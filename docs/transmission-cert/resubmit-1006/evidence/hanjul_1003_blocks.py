@@ -559,3 +559,96 @@ SERVER_BACKUP_MONITOR = r"""
 -- 경보 보낼 곳 설정 여부(값은 찍지 않는다)
 ALERT_CMD 없음 또는 비어 있음
 """.strip('\n')
+
+# ── 이새 싱크에이전트 출발지 재등록 뒤 재확인 (2026-10-03 · Harold 실행 · .62) ──────────────
+# 재등록 = 10:00:37(회사 에이전트 범위) · 기록은 같은 출발지를 1시간에 한 번만 남긴다 · 백엔드 프로세스 09:43~11:39 동일
+ISAE_RECHECK_COLLECTED = '2026-10-03 11:49 (한국 · 출력을 받은 시각)'
+
+ISAE_RECHECK_DETECTED = r"""
+         action          |                     details                     |   ip_address   |            kst
+-------------------------+-------------------------------------------------+----------------+----------------------------
+ machine_origin_detected | {"scope": "company_agent", "registered": false} | 125.141.198.22 | 2026-10-03 09:30:19.105884
+ machine_origin_detected | {"scope": "company_agent", "registered": false} | 125.141.198.22 | 2026-10-03 10:00:16.99482
+(2 rows)
+""".strip('\n')
+
+ISAE_RECHECK_AGENT = r"""
+ agent_name | status |       heartbeat_kst        |          sync_kst
+------------+--------+----------------------------+----------------------------
+ isae       | active | 2026-10-03 11:00:17.846848 | 2026-10-03 11:30:19.864189
+(1 row)
+""".strip('\n')
+
+# ── 백업 경보 설정 뒤 재수집 (2026-10-03 · Harold 실행 · .62 root) ─────────────────────────────
+# 12:08 경보 보낼 곳(ALERT_CMD) 설정 · 시험 발송(응답 200 · 담당자 휴대폰 수신 확인 = Harold) → 14:51 백업 구간 재수집
+# → 서버 스크립트의 경보 줄 확인(서버본은 저장소본과 해시가 다르다 · 경보 줄은 같은 동작)
+SERVER_BACKUP2_COLLECTED = '2026-10-03 14:51 (한국) · 경보 시험 12:08'
+
+SERVER_BACKUP2 = r"""
+-- 예약
+0 3 * * * /home/administrator/backups/backup.sh >> /home/administrator/backups/cron.log 2>&1
+30 8 * * * /home/administrator/backups/backup-monitor.sh >> /home/administrator/backups/monitor.log 2>&1
+-- 최근 실행 기록(마지막 12줄)
+[2026-10-02 03:33:02] 로컬 정리 완료 (7일 초과)
+[2026-10-02 03:33:02] ===== 백업 성공 완료 =====
+[2026-10-03 03:00:01] ===== 백업 시작 (20261003_030001) =====
+[2026-10-03 03:00:01] PostgreSQL 덤프+암호화...
+[2026-10-03 03:00:32] PostgreSQL 완료: 368M
+[2026-10-03 03:00:32] MySQL 덤프+암호화...
+mysqldump: [Warning] Using a password on the command line interface can be insecure.
+[2026-10-03 05:23:24] MySQL 완료: 402M
+[2026-10-03 05:23:24] 59 오프사이트 전송...
+[2026-10-03 05:23:31] 전송 완료
+[2026-10-03 05:23:31] 로컬 정리 완료 (7일 초과)
+[2026-10-03 05:23:31] ===== 백업 성공 완료 =====
+-- 서버에 남아 있는 백업(최근 8개)
+-rw-rw-r-- 1 administrator administrator      3985 Oct  3 08:30 monitor.log
+-rw-rw-r-- 1 administrator administrator     42383 Oct  3 05:23 cron.log
+-rw-rw-r-- 1 administrator administrator        20 Oct  3 05:23 LAST_SUCCESS
+-rw-rw-r-- 1 administrator administrator 421472021 Oct  3 05:23 mysql_smsdb_20261003_030001.sql.gz.gpg
+-rw-rw-r-- 1 administrator administrator 385842948 Oct  3 03:00 pg_targetup_20261003_030001.sql.gz.gpg
+-rw-rw-r-- 1 administrator administrator 417460136 Oct  2 03:32 mysql_smsdb_20261002_030001.sql.gz.gpg
+-rw-rw-r-- 1 administrator administrator 381680916 Oct  2 03:00 pg_targetup_20261002_030001.sql.gz.gpg
+-rw-rw-r-- 1 administrator administrator 406911269 Oct  1 03:22 mysql_smsdb_20261001_030001.sql.gz.gpg
+-- 마지막 성공 표식
+2026-10-03 05:23:31.631241666 +0900  LAST_SUCCESS
+""".strip('\n')
+
+SERVER_BACKUP_MONITOR2 = r"""
+-- 감시 예약
+30 8 * * * /home/administrator/backups/backup-monitor.sh >> /home/administrator/backups/monitor.log 2>&1
+-- 감시 기록(마지막 8줄)
+[2026-09-26 08:30:01] OK: 백업 신선도 정상
+[2026-09-27 08:30:01] OK: 백업 신선도 정상
+[2026-09-28 08:30:01] OK: 백업 신선도 정상
+[2026-09-29 08:30:01] OK: 백업 신선도 정상
+[2026-09-30 08:30:01] OK: 백업 신선도 정상
+[2026-10-01 08:30:01] OK: 백업 신선도 정상
+[2026-10-02 08:30:01] OK: 백업 신선도 정상
+[2026-10-03 08:30:01] OK: 백업 신선도 정상
+-- 경보 보낼 곳 설정 여부(값은 찍지 않는다)
+ALERT_CMD 설정됨
+""".strip('\n')
+
+SERVER_ALERT_HOOKS = r"""
+== /home/administrator/backups/backup.sh (마지막 수정 2026-09-22 13:22:53)
+20:alert(){
+23:  [[ -n "${ALERT_CMD:-}" ]] && ALERT_MSG="한줄로 백업 실패: $1" bash -c "${ALERT_CMD}" || true
+25:trap 'alert "라인 ${LINENO} 중단(직전 명령 실패)"' ERR
+34:(( PG_SZ >= MIN_PG_BYTES )) || { alert "PG 산출물 과소 ${PG_SZ}B"; exit 1; }
+43:(( MY_SZ >= MIN_MYSQL_BYTES )) || { alert "MySQL 산출물 과소 ${MY_SZ}B"; exit 1; }
+46:file -b "${PG_OUT}" | grep -qi "PGP.*encrypted" || { alert "PG 산출물이 PGP 암호문 아님"; exit 1; }
+47:file -b "${MY_OUT}" | grep -qi "PGP.*encrypted" || { alert "MySQL 산출물이 PGP 암호문 아님"; exit 1; }
+== /home/administrator/backups/backup-monitor.sh (마지막 수정 2026-07-16 13:36:27)
+4:MAX_AGE_HOURS=26
+12:  (( age_h > MAX_AGE_HOURS )) && msg="마지막 성공 백업 ${age_h}시간 전(기준 ${MAX_AGE_HOURS}h 초과)"
+15:  echo "[$(date '+%F %T')] ALERT: ${msg}"
+16:  [[ -n "${ALERT_CMD:-}" ]] && ALERT_MSG="한줄로 백업 이상: ${msg}" bash -c "${ALERT_CMD}" || true
+""".strip('\n')
+
+SERVER_ALERT_TEST = r"""
+기존 ALERT_CMD 줄 수: 0
+alert_http=200
+-- 감시 실행
+[2026-10-03 12:08:39] OK: 백업 신선도 정상
+""".strip('\n')

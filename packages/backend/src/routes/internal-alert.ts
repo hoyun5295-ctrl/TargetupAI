@@ -3,8 +3,10 @@
 // ============================================================
 // 목적: monitor-dist.sh cron이 빌드/dist 사고 감지 시 Harold님 휴대폰으로 즉시 SMS 발송.
 //
-// 보안: localhost 전용 (외부 차단). IP 검증으로 인증 secret 불필요.
-// 호출자: 같은 서버의 monitor-dist.sh (curl http://127.0.0.1:3000/api/internal/dist-alert)
+// 보안: 출발지 IP 검증으로 인증 secret 불필요. 기본 = localhost 전용(외부 차단).
+//   ★2026-10-03 INTERNAL_ALERT_ALLOWED_IPS 에 적은 주소만 추가 허용(게이트웨이 백업 경보) — 판정 = utils/internal-alert-access.ts
+// 호출자: 같은 서버의 monitor-dist.sh (curl http://127.0.0.1:3000/api/internal/dist-alert) · 백업 감시(ALERT_CMD)
+//   · 게이트웨이 서버 백업 감시(https://hanjul.ai/api/internal/dist-alert · 허용 주소에 등록된 경우만)
 //
 // 발송 라인: 테스트 라인그룹의 적재 테이블(getTestSendTable · 첫 테이블 — 사전테스트 라인, Harold님 결정).
 //   ★2026-09-23 테스트 그룹이 여러 테이블이 된 뒤로 배열째 넘기면 라운드로빈으로 번갈아 갔다 → 한 테이블로 고정.
@@ -13,6 +15,7 @@
 
 import { Router, Request, Response } from 'express';
 import { getTestSendTable, bulkInsertSmsQueue } from '../utils/sms-queue';
+import { isInternalAlertCallerAllowed } from '../utils/internal-alert-access';
 
 const router = Router();
 
@@ -20,18 +23,17 @@ const ADMIN_PHONE = (process.env.ADMIN_ALERT_PHONE || '01052958517').replace(/\D
 const SYSTEM_CALLBACK = (process.env.SYSTEM_SMS_CALLBACK || '18008125').replace(/\D/g, '');
 
 /**
- * 시스템 알림 SMS 발송 (localhost 전용)
+ * 시스템 알림 SMS 발송 (localhost + 허용 주소 전용)
  * POST /api/internal/dist-alert
  * Body: { message: string }
  *
- * 외부에서 호출 불가 (IP 127.0.0.1만 허용).
+ * 외부에서 호출 불가 (루프백 + INTERNAL_ALERT_ALLOWED_IPS 에 적은 주소만 허용).
  */
 router.post('/dist-alert', async (req: Request, res: Response) => {
   try {
-    // 1. localhost 검증 (외부 차단)
+    // 1. 출발지 검증 (외부 차단)
     const ip = String(req.ip || (req.socket as any)?.remoteAddress || '');
-    const isLocal = ip === '127.0.0.1' || ip === '::1' || ip === '::ffff:127.0.0.1' || ip.endsWith('127.0.0.1');
-    if (!isLocal) {
+    if (!isInternalAlertCallerAllowed(ip)) {
       console.warn('[internal-alert] 외부 IP 차단:', ip);
       return res.status(403).json({ error: 'Forbidden: localhost only' });
     }

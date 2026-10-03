@@ -27,7 +27,7 @@ M.MAX_COLS = 340   # 예외 대장 · 감사 기록 상세가 넓다(한글 사�
 CUSTOMER_TOKENS = sorted([
     'lululemon44117', 'shadmin', 'gwss', 'laprairie01', 'lpcom', 'toun28', 'shiseido7',
     'dp26', 'soongsil', 'ACEMKT', 'louisquatorze1', 'jessinewyork01', 'dp76', 'woorim',
-    'sgbaek', 'bhappy4', 'keli', 'espayment01',
+    'sgbaek', 'bhappy4', 'keli', 'espayment01', 'isae',
 ], key=len, reverse=True)
 # 회사 이름 — 한글 한 자 = 두 칸. 첫 글자만 남기고 같은 폭의 별표로
 FIXED_MASKS = {
@@ -77,7 +77,7 @@ SPECS = [
         'title': '국외 IP 차단: 국내 대역 적재 · 날짜별 감지와 차단 · 차단 기록 원문',
         'sections': [
             ('국내 IP 대역 적재 현황 (국가 · 출처 · 대역 수 · 마지막 갱신)', H.GEO_CIDRS),
-            ('국외 출발지 접속 — 날짜별 감지(차단 전 · 기록만) · 차단 건수 (9월 이후)', H.GEO_DAILY),
+            ('국외 출발지 접속: 날짜별 감지(차단 전 · 기록만) · 차단 건수 (9월 이후)', H.GEO_DAILY),
             ('국외 출발지 접속 차단 기록 원문 (일시 · 종류 · 계정 · 출발지 · 상세)', H.GEO_BLOCKED_RAW),
         ],
     },
@@ -92,10 +92,17 @@ SPECS = [
         'note': UUID_NOTE,
     },
     {
-        'file': '보류_H03_2.2-5_기계경로_출발지_대조.png',
+        # ★1003 보류 해제 — 등록 범위를 바로잡은 고객사 1곳의 재확인 결과를 함께 싣는다
+        'file': 'H03_2.2-5_연동경로_출발지_대조.png',
         'badge': '2.2 ⑤',
-        'title': '연동 경로(API · 싱크에이전트) 출발지 대조 기록',
-        'sections': [('등록되지 않은 출발지에서 온 연동 호출 — 월별 (월 · 종류 · 경로 · 등록 여부 · 건수 · 고객사 수 · 출발지 수)', H.MACHINE)],
+        'title': '연동 경로(API · 싱크에이전트) 출발지 대조: 월별 기록과 등록 뒤 재확인',
+        'collected': H.COLLECTED + ' · ' + H.ISAE_RECHECK_COLLECTED,
+        'sections': [
+            ('등록되지 않은 출발지에서 온 연동 호출: 월별 (월 · 종류 · 경로 · 등록 여부 · 건수 · 고객사 수 · 출발지 수)', H.MACHINE),
+            ('출발지를 회사 에이전트 범위로 다시 등록(10/03 10:00:37)한 고객사: 그날 미등록 출발지 기록 (종류 · 상세 · 출발지 · 시각)', H.ISAE_RECHECK_DETECTED),
+            ('같은 고객사 싱크에이전트: 마지막 하트비트 · 마지막 동기화 (등록 뒤에도 연동이 계속됨)', H.ISAE_RECHECK_AGENT),
+        ],
+        'note': '마지막 미등록 기록은 등록 직전(10:00:16)입니다. 이 기록은 같은 출발지를 1시간에 한 번만 남기며, 등록 뒤 11:00 하트비트 · 11:30 동기화 호출에서는 미등록 기록이 생기지 않았습니다(그 사이 서버 프로세스 재기동 없음).',
     },
     {
         'file': 'H04_3.4-1_다중인증_기록.png',
@@ -195,15 +202,18 @@ SPECS = [
         ],
     },
     {
-        'file': '보류_H14_4.1-5_백업_실행과_감시.png',
+        'file': 'H14_4.1-5_백업_실행과_감시.png',
         'badge': '4.1 ⑤ · 4.2 ⑤',
-        'title': '백업: 매일 암호화 · 외부 서버 전송 · 실행 기록과 감시',
-        'how': SERVER_HOW,
-        'collected': H.SERVER_COLLECTED,
+        'title': '백업: 매일 암호화 · 외부 서버 전송 · 감시와 실패 경보',
+        'how': '한줄로 서버 확인 명령 실행 출력(읽기 전용 · root)',
+        'collected': H.SERVER_BACKUP2_COLLECTED,
         'sections': [
-            ('백업 예약 · 최근 실행 기록 · 서버에 남은 백업 · 마지막 성공 표식', H.SERVER_BACKUP),
-            ('백업 감시 예약 · 감시 기록 · 경보 보낼 곳 설정 여부', H.SERVER_BACKUP_MONITOR),
+            ('백업 예약 · 최근 실행 기록 · 서버에 남은 백업 · 마지막 성공 표식', H.SERVER_BACKUP2),
+            ('백업 감시 예약 · 감시 기록 · 경보 보낼 곳 설정 여부', H.SERVER_BACKUP_MONITOR2),
+            ('백업 · 감시 스크립트에서 경보를 보내는 줄 (백업 실패 · 중간 중단 · 26시간 넘게 성공 없음)', H.SERVER_ALERT_HOOKS),
+            ('경보 보낼 곳 설정 직후 시험 발송 (2026-10-03 12:08)', H.SERVER_ALERT_TEST),
         ],
+        'note': '경보는 담당자 휴대폰 문자로 갑니다. 12:08 시험 문자는 담당자 휴대폰에서 수신을 확인했습니다.',
     },
 ]
 

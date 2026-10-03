@@ -143,6 +143,20 @@ def render(spec):
     ]
     if spec.get('note'):
         foot_lines.insert(0, spec['note'])
+    # ★1003 아래 설명이 이미지 폭을 넘으면 잘리지 않게 어절 단위로 접는다(높이 계산 전에 접어야 한다)
+    max_px = width - PAD * 2
+    wrapped = []
+    for line in foot_lines:
+        cur = ''
+        for word in line.split(' '):
+            trial = (cur + ' ' + word) if cur else word
+            if cur and META.getlength(trial) > max_px:
+                wrapped.append(cur)
+                cur = word
+            else:
+                cur = trial
+        wrapped.append(cur)
+    foot_lines = wrapped
 
     height = PAD + 34 + 14 + 40 + len(meta_lines) * 24 + 18
     for heading, lines in sections:
@@ -206,11 +220,14 @@ SPECS = [
         'file': 'E01_2.2-1_방화벽_정책.png',
         'badge': '2.2 ① · 3.1 ①',
         'title': '방화벽 정책: 포트별 허용 출발지와 접속 제한',
-        'how': SERVER_HOW, 'collected': B.COLLECTED['S1'],
+        # ★1003 11:58 재수집 — 임시 SSH 허용 줄 삭제 · 사설 원격 접속망 해제 뒤
+        'how': SERVER_HOW, 'collected': B.COLLECTED_S2,
         'sections': [
-            ('방화벽 상태와 정책 목록', B.UFW_STATUS),
-            ('방화벽 · 침입 차단 · 감사 수집 서비스 가동 상태', B.SERVICES),
+            ('방화벽 상태와 정책 목록', B.UFW_STATUS_1158),
+            ('정책 파일 마지막 수정', B.UFW_FILES_1158),
+            ('방화벽 · 침입 차단 · 감사 수집 서비스 가동 상태 · 사설 원격 접속망 자동 시작 여부', B.SERVICES_1158),
         ],
+        'note': '2026-10-03 11:54 원격 관리(SSH) 임시 허용 줄을 지우고 사설 원격 접속망 서비스를 해제한 뒤 수집했습니다. 원격 관리 허용 출발지는 대표 · 사무실 두 곳입니다.',
     },
     {
         'file': 'E02_2.2-1_미등록_출발지_거부.png',
@@ -248,14 +265,16 @@ SPECS = [
         ],
     },
     {
-        'file': '보류_E05_2.2-1_허용IP_지정_현황.png',
+        # ★1003 12:22 보류 해제 — 허용 IP 가 비어 있던 시험 API 계정을 정지(감사 기록)한 뒤 현황
+        'file': 'E05_2.2-1_허용IP_지정_현황.png',
         'badge': '2.2 ①',
-        'title': '접속 계정의 허용 IP 지정 현황',
-        'how': SQL_HOW, 'collected': B.COLLECTED['Q1'] + ' · ' + B.COLLECTED['Q2'],
+        'title': '접속 계정의 허용 IP 지정 현황: 사용 중 계정 전부 지정',
+        'how': SQL_HOW, 'collected': B.COLLECTED_E05,
         'sections': [
-            ('접속 계정 수 (전체 · 사용 중 · 허용 IP 지정됨 · 허용 IP 없음)', B.Q1_ALLOWED_IP_COUNT),
-            ('허용 IP가 비어 있는 사용 중 계정', B.Q2_NO_IP_ACCOUNTS),
+            ('허용 IP가 비어 있던 시험용 API 계정 정지 (감사 기록)', B.E05_DEACTIVATE),
+            ('사용 중 접속 계정 수 · 허용 IP 지정됨 · 허용 IP 없음', B.E05_COUNTS),
         ],
+        'note': '정지한 계정은 시험용 API 계정으로 요청이 0건이었고 허용 IP가 비어 있었습니다. 정지 뒤 사용 중인 접속 계정 14개는 모두 허용 IP가 지정돼 있습니다.',
     },
     {
         'file': 'E06_3.1-4_방화벽_변경_이력.png',
@@ -293,8 +312,9 @@ SPECS = [
         'file': 'E09_3.1-4_서버_관리자_접속_이력.png',
         'badge': '3.1 ④',
         'title': '서버 관리자 접속 이력: 계정 · 출발지 · 접속과 종료 시각',
-        'how': SERVER_HOW, 'collected': B.COLLECTED['S1'],
-        'sections': [('서버 접속 이력 (최근 20건)', B.LAST_LOGINS)],
+        'how': SERVER_HOW, 'collected': B.COLLECTED_S2,
+        'sections': [('서버 접속 이력 (최근 20건)', B.LAST_LOGINS_1158)],
+        'note': '9월 26일 100.x 출발지 두 건은 사설 원격 접속망(대표 소유 기기)을 거친 접속입니다. 이 경로는 2026-10-03 해제했고, 지금 원격 관리는 방화벽에 지정한 대표 · 사무실 출발지로만 됩니다.',
     },
     {
         'file': 'E10_3.4-6_인증수단_관리_기록.png',
@@ -343,6 +363,31 @@ SPECS = [
             ('백업 감시 기록', B.BACKUP_MONITOR_LOG),
             ('백업 폴더', B.BACKUP_DIR),
         ],
+    },
+    {
+        # ★1003 게이트웨이 서버 로그 1년 보관 설정(한줄로 H13 과 같은 설정)
+        'file': 'E15_4.2-5_서버로그_보관_설정.png',
+        'badge': '4.1 ⑤ · 4.2 ⑤',
+        'title': '서버 로그 1년 보관 설정: 설정 전 · 적용 · 회전 점검',
+        'how': SERVER_HOW, 'collected': B.COLLECTED_LOG,
+        'sections': [
+            ('설정 전: 디스크 여유 · 저널 사용량 · 가장 오래된 저널 · 보관 설정 줄 · 웹 서버 로그 회전 설정', B.GW_LOG_BEFORE),
+            ('적용 뒤 확인: 저널 1년 · 최대 45G · 웹 서버 로그 매일 회전 400회분 · 게이트웨이 프로세스 로그 계속 기록', B.GW_LOG_AFTER),
+            ('회전 점검: 점검 출력 · 웹 서버 로그 폴더 권한 · 오늘 회전된 파일', B.GW_LOG_CHECK),
+        ],
+        'note': '「점검 오류 줄: 1」은 파일 이름 error.log 가 검색어에 걸린 것으로 실제 오류가 아닙니다(세 번째 칸). 저널 상한 45G = 하루 약 100MB(설정 전 4.1G · 08/22 이후) × 365일 + 여유입니다.',
+    },
+    {
+        # ★1003 4.3 ③ 이상징후 후속조치 실례(E02 의 반복 거부 → 원인 확인 → 조치 → 재확인)
+        'file': 'E16_4.3-3_이상징후_후속조치.png',
+        'badge': '4.3 ③',
+        'title': '이상징후 후속조치: 반복 접속 거부의 원인 정지와 재확인',
+        'how': SERVER_HOW, 'collected': B.COLLECTED_FOLLOWUP,
+        'sections': [
+            ('조치: 사내 시험 서버의 옛 시험 Agent 서비스 정지 · 재부팅 뒤 자동 시작 해제 (상태 줄 발췌)', B.FOLLOWUP_STOP),
+            ('재확인: 그 계정의 접속 거부 기록(12:05 이후) · 정지 뒤 프로세스 로그의 거부 줄 수', B.FOLLOWUP_AFTER),
+        ],
+        'note': '10월 1일부터 한 출발지(사내 시험 서버)에서 분당 1회 접속 거부가 이어졌습니다(E02). 원인은 허용 IP를 바꾼 뒤에도 옛 시험 Agent가 옛 출발지로 재접속을 시도한 것으로, 외부 공격이 아니었습니다. 12:12:48 정지 뒤 12:13~12:15 분에는 거부가 없습니다.',
     },
 ]
 

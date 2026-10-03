@@ -321,3 +321,176 @@ Q2_ALLOWED_IP_TEST97 = r"""
  2026-10-01 22:36:30.565416+09 | admin    | bito-test-97 | ["115.138.27.202"]
  2026-09-24 07:07:44.352401+09 | admin    | bito-test-97 | ["58.227.193.66"]
 """.strip('\n')
+
+# ── 2026-10-03 11:58 재수집(Harold 실행 · .65 root) ──────────────────────────────
+# 11:54 임시 SSH 허용 줄(휴대폰 핫스팟) 삭제 · 사설 원격 접속망 서비스 해제(disable --now) 뒤
+COLLECTED_S2 = '2026-10-03 11:58 (한국 시각)'
+
+UFW_STATUS_1158 = r"""
+Status: active
+
+     To                         Action      From
+     --                         ------      ----
+[ 1] 22/tcp                     ALLOW IN    115.138.27.202             # gateway-owner-ssh
+[ 2] 80/tcp                     ALLOW IN    Anywhere                   # gateway-http-acme
+[ 3] 443/tcp                    ALLOW IN    Anywhere                   # gateway-https
+[ 4] 4404/tcp                   ALLOW IN    115.138.27.202             # gateway-owner-rcs-webhook
+[ 5] 9443/tcp                   ALLOW IN    58.227.193.62              # hanjul-agent-grpc-tls
+[ 6] 9443/tcp                   ALLOW IN    58.227.193.66              # bito-console-agent-grpc-tls
+[ 7] 9443/tcp                   ALLOW IN    119.193.215.98             # agent itensms03 아이티앤
+[ 8] 9443/tcp                   LIMIT IN    Anywhere                   # agent grpc tls - app allowlist enforces source
+[ 9] 22/tcp                     ALLOW IN    180.226.236.94             # company-admin-ssh
+[10] 9444/tcp                   LIMIT IN    Anywhere                   # ViTO spec TCP mTLS 2026-09-24
+[11] 80/tcp (v6)                ALLOW IN    Anywhere (v6)              # gateway-http-acme
+[12] 443/tcp (v6)               ALLOW IN    Anywhere (v6)              # gateway-https
+[13] 9443/tcp (v6)              LIMIT IN    Anywhere (v6)              # agent grpc tls - app allowlist enforces source
+[14] 9444/tcp (v6)              LIMIT IN    Anywhere (v6)              # ViTO spec TCP mTLS 2026-09-24
+""".strip('\n')
+
+UFW_FILES_1158 = r"""
+2026-10-03 11:54:42.452769913 +0900  /etc/ufw/user.rules
+2026-07-31 15:41:13.785134252 +0900  /etc/ufw/after.rules
+""".strip('\n')
+
+SERVICES_1158 = r"""
+auditd.service active running
+bito-admin-api.service active running
+bito-gateway.service active running
+fail2ban.service active running
+linkguard-control.service active running
+tailscaled 부팅 시 자동 시작: disabled
+""".strip('\n')
+
+LAST_LOGINS_1158 = r"""
+invito   pts/0        115.138.27.202   Sat Oct  3 07:26:12 2026   still logged in
+invito   pts/0        180.226.236.94   Fri Oct  2 09:14:54 2026 - Fri Oct  2 15:29:27 2026  (06:14)
+invito   pts/0        115.138.27.202   Fri Oct  2 08:14:13 2026 - Fri Oct  2 08:38:48 2026  (00:24)
+invito   pts/2        115.138.27.202   Thu Oct  1 20:48:13 2026 - Thu Oct  1 20:48:43 2026  (00:00)
+invito   pts/2        115.138.27.202   Thu Oct  1 19:50:34 2026 - Thu Oct  1 19:50:39 2026  (00:00)
+invito   pts/2        115.138.27.202   Thu Oct  1 18:58:05 2026 - Thu Oct  1 18:58:10 2026  (00:00)
+invito   pts/0        115.138.27.202   Thu Oct  1 17:58:50 2026 - Fri Oct  2 02:04:04 2026  (08:05)
+invito   pts/0        115.138.27.202   Thu Oct  1 17:55:57 2026 - Thu Oct  1 17:56:01 2026  (00:00)
+invito   pts/0        115.138.27.202   Thu Oct  1 17:11:51 2026 - Thu Oct  1 17:11:56 2026  (00:00)
+invito   pts/0        115.138.27.202   Thu Oct  1 15:06:32 2026 - Thu Oct  1 15:06:38 2026  (00:00)
+invito   pts/0        115.138.27.202   Thu Oct  1 14:37:02 2026 - Thu Oct  1 14:37:57 2026  (00:00)
+invito   pts/2        115.138.27.202   Wed Sep 30 22:55:14 2026 - Wed Sep 30 22:55:23 2026  (00:00)
+invito   pts/2        115.138.27.202   Wed Sep 30 22:37:50 2026 - Wed Sep 30 22:42:49 2026  (00:04)
+invito   pts/0        115.138.27.202   Wed Sep 30 17:05:03 2026 - Thu Oct  1 08:53:18 2026  (15:48)
+invito   pts/0        115.138.27.202   Tue Sep 29 15:24:37 2026 - Wed Sep 30 13:37:28 2026  (22:12)
+invito   pts/1        115.138.27.202   Sun Sep 27 07:46:40 2026 - Sun Sep 27 07:46:45 2026  (00:00)
+invito   pts/0        115.138.27.202   Sun Sep 27 07:46:23 2026 - Sun Sep 27 21:44:07 2026  (13:57)
+invito   pts/3        100.73.46.62     Sat Sep 26 19:08:37 2026 - Sat Sep 26 22:33:44 2026  (03:25)
+invito   pts/2        100.116.151.70   Sat Sep 26 18:58:30 2026 - Sat Sep 26 19:14:43 2026  (00:16)
+invito   pts/0        115.138.27.202   Sat Sep 26 08:26:39 2026 - Sun Sep 27 02:21:19 2026  (17:54)
+
+wtmp begins Thu Jul 30 16:47:22 2026
+""".strip('\n')
+
+# ── 2026-10-03 게이트웨이 서버 로그 1년 보관 설정(Harold 실행 · .65 root) ──────────────
+# 조회 12:01:05 · 적용 12:01:50 · 점검 12:02:09 받음(한국 시각)
+COLLECTED_LOG = '2026-10-03 12:01 · 12:02 (한국 시각 · 출력을 받은 시각)'
+
+GW_LOG_BEFORE = r"""
+/dev/sda4       899G   94G  760G  11% /
+Archived and active journals take up 4.1G in the file system.
+가장 오래된 저널: 2026-08-22T22:08:30+09:00
+-- journald.conf 보관 줄
+27:#SystemMaxUse=
+35:#MaxRetentionSec=
+-- nginx 회전 설정
+/var/log/nginx/*.log {
+        daily
+        missingok
+        rotate 14
+        compress
+        delaycompress
+        notifempty
+        create 0640 www-data adm
+        sharedscripts
+        prerotate
+                if [ -d /etc/logrotate.d/httpd-prerotate ]; then \
+                        run-parts /etc/logrotate.d/httpd-prerotate; \
+                fi \
+        endscript
+        postrotate
+                invoke-rc.d nginx rotate >/dev/null 2>&1
+        endscript
+}
+nginx 로그 용량: 10M
+""".strip('\n')
+
+GW_LOG_AFTER = r"""
+-- 확인
+SystemMaxUse=45G
+MaxRetentionSec=1year
+        daily
+        rotate 400
+journald: active
+logrotate 점검 오류 줄: 1
+2026-10-03T12:01:36+09:00 invito bito-gateway[2396885]: {"time":"2026-10-03T12:01:36.771925265+09:00","level":"INFO","msg":"회선 간격 요약","component":"engine","bindAccountID":14,"mode":"enforce","sends":1,"intervalMs":34.5,"minGapMs":4731246.5,"burstGaps":0,"gapsBelowInterval":0,"ackP50Ms":2.4,"ackP99Ms":2.4,"ackMaxMs":2.4,"rateLimited":0,"penalty":1,"learnedDrop":0,"standbyPicks":0,"maxWaitMs":0.1,"maxInFlight":1,"limitSMS":80,"limitMMS":30}
+2026-10-03T12:01:37+09:00 invito bito-gateway[2396885]: {"time":"2026-10-03T12:01:37.831093634+09:00","level":"INFO","msg":"PAY 통계 적재 완료","rows":1,"failed":0,"full":false,"since":"2026-10-02"}
+""".strip('\n')
+
+GW_LOG_CHECK = r"""
+considering log /var/log/nginx/error.log
+-- 전체 설정으로 시험
+considering log /var/log/nginx/error.log
+drwxr-xr-x 2 root adm 4096 Oct  3 00:00 /var/log/nginx
+total 10224
+-rw-r----- 1 www-data adm 2398806 Oct  3 12:02 access.log
+-rw-r----- 1 www-data adm     396 Oct  3 07:36 error.log
+-rw-r----- 1 www-data adm 5204899 Oct  3 00:00 access.log.1
+-rw-r----- 1 www-data adm     194 Oct  2 07:11 error.log.1
+""".strip('\n')
+
+# ── 2026-10-03 4.3 ③ 후속조치: 사내 서버 시험 Agent(bito-test-97) 정지와 정지 뒤 확인(Harold 실행) ──
+# 정지 = .66 사내 서버 12:12:48 · 확인 = .65 게이트웨이 12:16:30 (정지 출력은 상태 줄만 발췌 · 인증 요청 줄 제외)
+COLLECTED_FOLLOWUP = '2026-10-03 12:12 · 12:16 (한국 시각)'
+
+FOLLOWUP_STOP = r"""
+Removed "/etc/systemd/system/multi-user.target.wants/bito-agent-bito-test-97.service".
+-- 상태
+inactive
+disabled
+정지 시각: 2026-10-03 12:12:48
+""".strip('\n')
+
+FOLLOWUP_AFTER = r"""
+          now_kst
+----------------------------
+ 2026-10-03 12:16:30.146908
+(1 row)
+
+     minute_kst      | event_type  | outcome |   reason    | event_count |   remote_ip
+---------------------+-------------+---------+-------------+-------------+---------------
+ 2026-10-03 12:06:00 | auth_failed | denied  | AUTH_FAILED |           1 | 58.227.193.66
+ 2026-10-03 12:07:00 | auth_failed | denied  | AUTH_FAILED |           1 | 58.227.193.66
+ 2026-10-03 12:08:00 | auth_failed | denied  | AUTH_FAILED |           1 | 58.227.193.66
+ 2026-10-03 12:09:00 | auth_failed | denied  | AUTH_FAILED |           1 | 58.227.193.66
+ 2026-10-03 12:10:00 | auth_failed | denied  | AUTH_FAILED |           1 | 58.227.193.66
+ 2026-10-03 12:11:00 | auth_failed | denied  | AUTH_FAILED |           1 | 58.227.193.66
+ 2026-10-03 12:12:00 | auth_failed | denied  | AUTH_FAILED |           1 | 58.227.193.66
+(7 rows)
+
+12:13 이후 프로세스 로그의 허용 IP 거부 줄 수: 0
+""".strip('\n')
+
+# ── 2026-10-03 12:22 시험 API 계정(api-hanjullo-api-test) 정지 · 허용 IP 지정 현황(Harold 실행 · .65 운영 SQL) ──
+# 정지 사유 = 시험용 · 요청 0건 · 허용 IP 미지정 · 감사 기록 710895(처리자 admin · channel sql)
+COLLECTED_E05 = '2026-10-03 12:22 (한국 시각)'
+
+E05_DEACTIVATE = r"""
+  id   |   action   |       target_id       |            kst
+--------+------------+-----------------------+----------------------------
+ 710895 | DEACTIVATE | api-hanjullo-api-test | 2026-10-03 12:22:14.783612
+(1 row)
+
+INSERT 0 1
+""".strip('\n')
+
+E05_COUNTS = r"""
+ 사용 중 | 사용 중 · 허용 IP 지정됨 | 사용 중 · 허용 IP 없음
+---------+--------------------------+------------------------
+      14 |                       14 |                      0
+(1 row)
+""".strip('\n')
