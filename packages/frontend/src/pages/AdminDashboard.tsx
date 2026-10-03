@@ -28,6 +28,7 @@ import { formatPlanOptionLabel } from '../utils/planLabel'; // ★ 2026-07-28 �
 import { taxbillIssueDatePreviewText, type TaxbillDayPolicy } from '../utils/taxbillDate'; // ★ 2026-07-28 작성일자 미리보기(예시 월 하드코딩 제거)
 // ★ 2026-08-04 IMC 이관 모달 — 템플릿 화면에서는 이미 연결된 프로필로 템플릿만 가져온다(templateOnly)
 import ImcProfileImportModal from '../components/alimtalk/ImcProfileImportModal';
+import OpsRecordsTab from '../components/admin/OpsRecordsTab'; // ★ 2026-10-03 운영 기록 대장(전송자격인증 3.1 ④ · 3.3 · 4.3)
 import Billing080Modal from '../components/Billing080Modal'; // ★ 2026-07-30 추가 청구 관리 (서수란 접수 — 080 KT 명세서 분할 + 부가서비스 수기)
 import MinimumChargeModal from '../components/MinimumChargeModal'; // ★ 2026-07-30 최소과금 정액 발행 (Harold 확정)
 import SettlementOverviewModal from '../components/SettlementOverviewModal'; // ★ 2026-08-05 총 정산표 (ceo 전용)
@@ -90,7 +91,7 @@ export default function AdminDashboard() {
   const navigate = useNavigate();
   const { user, logout } = useAuthStore();
 
-  const [activeTab, setActiveTab] = useState<'companies' | 'users' | 'scheduled' | 'callbacks' | 'plans' | 'requests' | 'deposits' | 'credits' | 'allCampaigns' | 'stats' | 'billing' | 'syncAgents' | 'auditLogs' | 'lineGroups' | 'templates' | 'loginBlocks' | 'agentDeploy' | 'marketingDiagnosis' | 'spamBlock' | 'geoAccess' | 'helpQuestions' | 'agencyMail' | 'agencyLedger' | 'adminAccounts' | 'precheckUsage'>('companies');
+  const [activeTab, setActiveTab] = useState<'companies' | 'users' | 'scheduled' | 'callbacks' | 'plans' | 'requests' | 'deposits' | 'credits' | 'allCampaigns' | 'stats' | 'billing' | 'syncAgents' | 'auditLogs' | 'lineGroups' | 'templates' | 'loginBlocks' | 'agentDeploy' | 'marketingDiagnosis' | 'spamBlock' | 'geoAccess' | 'helpQuestions' | 'agencyMail' | 'agencyLedger' | 'adminAccounts' | 'precheckUsage' | 'opsRecords'>('companies');
   // ★ 2026-06-11: 감사 로그 열람 권한 (AUDIT_LOG_VIEWER_IDS — 기본 ceo 전용) — 허용 계정에만 메뉴/탭 노출
   const [auditAccessAllowed, setAuditAccessAllowed] = useState(false);
   // ★ 2026-08-27 직원 계정·권한 (전송자격인증 3.2·3.3) — 권한분류표 원본은 서버(utils/admin-role.ts)
@@ -4671,7 +4672,7 @@ const handleApproveRequest = async (id: string) => {
               },
               {
                 label: '시스템', color: 'gray',
-                tabs: ['syncAgents', 'agentDeploy', 'lineGroups', 'auditLogs', 'helpQuestions', 'loginBlocks', 'adminAccounts'] as const,
+                tabs: ['syncAgents', 'agentDeploy', 'lineGroups', 'auditLogs', 'helpQuestions', 'loginBlocks', 'adminAccounts', 'opsRecords'] as const,
                 items: [
                   { key: 'syncAgents', label: 'Sync 모니터링' },
                   { key: 'agentDeploy', label: '싱크에이전트 배포' },
@@ -4692,6 +4693,8 @@ const handleApproveRequest = async (id: string) => {
                   // ★ 2026-06-13: AI 학습 데이터 = 허용 계정(기본 ceo)에만 노출 (별도 페이지 navigate)
                   ...(aiTrainingAllowed ? [{ key: 'aiTraining', label: 'AI 학습 데이터', onClick: () => navigate('/admin/ai-training') }] : []),
                   { key: 'loginBlocks', label: '로그인 차단 관리' },
+                  // ★ 2026-10-03 운영 기록 대장 — 조회는 전 등급(등급표 opsRecords) · 작성 · 확인은 화면이 서버 판정을 받아 연다
+                  { key: 'opsRecords', label: '운영 기록 대장' },
                   ...(adminAccountsAllowed ? [{ key: 'adminAccounts', label: '직원 계정·권한' }] : []),
                 ],
               },
@@ -13319,6 +13322,9 @@ const handleApproveRequest = async (id: string) => {
       {activeTab === 'loginBlocks' && (
         <LoginBlocksManagement />
       )}
+
+      {/* ★ 2026-10-03 운영 기록 대장(로그 점검 · 방화벽 변경 · 권한 점검) */}
+      {activeTab === 'opsRecords' && <OpsRecordsTab />}
 
       {/* ★ 2026-07-17 발송 라인 설정 탭 — LINE_GROUP_ADMIN_USERS(기본 ceo,admin) 전용 */}
       {activeTab === 'lineGroups' && lineGroupCanManage && (

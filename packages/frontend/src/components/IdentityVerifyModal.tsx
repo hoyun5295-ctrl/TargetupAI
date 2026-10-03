@@ -11,7 +11,7 @@
  *  3. 네이티브 dialog를 쓰지 않는다.
  */
 import { useState } from 'react';
-import { launchIdentityProvider } from '../utils/identityProvider';
+import { launchIdentityProvider, openIdentityWindow, identityWindowErrorMessage } from '../utils/identityProvider';
 
 export type IdentityVerifyMode = { kind: 'login'; ticket: string } | { kind: 'change' };
 
@@ -75,6 +75,10 @@ export default function IdentityVerifyModal({ mode, onLoginSuccess, onTakeover, 
   const begin = async () => {
     setBusy(true);
     setError('');
+    // ★ 2026-10-03 인증 창은 버튼을 누른 이 순간에 먼저 연다 — 서버 응답을 기다린 뒤에 열면 브라우저가 팝업으로 막는다.
+    //   열린 창은 아래 어느 길로 빠지든 책임지고 닫는다(시험 환경 · 시작 실패 · 예외).
+    const win = openIdentityWindow();
+    let handedOver = false;
     try {
       const path = isLogin ? '/api/auth/identity/start' : '/api/auth/identity/change/start';
       const { res, data } = await post(path, isLogin ? { identityTicket: mode.ticket } : {});
@@ -91,12 +95,14 @@ export default function IdentityVerifyModal({ mode, onLoginSuccess, onTakeover, 
       setStarted(s);
       // 시험 환경은 아래 입력 화면으로 이어진다. 그 밖에는 인증기관 창을 연다
       if (s.provider === 'stub') return;
-      const result = await launchIdentityProvider(s.provider, s.start);
+      handedOver = true;   // 여기부터 창은 인증 진행 쪽이 맡는다(닫힘 · 시간 초과를 그쪽이 본다)
+      const result = await launchIdentityProvider(s.provider, s.start, win);
       await finish(s, result);
-    } catch {
+    } catch (err) {
       setStarted(null);
-      setError('본인인증 창을 열지 못했습니다. 잠시 후 다시 시도해주세요.');
+      setError(identityWindowErrorMessage(err));
     } finally {
+      if (!handedOver && win && !win.closed) win.close();
       setBusy(false);
     }
   };

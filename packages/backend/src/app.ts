@@ -15,6 +15,8 @@ import syncRoutes from './routes/sync';
 
 // 라우트 import
 import authRoutes from './routes/auth';
+import identityReturnRoutes from './routes/identity-return';   // ★ 2026-10-03 본인확인 인증 창 복귀
+import { IDENTITY_RETURN_PATH } from './utils/identity-return';
 import companiesRoutes from './routes/companies';
 // ★ D219+ Part 2 (2026-05-27): Onboarding Wizard 7 step endpoints
 import onboardingRoutes from './routes/onboarding';
@@ -197,6 +199,7 @@ import imageStudioRouter from './routes/image-studio';
 
 // ★ D145 P0 (2026-05-07): 슈퍼관리자 로그인 차단 관리
 import loginBlocksRoutes from './routes/admin/login-blocks';
+import adminOpsRecordsRoutes from './routes/admin-ops-records';   // ★ 2026-10-03 운영 기록 대장(전송자격인증 3.1 ④ · 3.3 · 4.3)
 
 // ★ D152 (2026-05-12): 전단AI(hanjulDM) 완전 분리 — flyer 관련 라우트/유틸/미들웨어 모두 hanjulDM/으로 이전됨.
 //    여기서는 import/마운트/워커 시작 라인 모두 제거. 한줄AI는 hanjulDM 코드 의존 0건.
@@ -223,6 +226,12 @@ app.use('/api/invoice-view', invoicePublicRoutes);
 //   복귀 HTML 이 인라인 스크립트로 부모 창에 신호를 보내므로 CSP 뒤에 두면 창이 안 닫힌다.
 //   여기서 안 잡히는 경로는 next() 로 흘러 아래 인증 라우터가 받는다.
 app.use('/api/sns', snsPublicRouter);
+
+// ★ 2026-10-03 본인확인 인증 창 복귀 — helmet 전에 마운트.
+//   인증기관 창이 팝업에서 이 주소로 돌아와 부모 창에 결과를 넘긴다. helmet 의 창 격리 정책(COOP)이 붙으면
+//   부모 창과의 연결이 끊겨 결과를 넘길 수 없다. 이 응답은 자기 정책(nonce 스크립트 하나만 허용)을 직접 건다.
+//   이 경로만 받는다 — 나머지 /api/auth 는 아래 인증 라우터가 받는다.
+app.use(IDENTITY_RETURN_PATH, identityReturnRoutes);
 
 // 미들웨어
 app.use(helmet());
@@ -476,6 +485,7 @@ app.use('/api/admin/billing', billingRoutes);
 app.use('/api/admin/sync', adminSyncRoutes);
 // ★ D145 P0: 더 구체적 경로 먼저 등록 (/api/admin 와일드카드 위에)
 app.use('/api/admin/login-blocks', loginBlocksRoutes);
+app.use('/api/admin/ops-records', adminOpsRecordsRoutes);
 // ★ 2026-08-16 신규마케팅진단(ceo 전용 — MARKETING_DIAGNOSIS_VIEWER_IDS) — /api/admin 와일드카드 위
 app.use('/api/admin/marketing-diagnosis', marketingDiagnosisAdminRoutes);
 app.use('/api/admin', adminRoutes);

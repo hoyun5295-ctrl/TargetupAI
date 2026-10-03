@@ -36,6 +36,9 @@ export const AUDIT_ACTION_LABEL: Record<string, string> = {
   kakao_profile_disabled: '카카오 발신 프로필 사용 중지',
   totp_enroll_start: 'OTP 등록 시작',
   totp_enrolled: 'OTP 등록 완료',
+  // ★ 2026-10-03 운영 기록 대장(로그 점검 · 방화벽 변경 · 권한 점검) — utils/ops-records.ts
+  ops_record_created: '운영 기록 작성',
+  ops_record_confirmed: '운영 기록 확인',
   // ★ 2026-09-05 AI 영업 아웃리치(ceo 전용 · routes/sales-outreach.ts 성공 분기)
   'sales_outreach.enqueue': 'AI 영업 업체 등록',
   'sales_outreach.enqueue_bulk': 'AI 영업 일괄 등록',

@@ -142,6 +142,14 @@ export const PERMISSION_MATRIX: PermissionRow[] = [
     levels: { super: 'R', lead: 'NONE', support: 'NONE' },
   },
   {
+    // ★ 2026-10-03 운영 기록 대장(로그 점검 · 방화벽 정책 변경 · 접근권한 점검 · 전송자격인증 3.1 ④ · 3.3 · 4.3).
+    //   작성 · 확인은 대표 · 지원팀장. 지원팀원은 조회만. 고치기 · 지우기는 없다(정정은 새 기록).
+    key: 'opsRecords',
+    area: '운영 기록 대장',
+    screens: '운영 기록 대장(로그 점검 · 방화벽 변경 · 권한 점검)',
+    levels: { super: 'RW', lead: 'RW', support: 'R' },
+  },
+  {
     key: 'adminAccounts',
     area: '관리자 계정 관리',
     screens: '직원 계정·권한',

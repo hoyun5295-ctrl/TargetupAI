@@ -1115,6 +1115,70 @@ JWT를 주고 화면에서 가리는 방식은 통제가 아니다(그 토큰으
 - **★1003 「계정 담당자」 카드는 고객사 계정이면 항상 보인다**(Harold 「배포했는데 그대로」 — 종전에는 본인인증이 열린 계정에만 보여, 스위치도 인증기관도 없는 운영에서는 아무에게도 안 보였다 · 운영 `.env` 실측 = `MFA_*` · `SENDER_AUTH_*`만 있고 `IDENTITY_VERIFY_*` 없음). `/auth/identity/me` = `visible`(카드) + `enabled`(변경 버튼). 카드는 등록된 담당자(인증번호 수신 번호가 있는 계정의 이름 · 가린 번호)를 보여 주고, 본인인증 이력이 없으면 「본인인증 전」으로 표시한다(등록 ≠ 인증). 버튼은 본인인증이 열린 계정에서만 나오고, 그 전에는 「10월 26일부터 본인인증으로 변경할 수 있습니다」(날짜는 `constants/sendAuthPolicy.ts` 하나 · 로그인 고지 창과 공용). 변경 라우트의 판정은 그대로다(화면에서 버튼을 숨기는 것은 통제가 아니다). 검증 = BE · FE tsc 0 · vitest 538파일 7,581건 통과 · FE `build:safe` 통과 · 결함 주입 8종 전부 잡힘.
 - ⚠ 운영 환경변수를 `/proc/<pid>/environ`으로 보면 안 된다 — 뜰 때 받은 환경만 나오고 `.env`에서 읽은 값은 안 나온다(1003에 0줄이 나와 헛짚었다). 프로세스 cwd의 `.env`(`packages/backend/.env`)를 본다.
 
+### 1003 증빙 준비 — 한줄로 · 엔진 따로 (영업 요청 전체)
+
+> 영업 요청(1003) = 「항목마다 한줄로 · 비토엔진 따로 증빙 · 공통은 공통으로 · 3.4 ⑥ / 3.5 ⑤ 는 엔진 · 3.4 ①~⑤ / 3.5 ①~④ 는 한줄로」.
+> 항목별 증빙 원천 · 실물 시작일 · 상태 = **[증빙 대장](transmission-cert/resubmit-1006/00-증빙-대장.md)**(여기 복사하지 않는다).
+
+- **날짜는 실제대로(Harold 1003).** 없던 것을 「있었는데 안 냈다」고 쓰지 않는다. 오늘 만들어 오늘 날짜로 남긴 기록은 사실이고, 지난 기간은 「점검 대상 9월 · 점검 실시 10월 3일」처럼 실시일을 실제로 적는다. 소급 작성은 하지 않는다.
+- **수집 도구 4종**(전부 읽기 전용) = `transmission-cert/resubmit-1006/evidence/` — `hanjul-evidence.sql` · `hanjul-server-check.sh` · `gateway-evidence.sql` · `gateway-server-check.sh`. 결과가 로그 증빙의 원자료다.
+- **게이트웨이 저장소를 읽어 확인한 것** — 계정 최초 발급 기록은 남는다(`CREATE`/`reseller` · `CREATE`/`sender_account` · `CONNECT_WIZARD`) · 감사 · 접속 이력을 지우는 코드는 없다 · 감사 기록 조회는 `admin` 계정 하나 · 허용 IP에 승인 사유 · 허용 기간 칸은 없다 · DB 백업 흔적은 저장소에 없다(서버 확인) · ⚠ **서버 접속 · 명령 수집 기록은 게이트웨이 0925 점검에서 「7/31 이후 0건」**이었다(1002 대조표의 「있음」은 이 사실을 못 본 것 · 수집 결과로 확정).
+- **한줄로 기계 경로(2.2 ⑤)** = `guardMachineOrigin`이 API · 싱크에이전트 호출을 회사별 등록 출발지와 대조해 기록한다(`machine_origin_detected`). 차단 전환은 별도 스위치 `ORIGIN_ALLOWLIST_ENFORCE_FROM` — 운영 값은 수집 결과로 확정.
+
+### 1003 부족분 개발 — 운영 기록 대장 · 게이트웨이 허용 IP 사유 · 만료일 · API 출발지 확인 (코드 완료 · 배포 대기)
+
+> Harold 1003 「부족한 것들 개발 끝까지 닫고 보고 · Codex 리뷰 닫힐 때까지」. 항목별 상태 = [증빙 대장 §4](transmission-cert/resubmit-1006/00-증빙-대장.md).
+
+| 무엇 | 어디 | 닫는 항목 | 검토 |
+|---|---|---|---|
+| **운영 기록 대장**(한줄로 · 슈퍼관리자 탭) — 로그 점검(월) · 방화벽 정책 변경 · 접근권한 점검을 대상 시스템(한줄로 · 게이트웨이 · 공통)별로 남기고, 기록자와 다른 관리자가 확인 서명. 한줄로 로그 점검은 그달 집계를 기록 시점에 얼려 함께 남긴다 | `utils/ops-records.ts` · `routes/admin-ops-records.ts` · `components/admin/OpsRecordsTab.tsx` · 권한 표 `opsRecords` | 4.3 ①②③ · 3.1 ④ · 3.3 | Codex 적대 4R approve(1R high = 기록 번호 대소문자로 잠금이 갈림 · 2R · 3R medium = 화면 시계 · 서버 시각을 못 받으면 기본값을 만들지 않음) |
+| **허용 IP 변경 사유 · 허용 만료일**(게이트웨이) — 바꿀 때 사유 필수 · 만료일(한국 날짜 · 그날까지 유효) · 만료 작업자가 지난 계정의 허용 IP 와 만료일을 비우고 감사 기록 `ALLOWED_IPS_EXPIRED` · 연결 마법사 재발급 · 대량 발급도 감사 기록에 허용 IP 전 · 후 | 게이트웨이 `migrations/086` · `services/allowed-ip-policy.js` · `workers/allowed-ip-expiry-worker.js` · `routes/agents.js` · `routes/commercialization.js` · 관리 화면 | 2.2 ③ | Codex 적대 2R approve(1R high = 메모 저장이 만료로 비운 IP 를 되살림 · medium 2 = 같은 뿌리 · 전역 캐시 세대) |
+| **API 연동 출발지 확인**(게이트웨이) — 계정 허용 IP 를 REST 연동에도 적용. `GW_API_ORIGIN_ALLOWLIST` 기본 = 기록만(통과 + 접속 이력 사유와 판정한 출발지) · `enforce` = 403 | 게이트웨이 `middleware/client-auth.js` · `routes/access-events.js` | 2.2 ⑤ | 같은 2R |
+
+- **DDL** — 한줄로 0(감사 기록이 원장) · 게이트웨이 `086`(nullable 칸 2개 · 옛 코드 무영향이라 **DDL 먼저 → 관리 API 배포**).
+- **엔진(Go) 재기동 없음** — 관리 API(Node) 파일 7개 · 관리 화면만 바뀐다. 관리 API 는 파일마다 재시작한다(REST 연동 고객이 그 순간 끊긴다 — 업무시간 밖).
+- **기간계 영향** — 출발지 확인 기본 = 기록만이라 배포만으로 막히는 연동은 없다. 차단 전환 전 할 일 = API 계정 2개(`api-hanjullo-api-test` · `api-rabd-api-01`)에 실제 출발지 등록 → 접속 이력 「허용 IP 밖」 0 확인 → `enforce`. 만료일을 넣은 계정이 없으면 만료 작업자는 아무것도 바꾸지 않는다.
+- ⚠ **이미 붙어 있는 Agent 연결은 끊지 않는다** — 엔진은 접속할 때만 허용 IP 를 본다(`grpc_server.go` `verifyAgent` · 종전 관리 화면 IP 변경과 같다). 제출 문안에 「즉시 차단」으로 쓰지 않는다. API 연동 쪽 만료 반영은 인증 캐시 수명(2분) 안.
+- **하지 않은 것** — Agent 거부 사유를 「미등록 출발지」로 따로 남기기(엔진 재빌드 · 재기동 = 고객사 Agent 전체 재접속). 프로세스 로그 `Agent IP allowlist denied` 가 증빙이다(E02).
+- 검증 = 한줄로 BE · FE tsc 0 · 운영 기록 대장 계약 25건 · 게이트웨이 관리 API 전체 93파일 실패 0(구조 428건) · 관리 화면 38파일 실패 0 · 화면 빌드 통과.
+
+### 1003 한국모바일인증 연동 준비 (모듈 · 규격 수령 전)
+
+**이미 있는 자리**
+
+| 자리 | 위치 | 상태 |
+|---|---|---|
+| 인증기관 구현 틀 | `utils/identity-verify.ts` `IdentityProvider`(`buildStart` · `verify`) + `registerIdentityProvider` | 1002 완료 |
+| 팝업 복귀 통로(서버) | `utils/identity-return.ts` · `routes/identity-return.ts` · `app.ts`(helmet 앞) = `/api/auth/identity/return` | **1003 신설** |
+| 팝업 열기 · 결과 받기(화면) | `frontend/src/utils/identityProvider.ts` · `IdentityVerifyModal.tsx` | **1003 신설** |
+| 저장 · 담당자 등록 · 세션 발급 | `completeIdentityVerification` (인증된 번호만 저장 · 손 입력 없음) | 1002 완료 |
+| 설정 「계정 담당자」 카드 | `Settings.tsx` | 1003 항상 표시 |
+
+- 복귀 통로는 **인증기관이 무엇이든 같은 모양**(팝업에서 인증 → 등록해 둔 주소로 복귀)으로 만들었다. 한국모바일인증의 실제 방식이 이것과 같은지는 **규격서로 확인**한다(미검증 가정).
+- 복귀 통로는 아무것도 믿지 않는다 — DB · 세션을 건드리지 않고, 받은 값을 같은 출처의 부모 창에 그대로 넘길 뿐이다. 위조와 **남의 인증 결과 끼워 넣기**를 막는 자리는 `IdentityProvider.verify` 하나다.
+
+**모듈 · 규격이 오면 채울 것**
+
+1. `utils/identity-provider-kmc.ts`(신규) — `buildStart`: 요청 값을 모듈로 암호화해 `buildPopupFormStart(인증기관 요청 주소, 값)`을 돌려준다 · `verify`: 돌아온 값을 복호화해 이름 · 휴대폰 · 중복가입 확인값 · 거래 번호를 꺼내고, **결과가 이 `verificationId`의 요청에서 나온 것인지 대조**한다.
+2. 기동 시 등록 — 설정값이 모두 있을 때만 `registerIdentityProvider`를 부른다(없으면 종전처럼 아무도 요구받지 않는다).
+3. 중복 계정 차단 — `identity_verifications.dup_key_hash` 대조(2.1 ②).
+4. 한국모바일인증에 등록하는 값 — 서비스 주소 `hanjul.ai` · **결과 수신 주소 `https://hanjul.ai/api/auth/identity/return`**.
+5. 켜는 순서 = 위 「켜는 순서」 그대로(직원 계정부터 명단으로).
+
+**규격서에서 먼저 확인할 것**
+
+| 확인 | 이유 |
+|---|---|
+| 요청이 팝업 폼 전송인가 · 결과가 GET인가 POST인가 · 값 이름 | 복귀 통로는 둘 다 받지만 값 이름은 `verify`가 안다 |
+| 결과에 요청 식별값이 되돌아오는가 | 없으면 남의 인증 결과를 막을 수단을 따로 세워야 한다 |
+| 모듈 형태(Node 패키지인가 실행 파일인가) | ⚠ 배포 스크립트는 새 npm 의존성을 서버에 설치하지 않는다(0819 실측) — 패키지면 배포 절차가 하나 늘어난다 |
+| 요청 값의 글자 인코딩 | 폼 전송에 `charset`을 실어야 할 수 있다 |
+| 개발 · 운영 구분, 허용 주소 등록 방식 | 직원 계정 시범을 어느 쪽으로 하는지 |
+| 중복가입 확인값 제공 여부 | 2.1 ② 중복 가입 차단의 근거 |
+
+검증 = BE · FE tsc 0 · vitest 539파일 전부 통과 · FE `build:safe` 통과 · 복귀 통로 계약 16건(실제 응답 2건 포함) · 결함 주입 15종 전부 잡힘.
+Codex 적대 검토 1R(`gpt-6-astra`) = critical · high 0 · medium 1 — 「인증기관 값 이름이 `submit`이면 폼의 전송 메서드를 가려 요청이 안 나간다」. 스크립트 탈출 · 다른 창의 메시지 끼워 넣기 경로는 찾지 못했다고 보고. medium은 수용해 폼 동작을 원형 메서드로 부르게 고쳤다(`submit` · `appendChild` · 폼 제거 · 같은 뿌리 세 곳).
+
 ### 엔진(비토 게이트웨이) 증적 — 1002 영업 요청 「전 항목 비토 엔진 · 한줄로 증적파일」
 
 요청 범위 = 2.2(① · ③ · ④ · ⑤) · 3.1(① · ④) · 3.4 · 3.5 · 4.1(② · ⑤) · 4.2(⑤) · 4.3. **엔진은 3.4는 ⑥만 · 3.5는 ⑤만.**

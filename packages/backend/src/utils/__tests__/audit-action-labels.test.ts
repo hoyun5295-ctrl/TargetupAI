@@ -43,6 +43,8 @@ const DIRECT_INSERT_ACTIONS = [
   'privacy_export', 'privacy_purge', 'account_restricted', 'company_terminated',
   // ★ 2026-09-11 전송자격인증 4.2 — 개인정보 조회·수정 이력(privacy-audit.ts 직접 INSERT)
   'privacy_view', 'privacy_edit',
+  // ★ 2026-10-03 운영 기록 대장(ops-records.ts 직접 INSERT — 실패를 삼키지 않으려고 recordAuditLog 를 쓰지 않는다)
+  'ops_record_created', 'ops_record_confirmed',
 ];
 
 describe('감사 로그 액션 한글 라벨 커버리지', () => {
