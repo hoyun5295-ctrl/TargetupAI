@@ -494,3 +494,87 @@ E05_COUNTS = r"""
       14 |                       14 |                      0
 (1 row)
 """.strip('\n')
+
+# ── 2026-10-03 백업 실패 경보 연결 뒤 재수집(Harold 실행 · .65 root · 15:47) ──
+# 경보 = 한줄로 시스템 알림 API(허용 출발지 = 게이트웨이 서버 주소 · 1003 배포) → 담당자 휴대폰 LMS.
+# 시험 발송 응답 200(한줄로 배포 뒤) · 허용 밖 서버(.66)에서 출발지 헤더를 꾸민 요청 = 403.
+COLLECTED_E14 = '2026-10-03 15:47 (한국 시각)'
+
+E14_CRON = r"""
+30 3 * * * /opt/bito-gateway/backups/bito-db-backup.sh >> /opt/bito-gateway/backups/cron.log 2>&1
+30 8 * * * /opt/bito-gateway/backups/bito-db-backup-monitor.sh >> /opt/bito-gateway/backups/monitor.log 2>&1
+""".strip('\n')
+
+E14_DIR = r"""
+-rw-r--r-- 1 root root        400 Oct  3 08:30 monitor.log
+-rw-r--r-- 1 root root       5800 Oct  3 03:33 cron.log
+-rw-r--r-- 1 root root         20 Oct  3 03:33 LAST_SUCCESS
+-rw-r--r-- 1 root root  202955741 Oct  3 03:33 gw_message_request_20261003_033001.csv.gz.gpg
+-rw-r--r-- 1 root root 1531232855 Oct  3 03:32 gw_main_20261003_033001.dump.gpg
+-rw-r--r-- 1 root root        280 Oct  3 03:30 gw_manifest_20261003_033001.txt
+-rw-r--r-- 1 root root  193023395 Oct  2 03:32 gw_message_request_20261002_033001.csv.gz.gpg
+-rw-r--r-- 1 root root 1245843873 Oct  2 03:32 gw_main_20261002_033001.dump.gpg
+-rw-r--r-- 1 root root        280 Oct  2 03:30 gw_manifest_20261002_033001.txt
+2026-10-03 03:33:20.285445853 +0900  LAST_SUCCESS
+""".strip('\n')
+
+E14_RUN_LOG = r"""
+[2026-10-03 03:30:01] ===== 백업 시작 (20261003_033001) =====
+[2026-10-03 03:30:01] 스냅샷 00000014-001D5D05-1
+[2026-10-03 03:30:03] 본 덤프(발송 기록 표 데이터 제외)+암호화...
+[2026-10-03 03:32:46] 본 덤프 완료: 1531232855B
+[2026-10-03 03:32:46] 발송 기록(끝난 행의 MMS 이미지 제외)+암호화...
+[2026-10-03 03:33:04] 발송 기록 완료: 202955741B
+[2026-10-03 03:33:04] .59 오프사이트 전송...
+[2026-10-03 03:33:20] 전송 완료
+[2026-10-03 03:33:20] 로컬 정리 완료 (3일 초과 삭제)
+[2026-10-03 03:33:20] ===== 백업 성공 완료 (본 1531232855B · 발송 기록 202955741B) =====
+""".strip('\n')
+
+E14_MONITOR_LOG = r"""
+[2026-09-28 08:30:01] OK: 백업 신선도 정상
+[2026-09-29 08:30:01] OK: 백업 신선도 정상
+[2026-09-30 08:30:01] OK: 백업 신선도 정상
+[2026-10-01 08:30:01] OK: 백업 신선도 정상
+[2026-10-02 08:30:01] OK: 백업 신선도 정상
+[2026-10-03 08:30:01] OK: 백업 신선도 정상
+""".strip('\n')
+
+E14_ALERT = r"""
+-- 경보 보낼 곳 설정 여부(값은 찍지 않는다)
+ALERT_CMD 설정됨
+== /opt/bito-gateway/backups/bito-db-backup.sh (마지막 수정 2026-09-26 22:22:34)
+45:[[ -f "${BACKUP_DIR}/.env" ]] && { set -a; source "${BACKUP_DIR}/.env"; set +a; }   # ALERT_CMD(선택)
+52:  [[ -n "${ALERT_CMD:-}" ]] && ALERT_MSG="게이트웨이 백업 실패: $1" bash -c "${ALERT_CMD}" || true
+54:trap 'alert "라인 ${LINENO} 중단(직전 명령 실패)"' ERR
+81:trap release_snapshot EXIT
+== /opt/bito-gateway/backups/bito-db-backup-monitor.sh (마지막 수정 2026-09-25 22:22:38)
+11:MAX_AGE_HOURS=26          # 매일 03:30 백업 기준, 26h 넘으면 이상
+25:  [[ -n "${ALERT_CMD:-}" ]] && ALERT_MSG="게이트웨이 백업 이상: ${msg}" bash -c "${ALERT_CMD}" || true
+""".strip('\n')
+
+E14_ALERT_TEST = r"""
+alert_http=200
+""".strip('\n')
+
+# ── 2026-10-03 고객사 발신번호 정책(Harold 실행 · .65 운영 SQL · 읽기 전용) ──
+# 예외 2곳(아이티앤 · 더화이트) = 특수유형 부가통신사업자 · 자기 고객 발신번호를 직접 등록 · 관리(Harold 1003 확인).
+# 한줄로AI = 당사 서비스 · 한줄로가 발송 전에 등록 번호를 검사한다. 발신자 식별코드 정책은 3곳 모두 fallback_allowed(본문에 쓰지 않는다).
+COLLECTED_E17 = '2026-10-03 (한국 시각)'
+
+E17_POLICY_COUNTS = r"""
+ sender_number_policy | count
+----------------------+-------
+ registered_only      |     9
+ exempt_special_vasp  |     3
+(2 rows)
+""".strip('\n')
+
+E17_EXEMPT = r"""
+   code   |     name      |        sender_number_policy_reason
+----------+---------------+-------------------------------------------
+ HANJULLO | 한줄로AI      | HANJULLO 전체 계정 callback 등록검사 예외
+ R9005    | 아이티앤_신규 | 관리자 승인 callback 등록검사 예외
+ R9002    | 더화이트      | 관리자 승인 callback 등록검사 예외
+(3 rows)
+""".strip('\n')

@@ -3610,8 +3610,8 @@ router.get('/campaigns/:id/sms-detail', authenticate, requireSuperAdmin, async (
           callBack: r.call_back,
           // ★ 2026-07-30: 브랜드 행(msg_type='F')은 msg_contents가 JSON — 본문(MESSAGE)만 풀어 표시.
           msgContents: getDisplayContents(r.msg_type, r.msg_contents),
-          msgType: r.msg_type === 'S' ? 'SMS' : r.msg_type === 'L' ? 'LMS' : r.msg_type === 'M' ? 'MMS' : getSendTypeLabel(r.msg_type, r.k_oriseq),
-          sendType: getSendTypeLabel(r.msg_type, r.k_oriseq),
+          msgType: r.msg_type === 'S' ? 'SMS' : r.msg_type === 'L' ? 'LMS' : r.msg_type === 'M' ? 'MMS' : getSendTypeLabel(r.msg_type, r.k_oriseq, r.status_code),
+          sendType: getSendTypeLabel(r.msg_type, r.k_oriseq, r.status_code),
           statusCode: r.status_code,
           statusText: rowStatus.label,
           statusType: rowStatus.type,

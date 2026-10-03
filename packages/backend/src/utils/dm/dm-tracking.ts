@@ -139,6 +139,9 @@ export function classifyDmRecipientSegments(rows: any[]): Record<DmResendSegment
   for (const r of rows || []) {
     const id = String(r?.customer_id || '');
     if (!id) continue;
+    // ★ 2026-10-03 아직 안 나간(예약) · 취소·실패한 발송의 수신자는 다시 보내기 대상이 아니다(받은 적이 없다).
+    //   상태가 없는 행(옛 토큰 · 칸 없음)은 종전대로 받은 것으로 본다 — 판정 원천 = dm-recipient-token DM_TOKEN_SEND_STATE_SQL
+    if (r.send_state && r.send_state !== 'sent') continue;
     const viewed = !!r.viewed_at;
     const clicks = sumSectionClicks(r.section_interactions);
     const responded = !!r.responded;

@@ -355,7 +355,17 @@ router.get('/status', async (req: Request, res: Response) => {
     const companyId = req.user?.companyId;
     if (!companyId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
     const configured = await isSmtpConfigured(companyId);
-    return res.json({ success: true, smtp_configured: configured });
+    // ★ 2026-10-03 보내기 창의 연결 판정 원천(남지현 접수 「회사 메일 연결하기」 무반응). 담당자도 읽는 경로라
+    //   공개 값(보내는 주소·이름)과 관리 권한만 싣는다 — 서버 주소·계정·비밀번호는 관리자 전용 /smtp-config 에만 있다.
+    const pub = configured ? await getSmtpConfigPublic(companyId) : null;
+    const userType = req.user?.userType;
+    return res.json({
+      success: true,
+      smtp_configured: configured,
+      from_email: pub?.fromEmail || '',
+      from_name: pub?.fromName || '',
+      can_manage: userType === 'company_admin' || userType === 'super_admin',
+    });
   } catch (err: any) {
     console.error('[Email /status] 오류:', err);
     if (handleDbMigrationError(err, res, 'companies')) return;

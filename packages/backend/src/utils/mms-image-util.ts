@@ -49,6 +49,19 @@ export function alignMmsImageNames(names: unknown, count: number): string[] {
 }
 
 /**
+ * ★2026-10-03 경로 배열 + 원본 파일명 배열(같은 순서)을 캠페인 항목으로 묶는다(임은지 접수 · 대행 MMS 가 발송 결과 창에서만 UUID).
+ * 프론트 `utils/mmsImage.ts withMmsImageNames` 와 같은 규칙: 이름이 있는 칸만 `{ path, originalName }` · 빈칸·이름 없음은 원래 항목.
+ * 이름 정리(길이 맞춤 · trim · 200자 · 서로게이트)는 `alignMmsImageNames` 한 벌을 쓴다.
+ * 발송 배관은 `normalizeMmsImagePaths` 로 경로만 읽으므로 묶어도 무변경이다(직접발송·AI 발송이 이미 이 모양을 저장한다).
+ */
+export function withMmsImageNames(paths: MmsImageItem[], names: unknown): MmsImageItem[] {
+  if (!Array.isArray(paths)) return [];
+  if (!Array.isArray(names)) return paths;
+  const aligned = alignMmsImageNames(names, paths.length);
+  return paths.map((item, i) => (aligned[i] ? { path: getMmsImagePath(item), originalName: aligned[i] } : item));
+}
+
+/**
  * 코드 포인트 단위로 200자에서 자르고, 짝 없는 서로게이트는 버린다.
  * ⛔ UTF-16 단위로 자르면 이모지가 반쪽으로 남고, PG jsonb가 그 값을 거절해 **접수 INSERT가 통째로 실패**한다.
  */

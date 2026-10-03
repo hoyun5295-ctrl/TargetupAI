@@ -43,6 +43,7 @@ import { Layers } from 'lucide-react';
 import EmailEditScreen from '../components/make/EmailEditScreen';
 import EmailDetailModal from '../components/make/EmailDetailModal';
 import MakeSendModal from '../components/make/MakeSendModal';
+import SmtpConnectModal from '../components/email/SmtpConnectModal';
 import { ListHead, EmailChip, Meter, fmtDate } from '../components/make/HomeParts';
 import { emailChipStatus, emailCoverOf, type ChipStatus } from '../utils/make-flow';
 import '../styles/make.css';
@@ -81,56 +82,6 @@ interface SmtpConfig {
   isConfigured: boolean;
 }
 
-// 4 표준 SMTP 가이드 (회사 admin 진입 단순화)
-const SMTP_PRESETS = [
-  {
-    key: 'gmail',
-    label: 'Google Workspace',
-    host: 'smtp.gmail.com',
-    port: 587,
-    secure: false,
-    hint: '2단계 인증 + 앱 비밀번호 발급 의무 (Google 계정 안 보안 → 앱 비밀번호)',
-    docs: 'https://support.google.com/accounts/answer/185833',
-  },
-  {
-    key: 'naver_works',
-    label: 'Naver Works',
-    host: 'smtp.worksmobile.com',
-    port: 587,
-    secure: false,
-    hint: 'Naver Works 관리자 → 발신 메일 보안 설정 → SMTP 활성',
-    docs: 'https://guide.worksmobile.com/kr/mail/external-smtp/',
-  },
-  {
-    key: 'office365',
-    label: 'Office 365 / Outlook',
-    host: 'smtp.office365.com',
-    port: 587,
-    secure: false,
-    hint: 'Microsoft 365 계정 + 앱 비밀번호 또는 OAuth 인증',
-    docs: 'https://learn.microsoft.com/exchange/clients-and-mobile-in-exchange-online/authenticated-client-smtp-submission',
-  },
-  {
-    key: 'custom',
-    label: '자체 메일 서버',
-    host: '',
-    port: 587,
-    secure: false,
-    hint: '회사 본인 메일 서버 정보 직접 입력 (host/port/user/password)',
-    docs: null,
-  },
-];
-
-const EMPTY_SMTP_FORM = {
-  host: '',
-  port: 587,
-  user: '',
-  password: '',
-  secure: false,
-  from_email: '',
-  from_name: '',
-};
-
 // ★ 2026-07-02(3) EMPTY_CAMPAIGN_FORM 제거 — 신규 진입은 템플릿/비주얼/프롬프트 전부 비주얼 편집기.
 //   레거시 HTML 폼은 기존 HTML 전용 캠페인 수정(openEditor 폴백)에만 쓰인다.
 
@@ -159,12 +110,11 @@ export default function EmailCampaignsPage() {
   const [error, setError] = useState<string | null>(null);
   const [confirmState, setConfirmState] = useState<ConfirmState | null>(null);
 
-  // SMTP 설정 영역
+  // SMTP 설정 영역 — 창·입력·저장은 공용 SmtpConnectModal 소유(★2026-10-03 이관)
   const [smtpFormOpen, setSmtpFormOpen] = useState(false);
-  const [smtpForm, setSmtpForm] = useState(EMPTY_SMTP_FORM);
-  const [smtpFormSaving, setSmtpFormSaving] = useState(false);
-  const [showPassword, setShowPassword] = useState(false);
-  const [presetKey, setPresetKey] = useState<string>('gmail');
+  // ★ 2026-10-03 담당자도 읽는 연결 상태(/api/email/status) — 관리 권한 · 공개 발신 이름(관리자 전용 /smtp-config 는 담당자에게 403)
+  const [smtpCanManage, setSmtpCanManage] = useState(true);
+  const [smtpFromName, setSmtpFromName] = useState('');
 
   // 테스트 발송 영역 (작은 모달로 접음 — 가로 큰 카드 제거)
   const [testEmail, setTestEmail] = useState('');
@@ -206,9 +156,9 @@ export default function EmailCampaignsPage() {
   const [showGallery, setShowGallery] = useState(false);
   // 성과 분석 대시보드 모달
   const [showAnalytics, setShowAnalytics] = useState(false);
-  // ★ 2026-09-27 만들기 개편 — 첫 화면 상태 · 진입 값(?other=1 다른 방법 펼침 · blank 빈 화면 · ?smtp=1 회사 메일 연결 창 · ?pair= 같은 재료 DM)
+  // ★ 2026-09-27 만들기 개편 — 첫 화면 상태 · 진입 값(?other=1 다른 방법 펼침 · blank 빈 화면 · ?pair= 같은 재료 DM)
+  //   ★ 2026-10-03 ?smtp=1(회사 메일 연결 창) 진입 폐지 — 보내기 창이 연결 창을 직접 띄운다(같은 페이지 안 이동은 다시 열리지 않아 무반응이었다)
   const [entryOther] = useState(() => String(searchParams.get('other') || '').trim() || null);
-  const [entrySmtp] = useState(() => searchParams.get('smtp') === '1');
   const [pairDmId] = useState(() => String(searchParams.get('pair') || '').trim() || null);
   // ★ 2026-09-30 AI 존 보정: 접힌 "다른 방법" 패널 폐지 — ?other=1 로 오면 명령 카드([광고성]·[이미지])·시작 카드가 처음부터 보인다
   const [listFilter, setListFilter] = useState<'all' | ChipStatus>('all');
@@ -255,21 +205,12 @@ export default function EmailCampaignsPage() {
 
       if (handle503(statusData) || handle503(configData) || handle503(listData)) return;
 
-      if (statusData.success) setSmtpConfigured(!!statusData.smtp_configured);
-      if (configData.success && configData.config) {
-        setSmtpConfig(configData.config);
-        if (configData.config.isConfigured) {
-          setSmtpForm({
-            host: configData.config.host || '',
-            port: configData.config.port || 587,
-            user: configData.config.user || '',
-            password: '',  // 평문 응답 X — 마스킹
-            secure: !!configData.config.secure,
-            from_email: configData.config.fromEmail || '',
-            from_name: configData.config.fromName || '',
-          });
-        }
+      if (statusData.success) {
+        setSmtpConfigured(!!statusData.smtp_configured);
+        setSmtpCanManage(statusData.can_manage !== false);
+        setSmtpFromName(String(statusData.from_name || ''));
       }
+      if (configData.success && configData.config) setSmtpConfig(configData.config);
       if (listData.success) setCampaigns(listData.campaigns || []);
     } catch (e: any) {
       setError(e?.message || '조회 중 오류');
@@ -285,52 +226,6 @@ export default function EmailCampaignsPage() {
   // SMTP 설정 저장 / 삭제 / 테스트
   // ────────────────────────────────────────────────────────────────
 
-  const applyPreset = (key: string) => {
-    const preset = SMTP_PRESETS.find((p) => p.key === key);
-    if (!preset) return;
-    setPresetKey(key);
-    setSmtpForm((prev) => ({
-      ...prev,
-      host: preset.host || prev.host,
-      port: preset.port,
-      secure: preset.secure,
-    }));
-  };
-
-  const handleSaveSmtp = async () => {
-    if (!smtpForm.host.trim() || !smtpForm.port || !smtpForm.user.trim() || !smtpForm.password.trim() || !smtpForm.from_email.trim()) {
-      showToast('host / port / user / password / from_email 필수', 'warning');
-      return;
-    }
-    const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    if (!emailPattern.test(smtpForm.from_email)) {
-      showToast('from_email 형식 오류', 'warning');
-      return;
-    }
-    setSmtpFormSaving(true);
-    try {
-      const res = await fetch('/api/email/smtp-config', {
-        method: 'PUT',
-        headers: authHeaders(),
-        body: JSON.stringify(smtpForm),
-      });
-      const data = await res.json();
-      if (handle503(data)) return;
-      if (data.success) {
-        showToast('SMTP 설정 저장 완료', 'success');
-        setSmtpForm((prev) => ({ ...prev, password: '' }));  // 비밀번호 즉시 폐기
-        setSmtpFormOpen(false);
-        await loadAll();
-      } else {
-        showToast(data.error || 'SMTP 설정 저장 실패', 'error');
-      }
-    } catch (e: any) {
-      showToast(e?.message || 'SMTP 설정 저장 중 오류', 'error');
-    } finally {
-      setSmtpFormSaving(false);
-    }
-  };
-
   const handleClearSmtp = () => {
     setConfirmState({
       mode: 'danger',
@@ -344,7 +239,6 @@ export default function EmailCampaignsPage() {
           if (handle503(data)) return;
           if (data.success) {
             showToast('SMTP 설정 영구 제거 완료', 'success');
-            setSmtpForm(EMPTY_SMTP_FORM);
             await loadAll();
           } else {
             showToast(data.error || 'SMTP 설정 제거 실패', 'error');
@@ -567,7 +461,6 @@ export default function EmailCampaignsPage() {
   useEffect(() => {
     if (entryHandled.current || loading) return;
     entryHandled.current = true;
-    if (entrySmtp) setSmtpFormOpen(true);
     if (entryOther === 'blank') setVisualEditor({ sections: [], isAd: true, aiGenerated: false });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [loading]);
@@ -876,7 +769,9 @@ export default function EmailCampaignsPage() {
       }}
       blocks={[
         ...(error ? [{ text: error, tone: 'rose' as const }] : []),
-        ...(!smtpConfigured && !loading ? [{ text: '보내려면 회사 메일 연결이 필요해요. 만들기와 미리보기는 지금 돼요.', actionLabel: '회사 메일 연결하기', onAction: () => setSmtpFormOpen(true) }] : []),
+        ...(!smtpConfigured && !loading ? [smtpCanManage
+          ? { text: '보내려면 회사 메일 연결이 필요해요. 만들기와 미리보기는 지금 돼요.', actionLabel: '회사 메일 연결하기', onAction: () => setSmtpFormOpen(true) }
+          : { text: '보내려면 회사 메일 연결이 필요해요. 회사 관리자에게 연결을 요청해 주세요. 만들기와 미리보기는 지금 돼요.' }] : []),
       ]}
     >
       <div className="space-y-5">
@@ -989,6 +884,7 @@ export default function EmailCampaignsPage() {
         dm={null}
         email={pageSend ? { id: pageSend.id, name: pageSend.name, subject: pageSend.subject, isAd: pageSend.isAd, completed: !!pageSend.completed, hasPlaceholder: pageSend.hasPlaceholder } : null}
         onSent={() => { const id = pageSend?.id; void loadAll(); if (id) pollCampaign(id); }}
+        onSmtpChanged={() => { void loadAll(); }}
       />
 
       {/* ★ D225+ 발송 이력 모달 */}
@@ -1007,22 +903,13 @@ export default function EmailCampaignsPage() {
         />
       )}
 
-      {/* SMTP 설정 모달 */}
-      {smtpFormOpen && (
-        <SmtpFormModal
-          form={smtpForm}
-          setForm={setSmtpForm}
-          presetKey={presetKey}
-          setPresetKey={applyPreset}
-          showPassword={showPassword}
-          setShowPassword={setShowPassword}
-          saving={smtpFormSaving}
-          onSave={handleSaveSmtp}
-          onClose={() => setSmtpFormOpen(false)}
-          onClear={smtpConfig?.isConfigured ? () => { setSmtpFormOpen(false); handleClearSmtp(); } : undefined}
-          isUpdate={smtpConfig?.isConfigured || false}
-        />
-      )}
+      {/* SMTP 설정 모달 — 공용 창(★2026-10-03) · 영구 제거 확인 창은 이 화면 소유 */}
+      <SmtpConnectModal
+        open={smtpFormOpen}
+        onClose={() => setSmtpFormOpen(false)}
+        onSaved={() => { void loadAll(); }}
+        onClear={smtpConfig?.isConfigured ? () => { setSmtpFormOpen(false); handleClearSmtp(); } : undefined}
+      />
 
       {/* 테스트 발송 — 작은 모달 (가로 큰 카드 대체) */}
       {testModalOpen && (
@@ -1209,7 +1096,7 @@ export default function EmailCampaignsPage() {
           aiGenerated={visualEditor.aiGenerated}
           campaignId={visualEditor.campaignId}
           completed={visualEditor.completed}
-          fromName={visualEditor.fromName || smtpConfig?.fromName || ''}
+          fromName={visualEditor.fromName || smtpConfig?.fromName || smtpFromName || ''}
           hasPlaceholder={visualEditor.hasPlaceholder}
           pairDmId={pairDmId}
           authHeaders={authHeaders}
@@ -1224,195 +1111,6 @@ export default function EmailCampaignsPage() {
       {/* 고객 데이터 없음 — 생성 차단 안내 */}
       <CustomerDataRequiredModal open={showDataGate} onClose={() => setShowDataGate(false)} />
     </ZoneFrame>
-  );
-}
-
-// ════════════════════════════════════════════════════════════════════
-// SMTP 설정 모달
-// ════════════════════════════════════════════════════════════════════
-
-interface SmtpFormModalProps {
-  form: typeof EMPTY_SMTP_FORM;
-  setForm: (form: typeof EMPTY_SMTP_FORM) => void;
-  presetKey: string;
-  setPresetKey: (key: string) => void;
-  showPassword: boolean;
-  setShowPassword: (v: boolean) => void;
-  saving: boolean;
-  onSave: () => void;
-  onClose: () => void;
-  onClear?: () => void;
-  isUpdate: boolean;
-}
-
-function SmtpFormModal({ form, setForm, presetKey, setPresetKey, showPassword, setShowPassword, saving, onSave, onClose, onClear, isUpdate }: SmtpFormModalProps) {
-  const currentPreset = SMTP_PRESETS.find((p) => p.key === presetKey);
-  return (
-    <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 z-50">
-      <div className="bg-violet-50 border border-slate-200 rounded-2xl shadow-2xl w-full max-w-2xl max-h-[95vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
-        <div className="sticky top-0 bg-violet-50 border-b border-slate-200 px-6 py-4 flex items-center justify-between">
-          <h3 className="text-lg font-bold text-slate-900 flex items-center gap-2">
-            <Server className="w-5 h-5 text-blue-700" />
-            {isUpdate ? 'SMTP 설정 수정' : 'SMTP 설정 등록'}
-          </h3>
-          <button onClick={onClose} className="text-slate-500 hover:text-slate-900 p-1.5 rounded hover:bg-slate-100" aria-label="닫기">
-            <X className="w-5 h-5" />
-          </button>
-        </div>
-
-        <div className="p-6 space-y-4">
-          {/* 표준 SMTP 가이드 */}
-          <div>
-            <label className="text-xs font-bold text-slate-700 block mb-2">메일 서버 선택 (자동 입력 활용)</label>
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
-              {SMTP_PRESETS.map((preset) => (
-                <button
-                  key={preset.key}
-                  onClick={() => setPresetKey(preset.key)}
-                  className={`text-xs px-2 py-2 rounded-lg border transition-colors ${
-                    presetKey === preset.key
-                      ? 'bg-blue-100 border-blue-300 text-slate-900'
-                      : 'bg-violet-50 border-slate-200 text-slate-600 hover:bg-white'
-                  }`}
-                >
-                  {preset.label}
-                </button>
-              ))}
-            </div>
-            {currentPreset && (
-              <div className="text-[10px] text-slate-500 mt-2 flex items-start gap-1">
-                <AlertCircle className="w-3 h-3 mt-0.5 shrink-0" />
-                <span>
-                  {currentPreset.hint}
-                  {currentPreset.docs && (
-                    <> · <a href={currentPreset.docs} target="_blank" rel="noopener noreferrer" className="text-cyan-700 hover:underline">공식 가이드</a></>
-                  )}
-                </span>
-              </div>
-            )}
-          </div>
-
-          {/* SMTP 정보 입력 */}
-          <div className="grid grid-cols-1 md:grid-cols-[1fr,120px] gap-3">
-            <div>
-              <label className="text-xs text-slate-600 block mb-1">SMTP 서버 (host)</label>
-              <input
-                type="text"
-                value={form.host}
-                onChange={(e) => setForm({ ...form, host: e.target.value })}
-                placeholder="smtp.gmail.com"
-                className="w-full px-3 py-2 bg-violet-50 border border-slate-200 rounded-lg text-sm text-slate-900 placeholder-slate-400 focus:outline-none focus:border-blue-300"
-              />
-            </div>
-            <div>
-              <label className="text-xs text-slate-600 block mb-1">포트 (port)</label>
-              <input
-                type="number"
-                min={1}
-                max={65535}
-                value={form.port}
-                onChange={(e) => setForm({ ...form, port: parseInt(e.target.value, 10) || 587 })}
-                placeholder="587"
-                className="w-full px-3 py-2 bg-violet-50 border border-slate-200 rounded-lg text-sm text-slate-900 placeholder-slate-400 focus:outline-none focus:border-blue-300"
-              />
-            </div>
-          </div>
-
-          <div>
-            <label className="text-xs text-slate-600 block mb-1">사용자 (user): 보통 이메일 주소</label>
-            <input
-              type="text"
-              value={form.user}
-              onChange={(e) => setForm({ ...form, user: e.target.value })}
-              placeholder="admin@example.com"
-              className="w-full px-3 py-2 bg-violet-50 border border-slate-200 rounded-lg text-sm text-slate-900 placeholder-slate-400 focus:outline-none focus:border-blue-300"
-            />
-          </div>
-
-          <div>
-            <label className="text-xs text-slate-600 block mb-1 flex items-center gap-1">
-              <Lock className="w-3 h-3" /> 비밀번호 (password): 앱 비밀번호 권장 (Google 2단계 인증 영역)
-            </label>
-            <div className="relative">
-              <input
-                type={showPassword ? 'text' : 'password'}
-                value={form.password}
-                onChange={(e) => setForm({ ...form, password: e.target.value })}
-                placeholder={isUpdate ? '변경 시에만 새 비밀번호 입력' : '앱 비밀번호 (16자)'}
-                className="w-full px-3 py-2 pr-10 bg-violet-50 border border-slate-200 rounded-lg text-sm text-slate-900 placeholder-slate-400 focus:outline-none focus:border-blue-300"
-                autoComplete="new-password"
-              />
-              <button
-                type="button"
-                onClick={() => setShowPassword(!showPassword)}
-                className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-900 p-1"
-                aria-label={showPassword ? '비밀번호 숨김' : '비밀번호 표시'}
-              >
-                {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-              </button>
-            </div>
-            <div className="text-[10px] text-slate-400 mt-1">서버 저장 시 AES-256-GCM 암호화. 평문 응답/로그 X</div>
-          </div>
-
-          <div className="flex items-center gap-2">
-            <input
-              type="checkbox"
-              id="smtp_secure"
-              checked={form.secure}
-              onChange={(e) => setForm({ ...form, secure: e.target.checked })}
-              className="rounded"
-            />
-            <label htmlFor="smtp_secure" className="text-xs text-slate-700">
-              SSL/TLS 직접 연결 (포트 465 영역). 미체크 = STARTTLS (포트 587 default).
-            </label>
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-            <div>
-              <label className="text-xs text-slate-600 block mb-1">발신 이메일 (from_email)</label>
-              <input
-                type="email"
-                value={form.from_email}
-                onChange={(e) => setForm({ ...form, from_email: e.target.value })}
-                placeholder="noreply@example.com"
-                className="w-full px-3 py-2 bg-violet-50 border border-slate-200 rounded-lg text-sm text-slate-900 placeholder-slate-400 focus:outline-none focus:border-blue-300"
-              />
-            </div>
-            <div>
-              <label className="text-xs text-slate-600 block mb-1">발신자 이름 (from_name, 선택)</label>
-              <input
-                type="text"
-                value={form.from_name}
-                onChange={(e) => setForm({ ...form, from_name: e.target.value })}
-                placeholder="브랜드명 또는 회사명"
-                className="w-full px-3 py-2 bg-violet-50 border border-slate-200 rounded-lg text-sm text-slate-900 placeholder-slate-400 focus:outline-none focus:border-blue-300"
-              />
-            </div>
-          </div>
-        </div>
-
-        <div className="sticky bottom-0 bg-violet-50 border-t border-slate-200 px-6 py-3 flex items-center justify-between gap-2">
-          <div>
-            {isUpdate && onClear && (
-              <button onClick={onClear} className="px-3 py-2 text-xs text-rose-700 hover:bg-rose-50 rounded-lg flex items-center gap-1.5">
-                <Trash2 className="w-3.5 h-3.5" /> 영구 제거
-              </button>
-            )}
-          </div>
-          <div className="flex gap-2">
-            <button onClick={onClose} className="px-4 py-2 text-sm text-slate-600 hover:bg-white rounded-lg">취소</button>
-            <button
-              onClick={onSave}
-              disabled={saving}
-              className="px-5 py-2 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-40 text-white text-sm font-bold rounded-lg flex items-center gap-2"
-            >
-              {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />}
-              {saving ? '저장 중...' : isUpdate ? '수정 저장' : 'SMTP 등록'}
-            </button>
-          </div>
-        </div>
-      </div>
-    </div>
   );
 }
 

@@ -17,6 +17,10 @@
  *
  * 저장 = 기존 `audit_logs`(DDL 0). 작성 `ops_record_created` · 확인 `ops_record_confirmed` · 대상 = `ops_record` + 기록 id.
  *   ⛔ 실패를 삼키지 않는다 — `recordAuditLog`(실패 흡수)를 쓰지 않고 직접 넣는다. 대장 작성이 조용히 사라지면 기록이 아니다.
+ *
+ * ⛔ 무효 처리 (★2026-10-03 Harold — 작성자를 잘못 지정한 기록 · 오기 기록을 대장에서 걷어 낸다)
+ *   지우지 않는다. `ops_record_voided` 기록을 하나 더 쌓고(누가 · 언제 · 사유), 목록 · 확인 대기 수에서 뺀다.
+ *   대표 등급만 · **확인 전 기록만** · 사유 필수. 무효 처리한 기록은 확인 · 정정할 수 없다. 원래 기록은 그대로 남는다.
  */
 import crypto from 'crypto';
 import pool, { query } from '../config/database';
@@ -28,11 +32,14 @@ export const OPS_RECORD_KINDS: OpsRecordKind[] = ['log_review', 'firewall_change
 export const OPS_SYSTEMS: OpsSystem[] = ['hanjul', 'gateway', 'common'];
 export const OPS_ACTION_CREATED = 'ops_record_created';
 export const OPS_ACTION_CONFIRMED = 'ops_record_confirmed';
+export const OPS_ACTION_VOIDED = 'ops_record_voided';
 const TARGET_TYPE = 'ops_record';
+/** 한 번에 무효 처리할 수 있는 기록 수 */
+export const OPS_VOID_MAX = 100;
 /** 이 기능이 생긴 날 — 목록 조회를 이 날 이후로 좁혀 큰 감사 기록 표 전체를 훑지 않게 한다 */
 export const OPS_RECORDS_SINCE = '2026-10-01T00:00:00+09:00';
 
-const LIMITS = { title: 120, content: 4000, reason: 1000, followUp: 2000, evidence: 2000, comment: 500 };
+const LIMITS = { title: 120, content: 4000, reason: 1000, followUp: 2000, evidence: 2000, comment: 500, voidReason: 500 };
 
 /** 화면에 다시 보이는 월간 점검 자료의 기록 종류 — 4.3 점검 항목 */
 export const LOG_REVIEW_ACTIONS = [
@@ -192,9 +199,12 @@ export async function createOpsRecord(params: {
 }): Promise<{ id: string; createdAt: string }> {
   const { input, actor, req } = params;
   if (input.supersedes) {
+    // 무효 처리한 기록은 대장에서 걷어 낸 것이라 정정 대상이 될 수 없다
     const prev = await query(
-      `SELECT 1 FROM audit_logs WHERE action = $1 AND target_type = $2 AND target_id = $3::uuid AND created_at >= $4 LIMIT 1`,
-      [OPS_ACTION_CREATED, TARGET_TYPE, input.supersedes, OPS_RECORDS_SINCE]
+      `SELECT 1 FROM audit_logs c WHERE c.action = $1 AND c.target_type = $2 AND c.target_id = $3::uuid AND c.created_at >= $4
+          AND NOT EXISTS (SELECT 1 FROM audit_logs v WHERE v.action = $5 AND v.target_type = $2 AND v.target_id = c.target_id)
+        LIMIT 1`,
+      [OPS_ACTION_CREATED, TARGET_TYPE, input.supersedes, OPS_RECORDS_SINCE, OPS_ACTION_VOIDED]
     );
     if (prev.rows.length === 0) throw new OpsRecordError(400, '정정할 기록을 찾지 못했습니다.');
   }
@@ -250,6 +260,12 @@ export async function confirmOpsRecord(params: {
       [OPS_ACTION_CONFIRMED, TARGET_TYPE, recordId, OPS_RECORDS_SINCE]
     );
     if (done.rows.length > 0) throw new OpsRecordError(409, '이미 확인된 기록입니다.');
+    // 무효 처리와 같은 잠금 아래에서 본다 — 확인과 무효 처리가 엇갈려 둘 다 남지 않게
+    const voided = await client.query(
+      `SELECT 1 FROM audit_logs WHERE action = $1 AND target_type = $2 AND target_id = $3::uuid AND created_at >= $4 LIMIT 1`,
+      [OPS_ACTION_VOIDED, TARGET_TYPE, recordId, OPS_RECORDS_SINCE]
+    );
+    if (voided.rows.length > 0) throw new OpsRecordError(409, '무효 처리된 기록은 확인할 수 없습니다.');
     const ins = await client.query(
       `INSERT INTO audit_logs (user_id, action, target_type, target_id, details, ip_address, user_agent)
        VALUES ($1, $2, $3, $4::uuid, $5, $6, $7)
@@ -260,6 +276,76 @@ export async function confirmOpsRecord(params: {
     );
     await client.query('COMMIT');
     return { confirmedAt: new Date(ins.rows[0].created_at).toISOString() };
+  } catch (err) {
+    try { await client.query('ROLLBACK'); } catch { /* 아래에서 원래 오류를 던진다 */ }
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+
+/**
+ * 무효 처리 — 대표 등급만(라우트가 막는다) · 확인 전 기록만 · 사유 필수. 지우지 않고 무효 기록을 하나씩 더 쌓는다.
+ * 여러 건을 한 번에 받되 **전부 되거나 전부 안 된다**(한 건이라도 막히면 아무것도 남기지 않는다).
+ * 확인과 같은 잠금(기록 id)을 id 순서대로 잡은 뒤 판단한다 — 확인과 무효가 엇갈려 둘 다 남지 않게.
+ */
+export async function voidOpsRecords(params: {
+  recordIds: unknown;
+  actor: OpsActor;
+  reason: unknown;
+  req?: any;
+}): Promise<{ voided: number; voidedAt: string }> {
+  const { actor, req } = params;
+  const reason = clean(params.reason, LIMITS.voidReason);
+  if (!reason) throw new OpsRecordError(400, '무효 처리 사유를 적어 주세요.');
+  const rawIds = Array.isArray(params.recordIds) ? params.recordIds : [];
+  const ids: string[] = [];
+  for (const raw of rawIds) {
+    const id = canonicalRecordId(raw);
+    if (!id) throw new OpsRecordError(400, '무효 처리할 기록 번호가 올바르지 않습니다.');
+    if (!ids.includes(id)) ids.push(id);
+  }
+  if (ids.length === 0) throw new OpsRecordError(400, '무효 처리할 기록을 고르세요.');
+  if (ids.length > OPS_VOID_MAX) throw new OpsRecordError(400, `한 번에 ${OPS_VOID_MAX}건까지 무효 처리할 수 있습니다.`);
+  ids.sort();
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    for (const id of ids) {
+      await client.query(`SELECT pg_advisory_xact_lock(hashtext($1))`, [`ops_record:${id}`]);
+    }
+    let voidedAt = '';
+    for (const id of ids) {
+      const rec = await client.query(
+        `SELECT details->>'title' AS title FROM audit_logs
+          WHERE action = $1 AND target_type = $2 AND target_id = $3::uuid AND created_at >= $4 LIMIT 1`,
+        [OPS_ACTION_CREATED, TARGET_TYPE, id, OPS_RECORDS_SINCE]
+      );
+      if (rec.rows.length === 0) throw new OpsRecordError(404, `기록을 찾지 못했습니다(${id}).`);
+      const title = String(rec.rows[0].title || id);
+      const confirmed = await client.query(
+        `SELECT 1 FROM audit_logs WHERE action = $1 AND target_type = $2 AND target_id = $3::uuid AND created_at >= $4 LIMIT 1`,
+        [OPS_ACTION_CONFIRMED, TARGET_TYPE, id, OPS_RECORDS_SINCE]
+      );
+      if (confirmed.rows.length > 0) throw new OpsRecordError(409, `이미 확인된 기록은 무효 처리할 수 없습니다(${title}).`);
+      const already = await client.query(
+        `SELECT 1 FROM audit_logs WHERE action = $1 AND target_type = $2 AND target_id = $3::uuid AND created_at >= $4 LIMIT 1`,
+        [OPS_ACTION_VOIDED, TARGET_TYPE, id, OPS_RECORDS_SINCE]
+      );
+      if (already.rows.length > 0) throw new OpsRecordError(409, `이미 무효 처리된 기록입니다(${title}).`);
+      const ins = await client.query(
+        `INSERT INTO audit_logs (user_id, action, target_type, target_id, details, ip_address, user_agent)
+         VALUES ($1, $2, $3, $4::uuid, $5, $6, $7)
+         RETURNING created_at`,
+        [actor.id, OPS_ACTION_VOIDED, TARGET_TYPE, id,
+          JSON.stringify({ v: 1, recordId: id, voider: { id: actor.id, loginId: actor.loginId, name: actor.name }, reason }),
+          req?.ip || null, req?.headers?.['user-agent'] || '']
+      );
+      voidedAt = new Date(ins.rows[0].created_at).toISOString();
+    }
+    await client.query('COMMIT');
+    return { voided: ids.length, voidedAt };
   } catch (err) {
     try { await client.query('ROLLBACK'); } catch { /* 아래에서 원래 오류를 던진다 */ }
     throw err;
@@ -287,32 +373,44 @@ export interface OpsRecordRow {
   confirmedAt: string | null;
   confirmer: { loginId: string; name: string } | null;
   confirmComment: string | null;
+  voidedAt: string | null;
+  voider: { loginId: string; name: string } | null;
+  voidReason: string | null;
 }
 
-/** 대장 목록 — 최근 작성순 */
-export async function listOpsRecords(filter: { kind?: string | null; system?: string | null; limit?: number }): Promise<OpsRecordRow[]> {
+/** 대장 목록 — 최근 작성순 · 무효 처리한 기록은 기본으로 빼고, includeVoided 일 때만 함께 돌려준다 */
+export async function listOpsRecords(filter: { kind?: string | null; system?: string | null; limit?: number; includeVoided?: boolean }): Promise<OpsRecordRow[]> {
   const kind = filter.kind && OPS_RECORD_KINDS.includes(filter.kind as OpsRecordKind) ? filter.kind : null;
   const system = filter.system && OPS_SYSTEMS.includes(filter.system as OpsSystem) ? filter.system : null;
   const limit = Math.min(Math.max(Number(filter.limit) || 100, 1), 300);
+  const includeVoided = filter.includeVoided === true;
   const r = await query(
     `SELECT c.target_id AS id, c.created_at, c.details,
-            f.created_at AS confirmed_at, f.details AS confirm_details
+            f.created_at AS confirmed_at, f.details AS confirm_details,
+            v.created_at AS voided_at, v.details AS void_details
        FROM audit_logs c
        LEFT JOIN LATERAL (
          SELECT x.created_at, x.details FROM audit_logs x
           WHERE x.action = $2 AND x.target_type = $3 AND x.target_id = c.target_id AND x.created_at >= c.created_at
           ORDER BY x.created_at ASC LIMIT 1
        ) f ON true
+       LEFT JOIN LATERAL (
+         SELECT y.created_at, y.details FROM audit_logs y
+          WHERE y.action = $8 AND y.target_type = $3 AND y.target_id = c.target_id AND y.created_at >= c.created_at
+          ORDER BY y.created_at ASC LIMIT 1
+       ) v ON true
       WHERE c.action = $1 AND c.target_type = $3 AND c.created_at >= $4
         AND ($5::text IS NULL OR c.details->>'kind' = $5)
         AND ($6::text IS NULL OR c.details->>'system' = $6)
+        AND ($9::boolean OR v.created_at IS NULL)
       ORDER BY c.created_at DESC
       LIMIT $7`,
-    [OPS_ACTION_CREATED, OPS_ACTION_CONFIRMED, TARGET_TYPE, OPS_RECORDS_SINCE, kind, system, limit]
+    [OPS_ACTION_CREATED, OPS_ACTION_CONFIRMED, TARGET_TYPE, OPS_RECORDS_SINCE, kind, system, limit, OPS_ACTION_VOIDED, includeVoided]
   );
   return r.rows.map((row: any) => {
     const d = row.details || {};
     const cd = row.confirm_details || null;
+    const vd = row.void_details || null;
     return {
       id: String(row.id),
       createdAt: new Date(row.created_at).toISOString(),
@@ -332,6 +430,9 @@ export async function listOpsRecords(filter: { kind?: string | null; system?: st
       confirmedAt: row.confirmed_at ? new Date(row.confirmed_at).toISOString() : null,
       confirmer: cd?.confirmer ? { loginId: String(cd.confirmer.loginId || ''), name: String(cd.confirmer.name || '') } : null,
       confirmComment: cd?.comment ?? null,
+      voidedAt: row.voided_at ? new Date(row.voided_at).toISOString() : null,
+      voider: vd?.voider ? { loginId: String(vd.voider.loginId || ''), name: String(vd.voider.name || '') } : null,
+      voidReason: vd?.reason ?? null,
     };
   });
 }

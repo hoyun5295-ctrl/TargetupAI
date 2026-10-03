@@ -15,7 +15,7 @@
  */
 
 import pool, { mysqlBillingQuery, MYSQL_BILLING_POOL_LIMIT } from '../config/database';
-import { SUCCESS_CODES_SQL, PENDING_CODES_SQL, spamBilledResultSql, spamFailedResultSql } from './sms-result-map';
+import { SUCCESS_CODES_SQL, PENDING_CODES_SQL, spamBilledResultSql, spamFailedResultSql, ALIMTALK_FALLBACK_TYPE_WHEN_SQL } from './sms-result-map';
 import { getAllBulkSmsTables, getBitoSmsTables, getTestSmsTables, mergeLineTables, getInactiveLineGroupTables } from './sms-queue';
 import { queryPayAgentStoreBreakdown, type PayAgentStoreRow } from './pay-stats';
 import { loadBillingLedger, hasAgentMapping, type BillingLedger } from './billing-ledger';
@@ -57,13 +57,19 @@ const BRAND_SMSQ_CODE = BILLING_TYPES.find((t) => t.key === 'BRAND')?.smsqCode |
  *   ⛔ GROUP BY에도 이 식을 그대로 쓴다 — MySQL GROUP BY는 같은 이름의 원 컬럼을 별칭보다 먼저 찾아
  *      `GROUP BY msg_type`이면 F·FN이 한 그룹으로 합쳐진다.
  * 전제(2026-09-13 Harold 실측): `msg_type` 컬럼이 있는 smsdb 테이블 115개 전부 `k_etc_json` 보유.
+ *
+ * ★ 2026-10-03 알림톡(K) 행의 대체 성공 코드(7830·7831)는 그 문자 유형(S·L)으로 청구한다.
+ *   비토 라인은 대체 문자를 별도 행으로 남기지 않고 원래 K행 결과코드만 바꾼다(sms-result-map `KAKAO_FALLBACK_*` 주석).
+ *   이 식이 msg_type 만 보면 대체 LMS 가 알림톡 단가로 청구된다(크로커다일 9/29 접수). 문자 단가 청구 = 에이전트
+ *   대체분 KS·KL 별칭(billing-types `agentCodeAliases` · 0904 결정) · 옛 QTmsg 대체 L행과 같은 규칙.
+ *   청구 일자축·상세축이 같은 식 하나를 쓰므로 두 축 대조(diffBillingRowsVsDayData)는 그대로 성립한다.
  */
 export const BILLING_MSG_TYPE_SQL =
   `CASE WHEN msg_type = '${BRAND_SMSQ_CODE}' THEN `
   + `(CASE WHEN JSON_VALID(k_etc_json) = 1 THEN `
   + `(CASE WHEN JSON_UNQUOTE(JSON_EXTRACT(k_etc_json, '$.TARGETING')) IN (${BRAND_FRIEND_TARGETINGS.map((t) => `'${t}'`).join(', ')}) `
   + `THEN '${BRAND_SMSQ_CODE}' ELSE '${BRAND_NONFRIEND_SMSQ_CODE}' END) `
-  + `ELSE '${BRAND_NONFRIEND_SMSQ_CODE}' END) ELSE msg_type END`;
+  + `ELSE '${BRAND_NONFRIEND_SMSQ_CODE}' END) ${ALIMTALK_FALLBACK_TYPE_WHEN_SQL} ELSE msg_type END`;
 
 export interface UsageDayCounts { total: number; success: number; fail: number; pending: number }
 /** 일자(YYYY-MM-DD) → 유형키 → 카운트 */

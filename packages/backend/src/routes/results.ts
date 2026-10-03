@@ -13,7 +13,7 @@ import {
 } from '../utils/sms-queue';
 // ★ 2026-07-30 브랜드 SMSQ 합류(msg_type='F') — 채널 분기 판정은 CT 목록 하나만 쓴다
 import { BRAND_CAMPAIGN_CHANNELS } from '../utils/billing-types';
-import { STATUS_CODE_MAP, CARRIER_MAP, SUCCESS_CODES, PENDING_CODES, getStatusLabel, getStatusType, getCarrierLabel, getSendTypeLabel, getQueueRowStatus, getDisplayContents } from '../utils/sms-result-map';
+import { STATUS_CODE_MAP, CARRIER_MAP, SUCCESS_CODES, PENDING_CODES, getStatusLabel, getStatusType, getCarrierLabel, getSendTypeLabel, getQueueRowStatus, getDisplayContents, SUBSTITUTE_ROW_SQL } from '../utils/sms-result-map';
 import { DEFAULT_COSTS, getCompanyCosts, redis, CACHE_TTL } from '../config/defaults';
 import { buildDateRangeFilter, buildPeriodFilter, STAT_DATE_EXPR, STAT_STARTED_GUARD, aggregateSmsCountsByCampaign, aggregateSmsSendTimesByCampaign } from '../utils/stats-aggregation';
 import { computeDisplayCounts } from '../utils/sms-table-split';
@@ -629,7 +629,8 @@ router.get('/campaigns/:id', async (req: Request, res: Response) => {
       }
 
       // (2026-07-30 재구축) 옛 카카오 IMC 집계 폐기 — 브랜드 행도 위 SMSQ status_code/mob_company
-      //   집계에 포함된다. 대체발송 성공분은 k_oriseq>0 행으로 같은 집계에 잡힌다(알림톡과 동일 구조).
+      //   집계에 포함된다. 대체발송 성공분은 같은 집계에 잡힌다 — 옛 라인은 k_oriseq>0 별도 행, 비토 라인은 원래 K행의
+      //   결과코드 7830/7831(★2026-10-03 · 둘 다 SUCCESS_CODES).
 
       // ===== Redis 캐시 저장 (완료 캠페인: 24h / 진행중: 5min) =====
       try {
@@ -787,7 +788,7 @@ router.get('/campaigns/:id/messages', async (req: Request, res: Response) => {
 
       if (status === 'success') smsWhere += ` AND status_code IN (${SUCCESS_CODES.join(',')})`;
       else if (status === 'fail') smsWhere += ` AND status_code NOT IN (${[...SUCCESS_CODES, ...PENDING_CODES].join(',')})`;
-      else if (status === 'substitute') smsWhere += ` AND k_oriseq > 0 AND msg_type IN ('L', 'S')`;
+      else if (status === 'substitute') smsWhere += ` AND ${SUBSTITUTE_ROW_SQL}`;
 
       const smsFields = SMS_DETAIL_FIELDS;
 
@@ -878,7 +879,7 @@ router.get('/campaigns/:id/messages', async (req: Request, res: Response) => {
       }
       if (status === 'success') smsWhere += ` AND status_code IN (${SUCCESS_CODES.join(',')})`;
       else if (status === 'fail') smsWhere += ` AND status_code NOT IN (${[...SUCCESS_CODES, ...PENDING_CODES].join(',')})`;
-      else if (status === 'substitute') smsWhere += ` AND k_oriseq > 0 AND msg_type IN ('L', 'S')`;
+      else if (status === 'substitute') smsWhere += ` AND ${SUBSTITUTE_ROW_SQL}`;
 
       for (const t of msgTables) {
         if (logPattern.test(t)) continue; // LOG 테이블 스킵
@@ -909,7 +910,7 @@ router.get('/campaigns/:id/messages', async (req: Request, res: Response) => {
         status_type: rowStatus.type,
         // 라벨은 msg_type 축(getSendTypeLabel 'F'=브랜드메시지) 단일.
         carrier_label: rowStatus.type === 'scheduled' ? '-' : getCarrierLabel(m.mob_company),
-        send_type: getSendTypeLabel(m.msg_type, m.k_oriseq),
+        send_type: getSendTypeLabel(m.msg_type, m.k_oriseq, m.status_code),
       };
     });
 
@@ -998,7 +999,7 @@ router.get('/campaigns/:id/export', async (req: Request, res: Response) => {
     let smsStatusWhere = '';
     if (exportStatus === 'success') smsStatusWhere = ` AND status_code IN (${SUCCESS_CODES.join(',')})`;
     else if (exportStatus === 'fail') smsStatusWhere = ` AND status_code NOT IN (${[...SUCCESS_CODES, ...PENDING_CODES].join(',')})`;
-    else if (exportStatus === 'substitute') smsStatusWhere = ` AND k_oriseq > 0 AND msg_type IN ('L', 'S')`;
+    else if (exportStatus === 'substitute') smsStatusWhere = ` AND ${SUBSTITUTE_ROW_SQL}`;
 
     // ★ 알림톡(alimtalk)도 SMSQ_SEND msg_type='K' 경로라 SMS 분기에 포함 (messages 조회와 동일)
     // ★ 2026-07-30: 브랜드(kakao·kakao_brand)도 SMSQ(msg_type='F') 합류 — 옛 IMC 서브쿼리 폐기.
@@ -1051,7 +1052,7 @@ router.get('/campaigns/:id/export', async (req: Request, res: Response) => {
         // ★ 2026-07-30: 브랜드 행도 SMSQ 합류 — 라벨은 msg_type 축(getSendTypeLabel 'F'=브랜드메시지) 단일.
         // ★ 2026-06-13: 발송 요청 시각이 미래인 대기 행 = "발송 예약" (화면 상세와 동일 산출)
         const rowStatus = getQueueRowStatus(Number(m.status_code), !!Number(m.is_future));
-        const msgTypeDisplay = getSendTypeLabel(m.msg_type, m.k_oriseq);
+        const msgTypeDisplay = getSendTypeLabel(m.msg_type, m.k_oriseq, m.status_code);
         const statusDisplay = rowStatus.label;
         const carrierDisplay = rowStatus.type === 'scheduled' ? '-' : getCarrierLabel(m.mob_company);
 

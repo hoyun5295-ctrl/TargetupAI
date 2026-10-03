@@ -68,3 +68,69 @@ describe('블록 조립 창 표면 색', () => {
     expect(src).not.toContain('from-slate-950');
   });
 });
+
+/**
+ * ★ 2026-10-03 편집 화면 오른쪽 칸 글씨가 안 보인다(남지현 접수 · 모바일 DM·이메일 편집).
+ * make.css 의 편집기 변수 스코프가 9/30 밝은 작업대 전환 뒤에도 어두운 값(흰 글씨 · 남색 입력칸)으로 남아 있었다.
+ * 편집기 27종·FormControls 는 --dm-* 변수만 읽으므로 값의 원천인 스코프 한 곳을 고정한다.
+ * 기준 값 = dm-builder.css :root(블록 창 BlockEditModal 이 같은 편집기를 래퍼 없이 그 값으로 그려 정상이다).
+ */
+describe('만들기 수정 화면 편집기 변수 스코프 (make.css)', () => {
+  const makeCss = front('styles/make.css');
+  const rootCss = front('styles/dm-builder.css');
+  const block = (css: string, sel: string) => {
+    const at = css.indexOf(`${sel} {`);
+    expect(at, `${sel} 블록이 있어야 한다`).toBeGreaterThan(-1);
+    return css.slice(at, css.indexOf('}', at));
+  };
+  const vars = (body: string) => Object.fromEntries(
+    Array.from(body.matchAll(/(--dm-[a-z0-9-]+)\s*:\s*([^;]+);/g)).map((m) => [m[1], m[2].trim()]),
+  );
+  // 수집 단계에서 던지지 않도록 각 시험 안에서 읽는다(블록이 없으면 그 시험이 실패로 보인다)
+  const scopeVars = () => vars(block(makeCss, '.mk-editor'));
+  const rootVars = () => vars(block(rootCss, ':root'));
+
+  it('어두운 스코프 이름이 남지 않는다', () => {
+    expect(makeCss).not.toContain('mk-dark-editor');
+  });
+
+  it('neutral 0~1000 은 :root 값과 같다(흰 글씨 · 반투명 흰색 금지)', () => {
+    const scope = scopeVars(); const root = rootVars();
+    for (const k of ['0', '50', '100', '200', '300', '400', '500', '600', '700', '800', '900', '1000']) {
+      const name = `--dm-neutral-${k}`;
+      expect(scope[name], name).toBe(root[name]);
+    }
+    expect(makeCss.slice(makeCss.indexOf('.mk-editor {'), makeCss.indexOf('.mk-phone'))).not.toContain('rgba(255, 255, 255');
+  });
+
+  it('입력칸 바탕은 흰색이다(:root 의 --dm-bg = neutral-0)', () => {
+    const scope = scopeVars(); const root = rootVars();
+    expect(root['--dm-bg']).toBe('var(--dm-neutral-0)');
+    expect(scope['--dm-bg']).toBe(root['--dm-neutral-0']);
+  });
+
+  it('dm-builder.css 를 안 불러오는 화면(이메일 편집 · 결과 시트)에서도 편집기가 읽는 변수가 모두 정의된다', () => {
+    const scope = scopeVars(); const root = rootVars();
+    for (const name of ['--dm-primary', '--dm-primary-hover', '--dm-primary-light', '--dm-error', '--dm-font-mono', '--dm-shadow-md', '--dm-shadow-lg']) {
+      expect(scope[name], name).toBeTruthy();
+    }
+    expect(scope['--dm-error']).toBe(root['--dm-error']);
+    expect(scope['--dm-font-mono']).toBe(root['--dm-font-mono']);
+  });
+
+  it('브라우저 색 체계도 밝은 쪽이다', () => {
+    expect(block(makeCss, '.mk-editor')).toContain('color-scheme: light');
+    expect(makeCss).not.toContain('color-scheme: dark');
+  });
+
+  it('스크롤 막대는 밝은 바탕에서 보이는 색이다(사용처 전부 밝은 칸)', () => {
+    const thumb = makeCss.slice(makeCss.indexOf('.mk-scroll::-webkit-scrollbar-thumb'));
+    expect(thumb.slice(0, thumb.indexOf('}'))).not.toContain('rgba(255, 255, 255');
+  });
+
+  it('편집기를 그리는 세 곳이 밝은 스코프 안에서 그린다', () => {
+    expect(front('components/make/DmEditScreen.tsx')).toContain('<div className="mk-editor">');
+    expect(front('components/make/EmailEditScreen.tsx')).toContain('<div className="mk-editor"><SectionPropsEditor');
+    expect(front('components/make/BlockSheet.tsx')).toContain('<div className="mk-editor">');
+  });
+});

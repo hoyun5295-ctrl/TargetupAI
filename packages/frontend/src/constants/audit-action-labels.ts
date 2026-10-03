@@ -39,6 +39,7 @@ export const AUDIT_ACTION_LABEL: Record<string, string> = {
   // ★ 2026-10-03 운영 기록 대장(로그 점검 · 방화벽 변경 · 권한 점검) — utils/ops-records.ts
   ops_record_created: '운영 기록 작성',
   ops_record_confirmed: '운영 기록 확인',
+  ops_record_voided: '운영 기록 무효 처리',
   // ★ 2026-09-05 AI 영업 아웃리치(ceo 전용 · routes/sales-outreach.ts 성공 분기)
   'sales_outreach.enqueue': 'AI 영업 업체 등록',
   'sales_outreach.enqueue_bulk': 'AI 영업 일괄 등록',

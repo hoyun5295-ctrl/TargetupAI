@@ -7,6 +7,7 @@
  * ⛔ 화면 규율
  *  1. 작성 시각은 서버가 정한다 — 화면에 작성일 칸이 없다.
  *  2. 고치기 · 지우기 버튼이 없다. 정정은 「정정 기록 쓰기」로 새 기록을 남긴다.
+ *     ★1003 무효 처리 = 대표 등급만 · 확인 전 기록만 · 사유 필수. 지우지 않고 무효 기록을 쌓으며, 목록 · 확인 대기 수에서 뺀다(「무효 포함」으로만 보인다).
  *  3. 작성자는 자기 기록을 확인할 수 없다(버튼이 안 보이고 서버도 거절한다).
  *  4. 네이티브 dialog 를 쓰지 않는다. 톤 = 부모 화면(슈퍼관리자 라이트).
  */
@@ -35,6 +36,8 @@ const SYSTEM_LABEL: Record<System, string> = {
 interface Meta {
   canRead: boolean;
   canWrite: boolean;
+  /** 무효 처리 = 대표 등급만 */
+  canVoid?: boolean;
   me: { id: string; loginId: string; name: string } | null;
   currentMonth: string;
   /** 서버 시각 — 「지금」 기본값과 입력 상한의 기준 */
@@ -67,6 +70,9 @@ interface OpsRecord {
   confirmedAt: string | null;
   confirmer: { loginId: string; name: string } | null;
   confirmComment: string | null;
+  voidedAt?: string | null;
+  voider?: { loginId: string; name: string } | null;
+  voidReason?: string | null;
 }
 
 interface FormState {
@@ -187,6 +193,13 @@ export default function OpsRecordsTab() {
   const [confirmTarget, setConfirmTarget] = useState<OpsRecord | null>(null);
   const [confirmComment, setConfirmComment] = useState('');
   const [confirmError, setConfirmError] = useState<string | null>(null);
+  const [showVoided, setShowVoided] = useState(false);
+  const [voidOpen, setVoidOpen] = useState(false);
+  const [voidCandidates, setVoidCandidates] = useState<OpsRecord[]>([]);
+  const [voidSelected, setVoidSelected] = useState<string[]>([]);
+  const [voidReason, setVoidReason] = useState('');
+  const [voidError, setVoidError] = useState<string | null>(null);
+  const [voidBusy, setVoidBusy] = useState(false);
 
   const loadMeta = useCallback(async () => {
     try {
@@ -213,6 +226,7 @@ export default function OpsRecordsTab() {
       const params = new URLSearchParams({ limit: '200' });
       if (kindFilter !== 'all') params.set('kind', kindFilter);
       if (systemFilter !== 'all') params.set('system', systemFilter);
+      if (showVoided) params.set('includeVoided', '1');
       const r = await fetch(`/api/admin/ops-records?${params}`, { headers: authHeaders() });
       const d = await r.json();
       if (!r.ok) throw new Error(d?.error || '운영 기록을 불러오지 못했습니다.');
@@ -223,7 +237,7 @@ export default function OpsRecordsTab() {
     } finally {
       setLoading(false);
     }
-  }, [kindFilter, systemFilter]);
+  }, [kindFilter, systemFilter, showVoided]);
 
   useEffect(() => { loadMeta(); }, [loadMeta]);
   useEffect(() => { if (meta?.canRead) load(); }, [meta, load]);
@@ -305,11 +319,55 @@ export default function OpsRecordsTab() {
     }
   };
 
-  const counts = useMemo(() => ({
-    total: records.length,
-    pending: records.filter((r) => !r.confirmedAt).length,
-    anomaly: records.filter((r) => r.anomaly).length,
-  }), [records]);
+  // 무효 처리 대상 = 지금 대장의 확인 전 기록 전부(걸러보기와 상관없이 새로 받는다)
+  const openVoid = async () => {
+    setVoidError(null);
+    setVoidSelected([]);
+    setVoidReason('');
+    setVoidCandidates([]);
+    setVoidOpen(true);
+    try {
+      const r = await fetch('/api/admin/ops-records?limit=300', { headers: authHeaders() });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d?.error || '운영 기록을 불러오지 못했습니다.');
+      setVoidCandidates(((d.records || []) as OpsRecord[]).filter((x) => !x.confirmedAt && !x.voidedAt));
+    } catch (e: any) {
+      setVoidError(e?.message || '운영 기록을 불러오지 못했습니다.');
+    }
+  };
+
+  const toggleVoidSelect = (id: string) => {
+    setVoidSelected((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
+  };
+
+  const submitVoid = async () => {
+    if (voidSelected.length === 0 || !voidReason.trim()) return;
+    setVoidBusy(true);
+    setVoidError(null);
+    try {
+      const r = await fetch('/api/admin/ops-records/void', {
+        method: 'POST', headers: authHeaders(true), body: JSON.stringify({ ids: voidSelected, reason: voidReason }),
+      });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d?.error || '무효 처리를 하지 못했습니다.');
+      setVoidOpen(false);
+      setNotice(`${d.voided}건을 무효 처리했습니다. 기록은 남고 대장 목록에서 빠집니다.`);
+      await load();
+    } catch (e: any) {
+      setVoidError(e?.message || '무효 처리를 하지 못했습니다.');
+    } finally {
+      setVoidBusy(false);
+    }
+  };
+
+  const counts = useMemo(() => {
+    const live = records.filter((r) => !r.voidedAt);
+    return {
+      total: live.length,
+      pending: live.filter((r) => !r.confirmedAt).length,
+      anomaly: live.filter((r) => r.anomaly).length,
+    };
+  }, [records]);
 
   if (meta && !meta.canRead) {
     return (
@@ -330,9 +388,9 @@ export default function OpsRecordsTab() {
               정정은 새 기록으로 남기고, 다른 관리자가 확인해야 완료됩니다.
             </p>
           </div>
-          {meta?.canWrite && (
+          {(meta?.canWrite || meta?.canVoid) && (
             <div className="flex shrink-0 flex-wrap gap-2">
-              {(Object.keys(KIND_LABEL) as Kind[]).map((k) => (
+              {meta?.canWrite && (Object.keys(KIND_LABEL) as Kind[]).map((k) => (
                 <button
                   key={k}
                   type="button"
@@ -342,6 +400,15 @@ export default function OpsRecordsTab() {
                   + {KIND_LABEL[k]}
                 </button>
               ))}
+              {meta?.canVoid && (
+                <button
+                  type="button"
+                  onClick={openVoid}
+                  className="rounded-lg border border-gray-300 bg-white px-3 py-2 text-xs font-semibold text-gray-500 transition hover:border-rose-300 hover:text-rose-700"
+                >
+                  무효 처리
+                </button>
+              )}
             </div>
           )}
         </div>
@@ -367,6 +434,11 @@ export default function OpsRecordsTab() {
             value={systemFilter}
             onChange={setSystemFilter}
             options={[{ value: 'all', label: '모든 시스템' }, ...(Object.keys(SYSTEM_LABEL) as System[]).map((s) => ({ value: s, label: SYSTEM_LABEL[s] }))]}
+          />
+          <Segmented
+            value={showVoided ? 'with' : 'without'}
+            onChange={(v) => setShowVoided(v === 'with')}
+            options={[{ value: 'without', label: '무효 제외' }, { value: 'with', label: '무효 포함' }]}
           />
         </div>
       </div>
@@ -409,9 +481,9 @@ export default function OpsRecordsTab() {
                     r={r}
                     open={open}
                     onToggle={() => setExpanded(open ? null : r.id)}
-                    canConfirm={!!meta?.canWrite && !r.confirmedAt && !mine}
+                    canConfirm={!!meta?.canWrite && !r.confirmedAt && !r.voidedAt && !mine}
                     onConfirm={() => { setConfirmTarget(r); setConfirmComment(''); setConfirmError(null); }}
-                    canCorrect={!!meta?.canWrite}
+                    canCorrect={!!meta?.canWrite && !r.voidedAt}
                     onCorrect={() => openForm(r.kind, r)}
                   />
                 );
@@ -532,6 +604,66 @@ export default function OpsRecordsTab() {
           </div>
         </div>
       )}
+
+      {voidOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-4">
+          <div className="flex max-h-[calc(100vh-2rem)] w-full max-w-3xl flex-col overflow-hidden rounded-2xl bg-white shadow-2xl">
+            <div className="border-b border-gray-100 px-6 py-4">
+              <h3 className="text-base font-bold text-gray-900">기록 무효 처리</h3>
+              <p className="mt-1 text-xs leading-relaxed text-gray-500">
+                확인 전 기록만 고를 수 있습니다. 무효 처리한 기록은 지워지지 않고, 처리자 · 일시 · 사유와 함께 남은 채 대장 목록과 확인 대기 수에서 빠집니다.
+              </p>
+            </div>
+            <div className="min-h-0 flex-1 overflow-y-auto px-6 py-4">
+              {voidCandidates.length === 0 ? (
+                <p className="py-6 text-center text-sm text-gray-400">{voidError ? '' : '확인 전 기록이 없습니다.'}</p>
+              ) : (
+                <>
+                  <div className="mb-2 flex items-center justify-between text-xs text-gray-500">
+                    <span>확인 전 기록 {voidCandidates.length}건 · 고른 기록 {voidSelected.length}건</span>
+                    <button
+                      type="button"
+                      onClick={() => setVoidSelected(voidSelected.length === voidCandidates.length ? [] : voidCandidates.map((x) => x.id))}
+                      className="font-semibold text-gray-600 hover:text-gray-900"
+                    >
+                      {voidSelected.length === voidCandidates.length ? '모두 풀기' : '모두 고르기'}
+                    </button>
+                  </div>
+                  <ul className="divide-y divide-gray-100 rounded-lg border border-gray-200">
+                    {voidCandidates.map((x) => (
+                      <li key={x.id}>
+                        <label className="flex cursor-pointer items-start gap-3 px-3 py-2.5 text-sm hover:bg-gray-50">
+                          <input type="checkbox" className="mt-0.5" checked={voidSelected.includes(x.id)} onChange={() => toggleVoidSelect(x.id)} />
+                          <span className="min-w-0 flex-1">
+                            <span className="block truncate font-medium text-gray-800">{x.title}</span>
+                            <span className="block text-xs text-gray-500">
+                              작성 {fmtDateTime(x.createdAt)} · {x.recorder?.name || '-'} · {KIND_LABEL[x.kind] || x.kind} · {SYSTEM_LABEL[x.system] || x.system} · {x.kind === 'firewall_change' ? `변경 ${fmtDateTime(x.occurredAt)}` : fmtMonth(x.period)}
+                            </span>
+                          </span>
+                        </label>
+                      </li>
+                    ))}
+                  </ul>
+                </>
+              )}
+              <div className="mt-4">
+                <label className={labelCls}>무효 처리 사유</label>
+                <textarea className={`${inputCls} min-h-[64px]`} value={voidReason} maxLength={500}
+                  placeholder="작성자 지정 착오 · 담당자 이름으로 다시 작성"
+                  onChange={(e) => setVoidReason(e.target.value)} />
+              </div>
+              {voidError && <div className="mt-2 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{voidError}</div>}
+            </div>
+            <div className="flex justify-end gap-2 border-t border-gray-100 px-6 py-4">
+              <button type="button" onClick={() => setVoidOpen(false)} className="rounded-lg px-4 py-2 text-sm font-semibold text-gray-600 hover:bg-gray-100">취소</button>
+              <button type="button" onClick={submitVoid} disabled={voidBusy || voidSelected.length === 0 || !voidReason.trim()}
+                className="rounded-lg bg-rose-600 px-5 py-2 text-sm font-semibold text-white transition hover:bg-rose-700 disabled:opacity-50">
+                {voidBusy ? '처리하는 중' : `${voidSelected.length}건 무효 처리`}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -543,19 +675,22 @@ function FragmentRow({ r, open, onToggle, canConfirm, onConfirm, canCorrect, onC
   const target = r.kind === 'firewall_change' ? `변경 ${fmtDateTime(r.occurredAt)}` : fmtMonth(r.period);
   return (
     <>
-      <tr className="cursor-pointer align-top transition hover:bg-gray-50" onClick={onToggle}>
+      <tr className={`cursor-pointer align-top transition hover:bg-gray-50 ${r.voidedAt ? 'opacity-60' : ''}`} onClick={onToggle}>
         <td className="whitespace-nowrap px-4 py-3 tabular-nums text-gray-600">{fmtDateTime(r.createdAt)}</td>
         <td className="whitespace-nowrap px-4 py-3 font-medium text-gray-800">{KIND_LABEL[r.kind] || r.kind}</td>
         <td className="whitespace-nowrap px-4 py-3 text-gray-600">{SYSTEM_LABEL[r.system] || r.system}</td>
         <td className="whitespace-nowrap px-4 py-3 tabular-nums text-gray-600">{target}</td>
         <td className="px-4 py-3 text-gray-800">
+          {r.voidedAt && <span className="mr-1.5 rounded bg-rose-50 px-1.5 py-0.5 text-[11px] font-semibold text-rose-700">무효</span>}
           {r.anomaly && <span className="mr-1.5 rounded bg-amber-100 px-1.5 py-0.5 text-[11px] font-semibold text-amber-800">이상 있음</span>}
           {r.supersedes && <span className="mr-1.5 rounded bg-gray-100 px-1.5 py-0.5 text-[11px] font-semibold text-gray-600">정정</span>}
-          {r.title}
+          <span className={r.voidedAt ? 'line-through' : ''}>{r.title}</span>
         </td>
         <td className="whitespace-nowrap px-4 py-3 text-gray-600">{r.recorder?.name || '-'}</td>
         <td className="whitespace-nowrap px-4 py-3" onClick={(e) => e.stopPropagation()}>
-          {r.confirmedAt ? (
+          {r.voidedAt ? (
+            <span className="text-xs text-rose-700">무효 · {r.voider?.name} · {fmtDateTime(r.voidedAt)}</span>
+          ) : r.confirmedAt ? (
             <span className="text-xs text-emerald-700">{r.confirmer?.name} · {fmtDateTime(r.confirmedAt)}</span>
           ) : canConfirm ? (
             <button type="button" onClick={onConfirm} className="rounded-md bg-blue-600 px-2.5 py-1 text-xs font-semibold text-white hover:bg-blue-700">확인하기</button>
@@ -576,6 +711,7 @@ function FragmentRow({ r, open, onToggle, canConfirm, onConfirm, canCorrect, onC
               {r.evidence && (<><dt className="text-xs font-semibold text-gray-500">근거</dt><dd className="whitespace-pre-wrap text-gray-800">{r.evidence}</dd></>)}
               {r.summary && (<><dt className="text-xs font-semibold text-gray-500">점검 자료</dt><dd><SummaryTable summary={r.summary} /></dd></>)}
               {r.confirmComment && (<><dt className="text-xs font-semibold text-gray-500">확인 의견</dt><dd className="whitespace-pre-wrap text-gray-800">{r.confirmComment}</dd></>)}
+              {r.voidedAt && (<><dt className="text-xs font-semibold text-gray-500">무효 처리</dt><dd className="whitespace-pre-wrap text-gray-800">{r.voider?.name} · {fmtDateTime(r.voidedAt)}{r.voidReason ? `\n사유: ${r.voidReason}` : ''}</dd></>)}
               <dt className="text-xs font-semibold text-gray-500">기록 번호</dt>
               <dd className="font-mono text-xs text-gray-500">{r.id}{r.supersedes ? ` · 정정 대상 ${r.supersedes}` : ''}</dd>
             </dl>

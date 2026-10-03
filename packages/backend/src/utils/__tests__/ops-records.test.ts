@@ -25,8 +25,8 @@ vi.mock('../../config/database', () => {
 
 import pool, { query } from '../../config/database';
 import {
-  validateOpsRecord, currentKstMonth, createOpsRecord, confirmOpsRecord, listOpsRecords, loadOpsActor,
-  OpsRecordError, OPS_ACTION_CREATED, OPS_ACTION_CONFIRMED,
+  validateOpsRecord, currentKstMonth, createOpsRecord, confirmOpsRecord, listOpsRecords, loadOpsActor, voidOpsRecords,
+  OpsRecordError, OPS_ACTION_CREATED, OPS_ACTION_CONFIRMED, OPS_ACTION_VOIDED,
 } from '../ops-records';
 
 const q = query as unknown as ReturnType<typeof vi.fn>;
@@ -175,7 +175,7 @@ describe('작성', () => {
 });
 
 describe('확인 — 작성자 아닌 사람이 한 번만', () => {
-  function wire(opts: { recorderId?: string; exists?: boolean; confirmed?: boolean }) {
+  function wire(opts: { recorderId?: string; exists?: boolean; confirmed?: boolean; voided?: boolean }) {
     client.query.mockImplementation(async (sql: string, params: any[]) => {
       if (/^(BEGIN|COMMIT|ROLLBACK)$/.test(sql)) return { rows: [] };
       if (/pg_advisory_xact_lock/.test(sql)) return { rows: [] };
@@ -184,6 +184,7 @@ describe('확인 — 작성자 아닌 사람이 한 번만', () => {
         return { rows: opts.exists === false ? [] : [{ user_id: opts.recorderId, details: { recorder: { id: opts.recorderId } } }] };
       }
       if (/SELECT 1 FROM audit_logs/.test(sql)) {
+        if (params[0] === OPS_ACTION_VOIDED) return { rows: opts.voided ? [{ '?column?': 1 }] : [] };
         expect(params[0]).toBe(OPS_ACTION_CONFIRMED);
         return { rows: opts.confirmed ? [{ '?column?': 1 }] : [] };
       }
@@ -245,9 +246,121 @@ describe('확인 — 작성자 아닌 사람이 한 번만', () => {
     await expect(confirmOpsRecord({ recordId: REC_ID, actor: OTHER })).rejects.toThrow('찾지 못했습니다');
     await expect(confirmOpsRecord({ recordId: 'x', actor: OTHER })).rejects.toThrow('찾지 못했습니다');
   });
+
+  it('★1003 무효 처리된 기록은 확인하지 않는다(같은 잠금 아래에서 본다)', async () => {
+    wire({ recorderId: ACTOR.id, voided: true });
+    await expect(confirmOpsRecord({ recordId: REC_ID, actor: OTHER })).rejects.toThrow('무효 처리된 기록은 확인할 수 없습니다');
+    const sqls = client.query.mock.calls.map((c) => c[0]);
+    expect(sqls.some((s) => /INSERT/.test(s))).toBe(false);
+    expect(sqls).toContain('ROLLBACK');
+    const lockAt = sqls.findIndex((s) => /pg_advisory_xact_lock/.test(s));
+    const voidCheckAt = client.query.mock.calls.findIndex((c) => /SELECT 1 FROM audit_logs/.test(c[0]) && c[1][0] === OPS_ACTION_VOIDED);
+    expect(voidCheckAt).toBeGreaterThan(lockAt);
+  });
+});
+
+describe('★1003 무효 처리 — 지우지 않고 무효 기록을 쌓는다 · 확인 전 기록만 · 전부 되거나 전부 안 된다', () => {
+  const ID2 = 'dddddddd-dddd-4ddd-8ddd-dddddddddddd';
+  function wireVoid(opts: { missing?: string[]; confirmed?: string[]; voided?: string[] } = {}) {
+    client.query.mockImplementation(async (sql: string, params: any[]) => {
+      if (/^(BEGIN|COMMIT|ROLLBACK)$/.test(sql)) return { rows: [] };
+      if (/pg_advisory_xact_lock/.test(sql)) return { rows: [] };
+      if (/SELECT details->>'title' AS title FROM audit_logs/.test(sql)) {
+        expect(params[0]).toBe(OPS_ACTION_CREATED);
+        return { rows: (opts.missing || []).includes(params[2]) ? [] : [{ title: `기록 ${params[2].slice(0, 4)}` }] };
+      }
+      if (/SELECT 1 FROM audit_logs/.test(sql)) {
+        if (params[0] === OPS_ACTION_CONFIRMED) return { rows: (opts.confirmed || []).includes(params[2]) ? [{ x: 1 }] : [] };
+        if (params[0] === OPS_ACTION_VOIDED) return { rows: (opts.voided || []).includes(params[2]) ? [{ x: 1 }] : [] };
+      }
+      if (/INSERT INTO audit_logs/.test(sql)) return { rows: [{ created_at: '2026-10-03T09:00:00.000Z' }] };
+      throw new Error(`예상하지 못한 SQL: ${sql}`);
+    });
+  }
+  const inserts = () => client.query.mock.calls.filter((c) => /INSERT INTO audit_logs/.test(c[0]));
+
+  it('사유가 없거나 고른 기록이 없으면 DB 에 가지 않는다', async () => {
+    await expect(voidOpsRecords({ recordIds: [REC_ID], reason: ' ', actor: ACTOR })).rejects.toThrow('사유');
+    await expect(voidOpsRecords({ recordIds: [], reason: '착오', actor: ACTOR })).rejects.toThrow('고르세요');
+    await expect(voidOpsRecords({ recordIds: 'x', reason: '착오', actor: ACTOR })).rejects.toThrow('고르세요');
+    await expect(voidOpsRecords({ recordIds: ['not-a-uuid'], reason: '착오', actor: ACTOR })).rejects.toThrow('올바르지 않습니다');
+    expect(connect).not.toHaveBeenCalled();
+  });
+
+  it('여러 건 — 번호를 소문자로 접고 겹친 것은 하나로 · 정렬 순서로 전부 잠근 뒤 판단 · 건마다 무효 기록 하나', async () => {
+    wireVoid();
+    const done = await voidOpsRecords({ recordIds: [ID2, REC_ID.toUpperCase(), REC_ID], reason: '작성자 지정 착오', actor: ACTOR });
+    expect(done).toEqual({ voided: 2, voidedAt: '2026-10-03T09:00:00.000Z' });
+    const calls = client.query.mock.calls;
+    const locks = calls.filter((c) => /pg_advisory_xact_lock/.test(c[0])).map((c) => c[1][0]);
+    expect(locks).toEqual([`ops_record:${REC_ID}`, `ops_record:${ID2}`]);
+    const lastLockAt = calls.map((c) => c[0]).lastIndexOf(calls.filter((c) => /pg_advisory_xact_lock/.test(c[0])).pop()![0]);
+    const firstCheckAt = calls.findIndex((c) => /SELECT details->>'title'/.test(c[0]));
+    expect(firstCheckAt).toBeGreaterThan(lastLockAt);
+    const ins = inserts();
+    expect(ins).toHaveLength(2);
+    for (const c of ins) {
+      expect(c[1][1]).toBe(OPS_ACTION_VOIDED);
+      const d = JSON.parse(c[1][4]);
+      expect(d.voider).toEqual({ id: ACTOR.id, loginId: 'ceo', name: '유호윤' });
+      expect(d.reason).toBe('작성자 지정 착오');
+    }
+    expect(ins.map((c) => c[1][3])).toEqual([REC_ID, ID2]);
+    expect(calls.map((c) => c[0])).toContain('COMMIT');
+  });
+
+  it('확인된 기록이 하나라도 섞이면 아무것도 남기지 않는다', async () => {
+    wireVoid({ confirmed: [ID2] });
+    await expect(voidOpsRecords({ recordIds: [REC_ID, ID2], reason: '착오', actor: ACTOR })).rejects.toThrow('이미 확인된 기록은 무효 처리할 수 없습니다');
+    expect(client.query.mock.calls.map((c) => c[0])).toContain('ROLLBACK');
+    expect(client.query.mock.calls.map((c) => c[0])).not.toContain('COMMIT');
+    expect(client.release).toHaveBeenCalled();
+  });
+
+  it('이미 무효 · 없는 기록은 거절한다', async () => {
+    wireVoid({ voided: [REC_ID] });
+    await expect(voidOpsRecords({ recordIds: [REC_ID], reason: '착오', actor: ACTOR })).rejects.toThrow('이미 무효 처리된');
+    wireVoid({ missing: [REC_ID] });
+    await expect(voidOpsRecords({ recordIds: [REC_ID], reason: '착오', actor: ACTOR })).rejects.toThrow('찾지 못했습니다');
+    expect(inserts()).toHaveLength(0);
+  });
+
+  it('무효 처리한 기록은 정정 대상이 될 수 없다(정정 대상 조회가 무효 기록을 뺀다)', async () => {
+    q.mockImplementation(async (sql: string, params: any[]) => {
+      if (/SELECT 1 FROM audit_logs c/.test(sql)) {
+        expect(sql).toMatch(/NOT EXISTS \(SELECT 1 FROM audit_logs v WHERE v\.action = \$5/);
+        expect(params[4]).toBe(OPS_ACTION_VOIDED);
+        return { rows: [] };
+      }
+      throw new Error(`예상하지 못한 SQL: ${sql}`);
+    });
+    const input = validateOpsRecord({ kind: 'access_review', system: 'common', period: '2026-09', title: 't', content: 'c', supersedes: REC_ID }, NOW);
+    await expect(createOpsRecord({ input, actor: ACTOR })).rejects.toThrow('정정할 기록');
+  });
 });
 
 describe('목록 · 작성자 조회', () => {
+  it('★1003 무효 처리한 기록은 기본으로 빼고, includeVoided 일 때만 무효 정보와 함께 돌려준다', async () => {
+    const seen: any[] = [];
+    q.mockImplementation(async (sql: string, params: any[]) => {
+      seen.push(params);
+      expect(sql).toMatch(/\(\$9::boolean OR v\.created_at IS NULL\)/);
+      expect(params[7]).toBe(OPS_ACTION_VOIDED);
+      return {
+        rows: params[8] ? [{
+          id: REC_ID, created_at: '2026-10-03T07:01:02.000Z',
+          details: { kind: 'firewall_change', system: 'hanjul', title: 't', content: 'c', recorder: { id: ACTOR.id, loginId: 'ceo', name: '유호윤' } },
+          confirmed_at: null, confirm_details: null,
+          voided_at: '2026-10-03T09:00:00.000Z', void_details: { voider: { loginId: 'ceo', name: '유호윤' }, reason: '착오' },
+        }] : [],
+      };
+    });
+    expect(await listOpsRecords({})).toEqual([]);
+    const rows = await listOpsRecords({ includeVoided: true });
+    expect(seen.map((p) => p[8])).toEqual([false, true]);
+    expect(rows[0]).toMatchObject({ voidedAt: '2026-10-03T09:00:00.000Z', voider: { loginId: 'ceo', name: '유호윤' }, voidReason: '착오' });
+  });
+
   it('확인 여부를 붙여 돌려주고, 모르는 걸러보기 값은 무시한다', async () => {
     q.mockImplementation(async (_sql: string, params: any[]) => {
       expect(params[4]).toBeNull();
@@ -297,6 +410,9 @@ describe('배선', () => {
     expect(block("router.post('/', ")).toContain("canWrite(role, 'opsRecords')");
     expect(block("router.post('/:id/confirm'")).toContain("canWrite(role, 'opsRecords')");
     expect(block("router.get('/log-review-summary'")).toContain("canWrite(role, 'opsRecords')");
+    // ★1003 무효 처리 = 대표 등급만
+    expect(block("router.post('/void'")).toContain("if (role !== 'super') return res.status(403)");
+    expect(block("router.get('/meta'")).toContain("canVoid: role === 'super',");
     expect(readFileSync(join(SRC, 'app.ts'), 'utf8')).toContain("app.use('/api/admin/ops-records', adminOpsRecordsRoutes);");
   });
 
@@ -310,7 +426,8 @@ describe('배선', () => {
     const tab = readFileSync(resolve(SRC, '../../frontend/src/components/admin/OpsRecordsTab.tsx'), 'utf8');
     expect(tab).not.toMatch(/createdAt:\s*form/);
     expect(tab).not.toMatch(/method: '(PUT|PATCH|DELETE)'/);
-    expect(tab).toContain('canConfirm={!!meta?.canWrite && !r.confirmedAt && !mine}');
+    expect(tab).toContain('canConfirm={!!meta?.canWrite && !r.confirmedAt && !r.voidedAt && !mine}');
+    expect(tab).toContain('canCorrect={!!meta?.canWrite && !r.voidedAt}');
     expect(tab).not.toMatch(/\b(alert|confirm|prompt)\(/);
   });
 

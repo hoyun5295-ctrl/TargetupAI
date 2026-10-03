@@ -10,7 +10,8 @@ import { normalizeDmShortCode } from './dm-code';
 // ★ 2026-09-15 카탈로그 DM 판정(settings.catalog) — 목록 카드 뱃지 · 판정 한 곳(뷰어와 같은 함수)
 import { isCatalogEnabled } from './dm-viewer-catalog';
 import { publicImageUrl } from './dm-viewer-utils';
-import { EXCLUDE_PURGED_OUTREACH_DMS_SQL } from '../sales-outreach-dm-ownership';   // ★ 2026-10-01 파기된 AI 영업 DM 목록 숨김(판정 CT · 순환 없음)
+import { EXCLUDE_PURGED_OUTREACH_DMS_SQL } from '../sales-outreach-dm-ownership';
+import { hasDmTokenCampaignColumn, DM_TOKEN_CAMPAIGN_JOIN_SQL, DM_TOKEN_SEND_STATE_SQL, DM_TOKEN_SENT_AT_SQL } from './dm-recipient-token';   // ★ 2026-10-03 예약 발송 구분   // ★ 2026-10-01 파기된 AI 영업 DM 목록 숨김(판정 CT · 순환 없음)
 import {
   clampPageReached, clampTotalPages, clampDurationDelta, clampScrollPct,
   sanitizeSectionInteractions, mergeSectionInteractions,
@@ -510,6 +511,12 @@ export async function getDmList(
   //   판정 = sales-outreach-dm-ownership.ts). 호출부가 영업 회사일 때만 켜므로 다른 고객사 목록 SQL 은 글자 그대로다.
   const scopeSql = (ownerUserId ? ' AND created_by = $2' : '') + (opts.hidePurgedOutreach ? ` AND ${EXCLUDE_PURGED_OUTREACH_DMS_SQL}` : '');
   const params: any[] = ownerUserId ? [companyId, ownerUserId] : [companyId];
+  // ★ 2026-10-03 다가오는 예약 시각(목록 칩 「예약」 · make-flow dmChipStatus 가 읽는다 · 남지현 접수).
+  //   예약 = 발송결과 「예약내역」과 같은 기준(campaigns.status = 'scheduled'). 토큰에 캠페인 칸이 없으면(DDL 전) 비운다.
+  const scheduledSql = (await hasDmTokenCampaignColumn())
+    ? `(SELECT MIN(cp.scheduled_at) FROM dm_recipient_tokens t ${DM_TOKEN_CAMPAIGN_JOIN_SQL}
+         WHERE t.dm_id = dm_pages.id AND t.campaign_id IS NOT NULL AND cp.status = 'scheduled')`
+    : 'NULL::timestamptz';
   let result;
   try {
     result = await query(
@@ -520,6 +527,7 @@ export async function getDmList(
               COALESCE(jsonb_array_length(pages), 0) as page_count,
               pages->0 AS first_page,
               EXISTS (SELECT 1 FROM dm_recipient_tokens t WHERE t.dm_id = dm_pages.id) AS has_send_history,
+              ${scheduledSql} AS scheduled_at,
               created_at, updated_at
        FROM dm_pages WHERE company_id = $1${scopeSql}
        ORDER BY updated_at DESC`,
@@ -536,6 +544,7 @@ export async function getDmList(
               COALESCE(jsonb_array_length(pages), 0) as page_count,
               pages->0 AS first_page,
               false AS has_send_history,
+              NULL::timestamptz AS scheduled_at,
               created_at, updated_at
        FROM dm_pages WHERE company_id = $1${scopeSql}
        ORDER BY updated_at DESC`,
@@ -564,6 +573,7 @@ export async function getDmList(
       view_count: row.view_count,
       page_count: row.page_count,
       has_send_history: !!row.has_send_history,
+      scheduled_at: row.scheduled_at || null,
       section_summary: summary,
       created_at: row.created_at,
       updated_at: row.updated_at,
@@ -861,15 +871,26 @@ export interface DmViewTrackInput {
  */
 export async function getDmRecipientEngagementRows(dmId: string, companyId: string, customerId?: string, opts?: { limit?: number }) {
   const limit = Number.isFinite(Number(opts?.limit)) && Number(opts?.limit) > 0 ? Math.floor(Number(opts?.limit)) : null;
+  // ★ 2026-10-03 토큰마다 그 발송 캠페인의 상태·시각(남지현 접수 · 예약이 「보냄」·요청 시각으로 보였다).
+  //   send_state = 발송결과 「예약내역」과 같은 기준 · sent_at = 예약 시각 → 실제 발송 시각 → 발급 시각.
+  //   한 고객에게 토큰이 여럿이면 실제로 받은 토큰을 먼저 고른다(이미 받은 고객이 다시 예약에 들어가도 「받음」으로 남게).
+  //   토큰에 캠페인 칸이 없으면(DDL 전) 종전과 같다.
+  const linked = await hasDmTokenCampaignColumn();
+  const stateCols = linked
+    ? `${DM_TOKEN_SEND_STATE_SQL} AS send_state, ${DM_TOKEN_SENT_AT_SQL} AS sent_at`
+    : `'sent' AS send_state, t.created_at AS sent_at`;
+  const join = linked ? DM_TOKEN_CAMPAIGN_JOIN_SQL : '';
+  const order = linked ? `t.customer_id, (${DM_TOKEN_SEND_STATE_SQL}) = 'sent' DESC, t.created_at DESC` : 't.customer_id, t.created_at DESC';
   const r = await query(
     `SELECT DISTINCT ON (t.customer_id)
-            t.customer_id, c.name, c.phone, t.created_at AS sent_at,
+            t.customer_id, c.name, c.phone, ${stateCols},
             v.page_reached, v.total_pages, v.duration_seconds, v.max_scroll_pct,
             v.section_interactions, v.viewed_at, v.last_active_at,
             v.open_count, v.seen_anon_ids,
             EXISTS (SELECT 1 FROM dm_event_responses er WHERE er.campaign_id = t.dm_id AND er.customer_id = t.customer_id) AS responded
        FROM dm_recipient_tokens t
        JOIN customers c ON c.id = t.customer_id AND c.company_id = t.company_id
+       ${join}
        LEFT JOIN LATERAL (
          SELECT dv.page_reached, dv.total_pages, dv.duration_seconds, dv.max_scroll_pct,
                 dv.section_interactions, dv.viewed_at, dv.last_active_at,
@@ -881,11 +902,45 @@ export async function getDmRecipientEngagementRows(dmId: string, companyId: stri
        ) v ON true
       WHERE t.dm_id = $1::uuid AND t.company_id = $2::uuid
         AND ($3::uuid IS NULL OR t.customer_id = $3::uuid)
-      ORDER BY t.customer_id, t.created_at DESC
+      ORDER BY ${order}
       LIMIT $4::int`,
     [dmId, companyId, customerId || null, limit],
   );
   return r.rows;
+}
+
+/**
+ * ★ 2026-10-03 보낸 기록 = 발송(캠페인)마다 한 줄 · 시각·상태·사람 수(남지현 접수).
+ * 옛: 화면이 수신자 목록의 발급 시각을 분 단위로 묶었다(목록 상한 · UTC 글자 자르기로 9시간 어긋남).
+ * 토큰에 캠페인 칸이 없으면(DDL 전) 발급 시각을 분 단위로 묶는다(종전과 같은 묶음 · 시각은 그대로 timestamptz).
+ */
+export async function getDmSendBatches(dmId: string, companyId: string): Promise<Array<{ at: string; state: string; count: number }>> {
+  const linked = await hasDmTokenCampaignColumn();
+  const r = linked
+    ? await query(
+      // 묶음 = 캠페인 하나 · 캠페인을 모르는 옛 토큰은 발급 분 단위(종전 묶음) · 시각은 묶음 안 가장 이른 값
+      `SELECT MIN(${DM_TOKEN_SENT_AT_SQL}) AS at, ${DM_TOKEN_SEND_STATE_SQL} AS state, COUNT(DISTINCT t.customer_id)::int AS cnt
+         FROM dm_recipient_tokens t ${DM_TOKEN_CAMPAIGN_JOIN_SQL}
+        WHERE t.dm_id = $1::uuid AND t.company_id = $2::uuid
+        GROUP BY COALESCE(t.campaign_id::text, to_char(date_trunc('minute', t.created_at), 'YYYY-MM-DD HH24:MI')), 2
+        ORDER BY 1 DESC
+        LIMIT 100`,
+      [dmId, companyId],
+    )
+    : await query(
+      `SELECT date_trunc('minute', t.created_at) AS at, 'sent' AS state, COUNT(DISTINCT t.customer_id)::int AS cnt
+         FROM dm_recipient_tokens t
+        WHERE t.dm_id = $1::uuid AND t.company_id = $2::uuid
+        GROUP BY 1
+        ORDER BY 1 DESC
+        LIMIT 100`,
+      [dmId, companyId],
+    );
+  return r.rows.map((x: any) => ({
+    at: x.at instanceof Date ? x.at.toISOString() : String(x.at),
+    state: String(x.state || 'sent'),
+    count: Number(x.cnt) || 0,
+  }));
 }
 
 export async function trackDmView(input: DmViewTrackInput) {

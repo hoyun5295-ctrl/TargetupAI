@@ -2,13 +2,14 @@
  * 운영 기록 대장 라우트 (★2026-10-03 전송자격인증 3.1 ④ · 3.3 · 4.3) — 판정 · 저장은 `utils/ops-records.ts` 가 소유한다.
  *
  * 권한 = 슈퍼관리자 + 등급표 `opsRecords`(조회 = 전 등급 · 작성 · 확인 = 대표 · 지원팀장).
+ * 무효 처리 = 대표 등급(`super`)만(★2026-10-03 · 지우지 않고 무효 기록을 쌓는다 · 판정은 CT).
  */
 import { Request, Response, Router } from 'express';
 import { authenticate, requireSuperAdmin } from '../middlewares/auth';
 import { fetchAdminRole, canRead, canWrite } from '../utils/admin-role';
 import {
   OpsRecordError, validateOpsRecord, loadOpsActor, createOpsRecord, confirmOpsRecord, listOpsRecords,
-  buildHanjulLogReviewSummary, currentKstMonth,
+  buildHanjulLogReviewSummary, currentKstMonth, voidOpsRecords,
 } from '../utils/ops-records';
 
 const router = Router();
@@ -28,6 +29,7 @@ router.get('/meta', async (req: Request, res: Response) => {
     return res.json({
       canRead: canRead(role, 'opsRecords'),
       canWrite: canWrite(role, 'opsRecords'),
+      canVoid: role === 'super',
       me: me ? { id: me.id, loginId: me.loginId, name: me.name } : null,
       currentMonth: currentKstMonth(),
       // ★Codex 2R — 화면의 「지금」 기본값 · 입력 상한은 이 서버 시각으로 만든다(브라우저 시계가 빠르면 정상 입력이 거절된다)
@@ -46,6 +48,7 @@ router.get('/', async (req: Request, res: Response) => {
       kind: typeof req.query.kind === 'string' ? req.query.kind : null,
       system: typeof req.query.system === 'string' ? req.query.system : null,
       limit: Number(req.query.limit) || 100,
+      includeVoided: req.query.includeVoided === '1',
     });
     return res.json({ records });
   } catch (err) {
@@ -90,6 +93,20 @@ router.post('/:id/confirm', async (req: Request, res: Response) => {
     return res.json({ confirmedAt: done.confirmedAt });
   } catch (err) {
     return sendError(res, err, 'confirm');
+  }
+});
+
+/** 무효 처리 — 대표 등급만 · 확인 전 기록만 · 사유 필수 · 여러 건은 전부 되거나 전부 안 된다 */
+router.post('/void', async (req: Request, res: Response) => {
+  try {
+    const role = await fetchAdminRole(req.user?.userId);
+    if (role !== 'super') return res.status(403).json({ error: '무효 처리는 대표 등급만 할 수 있습니다.' });
+    const actor = await loadOpsActor(req.user?.userId);
+    if (!actor) return res.status(403).json({ error: '관리자 계정을 확인하지 못했습니다.' });
+    const done = await voidOpsRecords({ recordIds: req.body?.ids, reason: req.body?.reason, actor, req });
+    return res.json(done);
+  } catch (err) {
+    return sendError(res, err, 'void');
   }
 });
 

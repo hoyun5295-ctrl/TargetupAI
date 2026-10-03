@@ -149,3 +149,65 @@ export async function lookupDmShortLink(code: string): Promise<{ token: string; 
   const expired = !!row.expires_at && new Date(row.expires_at).getTime() <= Date.now();
   return { token: String(row.token), dmCode: String(row.dm_code), expired };
 }
+
+// ────────────── ★ 2026-10-03 토큰 ↔ 발송 캠페인 연결 ──────────────
+// 남지현 접수 「예약 발송인데 목록·상세가 '보냄' · 보낸 기록 시각이 예약 시각과 다르다」.
+// 토큰은 발송 요청 순간에 발급되는데 어느 발송 캠페인의 토큰인지 남기지 않아, DM 쪽은 예약 여부·예약 시각·취소를 몰랐다.
+// dm_recipient_tokens.campaign_id(uuid NULL) 로 잇는다. ⛔ DDL 은 배포 뒤에 실행한다 — 칸이 없으면 종전 동작(전부 「보냄」 · 발급 시각).
+
+let campaignColumn: boolean | null = null;
+let campaignColumnCheckedAt = 0;
+/** 없다고 본 판정은 1분만 믿는다 — 배포 뒤 DDL 을 실행하면 재기동 없이 1분 안에 켜진다. 있다고 본 판정은 계속 믿는다. */
+const CAMPAIGN_COLUMN_RECHECK_MS = 60_000;
+
+export async function hasDmTokenCampaignColumn(): Promise<boolean> {
+  if (campaignColumn === true) return true;
+  if (campaignColumn === false && Date.now() - campaignColumnCheckedAt < CAMPAIGN_COLUMN_RECHECK_MS) return false;
+  try {
+    const r = await query(
+      `SELECT 1 FROM information_schema.columns
+        WHERE table_schema = current_schema() AND table_name = 'dm_recipient_tokens' AND column_name = 'campaign_id'`,
+    );
+    campaignColumn = r.rows.length > 0;
+    campaignColumnCheckedAt = Date.now();
+    return campaignColumn;
+  } catch {
+    return false; // 확인 실패는 캐시하지 않는다(다음 호출이 다시 확인)
+  }
+}
+
+/** 테스트 전용 — 칸 판정 캐시를 비운다 */
+export function resetDmTokenCampaignColumnCacheForTest(): void {
+  campaignColumn = null;
+  campaignColumnCheckedAt = 0;
+}
+
+/**
+ * 이번 발송 요청에서 발급한 토큰을 그 발송 캠페인에 잇는다(아직 비어 있는 행만 · 같은 DM·회사만).
+ * 발송은 이미 접수됐으므로 실패해도 던지지 않는다 — 그 토큰은 종전처럼 「보냄」·발급 시각으로 보일 뿐이다.
+ */
+export async function attachDmTokensToCampaign(dmId: string, companyId: string, tokens: string[], campaignId: string): Promise<number> {
+  if (!Array.isArray(tokens) || tokens.length === 0 || !campaignId) return 0;
+  if (!(await hasDmTokenCampaignColumn())) return 0;
+  try {
+    const r = await query(
+      `UPDATE dm_recipient_tokens SET campaign_id = $4::uuid
+        WHERE dm_id = $1::uuid AND company_id = $2::uuid AND token = ANY($3::text[]) AND campaign_id IS NULL`,
+      [dmId, companyId, tokens, campaignId],
+    );
+    return r.rowCount || 0;
+  } catch (e: any) {
+    console.warn('[DM 토큰] 발송 캠페인 연결 실패(종전 표시로 남음):', e?.message);
+    return 0;
+  }
+}
+
+/** SQL 조각: 토큰 한 줄을 그 발송 캠페인에 붙인다(별칭 t = dm_recipient_tokens · cp = campaigns) */
+export const DM_TOKEN_CAMPAIGN_JOIN_SQL = 'LEFT JOIN campaigns cp ON cp.id = t.campaign_id AND cp.company_id = t.company_id';
+/**
+ * SQL 조각: 토큰 한 줄의 발송 상태 — 발송결과 「예약내역」(results.ts status = 'scheduled')과 같은 기준.
+ * 캠페인을 모르면(옛 토큰 · 칸 없음 · 정리된 캠페인) 종전대로 보낸 것으로 본다.
+ */
+export const DM_TOKEN_SEND_STATE_SQL = "CASE WHEN cp.status = 'scheduled' THEN 'scheduled' WHEN cp.status = 'cancelled' THEN 'cancelled' WHEN cp.status = 'failed' THEN 'failed' ELSE 'sent' END";
+/** SQL 조각: 토큰 한 줄의 보낸 시각 — 예약이면 예약 시각 · 아니면 실제 발송 시각 · 캠페인을 모르면 발급 시각 */
+export const DM_TOKEN_SENT_AT_SQL = 'COALESCE(cp.scheduled_at, cp.sent_at, t.created_at)';

@@ -13,16 +13,28 @@ import DmPublicLinkStatsPanel from '../dm/DmPublicLinkStatsPanel';
 import { StatusChip, fmtDate } from './HomeParts';
 import { MK_BTN_OUTLINE, MK_BTN_PRIMARY, MK_MODAL, MK_MODAL_BACKDROP } from '../../utils/make-ui';
 import { dmChipStatus, INTERACTION_SECTION_TYPES } from '../../utils/make-flow';
+import { formatKstMonthDayTime } from '../../utils/formatDate';
 
 export interface DmDetailItem {
   id: string; title: string; status?: string; short_code?: string | null; layout_mode?: string; catalog?: boolean;
   view_count?: number; has_send_history?: boolean; updated_at?: string; created_at?: string;
+  /** ★ 2026-10-03 다가오는 예약 시각(목록 API) — 상태 칩 「예약」 */
+  scheduled_at?: string | null;
   section_summary?: { types: string[]; cover?: string | null; count: number };
 }
 
+/** ★ 2026-10-03 보낸 기록 한 줄의 상태 표기(남지현 접수 · 예약이 「보냄」으로 보였다) — 상태 원천 = 서버 dm-recipient-token DM_TOKEN_SEND_STATE_SQL */
+const BATCH_STATE_LABEL: Record<string, { text: string; tone: string }> = {
+  scheduled: { text: '(예약)', tone: 'text-amber-700' },
+  cancelled: { text: '(예약 취소)', tone: 'text-slate-400' },
+  failed: { text: '(보내지 못함)', tone: 'text-rose-700' },
+};
+
 interface Track {
-  summary: { sent: number; viewed: number; reached50: number; completed: number; clicked: number; responded: number; purchased?: number };
-  recipients: Array<{ customerId: string; name: string | null; phone: string | null; sentAt: string | null; viewed: boolean; progressPct: number; clicks: number; responded: boolean }>;
+  summary: { sent: number; scheduled?: number; viewed: number; reached50: number; completed: number; clicked: number; responded: number; purchased?: number };
+  recipients: Array<{ customerId: string; name: string | null; phone: string | null; sendState?: string; sentAt: string | null; viewed: boolean; progressPct: number; clicks: number; responded: boolean }>;
+  /** ★ 2026-10-03 발송마다 한 줄(시각 = 예약 시각 → 실제 발송 시각 · 상태 · 사람 수) */
+  batches?: Array<{ at: string; state: string; count: number }>;
   recipientsTotal?: number; listTruncated?: boolean;
   segments?: { unviewed?: number };
   hourDistribution?: Array<{ hour: number; cnt: number }>;
@@ -95,15 +107,24 @@ export default function DmDetailModal({ dm, onClose, onEdit, onClone, onStop, on
   }, [tab, resp, dm.id]);
 
   const s = track?.summary;
-  const batches = useMemo(() => {
-    const m = new Map<string, number>();
+  // ★ 2026-10-03 보낸 기록 = 서버 묶음(발송마다 한 줄 · 남지현 접수). 옛 서버 응답이면 수신자 시각을 분 단위로 묶는다 —
+  //   시각 글자는 자르지 않는다(옛: 앞 16자로 잘라 끝의 Z 가 떨어지고 지역 시각으로 다시 읽어 9시간 이른 시각이 보였다).
+  const batches = useMemo<Array<{ at: string; state: string; count: number }>>(() => {
+    if (Array.isArray(track?.batches)) return track!.batches!;
+    const m = new Map<number, { at: string; count: number }>();
     for (const r of track?.recipients || []) {
       if (!r.sentAt) continue;
-      const k = r.sentAt.slice(0, 16);
-      m.set(k, (m.get(k) || 0) + 1);
+      const t = new Date(r.sentAt).getTime();
+      if (Number.isNaN(t)) continue;
+      const k = Math.floor(t / 60000);
+      const cur = m.get(k);
+      if (cur) cur.count += 1; else m.set(k, { at: r.sentAt, count: 1 });
     }
-    return Array.from(m.entries()).sort((a, b) => (a[0] < b[0] ? 1 : -1));
+    return Array.from(m.entries()).sort((a, b) => b[0] - a[0]).map(([, v]) => ({ ...v, state: 'sent' }));
   }, [track]);
+  const sentBatchCount = batches.filter((b) => b.state === 'sent').length;
+  const scheduledCount = s?.scheduled || 0;
+  const nextScheduledAt = batches.filter((b) => b.state === 'scheduled').map((b) => b.at).sort()[0] || null;
   const hours = useMemo(() => {
     const arr = Array.from({ length: 24 }, () => 0);
     for (const h of track?.hourDistribution || []) if (h.hour >= 0 && h.hour < 24) arr[h.hour] = h.cnt;
@@ -162,7 +183,11 @@ export default function DmDetailModal({ dm, onClose, onEdit, onClone, onStop, on
           <div className="flex items-start gap-3">
             <div className="min-w-0 flex-1">
               <div className="flex items-center gap-2"><h3 className="text-[19px] font-bold text-slate-900 truncate">{dm.title || '(제목 없음)'}</h3><StatusChip status={status} /></div>
-              <div className="text-[12px] text-slate-500 mt-1">{s && s.sent > 0 ? `개인화 문자 ${s.sent.toLocaleString()}명 · ${batches.length}번 보냄` : '개인화 문자로 보낸 기록이 없어요'}</div>
+              <div className="text-[12px] text-slate-500 mt-1">{s && s.sent > 0
+                ? `개인화 문자 ${s.sent.toLocaleString()}명 · ${sentBatchCount}번 보냄${scheduledCount > 0 ? ` · 예약 ${scheduledCount.toLocaleString()}명` : ''}`
+                : scheduledCount > 0
+                  ? `예약 ${scheduledCount.toLocaleString()}명${nextScheduledAt ? ` · ${formatKstMonthDayTime(nextScheduledAt)}에 보내요` : ''}`
+                  : '개인화 문자로 보낸 기록이 없어요'}</div>
             </div>
             <button type="button" onClick={onClose} className="p-1.5 rounded-lg text-slate-500 hover:text-slate-900 hover:bg-slate-100" aria-label="닫기"><X className="w-5 h-5" /></button>
           </div>
@@ -179,7 +204,9 @@ export default function DmDetailModal({ dm, onClose, onEdit, onClone, onStop, on
               : tab === 'perf' ? (
                 !s || s.sent === 0 ? (
                   <div className="space-y-3">
-                    <div className="text-[12.5px] text-slate-500">개인화 문자로 보낸 기록이 없어 공용 링크 열람만 보여 드려요.</div>
+                    <div className="text-[12.5px] text-slate-500">{scheduledCount > 0
+                      ? `예약한 문자가 ${nextScheduledAt ? `${formatKstMonthDayTime(nextScheduledAt)}에 ` : ''}나가면 성과가 쌓여요. 지금은 공용 링크 열람만 보여 드려요.`
+                      : '개인화 문자로 보낸 기록이 없어 공용 링크 열람만 보여 드려요.'}</div>
                     <DmPublicLinkStatsPanel dmId={dm.id} />
                   </div>
                 ) : (
@@ -222,9 +249,14 @@ export default function DmDetailModal({ dm, onClose, onEdit, onClone, onStop, on
               ) : tab === 'batches' ? (
                 batches.length === 0 ? <Empty text="개인화 문자로 보낸 기록이 없어요." /> : (
                   <div className="space-y-1.5">
-                    {batches.map(([k, n]) => (
-                      <div key={k} className="flex items-center gap-3 h-11 px-4 rounded-xl bg-white">
-                        <Send className="w-4 h-4 text-violet-700" /><span className="text-[13px] text-slate-700 flex-1">{new Date(k).toLocaleString('ko-KR', { month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</span><b className="text-[13px] text-slate-900">{n.toLocaleString()}명</b>
+                    {batches.map((b, i) => (
+                      <div key={`${b.at}-${b.state}-${i}`} className="flex items-center gap-3 h-11 px-4 rounded-xl bg-white">
+                        <Send className="w-4 h-4 text-violet-700" />
+                        <span className="text-[13px] text-slate-700 flex-1">
+                          {formatKstMonthDayTime(b.at)}
+                          {BATCH_STATE_LABEL[b.state] && <span className={`ml-1.5 text-[12px] font-semibold ${BATCH_STATE_LABEL[b.state].tone}`}>{BATCH_STATE_LABEL[b.state].text}</span>}
+                        </span>
+                        <b className="text-[13px] text-slate-900">{b.count.toLocaleString()}명</b>
                       </div>
                     ))}
                     {track?.listTruncated && <div className="text-[11.5px] text-amber-700">받은 사람이 많아 앞쪽 일부로 묶었어요. 전체는 [자세히 보기]에서 볼 수 있어요.</div>}
@@ -237,7 +269,7 @@ export default function DmDetailModal({ dm, onClose, onEdit, onClone, onStop, on
                     {track!.recipients.slice(0, 100).map((r) => (
                       <div key={r.customerId} className="grid grid-cols-[1fr_1fr_70px_70px_60px] gap-2 px-3 py-2 text-[12px] text-slate-700 border-t border-slate-100">
                         <span className="truncate">{maskName(r.name)}</span><span className="truncate">{maskPhone(r.phone)}</span>
-                        <span className={r.viewed ? 'text-emerald-700' : 'text-slate-400'}>{r.viewed ? '열람' : '안 봄'}</span>
+                        <span className={r.viewed ? 'text-emerald-700' : r.sendState === 'scheduled' ? 'text-amber-700' : 'text-slate-400'}>{r.viewed ? '열람' : r.sendState === 'scheduled' ? '예약' : r.sendState === 'cancelled' ? '예약 취소' : r.sendState === 'failed' ? '보내지 못함' : '안 봄'}</span>
                         <span>{r.viewed ? `${Math.round(r.progressPct)}%` : '-'}</span><span>{r.clicks || 0}</span>
                       </div>
                     ))}

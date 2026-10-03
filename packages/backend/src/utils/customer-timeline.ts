@@ -408,7 +408,7 @@ async function fetchSends(
     const isFuture = r._future === true || num(r._future) === 1;
     const st = getQueueRowStatus(num(r.status_code), isFuture);
     const camp = campaignMap.get(String(r.app_etc1 || ''));
-    const typeLabel = getSendTypeLabel(msgType, r.k_oriseq);
+    const typeLabel = getSendTypeLabel(msgType, r.k_oriseq, r.status_code);
     const carrier = getCarrierLabel(String(r.mob_company || ''));
     const sentAt = kstSqlToIso(r.mobsend_s);
 

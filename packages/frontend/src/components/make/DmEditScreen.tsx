@@ -225,7 +225,7 @@ function DmBlockPanel({ section }: { section: Section }) {
     <div>
       <PanelHead icon={<BlockIcon type={section.type} className="w-5 h-5" />} title={blockLabel(section)} sub={blockPanelSub(section.type)} />
       <PanelBlock title="내용" right={<button type="button" onClick={() => setOpenModal('ai-improve')} className="inline-flex items-center gap-1.5 h-7 px-2.5 rounded-lg text-[11.5px] font-semibold text-fuchsia-900 border border-fuchsia-300 bg-fuchsia-50 hover:bg-fuchsia-100"><Sparkles className="w-3.5 h-3.5" />다르게 쓰기</button>}>
-        <div className="mk-dark-editor">
+        <div className="mk-editor">
           <SectionPropsEditor key={section.id} section={section} onUpdate={(patch) => updateSectionProps(section.id, patch)} />
         </div>
       </PanelBlock>

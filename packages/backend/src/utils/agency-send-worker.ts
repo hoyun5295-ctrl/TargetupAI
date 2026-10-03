@@ -51,6 +51,7 @@ import { isMissingSchemaError } from './db-errors';
 import { createStageGuard } from './stage-guard';
 // ★2026-09-25 맞춤법 검사(테스트 문자 뒤·승인 안내 앞 · 흐름을 막지 않는다 · docs/2026-09-25-agency-spell-check-design.md §3-4)
 import { readAgencySpellCount, runAgencySpellAfterTest } from './agency-send-spell';
+import { withMmsImageNames } from './mms-image-util';
 
 const LOG = '[agency-send][worker]';
 const TICK_MS = 5 * 60 * 1000;
@@ -1162,7 +1163,8 @@ async function dispatchAttempt(
         adEnabled: !!row.is_ad,
         scheduled: true,
         scheduledAt: new Date(row.requested_at).toISOString(),
-        mmsImagePaths: images.length > 0 ? images : null,
+        // ★2026-10-03 원장의 원본 파일명을 묶어 넘긴다 — 결과·예약대기·캘린더 창이 캠페인 칸을 읽는다(임은지 접수 · 발송 배관은 경로만 읽어 무변경)
+        mmsImagePaths: images.length > 0 ? withMmsImageNames(images, row.mms_image_names) : null,
         dedupEnabled: true,
         unsubFilterEnabled: true,
       },

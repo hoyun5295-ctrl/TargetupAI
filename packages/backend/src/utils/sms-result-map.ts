@@ -224,8 +224,40 @@ export const SUCCESS_CODES_SQL = SUCCESS_CODES.join(', ');
 export const PENDING_CODES_SQL = PENDING_CODES.join(', ');
 
 /**
+ * ★ 2026-10-03 카카오 실패 → 문자 대체 성공의 두 모양 (서수란 접수 · 크로커다일 9/29 대체 LMS 가 알림톡으로 청구됨)
+ *   ① 옛 QTmsg 라인 = 대체 문자가 별도 행(L/S + k_oriseq = 원본 K행 seqno)
+ *   ② 비토 게이트웨이 라인(SMSQ_SEND_13~16) = 별도 행 없이 **원래 알림톡(K) 행**의 결과코드가 7830(SMS)·7831(LMS)
+ *      (bito-gateway engine/report.go parentFallbackReport · agent/poller isGatewayManagedFallbackReport 가 L행 적재를 건너뜀)
+ *   ②를 알림톡 성공으로 세면 통계는 대체분을 놓치고 정산은 알림톡 단가로 청구한다.
+ *   판정은 여기 하나가 소유한다(JS 판정 · SQL 조각이 같은 상수에서 나온다).
+ *   ⛔ 브랜드(F) 행은 이 판정에 넣지 않았다 — 같은 코드가 F행에도 실리는지 운영 실측 전이다(BUGS B-1003-1 추가 과제).
+ */
+export const KAKAO_FALLBACK_SMS_CODE = 7830;
+export const KAKAO_FALLBACK_LMS_CODE = 7831;
+
+/** 알림톡(K) 행이 문자로 대체 성공했으면 그 문자 유형('S'|'L'), 아니면 null */
+export function alimtalkFallbackMsgType(msgType: string, statusCode?: number | string | null): 'S' | 'L' | null {
+  if (msgType !== 'K' || statusCode == null || statusCode === '') return null;
+  const code = Number(statusCode);
+  if (code === KAKAO_FALLBACK_SMS_CODE) return 'S';
+  if (code === KAKAO_FALLBACK_LMS_CODE) return 'L';
+  return null;
+}
+
+/** SQL용: 청구 유형 식(CASE)에 끼우는 WHEN 절 — K행 대체 성공을 그 문자 유형으로 (alimtalkFallbackMsgType 과 같은 규칙) */
+export const ALIMTALK_FALLBACK_TYPE_WHEN_SQL =
+  `WHEN msg_type = 'K' AND status_code = ${KAKAO_FALLBACK_SMS_CODE} THEN 'S' `
+  + `WHEN msg_type = 'K' AND status_code = ${KAKAO_FALLBACK_LMS_CODE} THEN 'L'`;
+
+/** SQL용: 카카오 실패 대체발송 행 — ① 별도 문자 행 + ② K행 대체 성공 (발송결과·엑셀의 「대체발송」 필터) */
+export const SUBSTITUTE_ROW_SQL =
+  `((k_oriseq > 0 AND msg_type IN ('L', 'S')) `
+  + `OR (msg_type = 'K' AND status_code IN (${KAKAO_FALLBACK_SMS_CODE}, ${KAKAO_FALLBACK_LMS_CODE})))`;
+
+/**
  * 발송내역 행별 유형 라벨 (QTmsg SMSQ_SEND의 msg_type + k_oriseq 기반).
  * 발송내역 상세/엑셀에서 행마다 표시. 카카오 실패 후 LMS 대체발송을 별도 구분.
+ * - 'K' + 7830/7831(status_code)  → 카카오실패 대체발송(SMS/LMS) — 비토 라인 모양(★2026-10-03)
  * - 'K'                          → 알림톡
  * - 'L' + k_oriseq(원본 K행 seqno) → 카카오실패 대체발송
  * - 'L'                          → LMS
@@ -250,9 +282,12 @@ export function getDisplayContents(msgType: string, msgContents: any): string {
   return raw;
 }
 
-export function getSendTypeLabel(msgType: string, kOriseq?: number | string | null): string {
+export function getSendTypeLabel(msgType: string, kOriseq?: number | string | null, statusCode?: number | string | null): string {
   const ori = Number(kOriseq);
   const isSub = kOriseq != null && kOriseq !== '' && !Number.isNaN(ori) && ori > 0;
+  // ★ 2026-10-03 비토 라인 = K행 결과코드로 대체 성공(위 KAKAO_FALLBACK_* 주석)
+  const inRow = alimtalkFallbackMsgType(msgType, statusCode);
+  if (inRow) return inRow === 'L' ? '카카오실패 대체발송(LMS)' : '카카오실패 대체발송(SMS)';
   if (msgType === 'K') return '알림톡';
   if (msgType === 'F') return '브랜드메시지';   // ★ 2026-07-30 브랜드 SMSQ 합류(msg_type='F')
   if (msgType === 'L') return isSub ? '카카오실패 대체발송(LMS)' : 'LMS';
@@ -280,13 +315,16 @@ export function getCampaignChannelLabel(sendChannel: string | null | undefined, 
 
 /**
  * 발송 채널 분류 (집계 키) — getSendTypeLabel과 동일 규칙의 영문 키 버전.
- * 통계에서 알림톡(K)과 카카오실패 대체발송(L·k_oriseq>0)을 분리 집계할 때 사용.
+ * 통계에서 알림톡(K)과 카카오실패 대체발송(L·k_oriseq>0 · K+7830/7831)을 분리 집계할 때 사용.
  */
 export type SmsChannel = 'alimtalk' | 'brand' | 'substitute_lms' | 'substitute_sms' | 'lms' | 'sms' | 'mms' | 'other';
 
-export function classifyMsgChannel(msgType: string, kOriseq?: number | string | null): SmsChannel {
+export function classifyMsgChannel(msgType: string, kOriseq?: number | string | null, statusCode?: number | string | null): SmsChannel {
   const ori = Number(kOriseq);
   const isSub = kOriseq != null && kOriseq !== '' && !Number.isNaN(ori) && ori > 0;
+  // ★ 2026-10-03 비토 라인 = K행 결과코드로 대체 성공(위 KAKAO_FALLBACK_* 주석)
+  const inRow = alimtalkFallbackMsgType(msgType, statusCode);
+  if (inRow) return inRow === 'L' ? 'substitute_lms' : 'substitute_sms';
   if (msgType === 'K') return 'alimtalk';
   if (msgType === 'F') return 'brand';   // ★ 2026-07-30 브랜드 SMSQ 합류
   if (msgType === 'L') return isSub ? 'substitute_lms' : 'lms';  // 카카오 실패 → LMS 대체
@@ -309,7 +347,7 @@ export function tallySmsChannelCounts(
     alimtalk: init(), brand: init(), substitute_lms: init(), substitute_sms: init(), lms: init(), sms: init(), mms: init(), other: init(),
   };
   for (const r of rows) {
-    const ch = classifyMsgChannel(r.msg_type, r.k_oriseq);
+    const ch = classifyMsgChannel(r.msg_type, r.k_oriseq, r.status_code);
     const cnt = Number(r.cnt || 0);
     const code = Number(r.status_code);
     const b = out[ch];

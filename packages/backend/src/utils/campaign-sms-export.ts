@@ -12,7 +12,7 @@
 import { Response } from 'express';
 import { mysqlQuery } from '../config/database';
 import { getCampaignSmsTablesFor } from './sms-queue';
-import { SUCCESS_CODES, PENDING_CODES, getQueueRowStatus, getSendTypeLabel, getCarrierLabel, getDisplayContents } from './sms-result-map';
+import { SUCCESS_CODES, PENDING_CODES, getQueueRowStatus, getSendTypeLabel, getCarrierLabel, getDisplayContents, SUBSTITUTE_ROW_SQL } from './sms-result-map';
 import { BRAND_CAMPAIGN_CHANNELS } from './billing-types';
 
 // ★ B10: 엑셀 2컬럼(전송요청/발송) — 수신확인 제거. mobsend_time은 UTC 저장이라 +9h (D98).
@@ -65,7 +65,7 @@ export async function streamCampaignSmsCsv(res: Response, params: CampaignSmsCsv
   let smsStatusWhere = '';
   if (exportStatus === 'success') smsStatusWhere = ` AND status_code IN (${SUCCESS_CODES.join(',')})`;
   else if (exportStatus === 'fail') smsStatusWhere = ` AND status_code NOT IN (${[...SUCCESS_CODES, ...PENDING_CODES].join(',')})`;
-  else if (exportStatus === 'substitute') smsStatusWhere = ` AND k_oriseq > 0 AND msg_type IN ('L', 'S')`;
+  else if (exportStatus === 'substitute') smsStatusWhere = ` AND ${SUBSTITUTE_ROW_SQL}`;
 
   // ★ 알림톡(alimtalk)도 SMSQ_SEND msg_type='K' 경로라 SMS 분기에 포함
   // ★ 2026-07-30: 브랜드(kakao·kakao_brand)도 SMSQ(msg_type='F') 합류 — 옛 IMC 서브쿼리 폐기.
@@ -105,7 +105,7 @@ export async function streamCampaignSmsCsv(res: Response, params: CampaignSmsCsv
       // ★ 2026-07-30: 브랜드 행도 SMSQ 합류 — 라벨은 msg_type 축(getSendTypeLabel 'F'=브랜드메시지) 단일.
       // 발송 요청 시각이 미래인 대기 행 = "발송 예약" (화면 상세와 동일 산출)
       const rowStatus = getQueueRowStatus(Number(m.status_code), !!Number(m.is_future));
-      const msgTypeDisplay = getSendTypeLabel(m.msg_type, m.k_oriseq);
+      const msgTypeDisplay = getSendTypeLabel(m.msg_type, m.k_oriseq, m.status_code);
       const statusDisplay = rowStatus.label;
       const carrierDisplay = rowStatus.type === 'scheduled' ? '-' : getCarrierLabel(m.mob_company);
 

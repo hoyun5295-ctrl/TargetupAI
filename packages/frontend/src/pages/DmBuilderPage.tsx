@@ -105,6 +105,8 @@ type DmListItem = {
   page_count?: number;
   /** ★ 2026-07-02(3) 타겟 발송 이력 여부 — 카드 [발송 추적] 노출 */
   has_send_history?: boolean;
+  /** ★ 2026-10-03 다가오는 예약 시각(목록 API) — 칩 「예약」(make-flow dmChipStatus) · 남지현 접수 */
+  scheduled_at?: string | null;
   section_summary?: DmSectionSummary;
   updated_at?: string;
 };
@@ -567,6 +569,9 @@ export default function DmBuilderPage() {
       onConfirm: async () => {
         try {
           await api.delete(`/dm/${id}`);
+          // ★ 2026-10-03 목록 카드에서 초안을 지울 수 있게 되며(남지현 접수) — 방금 나온 조립 화면의 편집 상태·자동저장이 남아 있으면
+          //   지운 DM 에 저장을 시도한다(조립 화면 뒤로가기는 상태를 비우지 않는다). 같은 DM 이면 비운다.
+          if (useDmBuilderStore.getState().dmId === id) reset();
           setToast({ type: 'success', message: '삭제했어요.' });
           refreshList();
         } catch (err: any) {
@@ -1028,7 +1033,7 @@ export default function DmBuilderPage() {
         {/* ★ 2026-09-27 만들기 개편 — 내 DM = 요약 한 줄 + 상태 거름 칩 + 찾기·정렬 + 휴대폰 모양 카드칩(목업 마 ①) · 누르면 상세 창 · 초안 = 이어서 만들기 */}
         {(() => {
           const rows = list.map((d) => ({ d, st: dmChipStatus(d) }));
-          const cnt: Record<string, number> = { all: rows.length, draft: 0, sent: 0, stopped: 0 };
+          const cnt: Record<string, number> = { all: rows.length, draft: 0, scheduled: 0, sent: 0, stopped: 0 };
           rows.forEach(({ st }) => { cnt[st] = (cnt[st] || 0) + 1; });
           const q = listQuery.trim().toLowerCase();
           let shown = rows.filter(({ d, st }) => (listFilter === 'all' || st === listFilter) && (!q || (d.title || '').toLowerCase().includes(q)));
@@ -1041,10 +1046,12 @@ export default function DmBuilderPage() {
                 filters={[
                   { key: 'all' as const, label: '전체', count: cnt.all },
                   { key: 'draft' as const, label: '초안', count: cnt.draft || 0 },
+                  // ★ 2026-10-03 예약 발송 = 보냄과 따로(남지현 접수)
+                  { key: 'scheduled' as const, label: '예약', count: cnt.scheduled || 0 },
                   { key: 'sent' as const, label: '보냄', count: cnt.sent || 0 },
                   { key: 'stopped' as const, label: '중지', count: cnt.stopped || 0 },
                 ]}
-                filter={listFilter === 'scheduled' || listFilter === 'failed' ? 'all' : listFilter}
+                filter={listFilter === 'failed' ? 'all' : listFilter}
                 onFilter={(f) => { setListFilter(f); setListLimit(24); }}
                 query={listQuery}
                 onQuery={setListQuery}
@@ -1079,6 +1086,7 @@ export default function DmBuilderPage() {
                       metric={st !== 'draft' ? <Meter label={`열람 ${(d.view_count || 0).toLocaleString()}`} pct={null} /> : undefined}
                       onOpen={() => { if (st === 'draft') void handleEdit(d.id, d.layout_mode); else setDetail(d); }}
                       onContinue={() => { void handleEdit(d.id, d.layout_mode); }}
+                      onDelete={st === 'draft' ? () => { void handleDelete(d.id); } : undefined}
                     />
                   ))}
                 </div>

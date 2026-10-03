@@ -317,6 +317,22 @@ export function formatDateTimeShort(dateStr: string | null | undefined): string 
 }
 
 /**
+ * ★ 2026-10-03 「10월 3일 오전 09:00」 — 한국 시각(Asia/Seoul) · 월 이름 · 오전/오후 (DM 보낸 기록 · 남지현 접수).
+ * 옛 보낸 기록은 UTC 시각 글자를 앞 16자로 잘라(끝의 Z 가 떨어짐) 지역 시각으로 다시 읽어 9시간 이른 시각을 보였다.
+ * 시각 글자는 자르지 말고 통째로 넘긴다(오프셋 없는 글자는 safeParse 가 UTC 로 읽는다).
+ */
+export function formatKstMonthDayTime(dateStr: string | null | undefined): string {
+  if (!dateStr) return '-';
+  const d = safeParse(String(dateStr));
+  if (isNaN(d.getTime())) return String(dateStr);
+  return d.toLocaleString('ko-KR', {
+    timeZone: 'Asia/Seoul',
+    month: 'long', day: 'numeric',
+    hour: '2-digit', minute: '2-digit',
+  });
+}
+
+/**
  * KST(Asia/Seoul) 기준 오늘 날짜 YYYY-MM-DD 문자열.
  * date input value + 백엔드 buildDateRangeFilter(KST +09)와 같은 기준.
  * toISOString().slice(0,10)은 UTC라 KST 자정~오전 9시 사이 전일로 어긋나므로 사용 금지.

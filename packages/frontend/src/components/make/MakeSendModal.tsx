@@ -9,7 +9,6 @@
  * ⛔ native dialog 0 · 모델명 0 · 금액 하드코딩 0(서버 견적·단가 표 CT).
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
 import {
   X, Smartphone, Mail, Users, Type, Clock, Check, AlertCircle, Link2, Send, Loader2, Phone, Settings2, Copy, Sparkles,
 } from 'lucide-react';
@@ -19,6 +18,7 @@ import CreditConfirmModal from '../credit/CreditConfirmModal';
 import { DateTimeField, isoToLocalInput, localInputToIso } from '../DateTimeField';
 import TargetExtractModal, { type ExtractedTarget } from '../TargetExtractModal';
 import EmailRecipientsModal from '../email/EmailRecipientsModal';
+import SmtpConnectModal from '../email/SmtpConnectModal';
 import type { EmailCampaign } from '../email/email-campaign-types';
 import { hasUnsupportedSmsChars, SMS_CHARSET_BLOCK_MESSAGE } from '../../utils/smsSafeChars';
 import { CONFIRM_CREDIT_COSTS } from '../../constants/credit';
@@ -43,7 +43,7 @@ const localNextMorning = () => {
 type When = 'now' | 'scheduled' | 'recommend';
 
 export default function MakeSendModal({
-  open, onClose, channel: initialChannel, dm, email, beforeSend, makeOther, onSent, onOpenAdvancedDm,
+  open, onClose, channel: initialChannel, dm, email, beforeSend, makeOther, onSent, onOpenAdvancedDm, onSmtpChanged,
 }: {
   open: boolean;
   onClose: () => void;
@@ -57,6 +57,8 @@ export default function MakeSendModal({
   onSent?: (c: SendChannel) => void;
   /** 기존 DM 발송 창(자세히 설정) */
   onOpenAdvancedDm?: () => void;
+  /** 이메일 카드에서 회사 메일을 연결(저장)한 뒤 · 여는 화면이 연결 상태를 다시 읽는다(★2026-10-03) */
+  onSmtpChanged?: () => void;
 }) {
   const [active, setActive] = useState<SendChannel>(initialChannel);
   useEffect(() => { if (open) setActive(initialChannel); }, [open, initialChannel]);
@@ -73,7 +75,7 @@ export default function MakeSendModal({
         </div>
 
         {active === 'dm' && dm && <DmCard dm={dm} beforeSend={beforeSend} onSent={() => { onSent?.('dm'); onClose(); }} onOpenAdvanced={onOpenAdvancedDm} />}
-        {active === 'email' && email && <EmailCard email={email} beforeSend={beforeSend} onSent={() => { onSent?.('email'); onClose(); }} />}
+        {active === 'email' && email && <EmailCard email={email} beforeSend={beforeSend} onSent={() => { onSent?.('email'); onClose(); }} onSmtpChanged={onSmtpChanged} />}
         {((active === 'dm' && !dm) || (active === 'email' && !email)) && (
           <div className="rounded-2xl border border-slate-200 bg-white p-5 text-[13px] text-slate-500">먼저 저장된 초안이 있어야 보낼 수 있어요.</div>
         )}
@@ -435,11 +437,18 @@ function DmCard({ dm, beforeSend, onSent, onOpenAdvanced }: { dm: SendDm; before
 
 // ─────────────────────────────────────────── 이메일 카드 ───────────────────────────────────────────
 
-function EmailCard({ email, beforeSend, onSent }: { email: SendEmail; beforeSend?: (c: SendChannel) => Promise<boolean>; onSent: () => void }) {
+function EmailCard({ email, beforeSend, onSent, onSmtpChanged }: { email: SendEmail; beforeSend?: (c: SendChannel) => Promise<boolean>; onSent: () => void; onSmtpChanged?: () => void }) {
   const toast = useToast();
-  const navigate = useNavigate();
   const [ready, setReady] = useState(false);
-  const [smtp, setSmtp] = useState<{ ok: boolean; from: string } | null>(null);
+  // ★ 2026-10-03 연결 판정 = 발송 관문과 같은 GET /api/email/status(담당자도 읽는다 · 관리자 전용 /smtp-config 는 담당자에게 403 이라
+  //   연결된 회사도 「연결 필요」로 막혔다) · canManage = 연결 창을 열 수 있는 관리자 여부(남지현 접수)
+  const [smtp, setSmtp] = useState<{ ok: boolean; from: string; canManage: boolean } | null>(null);
+  const [smtpOpen, setSmtpOpen] = useState(false);
+  const loadSmtp = useCallback(async () => {
+    const r = await fetch('/api/email/status', { headers: authGet() });
+    const d = await r.json().catch(() => ({}));
+    setSmtp({ ok: r.ok && !!d?.smtp_configured, from: String(d?.from_email || ''), canManage: d?.can_manage === true });
+  }, []);
   const [balance, setBalance] = useState<{ total: number; enabled: boolean } | null>(null);
   const [allTotal, setAllTotal] = useState<number | null>(null);
   const [picked, setPicked] = useState<{ payload: any; total: number } | null>(null);
@@ -462,11 +471,7 @@ function EmailCard({ email, beforeSend, onSent }: { email: SendEmail; beforeSend
     (async () => {
       if (beforeRef.current && !(await beforeRef.current('email'))) { if (alive) { setBarrierFailed(true); setBlockMsg('저장하지 못해 보낼 수 없어요. 잠시 뒤 다시 열어 주세요.'); } return; }
       await Promise.allSettled([
-        (async () => {
-          const r = await fetch('/api/email/smtp-config', { headers: authGet() });
-          const d = await r.json().catch(() => ({}));
-          if (alive) setSmtp({ ok: !!d?.config?.isConfigured, from: String(d?.config?.fromEmail || '') });
-        })(),
+        (async () => { if (alive) await loadSmtp(); })(),
         (async () => {
           const r = await fetch('/api/companies/my-credit', { headers: authGet() });
           const d = await r.json().catch(() => ({}));
@@ -492,7 +497,7 @@ function EmailCard({ email, beforeSend, onSent }: { email: SendEmail; beforeSend
   }, [picked, when, scheduledAt]);
 
   const problem: string | null = (barrierFailed ? '저장하지 못해 보낼 수 없어요. 잠시 뒤 다시 열어 주세요.' : null)
-    || (smtp && !smtp.ok ? '회사 메일(발신 설정)을 먼저 연결해 주세요.' : null)
+    || (smtp && !smtp.ok ? (smtp.canManage ? '회사 메일(발신 설정)을 먼저 연결해 주세요.' : '회사 메일이 아직 연결되지 않았어요. 회사 관리자에게 연결을 요청해 주세요.') : null)
     || (email.hasPlaceholder ? '직접 채워야 하는 자리가 남아 있어요. 수정 화면에서 채워 주세요.' : null)
     || (ready && total === 0 ? '받는 사람이 0명이에요.' : null)
     || (!picked && when === 'scheduled' && !scheduledAt ? '보낼 시각을 골라 주세요.' : null);
@@ -566,7 +571,9 @@ function EmailCard({ email, beforeSend, onSent }: { email: SendEmail; beforeSend
         {smtp === null ? <Loader2 className="w-4 h-4 animate-spin text-slate-500" /> : smtp.ok ? (
           <span className="inline-flex items-center gap-1.5 text-[13px] text-emerald-800"><Check className="w-4 h-4 text-emerald-600" />{smtp.from}</span>
         ) : (
-          <button type="button" onClick={() => navigate('/email-campaigns?smtp=1')} className={MK_BTN_OUTLINE}>회사 메일 연결하기</button>
+          smtp.canManage
+            ? <button type="button" onClick={() => setSmtpOpen(true)} className={MK_BTN_OUTLINE}>회사 메일 연결하기</button>
+            : <span className="text-[12.5px] text-slate-600">회사 관리자에게 회사 메일 연결을 요청해 주세요</span>
         )}
       </Row>
       {!picked && (
@@ -633,6 +640,11 @@ function EmailCard({ email, beforeSend, onSent }: { email: SendEmail; beforeSend
           onToast={(m, ty) => { const k = ty || 'info'; toast[k](m); }}
         />
       )}
+      <SmtpConnectModal
+        open={smtpOpen}
+        onClose={() => setSmtpOpen(false)}
+        onSaved={() => { setBlockMsg(null); void loadSmtp(); onSmtpChanged?.(); }}
+      />
       <ConfirmModal state={confirm} onClose={() => setConfirm(null)} />
       <CreditConfirmModal
         open={feeOpen}

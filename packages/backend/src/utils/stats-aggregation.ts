@@ -424,7 +424,7 @@ export async function aggregateSmsChannelSplitByCampaign(
       if (!rawByCampaign.has(cid)) rawByCampaign.set(cid, []);
       rawByCampaign.get(cid)!.push({
         msg_type: String(r.msg_type),
-        k_oriseq: Number(r.is_sub) === 1 ? 1 : null,  // tallySmsChannelCounts는 k_oriseq>0 여부만 봄
+        k_oriseq: Number(r.is_sub) === 1 ? 1 : null,  // 옛 대체 행 = k_oriseq>0 여부 · 비토 대체 = K+7830/7831(status_code로 판정 · ★2026-10-03)
         status_code: Number(r.status_code),
         cnt: Number(r.cnt || 0),
       });

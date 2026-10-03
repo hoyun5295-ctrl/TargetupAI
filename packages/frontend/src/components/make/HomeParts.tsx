@@ -6,7 +6,7 @@
  * 카드칩 숫자는 저장값만(열람 수 · 오픈/클릭 = 서버 집계) — 화면이 지어내는 비율 0.
  */
 import { useState, type ReactNode } from 'react';
-import { Search } from 'lucide-react';
+import { Search, Trash2 } from 'lucide-react';
 import { CHIP_STATUS_LABEL, type ChipStatus } from '../../utils/make-flow';
 import ZoneSection from '../zone/ZoneSection';
 import ZoneSegmented from '../zone/ZoneSegmented';
@@ -55,13 +55,14 @@ export function StatusChip({ status, className = '' }: { status: ChipStatus; cla
   );
 }
 
-/** DM 카드칩(휴대폰 모양 표지) */
-export function DmChip({ cover, fallback, status, catalog, title, meta, metric, onOpen, onContinue }: {
-  cover: string | null; fallback: ReactNode; status: ChipStatus; catalog?: boolean; title: string; meta: string; metric?: ReactNode; onOpen: () => void; onContinue?: () => void;
+/** DM 카드칩(휴대폰 모양 표지) · onDelete = 초안 전용 삭제(★2026-10-03 남지현 접수 · 초안은 상세 창이 안 열려 지울 길이 없었다) */
+export function DmChip({ cover, fallback, status, catalog, title, meta, metric, onOpen, onContinue, onDelete }: {
+  cover: string | null; fallback: ReactNode; status: ChipStatus; catalog?: boolean; title: string; meta: string; metric?: ReactNode; onOpen: () => void; onContinue?: () => void; onDelete?: () => void;
 }) {
   const [hover, setHover] = useState(false);
+  const deletable = status === 'draft' && onDelete;
   return (
-    <div onMouseEnter={() => setHover(true)} onMouseLeave={() => setHover(false)} className="group rounded-2xl border border-slate-200 bg-white overflow-hidden hover:border-violet-300 transition-colors">
+    <div onMouseEnter={() => setHover(true)} onMouseLeave={() => setHover(false)} className="group relative rounded-2xl border border-slate-200 bg-white overflow-hidden hover:border-violet-300 transition-colors">
       <button type="button" onClick={onOpen} className="block w-full text-left" aria-label={`${title} 열기`}>
         <div className="relative aspect-[3/4] bg-white overflow-hidden">
           {cover ? <img src={cover} alt="" className="w-full h-full object-cover" loading="lazy" /> : <div className="w-full h-full flex items-center justify-center">{fallback}</div>}
@@ -73,12 +74,24 @@ export function DmChip({ cover, fallback, status, catalog, title, meta, metric, 
             </span>
           )}
         </div>
-        <div className="px-3.5 py-3 min-h-[86px]">
+        <div className={`px-3.5 py-3 min-h-[86px]${deletable ? ' pr-12' : ''}`}>
           <b className="block text-[13.5px] text-slate-900 truncate">{title}</b>
           <span className="block text-[11.5px] text-slate-400 mt-0.5 truncate">{meta}</span>
           {metric && <div className="mt-2">{metric}</div>}
         </div>
       </button>
+      {/* 카드 버튼 안에 넣지 않는다(형제 버튼) — 안에 두면 키보드·Enter 가 편집기 열기로 샌다 · 휴대폰 폭은 늘 보인다 */}
+      {status === 'draft' && onDelete && (
+        <button
+          type="button"
+          onClick={onDelete}
+          aria-label="초안 삭제"
+          title="초안 삭제"
+          className="absolute right-2 bottom-2.5 h-9 w-9 inline-flex items-center justify-center rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 focus-visible:opacity-100 transition-opacity md:opacity-0 md:group-hover:opacity-100 md:group-focus-within:opacity-100"
+        >
+          <Trash2 className="w-4 h-4" />
+        </button>
+      )}
     </div>
   );
 }

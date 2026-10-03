@@ -18,7 +18,7 @@ import { query } from '../config/database';
 import { authenticate } from '../middlewares/auth';
 import {
   createDm, updateDm, deleteDm, getDmList, getDmDetail, getDmByCode, getDmTrackTargetByCode, cloneDm,
-  publishDm, trackDmView, getDmStats, getDmRecipientEngagementRows,
+  publishDm, trackDmView, getDmStats, getDmRecipientEngagementRows, getDmSendBatches,
   saveDmVersion, listDmVersions, restoreDmVersion, setApprovalStatus, buildDmSnapshot,
   extractFlatSectionsFromDm, extractPagesFromDm, extractDmCopyText,
   stopDm, resumeDm, isDmStopped, isDmStoppedByCode, DM_TRANSITION_BLOCK_MESSAGES,
@@ -49,7 +49,7 @@ import { getCreditCost } from '../utils/ai-credit-calc';
 import { runInCreditBundle } from '../utils/ai-credit-context';
 import type { Section } from '../utils/dm/dm-section-registry';
 import { selectSampleCustomers, selectSampleCustomerByKey, type SampleCustomerKey } from '../utils/dm/dm-sample-customer';
-import { lookupDmRecipientToken, issueDmRecipientTokensBulk, lookupDmShortLink } from '../utils/dm/dm-recipient-token';
+import { lookupDmRecipientToken, issueDmRecipientTokensBulk, lookupDmShortLink, attachDmTokensToCampaign } from '../utils/dm/dm-recipient-token';
 // ★ 2026-07-10 고객사 자체 URL 단축(hlj.kr) — 박성용 신기능(도메인 평판 보호 · 2026-09-16 20크레딧)
 import {
   createCustomShortLink, lookupCustomShortLink, recordCustomShortLinkClick,
@@ -1572,6 +1572,10 @@ dmRouter.post('/:id/send-to-target', requireDmAccess, async (req: any, res: any)
       throw e;
     }
 
+    // ★ 2026-10-03 이번 토큰을 발송 캠페인에 잇는다 — DM 상세·목록이 예약·취소·실제 발송 시각을 안다(남지현 접수).
+    //   발송은 이미 접수됐으므로 연결 실패는 던지지 않는다(종전 표시로 남음) · 토큰 칸이 없으면(DDL 전) 아무것도 안 한다.
+    await attachDmTokensToCampaign(dm.id, companyId, tokenPairs.map((p) => p.token), campaignId);
+
     // ★ 2026-07-03 Gap5 Layer2: 고객별 발송 카운터 (예측 분모 전용, fire-and-forget — 발송·돈 무영향, campaignRef 멱등)
     void recordCustomerSends({
       companyId,
@@ -1644,6 +1648,8 @@ dmRouter.get('/:id/recipients-tracking', requireDmAccess, async (req: any, res: 
         customerId: row.customer_id,
         name: row.name || null,
         phone: row.phone || null,
+        // ★ 2026-10-03 예약·취소·실패와 실제 발송을 가른다(dm-recipient-token DM_TOKEN_SEND_STATE_SQL) · sentAt = 예약 시각 → 실제 발송 시각 → 발급 시각
+        sendState: row.send_state || 'sent',
         sentAt: row.sent_at,
         viewed,
         pageReached,
@@ -1676,7 +1682,9 @@ dmRouter.get('/:id/recipients-tracking', requireDmAccess, async (req: any, res: 
     const wantFull = String(req.query.full || '') === '1';
     const listTruncated = !wantFull && recipients.length > DM_TRACK_LIST_CAP;
     const summary = {
-      sent: recipients.length,
+      // ★ 2026-10-03 보냄 = 실제로 받은 사람(예약 대기·취소·실패 제외) · 예약 = 아직 안 나간 사람(남지현 접수 「예약인데 보냄 167」)
+      sent: recipients.filter((x) => x.sendState === 'sent').length,
+      scheduled: recipients.filter((x) => x.sendState === 'scheduled').length,
       viewed: recipients.filter((x) => x.viewed).length,
       reached50: recipients.filter((x) => x.viewed && x.progressPct >= 50).length,
       completed: recipients.filter((x) => x.completed).length,
@@ -1739,12 +1747,20 @@ dmRouter.get('/:id/recipients-tracking', requireDmAccess, async (req: any, res: 
       console.warn('[DM 발송 추적] 섹션 이탈 집계 실패:', e?.message);
     }
 
+    // ★ 2026-10-03 보낸 기록 = 발송(캠페인)마다 한 줄(시각·상태·사람 수) — 화면이 수신자 목록 시각을 잘라 묶던 것을 대신한다. 실패 격리.
+    let batches: Array<{ at: string; state: string; count: number }> = [];
+    try {
+      batches = await getDmSendBatches(req.params.id, companyId);
+    } catch (e: any) {
+      console.warn('[DM 발송 추적] 보낸 기록 묶음 조회 실패:', e?.message);
+    }
+
     return res.json({
       success: true, summary,
       // 목록은 상한까지(full=1 = CSV 등 전체) · 전체 수와 잘림 여부를 함께 준다
       recipients: listTruncated ? recipients.slice(0, DM_TRACK_LIST_CAP) : recipients,
       recipientsTotal: recipients.length, listTruncated, segments,
-      hourDistribution, sectionExits,
+      hourDistribution, sectionExits, batches,
     });
   } catch (err: any) {
     const msg = err?.message || '';

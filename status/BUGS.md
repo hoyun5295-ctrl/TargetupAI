@@ -55,6 +55,14 @@
 
 ## 2) 활성 버그
 
+### 🟠 B-1003-1 알림톡 실패 후 문자 대체발송이 통계에서 알림톡 성공으로 잡히고 정산에서 알림톡 단가로 청구된다 (🟡 1003 수정 · **미배포** · DDL 0) · 2026-10-02 서수란 접수 `cmuqa9pa50aqpjnn4gze9ugam`(크로커다일 9/29 「대체발송이 문자로 안 잡힌다 · LMS 로 청구돼야 한다」)
+- **한 줄**: 대체 결과가 두 모양으로 온다. 옛 QTmsg 라인 = 대체 문자가 별도 행(L/S + `k_oriseq`). 비토 게이트웨이 라인(SMSQ_SEND_13~16) = 별도 행 없이 원래 K행의 `status_code` 가 7830(SMS)·7831(LMS)(bito-gateway `engine/report.go parentFallbackReport` · `agent/poller isGatewayManagedFallbackReport`). 한줄로 판정은 옛 모양만 알았다(청구 식 `BILLING_MSG_TYPE_SQL` 은 msg_type 만 · 통계 분리·결과 필터는 `k_oriseq`). 선불 결과별 정산(`smsAlimtalkResultAgg`)만 두 모양을 알았다.
+- **실측(1003 Harold 실행)**: 13~16 에 옛 모양 0건 · K행 7831 = 4건(13번 인비토 `[여정] step 1` 7/27 1 · 15번 크로커다일 직접발송 9/22 2 · 9/29 1) · 7830 0건. 발행된 정산서 중 해당분 0(크로커다일 = 7월 paid · 8월 confirmed 뿐 · 인비토 7월 이후 없음). 두 회사 LMS 단가 설정됨(크로커다일 22.70 · 인비토 24.55).
+- **수정**: 판정을 `sms-result-map.ts` 한 곳에(`KAKAO_FALLBACK_SMS/LMS_CODE` · `alimtalkFallbackMsgType` · `ALIMTALK_FALLBACK_TYPE_WHEN_SQL` · `SUBSTITUTE_ROW_SQL`). 청구 식에 K+7830→S · K+7831→L(일자축·상세축·고객사 통계·매장별 미리보기·일일 인사이트가 같은 식) · `classifyMsgChannel`·`getSendTypeLabel` 에 상태코드 인자(슈퍼관리자 통계 엑셀 「알림톡대체발송」 행 · 행 유형 라벨) · 발송결과·엑셀 「대체발송」 필터 4곳 = 공용 조각. 계약 테스트 `alimtalk-fallback-inrow-1003.test.ts` 13건(구현 전 11건 실패 확인) · tsc 0 · vitest 545/7,702.
+- **순서 제약**: 크로커다일 9월 정산서는 배포 뒤에 발행한다(먼저 발행하면 3건이 알림톡으로 저장돼 수량 조정 필요 · 차액 3 × ₩18.8).
+- **통계 엑셀 숫자 의미**: 옛 모양은 실패 K행이 알림톡 행에 실패로 남고 대체 L행이 따로 있었다(한 수신자 2행). 비토 모양은 K행 하나가 대체 행으로 옮겨간다(한 수신자 1행).
+- **추가 과제(착수 판단 = Harold님)**: ① 게이트웨이 자체 대체발송은 `kakao_` 유형 전부(브랜드 포함)에 걸린다(`report.go shouldStartKakaoFallback`). 브랜드(F) 행에 7830/7831 이 실리면 지금도 브랜드 단가로 청구된다. 운영 실측 전이라 이번 판정에 넣지 않았다. ② 대체 문자까지 실패하면 K행에 문자 실패 코드만 남아 알림톡 실패와 구분되지 않는다(`report.go:1171`).
+
 ### 🔴 B-1002-2 고객사 PC 전체가 hanjul.ai 에 연결되지 않는다(`ERR_CONNECTION_TIMED_OUT`) — DM 이미지가 요청 제한에 걸려 서버가 고객사 IP 를 1시간 차단 (🟡 1002 수정 · **서버 설정(nginx) 반영 완료 16:18:56 · 차단 해제 완료** · 코드·DDL 0 · 재발 여부 실측 대기) · 2026-10-02 박성용 접수 `cmuqmdbly0cggjnn4iq1c5r29`(제시뉴욕 jessi1 「처음엔 로그인되다가 강제 종료 후 접속하면 항상 오류 · 회사 PC 여러 대 동일」)
 - **상세·설정 원문·확인 명령 = [OPS §4-3](OPS.md)**.
 - **한 줄**: nginx 가 `/api/` 전체를 IP 당 초 30건(`api_zone` · burst 100)으로 제한하는데 DM 이미지(`/api/dm/v/images/`)가 그 안에 있었다 → DM 화면이 이미지 100장 이상을 한꺼번에 불러오면 429 → fail2ban `nginx-limit-req`(10분에 5번이면 1시간 차단)가 고객사 공인 IP 를 방화벽에서 차단 → 로그인 화면도 안 뜬다. 앱의 차단(로그인 실패 · 국외 접속)은 아니다(`login_blocks` 0건).

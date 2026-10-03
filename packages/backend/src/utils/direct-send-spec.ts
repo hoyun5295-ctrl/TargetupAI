@@ -6,6 +6,7 @@
  * 실제 INSERT/차감/트리거는 direct-send-core.ts createDirectSendCampaign가 수행.
  */
 import { isDirectPipelineSendType } from './send-type-axis';
+import type { MmsImageItem } from './mms-image-util';
 
 export class DirectSendError extends Error {
   constructor(
@@ -44,7 +45,8 @@ export interface DirectSendSpec {
    * 안 밝히면(undefined) 싣지 않는다 → 워커가 종전처럼 DB 로 판정(다른 호출부 무변경).
    */
   callbackFilterUserId?: string | null;
-  mmsImagePaths?: string[] | null;
+  /** 경로 문자열 또는 {path, originalName}(표시 이름) · 발송 배관은 normalizeMmsImagePaths 로 경로만 읽는다(★2026-10-03 대행발송 원본명) */
+  mmsImagePaths?: MmsImageItem[] | null;
   dedupEnabled?: boolean;
   unsubFilterEnabled?: boolean;
   // kakao

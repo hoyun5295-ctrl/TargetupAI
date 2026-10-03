@@ -380,7 +380,7 @@ export default function EmailEditScreen({
         </div>
       )} />
       <PanelBlock title="내용">
-        <div className="mk-dark-editor"><SectionPropsEditor key={selected.id} section={selected} onUpdate={updateProps} hiddenFields={emailHiddenFieldsFor(selected.type)} /></div>
+        <div className="mk-editor"><SectionPropsEditor key={selected.id} section={selected} onUpdate={updateProps} hiddenFields={emailHiddenFieldsFor(selected.type)} /></div>
         {selected.type === 'footer' && <div className={`mt-3 rounded-xl border px-3 py-2.5 text-[11.5px] leading-relaxed ${isAd ? 'border-violet-200 bg-violet-50 text-violet-900' : 'border-slate-200 bg-white text-slate-500'}`}>{isAd ? '광고 메일이라 보내는 사람 정보와 수신거부 링크가 메일 맨 아래에 자동으로 붙어요. 가운데 미리보기 맨 끝에서 실제 문구를 확인하세요.' : '광고 메일이 아니어서 수신거부 링크가 붙지 않아요. 할인·행사 같은 광고 내용이 있으면 받은편지함 칸에서 광고 메일을 켜 주세요.'}</div>}
       </PanelBlock>
       {EMAIL_TREATMENT_OPTIONS[selected.type] && (
@@ -514,6 +514,7 @@ export default function EmailEditScreen({
         email={campaignId ? { id: campaignId, name, subject, isAd, completed: completedState, hasPlaceholder } : null}
         beforeSend={async () => beforeSend()}
         onSent={() => { onSaved(); onClose(); }}
+        onSmtpChanged={onSaved}
       />
       <ConfirmModal state={confirm} onClose={() => setConfirm(null)} />
     </div>

@@ -2,7 +2,7 @@
  * BlockSheet — 결과 화면 "누른 곳만 고치기" 하단 시트(★ 2026-09-27 만들기 개편 · 목업 ④)
  *
  * 버튼 블록 = 버튼 글자 + 누르면 갈 주소(필수) + 추천 주소 칩(우리 홈페이지 · 최근 쓴 주소) — 가장 자주 채우는 칸만 크게.
- * 그 밖의 블록 = 기존 블록 편집기(SectionPropsEditor)를 그대로(어두운 영역 변수만 바꾼다 · 편집기 코드 무수정).
+ * 그 밖의 블록 = 기존 블록 편집기(SectionPropsEditor)를 그대로(make.css .mk-editor 가 변수를 정의한다 · 편집기 코드 무수정).
  * 고친 값은 스토어에 바로 들어가고 [저장] = 즉시 저장(자동 저장도 따로 돈다).
  */
 import { useEffect, useRef } from 'react';
@@ -76,7 +76,7 @@ export default function BlockSheet({
               {buttons.length > 1 && <p className="text-[11.5px] text-slate-400">버튼이 {buttons.length}개예요. 나머지는 [자세히 편집]에서 고칠 수 있어요.</p>}
             </div>
           ) : (
-            <div className="mk-dark-editor">
+            <div className="mk-editor">
               <SectionPropsEditor key={section.id} section={section} onUpdate={onUpdate} />
             </div>
           )}

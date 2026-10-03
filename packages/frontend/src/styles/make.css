@@ -1,36 +1,42 @@
 /*
  * make.css — 만들기 개편 공용(★ 2026-09-27)
- * .mk-dark-editor = 기존 블록 편집기(SectionPropsEditor · 27 편집기 · FormControls)가 쓰는 --dm-* 변수를
- *   이 영역 안에서만 어두운 값으로 바꾼다. 편집기 코드는 무수정(같은 부품을 새 수정 화면 오른쪽 패널에서 쓴다).
+ * .mk-editor = 기존 블록 편집기(SectionPropsEditor · 27 편집기 · FormControls)가 쓰는 --dm-* 변수를
+ *   이 영역 안에서 정의한다. 편집기 코드는 무수정(같은 부품을 수정 화면 오른쪽 칸 · 결과 화면 시트에서 쓴다).
+ * ★ 2026-10-03 밝은 값으로 교체(남지현 접수 「편집 화면 오른쪽 바탕과 설명글이 모두 흰색 계열이라 안 보인다」).
+ *   옛 스코프는 어두운 패널 전제 값(흰 글씨 · 남색 입력칸)이었는데 9/30 AI 존 대개편으로
+ *   감싸는 칸이 밝은 작업대가 된 뒤에도 남아 있었다.
+ *   값은 dm-builder.css :root 와 같다(블록 창 BlockEditModal 이 같은 편집기를 그 값으로 그린다).
+ *   이메일 편집 · 결과 시트는 dm-builder.css 를 불러오지 않으므로 편집기가 읽는 변수를 여기서 모두 정의한다.
+ *   계약 = backend utils/dm/dm-build-light-surface.test.ts(:root 값과 대조).
  */
-.mk-dark-editor {
-  --dm-neutral-0: #0b1222;
-  --dm-neutral-50: #0f172a;
-  --dm-neutral-100: #131c31;
-  --dm-neutral-200: rgba(255, 255, 255, 0.14);
-  --dm-neutral-300: rgba(255, 255, 255, 0.22);
-  --dm-neutral-400: rgba(255, 255, 255, 0.4);
-  --dm-neutral-500: rgba(255, 255, 255, 0.55);
-  --dm-neutral-600: rgba(255, 255, 255, 0.68);
-  --dm-neutral-700: rgba(255, 255, 255, 0.82);
-  --dm-neutral-800: rgba(255, 255, 255, 0.92);
-  --dm-neutral-900: #ffffff;
-  --dm-neutral-1000: #ffffff;
-  --dm-bg: #0b1222;
-  --dm-primary: #8b5cf6;
-  --dm-primary-hover: #7c3aed;
-  --dm-primary-light: rgba(139, 92, 246, 0.18);
-  color: #fff;
-  color-scheme: dark;
+.mk-editor {
+  --dm-neutral-0: #ffffff;
+  --dm-neutral-50: #fafafa;
+  --dm-neutral-100: #f5f5f5;
+  --dm-neutral-200: #e5e5e5;
+  --dm-neutral-300: #d4d4d4;
+  --dm-neutral-400: #a3a3a3;
+  --dm-neutral-500: #737373;
+  --dm-neutral-600: #525252;
+  --dm-neutral-700: #404040;
+  --dm-neutral-800: #262626;
+  --dm-neutral-900: #171717;
+  --dm-neutral-1000: #000000;
+  --dm-bg: #ffffff;
+  /* 강조색 = 수정 화면의 보라(머리 띠 · 보내기 버튼과 같은 계열) */
+  --dm-primary: #7c3aed;
+  --dm-primary-hover: #6d28d9;
+  --dm-primary-light: #ede9fe;
+  --dm-error: #ef4444;
+  --dm-font-mono: "JetBrains Mono", Menlo, Consolas, monospace;
+  --dm-shadow-md: 0 6px 16px -4px rgba(15, 23, 42, 0.10), 0 2px 6px -2px rgba(15, 23, 42, 0.06);
+  --dm-shadow-lg: 0 12px 28px -6px rgba(15, 23, 42, 0.12), 0 4px 10px -4px rgba(15, 23, 42, 0.06);
+  color: #0f172a;
+  color-scheme: light;
 }
-.mk-dark-editor input,
-.mk-dark-editor textarea,
-.mk-dark-editor select {
-  color-scheme: dark;
-}
-.mk-dark-editor input::placeholder,
-.mk-dark-editor textarea::placeholder {
-  color: rgba(255, 255, 255, 0.35);
+.mk-editor input::placeholder,
+.mk-editor textarea::placeholder {
+  color: #94a3b8;
 }
 
 /* 휴대폰 틀 · 스크롤바 */
@@ -51,7 +57,7 @@
    clip = 스크롤 칸이 아니다(밀 수 없음) · 지원 안 하는 옛 브라우저는 앞줄 hidden 을 쓴다. */
 .mk-preview-box { overflow: hidden; overflow: clip; }
 .mk-scroll::-webkit-scrollbar { width: 8px; height: 8px; }
-.mk-scroll::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.12); border-radius: 8px; }
+.mk-scroll::-webkit-scrollbar-thumb { background: rgba(15, 23, 42, 0.18); border-radius: 8px; }
 .mk-scroll::-webkit-scrollbar-track { background: transparent; }
 
 @keyframes mk-sheet-in { from { transform: translateY(24px); opacity: 0; } to { transform: none; opacity: 1; } }
