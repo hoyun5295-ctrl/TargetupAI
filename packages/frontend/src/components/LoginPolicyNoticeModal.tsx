@@ -108,10 +108,10 @@ export default function LoginPolicyNoticeModal({ onClose }: { onClose: () => voi
         role="dialog"
         aria-modal="true"
         aria-labelledby="lpn-title"
-        className="lpn-panel flex max-h-[calc(100vh-1.5rem)] w-full max-w-[640px] flex-col overflow-hidden rounded-[22px] bg-white shadow-[0_28px_70px_-18px_rgba(15,23,42,0.55)]"
+        className="lpn-panel flex max-h-[calc(100vh-1.5rem)] w-full max-w-[720px] flex-col overflow-hidden rounded-[22px] bg-white shadow-[0_28px_70px_-18px_rgba(15,23,42,0.55)]"
       >
         {/* 머리 — 로그인 화면 브랜드 패널과 같은 색 */}
-        <div className="relative shrink-0 overflow-hidden bg-gradient-to-br from-emerald-600 via-teal-700 to-blue-800 px-6 pb-7 pt-7 sm:px-9 sm:pb-8 sm:pt-9">
+        <div className="relative shrink-0 overflow-hidden bg-gradient-to-br from-emerald-600 via-teal-700 to-blue-800 px-6 pb-5 pt-6 sm:px-9 sm:pb-6 sm:pt-7">
           <div className="pointer-events-none absolute -right-16 -top-20 h-56 w-56 rounded-full bg-white/[0.07]" />
           <div className="pointer-events-none absolute -bottom-24 right-24 h-44 w-44 rounded-full bg-white/[0.05]" />
 
@@ -126,7 +126,7 @@ export default function LoginPolicyNoticeModal({ onClose }: { onClose: () => voi
 
           <h3
             id="lpn-title"
-            className="relative pr-8 text-[23px] font-bold leading-[1.32] tracking-[-0.02em] text-white [text-wrap:balance] sm:text-[29px]"
+            className="relative pr-8 text-[21px] font-bold leading-[1.3] tracking-[-0.02em] text-white [text-wrap:balance] sm:text-[24px]"
           >
             {enforced ? (
               <>로그인·발송 인증이<br />의무 적용되고 있습니다</>
@@ -134,7 +134,7 @@ export default function LoginPolicyNoticeModal({ onClose }: { onClose: () => voi
               <>{ENFORCE_DATE_TEXT}부터<br />로그인·발송 인증이 의무화됩니다</>
             )}
           </h3>
-          <p className="relative mt-3.5 max-w-[30em] text-[15px] leading-[1.65] text-emerald-50 sm:text-[16px]">
+          <p className="relative mt-2.5 break-keep text-[14px] leading-[1.6] text-emerald-50 sm:text-[15px]">
             {enforced && <>{ENFORCE_DATE_TEXT}부터 시행 중입니다.<br /></>}
             한줄로만의 정책이 아닙니다.
             <br />
@@ -144,30 +144,30 @@ export default function LoginPolicyNoticeModal({ onClose }: { onClose: () => voi
         </div>
 
         {/* 바뀌는 것 세 가지 — 고객사에 바뀌는 것 */}
-        <div className="min-h-0 flex-1 overflow-y-auto px-6 pt-2 sm:px-9">
+        <div className="min-h-0 flex-1 overflow-y-auto px-6 sm:px-9">
           <dl>
             {CHANGES.map((c) => (
               <div
                 key={c.label}
-                className="grid gap-x-6 gap-y-1.5 border-b border-slate-100 py-[18px] sm:grid-cols-[108px_1fr] sm:items-baseline"
+                className="grid gap-x-5 gap-y-1 border-b border-slate-100 py-3 sm:grid-cols-[84px_1fr] sm:items-baseline"
               >
-                <dt className="text-[13.5px] font-semibold text-emerald-700">{c.label}</dt>
+                <dt className="text-[13px] font-semibold text-emerald-700">{c.label}</dt>
                 <dd>
-                  <p className="text-[17px] font-semibold leading-snug tracking-[-0.01em] text-slate-900 sm:text-[18px]">{c.title}</p>
-                  <p className="mt-2.5 rounded-xl bg-slate-50 px-3.5 py-3 text-[14px] leading-[1.65] text-slate-700">{c.detail}</p>
+                  <p className="text-[15.5px] font-semibold leading-snug tracking-[-0.01em] text-slate-900 sm:text-[16px]">{c.title}</p>
+                  <p className="mt-1.5 break-keep rounded-lg bg-slate-50 px-3 py-2 text-[13.5px] leading-[1.6] text-slate-700">{c.detail}</p>
                 </dd>
               </div>
             ))}
           </dl>
 
           {/* 근거 — 맨 아래 한 줄(링크 없음) */}
-          <p className="py-4 text-[12.5px] leading-relaxed text-slate-500">
+          <p className="py-3 text-[12px] leading-relaxed text-slate-500">
             근거: 방송미디어통신위원회 전송자격인증제(2026년 10월 26일 전 사업자 시행)
           </p>
         </div>
 
         {/* 버튼 */}
-        <div className="flex shrink-0 items-center justify-between gap-3 border-t border-slate-100 px-6 py-4 sm:px-9">
+        <div className="flex shrink-0 items-center justify-between gap-3 border-t border-slate-100 px-6 py-3 sm:px-9">
           <button
             type="button"
             onClick={hideToday}
@@ -179,7 +179,7 @@ export default function LoginPolicyNoticeModal({ onClose }: { onClose: () => voi
             ref={confirmRef}
             type="button"
             onClick={onClose}
-            className="rounded-xl bg-emerald-600 px-7 py-3 text-[15px] font-semibold text-white transition hover:bg-emerald-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500 focus-visible:ring-offset-2 active:bg-emerald-800"
+            className="rounded-xl bg-emerald-600 px-7 py-2.5 text-[15px] font-semibold text-white transition hover:bg-emerald-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500 focus-visible:ring-offset-2 active:bg-emerald-800"
           >
             확인했습니다
           </button>
