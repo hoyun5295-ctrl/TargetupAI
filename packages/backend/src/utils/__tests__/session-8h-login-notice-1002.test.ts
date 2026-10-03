@@ -90,7 +90,7 @@ describe('로그인 화면 사전 고지 창', () => {
     expect(confirm).not.toContain('hideToday');
   });
 
-  it('시행일 = 10월 26일(한국 시각) · 원문은 방송미디어통신위원회 누리집', () => {
+  it('시행일 = 10월 26일(한국 시각) · ★(1003 저녁) 외부 링크 없음', () => {
     // 날짜는 공용 상수 하나(설정 화면 카드와 같은 날짜)
     const policy = fe('constants', 'sendAuthPolicy.ts');
     expect(policy).toContain("export const POLICY_ENFORCE_AT_MS = new Date('2026-10-26T00:00:00+09:00').getTime();");
@@ -98,40 +98,34 @@ describe('로그인 화면 사전 고지 창', () => {
     expect(modal).toContain('const ENFORCE_DATE_TEXT = POLICY_ENFORCE_DATE_TEXT;');
     expect(modal).toContain('const enforced = isPolicyEnforced();');
     expect(modal).not.toContain('2026-10-26');
-    const urls = modal.match(/https:\/\/[^\s']+/g) || [];
-    expect(urls.length).toBe(2);
-    for (const u of urls) expect(u.startsWith('https://www.kmcc.go.kr/')).toBe(true);
-    expect(modal).toContain('rel="noopener noreferrer"');
+    // 가이드라인은 신청 사업자용 문서라 고객사에게 원문 링크를 걸지 않는다(Harold 1003 저녁)
+    expect(modal.match(/https:\/\/[^\s']+/g) || []).toEqual([]);
+    expect(modal).toContain('근거: 방송미디어통신위원회 전송자격인증제(2026년 10월 26일 전 사업자 시행)');
   });
 
   it('문구의 유지 시간 = 발신 인증 코드 값', () => {
     const hours = be('utils', 'sender-auth.ts').match(/export const SENDER_AUTH_TRUST_HOURS = (\d+);/);
     expect(hours).not.toBeNull();
     expect(modal).toContain(`title: '보내기 전에 발신번호 인증, ${hours![1]}시간 유지',`);
+    expect(modal).toContain(`인증하면 같은 접속 환경에서는 ${hours![1]}시간 동안 다시 묻지 않습니다.`);
     expect(modal).not.toContain('24시간');
   });
 
-  it('★(1003) 바뀌는 것마다 가이드라인 문장을 글자 그대로 붙이고, 원문 주소는 맨 아래에 둔다', () => {
-    // 3차 개정판(2026-10-01) 8 · 14 · 15쪽과 대조한 문장 — 고쳐 쓰면 이 테스트가 깨진다
-    const quotes = [
-      ['3.4 다중 인증 · 14쪽', '단순 ID/PW만으로는 계정 탈취 위험이 크므로, 이용자 계정 접속 시 다중인증 방식을 적용해야 한다.'],
-      ['2.1 계정관리 · 8쪽', '회원가입 시 검증된 본인확인기관의 서비스를 통해 이용자 본인확인을 수행하고, 본인확인 결과를 계정과 연계하여 중복가입을 차단하여야 한다.'],
-      ['3.5 추가 인증 · 15쪽', '추가인증은 문자 발송 시 해당 발신번호와 발송 계정의 정당한 연계성을 확인하여 발신번호 도용과 대량 문자 남용을 방지하기 위한 절차이다.'],
-    ];
-    for (const [source, quote] of quotes) {
-      expect(modal).toContain(`source: '${source}',`);
-      expect(modal).toContain(`quote: '${quote}',`);
-    }
-    expect(modal).toContain('<blockquote');
-    expect(modal).toContain("const GUIDELINE_REVISION_TEXT = '2026. 10. 1. 3차 개정';");
-    // 원문 줄은 발췌 목록 뒤 · 버튼 앞(본문의 맨 아래)
+  it('★(1003 저녁) 항목마다 고객사에 바뀌는 것을 우리 말로 · 가이드라인 발췌 없음 · 머리 문구 줄바꿈', () => {
+    expect(modal).toContain("detail: '아이디 · 비밀번호를 넣은 뒤, 계정 담당자 휴대폰으로 온 6자리 인증번호를 넣어야 로그인됩니다. 로그인할 때마다 묻습니다.',");
+    expect(modal).toContain("detail: '계정마다 담당자 한 명이 처음 한 번 본인인증을 합니다. 인증번호는 그 담당자 휴대폰으로 갑니다. 담당자가 바뀌면 설정에서 새 담당자가 다시 인증합니다.',");
+    expect(modal).not.toContain('<blockquote');
+    expect(modal).not.toContain('가이드라인 {c.source}');
+    expect(modal).not.toMatch(/GUIDELINE_(VIEWER|POST)_URL/);
+    // 머리 문구: 「한줄로만의 정책이 아닙니다.」 뒤에서 줄을 바꾼다
+    expect(modal).toMatch(/한줄로만의 정책이 아닙니다\.\s*<br \/>\s*방송미디어통신위원회 고시에 따라/);
+    // 근거 줄은 목록 뒤 · 버튼 앞(본문의 맨 아래)
     const list = modal.indexOf('{CHANGES.map(');
-    const origin = modal.indexOf('href={GUIDELINE_VIEWER_URL}');
+    const basis = modal.indexOf('근거: 방송미디어통신위원회 전송자격인증제');
     const buttons = modal.indexOf('{/* 버튼 */}');
     expect(list).toBeGreaterThan(0);
-    expect(origin).toBeGreaterThan(list);
-    expect(buttons).toBeGreaterThan(origin);
-    expect(modal.split('href={GUIDELINE_VIEWER_URL}')).toHaveLength(2);
+    expect(basis).toBeGreaterThan(list);
+    expect(buttons).toBeGreaterThan(basis);
   });
 
   it('고객에게 보이는 글에 줄표와 모델명이 없다', () => {
