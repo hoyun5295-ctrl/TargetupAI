@@ -18,8 +18,8 @@ const read = (p: string) => readFileSync(resolve(__dirname, p), 'utf8');
 
 /** 플래너에서 planner_events의 날짜 컬럼을 읽는 파일 전수 — 새 파일이 생기면 여기 추가한다. */
 const PLANNER_SQL_FILES = [
-  '../routes/marketing-planner.ts',
-  './planner-approval.ts',
+  './planner-confirm.ts',
+  './planner-review.ts',
   './planner-report.ts',
   './planner-touchpoint.ts',
 ];
@@ -49,6 +49,14 @@ describe('플래너 날짜 축 계약 (2026-08-21)', () => {
       }
     });
   }
+
+  it('./planner-event.ts — 행사 공용 선택 목록(EVENT_COLS)도 ::text로 받는다(★ 2026-10-04 · 캘린더 · 확인 화면 · 승인이 이 목록을 쓴다)', () => {
+    const src = read('./planner-event.ts');
+    const m = /const EVENT_COLS = `([\s\S]*?)`;/.exec(src);
+    expect(m, 'EVENT_COLS를 찾지 못했다').toBeTruthy();
+    expect(m![1]).toMatch(/starts_on::text AS starts_on/);
+    expect(m![1]).toMatch(/ends_on::text AS ends_on/);
+  });
 
   it('드라이버 파서는 1114(timestamp)만 재정의한다 — date(1082)를 전역으로 바꾸면 전 라우트 영향이라 여기서는 캐스트로 푼다', () => {
     const db = read('../config/database.ts');

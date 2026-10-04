@@ -500,6 +500,8 @@ export async function grantFreeMessagingForCurrentMonth(): Promise<{ granted: nu
            JOIN plans p ON p.id = c.plan_id
           WHERE COALESCE(p.${t.planColumn}, 0) > 0
             AND c.subscription_status IS DISTINCT FROM 'trial'
+            -- ★ 2026-10-04 선불 이용 기간 만료 정산 전(만료일 < 오늘 KST)인 회사는 이번 패스에서 뺀다 — 결제·잠금이 정해진 뒤 다음 패스에서 그 요금제로 지급(회의론자 최종 #9)
+            AND NOT COALESCE((to_jsonb(c) ->> 'plan_term_expires_on')::date < (NOW() AT TIME ZONE 'Asia/Seoul')::date, false)
             AND NOT EXISTS (
               SELECT 1 FROM company_plan_changes cpc
                WHERE cpc.company_id = c.id
@@ -568,6 +570,8 @@ export async function grantFreeMessagingForCompany(companyId: string): Promise<n
            JOIN plans p ON p.id = c.plan_id
           WHERE c.id = $1 AND COALESCE(p.${t.planColumn}, 0) > 0
             AND c.subscription_status IS DISTINCT FROM 'trial'
+            -- ★ 2026-10-04 선불 이용 기간 만료 정산 전(만료일 < 오늘 KST)인 회사는 이번 패스에서 뺀다 — 결제·잠금이 정해진 뒤 다음 패스에서 그 요금제로 지급(회의론자 최종 #9)
+            AND NOT COALESCE((to_jsonb(c) ->> 'plan_term_expires_on')::date < (NOW() AT TIME ZONE 'Asia/Seoul')::date, false)
             AND NOT EXISTS (
               SELECT 1 FROM company_plan_changes cpc
                WHERE cpc.company_id = c.id

@@ -75,8 +75,8 @@
 | 58 | customer_send_stats_marks | 발송 카운터 캠페인 멱등 마커 (2026-07-03 신설 — campaign_ref varchar(120) PK, 재시도 중복 카운트 차단) |
 | 59 | agent_charge_requests | 에이전트 충전 **실행** 요청 원장 (2026-07-24 §5-3 신설·DDL 적용완료 — 멱등키 UNIQUE·감사. 게이트웨이 잔액/반영의 진실은 여전히 62 `RSRM_FillAmtHist`) |
 | 60 | agent_charge_orders | 에이전트 충전 **요청**(고객사 접수) — §5-4. 웹 `deposit_requests`와 축이 달라 별도 테이블(승인 시 올라가는 지갑이 다르다). **2026-08-11 운영 실존 확인** — 신청 원장일 뿐 지갑 원장이 아니다(직원 직접 충전은 여기 안 남는다) |
-| 61 | planner_events | 마케팅 플래너 행사 원장(월간 계획·혜택은 고객사 기입). **2026-08-12 운영 CREATE 완료 — 12컬럼 실측 확인.** 설계서 = `docs/2026-08-12-ax-marketing-planner-design.md` §5-1 |
-| 62 | planner_touchpoints | 플래너 터치포인트(행사×채널×시점). **2026-08-12 운영 CREATE 완료 — 12컬럼 실측 확인**(`id·event_id·company_id·channel·timing_rule·format·est_credits·status·lock_reason·asset_ref·exec_ref·created_at` — **updated_at 없음, 쓰기 SQL에 넣지 말 것**). 발송 예정일은 저장하지 않고 조회 시 계산(행사 기간 수정 시 자동 추종 — 이중 진실 금지). **★2026-08-13 Phase 3 ADD 대기 = `exec_meta jsonb NOT NULL DEFAULT '{}'`**(채널별 실행 참조 — 알림톡 template_key·선점 시각·보류 사유·재제출 카운트. uuid 컬럼으로는 못 담는다). 대상 축(전체/참여자)은 `timing_rule.audience`가 갖는다(컬럼 신설 0). 코드 폴백 = 워커 4종이 `exec_meta` 실재를 단일 게이트로 확인하고 없으면 통째로 쉰다(부분 실행 금지). **★2026-09-02 `exec_meta` 키 추가(DDL 0)** = 모바일 DM 단계 `dm_stage`(drafted·published)·`dm_url`·`dm_residue`(남은 빈 자리)·`dm_edit_path`·`dm_reminded_at`·`dm_wait_notified_on`·`dm_check_error` / 문자 캐리어 `waiting_for_dm`·`carried_by`·`dm_touchpoint_id`·`copy_charged_by` / 확정 미커밋 `send_aborted_at`·`send_abort_code` / 생략 사유 `missed_reason`. 의미 = [플래너 §3-20](../docs/FEATURE-MARKETING-PLANNER.md) |
+| 61 | planner_events | 마케팅 플래너 행사 원장(월간 계획·혜택은 고객사 기입). **2026-08-12 운영 CREATE 완료 — 12컬럼 실측 확인.** 설계서 = `docs/2026-08-12-ax-marketing-planner-design.md` §5-1. **★2026-10-04 보강 ADD 대기(배포 뒤) = `meta jsonb NOT NULL DEFAULT '{}'`**(재료 `materials` · 완성본 기록 `build` · 만드는 중 `building` · 리비전 `revision` · 확인 링크 `preview`{tokenHash(sha256만) · revision · issuedAt · expiresAt · remindedAt} · 승인 `approved`{hash · at · by · revision} · 전환 표식 `migrated` · 닫힌 사유 `closedReason` · 준비 통지 `readyNotice`). 칸 부재 = 새 흐름 endpoint 503 `DB_MIGRATION_PENDING` · 새 워커 패스는 쉰다(`isEventMetaReady` 양성만 캐시). 설계 = [플래너 보강 §8](../docs/2026-10-04-planner-material-approval-design.md) |
+| 62 | planner_touchpoints | 플래너 터치포인트(행사×채널×시점). **2026-08-12 운영 CREATE 완료 — 12컬럼 실측 확인**(`id·event_id·company_id·channel·timing_rule·format·est_credits·status·lock_reason·asset_ref·exec_ref·created_at` — **updated_at 없음, 쓰기 SQL에 넣지 말 것**). 발송 예정일은 저장하지 않고 조회 시 계산(행사 기간 수정 시 자동 추종 — 이중 진실 금지). **★2026-08-13 Phase 3 ADD 대기 = `exec_meta jsonb NOT NULL DEFAULT '{}'`**(채널별 실행 참조 — 알림톡 template_key·선점 시각·보류 사유·재제출 카운트. uuid 컬럼으로는 못 담는다). 대상 축(전체/참여자)은 `timing_rule.audience`가 갖는다(컬럼 신설 0). 코드 폴백 = 워커 4종이 `exec_meta` 실재를 단일 게이트로 확인하고 없으면 통째로 쉰다(부분 실행 금지). **★2026-09-02 `exec_meta` 키 추가(DDL 0)** = 모바일 DM 단계 `dm_stage`(drafted·published)·`dm_url`·`dm_residue`(남은 빈 자리)·`dm_edit_path`·`dm_reminded_at`·`dm_wait_notified_on`·`dm_check_error` / 문자 캐리어 `waiting_for_dm`·`carried_by`·`dm_touchpoint_id`·`copy_charged_by` / 확정 미커밋 `send_aborted_at`·`send_abort_code` / 생략 사유 `missed_reason`. 의미 = [플래너 §3-20](../docs/FEATURE-MARKETING-PLANNER.md). **★2026-10-04 보강 `exec_meta` 키(DDL 0)** = 문자 문안 `copy`{text · subject · inputHash · spam(pass·pending·fail) · checkedAt · withDmLink · edited} · `copy_error` · 승인 지문 `approved`{hash · at · by · revision} · `post_approval_spam`('pending') · 완성본 `build_token`·`built_at` · `resumed_at` · `missed_reason`(missed·not_approved). 옛 DM 단계 키(`dm_stage` 등)는 전환 패스가 지운다 |
 | 63 | planner_monthly_approvals **(2026-08-13 운영 CREATE 완료 — 19컬럼 실측 확인)** | 플래너 **월간 승인 원장**(Phase 2). `id uuid PK DEFAULT gen_random_uuid(), company_id uuid NOT NULL REFERENCES companies(id), plan_month varchar(7) NOT NULL, status varchar(20) NOT NULL DEFAULT 'pending' CHECK IN (pending·approving·approved·cancelled), agency_credits integer NOT NULL DEFAULT 0, est_snapshot jsonb NOT NULL DEFAULT '{}', event_ids uuid[] NOT NULL DEFAULT '{}', plan_hash varchar(64), approve_attempt uuid, deduct_idempotency_key varchar(120), deducted_at timestamptz, token varchar(64), token_expires_at timestamptz, submitted_by uuid, submitted_at timestamptz, approved_by uuid, approved_at timestamptz, created_at·updated_at timestamptz NOT NULL DEFAULT now(), UNIQUE(company_id, plan_month)`. `event_ids` = **제출 스냅샷**(승인 대상은 그 목록뿐 — 서류에 없던 행사는 승인되지 않는다) · `plan_hash` = **결재 서류 지문**(행사 ID가 같아도 혜택·기간·상품·채널·시점·단가가 바뀌면 다른 서류 → 재결재) · `approve_attempt` = 승인 시도 소유권(선점이 서류를 함께 돌려주고, 복구·확정을 같은 시도에 묶는다. 10분 lease로 회수). 차감 멱등키는 `ai_credit_transactions.idempotency_key`와 같은 값(`planner:{회사}:{YYYY-MM}`)이라 두 원장이 그 키로 대조된다. 코드 42P01 폴백(브리핑 503 · 캘린더 배너 생략). **★2026-08-13 Phase 4 ADD 대기 = `result_notified_at timestamptz`**(월말 결과 통지 멱등 — 없으면 통지 패스만 쉰다. 결과 화면은 이 컬럼과 무관하게 동작) |
 | 64 | diagnosis_question_sets **(2026-08-16 운영 CREATE 완료)** | AI 마케팅 진단 **문항 세트**(활성 정확히 1개 — `CREATE UNIQUE INDEX uq_dqs_active ... WHERE is_active`). `version varchar(20) PK, definition jsonb NOT NULL, is_active boolean NOT NULL DEFAULT false, created_at timestamptz`. **문항 문장·선택지·추천 요구조건의 유일한 진실** — 바꿀 때 코드가 아니라 새 version INSERT + 활성 이동(현재 활성 = `v2`). 활성 0개면 전 endpoint 503 |
 | 65 | marketing_diagnoses **(2026-08-16 운영 CREATE 완료)** | 진단 원장(퍼널 A 고객사 + B 리드 통합). `id uuid PK, funnel char(1) CHECK IN (A,B), company_id uuid NULL FK companies CASCADE, submitted_by uuid NULL(FK 미부착), lead_company_name·lead_contact_name·lead_email·lead_phone, consent_agreed·consent_agreed_at·consent_version, source_ip inet, user_agent text, source_utm varchar(100), question_set_version varchar(20) FK diagnosis_question_sets, answers jsonb, result jsonb(DiagnosisResultV1 스냅샷), recommended_plan_id uuid FK plans ON DELETE SET NULL, recommended_plan_code·recommended_monthly_price, rule_version, lead_status varchar(20) CHECK(9종), contact_attempts int, disqualify_reason, linked_company_id uuid FK companies SET NULL, created_at·updated_at`. **funnel별 상호배타 CHECK**(A=company_id 필수·lead_email 금지 / B=반대 + 동의 4필드 필수) · **`uq_md_funnel_a`(company_id) WHERE funnel='A'** = 회사당 A 진단 1행(동시 제출 최후 방어) |
@@ -395,6 +395,7 @@
 | send_hour_end | integer | ★ 실측 레거시(send_end_hour 우선) |
 | holiday_send | boolean | ★ 실측 레거시(holiday_send_allowed 우선) |
 | duplicate_days | integer | ★ 실측 레거시(duplicate_prevention_days 우선) |
+| plan_term_expires_on · plan_term_auto_renew · plan_term_restore_plan_id · plan_term_next_plan_id · plan_term_version | date · boolean · uuid · uuid · integer | ★2026-10-04 **DDL 대기** — 선불 요금제 이용 기간. 뜻·제약·쓰기 입구 = 아래 「company_plan_term_events」 절 |
 | usage_type | varchar(10) | ★ 2026-07-03 실측 (사용구분: web/agent/both, NOT NULL DEFAULT 'web' + CHECK. agent=QTmsg 에이전트 전용 게이팅) |
 
 ### company_agent_ids (에이전트 발송ID 매핑 → 에이전트 계정 원장 — 2026-07-03 신설 실측 · 2026-07-24 원장 격상 ALTER 실측)
@@ -1229,6 +1230,32 @@ id company_id caller_phone customer_id(NULL 가능) transcript ai_response durat
 - **기준선 141행**(2026-07-25 21:18 UTC 일괄 INSERT): `change_type='initial'` · `effective_date = companies.created_at::date` · `from_*` 전부 NULL. reason에 "이력 도입 전 기준선 — 실제 변경 이력 없음" 명시. 분포 = FREE 129 / BASIC 6 / ENTERPRISE 3 / TRIAL 2 / BUSINESS 1.
 - 인덱스 실측(2026-07-26 `pg_indexes`): `company_plan_changes_pkey`(id) · `idx_cpc_company_effective`(company_id, effective_date) · `idx_cpc_effective`(effective_date).
 - FK·varchar 길이는 아직 `pg_constraint`/`character_maximum_length` 미실측 — 생성 명세는 `docs/2026-07-25-billing-restructure-handoff.md` §3-1.
+
+### company_plan_term_events + companies.plan_term_* (선불 요금제 이용 기간) ★2026-10-04 — **DDL 대기**
+
+> 설계·DDL 원문·검증 SQL = [선불 요금제 이용 기간 설계서](../docs/2026-10-04-prepaid-plan-term-design.md) §2. CT = `utils/plan-term.ts`(쓰기 입구 하나 · 계약 테스트 `plan-term-ct.test.ts`).
+> DDL 전에는 코드가 `to_jsonb(c)`로 읽어 컬럼 부재 = 미관리 = 기존 동작이다(라우트는 503 DB_MIGRATION_PENDING).
+
+companies 5칸: `plan_term_expires_on date`(만료일 KST · NULL = 관리 대상 아님) · `plan_term_auto_renew boolean NOT NULL DEFAULT true` · `plan_term_restore_plan_id uuid FK plans`(값 있으면 잠김 · 복구 요금제) · `plan_term_next_plan_id uuid FK plans`(다음 구매 요금제 = 내림 예약 · 구매 시 비움) · `plan_term_version integer NOT NULL DEFAULT 0`(회차 · 관리 종료해도 되돌리지 않음). CHECK 2: restore·next는 expires가 있을 때만.
+
+| 컬럼 | 타입 | 비고 |
+|------|------|------|
+| id | uuid PK | 앱이 만든다(randomUUID) — 잔액 원장 `reference_id`가 먼저 가리킨다 |
+| company_id | uuid NOT NULL FK companies ON DELETE CASCADE | |
+| term_version | integer NOT NULL | UNIQUE(company_id, term_version) = 회차 멱등의 마지막 그물 |
+| event_type | varchar(20) CHECK | start · first_charge · renew · extend · restore · upgrade · reserve · reserve_cancel · align · block · expire_free · auto_on · auto_off · admin_adjust · end |
+| plan_id · plan_code · monthly_price | uuid · varchar(20) · numeric(12,2) | 그 시점 **스냅샷**(차액·되돌림은 당시 값으로 · LESSONS_DB 36) |
+| covers_from · covers_to | date | 이 행이 덮는 날짜 구간 = 날짜별 요금제·가격의 진실. 구매(first_charge·renew·extend·restore) 구간 일수가 일할 분모 |
+| supply_amount · vat_amount · total_amount | numeric(15,2) DEFAULT 0 | 월정액은 부가세 별도 → 선불 잔액은 total(부가세 포함)로 깎는다 |
+| balance_before · balance_after · balance_tx_id | numeric · numeric · uuid | `balance_transactions`(type 'deduct' · reference_type **'plan_term'** · reference_id = 이 행 id) |
+| expires_before · expires_after | date | |
+| actor_type · actor_id · actor_label | varchar CHECK(company_user·super_admin·system) · uuid · varchar(100) | 고객 화면은 슈퍼관리자를 '한줄로 담당자'로 바꿔 보인다 |
+| request_id | uuid | 직접 연장·다시 열기 재생 키. 부분 UNIQUE(company_id, request_id) |
+| ip · user_agent · reason · detail | varchar(64) · text · text · jsonb | block 행 detail = {reason, balance, required, expires_on} |
+| created_at | timestamptz DEFAULT clock_timestamp() | |
+
+- 인덱스: (company_id, created_at DESC). 병합 축 = keep(`company-merge.ts`).
+- `balance_transactions`의 `reference_type 'plan_term'`을 읽는 자리: 발송 사용 금액 두 곳(companies.ts monthly_spend · admin.ts balance-overview)은 **제외**(`IS DISTINCT FROM`), 잔액 요약(balance.ts summary)은 포함(잔액 항등식), 환불·sweeper·회수는 (reference_type, reference_id) 짝으로 읽어 무관.
 
 ### saved_segments (저장 세그먼트 — D107)
 | 컬럼 | 타입 | 비고 |

@@ -7,7 +7,7 @@
  *  ③ 알림톡은 언제나 참여자 축이다(정보성 안내). 그 밖 채널은 기입값을 따른다.
  *  ④ 알림톡 문안에는 광고 표현이 없다 — 검수 통과 조건이라 품질 문제가 아니다.
  *  ⑤ 혜택은 지시문에 **원문 그대로** 들어간다(AI가 수치를 만들지 못하게).
- *  ⑥ 취소 환불은 그 달 제작·실행이 0건일 때만 전액이다(일할 없음).
+ *  ⑥ 취소 환불은 그 달 발송 시도가 0건일 때만 전액이다(일할 없음 · ★ 2026-10-04 §6-9).
  *  ⑦ 리드타임은 영업일로 센다(주말이 검수를 진행시키지 않는다).
  *  ⑧ 실행·대조 워커는 app 부팅에 등재돼 있다 — 선언이 아니라 등재가 가동의 근거다.
  */
@@ -22,7 +22,6 @@ import {
   appendDmLink,
   buildAlimtalkNoticeBody,
   buildAlimtalkTemplateName,
-  buildDmEditPath,
   buildParticipationCtaSection,
   buildPlannerCopyObjective,
   buildPlannerEventText,
@@ -82,17 +81,19 @@ describe('멱등키 — 고정 축', () => {
     expect(keys.size).toBe(3);
   });
 
-  it('제작물 과금 키는 그 채널 라우트가 쓰는 키와 같다 — 같은 제작물 이중 과금 차단', () => {
-    const prod = readFileSync(path.join(__dirname, 'planner-production.ts'), 'utf8');
-    expect(prod).toContain('`email-campaign-complete:${assetRef}`');
-    expect(prod).toContain('`inapp-publish:${assetRef}`');
-    // ★ 2026-09-02 DM 발행비는 플래너가 걷지 않는다 — 초안만 만들고, 발행은 담당자가 DM 라우트에서(그 키가 유일한 청구자).
-    const charges = prod.slice(prod.indexOf('function productionCharges('), prod.indexOf('function estimateProductionCost('));
-    expect(charges).not.toContain('dm-publish:');
-    // 라우트 쪽 키와 대조 — 한쪽이 바뀌면 이 테스트가 먼저 깨진다
-    expect(readFileSync(path.join(__dirname, '../routes/email.ts'), 'utf8')).toContain('email-campaign-complete:${campaign.id}');
-    expect(readFileSync(path.join(__dirname, '../routes/dm.ts'), 'utf8')).toContain('dm-publish:${req.params.id}');
-    expect(readFileSync(path.join(__dirname, '../routes/cdp.ts'), 'utf8')).toContain('inapp-publish:${message.id}');
+  it('승인 때 걷는 제작물 과금 키는 편집기 입구와 같은 코어 CT가 소유한다 — 같은 제작물 이중 과금 차단(★ 2026-10-04 C3)', () => {
+    const dmCore = readFileSync(path.join(__dirname, 'dm/dm-publish-core.ts'), 'utf8');
+    const emailCore = readFileSync(path.join(__dirname, 'email/email-complete-core.ts'), 'utf8');
+    expect(dmCore).toContain('idempotencyKey: `dm-publish:${dmId}`');
+    expect(emailCore).toContain('idempotencyKey: `email-campaign-complete:${campaign.id}`');
+    // 두 입구(편집기 라우트 · 플래너 승인)가 같은 코어를 부른다 — 한쪽만 고쳐지는 일이 없다
+    expect(readFileSync(path.join(__dirname, '../routes/dm.ts'), 'utf8')).toContain('await publishDmCore(');
+    expect(readFileSync(path.join(__dirname, '../routes/email.ts'), 'utf8')).toContain('await completeEmailCampaignCore(');
+    const approve = readFileSync(path.join(__dirname, 'planner-approve.ts'), 'utf8');
+    expect(approve).toContain('await publishDmCore(');
+    expect(approve).toContain('await completeEmailCampaignCore(');
+    // 옛 제작 파일(플래너 전용 과금 축)은 남아 있지 않다
+    expect(() => readFileSync(path.join(__dirname, 'planner-production.ts'), 'utf8')).toThrow();
   });
 
   it('당일 문안 source의 단가는 CREDIT_COST_MAP이 소유한다', () => {
@@ -189,19 +190,19 @@ describe('알림톡 — 정보성 전용', () => {
   });
 });
 
-describe('취소 환불 — 제작·실행 0건일 때만 전액', () => {
-  it('아무 일도 안 했으면 전액', () => {
-    const v = evaluateCancelRefund({ agencyPaid: true, agencyCredits: 1000, producedCount: 0, executedCount: 0 });
+describe('취소 환불 — 발송 시도 0건일 때만 전액(★ 2026-10-04 §6-9)', () => {
+  it('아무것도 안 나갔으면 전액', () => {
+    const v = evaluateCancelRefund({ agencyPaid: true, agencyCredits: 1000, executedCount: 0 });
     expect(v).toMatchObject({ refundable: true, amount: 1000 });
   });
 
-  it('제작 1건이라도 있으면 환불 없다 — 일할 계산도 없다', () => {
-    expect(evaluateCancelRefund({ agencyPaid: true, agencyCredits: 1000, producedCount: 1, executedCount: 0 }).refundable).toBe(false);
-    expect(evaluateCancelRefund({ agencyPaid: true, agencyCredits: 1000, producedCount: 0, executedCount: 1 }).amount).toBe(0);
+  it('발송 시도가 1건이라도 있으면 환불 없다 — 일할 계산도 없다', () => {
+    expect(evaluateCancelRefund({ agencyPaid: true, agencyCredits: 1000, executedCount: 1 }).refundable).toBe(false);
+    expect(evaluateCancelRefund({ agencyPaid: true, agencyCredits: 1000, executedCount: 1 }).amount).toBe(0);
   });
 
   it('차감 이력이 없으면 돌려줄 것도 없다', () => {
-    expect(evaluateCancelRefund({ agencyPaid: false, agencyCredits: 1000, producedCount: 0, executedCount: 0 }).refundable).toBe(false);
+    expect(evaluateCancelRefund({ agencyPaid: false, agencyCredits: 1000, executedCount: 0 }).refundable).toBe(false);
   });
 });
 
@@ -247,15 +248,12 @@ describe('워커 등재 — 선언이 아니라 부팅 호출이 가동의 근�
   it('발송 시도 표식을 커밋 전에 남기고, 표식 있는 행은 재발송 후보로 되돌리지 않는다', () => {
     const exec = readFileSync(path.join(__dirname, 'planner-executor.ts'), 'utf8');
     // 표식 → 커밋 순서(표식이 커밋 뒤로 가면 기록 실패 창에서 이중 발송이 된다)
-    const stampIdx = exec.indexOf('await stampSendAttempt(tp, stagingId');
+    const stampIdx = exec.indexOf('await stampSendAttempt(tp, claim, { staging_id: stagingId }, link.dm)');
     const commitIdx = exec.indexOf('await createDirectSendCampaign(');
     expect(stampIdx).toBeGreaterThan(0);
     expect(stampIdx).toBeLessThan(commitIdx);
-    // 취소와의 직렬화 — 실행·제작 선점이 같은 잠금 문(claimTouchpointUnderPlanLock)을 쓴다
-    //   ★ 2026-09-02 동반 DM 형제도 같은 잠금·같은 트랜잭션에서 함께 선점한다(companions)
-    expect(exec).toContain("claimTouchpointUnderPlanLock(tp, from, 'claimed_at', companions)");
-    expect(readFileSync(path.join(__dirname, 'planner-production.ts'), 'utf8'))
-      .toContain("claimTouchpointUnderPlanLock(tp, ['planned'])");
+    // 취소와의 직렬화 — 실행 선점은 월 원장 잠금 문(claimTouchpointUnderPlanLock)을 쓴다 · 승인 각인이 있는 ready만
+    expect(exec).toContain("claimTouchpointUnderPlanLock(tp, ['ready'], 'claimed_at', companions, token)");
     // 그 문은 승인 원장 행을 FOR UPDATE로 잠근 뒤 선점한다(조회 게이트는 장벽이 아니다)
     const ledgerSrc = readFileSync(path.join(__dirname, 'planner-touchpoint.ts'), 'utf8');
     const claimFn = ledgerSrc.slice(ledgerSrc.indexOf('export async function claimTouchpointUnderPlanLock'));
@@ -265,8 +263,7 @@ describe('워커 등재 — 선언이 아니라 부팅 호출이 가동의 근�
     const rec = readFileSync(path.join(__dirname, 'planner-reconcile.ts'), 'utf8');
     expect(rec).toContain("execMeta?.send_started_at && !tp.execRef");
     // 취소 환불 실적 판정도 그 표식을 실행으로 센다
-    const ledger = readFileSync(path.join(__dirname, 'planner-touchpoint.ts'), 'utf8');
-    expect(ledger).toContain("exec_meta ? 'send_started_at'");
+    expect(ledgerSrc).toContain("exec_meta ? 'send_started_at'");
   });
 
   it('취소·실적 집계·환불이 한 트랜잭션·한 잠금 안에서 순서대로 일어난다', () => {
@@ -274,8 +271,7 @@ describe('워커 등재 — 선언이 아니라 부팅 호출이 가동의 근�
     const fn = src.slice(src.indexOf('export async function cancelMonthlyApproval'));
     const lockIdx = fn.indexOf('FOR UPDATE');
     const transitionIdx = fn.indexOf("SET status = 'cancelled'");
-    // ★ 2026-09-02 produced 집계 조건이 여러 줄이 됐다(초안 대기 DM 제외) — 시작 토큰으로 순서를 잡는다
-    const countIdx = fn.indexOf('WHERE t.asset_ref IS NOT NULL');
+    const countIdx = fn.indexOf('countMonthWork(companyId, planMonth, client)');
     const refundIdx = fn.indexOf('refundCreditWithClient(');
     const commitIdx = fn.indexOf("client.query('COMMIT')");
     // 잠금 → 전이 → 집계 → 환불 → 커밋
@@ -288,8 +284,10 @@ describe('워커 등재 — 선언이 아니라 부팅 호출이 가동의 근�
     expect(fn).toContain('manageTx: false');
     // 진행 중(producing) 행은 취소가 건드리지 않는다 — 나간 발송을 상태로 덮지 않는다
     expect(fn).toContain("t.status IN ('planned', 'ready', 'hold_credit', 'locked')");
-    // 그 행은 실적에서 실행으로 세어 환불을 막는다
-    expect(fn).toContain("'sent', 'scheduled', 'producing'");
+    // 그 행은 실적(한 벌)에서 실행으로 세어 환불을 막는다
+    const ledger = readFileSync(path.join(__dirname, 'planner-touchpoint.ts'), 'utf8');
+    const work = ledger.slice(ledger.indexOf('export async function countMonthWork'));
+    expect(work).toContain("'sent', 'scheduled', 'producing'");
   });
 
   it('알림톡 재사용 폴백은 없다 — 행사별 문안이라 재사용본은 다른 행사 정보를 보낸다', () => {
@@ -361,16 +359,27 @@ describe('워커 등재 — 선언이 아니라 부팅 호출이 가동의 근�
     expect(tx).toContain('ORIG_TAG_PREFIX');
   });
 
-  it('승인 차감 키는 선점이 돌려준 회차로 확정한다 — ABA 무료 승인 차단', () => {
-    const src = readFileSync(path.join(__dirname, 'planner-approval.ts'), 'utf8');
-    const claim = src.slice(src.indexOf('async function claimApproval'), src.indexOf('/** 선점 해제'));
-    expect(claim).toContain('AS cycle');
-    expect(src).toContain('buildApprovalIdempotencyKey(companyId, planMonth, claimed.cycle)');
+  it('승인 대행료는 월 원장 잠금 안에서 낸 견적의 회차 키로 · 승인 트랜잭션 안에서 차감한다 — ABA 무료 승인 · 차감만 남은 달 차단', () => {
+    const src = readFileSync(path.join(__dirname, 'planner-approve.ts'), 'utf8');
+    const fn = src.slice(src.indexOf('export async function approvePlannerEvent'), src.indexOf('export async function unapprovePlannerEvent'));
+    const lockIdx = fn.indexOf('FOR UPDATE');
+    const quoteIdx = fn.indexOf('const lockedQuote = await quoteEventApproval(ev, pending);');
+    const deductIdx = fn.indexOf('await _deductWithClient(client, {');
+    const commitIdx = fn.indexOf("await client.query('COMMIT')");
+    expect(lockIdx).toBeGreaterThan(0);
+    expect(lockIdx).toBeLessThan(quoteIdx);
+    expect(quoteIdx).toBeLessThan(deductIdx);
+    expect(deductIdx).toBeLessThan(commitIdx);
+    expect(fn).toContain('idempotencyKey: lockedQuote.agency.key');
+    // 견적의 회차는 잠금 안 원장 조회(planner-approval loadAgencyPaymentState)
+    const confirm = readFileSync(path.join(__dirname, 'planner-confirm.ts'), 'utf8');
+    expect(confirm).toContain('const pay = await loadAgencyPaymentState(ev.companyId, ev.planMonth);');
+    // 월 상태로 선점하지 않는다(C1)
+    expect(fn).not.toContain("status = 'approving'");
     // 취소도 잠금 안에서 회차를 계산한다
-    const cancel = src.slice(src.indexOf('export async function cancelMonthlyApproval'));
-    const lockIdx = cancel.indexOf('FOR UPDATE');
-    const cycleIdx = cancel.indexOf('const cycle = Number(cycleRes');
-    expect(lockIdx).toBeLessThan(cycleIdx);
+    const approval = readFileSync(path.join(__dirname, 'planner-approval.ts'), 'utf8');
+    const cancel = approval.slice(approval.indexOf('export async function cancelMonthlyApproval'));
+    expect(cancel.indexOf('FOR UPDATE')).toBeLessThan(cancel.indexOf('const cycle = Number(cycleRes'));
   });
 
   it('참여 투영은 대조 워커 한 경로뿐이다 — 겹치면 중복 적재가 된다', () => {
@@ -394,38 +403,42 @@ describe('워커 등재 — 선언이 아니라 부팅 호출이 가동의 근�
   it('발송 커밋·스팸 게이트·080 가드를 직접 만들지 않고 기존 CT를 부른다', () => {
     const src = readFileSync(path.join(__dirname, 'planner-executor.ts'), 'utf8');
     expect(src).toContain("from './direct-send-core'");
-    expect(src).toContain("from './spam-test-queue'");
+    expect(src).toContain("from './planner-copy'");
     expect(src).toContain("from './messageUtils'");
     expect(src).toContain("from './planner-audience'");
-    // 알림톡은 message_type이 아니라 send_channel 축이다(0727 교훈)
-    expect(src).toContain("sendChannel: 'alimtalk'");
+    expect(src).toContain("from './planner-channel-gate'");
+    // 스팸 검사 CT는 문안 CT가 소유한다(CT-09) — 실행부는 재생성 없이(regenerate false) 부른다
+    expect(readFileSync(path.join(__dirname, 'planner-copy.ts'), 'utf8')).toContain("from './spam-test-queue'");
+    expect(src).toContain('regenerate: false');
     expect(src).not.toMatch(/msgType:\s*'KAKAO'/);
   });
 
-  it('소재 제작 그물이 실재한다 — 호출부가 승인 라우트 하나뿐이면 그물이 아니다', () => {
+  it('대조 워커는 생성 엔진을 부르지 않는다 — 문안·링크·승인 직후 스팸 패스는 놓친 실행 정리 뒤에 돈다(★ 2026-10-04)', () => {
     const rec = readFileSync(path.join(__dirname, 'planner-reconcile.ts'), 'utf8');
-    expect(rec).toContain('runPlannerProductionPass()');
-    // ⛔ 놓친 실행 정리 뒤여야 한다 — 예정일이 지난 계획의 소재를 제작해 크레딧이 나가면 안 된다
+    expect(rec).not.toContain('runPlannerProductionPass');
+    expect(rec).not.toContain('runPlannerDmReminderPass');
+    expect(rec).not.toContain('generateFromBuildMaterials');
     const missedIdx = rec.indexOf('const missed = await closeMissed(');
-    const produceIdx = rec.indexOf('await runPlannerProductionPass()');
+    const copyIdx = rec.indexOf('await runPlannerCopyPass()');
+    const linkIdx = rec.indexOf('await runPlannerReviewLinkPass()');
+    const spamIdx = rec.indexOf('await runPostApprovalSpamPass()');
     expect(missedIdx).toBeGreaterThan(0);
-    expect(missedIdx).toBeLessThan(produceIdx);
+    expect(missedIdx).toBeLessThan(copyIdx);
+    expect(copyIdx).toBeLessThan(linkIdx);
+    expect(linkIdx).toBeLessThan(spamIdx);
+    // 전환 패스가 놓친 실행 정리보다 먼저(옛 승인 행사가 새 실행 조건에 걸려 조용히 미발송되지 않게)
+    expect(rec.indexOf('await transitionLegacyEvents(today)')).toBeLessThan(missedIdx);
   });
 
-  it('재개는 상태 복원이다 — locked도 되살리고, 효과가 없으면 성공으로 답하지 않는다', () => {
-    const src = readFileSync(path.join(__dirname, 'planner-production.ts'), 'utf8');
-    const fn = src.slice(src.indexOf('export async function resumeHeldTouchpoint'));
-    expect(fn).toContain("const RESUMABLE_FROM = ['hold_credit', 'locked']");
-    // 전이 결과를 버리는 자리가 없다 — 효과(RETURNING)로만 성공을 판정한다(6원칙 ②)
-    const calls = fn.match(/(\w+\s*=\s*)?await setTouchpointState\(\{/g) || [];
-    expect(calls.length).toBeGreaterThan(0);
-    expect(calls.every((c) => c.includes('='))).toBe(true);
-    // 비소재 채널(문자·알림톡)을 제작 경로에 넣지 않는다 — 인앱 분기로 떨어져 엉뚱한 소재가 생기던 자리
-    expect(fn).toContain('if (!isMaterialChannel(tp.channel))');
-    // 라우트는 효과 없음을 200으로 답하지 않는다
+  it('[다시 시작]은 상태 복원이다 — 승인 각인이 있는 보류·잠금만 되살리고, 효과가 없으면 성공으로 답하지 않는다', () => {
+    const src = readFileSync(path.join(__dirname, 'planner-executor.ts'), 'utf8');
+    const fn = src.slice(src.indexOf('export async function resumePlannerTouchpoint'));
+    expect(fn).toContain("if (tp.status !== 'hold_credit' && tp.status !== 'locked') return 'unresumable';");
+    expect(fn).toContain("if (!tp.execMeta?.approved) return 'unresumable';");
+    expect(fn).toContain("['hold_credit', 'locked'],");
+    expect(fn).toContain("return updated.includes(tp.id) ? 'ready' : 'unresumable';");
     const route = readFileSync(path.join(__dirname, '../routes/marketing-planner.ts'), 'utf8');
     expect(route).toContain("code: 'NOT_RESUMABLE'");
-    expect(route).toContain("code: 'STILL_LOCKED'");
   });
 
   it('참여 토큰 서명 키에 기본값 폴백이 없다 — 코드에 적힌 문자열이 도장이면 위조가 성립한다', () => {
@@ -526,43 +539,22 @@ describe('DM 완성 게이트 — 고객 화면의 빈 자리', () => {
     expect(findDmPlaceholderResidue('<script>showMsg("전화번호를 입력해주세요.")</script><p>완성</p>')).toEqual([]);
   });
 
-  it('DM 단계는 exec_meta.dm_stage가 갖고 알 수 없는 값은 빈 단계다 · 편집 경로는 플래너 진입 표식을 단다', () => {
+  it('DM 단계는 exec_meta.dm_stage가 갖고 알 수 없는 값은 빈 단계다(옛 데이터 해석 · 전환 패스가 표식을 지운다)', () => {
     expect(dmStageOf({ dm_stage: 'drafted' })).toBe('drafted');
     expect(dmStageOf({ dm_stage: 'published' })).toBe('published');
     expect(dmStageOf({ dm_stage: 'weird' })).toBe('');
     expect(dmStageOf(null)).toBe('');
-    expect(buildDmEditPath('abc')).toBe('/dm-builder?id=abc&from=planner');
   });
 });
 
 describe('소스 계약 — 초안은 발행하지 않고, 검사 문안 = 발송 문안', () => {
-  it('제작 CT가 publishDm을 부르지 않고 DM 발행비를 걷지 않는다(발행비는 DM 라우트의 dm-publish 키뿐)', () => {
-    const src = readFileSync(path.join(__dirname, 'planner-production.ts'), 'utf8');
-    expect(src).not.toMatch(/\bpublishDm\(/);
-    const charges = src.slice(src.indexOf('function productionCharges('), src.indexOf('function estimateProductionCost('));
-    expect(charges).not.toContain('dm-publish:');
-    expect(charges).not.toContain("'dm-builder'");
-    expect(charges).toContain('plannerProduceGenKey(tp.id)');
-    // 초안 대기 접점은 잠금 앞에서 돌려보낸다 — producing 왕복이 없어야 고아 회수·취소 집계가 흔들리지 않는다
-    const produce = src.slice(src.indexOf('export async function produceTouchpoint('), src.indexOf('export async function runPlannerProductionPass('));
-    const guardIdx = produce.indexOf("dmStageOf(tp.execMeta) === 'drafted'");
-    const claimIdx = produce.indexOf("claimTouchpointUnderPlanLock(tp, ['planned'])");
-    expect(guardIdx).toBeGreaterThan(0);
-    expect(guardIdx).toBeLessThan(claimIdx);
-    // 발행 감지는 planned → ready 단일 CAS만 한다
-    const sync = src.slice(src.indexOf('export async function syncDmPublishState('), src.indexOf('export interface TouchpointDmInfo'));
-    expect(sync).toContain("status: 'ready', fromStatuses: ['planned']");
-    expect(sync).not.toContain("'producing'");
-    // 완성(발행 + 빈 자리 0 + 확인 오류 없음)까지 확인해야 ready다 · CAS 0행은 재조회로 "이미 올라감"과 가른다
-    expect(sync).toContain('if (!isDmCarryable(state))');
-    expect(sync).toContain("fresh.status === 'ready' && dmStageOf(fresh.execMeta) === 'published'");
-    // 통지는 표식이 바뀐 호출 하나만(조건부 UPDATE RETURNING)
-    expect(sync).toContain("stampExecMetaIfChanged(tp.companyId, tp.id, 'dm_residue'");
-    // 화면 조립은 읽기만 한다 — 상태 전이·통지 0
-    const describe = src.slice(src.indexOf('export async function describeMessagingTouchpoints('), src.indexOf('export async function readDmPublishStates('));
-    expect(describe).not.toContain('syncDmPublishState(');
-    expect(describe).not.toContain('setTouchpointState(');
-    expect(describe).not.toContain('notifyPlanner(');
+  it('워커는 DM을 발행하지 않는다 — 발행은 사람이 누른 승인(planner-approve → dm-publish-core)뿐이다', () => {
+    for (const f of ['planner-executor.ts', 'planner-reconcile.ts', 'planner-review.ts', 'planner-copy.ts']) {
+      const src = readFileSync(path.join(__dirname, f), 'utf8');
+      expect(src, f).not.toMatch(/\bpublishDm(Core)?\(/);
+      expect(src, f).not.toContain('generateFromBuildMaterials');
+    }
+    expect(readFileSync(path.join(__dirname, 'planner-approve.ts'), 'utf8')).toContain('await publishDmCore(');
   });
 
   it('완성 판정은 렌더 문구와 섹션 데이터 두 축이다 — 렌더러가 문구를 안 찍는 빈 이미지 자리도 잡는다', () => {
@@ -578,8 +570,8 @@ describe('소스 계약 — 초안은 발행하지 않고, 검사 문안 = 발�
     expect(residue).toEqual(expect.arrayContaining([{ label: '이미지', count: 3 }, { label: '상품 이미지', count: 1 }]));
     expect(mergeDmResidue([{ label: '이미지', count: 1 }], [{ label: '이미지', count: 2 }, { label: '리뷰', count: 1 }]))
       .toEqual(expect.arrayContaining([{ label: '이미지', count: 3 }, { label: '리뷰', count: 1 }]));
-    const prod = readFileSync(path.join(__dirname, 'planner-production.ts'), 'utf8');
-    const inspect = prod.slice(prod.indexOf('export async function inspectDmForCarry('), prod.indexOf('export async function syncDmPublishState('));
+    const prod = readFileSync(path.join(__dirname, 'planner-dm-check.ts'), 'utf8');
+    const inspect = prod.slice(prod.indexOf('export async function inspectDmForCarry('));
     expect(inspect).toContain('findDmDataResidue(sections)');
     expect(inspect).toContain('DM_RESIDUE_NO_CONTENT');
   });
@@ -592,9 +584,10 @@ describe('소스 계약 — 초안은 발행하지 않고, 검사 문안 = 발�
     expect(exec).toContain('carrierKey(s.scheduledOn, s.timing) === key');
   });
 
-  it('같은 날의 문자와 DM은 대상이 같아야 저장된다 — 다르면 같은 사람에게 두 통이 간다', () => {
+  it('같은 날의 문자와 DM은 같은 대상이다 — 1차는 참여자 축 입력을 전체로 확정한다(두 통 불가)', () => {
     const base = { title: '9월 생일', startsOn: '2026-09-01', endsOn: '2026-09-04', benefitText: '20% 추가 할인', products: [] };
-    const bad = parsePlannerEventInput({
+    // ★ 2026-10-04 보강(설계서 Q6) — 참여 체인은 2차라 참여자 축 값이 와도 전체로 저장된다(대상이 갈릴 수 없다).
+    const coerced = parsePlannerEventInput({
       ...base,
       touchpoints: [
         { channel: 'email', timing: { anchor: 'before_start', offsetDays: 5 } },
@@ -602,8 +595,8 @@ describe('소스 계약 — 초안은 발행하지 않고, 검사 문안 = 발�
         { channel: 'dm', timing: { anchor: 'start', audience: 'participants' } },
       ],
     });
-    expect(bad.ok).toBe(false);
-    if (!bad.ok) expect(bad.error).toContain('같은 대상');
+    expect(coerced.ok).toBe(true);
+    if (coerced.ok) expect(coerced.value.touchpoints.every((t) => !t.timing.audience)).toBe(true);
     const good = parsePlannerEventInput({
       ...base,
       touchpoints: [{ channel: 'sms', timing: { anchor: 'start' } }, { channel: 'dm', timing: { anchor: 'start' } }],
@@ -618,72 +611,70 @@ describe('소스 계약 — 초안은 발행하지 않고, 검사 문안 = 발�
     if (!oneDay.ok) expect(oneDay.error).toContain('같은 날');
   });
 
-  it('발송 직전 실물 확인의 축은 DM 존재다 — 캐시 주소가 비어도 건너뛰지 않는다', () => {
+  it('발송 직전 실물 확인의 축은 DM 존재다 — 승인 때 정해진 주소가 지금도 열리는지 두 번 본다(선점 직후 · 커밋 직전)', () => {
     const exec = readFileSync(path.join(__dirname, 'planner-executor.ts'), 'utf8');
-    const verify = exec.slice(exec.indexOf('async function verifyCarryOrRevert('), exec.indexOf('// ── 채널 실행'));
-    expect(verify).toContain("const dmTp = link.dm || (tp.channel === 'dm' ? tp : null)");
-    expect(verify).not.toContain("if (!link.url) return ''");
-    expect(exec).toContain("if (link.dm || tp.channel === 'dm') {\n    const recheck = await verifyCarryOrRevert(tp, link, today);");
+    const check = exec.slice(exec.indexOf('async function dmStillOpen('), exec.indexOf('// ── 채널 실행'));
+    expect(check).toContain("const dmTp = link.dm || (tp.channel === 'dm' ? tp : null)");
+    expect(check).toContain('if (!dmTp.assetRef || !link.url) return false;');
+    const core = exec.slice(exec.indexOf('async function executeMessagingCore('), exec.indexOf('/** 메일 — 승인 때'));
+    expect((core.match(/await dmStillOpen\(tp, link\)/g) || []).length).toBe(2);
+    expect((core.match(/await fingerprintsMatch\(tp, link, claim\)/g) || []).length).toBe(2);
   });
 
-  it('문자·DM 쌍의 마감은 한 문장이다 — 보류·생략·잠금·발송 완료 모두 setTouchpointStates', () => {
+  it('문자·DM 쌍의 마감은 한 문장이다 — 보류·생략·잠금·발송 완료 · 되돌림 모두 한 문장', () => {
     const exec = readFileSync(path.join(__dirname, 'planner-executor.ts'), 'utf8');
-    const endPair = exec.slice(exec.indexOf('async function endPair('), exec.indexOf('async function settleCompanionAfterError('));
-    expect(endPair).toContain('await setTouchpointStates(tp.companyId, rows, [\'producing\'])');
-    const mark = exec.slice(exec.indexOf('async function markSent('), exec.indexOf('// ── 당일 문안'));
+    const endPair = exec.slice(exec.indexOf('async function endPair('), exec.indexOf('async function backToReview('));
+    expect(endPair).toContain("await setTouchpointStates(tp.companyId, rows, ['producing'], claimToken)");
+    const mark = exec.slice(exec.indexOf('async function markSent('), exec.indexOf('// ── 문자·DM 쌍 마감'));
     expect(mark).toContain('setTouchpointStates(tp.companyId, rows.filter');
-    // 표식도 한 문장(동반 행 포함)
-    expect(exec).toContain('await stampExecMetaMany(tp.companyId, [tp.id, companion.id]');
-    // 커밋 직전 실물 재확인(두 번째)
-    const core = exec.slice(exec.indexOf('async function executeMessagingCore('));
-    expect((core.match(/await verifyCarryOrRevert\(tp, link, today\)/g) || []).length).toBe(2);
+    // 표식도 한 문장(동반 행 포함 · 이 실행이 주인일 때만)
+    expect(exec).toContain('await stampSendAttemptOwned(tp.companyId, [tp.id, companion.id], claim.token,');
+    // 되돌림(지문 어긋남 · 스팸 실패)은 쌍 전체를 한 트랜잭션으로(planner-review)
+    const back = exec.slice(exec.indexOf('async function backToReview('), exec.indexOf('/** 예외(throw) 뒤 동반 DM 정리'));
+    expect(back).toContain('const ids = [tp.id, ...(link.dm ? [link.dm.id] : [])];');
+    expect(back).toContain('claimedIds: ids, failedIds: ids');
     // 대조 워커는 동반 행을 캐리어 결과로 확정 복구한다
     const rec = readFileSync(path.join(__dirname, 'planner-reconcile.ts'), 'utf8');
     expect(rec).toContain("const carriedBy = String(tp.execMeta?.carried_by || '')");
     expect(rec).toContain('recovered_from_carrier: true');
-    // 취소 환불 자격: 초안 대기 DM은 제작 실적이 아니다(두 문이 같은 조건)
-    const ledger = readFileSync(path.join(__dirname, 'planner-touchpoint.ts'), 'utf8');
-    const approval = readFileSync(path.join(__dirname, 'planner-approval.ts'), 'utf8');
-    const cond = "AND NOT (t.channel = 'dm' AND COALESCE(t.exec_meta->>'dm_stage', '') = 'drafted' AND t.exec_ref IS NULL)";
-    expect(ledger).toContain(cond);
-    expect(approval).toContain(cond);
   });
 
-  it('실행부는 링크를 붙인 뒤 스팸 게이트를 지나고, 동반 DM은 같은 잠금에서 선점하며, 확정 실패는 표식을 걷는다', () => {
+  it('실행부는 각인된 문안에 실주소를 붙인 최종형을 재생성 없이 검사하고, 동반 DM은 같은 잠금에서 선점하며, 확정 실패는 표식을 걷는다', () => {
     const exec = readFileSync(path.join(__dirname, 'planner-executor.ts'), 'utf8');
-    const composeIdx = exec.indexOf('appendDmLink(copy.body, link.url)');
-    const gateIdx = exec.indexOf('await passSpamGate(tp, composed');
+    const composeIdx = exec.indexOf('const finalBody = appendDmLink(String(copy.text), link.url);');
+    const gateIdx = exec.indexOf('const passed = await spamCheckPlannerCopy({');
+    const commitIdx = exec.indexOf('await createDirectSendCampaign(');
     expect(composeIdx).toBeGreaterThan(0);
     expect(composeIdx).toBeLessThan(gateIdx);
-    // 재생성 콜백도 링크를 다시 붙인다
-    expect(exec).toContain('messageText: appendDmLink(regenBody, dmUrl)');
+    expect(gateIdx).toBeLessThan(commitIdx);
+    // 검사한 문안 = 나가는 문안(같은 변수)
+    expect(exec).toContain('message: finalBody,');
+    // 당일 생성 · 재생성 콜백이 없다(§6-7)
+    expect(exec).not.toContain('orchestrate(');
+    expect(exec).not.toContain('generateMessages(');
+    expect(exec).not.toContain('regenerateCallback');
     // 동반 선점 + heartbeat 동반
     expect(exec).toContain("companions = link.dm ? [{ id: link.dm.id, fromStatuses: ['ready'] }] : []");
     expect(exec).toContain('touchClaim(tp.companyId, claimIds)');
     // 확정 실패(잔액 부족 등)는 표식을 걷고, 그 밖은 표식을 유지한 채 잠근다
     expect(exec).toContain("DEFINITE_NO_COMMIT = new Set(['INSUFFICIENT_BALANCE'");
     expect(exec).toContain('await clearSendAttempt(tp, link.dm, String(e.code))');
-    // 초안 대기 DM은 제작 경로가 아니라 감지만(잠금 없음)
-    expect(exec).toContain("tp.channel === 'dm' && tp.status === 'planned' && dmStageOf(tp.execMeta) === 'drafted'");
-    // 예외 복구는 발행 전 DM을 ready로 되돌리지 않는다
-    expect(exec).toContain("tp.channel === 'dm' && dmStageOf(tp.execMeta) !== 'published'");
-    // 발송 직전 실물 재확인(중지·빈 자리 재발)
-    expect(exec).toContain('await inspectDmForCarry(tp.companyId, dmId)');
+    // 실행 대상 = 승인 각인 있는 ready만
+    expect(exec).toContain("if (!fresh || fresh.status !== 'ready' || !fresh.execMeta?.approved) return 'not_due';");
+    expect(exec).toContain("requireApproved: true");
   });
 
   it('"보냈는지 모르는" 행은 [다시 시작]이 되살리지 않는다 · 동반 형제 heartbeat · 결과 합계는 캠페인 단위로 한 번', () => {
-    const prod = readFileSync(path.join(__dirname, 'planner-production.ts'), 'utf8');
-    const resume = prod.slice(prod.indexOf('export async function resumeHeldTouchpoint'));
-    expect(resume).toContain("if (tp.execMeta?.send_started_at && !tp.execRef) return 'unresumable';");
-    // DM 재개는 발행 확인 없이 ready가 되지 않는다
-    expect(resume).toContain("tp.channel === 'dm' && dmStageOf(tp.execMeta) !== 'published'");
+    const exec = readFileSync(path.join(__dirname, 'planner-executor.ts'), 'utf8');
+    const resume = exec.slice(exec.indexOf('export async function resumePlannerTouchpoint'));
+    expect(resume).toContain("if (tp.execMeta?.send_started_at && !tp.execRef && tp.channel !== 'email') return 'unresumable';");
     const ledger = readFileSync(path.join(__dirname, 'planner-touchpoint.ts'), 'utf8');
     expect(ledger).toContain("WHERE id = ANY($1::uuid[]) AND company_id = $2::uuid AND status = 'producing'");
     const report = readFileSync(path.join(__dirname, 'planner-report.ts'), 'utf8');
     expect(report).toContain('countedCampaigns');
-    // 대조 워커가 리마인드 패스를 부른다(호출부가 하나뿐인 패스는 그물이 아니다)
+    // 미승인 행사의 접점도 놓친 실행으로 닫는다(★ 2026-10-04 §6-8 · 옛: 승인된 행사만 봐서 조용히 남았다)
     const rec = readFileSync(path.join(__dirname, 'planner-reconcile.ts'), 'utf8');
-    expect(rec).toContain('await runPlannerDmReminderPass(today)');
-    expect(rec).toContain("missed_reason: 'dm_unpublished'");
+    expect(rec).toContain("const MISSED_EVENT_STATUS = ['approved', 'producing', 'scheduled', 'done', 'briefed', 'draft', 're_brief'];");
+    expect(rec).toContain("missed_reason: approved ? 'missed' : 'not_approved'");
   });
 });

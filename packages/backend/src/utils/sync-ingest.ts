@@ -145,6 +145,26 @@ export function buildPurchaseIngestSql(
   return { sql, params };
 }
 
+/**
+ * ★ 2026-10-04 계통 오류 응답 — 교착(40P01)·시간 초과(57014)·연결(08xxx)처럼 행 데이터 탓이 아닌 오류.
+ *
+ * 옛: 고객 경로는 그 청크를 "실패 N건"으로, 구매 경로는 단건 폴백 뒤 행마다 실패로 세어 **200**으로 답했다.
+ *   에이전트는 HTTP 성공이면 커서를 넘기므로(engine processBatch) 그 행들이 영구히 빠졌다
+ *   — 불변 원칙 「커서 전진은 서버 성공 후」 위반(FEATURE-SYNC-AGENT §2).
+ * 지금: 남은 청크를 멈추고 503 으로 답한다. 에이전트는 5xx 를 재시도하고, 끝내 실패하면 커서를 멈춘다.
+ *   이미 들어간 청크는 다시 와도 멱등이다(고객 = 폰 · 구매 = 원본 행 키).
+ * ponytail: 원본 행 키가 없는 구매(PK 없는 테이블의 전량)는 다시 오면 그 청크만큼 중복된다 — 요청 하나를
+ *   트랜잭션으로 묶으면 닫히지만 행 폴백에 SAVEPOINT 가 필요해 지금은 수용(그 경로는 1.7.2 에서 증분이 잠긴다).
+ */
+export const SYNC_RETRY_HTTP_STATUS = 503;
+export function syncRetryResponseBody(): { success: false; error: string; code: 'SYNC_RETRY' } {
+  return {
+    success: false,
+    error: '일시적인 서버 오류입니다. 같은 배치를 다시 보내 주세요.',
+    code: 'SYNC_RETRY',
+  };
+}
+
 /** 신규 컬럼 미생성(42703) 판정 — 배포 직후 DDL 실행 전 구간을 legacy 경로로 견딘다. */
 export function isUndefinedColumnError(err: any): boolean {
   if (err?.code === '42703') return true;

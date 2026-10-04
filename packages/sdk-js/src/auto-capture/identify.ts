@@ -46,16 +46,20 @@ export function watchIdentifyChanges(
     return () => {};
   }
   let lastUserId = document.body.getAttribute(ATTR_USER_ID);
+  // ★ 2026-10-04 회원 토큰이 아이디보다 늦게 붙어도(SPA) 다시 식별을 보낸다 — 서버는 토큰이 있어야 고객에 잇는다.
+  let lastToken = document.body.getAttribute(ATTR_MEMBER_TOKEN);
   const observer = new MutationObserver(() => {
     const currentUserId = document.body.getAttribute(ATTR_USER_ID);
-    if (currentUserId !== lastUserId) {
+    const currentToken = document.body.getAttribute(ATTR_MEMBER_TOKEN);
+    if (currentUserId !== lastUserId || currentToken !== lastToken) {
       lastUserId = currentUserId;
+      lastToken = currentToken;
       callback(detectIdentify());
     }
   });
   observer.observe(document.body, {
     attributes: true,
-    attributeFilter: [ATTR_USER_ID, ATTR_EMAIL, ATTR_PHONE, ATTR_NAME],
+    attributeFilter: [ATTR_USER_ID, ATTR_EMAIL, ATTR_PHONE, ATTR_NAME, ATTR_MEMBER_TOKEN],
   });
   return () => observer.disconnect();
 }

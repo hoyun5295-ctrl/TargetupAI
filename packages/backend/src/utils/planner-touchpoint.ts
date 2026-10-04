@@ -27,6 +27,8 @@ export interface PlannerTouchpointRow {
   assetRef: string | null;
   execRef: string | null;
   execMeta: Record<string, any>;
+  /** 보류·잠금·생략 사유(고객 문장) */
+  lockReason: string | null;
   /** 계산값(저장하지 않는다) */
   scheduledOn: string;
   // 행사 축
@@ -69,6 +71,54 @@ export async function guardExecMetaOrSkip(worker: string): Promise<boolean> {
   return false;
 }
 
+// ── planner_events.meta 준비 판정 (★ 2026-10-04 보강 · DDL 1 = 배포 뒤) ─────────
+let eventMetaReady: boolean | null = null;
+
+/**
+ * `planner_events.meta`(jsonb) 실재 확인 — 재료 · 생성 스냅샷 · 리비전 · 확인 링크 · 승인 각인이 산다.
+ * **양성만 캐시한다**(exec_meta와 같은 이유 — 음성을 캐시하면 ALTER 뒤에도 재기동 전까지 기능이 잠긴다).
+ * 조회 실패는 false(그 주기는 쉰다 · 다음 호출이 다시 본다).
+ */
+export async function isEventMetaReady(): Promise<boolean> {
+  if (eventMetaReady === true) return true;
+  try {
+    const r = await query(
+      `SELECT 1 FROM information_schema.columns
+        WHERE table_name = 'planner_events' AND column_name = 'meta'`,
+    );
+    eventMetaReady = r.rows.length > 0;
+    return eventMetaReady;
+  } catch (e: any) {
+    console.warn('[planner-touchpoint] planner_events.meta 확인 실패(이번 주기 보류):', e?.message || e);
+    return false;
+  }
+}
+
+/** 새 워커 패스 진입 게이트 — 두 칸(exec_meta · meta)이 다 있어야 돈다(한쪽만 있으면 반쪽 상태를 만든다). */
+export async function guardPlannerMetaOrSkip(worker: string): Promise<boolean> {
+  if (!(await guardExecMetaOrSkip(worker))) return false;
+  if (await isEventMetaReady()) return true;
+  console.log(`[${worker}] DB_MIGRATION_PENDING — planner_events.meta ALTER 대기, 이번 주기 건너뜀`);
+  return false;
+}
+
+/**
+ * 라우트용 — 새 칸이 없으면 503 DB_MIGRATION_PENDING으로 답할 근거(db_alter_safety_net).
+ * code = 42703(column does not exist) — 라우트의 `handleDbMigrationError` CT가 그대로 503으로 옮긴다(분기 두 벌 금지).
+ */
+export class PlannerMigrationPendingError extends Error {
+  code = '42703';
+  constructor(public table: string) {
+    super(`column does not exist: ${table} ALTER 실행 요청`);
+    this.name = 'PlannerMigrationPendingError';
+  }
+}
+
+export async function requirePlannerMeta(): Promise<void> {
+  if (!(await isExecMetaReady())) throw new PlannerMigrationPendingError('planner_touchpoints');
+  if (!(await isEventMetaReady())) throw new PlannerMigrationPendingError('planner_events');
+}
+
 // ── 조회 ─────────────────────────────────────────────────────────────
 /** 승인 이후 살아 있는 행사 상태 — 미승인은 어떤 실행·제작에도 걸리지 않는다(fail-closed). */
 export const LIVE_EVENT_STATUS = ['approved', 'producing', 'scheduled', 'done'];
@@ -88,6 +138,7 @@ function mapRow(r: any): PlannerTouchpointRow {
     assetRef: r.asset_ref ? String(r.asset_ref) : null,
     execRef: r.exec_ref ? String(r.exec_ref) : null,
     execMeta: (r.exec_meta && typeof r.exec_meta === 'object') ? r.exec_meta : {},
+    lockReason: r.lock_reason ?? null,
     scheduledOn: computeTouchpointDate(timing, startsOn, endsOn),
     planMonth: String(r.plan_month),
     title: String(r.title),
@@ -101,21 +152,42 @@ function mapRow(r: any): PlannerTouchpointRow {
 }
 
 /**
- * 실행·제작 후보 조회 — **승인된 행사의 터치포인트만**.
- * 예정일은 계산 축이라 SQL로 거르지 않는다(같은 규칙을 SQL에 한 번 더 쓰면 두 진실이 된다).
- * 월 범위로 좁혀 읽고 Node에서 computeTouchpointDate로 판정한다 — 월 계획이라 행 수가 작다.
+ * 실행·대조 후보 조회 — **후보 창 CT**(★ 2026-10-04 F1).
+ *
+ * ⛔ 옛 축(`e.plan_month >= 이번 달`)은 **시작 달**로 골랐다. 다음 달에 걸친 행사의 접점(10/30 시작 · 11/2 종료일 문자)은
+ *   11월이 되면 후보에서 빠져 실행되지 않았고, 대조는 지난 달로 그것을 생략으로 닫았다. 창은 날짜로 연다:
+ *   예정일은 언제나 `starts_on - 30 ≤ 예정일 ≤ ends_on`이다(앵커 = 시작·종료·시작 N일 전 · N ≤ 30 · 기입 검증이 강제).
+ *   그래서 `ends_on ≥ 하한`이면 하한 이후 예정일을 가진 행사가 빠지지 않고, `starts_on ≤ 상한 + 30`이면 먼 미래 달이 섞이지 않는다(F9).
+ * 예정일 자체는 계산 축이라 SQL로 다시 쓰지 않는다(같은 규칙이 두 진실이 된다) — 창으로 좁히고 Node가 computeTouchpointDate로 판정한다.
+ * `requireApproved` = 승인 각인(exec_meta.approved)이 있는 접점만(실행 대상 · 미승인 = not_due · F9 거름을 SQL로).
+ * `eventStatuses` 기본 = 승인 이후 상태. 대조 워커는 미승인 정리를 위해 briefed·draft를 넘긴다.
  */
+export const PLANNER_BEFORE_START_MAX_DAYS = 30;
+
 export async function loadLiveTouchpoints(input: {
   statuses: string[];
   channels?: PlannerChannel[];
-  /** 'YYYY-MM' 이상만 (지난 달 이월 실행 방지 — 기본 = 이번 달) */
-  monthFrom: string;
+  /** 'YYYY-MM-DD' — 이 날 이후(포함) 예정일을 가질 수 있는 행사만(ends_on ≥ 하한) */
+  scheduledFrom: string;
+  /** 'YYYY-MM-DD' — 이 날까지(포함) 예정일을 가질 수 있는 행사만(starts_on - 30 ≤ 상한). 없으면 상한 없음 */
+  scheduledTo?: string;
+  eventStatuses?: string[];
+  requireApproved?: boolean;
+  /** exec_meta 표식 일치(예: 승인 직후 스팸 대기 = post_approval_spam 'pending') — LIMIT 앞에서 SQL로 거른다(F9). */
+  execMetaFlag?: { key: string; value: string };
+  /** 이 행사만 */
+  eventId?: string;
   companyId?: string;
   limit?: number;
-  /** ★ 2026-09-02 페이지 순회용(리마인드처럼 전 행을 봐야 하는 패스). 정렬은 고정(starts_on·created_at)이라 커서 대신 offset으로 충분하다. */
+  /** 페이지 순회용(전 행을 봐야 하는 패스). 정렬은 고정(starts_on·created_at·id)이라 offset으로 충분하다. */
   offset?: number;
 }): Promise<PlannerTouchpointRow[]> {
-  const params: any[] = [input.statuses, LIVE_EVENT_STATUS, input.monthFrom];
+  const params: any[] = [input.statuses, input.eventStatuses && input.eventStatuses.length > 0 ? input.eventStatuses : LIVE_EVENT_STATUS, input.scheduledFrom];
+  let toClause = '';
+  if (input.scheduledTo) {
+    params.push(input.scheduledTo);
+    toClause = ` AND e.starts_on <= ($${params.length}::date + ${PLANNER_BEFORE_START_MAX_DAYS})`;
+  }
   let companyClause = '';
   if (input.companyId) {
     params.push(input.companyId);
@@ -126,19 +198,30 @@ export async function loadLiveTouchpoints(input: {
     params.push(input.channels);
     channelClause = ` AND t.channel = ANY($${params.length})`;
   }
+  const approvedClause = input.requireApproved ? ` AND (t.exec_meta ? 'approved')` : '';
+  let flagClause = '';
+  if (input.execMetaFlag) {
+    params.push(input.execMetaFlag.key, input.execMetaFlag.value);
+    flagClause = ` AND t.exec_meta->>$${params.length - 1} = $${params.length}`;
+  }
+  let eventClause = '';
+  if (input.eventId) {
+    params.push(input.eventId);
+    eventClause = ` AND t.event_id = $${params.length}::uuid`;
+  }
   params.push(Math.min(Math.max(1, input.limit || 500), 2000));
   const limitIdx = params.length;
   params.push(Math.max(0, Math.floor(input.offset || 0)));
   const r = await query(
     `SELECT t.id, t.event_id, t.company_id, t.channel, t.timing_rule, t.status,
-            t.asset_ref, t.exec_ref, t.exec_meta,
+            t.asset_ref, t.exec_ref, t.exec_meta, t.lock_reason,
             e.plan_month, e.title, e.starts_on::text AS starts_on, e.ends_on::text AS ends_on, e.benefit_text, e.products,
             e.created_by, e.status AS event_status
        FROM planner_touchpoints t
        JOIN planner_events e ON e.id = t.event_id AND e.company_id = t.company_id
       WHERE t.status = ANY($1)
         AND e.status = ANY($2)
-        AND e.plan_month >= $3${companyClause}${channelClause}
+        AND e.ends_on >= $3::date${toClause}${companyClause}${channelClause}${approvedClause}${flagClause}${eventClause}
       ORDER BY e.starts_on ASC, t.created_at ASC, t.id ASC
       LIMIT $${limitIdx} OFFSET $${params.length}`,
     params,
@@ -153,7 +236,7 @@ export async function loadLiveTouchpoints(input: {
 export async function loadEventTouchpoints(companyId: string, eventId: string): Promise<PlannerTouchpointRow[]> {
   const r = await query(
     `SELECT t.id, t.event_id, t.company_id, t.channel, t.timing_rule, t.status,
-            t.asset_ref, t.exec_ref, t.exec_meta,
+            t.asset_ref, t.exec_ref, t.exec_meta, t.lock_reason,
             e.plan_month, e.title, e.starts_on::text AS starts_on, e.ends_on::text AS ends_on, e.benefit_text, e.products,
             e.created_by, e.status AS event_status
        FROM planner_touchpoints t
@@ -165,11 +248,28 @@ export async function loadEventTouchpoints(companyId: string, eventId: string): 
   return (r.rows as any[]).map(mapRow);
 }
 
+/** 여러 행사의 터치포인트 전부(캘린더 한 달 · 쿼리 1번). 회사 조건을 자식 조회에도 직접 건다. */
+export async function loadTouchpointsForEvents(companyId: string, eventIds: string[]): Promise<PlannerTouchpointRow[]> {
+  if (eventIds.length === 0) return [];
+  const r = await query(
+    `SELECT t.id, t.event_id, t.company_id, t.channel, t.timing_rule, t.status,
+            t.asset_ref, t.exec_ref, t.exec_meta, t.lock_reason,
+            e.plan_month, e.title, e.starts_on::text AS starts_on, e.ends_on::text AS ends_on, e.benefit_text, e.products,
+            e.created_by, e.status AS event_status
+       FROM planner_touchpoints t
+       JOIN planner_events e ON e.id = t.event_id AND e.company_id = t.company_id
+      WHERE t.event_id = ANY($1::uuid[]) AND t.company_id = $2::uuid
+      ORDER BY t.created_at ASC`,
+    [eventIds, companyId],
+  );
+  return (r.rows as any[]).map(mapRow);
+}
+
 /** 터치포인트 1건 재조회(재개·수동 경로). */
 export async function loadTouchpointById(companyId: string, touchpointId: string): Promise<PlannerTouchpointRow | null> {
   const r = await query(
     `SELECT t.id, t.event_id, t.company_id, t.channel, t.timing_rule, t.status,
-            t.asset_ref, t.exec_ref, t.exec_meta,
+            t.asset_ref, t.exec_ref, t.exec_meta, t.lock_reason,
             e.plan_month, e.title, e.starts_on::text AS starts_on, e.ends_on::text AS ends_on, e.benefit_text, e.products,
             e.created_by, e.status AS event_status
        FROM planner_touchpoints t
@@ -214,6 +314,8 @@ export async function setTouchpointState(input: {
   execRef?: string | null;
   lockReason?: string | null;
   execMetaPatch?: Record<string, any>;
+  /** ★ 2026-10-04 선점 토큰(Codex 2R) — 주면 이 실행이 아직 주인일 때만 쓴다(회수·재개 뒤 옛 실행이 새 주인의 상태를 덮지 않게) */
+  claimToken?: string | null;
 }): Promise<boolean> {
   const params: any[] = [input.touchpointId, input.companyId, input.status];
   const sets = ['status = $3'];
@@ -238,6 +340,10 @@ export async function setTouchpointState(input: {
     params.push(input.fromStatuses);
     guard = ` AND status = ANY($${params.length})`;
   }
+  if (input.claimToken) {
+    params.push(input.claimToken);
+    guard += ` AND exec_meta->>'claim_token' = $${params.length}`;
+  }
   const r = await query(
     `UPDATE planner_touchpoints SET ${sets.join(', ')}
       WHERE id = $1::uuid AND company_id = $2::uuid${guard} RETURNING id`,
@@ -250,13 +356,21 @@ export async function setTouchpointState(input: {
  * exec_meta만 병합한다(상태 무변경) — 통지 표식처럼 **상태를 바꿀 이유가 없는 기록**에 쓴다.
  * ⛔ 표식을 남기려고 status를 함께 쓰면 그 자리가 조용한 상태 변경이 된다(취소된 행을 발송으로 되돌리는 부류).
  */
-export async function stampExecMeta(companyId: string, touchpointId: string, patch: Record<string, any>): Promise<void> {
-  await query(
+export async function stampExecMeta(
+  companyId: string,
+  touchpointId: string,
+  patch: Record<string, any>,
+  /** ★ 2026-10-04 Codex 3R — 주면 이 실행이 아직 주인(같은 선점 토큰)일 때만 남긴다. 반환 = 남겼는가 */
+  claimToken: string | null = null,
+): Promise<boolean> {
+  const r = await query(
     `UPDATE planner_touchpoints
         SET exec_meta = COALESCE(exec_meta, '{}'::jsonb) || $3::jsonb
-      WHERE id = $1::uuid AND company_id = $2::uuid`,
-    [touchpointId, companyId, JSON.stringify(patch)],
+      WHERE id = $1::uuid AND company_id = $2::uuid
+        AND ($4::text IS NULL OR exec_meta->>'claim_token' = $4)`,
+    [touchpointId, companyId, JSON.stringify(patch), claimToken],
   );
+  return (r.rowCount || 0) > 0;
 }
 
 /**
@@ -272,6 +386,85 @@ export async function stampExecMetaMany(companyId: string, touchpointIds: string
       WHERE id = ANY($1::uuid[]) AND company_id = $2::uuid`,
     [ids, companyId, JSON.stringify(patch)],
   );
+}
+
+/**
+ * 발송 시도 표식(★ 2026-10-04 Codex 1R H4·H6) — **이 실행이 아직 주인일 때만**(producing + 같은 선점 토큰) 남긴다.
+ * 쌍(문자 + 동반 DM)은 한 트랜잭션으로: 하나라도 주인이 아니면 아무것도 남기지 않고 false(보내지 않는다).
+ * 회수(lease 초과 → locked)나 [다시 시작] 뒤 새 실행이 집으면 토큰이 바뀌어 옛 실행은 여기서 멈춘다.
+ */
+export async function stampSendAttemptOwned(
+  companyId: string,
+  touchpointIds: string[],
+  claimToken: string,
+  patch: Record<string, any>,
+): Promise<boolean> {
+  const ids = Array.from(new Set(touchpointIds.filter(Boolean)));
+  if (ids.length === 0 || !claimToken) return false;
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const r = await client.query(
+      `UPDATE planner_touchpoints
+          SET exec_meta = COALESCE(exec_meta, '{}'::jsonb) || $4::jsonb
+        WHERE id = ANY($1::uuid[]) AND company_id = $2::uuid
+          AND status = 'producing' AND exec_meta->>'claim_token' = $3
+        RETURNING id`,
+      [ids, companyId, claimToken, JSON.stringify(patch)],
+    );
+    if (r.rows.length !== ids.length) {
+      await client.query('ROLLBACK');
+      return false;
+    }
+    await client.query('COMMIT');
+    return true;
+  } catch (err) {
+    await client.query('ROLLBACK').catch(() => { /* 원 오류 우선 */ });
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+
+/**
+ * 문안 쓰기 CAS(★ 2026-10-04 Codex 1R M10) — 읽어 둔 문안이 **그대로일 때만** 쓴다(승인 전 접점만).
+ * 검사·생성이 수 분 걸리는 동안 담당자가 고친 문안을 옛 결과가 덮지 않게. `expectedCopy` = 읽을 때의 copy(없었으면 null).
+ */
+export async function setTouchpointMetaIfCopyIs(
+  companyId: string,
+  touchpointId: string,
+  expectedCopy: unknown,
+  patch: Record<string, any>,
+): Promise<boolean> {
+  const r = await query(
+    `UPDATE planner_touchpoints
+        SET exec_meta = COALESCE(exec_meta, '{}'::jsonb) || $4::jsonb
+      WHERE id = $1::uuid AND company_id = $2::uuid AND status = 'planned'
+        AND COALESCE(exec_meta->'copy', 'null'::jsonb) = $3::jsonb
+      RETURNING id`,
+    [touchpointId, companyId, JSON.stringify(expectedCopy ?? null), JSON.stringify(patch)],
+  );
+  return r.rows.length > 0;
+}
+
+/**
+ * 후보 전수(★ 2026-10-04 Codex 1R·2R H7) — 창 조건(행사 기간)으로 고른 뒤 Node가 예정일을 거르므로, 한 페이지(LIMIT)만 보면
+ * 미래 예정 행이 앞을 차지해 오늘 행이 하루 종일 잘린다. 고정 정렬로 **끝까지 다 모은 뒤** 처리한다(처리 중 상태 변화가 페이지를 밀지 않게).
+ * ⛔ 상한을 두지 않는다 — 상한은 매 주기 같은 앞쪽만 다시 읽어 뒤쪽 당일 행을 영원히 못 닿게 한다(2R). 큰 묶음은 로그로 알린다.
+ */
+export async function loadAllLiveTouchpoints(
+  input: Omit<Parameters<typeof loadLiveTouchpoints>[0], 'limit' | 'offset'>,
+  opts: { pageSize?: number; label?: string } = {},
+): Promise<PlannerTouchpointRow[]> {
+  const pageSize = opts.pageSize || 500;
+  const out: PlannerTouchpointRow[] = [];
+  for (let page = 0; ; page++) {
+    const rows = await loadLiveTouchpoints({ ...input, limit: pageSize, offset: page * pageSize });
+    out.push(...rows);
+    if (rows.length < pageSize) break;
+  }
+  if (out.length > pageSize * 20) console.warn(`[planner-touchpoint] 후보 ${out.length}건${opts.label ? ` (${opts.label})` : ''} — 많다(전수는 처리함)`);
+  return out;
 }
 
 /**
@@ -307,6 +500,8 @@ export async function setTouchpointStates(
   companyId: string,
   rows: Array<{ id: string; status: string; lockReason: string | null; execRef?: string | null; execMetaPatch?: Record<string, any> }>,
   fromStatuses: string[],
+  /** ★ 2026-10-04 선점 토큰(Codex 2R) — 주면 이 실행이 아직 주인인 행만 옮긴다 */
+  claimToken: string | null = null,
 ): Promise<string[]> {
   if (rows.length === 0) return [];
   const r = await query(
@@ -317,6 +512,7 @@ export async function setTouchpointStates(
             exec_meta = COALESCE(t.exec_meta, '{}'::jsonb) || v.patch
        FROM unnest($2::uuid[], $3::text[], $4::text[], $5::uuid[], $6::jsonb[]) AS v(id, status, lock_reason, exec_ref, patch)
       WHERE t.id = v.id AND t.company_id = $1::uuid AND t.status = ANY($7)
+        AND ($8::text IS NULL OR t.exec_meta->>'claim_token' = $8)
       RETURNING t.id`,
     [
       companyId,
@@ -326,6 +522,7 @@ export async function setTouchpointStates(
       rows.map((x) => x.execRef ?? null),
       rows.map((x) => JSON.stringify(x.execMetaPatch || {})),
       fromStatuses,
+      claimToken,
     ],
   );
   return (r.rows as any[]).map((row) => String(row.id));
@@ -409,31 +606,29 @@ export async function notifyPlanner(
 }
 
 /**
- * 그 달 제작·실행 실적 — 취소 환불 자격 판정의 근거(실쿼리).
- * ⛔ 원장 접근은 이 파일이 소유한다 — 결재 CT가 제작 워커를 import하면 순환이 생긴다.
+ * 그 달 발송 시도 실적 — 월 대행 취소 환불 자격의 유일한 판정(★ 2026-10-04 §6-9 · 한 벌).
+ * 승인 전 소재(완성본 초안)는 실적이 아니다 · 승인 때 낸 발행비·완성비는 대행료와 별개(비환불)라 여기서 세지 않는다.
+ * ⛔ **선점(producing)과 발송 시도 표식도 실행으로 센다.** 커밋은 됐는데 참조 기록이 늦거나 실패한 창이 있고,
+ *    그 창에서 "아무 일도 안 했다"로 읽으면 나간 발송에 대행료를 환불한다.
+ * `db` = 취소 트랜잭션의 클라이언트(잠금 안에서 센다).
  */
-export async function countMonthWork(companyId: string, planMonth: string): Promise<{ produced: number; executed: number }> {
-  const r = await query(
-    `SELECT
-       -- ★ 2026-09-02 담당자가 완성·발행하지 않은 DM **초안**은 제작 실적이 아니다(생성비 5만 나갔고 고객에게 나간 것이 없다).
-       --   종전 asset_ref는 발행까지 끝난 DM을 뜻했다 — 초안을 실적으로 세면 아무것도 안 나간 달의 대행료 환불이 막힌다.
-       COUNT(*) FILTER (
-         WHERE t.asset_ref IS NOT NULL
-           AND NOT (t.channel = 'dm' AND COALESCE(t.exec_meta->>'dm_stage', '') = 'drafted' AND t.exec_ref IS NULL)
-       )::int AS produced,
-       -- ⛔ **발송 시도 표식도 실행으로 센다.** 커밋은 됐는데 참조 기록이 늦거나 실패한 창이 있고,
-       --    그 창에서 "아무 일도 안 했다"로 읽으면 나간 발송에 대행료를 환불한다.
-       COUNT(*) FILTER (
-         WHERE t.exec_ref IS NOT NULL
-            OR t.status IN ('sent', 'scheduled')
-            OR (t.exec_meta ? 'send_started_at')
-       )::int AS executed
+export async function countMonthWork(
+  companyId: string,
+  planMonth: string,
+  db: { query: (text: string, params?: any[]) => Promise<{ rows: any[] }> } = { query },
+): Promise<{ executed: number }> {
+  const r = await db.query(
+    `SELECT COUNT(*) FILTER (
+              WHERE t.exec_ref IS NOT NULL
+                 OR t.status IN ('sent', 'scheduled', 'producing')
+                 OR (t.exec_meta ? 'send_started_at')
+            )::int AS executed
        FROM planner_touchpoints t
        JOIN planner_events e ON e.id = t.event_id AND e.company_id = t.company_id
       WHERE t.company_id = $1::uuid AND e.plan_month = $2`,
     [companyId, planMonth],
   );
-  return { produced: Number(r.rows[0]?.produced) || 0, executed: Number(r.rows[0]?.executed) || 0 };
+  return { executed: Number(r.rows[0]?.executed) || 0 };
 }
 
 /**
@@ -457,6 +652,8 @@ export async function claimTouchpointUnderPlanLock(
   fromStatuses: string[],
   stampKey = 'claimed_at',
   companions: Array<{ id: string; fromStatuses: string[] }> = [],
+  /** ★ 2026-10-04 선점 토큰(Codex 1R H6) — 이 실행만의 소유 증표. 발송 시도 표식은 이 토큰이 그대로일 때만 남는다(회수·재개 뒤 옛 실행이 커밋하지 못한다). */
+  claimToken: string | null = null,
 ): Promise<boolean> {
   const client = await pool.connect();
   try {
@@ -483,13 +680,17 @@ export async function claimTouchpointUnderPlanLock(
       return false;
     }
     // ③ 같은 잠금 안에서 터치포인트를 선점한다.
+    // ⛔ 문자·DM은 발송 여부를 모르는 행(시도 표식 · 참조 없음)을 다시 집지 않는다(같은 문자 두 번 · Codex 1R H6).
+    //   메일은 발송 CT가 이미 받은 사람을 건너뛰어(email_events delivered) 다시 집어도 남은 사람에게만 간다.
     const claimed = await client.query(
       `UPDATE planner_touchpoints
           SET status = 'producing',
               exec_meta = COALESCE(exec_meta, '{}'::jsonb) || jsonb_build_object($4::text, to_jsonb(NOW()))
+                          || CASE WHEN $5::text IS NULL THEN '{}'::jsonb ELSE jsonb_build_object('claim_token', $5::text) END
         WHERE id = $1::uuid AND company_id = $2::uuid AND status = ANY($3)
+          AND NOT (channel IN ('sms', 'dm') AND (exec_meta ? 'send_started_at') AND exec_ref IS NULL)
         RETURNING id`,
-      [tp.id, tp.companyId, fromStatuses, stampKey],
+      [tp.id, tp.companyId, fromStatuses, stampKey, claimToken],
     );
     if (claimed.rows.length === 0) {
       await client.query('ROLLBACK');
@@ -501,9 +702,11 @@ export async function claimTouchpointUnderPlanLock(
         `UPDATE planner_touchpoints
             SET status = 'producing',
                 exec_meta = COALESCE(exec_meta, '{}'::jsonb) || jsonb_build_object($4::text, to_jsonb(NOW()))
+                            || CASE WHEN $6::text IS NULL THEN '{}'::jsonb ELSE jsonb_build_object('claim_token', $6::text) END
           WHERE id = $1::uuid AND company_id = $2::uuid AND event_id = $5::uuid AND status = ANY($3)
+            AND NOT (channel IN ('sms', 'dm') AND (exec_meta ? 'send_started_at') AND exec_ref IS NULL)
           RETURNING id`,
-        [c.id, tp.companyId, c.fromStatuses, stampKey, tp.eventId],
+        [c.id, tp.companyId, c.fromStatuses, stampKey, tp.eventId, claimToken],
       );
       if (co.rows.length === 0) {
         await client.query('ROLLBACK');

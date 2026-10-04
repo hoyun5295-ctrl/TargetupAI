@@ -45,7 +45,11 @@ describe('S2 이메일 완성 판정', () => {
     const src = fs.readFileSync(path.join(__dirname, '../../../routes/email.ts'), 'utf-8');
     expect(src).not.toMatch(/async function isEmailCampaignCompleted/);
     expect(src).toContain("from '../utils/email/email-completion'");
-    expect((src.match(/isEmailCampaignCompleted\(auth\.companyId, campaign\.id\)/g) || []).length).toBeGreaterThanOrEqual(4);
+    // ★ 2026-10-04 /complete 본문은 완성 코어 CT(email-complete-core · 편집기 · 플래너 승인 두 입구가 같은 문)
+    expect((src.match(/isEmailCampaignCompleted\(auth\.companyId, campaign\.id\)/g) || []).length).toBeGreaterThanOrEqual(3);
+    expect(src).toContain('await completeEmailCampaignCore({ companyId: auth.companyId, userId: auth.userId, campaign })');
+    const core = fs.readFileSync(path.join(__dirname, '../email-complete-core.ts'), 'utf-8');
+    expect(core).toContain('isEmailCampaignCompleted(companyId, campaign.id)');
     expect(src).toContain('emailCompletionContextOf(companyId, (campaigns as any[]).map((c) => String(c.id)))'); // ★0928 R122 목록 id 만
   });
 });
@@ -66,7 +70,7 @@ describe('S3 이메일 완성·발송 잠금', () => {
   });
   it('/complete 는 차감 앞에서 잠금 · /send 는 선점 앞에서 발신 설정', () => {
     const src = fs.readFileSync(path.join(__dirname, '../../../routes/email.ts'), 'utf-8');
-    const complete = src.slice(src.indexOf("router.post('/campaigns/:id/complete'"), src.indexOf("router.post('/campaigns', async"));
+    const complete = fs.readFileSync(path.join(__dirname, '../email-complete-core.ts'), 'utf-8');
     expect(complete.indexOf('emailSmtpBlocker(')).toBeGreaterThan(-1);
     expect(complete.indexOf('emailSmtpBlocker(')).toBeLessThan(complete.indexOf('deductCreditSafe('));
     expect(complete.indexOf('emailContentBlocker(')).toBeLessThan(complete.indexOf('deductCreditSafe('));

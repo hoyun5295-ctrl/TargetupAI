@@ -1,4 +1,4 @@
-import { Pool, types } from 'pg';
+import { Pool, types, type QueryResult } from 'pg';
 import mysql from 'mysql2/promise';
 
 // timestamp without timezone를 UTC로 처리 (PostgreSQL timezone=Etc/UTC)
@@ -55,6 +55,28 @@ pool.on('error', (err) => {
 export const query = (text: string, params?: any[]) => {
   return pool.query(text, params);
 };
+
+export type TxRun = (text: string, params?: any[]) => Promise<QueryResult>;
+
+/**
+ * ★ 2026-10-04 트랜잭션 헬퍼 — 한 연결에서 BEGIN → work → COMMIT. work 가 던지면 ROLLBACK 하고 그대로 다시 던진다.
+ * ROLLBACK 마저 실패한 연결은 풀로 돌려보내지 않고 버린다(끊긴 연결을 다음 요청이 받지 않게).
+ */
+export async function withTransaction<T>(work: (run: TxRun) => Promise<T>): Promise<T> {
+  const client = await pool.connect();
+  let broken: Error | undefined;
+  try {
+    await client.query('BEGIN');
+    const out = await work((text, params) => client.query(text, params));
+    await client.query('COMMIT');
+    return out;
+  } catch (err) {
+    await client.query('ROLLBACK').catch((e: Error) => { broken = e; });
+    throw err;
+  } finally {
+    client.release(broken);
+  }
+}
 
 // ★ 보안: MySQL 비밀번호 미설정 시 서버 기동 차단 (fail-fast)
 if (!IS_TEST && !process.env.MYSQL_PASSWORD) {

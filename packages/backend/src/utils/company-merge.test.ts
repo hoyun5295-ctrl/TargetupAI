@@ -59,10 +59,12 @@ describe('이동/잔류 판정 — 리터럴로 고정', () => {
     );
   });
 
-  it('잔류 축 = 이력·설정·채번·계정 + 진단 지급·초대 6종 — 옮기면 병합 목적지의 사실이 오염된다', () => {
+  it('잔류 축 = 이력·설정·채번·계정 + 진단 지급·초대 + 선불 이용 기간 원장 7종 — 옮기면 병합 목적지의 사실이 오염된다', () => {
     expect(keepTables().sort()).toEqual(
       [
         'company_plan_changes',
+        // ★2026-10-04 선불 이용 기간 원장 — 회차 UNIQUE·날짜별 요금제가 그 회사의 기록이다
+        'company_plan_term_events',
         'company_settings',
         'customer_code_sequences',
         'users',

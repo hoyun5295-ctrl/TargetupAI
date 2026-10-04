@@ -141,7 +141,7 @@ const cdpVariantTrackOnce = cdpBurstLimit(2, 30 * 60_000, (req, companyId) => `$
 
 router.post('/ingest', requireCdpBrowserOrigin, cdpIngestBurst, async (req: Request, res: Response) => {
   try {
-    const { schema_version, anonymous_id, session_id, sent_at, events } = req.body || {};
+    const { schema_version, anonymous_id, session_id, sent_at, events, member } = req.body || {};
 
     if (schema_version !== 'v1') {
       return res.status(400).json({
@@ -190,6 +190,10 @@ router.post('/ingest', requireCdpBrowserOrigin, cdpIngestBurst, async (req: Requ
       sentAt: sent_at || null,
       events: events as Array<Record<string, any>>,
       storeCode,
+      // ★ 2026-10-04 SDK 가 매 전송에 싣는 회원 증명 — 검증은 ingestBrowserEvents 가 토큰으로 한다
+      member: member && typeof member.external_id === 'string' && typeof member.member_token === 'string'
+        ? { externalId: member.external_id, memberToken: member.member_token }
+        : null,
     });
 
     return res.json({
@@ -538,9 +542,16 @@ router.post('/push/subscribe', requireCdpKeyOrBrowserOrigin, async (req: Request
     }
 
     // customer 식별 (external_id 또는 anonymous_id)
+    // ★ 2026-10-04 브라우저 호출은 회원 토큰이 이 회원과 맞을 때만 그 고객에 구독을 잇는다(전수점검 C1 같은 뿌리).
+    //   옛: 공개키 + Origin 만으로 남의 회원 id 에 내 브라우저 구독을 붙여 그 고객에게 가는 푸시를 받아 볼 수 있었다.
+    //   비밀키 서버 호출(미들웨어가 이미 검증)은 그대로. 토큰이 없으면 익명 구독으로 저장한다(구독 자체는 막지 않는다).
+    const viaSecret = !!(req.headers['x-hanjullo-secret'] || req.headers['X-Hanjullo-Secret' as any]);
+    const identityAllowed = !!external_id && (viaSecret || verifyCdpMemberToken(
+      req.body?.member_token ? String(req.body.member_token) : '', cdpAuth.companyId, String(external_id),
+    ));
     let customerId: string | null = null;
     let identityLinkId: string | null = null;
-    if (external_id) {
+    if (identityAllowed) {
       const linkRow = await query(
         `SELECT id, customer_id FROM cdp_identity_links
          WHERE company_id = $1::uuid AND source = $2 AND external_id = $3 LIMIT 1`,

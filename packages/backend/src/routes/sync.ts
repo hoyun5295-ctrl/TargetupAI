@@ -6,11 +6,11 @@ import { agentReleasesDir } from '../utils/agent-build-tiers';
 import { Request, Response, Router } from 'express';
 import fs from 'fs';
 import path from 'path';
-import { query } from '../config/database';
+import { query, withTransaction } from '../config/database';
 import { guardMachineOrigin } from '../utils/geo-access';
 import { ensureSystemSyncUser } from '../utils/system-sync-user';
 import { TIMEOUTS, RATE_LIMITS, BATCH_SIZES } from '../config/defaults';
-import { normalizePhone, normalizeRegion, normalizeDate, normalizeCustomFieldValue, salvageBirthParts, normalizeAmount } from '../utils/normalize';
+import { normalizePhone, normalizeRegion, normalizeDate, normalizeCustomFieldValue, salvageBirthParts, normalizeAmount, normalizeSmsOptIn } from '../utils/normalize';
 import {
   FIELD_MAP,
   CATEGORY_LABELS,
@@ -19,7 +19,7 @@ import {
   upsertCustomFieldDefinitions,
 } from '../utils/standard-field-map';
 import { callAiMapping, AiMappingQuotaExceeded, AiMappingUnavailable, SupportedDbType, MappingTarget } from '../utils/ai-mapping';
-import { createCustomerUpsertBuilder, buildSmsOptInBackfill, isRowLevelDbError } from '../utils/customer-upsert';
+import { createCustomerUpsertBuilder, applySmsOptInDefaults, isRowLevelDbError } from '../utils/customer-upsert';
 // ★2026-09-12 시크릿 해시 비교(원문 저장 폐지 · 전환기 폴백은 42703로만 판정)
 import { hashSecret, verifySecret } from '../utils/secret-hash';
 import { registerBulkCompanyUserUnsubscribes } from '../utils/unsubscribe-helper';
@@ -37,6 +37,8 @@ import {
   buildPurchaseIngestSql,
   isUndefinedColumnError,
   PurchaseIngestRow,
+  SYNC_RETRY_HTTP_STATUS,
+  syncRetryResponseBody,
 } from '../utils/sync-ingest';
 
 const router = Router();
@@ -297,10 +299,13 @@ async function getSyncConfigForAgent(companyId: string): Promise<{
  * [해제] sms_opt_in=true 고객 → source='sync' unsubscribes 제거 (등록의 짝).
  *   ★ source='sync'(sms_opt_in 파생)만 삭제 — 능동 수신거부(manual/upload/legacy_migration)는 보존.
  *   명시 opt-out 우선(정보통신망법): 고객이 직접 거부했거나 옛 이관 거부분은 동의 동기화로 덮지 않는다.
+ *   ★ 2026-10-04 해제는 **이 배치에서 원본(ERP)이 동의라고 보낸 번호**만(optInPhones). 옛: 고객 행 sms_opt_in=true 전원이었다 —
+ *     그 칸은 싱크만 쓰는 칸이 아니라(자사몰 식별 · 화면 수정 · 업로드) 다른 문이 true 로 올리면 원본이 아직 거부인데도
+ *     싱크 수신거부가 지워졌다(싱크·자사몰 전수점검 S16 · 결정 ④ 철회 우선). 등록 쪽은 회사 전체 그대로(빠짐 0).
  *
  * ⚠️ 이 로직은 sync.ts 외부에서 복제 금지. 싱크 경로의 유일한 수신거부 진입점.
  */
-async function reconcileSyncUnsubscribes(companyId: string, companyName?: string): Promise<void> {
+async function reconcileSyncUnsubscribes(companyId: string, companyName: string | undefined, optInPhones: string[]): Promise<void> {
   try {
     // 1. 시스템 user 조회/생성 — CT (42P08 타입 고정: $1::uuid + $2::text)
     let systemUserId: string | null = null;
@@ -352,15 +357,17 @@ async function reconcileSyncUnsubscribes(companyId: string, companyName?: string
     // ★ 2026-06-15 버그2 fix: 거부→동의 재동의 고객이 옛 sync 수신거부 잔존으로 계속 거부로 노출되던 비대칭 차단.
     //   source='sync'(sms_opt_in 파생)만 삭제 — manual/upload/legacy_migration(능동 opt-out)은 보존(정보통신망법).
     //   EXISTS로 unsubscribes(작은 집합) 기준 스캔 → 동의 전환분만 정확히 해제. 변경 없으면 0건.
+    if (optInPhones.length === 0) return;
     const reEnable = await query(
       `DELETE FROM unsubscribes u
        WHERE u.company_id = $1 AND u.source = 'sync'
+         AND u.phone = ANY($2::text[])
          AND EXISTS (
            SELECT 1 FROM customers c
            WHERE c.company_id = $1 AND c.phone = u.phone
              AND c.sms_opt_in = true AND c.is_active = true
          )`,
-      [companyId]
+      [companyId, optInPhones]
     );
     if (reEnable.rowCount && reEnable.rowCount > 0) {
       console.log(`[Sync] 수신거부 자동해제(동의 전환): ${reEnable.rowCount}건 (company: ${companyName})`);
@@ -661,6 +668,10 @@ router.post('/customers', async (req: SyncAuthRequest, res: Response) => {
     //   첫 행만 남기고 끝내면 나머지 매장이 customer_stores에서 통째로 사라진다(고치려다 다른 사고).
     const seenPhones = new Set<string>();
     let duplicateInRequest = 0;
+    // ★ 2026-10-04 수신동의 칸 값을 에이전트가 알아보지 못한 행(1.7.2+ 가 sms_opt_in_unknown 에 그 글자를 싣는다)
+    //   → 신규 고객이면 미동의(applySmsOptInDefaults). 옛: null 로 접혀 신규 기본 동의(true)를 탔다.
+    const unknownConsentPhones = new Set<string>();
+    const unknownConsentWords = new Set<string>();
     /** 폰 → 그 폰이 이 배치에서 들고 온 매장 전량(중복 행 것 포함). Set이라 같은 매장이 겹쳐도 1개다. */
     const storesByPhone = new Map<string, Set<string>>();
 
@@ -750,9 +761,13 @@ router.post('/customers', async (req: SyncAuthRequest, res: Response) => {
           row.age = finalAge;
         } else if (field.fieldKey === 'sms_opt_in') {
           // ★ 2026-08-14 (Codex 1R): 미제공 = null — true로 채우면 UPDATE COALESCE가 기존 false(수신거부)를
-          //   true로 되돌린다. 신규 행 기본 true는 업서트 직후 buildSmsOptInBackfill이 채운다.
+          //   true로 되돌린다. 신규 행 기본 true는 업서트와 같은 트랜잭션의 applySmsOptInDefaults가 채운다.
           const val = c[field.fieldKey];
           row.sms_opt_in = val !== null && val !== undefined ? val : null;
+          if (row.sms_opt_in === null && c.sms_opt_in_unknown) {
+            unknownConsentPhones.add(phone);
+            unknownConsentWords.add(String(c.sms_opt_in_unknown).slice(0, 20));
+          }
         } else if (field.dataType === 'date') {
           // ★ 2026-08-14: date 컬럼(recent_purchase_date)이 정규화를 못 거치고 원본 그대로 PG로 가던 자리.
           //   FIELD_MAP은 normalizeFunction='normalizeDate'를 지정하는데 이 루프가 birth_date만 특수 처리하고
@@ -811,38 +826,47 @@ router.post('/customers', async (req: SyncAuthRequest, res: Response) => {
       skipUnchanged: true,
     });
     const CHUNK_SIZE = 500;
-
+    // ★ 2026-10-04 폰 순서로 적재한다 — 같은 고객을 건드리는 동시 요청(정각 고객 동기화 · 원격 전체 동기화)이
+    //   서로 다른 순서로 행을 잠그면 교착(40P01)이 난다. 구매 경로는 원본 행 키 정렬로 이미 막고 있다(dedupeBySourceRowKey).
+    validRows.sort((a, b) => (a.phone < b.phone ? -1 : a.phone > b.phone ? 1 : 0));
+    // ★ 2026-10-04 계통 오류가 나면 남은 청크를 멈추고 503 — 행 실패로 접어 200 을 주면 에이전트가 커서를 넘긴다(sync-ingest.ts).
+    let systemError: any = null;
+    // ★ 2026-10-04 청크(폴백이면 한 행)마다 업서트 · 매장 기록 · 수신동의 기본값을 한 트랜잭션으로(applySmsOptInDefaults 주석).
     for (let i = 0; i < validRows.length; i += CHUNK_SIZE) {
       const chunk = validRows.slice(i, i + CHUNK_SIZE);
       try {
-        const { sql, values } = upsertBuilder.buildBatch(companyId, chunk);
-        await query(sql, values);
-        // 처리한 행 수(바뀌지 않아 다시 쓰지 않은 행 포함 · 종전과 같은 뜻 — R206 뒤 rowCount 는 바뀐 행만 센다)
-        upsertedCount += chunk.length;
+        await withTransaction(async (run) => {
+          const { sql, values } = upsertBuilder.buildBatch(companyId, chunk);
+          await run(sql, values);
 
-        // customer_stores 벌크 처리 (sync 경로 전용 — upload.ts는 별도 매핑 로직 사용)
-        // ★ 2026-09-02 chunk 배열이 아니라 그 폰들의 매장 전량을 쓴다 — 폰 dedupe로 두 번째 행을
-        //   customers 적재에서 뺐어도 그 행이 들고 온 매장은 살아야 한다(다매장 고객이 중복의 주된 이유).
-        const storeRows: Array<{ phone: string; store_code: string }> = [];
-        for (const r of chunk) {
-          const codes = storesByPhone.get(String(r.phone));
-          if (codes) for (const code of codes) storeRows.push({ phone: String(r.phone), store_code: code });
-        }
-        if (storeRows.length > 0) {
-          const storeValues: any[] = [];
-          const storeValueClauses: string[] = [];
-          for (let j = 0; j < storeRows.length; j++) {
-            const offset = j * 3;
-            storeValueClauses.push(`($${offset+1}, (SELECT id FROM customers WHERE company_id = $${offset+1} AND phone = $${offset+2} LIMIT 1), $${offset+3})`);
-            storeValues.push(companyId, storeRows[j].phone, storeRows[j].store_code);
+          // customer_stores 벌크 처리 (sync 경로 전용 — upload.ts는 별도 매핑 로직 사용)
+          // ★ 2026-09-02 chunk 배열이 아니라 그 폰들의 매장 전량을 쓴다 — 폰 dedupe로 두 번째 행을
+          //   customers 적재에서 뺐어도 그 행이 들고 온 매장은 살아야 한다(다매장 고객이 중복의 주된 이유).
+          const storeRows: Array<{ phone: string; store_code: string }> = [];
+          for (const r of chunk) {
+            const codes = storesByPhone.get(String(r.phone));
+            if (codes) for (const code of codes) storeRows.push({ phone: String(r.phone), store_code: code });
           }
-          await query(
-            `INSERT INTO customer_stores (company_id, customer_id, store_code)
-             VALUES ${storeValueClauses.join(',')}
-             ON CONFLICT (customer_id, store_code) DO NOTHING`,
-            storeValues
-          );
-        }
+          if (storeRows.length > 0) {
+            const storeValues: any[] = [];
+            const storeValueClauses: string[] = [];
+            for (let j = 0; j < storeRows.length; j++) {
+              const offset = j * 3;
+              storeValueClauses.push(`($${offset+1}, (SELECT id FROM customers WHERE company_id = $${offset+1} AND phone = $${offset+2} LIMIT 1), $${offset+3})`);
+              storeValues.push(companyId, storeRows[j].phone, storeRows[j].store_code);
+            }
+            await run(
+              `INSERT INTO customer_stores (company_id, customer_id, store_code)
+               VALUES ${storeValueClauses.join(',')}
+               ON CONFLICT (customer_id, store_code) DO NOTHING`,
+              storeValues
+            );
+          }
+          await applySmsOptInDefaults(run, companyId, chunk.map((r) => String(r.phone)), unknownConsentPhones);
+        });
+        // 처리한 행 수(바뀌지 않아 다시 쓰지 않은 행 포함 · 종전과 같은 뜻 — R206 뒤 rowCount 는 바뀐 행만 센다)
+        // ★ 2026-10-04 매장 기록까지 끝난 뒤에 센다 — 매장 기록이 실패해 단건 폴백으로 가면 같은 청크가 두 번 세어졌다.
+        upsertedCount += chunk.length;
       } catch (chunkError: any) {
         // ★ D142 (2026-04-28) PDF 0428 #11: chunk(500건) 일괄 UPSERT는 단일 트랜잭션이라
         //   1건만 잘못되어도 PostgreSQL이 전체 롤백 → 500건 전부 fail로 카운트되던 사고.
@@ -850,33 +874,43 @@ router.post('/customers', async (req: SyncAuthRequest, res: Response) => {
         //   해결: 일괄 실패 시 단건씩 재시도 → 실패 행만 정확히 식별 + 정상 행은 정상 처리.
         //   느리지만(최대 500회 SQL) 정확. chunk 일괄 실패는 흔한 케이스 아니라 성능 영향 미미.
         // ★ 2026-08-14 (Codex 2R): 단 계통 오류(연결·구문·자원)는 폴백 금지 — 부하 증폭(customer-upsert.ts 참조).
+        // ★ 2026-10-04 그리고 실패로 세지도 않는다 — 배치를 멈추고 503(위 systemError).
         if (!isRowLevelDbError(chunkError)) {
-          failedCount += chunk.length;
-          failures.push({ phone: `chunk#${Math.floor(i / CHUNK_SIZE) + 1}`, reason: `계통 오류(폴백 생략): ${chunkError.message || chunkError}` });
-          continue;
+          systemError = chunkError;
+          break;
         }
         console.warn(`[Sync] Chunk ${Math.floor(i / CHUNK_SIZE) + 1} 일괄 UPSERT 실패 → 단건 재시도 모드: ${chunkError.message || chunkError}`);
         for (const row of chunk) {
           try {
-            const { sql: rowSql, values: rowValues } = upsertBuilder.buildBatch(companyId, [row]);
-            const rowResult = await query(rowSql, rowValues);
-            upsertedCount += rowResult.rowCount || 1;
+            let rowCount = 0;
+            await withTransaction(async (run) => {
+              const { sql: rowSql, values: rowValues } = upsertBuilder.buildBatch(companyId, [row]);
+              const rowResult = await run(rowSql, rowValues);
+              rowCount = rowResult.rowCount || 1;
 
-            // customer_stores 단건 처리 (chunk 일괄 실패 시 fallback)
-            // ★ 2026-09-02 이 폰의 매장 전량을 넣는다 — 벌크 경로와 같은 규칙이라야
-            //   "청크가 성공했을 때만 매장이 다 들어가는" 불일치가 생기지 않는다.
-            const rowCodes = storesByPhone.get(String(row.phone));
-            if (rowCodes) {
-              for (const code of rowCodes) {
-                await query(
-                  `INSERT INTO customer_stores (company_id, customer_id, store_code)
-                   VALUES ($1, (SELECT id FROM customers WHERE company_id = $1 AND phone = $2 LIMIT 1), $3)
-                   ON CONFLICT (customer_id, store_code) DO NOTHING`,
-                  [companyId, row.phone, code]
-                );
+              // customer_stores 단건 처리 (chunk 일괄 실패 시 fallback)
+              // ★ 2026-09-02 이 폰의 매장 전량을 넣는다 — 벌크 경로와 같은 규칙이라야
+              //   "청크가 성공했을 때만 매장이 다 들어가는" 불일치가 생기지 않는다.
+              const rowCodes = storesByPhone.get(String(row.phone));
+              if (rowCodes) {
+                for (const code of rowCodes) {
+                  await run(
+                    `INSERT INTO customer_stores (company_id, customer_id, store_code)
+                     VALUES ($1, (SELECT id FROM customers WHERE company_id = $1 AND phone = $2 LIMIT 1), $3)
+                     ON CONFLICT (customer_id, store_code) DO NOTHING`,
+                    [companyId, row.phone, code]
+                  );
+                }
               }
-            }
+              await applySmsOptInDefaults(run, companyId, [String(row.phone)], unknownConsentPhones);
+            });
+            upsertedCount += rowCount;
           } catch (rowError: any) {
+            // 단건 폴백 중에도 계통 오류면 행 실패가 아니다(그 뒤 행 전부가 같은 이유로 "실패"로 세어진다)
+            if (!isRowLevelDbError(rowError)) {
+              systemError = rowError;
+              break;
+            }
             failedCount++;
             failures.push({
               phone: row.phone,
@@ -884,14 +918,19 @@ router.post('/customers', async (req: SyncAuthRequest, res: Response) => {
             });
           }
         }
+        if (systemError) break;
       }
     }
 
-    // ★ 2026-08-14 (Codex 1R): 신규 행 수신동의 기본 true 백필 — 미제공은 null로 들어가므로
-    //   업서트가 끝난 뒤 null인 행만 정책 기본으로 채운다(기존 false는 COALESCE 보존이라 불변).
-    if (upsertedCount > 0 && validRows.length > 0) {
-      const backfill = buildSmsOptInBackfill(companyId, validRows.map((r) => r.phone));
-      await query(backfill.sql, backfill.values);
+    if (systemError) {
+      // 이미 커밋된 청크는 다음 재전송에서 폰 기준으로 다시 맞춰진다. 수신거부 대조도 그때 돈다.
+      console.warn(`[Sync] Customers 계통 오류 — 배치 중단 · 503 재전송 요청 (company: ${req.companyName}): ${systemError?.code || ''} ${systemError?.message || systemError}`);
+      return res.status(SYNC_RETRY_HTTP_STATUS).json(syncRetryResponseBody());
+    }
+
+    // 수신동의 기본값(못 알아본 글자 = 미동의 → 값 없음 = 기본 동의)은 위 청크 트랜잭션 안에서 이미 적용했다(applySmsOptInDefaults).
+    if (unknownConsentPhones.size > 0) {
+      console.log(`[Sync] 수신동의 값 해석 불가 ${unknownConsentPhones.size}건 — 신규 고객은 미동의로 (표기: ${[...unknownConsentWords].slice(0, 5).join(', ')}) (company: ${req.companyName})`);
     }
 
     // sync_logs 기록
@@ -976,7 +1015,11 @@ router.post('/customers', async (req: SyncAuthRequest, res: Response) => {
     }
 
     // ===== sms_opt_in 양방향 동기화 — false→unsubscribes 등록 / true→source='sync' 해제 =====
-    await reconcileSyncUnsubscribes(companyId, req.companyName);
+    await reconcileSyncUnsubscribes(
+      companyId,
+      req.companyName,
+      validRows.filter((r) => normalizeSmsOptIn(r.sms_opt_in) === true).map((r) => String(r.phone)),
+    );
 
     // ===== Agent 설정 응답 (설정 폴링 제거 대체) =====
     const agentConfig = await getSyncConfigForAgent(companyId);
@@ -999,6 +1042,8 @@ router.post('/customers', async (req: SyncAuthRequest, res: Response) => {
         // ★ 2026-09-02 배치 안에서 같은 폰이라 customers 적재를 건너뛴 행 수(매장은 보존했다).
         //   실패가 아니므로 failedCount와 섞지 않는다 — upload 응답과 같은 이름·의미다.
         duplicateInRequest,
+        // ★ 2026-10-04 수신동의 값을 알아보지 못한 행 수(신규면 미동의로 넣었다 · 실패가 아니다)
+        consentUnknown: unknownConsentPhones.size,
         failures: failures.slice(0, 50) // 최대 50건만 리턴
       },
       config: agentConfig
@@ -1122,36 +1167,75 @@ router.post('/purchases', async (req: SyncAuthRequest, res: Response) => {
     //     배포 직후 ~ DDL 실행 전 구간은 42703을 잡아 legacy 경로로 한 번 내려가고 그대로 견딘다.
     const P_CHUNK = 500;
     let useSourceKey = true;
-    for (let i = 0; i < validPurchases.length; i += P_CHUNK) {
-      const chunk = validPurchases.slice(i, i + P_CHUNK);
-      try {
-        const built = buildPurchaseIngestSql(chunk, companyId, phoneToCustomerId, useSourceKey);
-        const result = await query(built.sql, built.params);
-        insertedCount += result.rowCount || chunk.length;
-      } catch (chunkError: any) {
-        // 신규 컬럼 미생성 = DB 마이그레이션 대기 구간. 적재를 멈추지 않고 legacy로 내려 같은 청크를 다시 처리한다.
-        if (useSourceKey && isUndefinedColumnError(chunkError)) {
-          console.warn('[Sync] purchases.source_row_key 미생성 — DB 마이그레이션 필요(ALTER 실행 요청). legacy 적재로 대체합니다.');
-          useSourceKey = false;
-          i -= P_CHUNK;
-          continue;
-        }
-        // ★ D142 (2026-04-28) PDF 0428 #11: purchases도 동일 패턴 — 단건 재시도로 실패 행만 식별
-        console.warn(`[Sync] Purchases chunk ${Math.floor(i / P_CHUNK) + 1} 일괄 적재 실패 → 단건 재시도: ${chunkError.message || chunkError}`);
-        for (const r of chunk) {
+    // ★ 2026-10-04 계통 오류면 배치를 멈추고 503 — 고객 경로와 같은 규칙(sync-ingest.ts syncRetryResponseBody).
+    //   옛: 계통 오류에도 단건 폴백을 돌려 행마다 실패로 세고 200 → 에이전트가 커서를 넘겨 구매가 영구히 빠졌다.
+    let systemError: any = null;
+    // ★ 2026-10-04 요청 전체를 한 트랜잭션으로(청크·행 실패는 SAVEPOINT 로 그 부분만 되돌린다) — 503 이면 아무것도 남기지 않는다.
+    //   옛: 앞 청크가 커밋된 뒤 503 이면 재전송 때 원본 행 키 없는 구매(옛 에이전트 · 키 없는 원본)가 그만큼 두 번 들어갔다(Codex 1004 R1 high).
+    //   created_at(도착 축)이 트랜잭션 시작 시각이 되지만 구매 원장 여정 창 끝은 오늘 00:00 KST 라 커밋 지연에 걸리지 않는다(journey-trigger-watcher).
+    try {
+      await withTransaction(async (pRun) => {
+        const undoTo = (savepoint: string) => pRun(`ROLLBACK TO SAVEPOINT ${savepoint}`);
+        for (let i = 0; i < validPurchases.length; i += P_CHUNK) {
+          const chunk = validPurchases.slice(i, i + P_CHUNK);
+          await pRun('SAVEPOINT p_chunk');
           try {
-            const one = buildPurchaseIngestSql([r], companyId, phoneToCustomerId, useSourceKey);
-            await query(one.sql, one.params);
-            insertedCount++;
-          } catch (rowError: any) {
-            failedCount++;
-            failures.push({
-              phone: r.phone,
-              reason: rowError.message || rowError.detail || 'Single-row INSERT failed',
-            });
+            const built = buildPurchaseIngestSql(chunk, companyId, phoneToCustomerId, useSourceKey);
+            const result = await pRun(built.sql, built.params);
+            await pRun('RELEASE SAVEPOINT p_chunk');
+            insertedCount += result.rowCount || chunk.length;
+          } catch (chunkError: any) {
+            await undoTo('p_chunk');
+            // 신규 컬럼 미생성 = DB 마이그레이션 대기 구간. 적재를 멈추지 않고 legacy로 내려 같은 청크를 다시 처리한다.
+            if (useSourceKey && isUndefinedColumnError(chunkError)) {
+              console.warn('[Sync] purchases.source_row_key 미생성 — DB 마이그레이션 필요(ALTER 실행 요청). legacy 적재로 대체합니다.');
+              useSourceKey = false;
+              i -= P_CHUNK;
+              continue;
+            }
+            if (!isRowLevelDbError(chunkError)) {
+              systemError = chunkError;
+              break;
+            }
+            // ★ D142 (2026-04-28) PDF 0428 #11: purchases도 동일 패턴 — 단건 재시도로 실패 행만 식별
+            console.warn(`[Sync] Purchases chunk ${Math.floor(i / P_CHUNK) + 1} 일괄 적재 실패 → 단건 재시도: ${chunkError.message || chunkError}`);
+            for (const r of chunk) {
+              await pRun('SAVEPOINT p_row');
+              try {
+                const one = buildPurchaseIngestSql([r], companyId, phoneToCustomerId, useSourceKey);
+                await pRun(one.sql, one.params);
+                await pRun('RELEASE SAVEPOINT p_row');
+                insertedCount++;
+              } catch (rowError: any) {
+                await undoTo('p_row');
+                if (!isRowLevelDbError(rowError)) {
+                  systemError = rowError;
+                  break;
+                }
+                failedCount++;
+                failures.push({
+                  phone: r.phone,
+                  reason: rowError.message || rowError.detail || 'Single-row INSERT failed',
+                });
+              }
+            }
+            if (systemError) break;
           }
         }
-      }
+        // 계통 오류면 던져서 요청 전체를 되돌린다(withTransaction 이 ROLLBACK)
+        if (systemError) throw systemError;
+      });
+    } catch (txError: any) {
+      // 위 계통 오류 · 연결·SAVEPOINT·COMMIT 자체 실패 = 계통 오류 · 되돌렸으므로 남는 것이 없다
+      //   (예외 하나: 서버는 COMMIT 했는데 그 응답만 끊긴 경우는 알 수 없다. 1.7.2+ 는 키 없는 행에도 배치 재시도 표식을
+      //    source_row_key 로 실어 재전송이 UPSERT 로 흡수된다(sync-agent db/keyset.ts keylessRetryKeys) · 그 전 버전의 키 없는 행만 한 번 더 들어간다)
+      systemError = systemError || txError;
+    }
+
+    if (systemError) {
+      // 이 요청의 적재는 모두 되돌렸다 — 같은 배치를 다시 보내도 중복이 없다(키 없는 행 포함). 구매 요약 재계산도 재전송 때 돈다.
+      console.warn(`[Sync] Purchases 계통 오류 — 배치 되돌림 · 503 재전송 요청 (company: ${req.companyName}): ${systemError?.code || ''} ${systemError?.message || systemError}`);
+      return res.status(SYNC_RETRY_HTTP_STATUS).json(syncRetryResponseBody());
     }
 
     // ★ 2026-07-03: 이 배치에 등장한 고객들의 구매요약 컬럼 재계산 (멱등 — 원장 기준 전체 재계산)

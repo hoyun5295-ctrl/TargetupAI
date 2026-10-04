@@ -59,6 +59,13 @@ const DatabaseConfigSchema = z.object({
 
 // ─── 동기화 설정 ────────────────────────────────────────
 
+/** ★ 1.7.2 서버 배치 상한(백엔드 BATCH_SIZES.syncCustomer·syncPurchase = 5000 · 넘으면 400 비재시도) */
+export const SERVER_MAX_BATCH_SIZE = 5000;
+export function clampBatchSize(n: number): number {
+  const v = Number.isFinite(n) && n > 0 ? Math.floor(n) : 4000;
+  return Math.min(v, SERVER_MAX_BATCH_SIZE);
+}
+
 const SyncConfigSchema = z.object({
   customerInterval: z.number().int().min(5).max(1440).default(60),     // 분
   purchaseInterval: z.number().int().min(5).max(720).default(30),      // 분

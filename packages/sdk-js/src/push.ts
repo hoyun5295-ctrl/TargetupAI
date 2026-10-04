@@ -14,6 +14,11 @@ import type { HanjulloSDKConfig } from './types';
 export interface PushSubscribeInput {
   /** 회원 식별 (선택) */
   externalId?: string;
+  /**
+   * ★ 2026-10-04 회원 토큰 — 몰 서버가 비밀키로 받은 값(POST /api/cdp/member-token).
+   * 브라우저 구독을 그 회원에 잇는 근거다. 없으면 구독은 익명으로 저장된다(남의 회원 id 에 구독을 붙이지 못하게).
+   */
+  memberToken?: string;
   /** 비회원 추적 ID (선택) */
   anonymousId?: string;
   /** 자사몰에 배치된 service worker 경로 (기본 /hanjullo-sw.js) */
@@ -93,6 +98,7 @@ export class HanjulloPushModule {
             keys: subJson.keys,
           },
           external_id: input.externalId,
+          member_token: input.memberToken,
           anonymous_id: input.anonymousId,
           user_agent: navigator.userAgent,
         }),

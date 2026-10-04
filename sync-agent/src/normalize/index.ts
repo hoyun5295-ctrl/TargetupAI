@@ -351,11 +351,17 @@ export function normalizeDate(value: any): string | null {
 /**
  * 구매일시 정규화 — 'YYYY-MM-DD HH:mm:ss'
  */
-export function normalizeTimestamp(raw: unknown): string | null {
+export function normalizeTimestamp(raw: unknown, opts?: { utcWallClock?: boolean }): string | null {
   if (raw === null || raw === undefined || raw === '') return null;
 
   if (raw instanceof Date) {
     if (isNaN(raw.getTime())) return null;
+    // ★ 1.7.2 MSSQL(tedious useUTC 기본 true)은 원본 벽시계를 UTC 성분에 담아 준다 — 로컬로 읽으면 +9시간(15시 이후 구매 = 다음 날).
+    //   custom 칸은 0913 에 같은 규칙으로 되돌렸다(normalizeSyncCustomFieldValue) · 구매일만 빠져 있었다.
+    if (opts?.utcWallClock) {
+      const p = (n: number) => String(n).padStart(2, '0');
+      return `${raw.getUTCFullYear()}-${p(raw.getUTCMonth() + 1)}-${p(raw.getUTCDate())} ${p(raw.getUTCHours())}:${p(raw.getUTCMinutes())}:${p(raw.getUTCSeconds())}`;
+    }
     return dayjs(raw).format('YYYY-MM-DD HH:mm:ss');
   }
 
@@ -488,6 +494,13 @@ export function normalizeCustomer(
 ): Record<string, unknown> {
   const result: Record<string, unknown> = { ...mapped };
 
+  // ★ 1.7.2 수신동의 칸에 값은 있는데 알아볼 수 없으면(낱말표 밖) 그 글자를 표시로 싣는다 — 서버가 신규 고객을 미동의로 넣는다.
+  //   null 로만 접으면 서버는 「값 없음」으로 보고 신규 기본 동의(true)를 탄다(거부 표기가 동의로 들어가던 자리).
+  //   ⛔ 서버 `utils/normalize.ts isUnrecognizedSmsOptIn` 과 같은 규칙.
+  const rawConsent = result.sms_opt_in;
+  const consentUnrecognized =
+    rawConsent != null && typeof rawConsent !== 'boolean' && String(rawConsent).trim() !== '' && normalizeSmsOptIn(rawConsent) === null;
+
   // FIELD_MAP을 순회하면서 각 필드의 normalizeFunction에 따라 동적 정규화
   for (const field of FIELD_MAP) {
     if (field.storageType === 'custom_fields') continue; // custom은 별도 처리
@@ -495,6 +508,7 @@ export function normalizeCustomer(
     if (!(key in result)) continue;
     result[key] = normalizeByFieldKey(key, result[key]);
   }
+  if (consentUnrecognized) result.sms_opt_in_unknown = String(rawConsent).trim().slice(0, 20);
 
   // 생년월일 파생 필드 계산 (FIELD_MAP에 없는 파생 필드)
   if (result.birth_date && typeof result.birth_date === 'string') {
@@ -539,6 +553,7 @@ export function normalizeCustomer(
 
 export function normalizePurchase(
   mapped: Record<string, unknown>,
+  opts?: { dbType?: string },
 ): Record<string, unknown> {
   const result: Record<string, unknown> = { ...mapped };
 
@@ -547,7 +562,7 @@ export function normalizePurchase(
   }
 
   if ('purchase_date' in result) {
-    result.purchase_date = normalizeTimestamp(result.purchase_date);
+    result.purchase_date = normalizeTimestamp(result.purchase_date, { utcWallClock: opts?.dbType === 'mssql' });
   }
 
   // 금액 필드 (normalizeAmount가 쉼표·통화기호 제거)
@@ -603,12 +618,12 @@ export function normalizeCustomerBatch(rows: Record<string, unknown>[], opts?: {
   return { normalized, dropped };
 }
 
-export function normalizePurchaseBatch(rows: Record<string, unknown>[]): NormalizationResult {
+export function normalizePurchaseBatch(rows: Record<string, unknown>[], opts?: { dbType?: string }): NormalizationResult {
   const normalized: Record<string, unknown>[] = [];
   const dropped: NormalizationResult['dropped'] = [];
 
   for (const row of rows) {
-    const result = normalizePurchase(row);
+    const result = normalizePurchase(row, opts);
 
     if (!result.customer_phone) {
       dropped.push({ row, reason: '고객 전화번호 정규화 실패 또는 누락' });

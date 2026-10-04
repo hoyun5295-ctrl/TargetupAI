@@ -198,8 +198,9 @@ export default function BalanceModals({
 
       {/* 잔액 충전 모달 */}
       {showChargeModal && (
-        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-[65]">
-          <div className="bg-white rounded-2xl shadow-2xl w-[460px] overflow-hidden animate-in fade-in zoom-in" onClick={e => e.stopPropagation()}>
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center p-4 z-[65]">
+          {/* ★ 2026-10-04 375 폭에서 넘치던 고정 폭 → 화면 폭에 맞춘다(요금제 페이지 선불 이용 기간 카드에서도 연다) */}
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-[460px] overflow-hidden animate-in fade-in zoom-in" onClick={e => e.stopPropagation()}>
 
             {/* 충전 방법 선택 */}
             {chargeStep === 'select' && (

@@ -19,6 +19,7 @@
  */
 import type { PoolClient } from 'pg';
 import { pool } from '../config/database';
+import { guardBillingTypeSwitchWithClient } from './plan-term';
 
 export const BILLING_TYPE_CHANGE_ACTION = 'billing_type_change';
 export type CompanyBillingType = 'prepaid' | 'postpaid';
@@ -162,6 +163,13 @@ export async function switchCompanyBillingType(input: {
       return { found: false };
     }
     const from = String(cur.rows[0].billing_type ?? '');
+    // ★ 2026-10-04 선불 이용 기간 게이트(설계 §5-3) — 선불→후불: 진행 중이면 409 · 잠김이면 관리 종료 후 통과 ·
+    //   이미 낸 기간이 남았으면 409(후불 정산이 같은 기간 요금제를 다시 청구하지 않게). 같은 행 잠금 안에서 판정한다.
+    if (from !== input.to) {
+      await guardBillingTypeSwitchWithClient(client, input.companyId, from, input.to, {
+        type: 'super_admin', id: input.actorUserId, label: null, ip: input.ip ?? null, userAgent: input.userAgent ?? null,
+      });
+    }
     if (from === input.to) {
       const same = await client.query(`SELECT id, company_name, billing_type, balance FROM companies WHERE id = $1`, [input.companyId]);
       await client.query('COMMIT');

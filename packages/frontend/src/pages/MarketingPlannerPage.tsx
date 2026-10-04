@@ -1,1107 +1,455 @@
-import ZoneFrame from '../components/zone/ZoneFrame';
-import ZoneEmphasis from '../components/zone/ZoneEmphasis';
-import { CalendarRange } from 'lucide-react';
 /**
- * MarketingPlannerPage.tsx — 마케팅 플래너 (★ 2026-08-12 Phase 1 · 설계서 = docs/2026-08-12-ax-marketing-planner-design.md)
+ * MarketingPlannerPage.tsx — 마케팅 플래너 캘린더 (★ 2026-08-12 Phase 1 · ★ 2026-10-04 보강 · 설계서 §5-1 · 목업 v2 (가))
  *
- * 세 번째 시계 — 여정(사건)·자동마케팅(상태)에 이은 **달력** 축. 담당자가 월간 캘린더에 행사를 기입하고
- * 채널 5종을 체크하면, 이후 단계(Phase 2 결재 → Phase 3 대행 제작·실행)가 그 계획을 무인으로 완주한다.
+ * 머리 숫자 = [할 일][이달 행사][보유 크레딧] · 행동 자리는 할 일 카드 한 곳(재료 넣기 · 확인하고 승인) ·
+ * 왼쪽 달력 = 행사 기간 막대(주를 가로질러 하나) + 그날 나가는 발송(그 행사 상태 색 · 채널 아이콘) + 승인 마감 표시 ·
+ * 오른쪽 = 행사 목록(다음 발송일 순 · 버튼 없이 줄 전체가 행사 상세) · 오른쪽 행사에 마우스를 올리면 달력에 그 행사만 남는다.
+ * 375 = 할 일 → 행사 목록 → 접은 이번 주 달력.
  *
- * ★ 2026-08-13(2) 화면 재구성 — 달력이 화면을 다 먹던 구조를 **좌우 분할**로 바꿨다.
- *   왼쪽 = 달력(공휴일·오늘·행사 바), 오른쪽 = **실행 예정** 패널(터치포인트를 예정일 순으로).
- *   승인 뒤 실제로 채워지는 쪽은 오른쪽이고, 항목을 누르면 상세가 열린다 —
- *   아직 도래하지 않은 건은 계획(대상·시점·크레딧)을, 도래한 건은 **실제로 나간 문안과 소재 미리보기**를 보여준다.
- *
- * 영구 룰: 다크 slate-950 + violet 액센트 · native dialog 0(ConfirmModal·useToast) · 모델명 노출 0 ·
- *          혜택은 고객사 기입 칸(AI가 채우지 않는다) · Source caption 의무 · goBackOr 복귀.
- * ⛔ 공휴일 표는 서버 CT(`utils/kr-holidays.ts`) 하나가 진실이다 — 화면에 같은 표를 복사하지 않는다.
- * ⛔ 날짜는 전부 KST 'YYYY-MM-DD' 문자열 축이다. Date의 로컬 해석으로 오늘을 구하면 해외 접속에서 하루가 밀린다.
+ * ⛔ 화면 상태 · 할 일 · 고칠 수 있는가는 서버가 판정한다(utils/planner-calendar.ts) — 사전에 없는 값은 그리지 않는다.
+ * ⛔ 불러오기 실패는 빈 달력으로 속이지 않는다(차단 상자 + [다시 읽기] · F6). 날짜는 KST 'YYYY-MM-DD' 문자열 축.
+ * ⛔ 공휴일 표는 서버 CT(utils/kr-holidays.ts) 하나가 진실이다. native dialog 0 · 모델명 0 · 줄표 0.
  */
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import {
-  ArrowLeft, CalendarDays, CheckCircle2, ChevronLeft, ChevronRight, ClipboardCheck, ExternalLink,
-  Loader2, Lock, MailOpen, PauseCircle, Plus, Smartphone, Sparkles, Trash2, Wand2, X,
-} from 'lucide-react';
-import { goBackOr } from '../lib/scroll-restoration';
+import { AlarmClock, CalendarRange, ChartColumn, Check, ChevronDown, ChevronLeft, ChevronRight, ListChecks, Plus, Send } from 'lucide-react';
+import ZoneFrame from '../components/zone/ZoneFrame';
 import { useToast } from '../components/ToastProvider';
-import ConfirmModal, { type ConfirmState } from '../components/ConfirmModal';
-// ★ 2026-09-02 모바일 DM 단계 사전 — 브리핑 화면과 같은 라벨(두 벌 금지)
-import { DM_NEEDS_ACTION, describeDmStage, dmActionLabel, dmBadgeOf, type PlannerDmInfo } from '../constants/planner-dm';
+import { useMediaQuery } from '../hooks/useMediaQuery';
+import PlannerEventModal from '../components/planner/PlannerEventModal';
+import {
+  PLANNER_LEGEND, PLANNER_SEND_KIND, PLANNER_STATE, kstToday, plannerDay, plannerDaysBetween, plannerRange, plannerStateOf,
+  type PlannerSendKind,
+} from '../constants/planner-status';
+import { plannerApi, won, type Availability, type CalendarEvent, type Holiday, type PlannerCalendar } from '../components/planner/planner-api';
 
-// ── 타입 (백엔드 CT와 미러 — 서버가 진실) ─────────────────────────────
-type Channel = 'sms' | 'alimtalk' | 'email' | 'dm' | 'inapp';
-type Anchor = 'start' | 'end' | 'before_start';
-
-interface Availability { channel: Channel; label: string; available: boolean; reason: string | null; estCredits: number | null }
-interface Touchpoint {
-  id?: string; channel: Channel; label?: string;
-  timing: { anchor: Anchor; offsetDays?: number; audience?: 'all' | 'participants' };
-  estCredits?: number | null; scheduledOn?: string; status?: string; lockReason?: string | null;
-  /** ★ 2026-09-02 모바일 DM 단계(dm 채널만) · 같은 날 문자에 실림 / 문자에 DM 링크 포함 / 실을 문자가 이미 끝남 */
-  dm?: PlannerDmInfo; dmLinked?: boolean; carriedBySms?: boolean; carrierDone?: boolean;
-}
-interface PlannerEvent {
-  id: string; title: string; startsOn: string; endsOn: string; benefitText: string | null;
-  products: Array<{ name: string }>; status: string; touchpoints: Touchpoint[]; estCreditsTotal: number;
-}
-/** ★ Phase 2 — 그 달 결재 상태(승인 원장 표가 아직 없으면 서버가 null을 준다) */
-interface MonthApproval { status: 'pending' | 'approving' | 'approved' | 'cancelled'; approvedAt: string | null; agencyCredits: number }
-/** ★ 2026-08-13(2) 공휴일 — 서버 표가 준비된 해만 온다. */
-interface Holiday { date: string; name: string; substitute?: boolean }
-/** ★ 2026-08-13(2) 도래한 터치포인트의 실제 결과 — 서버 실측(목업 없음). */
-interface TouchpointDetail {
-  status: string; scheduledOn: string; channel: Channel; label: string;
-  audience: 'all' | 'participants'; audienceCount: number | null; audienceNote: string | null;
-  sentAt: string | null; sentCount: number | null;
-  message: { subject: string | null; body: string } | null;
-  asset: { kind: 'dm' | 'email' | 'inapp' | 'alimtalk'; url?: string | null; html?: string | null; title?: string | null; body?: string | null; imageUrl?: string | null; inspection?: string | null; stage?: string | null; editPath?: string | null } | null;
-}
-
-const ANCHOR_LABEL: Record<Anchor, string> = { start: '행사 시작일', end: '행사 종료일', before_start: '시작 전 사전 안내' };
-const STATUS_BADGE: Record<string, { label: string; cls: string }> = {
-  draft: { label: '작성 중', cls: 'bg-slate-100 text-slate-500' },
-  briefed: { label: '브리핑 대기', cls: 'bg-amber-100 text-amber-800' },
-  approved: { label: '승인됨', cls: 'bg-emerald-100 text-emerald-800' },
-};
-/** 터치포인트 실행 상태 — 예정 패널·상세가 같은 라벨을 쓴다(두 벌 금지). */
-const TP_STATUS: Record<string, { label: string; cls: string }> = {
-  planned: { label: '실행 예정', cls: 'bg-slate-100 text-slate-500 border-slate-300' },
-  ready: { label: '준비 완료', cls: 'bg-sky-100 text-sky-800 border-sky-200' },
-  producing: { label: '제작 중', cls: 'bg-violet-100 text-violet-800 border-violet-200' },
-  scheduled: { label: '발송 예약', cls: 'bg-sky-100 text-sky-800 border-sky-200' },
-  sent: { label: '발송 완료', cls: 'bg-emerald-100 text-emerald-800 border-emerald-200' },
-  skipped: { label: '생략', cls: 'bg-slate-100 text-slate-400 border-slate-300' },
-  hold_credit: { label: '보류 (크레딧)', cls: 'bg-amber-100 text-amber-800 border-amber-200' },
-  locked: { label: '보류', cls: 'bg-amber-100 text-amber-800 border-amber-200' },
-};
-const CHANNEL_ICON: Record<Channel, typeof MailOpen> = {
-  sms: Smartphone, alimtalk: Smartphone, email: MailOpen, dm: Smartphone, inapp: Smartphone,
-};
-
-/** 'YYYY-MM-DD' 형식 — 서버 응답의 날짜 축 계약(이 형식이 아니면 날짜 산술에 넣지 않는다). */
+const todayMonth = () => kstToday().slice(0, 7);
+const DOW = ['일', '월', '화', '수', '목', '금', '토'];
+const addDays = (d: string, n: number) => { const x = new Date(`${d}T00:00:00Z`); x.setUTCDate(x.getUTCDate() + n); return x.toISOString().slice(0, 10); };
+const shiftMonth = (m: string, delta: number) => { const [y, mm] = m.split('-').map(Number); return new Date(Date.UTC(y, mm - 1 + delta, 1)).toISOString().slice(0, 7); };
 const DAY_KEY = /^\d{4}-\d{2}-\d{2}$/;
 
-/** KST 오늘 — 브라우저 타임존과 무관하게 한국 날짜를 쓴다(해외 접속 하루 밀림 차단). */
-const kstToday = () => new Date(Date.now() + 9 * 60 * 60 * 1000).toISOString().slice(0, 10);
-const todayMonth = () => kstToday().slice(0, 7);
-
-/** 'YYYY-MM' → 6주 42칸. 앞뒤 달 날짜도 채워 격자 높이가 달마다 흔들리지 않게 한다. */
-function buildMonthCells(month: string): Array<{ date: string; inMonth: boolean }> {
-  const [y, m] = month.split('-').map(Number);
-  const first = new Date(Date.UTC(y, m - 1, 1));
-  const start = new Date(first);
-  start.setUTCDate(1 - first.getUTCDay());
-  const cells: Array<{ date: string; inMonth: boolean }> = [];
-  for (let i = 0; i < 42; i++) {
-    const d = new Date(start);
-    d.setUTCDate(start.getUTCDate() + i);
-    const date = d.toISOString().slice(0, 10);
-    cells.push({ date, inMonth: date.startsWith(month) });
+/** (순수) 행사 1건의 발송 = 날짜별 한 덩어리(같은 날 문자+DM = 1통) + 메일 */
+interface SendChip { date: string; kind: PlannerSendKind; done: boolean; count: number | null }
+function sendChipsOf(ev: CalendarEvent): SendChip[] {
+  const out: SendChip[] = [];
+  const live = ev.touchpoints.filter((t) => t.status !== 'skipped');
+  const days = Array.from(new Set(live.map((t) => t.scheduledOn))).sort();
+  for (const d of days) {
+    const mine = live.filter((t) => t.scheduledOn === d);
+    const sms = mine.find((t) => t.channel === 'sms');
+    const dm = mine.find((t) => t.channel === 'dm');
+    const email = mine.find((t) => t.channel === 'email');
+    if (email) out.push({ date: d, kind: 'email', done: email.status === 'sent', count: email.sentCount });
+    if (sms || dm) {
+      const carrier = sms || dm!;
+      out.push({ date: d, kind: sms && dm ? 'smsdm' : sms ? 'sms' : 'dm', done: carrier.status === 'sent', count: carrier.sentCount });
+    }
   }
-  return cells;
+  return out;
 }
-
-const shiftMonth = (month: string, delta: number) => {
-  const [y, m] = month.split('-').map(Number);
-  const d = new Date(Date.UTC(y, m - 1 + delta, 1));
-  return d.toISOString().slice(0, 7);
-};
-
-function nextDay(date: string): string {
-  const d = new Date(`${date}T00:00:00Z`);
-  d.setUTCDate(d.getUTCDate() + 1);
-  return d.toISOString().slice(0, 10);
-}
-
-/** 두 날짜의 일수 차(KST 문자열 축). 예정 패널의 D-day 배지. */
-function daysBetween(from: string, to: string): number {
-  const a = new Date(`${from}T00:00:00Z`).getTime();
-  const b = new Date(`${to}T00:00:00Z`).getTime();
-  return Math.round((b - a) / 86400000);
-}
-
-function ddayLabel(scheduledOn: string, today: string): string {
-  const diff = daysBetween(today, scheduledOn);
-  if (diff === 0) return '오늘';
-  if (diff > 0) return `D-${diff}`;
-  return `${-diff}일 전`;
-}
+const nextSendOf = (ev: CalendarEvent, today: string) => sendChipsOf(ev).find((c) => !c.done && c.date >= today)?.date || ev.firstSend || ev.startsOn;
 
 export default function MarketingPlannerPage() {
   const navigate = useNavigate();
   const toast = useToast();
+  const phone = useMediaQuery('(max-width: 767px)');
   const [searchParams, setSearchParams] = useSearchParams();
-  const token = () => localStorage.getItem('token');
-  const auth = () => ({ Authorization: `Bearer ${token()}` });
-
-  const [month, setMonth] = useState(todayMonth());
-  const [events, setEvents] = useState<PlannerEvent[]>([]);
-  const [approval, setApproval] = useState<MonthApproval | null>(null);
-  const [availability, setAvailability] = useState<Availability[]>([]);
-  const [holidays, setHolidays] = useState<Holiday[]>([]);
-  const [holidaysReady, setHolidaysReady] = useState(true);
-  const [loading, setLoading] = useState(true);
-  const [migrationPending, setMigrationPending] = useState(false);
-  const [confirm, setConfirm] = useState<ConfirmState | null>(null);
   const today = kstToday();
-
-  // 기입 모달
-  const [modalOpen, setModalOpen] = useState(false);
-  const [editing, setEditing] = useState<PlannerEvent | null>(null);
-  const [saving, setSaving] = useState(false);
-  const [fTitle, setFTitle] = useState('');
-  const [fStart, setFStart] = useState('');
-  const [fEnd, setFEnd] = useState('');
-  const [fBenefit, setFBenefit] = useState('');
-  const [fProducts, setFProducts] = useState('');
-  const [fTouchpoints, setFTouchpoints] = useState<Touchpoint[]>([]);
-
-  // ★ 2026-08-13(2) 상세 모달 — 예정 건은 화면이 이미 가진 계획으로 즉시 그리고,
-  //   도래한 건만 서버에 실제 결과(문안·소재)를 물어본다(불필요한 호출 0).
-  const [detailOf, setDetailOf] = useState<{ ev: PlannerEvent; tp: Touchpoint } | null>(null);
-  const [detail, setDetail] = useState<TouchpointDetail | null>(null);
-  const [detailLoading, setDetailLoading] = useState(false);
-  const [preview, setPreview] = useState<{ title: string; html: string } | null>(null);
+  const [month, setMonth] = useState(() => (/^\d{4}-\d{2}$/.test(searchParams.get('month') || '') ? String(searchParams.get('month')) : todayMonth()));
+  const [cal, setCal] = useState<PlannerCalendar | null>(null);
+  const [loadState, setLoadState] = useState<'loading' | 'ok' | 'fail' | 'pending'>('loading');
+  const [loadedAt, setLoadedAt] = useState<string>('');
+  const [availability, setAvailability] = useState<Availability[]>([]);
+  const [modal, setModal] = useState<{ editing: CalendarEvent | null; date?: string | null } | null>(null);
+  const [hovered, setHovered] = useState<string | null>(null);
+  const [weekOpen, setWeekOpen] = useState(false);
 
   const loadAvailability = useCallback(async () => {
-    try {
-      const r = await fetch('/api/marketing-planner/availability', { headers: auth() });
-      if (r.ok) {
-        const d = await r.json();
-        setAvailability(Array.isArray(d.channels) ? d.channels : []);
-      }
-    } catch { /* 가용성 로드 실패 — 기입 모달에서 재시도 */ }
+    const r = await plannerApi<{ channels: Availability[] }>('/api/marketing-planner/availability');
+    if (r.ok) setAvailability(Array.isArray(r.data.channels) ? r.data.channels : []);
+    return r.ok;
   }, []);
 
-  const loadEvents = useCallback(async (m: string, opts?: { silent?: boolean }) => {
-    if (!opts?.silent) setLoading(true);
-    try {
-      const r = await fetch(`/api/marketing-planner/events?month=${m}`, { headers: auth() });
-      if (r.status === 503) { setMigrationPending(true); setEvents([]); return; }
-      if (r.ok) {
-        const d = await r.json();
-        setMigrationPending(false);
-        setEvents(Array.isArray(d.events) ? d.events : []);
-        setApproval(d.approval || null);
-        setHolidays(Array.isArray(d.holidays) ? d.holidays : []);
-        setHolidaysReady(d.holidaysReady !== false);
-      }
-    } catch { /* 일시 오류 — 직전 목록 유지 */ }
-    finally { if (!opts?.silent) setLoading(false); }
+  const load = useCallback(async (m: string, silent = false) => {
+    if (!silent) setLoadState('loading');
+    const r = await plannerApi<PlannerCalendar>(`/api/marketing-planner/events?month=${m}`);
+    if (r.ok) {
+      setCal(r.data);
+      setLoadState('ok');
+      const now = new Date(Date.now() + 9 * 3600 * 1000).toISOString();
+      setLoadedAt(`${Number(now.slice(5, 7))}/${Number(now.slice(8, 10))} ${now.slice(11, 16)} 기준`);
+      return;
+    }
+    if (r.status === 503 && r.data?.code === 'DB_MIGRATION_PENDING') { setLoadState('pending'); return; }
+    // ⛔ 실패를 "행사 없음"으로 그리지 않는다(F6) — 직전 값을 지우고 차단 상자를 띄운다
+    setCal(null);
+    setLoadState('fail');
   }, []);
 
-  useEffect(() => { loadAvailability(); }, [loadAvailability]);
-  useEffect(() => { loadEvents(month); }, [month, loadEvents]);
-
-  // ★ 2026-09-02 DM 빌더에서 완성·발행하고 돌아오면 목록을 조용히 다시 읽는다 — 배지가 "발행 완료"로 바뀌어야
-  //   담당자가 두 번째 DM을 만들거나 문의를 넣지 않는다(폴링은 두지 않는다 · 탭 복귀·포커스 때만).
+  useEffect(() => { void load(month); }, [month, load]);
+  useEffect(() => { void loadAvailability(); }, [loadAvailability]);
+  // 채널 상태를 못 받은 채면 창을 열 때 다시 묻는다(1회 실패로 "불러오는 중"에 갇히지 않게 · F6)
+  useEffect(() => { if (modal && availability.length === 0) void loadAvailability(); }, [modal, availability.length, loadAvailability]);
+  // 탭 복귀 때 조용히 다시 읽는다(휴대폰에서 승인하고 돌아온 PC 등 · 폴링 없음)
   useEffect(() => {
-    const onVisible = () => { if (document.visibilityState === 'visible') void loadEvents(month, { silent: true }); };
+    const onVisible = () => { if (document.visibilityState === 'visible') void load(month, true); };
     document.addEventListener('visibilitychange', onVisible);
     return () => document.removeEventListener('visibilitychange', onVisible);
-  }, [month, loadEvents]);
+  }, [month, load]);
 
-  // 결재 링크 착지 — 만료·오류를 조용히 넘기지 않는다(문자 링크의 도착점이 여기 하나다).
+  // 옛 결재 문자 링크 착지 · 다른 화면에서 온 [행사 고치기](?edit=) · 달(?month=)
   useEffect(() => {
     const link = searchParams.get('link');
-    if (!link) return;
-    toast.error(link === 'expired'
-      ? '결재 링크가 만료됐습니다. 아래 브리핑에서 확인해 주세요'
-      : '결재 링크를 여는 중 문제가 있었습니다. 아래 브리핑에서 확인해 주세요');
-    searchParams.delete('link');
-    setSearchParams(searchParams, { replace: true });
-  }, [searchParams, setSearchParams, toast]);
-
-  const cells = useMemo(() => buildMonthCells(month), [month]);
-  const holidayByDate = useMemo(() => {
-    const map = new Map<string, Holiday>();
-    for (const h of holidays) if (!map.has(h.date)) map.set(h.date, h);
-    return map;
-  }, [holidays]);
-
-  const eventsByDate = useMemo(() => {
-    const map = new Map<string, PlannerEvent[]>();
-    for (const ev of events) {
-      // ★ 2026-08-21 방어층(임은지 접수) — 날짜가 'YYYY-MM-DD'가 아니면 그 행사만 건너뛴다. 그전에는 서버가
-      //   Date 객체를 잘못 문자열화한 값("Fri Aug 21")이 오자 nextDay의 toISOString이 RangeError로 죽어
-      //   **화면 전체**가 오류 카드가 됐다. 근본 수정은 서버(::text 캐스트)이고, 여기는 한 행사가 화면을
-      //   통째로 죽이지 않게 하는 두 번째 층이다. 상한 400일은 무한 루프 차단(기간 검증은 서버가 한다).
-      if (!DAY_KEY.test(ev.startsOn) || !DAY_KEY.test(ev.endsOn) || ev.endsOn < ev.startsOn) continue;
-      // 행사 기간의 각 날짜에 바를 그린다 — 셀 순회보다 행사 순회가 싸다(행사 수 << 날짜 수)
-      for (let d = ev.startsOn, guard = 0; d <= ev.endsOn && guard < 400; d = nextDay(d), guard++) {
-        const arr = map.get(d) || [];
-        arr.push(ev);
-        map.set(d, arr);
-      }
+    const edit = searchParams.get('edit');
+    if (!link && !edit && !searchParams.get('month')) return;
+    if (link) toast.info(link === 'expired' ? '예전 결재 링크예요. 이제 행사마다 확인하고 승인해요. 아래 할 일을 확인해 주세요.' : '링크를 여는 중 문제가 있었어요. 아래 할 일을 확인해 주세요.');
+    if (edit && cal) {
+      const ev = cal.events.find((e) => e.id === edit);
+      if (ev?.editable) setModal({ editing: ev });
     }
-    return map;
-  }, [events]);
+    if (!edit || cal) setSearchParams({}, { replace: true });
+  }, [searchParams, setSearchParams, toast, cal]);
 
-  /** 실행 예정 목록 — 그 달 모든 터치포인트를 예정일 순으로 편다(행사가 아니라 **실행 단위**가 축이다). */
-  const schedule = useMemo(() => {
-    const rows: Array<{ ev: PlannerEvent; tp: Touchpoint }> = [];
-    for (const ev of events) for (const tp of ev.touchpoints) rows.push({ ev, tp });
-    return rows.sort((a, b) => String(a.tp.scheduledOn || '').localeCompare(String(b.tp.scheduledOn || '')));
-  }, [events]);
+  const events = useMemo(() => (cal?.events || []).filter((e) => DAY_KEY.test(e.startsOn) && DAY_KEY.test(e.endsOn) && e.endsOn >= e.startsOn), [cal]);
+  const holidays = useMemo(() => new Map<string, Holiday>((cal?.holidays || []).map((h) => [h.date, h])), [cal]);
+  const todo = useMemo(() => events.filter((e) => e.todo).sort((a, b) => String(a.deadline?.date || a.firstSend || a.startsOn).localeCompare(String(b.deadline?.date || b.firstSend || b.startsOn))), [events]);
+  const sorted = useMemo(() => {
+    const rank = (e: CalendarEvent) => (e.displayState === 'cancelled' ? 2 : e.displayState === 'done' ? 1 : 0);
+    return [...events].sort((a, b) => rank(a) - rank(b) || nextSendOf(a, today).localeCompare(nextSendOf(b, today)));
+  }, [events, today]);
+  const upcoming = useMemo(() => {
+    const tomorrow = addDays(today, 1);
+    return events.flatMap((e) => sendChipsOf(e).filter((c) => !c.done && (c.date === today || c.date === tomorrow)).map((c) => ({ e, c })));
+  }, [events, today]);
+  const nextAny = useMemo(() => events.flatMap((e) => sendChipsOf(e).filter((c) => !c.done && c.date >= today).map((c) => ({ e, c })))
+    .sort((a, b) => a.c.date.localeCompare(b.c.date))[0] || null, [events, today]);
 
-  // ── 기입 모달 열기/편집 ──────────────────────────────────────────
-  const openCreate = (date?: string) => {
-    setEditing(null);
-    setFTitle('');
-    setFStart(date || `${month}-01`);
-    setFEnd(date || `${month}-01`);
-    setFBenefit('');
-    setFProducts('');
-    setFTouchpoints([]);
-    setModalOpen(true);
-  };
-  const openEdit = (ev: PlannerEvent) => {
-    setEditing(ev);
-    setFTitle(ev.title);
-    setFStart(ev.startsOn);
-    setFEnd(ev.endsOn);
-    setFBenefit(ev.benefitText || '');
-    setFProducts((ev.products || []).map((p) => p.name).join('\n'));
-    setFTouchpoints(ev.touchpoints.map((t) => ({ channel: t.channel, timing: t.timing })));
-    setModalOpen(true);
-  };
+  const openEvent = (ev: CalendarEvent) => navigate(`/marketing-planner/events/${ev.id}`);
+  const openCreate = (date?: string) => setModal({ editing: null, date: date || null });
 
-  /** 캘린더 셀 클릭 — 앞뒤 달 날짜를 누르면 그 달로 넘어간다(격자를 채운 값이 죽은 칸이 되지 않게). */
-  const onCellClick = (cell: { date: string; inMonth: boolean }) => {
-    if (!cell.inMonth) { setMonth(cell.date.slice(0, 7)); return; }
-    const dayEvents = eventsByDate.get(cell.date) || [];
-    if (dayEvents.length > 0) openEdit(dayEvents[0]);
-    else openCreate(cell.date);
-  };
+  // ── 달력 ────────────────────────────────────────────────────────
+  const weeks = useMemo(() => {
+    const first = `${month}-01`;
+    const start = addDays(first, -new Date(`${first}T00:00:00Z`).getUTCDay());
+    const last = addDays(shiftMonth(month, 1) + '-01', -1);
+    const out: string[] = [];
+    for (let w = start; w <= last; w = addDays(w, 7)) out.push(w);
+    return out;
+  }, [month]);
 
-  // ── 상세 ────────────────────────────────────────────────────────
-  const openDetail = async (ev: PlannerEvent, tp: Touchpoint) => {
-    setDetailOf({ ev, tp });
-    setDetail(null);
-    // 아직 도래하지 않은 계획은 물어볼 실측이 없다 — 화면이 가진 계획으로 그린다.
-    const arrived = !!tp.scheduledOn && tp.scheduledOn <= today;
-    if (!arrived || !tp.id) return;
-    setDetailLoading(true);
-    try {
-      const r = await fetch(`/api/marketing-planner/touchpoints/${tp.id}/detail`, { headers: auth() });
-      if (r.ok) setDetail(await r.json());
-      else if (r.status !== 404) toast.error('상세를 불러오지 못했습니다');
-    } catch {
-      toast.error('네트워크 오류. 다시 시도해 주세요');
-    } finally {
-      setDetailLoading(false);
-    }
-  };
-
-  const toggleChannel = (channel: Channel) => {
-    const gate = availability.find((a) => a.channel === channel);
-    if (gate && !gate.available) return; // 잠금 — 클릭 무시(사유는 화면에 이미 떠 있다)
-    setFTouchpoints((prev) => {
-      const has = prev.some((t) => t.channel === channel);
-      if (has) return prev.filter((t) => t.channel !== channel);
-      // ★ 2026-09-02 문자와 모바일 DM은 같은 시점이면 문자 1통에 링크로 함께 나간다 — 한쪽을 켜면 다른 쪽 시점을 그대로 따른다.
-      //   (기본값이 서로 다르면 담당자는 "따로 나간다"고 읽고, 실제로는 DM이 캐리어 문자를 하나 더 보낸다.)
-      const mirror = channel === 'dm' ? prev.filter((t) => t.channel === 'sms') : channel === 'sms' ? prev.filter((t) => t.channel === 'dm') : [];
-      if (mirror.length > 0) return [...prev, ...mirror.map((t) => ({ channel, timing: { ...t.timing } }))];
-      // 채널별 기본 시점 — 문자·인앱=시작일 / 이메일·DM=시작 5일 전 사전 안내 / 알림톡=시작일(정보성 안내)
-      const timing: Touchpoint['timing'] =
-        channel === 'email' || channel === 'dm' ? { anchor: 'before_start', offsetDays: 5 } : { anchor: 'start' };
-      return [...prev, { channel, timing }];
+  const weekRow = (ws: string, isLast: boolean) => {
+    const days = Array.from({ length: 7 }, (_, i) => addDays(ws, i));
+    const we = days[6];
+    const inWeek = events.filter((e) => e.endsOn >= ws && e.startsOn <= we).sort((a, b) => a.startsOn.localeCompare(b.startsOn) || plannerDaysBetween(b.startsOn, b.endsOn) - plannerDaysBetween(a.startsOn, a.endsOn));
+    const lanes: number[] = [];
+    const bars = inWeek.map((e) => {
+      const s = e.startsOn < ws ? ws : e.startsOn;
+      const en = e.endsOn > we ? we : e.endsOn;
+      const c0 = plannerDaysBetween(ws, s);
+      const c1 = plannerDaysBetween(ws, en);
+      let lane = lanes.findIndex((end) => end < c0);
+      if (lane < 0) { lane = lanes.length; lanes.push(c1); } else lanes[lane] = c1;
+      const st = plannerStateOf(e.displayState);
+      if (!st) return null;
+      const cl = e.startsOn < ws;
+      const cr = e.endsOn > we;
+      const Icon = st.icon;
+      return (
+        <button key={e.id} type="button" onClick={() => openEvent(e)} title={`${e.title} · ${st.label}`}
+          className={`self-start border px-1.5 py-[3px] text-[11.5px] font-semibold leading-[1.3] flex items-start gap-1 min-w-0 text-left transition-opacity ${cl ? 'rounded-l-none border-l-0' : 'ml-1 rounded-l-md'} ${cr ? 'rounded-r-none border-r-0' : 'mr-1 rounded-r-md'} ${st.bar} ${hovered && hovered !== e.id ? 'opacity-25' : ''}`}
+          style={{ gridColumn: `${c0 + 1} / span ${c1 - c0 + 1}`, gridRow: lane + 1 }}>
+          {!cl && c1 !== c0 && <Icon className="w-3 h-3 mt-[1px] shrink-0" />}
+          <span className={`min-w-0 ${c1 === c0 ? 'line-clamp-3' : 'line-clamp-2'}`}>{e.title}</span>
+        </button>
+      );
     });
+    return (
+      <div key={ws} className={`relative flex-1 ${isLast ? '' : 'border-b border-slate-100'}`}>
+        <div className="absolute inset-0 grid grid-cols-7" aria-hidden="true">
+          {days.map((d, i) => <div key={d} className={`${i < 6 ? 'border-r border-slate-100' : ''} ${d.slice(0, 7) !== month ? 'bg-slate-50' : ''} ${d === today ? 'bg-indigo-50/60' : ''}`} />)}
+        </div>
+        <div className="relative grid grid-cols-7">
+          {days.map((d, i) => {
+            const out = d.slice(0, 7) !== month;
+            const hol = holidays.get(d);
+            const red = i === 0 || !!hol;
+            const due = events.find((e) => e.deadline?.date === d);
+            return (
+              <button key={d} type="button" onClick={() => (out ? setMonth(d.slice(0, 7)) : openCreate(d))} aria-label={`${plannerDay(d)}${out ? ' 그 달로' : ' 행사 담기'}`}
+                className="px-1.5 pt-1.5 flex items-center gap-1 min-w-0 text-[12px] font-semibold tabular-nums text-left hover:bg-white/60">
+                {d === today
+                  ? <span className="inline-grid place-items-center min-w-[22px] h-[22px] px-1 rounded-full bg-indigo-600 text-white">{Number(d.slice(8))}</span>
+                  : <span className={out ? 'text-slate-400' : red ? 'text-rose-700' : i === 6 ? 'text-sky-700' : 'text-slate-700'}>{Number(d.slice(8))}</span>}
+                {hol && !out && <span className="text-[11px] font-medium text-rose-700 truncate">{hol.name}</span>}
+                {due && !out && <span className="ml-auto inline-flex items-center gap-0.5 text-[11px] font-bold text-amber-800 whitespace-nowrap"><AlarmClock className="w-[11px] h-[11px]" />마감 {due.deadline!.hour}시</span>}
+              </button>
+            );
+          })}
+        </div>
+        <div className="relative grid grid-cols-7 gap-y-1 mt-1.5 min-h-[22px]" style={{ gridAutoRows: 'minmax(22px,auto)' }}>{bars}</div>
+        <div className="relative grid grid-cols-7 mt-1.5 pb-2 min-h-[30px]">
+          {days.map((d) => (
+            <div key={d} className="px-1 flex flex-col items-start gap-1 min-w-0">
+              {events.flatMap((e) => sendChipsOf(e).filter((c) => c.date === d).map((c) => {
+                const st = plannerStateOf(e.displayState);
+                if (!st) return null;
+                const K = PLANNER_SEND_KIND[c.kind];
+                const Icon = c.done ? Check : K.icon;
+                return (
+                  <span key={`${e.id}-${c.kind}`} className={`inline-flex items-center gap-1 h-5 px-1.5 rounded border text-[11px] font-semibold whitespace-nowrap max-w-full transition-opacity ${st.chip} ${hovered && hovered !== e.id ? 'opacity-25' : ''}`}>
+                    <Icon className="w-[11px] h-[11px] shrink-0" />{K.label}
+                  </span>
+                );
+              }))}
+            </div>
+          ))}
+        </div>
+      </div>
+    );
   };
 
-  /** ★ 2026-09-02 문자·DM이 같은 시점을 공유하는가(기입 모달 안내용 — 서버 timingKey와 같은 구성). */
-  const sharesTiming = (a: Touchpoint['timing'], b: Touchpoint['timing']) =>
-    a.anchor === b.anchor
-    && (a.anchor !== 'before_start' || (a.offsetDays || 0) === (b.offsetDays || 0))
-    && (a.audience === 'participants') === (b.audience === 'participants');
-
-  /**
-   * 시점 켜고 끄기 — 한 채널에 시점을 여럿 붙일 수 있다(★2026-08-25 접수 임은지).
-   *
-   * 종전에는 채널 하나에 접점 하나만 두고 시점을 덮어써서 버튼이 라디오처럼 동작했다.
-   * 서버는 처음부터 (채널·시점·오프셋·대상) 조합으로 중복만 막으므로, 다른 시점은 원래 함께 담긴다.
-   * ⛔ 마지막 하나는 지우지 않는다 — 시점이 0개면 채널을 켜 둔 뜻이 사라진다(끄려면 채널 자체를 끈다).
-   */
-  const toggleTiming = (channel: Channel, anchor: Anchor) => {
-    setFTouchpoints((prev) => {
-      const mine = prev.filter((t) => t.channel === channel);
-      const has = mine.some((t) => t.timing.anchor === anchor);
-      if (has) {
-        if (mine.length <= 1) return prev;
-        return prev.filter((t) => !(t.channel === channel && t.timing.anchor === anchor));
-      }
-      // 대상 축은 그 채널이 이미 쓰던 것을 따라간다(화면이 채널 단위로 고르게 돼 있다)
-      const audience = mine[0]?.timing.audience;
-      return [...prev, {
-        channel,
-        timing: {
-          anchor,
-          ...(anchor === 'before_start' ? { offsetDays: 5 } : {}),
-          ...(audience ? { audience } : {}),
-        },
-      }];
-    });
-  };
-
-  /** 사전 안내를 며칠 전에 보낼지 — 그 채널의 사전 안내 접점에만 적용한다 */
-  const setOffsetDays = (channel: Channel, offsetDays: number) => {
-    setFTouchpoints((prev) => prev.map((t) => (
-      t.channel === channel && t.timing.anchor === 'before_start'
-        ? { ...t, timing: { ...t.timing, offsetDays } }
-        : t
-    )));
-  };
-
-  /**
-   * ★ 2026-08-13 대상 축 — 전체 / 행사 참여 신청자. 서버가 채널별로 다시 확정한다(프론트 값 그대로 믿지 않는다).
-   * ★ 2026-09-02 문자와 모바일 DM은 **함께** 옮긴다 — 같은 날 대상이 갈리면 문자 1통으로 합칠 수 없어 서버가 저장을 거부한다.
-   */
-  const setAudience = (channel: Channel, audience: 'all' | 'participants') => {
-    const pair: Channel[] = channel === 'sms' || channel === 'dm' ? ['sms', 'dm'] : [channel];
-    setFTouchpoints((prev) => prev.map((t) => (
-      pair.includes(t.channel)
-        ? { ...t, timing: { ...t.timing, ...(audience === 'participants' ? { audience } : { audience: undefined }) } }
-        : t
-    )));
-  };
-
-  const estTotal = useMemo(
-    () => fTouchpoints.reduce((s, t) => s + (availability.find((a) => a.channel === t.channel)?.estCredits || 0), 0),
-    [fTouchpoints, availability],
+  const calendarCard = (
+    <div className="w-full rounded-2xl border border-slate-200 bg-white overflow-hidden flex flex-col">
+      <div className="flex items-center gap-2 px-4 h-12 border-b border-slate-200">
+        <h2 className="text-[14px] font-semibold">{Number(month.slice(5))}월 달력</h2>
+        <span className="text-[12px] text-slate-500 hidden sm:inline">막대 = 행사 기간 · 아래 줄 = 그날 나가는 발송</span>
+      </div>
+      <div className="grid grid-cols-7 text-center text-[12px] font-semibold border-b border-slate-200">
+        {DOW.map((d, i) => <div key={d} className={`py-2 ${i === 0 ? 'text-rose-700' : i === 6 ? 'text-sky-700' : 'text-slate-500'}`}>{d}</div>)}
+      </div>
+      {loadState === 'ok'
+        ? <div className="flex-1 flex flex-col">{weeks.map((w, i) => weekRow(w, i === weeks.length - 1))}</div>
+        : <div className="flex-1 min-h-[480px] bg-slate-50/80" aria-hidden="true" />}
+      {loadState === 'ok' && (
+        <div className="mt-auto px-4 py-2.5 border-t border-slate-200 flex flex-wrap items-center gap-x-4 gap-y-1.5 text-[12px] text-slate-600">
+          {PLANNER_LEGEND.map((k) => { const st = PLANNER_STATE[k]; const Icon = st.icon; return (
+            <span key={k} className="inline-flex items-center gap-1.5"><span className={`inline-flex items-center justify-center w-5 h-4 rounded border ${st.bar}`}><Icon className="w-2.5 h-2.5" /></span>{st.label}</span>
+          ); })}
+          <span className="inline-flex items-center gap-1 font-bold text-amber-800"><AlarmClock className="w-3 h-3" />승인 마감</span>
+          {cal && !cal.holidaysReady && <span className="text-amber-800">{month.slice(0, 4)}년 공휴일은 확정되면 표시해요</span>}
+        </div>
+      )}
+    </div>
   );
 
-  const submit = async () => {
-    if (!fTitle.trim()) { toast.error('행사명을 입력해 주세요'); return; }
-    if (!fStart || !fEnd) { toast.error('행사 기간을 선택해 주세요'); return; }
-    if (fTouchpoints.length === 0) { toast.error('채널을 1개 이상 선택해 주세요'); return; }
-    setSaving(true);
-    try {
-      const body = JSON.stringify({
-        title: fTitle.trim(),
-        startsOn: fStart,
-        endsOn: fEnd,
-        benefitText: fBenefit.trim() || null,
-        products: fProducts.split('\n').map((s) => ({ name: s.trim() })).filter((p) => p.name),
-        touchpoints: fTouchpoints.map((t) => ({ channel: t.channel, timing: t.timing })),
-      });
-      const url = editing ? `/api/marketing-planner/events/${editing.id}` : '/api/marketing-planner/events';
-      const r = await fetch(url, {
-        method: editing ? 'PUT' : 'POST',
-        headers: { 'Content-Type': 'application/json', ...auth() },
-        body,
-      });
-      const d = await r.json().catch(() => ({}));
-      if (r.status === 503) { setMigrationPending(true); toast.error('준비 중입니다. 잠시 후 다시 시도해 주세요'); return; }
-      if (!r.ok) { toast.error(d.error || '저장에 실패했습니다'); return; }
-      toast.success(editing ? '행사가 수정되었습니다' : '행사가 캘린더에 담겼습니다');
-      setModalOpen(false);
-      loadEvents(month);
-    } catch {
-      toast.error('네트워크 오류. 다시 시도해 주세요');
-    } finally {
-      setSaving(false);
+  // ── 할 일 · 행사 목록 ────────────────────────────────────────────
+  const todoRow = (e: CalendarEvent) => {
+    const st = plannerStateOf(e.displayState);
+    if (!st) return null;
+    const Icon = st.icon;
+    const chips = sendChipsOf(e).filter((c) => !c.done);
+    const desc = e.displayState === 'material'
+      ? (e.notice || `${e.staleChannels.map((c) => (c === 'dm' ? '모바일 DM' : '메일')).join('·')} 재료를 넣으면 완성본을 만들어요${e.firstSend ? ` · 첫 발송 ${plannerDay(e.firstSend)}` : ''}`)
+      : e.displayState === 'review'
+        ? `실물이 준비됐어요${chips[0] ? ` · ${plannerDay(chips[0].date)} ${PLANNER_SEND_KIND[chips[0].kind].label}부터 ${chips.length}번` : ''}`
+        : (e.notice || '발송이 멈춰 있어요. 사유를 확인해 주세요.');
+    const left = e.deadline ? plannerDaysBetween(today, e.deadline.date) : null;
+    const due = e.deadline
+      ? `승인 마감 ${plannerDay(e.deadline.date)} ${e.deadline.hour}시${left !== null ? ` · ${left > 0 ? `${left}일 남음` : left === 0 ? '오늘' : '지남'}` : ''}`
+      : e.firstSend ? `첫 발송 ${plannerDay(e.firstSend)} 오전 8시 · 그 전에 승인해야 나가요` : '';
+    const btn = e.displayState === 'material'
+      ? <button type="button" onClick={() => setModal({ editing: e })} className={`${phone ? 'w-full h-11' : 'w-full h-10'} px-3.5 rounded-[10px] border border-slate-200 bg-white hover:bg-slate-50 hover:border-slate-300 text-[13px] font-semibold text-slate-700 inline-flex items-center justify-center gap-1.5`}>재료 넣기</button>
+      : e.displayState === 'review'
+        ? <button type="button" onClick={() => openEvent(e)} className={`${phone ? 'w-full h-11' : 'w-full h-10'} px-4 rounded-[10px] bg-indigo-600 hover:bg-indigo-700 text-white text-[13.5px] font-bold inline-flex items-center justify-center gap-1.5`}>확인하고 승인</button>
+        : <button type="button" onClick={() => openEvent(e)} className={`${phone ? 'w-full h-11' : 'w-full h-10'} px-3.5 rounded-[10px] border border-slate-200 bg-white hover:bg-slate-50 text-[13px] font-semibold text-slate-700`}>사유 보기</button>;
+    const badge = <span className={`inline-flex items-center gap-1 h-6 px-2 rounded-md border text-[12px] font-semibold whitespace-nowrap ${st.badge}`}><Icon className="w-[13px] h-[13px]" />{st.label}</span>;
+    if (phone) {
+      return (
+        <li key={e.id} className="py-3.5 space-y-2">
+          <div className="flex items-center gap-2">{badge}<b className="text-[14px] truncate">{e.title}</b></div>
+          <p className="text-[12.5px] text-slate-600 leading-snug">{desc}</p>
+          {due && <p className="text-[12.5px] font-semibold text-amber-800 inline-flex items-center gap-1 tabular-nums"><AlarmClock className="w-3.5 h-3.5" />{due}</p>}
+          {btn}
+        </li>
+      );
     }
+    return (
+      <li key={e.id} className="grid grid-cols-[minmax(0,1fr)_250px_150px] items-center gap-5 py-3.5">
+        <div className="min-w-0"><div className="flex items-center gap-2">{badge}<b className="text-[14px] truncate">{e.title}</b></div><p className="text-[12.5px] text-slate-600 mt-1">{desc}</p></div>
+        <p className="text-[12.5px] font-bold text-amber-800 inline-flex items-center gap-1 tabular-nums">{due && <AlarmClock className="w-3.5 h-3.5 shrink-0" />}{due}</p>
+        {btn}
+      </li>
+    );
   };
 
-  const removeEvent = (ev: PlannerEvent) => {
-    setConfirm({
-      title: '행사 삭제',
-      description: `'${ev.title}' 행사를 캘린더에서 삭제할까요? 선택한 채널 구성도 함께 삭제됩니다.`,
-      mode: 'danger',
-      confirmLabel: '삭제',
-      onConfirm: async () => {
-        setConfirm(null);
-        try {
-          const r = await fetch(`/api/marketing-planner/events/${ev.id}`, { method: 'DELETE', headers: auth() });
-          const d = await r.json().catch(() => ({}));
-          if (!r.ok) { toast.error(d.error || '삭제에 실패했습니다'); return; }
-          toast.success('삭제되었습니다');
-          loadEvents(month);
-        } catch { toast.error('네트워크 오류. 다시 시도해 주세요'); }
-      },
-    });
+  const eventRow = (e: CalendarEvent) => {
+    const st = plannerStateOf(e.displayState);
+    if (!st) return null;
+    const Icon = st.icon;
+    const sub = e.displayState === 'making' ? (e.building ? '완성본을 만드는 중이에요' : e.notice || '문자 문안을 준비하고 있어요 · 준비되면 확인 요청이 가요')
+      : e.displayState === 'approved' ? '정해진 날 오전 8시에 그대로 나가요'
+        : e.displayState === 'cancelled' ? (e.closedReason === 'not_approved' ? '승인되지 않아 보내지 않았어요' : e.closedReason === 'missed' ? '예정일이 지나 보내지 않았어요' : '취소한 행사예요')
+          : '';
+    const subTone = e.displayState === 'making' ? 'text-violet-800' : e.displayState === 'approved' ? 'text-emerald-800' : 'text-slate-500';
+    return (
+      <li key={e.id}>
+        <button type="button" onClick={() => openEvent(e)} onMouseEnter={() => setHovered(e.id)} onMouseLeave={() => setHovered(null)} onFocus={() => setHovered(e.id)} onBlur={() => setHovered(null)}
+          className="w-full text-left flex items-start gap-3 px-4 py-3.5 hover:bg-slate-50">
+          <div className="min-w-0 flex-1">
+            <div className="flex items-center gap-2 min-w-0">
+              <span className={`inline-flex items-center gap-1 h-6 px-1.5 rounded-md border text-[11.5px] font-semibold whitespace-nowrap ${st.badge}`}><Icon className="w-[13px] h-[13px]" />{st.label}</span>
+              <span className={`text-[14px] font-semibold truncate ${e.displayState === 'done' || e.displayState === 'cancelled' ? 'text-slate-600' : ''}`}>{e.title}</span>
+            </div>
+            <p className="text-[12px] text-slate-500 mt-1 tabular-nums truncate">{plannerRange(e.startsOn, e.endsOn)}{e.benefitText ? ` · ${e.benefitText}` : ''}</p>
+            <div className="flex flex-wrap gap-1.5 mt-2">
+              {sendChipsOf(e).map((c) => {
+                const K = PLANNER_SEND_KIND[c.kind];
+                const CIcon = c.done ? Check : K.icon;
+                return <span key={`${c.date}-${c.kind}`} className={`inline-flex items-center gap-1 h-6 px-2 rounded-md border text-[12px] tabular-nums whitespace-nowrap ${st.chip}`}><CIcon className="w-3 h-3" />{plannerDay(c.date).replace(/\(.\)$/, '')} {K.label}{c.done && c.count !== null ? ` · ${won(c.count)} 보냄` : ''}</span>;
+              })}
+            </div>
+            {sub && <p className={`text-[12px] font-semibold mt-2 ${subTone}`}>{sub}</p>}
+          </div>
+          <ChevronRight className="w-4 h-4 text-slate-400 mt-1 shrink-0" />
+        </button>
+      </li>
+    );
   };
 
-  const monthEstTotal = events.reduce((s, e) => s + (e.estCreditsTotal || 0), 0);
+  const empty = loadState === 'ok' && events.length === 0;
+  const emptyGuide = (
+    <div className="px-5 md:px-6 py-7">
+      <p className="text-[16px] font-bold">이달 첫 행사를 담아 보세요</p>
+      <p className="text-[13px] text-slate-600 mt-1">행사 하나에 문자·모바일 DM·메일을 정해진 날 보내 드려요</p>
+      <ol className="mt-5 space-y-4 text-[13px]">
+        {[['행사명·기간·혜택을 적어요', '혜택은 적은 글자 그대로 실려요'], ['사진·글·몰 상품을 넣어요', '모바일 DM과 메일 완성본을 만들어 드려요'], ['발송 3일 전, 실물을 보고 승인해요', '휴대폰으로 확인 요청이 가요 · 승인 전에는 아무것도 나가지 않아요']].map(([t, d], i) => (
+          <li key={t} className="flex gap-3"><span className="w-6 h-6 rounded-full bg-slate-900 text-white text-[12px] font-bold grid place-items-center shrink-0">{i + 1}</span><div><b>{t}</b><p className="text-slate-600 mt-0.5">{d}</p></div></li>
+        ))}
+      </ol>
+      <button type="button" onClick={() => openCreate()} className="mt-6 w-full md:w-auto h-12 md:h-10 px-4 rounded-[10px] bg-indigo-600 hover:bg-indigo-700 text-white text-[13.5px] font-bold inline-flex items-center justify-center gap-1.5"><Plus className="w-4 h-4" />첫 행사 담기</button>
+    </div>
+  );
 
-  // ★ 2026-09-30 AI 존 대개편(설계서 §4-3): 담당자 할 일(DM 완성 필요) 수 = 실행 예정 목록과 같은 판정(dmAction)
-  const dmTodo = schedule.filter(({ tp }) => tp.channel === 'dm' && tp.dm && !tp.carrierDone && DM_NEEDS_ACTION.has(tp.dm.stage) && tp.dm.editPath).length;
+  const upcomingStrip = (
+    <div className="px-4 py-3 bg-slate-50 border-b border-slate-200 flex items-start gap-2.5 text-[12.5px]">
+      <Send className="w-[15px] h-[15px] text-slate-500 mt-0.5 shrink-0" />
+      {upcoming.length > 0 ? (
+        <div className="min-w-0"><p className="font-semibold">오늘·내일 나가는 발송 {upcoming.length}</p>
+          <p className="text-slate-600 mt-0.5 tabular-nums">{upcoming.map(({ e, c }) => `${plannerDay(c.date)} ${e.title} ${PLANNER_SEND_KIND[c.kind].label}`).join(' · ')}</p></div>
+      ) : (
+        <div className="min-w-0"><p className="font-semibold">오늘·내일 나가는 발송 없음</p>
+          {nextAny && <p className="text-slate-600 mt-0.5 tabular-nums">다음 발송 {plannerDay(nextAny.c.date)} 오전 8시 · {nextAny.e.title} {PLANNER_SEND_KIND[nextAny.c.kind].label}{nextAny.e.displayState !== 'approved' && nextAny.e.displayState !== 'done' ? <> · <b className="text-amber-800">승인해야 나가요</b></> : null}</p>}
+        </div>
+      )}
+    </div>
+  );
 
+  const listCard = (
+    <div className="rounded-2xl border border-slate-200 bg-white flex flex-col overflow-hidden">
+      <div className="flex items-center gap-2 px-4 h-12 border-b border-slate-200">
+        <h2 className="text-[14px] font-semibold">행사 {loadState === 'ok' ? events.length : ''}</h2>
+        {!empty && loadState === 'ok' && <span className="text-[12px] text-slate-500">다음 발송일 순 · 누르면 행사 상세</span>}
+      </div>
+      {loadState !== 'ok' ? <div className="flex-1 min-h-[200px] bg-slate-50/80" aria-hidden="true" />
+        : empty ? emptyGuide : (
+          <>
+            {upcomingStrip}
+            <ul className="divide-y divide-slate-100">{sorted.map(eventRow)}</ul>
+          </>
+        )}
+      {loadState === 'ok' && (
+        <div className="mt-auto px-4 py-3 border-t border-slate-100">
+          <p className="text-[10px] text-slate-500 italic">Data source: 행사·채널은 플래너 계획, 상태·마감은 서버 판정, 받는 사람 수는 수신거부를 뺀 고객 데이터 실조회, 발송 결과는 실제 발송 기록입니다. 공휴일은 관보 확정분입니다.</p>
+        </div>
+      )}
+    </div>
+  );
+
+  const todoCard = todo.length > 0 && loadState === 'ok' ? (
+    <section className={`bg-white rounded-2xl border border-slate-200 border-l-[3px] border-l-amber-400 shadow-sm ${phone ? 'px-4 pt-3.5' : 'p-5'}`}>
+      <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1">
+        <span className="w-7 h-7 rounded-lg bg-amber-50 text-amber-600 grid place-items-center"><ListChecks className="w-[14px] h-[14px]" /></span>
+        <h2 className="text-[15px] font-semibold tracking-[-0.01em]">할 일 {todo.length}건</h2>
+        {!phone && <span className="text-[12.5px] text-slate-500">마감이 가까운 순 · 승인 전에는 아무것도 나가지 않아요</span>}
+      </div>
+      <ul className="mt-3 divide-y divide-slate-100 border-t border-slate-100">{todo.map(todoRow)}</ul>
+    </section>
+  ) : null;
+
+  const weekStart = addDays(today, 0);
+  const weekStrip = (
+    <section className="bg-white rounded-2xl border border-slate-200 px-2 pt-2.5 pb-2">
+      <div className="flex items-center justify-between px-2"><p className="text-[13px] font-semibold">이번 주</p><span className="text-[12px] text-slate-500 tabular-nums">{plannerDay(weekStart).replace(/\(.\)$/, '')} ~ {plannerDay(addDays(weekStart, 6)).replace(/\(.\)$/, '')}</span></div>
+      <div className="grid grid-cols-7 gap-0.5 mt-1.5">
+        {Array.from({ length: 7 }, (_, i) => addDays(weekStart, i)).map((d) => {
+          const has = events.flatMap((e) => sendChipsOf(e).filter((c) => c.date === d).map(() => e));
+          const dow = new Date(`${d}T00:00:00Z`).getUTCDay();
+          const isToday = d === today;
+          const red = dow === 0 || holidays.has(d);
+          return (
+            <div key={d} className={`h-14 rounded-xl flex flex-col items-center justify-center gap-0.5 ${isToday ? 'bg-indigo-600 text-white' : ''}`} aria-label={`${plannerDay(d)}${has.length ? ` 발송 ${has.length}` : ''}`}>
+              <span className={`text-[11px] ${isToday ? 'text-white/80' : red ? 'text-rose-700' : dow === 6 ? 'text-sky-700' : 'text-slate-500'}`}>{DOW[dow]}</span>
+              <span className={`text-[15px] font-semibold tabular-nums ${!isToday && red ? 'text-rose-700' : ''}`}>{Number(d.slice(8))}</span>
+              <span className="flex gap-0.5 h-1.5">{has.slice(0, 3).map((e, i) => <span key={i} className={`w-1.5 h-1.5 rounded-full ${e.displayState === 'review' || e.displayState === 'material' || e.displayState === 'hold' ? 'bg-amber-500' : e.displayState === 'making' ? 'bg-violet-500' : 'bg-emerald-500'}`} />)}</span>
+            </div>
+          );
+        })}
+      </div>
+      <button type="button" onClick={() => setWeekOpen((v) => !v)} className="mt-1 w-full h-11 rounded-xl text-[13px] font-semibold text-indigo-700 inline-flex items-center justify-center gap-1 hover:bg-indigo-50">
+        {Number(month.slice(5))}월 달력 {weekOpen ? '접기' : '펼치기'}<ChevronDown className={`w-4 h-4 transition-transform ${weekOpen ? 'rotate-180' : ''}`} />
+      </button>
+    </section>
+  );
+
+  const kpiFail = loadState === 'fail';
   return (
     <ZoneFrame
       moduleId="planner"
       kpis={[
-        { label: `${Number(month.slice(5))}월 행사`, value: `${events.length}건` },
-        { label: '실행 예정', value: `${schedule.length}건` },
-        { label: '예상 제작', value: monthEstTotal > 0 ? `${monthEstTotal.toLocaleString()}크레딧` : '—' },
+        { label: '할 일', value: kpiFail || !cal ? '확인 불가' : `${cal.kpi.todo}건`, tone: cal && cal.kpi.todo > 0 ? 'amber' : undefined },
+        { label: `${Number(month.slice(5))}월 행사`, value: kpiFail || !cal ? '확인 불가' : `${cal.kpi.events}건` },
+        { label: '보유 크레딧', value: cal?.kpi.balance !== null && cal?.kpi.balance !== undefined ? won(cal.kpi.balance) : '확인 불가' },
       ]}
-      links={[{ label: '1년 설계 보기', icon: CalendarRange, onClick: () => navigate('/marketing-calendar') }]}
-      stamp={{ text: '다시 읽기', onRefresh: () => loadEvents(month), loading: false }}
+      links={[
+        { label: '이달 결과', icon: ChartColumn, onClick: () => navigate(`/marketing-planner/brief/${month}`) },
+        { label: '1년 설계 보기', icon: CalendarRange, onClick: () => navigate('/marketing-calendar') },
+      ]}
+      stamp={{ text: loadedAt || '다시 읽기', onRefresh: () => { void load(month); void loadAvailability(); }, loading: loadState === 'loading' }}
       command={{
         lead: (
-          <div className="flex items-center gap-2">
-            <div className="flex items-center gap-1 rounded-xl border border-slate-200 bg-white p-[3px]">
-              <button onClick={() => setMonth((m) => shiftMonth(m, -1))} className="w-8 h-8 rounded-lg hover:bg-slate-100 flex items-center justify-center" aria-label="이전 달">
-                <ChevronLeft className="w-4 h-4" />
-              </button>
-              <span className="px-2 text-[14px] font-semibold tabular-nums">{month.replace('-', '년 ')}월</span>
-              <button onClick={() => setMonth((m) => shiftMonth(m, 1))} className="w-8 h-8 rounded-lg hover:bg-slate-100 flex items-center justify-center" aria-label="다음 달">
-                <ChevronRight className="w-4 h-4" />
-              </button>
-            </div>
-            {month !== todayMonth() && (
-              <button onClick={() => setMonth(todayMonth())} className="h-10 px-3 rounded-xl border border-slate-200 bg-white text-[13px] font-semibold text-slate-600 hover:bg-slate-50 transition-colors">
-                이번 달
-              </button>
-            )}
+          <div className="flex items-center gap-1 rounded-xl border border-slate-200 bg-white p-[3px]">
+            <button type="button" onClick={() => setMonth((m) => shiftMonth(m, -1))} className={`${phone ? 'w-11 h-11' : 'w-8 h-8'} rounded-lg hover:bg-slate-100 grid place-items-center`} aria-label="이전 달"><ChevronLeft className="w-4 h-4" /></button>
+            <span className="px-2 text-[14px] font-semibold tabular-nums">{phone ? `${Number(month.slice(5))}월` : `${month.slice(0, 4)}년 ${Number(month.slice(5))}월`}</span>
+            <button type="button" onClick={() => setMonth((m) => shiftMonth(m, 1))} className={`${phone ? 'w-11 h-11' : 'w-8 h-8'} rounded-lg hover:bg-slate-100 grid place-items-center`} aria-label="다음 달"><ChevronRight className="w-4 h-4" /></button>
+            {month !== todayMonth() && <button type="button" onClick={() => setMonth(todayMonth())} className="h-8 px-2.5 rounded-lg text-[12.5px] font-semibold text-slate-600 hover:bg-slate-100">이번 달</button>}
           </div>
         ),
-        note: dmTodo > 0
-          ? <span className="text-amber-800">DM 완성이 필요한 발송 {dmTodo}건 · 실행 예정에서 [DM 완성하기]</span>
-          : '행사를 담으면 DM·문자·이메일 제작과 발송 일정이 이 달에 채워집니다',
+        note: phone ? undefined : '행사를 담고 모바일 DM·메일 재료를 넣으면 완성본을 만들어요. 발송 3일 전 휴대폰으로 실물 확인 요청이 가요',
         primary: { label: '행사 담기', icon: Plus, onClick: () => openCreate(), tone: 'indigo' },
       }}
-      blocks={migrationPending ? [{ text: '플래너 준비 작업이 진행 중입니다. 잠시 후 새로고침해 주세요.' }] : []}
-      emphasis={events.length > 0 && !migrationPending ? (
-        <ZoneEmphasis
-          kind="status"
-          tone={approval?.status === 'approved' ? 'emerald' : approval ? 'amber' : 'indigo'}
-          icon={approval?.status === 'approved' ? CheckCircle2 : ClipboardCheck}
-          title={approval?.status === 'approved'
-            ? '이번 달 대행이 시작되었습니다'
-            : approval
-              ? '결재 대기: 승인만 하면 대행이 시작됩니다'
-              : '이번 달 계획을 결재에 올리세요'}
-          meta={approval?.status === 'approved'
-            ? '계획대로 제작과 발송이 이어집니다. 소재 제작분은 각 제작 시점에 차감됩니다.'
-            : '승인 전에는 제작·발송·차감이 일어나지 않습니다.'}
-          right={(
-            <button
-              onClick={() => navigate(`/marketing-planner/brief/${month}`)}
-              className="h-9 px-4 rounded-[10px] bg-indigo-600 hover:bg-indigo-700 text-white text-[13px] font-bold transition-colors"
-            >
-              {approval?.status === 'approved' ? '브리핑 보기' : approval ? '승인하러 가기' : '브리핑 열기'}
-            </button>
-          )}
-        />
-      ) : null}
+      blocks={[
+        ...(loadState === 'fail' ? [{ text: '행사를 불러오지 못했어요. 달력이 비어 보여도 행사가 없는 것이 아니에요.', actionLabel: '다시 읽기', onAction: () => { void load(month); }, tone: 'rose' as const }] : []),
+        ...(loadState === 'pending' ? [{ text: '플래너 준비 작업이 진행 중이에요. 몇 분 뒤 다시 읽어 주세요.', actionLabel: '다시 읽기', onAction: () => { void load(month); } }] : []),
+        ...(cal && cal.migratedTodo > 0 ? [{ text: `결재가 행사별 확인으로 바뀌었어요. 확인할 행사 ${cal.migratedTodo}건이 아래 할 일에 있어요.` }] : []),
+      ]}
+      emphasis={!phone ? todoCard : null}
     >
-      <div className="space-y-4">
-        {/* ── 좌: 캘린더 / 우: 실행 예정 ───────────────────────────── */}
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-4">
-          {/* 캘린더 */}
-          <div className="lg:col-span-7 rounded-2xl border border-slate-200 bg-white overflow-hidden">
-            <div className="grid grid-cols-7 border-b border-slate-200 text-center text-[11px] font-medium">
-              {['일', '월', '화', '수', '목', '금', '토'].map((d, i) => (
-                <div key={d} className={`py-2 ${i === 0 ? 'text-rose-700' : i === 6 ? 'text-sky-700' : 'text-slate-400'}`}>{d}</div>
-              ))}
-            </div>
-            {loading ? (
-              <div className="py-24 flex items-center justify-center text-slate-400 text-sm">
-                <Loader2 className="w-4 h-4 animate-spin mr-2" /> 불러오는 중...
-              </div>
-            ) : (
-              <div className="grid grid-cols-7">
-                {cells.map((c, i) => {
-                  const dayEvents = c.inMonth ? eventsByDate.get(c.date) || [] : [];
-                  const holiday = holidayByDate.get(c.date);
-                  const dow = i % 7;
-                  const isToday = c.date === today;
-                  const red = dow === 0 || !!holiday;
-                  return (
-                    <button
-                      key={c.date}
-                      onClick={() => onCellClick(c)}
-                      className={`relative min-h-[84px] md:min-h-[104px] p-1.5 text-left border-b border-r border-slate-100 align-top transition-colors ${
-                        c.inMonth ? 'hover:bg-white' : 'bg-slate-50 hover:bg-white'
-                      }`}
-                    >
-                      <div className="flex items-baseline gap-1">
-                        <span className={`text-[12px] tabular-nums font-medium ${
-                          !c.inMonth ? 'text-slate-400'
-                            : isToday ? 'text-white'
-                              : red ? 'text-rose-700' : dow === 6 ? 'text-sky-700' : 'text-slate-600'
-                        } ${isToday ? 'inline-flex items-center justify-center min-w-[20px] h-5 px-1 rounded-full bg-indigo-600' : ''}`}>
-                          {Number(c.date.slice(8))}
-                        </span>
-                        {holiday && c.inMonth && (
-                          <span className="text-[9px] text-rose-700 truncate">{holiday.name}</span>
-                        )}
-                      </div>
-                      {c.inMonth && (
-                        <div className="mt-1 space-y-1">
-                          {dayEvents.slice(0, 3).map((ev) => (
-                            <div key={ev.id} className="truncate rounded px-1.5 py-0.5 text-[10px] font-medium bg-violet-100 text-violet-900 border border-violet-200">
-                              {ev.title}
-                            </div>
-                          ))}
-                          {dayEvents.length > 3 && <div className="text-[9px] text-slate-400 pl-1">+{dayEvents.length - 3}</div>}
-                        </div>
-                      )}
-                    </button>
-                  );
-                })}
-              </div>
-            )}
-            {!holidaysReady && (
-              <div className="px-4 py-2.5 border-t border-slate-200 text-[11px] text-amber-800">
-                {month.slice(0, 4)}년 공휴일 정보가 아직 등록되지 않아 표시하지 않습니다. 확정된 뒤 반영됩니다.
-              </div>
-            )}
-          </div>
-
-          {/* 실행 예정 패널 */}
-          <div className="lg:col-span-5 rounded-2xl border border-slate-200 bg-white flex flex-col lg:h-0 lg:min-h-full">
-            <div className="px-4 py-3 border-b border-slate-200 flex items-center gap-2">
-              <h2 className="text-sm font-semibold">실행 예정</h2>
-              <span className="text-[11px] text-slate-400">{schedule.length}건</span>
-              <span className="ml-auto text-[11px] text-slate-400">항목을 누르면 상세가 열립니다</span>
-            </div>
-            {loading ? (
-              <div className="py-20 flex items-center justify-center text-slate-400 text-sm">
-                <Loader2 className="w-4 h-4 animate-spin mr-2" /> 불러오는 중...
-              </div>
-            ) : schedule.length === 0 ? (
-              <div className="py-16 px-6 text-center">
-                <Sparkles className="w-6 h-6 text-violet-700 mx-auto mb-2" />
-                <p className="text-sm text-slate-500">이번 달 실행 예정이 없습니다</p>
-                <p className="text-xs text-slate-400 mt-1">행사를 담으면 채널별 발송 일정이 여기에 순서대로 섭니다</p>
-              </div>
-            ) : (
-              <div className="divide-y divide-slate-100 max-h-[720px] lg:max-h-none lg:flex-1 lg:min-h-0 overflow-y-auto">
-                {schedule.map(({ ev, tp }, i) => {
-                  const st = TP_STATUS[String(tp.status || 'planned')] || TP_STATUS.planned;
-                  const arrived = !!tp.scheduledOn && tp.scheduledOn <= today;
-                  const Icon = CHANNEL_ICON[tp.channel] || Smartphone;
-                  // ★ 2026-09-02 DM 단계 배지 — 상태 배지 옆 두 번째 배지. 담당자 할 일이 있으면 [DM 완성하기] 1클릭.
-                  //   실을 문자가 이미 끝났으면(carrierDone) 버튼 대신 그 사실을 말한다.
-                  const dmBadge = tp.channel === 'dm' && tp.dm ? dmBadgeOf(tp.dm.stage) : null;
-                  const dmAction = tp.channel === 'dm' && tp.dm && !tp.carrierDone && DM_NEEDS_ACTION.has(tp.dm.stage) && tp.dm.editPath ? tp.dm.editPath : null;
-                  return (
-                    <div key={tp.id || `${ev.id}-${i}`} className="hover:bg-white transition-colors">
-                      <button
-                        onClick={() => openDetail(ev, tp)}
-                        className="w-full text-left px-4 pt-3 pb-2"
-                      >
-                        <div className="flex items-center gap-2">
-                          <span className={`text-[11px] font-bold tabular-nums px-1.5 py-0.5 rounded ${
-                            arrived ? 'bg-slate-100 text-slate-500' : 'bg-violet-100 text-violet-800'
-                          }`}>
-                            {tp.scheduledOn ? ddayLabel(tp.scheduledOn, today) : '-'}
-                          </span>
-                          <Icon className="w-3.5 h-3.5 text-slate-400 flex-shrink-0" />
-                          <span className="text-sm font-medium truncate">{tp.label || tp.channel}</span>
-                          <span className="ml-auto flex items-center gap-1 flex-shrink-0">
-                            {dmBadge && <span className={`text-[10px] px-1.5 py-0.5 rounded border ${dmBadge.cls}`}>{dmBadge.label}</span>}
-                            <span className={`text-[10px] px-1.5 py-0.5 rounded border ${st.cls}`}>{st.label}</span>
-                          </span>
-                        </div>
-                        <div className="mt-1 flex items-center gap-2 text-[11px] text-slate-400">
-                          <span className="truncate">{ev.title}</span>
-                          <span className="tabular-nums flex-shrink-0">{tp.scheduledOn}</span>
-                          {tp.timing?.audience === 'participants' && (
-                            <span className="text-[10px] px-1.5 rounded bg-sky-100 text-sky-800 flex-shrink-0">참여자</span>
-                          )}
-                          {tp.carriedBySms && (
-                            <span className="text-[10px] px-1.5 rounded bg-violet-100 text-violet-800 flex-shrink-0">같은 날 문자에 링크로 실림</span>
-                          )}
-                          {tp.carrierDone && (
-                            <span className="text-[10px] px-1.5 rounded bg-slate-100 text-slate-500 flex-shrink-0">같은 날 문자가 이미 끝나 실리지 않음</span>
-                          )}
-                          {tp.channel === 'sms' && tp.dmLinked && (
-                            <span className="text-[10px] px-1.5 rounded bg-violet-100 text-violet-800 flex-shrink-0">모바일 DM 링크 포함</span>
-                          )}
-                        </div>
-                        {tp.lockReason && (
-                          <div className="mt-1.5 flex items-start gap-1.5 text-[11px] text-amber-800">
-                            <PauseCircle className="w-3.5 h-3.5 flex-shrink-0 mt-px" />
-                            <span className="flex-1">{tp.lockReason}</span>
-                          </div>
-                        )}
-                        {tp.dm && tp.dm.stage === 'incomplete' && tp.dm.residue && (
-                          <div className="mt-1.5 text-[11px] text-amber-800">남은 자리: {tp.dm.residue}</div>
-                        )}
-                      </button>
-                      {dmAction && tp.dm && (
-                        <div className="px-4 pb-3 flex items-center gap-2">
-                          <span className="text-[11px] text-amber-900 flex-1">
-                            {tp.dm.stage === 'stopped'
-                              ? '발행이 중지돼 있어 재개 전에는 문자에 실리지 않습니다.'
-                              : tp.carriedBySms ? '발행 전에는 같은 날 문자가 나가지 않습니다.' : '발행 전에는 이 문자가 나가지 않습니다.'}
-                          </span>
-                          <button
-                            onClick={(e) => { e.stopPropagation(); navigate(dmAction); }}
-                            className="flex items-center gap-1 text-[11px] font-semibold px-2.5 py-1.5 rounded-lg bg-amber-100 border border-amber-300 text-amber-900 hover:bg-amber-100 transition-colors"
-                          >
-                            <Smartphone className="w-3 h-3" /> {dmActionLabel(tp.dm.stage)}
-                          </button>
-                        </div>
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-          </div>
+      {phone ? (
+        <div className="space-y-3">
+          {todoCard}
+          {listCard}
+          {loadState === 'ok' && !empty && weekStrip}
+          {weekOpen && calendarCard}
         </div>
-
-        {/* ── 행사 목록(편집·삭제) ─────────────────────────────────── */}
-        {events.length > 0 && (
-          <div className="space-y-2">
-            {events.map((ev) => (
-              <div key={ev.id} className="rounded-2xl border border-slate-200 bg-white px-4 py-3">
-                <div className="flex flex-wrap items-center gap-2">
-                  <span className="text-sm font-semibold">{ev.title}</span>
-                  <span className={`text-[10px] px-1.5 py-0.5 rounded ${(STATUS_BADGE[ev.status] || STATUS_BADGE.draft).cls}`}>
-                    {(STATUS_BADGE[ev.status] || STATUS_BADGE.draft).label}
-                  </span>
-                  <span className="text-xs text-slate-400 tabular-nums">{ev.startsOn} ~ {ev.endsOn}</span>
-                  {ev.estCreditsTotal > 0 && (
-                    <span className="text-[11px] text-violet-800 tabular-nums">제작 예상 {ev.estCreditsTotal.toLocaleString()}크레딧</span>
-                  )}
-                  <span className="ml-auto flex gap-1.5">
-                    <button onClick={() => openEdit(ev)} className="text-xs px-2.5 py-1 rounded-lg border border-slate-300 text-slate-600 hover:bg-slate-100">편집</button>
-                    {ev.status === 'draft' && (
-                      <button onClick={() => removeEvent(ev)} className="p-1.5 rounded-lg text-slate-400 hover:text-rose-700 hover:bg-rose-50" aria-label="삭제">
-                        <Trash2 className="w-3.5 h-3.5" />
-                      </button>
-                    )}
-                  </span>
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
-
-        {!loading && events.length === 0 && !migrationPending && (
-          <div className="rounded-2xl border border-dashed border-slate-200 py-14 text-center">
-            <Sparkles className="w-6 h-6 text-violet-700 mx-auto mb-2" />
-            <p className="text-sm text-slate-500">이번 달 행사가 아직 없습니다</p>
-            <p className="text-xs text-slate-400 mt-1">날짜를 누르거나 [행사 담기]로 시작하세요. 채널 제작·발송은 AI가 이어받습니다</p>
-          </div>
-        )}
-
-        <p className="text-[10px] text-slate-400 italic">
-          Data source: 행사·채널 구성은 저장 즉시 반영, 예상 크레딧은 소재 제작 기준이며 문자·알림톡은 실행 시 별도 과금됩니다.
-          공휴일은 관보 확정분이고, 발송 결과·대상 수는 실제 발송 기록입니다. 월간 결재는 브리핑 화면에서 진행합니다.
-          모바일 DM 단계는 발행 상태를 실시간으로 읽으며, 같은 날 같은 대상의 문자와 DM은 문자 1통(링크 포함)으로 나갑니다.
-        </p>
-      </div>
-
-      {/* ── 터치포인트 상세 모달 (★ 2026-08-13(2)) ─────────────────── */}
-      {detailOf && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60" onClick={() => setDetailOf(null)}>
-          <div className="bg-white border border-slate-200 rounded-2xl shadow-2xl w-full max-w-xl max-h-[88vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
-            <div className="px-5 py-4 border-b border-slate-200 flex items-start gap-3 sticky top-0 bg-white z-10">
-              <div className="flex-1 min-w-0">
-                <h3 className="text-sm font-bold truncate">{detailOf.ev.title}</h3>
-                <p className="text-[11px] text-slate-400 mt-0.5">
-                  {detailOf.tp.label || detailOf.tp.channel} · {detailOf.tp.scheduledOn}
-                  {detailOf.tp.timing?.anchor && <> · {ANCHOR_LABEL[detailOf.tp.timing.anchor]}</>}
-                </p>
-              </div>
-              <button onClick={() => setDetailOf(null)} className="p-1.5 rounded-lg text-slate-400 hover:bg-slate-100" aria-label="닫기">
-                <X className="w-4 h-4" />
-              </button>
-            </div>
-
-            <div className="p-5 space-y-4">
-              {(() => {
-                const tp = detailOf.tp;
-                const st = TP_STATUS[String(tp.status || 'planned')] || TP_STATUS.planned;
-                const arrived = !!tp.scheduledOn && tp.scheduledOn <= today;
-                return (
-                  <>
-                    <div className="flex flex-wrap items-center gap-2">
-                      <span className={`text-[11px] px-2 py-1 rounded-lg border ${st.cls}`}>{st.label}</span>
-                      {!arrived && <span className="text-[11px] text-slate-400">{ddayLabel(String(tp.scheduledOn), today)}에 실행됩니다</span>}
-                      {tp.timing?.audience === 'participants' && (
-                        <span className="text-[11px] px-2 py-1 rounded-lg bg-sky-100 text-sky-800 border border-sky-200">행사 참여 신청자</span>
-                      )}
-                    </div>
-
-                    {tp.lockReason && (
-                      <div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2.5 flex items-start gap-2">
-                        <PauseCircle className="w-4 h-4 text-amber-700 flex-shrink-0 mt-px" />
-                        <p className="text-[12px] text-amber-900">{tp.lockReason}</p>
-                      </div>
-                    )}
-
-                    {/* 계획 — 도래 전에는 이것이 전부다(없는 실측을 지어내지 않는다) */}
-                    <div className="rounded-xl border border-slate-200 bg-white px-4 py-3 space-y-1.5 text-[12px]">
-                      <div className="flex justify-between"><span className="text-slate-400">행사 기간</span><span className="tabular-nums">{detailOf.ev.startsOn} ~ {detailOf.ev.endsOn}</span></div>
-                      <div className="flex justify-between"><span className="text-slate-400">발송 예정일</span><span className="tabular-nums">{tp.scheduledOn}</span></div>
-                      <div className="flex justify-between">
-                        <span className="text-slate-400">제작 크레딧</span>
-                        <span className="tabular-nums">{tp.estCredits != null ? `${Number(tp.estCredits).toLocaleString()}크레딧` : '실행 시 과금'}</span>
-                      </div>
-                      {detailOf.ev.benefitText && (
-                        <div className="flex justify-between gap-3"><span className="text-slate-400 flex-shrink-0">혜택</span><span className="text-right">{detailOf.ev.benefitText}</span></div>
-                      )}
-                    </div>
-
-                    {/* ★ 2026-09-02 모바일 DM 단계 — 담당자가 할 일이 있으면 여기서 바로 연다(1클릭) */}
-                    {tp.channel === 'dm' && tp.dm && (() => {
-                      const badge = dmBadgeOf(tp.dm.stage);
-                      const actionable = !tp.carrierDone && DM_NEEDS_ACTION.has(tp.dm.stage);
-                      return (
-                        <div className={`rounded-xl border px-4 py-3 space-y-2 ${
-                          actionable ? 'border-amber-200 bg-amber-50' : 'border-slate-200 bg-white'
-                        }`}>
-                          <div className="flex items-center gap-2">
-                            {badge && <span className={`text-[11px] px-2 py-1 rounded-lg border ${badge.cls}`}>{badge.label}</span>}
-                            {tp.dm.url && (
-                              <a href={tp.dm.url} target="_blank" rel="noopener noreferrer" className="ml-auto text-[11px] text-violet-800 flex items-center gap-1 hover:underline">
-                                발행 페이지 <ExternalLink className="w-3 h-3" />
-                              </a>
-                            )}
-                          </div>
-                          <p className="text-[12px] text-slate-600">{describeDmStage(tp.dm, !!tp.carriedBySms, !!tp.carrierDone)}</p>
-                          {tp.dm.editPath && !tp.carrierDone && (
-                            <button
-                              onClick={() => navigate(tp.dm!.editPath!)}
-                              className={`w-full flex items-center justify-center gap-1.5 text-[12px] font-semibold px-3 py-2 rounded-lg transition-colors ${
-                                actionable
-                                  ? 'bg-amber-100 border border-amber-300 text-amber-900 hover:bg-amber-200'
-                                  : 'border border-slate-300 text-slate-600 hover:bg-slate-100'
-                              }`}
-                            >
-                              <Smartphone className="w-3.5 h-3.5" /> {actionable ? dmActionLabel(tp.dm.stage) : 'DM 편집 열기'}
-                            </button>
-                          )}
-                        </div>
-                      );
-                    })()}
-                    {tp.channel === 'sms' && tp.dmLinked && !arrived && (
-                      <p className="text-[11px] text-violet-800">
-                        같은 날의 모바일 DM 링크를 실어 문자 1통으로 보냅니다. DM이 발행돼야 이 문자가 나갑니다.
-                      </p>
-                    )}
-
-                    {!arrived && (
-                      <p className="text-[11px] text-slate-400">
-                        아직 도래하지 않은 일정입니다. 문자 문안은 발송 당일에 만들어지고, 소재는 승인 후 제작됩니다.
-                      </p>
-                    )}
-
-                    {arrived && detailLoading && (
-                      <div className="py-8 flex items-center justify-center text-slate-400 text-sm">
-                        <Loader2 className="w-4 h-4 animate-spin mr-2" /> 실행 내역을 불러오는 중...
-                      </div>
-                    )}
-
-                    {arrived && !detailLoading && detail && (
-                      <div className="space-y-3">
-                        <div className="rounded-xl border border-slate-200 bg-white px-4 py-3 space-y-1.5 text-[12px]">
-                          {detail.sentAt && (
-                            <div className="flex justify-between"><span className="text-slate-400">발송 시각</span><span className="tabular-nums">{new Date(detail.sentAt).toLocaleString('ko-KR')}</span></div>
-                          )}
-                          <div className="flex justify-between">
-                            <span className="text-slate-400">대상</span>
-                            <span className="tabular-nums">
-                              {detail.sentCount != null ? `${detail.sentCount.toLocaleString()}명 발송` : detail.audienceCount != null ? `${detail.audienceCount.toLocaleString()}명` : '집계 없음'}
-                            </span>
-                          </div>
-                          {detail.audienceNote && <p className="text-[11px] text-slate-400 pt-0.5">{detail.audienceNote}</p>}
-                        </div>
-
-                        {detail.message && (
-                          <div>
-                            <p className="text-[11px] font-medium text-slate-500 mb-1.5">실제 발송 문안</p>
-                            <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
-                              {detail.message.subject && <p className="text-[12px] font-semibold mb-1">{detail.message.subject}</p>}
-                              <p className="text-[12px] text-slate-600 whitespace-pre-wrap leading-relaxed">{detail.message.body}</p>
-                            </div>
-                          </div>
-                        )}
-
-                        {detail.asset && (
-                          <div>
-                            <p className="text-[11px] font-medium text-slate-500 mb-1.5">발행된 소재</p>
-                            {detail.asset.kind === 'email' && detail.asset.html && (
-                              <button
-                                onClick={() => setPreview({ title: '이메일 미리보기', html: String(detail.asset?.html || '') })}
-                                className="w-full flex items-center gap-2 px-4 py-3 rounded-xl border border-slate-200 bg-white hover:bg-white transition-colors text-left"
-                              >
-                                <MailOpen className="w-4 h-4 text-violet-700 flex-shrink-0" />
-                                <span className="text-[12px] flex-1 truncate">{detail.asset.title || '이메일 소재'}</span>
-                                <span className="text-[11px] text-violet-800">미리보기</span>
-                              </button>
-                            )}
-                            {detail.asset.kind === 'dm' && detail.asset.url && (
-                              <a
-                                href={detail.asset.url} target="_blank" rel="noopener noreferrer"
-                                className="w-full flex items-center gap-2 px-4 py-3 rounded-xl border border-slate-200 bg-white hover:bg-white transition-colors"
-                              >
-                                <Smartphone className="w-4 h-4 text-violet-700 flex-shrink-0" />
-                                <span className="text-[12px] flex-1 truncate">모바일 DM: {detail.asset.url}</span>
-                                <ExternalLink className="w-3.5 h-3.5 text-violet-800 flex-shrink-0" />
-                              </a>
-                            )}
-                            {detail.asset.kind === 'dm' && !detail.asset.url && (
-                              <p className="text-[11px] text-slate-400">
-                                {detail.sentAt
-                                  ? '발행이 확인되지 않아 문자에 실리지 않았습니다.'
-                                  : '아직 발행 확인 전입니다. 지금 완성해 발행하면 오늘 문자에 실립니다.'}
-                              </p>
-                            )}
-                            {detail.asset.kind === 'inapp' && (
-                              <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
-                                {detail.asset.imageUrl && (
-                                  <img src={detail.asset.imageUrl} alt="" className="w-full max-h-40 object-cover rounded-lg mb-2" />
-                                )}
-                                <p className="text-[12px] font-semibold">{detail.asset.title}</p>
-                                <p className="text-[12px] text-slate-600 mt-1 whitespace-pre-wrap">{detail.asset.body}</p>
-                              </div>
-                            )}
-                            {detail.asset.kind === 'alimtalk' && (
-                              <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
-                                {detail.asset.inspection && <p className="text-[11px] text-slate-400 mb-1.5">검수 상태: {detail.asset.inspection}</p>}
-                                <p className="text-[12px] text-slate-600 whitespace-pre-wrap leading-relaxed">{detail.asset.body}</p>
-                              </div>
-                            )}
-                          </div>
-                        )}
-
-                        {!detail.message && !detail.asset && (
-                          <p className="text-[11px] text-slate-400">이 항목의 발송 내역이 아직 없습니다.</p>
-                        )}
-                      </div>
-                    )}
-                  </>
-                );
-              })()}
-            </div>
-
-            <div className="px-5 py-4 border-t border-slate-200 flex gap-2">
-              <button onClick={() => { const ev = detailOf.ev; setDetailOf(null); openEdit(ev); }} className="text-xs px-3 py-2 rounded-lg border border-slate-300 text-slate-600 hover:bg-slate-100">
-                행사 편집
-              </button>
-              <button onClick={() => navigate(`/marketing-planner/brief/${month}`)} className="text-white ml-auto text-xs px-3 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-700 font-semibold">
-                브리핑에서 보기
-              </button>
-            </div>
-          </div>
+      ) : (
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 items-stretch">
+          <div className="lg:col-span-7 flex">{calendarCard}</div>
+          <div className="lg:col-span-5 flex flex-col">{listCard}</div>
         </div>
       )}
-
-      {/* 소재 미리보기 — 발행된 HTML을 그대로 띄운다(sandbox: 스크립트 차단) */}
-      {preview && (
-        <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/70" onClick={() => setPreview(null)}>
-          <div className="bg-white border border-slate-200 rounded-2xl shadow-2xl w-full max-w-2xl h-[82vh] flex flex-col" onClick={(e) => e.stopPropagation()}>
-            <div className="px-5 py-3 border-b border-slate-200 flex items-center justify-between">
-              <h3 className="text-sm font-bold">{preview.title}</h3>
-              <button onClick={() => setPreview(null)} className="p-1.5 rounded-lg text-slate-400 hover:bg-slate-100" aria-label="닫기">
-                <X className="w-4 h-4" />
-              </button>
-            </div>
-            <iframe title={preview.title} srcDoc={preview.html} sandbox="" className="flex-1 w-full bg-white rounded-b-2xl" />
-          </div>
-        </div>
+      {modal && (
+        <PlannerEventModal
+          month={month}
+          initialDate={modal.date}
+          editing={modal.editing}
+          availability={availability}
+          balance={cal?.kpi.balance ?? null}
+          onClose={() => setModal(null)}
+          onSaved={() => { void load(month, true); }}
+        />
       )}
-
-      {/* ── 행사 기입 모달 ─────────────────────────────────────────── */}
-      {modalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60">
-          <div className="bg-white border border-slate-200 rounded-2xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-y-auto">
-            <div className="px-5 py-4 border-b border-slate-200 flex items-center justify-between sticky top-0 bg-white z-10">
-              <h3 className="text-sm font-bold">{editing ? '행사 편집' : '행사 담기'}</h3>
-              <button onClick={() => setModalOpen(false)} className="p-1.5 rounded-lg text-slate-400 hover:bg-slate-100" aria-label="닫기">
-                <X className="w-4 h-4" />
-              </button>
-            </div>
-
-            <div className="p-5 space-y-4">
-              <label className="block">
-                <span className="text-xs font-medium text-slate-500">행사명</span>
-                <input
-                  type="text" value={fTitle} onChange={(e) => setFTitle(e.target.value.slice(0, 120))}
-                  placeholder="예: 가을 신상 위크"
-                  className="mt-1 w-full px-3 py-2.5 bg-white border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-violet-500 outline-none"
-                />
-              </label>
-
-              <div className="grid grid-cols-2 gap-3">
-                <label className="block">
-                  <span className="text-xs font-medium text-slate-500">시작일</span>
-                  <input type="date" value={fStart} onChange={(e) => setFStart(e.target.value)}
-                    className="mt-1 w-full px-3 py-2.5 bg-white border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-violet-500 outline-none" />
-                </label>
-                <label className="block">
-                  <span className="text-xs font-medium text-slate-500">종료일</span>
-                  <input type="date" value={fEnd} onChange={(e) => setFEnd(e.target.value)}
-                    className="mt-1 w-full px-3 py-2.5 bg-white border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-violet-500 outline-none" />
-                </label>
-              </div>
-
-              <label className="block">
-                <span className="text-xs font-medium text-slate-500">혜택 문구 <span className="text-slate-400">(직접 입력, AI가 대신 만들지 않습니다)</span></span>
-                <input
-                  type="text" value={fBenefit} onChange={(e) => setFBenefit(e.target.value.slice(0, 300))}
-                  placeholder="예: 전 품목 신상 특가, 첫 구매 사은품"
-                  className="mt-1 w-full px-3 py-2.5 bg-white border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-violet-500 outline-none"
-                />
-              </label>
-
-              <label className="block">
-                <span className="text-xs font-medium text-slate-500">행사 상품 <span className="text-slate-400">(한 줄에 하나 · 선택)</span></span>
-                <textarea
-                  value={fProducts} onChange={(e) => setFProducts(e.target.value)} rows={2}
-                  placeholder={'니트 가디건\n울 머플러'}
-                  className="mt-1 w-full px-3 py-2.5 bg-white border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-violet-500 outline-none resize-none"
-                />
-              </label>
-
-              {/* 채널 선택 — 가용성 잠금 + 시점 규칙 */}
-              <div>
-                <span className="text-xs font-medium text-slate-500">채널과 시점</span>
-                <div className="mt-2 space-y-2">
-                  {availability.map((a) => {
-                    // 한 채널에 시점이 여럿일 수 있다 — 선택 여부는 "접점이 하나라도 있는가"다
-                    const picked = fTouchpoints.filter((t) => t.channel === a.channel);
-                    const selected = picked.length > 0;
-                    const beforeTp = picked.find((t) => t.timing.anchor === 'before_start');
-                    return (
-                      <div key={a.channel} className={`rounded-xl border px-3 py-2.5 ${selected ? 'border-violet-300 bg-violet-50' : 'border-slate-200 bg-white'} ${!a.available ? 'opacity-60' : ''}`}>
-                        <div className="flex items-center gap-2.5">
-                          <button
-                            type="button"
-                            onClick={() => toggleChannel(a.channel)}
-                            disabled={!a.available}
-                            className={`w-4.5 h-4.5 w-[18px] h-[18px] rounded border flex items-center justify-center shrink-0 ${
-                              selected ? 'bg-violet-500 border-violet-400' : 'border-slate-300'
-                            } ${!a.available ? 'cursor-not-allowed' : ''}`}
-                            aria-label={a.label}
-                          >
-                            {selected && <span className="text-[10px] leading-none">✓</span>}
-                            {!a.available && <Lock className="w-2.5 h-2.5 text-slate-400" />}
-                          </button>
-                          <span className="text-sm">{a.label}</span>
-                          <span className="ml-auto text-[11px] text-slate-400 tabular-nums">
-                            {picked.length > 1 && <span className="text-violet-800 mr-1.5">시점 {picked.length}회</span>}
-                            {a.estCredits != null ? `제작 ${a.estCredits}크레딧` : '실행 시 과금'}
-                          </span>
-                        </div>
-                        {!a.available && a.reason && (
-                          <p className="mt-1.5 ml-[28px] text-[11px] text-amber-800">{a.reason}</p>
-                        )}
-                        {selected && (
-                          <div className="mt-2 ml-[28px]">
-                            <div className="flex flex-wrap items-center gap-1.5">
-                              {(['start', 'end', 'before_start'] as Anchor[]).map((anchor) => {
-                                const on = picked.some((t) => t.timing.anchor === anchor);
-                                return (
-                                  <button
-                                    key={anchor}
-                                    type="button"
-                                    onClick={() => toggleTiming(a.channel, anchor)}
-                                    aria-pressed={on}
-                                    className={`text-[11px] px-2 py-1 rounded-lg border ${
-                                      on
-                                        ? 'border-violet-300 bg-violet-100 text-violet-900'
-                                        : 'border-slate-200 text-slate-500 hover:bg-white'
-                                    }`}
-                                  >
-                                    {ANCHOR_LABEL[anchor]}
-                                  </button>
-                                );
-                              })}
-                              {beforeTp && (
-                                <span className="flex items-center gap-1 text-[11px] text-slate-500">
-                                  시작
-                                  <input
-                                    type="number" min={1} max={30}
-                                    value={beforeTp.timing.offsetDays || 5}
-                                    onChange={(e) => setOffsetDays(a.channel, Math.max(1, Math.min(30, Number(e.target.value) || 5)))}
-                                    className="w-14 px-2 py-1 bg-white border border-slate-200 rounded-lg text-center tabular-nums outline-none focus:ring-1 focus:ring-violet-500"
-                                  />
-                                  일 전
-                                </span>
-                              )}
-                            </div>
-                            <p className="mt-1.5 text-[11px] text-slate-400">
-                              {picked.length > 1
-                                ? `고른 시점마다 따로 만들어 보냅니다. 지금 ${picked.length}회입니다.`
-                                : '시점을 여러 개 골라 시작과 종료에 나눠 보낼 수 있습니다.'}
-                            </p>
-                            {/* ★ 2026-09-02 문자·DM 같은 시점 = 문자 1통(링크 포함). 정책은 서버가 소유하고 여기는 그 사실을 말한다. */}
-                            {a.channel === 'dm' && (() => {
-                              const smsPicked = fTouchpoints.filter((t) => t.channel === 'sms');
-                              const shared = picked.filter((t) => smsPicked.some((s) => sharesTiming(s.timing, t.timing))).length;
-                              return (
-                                <p className="mt-1 text-[11px] text-violet-800">
-                                  AI가 초안을 만들면 담당자가 사진과 문구를 채워 발행합니다.{' '}
-                                  {smsPicked.length > 0 && shared > 0
-                                    ? `문자와 같은 날(${shared}회)은 문자 1통에 링크로 함께 나갑니다. 발행 전에는 그 문자가 나가지 않습니다.`
-                                    : smsPicked.length > 0
-                                      ? '문자와 다른 날이라 각각 나갑니다. 같은 날로 맞추면 문자 1통에 링크로 함께 나갑니다.'
-                                      : '예정일에 발행 주소를 실은 문자가 나갑니다. 발행 전에는 나가지 않습니다.'}
-                                  {' '}초안 5크레딧, 발행 시 100크레딧(응모·룰렛·설문이 들어가면 120 · 담당자 발행 때 차감).
-                                </p>
-                              );
-                            })()}
-                            {a.channel === 'sms' && (() => {
-                              const dmPicked = fTouchpoints.filter((t) => t.channel === 'dm');
-                              const shared = picked.filter((t) => dmPicked.some((d) => sharesTiming(d.timing, t.timing))).length;
-                              return shared > 0 ? (
-                                <p className="mt-1 text-[11px] text-violet-800">
-                                  같은 날의 모바일 DM 링크를 실어 1통으로 보냅니다({shared}회). DM이 발행돼야 그 문자가 나갑니다.
-                                </p>
-                              ) : dmPicked.length > 0 ? (
-                                <p className="mt-1 text-[11px] text-amber-800">
-                                  모바일 DM과 다른 날이라 각각 나갑니다. 같은 날로 맞추면 문자 1통에 링크로 함께 나갑니다.
-                                </p>
-                              ) : null;
-                            })()}
-                          </div>
-                        )}
-                        {/* ★ 2026-08-13 대상 축 — 문자·DM만 고를 수 있다.
-                            알림톡은 언제나 참여 신청자(정보성 안내)라 선택지가 없고, 이메일은 참여 접수의 입구다. */}
-                        {selected && (a.channel === 'sms' || a.channel === 'dm') && (
-                          <label className="mt-2 ml-[28px] flex items-center gap-2 text-[11px] text-slate-500 cursor-pointer">
-                            <input
-                              type="checkbox"
-                              checked={picked[0]?.timing.audience === 'participants'}
-                              onChange={(e) => setAudience(a.channel, e.target.checked ? 'participants' : 'all')}
-                              className="accent-violet-500"
-                            />
-                            행사 참여를 신청한 고객에게만 보내기
-                          </label>
-                        )}
-                        {selected && a.channel === 'alimtalk' && (
-                          <p className="mt-2 ml-[28px] text-[11px] text-slate-400">
-                            알림톡은 행사 참여를 신청한 고객에게 보내는 안내입니다. 템플릿 검수는 대행해 드립니다.
-                          </p>
-                        )}
-                      </div>
-                    );
-                  })}
-                  {availability.length === 0 && (
-                    <p className="text-xs text-slate-400 py-3 text-center">채널 상태를 불러오는 중입니다...</p>
-                  )}
-                </div>
-              </div>
-            </div>
-
-            <div className="px-5 py-4 border-t border-slate-200 flex items-center gap-3 sticky bottom-0 bg-white">
-              <span className="text-xs text-slate-500">
-                예상 제작 크레딧 <b className="text-violet-800 tabular-nums">{estTotal.toLocaleString()}</b>
-                <span className="text-slate-400"> · 저장만으로는 차감되지 않습니다</span>
-              </span>
-              <button
-                onClick={submit} disabled={saving}
-                className="text-white ml-auto px-5 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-sm font-semibold disabled:opacity-40 transition-opacity"
-              >
-                {saving ? '저장 중...' : editing ? '수정 저장' : '캘린더에 담기'}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      <ConfirmModal state={confirm} onClose={() => setConfirm(null)} />
     </ZoneFrame>
   );
 }
+

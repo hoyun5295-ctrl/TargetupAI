@@ -18,6 +18,8 @@ import authRoutes from './routes/auth';
 import identityReturnRoutes from './routes/identity-return';   // ★ 2026-10-03 본인확인 인증 창 복귀
 import { IDENTITY_RETURN_PATH } from './utils/identity-return';
 import companiesRoutes from './routes/companies';
+// ★ 2026-10-04 선불 요금제 이용 기간(docs/2026-10-04-prepaid-plan-term-design.md) — 고객·슈퍼관리자 라우터
+import { customerRouter as planTermCustomerRoutes, adminRouter as planTermAdminRoutes } from './routes/plan-term';
 // ★ D219+ Part 2 (2026-05-27): Onboarding Wizard 7 step endpoints
 import onboardingRoutes from './routes/onboarding';
 import helpRoutes from './routes/help';
@@ -109,6 +111,7 @@ import { startPayIngestMonitor } from './utils/pay-ingest-monitor';
 // ★ CT-17: 30일 PRO 무료체험 자동 강등 Cron (2026-04-22)
 import { startTrialDowngradeWorker } from './utils/trial-downgrade-worker';
 import { startFreeMessagingGrantWorker } from './utils/free-messaging-grant-worker';
+import { startPlanTermWorker } from './utils/plan-term';
 // ★ 2026-07-28 세금계산서 상태 전이 워커 (pending→due, confirmed·due→ready. 팝빌 연동 전 = ready 정지)
 import { startTaxbillWorker } from './utils/taxbill-worker';
 // ★ 2026-07-30: 팝빌 세금계산서 웹훅 (공개 — 팝빌 서버 POST 수신)
@@ -448,6 +451,8 @@ app.get('/api', (req, res) => {
 
 // 라우트 등록
 app.use('/api/auth', authRoutes);
+// ★ 2026-10-04 선불 이용 기간 — /api/companies 보다 먼저(같은 접두어의 구체 경로)
+app.use('/api/companies/plan-term', planTermCustomerRoutes);
 app.use('/api/companies', companiesRoutes);
 app.use('/api/onboarding', onboardingRoutes);
 app.use('/api/help', helpRoutes); // ★ 2026-08-22 도움말 봇 · 기능 카탈로그(docs/FEATURE-HELP-CATALOG.md)
@@ -488,6 +493,8 @@ app.use('/api/admin/login-blocks', loginBlocksRoutes);
 app.use('/api/admin/ops-records', adminOpsRecordsRoutes);
 // ★ 2026-08-16 신규마케팅진단(ceo 전용 — MARKETING_DIAGNOSIS_VIEWER_IDS) — /api/admin 와일드카드 위
 app.use('/api/admin/marketing-diagnosis', marketingDiagnosisAdminRoutes);
+// ★ 2026-10-04 선불 이용 기간 슈퍼관리자 — /api/admin 와일드카드 위
+app.use('/api/admin/companies/:id/plan-term', planTermAdminRoutes);
 app.use('/api/admin', adminRoutes);
 app.use('/api/test-contacts', testContactsRoutes);
 app.use('/api/sms-templates', smsTemplatesRoutes);
@@ -594,6 +601,9 @@ app.listen(PORT, () => {
 
   // ★ 2026-08-05 요금제 무료 메시징 월 지급 (기동 즉시 1회 + 10분 주기 — 지급이 멱등이라 주기가 곧 복구 경로)
   startFreeMessagingGrantWorker();
+
+  // ★ 2026-10-04 선불 요금제 이용 기간 — 만료 정산(자동 결제·잠금)·요금제 정렬(기동 즉시 + 10분 · DDL 전 건너뜀)
+  startPlanTermWorker();
 
   // ★ 2026-07-28 세금계산서 상태 전이 (5분 주기 — 팝빌 연동 전에는 ready에서 정지)
   startTaxbillWorker();

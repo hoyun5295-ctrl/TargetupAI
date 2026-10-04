@@ -6,6 +6,7 @@ import IdentityVerifyModal from '../components/IdentityVerifyModal';
 import LoginPolicyNoticeModal, { shouldShowLoginPolicyNotice } from '../components/LoginPolicyNoticeModal';
 import { DEFAULT_SESSION_TIMEOUT_MINUTES } from '../hooks/useSessionTimeout';
 import { COMPANY_NAME, CEO_NAME, BIZ_NUMBER, TRADE_NUMBER, COMPANY_ADDRESS, COMPANY_PHONE } from '../constants/company';
+import { takeLoginReturn } from '../utils/login-return';
 
 export default function LoginPage() {
   const navigate = useNavigate();
@@ -133,7 +134,8 @@ export default function LoginPage() {
         sessionStorage.removeItem('cafe24_return_mall_id');
         navigate(`/cafe24/launch?mall_id=${encodeURIComponent(cafe24Mall)}`);
       } else {
-        navigate('/dashboard');
+        // ★ 2026-10-04 로그인 전에 가려던 화면(허용 경로만 · 플래너 행사 확인 등) → 없으면 대시보드
+        navigate(takeLoginReturn() || '/dashboard');
       }
     }
   };
@@ -386,7 +388,7 @@ export default function LoginPage() {
         // ★ 2026-07-03 카페24 앱 실행 랜딩 복귀
         const cafe24Mall = sessionStorage.getItem('cafe24_return_mall_id');
         if (cafe24Mall) { sessionStorage.removeItem('cafe24_return_mall_id'); navigate(`/cafe24/launch?mall_id=${encodeURIComponent(cafe24Mall)}`); }
-        else { navigate('/dashboard'); }
+        else { navigate(takeLoginReturn() || '/dashboard'); }
       }
     } catch (err: any) { setPwError('비밀번호 변경에 실패했습니다.'); }
     finally { setPwLoading(false); }

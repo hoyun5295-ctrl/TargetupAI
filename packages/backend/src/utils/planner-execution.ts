@@ -178,11 +178,6 @@ export function dmStageOf(execMeta: Record<string, any> | null | undefined): DmS
   return s === 'drafted' || s === 'published' ? s : '';
 }
 
-/** (순수) 담당자 편집 화면 경로 — 통지 문자·화면 버튼이 같은 값을 쓴다. */
-export function buildDmEditPath(dmId: string): string {
-  return `/dm-builder?id=${encodeURIComponent(dmId)}&from=planner`;
-}
-
 /**
  * (순수) 시점 키 — 같은 행사에서 "같은 시점"을 가르는 유일한 축.
  * 기입 검증의 중복 키(채널·앵커·오프셋·대상)에서 채널만 뺀 것이라, 문자와 DM이 같은 키면 **같은 날 같은 사람에게** 간다.
@@ -486,27 +481,21 @@ export const ALIMTALK_MAX_RESUBMIT = 1;
 
 // ── 취소·환불 ────────────────────────────────────────────────────────
 /**
- * (순수) 대행 취소 시 환불 자격 — **그 달 제작·실행이 0건일 때만 전액**(설계서 §3-4).
+ * (순수) 대행 취소 시 환불 자격 — **그 달 발송 시도가 0건일 때만 전액**(★ 2026-10-04 §6-9).
  * 일할 계산은 하지 않는다. 규칙이 단순해야 분쟁이 없다.
  */
 export function evaluateCancelRefund(input: {
   agencyPaid: boolean;
   agencyCredits: number;
-  producedCount: number;
   executedCount: number;
 }): { refundable: boolean; amount: number; reason: string } {
-  const worked = (input.producedCount || 0) + (input.executedCount || 0);
-  if (worked > 0) {
-    return {
-      refundable: false,
-      amount: 0,
-      reason: '이번 달 제작 또는 발송이 이미 시작돼 대행료는 환불되지 않습니다.',
-    };
+  if ((input.executedCount || 0) > 0) {
+    return { refundable: false, amount: 0, reason: '이번 달 발송이 이미 시작돼 대행료는 환불되지 않습니다.' };
   }
   if (!input.agencyPaid || input.agencyCredits <= 0) {
     return { refundable: false, amount: 0, reason: '환불할 대행료 차감 내역이 없습니다.' };
   }
-  return { refundable: true, amount: input.agencyCredits, reason: '이번 달 제작·발송이 없어 대행료를 전액 환불합니다.' };
+  return { refundable: true, amount: input.agencyCredits, reason: '이번 달 발송이 없어 대행료를 전액 환불합니다.' };
 }
 
 // ── 참여 버튼(이메일 소재) ───────────────────────────────────────────

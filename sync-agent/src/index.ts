@@ -31,12 +31,13 @@ import dotenv from 'dotenv';
 import os from 'node:os';
 import { createHash } from 'node:crypto';
 import { loadConfig, updateConfigEncrypted, type AgentConfig, type ConfigSource } from './config';
+import { clampBatchSize } from './config/schema';
 import { initLogger, getLogger } from './logger';
 import { createDbConnector, createMockDbConnector, type IDbConnector } from './db';
 import { ApiClient } from './api/client';
 import { SyncStateManager } from './sync/state';
 import { SyncEngine } from './sync/engine';
-import { QueueManager } from './queue';
+import { retireLegacyQueueFile } from './queue';
 import { HeartbeatManager } from './heartbeat';
 import { Scheduler } from './scheduler';
 import { AlertManager, loadAlertConfig } from './alert';
@@ -147,9 +148,8 @@ async function main(): Promise<void> {
   const alertManager = new AlertManager(alertConfig);
   await alertManager.initialize();
 
-  // 4. 오프라인 큐 초기화
-  const queue = new QueueManager();
-  await queue.init();
+  // 4. ★ 1.7.2 오프라인 큐 폐지 — 옛 큐 파일은 다시 보내지 않고 보관 처리(재시도 = 커서)
+  retireLegacyQueueFile();
 
   // 5. DB 커넥터 생성 + 연결 테스트
   let db: IDbConnector;
@@ -270,7 +270,9 @@ async function main(): Promise<void> {
     : getDefaultPurchaseMapping();
 
   const engine = new SyncEngine(db, apiClient, syncState, {
-    batchSize: config.sync.batchSize,
+    // ★ 1.7.2 서버 배치 상한(5000)을 넘지 않게 — 넘으면 서버가 400(재시도 안 함)으로 거절해 증분이 영구히 멈췄다.
+    //   설정 스키마 상한(10000)은 그대로 둔다(옛 설정 파일이 검증에 걸려 기동 자체가 막히지 않게).
+    batchSize: clampBatchSize(config.sync.batchSize),
     customerTable: config.sync.customerTable,
     purchaseTable: config.sync.purchaseTable,
     timestampColumn: config.sync.timestampColumn,
@@ -283,7 +285,7 @@ async function main(): Promise<void> {
     customerMapping,
     purchaseMapping,
     dryRun: DRY_RUN,
-  }, queue, alertManager);
+  }, alertManager);
 
   // 9.5. 타임스탬프 컬럼 실재 검증 (★ 2026-06-11 — 인비토 SyncTest updated_at 부재 실측)
   //   누락이면 여기서 즉시 경고 — 60분 뒤 첫 증분 주기에서야 드러나는 일 차단.
@@ -339,12 +341,12 @@ async function main(): Promise<void> {
     //   (기존 순서: new Heartbeat → send → new Scheduler → setCommandHandler → 첫 heartbeat가 handler 없이 실행되어 명령 유실)
     let heartbeat: HeartbeatManager | null = null;
     if (apiClient) {
-      heartbeat = new HeartbeatManager(apiClient, syncState, queue, config, alertManager);
+      heartbeat = new HeartbeatManager(apiClient, syncState, config, alertManager);
     }
 
     // ★ v1.4.1: 구매 테이블 빈 문자열이면 enablePurchase=false (구매 동기화 자체를 스킵)
     const enablePurchase = !!config.sync.purchaseTable;
-    const scheduler = new Scheduler(engine, heartbeat, queue, apiClient, {
+    const scheduler = new Scheduler(engine, heartbeat, apiClient, {
       customerIntervalMin: config.sync.customerInterval,
       purchaseIntervalMin: config.sync.purchaseInterval,
       enablePurchase,
@@ -451,13 +453,11 @@ async function main(): Promise<void> {
     log.info(`   고객 동기화: 매 ${config.sync.customerInterval}분`);
     log.info(`   구매 동기화: ${enablePurchase ? `매 ${config.sync.purchaseInterval}분` : '미사용 (구매 테이블 미설정)'}`);
     log.info(`   Heartbeat: 매 60분`);
-    log.info(`   큐 재전송: 매 30분`);
 
     // 12. Graceful Shutdown
     const shutdown = async (signal: string) => {
       log.info(`${signal} 수신 — 종료 중...`);
       scheduler.stop();
-      queue.close();
       try {
         await db.disconnect();
         log.info('DB 연결 해제 완료');

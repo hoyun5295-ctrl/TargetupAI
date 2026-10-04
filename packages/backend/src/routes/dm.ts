@@ -44,7 +44,8 @@ import {
 } from '../utils/dm/dm-ai';
 import { checkCredit, deductCreditSafe, InsufficientCreditError, isCreditEnabledStrict } from '../utils/ai-credit';
 // ★ 2026-09-27 만들기 개편 S6 — 첫 발행 잠금·발행비 판정은 CT 가 소유(두 발행 문이 같은 판정)
-import { dmPublishBlocker, dmPublishFeeSourceOf, isDmPublishFeeCharged, resolveSendPublishFeeGate, quoteDmPublishFee } from '../utils/dm/dm-publish-gate';
+import { dmPublishBlocker, resolveSendPublishFeeGate, quoteDmPublishFee } from '../utils/dm/dm-publish-gate';
+import { publishDmCore } from '../utils/dm/dm-publish-core';
 import { getCreditCost } from '../utils/ai-credit-calc';
 import { runInCreditBundle } from '../utils/ai-credit-context';
 import type { Section } from '../utils/dm/dm-section-registry';
@@ -123,7 +124,6 @@ import { getPersonalizationVariables } from '../utils/dm/dm-personalization-engi
 import {
   submitEventResponse, getResponses, getWinners, getResponseStats,
   buildResponseExportRows, importPresetWinners, replacePrizesForSection,
-  syncPrizesFromSections,
 } from '../utils/dm/dm-interaction';
 import { parseWinnerRows, buildEventInsight } from '../utils/dm/dm-interaction-core';
 import * as XLSX from 'xlsx';
@@ -846,109 +846,20 @@ dmRouter.post('/:id/publish', requireDmAccess, async (req: any, res: any) => {
   try {
     const companyId = req.user?.companyId;
     if (!companyId) return res.status(403).json({ error: '회사 권한이 필요합니다.' });
-    // ★ 2026-08-06 중지된 DM은 이 경로로 되살아나지 않는다(서수란 접수).
-    //   화면의 [발행 주소 복사]가 이 엔드포인트를 부르므로, 막지 않으면 **주소를 복사하는 순간 중지가 풀린다.**
-    //   되살리는 문은 [재개] 하나여야 한다 — 그래야 "왜 다시 열렸는지"가 기록으로 남는다.
-    if (await isDmStopped(req.params.id, companyId)) {
-      return res.status(409).json({
-        error: '중지된 DM입니다. 다시 열려면 [재개]를 눌러주세요.',
-        code: 'DM_STOPPED',
-      });
-    }
-    // ★2026-09-22 링크 결함(실존하지 않는 도메인) = 발행 차단. **차감 앞이다** — 뒤에서 막으면 크레딧만
-    //   나가고 발행은 안 된다. DM은 발행 자체는 되고 **보는 사람이 눌렀을 때** 안 열려 더 늦게 드러난다.
-    //   본문 구조가 `sections`·`pages` 두 갈래라 둘 다 본다(SCHEMA dm_pages 10·17 — 실측상 pages가 항상 있다).
-    //   키 이름이 섹션마다 달라서 값으로 찾는다(findLinkDefectDeep).
-    // ★ 2026-09-27 만들기 개편 S7 — **첫 발행**(short_code 없음)은 CT 잠금 전체(링크 결함 · 채울 자리 · 무시 불가 검수 치명).
-    //   재발행(목록 [발행 주소 복사])은 옛 링크 검사만 그대로 — 발행 뒤 사정(지난 카운트다운 등)으로 주소 복사가 막히지 않게.
-    //   화면은 이미 검수 치명에서 멈췄다 — 서버가 같은 판정으로 뒷받침한다(목록·API 직행 우회 차단).
-    const dmBodyRow = await getDmDetail(req.params.id, companyId);
-    if (dmBodyRow) {
-      if (!dmBodyRow.short_code) {
-        const block = await dmPublishBlocker(dmBodyRow);
-        if (block) return res.status(block.status).json({ error: block.error, code: block.code, items: block.items || [] });
-      } else {
-        const dmLinkDefect = findLinkDefectDeep(
-          { sections: dmBodyRow.sections, pages: dmBodyRow.pages, header_data: dmBodyRow.header_data, footer_data: dmBodyRow.footer_data },
-          '링크는',
-        );
-        if (dmLinkDefect) {
-          return res.status(400).json({ error: dmLinkDefect, code: 'LINK_DEFECT' });
-        }
-      }
-    }
-
-    // ★ 종량제: 발행(단축URL 확정) 최초 1회만(멱등키 dm-publish:dmId). 인터랙션 캠페인 · 일반 DM 단가 = 단가표. test-send 자동발행은 라우트 미경유=미과금. 재발행은 멱등 0.
-    //   ★ 2026-09-27 S6 — 판정은 CT(send-to-target·선견적과 같은 함수) · 동작 무변경.
-    const { source: costSource, cost: pubCost } = await dmPublishFeeSourceOf(companyId, req.params.id);
-    const firstPublish = !(await isDmPublishFeeCharged(companyId, req.params.id));
-    // ★ 2026-09-27 Codex 3R·4R — 화면이 확인한 발행비(expected_fee · 보내기 창 [링크만 받기])가 오면 **청구 여부를 여기서 한 번 정하고**
-    //   차감까지 그대로 쓴다. 지금 발행비가 더 크면 차감 전에 402 · 크레딧제 미적용으로 통과한 요청은 뒤에 켜져도 걷지 않는다
-    //   (대조와 차감 사이 구매·요금제 반영으로 승인 없는 100/120 이 나가던 길). 걷는 금액 = pubCost ≤ expected_fee.
-    //   조회 실패 = throw(아래 catch · 차감 0). 값을 싣지 않는 옛 호출부(편집기 발행 · 목록 주소 복사)는 동작 그대로(chargeNow = firstPublish).
-    const expectedFee = req.body?.expected_fee;
-    let chargeNow = firstPublish;
-    if (typeof expectedFee === 'number' && firstPublish) {
-      const creditOn = await isCreditEnabledStrict(companyId);
-      if (creditOn && pubCost > expectedFee) {
-        return res.status(402).json({ error: '발행 비용을 다시 확인해 주세요.', code: 'PUBLISH_FEE_REQUIRED', costSource, cost: pubCost });
-      }
-      chargeNow = creditOn;
-    }
-    if (chargeNow) await checkCredit(companyId, pubCost);
-    const result = await publishDm(req.params.id, companyId);
-    if (!result) return res.status(404).json({ error: 'DM을 찾을 수 없습니다.' });
-
-    // ★ 2026-07-28 검수 치명 무시 발행 기록 (서수란 접수 — 이미지만 올린 DM이 footer 부재로 막히던 건).
-    //   무시 가능한 치명(required_info)만 프론트가 넘길 수 있고, 여기서는 "누가 언제 무엇을 넘겼는지"를 남긴다.
-    //   기록이 없으면 "고객이 확인하고 본인이 발행했다"는 방어가 성립하지 않는다.
-    //   컬럼은 신규가 아니다 — validation_result는 /validate가 이미 쓰고 있는 기존 jsonb.
-    //   실패해도 발행은 유지한다(경품 동기화와 같은 원칙 — 기록 실패로 발행을 되돌리지 않는다).
-    const overrideReq = req.body?.validation_override;
-    if (overrideReq && Array.isArray(overrideReq.items) && overrideReq.items.length > 0) {
-      try {
-        await query(
-          // dm_pages.validation_result = jsonb (2026-07-28 information_schema 실측 확정).
-          // ::jsonb 캐스팅은 그대로 둔다 — || 가 jsonb 전용 연산자라 타입이 바뀌면 런타임에 터지고 tsc는 못 잡는다.
-          `UPDATE dm_pages
-              SET validation_result = (COALESCE(validation_result::jsonb, '{}'::jsonb) || $1::jsonb),
-                  updated_at = NOW()
-            WHERE id = $2 AND company_id = $3`,
-          [
-            JSON.stringify({
-              overridden_at: new Date().toISOString(),
-              overridden_by: req.user?.userId || null,
-              overridden_items: overrideReq.items
-                .filter((i: any) => i && typeof i.message === 'string')
-                .map((i: any) => ({ area: String(i.area || ''), message: String(i.message) })),
-            }),
-            req.params.id,
-            companyId,
-          ],
-        );
-      } catch (e: any) {
-        console.error('[DM발행] 검수 무시 기록 실패:', e?.message);
-      }
-    }
-    // ★ B 연계: lucky_draw/roulette 경품 설정 → dm_prizes 동기화 (실패해도 발행은 유지)
-    try { await syncPrizesFromSections(companyId, req.params.id); }
-    catch (e: any) { console.error('[DM발행] 경품 동기화 오류:', e?.message); }
-    if (chargeNow) {
-      await deductCreditSafe({
-        companyId, cost: pubCost, source: costSource, createdBy: req.user?.userId,
-        idempotencyKey: `dm-publish:${req.params.id}`,
-      });
-    }
-    // ★ 2026-07-08 발행 URL도 hlj.kr 단축 도메인 — /s/:code가 dm_recipient_tokens 미발견 시
-    //   dm_pages.short_code 폴백 조회 → 토큰 없이 공용 렌더 302 (추적·발송 로직 무변경).
-    //   env(DM_SHORT_LINK_BASE) 미설정 = 기존 긴 뷰어 URL 그대로 (무결 최우선).
-    const pubShortBase = String(process.env.DM_SHORT_LINK_BASE || '').trim().replace(/\/+$/, '');
-    return res.json({
-      short_code: result.short_code,
-      short_url: pubShortBase
-        ? `${pubShortBase}/${result.short_code}`
-        : `${process.env.HANJUL_BASE_URL || 'https://hanjul.ai'}/api/dm/v/dm-${result.short_code}`,
+    // ★ 2026-10-04 플래너 보강 B4 — 본문은 발행 코어 CT(utils/dm/dm-publish-core.ts)로 옮겼다(동작 무변경).
+    //   발행의 문이 둘(편집기 발행 · 플래너 행사 승인)이라 차단 판정 · 단가 분기 · 경품 동기화 · 차감을 한 함수가 소유한다.
+    const r = await publishDmCore({
+      companyId,
+      dmId: req.params.id,
+      userId: req.user?.userId || null,
+      expectedFee: typeof req.body?.expected_fee === 'number' ? req.body.expected_fee : undefined,
+      validationOverride: req.body?.validation_override || null,
     });
+    if (!r.ok) {
+      if (r.code === 'PUBLISH_FEE_REQUIRED') return res.status(r.status).json({ error: r.error, code: r.code, ...(r.extra || {}) });
+      return res.status(r.status).json(r.code ? { error: r.error, code: r.code, ...(r.items ? { items: r.items } : {}) } : { error: r.error });
+    }
+    return res.json({ short_code: r.shortCode, short_url: r.shortUrl });
   } catch (err: any) {
     if (err instanceof InsufficientCreditError) {
       return res.status(402).json({ error: err.message, code: 'INSUFFICIENT_CREDIT' });

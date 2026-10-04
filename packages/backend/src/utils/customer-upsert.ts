@@ -242,6 +242,43 @@ export function buildSmsOptInBackfill(
 }
 
 /**
+ * ★ 2026-10-04 수신동의 값을 알아볼 수 없던 행 = 신규면 미동의 (싱크·자사몰 전수점검 S15 · 결정 ②).
+ * ⛔ buildSmsOptInBackfill(신규 기본 true) **보다 먼저** 실행한다 — 그 백필은 NULL 행만 채우므로 여기서 false 가 된 행은 건너뛴다.
+ * 기존 행은 업서트의 COALESCE 가 옛 값을 지켜 NULL 이 아니므로 바뀌지 않는다(모르는 값으로 옛 동의·거부를 덮지 않는다).
+ */
+export function buildSmsOptInUnknownDefault(
+  companyId: string,
+  phones: string[],
+): { sql: string; values: any[] } {
+  return {
+    sql: `UPDATE customers SET sms_opt_in = false
+          WHERE company_id = $1 AND phone = ANY($2::text[]) AND sms_opt_in IS NULL`,
+    values: [companyId, phones],
+  };
+}
+
+/**
+ * ★ 2026-10-04 신규 행 수신동의 기본값 — 못 알아본 글자 = 미동의(먼저) → 값 없음 = 기본 동의.
+ * ⛔ 업서트와 **같은 트랜잭션** 안에서 부른다(Codex 1004 R1 high). 커밋된 NULL 이 잠깐이라도 보이면
+ *   같은 번호를 동의값 없이 보낸 다른 요청의 기본 동의 백필이 먼저 true 로 채우고, 이 요청의 미동의는 NULL 조건에 걸려 건너뛴다.
+ */
+export async function applySmsOptInDefaults(
+  run: (sql: string, values: any[]) => Promise<unknown>,
+  companyId: string,
+  phones: string[],
+  unknownPhones: ReadonlySet<string>,
+): Promise<void> {
+  if (phones.length === 0) return;
+  const unknown = phones.filter((p) => unknownPhones.has(p));
+  if (unknown.length > 0) {
+    const u = buildSmsOptInUnknownDefault(companyId, unknown);
+    await run(u.sql, u.values);
+  }
+  const b = buildSmsOptInBackfill(companyId, phones);
+  await run(b.sql, b.values);
+}
+
+/**
  * ★ 2026-08-14 (Codex 2R): 배치 실패 → 단건 폴백을 허용할 오류인지 분류.
  *
  * 행 데이터에 국한된 오류(무결성 위반 23xxx · 데이터 형식 22xxx)만 행 격리의 의미가 있다.

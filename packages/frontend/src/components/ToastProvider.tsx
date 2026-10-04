@@ -17,7 +17,7 @@
  * ★ 옛 Toast.tsx 영역 = 단일 인스턴스 + 옛 호출처 영역 영향 0건 (legacy 호환)
  */
 
-import { createContext, useContext, useState, useCallback, useEffect, ReactNode } from 'react';
+import { createContext, useContext, useState, useCallback, useEffect, useMemo, ReactNode } from 'react';
 import { CheckCircle2, AlertCircle, Info, AlertTriangle, X } from 'lucide-react';
 import { CONFIRM_CREDIT_COSTS, CREDIT_SOURCE_LABELS } from '../constants/credit';
 
@@ -73,13 +73,15 @@ export function ToastProvider({ children }: { children: ReactNode }) {
     return () => window.removeEventListener('credit:used', onCredit);
   }, [show]);
 
-  const value: ToastContextValue = {
+  // ★ 2026-10-04 F3 — value를 고정한다. 매 렌더 새 객체면 toast를 훅 의존성에 둔 화면이 토스트 한 번에 다시 불러오고
+  //   그 불러오기가 또 토스트를 띄워 끝없이 돈다(옛 결재 화면). show가 고정이라 값도 고정이다(동작 무변경).
+  const value = useMemo<ToastContextValue>(() => ({
     show,
     success: (message, duration) => show('success', message, duration),
     error: (message, duration) => show('error', message, duration),
     info: (message, duration) => show('info', message, duration),
     warning: (message, duration) => show('warning', message, duration),
-  };
+  }), [show]);
 
   return (
     <ToastContext.Provider value={value}>

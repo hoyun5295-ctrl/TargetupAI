@@ -379,11 +379,10 @@ async function processInspecting(tp: PlannerTouchpointRow, today: string): Promi
 export async function runPlannerAlimtalkPass(opts?: { companyId?: string }): Promise<{ submitted: number; approved: number }> {
   if (!(await guardExecMetaOrSkip('planner-alimtalk'))) return { submitted: 0, approved: 0 };
   const today = kstDateString();
-  const monthFrom = kstMonthString();
   let submitted = 0;
   let approved = 0;
 
-  const all = await loadLiveTouchpoints({ statuses: ['planned'], channels: ['alimtalk'], monthFrom, companyId: opts?.companyId, limit: 60 });
+  const all = await loadLiveTouchpoints({ statuses: ['planned'], channels: ['alimtalk'], scheduledFrom: today, companyId: opts?.companyId, limit: 60 });
   const stageOf = (tp: PlannerTouchpointRow) => String(tp.execMeta?.alimtalk_stage || '');
   const pending = all.filter((tp) => ['', 'registered', 'rejected', 'submitting'].includes(stageOf(tp))).slice(0, 20);
   for (const tp of pending) {

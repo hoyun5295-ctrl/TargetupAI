@@ -81,16 +81,19 @@ export function buildWooDeveloperText(input: BuildWooDeveloperTextInput): string
 }
 
 /**
- * 워드프레스 회원 식별(선택) — 로그인 회원의 번호·휴대폰·이름을 <body> 속성으로 싣는다.
+ * 워드프레스 회원 식별(선택) — 로그인 회원의 식별자·회원 토큰·휴대폰·이름을 <body> 속성으로 싣는다.
  * 다른 몰(고도몰)과 같은 data-hjl-* 규약. 테마 <body> 태그 한 줄 수정(미검증 · 게이트 ③ SDK 리허설에서 확인).
+ * ★ 2026-10-04 한줄로는 회원 토큰이 있는 식별만 고객과 잇는다(전수점검 C1) — 토큰·몰 접두 식별자는 플러그인 1.0.2 함수가 만든다
+ *   (CDP 비밀키는 플러그인 설정에만 · 테마 코드에 넣지 않는다). 플러그인이 없으면 이 조각은 아무것도 싣지 않는다.
  */
 export function buildWooBodyAttrsSnippet(): string {
   return [
     '<body <?php body_class(); ?><?php',
-    '  if ( is_user_logged_in() ) {',
-    '    $hjl_u = wp_get_current_user();',
-    "    printf( ' data-hjl-user-id=\"%s\" data-hjl-phone=\"%s\" data-hjl-name=\"%s\"',",
-    "      esc_attr( $hjl_u->ID ), esc_attr( get_user_meta( $hjl_u->ID, 'billing_phone', true ) ), esc_attr( $hjl_u->display_name ) );",
+    "  if ( is_user_logged_in() && function_exists( 'hanjullo_member_token' ) ) {",
+    '    $hjl_u  = wp_get_current_user();',
+    '    $hjl_id = hanjullo_member_external_id( $hjl_u->ID );',
+    "    printf( ' data-hjl-user-id=\"%s\" data-hjl-member-token=\"%s\" data-hjl-phone=\"%s\" data-hjl-name=\"%s\"',",
+    "      esc_attr( $hjl_id ), esc_attr( hanjullo_member_token( $hjl_id ) ), esc_attr( get_user_meta( $hjl_u->ID, 'billing_phone', true ) ), esc_attr( $hjl_u->display_name ) );",
     '  }',
     '?>>',
   ].join('\n');

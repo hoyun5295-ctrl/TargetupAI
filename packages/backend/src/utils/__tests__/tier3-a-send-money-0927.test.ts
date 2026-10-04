@@ -51,11 +51,8 @@ describe('R247 인앱 트리거 = AI 조건', () => {
   it('생성 CT 기본값 · 플래너 전달', () => {
     const m = src('inapp-message.ts');
     expect(m).toContain("input.triggerEvent || (typeof (input.trigger_conditions as any)?.event === 'string' ? (input.trigger_conditions as any).event : '') || 'page_load'");
-    const p = src('planner-production.ts');
-    const b = between(p, 'const created = await createInAppMessage(tp.companyId, userId, {', '});');
-    for (const k of ['trigger_conditions: m.trigger_conditions', 'segment_conditions: m.segment_conditions', 'personalization_vars: m.personalization_vars', 'displayFrequency: m.display_frequency']) {
-      expect(b, k).toContain(k);
-    }
+    // ★ 2026-10-04 플래너 1차 채널 = 문자·DM·메일 — 플래너가 인앱을 만드는 경로(옛 제작 파일)는 삭제됐다.
+    expect(() => src('planner-production.ts')).toThrow();
   });
 });
 

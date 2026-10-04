@@ -118,10 +118,12 @@ describe('DM 위험 동작 불변식 (재발 방지책 2)', () => {
     });
 
     it('무시 기록은 발행 시 서버가 남긴다 (소스 계약)', () => {
+      // ★ 2026-10-04 발행 본문은 코어 CT(dm-publish-core)로 옮겼다 — 라우트는 값을 넘기고 기록은 코어가 남긴다.
       const src = readFileSync(resolve(process.cwd(), 'src/routes/dm.ts'), 'utf8');
       const publishBody = src.slice(src.indexOf("dmRouter.post('/:id/publish'"));
+      const core = readFileSync(resolve(process.cwd(), 'src/utils/dm/dm-publish-core.ts'), 'utf8');
       expect(
-        /validation_override/.test(publishBody) && /overridden_by/.test(publishBody),
+        /validationOverride: req\.body\?\.validation_override/.test(publishBody) && /overridden_by/.test(core),
         '무시 기록이 빠지면 "고객이 확인하고 발행했다"는 근거가 남지 않는다',
       ).toBe(true);
     });

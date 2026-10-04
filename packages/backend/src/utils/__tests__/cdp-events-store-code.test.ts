@@ -21,12 +21,16 @@ vi.mock('../inapp-trigger-engine', () => ({ listInAppTriggerCandidates: vi.fn(as
 
 import { identifyCustomer } from '../cdp-identity';
 import { ingestBrowserEvents } from '../cdp-events';
+import { issueCdpMemberToken } from '../cdp-member-token';
+
+// ★ 2026-10-04 브라우저 식별은 회원 토큰이 있어야 고객에 잇는다(전수점검 C1) — 이 계약의 식별 배치는 유효 토큰을 싣는다
+process.env.JWT_SECRET = process.env.JWT_SECRET || 'test-jwt-secret-1004';
 
 const COMPANY = '11111111-1111-4111-8111-111111111111';
 const identify = identifyCustomer as unknown as ReturnType<typeof vi.fn>;
 const batch = (extra: Record<string, any> = {}) => ({
   anonymousId: 'anon-1', sessionId: 's-1', schemaVersion: 'v1', sentAt: null,
-  events: [{ type: 'identify', external_id: '9', phone: '01000000000' }, { type: 'page_view', url: 'https://www.iroirotokyo.net/' }],
+  events: [{ type: 'identify', external_id: '9', phone: '01000000000', member_token: issueCdpMemberToken(COMPANY, '9').token }, { type: 'page_view', url: 'https://www.iroirotokyo.net/' }],
   ...extra,
 });
 

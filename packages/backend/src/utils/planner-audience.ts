@@ -111,6 +111,32 @@ export async function loadPlannerStaging(input: {
   return res.rowCount || 0;
 }
 
+/**
+ * 받는 사람 수의 상태 — null 하나에 세 뜻을 담지 않는다(★ 2026-10-04 F7).
+ *  known   = 실쿼리로 셌다.
+ *  blocked = **영구 차단**(행사를 만든 계정의 매장 범위가 정해지지 않음) — 기다려도 풀리지 않는다. 관리자 조치가 답이다.
+ *  error   = 세려 했는데 실패했다(일시) — 다시 열면 풀릴 수 있다.
+ * 옛 코드는 blocked를 error로 접어 "잠시 후 다시"라고 안내했다(영구 차단을 일시 오류로 오도).
+ */
+export type PlannerAudienceState = 'known' | 'blocked' | 'error';
+
+export interface PlannerAudienceCount {
+  state: PlannerAudienceState;
+  count: number | null;
+}
+
+/** 문자 대상(전체 축) — 결재·확인 화면과 발송이 같은 문(countPlannerAudience)으로 센다. */
+export async function countEventSmsAudience(input: { companyId: string; createdBy: string | null; eventId: string }): Promise<PlannerAudienceCount> {
+  try {
+    const r = await countPlannerAudience({ companyId: input.companyId, createdBy: input.createdBy, mode: 'all', plannerEventId: input.eventId });
+    if (r.blocked) return { state: 'blocked', count: null };
+    return { state: 'known', count: r.count };
+  } catch (e: any) {
+    console.warn('[planner-audience] 문자 대상 수 산출 실패:', e?.message || e);
+    return { state: 'error', count: null };
+  }
+}
+
 /** 주인 없는 staging 정리 — 캠페인이 소유권을 갖기 전에 빠져나가면 전화번호가 남는다. */
 export async function cleanupPlannerStaging(stagingId: string): Promise<void> {
   if (!stagingId) return;

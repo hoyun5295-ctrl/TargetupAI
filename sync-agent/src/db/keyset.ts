@@ -14,6 +14,8 @@
  * 순수 모듈 — DB 드라이버 import 0. 어댑터 4종(oracle·mssql·mysql·postgresql)이 공유한다.
  */
 
+import crypto from 'crypto';
+
 /** 증분 커서 — 마지막 처리 행의 (타임스탬프 원문, PK 값들) */
 export interface IncrementalCursor {
   /** 타임스탬프 DB 원문 문자열 — 어댑터 자신이 조회 때 실어 준 형식 그대로 */
@@ -86,6 +88,19 @@ export function serializeSourceRowKey(values: unknown[]): string | null {
   }
   const joined = parts.map(escapeKeyPart).join('|');
   return joined.length > MAX_SOURCE_ROW_KEY_LEN ? null : joined;
+}
+
+/**
+ * ★ 1.7.2 원본 키가 없는 구매 배치의 재시도 표식 — 이 배치 한 번에만 쓰는 무작위 값 + 배치 안 순번.
+ * 원본 행의 정체가 아니다(같은 행을 다음 회차에 다시 읽으면 다른 표식) · 같은 요청을 다시 보낼 때만 서버 UPSERT 가 겹침을 흡수한다.
+ * 막는 것 = 서버가 커밋했는데 응답만 끊겨 실행 안 재시도가 같은 배치를 한 번 더 넣는 중복(Codex 1004 R2 high).
+ * 서로 다른 행은 순번이 달라 합쳐지지 않는다(자연 키를 지어내지 않는다 = FEATURE-SYNC-AGENT §2 그대로).
+ * crypto.randomUUID 는 Node 14.17+ 라 win-legacy(node12) 빌드를 위해 randomBytes 를 쓴다.
+ */
+export const KEYLESS_RETRY_KEY_PREFIX = '~retry:';
+export function keylessRetryKeys(count: number): string[] {
+  const token = crypto.randomBytes(16).toString('hex');
+  return Array.from({ length: count }, (_, i) => `${KEYLESS_RETRY_KEY_PREFIX}${token}:${i}`);
 }
 
 /** 커서 키 값이 결정적 왕복 가능한 스칼라인지 — 아니면 증분을 잠근다. */

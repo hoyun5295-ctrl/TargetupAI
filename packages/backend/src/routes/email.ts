@@ -36,6 +36,7 @@ import { query } from '../config/database';
 // ★ 2026-09-27 만들기 개편 S2·S3 — 완성 판정·완성/발송 잠금은 CT 가 소유(라우트 인라인 0)
 import { isEmailCampaignCompleted, emailCompletionContextOf } from '../utils/email/email-completion';
 import { emailContentBlocker, emailSmtpBlocker } from '../utils/email/email-send-gate';
+import { completeEmailCampaignCore } from '../utils/email/email-complete-core';
 import {
   createEmailCampaign,
   listEmailCampaigns,
@@ -510,25 +511,12 @@ router.post('/campaigns/:id/complete', async (req: Request, res: Response) => {
   try {
     const campaign = await getEmailCampaign(auth.companyId, req.params.id, auth.ownerId);
     if (!campaign) return res.status(404).json({ success: false, error: '캠페인을 찾을 수 없습니다.' });
-
-    if (await isEmailCampaignCompleted(auth.companyId, campaign.id)) {
-      return res.json({ success: true, completed: true, alreadyCompleted: true });
-    }
-
-    // ★ 2026-09-27 만들기 개편 S4 — 50 을 내기 **전에** 막는다(옛: 완성은 통과하고 발송에서야 막혀 돈만 나갔다).
-    //   발신 설정 판정은 생성에서 이 자리로 옮겨 왔다(Harold 결재 ③ · 불변 11 개정).
-    const completeBlock = (await emailSmtpBlocker(auth.companyId)) || emailContentBlocker(campaign);
-    if (completeBlock) {
-      return res.status(completeBlock.status).json({ success: false, error: completeBlock.error, code: completeBlock.code });
-    }
-
-    const cost = getCreditCost('email-campaign-complete'); // 50
-    await checkCredit(auth.companyId, cost);
-    await deductCreditSafe({
-      companyId: auth.companyId, cost, source: 'email-campaign-complete',
-      createdBy: auth.userId, idempotencyKey: `email-campaign-complete:${campaign.id}`,
-    });
-    return res.json({ success: true, completed: true, alreadyCompleted: false, cost });
+    // ★ 2026-10-04 플래너 보강 B4 — 본문은 완성 코어 CT(utils/email/email-complete-core.ts)로 옮겼다(동작 무변경).
+    //   완성의 문이 둘(편집기 [완성] · 플래너 행사 승인)이라 이미 완성 판정 · 발신 설정·본문 잠금 · 차감을 한 함수가 소유한다.
+    const r = await completeEmailCampaignCore({ companyId: auth.companyId, userId: auth.userId, campaign });
+    if (!r.ok) return res.status(r.status).json({ success: false, error: r.error, code: r.code });
+    if (r.alreadyCompleted) return res.json({ success: true, completed: true, alreadyCompleted: true });
+    return res.json({ success: true, completed: true, alreadyCompleted: false, cost: r.cost });
   } catch (err: any) {
     console.error('[Email /campaigns/:id/complete] 오류:', err);
     if (err instanceof InsufficientCreditError) {

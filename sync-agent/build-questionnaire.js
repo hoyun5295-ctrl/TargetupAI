@@ -1,4 +1,4 @@
-/* SyncAgent 사전 질의서 v1.0 빌드 스크립트 — SoT = PREINSTALL-QUESTIONNAIRE.md §1 (여기와 1:1 유지)
+/* SyncAgent 사전 질의서 v1.1 빌드 스크립트 — SoT = PREINSTALL-QUESTIONNAIRE.md §1 (여기와 1:1 유지)
  * 사용: node build-questionnaire.js [출력경로.docx]
  *
  * 양식 규격 (★2026-08-13 Harold — "고객사에서 입력하기 편하게"):
@@ -96,7 +96,7 @@ function qTable(items) {
 const children = [];
 
 children.push(p('Sync Agent 설치 사전 질의서', { size: 40, bold: true, color: '047857', spacing: { after: 60 } }));
-children.push(p('한줄로 데이터 동기화 에이전트 · v1.0', { size: 22, color: '6B7280', spacing: { after: 160 } }));
+children.push(p('한줄로 데이터 동기화 에이전트 · v1.1', { size: 22, color: '6B7280', spacing: { after: 160 } }));
 children.push(p('설치 전에 아래 내용을 회신해 주시면, 고객사 환경과 동일한 구성으로 저희가 먼저 설치 전 과정을 검증한 뒤 설치 파일을 전달드립니다. 해당하는 항목에 체크(☑)하시고, 기입란은 아는 범위까지만 적어 주셔도 됩니다.', { spacing: { after: 200 } }));
 
 children.push(h1('1. 에이전트를 설치할 서버'));
@@ -123,6 +123,8 @@ children.push(qTable([
   { no: '3-4', q: '대략 몇 행입니까', ex: '고객 약 30만 · 주문 약 500만', a: { prefix: '고객 약           만 건  /  구매 약           만 건' } },
   { no: '3-5', q: '한 행을 고유하게 식별하는 컬럼', ex: '고객 = 회원번호 / 주문 = 주문번호+항목순번', a: { prefix: '고객:                              /  구매:' } },
   { no: '3-6', q: '등록·수정 일시 컬럼의 이름과, 값에 시각(시:분)까지 있는지', ex: 'upd_dt — 시각 포함 / 판매일 — 날짜만', a: { prefix: '고객:                 ☐ 시각 포함 ☐ 날짜만   /  구매:                 ☐ 시각 포함 ☐ 날짜만' } },
+  { no: '3-7', q: '회원이 탈퇴하면 고객 데이터에서 어떻게 처리됩니까', a: { options: ['행을 지운다', '탈퇴 표시 컬럼에 남긴다', '모름'], extra: '표시 컬럼이면 컬럼명·값: ' } },
+  { no: '3-8', q: '문자(광고) 수신동의 컬럼의 이름과 실제로 들어 있는 값 전부', ex: 'SMS_YN — Y · N · 공란', a: { prefix: '컬럼명:                    값:' } },
 ]));
 children.push(p('※ 뷰로 연동하시는 경우, 3-5의 고유 식별 컬럼이 뷰에 반드시 포함되어야 변경분 자동 반영이 동작합니다.', { size: 20, color: 'B45309', spacing: { before: 100, after: 160 }, keepLines: true }));
 
@@ -142,7 +144,7 @@ children.push(qTable([
 children.push(p('회신 주신 구성 그대로 저희 쪽에서 설치 전 과정을 재현·검증한 뒤 설치 파일을 전달드립니다. 감사합니다.', { spacing: { before: 220 }, italics: true, color: '6B7280' }));
 
 const doc = new Document({
-  title: 'Sync Agent 설치 사전 질의서 v1.0',
+  title: 'Sync Agent 설치 사전 질의서 v1.1',
   styles: { default: { document: { run: { font: FONT, size: 22 } } } },
   sections: [{
     headers: { default: new Header({ children: [p('INVITO — 한줄로 Sync Agent', { size: 16, color: '9CA3AF', spacing: { after: 0 } })] }) },
@@ -158,7 +160,7 @@ const doc = new Document({
   }],
 });
 
-const outPath = process.argv[2] || 'SyncAgent_사전질의서_v1_0.docx';
+const outPath = process.argv[2] || 'SyncAgent_사전질의서_v1_1.docx';
 Packer.toBuffer(doc).then((buf) => {
   fs.writeFileSync(outPath, buf);
   console.log('OK', outPath, buf.length, 'bytes');

@@ -156,7 +156,8 @@ describe('consentJoinSql — 집계용(조인 형태) 조각', () => {
     expect(read('routes/companies.ts')).toContain('FROM customers${consent.join}');
     expect(read('routes/customers.ts')).toContain('uo ON uo.phone = c.phone${consent.join}');
     expect((read('routes/ai.ts').match(/FROM customers\$\{consentU\.join\}/g) || [])).toHaveLength(4);
-    for (const f of ['utils/citations.ts', 'utils/crm-agency-proposal.ts', 'utils/planner-executor.ts', 'utils/continuous-operator.ts']) {
+    // ★ 2026-10-04 플래너 문맥 통계는 문안 CT(planner-copy)로 옮겼다 — 실행부는 문안을 만들지 않는다.
+    for (const f of ['utils/citations.ts', 'utils/crm-agency-proposal.ts', 'utils/planner-copy.ts', 'utils/continuous-operator.ts']) {
       expect(read(f), f).toContain('FROM customers${statsConsent.join}');
     }
     // FILTER 안에 행 단위 조각(소속 표를 행마다 찾는 식)을 넣은 집계가 없다: FILTER 를 쓰는 파일의 조각은 전부 조인 형태로 만든 것이다

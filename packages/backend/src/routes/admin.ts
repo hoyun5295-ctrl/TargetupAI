@@ -73,6 +73,8 @@ import { normalizeCdpAutoExecuteGate } from '../utils/autosend-policy';
 import { grantFreeTrial } from '../utils/basic-trial';
 // ★ 2026-07-25 요금제 변경 이력 CT — 청구서 일할계산의 진실의 원천(빠지면 그 구간이 증발)
 import { recordPlanChange, alertPlanChangeFailure } from '../utils/plan-change-log';
+// ★ 2026-10-04 선불 요금제 이용 기간 — 승인 판정·차감 CT · 관리 중 게이트(docs/2026-10-04-prepaid-plan-term-design.md §5)
+import { applyPlanRequestWithClient, PlanTermError, planTermManagedSql, planTermManagedError } from '../utils/plan-term';
 // ★ 2026-06-11: 감사 로그 CT — 라인그룹 지정/해제 책임 추적 (에이치피오 예약취소 사고 후속)
 import { loadAgencyCallbackKinds } from '../utils/agency-send-intake';
 import { switchCompanyBillingType } from '../utils/billing-type-history';
@@ -1694,7 +1696,8 @@ router.put('/companies/:id', authenticate, requireSuperAdmin, async (req: Reques
     let result: any;
     try {
       await planClient.query('BEGIN');
-      const beforePlan = await planClient.query('SELECT plan_id FROM companies WHERE id = $1::uuid FOR UPDATE', [id]);
+      const beforePlan = await planClient.query(
+        `SELECT plan_id, ${planTermManagedSql('companies')} AS plan_term_managed FROM companies WHERE id = $1::uuid FOR UPDATE`, [id]);
       if (beforePlan.rows.length === 0) {
         await planClient.query('ROLLBACK');
         return res.status(404).json({ error: '회사를 찾을 수 없습니다.' });
@@ -1704,6 +1707,12 @@ router.put('/companies/:id', authenticate, requireSuperAdmin, async (req: Reques
       //   trialDaysParam: null = 체험 아님(만료일 삭제) / N = 오늘부터 N일.
       const planChanged =
         Boolean(planId) && String(beforePlan.rows[0].plan_id || '') !== String(planId);
+      // ★ 2026-10-04 선불 이용 기간 중인 회사의 요금제 직접 변경은 막는다(설계 §5-1 · G4) — 돈이 걸린 판정은 신청 승인 CT 한 길.
+      if (planChanged && beforePlan.rows[0].plan_term_managed === true) {
+        await planClient.query('ROLLBACK');
+        const e = planTermManagedError('요금제를 여기서 바꿀 수 없습니다');
+        return res.status(e.status).json(e.body);
+      }
       let trialDaysParam: number | null = null;
       if (planChanged) {
         finalSubscriptionStatus = planIsTrial ? 'trial' : 'paid';
@@ -2926,7 +2935,18 @@ router.put('/plan-requests/:id/approve', authenticate, requireSuperAdmin, async 
     // ★ 2026-06-08: 무료체험 신청([무료체험] 센티넬)이면 1개월 체험 부여, 그 외는 일반 플랜 변경.
     //   ★ 2026-07-28 배정 플랜 BASIC → TRIAL(월 0원). 기능 권한은 TRIAL 플래그가 BASIC과 동일하게 맞춰져 있다.
     const isTrialReq = typeof request.message === 'string' && request.message.startsWith('[무료체험]');
-    if (isTrialReq) {
+    // ★ 2026-10-04 선불 이용 기간 — 판정·차감·이력은 CT가 먼저 한다(설계 §5-2: 올림 = 차액 즉시 · 내림 = 다음 구매부터 · 잠김 = 다시 열기 ·
+    //   미관리 선불의 유료 승인 = 첫 1개월 결제로 시작). 처리되면 아래 기존 UPDATE·이력을 건너뛴다. 후불·DDL 전은 미처리 = 기존 그대로.
+    // 이름 조회는 트랜잭션 밖 연결로 — 실패해도 승인 트랜잭션을 중단시키지 않는다(PG는 실패한 문 뒤로 트랜잭션 전체를 막는다)
+    const adminLabel = await query(`SELECT COALESCE(NULLIF(name, ''), login_id) AS label FROM super_admins WHERE id = $1::uuid`, [adminId])
+      .then((r: any) => r.rows[0]?.label || null).catch(() => null);
+    const term = await applyPlanRequestWithClient(client, {
+      companyId: request.company_id, targetPlanId: request.requested_plan_id, trialRequest: isTrialReq,
+      actor: { type: 'super_admin', id: adminId || null, label: adminLabel, ip: req.ip || null, userAgent: String(req.headers['user-agent'] || '').slice(0, 300) },
+    });
+    if (term.handled) {
+      // 요금제·이용 기간은 CT가 이미 썼다.
+    } else if (isTrialReq) {
       // 같은 트랜잭션(client 주입 — 체험 지급 CT는 호출부 트랜잭션을 그대로 탄다)
       await grantFreeTrial(request.company_id, 30, { client });
     } else {
@@ -2968,11 +2988,16 @@ router.put('/plan-requests/:id/approve', authenticate, requireSuperAdmin, async 
 
     await client.query('COMMIT');
     res.json({
-      message: '승인되었습니다. 회사 플랜이 변경되었습니다.',
-      request: result.rows[0]
+      message: term.handled ? term.message : '승인되었습니다. 회사 플랜이 변경되었습니다.',
+      request: result.rows[0],
+      plan_term: term.handled ? { outcome: term.outcome, charged: term.charged, scheduled_from: term.scheduledFrom ?? null } : null,
     });
   } catch (error) {
     if (client) { try { await client.query('ROLLBACK'); } catch { /* 아래 알림에 포함 */ } }
+    // ★ 2026-10-04 선불 이용 기간 판정 거절(잔액 부족 402 · 관리 중 체험 409 등)은 결함이 아니라 업무 응답이다 — 신청은 pending 그대로.
+    if (error instanceof PlanTermError) {
+      return res.status(error.status).json(error.body);
+    }
     if (request?.company_id) await alertPlanChangeFailure(request.company_id, error).catch(() => {});
     console.error('플랜 신청 승인 실패:', error);
     res.status(500).json({ error: '요금제 승인에 실패했습니다. 다시 시도해주세요.' });
@@ -3819,6 +3844,8 @@ router.patch('/companies/:id/billing-type', authenticate, requireSuperAdmin, asy
       company: { id: c.id, companyName: c.company_name, billingType: c.billing_type, balance: Number(c.balance) }
     });
   } catch (error) {
+    // ★ 2026-10-04 선불 이용 기간 게이트(진행 중 · 이미 낸 기간 남음) = 업무 응답
+    if (error instanceof PlanTermError) return res.status(error.status).json(error.body);
     console.error('요금제 유형 변경 실패:', error);
     res.status(500).json({ error: '요금제 유형 변경 실패' });
   }
@@ -4360,7 +4387,8 @@ router.get('/balance-overview', authenticate, requireSuperAdmin, async (req: Req
       SELECT c.id, c.company_name, c.billing_type, c.balance,
         c.cost_per_sms, c.cost_per_lms,
         (SELECT COUNT(*) FROM balance_transactions WHERE company_id = c.id AND created_at >= NOW() - INTERVAL '30 days') as recent_tx_count,
-        (SELECT SUM(amount) FROM balance_transactions WHERE company_id = c.id AND type = 'deduct' AND created_at >= NOW() - INTERVAL '30 days') as monthly_usage
+        (SELECT SUM(amount) FROM balance_transactions WHERE company_id = c.id AND type = 'deduct' AND created_at >= NOW() - INTERVAL '30 days'
+           AND reference_type IS DISTINCT FROM 'plan_term') as monthly_usage  -- ★ 2026-10-04 요금제 이용료 제외(발송 사용량)
       FROM companies c
       WHERE c.billing_type = 'prepaid' AND c.status = 'active'
       ORDER BY c.balance ASC

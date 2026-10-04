@@ -2,6 +2,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useToast } from '../components/ToastProvider';
+import type { PrepaidTermView } from '../components/PrepaidTermCard';
 import { aiApi, campaignsApi, customersApi } from '../api/client';
 import AddressBookModal from '../components/AddressBookModal';
 import SenderAuthModal, { type SenderAuthState } from '../components/SenderAuthModal';
@@ -131,6 +132,8 @@ interface PlanInfo {
   // ★ 2026-08-22 대행발송 이용 자격(서버 canUseAgencySend = 회사 스위치 AND 유료).
   //   메뉴는 모든 회사에 보이고 이 값이 false면 안내 모달로 간다(docs/2026-08-22-agency-send-design.md §4-1).
   agency_send_allowed?: boolean;
+  // ★ 2026-10-04 선불 요금제 이용 기간(관리 대상이 아니면 null · docs/2026-10-04-prepaid-plan-term-design.md)
+  prepaid_term?: PrepaidTermView | null;
 }
 
 // D41 대시보드 동적 카드 아이콘 맵
@@ -206,7 +209,7 @@ export default function Dashboard() {
   const subscriptionStatus = (user as any)?.company?.subscriptionStatus || 'trial';
   const [showSubscriptionLock, setShowSubscriptionLock] = useState(false);
   const [showPlanApproval, setShowPlanApproval] = useState(false);
-  const [planApproval, setPlanApproval] = useState<{requestId: string; planName: string} | null>(null);
+  const [planApproval, setPlanApproval] = useState<{requestId: string; planName: string; scheduledFrom?: string | null} | null>(null);
   // ★ D163 (2026-05-19) Braze급 SaaS Step 0 — AI Operator 베타 모달 (전체 등급 노출, ENT+만 실제 진입)
 
   const [stats, setStats] = useState<Stats | null>(null);
@@ -243,12 +246,15 @@ export default function Dashboard() {
         ? 'trial'
         : null;
   // ★ 2026-06-08: 요금제 변경(무료체험 활성/종료 포함) 최초 1회 알림 모달 (localStorage 비교)
-  const [planChange, setPlanChange] = useState<{ from: string; to: string; toStatus?: string } | null>(null);
+  const [planChange, setPlanChange] = useState<{ from: string; to: string; toStatus?: string; lock?: { planName: string; reason: 'insufficient' | 'auto_off' | null } | null } | null>(null);
   // ★ 2026-07-06 요금제 변경 안내 = 서버 판정(my-plan의 plan_change)만 신뢰. localStorage 비교 폐기(브라우저 stale 값 반복 노출 근본 차단).
   useEffect(() => {
     const ch = planInfo?.plan_change;
     if (ch?.from && ch?.to) {
-      setPlanChange({ from: ch.from, to: ch.to, toStatus: planInfo?.subscription_status });
+      // ★ 2026-10-04 선불 이용 기간이 잠겨 FREE가 된 경우 — "미가입으로 변경"이 아니라 잠김 안내(같은 응답의 prepaid_term으로 판정)
+      const term = planInfo?.prepaid_term;
+      const lock = ch.to === 'FREE' && term?.state === 'blocked' ? { planName: term.plan_name, reason: term.block_reason ?? null } : null;
+      setPlanChange({ from: ch.from, to: ch.to, toStatus: planInfo?.subscription_status, lock });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [planInfo?.plan_change?.from, planInfo?.plan_change?.to]);
@@ -1393,7 +1399,7 @@ export default function Dashboard() {
       if (approvalRes.ok) {
         const approvalData = await approvalRes.json();
         if (approvalData.unconfirmed?.status === 'approved') {
-          setPlanApproval({ requestId: approvalData.unconfirmed.id, planName: approvalData.unconfirmed.requested_plan_name });
+          setPlanApproval({ requestId: approvalData.unconfirmed.id, planName: approvalData.unconfirmed.requested_plan_name, scheduledFrom: approvalData.unconfirmed.scheduled_from ?? null });
           setShowPlanApproval(true);
         }
       }
@@ -2265,6 +2271,7 @@ const campaignData = {
       <PlanApprovalModal
         show={showPlanApproval}
         planName={planApproval?.planName || ''}
+        scheduledFrom={planApproval?.scheduledFrom ?? null}
         onClose={async () => {
           setShowPlanApproval(false);
           if (planApproval?.requestId) {
@@ -2531,8 +2538,16 @@ const campaignData = {
                 {/* ★ CT-17: plan_name + D-N 뱃지 같은 줄 배치로 카드 높이 최소화 */}
                 <div className="flex items-center gap-2 mb-1 flex-wrap">
                   <span className="text-lg font-bold text-gray-800">
-                    {planInfo?.plan_name || '로딩...'}
+                    {planInfo?.prepaid_term?.state === 'blocked' ? planInfo.prepaid_term.plan_name : (planInfo?.plan_name || '로딩...')}
                   </span>
+                  {/* ★ 2026-10-04 선불 요금제 이용 기간 — 잠김 / 남은 날(자동 연장이 꺼져 있고 7일 이하면 주황) */}
+                  {planInfo?.prepaid_term && (planInfo.prepaid_term.state === 'blocked' ? (
+                    <span className="px-2 py-0.5 bg-rose-100 text-rose-700 text-[11px] font-bold rounded-full whitespace-nowrap">잠김</span>
+                  ) : (
+                    <span className={`px-2 py-0.5 text-[11px] font-bold rounded-full whitespace-nowrap ${!planInfo.prepaid_term.auto_renew && planInfo.prepaid_term.days_left <= 7 ? 'bg-amber-100 text-amber-700' : 'bg-slate-100 text-slate-600'}`}>
+                      {planInfo.prepaid_term.days_left <= 1 ? '오늘까지' : `${planInfo.prepaid_term.days_left}일 남음`}
+                    </span>
+                  ))}
                   {/* 무료체험 중 → 요금제 만료 D-N 뱃지 (BASIC 체험 = plan=BASIC + status='trial') */}
                   {planInfo?.subscription_status === 'trial' && planInfo?.trial_expires_at && (() => {
                     const daysLeft = Math.max(0, Math.ceil((new Date(planInfo.trial_expires_at).getTime() - Date.now()) / 86400000));
@@ -4173,6 +4188,8 @@ const campaignData = {
           toPlan={planChange.to}
           toStatus={planChange.toStatus}
           onClose={closePlanChange}
+          lock={planChange.lock}
+          onGoPricing={() => navigate('/pricing')}
         />
       )}
 

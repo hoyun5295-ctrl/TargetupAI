@@ -112,7 +112,7 @@ export default function ChargeApprovePage() {
       <main className="flex-1 w-full max-w-[560px] mx-auto px-5 py-6">{children}</main>
       <footer className="w-full max-w-[560px] mx-auto px-5 pb-6 space-y-1">
         <p className="text-[11px] text-neutral-400">한줄로 충전 관리 · 이 화면은 안내 문자를 받은 담당자용입니다</p>
-        <p className="text-[11px] text-neutral-400">이 화면은 승인 버튼 외에 어떤 입력도 요구하지 않습니다. 로그인·비밀번호·결제정보를 묻는 비슷한 화면은 가짜이니 입력하지 마세요.</p>
+        <p className="text-[11px] text-neutral-400">이 화면은 입력을 받지 않습니다. 로그인은 hanjul.ai 로그인 화면에서만 합니다.</p>
       </footer>
     </div>
   );

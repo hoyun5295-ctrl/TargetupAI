@@ -7,6 +7,8 @@ import { COMPANY_PHONE, COMPANY_PHONE_TEL } from '../constants/company';
 import { Sparkles, Users, Server, Cpu } from 'lucide-react';
 import CreditSummaryBar from '../components/credit/CreditSummaryBar';
 import CreditRechargeModal from '../components/credit/CreditRechargeModal';
+import PrepaidTermCard, { prepaidTermRequestNote, type PrepaidTermView } from '../components/PrepaidTermCard';
+import BalanceModals from '../components/BalanceModals';
 import { PLAN_INFRA, planBonusPct, dailyDbAnalysisCredits } from '../constants/credit';
 import { useToast } from '../components/ToastProvider';
 import { goBackOr } from '../lib/scroll-restoration';
@@ -32,6 +34,9 @@ interface CompanyInfo {
   is_trial_expired: boolean;
   // ★ CT-17 (2026-04-22)
   subscription_status?: string | null; // 'trial' | 'trial_expired' | 'paid' | 'expired' | 'suspended' (※ 'active'는 네이밍 충돌로 2026-04-22 폐지, 'paid'로 통일)
+  monthly_price?: number;
+  // ★ 2026-10-04 선불 요금제 이용 기간(관리 대상이 아니면 null)
+  prepaid_term?: PrepaidTermView | null;
 }
 
 /** ★ 2026-08-05 요금제 무료 메시징 — `GET /api/companies/my-free-messaging` 응답 */
@@ -72,6 +77,10 @@ export default function PricingPage() {
   const [successModalType, setSuccessModalType] = useState<'plan' | 'inquiry'>('plan');
   const [showContactModal, setShowContactModal] = useState(false);
   const [showRecharge, setShowRecharge] = useState(false);
+  // ★ 2026-10-04 선불 이용 기간 카드의 [잔액 충전] — 대시보드와 같은 충전 창을 이 페이지에서 바로 연다(다른 화면으로 보내지 않는다)
+  const [showBalanceCharge, setShowBalanceCharge] = useState(false);
+  const [showBalanceInfo, setShowBalanceInfo] = useState(false);
+  const [insufficientInfo, setInsufficientInfo] = useState<{ show: boolean; balance: number; required: number } | null>(null);
   const [inquiryForm, setInquiryForm] = useState({
     companyName: '', contactName: '', phone: '', email: '', planInterest: '', subject: '', message: '',
   });
@@ -309,6 +318,14 @@ export default function PricingPage() {
       </header>
 
       <main className="max-w-7xl mx-auto px-4 py-8">
+        {/* ★ 2026-10-04 선불 요금제 이용 기간(관리 대상 회사만) — 만료일 · 자동 연장 · 1개월 연장 · 기록 */}
+        {companyInfo?.prepaid_term && (
+          <PrepaidTermCard
+            term={companyInfo.prepaid_term}
+            onChanged={loadData}
+            onOpenCharge={() => setShowBalanceCharge(true)}
+          />
+        )}
         {companyInfo && (() => {
           // ★ CT-17: 30일 PRO 무료체험 상태 계산
           //   plan_code='TRIAL'을 진실의 원천으로 사용 (subscription_status에 의존하지 않음).
@@ -316,7 +333,9 @@ export default function PricingPage() {
           //   subscription_status 기반 판정은 견고하지 않음. plan_code는 grant-trial/revoke-trial/Cron 강등 3곳에서만 변경됨.
           const isOnTrial = (companyInfo.plan_code === 'TRIAL' || companyInfo.subscription_status === 'trial') && !!companyInfo.trial_expires_at;
           const isTrialExpired = companyInfo.subscription_status === 'trial_expired';
-          const isUnsubscribed = companyInfo.plan_code === 'FREE' && !isTrialExpired;
+          // ★ 2026-10-04 선불 이용 기간이 잠긴 회사는 plan_code가 FREE지만 미가입이 아니다(돈 내던 회사 · 위 카드가 다시 열기를 안내)
+          const termBlocked = companyInfo.prepaid_term?.state === 'blocked';
+          const isUnsubscribed = companyInfo.plan_code === 'FREE' && !isTrialExpired && !termBlocked;
           // 크레딧 보유 시 요금제+DB는 아래 크레딧 카드가 보여줌 → 이 단독 카드는 미가입/FREE에서만 표시
           const isCreditEnabled = !!myCredit?.creditEnabled && (((myCredit?.planCredits || 0) > 0) || ((myCredit?.purchased || 0) > 0));
           const daysRemaining = isOnTrial && companyInfo.trial_expires_at
@@ -369,8 +388,11 @@ export default function PricingPage() {
                   <div>
                     <div className="flex items-baseline gap-2 flex-wrap">
                       <span className="text-2xl font-bold text-blue-600">
-                        {isTrialExpired ? '미가입' : companyInfo.plan_name}
+                        {termBlocked ? companyInfo.prepaid_term!.plan_name : isTrialExpired ? '미가입' : companyInfo.plan_name}
                       </span>
+                      {termBlocked && (
+                        <span className="px-2.5 py-1 bg-rose-100 text-rose-700 text-xs font-bold rounded-full">잠김</span>
+                      )}
                       {isTrialExpired && (
                         <span className="px-2.5 py-1 bg-red-100 text-red-700 text-xs font-bold rounded-full">
                           체험 만료
@@ -725,6 +747,13 @@ export default function PricingPage() {
                 </div>
               </div>
 
+              {/* ★ 2026-10-04 선불 이용 기간 회사 — 승인되면 돈이 어떻게 움직이는지 한 줄(금액은 승인하는 날 서버가 계산) */}
+              {companyInfo?.prepaid_term && (
+                <p className="text-xs text-slate-600 bg-slate-50 ring-1 ring-slate-200 rounded-lg px-3 py-2 mb-4 leading-relaxed">
+                  {prepaidTermRequestNote(companyInfo.prepaid_term, Number(companyInfo.monthly_price) || 0, selectedPlan)}
+                </p>
+              )}
+
               <div className="mb-4">
                 <label className="block text-sm font-medium text-gray-700 mb-1">
                   요청 메시지 (선택)
@@ -794,6 +823,19 @@ export default function PricingPage() {
 
       {showRecharge && (
         <CreditRechargeModal onClose={() => setShowRecharge(false)} onSuccess={loadData} />
+      )}
+
+      {/* ★ 2026-10-04 선불 이용 기간 카드의 [잔액 충전] — 충전 창만 쓴다(잔액 창은 열지 않는다) */}
+      {companyInfo?.prepaid_term && (
+        <BalanceModals
+          showBalanceModal={showBalanceInfo}
+          setShowBalanceModal={setShowBalanceInfo}
+          showChargeModal={showBalanceCharge}
+          setShowChargeModal={setShowBalanceCharge}
+          balanceInfo={null}
+          showInsufficientBalance={insufficientInfo}
+          setShowInsufficientBalance={setInsufficientInfo}
+        />
       )}
 
       {showContactModal && (
@@ -882,10 +924,13 @@ export default function PricingPage() {
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
                     </svg>
                   </div>
-                  <h3 className="text-lg font-semibold text-gray-900 mb-2">요금제 변경 완료</h3>
+                  {/* ★ 2026-10-04 선불 이용 기간 — 내림은 승인돼도 지금 바뀌지 않는다(만료 다음 날부터). 서버가 적용일을 준다 */}
+                  <h3 className="text-lg font-semibold text-gray-900 mb-2">{unconfirmedResult.scheduled_from ? '요금제 변경 예약' : '요금제 변경 완료'}</h3>
                   <p className="text-sm text-gray-600">
                     <span className="font-semibold text-blue-600">{unconfirmedResult.requested_plan_name}</span> 플랜으로<br/>
-                    변경이 완료되었습니다.
+                    {unconfirmedResult.scheduled_from
+                      ? `${formatDate(unconfirmedResult.scheduled_from)}부터 바뀝니다. 남은 기간은 지금 요금제로 이용합니다.`
+                      : '변경이 완료되었습니다.'}
                   </p>
                   {unconfirmedResult.admin_note && (
                     <div className="mt-3 p-3 bg-gray-50 rounded-lg text-left">

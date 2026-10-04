@@ -166,8 +166,9 @@ describe('⑤ 초안 판정', () => {
     expect(between(v, 'export async function createVariant(', '\nexport async function setVariantStatus(')).toMatch(/if \(input\.status !== 'paused'\) \{\s*const defect = inAppPublishDefect\(/);
     // (Codex 1R high) 상태만 바꾸는 켜기 = 단일 길목(한 트랜잭션 · 행 잠금 → 판정 → 켜기)
     expect(between(v, 'export async function setVariantStatus(', '\n}\n')).toContain('await activateInAppMessage({ companyId, messageId: variantId, parentMessageId });');
-    const p = between(utilSrc('planner-executor.ts'), 'async function executeInapp(', '\n}\n');
-    expect(p).toContain('await activateInAppMessage({ companyId: tp.companyId, messageId, window: {');
+    // ★ 2026-10-04 플래너 1차 채널 = 문자·DM·메일 — 실행부에 인앱 켜기 분기가 없다(켜는 길목은 activateInAppMessage 하나로 남는다).
+    const p = utilSrc('planner-executor.ts');
+    expect(p).not.toContain('async function executeInapp(');
     expect(p).not.toContain("SET status = 'active'");
   });
   it('켜기 단일 길목 — 한 트랜잭션에서 FOR UPDATE → 판정 → 켜기 · 미달 = 되돌리고 결함 반환', () => {

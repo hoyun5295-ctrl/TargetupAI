@@ -55,6 +55,8 @@ export const CustomerSchema = z.object({
 
   // 수신 동의
   sms_opt_in: z.boolean().nullish(),
+  /** ★ 1.7.2 수신동의 원문을 알아보지 못했을 때 그 글자(서버가 신규 고객을 미동의로 넣는다) */
+  sms_opt_in_unknown: z.string().max(20).optional(),
 
   // 확장
   custom_fields: z.record(z.unknown()).nullish(),

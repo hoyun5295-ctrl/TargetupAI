@@ -119,10 +119,8 @@ describe('reference-skeleton invariants', () => {
     expect(savedMeta.stats.n).toBe(2);
   });
 
-  it('11. 플래너 — 제작 호출부 2곳이 재료 확장을 쓰고 공용 buildPlannerEventText는 그대로', () => {
-    const code = readCode('utils/planner-production.ts');
-    expect(count(code, 'await buildPlannerProductionEventText(tp)')).toBe(2);
-    expect(code).toContain('buildPlannerExtraMaterial(');
+  it('11. 플래너 — 옛 제작 파일은 없고(★ 2026-10-04 완성본 = 사람이 고른 재료 → 자동 제작 엔진) 공용 buildPlannerEventText는 그대로', () => {
+    expect(() => readCode('utils/planner-production.ts')).toThrow();
     const exec = readCode('utils/planner-execution.ts');
     const fn = exec.slice(exec.indexOf('export function buildPlannerEventText'), exec.indexOf('export function buildPlannerExtraMaterial'));
     expect(fn).not.toContain('brand_name'); // 공용 함수에 재료를 섞지 않았다

@@ -23,6 +23,7 @@ import PaymentResultPage from './pages/PaymentResultPage';
 import JourneyPausePage from './pages/JourneyPausePage'; // ★ D218+ Public 정지 페이지 (인증 X)
 // ★ 2026-08-16 AI 마케팅 진단 공개 페이지(퍼널 B — 영업 링크 착지) — 공개 동선이라 정적 import(0718 사고 전례)
 import DiagnosisPage from './pages/DiagnosisPage';
+import { rememberLoginReturn } from './utils/login-return';
 import PlanGate from './components/PlanGate'; // ★ 2026-09-15 AI Operator 기능 화면 입구(못 쓰는 회사 = 허브 요금제 안내로)
 
 const AdminDashboard = lazyPage(() => import('./pages/AdminDashboard'));
@@ -63,6 +64,9 @@ const MarketingCalendarPage = lazyPage(() => import('./pages/MarketingCalendarPa
 const MarketingPlannerPage = lazyPage(() => import('./pages/MarketingPlannerPage'));
 // ★ 2026-08-13 마케팅 플래너 Phase 2 — 월간 브리핑·결재(문자 결재 링크의 착지 화면)
 const PlannerBriefPage = lazyPage(() => import('./pages/PlannerBriefPage'));
+// ★ 2026-10-04 마케팅 플래너 보강 — 행사 상세(로그인판 확인 화면) · 휴대폰 확인 화면(공개 · 확인 요청 문자 링크 착지)
+const PlannerEventDetailPage = lazyPage(() => import('./pages/PlannerEventDetailPage'));
+const PlannerConfirmPage = lazyPage(() => import('./pages/PlannerConfirmPage'));
 const ImageStudioPage = lazyPage(() => import('./pages/ImageStudioPage')); // ★ 2026-07-19 P4 AI 이미지 스튜디오
 // ★ D180 (2026-05-19): Email 채널 (SendGrid)
 const EmailCampaignsPage = lazyPage(() => import('./pages/EmailCampaignsPage'));
@@ -112,6 +116,8 @@ function PrivateRoute({ children, allowedTypes }: { children: React.ReactNode; a
   const location = useLocation();
 
   if (!isAuthenticated) {
+    // ★ 2026-10-04 로그인 뒤 가려던 화면으로(허용 경로만 · utils/login-return)
+    rememberLoginReturn(`${location.pathname}${location.search}`);
     return <Navigate to="/login" replace />;
   }
 
@@ -517,7 +523,16 @@ function App() {
             </PrivateRoute>
           }
         />
-        {/* ★ 2026-08-13 마케팅 플래너 Phase 2 — 월간 브리핑·결재. 문자 결재 링크가 이 경로로 착지한다 */}
+        {/* ★ 2026-10-04 마케팅 플래너 보강 — 행사 상세 = 로그인판 확인 화면(승인 · 승인 풀기 · 결과) */}
+        <Route
+          path="/marketing-planner/events/:id"
+          element={
+            <PrivateRoute allowedTypes={['company_admin', 'company_user']}>
+              <PlanGate featureId="marketing-planner"><PlannerEventDetailPage /></PlanGate>
+            </PrivateRoute>
+          }
+        />
+        {/* ★ 2026-08-13 Phase 2 · ★ 2026-10-04 이달 결과(월간 결재 폐지 · 결과 + 월 대행 취소) */}
         <Route
           path="/marketing-planner/brief/:month"
           element={
@@ -748,6 +763,7 @@ function App() {
         {/* ★ 2026-08-25 대행발송 담당자 링크 승인 (인증 X · 안내 문자 속 주소 ?t=토큰) */}
         <Route path="/agency-approve" element={<AgencyApprovePage />} />
         <Route path="/charge-approve" element={<ChargeApprovePage />} />
+        <Route path="/planner-confirm" element={<PlannerConfirmPage />} />
 
         {/* 404 */}
         <Route path="*" element={<Navigate to="/" replace />} />

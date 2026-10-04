@@ -182,6 +182,18 @@ export function normalizeSmsOptIn(value: any): boolean | null {
   return null;
 }
 
+/**
+ * ★ 2026-10-04 수신동의 칸에 값은 있는데 알아볼 수 없는가('수신안함'·'미수신'·'FALSE' 처럼 낱말표 밖).
+ * 「값이 없다」(null · 빈 칸)와 갈라야 한다 — 없는 값은 신규 기본 동의 규칙을 타지만, 못 알아본 값을 같은 null 로 접으면
+ * 거부 표기가 동의로 들어간다(2026-10-04 싱크·자사몰 전수점검 S15 · 결정 ②: 신규 고객은 미동의).
+ * ⛔ 에이전트 `sync-agent/src/normalize/index.ts` 가 같은 규칙으로 표시(sms_opt_in_unknown)를 실어 보낸다.
+ */
+export function isUnrecognizedSmsOptIn(value: any): boolean {
+  if (value == null || typeof value === 'boolean') return false;
+  if (String(value).trim() === '') return false;
+  return normalizeSmsOptIn(value) === null;
+}
+
 // ============================================================
 // 결혼 여부 정규화
 // 표준값: true (기혼) / false (미혼)

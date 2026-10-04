@@ -16,6 +16,8 @@ import { query } from '../config/database';
 import { LOG_RETENTION_DAYS } from '../config/defaults';
 import { extractWebhookResource } from './cdp-webhook-delivery';
 import { getProvider } from './provider-registry';
+// ★ 2026-10-04 재처리 소진 알림(전수점검 W1)
+import { sendSystemAlert } from './system-alert';
 
 const RETRY_INTERVAL_MS = 5 * 60 * 1000;   // 5분
 const MAX_RETRY = 3;
@@ -30,7 +32,12 @@ export async function runCdpWebhookRetryPass(): Promise<{ retried: number; succe
   const failedRows = await query(
     `SELECT id, company_id, source, webhook_event, payload, retry_count
      FROM cdp_webhook_deliveries
-     WHERE status = 'failed'
+     WHERE (
+             status = 'failed'
+             -- ★ 2026-10-04 처리 중 프로세스가 끝나 'received' 로 멈춘 행(배포 재시작 등)도 10분이 지나면 다시 돈다.
+             --   옛: 재처리는 'failed' 만 집고 몰의 재전송은 같은 멱등 키라 중복으로 200 을 받아, 그 이벤트가 영구히 빠졌다.
+             OR (status = 'received' AND created_at < NOW() - INTERVAL '10 minutes')
+           )
        AND retry_count < $1
        AND webhook_event != 'oauth_state'
        AND created_at > NOW() - INTERVAL '7 days'
@@ -45,7 +52,7 @@ export async function runCdpWebhookRetryPass(): Promise<{ retried: number; succe
       // 어댑터 미등록 source — 재시도 무의미, 카운트만 올려 종결 수렴
       await query(
         `UPDATE cdp_webhook_deliveries
-         SET retry_count = retry_count + 1, error_message = $2, processed_at = NOW()
+         SET status = 'failed', retry_count = retry_count + 1, error_message = $2, processed_at = NOW()
          WHERE id = $1::uuid`,
         [row.id, `재처리 불가: 미등록 source: ${row.source}`]
       );
@@ -68,13 +75,36 @@ export async function runCdpWebhookRetryPass(): Promise<{ retried: number; succe
     } catch (err: any) {
       await query(
         `UPDATE cdp_webhook_deliveries
-         SET retry_count = retry_count + 1,
+         SET status = 'failed',
+             retry_count = retry_count + 1,
              error_message = $2,
              processed_at = NOW()
          WHERE id = $1::uuid`,
         [row.id, String(err?.message || 'unknown').slice(0, 1000)]
       );
     }
+  }
+
+  // ★ 2026-10-04 재처리를 다 쓰고도 실패한 몰 웹훅이 있으면 알린다(옛: 조용히 failed 로 남았고 7일이 지나면 재처리 대상에서도 빠졌다)
+  try {
+    const exhausted = await query(
+      `SELECT COUNT(*)::int AS n FROM cdp_webhook_deliveries
+        WHERE status = 'failed' AND retry_count >= $1 AND webhook_event != 'oauth_state'
+          AND created_at > NOW() - INTERVAL '1 day'`,
+      [MAX_RETRY]
+    );
+    const n = Number(exhausted.rows[0]?.n || 0);
+    if (n > 0) {
+      await sendSystemAlert({
+        dedupKey: 'cdp-webhook-exhausted',
+        cooldownMs: 12 * 60 * 60 * 1000,
+        title: '자사몰 웹훅이 재처리를 다 쓰고도 실패했습니다.',
+        details: [`최근 하루: ${n}건`],
+        action: '자사몰 연동 웹훅 기록의 실패 사유를 확인해 주세요.',
+      });
+    }
+  } catch (err: any) {
+    console.error('[CDP Webhook Retry] 소진 알림 확인 실패:', err?.message || err);
   }
 
   return { retried, succeeded };

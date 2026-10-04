@@ -5,35 +5,42 @@
  * 선택이 아니라 필수다(기능 문서 §3-8).
  *
  * 잡는 것 넷:
- *   ① **놓친 실행** — 승인됐는데 예정일이 지나도록 planned·ready로 남은 것 → 생략으로 닫고 사유 통지.
+ *   ① **놓친 실행** — 예정일이 지나도록 planned·ready로 남은 것 → 생략으로 닫고 사유 통지.
+ *      ★ 2026-10-04 **미승인 행사의 접점도 닫는다**(옛: 승인된 행사만 봐서 미승인 행사는 조용히 남았다 · §6-8).
  *      (지난 날짜에 뒤늦게 보내지 않는다 — 끝난 행사 안내가 나가는 것이 더 큰 사고다.)
  *   ② **producing 고아** — 선점 lease(30분)를 넘긴 것 → 원위치로 돌려 다음 주기가 다시 본다.
  *   ③ **취소됐는데 실행 잔존** — 취소된 달에 발송·제작 참조가 남아 있으면 **사람에게 알린다**(자동 되돌림 금지).
  *   ④ **참여 클릭 미수집** — 이메일 참여 버튼 클릭을 참여 이벤트로 투영(누락 보충).
  *
- * 그리고 **패스 셋을 구동한다** — 소재 제작 그물 · 알림톡 검수 대행 · 결과 브리핑 통지.
+ * 그리고 **패스를 구동한다** — 전환(옛 월간 결재 → 행사별 확인) · 문자 문안 준비 · 확인 링크·리마인드·준비 실패 통지 ·
+ *   승인 직후 실주소 스팸 · 알림톡 검수 대행 · 결과 브리핑 통지. ★ 2026-10-04 이 워커는 생성 엔진을 부르지 않는다
+ *   (소재 제작 그물 · DM 리마인드 패스 삭제 · 완성본은 사람이 [담고 만들기]를 누를 때만 만든다).
  *   별도 타이머를 만들지 않는다(어느 주기가 그 일을 하는지 흐려진다). 승인 직후 호출이 끊긴 건은
  *   전부 이 패스가 다시 집는다 — **호출부가 하나뿐인 패스는 그물이 없는 것과 같다.**
  *
  * ⛔ best-effort 경보 원칙 — 행 단위 정확 1회 보장을 쌓지 않는다(LESSONS 0731).
  *    같은 사실을 매 주기 다시 알리지 않으려고 exec_meta에 통지 표식만 남긴다.
  */
-import { query } from '../config/database';
+import { pool, query } from '../config/database';
 import {
   guardExecMetaOrSkip,
+  isEventMetaReady,
   isClaimStale,
-  loadLiveTouchpoints,
+  loadAllLiveTouchpoints,
   loadTouchpointById,
   notifyPlanner,
   releaseStaleClaim,
   setTouchpointState,
   stampExecMeta,
 } from './planner-touchpoint';
-import { carrierKey, classifyExecutionWindow, dmStageOf, kstDateString } from './planner-execution';
+import { classifyExecutionWindow, kstDateString } from './planner-execution';
 import { ingestJoinClicksForCampaign } from './planner-participation';
 import { runPlannerResultNotifyPass } from './planner-report';
 import { runPlannerAlimtalkPass } from './planner-alimtalk';
-import { runPlannerDmReminderPass, runPlannerProductionPass } from './planner-production';
+import { runPlannerCopyPass } from './planner-copy';
+import { formatPlannerDay, runPlannerReviewLinkPass, runPostApprovalSpamPass, settleEventIfFinished } from './planner-review';
+import { PLANNER_PHASE1_CHANNELS } from './planner-channel-gate';
+import { PLANNER_REASON } from './planner-reasons';
 
 /** 지난 달까지 되돌아본다 — 그 이전은 브리핑·정산이 이미 닫힌 구간이다. */
 function reconcileMonthFrom(now: Date): string {
@@ -42,70 +49,55 @@ function reconcileMonthFrom(now: Date): string {
   return kst.toISOString().slice(0, 7);
 }
 
+/** 미승인 행사도 닫는다 — 놓친 실행의 후보 행사 상태(옛 값 re_brief 포함). */
+const MISSED_EVENT_STATUS = ['approved', 'producing', 'scheduled', 'done', 'briefed', 'draft', 're_brief'];
+
 /**
- * ① 놓친 실행 — 예정일이 지난 planned·ready를 생략으로 닫는다.
- * ★ 2026-09-02 사유가 **왜** 안 나갔는지를 말한다 — 모바일 DM이 발행되지 않아 기다리다 넘긴 문자와 그 DM은
- *   "DM이 마무리되지 않아"로 닫고, 같은 행사·같은 시점의 문자+DM 쌍은 통지를 **한 번만** 보낸다(두 통이면 담당자가 두 사고로 읽는다).
+ * ① 놓친 실행 — 예정일이 지난 planned·ready를 생략으로 닫고, 행사마다 통지 1건(날짜를 묶어서).
+ * 사유 = 승인 각인이 있으면 "예정일이 지나" · 없으면 "승인되지 않아"(미승인 = 크레딧 0 고지).
+ * 남은 접점이 없으면 행사를 닫는다(하나라도 나갔으면 발송 완료 · 아니면 취소 + 사유 표식).
  */
-async function closeMissed(today: string, monthFrom: string): Promise<number> {
-  const rows = await loadLiveTouchpoints({ statuses: ['planned', 'ready'], monthFrom, limit: 500 });
+async function closeMissed(today: string, lookbackDate: string): Promise<number> {
+  // 후보 전수(★ Codex 1R H7 · 한 페이지만 보면 앞 행이 지난 행을 가린다)
+  const rows = await loadAllLiveTouchpoints({
+    statuses: ['planned', 'ready'], eventStatuses: MISSED_EVENT_STATUS, scheduledFrom: lookbackDate, scheduledTo: today,
+  }, { label: 'planner-reconcile closeMissed' });
   const missed = rows.filter((t) => classifyExecutionWindow(t.scheduledOn, today) === 'missed');
-  // 쌍 판정은 표식이 아니라 **구조**로 — 같은 행사·같은 날·같은 대상(carrierKey) 묶음에 미발행 DM이 있으면 그 묶음 전체가 "DM 미완성" 사유다.
-  //   (표식 waiting_for_dm은 실행 워커가 그날 한 번이라도 돌아야 찍히므로 그것만 믿으면 통지가 둘로 갈린다 — 적대 검토 지적)
-  const groups = new Map<string, typeof missed>();
-  for (const t of missed) {
-    if (t.channel !== 'sms' && t.channel !== 'dm') continue;
-    const k = `${t.eventId}:${carrierKey(t.scheduledOn, t.timing)}`;
-    groups.set(k, [...(groups.get(k) || []), t]);
-  }
-  const dmRelatedKeys = new Set<string>();
-  for (const [k, group] of groups) {
-    if (group.some((t) => t.channel === 'dm' && dmStageOf(t.execMeta) !== 'published') || group.some((t) => t.channel === 'sms' && !!t.execMeta?.waiting_for_dm)) {
-      dmRelatedKeys.add(k);
-    }
-  }
   let closed = 0;
-  const notifiedPairs = new Set<string>();
+  const byEvent = new Map<string, { first: (typeof missed)[number]; approved: string[]; unapproved: string[] }>();
   for (const tp of missed) {
-    const pairKey = `${tp.eventId}:${carrierKey(tp.scheduledOn, tp.timing)}`;
-    const dmRelated = (tp.channel === 'sms' || tp.channel === 'dm') && dmRelatedKeys.has(pairKey);
-    const reason = dmRelated
-      ? `모바일 DM이 예정일(${tp.scheduledOn})까지 완성·발행되지 않아 문자를 보내지 않았습니다.`
-      : `예정일(${tp.scheduledOn})이 지나 발송하지 않았습니다.`;
+    const approved = !!tp.execMeta?.approved;
     const ok = await setTouchpointState({
       companyId: tp.companyId, touchpointId: tp.id,
       status: 'skipped',
       fromStatuses: ['planned', 'ready'],
-      lockReason: reason,
-      execMetaPatch: { missed_at: new Date().toISOString(), ...(dmRelated ? { missed_reason: 'dm_unpublished' } : {}) },
+      lockReason: approved ? PLANNER_REASON.missed : PLANNER_REASON.notApproved,
+      execMetaPatch: { missed_at: new Date().toISOString(), missed_reason: approved ? 'missed' : 'not_approved' },
     });
     if (!ok) continue;
     closed++;
-    if (dmRelated) {
-      // 문자+DM 쌍 → 통지 1건. 차감 축을 정확히 말한다(당일 문안비는 안 나갔고, 이미 나간 제작비·발행비는 그대로다).
-      if (notifiedPairs.has(pairKey)) continue;
-      notifiedPairs.add(pairKey);
-      const dmRow = (groups.get(pairKey) || []).find((t) => t.channel === 'dm');
-      const residue = String(dmRow?.execMeta?.dm_residue || '');
-      await notifyPlanner(tp.companyId, tp.createdBy, '[마케팅 플래너] 발송 생략',
-        `'${tp.title}' ${tp.scheduledOn} 문자는 모바일 DM이 마무리되지 않아 보내지 않았습니다${residue ? ` (남은 자리: ${residue})` : ''}. 이번 발송 요금(당일 문안)은 차감되지 않았고, 이미 차감된 제작비·발행비는 그대로입니다. 필요하면 계획을 다시 세워 결재에 올려주세요.`);
-      continue;
-    }
-    await notifyPlanner(tp.companyId, tp.createdBy, '[마케팅 플래너] 발송 생략',
-      `'${tp.title}' ${tp.channelLabel}(예정 ${tp.scheduledOn})이 예정일에 발송되지 않아 생략 처리했습니다. 필요하면 계획을 다시 세워 결재에 올려주세요.`);
+    const g = byEvent.get(tp.eventId) || { first: tp, approved: [], unapproved: [] };
+    const day = `${formatPlannerDay(tp.scheduledOn)} ${tp.channelLabel}`;
+    (approved ? g.approved : g.unapproved).push(day);
+    byEvent.set(tp.eventId, g);
+  }
+  for (const [eventId, g] of byEvent) {
+    const tp = g.first;
+    const lines: string[] = [];
+    if (g.unapproved.length > 0) lines.push(`${Array.from(new Set(g.unapproved)).join(', ')} 발송은 승인되지 않아 보내지 않았습니다. 이 발송에는 크레딧이 빠지지 않았습니다.`);
+    if (g.approved.length > 0) lines.push(`${Array.from(new Set(g.approved)).join(', ')} 발송은 예정일이 지나 보내지 않았습니다. 이번 발송의 문안비는 빠지지 않았습니다.`);
+    await notifyPlanner(tp.companyId, tp.createdBy, '[마케팅 플래너] 발송 생략', `'${tp.title}' ${lines.join(' ')}`);
+    await settleEventIfFinished(tp.companyId, eventId, g.approved.length > 0 ? 'missed' : 'not_approved').catch(() => null);
   }
   return closed;
 }
 
 /** ② producing 고아 — lease 초과분을 원위치로. 통지는 반복 사유가 아니라 한 번만. */
-async function recoverStale(monthFrom: string): Promise<number> {
-  const rows = await loadLiveTouchpoints({ statuses: ['producing'], monthFrom, limit: 500 });
+async function recoverStale(lookbackDate: string): Promise<number> {
+  const rows = await loadAllLiveTouchpoints({ statuses: ['producing'], scheduledFrom: lookbackDate }, { label: 'planner-reconcile recoverStale' });
   let recovered = 0;
   for (const tp of rows) {
-    // ★ 2026-08-13 Codex 2R: 알림톡 검수는 producing을 쓰지 않는다(planned + exec_meta.alimtalk_stage) —
-    //   그래서 여기 있는 producing은 전부 실행·제작 선점이다. 예외 분기가 사라졌다.
-    // ★ 2026-09-02 모바일 DM 초안 대기도 같은 계약이다 — planned + exec_meta.dm_stage='drafted'로 두고 **절대 producing에 두지 않는다**.
-    //   발행 감지는 planned → ready 단일 CAS라 여기 회수 대상이 될 일이 없다.
+    // 알림톡 검수는 producing을 쓰지 않는다(planned + exec_meta.alimtalk_stage) — 여기 있는 producing은 전부 실행 선점이다.
     if (!isClaimStale(tp.execMeta)) continue;
     const observed = String(tp.execMeta?.claimed_at || '');
     // ★ 2026-09-02 문자 1통에 실린 **동반 DM 행**은 캐리어 문자의 결과로 확정 복구한다(Codex 1R) — 캐리어가 exec_ref를 가지면
@@ -138,12 +130,12 @@ async function recoverStale(monthFrom: string): Promise<number> {
     if (tp.execMeta?.send_started_at && !tp.execRef) {
       const locked = await releaseStaleClaim({
         companyId: tp.companyId, touchpointId: tp.id, observedClaimedAt: observed, toStatus: 'locked',
-        lockReason: '발송 여부를 확인하지 못했습니다. 발송 내역 확인이 필요합니다.',
+        lockReason: PLANNER_REASON.sendUnknown,
       });
       if (locked) {
         recovered++;
         await notifyPlanner(tp.companyId, tp.createdBy, '[마케팅 플래너] 확인 필요',
-          `'${tp.title}' ${tp.channelLabel}(예정 ${tp.scheduledOn}) 발송 여부를 확인하지 못했습니다. 발송 내역을 확인해 주세요.`);
+          `'${tp.title}' ${tp.channelLabel}(예정 ${formatPlannerDay(tp.scheduledOn)}) 발송 여부를 확인하지 못했습니다. 발송 결과 화면에서 확인해 주세요.`);
       }
       continue;
     }
@@ -152,12 +144,12 @@ async function recoverStale(monthFrom: string): Promise<number> {
     //   담당자가 [다시 시작]을 누르면 그때 정상 경로로 재개된다(제작비·발송 멱등키가 이중 과금을 막는다).
     const ok = await releaseStaleClaim({
       companyId: tp.companyId, touchpointId: tp.id, observedClaimedAt: observed, toStatus: 'locked',
-      lockReason: '진행이 오래 멈춰 있어 자동 진행을 중단했습니다. 확인 후 [다시 시작]을 눌러주세요.',
+      lockReason: PLANNER_REASON.stalled,
       execMetaPatch: { recovered_at: new Date().toISOString() },
     });
     if (ok) {
       await notifyPlanner(tp.companyId, tp.createdBy, '[마케팅 플래너] 확인 필요',
-        `'${tp.title}' ${tp.channelLabel}(예정 ${tp.scheduledOn}) 진행이 오래 멈춰 자동 진행을 중단했습니다. 확인 후 [다시 시작]을 눌러주세요.`);
+        `'${tp.title}' ${tp.channelLabel}(예정 ${formatPlannerDay(tp.scheduledOn)}) ${PLANNER_REASON.stalled}`);
     }
     if (ok) recovered++;
   }
@@ -216,6 +208,94 @@ async function sweepJoinClicks(monthFrom: string): Promise<number> {
   return inserted;
 }
 
+/**
+ * ⓪ 전환(★ 2026-10-04 §8 · 회의론자 M8·M9) — 옛 월간 결재 흐름의 행사를 행사별 확인 흐름으로 옮긴다. **멱등**(새 흐름 표식 = meta.revision).
+ *   - 끝난 행사(ends_on < 오늘)의 남은 접점 = 생략 · 행사 = 발송 완료(하나라도 나갔으면) 또는 취소.
+ *   - 진행 중·이후 행사(옛 draft · briefed · approved · producing · scheduled · re_brief) = 남은 접점을 승인 전(planned)으로 · 행사 = 재료 단계(draft).
+ *     문자만 있는 행사는 문안 패스가 문안을 만들어 확인 대기로 올리고, 모바일 DM·메일은 재료를 넣어 다시 만든다(옛 DM 초안은 이어 쓰지 않는다).
+ *     대행료는 같은 회차 키라 다시 승인해도 두 번 빠지지 않는다.
+ *   - 1차 채널 밖(인앱·알림톡)의 남은 접점 = 생략.
+ *   - 발송 여부를 모르는 행(시도 표식 · 참조 없음)과 진행 중(producing)이 있는 행사는 건드리지 않는다(고아 회수 · 사람 판정이 먼저 · 다음 주기에 다시 본다).
+ * 데이터 의미 변경은 그 의미를 아는 코드가 배포된 뒤에만 — 그래서 수동 SQL이 아니라 이 패스다(meta 칸이 있을 때만 돈다).
+ */
+async function transitionLegacyEvents(today: string): Promise<number> {
+  if (!(await isEventMetaReady())) return 0;
+  const client = await pool.connect();
+  let moved = 0;
+  // 옛 행사 = 새 흐름 표식(revision)이 없고 아직 닫히지 않았고 진행 중(producing) 접점이 없는 것
+  const legacy = `NOT (COALESCE(e.meta, '{}'::jsonb) ? 'revision')
+          AND e.status NOT IN ('done', 'reported', 'cancelled')
+          AND NOT EXISTS (SELECT 1 FROM planner_touchpoints x WHERE x.event_id = e.id AND x.company_id = e.company_id AND x.status = 'producing')`;
+  const settled = `NOT ((t.exec_meta ? 'send_started_at') AND t.exec_ref IS NULL)`;
+  try {
+    await client.query('BEGIN');
+    // 끝난 옛 행사 — 남은 접점 생략
+    await client.query(
+      `UPDATE planner_touchpoints t SET status = 'skipped', lock_reason = $2
+         FROM planner_events e
+        WHERE e.id = t.event_id AND e.company_id = t.company_id AND ${legacy}
+          AND e.ends_on < $1::date
+          AND t.status IN ('planned', 'ready', 'hold_credit', 'locked') AND ${settled}`,
+      [today, PLANNER_REASON.missed],
+    );
+    // 이후 옛 행사 — 1차 채널 밖 접점 생략
+    await client.query(
+      `UPDATE planner_touchpoints t SET status = 'skipped', lock_reason = $2
+         FROM planner_events e
+        WHERE e.id = t.event_id AND e.company_id = t.company_id AND ${legacy}
+          AND e.ends_on >= $1::date
+          AND NOT (t.channel = ANY($3))
+          AND t.status IN ('planned', 'ready', 'hold_credit', 'locked') AND ${settled}`,
+      [today, PLANNER_REASON.notInPhase1, PLANNER_PHASE1_CHANNELS],
+    );
+    // 이후 옛 행사 — 남은 접점을 승인 전으로(옛 DM 단계 표식 제거)
+    await client.query(
+      `UPDATE planner_touchpoints t
+          SET status = 'planned', lock_reason = NULL,
+              exec_meta = COALESCE(t.exec_meta, '{}'::jsonb) - 'approved' - 'dm_stage' - 'dm_url' - 'dm_residue' - 'waiting_for_dm' - 'waiting_reason' - 'post_approval_spam'
+         FROM planner_events e
+        WHERE e.id = t.event_id AND e.company_id = t.company_id AND ${legacy}
+          AND e.ends_on >= $1::date
+          AND t.status IN ('planned', 'ready', 'hold_credit', 'locked') AND ${settled}`,
+      [today],
+    );
+    // 행사 — 끝난 것은 닫고(남은 접점이 없을 때만), 이후 것은 재료 단계로 · 새 흐름 표식(revision 1 · migrated)
+    const ended = await client.query(
+      `UPDATE planner_events e
+          SET status = CASE WHEN EXISTS (SELECT 1 FROM planner_touchpoints s WHERE s.event_id = e.id AND s.company_id = e.company_id AND s.status = 'sent')
+                            THEN 'done' ELSE 'cancelled' END,
+              meta = COALESCE(e.meta, '{}'::jsonb) || jsonb_build_object('revision', 1, 'migrated', jsonb_build_object('at', to_jsonb(NOW()), 'from', e.status), 'closedReason', 'missed'),
+              updated_at = NOW()
+        WHERE ${legacy}
+          AND e.ends_on < $1::date
+          AND NOT EXISTS (SELECT 1 FROM planner_touchpoints p WHERE p.event_id = e.id AND p.company_id = e.company_id AND p.status NOT IN ('sent', 'skipped'))
+        RETURNING e.id`,
+      [today],
+    );
+    const live = await client.query(
+      `UPDATE planner_events e
+          SET status = 'draft',
+              meta = COALESCE(e.meta, '{}'::jsonb) || jsonb_build_object('revision', 1, 'migrated', jsonb_build_object('at', to_jsonb(NOW()), 'from', e.status)),
+              updated_at = NOW()
+        WHERE ${legacy}
+          AND e.ends_on >= $1::date
+          AND NOT EXISTS (SELECT 1 FROM planner_touchpoints p WHERE p.event_id = e.id AND p.company_id = e.company_id
+                           AND p.status IN ('ready', 'hold_credit', 'locked'))
+        RETURNING e.id`,
+      [today],
+    );
+    await client.query('COMMIT');
+    moved = ended.rows.length + live.rows.length;
+  } catch (err) {
+    await client.query('ROLLBACK').catch(() => { /* 원 오류 우선 */ });
+    throw err;
+  } finally {
+    client.release();
+  }
+  if (moved > 0) console.log(`[planner-reconcile] 옛 월간 결재 행사 전환 ${moved}건(행사별 확인 흐름)`);
+  return moved;
+}
+
 /** 대조 패스 — 1시간 주기. 발견은 통지, 자동 복구는 모호하지 않은 것만. */
 let reconcileRunning = false;
 
@@ -236,10 +316,12 @@ async function reconcilePass(): Promise<{ missed: number; recovered: number; lef
   const today = kstDateString(now);
   const monthFrom = reconcileMonthFrom(now);
 
-  const missed = await closeMissed(today, monthFrom).catch((e: any) => {
+  // ⓪ 전환을 먼저 — 옛 승인 행사가 새 실행 조건(승인 각인)에 걸려 조용히 미발송되기 전에 재료·확인 단계로 옮긴다.
+  await transitionLegacyEvents(today).catch((e: any) => console.error('[planner-reconcile] 전환 실패:', e?.message || e));
+  const missed = await closeMissed(today, `${monthFrom}-01`).catch((e: any) => {
     console.error('[planner-reconcile] 놓친 실행 정리 실패:', e?.message || e); return 0;
   });
-  const recovered = await recoverStale(monthFrom).catch((e: any) => {
+  const recovered = await recoverStale(`${monthFrom}-01`).catch((e: any) => {
     console.error('[planner-reconcile] 고아 회수 실패:', e?.message || e); return 0;
   });
   const leftovers = await reportCancelledLeftovers().catch((e: any) => {
@@ -248,16 +330,11 @@ async function reconcilePass(): Promise<{ missed: number; recovered: number; lef
   const joins = await sweepJoinClicks(monthFrom).catch((e: any) => {
     console.error('[planner-reconcile] 참여 수집 실패:', e?.message || e); return 0;
   });
-  // ⛔ **소재 제작 그물** (★ 2026-08-13 정정 — 선언만 있고 실체가 없던 자리).
-  //   승인 직후 제작은 라우트의 best-effort 한 번뿐이라, 그 호출이 일시 실패로 planned에 되돌아오거나
-  //   그 사이 프로세스가 재기동되면 소재가 **예정일 당일에야** 만들어지고 그날 실패하면 그 행사는 못 나간다.
-  //   ⛔ 반드시 closeMissed **뒤**에 둔다 — 예정일이 지난 터치포인트를 먼저 닫아야
-  //   지나간 계획의 소재를 제작해 크레딧이 나가지 않는다.
-  await runPlannerProductionPass().catch((e: any) =>
-    console.error('[planner-reconcile] 소재 제작 그물 실패:', e?.message || e));
-  // ★ 2026-09-02 초안 대기 DM의 예정일 하루 전 리마인드 — 발행 전에는 그 시점 문자가 나가지 않으므로 마지막 통지다.
-  await runPlannerDmReminderPass(today).catch((e: any) =>
-    console.error('[planner-reconcile] DM 발행 리마인드 실패:', e?.message || e));
+  // ★ 2026-10-04 행사별 확인 흐름 — 반드시 closeMissed **뒤**(지난 접점을 먼저 닫아야 지나간 행사에 문안·링크를 만들지 않는다).
+  //   문안 준비(원가 0 · AI 상한 20) → 확인 링크·리마인드·준비 실패 통지 → 승인 직후 실주소 스팸.
+  await runPlannerCopyPass().catch((e: any) => console.error('[planner-reconcile] 문안 준비 실패:', e?.message || e));
+  await runPlannerReviewLinkPass().catch((e: any) => console.error('[planner-reconcile] 확인 링크 실패:', e?.message || e));
+  await runPostApprovalSpamPass().catch((e: any) => console.error('[planner-reconcile] 승인 직후 스팸 검사 실패:', e?.message || e));
   // ⛔ 알림톡 검수 대행도 여기서 돈다 — 별도 타이머를 두지 않는다(검수는 하루 단위 절차라 시간당 1회로 충분하고,
   //   타이머가 늘면 "어느 주기가 그 일을 하는지"가 흐려진다). 상태 추적의 원천은 30분 동기화 워커다.
   await runPlannerAlimtalkPass().catch((e: any) =>

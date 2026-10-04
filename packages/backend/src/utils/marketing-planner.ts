@@ -17,6 +17,9 @@ import { getCreditCost } from './ai-credit-calc';
 export const PLANNER_CHANNELS = ['sms', 'alimtalk', 'email', 'dm', 'inapp'] as const;
 export type PlannerChannel = (typeof PLANNER_CHANNELS)[number];
 
+/** 1차 기입 채널(설계서 Q6) — 판정 원천은 planner-channel-gate의 PLANNER_PHASE1_CHANNELS와 같은 목록(순환 import를 피해 여기 둔다). */
+export const PLANNER_PHASE1_INPUT_CHANNELS: PlannerChannel[] = ['sms', 'dm', 'email'];
+
 export const PLANNER_CHANNEL_LABEL: Record<PlannerChannel, string> = {
   sms: '메시징(문자)',
   alimtalk: '알림톡(정보성 안내)',
@@ -82,6 +85,10 @@ export function sumEstimatedCredits(channels: PlannerChannel[]): number {
 
 // ── 입력 검증 ────────────────────────────────────────────────────────
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+/** (순수) 'YYYY-MM-DD' 형식인가 — 기입 검증과 같은 판정(담기 전 견적 등). */
+export function isPlannerDay(v: unknown): boolean {
+  return DATE_RE.test(String(v ?? ''));
+}
 const MONTH_RE = /^\d{4}-\d{2}$/;
 
 export interface PlannerEventInput {
@@ -128,6 +135,11 @@ export function parsePlannerEventInput(body: any): ParseResult {
     if (!PLANNER_CHANNELS.includes(channel)) {
       return { ok: false, error: '지원하지 않는 채널이 있습니다.' };
     }
+    // ★ 2026-10-04 보강(설계서 Q6) — 1차 = 문자·모바일 DM·메일. 인앱·알림톡은 완성본 엔진·확인 화면이 아직 없다
+    //   (기입만 받고 만들 수 없는 행사는 영원히 "재료 필요"로 남는다). 화면도 고르지 못하게 숨긴다.
+    if (!PLANNER_PHASE1_INPUT_CHANNELS.includes(channel)) {
+      return { ok: false, error: '인앱 메시지·알림톡은 아직 플래너에서 고를 수 없습니다. 문자·모바일 DM·메일로 담아 주세요.' };
+    }
     const anchor = String(t?.timing?.anchor ?? '').trim() as TimingAnchor;
     if (!['start', 'end', 'before_start'].includes(anchor)) {
       return { ok: false, error: '발송 시점을 선택해 주세요.' };
@@ -140,16 +152,11 @@ export function parsePlannerEventInput(body: any): ParseResult {
       }
     }
     // ★ 2026-08-13 대상 축 — 서버가 채널별로 확정한다(프론트 값 그대로 믿지 않는다).
-    //   알림톡 = 언제나 참여 신청자(정보성 안내 전용) / 문자·DM = 선택 가능 /
-    //   이메일·인앱 = 전체(이메일은 깔때기의 입구이고, 인앱 노출은 방문 시점에 정해진다).
-    const wantParticipants = String(t?.timing?.audience ?? t?.audience ?? '') === 'participants';
-    const audience: 'all' | 'participants' =
-      channel === 'alimtalk' ? 'participants'
-      : (wantParticipants && (channel === 'sms' || channel === 'dm')) ? 'participants'
-      : 'all';
+    // ★ 2026-10-04 보강(설계서 Q6) — 참여 신청자 축(참여 체인)은 2차다. 1차 메일 완성본에는 참여 버튼이 없어
+    //   참여자 축 발송은 대상이 영원히 0이 된다 → 1차는 전원 "전체"로 확정한다(값이 와도 무시 · 저장 형태는 종전 "전체"와 같다 = audience 키 없음).
     touchpoints.push({
       channel,
-      timing: { anchor, ...(offsetDays ? { offsetDays } : {}), ...(audience === 'participants' ? { audience } : {}) },
+      timing: { anchor, ...(offsetDays ? { offsetDays } : {}) },
       format: t?.format ? String(t.format).trim().slice(0, 30) : null,
     });
   }
@@ -172,23 +179,12 @@ export function parsePlannerEventInput(body: any): ParseResult {
     seenDay.add(key);
   }
 
-  // ★ 2026-09-02 같은 날의 문자와 모바일 DM은 문자 1통(링크 포함)으로 나간다 — 대상 축이 다르면 한 통으로 합칠 수 없어
-  //   같은 사람에게 두 통이 간다(참여자는 전체의 부분집합). 기입 단계에서 막는다(정책 = 기능 문서 §3-20).
-  for (const s of touchpoints.filter((t) => t.channel === 'sms')) {
-    const sDate = computeTouchpointDate(s.timing, startsOn, endsOn);
-    const clash = touchpoints.find((d) => d.channel === 'dm'
-      && computeTouchpointDate(d.timing, startsOn, endsOn) === sDate
-      && (d.timing.audience || 'all') !== (s.timing.audience || 'all'));
-    if (clash) {
-      return { ok: false, error: '같은 날의 문자와 모바일 DM은 같은 대상이어야 합니다. 문자 1통에 DM 링크를 실어 보냅니다.' };
-    }
-  }
+  // ★ 2026-10-04 같은 날 문자·DM의 대상 축 충돌 검사는 지웠다 — 1차는 대상이 전원 "전체"라 충돌이 생길 수 없다(안 불리는 검사 0).
 
-  // 참여자 축을 고르려면 그 행사에 참여 접수 경로(이메일 안내)가 있어야 한다 — 없으면 대상이 영원히 0이다.
-  const hasEmailEntry = touchpoints.some((t) => t.channel === 'email');
-  const needsEntry = touchpoints.some((t) => t.timing.audience === 'participants');
-  if (needsEntry && !hasEmailEntry) {
-    return { ok: false, error: '행사 참여자에게 보내려면 참여 신청을 받을 이메일 안내를 함께 선택해 주세요.' };
+  // ★ 2026-10-04 보강 — 메일은 행사당 한 번이다. 재료 1벌로 메일 완성본(캠페인) 1개를 만들고, 같은 캠페인은 두 번 보낼 수 없다
+  //   (발송 엔진이 이미 받은 사람을 건너뛰어 두 번째 발송은 0통이 된다). 모바일 DM은 여러 시점이 같은 DM 주소를 문자에 싣는다.
+  if (touchpoints.filter((t) => t.channel === 'email').length > 1) {
+    return { ok: false, error: '메일은 한 행사에 한 번만 보낼 수 있습니다. 시점을 하나만 골라 주세요.' };
   }
 
   return {

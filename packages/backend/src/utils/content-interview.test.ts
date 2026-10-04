@@ -236,7 +236,8 @@ describe('Phase 2 — 사람이 고른 구성이 AI 재설계에 덮이지 않�
 
   it('기존 두 호출부는 structure를 넘기지 않는다(동작 무변경)', () => {
     const route = readFileSync(path.join(__dirname, '../routes/dm.ts'), 'utf8');
-    const planner = readFileSync(path.join(__dirname, 'planner-production.ts'), 'utf8');
+    // ★ 2026-10-04 플래너 완성본은 재료 → 자동 제작 엔진(planner-build)이 만든다 — 옛 제작 파일은 없다.
+    const planner = readFileSync(path.join(__dirname, 'planner-build.ts'), 'utf8');
     expect(route).not.toContain('structure:');
     expect(planner).not.toContain('structure:');
   });

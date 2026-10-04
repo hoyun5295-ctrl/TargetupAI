@@ -16,6 +16,7 @@ import { Router, Request, Response } from 'express';
 import pool, { query } from '../config/database';
 import { authenticate } from '../middlewares/auth';
 import { handleDbMigrationError } from '../utils/db-migration-error';
+import { planTermManagedSql } from '../utils/plan-term'; // ★ 2026-10-04 선불 이용 기간 중(잠김 포함)인 회사는 진단 체험 대상 아님
 import { computeMonthlyUsage } from '../utils/monthly-usage';
 import { validateAnswers, recommendPlan, type DiagnosisDefinition } from '../utils/plan-recommend';
 import { buildDiagnosisResult, buildSectionEchoes } from '../utils/marketing-diagnosis-report';
@@ -71,7 +72,8 @@ router.get('/state', async (req: Request, res: Response) => {
     const [setRes, compRes, dxRes, grantRes, invRes] = await Promise.all([
       query(`SELECT version FROM diagnosis_question_sets WHERE is_active = true LIMIT 1`),
       query(
-        `SELECT UPPER(COALESCE(p.plan_code, '')) AS plan_code, c.subscription_status, c.trial_expires_at
+        `SELECT UPPER(COALESCE(p.plan_code, '')) AS plan_code, c.subscription_status, c.trial_expires_at,
+                ${planTermManagedSql('c')} AS plan_term_managed
            FROM companies c LEFT JOIN plans p ON p.id = c.plan_id
           WHERE c.id = $1`,
         [companyId],
@@ -90,7 +92,7 @@ router.get('/state', async (req: Request, res: Response) => {
     }
     const comp = compRes.rows[0];
     // 요금제 × 역할 — 담당자에게는 진단 자체가 존재하지 않는다(히어로·초대·모달 전부 이 값이 판정)
-    const eligible = judgeDiagnosisEligible({ planCode: comp.plan_code, userType: req.user?.userType });
+    const eligible = judgeDiagnosisEligible({ planCode: comp.plan_code, userType: req.user?.userType, planTermManaged: comp.plan_term_managed === true });
 
     let grantable: 'available' | 'already_granted' | 'not_eligible' | 'not_applicable';
     if (!eligible) grantable = 'not_applicable';

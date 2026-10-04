@@ -20,7 +20,7 @@ import { isAgentVersionGte, ACK_MIN_AGENT_VERSION } from '../utils/agent-protoco
 // ★ 2026-09-02 매핑 계약 — 대상별 허용 필드·필수 필드 검증 CT
 import { validateSyncMapping } from '../utils/sync-mapping-fields';
 // ★ 2026-09-02(2) 주기 해석 CT — 온라인 판정을 고객사별 실제 설정으로 자른다(상수 금지)
-import { resolveAgentIntervals, AGENT_INTERVAL_DEFAULTS } from '../utils/sync-intervals';
+import { resolveAgentIntervals, AGENT_INTERVAL_DEFAULTS, SCHEDULABLE_INTERVALS_MIN } from '../utils/sync-intervals';
 import path from 'path';
 import fs from 'fs';
 
@@ -347,6 +347,16 @@ router.put('/agents/:agentId/config', authenticate, requireSuperAdmin, async (re
         success: false,
         error: `구매 동기화 주기는 최소 ${MIN_INTERVAL}분 이상이어야 합니다.`
       });
+    }
+    // ★ 2026-10-04 에이전트가 같은 간격으로 지킬 수 있는 값만 받는다(sync-intervals.ts SCHEDULABLE_INTERVALS_MIN).
+    //   옛: 45·90분 같은 값도 저장돼 에이전트가 매시 0·45분 또는 매시 정각으로 돌았다(화면 주기 ≠ 실제 주기).
+    for (const [label, v] of [['고객', sync_interval_customers], ['구매', sync_interval_purchases]] as const) {
+      if (v !== undefined && !SCHEDULABLE_INTERVALS_MIN.includes(Number(v))) {
+        return res.status(400).json({
+          success: false,
+          error: `${label} 동기화 주기는 ${SCHEDULABLE_INTERVALS_MIN.join('·')}분 중 하나로 정해 주세요.`,
+        });
+      }
     }
 
     // ★ 2026-09-27 한줄로 V2 R275 — 매핑은 이 입구로 받지 않는다(매핑 전용 경로가 검증을 소유 · 화면도 보내지 않는다).

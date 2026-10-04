@@ -98,9 +98,11 @@ describe('배선', () => {
     const op = back('utils/continuous-operator.ts');
     expect(op).not.toContain('{ count: recipientCount, segmentName');
     expect(op).toContain('total_count: recipientCount');
-    const pl = back('utils/planner-executor.ts');
+    // ★ 2026-10-04 플래너 재생성 콜백은 문안 CT(planner-copy · 사람이 보기 전에만)로 옮겼다 — 실행부는 재생성하지 않는다.
+    const pl = back('utils/planner-copy.ts');
     expect(pl).not.toContain('{ count: 0, segmentName: tp.title');
     expect(pl).toContain('total_count: 0');
+    expect(back('utils/planner-executor.ts')).not.toContain('regenerateCallback');
   });
 
   it('자동마케팅은 3안을 차례로 검사하고 통과 안 번호를 제안에 남긴다', () => {

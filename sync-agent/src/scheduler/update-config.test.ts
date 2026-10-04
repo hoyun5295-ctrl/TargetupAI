@@ -11,7 +11,6 @@
 import { describe, it, expect, vi } from 'vitest';
 import { Scheduler } from './index';
 import type { SyncEngine } from '../sync/engine';
-import type { QueueManager } from '../queue';
 
 function makeEngineStub() {
   return {
@@ -27,7 +26,6 @@ function makeScheduler(engine: ReturnType<typeof makeEngineStub>) {
   return new Scheduler(
     engine as unknown as SyncEngine,
     null,
-    {} as unknown as QueueManager,
     null,
     { customerIntervalMin: 60, purchaseIntervalMin: 30 },
   );

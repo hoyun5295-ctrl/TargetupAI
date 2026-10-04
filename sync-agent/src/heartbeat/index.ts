@@ -8,7 +8,6 @@
 import os from 'node:os';
 import type { ApiClient } from '../api/client';
 import type { SyncStateManager } from '../sync/state';
-import type { QueueManager } from '../queue';
 import type { AgentConfig } from '../config';
 import type { AlertManager } from '../alert';
 import type { AgentCommand, AgentSelfReport } from '../types/api';
@@ -21,7 +20,6 @@ const logger = getLogger('heartbeat');
 export class HeartbeatManager {
   private apiClient: ApiClient;
   private stateManager: SyncStateManager;
-  private queueManager: QueueManager;
   private config: AgentConfig;
   private startTime: number;
   private updateManager: UpdateManager;
@@ -44,13 +42,11 @@ export class HeartbeatManager {
   constructor(
     apiClient: ApiClient,
     stateManager: SyncStateManager,
-    queueManager: QueueManager,
     config: AgentConfig,
     alertManager?: AlertManager,
   ) {
     this.apiClient = apiClient;
     this.stateManager = stateManager;
-    this.queueManager = queueManager;
     this.config = config;
     this.startTime = Date.now();
     this.alertManager = alertManager || null;
@@ -127,7 +123,8 @@ export class HeartbeatManager {
         dbType: this.config.database.type,
         lastSyncAt: state.lastCustomerSyncAt || state.lastPurchaseSyncAt || null,
         totalCustomersSynced: state.totalCustomersSynced,
-        queuedItems: this.queueManager.getCount(),
+        // ★ 1.7.2 로컬 큐 폐지 — 서버 칸(queued_items) 호환으로 0을 보낸다
+        queuedItems: 0,
         uptime,
         reported,
         commandResults: commandResults.length > 0 ? commandResults : undefined,

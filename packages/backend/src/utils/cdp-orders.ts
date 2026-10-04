@@ -98,6 +98,9 @@ export async function syncOrder(
   if (!input.orderedAt || isNaN(new Date(input.orderedAt).getTime())) {
     throw new Error('orderedAt 형식이 올바르지 않습니다 (ISO datetime).');
   }
+  // ★ 2026-10-04 상태 글자는 앞뒤 공백·대소문자를 걷어 한 모양으로(매출 판정 CT-86 은 'paid'·'completed'·'cancelled'·'refunded' 정확 일치).
+  //   옛: 자체호스팅·/order API 가 'PAID'·'Completed' 로 보내면 결제 주문의 매출이 0이었다. 저장되는 이벤트 status 도 이 값이다.
+  input = { ...input, status: String(input.status ?? '').trim().toLowerCase() };
 
   // 1. customer + link 보장
   const identifyInput: IdentifyInput = {
@@ -187,14 +190,18 @@ export async function syncOrder(
     }
     const orderedDate = new Date(input.orderedAt);
     try {
+      // ★ 2026-10-04 최근 구매 금액·마지막 구매일은 이 주문이 기존 최근 구매보다 늦거나 같을 때만 바꾼다(최근 구매일은 원래 GREATEST).
+      //   옛: 무조건 이번 주문 값이라, 옛 주문이 나중에 처리되면(백필 · 지연 웹훅) 날짜는 새 값인데 금액·마지막 구매일은 옛 값이 됐다.
+      //   SET 의 오른쪽은 모두 갱신 전 값을 본다(recent_purchase_date 비교가 이 문장의 GREATEST 결과에 영향받지 않는다).
       await query(
         `UPDATE customers SET
           total_purchase_amount = COALESCE(total_purchase_amount, 0) + $2,
           total_purchase = COALESCE(total_purchase, 0) + $2,
           purchase_count = COALESCE(purchase_count, 0) + 1,
           recent_purchase_date = GREATEST(COALESCE(recent_purchase_date, $3::date), $3::date),
-          recent_purchase_amount = $2,
-          last_purchase_date = TO_CHAR($3::date, 'YYYY-MM-DD'),
+          recent_purchase_amount = CASE WHEN recent_purchase_date IS NULL OR $3::date >= recent_purchase_date THEN $2 ELSE recent_purchase_amount END,
+          last_purchase_date = CASE WHEN COALESCE(last_purchase_date, '') = '' OR TO_CHAR($3::date, 'YYYY-MM-DD') >= last_purchase_date
+                                    THEN TO_CHAR($3::date, 'YYYY-MM-DD') ELSE last_purchase_date END,
           avg_order_value = (COALESCE(total_purchase_amount, 0) + $2) / GREATEST(COALESCE(purchase_count, 0) + 1, 1),
           updated_at = NOW()
         WHERE id = $1::uuid`,

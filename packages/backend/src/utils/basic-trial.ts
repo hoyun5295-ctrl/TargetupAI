@@ -13,6 +13,7 @@
 import type { PoolClient } from 'pg';
 import pool from '../config/database';
 import { recordPlanChange, alertPlanChangeFailure } from './plan-change-log';
+import { planTermManagedSql, planTermManagedError, PlanTermError } from './plan-term';
 
 /**
  * ★ 무료체험 신청 마감 (Harold 확정 2026-06-11): 2026-06-30 23:59:59 KST까지만 신청 접수.
@@ -67,7 +68,8 @@ export async function grantFreeTrial(
     return result;
   } catch (err) {
     try { await client.query('ROLLBACK'); } catch { /* 롤백 실패는 아래 알림에 포함 */ }
-    await alertPlanChangeFailure(companyId, err);
+    // 선불 이용 기간 거절(409)은 업무 응답이라 실패 알림을 보내지 않는다
+    if (!(err instanceof PlanTermError)) await alertPlanChangeFailure(companyId, err);
     throw err;
   } finally {
     client.release();
@@ -95,10 +97,14 @@ async function grantFreeTrialWithClient(
 
   // 연장인지 신규인지는 **잠근 행의 갱신 전 값**으로 판정한다(동시 클릭이 서로의 판정을 오염시키지 않게).
   const cur = await client.query(
-    `SELECT subscription_status, trial_expires_at FROM companies WHERE id = $1::uuid FOR UPDATE`,
+    `SELECT subscription_status, trial_expires_at, ${planTermManagedSql('companies')} AS plan_term_managed
+       FROM companies WHERE id = $1::uuid FOR UPDATE`,
     [companyId],
   );
   if (cur.rows.length === 0) throw new Error('고객사를 찾을 수 없습니다.');
+  // ★ 2026-10-04 선불 이용 기간 중인 회사는 체험 대상이 아니다(승인 체험 · 슈퍼관리자 · 진단 자동 세 호출부가 이 코어를 지난다).
+  //   타입 오류(409)라 호출부가 업무 응답으로 돌려준다.
+  if (cur.rows[0].plan_term_managed === true) throw planTermManagedError('무료체험을 줄 수 없습니다');
   const curExpiry = cur.rows[0].trial_expires_at ? new Date(cur.rows[0].trial_expires_at) : null;
   const extended =
     cur.rows[0].subscription_status === 'trial' &&

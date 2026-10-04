@@ -5,12 +5,12 @@ import multer from 'multer';
 import path from 'path';
 import * as XLSX from 'xlsx';
 import Anthropic from '@anthropic-ai/sdk';
-import { query } from '../config/database';
+import { query, withTransaction } from '../config/database';
 import { redis, AI_MODELS, AI_MAX_TOKENS, CACHE_TTL, TIMEOUTS, BATCH_SIZES, claudeRequestShape, resolveMaxTokens } from '../config/defaults';
-import { normalizeByFieldKey, normalizeRegion, normalizeDate, normalizeCustomFieldValue, salvageBirthParts } from '../utils/normalize';
+import { normalizeByFieldKey, normalizeRegion, normalizeDate, normalizeCustomFieldValue, salvageBirthParts, isUnrecognizedSmsOptIn } from '../utils/normalize';
 import { CATEGORY_LABELS, FIELD_MAP, getColumnFields, getCustomFields, getFieldByKey, upsertCustomFieldDefinitions } from '../utils/standard-field-map';
 import { validateUploadMapping } from '../utils/upload-mapping-validator';
-import { createCustomerUpsertBuilder, buildSmsOptInBackfill, isRowLevelDbError } from '../utils/customer-upsert';
+import { createCustomerUpsertBuilder, applySmsOptInDefaults, isRowLevelDbError } from '../utils/customer-upsert';
 // ★ 2026-06-25: 고객 업로드 완료 시 회사 데이터 프로필 캐시 무효화(게이트 "고객 없음" 오표시 차단)
 import { clearCompanyDataProfileCache } from '../utils/company-data-profile';
 import { clearEnabledFieldsCache } from '../utils/enabled-fields';
@@ -525,6 +525,8 @@ async function processUploadInBackground(
       const batch = rows.slice(i, i + BATCH_SIZE);
       const batchRows: Record<string, any>[] = []; // 컨트롤타워 buildBatch 입력
       const batchPhones: string[] = [];
+      // ★ 2026-10-04 수신동의 값을 못 알아본 행(신규면 미동의 · 백필보다 먼저)
+      const unknownConsentPhones: string[] = [];
       const seenInBatch = new Set<string>();
       // ★ 2026-08-14 (Codex 1R): 다매장 소속 쌍 — phone dedupe로 버려지는 후속 행의 매장 코드도
       //   customer_stores에는 적재해야 한다(다매장 진실 = customer_stores). dedupe 전에 전 행에서 수집.
@@ -541,6 +543,9 @@ async function processUploadInBackground(
             record[fieldKey] = row[idx];
           }
         });
+
+        // ★ 2026-10-04 수신동의 칸 값을 못 알아보면 신규 고객은 미동의(정규화 전 원문으로 판정 · 정규화는 null 로 접는다)
+        const consentUnrecognized = isUnrecognizedSmsOptIn(record.sms_opt_in);
 
         // ── FIELD_MAP 기반 정규화 ──
         // birth_date는 파생 필드 계산에서 특별 처리 (4자리 연도, Excel 시리얼넘버 등)
@@ -581,6 +586,7 @@ async function processUploadInBackground(
         }
         seenInBatch.add(dedupeKey);
         batchPhones.push(record.phone);
+        if (consentUnrecognized) unknownConsentPhones.push(record.phone);
 
         // ── 파생 필드 계산 ──
         let derivedBirthYear: number | null = null;
@@ -657,7 +663,7 @@ async function processUploadInBackground(
         for (const field of columnFieldDefs) {
           if (field.fieldKey === 'sms_opt_in') {
             // ★ 2026-08-14 (Codex 1R): 미제공 = null — true로 채우면 UPDATE가 기존 수신거부를 되돌린다.
-            //   신규 행 기본 true는 업서트 직후 buildSmsOptInBackfill이 채운다.
+            //   신규 행 기본 true는 업서트와 같은 트랜잭션의 applySmsOptInDefaults가 채운다.
             const val = record[field.fieldKey];
             batchRow[field.columnName] = val !== null && val !== undefined ? val : null;
           } else if (field.fieldKey === 'region') {
@@ -685,6 +691,8 @@ async function processUploadInBackground(
       }
 
       if (batchRows.length > 0) {
+        // ★ 2026-10-04 못 알아본 수신동의 값 = 신규 미동의(먼저) → 값 없는 신규 = 기본 동의 — 업서트와 같은 트랜잭션(applySmsOptInDefaults 주석)
+        const unknownConsentSet = new Set(unknownConsentPhones);
         try {
           // ── 컨트롤타워 buildBatch 호출 — insertCols/updateClauses/values 구성 전부 위임 ──
           const { sql, values: queryValues } = uploadUpsertBuilder.buildBatch(
@@ -692,7 +700,11 @@ async function processUploadInBackground(
             batchRows,
             userId || null,
           );
-          const result = await query(sql, queryValues);
+          const result = await withTransaction(async (run) => {
+            const r = await run(sql, queryValues);
+            await applySmsOptInDefaults(run, companyId, batchRows.map((row) => String(row.phone)), unknownConsentSet);
+            return r;
+          });
 
           result.rows.forEach((r: any) => {
             if (r.is_insert) insertCount++;
@@ -714,7 +726,11 @@ async function processUploadInBackground(
                 const { sql: rowSql, values: rowValues } = uploadUpsertBuilder.buildBatch(
                   companyId, [row], userId || null,
                 );
-                const rowResult = await query(rowSql, rowValues);
+                const rowResult = await withTransaction(async (run) => {
+                  const r = await run(rowSql, rowValues);
+                  await applySmsOptInDefaults(run, companyId, [String(row.phone)], unknownConsentSet);
+                  return r;
+                });
                 rowResult.rows.forEach((r: any) => {
                   if (r.is_insert) insertCount++;
                   else duplicateCount++;
@@ -728,14 +744,9 @@ async function processUploadInBackground(
           }
         }
 
-        // ★ 2026-08-14 (Codex 1R): 신규 행 수신동의 기본 true 백필 — sync.ts와 동일 구조
-        if (batchPhones.length > 0) {
-          try {
-            const backfill = buildSmsOptInBackfill(companyId, batchPhones);
-            await query(backfill.sql, backfill.values);
-          } catch (bfErr: any) {
-            console.error('[업로드 백그라운드] 수신동의 백필 오류:', bfErr?.message || bfErr);
-          }
+        // 수신동의 기본값은 위 업서트 트랜잭션 안에서 적용했다(applySmsOptInDefaults).
+        if (unknownConsentPhones.length > 0) {
+          console.log(`[업로드 백그라운드] 수신동의 값 해석 불가 ${unknownConsentPhones.length}건 — 신규 고객은 미동의로`);
         }
 
         // ── customer_stores N:N 매핑 (★2026-08-14 폴백 경로도 타도록 try 밖으로) ──

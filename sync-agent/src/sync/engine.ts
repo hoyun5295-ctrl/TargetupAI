@@ -14,11 +14,10 @@
 
 import type { IDbConnector, RawRow, ColumnInfo } from '../db/types';
 import type { ApiClient } from '../api/client';
-import type { QueueManager } from '../queue';
 import type { AlertManager } from '../alert';
 import type { SyncTarget, SyncMode, SyncResult, SyncError, SyncCursorState } from '../types/sync';
 // ★ 2026-08-03 커서 재설계 — 키셋 커서·원본 행 키 직렬화(순수 모듈, 어댑터 4종 공유)
-import { serializeSourceRowKey, cursorKeysValid } from '../db/keyset';
+import { serializeSourceRowKey, cursorKeysValid, keylessRetryKeys } from '../db/keyset';
 import type { ColumnMapping } from '../mapping';
 import { mapBatch } from '../mapping';
 import { normalizeCustomerBatch, normalizePurchaseBatch } from '../normalize';
@@ -65,25 +64,57 @@ export interface SyncEngineConfig {
 export class SyncEngine {
   private db: IDbConnector;
   private apiClient: ApiClient | null;
-  private queue: QueueManager | null;
   private stateManager: SyncStateManager;
   private config: SyncEngineConfig;
   private alertManager: AlertManager | null;
+  /**
+   * ★ 1.7.2 실행 한 줄 — 고객·구매·원격 명령(full_sync·update_config)의 전체/증분을 도착 순서대로 하나씩 돌린다.
+   * 옛: 스케줄러 플래그는 같은 대상의 cron 만 막았고 원격 명령의 전체 동기화는 그 밖이라 같은 커서·같은 서버 행을
+   *   동시에 건드렸다(교착 → 그 배치 손실의 재료). 정각에는 고객 cron 이 먼저 줄에 서므로 고객 → 구매 순서가 된다
+   *   (신규 가입 직후 구매가 고객보다 먼저 서버에 닿아 고객과 연결되지 않던 틈을 줄인다).
+   * ⛔ 줄 안에서 다시 runFull/runIncremental 을 부르면 자기 자신을 기다린다 — 안쪽은 full()/incremental() 을 부른다.
+   */
+  private lane: Promise<unknown> = Promise.resolve();
 
   constructor(
     db: IDbConnector,
     apiClient: ApiClient | null,
     stateManager: SyncStateManager,
     config: SyncEngineConfig,
-    queue?: QueueManager,
     alertManager?: AlertManager,
   ) {
     this.db = db;
     this.apiClient = apiClient;
     this.stateManager = stateManager;
     this.config = config;
-    this.queue = queue || null;
     this.alertManager = alertManager || null;
+  }
+
+  private inLane<T>(fn: () => Promise<T>): Promise<T> {
+    const run = this.lane.then(fn, fn);
+    this.lane = run.catch(() => undefined);
+    return run;
+  }
+
+  /** 파일 원본(엑셀·CSV) — 행이 언제 바뀌었는지 알 근거(시각·원본 키)가 파일에 없다. */
+  private isFileSource(): boolean {
+    return this.db.dbType === 'excel' || this.db.dbType === 'csv';
+  }
+
+  /** 증분을 열지 않고 사유만 남기는 회차 결과(커서 무변경). */
+  private async lockedResult(
+    target: SyncTarget, code: string, message: string, mode: 'incremental' | 'full' = 'incremental',
+  ): Promise<SyncResult> {
+    const now = new Date().toISOString();
+    logger.warn(`${mode === 'full' ? '전체' : '증분'} 잠금(${target}): ${message}`);
+    const result: SyncResult = {
+      target, mode,
+      totalCount: 0, successCount: 0, failCount: 0, skippedCount: 0,
+      durationMs: 0, startedAt: now, completedAt: now, errors: [{ code, message }],
+    };
+    this.logResult(result);
+    await this.sendSyncLog(result);
+    return result;
   }
 
   /**
@@ -270,6 +301,10 @@ export class SyncEngine {
   // ─── 증분 동기화 ──────────────────────────────────────
 
   async runIncremental(target: SyncTarget): Promise<SyncResult> {
+    return this.inLane(() => this.incremental(target));
+  }
+
+  private async incremental(target: SyncTarget): Promise<SyncResult> {
     // ★ v1.4.1: 구매 테이블 미사용(옵션) — 조기 종료하여 빈 결과 반환
     if (target === 'purchases' && !this.config.purchaseTable) {
       logger.info('구매 테이블 미설정 — 구매 증분 동기화 스킵 (사용 안 함 옵션)');
@@ -291,15 +326,42 @@ export class SyncEngine {
 
     const timestampCol = this.getTimestampForTarget(target);
 
+    // ★ 1.7.2 파일 원본(엑셀·CSV)은 증분을 하지 않는다 — 옛 해시 비교는 기준이 메모리에만 있어 재시작하면 영영 0건이었고
+    //   첫 페이지만 보냈다. 고객은 폰 기준 멱등이라 매 회차 전체를 다시 읽고, 구매는 원본 키가 있을 때만 그렇게 한다
+    //   (키 없이 다시 보내면 중복 · 키를 지어내지 않는다 = FEATURE-SYNC-AGENT §2).
+    if (this.isFileSource()) {
+      if (target === 'customers' || (this.config.purchaseKeyColumns && this.config.purchaseKeyColumns.length > 0)) {
+        return this.full(target);
+      }
+      return this.lockedResult(
+        target,
+        'INCREMENTAL_LOCKED_FILE_SOURCE',
+        '파일 원본의 구매는 처음 한 번만 가져옵니다(행마다 고유 번호가 없어 다시 보내면 중복됩니다). ' +
+          '다시 받으려면 구매 키 컬럼을 지정하거나, 이미 받은 구매를 지운 뒤 전체 동기화를 실행해 주세요.',
+      );
+    }
+
     // ★ 2026-06-11: 증분 직전 타임스탬프 컬럼 실재 검증 (인비토 SyncTest updated_at 부재 실측)
     const columnStatus = await this.checkTimestampColumn(tableName, timestampCol);
     if (columnStatus === 'missing') {
       if (this.config.fallbackToFullSync) {
+        // ★ 1.7.2 구매에 원본 키(PK·지정 키)가 없으면 매 회차 전체 = 키 없는 INSERT 반복 = 중복 증식. 정직하게 잠근다.
+        if (target === 'purchases') {
+          const pk = await this.resolvePkColumns(target, tableName);
+          if (!pk.ok || pk.columns.length === 0) {
+            return this.lockedResult(
+              target,
+              'INCREMENTAL_LOCKED_NO_TS_NO_PK',
+              `증분 불가: 구매 테이블 '${tableName}'에 갱신 시각 컬럼 '${timestampCol}'도 기본키도 없습니다. ` +
+                '매 회차 전체를 다시 보내면 같은 구매가 중복되므로 멈춥니다 — 갱신 시각 컬럼이나 기본키(또는 지정 키)를 두면 열립니다.',
+            );
+          }
+        }
         logger.warn(
           `타임스탬프 컬럼 '${timestampCol}'이 테이블 '${tableName}'에 없음 → 전체 동기화로 대체합니다. ` +
           `(권장: 테이블에 갱신 시각 컬럼을 추가하고 --edit-config로 컬럼명 지정)`,
         );
-        return this.runFull(target);
+        return this.full(target);
       }
       throw new Error(
         `타임스탬프 컬럼 '${timestampCol}'이 테이블 '${tableName}'에 없습니다. ` +
@@ -320,7 +382,7 @@ export class SyncEngine {
     // 마지막 동기화 시각이 없으면 → 전체 동기화로 폴백
     if (!lastSyncAt) {
       logger.info('마지막 동기화 기록 없음 → 전체 동기화로 전환');
-      return this.runFull(target);
+      return this.full(target);
     }
 
     let totalCount = 0;
@@ -353,8 +415,9 @@ export class SyncEngine {
     }
 
     // 상태 업데이트
+    // ★ 1.7.2 전송 실패가 있었으면 기준 시각을 올리지 않는다 — 로컬 큐를 없앴으므로 다음 회차의 재조회가 유일한 재시도다.
     const completedAt = new Date().toISOString();
-    if (successCount > 0) {
+    if (successCount > 0 && !errors.some((e) => e.code === 'API_SEND_FAILED')) {
       this.stateManager.updateAfterSync(target, completedAt, successCount);
     }
 
@@ -492,7 +555,7 @@ export class SyncEngine {
       if (probe) {
         logger.info(`증분 보류 해제(${target}) — 타임스탬프 값 관측, 전체 동기화로 기준 재설정`);
         this.stateManager.setIncrementalHold(target, null);
-        return this.runFull(target);
+        return this.full(target);
       }
       errors.push({ code: 'INCREMENTAL_HOLD', message: `증분 보류: ${hold}` });
       logger.warn(`증분 보류 중(${target}): ${hold}`);
@@ -540,7 +603,7 @@ export class SyncEngine {
     if (!cursor) {
       // 신규 설치·옛 형식(완료 시각) 커서·fingerprint 변경 — 전량이 기준을 다시 잡고 씨앗을 심는다(runFull).
       logger.info(`키셋 커서 없음(${target}) → 전체 동기화로 기준 재설정`);
-      return this.runFull(target);
+      return this.full(target);
     }
 
     logger.info(`증분 동기화 시작(키셋): ${target}`, { tableName, timestampCol, pkCols, cursorTs: cursor.tsRaw, openBucket: cursor.keys.length === 0 });
@@ -642,6 +705,10 @@ export class SyncEngine {
   // ─── 전체 동기화 ──────────────────────────────────────
 
   async runFull(target: SyncTarget): Promise<SyncResult> {
+    return this.inLane(() => this.full(target));
+  }
+
+  private async full(target: SyncTarget): Promise<SyncResult> {
     // ★ v1.4.1: 구매 테이블 미사용(옵션) — 조기 종료하여 빈 결과 반환
     if (target === 'purchases' && !this.config.purchaseTable) {
       logger.info('구매 테이블 미설정 — 구매 전체 동기화 스킵 (사용 안 함 옵션)');
@@ -682,9 +749,11 @@ export class SyncEngine {
       seedClosed = await this.db.fetchMaxCursor!(tableName, tsCol, fullPkCols, t0.tsRaw);
       seedOpenTs = seedClosed ? null : t0.tsRaw;
     };
+    let keyResolveError: string | null = null;
     if (this.db.fetchIncrementalKeyset && this.db.fetchMaxCursor && this.db.getSourceId) {
       const tsCol = this.getTimestampForTarget(target);
       const pkResult = await this.resolvePkColumns(target, tableName);
+      if (!pkResult.ok) keyResolveError = pkResult.error;
       const tsOk = (await this.checkTimestampColumn(tableName, tsCol)) === 'ok';
       if (pkResult.ok && pkResult.columns.length > 0 && !pkResult.nonScalarPk) {
         fullPkCols = pkResult.columns;
@@ -699,6 +768,29 @@ export class SyncEngine {
           }
         }
       }
+    } else if (this.isFileSource() && target === 'purchases') {
+      // ★ 1.7.2 파일 원본 구매는 지정 키가 있을 때만 키를 싣는다(매 회차 전체를 다시 보내도 멱등). 없으면 종전처럼 키 없이(첫 전량 1회).
+      const pkResult = await this.resolvePkColumns(target, tableName);
+      if (!pkResult.ok) keyResolveError = pkResult.error;
+      if (pkResult.ok && pkResult.columns.length > 0 && !pkResult.nonScalarPk) fullPkCols = pkResult.columns;
+    }
+    // ★ 1.7.2 구매 키를 정해 두었는데(지정 키) 쓸 수 없거나 · 키 판정 자체가 실패하면 키 없이 보내지 않고 잠근다(Codex 1004 R1 high).
+    //   옛: 키 없는 전송으로 내려앉았다 — 파일 원본은 지정 키가 있으면 매 회차 전체를 다시 보내므로 회차마다 같은 구매가 쌓였다.
+    //   키를 처음부터 안 정한 원본(PK·지정 키 모두 없음)은 종전대로 첫 전체 1회만 키 없이 간다(FEATURE-SYNC-AGENT §2).
+    if (target === 'purchases') {
+      const designated = this.config.purchaseKeyColumns ?? [];
+      const reason = keyResolveError
+        ?? (designated.length > 0 && fullPkCols.length === 0
+          ? `지정 키 컬럼(${designated.join(', ')})을 원본 행 키로 쓸 수 없습니다(날짜·이진 타입 또는 메타 불일치)`
+          : null);
+      if (reason) {
+        return this.lockedResult(
+          target,
+          'PURCHASE_KEY_UNUSABLE',
+          `${reason}. 키 없이 보내면 다시 보낼 때마다 같은 구매가 쌓이므로 구매를 보내지 않았습니다. --edit-config로 키 컬럼을 다시 지정해 주세요.`,
+          'full',
+        );
+      }
     }
 
     let totalCount = 0;
@@ -712,8 +804,8 @@ export class SyncEngine {
       logger.info(`배치 ${batchIndex}/${totalBatches} 처리 중 (${rows.length}건)`);
       // 원본 행 키 — 전량도 멱등 적재(재싱크·재시도가 중복 행을 만들지 않는다). purchases만.
       //   PK가 있는데 직렬화 불가한 행은 키 없이 보내지 않고 행 실패로 보고한다(Codex F4 —
-      //   키 없는 행은 재실행마다 중복이 쌓인다). PK 자체가 없는 테이블은 기존대로 키 없이 보낸다
-      //   (증분은 어차피 잠겨 있고, 재기준 시 선삭제가 운영 절차다).
+      //   키 없는 행은 재실행마다 중복이 쌓인다). PK 자체가 없는 테이블은 원본 키 없이 보낸다
+      //   (증분은 어차피 잠겨 있고, 재기준 시 선삭제가 운영 절차다). ★ 1.7.2 단 이 배치 한 번의 재시도 표식을 싣는다(keylessRetryKeys).
       let sendRows = rows;
       let srkList: (string | null)[] | undefined;
       if (target === 'purchases' && fullPkCols.length > 0) {
@@ -735,6 +827,9 @@ export class SyncEngine {
         } else {
           srkList = all;
         }
+      } else if (target === 'purchases') {
+        // ★ 1.7.2 응답만 끊긴 요청을 실행 안 재시도가 다시 보내도 같은 표식이라 서버가 한 번만 넣는다(Codex 1004 R2 high)
+        srkList = keylessRetryKeys(rows.length);
       }
       fetchedRows += rows.length;
       totalCount += rows.length - sendRows.length; // 제외 행도 총량에 계상(실패로 이미 집계)
@@ -804,6 +899,17 @@ export class SyncEngine {
         `(${totalRows - fetchedRows}건 누락) — 다음 동기화 주기에서 보강 필요.`,
         { target, tableName },
       );
+    }
+
+    // ★ 1.7.2 키 없는 구매의 첫 전체에서 보내지 못한 배치는 자동으로 다시 보낼 길이 없다(Codex 1004 R1 high).
+    //   다시 보내면 이미 들어간 배치가 키 없이 한 번 더 쌓인다. 실행 안 재시도(api/retry.ts server 프리셋 · 최대 10회)와
+    //   서버의 요청 단위 되돌림(503 = 그 배치는 하나도 안 남음)이 일시 오류를 흡수하고, 그래도 실패하면 여기서 분명히 알린다.
+    if (target === 'purchases' && fullPkCols.length === 0 && errors.some((e) => e.code === 'API_SEND_FAILED')) {
+      errors.push({
+        code: 'KEYLESS_FULL_INCOMPLETE',
+        message: '원본 행 키가 없는 구매를 처음 가져오다 일부 배치를 보내지 못했습니다. 자동으로 다시 보내면 중복되므로 다시 보내지 않습니다. ' +
+          '이미 받은 구매를 지운 뒤 전체 동기화를 다시 실행하거나, 구매 키 컬럼을 지정해 주세요.',
+      });
     }
 
     // 상태 업데이트
@@ -908,7 +1014,7 @@ export class SyncEngine {
     // ② 데이터 정규화
     const normalizeResult = target === 'customers'
       ? normalizeCustomerBatch(mapped, { dbType: this.db.dbType })
-      : normalizePurchaseBatch(mapped);
+      : normalizePurchaseBatch(mapped, { dbType: this.db.dbType });
 
     // 정규화 실패 건 로깅
     for (const dropped of normalizeResult.dropped) {
@@ -917,6 +1023,21 @@ export class SyncEngine {
         message: dropped.reason,
         recordKey: String(dropped.row.phone || dropped.row.customer_phone || 'unknown'),
       });
+    }
+
+    // ★ 1.7.2 알아볼 수 없는 수신동의 표기 — 행마다가 아니라 배치에 한 줄(어떤 글자였는지 함께 · 낱말표에 더할지 판단용)
+    if (target === 'customers') {
+      const words = new Set<string>();
+      let n = 0;
+      for (const r of normalizeResult.normalized) {
+        if (typeof r.sms_opt_in_unknown === 'string') { n++; words.add(r.sms_opt_in_unknown); }
+      }
+      if (n > 0) {
+        errors.push({
+          code: 'CONSENT_VALUE_UNKNOWN',
+          message: `수신동의 값을 알아볼 수 없는 행 ${n}건 — 신규 고객은 미동의로 들어갑니다(표기: ${[...words].slice(0, 5).join(', ')})`,
+        });
+      }
     }
 
     // ③ Zod 유효성 검증
@@ -981,11 +1102,8 @@ export class SyncEngine {
             code: 'API_SEND_FAILED',
             message: error instanceof Error ? error.message : String(error),
           });
-          // 큐에 저장 (오프라인 대비)
-          if (this.queue) {
-            this.queue.enqueue(target, validData);
-            logger.info(`전송 실패 → 큐에 ${validData.length}건 저장`);
-          }
+          // ★ 1.7.2 로컬 큐에 담지 않는다 — 커서·기준 시각을 멈춘 것이 재시도다. 옛 큐는 30분 뒤 옛 값을 다시 보내
+          //   그 사이 들어간 새 값(수신거부 포함)을 덮었다.
         }
       }
     }

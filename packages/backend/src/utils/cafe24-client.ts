@@ -573,6 +573,30 @@ export function mapCafe24EventNo(eventNo: unknown): string | null {
   return CAFE24_EVENT_NO_MAP[n] || null;
 }
 
+/**
+ * ★ 2026-10-04 카페24 주문 상태 코드 → 주문 적재 CT 의 상태(cdp-orders · 매출 판정은 'paid'·'completed'·'cancelled'·'refunded' 만 안다).
+ * 근거 = 카페24 Admin API 공식 문서 주문 상태 코드표(partners.cafe24.co.jp/docs/api/admin · 2026-10-04 원문 확인):
+ *   N00 입금전 · N02 주문접수중/카드결제대기 · N10 상품준비중 · N20 배송준비중 · N21 배송대기 · N22 배송보류 · N30 배송중 ·
+ *   N40 배송완료 · N50 구매확정 · C40~C43 취소완료 · C47~C49 입금전취소 · R40~R43 반품완료 · (C00·C10·C34~C36 = 취소 진행 ·
+ *   R00~R36 = 반품 진행 · E** = 교환 진행/완료 · N01·N03 = 교환 관련).
+ * 옛: `order_status === 'completed'` 만 알아봐서 카페24가 실제로 쓰는 코드(N10…)는 전부 'pending' 처럼 흘러 매출·구매이력이 0이었다.
+ * 결제 뒤 진행 상태(N10~N50)만 'paid' 로 올린다. 진행 중 취소·반품·교환은 매출을 건드리지 않는다(취소 완료·반품 완료만 차감).
+ * ⚠ 웹훅 resource.order_status 에 이 코드가 실린다는 것은 첫 실주문 원문으로 확인할 일이다(미검증) — 모르는 값은 원문 그대로(= 매출 변화 없음).
+ */
+const CAFE24_PAID_STATUS = new Set(['N10', 'N20', 'N21', 'N22', 'N30', 'N40', 'N50']);
+const CAFE24_CANCELLED_STATUS = new Set(['C40', 'C41', 'C42', 'C43', 'C47', 'C48', 'C49']);
+const CAFE24_REFUNDED_STATUS = new Set(['R40', 'R41', 'R42', 'R43']);
+export function mapCafe24OrderStatus(raw: unknown): string {
+  const s = String(raw ?? '').trim();
+  if (!s) return 'pending';
+  const code = s.toUpperCase();
+  if (CAFE24_PAID_STATUS.has(code)) return 'paid';
+  if (CAFE24_CANCELLED_STATUS.has(code)) return 'cancelled';
+  if (CAFE24_REFUNDED_STATUS.has(code)) return 'refunded';
+  if (s.toLowerCase() === 'completed') return 'completed';
+  return s;
+}
+
 // 금액 파싱은 공용 CT normalize.firstPositiveAmount 사용 — "0.00" 문자열 truthy 함정 방어
 // (2026-07-03 gyunoo83 실주문 실측 — 순서: 실결제액 → 주문 총액(배송비 포함) → 상품 금액)
 
@@ -679,7 +703,7 @@ export const cafe24Adapter: IProviderAdapter = {
           email: resource.buyer_email,
           phone: resource.buyer_cellphone || resource.buyer_phone,
           name: resource.buyer_name,
-          status: resource.order_status === 'completed' ? 'completed' : (resource.order_status || 'pending'),
+          status: mapCafe24OrderStatus(resource.order_status),
           totalAmount: firstPositiveAmount(resource.actual_payment_amount, resource.initial_total_amount_due, resource.order_price_amount),
           itemCount: orderItems ? orderItems.length : undefined,
           items: orderItems ? orderItems.map((it: any) => ({

@@ -119,12 +119,15 @@ export default function DmBuilderPage() {
   const [mode, setMode] = useState<'list' | 'edit' | 'build'>('list');
   const [list, setList] = useState<DmListItem[]>([]);
   const [listLoading, setListLoading] = useState(false);
-  // ★ 2026-09-02 딥링크 진입(/dm-builder?id=<DM>&from=planner) — 마케팅 플래너 [DM 완성하기] 1클릭.
-  //   진입 값은 마운트 때 한 번 읽어 두고 URL에서는 지운다(새로고침·뒤로가기가 같은 진입을 되풀이하지 않게).
+  // 딥링크 진입(/dm-builder?id=<DM>) — 진입 값은 마운트 때 한 번 읽어 두고 URL에서는 지운다(새로고침·뒤로가기가 같은 진입을 되풀이하지 않게).
+  // ★ 2026-10-04 플래너 보강 — 옛 `from=planner`(담당자가 발행) 분기 삭제. 플래너 행사의 모바일 DM은 행사 승인 때 발행된다(설계서 §6-5).
+  //   행사 상세 [모바일 DM 고치기]는 `plannerEvent=<행사 id>`를 싣고, 여기 [보내기]는 저장하고 그 행사 확인 화면으로 돌아간다.
   const [searchParams, setSearchParams] = useSearchParams();
   const [entry] = useState(() => ({
     id: String(searchParams.get('id') || '').trim() || null,
-    fromPlanner: searchParams.get('from') === 'planner',
+    plannerReturn: /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(String(searchParams.get('plannerEvent') || ''))
+      ? `/marketing-planner/events/${String(searchParams.get('plannerEvent'))}`
+      : null,
     // ★ 2026-09-27 만들기 개편 — ?other=1(다른 방법 펼침) · onestep(질문 몇 개) · blocks(블록 조립) / ?send=1(편집 진입 뒤 자세한 발송 창) / ?pair=(같은 재료 이메일)
     other: String(searchParams.get('other') || '').trim() || null,
     send: searchParams.get('send') === '1',
@@ -169,7 +172,6 @@ export default function DmBuilderPage() {
   const [listLimit, setListLimit] = useState(24);
   const [detail, setDetail] = useState<DmListItem | null>(null);
   const [makeSendOpen, setMakeSendOpen] = useState(false);
-  const [publishSignal, setPublishSignal] = useState(0);
   const [advSendSignal, setAdvSendSignal] = useState(0);
   const [pairEmailId] = useState<string | null>(entry.pair);
   // ★ D216+ ConfirmModal generic (native confirm 영구 폐기)
@@ -702,7 +704,7 @@ export default function DmBuilderPage() {
 
   if (mode === 'edit') {
     // ★ 2026-09-27 만들기 개편 — 수정 화면 = DmEditScreen(같은 스토어·같은 모달). 발행·발송 흐름은 TopBarWithBack 이 그대로 가진다(바만 숨김).
-    //   [보내기] = 보내기 창(DM 카드 · 이메일 짝) · 플래너에서 온 DM = 옛 발행 흐름(발행 뒤 문자 실림 확인) 그대로.
+    //   [보내기] = 보내기 창(DM 카드 · 이메일 짝) · 플래너 행사 DM = 저장하고 행사 확인 화면으로(발행은 행사 승인 때).
     const st = useDmBuilderStore.getState();
     const heroSub = String(((st.pages.flatMap((pg) => pg.sections).find((x) => x.type === 'hero')?.props) as any)?.sub_copy || '');
     // ★ 2026-09-30 AI 존 대개편: 수정 화면에서 여는 공용 창(발행·확인)도 밝은 짝 — 문맥을 바깥에서 내린다
@@ -712,7 +714,11 @@ export default function DmBuilderPage() {
         <DmEditScreen
           onBack={handleBackRequest}
           onSend={() => {
-            if (entry.fromPlanner) { setPublishSignal((v) => v + 1); return; }
+            if (entry.plannerReturn) {
+              const back = entry.plannerReturn;
+              void (async () => { await useDmBuilderStore.getState().save(); if (!useDmBuilderStore.getState().isDirty) navigate(back); })();
+              return;
+            }
             const g = useDmBuilderStore.getState();
             if (g.isPublished && g.isDirty) {
               setConfirm({
@@ -726,7 +732,11 @@ export default function DmBuilderPage() {
             setMakeSendOpen(true);
           }}
           pair={pairEmailId ? { onSwitch: () => navigate(`/email-campaigns?edit=${encodeURIComponent(pairEmailId)}&pair=${encodeURIComponent(st.dmId || '')}`) } : null}
-          banner={buildBar ? (
+          banner={entry.plannerReturn ? (
+            <div className="rounded-xl border border-violet-200 bg-violet-50 px-4 py-2.5 text-[13px] text-violet-900">
+              마케팅 플래너 행사의 모바일 DM이에요. 고친 뒤 [보내기]를 누르면 저장하고 행사 확인 화면으로 돌아가요. 발행은 행사를 승인할 때 해요.
+            </div>
+          ) : buildBar ? (
             <BuildResultBar
               handoff={buildBar}
               collapsed={isDirtyForBar}
@@ -736,7 +746,7 @@ export default function DmBuilderPage() {
             />
           ) : undefined}
         />
-        <TopBarWithBack hidden publishSignal={publishSignal} sendSignal={advSendSignal} onBack={handleBackRequest} onPublishDone={handleBackToList} fromPlanner={entry.fromPlanner} />
+        <TopBarWithBack hidden sendSignal={advSendSignal} onBack={handleBackRequest} onPublishDone={handleBackToList} />
         <MakeSendModal
           open={makeSendOpen}
           onClose={() => setMakeSendOpen(false)}
@@ -1187,10 +1197,10 @@ export default function DmBuilderPage() {
   );
 }
 
-function TopBarWithBack({ onBack, onPublishDone, fromPlanner = false, hidden = false, publishSignal = 0, sendSignal = 0 }: {
-  onBack: () => void; onPublishDone: () => void; fromPlanner?: boolean;
+function TopBarWithBack({ onBack, onPublishDone, hidden = false, sendSignal = 0 }: {
+  onBack: () => void; onPublishDone: () => void;
   /** ★ 2026-09-27 만들기 개편 — 새 수정 화면이 머리를 가진다. 발행·발송 흐름(모달·검수·플래너 확인)만 여기 남는다 */
-  hidden?: boolean; publishSignal?: number; sendSignal?: number;
+  hidden?: boolean; sendSignal?: number;
 }) {
   const navigate = useNavigate();
   const saveStore = useDmBuilderStore((s) => s.save);
@@ -1216,8 +1226,6 @@ function TopBarWithBack({ onBack, onPublishDone, fromPlanner = false, hidden = f
   }, [validationOverride]);
   const [publishedUrl, setPublishedUrl] = useState<string | null>(null);
   const [sendModalOpen, setSendModalOpen] = useState(false);
-  // ★ 2026-09-02 플래너에서 온 DM — 발행 직후 "문자에 실릴 수 있는가"를 서버에 묻는다(빈 자리가 남았으면 그 사실을 말해야 담당자가 손을 떼지 않는다).
-  const [carryCheck, setCarryCheck] = useState<{ ready: boolean; residue: string | null; checkError: boolean } | null>(null);
 
   // ★ 2026-07-14 발행 DM은 자동저장을 하지 않으므로(임은지 유실 방지), 미저장 편집분이 하드 새로고침/탭 닫기로
   //   조용히 사라지지 않게 브라우저 이탈 가드(beforeunload). 앱 내 뒤로가기 이탈은 기존 확인 모달이 담당.
@@ -1261,15 +1269,6 @@ function TopBarWithBack({ onBack, onPublishDone, fromPlanner = false, hidden = f
         const url = res?.data?.short_url || '';
         if (url) {
           // 발행 완료 → 단축 URL 확인·복사 모달. 목록 이동은 모달 확인 시.
-          if (fromPlanner) {
-            setCarryCheck(null);
-            try {
-              const chk = await api.get(`/marketing-planner/dm/${dmId}/carry-check`);
-              setCarryCheck({ ready: !!chk.data?.ready, residue: chk.data?.residue || null, checkError: !!chk.data?.checkError });
-            } catch {
-              setCarryCheck(null); // 확인 실패 = 플래너 화면이 다시 말해 준다
-            }
-          }
           setPublishedUrl(url);
           return;
         }
@@ -1306,8 +1305,7 @@ function TopBarWithBack({ onBack, onPublishDone, fromPlanner = false, hidden = f
           }
           setConfirmPublish(true);
   };
-  // ★ 2026-09-27 새 수정 화면의 [보내기](플래너 DM) · 보내기 창 [자세히 설정] 신호
-  useEffect(() => { if (publishSignal > 0) void startPublish(); }, [publishSignal]); // eslint-disable-line react-hooks/exhaustive-deps
+  // ★ 2026-09-27 보내기 창 [자세히 설정] 신호
   useEffect(() => { if (sendSignal > 0) setSendModalOpen(true); }, [sendSignal]);
 
   return (
@@ -1334,34 +1332,13 @@ function TopBarWithBack({ onBack, onPublishDone, fromPlanner = false, hidden = f
         open={!!publishedUrl}
         onClose={() => { setPublishedUrl(null); onPublishDone(); }}
         title="발행 완료"
-        // ★ 2026-09-02 플래너에서 온 DM은 플래너가 예정일 문자에 링크로 실어 보낸다 — 여기서 따로 보내면 같은 고객에게 두 통이다.
-        subtitle={fromPlanner
-          ? (carryCheck && !carryCheck.ready
-            ? (carryCheck.residue
-              ? `아직 채워지지 않은 자리가 있습니다: ${carryCheck.residue}. 채운 뒤 다시 발행해야 문자에 실립니다.`
-              : '문자에 실을 수 있는지 확인하지 못했습니다. 플래너 화면에서 상태를 확인해 주세요.')
-            : '마케팅 플래너가 예정일 문자 1통에 이 주소를 링크로 실어 보냅니다. 지금 따로 보내지 않아도 됩니다.')
-          : '아래 단축 URL을 복사해 고객에게 발송하세요.'}
+        subtitle="아래 단축 URL을 복사해 고객에게 발송하세요."
         size="sm"
         footer={
-          fromPlanner ? (
-            carryCheck && !carryCheck.ready && carryCheck.residue ? (
-              <>
-                <ModalButton variant="secondary" onClick={() => { setPublishedUrl(null); navigate('/marketing-planner'); }}>플래너로 돌아가기</ModalButton>
-                <ModalButton variant="primary" onClick={() => { setPublishedUrl(null); }}>계속 채우기</ModalButton>
-              </>
-            ) : (
-              <>
-                <ModalButton variant="secondary" onClick={() => { setPublishedUrl(null); onPublishDone(); }}>확인</ModalButton>
-                <ModalButton variant="primary" onClick={() => { setPublishedUrl(null); navigate('/marketing-planner'); }}>플래너로 돌아가기</ModalButton>
-              </>
-            )
-          ) : (
-            <>
-              <ModalButton variant="secondary" onClick={() => { setPublishedUrl(null); onPublishDone(); }}>확인</ModalButton>
-              <ModalButton variant="primary" onClick={() => { setPublishedUrl(null); setSendModalOpen(true); }}>타겟 고객에게 발송</ModalButton>
-            </>
-          )
+          <>
+            <ModalButton variant="secondary" onClick={() => { setPublishedUrl(null); onPublishDone(); }}>확인</ModalButton>
+            <ModalButton variant="primary" onClick={() => { setPublishedUrl(null); setSendModalOpen(true); }}>타겟 고객에게 발송</ModalButton>
+          </>
         }
       >
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, background: '#f3f4f6', border: '1px solid #e5e7eb', borderRadius: 10, padding: '10px 12px' }}>

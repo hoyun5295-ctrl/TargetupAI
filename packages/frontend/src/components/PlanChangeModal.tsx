@@ -45,12 +45,16 @@ const PLAN_FEATURES: Record<string, string[]> = {
 const featuresOf = (code: string): string[] => PLAN_FEATURES[code] || [];
 
 export default function PlanChangeModal({
-  fromPlan, toPlan, toStatus, onClose,
+  fromPlan, toPlan, toStatus, onClose, lock, onGoPricing,
 }: {
   fromPlan: string;
   toPlan: string;
   toStatus?: string;
   onClose: () => void;
+  /** ★ 2026-10-04 선불 이용 기간이 끝나 잠긴 경우 — "미가입으로 변경"이 아니라 잠김과 다시 여는 길을 알린다 */
+  lock?: { planName: string; reason: 'insufficient' | 'auto_off' | null } | null;
+  /** 잠김 안내의 [1개월 연장하러 가기] */
+  onGoPricing?: () => void;
 }) {
   useEffect(() => {
     const h = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
@@ -77,6 +81,45 @@ export default function PlanChangeModal({
     : featuresOf(fromPlan).filter((f) => !featuresOf(toPlan).includes(f));
 
   const openManual = () => window.open("/manual/manual.html", "_blank", "noopener");
+
+  if (lock) {
+    return (
+      <div className="fixed inset-0 z-[9997] flex items-center justify-center p-4 bg-slate-950/70 backdrop-blur-sm" role="dialog" aria-modal="true">
+        <div className="relative w-full max-w-[460px] overflow-hidden rounded-2xl border border-white/10 bg-slate-900 shadow-2xl">
+          <button type="button" onClick={onClose} aria-label="닫기"
+            className="absolute right-3 top-3 grid h-8 w-8 place-items-center rounded-full text-white/45 transition hover:bg-white/10 hover:text-white">
+            <X className="h-4 w-4" />
+          </button>
+          <div className="flex flex-col items-center gap-4 px-7 pb-6 pt-9 text-center">
+            <div className="grid h-14 w-14 place-items-center rounded-2xl bg-rose-500/15">
+              <AlertTriangle className="h-7 w-7 text-rose-300" />
+            </div>
+            <div>
+              <h2 className="text-xl font-bold tracking-[-0.02em] text-white">{lock.planName} 요금제가 잠겼습니다</h2>
+              <p className="mt-1.5 text-[14px] text-white/60 leading-relaxed">
+                {lock.reason === "auto_off"
+                  ? "자동 연장이 꺼져 있어 이용 기간이 끝났습니다."
+                  : "충전 잔액이 부족해 자동 연장 결제를 하지 못했습니다."}
+              </p>
+            </div>
+            <p className="w-full rounded-xl border border-white/10 bg-white/[0.04] p-3 text-left text-[13px] leading-relaxed text-white/75">
+              문자 직접 발송, 수신거부, 발송결과는 그대로 쓸 수 있습니다. 충전한 뒤 요금제 페이지에서 1개월 연장을 누르면 바로 다시 열립니다.
+            </p>
+            <div className="mt-1 flex w-full flex-col gap-2">
+              <button type="button" onClick={() => { onClose(); onGoPricing?.(); }}
+                className="inline-flex w-full items-center justify-center rounded-xl bg-gradient-to-r from-rose-500 to-red-500 px-6 py-3 text-[15px] font-semibold text-white transition hover:from-rose-400 hover:to-red-400">
+                1개월 연장하러 가기
+              </button>
+              <button type="button" onClick={onClose}
+                className="inline-flex w-full items-center justify-center rounded-xl border border-white/15 bg-white/[0.04] px-6 py-2.5 text-[13px] font-medium text-white/70 transition hover:bg-white/10 hover:text-white">
+                닫기
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div

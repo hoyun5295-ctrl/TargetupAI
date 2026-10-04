@@ -35,9 +35,6 @@ export class ExcelCsvConnector implements IDbConnector {
   private onChangeCallback: FileChangeCallback | null = null;
   private lastFileHash: string | null = null;
 
-  // 증분 비교용 캐시 (키 → 행 해시)
-  private previousRowHashes: Map<string, string> = new Map();
-
   constructor(config: DbConnectionConfig) {
     this.config = config;
     this.dbType = config.type as 'excel' | 'csv';
@@ -77,7 +74,6 @@ export class ExcelCsvConnector implements IDbConnector {
 
   async disconnect(): Promise<void> {
     this.stopWatching();
-    this.previousRowHashes.clear();
     this.connected = false;
     logger.info('파일 커넥터 종료');
   }
@@ -131,40 +127,17 @@ export class ExcelCsvConnector implements IDbConnector {
     // 페이지네이션
     const sliced = allRows.slice(offset, offset + limit);
 
-    // 캐시 업데이트 (전체 데이터 기준)
-    if (offset === 0) {
-      this.cacheRows(allRows);
-    }
-
     logger.debug(`파일 fetchAll: ${sliced.length}건`, { tableName, offset });
     return sliced;
   }
 
-  async fetchIncremental(
-    tableName: string,
-    _timestampColumn: string,
-    _since: string,
-    limit: number,
-    offset: number,
-  ): Promise<RawRow[]> {
-    this.ensureConnected();
-
-    // 첫 호출 시 (캐시 없음) → 빈 배열 반환 (전체 동기화가 먼저 실행됨)
-    if (this.previousRowHashes.size === 0) {
-      logger.debug('파일 증분: 캐시 없음 — 빈 결과 반환');
-      return [];
-    }
-
-    const allRows = this.readFile(tableName);
-    const changed = this.detectChanges(allRows);
-
-    // 캐시 업데이트
-    this.cacheRows(allRows);
-
-    // 페이지네이션
-    const sliced = changed.slice(offset, offset + limit);
-    logger.debug(`파일 fetchIncremental: ${sliced.length}건 변경`, { tableName });
-    return sliced;
+  /**
+   * ★ 1.7.2 파일 원본은 증분이 없다 — 엔진이 고객은 매 회차 전체로, 구매는 키가 있을 때만 전체로 처리한다(engine.isFileSource).
+   * 옛 해시 비교는 기준이 메모리에만 있어 재시작하면 영영 0건이었고, 첫 페이지에서 기준을 바꿔 둘째 페이지부터 0건이었다.
+   * 인터페이스 자리만 남긴다 — 불리면 엔진 분기가 깨졌다는 뜻이므로 조용히 0건을 주지 않고 던진다.
+   */
+  async fetchIncremental(): Promise<RawRow[]> {
+    throw new Error('파일 원본은 증분 조회를 지원하지 않습니다(엔진이 전체 동기화로 처리해야 합니다).');
   }
 
   async getRowCount(tableName: string): Promise<number> {
@@ -269,47 +242,6 @@ export class ExcelCsvConnector implements IDbConnector {
   }
 
   // ─── 변경 감지 ────────────────────────────────────────
-
-  private cacheRows(rows: RawRow[]): void {
-    this.previousRowHashes.clear();
-    for (const row of rows) {
-      const key = this.getRowKey(row);
-      this.previousRowHashes.set(key, this.hashRow(row));
-    }
-  }
-
-  private detectChanges(currentRows: RawRow[]): RawRow[] {
-    const changed: RawRow[] = [];
-
-    for (const row of currentRows) {
-      const key = this.getRowKey(row);
-      const prevHash = this.previousRowHashes.get(key);
-      const currHash = this.hashRow(row);
-
-      if (!prevHash || prevHash !== currHash) {
-        changed.push(row);
-      }
-    }
-
-    return changed;
-  }
-
-  /**
-   * 행의 고유 키 — phone 컬럼 우선, 없으면 첫 3개 컬럼 조합
-   */
-  private getRowKey(row: RawRow): string {
-    const phoneKeys = ['phone', 'PHONE', 'HP', 'TEL', 'CUST_HP', '전화번호', '휴대폰', 'customer_phone'];
-    for (const pk of phoneKeys) {
-      if (row[pk]) return String(row[pk]).replace(/[^0-9]/g, '');
-    }
-    const keys = Object.keys(row).slice(0, 3);
-    return keys.map((k) => String(row[k] ?? '')).join('|');
-  }
-
-  private hashRow(row: RawRow): string {
-    const content = JSON.stringify(row, Object.keys(row).sort());
-    return crypto.createHash('md5').update(content).digest('hex');
-  }
 
   private computeFileHash(): string {
     const data = fs.readFileSync(this.getFilePath());

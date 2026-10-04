@@ -186,9 +186,11 @@ describe('보내기 창 발행비 견적 배선', () => {
 // ★ 2026-09-27 Codex 3R — [링크만 받기]는 화면이 확인한 금액(expected_fee)을 싣고, 서버는 지금 금액이 더 크면 차감 전에 402 로 멈춘다
 describe('링크 발행 승인 금액 대조', () => {
   it('서버 /publish: expected_fee 대조가 checkCredit·publishDm·차감보다 먼저 · 크레딧제 조회는 strict · 대조 결과(chargeNow)를 차감까지 그대로', () => {
+    // ★ 2026-10-04 발행 본문은 코어 CT(dm-publish-core) — 라우트는 expected_fee를 그대로 넘긴다.
     const dm = readFileSync(resolve(__dirname, '../../routes/dm.ts'), 'utf-8');
-    const body = dm.slice(dm.indexOf("const { source: costSource, cost: pubCost } = await dmPublishFeeSourceOf(companyId, req.params.id);"));
-    const route = body.slice(0, body.indexOf("return res.status(500).json({ error: '서버 오류' });"));
+    expect(dm).toContain("expectedFee: typeof req.body?.expected_fee === 'number' ? req.body.expected_fee : undefined,");
+    const core = readFileSync(resolve(__dirname, '../dm/dm-publish-core.ts'), 'utf-8');
+    const route = core.slice(core.indexOf('const { source: costSource, cost: pubCost } = await dmPublishFeeSourceOf(companyId, dmId);'));
     const iOn = route.indexOf('const creditOn = await isCreditEnabledStrict(companyId);');
     const iGuard = route.indexOf('if (creditOn && pubCost > expectedFee) {');
     expect(iOn).toBeGreaterThan(0);
@@ -196,9 +198,9 @@ describe('링크 발행 승인 금액 대조', () => {
     expect(route.slice(iGuard, iGuard + 300)).toContain("code: 'PUBLISH_FEE_REQUIRED'");
     expect(route).toContain('chargeNow = creditOn;');
     expect(iGuard).toBeLessThan(route.indexOf('if (chargeNow) await checkCredit(companyId, pubCost);'));
-    expect(iGuard).toBeLessThan(route.indexOf('await publishDm(req.params.id, companyId)'));
+    expect(iGuard).toBeLessThan(route.indexOf('await publishDm(dmId, companyId)'));
     // 차감은 대조 때 정한 chargeNow 로만(firstPublish 로 다시 정하지 않는다)
-    expect(route).toContain('if (chargeNow) {\n      await deductCreditSafe({');
+    expect(route).toContain('if (chargeNow) {\n    await deductCreditSafe({');
     expect(route).not.toMatch(/if \(firstPublish\) \{\s*await deductCreditSafe/);
   });
   it('보내기 창: 링크 발행에 expected_fee · 402 = 확인 창 · 성공 뒤 서버 견적 다시 받기(임의 required=false 0)', () => {

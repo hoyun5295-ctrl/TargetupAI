@@ -111,6 +111,8 @@ function createHjlGlobal(): HjlGlobal {
           email: id.email,
           phone: id.phone,
           name: id.name,
+          // ★ 2026-10-04 서버는 회원 토큰이 이 회원과 맞을 때만 고객에 잇는다(없으면 익명 적재)
+          member_token: id.memberToken,
           trust_level: 'declared',
         });
       }
@@ -125,10 +127,14 @@ function createHjlGlobal(): HjlGlobal {
             email: result.email,
             phone: result.phone,
             name: result.name,
+            member_token: result.memberToken,
             trust_level: 'declared',
           });
           // 늦은 로그인(SPA) — 새 externalId로 인앱 재조회 (과다 호출은 5분 캐시가 흡수)
           inapp.init({ ...inappBaseInput(), externalId: result.externalId, memberToken: result.memberToken }).catch(() => {});
+        } else {
+          // ★ 2026-10-04 로그아웃(SPA) — 이 페이지의 회원 증명을 지운다(이후 행동은 익명)
+          transport.clearMember();
         }
       });
 

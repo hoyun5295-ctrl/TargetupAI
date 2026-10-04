@@ -22,6 +22,14 @@ export const AGENT_INTERVAL_DEFAULTS = {
   purchasesMin: 360,
 } as const;
 
+/**
+ * ★ 2026-10-04 에이전트 스케줄러가 정확히 지킬 수 있는 동기화 주기(분).
+ * 에이전트는 주기를 cron 식으로 바꾼다(`*\/m * * * *` · `0 *\/h * * *`). 60의 약수(분)와 24의 약수(시간)만
+ * 같은 간격으로 돈다 — 45분은 매시 0·45분, 90분은 매시 정각, 5시간은 0·5·10·15·20시(자정 앞 4시간)로 어긋난다.
+ * ⛔ 에이전트 `scheduler/index.ts SCHEDULABLE_INTERVALS_MIN` 과 같은 값이어야 한다(패키지가 달라 미러).
+ */
+export const SCHEDULABLE_INTERVALS_MIN: readonly number[] = [5, 6, 10, 12, 15, 20, 30, 60, 120, 180, 240, 360, 480, 720, 1440];
+
 export interface AgentIntervals {
   heartbeatMin: number;
   customersMin: number;

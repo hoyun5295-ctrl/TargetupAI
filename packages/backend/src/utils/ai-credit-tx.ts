@@ -139,22 +139,26 @@ export async function applyResetIfNeeded(client: any, companyId: string, row: an
  * 순서: BEGIN → loadCreditRow(FOR UPDATE, 직렬화) → idempotent 재확인 → reset → split → UPDATE → INSERT → COMMIT.
  * cost 0·companyId 없음은 호출측(deductCredit)에서 거른다.
  */
-export async function _deductWithClient(client: any, opts: DeductOpts, now: Date): Promise<DeductResult> {
+export async function _deductWithClient(client: any, opts: DeductOpts, now: Date, tx: { manageTx?: boolean } = {}): Promise<DeductResult> {
   const empty: DeductResult = { deducted: false, fromBase: 0, fromPurchased: 0, baseAfter: 0, purchasedAfter: 0 };
   const idemKey = opts.idempotencyKey ?? buildIdempotencyKey(opts.source, opts.aiCallLogId);
+  // ★ 2026-10-04 manageTx=false = 호출부 트랜잭션 안에서 차감한다(BEGIN·COMMIT·ROLLBACK을 호출부가 소유 · 환불의 manageTx와 같은 축).
+  //   쓰는 자리 = 플래너 행사 승인(대행료가 승인 커밋과 함께 확정 · 승인이 롤백되면 차감도 없다). 기본값은 종전 동작 그대로.
+  const own = tx.manageTx !== false;
+  const rollback = async () => { if (own) await client.query('ROLLBACK'); };
 
-  await client.query('BEGIN');
+  if (own) await client.query('BEGIN');
 
   const locked = await loadCreditRow(client, opts.companyId, true);
   if (!locked) {
-    await client.query('ROLLBACK');
+    await rollback();
     return { ...empty, skipReason: 'no_credit_row' };
   }
 
   // ★ D227+ 크레딧제 미적용(요금제 크레딧 미설정 + 구매분 0) → 차감 skip(차단 X).
   //   plans.ai_credits_per_month에 값을 넣는 순간 자동으로 차감이 활성화된다.
   if (locked.plan_credits == null && (Number(locked.purchased) || 0) === 0) {
-    await client.query('ROLLBACK');
+    await rollback();
     return { ...empty, skipReason: 'not_applicable' };
   }
 
@@ -165,7 +169,7 @@ export async function _deductWithClient(client: any, opts: DeductOpts, now: Date
       [idemKey]
     );
     if (dup.rows.length > 0) {
-      await client.query('ROLLBACK');
+      await rollback();
       // 이미 그 키로 차감됐다 = 돈은 빠졌다. 실패와 섞으면 호출부가 재시도·보류로 오판한다.
       return { ...empty, skipReason: 'duplicate' };
     }
@@ -179,7 +183,7 @@ export async function _deductWithClient(client: any, opts: DeductOpts, now: Date
   const overageAllowed = creditOverageAllowance(row, opts.source);
   const { fromBase, fromPurchased, shortfall } = splitDeduction(base, purchased, opts.cost);
   if ((base + purchased) - opts.cost < -overageAllowed) {
-    await client.query('ROLLBACK');
+    await rollback();
     throw new InsufficientCreditError(opts.cost, base + purchased);
   }
 
@@ -206,7 +210,7 @@ export async function _deductWithClient(client: any, opts: DeductOpts, now: Date
     ]
   );
 
-  await client.query('COMMIT');
+  if (own) await client.query('COMMIT');
   return { deducted: true, fromBase, fromPurchased, baseAfter, purchasedAfter };
 }
 

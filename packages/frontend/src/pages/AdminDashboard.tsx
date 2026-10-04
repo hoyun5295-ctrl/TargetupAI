@@ -15,6 +15,7 @@ import LoginBlocksManagement from '../components/admin/LoginBlocksManagement'; /
 import AgentChargePanel from '../components/AgentChargePanel'; // ★ 2026-07-24 §5-3 에이전트 충전 실행 (게이트웨이 지갑)
 import AgentDeployWizard from '../components/admin/AgentDeployWizard'; // 싱크에이전트 OS별 배포 위저드
 import DiagnosisAdminPanel from '../components/admin/DiagnosisAdminPanel'; // ★ 2026-08-16 신규마케팅진단(ceo 전용)
+import PlanTermBox, { PlanTermLockNote } from '../components/admin/PlanTermBox'; // ★ 2026-10-04 선불 요금제 이용 기간
 import HelpQuestionsTab from '../components/admin/HelpQuestionsTab'; // ★ 2026-08-24 도움말 질문 이력(ceo 전용)
 import PrecheckUsageTab from '../components/admin/PrecheckUsageTab'; // ★ 2026-09-26 스팸 검사·맞춤법 사용 현황(ceo 전용)
 import SalesOutreachModal from '../components/admin/SalesOutreachModal'; // ★ 2026-08-24 AI 영업 아웃리치(ceo 전용 · 모달)
@@ -3568,7 +3569,8 @@ const handleApproveRequest = async (id: string) => {
   setModal({
       type: 'confirm',
       title: '플랜 변경 승인',
-      message: '이 신청을 승인하시겠습니까?\n승인 시 즉시 플랜이 변경됩니다.',
+      // ★ 2026-10-04 선불 이용 기간 회사는 돈이 함께 움직인다(올림 = 남은 기간 차액 즉시 · 내림 = 만료 다음 날부터 · 잠김 = 1개월 결제로 다시 열기)
+      message: '이 신청을 승인하시겠습니까?\n승인 시 즉시 플랜이 변경됩니다.\n선불 이용 기간 회사: 올림은 남은 기간 차액을 충전 잔액에서 바로 빼고, 내림은 만료 다음 날부터 적용합니다.',
       onConfirm: async () => {
         try {
           const token = localStorage.getItem('token');
@@ -3582,8 +3584,10 @@ const handleApproveRequest = async (id: string) => {
           });
           
           if (res.ok) {
+            const okData = await res.json().catch(() => ({}));
             closeModal();
-            setModal({ type: 'alert', title: '승인 완료', message: '플랜이 변경되었습니다.', variant: 'success' });
+            // ★ 2026-10-04 선불 이용 기간 처리 결과(차감액·적용일)는 서버 문장을 그대로 보인다
+            setModal({ type: 'alert', title: '승인 완료', message: okData?.plan_term ? okData.message : '플랜이 변경되었습니다.', variant: 'success' });
             loadPlanRequests();
             loadData();
           } else {
@@ -7062,7 +7066,10 @@ const handleApproveRequest = async (id: string) => {
                           admin: { label: '관리자', color: 'bg-gray-100 text-gray-700' },
                           system: { label: '시스템', color: 'bg-orange-50 text-orange-700' },
                         };
-                        const tc = typeConfig[tx.type] || { label: tx.type, color: 'bg-gray-100 text-gray-600', sign: '' };
+                        // ★ 2026-10-04 요금제 이용료(선불 이용 기간)는 같은 차감 type이라 참조 유형으로 가른다
+                        const tc = (tx.type === 'deduct' && (tx as any).reference_type === 'plan_term')
+                          ? { label: '요금제 이용료', color: 'bg-red-100 text-red-800', sign: '-' }
+                          : (typeConfig[tx.type] || { label: tx.type, color: 'bg-gray-100 text-gray-600', sign: '' });
                         const mc = methodConfig[tx.payment_method] || { label: tx.payment_method || '-', color: 'bg-gray-50 text-gray-600' };
                         const isPlus = ['admin_charge', 'charge', 'deposit_charge', 'refund'].includes(tx.type);
 
@@ -8905,6 +8912,8 @@ const handleApproveRequest = async (id: string) => {
                         <option key={plan.id} value={plan.id}>{formatPlanOptionLabel(plan.plan_name, plan.monthly_price)}</option>
                       ))}
                     </select>
+                    {/* ★ 2026-10-04 선불 이용 기간 중 회사 = 요금제 직접 변경 불가(서버 409) — 미리 알린다 */}
+                    {editCompany.billingType === 'prepaid' && <PlanTermLockNote companyId={editCompany.id} />}
                   </div>
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">상태 *</label>
@@ -9712,7 +9721,8 @@ const handleApproveRequest = async (id: string) => {
                                 <div key={tx.id} className="flex items-center justify-between text-[11px] py-1 px-2 bg-white rounded border">
                                   <div className="flex-1">
                                     <span className={`font-medium ${typeColors[tx.type] || 'text-gray-600'}`}>
-                                      {typeLabels[tx.type] || tx.type}
+                                      {/* ★ 2026-10-04 요금제 이용료(선불 이용 기간)는 같은 차감 type이라 참조 유형으로 가른다 */}
+                                      {tx.type === 'deduct' && tx.reference_type === 'plan_term' ? '요금제 이용료' : (typeLabels[tx.type] || tx.type)}
                                     </span>
                                     <span className="text-gray-400 ml-2">{tx.description?.slice(0, 30) || ''}</span>
                                   </div>
@@ -9730,6 +9740,9 @@ const handleApproveRequest = async (id: string) => {
                       </div>
                     </div>
                   )}
+
+                  {/* ★ 2026-10-04 선불 요금제 이용 기간(docs/2026-10-04-prepaid-plan-term-design.md §7) — 잔액 조정과 같은 화면에서 */}
+                  {editCompany.billingType === 'prepaid' && <PlanTermBox companyId={editCompany.id} />}
 
                   {/* ★ 2026-07-26 단가 입력 = 부가세 별도(공급가). 시스템이 건별 VAT를 자동 합산한다.
                       배경: 단가가 부가세 포함으로 입력돼 있었는데 청구가 10%를 또 더해 과청구가 났다.

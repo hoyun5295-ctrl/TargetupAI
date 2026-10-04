@@ -116,12 +116,34 @@ describe('parsePlannerEventInput — 기입 검증', () => {
     const r = parsePlannerEventInput({
       ...base,
       touchpoints: [
-        { channel: 'email', timing: { anchor: 'before_start', offsetDays: 7 } },
-        { channel: 'email', timing: { anchor: 'before_start', offsetDays: 1 } },
+        { channel: 'sms', timing: { anchor: 'before_start', offsetDays: 7 } },
+        { channel: 'sms', timing: { anchor: 'before_start', offsetDays: 1 } },
       ],
     });
     expect(r.ok).toBe(true);
     if (r.ok) expect(r.value.touchpoints).toHaveLength(2);
+  });
+
+  // ★ 2026-10-04 보강 — 메일은 재료 1벌 = 캠페인 1개라 행사당 한 번(같은 캠페인을 두 번 보내면 두 번째는 0통이다).
+  it('메일은 한 행사에 한 번만 — 두 시점이면 거부', () => {
+    const r = parsePlannerEventInput({
+      ...base,
+      touchpoints: [
+        { channel: 'email', timing: { anchor: 'before_start', offsetDays: 7 } },
+        { channel: 'email', timing: { anchor: 'before_start', offsetDays: 1 } },
+      ],
+    });
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.error).toContain('메일은 한 행사에 한 번');
+  });
+
+  // ★ 2026-10-04 보강(설계서 Q6) — 1차 = 문자·모바일 DM·메일. 인앱·알림톡·참여자 축은 2차.
+  it('인앱·알림톡은 거부하고 참여자 축은 전체로 확정한다', () => {
+    expect(parsePlannerEventInput({ ...base, touchpoints: [{ channel: 'inapp', timing: { anchor: 'start' } }] })).toMatchObject({ ok: false });
+    expect(parsePlannerEventInput({ ...base, touchpoints: [{ channel: 'alimtalk', timing: { anchor: 'start' } }] })).toMatchObject({ ok: false });
+    const r = parsePlannerEventInput({ ...base, touchpoints: [{ channel: 'sms', timing: { anchor: 'start', audience: 'participants' } }] });
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.value.touchpoints[0].timing.audience).toBeUndefined();
   });
 
   it('before_start의 offsetDays는 1~30만', () => {

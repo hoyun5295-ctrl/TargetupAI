@@ -6,7 +6,7 @@
  *   허브 = 목업 1안(남색 명령 띠 + 명령 카드) · 편집기 = EditShell(같은 남색 머리) · 공용 창 = 여는 쪽 문맥으로 밝은 짝.
  *
  * 이 파일이 잠그는 것(파일 지정 계약 + 값 대조 · 오탐 0인 규칙만)
- *   1. 존 화면 24개는 ZoneFrame(또는 편집기 머리 ZoneHeader)을 쓰고, 옛 머리·바닥(OUI_HEADER · OperatorAura · 짙은 로비 그라데이션)이 0회다.
+ *   1. 존 화면 25개(★ 2026-10-04 플래너 행사 상세 추가)는 ZoneFrame(또는 편집기 머리 ZoneHeader)을 쓰고, 옛 머리·바닥(OUI_HEADER · OperatorAura · 짙은 로비 그라데이션)이 0회다.
  *   2. 허브는 남색 띠 + 밝은 문맥이고 옛 보라 지면이 0회다.
  *   3. 타일 12장은 아이콘·그라데이션이 서로 겹치지 않는다(D9) · 한 줄 입력 카드는 자동화 7메뉴 고정 · 허브 행 이름표가 12장을 한 번씩 덮는다.
  *   4. 값 계약: 작업대는 밝다 · 톤 문맥의 기본값은 'dark'(AI 존 밖 공용 창 회귀 0).
@@ -40,8 +40,8 @@ const FORBIDDEN = [
 ];
 
 describe('AI 존 표면 불변식', () => {
-  it('존 화면 24개 = 같은 틀(ZoneFrame · 편집기 머리 ZoneHeader) + 옛 머리·바닥 0회', () => {
-    expect(ZONE_PAGES.length).toBe(24);
+  it('존 화면 25개 = 같은 틀(ZoneFrame · 편집기 머리 ZoneHeader) + 옛 머리·바닥 0회', () => {
+    expect(ZONE_PAGES.length).toBe(25);
     const offenders: string[] = [];
     for (const rel of ZONE_PAGES) {
       const src = code(rel);

@@ -18,7 +18,6 @@
 import cron from 'node-cron';
 import type { SyncEngine } from '../sync/engine';
 import type { HeartbeatManager } from '../heartbeat';
-import type { QueueManager } from '../queue';
 import type { ApiClient } from '../api/client';
 import type { SyncStateManager } from '../sync/state';
 import { getLogger } from '../logger';
@@ -40,7 +39,6 @@ export interface SchedulerConfig {
 export class Scheduler {
   private engine: SyncEngine;
   private heartbeat: HeartbeatManager | null;
-  private queue: QueueManager;
   private apiClient: ApiClient | null;
   private stateManager: SyncStateManager | null;
   private config: SchedulerConfig;
@@ -60,19 +58,16 @@ export class Scheduler {
   /** 동시 실행 방지 플래그 */
   private customerSyncing = false;
   private purchaseSyncing = false;
-  private queueProcessing = false;
 
   constructor(
     engine: SyncEngine,
     heartbeat: HeartbeatManager | null,
-    queue: QueueManager,
     apiClient: ApiClient | null,
     config: SchedulerConfig,
     stateManager?: SyncStateManager,
   ) {
     this.engine = engine;
     this.heartbeat = heartbeat;
-    this.queue = queue;
     this.apiClient = apiClient;
     this.config = config;
     this.stateManager = stateManager || null;
@@ -84,8 +79,6 @@ export class Scheduler {
   start(): void {
     if (this.running) return;
     this.running = true;
-
-    const isTestMode = process.env.RETRY_PRESET === 'test';
 
     // 고객 동기화
     const custCron = this.minutesToCron(this.config.customerIntervalMin);
@@ -155,23 +148,8 @@ export class Scheduler {
 
     // ※ v1.5.0: 원격 설정 폴링 제거 — 싱크 응답 config로 대체 (ApiClient에서 자동 갱신)
 
-    // 큐 재전송 (프로덕션: 매 30분, 테스트: 매 1분 — v1.5.0 설계서 §7-1)
-    const queueCron = isTestMode ? '*/1 * * * *' : '*/30 * * * *';
-    const queueIntervalLabel = isTestMode ? '1분 (테스트)' : '30분';
-    this.tasks.push(
-      cron.schedule(queueCron, async () => {
-        await this.processQueue();
-      }),
-    );
-    logger.info(`큐 재전송 스케줄 등록: 매 ${queueIntervalLabel}`);
+    // ★ 1.7.2 로컬 큐 재전송·정리 cron 폐지 — 전송 실패는 커서·기준 시각을 멈추는 것으로 다음 회차가 다시 읽는다.
 
-    // 큐 정리 (매일 자정)
-    this.tasks.push(
-      cron.schedule('0 0 * * *', () => {
-        this.queue.cleanup();
-      }),
-    );
-    logger.info('큐 정리 스케줄 등록: 매일 00:00');
 
     logger.info('✅ 스케줄러 시작 완료');
   }
@@ -424,62 +402,6 @@ export class Scheduler {
     }
   }
 
-  /**
-   * 큐에 쌓인 항목 재전송
-   */
-  private async processQueue(): Promise<void> {
-    // ★ D131 후속: paused면 큐 재전송도 스킵 (데이터 저장은 큐에 계속 쌓이지만 송신 중단)
-    if (this.paused) {
-      logger.debug('⏸️  일시정지 상태 — 큐 재전송 스킵');
-      return;
-    }
-    if (this.queueProcessing || !this.apiClient) return;
-    this.queueProcessing = true;
-
-    try {
-      const items = this.queue.dequeueAll();
-      if (items.length === 0) return;
-
-      logger.info(`📤 큐 재전송 시작: ${items.length}건`);
-
-      let successCount = 0;
-      let failCount = 0;
-
-      for (const item of items) {
-        try {
-          const data = JSON.parse(item.payload);
-
-          if (item.type === 'customers') {
-            await this.apiClient.syncCustomers({
-              customers: data,
-              mode: 'incremental',
-            });
-          } else {
-            await this.apiClient.syncPurchases({
-              purchases: data,
-              mode: 'incremental',
-            });
-          }
-
-          this.queue.remove(item.id);
-          successCount++;
-          logger.info(`✅ 큐 항목 전송 성공 (id: ${item.id}, type: ${item.type})`);
-        } catch (error) {
-          this.queue.incrementRetry(item.id);
-          failCount++;
-          logger.warn(`❌ 큐 항목 전송 실패 (id: ${item.id}, retry: ${item.retries + 1})`, {
-            error: error instanceof Error ? error.message : String(error),
-          });
-        }
-      }
-
-      // 결과 요약
-      logger.info(`📤 큐 재전송 완료: 성공 ${successCount}건, 실패 ${failCount}건, 잔여 ${this.queue.getCount()}건`);
-    } finally {
-      this.queueProcessing = false;
-    }
-  }
-
   // ─── heartbeat 부스트 (v1.6.1 — P1-6) ──────────────────
   //
   // 서버가 heartbeat 응답에 boost 지시를 동봉하면(대기 명령·미수신 ACK 존재 시)
@@ -558,11 +480,30 @@ export class Scheduler {
   }
 
   // 분 단위를 cron 표현식으로 변환
+  // ★ 1.7.2 cron 이 같은 간격으로 지킬 수 있는 값으로 맞춘다(서버 `utils/sync-intervals.ts SCHEDULABLE_INTERVALS_MIN` 미러).
+  //   옛: 45분 = 매시 0·45분, 90분 = `*/90` = 매시 정각, 5시간 = 0·5·10·15·20시로 돌았다(설정 주기 ≠ 실제 주기).
   private minutesToCron(minutes: number): string {
-    if (minutes >= 60 && minutes % 60 === 0) {
-      const hours = minutes / 60;
+    const snapped = snapToSchedulableInterval(minutes);
+    if (snapped !== minutes) {
+      logger.warn(`동기화 주기 ${minutes}분은 같은 간격으로 돌 수 없어 ${snapped}분으로 맞춥니다`);
+    }
+    if (snapped >= 60) {
+      const hours = snapped / 60;
       return hours === 1 ? '0 * * * *' : `0 */${hours} * * *`;
     }
-    return `*/${minutes} * * * *`;
+    return `*/${snapped} * * * *`;
   }
+}
+
+/** 60의 약수(분) · 24의 약수(시간)만 cron 이 같은 간격으로 돈다. ⛔ 서버 sync-intervals.ts 와 같은 값 */
+export const SCHEDULABLE_INTERVALS_MIN: readonly number[] = [5, 6, 10, 12, 15, 20, 30, 60, 120, 180, 240, 360, 480, 720, 1440];
+
+/** 가장 가까운 값(같은 거리면 더 긴 쪽 = 원본 DB 부하를 늘리지 않는 방향) */
+export function snapToSchedulableInterval(minutes: number): number {
+  const m = Number.isFinite(minutes) && minutes > 0 ? minutes : 60;
+  let best = SCHEDULABLE_INTERVALS_MIN[0];
+  for (const v of SCHEDULABLE_INTERVALS_MIN) {
+    if (Math.abs(v - m) <= Math.abs(best - m)) best = v;
+  }
+  return best;
 }

@@ -334,6 +334,42 @@ export async function identifyCustomer(
   };
 }
 
+/**
+ * ★ 2026-10-04 몰 회원 탈퇴 = 그 회원의 광고 수신 철회(고객 행 sms_opt_in = false · 싱크·자사몰 전수점검 I2 · 결정 ③).
+ * 0922 몰 동의 설계와 같은 방향 — 철회는 고객 행에도 내린다(관리자·여정·자동발송이 고객 행을 읽는다).
+ * ⛔ 영구 수신거부 표(unsubscribes)로 옮기지 않는다(D93 · unsubscribe-helper brandRefusalCopyCond 주석 — 몰 동의로 보내는 계정이
+ *   다시 동의해도 풀리지 않게 된다). 연결된 고객이 없으면 0(모르는 회원을 만들지 않는다).
+ */
+export async function withdrawMemberConsent(companyId: string, source: string, externalId: string): Promise<number> {
+  if (!source || !externalId) return 0;
+  const r = await query(
+    `UPDATE customers SET sms_opt_in = false, updated_at = NOW()
+      WHERE company_id = $1::uuid
+        AND id IN (
+          SELECT customer_id FROM cdp_identity_links
+           WHERE company_id = $1::uuid AND source = $2 AND external_id = $3 AND customer_id IS NOT NULL
+        )
+        AND (sms_opt_in IS NULL OR sms_opt_in = true)`,
+    [companyId, source, externalId]
+  );
+  return r.rowCount || 0;
+}
+
+/**
+ * ★ 2026-10-04 이미 연결된 회원의 고객 id 만 찾는다(없으면 null) — 고객 행을 만들거나 고치지 않는다.
+ * 호출부가 회원 증명(토큰)을 검증한 뒤에만 부른다(cdp-events ingestBrowserEvents ②).
+ */
+export async function findLinkedCustomerId(companyId: string, source: string, externalId: string): Promise<string | null> {
+  if (!source || !externalId) return null;
+  const r = await query(
+    `SELECT customer_id FROM cdp_identity_links
+      WHERE company_id = $1::uuid AND source = $2 AND external_id = $3 AND customer_id IS NOT NULL
+      LIMIT 1`,
+    [companyId, source, externalId]
+  );
+  return r.rows[0]?.customer_id ?? null;
+}
+
 // ═══════════════════════════════════════════════════════════
 // 비회원 이벤트용 anonymous link (external_id만 박힘, customer_id NULL)
 // ═══════════════════════════════════════════════════════════

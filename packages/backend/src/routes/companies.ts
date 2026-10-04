@@ -16,6 +16,8 @@ import { normalizeOpt080Input, findLinkDefectInText, findLinkDefectDeep, webLink
 import { grantFreeTrial, isTrialApplyOpen } from '../utils/basic-trial';
 // ★ 2026-07-25 요금제 변경 이력 CT — 청구서 일할계산의 진실의 원천(빠지면 그 구간이 증발)
 import { recordPlanChange, alertPlanChangeFailure } from '../utils/plan-change-log';
+// ★ 2026-10-04 선불 요금제 이용 기간 — 관리 중 게이트 · my-plan 표시(docs/2026-10-04-prepaid-plan-term-design.md)
+import { planTermManagedSql, planTermManagedError, PlanTermError, getPlanTermView, getScheduledFromForPlan } from '../utils/plan-term';
 import { canUseAgencySend, loadPlanContext } from '../utils/plan-guard';
 import { parseAgentLedgerFields, parseAgentLedgerPatch, getAgentCustNameMap } from '../utils/pay-stats';
 // ★ 2026-08-20 발송ID 표기 정규화 CT — 저장(여기)·비교(집계)가 같은 규약(대문자)을 쓴다
@@ -521,7 +523,16 @@ router.get('/my-plan', async (req: Request, res: Response) => {
       console.warn('[my-plan] 대행발송 자격 판정 스킵:', e?.message);
     }
 
-    res.json({ ...row, plan_change: planChange, agency_send_allowed: agencySendAllowed });
+    // ★ 2026-10-04 선불 요금제 이용 기간(docs/2026-10-04-prepaid-plan-term-design.md §6) — 미관리·DDL 전 = null.
+    //   조회 실패는 이 칸만 비우고 플랜 조회 자체(대시보드 핵심)는 살린다. 조작 권한은 서버가 판정(회사 관리자).
+    let prepaidTerm: any = null;
+    try {
+      prepaidTerm = await getPlanTermView(companyId, (req as any).user?.userType === 'company_admin');
+    } catch (e: any) {
+      console.warn('[my-plan] 선불 이용 기간 조회 스킵:', e?.message);
+    }
+
+    res.json({ ...row, plan_change: planChange, agency_send_allowed: agencySendAllowed, prepaid_term: prepaidTerm });
   } catch (error) {
     console.error('플랜 조회 실패:', error);
     res.status(500).json({ error: '플랜 조회 실패' });
@@ -658,7 +669,7 @@ router.get('/plan-request/status', async (req: Request, res: Response) => {
 
     // 미확인 처리 결과 (approved/rejected 중 user_confirmed = false)
     const unconfirmedResult = await query(
-      `SELECT pr.id, pr.status, pr.admin_note, p.plan_name as requested_plan_name, pr.processed_at
+      `SELECT pr.id, pr.status, pr.admin_note, p.plan_name as requested_plan_name, pr.processed_at, pr.requested_plan_id
        FROM plan_requests pr
        LEFT JOIN plans p ON pr.requested_plan_id = p.id
        WHERE pr.company_id = $1 AND pr.status IN ('approved', 'rejected') AND pr.user_confirmed = false
@@ -666,9 +677,18 @@ router.get('/plan-request/status', async (req: Request, res: Response) => {
       [companyId]
     );
 
+    // ★ 2026-10-04 선불 이용 기간 — 승인된 신청이 내림 예약이면 "변경 완료"가 아니라 적용일을 보여 준다(설계 §6).
+    //   조회 실패·DDL 전은 null(기존 문구 그대로).
+    const unconfirmed = unconfirmedResult.rows[0] || null;
+    let scheduledFrom: string | null = null;
+    if (unconfirmed?.status === 'approved') {
+      try { scheduledFrom = await getScheduledFromForPlan(companyId, unconfirmed.requested_plan_id); }
+      catch (e: any) { console.warn('[plan-request/status] 선불 이용 기간 예약일 조회 스킵:', e?.message); }
+    }
+
     res.json({
       pending: pendingResult.rows[0] || null,
-      unconfirmed: unconfirmedResult.rows[0] || null,
+      unconfirmed: unconfirmed ? { ...unconfirmed, scheduled_from: scheduledFrom } : null,
     });
   } catch (error) {
     console.error('플랜 신청 상태 조회 실패:', error);
@@ -1112,7 +1132,9 @@ async function aggregateDashboardCards(companyId: string, cardIds: string[], use
         setPrefetch(cardId, query(
           `SELECT COALESCE(SUM(amount), 0)::numeric as total
            FROM balance_transactions
-           WHERE company_id = $1 AND type = 'deduct' AND created_at >= date_trunc('month', NOW())${spendCreatedByFilter}`,
+           WHERE company_id = $1 AND type = 'deduct' AND created_at >= date_trunc('month', NOW())
+             AND reference_type IS DISTINCT FROM 'plan_term'${spendCreatedByFilter}`,
+          // ↑ ★ 2026-10-04 요금제 이용료(선불 이용 기간)는 뺀다 — 이 카드는 "이번 달 발송 사용 금액"이다(dashboard-card-pool.ts:51)
           spendParams
         ));
         break;
@@ -1851,10 +1873,17 @@ router.post('/:id/grant-trial', requireUuidId, requireSuperAdmin, async (req: Re
                 trial_expires_at    = NOW() + ($2::int || ' days')::interval,
                 updated_at          = NOW()
           WHERE c.id = $3
+            -- ★ 2026-10-04 선불 이용 기간 중인 회사는 체험 대상이 아니다(설계 §5-1) — 잠금과 판정이 한 문장
+            AND NOT ${planTermManagedSql('c')}
         RETURNING c.id, c.plan_id, c.subscription_status, c.trial_expires_at,
                   (SELECT plan_code FROM plans WHERE id = $1) AS plan_code`,
         [trialPlanId, days, id],
       );
+      if (updated.rows.length === 0) {
+        await client.query('ROLLBACK');
+        const e = planTermManagedError('무료체험을 줄 수 없습니다');
+        return res.status(e.status).json(e.body);
+      }
       if (updated.rows.length > 0) {
         await recordPlanChange({
           client,
@@ -2090,6 +2119,8 @@ router.post('/:id/grant-basic-trial', requireUuidId, requireSuperAdmin, async (r
       company,
     });
   } catch (err: any) {
+    // ★ 2026-10-04 선불 이용 기간 중인 회사 = 체험 코어가 409로 거절한다(결함이 아니라 업무 응답)
+    if (err instanceof PlanTermError) return res.status(err.status).json(err.body);
     console.error('grant-basic-trial 실패:', err);
     return res.status(500).json({ error: err?.message || 'BASIC 무료체험 부여 실패' });
   }
@@ -2118,6 +2149,8 @@ router.post('/:id/revoke-basic-trial', requireUuidId, requireSuperAdmin, async (
                 ai_credits_reset_at       = NOW(),
                 updated_at                = NOW()
           WHERE id = $3 AND subscription_status = 'trial'
+            -- ★ 2026-10-04 선불 이용 기간 중인 회사는 체험 취소로 FREE가 되지 않는다(회의론자 최종 #7)
+            AND NOT ${planTermManagedSql('companies')}
         RETURNING id, plan_id, subscription_status`,
         [freeRes.rows[0].id, Number(freeRes.rows[0].credits) || 0, id],
       );
@@ -2184,10 +2217,17 @@ router.put('/:id', requireUuidId, requireSuperAdmin, async (req: Request, res: R
     let result: any;
     try {
       await client.query('BEGIN');
-      const before = await client.query('SELECT plan_id FROM companies WHERE id = $1::uuid FOR UPDATE', [id]);
+      const before = await client.query(
+        `SELECT plan_id, ${planTermManagedSql('companies')} AS plan_term_managed FROM companies WHERE id = $1::uuid FOR UPDATE`, [id]);
       if (before.rows.length === 0) {
         await client.query('ROLLBACK');
         return res.status(404).json({ error: '고객사를 찾을 수 없습니다.' });
+      }
+      // ★ 2026-10-04 선불 이용 기간 중인 회사의 요금제 직접 변경은 막는다(설계 §5-1 · G4)
+      if (planId && String(before.rows[0].plan_id || '') !== String(planId) && before.rows[0].plan_term_managed === true) {
+        await client.query('ROLLBACK');
+        const e = planTermManagedError('요금제를 여기서 바꿀 수 없습니다');
+        return res.status(e.status).json(e.body);
       }
       result = await client.query(
       `UPDATE companies SET

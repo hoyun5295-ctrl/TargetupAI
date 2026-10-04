@@ -14,6 +14,7 @@
  */
 import type { PoolClient } from 'pg';
 import { grantFreeTrial } from './basic-trial';
+import { planTermManagedSql } from './plan-term';
 
 export const DIAGNOSIS_TRIAL_DAYS = 7;
 
@@ -34,7 +35,9 @@ export function isDiagnosisRunner(userType?: string | null): boolean {
  * 진단 대상 여부 = 요금제 × 역할. `/state`의 `eligible`이 이 한 벌을 쓰고 화면은 그것만 소비한다
  * (§3-1 화면은 게이트가 아니다). 라우트 게이트는 isDiagnosisRunner로 같은 축을 재검사한다.
  */
-export function judgeDiagnosisEligible(params: { planCode: string; userType?: string | null }): boolean {
+export function judgeDiagnosisEligible(params: { planCode: string; userType?: string | null; planTermManaged?: boolean }): boolean {
+  // ★ 2026-10-04 선불 이용 기간이 잠긴 회사는 plan_code가 FREE지만 미가입이 아니다(돈 내던 회사 · 연장하면 원래 요금제로 복구) — 진단 체험 대상에서 뺀다.
+  if (params.planTermManaged) return false;
   return params.planCode === 'FREE' && isDiagnosisRunner(params.userType);
 }
 
@@ -52,7 +55,8 @@ export async function judgeGrantEligibility(
 ): Promise<GrantJudgement> {
   const comp = await client.query(
     `SELECT c.id, c.subscription_status, c.trial_expires_at,
-            UPPER(COALESCE(p.plan_code, '')) AS plan_code
+            UPPER(COALESCE(p.plan_code, '')) AS plan_code,
+            ${planTermManagedSql('c')} AS plan_term_managed
        FROM companies c LEFT JOIN plans p ON p.id = c.plan_id
       WHERE c.id = $1 FOR UPDATE OF c`,
     [companyId],
@@ -68,6 +72,8 @@ export async function judgeGrantEligibility(
 
   // 원칙 2 — 화면은 게이트가 아니다. 지급 함수 안에서 FREE 정확 일치 재검사.
   if (crow.plan_code !== 'FREE') return { outcome: 'not_applicable' };
+  // ★ 2026-10-04 선불 이용 기간이 잠긴 회사(FREE지만 미가입 아님)는 대상 아님 — 체험 코어 409로 진단 저장째 롤백되지 않게 여기서 먼저 거른다
+  if (crow.plan_term_managed === true) return { outcome: 'not_applicable' };
 
   // §4-1 ⓓ 체험 이력 4항 OR
   if (await hasTrialHistory(client, companyId, crow)) return { outcome: 'not_eligible' };

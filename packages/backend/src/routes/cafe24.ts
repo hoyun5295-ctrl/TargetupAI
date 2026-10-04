@@ -63,14 +63,18 @@ router.post('/webhook', json({ limit: '1mb', verify: (req: any, _res, buf) => { 
     const event = cafe24Adapter.extractEventFromWebhook(req.headers as any, req.body || {});
     const mallId = cafe24Adapter.extractMallIdFromWebhook(req.headers as any, req.body || {});
 
-    if (!event || !mallId) {
-      console.warn('[Cafe24 Webhook] event/mall_id 식별 실패 — event_no:', req.body?.event_no, 'mall_id:', mallId);
-      return res.status(400).json({ success: false, error: 'event 또는 mall_id를 식별할 수 없습니다.' });
-    }
-
     // 인증 — X-API-Key(실제 방식, .env CAFE24_WEBHOOK_API_KEY) 우선, 구형 HMAC 서명 하위 호환
     const apiKeyHeader = (req.headers['x-api-key'] || req.headers['X-API-Key']) as string | undefined;
     const apiKeyOk = verifyCafe24WebhookApiKey(apiKeyHeader);
+
+    if (!event || !mallId) {
+      console.warn('[Cafe24 Webhook] event/mall_id 식별 실패 — event_no:', req.body?.event_no, 'mall_id:', mallId);
+      // ★ 2026-10-04 카페24가 보낸(인증된) 웹훅인데 우리 표에 없는 이벤트 번호면 200 으로 받고 무시한다.
+      //   400 으로 거절하면 카페24 실패 집계에 쌓이고, "주간 실패 100건+ · 성공률 10% 미만"이면 그 앱의 웹훅 수신 전체가 자동 차단된다
+      //   (아래 미연동 몰 200 무시와 같은 이유). 인증 안 된 요청은 종전처럼 400.
+      if (apiKeyOk) return res.json({ success: true, ignored: true });
+      return res.status(400).json({ success: false, error: 'event 또는 mall_id를 식별할 수 없습니다.' });
+    }
 
     // 회사 식별 (mall_id → company_integrations)
     // ★ 2026-09-27 한줄로 V2 R098 — 같은 몰이 여러 회사에 연동돼 있으면 전부에게 전달한다(옛: LIMIT 1 임의 한 회사).

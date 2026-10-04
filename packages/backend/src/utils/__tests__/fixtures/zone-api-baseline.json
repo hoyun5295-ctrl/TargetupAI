@@ -255,10 +255,6 @@
   "/api/ai/operator/marketing-calendar": 1,
   "/api/ai/operator/marketing-calendar/generate": 1,
   "/api/ai/operator/marketing-calendar/regenerate-month": 1,
-  "/api/marketing-planner/availability": 1,
-  "/api/marketing-planner/events": 2,
-  "/api/marketing-planner/touchpoints/:p/detail": 1,
-  "/api/marketing-planner/events/:p": 2,
   "/api/ai/operator/performance/full-analysis/start": 1,
   "/api/ai/operator/performance/full-analysis/status/:p": 1,
   "/api/ai/operator/performance/full-analysis/download/:p": 1,
@@ -271,12 +267,6 @@
   "/api/ai/operator/performance/campaigns": 1,
   "/api/ai/operator/performance/customer-axis": 1,
   "/api/ai/operator/performance/quick-action": 1,
-  "/api/marketing-planner/brief": 1,
-  "/api/marketing-planner/brief/:p/result": 1,
-  "/api/marketing-planner/brief/:p/approve": 1,
-  "/api/marketing-planner/brief/:p/cancel": 1,
-  "/api/marketing-planner/brief/:p/submit": 1,
-  "/api/marketing-planner/touchpoints/:p/resume": 1,
   "/api/ai/operator/predictive/settings": 2,
   "/api/ai/operator/predictive/distribution": 1,
   "/api/ai/operator/predictive/summary": 1,
@@ -293,7 +283,21 @@
   "/api/sns/overview": 1,
   "/api/sns/auth/start/:p": 1,
   "/api/sns/accounts/:p/reconnect": 1,
-  "/api/sns/accounts/:p/disconnect": 1
+  "/api/sns/accounts/:p/disconnect": 1,
+  "/api/marketing-planner/events/:p/copy": 1,
+  "/api/marketing-planner/build-quote": 1,
+  "/api/marketing-planner/events/:p": 1,
+  "/api/marketing-planner/events": 2,
+  "/api/marketing-planner/events/:p/build": 1,
+  "/api/marketing-planner/events/:p/build-quote": 2,
+  "/api/marketing-planner/availability": 1,
+  "/api/marketing-planner/brief/:p/result": 1,
+  "/api/marketing-planner/brief/:p/cancel": 1,
+  "/api/marketing-planner/events/:p/confirm-view": 1,
+  "/api/marketing-planner/events/:p/approve": 1,
+  "/api/marketing-planner/events/:p/unapprove": 1,
+  "/api/marketing-planner/events/:p/cancel": 1,
+  "/api/marketing-planner/touchpoints/:p/resume": 1
  },
  "nav": [
   "/ai-journeys",
@@ -315,6 +319,7 @@
   "/predictive",
   "/pricing",
   "/quick-campaign",
-  "/segments"
+  "/segments",
+  "/marketing-planner/events/:p"
  ]
 }

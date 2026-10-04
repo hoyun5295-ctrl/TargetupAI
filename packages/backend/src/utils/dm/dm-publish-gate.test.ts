@@ -106,10 +106,13 @@ describe('S7~S10 라우트 배선', () => {
   const publish = src.slice(src.indexOf("dmRouter.post('/:id/publish'"), src.indexOf("dmRouter.post('/:id/stop'"));
   const send = src.slice(src.indexOf("dmRouter.post('/:id/send-to-target'"), src.indexOf("dmRouter.get('/:id/recipients-tracking'"));
   it('/publish = 첫 발행(short_code 없음)만 CT 잠금 · 재발행은 옛 링크 검사 · 둘 다 차감 앞', () => {
-    expect(publish).toMatch(/if \(!dmBodyRow\.short_code\) \{\s*const block = await dmPublishBlocker\(dmBodyRow\)/);
-    expect(publish.indexOf('dmPublishBlocker(')).toBeLessThan(publish.indexOf('deductCreditSafe('));
-    expect(publish).toContain('dmPublishFeeSourceOf(companyId, req.params.id)');
-    expect(publish).toContain('isDmPublishFeeCharged(companyId, req.params.id)');
+    // ★ 2026-10-04 본문은 발행 코어 CT(편집기 · 플래너 승인 두 입구가 같은 문 · 회의론자 C3)
+    expect(publish).toContain('await publishDmCore({');
+    const core = readFileSync(resolve(__dirname, './dm-publish-core.ts'), 'utf-8');
+    expect(core).toMatch(/if \(!dmBodyRow\.short_code\) \{\s*const block = await dmPublishBlocker\(dmBodyRow\)/);
+    expect(core.indexOf('dmPublishBlocker(')).toBeLessThan(core.indexOf('deductCreditSafe('));
+    expect(core).toContain('dmPublishFeeSourceOf(companyId, dmId)');
+    expect(core).toContain('isDmPublishFeeCharged(companyId, dmId)');
   });
   it('send-to-target = 미발행 DM 만 잠금 · 발행비 판정(CT)·차감보다 앞 · 인라인 발행비 SQL 0', () => {
     expect(send).toMatch(/if \(!dm\.short_code\) \{\s*const block = await dmPublishBlocker\(dm\)/);

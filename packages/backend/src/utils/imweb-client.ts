@@ -40,7 +40,7 @@ import {
   ProviderIntegration,
   registerProvider,
 } from './provider-registry';
-import { identifyCustomer } from './cdp-identity';
+import { identifyCustomer, withdrawMemberConsent } from './cdp-identity';
 import { syncOrder } from './cdp-orders';
 import { orderExternalId } from './cdp-order-identity';
 import { trackEvent } from './cdp-events';
@@ -412,22 +412,28 @@ export const imwebAdapter: IProviderAdapter = {
         });
         break;
 
-      // 탈퇴 → 발송 제외 이벤트
-      case 'END_USER_WITHDRAWAL':
+      // 탈퇴 → 광고 수신 철회 + 기록 이벤트
+      // ★ 2026-10-04 옛: 이벤트만 남기고 그 이벤트를 읽는 곳이 없어(주석의 "발송 제외"가 실제로 일어나지 않음) 탈퇴 회원이 계속 발송 대상이었다.
+      //   이제 연결된 고객의 수신동의를 내린다(withdrawMemberConsent · 영구 수신거부 표로는 옮기지 않는다 = D93).
+      case 'END_USER_WITHDRAWAL': {
+        const withdrawnId = String(resource.memberUid || resource.member_uid || '');
+        await withdrawMemberConsent(companyId, 'imweb', withdrawnId);
         await trackEvent(companyId, {
           source: 'imweb',
           eventName: 'custom_member_withdrawn',
-          externalId: String(resource.memberUid || resource.member_uid || ''),
+          externalId: withdrawnId,
           properties: { imweb_member_uid: resource.memberUid },
           occurredAt: String(resource.occurredAt || new Date().toISOString()),
         });
         break;
+      }
 
       // 장바구니 담기 → 장바구니 이탈 여정
       case 'END_USER_CART_ADD':
         await trackEvent(companyId, {
           source: 'imweb',
-          eventName: 'custom_cart_add',
+          // ★ 2026-10-04 표준 이름 — 장바구니 이탈 여정·인앱 트리거는 'cart_add' 만 본다(옛 'custom_cart_add' 는 읽는 곳 0)
+          eventName: 'cart_add',
           externalId: String(resource.memberUid || resource.member_uid || ''),
           properties: {
             product_no: resource.prodNo || resource.productNo,
@@ -448,7 +454,9 @@ export const imwebAdapter: IProviderAdapter = {
           email: resource.email,
           phone: resource.call || resource.mobile || resource.phone,
           name: resource.name || resource.ordererName,
-          status: String(resource.orderStatus || event),
+          // ★ 2026-10-04 입금 완료 웹훅은 그 자체가 결제 사실이다 → 'paid'(옛: 이벤트 이름이 상태로 들어가 매출이 반영되지 않았다).
+          //   주문 생성의 몰 상태 값은 아직 원문 미확인이라 그대로 둔다(모르는 값 = 매출 변화 없음).
+          status: event === 'ORDER_DEPOSIT_COMPLETE' ? 'paid' : String(resource.orderStatus || event),
           totalAmount: firstPositiveAmount(resource.totalPrice, resource.paidPrice, resource.totalRefundPrice),
           orderedAt: String(resource.orderTime || resource.orderedAt || new Date().toISOString()),
           currency: 'KRW',
@@ -473,18 +481,42 @@ export const imwebAdapter: IProviderAdapter = {
         });
         break;
 
-      // 취소/반품/환불 → 상태 이벤트
+      // 취소/반품/환불 → 매출 차감(결제로 반영된 주문만 · CT-86 표식) + 상태 이벤트
+      // ★ 2026-10-04 옛: 이벤트만 남겨 취소·환불된 주문의 매출이 고객 요약(RFM)에 그대로 남았다(카페24 수신부는 syncOrder 로 차감).
       case 'ORDER_CANCEL_COMPLETE':
       case 'ORDER_RETURN_COMPLETE':
-      case 'ORDER_REFUND':
-        await trackEvent(companyId, {
-          source: 'imweb',
-          eventName: 'custom_order_cancelled',
-          externalId: String(resource.memberUid || resource.member_uid || ''),
-          properties: { order_no: resource.orderNo, status: event },
-          occurredAt: String(resource.occurredAt || new Date().toISOString()),
-        });
+      case 'ORDER_REFUND': {
+        const memberUid = resource.memberUid || resource.member_uid;
+        const phone = resource.call || resource.mobile || resource.phone;
+        const orderNo = resource.orderNo || resource.order_no;
+        // 주문 생성 때와 같은 고객 식별 규칙(orderExternalId) · 회원도 번호도 없으면 고객을 지어내지 않는다(차감 생략 · 로그)
+        if (orderNo && (memberUid || phone)) {
+          await syncOrder(companyId, {
+            source: 'imweb',
+            orderId: String(orderNo),
+            externalId: orderExternalId(memberUid, phone, orderNo),
+            email: resource.email,
+            phone,
+            name: resource.name || resource.ordererName,
+            status: event === 'ORDER_CANCEL_COMPLETE' ? 'cancelled' : 'refunded',
+            totalAmount: firstPositiveAmount(resource.totalPrice, resource.paidPrice, resource.totalRefundPrice),
+            orderedAt: String(resource.orderTime || resource.orderedAt || resource.occurredAt || new Date().toISOString()),
+            currency: 'KRW',
+          });
+        } else {
+          console.log(`[Imweb Adapter] ${event} — 주문번호·고객 식별값 없음, 매출 차감 생략 (order=${orderNo || '-'})`);
+        }
+        if (memberUid) {
+          await trackEvent(companyId, {
+            source: 'imweb',
+            eventName: 'custom_order_cancelled',
+            externalId: String(memberUid),
+            properties: { order_no: orderNo, status: event },
+            occurredAt: String(resource.occurredAt || new Date().toISOString()),
+          });
+        }
         break;
+      }
 
       default:
         console.log(`[Imweb Adapter] 처리하지 않는 event: ${event}`);

@@ -65,6 +65,8 @@ export const COMPANY_MERGE_AXES: readonly MergeAxis[] = [
 
   { table: 'users', action: 'keep', reason: '계정: 실사용 계정은 병합 대상에 이미 있고 옛 계정은 status로 로그인 차단된다' },
   { table: 'company_plan_changes', action: 'keep', reason: '요금제 이력: 옮기면 병합 대상이 겪지 않은 변경이 이력에 생긴다' },
+  // ★ 2026-10-04 선불 요금제 이용 기간 원장(docs/2026-10-04-prepaid-plan-term-design.md) — 미등재면 이 행이 있는 회사의 병합이 차단된다
+  { table: 'company_plan_term_events', action: 'keep', reason: '선불 이용 기간 원장: 그 회사가 낸 기간·회차의 기록이다. 옮기면 병합 대상의 회차(UNIQUE)·날짜별 요금제가 오염된다' },
   { table: 'company_settings', action: 'keep', reason: '회사 설정: 옮기면 병합 대상의 현재 설정을 옛 값으로 덮는다' },
   { table: 'customer_code_sequences', action: 'keep', reason: '고객코드 채번 상태: 회사 고유값이라 합칠 수 없다' },
 ];

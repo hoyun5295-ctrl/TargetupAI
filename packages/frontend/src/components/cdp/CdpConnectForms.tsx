@@ -607,9 +607,7 @@ export interface CdpGodoConnectFormProps {
 
 export function CdpGodoConnectForm(p: CdpGodoConnectFormProps) {
   const godoHead = buildSdkScriptTag(p.publicKey);
-  const godoBody = `<body data-hjl-user-id="{=gSess.memNo}" data-hjl-phone="{=gSess.cellPhone}" data-hjl-name="{=gSess.memNm}">`;
   const godoCart = `<script>\n  // 장바구니 담기 성공 시점(담기 버튼/AJAX 성공)에 호출\n  window.hjl && window.hjl.track('cart_add', {\n    product_name: "{=goodsView['goodsNm']}",\n    price: Number("{=gd_isset(goodsView['goodsPrice'],0)}"),\n    product_url: location.href,\n    quantity: 1\n  });\n</script>`;
-  const godoPurchase = `<script>\n  window.hjl && window.hjl.track('purchase', { order_id: '{=orderInfo.orderNo}' });\n</script>`;
   const blk = (label: string, code: string, copyLabel: string) => (
     <div key={copyLabel}>
       <div className="text-xs font-medium text-slate-600 mb-1.5">{label}</div>
@@ -681,14 +679,12 @@ export function CdpGodoConnectForm(p: CdpGodoConnectFormProps) {
       <div className="mt-5 pt-5 border-t border-slate-200 space-y-4">
         <div className="flex items-center gap-2">
           <Code2 className="w-4 h-4 text-violet-700" />
-          <h3 className="text-sm font-bold text-slate-900">SDK 설치: 방문·회원·장바구니 수집</h3>
+          <h3 className="text-sm font-bold text-slate-900">SDK 설치: 방문·장바구니 수집</h3>
         </div>
-        <div className="text-[11px] text-slate-500 -mt-2">주문(위)과 별개입니다. 방문·회원·장바구니까지 수집하려면 고도몰 스킨(PC·모바일 각각)에 아래를 붙여넣으세요. 고도몰5 표준 치환코드라 수정 없이 동작합니다.</div>
+        <div className="text-[11px] text-slate-500 -mt-2">주문(위)과 별개입니다. 방문·장바구니까지 수집하려면 고도몰 스킨(PC·모바일 각각)에 아래를 붙여넣으세요. 고도몰5 표준 치환코드라 수정 없이 동작합니다. 회원과 구매는 위 주문 수집이 한줄로 고객과 이어 줍니다(페이지의 회원 번호만으로는 본인 확인이 되지 않아 고객과 잇지 않습니다).</div>
         <div className="space-y-4">
           {blk('① 설치 스크립트: 모든 페이지 스킨 <head>', godoHead, '고도몰 설치 스크립트')}
-          {blk('② 회원 식별: 로그인 스킨 <body> 태그', godoBody, '고도몰 회원 식별 코드')}
-          {blk('③ 장바구니 담기: 상품상세(goods_view) 스킨', godoCart, '고도몰 장바구니 코드')}
-          {blk('④ 구매 완료: 주문완료(order_end) 스킨', godoPurchase, '고도몰 구매 완료 코드')}
+          {blk('② 장바구니 담기: 상품상세(goods_view) 스킨', godoCart, '고도몰 장바구니 코드')}
           <div className="text-[10px] text-amber-700 italic">PC·모바일 스킨 양쪽에 넣어야 합니다. 그리고 "수집 허용 도메인"에 몰 도메인을 등록해야 수집이 시작됩니다.</div>
         </div>
       </div>
@@ -1016,7 +1012,7 @@ export function CdpWooConnectForm(p: CdpWooConnectFormProps) {
           <a href="/api/woocommerce/plugin.zip" download className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white hover:bg-slate-100 border border-slate-200 text-slate-600 font-medium">
             <Blocks className="w-3.5 h-3.5" /> 한줄로 플러그인 다운로드(선택)
           </a>
-          <span>워드프레스 플러그인 업로드에 그대로 올리면 수집 스크립트 삽입·회원 식별·수신동의 REST 노출이 자동입니다. 주문·회원 동기화는 위 승인 연결만으로 됩니다.</span>
+          <span>워드프레스 플러그인 업로드에 그대로 올리면 수집 스크립트 삽입·수신동의 REST 노출이 자동입니다. 로그인 회원 식별은 플러그인 설정에 CDP 비밀키를 넣으면 켜집니다(비밀키는 몰 서버에만 저장 · 페이지에 실리지 않음). 주문·회원 동기화는 위 승인 연결만으로 됩니다.</span>
         </div>
       </div>
 
@@ -1029,7 +1025,7 @@ export function CdpWooConnectForm(p: CdpWooConnectFormProps) {
         <div className="text-[11px] text-slate-500 -mt-2">주문(위)과 별개입니다. 테마의 &lt;head&gt; 에 아래 한 줄을 넣으면 방문·장바구니가 들어옵니다. 회원 식별(②)은 선택이며 테마 &lt;body&gt; 태그 한 줄을 바꿉니다.</div>
         <div className="space-y-4">
           {blk('① 설치 스크립트: 테마 header.php 의 <head> 안(모든 페이지)', wooHead, '우커머스 설치 스크립트')}
-          {blk('② 회원 식별(선택): 테마 <body> 태그를 이렇게 바꿉니다', wooBody, '우커머스 회원 식별 코드')}
+          {blk('② 회원 식별(선택 · 한줄로 플러그인 1.0.2 와 CDP 비밀키 설정 필요): 테마 <body> 태그를 이렇게 바꿉니다', wooBody, '우커머스 회원 식별 코드')}
         </div>
       </div>
     </div>

@@ -28,12 +28,14 @@
  */
 
 import { query, pool } from '../config/database';
-import { ensureAnonymousLink, identifyCustomer } from './cdp-identity';
+import { ensureAnonymousLink, identifyCustomer, findLinkedCustomerId } from './cdp-identity';
 // ★ 2026-06-25 (gap 5): 자사몰 전송 시각 미래 클램프(커서·통계 왜곡 차단)
 import { clampOccurredAt } from './cdp-occurred-at';
 import { isUuid } from './normalize';
 import { maskPII } from './pii-masking';
 import { isOverMonthlyCdpLimit, recordCdpApiCall } from './cdp-auth';
+// ★ 2026-10-04 브라우저 식별 = 회원 토큰 확인 뒤에만(C1·C2)
+import { verifyCdpMemberToken } from './cdp-member-token';
 // ★ D214+ (2026-05-24) Unified Customer Profile 정합
 import { fuseEventToCustomer } from './customer-cdp-fusion';
 import { recomputeProfile } from './unified-customer-profile';
@@ -353,9 +355,18 @@ const BROWSER_TYPE_TO_EVENT_NAME: Record<string, string> = {
 };
 
 // 정규화 시 properties에서 제외할 control 키 (식별 정보 + 구조 키)
+// ★ 2026-10-04 member_token 추가 — 회원 토큰(1시간 유효 서명값)이 이벤트 기록·최근 이벤트 화면에 남지 않게.
 const BROWSER_CONTROL_KEYS = new Set([
-  'type', 'trust_level', 'external_id', 'email', 'phone', 'name', 'event', 'properties',
+  'type', 'trust_level', 'external_id', 'email', 'phone', 'name', 'event', 'properties', 'member_token',
 ]);
+
+/**
+ * ★ 2026-10-04 브라우저가 보낸 'purchase' 는 결제 사실이 아니라 「결제 완료 화면을 봤다」는 신호다 → checkout_complete 로 적는다.
+ * 주문의 진실은 서버 쪽 한 곳(몰 웹훅·폴링 · 비밀키 /order)이 갖는다. 옛: GA4 dataLayer 의 purchase 가 그대로 'purchase' 로 들어가
+ * 같은 주문이 몰 웹훅 purchase 와 두 건이 됐다(성과·여정 이중 계상) · 공개키만으로 구매 이벤트를 지어낼 수 있었다
+ * (2026-10-04 싱크·자사몰 전수점검 SDK2 · C2). SDK 만 단 몰의 구매는 비밀키 /api/cdp/order 로 받는다.
+ */
+const BROWSER_EVENT_RENAME: Record<string, string> = { purchase: 'checkout_complete' };
 
 export interface BrowserIngestBatch {
   anonymousId: string | null;
@@ -369,6 +380,8 @@ export interface BrowserIngestBatch {
    * 없으면 지금과 같은 무분류 적재.
    */
   storeCode?: string | null;
+  /** ★ 2026-10-04 SDK 가 그 페이지에서 받은 회원 증명(identify 없는 배치의 고객 연결 근거 · 토큰 검증 뒤에만 쓴다) */
+  member?: { externalId: string; memberToken: string } | null;
 }
 
 export interface BrowserIngestResult {
@@ -394,8 +407,9 @@ function normalizeBrowserEvent(e: Record<string, any>): NormalizedBrowserEvent |
   const trustLevel = String(e?.trust_level || 'observed');
 
   if (type === 'track') {
-    const eventName = String(e?.event || '');
-    if (!validateEventName(eventName).ok) return null;
+    const rawName = String(e?.event || '');
+    if (!validateEventName(rawName).ok) return null;
+    const eventName = BROWSER_EVENT_RENAME[rawName] || rawName;
     const props = e?.properties && typeof e.properties === 'object' && !Array.isArray(e.properties)
       ? e.properties
       : {};
@@ -439,7 +453,26 @@ export async function ingestBrowserEvents(
   let identityLinkId: string | null = null;
   let didIdentify = false;
 
-  const identifyEvt = batch.events.find((e) => e?.type === 'identify' && e?.external_id);
+  // ★ 2026-10-04 브라우저 배치를 고객에 잇는 근거는 몰 서버가 비밀키로 받은 회원 토큰이 **이 회사·이 회원**과 맞는 것 하나뿐이다.
+  //   이 입구는 공개키 + Origin 헤더 글자 비교뿐이라(Origin 은 브라우저 밖에서 바꿔 보낼 수 있다) 누구나 부를 수 있다.
+  //   옛: 피해자 이메일만 알면 identify 가 그 고객의 이름·이메일을 덮고 휴대폰을 공격자 번호로 바꿨다(점유자 없으면 자동 갱신)
+  //   + 그 고객 이름으로 장바구니·구매 이벤트를 지어내 여정 발송을 일으켰다(2026-10-04 전수점검 C1·C2).
+  //   ① 배치의 **마지막** identify 하나 — 토큰이 맞으면 식별, 틀리면 익명(앞의 다른 identify 로 물러나지 않는다 · Codex 1004 R2 high:
+  //      정상 A 뒤 로그아웃·다른 회원이 같은 배치에 오면 A 로 물러나 뒤 행동까지 A 에게 붙었다). 토큰 없는 A 뒤 토큰 있는 A 는 잡힌다(R1 medium).
+  //      SDK 는 회원이 바뀌면 큐를 먼저 보내 한 배치에 한 사람만 담는다(transport.ts identityKey).
+  //   ② identify 가 없으면 배치에 실린 회원 증명(`member` · SDK 가 그 페이지에서 받은 토큰을 매 전송에 싣는다) — 고객 정보는 고치지 않고 연결만 찾는다
+  //   ③ 그 밖은 익명. 옛: anonymous_id 로 예전 연결 고객을 다시 썼다 → 공용 PC 에서 로그아웃 뒤 다른 사람의 행동이 앞사람에게 붙었고
+  //      토큰이 틀린 배치도 그 고객 것으로 들어갔다(Codex 1004 R1 high). 인앱 개인화 읽기와 같은 토큰(R1-49).
+  // 종류만으로 마지막 identify 를 고른 뒤 아이디·토큰을 검사한다 — 아이디가 빈 identify 를 먼저 걸러 내면 앞 회원으로 물러났다(Codex 1004 R3 high)
+  const identifyEvts = batch.events.filter((e) => e?.type === 'identify');
+  const lastIdentify = identifyEvts[identifyEvts.length - 1];
+  const identifyEvt = lastIdentify && lastIdentify.external_id
+    && verifyCdpMemberToken(lastIdentify.member_token, companyId, String(lastIdentify.external_id))
+    ? lastIdentify
+    : undefined;
+  if (identifyEvts.length > 0 && !identifyEvt) {
+    console.log('[CDP ingestBrowser] 회원 토큰 없음·불일치 — 식별 없이 익명 적재');
+  }
   if (identifyEvt) {
     try {
       const r = await identifyCustomer(companyId, {
@@ -460,15 +493,10 @@ export async function ingestBrowserEvents(
     }
   }
 
-  // identify 없으면 anonymous_id로 기존 known customer 재사용 (이전 배치에서 식별된 경우)
-  if (!customerId && anonymousId) {
-    const prior = await query(
-      `SELECT customer_id FROM cdp_events
-       WHERE company_id = $1::uuid AND anonymous_id = $2 AND customer_id IS NOT NULL
-       ORDER BY received_at DESC LIMIT 1`,
-      [companyId, anonymousId]
-    );
-    if (prior.rows.length > 0) customerId = prior.rows[0].customer_id;
+  // ② identify 가 없는 배치 = 배치에 실린 회원 증명으로만 잇는다(없거나 틀리면 익명)
+  if (!customerId && identifyEvts.length === 0 && batch.member?.externalId
+    && verifyCdpMemberToken(batch.member.memberToken, companyId, batch.member.externalId)) {
+    customerId = await findLinkedCustomerId(companyId, 'sdk', batch.member.externalId);
   }
 
   // 익명 이벤트라도 anonymous link 1건 보장 (추후 회원 가입 시 추적 흐름 일치)
