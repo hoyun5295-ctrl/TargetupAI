@@ -395,7 +395,7 @@
 | send_hour_end | integer | ★ 실측 레거시(send_end_hour 우선) |
 | holiday_send | boolean | ★ 실측 레거시(holiday_send_allowed 우선) |
 | duplicate_days | integer | ★ 실측 레거시(duplicate_prevention_days 우선) |
-| plan_term_expires_on · plan_term_auto_renew · plan_term_restore_plan_id · plan_term_next_plan_id · plan_term_version | date · boolean · uuid · uuid · integer | ★2026-10-04 **DDL 대기** — 선불 요금제 이용 기간. 뜻·제약·쓰기 입구 = 아래 「company_plan_term_events」 절 |
+| plan_term_expires_on · plan_term_auto_renew · plan_term_restore_plan_id · plan_term_next_plan_id · plan_term_version | date · boolean · uuid · uuid · integer | ★2026-10-04 **DDL 실행완료(Harold 1004 · 운영 SELECT로 5칸 값 조회 확인)** — 선불 요금제 이용 기간. 뜻·제약·쓰기 입구 = 아래 「company_plan_term_events」 절 |
 | usage_type | varchar(10) | ★ 2026-07-03 실측 (사용구분: web/agent/both, NOT NULL DEFAULT 'web' + CHECK. agent=QTmsg 에이전트 전용 게이팅) |
 
 ### company_agent_ids (에이전트 발송ID 매핑 → 에이전트 계정 원장 — 2026-07-03 신설 실측 · 2026-07-24 원장 격상 ALTER 실측)
@@ -1231,10 +1231,10 @@ id company_id caller_phone customer_id(NULL 가능) transcript ai_response durat
 - 인덱스 실측(2026-07-26 `pg_indexes`): `company_plan_changes_pkey`(id) · `idx_cpc_company_effective`(company_id, effective_date) · `idx_cpc_effective`(effective_date).
 - FK·varchar 길이는 아직 `pg_constraint`/`character_maximum_length` 미실측 — 생성 명세는 `docs/2026-07-25-billing-restructure-handoff.md` §3-1.
 
-### company_plan_term_events + companies.plan_term_* (선불 요금제 이용 기간) ★2026-10-04 — **DDL 대기**
+### company_plan_term_events + companies.plan_term_* (선불 요금제 이용 기간) ★2026-10-04 — **DDL 실행완료(Harold 1004)**
 
 > 설계·DDL 원문·검증 SQL = [선불 요금제 이용 기간 설계서](../docs/2026-10-04-prepaid-plan-term-design.md) §2. CT = `utils/plan-term.ts`(쓰기 입구 하나 · 계약 테스트 `plan-term-ct.test.ts`).
-> DDL 전에는 코드가 `to_jsonb(c)`로 읽어 컬럼 부재 = 미관리 = 기존 동작이다(라우트는 503 DB_MIGRATION_PENDING).
+> DDL 전에는 코드가 `to_jsonb(c)`로 읽어 컬럼 부재 = 미관리 = 기존 동작이었다(지금도 그 폴백은 남아 있다). 첫 관리 회사 = (주)이에스페이먼트(1004 start 행 1 · 만료 11/1).
 
 companies 5칸: `plan_term_expires_on date`(만료일 KST · NULL = 관리 대상 아님) · `plan_term_auto_renew boolean NOT NULL DEFAULT true` · `plan_term_restore_plan_id uuid FK plans`(값 있으면 잠김 · 복구 요금제) · `plan_term_next_plan_id uuid FK plans`(다음 구매 요금제 = 내림 예약 · 구매 시 비움) · `plan_term_version integer NOT NULL DEFAULT 0`(회차 · 관리 종료해도 되돌리지 않음). CHECK 2: restore·next는 expires가 있을 때만.
 
