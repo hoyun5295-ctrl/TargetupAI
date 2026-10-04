@@ -81,7 +81,7 @@ describe('이미지 스튜디오 카탈로그', () => {
   });
 
   it('트랙·카테고리가 계약대로다 — 행사 트랙은 kind가 명시돼 있어야 화면 탭이 갈린다', () => {
-    const EVENT_CATEGORIES = ['멤버십·고객감사', '오픈·기념일', '시즌·명절 행사', '팝업·페스티벌', '데이·기념일', '클래스·체험'];
+    const EVENT_CATEGORIES = ['멤버십·고객감사', '오픈·기념일', '시즌·명절 행사', '팝업·페스티벌', '데이·기념일', '클래스·체험', '안내·예약', '모집·참여'];
     const wrong = STUDIO_TEMPLATES
       .filter((t) => EVENT_CATEGORIES.includes(t.category) && t.kind !== 'event')
       .map((t) => t.id);

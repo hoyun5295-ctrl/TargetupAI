@@ -322,7 +322,7 @@ async function judgePersonInImage(base64: string, mime: string): Promise<PersonJ
 export const INDUSTRY_TEMPLATE_MAP: Record<IndustryCode, { product: TemplateCategory[]; event: TemplateCategory[] }> = {
   fashion: { product: ['패션'], event: ['시즌·명절 행사'] },
   beauty:  { product: ['뷰티'], event: ['멤버십·고객감사'] },
-  food:    { product: ['카페·음료', '신메뉴·팝'], event: ['팝업·페스티벌'] },
+  food:    { product: ['카페·음료', '신메뉴·팝', '외식·메뉴'], event: ['팝업·페스티벌'] },
   health:  { product: ['미니멀'], event: ['멤버십·고객감사'] },
   home:    { product: ['미니멀'], event: ['시즌·명절 행사'] },
   digital: { product: ['세일·이벤트'], event: ['오픈·기념일'] },
