@@ -296,14 +296,61 @@ SELECT count(*) AS cols FROM information_schema.columns WHERE table_name = 'comp
 **실측 1건 시나리오(6원칙 ⑤ · 배포·DDL 뒤 Harold)**
 1. 슈퍼관리자 → 이에스페이먼트 단가/요금 탭 → [이용 기간 시작] 만료일 = 대표가 정한 날짜.
 2. 고객 관리자로 /pricing → 카드 확인 → [1개월 연장] → 확인 창 금액 = 월정액 × 1.1 → 결제.
-3. SQL: `SELECT event_type, total_amount, expires_before, expires_after, balance_before, balance_after FROM company_plan_term_events WHERE company_id = '<ESP>' ORDER BY created_at DESC LIMIT 3;` 와 `SELECT type, reference_type, amount, balance_after FROM balance_transactions WHERE company_id = '<ESP>' AND reference_type = 'plan_term' ORDER BY created_at DESC LIMIT 1;` → 금액·잔액 일치.
+3. SQL(▶ .62 root 셸 · docker DB) → 원장 `total_amount`·`balance_after` 와 잔액 원장 `amount`·`balance_after` 가 같으면 통과:
+```bash
+docker exec -i targetup-postgres psql -U targetup targetup -c "SELECT event_type, total_amount, covers_from, covers_to, expires_before, expires_after, balance_before, balance_after, created_at FROM company_plan_term_events WHERE company_id IN (SELECT id FROM companies WHERE plan_term_expires_on IS NOT NULL) ORDER BY term_version DESC LIMIT 3;" -c "SELECT type, reference_type, amount, balance_before, balance_after, description, created_at FROM balance_transactions WHERE reference_type = 'plan_term' ORDER BY created_at DESC LIMIT 3;"
+```
+- 자동 결제 실측(11/2): `renew` 행 total 165,000 · covers 11/2~12/1 · expires 11/1→12/1 · 잔액 원장 같은 금액. 잔액 부족이었다면 `block` 행(detail 에 그때 잔액·필요액)과 `companies.plan_id` = FREE.
 
 ---
 
 ## 10. 대표 확인 사항 · 추가 과제(착수 안 함)
 
 - **잠긴 동안 자사몰 연동(CDP) 수집이 막힌다**(FREE와 같음 · cdp-auth.ts:396). 이에스페이먼트가 그 수집을 쓰면 잠긴 기간 데이터는 되살릴 수 없다. 열려면 cdp-auth 수집 세 곳에 "잠김이면 통과" 한 조건(별건).
-- 잠긴 동안 기존 자동발송·여정은 계속 돈다(요금제 재확인 없음 · 기존 체험 만료와 같은 성질) → BUGS 등재 대상.
-- 슈퍼관리자 구독 상태 선택칸에서 expired·suspended를 고르면 발송까지 막힌다(D2와 충돌하는 수동 경로 · 기존).
-- AdminDashboard 잔액 이력에서 `credit_recharge`(AI 크레딧 선불 충전)도 "발송 차감"으로 보인다(기존).
+- 잠긴 동안 기존 자동발송·여정은 계속 돈다(요금제 재확인 없음 · 기존 체험 만료와 같은 성질) → [BUGS B-1004-2](../status/BUGS.md) ①.
+- 슈퍼관리자 구독 상태 선택칸에서 expired·suspended를 고르면 발송까지 막힌다(D2와 충돌하는 수동 경로 · 기존) → B-1004-2 ③.
+- AdminDashboard 잔액 이력에서 `credit_recharge`(AI 크레딧 선불 충전)도 "발송 차감"으로 보인다(기존) → B-1004-2 ②.
 - 미리 산 싼 달을 중간 요금제로 올리는 길이 없다(§1-2 #13).
+- 슈퍼관리자가 고객 신청 없이 관리 중 회사의 요금제를 바꾸는 길이 없다(G4 · 회사 수정 409). 필요하면 [관리 종료] → 회사 수정 → [이용 기간 시작] 순서이고, 이미 낸 기간 정산은 잔액 조정으로 한다.
+- 내림 예약을 슈퍼관리자가 취소하는 버튼이 없다(고객이 지금 요금제를 다시 신청하면 취소된다 · §5-2 reserve_cancel).
+
+---
+
+## 11. 구현 기록 (2026-10-04)
+
+### 11-1. 파일
+| 파일 | 역할 |
+|---|---|
+| `backend/src/utils/plan-term-calc.ts` (신규) | 순수 계산: `periodEnd` · `monthlyCharge` · `planOfDay`·`denomOfDay` · `upgradeCharge`·`upgradeRuns` · `currentTermEvents` · `lastPlanSetterPlanId` · `decideSettle` · `decidePlanRequest` |
+| `backend/src/utils/plan-term.ts` (신규 · CT) | 쓰기 입구 하나. 잠금·회차 CAS·원장·잔액 차감·정산(settle)·잠금(block)·복구·정렬(align)·승인 판정·결제방식 전환 게이트·관리자 조작·조회·워커(`runPlanTermPass` · `startPlanTermWorker`) |
+| `backend/src/routes/plan-term.ts` (신규) | 고객 `/api/companies/plan-term`(events · quote · extend · auto-renew) · 관리자 `/api/admin/companies/:id/plan-term`(GET · start · expires · auto-renew · end) |
+| `backend/src/app.ts` | 라우터 2개 마운트(각 접두어보다 먼저) · `startPlanTermWorker()` |
+| `backend/src/routes/admin.ts` | 신청 승인 = CT 먼저(handled 면 기존 UPDATE 생략 · `PlanTermError` = 업무 응답) · 회사 수정 409 · 결제방식 전환 catch · balance-overview `plan_term` 제외 |
+| `backend/src/routes/companies.ts` | my-plan `prepaid_term` · plan-request/status `scheduled_from` · grant-trial·revoke-basic-trial·PUT /:id 게이트 · monthly_spend `plan_term` 제외 |
+| `backend/src/utils/basic-trial.ts` · `marketing-diagnosis-grant.ts` · `routes/marketing-diagnosis.ts` | 관리 중이면 체험·진단 체험 대상 아님(409 · not_applicable) |
+| `backend/src/utils/billing-type-history.ts` | 선불→후불 게이트(`guardBillingTypeSwitchWithClient`) |
+| `backend/src/utils/free-messaging.ts` · `free-messaging-grant-worker.ts` | 지급 = 이용 기간 패스 결과(실패 회사 · 기준일)로 관리 회사 제외 |
+| `backend/src/utils/company-merge.ts` | 병합 축 `company_plan_term_events` keep |
+| `frontend/src/components/PrepaidTermCard.tsx` (신규) | /pricing 카드 · 연장 확인 창 · 끄기 확인 · 잠김 블록 · 기록 · `prepaidTermRequestNote` |
+| `frontend/src/components/admin/PlanTermBox.tsx` (신규) | 단가/요금 탭 상자 · `PlanTermLockNote`(기본정보 탭 한 줄) |
+| `frontend/src/pages/PricingPage.tsx` · `Dashboard.tsx` · `AdminDashboard.tsx` · `components/PlanChangeModal.tsx` · `PlanApprovalModal.tsx` · `BalanceModals.tsx` | 카드 장착 · 잠김 안내 · 배지 · 예약 문구 · 승인 결과 문구 · 잔액 이력 라벨 · 충전 창 폭 |
+
+### 11-2. 테스트(backend · vitest)
+- `plan-term-calc.test.ts` — periodEnd 벡터 12 · 차액 성질 · 올림 구간 · 원장 절단 · 가드 · 정산·승인 판정표
+- `plan-term-ct.test.ts` — 가짜 DB(모르는 SQL이면 던짐)로 정산·잠금·FREE 종료·연장 재생·CAS·복구·AI 보충·승인·정렬·Codex 1R~2R 재현 + 소스 계약 3(쓰기 입구 · DB 오늘 미사용 · plan_id 쓰기 허용 목록)
+- `plan-term-grant-worker.test.ts` · `plan-term-grant-sql.test.ts` — 지급 순서·제외 인자·SQL 인자 계약
+- 변이 검사 5건(정산 순서 · 재생 생략 · 같은 요금제 날 제외 · 가드 sets_plan · 실패 회사 제외) 전부 테스트가 잡음 · 최종 backend 565파일 7,953건 · frontend `build:safe` 통과(지연 청크 48 실존)
+
+### 11-3. 배포·운영 기록
+| 시각(KST) | 일 |
+|---|---|
+| 1004 12:41 | `c8da552e` 푸시(1차 코드 · 플래너·연동과 같은 커밋 · DDL 전이라 무동작) |
+| 1004 14:51 | `c9063096` 커밋(Codex 1R~3R 정정 · 4R approve) |
+| 1004 14:56:32 | 서버 pull |
+| 1004 14:56:43 | `targetup-backend` 재시작 |
+| 1004 14:58 | 프론트 `build:safe` |
+| 1004 | DDL(§2) Harold 실행 |
+| 1004 15:00 | 이에스페이먼트 [이용 기간 시작] — 스타터 · 만료 11/1 · 사유 "자동결제적용" · start 행 covers 10/4~11/1 · 잔액 356,022.35원 |
+| 1102 예정 | 첫 자동 결제 165,000원(11/2~12/1) = 실측 §9 |
+
+운영 절차·확인 명령 = [OPS.md §2-2-H](../status/OPS.md).

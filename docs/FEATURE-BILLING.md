@@ -331,6 +331,8 @@ AI 크레딧 충전은 회사 행위라 나눌 근거가 없고, 에이전트 �
 | 수량 조정 | `billing_qty_adjustments` | 회사×기간 축이라 삭제·재발행에도 살아남는다 |
 | 수동 완료 | `billing_manual_completions` | 우리 정산으로 못 내는 회사의 그 달 기록 |
 
+> **선불 회사의 요금제 월정액은 정산서 축이 아니다**(★2026-10-04). 선불 회사는 정산서 발행이 막혀 있고(`billing-issue.ts` 선불 차단 · 발송은 잔액에서 이미 차감), 요금제 월정액은 **선불 이용 기간 CT**(`utils/plan-term.ts`)가 만료 다음 날 잔액에서 받는다(`balance_transactions` type `deduct` · reference_type `plan_term`). 선불→후불 전환은 이미 낸 이용 기간이 끝난 다음 날부터만 된다(후불 정산이 같은 기간 구독료를 다시 청구하지 않게). SoT = [선불 요금제 이용 기간 설계서](2026-10-04-prepaid-plan-term-design.md) · 운영 = [OPS §2-2-H](../status/OPS.md).
+
 ### 3-2. 발행 흐름
 
 ```

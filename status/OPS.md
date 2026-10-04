@@ -502,6 +502,34 @@ docker exec -i targetup-redis sh -c "redis-cli --scan --pattern 'result_*<campai
 ```
 출력 = 지운 키 수(없으면 빈 출력). `REDIS_URL`에 비밀번호가 있으면 `redis-cli -a` 필요(0914 실측은 무인증으로 2키 삭제).
 
+### 2-2-H. 선불 요금제 이용 기간 운영 (★2026-10-04 신설 · 설계 = [설계서](../docs/2026-10-04-prepaid-plan-term-design.md))
+
+선불 회사의 요금제에 만료일을 두고, 만료 다음 날 충전 잔액에서 1개월 요금(월정액 + 부가세)을 자동으로 받는다. 잔액 부족·자동 연장 꺼짐이면 요금제가 잠긴다(plan_id = FREE · 발송은 계속).
+
+**도는 것**
+- 워커 `plan-term` = 기동 즉시 + 10분(`app.ts` `startPlanTermWorker`). 만료 정산(자동 결제 · 잠금 · FREE 종료) · 미리 산 다른 요금제 구간 시작일 정렬.
+- 무료 메시징 지급 워커는 이 패스를 먼저 기다리고, 정산에 실패한 회사·자정을 넘긴 패스는 그 회차 지급에서 뺀다(다음 패스에서 지급).
+- 잠긴 회사는 자동 재시도하지 않는다. 고객이 충전한 뒤 요금제 페이지 [1개월 연장]으로 다시 연다.
+
+**화면**
+- 슈퍼관리자: 회사 수정 → **단가/요금 탭** → 선불 잔액 아래 「선불 이용 기간」 = 이용 기간 시작(결제 없음 · 첫 만료일) · 만료일 조정(돈 이동 없음 · 이미 결제한 구간보다 앞당기기 불가) · 자동 연장 대리 변경 · 관리 종료(요금제 그대로 · 환불 없음).
+- 고객사 관리자: 요금제 페이지 맨 위 카드(만료일 · 자동 연장 스위치 · 1개월 연장 · 기록).
+
+**절차**
+| 상황 | 순서 |
+|---|---|
+| 새 선불 회사에 적용 | 선불 · 유료 요금제(무료체험 아님)인지 확인 → [이용 기간 시작] 첫 만료일 입력(어제로 넣으면 10분 안에 첫 결제) |
+| 요금제 변경 | 고객 신청 → 슈퍼관리자 승인(올림 = 남은 기간 차액 즉시 · 내림 = 만료 다음 날부터). 관리 중 회사는 회사 수정 화면에서 요금제를 못 바꾼다(409) |
+| 후불 전환 | [관리 종료] → 결제방식 후불. 이미 낸 기간이 남았으면 409 `PAID_TERM_REMAINS` 의 날짜 다음 날부터 전환된다(후불 정산 이중 청구 방지) |
+| 잠긴 회사 | 고객이 충전 → 1개월 연장. 슈퍼관리자 만료일 조정은 잠긴 동안 막힌다(409) |
+
+**상태 확인**(▶ 실행 위치: .62 · root 셸 · docker DB)
+```bash
+docker exec -i targetup-postgres psql -U targetup targetup -c "SELECT c.company_name, c.plan_term_expires_on, c.plan_term_auto_renew, c.plan_term_restore_plan_id IS NOT NULL AS blocked, c.plan_term_version, c.balance, p.plan_code FROM companies c LEFT JOIN plans p ON p.id = c.plan_id WHERE c.plan_term_expires_on IS NOT NULL;" -c "SELECT c.company_name, e.event_type, e.plan_code, e.total_amount, e.covers_from, e.covers_to, e.expires_after, e.actor_label, e.created_at FROM company_plan_term_events e JOIN companies c ON c.id = e.company_id ORDER BY e.created_at DESC LIMIT 10;"
+```
+
+**로그·알림 지문**: `[plan-term] 정산·정렬 N곳` · 시스템 알림 `plan-term:settle-skip`(해지·선불 아님이라 정산 멈춤) · `plan-term:settle-zero`(다음 구매 요금제 0원) · `plan-term:align-mismatch`(요금제가 원장과 다름 · CT 밖 변경) · `plan-term:worker-fail`(회사별 정산 실패).
+
 ### 2-3. QTmsg 발송 엔진 (로컬 - 개발용)
 ```bash
 cd C:\projects\qtmsg\bin
@@ -530,6 +558,7 @@ C:\Users\ceo\projects\targetup\  (로컬)
 │   │           ├── customer-filter.ts     ← 고객 필터/쿼리 빌더 컨트롤타워 (D63 CT-01)
 │   │           ├── sms-queue.ts           ← MySQL 큐 조작 컨트롤타워 (D63 B16-02)
 │   │           ├── prepaid.ts             ← 선불 차감/환불 컨트롤타워 (D63 B16-02)
+│   │           ├── plan-term.ts           ← 선불 요금제 이용 기간 컨트롤타워(자동 결제·잠금·연장 · 2026-10-04 · 계산 = plan-term-calc.ts)
 │   │           ├── campaign-lifecycle.ts  ← 캠페인 취소/결과동기화 (D63 B16-02)
 │   │           ├── unsubscribe-helper.ts ← 수신거부 관리 + 080 자동연동 컨트롤타워 (D64 CT-03, D73 확장: registerUnsubscribe + getUserUnsubscribes)
 │   │           └── stats-aggregation.ts ← 대시보드 통계 집계
