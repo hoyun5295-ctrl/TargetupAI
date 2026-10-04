@@ -19,6 +19,8 @@ export interface TermEvent {
   monthly_price: number | string | null;
   covers_from: string | null;
   covers_to: string | null;
+  /** upgrade 행은 { sets_plan: boolean } — 오늘 plan_id를 실제로 바꿨는지(정렬 가드 기준 · Codex 2R high) */
+  detail?: any;
 }
 
 /** 날짜 구간을 덮는 이벤트 — 그날의 요금제·가격을 정한다 */
@@ -110,11 +112,53 @@ export function upgradeCharge(
   return { supply, vat, total: supply + vat };
 }
 
-/** (순수) plan_id를 마지막으로 정한 이벤트의 요금제 — 정렬 가드 기준 */
+/**
+ * (순수) 올림이 실제로 바꾸는 날짜 구간들. **차액을 세는 날과 같은 날만** 바꾼다(Codex 1R high):
+ * 그날 요금제가 목표와 다르고 그날 가격 ≤ 목표가인 날. 더 비싼 요금제로 이미 산 날은 건드리지 않는다
+ * (오늘~만료일 전체를 덮으면 미리 산 비싼 구간이 싼 요금제로 바뀌고, 다시 올리면 차액을 또 받는다).
+ * 연속한 날끼리 묶어 [from, to] 목록으로 돌려준다.
+ */
+export function upgradeRuns(
+  events: TermEvent[], from: string, to: string, target: { planId: string; price: number | string },
+): Array<{ from: string; to: string }> {
+  if (!isYmd(from) || !isYmd(to) || from > to) return [];
+  const targetPrice = Number(target.price) || 0;
+  const runs: Array<{ from: string; to: string }> = [];
+  for (let d = from; d <= to; d = shiftDayKey(d, 1)) {
+    const p = planOfDay(events, d);
+    const changes = !!p && p.planId !== target.planId && p.price <= targetPrice;
+    if (!changes) continue;
+    const last = runs[runs.length - 1];
+    if (last && shiftDayKey(last.to, 1) === d) last.to = d;
+    else runs.push({ from: d, to: d });
+  }
+  return runs;
+}
+
+/** 관리 기간을 끝내는 이벤트 — 그 이전 원장은 지난 관리 기간이다 */
+export const TERM_ENDING_EVENT_TYPES = ['end', 'expire_free'] as const;
+
+/**
+ * (순수) 현재 관리 기간의 원장만 남긴다(Codex 1R high). 마지막 종료 이벤트 이후만.
+ * 지난 기간 원장이 섞이면 관리를 끝냈다 다시 시작한 회사가 옛 요금제로 결제·정렬된다.
+ * 회차 오름차순으로 넘긴다.
+ */
+export function currentTermEvents<T extends TermEvent>(events: T[]): T[] {
+  let cut = -1;
+  events.forEach((e, i) => { if ((TERM_ENDING_EVENT_TYPES as readonly string[]).includes(e.event_type)) cut = i; });
+  return events.slice(cut + 1);
+}
+
+/**
+ * (순수) plan_id를 **실제로** 마지막에 정한 이벤트의 요금제 — 정렬 가드 기준.
+ * upgrade 는 오늘 plan_id를 바꾼 행(detail.sets_plan === true)만 센다. 미래 구간만 올린 행을 세면 가드가
+ * 실제 plan_id와 어긋나 그 구간이 시작돼도 정렬이 영영 거부된다(Codex 2R high · 결제한 구간 미적용).
+ */
 export function lastPlanSetterPlanId(events: TermEvent[]): string | null {
   let found: TermEvent | null = null;
   for (const e of events) {
     if (!(PLAN_SETTER_EVENT_TYPES as readonly string[]).includes(e.event_type)) continue;
+    if (e.event_type === 'upgrade' && e.detail?.sets_plan !== true) continue;
     if (!found || e.term_version > found.term_version) found = e;
   }
   return found ? found.plan_id : null;

@@ -83,6 +83,7 @@
 | `Starting collaboration tool: wait` | **직전에 띄운 장시간 명령의 결과를 못 받고 선다.** 0804 실측 — `tsc`·`vitest`·`git`을 동시에 띄웠는데 `vitest`만 종료 기록이 없고 프로세스는 이미 사라져 있었다 | 잡을 버리고 §2 ①(검사 재실행 금지)을 넣어 재실행 |
 | `Starting Codex task thread.` | **브로커 좀비** — 브로커가 살아 있어도 app-server 연결을 잃으면 그 뒤 모든 잡이 여기서 영구히 선다(0729: 잡 4개 전멸) | 컴패니언·브로커 `Stop-Process` → `state/<ws>/broker.json` 삭제 → 재실행 |
 | 파이프 `ENOENT` | 인증 만료(`auth.loggedIn=false`) | **Harold님이 `codex login`.** 인증이라 본 AI가 대행하지 않는다 |
+| `400 ... model is not supported when using Codex with a ChatGPT account` (9초 안에 실패) | **기본 모델 이름**(config `gpt-6.1-sol`)이 계정에서 거절됨 — 계정 문제가 아니다(★1004 실측 · Harold 지적) | 실행 인자에 **`--model gpt-6-astra`**(review·adversarial-review 둘 다 받는다 · 사용법 출력엔 없음). 설정 파일은 고치지 않는다 |
 | 마지막 줄이 **정상 명령 완료**인데 잡 pid만 사라짐 | **런처 사망 = 잡 사망**(0805·0814 2회). 0814는 **런처를 `timeout`으로 감쌌다.** `--background`는 잡을 런처에서 떼어내지 않아 **런처가 죽으면 잡도 죽는다.** Bash 도구 타임아웃을 피하려고 `timeout 100 node ... > /dev/null` 로 띄웠더니 100초마다 리뷰가 통째로 죽었다(3회 반복 · 로그가 시작 후 약 91초에 멈춘 것이 지문). 55초에 끝난 회차만 살아남아 "도구가 불안정하다"로 오판했다 | **런처를 절대 `timeout`으로 감싸지 않는다.** Bash `run_in_background`로 띄워 런처를 살려 둔다(그 태스크의 출력 파일에 결과 본문이 그대로 찍힌다) |
 | `Running command: ... Get-ChildItem -LiteralPath ...` (디렉터리 스캔) | **대상 파일을 경로로 줬는데도 리뷰가 스스로 레포를 훑다가 선다.** 0804 2차 실측 — 6개 파일을 다 읽고 마지막에 파일 목록 조회를 띄운 뒤 32분간 로그가 한 줄도 안 늘었고 잡 pid는 이미 사라져 있었다 | 잡을 버리고 §2 ①과 **함께** "디렉터리 재귀 탐색·파일 목록 조회 금지 — 아래 경로만 읽어라"를 요청문에 넣어 재실행 |
 

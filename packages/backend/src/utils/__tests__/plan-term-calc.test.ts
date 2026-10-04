@@ -10,7 +10,7 @@
  */
 import { describe, it, expect } from 'vitest';
 import {
-  periodEnd, monthlyCharge, planOfDay, denomOfDay, upgradeCharge, lastPlanSetterPlanId,
+  periodEnd, monthlyCharge, planOfDay, denomOfDay, upgradeCharge, upgradeRuns, currentTermEvents, lastPlanSetterPlanId,
   daysLeft, decideSettle, decidePlanRequest, type TermEvent,
 } from '../plan-term-calc';
 
@@ -112,6 +112,36 @@ describe('upgradeCharge — 남은 기간 일할 차액(D3)', () => {
   });
 });
 
+describe('upgradeRuns · currentTermEvents (Codex 1R high 2건)', () => {
+  it('더 비싼 요금제로 이미 산 구간은 바꾸지 않는다 — 차액을 세는 날 = 바꾸는 날', () => {
+    const events = [
+      ev(1, 'renew', 'C10', 100000, '2026-11-04', '2026-12-03'),
+      ev(2, 'extend', 'C20', 200000, '2026-12-04', '2027-01-03'),
+    ];
+    const target = { planId: 'C15', price: 150000 };
+    expect(upgradeRuns(events, '2026-11-04', '2027-01-03', target)).toEqual([{ from: '2026-11-04', to: '2026-12-03' }]);
+    expect(upgradeCharge(events, '2026-11-04', '2027-01-03', target).supply).toBe(50000);
+  });
+  it('같은 가격·다른 요금제인 날은 0원으로 바꾼다 · 목표 요금제인 날은 제외', () => {
+    const events = [
+      ev(1, 'renew', 'A', 100000, '2026-11-04', '2026-11-10'),
+      ev(2, 'extend', 'T', 100000, '2026-11-11', '2026-11-20'),
+      ev(3, 'extend', 'B', 100000, '2026-11-21', '2026-11-30'),
+    ];
+    expect(upgradeRuns(events, '2026-11-04', '2026-11-30', { planId: 'T', price: 100000 }))
+      .toEqual([{ from: '2026-11-04', to: '2026-11-10' }, { from: '2026-11-21', to: '2026-11-30' }]);
+  });
+  it('현재 관리 기간 = 마지막 종료(end·expire_free) 이후만', () => {
+    const events = [
+      ev(1, 'start', 'A', 1, '2026-10-04', '2026-11-03'),
+      ev(2, 'end', 'A', 1, null, null),
+      ev(3, 'start', 'B', 1, null, null),
+    ];
+    expect(currentTermEvents(events).map((e) => e.term_version)).toEqual([3]);
+    expect(currentTermEvents(events.slice(0, 1)).map((e) => e.term_version)).toEqual([1]);
+  });
+});
+
 describe('lastPlanSetterPlanId · daysLeft', () => {
   it('요금제를 정한 마지막 이벤트(start·first_charge·restore·upgrade·align)', () => {
     const events = [
@@ -121,6 +151,11 @@ describe('lastPlanSetterPlanId · daysLeft', () => {
     ];
     expect(lastPlanSetterPlanId(events)).toBe('PRO');
     expect(lastPlanSetterPlanId([...events, ev(4, 'align', 'BASIC', 1, null, null)])).toBe('BASIC');
+  });
+  it('올림 행은 오늘 plan_id를 실제로 바꾼 것만 센다(Codex 2R high)', () => {
+    const base = [ev(1, 'start', 'A', 1, '2026-10-04', '2026-11-03')];
+    expect(lastPlanSetterPlanId([...base, { ...ev(2, 'upgrade', 'B', 1, '2026-12-04', '2027-01-03'), detail: { sets_plan: false } }])).toBe('A');
+    expect(lastPlanSetterPlanId([...base, { ...ev(2, 'upgrade', 'B', 1, '2026-10-10', '2026-11-03'), detail: { sets_plan: true } }])).toBe('B');
   });
   it('남은 날 = 오늘 포함, 지났으면 0', () => {
     expect(daysLeft('2026-10-10', '2026-11-03')).toBe(25);

@@ -488,8 +488,19 @@ export async function readPlanFreeQuotas(): Promise<Record<string, Record<string
 //   plan_code로 거르면 샌다: 이 저장소에는 체험인데 plan_code가 유료인 회사가 있고
 //   (무료체험을 BASIC으로 주던 경로 — trial-downgrade-worker 주석이 그 사실을 명시한다),
 //   실제로 (주)한국시세이도가 BASIC 수량을 받았다.
-export async function grantFreeMessagingForCurrentMonth(): Promise<{ granted: number; skipped: boolean }> {
+/**
+ * @param opts ★ 2026-10-04 선불 이용 기간 정산 결과(Codex 2R medium) — 정산·정렬이 끝나지 않은 회사는 이번 패스에서 뺀다.
+ *   excludeCompanyIds = 정산에 실패한 회사 · excludePlanTermCompanies = 정산 패스 자체가 실패해 관리 회사 전부를 뺀다.
+ *   planTermSettledOn = 정산 패스의 기준일(KST) — DB의 오늘(KST)과 다르면(자정을 넘겨 끝난 패스) 관리 회사를 뺀다(Codex 3R medium).
+ *   빼진 회사는 다음 패스(10분 뒤)에 정해진 요금제로 지급된다. 인자 없음 = 기존 동작.
+ */
+export async function grantFreeMessagingForCurrentMonth(
+  opts: { excludeCompanyIds?: string[]; excludePlanTermCompanies?: boolean; planTermSettledOn?: string } = {},
+): Promise<{ granted: number; skipped: boolean }> {
   let inserted = 0;
+  const excludeIds = (opts.excludeCompanyIds || []).filter(Boolean);
+  const excludeManaged = opts.excludePlanTermCompanies === true;
+  const settledOn = /^\d{4}-\d{2}-\d{2}$/.test(String(opts.planTermSettledOn || '')) ? opts.planTermSettledOn! : null;
   for (const t of FREE_MESSAGING_TYPES) {
     try {
       const res = await query(
@@ -502,13 +513,18 @@ export async function grantFreeMessagingForCurrentMonth(): Promise<{ granted: nu
             AND c.subscription_status IS DISTINCT FROM 'trial'
             -- ★ 2026-10-04 선불 이용 기간 만료 정산 전(만료일 < 오늘 KST)인 회사는 이번 패스에서 뺀다 — 결제·잠금이 정해진 뒤 다음 패스에서 그 요금제로 지급(회의론자 최종 #9)
             AND NOT COALESCE((to_jsonb(c) ->> 'plan_term_expires_on')::date < (NOW() AT TIME ZONE 'Asia/Seoul')::date, false)
+            -- ★ 2026-10-04 이용 기간 정산·정렬에 실패한 회사 / 정산 패스 실패 시 관리 회사 전부(다음 패스에서 지급)
+            AND NOT (c.id = ANY($3::uuid[]))
+            AND ($4::boolean IS NOT TRUE OR (to_jsonb(c) ->> 'plan_term_expires_on') IS NULL)
+            AND ($5::date IS NULL OR (to_jsonb(c) ->> 'plan_term_expires_on') IS NULL
+                 OR $5::date = (NOW() AT TIME ZONE 'Asia/Seoul')::date)
             AND NOT EXISTS (
               SELECT 1 FROM company_plan_changes cpc
                WHERE cpc.company_id = c.id
                  AND cpc.effective_date > ${KST_PERIOD_MONTH_SQL}
             )
          ON CONFLICT (company_id, period_month, msg_type) DO NOTHING`,
-        [t.key, t.unitValue],
+        [t.key, t.unitValue, excludeIds, excludeManaged, settledOn],
       );
       inserted += res.rowCount || 0;
     } catch (err: any) {

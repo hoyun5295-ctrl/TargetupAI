@@ -16,6 +16,7 @@
  */
 
 import { grantFreeMessagingForCurrentMonth, revokeFreeMessagingForTrials } from './free-messaging';
+import { runPlanTermPass } from './plan-term';
 
 const PASS_INTERVAL_MS = 10 * 60 * 1000;
 
@@ -34,7 +35,21 @@ export async function runFreeMessagingGrantPass(): Promise<{ granted: number; sk
     const revoked = await revokeFreeMessagingForTrials();
     if (revoked > 0) console.log(`[무료메시징][회수] 체험 전환 회사 미사용 지급분 ${revoked}행 회수`);
 
-    const res = await grantFreeMessagingForCurrentMonth();
+    // ★ 2026-10-04 선불 요금제 이용 기간의 정산·정렬을 먼저 끝내고 그 결과로 지급한다 — 미리 산 다른 요금제 구간이 월초에
+    //   시작되는 회사가 이전 요금제(plan_id)인 채로 지급되면 그 달 수량이 굳는다(ON CONFLICT DO NOTHING · Codex 1R·2R medium).
+    //   정산에 실패한 회사만 이번 패스에서 빼고, 패스 자체가 실패하면 관리 회사 전부를 뺀다. 다른 회사 지급은 막지 않는다
+    //   (영구 실패 한 곳이 전체 지급을 멈추지 않게). 빼진 회사는 다음 패스(10분 뒤)에 지급된다.
+    //   정산 기준일도 넘긴다 — 자정을 넘겨 끝난 패스(전날 기준)로 새 달 수량을 주지 않게 지급 SQL이 DB의 오늘과 대조한다(Codex 3R medium).
+    let exclude: { excludeCompanyIds?: string[]; excludePlanTermCompanies?: boolean; planTermSettledOn?: string } = {};
+    try {
+      const pass = await runPlanTermPass();
+      exclude = { planTermSettledOn: pass.today, ...(pass.failed.length > 0 ? { excludeCompanyIds: pass.failed } : {}) };
+    } catch (e: any) {
+      console.warn('[무료메시징] 선불 이용 기간 정산 선행 실패 · 관리 회사는 이번 지급에서 뺀다:', e?.message || e);
+      exclude = { excludePlanTermCompanies: true };
+    }
+
+    const res = await grantFreeMessagingForCurrentMonth(exclude);
     // 신규 지급이 있을 때만 남긴다 — 10분마다 "0건"을 찍으면 로그가 의미를 잃는다.
     if (res.granted > 0) {
       console.log(`[무료메시징][지급] 당월분 ${res.granted}행 신규 지급`);

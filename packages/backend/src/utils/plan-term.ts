@@ -23,7 +23,7 @@ import { sendSystemAlert } from './system-alert';
 import { carriedBaseOnReset } from './ai-credit-tx';
 import { shiftDayKey } from './plan-proration';
 import {
-  periodEnd, monthlyCharge, planOfDay, upgradeCharge, lastPlanSetterPlanId, daysLeft,
+  periodEnd, monthlyCharge, planOfDay, upgradeCharge, upgradeRuns, currentTermEvents, lastPlanSetterPlanId, daysLeft,
   decideSettle, decidePlanRequest, isYmd, PURCHASE_EVENT_TYPES, type TermEvent,
 } from './plan-term-calc';
 
@@ -134,13 +134,15 @@ async function loadEvents(db: { query: PoolClient['query'] } | typeof pool, comp
        FROM company_plan_term_events WHERE company_id = $1 ORDER BY term_version`,
     [companyId],
   );
-  return r.rows.map((e: any) => ({
+  // 현재 관리 기간만(마지막 종료 이후) — 판정·정렬·차액·보충이 지난 기간 원장을 보지 않게 한다(Codex 1R high).
+  //   ⚠ 결제방식 전환의 "이미 낸 기간 남음"은 지난 기간까지 봐야 해서 이 함수를 쓰지 않는다(guardBillingTypeSwitchWithClient).
+  return currentTermEvents(r.rows.map((e: any) => ({
     ...e,
     id: String(e.id),
     term_version: Number(e.term_version),
     plan_id: e.plan_id ? String(e.plan_id) : null,
     created_at: e.created_at instanceof Date ? e.created_at.toISOString() : String(e.created_at),
-  }));
+  })));
 }
 
 /** 회사 행을 잠그고 상태·원장을 읽는다. 준비 안 됨이면 events는 빈 배열 */
@@ -673,25 +675,41 @@ export async function applyPlanRequestWithClient(
       return { handled: true, outcome: 'end', charged: 0, message: '이용 기간 관리를 끝냈습니다. 미가입 상태를 유지합니다.' };
     }
     case 'upgrade': {
-      const charge = upgradeCharge(s.events, s.today, s.row.expires_on!, { planId: target.id, price: target.monthly_price });
+      const tgt = { planId: target.id, price: target.monthly_price };
+      // 차액을 세는 날 = 권한을 바꾸는 날(Codex 1R high). 더 비싼 요금제로 이미 산 날은 그대로 둔다.
+      const runs = upgradeRuns(s.events, s.today, s.row.expires_on!, tgt);
+      if (runs.length === 0) {
+        return { handled: true, outcome: 'noop', charged: 0, message: `남은 기간이 모두 ${target.plan_name} 요금제 이상으로 결제되어 있어 바꿀 구간이 없습니다.` };
+      }
+      const charge = upgradeCharge(s.events, s.today, s.row.expires_on!, tgt);
       const eventId = randomUUID();
       const fromName = (await getPlan(client, s.row.plan_id))?.plan_name || '';
+      const span = `${runs[0].from}~${runs[runs.length - 1].to}`;
       const dd = await deduct(client, s, charge.total, eventId,
-        `[요금제 이용료] ${fromName}→${target.plan_name} 올림 차액 ${s.today}~${s.row.expires_on} (공급가 ${won(charge.supply)} + 부가세 ${won(charge.vat)})`, input.actor);
+        `[요금제 이용료] ${fromName}→${target.plan_name} 올림 차액 ${span} (공급가 ${won(charge.supply)} + 부가세 ${won(charge.vat)})`, input.actor);
       if (!dd.ok) {
         throw new PlanTermError(402, {
           code: 'INSUFFICIENT_BALANCE', error: `잔액이 부족해 승인하지 못했습니다. 필요 ${won(charge.total)} / 현재 ${won(s.row.balance)}`,
           insufficientBalance: true, balance: s.row.balance, requiredAmount: charge.total,
         });
       }
-      const planChanged = s.row.plan_id !== target.id;
-      const v = await writeTerm(client, s, { plan: { id: target.id, paid: true }, next_plan_id: null });
-      await insertEvent(client, s, v, {
-        id: eventId, type: 'upgrade', plan: target, coversFrom: s.today, coversTo: s.row.expires_on, charge,
-        balanceBefore: dd.before, balanceAfter: dd.after, balanceTxId: dd.txId || null,
-        expiresBefore: s.row.expires_on, expiresAfter: s.row.expires_on, actor: input.actor,
-      });
-      if (planChanged) await changePlan(client, s, target, input.actor, `선불 이용 기간 중 올림(${target.plan_code})`);
+      // 오늘이 바뀌는 구간에 들면 지금 요금제를 바꾼다. 아니면(같은 요금제 재신청으로 미래의 싼 구간만 올림) plan_id는 그대로.
+      const switchNow = runs[0].from === s.today && s.row.plan_id !== target.id;
+      for (let i = 0; i < runs.length; i++) {
+        const first = i === 0;
+        const v = await writeTerm(client, s, first
+          ? { next_plan_id: null, ...(switchNow ? { plan: { id: target.id, paid: true } } : {}) }
+          : {});
+        await insertEvent(client, s, v, {
+          id: first ? eventId : undefined, type: 'upgrade', plan: target, coversFrom: runs[i].from, coversTo: runs[i].to,
+          charge: first ? charge : null,
+          balanceBefore: first ? dd.before : null, balanceAfter: first ? dd.after : null, balanceTxId: first ? (dd.txId || null) : null,
+          expiresBefore: s.row.expires_on, expiresAfter: s.row.expires_on, actor: input.actor,
+          // 정렬 가드는 오늘 plan_id를 실제로 바꾼 행만 센다(lastPlanSetterPlanId · Codex 2R high)
+          detail: { sets_plan: first && switchNow },
+        });
+      }
+      if (switchNow) await changePlan(client, s, target, input.actor, `선불 이용 기간 중 올림(${target.plan_code})`);
       return { handled: true, outcome: 'upgrade', charged: charge.total,
         message: charge.total > 0
           ? `${target.plan_name} 요금제로 바꿨습니다. 남은 기간 차액 ${won(charge.total)}(부가세 포함)을 차감했고 만료일(${s.row.expires_on})은 그대로입니다.`
@@ -1037,7 +1055,12 @@ export async function getScheduledFromForPlan(companyId: string, planId: string 
 // ════════════════════════════════════════════════════════════
 
 let _warnedNotReady = false;
-let _running = false;
+/** 패스 결과. failed = 정산·정렬에 실패한 회사(무료 메시징 지급이 이 회사를 빼고 지급한다 · Codex 2R medium) */
+/** today = 이 패스가 정산한 기준일(KST). 지급은 이 날이 DB의 오늘과 같을 때만 관리 회사에 준다(Codex 3R medium · 자정 경계) */
+export interface PlanTermPassResult { processed: number; failed: string[]; today: string }
+
+/** 진행 중인 패스와 그 기준일. 같은 날 요청은 함께 기다리고, 다른 날 요청은 끝난 뒤 그 날로 다시 돈다(Codex 2R medium) */
+let _inflight: { today: string; p: Promise<PlanTermPassResult> } | null = null;
 let _timer: NodeJS.Timeout | null = null;
 
 function isSchemaMissing(err: any): boolean {
@@ -1045,45 +1068,58 @@ function isSchemaMissing(err: any): boolean {
   return code === '42P01' || code === '42703';
 }
 
-/** 한 패스: 정산·정렬이 필요할 수 있는 관리 회사만 골라 회사별 트랜잭션으로 처리(재판정은 잠금 안에서). */
-export async function runPlanTermPass(today: string = todayKst()): Promise<{ processed: number }> {
-  if (_running) return { processed: 0 };
-  _running = true;
+/**
+ * 한 패스: 정산·정렬이 필요할 수 있는 관리 회사만 골라 회사별 트랜잭션으로 처리(재판정은 잠금 안에서).
+ * 무료 메시징 지급 워커가 "정렬이 끝난 요금제"로 지급하려고 이 함수를 먼저 await 한다(Codex 1R·2R medium).
+ *  - 같은 기준일 패스가 도는 중이면 그 결과를 함께 기다린다.
+ *  - 다른 기준일(자정을 넘긴 호출)이면 앞 패스가 끝난 뒤 요청한 날로 다시 돈다 — 전날 패스를 오늘 정산으로 치지 않는다.
+ *  - 후보 조회가 실패하면(DDL 전 제외) 던진다 — 지급 워커는 이때 관리 회사 전부를 빼고 지급한다.
+ */
+export function runPlanTermPass(today: string = todayKst()): Promise<PlanTermPassResult> {
+  if (_inflight && _inflight.today === today) return _inflight.p;
+  const prev = _inflight?.p;
+  const p: Promise<PlanTermPassResult> = (async () => {
+    if (prev) await prev.catch(() => undefined);
+    return runPlanTermPassOnce(today);
+  })().finally(() => { if (_inflight?.p === p) _inflight = null; });
+  _inflight = { today, p };
+  return p;
+}
+
+async function runPlanTermPassOnce(today: string): Promise<PlanTermPassResult> {
+  let candidates: string[] = [];
   try {
-    let candidates: string[] = [];
-    try {
-      const r = await query(
-        `SELECT c.id FROM companies c
-          WHERE (to_jsonb(c) ->> 'plan_term_expires_on') IS NOT NULL
-            AND (to_jsonb(c) ->> 'plan_term_restore_plan_id') IS NULL
-            AND ( (to_jsonb(c) ->> 'plan_term_expires_on')::date < $1::date
-                  OR EXISTS (SELECT 1 FROM company_plan_term_events e
-                              WHERE e.company_id = c.id AND e.covers_from <= $1::date AND e.covers_to >= $1::date
-                                AND e.plan_id IS DISTINCT FROM c.plan_id) )`,
-        [today],
-      );
-      candidates = r.rows.map((x: any) => String(x.id));
-    } catch (err: any) {
-      if (isSchemaMissing(err)) {
-        if (!_warnedNotReady) { console.warn('[plan-term] DDL 전: 워커 건너뜀:', err?.message); _warnedNotReady = true; }
-        return { processed: 0 };
-      }
-      throw err;
+    const r = await query(
+      `SELECT c.id FROM companies c
+        WHERE (to_jsonb(c) ->> 'plan_term_expires_on') IS NOT NULL
+          AND (to_jsonb(c) ->> 'plan_term_restore_plan_id') IS NULL
+          AND ( (to_jsonb(c) ->> 'plan_term_expires_on')::date < $1::date
+                OR EXISTS (SELECT 1 FROM company_plan_term_events e
+                            WHERE e.company_id = c.id AND e.covers_from <= $1::date AND e.covers_to >= $1::date
+                              AND e.plan_id IS DISTINCT FROM c.plan_id) )`,
+      [today],
+    );
+    candidates = r.rows.map((x: any) => String(x.id));
+  } catch (err: any) {
+    if (isSchemaMissing(err)) {
+      if (!_warnedNotReady) { console.warn('[plan-term] DDL 전: 워커 건너뜀:', err?.message); _warnedNotReady = true; }
+      return { processed: 0, failed: [], today };
     }
-    let processed = 0;
-    for (const id of candidates) {
-      try {
-        await withTx(async (client) => { await enter(client, id, today); });
-        processed++;
-      } catch (err: any) {
-        await alertOnce(`worker-fail:${id}`, `회사 ${id.slice(0, 8)} 정산 실패: ${err?.message || err}`);
-      }
-    }
-    if (processed > 0) console.log(`[plan-term] 정산·정렬 ${processed}곳`);
-    return { processed };
-  } finally {
-    _running = false;
+    throw err;
   }
+  let processed = 0;
+  const failed: string[] = [];
+  for (const id of candidates) {
+    try {
+      await withTx(async (client) => { await enter(client, id, today); });
+      processed++;
+    } catch (err: any) {
+      failed.push(id);
+      await alertOnce(`worker-fail:${id}`, `회사 ${id.slice(0, 8)} 정산 실패: ${err?.message || err}`);
+    }
+  }
+  if (processed > 0) console.log(`[plan-term] 정산·정렬 ${processed}곳`);
+  return { processed, failed, today };
 }
 
 export function startPlanTermWorker(): void {

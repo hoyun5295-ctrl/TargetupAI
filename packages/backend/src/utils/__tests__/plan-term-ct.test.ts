@@ -358,6 +358,84 @@ describe('적대 검토 정정(2026-10-04)', () => {
   });
 });
 
+describe('Codex 1R 정정', () => {
+  it('[high] 올림이 미리 산 더 비싼 구간을 보존한다(차액도 그 구간을 빼고 받는다)', async () => {
+    // 오늘 BASIC(35만) · 미리 산 다음 달 PRO(100만) · STD(60만)로 올림 → BASIC 구간만 STD, PRO 구간 그대로
+    resetDb({ plan_id: PLANS.BASIC.id, plan_term_expires_on: '2027-01-03', plan_term_version: 2, balance: 9000000 });
+    addEvent({ term_version: 1, event_type: 'renew', plan_id: PLANS.BASIC.id, monthly_price: 350000, covers_from: '2026-11-04', covers_to: '2026-12-03' });
+    addEvent({ term_version: 2, event_type: 'extend', plan_id: PLANS.PRO.id, monthly_price: 1000000, covers_from: '2026-12-04', covers_to: '2027-01-03' });
+    const out = await applyPlanRequestWithClient(client as any, { companyId: CID, targetPlanId: PLANS.STD.id, trialRequest: false, actor: SUPER }, '2026-11-04');
+    expect(out).toMatchObject({ handled: true, outcome: 'upgrade', charged: 275000 }); // (60만 − 35만) × 30/30 + 부가세
+    const up = db.events.filter((e) => e.event_type === 'upgrade');
+    expect(up.map((e) => [e.covers_from, e.covers_to])).toEqual([['2026-11-04', '2026-12-03']]);
+    expect(db.co.plan_id).toBe(PLANS.STD.id);
+  });
+  it('[high] 관리 종료 뒤 다시 시작하면 지난 기간 원장의 요금제로 결제하지 않는다', async () => {
+    resetDb({ plan_id: PLANS.BASIC.id, plan_term_expires_on: '2026-10-09', plan_term_version: 3, balance: 9000000 });
+    addEvent({ term_version: 1, event_type: 'renew', plan_id: PLANS.PRO.id, monthly_price: 1000000, covers_from: '2026-10-04', covers_to: '2026-11-03' });
+    addEvent({ term_version: 2, event_type: 'end', plan_id: null });
+    addEvent({ term_version: 3, event_type: 'start', plan_id: PLANS.BASIC.id, monthly_price: 350000 }); // covers 없음(만료일 = 어제)
+    await runPlanTermPass('2026-10-10');
+    expect(db.balanceTx[0]).toMatchObject({ amount: 385000 }); // BASIC 1개월 + 부가세 (PRO 1,100,000 아님)
+    expect(db.co.plan_id).toBe(PLANS.BASIC.id);
+  });
+  it('[medium] 동시에 부른 패스는 하나를 함께 기다린다(지급 워커가 정렬 뒤에 지급)', async () => {
+    const a = runPlanTermPass('2026-10-10');
+    const b = runPlanTermPass('2026-10-10');
+    expect(a).toBe(b);
+    await a;
+  });
+  it('[medium] 무료 메시징 지급 워커는 이용 기간 패스를 먼저 기다린다(소스 순서)', () => {
+    const src = fs.readFileSync(path.resolve(__dirname, '..', 'free-messaging-grant-worker.ts'), 'utf8');
+    const pass = src.indexOf('await runPlanTermPass()');
+    const grant = src.indexOf('await grantFreeMessagingForCurrentMonth(exclude)');
+    expect(pass).toBeGreaterThan(0);
+    expect(grant).toBeGreaterThan(0);
+    expect(pass).toBeLessThan(grant);
+  });
+});
+
+describe('Codex 2R 정정', () => {
+  it('[high] 미래 구간만 올린 뒤 그 구간이 시작되면 정렬된다(올림 행이 가드를 막지 않는다)', async () => {
+    // A 정가 5만원(구매 당시 10만원) · 미래 C 4만원 구매 · B 8만원 신청 → 오늘 A 보존, 미래 C 구간만 B
+    PLANS.A = { id: '00000000-0000-0000-0000-00000000000a', plan_code: 'A', plan_name: '에이', monthly_price: 50000, ai_credits_per_month: 0 };
+    PLANS.B = { id: '00000000-0000-0000-0000-00000000000b', plan_code: 'B', plan_name: '비', monthly_price: 80000, ai_credits_per_month: 0 };
+    PLANS.C = { id: '00000000-0000-0000-0000-00000000000c', plan_code: 'C', plan_name: '씨', monthly_price: 40000, ai_credits_per_month: 0 };
+    resetDb({ plan_id: PLANS.A.id, plan_term_expires_on: '2027-01-03', plan_term_version: 3, balance: 9000000 });
+    addEvent({ term_version: 1, event_type: 'start', plan_id: PLANS.A.id, monthly_price: 100000, covers_from: '2026-11-01', covers_to: '2026-11-03' });
+    addEvent({ term_version: 2, event_type: 'renew', plan_id: PLANS.A.id, monthly_price: 100000, covers_from: '2026-11-04', covers_to: '2026-12-03' });
+    addEvent({ term_version: 3, event_type: 'extend', plan_id: PLANS.C.id, monthly_price: 40000, covers_from: '2026-12-04', covers_to: '2027-01-03' });
+    const out = await applyPlanRequestWithClient(client as any, { companyId: CID, targetPlanId: PLANS.B.id, trialRequest: false, actor: SUPER }, '2026-11-10');
+    expect(out).toMatchObject({ handled: true, outcome: 'upgrade' });
+    expect(db.co.plan_id).toBe(PLANS.A.id);
+    expect(db.events[db.events.length - 1].detail).toEqual({ sets_plan: false });
+    await runPlanTermPass('2026-12-04');
+    expect(db.co.plan_id).toBe(PLANS.B.id);
+    expect(db.alerts.some((a) => a.includes('원장과 다릅니다'))).toBe(false);
+    delete (PLANS as any).A; delete (PLANS as any).B; delete (PLANS as any).C;
+  });
+  it('[medium] 다른 기준일 패스는 앞 패스를 기다린 뒤 따로 돈다 · 같은 날은 하나를 함께 기다린다', async () => {
+    const a = runPlanTermPass('2026-10-10');
+    const b = runPlanTermPass('2026-10-11');
+    const c = runPlanTermPass('2026-10-11');
+    expect(a).not.toBe(b);
+    expect(b).toBe(c);
+    await Promise.all([a, b]);
+  });
+  it('[medium] 정산 실패 회사는 결과의 failed 로 돌려준다(지급 제외 근거)', async () => {
+    resetDb({ balance: 9000000, status: 'active' });
+    addEvent({ term_version: 1, event_type: 'start', plan_id: PLANS.PRO.id, monthly_price: 1000000, covers_from: '2026-10-04', covers_to: '2026-11-03' });
+    const orig = client.query.getMockImplementation();
+    client.query.mockImplementation(async (sql: string, p?: any[]) => {
+      if (String(sql).includes('UPDATE companies SET balance = balance - $1')) throw new Error('일시 장애');
+      return exec(sql, p);
+    });
+    const r = await runPlanTermPass('2026-11-04');
+    client.query.mockImplementation(orig!);
+    expect(r.failed).toEqual([CID]);
+  });
+});
+
 describe('정렬 가드', () => {
   it('미리 산 다른 요금제 구간이 시작되면 교체', async () => {
     resetDb({ plan_term_expires_on: '2026-12-03', plan_term_version: 2 });
