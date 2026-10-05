@@ -586,21 +586,21 @@ describe('감사 기록', () => {
 });
 
 /**
- * [소스 스캔] 발송 경로 배선 — 세 경로가 **판정 CT 하나**를 부른다.
+ * [소스 스캔] 발송 경로 배선 — 네 경로가 **판정 CT 하나**를 부른다(★1005 브랜드메시지 추가 · Harold 결정 D-9 · 담당자 시험 발송은 대상 아님).
  * 못 박는 것: 라우트가 조건을 다시 조립하지 않는다(시행일·명단을 라우트에서 읽지 않는다).
  * 경로가 늘면 이 테스트가 먼저 깨져야 한다 — 조용히 빠진 경로는 인증 없는 발송 구멍이다.
  */
 describe('[소스 스캔] 발송 경로 배선', () => {
   const src = readFileSync(resolve(__dirname, '../routes/campaigns.ts'), 'utf8');
 
-  it('이용자 지시 발송 3경로가 게이트를 부른다', () => {
+  it('이용자 지시 발송 4경로가 게이트를 부른다', () => {
     const calls = src.match(/checkSenderAuthGate\(/g) || [];
-    expect(calls.length, '게이트 호출 수가 3이 아니다').toBe(3);
+    expect(calls.length, '게이트 호출 수가 4가 아니다').toBe(4);
   });
 
   it('게이트 뒤에는 발송을 세우고 인증 요구를 돌려준다 — 응답도 CT가 만든다', () => {
     const replies = src.match(/senderAuthRejection\(/g) || [];
-    expect(replies.length, '거절 응답 수가 게이트 수와 다르다').toBe(3);
+    expect(replies.length, '거절 응답 수가 게이트 수와 다르다').toBe(4);
     expect(src, '응답 코드를 라우트가 직접 적었다').not.toMatch(/'SENDER_AUTH_REQUIRED'/);
   });
 
@@ -646,14 +646,14 @@ describe('[소스 스캔] 발송 경로 배선', () => {
     expect(src).toMatch(/useIndividualCallback: directIndividualCallback/);
   });
 
-  it('★게이트 호출 3곳이 전부 개별 회신번호 축을 넘긴다', () => {
+  it('★게이트 호출 4곳이 전부 개별 회신번호 축을 넘긴다', () => {
     const calls: string[] = [];
     let at = src.indexOf('checkSenderAuthGate({');
     while (at !== -1) {
       calls.push(src.slice(at, src.indexOf('});', at)));
       at = src.indexOf('checkSenderAuthGate({', at + 1);
     }
-    expect(calls.length, '게이트 호출 수').toBe(3);
+    expect(calls.length, '게이트 호출 수').toBe(4);
     for (const call of calls) {
       expect(call, '개별 회신번호 축을 안 넘기는 게이트 호출이 있다').toMatch(/useIndividualCallback/);
     }
@@ -692,16 +692,17 @@ describe('[소스 스캔] 화면 배선', () => {
   });
 
   /**
-   * 화면이 서버 발송을 부르는 자리는 5곳이다(백엔드 게이트 3개를 이 5곳이 나눠 친다).
+   * 화면이 서버 발송을 부르는 자리는 6곳이다(백엔드 게이트 4개를 이 6곳이 나눠 친다).
    *   직접발송 · 타겟발송 · AI 오퍼레이터 승인 · AI 캠페인 생성발송 · AI 캠페인 이어보내기.
    *   ★ 2026-10-05 생성발송 1곳(AI 맞춤한줄)은 여는 곳이 0이던 창과 함께 지웠다(한줄로 시그니처 설계서 §1 H1).
+   *   ★ 2026-10-05 브랜드메시지 발송 1곳 추가(D-9).
    * 한 곳이라도 빠지면 그 화면은 "인증이 필요합니다"만 띄우고 입력할 곳을 안 주는 막다른 길이 된다.
    */
-  it('화면의 발송 호출 5곳이 전부 인증 요구를 받는다', () => {
+  it('화면의 발송 호출 6곳이 전부 인증 요구를 받는다', () => {
     const count = (src: string) =>
       (src.match(/senderAuth\.handleResponse\(/g) || []).length
       + (src.match(/senderAuth\.handleError\(/g) || []).length;
-    expect(count(dashboard), 'Dashboard 배선 수').toBe(4);
+    expect(count(dashboard), 'Dashboard 배선 수').toBe(5);
     expect(count(operator), 'AiOperatorPage 배선 수').toBe(1);
   });
 

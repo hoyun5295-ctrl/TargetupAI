@@ -4142,6 +4142,16 @@ router.post('/brand-send', async (req: Request, res: Response) => {
     // 큐에 실릴 회신번호를 먼저 확정한다 — campaigns와 큐가 다른 번호를 갖지 않게(판정은 CT 한 곳).
     const resolvedCallback = await resolveBrandCallback(companyId, resendFrom);
 
+    // ★1005 발신 인증(전송자격인증 3.5 · Harold 결정 D-9) — 브랜드메시지도 이용자가 직접 보내는 발송이고 실패 시 문자 대체 발송이 있다.
+    //   직접발송과 같은 게이트를 캠페인 생성 · 차감 · 적재 앞에서 세운다. 번호가 없으면 게이트가 계정 축으로 잡는다.
+    //   (담당자 시험 발송 `/test-send` 은 Harold 결정으로 대상 아님 — 본인 확인용)
+    const brandSenderGate = await checkSenderAuthGate({
+      req, userId, companyId, callback: resolvedCallback || '',
+      useIndividualCallback: false,
+      recipientCount: phones.length,
+    });
+    if (!brandSenderGate.ok) return res.status(403).json(senderAuthRejection(brandSenderGate));
+
     // 캠페인 레코드 생성
     const campaignResult = await query(
       // ★ 2026-07-29 `name` → `campaign_name`. 실제 컬럼명이 다른데 이 INSERT만 틀려서

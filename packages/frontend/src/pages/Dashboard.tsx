@@ -1,5 +1,6 @@
 ﻿import { AlertTriangle, Award, BarChart3, Bell, BellOff, Cake, Calendar, ChevronLeft, ChevronRight, Clock, CreditCard, DollarSign, HelpCircle, Lightbulb, Mail, MapPin, Percent, Rocket, Send, ShoppingCart, Sparkles, Store, TrendingDown, TrendingUp, User, UserPlus, Users, UserX } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useToast } from '../components/ToastProvider';
 import type { PrepaidTermView } from '../components/PrepaidTermCard';
@@ -3578,7 +3579,7 @@ const campaignData = {
         isAiTargetLocked={isAiMessagingLocked}
         onLockedFeature={openPlanFeature}
         sending={brandSending}
-        onSend={async (payload: any) => {
+        onSend={async function sendBrand(payload: any) {
           if (!payload?.senderKey) { setToast({ show: true, type: 'error', message: '발신 프로필을 선택해주세요' }); return; }
           if (!payload?.phones?.length) { setToast({ show: true, type: 'error', message: '수신자를 입력해주세요' }); return; }
           setBrandSending(true);
@@ -3589,6 +3590,8 @@ const campaignData = {
               body: JSON.stringify(payload),
             });
             const data = await res.json();
+            // ★1005 발신 인증(3.5) — 인증 뒤 이 발송을 그대로 다시 실행한다(창은 열린 채 · 내용 보존)
+            if (senderAuth.handleResponse(data, () => { void sendBrand(payload); })) return;
             if (!res.ok || data?.success === false) throw new Error(data?.error || '브랜드메시지 발송 실패');
             setToast({ show: true, type: 'success', message: `브랜드메시지 ${Number(data?.sentCount || 0).toLocaleString()}건 발송했습니다` });
             setShowBrandSend(false);
@@ -3945,18 +3948,22 @@ const campaignData = {
         onClose={() => setShowAgencyIntro(false)}
       />
 
-      {senderAuthState && (
-        <SenderAuthModal
-          state={senderAuthState}
-          code={senderAuth.code}
-          onCodeChange={senderAuth.setCode}
-          error={senderAuth.error}
-          busy={senderAuth.busy}
-          onVerify={senderAuth.verify}
-          onResend={senderAuth.resend}
-          onProceed={closeSenderAuth}
-          onCancel={closeSenderAuth}
-        />
+      {/* ★1005 브랜드메시지 창은 body 포털 · 겹침 2000 이라 그 위에 떠야 한다 → 확인 창 층(2100)으로 body 에 띄운다 */}
+      {senderAuthState && createPortal(
+        <div style={{ position: 'relative', zIndex: 2100 }}>
+          <SenderAuthModal
+            state={senderAuthState}
+            code={senderAuth.code}
+            onCodeChange={senderAuth.setCode}
+            error={senderAuth.error}
+            busy={senderAuth.busy}
+            onVerify={senderAuth.verify}
+            onResend={senderAuth.resend}
+            onProceed={closeSenderAuth}
+            onCancel={closeSenderAuth}
+          />
+        </div>,
+        document.body,
       )}
 
       {/* 하단 링크 — 2026-07-05 (Harold 명시): 매뉴얼 링크 헤더 → 푸터 복귀 (헤더 간소화, 매뉴얼 강조 제거) */}
