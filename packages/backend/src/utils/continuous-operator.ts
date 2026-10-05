@@ -36,10 +36,11 @@ import { insertProposalVariants, recommendVariantForProposal, recordVariantRewar
 // ★ D212+ 정책 (2026-05-23 Harold 명시): CT-64 영역 통합 — 검증 영역 + 담당자 학습
 // ★ D227+ 스팸 안전망 격상 — decideSpamOutcome(실제 테스트 결과 → 상태) + buildSpamRegeneratePrompt(AI 재작성)
 import { recordAdminStopLearning, decideSpamOutcome, buildSpamRegeneratePrompt, spamCheckPassedIndex, AUTO_SEND_SPAM_VERIFIED_SQL } from './continuous-operator-policy';
-import { resolveAutoSendLeadMinutes, computeScheduledSendAt, decideSendOutcome, decideStuckSendingRecovery, decideBudgetGuard, decideBudgetAlert, isSendableHourKst, validateScheduleTimeSendable, buildAutoSendPrepInfoBody, buildPendingReviewNoticeBody, computeNextOccurrence, computeNextGenerationRun, normalizeSendTimeMode, SendTimeMode, normalizeCopyStyle, buildCopyStylePromptBlock, CopyStyle, wrapOperatorNoticeBody, normalizeTargetHint, TargetHint, applyBenefitToBody, hasUneditedBenefitPlaceholder, detectMissedOperatorRound } from './autosend-policy';
+import { resolveAutoSendLeadMinutes, computeScheduledSendAt, decideSendOutcome, decideStuckSendingRecovery, decideBudgetGuard, decideBudgetAlert, isSendableHourKst, validateScheduleTimeSendable, buildAutoSendPrepInfoBody, buildPendingReviewNoticeBody, computeNextOccurrence, computeNextGenerationRun, normalizeSendTimeMode, SendTimeMode, normalizeCopyStyle, buildCopyStylePromptBlock, CopyStyle, wrapOperatorNoticeBody, normalizeTargetHint, TargetHint, applyBenefitToBody, hasUneditedBenefitPlaceholder, detectMissedOperatorRound , computeApprovalWindow, buildRenewalNoticeBody, countEmptyRounds, isWithinApprovalWindow, approvalSummarySince } from './autosend-policy';
+import { stableJson } from './agent-protocol';
 import { getOpt080Number } from './messageUtils';
 // ★ D227+ 검증된 스팸 자산 재사용 (auto-campaign-worker와 동일 패턴) — 실제 테스트폰 발송 + AI 재생성 + 재테스트
-import { autoSpamTestWithRegenerate } from './spam-test-queue';
+import { autoSpamTestWithRegenerate, computeMessageHash } from './spam-test-queue';
 import { generateMessages, stripIncompatibleEmojis } from '../services/ai';
 // ★ D227+ 종량제: AI 사이클 크레딧 부족 감지 + 담당자 무과금 알림(인증 라인 재사용)
 import { InsufficientCreditError, checkCredit, deductCreditSafe, hasCreditForStrict } from './ai-credit';
@@ -52,10 +53,11 @@ import { SUCCESS_CODES } from './sms-result-map';
 import { randomUUID } from 'crypto';
 import { buildSendableStagingInsertSql } from './operator-recipients';
 // ★ 2026-08-03 타겟팅 재설계 A-1: 대상 수는 발송과 같은 게이트를 쓰는 단일 문으로만 센다.
-import { resolveOperatorAudienceGates, compileOperatorAudience, resolveOperatorStoreScope, assertSegmentUsable } from './operator-audience';
+import { resolveOperatorAudienceGates, compileOperatorAudience, resolveOperatorStoreScope, assertSegmentUsable, countOperatorAudienceFor } from './operator-audience';
+import { conditionsToFilters, describeConditions, type AudienceCondition } from './audience-translate';   // ★ 2026-10-05 신뢰 설계
 import { AudienceGates } from './operator-recipients';
 import { resolveConsentScope, consentJoinSql } from './mall-consent';
-import { normalizeSegmentKey, normalizeSegmentParams, segmentNeedsCycleBaseline } from './automarketing-segment';
+import { normalizeSegmentKey, normalizeSegmentParams, segmentNeedsCycleBaseline, schedulePeriod, contractCriteriaText } from './automarketing-segment';
 // ★ 2026-09-26 한줄로 V2 m104 — 회복 패스의 적재 묶음 id 검증
 import { isUuid } from './normalize';
 // ★ 2026-08-04 변화 축 — 회차 스냅샷(자동마케팅 고유 어휘의 유일한 근거).
@@ -125,6 +127,21 @@ export interface CreateOperatorInput {
   segmentParams?: Record<string, number> | null;
   // ★ 2026-07-30 (임은지 접수): 채널 mms 전용 첨부 이미지(serverPath, 최대 3) — 매 자율 발송에 첨부.
   mmsImagePaths?: string[] | null;
+  // ★ 2026-10-05 신뢰 설계 — 칸 조건 계약(축이 아닌 목표 · 대상 번역 결과) · 문안 분기(직접 쓴 문안)
+  audienceConditions?: AudienceCondition[] | null;
+  copyMode?: 'ai' | 'fixed' | null;
+  fixedCopy?: { subject?: string; body: string } | null;
+}
+
+/** ★ 2026-10-05 직접 쓴 문안 — spam = 같은 문안 1회 검사 결과(지문) */
+export interface FixedCopy { subject: string; body: string; spam?: { hash: string; status: string; checkedAt: string } | null }
+/** ★ 2026-10-05 회차 기록 한 줄 — 0명인 날 · 멈춤도 남는다(승인 기간 요약 · 화면) */
+export interface RoundLogEntry { at: string; outcome: 'scheduled' | 'pending' | 'held' | 'empty' | 'blocked'; count?: number; reason?: string }
+
+/** ★ 2026-10-05 대상 계약 없는 등록(옛 자유 해석) 거절 — 대상은 축 또는 칸 조건으로만 */
+export class AudienceRequiredError extends Error {
+  code = 'AUDIENCE_REQUIRED';
+  constructor() { super('누구에게 보낼지 조건이 정해지지 않았어요. 발송 대상을 골라 주세요.'); }
 }
 
 export interface ContinuousOperator {
@@ -186,6 +203,13 @@ export interface ContinuousOperator {
   segmentParams: Record<string, number> | null;
   // ★ 2026-07-30 (임은지 접수): 채널 mms 첨부 이미지(serverPath) — 컬럼 미생성/NULL = []
   mmsImagePaths: string[];
+  // ★ 2026-10-05 신뢰 설계(설계서 §3 · DDL 전 = 비어 있음)
+  audienceConditions: AudienceCondition[] | null;
+  copyMode: 'ai' | 'fixed';
+  fixedCopy: FixedCopy | null;
+  approvedUntil: Date | null;
+  approvalMeta: Record<string, any> | null;
+  roundLog: RoundLogEntry[];
 }
 
 export interface OperatorProposal {
@@ -306,6 +330,13 @@ export async function createOperator(input: CreateOperatorInput): Promise<Contin
   //   계약 없는 active 행이 남아 워커가 집었다. 한 문장에 넣으면 원자성은 DB가 보장하고 보상 코드는 사라진다.
   //   컬럼 미생성(42703)이면 계약을 고른 등록만 실패한다 — 행도 크레딧도 남지 않는다(라우트가 503).
   const { segKey, segParams } = normalizeOperatorSegment(input);   // ★ 2026-10-05 미리보기와 같은 함수
+  // ★ 2026-10-05 대상 = 계약만(신뢰 설계 §2-1) — 축도 칸 조건도 없는 등록은 받지 않는다.
+  //   옛: 회차마다 AI 가 목표를 자유 해석했고, 조건을 칸으로 못 옮기면 빼고 넓혀 전체 고객이 됐다(생일 쿠폰 접수).
+  const audienceConditions = !segKey && Array.isArray(input.audienceConditions) && input.audienceConditions.length > 0 ? input.audienceConditions : null;
+  if (!segKey && !audienceConditions) throw new AudienceRequiredError();
+  const copyMode: 'fixed' | null = input.copyMode === 'fixed' ? 'fixed' : null;
+  const fixedCopy = copyMode ? normalizeFixedCopyInput(input.fixedCopy) : null;
+  if (copyMode && !fixedCopy) throw new Error('직접 쓴 문안이 비어 있어요. 문안을 넣어 주세요.');
   // ⛔ 5R 정정: 화이트리스트만 보고 저장하면 그 회사에서 쓸 수 없는 축도 active로 남고 크레딧까지 나간다
   //   (생일 데이터가 없는 회사가 API로 birthday를 보내는 경우). 화면이 잠그는 것과 같은 판정을 서버에서 한 번 더.
   // ⛔ 2026-08-04(R1): 검증은 근거 판정만 — 컴파일로 검증하면 변화 축이 "지난 회차 없음"에 걸려
@@ -340,6 +371,22 @@ export async function createOperator(input: CreateOperatorInput): Promise<Contin
     segCols = ', segment_key, segment_params';
     segVals = `, $${insertParams.length - 1}, $${insertParams.length}::jsonb`;
   }
+  // ★ 2026-10-05 칸 조건 · 직접 쓴 문안 — 칸이 준비되기 전(DDL 전)이면 이 등록만 503(축 계약 등록은 그대로)
+  const wantsV2 = !!audienceConditions || !!copyMode;
+  if (wantsV2 && !(await hasOperatorV2Columns())) {
+    throw new Error('DB 마이그레이션 필요: continuous_operators audience_filters column does not exist');
+  }
+  let v2Cols = '';
+  let v2Vals = '';
+  if (wantsV2) {
+    insertParams.push(
+      audienceConditions ? JSON.stringify({ conditions: audienceConditions, confirmedAt: new Date().toISOString() }) : null,
+      copyMode,
+      fixedCopy ? JSON.stringify(fixedCopy) : null,
+    );
+    v2Cols = ', audience_filters, copy_mode, fixed_copy';
+    v2Vals = `, $${insertParams.length - 2}::jsonb, $${insertParams.length - 1}, $${insertParams.length}::jsonb`;
+  }
   const result = await query(
     `INSERT INTO continuous_operators (
       id, company_id, created_by, name, objective,
@@ -347,7 +394,7 @@ export async function createOperator(input: CreateOperatorInput): Promise<Contin
       channel, benefit_content, admin_phone_numbers, backup_admin_phone, admin_alert_channel,
       auto_send_lead_minutes, budget_monthly, budget_daily, budget_alert_threshold, delivery_policy,
       sequence_enabled, sequence_delay_days, sequence_reminder_content, send_time_mode, copy_style,
-      schedule_month, target_hint, mms_image_paths${segCols},
+      schedule_month, target_hint, mms_image_paths${segCols}${v2Cols},
       created_at, updated_at
     ) VALUES (
       gen_random_uuid(), $1::uuid, $2::uuid, $3, $4,
@@ -355,7 +402,7 @@ export async function createOperator(input: CreateOperatorInput): Promise<Contin
       $10, $11, $12, $13, $14,
       $15, $16, $17, $18, $19,
       $20, $21, $22, $23, $24,
-      $25, $26, $27::text[]${segVals},
+      $25, $26, $27::text[]${segVals}${v2Vals},
       NOW(), NOW()
     ) RETURNING *`,
     insertParams,
@@ -777,6 +824,10 @@ export async function loadOperatorCompanyContext(companyId: string): Promise<Ope
 export type OperatorOrchestrateInput = Pick<ContinuousOperator, 'companyId' | 'objective' | 'copyStyle' | 'channel' | 'benefitContent' | 'targetHint' | 'segmentKey' | 'segmentParams'> & {
   id: string | null;
   createdBy: string | null;
+  /** ★ 2026-10-05 칸 조건 계약 · 주기(회차 기간) · 회차 기준 시각 */
+  audienceConditions?: AudienceCondition[] | null;
+  schedule?: string | null;
+  anchorAt?: Date | null;
 };
 
 export function buildOperatorOrchestrateContext(op: OperatorOrchestrateInput, loaded: OperatorCompanyContext): AgentContext {
@@ -789,7 +840,7 @@ export function buildOperatorOrchestrateContext(op: OperatorOrchestrateInput, lo
     // ★ 계절 문안 주입 — objective는 불변, 그 달 시즌을 메시지 톤·소재로만(§6-8).
     //   2026-07-02 2단계: 관리자 선택 문안 스타일 지시를 같은 힌트 채널로 함께 주입(미선택 = 계절만).
     seasonHint: [
-      buildSeasonPromptBlock(getSeasonContext(new Date()).month, loaded.ctx.business_type),
+      buildSeasonPromptBlock(getSeasonContext(op.anchorAt || new Date()).month, loaded.ctx.business_type),
       buildCopyStylePromptBlock(op.copyStyle),
     ].filter(Boolean).join('\n'),
     // ★ 2026-06-26: 폼에서 고정한 채널(#1) + 관리자 입력 혜택(#4) 주입 → 제안·테스트·발송 일관
@@ -806,6 +857,13 @@ export function buildOperatorOrchestrateContext(op: OperatorOrchestrateInput, lo
     operatorId: op.id,
     // ⛔ 1R 정정: 자동마케팅 회차임을 명시. 이 플래그가 있어야 발송 게이트가 붙은 대상 수를 쓴다.
     audienceScope: 'operator',
+    // ★ 2026-10-05 신뢰 설계 — 칸 조건 계약은 고정 조건이다(대상 AI 조건을 쓰지 않는다) · 회차 기간 · 기준 시각
+    audienceFilters: op.audienceConditions && op.audienceConditions.length > 0 ? conditionsToFilters(op.audienceConditions) : null,
+    audienceCriteria: op.audienceConditions && op.audienceConditions.length > 0 ? describeConditions(op.audienceConditions) : null,
+    period: schedulePeriod(op.schedule),
+    anchorAt: op.anchorAt ?? null,
+    // ★ 2026-10-05 핵심 혜택 = 사용자 글자만 근거(Q19 · 허브와 같은 엔진) — 회사 메모리 · 계절 블록이 혜택 근거가 되지 않는다(B-1005-1 ①)
+    lineFacts: { benefit: op.benefitContent || null },
   };
 }
 
@@ -836,6 +894,8 @@ export function operatorContextFields(input: CreateOperatorInput): Omit<Operator
     targetHint: segKey ? null : normalizeTargetHint(input.targetHint),
     segmentKey: segKey,
     segmentParams: segParams,
+    audienceConditions: !segKey && Array.isArray(input.audienceConditions) && input.audienceConditions.length > 0 ? input.audienceConditions : null,
+    schedule: input.schedule || 'daily',
   };
 }
 
@@ -1018,6 +1078,67 @@ export async function generateProposalForOperator(operatorId: string, opts?: { p
       .catch((e: any) => console.warn(`[ContinuousOperator] ${operator.name} 기준선 보충 경고:`, e?.message));
   }
 
+  // ★ 2026-10-05 회차 기준 시각 = 이번 회차 발송 시각(신뢰 설계 §2-5) — 옛 자리(제안 INSERT 직전)에서 그대로 옮겼다.
+  //   생일처럼 날짜로 정해지는 축은 이 시각의 날짜로 세고, 제안에 적어 발송 재추출 · 명단 화면이 같은 회차를 센다.
+  //    ★ 2026-07-07: scheduled_send_at은 pending에도 저장(발송 희망 시각 표시 + 예정일 경과 승인 경고).
+  //      자율 발송 트리거(runAutoSendPass)는 status='scheduled' 게이트라 pending 값 저장은 발송에 영향 0 — 소비처 17곳 전수 확인.
+  const leadMinutes = resolveAutoSendLeadMinutes(operator.autoSendLeadMinutes);
+  // ★ 2026-07-02 1단계 B (Harold 스펙): schedule_time = 발송 희망 시각.
+  //   fixed(기본) = 희망 시각 정각 발송 — 생성 워커가 희망 − lead에 돌므로 다음 occurrence가 이번 주기 희망 시각.
+  //   ai_optimal(명시 선택) = Phase3 B 클릭 피크 개인화(준비 창 보존·데이터 부족 시 now+lead 폴백) 유지.
+  // ★ 2026-07-12 C-1: fixed 모드도 발송 가능 창 클램프 — 신규 저장은 시각 가드로 차단되지만 기존 야간 설정 행 방어.
+  //   (ai_optimal은 computeOptimalSendAt이 자체 클램프, 리마인드는 shiftToSendableHour 기적용 — 3경로 전부 봉합)
+  const scheduledSendAt = operator.sendTimeMode === 'ai_optimal'
+    ? await resolveOptimalScheduledSendAt(operator.companyId, leadMinutes)
+    : shiftToSendableHour(computeNextOccurrence(operator.schedule, operator.scheduleTime, operator.scheduleDayOfWeek, operator.scheduleDayOfMonth, operator.scheduleMonth));
+  const period = schedulePeriod(operator.schedule);
+
+  // ★ 2026-10-05 대상 = 계약만 · AI 를 부르기 전에 먼저 센다(신뢰 설계 §2-1 · §2-5).
+  //   옛 축 힌트(target_hint)는 같은 이름의 축이다(AI 지시 갈래 삭제). 계약이 없으면(옛 자유 해석) 조건 확인 전까지 멈춘다.
+  const contract = operatorContract(operator);
+  const contractKey = contract?.key ?? null;
+  const contractConditions = contract?.conditions ?? null;
+  if (!contract) {
+    console.warn(`[ContinuousOperator] ${operator.name} 대상 계약 없음(옛 자유 해석) → 조건 확인 전 회차 멈춤`);
+    await notifyZeroTargetOnce(operator, '대상 조건 확인이 필요해요. 자동 마케팅 실행 중 목록에서 [조건 확인]을 눌러 주세요');
+    await appendRoundLog(operator.id, { outcome: 'blocked', reason: '대상 조건 확인 필요' });
+    await updateOperatorAfterRun(operator.id, operator.schedule, operator.scheduleTime, 0);
+    return null;
+  }
+  let measuredCount = 0;
+  try {
+    const scope = await resolveOperatorStoreScope(operator.companyId, operator.createdBy || null);
+    if (scope.blocked) throw new Error('담당 매장이 지정되지 않아 발송 대상을 정할 수 없습니다');
+    const m = await countOperatorAudienceFor({
+      companyId: operator.companyId,
+      segmentKey: contractKey,
+      segmentParams: operator.segmentParams,
+      legacyFilters: contractConditions ? conditionsToFilters(contractConditions) : null,
+      storeFilter: scope.storeFilter,
+      baseParams: scope.baseParams,
+      ownerUserId: operator.createdBy || null,
+      operatorId: operator.id,
+      period,
+      now: scheduledSendAt,
+    });
+    measuredCount = m.count;
+  } catch (e: any) {
+    // 판정 불가(데이터 없음 · 조건 비어 있음 · 매장 미배정 등) = 멈추고 알린다(조용한 0건 금지)
+    const reason = String(e?.message || '발송 대상을 세지 못했습니다');
+    console.warn(`[ContinuousOperator] ${operator.name} 대상 판정 불가 → 회차 멈춤:`, reason);
+    await notifyZeroTargetOnce(operator, reason);
+    await appendRoundLog(operator.id, { outcome: 'blocked', reason: reason.slice(0, 120) });
+    await updateOperatorAfterRun(operator.id, operator.schedule, operator.scheduleTime, 0);
+    return null;
+  }
+  if (measuredCount === 0) {
+    // 0명인 날 = 정상(생일자가 없는 날 등 · Harold Q8) — 조용히 넘긴다. 발송 0 · 차감 0 · AI 0. 기록만 남겨 승인 기간 요약에 센다.
+    console.log(`[ContinuousOperator] ${operator.name} 이번 회차 대상 0명 → 조용히 넘김(기록만)`);
+    await appendRoundLog(operator.id, { outcome: 'empty', count: 0 });
+    await updateOperatorAfterRun(operator.id, operator.schedule, operator.scheduleTime, 0);
+    return null;
+  }
+
   // 2~3. 회사 컨텍스트 + 자동 실행 옵션 + 고객 통계 — ★ 2026-10-05 미리보기와 같은 함수(loadOperatorCompanyContext)
   const loaded = await loadOperatorCompanyContext(operator.companyId);
   if (!loaded) return null;
@@ -1030,8 +1151,23 @@ export async function generateProposalForOperator(operatorId: string, opts?: { p
   try {
     // ★ 2026-10-05 미리보기에서 이미 만든 결과(precomputed)가 오면 오케스트레이터를 다시 부르지 않는다 — 본 제안 = 첫 회차.
     //   없으면 지금과 같다(같은 문맥 · 같은 무과금).
-    orchestratorResult = opts?.precomputed
-      ?? await orchestrate(buildOperatorOrchestrateContext({ ...operator, id: operator.id }, loaded), { source: 'continuous-operator', cost: 0 });  // ★ 2026-06-02: 제안서 생성(매일)은 무과금 — 200은 저장 1회, 발송 시 문안 3로 재배치. source는 이력용 유지.
+    // ★ 2026-10-05 문안 분기(Q15) — 직접 쓴 문안 = AI 0 · 미리보기 결과 = 대상 수 · 비용만 방금 센 값으로 · 그 밖 = 오케스트레이터
+    if (operator.copyMode === 'fixed' && operator.fixedCopy?.body) {
+      orchestratorResult = buildFixedCopyRoundResult(operator, loaded, measuredCount);
+    } else if (opts?.precomputed) {
+      orchestratorResult = withMeasuredCount(opts.precomputed, measuredCount);
+    } else {
+      orchestratorResult = await orchestrate(
+        buildOperatorOrchestrateContext({ ...operator, id: operator.id, segmentKey: contractKey, anchorAt: scheduledSendAt }, loaded),
+        { source: 'continuous-operator', cost: 0 },  // ★ 2026-06-02: 제안서 생성(매일)은 무과금 — 200은 저장 1회, 발송 시 문안 3로 재배치. source는 이력용 유지.
+      );
+    }
+    // 이 회차를 센 기준(회차 기간 · 기준 시각) — 발송 재추출 · 명단 화면이 같은 값으로 센다(보여준 수 = 나가는 수)
+    // ★ Codex 1R: 대상 칸(축 · 조건 · 기준 설명)은 저장된 계약에서만 — 미리보기 결과(창에서 대상을 바꾼 뒤일 수 있다) · AI 결과의 대상 칸을 믿지 않는다
+    orchestratorResult = {
+      ...orchestratorResult,
+      target: { ...(orchestratorResult?.target || {}), ...contractTarget(operator, contractKey, contractConditions), period, anchorAt: scheduledSendAt.toISOString() },
+    };
     // ★ D227+ 종량제: 크레딧 충분해 정상 실행 — paused_no_credit였으면 자동 재개
     await query(
       `UPDATE continuous_operators SET status = 'active', updated_at = NOW()
@@ -1069,7 +1205,10 @@ export async function generateProposalForOperator(operatorId: string, opts?: { p
     console.log(`[ContinuousOperator] ${operator.name} 0건 매칭 → 제안서 생성 안 함 (Zero-Count 영구 원칙)`);
     // ★ 2026-08-03 A-5: 조용한 0건 제거. 오발송은 종전에도 막았지만 사유가 담당자에게 가지 않아
     //   "왜 이번 달은 아무것도 안 왔지"를 알 길이 없었다. 반복 0건은 7일 쿨다운으로 수렴시킨다.
-    await notifyZeroTargetOnce(operator, orchestratorResult.meta?.countError || null);
+    // ★ 2026-10-05 0명 = 정상(조용히 기록) · 판정 불가(countError)만 알린다(신뢰 설계 §2-5)
+    const countError = orchestratorResult.meta?.countError || null;
+    if (countError) await notifyZeroTargetOnce(operator, countError);
+    await appendRoundLog(operator.id, countError ? { outcome: 'blocked', reason: String(countError).slice(0, 120) } : { outcome: 'empty', count: 0 });
     await updateOperatorAfterRun(operator.id, operator.schedule, operator.scheduleTime, 0);
     return null;
   }
@@ -1103,14 +1242,15 @@ export async function generateProposalForOperator(operatorId: string, opts?: { p
   const maxRiskRank = riskRank[ctx.cdp_auto_execute_max_risk] || 1;
   const riskWithinThreshold = proposalRiskRank <= maxRiskRank;
 
-  // ★ 2026-10-05 미리보기로 만든 첫 회차(precomputed)는 자율 발송 판정에서 뺀다 — 대상 수 · 비용이 최대 30분 묵은 값이라
-  //   그 값으로 자동 예약을 결정하지 않는다(Codex 1R). 담당자 승인으로 보내고, 승인 발송은 발송 직전 대상을 다시 뽑아 기록한다.
+  // ★ 2026-10-05 자율 자격 = 회사 자율 옵션(슈퍼관리자 · Q5 그대로) **또는** 담당자가 승인한 기간 안의 회차(주간 승인 · Q3).
+  //   대상 수 · 비용은 방금 계약으로 센 값이다(미리보기 결과도 덮었다) — 묵은 값으로 자동 예약하지 않는다.
+  //   ★ 2026-07-28 요금제 코드 직접 비교 → plans 플래그. 회사별 옵션(cdp_auto_execute_enabled)이
+  //   여전히 앞단에 있으므로, 요금제만으로 자율 발송이 켜지지는 않는다.
+  const companyAuto = !!(ctx.cdp_auto_execute_enabled && ctx.advanced_access_enabled);
+  //   승인 기간 = 첫 승인 회차의 날부터 끝까지(시작 경계 포함 · Codex 1R — 끝만 보면 승인 전 회차가 통과한다)
+  const approvalActive = isWithinApprovalWindow(operator.approvedUntil, operator.approvalMeta?.windowStart, scheduledSendAt);
   const autoExecuteEligible =
-    !opts?.precomputed &&
-    ctx.cdp_auto_execute_enabled &&
-    // ★ 2026-07-28 요금제 코드 직접 비교 → plans 플래그. 회사별 옵션(cdp_auto_execute_enabled)이
-    //   여전히 앞단에 있으므로, 요금제만으로 자율 발송이 켜지지는 않는다.
-    ctx.advanced_access_enabled &&
+    (companyAuto || approvalActive) &&
     recipientCount <= ctx.cdp_auto_execute_max_recipients &&
     costEstimate <= ctx.cdp_auto_execute_max_cost_krw &&
     riskWithinThreshold &&
@@ -1119,11 +1259,9 @@ export async function generateProposalForOperator(operatorId: string, opts?: { p
     adRejectOk;
 
   const autoExecuteReason = autoExecuteEligible
-    ? `자동 실행 임계값 통과: ${recipientCount}명 / ${costEstimate.toLocaleString()}원 / ${compliance.riskLevel} risk (회사 max ${ctx.cdp_auto_execute_max_risk}) / 광고`
+    ? `자동 실행 임계값 통과(${companyAuto ? '회사 자율' : '승인 기간'}): ${recipientCount}명 / ${costEstimate.toLocaleString()}원 / ${compliance.riskLevel} risk (회사 max ${ctx.cdp_auto_execute_max_risk}) / 광고`
     : `자동 실행 미통과: ${[
-        opts?.precomputed && '미리보기로 만든 첫 회차(담당자 승인 뒤 발송)',
-        !ctx.cdp_auto_execute_enabled && '옵션 OFF',
-        !ctx.advanced_access_enabled && '요금제',
+        !companyAuto && !approvalActive && '승인 기간 아님(회차마다 승인)',
         recipientCount > ctx.cdp_auto_execute_max_recipients && `${recipientCount}건 > ${ctx.cdp_auto_execute_max_recipients}`,
         costEstimate > ctx.cdp_auto_execute_max_cost_krw && `${costEstimate}원 > ${ctx.cdp_auto_execute_max_cost_krw}원`,
         !riskWithinThreshold && `compliance ${compliance.riskLevel} > 회사 max ${ctx.cdp_auto_execute_max_risk}`,
@@ -1133,17 +1271,6 @@ export async function generateProposalForOperator(operatorId: string, opts?: { p
       ].filter(Boolean).join(', ')}`;
 
   // 7. 제안서 INSERT — auto-eligible은 'scheduled'(T에 자율 발송), 아니면 'pending'(수동 검토).
-  //    ★ 2026-07-07: scheduled_send_at은 pending에도 저장(발송 희망 시각 표시 + 예정일 경과 승인 경고).
-  //      자율 발송 트리거(runAutoSendPass)는 status='scheduled' 게이트라 pending 값 저장은 발송에 영향 0 — 소비처 17곳 전수 확인.
-  const leadMinutes = resolveAutoSendLeadMinutes(operator.autoSendLeadMinutes);
-  // ★ 2026-07-02 1단계 B (Harold 스펙): schedule_time = 발송 희망 시각.
-  //   fixed(기본) = 희망 시각 정각 발송 — 생성 워커가 희망 − lead에 돌므로 다음 occurrence가 이번 주기 희망 시각.
-  //   ai_optimal(명시 선택) = Phase3 B 클릭 피크 개인화(준비 창 보존·데이터 부족 시 now+lead 폴백) 유지.
-  // ★ 2026-07-12 C-1: fixed 모드도 발송 가능 창 클램프 — 신규 저장은 시각 가드로 차단되지만 기존 야간 설정 행 방어.
-  //   (ai_optimal은 computeOptimalSendAt이 자체 클램프, 리마인드는 shiftToSendableHour 기적용 — 3경로 전부 봉합)
-  const scheduledSendAt = operator.sendTimeMode === 'ai_optimal'
-    ? await resolveOptimalScheduledSendAt(operator.companyId, leadMinutes)
-    : shiftToSendableHour(computeNextOccurrence(operator.schedule, operator.scheduleTime, operator.scheduleDayOfWeek, operator.scheduleDayOfMonth, operator.scheduleMonth));
   const proposalRes = await query(
     `INSERT INTO operator_proposals (
       id, operator_id, company_id, proposal_json, recipient_count, cost_estimate,
@@ -1220,6 +1347,7 @@ export async function generateProposalForOperator(operatorId: string, opts?: { p
   // 9. ★ D227+ 스팸 안전망 — 실제 테스트폰 발송 → 차단 시 AI 재생성(2회) → 재테스트 → 끝내 실패 시 담당자 검토.
   //    auto-campaign-worker와 동일한 검증된 자산(autoSpamTestWithRegenerate + generateMessages) 재사용.
   //    channelForSpam·callbackForSpam·bestMessage·bestSubject·canAutoSend는 위 자격 판정에서 계산됨.
+  const isFixedCopy = orchestratorResult?.meta?.copyMode === 'fixed';
   if (canAutoSend) {
     try {
       // ★ 2026-10-03 추천 3안을 차례로 검사하고 첫 통과에서 멈춘다 · 모두 막히면 그때 1안을 재생성(임은지 접수).
@@ -1230,7 +1358,12 @@ export async function generateProposalForOperator(operatorId: string, opts?: { p
         messageText: String(m?.body || m?.message || ''),
         subject: m?.subject ? String(m.subject) : (bestSubject || undefined),
       })).filter((v: { messageText: string }) => !!v.messageText);
-      const spamResult = await autoSpamTestWithRegenerate({
+      // ★ 2026-10-05 직접 쓴 문안(Q17) — 같은 문안(지문)이 이미 통과했으면 다시 검사하지 않는다 · 재생성 0(사람 문안을 AI 가 바꾸지 않는다).
+      const fixedHash = isFixedCopy ? computeMessageHash(`${bestSubject}\n${bestMessage}`) : '';
+      const cachedPass = isFixedCopy && operator.fixedCopy?.spam?.hash === fixedHash && operator.fixedCopy?.spam?.status === 'pass';
+      const spamResult = cachedPass
+        ? ({ passedVariantId: 'A', variants: [{ variantId: 'A', messageText: bestMessage, subject: bestSubject || undefined, spamResult: 'pass', regenerateCount: 0, regenerated: false }] } as any)
+        : await autoSpamTestWithRegenerate({
         companyId: operator.companyId,
         userId: operator.createdBy || operator.companyId,
         callbackNumber: callbackForSpam,
@@ -1239,11 +1372,11 @@ export async function generateProposalForOperator(operatorId: string, opts?: { p
         variants: spamVariants.length > 0 ? spamVariants : [{ variantId: 'A', messageText: bestMessage, subject: bestSubject || undefined }],
         isAd: !!isAd,
         rejectNumber: ctx.reject_number || undefined,
-        maxRetries: 2,  // ★ Harold 2026-05-31: AI 재생성 2회
+        maxRetries: isFixedCopy ? 0 : 2,  // ★ Harold 2026-05-31: AI 재생성 2회 · ★ 2026-10-05 직접 쓴 문안 = 0
         stopOnFirstPass: true,
         budgetMs: TIMEOUTS.operatorSpamVariantsBudget,
         // 차단 시 AI 재작성 (Opus) — buildSpamRegeneratePrompt: 목표 유지 + 구체 혜택 생성 금지
-        regenerateCallback: async () => {
+        regenerateCallback: isFixedCopy ? (async () => null) : async () => {
           try {
             // 스팸 재생성은 자동마케팅 사이클 안전망(품질 보증) → 묶음으로 차감 0 (사이클 1회 200에 포함).
             // ★ 2026-10-03 대상 정보 형식(total_count) — 옛 { count } 는 generateMessages 가 total_count 를 읽다 던져
@@ -1263,7 +1396,7 @@ export async function generateProposalForOperator(operatorId: string, opts?: { p
         },
       });
 
-      const tested = spamResult.variants || [];
+      const tested: Array<{ variantId: string; spamResult: string; regenerateCount?: number; regenerated?: boolean; messageText?: string; subject?: string }> = spamResult.variants || [];
       const letterIndex = (id: string) => String(id || 'A').charCodeAt(0) - 65;
       const passedIndex = spamResult.passedVariantId ? letterIndex(spamResult.passedVariantId) : null;
       const firstTested = tested[0];
@@ -1272,6 +1405,10 @@ export async function generateProposalForOperator(operatorId: string, opts?: { p
         : tested.some((v) => v.spamResult === 'blocked') ? 'blocked'
           : (firstTested?.spamResult || 'failed')) as 'pass' | 'blocked' | 'failed' | 'timeout';
       const regenCount = firstTested?.regenerateCount || 0;
+      if (isFixedCopy && !cachedPass) {
+        await recordFixedCopySpam(operator.id, fixedHash, finalResult)
+          .catch((e: any) => console.warn('[ContinuousOperator] 직접 쓴 문안 검사 기록 경고:', e?.message));
+      }
 
       // 제안에 안별 결과와 통과 안 번호를 남긴다 — 화면 기본 미리보기 · 발송 문안(dispatchProposalSend)이 이 번호를 따른다.
       //   ★ Codex 1R high — 검사는 수 분이 걸리고 그동안 제안은 화면에 있어 사람이 승인·선택·중지할 수 있다.
@@ -1331,7 +1468,9 @@ export async function generateProposalForOperator(operatorId: string, opts?: { p
           // ★ 스팸 2회 재생성 후에도 실패 → 운영자 일시정지 + 담당자 사유 알림(설계 §1)
           await query(`UPDATE continuous_operators SET status = 'paused', updated_at = NOW() WHERE id = $1::uuid AND status = 'active'`, [operator.id]).catch(() => {});
           // ★ 2026-10-03 따옴표 안은 자동마케팅 이름이다(옛 문구는 문안 이름처럼 읽혔다) · 검사한 안 수를 함께 알린다
-          await notifyOperatorAdmins(operator, '[AI 자동마케팅] 일시정지', `'${operator.name}' 자동마케팅의 추천 문안 ${tested.length}안이 모두 스팸필터를 통과하지 못해 자동마케팅을 일시정지했습니다. 문안 검토 후 재개해주세요.`).catch((e: any) => console.warn('[ContinuousOperator] 정지 알림 경고:', e?.message));
+          await notifyOperatorAdmins(operator, '[AI 자동마케팅] 일시정지', isFixedCopy
+            ? `'${operator.name}' 자동마케팅의 직접 쓰신 문안이 스팸필터를 통과하지 못해 자동마케팅을 일시정지했습니다. 문안을 고친 뒤 재개해주세요.`
+            : `'${operator.name}' 자동마케팅의 추천 문안 ${tested.length}안이 모두 스팸필터를 통과하지 못해 자동마케팅을 일시정지했습니다. 문안 검토 후 재개해주세요.`).catch((e: any) => console.warn('[ContinuousOperator] 정지 알림 경고:', e?.message));
         } else {
           console.warn(`[ContinuousOperator] ${operator.name} 스팸 미통과 — 검사 중 담당자가 이미 처리한 제안이라 상태·정지·통지를 바꾸지 않음`);
         }
@@ -1383,6 +1522,13 @@ export async function generateProposalForOperator(operatorId: string, opts?: { p
   } catch (e: any) {
     console.warn('[ContinuousOperator] 승인 대기 통지 경고:', e?.message);
   }
+
+  // ★ 2026-10-05 회차 기록 — 이 회차가 어떻게 끝났나(예약 · 승인 대기 · 보류)
+  try {
+    const st = await query(`SELECT status FROM operator_proposals WHERE id = $1::uuid`, [proposalRes.rows[0].id]);
+    const s = String(st.rows[0]?.status || '');
+    await appendRoundLog(operator.id, { outcome: s === 'scheduled' ? 'scheduled' : s === 'admin_review' ? 'held' : 'pending', count: recipientCount });
+  } catch { /* 기록은 부가 정보 */ }
 
   // 11. Operator 통계 갱신
   await updateOperatorAfterRun(operator.id, operator.schedule, operator.scheduleTime, 1, autoExecuteEligible);
@@ -1662,6 +1808,8 @@ export async function runOperatorWorker(): Promise<{ processed: number; failed: 
     if (dueRes.rows.length > 0) {
       console.log(`[ContinuousOperator Worker] 처리 완료 — ${processed} 성공 / ${failed} 실패`);
     }
+    // ★ 2026-10-05 승인 기간 끝나기 하루 전 = 요약 + 다음 승인 요청 1통(신뢰 설계 §2-6)
+    await runApprovalRenewalNotices().catch((e: any) => console.error('[ContinuousOperator Approval] 갱신 안내 예외:', e?.message || e));
 
     // (발송 패스는 위 제안 생성 앞에서 돈다 — m107)
   } finally {
@@ -2352,6 +2500,9 @@ async function dispatchProposalSend(
         //   스냅샷 갱신을 발송 뒤로 미루는 이유가 여기 있다 — 제안 시점에 갈아 끼우면 이 재추출이
         //   방금 심은 자기 스냅샷과 비교해 변화 0이 되고, "보여준 수 = 나가는 수"가 깨진다.
         operatorId: p.operator_id || null,
+        // ★ 2026-10-05 제안이 센 회차(기간 · 기준 시각) 그대로 — 생일 축이 늦은 승인 날의 생일자로 바뀌지 않는다(옛 제안 = 없음 = 옛 동작)
+        period: pj.target?.period || null,
+        now: pj.target?.anchorAt ? new Date(pj.target.anchorAt) : undefined,
       });
       filterWhere = compiled.filterWhere;
       filterParams = compiled.filterParams;
@@ -2365,7 +2516,24 @@ async function dispatchProposalSend(
     // ⛔ 4R: 추출 시각 경계(CTE)는 폐기했다 — 리마인드를 보류하기로 하면서 그 값을 쓸 곳이 없어졌다.
     //   구조를 고치면 덧댔던 장치도 함께 사라지는 게 정상이다.
     const { sql: insSql, params: insParams } = buildSendableStagingInsertSql(stagingId, sendBaseParams, filterWhere, filterParams, sendStoreFilter, sendGates);
-    recipientTotal = (await query(insSql, insParams)).rowCount || 0;
+    if (pj.meta?.is_reminder === true) {
+      // 리마인드 = 1차 수신자 코호트(대상 칸은 표시용) — 계약 비교 밖
+      recipientTotal = (await query(insSql, insParams)).rowCount || 0;
+    } else {
+      // ★ 2026-10-05 신뢰 설계 Q12(Codex 1R~3R) — 수신자 확정은 이 회차의 대상 칸이 운영자의 **지금 계약**과 같을 때만.
+      //   계약이 없거나(옛 자유 해석) 조건 확인 · 다음 승인으로 바뀌었으면 승인된 대상이 아니다 → 보류 · 다시 확인(자동 · 수동 승인 공통).
+      const staged = await stageIfContractMatches(p.operator_id, pj.target, insSql, insParams);
+      if (staged == null) {
+        await query(
+          `UPDATE operator_proposals SET status = 'admin_review', auto_executed = false, scheduled_send_at = NULL,
+             auto_execute_reason = '대상 조건이 확인 전이거나 바뀌어 발송을 보류했습니다. 지금 조건으로 다시 확인해 주세요' WHERE id = $1::uuid`,
+          [proposalId],
+        );
+        await notify('[AI 자동마케팅] 발송 보류', `'${op.name || ''}' 대상 조건이 확인 전이거나 바뀌어 발송을 보류했습니다. 자동 마케팅에서 조건을 확인한 뒤 다시 승인해 주세요.`);
+        return { action: 'skipped', reason: '대상 조건 확인 전 · 변경. 발송 보류' };
+      }
+      recipientTotal = staged;
+    }
 
     // ⛔ 7R 정정: 재추출된 **실제 건수**로 상한·예산을 다시 본다. 종전엔 제안 시점 수로 통과한 뒤
     //   발송 직전 추출에서 대상이 늘어도 검사가 없어, 설정한 자율 발송 상한과 예산을 넘겨 실발송·실차감했다.
@@ -2679,6 +2847,276 @@ async function dispatchProposalSend(
  *
  * 캐시는 "준비됨"만 기억한다. 아직이면 매번 다시 본다 — DDL은 배포 뒤에 돌고, 그때 재기동 없이 자동 활성돼야 한다.
  */
+/**
+ * ★ 2026-10-05 신뢰 설계 칸(설계서 §3) 준비 여부 — 옛 hasSegmentColumns 와 같은 형태(준비됨만 캐시 · DDL 뒤 재기동 없이 활성).
+ *   준비 전 = 칸 조건 · 직접 쓴 문안 · 승인 기간만 503, 축 계약 · 회차 · 발송은 그대로. 회차 기록 쓰기는 건너뛴다.
+ */
+let operatorV2ColumnsReadyCache = false;
+export async function hasOperatorV2Columns(): Promise<boolean> {
+  if (operatorV2ColumnsReadyCache) return true;
+  const r = await query(
+    `SELECT COUNT(*)::int AS n FROM information_schema.columns
+      WHERE table_name = 'continuous_operators'
+        AND column_name IN ('audience_filters', 'copy_mode', 'fixed_copy', 'approved_until', 'approval_meta', 'round_log')`,
+  );
+  operatorV2ColumnsReadyCache = (Number(r.rows[0]?.n) || 0) === 6;
+  return operatorV2ColumnsReadyCache;
+}
+
+/** 회차 기록 한 줄 추가(최근 60) — 실패해도 회차 흐름에 영향 없음 */
+async function appendRoundLog(operatorId: string, entry: Omit<RoundLogEntry, 'at'>): Promise<void> {
+  try {
+    if (!(await hasOperatorV2Columns())) return;
+    const row = JSON.stringify([{ at: new Date().toISOString(), ...entry }]);
+    await query(
+      `UPDATE continuous_operators
+          SET round_log = (
+            SELECT COALESCE(jsonb_agg(e ORDER BY i), '[]'::jsonb) FROM (
+              SELECT e, i FROM jsonb_array_elements(COALESCE(round_log, '[]'::jsonb) || $2::jsonb) WITH ORDINALITY AS t(e, i)
+               ORDER BY i DESC LIMIT 60
+            ) s
+          )
+        WHERE id = $1::uuid`,
+      [operatorId, row],
+    );
+  } catch (e: any) {
+    console.warn('[ContinuousOperator] 회차 기록 경고:', e?.message);
+  }
+}
+
+/** 직접 쓴 문안의 스팸 검사 결과를 지문과 함께 저장 — 같은 문안이면 다음 회차는 검사하지 않는다(Q17) */
+async function recordFixedCopySpam(operatorId: string, hash: string, status: string): Promise<void> {
+  if (!(await hasOperatorV2Columns())) return;
+  await query(
+    `UPDATE continuous_operators
+        SET fixed_copy = jsonb_set(fixed_copy, '{spam}', $2::jsonb, true)
+      WHERE id = $1::uuid AND copy_mode = 'fixed' AND jsonb_typeof(fixed_copy) = 'object'`,
+    [operatorId, JSON.stringify({ hash, status, checkedAt: new Date().toISOString() })],
+  );
+}
+
+/** 직접 쓴 문안 입력 정규화(EUC-KR 안전화 · 길이) — 비면 null */
+export function normalizeFixedCopyInput(raw: { subject?: string; body?: string } | null | undefined): FixedCopy | null {
+  const body = typeof raw?.body === 'string' ? stripIncompatibleEmojis(raw.body).trim().slice(0, 2000) : '';
+  if (!body) return null;
+  const subject = typeof raw?.subject === 'string' ? stripIncompatibleEmojis(raw.subject).trim().slice(0, 40) : '';
+  return { subject, body };
+}
+
+/** 미리보기 결과를 첫 회차로 쓸 때 대상 수 · 비용만 방금 센 값으로(문안은 그대로) */
+/** 대상 계약(축 · 옛 축 힌트 · 고정 칸 조건) — 없으면 null = 옛 자유 해석(조건 확인 전 자동 발송 0 · Q12). 회차 · 발송 직전 · 승인 창 공용 */
+export function operatorContract(
+  op: Pick<ContinuousOperator, 'segmentKey' | 'targetHint' | 'audienceConditions'>,
+): { key: string | null; conditions: AudienceCondition[] | null } | null {
+  const key = op.segmentKey || op.targetHint || null;
+  if (key) return { key, conditions: null };
+  return op.audienceConditions && op.audienceConditions.length > 0 ? { key: null, conditions: op.audienceConditions } : null;
+}
+
+/** 회차 결과의 대상 칸 = 저장된 계약(발송 재추출 · 명단 · 화면 기준이 이것을 읽는다) */
+function contractTarget(operator: ContinuousOperator, contractKey: string | null, conditions: AudienceCondition[] | null): Record<string, any> {
+  if (contractKey) {
+    const key = normalizeSegmentKey(contractKey);
+    if (!key) throw new Error(`알 수 없는 발송 대상 축이라 대상을 만들 수 없습니다: ${contractKey.slice(0, 40)}`);
+    const params = normalizeSegmentParams(key, operator.segmentParams);
+    return { segmentKey: key, segmentParams: params, filters: {}, criteria: contractCriteriaText(key, params, null) };
+  }
+  const list = conditions || [];
+  return { segmentKey: null, segmentParams: null, filters: conditionsToFilters(list), criteria: contractCriteriaText(null, null, list.length ? describeConditions(list) : null) };
+}
+
+/** 예약된 회차의 대상 칸 = 운영자의 지금 계약인가(축 · 파라미터 · 칸 조건 · 키 순서 무관) — 발송 직전 게이트 */
+export function proposalMatchesContract(target: any, op: ContinuousOperator): boolean {
+  const c = operatorContract(op);
+  if (!c || !target || typeof target !== 'object') return false;
+  let want: Record<string, any>;
+  try { want = contractTarget(op, c.key, c.conditions); } catch { return false; }
+  const key = target.segmentKey ? normalizeSegmentKey(target.segmentKey) : null;
+  if (key !== want.segmentKey) return false;
+  if (key && stableJson(normalizeSegmentParams(key, target.segmentParams)) !== stableJson(want.segmentParams)) return false;
+  return stableJson(target.filters || {}) === stableJson(want.filters);
+}
+
+/**
+ * 수신자 적재 = 회차의 대상 칸이 운영자의 지금 계약과 같을 때만 — 운영자 행 공유 잠금 + 비교 + 적재를 한 트랜잭션에서(Codex 3R).
+ *   계약 저장(approveOperatorWindow UPDATE)은 이 적재가 끝난 뒤에 된다 = 「적재가 먼저면 옛 계약 회차 · 저장이 먼저면 보류」 둘 중 하나.
+ *   null = 달라서 적재하지 않았다.
+ */
+export async function stageIfContractMatches(operatorId: string, target: any, insSql: string, insParams: any[]): Promise<number | null> {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const r = await client.query(`SELECT to_jsonb(o) AS op_row FROM continuous_operators o WHERE o.id = $1::uuid FOR SHARE`, [operatorId]);
+    if (!r.rows[0]?.op_row || !proposalMatchesContract(target, mapRowToOperator(r.rows[0].op_row))) {
+      await client.query('ROLLBACK');
+      return null;
+    }
+    const n = (await client.query(insSql, insParams)).rowCount || 0;
+    await client.query('COMMIT');
+    return n;
+  } catch (e) {
+    await client.query('ROLLBACK').catch(() => {});
+    throw e;
+  } finally {
+    client.release();
+  }
+}
+
+function withMeasuredCount(precomputed: any, count: number): any {
+  const unit = Number(precomputed?.cost?.unitCost);
+  return {
+    ...precomputed,
+    target: { ...(precomputed?.target || {}), count },
+    cost: Number.isFinite(unit)
+      ? { ...(precomputed?.cost || {}), estimated: Math.round(unit * count), breakdown: `${count.toLocaleString()}건 × ${unit.toLocaleString()}원` }
+      : precomputed?.cost,
+  };
+}
+
+/** 직접 쓴 문안 회차 결과 — AI 없이 오케스트레이터 결과와 같은 모양(제안 저장 · 화면 · 발송이 그대로 읽는다) */
+function buildFixedCopyRoundResult(operator: ContinuousOperator, loaded: OperatorCompanyContext, count: number): any {
+  const channel = operator.channel.toUpperCase();
+  const costs = getCompanyCosts(loaded.companyInfo as any) as Record<string, number>;
+  const unitCost = Number(costs[operator.channel]) || Number(costs.sms) || 0;
+  const body = operator.fixedCopy?.body || '';
+  const subject = operator.fixedCopy?.subject || '';
+  return {
+    target: {
+      count,
+      totalCount: Number(loaded.customerStats?.total) || 0,
+      suggestedName: operator.name,   // 대상 칸(축 · 조건 · 기준 설명) = 회차의 계약 스탬프(contractTarget)
+    },
+    messages: [{ variantId: 'A', variantName: '직접 쓴 문안', concept: '', body, subject, byteCount: eucKrByteLength(body), byteWarning: false, score: 0 }],
+    recommendation: 'A',
+    recommendationReason: '직접 쓰신 문안을 그대로 보냅니다.',
+    channel: { recommended: channel, reason: '직접 쓴 문안', isAd: true },
+    compliance: { passed: true, riskLevel: 'low', warnings: [], suggestions: [] },
+    cost: { estimated: Math.round(unitCost * count), unitCost, breakdown: `${count.toLocaleString()}건 × ${unitCost.toLocaleString()}원` },
+    meta: { copyMode: 'fixed' },
+  };
+}
+
+/**
+ * ★ 2026-10-05 승인(첫 주 · 다음 주 · 조건 확인) — 승인 기간과 (있으면) 대상 계약 · 문안 분기를 **한 문장**에서 저장한다.
+ *   계약을 바꾸면 옛 축 힌트는 해제한다(대상 모드는 하나). 칸이 준비되기 전이면 던진다(라우트 503).
+ */
+export async function approveOperatorWindow(input: {
+  companyId: string;
+  operatorId: string;
+  userId: string;
+  contract?: { segmentKey: string | null; segmentParams: Record<string, number> | null; conditions: AudienceCondition[] | null } | null;
+  copy?: { mode: 'ai' | 'fixed'; fixedCopy: FixedCopy | null } | null;
+  benefitContent?: string | null;
+  /** 화면이 확인한 승인 기간 — 있으면 그대로 저장(지금 시각으로 다시 계산하면 본 것과 다른 기간이 된다 · Codex 3R) */
+  window?: { startAt: Date; until: Date; rounds: Date[] } | null;
+  now?: Date;
+}): Promise<{ until: Date; startAt: Date; rounds: Date[] } | null> {
+  if (!(await hasOperatorV2Columns())) {
+    throw new Error('DB 마이그레이션 필요: continuous_operators approved_until column does not exist');
+  }
+  const cur = await query(`SELECT * FROM continuous_operators WHERE id = $1::uuid AND company_id = $2::uuid`, [input.operatorId, input.companyId]);
+  if (cur.rows.length === 0) return null;
+  const op = mapRowToOperator(cur.rows[0]);
+  const win = input.window || computeApprovalWindow(op, input.now);
+  const contract = input.contract || null;
+  if (contract) {
+    if (contract.segmentKey) {
+      const k = normalizeSegmentKey(contract.segmentKey);
+      if (!k) throw new Error(`알 수 없는 발송 대상 축입니다: ${String(contract.segmentKey).slice(0, 40)}`);
+      await assertSegmentUsable(input.companyId, k);
+    } else if (!contract.conditions || contract.conditions.length === 0) {
+      throw new AudienceRequiredError();
+    }
+  }
+  const copy = input.copy || null;
+  if (copy?.mode === 'fixed' && !copy.fixedCopy?.body) throw new Error('직접 쓴 문안이 비어 있어요. 문안을 넣어 주세요.');
+  const params: any[] = [
+    input.operatorId, input.companyId, win.until,
+    JSON.stringify({ approvedAt: new Date().toISOString(), approvedBy: input.userId, windowStart: win.startAt.toISOString(), renewalNoticeFor: null }),
+  ];
+  const sets: string[] = ['approved_until = $3', 'approval_meta = $4::jsonb', 'updated_at = NOW()'];
+  if (contract) {
+    const segKey = contract.segmentKey ? normalizeSegmentKey(contract.segmentKey) : null;
+    params.push(segKey, segKey ? JSON.stringify(normalizeSegmentParams(segKey, contract.segmentParams)) : null,
+      !segKey && contract.conditions ? JSON.stringify({ conditions: contract.conditions, confirmedAt: new Date().toISOString() }) : null);
+    sets.push(`segment_key = $${params.length - 2}`, `segment_params = $${params.length - 1}::jsonb`, `audience_filters = $${params.length}::jsonb`, 'target_hint = NULL');
+  }
+  if (copy) {
+    params.push(copy.mode === 'fixed' ? 'fixed' : null, copy.mode === 'fixed' && copy.fixedCopy ? JSON.stringify(copy.fixedCopy) : null);
+    sets.push(`copy_mode = $${params.length - 1}`, `fixed_copy = $${params.length}::jsonb`);
+  }
+  if (input.benefitContent !== undefined) {
+    params.push(normalizeOperatorBenefit(input.benefitContent));
+    sets.push(`benefit_content = $${params.length}`);
+  }
+  const r = await query(
+    `UPDATE continuous_operators SET ${sets.join(', ')} WHERE id = $1::uuid AND company_id = $2::uuid AND status <> 'archived' RETURNING id`,
+    params,
+  );
+  if (r.rows.length === 0) return null;
+  return win;
+}
+
+/** 승인 기간 끝나기 24시간 안 = 요약 + 다음 승인 요청 1통(기간마다 1회 · 선점 뒤 발송) */
+async function runApprovalRenewalNotices(): Promise<void> {
+  if (!(await hasOperatorV2Columns())) return;
+  const rows = await query(
+    `SELECT * FROM continuous_operators
+      WHERE status = 'active' AND approved_until IS NOT NULL
+        AND approved_until > NOW() AND approved_until <= NOW() + INTERVAL '24 hours'
+        AND (approval_meta->>'renewalNoticeFor') IS NULL
+      ORDER BY approved_until`,   // LIMIT 없음 — 실패해 다시 고르는 행이 뒤 행을 막지 않게(Codex 2R · 24시간 안 만료분만이라 적다)
+  );
+  for (const row of rows.rows) {
+    const op = mapRowToOperator(row);
+    if (!op.approvedUntil) continue;
+    const key = op.approvedUntil.toISOString();
+    if (op.approvalMeta?.renewalNoticeFor === key) continue;
+    const claim = await query(
+      `UPDATE continuous_operators
+          SET approval_meta = jsonb_set(COALESCE(approval_meta, '{}'::jsonb), '{renewalNoticeFor}', to_jsonb($2::text), true)
+        WHERE id = $1::uuid AND approved_until = $3::timestamptz
+          AND (approval_meta->>'renewalNoticeFor') IS DISTINCT FROM $2::text
+        RETURNING id`,
+      [op.id, key, op.approvedUntil],
+    );
+    if (claim.rows.length === 0) continue;
+    const since = approvalSummarySince(op.approvalMeta?.windowStart, op.autoSendLeadMinutes, new Date(op.approvedUntil.getTime() - 7 * 24 * 60 * 60 * 1000));
+    let sentRounds = 0;
+    let people = 0;
+    let held = 0;
+    try {
+      const s = await query(
+        `SELECT COUNT(*) FILTER (WHERE status IN ('sent', 'auto_executed'))::int AS sent_rounds,
+                COALESCE(SUM(recipient_count) FILTER (WHERE status IN ('sent', 'auto_executed')), 0)::int AS people,
+                COUNT(*) FILTER (WHERE status IN ('admin_review', 'admin_stopped', 'skipped'))::int AS held
+           FROM operator_proposals
+          WHERE operator_id = $1::uuid AND created_at >= $2
+            AND COALESCE(proposal_json->'meta'->>'is_reminder', 'false') <> 'true'`,
+        [op.id, since],
+      );
+      sentRounds = Number(s.rows[0]?.sent_rounds) || 0;
+      people = Number(s.rows[0]?.people) || 0;
+      held = Number(s.rows[0]?.held) || 0;
+    } catch (e: any) {
+      console.warn('[ContinuousOperator Approval] 요약 집계 경고:', e?.message);
+    }
+    const untilLabel = op.approvedUntil.toLocaleString('ko-KR', { timeZone: 'Asia/Seoul', month: 'long', day: 'numeric' });
+    const sent = await notifyOperatorAdmins(op, '[AI 자동마케팅] 다음 승인 요청', buildRenewalNoticeBody({
+      name: op.name, untilLabel, sentRounds, people, emptyDays: countEmptyRounds(op.roundLog, since), held,
+    })).catch((e: any) => { console.warn('[ContinuousOperator Approval] 갱신 안내 발송 경고:', e?.message); return false; });
+    if (!sent) {
+      // 적재 실패 = 선점을 풀어 다음 워커 주기에 다시 보낸다(같은 기간일 때만 · Codex 1R)
+      // ponytail: 선점과 적재 사이에 프로세스가 죽으면 그 기간 안내는 빠진다 — 필요해지면 안내 작업 표(멱등키)로
+      await query(
+        `UPDATE continuous_operators SET approval_meta = approval_meta - 'renewalNoticeFor'
+          WHERE id = $1::uuid AND approved_until = $2::timestamptz AND (approval_meta->>'renewalNoticeFor') = $3::text`,
+        [op.id, op.approvedUntil, key],
+      ).catch((e: any) => console.warn('[ContinuousOperator Approval] 선점 해제 경고:', e?.message));
+    }
+  }
+}
+
 let segmentColumnsReadyCache = false;
 async function hasSegmentColumns(): Promise<boolean> {
   if (segmentColumnsReadyCache) return true;
@@ -3134,7 +3572,7 @@ async function resolveOptimalScheduledSendAt(companyId: string, leadMinutes: num
 
 // (computeNextRun은 autosend-policy.ts computeNextOccurrence로 이동 — 2026-07-02 1단계 B, now 주입형 순수 CT)
 
-function mapRowToOperator(row: any): ContinuousOperator {
+export function mapRowToOperator(row: any): ContinuousOperator {
   return {
     id: row.id,
     companyId: row.company_id,
@@ -3194,6 +3632,15 @@ function mapRowToOperator(row: any): ContinuousOperator {
       : null,
     // ★ 2026-07-30 (임은지 접수): MMS 이미지 (컬럼 미생성/NULL = [])
     mmsImagePaths: Array.isArray(row.mms_image_paths) ? row.mms_image_paths.filter((p: any) => typeof p === 'string' && p.trim()) : [],
+    // ★ 2026-10-05 신뢰 설계 — 칸 미생성(DDL 전) · NULL = 비어 있음(옛 동작)
+    audienceConditions: Array.isArray(row.audience_filters?.conditions) && row.audience_filters.conditions.length > 0 ? row.audience_filters.conditions : null,
+    copyMode: row.copy_mode === 'fixed' && row.fixed_copy && typeof row.fixed_copy.body === 'string' && row.fixed_copy.body.trim() ? 'fixed' : 'ai',
+    fixedCopy: row.fixed_copy && typeof row.fixed_copy.body === 'string'
+      ? { subject: String(row.fixed_copy.subject || ''), body: row.fixed_copy.body, spam: row.fixed_copy.spam || null }
+      : null,
+    approvedUntil: row.approved_until ? new Date(row.approved_until) : null,
+    approvalMeta: row.approval_meta && typeof row.approval_meta === 'object' ? row.approval_meta : null,
+    roundLog: Array.isArray(row.round_log) ? row.round_log : [],
   };
 }
 

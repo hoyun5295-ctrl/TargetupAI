@@ -2,12 +2,14 @@
 // ★ 2026-09-30 AI 존 대개편(설계서 §4-2): 첫 화면 = 승인할 제안(런처 2×2 → 명령 카드로 흡수).
 //   한 줄 입력 = 자연어 시작(스마트 기본값 + 목표 → 크레딧 확인 → 생성) · 다른 방법 = 시나리오 · 세부설정 · 자세히 쓰기.
 // ★ 2026-10-05 한 줄 · 자세히 쓰기 = 미리보기 먼저(5크레딧 · 등록 0) → [이대로 시작] 에서만 200(설계서 docs/2026-10-05-automarketing-preview-design.md).
+// ★ 2026-10-05 신뢰 설계(docs/2026-10-05-automarketing-trust-design.md) — 같은 창이 첫 주 승인 · 다음 승인 · 조건 확인을 맡는다.
+//   [문안 직접 쓰기] = AI 문안 없이 대상만(미리보기 0크레딧) · 창 편집(칸 · 기준 · 문안 분기 · 혜택)은 서버가 다시 계산한다.
 //   탭 = 승인할 제안 / 실행 중(`?tab=running` · 허브 "관리 →" 착지). 핸들러·저장 계약은 그대로.
 // native dialog 0(ConfirmModal·useToast). 모델명 0.
 import { useEffect, useRef, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { goUpTo } from '../lib/scroll-restoration';
-import { GitMerge, LayoutGrid, Loader2, PenLine, SlidersHorizontal, Sparkles, TrendingUp } from 'lucide-react';
+import { Check, GitMerge, LayoutGrid, Loader2, PenLine, SlidersHorizontal, Sparkles, TrendingUp } from 'lucide-react';
 import ZoneFrame from '../components/zone/ZoneFrame';
 import ZoneSection from '../components/zone/ZoneSection';
 import ZoneSegmented from '../components/zone/ZoneSegmented';
@@ -29,12 +31,16 @@ import MultiGoalModal from '../components/automarketing/MultiGoalModal';
 import OperatorsManageList from '../components/automarketing/OperatorsManageList';
 import DailyBriefCard, { DailyBrief, DailyBriefRecommendation } from '../components/automarketing/DailyBriefCard';
 import OperatorPreviewModal, { OperatorPreviewData } from '../components/automarketing/OperatorPreviewModal';
+import { MK_LINE_EXTRA_BTN } from '../utils/make-ui';
 
 /** 하위 보기의 머리 표시(제목은 메뉴 이름 한 벌 · 하위 위치만 "› …") */
 const VIEW_SUB: Partial<Record<AutoMarketingView, string>> = {
   natural: '자세히 쓰기',
   scenario: '시나리오로 시작',
 };
+
+/** 승인 기간 끝(KST) 「10월 12일」 */
+const untilLabel = (iso: string) => new Date(iso).toLocaleDateString('ko-KR', { timeZone: 'Asia/Seoul', month: 'long', day: 'numeric' });
 
 const SMART_DEFAULTS: Partial<ContinuousOperator> = {
   schedule: 'daily', scheduleTime: '09:00', status: 'active', channel: 'lms',
@@ -68,7 +74,10 @@ export default function ContinuousOperatorPage() {
   const [showMultiGoal, setShowMultiGoal] = useState(false);
   const [pendingConfig, setPendingConfig] = useState<Partial<ContinuousOperator> | null>(null);
   // ★ 2026-10-05 [제안 받기] = 미리보기 — 등록 전에 첫 제안을 보여 주고, 200은 [이대로 시작]에서만.
-  const [preview, setPreview] = useState<{ config: Partial<ContinuousOperator>; data: OperatorPreviewData | null } | null>(null);
+  // mode = new(처음 시작 · 서버 보관본) · renewal(실행 중의 다음 승인 · 조건 확인)
+  const [preview, setPreview] = useState<{ mode: 'new' | 'renewal'; config: Partial<ContinuousOperator>; data: OperatorPreviewData | null; operatorId: string | null } | null>(null);
+  const [previewBusy, setPreviewBusy] = useState(false);
+  const [ownCopy, setOwnCopy] = useState(false);   // [문안 직접 쓰기] — 켜면 AI 문안 없이 대상만(0크레딧)
   const [previewing, setPreviewing] = useState(false);
   const [startConfirm, setStartConfirm] = useState(false);
   const [starting, setStarting] = useState(false);
@@ -282,18 +291,19 @@ export default function ContinuousOperatorPage() {
   // ★ 2026-10-05 옛: 바로 200 확인 창 → 등록 → 첫 초안(제안을 보기도 전에 200). 지금: 첫 제안을 먼저 보고 시작할지 정한다.
   const handleNaturalSubmit = (goal: string, copyStyle: 'courteous' | 'friendly' | 'witty' | 'punchy' | null) => {
     if (!goal || previewing) return;
-    requestPreview({ ...SMART_DEFAULTS, name: goal.slice(0, 40), objective: goal, copyStyle });
+    requestPreview({ ...SMART_DEFAULTS, name: goal.slice(0, 40), objective: goal, copyStyle }, ownCopy ? 'fixed' : 'ai');
   };
 
-  const requestPreview = async (config: Partial<ContinuousOperator>) => {
+  const requestPreview = async (config: Partial<ContinuousOperator>, copyMode: 'ai' | 'fixed') => {
     const gen = ++previewGen.current;
-    setPreview({ config, data: null });
+    setPreview({ mode: 'new', config, data: null, operatorId: null });
     setPreviewing(true);
     try {
       const res = await fetch('/api/ai/operator/continuous/preview', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', ...auth() },
-        body: JSON.stringify(serialize(config)),
+        // infer_schedule = 서버가 문장의 주기(매일 · 매주 ○요일 · 매월 ○일 · 생일인 날)를 읽는다 · 없으면 매월
+        body: JSON.stringify({ ...serialize(config), copy_mode: copyMode, infer_schedule: true }),
       });
       const data = await res.json().catch(() => ({ success: false }));
       if (gen !== previewGen.current) return;
@@ -302,13 +312,7 @@ export default function ContinuousOperatorPage() {
         toast.error(data.error || '제안을 만들지 못했습니다.');
         return;
       }
-      setPreview({
-        config,
-        data: {
-          kind: data.kind, previewId: data.previewId ?? null, proposal: data.proposal ?? null, reason: data.reason ?? null,
-          appliedSegment: data.appliedSegment ?? null, segment: data.segment ?? { key: null, params: null },
-        },
-      });
+      setPreview({ mode: 'new', config, data: data as OperatorPreviewData, operatorId: null });
     } catch (e: any) {
       if (gen !== previewGen.current) return;
       setPreview(null);
@@ -318,23 +322,89 @@ export default function ContinuousOperatorPage() {
     }
   };
 
+  // ★ 2026-10-05 다음 승인 · 조건 확인 — 실행 중 자동 마케팅의 승인 창(AI 문안 0 · 차감 0)
+  //   창 상태는 서버 보관본 하나(처음 시작과 같다) — 화면은 판 번호(revision)를 들고 편집 · 승인한다(본 것 = 저장한 것).
+  const toApprovalData = (r: any): OperatorPreviewData =>
+    ({ ...(r.outcome || {}), lastWindow: r.lastWindow ?? null, needsContract: !!r.needsContract }) as OperatorPreviewData;
+  // 서버 응답(편집 결과 · 409 의 지금 상태)으로 창을 바꾼다 — 지난 기간 요약 · 조건 확인 여부는 창을 열 때 값을 잇는다
+  const applyServerData = (next: any) =>
+    setPreview((p) => (p ? {
+      ...p,
+      data: { ...next, lastWindow: p.data?.lastWindow ?? null, needsContract: p.data?.needsContract ?? false } as OperatorPreviewData,
+    } : p));
+
+  const openRenewal = async (op: ContinuousOperator) => {
+    const gen = ++previewGen.current;
+    setPreview({ mode: 'renewal', config: { name: op.name, objective: op.objective }, data: null, operatorId: op.id });
+    setPreviewing(true);
+    try {
+      const res = await fetch(`/api/ai/operator/continuous/${op.id}/approval-preview`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json', ...auth() }, body: '{}',
+      });
+      const data = await res.json().catch(() => ({ success: false }));
+      if (gen !== previewGen.current) return;
+      if (!data.success) { setPreview(null); toast.error(data.error || '승인 창을 열지 못했습니다.'); return; }
+      setPreview({ mode: 'renewal', config: { name: op.name, objective: op.objective }, data: toApprovalData(data), operatorId: op.id });
+    } catch (e: any) {
+      if (gen !== previewGen.current) return;
+      setPreview(null);
+      toast.error(e?.message || '승인 창을 열지 못했습니다.');
+    } finally {
+      if (gen === previewGen.current) setPreviewing(false);
+    }
+  };
+
+  // 창 편집 — 처음 시작 · 다음 승인 모두 서버 보관본 편집(preview/update). 판이 다르면 서버가 지금 상태를 돌려준다(409).
+  const editPreview = async (patch: Record<string, any>) => {
+    const cur = preview;
+    if (!cur?.data?.previewId) return;
+    const gen = previewGen.current;
+    setPreviewBusy(true);
+    try {
+      const res = await fetch('/api/ai/operator/continuous/preview/update', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...auth() },
+        body: JSON.stringify({ preview_id: cur.data.previewId, revision: cur.data.revision, ...patch }),
+      });
+      const data = await res.json().catch(() => ({ success: false }));
+      if (gen !== previewGen.current) return;
+      if (!data.success) {
+        toast.error(data.error || '고친 내용을 반영하지 못했습니다.');
+        if (res.status === 409 && data.current) applyServerData(data.current);
+        if (res.status === 410) setPreview(null);   // 만료 — 다시 열기(차감 0)
+        return;
+      }
+      applyServerData(data);
+    } catch (e: any) {
+      toast.error(e?.message || '고친 내용을 반영하지 못했습니다.');
+    } finally {
+      if (gen === previewGen.current) setPreviewBusy(false);
+    }
+  };
+
   const closePreview = () => {
     if (starting) return;
     previewGen.current += 1;
     setPreview(null);
     setPreviewing(false);
+    setPreviewBusy(false);
   };
 
-  // [세부 설정에서 고치기] — 이 값(+ 고정된 대상 기준)으로 세부 설정 창 → 저장 = 기존 등록 경로(200 확인 창)
+  // [세부 설정에서 고치기] — 처음 시작 = 이 값(+ 고정된 대상 기준)으로 세부 설정 창(저장 = 기존 등록 경로 · 200 확인 창) · 다음 승인 = 그 자동 마케팅 수정
   const editFromPreview = () => {
     if (!preview?.data) return;
-    const { config, data } = preview;
+    const { config, data, mode, operatorId } = preview;
     previewGen.current += 1;
     setPreview(null);
+    if (mode === 'renewal') {
+      const op = operators.find((o) => o.id === operatorId);
+      if (op) setEditing(op);
+      return;
+    }
     setEditing({ ...config, ...(data.segment.key ? { segmentKey: data.segment.key, segmentParams: data.segment.params } : {}) });
   };
 
-  // [이대로 자동 마케팅 시작] — 미리보기 id 하나만 보낸다(서버가 보관한 입력 그대로 등록 · 본 제안 = 첫 회차).
+  // [이번 주 승인하고 시작] — 미리보기 id 하나만 보낸다(서버가 보관한 입력 그대로 등록 · 승인 기간 · 본 제안 = 첫 회차).
   const startFromPreview = async () => {
     const id = preview?.data?.previewId;
     if (!id) return;
@@ -343,23 +413,52 @@ export default function ContinuousOperatorPage() {
       const res = await fetch('/api/ai/operator/continuous/from-preview', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', ...auth() },
-        body: JSON.stringify({ preview_id: id }),
+        body: JSON.stringify({ preview_id: id, revision: preview?.data?.revision }),
       });
       const data = await res.json().catch(() => ({ success: false }));
       if (!data.success) {
         toast.error(data.error || '자동 마케팅을 시작하지 못했습니다.');
+        if (res.status === 409 && data.current) applyServerData(data.current);   // 화면이 본 판이 아니었다 — 지금 상태로
         if (res.status === 410) setPreview(null);   // 만료 — 다시 [제안 받기](차감 0)
         return;
       }
       setPreview(null);
       setLine('');
-      toast.success('자동 마케팅이 시작되었습니다.');
+      toast.success(data.approvedUntil ? `자동 마케팅을 시작했어요. ${untilLabel(data.approvedUntil)}까지 승인한 대로 나가요.` : '자동 마케팅이 시작되었습니다.');
       if (!data.proposal && data.message) toast.info(data.message);
       setProposalStatus('pending');
       setView(data.proposal ? 'recommendations' : 'operators');
       await loadAll();
     } catch (e: any) {
       toast.error(e?.message || '자동 마케팅을 시작하지 못했습니다.');
+    } finally {
+      setStarting(false);
+    }
+  };
+
+  // [다음 주 승인] · [조건 확인] — 고친 값과 함께 승인 기간을 저장한다(차감 0 · 서버가 다시 검증)
+  const approveRenewal = async () => {
+    const opId = preview?.operatorId;
+    if (!opId) return;
+    setStarting(true);
+    try {
+      const res = await fetch(`/api/ai/operator/continuous/${opId}/approve-window`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...auth() },
+        body: JSON.stringify({ preview_id: preview?.data?.previewId, revision: preview?.data?.revision }),
+      });
+      const data = await res.json().catch(() => ({ success: false }));
+      if (!data.success) {
+        toast.error(data.error || '승인을 저장하지 못했습니다.');
+        if (res.status === 409 && data.current) applyServerData(data.current);
+        if (res.status === 410) setPreview(null);
+        return;
+      }
+      setPreview(null);
+      toast.success(`승인했어요. ${untilLabel(data.approvedUntil)}까지 승인한 대로 나가요.`);
+      await loadAll();
+    } catch (e: any) {
+      toast.error(e?.message || '승인을 저장하지 못했습니다.');
     } finally {
       setStarting(false);
     }
@@ -391,7 +490,9 @@ export default function ContinuousOperatorPage() {
     if (rec.recommendedChannel === 'email') { navigate('/email-campaigns'); return; }
     if (rec.recommendedChannel === 'dm') { navigate('/dm-builder'); return; }
     if (!rec.objective) return;
-    setPendingConfig({ ...SMART_DEFAULTS, name: rec.title.slice(0, 40), objective: rec.objective });
+    // ★ 2026-10-05 오늘의 추천도 한 줄과 같은 승인 창을 거친다 — 옛: 매일 기본값으로 바로 등록(같은 고객 매일 반복 · 대상 확인 없음).
+    if (previewing) return;
+    requestPreview({ ...SMART_DEFAULTS, name: rec.title.slice(0, 40), objective: rec.objective }, 'ai');
   };
 
   // ── 제안 액션 (ConfirmModal) ──
@@ -514,7 +615,18 @@ export default function ContinuousOperatorPage() {
           verb: oneLine.verb,
           icon: Sparkles,
           busy: creating || previewing,
-          credit: `${AI_GENERATE_COSTS['ai-operator-propose']}크레딧`,
+          // ★ 2026-10-05 문안 직접 쓰기(Q15) — 켜면 AI 문안 없이 대상만 뽑아 보여 준다(0크레딧)
+          credit: ownCopy ? '0크레딧' : `${AI_GENERATE_COSTS['ai-operator-propose']}크레딧`,
+          extra: (
+            <button
+              type="button"
+              onClick={() => setOwnCopy((v) => !v)}
+              aria-pressed={ownCopy}
+              className={`${MK_LINE_EXTRA_BTN} ${ownCopy ? '!border-indigo-500 !bg-indigo-50 !text-indigo-700' : ''}`}
+            >
+              {ownCopy ? <Check className="w-[15px] h-[15px]" /> : <PenLine className="w-[15px] h-[15px]" />}문안 직접 쓰기
+            </button>
+          ),
         },
       }}
       stamp={{ text: stampText, onRefresh: loadAll, loading }}
@@ -620,6 +732,7 @@ export default function ContinuousOperatorPage() {
                 operators={operators}
                 onRunNow={handleRunNow}
                 onEdit={(op) => setEditing(op)}
+                onApprove={openRenewal}
                 onDelete={handleDelete}
                 onCreate={() => setEditing({ ...SMART_DEFAULTS, name: '', objective: '' })}
               />
@@ -643,19 +756,25 @@ export default function ContinuousOperatorPage() {
       <ConfirmModal state={confirmState} onClose={() => setConfirmState(null)} />
       <OperatorPreviewModal
         open={!!preview}
+        mode={preview?.mode || 'new'}
         loading={previewing}
+        busy={previewBusy}
         objective={preview?.config.objective || ''}
-        config={preview?.config || null}
         data={preview?.data || null}
         starting={starting}
         onClose={closePreview}
         onEdit={editFromPreview}
-        onStart={() => setStartConfirm(true)}
+        onStart={() => (preview?.mode === 'renewal' ? approveRenewal() : setStartConfirm(true))}
+        onConditions={(conditions) => editPreview({ conditions })}
+        onAxis={(segmentKey) => editPreview({ segment_key: segmentKey })}
+        onCopyMode={(m) => editPreview({ copy_mode: m })}
+        onFixedCopy={(subject, body) => editPreview({ fixed_subject: subject, fixed_body: body })}
+        onBenefit={(benefit) => editPreview({ benefit })}
       />
       <CreditConfirmModal
         open={startConfirm}
         source="continuous-operator"
-        description="방금 본 제안이 승인할 제안으로 저장됩니다. 승인하면 발송됩니다."
+        description="승인한 기간 동안 회차마다 자동으로 나가요. 보낸 날만 발송 크레딧이 차감돼요."
         onConfirm={() => { setStartConfirm(false); startFromPreview(); }}
         onCancel={() => setStartConfirm(false)}
       />

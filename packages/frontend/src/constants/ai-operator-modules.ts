@@ -76,7 +76,7 @@ export const SUB_MODULE_CARDS: SubModuleCard[] = [
   { icon: Workflow,     gradient: 'from-fuchsia-400 to-purple-500', label: '여정 자동화',    description: 'AI 여정 7종 자동 설계',          path: '/ai-journeys', id: 'journeys',
     oneLine: { placeholder: '예: 가입하고 7일 안에 첫 구매가 없으면 쿠폰으로 이어서 보내줘', verb: '여정 만들기' } },
   { icon: Brain,        gradient: 'from-indigo-400 to-violet-500',  label: '자동 마케팅',    description: '매일 AI 캠페인 자동 제안',       path: '/continuous-operator', id: 'auto-marketing',
-    oneLine: { placeholder: '예: 90일 넘게 안 산 고객을 매주 월요일에 다시 불러와줘', verb: '제안 받기' } },
+    oneLine: { placeholder: '예: 매월 초에 90일 넘게 안 산 고객을 다시 불러와줘', verb: '제안 받기' } },   // ★ 2026-10-05 매주 + 상태 조건 = 반복이라 막는다(신뢰 설계 Q9) → 매월 예시
   // ★ 2026-09-20 NEW 만료 제거(출시 08-12 · 라벨 3단 정책의 4~6주 기한 경과). 이미지 스튜디오(07-19)도 같이 내렸다.
   { icon: CalendarDays, gradient: 'from-violet-400 to-fuchsia-500', label: '마케팅 플래너',  description: '월간 행사 계획 → AI 대행',       path: '/marketing-planner', id: 'planner' },
   // 2행 — 발송 채널

@@ -3,9 +3,12 @@ import { query } from '../config/database';
 import { authenticate } from '../middlewares/auth';
 import { checkAPIStatus, extractVarCatalog, filterVarCatalogByData, generateCustomMessages, generateMessages, parseBriefing, recommendTarget, countFilteredCustomers, recommendNextCampaign, refineDirectMessage, callAIWithFallback } from '../services/ai';
 import {
-  resolveRegistrationSegment, createOperatorInputFromBody, operatorSaveErrorResponse,
-  runOperatorPreview, startOperatorFromPreview, PreviewBusyError, PreviewInputError, PREVIEW_EXPIRED_MESSAGE,
-} from '../utils/automarketing-preview';   // ★ 2026-10-05 자동 마케팅 미리보기
+  createOperatorInputFromBody, operatorSaveErrorResponse,
+  runOperatorPreview, startOperatorFromPreview, updateOperatorPreview, previewOperatorApproval, approveOperatorFromScreen,
+  PreviewBusyError, PreviewInputError, PreviewStaleError, PREVIEW_EXPIRED_MESSAGE, APPROVAL_EXPIRED_MESSAGE,
+} from '../utils/automarketing-preview';   // ★ 2026-10-05 자동 마케팅 미리보기 · 승인 창
+import { translateAudience } from '../utils/audience-translate';   // ★ 2026-10-05 대상 번역(신뢰 설계 §2-2)
+import { validateOperatorInput } from '../utils/continuous-operator';
 import { buildGenderFilter, buildGradeFilter, buildRegionFilter, getGenderVariants, getRegionVariants } from '../utils/normalize';
 import { FIELD_MAP, FIELD_DISPLAY_MAP, reverseDisplayValue, getColumnFields, renderFieldValue } from '../utils/standard-field-map';
 import { replaceVariables } from '../utils/messageUtils';
@@ -25,7 +28,7 @@ import {
   assertSegmentUsable,
 } from '../utils/operator-audience';
 // ★ 2026-08-04 변화 축 — 기준선 유무 판정(화면 첫 회차 안내가 서버 답을 쓴다).
-import { segmentNeedsCycleBaseline, normalizeSegmentKey } from '../utils/automarketing-segment';
+import { segmentNeedsCycleBaseline, normalizeSegmentKey, schedulePeriod } from '../utils/automarketing-segment';
 import { hasCycleBaseline } from '../utils/operator-cycle-snapshot';
 import { aggregateCampaignPerformance } from '../utils/stats-aggregation';
 import { formatDateValue, getOpt080Number, buildAdMessage, buildAdSubject } from '../utils/messageUtils';
@@ -1657,18 +1660,11 @@ router.post('/operator/target-recipients', async (req: Request, res: Response) =
       baseParams,
       // ★ 2026-08-04 변화 축 — 비교할 지난 회차의 주인(위 기준선 게이트를 지난 뒤라 항상 존재).
       operatorId: opIdForBaseline,
+      // ★ 2026-10-05 생일 축 = 회차 기간(주기를 보내면 그 기간 · 없으면 이번 달)
+      period: typeof req.body?.schedule === 'string' ? schedulePeriod(req.body.schedule) : null,
     });
-
-    // ★ 2026-08-18 계약 축이 아닌데 조건이 하나도 안 만들어졌으면 **전원이 아니라 거절**이다.
-    //   preview-recipients(발송 경로)와 같은 판정을 쓴다 — 화면이 6명을 보여주고 발송은 막히는
-    //   어긋남이 생기면 그게 더 나쁘다. 계약 축(segment)은 자기 SQL이 조건을 소유하므로 대상이 아니다.
-    if (compiled.basis !== 'segment' && !compiled.filterWhere.trim()) {
-      return res.status(400).json({
-        success: false,
-        code: 'TARGET_FILTER_EMPTY',
-        error: 'AI가 이 목표를 조건으로 옮기지 못했습니다. 조건을 더 구체적으로 적어주시거나, 특정 고객 몇 명에게만 보낼 때는 직접발송에서 고객을 직접 골라 보내주세요.',
-      });
-    }
+    // ★ 2026-08-18 → 2026-10-05: 계약 축이 아닌데 조건이 비면 전원이 아니라 거절 — 판정은 컴파일(AudienceEmptyError)이 소유한다.
+    //   대상 수 · 제안 명단 · 실발송이 같은 판정을 쓰게 됐다(옛: 이 화면만 거절하고 회차는 전원을 셌다). 응답은 아래 catch.
     // 조건 필드 동적 컬럼 — FIELD_MAP 화이트리스트 + displayName 라벨 단일 소스.
     //   계약 축은 조건 컬럼을 계약이 정하므로 filters 기반 동적 컬럼을 붙이지 않는다.
     const conditionColumns = compiled.basis === 'segment' ? [] : resolveConditionColumns(filters || {}, FIELD_MAP);
@@ -1700,6 +1696,13 @@ router.post('/operator/target-recipients', async (req: Request, res: Response) =
     }
     if (msg.includes('column') && msg.includes('does not exist')) {
       return res.status(503).json({ success: false, error: 'DB 마이그레이션 필요: 운영자에게 customers 컬럼 확인을 요청해주세요.', code: 'DB_MIGRATION_PENDING' });
+    }
+    if (err?.code === 'TARGET_FILTER_EMPTY') {
+      return res.status(400).json({
+        success: false,
+        code: 'TARGET_FILTER_EMPTY',
+        error: 'AI가 이 목표를 조건으로 옮기지 못했습니다. 조건을 더 구체적으로 적어주시거나, 특정 고객 몇 명에게만 보낼 때는 직접발송에서 고객을 직접 골라 보내주세요.',
+      });
     }
     console.error('[AI Operator] target-recipients 오류:', err);
     return res.status(500).json({ success: false, error: err?.message || '추출 대상 조회 실패' });
@@ -2167,17 +2170,32 @@ router.post('/operator/continuous', async (req: Request, res: Response) => {
       }
     }
 
-    // ★ 2026-08-04 계약 필수화(§5-B ③) — 등록 1회 축 매핑. ★ 2026-10-05 미리보기와 같은 함수로 옮겼다(utils/automarketing-preview.ts).
-    const seg = await resolveRegistrationSegment(companyId, userId, req.body);
-
-
-    const operator = await createOperator({
-      ...createOperatorInputFromBody(companyId, userId, req.body),   // ★ 2026-10-05 미리보기와 같은 조립
-      // ★ 2026-08-03 A-7: 계약(createOperator가 화이트리스트·범위 정규화). 미지정 = 옛 방식(자유 해석).
-      // ★ 2026-08-04: 사용자가 안 골랐으면 위 등록 1회 매핑 결과가 들어온다.
-      segmentKey: seg.segmentKey,
-      segmentParams: seg.segmentParams,
+    // ★ 2026-10-05 대상 번역(신뢰 설계 §2-2 · 등록 · 미리보기 · 승인 창 공용) — 축 · 칸 조건으로 한 번 고정한다.
+    //   옛: 등록 1회 축 매핑이 실패하면 자유 해석으로 등록돼 회차마다 AI 가 조건을 빼고 넓혔다(생일 쿠폰이 전체 고객).
+    //   막힘(데이터 없음 · 조건 없음 · 주기 짝) · 칸 고르기 필요 = 등록하지 않는다(400 · 차감 0). 등록이 거절할 입력은 AI 전에 거른다.
+    const baseInput = createOperatorInputFromBody(companyId, userId, req.body);   // ★ 2026-10-05 미리보기와 같은 조립
+    try { validateOperatorInput(baseInput as any); } catch (e: any) { return res.status(400).json({ success: false, error: e?.message || '입력을 확인해 주세요.' }); }
+    const tr = await translateAudience({
+      companyId, userId, objective: baseInput.objective, schedule: baseInput.schedule || 'daily',
+      segmentKey: req.body?.segment_key, segmentParams: req.body?.segment_params, targetHint: req.body?.target_hint,
+      conditions: Array.isArray(req.body?.audience_conditions) ? req.body.audience_conditions : null,
     });
+    if (tr.kind === 'blocked') {
+      return res.status(400).json({ success: false, code: `AUDIENCE_${tr.code}`, error: tr.reason, suggestKey: tr.suggestKey ?? null });
+    }
+    if (tr.kind === 'needs_choice') {
+      return res.status(400).json({
+        success: false, code: 'AUDIENCE_NEEDS_CHOICE',
+        error: `${tr.unresolved.map((u) => `「${u.term}」`).join(' · ')}을(를) 어느 칸으로 판단할지 정해야 해요. 자동 마케팅 첫 화면의 한 줄 입력으로 시작하면 칸을 고를 수 있어요.`,
+      });
+    }
+    const operator = await createOperator({
+      ...baseInput,
+      segmentKey: tr.kind === 'axis' ? tr.segmentKey : null,
+      segmentParams: tr.kind === 'axis' ? tr.segmentParams : null,
+      audienceConditions: tr.kind === 'filters' ? tr.conditions : null,
+    });
+    const appliedSegment = tr.kind === 'axis' && tr.mapped ? { key: tr.segmentKey, label: tr.label } : null;
     // ★ 2026-07-05: 캘린더 경유 등록 기록 — 실패해도 등록은 성공(fire-safe, 테이블 미생성 = 내부 생략)
     if (calendarMonth != null) {
       const { markCalendarRegistration } = await import('../utils/marketing-calendar-store');
@@ -2185,7 +2203,7 @@ router.post('/operator/continuous', async (req: Request, res: Response) => {
         console.log('[MarketingCalendar] 등록 기록 실패(등록은 성공):', e?.message || e));
     }
     // appliedSegment — AI 매핑으로 고정된 축. 화면이 즉시 알린다(사용자 몰래 고정되는 상태 금지).
-    return res.json({ success: true, operator, appliedSegment: seg.appliedSegment });
+    return res.json({ success: true, operator, appliedSegment });
   } catch (err: any) {
     const mapped = operatorSaveErrorResponse(err);   // ★ 2026-10-05 [시작]과 같은 응답
     if (mapped) return res.status(mapped.status).json(mapped.body);
@@ -2232,16 +2250,97 @@ router.post('/operator/continuous/from-preview', async (req: Request, res: Respo
       return res.status(403).json({ success: false, error: '본 기능은 요금제 가입 후 이용 가능합니다.', code: 'BETA_GATE' });
     }
     const previewId = typeof req.body?.preview_id === 'string' ? req.body.preview_id : '';
-    const out = previewId ? await startOperatorFromPreview(previewId, companyId, userId) : null;
+    const out = previewId ? await startOperatorFromPreview(previewId, companyId, userId, req.body?.revision) : null;
     if (!out) {
       return res.status(410).json({ success: false, error: PREVIEW_EXPIRED_MESSAGE, code: 'PREVIEW_EXPIRED' });
     }
     return res.json({ success: true, ...out });
   } catch (err: any) {
+    if (err instanceof PreviewStaleError) return res.status(409).json({ success: false, error: err.message, code: 'PREVIEW_STALE', current: err.current });
     const mapped = operatorSaveErrorResponse(err);
     if (mapped) return res.status(mapped.status).json(mapped.body);
     console.error('[Operator continuous from-preview] 오류:', err);
     return res.status(500).json({ success: false, error: err?.message || '자동 마케팅 시작 실패' });
+  }
+});
+
+// ★ 2026-10-05 미리보기 창 편집(신뢰 설계 §5) — 칸 고르기 · 기준 숫자 · 문안 분기 · 직접 쓴 문안 · 핵심 혜택.
+//   서버가 검증해 보관본에 반영한다(시작은 보관본만 쓴다). AI 문안이 필요해지면 그때 만든다(5 · 대상 0명 0).
+router.post('/operator/continuous/preview/update', async (req: Request, res: Response) => {
+  try {
+    const companyId = req.user?.companyId;
+    const userId = req.user?.userId;
+    if (!companyId || !userId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
+    const planCtx = await loadPlanContext(companyId);
+    if (!planCtx) return res.status(404).json({ success: false, error: '회사 정보를 찾을 수 없습니다.' });
+    if (!isAiOperatorAllowed(planCtx, req.user)) {
+      return res.status(403).json({ success: false, error: '본 기능은 요금제 가입 후 이용 가능합니다.', code: 'BETA_GATE' });
+    }
+    const previewId = typeof req.body?.preview_id === 'string' ? req.body.preview_id : '';
+    const out = previewId ? await updateOperatorPreview(previewId, companyId, userId, req.body) : null;
+    if (!out) return res.status(410).json({ success: false, error: PREVIEW_EXPIRED_MESSAGE, code: 'PREVIEW_EXPIRED' });
+    return res.json({ success: true, ...out });
+  } catch (err: any) {
+    if (err instanceof PreviewStaleError) return res.status(409).json({ success: false, error: err.message, code: 'PREVIEW_STALE', current: err.current });
+    if (err instanceof PreviewBusyError) return res.status(409).json({ success: false, error: err.message, code: 'PREVIEW_BUSY' });
+    if (err instanceof PreviewInputError) return res.status(400).json({ success: false, error: err.message, code: 'PREVIEW_INPUT' });
+    if (err instanceof InsufficientCreditError) {
+      return res.status(402).json({ success: false, error: '문안을 만드는 데 필요한 크레딧이 부족합니다. 크레딧을 충전해 주세요.', code: 'INSUFFICIENT_CREDIT' });
+    }
+    console.error('[Operator continuous preview update] 오류:', err);
+    return res.status(500).json({ success: false, error: '미리보기를 고치지 못했습니다. 잠시 뒤 다시 시도해 주세요.' });
+  }
+});
+
+// ★ 2026-10-05 실행 중 자동 마케팅의 승인 창(다음 승인 · 조건 확인) — 지난 기간 요약 · 다음 7일 · 지금 계약의 근거(AI 문안 0 · 차감 0)
+router.post('/operator/continuous/:id/approval-preview', async (req: Request, res: Response) => {
+  try {
+    const companyId = req.user?.companyId;
+    const userId = req.user?.userId;
+    if (!companyId || !userId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
+    const owner = await query(`SELECT created_by FROM continuous_operators WHERE id = $1::uuid AND company_id = $2::uuid`, [req.params.id, companyId]);
+    if (owner.rows.length === 0) return res.status(404).json({ success: false, error: '자동 마케팅을 찾을 수 없습니다.' });
+    if (req.user?.userType !== 'company_admin' && owner.rows[0].created_by !== userId) {
+      return res.status(403).json({ success: false, error: '본인이 만든 자동마케팅만 승인할 수 있습니다.' });
+    }
+    // 창을 열 때만 — 편집은 preview/update(보관본) · 승인은 approve-window(보관본 + 판 번호)
+    const out = await previewOperatorApproval(companyId, req.params.id, userId);
+    if (!out) return res.status(404).json({ success: false, error: '자동 마케팅을 찾을 수 없습니다.' });
+    return res.json({ success: true, ...out });
+  } catch (err: any) {
+    if (err instanceof PreviewBusyError) return res.status(409).json({ success: false, error: err.message, code: 'PREVIEW_BUSY' });
+    if (err instanceof PreviewInputError) return res.status(400).json({ success: false, error: err.message, code: 'APPROVAL_INPUT' });
+    console.error('[Operator approval-preview] 오류:', err);
+    return res.status(500).json({ success: false, error: '승인 창을 열지 못했습니다. 잠시 뒤 다시 시도해 주세요.' });
+  }
+});
+
+// ★ 2026-10-05 [다음 승인] · [조건 확인] — 계약 · 문안 분기 · 핵심 혜택을 서버가 다시 검증하고 승인 기간과 함께 한 문장에 저장(차감 0)
+router.post('/operator/continuous/:id/approve-window', async (req: Request, res: Response) => {
+  try {
+    const companyId = req.user?.companyId;
+    const userId = req.user?.userId;
+    if (!companyId || !userId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
+    const planCtx = await loadPlanContext(companyId);
+    if (!planCtx || !isAiOperatorAllowed(planCtx, req.user)) {
+      return res.status(403).json({ success: false, error: '본 기능은 요금제 가입 후 이용 가능합니다.', code: 'BETA_GATE' });
+    }
+    const owner = await query(`SELECT created_by FROM continuous_operators WHERE id = $1::uuid AND company_id = $2::uuid`, [req.params.id, companyId]);
+    if (owner.rows.length === 0) return res.status(404).json({ success: false, error: '자동 마케팅을 찾을 수 없습니다.' });
+    if (req.user?.userType !== 'company_admin' && owner.rows[0].created_by !== userId) {
+      return res.status(403).json({ success: false, error: '본인이 만든 자동마케팅만 승인할 수 있습니다.' });
+    }
+    const out = await approveOperatorFromScreen(companyId, req.params.id, userId, req.body);
+    if (!out) return res.status(410).json({ success: false, error: APPROVAL_EXPIRED_MESSAGE, code: 'PREVIEW_EXPIRED' });
+    return res.json({ success: true, approvedUntil: out.until });
+  } catch (err: any) {
+    if (err instanceof PreviewStaleError) return res.status(409).json({ success: false, error: err.message, code: 'PREVIEW_STALE', current: err.current });
+    if (err instanceof PreviewBusyError) return res.status(409).json({ success: false, error: err.message, code: 'PREVIEW_BUSY' });
+    if (err instanceof PreviewInputError) return res.status(400).json({ success: false, error: err.message, code: 'APPROVAL_INPUT' });
+    const mapped = operatorSaveErrorResponse(err);
+    if (mapped) return res.status(mapped.status).json(mapped.body);
+    console.error('[Operator approve-window] 오류:', err);
+    return res.status(500).json({ success: false, error: err?.message || '승인을 저장하지 못했습니다.' });
   }
 });
 
@@ -2829,6 +2928,9 @@ router.post('/operator/proposals/:id/recipients', async (req: Request, res: Resp
         baseParams,
         // ★ 2026-08-04(R1): 변화 축은 이 제안의 오퍼레이터 스냅샷과 비교한다 — 발송 경로와 같은 축.
         operatorId: prow.operator_id || null,
+        // ★ 2026-10-05 제안이 센 회차(기간 · 기준 시각) 그대로 — 발송 재추출과 같은 값(옛 제안 = 없음 = 옛 동작)
+        period: pj.target?.period || null,
+        now: pj.target?.anchorAt ? new Date(pj.target.anchorAt) : undefined,
       });
       filterWhere = compiled.filterWhere;
       filterParams = compiled.filterParams;
@@ -2873,6 +2975,9 @@ router.post('/operator/proposals/:id/recipients', async (req: Request, res: Resp
     }
     if (msg.includes('column') && msg.includes('does not exist')) {
       return res.status(503).json({ success: false, error: 'DB 마이그레이션 필요: 운영자에게 customers/operator_proposals 컬럼 확인을 요청해주세요.', code: 'DB_MIGRATION_PENDING' });
+    }
+    if (err?.code === 'TARGET_FILTER_EMPTY') {
+      return res.status(400).json({ success: false, code: 'TARGET_FILTER_EMPTY', error: '이 제안은 대상 조건이 비어 있어 보낼 수 없어요. 자동 마케팅에서 대상 조건을 확인해 주세요.' });
     }
     console.error('[Proposals recipients] 오류:', err);
     return res.status(500).json({ success: false, error: err?.message || '발송 대상 조회 실패' });

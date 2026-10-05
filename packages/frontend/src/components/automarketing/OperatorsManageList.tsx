@@ -1,5 +1,5 @@
 // 실행 중인 자동마케팅 관리 — 오퍼레이터 목록 + 예산 + 지금 실행/수정/중단 (2026-06-27)
-import { Clock, Play, Edit2, Trash2, AlertCircle, Plus } from 'lucide-react';
+import { Clock, Play, Edit2, Trash2, AlertCircle, Plus, ShieldCheck } from 'lucide-react';
 import { ContinuousOperator, won } from './types';
 import StatusBadge from './StatusBadge';
 
@@ -7,13 +7,27 @@ interface Props {
   operators: ContinuousOperator[];
   onRunNow: (id: string) => void;
   onEdit: (op: ContinuousOperator) => void;
+  /** ★ 2026-10-05 다음 승인 · 조건 확인(주간 승인 창) */
+  onApprove: (op: ContinuousOperator) => void;
   onDelete: (id: string) => void;
   onCreate: () => void;
 }
 
 const POLICY_LABEL: Record<string, string> = { daily: '매일', weekly: '매주', monthly: '매월', yearly: '매년' };
 
-export default function OperatorsManageList({ operators, onRunNow, onEdit, onDelete, onCreate }: Props) {
+/** ★ 2026-10-05 승인 상태 — 조건 확인 필요(옛 자유 해석) · 승인 기간 · 회차마다 승인 */
+function approvalState(op: ContinuousOperator): { tone: string; label: string; action: string } {
+  const needsContract = !op.segmentKey && !op.targetHint && !(op.audienceConditions && op.audienceConditions.length > 0);
+  if (needsContract) return { tone: 'bg-amber-50 text-amber-800 border-amber-200', label: '조건 확인 필요', action: '조건 확인' };
+  const until = op.approvedUntil ? new Date(op.approvedUntil) : null;
+  if (until && until.getTime() > Date.now()) {
+    const d = until.toLocaleDateString('ko-KR', { timeZone: 'Asia/Seoul', month: 'long', day: 'numeric' });
+    return { tone: 'bg-emerald-50 text-emerald-800 border-emerald-200', label: `${d}까지 승인`, action: '승인 보기' };
+  }
+  return { tone: 'bg-slate-50 text-slate-700 border-slate-200', label: '회차마다 승인', action: op.schedule === 'daily' ? '다음 주 승인' : '다음 회차 승인' };
+}
+
+export default function OperatorsManageList({ operators, onRunNow, onEdit, onApprove, onDelete, onCreate }: Props) {
   if (operators.length === 0) {
     return (
       <div className="bg-white border border-slate-200 rounded-xl p-12 text-center text-sm text-slate-500">
@@ -42,6 +56,7 @@ export default function OperatorsManageList({ operators, onRunNow, onEdit, onDel
                 <div className="flex items-center gap-2 mb-1 flex-wrap">
                   <div className="text-base font-semibold text-slate-900">{op.name}</div>
                   <StatusBadge status={op.status} />
+                  {(() => { const a = approvalState(op); return <span className={`text-[11px] px-2 py-0.5 rounded-full border ${a.tone}`}>{a.label}</span>; })()}
                 </div>
                 <div className="text-sm text-slate-600 mb-2">{op.objective}</div>
                 <div className="flex flex-wrap gap-x-3 gap-y-1 text-xs text-slate-500">
@@ -68,6 +83,9 @@ export default function OperatorsManageList({ operators, onRunNow, onEdit, onDel
               </div>
 
               <div className="flex flex-col gap-1.5 shrink-0">
+                <button onClick={() => onApprove(op)} className="text-xs bg-amber-100 hover:bg-amber-200 text-amber-900 px-2 py-1 rounded flex items-center gap-1 border border-amber-200 transition-colors">
+                  <ShieldCheck className="w-3 h-3" /> {approvalState(op).action}
+                </button>
                 <button onClick={() => onRunNow(op.id)} className="text-xs bg-indigo-100 hover:bg-indigo-100 text-indigo-800 px-2 py-1 rounded flex items-center gap-1 border border-indigo-200 transition-colors">
                   <Play className="w-3 h-3" /> 지금 실행
                 </button>

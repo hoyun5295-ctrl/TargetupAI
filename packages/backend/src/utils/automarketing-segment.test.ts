@@ -130,7 +130,10 @@ describe('buildSegmentPredicate — 축이 정해지면 SQL이 정해진다(결�
   it('이번 달 생일 = 발송 월(KST) 일치', () => {
     const params: any[] = ['CID'];
     const sql = buildSegmentPredicate('birthday', null, params, { now });
-    expect(sql).toContain('EXTRACT(MONTH FROM c.birth_date) = $2');
+    expect(sql).toContain('EXTRACT(MONTH FROM c.birth_date) = $2::int');
+    // ★ 2026-10-05 월일 칸(음력 생일 구제 행)도 같은 달로 읽는다
+    expect(sql).toContain("LEFT(c.birth_month_day, 3) = LPAD($2::text, 2, '0') || '-'");
+    expect(sql).not.toContain('birth_month_day, 2)::int');
     expect(params[1]).toBe(8);
   });
 

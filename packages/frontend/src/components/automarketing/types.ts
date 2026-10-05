@@ -57,6 +57,11 @@ export interface ContinuousOperator {
    * 자동 판단을 직접 고른 경우에만 해제를 보낸다. 저장 payload에는 이 값 자체가 나가지 않는다.
    */
   targetHintTouched?: boolean;
+  // ★ 2026-10-05 신뢰 설계 — 칸 조건 계약 · 문안 분기 · 승인 기간 · 회차 기록(서버 mapRowToOperator)
+  audienceConditions?: Array<{ term: string; field: string; label: string; operator: string; value: any }> | null;
+  copyMode?: 'ai' | 'fixed';
+  approvedUntil?: string | null;
+  roundLog?: Array<{ at: string; outcome: string; count?: number; reason?: string }>;
   // 발송 시각 모드 — 'fixed'(기본, 희망 시각 정각 발송) | 'ai_optimal'(반응 좋은 시간대로 AI가 조정)
   sendTimeMode?: 'fixed' | 'ai_optimal';
   // 문안 스타일 4종 — null/미지정 = 브랜드 톤 자동

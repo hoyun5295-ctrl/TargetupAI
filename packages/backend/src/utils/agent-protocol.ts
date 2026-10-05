@@ -187,7 +187,7 @@ export function markCommandsDelivered(
 }
 
 /** 키 순서와 무관한 JSON(jsonb는 키 순서를 바꿔 저장한다) */
-function stableJson(v: any): string {
+export function stableJson(v: any): string {
   if (Array.isArray(v)) return `[${v.map(stableJson).join(',')}]`;
   if (v && typeof v === 'object') {
     return `{${Object.keys(v).sort().map((k) => `${JSON.stringify(k)}:${stableJson(v[k])}`).join(',')}}`;

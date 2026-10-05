@@ -17,19 +17,20 @@ export interface ScenarioPick {
   segmentParams?: Record<string, number>;
 }
 
+// ★ 2026-10-05 상태 조건 시나리오 = 매월 1일 기본(신뢰 설계 Q9 — 매일 · 매주 + 상태 조건은 같은 고객이 회차마다 다시 받아 등록이 막힌다)
 const SCENARIOS: Array<ScenarioPick & { icon: LucideIcon; desc: string }> = [
   // 두 조건의 결합(VIP+휴면)·축에 없는 대상(승급 근접·상품 관심·포인트)은 프리필 없음 — 등록 시 AI 매핑 또는 자유 해석.
-  { key: 'vip_repurchase', icon: Crown, name: 'VIP 재구매 유도', desc: '90일 이상 구매 없는 VIP에게 재구매 제안', objective: 'VIP 등급 고객 중 최근 90일 구매가 없는 고객에게 재구매를 유도' },
-  { key: 'dormant', icon: Moon, name: '휴면 고객 회복', desc: '60일 넘게 잠든 고객을 복귀 유도', objective: '최근 60일 이상 구매가 없는 휴면 고객을 복귀 유도', segmentKey: 'dormant', segmentParams: { days: 60 } },
+  { key: 'vip_repurchase', icon: Crown, name: 'VIP 재구매 유도', desc: '90일 이상 구매 없는 VIP에게 재구매 제안', objective: 'VIP 등급 고객 중 최근 90일 구매가 없는 고객에게 재구매를 유도', schedule: 'monthly', scheduleDayOfMonth: 1 },
+  { key: 'dormant', icon: Moon, name: '휴면 고객 회복', desc: '60일 넘게 잠든 고객을 복귀 유도', objective: '최근 60일 이상 구매가 없는 휴면 고객을 복귀 유도', segmentKey: 'dormant', segmentParams: { days: 60 }, schedule: 'monthly', scheduleDayOfMonth: 1 },
   // ⛔ first_purchase 시나리오는 프리필 없음(Codex) — new_customers 축은 "미구매" 조건이 없어 이미 산
   //   신규 고객에게 첫구매 문안이 나간다. 축 하나로 표현이 안 되는 대상은 자유 해석에 맡긴다.
-  { key: 'first_purchase', icon: UserPlus, name: '신규 첫구매 전환', desc: '가입 후 아직 안 산 고객 첫 구매 유도', objective: '가입 후 아직 구매하지 않은 신규 고객의 첫 구매 유도' },
-  { key: 'tier_up', icon: TrendingUp, name: '등급 상승 유도', desc: 'VIP 근접 고객에게 한 걸음 더 제안', objective: 'VIP 승급에 근접한 일반 고객의 추가 구매 유도' },
-  { key: 'seasonal', icon: Sun, name: '계절 프로모션', desc: '이번 시즌에 맞춰 전체 활성 고객 안내', objective: '이번 시즌에 맞춰 전체 활성 고객에게 시즌 프로모션 안내', segmentKey: 'all' },
-  { key: 'inventory', icon: Package, name: '재고 소진', desc: '재고가 남은 상품의 구매 유도', objective: '재고 소진이 필요한 상품에 관심을 보인 고객의 구매 유도' },
+  { key: 'first_purchase', icon: UserPlus, name: '신규 첫구매 전환', desc: '가입 후 아직 안 산 고객 첫 구매 유도', objective: '가입 후 아직 구매하지 않은 신규 고객의 첫 구매 유도', schedule: 'monthly', scheduleDayOfMonth: 1 },
+  { key: 'tier_up', icon: TrendingUp, name: '등급 상승 유도', desc: 'VIP 근접 고객에게 한 걸음 더 제안', objective: 'VIP 승급에 근접한 일반 고객의 추가 구매 유도', schedule: 'monthly', scheduleDayOfMonth: 1 },
+  { key: 'seasonal', icon: Sun, name: '계절 프로모션', desc: '이번 시즌에 맞춰 전체 활성 고객 안내', objective: '이번 시즌에 맞춰 전체 활성 고객에게 시즌 프로모션 안내', segmentKey: 'all', schedule: 'monthly', scheduleDayOfMonth: 1 },
+  { key: 'inventory', icon: Package, name: '재고 소진', desc: '재고가 남은 상품의 구매 유도', objective: '재고 소진이 필요한 상품에 관심을 보인 고객의 구매 유도', schedule: 'monthly', scheduleDayOfMonth: 1 },
   // ★ 2026-07-02 5차 확장 (Harold 스펙): 생일·포인트·VIP 지정일
   { key: 'birthday_monthly', icon: Cake, name: '생일 축하 (매월)', desc: '매월 정한 날, 그 달 생일 고객에게 축하 인사', objective: '이번 달 생일인 고객에게 생일 축하 인사', schedule: 'monthly', scheduleDayOfMonth: 1, segmentKey: 'birthday' },
-  { key: 'points_use', icon: Coins, name: '포인트 사용 유도', desc: '포인트 보유 고객에게 사용 안내', objective: '포인트를 보유한 고객에게 포인트 사용을 유도' },
+  { key: 'points_use', icon: Coins, name: '포인트 사용 유도', desc: '포인트 보유 고객에게 사용 안내', objective: '포인트를 보유한 고객에게 포인트 사용을 유도', schedule: 'monthly', scheduleDayOfMonth: 1 },
   { key: 'vip_day', icon: Star, name: 'VIP 데이 (매월)', desc: '매월 정한 날, VIP에게 감사 안내', objective: 'VIP 등급 고객에게 이번 달 VIP 감사 안내', schedule: 'monthly', scheduleDayOfMonth: 1, segmentKey: 'vip' },
 ];
 

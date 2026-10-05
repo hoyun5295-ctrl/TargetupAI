@@ -55,6 +55,10 @@
 
 ## 2) 활성 버그
 
+### 🟡 B-1005-3 자동 마케팅 신뢰 설계 작업 중 발견 · 범위 밖 기존 결함 1건 (등재만 · 착수 판단 = Harold님) · 2026-10-05
+- **고객 필터 · 구조 필터의 생일 월 = `split_part(birth_month_day, '-', 1)::int` 형변환** — `customer-filter.ts:293` · `:511`. 생년월일이 없고 월일 칸에 숫자가 아닌 값(예: `1월-03`)이 한 행이라도 있으면 그 회사의 생일 월 필터 조회 전체가 형변환 오류로 멈춘다. 자동 마케팅 생일 축은 글자 비교로 바꿨다(설계서 §9-2). 운영 데이터에 그런 값이 있는지 미검증(확인 = `SELECT COUNT(*) FROM customers WHERE birth_date IS NULL AND birth_month_day IS NOT NULL AND birth_month_day !~ '^[0-9]{2}-[0-9]{2}$';`).
+- 설계서 = [자동 마케팅 신뢰 설계 §9](../docs/2026-10-05-automarketing-trust-design.md)
+
 ### 🟡 B-1005-2 자동 마케팅 미리보기 작업 중 발견 · 범위 밖 기존 결함 1건 (등재만 · 착수 판단 = Harold님) · 2026-10-05
 - **허브 제안(`/operator/propose`)은 대상 0명이어도 문안이 나오면 5 차감** — 근거 = 코드 읽기: `ai-orchestrator.ts` 순차 경로(`orchestrate`)는 대상 수 0이어도 문안 생성으로 넘어가고, 차감 조건은 「문안 1개 이상」뿐이다(0708 원칙 「0건 매칭 = 차감 skip」의 전제와 다름). 회사 토글로 쓰는 `orchestrateWithAI` 경로는 도구 설명상 0건이면 문안 도구를 부르지 않는다. 운영 원장 발생 여부 미검증. 자동 마케팅 미리보기는 `chargeOnlyWithTarget` 로 닫혔다(허브는 지정 안 함 = 그대로).
 - 설계서 = [자동 마케팅 미리보기 §7](../docs/2026-10-05-automarketing-preview-design.md)

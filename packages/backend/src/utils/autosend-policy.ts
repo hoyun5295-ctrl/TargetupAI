@@ -7,6 +7,7 @@
  * - normalizeCdpAutoExecuteGate: 슈퍼관리자 자율발송 게이트 입력 정규화(clamp·화이트리스트).
  */
 import { clampInt } from './journey-points-trigger'; // 순수(DB 미import) CT — 테스트 DB-free 유지
+import { shiftToSendableHour } from './send-time-util'; // 순수(설정 상수만) — ★ 2026-10-05 승인 기간
 
 export function resolveAutoSendLeadMinutes(raw: number | null | undefined): number {
   const n = Math.floor(Number(raw));
@@ -616,4 +617,111 @@ export function normalizeCdpAutoExecuteGate(raw: any): CdpAutoExecuteGate {
     maxCostKrw: clampInt(r.maxCostKrw, 50000, 1, 100_000_000),
     maxRisk: CDP_RISK_LEVELS.includes(r.maxRisk) ? r.maxRisk : 'low',
   };
+}
+
+// ════════════════════════════════════════════════════════════════════
+// ★ 2026-10-05 주간 승인(신뢰 설계 §2-6) — 순수 정책(continuous-operator.ts 에서 옮김 · DB 0)
+// ════════════════════════════════════════════════════════════════════
+
+/**
+ * ★ 2026-10-05 승인 기간(신뢰 설계 §2-6) — 시작 = 다음 회차 발송 · 끝 = 시작일 + 6일 그날 밤 12시(KST).
+ *   매일 = 7회 · 매주 · 매월 · 매년 = 그 기간에 든 1회.
+ */
+export function computeApprovalWindow(
+  op: { schedule: OperatorScheduleKind; scheduleTime: string; scheduleDayOfWeek: number | null; scheduleDayOfMonth: number | null; scheduleMonth: number | null },
+  now: Date = new Date(),
+): { startAt: Date; until: Date; rounds: Date[] } {
+  const startAt = shiftToSendableHour(computeNextOccurrence(op.schedule, op.scheduleTime, op.scheduleDayOfWeek, op.scheduleDayOfMonth, op.scheduleMonth, now));
+  const kst = new Date(startAt.getTime() + 9 * 60 * 60 * 1000);
+  const until = new Date(Date.UTC(kst.getUTCFullYear(), kst.getUTCMonth(), kst.getUTCDate() + 6, 23, 59, 59, 999) - 9 * 60 * 60 * 1000);
+  const rounds = op.schedule === 'daily'
+    ? Array.from({ length: 7 }, (_, i) => new Date(startAt.getTime() + i * 24 * 60 * 60 * 1000))
+    : [startAt];
+  return { startAt, until, rounds };
+}
+
+/**
+ * 승인 기간 안의 회차인가(순수 · Codex 1R) — 첫 승인 회차의 날(KST 0시)부터 끝(마지막 날 23:59:59.999)까지.
+ *   끝만 보면 승인 전 회차가 통과한다(매월 1일 운영자를 5일에 시작 → 최적 시각 회차가 오늘 = 다음 달 승인으로 나감). 시작을 모르면 아니다.
+ */
+export function isWithinApprovalWindow(approvedUntil: Date | null | undefined, windowStart: string | null | undefined, at: Date): boolean {
+  if (!approvedUntil || !windowStart) return false;
+  const s = new Date(windowStart).getTime();
+  if (!Number.isFinite(s)) return false;
+  const kst = new Date(s + 9 * 60 * 60 * 1000);
+  const dayStart = Date.UTC(kst.getUTCFullYear(), kst.getUTCMonth(), kst.getUTCDate()) - 9 * 60 * 60 * 1000;
+  return at.getTime() >= dayStart && at.getTime() <= approvedUntil.getTime();
+}
+
+/** 승인 기간 요약을 세기 시작할 때(순수) — 첫 회차는 발송 준비 시간만큼 먼저 만들어진다(Codex 2R) */
+export function approvalSummarySince(windowStart: string | null | undefined, autoSendLeadMinutes: number | null | undefined, fallback: Date): Date {
+  const s = windowStart ? new Date(windowStart).getTime() : NaN;
+  const base = Number.isFinite(s) ? s : fallback.getTime();
+  return new Date(base - resolveAutoSendLeadMinutes(autoSendLeadMinutes) * 60 * 1000);
+}
+
+/** 승인 기간 요약 문자 본문(순수) — 끝나기 하루 전 한 통 */
+export function buildRenewalNoticeBody(p: { name: string; untilLabel: string; sentRounds: number; people: number; emptyDays: number; held: number }): string {
+  const held = p.held > 0 ? ` · 멈춘 회차 ${p.held}` : '';
+  return `'${p.name}' 승인 기간이 ${p.untilLabel}에 끝나요. 지난 회차: 보낸 날 ${p.sentRounds}일 · ${p.people.toLocaleString()}명 · 대상 없는 날 ${p.emptyDays}일${held}. `
+    + '이어서 보내려면 한줄로 자동 마케팅 실행 중 목록에서 [다음 승인]을 눌러 주세요.';
+}
+
+/** 회차 기록에서 since 이후 「대상 없음」 날 수 */
+export function countEmptyRounds(log: Array<{ at: string; outcome: string }>, since: Date): number {
+  return log.filter((e) => e.outcome === 'empty' && new Date(e.at).getTime() >= since.getTime()).length;
+}
+
+/**
+ * ★ 2026-10-05 한 줄에서 주기 읽기(신뢰 설계 · 한 줄 · 오늘의 추천 입구) — 결정적 규칙(AI 0).
+ *   「포인트 독려 문자를 매월 초에」를 기본값 매일로 받으면 매일 + 상태 조건 = 같은 고객 반복이라 막힌다(Q9).
+ *   ⛔ 「생일인 날 · 당일 · 생일날」은 사람마다 그날에 보내는 것 = 매일(생일 축이 회차 기간 = 오늘로 센다).
+ *     「매달 생일자에게 생일인 날」의 「매달」은 주기가 아니라 「달마다 그달 생일자도」라는 말이다.
+ *   주기 말이 없으면 null(호출부가 매월 · 오늘 날짜로 둔다).
+ */
+export function parseScheduleFromText(text: string): {
+  schedule: OperatorScheduleKind;
+  scheduleDayOfWeek: number | null;
+  scheduleDayOfMonth: number | null;
+  scheduleTime: string | null;
+} | null {
+  const t = String(text || '');
+  let scheduleTime: string | null = null;
+  const tm = t.match(/(오전|오후)?\s*(\d{1,2})\s*시(?!간)(?:\s*(\d{1,2})\s*분|\s*반)?/);   // 「3시간 특가」는 시각이 아니다
+  if (tm) {
+    let h = parseInt(tm[2], 10);
+    const m = tm[3] ? parseInt(tm[3], 10) : (/반/.test(tm[0]) ? 30 : 0);
+    if (tm[1] === '오후' && h < 12) h += 12;
+    if (h >= 0 && h <= 23 && m >= 0 && m <= 59) scheduleTime = `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
+  }
+  if (/생일/.test(t) && /(당일|생일\s*인\s*날|생일날|생일\s*당일|생일\s*에\s*맞춰)/.test(t)) {
+    return { schedule: 'daily', scheduleDayOfWeek: null, scheduleDayOfMonth: null, scheduleTime };
+  }
+  const candidates: Array<{ at: number; v: { schedule: OperatorScheduleKind; scheduleDayOfWeek: number | null; scheduleDayOfMonth: number | null } }> = [];
+  const daily = t.search(/매일|날마다|하루\s*한\s*번/);
+  if (daily >= 0) candidates.push({ at: daily, v: { schedule: 'daily', scheduleDayOfWeek: null, scheduleDayOfMonth: null } });
+  const wk = t.match(/매주\s*([월화수목금토일])\s*요일/);
+  if (wk && wk.index != null) {
+    candidates.push({ at: wk.index, v: { schedule: 'weekly', scheduleDayOfWeek: '일월화수목금토'.indexOf(wk[1]), scheduleDayOfMonth: null } });
+  } else {
+    const w = t.search(/매주/);
+    if (w >= 0) candidates.push({ at: w, v: { schedule: 'weekly', scheduleDayOfWeek: null, scheduleDayOfMonth: null } });
+  }
+  const md = t.match(/매\s*(?:월|달)\s*(\d{1,2})\s*일/);
+  const mStart = t.search(/매\s*(?:월|달)\s*초/);
+  const mEnd = t.search(/매\s*(?:월|달)\s*(?:말|마지막\s*날)/);
+  const mAny = t.search(/매\s*(?:월|달)/);
+  if (md && md.index != null) {
+    const dom = parseInt(md[1], 10);
+    if (dom >= 1 && dom <= 31) candidates.push({ at: md.index, v: { schedule: 'monthly', scheduleDayOfWeek: null, scheduleDayOfMonth: dom } });
+  } else if (mStart >= 0) {
+    candidates.push({ at: mStart, v: { schedule: 'monthly', scheduleDayOfWeek: null, scheduleDayOfMonth: 1 } });
+  } else if (mEnd >= 0) {
+    candidates.push({ at: mEnd, v: { schedule: 'monthly', scheduleDayOfWeek: null, scheduleDayOfMonth: 31 } });
+  } else if (mAny >= 0) {
+    candidates.push({ at: mAny, v: { schedule: 'monthly', scheduleDayOfWeek: null, scheduleDayOfMonth: 1 } });
+  }
+  if (candidates.length === 0) return null;
+  candidates.sort((x, y) => x.at - y.at);
+  return { ...candidates[0].v, scheduleTime };
 }

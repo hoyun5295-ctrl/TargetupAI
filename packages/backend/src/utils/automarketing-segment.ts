@@ -113,6 +113,41 @@ export interface SegmentBuildContext {
    *   그 상태로 조건을 만들면 비교 대상 없는 술어가 조용히 0건을 낸다(사유가 사라진다).
    */
   operatorId?: string | null;
+  /**
+   * ★ 2026-10-05 회차 기간(신뢰 설계 §2-4) — 생일처럼 「이번 회차에 해당하는가」를 주기가 정한다.
+   *   매일 = 오늘 · 매주 = 발송일부터 7일 · 매월 · 매년 = 이번 달. 주지 않으면 이번 달(옛 동작).
+   */
+  period?: RoundPeriod;
+}
+
+/** 회차 기간 — 주기에서 정한다(schedulePeriod). */
+export type RoundPeriod = 'day' | 'week' | 'month';
+
+/** 주기 → 회차 기간(★ 2026-10-05). 매일 = 오늘 · 매주 = 이번 주 · 그 밖(매월 · 매년 · 모름) = 이번 달. */
+export function schedulePeriod(schedule: string | null | undefined): RoundPeriod {
+  if (schedule === 'daily') return 'day';
+  if (schedule === 'weekly') return 'week';
+  return 'month';
+}
+
+function isLeapYear(y: number): boolean {
+  return (y % 4 === 0 && y % 100 !== 0) || y % 400 === 0;
+}
+
+/**
+ * KST 기준 now부터 days일의 'MM-DD' 목록(★ 2026-10-05 생일 기간).
+ *   2/29생은 평년엔 2/28에 받는다 — 평년 기간에 02-28이 있으면 02-29도 넣는다(여정 생일 트리거와 같은 처리).
+ */
+export function kstMonthDays(now: Date, days: number): string[] {
+  const out = new Set<string>();
+  const base = now.getTime() + 9 * 60 * 60 * 1000;
+  for (let i = 0; i < Math.max(1, days); i++) {
+    const d = new Date(base + i * 24 * 60 * 60 * 1000);
+    const md = `${String(d.getUTCMonth() + 1).padStart(2, '0')}-${String(d.getUTCDate()).padStart(2, '0')}`;
+    out.add(md);
+    if (md === '02-28' && !isLeapYear(d.getUTCFullYear())) out.add('02-29');
+  }
+  return [...out];
 }
 
 const DAYS_PARAM = (label: string, def: number): SegmentParamDef => ({
@@ -257,15 +292,27 @@ export const SEGMENT_CONTRACTS: SegmentContract[] = [
   },
   {
     key: 'birthday',
-    label: '이번 달 생일 고객',
-    description: '발송하는 달에 생일이 있는 고객입니다.',
+    label: '생일 고객',
+    // ★ 2026-10-05 회차 기간에 생일인 고객(신뢰 설계 §2-4 · Harold Q6) — 옛: 늘 이번 달이라 매일 주기면 그 달 생일자가 매일 받았다.
+    description: '이번 회차 기간에 생일인 고객입니다. 매일 보내면 오늘, 매주 보내면 발송일부터 7일, 매월 보내면 이번 달에 생일인 고객입니다.',
     params: [],
     resolve: (f) => (f.hasBirthday
-      ? { available: true, reason: '발송하는 달에 생일이 있는 고객에게 보냅니다.' }
+      ? { available: true, reason: '이번 회차 기간에 생일인 고객에게 보냅니다.' }
       : { available: false, reason: '고객 생일 정보가 아직 없어요. 생일이 들어오면 열립니다.' }),
+    // 생일 = 월일 칸(birth_month_day 'MM-DD' · 음력 생일 구제 행은 이것만 있다) 또는 생년월일(birth_date) — 여정 · 고객 필터와 같은 두 칸(Q7).
+    //   월일 칸은 글자로만 비교한다(::int 형변환 금지 — PG 는 AND 평가 순서를 보장하지 않아 이상한 값 한 행이 회차 전체를 멈춘다).
     build: (params, _values, ctx) => {
-      params.push(kstMonth(ctx.now));
-      return `AND c.birth_date IS NOT NULL AND EXTRACT(MONTH FROM c.birth_date) = $${params.length}`;
+      const period = ctx.period || 'month';
+      if (period === 'month') {
+        params.push(kstMonth(ctx.now));
+        const p = params.length;
+        return `AND ((c.birth_date IS NOT NULL AND EXTRACT(MONTH FROM c.birth_date) = $${p}::int)
+            OR LEFT(c.birth_month_day, 3) = LPAD($${p}::text, 2, '0') || '-')`;
+      }
+      params.push(kstMonthDays(ctx.now, period === 'week' ? 7 : 1));
+      const p = params.length;
+      return `AND ((c.birth_date IS NOT NULL AND TO_CHAR(c.birth_date, 'MM-DD') = ANY($${p}::text[]))
+            OR c.birth_month_day = ANY($${p}::text[]))`;
     },
   },
   {
@@ -389,8 +436,46 @@ export const SEGMENT_CONTRACTS: SegmentContract[] = [
   },
 ];
 
+/**
+ * ★ 2026-10-05 주기 · 대상 짝 검사(신뢰 설계 Q9). 매일 · 매주에 「지금 어떤 상태다」 조건(상태 축 · 칸 조건)을 걸면
+ *   같은 고객이 회차마다 다시 받는다. 생일은 회차 기간 축이라 통과 · 변화 축은 새로 해당된 사람만이라 통과.
+ *   매월 · 매년은 모두 통과(옛 동작).
+ */
+const REPEATING_STATE_KEYS = new Set<SegmentKey>(['all', 'dormant', 'recent_buyers', 'vip', 'new_customers']);
+const CHANGE_COUNTERPART: Partial<Record<SegmentKey, SegmentKey>> = { dormant: 'went_quiet', vip: 'grade_up' };
+
+export function checkSchedulePairing(
+  schedule: string | null | undefined,
+  target: { segmentKey?: string | null; hasConditions?: boolean },
+): { ok: true } | { ok: false; reason: string; suggestKey: SegmentKey | null } {
+  const period = schedulePeriod(schedule);
+  if (period === 'month') return { ok: true };
+  const key = normalizeSegmentKey(target.segmentKey);
+  const repeats = key ? REPEATING_STATE_KEYS.has(key) : !!target.hasConditions;
+  if (!repeats) return { ok: true };
+  const every = period === 'day' ? '매일' : '매주';
+  const suggestKey = key ? (CHANGE_COUNTERPART[key] ?? null) : null;
+  const suggestLabel = suggestKey ? getSegmentContract(suggestKey)?.label : null;
+  const reason = `${every} 보내면 같은 고객이 ${every} 다시 받게 돼요. `
+    + (suggestLabel
+      ? `「${suggestLabel}」처럼 새로 해당된 고객만 고르거나, 주기를 매월로 바꿔 주세요.`
+      : '새로 해당된 고객만 고르는 조건(발길이 끊긴 고객 · 등급이 오른 고객 등)을 쓰거나, 주기를 매월로 바꿔 주세요.');
+  return { ok: false, reason, suggestKey };
+}
+
 export function getSegmentContract(key: string | null | undefined): SegmentContract | null {
   return SEGMENT_CONTRACTS.find((s) => s.key === key) || null;
+}
+
+/** 계약 → 화면 기준 · 문안 대상 블록 문장(오케스트레이터 · 회차 결과 공용). 축 = 「라벨 (기준 N일): 설명」 · 칸 조건 = 「조건: …」 */
+export function contractCriteriaText(key: string | null, params: Record<string, number> | null, conditionsText: string | null): string {
+  if (key) {
+    const c = getSegmentContract(key);
+    if (!c) return '';
+    const dayPart = params?.days ? ` (기준 ${params.days}일)` : '';
+    return `${c.label}${dayPart}: ${c.description}`;
+  }
+  return conditionsText ? `조건: ${conditionsText}` : '';
 }
 
 export function normalizeSegmentKey(raw: unknown): SegmentKey | null {

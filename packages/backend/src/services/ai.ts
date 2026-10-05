@@ -1565,10 +1565,12 @@ ${usePersonalization ? `- 사용할 개인화 변수: ${personalizationTags}
 // AI 프롬프트에 고객사별 실제 데이터 기반 필터 필드를 제공하기 위한 컨트롤타워
 // ============================================================
 
-interface ActiveFieldsResult {
+export interface ActiveFieldsResult {
   activeColumnFields: ReturnType<typeof getColumnFields>;
   customFieldLabels: Record<string, string>;
   distinctValues: Record<string, string[]>;
+  /** ★ 2026-10-05 표준 칸별 값 있는 고객 수(위 판정과 같은 식 · 0 포함) — 대상 번역의 근거 숫자. 옛 소비처는 읽지 않는다. */
+  fillCounts?: Record<string, number>;
 }
 
 /**
@@ -1663,7 +1665,9 @@ export async function detectActiveFields(companyId: string): Promise<ActiveField
     console.warn('[AI] DISTINCT 조회 실패:', err);
   }
 
-  return { activeColumnFields, customFieldLabels, distinctValues };
+  const fillCounts: Record<string, number> = {};
+  for (const f of detectableFields) fillCounts[f.fieldKey] = parseInt(dc[`cnt_${f.fieldKey}`] || '0') || 0;
+  return { activeColumnFields, customFieldLabels, distinctValues, fillCounts };
 }
 
 /**
@@ -1720,22 +1724,24 @@ ${customLines}
 //   자연어 목표를 세그먼트 계약(축 + 파라미터)으로 옮긴다 — **등록 시 1회만** 부른다.
 //   회차마다 목표를 다시 해석하지 않는 것(결정성)이 목적이라, 이 함수를 회차 경로에서 부르면 안 된다.
 //   ⛔ 대상 판정은 AI가 하지 않는다 — AI는 어휘 번역만 하고, 실제 명단은 계약 SQL이 뽑는다(불변 원칙 1).
-//   ⛔ 정답표 금지 — 후보는 그 회사에서 지금 열려 있는 축뿐(호출부가 listSegmentAvailability로 준다).
-//   확신이 없거나 축으로 표현이 안 되는 목표는 null — 옛 방식(자유 해석)으로 등록된다(기능 우선).
+//   ⛔ 정답표 금지 — 후보는 그 회사의 축 판정(listSegmentAvailability) 그대로다.
+//   ★ 2026-10-05 잠긴 축도 사유와 함께 받는다(신뢰 설계 §2-2). 옛: 열린 축만 받아 「생일 고객」 목표가 잠긴 생일 축을
+//     고를 수 없었고 null → 자유 해석 → 조건을 빼고 전체 고객이 됐다. 잠긴 축을 골랐는지는 호출부(대상 번역)가 판정한다.
 // ============================================================
 
 export async function suggestSegmentForObjective(
   companyId: string,
   userId: string | null,
   objective: string,
-  availableAxes: Array<{ key: string; label: string; params: Array<{ key: string; label: string; unit: string; default: number; min: number; max: number }> }>,
+  availableAxes: Array<{ key: string; label: string; available?: boolean; reason?: string; params: Array<{ key: string; label: string; unit: string; default: number; min: number; max: number }> }>,
 ): Promise<{ key: string; params: Record<string, number> } | null> {
   if (!process.env.ANTHROPIC_API_KEY || availableAxes.length === 0) return null;
 
   const axisLines = availableAxes.map((a) => {
     const desc = getSegmentContract(a.key)?.description || '';
     const params = a.params.map((p) => `${p.key}(${p.label}, ${p.unit}, 기본 ${p.default}, ${p.min}~${p.max})`).join(' · ');
-    return `- "${a.key}": ${a.label}: ${desc}${params ? ` [조절값: ${params}]` : ''}`;
+    const locked = a.available === false ? ` (이 회사는 지금 못 씀: ${a.reason || '데이터 없음'})` : '';
+    return `- "${a.key}": ${a.label}: ${desc}${params ? ` [조절값: ${params}]` : ''}${locked}`;
   }).join('\n');
 
   const system = `너는 마케팅 목표 문장을 발송 대상 축으로 분류하는 분류기다.
@@ -1747,7 +1753,8 @@ ${axisLines}
 1. 목표의 "누구에게"가 축 정의와 정확히 맞을 때만 고른다. 비슷해 보이는 정도면 고르지 않는다.
 2. 축 하나로 표현이 안 되는 대상(두 조건의 결합, 목록에 없는 조건)은 고르지 않는다.
 3. 목표에 기간·금액 숫자가 있으면 그 축의 조절값 범위 안에서 반영한다. 없으면 기본값.
-4. 응답은 JSON 하나만: {"key": "축key", "params": {"days": 60}} 또는 확신이 없으면 {"key": null}.
+4. "못 씀" 표시가 있는 축이어도 목표가 그 대상을 말하면 그 축을 고른다(못 쓰는 사유는 따로 안내된다). 대신 비슷한 다른 축으로 바꾸지 않는다.
+5. 응답은 JSON 하나만: {"key": "축key", "params": {"days": 60}} 또는 확신이 없으면 {"key": null}.
 다른 텍스트 절대 금지.`;
 
   try {
@@ -1771,6 +1778,85 @@ ${axisLines}
     return { key, params: normalizeSegmentParams(key as any, parsed?.params) };
   } catch (e: any) {
     console.warn('[AI] 축 매핑 실패(자유 해석으로 등록):', e?.message);
+    return null;
+  }
+}
+
+// ============================================================
+// ★ 2026-10-05 대상 번역 — 축이 아닌 목표를 고객 데이터 칸 조건으로 한 번 옮긴다(신뢰 설계 §2-2 · 등록 · 미리보기 1회)
+//   ⛔ 표현 못 한 조건을 빼지 않는다 — 빼면 대상이 넓어진다(생일 데이터 없는 회사의 생일 쿠폰이 전체 고객으로 나간 접수).
+//     옮기지 못한 말은 unexpressed 로 돌려주고, 화면이 칸을 고르게 하거나 막는다.
+//   ⛔ 대상 수 · 근거 숫자는 AI 가 아니라 DB 가 센다(호출부). 여기는 말 → 칸 · 연산자 · 값 번역뿐이다.
+// ============================================================
+
+export interface TranslatedCondition { term: string; field: string; operator: string; value: any }
+export interface UnexpressedTerm { term: string; operator?: string; value?: any }
+
+/**
+ * 칸 번역 응답 → 조건 · 옮기지 못한 말(순수).
+ *   ⛔ 칸 · 연산자가 빠진 조건 · 이름 없는 「옮기지 못한 말」도 버리지 않는다 — 버리면 남은 조건만으로 대상이 넓어진다(Codex 1R).
+ *     옮기지 못한 말로 돌려 화면이 칸을 고르게 한다.
+ */
+export function parseConditionTranslation(raw: string): { conditions: TranslatedCondition[]; unexpressed: UnexpressedTerm[]; everyone: boolean } | null {
+  const m = String(raw || '').match(/\{[\s\S]*\}/);
+  if (!m) return null;
+  const parsed = extractJsonFromAiText(m[0]);
+  if (!parsed || typeof parsed !== 'object') return null;
+  const str = (v: unknown) => (typeof v === 'string' ? v.trim() : '');
+  // 배열이 아닌 칸(객체 하나 · 글자)도 항목으로 본다 — 모양이 틀렸다고 통째로 버리면 그 조건이 사라진다(Codex 2R)
+  const items = (v: unknown): any[] => (v == null ? [] : Array.isArray(v) ? v : [v]);
+  const termOf = (x: any) => (typeof x === 'string' ? x.trim() : str(x?.term)).slice(0, 40);
+  const conditions: TranslatedCondition[] = [];
+  const unexpressed: UnexpressedTerm[] = [];
+  const keep = (term: string, operator: string, value: any) => unexpressed.push({
+    term: term || '대상 조건', ...(operator ? { operator } : {}), ...(value !== undefined ? { value } : {}),
+  });
+  for (const c of items(parsed.conditions)) {
+    const t = { term: termOf(c), field: str(c?.field), operator: str(c?.operator), value: c?.value };
+    if (t.field && t.operator) conditions.push(t);
+    else keep(t.term || t.field, t.operator, t.value);
+  }
+  for (const u of items(parsed.unexpressed)) {
+    keep(termOf(u), str(u?.operator), u?.value);
+  }
+  return { conditions, unexpressed, everyone: parsed.everyone === true && conditions.length === 0 && unexpressed.length === 0 };
+}
+
+export async function translateObjectiveToConditions(
+  companyId: string,
+  userId: string | null,
+  objective: string,
+  fields: ActiveFieldsResult,
+): Promise<{ conditions: TranslatedCondition[]; unexpressed: UnexpressedTerm[]; everyone: boolean } | null> {
+  if (!process.env.ANTHROPIC_API_KEY) return null;
+  const system = `너는 마케팅 목표 문장에서 "누구에게 보내는가"를 고객 데이터 칸 조건으로 옮기는 번역기다.
+아래 칸 목록에 있는 칸만 쓴다.
+
+${buildFilterFieldsPrompt(fields)}
+
+규칙:
+1. 목표가 대상 조건을 말하지 않으면(모든 고객에게) {"conditions": [], "unexpressed": [], "everyone": true}.
+2. 목표의 대상 조건 하나하나를 칸으로 옮긴다. 혜택 · 문안 · 발송 시각은 대상 조건이 아니다.
+3. 옮길 칸이 목록에 없거나, 어느 칸인지 확신이 없으면 그 조건을 빼지 말고 unexpressed 에 넣는다. 조건을 빼서 대상을 넓히지 않는다.
+4. unexpressed 에는 사용자가 쓴 말(term)과, 칸이 정해지면 쓸 연산자 · 값을 함께 적는다(예: 포인트가 있는 고객 = {"term":"포인트","operator":"gte","value":1}).
+5. 값은 목록에 나온 실제 값만 쓴다.
+6. 응답은 JSON 하나만: {"conditions": [{"term": "사용자가 쓴 말", "field": "칸 key", "operator": "연산자", "value": 값}], "unexpressed": [], "everyone": false}
+다른 텍스트 절대 금지.`;
+  try {
+    const raw = await callAIWithFallback({
+      system,
+      userMessage: `마케팅 목표: ${objective.slice(0, 500)}`,
+      maxTokens: 700,
+      temperature: 0,
+      model: 'opus',
+      companyId,
+      userId: userId || undefined,
+      source: 'operator-audience-translate',
+      creditCost: 0,   // 등록 1회 번역 — 축 매핑과 같은 무과금(등록 크레딧에 포함)
+    });
+    return parseConditionTranslation(raw);
+  } catch (e: any) {
+    console.warn('[AI] 대상 번역 실패:', e?.message);
     return null;
   }
 }

@@ -40,7 +40,7 @@ import {
 //   ⛔ 1R 정정: 이 문은 audienceScope==='operator'일 때만. 공용 제안 경로는 countFilteredCustomers 그대로.
 import { countOperatorAudienceFor, resolveOperatorStoreScope } from '../utils/operator-audience';
 // ★ 2026-08-03 A-7: 세그먼트 계약 — 축이 정해지면 SQL이 정해진다(AI 해석 개입 없음).
-import { normalizeSegmentParams, getSegmentContract } from '../utils/automarketing-segment';
+import { normalizeSegmentParams, getSegmentContract, contractCriteriaText } from '../utils/automarketing-segment';
 // 성과 추정도 대상 수와 같은 최종 WHERE(안전필터·미클릭·피로도 포함)를 쓰게 하려고 공용 조각 빌더를 함께 쓴다.
 import { buildAudienceWhere } from '../utils/operator-recipients';
 // ★ D227+ 성과 추정 실데이터 전환 — calculateCostROI(하드코딩) 대체
@@ -118,6 +118,16 @@ export interface AgentContext {
   lineFacts?: LineFacts;
   /** ★ 2026-10-05 C안 시험(COPY_C_TEST_COMPANY_IDS · 허브 제안만) — 없으면 지금 그대로 */
   cVariant?: CopyCVariant;
+  /**
+   * ★ 2026-10-05 자동 마케팅 신뢰 설계 — 칸 조건 계약(등록 때 고정한 조건 · 축이 아닌 목표). 자동 마케팅 회차는
+   *   대상 AI 가 만든 filters 를 쓰지 않고 이것만 쓴다(없고 축도 없으면 대상 0 + 사유 · 빈 조건 = 전체 금지).
+   */
+  audienceFilters?: Record<string, any> | null;
+  /** 칸 조건을 사람 말로 — 화면 기준 · 문안 대상 블록 */
+  audienceCriteria?: string | null;
+  /** 회차 기간(생일 축) · 회차 기준 시각 — 발송 재추출과 같은 회차를 센다 */
+  period?: 'day' | 'week' | 'month' | null;
+  anchorAt?: Date | null;
 }
 
 export interface ComplianceResult {
@@ -423,6 +433,9 @@ async function _orchestrateImpl(ctx: AgentContext): Promise<OrchestratorResult> 
   // 대상 판정에 실제로 쓰인 조건 — 성과 추정도 같은 WHERE를 봐야 수와 기대 성과의 근거가 갈리지 않는다(3R 정정).
   let audienceWhere: { sql: string; params: any[] } | null = null;
   if (rawSegmentKey) targetResult.filters = {};   // 계약이 조건이다 — AI가 만든 filters는 쓰지 않는다
+  // ★ 2026-10-05 자동 마케팅 = 계약만(신뢰 설계 §2-1) — 축이 없으면 등록 때 고정한 칸 조건. 대상 AI 의 filters 는 쓰지 않는다.
+  //   (둘 다 없으면 빈 조건 → 컴파일이 멈추고 사유가 countError 로 간다 · 전체 고객으로 열리지 않는다)
+  else if (isOperatorScope) targetResult.filters = ctx.audienceFilters || {};
   try {
     // ★ 2026-08-03 A-1: 자동마케팅은 발송 게이트(피로도·미클릭)를 포함한 단일 문 — 센 수가 곧 화면 수·사전 통지 수다.
     //   일반 제안 경로는 그 게이트가 발송에 걸리지 않으므로 종전 count를 유지한다.
@@ -442,18 +455,18 @@ async function _orchestrateImpl(ctx: AgentContext): Promise<OrchestratorResult> 
         ownerUserId: ctx.userId || null,   // ★ 2026-10-02 수신동의 기준 = 매장 범위와 같은 사람
         // ★ 2026-08-04: 변화 축이 비교할 지난 회차. 없으면 그 축은 사유와 함께 멈춘다(아래 catch가 받는다).
         operatorId: ctx.operatorId ?? null,
+        // ★ 2026-10-05 회차 기간 · 기준 시각(생일 축) — 회차 생성 · 발송 재추출과 같은 회차
+        period: ctx.period ?? null,
+        now: ctx.anchorAt ?? undefined,
       });
       actual = measured.count;
       // 컴파일이 확정한 축을 제안에 남긴다 — 발송·명단이 같은 축으로 다시 컴파일한다.
       contractKey = measured.compiled.segmentKey;
       contractParams = contractKey ? normalizeSegmentParams(contractKey as any, ctx.segmentParams) : null;
-      if (contractKey) {
-        // 화면 기준·캠페인 이름의 근거를 계약으로 통일한다(파라미터까지 문장에 담아 두루뭉술을 없앤다).
-        const c = getSegmentContract(contractKey);
-        const dayPart = contractParams?.days ? ` (기준 ${contractParams.days}일)` : '';
-        contractLabel = c?.label || '';
-        contractCriteria = c ? `${c.label}${dayPart}: ${c.description}` : '';
-      }
+      // 화면 기준·캠페인 이름의 근거를 계약으로 통일한다(파라미터까지 문장에 담아 두루뭉술을 없앤다).
+      // ★ 2026-10-05 칸 조건 계약도 고정 조건이 근거다(AI reasoning 아님) · 문장 = 회차 결과와 같은 함수
+      contractCriteria = contractCriteriaText(contractKey, contractParams, contractKey ? null : ctx.audienceCriteria || null);
+      if (contractKey) contractLabel = getSegmentContract(contractKey)?.label || '';
       // ⛔ 4R 정정: 조건 조각만 넘기면 추정기는 안전필터·수신거부·피로도를 안 본다 — VIP 100명 중 실제 10명인데
       //   프로파일은 100명 기준으로 잡혀 기대 매출이 몇 배가 된다. count가 쓴 최종 WHERE 그대로를 넘긴다.
       const estParams: any[] = [...scope.baseParams, ...measured.compiled.filterParams];

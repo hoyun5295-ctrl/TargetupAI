@@ -21,10 +21,21 @@ import { buildAudienceCountSql, AudienceGates } from './operator-recipients';
 import { ownerConsentSql } from './mall-consent';
 import { hasUsableGradeOrder } from './customer-grade-rank';
 import {
-  CompanySegmentFacts, SegmentAvailability, SegmentKey,
+  CompanySegmentFacts, SegmentAvailability, SegmentKey, RoundPeriod,
   buildSegmentPredicate, normalizeSegmentKey, resolveSegmentAvailability, getSegmentContract,
   segmentNeedsCycleBaseline,
 } from './automarketing-segment';
+
+/**
+ * ★ 2026-10-05 빈 조건 = 전체 금지(신뢰 설계 §2-3). 축도 없고 조건도 비면 WHERE 가 통째로 사라져 전체 고객이 열린다
+ *   (생일 30% 쿠폰이 6명 전원으로 잡힌 접수). 전체 발송은 「전체 고객」 축으로만 — 여기서 멈추면 대상 수 · 명단 · 실발송이 같이 멈춘다.
+ */
+export class AudienceEmptyError extends Error {
+  code = 'TARGET_FILTER_EMPTY';
+  constructor() {
+    super('대상 조건이 비어 있어 보낼 수 없어요. 자동 마케팅에서 대상 조건을 확인해 주세요.');
+  }
+}
 // ★ 2026-08-04 변화 축 — 표 준비 여부를 컴파일 전에 단 한 곳에서 본다(없는 표 참조 = 42P01 = 화면 500).
 import { isCycleSnapshotReady, cycleSnapshotMigrationPending } from './operator-cycle-snapshot';
 
@@ -109,7 +120,7 @@ export async function loadCompanySegmentFacts(companyId: string): Promise<Compan
     query(
       `SELECT
          COUNT(*) FILTER (WHERE recent_purchase_date IS NOT NULL)::int AS recent_purchase,
-         COUNT(*) FILTER (WHERE birth_date IS NOT NULL)::int           AS birthday,
+         COUNT(*) FILTER (WHERE birth_date IS NOT NULL OR birth_month_day ~ '^[0-9]{2}-[0-9]{2}$')::int AS birthday,   -- ★ 2026-10-05 월일 칸도(음력 구제 행 · 여정과 같은 두 칸)
          COUNT(*) FILTER (WHERE COALESCE(grade, '') <> '')::int        AS grade_values,
          COUNT(*) FILTER (WHERE purchase_count IS NOT NULL AND purchase_count > 0)::int        AS purchase_count_filled,
          COUNT(*) FILTER (WHERE total_purchase_amount IS NOT NULL AND total_purchase_amount > 0)::int AS purchase_amount_filled
@@ -275,6 +286,8 @@ export async function compileOperatorAudience(input: {
    * 그때 변화 축은 컴파일되지 않고 "첫 회차에 기준을 잡는다"는 사유로 멈춘다.
    */
   operatorId?: string | null;
+  /** ★ 2026-10-05 회차 기간(생일 축 · 주기에서 정한다) — 없으면 이번 달(옛 동작) */
+  period?: RoundPeriod | null;
 }): Promise<CompiledAudience> {
   const baseParams = input.baseParams && input.baseParams.length > 0 ? input.baseParams : [input.companyId];
   const raw = typeof input.segmentKey === 'string' ? input.segmentKey.trim() : '';
@@ -289,6 +302,7 @@ export async function compileOperatorAudience(input: {
 
   if (!key) {
     const compiled = buildFilterWhereClauseCompat(input.legacyFilters || {}, baseParams.length + 1);
+    if (!compiled.sql.trim()) throw new AudienceEmptyError();   // ★ 2026-10-05 빈 조건 = 전체 금지
     return { filterWhere: compiled.sql, filterParams: compiled.params, segmentKey: null, basis: 'legacy_filters' };
   }
 
@@ -308,6 +322,7 @@ export async function compileOperatorAudience(input: {
     now: input.now || new Date(),
     topGradeValues: key === 'vip' ? await resolveTopGradeValues(input.companyId) : undefined,
     operatorId: input.operatorId ?? null,
+    period: input.period ?? undefined,
   });
   return {
     filterWhere,
@@ -336,6 +351,9 @@ export async function countOperatorAudienceFor(input: {
   /** 변화 축 전용 — 지난 회차 스냅샷의 주인. 없으면 변화 축은 사유와 함께 멈춘다. */
   operatorId?: string | null;
   /** 계약 축 컴파일 결과를 호출부가 다시 쓸 때(발송 추출 등) 받아 간다. */
+  /** ★ 2026-10-05 회차 기간 · 기준 시각(생일 축 · 발송 재추출과 같은 회차를 센다) */
+  period?: RoundPeriod | null;
+  now?: Date;
 }): Promise<{ count: number; compiled: CompiledAudience; gates: AudienceGates; label: string }> {
   const baseParams = input.baseParams && input.baseParams.length > 0 ? input.baseParams : [input.companyId];
   const compiled = await compileOperatorAudience({
@@ -345,6 +363,8 @@ export async function countOperatorAudienceFor(input: {
     legacyFilters: input.legacyFilters ?? null,
     baseParams,
     operatorId: input.operatorId ?? null,
+    period: input.period ?? null,
+    now: input.now,
   });
   const gates = input.gates ?? (await resolveOperatorAudienceGates(input.companyId, null, input.ownerUserId ?? null));
   const count = await countCompiledAudience({ compiled, gates, storeFilter: input.storeFilter, baseParams });

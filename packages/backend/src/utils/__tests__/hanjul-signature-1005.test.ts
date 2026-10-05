@@ -65,15 +65,18 @@ describe('2. 혜택 근거 = 사용자 원문 한정', () => {
     expect(block.indexOf('brandSlogan')).toBeGreaterThan(block.indexOf(': ['));
     expect(s).toContain('const benefitDetect = detectBenefits(licenseSource);');
   });
-  it('오케스트레이터 두 경로가 넘기고, 자동 마케팅 · 자동발송 · 플래너는 넘기지 않는다', () => {
+  it('오케스트레이터 두 경로가 넘기고, 자동발송 · 플래너는 넘기지 않는다 · 자동 마케팅은 핵심 혜택 한 칸만(★ 2026-10-05 신뢰 설계 Q19)', () => {
     const o = SRC('services', 'ai-orchestrator.ts');
     expect((o.match(/buildLineEventText\(ctx\.objective, ctx\.lineFacts\)/g) || []).length).toBe(2);
     expect(o).toContain('...(licenseText !== undefined ? { licenseText } : {}),');
     expect(o).toContain('...(licenseTextAI !== undefined ? { licenseText: licenseTextAI } : {}),');
-    for (const f of [['utils', 'continuous-operator.ts'], ['utils', 'auto-campaign-worker.ts'], ['utils', 'planner-copy.ts']]) {
+    for (const f of [['utils', 'auto-campaign-worker.ts'], ['utils', 'planner-copy.ts']]) {
       const src = SRC(...f);
       expect(src).not.toMatch(/lineFacts|licenseText|cVariant/);
     }
+    const co = SRC('utils', 'continuous-operator.ts');
+    expect(co).toContain('lineFacts: { benefit: op.benefitContent || null },');
+    expect(co).not.toMatch(/cVariant|licenseText/);
   });
 });
 
