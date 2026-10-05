@@ -352,7 +352,7 @@ passed=true 이면 warnings/suggestions 빈 배열 가능. 사소한 issue는 me
 // Orchestrator main — 6 Sub-agent 호출 + 결과 통합
 // ============================================================
 
-export async function orchestrate(ctx: AgentContext, creditOpts?: { source?: string; cost?: number }): Promise<OrchestratorResult> {
+export async function orchestrate(ctx: AgentContext, creditOpts?: { source?: string; cost?: number; chargeOnlyWithTarget?: boolean }): Promise<OrchestratorResult> {
   // ★ D227+ 종량제: 풀분석 묶음 — 진입 사전 체크 → 본문(sub는 묶음으로 차감 0) → 성공 후 1회 차감.
   //   creditOpts: 자동마케팅 등이 source/cost 오버라이드(예: source 'continuous-operator' → 200). 미지정 시 풀분석 300.
   const source = creditOpts?.source ?? 'orchestrate';
@@ -362,7 +362,9 @@ export async function orchestrate(ctx: AgentContext, creditOpts?: { source?: str
     const result = await _orchestrateImpl(ctx);
     // ★ 2026-07-08 (Harold 명시): 문안 미출력(0건 매칭 등) = 사용자 결과 없음 → 차감 skip.
     //   문안이 1개 이상 실제 생성된 경우에만 과금 (6원칙 ② 효과 검증 후 과금).
-    if ((result.messages?.length ?? 0) > 0) {
+    // ★ 2026-10-05 자동 마케팅 미리보기: chargeOnlyWithTarget = 대상 0명이면 문안이 있어도 차감 0(시작할 수 없는 제안).
+    //   지정하지 않은 호출(허브 제안 · 회차 생성)은 지금 그대로.
+    if ((result.messages?.length ?? 0) > 0 && (!creditOpts?.chargeOnlyWithTarget || (result.target?.count ?? 0) > 0)) {
       await deductCreditSafe({ companyId: ctx.companyId, cost, source, createdBy: ctx.userId || currentUserId() || null });
     }
     return result;

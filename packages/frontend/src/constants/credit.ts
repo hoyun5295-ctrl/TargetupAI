@@ -139,6 +139,7 @@ export const AI_GENERATE_COSTS: Record<string, number> = {
   'event-image-extract': 3,
   'catalog-dm-build': 10,
   'inapp-explainer': 1,   // ★ 2026-09-26 한줄로 V2 R1-42 인앱 AI 영향 요인 분석 버튼 라벨(백엔드 CREDIT_COST_MAP 미러)
+  'ai-operator-propose': 5,   // ★ 2026-10-05 자동 마케팅 [제안 받기] 미리보기 버튼 라벨(백엔드 CREDIT_COST_MAP 미러 · 허브 제안과 같은 키)
 };
 
 export const CONFIRM_CREDIT_COSTS: Record<string, number> = {

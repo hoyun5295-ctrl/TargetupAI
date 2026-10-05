@@ -28,7 +28,7 @@
 // ★ 2026-09-27 한줄로 V2 R197 — 운영자 일·월 예산 창 = KST(옛 CURRENT_DATE·date_trunc는 UTC 세션 기준)
 import { KST_TODAY_START_SQL, KST_MONTH_START_SQL } from './stats-aggregation';
 import { query, pool } from '../config/database';
-import { orchestrate } from '../services/ai-orchestrator';
+import { orchestrate, type AgentContext } from '../services/ai-orchestrator';
 import { getCompanyCosts, SEND_HOURS, TIMEOUTS } from '../config/defaults';
 import { shouldSkipProposalGeneration } from './operator-proposal-dedup';
 // ★ D177 (2026-05-19): Self-Optimizing Bandit — message variants 생성 + Thompson Sampling
@@ -213,7 +213,11 @@ export interface OperatorProposal {
 // CRUD — Operator
 // ════════════════════════════════════════════════════════════════════
 
-export async function createOperator(input: CreateOperatorInput): Promise<ContinuousOperator> {
+/**
+ * 등록 입력 검증(★ 2026-10-05 등록 · 미리보기 공용 — 미리보기가 돈을 쓰기 전에 등록이 거절할 입력을 먼저 거른다).
+ *   createOperator 첫머리를 그대로 옮겼다(동작 동일).
+ */
+export function validateOperatorInput(input: CreateOperatorInput): { schedule: OperatorSchedule; scheduleTime: string; scheduleMonth: number | null } {
   if (!input.name || !input.objective) {
     throw new Error('name과 objective는 필수입니다.');
   }
@@ -225,14 +229,28 @@ export async function createOperator(input: CreateOperatorInput): Promise<Contin
   // ★ 2026-07-12 C-1: 야간 광고 발송 제한 — 자동마케팅은 광고 강제라 발송 희망 시각을 발송 가능 창 안으로만 저장.
   const timeGate = validateScheduleTimeSendable(scheduleTime, SEND_HOURS.start, SEND_HOURS.end);
   if (!timeGate.ok) throw new Error(timeGate.reason);
-  const scheduleDayOfWeek = (schedule === 'weekly' && input.scheduleDayOfWeek != null) ? input.scheduleDayOfWeek : null;
-  const scheduleDayOfMonth = ((schedule === 'monthly' || schedule === 'yearly') && input.scheduleDayOfMonth != null) ? input.scheduleDayOfMonth : null;
   // ★ 2026-07-05 yearly: 대상 월(1~12) 필수 — 시즌 캠페인 연 1회 (없으면 매월 반복으로 오등록되므로 차단)
   const scheduleMonth = (schedule === 'yearly' && input.scheduleMonth != null && Number(input.scheduleMonth) >= 1 && Number(input.scheduleMonth) <= 12)
     ? Math.floor(Number(input.scheduleMonth)) : null;
   if (schedule === 'yearly' && scheduleMonth === null) {
     throw new Error('연 1회 일정은 대상 월(1~12)을 지정해야 합니다.');
   }
+  return { schedule, scheduleTime, scheduleMonth };
+}
+
+/** 등록 축 정규화(★ 2026-10-05 등록 · 미리보기 공용 · createOperator 에서 그대로 옮김) — 모르는 축은 던진다 */
+export function normalizeOperatorSegment(input: Pick<CreateOperatorInput, 'segmentKey' | 'segmentParams'>): { segKey: ReturnType<typeof normalizeSegmentKey>; segParams: ReturnType<typeof normalizeSegmentParams> | null } {
+  const wantsSegment = typeof input.segmentKey === 'string' && input.segmentKey.trim() !== '';
+  const segKey = wantsSegment ? normalizeSegmentKey(input.segmentKey) : null;
+  if (wantsSegment && !segKey) throw new Error(`알 수 없는 발송 대상 축입니다: ${String(input.segmentKey).slice(0, 40)}`);
+  const segParams = segKey ? normalizeSegmentParams(segKey, input.segmentParams) : null;
+  return { segKey, segParams };
+}
+
+export async function createOperator(input: CreateOperatorInput): Promise<ContinuousOperator> {
+  const { schedule, scheduleTime, scheduleMonth } = validateOperatorInput(input);   // ★ 2026-10-05 미리보기와 같은 검증
+  const scheduleDayOfWeek = (schedule === 'weekly' && input.scheduleDayOfWeek != null) ? input.scheduleDayOfWeek : null;
+  const scheduleDayOfMonth = ((schedule === 'monthly' || schedule === 'yearly') && input.scheduleDayOfMonth != null) ? input.scheduleDayOfMonth : null;
   // ★ 2026-07-02 1단계 B: schedule_time = 발송 희망 시각 — 생성(next_run_at)은 희망 시각 − 준비시간(lead)
   const sendTimeMode = normalizeSendTimeMode(input.sendTimeMode);
   // ★ 2026-07-02 2단계: 문안 스타일 (화이트리스트 밖/미지정 = null → 브랜드 톤 자동)
@@ -243,7 +261,7 @@ export async function createOperator(input: CreateOperatorInput): Promise<Contin
   );
 
   // ★ 2026-06-26: 생성 시 채널·혜택·담당자·예산도 저장 (기존엔 누락 → 담당자 연락처 드롭·2시간 알림 불가 #3 + 채널 #1 + 혜택 #4 fix)
-  const channel = ['sms', 'lms', 'mms'].includes((input.channel || '').toLowerCase()) ? (input.channel as string).toLowerCase() : 'lms';
+  const channel = normalizeOperatorChannel(input.channel);   // ★ 2026-10-05 미리보기와 같은 정규화
   let adminPhones = Array.isArray(input.adminPhoneNumbers) ? input.adminPhoneNumbers.filter((p) => typeof p === 'string' && p.trim()).slice(0, 3) : [];
   // ★ 2026-07-07 마케팅 캘린더 완비: 담당자 미입력 = 등록 계정(users.phone) 자동 기본값.
   //   담당자 번호가 비면 notifyOperatorAdmins가 조용히 통지를 생략해 "발송 2시간 전 문안 안내"·승인 대기·D-2
@@ -259,7 +277,7 @@ export async function createOperator(input: CreateOperatorInput): Promise<Contin
   }
   const adminAlertChannel = ['sms', 'kakao', 'email'].includes(input.adminAlertChannel || '') ? input.adminAlertChannel! : 'sms';
   const deliveryPolicy = ['daily', 'weekly', 'monthly'].includes(input.deliveryPolicy || '') ? input.deliveryPolicy! : 'daily';
-  const benefitContent = typeof input.benefitContent === 'string' && input.benefitContent.trim() ? input.benefitContent.trim() : null;
+  const benefitContent = normalizeOperatorBenefit(input.benefitContent);   // ★ 2026-10-05 미리보기와 같은 정규화
   const backupAdminPhone = typeof input.backupAdminPhone === 'string' && input.backupAdminPhone.trim() ? input.backupAdminPhone.trim() : null;
   // ★ Phase3 C: 다단계 시퀀스 — delay 1~30일 클램프, 리마인드 문안 관리자 입력(슬라이스).
   // ★ 2026-08-04 되살림 — 1차 수신자 코호트를 발송결과(MySQL `app_etc1`=캠페인 id)에서 얻을 수 있게 되어
@@ -287,10 +305,7 @@ export async function createOperator(input: CreateOperatorInput): Promise<Contin
   //   계약을 안 고른 등록도 UPDATE를 거쳐 일시적 DB 오류에 정상 등록이 지워지고, DELETE가 실패하면
   //   계약 없는 active 행이 남아 워커가 집었다. 한 문장에 넣으면 원자성은 DB가 보장하고 보상 코드는 사라진다.
   //   컬럼 미생성(42703)이면 계약을 고른 등록만 실패한다 — 행도 크레딧도 남지 않는다(라우트가 503).
-  const wantsSegment = typeof input.segmentKey === 'string' && input.segmentKey.trim() !== '';
-  const segKey = wantsSegment ? normalizeSegmentKey(input.segmentKey) : null;
-  if (wantsSegment && !segKey) throw new Error(`알 수 없는 발송 대상 축입니다: ${String(input.segmentKey).slice(0, 40)}`);
-  const segParams = segKey ? normalizeSegmentParams(segKey, input.segmentParams) : null;
+  const { segKey, segParams } = normalizeOperatorSegment(input);   // ★ 2026-10-05 미리보기와 같은 함수
   // ⛔ 5R 정정: 화이트리스트만 보고 저장하면 그 회사에서 쓸 수 없는 축도 active로 남고 크레딧까지 나간다
   //   (생일 데이터가 없는 회사가 API로 birthday를 보내는 경우). 화면이 잠그는 것과 같은 판정을 서버에서 한 번 더.
   // ⛔ 2026-08-04(R1): 검증은 근거 판정만 — 컴파일로 검증하면 변화 축이 "지난 회차 없음"에 걸려
@@ -685,7 +700,201 @@ interface CompanyContextRow {
 /** ★ 2026-09-26 R1-24 — 회차 건너뜀 알림을 보낸 (운영자, 희망 시각). 같은 회차 반복 알림 방지(프로세스 안) */
 const missedRoundNoticed = new Set<string>();
 
-export async function generateProposalForOperator(operatorId: string): Promise<OperatorProposal | null> {
+// ============================================================
+// ★ 2026-10-05 자동 마케팅 미리보기(설계서 docs/2026-10-05-automarketing-preview-design.md §2-1)
+//   회차 생성(generateProposalForOperator)과 미리보기가 **같은 함수**로 회사 문맥을 읽고 오케스트레이터 문맥을 만든다.
+//   그래야 미리보기에서 본 제안 = 첫 회차가 된다(두 곳에 사본을 두면 언젠가 갈라진다). 원본 코드를 그대로 옮겼다(동작 동일).
+// ============================================================
+export interface OperatorCompanyContext {
+  ctx: CompanyContextRow;
+  companyInfo: any;
+  customerStats: any;
+}
+
+export async function loadOperatorCompanyContext(companyId: string): Promise<OperatorCompanyContext | null> {
+  // 2. 회사 컨텍스트 + 자동 실행 옵션 조회
+  const ctxRes = await query(
+    `SELECT c.company_name, c.business_type, c.brand_name, c.brand_slogan,
+            c.brand_description, c.brand_tone, c.customer_schema,
+            COALESCE(c.reject_number, c.opt_out_080_number) AS reject_number,
+            c.cost_per_sms, c.cost_per_lms, c.cost_per_mms, c.cost_per_kakao, c.unit_price_basis,
+            COALESCE(c.cdp_auto_execute_enabled, false) AS cdp_auto_execute_enabled,
+            COALESCE(c.cdp_auto_execute_max_recipients, 1000) AS cdp_auto_execute_max_recipients,
+            COALESCE(c.cdp_auto_execute_max_cost_krw, 50000) AS cdp_auto_execute_max_cost_krw,
+            COALESCE(c.cdp_auto_execute_max_risk, 'low') AS cdp_auto_execute_max_risk,
+            COALESCE(p.plan_code, 'FREE') AS plan_code,
+            -- ★ 2026-07-28 자율 발송 자격을 plans 플래그로. ALTER 전에는 옛 규칙으로 폴백(to_jsonb는 없는 키를 NULL로 준다).
+            COALESCE(
+              (to_jsonb(p) ->> 'advanced_access_enabled')::boolean,
+              p.plan_code IN ('ENTERPRISE', 'BUSINESS'),
+              false
+            ) AS advanced_access_enabled
+     FROM companies c
+     LEFT JOIN plans p ON c.plan_id = p.id
+     WHERE c.id = $1::uuid`,
+    [companyId]
+  );
+  if (ctxRes.rows.length === 0) return null;
+  const ctx = ctxRes.rows[0] as CompanyContextRow;
+
+  // 3. 고객 통계 조회
+  const statsConsent = consentJoinSql(await resolveConsentScope(companyId, null), '', 'customers.id');   // ★ 2026-10-02 수신동의 읽기 = CT
+  const statsRes = await query(
+    `SELECT
+       COUNT(*) AS total,
+       COUNT(*) FILTER (WHERE ${statsConsent.isTrue}) AS sms_opt_in_count,
+       AVG(purchase_count) AS avg_purchase_count,
+       AVG(total_purchase_amount) AS avg_total_spent
+     FROM customers${statsConsent.join}
+     WHERE company_id = $1::uuid AND is_active = true`,
+    [companyId]
+  );
+  const customerStats = statsRes.rows[0];
+
+  // 오케스트레이터에 넘길 회사 정보
+  const companyInfo: any = {
+    company_name: ctx.company_name,
+    business_type: ctx.business_type,
+    brand_name: ctx.brand_name,
+    brand_slogan: ctx.brand_slogan,
+    brand_description: ctx.brand_description,
+    brand_tone: ctx.brand_tone,
+    customer_schema: ctx.customer_schema,
+    reject_number: ctx.reject_number,
+    // ★ 2026-07-02 1단계: 회사별 단가 반영 — 빈 객체 전달로 항상 기본 단가만 쓰이던 것을 교정.
+    //   raw cost_per_*도 함께 전달해 orchestrate 내부 getCompanyCosts(ctx.companyInfo)가 회사 단가를 해석하게 한다.
+    cost_per_sms: ctx.cost_per_sms,
+    cost_per_lms: ctx.cost_per_lms,
+    cost_per_mms: ctx.cost_per_mms,
+    cost_per_kakao: ctx.cost_per_kakao,
+    ...getCompanyCosts(ctx as any),
+  };
+
+  return { ctx, companyInfo, customerStats };
+}
+
+/** 오케스트레이터 문맥에 쓰는 오퍼레이터 값(등록 전 미리보기는 id = null — 상태 축은 id 를 쓰지 않는다 · 변화 축은 미리보기를 하지 않는다) */
+export type OperatorOrchestrateInput = Pick<ContinuousOperator, 'companyId' | 'objective' | 'copyStyle' | 'channel' | 'benefitContent' | 'targetHint' | 'segmentKey' | 'segmentParams'> & {
+  id: string | null;
+  createdBy: string | null;
+};
+
+export function buildOperatorOrchestrateContext(op: OperatorOrchestrateInput, loaded: OperatorCompanyContext): AgentContext {
+  return {
+    companyId: op.companyId,
+    userId: op.createdBy,
+    objective: op.objective,
+    companyInfo: loaded.companyInfo,
+    customerStats: loaded.customerStats,
+    // ★ 계절 문안 주입 — objective는 불변, 그 달 시즌을 메시지 톤·소재로만(§6-8).
+    //   2026-07-02 2단계: 관리자 선택 문안 스타일 지시를 같은 힌트 채널로 함께 주입(미선택 = 계절만).
+    seasonHint: [
+      buildSeasonPromptBlock(getSeasonContext(new Date()).month, loaded.ctx.business_type),
+      buildCopyStylePromptBlock(op.copyStyle),
+    ].filter(Boolean).join('\n'),
+    // ★ 2026-06-26: 폼에서 고정한 채널(#1) + 관리자 입력 혜택(#4) 주입 → 제안·테스트·발송 일관
+    forcedChannel: op.channel,
+    benefitContent: op.benefitContent,
+    // ★ 2026-07-02 (Harold 명시): 자동마케팅 = 마케팅 = 무조건 광고 — (광고)+무료거부 080 자동 합성 전제.
+    forcedIsAd: true,
+    // ★ 2026-07-07: 타겟 축 고정(마케팅 캘린더 완비) — 발송 당일 타겟 해석이 등록 때 고른 축에 앵커.
+    targetHint: op.targetHint,
+    // ★ 2026-08-03 A-7: 계약이 있으면 대상 조건은 계약이 만든다 — 타겟 AI 해석 결과를 쓰지 않는다(결정성).
+    segmentKey: op.segmentKey,
+    segmentParams: op.segmentParams,
+    // ★ 2026-08-04: 변화 축이 비교할 지난 회차 스냅샷의 주인. 상태 축은 이 값을 쓰지 않는다.
+    operatorId: op.id,
+    // ⛔ 1R 정정: 자동마케팅 회차임을 명시. 이 플래그가 있어야 발송 게이트가 붙은 대상 수를 쓴다.
+    audienceScope: 'operator',
+  };
+}
+
+/** 등록 채널 정규화(등록 · 미리보기 공용 · 밖이면 lms) */
+export function normalizeOperatorChannel(raw: unknown): 'sms' | 'lms' | 'mms' {
+  const c = typeof raw === 'string' ? raw.toLowerCase() : '';
+  return c === 'sms' || c === 'lms' || c === 'mms' ? c : 'lms';
+}
+
+/** 관리자 입력 혜택 정규화(등록 · 미리보기 공용 · 빈 글 = null) */
+export function normalizeOperatorBenefit(raw: unknown): string | null {
+  return typeof raw === 'string' && raw.trim() ? raw.trim() : null;
+}
+
+/**
+ * 등록 입력 → 오케스트레이터 문맥 값(★ 2026-10-05 미리보기). createOperator 가 저장하는 값과 같은 정규화를 같은 함수로 탄다 —
+ *   저장 뒤 mapRowToOperator 로 읽힌 값과 같다(축 · 옛 힌트 상호배타 포함). 그래서 미리보기 = 첫 회차.
+ */
+export function operatorContextFields(input: CreateOperatorInput): Omit<OperatorOrchestrateInput, 'id'> {
+  const { segKey, segParams } = normalizeOperatorSegment(input);
+  return {
+    companyId: input.companyId,
+    createdBy: input.createdBy,
+    objective: input.objective.trim(),
+    copyStyle: normalizeCopyStyle(input.copyStyle),
+    channel: normalizeOperatorChannel(input.channel),
+    benefitContent: normalizeOperatorBenefit(input.benefitContent),
+    targetHint: segKey ? null : normalizeTargetHint(input.targetHint),
+    segmentKey: segKey,
+    segmentParams: segParams,
+  };
+}
+
+/**
+ * 회차 생성이 제안을 돌려주지 않았을 때 그 사유(★ 2026-10-05 run-now 라우트에서 그대로 옮김 · run-now · 미리보기 시작 공용).
+ *   반환값 null 은 사유를 담지 않는다 — 저장 상태(예약 · 기준선)로 판정한다.
+ */
+export async function explainEmptyRound(operatorId: string, companyId: string): Promise<string> {
+  // ★ 2026-08-05(Codex 1R): 예약 확인이 **기준선 안내보다 먼저**다. 변화 축은 첫 회차 뒤 기준선이 계속
+  //   존재하므로, 순서가 반대면 이미 예약된 회차가 있어도 "비교 기준을 잡았습니다"가 나가 담당자가
+  //   실제 예약을 못 본다. 생성 skip(shouldSkipProposalGeneration)과 동시 실행 차단이 이 안내로 모인다.
+  //   ⛔ 조용한 0건 금지(자동마케팅 §2 불변 원칙 3) — "0건 매칭"과 "이미 예약됨"은 다른 사실이다.
+  try {
+    const openRes = await query(
+      `SELECT 1 FROM operator_proposals
+        WHERE operator_id = $1::uuid AND company_id = $2::uuid AND status = 'scheduled'
+          AND COALESCE(proposal_json->'meta'->>'is_reminder', 'false') <> 'true'
+        LIMIT 1`,
+      [operatorId, companyId],
+    );
+    if (openRes.rows.length > 0) {
+      return '이미 이번 회차 발송이 예약되어 있습니다. 예약을 취소하거나 발송이 끝난 뒤 다시 실행해 주세요.';
+    }
+  } catch { /* 안내 실패 = 아래 판정으로 */ }
+  // ★ 2026-08-04: 변화 축 첫 회차는 실패가 아니라 기준을 잡은 정상 동작 — 일반 0건과 섞으면 고장으로 읽힌다.
+  try {
+    // 2R(#12): 회사 결합 — 소유 검증은 위에서 끝났지만 조회 축은 항상 테넌트 경계를 함께 진다.
+    const opRow = await query(
+      `SELECT segment_key FROM continuous_operators WHERE id = $1::uuid AND company_id = $2::uuid`,
+      [operatorId, companyId],
+    );
+    const segKey = String(opRow.rows[0]?.segment_key || '');
+    if (segKey && segmentNeedsCycleBaseline(normalizeSegmentKey(segKey)) && (await hasCycleBaseline(operatorId, companyId))) {
+      return '비교 기준을 잡았습니다. 지난번과 달라진 고객이 생기면 다음 회차부터 대상으로 잡힙니다.';
+    }
+  } catch { /* 안내 실패 = 일반 메시지로 */ }
+  return '0건 매칭 또는 생성 실패. 제안서가 생성되지 않았습니다.';
+}
+
+/**
+ * 이 오퍼레이터의 열린 회차(승인 대기 · 검토 · 예약 · 리마인드 제외) 최신 1건(★ 2026-10-05 미리보기 시작).
+ *   회차 생성은 제안 INSERT 뒤 후속 단계에서 던질 수 있다 — 반환값 대신 저장 상태로 「저장됐는가」를 판정한다.
+ */
+export async function findOpenProposalForOperator(operatorId: string, companyId: string): Promise<OperatorProposal | null> {
+  const r = await query(
+    `SELECT * FROM operator_proposals
+      WHERE operator_id = $1::uuid AND company_id = $2::uuid AND status IN ('pending', 'admin_review', 'scheduled')
+        AND COALESCE(proposal_json->'meta'->>'is_reminder', 'false') <> 'true'
+      ORDER BY created_at DESC LIMIT 1`,
+    [operatorId, companyId],
+  );
+  return r.rows[0] ? mapRowToProposal(r.rows[0]) : null;
+}
+
+/**
+ * 회차 1건 생성. `opts.precomputed` = 미리보기에서 이미 만든 오케스트레이터 결과(★ 2026-10-05 · 설계서 §2-5) —
+ *   오케스트레이터 호출만 건너뛰고 그 뒤 판정(0명 · 자율 자격 · 예약 중복 · 스팸 · 통지 · 통계)은 그대로 탄다.
+ */
+export async function generateProposalForOperator(operatorId: string, opts?: { precomputed?: any }): Promise<OperatorProposal | null> {
   // 1. Operator 조회 — ★ D212+ 5번 (2026-05-23 Harold 명시): budget_spent 영역 sub-query 통합
   const operRes = await query(
     `SELECT o.*, c.id AS c_id,
@@ -809,95 +1018,20 @@ export async function generateProposalForOperator(operatorId: string): Promise<O
       .catch((e: any) => console.warn(`[ContinuousOperator] ${operator.name} 기준선 보충 경고:`, e?.message));
   }
 
-  // 2. 회사 컨텍스트 + 자동 실행 옵션 조회
-  const ctxRes = await query(
-    `SELECT c.company_name, c.business_type, c.brand_name, c.brand_slogan,
-            c.brand_description, c.brand_tone, c.customer_schema,
-            COALESCE(c.reject_number, c.opt_out_080_number) AS reject_number,
-            c.cost_per_sms, c.cost_per_lms, c.cost_per_mms, c.cost_per_kakao, c.unit_price_basis,
-            COALESCE(c.cdp_auto_execute_enabled, false) AS cdp_auto_execute_enabled,
-            COALESCE(c.cdp_auto_execute_max_recipients, 1000) AS cdp_auto_execute_max_recipients,
-            COALESCE(c.cdp_auto_execute_max_cost_krw, 50000) AS cdp_auto_execute_max_cost_krw,
-            COALESCE(c.cdp_auto_execute_max_risk, 'low') AS cdp_auto_execute_max_risk,
-            COALESCE(p.plan_code, 'FREE') AS plan_code,
-            -- ★ 2026-07-28 자율 발송 자격을 plans 플래그로. ALTER 전에는 옛 규칙으로 폴백(to_jsonb는 없는 키를 NULL로 준다).
-            COALESCE(
-              (to_jsonb(p) ->> 'advanced_access_enabled')::boolean,
-              p.plan_code IN ('ENTERPRISE', 'BUSINESS'),
-              false
-            ) AS advanced_access_enabled
-     FROM companies c
-     LEFT JOIN plans p ON c.plan_id = p.id
-     WHERE c.id = $1::uuid`,
-    [operator.companyId]
-  );
-  if (ctxRes.rows.length === 0) return null;
-  const ctx = ctxRes.rows[0] as CompanyContextRow;
-
-  // 3. 고객 통계 조회
-  const statsConsent = consentJoinSql(await resolveConsentScope(operator.companyId, null), '', 'customers.id');   // ★ 2026-10-02 수신동의 읽기 = CT
-  const statsRes = await query(
-    `SELECT
-       COUNT(*) AS total,
-       COUNT(*) FILTER (WHERE ${statsConsent.isTrue}) AS sms_opt_in_count,
-       AVG(purchase_count) AS avg_purchase_count,
-       AVG(total_purchase_amount) AS avg_total_spent
-     FROM customers${statsConsent.join}
-     WHERE company_id = $1::uuid AND is_active = true`,
-    [operator.companyId]
-  );
-  const customerStats = statsRes.rows[0];
+  // 2~3. 회사 컨텍스트 + 자동 실행 옵션 + 고객 통계 — ★ 2026-10-05 미리보기와 같은 함수(loadOperatorCompanyContext)
+  const loaded = await loadOperatorCompanyContext(operator.companyId);
+  if (!loaded) return null;
+  const { ctx, companyInfo } = loaded;
 
   // 4. AI Operator 호출 (orchestrate) — 제안서 생성
-  const companyInfo: any = {
-    company_name: ctx.company_name,
-    business_type: ctx.business_type,
-    brand_name: ctx.brand_name,
-    brand_slogan: ctx.brand_slogan,
-    brand_description: ctx.brand_description,
-    brand_tone: ctx.brand_tone,
-    customer_schema: ctx.customer_schema,
-    reject_number: ctx.reject_number,
-    // ★ 2026-07-02 1단계: 회사별 단가 반영 — 빈 객체 전달로 항상 기본 단가만 쓰이던 것을 교정.
-    //   raw cost_per_*도 함께 전달해 orchestrate 내부 getCompanyCosts(ctx.companyInfo)가 회사 단가를 해석하게 한다.
-    cost_per_sms: ctx.cost_per_sms,
-    cost_per_lms: ctx.cost_per_lms,
-    cost_per_mms: ctx.cost_per_mms,
-    cost_per_kakao: ctx.cost_per_kakao,
-    ...getCompanyCosts(ctx as any),
-  };
-
   console.log(`[ContinuousOperator] ${operator.name} 제안서 생성 시작 (objective: ${operator.objective.slice(0, 50)})`);
 
   let orchestratorResult: any;
   try {
-    orchestratorResult = await orchestrate({
-      companyId: operator.companyId,
-      userId: operator.createdBy,
-      objective: operator.objective,
-      companyInfo,
-      customerStats,
-      // ★ 계절 문안 주입 — objective는 불변, 그 달 시즌을 메시지 톤·소재로만(§6-8).
-      //   2026-07-02 2단계: 관리자 선택 문안 스타일 지시를 같은 힌트 채널로 함께 주입(미선택 = 계절만).
-      seasonHint: [
-        buildSeasonPromptBlock(getSeasonContext(new Date()).month, ctx.business_type),
-        buildCopyStylePromptBlock(operator.copyStyle),
-      ].filter(Boolean).join('\n'),
-      // ★ 2026-06-26: 폼에서 고정한 채널(#1) + 관리자 입력 혜택(#4) 주입 → 제안·테스트·발송 일관
-      forcedChannel: operator.channel,
-      benefitContent: operator.benefitContent,
-      // ★ 2026-07-02 (Harold 명시): 자동마케팅 = 마케팅 = 무조건 광고 — (광고)+무료거부 080 자동 합성 전제.
-      forcedIsAd: true,
-      // ★ 2026-07-07: 타겟 축 고정(마케팅 캘린더 완비) — 발송 당일 타겟 해석이 등록 때 고른 축에 앵커.
-      targetHint: operator.targetHint,
-      // ★ 2026-08-03 A-7: 계약이 있으면 대상 조건은 계약이 만든다 — 타겟 AI 해석 결과를 쓰지 않는다(결정성).
-      segmentKey: operator.segmentKey,
-      segmentParams: operator.segmentParams,
-      // ★ 2026-08-04: 변화 축이 비교할 지난 회차 스냅샷의 주인. 상태 축은 이 값을 쓰지 않는다.
-      operatorId: operator.id,
-      // ⛔ 1R 정정: 자동마케팅 회차임을 명시. 이 플래그가 있어야 발송 게이트가 붙은 대상 수를 쓴다.
-      audienceScope: 'operator',
-    }, { source: 'continuous-operator', cost: 0 });  // ★ 2026-06-02: 제안서 생성(매일)은 무과금 — 200은 저장 1회, 발송 시 문안 3로 재배치. source는 이력용 유지.
+    // ★ 2026-10-05 미리보기에서 이미 만든 결과(precomputed)가 오면 오케스트레이터를 다시 부르지 않는다 — 본 제안 = 첫 회차.
+    //   없으면 지금과 같다(같은 문맥 · 같은 무과금).
+    orchestratorResult = opts?.precomputed
+      ?? await orchestrate(buildOperatorOrchestrateContext({ ...operator, id: operator.id }, loaded), { source: 'continuous-operator', cost: 0 });  // ★ 2026-06-02: 제안서 생성(매일)은 무과금 — 200은 저장 1회, 발송 시 문안 3로 재배치. source는 이력용 유지.
     // ★ D227+ 종량제: 크레딧 충분해 정상 실행 — paused_no_credit였으면 자동 재개
     await query(
       `UPDATE continuous_operators SET status = 'active', updated_at = NOW()
@@ -969,7 +1103,10 @@ export async function generateProposalForOperator(operatorId: string): Promise<O
   const maxRiskRank = riskRank[ctx.cdp_auto_execute_max_risk] || 1;
   const riskWithinThreshold = proposalRiskRank <= maxRiskRank;
 
+  // ★ 2026-10-05 미리보기로 만든 첫 회차(precomputed)는 자율 발송 판정에서 뺀다 — 대상 수 · 비용이 최대 30분 묵은 값이라
+  //   그 값으로 자동 예약을 결정하지 않는다(Codex 1R). 담당자 승인으로 보내고, 승인 발송은 발송 직전 대상을 다시 뽑아 기록한다.
   const autoExecuteEligible =
+    !opts?.precomputed &&
     ctx.cdp_auto_execute_enabled &&
     // ★ 2026-07-28 요금제 코드 직접 비교 → plans 플래그. 회사별 옵션(cdp_auto_execute_enabled)이
     //   여전히 앞단에 있으므로, 요금제만으로 자율 발송이 켜지지는 않는다.
@@ -984,6 +1121,7 @@ export async function generateProposalForOperator(operatorId: string): Promise<O
   const autoExecuteReason = autoExecuteEligible
     ? `자동 실행 임계값 통과: ${recipientCount}명 / ${costEstimate.toLocaleString()}원 / ${compliance.riskLevel} risk (회사 max ${ctx.cdp_auto_execute_max_risk}) / 광고`
     : `자동 실행 미통과: ${[
+        opts?.precomputed && '미리보기로 만든 첫 회차(담당자 승인 뒤 발송)',
         !ctx.cdp_auto_execute_enabled && '옵션 OFF',
         !ctx.advanced_access_enabled && '요금제',
         recipientCount > ctx.cdp_auto_execute_max_recipients && `${recipientCount}건 > ${ctx.cdp_auto_execute_max_recipients}`,

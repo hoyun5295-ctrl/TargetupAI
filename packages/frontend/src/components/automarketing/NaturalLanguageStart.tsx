@@ -4,6 +4,7 @@
 import { useState } from 'react';
 import { Sparkles, Check, Lock, Loader2 } from 'lucide-react';
 import CopyStylePicker, { CopyStyleKey } from './CopyStylePicker';
+import { AI_GENERATE_COSTS } from '../../constants/credit';
 
 const EXAMPLES: Array<{ label: string; goal: string }> = [
   { label: 'VIP 재구매', goal: 'VIP 등급 고객 중 최근 30일 구매가 없는 고객에게 재구매를 유도' },
@@ -72,7 +73,7 @@ export default function NaturalLanguageStart({ submitting, onSubmit }: { submitt
         className="mt-5 w-full inline-flex items-center justify-center gap-2 bg-indigo-200 hover:bg-indigo-200 disabled:opacity-30 disabled:cursor-not-allowed text-indigo-900 text-sm font-semibold py-3.5 rounded-xl transition-colors"
       >
         {submitting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
-        AI가 초안 만들기
+        AI가 초안 만들기<span className="font-normal opacity-70 text-[12.5px]">· {AI_GENERATE_COSTS['ai-operator-propose']}크레딧</span>
       </button>
 
       <div className="mt-3 flex items-center justify-center gap-1.5 text-xs text-slate-400">

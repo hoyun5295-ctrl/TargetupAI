@@ -1,9 +1,10 @@
 // AI 자동 마케팅 (Continuous Operator) — 재설계 (2026-06-27)
 // ★ 2026-09-30 AI 존 대개편(설계서 §4-2): 첫 화면 = 승인할 제안(런처 2×2 → 명령 카드로 흡수).
 //   한 줄 입력 = 자연어 시작(스마트 기본값 + 목표 → 크레딧 확인 → 생성) · 다른 방법 = 시나리오 · 세부설정 · 자세히 쓰기.
+// ★ 2026-10-05 한 줄 · 자세히 쓰기 = 미리보기 먼저(5크레딧 · 등록 0) → [이대로 시작] 에서만 200(설계서 docs/2026-10-05-automarketing-preview-design.md).
 //   탭 = 승인할 제안 / 실행 중(`?tab=running` · 허브 "관리 →" 착지). 핸들러·저장 계약은 그대로.
 // native dialog 0(ConfirmModal·useToast). 모델명 0.
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { goUpTo } from '../lib/scroll-restoration';
 import { GitMerge, LayoutGrid, Loader2, PenLine, SlidersHorizontal, Sparkles, TrendingUp } from 'lucide-react';
@@ -14,6 +15,7 @@ import ZoneStatStrip from '../components/zone/ZoneStatStrip';
 import { zoneModule } from '../constants/ai-operator-modules';
 import ConfirmModal, { ConfirmState } from '../components/ConfirmModal';
 import CreditConfirmModal from '../components/credit/CreditConfirmModal';
+import { AI_GENERATE_COSTS } from '../constants/credit';
 import { useToast } from '../components/ToastProvider';
 import {
   ContinuousOperator, OperatorProposal, ProposalVariant, BanditRecommendation,
@@ -26,6 +28,7 @@ import OperatorSetupModal from '../components/automarketing/OperatorSetupModal';
 import MultiGoalModal from '../components/automarketing/MultiGoalModal';
 import OperatorsManageList from '../components/automarketing/OperatorsManageList';
 import DailyBriefCard, { DailyBrief, DailyBriefRecommendation } from '../components/automarketing/DailyBriefCard';
+import OperatorPreviewModal, { OperatorPreviewData } from '../components/automarketing/OperatorPreviewModal';
 
 /** 하위 보기의 머리 표시(제목은 메뉴 이름 한 벌 · 하위 위치만 "› …") */
 const VIEW_SUB: Partial<Record<AutoMarketingView, string>> = {
@@ -64,6 +67,12 @@ export default function ContinuousOperatorPage() {
   const [confirmState, setConfirmState] = useState<ConfirmState | null>(null);
   const [showMultiGoal, setShowMultiGoal] = useState(false);
   const [pendingConfig, setPendingConfig] = useState<Partial<ContinuousOperator> | null>(null);
+  // ★ 2026-10-05 [제안 받기] = 미리보기 — 등록 전에 첫 제안을 보여 주고, 200은 [이대로 시작]에서만.
+  const [preview, setPreview] = useState<{ config: Partial<ContinuousOperator>; data: OperatorPreviewData | null } | null>(null);
+  const [previewing, setPreviewing] = useState(false);
+  const [startConfirm, setStartConfirm] = useState(false);
+  const [starting, setStarting] = useState(false);
+  const previewGen = useRef(0);   // 닫기 · 새 요청 = 세대 증가 → 늦게 온 결과는 버린다(닫기를 잠그지 않는다)
 
   const token = () => localStorage.getItem('token');
   const auth = () => ({ Authorization: `Bearer ${token()}` });
@@ -269,10 +278,91 @@ export default function ContinuousOperatorPage() {
     setPendingConfig({ ...editing, segmentChoiceSeen: true });
   };
 
-  // 자연어 제출: 스마트 기본값 + 목표 (+선택 문안 스타일) → 크레딧 확인 → 생성 + 즉시 초안.
+  // 자연어 제출(명령 카드 한 줄 · 자세히 쓰기): 스마트 기본값 + 목표 (+선택 문안 스타일) → 미리보기.
+  // ★ 2026-10-05 옛: 바로 200 확인 창 → 등록 → 첫 초안(제안을 보기도 전에 200). 지금: 첫 제안을 먼저 보고 시작할지 정한다.
   const handleNaturalSubmit = (goal: string, copyStyle: 'courteous' | 'friendly' | 'witty' | 'punchy' | null) => {
-    if (!goal) return;
-    setPendingConfig({ ...SMART_DEFAULTS, name: goal.slice(0, 40), objective: goal, copyStyle });
+    if (!goal || previewing) return;
+    requestPreview({ ...SMART_DEFAULTS, name: goal.slice(0, 40), objective: goal, copyStyle });
+  };
+
+  const requestPreview = async (config: Partial<ContinuousOperator>) => {
+    const gen = ++previewGen.current;
+    setPreview({ config, data: null });
+    setPreviewing(true);
+    try {
+      const res = await fetch('/api/ai/operator/continuous/preview', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...auth() },
+        body: JSON.stringify(serialize(config)),
+      });
+      const data = await res.json().catch(() => ({ success: false }));
+      if (gen !== previewGen.current) return;
+      if (!data.success) {
+        setPreview(null);
+        toast.error(data.error || '제안을 만들지 못했습니다.');
+        return;
+      }
+      setPreview({
+        config,
+        data: {
+          kind: data.kind, previewId: data.previewId ?? null, proposal: data.proposal ?? null, reason: data.reason ?? null,
+          appliedSegment: data.appliedSegment ?? null, segment: data.segment ?? { key: null, params: null },
+        },
+      });
+    } catch (e: any) {
+      if (gen !== previewGen.current) return;
+      setPreview(null);
+      toast.error(e?.message || '제안을 만들지 못했습니다.');
+    } finally {
+      if (gen === previewGen.current) setPreviewing(false);
+    }
+  };
+
+  const closePreview = () => {
+    if (starting) return;
+    previewGen.current += 1;
+    setPreview(null);
+    setPreviewing(false);
+  };
+
+  // [세부 설정에서 고치기] — 이 값(+ 고정된 대상 기준)으로 세부 설정 창 → 저장 = 기존 등록 경로(200 확인 창)
+  const editFromPreview = () => {
+    if (!preview?.data) return;
+    const { config, data } = preview;
+    previewGen.current += 1;
+    setPreview(null);
+    setEditing({ ...config, ...(data.segment.key ? { segmentKey: data.segment.key, segmentParams: data.segment.params } : {}) });
+  };
+
+  // [이대로 자동 마케팅 시작] — 미리보기 id 하나만 보낸다(서버가 보관한 입력 그대로 등록 · 본 제안 = 첫 회차).
+  const startFromPreview = async () => {
+    const id = preview?.data?.previewId;
+    if (!id) return;
+    setStarting(true);
+    try {
+      const res = await fetch('/api/ai/operator/continuous/from-preview', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...auth() },
+        body: JSON.stringify({ preview_id: id }),
+      });
+      const data = await res.json().catch(() => ({ success: false }));
+      if (!data.success) {
+        toast.error(data.error || '자동 마케팅을 시작하지 못했습니다.');
+        if (res.status === 410) setPreview(null);   // 만료 — 다시 [제안 받기](차감 0)
+        return;
+      }
+      setPreview(null);
+      setLine('');
+      toast.success('자동 마케팅이 시작되었습니다.');
+      if (!data.proposal && data.message) toast.info(data.message);
+      setProposalStatus('pending');
+      setView(data.proposal ? 'recommendations' : 'operators');
+      await loadAll();
+    } catch (e: any) {
+      toast.error(e?.message || '자동 마케팅을 시작하지 못했습니다.');
+    } finally {
+      setStarting(false);
+    }
   };
 
   // 시나리오 선택: 세부설정 모달 prefill (가동 전 한 번 확인). 월간형(생일·VIP 데이)은 주기까지 프리필.
@@ -423,7 +513,8 @@ export default function ContinuousOperatorPage() {
           placeholder: oneLine.placeholder,
           verb: oneLine.verb,
           icon: Sparkles,
-          busy: creating,
+          busy: creating || previewing,
+          credit: `${AI_GENERATE_COSTS['ai-operator-propose']}크레딧`,
         },
       }}
       stamp={{ text: stampText, onRefresh: loadAll, loading }}
@@ -519,7 +610,7 @@ export default function ContinuousOperatorPage() {
             </div>
           )}
 
-          {view === 'natural' && <div className="max-w-3xl mx-auto"><NaturalLanguageStart submitting={creating} onSubmit={handleNaturalSubmit} /></div>}
+          {view === 'natural' && <div className="max-w-3xl mx-auto"><NaturalLanguageStart submitting={creating || previewing} onSubmit={handleNaturalSubmit} /></div>}
 
           {view === 'scenario' && <ScenarioStart onSelect={handleScenarioSelect} />}
 
@@ -550,6 +641,24 @@ export default function ContinuousOperatorPage() {
       )}
       {showMultiGoal && <MultiGoalModal onClose={() => setShowMultiGoal(false)} />}
       <ConfirmModal state={confirmState} onClose={() => setConfirmState(null)} />
+      <OperatorPreviewModal
+        open={!!preview}
+        loading={previewing}
+        objective={preview?.config.objective || ''}
+        config={preview?.config || null}
+        data={preview?.data || null}
+        starting={starting}
+        onClose={closePreview}
+        onEdit={editFromPreview}
+        onStart={() => setStartConfirm(true)}
+      />
+      <CreditConfirmModal
+        open={startConfirm}
+        source="continuous-operator"
+        description="방금 본 제안이 승인할 제안으로 저장됩니다. 승인하면 발송됩니다."
+        onConfirm={() => { setStartConfirm(false); startFromPreview(); }}
+        onCancel={() => setStartConfirm(false)}
+      />
       <CreditConfirmModal
         open={!!pendingConfig}
         source="continuous-operator"

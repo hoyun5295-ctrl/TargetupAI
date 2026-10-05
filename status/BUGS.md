@@ -55,6 +55,10 @@
 
 ## 2) 활성 버그
 
+### 🟡 B-1005-2 자동 마케팅 미리보기 작업 중 발견 · 범위 밖 기존 결함 1건 (등재만 · 착수 판단 = Harold님) · 2026-10-05
+- **허브 제안(`/operator/propose`)은 대상 0명이어도 문안이 나오면 5 차감** — 근거 = 코드 읽기: `ai-orchestrator.ts` 순차 경로(`orchestrate`)는 대상 수 0이어도 문안 생성으로 넘어가고, 차감 조건은 「문안 1개 이상」뿐이다(0708 원칙 「0건 매칭 = 차감 skip」의 전제와 다름). 회사 토글로 쓰는 `orchestrateWithAI` 경로는 도구 설명상 0건이면 문안 도구를 부르지 않는다. 운영 원장 발생 여부 미검증. 자동 마케팅 미리보기는 `chargeOnlyWithTarget` 로 닫혔다(허브는 지정 안 함 = 그대로).
+- 설계서 = [자동 마케팅 미리보기 §7](../docs/2026-10-05-automarketing-preview-design.md)
+
 ### 🟡 B-1005-1 한줄로 시그니처 작업 중 발견 · 범위 밖 기존 결함 4건 (등재만 · 착수 판단 = Harold님) · 2026-10-05
 - **① 허브 문자: 스위치 밖 회사는 회사 AI 메모리가 혜택 근거 · 혜택 강조 지시가 된다** — `ai-orchestrator.ts` orchestrate 의 `learnedMemoryContext` 가 목표 문장에 붙어 `generateMessages` 의 혜택 근거(`benefitGround` 첫 원소)와 혜택 감지(`detectBenefits`)에 들어간다. `ONE_LINE_FACTS_COMPANY_IDS` 회사는 닫혔다(근거 = 사용자 글자 · `licenseText`). 메모리에 실제 수치가 있는지 미검증(확인 = `ai_company_memory` 값 칼럼에서 `숫자%·원` 건수 · 칼럼명은 information_schema 먼저).
 - **② DM · 이메일 생성 차감 멱등키 없음(한 줄 입구 밖)** — 스위치 켠 회사의 한 줄 요청만 시도 토큰 키가 붙는다. 빠른 시작 · 편집기 AI · 행사 모달 경로는 `fallback:{회사}:{source}:{Date.now()}` 라 겹친 두 요청이 두 번 차감될 수 있다(실발생 미검증 · 확인 = `ai_credit_transactions` 같은 회사 · source 2초 안 2행). 인앱 · 여정 · 자동 마케팅 생성도 같은 부류.

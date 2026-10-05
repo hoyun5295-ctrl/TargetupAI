@@ -1,7 +1,11 @@
 import { Request, Response, Router } from 'express';
 import { query } from '../config/database';
 import { authenticate } from '../middlewares/auth';
-import { checkAPIStatus, extractVarCatalog, filterVarCatalogByData, generateCustomMessages, generateMessages, parseBriefing, recommendTarget, countFilteredCustomers, recommendNextCampaign, refineDirectMessage, callAIWithFallback, suggestSegmentForObjective } from '../services/ai';
+import { checkAPIStatus, extractVarCatalog, filterVarCatalogByData, generateCustomMessages, generateMessages, parseBriefing, recommendTarget, countFilteredCustomers, recommendNextCampaign, refineDirectMessage, callAIWithFallback } from '../services/ai';
+import {
+  resolveRegistrationSegment, createOperatorInputFromBody, operatorSaveErrorResponse,
+  runOperatorPreview, startOperatorFromPreview, PreviewBusyError, PreviewInputError, PREVIEW_EXPIRED_MESSAGE,
+} from '../utils/automarketing-preview';   // ★ 2026-10-05 자동 마케팅 미리보기
 import { buildGenderFilter, buildGradeFilter, buildRegionFilter, getGenderVariants, getRegionVariants } from '../utils/normalize';
 import { FIELD_MAP, FIELD_DISPLAY_MAP, reverseDisplayValue, getColumnFields, renderFieldValue } from '../utils/standard-field-map';
 import { replaceVariables } from '../utils/messageUtils';
@@ -69,6 +73,7 @@ import {
   approveProposal,
   rejectProposal,
   generateProposalForOperator,
+  explainEmptyRound,   // ★ 2026-10-05 빈 회차 사유(run-now · 미리보기 시작 공용)
   // ★ 2026-08-04 리마인드 명단 — 발송과 같은 코호트를 읽는다(보여준 수 = 나가는 수)
   readCampaignQueuedPhones,
   OPERATOR_STATUSES,
@@ -2145,15 +2150,7 @@ router.post('/operator/continuous', async (req: Request, res: Response) => {
       return res.status(403).json({ success: false, error: '본 기능은 요금제 가입 후 이용 가능합니다.', code: 'BETA_GATE' });
     }
 
-    const {
-      name, objective, schedule, schedule_time, schedule_day_of_week, schedule_day_of_month, schedule_month,
-      channel, benefit_content, admin_phone_numbers, backup_admin_phone, admin_alert_channel,
-      auto_send_lead_minutes, budget_monthly, budget_daily, budget_alert_threshold, delivery_policy,
-      sequence_enabled, sequence_delay_days, sequence_reminder_content, send_time_mode, copy_style,
-      calendar_month, target_hint, mms_image_paths,
-      // ★ 2026-08-03 A-7: 세그먼트 계약(축 + 파라미터) — 지정하면 회차마다 같은 조건으로 컴파일된다.
-      segment_key, segment_params,
-    } = req.body;
+    const { calendar_month } = req.body;
 
     // ★ 2026-07-05 마케팅 캘린더 경유 등록 — 같은 달에 살아있는 등록이 있으면 409(200크레딧 중복 차감 차단)
     const calendarMonth = calendar_month != null && Number(calendar_month) >= 1 && Number(calendar_month) <= 12
@@ -2170,80 +2167,16 @@ router.post('/operator/continuous', async (req: Request, res: Response) => {
       }
     }
 
-    // ★ 2026-08-04 계약 필수화(§5-B ③) — 축을 안 고른 등록(자연어·오늘의 추천·시나리오 미선택)은
-    //   **등록 1회에 한해** AI가 목표를 그 회사에서 열려 있는 축으로 옮긴다. 이게 되면 회차마다 목표를
-    //   다시 해석하지 않는다(결정성). 축으로 표현이 안 되거나 확신이 없으면 종전대로 자유 해석 —
-    //   매핑 실패로 등록을 막지 않는다(기능 우선). 무엇으로 고정됐는지는 응답에 실어 화면이 바로 알린다.
-    let finalSegmentKey: string | null = typeof segment_key === 'string' && segment_key.trim() ? segment_key : null;
-    let finalSegmentParams: Record<string, number> | null =
-      segment_params && typeof segment_params === 'object' && !Array.isArray(segment_params)
-        ? (segment_params as Record<string, number>) : null;
-    let appliedSegment: { key: string; label: string } | null = null;
-    // ⛔ 매핑이 서는 조건 넷(2026-08-04 Codex 반영):
-    //   ①축 미지정 ②화면에서 축 선택 UI를 본 등록이 아님(segment_choice_seen — 모달의 "자동 판단" 명시
-    //     선택을 덮으면 화면이 거짓말이 된다) ③옛 축(target_hint)도 명시 안 함 — 마케팅 캘린더는 그 축으로
-    //     대상을 골라 보낸다. 그 선택을 AI 계약이 덮으면 캘린더 화면이 보여준 축과 실제가 갈린다(2R #8)
-    //   ④이름·목표가 실재(빈 등록은 어차피 저장이 거부되는데 AI 호출·호출 한도만 소모한다).
-    if (
-      !finalSegmentKey
-      && req.body?.segment_choice_seen !== true
-      && !(typeof target_hint === 'string' && target_hint.trim())
-      && typeof objective === 'string' && objective.trim()
-      && typeof name === 'string' && name.trim()
-    ) {
-      try {
-        const openAxes = (await listSegmentAvailability(companyId)).filter((a) => a.available);
-        const mapped = await suggestSegmentForObjective(companyId, userId || null, objective.trim(), openAxes);
-        if (mapped) {
-          // 저장 검증을 여기서 미리 통과시킨다 — 매핑된 축이 표 미생성 등으로 저장 불가면 매핑을 버리고
-          //   자유 해석으로 등록한다(매핑 실패가 등록 전체를 503으로 만들면 안 된다 — 기능 우선).
-          await assertSegmentUsable(companyId, mapped.key);
-          finalSegmentKey = mapped.key;
-          finalSegmentParams = mapped.params;
-          appliedSegment = { key: mapped.key, label: openAxes.find((a) => a.key === mapped.key)?.label || mapped.key };
-        }
-      } catch (e: any) {
-        console.warn('[Operator continuous POST] 축 매핑 생략(자유 해석 등록):', e?.message);
-      }
-    }
+    // ★ 2026-08-04 계약 필수화(§5-B ③) — 등록 1회 축 매핑. ★ 2026-10-05 미리보기와 같은 함수로 옮겼다(utils/automarketing-preview.ts).
+    const seg = await resolveRegistrationSegment(companyId, userId, req.body);
+
 
     const operator = await createOperator({
-      companyId,
-      createdBy: userId,
-      name: String(name || '').slice(0, 100),
-      objective: String(objective || ''),
-      schedule,
-      scheduleTime: schedule_time,
-      scheduleDayOfWeek: schedule_day_of_week != null ? Number(schedule_day_of_week) : null,
-      scheduleDayOfMonth: schedule_day_of_month != null ? Number(schedule_day_of_month) : null,
-      scheduleMonth: schedule_month != null ? Number(schedule_month) : null,  // ★ 2026-07-05 yearly 대상 월
-      // ★ 2026-06-26: 생성 시에도 채널·혜택·담당자·예산 저장 (#1 채널 / #3 담당자·2h알림 / #4 혜택 fix)
-      channel,
-      benefitContent: typeof benefit_content === 'string' ? benefit_content : null,
-      adminPhoneNumbers: Array.isArray(admin_phone_numbers) ? admin_phone_numbers.filter((p: any) => typeof p === 'string' && p.trim()) : undefined,
-      backupAdminPhone: backup_admin_phone === undefined ? undefined : (backup_admin_phone === null ? null : String(backup_admin_phone)),
-      adminAlertChannel: ['sms', 'kakao', 'email'].includes(admin_alert_channel) ? admin_alert_channel : undefined,
-      autoSendLeadMinutes: auto_send_lead_minutes != null ? Number(auto_send_lead_minutes) : null,
-      budgetMonthly: budget_monthly === undefined ? undefined : (budget_monthly === null ? null : Number(budget_monthly)),
-      budgetDaily: budget_daily === undefined ? undefined : (budget_daily === null ? null : Number(budget_daily)),
-      budgetAlertThreshold: budget_alert_threshold !== undefined ? Number(budget_alert_threshold) : undefined,
-      deliveryPolicy: ['daily', 'weekly', 'monthly'].includes(delivery_policy) ? delivery_policy : undefined,
-      // ★ Phase3 C: 다단계 시퀀스 (1차 → N일 후 미반응자 리마인드)
-      sequenceEnabled: sequence_enabled === true,
-      sequenceDelayDays: sequence_delay_days != null ? Number(sequence_delay_days) : null,
-      sequenceReminderContent: typeof sequence_reminder_content === 'string' ? sequence_reminder_content : null,
-      // ★ 2026-07-02 1단계 B: 발송 시각 모드 — 'fixed'(기본) | 'ai_optimal'
-      sendTimeMode: send_time_mode === 'ai_optimal' ? 'ai_optimal' : 'fixed',
-      // ★ 2026-07-02 2단계: 문안 스타일 (createOperator가 화이트리스트 정규화)
-      copyStyle: typeof copy_style === 'string' ? copy_style : null,
-      // ★ 2026-07-07 마케팅 캘린더 완비: 발송 대상 축 (createOperator가 화이트리스트 정규화)
-      targetHint: typeof target_hint === 'string' ? target_hint : null,
+      ...createOperatorInputFromBody(companyId, userId, req.body),   // ★ 2026-10-05 미리보기와 같은 조립
       // ★ 2026-08-03 A-7: 계약(createOperator가 화이트리스트·범위 정규화). 미지정 = 옛 방식(자유 해석).
       // ★ 2026-08-04: 사용자가 안 골랐으면 위 등록 1회 매핑 결과가 들어온다.
-      segmentKey: finalSegmentKey,
-      segmentParams: finalSegmentParams,
-      // ★ 2026-07-30 (임은지 접수): MMS 이미지 (createOperator가 채널 mms + 최대 3장으로 정규화)
-      mmsImagePaths: Array.isArray(mms_image_paths) ? mms_image_paths : null,
+      segmentKey: seg.segmentKey,
+      segmentParams: seg.segmentParams,
     });
     // ★ 2026-07-05: 캘린더 경유 등록 기록 — 실패해도 등록은 성공(fire-safe, 테이블 미생성 = 내부 생략)
     if (calendarMonth != null) {
@@ -2252,20 +2185,63 @@ router.post('/operator/continuous', async (req: Request, res: Response) => {
         console.log('[MarketingCalendar] 등록 기록 실패(등록은 성공):', e?.message || e));
     }
     // appliedSegment — AI 매핑으로 고정된 축. 화면이 즉시 알린다(사용자 몰래 고정되는 상태 금지).
-    return res.json({ success: true, operator, appliedSegment });
+    return res.json({ success: true, operator, appliedSegment: seg.appliedSegment });
   } catch (err: any) {
-    if (err instanceof InsufficientCreditError) {
-      return res.status(402).json({ success: false, error: '자동 마케팅 시작에 필요한 크레딧이 부족합니다. 크레딧을 충전해 주세요.', code: 'INSUFFICIENT_CREDIT' });
-    }
-    const msg = err?.message || '';
-    if (err?.code === 'DB_MIGRATION_PENDING' || err?.code === '42P01') {
-      return res.status(503).json({ success: false, error: '지난번과 달라진 점을 찾는 조건은 준비 중입니다. 다른 조건으로 저장해 주세요.', code: 'DB_MIGRATION_PENDING' });
-    }
-    if (msg.includes('column') && msg.includes('does not exist')) {
-      return res.status(503).json({ success: false, error: 'DB 마이그레이션이 필요합니다. 운영자에게 continuous_operators 컬럼 추가(ALTER)를 요청해주세요.', code: 'DB_MIGRATION_PENDING' });
-    }
+    const mapped = operatorSaveErrorResponse(err);   // ★ 2026-10-05 [시작]과 같은 응답
+    if (mapped) return res.status(mapped.status).json(mapped.body);
     console.error('[Operator continuous POST] 오류:', err);
     return res.status(500).json({ success: false, error: err?.message || 'Continuous Operator 신설 실패' });
+  }
+});
+
+// ★ 2026-10-05 자동 마케팅 [제안 받기] = 미리보기(설계서 docs/2026-10-05-automarketing-preview-design.md §2)
+//   등록 0 · 첫 회차와 같은 계산 · 5크레딧(대상 0명이면 0). 시작은 아래 from-preview 가 미리보기 id 하나로만 한다.
+router.post('/operator/continuous/preview', async (req: Request, res: Response) => {
+  try {
+    const companyId = req.user?.companyId;
+    const userId = req.user?.userId;
+    if (!companyId || !userId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
+    const planCtx = await loadPlanContext(companyId);
+    if (!planCtx) return res.status(404).json({ success: false, error: '회사 정보를 찾을 수 없습니다.' });
+    if (!isAiOperatorAllowed(planCtx, req.user)) {
+      return res.status(403).json({ success: false, error: '본 기능은 요금제 가입 후 이용 가능합니다.', code: 'BETA_GATE' });
+    }
+    const out = await runOperatorPreview(companyId, userId, req.body);
+    return res.json({ success: true, ...out });
+  } catch (err: any) {
+    if (err instanceof PreviewBusyError) return res.status(409).json({ success: false, error: err.message, code: 'PREVIEW_BUSY' });
+    if (err instanceof PreviewInputError) return res.status(400).json({ success: false, error: err.message, code: 'PREVIEW_INPUT' });
+    if (err instanceof InsufficientCreditError) {
+      return res.status(402).json({ success: false, error: '제안을 받는 데 필요한 크레딧이 부족합니다. 크레딧을 충전해 주세요.', code: 'INSUFFICIENT_CREDIT' });
+    }
+    console.error('[Operator continuous preview] 오류:', err);
+    return res.status(500).json({ success: false, error: '제안을 만들지 못했습니다. 잠시 뒤 다시 시도해 주세요.' });
+  }
+});
+
+// ★ 2026-10-05 미리보기 → 시작. 본문 = preview_id 하나(화면 값으로 다시 만들지 않는다 · 본 것 = 등록한 것).
+//   만료 · 남의 것 = 410(차감 0). 등록 200(기존 멱등) + 본 제안 = 첫 회차.
+router.post('/operator/continuous/from-preview', async (req: Request, res: Response) => {
+  try {
+    const companyId = req.user?.companyId;
+    const userId = req.user?.userId;
+    if (!companyId || !userId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
+    const planCtx = await loadPlanContext(companyId);
+    if (!planCtx) return res.status(404).json({ success: false, error: '회사 정보를 찾을 수 없습니다.' });
+    if (!isAiOperatorAllowed(planCtx, req.user)) {
+      return res.status(403).json({ success: false, error: '본 기능은 요금제 가입 후 이용 가능합니다.', code: 'BETA_GATE' });
+    }
+    const previewId = typeof req.body?.preview_id === 'string' ? req.body.preview_id : '';
+    const out = previewId ? await startOperatorFromPreview(previewId, companyId, userId) : null;
+    if (!out) {
+      return res.status(410).json({ success: false, error: PREVIEW_EXPIRED_MESSAGE, code: 'PREVIEW_EXPIRED' });
+    }
+    return res.json({ success: true, ...out });
+  } catch (err: any) {
+    const mapped = operatorSaveErrorResponse(err);
+    if (mapped) return res.status(mapped.status).json(mapped.body);
+    console.error('[Operator continuous from-preview] 오류:', err);
+    return res.status(500).json({ success: false, error: err?.message || '자동 마케팅 시작 실패' });
   }
 });
 
@@ -2728,41 +2704,8 @@ router.post('/operator/continuous/:id/run-now', async (req: Request, res: Respon
     }
     const proposal = await generateProposalForOperator(req.params.id);
     if (!proposal) {
-      // ★ 2026-08-05(Codex 1R): 예약 확인이 **기준선 안내보다 먼저**다. 변화 축은 첫 회차 뒤 기준선이 계속
-      //   존재하므로, 순서가 반대면 이미 예약된 회차가 있어도 "비교 기준을 잡았습니다"가 나가 담당자가
-      //   실제 예약을 못 본다. 생성 skip(shouldSkipProposalGeneration)과 동시 실행 차단이 이 안내로 모인다.
-      //   ⛔ 조용한 0건 금지(자동마케팅 §2 불변 원칙 3) — "0건 매칭"과 "이미 예약됨"은 다른 사실이다.
-      try {
-        const openRes = await query(
-          `SELECT 1 FROM operator_proposals
-            WHERE operator_id = $1::uuid AND company_id = $2::uuid AND status = 'scheduled'
-              AND COALESCE(proposal_json->'meta'->>'is_reminder', 'false') <> 'true'
-            LIMIT 1`,
-          [req.params.id, companyId],
-        );
-        if (openRes.rows.length > 0) {
-          return res.json({
-            success: true, proposal: null,
-            message: '이미 이번 회차 발송이 예약되어 있습니다. 예약을 취소하거나 발송이 끝난 뒤 다시 실행해 주세요.',
-          });
-        }
-      } catch { /* 안내 실패 = 아래 판정으로 */ }
-      // ★ 2026-08-04: 변화 축 첫 회차는 실패가 아니라 기준을 잡은 정상 동작 — 일반 0건과 섞으면 고장으로 읽힌다.
-      try {
-        // 2R(#12): 회사 결합 — 소유 검증은 위에서 끝났지만 조회 축은 항상 테넌트 경계를 함께 진다.
-        const opRow = await query(
-          `SELECT segment_key FROM continuous_operators WHERE id = $1::uuid AND company_id = $2::uuid`,
-          [req.params.id, companyId],
-        );
-        const segKey = String(opRow.rows[0]?.segment_key || '');
-        if (segKey && segmentNeedsCycleBaseline(normalizeSegmentKey(segKey)) && (await hasCycleBaseline(req.params.id, companyId))) {
-          return res.json({
-            success: true, proposal: null,
-            message: '비교 기준을 잡았습니다. 지난번과 달라진 고객이 생기면 다음 회차부터 대상으로 잡힙니다.',
-          });
-        }
-      } catch { /* 안내 실패 = 일반 메시지로 */ }
-      return res.json({ success: true, proposal: null, message: '0건 매칭 또는 생성 실패. 제안서가 생성되지 않았습니다.' });
+      // ★ 2026-10-05 사유 판정은 CT(explainEmptyRound)로 옮겼다 — 미리보기 시작과 같은 함수(동작 동일).
+      return res.json({ success: true, proposal: null, message: await explainEmptyRound(req.params.id, companyId) });
     }
     return res.json({ success: true, proposal });
   } catch (err: any) {
