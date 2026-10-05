@@ -128,3 +128,29 @@ export async function approveDepositRequestTx(opts: {
     depClient.release();
   }
 }
+
+/**
+ * ★ 2026-10-05 전송자격인증 2.3 — 명의 확인을 기다리는 입금 신청이 있는 고객사에는 **관리자 수동 충전을 막는다**.
+ *   실례(9/18): 명의 불일치로 보류된 무통장입금(15:35) 7분 뒤 같은 금액을 수동 충전(사유 「무통장입금」)으로 넣어
+ *   소명 없이 충전됐고, 보류 건은 9/20 「이미 충전됨」으로 반려됐다. 수동 충전은 금액 · 사유만 받아 입금 신청을 보지 않았다.
+ *   보류 건은 이 파일의 승인(소명 확인 · resolveHold) 또는 반려로만 닫는다. 수동 충전은 대기 보류가 없을 때만 된다.
+ *   ponytail: 판정과 같은 순간에 고객이 새 입금 신청을 넣는 경합은 막지 않는다 — 관리자가 알 수 없던 신청이라 「알고 우회」가
+ *   아니고, 그 신청은 그대로 보류되어 이 경로로 닫힌다. 막아야 하면 입금 신청 INSERT 에 회사 행 잠금을 함께 건다.
+ */
+export async function findPendingHeldDeposit(
+  db: { query: (sql: string, params?: any[]) => Promise<{ rows: any[] }> },
+  companyId: string,
+): Promise<{ id: string; amount: number; depositorName: string; createdAt: string } | null> {
+  const r = await db.query(
+    `SELECT id, amount, depositor_name, created_at FROM deposit_requests
+      WHERE company_id = $1 AND status = 'pending' AND held_reason IS NOT NULL
+      ORDER BY created_at LIMIT 1`,
+    [companyId],
+  );
+  const row = r.rows[0];
+  if (!row) return null;
+  return { id: String(row.id), amount: Number(row.amount), depositorName: String(row.depositor_name || ''), createdAt: new Date(row.created_at).toISOString() };
+}
+
+export const HELD_DEPOSIT_PENDING_MESSAGE =
+  '이 고객사에 입금자 명의 확인이 필요한 입금 신청이 있어 수동 충전을 할 수 없습니다. 충전 관리의 승인 대기에서 소명을 확인해 승인하거나 반려해 주세요.';

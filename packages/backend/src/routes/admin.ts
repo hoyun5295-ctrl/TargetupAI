@@ -64,7 +64,7 @@ import { normalizeSenderEmail, senderKeyClash } from '../utils/agency-send-email
 // ★ 2026-08-26(3) 대행발송 운영 취소 — 효과는 고객 화면과 같은 CT를 지난다(입구만 다르다)
 import { cancelAgencyRequestTx } from '../utils/agency-send-cancel';
 import { AGENCY_PREVIEW_LIMIT, buildRenderedSamples } from '../utils/agency-send-preview';
-import { approveDepositRequestTx } from '../utils/deposit-approve';
+import { approveDepositRequestTx, findPendingHeldDeposit, HELD_DEPOSIT_PENDING_MESSAGE } from '../utils/deposit-approve';
 import { executeAgentChargeBatch } from '../utils/agent-charge-core';
 import { buildStaffCancelledNotify, formatWhen as agencyFormatWhen, shortLabel } from '../utils/agency-send-notify';
 import { notifyManager } from '../utils/agency-send-worker';
@@ -3908,6 +3908,12 @@ router.post('/companies/:id/balance-adjust', authenticate, requireSuperAdmin, as
       });
     } else {
       // 충전
+      // ★ 2026-10-05 전송자격인증 2.3 — 명의 확인 대기 입금 신청이 있으면 수동 충전으로 채우지 않는다(소명 없이 충전되는 우회 · 9/18 실례).
+      //   보류 건은 충전 관리 승인 대기에서 소명 확인 승인 또는 반려로만 닫는다(utils/deposit-approve.ts).
+      if (await findPendingHeldDeposit(client, id)) {
+        await client.query('ROLLBACK');
+        return res.status(409).json({ error: HELD_DEPOSIT_PENDING_MESSAGE, code: 'DEPOSIT_HOLD_PENDING' });
+      }
       const result = await client.query(
         'UPDATE companies SET balance = balance + $1, updated_at = NOW() WHERE id = $2 RETURNING balance, company_name',
         [amount, id]
@@ -3934,6 +3940,8 @@ router.post('/companies/:id/balance-adjust', authenticate, requireSuperAdmin, as
     }
   } catch (error) {
     if (client) { try { await client.query('ROLLBACK'); } catch { /* 이미 끝난 트랜잭션 */ } }
+    // ★ 2026-10-05 보류 대기 판정이 ALTER 로 추가된 칸(deposit_requests.held_reason)을 읽는다 — 칸이 없으면 500 이 아니라 마이그레이션 대기(Codex 1R)
+    if (isMissingSchemaError(error)) return res.status(503).json(migrationPendingBody('deposit_requests.held_reason ALTER'));
     console.error('잔액 조정 실패:', error);
     res.status(500).json({ error: '잔액 조정 실패' });
   } finally {

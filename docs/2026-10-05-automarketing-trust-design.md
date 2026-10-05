@@ -1,6 +1,6 @@
 # 자동 마케팅 신뢰 설계: 대상 계약 · 주간 승인 · 문안 분기 (2026-10-05)
 
-> 호출어 **"자동 마케팅 신뢰 설계 / 주간 승인 / 대상 번역"**. 상태 = **설계 확정(Harold 승인 2026-10-05 「추천대로 다 하자 · 목업 승인 · 설계서 쓰고 구현」) · 구현 완료 · Codex 적대 5R approve · 미커밋 · 미배포 · DDL 대기(§3 · 배포 뒤)** · 구현 기록 = §9.
+> 호출어 **"자동 마케팅 신뢰 설계 / 주간 승인 / 대상 번역"**. 상태 = **설계 확정(Harold 승인 2026-10-05 「추천대로 다 하자 · 목업 승인 · 설계서 쓰고 구현」) · 구현 완료 · Codex 적대 5R approve · push · .62 배포 · DDL 6칸 완료(1005 Harold · information_schema 확인)** · 실측 ①③ 확인(1005 Harold) · 다음 = 직원 테스트 · 구현 기록 = §9.
 > 접수 = Harold 실측(2026-10-05): 「매달 생일자에게 생일인 날 30% 쿠폰」 자동 마케팅이 전체 고객 6명 전원(매칭 6 / 전체 7)을 대상으로 잡았다. 「생년월일 필드가 없어 필터 없이 전체 고객」.
 > 근거 = 비토 구조체크 보고서(scratchpad `architecture-review-automarketing-1005.html`) · 비토 질문 Q1~Q19 · 승인 목업(scratchpad `automarketing-weekly-approval-mock.html` 상태 ①~⑤).
 > 선행 = [자동 마케팅 미리보기](2026-10-05-automarketing-preview-design.md)(같은 날 · 미배포 · 이 설계가 그 위에 얹힌다) · 상설 = [FEATURE-AUTOMARKETING.md](FEATURE-AUTOMARKETING.md) §2 불변 원칙.

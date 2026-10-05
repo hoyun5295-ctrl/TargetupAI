@@ -2683,6 +2683,12 @@ cd /home/administrator/targetup-app/packages/backend && npm install web-push @ty
 | prep_reminder_sent_for | date | 월간 캠페인 D-2 사전 준비 문자 멱등(발송일 기록) (2026-07-02 ALTER — 세션 종료 시점 미실행 확인, Harold 실행 예정) |
 | target_hint | text | 발송 대상 축(all/dormant/recent_buyers/vip/birthday/new_customers, NULL=자유 해석) — 마케팅 캘린더 완비 (2026-07-07 ALTER 실행완료 — Harold 배포 선언) |
 | mms_image_paths | text[] | 채널 mms 첨부 이미지 serverPath 최대 3, NULL=없음 — 자율발송이 validateMmsPayload 게이트 후 직접발송 spec으로 전달 (★2026-07-30 ALTER 실행완료 — Harold, 임은지 접수) |
+| audience_filters | jsonb | 고정 칸 조건 계약 `{ conditions: [{ term, field, label, operator, value }], confirmedAt }` — 축(segment_key)과 상호배타 · 회차는 이것만 컴파일(대상 AI 0) (★2026-10-05 ALTER 실행완료 · information_schema 6칸 확인 — Harold · [신뢰 설계 §3](../docs/2026-10-05-automarketing-trust-design.md)) |
+| copy_mode | varchar(10) | 문안 분기 'ai' · 'fixed', NULL = ai (★2026-10-05 ALTER 실행완료) |
+| fixed_copy | jsonb | 직접 쓴 문안 `{ subject, body, spam: { hash, status, checkedAt } }` — 같은 문안 스팸 검사 1회(지문) (★2026-10-05 ALTER 실행완료) |
+| approved_until | timestamptz | 승인 기간 끝(KST 그날 밤 12시) — 기간 안 회차 = 자율 자격 (★2026-10-05 ALTER 실행완료) |
+| approval_meta | jsonb | `{ approvedAt, approvedBy, windowStart, renewalNoticeFor }` — 기간 시작 · 갱신 안내 선점(NULL = 아직 안 보냄) (★2026-10-05 ALTER 실행완료) |
+| round_log | jsonb | 회차 기록 `[{ at, outcome, count, reason }]` 최근 60 — 0명인 날 · 멈춤도 남는다(승인 기간 요약) (★2026-10-05 ALTER 실행완료) |
 - INDEX: company_id, status WHERE status='active'
 - INDEX: status, next_run_at WHERE status='active' (worker 호출용)
 - 2026-06-26 information_schema 덤프 = 위 33컬럼 전부 존재 확정. 중복 4컬럼(notify_phones/backup_phones/notify_channel/lead_minutes)은 DROP 완료(데이터 0). 재질의 금지.
