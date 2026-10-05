@@ -8,7 +8,7 @@
  *   - mmsServerPathToUrl + getMmsImagePath + getMmsImageDisplayName 기존 컨트롤타워 재사용
  *
  * 사용처:
- *   - DirectSendPanel/AiCampaignSendModal/AiCustomSendFlow/TargetSendModal 발송창 썸네일
+ *   - DirectSendPanel/AiCampaignSendModal/TargetSendModal 발송창 썸네일
  *   - ResultsModal 폰 프레임 미리보기 + 메시지내용 상세 팝업
  *   - CalendarModal 우측 상세 패널
  *   - ScheduledCampaignModal 예약대기 팝업

@@ -137,7 +137,6 @@ describe('작성 화면 배선 (P2)', () => {
   const SCREENS = [
     'components/DirectSendPanel.tsx',
     'components/TargetSendModal.tsx',
-    'components/AiCustomSendFlow.tsx',
     'components/AiCampaignResultPopup.tsx',
     'components/AutoSendFormModal.tsx',
     'components/ScheduledCampaignModal.tsx',

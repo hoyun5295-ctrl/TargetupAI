@@ -92,6 +92,41 @@ interface TrainingLogParams {
 
   // 가드레일
   guardrailActions?: GuardrailActions;
+
+  /**
+   * ★ 2026-10-05 한줄로 시그니처 §6 — 허브 3안 선택 기록의 **요청 원값**(body 그대로).
+   *   검증 · 계산은 logTrainingData 안(try 안 · 실패 격리)에서만 한다 — 발송 라우트는 원값만 넘긴다(발송 응답 경로 무접촉).
+   *   모양이 맞으면 aiMessages · selectedIndex · finalSource · modelParams.hubVariants 를 덮고, 틀리면 무시한다(옛 기록 그대로).
+   */
+  aiVariantsRaw?: unknown;
+}
+
+export interface HubVariantsRecord {
+  messages: string[];
+  names: string[];
+  selectedIndex: number;
+  recommendedIndex: number | null;
+  edited: boolean;
+  aiRefined: boolean;
+  cVariant: 'mz' | 'punchy' | null;
+}
+
+/** (순수) 허브 3안 선택 기록 검증 — 배열 1~3개 · 각 2000자 · 선택 인덱스 범위 · 불리언. 하나라도 틀리면 null. */
+export function parseHubVariantsRecord(raw: unknown): HubVariantsRecord | null {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
+  const r = raw as Record<string, unknown>;
+  const messages = r.messages;
+  if (!Array.isArray(messages) || messages.length < 1 || messages.length > 3) return null;
+  if (!messages.every((m) => typeof m === 'string' && m.length <= 2000)) return null;
+  const sel = r.selectedIndex;
+  if (typeof sel !== 'number' || !Number.isInteger(sel) || sel < 0 || sel >= messages.length) return null;
+  if (typeof r.edited !== 'boolean') return null;
+  const rec = r.recommendedIndex;
+  const recommendedIndex = typeof rec === 'number' && Number.isInteger(rec) && rec >= 0 && rec < messages.length ? rec : null;
+  const namesRaw = Array.isArray(r.names) ? r.names : [];
+  const names = namesRaw.slice(0, messages.length).map((n) => (typeof n === 'string' ? n.slice(0, 20) : ''));
+  const cVariant = r.cVariant === 'mz' || r.cVariant === 'punchy' ? r.cVariant : null;
+  return { messages: messages as string[], names, selectedIndex: sel, recommendedIndex, edited: r.edited, aiRefined: r.aiRefined === true, cVariant };
 }
 
 interface TrainingMetricsParams {
@@ -239,6 +274,21 @@ function buildCandidates(aiMessages: string[], companyName?: string): Candidate[
 // ============================================================
 export async function logTrainingData(params: TrainingLogParams): Promise<void> {
   try {
+    // ★ 2026-10-05 허브 3안 선택 기록(원값 검증 · 계산 = 이 try 안). 고른 안을 그대로 보냈는지는 화면이 아는 편집 여부로 정한다
+    //   (본문 비교는 광고 표기 · 링크 치환 · 자리 채움 때문에 늘 '편집'으로 잡힌다).
+    const hub = parseHubVariantsRecord(params.aiVariantsRaw);
+    if (hub) {
+      params = {
+        ...params,
+        aiMessages: hub.messages,
+        selectedIndex: hub.selectedIndex,
+        finalSource: hub.edited ? 'edited' : 'selected_as_is',
+        modelParams: {
+          ...(params.modelParams || {}),
+          hubVariants: { names: hub.names, recommendedIndex: hub.recommendedIndex, aiRefined: hub.aiRefined, cVariant: hub.cVariant },
+        },
+      };
+    }
     // source_ref: campaign_run_id를 HMAC 해시 (중복 적재 방지)
     const sourceRef = hmacHash(params.campaignRunId);
 

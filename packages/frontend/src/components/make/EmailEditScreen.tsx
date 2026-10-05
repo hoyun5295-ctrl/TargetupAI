@@ -27,6 +27,11 @@ import { createSection, normalizeOrder, resequence, moveWithin, type Section, ty
 import { blockLabel, blockPanelSub, blockSummary, emailPaletteItems, isAutoBlock, type MakePaletteItem } from '../../utils/make-flow';
 import { peekBuildResult, clearBuildResult, type BuildResultHandoff } from '../../utils/ai-build';
 import { AI_GENERATE_COSTS, CONFIRM_CREDIT_COSTS } from '../../constants/credit';
+// ★ 2026-10-05 한줄로 시그니처(설계서 docs/2026-10-05-hanjul-signature-design.md §5) — 완성도 줄 · 보강 시트(혜택 · 기간 자리 0크레딧 채우기)
+import ZoneCompletion from '../zone/ZoneCompletion';
+import { LineFacts, LineFactsSheet, typedBenefit, type LineFactsValues, type LineFactsField } from '../zone/LineFacts';
+import { countSlots, countEmailGatePlaceholders, fillSlots, fillSlotsDeep, stringsDeep } from '../../utils/one-line';
+import type { FixItem } from '../../utils/make-flow';
 
 // 렌더러가 실제로 읽는 타입에만 조작을 보인다(백엔드 EMAIL_* 미러 · EmailVisualEditor 와 같은 표 · 계약 = email-editor-parity.test)
 const EMAIL_ALIGN_AWARE = new Set<SectionType>(['hero', 'header', 'text_card']);
@@ -58,6 +63,10 @@ export interface EmailEditScreenProps {
   hasPlaceholder?: boolean;
   /** 같은 재료로 만든 DM(있으면 머리 전환) */
   pairDmId?: string | null;
+  /** ★ 2026-10-05 한 줄로 만든 이메일(스위치 켠 회사) — 완성도 줄 · 보강 시트를 그린다 */
+  lineAssist?: { text: string; gapBenefit: boolean } | null;
+  /** 결과에 혜택 자리가 없을 때 혜택을 넣어 새로 만든다(부모가 새 이메일로 연다) */
+  onRegenerateWithBenefit?: (benefit: string) => void;
   authHeaders: () => Record<string, string>;
   onClose: () => void;
   onSaved: () => void;
@@ -66,7 +75,7 @@ export interface EmailEditScreenProps {
 
 export default function EmailEditScreen({
   initialSections, initialName, initialSubject, initialIsAd, initialDesign, aiGenerated, campaignId: initialId, completed,
-  fromName, hasPlaceholder, pairDmId, authHeaders, onClose, onSaved, onToast,
+  fromName, hasPlaceholder, pairDmId, authHeaders, onClose, onSaved, onToast, lineAssist, onRegenerateWithBenefit,
 }: EmailEditScreenProps) {
   const navigate = useNavigate();
   const [campaignId, setCampaignId] = useState<string | undefined>(initialId);
@@ -86,6 +95,11 @@ export default function EmailEditScreen({
   const [samples, setSamples] = useState<Array<{ label: string; customer: Record<string, any> }>>([]);
   const [emailVars, setEmailVars] = useState<EmailVar[]>(DEFAULT_EMAIL_VARS);
   const [buildBar, setBuildBar] = useState<BuildResultHandoff | null>(() => (initialId ? peekBuildResult(initialId) : null));
+  // ★ 2026-10-05 한줄로 시그니처 — 완성도 줄(닫으면 사라짐) · 보강 시트
+  const [lineBarOn, setLineBarOn] = useState(!!lineAssist);
+  const [lineSheet, setLineSheet] = useState(false);
+  const [lineValues, setLineValues] = useState<LineFactsValues>({});
+  const lineAutoOpened = useRef(false);
 
   // ── 되돌리기(스냅샷 · 0.5초 묶음) ──
   const past = useRef<Snap[]>([]);
@@ -112,6 +126,61 @@ export default function EmailEditScreen({
   const sampleCustomer = sample !== 'none' ? samples.find((c) => c.label === sample)?.customer : null;
   const previewKey = JSON.stringify({ sections, design, isAd, campaignId, sample });
   const preview = useRenderedHtml(previewKey, (signal) => fetchEmailPreview({ sections, design, is_ad: isAd, campaign_id: campaignId || null, sampleCustomer }, signal), 450);
+
+  // ── ★ 2026-10-05 한줄로 시그니처 · 완성도 줄 ──
+  //   보내기 전에 N곳 = 발송 관문(email-ai PLACEHOLDER_PATTERN)과 같은 기준으로 센 자리 + 받은편지함 제목.
+  //   혜택 · 기간 자리는 시트에서 값만 받아 그 자리에 넣는다(0크레딧 · 되돌리기 기록). 자리가 없는데 혜택이 빠졌으면 새로 만들기(생성비 1회).
+  const lineTexts = useMemo(() => [...stringsDeep(sections), subject], [sections, subject]);
+  const lineBenefitSlots = countSlots(lineTexts, 'benefit');
+  const linePeriodSlots = countSlots(lineTexts, 'period');
+  const lineOtherSlots = Math.max(0, countEmailGatePlaceholders(lineTexts) - lineBenefitSlots - linePeriodSlots);
+  const lineCanRegen = !!lineAssist?.gapBenefit && lineBenefitSlots === 0 && !!onRegenerateWithBenefit;
+  const lineFields: LineFactsField[] = [
+    ...(lineBenefitSlots > 0 || lineCanRegen ? (['benefit'] as const) : []),
+    ...(linePeriodSlots > 0 ? (['period'] as const) : []),
+  ];
+  const lineItems: FixItem[] = useMemo(() => {
+    if (!lineAssist) return [];
+    const out: FixItem[] = [];
+    if (lineBenefitSlots > 0) out.push({ kind: 'must', title: `혜택 자리 ${lineBenefitSlots}곳이 비었어요`, sub: '적어 주시면 그 자리에 그대로 넣어요 · 무료', action: '채우기' });
+    if (linePeriodSlots > 0) out.push({ kind: 'must', title: `기간 자리 ${linePeriodSlots}곳이 비었어요`, sub: '적어 주시면 그 자리에 그대로 넣어요 · 무료', action: '채우기' });
+    if (lineOtherSlots > 0) out.push({ kind: 'must', title: `직접 채울 자리 ${lineOtherSlots}곳이 남았어요`, sub: '블록에서 그 자리를 고쳐 주세요' });
+    if (!subject.trim()) out.push({ kind: 'must', title: '받은편지함 제목이 비었어요', sub: '위 제목 칸에 넣어 주세요' });
+    if (lineCanRegen) out.push({ kind: 'suggest', title: '혜택을 적어 주시면 첫 줄이 혜택으로 시작해요', sub: `새 이메일로 만들어요 · ${AI_GENERATE_COSTS['email-ai-generate']}크레딧 · 지금 이메일은 그대로 남아요`, action: '넣기' });
+    if (subject.trim()) out.push({ kind: 'ok', title: '받은편지함 제목 있음' });
+    if (lineBenefitSlots + linePeriodSlots + lineOtherSlots === 0) out.push({ kind: 'ok', title: '채울 자리 없음' });
+    if (isAd) out.push({ kind: 'ok', title: '광고 표기 · 수신거부 자동' });
+    return out;
+  }, [lineAssist, lineBenefitSlots, linePeriodSlots, lineOtherSlots, lineCanRegen, subject, isAd]);
+  // 생성 직후 보내기 전에 채울 자리가 있으면 시트를 한 번만 연다(그 밖에는 줄의 [채우기]로 연다)
+  useEffect(() => {
+    if (!lineAssist || lineAutoOpened.current) return;
+    lineAutoOpened.current = true;
+    if (lineBenefitSlots + linePeriodSlots > 0) setLineSheet(true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  const lineTypedPeriod = typeof lineValues.period === 'string' ? lineValues.period.trim() : '';
+  const lineTypedBenefit = typedBenefit(lineValues);
+  const lineFillable = (!!lineTypedBenefit && lineBenefitSlots > 0) || (!!lineTypedPeriod && linePeriodSlots > 0);
+  const lineRegenReady = !lineFillable && !!lineTypedBenefit && lineCanRegen;
+  const applyLineFill = () => {
+    record();
+    let next = sections;
+    let nextSubject = subject;
+    if (lineTypedBenefit && lineBenefitSlots > 0) { next = fillSlotsDeep(next, 'benefit', lineTypedBenefit); nextSubject = fillSlots(nextSubject, 'benefit', lineTypedBenefit); }
+    if (lineTypedPeriod && linePeriodSlots > 0) { next = fillSlotsDeep(next, 'period', lineTypedPeriod); nextSubject = fillSlots(nextSubject, 'period', lineTypedPeriod); }
+    setSections(next);
+    setSubject(nextSubject);
+    setLineSheet(false);
+    setLineValues({});
+    onToast('적어 주신 그대로 넣었어요', 'success');
+  };
+  const regenLineWithBenefit = () => {
+    if (!lineTypedBenefit || !onRegenerateWithBenefit) return;
+    const b = lineTypedBenefit;
+    setLineSheet(false);
+    void (dirty && canSave ? persist() : Promise.resolve(null)).then(() => onRegenerateWithBenefit(b));
+  };
 
   // ── 자동 저장 ──
   const savedSnap = useRef<string>(JSON.stringify({ name, subject, isAd, sections, design }));
@@ -499,6 +568,13 @@ export default function EmailEditScreen({
         onSend={() => { void beforeSend().then((ok) => { if (ok) setSendOpen(true); }); }}
         banner={buildBar ? (
           <BuildResultBar handoff={buildBar} collapsed={dirty} onDismiss={() => { clearBuildResult(); setBuildBar(null); }} onRegenerate={() => { clearBuildResult(); setBuildBar(null); onClose(); navigate('/quick-campaign?channel=email&regen=1'); }} />
+        ) : lineAssist && lineBarOn ? (
+          <ZoneCompletion
+            items={lineItems}
+            onItem={(it) => { if (it.action === '채우기' || it.action === '넣기') setLineSheet(true); }}
+            action={lineFields.length > 0 ? { label: '채우기', onClick: () => setLineSheet(true) } : null}
+            onDismiss={() => setLineBarOn(false)}
+          />
         ) : undefined}
         left={left}
         center={center}
@@ -517,6 +593,20 @@ export default function EmailEditScreen({
         onSmtpChanged={onSaved}
       />
       <ConfirmModal state={confirm} onClose={() => setConfirm(null)} />
+      {lineAssist && (
+        <LineFactsSheet
+          open={lineSheet && lineFields.length > 0}
+          onClose={() => setLineSheet(false)}
+          title="한 가지만 더 알려 주시면 이렇게 좋아져요"
+          reason="적어 주신 그대로만 씁니다 · 지금 이메일은 그대로 남아요"
+          line={lineAssist.text}
+          primary={lineRegenReady
+            ? { label: `넣고 새로 만들기 · ${AI_GENERATE_COSTS['email-ai-generate']}크레딧`, tone: 'amber', onClick: regenLineWithBenefit, note: '새 이메일로 만들어요' }
+            : { label: '채우기 · 무료', tone: 'indigo', disabled: !lineFillable, onClick: applyLineFill }}
+        >
+          <LineFacts fields={lineFields} values={lineValues} onChange={setLineValues} allowNone={false} />
+        </LineFactsSheet>
+      )}
     </div>
   );
 }

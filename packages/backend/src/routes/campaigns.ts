@@ -3188,6 +3188,8 @@ router.post('/direct-send', async (req: Request, res: Response) => {
       isAd: finalIsAd,
       finalMessage: sanitizedMessage,
       finalSource: 'manual',
+      // ★ 2026-10-05 한줄로 시그니처 §6 — 허브 3안 선택 기록 원값(검증 · 계산은 logTrainingData 안 · 실패 격리 · 없으면 지금 그대로)
+      aiVariantsRaw: req.body?.aiVariants,
       sendAt: scheduled && scheduledAt ? new Date(scheduledAt) : new Date(),
     });
 

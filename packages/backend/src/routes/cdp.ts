@@ -111,6 +111,7 @@ import {
 } from '../utils/inapp-quick-action';
 import { query } from '../config/database';
 import { checkCredit, deductCreditSafe, deductCreditOutcome, isChargedByKey, chargedKeysAmong, InsufficientCreditError } from '../utils/ai-credit';
+import { oneLineFactsEnabled } from '../utils/one-line-facts';   // ★ 2026-10-05 한줄로 시그니처
 import { sendSystemAlert } from '../utils/system-alert';
 // ★ 2026-09-26 한줄로 V2 R1-03(Codex 7차 2R) — 같은 인앱 메시지의 게시 PUT 직렬화(공용 잠금 CT)
 import { withKeyedLock, uuidLockKey } from '../utils/keyed-lock';
@@ -1582,15 +1583,21 @@ router.post('/inapp/ai-generate', async (req: Request, res: Response) => {
       return res.status(400).json({ success: false, error: elig.blockReasonWeb, code: 'INAPP_DISPLAY_UNAVAILABLE' });
     }
     const { objective, templateHint, event_text } = req.body;
+    // ★ 2026-10-05 한줄로 시그니처(설계서 §5) — 한 줄 입구(one_line:true) + 스위치 켠 회사 + 원문 없음일 때만 한 줄을 사용자 원문으로 쓴다.
+    //   옛: 원문이 없으면 혜택 블록을 무조건 자리표시로 바꿔(inapp-ai-generator.ts:369-371) 사용자가 쓴 혜택도 사라지고 다시 물었다.
+    const lineOn = req.body?.one_line === true && oneLineFactsEnabled(auth.companyId);
+    const lineAsEvent = lineOn && typeof objective === 'string' && objective.trim() && !(typeof event_text === 'string' && event_text.trim())
+      ? objective.trim()
+      : undefined;
     const pkg = await generateInAppMessagePackage({
       companyId: auth.companyId,
       createdBy: auth.userId,
       objective,
       templateHint,
       // ★ 2026-07-07(4) 행사 캠페인 — 행사 원문 기반 생성 (기재 혜택만 원문 그대로 통과)
-      eventText: typeof event_text === 'string' ? event_text : undefined,
+      eventText: lineAsEvent ?? (typeof event_text === 'string' ? event_text : undefined),
     });
-    return res.json({ success: true, package: pkg });
+    return res.json({ success: true, package: pkg, ...(lineOn ? { one_line: { enabled: true } } : {}) });
   } catch (err: any) {
     // ★ 2026-09-27 한줄로 V2 R246 — 크레딧 부족은 402(충전 안내 · 사전 확인과 성공 뒤 차감 확정 둘 다 여기로 온다)
     if (err instanceof InsufficientCreditError) return res.status(402).json({ success: false, error: err.message, code: 'INSUFFICIENT_CREDIT' });

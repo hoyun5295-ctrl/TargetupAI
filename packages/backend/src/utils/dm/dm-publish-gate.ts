@@ -52,10 +52,11 @@ function parseMaybe(v: unknown): unknown {
 }
 
 /**
- * 첫 발행 잠금 — 링크 결함 → 채울 자리 → 무시 불가 검수 치명 순. 없으면 null.
- * 링크 판정은 옛 `/publish` 인라인과 같은 입력(sections·pages·header·footer)과 같은 문구다.
+ * 첫 발행 잠금의 앞 두 칸(링크 결함 → 채울 자리) · 없으면 null. 검수(validateDm) 없이 바로 판정된다.
+ * ★ 2026-10-05 한줄로 시그니처 — 검수 결과(`POST /:id/validate`)에 같은 판정을 실어 화면의 "보내기 전에 N곳"이
+ *   발행 관문이 막는 수와 같아지게 하려고 떼어냈다(동작 무변경 · dmPublishBlocker 가 같은 순서로 부른다).
  */
-export async function dmPublishBlocker(dm: DmBodyRow): Promise<DmPublishBlock | null> {
+export function dmPublishStaticBlock(dm: DmBodyRow): DmPublishBlock | null {
   const body = {
     sections: parseMaybe(dm.sections),
     pages: parseMaybe(dm.pages),
@@ -73,6 +74,22 @@ export async function dmPublishBlocker(dm: DmBodyRow): Promise<DmPublishBlock | 
       error: '직접 입력이 필요한 자리가 남아 있어요. 그 자리를 채운 뒤 보내 주세요.',
     };
   }
+  return null;
+}
+
+/**
+ * 첫 발행 잠금 — 링크 결함 → 채울 자리 → 무시 불가 검수 치명 순. 없으면 null.
+ * 링크 판정은 옛 `/publish` 인라인과 같은 입력(sections·pages·header·footer)과 같은 문구다.
+ */
+export async function dmPublishBlocker(dm: DmBodyRow): Promise<DmPublishBlock | null> {
+  const staticBlock = dmPublishStaticBlock(dm);
+  if (staticBlock) return staticBlock;
+  const body = {
+    sections: parseMaybe(dm.sections),
+    pages: parseMaybe(dm.pages),
+    header_data: parseMaybe(dm.header_data),
+    footer_data: parseMaybe(dm.footer_data),
+  };
 
   // ★ 2026-09-27 Codex 1R — 옛 슬라이드 DM(장마다 사진 · 장에 sections 가 없다)은 검수 기준(섹션)이 없다.
   //   뷰어는 그 구조를 그대로 그리므로 옛 동작처럼 링크·채울 자리만 보고 넘긴다(복제본 첫 발행이 "섹션 0"으로 막히던 경로).

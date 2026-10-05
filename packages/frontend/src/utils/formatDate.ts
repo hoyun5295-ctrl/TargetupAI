@@ -155,7 +155,7 @@ export function formatIfIsoDate(val: any): string | null {
  * - 숫자: "35000.00" → "35,000"
  * - 기타: 그대로 반환
  *
- * 사용처: Dashboard.tsx, TargetSendModal.tsx, AiCustomSendFlow.tsx,
+ * 사용처: Dashboard.tsx, TargetSendModal.tsx,
  *          AiPreviewModal.tsx, DirectPreviewModal.tsx, AiCampaignResultPopup.tsx
  */
 /**
@@ -363,7 +363,7 @@ export function compactTimestamp(date: Date = new Date()): string {
 /**
  * ★ D95: SMS 바이트 계산 — EUC-KR 기준 (한글 2byte, 영문/숫자/ASCII 1byte)
  * 프론트 전 경로의 유일한 바이트 계산 함수.
- * 사용처: Dashboard.tsx, AiCustomSendFlow.tsx, TargetSendModal.tsx 등
+ * 사용처: Dashboard.tsx, TargetSendModal.tsx 등
  */
 export function calculateSmsBytes(text: string): number {
   let bytes = 0;
@@ -554,7 +554,7 @@ export function formatByType(val: any, dataType?: string, fieldKey?: string): st
  *
  * ⚠️ 백엔드 standard-field-map.ts FIELD_DISPLAY_MAP과 반드시 동기화 유지.
  */
-// ★ D114 P5b: field key → 한글 표시명 매핑 (RecommendTemplateModal 등에서 사용)
+// ★ D114 P5b: field key → 한글 표시명 매핑
 export const FIELD_KEY_DISPLAY_MAP: Record<string, string> = {
   name: '고객명', phone: '전화번호', gender: '성별', age: '나이',
   birth_date: '생일', email: '이메일', address: '주소', region: '지역',
@@ -590,7 +590,7 @@ export function replaceMessageVars(
 ): string {
   // ★ D141 B3 심화: customerData null/undefined 가드 — 컨트롤타워 자체 안전망
   //   D109 원칙: "데이터 출처 시점에서 안전 처리하여 모든 호출부 자동 보호"
-  //   호출부 3곳(AiCustomSendFlow 2곳 + AutoSendFormModal)에서 sampleData/sc/spamSampleCustomer가
+  //   호출부(AutoSendFormModal 등)에서 sampleData/sc/spamSampleCustomer가
   //   undefined인 시점이 있으면 customerData[fieldKey] 또는 Object.entries 접근으로 흰화면 사고.
   if (!text) return text;
   const data = customerData || {};

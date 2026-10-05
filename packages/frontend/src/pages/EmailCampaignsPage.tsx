@@ -41,6 +41,7 @@ import RecipientsModal from '../components/email/EmailRecipientsModal';
 // ★ 2026-09-27 만들기 개편 — 첫 화면(만들기 카드 · 다른 방법 접힘 · 카드칩 · 상세 창) · 수정 화면(EmailEditScreen · DM 과 같은 칸) · 보내기 창
 import { Layers } from 'lucide-react';
 import EmailEditScreen from '../components/make/EmailEditScreen';
+import { newAttemptToken, appendToOneLine } from '../utils/one-line';   // ★ 2026-10-05 한줄로 시그니처
 import EmailDetailModal from '../components/make/EmailDetailModal';
 import MakeSendModal from '../components/make/MakeSendModal';
 import SmtpConnectModal from '../components/email/SmtpConnectModal';
@@ -148,7 +149,7 @@ export default function EmailCampaignsPage() {
   // AI 캠페인 발송 확정 30크레딧 확인
   const [creditConfirm, setCreditConfirm] = useState<{ campaign: EmailCampaign; payload: any; desc: string } | null>(null);
   // 비주얼 빌더 에디터 (sections 기반)
-  const [visualEditor, setVisualEditor] = useState<{ sections: Section[]; name?: string; subject?: string; isAd?: boolean; aiGenerated?: boolean; campaignId?: string; completed?: boolean; design?: EmailDesign | null; fromName?: string; hasPlaceholder?: boolean } | null>(null);
+  const [visualEditor, setVisualEditor] = useState<{ sections: Section[]; name?: string; subject?: string; isAd?: boolean; aiGenerated?: boolean; campaignId?: string; completed?: boolean; design?: EmailDesign | null; fromName?: string; hasPlaceholder?: boolean; line?: { text: string; gapBenefit: boolean } | null } | null>(null);
   // ★ 2026-07-02 캠페인 목록 페이징 — 2열 × 2줄 = 페이지당 4카드 (Harold 확정)
   const CAMPAIGN_PAGE_SIZE = 4;
   const [campaignPage, setCampaignPage] = useState(1);
@@ -484,7 +485,9 @@ export default function EmailCampaignsPage() {
   // ──────────────── AI 원샷 생성 (1클릭 = AI 자동 흐름 + 편집 모드 진입) ────────────────
   // ★ 2026-07-02(3) 편집기 통일 (Harold 확정) — 레거시 HTML 폼(/ai/generate) 대신
   //   블록 생성(/ai/generate-sections) → 비주얼 편집기로 진입. 시작 방식 = 템플릿/비주얼/프롬프트 전부 비주얼 편집기 1개.
-  const handleAiGenerate = async (opts: { prompt?: string }) => {
+  // ★ 2026-10-05 한줄로 시그니처 — 한 줄 입구 표시 + 시도 토큰(서버가 스위치를 본다 · 스위치 밖이면 응답 그대로).
+  //   line = 처음 적은 한 줄(혜택을 넣어 새로 만들 때도 다시 입력하지 않는다).
+  const handleAiGenerate = async (opts: { prompt?: string; line?: string }) => {
     if (customerGate.isEmpty) { setShowDataGate(true); return; }
     if (genStep !== null) return; // 중복 방지
     if (!opts.prompt?.trim()) {
@@ -500,7 +503,7 @@ export default function EmailCampaignsPage() {
       const res = await fetch('/api/email/ai/generate-sections', {
         method: 'POST',
         headers: authHeaders(),
-        body: JSON.stringify({ prompt: opts.prompt.trim(), is_ad: aiAsAd }),
+        body: JSON.stringify({ prompt: opts.prompt.trim(), is_ad: aiAsAd, one_line: true, attempt_token: newAttemptToken() }),
       });
       const data = await res.json();
       if (data?.code === 'INSUFFICIENT_CREDIT') { showToast('크레딧이 부족합니다. 충전 후 이용해주세요.', 'warning'); return; }
@@ -516,6 +519,7 @@ export default function EmailCampaignsPage() {
           aiGenerated: true,
           // ★ 2026-07-13 — AI 프리헤더 회생(design.preheader로 수용 — 옛 흐름은 버렸음)
           design: g.preheader ? { preheader: String(g.preheader).slice(0, 90) } : null,
+          line: g.one_line?.enabled ? { text: (opts.line ?? opts.prompt).trim(), gapBenefit: g.one_line.gaps?.benefit === true } : null,
         });
         showToast('AI 생성 완료. 비주얼 편집기에서 확인하고 다듬어주세요. (3 크레딧)', 'success');
       } else {
@@ -744,7 +748,7 @@ export default function EmailCampaignsPage() {
               </label>
               <ImageToCopyButton
                 label="이미지"
-                onExtracted={(t) => setAiPrompt((prev) => (prev.trim() ? `${prev.trim()}\n${t}` : t))}
+                onExtracted={(t) => setAiPrompt((prev) => appendToOneLine(prev, t))}
                 disabled={genStep !== null}
                 className={MK_LINE_EXTRA_BTN}
               />
@@ -1100,6 +1104,13 @@ export default function EmailCampaignsPage() {
           hasPlaceholder={visualEditor.hasPlaceholder}
           pairDmId={pairDmId}
           authHeaders={authHeaders}
+          lineAssist={visualEditor.line || null}
+          onRegenerateWithBenefit={(benefit) => {
+            // ★ 2026-10-05 결과에 혜택 자리가 없을 때만 오는 길 — 새 이메일로 만든다(지금 이메일은 저장된 채 그대로 · 생성비 1회)
+            const line = visualEditor.line?.text || '';
+            setVisualEditor(null);
+            void handleAiGenerate({ prompt: `${line}\n[혜택] ${benefit}`, line });
+          }}
           onClose={() => setVisualEditor(null)}
           onSaved={() => { loadAll(); }}
           onToast={showToast}

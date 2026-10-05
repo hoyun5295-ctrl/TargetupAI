@@ -42,9 +42,10 @@ import {
   oneShotGenerate,
   type CampaignSpec, type ToneKey,
 } from '../utils/dm/dm-ai';
-import { checkCredit, deductCreditSafe, InsufficientCreditError, isCreditEnabledStrict } from '../utils/ai-credit';
+import { checkCredit, deductCreditSafe, InsufficientCreditError, isCreditEnabledStrict, isChargedByKey } from '../utils/ai-credit';
+import { oneLineFactsEnabled, oneLineGaps, sanitizeLineFacts, buildLineEventText, isValidAttemptToken, buildOneLineIdempotencyKey, oneLineInflightKey } from '../utils/one-line-facts';   // ★ 2026-10-05 한줄로 시그니처
 // ★ 2026-09-27 만들기 개편 S6 — 첫 발행 잠금·발행비 판정은 CT 가 소유(두 발행 문이 같은 판정)
-import { dmPublishBlocker, resolveSendPublishFeeGate, quoteDmPublishFee } from '../utils/dm/dm-publish-gate';
+import { dmPublishBlocker, dmPublishStaticBlock, resolveSendPublishFeeGate, quoteDmPublishFee } from '../utils/dm/dm-publish-gate';
 import { publishDmCore } from '../utils/dm/dm-publish-core';
 import { getCreditCost } from '../utils/ai-credit-calc';
 import { runInCreditBundle } from '../utils/ai-credit-context';
@@ -952,12 +953,12 @@ dmRouter.post('/ai/one-shot-generate', async (req: any, res: any) => {
   try {
     const companyId = req.user?.companyId;
     if (!companyId) return res.status(403).json({ error: '회사 권한이 필요합니다.' });
-    const prompt: string = (req.body?.prompt || '').toString().trim();
+    let prompt: string = (req.body?.prompt || '').toString().trim();
     const scenario: string | undefined = req.body?.scenario;
     const brandName: string | undefined = req.body?.brand_name;
     // ★ 2026-07-07(4) 행사 캠페인 — 행사 원문 단독 입력도 생성 가능. 브리프 블록을 프롬프트에 합성
     //   (parsePrompt가 원문 기재 혜택을 spec.benefit으로 추출 → 기재 혜택만 카피에 반영되는 기존 경로 그대로).
-    const eventText = req.body?.event_text ? normalizeEventText(req.body.event_text) : '';
+    let eventText = req.body?.event_text ? normalizeEventText(req.body.event_text) : '';
 
     // ★ 2026-09-14 T4 AI 자동제작 v1(materials.version === 1 · 설계서 §6-5 · §6-7) — 신규 ENV(AI_AUTO_BUILD_COMPANY_IDS · 비면 403) AND · 회사 단위 in-flight 409 ·
     //   판정(정규화·게이트·몰 재조회·견적 결박) → checkCredit 순서는 오케스트레이터가 소유 · 오류는 AiAutoBuildError.status 그대로 → 402 잔액 → 503 마이그레이션 → 500 · 몰 자동 첨부 0 · v0 경로는 아래 그대로.
@@ -999,6 +1000,23 @@ dmRouter.post('/ai/one-shot-generate', async (req: any, res: any) => {
       }
     }
 
+    // ★ 2026-10-05 한줄로 시그니처(설계서 §5) — 한 줄 입구(one_line:true)만 해당한다. 빠른 시작 · 행사 원문 · 편집기 요청은 지금 그대로.
+    //   스위치 켠 회사면 한 줄을 **사용자 원문(event_text)** 으로 옮긴다 — 출구 가드 근거가 parsePrompt 요약(자기 참조 · dm-ai.ts:480)이 아니라
+    //   사용자 글자가 된다. 칸에 적은 답(facts)은 [혜택] 줄로 붙인다(원스텝 원문 직렬화와 같은 라벨). 스위치 밖인데 답이 오면 400(조용히 버리지 않는다).
+    const oneLineReq = req.body?.one_line === true;
+    const lineOn = oneLineReq && oneLineFactsEnabled(companyId);
+    const lineFacts = oneLineReq ? sanitizeLineFacts(req.body?.facts) : undefined;
+    if (lineFacts === 'invalid') {
+      return res.status(400).json({ success: false, error: '혜택은 300자 이내로 적어 주세요.', code: 'LINE_FACTS_INVALID' });
+    }
+    if (lineFacts !== undefined && !lineOn) {
+      return res.status(400).json({ success: false, error: '이 기능은 아직 열리지 않았습니다. 화면을 새로 고친 뒤 다시 시도해 주세요.', code: 'FEATURE_DISABLED' });
+    }
+    const typedLine = prompt;
+    if (lineOn && prompt && !eventText && !scenario) {
+      eventText = normalizeEventText(buildLineEventText(prompt, lineFacts));
+      prompt = '';
+    }
     if (!prompt && !scenario && !eventText) {
       return res.status(400).json({ error: 'prompt 또는 scenario 영역 필요' });
     }
@@ -1010,14 +1028,36 @@ dmRouter.post('/ai/one-shot-generate', async (req: any, res: any) => {
       ? `${buildEventPromptBlock(eventText)}${(() => { const h = buildEventTemplateHintBlock(eventText); return h ? `\n\n${h}` : ''; })()}${prompt ? `\n\n[추가 요청]\n${prompt}` : ''}`
       : prompt;
 
-    // ★ 종량제: DM 생성(돌려보기) = 3크레딧 묶음 (내부 parse/copy/tone은 집계만, 차감 0). 발행 시 30 별도.
-    const genCost = getCreditCost('dm-ai-generate');  // 3
-    await checkCredit(companyId, genCost);
-    const result = await runInCreditBundle(async () => {
-      const r = await oneShotGenerate({ prompt: effectivePrompt, scenario, brandName, companyId, eventText });
-      await deductCreditSafe({ companyId, cost: genCost, source: 'dm-ai-generate', createdBy: req.user?.userId });
-      return r;
-    });
+    // ★ 2026-10-05 한줄로 시그니처 §3-7 — 시도 토큰이 온 한 줄 요청(스위치 켠 회사)만 멱등. 토큰 없는 요청 = 지금 동작 그대로.
+    //   키 = 시도 토큰 + 생성 입력 지문(내용을 바꿔 보내면 새 차감) · 같은 토큰 동시 요청 = 409 · 이미 차감된 키 = 생성하지 않고 409 · 원장 조회 실패 = 503.
+    const attemptToken = lineOn && isValidAttemptToken(req.body?.attempt_token) ? String(req.body.attempt_token) : null;
+    const idemKey = attemptToken ? buildOneLineIdempotencyKey(companyId, 'dm', attemptToken, { prompt, eventText, scenario: scenario || null }) : undefined;
+    const lineLock = attemptToken ? oneLineInflightKey(companyId, 'dm', attemptToken) : '';
+    if (lineLock && !tryAcquireInflight(lineLock)) {
+      return res.status(409).json({ success: false, error: '지금 만드는 중이에요. 완성되면 이어서 진행해 주세요.', code: 'IN_FLIGHT' });
+    }
+    let result: Awaited<ReturnType<typeof oneShotGenerate>>;
+    try {
+      if (idemKey) {
+        let charged: boolean;
+        try { charged = await isChargedByKey(companyId, idemKey); } catch {
+          return res.status(503).json({ success: false, error: '잠시 후 다시 시도해 주세요.', code: 'CREDIT_STATE_UNKNOWN' });
+        }
+        if (charged) {
+          return res.status(409).json({ success: false, error: '이 요청은 이미 처리됐어요. 다시 만들려면 [만들기]를 한 번 더 눌러 주세요.', code: 'ALREADY_DONE' });
+        }
+      }
+      // ★ 종량제: DM 생성(돌려보기) = 3크레딧 묶음 (내부 parse/copy/tone은 집계만, 차감 0). 발행 시 30 별도.
+      const genCost = getCreditCost('dm-ai-generate');  // 3
+      await checkCredit(companyId, genCost);
+      result = await runInCreditBundle(async () => {
+        const r = await oneShotGenerate({ prompt: effectivePrompt, scenario, brandName, companyId, eventText });
+        await deductCreditSafe({ companyId, cost: genCost, source: 'dm-ai-generate', createdBy: req.user?.userId, ...(idemKey ? { idempotencyKey: idemKey } : {}) });
+        return r;
+      });
+    } finally {
+      if (lineLock) releaseInflight(lineLock);
+    }
     // ★ 2026-07-21 연락처 시드는 oneShotGenerate 내부(페이지 분할 전)에서 실제 회사 brand_kit로 수행 — sections·pages 모두 반영(편집=발송). 여기 재시드 불필요.
     // ★ 2026-07-08 연동 몰 상품 자동 첨부 — 상품 슬라이드 항목명 이름매칭 → 이미지·링크·정가·할인가 채움(빈 값만, 몰 실패 skip). 발송 코어 무관(생성 결과 후처리).
     try { await attachMallImagesToProductCarousels(companyId, result.sections); } catch { /* best-effort */ }
@@ -1033,6 +1073,8 @@ dmRouter.post('/ai/one-shot-generate', async (req: any, res: any) => {
         // ★ 2026-07-16 M1 — 행사 브리프 + 반영 커버리지(미반영 항목 정직 표시 — 숨기지 않는다)
         brief: result.brief ?? null,
         coverage: result.coverage ?? null,
+        // ★ 2026-10-05 한줄로 시그니처 — 화면이 완성도 줄을 그릴지 · 생성 전에 물었는지(물은 항목은 다시 자동으로 묻지 않는다)
+        one_line: lineOn ? { enabled: true, gaps: oneLineGaps(typedLine), asked: lineFacts !== undefined, benefit: lineFacts ? lineFacts.benefit : null } : null,
       },
     });
   } catch (err: any) {
@@ -2344,7 +2386,12 @@ dmRouter.post('/:id/validate', requireDmAccess, async (req: any, res: any) => {
       console.warn('[DM 검수결과 저장] 실패:', (e as any)?.message);
     }
 
-    return res.json(result);
+    // ★ 2026-10-05 한줄로 시그니처 — 첫 발행 관문의 앞 두 칸(링크 결함 · 채울 자리)을 함께 싣는다(필드 추가만 · 기존 필드 무변경).
+    //   화면 완성도 줄이 "보내기 전에 N곳"을 관문이 막는 것과 같은 기준으로 센다. 저장(validation_result)은 검수 결과 그대로.
+    //   이 판정이 실패해도 기존 검수 응답은 그대로 나간다(검수를 쓰는 기존 화면이 500을 받지 않게 · 값만 null).
+    let staticBlock: ReturnType<typeof dmPublishStaticBlock> = null;
+    try { staticBlock = dmPublishStaticBlock(dm); } catch (e) { console.warn('[DM 검수] 첫 발행 관문 앞 판정 실패:', (e as any)?.message); }
+    return res.json({ ...result, publish_static_block: staticBlock ? { code: staticBlock.code, error: staticBlock.error } : null });
   } catch (err: any) {
     console.error('[DM 검수] 오류:', err.message);
     return res.status(500).json({ error: err.message || '검수 실패' });

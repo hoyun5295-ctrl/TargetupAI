@@ -33,6 +33,7 @@ import {
 } from '../utils/ai-build';
 import { AI_GENERATE_COSTS } from '../constants/credit';
 import { fixHeadline, fixItemsOf, makeResultPath, type FixItem, type MakeChannel } from '../utils/make-flow';
+import { FixRow } from '../components/zone/ZoneCompletion';   // ★ 2026-10-05 한줄로 시그니처 — 완성도 줄과 같은 부품
 import { MK_BTN_AI, MK_BTN_GHOST, MK_BTN_PRIMARY } from '../utils/make-ui';
 import type { EmailCampaign } from '../components/email/email-campaign-types';
 import '../styles/make.css';
@@ -387,22 +388,6 @@ export default function QuickCampaignResultPage() {
       <ConfirmModal state={confirm} onClose={() => setConfirm(null)} />
     </div>
     </SurfaceToneProvider>
-  );
-}
-
-function FixRow({ item, onClick }: { item: FixItem; onClick: () => void }) {
-  if (item.kind === 'ok') return <div className="flex items-center gap-2 text-[13px] text-slate-700"><Check className="w-4 h-4 text-emerald-600 shrink-0" />{item.title}</div>;
-  if (item.kind === 'info') return <div className="flex gap-2 rounded-xl bg-white px-3 py-2.5 text-[12px] text-slate-500"><ShoppingBag className="w-4 h-4 text-violet-700 shrink-0 mt-0.5" />{item.title}</div>;
-  const must = item.kind === 'must';
-  return (
-    <button type="button" onClick={onClick} className={`w-full text-left flex items-start gap-2.5 rounded-xl border px-3 py-3 ${must ? 'border-amber-300 bg-amber-50 hover:bg-amber-50' : 'border-violet-300 bg-violet-50 hover:bg-violet-50'}`}>
-      {must ? <AlertCircle className="w-4 h-4 text-amber-700 shrink-0 mt-0.5" /> : <Sparkles className="w-4 h-4 text-violet-700 shrink-0 mt-0.5" />}
-      <span className="flex-1 min-w-0">
-        <b className="block text-[13px] text-slate-900 leading-snug">{item.title}</b>
-        {item.sub && <span className="block text-[11.5px] text-slate-500 mt-0.5">{item.sub}</span>}
-      </span>
-      {item.action && <em className={`not-italic shrink-0 text-[11.5px] font-bold rounded-md px-2 py-1 ${must ? 'bg-amber-400 text-amber-950' : 'bg-violet-100 text-violet-900'}`}>{item.action}</em>}
-    </button>
   );
 }
 

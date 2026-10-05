@@ -1,4 +1,5 @@
 import ZoneFrame from '../components/zone/ZoneFrame';
+import { fetchOneLineEnabled } from '../utils/one-line';   // ★ 2026-10-05 한줄로 시그니처
 import ZoneEmphasis from '../components/zone/ZoneEmphasis';
 import ZoneRowActions from '../components/zone/ZoneRowActions';
 import ZoneSection from '../components/zone/ZoneSection';
@@ -672,6 +673,10 @@ export default function JourneysPage() {
   // ★ 2026-08-08 혜택 입력(선택) — 모달의 자연어·빠른 시작 두 경로가 같은 값을 쓴다.
   //   1클릭 카드(이어달리기·기회)는 이 상자를 읽지 않는다 — 옛 입력이 엉뚱한 여정에 끼면 안 된다.
   const [benefitText, setBenefitText] = useState('');
+  // ★ 2026-10-05 한줄로 시그니처(설계서 §5) — 스위치 켠 회사는 명령 카드 한 줄이 모달에 남은 혜택 칸 값을 싣지 않는다
+  //   (화면에 안 보이는 값이 혜택 근거가 되던 길). 혜택은 그 값이 보이는 모달 · 스튜디오 채움 패널에서만 받는다.
+  const [lineFactsOn, setLineFactsOn] = useState(false);
+  useEffect(() => { void fetchOneLineEnabled().then(setLineFactsOn); }, []);
   const [generating, setGenerating] = useState(false);
   // ★ 2026-08-01 설계서 §2-3 — 이 회사가 지금 만들 수 있는 여정. 못 만드는 것은 사유와 함께 잠근다.
   //   조회 실패면 잠그지 않는다(화면 편의 게이트). 실제 발송 차단은 백엔드가 담당한다.
@@ -2007,7 +2012,7 @@ export default function JourneysPage() {
         line: {
           value: objective,
           onChange: setObjective,
-          onSubmit: () => { void handleAIGenerate(undefined, undefined, undefined, benefitText); },
+          onSubmit: () => { void handleAIGenerate(undefined, undefined, undefined, lineFactsOn ? undefined : benefitText); },
           placeholder: journeyOneLine.placeholder,
           verb: journeyOneLine.verb,
           icon: Sparkles,

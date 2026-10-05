@@ -31,6 +31,7 @@ import { isInCreditBundle } from '../utils/ai-credit-context';
 // ★ 2026-08-04 계약 필수화 — 등록 1회 축 매핑(suggestSegmentForObjective)이 계약 정의·범위를 읽는다.
 import { getSegmentContract, normalizeSegmentParams } from '../utils/automarketing-segment';
 import { customFieldRef } from '../utils/safe-field-name';
+import type { CopyCVariant } from '../utils/one-line-facts';
 
 // ★ 2026-07-22 기동 시 1회 진단 경고(운영 PM2용). vitest는 dotenv.config()를 안 거쳐(app.ts 부트스트랩 미실행)
 //   process.env가 비어 실제 키가 있어도 매 테스트 파일마다 오탐 경고가 찍힌다 → 테스트 컨텍스트에선 skip.
@@ -1061,6 +1062,44 @@ SMS/LMS/MMS: 이모지 절대 금지! 아래 특수문자만 사용:
 }`;
 
 // ============================================================
+// ★ 2026-10-05 한줄로 시그니처 §6 — 문자 3안 C안 교체 시험(허브 제안 · COPY_C_TEST_COMPANY_IDS 회사만 반반)
+//   기본(인자 없음 · 'mz') = 지금 프롬프트와 문자 단위 동일. 'punchy' = 세 자리(제목 전략 · C 전략 · 출력 이름)만 바꾼다.
+//   이름은 자동 마케팅 문안 스타일 「짧고 강한」과 같은 고객 용어다.
+// ============================================================
+export const COPY_C_NAMES: Record<CopyCVariant, string> = { mz: 'MZ감성형', punchy: '짧고 강한형' };
+
+const C_MZ_SUBJECT = '- MZ감성형: 호기심 ("[브랜드] 아직 확인 안 하셨나요?")';
+const C_PUNCHY_SUBJECT = '- 짧고 강한형: 핵심 그대로 ("[브랜드] 가을 신상 입고 안내")';
+const C_MZ_STRATEGY = `**MZ감성형(C): "호기심으로 끌어당기기"**
+- 설득 전략: 궁금증 유발 → 공감 형성 → 가볍게 행동 유도
+- 도입: "뭐지?" 하고 계속 읽게 만드는 질문/비밀 훅
+- 구조: 호기심 훅 → 짧은 임팩트 전달 → 사용 시나리오 → 개인화 → 가벼운 CTA
+- 톤: 친구가 카톡으로 추천하는 느낌. 캐주얼하되 초성체(ㄱㄱ,ㅋㅋ) 절대 금지!
+- 핵심: 문장을 아주 짧게 끊어 모바일 리딩에 최적화`;
+const C_PUNCHY_STRATEGY = `**짧고 강한형(C): "핵심만 짧게"**
+- 설득 전략: 무엇 · 언제 · 어디서를 바로 전달 → 한 번에 이해 → 짧은 CTA
+- 도입: 인사 없이 무엇에 관한 문자인지 첫 줄에 바로. 첫 줄을 숫자로 시작하지 않는다(혜택강조형과 겹친다)
+- 구조: 핵심 한 줄 → 언제 · 어디서 → 짧은 CTA. 넘버링(①②③)과 수식어 · 감탄 · 계절 인사는 쓰지 않는다
+- 톤: 군더더기 없는 안내. LMS/MMS여도 이 안은 4줄 안으로 짧게
+- 핵심: 요청에 혜택이 없으면 혜택 문장 자체를 쓰지 않는다. 혜택 없이도 그대로 보낼 수 있는 안이다`;
+const C_MZ_OUTPUT = `      "variant_name": "MZ감성형",
+      "concept": "트렌디하고 캐주얼한 톤",`;
+const C_PUNCHY_OUTPUT = `      "variant_name": "짧고 강한형",
+      "concept": "핵심만 짧게 전하는 안내",`;
+
+/** (순수) 시스템 프롬프트의 C안 정의를 바꾼다. 세 자리 중 하나라도 못 찾으면 원문 그대로(시험이 조용히 반쪽이 되지 않게 계약 테스트가 고정). */
+export function applyCopyCVariant(system: string, kind?: CopyCVariant): string {
+  if (kind !== 'punchy') return system;
+  if (!system.includes(C_MZ_SUBJECT) || !system.includes(C_MZ_STRATEGY) || !system.includes(C_MZ_OUTPUT)) return system;
+  return system.replace(C_MZ_SUBJECT, C_PUNCHY_SUBJECT).replace(C_MZ_STRATEGY, C_PUNCHY_STRATEGY).replace(C_MZ_OUTPUT, C_PUNCHY_OUTPUT);
+}
+
+/** 계약 테스트용 — 기본 시스템 프롬프트 원문 */
+export function brandSystemPromptForTest(): string {
+  return BRAND_SYSTEM_PROMPT;
+}
+
+// ============================================================
 // ★ D142+ (2026-04-29) 0429 PDF B2 — [브랜드] placeholder 후처리 컨트롤타워
 //
 // AI(Anthropic/OpenAI)가 프롬프트의 `브랜드명은 "[${brandName}]" 형태로 정확히 사용` 지침을
@@ -1123,6 +1162,14 @@ export async function generateMessages(
     companyDataProfile?: CompanyDataProfile;
     // ★ D120: 고객사 최근 발송 문안 (few-shot 학습용)
     recentMessages?: string[];
+    /**
+     * ★ 2026-10-05 한줄로 시그니처 — 혜택 근거 · 혜택 감지의 원문(사용자가 친 한 줄 + 칸에 적은 답).
+     *   주면 prompt 대신 이것만 근거로 본다(허브 prompt 에 붙는 회사 메모리 · 계절 · 대상 블록이 혜택 근거가 되지 않게).
+     *   안 주면 지금과 같다(prompt 가 근거).
+     */
+    licenseText?: string;
+    /** ★ 2026-10-05 C안 시험 — 'punchy'면 C안 = 짧고 강한형. 없거나 'mz'면 지금 그대로. */
+    cVariant?: CopyCVariant;
     // ★ D170+ (2026-05-19) Harold 명시 — AI Operator 메시지 = Opus 4.7로 격상:
     //   기본 호출(/generate-message)은 model 미박힘 → default sonnet. AI Operator는 'opus' 전달.
     model?: 'sonnet' | 'opus';
@@ -1160,8 +1207,12 @@ export async function generateMessages(
   const personalizationDirective = parsePersonalizationDirective(prompt, availableVars);
   const cleanPrompt = personalizationDirective?.cleanPrompt || prompt;
 
+  // ★ 2026-10-05 한줄로 시그니처 — 혜택의 원문은 licenseText(사용자 글자)가 오면 그것만. 안 오면 지금처럼 prompt.
+  const licenseSource = typeof extraContext?.licenseText === 'string'
+    ? (parsePersonalizationDirective(extraContext.licenseText, availableVars)?.cleanPrompt || extraContext.licenseText)
+    : cleanPrompt;
   // ★ A1/A4 (2026-06-30): 입력 혜택 감지 → 채널별 강조 / 미입력 시 시의성 풍성 (혜택 날조 0)
-  const benefitDetect = detectBenefits(cleanPrompt);
+  const benefitDetect = detectBenefits(licenseSource);
   const benefitEmphasis = buildBenefitEmphasis(benefitDetect.tokens, channel);
   
   // 개인화 태그 생성 (카탈로그 기반 동적 생성)
@@ -1235,7 +1286,7 @@ ${companyProfilePrompt}
 
 ## 요청사항
 ${channel} 채널에 최적화된 3가지 문안(A/B/C)을 생성해주세요.
-- 위에 정의된 3가지 variant 전략을 그대로 따르고, variant_name은 반드시 "감성형"(A) · "혜택강조형"(B) · "MZ감성형"(C)으로 정확히 출력하세요. (다른 이름으로 바꾸지 말 것)
+- 위에 정의된 3가지 variant 전략을 그대로 따르고, variant_name은 반드시 "감성형"(A) · "혜택강조형"(B) · "${COPY_C_NAMES[extraContext?.cVariant === 'punchy' ? 'punchy' : 'mz']}"(C)으로 정확히 출력하세요. (다른 이름으로 바꾸지 말 것)
 - 계절감·해당 월 특성·시즌 시의성을 자연스럽게 녹여 내용을 풍성하게 채우고, 3개 안이 서로 다른 계절/시의성 색깔을 띠게 작성하세요. (단, 없는 혜택·날짜는 지어내지 말 것)
 - 브랜드명은 "[${brandName}]" 형태로 정확히 사용
 ${benefitEmphasis}
@@ -1266,7 +1317,7 @@ ${usePersonalization ? `- 사용할 개인화 변수: ${personalizationTags}
 
   // ★ D225+ Brand Voice Learning — 회사별 가이드라인 자동 주입 (회사 등록 미존재 시 옛 BRAND_SYSTEM_PROMPT 그대로)
   // ★ 2026-07-02 brandLinks: true — 문자 생성 경로 한정 브랜드 링크 토큰 규칙 포함 (여정/이메일/DM 기본 OFF)
-  const baseEnriched = await buildSystemPromptWithBrandVoice(extraContext?.companyId, BRAND_SYSTEM_PROMPT, { brandLinks: true });
+  const baseEnriched = await buildSystemPromptWithBrandVoice(extraContext?.companyId, applyCopyCVariant(BRAND_SYSTEM_PROMPT, extraContext?.cVariant), { brandLinks: true });
   // 문안 두뇌: 캠페인 문자(SMS/LMS/MMS) 성과 RAG + 시의성 + 브랜드 키트 주입 (companyId 있을 때만)
   let enrichedSystemPrompt = baseEnriched;
   let bannedWords: string[] = [];
@@ -1296,14 +1347,19 @@ ${usePersonalization ? `- 사용할 개인화 변수: ${personalizationTags}
 
   // ★ 2026-09-30 프롬프트 점검 WP2 — 혜택 값의 근거(사용자 요청 · 상품 · 할인율 · 행사 · 브랜드 정보). 최근 발송 문안은 근거가 아니다
   //   (지난 행사의 "30%"를 이번 문안에 옮기면 지어낸 혜택이다). 판정 = copy-benefit-detector 값 기준(표현이 달라도 같은 값은 통과).
-  const benefitGround = [
-    prompt,
-    extraContext?.productName,
-    extraContext?.discountRate ? `${extraContext.discountRate}%` : '',
-    extraContext?.eventName,
-    brandSlogan,
-    brandDescription,
-  ].filter(Boolean).join('\n');
+  // ★ 2026-10-05 한줄로 시그니처(Codex 1R high) — licenseText 가 오면 근거는 그 글자 **전체**다(사용자가 친 한 줄 + 칸에 적은 답).
+  //   브랜드 슬로건 · 소개에 옛 행사의 "30% 할인"이 남아 있으면 그것이 근거가 되어 지어낸 혜택이 통과하던 길을 닫는다.
+  //   licenseText 가 없으면 지금과 같다.
+  const benefitGround = typeof extraContext?.licenseText === 'string'
+    ? extraContext.licenseText
+    : [
+      prompt,
+      extraContext?.productName,
+      extraContext?.discountRate ? `${extraContext.discountRate}%` : '',
+      extraContext?.eventName,
+      brandSlogan,
+      brandDescription,
+    ].filter(Boolean).join('\n');
 
   try {
     // ★ 2026-07-06 Liquid 출구 가드 기록 — 직전 실행에서 템플릿 문법이 검출됐는지 (재생성 힌트 트리거)

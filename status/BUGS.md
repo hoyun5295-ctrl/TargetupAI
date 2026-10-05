@@ -55,6 +55,13 @@
 
 ## 2) 활성 버그
 
+### 🟡 B-1005-1 한줄로 시그니처 작업 중 발견 · 범위 밖 기존 결함 4건 (등재만 · 착수 판단 = Harold님) · 2026-10-05
+- **① 허브 문자: 스위치 밖 회사는 회사 AI 메모리가 혜택 근거 · 혜택 강조 지시가 된다** — `ai-orchestrator.ts` orchestrate 의 `learnedMemoryContext` 가 목표 문장에 붙어 `generateMessages` 의 혜택 근거(`benefitGround` 첫 원소)와 혜택 감지(`detectBenefits`)에 들어간다. `ONE_LINE_FACTS_COMPANY_IDS` 회사는 닫혔다(근거 = 사용자 글자 · `licenseText`). 메모리에 실제 수치가 있는지 미검증(확인 = `ai_company_memory` 값 칼럼에서 `숫자%·원` 건수 · 칼럼명은 information_schema 먼저).
+- **② DM · 이메일 생성 차감 멱등키 없음(한 줄 입구 밖)** — 스위치 켠 회사의 한 줄 요청만 시도 토큰 키가 붙는다. 빠른 시작 · 편집기 AI · 행사 모달 경로는 `fallback:{회사}:{source}:{Date.now()}` 라 겹친 두 요청이 두 번 차감될 수 있다(실발생 미검증 · 확인 = `ai_credit_transactions` 같은 회사 · source 2초 안 2행). 인앱 · 여정 · 자동 마케팅 생성도 같은 부류.
+- **③ 만들기 결과 화면의 「보내기 전에 N곳」이 첫 발행 관문의 링크 결함 · 채울 자리를 세지 않는다** — `QuickCampaignResultPage` 는 서버 검수만 본다. 검수 응답에 `publish_static_block`(관문 앞 두 칸)이 이제 실리므로 화면 한 곳에서 맞출 수 있다.
+- **④ 맞춤한줄 백엔드 라우트 화면 소비처 0** — `/api/ai/parse-briefing` · `/api/ai/generate-custom` (열리지 않던 창을 지운 뒤 부르는 화면 없음).
+- 설계서 = [한줄로 시그니처 §8](../docs/2026-10-05-hanjul-signature-design.md)
+
 ### 🟡 B-1004-2 선불 이용 기간 작업 중 발견 · 범위 밖 기존 결함 3건 (등재만 · 착수 판단 = Harold님) · 2026-10-04
 - **① 잠긴(FREE) 동안에도 이미 켜 둔 자동발송·여정이 돈다** — 실행 시점에 요금제를 다시 보지 않는다(`auto-campaign-worker` 등 요금제 확인 grep 0 · 회의 백엔드·기획·회의론자 공통 확인). 무료체험 만료 강등과 같은 성질의 기존 경로. 선불 이용 기간이 잠기면 같은 현상이 생긴다.
 - **② 슈퍼관리자 회사 잔액 이력에서 AI 크레딧 선불 충전(`reference_type='credit_recharge'`)이 "발송 차감"으로 보인다** — `AdminDashboard.tsx` 회사 잔액 이력 라벨이 type 만 본다. 요금제 이용료(`plan_term`)는 이번에 참조 유형으로 갈랐다.

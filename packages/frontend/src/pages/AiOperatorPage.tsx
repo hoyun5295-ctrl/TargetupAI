@@ -48,6 +48,7 @@ import PlanFeatureModal from '../components/PlanFeatureModal';
 import { findPlanFeatureIntro, planFeatureIdForPath, PLAN_FEATURE_MIN_PLAN } from '../constants/plan-feature-intros';
 import { fetchAiOperatorAccess, fetchAiOperatorFeatures } from '../utils/ai-operator-access';
 import ConfirmModal, { type ConfirmState } from '../components/ConfirmModal';
+import { LineFactsAskModal } from '../components/zone/LineFacts';   // ★ 2026-10-05 한줄로 시그니처 — 판정이 걸리면 생성 전에 한 번만 묻는다
 // 고객 데이터 없으면 AI 문안 생성 전 안내 (공용 게이트)
 import { useCustomerDataGate, CustomerDataRequiredBanner, CustomerDataRequiredModal } from '../components/CustomerDataGate';
 // 2026-07-09: MMS 이미지 첨부 — 공용 모달 + 업로드 훅 + 경로/검증 컨트롤타워
@@ -354,6 +355,10 @@ export default function AiOperatorPage() {
   const [selectedVariantIdx, setSelectedVariantIdx] = useState(0);
   const [showRefineModal, setShowRefineModal] = useState(false);
   const [refinedOverrides, setRefinedOverrides] = useState<Record<number, string>>({});
+  // ★ 2026-10-05 한줄로 시그니처 — 묻는 창 · 3안 선택 기록(AI 꾸미기를 거친 안 · C안 시험 종류)
+  const [askFactsOpen, setAskFactsOpen] = useState(false);
+  const [aiRefinedIdx, setAiRefinedIdx] = useState<Record<number, true>>({});
+  const [proposalCVariant, setProposalCVariant] = useState<'mz' | 'punchy' | null>(null);
   // ★ 2026-07-10 (임은지 리포트): LMS/MMS 제목 확인·수정 — 변형별 제목 편집 오버라이드 (화면 표시 = 발송 값)
   const [subjectOverrides, setSubjectOverrides] = useState<Record<number, string>>({});
   const [editingBody, setEditingBody] = useState(false); // ★ 2026-06-19: 생성 문안 직접 편집(타이핑) 모드
@@ -546,7 +551,7 @@ export default function AiOperatorPage() {
   //   사고 = 회사 전체 고객 안 1건 fetch (filter X). 정정 = handleSubmit 안 proposal.target.filters 매칭 영역 안 1건 fetch.
   //   본 영역 = 옛 useEffect 폐기 정합 (handleSubmit 안 fetch 정합).
 
-  const handleSubmit = async () => {
+  const handleSubmit = async (facts?: { benefit: string | null }) => {
     if (planLocked) { setPlanFeatureId('ai-operator'); return; }
     if (customerGate.isEmpty) { setShowDataGate(true); return; }
     if (objective.trim().length < 5) {
@@ -566,6 +571,8 @@ export default function AiOperatorPage() {
     setSubjectOverrides({});
     setSelectedVariantIdx(0);
     setEditingBody(false);
+    setAiRefinedIdx({});
+    setProposalCVariant(null);
 
     try {
       const token = localStorage.getItem('token');
@@ -575,12 +582,21 @@ export default function AiOperatorPage() {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${token}`,
         },
-        body: JSON.stringify({ objective: objective.trim() }),
+        // ★ 2026-10-05 한줄로 시그니처 — 묻는 창에서 받은 답(null = 혜택 없음)을 함께 보낸다
+        body: JSON.stringify({ objective: objective.trim(), ...(facts ? { facts } : {}) }),
       });
       const data = await res.json();
       if (!res.ok || !data.success) {
         throw new Error(data.error || '제안서 생성에 실패했습니다.');
       }
+      // ★ 2026-10-05 판정이 걸리면 서버가 만들지 않고(생성 0 · 차감 0) 먼저 묻는다 → 답을 받아 같은 한 줄로 다시 보낸다
+      if (data.needsFacts?.benefit) {
+        setLoading(false);
+        setProgressStep(0);
+        setAskFactsOpen(true);
+        return;
+      }
+      setProposalCVariant(data.copyCVariant === 'mz' || data.copyCVariant === 'punchy' ? data.copyCVariant : null);
       // ★ D210+ Phase 2-fix7 (Harold 명시 2026-05-23): AI 응답 후 진행 시각 확보 영역.
       //   옛 사고 = setTimeout 600ms 즉시 setLoading(false) → 진행 시각 효과 영역 X (즉시 사라짐).
       //   정정 = 1500ms 후 마지막 단계 완료 표시 + 2200ms 후 화면 전환 (사용자 자연 시각 흐름).
@@ -636,6 +652,8 @@ export default function AiOperatorPage() {
     setSubjectOverrides({});
     setEditingBody(false);
     setSelectedVariantIdx(0);
+    setAiRefinedIdx({});
+    setProposalCVariant(null);
     // ★ D210+ Phase 2-fix5 (Harold 명시 2026-05-23): 새 입력 진입 시 옛 sample-customer 영역 초기화
     setSampleCustomer(null);
     setSampleCustomerFields(null);
@@ -672,6 +690,11 @@ export default function AiOperatorPage() {
         setRefinedOverrides((prev) => {
           const next = { ...prev };
           (data.messages as string[]).forEach((msg, i) => { if (typeof msg === 'string' && msg.trim()) next[i] = msg; });
+          return next;
+        });
+        setAiRefinedIdx((prev) => {
+          const next = { ...prev };
+          (data.messages as string[]).forEach((msg, i) => { if (typeof msg === 'string' && msg.trim()) next[i] = true; });
           return next;
         });
       } else {
@@ -848,6 +871,20 @@ export default function AiOperatorPage() {
         //   캠페인명도 `직접발송 {일시}`로 덮어써서 행에 오퍼레이터 흔적이 하나도 안 남았다.
         //   값의 정의는 백엔드 CT(`utils/send-type-axis.ts`)가 소유한다 — 여기서 새 값을 지어내지 않는다.
         sendType: 'operator',
+        // ★ 2026-10-05 한줄로 시그니처 §6 — 3안 중 무엇을 골라 그대로 보냈는지(학습 로그 · 검증은 서버 적재기 안 · 발송과 무관)
+        aiVariants: {
+          messages: proposal.messages.map((m) => m.body || ''),
+          names: proposal.messages.map((m) => m.variantName || ''),
+          selectedIndex: idx,
+          recommendedIndex: (() => {
+            const r = proposal.recommendation || '';
+            const i = proposal.messages.findIndex((m) => r === m.variantId || (!!m.variantName && r.includes(m.variantName)));
+            return i >= 0 ? i : null;
+          })(),
+          edited: refinedOverrides[idx] != null && refinedOverrides[idx] !== (variant.body || ''),
+          aiRefined: !!aiRefinedIdx[idx],
+          cVariant: proposalCVariant,
+        },
         // 오퍼레이터가 제안 때 붙인 이름을 그대로 쓴다. 없으면 필드를 비워 서버 기본명에 맡긴다.
         ...(proposal.target.suggestedName?.trim() ? { campaignName: suggestedName } : {}),
       };
@@ -916,6 +953,12 @@ export default function AiOperatorPage() {
     <SurfaceToneProvider tone="light">
     <div className="relative min-h-screen bg-slate-100 text-slate-900" data-zone-frame="hub">
       <ConfirmModal state={confirm} onClose={() => setConfirm(null)} />
+      <LineFactsAskModal
+        open={askFactsOpen}
+        line={objective.trim()}
+        onCancel={() => setAskFactsOpen(false)}
+        onSubmit={(benefit) => { setAskFactsOpen(false); void handleSubmit({ benefit }); }}
+      />
       {/* ★ 2026-09-15 요금제 공통 안내 창 — 못 쓰는 회사가 카드·[생성]·[이미지]를 눌렀을 때 */}
       <PlanFeatureModal featureId={planFeatureId} onClose={() => setPlanFeatureId(null)} />
 
@@ -1048,7 +1091,7 @@ export default function AiOperatorPage() {
                 )}
                 <button
                   type="button"
-                  onClick={handleSubmit}
+                  onClick={() => { void handleSubmit(); }}
                   disabled={loading || objective.trim().length < 5}
                   className="flex-1 md:flex-none h-10 px-5 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-900 text-[14px] font-bold inline-flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
                   aria-label="AI 제안서 생성"

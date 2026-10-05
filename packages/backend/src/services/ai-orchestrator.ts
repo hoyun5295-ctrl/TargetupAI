@@ -47,6 +47,7 @@ import { buildAudienceWhere } from '../utils/operator-recipients';
 import { estimatePerformance } from '../utils/operator-performance-estimator';
 // 문안 생성 objective 합성(seasonHint 결합) 공통 헬퍼 — orchestrate / orchestrateWithAI 일관
 import { buildMessageObjective } from '../utils/season-context';
+import { buildLineEventText, type LineFacts, type CopyCVariant } from '../utils/one-line-facts';
 // ★ D227+ AI 성과 분석가 sub-agent — 통계 결과 위에 진단·전략·리스크 자연어 (숫자 생성 X)
 import { extractJsonFromAiText } from '../utils/ai-json';
 import {
@@ -109,6 +110,14 @@ export interface AgentContext {
    *   추천 수가 조용히 달라지고, 그 뒤 미리보기 명단과도 어긋난다. 'operator'일 때만 그 게이트를 쓴다.
    */
   audienceScope?: 'operator';
+  /**
+   * ★ 2026-10-05 한줄로 시그니처(ONE_LINE_FACTS_COMPANY_IDS 회사의 허브 제안만) — 한 줄에 대한 사용자 답.
+   *   있으면 문안의 혜택 근거 = 목표 문장 + 이 답뿐이다. 목표 문장에 붙는 회사 메모리 · 계절 힌트 · 대상 블록은 근거가 아니다.
+   *   자동 마케팅(continuous-operator)은 넘기지 않는다 → 지금 그대로.
+   */
+  lineFacts?: LineFacts;
+  /** ★ 2026-10-05 C안 시험(COPY_C_TEST_COMPANY_IDS · 허브 제안만) — 없으면 지금 그대로 */
+  cVariant?: CopyCVariant;
 }
 
 export interface ComplianceResult {
@@ -488,9 +497,11 @@ async function _orchestrateImpl(ctx: AgentContext): Promise<OrchestratorResult> 
   const contractAudienceBlock = contractCriteria
     ? `[실제 발송 대상: 이 대상에게 맞게 쓴다]\n${contractCriteria}\n목표 문장과 대상이 다르면 대상을 따른다. 다른 고객군을 지칭하지 않는다.`
     : '';
+  // ★ 2026-10-05 한줄로 시그니처 — 사용자 답이 있으면 목표 문장 + 답이 문안 요청이자 혜택 근거(licenseText)다.
+  const licenseText = ctx.lineFacts ? buildLineEventText(ctx.objective, ctx.lineFacts) : undefined;
   const messagesResult = await generateMessages(
     buildMessageObjective(
-      ctx.objective,
+      licenseText ?? ctx.objective,
       [contractAudienceBlock, ctx.seasonHint, learnedMemoryContext].filter(Boolean).join('\n\n'),
     ),
     {
@@ -518,6 +529,8 @@ async function _orchestrateImpl(ctx: AgentContext): Promise<OrchestratorResult> 
       model: 'sonnet',
       // ★ D225+ Brand Voice Learning — 회사별 가이드라인 자동 주입
       companyId: ctx.companyId,
+      ...(licenseText !== undefined ? { licenseText } : {}),
+      ...(ctx.cVariant ? { cVariant: ctx.cVariant } : {}),
     }
   );
   mark('message', messageStart);
@@ -815,8 +828,10 @@ async function _orchestrateWithAIImpl(ctx: AgentContext): Promise<OrchestratorRe
         // ★ D210+ Phase 2 (Harold 명시 2026-05-23): 회사 customer DB 실측 프로필 자동 조회 (CT-58).
         const companyDataProfile = await getCompanyDataProfile(ctx.companyId);
 
+        // ★ 2026-10-05 한줄로 시그니처 — orchestrate 와 같은 규칙(사용자 답이 있으면 목표 + 답 = 요청이자 혜택 근거)
+        const licenseTextAI = ctx.lineFacts ? buildLineEventText(ctx.objective, ctx.lineFacts) : undefined;
         messagesResult = await generateMessages(
-          buildMessageObjective(ctx.objective, ctx.seasonHint),
+          buildMessageObjective(licenseTextAI ?? ctx.objective, ctx.seasonHint),
           {
             total_count: estimatedCount,
             avg_purchase_count: parseFloat(ctx.customerStats.avg_purchase_count) || 0,
@@ -841,6 +856,8 @@ async function _orchestrateWithAIImpl(ctx: AgentContext): Promise<OrchestratorRe
             model: 'sonnet',
             // ★ D225+ Brand Voice Learning — 회사별 가이드라인 자동 주입
             companyId: ctx.companyId,
+            ...(licenseTextAI !== undefined ? { licenseText: licenseTextAI } : {}),
+            ...(ctx.cVariant ? { cVariant: ctx.cVariant } : {}),
           }
         );
         normalizedMessages = messagesResult.variants.slice(0, 3).map((v: any) => {

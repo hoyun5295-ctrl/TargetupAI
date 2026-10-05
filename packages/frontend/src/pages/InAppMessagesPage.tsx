@@ -55,6 +55,11 @@ import MallProductPickerModal, { type PickedMallProduct } from '../components/dm
 import AssetLibraryPickerModal, { type PickedAsset } from '../components/assets/AssetLibraryPickerModal';
 // ★ 2026-09-29 인앱 만들기 개편 — 전체 화면 편집기(EditShell) · 입구 갤러리 · 포스터 계열 장 편집(설계서 docs/2026-09-29-inapp-editor-redesign-design.md)
 import EditShell, { type SaveTone } from '../components/make/EditShell';
+// ★ 2026-10-05 한줄로 시그니처(설계서 docs/2026-10-05-hanjul-signature-design.md §5) — 한 줄 원문 · 완성도 줄 · 혜택 자리 0크레딧 채우기
+import ZoneCompletion from '../components/zone/ZoneCompletion';
+import { LineFacts, LineFactsSheet, typedBenefit, type LineFactsValues } from '../components/zone/LineFacts';
+import { countSlots, fillSlots, fillSlotsDeep, stringsDeep, appendToOneLine } from '../utils/one-line';
+import type { FixItem } from '../utils/make-flow';
 import InAppEntryGallery from '../components/inapp/InAppEntryGallery';
 import { PosterStage, SlideRail, SlidePanel, LayoutSwitcher, ImageSourceMenu, useImageSources, readField, writeField, FIELD_MAX } from '../components/inapp/PosterEditor';
 import { resolvePosterLayout, type PosterLayout, type SheetEditKey } from '../components/inapp/PosterSheetPreview';
@@ -381,6 +386,8 @@ export default function InAppMessagesPage() {
   const [aiGenerating, setAiGenerating] = useState(false);
   const [aiProgressStep, setAiProgressStep] = useState<number>(-1);
   const [aiObjective, setAiObjective] = useState('');
+  // ★ 2026-10-05 한 줄로 만든 메시지(스위치 켠 회사) — 편집기에 완성도 줄 · 혜택 채우기 시트를 그린다
+  const [inappLine, setInappLine] = useState<string | null>(null);
 
   // ★ 2026-07-07(4) 행사 캠페인 — EventCampaignModal이 생성해둔 인앱 초안 자동 적용 (30분 TTL, 1회 소비)
   useEffect(() => {
@@ -570,7 +577,7 @@ export default function InAppMessagesPage() {
   // AI 자동 생성 (자연어 + 빠른 시작)
   // ────────────────────────────────────────────────────────────────
 
-  const handleAIGenerate = async (objective: string, templateHint?: QuickStartScenario, channelOverride?: 'web' | 'app') => {
+  const handleAIGenerate = async (objective: string, templateHint?: QuickStartScenario, channelOverride?: 'web' | 'app', oneLine = false) => {
     if (customerGate.isEmpty) { setShowDataGate(true); return; }
     // ★ 2026-07-06 표시 가능성 가드 — 웹에 표시할 곳이 없으면 AI 생성(크레딧) 진입 자체를 차단
     if ((channelOverride || channel || 'web') === 'web' && webBlocked) { setShowDisplayBlock(true); return; }
@@ -591,7 +598,8 @@ export default function InAppMessagesPage() {
       const res = await fetch('/api/cdp/inapp/ai-generate', {
         method: 'POST',
         headers: authHeaders(),
-        body: JSON.stringify({ objective, templateHint }),
+        // ★ 2026-10-05 한 줄 입구 표시(서버가 스위치를 보고 한 줄을 사용자 원문으로 쓴다 · 스위치 밖이면 지금 그대로)
+        body: JSON.stringify({ objective, templateHint, ...(oneLine ? { one_line: true } : {}) }),
       });
       const data = await res.json();
       clearInterval(stepInterval);
@@ -607,6 +615,7 @@ export default function InAppMessagesPage() {
       }
 
       const pkg = data.package;
+      setInappLine(oneLine && data.one_line?.enabled ? objective.trim() : null);
       // 편집 진입 — placeholder 직접 작성 의무
       setEditing({
         title: pkg.message.title,
@@ -913,7 +922,7 @@ export default function InAppMessagesPage() {
             verb: inappOneLine.verb,
             icon: Sparkles,
             busy: aiGenerating,
-            extra: <ImageToCopyButton label="이미지" onExtracted={(t) => setAiObjective((prev) => (prev.trim() ? `${prev.trim()}\n${t}` : t))} disabled={aiGenerating} className={MK_LINE_EXTRA_BTN} />,
+            extra: <ImageToCopyButton label="이미지" onExtracted={(t) => setAiObjective((prev) => appendToOneLine(prev, t))} disabled={aiGenerating} className={MK_LINE_EXTRA_BTN} />,
           },
         }}
         emphasis={
@@ -1022,7 +1031,7 @@ export default function InAppMessagesPage() {
               <p className="text-xs text-slate-500 mb-4 line-clamp-2">{scenarioPick ? SCENARIO_VISUAL[scenarioPick].label : `"${objectivePick}"`}: 채널을 고르면 AI가 바로 만들어요</p>
               <div className="grid grid-cols-2 gap-3">
                 <button
-                  onClick={() => { if (webBlocked) { setScenarioPick(null); setObjectivePick(null); setShowDisplayBlock(true); return; } const sc = scenarioPick; const ob = objectivePick; setScenarioPick(null); setObjectivePick(null); setChannel('web'); if (sc) handleAIGenerate('', sc, 'web'); else if (ob) handleAIGenerate(ob, undefined, 'web'); }}
+                  onClick={() => { if (webBlocked) { setScenarioPick(null); setObjectivePick(null); setShowDisplayBlock(true); return; } const sc = scenarioPick; const ob = objectivePick; setScenarioPick(null); setObjectivePick(null); setChannel('web'); if (sc) handleAIGenerate('', sc, 'web'); else if (ob) handleAIGenerate(ob, undefined, 'web', true); }}
                   className="flex flex-col items-center gap-2 bg-violet-100 hover:bg-violet-100 border border-violet-200 rounded-xl p-4 transition-colors"
                 >
                   <Globe className="w-6 h-6 text-violet-800" />
@@ -1030,7 +1039,7 @@ export default function InAppMessagesPage() {
                   <span className="text-[10px] text-slate-500">{webBlocked ? '쇼핑몰 연동 필요' : '팝업·슬라이드·토스트'}</span>
                 </button>
                 <button
-                  onClick={() => { const sc = scenarioPick; const ob = objectivePick; setScenarioPick(null); setObjectivePick(null); setChannel('app'); if (sc) handleAIGenerate('', sc, 'app'); else if (ob) handleAIGenerate(ob, undefined, 'app'); }}
+                  onClick={() => { const sc = scenarioPick; const ob = objectivePick; setScenarioPick(null); setObjectivePick(null); setChannel('app'); if (sc) handleAIGenerate('', sc, 'app'); else if (ob) handleAIGenerate(ob, undefined, 'app', true); }}
                   className="flex flex-col items-center gap-2 bg-sky-100 hover:bg-sky-100 border border-sky-200 rounded-xl p-4 transition-colors"
                 >
                   <Smartphone className="w-6 h-6 text-sky-800" />
@@ -1128,12 +1137,12 @@ export default function InAppMessagesPage() {
         line: {
           value: aiObjective,
           onChange: setAiObjective,
-          onSubmit: () => handleAIGenerate(aiObjective),
+          onSubmit: () => handleAIGenerate(aiObjective, undefined, undefined, true),
           placeholder: inappOneLine.placeholder,
           verb: inappOneLine.verb,
           icon: Sparkles,
           busy: aiGenerating,
-          extra: <ImageToCopyButton label="이미지" onExtracted={(t) => setAiObjective((prev) => (prev.trim() ? `${prev.trim()}\n${t}` : t))} disabled={aiGenerating} className={MK_LINE_EXTRA_BTN} />,
+          extra: <ImageToCopyButton label="이미지" onExtracted={(t) => setAiObjective((prev) => appendToOneLine(prev, t))} disabled={aiGenerating} className={MK_LINE_EXTRA_BTN} />,
         },
       }}
       stamp={{ text: '다시 읽기', onRefresh: loadAll, loading }}
@@ -1427,7 +1436,8 @@ export default function InAppMessagesPage() {
           uploadImage={uploadImageReturnUrl}
           webBlocked={webBlocked}
           onDisplayBlocked={() => setShowDisplayBlock(true)}
-          onDone={() => { setEditing(null); void loadAll(); }}
+          lineAssist={inappLine ? { text: inappLine } : null}
+          onDone={() => { setEditing(null); setInappLine(null); void loadAll(); }}
         />
       )}
 
@@ -1584,9 +1594,11 @@ interface EditModalProps {
   onDisplayBlocked: () => void;
   /** 편집기를 닫고 목록을 다시 읽는다 */
   onDone: () => void;
+  /** ★ 2026-10-05 한 줄로 만든 메시지 — 완성도 줄 · 혜택 채우기 시트 */
+  lineAssist?: { text: string } | null;
 }
 
-function EditModal({ editing, setEditing, availableVariables, fileInputRef, onImageUpload, uploadImage, webBlocked, onDisplayBlocked, onDone }: EditModalProps) {
+function EditModal({ editing, setEditing, availableVariables, fileInputRef, onImageUpload, uploadImage, webBlocked, onDisplayBlocked, onDone, lineAssist }: EditModalProps) {
   const [segmentCount, setSegmentCount] = useState<number | null>(null);
   const [segmentDesc, setSegmentDesc] = useState<string>('');
   const [extractOpen, setExtractOpen] = useState(false);
@@ -2138,6 +2150,44 @@ function EditModal({ editing, setEditing, availableVariables, fileInputRef, onIm
     confirmLabel: '바꾸기',
     onConfirm: () => switchLayout('event_card', { addSlide: true }),
   });
+
+  // ───────── ★ 2026-10-05 한줄로 시그니처 · 완성도 줄(한 줄로 만든 메시지만) ─────────
+  //   보내기 전에 N곳 = 편집기 발행 검사(publishDefectOf · 서버가 다시 본다)와 같은 판정 + 혜택 자리.
+  //   혜택 자리는 시트에서 값만 받아 그 자리에 넣는다(0크레딧 · 되돌리기 기록). 포스터 장은 장 편집에서 고친다.
+  const [lineBarOn, setLineBarOn] = useState(true);
+  const [lineSheet, setLineSheet] = useState(false);
+  const [lineValues, setLineValues] = useState<LineFactsValues>({});
+  const lineAutoOpened = useRef(false);
+  const lineBenefitSlots = lineAssist ? countSlots(stringsDeep({ blocks: editing.content_blocks, title: editing.title, body: editing.body }), 'benefit') : 0;
+  const lineDefect = lineAssist ? publishDefectOf(buildPayload(editing)) : null;
+  const lineCanFill = lineBenefitSlots > 0 && !posterMode;
+  const lineItems: FixItem[] = (() => {
+    if (!lineAssist) return [];
+    const out: FixItem[] = [];
+    if (lineBenefitSlots > 0) out.push({ kind: 'must', title: `혜택 자리 ${lineBenefitSlots}곳이 비었어요`, sub: lineCanFill ? '적어 주시면 그 자리에 그대로 넣어요 · 무료' : '장 편집에서 그 자리를 고쳐 주세요', action: lineCanFill ? '채우기' : undefined });
+    else if (lineDefect) out.push({ kind: 'must', title: lineDefect.message });
+    if (!lineDefect && lineBenefitSlots === 0) out.push({ kind: 'ok', title: '보낼 준비가 됐어요' });
+    return out;
+  })();
+  useEffect(() => {
+    if (!lineAssist || lineAutoOpened.current) return;
+    lineAutoOpened.current = true;
+    if (lineCanFill) setLineSheet(true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  const applyLineBenefit = () => {
+    const v = typedBenefit(lineValues);
+    if (!v) return;
+    setEditing((prev) => (prev ? {
+      ...prev,
+      content_blocks: fillSlotsDeep(prev.content_blocks, 'benefit', v),
+      title: typeof prev.title === 'string' ? fillSlots(prev.title, 'benefit', v) : prev.title,
+      body: typeof prev.body === 'string' ? fillSlots(prev.body, 'benefit', v) : prev.body,
+    } : prev));
+    setLineSheet(false);
+    setLineValues({});
+    pickToast.success('적어 주신 그대로 넣었어요');
+  };
 
   // ───────── 발행 · 반영 ─────────
   const checkPublish = (): boolean => {
@@ -3493,6 +3543,14 @@ function EditModal({ editing, setEditing, availableVariables, fileInputRef, onIm
           }}
           sendLabel={publishing ? '처리 중' : sendLabel}
           extraHeader={extraHeader}
+          banner={lineAssist && lineBarOn ? (
+            <ZoneCompletion
+              items={lineItems}
+              onItem={(it) => { if (it.action === '채우기') setLineSheet(true); }}
+              action={lineCanFill ? { label: '채우기', onClick: () => setLineSheet(true) } : null}
+              onDismiss={() => setLineBarOn(false)}
+            />
+          ) : undefined}
           left={left}
           center={center}
           right={right}
@@ -3508,6 +3566,18 @@ function EditModal({ editing, setEditing, availableVariables, fileInputRef, onIm
       <ImageSourceMenu open={imgMenu} onClose={() => setImgMenu(false)} images={images} />
       {images.node}
       <ConfirmModal state={editorConfirm} onClose={() => setEditorConfirm(null)} />
+      {lineAssist && (
+        <LineFactsSheet
+          open={lineSheet && lineCanFill}
+          onClose={() => setLineSheet(false)}
+          title="한 가지만 더 알려 주시면 이렇게 좋아져요"
+          reason="적어 주신 그대로만 씁니다 · 지금 메시지는 그대로 남아요"
+          line={lineAssist.text}
+          primary={{ label: '채우기 · 무료', tone: 'indigo', disabled: !typedBenefit(lineValues), onClick: applyLineBenefit }}
+        >
+          <LineFacts fields={['benefit']} values={lineValues} onChange={setLineValues} allowNone={false} />
+        </LineFactsSheet>
+      )}
       {/* ★ 2026-07-22 테스트저장 — 웹·앱 실물을 실제 크기로 렌더해 PNG 저장(영업용, 발송 아님). 백드롭 클릭 닫힘 없음(작업 손실 방지). */}
       {captureOpen && (
         <div className="fixed inset-0 z-[2000] flex items-start justify-center bg-black/75 backdrop-blur-sm px-4 py-8 overflow-y-auto">

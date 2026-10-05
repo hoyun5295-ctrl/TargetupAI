@@ -107,7 +107,8 @@ export const EMAIL_SCENARIO_PRESETS: Record<EmailScenarioKey, { label: string; p
 // ════════════════════════════════════════════════════════════════════
 
 /** AI placeholder 잔존 검사 — [혜택을 직접 입력해주세요] 류가 남아 있으면 true (발송 차단) */
-const PLACEHOLDER_PATTERN = /\[[^\[\]\n]{0,60}(직접|입력해|작성해)[^\[\]\n]{0,60}\]/;
+// ★ 2026-10-05 export 만 추가(동작 불변) — 화면 완성도 줄이 같은 기준으로 세는지 짝 테스트가 글자 단위로 대조한다
+export const PLACEHOLDER_PATTERN = /\[[^\[\]\n]{0,60}(직접|입력해|작성해)[^\[\]\n]{0,60}\]/;
 
 export function hasUneditedPlaceholder(...texts: Array<string | null | undefined>): boolean {
   return texts.some((t) => !!t && PLACEHOLDER_PATTERN.test(t));

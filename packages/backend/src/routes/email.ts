@@ -104,7 +104,8 @@ import { normalizeEventText } from '../utils/event-brief';
 import { attachMallImagesToProductCarousels } from '../utils/mall-product-match';
 import { industryLabel } from '../utils/industry-codes';
 import type { Section } from '../utils/dm/dm-section-registry';
-import { checkCredit, deductCreditSafe, InsufficientCreditError } from '../utils/ai-credit';
+import { checkCredit, deductCreditSafe, InsufficientCreditError, isChargedByKey } from '../utils/ai-credit';
+import { oneLineFactsEnabled, oneLineGaps, isValidAttemptToken, buildOneLineIdempotencyKey, oneLineInflightKey } from '../utils/one-line-facts';   // ★ 2026-10-05 한줄로 시그니처
 import { getCreditCost } from '../utils/ai-credit-calc';
 // ★ 2026-09-06 S6 재료 입구(이미지·행사 텍스트 → 아웃리치 브랜드 이메일 시안 경로)
 import { generateEmailFromMaterials, quickMaterialsEnabled, generateFromBuildMaterials, buildGenerateResponse } from '../utils/campaign-quick';
@@ -1149,13 +1150,37 @@ router.post('/ai/generate-sections', async (req: Request, res: Response) => {
     if (scenario && !EMAIL_SCENARIO_PRESETS[scenario]) {
       return res.status(400).json({ success: false, error: '알 수 없는 시나리오입니다.' });
     }
-    const cost = getCreditCost('email-ai-generate'); // 3
-    await checkCredit(auth.companyId, cost);
-    const result = await generateEmailSections({ companyId: auth.companyId, userId: auth.userId, prompt, scenario, isAd, eventText });
-    await deductCreditSafe({ companyId: auth.companyId, cost, source: 'email-ai-generate', createdBy: auth.userId });
-    // ★ 2026-07-08 연동 몰 상품 자동 첨부 — 상품 슬라이드 항목명 이름매칭 → 이미지·링크·정가·할인가(빈 값만, 실패 skip). 발송 코어 무관(생성 결과 후처리).
-    try { await attachMallImagesToProductCarousels(auth.companyId, (result as any)?.sections); } catch { /* best-effort */ }
-    return res.json({ success: true, data: result });
+    // ★ 2026-10-05 한줄로 시그니처(설계서 §3-7) — 한 줄 입구(one_line:true) + 스위치 켠 회사 + 시도 토큰이 온 요청만 멱등. 그 밖 요청 = 지금 동작 그대로.
+    //   이메일은 요청 글이 이미 혜택 근거다(email-ai generateEmailSections 의 근거 = 요청 · 원문) → 원문 자리는 옮기지 않는다.
+    //   빠진 혜택 · 기간은 생성기가 남긴 자리에서 화면이 0크레딧으로 채운다.
+    const lineOn = req.body?.one_line === true && oneLineFactsEnabled(auth.companyId);
+    const attemptToken = lineOn && isValidAttemptToken(req.body?.attempt_token) ? String(req.body.attempt_token) : null;
+    const idemKey = attemptToken ? buildOneLineIdempotencyKey(auth.companyId, 'email', attemptToken, { prompt, scenario: scenario || null, isAd, eventText }) : undefined;
+    const lineLock = attemptToken ? oneLineInflightKey(auth.companyId, 'email', attemptToken) : '';
+    if (lineLock && !tryAcquireInflight(lineLock)) {
+      return res.status(409).json({ success: false, error: '지금 만드는 중이에요. 완성되면 이어서 진행해 주세요.', code: 'IN_FLIGHT' });
+    }
+    try {
+      if (idemKey) {
+        let charged: boolean;
+        try { charged = await isChargedByKey(auth.companyId, idemKey); } catch {
+          return res.status(503).json({ success: false, error: '잠시 후 다시 시도해 주세요.', code: 'CREDIT_STATE_UNKNOWN' });
+        }
+        if (charged) {
+          return res.status(409).json({ success: false, error: '이 요청은 이미 처리됐어요. 다시 만들려면 [만들기]를 한 번 더 눌러 주세요.', code: 'ALREADY_DONE' });
+        }
+      }
+      const cost = getCreditCost('email-ai-generate'); // 3
+      await checkCredit(auth.companyId, cost);
+      const result = await generateEmailSections({ companyId: auth.companyId, userId: auth.userId, prompt, scenario, isAd, eventText });
+      await deductCreditSafe({ companyId: auth.companyId, cost, source: 'email-ai-generate', createdBy: auth.userId, ...(idemKey ? { idempotencyKey: idemKey } : {}) });
+      // ★ 2026-07-08 연동 몰 상품 자동 첨부 — 상품 슬라이드 항목명 이름매칭 → 이미지·링크·정가·할인가(빈 값만, 실패 skip). 발송 코어 무관(생성 결과 후처리).
+      try { await attachMallImagesToProductCarousels(auth.companyId, (result as any)?.sections); } catch { /* best-effort */ }
+      // ★ 2026-10-05 한줄로 시그니처 — 화면이 완성도 줄 · 보강 시트를 그릴지(스위치 켠 회사의 한 줄 요청만)
+      return res.json({ success: true, data: lineOn ? { ...result, one_line: { enabled: true, gaps: oneLineGaps(prompt) } } : result });
+    } finally {
+      if (lineLock) releaseInflight(lineLock);
+    }
   } catch (err: any) {
     console.error('[Email /ai/generate-sections] 오류:', err);
     if (err instanceof InsufficientCreditError) {

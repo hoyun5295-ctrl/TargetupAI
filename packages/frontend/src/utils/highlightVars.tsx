@@ -4,7 +4,7 @@ import { renderLiquid } from './liquid-templating';
 /**
  * ★ D93: 메시지 내 %변수% / Liquid 태그({{ }}, {% %}) 부분을 하이라이트 span으로 감싸서 React 요소 배열로 반환
  *
- * 사용처: AiCampaignResultPopup(한줄로), AiCustomSendFlow(맞춤한줄), AiCampaignSendModal(발송확인), AiOperatorPage(D210+ fix4), JourneysPage(D210+ fix6)
+ * 사용처: AiCampaignResultPopup(한줄로), AiCampaignSendModal(발송확인), AiOperatorPage(D210+ fix4), JourneysPage(D210+ fix6)
  *
  * ★ D210+ Phase 2-fix4 (Harold 명시 2026-05-23): theme prop 신규 — dark 영역 = AiOperatorPage 보라색 배경 정합.
  * ★ D210+ Phase 2-fix9 (Harold 명시 2026-05-23): Liquid 태그/변수 영역도 amber 강조 추가 — 원본 영역 시각화 완전 매트릭스.
@@ -57,7 +57,7 @@ export function highlightVars(text: string, theme: 'light' | 'dark' = 'light'): 
  * 단순 케이스(%변수% + {{ 변수 }})는 토큰 단위로 둘 다 치환·강조한다.
  * 조건 블록({% if %} 등)이 있으면 전체 Liquid 렌더링 후 %변수%만 강조한다.
  *
- * 사용처: AiCampaignSendModal, AiCustomSendFlow, AiOperatorPage, JourneysPage 메시지 미리보기.
+ * 사용처: AiCampaignSendModal, AiOperatorPage, JourneysPage 메시지 미리보기.
  *
  * @param text 원본 메시지 (예: "%고객명%님" 또는 "{{ customer.name }}님")
  * @param sampleCustomer 한국어 키 객체 (예: { "고객명": "김민수", "등급": "VIP" }) — %변수% 치환

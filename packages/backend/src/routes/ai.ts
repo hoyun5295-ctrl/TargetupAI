@@ -28,6 +28,7 @@ import { formatDateValue, getOpt080Number, buildAdMessage, buildAdSubject } from
 import { resolveJourneyAdFlag } from '../utils/journey-ad-policy';
 import { loadPlanContext, canUseFeature, requirePlanFeature, isBetaAccessAllowed, isAiOperatorAllowed } from '../utils/plan-guard';
 import { snsPublishEnabled } from '../utils/sns-constants';   // ★ 2026-09-20 허브 SNS 플래그(§3-11)
+import { oneLineFactsEnabled, oneLineGaps, sanitizeLineFacts, pickCopyCVariant } from '../utils/one-line-facts';   // ★ 2026-10-05 한줄로 시그니처
 import { getCompanyCosts } from '../config/defaults';
 // ★ D209+ (Harold 명시 2026-05-22) Phase D 비용 안전 매트릭스 — 회사별 월 한도 + cache 통계
 import { getMonthlyUsage, getDailyUsage, getModelBreakdown, checkAiRateLimit, AiRateLimitExceeded, recordAiCall } from '../utils/ai-rate-limit';
@@ -1143,6 +1144,16 @@ router.get('/operator/access', async (req: Request, res: Response) => {
   }
 });
 
+// ★ 2026-10-05 한줄로 시그니처(설계서 docs/2026-10-05-hanjul-signature-design.md §3) — 한 줄 판정.
+//   AI 0 · DB 0 · 무과금. 화면은 이 응답으로만 칸을 그린다(판정 규칙을 화면에 다시 두지 않는다).
+//   스위치 밖 회사 = enabled:false · 묻는 칸 0 → 지금 화면 그대로.
+router.post('/one-line/gaps', (req: Request, res: Response) => {
+  const companyId = req.user?.companyId;
+  const line = typeof req.body?.line === 'string' ? req.body.line.slice(0, 2000) : '';
+  const enabled = oneLineFactsEnabled(companyId);
+  return res.json({ success: true, enabled, gaps: enabled ? oneLineGaps(line) : { benefit: false } });
+});
+
 // ============================================================
 // ★ D210+ Phase 2-fix1 (Harold 명시 2026-05-23) — 회사 customer DB 실측 프로필 조회
 //   본질 = 마케팅 담당자 검토 UI 안내 카드 (CompanyDataProfileCard) data source.
@@ -1345,6 +1356,23 @@ router.post('/operator/propose', async (req: Request, res: Response) => {
       return res.status(400).json({ success: false, error: '마케팅 목표를 한 줄로 입력해주세요 (5자 이상).' });
     }
 
+    // ★ 2026-10-05 한줄로 시그니처 §3-4 — 허브 문자는 확인 창이 없고 생성기가 혜택 자리를 남기지 않는다(시즌감으로 채운다).
+    //   그래서 판정이 걸리면 **생성 전에 한 번만** 묻는다(생성 0 · 차감 0 응답). 답이 오면(null = 없음 포함) 묻지 않고 만든다.
+    //   스위치 밖 회사 = 지금 그대로. 스위치 밖인데 답이 오면 조용히 버리지 않고 400(사용자가 적은 값이 사라지지 않게).
+    const lineOn = oneLineFactsEnabled(companyId);
+    const lineFacts = sanitizeLineFacts(req.body?.facts);
+    if (lineFacts === 'invalid') {
+      return res.status(400).json({ success: false, error: '혜택은 300자 이내로 적어 주세요.', code: 'LINE_FACTS_INVALID' });
+    }
+    if (lineFacts !== undefined && !lineOn) {
+      return res.status(400).json({ success: false, error: '이 기능은 아직 열리지 않았습니다. 화면을 새로 고친 뒤 다시 시도해 주세요.', code: 'FEATURE_DISABLED' });
+    }
+    if (lineOn && lineFacts === undefined && oneLineGaps(objective).benefit) {
+      return res.json({ success: true, needsFacts: { benefit: true } });
+    }
+    // ★ 2026-10-05 C안 시험(COPY_C_TEST_COMPANY_IDS) — 제안마다 반반. 시험 밖 = undefined = 지금 그대로.
+    const copyCVariant = pickCopyCVariant(companyId);
+
     // 회사 정보 + 통계 조회 (Orchestrator에 전달)
     const companyResult = await query(
       `SELECT company_name, business_type, COALESCE(reject_number, opt_out_080_number) as reject_number,
@@ -1402,9 +1430,12 @@ router.post('/operator/propose', async (req: Request, res: Response) => {
       objective: objective.trim(),
       companyInfo,
       customerStats,
+      // ★ 2026-10-05 한줄로 시그니처 — 스위치 켠 회사는 늘 원문 한정(답이 없어도 { benefit: null }) → 메모리 · 계절 · 대상 블록이 혜택 근거가 되지 않는다
+      ...(lineOn ? { lineFacts: lineFacts ?? { benefit: null } } : {}),
+      ...(copyCVariant ? { cVariant: copyCVariant } : {}),
     }, { source: 'ai-operator-propose', cost: 5 });
 
-    return res.json({ success: true, ...result });
+    return res.json({ success: true, ...result, copyCVariant: copyCVariant ?? null });
   } catch (err: any) {
     console.error('[AI Operator] propose 오류:', err);
     return res.status(500).json({ success: false, error: err?.message || 'AI Operator 제안서 생성 실패' });

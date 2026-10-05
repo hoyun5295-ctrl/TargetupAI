@@ -6,14 +6,14 @@
  *
  * 레거시(slides 모드) DM은 편집 불가 안내 + 새 에디터로 전환 버튼(15단계 구현 후 활성).
  */
-import { useEffect, useState, useCallback, useRef } from 'react';
+import { useEffect, useState, useCallback, useRef, useMemo } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { goBackOr } from '../lib/scroll-restoration';
 import { DmMiniCover } from '../components/dm/DmThumbnails';
 import DmBlockBuilder from '../components/dm/build/DmBlockBuilder';
 import axios from 'axios';
 import { attachCreditInterceptor } from '../lib/credit-interceptor';
-import { useDmBuilderStore } from '../stores/dmBuilderStore';
+import { useDmBuilderStore, selectAllSectionsFlat } from '../stores/dmBuilderStore';
 import { createSection } from '../utils/dm-section-defaults';
 import { formatDateTimeShort } from '../utils/formatDate';
 import { uploadOne } from '../components/dm/panels/FormControls';
@@ -67,7 +67,14 @@ import DmEditScreen from '../components/make/DmEditScreen';
 import MakeSendModal from '../components/make/MakeSendModal';
 import DmDetailModal from '../components/make/DmDetailModal';
 import { ListHead, DmChip, Meter, fmtDate } from '../components/make/HomeParts';
-import { dmChipStatus, type ChipStatus } from '../utils/make-flow';
+import { dmChipStatus, fixItemsOf, type ChipStatus, type FixItem } from '../utils/make-flow';
+// ★ 2026-10-05 한줄로 시그니처(설계서 docs/2026-10-05-hanjul-signature-design.md §5) — 한 줄 판정 · 확인 창 혜택 칸 · 완성도 줄
+import ZoneCompletion from '../components/zone/ZoneCompletion';
+import { LineFactsInline, typedBenefit, type LineFactsValues } from '../components/zone/LineFacts';
+import { fetchOneLineGaps, newAttemptToken, appendToOneLine } from '../utils/one-line';
+import { CONFIRM_CREDIT_COSTS } from '../constants/credit';
+
+const LINE_BENEFIT_SUGGEST = '혜택을 적어 주시면 첫 줄이 혜택으로 시작해요';
 
 const api = axios.create({ baseURL: '/api' });
 attachCreditInterceptor(api);
@@ -163,6 +170,53 @@ export default function DmBuilderPage() {
     const t = setTimeout(() => { void useDmBuilderStore.getState().save({ silent: true }); }, 2500);
     return () => clearTimeout(t);
   }, [mode, isDirty, isSavingGlobal, isPublishedGlobal]);
+  // ★ 2026-10-05 한줄로 시그니처 — 완성도 줄: 저장이 끝날 때마다 서버 검수(차감 0)를 다시 본다 · 편집기를 떠나거나 다른 DM 이면 닫는다.
+  //   보내기 전에 N곳 = 서버 검수의 넘길 수 없는 치명 + 첫 발행 관문 앞 두 칸(링크 결함 · 채울 자리)과 같은 기준.
+  // ★ 2026-10-05 한줄로 시그니처 — 확인 창 혜택 칸 값 · 한 줄로 만든 DM 의 완성도 줄(서버 검수 + 첫 발행 관문 앞 두 칸 + 반영 검산)
+  const [lineValues, setLineValues] = useState<LineFactsValues>({});
+  const [lineResult, setLineResult] = useState<{ dmId: string; line: string; gapBenefit: boolean; benefit: string | null; missing: string[] } | null>(null);
+  const [lineValidation, setLineValidation] = useState<any>(null);
+  const [lineChecking, setLineChecking] = useState(false);
+  const lineFlat = useDmBuilderStore(selectAllSectionsFlat);
+  const lineSeq = useRef(0);
+  useEffect(() => {
+    if (!lineResult) return;
+    if (mode !== 'edit' || (dmId && lineResult.dmId !== dmId)) { setLineResult(null); return; }
+    if (isDirty || isSavingGlobal || !dmId) return;
+    const my = ++lineSeq.current;
+    setLineChecking(true);
+    void (async () => {
+      try {
+        const r = await api.post(`/dm/${dmId}/validate`, {});
+        if (my === lineSeq.current) setLineValidation(r.data);
+      } catch { /* 다음 저장 뒤 다시 본다 */ } finally {
+        if (my === lineSeq.current) setLineChecking(false);
+      }
+    })();
+  }, [lineResult, mode, dmId, isDirty, isSavingGlobal]);
+  const lineItems: FixItem[] = useMemo(() => {
+    if (!lineResult || !lineValidation) return [];
+    const base = fixItemsOf(lineValidation, lineFlat, lineResult.missing.map((l) => `반영하지 못한 항목: ${l}`));
+    const sb = lineValidation.publish_static_block as { code?: string; error?: string } | null | undefined;
+    const staticMust: FixItem[] = sb ? [{ kind: 'must', title: sb.code === 'LINK_DEFECT' ? '고쳐야 할 링크가 있어요' : '직접 채울 자리가 남았어요', sub: sb.error }] : [];
+    const benefitAsk: FixItem[] = lineResult.gapBenefit && !lineResult.benefit
+      ? [{ kind: 'suggest', title: LINE_BENEFIT_SUGGEST, sub: `혜택을 넣어 새 DM으로 만들어요 · ${CONFIRM_CREDIT_COSTS['dm-ai-generate']}크레딧 · 지금 DM은 그대로 남아요`, action: '새로 만들기' }]
+      : [];
+    return [...staticMust, ...base.filter((i) => i.kind === 'must'), ...benefitAsk, ...base.filter((i) => i.kind !== 'must')];
+  }, [lineResult, lineValidation, lineFlat]);
+  const onLineItem = (it: FixItem) => {
+    if (it.sectionId) {
+      const st = useDmBuilderStore.getState();
+      const idx = st.pages.findIndex((p) => p.sections.some((s) => s.id === it.sectionId));
+      if (idx >= 0 && idx !== st.currentPageIndex) st.selectPage(idx);
+      st.selectSection(it.sectionId);
+      return;
+    }
+    if (it.title === LINE_BENEFIT_SUGGEST && lineResult) {
+      setLineValues({});
+      setPendingGen({ prompt: lineResult.line, desc: `"${lineResult.line}" 내용으로 새 DM을 만들어요. 지금 DM은 그대로 남아요.`, oneLine: true, askBenefit: true });
+    }
+  };
   const [confirmBackOpen, setConfirmBackOpen] = useState(false);
   // ★ 2026-09-27 만들기 개편 — 첫 화면 상태 · 보내기 창 · 발행(플래너)·자세한 발송 창 신호(TopBarWithBack 이 흐름을 그대로 가진다)
   // ★ 2026-09-30 AI 존 보정: 접힌 "다른 방법" 패널 폐지 — ?other=1(만들기 화면의 [한 줄로 자동 생성]·[이미지로 불러오기]) 은 명령 카드·그 밖에 줄이 처음부터 보이므로 펼칠 것이 없다
@@ -199,7 +253,7 @@ export default function DmBuilderPage() {
   const DM_PAGE_SIZE = 10;
   const [currentPage, setCurrentPage] = useState(1);
   // 빠른시작·자연어 생성 전 5크레딧 차감 확인 (Harold 명시 — 즉시 차감 X)
-  const [pendingGen, setPendingGen] = useState<{ prompt?: string; scenario?: string; desc: string } | null>(null);
+  const [pendingGen, setPendingGen] = useState<{ prompt?: string; scenario?: string; desc: string; oneLine?: boolean; askBenefit?: boolean } | null>(null);
   // ★ 2026-08-13 원스텝 — 질문에 답하면 그 답이 마스터프롬프트가 되어 생성으로 이어진다.
   const [oneStepOpen, setOneStepOpen] = useState(false);
 
@@ -287,7 +341,7 @@ export default function DmBuilderPage() {
   const applyAiGenerated = useDmBuilderStore((s) => s.applyAiGenerated);
   const save = useDmBuilderStore((s) => s.save);
 
-  const handleAutoGenerate = useCallback(async (opts: { prompt?: string; scenario?: string }) => {
+  const handleAutoGenerate = useCallback(async (opts: { prompt?: string; scenario?: string; oneLine?: boolean; facts?: { benefit: string | null } }) => {
     if (customerGate.isEmpty) { setShowDataGate(true); return; }
     if (generating) return;
     if (!opts.prompt && !opts.scenario) {
@@ -311,11 +365,13 @@ export default function DmBuilderPage() {
       const res = await api.post('/dm/ai/one-shot-generate', {
         prompt: opts.prompt || '',
         scenario: opts.scenario,
+        // ★ 2026-10-05 한줄로 시그니처 — 한 줄 입구 표시 · 칸에 적은 답 · 시도 토큰(서버가 스위치를 다시 본다 · 스위치 밖이면 지금 그대로)
+        ...(opts.oneLine ? { one_line: true, attempt_token: newAttemptToken(), ...(opts.facts ? { facts: opts.facts } : {}) } : {}),
       });
       if (!res.data?.success) {
         throw new Error(res.data?.error || 'AI 생성 실패');
       }
-      const { sections, brand_kit, pages, layout_mode } = res.data.data || {};
+      const { sections, brand_kit, pages, layout_mode, one_line: lineMeta, coverage } = res.data.data || {};
       // 3. 섹션 + brandKit + 레이아웃 모드/페이지 적용 (slides면 여러 페이지)
       applyAiGenerated(sections || [], brand_kit, opts.prompt || opts.scenario || '', { pages, layoutMode: layout_mode });
       // 4. 신규 dmId 저장
@@ -327,7 +383,23 @@ export default function DmBuilderPage() {
       // 6. 편집 모드 진입 + floating bar 표시 (자동 생성 직후만)
       setMode('edit');
       setShowAiFloatingBar(true);
-      setToast({ type: 'success', message: `AI가 ${(sections || []).length}개 섹션 + 카피 자동 생성 종결. 추가 1-click 액션 활용 가능` });
+      setNaturalLanguage('');
+      // ★ 2026-10-05 한줄로 시그니처 — 스위치 켠 회사의 한 줄 DM 은 편집기 머리에 완성도 줄(물어본 혜택은 다시 자동으로 묻지 않는다)
+      const savedId = useDmBuilderStore.getState().dmId;
+      if (lineMeta?.enabled && savedId) {
+        setLineValidation(null);
+        setLineResult({
+          dmId: savedId,
+          line: opts.prompt || '',
+          gapBenefit: lineMeta.gaps?.benefit === true,
+          benefit: typeof lineMeta.benefit === 'string' ? lineMeta.benefit : null,
+          missing: Array.isArray(coverage?.missing) ? coverage.missing.map((m: any) => String(m?.label || '')).filter(Boolean) : [],
+        });
+        setToast({ type: 'success', message: '모바일 DM을 만들었어요. 위 줄에서 보낼 준비를 확인해 주세요' });
+      } else {
+        setLineResult(null);
+        setToast({ type: 'success', message: `AI가 ${(sections || []).length}개 섹션 + 카피 자동 생성 종결. 추가 1-click 액션 활용 가능` });
+      }
     } catch (err: any) {
       clearInterval(stepTimer);
       setToast({ type: 'error', message: err?.response?.data?.error || err?.message || 'AI 생성 실패' });
@@ -335,7 +407,7 @@ export default function DmBuilderPage() {
       clearInterval(stepTimer);
       setGenerating(false);
       setGenerationStep(-1);
-      setNaturalLanguage('');
+      // ★ 2026-10-05 한줄로 시그니처 §3-1 — 실패해도 한 줄은 지우지 않는다(성공했을 때만 비운다 · 다시 입력 요구 0)
     }
   }, [generating, createNew, applyAiGenerated, save, setToast, customerGate.isEmpty]);
 
@@ -744,6 +816,8 @@ export default function DmBuilderPage() {
               // ★ 2026-10-01 카탈로그로 만든 DM 은 카탈로그 채널로 다시 만든다(옛: 늘 일반 DM 채널 → 올린 쪽이 안 보이고 재료 부족으로 아무 일도 안 일어났다)
               onRegenerate={() => { const ch = buildBar.channel === 'catalog' ? 'catalog' : 'dm'; clearBuildResult(); setBuildBar(null); navigate(`/quick-campaign?channel=${ch}&regen=1`); }}
             />
+          ) : lineResult && lineResult.dmId === dmId ? (
+            <ZoneCompletion items={lineItems} onItem={onLineItem} checking={lineChecking} onDismiss={() => setLineResult(null)} />
           ) : undefined}
         />
         <TopBarWithBack hidden sendSignal={advSendSignal} onBack={handleBackRequest} onPublishDone={handleBackToList} />
@@ -892,9 +966,14 @@ export default function DmBuilderPage() {
   };
   const metricsLoading = !overviewTried;
   const dmOneLine = zoneModule('dm').oneLine!;
-  const startOneLine = () => {
+  const startOneLine = async () => {
     const t = naturalLanguage.trim();
-    if (t && !generating) setPendingGen({ prompt: t, desc: `"${t}" 내용으로 AI가 섹션과 카피를 자동 생성합니다.` });
+    if (!t || generating) return;
+    // ★ 2026-10-05 한줄로 시그니처 — 판정은 서버(AI 0 · 무과금). 걸리면 원래 뜨던 확인 창 안에 혜택 칸이 하나 생긴다(새 단계 0).
+    //   조회 실패 = 지금 그대로(묻지 않는다).
+    const g = await fetchOneLineGaps(t);
+    setLineValues({});
+    setPendingGen({ prompt: t, desc: `"${t}" 내용으로 AI가 섹션과 카피를 자동 생성합니다.`, oneLine: !!g?.enabled, askBenefit: !!g?.enabled && g.gaps.benefit });
   };
   return (
     <ZoneFrame
@@ -903,7 +982,7 @@ export default function DmBuilderPage() {
         line: {
           value: naturalLanguage,
           onChange: setNaturalLanguage,
-          onSubmit: startOneLine,
+          onSubmit: () => { void startOneLine(); },
           placeholder: dmOneLine.placeholder,
           verb: dmOneLine.verb,
           icon: Sparkles,
@@ -911,13 +990,13 @@ export default function DmBuilderPage() {
           extra: (
         <ImageToCopyButton
           label="이미지로 불러오기"
-          onExtracted={(t) => setNaturalLanguage((prev) => (prev.trim() ? `${prev.trim()}\n${t}` : t))}
+          onExtracted={(t) => setNaturalLanguage((prev) => appendToOneLine(prev, t))}
           onStructured={({ events, text }) => {
             // ★ 기획전 스샷 → 행사별 [히어로+상품 카드] 즉시 조립 (AI 생성 없이 코드 매핑 — 크레딧 추가 0)
             try {
               const sections = buildDmSectionsFromEvents(events);
               if (sections.length === 0) {
-                setNaturalLanguage((prev) => (prev.trim() ? `${prev.trim()}\n${text}` : text));
+                setNaturalLanguage((prev) => appendToOneLine(prev, text));
                 return;
               }
               createNew({ title: deriveDmTitleFromEvents(events) });
@@ -928,7 +1007,7 @@ export default function DmBuilderPage() {
               setToast({ type: 'success', message: `행사 ${sum.events}건·상품 ${sum.products}개로 DM 초안을 만들었어요. 상품 이미지와 문구만 다듬어주세요.` });
             } catch {
               // 조립 실패 = 산문 폴백(기존 흐름 무손상)
-              setNaturalLanguage((prev) => (prev.trim() ? `${prev.trim()}\n${text}` : text));
+              setNaturalLanguage((prev) => appendToOneLine(prev, text));
             }
           }}
           disabled={generating}
@@ -1147,10 +1226,15 @@ export default function DmBuilderPage() {
         open={!!pendingGen}
         source="dm-ai-generate"
         description={pendingGen?.desc}
+        extraContent={pendingGen?.askBenefit ? <LineFactsInline values={lineValues} onChange={setLineValues} /> : undefined}
         onConfirm={() => {
           const g = pendingGen;
           setPendingGen(null);
-          if (g) void handleAutoGenerate({ prompt: g.prompt, scenario: g.scenario });
+          if (g) void handleAutoGenerate({
+            prompt: g.prompt, scenario: g.scenario, oneLine: g.oneLine,
+            // 칸을 보여 줬으면 답을 함께 보낸다(비우면 없음 = null · 서버가 [혜택] 줄로 원문에 붙인다)
+            ...(g.askBenefit ? { facts: { benefit: lineValues.benefit === null ? null : typedBenefit(lineValues) } } : {}),
+          });
         }}
         onCancel={() => setPendingGen(null)}
       />

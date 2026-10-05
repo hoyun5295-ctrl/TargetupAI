@@ -9,11 +9,9 @@ import SenderAuthModal, { type SenderAuthState } from '../components/SenderAuthM
 import { useSenderAuth } from '../hooks/useSenderAuth';
 import AiCampaignResultPopup from '../components/AiCampaignResultPopup';
 import AiCampaignSendModal from '../components/AiCampaignSendModal';
-import AiCustomSendFlow from '../components/AiCustomSendFlow';
 import PlanChangeModal from '../components/PlanChangeModal';
 import AiMessageSuggestModal from '../components/AiMessageSuggestModal';
 import AiPreviewModal from '../components/AiPreviewModal';
-import AiSendTypeModal from '../components/AiSendTypeModal';
 import AnalysisModal from '../components/AnalysisModal';
 import BalanceModals from '../components/BalanceModals';
 import CreditHistoryModal from '../components/credit/CreditHistoryModal';
@@ -39,7 +37,6 @@ import PlanApprovalModal from '../components/PlanApprovalModal';
 import PlanLimitModal from '../components/PlanLimitModal';
 import PlanFeatureModal from '../components/PlanFeatureModal';
 import RecentCampaignModal from '../components/RecentCampaignModal';
-import RecommendTemplateModal from '../components/RecommendTemplateModal';
 import ResultsModal from '../components/ResultsModal';
 import ScheduledCampaignModal from '../components/ScheduledCampaignModal';
 import ScheduleTimeModal from '../components/ScheduleTimeModal';
@@ -319,12 +316,7 @@ export default function Dashboard() {
   const [selectedAiMsgIdx, setSelectedAiMsgIdx] = useState(0);
   const [editingAiMsg, setEditingAiMsg] = useState<number | null>(null);
   const [showAiSendModal, setShowAiSendModal] = useState(false);
-  const [showAiSendType, setShowAiSendType] = useState(false);
-  const [showAiCustomFlow, setShowAiCustomFlow] = useState(false);
-  const [customSendData, setCustomSendData] = useState<any>(null);
-  const [showCustomSendModal, setShowCustomSendModal] = useState(false);
   // 저장 세그먼트용
-  const [customFlowPreload, setCustomFlowPreload] = useState<{selectedFields: string[]; briefing: string; url: string; channel: string; isAd: boolean} | null>(null);
   const [lastSendConfig, setLastSendConfig] = useState<{type: 'hanjullo' | 'custom'; prompt?: string; selectedFields?: string[]; briefing?: string; url?: string; channel?: string; isAd?: boolean} | null>(null);
   const [showSpamFilter, setShowSpamFilter] = useState(false);
   const [spamFilterData, setSpamFilterData] = useState<{sms?: string; lms?: string; callback: string; msgType: 'SMS'|'LMS'|'MMS'; subject?: string; isAd?: boolean; firstRecipient?: Record<string, any>}>({callback:'',msgType:'SMS'});
@@ -358,7 +350,6 @@ export default function Dashboard() {
   // ★ D132 Phase B: 대시보드 카드 상세 모달
   const [detailCard, setDetailCard] = useState<DashboardCardData | null>(null);
   // 직접 타겟 관련 state → DirectTargetFilterModal로 이동 (D43-3)
-  const [showTemplates, setShowTemplates] = useState(false);
   const [showInsights, setShowInsights] = useState(false);
   const [showTodayStats, setShowTodayStats] = useState(false);
   const [showScheduled, setShowScheduled] = useState(false);
@@ -1012,13 +1003,10 @@ export default function Dashboard() {
       setShowPreview(false);
       setShowAiResult(false);
       setShowAiSendModal(false);
-      setShowCustomSendModal(false);
-      setShowAiCustomFlow(false);
       setAiStep(1);
       setAiCampaignPrompt('');
       setAiResult(null);
       setSelectedAiMsgIdx(0);
-      setCustomSendData(null);
 
       setToast({ show: true, type: 'success', message: '발송이 시작되었습니다.' });
       setTimeout(() => setToast({ show: false, type: 'success', message: '' }), 3000);
@@ -2017,161 +2005,6 @@ const campaignData = {
   }
 };
 
-  // AI 맞춤한줄 발송 처리
-  const handleAiCustomSend = async (modalData: {
-    campaignName: string;
-    sendTimeOption: 'ai' | 'now' | 'custom';
-    customSendTime: string;
-    selectedCallback: string;
-    useIndividualCallback: boolean;
-    individualCallbackColumn?: string;
-    subject?: string;
-  }) => {
-    if (isSending || directSending || !customSendData) return; // 교차 중복 발송 방지
-    // ★ B2(0417 PDF #2): MMS 이미지 첨부 검증 (맞춤한줄)
-    if (customSendData.channel === 'MMS' && mmsUploadedImages.length === 0) {
-      setToast({ show: true, type: 'error', message: 'MMS는 이미지 첨부가 필수입니다. 이미지를 업로드하거나 발송타입을 SMS/LMS로 변경해주세요.' });
-      return;
-    }
-    if (adTextEnabled && !optOutNumber) {
-      setToast({ show: true, type: 'error', message: '광고 발송을 위해 수신거부번호(080) 설정이 필요합니다. 설정 > 발신번호 관리에서 등록해주세요.' });
-      return;
-    }
-
-    const _sendTimeOption = modalData.sendTimeOption;
-    const _customSendTime = modalData.customSendTime;
-    const _selectedCallback = modalData.selectedCallback;
-    const _useIndividualCallback = modalData.useIndividualCallback;
-    const _campaignName = modalData.campaignName;
-
-    if (!_selectedCallback && !_useIndividualCallback) {
-      setToast({ show: true, type: 'error', message: '회신번호를 선택해주세요' });
-      return;
-    }
-
-    setIsSending(true);
-    try {
-      const variant = customSendData.variant;
-      const channelType = customSendData.channel; // SMS or LMS
-
-      // 발송시간 계산
-      let scheduledAt: string | null = null;
-      if (_sendTimeOption === 'custom' && _customSendTime) {
-        scheduledAt = new Date(_customSendTime).toISOString();
-      }
-      // AI 맞춤한줄은 AI 추천시간 없으므로 'ai' 옵션 없음, 'now'면 null
-
-      // ★ D103: 순수 본문만 전달. (광고)+080은 백엔드 prepareSendMessage에서 추가
-      const messageContent = variant.message_text || '';
-
-      const campaignData = {
-        campaignName: _campaignName,
-        messageType: channelType,
-        sendChannel: 'sms',
-        messageContent,
-        targetFilter: customSendData.targetFilters || {},
-        // ★ D111 P3: Dashboard 전역 isAd 대신 맞춤한줄 Step3 토글값(customSendData.isAd) 사용
-        //   이전: isAd: isAd → 사용자가 광고 OFF 해도 Dashboard 전역값 true면 실발송에 (광고) 붙음
-        //   같은 버그를 미리보기 prop과 실발송 body 양쪽에 가지고 있었음 → 양쪽 동일 수정
-        isAd: customSendData.isAd ?? false,
-        scheduledAt,
-        eventStartDate: null,
-        eventEndDate: null,
-        callback: _useIndividualCallback ? null : _selectedCallback,
-        useIndividualCallback: _useIndividualCallback,
-        // ★ D102: modalData.individualCallbackColumn 우선 (맞춤한줄 개별회신번호 누락 수정)
-        individualCallbackColumn: _useIndividualCallback ? (modalData.individualCallbackColumn || individualCallbackColumn || 'store_phone') : undefined,
-        // ★ B+0407-3: 사용자가 발송확정 모달에서 수정한 제목(modalData.subject)을 우선 사용
-        //   기존: variant.subject 만 사용 → 사용자 제목 수정이 무시되어 원본 제목으로 발송됨
-        subject: modalData.subject ?? variant.subject ?? '',
-        // ★ B1: MMS 채널일 때 첨부 이미지 경로 전달 (이전: 빈 배열 하드코딩으로 첨부 누락)
-        mmsImagePaths: channelType === 'MMS' ? toMmsImagePaths(mmsUploadedImages) : [],
-      };
-
-      console.log('=== AI 맞춤한줄 발송 디버깅 ===');
-      console.log('customSendData:', customSendData);
-      console.log('campaignData:', campaignData);
-
-      const response = await campaignsApi.create(campaignData);
-
-      const campaignId = response.data.campaign?.id;
-      if (campaignId) {
-        let sendResult;
-        try {
-          sendResult = await campaignsApi.send(campaignId);
-        } catch (sendErr: any) {
-          // ★ 2026-09-12 발신 인증(3.5) — 캠페인을 다시 만들지 않고 이 캠페인만 다시 보낸다
-          if (senderAuth.handleError(sendErr, () => { void resumeAiCampaignSend(campaignId); })) {
-            setPendingAiCampaignId(campaignId);
-            setIsSending(false);
-            return;
-          }
-          throw sendErr;
-        }
-        // ★ 미등록 회신번호 확인 모달 — callbackConfirmRequired 응답 처리
-        if (sendResult.data?.callbackConfirmRequired) {
-          setPendingAiCampaignId(campaignId);
-          setCallbackConfirm({
-            show: true,
-            callbackMissingCount: sendResult.data.callbackMissingCount,
-            callbackUnregisteredCount: sendResult.data.callbackUnregisteredCount,
-            unregisteredDetails: sendResult.data.unregisteredDetails || [],
-            remainingCount: sendResult.data.remainingCount,
-            message: sendResult.data.message,
-            sendType: 'aiCustom',
-          });
-          setIsSending(false);
-          return;
-        }
-      }
-
-      // 모달 닫기 + 초기화
-      setShowCustomSendModal(false);
-      setShowAiCustomFlow(false);
-      // ★ #8 수정: customSendData null 전에 채널/인원수 저장
-      setSuccessChannel(customSendData?.channel || 'LMS');
-      setSuccessTargetCount(customSendData?.estimatedCount || 0);
-      setSuccessUnsubscribeCount(customSendData?.unsubscribeCount || 0);  // ★ B8-08 수정
-      // ★ D107: 저장 세그먼트용 — 맞춤한줄 설정 캐시
-      if (customSendData) {
-        setLastSendConfig({
-          type: 'custom',
-          selectedFields: customSendData.personalFields,
-          briefing: customSendData.briefing,
-          url: customSendData.url,
-          channel: customSendData.channel,
-          isAd: customSendData.isAd,
-        });
-      }
-      setCustomSendData(null);
-      // ★ B17-04: 이전 AI 결과 완전 초기화 (중복 발송 방지)
-      setAiResult(null);
-      setSelectedAiMsgIdx(0);
-      setAiStep(1);
-      setAiCampaignPrompt('');
-
-      const sendInfoText = _sendTimeOption === 'now' ? '즉시 발송 완료' :
-        `예약 완료 (${_customSendTime ? new Date(_customSendTime).toLocaleString('ko-KR', { year: 'numeric', month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : ''})`;
-      setSuccessSendInfo(sendInfoText);
-      setSuccessCampaignId(response.data.campaign?.id || '');
-      setShowSuccess(true);
-      loadRecentCampaigns();
-      loadScheduledCampaigns();
-
-    } catch (error: any) {
-      console.error('AI 맞춤한줄 발송 실패:', error);
-      if (error.response?.data?.code === 'LINE_GROUP_NOT_SET') {
-        setShowLineGroupError(true);
-      } else if (error.response?.status === 402 && error.response?.data?.insufficientBalance) {
-        setShowInsufficientBalance({ show: true, balance: error.response.data.balance, required: error.response.data.requiredAmount });
-      } else {
-        setToast({ show: true, type: 'error', message: error.response?.data?.error || '캠페인 생성에 실패했습니다.' });
-      }
-    } finally {
-      setIsSending(false);
-    }
-  };
-
   // 담당자 사전수신
   const handleTestSend = async () => {
     setTestSending(true);
@@ -2301,54 +2134,6 @@ const campaignData = {
         />
       )}
 
-      {/* AI 발송 방식 선택 모달 */}
-      {showAiSendType && (
-        <AiSendTypeModal
-          onClose={() => { setShowAiSendType(false); setAiCampaignPrompt(''); }}
-          initialPrompt={aiCampaignPrompt}
-          onSelectHanjullo={(prompt) => {
-            setShowAiSendType(false);
-            setAiCampaignPrompt(prompt);
-            handleAiCampaignGenerate(prompt);
-          }}
-          onSelectCustom={() => {
-            setShowAiSendType(false);
-            setShowAiCustomFlow(true);
-          }}
-        />
-      )}
-
-      {/* AI 맞춤한줄 플로우 */}
-      {showAiCustomFlow && (
-        <AiCustomSendFlow
-          onClose={() => { setShowAiCustomFlow(false); setCustomSendData(null); setCustomFlowPreload(null); }}
-          preloadData={customFlowPreload || undefined}
-          onConfirmSend={(data) => {
-            setCustomSendData(data);
-            setShowCustomSendModal(true);
-          }}
-          brandName={user?.company?.name || '브랜드'}
-          callbackNumbers={callbackNumbers}
-          selectedCallback={selectedCallback}
-          isAd={isAd}
-          optOutNumber={optOutNumber}
-          setShowSpamFilter={setShowSpamFilter}
-          setSpamFilterData={setSpamFilterData}
-          handleTestSend={handleTestSend}
-          testSending={testSending}
-          testCooldown={testCooldown}
-          testSentResult={testSentResult}
-          sampleCustomer={sampleCustomer}
-          isSpamFilterLocked={isSpamFilterLocked}
-          /* ★ B1: MMS 이미지 첨부 (한줄로 AI와 동일 패턴 — Dashboard 부모 state 공유) */
-          mmsUploadedImages={mmsUploadedImages}
-          onMmsImageUpload={(files) => handleMmsMultiUpload(files!)}
-          onMmsFromAsset={handleMmsFromAsset}
-          onMmsImageRemove={handleMmsImageRemove}
-          mmsUploading={mmsUploading}
-        />
-      )}
-
       {/* AI 캠페인 발송 확정 모달 */}
       {showAiSendModal && (
         <AiCampaignSendModal
@@ -2374,34 +2159,6 @@ const campaignData = {
           />
         )}
 
-        {/* AI 맞춤한줄 발송 확정 모달 */}
-        {showCustomSendModal && customSendData && (
-          <AiCampaignSendModal
-            onClose={() => { setShowCustomSendModal(false); setCustomSendData(null); }}
-            onSend={(data) => handleAiCustomSend(data)}
-            isSending={isSending}
-            messageText={customSendData.variant?.message_text || ''}
-            selectedChannel={customSendData.channel}
-            suggestedCampaignName={customSendData.promotionCard?.name || 'AI 맞춤 캠페인'}
-            recommendedTime={''}
-            targetDescription={customSendData.targetCondition?.description || '전체 고객'}
-            targetCount={customSendData.estimatedCount || 0}
-            callbackNumbers={callbackNumbers}
-            defaultCallback={selectedCallback}
-            defaultUseIndividual={useIndividualCallback}
-            /* ★ D111 P3: Dashboard 전역 isAd 대신 맞춤한줄에서 사용자가 토글한 값(customSendData.isAd)을 전달.
-               이전: isAd={isAd} → Dashboard 전역값 사용 → 광고 제외로 토글해도 미리보기에 (광고)+080 표시 (실발송은 정상).
-               crm/sh 계정은 전역 isAd=false라 영향 없었고, 나머지 계정만 재현됨. */
-            isAd={customSendData.isAd ?? false}
-            optOutNumber={optOutNumber}
-            phoneFields={phoneFields}
-            subject={customSendData.variant?.subject}
-            usePersonalization={true}
-            sampleCustomer={sampleCustomer}
-            /* ★ B1 후속: 발송 확정 모달 폰 미리보기에도 MMS 이미지 표시 */
-            mmsImages={customSendData.channel === 'MMS' ? mmsUploadedImages : undefined}
-          />
-        )}
   
         {/* AI 프롬프트 입력 안내 모달 */}
       {showPromptAlert && (
@@ -3101,7 +2858,7 @@ const campaignData = {
 
             <div className="px-4 pt-1 pb-4">
              {/* 타겟 추출 탭 — 하단 카드 4개 (최근 캠페인 / AI 발송 템플릿 / AI 분석 / 예약 대기) 전수 삭제 (Harold 명시).
-                 모달 (showRecentCampaigns / showTemplates / showAnalysis / showScheduled) + state (recentCampaigns / scheduledCampaigns) 보존 — 다른 영역 호출 흐름 정합. */}
+                 모달 (showRecentCampaigns / showAnalysis / showScheduled) + state (recentCampaigns / scheduledCampaigns) 보존 — 다른 영역 호출 흐름 정합. */}
             {activeTab === 'target' && (
               <div className="hidden" />
             )}
@@ -3424,21 +3181,6 @@ const campaignData = {
         />
         
         <RecentCampaignModal show={showRecentCampaigns} onClose={() => setShowRecentCampaigns(false)} recentCampaigns={recentCampaigns} />
-
-        <RecommendTemplateModal
-          show={showTemplates}
-          onClose={() => setShowTemplates(false)}
-          onSelectHanjullo={(prompt) => {
-            setShowTemplates(false);
-            setAiCampaignPrompt(prompt);
-            handleAiCampaignGenerate(prompt);
-          }}
-          onSelectCustom={(preloadData) => {
-            setShowTemplates(false);
-            setCustomFlowPreload(preloadData);
-            setShowAiCustomFlow(true);
-          }}
-        />
                             {/* 파일 업로드 캠페인 모달 */}
         {/* 직접 타겟 설정 모달 (D43-3: 컴포넌트 분리) */}
         <DirectTargetFilterModal

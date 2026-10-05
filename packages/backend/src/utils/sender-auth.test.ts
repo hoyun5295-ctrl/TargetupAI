@@ -692,15 +692,16 @@ describe('[소스 스캔] 화면 배선', () => {
   });
 
   /**
-   * 화면이 서버 발송을 부르는 자리는 6곳이다(백엔드 게이트 3개를 이 6곳이 나눠 친다).
-   *   직접발송 · 타겟발송 · AI 오퍼레이터 승인 · AI 캠페인 생성발송 2곳 · AI 캠페인 이어보내기.
+   * 화면이 서버 발송을 부르는 자리는 5곳이다(백엔드 게이트 3개를 이 5곳이 나눠 친다).
+   *   직접발송 · 타겟발송 · AI 오퍼레이터 승인 · AI 캠페인 생성발송 · AI 캠페인 이어보내기.
+   *   ★ 2026-10-05 생성발송 1곳(AI 맞춤한줄)은 여는 곳이 0이던 창과 함께 지웠다(한줄로 시그니처 설계서 §1 H1).
    * 한 곳이라도 빠지면 그 화면은 "인증이 필요합니다"만 띄우고 입력할 곳을 안 주는 막다른 길이 된다.
    */
-  it('화면의 발송 호출 6곳이 전부 인증 요구를 받는다', () => {
+  it('화면의 발송 호출 5곳이 전부 인증 요구를 받는다', () => {
     const count = (src: string) =>
       (src.match(/senderAuth\.handleResponse\(/g) || []).length
       + (src.match(/senderAuth\.handleError\(/g) || []).length;
-    expect(count(dashboard), 'Dashboard 배선 수').toBe(5);
+    expect(count(dashboard), 'Dashboard 배선 수').toBe(4);
     expect(count(operator), 'AiOperatorPage 배선 수').toBe(1);
   });
 
