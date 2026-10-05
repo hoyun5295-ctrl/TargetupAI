@@ -4,6 +4,7 @@ import multer from 'multer';
 import path from 'path';
 import fs from 'fs';
 import { dropUploadedFiles } from '../utils/upload-cleanup';
+import { isMissingSchemaError, migrationPendingBody } from '../utils/db-errors';
 import {
   // 담당자
   getManagers,
@@ -190,6 +191,10 @@ router.post(
     } catch (error: any) {
       dropUploadedFiles(req); // ★ R341 신청 실패 = 저장한 서류 삭제
       console.error('발신번호 등록 신청 실패:', error);
+      // ★1005 접수에 회선 상한 판정이 붙어 companies 회선 정책 칸을 읽는다
+      if (isMissingSchemaError(error)) {
+        return res.status(503).json(migrationPendingBody('companies.subscriber_type · mobile_line_limit · landline_line_limit ALTER'));
+      }
       res.status(400).json({ error: error.message || '등록 신청 실패' });
     }
   }

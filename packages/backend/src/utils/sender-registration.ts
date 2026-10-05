@@ -258,6 +258,14 @@ export async function createRegistration(data: {
     throw new Error('이미 등록된 발신번호입니다.');
   }
 
+  // ★1005 전송자격인증 2.1 — 신청 접수도 등록 길목과 같은 회선 상한 판정을 지난다.
+  //   옛: 접수는 상한을 보지 않아 초과 신청이 「승인 대기」로 들어갔다(승인에서야 거부 · 고객 화면에선 통제가 안 보였다).
+  // ponytail: 대기 중 신청 건수는 세지 않는다 — 상한 직전에 연달아 낸 신청은 approveRegistration 의 같은 판정이 마지막 문으로 막는다.
+  const lineVerdict = await checkSenderLineLimit(data.companyId, data.phone);
+  if (lineVerdict.status === 'exceeded') {
+    throw new Error(lineVerdict.message);
+  }
+
   const result = await pool.query(
     `INSERT INTO sender_registrations
        (company_id, requested_by, phone, label, store_code, store_name, number_type, documents, request_note)

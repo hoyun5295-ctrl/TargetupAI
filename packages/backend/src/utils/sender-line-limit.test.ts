@@ -132,4 +132,23 @@ describe('등록 길목 전수 — 게이트가 빠진 곳이 없다', () => {
       expect(gate, `${path}: 게이트가 INSERT 뒤에 있다`).toBeLessThan(insert);
     }
   });
+
+  // ★1005 신청 접수에도 게이트가 붙었다. 접수 · 승인이 같은 파일이라 파일 단위 indexOf 로는 한쪽이 빠져도 통과한다 → 함수 단위로 본다
+  it('신청 접수 · 신청 승인이 각자 저장 전에 판정한다(함수 단위)', () => {
+    const src = read('./sender-registration.ts');
+    const CASES: Array<[string, string]> = [
+      ['createRegistration', 'INSERT INTO sender_registrations'],
+      ['approveRegistration', 'INSERT INTO callback_numbers'],
+    ];
+    for (const [fn, insertSql] of CASES) {
+      const start = src.indexOf(`export async function ${fn}(`);
+      expect(start, `${fn}: 함수가 없다`).toBeGreaterThan(-1);
+      const body = src.slice(start, src.indexOf('\nexport async function ', start + 1));
+      const gate = body.indexOf('checkSenderLineLimit(');
+      const insert = body.indexOf(insertSql);
+      expect(gate, `${fn}: 게이트 호출이 없다`).toBeGreaterThan(-1);
+      expect(insert, `${fn}: 저장 문장이 없다`).toBeGreaterThan(-1);
+      expect(gate, `${fn}: 게이트가 저장 뒤에 있다`).toBeLessThan(insert);
+    }
+  });
 });
