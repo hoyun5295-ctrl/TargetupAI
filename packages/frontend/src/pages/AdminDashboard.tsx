@@ -6234,8 +6234,9 @@ const handleApproveRequest = async (id: string) => {
                         <td className="px-4 py-2 text-xs text-gray-700">{h.company_name || '-'}</td>
                         <td className="px-4 py-2 font-mono text-xs text-gray-700">{h.ip_address || '-'}</td>
                         <td className="px-4 py-2">
-                          <span className={`px-2 py-0.5 text-[11px] rounded ${h.action === 'foreign_access_blocked' ? 'bg-rose-100 text-rose-700' : 'bg-gray-100 text-gray-600'}`}>
-                            {h.action === 'foreign_access_blocked' ? '차단' : '기록만'}
+                          {/* ★1005 전송자격인증 2.2 — 시행 뒤 예외 승인으로 통과한 감지(details.exempted)를 「기록만」으로 그리면 사실과 다르다 */}
+                          <span className={`px-2 py-0.5 text-[11px] rounded ${h.action === 'foreign_access_blocked' ? 'bg-rose-100 text-rose-700' : h.details?.exempted === true ? 'bg-amber-100 text-amber-700' : 'bg-gray-100 text-gray-600'}`}>
+                            {h.action === 'foreign_access_blocked' ? '차단' : h.details?.exempted === true ? '예외 통과' : '기록만'}
                           </span>
                         </td>
                       </tr>
