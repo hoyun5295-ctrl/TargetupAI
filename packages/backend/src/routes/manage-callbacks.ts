@@ -11,6 +11,7 @@ import {
   replaceAssignments,
 } from '../utils/sender-registration';
 import { normalizePhone } from '../utils/normalize-phone';
+import { checkCallbackSpec } from '../utils/callback-spec';
 
 const router = Router();
 
@@ -95,10 +96,12 @@ router.post('/', async (req: Request, res: Response) => {
   }
 
   // ★ D142+ (2026-04-29) 0429 PDF B5 — phone 정규화 + 중복 등록 사전 차단
-  const normalizedPhone = normalizePhone(phone);
-  if (normalizedPhone.length < 8 || normalizedPhone.length > 11) {
-    return res.status(400).json({ error: '유효하지 않은 발신번호 형식입니다.' });
+  // ★1005 발신번호 규격(세칙) — 길이(8~11)만 보던 검사를 세부지침 규격 전체로(utils/callback-spec.ts · 특부가 재등록 증빙 ⑥)
+  const phoneSpec = checkCallbackSpec(phone);
+  if (!phoneSpec.ok) {
+    return res.status(400).json({ error: phoneSpec.message, code: phoneSpec.code });
   }
+  const normalizedPhone = phoneSpec.digits;
 
   // 고객사관리자: 자체등록 허용 여부 체크
   if (callerType === 'company_admin') {

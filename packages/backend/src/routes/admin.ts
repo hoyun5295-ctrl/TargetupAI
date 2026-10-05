@@ -60,6 +60,7 @@ import { buildAdminAgentStatsXlsx } from '../utils/manage-stats-export';
 // ★ 2026-07-25 고객 대상 표는 엑셀(.xlsx)로 나간다 — LESSONS_BACKEND "고객 대상 xlsx = exceljs".
 import { buildXlsxBuffer, XLSX_CONTENT_TYPE, xlsxContentDisposition } from '../utils/xlsx-writer';
 import { normalizePhone } from '../utils/normalize-phone';
+import { checkCallbackSpec } from '../utils/callback-spec';
 import { normalizeSenderEmail, senderKeyClash } from '../utils/agency-send-email';
 // ★ 2026-08-26(3) 대행발송 운영 취소 — 효과는 고객 화면과 같은 CT를 지난다(입구만 다르다)
 import { cancelAgencyRequestTx } from '../utils/agency-send-cancel';
@@ -2601,10 +2602,12 @@ router.post('/callback-numbers', authenticate, requireSuperAdmin, async (req: Re
   // ★ D142+ (2026-04-29) 0429 PDF B5 — phone 정규화 + 중복 등록 사전 차단
   //   기존: 사용자 입력 그대로 INSERT → '02-3145-2186' / '0231452186' 같은 형식 차이로 중복 등록 가능
   //   변경: normalizePhone으로 통일 저장 + 사전 SELECT로 중복 체크 + DB UNIQUE 제약(별도 마이그레이션)
-  const normalizedPhone = normalizePhone(phone);
-  if (normalizedPhone.length < 8 || normalizedPhone.length > 11) {
-    return res.status(400).json({ error: '유효하지 않은 발신번호 형식입니다.' });
+  // ★1005 발신번호 규격(세칙) — 길이(8~11)만 보던 검사를 세부지침 규격 전체로(utils/callback-spec.ts · 특부가 재등록 증빙 ⑥)
+  const phoneSpec = checkCallbackSpec(phone);
+  if (!phoneSpec.ok) {
+    return res.status(400).json({ error: phoneSpec.message, code: phoneSpec.code });
   }
+  const normalizedPhone = phoneSpec.digits;
 
   try {
     // 사전 중복 체크 (정규화된 phone 기준 — 형식 차이로 인한 우회 차단)
@@ -2685,8 +2688,10 @@ router.put('/callback-numbers/:id', authenticate, requireSuperAdmin, async (req:
       const cur = curRes.rows[0];
       const nextNormalized = normalizePhone(phone);
       if (nextNormalized !== normalizePhone(String(cur.phone))) {
-        if (nextNormalized.length < 8 || nextNormalized.length > 11) {
-          return res.status(400).json({ error: '유효하지 않은 발신번호 형식입니다.' });
+        // ★1005 발신번호 규격(세칙) — 등록(POST)과 같은 검사
+        const nextSpec = checkCallbackSpec(phone);
+        if (!nextSpec.ok) {
+          return res.status(400).json({ error: nextSpec.message, code: nextSpec.code });
         }
         const dup = await query(
           `SELECT id FROM callback_numbers WHERE company_id = $1 AND regexp_replace(phone, '\\D', '', 'g') = $2 AND id <> $3`,

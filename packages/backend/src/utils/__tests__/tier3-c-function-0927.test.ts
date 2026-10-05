@@ -151,7 +151,8 @@ describe('R280 슈퍼관리자 발신번호 수정', () => {
     const a = src('..', 'routes', 'admin.ts');
     const b = between(a, "router.put('/callback-numbers/:id',", '\nrouter.');
     expect(b).toContain('if (nextNormalized !== normalizePhone(String(cur.phone))) {');
-    expect(b).toContain('if (nextNormalized.length < 8 || nextNormalized.length > 11) {');
+    // ★1005 형식 검사 = 길이(8~11) → 발신번호 규격(세칙) 함수(utils/callback-spec.ts)
+    expect(b).toContain('const nextSpec = checkCallbackSpec(phone);');
     expect(b).toContain("AND regexp_replace(phone, '\\\\D', '', 'g') = $2 AND id <> $3");
     expect(b).toContain('if (lineKindOf(phone) !== lineKindOf(cur.phone)) {');
     expect(b).toContain("if (error?.code === '23505') {");

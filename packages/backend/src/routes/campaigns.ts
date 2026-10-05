@@ -16,6 +16,7 @@ import { SUCCESS_CODES, PENDING_CODES, SUCCESS_CODES_SQL, PENDING_CODES_SQL, isS
 import { DEFAULT_COSTS, getCompanyCosts, redis, CACHE_TTL, BATCH_SIZES, SEND_HOURS } from '../config/defaults';
 import { isValidSmsTable } from '../utils/sms-table-validator';
 import { normalizePhone } from '../utils/normalize-phone';
+import { checkCallbackSpec } from '../utils/callback-spec';
 import { isValidCustomFieldKey } from '../utils/safe-field-name';
 import { fieldKeyToColumn, getFieldByKey } from '../utils/standard-field-map';
 import { tryAcquireInflight, releaseInflight } from '../utils/inflight-lock';
@@ -859,10 +860,11 @@ router.post('/:id/send', async (req: Request, res: Response) => {
     if (!useIndividualCallback) {
       const senderCallback = normalizePhone(campaign.callback_number || defaultCallback);
 
-      // 회신번호 최소 길이 검증 (한국 전화번호 최소 8자리)
-      if (senderCallback.length < 8 || senderCallback.length > 11) {
+      // ★1005 회신번호 규격(세칙) 검증 — 길이만 보던 것을 세부지침 규격 전체로(utils/callback-spec.ts)
+      const senderSpec = checkCallbackSpec(campaign.callback_number || defaultCallback);
+      if (!senderSpec.ok) {
         return res.status(400).json({
-          error: '유효하지 않은 회신번호입니다. 올바른 전화번호 형식으로 입력해주세요.',
+          error: `유효하지 않은 회신번호입니다. ${senderSpec.message}`,
           code: 'INVALID_CALLBACK_FORMAT'
         });
       }
@@ -1989,7 +1991,9 @@ router.post('/direct-send/commit', async (req: Request, res: Response) => {
     if (!callback && !useIndividualCallback) return res.status(400).json({ success: false, error: '회신번호를 선택해주세요' });
     if (!useIndividualCallback && callback) {
       const nc = normalizePhone(callback);
-      if (nc.length < 8 || nc.length > 11) return res.status(400).json({ success: false, error: '유효하지 않은 회신번호입니다.', code: 'INVALID_CALLBACK_FORMAT' });
+      // ★1005 회신번호 규격(세칙) 검증(utils/callback-spec.ts)
+      const ncSpec = checkCallbackSpec(callback);
+      if (!ncSpec.ok) return res.status(400).json({ success: false, error: `유효하지 않은 회신번호입니다. ${ncSpec.message}`, code: 'INVALID_CALLBACK_FORMAT' });
       const senderCheck = await query(
         `SELECT phone FROM (SELECT REPLACE(phone_number, '-', '') AS phone FROM sender_numbers WHERE company_id = $1 AND is_active = true UNION SELECT REPLACE(phone, '-', '') AS phone FROM callback_numbers WHERE company_id = $1) t WHERE phone = $2 LIMIT 1`,
         [companyId, nc]
@@ -2445,11 +2449,12 @@ router.post('/direct-send', async (req: Request, res: Response) => {
     if (!useIndividualCallback && callback) {
       const normalizedCallback = normalizePhone(callback);
 
-      // 회신번호 최소 길이 검증 (한국 전화번호 최소 8자리)
-      if (normalizedCallback.length < 8 || normalizedCallback.length > 11) {
+      // ★1005 회신번호 규격(세칙) 검증 — 길이만 보던 것을 세부지침 규격 전체로(utils/callback-spec.ts)
+      const callbackSpec = checkCallbackSpec(callback);
+      if (!callbackSpec.ok) {
         return res.status(400).json({
           success: false,
-          error: '유효하지 않은 회신번호입니다. 올바른 전화번호 형식으로 입력해주세요.',
+          error: `유효하지 않은 회신번호입니다. ${callbackSpec.message}`,
           code: 'INVALID_CALLBACK_FORMAT'
         });
       }

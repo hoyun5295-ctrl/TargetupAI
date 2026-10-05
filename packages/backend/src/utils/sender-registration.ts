@@ -9,6 +9,7 @@
 import pool from '../config/database';
 import { checkSenderLineLimit } from './sender-line-limit';
 import { normalizePhone } from './normalize-phone';
+import { checkCallbackSpec } from './callback-spec';
 
 // ============================================================
 //  타입 정의
@@ -233,6 +234,12 @@ export async function createRegistration(data: {
   documents: DocumentInfo[];
   requestNote?: string;
 }): Promise<SenderRegistration> {
+  // ★1005 발신번호 규격(세칙) — 접수 단계에서 먼저 거른다(utils/callback-spec.ts · 특부가 재등록 증빙 ⑥)
+  const spec = checkCallbackSpec(data.phone);
+  if (!spec.ok) {
+    throw new Error(spec.message);
+  }
+
   // 승인된 담당자 존재 여부 체크 (1차 위임장 승인 완료 필수)
   const approved = await hasApprovedManager(data.companyId);
   if (!approved) {
@@ -384,6 +391,12 @@ export async function approveRegistration(
     );
     if (existCheck.rows.length > 0) {
       throw new Error('이미 등록된 발신번호입니다. 신청을 반려 처리해주세요.');
+    }
+
+    // ★1005 발신번호 규격(세칙) — 승인이 실제 등록 길목이다. 규격 이전에 접수된 신청도 여기서 거른다
+    const regSpec = checkCallbackSpec(reg.phone);
+    if (!regSpec.ok) {
+      throw new Error(`${regSpec.message} 신청을 반려해주세요.`);
     }
 
     // ★ 2026-08-18 전송자격인증 2.1 — 승인이 실제 등록 길목이다. 상한 초과면 승인하지 않는다

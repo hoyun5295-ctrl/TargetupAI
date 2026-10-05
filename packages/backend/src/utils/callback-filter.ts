@@ -14,6 +14,7 @@
 
 import { query } from '../config/database';
 import { normalizePhone } from './normalize-phone';
+import { checkCallbackSpec } from './callback-spec';
 
 /** 미등록 회신번호별 제외 상세 */
 export interface UnregisteredCallbackDetail {
@@ -184,7 +185,9 @@ export async function getRegisteredCallbackSet(companyId: string, userId?: strin
   }
 
   const registeredResult = await query(registeredSql, registeredParams);
-  return new Set((registeredResult.rows as any[]).map((r: any) => r.phone));
+  // ★1005 발신번호 규격(세칙) — 규격 이전에 등록된 위반 번호는 등록 번호로 치지 않는다(Codex 1R high · 개별 회신번호가 차감 · 적재까지 가던 구멍).
+  //   이 집합을 쓰는 길목(개별 회신번호 필터 · 단건 판정 · 대행 · 스팸 검사)이 전부 여기서 같이 막힌다. 집합 값의 표기는 종전 그대로다.
+  return new Set((registeredResult.rows as any[]).filter((r: any) => checkCallbackSpec(r.phone).ok).map((r: any) => r.phone));
 }
 
 /**
