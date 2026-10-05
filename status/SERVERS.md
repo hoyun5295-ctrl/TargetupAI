@@ -23,6 +23,14 @@
 
 **자원은 여섯 대 모두 여유롭다.** 부하 최대가 `.54`의 36%, 디스크 최대가 `.54`의 55%다. 성능이 병목인 지점은 현재 없다.
 
+### ★2026-10-06 보안 조치 (.62 · .65 · 특부가 재등록 ⑯ 실측 · Harold 실행)
+- **두 서버 공통**: 침입탐지 Suricata 7.0.3(af-packet `eno1` · `copy-mode` 없음 = 탐지 전용 · ET Open 룰 · `/etc/cron.daily/suricata-update` · systemd 드롭인 `suricata.service.d/limits.conf` CPUQuota .62 200% · .65 400% · Nice 10 · IO idle · 로그 주 1회 × 26) · 웹방화벽 ModSecurity 3.0.12 + CRS 3.3.5(`/etc/nginx/conf.d/modsecurity.conf` → `/etc/nginx/modsec/main.conf` · **DetectionOnly** · 감사 로그 `/var/log/nginx/modsec_audit.log` 헤더만) · ClamAV(`/etc/cron.weekly/clamav-scan` · nice/ionice) · AIDE(초기 색인) · auditd · sysstat · acct · pwquality · SSH 드롭인 `sshd_config.d/90-hardening.conf`(MaxAuthTries 3 · X11 no · ClientAliveCountMax 2 · LogLevel VERBOSE) · `sysctl.d/90-hardening.conf`(리다이렉트 · martians · dmesg/kptr · suid_dumpable · **ip_forward 미변경**) · `modprobe.d/90-hardening.conf`(dccp · sctp · rds · tipc · usb-storage) · core dump 차단 · 경고문 · login.defs 90일(신규 계정만). Lynis .62 66→74 · .65 70→76.
+- **.65**: 자동 보안 업데이트가 `20auto-upgrades` "0" 으로 꺼져 125건 밀려 있었다 → 일괄 적용 · 재부팅(00:44 · 약 2분 정지 · 직전 10분 발송 0 · 고객 Agent 재접속 확인) · 커널 6.8.0-142 · 자동 업데이트 "1" + `needrestart/conf.d/90-list-only.conf`(자동 재시작 안 함 · 도커 무단 재시작 방지). ops.hanjulgw.com 보안 헤더 5종(`snippets/security-headers.conf` · 원본 `/root/bito-dashboard.bak-20261006`) · `server_tokens off`. **관리 API Node 18.19.1 = 지원 종료**.
+- **.62**: 커널 6.8.0-142 설치 · **구동은 124(재부팅 대기)** · 재부팅 전제 = PM2 부팅 자동 기동 · QTmsg 에이전트 기동 정리(아래 리스크 원장 재부팅 공백).
+- **TLS 1.0 · 1.1 이 두 서버 모든 도메인에서 실제로 받아진다**(사이트 블록에 1.2+ 를 적어도 `nginx.conf:35` 기본값이 이김 · openssl 실측). Suricata eve 의 TLS 버전으로 24시간 센 뒤 끈다.
+- **⑯에 「조치 예정」으로 약속한 날짜**: TLS 1.2+ · fail2ban 로그 26주 = 10-07 / npm 호환 업데이트(fast-xml-parser critical 포함) = 10-09 / .62 재부팅 = 10-11 / 웹방화벽 차단 전환 = 10-13 / 큰 버전 의존성 · Node 20 · 기존 계정 비밀번호 기간 · DB 복원 시험 = 10-31. 원장 = `docs/2026-08-18-transmission-qualification-cert.md` ★1005~06 줄.
+- [범위 밖 · 기록만] .62 `sites-enabled` 에 한줄전단 `.bak` 사이트 파일 2개가 같이 실려 있다(`include sites-enabled/*`).
+
 ## 2. 서버별 상세
 
 ### .62 — 한줄로 운영 (58.227.193.62 / `administrator`)
