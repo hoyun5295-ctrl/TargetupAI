@@ -15,8 +15,9 @@ import { useNavigate } from 'react-router-dom';
 import {
   ArrowLeft, ImagePlus, Loader2, ShoppingBag, Upload, Wand2,
   Check, Save, PenLine, ChevronLeft, Sparkles, FolderOpen,
-  Layers, Smartphone, Mail, X,
+  Layers, Smartphone, Mail, X, Search,
 } from 'lucide-react';
+import ZoneSegmented from '../components/zone/ZoneSegmented';
 import { goBackOr } from '../lib/scroll-restoration';
 import { putStudioDraft, STUDIO_INAPP_DRAFT_KEY, STUDIO_DM_DRAFT_KEY, STUDIO_EMAIL_DRAFT_KEY } from '../lib/studio-draft';
 import { useToast } from '../components/ToastProvider';
@@ -44,6 +45,8 @@ interface StudioTemplatePublic {
   defaultTexts: { label?: string; title?: string; subtitle?: string };
   /** 카드 목업 예시 카피(템플릿 무드별 실카피). */
   sample?: { title: string; subtitle?: string };
+  /** ★ 2026-10-06 세부 카테고리(20종 이상 카테고리만 · 없으면 null) — 갤러리 걸러보기 축. */
+  sub?: string | null;
 }
 interface Candidate { tempId: string; url: string; blob?: string; presetKey: string; title?: string }
 
@@ -95,6 +98,11 @@ export default function ImageStudioPage() {
   const [template, setTemplate] = useState<StudioTemplatePublic | null>(null);
   // ★ 2026-07-31 트랙 축 — 제품 포스터(누끼) / 행사 포스터(멤버십데이·오픈·시즌 행사, 제품 없이 성립)
   const [trackKind, setTrackKind] = useState<'product' | 'event'>('product');
+  // ★ 2026-10-06 (Harold) 세부 카테고리 칩 · 템플릿 검색 — 502종을 카테고리 한 겹으로는 못 고른다.
+  //   sub = '' 이면 카테고리 전체. 검색어가 있으면 트랙 · 카테고리와 무관하게 전부에서 찾는다.
+  const [subOrder, setSubOrder] = useState<Record<string, string[]>>({});
+  const [sub, setSub] = useState('');
+  const [query, setQuery] = useState('');
   // ★ 2026-08-09 행사 포스터 문구 위치(위/중앙/아래) — 기본 위(Harold 재확정: 갤러리 예시와 같은 구도로 시작, 중앙·아래는 선택). 제품 포스터는 템플릿 기본 배치 유지라 미전달.
   const [textPosition, setTextPosition] = useState<'top' | 'center' | 'bottom'>('top');
 
@@ -141,7 +149,10 @@ export default function ImageStudioPage() {
 
   useEffect(() => {
     authFetch('/api/image-studio/status').then((r) => r.json()).then((d) => setReady(!!d?.ready)).catch(() => setReady(true));
-    authFetch('/api/image-studio/templates').then((r) => r.json()).then((d) => setTemplates(Array.isArray(d?.templates) ? d.templates : [])).catch(() => setTemplates([]));
+    authFetch('/api/image-studio/templates').then((r) => r.json()).then((d) => {
+      setTemplates(Array.isArray(d?.templates) ? d.templates : []);
+      setSubOrder(d?.subOrder && typeof d.subOrder === 'object' ? d.subOrder : {});
+    }).catch(() => setTemplates([]));
     loadLibrary();
     return () => { objectUrls.current.forEach((u) => URL.revokeObjectURL(u)); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -158,9 +169,39 @@ export default function ImageStudioPage() {
     }
     return Array.from(map.entries()).map(([name, v]) => ({ name, ...v }));
   }, [templates, trackKind]);
-  const visibleTemplates = useMemo(
+  // 검색 — 공백을 지우고 대소문자를 무시해 이름 · 카테고리 · 세부 · 추천 용도 · 설명 · 예시 문구에서 찾는다.
+  //   순서 = 카테고리 · 세부 이름이 맞는 것 → 템플릿 이름이 맞는 것 → 설명 · 용도 · 예시 문구만 맞는 것(같은 순위 안은 카탈로그 순서).
+  const searchKey = query.replace(/\s+/g, '').toLowerCase();
+  const searchResults = useMemo(() => {
+    if (!searchKey) return [];
+    const has = (s?: string | null) => (s || '').replace(/\s+/g, '').toLowerCase().includes(searchKey);
+    const rank = (t: StudioTemplatePublic) => {
+      if (has(t.category) || has(t.sub)) return 0;
+      if (has(t.name)) return 1;
+      if (has(t.useCase) || has(t.desc) || has(t.sample?.title) || has(t.sample?.subtitle)) return 2;
+      return -1;
+    };
+    return templates
+      .map((t) => ({ t, r: rank(t) }))
+      .filter((x) => x.r >= 0)
+      .sort((a, b) => a.r - b.r)
+      .map((x) => x.t);
+  }, [templates, searchKey]);
+  const inCategory = useMemo(
     () => (category ? templates.filter((t) => (t.kind || 'product') === trackKind && t.category === category) : []),
     [templates, category, trackKind],
+  );
+  // 세부 칩 = 서버가 준 순서 · 그 카테고리에 실제 있는 것만 · 맨 앞 「전체」.
+  const subItems = useMemo(() => {
+    const order = (category && subOrder[category]) || [];
+    const items = order
+      .map((s) => ({ id: s, label: s, count: inCategory.filter((t) => t.sub === s).length }))
+      .filter((it) => it.count > 0);
+    return items.length ? [{ id: '', label: '전체', count: inCategory.length }, ...items] : [];
+  }, [category, subOrder, inCategory]);
+  const visibleTemplates = useMemo(
+    () => (searchKey ? searchResults : sub ? inCategory.filter((t) => t.sub === sub) : inCategory),
+    [searchKey, searchResults, sub, inCategory],
   );
 
   // ★ 2026-08-11 갤러리 페이징 (Harold 지시) — 한 페이지 10개, 카드를 키워 예시가 실제로 보이게 한다.
@@ -175,7 +216,9 @@ export default function ImageStudioPage() {
   // ⛔ 페이지 초기화는 **카테고리·트랙을 바꿀 때만**이다(Harold 지시).
   //   템플릿을 골랐다가 돌아올 때 1페이지로 되돌리면, 3페이지에서 고른 사람은 매번 그 페이지를 다시 찾아가야 한다.
   //   stage 전환은 이 의존성에 없으므로 갤러리로 돌아와도 보던 페이지가 그대로 남는다.
-  useEffect(() => { setTplPage(1); }, [category, trackKind]);
+  useEffect(() => { setTplPage(1); }, [category, trackKind, sub, searchKey]);
+  // 카테고리 · 트랙을 바꾸면 세부는 「전체」로 — 다른 카테고리에 없는 세부가 남아 빈 목록이 뜨는 것을 막는다.
+  useEffect(() => { setSub(''); }, [category, trackKind]);
   // 목록이 줄어 현재 페이지가 비면(예: 검색·데이터 갱신) 마지막 페이지로 당긴다 — 빈 화면 방지.
   useEffect(() => { if (tplPage > tplTotalPages) setTplPage(tplTotalPages); }, [tplPage, tplTotalPages]);
 
@@ -343,7 +386,7 @@ export default function ImageStudioPage() {
     >
       <div className="space-y-6">
         {/* 0단계 — 내 라이브러리 폴더 (저장 소재 스트립) */}
-        {stage === 'gallery' && !category && libAssets.length > 0 && (
+        {stage === 'gallery' && !category && !searchKey && libAssets.length > 0 && (
           <section className="rounded-2xl border border-slate-200 bg-white p-4">
             <div className="flex items-center justify-between mb-3">
               <h2 className="text-sm font-bold flex items-center gap-2">
@@ -371,8 +414,27 @@ export default function ImageStudioPage() {
           </section>
         )}
 
+        {/* ★ 2026-10-06 템플릿 검색(Harold) — 제품 · 행사 · 모든 카테고리를 한 번에 찾는다. 지우면 보던 화면으로 돌아간다. */}
+        {stage === 'gallery' && (
+          <div className="relative mb-4">
+            <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+            <input
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="템플릿 찾기 (예: 오픈, 립, 국물, 멤버십)"
+              aria-label="템플릿 찾기"
+              className="w-full h-10 pl-9 pr-9 rounded-xl border border-slate-200 bg-white text-sm text-slate-900 placeholder-slate-400 focus:outline-none focus:border-violet-300"
+            />
+            {query && (
+              <button type="button" onClick={() => setQuery('')} aria-label="검색어 지우기" className="absolute right-2 top-1/2 -translate-y-1/2 w-7 h-7 flex items-center justify-center rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100">
+                <X className="w-4 h-4" />
+              </button>
+            )}
+          </div>
+        )}
+
         {/* 1단계-a — 카테고리 선택 */}
-        {stage === 'gallery' && !category && (
+        {stage === 'gallery' && !category && !searchKey && (
           <section>
             {/* ★ 2026-07-31 트랙 축 — 제품 포스터 / 행사 포스터 명확 분리 (Harold) */}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-5">
@@ -416,23 +478,50 @@ export default function ImageStudioPage() {
         )}
 
         {/* 1단계-b — 템플릿 선택 (컴팩트 카드) */}
-        {stage === 'gallery' && category && (
+        {stage === 'gallery' && (category || searchKey) && (
           <section>
-            <div className="flex items-center gap-2 mb-3">
-              <button onClick={() => setCategory(null)} className="flex items-center gap-1 text-xs px-2.5 py-1.5 rounded-lg border border-slate-200 text-slate-500 hover:text-slate-900 hover:bg-slate-100">
-                <ChevronLeft className="w-3.5 h-3.5" /> 카테고리
-              </button>
-              <h2 className="text-sm font-bold text-slate-800">{category}</h2>
-              <span className="text-[11px] text-slate-400">총 {visibleTemplates.length}종</span>
-            </div>
+            {searchKey ? (
+              <div className="flex items-center gap-2 mb-3 flex-wrap">
+                <button onClick={() => setQuery('')} className="flex items-center gap-1 text-xs px-2.5 py-1.5 rounded-lg border border-slate-200 text-slate-500 hover:text-slate-900 hover:bg-slate-100">
+                  <ChevronLeft className="w-3.5 h-3.5" /> {category ? category : '카테고리'}
+                </button>
+                <h2 className="text-sm font-bold text-slate-800">「{query.trim()}」 검색 결과</h2>
+                <span className="text-[11px] text-slate-400">총 {visibleTemplates.length}종 · 제품 · 행사 전체</span>
+              </div>
+            ) : (
+              <>
+                <div className="flex items-center gap-2 mb-3">
+                  <button onClick={() => setCategory(null)} className="flex items-center gap-1 text-xs px-2.5 py-1.5 rounded-lg border border-slate-200 text-slate-500 hover:text-slate-900 hover:bg-slate-100">
+                    <ChevronLeft className="w-3.5 h-3.5" /> 카테고리
+                  </button>
+                  <h2 className="text-sm font-bold text-slate-800">{category}</h2>
+                  <span className="text-[11px] text-slate-400">총 {visibleTemplates.length}종</span>
+                </div>
+                {/* ★ 2026-10-06 세부 카테고리 — 누르면 그 세부만. 20종 이상 카테고리만 칩이 있다. */}
+                {subItems.length > 0 && (
+                  <div className="mb-4">
+                    <ZoneSegmented items={subItems} value={sub} onChange={setSub} ariaLabel={`${category} 세부 카테고리`} />
+                  </div>
+                )}
+              </>
+            )}
+            {searchKey && visibleTemplates.length === 0 && (
+              <div className="rounded-2xl border border-dashed border-slate-200 bg-white px-4 py-8 text-center text-sm text-slate-500">
+                「{query.trim()}」에 맞는 템플릿이 없어요. 다른 말로 찾아보세요 (예: 오픈 · 립 · 국물 · 멤버십)
+              </div>
+            )}
             {/* ★ 2026-08-11 5열 × 2행 = 한 페이지 10개. 열을 줄여 카드가 커지고 예시가 실제로 읽힌다. */}
             <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4">
               {pagedTemplates.map((t) => (
                 <button
                   key={t.id}
                   onClick={() => { setTemplate(t); setStage('setup'); }}
-                  className="group rounded-2xl border border-slate-200 overflow-hidden text-left hover:border-violet-300 hover:bg-white transition bg-slate-100"
+                  className="group relative rounded-2xl border border-slate-200 overflow-hidden text-left hover:border-violet-300 hover:bg-white transition bg-slate-100"
                 >
+                  {/* ★ 2026-10-06 제품 · 행사 칩 — 검색 결과처럼 두 트랙이 섞여도 바로 구분된다. */}
+                  <span className={`absolute top-2 left-2 z-10 px-2 py-0.5 rounded-full text-[10px] font-bold shadow-sm ${(t.kind || 'product') === 'event' ? 'bg-fuchsia-100 text-fuchsia-800' : 'bg-violet-100 text-violet-800'}`}>
+                    {(t.kind || 'product') === 'event' ? '행사' : '제품'}
+                  </span>
                   {t.exampleUrl ? (
                     <img src={t.exampleUrl} alt={t.name} loading="lazy" className="w-full aspect-[3/4] object-cover" />
                   ) : (
@@ -447,6 +536,7 @@ export default function ImageStudioPage() {
                   )}
                   <div className="p-3">
                     <div className="text-[13px] font-semibold truncate">{t.name}</div>
+                    {searchKey && <div className="text-[10px] text-violet-700 truncate mt-0.5">{t.category}{t.sub ? ` · ${t.sub}` : ''}</div>}
                     <div className="text-[10px] text-slate-400 truncate mt-0.5">{t.desc}</div>
                     {/* 추천 용도 — 185종을 하나씩 열어 보지 않고 고르게 하는 축(2줄까지 보여준다). */}
                     {t.useCase && (
@@ -480,7 +570,7 @@ export default function ImageStudioPage() {
                 </button>
               </div>
             )}
-            <p className="text-[10px] text-slate-400 italic mt-3">Data source: 템플릿을 고르면 상품과 문구를 넣는 단계로 이동합니다. 돌아오면 보던 페이지가 유지됩니다.</p>
+            <p className="text-[10px] text-slate-400 italic mt-3">Data source: 템플릿을 고르면 상품과 문구를 넣는 단계로 이동합니다. 돌아오면 보던 페이지{searchKey ? '와 검색 결과' : ''}가 유지됩니다.</p>
           </section>
         )}
 

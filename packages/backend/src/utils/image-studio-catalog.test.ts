@@ -12,6 +12,7 @@
  */
 import { describe, it, expect } from 'vitest';
 import { STUDIO_TEMPLATES, listTemplatesPublic } from './image-studio-templates';
+import { TEMPLATE_SUB_GROUPS, SUB_BY_ID } from './image-studio-template-subs';
 
 /**
  * §2-2 금지 표기를 두 층으로 나눈다 — **어디에 쓰였는가로 죄가 갈린다.**
@@ -91,5 +92,29 @@ describe('이미지 스튜디오 카탈로그', () => {
       .filter((t) => t.kind === 'event' && !EVENT_CATEGORIES.includes(t.category))
       .map((t) => t.id);
     expect(strayEvent, `제품 카테고리인데 kind가 event다: ${strayEvent.join(', ')}`).toEqual([]);
+  });
+
+  // ★ 2026-10-06 세부 카테고리 — 나눈 카테고리에 새 템플릿을 넣고 배정을 빼먹으면 그 템플릿은 「전체」에만 보이고 어느 칩에도 안 잡힌다.
+  it('세부를 나눈 카테고리의 모든 템플릿이 세부를 하나씩 갖고, 표에 없는 id · 다른 카테고리 id가 없다', () => {
+    const byId = new Map(STUDIO_TEMPLATES.map((t) => [t.id, t]));
+    const missing = STUDIO_TEMPLATES.filter((t) => TEMPLATE_SUB_GROUPS[t.category] && !SUB_BY_ID[t.id]).map((t) => t.id);
+    expect(missing, `세부 미배정: ${missing.join(', ')}`).toEqual([]);
+
+    const seen: string[] = [];
+    const wrong: string[] = [];
+    for (const [cat, groups] of Object.entries(TEMPLATE_SUB_GROUPS)) {
+      for (const g of groups) {
+        for (const id of g.ids) {
+          seen.push(id);
+          if (byId.get(id)?.category !== cat) wrong.push(`${cat}/${g.sub}/${id}`);
+        }
+      }
+    }
+    expect(wrong, `없는 id 또는 다른 카테고리 id: ${wrong.join(', ')}`).toEqual([]);
+    const dup = seen.filter((id, i) => seen.indexOf(id) !== i);
+    expect(dup, `두 세부에 배정된 id: ${dup.join(', ')}`).toEqual([]);
+
+    const small = STUDIO_TEMPLATES.filter((t) => !TEMPLATE_SUB_GROUPS[t.category]);
+    expect(small.every((t) => listTemplatesPublic().find((p) => p.id === t.id)?.sub === null)).toBe(true);
   });
 });

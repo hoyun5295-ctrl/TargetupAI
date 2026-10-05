@@ -42,6 +42,7 @@ import {
   type ComposeTypography,
 } from '../utils/image-studio';
 import { getTemplate, listTemplatesPublic, findUnfilledTemplateText } from '../utils/image-studio-templates';
+import { SUB_ORDER } from '../utils/image-studio-template-subs';
 
 export const imageStudioRouter = Router();
 
@@ -101,7 +102,8 @@ imageStudioRouter.get('/templates', (_req: any, res: Response) => {
     ...t,
     exampleUrl: t.exampleUrl || (findTemplateSample(t.id) ? `/api/image-studio/template-sample/${t.id}` : null),
   }));
-  return res.json({ success: true, templates });
+  // ★ 2026-10-06 subOrder = 카테고리별 세부 칩 순서(화면이 이 순서로 칩을 그린다)
+  return res.json({ success: true, templates, subOrder: SUB_ORDER });
 });
 
 // ── POST /template-samples/generate — 예시 실샘플 배치 생성 (★슈퍼관리자 전용·내부 원가) ──

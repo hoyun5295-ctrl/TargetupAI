@@ -17,6 +17,7 @@
 // ★ 2026-07-31 행사 포스터 트랙(Harold) — 제품 없이 행사 내용만으로 만드는 포스터(멤버십데이·오픈·시즌 행사·팝업).
 //   kind='event' 카테고리 4종 신설. 기존 7종 = 제품 트랙(kind 생략 = 'product').
 import { TEMPLATES_2610 } from './image-studio-templates-2610';
+import { SUB_BY_ID } from './image-studio-template-subs';
 
 export type TemplateCategory =
   | '뷰티' | '카페·음료' | '신메뉴·팝' | '세일·이벤트' | '패션' | '미니멀' | '시즌'
@@ -4218,6 +4219,8 @@ export function listTemplatesPublic() {
   return STUDIO_TEMPLATES.map((t) => ({
     id: t.id, name: t.name, category: t.category, kind: t.kind || 'product', desc: t.desc, useCase: t.useCase, accent: t.accent,
     exampleUrl: t.exampleUrl || null, defaultTexts: t.defaultTexts, sample: t.sample,
+    // ★ 2026-10-06 세부 카테고리(갤러리 걸러보기 · 20종 이상 카테고리만 · 없으면 null) = image-studio-template-subs.ts
+    sub: SUB_BY_ID[t.id] || null,
   }));
 }
 
