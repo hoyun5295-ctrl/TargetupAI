@@ -139,7 +139,7 @@ def main():
             tmp.write(body)
             tmp_path = tmp.name
         target = os.path.join(out_dir, name[:-3] + '.docx')
-        subprocess.run(['pandoc', tmp_path, '-f', 'gfm', '-t', 'docx', '-o', target], check=True)
+        subprocess.run(['pandoc', tmp_path, '-f', 'gfm', '-t', 'docx', '--resource-path', SRC, '-o', target], check=True)
         os.unlink(tmp_path)
         polish(target)
         flag = (' · 경고: ' + ', '.join(warns)) if warns else ''
