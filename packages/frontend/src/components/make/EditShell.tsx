@@ -8,7 +8,7 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import {
   ArrowLeft, Check, Loader2, Pencil, Undo2, Redo2, Send, Smartphone, Mail, GripVertical, Plus, X, AlertCircle,
-  Monitor, RectangleHorizontal, FileText, LayoutGrid, AlignJustify, Images, Ticket, Timer, Star, MapPin, Link2, Video, Tag, Square, Minus, Gift,
+  Monitor, RectangleHorizontal, FileText, LayoutGrid, AlignJustify, Images, Ticket, Timer, Star, MapPin, Link2, Video, Tag, Square, Minus, Gift, Trash2,
 } from 'lucide-react';
 import { DndContext, closestCenter, KeyboardSensor, PointerSensor, useSensor, useSensors, type DragEndEvent } from '@dnd-kit/core';
 import { SortableContext, sortableKeyboardCoordinates, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable';
@@ -123,13 +123,15 @@ export function BlockIcon({ type, className = 'w-4 h-4' }: { type: string; class
 
 export interface BlockRowItem { id: string; type: string; label: string; summary: string; auto?: boolean; thumb?: string | null; index?: number }
 
-export function BlockList({ title, hint, items, selectedId, onSelect, onReorder, top, footer, emptyText }: {
+export function BlockList({ title, hint, items, selectedId, onSelect, onReorder, onRemove, top, footer, emptyText }: {
   title: string;
   hint?: string;
   items: BlockRowItem[];
   selectedId: string | null;
   onSelect: (id: string) => void;
   onReorder: (from: number, to: number) => void;
+  /** 줄마다 빼기 버튼(★1006 카탈로그 쪽 목록) — 안 주면 버튼을 그리지 않는다 */
+  onRemove?: (id: string) => void;
   top?: ReactNode;
   footer?: ReactNode;
   emptyText?: string;
@@ -151,7 +153,7 @@ export function BlockList({ title, hint, items, selectedId, onSelect, onReorder,
       <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={onEnd}>
         <SortableContext items={items.map((i) => i.id)} strategy={verticalListSortingStrategy}>
           <div className="space-y-2">
-            {items.map((it) => <Row key={it.id} item={it} selected={selectedId === it.id} onSelect={() => onSelect(it.id)} />)}
+            {items.map((it) => <Row key={it.id} item={it} selected={selectedId === it.id} onSelect={() => onSelect(it.id)} onRemove={onRemove ? () => onRemove(it.id) : undefined} />)}
           </div>
         </SortableContext>
       </DndContext>
@@ -161,7 +163,7 @@ export function BlockList({ title, hint, items, selectedId, onSelect, onReorder,
   );
 }
 
-function Row({ item, selected, onSelect }: { item: BlockRowItem; selected: boolean; onSelect: () => void }) {
+function Row({ item, selected, onSelect, onRemove }: { item: BlockRowItem; selected: boolean; onSelect: () => void; onRemove?: () => void }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: item.id });
   return (
     <div ref={setNodeRef} style={{ transform: CSS.Transform.toString(transform), transition, opacity: isDragging ? 0.6 : 1, zIndex: isDragging ? 10 : undefined }}
@@ -179,6 +181,7 @@ function Row({ item, selected, onSelect }: { item: BlockRowItem; selected: boole
         <span className="block text-[11.5px] text-slate-500 truncate mt-0.5">{item.summary}</span>
       </span>
       {item.auto && <span className="text-[10.5px] text-slate-500 border border-slate-300 rounded-md px-1.5 py-px shrink-0">자동</span>}
+      {onRemove && <button type="button" onClick={(e) => { e.stopPropagation(); onRemove(); }} className="w-8 h-8 rounded-lg text-slate-400 hover:text-rose-700 hover:bg-rose-50 flex items-center justify-center shrink-0" aria-label={`${item.label} 빼기`} title={`${item.label} 빼기`}><Trash2 className="w-4 h-4" /></button>}
     </div>
   );
 }

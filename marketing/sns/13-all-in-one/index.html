@@ -1,0 +1,195 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>한줄로 AI 올인원</title>
+<!--
+  릴스 13 · 올인원(37.5초 · 128 BPM 20마디): 할 일 폭주 → 한 점으로 → 열두 기능 카드(한 마디씩) → 한 판으로 → 아웃트로
+  기능 순서 = AI 존 허브 묶음(자동화 · 발송 채널 · 제작 도구 · 고객 이해·분석). 공용 = ../common
+-->
+<link rel="stylesheet" href="../common/reel.css">
+<style>
+  .todo { padding: 16px 26px; border-radius: 999px; background: #fff; border: 2px solid var(--line); font-size: 30px; font-weight: 700; white-space: nowrap; box-shadow: 0 12px 30px rgba(17,17,17,.10); }
+  .todo:nth-child(3n) { background: var(--ink); color: #fff; border-color: var(--ink); }
+  .todo:nth-child(4n) { background: var(--ac-soft); border-color: #FED7C3; color: #9A3412; }
+  #big { left: 160px; top: 760px; width: 760px; height: 170px; }
+  #big img { position: absolute; left: 0; top: 0; width: 760px; }
+
+  #mh { left: 0; width: 1080px; top: 300px; text-align: center; font-size: 42px; font-weight: 700; color: #52525B; }
+  .fc { left: 80px; top: 390px; width: 920px; height: 1010px; border-radius: 48px; background: #fff; border: 2px solid var(--line); box-shadow: 0 40px 100px rgba(17,17,17,.12); overflow: hidden; }
+  .vis { position: relative; height: 640px; background: #F7F7F5; border-bottom: 2px solid var(--line); overflow: hidden; }
+  .fc .bd { padding: 40px 50px; }
+  .fc .no { display: flex; align-items: center; gap: 14px; font-size: 26px; font-weight: 800; color: #52525B; }
+  .fc .no .lbl { background: var(--ink); color: #fff; }
+  .fc h2 { margin-top: 18px; font-size: 84px; font-weight: 900; letter-spacing: -0.05em; }
+  .fc p { margin-top: 14px; font-size: 38px; font-weight: 600; color: #3F3F46; letter-spacing: -0.03em; }
+  #dots { left: 0; width: 1080px; top: 1460px; display: flex; justify-content: center; gap: 14px; }
+  #dots i { width: 22px; height: 22px; border-radius: 50%; background: #E4E4E7; display: block; }
+  #dots i.on { background: var(--ink); }
+  #dots i.cur { background: var(--ac); transform: scale(1.3); }
+
+  /* 장면 그림 공용 조각 */
+  .mini { position: absolute; background: #fff; border: 2px solid var(--line); border-radius: 22px; box-shadow: 0 10px 24px rgba(17,17,17,.06); }
+  .mini b { display: block; font-size: 26px; font-weight: 800; }
+  .mini small { display: block; margin-top: 4px; font-size: 18px; color: #52525B; font-weight: 600; }
+  .ph { position: absolute; border: 8px solid var(--ink); border-radius: 40px; overflow: hidden; background: #fff; }
+  .ph .cta { position: absolute; left: 14px; right: 14px; bottom: 14px; height: 48px; border-radius: 14px; background: var(--ink); color: #fff; font-size: 20px; font-weight: 800; display: flex; align-items: center; justify-content: center; }
+  .pill { position: absolute; padding: 12px 22px; border-radius: 999px; background: var(--ink); color: #fff; font-size: 26px; font-weight: 800; white-space: nowrap; }
+  .pill.l { background: #fff; color: var(--ink); border: 2px solid var(--line); }
+  .dc { position: absolute; width: 70px; height: 70px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 26px; font-weight: 800; background: var(--ink); color: #fff; }
+  .dc.off { background: #fff; border: 3px dashed #D4D4D8; color: #52525B; }
+  .bb { position: absolute; padding: 20px 24px; border-radius: 24px 24px 24px 6px; background: #fff; border: 2px solid var(--line); font-size: 26px; line-height: 1.45; }
+  .bb u { text-decoration: none; background: linear-gradient(rgba(255,90,31,.32), rgba(255,90,31,.32)) no-repeat 0 85% / 100% 36%; }
+
+  /* 한 판 */
+  #grid { left: 60px; top: 520px; width: 960px; }
+  .gr { margin-top: 14px; }
+  .gr .k { font-size: 24px; font-weight: 800; color: #52525B; margin: 0 0 10px 6px; }
+  .gr .row { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; }
+  .tile { height: 190px; border-radius: 26px; background: #fff; border: 2px solid var(--line); box-shadow: 0 10px 24px rgba(17,17,17,.06); padding: 22px 22px; display: flex; flex-direction: column; justify-content: space-between; }
+  .tile i { display: block; width: 46px; height: 46px; border-radius: 14px; background: var(--ink); }
+  .tile:nth-child(2) i { background: var(--ac); }
+  .tile b { font-size: 30px; font-weight: 900; letter-spacing: -0.04em; }
+</style>
+</head>
+<body>
+<div id="stage">
+  <div id="todos"></div>
+  <div class="abs" id="big"><img src="../../../packages/frontend/public/logo.png" alt="한줄로" style="clip-path: inset(0 36% 0 0)"><img id="bigBar" src="../../../packages/frontend/public/logo.png" alt="" style="clip-path: inset(0 0 0 64%)"></div>
+  <div class="abs cap" id="c0" style="top:1010px"><div class="k">이 모든 걸</div><div class="h">한 곳에서, 한 번에</div></div>
+
+  <div class="abs" id="mh">한줄로 안에 다 있어요</div>
+  <div id="cards"></div>
+  <div class="abs" id="dots"></div>
+
+  <div class="abs cap" id="c1" style="top:300px"><div class="k">흩어진 마케팅 업무를</div><div class="h">한 곳에서</div></div>
+  <div class="abs" id="grid"></div>
+</div>
+
+<script src="../common/reel.js"></script>
+<script>
+const BAR = R.BAR;
+Object.assign(R.T, { s1: 2 * BAR, outro: 18 * BAR, copy: 34.9, url: 19 * BAR, och: [33.95, 34.07, 34.19, 34.31], aiType: [34.5, 34.65] });
+R.setup({
+  name: '모든 마케팅을 한 곳에',
+  hook: ['문자 · 이메일 · DM,', '인스타 · 스레드 · 팝업…', '[혼자 다 하세요?]'],
+  hookSize: 104,
+  chips: ['자동화', '발송 채널', '제작 도구', '고객 분석'],
+  copy: ['흩어진 마케팅 업무,', '이제 한줄로 하나로.'],
+});
+const { T, C, p, lerp, $, show } = R;
+
+// ── 할 일 이름표(0~3.6초) ──────────────────────────────
+const TODOS = [
+  ['문자 문구 쓰기', 70, 300, -6], ['쿠폰 이미지 만들기', 560, 270, 5], ['고객 엑셀 정리', 260, 420, 3], ['이메일 뉴스레터', 640, 430, -4],
+  ['인스타 글 올리기', 60, 1170, 4], ['스레드 글 쓰기', 600, 1150, -5], ['생일 쿠폰 보내기', 300, 1290, -2], ['휴면 고객 다시 부르기', 520, 1420, 6],
+  ['장바구니 리마인드', 40, 1440, -7], ['행사 캘린더 짜기', 660, 560, 7], ['자사몰 팝업 띄우기', 30, 560, -3], ['DM 페이지 만들기', 330, 1560, 3],
+  ['예약 발송 걸기', 700, 1300, -6], ['성과 정리 보고', 120, 1700, 5], ['브랜드 말투 맞추기', 560, 1690, -4], ['신규 가입 환영 문자', 360, 1830, 2],
+];
+const todoAt = (k) => 0.12 + k * 0.2;
+const SUCK = [3.5, 4.2];
+
+// ── 기능 열두 장(7.5초부터 한 마디씩) ───────────────────
+const G = ['자동화', '자동화', '자동화', '발송 채널', '발송 채널', '발송 채널', '제작 도구', '제작 도구', '제작 도구', '고객 이해·분석', '고객 이해·분석', '고객 이해·분석'];
+const FEATS = [
+  ['여정 설계', '가입부터 첫 구매까지, 고객마다 자동으로', `
+    <div class="mini" style="left:60px;top:150px;width:240px;padding:20px"><b>신규 가입 환영</b><small>가입 때 시작</small></div>
+    <div class="mini" style="left:340px;top:250px;width:240px;padding:20px"><b>첫 구매 감사</b><small>첫 구매 때 시작</small></div>
+    <div class="mini" style="left:620px;top:350px;width:240px;padding:20px"><b>단골 만들기</b><small>주문 완료 때 시작</small></div>
+    <svg style="position:absolute;left:0;top:0" width="920" height="640"><path d="M300 190 C 320 190, 320 290, 340 290" fill="none" stroke="#111" stroke-width="5"/><path d="M580 290 C 600 290, 600 390, 620 390" fill="none" stroke="#FF5A1F" stroke-width="5"/></svg>`],
+  ['자동 마케팅', '조건에 맞는 고객에게 매일 알아서', `
+    ${['월', '화', '수', '목', '금', '토', '일'].map((d, i) => `<div class="dc${i === 2 ? ' off' : ''}" style="left:${95 + i * 105}px;top:190px">${d}</div>`).join('')}
+    <div class="bb" style="left:120px;top:320px;width:680px">(광고) 지수님, 생일 축하드려요! 오늘 하루 20% 쿠폰을 드려요</div>`],
+  ['마케팅 플래너', '달력에 행사만 담으면 발송까지', `
+    <div class="mini" style="left:110px;top:80px;width:700px;height:480px;padding:24px"><b>2026년 11월</b>
+      <div style="margin-top:16px;display:grid;grid-template-columns:repeat(7,1fr);gap:8px">${Array.from({ length: 30 }, (_, i) => `<div style="height:62px;border-radius:10px;background:#F4F4F5;font-size:16px;font-weight:700;padding:6px 8px;color:#3F3F46">${i + 1}</div>`).join('')}</div>
+      <div style="position:absolute;left:${24 + 5 * 96}px;top:${70 + 3 * 70 + 30}px;width:190px;height:22px;border-radius:6px;background:#FF5A1F"></div></div>`],
+  ['모바일 DM', '한 줄로 카드형 DM, 열람까지 추적', `
+    <div class="ph" style="left:300px;top:50px;width:320px;height:560px"><img class="po" src="assets/p8.jpg" alt="" style="height:440px"><div class="cta">지금 보러 가기</div></div>
+    <div class="pill" style="left:650px;top:200px">열람</div><div class="pill" style="left:650px;top:280px;background:#FF5A1F">클릭</div><div class="pill l" style="left:80px;top:240px">완독</div>`],
+  ['이메일 마케팅', 'AI 비주얼 이메일, 오픈·클릭 확인', `
+    <div class="mini" style="left:180px;top:50px;width:560px;height:540px;padding:24px"><b>가을 한정, 메이플 라떼가 나왔어요</b><small>받은편지함</small>
+      <div style="margin-top:14px;height:330px;border-radius:16px;overflow:hidden"><img class="po" src="assets/p7.jpg" alt=""></div>
+      <div style="margin-top:14px;height:14px;border-radius:7px;background:#EDEDEE"></div></div>
+    <div class="pill" style="left:760px;top:200px">오픈</div><div class="pill" style="left:760px;top:280px;background:#FF5A1F">클릭</div>`],
+  ['인앱 메시지', '자사몰에 들어온 그 순간에', `
+    <div class="ph" style="left:300px;top:40px;width:320px;height:580px;background:#E9E9EB"><div style="position:absolute;inset:0;background:rgba(17,17,17,.45)"></div>
+      <div style="position:absolute;left:24px;right:24px;top:60px;border-radius:18px;overflow:hidden;background:#fff"><div style="height:300px"><img class="po" src="assets/p2.jpg" alt=""></div><div style="display:flex;font-size:18px;font-weight:800"><span style="flex:1;text-align:center;padding:12px 0">닫기</span><span style="flex:1;text-align:center;padding:12px 0;background:#111;color:#fff">자세히 보기</span></div></div></div>`],
+  ['만들기', '재료만 넣으면 DM·이메일 완성', `
+    <div class="pill l" style="left:70px;top:270px">행사 주소 · 사진</div>
+    <svg style="position:absolute;left:0;top:0" width="920" height="640"><path d="M330 300 L 400 300" stroke="#111" stroke-width="5" fill="none"/><path d="M390 288 L 404 300 L 390 312" stroke="#111" stroke-width="5" fill="none"/></svg>
+    <div class="ph" style="left:430px;top:90px;width:220px;height:440px"><img class="po" src="assets/p5.jpg" alt="" style="height:320px"><div class="cta" style="height:40px;font-size:16px">보러 가기</div></div>
+    <div class="mini" style="left:670px;top:150px;width:200px;height:320px;padding:14px"><b style="font-size:18px">겨울 감사 세일</b><div style="margin-top:10px;height:190px;border-radius:12px;overflow:hidden"><img class="po" src="assets/p5.jpg" alt=""></div></div>`],
+  ['이미지 스튜디오', '템플릿 고르고 문구만 쓰면 포스터', `
+    <div style="position:absolute;left:150px;top:110px;width:260px;height:347px;border-radius:22px;overflow:hidden;transform:rotate(-8deg);box-shadow:0 20px 40px rgba(17,17,17,.2);border:6px solid #fff"><img class="po" src="assets/p1.jpg" alt=""></div>
+    <div style="position:absolute;left:330px;top:70px;width:260px;height:347px;border-radius:22px;overflow:hidden;box-shadow:0 20px 40px rgba(17,17,17,.2);border:6px solid #fff;z-index:2"><img class="po" src="assets/p5.jpg" alt=""></div>
+    <div style="position:absolute;left:510px;top:110px;width:260px;height:347px;border-radius:22px;overflow:hidden;transform:rotate(8deg);box-shadow:0 20px 40px rgba(17,17,17,.2);border:6px solid #fff"><img class="po" src="assets/p6.jpg" alt=""></div>`],
+  ['SNS 채널', '사진 한 장으로 채널별 글과 예약', `
+    <div style="position:absolute;left:110px;top:90px;width:340px;height:453px;border-radius:24px;overflow:hidden"><img class="po" src="assets/p3.jpg" alt=""></div>
+    ${['인스타그램', '스레드', '페이스북', 'X'].map((n, i) => `<div class="pill${i % 2 ? ' l' : ''}" style="left:500px;top:${130 + i * 95}px">${n}</div>`).join('')}`],
+  ['자사몰 연동', '카페24·네이버 자동 연동', `
+    ${['카페24', '네이버', '고도몰', '메이크샵', '아임웹', '우커머스'].map((n, i) => `<div class="mini" style="left:${110 + (i % 3) * 240}px;top:${130 + Math.floor(i / 3) * 200}px;width:220px;height:170px;display:flex;align-items:center;justify-content:center;font-size:30px;font-weight:900;${i === 0 ? 'border-color:#FF5A1F;box-shadow:0 0 0 6px #FFF1EB' : ''}">${n}</div>`).join('')}`],
+  ['성과리포트', '30일 성과와 다음 할 일', `
+    ${[['모바일 DM', 92], ['여정', 78], ['문자', 64], ['이메일', 52], ['인앱', 40]].map(([n, w], i) => `<div style="position:absolute;left:110px;top:${110 + i * 90}px;display:flex;align-items:center;gap:18px;width:700px"><b style="width:150px;font-size:26px;font-weight:800">${n}</b><div style="flex:1;height:34px;border-radius:10px;background:#EDEDEE;overflow:hidden"><i style="display:block;height:100%;width:${w}%;border-radius:10px;background:${i === 0 ? '#FF5A1F' : '#111'}"></i></div></div>`).join('')}`],
+  ['AI 메모리', '쓸수록 우리 회사를 더 잘 알게', `
+    <div class="bb" style="left:100px;top:120px;width:720px;font-size:32px">(광고) <u>고객님</u>, 겨울 보습 루틴에 맞춘 <u>한정 혜택</u>을 준비했어요. <u>차분히</u> 둘러보세요.</div>
+    <div class="pill l" style="left:120px;top:420px">호칭 통일</div><div class="pill" style="left:330px;top:420px;background:#FF5A1F">차단 단어 대체</div><div class="pill l" style="left:620px;top:420px">브랜드 톤</div>`],
+];
+const cardAt = (k) => (4 + k) * BAR;
+
+function build() {
+  $('todos').innerHTML = TODOS.map(([s, x, y, r], k) => `<div class="abs todo" id="td${k}" style="left:${x}px;top:${y}px">${s}</div>`).join('');
+  $('cards').innerHTML = FEATS.map(([n, d, v], k) => `<div class="abs fc" id="fc${k}"><div class="vis">${v}</div><div class="bd"><div class="no"><span class="lbl">${G[k]}</span>${String(k + 1).padStart(2, '0')} / 12</div><h2>${n}</h2><p>${d}</p></div></div>`).join('');
+  $('dots').innerHTML = FEATS.map(() => '<i></i>').join('');
+  const groups = [['자동화', 0], ['발송 채널', 3], ['제작 도구', 6], ['고객 이해·분석', 9]];
+  $('grid').innerHTML = groups.map(([g, s]) => `<div class="gr"><div class="k">${g}</div><div class="row">${[0, 1, 2].map((j) => `<div class="tile" id="tl${s + j}"><i></i><b>${FEATS[s + j][0]}</b></div>`).join('')}</div></div>`).join('');
+}
+
+window.seek = function (t) {
+  R.base(t);
+  // 할 일 폭주 → 한 점으로
+  const su = p(t, SUCK[0], SUCK[1], 'in');
+  TODOS.forEach(([s, x, y, r], k) => {
+    const el = $('td' + k);
+    const a = todoAt(k), i = p(t, a, a + 0.3, 'back');
+    const jit = Math.sin(t * 9 + k) * 4 * (1 - su);
+    const cx = 540 - (x + 150), cy = 960 - (y + 30);
+    el.style.opacity = C(p(t, a, a + 0.12)) * (1 - p(t, SUCK[1] - 0.2, SUCK[1]));
+    el.style.visibility = t < a || t > SUCK[1] + 0.05 ? 'hidden' : 'visible';
+    el.style.transform = `translate(${cx * su}px, ${cy * su + jit}px) rotate(${r * (1 - su)}deg) scale(${(0.4 + 0.6 * i) * (1 - 0.85 * su)})`;
+  });
+  // 한줄로 로고 · 이 모든 걸
+  const lg = p(t, 4.3, 4.75, 'back');
+  const lgOut = p(t, cardAt(0) - 0.45, cardAt(0) - 0.1, 'in');
+  $('big').style.opacity = C(p(t, 4.3, 4.45)) * (1 - lgOut);
+  $('big').style.visibility = t < 4.3 || lgOut >= 1 ? 'hidden' : 'visible';
+  $('big').style.transform = `translateY(${-120 * lgOut}px) scale(${(0.6 + 0.4 * lg) * (1 - 0.3 * lgOut)})`;
+  $('bigBar').style.opacity = Math.floor((t - 4.3) * 3.2) % 2 === 0 ? 1 : 0.15;
+  show($('c0'), t, 4.75, cardAt(0) - 0.4);
+
+  // 기능 열두 장
+  show($('mh'), t, cardAt(0) - 0.1, cardAt(12) - 0.3, { dy: 20, blur: 4 });
+  FEATS.forEach((_, k) => {
+    const el = $('fc' + k);
+    const a = cardAt(k) - 0.22, b = cardAt(k + 1) - 0.22;
+    const i = p(t, a, a + 0.32, 'io'), o = p(t, b, b + 0.3, 'io');
+    const last = k === FEATS.length - 1;
+    el.style.visibility = t < a || (t > b + 0.3 && !last) || t > T.outro ? 'hidden' : 'visible';
+    const ox = last ? 0 : -1150 * o;
+    el.style.transform = `translateX(${1150 * (1 - i) + ox}px) rotate(${4 * (1 - i) - 4 * (last ? 0 : o)}deg) scale(${last ? 1 - 0.1 * p(t, b, b + 0.4, 'io') : 1})`;
+    el.style.opacity = last ? 1 - p(t, b, b + 0.35) : 1;
+  });
+  const cur = Math.floor((t - cardAt(0)) / BAR);
+  $('dots').querySelectorAll('i').forEach((d, k) => { d.className = k < cur ? 'on' : k === cur ? 'cur' : ''; });
+  show($('dots'), t, cardAt(0), cardAt(12) - 0.2, { dy: 20, blur: 0 });
+
+  // 한 판으로
+  show($('c1'), t, cardAt(12) + 0.05, T.outro - 0.3);
+  show($('grid'), t, cardAt(12) - 0.05, T.outro - 0.3, { dy: 0, blur: 0, dur: 0.1 });
+  R.pointer(t, []);
+  FEATS.forEach((_, k) => show($('tl' + k), t, cardAt(12) + 0.1 + k * 0.08, null, { dy: 40, blur: 6, sc: 0.2, ease: 'back', dur: 0.35 }));
+};
+R.ready(build);
+</script>
+</body>
+</html>

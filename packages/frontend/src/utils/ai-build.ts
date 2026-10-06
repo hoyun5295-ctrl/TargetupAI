@@ -74,7 +74,65 @@ export interface BuildDraftState {
   catalogImages: BuildImageValue[];
   /** ★ 카탈로그 채널 선택 제목(비우면 서버가 "[카탈로그] 브랜드") */
   catalogTitle: string;
+  /** ★ 2026-10-06 주소 읽기 결과와 고른 상태(없으면 null) — 「넣은 재료 다시 보기」에서 읽은 행사·사진·상품을 그대로 보이고 고칠 수 있게 */
+  pageRead?: BuildPageRead | null;
   savedAt: number;
+}
+
+/** 주소 읽기 응답(`POST /api/event-campaigns/materials/read-url`) — 사진은 회사 저장소 사본이라 다시 열어도 같은 주소다 */
+export interface BuildReadResult {
+  readId: string;
+  host: string;
+  mallDomain: boolean;
+  cards: Array<{ id: string; title: string; text: string; periodRaw: string | null; imageUrl: string | null; imageWidth: number | null; imageHeight: number | null; link: string; hash: string }>;
+  images: Array<{ url: string; width: number; height: number }>;
+  products: Array<{ name: string; url: string; imageUrl: string; width: number | null; height: number | null }>;
+  logoUrl: string | null;
+  brandColor: string | null;
+}
+
+/**
+ * ★ 2026-10-06 남지현 접수 「넣은 재료 다시 보기 = 링크·사진 초기화」 — 옛 초안은 읽은 결과를 버리고 카드 요약만 남겨
+ *   다시 열면 주소 칸이 비고 읽은 사진·체크가 사라졌다(「지난번 읽은 행사 N개」 한 줄만). 읽은 결과와 고른 상태를 함께 보관한다.
+ */
+export interface BuildPageRead {
+  address: string;
+  result: BuildReadResult;
+  offCards: string[];
+  onCards: string[];
+  offImages: string[];
+  offSite: string[];
+}
+
+/** 주소 칸 옆 「읽었어요」 요약 — 읽은 직후와 다시 열 때 같은 문장 */
+export function readSummaryOf(res: BuildReadResult): string {
+  const bits = [
+    res.cards.length ? `행사 ${res.cards.length}` : null,
+    res.images.length ? `사진 ${res.images.length}` : null,
+    res.logoUrl || res.brandColor ? '로고·색' : null,
+    res.products.length ? `상품 ${res.products.length}` : null,
+  ].filter(Boolean);
+  return bits.length ? bits.join(' · ') : '읽을 재료가 적어요. 사진·글을 더 넣어 주세요.';
+}
+
+const strList = (v: unknown): string[] => (Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : []);
+function pageReadOf(v: any): BuildPageRead | null {
+  const r = v?.result;
+  if (!r || typeof r.readId !== 'string' || !Array.isArray(r.cards) || !Array.isArray(r.images) || !Array.isArray(r.products)) return null;
+  return {
+    address: typeof v.address === 'string' ? v.address : '',
+    result: {
+      readId: r.readId,
+      host: String(r.host || ''),
+      mallDomain: r.mallDomain === true,
+      cards: r.cards.filter((c: any) => c && typeof c.id === 'string' && typeof c.hash === 'string'),
+      images: r.images.filter((im: any) => im && typeof im.url === 'string'),
+      products: r.products.filter((p: any) => p && typeof p.imageUrl === 'string'),
+      logoUrl: typeof r.logoUrl === 'string' ? r.logoUrl : null,
+      brandColor: typeof r.brandColor === 'string' ? r.brandColor : null,
+    },
+    offCards: strList(v.offCards), onCards: strList(v.onCards), offImages: strList(v.offImages), offSite: strList(v.offSite),
+  };
 }
 
 export function newAttemptToken(): string {
@@ -183,6 +241,7 @@ export function loadBuildDraft(): BuildDraftState | null {
       features: Array.isArray(d.features) ? d.features.map(String) : null,
       catalogImages: Array.isArray(d.catalogImages) ? d.catalogImages.filter((im) => im && typeof im.url === 'string').map((im) => ({ url: im.url, width: im.width ?? null, height: im.height ?? null })) : [],
       catalogTitle: typeof d.catalogTitle === 'string' ? d.catalogTitle : '',
+      pageRead: pageReadOf(d.pageRead),
       savedAt: d.savedAt,
     };
   } catch {

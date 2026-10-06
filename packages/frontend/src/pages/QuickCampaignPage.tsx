@@ -27,9 +27,9 @@ import {
   type MallCandidate, type ReadState,
 } from '../components/make/MakeInputs';
 import {
-  buildErrorMessage, buildMaterialsPayload, clearBuildDraft, loadBuildDraft, newAttemptToken,
+  buildErrorMessage, buildMaterialsPayload, clearBuildDraft, loadBuildDraft, newAttemptToken, readSummaryOf,
   saveBuildDraft, saveBuildResult,
-  type BuildCardValue, type BuildChannel, type BuildImageRole, type BuildImageValue, type BuildProductValue,
+  type BuildCardValue, type BuildChannel, type BuildImageRole, type BuildImageValue, type BuildProductValue, type BuildReadResult,
 } from '../utils/ai-build';
 import { makeResultPath } from '../utils/make-flow';
 import { MK_BTN_AI, MK_CARD } from '../utils/make-ui';
@@ -42,16 +42,6 @@ interface ServerQuote {
   creditEnabled: boolean;
   smtpConfigured: boolean | null;
   planLocked: boolean;
-}
-interface ReadResult {
-  readId: string;
-  host: string;
-  mallDomain: boolean;
-  cards: Array<{ id: string; title: string; text: string; periodRaw: string | null; imageUrl: string | null; imageWidth: number | null; imageHeight: number | null; link: string; hash: string }>;
-  images: Array<{ url: string; width: number; height: number }>;
-  products: Array<{ name: string; url: string; imageUrl: string; width: number | null; height: number | null }>;
-  logoUrl: string | null;
-  brandColor: string | null;
 }
 type Phase = 'idle' | 'running' | 'done';
 
@@ -84,8 +74,10 @@ export default function QuickCampaignPage() {
     return () => ctrl.abort();
   }, []);
 
-  // 재료(로컬 초안 복구 = 사진·글 판 · 상품 · 카탈로그 · 채널) — 주소 읽기 결과는 10분 캐시라 복구하지 않는다
+  // 재료(로컬 초안 복구 = 사진·글 판 · 상품 · 카탈로그 · 채널 · ★1006 주소 읽기 결과와 고른 상태)
+  //   읽은 사진은 회사 저장소 사본이라 다시 열어도 그대로 보인다 · readId 는 감사 기록 지문이라 서버 캐시(10분)가 지나도 생성은 막히지 않는다
   const [restored] = useState(() => loadBuildDraft());
+  const restoredRead = restored?.pageRead || null;
   const [channel, setChannel] = useState<BuildChannel>(entry.channel || restored?.channel || 'dm');
   const [isAd, setIsAd] = useState<boolean>(restored ? restored.isAd : true);
   const [board, setBoard] = useState<BuildCardValue>(() => {
@@ -95,16 +87,16 @@ export default function QuickCampaignPage() {
   const [products, setProducts] = useState<BuildProductValue[]>((restored?.products || []).filter((p) => p.source !== 'site'));
   const [catalogImages, setCatalogImages] = useState<BuildImageValue[]>(restored?.catalogImages || []);
   const [catalogTitle, setCatalogTitle] = useState<string>(restored?.catalogTitle || '');
-  const [address, setAddress] = useState('');
-  const [readState, setReadState] = useState<ReadState>({ kind: 'idle' });
-  const [read, setRead] = useState<ReadResult | null>(null);
-  // 지난번 주소 읽기 카드(다시 만들기 = 같은 재료) — 새로 읽기 전까지 그대로 싣는다(면허 = 지난번 "그대로 쓰기" 체크 그대로)
-  const [carriedRead, setCarriedRead] = useState<BuildCardValue[]>(() => (restored?.cards || []).filter((c) => !!c.readId));
-  const [offCards, setOffCards] = useState<Set<string>>(new Set());
+  const [address, setAddress] = useState(restoredRead?.address || '');
+  const [readState, setReadState] = useState<ReadState>(restoredRead ? { kind: 'done', summary: readSummaryOf(restoredRead.result) } : { kind: 'idle' });
+  const [read, setRead] = useState<BuildReadResult | null>(restoredRead?.result || null);
+  // 지난번 주소 읽기 카드(다시 만들기 = 같은 재료) — 읽은 결과가 없는 옛 초안(1006 전 저장분)만 이 줄로 싣는다(면허 = 지난번 "그대로 쓰기" 체크 그대로)
+  const [carriedRead, setCarriedRead] = useState<BuildCardValue[]>(() => (restoredRead ? [] : (restored?.cards || []).filter((c) => !!c.readId)));
+  const [offCards, setOffCards] = useState<Set<string>>(() => new Set(restoredRead?.offCards));
   // 읽어 온 카드 중 "이 문구 그대로 쓰기"를 켠 것(기본 꺼짐 · 면허 = 담당자 체크 · 서버 추측 0)
-  const [onCards, setOnCards] = useState<Set<string>>(new Set());
-  const [offImages, setOffImages] = useState<Set<string>>(new Set());
-  const [offSite, setOffSite] = useState<Set<string>>(new Set());
+  const [onCards, setOnCards] = useState<Set<string>>(() => new Set(restoredRead?.onCards));
+  const [offImages, setOffImages] = useState<Set<string>>(() => new Set(restoredRead?.offImages));
+  const [offSite, setOffSite] = useState<Set<string>>(() => new Set(restoredRead?.offSite));
   const [boardOpen, setBoardOpen] = useState(true);
   const [makeLine, setMakeLine] = useState('');
   const [uploading, setUploading] = useState(false);
@@ -198,7 +190,8 @@ export default function QuickCampaignPage() {
     if (flag !== 'on') return;
     if (skipPersist.current) { skipPersist.current = false; return; }
     if (!busy) attemptRef.current = null;
-    const t = setTimeout(() => saveBuildDraft({ channel, isAd, cards: [board, ...readCards], products: allProducts, features: null, catalogImages, catalogTitle }), 400);
+    const pageRead = read ? { address, result: read, offCards: [...offCards], onCards: [...onCards], offImages: [...offImages], offSite: [...offSite] } : null;
+    const t = setTimeout(() => saveBuildDraft({ channel, isAd, cards: [board, ...readCards], products: allProducts, features: null, catalogImages, catalogTitle, pageRead }), 400);
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [flag, channel, isAd, board, readCards, allProducts, catalogImages, catalogTitle]);
@@ -294,17 +287,11 @@ export default function QuickCampaignPage() {
       const r = await fetch('/api/event-campaigns/materials/read-url', { method: 'POST', headers: jsonHeaders(), body: JSON.stringify({ url }) });
       const d = await r.json().catch(() => ({}));
       if (!r.ok || !d?.success) { setReadState({ kind: 'failed', message: d?.error || '페이지를 읽지 못했어요. 사진·글을 직접 넣어 주세요.' }); return; }
-      const res = d as ReadResult;
+      const res = d as BuildReadResult;
       setRead(res);
       setCarriedRead([]);
       setOffCards(new Set()); setOnCards(new Set()); setOffImages(new Set()); setOffSite(new Set());
-      const bits = [
-        res.cards.length ? `행사 ${res.cards.length}` : null,
-        res.images.length ? `사진 ${res.images.length}` : null,
-        res.logoUrl || res.brandColor ? '로고·색' : null,
-        res.products.length ? `상품 ${res.products.length}` : null,
-      ].filter(Boolean);
-      setReadState({ kind: 'done', summary: bits.length ? bits.join(' · ') : '읽을 재료가 적어요. 사진·글을 더 넣어 주세요.' });
+      setReadState({ kind: 'done', summary: readSummaryOf(res) });
       if (!board.text.trim() && board.images.length === 0) setBoardOpen(false);
     } catch (e: any) {
       setReadState({ kind: 'failed', message: e?.message || '페이지를 읽지 못했어요.' });

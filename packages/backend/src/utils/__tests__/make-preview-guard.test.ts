@@ -156,14 +156,14 @@ describe('결과 화면 · 수정 화면의 카탈로그 배선', () => {
     expect(page).toContain('data-make="lock-hint"');
     expect(page).toContain('lockToastAt.current');
   });
-  it('수정 화면 쪽 패널에 [이 쪽 빼기] — 저장소의 쪽 빼기를 쓰고 되돌릴 수 있게 남긴다 · 책 최소 쪽 수 아래로는 막는다', () => {
+  it('수정 화면 쪽 패널에 [이 쪽 빼기] — 저장소의 쪽 빼기를 쓰고 되돌릴 수 있게 남긴다 · ★1006 2쪽 잠금 해제(1쪽 조건은 확인 창에)', () => {
     const edit = read('components/make/DmEditScreen.tsx');
     expect(edit).toContain('data-make="catalog-remove-page"');
     expect(edit).toMatch(/st\.pushHistory\(\);\s*st\.removePage\(idx\);/);
-    expect(edit).toContain('const CATALOG_MIN_PAGES = 2;');
-    expect(edit).toContain('st.pages.length <= CATALOG_MIN_PAGES');
-    // 뷰어 판정(2쪽 미만 = 책 아님)과 같은 수
+    expect(edit).not.toContain('CATALOG_MIN_PAGES');
+    // 1쪽이 되면 뷰어는 책이 아니다(2쪽 미만 = 책 아님) → 확인 창이 그 조건을 말한다
     expect(readFileSync(resolve(__dirname, '../dm/dm-viewer-catalog.ts'), 'utf8')).toContain('pages.length < 2');
+    expect(edit).toContain("(total === 2 ? ' 1쪽만 남으면 책처럼 펼쳐지지 않고 한 장으로 보여요. 쪽을 다시 넣으면 책으로 돌아와요.' : '')");
   });
   it('보내기 창은 만들 버튼이 없을 때 「같은 재료로 바로」를 말하지 않는다', () => {
     expect(read('components/make/MakeSendModal.tsx')).toContain("makeOther && makeOther.channel === other ? '아직 만들지 않았어요 · 같은 재료로 바로 만들 수 있어요' : '아직 만들지 않았어요'");
@@ -219,7 +219,8 @@ describe('링크 발행 승인 금액 대조', () => {
 describe('주소 읽기 카드 면허 배선', () => {
   it('만들기 화면: 카드 면허 = "그대로 쓰기" 체크 집합(기본 빈 집합 · 새로 읽으면 비운다) · 서버 추측 필드 0', () => {
     const page = readFileSync(resolve(__dirname, '../../../../frontend/src/pages/QuickCampaignPage.tsx'), 'utf-8');
-    expect(page).toContain('const [onCards, setOnCards] = useState<Set<string>>(new Set());');
+    // ★1006 다시 열 때 = 그 담당자가 지난번에 켠 체크 그대로(옛 carriedRead 의 licensed 와 같은 뜻) · 처음 · 새로 읽으면 빈 집합
+    expect(page).toContain('const [onCards, setOnCards] = useState<Set<string>>(() => new Set(restoredRead?.onCards));');
     expect(page).toContain('licensed: onCards.has(c.id), images: imgs, readId: read.readId');
     expect(page).toContain('setOffCards(new Set()); setOnCards(new Set());');
     expect(page).not.toMatch(/licensable/);

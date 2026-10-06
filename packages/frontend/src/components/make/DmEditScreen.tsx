@@ -101,7 +101,7 @@ export default function DmEditScreen({ onBack, onSend, pair, banner }: {
   // ── 왼쪽 ──
   const listItems: BlockRowItem[] = curSections.map((x) => ({ id: x.id, type: x.type, label: blockLabel(x), summary: blockSummary(x), auto: isAutoBlock(x.type) }));
   const left = isCatalog ? (
-    <CatalogLeft />
+    <CatalogLeft onRemove={(i) => setConfirm(pageRemoveConfirm(i, true, s.pages.length))} />
   ) : (
     <BlockList
       title="블록"
@@ -110,7 +110,7 @@ export default function DmEditScreen({ onBack, onSend, pair, banner }: {
       selectedId={s.selectedSectionId}
       onSelect={(id) => focus(id)}
       onReorder={(from, to) => s.reorderSections(from, to)}
-      top={isSlides ? <PageChips /> : undefined}
+      top={isSlides ? <PageChips onRemove={(i) => setConfirm(pageRemoveConfirm(i, false, s.pages.length))} /> : undefined}
       footer={(
         <AddBlockButton open={paletteOpen} onToggle={() => setPaletteOpen((v) => !v)}>
           <PalettePopover
@@ -180,9 +180,36 @@ export default function DmEditScreen({ onBack, onSend, pair, banner }: {
   );
 }
 
+// ─────────────────────────────── 장 빼기(옆으로 넘기기 · 카탈로그 공통) ───────────────────────────────
+
+/**
+ * ★ 2026-10-06 임은지 접수 「옆으로 넘기기 · 책처럼에 장(쪽) 빼기가 없다」 — 0927 수정 화면이 장 추가만 옮겨 왔고,
+ *   카탈로그 빼기는 사진 쪽을 골랐을 때 오른쪽 패널에만 있었다(사진 없는 쪽은 고를 수조차 없음 · 2쪽에서는 잠김).
+ *   빼기는 이 한 곳 — 되돌리기로 살릴 수 있게 빼기 직전 모습을 남긴다 · 마지막 1장은 남긴다(저장소 규칙).
+ *   카탈로그가 1쪽이 되면 뷰어는 책 대신 한 장으로 보인다(dm-viewer-catalog isCatalogDm = 2쪽 이상) — 확인 창에 그 조건을 적는다.
+ */
+function removePageAt(idx: number) {
+  const st = useDmBuilderStore.getState();
+  if (idx < 0 || idx >= st.pages.length || st.pages.length <= 1) return;
+  st.pushHistory();
+  st.removePage(idx);
+  const after = useDmBuilderStore.getState();
+  if (!after.catalogView) return;
+  const g = galleryOf(after.pages[after.currentPageIndex] || { sections: [] });
+  if (g) after.selectSection(g.id);
+}
+
+function pageRemoveConfirm(idx: number, catalog: boolean, total: number): ConfirmState {
+  const what = catalog ? `${idx + 1}쪽` : `${idx + 1}장`;
+  const note = catalog
+    ? (total === 2 ? ' 1쪽만 남으면 책처럼 펼쳐지지 않고 한 장으로 보여요. 쪽을 다시 넣으면 책으로 돌아와요.' : '')
+    : ' 이 장에 넣은 블록도 함께 빠져요.';
+  return { mode: 'danger', title: `${what}을 뺄까요?`, description: `빼도 위쪽 되돌리기로 다시 살릴 수 있어요.${note}`, confirmLabel: '빼기', onConfirm: () => removePageAt(idx) };
+}
+
 // ─────────────────────────────── 장 고르기(옆으로 넘기기) ───────────────────────────────
 
-function PageChips() {
+function PageChips({ onRemove }: { onRemove: (idx: number) => void }) {
   const pages = useDmBuilderStore((s) => s.pages);
   const cur = useDmBuilderStore((s) => s.currentPageIndex);
   const selectPage = useDmBuilderStore((s) => s.selectPage);
@@ -193,6 +220,9 @@ function PageChips() {
         <button key={p.id} type="button" onClick={() => selectPage(i)} className={`h-7 px-2.5 rounded-lg text-[12px] font-semibold ${i === cur ? 'bg-violet-600 text-white' : 'bg-white text-slate-500 hover:text-slate-900'}`}>{i + 1}장</button>
       ))}
       <button type="button" onClick={() => addPage()} className="h-7 px-2.5 rounded-lg text-[12px] font-semibold border border-dashed border-slate-300 text-slate-500 hover:text-slate-900 inline-flex items-center gap-1"><Plus className="w-3.5 h-3.5" />장 추가</button>
+      {pages.length > 1 && (
+        <button type="button" onClick={() => onRemove(cur)} className="h-7 px-2.5 rounded-lg text-[12px] font-semibold text-slate-500 hover:text-rose-700 hover:bg-rose-50 inline-flex items-center gap-1" data-make="slides-remove-page"><Trash2 className="w-3.5 h-3.5" />{cur + 1}장 빼기</button>
+      )}
     </div>
   );
 }
@@ -442,9 +472,6 @@ function ThemeTile({ name, swatches, onClick }: { name: string; swatches: [strin
 
 // ─────────────────────────────── 카탈로그(쪽) ───────────────────────────────
 
-/** 책처럼 보기(카탈로그)의 최소 쪽 수 — 뷰어 판정(dm-viewer-catalog isCatalogDm = 2쪽 이상)과 같은 값 */
-const CATALOG_MIN_PAGES = 2;
-
 function galleryOf(p: { sections: Section[] }): Section | null {
   return p.sections.find((x) => x.type === 'gallery') || null;
 }
@@ -454,7 +481,7 @@ function pageImage(p: { sections: Section[] }): string | null {
   return typeof url === 'string' ? url : null;
 }
 
-function CatalogLeft() {
+function CatalogLeft({ onRemove }: { onRemove: (idx: number) => void }) {
   const toast = useToast();
   const pages = useDmBuilderStore((s) => s.pages);
   const selectedId = useDmBuilderStore((s) => s.selectedSectionId);
@@ -472,9 +499,11 @@ function CatalogLeft() {
     const chips = ((g?.props as any)?.chips || []).length;
     return { id: g?.id || p.id, type: 'gallery', label: i === 0 ? '표지' : i === pages.length - 1 && pages.length > 2 ? '마무리' : `${i + 1}쪽`, summary: `사진 ${((g?.props as any)?.images || []).length}${chips ? ` · 칩 ${chips}` : ''}`, thumb: pageImage(p), index: i + 1 };
   });
+  // 줄 id = 그 쪽의 사진 블록 id(없으면 쪽 id)
+  const pageIndexOf = (id: string) => useDmBuilderStore.getState().pages.findIndex((p) => p.sections.some((x) => x.id === id) || p.id === id);
   const select = (id: string) => {
     const st = useDmBuilderStore.getState();
-    const idx = st.pages.findIndex((p) => p.sections.some((x) => x.id === id) || p.id === id);
+    const idx = pageIndexOf(id);
     if (idx < 0) return;
     if (idx !== st.currentPageIndex) st.selectPage(idx);
     const g = galleryOf(useDmBuilderStore.getState().pages[idx]);
@@ -514,6 +543,7 @@ function CatalogLeft() {
         selectedId={selectedId}
         onSelect={select}
         onReorder={(from, to) => reorderPages(from, to)}
+        onRemove={pages.length > 1 ? (id) => { const idx = pageIndexOf(id); if (idx >= 0) onRemove(idx); } : undefined}
         footer={(
           <AddBlockButton label="쪽 추가" open={menu} onToggle={() => setMenu((v) => !v)}>
             {/* ★ 2026-09-29 — 블록 추가 창과 같은 규칙: 버튼 바로 아래에 펼친다(옛: 왼쪽 칸 오른쪽 바깥에 떠서 좌우 스크롤·위쪽 잘림) */}
@@ -559,19 +589,7 @@ function CatalogPagePanel({ section }: { section: Section }) {
   const pageNo = pages.findIndex((p) => p.sections.some((x) => x.id === section.id)) + 1;
   const setImage = (u: string) => updateSectionProps(section.id, { images: [{ ...(props.images?.[0] || {}), url: u }], layout: 'list_1xN', full_bleed: true } as any);
   const setChips = (next: typeof chips) => updateSectionProps(section.id, { chips: next.length ? next : undefined } as any);
-  // ★ 2026-10-01 쪽 빼기 — 이 화면에는 쪽을 뺄 방법이 없었다(추가·순서·사진 바꾸기만 · 저장소 removePage 는 옛 편집기에서만 불렀다).
-  //   책 보기는 2쪽부터라 2쪽 이하에서는 빼지 않는다. 되돌리기로 살릴 수 있게 빼기 직전 모습을 남긴다.
-  const canRemovePage = pages.length > CATALOG_MIN_PAGES;
-  const removeThisPage = () => {
-    const st = useDmBuilderStore.getState();
-    const idx = st.pages.findIndex((p) => p.sections.some((x) => x.id === section.id));
-    if (idx < 0 || st.pages.length <= CATALOG_MIN_PAGES) return;
-    st.pushHistory();
-    st.removePage(idx);
-    const after = useDmBuilderStore.getState();
-    const g = galleryOf(after.pages[after.currentPageIndex] || { sections: [] });
-    if (g) after.selectSection(g.id);
-  };
+  // ★ 2026-10-01 쪽 빼기 · ★1006 왼쪽 쪽 목록과 같은 한 곳(removePageAt · 2쪽 잠금 해제 = 확인 창에 1쪽 조건을 적는다)
 
   return (
     <div className="flex flex-col min-h-full">
@@ -614,14 +632,14 @@ function CatalogPagePanel({ section }: { section: Section }) {
       <div className="mt-auto pt-6 flex items-center gap-3">
         <button type="button" onClick={() => setTpl('one')} className="inline-flex items-center gap-1.5 h-10 px-4 rounded-xl text-[13px] font-bold text-white bg-violet-600 hover:bg-violet-500"><Wand2 className="w-4 h-4" />이 쪽 다시 만들기</button>
         <span className="text-[12px] text-slate-500">크레딧 0</span>
-        <button
-          type="button"
-          disabled={!canRemovePage}
-          title={canRemovePage ? undefined : `책처럼 보려면 ${CATALOG_MIN_PAGES}쪽은 있어야 해요`}
-          onClick={() => setConfirm({ mode: 'danger', title: `${pageNo}쪽을 뺄까요?`, description: '빼도 위쪽 되돌리기로 다시 살릴 수 있어요.', confirmLabel: '빼기', onConfirm: removeThisPage })}
-          className="ml-auto inline-flex items-center gap-1.5 h-10 px-3 rounded-xl border border-slate-300 bg-white text-[12.5px] text-slate-700 hover:text-rose-700 hover:border-rose-300 disabled:opacity-40 disabled:hover:text-slate-700 disabled:hover:border-slate-300"
-          data-make="catalog-remove-page"
-        ><Trash2 className="w-4 h-4" />이 쪽 빼기</button>
+        {pages.length > 1 && pageNo > 0 && (
+          <button
+            type="button"
+            onClick={() => setConfirm(pageRemoveConfirm(pageNo - 1, true, pages.length))}
+            className="ml-auto inline-flex items-center gap-1.5 h-10 px-3 rounded-xl border border-slate-300 bg-white text-[12.5px] text-slate-700 hover:text-rose-700 hover:border-rose-300"
+            data-make="catalog-remove-page"
+          ><Trash2 className="w-4 h-4" />이 쪽 빼기</button>
+        )}
       </div>
       <ConfirmModal state={confirm} onClose={() => setConfirm(null)} />
       <CatalogPageModal templateKey={tpl} open={!!tpl} onClose={() => setTpl(null)} onMade={(u, c) => { setImage(u); if (c.length) setChips(c); setTpl(null); }} brandColor={brandColor || null} />
