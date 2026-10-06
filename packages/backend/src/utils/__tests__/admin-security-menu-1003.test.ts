@@ -12,7 +12,7 @@
  *   2. 요청 방식 판정(조회 · 변경 · 삭제)과 메뉴 노출 판정이 등급표 하나에서 나온다.
  *   3. 막는 장치가 실제로 막는다(미들웨어 실행 · 조회 실패 = 닫힘) · 라우트마다 빠짐없이 붙어 있다.
  *   4. AI 영업 기본 허용 = ceo · suran.
- *   5. 화면: 메뉴 7묶음 · 항목 31개 각 1번 · 묶음 활성은 항목에서 계산 · 보안 메뉴는 서버 판정으로만 노출 · 진단 뱃지 60초 주기.
+ *   5. 화면: 메뉴 7묶음 · 항목 32개 각 1번(★1006 기능 관심 업체 +1) · 묶음 활성은 항목에서 계산 · 보안 메뉴는 서버 판정으로만 노출 · 진단 뱃지 60초 주기.
  *
  * ⚠ mock 은 실제 SELECT 보다 관대하면 안 된다 — `fetchAdminRole` 은 `SELECT role … AND is_active = true` 만 본다.
  */
@@ -199,14 +199,14 @@ describe('5. 화면 — 메뉴 7묶음 · 노출 · 뱃지', () => {
     expect(labels).toEqual(['고객 관리', '발송 관리', '대행 발송', '요금/정산', '보안 · 인증', '연동 · 인프라', 'AI · 콘텐츠']);
   });
 
-  it('항목 31개 · 각 1번(삭제 0 · 중복 0)', () => {
+  it('항목 32개 · 각 1번(삭제 0 · 중복 0)', () => {
     const keys = [...menu.matchAll(/\{ key: '(\w+)', label: '/g)].map((m) => m[1]);
-    expect(keys.length).toBe(31);
-    expect(new Set(keys).size).toBe(31);
+    expect(keys.length).toBe(32);
+    expect(new Set(keys).size).toBe(32);
     for (const k of ['companies', 'users', 'marketingDiagnosis', 'salesOutreach', 'callbacks', 'templates', 'scheduled', 'allCampaigns', 'stats',
       'agencyMail', 'agencyLedger', 'campaignAgency', 'plans', 'requests', 'deposits', 'credits', 'billing',
       'adminAccounts', 'loginBlocks', 'geoAccess', 'spamBlock', 'auditLogs', 'opsRecords',
-      'syncAgents', 'agentDeploy', 'lineGroups', 'bestCopy', 'bestLayout', 'aiTraining', 'helpQuestions', 'precheckUsage']) {
+      'syncAgents', 'agentDeploy', 'lineGroups', 'bestCopy', 'bestLayout', 'aiTraining', 'helpQuestions', 'precheckUsage', 'featureInterest']) {
       expect(keys, k).toContain(k);
     }
   });

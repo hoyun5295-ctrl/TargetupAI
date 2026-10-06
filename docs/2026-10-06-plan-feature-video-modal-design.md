@@ -2,7 +2,7 @@
 
 > Harold 지시(10-06): 요금제 미가입 회사가 AI Operator에서 기능을 누르면 뜨는 안내 창을 **왼쪽 예시 영상 · 오른쪽 기능 상세 설명**으로 올린다.
 > 「영상은 예시니까 우측에 설명을 제대로 해 줘야 한다 · 자동마케팅도 원하는 시간 · 예산 등 자유롭게 설정 가능하잖아」.
-> 목업 승인 = 같은 날 「너무 맘에 든다 · 추천대로 구현 설계서 쓰고 구현까지」.
+> 목업 승인 = 같은 날 「너무 맘에 든다 · 추천대로 구현 설계서 쓰고 구현까지」. **배포완료(1006 · 허브 카드 12개 · 영상 12편 · Harold).**
 > 원 창 = `PlanFeatureModal`(2026-09-15 · 결정 D90) · 문안 원장 = `frontend/src/constants/plan-feature-intros.ts` · 계약 = `backend/src/utils/__tests__/plan-feature-modal-contract.test.ts`.
 
 ---
@@ -90,3 +90,17 @@
 
 - 플래너 「재료를 넣으면 AI가 완성본을 만듭니다」는 회사 스위치 `AI_AUTO_BUILD_COMPANY_IDS` 가 `*` 일 때만 모든 회사에 참이다. **운영 값 = `*` 확인(10-06 · Harold 실측)** — 백엔드 프로세스 cwd 에서 `dotenv` 로 읽은 값. ⚠ `/proc/<pid>/environ` 은 비어 나온다(앱이 시작 뒤 `.env` 를 프로세스 안에서 읽는다 · `app.ts` 첫 줄) — 그 출력은 「꺼짐」의 증거가 아니다.
 - 배포 = 프런트만(`git pull` → `npm run build:safe` · 원자 교체라 끊김 없음) · 백엔드 재시작 없음.
+
+## 9. 남은 것 (착수 판단 = Harold님)
+
+- 허브 카드 아래 한 줄 설명 일부가 지금 동작과 다르다(`ai-operator-modules.ts` · 자동 마케팅 「매일 AI 캠페인 자동 제안」 · 마케팅 플래너 「월간 행사 계획 → AI 대행」 · 여정 「AI 여정 7종」 · 이미지 스튜디오 「상품→AI 배경 소재 완성」).
+- SNS = 회사 단위 개방(`SNS_COMPANY_IDS` = 테스트 계정 1곳 · 1006 실측). 그 전까지 요금제 사용자도 같은 안내 창(가이드)을 본다(Harold 1006 「가이드만 넣어 두고 실제 기능은 그다음」). 개방 = Meta 심사 · 게시 실측 뒤 `*` + 백엔드 재시작([FEATURE-SNS-CHANNEL §7](FEATURE-SNS-CHANNEL.md)).
+- 도움말 카탈로그(`content/feature-catalog.ts`) 자동 마케팅 항목에 화면 스팸 검사 단계가 없다.
+
+## 10. 기능 관심 업체 (Harold 10-06 「클릭한 업체가 누군지 · 슈퍼관리자에 나만 볼 수 있는 메뉴로」)
+
+- 기록 = 안내 창 한 곳(`PlanFeatureModal`): 창이 열릴 때 1건 · 「요금제 보기」 1건 → `POST /api/plans/feature-seen`(로그인 필수 · 사용자당 1분 30회 · 응답을 기다리지 않음). 서버는 **고객사 사용자만** 기록(슈퍼관리자 · 회사 없는 토큰 제외 · 회사 = 토큰 값).
+- 저장 = 기존 `audit_logs` + `recordAuditLog`(새 테이블 · DDL 0) · action `plan_feature_open` · `plan_feature_pricing` · target_type `plan_feature` · details `{ featureId, companyId }`. 감사 로그 목록에도 함께 보인다(행동 필터로 거름 · 로그인 차단 · 요금 방식 이력은 action 으로 걸러 영향 없음 = Codex 1R 확인).
+- 열람 = 슈퍼관리자 「AI · 콘텐츠 → 기능 관심 업체」 · `FEATURE_INTEREST_VIEWER_IDS`(기본 `ceo`) AND 등급표 `featureInterest`(대표 조회만) · 다른 계정은 메뉴 자체가 없다. 집계 CT = `utils/feature-interest.ts`(SQL 묶음으로 전부 셈 · 시간순 기록만 회사당 30건) · 화면 = `FeatureInterestTab.tsx`.
+- Codex 적대: 1R medium 2(기록 호출 상한 없음 · 30건 밖 클릭이 기능별에서 빠짐 → 원장 행을 JS 로 묶던 구조를 SQL 묶음으로 바꿔 2만 건 상한도 제거) → **2R approve**.
+- 기록은 배포 시점부터(그 전 기록 없음).

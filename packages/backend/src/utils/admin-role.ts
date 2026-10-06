@@ -164,6 +164,13 @@ export const PERMISSION_MATRIX: PermissionRow[] = [
     levels: { super: 'R', lead: 'NONE', support: 'NONE' },
   },
   {
+    // ★ 2026-10-06 기능 관심 업체 — ENV 허용 목록(기본 ceo)과 AND(Harold 「나만 볼 수 있는 메뉴」)
+    key: 'featureInterest',
+    area: '기능 관심 업체',
+    screens: '기능 관심 업체(기능 안내 창 열람 · 요금제 보기)',
+    levels: { super: 'R', lead: 'NONE', support: 'NONE' },
+  },
+  {
     // ★ 2026-10-03 운영 기록 대장(로그 점검 · 방화벽 정책 변경 · 접근권한 점검 · 전송자격인증 3.1 ④ · 3.3 · 4.3).
     //   작성 · 확인은 대표 · 지원팀장. 고치기 · 지우기는 없다(정정은 새 기록).
     //   ★ 같은 날 저녁 보안 · 인증 묶음(Harold) — 지원팀원 조회도 닫는다.

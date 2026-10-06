@@ -19,6 +19,23 @@ import { useNavigate } from 'react-router-dom';
 import { ArrowRight, Coins, ListChecks, Lock, ShieldCheck, SlidersHorizontal, X } from 'lucide-react';
 import { findPlanFeatureIntro, PLAN_FEATURE_MIN_PLAN } from '../constants/plan-feature-intros';
 
+/**
+ * ★ 2026-10-06 기능 관심 업체(슈퍼관리자 ceo 전용 화면)의 원천 — 안내 창 열람 · 「요금제 보기」를 서버에 남긴다.
+ *   응답을 기다리지 않고, 실패해도 화면에 영향이 없다. 서버가 고객사 사용자만 기록한다(routes/plans.ts · utils/feature-interest.ts).
+ */
+function reportPlanFeature(featureId: string, event: 'open' | 'pricing'): void {
+  const token = localStorage.getItem('token');
+  if (!token) return;
+  try {
+    void fetch('/api/plans/feature-seen', {
+      method: 'POST',
+      keepalive: true, // 「요금제 보기」는 곧바로 화면을 옮긴다 — 옮겨도 요청이 끝까지 가게
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ featureId, event }),
+    }).catch(() => { /* 기록 실패는 무시 */ });
+  } catch { /* 기록 실패는 무시 */ }
+}
+
 interface PlanFeatureModalProps {
   /** 안내할 기능 id. null이면 창을 그리지 않는다 */
   featureId: string | null;
@@ -42,6 +59,7 @@ export default function PlanFeatureModal({ featureId, onClose }: PlanFeatureModa
     document.addEventListener('keydown', onKey);
     document.body.style.overflow = 'hidden';
     primaryRef.current?.focus();
+    reportPlanFeature(intro.id, 'open'); // ★ 2026-10-06 창이 열릴 때 한 번(같은 기능을 다시 열면 다시 센다)
     return () => {
       document.removeEventListener('keydown', onKey);
       document.body.style.overflow = prevOverflow;
@@ -65,6 +83,8 @@ export default function PlanFeatureModal({ featureId, onClose }: PlanFeatureModa
 
   if (!intro) return null;
   const Icon = intro.icon;
+  // ★ 2026-10-06 「요금제 보기」 = 기록 한 건 + 닫고 이동(두 창 모양이 같은 함수를 쓴다 · 영상 창 호출보다 먼저 선언)
+  const goPricing = () => { reportPlanFeature(intro.id, 'pricing'); onClose(); navigate('/pricing'); };
   if (intro.video) return renderVideoLayout();
 
   function renderVideoLayout() {
@@ -273,7 +293,7 @@ export default function PlanFeatureModal({ featureId, onClose }: PlanFeatureModa
                 <button
                   ref={primaryRef}
                   type="button"
-                  onClick={() => { onClose(); navigate('/pricing'); }}
+                  onClick={goPricing}
                   className="flex-1 inline-flex items-center justify-center gap-2 px-4 py-3 rounded-xl bg-violet-600 hover:bg-violet-700 text-sm font-semibold text-white shadow-[0_12px_26px_-12px_rgba(124,58,237,0.8)] transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-violet-300"
                 >
                   요금제 보기
@@ -374,7 +394,7 @@ export default function PlanFeatureModal({ featureId, onClose }: PlanFeatureModa
           <button
             ref={primaryRef}
             type="button"
-            onClick={() => { onClose(); navigate('/pricing'); }}
+            onClick={goPricing}
             className="flex-1 inline-flex items-center justify-center gap-2 px-4 py-3 rounded-xl bg-violet-600 hover:bg-violet-700 text-sm font-semibold text-white shadow-[0_12px_26px_-12px_rgba(124,58,237,0.8)] transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-violet-300"
           >
             요금제 보기

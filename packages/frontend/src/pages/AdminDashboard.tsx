@@ -17,6 +17,7 @@ import AgentDeployWizard from '../components/admin/AgentDeployWizard'; // 싱크
 import DiagnosisAdminPanel from '../components/admin/DiagnosisAdminPanel'; // ★ 2026-08-16 신규마케팅진단(ceo 전용)
 import PlanTermBox, { PlanTermLockNote } from '../components/admin/PlanTermBox'; // ★ 2026-10-04 선불 요금제 이용 기간
 import HelpQuestionsTab from '../components/admin/HelpQuestionsTab'; // ★ 2026-08-24 도움말 질문 이력(ceo 전용)
+import FeatureInterestTab from '../components/admin/FeatureInterestTab'; // ★ 2026-10-06 기능 관심 업체(ceo 전용)
 import PrecheckUsageTab from '../components/admin/PrecheckUsageTab'; // ★ 2026-09-26 스팸 검사·맞춤법 사용 현황(ceo 전용)
 import SalesOutreachModal from '../components/admin/SalesOutreachModal'; // ★ 2026-08-24 AI 영업 아웃리치(ceo 전용 · 모달)
 import AgencyEmailSendersModal from '../components/admin/AgencyEmailSendersModal'; // ★ 2026-08-26 대행발송 허용 발신 이메일(§18)
@@ -93,7 +94,7 @@ export default function AdminDashboard() {
   const navigate = useNavigate();
   const { user, logout } = useAuthStore();
 
-  const [activeTab, setActiveTab] = useState<'companies' | 'users' | 'scheduled' | 'callbacks' | 'plans' | 'requests' | 'deposits' | 'credits' | 'allCampaigns' | 'stats' | 'billing' | 'syncAgents' | 'auditLogs' | 'lineGroups' | 'templates' | 'loginBlocks' | 'agentDeploy' | 'marketingDiagnosis' | 'spamBlock' | 'geoAccess' | 'helpQuestions' | 'agencyMail' | 'agencyLedger' | 'adminAccounts' | 'precheckUsage' | 'opsRecords'>('companies');
+  const [activeTab, setActiveTab] = useState<'companies' | 'users' | 'scheduled' | 'callbacks' | 'plans' | 'requests' | 'deposits' | 'credits' | 'allCampaigns' | 'stats' | 'billing' | 'syncAgents' | 'auditLogs' | 'lineGroups' | 'templates' | 'loginBlocks' | 'agentDeploy' | 'marketingDiagnosis' | 'spamBlock' | 'geoAccess' | 'helpQuestions' | 'agencyMail' | 'agencyLedger' | 'adminAccounts' | 'precheckUsage' | 'featureInterest' | 'opsRecords'>('companies');
   // ★ 2026-06-11: 감사 로그 열람 권한 (AUDIT_LOG_VIEWER_IDS — 기본 ceo 전용) — 허용 계정에만 메뉴/탭 노출
   const [auditAccessAllowed, setAuditAccessAllowed] = useState(false);
   // ★ 2026-08-27 직원 계정·권한 (전송자격인증 3.2·3.3) — 권한분류표 원본은 서버(utils/admin-role.ts)
@@ -113,6 +114,7 @@ export default function AdminDashboard() {
   //   화면은 숨기기만 한다(실제 차단은 라우트가 같은 등급표로). 조회 실패 = 빈 값 = 숨김(닫힌 쪽으로).
   const [myPermRead, setMyPermRead] = useState<Record<string, boolean>>({});
   const [helpQAccessAllowed, setHelpQAccessAllowed] = useState(false); // ★ 2026-08-24 도움말 질문 이력(ceo 전용)
+  const [featureInterestAllowed, setFeatureInterestAllowed] = useState(false); // ★ 2026-10-06 기능 관심 업체(ceo 전용)
   const [precheckUsageAllowed, setPrecheckUsageAllowed] = useState(false); // ★ 2026-09-26 스팸 검사·맞춤법 사용 현황(ceo 전용)
   // ★ 2026-08-24 AI 영업 아웃리치(ceo 전용 · 모달) — 서버 /access가 유일 소스, 미허용 = 메뉴 자체 미노출
   const [outreachAllowed, setOutreachAllowed] = useState(false);
@@ -1122,6 +1124,13 @@ useEffect(() => {
       const d = await r.json();
       setPrecheckUsageAllowed(d.allowed === true);
     } catch { setPrecheckUsageAllowed(false); }
+    try {
+      const token = localStorage.getItem('token');
+      // ★ 2026-10-06 기능 관심 업체 — 허용 계정(기본 ceo)에만 메뉴 노출
+      const r = await fetch('/api/admin/feature-interest/access', { headers: { Authorization: `Bearer ${token}` } });
+      const d = await r.json();
+      setFeatureInterestAllowed(d.allowed === true);
+    } catch { setFeatureInterestAllowed(false); }
     try {
       const token = localStorage.getItem('token');
       // ★ 2026-08-16: 신규마케팅진단 접근(mount 1회) — 허용이면 신규 리드 뱃지도 함께
@@ -4775,6 +4784,8 @@ const handleApproveRequest = async (id: string) => {
                   ...(helpQAccessAllowed ? [{ key: 'helpQuestions', label: '도움말 질문 이력' }] : []),
                   // ★ 2026-09-26 (Harold) 스팸 검사·맞춤법 사용 현황 = 허용 계정(기본 ceo)에만 노출 · 다른 계정은 메뉴 자체가 없다
                   ...(precheckUsageAllowed ? [{ key: 'precheckUsage', label: '점검 사용 현황' }] : []),
+                  // ★ 2026-10-06 (Harold) 기능 관심 업체 = 허용 계정(기본 ceo)에만 노출 · 다른 계정은 메뉴 자체가 없다
+                  ...(featureInterestAllowed ? [{ key: 'featureInterest', label: '기능 관심 업체' }] : []),
                 ],
               },
             ].filter((group) => group.items.length > 0).map(group => {
@@ -5989,6 +6000,7 @@ const handleApproveRequest = async (id: string) => {
         {activeTab === 'precheckUsage' && precheckUsageAllowed && (
           <PrecheckUsageTab companies={companies.map((c) => ({ id: c.id, company_name: c.company_name }))} />
         )}
+        {activeTab === 'featureInterest' && featureInterestAllowed && <FeatureInterestTab />}
 
         {activeTab === 'geoAccess' && (
           <div className="space-y-6">

@@ -79,7 +79,8 @@ import { applyPlanRequestWithClient, PlanTermError, planTermManagedSql, planTerm
 // ★ 2026-06-11: 감사 로그 CT — 라인그룹 지정/해제 책임 추적 (에이치피오 예약취소 사고 후속)
 import { loadAgencyCallbackKinds } from '../utils/agency-send-intake';
 import { switchCompanyBillingType } from '../utils/billing-type-history';
-import { recordAuditLog, isAuditLogViewer, isAiTrainingViewer, isGeoHitsViewer, isHelpQuestionViewer, isLineGroupAdmin, isSettlementOverviewViewer, isBestLayoutViewer, isPrecheckUsageViewer, diffFields } from '../utils/audit-log';
+import { recordAuditLog, isAuditLogViewer, isAiTrainingViewer, isGeoHitsViewer, isHelpQuestionViewer, isLineGroupAdmin, isSettlementOverviewViewer, isBestLayoutViewer, isPrecheckUsageViewer, isFeatureInterestViewer, diffFields } from '../utils/audit-log';
+import { loadFeatureInterest, parseFeatureInterestQuery } from '../utils/feature-interest'; // ★ 2026-10-06 기능 관심 업체(ceo 전용)
 // ★ 2026-10-02 계정 발급 기록(전송자격인증 4.1 ②)
 import { recordAccountIssued } from '../utils/account-issue';
 // ★ 2026-09-26 스팸 검사·맞춤법 사용 현황(ceo 전용 · 읽기 전용 집계 CT)
@@ -5015,6 +5016,27 @@ router.get('/audit-logs/access', authenticate, requireSuperAdmin, async (req: Re
 // ★ 2026-06-13: AI 학습 데이터(인비토AI) 열람 — ceo 전용 (AI_TRAINING_VIEWER_IDS, 기본 'ceo')
 router.get('/ai-training/access', authenticate, requireSuperAdmin, async (req: Request, res: Response) => {
   res.json({ allowed: await isAiTrainingViewer(req.user?.userId) });
+});
+
+// ★ 2026-10-06: 기능 관심 업체 — ceo 전용 (FEATURE_INTEREST_VIEWER_IDS, 기본 'ceo'). 메뉴 노출 게이팅용
+router.get('/feature-interest/access', authenticate, requireSuperAdmin, async (req: Request, res: Response) => {
+  res.json({ allowed: await isFeatureInterestViewer(req.user?.userId) });
+});
+
+/**
+ * ★ 2026-10-06 기능 관심 업체 (Harold 명시 · ceo 전용 · 읽기만) — 집계 소유 = utils/feature-interest.ts
+ */
+router.get('/feature-interest', authenticate, requireSuperAdmin, async (req: Request, res: Response) => {
+  try {
+    if (!(await isFeatureInterestViewer(req.user?.userId))) {
+      return res.status(403).json({ success: false, error: '기능 관심 업체 열람 권한이 없습니다.' });
+    }
+    const data = await loadFeatureInterest(parseFeatureInterestQuery(req.query));
+    return res.json({ success: true, ...data });
+  } catch (err: any) {
+    console.error('[admin/feature-interest] 조회 실패:', err);
+    return res.status(500).json({ success: false, error: '기능 관심 업체를 불러오지 못했습니다.' });
+  }
 });
 
 // ★ 2026-09-26: 스팸 검사·맞춤법 사용 현황 — ceo 전용 (PRECHECK_USAGE_VIEWER_IDS, 기본 'ceo'). 메뉴 노출 게이팅용

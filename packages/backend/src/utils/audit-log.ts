@@ -108,6 +108,14 @@ export function isPrecheckUsageViewer(superAdminId?: string | null): Promise<boo
 }
 
 /**
+ * ★ 2026-10-06 기능 관심 업체(기능 안내 창 열람 · 「요금제 보기」) 열람 권한 — FEATURE_INTEREST_VIEWER_IDS(기본 'ceo').
+ * Harold 명시: 「슈퍼관리자에 나만 볼 수 있는 메뉴로」 · 다른 계정은 메뉴 자체가 보이지 않는다. 다른 축과 별도 env.
+ */
+export function isFeatureInterestViewer(superAdminId?: string | null): Promise<boolean> {
+  return isSuperAdminAllowed(superAdminId, 'FEATURE_INTEREST_VIEWER_IDS', 'ceo', 'feature-interest', 'featureInterest');
+}
+
+/**
  * AI 학습 데이터 열람 권한 — AI_TRAINING_VIEWER_IDS(기본 'ceo')에 포함된 super_admins.login_id만 허용.
  * 인비토AI 학습 데이터는 전사 비식별 집계라 소유자(ceo) 전용. 감사 로그와 분리된 별도 env.
  */
