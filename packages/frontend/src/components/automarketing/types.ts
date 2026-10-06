@@ -246,6 +246,14 @@ export interface ProposalJson {
     passedIndex?: number | null;
     results?: Array<{ index: number; result: string; regenerated?: boolean }>;
   };
+  /** ★ 2026-10-06 화면 스팸 검사(고른 안 · 고친 문안) — 결과는 검사한 문안 글자와 함께 쌓인다(같은 글자일 때만 표시) */
+  spamRetest?: ProposalSpamRetest | null;
+}
+
+export interface ProposalSpamRetest {
+  count?: number;
+  running?: { token?: string; variantIndex: number; startedAt: string };
+  results?: Array<{ variantIndex: number; body: string; subject: string; result: string; carriers?: Array<{ carrier: string; result: string }>; at: string }>;
 }
 
 export interface OperatorProposal {

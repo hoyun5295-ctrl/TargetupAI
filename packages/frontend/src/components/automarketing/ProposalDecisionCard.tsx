@@ -1,12 +1,12 @@
 // 오늘의 추천 — 의사결정 카드 (2026-06-27)
 // 버리는 데이터 0: proposal_json(orchestrate 결과 전체)을 위계로 렌더한다.
 //   히어로(기대 매출·ROI) → 근거(왜 지금·등급별 전환·안전·채널) → 보조(변형·인사이트·전략·리스크·비용·통합 분석).
-import { ReactNode, useRef, useState } from 'react';
+import { ReactNode, useEffect, useRef, useState } from 'react';
 import {
   X, ChevronDown, ChevronUp, Target, ShieldCheck,
-  Send, GitMerge, MessageSquare, AlertCircle, Check, Pencil, Users,
+  Send, GitMerge, MessageSquare, AlertCircle, Check, Pencil, Users, Loader2,
 } from 'lucide-react';
-import { OperatorProposal, ProposalVariant, BanditRecommendation, ProposalApproveSelection, won } from './types';
+import { OperatorProposal, ProposalVariant, BanditRecommendation, ProposalApproveSelection, ProposalSpamRetest, won } from './types';
 import StatusBadge from './StatusBadge';
 // ★ 2026-07-10 [타겟확인] — 발송 대상 명단 모달 (SoT: docs/superpowers/specs/2026-07-10-send-target-list-three-phase-design.md §3-2①)
 import TargetRecipientsModal, { arrayPager, TargetRecipient } from '../TargetRecipientsModal';
@@ -47,6 +47,9 @@ const SPAM_RESULT_CHIP: Record<string, { text: string; cls: string }> = {
   timeout: { text: '검사 결과 없음', cls: 'bg-slate-100 text-slate-500' },
   failed: { text: '검사 실패', cls: 'bg-slate-100 text-slate-500' },
 };
+/** ★ 2026-10-06 화면 스팸 검사 횟수(서버 PROPOSAL_SPAM_RETEST_LIMIT 와 같은 값 · 서버가 막는다) */
+const SPAM_RETEST_LIMIT = 5;
+const authHeader = () => ({ Authorization: `Bearer ${localStorage.getItem('token')}` });
 
 export default function ProposalDecisionCard({
   proposal, featured = false, expanded, variantData, busy,
@@ -126,6 +129,29 @@ export default function ProposalDecisionCard({
   const spamCheck = pj.spamCheck;
   const spamPassedIdx = Number.isInteger(spamCheck?.passedIndex) && messages[spamCheck!.passedIndex as number] ? (spamCheck!.passedIndex as number) : null;
   const spamResultAt = (i: number) => (spamCheck?.results || []).find((r) => r.index === i);
+  // ★ 2026-10-06 화면 스팸 검사(임은지 재오픈) — 고른 안 · 고친 문안을 자동 검사와 같은 검사로(무료 · 제안마다 5회).
+  //   결과는 검사한 글자와 함께 저장된다 → 지금 문안과 글자까지 같을 때만 붙인다(고치면 지난 결과는 안 보인다).
+  //   혜택 자리가 남은 문안은 서버가 검사하지 않는다(Codex 3R) → 검사한 글자 = 화면 글자 = 나가는 글자라 글자 비교만으로 충분하다.
+  const [retest, setRetest] = useState<ProposalSpamRetest | null>(pj.spamRetest || null);
+  const [retestStarting, setRetestStarting] = useState(false);
+  const [retestError, setRetestError] = useState<string | null>(null);
+  const retestRunning = !!retest?.running && Date.now() - Date.parse(retest.running.startedAt) < 10 * 60 * 1000;
+  const retestLeft = Math.max(0, SPAM_RETEST_LIMIT - (retest?.count || 0));
+  const retestFor = (i: number, body: string, subject: string) =>
+    [...(retest?.results || [])].reverse().find((r) => r.variantIndex === i && r.body === body && (r.subject || '') === subject);
+  const loadRetest = async () => {
+    try {
+      const res = await fetch(`/api/ai/operator/proposals/${proposal.id}/spam-test`, { headers: authHeader() });
+      const data = await res.json();
+      if (data.success) setRetest(data.spamRetest || null);
+    } catch { /* 다음에 다시 읽는다 */ }
+  };
+  useEffect(() => {
+    if (!retestRunning) return;
+    const t = setInterval(() => { void loadRetest(); }, 4000);
+    return () => clearInterval(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [retestRunning, proposal.id]);
   const banditIdx = spamPassedIdx != null ? spamPassedIdx : (recommendedIdx != null && messages[recommendedIdx] ? recommendedIdx : 0);
   // 사용자가 고른 변형이 있으면 그것, 없으면 검사 통과 안(없으면 추천 안). 미리보기·발송이 모두 이 index를 따른다.
   const effectiveIdx = selectedIdx != null && messages[selectedIdx] ? selectedIdx : banditIdx;
@@ -139,6 +165,27 @@ export default function ProposalDecisionCard({
   const charsetInvalid = canApprove && ['SMS', 'LMS', 'MMS'].includes(channelName)
     && hasUnsupportedSmsChars(effectiveBody, isLongType ? effectiveSubject : '');
   const selectVariant = (i: number) => { setSelectedIdx(i); setEditedBody(null); setEditedSubject(null); setEditing(false); };
+  const startRetest = async () => {
+    // ★ Codex 4R high — 검사한 안 = 승인할 안. 아무것도 안 고른 채 기본 안을 검사하고 승인하면 선택 없이 승인되어
+    //   서버가 추천을 다시 뽑아 다른 안이 나갈 수 있었다 → 검사를 시작하면 그 안을 발송 선택으로 고정한다(submitApprove 가 selection 을 싣는다).
+    if (selectedIdx == null) setSelectedIdx(effectiveIdx);
+    setRetestError(null);
+    setRetestStarting(true);
+    try {
+      const res = await fetch(`/api/ai/operator/proposals/${proposal.id}/spam-test`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...authHeader() },
+        body: JSON.stringify({ variantIndex: effectiveIdx, body: effectiveBody, subject: effectiveSubject }),
+      });
+      const data = await res.json();
+      if (data.success) setRetest(data.spamRetest || null);
+      else setRetestError(data.error || '스팸 검사를 시작하지 못했습니다.');
+    } catch {
+      setRetestError('스팸 검사를 시작하지 못했습니다. 잠시 뒤 다시 눌러 주세요.');
+    } finally {
+      setRetestStarting(false);
+    }
+  };
   // ★ Codex P3 (2026-07-09): 사용자가 명시적으로 선택/편집한 경우에만 selection 전송.
   //   미조작 승인에 selection을 실으면 변형 데이터 로딩 전(recommendedIdx=undefined)엔 변형 A(0)가 강제되어
   //   백엔드 Bandit 추천을 우회한다 — 미조작 = undefined로 보내 백엔드가 Bandit으로 결정(자동 경로 동일).
@@ -300,6 +347,10 @@ export default function ProposalDecisionCard({
               const v = variantData?.variants?.[i];
               const rec = recommendedIdx === i;
               const isSel = canApprove && effectiveIdx === i;
+              // 화면 검사 결과(같은 글자일 때만) → 없으면 자동 검사 결과(고친 문안에는 붙이지 않는다)
+              const reHit = retestFor(i, isSel ? effectiveBody : (m.body || m.message || ''), isSel ? effectiveSubject : (m.subject || ''));
+              const autoHit = isSel && (editedBody != null || editedSubject != null) ? undefined : spamResultAt(i);
+              const testingThis = retestRunning && retest?.running?.variantIndex === i;
               return (
                 <div
                   key={i}
@@ -311,9 +362,13 @@ export default function ProposalDecisionCard({
                     <span className="text-slate-700 font-medium">{m.variantName || `변형 ${variantLetter(i)}`}</span>
                     {(m.byteCount || m.byte_count) ? <span className="text-[10px] text-slate-400">{m.byteCount || m.byte_count}byte</span> : null}
                     {rec && <span className="text-[10px] bg-indigo-600 text-white px-1.5 py-0.5 rounded-full">추천</span>}
-                    {spamResultAt(i) && SPAM_RESULT_CHIP[spamResultAt(i)!.result] && (
-                      <span className={`text-[10px] px-1.5 py-0.5 rounded-full ${SPAM_RESULT_CHIP[spamResultAt(i)!.result].cls}`}>
-                        {SPAM_RESULT_CHIP[spamResultAt(i)!.result].text}{spamResultAt(i)!.regenerated ? ' · AI가 다시 씀' : ''}
+                    {testingThis ? (
+                      <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-slate-100 text-slate-600">스팸 검사 중</span>
+                    ) : reHit && SPAM_RESULT_CHIP[reHit.result] ? (
+                      <span className={`text-[10px] px-1.5 py-0.5 rounded-full ${SPAM_RESULT_CHIP[reHit.result].cls}`}>{SPAM_RESULT_CHIP[reHit.result].text}</span>
+                    ) : autoHit && SPAM_RESULT_CHIP[autoHit.result] && (
+                      <span className={`text-[10px] px-1.5 py-0.5 rounded-full ${SPAM_RESULT_CHIP[autoHit.result].cls}`}>
+                        {SPAM_RESULT_CHIP[autoHit.result].text}{autoHit.regenerated ? ' · AI가 다시 씀' : ''}
                       </span>
                     )}
                     {isSel && <span className="text-[10px] bg-indigo-100 text-indigo-900 px-1.5 py-0.5 rounded-full">발송 선택됨</span>}
@@ -380,6 +435,22 @@ export default function ProposalDecisionCard({
                           className="text-[11px] text-slate-500 hover:text-slate-700 px-1.5 py-1"
                         >원래대로</button>
                       )}
+                      {['SMS', 'LMS', 'MMS'].includes(channelName) && (
+                        <button
+                          onClick={(e) => { e.stopPropagation(); void startRetest(); }}
+                          disabled={busy || retestStarting || retestRunning || retestLeft === 0 || charsetInvalid || subjectInvalid || !effectiveBody.trim()}
+                          className="inline-flex items-center gap-1 text-[11px] text-emerald-800 border border-emerald-200 hover:bg-emerald-50 disabled:opacity-40 px-2 py-1 rounded-lg transition-colors"
+                        >
+                          {retestRunning || retestStarting ? <Loader2 className="w-3 h-3 animate-spin" /> : <ShieldCheck className="w-3 h-3" />}
+                          {retestRunning ? '스팸 검사 중(1~2분)' : '이 문안 스팸 검사'}
+                        </button>
+                      )}
+                    </div>
+                  )}
+                  {isSel && ['SMS', 'LMS', 'MMS'].includes(channelName) && (
+                    <div className="mt-1 text-[10px] text-slate-500">
+                      통신사 3곳 테스트폰으로 실제 수신을 확인합니다 · 무료 · {retestLeft > 0 ? `이 제안에서 ${retestLeft}회 남음` : '이 제안의 검사 횟수를 모두 썼습니다'}
+                      {retestError && <div className="text-rose-700 mt-0.5">{retestError}</div>}
                     </div>
                   )}
                 </div>
@@ -415,7 +486,7 @@ export default function ProposalDecisionCard({
   const reviewNotice = proposal.status === 'admin_review' && (
     <div className="mt-3 flex items-start gap-1.5 text-[11px] text-amber-900 bg-amber-50 border border-amber-200 rounded-lg p-2">
       <AlertCircle className="w-3 h-3 mt-0.5 shrink-0" />
-      <span>{proposal.autoExecuteReason || '스팸 필터를 끝내 통과하지 못했습니다.'}. 문안을 확인하고 발송 여부를 직접 판단해주세요.</span>
+      <span>{proposal.autoExecuteReason || '스팸 필터를 끝내 통과하지 못했습니다.'}. 문안을 확인하고 발송 여부를 직접 판단해주세요. 상세의 메시지 목록에서 다른 추천 문안을 고르거나 고친 뒤 스팸 검사를 할 수 있습니다.</span>
     </div>
   );
 

@@ -1063,7 +1063,7 @@ export async function autoSpamTestWithRegenerate(params: {
       source: 'auto_ai',
       variantId,
       batchId,
-      skipPrepaid: true, // 프로 이상: 무료
+      skipPrepaid: true, // 자동 검사 = 요금제 무관 무료(자동마케팅 진입 = 유료 요금제 전부 · 사용량은 크레딧)
     });
 
     if (!enqueueResult.ok) {

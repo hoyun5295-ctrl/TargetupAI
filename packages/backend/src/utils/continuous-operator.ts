@@ -35,7 +35,7 @@ import { shouldSkipProposalGeneration } from './operator-proposal-dedup';
 import { insertProposalVariants, recommendVariantForProposal, recordVariantReward } from './bandit-optimizer';
 // ★ D212+ 정책 (2026-05-23 Harold 명시): CT-64 영역 통합 — 검증 영역 + 담당자 학습
 // ★ D227+ 스팸 안전망 격상 — decideSpamOutcome(실제 테스트 결과 → 상태) + buildSpamRegeneratePrompt(AI 재작성)
-import { recordAdminStopLearning, decideSpamOutcome, buildSpamRegeneratePrompt, spamCheckPassedIndex, AUTO_SEND_SPAM_VERIFIED_SQL } from './continuous-operator-policy';
+import { recordAdminStopLearning, decideSpamOutcome, buildSpamRegeneratePrompt, spamCheckPassedIndex, AUTO_SEND_SPAM_VERIFIED_SQL, PROPOSAL_SPAM_RETEST_LIMIT, resolveRetestCopy } from './continuous-operator-policy';
 import { resolveAutoSendLeadMinutes, computeScheduledSendAt, decideSendOutcome, decideStuckSendingRecovery, decideBudgetGuard, decideBudgetAlert, isSendableHourKst, validateScheduleTimeSendable, buildAutoSendPrepInfoBody, buildPendingReviewNoticeBody, computeNextOccurrence, computeNextGenerationRun, normalizeSendTimeMode, SendTimeMode, normalizeCopyStyle, buildCopyStylePromptBlock, CopyStyle, wrapOperatorNoticeBody, normalizeTargetHint, TargetHint, applyBenefitToBody, hasUneditedBenefitPlaceholder, detectMissedOperatorRound , computeApprovalWindow, buildRenewalNoticeBody, countEmptyRounds, isWithinApprovalWindow, approvalSummarySince } from './autosend-policy';
 import { stableJson } from './agent-protocol';
 import { getOpt080Number } from './messageUtils';
@@ -1358,15 +1358,20 @@ export async function generateProposalForOperator(operatorId: string, opts?: { p
         messageText: String(m?.body || m?.message || ''),
         subject: m?.subject ? String(m.subject) : (bestSubject || undefined),
       })).filter((v: { messageText: string }) => !!v.messageText);
+      // ★ 2026-10-06 검사 발신번호 = 실제 발송과 같은 기본 발신번호(dispatchProposalSend · 검사 조건 = 발송 조건).
+      //   옛: callbackForSpam 은 companyInfo 에 발신번호 칸이 없어 늘 080 수신거부 번호였다(10-01~10-06 실측 9건 전부 080).
+      //   기본 발신번호가 없으면 종전 값 — 그 회사는 발송 단계에서 「발신번호 미설정」으로 보류된다. 자격 판정(canAutoSend)은 그대로.
+      const spamCallback = (await loadDefaultCallback(operator.companyId)) || callbackForSpam;
       // ★ 2026-10-05 직접 쓴 문안(Q17) — 같은 문안(지문)이 이미 통과했으면 다시 검사하지 않는다 · 재생성 0(사람 문안을 AI 가 바꾸지 않는다).
-      const fixedHash = isFixedCopy ? computeMessageHash(`${bestSubject}\n${bestMessage}`) : '';
+      //   ★ 2026-10-06 지문에 검사 발신번호를 넣는다 — 080 으로 검사한 옛 통과 기록이 실제 번호 검사를 건너뛰지 않게(번호가 바뀌어도 다시 검사).
+      const fixedHash = isFixedCopy ? computeMessageHash(`${spamCallback}\n${bestSubject}\n${bestMessage}`) : '';
       const cachedPass = isFixedCopy && operator.fixedCopy?.spam?.hash === fixedHash && operator.fixedCopy?.spam?.status === 'pass';
       const spamResult = cachedPass
         ? ({ passedVariantId: 'A', variants: [{ variantId: 'A', messageText: bestMessage, subject: bestSubject || undefined, spamResult: 'pass', regenerateCount: 0, regenerated: false }] } as any)
         : await autoSpamTestWithRegenerate({
         companyId: operator.companyId,
         userId: operator.createdBy || operator.companyId,
-        callbackNumber: callbackForSpam,
+        callbackNumber: spamCallback,
         messageType: (channelForSpam === 'LMS' || channelForSpam === 'MMS' ? channelForSpam : 'SMS') as 'SMS' | 'LMS' | 'MMS',
         subject: bestSubject || undefined,
         variants: spamVariants.length > 0 ? spamVariants : [{ variantId: 'A', messageText: bestMessage, subject: bestSubject || undefined }],
@@ -1470,7 +1475,7 @@ export async function generateProposalForOperator(operatorId: string, opts?: { p
           // ★ 2026-10-03 따옴표 안은 자동마케팅 이름이다(옛 문구는 문안 이름처럼 읽혔다) · 검사한 안 수를 함께 알린다
           await notifyOperatorAdmins(operator, '[AI 자동마케팅] 일시정지', isFixedCopy
             ? `'${operator.name}' 자동마케팅의 직접 쓰신 문안이 스팸필터를 통과하지 못해 자동마케팅을 일시정지했습니다. 문안을 고친 뒤 재개해주세요.`
-            : `'${operator.name}' 자동마케팅의 추천 문안 ${tested.length}안이 모두 스팸필터를 통과하지 못해 자동마케팅을 일시정지했습니다. 문안 검토 후 재개해주세요.`).catch((e: any) => console.warn('[ContinuousOperator] 정지 알림 경고:', e?.message));
+            : `'${operator.name}' 자동마케팅의 추천 문안 ${tested.length}안이 모두 스팸필터를 통과하지 못해 자동마케팅을 일시정지했습니다. 한줄로 자동마케팅 화면의 제안 상세에서 다른 추천 문안을 고르거나 문안을 고친 뒤 스팸 검사를 하고 승인할 수 있습니다. 확인 후 자동마케팅을 재개해주세요.`).catch((e: any) => console.warn('[ContinuousOperator] 정지 알림 경고:', e?.message));
         } else {
           console.warn(`[ContinuousOperator] ${operator.name} 스팸 미통과 — 검사 중 담당자가 이미 처리한 제안이라 상태·정지·통지를 바꾸지 않음`);
         }
@@ -1764,6 +1769,129 @@ export async function rejectProposal(
     [result.rows[0].operator_id]
   );
   return true;
+}
+
+// ════════════════════════════════════════════════════════════════════
+// ★ 2026-10-06 화면 스팸 검사(임은지 재오픈 `cmuqcxfib0b5bjnn409ij7ncl`)
+//   「통과한 1안 말고 다른 추천 안이나 고친 문안도 스팸 검사를 할 수 있어야」. 자동 검사와 같은 검사(3사 테스트폰 실수신 · 무료)를
+//   한 안만 · 재생성 없이 돌린다. 결과는 검사한 문안 글자와 함께 proposal_json.spamRetest.results 에 쌓고, 화면은 지금 문안과
+//   글자까지 같은 결과만 붙인다. 승인 · 발송 규칙은 바꾸지 않는다(사람이 승인하면 지금처럼 나간다).
+//   발신번호 · 080 = 실제 발송과 같은 값(기본 발신번호 · getOpt080Number). 제안마다 5회 · 동시에 하나(시작 표식 + 토큰).
+//   시작 표식이 10분 넘게 남으면(검사 중 재기동) 다음 검사가 이어받는다 · 끝 기록은 자기 토큰일 때만 쓴다.
+// ════════════════════════════════════════════════════════════════════
+export async function startProposalSpamRetest(
+  companyId: string,
+  proposalId: string,
+  userId: string,
+  sel: { variantIndex: number; body?: string; subject?: string },
+): Promise<{ ok: true; spamRetest: any } | { ok: false; reason: string; code?: string }> {
+  const notTestable = '승인 전 제안에서만 스팸 검사를 할 수 있습니다.';
+  const pRes = await query(
+    `SELECT p.status, p.proposal_json, o.created_by
+       FROM operator_proposals p JOIN continuous_operators o ON o.id = p.operator_id
+      WHERE p.id = $1::uuid AND p.company_id = $2::uuid`,
+    [proposalId, companyId],
+  );
+  const row = pRes.rows[0];
+  if (!row) return { ok: false, reason: '제안서를 찾을 수 없습니다.' };
+  if (!['pending', 'admin_review'].includes(String(row.status))) return { ok: false, reason: notTestable };
+  const copy = resolveRetestCopy(row.proposal_json, sel);
+  if (!copy.ok) return { ok: false, reason: copy.reason };
+  const callback = await loadDefaultCallback(companyId);
+  if (!callback) return { ok: false, reason: '기본 발신번호가 없어 검사할 수 없습니다. 발신번호를 등록해 주세요.' };
+  const opt080 = await getOpt080Number(row.created_by || null, companyId);
+  if (!opt080) return { ok: false, reason: '광고 무료거부 번호(080)가 없어 검사할 수 없습니다. 080 번호를 등록해 주세요.' };
+
+  // 횟수 · 동시 하나를 한 문장으로 잡는다(두 번 눌러도 하나만 선다)
+  const token = randomUUID();
+  const claim = await query(
+    `UPDATE operator_proposals
+        SET proposal_json = jsonb_set(proposal_json, '{spamRetest}',
+              COALESCE(proposal_json->'spamRetest', '{}'::jsonb) || jsonb_build_object(
+                'count', COALESCE((proposal_json #>> '{spamRetest,count}')::int, 0) + 1,
+                'running', jsonb_build_object('token', $3::text, 'variantIndex', $4::int, 'startedAt', NOW())), true)
+      WHERE id = $1::uuid AND company_id = $2::uuid AND status IN ('pending', 'admin_review')
+        AND COALESCE((proposal_json #>> '{spamRetest,count}')::int, 0) < $5::int
+        AND (proposal_json #> '{spamRetest,running}' IS NULL
+             OR (proposal_json #>> '{spamRetest,running,startedAt}')::timestamptz < NOW() - INTERVAL '10 minutes')
+      RETURNING proposal_json->'spamRetest' AS retest`,
+    [proposalId, companyId, token, sel.variantIndex, PROPOSAL_SPAM_RETEST_LIMIT],
+  );
+  if (claim.rows.length === 0) {
+    const now = await query(
+      `SELECT status, proposal_json->'spamRetest' AS retest FROM operator_proposals WHERE id = $1::uuid AND company_id = $2::uuid`,
+      [proposalId, companyId],
+    );
+    const cur = now.rows[0];
+    if (!cur || !['pending', 'admin_review'].includes(String(cur.status))) return { ok: false, reason: notTestable };
+    if (Number(cur.retest?.count || 0) >= PROPOSAL_SPAM_RETEST_LIMIT) {
+      return { ok: false, code: 'SPAM_RETEST_LIMIT', reason: `이 제안의 스팸 검사 ${PROPOSAL_SPAM_RETEST_LIMIT}회를 모두 썼습니다.` };
+    }
+    return { ok: false, code: 'SPAM_RETEST_RUNNING', reason: '다른 문안을 검사하고 있습니다. 끝난 뒤 다시 눌러 주세요.' };
+  }
+
+  // 검사는 1~2분 걸린다 — 응답은 바로 하고 화면이 결과를 다시 읽는다
+  void runProposalSpamRetest({
+    proposalId, token, companyId, userId: row.created_by || userId, callback, opt080,
+    variantIndex: sel.variantIndex, copy,
+  }).catch((e: any) => console.warn('[ContinuousOperator] 화면 스팸 검사 예외:', e?.message));
+  return { ok: true, spamRetest: claim.rows[0].retest };
+}
+
+async function runProposalSpamRetest(a: {
+  proposalId: string; token: string; companyId: string; userId: string; callback: string; opt080: string;
+  variantIndex: number; copy: { body: string; subject: string; msgType: 'SMS' | 'LMS' | 'MMS' };
+}): Promise<void> {
+  let result = 'failed';
+  let carriers: Array<{ carrier: string; result: string }> = [];
+  try {
+    const r = await autoSpamTestWithRegenerate({
+      companyId: a.companyId,
+      userId: a.userId,
+      callbackNumber: a.callback,
+      messageType: a.copy.msgType,
+      subject: a.copy.subject || undefined,
+      variants: [{ variantId: String.fromCharCode(65 + a.variantIndex), messageText: a.copy.body, subject: a.copy.subject || undefined }],
+      isAd: true,
+      rejectNumber: a.opt080,
+      maxRetries: 0,
+      stopOnFirstPass: true,
+    });
+    const v = r.variants?.[0];
+    result = v?.spamResult || 'failed';
+    carriers = (v?.carrierResults || []).map((c) => ({ carrier: c.carrier, result: c.result }));
+  } catch (e: any) {
+    console.warn('[ContinuousOperator] 화면 스팸 검사 오류:', e?.message);
+  }
+  const entry = {
+    variantIndex: a.variantIndex, body: a.copy.body, subject: a.copy.subject,
+    result, carriers, at: new Date().toISOString(),
+  };
+  await query(
+    `UPDATE operator_proposals
+        SET proposal_json = jsonb_set(proposal_json #- '{spamRetest,running}', '{spamRetest,results}',
+              COALESCE(proposal_json #> '{spamRetest,results}', '[]'::jsonb) || jsonb_build_array($3::jsonb), true)
+      WHERE id = $1::uuid AND proposal_json #>> '{spamRetest,running,token}' = $2`,
+    [a.proposalId, a.token, JSON.stringify(entry)],
+  ).catch((e: any) => console.warn('[ContinuousOperator] 화면 스팸 검사 기록 경고:', e?.message));
+}
+
+/** 기본 발신번호(발송 dispatchProposalSend 와 같은 조건 = is_default) · 없으면 '' — 스팸 검사가 실제 발송 번호로 검사하게 */
+async function loadDefaultCallback(companyId: string): Promise<string> {
+  const r = await query(
+    `SELECT REPLACE(phone, '-', '') AS phone FROM callback_numbers WHERE company_id = $1 AND is_default = true LIMIT 1`,
+    [companyId],
+  );
+  return String(r.rows[0]?.phone || '');
+}
+
+/** 화면이 검사 진행 · 결과를 다시 읽는다(회사 범위) */
+export async function readProposalSpamRetest(companyId: string, proposalId: string): Promise<any | undefined> {
+  const r = await query(
+    `SELECT proposal_json->'spamRetest' AS retest FROM operator_proposals WHERE id = $1::uuid AND company_id = $2::uuid`,
+    [proposalId, companyId],
+  );
+  return r.rows.length === 0 ? undefined : (r.rows[0].retest || null);
 }
 
 // ════════════════════════════════════════════════════════════════════

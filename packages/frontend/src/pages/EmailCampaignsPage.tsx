@@ -847,6 +847,7 @@ export default function EmailCampaignsPage() {
                               : `${fmtDate(c.sentAt)} · ${c.sentCount.toLocaleString()}명`}
                       metric={st === 'sent' && c.sentCount > 0 ? <Meter label={`오픈 ${((c.openCount / c.sentCount) * 100).toFixed(1)}% · 클릭 ${((c.clickCount / c.sentCount) * 100).toFixed(1)}%`} pct={(c.openCount / c.sentCount) * 100} /> : undefined}
                       onOpen={() => { if (st === 'draft') openEditor(c); else setDetail(c); }}
+                      onDelete={st === 'draft' ? () => handleDeleteCampaign(c) : undefined}
                     />
                   ))}
                 </div>

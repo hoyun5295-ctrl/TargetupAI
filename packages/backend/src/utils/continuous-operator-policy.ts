@@ -6,6 +6,8 @@
  */
 
 import { addMemory } from './company-memory';
+import { hasUneditedBenefitPlaceholder } from './autosend-policy';
+import { eucKrByteLength } from './message-byte';
 
 // ━━━ 외부 노출 타입 ━━━
 export type DeliveryPolicy = 'daily' | 'weekly' | 'monthly';
@@ -97,6 +99,37 @@ export function spamCheckPassedIndex(pj: any): number | null {
   const idx = pj?.spamCheck?.passedIndex;
   if (!Number.isInteger(idx) || idx < 0) return null;
   return Array.isArray(pj?.messages) && pj.messages[idx] ? idx : null;
+}
+
+/** ★ 2026-10-06 화면 스팸 검사 횟수 — 제안마다 5회 · 무료(Harold 1006 · 자동 검사와 같은 무료 경로) */
+export const PROPOSAL_SPAM_RETEST_LIMIT = 5;
+
+/**
+ * ★ 2026-10-06 화면 「스팸 검사」(임은지 재오픈) — 고른 안 · 고친 문안에서 검사할 문안을 정한다.
+ * 발송(dispatchProposalSend)과 같은 순서다: 고친 본문이 있으면 그것 · 제목은 문자열이 오면 그것 · 단문이 90byte 를 넘으면 장문으로 검사한다.
+ * ★ Codex 3R 구조 정정 — 혜택 자리([혜택 …] · 직접 입력 안내)가 남은 문안은 검사하지 않는다(혜택을 문안에 직접 넣은 뒤 검사).
+ *   혜택은 서버(운영자 설정)에만 있어 화면이 「지금 나갈 문안」을 알 수 없다 → 1R(혜택 바뀌어도 지난 통과 표시) · 2R(받아 둔 결과 미갱신) ·
+ *   3R(재조회 실패 · 응답 역전)이 같은 뿌리로 반복됐다. 혜택 자리가 없으면 발송의 혜택 치환은 아무것도 바꾸지 않으므로
+ *   검사한 글자 = 화면 글자 = 나가는 글자가 되고 화면이 글자만으로 결과를 붙일 수 있다.
+ * ⛔ 발송 쪽 규칙을 바꾸면 여기도 바꾼다(검사한 문안 = 나가는 문안).
+ */
+export function resolveRetestCopy(
+  pj: any,
+  sel: { variantIndex: number; body?: string; subject?: string },
+): { ok: true; body: string; subject: string; msgType: 'SMS' | 'LMS' | 'MMS' } | { ok: false; reason: string } {
+  const msg = Array.isArray(pj?.messages) ? pj.messages[sel.variantIndex] : null;
+  if (!Number.isInteger(sel.variantIndex) || sel.variantIndex < 0 || !msg) return { ok: false, reason: '검사할 문안을 찾을 수 없습니다.' };
+  const edited = typeof sel.body === 'string' && sel.body.trim() !== '';
+  const body = edited ? String(sel.body) : String(msg.body || msg.message || '');
+  const subject = typeof sel.subject === 'string' ? sel.subject : String(msg.subject || '');
+  if (!body.trim()) return { ok: false, reason: '문안이 비어 있어 검사할 수 없습니다.' };
+  if (hasUneditedBenefitPlaceholder(body) || hasUneditedBenefitPlaceholder(subject)) {
+    return { ok: false, reason: '혜택 자리가 남은 문안은 검사하지 않습니다. 문안 편집에서 혜택을 직접 넣은 뒤 검사해 주세요.' };
+  }
+  const channel = String(pj?.channel?.recommended || 'SMS').toUpperCase();
+  let msgType: 'SMS' | 'LMS' | 'MMS' = channel === 'LMS' || channel === 'MMS' ? channel : 'SMS';
+  if (msgType === 'SMS' && edited && eucKrByteLength(body) > 90) msgType = 'LMS';
+  return { ok: true, body, subject, msgType };
 }
 
 /**

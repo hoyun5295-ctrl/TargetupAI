@@ -1,0 +1,445 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>한줄로 AI 마케팅 플래너</title>
+<!--
+  인스타그램 릴스 · 스레드 소개 영상 03(1080x1920 · 15초 · 30fps) · 흰 바탕 시리즈
+  시간은 window.seek(t) 하나가 정한다 → render.js 가 프레임마다 불러 찍는다.
+  장면 시각표 T 를 바꾸면 music.py 효과음 시각도 같이 바꾼다.
+-->
+<style>
+  :root { --bg: #FAFAF8; --ink: #111111; --line: #E7E5E4; --soft: #F4F4F5; --ac: #FF5A1F; --ac-soft: #FFF1EB; }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { width: 1080px; height: 1920px; overflow: hidden; background: var(--bg); }
+  body { font-family: 'Pretendard', sans-serif; -webkit-font-smoothing: antialiased; color: var(--ink); letter-spacing: -0.02em; }
+  #stage { position: relative; width: 1080px; height: 1920px; overflow: hidden; background-color: var(--bg);
+           background-image: radial-gradient(#E4E4E7 1.7px, transparent 1.7px); background-size: 40px 40px; }
+  .abs { position: absolute; }
+  .mark { background: linear-gradient(rgba(255,90,31,.32), rgba(255,90,31,.32)) no-repeat 0 82% / 0% 36%; padding: 0 6px; }
+  svg.i { width: 1em; height: 1em; fill: none; stroke: currentColor; stroke-width: 2.2; stroke-linecap: round; stroke-linejoin: round; flex: none; }
+  .panel { left: 60px; width: 960px; border-radius: 44px; background: #fff; border: 2px solid var(--line); box-shadow: 0 40px 100px rgba(17,17,17,.10); overflow: hidden; }
+  .lbl { display: inline-block; padding: 6px 16px; border-radius: 999px; background: var(--soft); color: #3F3F46; font-size: 22px; font-weight: 700; }
+
+  #chip { left: 50%; top: 200px; display: flex; align-items: center; gap: 22px; padding: 18px 34px; border-radius: 999px; background: #fff; border: 2px solid var(--line);
+          color: #3F3F46; font-size: 30px; font-weight: 600; white-space: nowrap; box-shadow: 0 8px 24px rgba(17,17,17,.05); }
+  #chip img { height: 34px; }
+  #chip .bar { width: 2px; height: 28px; background: var(--line); }
+  .cap { left: 0; width: 1080px; text-align: center; }
+  .cap .k { font-size: 44px; font-weight: 600; color: #71717A; }
+  .cap .h { margin-top: 10px; font-size: 84px; font-weight: 800; letter-spacing: -0.045em; line-height: 1.12; }
+
+  #hook { left: 0; top: 640px; width: 1080px; text-align: center; font-weight: 800; font-size: 128px; letter-spacing: -0.055em; line-height: 1.2; }
+  #hook .l { display: block; }
+
+  /* 달력 */
+  #cal { top: 540px; }
+  #cal .head { display: flex; align-items: center; padding: 30px 36px 18px; }
+  #cal .head b { font-size: 42px; font-weight: 800; letter-spacing: -0.04em; }
+  #cal .head span { margin-left: auto; }
+  #wd { display: flex; padding: 0 20px 10px; }
+  #wd div { flex: 1; text-align: center; font-size: 24px; font-weight: 600; color: #71717A; }
+  #grid { position: relative; margin: 0 20px 24px; border-top: 2px solid var(--line); }
+  .cell { position: absolute; border-right: 1px solid #F1F1F0; border-bottom: 1px solid #F1F1F0; }
+  .cell b { position: absolute; left: 12px; top: 8px; font-size: 24px; font-weight: 600; color: #27272A; }
+  .cell.sun b { color: #DC2626; }
+  .ev { position: absolute; height: 32px; border-radius: 9px; color: #fff; font-size: 19px; font-weight: 700; line-height: 32px; padding: 0 10px; white-space: nowrap; overflow: hidden; transform-origin: 0 50%; }
+  .sends { position: absolute; display: flex; flex-wrap: wrap; gap: 5px; }
+  .sc { padding: 2px 9px; border-radius: 8px; background: var(--soft); color: #3F3F46; font-size: 19px; font-weight: 700; line-height: 1.4; }
+  .sc.on { background: var(--ac); color: #fff; }
+  #ring { position: absolute; border: 4px solid var(--ac); border-radius: 14px; pointer-events: none; }
+
+  /* 행사 담기 창 */
+  #ev { left: 120px; top: 700px; width: 840px; padding: 40px; border-radius: 40px; background: #fff; border: 2px solid var(--line); box-shadow: 0 50px 120px rgba(17,17,17,.18); }
+  #ev .t { display: flex; align-items: center; font-size: 34px; font-weight: 800; padding-bottom: 24px; border-bottom: 2px solid var(--line); }
+  #ev .t span { margin-left: auto; }
+  .f { margin-top: 24px; }
+  .f .k { font-size: 23px; color: #71717A; font-weight: 600; }
+  .f .v { margin-top: 6px; font-size: 38px; font-weight: 700; letter-spacing: -0.035em; }
+  .f .note { margin-top: 6px; font-size: 22px; color: #52525B; }
+  .chs { margin-top: 10px; display: flex; gap: 12px; }
+  .ch { padding: 12px 24px; border-radius: 999px; border: 2px solid var(--line); font-size: 28px; font-weight: 700; color: #52525B; background: #fff; }
+  .ch.on { background: var(--ink); border-color: var(--ink); color: #fff; }
+  .btn { position: relative; overflow: hidden; display: flex; align-items: center; justify-content: center; gap: 14px; padding: 26px 40px; border-radius: 28px; color: #fff; font-size: 36px; font-weight: 700; background: var(--ink); }
+  .ripple { position: absolute; left: 50%; top: 50%; width: 120px; height: 120px; margin: -60px 0 0 -60px; border-radius: 50%; background: rgba(255,255,255,.45); }
+  #evBtn { margin-top: 30px; }
+  #pointer { width: 92px; height: 92px; z-index: 5; }
+
+  /* 재료 → 완성본 */
+  #mk { top: 540px; padding: 36px; }
+  #mk .t { display: flex; align-items: center; font-size: 32px; font-weight: 800; }
+  #mk .t span { margin-left: auto; }
+  #mk .sub { margin-top: 22px; font-size: 24px; color: #71717A; font-weight: 600; }
+  .mats { margin-top: 12px; display: flex; gap: 16px; align-items: stretch; }
+  .tile { width: 160px; border-radius: 24px; padding: 16px 16px 12px; display: flex; flex-direction: column; align-items: center; }
+  .tile i { display: block; width: 58px; height: 96px; border-radius: 18px 18px 14px 14px; background: rgba(17,17,17,.16); }
+  .tile em { margin-top: 10px; font-style: normal; font-size: 21px; font-weight: 700; color: #3F3F46; }
+  .txt { flex: 1; border-radius: 24px; background: var(--soft); padding: 20px 22px; font-size: 24px; line-height: 1.45; color: #27272A; }
+  .txt small { display: block; font-size: 20px; color: #52525B; font-weight: 600; margin-bottom: 6px; }
+  #prog { margin-top: 22px; display: flex; align-items: center; gap: 14px; font-size: 26px; font-weight: 700; color: #3F3F46; }
+  .spin { width: 32px; height: 32px; border-radius: 50%; border: 5px solid #E4E4E7; border-top-color: var(--ac); }
+  #done { color: var(--ac); font-size: 32px; display: none; }
+  .outs { margin-top: 18px; display: flex; gap: 20px; }
+  #dm { width: 380px; height: 520px; border: 8px solid var(--ink); border-radius: 46px; overflow: hidden; background: #fff; flex: none; }
+  #dm .hero { height: 212px; background: var(--ink); color: #fff; padding: 30px 26px; }
+  #dm .hero b { display: block; font-size: 42px; font-weight: 900; letter-spacing: -0.02em; }
+  #dm .hero s { display: block; text-decoration: none; margin-top: 8px; font-size: 29px; font-weight: 800; color: var(--ac); }
+  #dm .hero small { display: block; margin-top: 8px; font-size: 21px; color: #D4D4D8; }
+  #dm .g { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; padding: 16px; }
+  #dm .g div { height: 104px; border-radius: 16px; display: flex; align-items: flex-end; padding: 10px 12px; font-size: 18px; font-weight: 700; color: #3F3F46; }
+  .rc { flex: 1; display: flex; flex-direction: column; gap: 20px; }
+  .oc { border-radius: 28px; border: 2px solid var(--line); padding: 22px 24px; background: #fff; }
+  .oc .s { margin-top: 12px; font-size: 26px; font-weight: 800; letter-spacing: -0.035em; line-height: 1.35; }
+  .oc .hb { margin-top: 12px; height: 70px; border-radius: 14px; background: var(--ink); color: #fff; font-size: 22px; font-weight: 900; display: flex; align-items: center; padding-left: 18px; }
+  .oc .ln { margin-top: 10px; height: 14px; border-radius: 7px; background: #EDEDEE; }
+  .oc .bb { margin-top: 12px; padding: 16px 18px; border-radius: 20px 20px 20px 6px; background: var(--soft); font-size: 23px; line-height: 1.45; color: #27272A; }
+
+  /* 휴대폰 확인 */
+  #ph { left: 270px; top: 540px; width: 540px; height: 900px; border: 10px solid var(--ink); border-radius: 66px; background: #fff; overflow: hidden; box-shadow: 0 50px 120px rgba(17,17,17,.18); }
+  #nt { position: absolute; left: 20px; right: 20px; top: 26px; padding: 20px 22px; border-radius: 30px; background: var(--soft); display: flex; gap: 16px; }
+  #nt .ai { width: 56px; height: 56px; border-radius: 16px; background: linear-gradient(135deg, #4ade80, #16a34a); color: #fff; display: flex; align-items: center; justify-content: center; font-size: 30px; flex: none; }
+  #nt .r { font-size: 19px; color: #52525B; font-weight: 600; }
+  #nt .b { margin-top: 4px; font-size: 22px; line-height: 1.42; color: #18181B; }
+  #scr { position: absolute; left: 30px; right: 30px; top: 250px; }
+  #scr .k { font-size: 22px; color: #71717A; font-weight: 700; }
+  #scr .h { margin-top: 6px; font-size: 38px; font-weight: 800; letter-spacing: -0.04em; }
+  #scr .w { margin-top: 10px; font-size: 24px; color: #3F3F46; font-weight: 600; }
+  #scr .bb { margin-top: 22px; padding: 20px 22px; border-radius: 24px 24px 24px 6px; background: var(--soft); font-size: 23px; line-height: 1.45; }
+  #scr .mini { margin-top: 16px; height: 150px; border-radius: 22px; background: var(--ink); color: #fff; padding: 22px; }
+  #scr .mini b { display: block; font-size: 30px; font-weight: 900; }
+  #scr .mini s { display: block; text-decoration: none; margin-top: 6px; font-size: 22px; font-weight: 800; color: var(--ac); }
+  #scr .note { margin-top: 20px; font-size: 22px; color: #52525B; }
+  #okBtn { margin-top: 22px; font-size: 32px; padding: 24px; }
+
+  /* 아웃트로 */
+  .wipe { left: 0; top: 0; width: 1080px; height: 1920px; }
+  #wipeA { background: var(--ink); }
+  #wipeB { background: var(--bg); }
+  #och { left: 0; top: 540px; width: 1080px; display: flex; justify-content: center; gap: 18px; }
+  #och div { padding: 16px 30px; border-radius: 999px; background: var(--ink); color: #fff; font-size: 30px; font-weight: 700; }
+  #outK { top: 710px; left: 0; width: 1080px; text-align: center; font-size: 50px; font-weight: 600; color: #71717A; }
+  #logo { left: 190px; top: 810px; width: 700px; height: 156px; }
+  #logo img { position: absolute; left: 0; top: 0; width: 700px; }
+  #ai { position: absolute; left: 448px; width: 248px; text-align: center; top: -24px; font-size: 150px; font-weight: 900; letter-spacing: -0.03em; line-height: 1; color: var(--ac); }
+  #outC { top: 1080px; left: 0; width: 1080px; text-align: center; font-size: 66px; font-weight: 800; letter-spacing: -0.045em; line-height: 1.28; }
+  #outC .l { display: block; }
+  #url { top: 1340px; left: 50%; display: flex; align-items: center; gap: 16px; padding: 26px 56px; border-radius: 999px; background: var(--ink); color: #fff; font-size: 50px; font-weight: 700; letter-spacing: -0.01em; white-space: nowrap; }
+  #url svg { color: var(--ac); }
+</style>
+</head>
+<body>
+<div id="stage">
+  <div class="abs" id="chip"><img src="../../../packages/frontend/public/logo.png" alt="한줄로"><span class="bar"></span><span>마케팅 플래너</span></div>
+
+  <!-- 1 훅 -->
+  <div class="abs" id="hook"><span class="l" id="h1">이번 달 행사,</span><span class="l" id="h2"><span class="mark" id="hm">문자·DM·메일</span></span><span class="l" id="h3">언제 다 만들죠?</span></div>
+
+  <!-- 자막 -->
+  <div class="abs cap" id="c0" style="top:300px"><div class="k">달력에</div><div class="h">행사만 담으면</div></div>
+  <div class="abs cap" id="c1" style="top:300px"><div class="k">재료만 넣으면</div><div class="h">AI가 완성본까지</div></div>
+  <div class="abs cap" id="c2" style="top:300px"><div class="k">발송 3일 전, 휴대폰으로</div><div class="h">실물 보고 승인만</div></div>
+  <div class="abs cap" id="c3" style="top:300px"><div class="k">정해진 날 오전 8시</div><div class="h">알아서 나가요</div></div>
+
+  <!-- 달력 -->
+  <div class="abs panel" id="cal">
+    <div class="head"><b>2026년 11월</b><span class="lbl">행사 2건</span></div>
+    <div id="wd"><div style="color:#DC2626">일</div><div>월</div><div>화</div><div>수</div><div>목</div><div>금</div><div>토</div></div>
+    <div id="grid"><div id="ring"></div></div>
+  </div>
+
+  <!-- 행사 담기 -->
+  <div class="abs" id="ev">
+    <div class="t">행사 담기<span class="lbl">11월</span></div>
+    <div class="f"><div class="k">행사명</div><div class="v">블랙프라이데이 세일</div></div>
+    <div class="f"><div class="k">기간</div><div class="v">11/27(금) ~ 11/30(월)</div></div>
+    <div class="f"><div class="k">혜택 문구</div><div class="v">전 상품 20% 할인</div><div class="note">적은 글자 그대로 실려요 · AI가 바꾸거나 더하지 않아요</div></div>
+    <div class="f"><div class="k">채널</div><div class="chs"><div class="ch" id="ch0">문자</div><div class="ch" id="ch1">모바일 DM</div><div class="ch" id="ch2">메일</div></div></div>
+    <div class="btn" id="evBtn"><span class="ripple" id="rp1"></span>캘린더에 담기</div>
+  </div>
+
+  <!-- 재료 → 완성본 -->
+  <div class="abs panel" id="mk">
+    <div class="t">재료 넣기<span class="lbl">블랙프라이데이 세일</span></div>
+    <div class="sub">사진 · 글 · 몰 상품</div>
+    <div class="mats">
+      <div class="tile" id="m0" style="background:#F3E8DD"><i></i><em>수분 크림</em></div>
+      <div class="tile" id="m1" style="background:#F9DDE3"><i></i><em>립 틴트</em></div>
+      <div class="tile" id="m2" style="background:#DDE8DC"><i></i><em>선크림</em></div>
+      <div class="txt" id="m3"><small>글</small>겨울 보습 기획전, 한정 수량으로 준비했어요</div>
+    </div>
+    <div id="prog"><span class="spin" id="spin"></span><svg class="i" id="done" viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5"/></svg><span id="progT">완성본을 만드는 중이에요</span></div>
+    <div class="outs">
+      <div id="dm"><div class="hero"><b>BLACK FRIDAY</b><s>전 상품 20% 할인</s><small>11/27 ~ 11/30</small></div>
+        <div class="g"><div style="background:#F3E8DD">수분 크림</div><div style="background:#F9DDE3">립 틴트</div><div style="background:#DDE8DC">선크림</div><div style="background:#ECE7F5">세트 구성</div></div></div>
+      <div class="rc">
+        <div class="oc" id="ml"><span class="lbl">메일</span><div class="s">블랙프라이데이, 전 상품 20% 할인</div><div class="hb">BLACK FRIDAY</div><div class="ln"></div><div class="ln" style="width:70%"></div></div>
+        <div class="oc" id="sm"><span class="lbl">문자</span><div class="bb">(광고) 블랙프라이데이 시작! 전 상품 20% 할인 · 모바일 DM 보기 hanjul.ai/d/●●●●●</div></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 휴대폰 확인 -->
+  <div class="abs" id="ph">
+    <div id="nt"><div class="ai"><svg class="i" viewBox="0 0 24 24"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg></div>
+      <div><div class="r">문자 · 지금</div><div class="b">블랙프라이데이 세일 발송 3일 전이에요. 실물을 보고 승인해 주세요</div></div></div>
+    <div id="scr">
+      <div class="k" id="s0">실물 확인</div>
+      <div class="h" id="s1">블랙프라이데이 세일</div>
+      <div class="w" id="s2">11/27(금) 오전 8시 · 문자 + 모바일 DM</div>
+      <div class="bb" id="s3">(광고) 블랙프라이데이 시작! 전 상품 20% 할인 · 모바일 DM 보기</div>
+      <div class="mini" id="s4"><b>BLACK FRIDAY</b><s>전 상품 20% 할인</s></div>
+      <div class="note" id="s5">승인 전에는 아무것도 나가지 않아요</div>
+      <div class="btn" id="okBtn"><span class="ripple" id="rp2"></span><svg class="i" id="okChk" viewBox="0 0 24 24" style="display:none"><path d="M20 6 9 17l-5-5"/></svg><span id="okT">확인하고 승인</span></div>
+    </div>
+  </div>
+
+  <svg class="abs" id="pointer" viewBox="0 0 24 24"><path d="M4.037 4.688a.495.495 0 0 1 .651-.651l16 6.5a.5.5 0 0 1-.063.947l-6.124 1.58a2 2 0 0 0-1.438 1.435l-1.579 6.126a.5.5 0 0 1-.947.063z" fill="#111" stroke="#fff" stroke-width="1.4" stroke-linejoin="round"/></svg>
+
+  <!-- 아웃트로 -->
+  <div class="abs wipe" id="wipeA"></div>
+  <div class="abs wipe" id="wipeB"></div>
+  <div class="abs" id="och"><div>문자</div><div>모바일 DM</div><div>메일</div></div>
+  <div class="abs" id="outK">마케팅의 완성</div>
+  <div class="abs" id="logo">
+    <img src="../../../packages/frontend/public/logo.png" alt="한줄로" style="clip-path: inset(0 36% 0 0)">
+    <img id="logoBar" src="../../../packages/frontend/public/logo.png" alt="" style="clip-path: inset(0 0 0 64%)">
+    <div id="ai"></div>
+  </div>
+  <div class="abs" id="outC"><span class="l" id="o1">행사는 달력에,</span><span class="l" id="o2">나머지는 한줄로 AI가.</span></div>
+  <div class="abs" id="url">hanjul.ai<svg class="i" viewBox="0 0 24 24"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></svg></div>
+</div>
+
+<script>
+// ── 시각표(초) · 128 BPM 한 마디 = 1.875초 ─────────────────
+const BAR = 1.875;
+const T = {
+  cal: BAR, mat: 2 * BAR, ok: 3.5 * BAR, run: 4.5 * BAR, outro: 6 * BAR, copy: 12.55, url: 7 * BAR,
+  bar1: 2.25, tap: 2.6, card: 2.68, chs: [2.9, 3.05, 3.2], save: 3.28, fly: 3.3,
+  mats: [3.95, 4.1, 4.25, 4.4], made: 4.85, outs: [4.9, 5.4, 5.8],
+  notif: 6.75, scr: [7.05, 7.15, 7.25, 7.35, 7.45, 7.55, 7.62], okClick: 7.95,
+  back: 8.35, och: [11.6, 11.75, 11.9], aiType: [12.15, 12.3],
+};
+// 2026년 11월 · 1일 = 일요일
+const FIRST = new Date(2026, 10, 1).getDay(), DAYS = 30, CW = 920 / 7, RH = 146;
+const EVENTS = [
+  { title: '빼빼로데이', s: 9, e: 11, color: '#3F3F46', at: T.bar1 },
+  { title: '블랙프라이데이 세일', s: 27, e: 30, color: 'var(--ac)', at: T.fly + 0.05 },
+];
+// 그날 나가는 발송(행사 기간 막대 아래 줄) · 확인 표시는 날짜 순
+const SENDS = [
+  { d: 9, ch: ['문자', 'DM'], ev: 0, on: 8.9 },
+  { d: 11, ch: ['문자'], ev: 0, on: 9.25 },
+  { d: 24, ch: ['문자'], ev: 1, on: 9.6 },
+  { d: 27, ch: ['문자', 'DM', '메일'], ev: 1, on: 9.95 },
+  { d: 30, ch: ['문자'], ev: 1, on: 10.3 },
+];
+
+// ── 보조(01 · 02 와 같은 규칙) ───────────────────────────
+const C = (x) => Math.min(1, Math.max(0, x));
+const E = {
+  lin: (x) => x,
+  out: (x) => 1 - Math.pow(1 - x, 3),
+  in: (x) => x * x * x,
+  io: (x) => (x < 0.5 ? 4 * x * x * x : 1 - Math.pow(-2 * x + 2, 3) / 2),
+  back: (x) => { const c1 = 1.7, c3 = c1 + 1; return 1 + c3 * Math.pow(x - 1, 3) + c1 * Math.pow(x - 1, 2); },
+};
+const p = (t, a, b, e = 'out') => E[e](C((t - a) / (b - a)));
+const lerp = (a, b, x) => a + (b - a) * x;
+const $ = (id) => document.getElementById(id);
+function show(el, t, a, b, o = {}) {
+  const { dy = 60, blur = 12, dur = 0.38, outDur = 0.24, sc = 0, ease = 'out', x = '', dx = 0 } = o;
+  const i = p(t, a, a + dur, ease);
+  const q = b == null ? 0 : p(t, b, b + outDur, 'in');
+  const v = Math.min(C(i * 1.4), 1) * (1 - q);
+  el.style.opacity = v;
+  el.style.visibility = v <= 0.001 ? 'hidden' : 'visible';
+  el.style.transform = `${x} translate(${(1 - i) * dx}px, ${(1 - i) * dy - q * dy * 0.5}px) scale(${1 - sc * (1 - i) - sc * 0.5 * q})`;
+  const bl = (1 - C(i * 1.3)) * blur + q * blur;
+  el.style.filter = bl > 0.05 ? `blur(${bl}px)` : 'none';
+}
+const mark = (el, t, a) => { el.style.backgroundSize = `${p(t, a, a + 0.35, 'io') * 100}% 36%`; };
+function press(btn, rp, t, at) {
+  const pr = p(t, at - 0.06, at + 0.06, 'in') * (1 - p(t, at + 0.06, at + 0.26, 'out'));
+  btn.style.transform = `scale(${1 - 0.07 * pr})`;
+  const r = C((t - at) / 0.45);
+  rp.style.opacity = t >= at ? 0.9 * (1 - r) : 0;
+  rp.style.transform = `scale(${0.2 + r * 6})`;
+  return pr;
+}
+
+// ── 달력 그리기(한 번) ──────────────────────────────────
+const pos = (d) => { const k = FIRST + d - 1; return { col: k % 7, row: Math.floor(k / 7) }; };
+let BARS = [], CHIPS = [];
+function build() {
+  const g = $('grid');
+  const rows = Math.ceil((FIRST + DAYS) / 7);
+  g.style.height = rows * RH + 'px';
+  for (let d = 1; d <= DAYS; d++) {
+    const { col, row } = pos(d);
+    const c = document.createElement('div');
+    c.className = 'cell' + (col === 0 ? ' sun' : '');
+    Object.assign(c.style, { left: col * CW + 'px', top: row * RH + 'px', width: CW + 'px', height: RH + 'px' });
+    c.innerHTML = `<b>${d}</b>`;
+    g.appendChild(c);
+  }
+  // 행사 막대: 주(줄)마다 조각으로 나눈다
+  EVENTS.forEach((ev, ei) => {
+    let d = ev.s, k = 0;
+    while (d <= ev.e) {
+      const { col, row } = pos(d);
+      const end = Math.min(ev.e, d + (6 - col));
+      const b = document.createElement('div');
+      b.className = 'ev';
+      Object.assign(b.style, { left: col * CW + 4 + 'px', top: row * RH + 44 + 'px', width: (end - d + 1) * CW - 8 + 'px', background: ev.color });
+      b.textContent = k === 0 ? ev.title : '';
+      g.appendChild(b);
+      BARS.push({ el: b, ei, k });
+      d = end + 1; k++;
+    }
+  });
+  SENDS.forEach((s) => {
+    const { col, row } = pos(s.d);
+    const w = document.createElement('div');
+    w.className = 'sends';
+    Object.assign(w.style, { left: col * CW + 6 + 'px', top: row * RH + 84 + 'px', width: CW - 12 + 'px' });
+    w.innerHTML = s.ch.map((c) => `<span class="sc">${c}</span>`).join('');
+    g.appendChild(w);
+    CHIPS.push({ el: w, s });
+  });
+}
+
+function calendar(t) {
+  // 행사 막대가 왼쪽에서 그어진다(조각마다 이어서)
+  BARS.forEach(({ el, ei, k }) => {
+    const a = EVENTS[ei].at + k * 0.16;
+    el.style.transform = `scaleX(${p(t, a, a + 0.22, 'io')})`;
+    el.style.opacity = t >= a ? 1 : 0;
+  });
+  CHIPS.forEach(({ el, s }) => {
+    const ev = EVENTS[s.ev];
+    el.style.opacity = C(p(t, ev.at + 0.2, ev.at + 0.4));
+    const on = t >= s.on;
+    el.querySelectorAll('.sc').forEach((c) => c.classList.toggle('on', on));
+    const sp = p(t, s.on, s.on + 0.3, 'back');
+    el.style.transform = `scale(${t >= s.on ? 0.8 + 0.2 * sp : 1})`;
+    el.style.transformOrigin = '0 50%';
+  });
+  // 발송 날을 따라 움직이는 오늘 표시
+  const ring = $('ring');
+  let cur = null;
+  SENDS.forEach((s) => { if (t >= s.on - 0.12) cur = s; });
+  if (cur && t < T.outro) {
+    const { col, row } = pos(cur.d);
+    Object.assign(ring.style, { left: col * CW + 2 + 'px', top: row * RH + 2 + 'px', width: CW - 4 + 'px', height: RH - 4 + 'px', opacity: 1 });
+    ring.style.transform = `scale(${1.15 - 0.15 * p(t, cur.on - 0.12, cur.on + 0.1, 'out')})`;
+  } else ring.style.opacity = 0;
+}
+
+window.seek = function (t) {
+  $('stage').style.backgroundPosition = `${-t * 6}px ${-t * 14}px`;
+  show($('chip'), t, 0.0, T.outro - 0.2, { dy: -30, x: 'translateX(-50%)' });
+
+  // 1 훅
+  show($('h1'), t, 0.04, T.cal - 0.2, { dy: 80, sc: 0.06 });
+  show($('h2'), t, 0.47, T.cal - 0.2, { dy: 80, sc: 0.06 });
+  show($('h3'), t, 0.9, T.cal - 0.2, { dy: 80, sc: 0.06 });
+  mark($('hm'), t, 0.7);
+
+  // 2 달력에 담기 · 5 발송(같은 달력)
+  show($('c0'), t, T.cal + 0.05, T.mat - 0.22, { dy: 50 });
+  const calIn = p(t, T.cal - 0.05, T.cal + 0.4), calOut = p(t, T.mat - 0.2, T.mat + 0.05, 'in'), calBack = p(t, T.back, T.back + 0.45);
+  const cv = t < T.back ? calIn * (1 - calOut) : calBack * (1 - p(t, T.outro - 0.3, T.outro - 0.05, 'in'));
+  const cy = t < T.back ? (1 - calIn) * 160 : (1 - calBack) * 160;
+  $('cal').style.opacity = cv;
+  $('cal').style.visibility = cv <= 0.001 ? 'hidden' : 'visible';
+  $('cal').style.transform = `translateY(${cy}px) scale(${1 - 0.06 * (t < T.back ? (1 - calIn) + calOut : 1 - calBack)})`;
+  calendar(t);
+
+  // 행사 담기 창 → 27일 칸으로 날아가 막대가 된다
+  const fly = p(t, T.fly, T.fly + 0.3, 'io');
+  const evIn = p(t, T.card, T.card + 0.3, 'back');
+  const ev = $('ev');
+  ev.style.opacity = C(p(t, T.card, T.card + 0.15)) * (1 - fly);
+  ev.style.visibility = t >= T.card && fly < 1 ? 'visible' : 'hidden';
+  const c27 = pos(27);
+  const tx = (60 + 20 + c27.col * CW + CW / 2) - (120 + 420), ty = (540 + 150 + c27.row * RH + 60) - (700 + 380);
+  ev.style.transform = `translate(${tx * fly}px, ${ty * fly}px) scale(${(0.9 + 0.1 * evIn) * (1 - 0.88 * fly)})`;
+  [0, 1, 2].forEach((k) => $('ch' + k).classList.toggle('on', t >= T.chs[k]));
+  [0, 1, 2].forEach((k) => { $('ch' + k).style.transform = `scale(${t >= T.chs[k] ? 0.9 + 0.1 * p(t, T.chs[k], T.chs[k] + 0.25, 'back') : 1})`; });
+  const pr = press($('evBtn'), $('rp1'), t, T.save);
+
+  // 3 재료 → 완성본
+  show($('c1'), t, T.mat + 0.1, T.ok - 0.2);
+  show($('mk'), t, T.mat - 0.05, T.ok - 0.25, { dy: 160, sc: 0.06, dur: 0.5 });
+  ['m0', 'm1', 'm2', 'm3'].forEach((id, k) => show($(id), t, T.mats[k], null, { dy: 40, blur: 6, sc: 0.12, ease: 'back', dur: 0.32 }));
+  const made = t >= T.made;
+  $('spin').style.display = made ? 'none' : 'block';
+  $('spin').style.transform = `rotate(${t * 900}deg)`;
+  $('done').style.display = made ? 'block' : 'none';
+  $('progT').textContent = made ? '완성본이 만들어졌어요' : '완성본을 만드는 중이에요';
+  show($('prog'), t, T.mats[3] + 0.1, null, { dy: 20, blur: 4 });
+  show($('dm'), t, T.outs[0], null, { dy: 80, sc: 0.08, ease: 'back', dur: 0.45 });
+  show($('ml'), t, T.outs[1], null, { dy: 0, dx: 90, blur: 6, ease: 'back', dur: 0.4 });
+  show($('sm'), t, T.outs[2], null, { dy: 0, dx: 90, blur: 6, ease: 'back', dur: 0.4 });
+
+  // 4 휴대폰 확인 · 승인
+  show($('c2'), t, T.ok + 0.05, T.run - 0.2);
+  show($('ph'), t, T.ok - 0.05, T.run - 0.25, { dy: 200, sc: 0.06, dur: 0.5 });
+  const ni = p(t, T.notif, T.notif + 0.35, 'back');
+  $('nt').style.opacity = C(p(t, T.notif, T.notif + 0.12));
+  $('nt').style.transform = `translateY(${(1 - ni) * -120}px)`;
+  ['s0', 's1', 's2', 's3', 's4', 's5'].forEach((id, k) => show($(id), t, T.scr[k], null, { dy: 30, blur: 6, dur: 0.3 }));
+  show($('okBtn'), t, T.scr[6], null, { dy: 30, blur: 0, dur: 0.3 });
+  press($('okBtn'), $('rp2'), t, T.okClick);
+  const ok = t >= T.okClick + 0.08;
+  $('okBtn').style.background = ok ? 'var(--ac)' : '';
+  $('okChk').style.display = ok ? 'block' : 'none';
+  $('okT').textContent = ok ? '승인했어요' : '확인하고 승인';
+
+  // 5 정해진 날 · 달력은 위에서 다시 그린다
+  show($('c3'), t, T.run + 0.05, T.outro - 0.3);
+
+  // 아웃트로
+  const wa = p(t, T.outro - 0.25, T.outro + 0.15, 'io');
+  const wb = p(t, T.outro - 0.12, T.outro + 0.28, 'io');
+  $('wipeA').style.clipPath = `circle(${wa * 1400}px at 540px 1150px)`;
+  $('wipeB').style.clipPath = `circle(${wb * 1400}px at 540px 1150px)`;
+  $('wipeA').style.visibility = wa > 0 ? 'visible' : 'hidden';
+  $('wipeB').style.visibility = wb > 0 ? 'visible' : 'hidden';
+  $('och').querySelectorAll('div').forEach((d, k) => show(d, t, T.och[k], null, { dy: 30, blur: 0, sc: 0.3, ease: 'back', dur: 0.35 }));
+  show($('outK'), t, T.outro + 0.2, null, { dy: 40 });
+  show($('logo'), t, T.outro + 0.28, null, { dy: 70, sc: 0.08, dur: 0.5 });
+  $('ai').textContent = (t >= T.aiType[0] ? 'A' : '') + (t >= T.aiType[1] ? 'I' : '');
+  $('logoBar').style.opacity = t < T.aiType[1] ? (Math.floor((t - T.outro) * 3.2) % 2 === 0 ? 1 : 0.15) : 1;
+  show($('o1'), t, T.copy, null, { dy: 50 });
+  show($('o2'), t, T.copy + 0.15, null, { dy: 50 });
+  show($('url'), t, T.url, null, { dy: 40, sc: 0.2, ease: 'back', dur: 0.45, x: 'translateX(-50%)' });
+
+  // 포인터: 27일 칸 → 담기 버튼 → 승인 버튼
+  const pt = $('pointer');
+  let P = null;
+  if (t < T.mat) {
+    const a = { x: 60 + 20 + c27.col * CW + CW * 0.55, y: 540 + 150 + c27.row * RH + RH * 0.5 };
+    const bb = $('evBtn').getBoundingClientRect();
+    const b = { x: bb.left + bb.width * 0.6, y: bb.top + bb.height * 0.55 };
+    const m1 = p(t, T.tap - 0.4, T.tap - 0.05, 'io'), m2 = p(t, T.tap + 0.2, T.save - 0.05, 'io');
+    P = { x: lerp(lerp(a.x + 180, a.x, m1), b.x, m2), y: lerp(lerp(a.y + 300, a.y, m1), b.y, m2),
+          o: C(p(t, T.tap - 0.5, T.tap - 0.35)) * (1 - p(t, T.save + 0.15, T.save + 0.3)),
+          s: Math.max(p(t, T.tap - 0.06, T.tap + 0.06, 'in') * (1 - p(t, T.tap + 0.06, T.tap + 0.26)), pr) };
+  } else {
+    const bb = $('okBtn').getBoundingClientRect();
+    const b = { x: bb.left + bb.width * 0.62, y: bb.top + bb.height * 0.55 };
+    const m = p(t, T.okClick - 0.42, T.okClick - 0.05, 'io');
+    P = { x: lerp(b.x + 170, b.x, m), y: lerp(b.y + 240, b.y, m), o: C(p(t, T.okClick - 0.5, T.okClick - 0.35)) * (1 - p(t, T.run - 0.3, T.run - 0.15)),
+          s: p(t, T.okClick - 0.06, T.okClick + 0.06, 'in') * (1 - p(t, T.okClick + 0.06, T.okClick + 0.26)) };
+  }
+  pt.style.left = P.x + 'px';
+  pt.style.top = P.y + 'px';
+  pt.style.opacity = P.o;
+  pt.style.transform = `scale(${1 - 0.14 * P.s})`;
+};
+
+window.ready = (async () => { await document.fonts.ready; build(); window.seek(0); return true; })();
+</script>
+</body>
+</html>

@@ -75,6 +75,8 @@ import {
   listProposals,
   approveProposal,
   rejectProposal,
+  startProposalSpamRetest,   // ★ 2026-10-06 화면 스팸 검사(고른 안 · 고친 문안)
+  readProposalSpamRetest,
   generateProposalForOperator,
   explainEmptyRound,   // ★ 2026-10-05 빈 회차 사유(run-now · 미리보기 시작 공용)
   // ★ 2026-08-04 리마인드 명단 — 발송과 같은 코호트를 읽는다(보여준 수 = 나가는 수)
@@ -3024,6 +3026,57 @@ router.post('/operator/proposals/:id/approve', async (req: Request, res: Respons
   } catch (err: any) {
     console.error('[Proposals approve] 오류:', err);
     return res.status(500).json({ success: false, error: err?.message || '승인 실패' });
+  }
+});
+
+// ★ 2026-10-06 화면 스팸 검사(임은지 재오픈) — 고른 안 · 고친 문안을 자동 검사와 같은 검사로 확인한다(무료 · 제안마다 5회).
+//   권한 · 요금제 게이트 = 승인과 같다(테스트폰으로 실제 문자가 나가는 입구다). 검사는 백그라운드 · 화면은 GET 으로 다시 읽는다.
+router.post('/operator/proposals/:id/spam-test', async (req: Request, res: Response) => {
+  try {
+    const companyId = req.user?.companyId;
+    const userId = req.user?.userId;
+    const userType = req.user?.userType;
+    if (!companyId || !userId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
+    const own = await query(
+      `SELECT o.created_by FROM operator_proposals p
+         JOIN continuous_operators o ON o.id = p.operator_id
+        WHERE p.id = $1::uuid AND p.company_id = $2::uuid`,
+      [req.params.id, companyId]
+    );
+    if (own.rows.length === 0) return res.status(404).json({ success: false, error: '제안서를 찾을 수 없습니다.' });
+    if (userType !== 'company_admin' && own.rows[0].created_by !== userId) {
+      return res.status(403).json({ success: false, error: '본인이 만든 자동마케팅만 검사할 수 있습니다.' });
+    }
+    const planCtx = await loadPlanContext(companyId);
+    if (!planCtx || !isAiOperatorAllowed(planCtx, req.user)) {
+      return res.status(403).json({ success: false, error: '본 기능은 요금제 가입 후 이용 가능합니다.', code: 'BETA_GATE' });
+    }
+    if (!req.body || !Number.isInteger(req.body.variantIndex)) {
+      return res.status(400).json({ success: false, error: '검사할 문안을 골라 주세요.' });
+    }
+    const r = await startProposalSpamRetest(companyId, req.params.id, userId, {
+      variantIndex: Number(req.body.variantIndex),
+      body: typeof req.body.body === 'string' ? req.body.body : undefined,
+      subject: typeof req.body.subject === 'string' ? req.body.subject : undefined,
+    });
+    if (!r.ok) return res.status(r.code ? 409 : 400).json({ success: false, error: r.reason, code: r.code });
+    return res.json({ success: true, spamRetest: r.spamRetest });
+  } catch (err: any) {
+    console.error('[Proposals spam-test] 오류:', err);
+    return res.status(500).json({ success: false, error: '스팸 검사를 시작하지 못했습니다.' });
+  }
+});
+
+router.get('/operator/proposals/:id/spam-test', async (req: Request, res: Response) => {
+  try {
+    const companyId = req.user?.companyId;
+    if (!companyId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
+    const retest = await readProposalSpamRetest(companyId, req.params.id);
+    if (retest === undefined) return res.status(404).json({ success: false, error: '제안서를 찾을 수 없습니다.' });
+    return res.json({ success: true, spamRetest: retest });
+  } catch (err: any) {
+    console.error('[Proposals spam-test GET] 오류:', err);
+    return res.status(500).json({ success: false, error: '조회 실패' });
   }
 });
 

@@ -96,26 +96,41 @@ export function DmChip({ cover, fallback, status, catalog, title, meta, metric, 
   );
 }
 
-/** 이메일 카드칩(받은편지함 모양 머리 + 표지) */
-export function EmailChip({ from, subject, cover, status, title, meta, metric, onOpen }: {
-  from: string; subject: string; cover: string | null; status: ChipStatus; title: string; meta: ReactNode; metric?: ReactNode; onOpen: () => void;
+/** 이메일 카드칩(받은편지함 모양 머리 + 표지) · onDelete = 초안 전용 삭제(★2026-10-06 남지현 재오픈 · DmChip 과 같은 구조) */
+export function EmailChip({ from, subject, cover, status, title, meta, metric, onOpen, onDelete }: {
+  from: string; subject: string; cover: string | null; status: ChipStatus; title: string; meta: ReactNode; metric?: ReactNode; onOpen: () => void; onDelete?: () => void;
 }) {
+  const deletable = status === 'draft' && onDelete;
   return (
-    <button type="button" onClick={onOpen} className="block w-full text-left rounded-2xl border border-slate-200 bg-white overflow-hidden hover:border-sky-300 transition-colors" aria-label={`${title} 열기`}>
-      <div className="bg-white px-3.5 py-2.5 flex items-center gap-2.5">
-        <span className="w-7 h-7 rounded-full bg-[#9a4f2c] text-white text-[12px] font-bold flex items-center justify-center shrink-0">{(from || 'H').slice(0, 1)}</span>
-        <div className="min-w-0"><div className="text-[12px] font-bold text-slate-900 truncate">{from || '보내는 사람'}</div><div className="text-[11.5px] text-slate-600 truncate">{subject || '(제목 없음)'}</div></div>
-      </div>
-      <div className="relative h-[124px] bg-white overflow-hidden">
-        {cover ? <img src={cover} alt="" className="w-full h-full object-cover" loading="lazy" /> : null}
-        <StatusChip status={status} className="absolute left-2.5 bottom-2.5" />
-      </div>
-      <div className="px-3.5 py-3 min-h-[80px]">
-        <b className="block text-[13.5px] text-slate-900 truncate">{title}</b>
-        <span className="block text-[11.5px] text-slate-400 mt-0.5 truncate">{meta}</span>
-        {metric && <div className="mt-2">{metric}</div>}
-      </div>
-    </button>
+    <div className="group relative rounded-2xl border border-slate-200 bg-white overflow-hidden hover:border-sky-300 transition-colors">
+      <button type="button" onClick={onOpen} className="block w-full text-left" aria-label={`${title} 열기`}>
+        <div className="bg-white px-3.5 py-2.5 flex items-center gap-2.5">
+          <span className="w-7 h-7 rounded-full bg-[#9a4f2c] text-white text-[12px] font-bold flex items-center justify-center shrink-0">{(from || 'H').slice(0, 1)}</span>
+          <div className="min-w-0"><div className="text-[12px] font-bold text-slate-900 truncate">{from || '보내는 사람'}</div><div className="text-[11.5px] text-slate-600 truncate">{subject || '(제목 없음)'}</div></div>
+        </div>
+        <div className="relative h-[124px] bg-white overflow-hidden">
+          {cover ? <img src={cover} alt="" className="w-full h-full object-cover" loading="lazy" /> : null}
+          <StatusChip status={status} className="absolute left-2.5 bottom-2.5" />
+        </div>
+        <div className={`px-3.5 py-3 min-h-[80px]${deletable ? ' pr-12' : ''}`}>
+          <b className="block text-[13.5px] text-slate-900 truncate">{title}</b>
+          <span className="block text-[11.5px] text-slate-400 mt-0.5 truncate">{meta}</span>
+          {metric && <div className="mt-2">{metric}</div>}
+        </div>
+      </button>
+      {/* 카드 버튼 안에 넣지 않는다(형제 버튼) — 안에 두면 키보드·Enter 가 편집기 열기로 샌다 · 휴대폰 폭은 늘 보인다 */}
+      {status === 'draft' && onDelete && (
+        <button
+          type="button"
+          onClick={onDelete}
+          aria-label="초안 삭제"
+          title="초안 삭제"
+          className="absolute right-2 bottom-2.5 h-9 w-9 inline-flex items-center justify-center rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 focus-visible:opacity-100 transition-opacity md:opacity-0 md:group-hover:opacity-100 md:group-focus-within:opacity-100"
+        >
+          <Trash2 className="w-4 h-4" />
+        </button>
+      )}
+    </div>
   );
 }
 
