@@ -105,6 +105,7 @@ QtMsg 3.0(`test11/12`)·4.0(`insvc11/12`)·KAW(웹)·ngen(GemTek 문자) 구동.
 
 ## 4. 계정·경로 메모
 
+- **★1006 한국모바일인증 암호화 모듈** = .62 `/home/administrator/kmc/KmcCrypto`(저장소 밖 · `700 administrator` · 지문 `2ff1e68a…92b064d` · 고객사 ID `IVTT1001` 전용 = 열쇠가 든 파일 · 원본 = 대표 PC `Downloads/(주)인비토 IVTT1001.zip`) · `.env` `KMC_CP_ID` · `KMC_URL_CODE` · `KMC_CRYPTO_PATH` · 서버 이전 · 재설치 때 함께 옮긴다. 서버 → KMC `117.52.81.52:443` 1006 확인.
 - **★1006~ 출장 기간 사설 원격 접속망(Tailscale · 귀국 뒤 되돌림)**: .65 = 다시 켬(19:46:48 · 10-03 에 끈 것) · .62 = 새로 설치(1.102.5 · 19:52) + ufw `trip-tailscale-ssh`(tailscale0 · 대표 노트북 100.116.151.70 → 22 만) · 관리 콘솔 접근 규칙 = 노트북 · 휴대폰 → 두 서버 `tcp:22` 만. 접속 = .62 `administrator@100.88.72.107` · .65 `invito@100.98.116.90`(1006 로그인 확인). 근거 = 제출 문서 3.1 §6 · 대장 입력안 `docs/transmission-cert/resubmit-1006/운영기록대장_입력안_20261006.md` · 메모리 「일본출장 서버 접속」.
 
 - **PAY 수집 DB** = `.62`의 `pay-ingest-db`(MariaDB, 포트 23388, DB `sales`). 쓰기 계정 `sales`는 **IP 제한**: `.54`·`.57`·`.58`(중계) + `.65`(비토 게이트웨이, 0815 신설). 읽기는 `hanjul_ro`·`paystats`(도커 내부 `172.%`).

@@ -1393,7 +1393,15 @@ Codex 적대 검토 1R(`gpt-6-astra`) = critical · high 0 · medium 1 — 「�
 **운영 결함 → 수정([B-1006-3](../status/BUGS.md))** — 이름이 URL 인코딩(`%EC%9C%A0…`)으로 와 그대로 계정 이름에 저장(규격서 · 예제에 없던 모양 · 지어낸 응답으로만 시험) → `kmcText` 로 풀고 못 풀면 거절 · 데이터 정리 2회(Harold 실행 · `hoyun` 계정 이름 = 인증 전 값 「테스트계정」 복원 · 인증 이력 이름 = 풀어 쓴 값). 같은 자리에서 Harold 결정 = 계정 이름은 덮지 않는다(위 「저장」 줄).
 **기록(Harold 「나중에 할 말이 있게」)** = ① `identity_verifications`(인증 이름 · 번호 · 시각 · IP · 브라우저 · KMC 요청번호 · DI 해시) ② 감사 기록 시작 · 성공 · 실패 세 줄 모두 인증 건 번호 · 실패 줄 거절 사유 코드(`KMC_CERTNUM_MISMATCH_*` · `KMC_TAMPERED` · `KMC_TOKEN_APR0n` 등) ③ KMC 관리 화면 인증내역(요청번호 = 인증 건 번호 하이픈 제거 → 바로 대조).
 
-**미검증** — 휴대폰에서 팝업(새 탭) 진행(예제는 휴대폰이면 같은 창) · KMC 의 URL 대조 범위.
+**명단 확대(1006 Harold 실행)** = 수정분 배포(`0f09de43` · 첫 push 는 GitHub 「Empty reply」 로 실패 → 재push) 뒤 `IDENTITY_VERIFY_PILOT_LOGIN_IDS=hoyun,gwchae,sgbaek,psy5868,mobile` · `pm2 restart targetup-backend --update-env`. 직원 4계정 = 고객사 계정(인비토 · 사용 중 · 인증번호 번호 비어 있음 · 인증 이력 0 · 1006 조회). 다음 = 직원 휴대폰 KMC 테스트폰 등록 → 1007 직원 PC 로그인 본인인증 → KMC 서비스 오픈 요청(과금 시작) → 고객사 시행.
+
+**★1007 체크(Harold 1006 「내일 직원들 다 등록하고 테스트하고 나면 로그 찍어서 보완 마무리」)**
+- [ ] 직원 4계정(`gwchae` · `sgbaek` · `psy5868` · `mobile`) PC 로그인 → 본인인증(KMC 창 · 통신사 고르기 · 문자 또는 PASS 앱 · PASS인증서 아님 · 테스트폰 등록 불필요 = 등록 없이 1006 성공)
+- [ ] 로그 찍기 — ① `identity_verifications` 4행 verified(이름 · 번호 끝 4자리 · KMC 요청번호 · 인증 시각) ② 감사 기록 `identity_verify_start` · `identity_verified` · `identity_verify_fail`(인증 건 번호 · 거절 코드) ③ 계정 이름 그대로 · `phone` = `mfa_phone` = 인증 번호 ④ `pm2 logs targetup-backend` 의 `[kmc-crypto]` · `[identity-verify]` 줄 ⑤ KMC 관리 화면 인증내역(요청번호 = 인증 건 번호 하이픈 제거)과 대조
+- [ ] 보완 — 실패 · 거절 코드가 있으면 원인 수정 → 증빙 캡처(설정 「계정 담당자」 카드 · 위 조회) → 증빙 대장 3.4 ② · ③ · 3.5 ② 채움 → 2.1 3절 · 3.4 2절 · 3.5 ② 「시행 중」으로 다시 쓰기(계정 이름 안 바뀜 · 번호만 담당자 번호)
+- [ ] 고객사 시행 전 — KMC 오픈 상태 · 과금조건 확인(마이페이지 → 고객사정보) · 슈퍼관리자 번호 직접 입력 경로(`PUT /users/:id/mfa-phone`) 닫기 · 휴대폰(새 탭) 흐름 시험 · DI 중복 계정은 기록만(추천 · Harold 결정 대기) · 10/26 명단 `*`
+
+**미검증** — 휴대폰에서 팝업(새 탭) 진행(예제는 휴대폰이면 같은 창) · KMC 의 URL 대조 범위 · `IVTT1001` 오픈 상태(테스트폰 메뉴 없음 + 등록 없이 성공 = 매뉴얼 15쪽 「오픈 시 메뉴 삭제」와 맞음 · 화면으로 직접 확인 전).
 
 ### 엔진(비토 게이트웨이) 증적 — 1002 영업 요청 「전 항목 비토 엔진 · 한줄로 증적파일」
 
