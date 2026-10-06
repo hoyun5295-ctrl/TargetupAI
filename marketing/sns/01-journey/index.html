@@ -1,0 +1,469 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>한줄로 AI 여정 설계</title>
+<!--
+  인스타그램 릴스 · 스레드 소개 영상(1080x1920 · 15초 · 30fps)
+  시간은 window.seek(t) 하나가 정한다 → render.js 가 프레임마다 불러 찍는다(실시간 애니메이션 없음).
+  장면 시각표 T 를 바꾸면 music.py 효과음 시각도 같이 바꾼다.
+-->
+<style>
+  :root { --navy: #0F172A; --fu: #d946ef; --pu: #a855f7; --vi: #8b5cf6; }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { width: 1080px; height: 1920px; overflow: hidden; background: var(--navy); }
+  body { font-family: 'Pretendard', sans-serif; -webkit-font-smoothing: antialiased; color: #0f172a; letter-spacing: -0.02em; }
+  #stage { position: relative; width: 1080px; height: 1920px; overflow: hidden; background: var(--navy); }
+  .abs { position: absolute; }
+  .glow { position: absolute; border-radius: 50%; filter: blur(120px); }
+  .grad { background: linear-gradient(90deg, #f0abfc, #c084fc 55%, #a78bfa); -webkit-background-clip: text; background-clip: text; color: transparent; }
+  svg.i { width: 1em; height: 1em; fill: none; stroke: currentColor; stroke-width: 2.2; stroke-linecap: round; stroke-linejoin: round; flex: none; }
+
+  /* 상단 시리즈 표지 */
+  #chip { left: 50%; top: 200px; display: flex; align-items: center; gap: 22px; padding: 18px 34px; border-radius: 999px;
+          background: rgba(255,255,255,.07); border: 2px solid rgba(255,255,255,.14); color: #e2e8f0; font-size: 30px; font-weight: 600; white-space: nowrap; }
+  #chip img { height: 34px; filter: invert(1); }
+  #chip .bar { width: 2px; height: 28px; background: rgba(255,255,255,.25); }
+
+  /* 자막: 작은 머리말 + 큰 문장 */
+  .cap { left: 0; width: 1080px; text-align: center; color: #fff; }
+  .cap .k { font-size: 44px; font-weight: 600; color: #f5d0fe; letter-spacing: -0.01em; }
+  .cap .h { margin-top: 10px; font-size: 84px; font-weight: 800; letter-spacing: -0.04em; line-height: 1.12; }
+
+  /* 장면 1 — 훅 */
+  #hook { left: 0; top: 720px; width: 1080px; text-align: center; color: #fff; font-weight: 800; font-size: 136px; letter-spacing: -0.05em; line-height: 1.16; }
+  #hook .l { display: block; }
+
+  /* 장면 2 — 한 줄 입력 */
+  #card { left: 70px; top: 760px; width: 940px; padding: 46px; border-radius: 44px; background: #fff; box-shadow: 0 50px 140px rgba(0,0,0,.45); }
+  #card .hd { display: flex; align-items: center; gap: 24px; padding-bottom: 34px; border-bottom: 2px solid #e2e8f0; }
+  #card .ic { width: 84px; height: 84px; border-radius: 24px; background: linear-gradient(135deg, #e879f9, #a855f7); color: #fff; display: flex; align-items: center; justify-content: center; font-size: 42px; }
+  #card .t1 { font-size: 42px; font-weight: 700; }
+  #card .t2 { margin-top: 6px; font-size: 26px; color: #64748b; letter-spacing: -0.01em; }
+  #card .lb { margin-top: 36px; font-size: 30px; font-weight: 600; color: #334155; }
+  #box { margin-top: 18px; height: 168px; padding: 36px 34px; border-radius: 30px; background: #f1f5f9; border: 3px solid #f5d0fe; font-size: 54px; font-weight: 600; color: #0f172a; display: flex; align-items: center; }
+  #ph { color: #cbd5e1; font-weight: 500; font-size: 42px; }
+  #caret { display: inline-block; width: 5px; height: 62px; margin-left: 6px; background: var(--fu); border-radius: 3px; }
+  #card .ft { margin-top: 30px; display: flex; justify-content: flex-end; }
+  #btn { position: relative; overflow: hidden; display: flex; align-items: center; gap: 14px; padding: 28px 52px; border-radius: 30px; color: #fff; font-size: 40px; font-weight: 700;
+         background: linear-gradient(90deg, #d946ef, #a855f7); box-shadow: 0 20px 50px rgba(217,70,239,.35); }
+  #ripple { position: absolute; left: 50%; top: 50%; width: 120px; height: 120px; margin: -60px 0 0 -60px; border-radius: 50%; background: rgba(255,255,255,.55); }
+  #spin { width: 40px; height: 40px; border-radius: 50%; border: 5px solid rgba(255,255,255,.35); border-top-color: #fff; }
+  #pointer { width: 92px; height: 92px; }
+
+  /* 장면 3 — 여정 지도 창 */
+  #win { left: 60px; top: 540px; width: 960px; height: 1180px; border-radius: 46px; overflow: hidden; background: #f1f5f9;
+         box-shadow: 0 60px 160px rgba(0,0,0,.55); border: 2px solid rgba(255,255,255,.10); }
+  #wh { height: 128px; padding: 0 44px; display: flex; align-items: center; gap: 22px; color: #fff;
+        background: radial-gradient(620px 220px at 6% 0%, rgba(217,70,239,.38), transparent 70%), radial-gradient(520px 200px at 92% 0%, rgba(168,85,247,.2), transparent 70%), #0F172A; }
+  #wh .t { font-size: 40px; font-weight: 700; }
+  #wh .s { font-size: 26px; color: #cbd5e1; margin-top: 4px; }
+  #wh .on { margin-left: auto; display: flex; align-items: center; gap: 10px; font-size: 26px; color: #6ee7b7; font-weight: 600; }
+  #wh .on i { width: 14px; height: 14px; border-radius: 50%; background: #34d399; }
+  #view { position: relative; height: calc(100% - 128px); overflow: hidden; }
+  #world { position: absolute; left: 0; top: 0; width: 2800px; height: 1800px; transform-origin: 0 0; }
+  #lines { position: absolute; left: 0; top: 0; overflow: visible; }
+
+  .lane { position: absolute; top: 0; width: 760px; padding: 18px 4px; border-bottom: 3px solid #e2e8f0; font-size: 36px; font-weight: 600; color: #334155; letter-spacing: .01em; }
+  .jc { position: absolute; width: 760px; border-radius: 30px; background: #fff; border: 2px solid #cbd5e1; overflow: hidden; box-shadow: 0 10px 30px rgba(15,23,42,.06); }
+  .jc .head { padding: 30px 32px 22px; }
+  .jc .tt { display: flex; align-items: center; gap: 16px; font-size: 42px; font-weight: 700; color: #0f172a; }
+  .dot { width: 18px; height: 18px; border-radius: 50%; background: #34d399; flex: none; box-shadow: 0 0 0 6px rgba(52,211,153,.18); }
+  .jc .sb { margin-top: 8px; font-size: 27px; color: #64748b; }
+  .jc .rows { padding: 0 32px 30px; }
+  .row { padding-top: 16px; }
+  .row .iv { padding-left: 26px; font-size: 26px; color: #94a3b8; }
+  .start { display: flex; align-items: center; gap: 12px; font-size: 26px; color: #64748b; padding-top: 4px; border-top: 2px solid #e2e8f0; padding-top: 22px; }
+  .start svg { color: #6d28d9; }
+  .st { margin-top: 12px; border-radius: 20px; padding: 20px 24px; }
+  .st.msg { background: #f5f3ff; border: 2px solid #c4b5fd; color: #4c1d95; }
+  .st.cond { background: #ecfeff; border: 2px solid #67e8f9; color: #164e63; }
+  .st .a { display: flex; align-items: center; gap: 12px; font-size: 27px; font-weight: 600; }
+  .st .a span:last-child { margin-left: auto; font-weight: 400; color: #64748b; font-size: 25px; }
+  .st .p { margin-top: 10px; font-size: 26px; line-height: 1.45; color: #64748b; letter-spacing: -0.015em; }
+  .goal { margin-top: 16px; display: flex; align-items: center; gap: 12px; padding: 12px 22px; border-radius: 16px; background: #ecfdf5; color: #047857; font-size: 27px; font-weight: 600; }
+  .pill { position: absolute; transform: translate(-50%, -50%); white-space: nowrap; padding: 8px 20px; border-radius: 999px; background: #fff; border: 2px solid #c4b5fd; color: #4c1d95; font-size: 26px; font-weight: 600; box-shadow: 0 6px 16px rgba(76,29,149,.12); }
+  .band { position: absolute; left: 0; width: 2800px; padding: 18px 4px; border-bottom: 3px solid #e2e8f0; font-size: 36px; font-weight: 600; color: #334155; }
+  .band span { margin-left: 22px; font-size: 28px; font-weight: 400; color: #94a3b8; }
+  .mini { position: absolute; width: 655px; padding: 30px 32px; border-radius: 30px; background: #fff; border: 2px solid #cbd5e1; }
+  .mini .tt { display: flex; align-items: center; gap: 16px; font-size: 38px; font-weight: 700; }
+  .mini .sb { margin-top: 8px; font-size: 26px; color: #64748b; }
+
+  /* 문자 알림 */
+  .toast { left: 90px; width: 900px; padding: 28px 32px; border-radius: 38px; background: rgba(255,255,255,.96); box-shadow: 0 30px 80px rgba(0,0,0,.4); display: flex; gap: 24px; }
+  .toast .ai { width: 76px; height: 76px; border-radius: 20px; background: linear-gradient(135deg, #4ade80, #16a34a); color: #fff; display: flex; align-items: center; justify-content: center; font-size: 40px; flex: none; }
+  .toast .m { flex: 1; min-width: 0; }
+  .toast .r { display: flex; font-size: 24px; color: #64748b; font-weight: 600; }
+  .toast .r span:last-child { margin-left: auto; font-weight: 400; }
+  .toast .b { white-space: nowrap; margin-top: 6px; font-size: 31px; line-height: 1.38; color: #0f172a; letter-spacing: -0.02em; }
+
+  /* 아웃트로 */
+  .wipe { left: 0; top: 0; width: 1080px; height: 1920px; }
+  #wipeA { background: linear-gradient(135deg, #d946ef, #8b5cf6); }
+  #wipeB { background: #fff; }
+  #outK { top: 710px; left: 0; width: 1080px; text-align: center; font-size: 50px; font-weight: 600; color: #64748b; letter-spacing: -0.02em; }
+  #logo { left: 190px; top: 810px; width: 700px; height: 156px; }
+  #logo img { position: absolute; left: 0; top: 0; width: 700px; }
+  #ai { position: absolute; left: 448px; width: 248px; text-align: center; top: -24px; font-size: 150px; font-weight: 900; letter-spacing: -0.03em; line-height: 1;
+        background: linear-gradient(90deg, #d946ef, #8b5cf6); -webkit-background-clip: text; background-clip: text; color: transparent; }
+  #outC { top: 1080px; left: 0; width: 1080px; text-align: center; font-size: 66px; font-weight: 800; color: #0f172a; letter-spacing: -0.045em; line-height: 1.28; }
+  #outC .l { display: block; }
+  #url { top: 1340px; left: 50%; display: flex; align-items: center; gap: 16px; padding: 26px 56px; border-radius: 999px; background: #0F172A; color: #fff; font-size: 50px; font-weight: 700; letter-spacing: -0.01em; white-space: nowrap; }
+  #url svg { color: #e879f9; }
+</style>
+</head>
+<body>
+<div id="stage">
+  <div class="glow" id="g1" style="width:900px;height:900px;background:rgba(217,70,239,.38);left:-300px;top:-260px"></div>
+  <div class="glow" id="g2" style="width:800px;height:800px;background:rgba(139,92,246,.30);left:520px;top:1300px"></div>
+
+  <div class="abs" id="chip"><img src="../../../packages/frontend/public/logo.png" alt=""><span class="bar"></span><span>여정 설계</span></div>
+
+  <!-- 장면 1 -->
+  <div class="abs" id="hook"><span class="l" id="h1">가입만 하고</span><span class="l" id="h2"><span class="grad">안 사는</span> 고객?</span></div>
+
+  <!-- 자막 -->
+  <div class="abs cap" id="c0" style="top:470px"><div class="k">하고 싶은 것을</div><div class="h">한 줄로 쓰면</div></div>
+  <div class="abs cap" id="c1" style="top:300px"><div class="k">한 줄을 받으면</div><div class="h">AI가 지도를 그려요</div></div>
+  <div class="abs cap" id="c2" style="top:300px"><div class="k">첫 구매가 일어나면</div><div class="h">다음 여정으로 이어져요</div></div>
+  <div class="abs cap" id="c3" style="top:300px"><div class="k">가입부터 재구매까지</div><div class="h">한 장의 지도로</div></div>
+  <div class="abs cap" id="c4" style="top:300px"><div class="k">켜 두기만 하면</div><div class="h">알아서 보내요</div></div>
+
+  <!-- 장면 2 -->
+  <div class="abs" id="card">
+    <div class="hd">
+      <div class="ic"><svg class="i" viewBox="0 0 24 24"><path d="m3 11 18-5v12L3 14v-3z"/><path d="M11.6 16.8a3 3 0 1 1-5.8-1.6"/></svg></div>
+      <div><div class="t1">마케팅 여정 만들기</div><div class="t2">하고 싶은 것을 한 줄로 쓰면 AI가 흐름을 설계합니다</div></div>
+    </div>
+    <div class="lb">무엇을 하고 싶으신가요</div>
+    <div id="box"><span id="ph">예: 신규 가입자 환영 7일 시리즈</span><span id="typed"></span><span id="caret"></span></div>
+    <div class="ft">
+      <div id="btn"><span id="ripple"></span>
+        <svg class="i" id="sendI" viewBox="0 0 24 24"><path d="M14.536 21.686a.5.5 0 0 0 .937-.024l6.5-19a.496.496 0 0 0-.635-.635l-19 6.5a.5.5 0 0 0-.024.937l7.93 3.18a2 2 0 0 1 1.112 1.11z"/><path d="m21.854 2.147-10.94 10.939"/></svg>
+        <span id="spin" style="display:none"></span><span id="btnT">AI 생성</span>
+      </div>
+    </div>
+  </div>
+  <svg class="abs" id="pointer" viewBox="0 0 24 24"><path d="M4.037 4.688a.495.495 0 0 1 .651-.651l16 6.5a.5.5 0 0 1-.063.947l-6.124 1.58a2 2 0 0 0-1.438 1.435l-1.579 6.126a.5.5 0 0 1-.947.063z" fill="#fff" stroke="#0f172a" stroke-width="1.4" stroke-linejoin="round"/></svg>
+
+  <!-- 장면 3 — 여정 지도 -->
+  <div class="abs" id="win">
+    <div id="wh"><div><div class="t">여정 지도</div><div class="s">가입 · 첫 구매 · 재구매</div></div><div class="on"><i></i>켜짐</div></div>
+    <div id="view">
+      <div id="world">
+        <svg id="lines" width="2800" height="1800">
+          <path id="L1" fill="none" stroke="#8b5cf6" stroke-width="5" stroke-linecap="round"/>
+          <path id="L1f" fill="none" stroke="#ddd6fe" stroke-width="5" stroke-dasharray="10 26" stroke-linecap="round"/>
+          <path id="A1" fill="#8b5cf6"/>
+          <path id="L2" fill="none" stroke="#8b5cf6" stroke-width="5" stroke-linecap="round"/>
+          <path id="L2f" fill="none" stroke="#ddd6fe" stroke-width="5" stroke-dasharray="10 26" stroke-linecap="round"/>
+          <path id="A2" fill="#8b5cf6"/>
+        </svg>
+        <div class="lane" style="left:0">가입</div>
+        <div class="lane" style="left:1020px">첫 구매</div>
+        <div class="lane" style="left:2040px">재구매</div>
+
+        <div class="jc" id="J1" style="left:0;top:112px">
+          <div class="head"><div class="tt"><i class="dot"></i>신규 가입 환영</div><div class="sb">켜짐 · 신규 가입 때 시작</div></div>
+          <div class="rows">
+            <div class="row"><div class="start"><svg class="i" viewBox="0 0 24 24"><path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"/><path d="M4 22v-7"/></svg>시작: 신규 가입</div>
+              <div class="iv" style="margin-top:14px">↓ 바로</div>
+              <div class="st msg"><div class="a"><svg class="i" viewBox="0 0 24 24"><rect width="20" height="16" x="2" y="4" rx="2"/><path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7"/></svg><span>1번째 · 문자</span><span>가입 당일</span></div>
+                <div class="p">(광고) 지수님, 가입을 환영해요! 첫 구매 10% 쿠폰을 드려요</div></div></div>
+            <div class="row"><div class="iv">↓ 3일 뒤</div>
+              <div class="st msg"><div class="a"><svg class="i" viewBox="0 0 24 24"><rect width="20" height="16" x="2" y="4" rx="2"/><path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7"/></svg><span>2번째 · 문자</span><span>3일째</span></div>
+                <div class="p">(광고) 쿠폰이 곧 끝나요. 인기 상품 3가지를 골라 뒀어요</div></div></div>
+            <div class="row"><div class="iv">↓ 4일 뒤</div>
+              <div class="st cond"><div class="a"><svg class="i" viewBox="0 0 24 24"><path d="M12 2 22 12 12 22 2 12z"/></svg><span>3번째 · 조건</span><span>7일째</span></div>
+                <div class="p">아직 안 샀으면 마지막 혜택 문자</div></div></div>
+            <div class="row"><div class="goal"><svg class="i" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/></svg>구매가 확인되면 여기서 끝나요</div></div>
+          </div>
+        </div>
+
+        <div class="jc" id="J2" style="left:1020px;top:196px">
+          <div class="head"><div class="tt"><i class="dot"></i>첫 구매 감사</div><div class="sb">켜짐 · 첫 구매 때 시작</div></div>
+          <div class="rows">
+            <div class="row"><div class="iv">↓ 바로</div>
+              <div class="st msg"><div class="a"><svg class="i" viewBox="0 0 24 24"><rect width="20" height="16" x="2" y="4" rx="2"/><path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7"/></svg><span>1번째 · 문자</span><span>구매 당일</span></div>
+                <div class="p">(광고) 첫 구매 고마워요! 후기를 남기면 적립금을 드려요</div></div></div>
+            <div class="row"><div class="iv">↓ 14일 뒤</div>
+              <div class="st msg"><div class="a"><svg class="i" viewBox="0 0 24 24"><rect width="20" height="16" x="2" y="4" rx="2"/><path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7"/></svg><span>2번째 · 문자</span><span>14일째</span></div>
+                <div class="p">(광고) 잘 쓰고 계세요? 함께 쓰면 좋은 상품을 골랐어요</div></div></div>
+            <div class="row"><div class="goal"><svg class="i" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/></svg>다시 사면 여기서 끝나요</div></div>
+          </div>
+        </div>
+
+        <div class="jc" id="J3" style="left:2040px;top:280px">
+          <div class="head"><div class="tt"><i class="dot"></i>단골 만들기</div><div class="sb">켜짐 · 주문 완료 때 시작</div></div>
+          <div class="rows">
+            <div class="row"><div class="iv">↓ 바로</div>
+              <div class="st msg"><div class="a"><svg class="i" viewBox="0 0 24 24"><rect width="20" height="16" x="2" y="4" rx="2"/><path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7"/></svg><span>1번째 · 문자</span><span>구매 당일</span></div>
+                <div class="p">(광고) 또 찾아 주셔서 고마워요</div></div></div>
+            <div class="row"><div class="iv">↓ 30일 뒤</div>
+              <div class="st msg"><div class="a"><svg class="i" viewBox="0 0 24 24"><rect width="20" height="16" x="2" y="4" rx="2"/><path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7"/></svg><span>2번째 · 문자</span><span>30일째</span></div>
+                <div class="p">(광고) 다 써 갈 때쯤이에요. 다시 담아 드릴까요?</div></div></div>
+          </div>
+        </div>
+
+        <div class="pill" id="P1">이어짐</div>
+        <div class="pill" id="P2">이어짐</div>
+
+        <div class="band" id="band">언제든 생기는 순간<span>장바구니 · 생일 · 등급 · 포인트</span></div>
+        <div class="mini" id="M0"><div class="tt"><i class="dot"></i>장바구니 회복</div><div class="sb">켜짐 · 장바구니 때 시작</div></div>
+        <div class="mini" id="M1"><div class="tt"><i class="dot"></i>생일 축하</div><div class="sb">켜짐 · 생일 D-7 때 시작</div></div>
+        <div class="mini" id="M2"><div class="tt"><i class="dot"></i>등급 상승 축하</div><div class="sb">켜짐 · 등급 상승 때 시작</div></div>
+        <div class="mini" id="M3"><div class="tt"><i class="dot"></i>포인트 소멸 안내</div><div class="sb">켜짐 · 포인트 소멸 임박 때 시작</div></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="abs toast" id="T0" style="top:1350px"><div class="ai"><svg class="i" viewBox="0 0 24 24"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg></div>
+    <div class="m"><div class="r"><span>문자 · 신규 가입 환영</span><span>가입 당일</span></div><div class="b">(광고) 지수님, 가입 축하 쿠폰이 왔어요</div></div></div>
+  <div class="abs toast" id="T1" style="top:1500px"><div class="ai"><svg class="i" viewBox="0 0 24 24"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg></div>
+    <div class="m"><div class="r"><span>문자 · 첫 구매 감사</span><span>구매 당일</span></div><div class="b">(광고) 첫 구매 고마워요! 후기 적립금 드려요</div></div></div>
+
+  <!-- 아웃트로 -->
+  <div class="abs wipe" id="wipeA"></div>
+  <div class="abs wipe" id="wipeB"></div>
+  <svg class="abs" id="ol" width="1080" height="240" style="left:0;top:450px;overflow:visible">
+    <defs><linearGradient id="olg" x1="0" x2="1"><stop offset="0" stop-color="#d946ef"/><stop offset="1" stop-color="#8b5cf6"/></linearGradient></defs>
+    <path id="olL" d="M 140 100 C 290 20, 390 180, 540 100 C 690 20, 790 180, 940 100" fill="none" stroke="url(#olg)" stroke-width="7" stroke-linecap="round"/>
+    <path id="olF" d="M 140 100 C 290 20, 390 180, 540 100 C 690 20, 790 180, 940 100" fill="none" stroke="#fff" stroke-opacity=".6" stroke-width="7" stroke-dasharray="10 30" stroke-linecap="round"/>
+    <g transform="translate(140 100)"><g class="oln"><circle r="17" fill="#fff" stroke="#d946ef" stroke-width="7"/><text y="66" text-anchor="middle" font-size="30" font-weight="600" fill="#64748b">가입</text></g></g>
+    <g transform="translate(540 100)"><g class="oln"><circle r="17" fill="#fff" stroke="#b05cf6" stroke-width="7"/><text y="66" text-anchor="middle" font-size="30" font-weight="600" fill="#64748b">첫 구매</text></g></g>
+    <g transform="translate(940 100)"><g class="oln"><circle r="17" fill="#fff" stroke="#8b5cf6" stroke-width="7"/><text y="66" text-anchor="middle" font-size="30" font-weight="600" fill="#64748b">재구매</text></g></g>
+  </svg>
+  <div class="abs" id="outK">마케팅의 완성</div>
+  <div class="abs" id="logo">
+    <img id="logoMain" src="../../../packages/frontend/public/logo.png" alt="한줄로" style="clip-path: inset(0 36% 0 0)">
+    <img id="logoBar" src="../../../packages/frontend/public/logo.png" alt="" style="clip-path: inset(0 0 0 64%)">
+    <div id="ai"></div>
+  </div>
+  <div class="abs" id="outC"><span class="l" id="o1">한줄로 AI와 함께</span><span class="l" id="o2">마케팅 여정을 만들어 가세요</span></div>
+  <div class="abs" id="url">hanjul.ai<svg class="i" viewBox="0 0 24 24"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></svg></div>
+</div>
+
+<script>
+// ── 시각표(초) · 128 BPM 한 마디 = 1.875초 ─────────────────
+const BAR = 1.875;
+const T = {
+  hook: 0, input: BAR, map: 2 * BAR, link: 3.5 * BAR, all: 4.5 * BAR, send: 9.6, outro: 6 * BAR, copy: 12.55, url: 7 * BAR, end: 15,
+  typeAt: (k) => BAR + 0.12 + k * 0.085, click: BAR + 1.35,
+  rows1: [4.0, 4.55, 5.1, 5.65], card2: 7.2, rows2: [7.45, 7.75, 8.05], card3: 8.8, rows3: [8.95, 9.1], minis: [9.0, 9.1, 9.2, 9.3],
+  toasts: [9.6, 10.1], aiType: [12.15, 12.3],
+};
+const TYPED = '가입 고객을 첫 구매로';
+
+// ── 보조 ───────────────────────────────────────────────
+const C = (x) => Math.min(1, Math.max(0, x));
+const E = {
+  lin: (x) => x,
+  out: (x) => 1 - Math.pow(1 - x, 3),
+  in: (x) => x * x * x,
+  io: (x) => (x < 0.5 ? 4 * x * x * x : 1 - Math.pow(-2 * x + 2, 3) / 2),
+  back: (x) => { const c1 = 1.7, c3 = c1 + 1; return 1 + c3 * Math.pow(x - 1, 3) + c1 * Math.pow(x - 1, 2); },
+};
+const p = (t, a, b, e = 'out') => E[e](C((t - a) / (b - a)));
+const lerp = (a, b, x) => a + (b - a) * x;
+const $ = (id) => document.getElementById(id);
+
+// 나타남·사라짐(위로 떠오르며 · 흐림 풀림)
+function show(el, t, a, b, o = {}) {
+  const { dy = 60, blur = 14, dur = 0.38, outDur = 0.24, sc = 0, ease = 'out', x = '' } = o;
+  const i = p(t, a, a + dur, ease);
+  const q = b == null ? 0 : p(t, b, b + outDur, 'in');
+  const v = Math.min(C(i * 1.4), 1) * (1 - q);
+  el.style.opacity = v;
+  el.style.visibility = v <= 0.001 ? 'hidden' : 'visible';
+  el.style.transform = `${x} translateY(${(1 - i) * dy - q * dy * 0.5}px) scale(${1 - sc * (1 - i) - sc * 0.5 * q})`;
+  const bl = (1 - C(i * 1.3)) * blur + q * blur;
+  el.style.filter = bl > 0.05 ? `blur(${bl}px)` : 'none';
+}
+
+// ── 측정(월드 좌표 · 한 번) ─────────────────────────────
+const VW = 960, VH = 1052, VH3 = 780 - 128;
+let G = null;
+function measure() {
+  const box = (el) => ({ x: el.offsetLeft, y: el.offsetTop, w: el.offsetWidth, h: el.offsetHeight });
+  const J = ['J1', 'J2', 'J3'].map((id) => $(id));
+  const jb = J.map(box);
+  // 카드 높이 = 머리 + 줄들(펼쳐지는 만큼)
+  const rows = J.map((el) => [...el.querySelectorAll('.row')].map((r) => r.offsetHeight));
+  const headH = J.map((el) => el.querySelector('.head').offsetHeight + 30);
+  const bottom = Math.max(...jb.map((b) => b.y + b.h));
+  const bandY = bottom + 110;
+  $('band').style.top = bandY + 'px';
+  const bandH = $('band').offsetHeight;
+  ['M0', 'M1', 'M2', 'M3'].forEach((id, k) => { $(id).style.left = k * 715 + 'px'; $(id).style.top = bandY + bandH + 36 + 'px'; });
+  const worldH = bandY + bandH + 36 + $('M0').offsetHeight;
+
+  // 선: 카드 머리 높이에서 붙는다(실제 지도와 같은 규칙)
+  const curve = (a, b) => {
+    const p0 = [a.x + a.w, a.y + 62], p3 = [b.x, b.y + 62];
+    const dx = (p3[0] - p0[0]) / 2;
+    return { d: `M ${p0[0]} ${p0[1]} C ${p0[0] + dx} ${p0[1]}, ${p3[0] - dx} ${p3[1]}, ${p3[0] - 14} ${p3[1]}`, end: p3, mid: [(p0[0] + p3[0]) / 2, (p0[1] + p3[1]) / 2] };
+  };
+  const L = [curve(jb[0], jb[1]), curve(jb[1], jb[2])];
+  L.forEach((c, k) => {
+    $('L' + (k + 1)).setAttribute('d', c.d);
+    $('L' + (k + 1) + 'f').setAttribute('d', c.d);
+    const [ex, ey] = c.end;
+    $('A' + (k + 1)).setAttribute('d', `M ${ex - 22} ${ey - 13} L ${ex} ${ey} L ${ex - 22} ${ey + 13} Z`);
+    $('P' + (k + 1)).style.left = c.mid[0] + 'px';
+    $('P' + (k + 1)).style.top = c.mid[1] + 'px';
+  });
+  const len = [1, 2].map((k) => $('L' + k).getTotalLength());
+
+  // 카메라 목표: (배율, 화면 중심에 올 월드 점)
+  const fit = (x0, y0, x1, y1, pad, vh = VH) => ({ s: Math.min((VW - 2 * pad) / (x1 - x0), (vh - 2 * pad) / (y1 - y0)), cx: (x0 + x1) / 2, cy: (y0 + y1) / 2 });
+  const c1 = fit(0, 0, 760, jb[0].y + jb[0].h, 46);
+  const s2 = 0.85;
+  const H2 = 128 + 60 + (jb[1].y + jb[1].h) * s2 + 56;
+  // 첫 카드는 테두리만 살짝 · 레인 머리는 위에서 60
+  const c2 = { s: s2, cx: jb[0].x + jb[0].w - 30 + VW / 2 / s2, cy: -60 + (H2 - 128) / 2 / s2 };
+  const c3 = fit(-30, -20, 2830, worldH + 20, 30, VH3);
+  G = { rows, headH, len, c1, c2, c3, H2 };
+}
+
+function cam(t) {
+  const { c1, c2, c3 } = G;
+  const k1 = { ...c1, s: c1.s * 1.04 };
+  let c;
+  if (t < T.link) c = { ...c1, s: lerp(c1.s, k1.s, p(t, T.map, T.link, 'lin')) };
+  else if (t < T.all) {
+    const x = p(t, T.link, T.link + 0.6, 'io');
+    const drift = p(t, T.link + 0.6, T.all, 'lin') * 0.03;
+    c = { s: lerp(k1.s, c2.s, x) * (1 + drift), cx: lerp(k1.cx, c2.cx, x), cy: lerp(k1.cy, c2.cy, x) };
+  } else {
+    const x = p(t, T.all, T.all + 0.7, 'io');
+    const from = { ...c2, s: c2.s * 1.03 };
+    const drift = p(t, T.all + 0.7, T.outro, 'lin') * 0.035;
+    c = { s: lerp(from.s, c3.s, x) * (1 + drift), cx: lerp(from.cx, c3.cx, x), cy: lerp(from.cy, c3.cy, x) };
+  }
+  const H = lerp(lerp(1180, G.H2, p(t, T.link, T.link + 0.6, 'io')), 780, p(t, T.all, T.all + 0.7, 'io'));
+  $('win').style.height = H + 'px';
+  const vh = H - 128;
+  $('world').style.transform = `translate(${VW / 2 - c.cx * c.s}px, ${vh / 2 - c.cy * c.s}px) scale(${c.s})`;
+}
+
+function card(id, k, t, at, rowTimes) {
+  const el = $(id);
+  const i = p(t, at, at + 0.42, 'back');
+  el.style.opacity = C(p(t, at, at + 0.2));
+  el.style.transform = `scale(${0.86 + 0.14 * i})`;
+  el.style.transformOrigin = '0 0';
+  let h = G.headH[k];
+  el.querySelectorAll('.row').forEach((r, n) => {
+    const a = rowTimes[n];
+    h += G.rows[k][n] * p(t, a, a + 0.3, 'out');
+    const v = p(t, a + 0.06, a + 0.34);
+    r.style.opacity = v;
+    r.style.transform = `translateY(${(1 - v) * 24}px)`;
+  });
+  el.style.height = h + 'px';
+}
+
+function line(k, t, a, b) {
+  const L = $('L' + k), F = $('L' + k + 'f'), A = $('A' + k), P = $('P' + k);
+  const len = G.len[k - 1];
+  const x = p(t, a, b, 'io');
+  L.setAttribute('stroke-dasharray', `${len} ${len}`);
+  L.setAttribute('stroke-dashoffset', len * (1 - x));
+  L.style.opacity = x > 0 ? 1 : 0;
+  F.style.opacity = p(t, b, b + 0.25);
+  F.setAttribute('stroke-dashoffset', -t * 90);
+  A.style.opacity = p(t, b - 0.06, b + 0.08);
+  const pi = p(t, b, b + 0.35, 'back');
+  P.style.opacity = C(p(t, b, b + 0.15));
+  P.style.transform = `translate(-50%, -50%) scale(${0.6 + 0.4 * pi})`;
+}
+
+// ── 한 프레임 ───────────────────────────────────────────
+window.seek = function (t) {
+  // 배경 빛
+  $('g1').style.transform = `translate(${Math.sin(t * 0.7) * 80}px, ${Math.cos(t * 0.5) * 60}px)`;
+  $('g2').style.transform = `translate(${Math.cos(t * 0.6) * 90}px, ${Math.sin(t * 0.8) * 70}px)`;
+  show($('chip'), t, 0.0, T.outro - 0.2, { dy: -30, x: 'translateX(-50%)' });
+
+  // 1 훅
+  show($('h1'), t, 0.04, T.input - 0.2, { dy: 80, sc: 0.06 });
+  show($('h2'), t, 0.47, T.input - 0.2, { dy: 80, sc: 0.06 });
+
+  // 2 입력
+  show($('c0'), t, T.input + 0.05, T.map - 0.22, { dy: 50 });
+  show($('card'), t, T.input, T.map - 0.2, { dy: 140, sc: 0.06, dur: 0.45, ease: 'out' });
+  let n = 0;
+  for (let k = 0; k < TYPED.length; k++) if (t >= T.typeAt(k)) n = k + 1;
+  $('typed').textContent = TYPED.slice(0, n);
+  $('ph').style.display = n > 0 ? 'none' : '';
+  $('caret').style.opacity = n < TYPED.length || Math.floor(t * 3.2) % 2 === 0 ? 1 : 0;
+  const pr = p(t, T.click - 0.06, T.click + 0.06, 'in') * (1 - p(t, T.click + 0.06, T.click + 0.26, 'out'));
+  $('btn').style.transform = `scale(${1 - 0.08 * pr})`;
+  const rp = C((t - T.click) / 0.45);
+  $('ripple').style.opacity = t >= T.click ? 0.9 * (1 - rp) : 0;
+  $('ripple').style.transform = `scale(${0.2 + rp * 5})`;
+  const loading = t >= T.click + 0.12;
+  $('spin').style.display = loading ? 'block' : 'none';
+  $('sendI').style.display = loading ? 'none' : 'block';
+  $('spin').style.transform = `rotate(${t * 900}deg)`;
+  $('btnT').textContent = loading ? '설계 중' : 'AI 생성';
+  // 손가락 대신 화살표 포인터가 버튼으로
+  const btn = $('btn').getBoundingClientRect();
+  const bx = btn.left + btn.width * 0.62, by = btn.top + btn.height * 0.55;
+  const mv = p(t, T.click - 0.42, T.click - 0.05, 'io');
+  const pt = $('pointer');
+  pt.style.left = lerp(bx + 160, bx, mv) + 'px';
+  pt.style.top = lerp(by + 260, by, mv) + 'px';
+  pt.style.opacity = C(p(t, T.click - 0.5, T.click - 0.35)) * (1 - p(t, T.map - 0.3, T.map - 0.15));
+  pt.style.transform = `scale(${1 - 0.14 * pr})`;
+
+  // 3 여정 지도
+  show($('win'), t, T.map - 0.05, T.outro - 0.3, { dy: 160, sc: 0.08, dur: 0.5 });
+  show($('c1'), t, T.map + 0.1, T.link - 0.2);
+  show($('c2'), t, T.link + 0.05, T.all - 0.2);
+  show($('c3'), t, T.all + 0.05, T.send - 0.2);
+  show($('c4'), t, T.send, T.outro - 0.3);
+  cam(t);
+  card('J1', 0, t, T.map + 0.05, T.rows1);
+  card('J2', 1, t, T.card2, T.rows2);
+  card('J3', 2, t, T.card3, T.rows3);
+  line(1, t, T.link + 0.25, T.card2 + 0.05);
+  line(2, t, T.all + 0.15, T.card3 + 0.05);
+  show($('band'), t, T.minis[0] - 0.1, null, { dy: 30, blur: 0 });
+  ['M0', 'M1', 'M2', 'M3'].forEach((id, k) => show($(id), t, T.minis[k], null, { dy: 50, blur: 0, sc: 0.1, ease: 'back' }));
+  ['T0', 'T1'].forEach((id, k) => show($(id), t, T.toasts[k], T.outro - 0.3, { dy: 70, sc: 0.06, ease: 'back', dur: 0.42 }));
+  $('view').style.filter = t > T.send ? `brightness(${1 - 0.12 * p(t, T.send, T.send + 0.3)})` : 'none';
+
+  // 4 아웃트로
+  const wa = p(t, T.outro - 0.25, T.outro + 0.15, 'io');
+  const wb = p(t, T.outro - 0.12, T.outro + 0.28, 'io');
+  $('wipeA').style.clipPath = `circle(${wa * 1400}px at 540px 1150px)`;
+  $('wipeB').style.clipPath = `circle(${wb * 1400}px at 540px 1150px)`;
+  $('wipeA').style.visibility = wa > 0 ? 'visible' : 'hidden';
+  $('wipeB').style.visibility = wb > 0 ? 'visible' : 'hidden';
+  const ol = $('olL'), oll = ol.getTotalLength(), od = p(t, T.outro + 0.3, T.outro + 1.3, 'io');
+  ol.setAttribute('stroke-dasharray', `${oll} ${oll}`);
+  ol.setAttribute('stroke-dashoffset', oll * (1 - od));
+  ol.style.opacity = od > 0 ? 1 : 0;
+  $('olF').style.opacity = p(t, T.outro + 1.3, T.outro + 1.6);
+  $('olF').setAttribute('stroke-dashoffset', -t * 80);
+  document.querySelectorAll('.oln').forEach((g, k) => {
+    const a = T.outro + 0.3 + k * 0.5, v = p(t, a, a + 0.4, 'back');
+    g.style.opacity = C(p(t, a, a + 0.12));
+    g.style.transform = `scale(${0.4 + 0.6 * v})`;
+  });
+  show($('outK'), t, T.outro + 0.2, null, { dy: 40 });
+  show($('logo'), t, T.outro + 0.28, null, { dy: 70, sc: 0.08, dur: 0.5 });
+  const typedAI = (t >= T.aiType[0] ? 'A' : '') + (t >= T.aiType[1] ? 'I' : '');
+  $('ai').textContent = typedAI;
+  // 밑줄 = 입력 커서처럼 깜빡이다가 AI 가 들어오면 멈춘다
+  $('logoBar').style.opacity = t < T.aiType[1] ? (Math.floor((t - T.outro) * 3.2) % 2 === 0 ? 1 : 0.15) : 1;
+  show($('o1'), t, T.copy, null, { dy: 50 });
+  show($('o2'), t, T.copy + 0.15, null, { dy: 50 });
+  show($('url'), t, T.url, null, { dy: 40, sc: 0.2, ease: 'back', dur: 0.45, x: 'translateX(-50%)' });
+};
+
+window.ready = (async () => { await document.fonts.ready; measure(); window.seek(0); return true; })();
+</script>
+</body>
+</html>

@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>한줄로 AI 여정 설계 표지</title>
+<!--
+  릴스 표지(1080x1920). 프로필 격자는 가운데 3:4(y 240~1680)만 보인다 → 모든 내용을 그 안에 둔다.
+  다음 기능 표지는 번호 · 제목 · 부제 · 지도 부분만 바꾼다.  찍기: node render.js --cover
+-->
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { width: 1080px; height: 1920px; overflow: hidden; }
+  body { font-family: 'Pretendard', sans-serif; -webkit-font-smoothing: antialiased; letter-spacing: -0.02em; position: relative;
+         background: radial-gradient(900px 800px at 0% 8%, rgba(217,70,239,.42), transparent 70%), radial-gradient(800px 700px at 100% 92%, rgba(139,92,246,.34), transparent 70%), #0F172A; }
+  .abs { position: absolute; }
+  .grad { background: linear-gradient(90deg, #f0abfc, #c084fc 55%, #a78bfa); -webkit-background-clip: text; background-clip: text; color: transparent; }
+
+  #chip { left: 50%; top: 300px; transform: translateX(-50%); display: flex; align-items: center; gap: 24px; padding: 20px 38px; border-radius: 999px;
+          background: rgba(255,255,255,.08); border: 2px solid rgba(255,255,255,.16); color: #f5d0fe; font-size: 36px; font-weight: 700; white-space: nowrap; }
+  #chip img { height: 40px; filter: invert(1); }
+  #chip .bar { width: 2px; height: 32px; background: rgba(255,255,255,.28); }
+  #title { left: 0; top: 410px; width: 1080px; text-align: center; color: #fff; font-size: 236px; font-weight: 900; letter-spacing: -0.06em; line-height: 1.1; }
+  #sub { left: 0; top: 700px; width: 1080px; text-align: center; color: #e2e8f0; font-size: 56px; font-weight: 600; letter-spacing: -0.035em; line-height: 1.35; }
+
+  #map { left: 60px; top: 950px; width: 960px; height: 560px; border-radius: 44px; overflow: hidden; background: #f1f5f9; box-shadow: 0 50px 140px rgba(0,0,0,.5); border: 2px solid rgba(255,255,255,.1); }
+  #mh { height: 96px; padding: 0 36px; display: flex; align-items: center; color: #fff; font-size: 32px; font-weight: 700;
+        background: radial-gradient(520px 200px at 6% 0%, rgba(217,70,239,.4), transparent 70%), #0F172A; }
+  #mh span { margin-left: auto; display: flex; align-items: center; gap: 10px; font-size: 24px; color: #6ee7b7; font-weight: 600; }
+  #mh i { width: 13px; height: 13px; border-radius: 50%; background: #34d399; }
+  .lane { top: 118px; width: 262px; padding-bottom: 10px; border-bottom: 3px solid #e2e8f0; font-size: 26px; font-weight: 600; color: #334155; }
+  .jc { width: 262px; padding: 20px; border-radius: 22px; background: #fff; border: 2px solid #cbd5e1; box-shadow: 0 10px 24px rgba(15,23,42,.07); }
+  .jc .t { display: flex; align-items: center; gap: 10px; font-size: 27px; font-weight: 700; color: #0f172a; white-space: nowrap; }
+  .jc .t i { width: 13px; height: 13px; border-radius: 50%; background: #34d399; box-shadow: 0 0 0 5px rgba(52,211,153,.18); flex: none; }
+  .jc .s { margin-top: 6px; font-size: 20px; color: #64748b; }
+  .st { margin-top: 12px; padding: 12px 14px; border-radius: 14px; background: #f5f3ff; border: 2px solid #c4b5fd; color: #4c1d95; font-size: 20px; font-weight: 600; }
+  .st.g { background: #ecfdf5; border-color: #a7f3d0; color: #047857; }
+  .pill { transform: translate(-50%, -50%); padding: 5px 13px; border-radius: 999px; background: #fff; border: 2px solid #c4b5fd; color: #4c1d95; font-size: 19px; font-weight: 600; white-space: nowrap; }
+
+  #url { left: 0; top: 1600px; width: 1080px; text-align: center; color: #94a3b8; font-size: 38px; font-weight: 600; letter-spacing: 0; }
+</style>
+</head>
+<body>
+  <div class="abs" id="chip"><img src="../../../packages/frontend/public/logo.png" alt="한줄로"><span class="bar"></span><span>기능 소개 01</span></div>
+  <div class="abs" id="title"><span class="grad">여정</span> 설계</div>
+  <div class="abs" id="sub">가입부터 첫 구매까지<br>AI가 여정을 지도로 그려요</div>
+
+  <div class="abs" id="map">
+    <div id="mh">여정 지도<span><i></i>켜짐</span></div>
+    <svg class="abs" width="960" height="600" style="left:0;top:0">
+      <path d="M 298 236 C 330 236, 322 296, 352 296" fill="none" stroke="#8b5cf6" stroke-width="4"/>
+      <path d="M 338 288 L 352 296 L 338 304 Z" fill="#8b5cf6"/>
+      <path d="M 614 296 C 646 296, 638 356, 668 356" fill="none" stroke="#8b5cf6" stroke-width="4"/>
+      <path d="M 654 348 L 668 356 L 654 364 Z" fill="#8b5cf6"/>
+    </svg>
+    <div class="abs lane" style="left:36px">가입</div>
+    <div class="abs lane" style="left:352px">첫 구매</div>
+    <div class="abs lane" style="left:668px">재구매</div>
+    <div class="abs jc" style="left:36px;top:190px"><div class="t"><i></i>신규 가입 환영</div><div class="s">신규 가입 때 시작</div>
+      <div class="st">1번째 · 문자</div><div class="st">2번째 · 문자</div><div class="st g">구매 확인되면 끝</div></div>
+    <div class="abs jc" style="left:352px;top:250px"><div class="t"><i></i>첫 구매 감사</div><div class="s">첫 구매 때 시작</div>
+      <div class="st">1번째 · 문자</div><div class="st">2번째 · 문자</div></div>
+    <div class="abs jc" style="left:668px;top:310px"><div class="t"><i></i>단골 만들기</div><div class="s">주문 완료 때 시작</div>
+      <div class="st">1번째 · 문자</div></div>
+    <div class="abs pill" style="left:346px;top:212px">이어짐</div>
+    <div class="abs pill" style="left:662px;top:272px">이어짐</div>
+  </div>
+
+  <div class="abs" id="url">hanjul.ai</div>
+</body>
+</html>

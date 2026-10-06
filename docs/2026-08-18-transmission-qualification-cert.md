@@ -997,7 +997,41 @@ JWT를 주고 화면에서 가리는 방식은 통제가 아니다(그 토큰으
 > 심사관이 본 실물 = `C:\Users\ceo\OneDrive\문서\카카오톡 받은 파일\구비서류_인비토_260918.zip`(78파일) · `전송자격인증신청서_인비토.pdf`.
 > ⛔ 저장소 `docs/transmission-cert/`가 아니라 **그 묶음이 기준**이다. 저장소 판과 묶음이 달랐다(아래).
 
-### ★ 현재 상태판 (1003 세션 마감 · 23:55 · 다음 세션은 여기부터)
+### ★ 1006 세션 마감 상태판 (2026-10-06 02:2x · 다음 세션은 여기부터)
+
+**넘긴 것 (박과장 전달 = Harold)**
+- 전송자격인증 보완자료(2.2 · 3.1 · 3.4 · 3.5 · 4.1~4.3) = `Downloads\전송자격인증제\박과장_보완자료_20261005.zip` + 본문 `박과장_메일_본문.txt`.
+- 특부가 재등록 ⑥ · ⑫ · ⑬(3장) · ⑭(2장) · ⑯ = `특부가_재등록_증빙_20261005.zip`(8파일) + 본문 `박과장_메일_본문_특부가.txt`.
+- 메일 문체 = 「박과장」 · 「~하도록 해라」 · 쉼표는 문장 중간만 · 줄 끝 부호 없음(Harold 1006 정정).
+
+**남이 할 것 · 회신 대기**
+- 박과장: 하나로호스팅 IDC 설비 계약서 PDF(3.1 별첨) · 약관 개정안(1.1) · ⑯ 붙임4 · 붙임10 의 62 · 65 밖 서버를 서수란 팀장 서버 내역으로 「개발환경 테스트 서버」라고만 채움 · 「아래 발신번호 규격」 표 원본.
+- 젬텍: ⑭ 임시 식별코드 123456789 시험 1건이 LG 까지 도달(시리얼 `00000000000004759341` · 10-05 23:44:05). 수신 `SENDER_CODE` 값과 차단 여부 문의 → 「값이 비었거나 다르다」면 우리 결함(게이트웨이 STATUS 0-W ④) · 「받았고 차단 안 함」이면 차단 확인 뒤 ⑭ 재시험 · 보완.
+
+**⑯에 「조치 예정」으로 약속한 일 (번호 = ⑯ 붙임12 취약점 목록 · 끝날 때마다 `특부가_재등록/tools/fill_16.py` 의 그 행을 「완료」로 고쳐 다시 뽑고 박과장에게 준다)**
+
+| 날짜 | 할 일 | 붙임12 | 절차 요지 |
+|---|---|---|---|
+| **10-07(화) 밤** | TLS 1.0 · 1.1 끄기 | #4 | ① 두 서버에서 Suricata 기록으로 24시간 TLS 버전 집계: `grep '"event_type":"tls"' /var/log/suricata/eve.json \| grep -o '"version":"[^"]*"' \| sort \| uniq -c` (낮은 버전이 있으면 같은 줄의 `src_ip` 로 출발지 확인 · 고객 연동이면 끄기 전에 그 업체부터) ② 0이면 `grep -n 'ssl_protocols TLSv1 TLSv1.1' /etc/nginx/nginx.conf` 로 줄 확인(.62 = 35번 줄 · .65 는 확인) → 그 줄만 `ssl_protocols TLSv1.2 TLSv1.3;` → `nginx -t` 통과 때만 reload ③ 확인 = `openssl s_client -tls1 / -tls1_1 -cipher 'DEFAULT:@SECLEVEL=0'` 거부 · `-tls1_2` 정상(hanjul.ai · app.hanjul.ai · sys.hanjullo.com · ops.hanjulgw.com) |
+| 10-07 | fail2ban 로그 26주 | #9 | 두 서버 `/etc/logrotate.d/fail2ban` 내용 확인 → `rotate` 26 · 주기 weekly |
+| 10-07 | 게이트웨이 마무리 | - | .66 소스 동기화(`& C:\Users\ceo\projects\CureOPS\scripts\Sync-Source66.ps1 -Project bito-gateway` · `4c87c38` · 런북 §3-4) + 게이트웨이 STATUS 0-W ⑤ 줄 커밋 · push |
+| 10-07 | 웹방화벽 탐지 기록 첫 점검 | (#2 준비) | 두 서버 `grep -oE 'id "[0-9]+"' /var/log/nginx/modsec_audit.log \| sort \| uniq -c \| sort -rn \| head -20` |
+| 10-07 | DB 전체 색인 점검 · SSD 건강 | (특부가 밖 · 10-06 백업 실패 후속) | `amcheck` 확장 → 전 btree 색인 `bt_index_check` · `smartmontools` 설치 + `smartctl -a /dev/sda` · 경위 = `status/SERVERS.md` ★2026-10-06 「백업 실패 → 복구」 |
+| **10-08(수)** | 의존성 1차 착수 동의(Harold) | - | 동의가 없으면 10-09 를 못 지킨다 |
+| **10-09(목) 밤** | 의존성 1차 | #3 · #13 · #14(npm) | backend · frontend · 게이트웨이 `web/api` 에서 `npm audit fix`(`--force` 금지 · 호환 범위만) · **fast-xml-parser 4.5 → 5.x(critical · 주 버전) = 사용처 `backend/src/utils/godo-parse.ts` 하나 · 변경점 대조 + 고도몰 파싱 시험** · 검증 = backend tsc · 전체 vitest · frontend 빌드 · 게이트웨이 `check.sh` · npm audit 재실행(남는 것 = 주 버전 4건 + xlsx) · 발송 경로 라이브러리(mysql2 · axios · express) 포함 = 6원칙 ⑤ 실측 1건(시험 계정 발송) · 배포 = 한줄로 표준 · 게이트웨이 런북 §3-1-b |
+| **10-11(토) 새벽** | .62 재부팅(커널 6.8.0-142 반영) | #11 | **준비(평일)**: ① PM2 부팅 기동 = administrator 셸에서 `pm2 startup systemd` 가 출력하는 명령을 root 셸에서 실행(앞의 sudo 는 빼고) + `pm2 save` ② QTmsg 발송 에이전트 11프로세스(java 9001~9011) 기동 방법 조사(`ps -o pid,lstart,args -C java` · `ls -l /proc/<pid>/cwd`) → 부팅 기동 장치(systemd) ③ python 8555 · node 3000 · 3001 · 4317 출처 확인 ④ 도커 4종 자동 재시작은 1006 확인 완료. ⑤ 같은 정지 시간에 `pg_checksums --enable`(PG 정지 필요 · 10-06 색인 손상 후속 · SERVERS ★2026-10-06). **당일**: 직전 10분 발송 0 확인 → `systemctl reboot` → 커널 142 · pm2 list · java 11 · docker 4 · hanjul.ai 200 · 시험 발송 1건. ⛔ 준비 없이 재부팅하면 hanjul.ai 와 발송 에이전트가 안 뜬다(SERVERS.md 리스크 원장 「재부팅 시 자동 복구 공백」) |
+| **10-13(월) 밤** | 웹방화벽 차단 전환 | #2 | 1주 기록에서 정상 요청이 걸린 규칙을 찾아 예외(REQUEST-900 파일 `SecRuleRemoveById` 또는 경로 한정) → **차단은 한줄로 서버 블록(hanjul.ai · app.hanjul.ai · sys.hanjullo.com)과 ops.hanjulgw.com 에만** `modsecurity_rules 'SecRuleEngine On';` 한 줄 · 전역은 DetectionOnly 유지(한줄전단 무변경) → `nginx -t` → reload → 공격 시험 403 · 정상 200 → 24시간 403 건수 감시(고객 연동 API · 업로드 · 몰 웹훅) |
+| **10-31(금)까지** | 주 버전 의존성 | #12 | nodemailer 8 → 10 · puppeteer · exceljs · xlsx 0.18.5 교체(SheetJS 공식 배포본) · 사용처마다 회귀 |
+| 10-31 | 게이트웨이 관리 API Node 18 → 20 LTS | #14 | .65 node 교체 → `bito-admin-api` 재시작 · `check.sh` · health |
+| 10-31 | 기존 서버 계정 비밀번호 사용기간 | #10 | root · administrator · invito 에 `chage -M 90 -W 14`(먼저 비밀번호 변경 날짜를 Harold 가 정한다) |
+| 10-31 | DB 복원 시험 | 붙임16 | 한줄로 · 게이트웨이 백업 1개씩 별도 컨테이너에 복원 · 걸린 시간 기록 → 붙임16 「복구 소요 시간」 칸 |
+| 10-31 | 노트북 화면 잠금 | #15 | 1006 Harold 「재택 · 지금은 불편」으로 해제 상태(자동 실행 끔 · 기본 공유 끔은 완료). 10분 · 해제 암호로 다시 켤지 Harold 결정 · 안 켜면 #15 를 위험 수용(사유)으로 고친다 |
+| 10-31 | 점검 운영 | - | AIDE 첫 점검(`aide --check` · 오탐 경로 제외) · 대량 발송 중 Suricata CPU 실측(상한 .62 2코어 · .65 4코어 안인지) · 운영 기록 대장 월 점검에 침입탐지 · 웹방화벽 · 백신 결과 추가(10월분 = 11월 초 점검부터 · ⑯ 본문에 그렇게 적었다) |
+
+**이 세션(1005~1006) 기록 위치**
+- 서버 변경 전부 = `status/SERVERS.md` ★2026-10-06 · ⑯ 생성 스크립트와 KAIT 양식 = `특부가_재등록/tools/` · 게이트웨이 배포 `4c87c38` = 게이트웨이 STATUS 0-W · 이미지 스튜디오 세부 카테고리 · 검색 · 제품/행사 칩(1006 배포) = `docs/FEATURE-IMAGE-STUDIO.md` §7.
+
+### (1003 상태판 · 위 ★1006 상태판이 덮는다)
 
 **재접수 = 2026-10-06(화).** 1003에 만든 코드는 **전부 운영 배포 완료**다(남은 미배포 0).
 

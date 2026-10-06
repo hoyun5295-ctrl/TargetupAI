@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>한줄로 AI 자동 마케팅 표지</title>
+<!--
+  릴스 표지(1080x1920 · 흰 바탕 시리즈). 프로필 격자는 가운데 3:4(y 240~1680)만 보인다 → 모든 내용을 그 안에 둔다.
+  찍기: node render.js --cover
+-->
+<style>
+  :root { --bg: #FAFAF8; --ink: #111111; --line: #E7E5E4; --soft: #F4F4F5; --ac: #FF5A1F; --ac-soft: #FFF1EB; }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { width: 1080px; height: 1920px; overflow: hidden; }
+  body { position: relative; font-family: 'Pretendard', sans-serif; -webkit-font-smoothing: antialiased; color: var(--ink); letter-spacing: -0.02em;
+         background-color: var(--bg); background-image: radial-gradient(#E4E4E7 1.7px, transparent 1.7px); background-size: 40px 40px; }
+  .abs { position: absolute; }
+  .mark { background: linear-gradient(rgba(255,90,31,.32), rgba(255,90,31,.32)) no-repeat 0 84% / 100% 34%; padding: 0 8px; }
+
+  #chip { left: 50%; top: 300px; transform: translateX(-50%); display: flex; align-items: center; gap: 24px; padding: 20px 38px; border-radius: 999px;
+          background: #fff; border: 2px solid var(--line); color: #3F3F46; font-size: 36px; font-weight: 700; white-space: nowrap; box-shadow: 0 8px 24px rgba(17,17,17,.05); }
+  #chip img { height: 40px; }
+  #chip .bar { width: 2px; height: 32px; background: var(--line); }
+  #title { left: 0; top: 420px; width: 1080px; text-align: center; font-size: 196px; font-weight: 900; letter-spacing: -0.06em; line-height: 1.1; }
+  #sub { left: 0; top: 690px; width: 1080px; text-align: center; color: #3F3F46; font-size: 56px; font-weight: 600; letter-spacing: -0.035em; line-height: 1.35; }
+
+  #wk { left: 90px; top: 930px; width: 900px; border-radius: 40px; background: #fff; border: 2px solid var(--line); box-shadow: 0 40px 100px rgba(17,17,17,.10); overflow: hidden; }
+  #wk .head { display: flex; align-items: center; padding: 26px 36px; border-bottom: 2px solid var(--line); font-size: 32px; font-weight: 800; }
+  #wk .head span { margin-left: auto; font-size: 25px; color: #52525B; font-weight: 600; }
+  .day { display: flex; align-items: center; gap: 20px; padding: 0 36px; height: 80px; }
+  .day + .day { border-top: 2px solid #F1F1F0; }
+  .dc { width: 54px; height: 54px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 25px; font-weight: 700; background: var(--ink); color: #fff; flex: none; }
+  .tx { flex: 1; min-width: 0; font-size: 27px; color: #27272A; letter-spacing: -0.03em; white-space: nowrap; }
+  .st { padding: 6px 16px; border-radius: 999px; font-size: 22px; font-weight: 700; background: var(--ac-soft); color: #C2410C; }
+  .off .dc { background: var(--soft); color: #3F3F46; }
+  .off .tx { color: #71717A; }
+  .off .st { background: var(--soft); color: #52525B; }
+
+  #url { left: 0; top: 1622px; width: 1080px; text-align: center; color: #52525B; font-size: 38px; font-weight: 600; letter-spacing: 0; }
+</style>
+</head>
+<body>
+  <div class="abs" id="chip"><img src="../../../packages/frontend/public/logo.png" alt="한줄로"><span class="bar"></span><span>기능 소개 02</span></div>
+  <div class="abs" id="title"><span class="mark">자동</span> 마케팅</div>
+  <div class="abs" id="sub">한 줄 써 두면<br>AI가 매일 알아서 보내요</div>
+
+  <div class="abs" id="wk">
+    <div class="head">이번 주<span>매일 오전 10시</span></div>
+    <div class="day"><div class="dc">월</div><div class="tx">월요일 생일 축하해요, 20% 쿠폰 드려요</div><div class="st">보냄</div></div>
+    <div class="day"><div class="dc">화</div><div class="tx">생일인 오늘, 20% 쿠폰으로 선물해요</div><div class="st">보냄</div></div>
+    <div class="day off"><div class="dc">수</div><div class="tx">오늘은 생일인 고객이 없어요</div><div class="st">쉬어요</div></div>
+    <div class="day"><div class="dc">목</div><div class="tx">가을 생일엔 20% 축하 쿠폰 한 장</div><div class="st">보냄</div></div>
+    <div class="day"><div class="dc">금</div><div class="tx">주말 앞둔 생일, 20% 쿠폰 도착</div><div class="st">보냄</div></div>
+    <div class="day"><div class="dc">토</div><div class="tx">생일 주말, 20% 쿠폰으로 즐기세요</div><div class="st">보냄</div></div>
+    <div class="day"><div class="dc">일</div><div class="tx">일요일 생일 축하해요, 20% 쿠폰</div><div class="st">보냄</div></div>
+  </div>
+
+  <div class="abs" id="url">hanjul.ai</div>
+</body>
+</html>
