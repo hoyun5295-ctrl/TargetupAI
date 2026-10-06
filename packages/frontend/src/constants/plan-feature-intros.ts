@@ -33,8 +33,17 @@ export interface PlanFeatureIntro {
   steps: { icon: LucideIcon; title: string; text: string }[];
   /** 드는 크레딧. credits = 백엔드 CREDIT_COST_MAP[source] */
   costs: { label: string; source: string; credits: number }[];
-  /** costs가 비었을 때 보여줄 한 줄 */
+  /** costs가 비었을 때 보여줄 한 줄(★2026-10-06 영상 창에서는 크레딧 표 아래에도 보인다) */
   costNote?: string;
+  /**
+   * ★ 2026-10-06 예시 영상(세로 9:16 · 무음 반복 · 끝 안내 장면 없음) — 있으면 창이 왼쪽 영상 · 오른쪽 설명 두 단이 된다.
+   *   파일 = frontend/public/videos/plan-feature/<id>.mp4 · .jpg(build:safe 가 함께 싣는다). 설계 = docs/2026-10-06-plan-feature-video-modal-design.md
+   */
+  video?: { src: string; poster: string };
+  /** ★ 2026-10-06 직접 정할 수 있는 것 — 설정 화면에 실제로 있는 항목만(없는 설정을 적지 않는다) */
+  options?: { title: string; text: string; chips?: string[]; wide?: boolean }[];
+  /** ★ 2026-10-06 알아서 지켜 주는 것 — 코드에 있는 안전장치만 */
+  safeguards?: { title: string; text: string }[];
 }
 
 export const PLAN_FEATURE_INTROS: PlanFeatureIntro[] = [
@@ -51,43 +60,114 @@ export const PLAN_FEATURE_INTROS: PlanFeatureIntro[] = [
   },
   {
     id: 'journeys', path: '/ai-journeys', title: '여정 자동화', icon: Workflow, gradient: 'from-fuchsia-400 to-purple-500',
-    summary: '가입·구매 같은 일이 생기면 정해 둔 순서대로 메시지가 나갑니다.',
+    summary: '가입·구매·생일 같은 일이 생긴 고객에게, 정해 둔 순서대로 메시지가 자동으로 나갑니다.',
+    video: { src: '/videos/plan-feature/journeys.mp4', poster: '/videos/plan-feature/journeys.jpg' },
     steps: [
-      { icon: Target, title: '목적 고르기', text: '재구매·휴면·생일 같은 준비된 여정이나 한 줄 목표로 시작합니다.' },
-      { icon: ListChecks, title: '단계 설계', text: '메시지·대기·조건 단계를 AI가 짜고, 말로 고칠 수 있습니다.' },
-      { icon: Send, title: '켜 두면 자동', text: '켠 뒤에 생기는 고객부터 순서대로 받습니다.' },
+      { icon: Target, title: '시작 사건 고르기', text: '준비된 여정을 고르거나 한 줄 목표로 시작합니다. 문장으로 답하면 AI가 초안을 만듭니다.' },
+      { icon: ListChecks, title: '단계 설계', text: 'AI가 메시지·대기·조건 단계를 짜 줍니다. 고칠 점을 말로 적으면 그대로 고쳐 줍니다.' },
+      { icon: Send, title: '켜 두면 자동', text: '켠 뒤에 해당하는 고객부터 순서대로 받습니다. 여정 지도에서 가입부터 재구매까지 한 화면으로 봅니다.' },
+    ],
+    options: [
+      {
+        title: '시작 사건', wide: true,
+        text: '우리 회사 데이터로 가능한 사건만 열립니다. 조건으로 고른 고객에게 한 번 보내는 여정도 만들 수 있습니다.',
+        chips: ['신규 가입', '첫 구매', '재구매', '휴면', '휴면 복귀', '구매 주기 이탈', '등급 상승', '생일', '포인트 소멸', '장바구니 이탈', '배송', '조회 후 미구매'],
+      },
+      { title: '시작 조건 세부', text: '휴면 기준 일수·생일 며칠 전·장바구니 방치 시간·가입 후 몇 시간 안·포인트 소멸 기준' },
+      { title: '단계와 채널', text: '단계마다 SMS·LMS·MMS를 고르고, 단계 사이 기다릴 기간을 정합니다.' },
+      { title: '목표 달성 시 종료', text: '구매·링크 클릭·몰 방문·포인트 사용·같은 상품 재구매가 확인되면 그 고객은 여정을 마칩니다.' },
+      { title: '상한과 예산', text: '한 번에 들어오는 인원 상한·월 예산·단계당 비용 한도' },
+      { title: '다시 들어오기', text: '같은 고객이 다시 들어오기까지 기다릴 일수를 정합니다.' },
+      { title: '대조군', text: '0~30% 고객에게는 보내지 않고 남겨 두어, 보낸 고객과 결과를 비교합니다.' },
+      { title: '발송 시각 개인화', text: '시각을 정한 단계를 고객이 반응했던 시간대(최근 90일)로 맞춥니다.' },
+    ],
+    safeguards: [
+      { title: '발송 2시간 전 스팸 검사', text: '단계마다 보내기 2시간 전에 검사합니다. 걸리면 AI가 한 번 고쳐 다시 검사하고, 그래도 걸리면 여정을 멈추고 담당자에게 알립니다. 통과 알림은 단계별로 켜고 끌 수 있습니다(기본은 첫 단계와 마지막 단계).' },
+      { title: '지난 일로는 시작하지 않음', text: '켜기 전에 있었던 구매·가입으로는 보내지 않습니다. 켠 뒤에 생긴 일부터 받습니다.' },
+      { title: '멈춰도 손해 없음', text: '언제든 일시정지할 수 있고, 다시 켤 때는 활성화 크레딧이 다시 들지 않습니다.' },
     ],
     costs: [
-      { label: '설계', source: 'journey-ai-generate', credits: 3 },
+      { label: '단계 설계(AI 만들기 한 번)', source: 'journey-ai-generate', credits: 3 },
       { label: '활성화(처음 한 번)', source: 'journey-activate', credits: 200 },
-      { label: '발송하는 날', source: 'journey-operation', credits: 10 },
+      { label: '발송하는 날(그날 여러 통이어도 한 번)', source: 'journey-operation', credits: 10 },
+      { label: '스팸에 걸린 문안 AI 재작성', source: 'journey-ai-refine', credits: 1 },
     ],
+    costNote: '문자 발송비는 크레딧과 별도로 요금표대로 나갑니다',
   },
   {
     id: 'auto-marketing', path: '/continuous-operator', title: '자동 마케팅', icon: Brain, gradient: 'from-indigo-400 to-violet-500',
-    summary: 'AI가 매일 고객 상태를 보고 캠페인을 제안하고, 승인한 것만 나갑니다.',
+    summary: '목표를 정해 두면 AI가 회차마다 대상과 문안을 만들고, 승인한 기간 동안 정해진 시각에 알아서 보냅니다.',
+    video: { src: '/videos/plan-feature/auto-marketing.mp4', poster: '/videos/plan-feature/auto-marketing.jpg' },
     steps: [
-      { icon: Target, title: '시나리오 고르기', text: '준비된 시나리오를 고르거나 목표를 한 줄 적습니다.' },
-      { icon: ListChecks, title: '매일 제안', text: '보낼 대상과 문안이 매일 올라옵니다.' },
-      { icon: Send, title: '승인해야 발송', text: '승인하지 않으면 아무것도 나가지 않습니다.' },
+      { icon: Target, title: '시작하기', text: '준비된 시나리오(VIP 재구매·휴면 회복·생일 축하·포인트 사용 유도 등 9가지)를 고르거나, 목표를 한 줄로 적습니다.' },
+      { icon: Eye, title: '첫 제안 미리보기', text: '시작하기 전에 받을 고객 수·문안·발송 일정을 먼저 봅니다. 문안을 직접 쓰면 AI 문안 없이 대상만 확인합니다.' },
+      { icon: Send, title: '기간 승인', text: '확인하고 승인하면 다음 회차부터 7일 동안 정해진 시각에 나갑니다. 기간이 끝나기 하루 전에 지난 회차 요약과 다음 승인 안내를 문자로 받습니다.' },
+    ],
+    options: [
+      {
+        title: '발송 대상', wide: true,
+        text: '우리 회사 데이터로 가능한 대상만 열리고, 고르면 지금 기준 대상 수를 바로 보여 줍니다.',
+        chips: ['전체', '휴면', '최근 구매', '상위 등급', '생일', '새로 등록', '등급 상승', '첫 구매', '다시 돌아온', '발길이 끊긴', '지난번보다 많이 산'],
+      },
+      { title: '보내는 주기', text: '매일·매주(요일)·매월(날짜)·매년(월·일)' },
+      { title: '발송 시각', text: '오전 8시부터 밤 9시 전까지 원하는 시각, 또는 고객 반응이 높은 시각을 AI에게 맡기기' },
+      { title: '발송 채널', text: 'SMS·LMS·MMS(이미지 최대 3장 첨부)' },
+      { title: '문안 느낌', text: '정중한·친근한·위트있는·짧고 강한' },
+      { title: '문안 직접 쓰기', text: 'AI 문안 대신 직접 쓴 문안을 그대로 보냅니다. 스팸 검사를 통과한 문안만 나갑니다.' },
+      { title: '혜택 내용', text: '적어 두면 문안의 혜택 자리에 그대로 들어갑니다. AI가 할인율을 지어내지 않습니다.' },
+      { title: '예산', text: '월 예산·하루 한도·알림 기준(기본 80%). 예산을 넘으면 새 제안을 멈춥니다.' },
+      { title: '미반응 고객 리마인드', text: '1차 문자를 실제로 받고 링크를 누르지 않은 고객에게만, 1~30일 뒤 한 번 더 보냅니다.' },
+      { title: '담당자 알림', text: '담당자 최대 3명과 휴가 대비 백업 담당자. 안내는 문자로 갑니다.' },
+      { title: '준비 시간', text: '발송 몇 분 전에 문안을 만들고 검사할지 정합니다(기본 120분 전).' },
+    ],
+    safeguards: [
+      { title: '보내기 전 스팸 검사', text: 'AI 문안은 회차마다 통신사 3곳 테스트폰으로 실제 수신을 확인하고, 추천 문안 3안을 차례로 검사해 통과한 문안으로 보냅니다. 직접 쓴 문안은 같은 문안이 한 번 통과했으면 그 결과를 쓰고, 문안이나 발신번호가 바뀌면 다시 검사합니다.' },
+      { title: '통과 못 하면 멈춤', text: '보내지 않고 자동 마케팅을 멈춘 뒤 담당자에게 알립니다. 화면에서 다른 안을 고르거나 고쳐 다시 검사할 수 있습니다(제안마다 5회 무료).' },
+      { title: '발송 전 미리 알림', text: '회차마다 보내기 전에 담당자에게 실제 문안과 발송 정보를 문자로 알립니다.' },
+      { title: '대상 없는 날은 쉼', text: '보낼 고객이 없는 날은 보내지 않고 크레딧도 쓰지 않습니다.' },
+      { title: '광고 규정 자동', text: '(광고) 표기와 무료수신거부 번호를 붙이고, 밤 9시부터 다음 날 오전 8시까지는 보내지 않습니다.' },
+      { title: '언제든 정지', text: '실행 중 목록에서 일시 중지하거나 예약된 회차의 자동 발송을 멈출 수 있습니다.' },
     ],
     costs: [
+      { label: '첫 제안 미리보기(문안 직접 쓰면 무료)', source: 'ai-operator-propose', credits: 5 },
       { label: '시작(처음 한 번)', source: 'continuous-operator', credits: 200 },
-      { label: '발송 문안', source: 'continuous-operator-send', credits: 10 },
+      { label: '발송하는 회차마다', source: 'continuous-operator-send', credits: 10 },
     ],
+    costNote: '문자 발송비는 크레딧과 별도로 요금표대로 나갑니다',
   },
   {
     id: 'marketing-planner', path: '/marketing-planner', title: '마케팅 플래너', icon: CalendarDays, gradient: 'from-violet-400 to-fuchsia-500',
-    summary: '한 달 행사 계획을 담아 두면 채널별 발송까지 AI가 대신 챙깁니다.',
+    summary: '한 달 행사를 달력에 담으면 문자·모바일 DM·이메일 완성본을 AI가 만들고, 행사마다 한 번 승인하면 예정일에 나갑니다.',
+    video: { src: '/videos/plan-feature/marketing-planner.mp4', poster: '/videos/plan-feature/marketing-planner.jpg' },
     steps: [
-      { icon: CalendarDays, title: '행사 담기', text: '행사명·기간·혜택 문구를 캘린더에 넣습니다.' },
-      { icon: ListChecks, title: '채널과 시점', text: '문자·DM·이메일 중 채널과 보낼 날을 고릅니다.' },
-      { icon: Eye, title: '실행 예정 확인', text: '나갈 문안과 대상을 미리 보고 그대로 진행합니다.' },
+      { icon: CalendarDays, title: '행사 담기', text: '행사명·기간·혜택 문구, 보낼 채널과 날짜를 달력에 넣습니다.' },
+      { icon: ImagePlus, title: '재료 넣기', text: '사진·글·연동 몰 상품을 넣으면 AI가 모바일 DM·이메일 완성본을 만듭니다. 문자 문안은 미리 만들어 스팸 검사까지 해 둡니다.' },
+      { icon: Smartphone, title: '휴대폰으로 확인·승인', text: '첫 발송 3일 전 담당자 휴대폰으로 확인 링크가 갑니다. 문안·DM·이메일 실물과 받는 사람 수·비용을 보고 행사마다 한 번 승인합니다.' },
+      { icon: Send, title: '예정일에 자동 발송', text: '그날 오전 8시부터 스팸 검사를 한 번 더 하고 승인한 그대로 보냅니다. 결과는 행사 상세와 이달 결과에서 봅니다.' },
+    ],
+    options: [
+      { title: '행사', text: '이름·기간·혜택 문구. 혜택은 적은 그대로 들어갑니다.' },
+      { title: '채널과 날짜', text: '행사마다 문자·모바일 DM·이메일 중 고르고, 채널마다 보낼 날을 정합니다.' },
+      { title: '재료', text: '사진·글·연동 몰 상품. 다시 만들기를 누르면 새로 만듭니다.' },
+      { title: '받는 사람', text: '실제 고객 데이터로 센 인원을 승인 전에 보여 줍니다.' },
+      { title: '막힌 채널 안내', text: '우리 회사 데이터나 설정으로 아직 못 쓰는 채널은 이유와 함께 잠겨 보입니다.', wide: true },
+    ],
+    safeguards: [
+      { title: '승인 전에는 아무것도 안 나감', text: '승인하지 않은 행사는 보내지도, 대행료를 쓰지도 않습니다.' },
+      { title: '승인한 그대로만', text: '승인한 내용과 나갈 내용을 맞춰 보고, 달라졌으면 보내지 않고 다시 확인을 요청합니다.' },
+      { title: '크레딧이 모자라면', text: '그 발송만 멈추고 바로 알립니다. 충전한 뒤 다시 시작할 수 있습니다.' },
+      { title: '취소 환불', text: '그 달 발송 처리가 시작되기 전에 취소하면 대행료를 전액 돌려드립니다.' },
     ],
     costs: [
-      { label: '월간 대행', source: 'planner-monthly-agency', credits: 1000 },
-      { label: '당일 문안', source: 'planner-touchpoint-send', credits: 10 },
+      { label: '월간 대행(그 달 첫 승인 때 한 번)', source: 'planner-monthly-agency', credits: 1000 },
+      { label: '모바일 DM 만들기', source: 'dm-ai-generate', credits: 5 },
+      { label: '모바일 DM 발행', source: 'dm-builder', credits: 100 },
+      { label: '룰렛·추첨·설문 같은 참여 칸이 있는 DM 발행', source: 'dm-interaction-publish', credits: 120 },
+      { label: '이메일 만들기', source: 'email-ai-generate', credits: 3 },
+      { label: '이메일 완성', source: 'email-campaign-complete', credits: 50 },
+      { label: '발송하는 날 문자 문안', source: 'planner-touchpoint-send', credits: 10 },
     ],
+    costNote: '문자 발송비는 크레딧과 별도로 요금표대로 나갑니다',
   },
   {
     id: 'mobile-dm', path: '/dm-builder', title: '모바일 DM', icon: Smartphone, gradient: 'from-amber-400 to-yellow-500',
@@ -145,16 +225,31 @@ export const PLAN_FEATURE_INTROS: PlanFeatureIntro[] = [
   },
   {
     id: 'image-studio', path: '/image-studio', title: '이미지 스튜디오', icon: ImagePlus, gradient: 'from-violet-400 to-fuchsia-500',
-    summary: '상품 사진으로 포스터와 배경 소재를 만듭니다.',
+    summary: '템플릿을 고르고 문구만 적으면 행사·제품 포스터가 완성되고, 모바일 DM·이메일·인앱·문자에 바로 씁니다.',
+    video: { src: '/videos/plan-feature/image-studio.mp4', poster: '/videos/plan-feature/image-studio.jpg' },
     steps: [
-      { icon: ListChecks, title: '템플릿 고르기', text: '제품 포스터와 행사 포스터 중에서 고릅니다.' },
-      { icon: ImagePlus, title: '문구와 사진', text: '들어갈 문구를 적고 상품 사진을 올리면 배경이 정리됩니다.' },
-      { icon: Send, title: '바로 활용', text: '라이브러리에 저장하고 DM·이메일·MMS에 씁니다.' },
+      { icon: Search, title: '템플릿 고르기', text: '뷰티·패션·외식·카페 등 16개 분류의 템플릿 502가지. 세부 분류·검색(예: 오픈)·제품/행사 표시로 빨리 찾습니다.' },
+      { icon: ImagePlus, title: '제품과 문구 넣기', text: '제품 포스터는 사진을 올리거나 연동 몰 상품을 불러오면 배경을 자동으로 지웁니다. 문구는 적은 그대로 넣고, 행사 포스터는 문구 위치도 고릅니다.' },
+      { icon: Wand2, title: '완성·다듬기', text: '포스터가 완성되면 바꾸고 싶은 점을 말로 적어 AI로 고칩니다.' },
+      { icon: Share2, title: '채널에 쓰기', text: '라이브러리에 저장하고, 누르면 모바일 DM·이메일·인앱으로 바로 만들거나 문자(MMS) 규격으로 자동 변환합니다.' },
+    ],
+    options: [
+      { title: '템플릿', text: '제품 포스터 329가지·행사 포스터 173가지(세일·오픈·클래스·신메뉴·시즌·멤버십 등)' },
+      { title: '문구와 위치', text: '행사명·안내 문구를 적습니다. 행사 포스터는 위·가운데·아래 중 문구 위치도 고릅니다.' },
+      { title: '제품 사진', text: '직접 올리기 또는 연동 몰 상품 불러오기. 배경은 자동으로 지웁니다.' },
+      { title: 'AI로 고치기', text: '배경·분위기 같은 바꾸고 싶은 점을 말로 적어 고칩니다.' },
+      { title: '채널별 크기', text: '모바일 DM·이메일·인앱은 바로 넣고, 문자(MMS)는 보낼 때 규격에 맞춰 자동으로 줄입니다. 인앱은 회사 관리자만 씁니다.', wide: true },
+    ],
+    safeguards: [
+      { title: '적은 문구만', text: '적은 문구 외 글자·가격·로고는 넣지 않습니다. 할인율 같은 혜택은 직접 적은 경우에만 들어갑니다.' },
+      { title: '색·모양 그대로', text: '채널 크기를 맞출 때 그림을 다시 그리지 않고 자르고 맞추기만 해서 제품 색·모양이 바뀌지 않습니다.' },
+      { title: '성공해야 차감', text: '포스터가 완성되어 저장된 뒤에만 크레딧이 나갑니다.' },
     ],
     costs: [
-      { label: '생성(후보 2장)', source: 'image-studio-generate', credits: 2 },
-      { label: 'AI 수정', source: 'image-studio-edit', credits: 1 },
+      { label: '포스터 만들기(한 장)', source: 'image-studio-generate', credits: 2 },
+      { label: 'AI로 고치기', source: 'image-studio-edit', credits: 1 },
     ],
+    costNote: '배경 지우기·채널 크기 변환은 크레딧이 들지 않습니다',
   },
   {
     id: 'ai-memory', path: '/ai-memory', title: 'AI 메모리', icon: Brain, gradient: 'from-emerald-400 to-teal-500',

@@ -1,5 +1,5 @@
-# 마케팅 플래너 소개 영상 배경음악 — 코드로 직접 합성(외부 음원 0 · 저작권 = 한줄로)
-# 128 BPM · 8마디 = 정확히 15.0초 · C - Am - F - G 두 바퀴 → C 로 끝맺음
+# 이미지 스튜디오 소개 영상 배경음악 — 코드로 직접 합성(외부 음원 0 · 저작권 = 한줄로)
+# 128 BPM · 25초 = 12마디 + 끝 화음 · Dm - Bb - F - C 세 바퀴 → F 로 끝맺음 · 6마디째 숨 고르기
 # 실행: python music.py  →  music.wav
 import wave
 import numpy as np
@@ -8,7 +8,7 @@ SR = 44100
 BPM = 128
 BEAT = 60 / BPM
 BAR = BEAT * 4
-DUR = 15.0
+DUR = 25.0
 N = int(SR * DUR)
 rng = np.random.default_rng(7)
 
@@ -177,19 +177,21 @@ def pop(m=84):
 
 
 # ── 편곡 ────────────────────────────────────────────
-# 마디 0 훅 · 1 달력에 담기(빌드업) · 2~3 완성본(드롭) · 3.5 승인 · 4.5~5 발송 · 6 로고 · 7 문구 + 엔딩 화음
+# 마디 0 훅 · 1 답(빌드업) · 2~3 갤러리 · 4 문구 · 5 생성 · 6 말로 고치기(숨 고르기 + 라이저) · 7~8 네 채널(드롭)
+# 9~10 몽타주 · 11 로고 · 12 끝 화음(22.5초~)
+END_BAR = 12
 CHORDS = [  # (근음, 화음)
-    (48, [60, 64, 67, 72]),   # C
-    (45, [60, 64, 69, 72]),   # Am
+    (38, [62, 65, 69, 74]),   # Dm
+    (46, [58, 62, 65, 70]),   # Bb
     (41, [60, 65, 69, 72]),   # F
-    (43, [59, 62, 67, 71]),   # G
-] * 2
+    (48, [60, 64, 67, 72]),   # C
+] * 3
 STAB = [0, 0.75, 1.5, 2.5, 3.0]          # 박 단위 · 3-3-2 싱코페이션
-MELODY = [  # 4마디 모티프(박 오프셋, 음) — 두 번째 바퀴에서 반복
-    (0, 76), (0.5, 79), (1, 84), (1.5, 79), (2.5, 76), (3, 79),
-    (4, 81), (4.75, 79), (5.5, 76), (6.5, 72), (7, 76),
-    (8, 77), (8.5, 81), (9, 84), (9.5, 81), (10.5, 77), (11, 79),
-    (12, 79), (12.75, 81), (13.5, 83), (14.5, 86), (15, 84),
+MELODY = [  # 4마디 모티프(박 오프셋, 음)
+    (0, 74), (0.5, 77), (1, 81), (1.5, 77), (2.5, 74), (3, 76),
+    (4, 77), (4.75, 74), (5.5, 70), (6.5, 72), (7, 74),
+    (8, 72), (8.5, 77), (9, 81), (9.5, 84), (10.5, 81), (11, 79),
+    (12, 76), (12.75, 77), (13.5, 79), (14.5, 76), (15, 72),
 ]
 
 kk = kick()
@@ -197,51 +199,45 @@ cp = clap()
 hc = hat()
 ho = hat(True)
 
-for bar in range(8):
+for bar in range(END_BAR):
     t0 = bar * BAR
     root, chord = CHORDS[bar]
-    full = bar >= 2 and bar <= 6
-    # 킥
-    if bar < 7:
+    brk = bar == 6                       # 숨 고르기: 킥·베이스 없이 화음 + 라이저
+    full = 2 <= bar <= 11 and not brk
+    if not brk:
         for b in range(4):
             if bar == 1 and b >= 2:
                 continue  # 빌드업 끝 두 박은 비운다
             add(duck_src, np.ones(1), t0 + b * BEAT)
             add('st', kk, t0 + b * BEAT, 0.95)
-    # 클랩 · 하이햇
-    if bar != 7:
-        for b in (1, 3):
-            if bar == 1 and b == 3:
-                continue
-            add('st', cp, t0 + b * BEAT, 0.8 if full else 0.6)
-            add(send, cp, t0 + b * BEAT, 0.25)
+    for b in (1, 3):
+        if bar == 1 and b == 3:
+            continue
+        add('st', cp, t0 + b * BEAT, 0.8 if full else 0.55)
+        add(send, cp, t0 + b * BEAT, 0.25)
+    if not brk:
         for b in range(4):
             add('st', ho if full else hc, t0 + (b + 0.5) * BEAT, 0.9, pan=0.25)
             if full:
                 add('st', hc, t0 + (b + 0.25) * BEAT, 0.5, pan=-0.3)
                 add('st', hc, t0 + (b + 0.75) * BEAT, 0.5, pan=-0.3)
-    # 빌드업 스네어 롤 · 라이저
-    if bar == 1:
+    if bar in (1, 6):
         for k in range(8):
             add('st', cp, t0 + 2 * BEAT + k * BEAT / 4, 0.25 + 0.06 * k)
         add('st', riser(BAR), t0, 1.0)
-    # 베이스(오프비트 하우스)
-    if bar < 7:
+    if not brk:
         for b in range(4):
             if bar == 1 and b >= 2:
                 continue
             add('st', bass(root, BEAT * 0.45), t0 + (b + 0.5) * BEAT, 1.0 if full else 0.7)
-    # 코드 스탭
-    if bar < 7:
-        for s in STAB:
-            if bar == 1 and s >= 2:
-                continue
-            ch = supersaw_chord(chord, BEAT * 0.9, 3800 if full else 2200)
-            add('st', ch, t0 + s * BEAT, 0.55, pan=-0.15)
-            add('st', ch, t0 + s * BEAT + 0.012, 0.45, pan=0.35)
-            add(send, ch, t0 + s * BEAT, 0.3)
-    # 멜로디(드롭부터)
-    if 2 <= bar <= 6:
+    for s_ in STAB:
+        if bar == 1 and s_ >= 2:
+            continue
+        ch = supersaw_chord(chord, BEAT * (1.6 if brk else 0.9), 3800 if full else 2200)
+        add('st', ch, t0 + s_ * BEAT, 0.55 if not brk else 0.4, pan=-0.15)
+        add('st', ch, t0 + s_ * BEAT + 0.012, 0.45 if not brk else 0.3, pan=0.35)
+        add(send, ch, t0 + s_ * BEAT, 0.3)
+    if full:
         k0 = (bar - 2) % 4
         for off, m in MELODY:
             if k0 * 4 <= off < (k0 + 1) * 4:
@@ -249,40 +245,45 @@ for bar in range(8):
                 add('st', p, t0 + (off - k0 * 4) * BEAT, 0.6, pan=0.1)
                 add(send, p, t0 + (off - k0 * 4) * BEAT, 0.35)
 
-# 훅 마디 위 가벼운 플럭(첫 소리부터 경쾌하게)
-for k, m in enumerate([72, 76, 79, 84]):
+# 훅 마디 위 가벼운 플럭
+for k, m in enumerate([74, 77, 81, 86]):
     add('st', pluck(m, bright=1.3), k * BEAT / 2 + BEAT * 2, 0.45)
-# 엔딩: 크래시 + 길게 끄는 C 코드 + 종
-t_end = 7 * BAR
+# 드롭(네 채널) · 아웃트로 진입 크래시
+add('st', crash(), 7 * BAR, 0.8)
+add('st', crash(), 11 * BAR, 0.55)
+# 엔딩: 크래시 + 길게 끄는 F 화음 + 종
+t_end = END_BAR * BAR
 add('st', crash(), t_end, 1.0)
 add('st', kk, t_end, 1.0)
-end_chord = np.zeros(int(1.9 * SR))
-for m in (48, 60, 64, 67, 72, 76):
+end_chord = np.zeros(int(2.5 * SR))
+for m in (41, 53, 60, 65, 69, 72):
     end_chord += saw(midi(m), len(end_chord), rng.random() * 0.01)
-end_chord = lowpass(end_chord / 6, 2500) * env(len(end_chord), a=0.01, d=0.9) * 0.5
+end_chord = lowpass(end_chord / 6, 2500) * env(len(end_chord), a=0.01, d=1.0) * 0.5
 add('st', end_chord, t_end)
 add(send, end_chord, t_end, 0.4)
-add('st', bell(84), t_end, 0.9)
-add(send, bell(84), t_end, 0.5)
-add('st', crash(), 6 * BAR, 0.55)         # 아웃트로 진입
+add('st', bell(89), t_end, 0.9)
+add(send, bell(89), t_end, 0.5)
 
 # 효과음 — 영상 장면 전환에 맞춘다(index.html 의 T 시각표와 같은 값)
-for t in (BAR - 0.3, 2 * BAR - 0.25, 3.5 * BAR - 0.25, 4.5 * BAR - 0.25, 6 * BAR - 0.25):
+for t in (BAR - 0.3, 2 * BAR - 0.25, 4 * BAR - 0.25, 5 * BAR - 0.25, 7 * BAR - 0.25, 9 * BAR - 0.25, 11 * BAR - 0.25):
     add('st', whoosh(), t, 1.0)
-add('st', pop(84), 2.25, 0.8)             # 이미 있던 행사 막대
-add('st', pop(79), 2.6, 1.2)              # 27일 누름
-for t in (2.9, 3.05, 3.2):                # 채널 켜기
+for k, t in enumerate((0.04, 0.47, 0.9)):  # 훅 세 줄
+    add('st', pop(81 + 3 * k), t, 0.8)
+for k, t in enumerate((2.2, 2.32, 2.44)): # 템플릿 세 장 펼침
+    add('st', pop(86 + 2 * k), t, 0.9)
+add('st', pop(79), 6.6, 1.2)              # 템플릿 누름
+for t in (7.65, 8.05, 8.45, 8.75):        # 문구 칸 · 위치
     add('st', tick(), t, 1.2)
-add('st', pop(88), 3.6, 1.0)              # 행사가 달력에 앉음
-for t in (3.95, 4.1, 4.25, 4.4):          # 재료
+add('st', pop(79), 9.1, 1.2)              # 만들기
+add('st', pop(91), 9.95, 1.0)             # 완성 포스터
+add('st', tick(), 11.45, 1.2)             # 고칠 말
+add('st', pop(79), 12.05, 1.2)            # 보내기
+add('st', pop(93), 12.55, 1.0)            # 수정 완료
+for k, t in enumerate((13.3, 13.75, 14.2, 14.65)):  # 네 채널
+    add('st', pop(84 + 2 * k), t, 1.0)
+for t in (18.4, 18.6, 18.8, 19.0, 19.2):  # 기능 이름표
     add('st', tick(), t, 1.0)
-for k, t in enumerate((4.9, 5.4, 5.8)):   # 완성본 3종
-    add('st', pop(84 + 3 * k), t, 1.0)
-add('st', pop(91), 6.75, 1.0)             # 확인 요청 알림
-add('st', pop(79), 7.95, 1.2)             # 승인 누름
-for k, t in enumerate((8.9, 9.25, 9.6, 9.95, 10.3)):
-    add('st', pop(84 + 2 * k), t, 0.9)    # 그날 발송
-for t in (11.6, 11.75, 11.9, 12.15, 12.3):  # 아웃트로 채널 · 밑줄에 AI
+for t in (20.95, 21.07, 21.19, 21.31, 21.5, 21.65):  # 아웃트로 채널 · 밑줄에 AI
     add('st', tick(), t, 1.2)
 
 # 사이드체인(킥마다 패드·베이스가 숨 쉬듯)

@@ -1,0 +1,407 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>한줄로 AI 이미지 스튜디오</title>
+<!--
+  인스타그램 릴스 · 스레드 소개 영상 04(1080x1920 · 25초 · 30fps) · 흰 바탕 시리즈
+  핵심 = 템플릿으로 간편하게 포스터를 만들고, 그 포스터를 DM · 문자 · 이메일 · 인앱에 바로 쓴다.
+  포스터 8장(assets/p1~p8) = 2026-10-06 서버에서 영상용으로 새로 만든 것(고객사 소재 0 · 상품 사진 없음).
+  시간은 window.seek(t) 하나가 정한다 → render.js 가 프레임마다 불러 찍는다. T 를 바꾸면 music.py 효과음도 같이.
+-->
+<style>
+  :root { --bg: #FAFAF8; --ink: #111111; --line: #E7E5E4; --soft: #F4F4F5; --ac: #FF5A1F; --ac-soft: #FFF1EB; }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { width: 1080px; height: 1920px; overflow: hidden; background: var(--bg); }
+  body { font-family: 'Pretendard', sans-serif; -webkit-font-smoothing: antialiased; color: var(--ink); letter-spacing: -0.02em; }
+  #stage { position: relative; width: 1080px; height: 1920px; overflow: hidden; background-color: var(--bg);
+           background-image: radial-gradient(#E4E4E7 1.7px, transparent 1.7px); background-size: 40px 40px; }
+  .abs { position: absolute; }
+  .mark { background: linear-gradient(rgba(255,90,31,.32), rgba(255,90,31,.32)) no-repeat 0 82% / 0% 36%; padding: 0 6px; }
+  svg.i { width: 1em; height: 1em; fill: none; stroke: currentColor; stroke-width: 2.2; stroke-linecap: round; stroke-linejoin: round; flex: none; }
+  .panel { left: 60px; width: 960px; border-radius: 44px; background: #fff; border: 2px solid var(--line); box-shadow: 0 40px 100px rgba(17,17,17,.10); overflow: hidden; }
+  .lbl { display: inline-block; padding: 6px 16px; border-radius: 999px; background: var(--soft); color: #3F3F46; font-size: 22px; font-weight: 700; }
+  img.po { display: block; width: 100%; height: 100%; object-fit: cover; }
+
+  #chip { left: 50%; top: 200px; display: flex; align-items: center; gap: 22px; padding: 18px 34px; border-radius: 999px; background: #fff; border: 2px solid var(--line);
+          color: #3F3F46; font-size: 30px; font-weight: 600; white-space: nowrap; box-shadow: 0 8px 24px rgba(17,17,17,.05); }
+  #chip img { height: 34px; }
+  #chip .bar { width: 2px; height: 28px; background: var(--line); }
+  .cap { left: 0; width: 1080px; text-align: center; }
+  .cap .k { font-size: 44px; font-weight: 600; color: #71717A; }
+  .cap .h { margin-top: 10px; font-size: 84px; font-weight: 800; letter-spacing: -0.045em; line-height: 1.12; }
+
+  #hook, #ans { left: 0; width: 1080px; text-align: center; font-weight: 800; letter-spacing: -0.055em; line-height: 1.2; }
+  #hook { top: 640px; font-size: 128px; }
+  #ans { top: 470px; font-size: 112px; }
+  #hook .l, #ans .l { display: block; }
+  .fan { width: 270px; height: 360px; border-radius: 26px; overflow: hidden; box-shadow: 0 30px 70px rgba(17,17,17,.22); border: 6px solid #fff; }
+
+  /* 갤러리 */
+  #gal { top: 520px; height: 1160px; }
+  #gal .head { display: flex; align-items: center; padding: 30px 36px 20px; }
+  #gal .head b { font-size: 36px; font-weight: 800; }
+  .seg { margin-left: auto; display: flex; padding: 6px; border-radius: 999px; background: var(--soft); }
+  .seg span { padding: 10px 22px; border-radius: 999px; font-size: 23px; font-weight: 700; color: #52525B; }
+  .seg span.on { background: #fff; color: var(--ink); box-shadow: 0 2px 8px rgba(17,17,17,.08); }
+  .search { margin: 0 36px; height: 74px; border-radius: 22px; background: var(--soft); display: flex; align-items: center; gap: 14px; padding: 0 24px; font-size: 26px; color: #52525B; }
+  .cats { display: flex; gap: 12px; padding: 20px 36px 18px; white-space: nowrap; overflow: hidden; }
+  .cats span { padding: 10px 20px; border-radius: 999px; border: 2px solid var(--line); font-size: 23px; font-weight: 700; color: #3F3F46; flex: none; }
+  #gw { position: absolute; left: 36px; right: 36px; top: 262px; bottom: 0; overflow: hidden; }
+  #cards { position: absolute; left: 0; top: 0; width: 100%; display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; }
+  .card { border-radius: 22px; overflow: hidden; border: 2px solid var(--line); background: #fff; }
+  .card .im { height: 376px; }
+  .card .nm { display: flex; align-items: center; gap: 10px; padding: 12px 14px; font-size: 23px; font-weight: 700; white-space: nowrap; }
+  .card .nm em { font-style: normal; margin-left: auto; font-size: 18px; font-weight: 700; color: #52525B; background: var(--soft); padding: 3px 10px; border-radius: 999px; }
+
+  /* 문구 */
+  #tp { top: 520px; padding: 40px; }
+  #tp .hd { display: flex; gap: 22px; align-items: center; padding-bottom: 26px; border-bottom: 2px solid var(--line); }
+  #tp .th { width: 96px; height: 128px; border-radius: 14px; overflow: hidden; flex: none; }
+  #tp .nm { font-size: 36px; font-weight: 800; letter-spacing: -0.04em; }
+  #tp .nt { margin-top: 8px; font-size: 22px; color: #52525B; line-height: 1.45; }
+  .fd { margin-top: 26px; }
+  .fd .k { font-size: 23px; color: #52525B; font-weight: 700; }
+  .fd .b { margin-top: 8px; height: 82px; border-radius: 20px; background: var(--soft); border: 3px solid transparent; display: flex; align-items: center; padding: 0 24px; font-size: 36px; font-weight: 700; letter-spacing: -0.03em; }
+  .fd .b.on { border-color: var(--ac); background: #fff; }
+  .pos { margin-top: 10px; display: flex; gap: 12px; }
+  .pos span { padding: 12px 26px; border-radius: 999px; border: 2px solid var(--line); font-size: 26px; font-weight: 700; color: #52525B; }
+  .pos span.on { background: var(--ink); border-color: var(--ink); color: #fff; }
+  .btn { position: relative; overflow: hidden; display: flex; align-items: center; justify-content: center; gap: 14px; padding: 26px 40px; border-radius: 28px; color: #fff; font-size: 36px; font-weight: 700; background: var(--ink); }
+  .ripple { position: absolute; left: 50%; top: 50%; width: 120px; height: 120px; margin: -60px 0 0 -60px; border-radius: 50%; background: rgba(255,255,255,.45); }
+  #mkBtn { margin-top: 32px; }
+
+  /* 생성 · 말로 고치기 */
+  #gp { left: 210px; top: 520px; width: 660px; height: 880px; border-radius: 34px; overflow: hidden; background: #fff; border: 2px solid var(--line); box-shadow: 0 50px 120px rgba(17,17,17,.18); }
+  #ph { position: absolute; inset: 0; background: var(--soft); display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 18px; }
+  #ph b { font-size: 34px; font-weight: 800; }
+  #ph small { font-size: 24px; color: #52525B; font-weight: 600; }
+  #pbar { width: 360px; height: 12px; border-radius: 6px; background: #E4E4E7; overflow: hidden; }
+  #pbar i { display: block; height: 100%; width: 0; background: var(--ac); }
+  #shine { position: absolute; inset: 0; background: linear-gradient(100deg, transparent 30%, rgba(255,255,255,.65) 50%, transparent 70%); pointer-events: none; }
+  #res { position: absolute; inset: 0; }
+  #eb { left: 110px; top: 1440px; width: 860px; height: 100px; border-radius: 50px; background: #fff; border: 2px solid var(--line); box-shadow: 0 16px 40px rgba(17,17,17,.08);
+        display: flex; align-items: center; padding: 0 14px 0 34px; font-size: 32px; font-weight: 600; }
+  #ebPh { color: #A1A1AA; font-weight: 500; font-size: 28px; }
+  #ebSend { margin-left: auto; width: 72px; height: 72px; border-radius: 50%; background: var(--ink); color: #fff; display: flex; align-items: center; justify-content: center; font-size: 34px; position: relative; overflow: hidden; }
+  #toast { left: 50%; top: 560px; display: flex; align-items: center; gap: 12px; padding: 18px 32px; border-radius: 999px; background: var(--ink); color: #fff; font-size: 30px; font-weight: 700; white-space: nowrap; }
+  #toast svg { color: var(--ac); }
+
+  /* 네 채널 */
+  .cell { width: 470px; height: 520px; border-radius: 36px; background: #fff; border: 2px solid var(--line); box-shadow: 0 24px 60px rgba(17,17,17,.08); overflow: hidden; }
+  .cell .lbl { position: absolute; left: 22px; top: 20px; z-index: 2; background: var(--ink); color: #fff; }
+  .phone { position: absolute; left: 105px; top: 66px; width: 260px; height: 430px; border: 8px solid var(--ink); border-radius: 40px; overflow: hidden; background: #fff; }
+  .dmImg { height: 300px; }
+  .dmBtn { margin: 14px 16px 0; height: 46px; border-radius: 14px; background: var(--ink); color: #fff; font-size: 19px; font-weight: 700; display: flex; align-items: center; justify-content: center; }
+  .chat { padding: 16px 12px; display: flex; flex-direction: column; gap: 10px; }
+  .chat .top { height: 26px; border-radius: 8px; background: var(--soft); }
+  .chat .ib { width: 150px; height: 200px; border-radius: 16px; overflow: hidden; }
+  .chat .tb { padding: 10px 12px; border-radius: 16px 16px 16px 4px; background: var(--soft); font-size: 16px; line-height: 1.4; color: #27272A; }
+  .mail { position: absolute; left: 24px; right: 24px; top: 76px; bottom: 22px; }
+  .mail .s { font-size: 22px; font-weight: 800; letter-spacing: -0.03em; }
+  .mail .f { margin-top: 4px; font-size: 16px; color: #52525B; }
+  .mail .mi { margin: 14px auto 0; width: 210px; height: 280px; border-radius: 14px; overflow: hidden; }
+  .mail .ln { margin-top: 10px; height: 12px; border-radius: 6px; background: #EDEDEE; }
+  .app { position: absolute; inset: 0; padding: 18px 14px; display: flex; flex-direction: column; gap: 10px; }
+  .app i { display: block; height: 60px; border-radius: 12px; background: #E9E9EB; }
+  .dim { position: absolute; inset: 0; background: rgba(17,17,17,.45); }
+  .modal { position: absolute; left: 22px; right: 22px; top: 40px; border-radius: 18px; overflow: hidden; background: #fff; }
+  .modal .mi { height: 262px; }
+  .modal .row { display: flex; font-size: 16px; font-weight: 700; }
+  .modal .row span { flex: 1; text-align: center; padding: 10px 0; color: #3F3F46; }
+  .modal .row span + span { border-left: 1px solid var(--line); color: var(--ink); }
+  #chNote { left: 0; width: 1080px; top: 1615px; text-align: center; font-size: 26px; color: #52525B; font-weight: 500; }
+
+  /* 몽타주 */
+  #mt { left: 0; top: 520px; width: 1080px; height: 1110px; overflow: hidden; }
+  .col { position: absolute; top: 0; width: 290px; display: flex; flex-direction: column; gap: 24px; }
+  .col div { height: 387px; border-radius: 24px; overflow: hidden; box-shadow: 0 16px 40px rgba(17,17,17,.12); }
+  #fade { position: absolute; left: 0; right: 0; bottom: 0; height: 360px; background: linear-gradient(transparent, var(--bg) 70%); }
+  #fc { left: 70px; width: 940px; top: 1440px; display: flex; flex-wrap: wrap; justify-content: center; gap: 12px; }
+  #fc span { padding: 14px 24px; border-radius: 999px; background: #fff; border: 2px solid var(--line); font-size: 27px; font-weight: 700; box-shadow: 0 8px 20px rgba(17,17,17,.08); }
+  #disc { left: 0; width: 1080px; top: 1645px; text-align: center; font-size: 22px; color: #52525B; font-weight: 600; }
+
+  #pointer { width: 92px; height: 92px; }
+
+  /* 아웃트로 */
+  .wipe { left: 0; top: 0; width: 1080px; height: 1920px; }
+  #wipeA { background: var(--ink); }
+  #wipeB { background: var(--bg); }
+  #och { left: 0; top: 540px; width: 1080px; display: flex; justify-content: center; gap: 16px; }
+  #och div { padding: 16px 28px; border-radius: 999px; background: var(--ink); color: #fff; font-size: 30px; font-weight: 700; }
+  #outK { top: 710px; left: 0; width: 1080px; text-align: center; font-size: 50px; font-weight: 600; color: #71717A; }
+  #logo { left: 190px; top: 810px; width: 700px; height: 156px; }
+  #logo img { position: absolute; left: 0; top: 0; width: 700px; }
+  #ai { position: absolute; left: 448px; width: 248px; text-align: center; top: -24px; font-size: 150px; font-weight: 900; letter-spacing: -0.03em; line-height: 1; color: var(--ac); }
+  #outC { top: 1080px; left: 0; width: 1080px; text-align: center; font-size: 66px; font-weight: 800; letter-spacing: -0.045em; line-height: 1.28; }
+  #outC .l { display: block; }
+  #url { top: 1340px; left: 50%; display: flex; align-items: center; gap: 16px; padding: 26px 56px; border-radius: 999px; background: var(--ink); color: #fff; font-size: 50px; font-weight: 700; letter-spacing: -0.01em; white-space: nowrap; }
+  #url svg { color: var(--ac); }
+</style>
+</head>
+<body>
+<div id="stage">
+  <div class="abs" id="chip"><img src="../../../packages/frontend/public/logo.png" alt="한줄로"><span class="bar"></span><span>이미지 스튜디오</span></div>
+
+  <!-- 1 훅 · 답 -->
+  <div class="abs" id="hook"><span class="l" id="h1">행사 포스터 한 장,</span><span class="l" id="h2">아직 <span class="mark" id="hm">처음부터</span></span><span class="l" id="h3">만드세요?</span></div>
+  <div class="abs" id="ans"><span class="l" id="a1">템플릿 고르고,</span><span class="l" id="a2"><span class="mark" id="am">문구만</span> 쓰면 끝.</span></div>
+  <div class="abs fan" id="f0" style="left:150px;top:1060px"><img class="po" src="assets/p1.jpg" alt=""></div>
+  <div class="abs fan" id="f1" style="left:405px;top:1020px"><img class="po" src="assets/p5.jpg" alt=""></div>
+  <div class="abs fan" id="f2" style="left:660px;top:1060px"><img class="po" src="assets/p7.jpg" alt=""></div>
+
+  <!-- 자막 -->
+  <div class="abs cap" id="c0" style="top:300px"><div class="k">업종별 템플릿에서</div><div class="h">골라서</div></div>
+  <div class="abs cap" id="c1" style="top:300px"><div class="k">문구는</div><div class="h">적은 그대로</div></div>
+  <div class="abs cap" id="c2" style="top:300px"><div class="k">AI가</div><div class="h">30초 만에 포스터로</div></div>
+  <div class="abs cap" id="c3" style="top:300px"><div class="k">마음에 안 들면</div><div class="h">말로 고쳐요</div></div>
+  <div class="abs cap" id="c4" style="top:300px"><div class="k">만든 포스터는</div><div class="h">DM·문자·이메일·인앱에</div></div>
+  <div class="abs cap" id="c5" style="top:300px"><div class="k">세일 · 오픈 · 클래스 · 신메뉴</div><div class="h">템플릿만 고르면</div></div>
+
+  <!-- 2 갤러리 -->
+  <div class="abs panel" id="gal">
+    <div class="head"><b>이미지 스튜디오</b><div class="seg"><span>제품 포스터</span><span class="on">행사 포스터</span></div></div>
+    <div class="search"><svg class="i" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>템플릿 찾기 (예: 오픈, 립, 국물, 멤버십)</div>
+    <div class="cats"><span>시즌·명절 행사</span><span>오픈·기념일</span><span>팝업·페스티벌</span><span>클래스·체험</span><span>카페·음료</span><span>뷰티</span></div>
+    <div id="gw"><div id="cards">
+      <div class="card"><div class="im"><img class="po" src="assets/p1.jpg" alt=""></div><div class="nm">블랙 위크<em>시즌</em></div></div>
+      <div class="card"><div class="im"><img class="po" src="assets/p2.jpg" alt=""></div><div class="nm">그랜드 오픈<em>오픈</em></div></div>
+      <div class="card"><div class="im"><img class="po" src="assets/p3.jpg" alt=""></div><div class="nm">팝업 스토어<em>팝업</em></div></div>
+      <div class="card"><div class="im"><img class="po" src="assets/p4.jpg" alt=""></div><div class="nm">런웨이 나이트<em>팝업</em></div></div>
+      <div class="card" id="pick"><div class="im"><img class="po" src="assets/p5.jpg" alt=""></div><div class="nm">윈터 홀리데이<em>시즌</em></div></div>
+      <div class="card"><div class="im"><img class="po" src="assets/p6.jpg" alt=""></div><div class="nm">뷰티 클래스<em>클래스</em></div></div>
+      <div class="card"><div class="im"><img class="po" src="assets/p7.jpg" alt=""></div><div class="nm">단풍 어텀 카페<em>카페</em></div></div>
+      <div class="card"><div class="im"><img class="po" src="assets/p8.jpg" alt=""></div><div class="nm">워터 프레시<em>뷰티</em></div></div>
+    </div></div>
+  </div>
+
+  <!-- 3 문구 -->
+  <div class="abs panel" id="tp">
+    <div class="hd"><div class="th"><img class="po" src="assets/p5.jpg" alt=""></div>
+      <div><div class="nm">윈터 홀리데이</div><div class="nt">갤러리에서 보신 예시 그대로입니다. 문구와 상품만 바뀝니다.</div></div></div>
+    <div class="fd"><div class="k">작은 라벨</div><div class="b" id="t0"></div></div>
+    <div class="fd"><div class="k">행사명</div><div class="b" id="t1"></div></div>
+    <div class="fd"><div class="k">안내 문구</div><div class="b" id="t2"></div></div>
+    <div class="fd"><div class="k">문구 위치</div><div class="pos"><span id="pos0">위</span><span>가운데</span><span>아래</span></div></div>
+    <div class="btn" id="mkBtn"><span class="ripple" id="rp1"></span>만들기</div>
+  </div>
+
+  <!-- 4 생성 · 말로 고치기 -->
+  <div class="abs" id="gp">
+    <div id="ph"><b>AI가 그리는 중이에요</b><small>약 30초</small><div id="pbar"><i id="pfill"></i></div></div>
+    <div id="res"><img class="po" id="resImg" src="assets/p5.jpg" alt=""></div>
+    <div id="shine"></div>
+  </div>
+  <div class="abs" id="eb"><span id="ebPh">배경·무드를 어떻게 바꿀까요?</span><span id="ebT"></span>
+    <div id="ebSend"><span class="ripple" id="rp2"></span><svg class="i" viewBox="0 0 24 24"><path d="m5 12 7-7 7 7"/><path d="M12 19V5"/></svg></div></div>
+  <div class="abs" id="toast"><svg class="i" viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5"/></svg>수정 완료</div>
+
+  <!-- 5 네 채널 -->
+  <div class="abs cell" id="k0" style="left:60px;top:520px"><span class="lbl">모바일 DM</span>
+    <div class="phone"><div class="dmImg"><img class="po" src="assets/p5.jpg" alt=""></div><div class="dmBtn">자세히 보기</div></div></div>
+  <div class="abs cell" id="k1" style="left:550px;top:520px"><span class="lbl">문자</span>
+    <div class="phone"><div class="chat"><div class="top"></div><div class="ib"><img class="po" src="assets/p5.jpg" alt=""></div>
+      <div class="tb">(광고) 겨울 감사 세일 · 전 상품 20% 할인<br>무료거부 080</div></div></div></div>
+  <div class="abs cell" id="k2" style="left:60px;top:1060px"><span class="lbl">이메일</span>
+    <div class="mail"><div class="s">겨울 감사 세일, 전 상품 20% 할인</div><div class="f">받은편지함 · 방금</div>
+      <div class="mi"><img class="po" src="assets/p5.jpg" alt=""></div><div class="ln"></div><div class="ln" style="width:70%"></div></div></div>
+  <div class="abs cell" id="k3" style="left:550px;top:1060px"><span class="lbl">인앱 메시지</span>
+    <div class="phone"><div class="app"><i></i><i></i><i style="height:120px"></i><i></i></div><div class="dim"></div>
+      <div class="modal"><div class="mi"><img class="po" src="assets/p5.jpg" alt=""></div><div class="row"><span>닫기</span><span>자세히 보기</span></div></div></div></div>
+  <div class="abs" id="chNote">문자(MMS)는 보낼 때 규격에 맞춰 자동 변환돼요</div>
+
+  <!-- 6 몽타주 -->
+  <div class="abs" id="mt">
+    <div class="col" id="m0" style="left:70px"></div>
+    <div class="col" id="m1" style="left:395px"></div>
+    <div class="col" id="m2" style="left:720px"></div>
+    <div id="fade"></div>
+  </div>
+  <div class="abs" id="fc"><span>배경 자동 제거</span><span>연동 몰 상품 불러오기</span><span>문구 위치 고르기</span><span>말로 고치기</span><span>채널에 바로</span></div>
+  <div class="abs" id="disc">예시 이미지 · 한줄로 AI 이미지 스튜디오로 생성</div>
+
+  <svg class="abs" id="pointer" viewBox="0 0 24 24"><path d="M4.037 4.688a.495.495 0 0 1 .651-.651l16 6.5a.5.5 0 0 1-.063.947l-6.124 1.58a2 2 0 0 0-1.438 1.435l-1.579 6.126a.5.5 0 0 1-.947.063z" fill="#111" stroke="#fff" stroke-width="1.4" stroke-linejoin="round"/></svg>
+
+  <!-- 아웃트로 -->
+  <div class="abs wipe" id="wipeA"></div>
+  <div class="abs wipe" id="wipeB"></div>
+  <div class="abs" id="och"><div>모바일 DM</div><div>문자</div><div>이메일</div><div>인앱</div></div>
+  <div class="abs" id="outK">마케팅의 완성</div>
+  <div class="abs" id="logo">
+    <img src="../../../packages/frontend/public/logo.png" alt="한줄로" style="clip-path: inset(0 36% 0 0)">
+    <img id="logoBar" src="../../../packages/frontend/public/logo.png" alt="" style="clip-path: inset(0 0 0 64%)">
+    <div id="ai"></div>
+  </div>
+  <div class="abs" id="outC"><span class="l" id="o1">템플릿 고르고 문구만 쓰면,</span><span class="l" id="o2">포스터까지 한줄로.</span></div>
+  <div class="abs" id="url">hanjul.ai<svg class="i" viewBox="0 0 24 24"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></svg></div>
+</div>
+
+<script>
+// ── 시각표(초) · 128 BPM 한 마디 = 1.875초 ─────────────────
+const BAR = 1.875;
+const T = {
+  ans: BAR, gal: 2 * BAR, txt: 4 * BAR, gen: 5 * BAR, edit: 6 * BAR, ch: 7 * BAR, mt: 9 * BAR, outro: 11 * BAR, copy: 22.0, url: 12 * BAR,
+  fan: [2.2, 2.32, 2.44], tap: 6.6, fields: [7.65, 8.05, 8.45], pos: 8.75, make: 9.1,
+  draw: [9.4, 9.95], reveal: 9.95, ebType: [11.45, 11.95], send: 12.05, edited: 12.5, toast: 12.55,
+  cells: [13.3, 13.75, 14.2, 14.65], chips: [18.4, 18.6, 18.8, 19.0, 19.2], och: [20.95, 21.07, 21.19, 21.31], aiType: [21.5, 21.65],
+};
+const FIELDS = ['WINTER HOLIDAY', '겨울 감사 세일', '전 상품 20% 할인'];
+const EDIT = '더 밝고 화사하게';
+const COLS = [['p1', 'p5', 'p2', 'p8', 'p6'], ['p7', 'p3', 'p6', 'p1', 'p4'], ['p4', 'p8', 'p5', 'p2', 'p3']];
+
+// ── 보조(01~03 과 같은 규칙) ─────────────────────────────
+const C = (x) => Math.min(1, Math.max(0, x));
+const E = {
+  lin: (x) => x,
+  out: (x) => 1 - Math.pow(1 - x, 3),
+  in: (x) => x * x * x,
+  io: (x) => (x < 0.5 ? 4 * x * x * x : 1 - Math.pow(-2 * x + 2, 3) / 2),
+  back: (x) => { const c1 = 1.7, c3 = c1 + 1; return 1 + c3 * Math.pow(x - 1, 3) + c1 * Math.pow(x - 1, 2); },
+};
+const p = (t, a, b, e = 'out') => E[e](C((t - a) / (b - a)));
+const lerp = (a, b, x) => a + (b - a) * x;
+const $ = (id) => document.getElementById(id);
+function show(el, t, a, b, o = {}) {
+  const { dy = 60, blur = 12, dur = 0.38, outDur = 0.24, sc = 0, ease = 'out', x = '', dx = 0, rot = 0 } = o;
+  const i = p(t, a, a + dur, ease);
+  const q = b == null ? 0 : p(t, b, b + outDur, 'in');
+  const v = Math.min(C(i * 1.4), 1) * (1 - q);
+  el.style.opacity = v;
+  el.style.visibility = v <= 0.001 ? 'hidden' : 'visible';
+  el.style.transform = `${x} translate(${(1 - i) * dx}px, ${(1 - i) * dy - q * dy * 0.5}px) rotate(${rot * i}deg) scale(${1 - sc * (1 - i) - sc * 0.5 * q})`;
+  const bl = (1 - C(i * 1.3)) * blur + q * blur;
+  el.style.filter = bl > 0.05 ? `blur(${bl}px)` : 'none';
+}
+const mark = (el, t, a) => { el.style.backgroundSize = `${p(t, a, a + 0.35, 'io') * 100}% 36%`; };
+function press(btn, rp, t, at) {
+  const pr = p(t, at - 0.06, at + 0.06, 'in') * (1 - p(t, at + 0.06, at + 0.26, 'out'));
+  btn.style.transform = `scale(${1 - 0.07 * pr})`;
+  const r = C((t - at) / 0.45);
+  rp.style.opacity = t >= at ? 0.9 * (1 - r) : 0;
+  rp.style.transform = `scale(${0.2 + r * 6})`;
+  return pr;
+}
+const typed = (s, t, a, b) => s.slice(0, Math.round(s.length * C((t - a) / (b - a))));
+
+function build() {
+  COLS.forEach((list, k) => {
+    $('m' + k).innerHTML = [...list, ...list].map((n) => `<div><img class="po" src="assets/${n}.jpg" alt=""></div>`).join('');
+  });
+}
+
+window.seek = function (t) {
+  $('stage').style.backgroundPosition = `${-t * 6}px ${-t * 14}px`;
+  show($('chip'), t, 0.0, T.outro - 0.2, { dy: -30, x: 'translateX(-50%)' });
+
+  // 1 훅 → 답
+  show($('h1'), t, 0.04, T.ans - 0.2, { dy: 80, sc: 0.06 });
+  show($('h2'), t, 0.47, T.ans - 0.2, { dy: 80, sc: 0.06 });
+  show($('h3'), t, 0.9, T.ans - 0.2, { dy: 80, sc: 0.06 });
+  mark($('hm'), t, 0.7);
+  show($('a1'), t, T.ans + 0.02, T.gal - 0.22, { dy: 70, sc: 0.05 });
+  show($('a2'), t, T.ans + 0.2, T.gal - 0.22, { dy: 70, sc: 0.05 });
+  mark($('am'), t, T.ans + 0.45);
+  [-8, 0, 8].forEach((r, k) => show($('f' + k), t, T.fan[k], T.gal - 0.2, { dy: 160, sc: 0.2, ease: 'back', dur: 0.45, rot: r }));
+
+  // 2 갤러리
+  show($('c0'), t, T.gal + 0.1, T.txt - 0.2);
+  show($('gal'), t, T.gal - 0.05, T.txt - 0.25, { dy: 160, sc: 0.06, dur: 0.5 });
+  $('cards').style.transform = `translateY(${-310 * p(t, T.gal + 0.3, T.tap - 0.5, 'io')}px)`;
+  const pk = p(t, T.tap, T.tap + 0.3, 'back');
+  $('pick').style.transform = `scale(${t >= T.tap ? 1 + 0.04 * pk : 1})`;
+  $('pick').style.borderColor = t >= T.tap ? 'var(--ac)' : '';
+  $('pick').style.boxShadow = t >= T.tap ? `0 0 0 ${6 * p(t, T.tap, T.tap + 0.3)}px var(--ac-soft)` : 'none';
+
+  // 3 문구
+  show($('c1'), t, T.txt + 0.05, T.gen - 0.2);
+  show($('tp'), t, T.txt - 0.05, T.gen - 0.25, { dy: 160, sc: 0.06, dur: 0.5 });
+  FIELDS.forEach((s, k) => {
+    const a = T.fields[k];
+    $('t' + k).textContent = typed(s, t, a, a + 0.32);
+    $('t' + k).classList.toggle('on', t >= a && t < (T.fields[k + 1] || T.pos));
+  });
+  $('pos0').classList.toggle('on', t >= T.pos);
+  const prMake = press($('mkBtn'), $('rp1'), t, T.make);
+
+  // 4 생성 · 말로 고치기
+  show($('c2'), t, T.gen + 0.05, T.edit - 0.2);
+  show($('c3'), t, T.edit + 0.05, T.ch - 0.2);
+  show($('gp'), t, T.gen - 0.05, T.ch - 0.25, { dy: 160, sc: 0.06, dur: 0.5 });
+  $('pfill').style.width = `${100 * p(t, T.draw[0], T.draw[1], 'io')}%`;
+  const rv = p(t, T.reveal, T.reveal + 0.6, 'io');
+  $('ph').style.opacity = 1 - p(t, T.reveal + 0.3, T.reveal + 0.6);
+  $('res').style.clipPath = `inset(0 0 ${100 - 100 * rv}% 0)`;
+  $('res').style.filter = rv < 1 ? `blur(${(1 - rv) * 22}px)` : 'none';
+  // 말로 고친 결과 = 같은 포스터를 더 밝고 화사하게(예시 표현)
+  const ed = p(t, T.edited, T.edited + 0.35);
+  $('resImg').style.filter = ed > 0 ? `brightness(${1 + 0.12 * ed}) saturate(${1 + 0.15 * ed})` : 'none';
+  const sh = C((t - T.send) / 0.5);
+  $('shine').style.opacity = t >= T.send && t < T.edited + 0.15 ? 1 : 0;
+  $('shine').style.transform = `translateX(${-100 + 200 * sh}%)`;
+  show($('eb'), t, T.edit - 0.05, T.ch - 0.25, { dy: 60, blur: 6 });
+  const et = typed(EDIT, t, T.ebType[0], T.ebType[1]);
+  $('ebT').textContent = et;
+  $('ebPh').style.display = et ? 'none' : '';
+  press($('ebSend'), $('rp2'), t, T.send);
+  show($('toast'), t, T.toast, T.ch - 0.3, { dy: -30, sc: 0.2, ease: 'back', dur: 0.35, x: 'translateX(-50%)', blur: 0 });
+
+  // 5 네 채널
+  show($('c4'), t, T.ch + 0.05, T.mt - 0.2);
+  [0, 1, 2, 3].forEach((k) => show($('k' + k), t, T.cells[k], T.mt - 0.25, { dy: 90, sc: 0.12, ease: 'back', dur: 0.45 }));
+  show($('chNote'), t, T.cells[3] + 0.3, T.mt - 0.25, { dy: 30, blur: 6 });
+
+  // 6 몽타주
+  show($('c5'), t, T.mt + 0.05, T.outro - 0.3);
+  show($('mt'), t, T.mt - 0.05, T.outro - 0.3, { dy: 120, blur: 8, dur: 0.5 });
+  const mv = p(t, T.mt - 0.05, T.outro, 'lin');
+  $('m0').style.transform = `translateY(${-60 - 620 * mv}px)`;
+  $('m1').style.transform = `translateY(${-760 + 620 * mv}px)`;
+  $('m2').style.transform = `translateY(${-300 - 620 * mv}px)`;
+  $('fc').querySelectorAll('span').forEach((s, k) => show(s, t, T.chips[k], T.outro - 0.3, { dy: 30, blur: 0, sc: 0.3, ease: 'back', dur: 0.35 }));
+  show($('fc'), t, T.chips[0] - 0.05, T.outro - 0.3, { dy: 0, blur: 0 });
+  show($('disc'), t, T.mt + 0.4, T.outro - 0.3, { dy: 20, blur: 4 });
+
+  // 아웃트로
+  const wa = p(t, T.outro - 0.25, T.outro + 0.15, 'io');
+  const wb = p(t, T.outro - 0.12, T.outro + 0.28, 'io');
+  $('wipeA').style.clipPath = `circle(${wa * 1400}px at 540px 1150px)`;
+  $('wipeB').style.clipPath = `circle(${wb * 1400}px at 540px 1150px)`;
+  $('wipeA').style.visibility = wa > 0 ? 'visible' : 'hidden';
+  $('wipeB').style.visibility = wb > 0 ? 'visible' : 'hidden';
+  $('och').querySelectorAll('div').forEach((d, k) => show(d, t, T.och[k], null, { dy: 30, blur: 0, sc: 0.3, ease: 'back', dur: 0.35 }));
+  show($('outK'), t, T.outro + 0.2, null, { dy: 40 });
+  show($('logo'), t, T.outro + 0.28, null, { dy: 70, sc: 0.08, dur: 0.5 });
+  $('ai').textContent = (t >= T.aiType[0] ? 'A' : '') + (t >= T.aiType[1] ? 'I' : '');
+  $('logoBar').style.opacity = t < T.aiType[1] ? (Math.floor((t - T.outro) * 3.2) % 2 === 0 ? 1 : 0.15) : 1;
+  show($('o1'), t, T.copy, null, { dy: 50 });
+  show($('o2'), t, T.copy + 0.15, null, { dy: 50 });
+  show($('url'), t, T.url, null, { dy: 40, sc: 0.2, ease: 'back', dur: 0.45, x: 'translateX(-50%)' });
+
+  // 포인터(이번 프레임의 버튼 위치로 · 맨 끝에서 계산): 템플릿 → 만들기 → 보내기
+  const targets = [
+    { el: $('pick'), at: T.tap, gone: T.txt - 0.3 },
+    { el: $('mkBtn'), at: T.make, gone: T.gen - 0.3 },
+    { el: $('ebSend'), at: T.send, gone: T.edited + 0.3 },
+  ];
+  const cur = targets.find((g) => t < g.gone + 0.15) || targets[2];
+  const bb = cur.el.getBoundingClientRect();
+  const bx = bb.left + bb.width * 0.6, by = bb.top + bb.height * 0.55;
+  const m = p(t, cur.at - 0.42, cur.at - 0.05, 'io');
+  const pt = $('pointer');
+  pt.style.left = lerp(bx + 170, bx, m) + 'px';
+  pt.style.top = lerp(by + 250, by, m) + 'px';
+  pt.style.opacity = C(p(t, cur.at - 0.5, cur.at - 0.35)) * (1 - p(t, cur.gone, cur.gone + 0.15));
+  const pr = p(t, cur.at - 0.06, cur.at + 0.06, 'in') * (1 - p(t, cur.at + 0.06, cur.at + 0.26));
+  pt.style.transform = `scale(${1 - 0.14 * Math.max(pr, cur.el === $('mkBtn') ? prMake : 0)})`;
+};
+
+window.ready = (async () => {
+  await document.fonts.ready;
+  build();
+  await Promise.all([...document.images].map((im) => (im.complete ? 0 : new Promise((r) => { im.onload = im.onerror = r; }))));
+  window.seek(0);
+  return true;
+})();
+</script>
+</body>
+</html>

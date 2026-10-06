@@ -182,3 +182,75 @@ describe('남은 옛 문구', () => {
     expect([...(job?.steps || []), job?.goal || ''].join('\n')).not.toMatch(/원클릭 캠페인|인앱/);
   });
 });
+
+/**
+ * ★ 2026-10-06 예시 영상 + 상세 설명(설계서 docs/2026-10-06-plan-feature-video-modal-design.md · Harold 목업 승인)
+ *   영상이 있는 기능은 두 단 창(왼쪽 영상 · 오른쪽 이렇게 씁니다 · 직접 정할 수 있는 것 · 알아서 지켜 주는 것 · 드는 크레딧).
+ *   영상은 예시라 오른쪽 설명이 기능을 제대로 말해야 한다(「원하는 시간 · 예산 등 자유롭게 설정」) → 설정 · 안전장치 칸이 함께 있어야 한다.
+ */
+describe('예시 영상 + 상세 설명', () => {
+  const VIDEO_IDS = ['auto-marketing', 'journeys', 'marketing-planner', 'image-studio'];
+  const block = (id: string) => {
+    const at = INTROS.indexOf(`id: '${id}'`);
+    const next = INTROS.indexOf('\n  {\n    id: ', at + 1);
+    return INTROS.slice(at, next === -1 ? undefined : next);
+  };
+  const PUBLIC = join(FRONT, '..', 'public');
+
+  it('영상 4기능은 영상 · 포스터 파일이 실제로 있고 설정 · 안전장치 칸을 함께 갖는다', () => {
+    for (const id of VIDEO_IDS) {
+      const b = block(id);
+      expect(b, id).toContain(`video: { src: '/videos/plan-feature/${id}.mp4', poster: '/videos/plan-feature/${id}.jpg' }`);
+      expect(existsSync(join(PUBLIC, 'videos', 'plan-feature', `${id}.mp4`)), `${id}.mp4`).toBe(true);
+      expect(existsSync(join(PUBLIC, 'videos', 'plan-feature', `${id}.jpg`)), `${id}.jpg`).toBe(true);
+      expect(b, `${id} options`).toMatch(/options: \[\s*\{/);
+      expect(b, `${id} safeguards`).toMatch(/safeguards: \[\s*\{/);
+    }
+  });
+
+  it('원장에서 영상을 가진 기능은 정확히 이 4개다(파일 없는 영상 주소 0)', () => {
+    const withVideo = [...INTROS.matchAll(/id: '([a-z-]+)'[\s\S]*?(?=\n  \{\n    id: |\n\];)/g)]
+      .filter((m) => m[0].includes('video: {')).map((m) => m[1]);
+    expect(withVideo.sort()).toEqual([...VIDEO_IDS].sort());
+  });
+
+  it('창: 영상이 있을 때만 두 단 · 무음 · 반복 · 화면 안 재생 · 움직임 줄이기면 자동재생 대신 재생 버튼', () => {
+    expect(MODAL).toContain('if (intro.video) return renderVideoLayout();');
+    expect(MODAL).toMatch(/<video[\s\S]*?muted[\s\S]*?loop[\s\S]*?playsInline[\s\S]*?preload="metadata"[\s\S]*?autoPlay=\{!reduceMotion\}[\s\S]*?controls=\{reduceMotion\}/);
+    expect(MODAL).toContain("matchMedia?.('(prefers-reduced-motion: reduce)')");
+    expect(MODAL).toContain('v.muted = true;');
+    // 영상 없는 기능은 옛 한 단 창 그대로(넓이 520)
+    expect(MODAL).toContain('sm:max-w-[520px]');
+  });
+
+  it('옛 원장 오류: 이미지 스튜디오 생성은 포스터 한 장이다(「후보 2장」 아님) · 자동 마케팅은 매일 제안이 아니라 기간 승인', () => {
+    expect(block('image-studio')).not.toContain('후보 2장');
+    expect(block('image-studio')).toContain("label: '포스터 만들기(한 장)', source: 'image-studio-generate'");
+    expect(block('auto-marketing')).not.toContain('매일 제안');
+    expect(block('auto-marketing')).toContain('7일 동안');
+  });
+});
+
+/**
+ * ★ 2026-10-06 Codex 1R(medium 5) — 오른쪽 문장은 고객에게 약속하는 문장이다. 적용 조건이 있는 장치는 조건까지 적는다.
+ *   ① 플래너 환불 = 발송 처리 시작 전 취소만(producing·scheduled·발송 시작도 실적) ② 직접 쓴 자동 마케팅 문안 = 같은 문안 통과 결과 재사용
+ *   ③ 여정 통과 알림 = 단계별 설정(기본 첫·마지막) · 검사 자체는 모든 단계 ④ 스튜디오 문구 위치 = 행사 포스터만 ⑤ 짧은 휴대폰 화면에서 설명이 사라짐
+ */
+describe('Codex 1R — 적용 조건까지 적는다 · 짧은 화면', () => {
+  const INTROS_RAW = read('constants/plan-feature-intros.ts');
+  it('적용 조건 문장', () => {
+    expect(INTROS_RAW).toContain('그 달 발송 처리가 시작되기 전에 취소하면');
+    expect(INTROS_RAW).not.toContain('아무것도 나가지 않은 채 취소하면');
+    expect(INTROS_RAW).toContain('직접 쓴 문안은 같은 문안이 한 번 통과했으면 그 결과를 쓰고');
+    expect(INTROS_RAW).toContain('통과 알림은 단계별로 켜고 끌 수 있습니다(기본은 첫 단계와 마지막 단계)');
+    expect(INTROS_RAW).toContain('행사 포스터는 문구 위치도 고릅니다');
+    expect(INTROS_RAW).not.toContain('문구는 적은 그대로 넣고 위치를 고릅니다');
+  });
+
+  it('휴대폰 = 영상 · 머리 · 설명이 함께 스크롤되고 버튼만 고정 · PC = 오른쪽 칸 세 줄(설명만 스크롤)', () => {
+    expect(MODAL).toContain('className="flex-1 min-h-0 overflow-y-auto overscroll-contain sm:contents"');
+    expect(MODAL).toContain('sm:grid-rows-[auto_minmax(0,1fr)_auto]');
+    expect(MODAL).toContain('sm:col-start-2 sm:row-start-2 sm:min-h-0 sm:overflow-y-auto');
+    expect(MODAL).toMatch(/shrink-0 border-t px-5 sm:px-6 pt-3 pb-4 sm:col-start-2 sm:row-start-3/);
+  });
+});
