@@ -1,0 +1,158 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>한줄로 AI 자사몰 연동</title>
+<!-- 릴스 10 · 자사몰 연동: 쇼핑몰 고르기 → 회원 · 주문 · 수신동의 자동 동기화 → 고객 행동 기록 → 모든 기능으로 (공용 = ../common) -->
+<link rel="stylesheet" href="../common/reel.css">
+<style>
+  #pf { top: 540px; padding: 36px; }
+  #pf .t { font-size: 32px; font-weight: 800; }
+  .grid { margin-top: 22px; display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
+  .pt { height: 150px; border-radius: 24px; border: 2px solid var(--line); display: flex; align-items: center; justify-content: center; text-align: center; font-size: 28px; font-weight: 800; padding: 0 12px; line-height: 1.25; }
+  .pt.pick { border-color: var(--ac); box-shadow: 0 0 0 6px var(--ac-soft); }
+  #oauth { margin-top: 22px; padding: 20px 24px; border-radius: 20px; background: var(--soft); font-size: 26px; font-weight: 700; color: #3F3F46; }
+  #any { margin-top: 14px; font-size: 24px; color: #52525B; font-weight: 600; }
+
+  #sy { top: 540px; }
+  .sr { padding: 28px 40px; }
+  .sr + .sr { border-top: 2px solid #F1F1F0; }
+  .sr .top { display: flex; align-items: center; gap: 18px; font-size: 32px; font-weight: 800; }
+  .sr .top .ok { margin-left: auto; }
+  .bar { margin-top: 16px; height: 14px; border-radius: 7px; background: var(--soft); overflow: hidden; }
+  .bar i { display: block; height: 100%; width: 0; background: var(--ink); }
+  .sr p { margin-top: 10px; font-size: 23px; color: #52525B; }
+  #live { margin: 4px 40px 32px; display: inline-flex; align-items: center; gap: 12px; padding: 14px 24px; border-radius: 999px; background: #F0FDF4; color: #166534; font-size: 26px; font-weight: 800; }
+  #live i { width: 14px; height: 14px; border-radius: 50%; background: #22C55E; box-shadow: 0 0 0 6px rgba(34,197,94,.18); }
+
+  #cu { top: 540px; padding: 40px; }
+  #cu .who { display: flex; align-items: center; gap: 22px; padding-bottom: 26px; border-bottom: 2px solid var(--line); }
+  #cu .who .av { width: 96px; height: 96px; border-radius: 50%; background: var(--soft); display: flex; align-items: center; justify-content: center; font-size: 38px; font-weight: 900; }
+  #cu .who b { display: block; font-size: 38px; font-weight: 900; }
+  #cu .who p { margin-top: 4px; font-size: 24px; color: #52525B; }
+  .tl { position: relative; margin-top: 24px; padding-left: 50px; }
+  .tl:before { content: ''; position: absolute; left: 17px; top: 14px; bottom: 14px; width: 4px; border-radius: 2px; background: var(--line); }
+  .ev { position: relative; padding: 16px 0; }
+  .ev:before { content: ''; position: absolute; left: -42px; top: 26px; width: 22px; height: 22px; border-radius: 50%; background: #fff; border: 5px solid var(--ink); }
+  .ev.hot:before { border-color: var(--ac); }
+  .ev b { font-size: 30px; font-weight: 800; }
+  .ev span { margin-left: 14px; font-size: 23px; color: #52525B; font-weight: 600; }
+
+  #hub { left: 0; top: 520px; width: 1080px; height: 1100px; }
+  #core { left: 340px; top: 400px; width: 400px; height: 220px; border-radius: 40px; background: var(--ink); color: #fff; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; }
+  #core b { font-size: 40px; font-weight: 900; }
+  #core small { margin-top: 8px; font-size: 24px; color: #D4D4D8; font-weight: 600; }
+  .ft { width: 330px; height: 150px; border-radius: 32px; background: #fff; border: 2px solid var(--line); box-shadow: 0 20px 50px rgba(17,17,17,.08); display: flex; flex-direction: column; justify-content: center; padding: 0 28px; }
+  .ft b { font-size: 34px; font-weight: 800; }
+  .ft small { margin-top: 6px; font-size: 22px; color: #52525B; font-weight: 600; }
+  #wires { left: 0; top: 0; }
+</style>
+</head>
+<body>
+<div id="stage">
+  <div class="abs cap" id="c0" style="top:300px"><div class="k">쓰는 쇼핑몰을</div><div class="h">고르고 연결하면</div></div>
+  <div class="abs cap" id="c1" style="top:300px"><div class="k">회원·주문·수신동의</div><div class="h">자동으로 동기화</div></div>
+  <div class="abs cap" id="c2" style="top:300px"><div class="k">고객 한 명 한 명의</div><div class="h">행동이 쌓이고</div></div>
+  <div class="abs cap" id="c3" style="top:300px"><div class="k">그 데이터로</div><div class="h">모든 기능이 움직여요</div></div>
+
+  <div class="abs panel" id="pf">
+    <div class="t">어떤 쇼핑몰을 쓰세요?</div>
+    <div class="grid">
+      <div class="pt" id="p0">카페24</div><div class="pt" id="p1">네이버<br>스마트스토어</div><div class="pt" id="p2">고도몰</div>
+      <div class="pt" id="p3">메이크샵</div><div class="pt" id="p4">아임웹</div><div class="pt" id="p5">우커머스</div>
+    </div>
+    <div id="oauth">OAuth 자동 연동: 코딩 없이 회원·주문 동기화</div>
+    <div id="any">그 밖의 자사몰도 연동해 드려요</div>
+  </div>
+
+  <div class="abs panel" id="sy">
+    <div class="head2">카페24 연동됨<span>자동 동기화</span></div>
+    <div class="sr" id="y0"><div class="top">회원<div class="ok"><svg class="i" viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5"/></svg></div></div><div class="bar"><i id="b0"></i></div><p>가입일 · 등급 · 생일</p></div>
+    <div class="sr" id="y1"><div class="top">주문<div class="ok"><svg class="i" viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5"/></svg></div></div><div class="bar"><i id="b1"></i></div><p>구매 상품 · 금액 · 날짜</p></div>
+    <div class="sr" id="y2"><div class="top">수신동의<div class="ok"><svg class="i" viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5"/></svg></div></div><div class="bar"><i id="b2"></i></div><p>문자 · 이메일 수신 동의</p></div>
+    <div id="live"><i></i>자동 동기화 중</div>
+  </div>
+
+  <div class="abs panel" id="cu">
+    <div class="who"><div class="av">지</div><div><b>지수님</b><p>VIP · 카페24 회원</p></div></div>
+    <div class="tl">
+      <div class="ev" id="e0"><b>회원 가입</b><span>3주 전</span></div>
+      <div class="ev" id="e1"><b>수분 크림 상품 조회</b><span>5일 전</span></div>
+      <div class="ev hot" id="e2"><b>장바구니 담기</b><span>어제</span></div>
+      <div class="ev hot" id="e3"><b>첫 구매</b><span>오늘</span></div>
+    </div>
+  </div>
+
+  <div class="abs" id="hub">
+    <svg class="abs" id="wires" width="1080" height="1100"><g id="wg" fill="none" stroke="#111" stroke-width="4" stroke-linecap="round" stroke-dasharray="6 10"></g></svg>
+    <div class="abs" id="core"><b>고객 데이터</b><small>회원 · 주문 · 행동</small></div>
+    <div class="abs ft" id="f0" style="left:60px;top:120px"><b>여정</b><small>가입부터 첫 구매까지</small></div>
+    <div class="abs ft" id="f1" style="left:690px;top:120px"><b>자동 마케팅</b><small>조건 맞는 고객에게 매일</small></div>
+    <div class="abs ft" id="f2" style="left:60px;top:760px"><b>인앱 메시지</b><small>방문한 그 순간에</small></div>
+    <div class="abs ft" id="f3" style="left:690px;top:760px"><b>성과리포트</b><small>보낸 뒤 매출까지</small></div>
+  </div>
+</div>
+
+<script src="../common/reel.js"></script>
+<script>
+R.setup({
+  name: '자사몰 연동',
+  hook: ['고객 데이터,', '[엑셀로 옮기고]', '계세요?'],
+  chips: ['카페24', '네이버', '고도몰', '아임웹'],
+  copy: ['쇼핑몰만 연결하면,', '나머지는 한줄로.'],
+});
+const { T, C, p, $, show } = R;
+const S = { tiles: [2.0, 2.15, 2.3, 2.45, 2.6, 2.75], pick: 3.225, sync: [4.0, 4.6, 5.2], live: 6.0, evs: [7.7, 8.0, 8.3, 8.6], feats: [9.6, 9.85, 10.1, 10.35] };
+
+let WIRES = [];
+function wire() {
+  const core = { x: 540, y: 510 };
+  const ends = [[225, 195], [855, 195], [225, 835], [855, 835]];
+  $('wg').innerHTML = ends.map(([x, y]) => `<path d="M ${core.x} ${core.y} L ${x} ${y}"/>`).join('');
+  WIRES = [...$('wg').querySelectorAll('path')];
+}
+
+window.seek = function (t) {
+  R.base(t);
+  show($('c0'), t, T.s1 + 0.05, T.s2 - 0.22, { dy: 50 });
+  show($('pf'), t, T.s1 - 0.05, T.s2 - 0.2, { dy: 140, sc: 0.06, dur: 0.45 });
+  [0, 1, 2, 3, 4, 5].forEach((k) => show($('p' + k), t, S.tiles[k], null, { dy: 30, blur: 4, sc: 0.15, ease: 'back', dur: 0.3 }));
+  $('p0').classList.toggle('pick', t >= S.pick);
+  show($('oauth'), t, S.pick + 0.1, null, { dy: 20, blur: 4, dur: 0.3 });
+  show($('any'), t, S.pick + 0.25, null, { dy: 10, blur: 4, dur: 0.3 });
+
+  show($('c1'), t, T.s2 + 0.1, T.s3 - 0.2);
+  show($('sy'), t, T.s2 - 0.05, T.s3 - 0.25, { dy: 160, sc: 0.06, dur: 0.5 });
+  [0, 1, 2].forEach((k) => {
+    $('b' + k).style.width = `${100 * p(t, S.sync[k] - 0.45, S.sync[k], 'io')}%`;
+    const ok = $('y' + k).querySelector('.ok');
+    ok.style.opacity = C(p(t, S.sync[k], S.sync[k] + 0.12));
+    ok.style.transform = `scale(${0.5 + 0.5 * p(t, S.sync[k], S.sync[k] + 0.3, 'back')})`;
+  });
+  show($('live'), t, S.live, null, { dy: 20, blur: 0, sc: 0.2, ease: 'back', dur: 0.35 });
+
+  show($('c2'), t, T.s3 + 0.05, T.s4 - 0.2);
+  show($('cu'), t, T.s3 - 0.05, T.s4 - 0.25, { dy: 160, sc: 0.06, dur: 0.45 });
+  [0, 1, 2, 3].forEach((k) => show($('e' + k), t, S.evs[k], null, { dy: 0, dx: 60, blur: 6, dur: 0.28 }));
+
+  show($('c3'), t, T.s4 + 0.05, T.outro - 0.3);
+  show($('hub'), t, T.s4 - 0.05, T.outro - 0.3, { dy: 120, blur: 8, dur: 0.45 });
+  show($('core'), t, T.s4 + 0.05, null, { dy: 0, sc: 0.2, ease: 'back', dur: 0.4 });
+  [0, 1, 2, 3].forEach((k) => {
+    show($('f' + k), t, S.feats[k], null, { dy: 0, sc: 0.25, ease: 'back', dur: 0.4 });
+    const w = WIRES[k];
+    if (w) {
+      const L = w.getTotalLength();
+      const x = p(t, S.feats[k] - 0.25, S.feats[k], 'io');
+      w.style.strokeDasharray = x < 1 ? `${L} ${L}` : '6 10';
+      w.style.strokeDashoffset = x < 1 ? `${L * (1 - x)}` : `${-t * 40}`;
+      w.style.opacity = x > 0 ? 1 : 0;
+    }
+  });
+
+  R.pointer(t, [{ el: $('p0'), at: S.pick, gone: T.s2 - 0.3 }]);
+};
+R.ready(wire);
+</script>
+</body>
+</html>

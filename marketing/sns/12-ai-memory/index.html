@@ -1,0 +1,138 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>한줄로 AI 메모리</title>
+<!-- 릴스 12 · AI 메모리: 대표 문안 → 브랜드 학습 → 브랜드킷 · 차단 단어 → 누적 학습 → 다음 문안에 반영 (공용 = ../common) -->
+<link rel="stylesheet" href="../common/reel.css">
+<style>
+  #lr { top: 540px; padding: 36px; }
+  #lr .t { font-size: 32px; font-weight: 800; }
+  #lr .sub { margin-top: 6px; font-size: 23px; color: #52525B; font-weight: 600; }
+  .qt { margin-top: 16px; padding: 22px 24px; border-radius: 22px; background: var(--soft); font-size: 27px; line-height: 1.45; color: #18181B; }
+  .qt em { font-style: normal; display: block; font-size: 19px; font-weight: 800; color: #52525B; margin-bottom: 4px; }
+  #learn { margin-top: 24px; }
+
+  #gd { top: 540px; padding: 36px; }
+  #gd .t { font-size: 30px; font-weight: 800; }
+  .gl { margin-top: 14px; display: flex; align-items: center; gap: 16px; padding: 18px 22px; border-radius: 20px; border: 2px solid var(--line); font-size: 26px; font-weight: 700; }
+  .gl small { flex: none; width: 110px; font-size: 21px; color: #52525B; font-weight: 800; }
+  .kit { margin-top: 26px; padding-top: 22px; border-top: 2px solid var(--line); display: flex; gap: 18px; align-items: flex-end; }
+  .sw { text-align: center; font-size: 21px; font-weight: 800; color: #3F3F46; }
+  .sw i { display: block; width: 120px; height: 90px; border-radius: 20px; margin-bottom: 8px; border: 2px solid var(--line); }
+  .sw .lg { display: flex; align-items: center; justify-content: center; width: 180px; height: 90px; border-radius: 20px; margin-bottom: 8px; border: 2px solid var(--line); background: #fff; font-size: 26px; font-weight: 900; letter-spacing: .12em; color: #3F3F46; }
+  .ban { margin-top: 24px; padding-top: 20px; border-top: 2px solid var(--line); }
+  .ban .k { font-size: 23px; font-weight: 800; color: #52525B; }
+  .bw { margin-top: 12px; display: flex; align-items: center; gap: 16px; font-size: 28px; font-weight: 800; }
+  .bw s { color: #71717A; text-decoration-thickness: 3px; }
+  .bw svg { color: var(--ac); }
+  .bw span { padding: 8px 18px; border-radius: 999px; background: var(--ac-soft); color: #9A3412; }
+
+  #mm { top: 540px; }
+  .mc { margin: 0 36px; padding: 24px 0; display: flex; gap: 18px; align-items: flex-start; }
+  .mc + .mc { border-top: 2px solid #F1F1F0; }
+  .mc .lbl { flex: none; }
+  .mc b { display: block; font-size: 28px; font-weight: 800; line-height: 1.4; }
+  .mc p { margin-top: 4px; font-size: 22px; color: #52525B; }
+  #tidy { margin: 4px 36px 30px; font-size: 23px; color: #52525B; font-weight: 600; }
+
+  #ap { top: 540px; padding: 40px; }
+  #ap .t { font-size: 30px; font-weight: 800; }
+  #ap .bb { margin-top: 20px; padding: 26px 28px; border-radius: 30px 30px 30px 8px; background: var(--soft); font-size: 32px; line-height: 1.55; color: #18181B; }
+  #ap .bb u { text-decoration: none; background: linear-gradient(rgba(255,90,31,.32), rgba(255,90,31,.32)) no-repeat 0 85% / 0% 36%; }
+  .why { margin-top: 26px; display: flex; gap: 12px; flex-wrap: wrap; }
+</style>
+</head>
+<body>
+<div id="stage">
+  <div class="abs cap" id="c0" style="top:300px"><div class="k">대표 문안 몇 개로</div><div class="h">우리 말투를 배우고</div></div>
+  <div class="abs cap" id="c1" style="top:300px"><div class="k">브랜드 색과</div><div class="h">피해야 할 단어까지</div></div>
+  <div class="abs cap" id="c2" style="top:300px"><div class="k">보낼수록</div><div class="h">학습이 쌓여요</div></div>
+  <div class="abs cap" id="c3" style="top:300px"><div class="k">다음 문안부터</div><div class="h">알아서 반영</div></div>
+
+  <div class="abs panel" id="lr">
+    <div class="t">브랜드 학습</div><div class="sub">대표 문안을 넣으면 가이드라인을 뽑아요</div>
+    <div class="qt" id="q0"><em>대표 문안 1</em>고객님, 오늘도 피부에 쉼표 하나 찍어 드릴게요.</div>
+    <div class="qt" id="q1"><em>대표 문안 2</em>차분히 고른 겨울 보습 루틴을 소개해요.</div>
+    <div class="qt" id="q2"><em>대표 문안 3</em>고객님만을 위한 한정 혜택을 준비했어요.</div>
+    <div class="btn" id="learn"><span class="ripple" id="rp1"></span><span class="spin" id="sp1" style="display:none"></span><span id="lT">브랜드 학습하기</span></div>
+  </div>
+
+  <div class="abs panel" id="gd">
+    <div class="t">가이드라인</div>
+    <div class="gl" id="g0"><small>브랜드 톤</small>우아한 · 차분한 톤 유지</div>
+    <div class="gl" id="g1"><small>문장</small>느낌표 1개 이내</div>
+    <div class="gl" id="g2"><small>호칭</small>고객님</div>
+    <div class="kit">
+      <div class="sw" id="w0"><div class="lg">LOGO</div>로고</div>
+      <div class="sw" id="w1"><i style="background:#9CAF88"></i>메인 색</div>
+      <div class="sw" id="w2"><i style="background:#F3E8DD"></i>배경 색</div>
+    </div>
+    <div class="ban"><div class="k">광고 차단 단어 + 대체</div>
+      <div class="bw" id="x0"><s>특가</s><svg class="i" viewBox="0 0 24 24"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></svg><span>한정 혜택</span></div>
+      <div class="bw" id="x1"><s>긴급</s><svg class="i" viewBox="0 0 24 24"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></svg><span>신규 안내</span></div>
+    </div>
+  </div>
+
+  <div class="abs panel" id="mm">
+    <div class="head2">누적 학습<span>회사별</span></div>
+    <div class="mc" id="m0"><span class="lbl">성공 패턴</span><div><b>VIP 고객은 한정판 신상 알림에 반응해요</b><p>매우 중요 · AI 우선 참고</p></div></div>
+    <div class="mc" id="m1"><span class="lbl">고객 인사이트</span><div><b>휴면 고객은 첫 구매 혜택 안내에 돌아와요</b><p>보통 · 일반 참고</p></div></div>
+    <div class="mc" id="m2"><span class="lbl">브랜드 톤 진화</span><div><b>이모지는 줄이고 전문성을 앞세워요</b><p>매우 중요 · AI 우선 참고</p></div></div>
+    <div id="tidy">오래된 학습은 자동으로 정리돼요</div>
+  </div>
+
+  <div class="abs panel" id="ap">
+    <div class="t">AI가 메모리를 참고해 쓴 문안</div>
+    <div class="bb" id="bb">(광고) <u id="u0">고객님</u>, 겨울 보습 루틴에 맞춘 <u id="u1">한정 혜택</u>을 준비했어요. <u id="u2">차분히</u> 둘러보세요.</div>
+    <div class="why"><span class="tag" id="y0">호칭 통일</span><span class="tag" id="y1">차단 단어 대체</span><span class="tag" id="y2">브랜드 톤</span></div>
+  </div>
+</div>
+
+<script src="../common/reel.js"></script>
+<script>
+R.setup({
+  name: 'AI 메모리',
+  hook: ['AI가 쓴 문안,', '[우리 브랜드 말투]', '같나요?'],
+  chips: ['브랜드 톤', '브랜드킷', '차단 단어', '성공 패턴'],
+  copy: ['쓸수록 우리 회사를', '더 잘 아는 한줄로.'],
+});
+const { T, C, p, $, show, press } = R;
+const S = { qs: [2.05, 2.3, 2.55], learn: 3.225, gl: [3.95, 4.3, 4.65], sw: [5.2, 5.4, 5.6], ban: [6.0, 6.35], mc: [7.7, 8.05, 8.4], bb: 9.6, why: [10.0, 10.25, 10.5] };
+
+window.seek = function (t) {
+  R.base(t);
+  show($('c0'), t, T.s1 + 0.05, T.s2 - 0.22, { dy: 50 });
+  show($('lr'), t, T.s1 - 0.05, T.s2 - 0.2, { dy: 140, sc: 0.06, dur: 0.45 });
+  [0, 1, 2].forEach((k) => show($('q' + k), t, S.qs[k] - 0.1, null, { dy: 0, dx: 80, blur: 6, dur: 0.28 }));
+  const pr = press($('learn'), $('rp1'), t, S.learn);
+  const ld = t >= S.learn + 0.12;
+  $('sp1').style.display = ld ? 'block' : 'none';
+  $('sp1').style.transform = `rotate(${t * 900}deg)`;
+  $('lT').textContent = ld ? '배우는 중' : '브랜드 학습하기';
+
+  show($('c1'), t, T.s2 + 0.1, T.s3 - 0.2);
+  show($('gd'), t, T.s2 - 0.05, T.s3 - 0.25, { dy: 160, sc: 0.06, dur: 0.5 });
+  [0, 1, 2].forEach((k) => show($('g' + k), t, S.gl[k], null, { dy: 0, dx: 60, blur: 6, dur: 0.28 }));
+  [0, 1, 2].forEach((k) => show($('w' + k), t, S.sw[k], null, { dy: 30, blur: 0, sc: 0.3, ease: 'back', dur: 0.32 }));
+  [0, 1].forEach((k) => show($('x' + k), t, S.ban[k], null, { dy: 0, dx: 60, blur: 6, dur: 0.28 }));
+
+  show($('c2'), t, T.s3 + 0.05, T.s4 - 0.2);
+  show($('mm'), t, T.s3 - 0.05, T.s4 - 0.25, { dy: 160, sc: 0.06, dur: 0.45 });
+  [0, 1, 2].forEach((k) => show($('m' + k), t, S.mc[k], null, { dy: 40, blur: 6, sc: 0.05, ease: 'back', dur: 0.35 }));
+  show($('tidy'), t, S.mc[2] + 0.25, null, { dy: 10, blur: 4 });
+
+  show($('c3'), t, T.s4 + 0.05, T.outro - 0.3);
+  show($('ap'), t, T.s4 - 0.05, T.outro - 0.3, { dy: 160, sc: 0.06, dur: 0.45 });
+  show($('bb'), t, S.bb, null, { dy: 40, blur: 6, dur: 0.35 });
+  [0, 1, 2].forEach((k) => {
+    $('u' + k).style.backgroundSize = `${p(t, S.why[k] - 0.05, S.why[k] + 0.3, 'io') * 100}% 36%`;
+    show($('y' + k), t, S.why[k], null, { dy: 20, blur: 0, sc: 0.3, ease: 'back', dur: 0.32 });
+  });
+
+  R.pointer(t, [{ el: $('learn'), at: S.learn, gone: T.s2 - 0.3, pr }]);
+};
+R.ready();
+</script>
+</body>
+</html>

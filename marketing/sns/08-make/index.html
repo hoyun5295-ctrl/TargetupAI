@@ -1,0 +1,166 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>한줄로 AI 만들기</title>
+<!-- 릴스 08 · 만들기: 행사 주소 · 사진 → 재료 읽기 → 같은 재료로 DM · 이메일 → 완성도 점검 → 보내기 (공용 = ../common) -->
+<link rel="stylesheet" href="../common/reel.css">
+<style>
+  #card { top: 760px; padding: 46px; }
+  #card .hd { display: flex; align-items: center; gap: 24px; padding-bottom: 28px; border-bottom: 2px solid var(--line); }
+  #card .ic { width: 84px; height: 84px; border-radius: 24px; background: var(--ink); color: #fff; display: flex; align-items: center; justify-content: center; font-size: 42px; flex: none; }
+  #card .t1 { font-size: 44px; font-weight: 700; }
+  #card .t2 { margin-top: 6px; font-size: 25px; color: #52525B; }
+  #box { margin-top: 30px; height: 130px; padding: 0 30px; border-radius: 28px; background: var(--soft); border: 3px solid var(--ac); font-size: 38px; font-weight: 600; display: flex; align-items: center; white-space: nowrap; overflow: hidden; }
+  #ph { color: #A1A1AA; font-weight: 500; font-size: 30px; }
+  #caret { display: inline-block; width: 5px; height: 48px; margin-left: 6px; background: var(--ac); border-radius: 3px; }
+  .mats { margin-top: 20px; display: flex; gap: 12px; }
+  .mats span { display: flex; align-items: center; gap: 10px; padding: 12px 20px; border-radius: 999px; border: 2px solid var(--line); font-size: 25px; font-weight: 700; color: #3F3F46; }
+  .mats i { width: 34px; height: 34px; border-radius: 8px; display: block; }
+  #card .ft { margin-top: 28px; display: flex; justify-content: flex-end; }
+
+  #mk { top: 540px; padding: 36px; }
+  #mk .t { display: flex; align-items: center; gap: 12px; font-size: 32px; font-weight: 800; }
+  .reads { margin-top: 18px; display: flex; gap: 10px; flex-wrap: wrap; }
+  .reads span { padding: 10px 18px; border-radius: 999px; background: var(--soft); font-size: 23px; font-weight: 700; color: #3F3F46; }
+  #prog { margin-top: 20px; display: flex; align-items: center; gap: 14px; font-size: 26px; font-weight: 700; color: #3F3F46; }
+  #prog .spin { border-color: #E4E4E7; border-top-color: var(--ac); width: 32px; height: 32px; }
+  #done { color: var(--ac); font-size: 32px; display: none; }
+  .outs { margin-top: 20px; display: flex; gap: 22px; align-items: flex-start; }
+  .dm { width: 360px; height: 600px; border: 8px solid var(--ink); border-radius: 46px; overflow: hidden; flex: none; position: relative; }
+  .dm .im { height: 400px; }
+  .dm b { display: block; padding: 18px 20px 0; font-size: 28px; font-weight: 900; }
+  .dm .cta { margin: 14px 20px; height: 56px; border-radius: 16px; background: var(--ink); color: #fff; font-size: 22px; font-weight: 800; display: flex; align-items: center; justify-content: center; }
+  .em { flex: 1; border: 2px solid var(--line); border-radius: 28px; padding: 22px; }
+  .em .s { font-size: 24px; font-weight: 800; letter-spacing: -0.03em; }
+  .em .f { margin-top: 4px; font-size: 18px; color: #52525B; }
+  .em .im { margin-top: 14px; height: 300px; border-radius: 16px; overflow: hidden; }
+  .em .ln { margin-top: 12px; height: 14px; border-radius: 7px; background: #EDEDEE; }
+  .em .cta { margin-top: 14px; height: 52px; border-radius: 14px; background: var(--ink); color: #fff; font-size: 20px; font-weight: 800; display: flex; align-items: center; justify-content: center; }
+  .lab { position: absolute; z-index: 3; }
+  .lab .lbl { background: var(--ink); color: #fff; }
+  #same { left: 50%; top: 1080px; }
+
+  #ck { top: 540px; }
+  .ckr { display: flex; align-items: center; gap: 20px; padding: 28px 40px; font-size: 32px; font-weight: 700; }
+  .ckr + .ckr { border-top: 2px solid #F1F1F0; }
+  .ckr small { margin-left: auto; font-size: 22px; color: #52525B; font-weight: 600; }
+
+  #sd { top: 540px; padding: 40px; }
+  .ch2 { display: flex; align-items: center; gap: 22px; padding: 26px; border: 2px solid var(--line); border-radius: 28px; }
+  .ch2 + .ch2 { margin-top: 20px; }
+  .ch2 .th { width: 120px; height: 160px; border-radius: 16px; overflow: hidden; flex: none; }
+  .ch2 b { display: block; font-size: 32px; font-weight: 800; }
+  .ch2 p { margin-top: 6px; font-size: 23px; color: #52525B; }
+  .ch2 .st { margin-left: auto; padding: 10px 20px; border-radius: 999px; font-size: 24px; font-weight: 800; background: var(--soft); color: #3F3F46; white-space: nowrap; }
+  .ch2 .st.on { background: var(--ac); color: #fff; }
+  #go { margin-top: 30px; }
+</style>
+</head>
+<body>
+<div id="stage">
+  <div class="abs cap" id="c0" style="top:470px"><div class="k">행사 주소나 사진만</div><div class="h">넣으면</div></div>
+  <div class="abs cap" id="c1" style="top:300px"><div class="k">AI가 같은 재료로</div><div class="h">DM·이메일 동시 완성</div></div>
+  <div class="abs cap" id="c2" style="top:300px"><div class="k">보내기 전에</div><div class="h">완성도 점검까지</div></div>
+  <div class="abs cap" id="c3" style="top:300px"><div class="k">확인했으면</div><div class="h">바로 보내기</div></div>
+
+  <div class="abs panel" id="card">
+    <div class="hd"><div class="ic"><svg class="i" viewBox="0 0 24 24"><path d="m21.64 3.64-1.28-1.28a1.21 1.21 0 0 0-1.72 0L2.36 18.64a1.21 1.21 0 0 0 0 1.72l1.28 1.28a1.2 1.2 0 0 0 1.72 0L21.64 5.36a1.2 1.2 0 0 0 0-1.72"/><path d="m14 7 3 3"/><path d="M5 6v4"/><path d="M19 14v4"/><path d="M10 2v2"/><path d="M7 8H3"/><path d="M21 16h-4"/><path d="M11 3H9"/></svg></div>
+      <div><div class="t1">만들기</div><div class="t2">재료만 넣으면 DM·이메일 완성</div></div></div>
+    <div id="box"><span id="ph">행사 주소를 붙여 넣거나, 행사를 한 줄로 적어 주세요</span><span id="typed"></span><span id="caret"></span></div>
+    <div class="mats"><span id="ma0"><i style="background:#E3EEF6"></i>사진 2장</span><span id="ma1"><i style="background:#F3E8DD"></i>몰 상품</span><span id="ma2"><i style="background:var(--ac)"></i>로고·색</span></div>
+    <div class="ft"><div class="btn" id="btn"><span class="ripple" id="rp1"></span><span class="spin" id="sp1" style="display:none"></span><span id="btnT">재료 읽기</span></div></div>
+  </div>
+
+  <div class="abs panel" id="mk">
+    <div class="t">재료 확인</div>
+    <div class="reads"><span id="rd0">사진 속 글자 읽기</span><span id="rd1">몰 가격 다시 확인</span><span id="rd2">로고·색</span></div>
+    <div id="prog"><span class="spin" id="spin"></span><svg class="i" id="done" viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5"/></svg><span id="progT">구성과 문구 만드는 중</span></div>
+    <div class="outs">
+      <div class="dm" id="o0"><div class="im"><img class="po" src="assets/p5.jpg" alt=""></div><b>겨울 감사 세일</b><div class="cta">지금 보러 가기</div></div>
+      <div class="em" id="o1"><div class="s">겨울 감사 세일, 전 상품 20% 할인</div><div class="f">받은편지함 제목</div><div class="im"><img class="po" src="assets/p5.jpg" alt="" style="object-position: 50% 30%"></div><div class="ln"></div><div class="ln" style="width:70%"></div><div class="cta">지금 보러 가기</div></div>
+    </div>
+  </div>
+  <div class="abs lab" id="l0" style="left:200px;top:1400px"><span class="lbl">모바일 DM</span></div>
+  <div class="abs lab" id="l1" style="left:680px;top:1400px"><span class="lbl">이메일</span></div>
+
+  <div class="abs panel" id="ck">
+    <div class="head2">완성도 점검<span>겨울 감사 세일</span></div>
+    <div class="ckr" id="k0"><div class="ok"><svg class="i" viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5"/></svg></div>받은편지함 제목 있음</div>
+    <div class="ckr" id="k1"><div class="ok"><svg class="i" viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5"/></svg></div>광고 표기·수신거부 자동</div>
+    <div class="ckr" id="k2"><div class="ok"><svg class="i" viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5"/></svg></div>버튼이 갈 주소 확인</div>
+    <div class="ckr" id="k3"><div class="ok" style="background:var(--ac)"><svg class="i" viewBox="0 0 24 24"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg></div>블록을 누르면 그 자리만 고쳐요</div>
+  </div>
+
+  <div class="abs panel" id="sd">
+    <div class="ch2"><div class="th"><img class="po" src="assets/p5.jpg" alt=""></div><div><b>모바일 DM</b><p>문자에 DM 링크를 실어 보내요</p></div><div class="st" id="st0">준비됨</div></div>
+    <div class="ch2"><div class="th"><img class="po" src="assets/p5.jpg" alt=""></div><div><b>이메일</b><p>받은편지함으로 보내요</p></div><div class="st" id="st1">준비됨</div></div>
+    <div class="btn" id="go"><span class="ripple" id="rp2"></span>보내기</div>
+  </div>
+</div>
+
+<script src="../common/reel.js"></script>
+<script>
+R.setup({
+  name: '만들기',
+  hook: ['행사 하나에,', '[DM 따로, 메일 따로]', '만드세요?'],
+  chips: ['모바일 DM', '이메일', '같은 재료'],
+  copy: ['재료만 넣으면,', 'DM·이메일까지 한줄로.'],
+  hookSize: 116,
+});
+const { T, C, p, $, show, press } = R;
+const URL_TEXT = 'https://example.com/winter-sale';
+const S = { type: T.s1 + 0.12, click: T.s1 + 1.35, reads: [3.95, 4.15, 4.35], made: 5.2, outs: [5.3, 5.75], checks: [7.7, 7.95, 8.2, 8.45], go: 9.9, sent: [10.1, 10.3] };
+
+window.seek = function (t) {
+  R.base(t);
+  show($('c0'), t, T.s1 + 0.05, T.s2 - 0.22, { dy: 50 });
+  show($('card'), t, T.s1, T.s2 - 0.2, { dy: 140, sc: 0.06, dur: 0.45 });
+  const tx = R.typed(URL_TEXT, t, S.type, 10);
+  $('typed').textContent = tx;
+  $('ph').style.display = tx ? 'none' : '';
+  $('caret').style.opacity = tx.length < URL_TEXT.length || Math.floor(t * 3.2) % 2 === 0 ? 1 : 0;
+  ['ma0', 'ma1', 'ma2'].forEach((id, k) => show($(id), t, T.s1 + 0.95 + k * 0.1, null, { dy: 20, blur: 0, sc: 0.2, ease: 'back', dur: 0.3 }));
+  const pr = press($('btn'), $('rp1'), t, S.click);
+  const ld = t >= S.click + 0.12;
+  $('sp1').style.display = ld ? 'block' : 'none';
+  $('sp1').style.transform = `rotate(${t * 900}deg)`;
+  $('btnT').textContent = ld ? '읽는 중' : '재료 읽기';
+
+  show($('c1'), t, T.s2 + 0.1, T.s3 - 0.2);
+  show($('mk'), t, T.s2 - 0.05, T.s3 - 0.25, { dy: 160, sc: 0.06, dur: 0.5 });
+  ['rd0', 'rd1', 'rd2'].forEach((id, k) => show($(id), t, S.reads[k], null, { dy: 20, blur: 0, sc: 0.2, ease: 'back', dur: 0.3 }));
+  show($('prog'), t, S.reads[2] + 0.1, null, { dy: 20, blur: 4 });
+  const made = t >= S.made;
+  $('spin').style.display = made ? 'none' : 'block';
+  $('spin').style.transform = `rotate(${t * 900}deg)`;
+  $('done').style.display = made ? 'block' : 'none';
+  $('progT').textContent = made ? '같은 재료로 모바일 DM과 이메일을 만들었어요' : '구성과 문구 만드는 중';
+  show($('o0'), t, S.outs[0], null, { dy: 80, sc: 0.08, ease: 'back', dur: 0.45 });
+  show($('o1'), t, S.outs[1], null, { dy: 0, dx: 90, blur: 6, ease: 'back', dur: 0.4 });
+  show($('l0'), t, S.outs[0] + 0.15, T.s3 - 0.25, { dy: 20, blur: 0, sc: 0.3, ease: 'back', dur: 0.3 });
+  show($('l1'), t, S.outs[1] + 0.15, T.s3 - 0.25, { dy: 20, blur: 0, sc: 0.3, ease: 'back', dur: 0.3 });
+
+  show($('c2'), t, T.s3 + 0.05, T.s4 - 0.2);
+  show($('ck'), t, T.s3 - 0.05, T.s4 - 0.25, { dy: 160, sc: 0.06, dur: 0.45 });
+  ['k0', 'k1', 'k2', 'k3'].forEach((id, k) => show($(id), t, S.checks[k], null, { dy: 0, dx: 80, blur: 6, dur: 0.28 }));
+
+  show($('c3'), t, T.s4 + 0.05, T.outro - 0.3);
+  show($('sd'), t, T.s4 - 0.05, T.outro - 0.3, { dy: 160, sc: 0.06, dur: 0.45 });
+  const prGo = press($('go'), $('rp2'), t, S.go);
+  ['st0', 'st1'].forEach((id, k) => {
+    const on = t >= S.sent[k];
+    $(id).classList.toggle('on', on);
+    $(id).textContent = on ? (k === 0 ? '문자로 보냈어요' : '이메일 보냈어요') : '준비됨';
+    $(id).style.transform = `scale(${on ? 0.8 + 0.2 * p(t, S.sent[k], S.sent[k] + 0.3, 'back') : 1})`;
+  });
+
+  R.pointer(t, [
+    { el: $('btn'), at: S.click, gone: T.s2 - 0.3, pr },
+    { el: $('go'), at: S.go, gone: T.outro - 0.4, pr: prGo },
+  ]);
+};
+R.ready();
+</script>
+</body>
+</html>

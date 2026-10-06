@@ -111,6 +111,39 @@
   #url { top: 1340px; left: 50%; display: flex; align-items: center; gap: 16px; padding: 26px 56px; border-radius: 999px; background: #0F172A; color: #fff; font-size: 50px; font-weight: 700; letter-spacing: -0.01em; white-space: nowrap; }
   #url svg { color: #e879f9; }
 </style>
+<style>
+  /* ★2026-10-06 흰 바탕 시리즈로 다시 굽기(Harold 「보라색 계열은 AI 티」) — 위 남색 · 보라 값을 덮는다 · 장면 · 시각표는 그대로 */
+  html, body { background: #FAFAF8; }
+  #stage { background-color: #FAFAF8; background-image: radial-gradient(#E4E4E7 1.7px, transparent 1.7px); background-size: 40px 40px; }
+  .glow { display: none; }
+  .grad { background: linear-gradient(rgba(255,90,31,.32), rgba(255,90,31,.32)) no-repeat 0 82% / 100% 36%; -webkit-background-clip: border-box; background-clip: border-box; color: inherit; padding: 0 6px; }
+  #chip { background: #fff; border-color: #E7E5E4; color: #3F3F46; box-shadow: 0 8px 24px rgba(17,17,17,.05); }
+  #chip img { filter: none; }
+  #chip .bar { background: #E7E5E4; }
+  .cap { color: #111; }
+  .cap .k { color: #71717A; }
+  #hook { color: #111; }
+  #card { border: 2px solid #E7E5E4; box-shadow: 0 40px 100px rgba(17,17,17,.10); }
+  #card .ic { background: #111; }
+  #box { border-color: #FF5A1F; background: #F4F4F5; }
+  #ph { color: #A1A1AA; }
+  #caret { background: #FF5A1F; }
+  #btn { background: #111; box-shadow: none; }
+  #win { border-color: #E7E5E4; box-shadow: 0 40px 100px rgba(17,17,17,.10); background: #F4F4F5; }
+  #wh { background: #fff; color: #111; border-bottom: 2px solid #E7E5E4; }
+  #wh .s { color: #52525B; }
+  #wh .on { color: #15803D; }
+  .start svg { color: #111; }
+  .st.msg { background: #F4F4F5; border-color: #E4E4E7; color: #18181B; }
+  .st.cond { background: #fff; border: 2px dashed #A1A1AA; color: #18181B; }
+  .pill { border-color: #111; color: #111; }
+  .toast { box-shadow: 0 20px 50px rgba(17,17,17,.12); border: 2px solid #E7E5E4; }
+  #wipeA { background: #111; }
+  #ai { background: none; -webkit-background-clip: border-box; background-clip: border-box; color: #FF5A1F; }
+  #outC { color: #111; }
+  #url { background: #111; }
+  #url svg { color: #FF5A1F; }
+</style>
 </head>
 <body>
 <div id="stage">
@@ -152,12 +185,12 @@
     <div id="view">
       <div id="world">
         <svg id="lines" width="2800" height="1800">
-          <path id="L1" fill="none" stroke="#8b5cf6" stroke-width="5" stroke-linecap="round"/>
-          <path id="L1f" fill="none" stroke="#ddd6fe" stroke-width="5" stroke-dasharray="10 26" stroke-linecap="round"/>
-          <path id="A1" fill="#8b5cf6"/>
-          <path id="L2" fill="none" stroke="#8b5cf6" stroke-width="5" stroke-linecap="round"/>
-          <path id="L2f" fill="none" stroke="#ddd6fe" stroke-width="5" stroke-dasharray="10 26" stroke-linecap="round"/>
-          <path id="A2" fill="#8b5cf6"/>
+          <path id="L1" fill="none" stroke="#111" stroke-width="5" stroke-linecap="round"/>
+          <path id="L1f" fill="none" stroke="#FF5A1F" stroke-width="5" stroke-dasharray="10 26" stroke-linecap="round"/>
+          <path id="A1" fill="#111"/>
+          <path id="L2" fill="none" stroke="#111" stroke-width="5" stroke-linecap="round"/>
+          <path id="L2f" fill="none" stroke="#FF5A1F" stroke-width="5" stroke-dasharray="10 26" stroke-linecap="round"/>
+          <path id="A2" fill="#111"/>
         </svg>
         <div class="lane" style="left:0">가입</div>
         <div class="lane" style="left:1020px">첫 구매</div>
@@ -226,12 +259,12 @@
   <div class="abs wipe" id="wipeA"></div>
   <div class="abs wipe" id="wipeB"></div>
   <svg class="abs" id="ol" width="1080" height="240" style="left:0;top:450px;overflow:visible">
-    <defs><linearGradient id="olg" x1="0" x2="1"><stop offset="0" stop-color="#d946ef"/><stop offset="1" stop-color="#8b5cf6"/></linearGradient></defs>
+    <defs><linearGradient id="olg" x1="0" x2="1"><stop offset="0" stop-color="#111"/><stop offset="1" stop-color="#111"/></linearGradient></defs>
     <path id="olL" d="M 140 100 C 290 20, 390 180, 540 100 C 690 20, 790 180, 940 100" fill="none" stroke="url(#olg)" stroke-width="7" stroke-linecap="round"/>
     <path id="olF" d="M 140 100 C 290 20, 390 180, 540 100 C 690 20, 790 180, 940 100" fill="none" stroke="#fff" stroke-opacity=".6" stroke-width="7" stroke-dasharray="10 30" stroke-linecap="round"/>
-    <g transform="translate(140 100)"><g class="oln"><circle r="17" fill="#fff" stroke="#d946ef" stroke-width="7"/><text y="66" text-anchor="middle" font-size="30" font-weight="600" fill="#64748b">가입</text></g></g>
-    <g transform="translate(540 100)"><g class="oln"><circle r="17" fill="#fff" stroke="#b05cf6" stroke-width="7"/><text y="66" text-anchor="middle" font-size="30" font-weight="600" fill="#64748b">첫 구매</text></g></g>
-    <g transform="translate(940 100)"><g class="oln"><circle r="17" fill="#fff" stroke="#8b5cf6" stroke-width="7"/><text y="66" text-anchor="middle" font-size="30" font-weight="600" fill="#64748b">재구매</text></g></g>
+    <g transform="translate(140 100)"><g class="oln"><circle r="17" fill="#fff" stroke="#111" stroke-width="7"/><text y="66" text-anchor="middle" font-size="30" font-weight="600" fill="#64748b">가입</text></g></g>
+    <g transform="translate(540 100)"><g class="oln"><circle r="17" fill="#fff" stroke="#FF5A1F" stroke-width="7"/><text y="66" text-anchor="middle" font-size="30" font-weight="600" fill="#64748b">첫 구매</text></g></g>
+    <g transform="translate(940 100)"><g class="oln"><circle r="17" fill="#fff" stroke="#111" stroke-width="7"/><text y="66" text-anchor="middle" font-size="30" font-weight="600" fill="#64748b">재구매</text></g></g>
   </svg>
   <div class="abs" id="outK">마케팅의 완성</div>
   <div class="abs" id="logo">

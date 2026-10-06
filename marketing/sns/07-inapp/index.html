@@ -1,0 +1,294 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>한줄로 AI 인앱 메시지</title>
+<!--
+  인스타그램 릴스 · 스레드 소개 영상 07(1080x1920 · 15초 · 30fps) · 흰 바탕 시리즈
+  모양 고르기 → 저장한 포스터로 모달 완성 → 대상 · 시점 · 하루 1회 → 발행 → 자사몰에 그 순간 노출.
+  포스터(assets/p2) = 04 편과 같이 서버에서 영상용으로 새로 만든 것. 시간은 window.seek(t) 하나가 정한다.
+-->
+<style>
+  :root { --bg: #FAFAF8; --ink: #111111; --line: #E7E5E4; --soft: #F4F4F5; --ac: #FF5A1F; --ac-soft: #FFF1EB; }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { width: 1080px; height: 1920px; overflow: hidden; background: var(--bg); }
+  body { font-family: 'Pretendard', sans-serif; -webkit-font-smoothing: antialiased; color: var(--ink); letter-spacing: -0.02em; }
+  #stage { position: relative; width: 1080px; height: 1920px; overflow: hidden; background-color: var(--bg);
+           background-image: radial-gradient(#E4E4E7 1.7px, transparent 1.7px); background-size: 40px 40px; }
+  .abs { position: absolute; }
+  .mark { background: linear-gradient(rgba(255,90,31,.32), rgba(255,90,31,.32)) no-repeat 0 82% / 0% 36%; padding: 0 6px; }
+  svg.i { width: 1em; height: 1em; fill: none; stroke: currentColor; stroke-width: 2.2; stroke-linecap: round; stroke-linejoin: round; flex: none; }
+  .panel { left: 60px; width: 960px; border-radius: 44px; background: #fff; border: 2px solid var(--line); box-shadow: 0 40px 100px rgba(17,17,17,.10); overflow: hidden; }
+  img.po { display: block; width: 100%; height: 100%; object-fit: cover; }
+  #chip { left: 50%; top: 200px; display: flex; align-items: center; gap: 22px; padding: 18px 34px; border-radius: 999px; background: #fff; border: 2px solid var(--line);
+          color: #3F3F46; font-size: 30px; font-weight: 600; white-space: nowrap; box-shadow: 0 8px 24px rgba(17,17,17,.05); }
+  #chip img { height: 34px; }
+  #chip .bar { width: 2px; height: 28px; background: var(--line); }
+  .cap { left: 0; width: 1080px; text-align: center; }
+  .cap .k { font-size: 44px; font-weight: 600; color: #71717A; }
+  .cap .h { margin-top: 10px; font-size: 84px; font-weight: 800; letter-spacing: -0.045em; line-height: 1.12; }
+  #hook { left: 0; top: 640px; width: 1080px; text-align: center; font-weight: 800; font-size: 124px; letter-spacing: -0.055em; line-height: 1.2; }
+  #hook .l { display: block; }
+  .btn { position: relative; overflow: hidden; display: flex; align-items: center; justify-content: center; gap: 14px; padding: 24px 40px; border-radius: 28px; color: #fff; font-size: 36px; font-weight: 700; background: var(--ink); }
+  .ripple { position: absolute; left: 50%; top: 50%; width: 120px; height: 120px; margin: -60px 0 0 -60px; border-radius: 50%; background: rgba(255,255,255,.45); }
+  #pointer { width: 92px; height: 92px; }
+
+  /* 모양 고르기 */
+  #fm { top: 540px; padding: 36px; }
+  #fm .t { font-size: 32px; font-weight: 800; }
+  .fg { margin-top: 24px; display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; }
+  .fc { border: 2px solid var(--line); border-radius: 26px; padding: 18px; background: #fff; }
+  .fc.pick { border-color: var(--ac); box-shadow: 0 0 0 6px var(--ac-soft); }
+  .fc .mini { position: relative; height: 300px; border-radius: 22px; background: var(--soft); overflow: hidden; }
+  .fc .mini i { position: absolute; display: block; background: #fff; border-radius: 12px; box-shadow: 0 6px 16px rgba(17,17,17,.12); }
+  .fc .mini .acc { background: var(--ink); }
+  .fc b { display: block; margin-top: 14px; font-size: 26px; font-weight: 800; text-align: center; }
+
+  /* 휴대폰(편집 · 자사몰) */
+  .phone { left: 290px; top: 540px; width: 500px; height: 1000px; border: 12px solid var(--ink); border-radius: 68px; overflow: hidden; background: #fff; box-shadow: 0 50px 120px rgba(17,17,17,.18); }
+  .mall { position: absolute; inset: 0; padding: 20px 18px; }
+  .mall .bar { height: 54px; border-radius: 14px; background: var(--soft); display: flex; align-items: center; padding: 0 18px; font-size: 22px; font-weight: 900; letter-spacing: .1em; color: #3F3F46; }
+  .mall .hero { margin-top: 16px; height: 260px; border-radius: 22px; background: #EDE7DF; }
+  .mall .g { margin-top: 16px; display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+  .mall .g i { display: block; height: 220px; border-radius: 18px; }
+  .dim { position: absolute; inset: 0; background: rgba(17,17,17,.5); }
+  .modal { position: absolute; left: 34px; right: 34px; top: 120px; border-radius: 28px; overflow: hidden; background: #fff; }
+  .modal .mi { height: 470px; }
+  .modal .bd { padding: 18px 22px 0; }
+  .modal .bd b { display: block; font-size: 30px; font-weight: 900; letter-spacing: -0.04em; }
+  .cp { margin: 14px 22px 0; border: 3px dashed var(--ac); border-radius: 18px; padding: 14px 18px; background: var(--ac-soft); display: flex; align-items: center; }
+  .cp small { display: block; font-size: 16px; font-weight: 800; color: #C2410C; letter-spacing: .04em; }
+  .cp b { display: block; font-size: 24px; font-weight: 900; color: #9A3412; }
+  .modal .act { display: flex; margin-top: 16px; border-top: 2px solid var(--line); }
+  .modal .act span { flex: 1; text-align: center; padding: 18px 0; font-size: 22px; font-weight: 800; color: #52525B; }
+  .modal .act span + span { background: var(--ink); color: #fff; }
+  .tag { padding: 12px 22px; border-radius: 999px; background: #fff; border: 2px solid var(--line); font-size: 25px; font-weight: 700; white-space: nowrap; box-shadow: 0 10px 24px rgba(17,17,17,.08); }
+
+  /* 대상 · 시점 */
+  #tg { top: 540px; padding: 40px; }
+  #tg .t { font-size: 34px; font-weight: 800; padding-bottom: 22px; border-bottom: 2px solid var(--line); }
+  .q { margin-top: 26px; }
+  .q .k { font-size: 24px; font-weight: 700; color: #52525B; }
+  .q .ops { margin-top: 12px; display: flex; gap: 12px; flex-wrap: wrap; }
+  .q .ops span { padding: 14px 24px; border-radius: 999px; border: 2px solid var(--line); font-size: 27px; font-weight: 700; color: #3F3F46; }
+  .q .ops span.on { background: var(--ink); border-color: var(--ink); color: #fff; }
+  #pub { margin-top: 34px; }
+  #toast { left: 50%; top: 1380px; display: flex; align-items: center; gap: 12px; padding: 18px 32px; border-radius: 999px; background: var(--ink); color: #fff; font-size: 28px; font-weight: 700; white-space: nowrap; }
+  #toast svg { color: var(--ac); }
+  #live { left: 50%; top: 1570px; display: flex; align-items: center; gap: 12px; padding: 14px 26px; border-radius: 999px; background: #fff; border: 2px solid var(--line); font-size: 28px; font-weight: 800; white-space: nowrap; box-shadow: 0 10px 24px rgba(17,17,17,.08); }
+  #live i { width: 14px; height: 14px; border-radius: 50%; background: #22C55E; box-shadow: 0 0 0 6px rgba(34,197,94,.18); }
+
+  .wipe { left: 0; top: 0; width: 1080px; height: 1920px; }
+  #wipeA { background: var(--ink); }
+  #wipeB { background: var(--bg); }
+  #och { left: 0; top: 540px; width: 1080px; display: flex; justify-content: center; gap: 16px; }
+  #och div { padding: 16px 28px; border-radius: 999px; background: var(--ink); color: #fff; font-size: 30px; font-weight: 700; }
+  #outK { top: 710px; left: 0; width: 1080px; text-align: center; font-size: 50px; font-weight: 600; color: #71717A; }
+  #logo { left: 190px; top: 810px; width: 700px; height: 156px; }
+  #logo img { position: absolute; left: 0; top: 0; width: 700px; }
+  #ai { position: absolute; left: 448px; width: 248px; text-align: center; top: -24px; font-size: 150px; font-weight: 900; letter-spacing: -0.03em; line-height: 1; color: var(--ac); }
+  #outC { top: 1080px; left: 0; width: 1080px; text-align: center; font-size: 66px; font-weight: 800; letter-spacing: -0.045em; line-height: 1.28; }
+  #outC .l { display: block; }
+  #url { top: 1340px; left: 50%; display: flex; align-items: center; gap: 16px; padding: 26px 56px; border-radius: 999px; background: var(--ink); color: #fff; font-size: 50px; font-weight: 700; white-space: nowrap; }
+  #url svg { color: var(--ac); }
+</style>
+</head>
+<body>
+<div id="stage">
+  <div class="abs" id="chip"><img src="../../../packages/frontend/public/logo.png" alt="한줄로"><span class="bar"></span><span>인앱 메시지</span></div>
+
+  <div class="abs" id="hook"><span class="l" id="h1">자사몰에 온 고객,</span><span class="l" id="h2">들어온 <span class="mark" id="hm">그 순간</span></span><span class="l" id="h3">놓치고 있나요?</span></div>
+
+  <div class="abs cap" id="c0" style="top:300px"><div class="k">모달 · 배너 · 포스터</div><div class="h">모양 고르고</div></div>
+  <div class="abs cap" id="c1" style="top:300px"><div class="k">저장한 포스터로</div><div class="h">바로 인앱 완성</div></div>
+  <div class="abs cap" id="c2" style="top:300px"><div class="k">누구에게, 언제</div><div class="h">정해서 발행</div></div>
+  <div class="abs cap" id="c3" style="top:300px"><div class="k">고객이 들어온 그 순간</div><div class="h">자사몰에 바로</div></div>
+
+  <!-- 모양 -->
+  <div class="abs panel" id="fm">
+    <div class="t">어떤 모양으로 띄울까요?</div>
+    <div class="fg">
+      <div class="fc" id="f0"><div class="mini"><i style="left:24px;right:24px;top:70px;height:160px"></i></div><b>중앙 모달</b></div>
+      <div class="fc" id="f1"><div class="mini"><i style="left:0;right:0;bottom:0;height:120px;border-radius:18px 18px 0 0"></i></div><b>바텀 시트</b></div>
+      <div class="fc" id="f2"><div class="mini"><i class="acc" style="left:12px;right:12px;top:12px;height:44px"></i></div><b>상단 배너</b></div>
+      <div class="fc" id="f3"><div class="mini"><i style="left:34px;right:34px;top:24px;bottom:24px"></i></div><b>포스터형</b></div>
+      <div class="fc" id="f4"><div class="mini"><i class="acc" style="left:30px;right:30px;bottom:30px;height:40px;border-radius:999px"></i></div><b>토스트</b></div>
+    </div>
+  </div>
+
+  <!-- 편집(휴대폰 위 모달) -->
+  <div class="abs phone" id="pe"><div class="mall"><div class="bar">SHOP</div><div class="hero"></div><div class="g"><i style="background:#F3E8DD"></i><i style="background:#E3EEF6"></i></div></div>
+    <div class="dim" id="ed0"></div>
+    <div class="modal">
+      <div class="mi" id="m0"><img class="po" src="assets/p2.jpg" alt=""></div>
+      <div class="bd" id="m1"><b>새 매장 그랜드 오픈</b></div>
+      <div class="cp" id="m2"><div><small>WELCOME GIFT</small><b>첫 방문 웰컴 기프트</b></div></div>
+      <div class="act" id="m3"><span>닫기</span><span>자세히 보기</span></div>
+    </div>
+  </div>
+  <div class="abs tag" id="g0" style="left:40px;top:760px">이미지 스튜디오 저장 소재</div>
+  <div class="abs tag" id="g1" style="left:800px;top:1180px">점선 쿠폰 스타일</div>
+
+  <!-- 대상 · 시점 -->
+  <div class="abs panel" id="tg">
+    <div class="t">타겟 · 시점</div>
+    <div class="q"><div class="k">누구에게</div><div class="ops"><span class="on">전체 방문 고객</span><span>장바구니 페이지 방문</span></div></div>
+    <div class="q"><div class="k">언제</div><div class="ops"><span>페이지 로드</span><span id="o1">페이지 체류</span><span>스크롤</span></div></div>
+    <div class="q"><div class="k">얼마나 자주</div><div class="ops"><span id="o2">하루 1회</span><span>사용자별 최대 노출 횟수</span></div></div>
+    <div class="q"><div class="k">노출 요일</div><div class="ops" id="o3"><span>월</span><span>화</span><span>수</span><span>목</span><span>금</span><span>토</span><span>일</span></div></div>
+    <div class="btn" id="pub"><span class="ripple" id="rp1"></span>지금 발행</div>
+  </div>
+  <div class="abs" id="toast"><svg class="i" viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5"/></svg>발행했어요. 고객 화면에 곧 보입니다</div>
+
+  <!-- 자사몰 -->
+  <div class="abs phone" id="pm"><div class="mall" id="mallIn"><div class="bar">SHOP</div><div class="hero"></div><div class="g"><i style="background:#F3E8DD"></i><i style="background:#E3EEF6"></i><i style="background:#F9DDE3"></i><i style="background:#DDE8DC"></i></div></div>
+    <div class="dim" id="d1"></div>
+    <div class="modal" id="mm">
+      <div class="mi"><img class="po" src="assets/p2.jpg" alt=""></div>
+      <div class="bd"><b>새 매장 그랜드 오픈</b></div>
+      <div class="cp"><div><small>WELCOME GIFT</small><b>첫 방문 웰컴 기프트</b></div></div>
+      <div class="act"><span>닫기</span><span>자세히 보기</span></div>
+    </div>
+  </div>
+  <div class="abs" id="live"><i></i>노출 중</div>
+
+  <svg class="abs" id="pointer" viewBox="0 0 24 24"><path d="M4.037 4.688a.495.495 0 0 1 .651-.651l16 6.5a.5.5 0 0 1-.063.947l-6.124 1.58a2 2 0 0 0-1.438 1.435l-1.579 6.126a.5.5 0 0 1-.947.063z" fill="#111" stroke="#fff" stroke-width="1.4" stroke-linejoin="round"/></svg>
+
+  <div class="abs wipe" id="wipeA"></div>
+  <div class="abs wipe" id="wipeB"></div>
+  <div class="abs" id="och"><div>중앙 모달</div><div>바텀 시트</div><div>배너</div><div>포스터</div></div>
+  <div class="abs" id="outK">마케팅의 완성</div>
+  <div class="abs" id="logo">
+    <img src="../../../packages/frontend/public/logo.png" alt="한줄로" style="clip-path: inset(0 36% 0 0)">
+    <img id="logoBar" src="../../../packages/frontend/public/logo.png" alt="" style="clip-path: inset(0 0 0 64%)">
+    <div id="ai"></div>
+  </div>
+  <div class="abs" id="outC"><span class="l" id="o1c">들어온 그 순간,</span><span class="l" id="o2c">말 거는 것까지 한줄로.</span></div>
+  <div class="abs" id="url">hanjul.ai<svg class="i" viewBox="0 0 24 24"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></svg></div>
+</div>
+
+<script>
+const BAR = 1.875;
+const T = {
+  form: BAR, edit: 2 * BAR, tgt: 4 * BAR, live: 5 * BAR, outro: 6 * BAR, copy: 12.55, url: 7 * BAR,
+  cards: [2.05, 2.3, 2.55, 2.8, 3.05], pick: 3.3, parts: [4.0, 4.5, 5.0, 5.5], opts: [7.7, 8.05, 8.4], pub: 8.85,
+  pop: 9.9, onAir: 10.5, och: [11.6, 11.75, 11.9, 12.05], aiType: [12.15, 12.3],
+};
+
+const C = (x) => Math.min(1, Math.max(0, x));
+const E = {
+  lin: (x) => x, out: (x) => 1 - Math.pow(1 - x, 3), in: (x) => x * x * x,
+  io: (x) => (x < 0.5 ? 4 * x * x * x : 1 - Math.pow(-2 * x + 2, 3) / 2),
+  back: (x) => { const c1 = 1.7, c3 = c1 + 1; return 1 + c3 * Math.pow(x - 1, 3) + c1 * Math.pow(x - 1, 2); },
+};
+const p = (t, a, b, e = 'out') => E[e](C((t - a) / (b - a)));
+const lerp = (a, b, x) => a + (b - a) * x;
+const $ = (id) => document.getElementById(id);
+function show(el, t, a, b, o = {}) {
+  const { dy = 60, blur = 12, dur = 0.38, outDur = 0.24, sc = 0, ease = 'out', x = '', dx = 0 } = o;
+  const i = p(t, a, a + dur, ease);
+  const q = b == null ? 0 : p(t, b, b + outDur, 'in');
+  const v = Math.min(C(i * 1.4), 1) * (1 - q);
+  el.style.opacity = v;
+  el.style.visibility = v <= 0.001 ? 'hidden' : 'visible';
+  el.style.transform = `${x} translate(${(1 - i) * dx}px, ${(1 - i) * dy - q * dy * 0.5}px) scale(${1 - sc * (1 - i) - sc * 0.5 * q})`;
+  const bl = (1 - C(i * 1.3)) * blur + q * blur;
+  el.style.filter = bl > 0.05 ? `blur(${bl}px)` : 'none';
+}
+const mark = (el, t, a) => { el.style.backgroundSize = `${p(t, a, a + 0.35, 'io') * 100}% 36%`; };
+function press(btn, rp, t, at) {
+  const pr = p(t, at - 0.06, at + 0.06, 'in') * (1 - p(t, at + 0.06, at + 0.26, 'out'));
+  btn.style.transform = `scale(${1 - 0.07 * pr})`;
+  const r = C((t - at) / 0.45);
+  rp.style.opacity = t >= at ? 0.9 * (1 - r) : 0;
+  rp.style.transform = `scale(${0.2 + r * 6})`;
+  return pr;
+}
+
+window.seek = function (t) {
+  $('stage').style.backgroundPosition = `${-t * 6}px ${-t * 14}px`;
+  show($('chip'), t, 0.0, T.outro - 0.2, { dy: -30, x: 'translateX(-50%)' });
+  show($('h1'), t, 0.04, T.form - 0.2, { dy: 80, sc: 0.06 });
+  show($('h2'), t, 0.47, T.form - 0.2, { dy: 80, sc: 0.06 });
+  show($('h3'), t, 0.9, T.form - 0.2, { dy: 80, sc: 0.06 });
+  mark($('hm'), t, 0.7);
+
+  // 모양
+  show($('c0'), t, T.form + 0.05, T.edit - 0.22, { dy: 50 });
+  show($('fm'), t, T.form - 0.05, T.edit - 0.2, { dy: 140, sc: 0.06, dur: 0.45 });
+  [0, 1, 2, 3, 4].forEach((k) => show($('f' + k), t, T.cards[k], null, { dy: 40, blur: 6, sc: 0.12, ease: 'back', dur: 0.32 }));
+  $('f0').classList.toggle('pick', t >= T.pick);
+
+  // 편집
+  show($('c1'), t, T.edit + 0.1, T.tgt - 0.2);
+  show($('pe'), t, T.edit - 0.05, T.tgt - 0.25, { dy: 200, sc: 0.06, dur: 0.5 });
+  $('ed0').style.opacity = 0.5 + 0.5 * p(t, T.parts[0], T.parts[0] + 0.3);
+  ['m0', 'm1', 'm2', 'm3'].forEach((id, k) => {
+    const a = T.parts[k];
+    $(id).style.opacity = p(t, a + 0.05, a + 0.3);
+    $(id).style.transform = `translateY(${(1 - p(t, a, a + 0.3)) * 26}px)`;
+  });
+  show($('g0'), t, T.parts[0] + 0.1, T.tgt - 0.25, { dy: 0, dx: -60, blur: 6, sc: 0.2, ease: 'back', dur: 0.35 });
+  show($('g1'), t, T.parts[2] + 0.1, T.tgt - 0.25, { dy: 0, dx: 60, blur: 6, sc: 0.2, ease: 'back', dur: 0.35 });
+
+  // 대상 · 시점 · 발행
+  show($('c2'), t, T.tgt + 0.05, T.live - 0.2);
+  show($('tg'), t, T.tgt - 0.05, T.live - 0.25, { dy: 160, sc: 0.06, dur: 0.45 });
+  $('o1').classList.toggle('on', t >= T.opts[0]);
+  $('o2').classList.toggle('on', t >= T.opts[1]);
+  $('o3').querySelectorAll('span').forEach((s) => s.classList.toggle('on', t >= T.opts[2]));
+  const prP = press($('pub'), $('rp1'), t, T.pub);
+  show($('toast'), t, T.pub + 0.1, T.live - 0.2, { dy: 30, sc: 0.2, ease: 'back', dur: 0.3, x: 'translateX(-50%)', blur: 0 });
+
+  // 자사몰에 뜬다
+  show($('c3'), t, T.live + 0.05, T.outro - 0.3);
+  show($('pm'), t, T.live - 0.05, T.outro - 0.3, { dy: 160, sc: 0.06, dur: 0.45 });
+  $('mallIn').style.transform = `translateY(${-120 * p(t, T.live, T.pop - 0.05, 'io')}px)`;
+  $('d1').style.opacity = p(t, T.pop, T.pop + 0.25);
+  const mp = p(t, T.pop, T.pop + 0.4, 'back');
+  $('mm').style.opacity = C(p(t, T.pop, T.pop + 0.15));
+  $('mm').style.transform = `scale(${0.8 + 0.2 * mp})`;
+  show($('live'), t, T.onAir, T.outro - 0.3, { dy: 30, sc: 0.2, ease: 'back', dur: 0.35, x: 'translateX(-50%)', blur: 0 });
+
+  // 아웃트로
+  const wa = p(t, T.outro - 0.25, T.outro + 0.15, 'io');
+  const wb = p(t, T.outro - 0.12, T.outro + 0.28, 'io');
+  $('wipeA').style.clipPath = `circle(${wa * 1400}px at 540px 1150px)`;
+  $('wipeB').style.clipPath = `circle(${wb * 1400}px at 540px 1150px)`;
+  $('wipeA').style.visibility = wa > 0 ? 'visible' : 'hidden';
+  $('wipeB').style.visibility = wb > 0 ? 'visible' : 'hidden';
+  $('och').querySelectorAll('div').forEach((d, j) => show(d, t, T.och[j], null, { dy: 30, blur: 0, sc: 0.3, ease: 'back', dur: 0.35 }));
+  show($('outK'), t, T.outro + 0.2, null, { dy: 40 });
+  show($('logo'), t, T.outro + 0.28, null, { dy: 70, sc: 0.08, dur: 0.5 });
+  $('ai').textContent = (t >= T.aiType[0] ? 'A' : '') + (t >= T.aiType[1] ? 'I' : '');
+  $('logoBar').style.opacity = t < T.aiType[1] ? (Math.floor((t - T.outro) * 3.2) % 2 === 0 ? 1 : 0.15) : 1;
+  show($('o1c'), t, T.copy, null, { dy: 50 });
+  show($('o2c'), t, T.copy + 0.15, null, { dy: 50 });
+  show($('url'), t, T.url, null, { dy: 40, sc: 0.2, ease: 'back', dur: 0.45, x: 'translateX(-50%)' });
+
+  // 포인터(맨 끝): 중앙 모달 → 지금 발행
+  const targets = [
+    { el: $('f0'), at: T.pick, gone: T.edit - 0.3, pr: 0 },
+    { el: $('pub'), at: T.pub, gone: T.live - 0.3, pr: prP },
+  ];
+  const cur = t < T.tgt - 0.3 ? targets[0] : targets[1];
+  const bb = cur.el.getBoundingClientRect();
+  const bx = bb.left + Math.min(bb.width * 0.6, 420), by = bb.top + bb.height * 0.55;
+  const m = p(t, cur.at - 0.42, cur.at - 0.05, 'io');
+  const pt = $('pointer');
+  pt.style.left = lerp(bx + 170, bx, m) + 'px';
+  pt.style.top = lerp(by + 250, by, m) + 'px';
+  pt.style.opacity = C(p(t, cur.at - 0.5, cur.at - 0.35)) * (1 - p(t, cur.gone, cur.gone + 0.15));
+  const tap = p(t, cur.at - 0.06, cur.at + 0.06, 'in') * (1 - p(t, cur.at + 0.06, cur.at + 0.26));
+  pt.style.transform = `scale(${1 - 0.14 * Math.max(tap, cur.pr)})`;
+};
+
+window.ready = (async () => {
+  await document.fonts.ready;
+  await Promise.all([...document.images].map((im) => (im.complete ? 0 : new Promise((r) => { im.onload = im.onerror = r; }))));
+  window.seek(0);
+  return true;
+})();
+</script>
+</body>
+</html>

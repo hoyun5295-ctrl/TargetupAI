@@ -189,15 +189,15 @@ describe('남은 옛 문구', () => {
  *   영상은 예시라 오른쪽 설명이 기능을 제대로 말해야 한다(「원하는 시간 · 예산 등 자유롭게 설정」) → 설정 · 안전장치 칸이 함께 있어야 한다.
  */
 describe('예시 영상 + 상세 설명', () => {
-  const VIDEO_IDS = ['auto-marketing', 'journeys', 'marketing-planner', 'image-studio'];
-  const block = (id: string) => {
-    const at = INTROS.indexOf(`id: '${id}'`);
-    const next = INTROS.indexOf('\n  {\n    id: ', at + 1);
-    return INTROS.slice(at, next === -1 ? undefined : next);
-  };
+  // ★ 2026-10-06 허브 카드 12개 전부(Harold 10-06 영상 12편 완성 · 끝 장면 잘라 720p 무음)
+  const VIDEO_IDS = ['auto-marketing', 'journeys', 'marketing-planner', 'image-studio',
+    'mobile-dm', 'email-campaign', 'inapp-message', 'quick-campaign', 'sns', 'connect-shop', 'performance', 'ai-memory'];
+  // 항목 = 「\n  {\n」으로 시작하는 덩어리 하나(id 앞에 주석 줄이 있어도 같은 덩어리 · 주석은 빈 줄로 지워져 있다)
+  const ENTRIES = INTROS.split('\n  {\n').map((chunk) => ({ id: chunk.match(/\bid: '([a-z-]+)'/)?.[1] || null, chunk }));
+  const block = (id: string) => ENTRIES.find((e) => e.id === id)?.chunk || '';
   const PUBLIC = join(FRONT, '..', 'public');
 
-  it('영상 4기능은 영상 · 포스터 파일이 실제로 있고 설정 · 안전장치 칸을 함께 갖는다', () => {
+  it('영상 기능은 영상 · 포스터 파일이 실제로 있고 설정 · 안전장치 칸을 함께 갖는다', () => {
     for (const id of VIDEO_IDS) {
       const b = block(id);
       expect(b, id).toContain(`video: { src: '/videos/plan-feature/${id}.mp4', poster: '/videos/plan-feature/${id}.jpg' }`);
@@ -208,10 +208,11 @@ describe('예시 영상 + 상세 설명', () => {
     }
   });
 
-  it('원장에서 영상을 가진 기능은 정확히 이 4개다(파일 없는 영상 주소 0)', () => {
-    const withVideo = [...INTROS.matchAll(/id: '([a-z-]+)'[\s\S]*?(?=\n  \{\n    id: |\n\];)/g)]
-      .filter((m) => m[0].includes('video: {')).map((m) => m[1]);
+  it('원장에서 영상을 가진 기능은 정확히 허브 카드 12개다(파일 없는 영상 주소 0)', () => {
+    const withVideo = ENTRIES.filter((e) => e.id && e.chunk.includes('video: {')).map((e) => e.id as string);
     expect(withVideo.sort()).toEqual([...VIDEO_IDS].sort());
+    // 허브 카드 12개와 같은 집합이다
+    expect([...VIDEO_IDS].sort()).toEqual(cardPaths.map((p) => introByPath.get(p)).sort());
   });
 
   it('창: 영상이 있을 때만 두 단 · 무음 · 반복 · 화면 안 재생 · 움직임 줄이기면 자동재생 대신 재생 버튼', () => {
@@ -252,5 +253,32 @@ describe('Codex 1R — 적용 조건까지 적는다 · 짧은 화면', () => {
     expect(MODAL).toContain('sm:grid-rows-[auto_minmax(0,1fr)_auto]');
     expect(MODAL).toContain('sm:col-start-2 sm:row-start-2 sm:min-h-0 sm:overflow-y-auto');
     expect(MODAL).toMatch(/shrink-0 border-t px-5 sm:px-6 pt-3 pb-4 sm:col-start-2 sm:row-start-3/);
+  });
+});
+
+/**
+ * ★ 2026-10-06 허브 카드 12개 전부 상세 설명(Harold: 「영상 오늘 다 만들 테니 공간만 비워 두고 전체 다 만들어 놓으면 된다 · 영상 오면 매칭해 한 번에 배포」).
+ *   영상은 따로 붙는다(영상 칸 = 파일이 생긴 기능만 · 위 「정확히 이 기능들」 테스트가 그 목록을 소유).
+ */
+describe('허브 카드 12개 — 상세 설명이 모두 있다', () => {
+  const blockByPath = (path: string) => {
+    const at = INTROS.indexOf(`path: '${path}'`);
+    const next = INTROS.indexOf('\n  {\n', at + 1);
+    return INTROS.slice(at, next === -1 ? undefined : next);
+  };
+
+  it('허브 카드마다 직접 정할 수 있는 것 · 알아서 지켜 주는 것이 있다', () => {
+    const missing = cardPaths.filter((p) => {
+      const b = blockByPath(p);
+      return !/options: \[\s*\{/.test(b) || !/safeguards: \[\s*\{/.test(b);
+    });
+    expect(missing).toEqual([]);
+  });
+
+  it('바로잡은 옛 문구: 자사몰 연동 매일 분석은 연동 탓이 아니다 · 이메일 제목은 허브 카드와 같다', () => {
+    const raw = read('constants/plan-feature-intros.ts');
+    expect(raw).not.toContain('연동하면 고객 수에 맞춰 매일 분석 크레딧이 듭니다');
+    expect(raw).toContain("costNote: '연동 자체에는 크레딧이 들지 않습니다'");
+    expect(raw).toContain("id: 'email-campaign', path: '/email-campaigns', title: '이메일 마케팅'");
   });
 });
