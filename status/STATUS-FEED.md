@@ -143,6 +143,7 @@
 > ★ 슈퍼관리자 「기능 관심 업체」(Harold 전용 · `FEATURE_INTEREST_VIEWER_IDS` 기본 ceo) = 안내 창 열람 · 「요금제 보기」를 회사별로(원천 audit_logs · DDL 0) · Codex 2R approve · 설계서 §10 · **배포완료(1006 Harold · 기록은 배포 시점부터)** · 접근권한 분류표 2.1(줄 추가 · 제출본은 2.0)
 > ★ 로그인 안내 창(`AiOperatorLoginPromo.tsx` · Harold 「로그인 후 · 지금 바로가기」) = AI Operator 잠긴 회사에 로그인 1회마다 1번 · 영상 + 칩 5줄 → `/ai-operator` · 기록 = 같은 audit_logs(featureId `login-promo` · `plan_feature_open` · `plan_feature_go`) · 「기능 관심 업체」에서 봄 · 설계서 §11 · Codex 3R 지적 없음 · **배포완료(1006 Harold)**
 > ★ 만들기 재오픈 2건(배포완료 1006 Harold · 프론트만 · DDL 0) = [B-1006-1](BUGS.md) 「넣은 재료 다시 보기」 주소 · 읽은 재료 · 체크 복구(이메일 같음) · [B-1006-2](BUGS.md) 수정 화면 장 · 쪽 빼기(옆으로 넘기기 · 책처럼 · 2쪽 잠금 해제)
+> ★1007 **공개 소개 페이지 대개편** = 앱 공개 화면 `/about`(옛 `about-ai-operator.html` → 안내 파일) · 기능 11개 × 예시 영상(썸네일 → 눌러서 한 편만 재생) · 문장 = 기능 안내 창과 같은 원장(`tagline` 칸 추가) · 목업 3안 승인 · 미배포(프론트 빌드만) · 설계서 [2026-10-07-about-page-redesign-design](../docs/2026-10-07-about-page-redesign-design.md)
 > 다음 = 접수 직원 실측(그룹웨어) · §9 남은 것(허브 카드 한 줄 설명 · SNS 개방 · 도움말 카탈로그) 착수 판단 Harold
 
 <a id="n01"></a>

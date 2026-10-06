@@ -44,6 +44,11 @@ export interface PlanFeatureIntro {
   options?: { title: string; text: string; chips?: string[]; wide?: boolean }[];
   /** ★ 2026-10-06 알아서 지켜 주는 것 — 코드에 있는 안전장치만 */
   safeguards?: { title: string; text: string }[];
+  /**
+   * ★ 2026-10-07 공개 소개 페이지(`/about`) 카드 한 줄 — 위 summary · steps 문장을 줄인 말만(새 사실 0).
+   *   공개 페이지에 싣는 기능만 채운다(`constants/about-page.ts` · 계약 = about-page-1007.test.ts).
+   */
+  tagline?: string;
 }
 
 export const PLAN_FEATURE_INTROS: PlanFeatureIntro[] = [
@@ -61,6 +66,7 @@ export const PLAN_FEATURE_INTROS: PlanFeatureIntro[] = [
   {
     id: 'journeys', path: '/ai-journeys', title: '여정 자동화', icon: Workflow, gradient: 'from-fuchsia-400 to-purple-500',
     summary: '가입·구매·생일 같은 일이 생긴 고객에게, 정해 둔 순서대로 메시지가 자동으로 나갑니다.',
+    tagline: '가입부터 재구매까지 순서대로',
     video: { src: '/videos/plan-feature/journeys.mp4', poster: '/videos/plan-feature/journeys.jpg' },
     steps: [
       { icon: Target, title: '시작 사건 고르기', text: '준비된 여정을 고르거나 한 줄 목표로 시작합니다. 문장으로 답하면 AI가 초안을 만듭니다.' },
@@ -97,6 +103,7 @@ export const PLAN_FEATURE_INTROS: PlanFeatureIntro[] = [
   {
     id: 'auto-marketing', path: '/continuous-operator', title: '자동 마케팅', icon: Brain, gradient: 'from-indigo-400 to-violet-500',
     summary: '목표를 정해 두면 AI가 회차마다 대상과 문안을 만들고, 승인한 기간 동안 정해진 시각에 알아서 보냅니다.',
+    tagline: '한 번 승인하면 7일 자동',
     video: { src: '/videos/plan-feature/auto-marketing.mp4', poster: '/videos/plan-feature/auto-marketing.jpg' },
     steps: [
       { icon: Target, title: '시작하기', text: '준비된 시나리오(VIP 재구매·휴면 회복·생일 축하·포인트 사용 유도 등 9가지)를 고르거나, 목표를 한 줄로 적습니다.' },
@@ -138,6 +145,7 @@ export const PLAN_FEATURE_INTROS: PlanFeatureIntro[] = [
   {
     id: 'marketing-planner', path: '/marketing-planner', title: '마케팅 플래너', icon: CalendarDays, gradient: 'from-violet-400 to-fuchsia-500',
     summary: '한 달 행사를 달력에 담으면 문자·모바일 DM·이메일 완성본을 AI가 만들고, 행사마다 한 번 승인하면 예정일에 나갑니다.',
+    tagline: '행사만 담으면 완성본까지',
     video: { src: '/videos/plan-feature/marketing-planner.mp4', poster: '/videos/plan-feature/marketing-planner.jpg' },
     steps: [
       { icon: CalendarDays, title: '행사 담기', text: '행사명·기간·혜택 문구, 보낼 채널과 날짜를 달력에 넣습니다.' },
@@ -172,6 +180,7 @@ export const PLAN_FEATURE_INTROS: PlanFeatureIntro[] = [
   {
     id: 'mobile-dm', path: '/dm-builder', title: '모바일 DM', icon: Smartphone, gradient: 'from-amber-400 to-yellow-500',
     summary: '사진·버튼·참여 이벤트가 담긴 모바일 페이지를 만들어 문자 링크로 보내고, 누가 보고 눌렀는지 확인합니다.',
+    tagline: '문자 링크로 여는 모바일 페이지',
     video: { src: '/videos/plan-feature/mobile-dm.mp4', poster: '/videos/plan-feature/mobile-dm.jpg' },
     steps: [
       { icon: Wand2, title: '만들기', text: '사진·글·홈페이지 주소 중 가진 것을 넣으면 AI가 완성본을 만듭니다. 블록으로 직접 만들기·카탈로그 DM·한 줄로 만들기·저장한 소재로도 시작합니다.' },
@@ -209,6 +218,7 @@ export const PLAN_FEATURE_INTROS: PlanFeatureIntro[] = [
   {
     id: 'email-campaign', path: '/email-campaigns', title: '이메일 마케팅', icon: Mail, gradient: 'from-blue-400 to-cyan-500',
     summary: '이메일을 만들어 회사 메일로 보내고, 누가 열고 무엇을 눌렀는지 봅니다.',
+    tagline: '보내고, 누가 열었는지까지',
     video: { src: '/videos/plan-feature/email-campaign.mp4', poster: '/videos/plan-feature/email-campaign.jpg' },
     steps: [
       { icon: Wand2, title: '만들기', text: '사진·글·홈페이지 주소를 넣거나 템플릿을 골라 만듭니다. 모바일 DM과 같은 재료로 이메일도 나란히 만들 수 있습니다.' },
@@ -237,6 +247,7 @@ export const PLAN_FEATURE_INTROS: PlanFeatureIntro[] = [
   {
     id: 'inapp-message', path: '/inapp-messages', title: '인앱메시지', icon: MessageSquare, gradient: 'from-rose-400 to-pink-500',
     summary: '자사몰이나 앱을 쓰는 고객에게 정한 순간에 팝업·배너를 띄웁니다.',
+    tagline: '정한 순간에 팝업 · 배너',
     video: { src: '/videos/plan-feature/inapp-message.mp4', poster: '/videos/plan-feature/inapp-message.jpg' },
     steps: [
       { icon: Target, title: '빠른 시작', text: '시나리오를 고르면 AI가 제목·본문·띄울 시점까지 만듭니다. 웹 자사몰 팝업이나 모바일 앱 인앱을 직접 만들 수도 있습니다.' },
@@ -270,6 +281,7 @@ export const PLAN_FEATURE_INTROS: PlanFeatureIntro[] = [
     // ★ 2026-09-27 만들기 개편 — 입구 이름 "만들기" · 결과 화면(고칠 곳만 채우고 보내기)
     id: 'quick-campaign', path: '/quick-campaign', title: '만들기', icon: Wand2, gradient: 'from-amber-400 to-fuchsia-500',
     summary: '사진·글·홈페이지 주소 중 가진 것만 넣으면 모바일 DM·이메일·카탈로그 DM 완성본이 결과 화면에 열립니다.',
+    tagline: '재료만 넣으면 완성본',
     video: { src: '/videos/plan-feature/quick-campaign.mp4', poster: '/videos/plan-feature/quick-campaign.jpg' },
     steps: [
       { icon: ImagePlus, title: '재료 넣기', text: '홈페이지·행사 페이지 주소를 붙이면 문구·사진·로고를 읽어 옵니다. 사진을 끌어놓거나 행사 내용을 적고, 연동한 몰 상품은 누르기만 하면 담깁니다.' },
@@ -297,6 +309,7 @@ export const PLAN_FEATURE_INTROS: PlanFeatureIntro[] = [
   {
     id: 'image-studio', path: '/image-studio', title: '이미지 스튜디오', icon: ImagePlus, gradient: 'from-violet-400 to-fuchsia-500',
     summary: '템플릿을 고르고 문구만 적으면 행사·제품 포스터가 완성되고, 모바일 DM·이메일·인앱·문자에 바로 씁니다.',
+    tagline: '문구만 쓰면 포스터',
     video: { src: '/videos/plan-feature/image-studio.mp4', poster: '/videos/plan-feature/image-studio.jpg' },
     steps: [
       { icon: Search, title: '템플릿 고르기', text: '뷰티·패션·외식·카페 등 16개 분류의 템플릿 502가지. 세부 분류·검색(예: 오픈)·제품/행사 표시로 빨리 찾습니다.' },
@@ -325,6 +338,7 @@ export const PLAN_FEATURE_INTROS: PlanFeatureIntro[] = [
   {
     id: 'ai-memory', path: '/ai-memory', title: 'AI 메모리', icon: Brain, gradient: 'from-emerald-400 to-teal-500',
     summary: 'AI가 우리 회사에 대해 배운 것을 보고, 꼭 알아야 할 사실을 직접 더하거나 낡은 것을 지웁니다.',
+    tagline: 'AI가 배운 우리 회사, 직접 고치기',
     video: { src: '/videos/plan-feature/ai-memory.mp4', poster: '/videos/plan-feature/ai-memory.jpg' },
     steps: [
       { icon: Eye, title: '배운 것 보기', text: 'AI 자율 진단, 학습 종류별 분포, 가장 자주 참고하는 학습 10가지를 봅니다.' },
@@ -368,6 +382,7 @@ export const PLAN_FEATURE_INTROS: PlanFeatureIntro[] = [
   {
     id: 'connect-shop', path: '/cdp-settings', title: '자사몰 연동', icon: Workflow, gradient: 'from-emerald-400 to-teal-500',
     summary: '쓰는 쇼핑몰을 연결하면 주문·회원과 방문·장바구니 같은 행동이 고객 정보에 자동으로 들어옵니다.',
+    tagline: '주문 · 회원 · 행동이 자동으로',
     video: { src: '/videos/plan-feature/connect-shop.mp4', poster: '/videos/plan-feature/connect-shop.jpg' },
     steps: [
       { icon: Plug, title: '몰 연결', text: '카페24·아임웹은 쇼핑몰 ID를 넣고 로그인·동의하면 끝납니다. 네이버·고도몰·메이크샵·우커머스는 그 몰에서 만든 키를 넣습니다. 직접 만든 몰은 한줄로가 발급한 키로 몰 서버가 주문을 보내 주도록 개발해야 합니다.' },
@@ -395,6 +410,7 @@ export const PLAN_FEATURE_INTROS: PlanFeatureIntro[] = [
   {
     id: 'performance', path: '/performance', title: '성과리포트', icon: LineChart, gradient: 'from-fuchsia-400 to-pink-500',
     summary: '최근 30일 발송 성과를 보고, AI가 원인을 진단해 다음에 할 캠페인을 설계해 줍니다.',
+    tagline: '지난 30일 성과와 다음 캠페인',
     video: { src: '/videos/plan-feature/performance.mp4', poster: '/videos/plan-feature/performance.jpg' },
     steps: [
       { icon: BarChart3, title: '요약 보기', text: '발송 캠페인·지출과 잘 된 캠페인을 한눈에 봅니다. 구매 데이터(자사몰 연동 등)가 들어와 있으면 발송 후 7일 구매와 귀속 매출도 봅니다.' },

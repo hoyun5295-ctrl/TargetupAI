@@ -3979,8 +3979,8 @@ const campaignData = {
         {/* ★ 2026-08-22 옛 정적 매뉴얼(3개월 정지) → 기능 안내(/guide, 도움말 봇과 같은 원장) */}
         <a href="/guide" className="hover:text-gray-600 transition">기능 안내</a>
         <span>|</span>
-        {/* ★ 2026-08-22 (Harold 명시): 헤더에서 내려온 자리. ?v= 캐시 버스터는 LoginPage 2곳과 동시에 올린다 */}
-        <a href="/about-ai-operator.html?v=7" target="_blank" rel="noopener" className="hover:text-gray-600 transition">AI Operator 소개</a>
+        {/* ★ 2026-08-22 (Harold 명시): 헤더에서 내려온 자리 · ★1007 소개 페이지 = 앱 공개 화면 /about */}
+        <a href="/about" target="_blank" rel="noopener" className="hover:text-gray-600 transition">AI Operator 소개</a>
         <span>|</span>
         <a href="/privacy" target="_blank" className="hover:text-gray-600 transition">개인정보처리방침</a>
         <span>|</span>
