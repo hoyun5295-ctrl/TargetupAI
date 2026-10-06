@@ -191,6 +191,16 @@ describe('KMC 결과 확인(verify)', () => {
     expect(cryptoCalls).toEqual([]);
   });
 
+  it('★ 1006 실측 — 이름이 URL 인코딩으로 오면 풀어서 돌려준다(그대로 저장 금지) · 못 풀면 거절', async () => {
+    seedVerify(RESULT_FIELDS.map((v, i) => (i === 8 ? '%ED%99%8D%EA%B8%B8%EB%8F%99' : v)));
+    stubTokenApi({ result_cd: 'APR01', apiRecCert: 'RECCERT', apiCertNum: EXPECTED });
+    expect((await verify()).name).toBe('홍길동');
+    seedVerify(RESULT_FIELDS.map((v, i) => (i === 8 ? 'JOHN+SMITH' : v)));
+    expect((await verify()).name).toBe('JOHN SMITH');
+    seedVerify(RESULT_FIELDS.map((v, i) => (i === 8 ? '%ED%99%8D%EA' : v)));
+    await expect(verify()).rejects.toThrow('KMC_RESULT_SHAPE');
+  });
+
   it('결과 칸 수가 모자라면 거절(18칸)', async () => {
     seedVerify(RESULT_FIELDS.slice(0, 12));
     stubTokenApi({ result_cd: 'APR01', apiRecCert: 'RECCERT', apiCertNum: EXPECTED });

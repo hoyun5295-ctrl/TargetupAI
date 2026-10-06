@@ -43,7 +43,7 @@ import pool, { query } from '../../config/database';
 import {
   isIdentityVerifyTarget, isIdentityVerifyActiveFor, resolveIdentityProvider, registerIdentityProvider,
   evaluateIdentityGate, issueIdentityTicket, verifyIdentityTicket, normalizeVerifiedPhone, normalizeVerifiedName,
-  startIdentityVerification, completeIdentityVerification, identityFailureResponse, loadIdentitySummary,
+  startIdentityVerification, completeIdentityVerification, identityFailureResponse, loadIdentitySummary, identityAuditId,
   IdentityProvider,
 } from '../identity-verify';
 
@@ -335,7 +335,7 @@ describe('완료', () => {
       if (/^\s*SELECT name, phone, mfa_phone FROM users WHERE id = \$1 FOR UPDATE/.test(sql)) return { rows: userRow ? [userRow] : [] };
       if (/FROM identity_verifications WHERE user_id = \$1 AND status = 'verified'/.test(sql)) return { rows: alreadyVerified ? [{ ok: 1 }] : [] };
       if (/^\s*UPDATE identity_verifications/.test(sql)) return { rows: confirmed ? [{ id: 'v-1' }] : [] };
-      if (/^\s*UPDATE users SET name = \$2, phone = \$3, mfa_phone = \$3/.test(sql)) return { rows: [], rowCount: 1 };
+      if (/^\s*UPDATE users SET phone = \$2, mfa_phone = \$2/.test(sql)) return { rows: [], rowCount: 1 };
       if (/^\s*DELETE FROM mfa_trusted_devices WHERE user_id = \$1/.test(sql)) return { rows: [], rowCount: 0 };
       throw new Error(`예상하지 못한 SQL: ${sql}`);
     });
@@ -347,6 +347,25 @@ describe('완료', () => {
   it('인증기관이 없으면 아무것도 하지 않는다', async () => {
     expect(await complete()).toEqual({ status: 'unavailable' });
     expect(connect).not.toHaveBeenCalled();
+  });
+
+  it('★1006 거절 사유 코드는 감사 기록용으로 넘긴다(대문자 코드만 · 그 밖의 오류 문구는 넘기지 않는다)', async () => {
+    turnOn();
+    registerIdentityProvider(fakeProvider({ verify: async () => { throw new Error('KMC_CERTNUM_MISMATCH_RETURN'); } }));
+    expect(await complete()).toEqual({ status: 'rejected', reason: 'provider', detail: 'KMC_CERTNUM_MISMATCH_RETURN' });
+    registerIdentityProvider(fakeProvider({ verify: async () => { throw new Error('connect ECONNREFUSED 117.52.81.52:443'); } }));
+    expect(await complete()).toEqual({ status: 'rejected', reason: 'provider' });
+    const route = readFileSync(join(resolve(__dirname, '../..'), 'routes/auth.ts'), 'utf8');
+    // 인증 · 실패 · 시작 기록 모두 인증 건 번호를 남긴다(KMC 요청번호 = 이 번호의 하이픈 뺀 값 → KMC 인증내역과 맞춰 볼 수 있다)
+    expect(route.split('verificationId: identityAuditId(req.body.verificationId)').length - 1).toBe(4);
+    expect(route).not.toContain("String(req.body.verificationId || '').slice(");
+    // ★ Codex 3R — 인증 건 번호 모양이 아니면 남기지 않는다(그 칸에 넣은 번호 원문이 기록에 쌓이지 않게)
+    expect(identityAuditId('6F1C2B3A-4D5E-4F60-8A9B-0C1D2E3F4A5B')).toBe('6f1c2b3a-4d5e-4f60-8a9b-0c1d2e3f4a5b');
+    expect(identityAuditId('01000000000')).toBeNull();
+    expect(identityAuditId({ id: 1 })).toBeNull();
+    expect(identityAuditId(undefined)).toBeNull();
+    expect(route.split('provider: started.provider, verificationId: started.verificationId').length - 1).toBe(2);
+    expect(route.split("detail: done.status === 'rejected' ? done.detail ?? null : null").length - 1).toBe(2);
   });
 
   it('인증기관이 결과를 인정하지 않으면 거절하고 DB를 건드리지 않는다', async () => {
@@ -431,7 +450,9 @@ describe('완료', () => {
     expect(order[0]).toBe('BEGIN');
     expect(order[order.length - 1]).toBe('COMMIT');
     const userUpdate = client.query.mock.calls.find((c) => /^\s*UPDATE users/.test(String(c[0])))!;
-    expect(userUpdate[1]).toEqual([USER.id, '홍길동', '01000000000']);
+    expect(userUpdate[1]).toEqual([USER.id, '01000000000']);
+    // ★1006 Harold — 계정 이름은 덮지 않는다(번호만 담당자 번호로)
+    expect(String(userUpdate[0])).not.toMatch(/\bname\b/);
     expect(order.some((s) => /^DELETE FROM mfa_trusted_devices/.test(s))).toBe(true);
     // 옛 번호의 미사용 인증번호는 여기서 지우지 않는다 — 검증이 현재 번호와 대조해 거른다(mfa.test.ts가 고정)
     expect(order.some((s) => /mfa_challenges/.test(s))).toBe(false);
@@ -506,10 +527,10 @@ describe('설정 화면 카드 — 등록된 담당자는 보여 주되 인증 �
     expect(JSON.stringify(await loadIdentitySummary(USER.id))).not.toContain('01099999999');
   });
 
-  it('이력이 있으면 이름과 가린 번호와 인증일을 준다', async () => {
+  it('이력이 있으면 인증한 사람 이름(계정 이름 아님 · ★1006)과 가린 번호와 인증일을 준다', async () => {
     q.mockImplementation(async (sql: string) => {
-      if (/FROM users WHERE id = \$1/.test(sql)) return { rows: [{ name: '홍길동', mfa_phone: '01000000000' }] };
-      if (/FROM identity_verifications/.test(sql)) return { rows: [{ verified_at: '2026-10-02T07:00:00.000Z' }] };
+      if (/FROM users WHERE id = \$1/.test(sql)) return { rows: [{ name: '인비토01', mfa_phone: '01000000000' }] };
+      if (/FROM identity_verifications/.test(sql)) return { rows: [{ verified_at: '2026-10-02T07:00:00.000Z', verified_name: '홍길동' }] };
       throw new Error(`예상하지 못한 SQL: ${sql}`);
     });
     expect(await loadIdentitySummary(USER.id)).toEqual({

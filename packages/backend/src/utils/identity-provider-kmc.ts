@@ -72,6 +72,21 @@ export function kmcTrCertPlain(cfg: Pick<KmcConfig, 'cpId' | 'urlCode'>, certNum
   return [cfg.cpId, cfg.urlCode, certNum, date, 'M', '', '', '', '', '', '', plusInfo, KMC_EXTEND_VAR].join('/');
 }
 
+/**
+ * KMC 결과 글자 풀기 — ★2026-10-06 실측: 이름이 URL 인코딩(UTF-8 · `%EC%9C%A0…`)으로 와서 그대로 계정 이름에 저장됐다.
+ *   규격서 · 예제 어디에도 없던 모양이라 예제처럼 그대로 썼다(지어낸 응답으로 시험해 못 잡음 = LESSONS_BACKEND 「외부 API 응답의 테스트 대역은 원문으로」).
+ *   `%` · `+` 가 있으면 푼다(자바 URL 인코딩은 공백을 `+` 로 쓴다). 못 풀면 저장하지 않고 거절한다.
+ */
+export function kmcText(raw: string | undefined): string {
+  const v = String(raw ?? '');
+  if (!/[%+]/.test(v)) return v;
+  try {
+    return decodeURIComponent(v.replace(/\+/g, ' '));
+  } catch {
+    throw new Error('KMC_RESULT_SHAPE');
+  }
+}
+
 function requireConfig(): KmcConfig {
   const cfg = kmcConfig();
   if (!cfg) throw new Error('KMC_NOT_CONFIGURED');
@@ -131,6 +146,6 @@ export const kmcProvider: IdentityProvider = {
 
     const diEnc = fields[F.di];
     const dupKey = isKmcToken(diEnc) ? await kmcCrypto({ file: cfg.cryptoPath }, 'dec', diEnc) : '';
-    return { name: fields[F.name], phone: fields[F.phone], dupKey: dupKey || null, providerTxId: expected };
+    return { name: kmcText(fields[F.name]), phone: kmcText(fields[F.phone]), dupKey: dupKey || null, providerTxId: expected };
   },
 };

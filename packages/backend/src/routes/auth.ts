@@ -16,7 +16,7 @@ import {
 // ★ 2026-10-02 담당자 본인인증(전송자격인증 2.1 ①-1 · 3.4 ②) — 판정·저장은 전부 CT가 소유한다
 import {
   evaluateIdentityGate, verifyIdentityTicket, startIdentityVerification, completeIdentityVerification,
-  isIdentityVerifyActiveFor, isIdentitySchemaMissing, loadIdentitySummary, IDENTITY_TICKET_TTL_MINUTES,
+  isIdentityVerifyActiveFor, isIdentitySchemaMissing, loadIdentitySummary, IDENTITY_TICKET_TTL_MINUTES, identityAuditId,
   identityFailureResponse, IDENTITY_UNAVAILABLE_RESPONSE, IDENTITY_MIGRATION_RESPONSE, IDENTITY_ALREADY_VERIFIED_RESPONSE,
 } from '../utils/identity-verify';
 import { recordAuditLog } from '../utils/audit-log';
@@ -372,7 +372,7 @@ router.post('/login', loginLimiter, async (req: Request, res: Response) => {
     }
 
     // ===== ★ 2026-10-02 담당자 본인인증 — 전송자격인증 2.1 ①-1 · 3.4 ② =====
-    //   계정마다 최초 1회. 인증된 이름·휴대폰이 담당자 정보와 로그인 인증번호 수신 번호가 된다.
+    //   계정마다 최초 1회. 인증된 휴대폰이 담당자 번호(로그인 인증번호 수신 번호)가 된다 · 계정 이름은 그대로(★1006).
     //   다중 인증보다 **먼저** 본다 — 종전에 직원이 넣어 둔 번호가 틀렸으면 그 번호로는 영영 못 들어온다.
     //   스위치·명단·인증기관 셋이 모두 성립해야 요구한다(배포만으로는 아무도 요구받지 않는다).
     //   컨트롤타워 = utils/identity-verify.ts — 판정 조건을 여기서 다시 조립하지 않는다.
@@ -708,7 +708,7 @@ router.post('/identity/start', loginLimiter, async (req: Request, res: Response)
     if (started.status === 'already_verified') return res.status(409).json(IDENTITY_ALREADY_VERIFIED_RESPONSE);
     await recordAuditLog({ actorUserId: user.id, action: 'identity_verify_start',
       targetType: 'user', targetId: user.id,
-      details: { loginId: user.login_id, purpose: 'first_login', provider: started.provider },
+      details: { loginId: user.login_id, purpose: 'first_login', provider: started.provider, verificationId: started.verificationId },
       req,
     });
     return res.json({ verificationId: started.verificationId, provider: started.provider, start: started.start });
@@ -743,7 +743,7 @@ router.post('/identity/complete', loginLimiter, async (req: Request, res: Respon
     if (done.status !== 'verified') {
       await recordAuditLog({ actorUserId: user.id, action: 'identity_verify_fail',
         targetType: 'user', targetId: user.id,
-        details: { loginId: user.login_id, purpose: 'first_login', result: done.status, reason: done.status === 'rejected' ? done.reason : null },
+        details: { loginId: user.login_id, purpose: 'first_login', result: done.status, reason: done.status === 'rejected' ? done.reason : null, detail: done.status === 'rejected' ? done.detail ?? null : null, verificationId: identityAuditId(req.body.verificationId) },
         req,
       });
       const failure = identityFailureResponse(done);
@@ -751,7 +751,7 @@ router.post('/identity/complete', loginLimiter, async (req: Request, res: Respon
     }
     await recordAuditLog({ actorUserId: user.id, action: 'identity_verified',
       targetType: 'user', targetId: user.id,
-      details: { loginId: user.login_id, purpose: 'first_login', name: done.name, phoneMasked: done.maskedPhone, before: done.before },
+      details: { loginId: user.login_id, purpose: 'first_login', name: done.name, phoneMasked: done.maskedPhone, before: done.before, verificationId: identityAuditId(req.body.verificationId) },
       req,
     });
 
@@ -811,7 +811,7 @@ router.post('/identity/change/start', authenticate, async (req: Request, res: Re
     if (started.status !== 'started') return res.status(503).json(IDENTITY_UNAVAILABLE_RESPONSE);
     await recordAuditLog({ actorUserId: userId, action: 'identity_verify_start',
       targetType: 'user', targetId: userId,
-      details: { loginId: req.user?.loginId, purpose: 'change', provider: started.provider },
+      details: { loginId: req.user?.loginId, purpose: 'change', provider: started.provider, verificationId: started.verificationId },
       req,
     });
     return res.json({ verificationId: started.verificationId, provider: started.provider, start: started.start });
@@ -838,7 +838,7 @@ router.post('/identity/change/complete', authenticate, async (req: Request, res:
     if (done.status !== 'verified') {
       await recordAuditLog({ actorUserId: userId, action: 'identity_verify_fail',
         targetType: 'user', targetId: userId,
-        details: { loginId: req.user?.loginId, purpose: 'change', result: done.status, reason: done.status === 'rejected' ? done.reason : null },
+        details: { loginId: req.user?.loginId, purpose: 'change', result: done.status, reason: done.status === 'rejected' ? done.reason : null, detail: done.status === 'rejected' ? done.detail ?? null : null, verificationId: identityAuditId(req.body.verificationId) },
         req,
       });
       const failure = identityFailureResponse(done);
@@ -846,7 +846,7 @@ router.post('/identity/change/complete', authenticate, async (req: Request, res:
     }
     await recordAuditLog({ actorUserId: userId, action: 'identity_verified',
       targetType: 'user', targetId: userId,
-      details: { loginId: req.user?.loginId, purpose: 'change', name: done.name, phoneMasked: done.maskedPhone, before: done.before },
+      details: { loginId: req.user?.loginId, purpose: 'change', name: done.name, phoneMasked: done.maskedPhone, before: done.before, verificationId: identityAuditId(req.body.verificationId) },
       req,
     });
     return res.json({ success: true, name: done.name, maskedPhone: done.maskedPhone });

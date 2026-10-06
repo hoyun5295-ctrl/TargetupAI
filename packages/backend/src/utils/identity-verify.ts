@@ -2,8 +2,8 @@
  * identity-verify.ts — 담당자 본인인증 컨트롤타워 (★2026-10-02 전송자격인증 2.1 ①-1 · 3.4 ② · ③ · 3.5 ②)
  *
  * 무엇을 하나
- *   계정마다 **최초 1회** 본인확인기관 인증을 거치게 하고, 인증된 이름·휴대폰을 그 계정의 담당자 정보와
- *   로그인 인증번호 수신 번호로 저장한다(1001 회의 결정 · Harold 승인). 담당자가 바뀌면 설정 화면에서
+ *   계정마다 **최초 1회** 본인확인기관 인증을 거치게 하고, 인증된 휴대폰을 그 계정의 담당자 번호(연락처 ·
+ *   로그인 인증번호 수신 번호)로 저장한다(1001 회의 결정 · Harold 승인). 담당자가 바뀌면 설정 화면에서
  *   다시 본인인증을 거쳐 바꾼다. 이용자가 손으로 번호를 고치는 길은 두지 않는다 — 인증기준 3.4 ②가 요구하는
  *   "다중인증 수단이 본인확인된 정보와 연계"가 이것으로 성립한다.
  *   ⚠ 전환기 잔여 — 슈퍼관리자가 번호를 직접 넣는 경로(`routes/admin.ts` `PUT /users/:id/mfa-phone`)는
@@ -29,6 +29,9 @@
  *   인증기관이 준비되지 않은 동안에는 스위치를 켜도 요구하지 않는다(위 3번).
  *
  * ⛔ 과거를 지어내지 않는다 — 본인인증 이력이 없는 계정은 "미인증"이다. 기존 번호를 인증된 것으로 치지 않는다.
+ *
+ * ⛔ 계정 이름(`users.name`)은 바꾸지 않는다(★2026-10-06 Harold 「원래 계정에 설정한 이름으로 · 전화번호만 담당자 번호로」).
+ *   인증한 사람의 이름은 인증 이력(`identity_verifications.verified_name`)에만 남고, 설정 「계정 담당자」 카드가 그 이름을 보여 준다.
  */
 import crypto from 'crypto';
 import jwt from 'jsonwebtoken';
@@ -294,8 +297,8 @@ export type IdentityCompletion =
       /** 저장 전 값 — 감사 기록용(번호는 가린 값) */
       before: { name: string | null; maskedPhone: string | null; maskedMfaPhone: string | null };
     }
-  /** 인증기관이 결과를 인정하지 않았다 · 이름이나 번호가 형식에 맞지 않는다 */
-  | { status: 'rejected'; reason: 'provider' | 'invalid_identity' }
+  /** 인증기관이 결과를 인정하지 않았다 · 이름이나 번호가 형식에 맞지 않는다 · detail = 인증기관 구현의 거절 코드(감사 기록용 · 화면에 내보내지 않는다) */
+  | { status: 'rejected'; reason: 'provider' | 'invalid_identity'; detail?: string }
   /** 대기 행이 만료됐거나 이미 쓰였다 — 처음부터 다시 */
   | { status: 'expired' }
   /** 최초 등록인데 그 계정은 그사이 본인인증을 마쳤다 — 담당자를 다시 덮지 않는다 */
@@ -315,6 +318,7 @@ export type IdentityCompletion =
  *    **아직 쓰지 않은 로그인 인증번호**는 검증 쪽이 현재 번호와 대조해 거른다(`verifyMfaChallenge`).
  *    폐기를 여기에만 두면 번호를 바꾸는 다른 자리(슈퍼관리자 등록)와 동시에 발급 중이던 인증번호가 빠진다.
  * 인증된 번호가 그 계정의 **유일한** 로그인 인증번호가 된다(계정당 하나 · 기존 번호를 덮는다).
+ * ⛔ 계정 이름은 덮지 않는다(★1006 Harold) — 이름은 인증 이력에만 남는다.
  */
 export async function completeIdentityVerification(params: {
   userId: string;
@@ -333,7 +337,9 @@ export async function completeIdentityVerification(params: {
     identity = await provider.verify(payload, { verificationId, req });
   } catch (err: any) {
     console.error('[identity-verify] 인증기관 결과 확인 실패:', err?.code || err?.message);
-    return { status: 'rejected', reason: 'provider' };
+    // ★1006 Harold 「나중에 할 말이 있게 기록」 — 거절 사유 코드(예: KMC_CERTNUM_MISMATCH_RETURN = 남의 결과 끼워 넣기)를 감사 기록에 남긴다
+    const detail = /^[A-Z][A-Z0-9_]{2,59}$/.test(String(err?.message || '')) ? String(err.message) : undefined;
+    return detail ? { status: 'rejected', reason: 'provider', detail } : { status: 'rejected', reason: 'provider' };
   }
   const name = normalizeVerifiedName(identity?.name);
   const phone = normalizeVerifiedPhone(identity?.phone);
@@ -381,8 +387,8 @@ export async function completeIdentityVerification(params: {
       return { status: 'expired' };
     }
     await client.query(
-      `UPDATE users SET name = $2, phone = $3, mfa_phone = $3, updated_at = NOW() WHERE id = $1`,
-      [userId, name, phone]
+      `UPDATE users SET phone = $2, mfa_phone = $2, updated_at = NOW() WHERE id = $1`,
+      [userId, phone]
     );
     // 옛 번호로 얻은 통과권은 무효다.
     // 아직 쓰지 않은 로그인 인증번호는 여기서 지우지 않는다 — 검증(`mfa.ts` `verifyMfaChallenge`)이 쓰는 순간에
@@ -407,6 +413,15 @@ export async function completeIdentityVerification(params: {
   } finally {
     client.release();
   }
+}
+
+/**
+ * 감사 기록에 남기는 인증 건 번호 — 인증 건 번호(UUID) 모양일 때만 소문자로, 아니면 null(★1006 Codex 3R).
+ *   화면이 보낸 값을 그대로 남기면 그 칸에 넣은 휴대폰 번호 같은 원문이 감사 기록에 쌓인다.
+ */
+export function identityAuditId(raw: unknown): string | null {
+  const v = typeof raw === 'string' ? raw.trim().toLowerCase() : '';
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(v) ? v : null;
 }
 
 /** 표가 아직 없을 때의 응답 — 500으로 내보내지 않는다 */
@@ -455,6 +470,7 @@ export function identityFailureResponse(
  * ★ 2026-10-03 카드를 전 고객사 계정에 항상 보여 주게 되면서(Harold), 본인인증 전이어도 **등록된 담당자**를 준다.
  *   등록된 담당자 = 로그인 인증번호를 받는 번호(`mfa_phone`)가 있는 계정의 이름 · 번호.
  *   ⛔ 등록돼 있다고 인증된 것은 아니다 — 인증 여부는 `verifiedAt` 하나로만 말한다(없으면 화면이 「본인인증 전」으로 표시).
+ * ★ 2026-10-06 본인인증을 마친 계정의 담당자 이름 = 마지막 인증의 이름(계정 이름은 덮지 않으므로 이력에서 읽는다).
  */
 export async function loadIdentitySummary(userId: string): Promise<{
   name: string | null;
@@ -463,20 +479,22 @@ export async function loadIdentitySummary(userId: string): Promise<{
 }> {
   const u = await query(`SELECT name, mfa_phone FROM users WHERE id = $1`, [userId]);
   let verifiedAt: string | null = null;
+  let verifiedName: string | null = null;
   try {
     const v = await query(
-      `SELECT verified_at FROM identity_verifications
+      `SELECT verified_at, verified_name FROM identity_verifications
         WHERE user_id = $1 AND status = 'verified' ORDER BY verified_at DESC LIMIT 1`,
       [userId]
     );
     verifiedAt = v.rows[0]?.verified_at ? new Date(v.rows[0].verified_at).toISOString() : null;
+    verifiedName = v.rows[0]?.verified_name ?? null;
   } catch (err: any) {
     if (!isIdentitySchemaMissing(err)) throw err;
   }
   const row = u.rows[0] || {};
   const registered = !!row.mfa_phone;
   return {
-    name: registered ? row.name ?? null : null,
+    name: registered ? (verifiedAt && verifiedName ? verifiedName : row.name ?? null) : null,
     maskedPhone: registered ? maskPhone(row.mfa_phone) : null,
     verifiedAt,
   };

@@ -2,7 +2,7 @@
  * IdentityVerifyModal — 담당자 본인인증 창 (★2026-10-02 전송자격인증 2.1 ①-1 · 3.4 ② · ③)
  *
  * 두 곳에서 쓴다
- *   로그인  : 최초 1회. 통과하면 인증된 이름·휴대폰이 계정 담당자로 등록되고 그대로 로그인된다.
+ *   로그인  : 최초 1회. 통과하면 인증된 휴대폰이 계정 담당자 번호로 등록되고 그대로 로그인된다(계정 이름은 그대로 · ★1006).
  *   설정    : 담당자가 바뀔 때. 새 담당자가 본인 휴대폰으로 인증해야 바뀐다.
  *
  * ⛔ 화면 규율
@@ -143,7 +143,7 @@ export default function IdentityVerifyModal({ mode, onLoginSuccess, onTakeover, 
           {!stubStep && (
             <div className="bg-gray-50 border border-gray-100 rounded-xl px-4 py-3 space-y-1.5">
               <p className="text-xs text-gray-600 leading-relaxed">
-                · 인증된 <span className="font-medium text-gray-800">이름과 휴대폰번호</span>가 이 계정의 담당자로 등록됩니다.
+                · 인증한 <span className="font-medium text-gray-800">휴대폰번호</span>가 이 계정의 담당자 번호로 등록됩니다. 계정 이름은 바뀌지 않습니다.
               </p>
               <p className="text-xs text-gray-600 leading-relaxed">
                 · 다음 로그인부터 이 번호로 <span className="font-medium text-gray-800">인증번호</span>가 발송됩니다.

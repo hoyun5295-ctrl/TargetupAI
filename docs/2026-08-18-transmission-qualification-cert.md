@@ -1187,7 +1187,7 @@ JWT를 주고 화면에서 가리는 방식은 통제가 아니다(그 토큰으
 - **요구 조건(셋이 모두 성립해야)** = 시행일 `IDENTITY_VERIFY_ENFORCE_FROM` · 명단 `IDENTITY_VERIFY_PILOT_LOGIN_IDS`(**빈 명단 = 미시행** · 전 계정은 `*` 명시) · 인증기관 준비. 배포만으로는 아무도 요구받지 않는다.
 - **인증기관 자리** = `IdentityProvider`(`buildStart` · `verify`) + `registerIdentityProvider`. 화면 쪽은 `frontend/src/utils/identityProvider.ts` `launchIdentityProvider`. **한국모바일인증 모듈 · 규격이 오면 이 두 곳만 채운다.** 시험용(`stub`)은 `NODE_ENV`가 development · test로 명시된 환경에서만 켜진다(허용 목록).
 - **로그인 흐름** = 비밀번호 확인 → 본인인증 판정(인증번호 발송보다 **앞**) → 미인증이면 세션 없이 티켓만(`identityRequired`) → `/auth/identity/start` → 인증 → `/auth/identity/complete` → 이름 · 휴대폰 저장 + 그 자리에서 세션 발급(이번 로그인은 인증번호를 묻지 않는다).
-- **저장** = `users.name` · `phone` · `mfa_phone`을 인증된 값으로 덮는다(계정당 번호 하나 · 회의 결정대로 기존 값 변경). 한 트랜잭션(대기 행 확정 · 계정 갱신 · 옛 통과권 삭제). 이력 = 새 표 `identity_verifications`(`migrations/identity-verifications.sql` · 외래키 없음 — 계정 행이 삭제돼도 이력은 남아야 하고, 걸면 계정 삭제가 막힌다).
+- **저장** = `users.name` · `phone` · `mfa_phone`을 인증된 값으로 덮는다(계정당 번호 하나 · 회의 결정대로 기존 값 변경). **★1006 Harold 변경 = 계정 이름(`users.name`)은 덮지 않는다 · `phone` · `mfa_phone` 만 인증 번호로 · 인증한 사람 이름은 `identity_verifications.verified_name` 에만(설정 카드가 그 이름을 보여 준다)**. 한 트랜잭션(대기 행 확정 · 계정 갱신 · 옛 통과권 삭제). 이력 = 새 표 `identity_verifications`(`migrations/identity-verifications.sql` · 외래키 없음 — 계정 행이 삭제돼도 이력은 남아야 하고, 걸면 계정 삭제가 막힌다).
 - **관문 누락 방지** = `issueUserLogin`이 이 CT만 만들 수 있는 `IdentityClearance`를 필수 인자로 받는다(호출부 3곳 · tsc가 누락을 잡는다).
 - **설정 화면** = 「담당자 사전수신」 위 「계정관리자 인증」 카드(현재 담당자 · 가린 번호 · 인증일 · 변경 버튼 → 본인인증). 본인인증이 열린 계정에만 보인다. 손으로 넣는 칸 없음.
 - **감사 기록** = `identity_verify_start` · `identity_verified`(최초 등록 / 담당자 변경 · 이름 · 가린 번호 · 종전 값) · `identity_verify_fail`.
@@ -1378,7 +1378,7 @@ Codex 적대 검토 1R(`gpt-6-astra`) = critical · high 0 · medium 1 — 「�
 - `identity-verify.ts` `resolveIdentityProvider` = ENV `KMC_CP_ID` · `KMC_URL_CODE`(6자리) · `KMC_CRYPTO_PATH`(실행 가능) 가 **다 있을 때만** kmc. 하나라도 없으면 종전처럼 인증기관 없음 = 아무도 요구받지 않는다.
 - 계약 = `kmc-crypto-1006.test.ts`(실제 자식 프로세스 · 가짜 모듈로 규약 · 동시 · EUC-KR · 조각 · 죽음 · 멈춤 · 없는 파일) · `identity-provider-kmc-1006.test.ts`(예제 조립식과 tr_cert 동일 · 세 자리 대조 · 위변조 · APR02~06 · N · 칸 부족 · 줄바꿈 차단 · CI 미복호화). 결함 주입 4종(대조 2 · 위변조 · Y 확인) 전부 잡힘. 실제 모듈은 이 PC 에서 실행하지 않았다 — 실암호화는 서버 테스트폰 실측.
 
-**Codex 적대 검토**(`gpt-6-astra` · 닫힐 때까지) — 1R needs-attention: [high] 통로 없는 실행 실패(EMFILE)에서 오류 리스너보다 통로 접근이 먼저라 뒤따르는 error 이벤트가 서버를 내림 → 리스너를 spawn 직후 먼저 걸고 통로 없으면 거절 · [medium] 폴더 경로도 X_OK 로 「준비됨」 → `isFile()` 먼저. 회귀 = `kmc-crypto-spawnfail-1006.test.ts` · 폴더 경로 null(결함 주입 2종 잡힘) → **2R approve**. 검증 = BE tsc 0 · vitest 584파일 8,254건.
+**Codex 적대 검토**(`gpt-6-astra` · 닫힐 때까지) — 1R needs-attention: [high] 통로 없는 실행 실패(EMFILE)에서 오류 리스너보다 통로 접근이 먼저라 뒤따르는 error 이벤트가 서버를 내림 → 리스너를 spawn 직후 먼저 걸고 통로 없으면 거절 · [medium] 폴더 경로도 X_OK 로 「준비됨」 → `isFile()` 먼저. 회귀 = `kmc-crypto-spawnfail-1006.test.ts` · 폴더 경로 null(결함 주입 2종 잡힘) → **2R approve**. 검증 = BE tsc 0 · vitest 584파일 8,254건. 운영 실측 뒤 수정분(이름 인코딩 풀기 · 계정 이름 안 덮음 · 감사 기록 인증 건 번호 · 거절 코드) = 3R medium 1(실패 감사 기록에 검증 안 된 verificationId 원문 → `identityAuditId` UUID 모양만) → **4R approve** · vitest 584파일 8,256건.
 
 **KMC 관리 화면(1006 Harold 캡처)** = 회원사 ID `IVTT1001` · 도메인 `hanjul.ai` 순번 004 · URL 001 `https://hanjul.ai//api/auth/identity/return`(**슬래시 두 번 — 입력칸 앞에 `https://hanjul.ai/` 가 붙어 있다**) → **1006 Harold 재등록 확인(캡처) = URL 002 `https://hanjul.ai/api/auth/identity/return` · 코드 `004002` · 사용중 · 001 삭제(2026.10.06)**. KMC 가 URL 전체를 대조하는지 도메인만 보는지는 규격에 없다(미검증).
 
@@ -1389,7 +1389,11 @@ Codex 적대 검토 1R(`gpt-6-astra`) = critical · high 0 · medium 1 — 「�
 4. 대표 계정 로그인 → 본인인증 창(KMC) → 대표 휴대폰 인증 → `identity_verifications` 1행 verified · 담당자 이름 · 번호 확인.
 5. 직원 계정으로 명단 확대 → KMC 서비스 오픈 요청(과금 시작) → 전 계정 시행(`*`).
 
-**미검증** — 휴대폰에서 팝업(새 탭) 진행(예제는 휴대폰이면 같은 창) · KMC 의 URL 대조 범위 · .62 → KMC 통신 · 실제 모듈의 결과 칸 글자 모양(암호문 문자 집합).
+**서버 준비 · 첫 실측(1006 · Harold 실행)** — 실행 파일 .62 `~/kmc/KmcCrypto`(700 · 지문 `2ff1e68a…92b064d` 원본과 같음) · 단독 실행 `enc:1^*test` → `1:KMC000002-…`(암호문 = 대문자 · 숫자 · `-`) · .62 → KMC `200 117.52.81.52` · `.env` KMC 3값 + 시행일 + 명단 `hoyun` · 재시작 → `hoyun` 로그인 → KMC 창 → 통신사 선택 → 인증 → **로그인 성공(21:44:16 · 번호 끝 4자리 일치)**. 첫 시도의 「PASS인증서 오류 3103」은 인증 수단을 PASS인증서로 고른 것(그 휴대폰에 인증서 미발급) — 문자 · PASS 앱으로 진행. 수단 선택 화면 생략은 규격에 없음(certMet = M 고정 · 개인정보 칸 금지 (11)) → KMC 문의 대상.
+**운영 결함 → 수정([B-1006-3](../status/BUGS.md))** — 이름이 URL 인코딩(`%EC%9C%A0…`)으로 와 그대로 계정 이름에 저장(규격서 · 예제에 없던 모양 · 지어낸 응답으로만 시험) → `kmcText` 로 풀고 못 풀면 거절 · 데이터 정리 2회(Harold 실행 · `hoyun` 계정 이름 = 인증 전 값 「테스트계정」 복원 · 인증 이력 이름 = 풀어 쓴 값). 같은 자리에서 Harold 결정 = 계정 이름은 덮지 않는다(위 「저장」 줄).
+**기록(Harold 「나중에 할 말이 있게」)** = ① `identity_verifications`(인증 이름 · 번호 · 시각 · IP · 브라우저 · KMC 요청번호 · DI 해시) ② 감사 기록 시작 · 성공 · 실패 세 줄 모두 인증 건 번호 · 실패 줄 거절 사유 코드(`KMC_CERTNUM_MISMATCH_*` · `KMC_TAMPERED` · `KMC_TOKEN_APR0n` 등) ③ KMC 관리 화면 인증내역(요청번호 = 인증 건 번호 하이픈 제거 → 바로 대조).
+
+**미검증** — 휴대폰에서 팝업(새 탭) 진행(예제는 휴대폰이면 같은 창) · KMC 의 URL 대조 범위.
 
 ### 엔진(비토 게이트웨이) 증적 — 1002 영업 요청 「전 항목 비토 엔진 · 한줄로 증적파일」
 
