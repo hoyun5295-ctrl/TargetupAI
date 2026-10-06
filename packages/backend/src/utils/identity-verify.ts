@@ -23,7 +23,8 @@
  *   표가 아직 없음(42P01) · 조회 오류 → 요구하지 않는다. 기능만 쉰다.
  *
  * ⛔ 인증기관 자리
- *   한국모바일인증 모듈은 아직 받지 못했다. `IdentityProvider` 두 함수(요청 만들기 · 결과 확인)가 그 자리다.
+ *   `IdentityProvider` 두 함수(요청 만들기 · 결과 확인)가 그 자리다. ★2026-10-06 한국모바일인증 = `identity-provider-kmc.ts`
+ *   (ENV `KMC_CP_ID` · `KMC_URL_CODE` · `KMC_CRYPTO_PATH` 가 다 있고 실행 파일이 있을 때만 연결된다).
  *   운영에서는 실제 인증기관만 쓰인다 — 시험용(`stub`)은 `NODE_ENV`가 development · test로 명시된 환경에서만 켜진다.
  *   인증기관이 준비되지 않은 동안에는 스위치를 켜도 요구하지 않는다(위 3번).
  *
@@ -35,6 +36,7 @@ import type { Request } from 'express';
 import pool, { query } from '../config/database';
 import { isEnforcedFrom } from './rollout-gate';
 import { maskPhone, markVerifiedPhone, VerifiedPhone } from './mfa';
+import { kmcConfig, kmcProvider } from './identity-provider-kmc';
 
 /** 본인인증 진행 시간(분) — 인증 창을 열어 끝낼 때까지 */
 export const IDENTITY_TICKET_TTL_MINUTES = 10;
@@ -97,6 +99,8 @@ export function resolveIdentityProvider(): IdentityProvider | null {
   const wanted = String(process.env.IDENTITY_VERIFY_PROVIDER || '').trim().toLowerCase();
   const nodeEnv = String(process.env.NODE_ENV || '').trim().toLowerCase();
   if (wanted === 'stub' && STUB_ALLOWED_NODE_ENVS.includes(nodeEnv)) return stubProvider;
+  // ★ 2026-10-06 한국모바일인증 — 설정 · 실행 파일이 다 있을 때만(하나라도 없으면 종전처럼 아무도 요구받지 않는다)
+  if (kmcConfig()) return kmcProvider;
   return null;
 }
 

@@ -1355,6 +1355,42 @@ JWT를 주고 화면에서 가리는 방식은 통제가 아니다(그 토큰으
 검증 = BE · FE tsc 0 · vitest 539파일 전부 통과 · FE `build:safe` 통과 · 복귀 통로 계약 16건(실제 응답 2건 포함) · 결함 주입 15종 전부 잡힘.
 Codex 적대 검토 1R(`gpt-6-astra`) = critical · high 0 · medium 1 — 「인증기관 값 이름이 `submit`이면 폼의 전송 메서드를 가려 요청이 안 나간다」. 스크립트 탈출 · 다른 창의 메시지 끼워 넣기 경로는 찾지 못했다고 보고. medium은 수용해 폼 동작을 원형 메서드로 부르게 고쳤다(`submit` · `appendChild` · 폼 제거 · 같은 뿌리 세 곳).
 
+### 1006 한국모바일인증 연동 (모듈 · 규격 수령 · Harold 「한국모바일인증 파일 왔어」)
+
+받은 것 = 범용 개발가이드 v2.0(MVC) · 고객사 페이지 매뉴얼 · NodeJS 예제(step 1~3 · crypto) · 암호화 모듈 실행 파일(리눅스 `KmcCrypto` · 윈도 `.exe` · **고객사 ID 별 개별 발급 = 열쇠가 든 파일**). 원본 = Harold PC `Downloads/(주)인비토 IVTT1001.zip`(저장소에 넣지 않는다).
+
+**1003 「규격서에서 먼저 확인할 것」의 답**
+
+| 확인 | 규격 | 처리 |
+|---|---|---|
+| 요청 · 결과 방식 | 요청 = 팝업 폼 POST `https://www.kmcert.com/kmcis/web/kmcisReq.jsp`(tr_cert · tr_url · tr_ver V2 · tr_add N) · 결과 = tr_url 로 POST `apiToken` · `certNum`(대소문자 구분) | 1003 복귀 통로 · 화면 팝업 그대로(코드 변경 0) |
+| 요청 식별값이 되돌아오는가 | 된다 — 요청번호 certNum(16~40자 · 유일)이 복귀 값 · 토큰 확인 응답 `apiCertNum` · 결과 첫 칸 `kCertNum` 세 곳에 | 요청번호 = 인증 건 번호(`verificationId` 하이픈 제거 32자) · 세 곳 모두 대조 |
+| 모듈 형태 | 리눅스 실행 파일 · `child_process.spawn` 후 stdin/stdout 한 줄 규약(`모드:번호^*값` → `번호:결과`) | `utils/kmc-crypto.ts` · **npm 의존성 0**(예제의 iconv-lite · axios 대신 Node 기본 TextDecoder · fetch) · 서버 경로 = ENV |
+| 글자 인코딩 | 모듈 결과 = EUC-KR(이름) · 토큰 확인 = JSON UTF-8 | TextDecoder('euc-kr')(이 PC Node 20 실측 「한」 복원) |
+| 개발 · 운영 구분 | 테스트폰 등록(최대 30개 · 30일) 번호로만 시험 → 서비스 오픈 요청 → **오픈일부터 과금** | 테스트폰 = 대표 휴대폰(Harold 1006) |
+| 중복가입 확인값 | DI 제공(휴대폰 · PASS 인증) | 해시로 저장(`dup_key_hash`) · **차단은 하지 않는다** — 제출한 2.1 문서에 없고, 한 사람이 여러 고객사 계정을 맡는 대행사가 있다(착수 판단 Harold) |
+
+**구현** — 인증기관 자리만 채웠다(로그인 · 설정 흐름 · 저장 · 감사 기록 무변경)
+- `utils/identity-provider-kmc.ts` = `kmcProvider`
+  - buildStart: tr_cert 평문(`고객사ID/URL코드/요청번호/한국시각/M/빈칸 6/추가정보(빈칸)/0000000000000000` · 구분자 12) → enc → msg(위변조 검사값) → enc(1차/검사값/확장변수) → 팝업 폼
+  - verify: 복귀 값 모양 검사(영숫자 · `+/=_-` · 줄바꿈 차단) → apiToken · certNum 복호화 → certNum 대조 → 서버끼리 `kmcisToken_api.jsp`(한국시각 · 20초) → APR01 만 통과 · `apiCertNum` 대조 → apiRecCert 복호화 → 「결과/검사값」 검사값 재계산 대조 → 2차 복호화 → 18칸 · `kCertNum` 대조 · `result = Y` → 이름 · 휴대폰 · DI 복호화 → 반환. **CI 는 풀지도 저장하지도 않는다.**
+- `utils/kmc-crypto.ts` = 모듈 한 번 띄워 두고 번호로 짝짓기 · 10초 무응답 = 실패 + 모듈 내림 · 모듈 종료 = 기다리던 요청 전부 실패 · 다음 호출에 다시 띄움 · 입력 통로 오류를 받는다(안 받으면 서버가 내려간다).
+- `identity-verify.ts` `resolveIdentityProvider` = ENV `KMC_CP_ID` · `KMC_URL_CODE`(6자리) · `KMC_CRYPTO_PATH`(실행 가능) 가 **다 있을 때만** kmc. 하나라도 없으면 종전처럼 인증기관 없음 = 아무도 요구받지 않는다.
+- 계약 = `kmc-crypto-1006.test.ts`(실제 자식 프로세스 · 가짜 모듈로 규약 · 동시 · EUC-KR · 조각 · 죽음 · 멈춤 · 없는 파일) · `identity-provider-kmc-1006.test.ts`(예제 조립식과 tr_cert 동일 · 세 자리 대조 · 위변조 · APR02~06 · N · 칸 부족 · 줄바꿈 차단 · CI 미복호화). 결함 주입 4종(대조 2 · 위변조 · Y 확인) 전부 잡힘. 실제 모듈은 이 PC 에서 실행하지 않았다 — 실암호화는 서버 테스트폰 실측.
+
+**Codex 적대 검토**(`gpt-6-astra` · 닫힐 때까지) — 1R needs-attention: [high] 통로 없는 실행 실패(EMFILE)에서 오류 리스너보다 통로 접근이 먼저라 뒤따르는 error 이벤트가 서버를 내림 → 리스너를 spawn 직후 먼저 걸고 통로 없으면 거절 · [medium] 폴더 경로도 X_OK 로 「준비됨」 → `isFile()` 먼저. 회귀 = `kmc-crypto-spawnfail-1006.test.ts` · 폴더 경로 null(결함 주입 2종 잡힘) → **2R approve**. 검증 = BE tsc 0 · vitest 584파일 8,254건.
+
+**KMC 관리 화면(1006 Harold 캡처)** = 회원사 ID `IVTT1001` · 도메인 `hanjul.ai` 순번 004 · URL 001 `https://hanjul.ai//api/auth/identity/return`(**슬래시 두 번 — 입력칸 앞에 `https://hanjul.ai/` 가 붙어 있다**) → **1006 Harold 재등록 확인(캡처) = URL 002 `https://hanjul.ai/api/auth/identity/return` · 코드 `004002` · 사용중 · 001 삭제(2026.10.06)**. KMC 가 URL 전체를 대조하는지 도메인만 보는지는 규격에 없다(미검증).
+
+**켜는 순서**(배포 뒤 · 서버 명령은 대화로 하나씩)
+1. 리눅스 `KmcCrypto` 를 .62 저장소 밖 폴더에 올리고 실행 권한(소유 = pm2 실행 계정 · 700).
+2. .62 → `www.kmcert.com`(117.52.81.52:443) 서버끼리 통신 확인(가이드 「방화벽 확인 필수」).
+3. `.env` = `KMC_CP_ID=IVTT1001` · `KMC_URL_CODE=004002` · `KMC_CRYPTO_PATH=<경로>` + 시행일 · 명단(대표 계정 하나) → `pm2 restart targetup-backend --update-env`.
+4. 대표 계정 로그인 → 본인인증 창(KMC) → 대표 휴대폰 인증 → `identity_verifications` 1행 verified · 담당자 이름 · 번호 확인.
+5. 직원 계정으로 명단 확대 → KMC 서비스 오픈 요청(과금 시작) → 전 계정 시행(`*`).
+
+**미검증** — 휴대폰에서 팝업(새 탭) 진행(예제는 휴대폰이면 같은 창) · KMC 의 URL 대조 범위 · .62 → KMC 통신 · 실제 모듈의 결과 칸 글자 모양(암호문 문자 집합).
+
 ### 엔진(비토 게이트웨이) 증적 — 1002 영업 요청 「전 항목 비토 엔진 · 한줄로 증적파일」
 
 요청 범위 = 2.2(① · ③ · ④ · ⑤) · 3.1(① · ④) · 3.4 · 3.5 · 4.1(② · ⑤) · 4.2(⑤) · 4.3. **엔진은 3.4는 ⑥만 · 3.5는 ⑤만.**
