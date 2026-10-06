@@ -104,3 +104,14 @@
 - 열람 = 슈퍼관리자 「AI · 콘텐츠 → 기능 관심 업체」 · `FEATURE_INTEREST_VIEWER_IDS`(기본 `ceo`) AND 등급표 `featureInterest`(대표 조회만) · 다른 계정은 메뉴 자체가 없다. 집계 CT = `utils/feature-interest.ts`(SQL 묶음으로 전부 셈 · 시간순 기록만 회사당 30건) · 화면 = `FeatureInterestTab.tsx`.
 - Codex 적대: 1R medium 2(기록 호출 상한 없음 · 30건 밖 클릭이 기능별에서 빠짐 → 원장 행을 JS 로 묶던 구조를 SQL 묶음으로 바꿔 2만 건 상한도 제거) → **2R approve**.
 - 기록은 배포 시점부터(그 전 기록 없음).
+
+## 11. 로그인 안내 창 (Harold 10-06 「로그인하면 지금 바로 한줄로 AI Operator 기능을 살펴보세요 · 영상과 함께 · 지금 바로가기」)
+
+- 대상 = 허브와 같은 서버 판정 `fetchAiOperatorAccess()` 가 **false** 인 회사(요금제 미가입 · 잠김). 모름(오류 · 응답 없음)은 띄우지 않는다.
+- 빈도 = **로그인 1회마다 1번**. 표식 = 토큰 끝 24자(`localStorage['ai-op-login-promo-seen']`) · 토큰은 로그인할 때만 바뀐다(authStore).
+- 화면 = 대시보드(`<AiOperatorLoginPromo blocked={loginPromoBlocked} />`) · 영상 = `auto-marketing.mp4`(무음 · 동작 줄이기 설정이면 정지) · 칩 5줄(원장 `plan-feature-intros.ts` 와 같은 사실만) · 「지금 바로가기」 → `/ai-operator` · 「다음에 볼게요」.
+- 기록 = §10 과 같은 원천(`audit_logs`) · featureId `login-promo` · 뜬 것 = `plan_feature_open` · 바로가기 = `plan_feature_go`(새 action). 「기능 관심 업체」 기능 선택에 「로그인 안내 창」 · 회사 표에 「바로가기 N회」.
+- 겹침 = 요금제 변경 알림(최초 1회 자동)이 정해지기 전 · 열려 있는 동안은 기다린다(렌더 때 아는 값 `loginPromoBlocked`).
+- 한 번 보장 = 탭 사이 잠금(`navigator.locks`) 안에서 표식을 다시 보고 **저장에 성공한 탭만** 띄우고 기록한다. 잠금이 없는 브라우저 · 표식 저장 실패 = 띄우지 않는다(중복 노출보다 안 뜨는 쪽). 한 화면에서 한 번 띄우면 다시 띄우지 않는다(`shownRef`).
+- 접근성 = Esc 닫기 · Tab 은 창 안에서만 · 닫으면 포커스 복귀 · 뒤 화면 스크롤 잠금.
+- Codex 적대: 1R(탭 두 개 중복 · 요금제 변경 알림과 겹침 · 포커스 이탈) → 2R medium 2(잠금 없는 브라우저 중복 · 표식 저장 실패 시 재표시) → **3R 지적 없음**.

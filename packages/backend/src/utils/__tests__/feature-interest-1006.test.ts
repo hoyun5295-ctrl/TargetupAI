@@ -27,6 +27,7 @@ describe('기록 요청 정규화', () => {
   it('열람 · 요금제 보기만 · 기능 id 형식만', () => {
     expect(parseFeatureSeen({ featureId: 'auto-marketing', event: 'open' })).toEqual({ featureId: 'auto-marketing', event: 'open' });
     expect(parseFeatureSeen({ featureId: 'sns', event: 'pricing' })).toEqual({ featureId: 'sns', event: 'pricing' });
+    expect(parseFeatureSeen({ featureId: 'login-promo', event: 'go' })).toEqual({ featureId: 'login-promo', event: 'go' });
     expect(parseFeatureSeen({ featureId: 'sns', event: 'click' })).toBeNull();
     expect(parseFeatureSeen({ featureId: "x'; DROP", event: 'open' })).toBeNull();
     expect(parseFeatureSeen({ featureId: 'A-UPPER', event: 'open' })).toBeNull();
@@ -109,7 +110,7 @@ describe('집계 — 회사 · 기능별', () => {
     const d = await loadFeatureInterest(parseFeatureInterestQuery({ period: 'all' }));
     expect(d.summary).toEqual({ companies: 2, opens: 4, pricingCompanies: 1, unsubscribedCompanies: 1 });
     const am = d.features.find((f) => f.featureId === 'auto-marketing');
-    expect(am).toEqual({ featureId: 'auto-marketing', companies: 1, pricingCompanies: 1, opens: 2 });
+    expect(am).toEqual({ featureId: 'auto-marketing', companies: 1, pricingCompanies: 1, goCompanies: 0, opens: 2 });
     const beauty = d.companies.find((c) => c.companyId === 'c-free')!;
     expect(beauty.companyName).toBe('표본뷰티');
     expect(beauty.subscribed).toBe(false);
@@ -133,7 +134,7 @@ describe('집계 — 회사 · 기능별', () => {
     const beauty = d.companies[0];
     expect(beauty.events).toHaveLength(30);
     expect(beauty.events.some((e) => e.featureId === 'journeys')).toBe(false); // 상세에는 없어도
-    expect(d.features.find((f) => f.featureId === 'journeys')).toEqual({ featureId: 'journeys', companies: 0, pricingCompanies: 1, opens: 0 }); // 수에는 있다
+    expect(d.features.find((f) => f.featureId === 'journeys')).toEqual({ featureId: 'journeys', companies: 0, pricingCompanies: 1, goCompanies: 0, opens: 0 }); // 수에는 있다
     expect(beauty.pricingClicks).toBe(1);
   });
 
@@ -143,8 +144,22 @@ describe('집계 — 회사 · 기능별', () => {
     expect(d.companies.map((c) => c.companyId)).toEqual(['c-free']);
     const [sql, params] = mockQuery.mock.calls[0];
     expect(String(sql)).not.toContain('al.created_at >=');
-    expect(String(sql)).toContain("al.details->>'featureId' = $3");
-    expect(params.slice(0, 3)).toEqual(['plan_feature_open', 'plan_feature_pricing', 'auto-marketing']);
+    expect(String(sql)).toContain("al.action IN ($1, $2, $3)");
+    expect(String(sql)).toContain("al.details->>'featureId' = $4");
+    expect(params.slice(0, 4)).toEqual(['plan_feature_open', 'plan_feature_pricing', 'plan_feature_go', 'auto-marketing']);
+  });
+
+  it('★ 로그인 안내 창 — 뜬 것(open) · 「지금 바로가기」(go)를 요금제 보기와 따로 센다', async () => {
+    fakeDb([
+      { action: 'plan_feature_go', created_at: '2026-10-06T09:01:00Z', feature_id: 'login-promo', company_id: 'c-free', user_name: '김담당', login_id: 'beauty01', company_name: '표본뷰티' },
+      { action: 'plan_feature_open', created_at: '2026-10-06T09:00:00Z', feature_id: 'login-promo', company_id: 'c-free', user_name: '김담당', login_id: 'beauty01', company_name: '표본뷰티' },
+    ]);
+    const d = await loadFeatureInterest(parseFeatureInterestQuery({ period: 'all' }));
+    expect(d.features).toEqual([{ featureId: 'login-promo', companies: 1, pricingCompanies: 0, goCompanies: 1, opens: 1 }]);
+    expect(d.companies[0].goClicks).toBe(1);
+    expect(d.companies[0].pricingClicks).toBe(0);
+    expect(d.companies[0].events[0].event).toBe('go');
+    expect(d.summary.pricingCompanies).toBe(0);
   });
 
   it('기간을 고르면 시각 조건이 붙는다 · 읽는 행 수 상한이 없다(묶음 SQL)', async () => {
@@ -189,7 +204,9 @@ describe('열람은 Harold님만 · 기록은 로그인 사용자만', () => {
 describe('화면 — 안내 창 한 곳에서 보내고 · 메뉴는 허용 계정에만', () => {
   it('창이 열릴 때 · 「요금제 보기」(두 창 모양 모두)에서 보낸다', () => {
     const modal = front('components/PlanFeatureModal.tsx');
-    expect(modal).toContain("fetch('/api/plans/feature-seen'");
+    expect(front('utils/plan-feature-report.ts')).toContain("fetch('/api/plans/feature-seen'");
+    expect(modal).toContain("import { reportPlanFeature } from '../utils/plan-feature-report';");
+    expect(modal).not.toContain('function reportPlanFeature');
     expect(modal).toContain("reportPlanFeature(intro.id, 'open');");
     expect(modal).toContain("const goPricing = () => { reportPlanFeature(intro.id, 'pricing'); onClose(); navigate('/pricing'); };");
     expect(modal.match(/onClick=\{goPricing\}/g)?.length).toBe(2);
@@ -203,5 +220,73 @@ describe('화면 — 안내 창 한 곳에서 보내고 · 메뉴는 허용 계�
     expect(dash).toContain("fetch('/api/admin/feature-interest/access'");
     expect(dash).toContain("...(featureInterestAllowed ? [{ key: 'featureInterest', label: '기능 관심 업체' }] : []),");
     expect(dash).toContain("{activeTab === 'featureInterest' && featureInterestAllowed && <FeatureInterestTab />}");
+  });
+});
+
+/**
+ * ★ 2026-10-06 로그인 안내 창(Harold 「로그인 후 팝업 · 지금 바로가기」 · 목업 승인 · 추천 3건 = 못 쓰는 회사만 · 로그인마다 한 번 · 효과 기록)
+ */
+describe('로그인 안내 창 — 못 쓰는 회사 · 로그인마다 한 번 · 뜬 것과 바로가기 기록', () => {
+  const promo = front('components/AiOperatorLoginPromo.tsx');
+
+  it('대상 = 허브와 같은 서버 판정이 false 일 때만(모름은 띄우지 않는다)', () => {
+    expect(promo).toContain("import { fetchAiOperatorAccess } from '../utils/ai-operator-access';");
+    expect(promo).toContain('if (alive && allowed === false) setEligible(true);');
+  });
+
+  it('로그인 한 번(토큰)마다 한 번 · 이미 띄웠으면 묻지도 않는다', () => {
+    expect(promo).toContain('if (!mark || readSeen() === mark) return;');
+    expect(promo).toContain('try { localStorage.setItem(SEEN_KEY, mark); return localStorage.getItem(SEEN_KEY) === mark; } catch { return false; }');
+  });
+
+  it('★ Codex 2R — 「한 번」은 원자적으로 잡을 수 있을 때만: 잠금이 없거나 표식을 저장 못 하면 띄우지 않는다 · 한 화면 한 번', () => {
+    const show = promo.slice(promo.indexOf('// ② 표시'), promo.indexOf('// 열려 있는 동안'));
+    expect(show).toContain('if (!mark || !locks?.request) return;');
+    expect(show).toContain('return writeSeen(mark);');
+    expect(show).toContain('if (!eligible || blocked || open || shownRef.current) return;');
+    expect(show.indexOf('shownRef.current = true;')).toBeLessThan(show.indexOf('setOpen(true);'));
+    expect(show).not.toContain(': claim();'); // 잠금 없는 직접 선점 분기 없음
+  });
+
+  it('★ Codex 1R — 탭 두 개여도 한 번: 탭 사이 잠금 안에서 표식을 다시 보고 잡은 탭만 띄우고 기록한다', () => {
+    const show = promo.slice(promo.indexOf('// ② 표시'), promo.indexOf('// 열려 있는 동안'));
+    expect(show).toContain("locks.request('ai-op-login-promo', async () => claim())");
+    expect(show).toContain('if (!alive || readSeen() === mark) return false;');
+    expect(show.indexOf('writeSeen(mark);')).toBeLessThan(show.indexOf('setOpen(true);'));
+    expect(show.indexOf('if (!alive || !won) return;')).toBeLessThan(show.indexOf("reportPlanFeature(LOGIN_PROMO_FEATURE_ID, 'open');"));
+  });
+
+  it('★ Codex 1R — 다른 자동 안내 창(요금제 변경 알림)이 정해지기 전 · 열려 있는 동안은 기다린다(렌더 때 아는 값)', () => {
+    expect(promo).toContain('if (!eligible || blocked || open || shownRef.current) return;');
+    const dash = front('pages/Dashboard.tsx');
+    expect(dash).toContain('const loginPromoBlocked = !planInfo || !!planChange || (!!planInfo.plan_change?.from && !!planInfo.plan_change?.to && !planChangeDone);');
+    expect(dash).toContain('<AiOperatorLoginPromo blocked={loginPromoBlocked} />');
+    const close = dash.slice(dash.indexOf('const closePlanChange = async () => {'), dash.indexOf("fetch('/api/companies/plan-change/ack'"));
+    expect(close).toContain('setPlanChangeDone(true);');
+  });
+
+  it('★ Codex 1R — Tab · Shift+Tab 은 창 안에서만 · 닫으면 포커스 복귀', () => {
+    expect(promo).toContain("if (e.key !== 'Tab') return;");
+    expect(promo).toContain('if (e.shiftKey && (active === first || !root.contains(active))) { e.preventDefault(); last.focus(); }');
+    expect(promo).toContain('prevFocus?.focus?.();');
+  });
+
+  it('뜬 것 · 지금 바로가기를 기록하고 허브로 간다', () => {
+    expect(promo).toContain("reportPlanFeature(LOGIN_PROMO_FEATURE_ID, 'open');");
+    expect(promo).toContain("reportPlanFeature(LOGIN_PROMO_FEATURE_ID, 'go');");
+    expect(promo).toContain("navigate('/ai-operator');");
+    expect(promo).toContain("export const LOGIN_PROMO_FEATURE_ID = 'login-promo';");
+  });
+
+  it('무음 · 반복 · 화면 안 재생 · 움직임 줄이기면 재생 버튼 · native dialog 0', () => {
+    expect(promo).toMatch(/<video[\s\S]*?muted[\s\S]*?loop[\s\S]*?playsInline[\s\S]*?autoPlay=\{!reduceMotion\}[\s\S]*?controls=\{reduceMotion\}/);
+    expect(promo).not.toMatch(/\b(alert|confirm|prompt)\(/);
+  });
+
+  it('대시보드에 붙어 있다 · 슈퍼관리자 화면은 로그인 안내 창 이름과 바로가기를 보여 준다', () => {
+    expect(front('pages/Dashboard.tsx')).toContain('<AiOperatorLoginPromo blocked={loginPromoBlocked} />');
+    const tab = front('components/admin/FeatureInterestTab.tsx');
+    expect(tab).toContain("id === LOGIN_PROMO_ID ? '로그인 안내 창'");
+    expect(tab).toContain("const next = f.featureId === LOGIN_PROMO_ID ? f.goCompanies : f.pricingCompanies;");
   });
 });

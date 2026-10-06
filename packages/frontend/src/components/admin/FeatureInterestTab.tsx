@@ -20,14 +20,15 @@ interface CompanyRow {
   subscribed: boolean;
   features: { featureId: string; opens: number }[];
   pricingClicks: number;
+  goClicks: number;
   lastAt: string;
   users: { name: string; loginId: string }[];
-  events: { at: string; event: 'open' | 'pricing'; featureId: string; userName: string }[];
+  events: { at: string; event: 'open' | 'pricing' | 'go'; featureId: string; userName: string }[];
 }
 
 interface InterestData {
   summary: { companies: number; opens: number; pricingCompanies: number; unsubscribedCompanies: number };
-  features: { featureId: string; companies: number; pricingCompanies: number; opens: number }[];
+  features: { featureId: string; companies: number; pricingCompanies: number; goCompanies: number; opens: number }[];
   companies: CompanyRow[];
 }
 
@@ -46,7 +47,10 @@ const PLAN_FILTERS: { key: PlanFilter; label: string }[] = [
 const authHeaders = () => ({ Authorization: `Bearer ${localStorage.getItem('token')}` });
 const segBtn = (on: boolean) =>
   `px-3 py-1.5 text-sm transition-colors ${on ? 'bg-cyan-50 text-cyan-700 font-medium' : 'text-gray-600 hover:bg-gray-100'}`;
-const featureName = (id: string) => findPlanFeatureIntro(id)?.title || id;
+// ★ 2026-10-06 로그인 안내 창(AiOperatorLoginPromo) = 기능 원장 밖 항목 · 「지금 바로가기」(go) 가 다음 행동
+const LOGIN_PROMO_ID = 'login-promo';
+const featureName = (id: string) => (id === LOGIN_PROMO_ID ? '로그인 안내 창' : findPlanFeatureIntro(id)?.title || id);
+const EVENT_LABEL: Record<'open' | 'pricing' | 'go', string> = { open: '안내 창 열람', pricing: '요금제 보기', go: '지금 바로가기' };
 const fmt = (iso: string) => new Date(iso).toLocaleString('ko-KR', {
   timeZone: 'Asia/Seoul', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false,
 });
@@ -105,6 +109,7 @@ export default function FeatureInterestTab() {
         <select value={featureId} onChange={(e) => setFeatureId(e.target.value)}
           className="border rounded-lg px-3 py-1.5 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-cyan-200">
           <option value="all">모든 기능</option>
+          <option value={LOGIN_PROMO_ID}>로그인 안내 창</option>
           {PLAN_FEATURE_INTROS.map((f) => <option key={f.id} value={f.id}>{f.title}</option>)}
         </select>
         <span className="text-sm text-gray-500 font-medium">회사</span>
@@ -143,18 +148,21 @@ export default function FeatureInterestTab() {
           <div className="text-sm font-semibold mb-3">기능별 관심</div>
           {data && data.features.length === 0 && <div className="text-sm text-gray-400 py-6 text-center">이 기간에 안내 창을 연 회사가 없습니다</div>}
           <div className="space-y-2">
-            {(data?.features || []).map((f) => (
-              <div key={f.featureId} className="grid grid-cols-[92px_1fr_64px] gap-2 items-center text-[12.5px]">
-                <span className="truncate" title={featureName(f.featureId)}>{featureName(f.featureId)}</span>
-                <span className="relative h-2 rounded-full bg-gray-100 overflow-hidden">
-                  <span className="absolute inset-y-0 left-0 rounded-full bg-cyan-200" style={{ width: `${(f.companies / maxCompanies) * 100}%` }} />
-                  <span className="absolute inset-y-0 left-0 rounded-full bg-cyan-600" style={{ width: `${(f.pricingCompanies / maxCompanies) * 100}%` }} />
-                </span>
-                <span className="text-right text-gray-500 tabular-nums">{f.companies}곳 · {f.pricingCompanies}</span>
-              </div>
-            ))}
+            {(data?.features || []).map((f) => {
+              const next = f.featureId === LOGIN_PROMO_ID ? f.goCompanies : f.pricingCompanies;
+              return (
+                <div key={f.featureId} className="grid grid-cols-[92px_1fr_64px] gap-2 items-center text-[12.5px]">
+                  <span className="truncate" title={featureName(f.featureId)}>{featureName(f.featureId)}</span>
+                  <span className="relative h-2 rounded-full bg-gray-100 overflow-hidden">
+                    <span className="absolute inset-y-0 left-0 rounded-full bg-cyan-200" style={{ width: `${(f.companies / maxCompanies) * 100}%` }} />
+                    <span className="absolute inset-y-0 left-0 rounded-full bg-cyan-600" style={{ width: `${(next / maxCompanies) * 100}%` }} />
+                  </span>
+                  <span className="text-right text-gray-500 tabular-nums">{f.companies}곳 · {next}</span>
+                </div>
+              );
+            })}
           </div>
-          <div className="text-[11px] text-gray-400 mt-3">연한 막대 = 안내 창을 연 회사 · 진한 막대 = 거기서 「요금제 보기」를 누른 회사</div>
+          <div className="text-[11px] text-gray-400 mt-3">연한 막대 = 안내 창을 연 회사 · 진한 막대 = 거기서 「요금제 보기」를 누른 회사(로그인 안내 창은 「지금 바로가기」)</div>
         </div>
 
         <div className="rounded-xl border border-gray-200/70 overflow-hidden">
@@ -188,7 +196,10 @@ export default function FeatureInterestTab() {
                           </span>
                         ))}
                       </td>
-                      <td className="px-3 py-2.5 tabular-nums">{c.pricingClicks > 0 ? <b className="text-emerald-700">{c.pricingClicks}회</b> : <span className="text-gray-400">없음</span>}</td>
+                      <td className="px-3 py-2.5 tabular-nums">
+                        {c.pricingClicks > 0 ? <b className="text-emerald-700">{c.pricingClicks}회</b> : <span className="text-gray-400">없음</span>}
+                        {c.goClicks > 0 && <div className="text-[11px] text-violet-700">바로가기 {c.goClicks}회</div>}
+                      </td>
                       <td className="px-3 py-2.5 whitespace-nowrap tabular-nums">{fmt(c.lastAt)}</td>
                       <td className="px-3 py-2.5 text-xs">
                         {c.users.slice(0, 2).map((u) => <div key={u.loginId}>{u.name || '이름 없음'} <span className="text-gray-400">{u.loginId}</span></div>)}
@@ -203,7 +214,7 @@ export default function FeatureInterestTab() {
                             {c.events.map((e, i) => (
                               <li key={`${e.at}-${i}`} className="grid grid-cols-[110px_96px_1fr] gap-2 py-1.5">
                                 <span className="tabular-nums text-gray-500">{fmt(e.at)}</span>
-                                <span className={e.event === 'pricing' ? 'font-semibold text-emerald-700' : 'font-medium text-gray-700'}>{e.event === 'pricing' ? '요금제 보기' : '안내 창 열람'}</span>
+                                <span className={e.event === 'pricing' ? 'font-semibold text-emerald-700' : e.event === 'go' ? 'font-semibold text-violet-700' : 'font-medium text-gray-700'}>{EVENT_LABEL[e.event]}</span>
                                 <span className="text-gray-600">{featureName(e.featureId)} · {e.userName || '이름 없음'}</span>
                               </li>
                             ))}

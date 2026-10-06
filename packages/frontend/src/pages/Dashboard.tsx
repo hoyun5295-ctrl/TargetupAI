@@ -25,6 +25,7 @@ import { LmsConvertModal, SmsConvertModal } from '../components/ChannelConvertMo
 import CustomerDBModal from '../components/CustomerDBModal';
 import CustomerInsightModal from '../components/CustomerInsightModal';
 import DashboardHeader from '../components/DashboardHeader';
+import AiOperatorLoginPromo from '../components/AiOperatorLoginPromo'; // ★ 2026-10-06 로그인 직후 AI Operator 소개 창(못 쓰는 회사 · 로그인마다 한 번)
 import OnboardingCard from '../components/onboarding/OnboardingCard'; // ★ D219+ Part 2 (2026-05-27): AI 오퍼레이션 무료체험 사용자 진입 안내 카드
 import BrandVoiceNudgeCard from '../components/onboarding/BrandVoiceNudgeCard'; // ★ D225+ (2026-05-28): Brand Voice 미등록 회사 강력 push 카드
 import DirectPreviewModal from '../components/DirectPreviewModal';
@@ -256,9 +257,14 @@ export default function Dashboard() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [planInfo?.plan_change?.from, planInfo?.plan_change?.to]);
+  // ★ 2026-10-06 로그인 소개 창(AiOperatorLoginPromo)이 이 알림과 겹치지 않게 — 알림은 위 effect 에서 한 박자 늦게 정해지므로
+  //   「열렸나」가 아니라 렌더 때 바로 아는 값으로 막는다: 요금제 정보 전 · 변경 알림이 있는데 아직 닫지 않음(Codex 1R)
+  const [planChangeDone, setPlanChangeDone] = useState(false);
+  const loginPromoBlocked = !planInfo || !!planChange || (!!planInfo.plan_change?.from && !!planInfo.plan_change?.to && !planChangeDone);
   // 안내 확인/닫기 = 서버에 ack → 다음 조회부터 재노출 없음(계정당 1회, 브라우저·기기 무관)
   const closePlanChange = async () => {
     setPlanChange(null);
+    setPlanChangeDone(true);
     try {
       const token = localStorage.getItem('token');
       await fetch('/api/companies/plan-change/ack', { method: 'POST', headers: { Authorization: `Bearer ${token}` } });
@@ -2254,6 +2260,8 @@ const campaignData = {
 
       {/* ★ D219+ Part 2 (2026-05-27): AI 오퍼레이션 무료체험 사용자 Wizard 진입 안내 카드 */}
       <OnboardingCard />
+      {/* ★ Codex 1R — 요금제 변경 알림(최초 1회 자동)과 겹치지 않게 그 창이 닫힐 때까지 기다린다 */}
+      <AiOperatorLoginPromo blocked={loginPromoBlocked} />
 
       {/* 메인 */}
       <main className="max-w-7xl mx-auto px-3 md:px-4 py-4 md:py-8">

@@ -15,7 +15,8 @@ import { mapWithConcurrency } from './concurrency';
 import { isActivePaidPlan, loadPlanContext } from './plan-guard';
 import { precheckPeriodStartSql } from './precheck-usage';
 
-export const FEATURE_INTEREST_ACTIONS = { open: 'plan_feature_open', pricing: 'plan_feature_pricing' } as const;
+// ★ 2026-10-06 go = 로그인 안내 창(featureId 'login-promo')의 「지금 바로가기」 — 요금제 보기와 다른 행동이라 다른 값으로 남긴다
+export const FEATURE_INTEREST_ACTIONS = { open: 'plan_feature_open', pricing: 'plan_feature_pricing', go: 'plan_feature_go' } as const;
 export type FeatureInterestEvent = keyof typeof FEATURE_INTEREST_ACTIONS;
 export const FEATURE_INTEREST_TARGET = 'plan_feature';
 /** 기록 경로 호출 상한 — 사용자당 1분 30회(안내 창을 사람이 여는 속도로는 닿지 않는다 · 넘으면 기록하지 않는다) */
@@ -29,7 +30,7 @@ const FEATURE_ID_RE = /^[a-z][a-z-]{1,39}$/;
 /** 기록 요청 정규화 — 모르는 값이면 null(기록하지 않는다) */
 export function parseFeatureSeen(body: any): { featureId: string; event: FeatureInterestEvent } | null {
   const featureId = typeof body?.featureId === 'string' ? body.featureId.trim() : '';
-  const event = body?.event === 'pricing' ? 'pricing' : body?.event === 'open' ? 'open' : null;
+  const event = (['open', 'pricing', 'go'] as const).find((e) => e === body?.event) ?? null;
   if (!event || !FEATURE_ID_RE.test(featureId)) return null;
   return { featureId, event };
 }
@@ -72,6 +73,8 @@ export interface FeatureInterestCompanyRow {
   subscribed: boolean;
   features: Array<{ featureId: string; opens: number }>;
   pricingClicks: number;
+  /** 로그인 안내 창 「지금 바로가기」 */
+  goClicks: number;
   lastAt: string;
   users: Array<{ name: string; loginId: string }>;
   events: Array<{ at: string; event: FeatureInterestEvent; featureId: string; userName: string }>;
@@ -79,7 +82,7 @@ export interface FeatureInterestCompanyRow {
 
 export interface FeatureInterestData {
   summary: { companies: number; opens: number; pricingCompanies: number; unsubscribedCompanies: number };
-  features: Array<{ featureId: string; companies: number; pricingCompanies: number; opens: number }>;
+  features: Array<{ featureId: string; companies: number; pricingCompanies: number; goCompanies: number; opens: number }>;
   companies: FeatureInterestCompanyRow[];
 }
 
@@ -89,9 +92,9 @@ export interface FeatureInterestData {
  *   시간순 기록만 회사당 최근 몇 건을 따로 읽는다.
  */
 export async function loadFeatureInterest(q: FeatureInterestQuery): Promise<FeatureInterestData> {
-  const params: any[] = [FEATURE_INTEREST_ACTIONS.open, FEATURE_INTEREST_ACTIONS.pricing];
+  const params: any[] = [FEATURE_INTEREST_ACTIONS.open, FEATURE_INTEREST_ACTIONS.pricing, FEATURE_INTEREST_ACTIONS.go];
   const companyExpr = `COALESCE(al.details->>'companyId', u.company_id::text)`;
-  let where = `al.action IN ($1, $2) AND ${companyExpr} IS NOT NULL`;
+  let where = `al.action IN ($1, $2, $3) AND ${companyExpr} IS NOT NULL`;
   if (q.period !== 'all') where += ` AND al.created_at >= ${precheckPeriodStartSql(q.period)}`;
   if (q.featureId) { params.push(q.featureId); where += ` AND al.details->>'featureId' = $${params.length}`; }
   const from = `FROM audit_logs al LEFT JOIN users u ON u.id = al.user_id WHERE ${where}`;
@@ -117,14 +120,14 @@ export async function loadFeatureInterest(q: FeatureInterestQuery): Promise<Feat
     ),
   ]);
 
-  type Acc = FeatureInterestCompanyRow & { openMap: Map<string, number>; pricingFeatures: Set<string> };
+  type Acc = FeatureInterestCompanyRow & { openMap: Map<string, number>; pricingFeatures: Set<string>; goFeatures: Set<string> };
   const byCompany = new Map<string, Acc>();
   const accOf = (companyId: string): Acc => {
     let a = byCompany.get(companyId);
     if (!a) {
       a = {
-        companyId, companyName: '(회사 정보 없음)', planName: '', subscribed: false, features: [], pricingClicks: 0,
-        lastAt: new Date(0).toISOString(), users: [], events: [], openMap: new Map(), pricingFeatures: new Set(),
+        companyId, companyName: '(회사 정보 없음)', planName: '', subscribed: false, features: [], pricingClicks: 0, goClicks: 0,
+        lastAt: new Date(0).toISOString(), users: [], events: [], openMap: new Map(), pricingFeatures: new Set(), goFeatures: new Set(),
       };
       byCompany.set(companyId, a);
     }
@@ -137,6 +140,9 @@ export async function loadFeatureInterest(q: FeatureInterestQuery): Promise<Feat
     if (row.action === FEATURE_INTEREST_ACTIONS.pricing) {
       a.pricingClicks += n;
       if (n > 0) a.pricingFeatures.add(featureId);
+    } else if (row.action === FEATURE_INTEREST_ACTIONS.go) {
+      a.goClicks += n;
+      if (n > 0) a.goFeatures.add(featureId);
     } else {
       a.openMap.set(featureId, (a.openMap.get(featureId) || 0) + n);
     }
@@ -152,7 +158,7 @@ export async function loadFeatureInterest(q: FeatureInterestQuery): Promise<Feat
     if (!a) continue;
     a.events.push({
       at: new Date(row.created_at).toISOString(),
-      event: row.action === FEATURE_INTEREST_ACTIONS.pricing ? 'pricing' : 'open',
+      event: row.action === FEATURE_INTEREST_ACTIONS.pricing ? 'pricing' : row.action === FEATURE_INTEREST_ACTIONS.go ? 'go' : 'open',
       featureId: String(row.feature_id || ''),
       userName: String(row.user_name || ''),
     });
@@ -175,24 +181,25 @@ export async function loadFeatureInterest(q: FeatureInterestQuery): Promise<Feat
     .filter((a) => (q.plan === 'all' ? true : q.plan === 'subscribed' ? a.subscribed : !a.subscribed))
     .sort((x, y) => (x.lastAt < y.lastAt ? 1 : x.lastAt > y.lastAt ? -1 : 0));
 
-  const featureAcc = new Map<string, { companies: Set<string>; pricing: Set<string>; opens: number }>();
+  const featureAcc = new Map<string, { companies: Set<string>; pricing: Set<string>; go: Set<string>; opens: number }>();
   const fa = (id: string) => {
     let v = featureAcc.get(id);
-    if (!v) { v = { companies: new Set<string>(), pricing: new Set<string>(), opens: 0 }; featureAcc.set(id, v); }
+    if (!v) { v = { companies: new Set<string>(), pricing: new Set<string>(), go: new Set<string>(), opens: 0 }; featureAcc.set(id, v); }
     return v;
   };
   for (const a of kept) {
     for (const [featureId, opens] of a.openMap) { const v = fa(featureId); v.companies.add(a.companyId); v.opens += opens; }
     for (const featureId of a.pricingFeatures) fa(featureId).pricing.add(a.companyId);
+    for (const featureId of a.goFeatures) fa(featureId).go.add(a.companyId);
   }
 
   const companies: FeatureInterestCompanyRow[] = kept.map((a) => ({
     companyId: a.companyId, companyName: a.companyName, planName: a.planName, subscribed: a.subscribed,
     features: Array.from(a.openMap.entries()).map(([featureId, opens]) => ({ featureId, opens })).sort((x, y) => y.opens - x.opens),
-    pricingClicks: a.pricingClicks, lastAt: a.lastAt, users: a.users, events: a.events,
+    pricingClicks: a.pricingClicks, goClicks: a.goClicks, lastAt: a.lastAt, users: a.users, events: a.events,
   }));
   const features = Array.from(featureAcc.entries())
-    .map(([featureId, v]) => ({ featureId, companies: v.companies.size, pricingCompanies: v.pricing.size, opens: v.opens }))
+    .map(([featureId, v]) => ({ featureId, companies: v.companies.size, pricingCompanies: v.pricing.size, goCompanies: v.go.size, opens: v.opens }))
     .sort((x, y) => y.companies - x.companies || y.pricingCompanies - x.pricingCompanies || y.opens - x.opens);
 
   return {

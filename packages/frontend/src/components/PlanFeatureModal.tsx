@@ -18,23 +18,7 @@ import { useEffect, useMemo, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { ArrowRight, Coins, ListChecks, Lock, ShieldCheck, SlidersHorizontal, X } from 'lucide-react';
 import { findPlanFeatureIntro, PLAN_FEATURE_MIN_PLAN } from '../constants/plan-feature-intros';
-
-/**
- * ★ 2026-10-06 기능 관심 업체(슈퍼관리자 ceo 전용 화면)의 원천 — 안내 창 열람 · 「요금제 보기」를 서버에 남긴다.
- *   응답을 기다리지 않고, 실패해도 화면에 영향이 없다. 서버가 고객사 사용자만 기록한다(routes/plans.ts · utils/feature-interest.ts).
- */
-function reportPlanFeature(featureId: string, event: 'open' | 'pricing'): void {
-  const token = localStorage.getItem('token');
-  if (!token) return;
-  try {
-    void fetch('/api/plans/feature-seen', {
-      method: 'POST',
-      keepalive: true, // 「요금제 보기」는 곧바로 화면을 옮긴다 — 옮겨도 요청이 끝까지 가게
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-      body: JSON.stringify({ featureId, event }),
-    }).catch(() => { /* 기록 실패는 무시 */ });
-  } catch { /* 기록 실패는 무시 */ }
-}
+import { reportPlanFeature } from '../utils/plan-feature-report'; // ★ 2026-10-06 기능 관심 업체 원천(로그인 안내 창과 같은 함수)
 
 interface PlanFeatureModalProps {
   /** 안내할 기능 id. null이면 창을 그리지 않는다 */
