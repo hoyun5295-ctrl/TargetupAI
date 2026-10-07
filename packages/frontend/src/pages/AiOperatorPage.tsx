@@ -23,6 +23,7 @@ import {
   Wand2,
   X,
   Pencil,
+  Phone,
 } from 'lucide-react';
 import AiRefineModal from '../components/AiRefineModal';
 import { DateTimeField, isoToLocalInput, localInputToIso } from '../components/DateTimeField';
@@ -1772,6 +1773,45 @@ export default function AiOperatorPage() {
                     }
                   />
 
+                  {/* ★ 2026-10-07 회신번호(임은지 접수 · Harold: 활용 가능 컬럼 위 가로 카드) — 기본 = 회사 기본 번호(종전 동작) · 등록 번호 · 고객별 매장번호 */}
+                  <div className="sm:col-span-2 p-5 rounded-2xl bg-white border border-slate-200 shadow-lg">
+                    <div className="flex items-center gap-2 mb-3">
+                      <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-sky-400 to-indigo-500 flex items-center justify-center shrink-0">
+                        <Phone className="w-4 h-4 text-white" />
+                      </div>
+                      <div className="min-w-0">
+                        <p className="text-sm font-bold text-slate-900">회신번호</p>
+                        <p className="text-[10px] text-slate-400">고객이 답장하거나 전화할 번호예요 · 등록된 번호만 고를 수 있어요</p>
+                      </div>
+                    </div>
+                    <div className="flex flex-wrap gap-2" role="radiogroup" aria-label="회신번호">
+                      {[
+                        { value: '', label: '기본 번호', sub: cbList.find((c) => c.isDefault)?.phone || '회사 기본' },
+                        ...cbList.filter((c) => !c.isDefault).map((c) => ({ value: c.phone, label: c.phone, sub: '등록 번호' })),
+                        { value: INDIVIDUAL_CB, label: '고객별 매장번호', sub: '개별 회신' },
+                      ].map((o) => {
+                        const on = cbChoice === o.value;
+                        return (
+                          <button
+                            key={o.value || 'default'}
+                            type="button"
+                            role="radio"
+                            aria-checked={on}
+                            disabled={sending}
+                            onClick={() => setCbChoice(o.value)}
+                            className={`flex flex-col items-start px-3.5 py-2 rounded-xl border text-left transition-all disabled:opacity-50 ${on ? 'bg-indigo-50 border-indigo-400 ring-2 ring-indigo-100' : 'bg-white border-slate-200 hover:bg-slate-50 hover:border-slate-300'}`}
+                          >
+                            <span className={`text-[13px] font-semibold tabular-nums ${on ? 'text-indigo-900' : 'text-slate-800'}`}>{o.label}</span>
+                            <span className={`text-[10.5px] tabular-nums ${on ? 'text-indigo-600' : 'text-slate-400'}`}>{o.sub}</span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                    {cbChoice === INDIVIDUAL_CB && (
+                      <p className="text-[11px] text-slate-500 mt-2.5">고객마다 등록 매장 번호로 보내요. 매장번호가 없거나 등록 안 된 번호인 고객은 보내기 전에 확인하고 빼요.</p>
+                    )}
+                  </div>
+
                   {/* ★ 2026-06-29: 활용 가능 컬럼 다중 선택 + AI 꾸미기 (우측 전체폭) */}
                   <div className="sm:col-span-2 p-5 rounded-2xl bg-white backdrop-blur-xl border border-violet-200 shadow-lg">
                     <div className="flex items-center justify-between gap-2 mb-2 flex-wrap">
@@ -1823,23 +1863,6 @@ export default function AiOperatorPage() {
 
             {/* ★ D166: 승인 발송 활성화 — preview-recipients + /direct-send 2-step */}
             {/* ★ 2026-07-08: 타겟 0건 = 발송/요약 버튼 숨김 (조건 재입력 안내 카드가 대체) */}
-            {/* ★ 2026-10-07 회신번호 — 기본 = 회사 기본 번호(종전 동작) · 등록 번호 · 고객별 매장번호 */}
-            {!isZeroTarget && (
-              <div className="mb-3 flex items-center gap-2 flex-wrap">
-                <span className="text-[13px] font-semibold text-slate-700">회신번호</span>
-                <select
-                  value={cbChoice}
-                  onChange={(e) => setCbChoice(e.target.value)}
-                  disabled={sending}
-                  className="h-9 px-2.5 rounded-lg bg-white border border-slate-300 text-[13px] text-slate-900 outline-none focus:border-indigo-300"
-                >
-                  <option value="">기본 번호{cbList.find((c) => c.isDefault) ? ` (${cbList.find((c) => c.isDefault)!.phone})` : ''}</option>
-                  {cbList.filter((c) => !c.isDefault).map((c) => <option key={c.phone} value={c.phone}>{c.phone}</option>)}
-                  <option value={INDIVIDUAL_CB}>고객별 매장번호 (개별 회신)</option>
-                </select>
-                {cbChoice === INDIVIDUAL_CB && <span className="text-[12px] text-slate-500">매장번호가 없거나 등록 안 된 번호인 고객은 확인 뒤 빼고 보내요</span>}
-              </div>
-            )}
             {!isZeroTarget && (
             <div className="flex flex-col sm:flex-row gap-3">
               <button

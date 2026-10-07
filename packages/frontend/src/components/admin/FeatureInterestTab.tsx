@@ -13,6 +13,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Building2, ChevronRight, X } from 'lucide-react';
 import { PLAN_FEATURE_INTROS, findPlanFeatureIntro } from '../../constants/plan-feature-intros';
+import ListPager, { pageSlice } from '../shared/ListPager';   // ★ 2026-10-07 업체 목록 쪽 넘김(20건)
 
 type Period = 'today' | '7d' | 'month' | 'all';
 type PlanFilter = 'all' | 'unsubscribed' | 'subscribed';
@@ -190,6 +191,7 @@ export default function FeatureInterestTab() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [detail, setDetail] = useState<CompanyRow | null>(null);
+  const [page, setPage] = useState(1);   // ★ 2026-10-07 업체 목록 쪽 넘김 · 조건을 바꿔 다시 읽으면 1쪽
   // 「본 기능」 말풍선 — 표가 가로 스크롤 상자 안이라 칸 안에 띄우면 잘린다 → 화면 기준(fixed)으로 하나만 띄운다
   const [tip, setTip] = useState<{ left: number; top: number; above: boolean; c: CompanyRow } | null>(null);
   // 늦게 도착한 옛 조건의 응답이 새 조건 화면을 덮지 않게(조건을 빨리 바꿀 때)
@@ -206,6 +208,7 @@ export default function FeatureInterestTab() {
       if (mySeq !== seq.current) return;
       if (!r.ok || !d?.success) throw new Error(d?.error || '기능 관심 업체를 불러오지 못했습니다.');
       setData(d as InterestData);
+      setPage(1);
     } catch (e: any) {
       if (mySeq !== seq.current) return;
       setError(e?.message || '기능 관심 업체를 불러오지 못했습니다.');
@@ -322,7 +325,7 @@ export default function FeatureInterestTab() {
               <tbody>
                 {loading && !data && <tr><td colSpan={9} className="px-3 py-8 text-center text-gray-400">불러오는 중</td></tr>}
                 {data && data.companies.length === 0 && <tr><td colSpan={9} className="px-3 py-8 text-center text-gray-400">이 조건에 맞는 회사가 없습니다</td></tr>}
-                {(data?.companies || []).map((c) => (
+                {pageSlice(data?.companies || [], page).map((c) => (
                   <tr
                     key={c.companyId}
                     tabIndex={0}
@@ -365,6 +368,7 @@ export default function FeatureInterestTab() {
               </tbody>
             </table>
           </div>
+          <ListPager page={page} total={data?.companies.length || 0} onPage={(p) => { setTip(null); setPage(p); }} />
         </div>
       </div>
 
