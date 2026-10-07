@@ -116,6 +116,14 @@ export function isFeatureInterestViewer(superAdminId?: string | null): Promise<b
 }
 
 /**
+ * ★ 2026-10-07 공개 소개 페이지 방문 · 시연 요청 열람 권한 — INTRO_LEADS_VIEWER_IDS(기본 'ceo,suran').
+ * Harold 명시: 「슈퍼관리자에 나랑 suran 이 계정만 볼 수 있도록」. 다른 축과 별도 env.
+ */
+export function isIntroLeadsViewer(superAdminId?: string | null): Promise<boolean> {
+  return isSuperAdminAllowed(superAdminId, 'INTRO_LEADS_VIEWER_IDS', 'ceo,suran', 'intro-leads', 'introLeads');
+}
+
+/**
  * ★ 2026-10-07 본인인증 현황(담당자 본인인증 시행 상태 · 이력 · 실패) 열람 권한 — IDENTITY_STATUS_VIEWER_IDS(기본 'ceo').
  * Harold 명시: 「슈퍼관리자에 나만 볼 수 있게」 · 다른 계정은 메뉴 자체가 보이지 않는다. 다른 축과 별도 env.
  */

@@ -79,7 +79,8 @@ import { applyPlanRequestWithClient, PlanTermError, planTermManagedSql, planTerm
 // ★ 2026-06-11: 감사 로그 CT — 라인그룹 지정/해제 책임 추적 (에이치피오 예약취소 사고 후속)
 import { loadAgencyCallbackKinds } from '../utils/agency-send-intake';
 import { switchCompanyBillingType } from '../utils/billing-type-history';
-import { recordAuditLog, isAuditLogViewer, isAiTrainingViewer, isGeoHitsViewer, isHelpQuestionViewer, isLineGroupAdmin, isSettlementOverviewViewer, isBestLayoutViewer, isPrecheckUsageViewer, isFeatureInterestViewer, isIdentityStatusViewer, diffFields } from '../utils/audit-log';
+import { recordAuditLog, isAuditLogViewer, isAiTrainingViewer, isGeoHitsViewer, isHelpQuestionViewer, isLineGroupAdmin, isSettlementOverviewViewer, isBestLayoutViewer, isPrecheckUsageViewer, isFeatureInterestViewer, isIdentityStatusViewer, isIntroLeadsViewer, diffFields } from '../utils/audit-log';
+import { loadIntroLeads, parseIntroLeadsQuery } from '../utils/intro-leads'; // ★ 2026-10-07 소개 방문 · 시연 요청(ceo · suran)
 import { loadFeatureInterest, parseFeatureInterestQuery } from '../utils/feature-interest'; // ★ 2026-10-06 기능 관심 업체(ceo 전용)
 import { loadIdentityStatus } from '../utils/identity-status'; // ★ 2026-10-07 본인인증 현황(ceo 전용)
 import { isIdentitySchemaMissing, IDENTITY_MIGRATION_RESPONSE } from '../utils/identity-verify';
@@ -4979,6 +4980,25 @@ router.get('/feature-interest', authenticate, requireSuperAdmin, async (req: Req
   } catch (err: any) {
     console.error('[admin/feature-interest] 조회 실패:', err);
     return res.status(500).json({ success: false, error: '기능 관심 업체를 불러오지 못했습니다.' });
+  }
+});
+
+// ★ 2026-10-07: 소개 방문 · 시연 요청 — ceo · suran (INTRO_LEADS_VIEWER_IDS, 기본 'ceo,suran'). 메뉴 노출 게이팅용
+router.get('/intro-leads/access', authenticate, requireSuperAdmin, async (req: Request, res: Response) => {
+  res.json({ allowed: await isIntroLeadsViewer(req.user?.userId) });
+});
+
+/** ★ 2026-10-07 소개 방문 · 시연 요청 (Harold 명시 · 읽기만 · 20건씩) — 집계 소유 = utils/intro-leads.ts */
+router.get('/intro-leads', authenticate, requireSuperAdmin, async (req: Request, res: Response) => {
+  try {
+    if (!(await isIntroLeadsViewer(req.user?.userId))) {
+      return res.status(403).json({ success: false, error: '소개 방문 · 시연 요청 열람 권한이 없습니다.' });
+    }
+    const data = await loadIntroLeads(parseIntroLeadsQuery(req.query));
+    return res.json({ success: true, ...data });
+  } catch (err: any) {
+    console.error('[admin/intro-leads] 조회 실패:', err);
+    return res.status(500).json({ success: false, error: '소개 방문 · 시연 요청을 불러오지 못했습니다.' });
   }
 });
 

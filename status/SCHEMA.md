@@ -135,6 +135,7 @@
 | user_agent | text |
 | created_at | timestamptz |
 > ★2026-10-06 action 값 추가 = `plan_feature_open` · `plan_feature_pricing`(target_type `plan_feature` · details `{ featureId, companyId }`) — 기능 안내 창 열람 · 「요금제 보기」(기록 = `utils/feature-interest.ts` · 열람 = 슈퍼관리자 「기능 관심 업체」 ceo 전용). 이 표를 action 으로 읽는 곳(로그인 차단 · 요금 방식 이력)은 영향 없음.
+> ★2026-10-07 action 값 추가 = `intro_view`(공개 소개 /intro 방문 · user_id NULL · details `{ from }` 들어온 호스트) · `intro_demo_request`(시연 요청 · user_id NULL · details `{ companyName, contactName, phone, method, memo }`) · target_type `intro`(기록 · 조회 = `utils/intro-leads.ts` · 열람 = 슈퍼관리자 「소개 방문 · 시연 요청」 ceo · suran). 같은 IP 대조는 `login_success` 의 ip_address · details->>'loginId' 를 읽기만 한다.
 
 ### login_blocks (로그인 차단 — D145 P0, 2026-05-07)
 | 컬럼 | 타입 | 설명 |

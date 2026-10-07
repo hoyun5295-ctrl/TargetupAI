@@ -54,6 +54,7 @@ import marketingPlannerRoutes from './routes/marketing-planner';
 import contentInterviewRoutes from './routes/content-interview';
 import marketingDiagnosisRoutes from './routes/marketing-diagnosis';
 import marketingDiagnosisPublicRoutes from './routes/marketing-diagnosis-public';
+import introPublicRoutes from './routes/intro-public'; // ★ 2026-10-07 공개 소개 페이지 방문 · 시연 요청(무인증)
 import marketingDiagnosisAdminRoutes from './routes/marketing-diagnosis-admin';
 // ★ D184 (2026-05-20): 이니시스 표준결제 라우트 (레거시 invitobiz.com → 한줄로 이전)
 import paymentsRoutes from './routes/payments';
@@ -484,6 +485,8 @@ app.use('/api/one-step', contentInterviewRoutes);
 app.use('/api/marketing-diagnosis', marketingDiagnosisRoutes);
 // ★ 2026-08-16 AI 마케팅 진단(퍼널 B — 미인증 리드). 본문 파서 32kb 한정은 전역 파서 앞에 선배치됨
 app.use('/api/public/marketing-diagnosis', marketingDiagnosisPublicRoutes);
+// ★ 2026-10-07 공개 소개 페이지(/intro) — 방문 기록 · 시연 요청(무인증 · IP당 한도는 라우터 안)
+app.use('/api/public/intro', introPublicRoutes);
 // ★ D184: 이니시스 표준결제 (prepare/return/close/list/detail)
 app.use('/api/payments', paymentsRoutes);
 app.use('/api/admin/billing', billingRoutes);

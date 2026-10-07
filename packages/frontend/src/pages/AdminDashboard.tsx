@@ -21,6 +21,7 @@ import PlanTermBox, { PlanTermLockNote } from '../components/admin/PlanTermBox';
 import HelpQuestionsTab from '../components/admin/HelpQuestionsTab'; // ★ 2026-08-24 도움말 질문 이력(ceo 전용)
 import FeatureInterestTab from '../components/admin/FeatureInterestTab'; // ★ 2026-10-06 기능 관심 업체(ceo 전용)
 import IdentityStatusTab from '../components/admin/IdentityStatusTab'; // ★ 2026-10-07 본인인증 현황(ceo 전용)
+import IntroLeadsTab from '../components/admin/IntroLeadsTab'; // ★ 2026-10-07 소개 방문 · 시연 요청(ceo · suran)
 import PrecheckUsageTab from '../components/admin/PrecheckUsageTab'; // ★ 2026-09-26 스팸 검사·맞춤법 사용 현황(ceo 전용)
 import SalesOutreachModal from '../components/admin/SalesOutreachModal'; // ★ 2026-08-24 AI 영업 아웃리치(ceo 전용 · 모달)
 import AgencyEmailSendersModal from '../components/admin/AgencyEmailSendersModal'; // ★ 2026-08-26 대행발송 허용 발신 이메일(§18)
@@ -97,7 +98,7 @@ export default function AdminDashboard() {
   const navigate = useNavigate();
   const { user, logout } = useAuthStore();
 
-  const [activeTab, setActiveTab] = useState<'companies' | 'users' | 'scheduled' | 'callbacks' | 'plans' | 'requests' | 'deposits' | 'credits' | 'allCampaigns' | 'stats' | 'billing' | 'syncAgents' | 'auditLogs' | 'lineGroups' | 'templates' | 'loginBlocks' | 'agentDeploy' | 'marketingDiagnosis' | 'spamBlock' | 'geoAccess' | 'helpQuestions' | 'agencyMail' | 'agencyLedger' | 'adminAccounts' | 'precheckUsage' | 'featureInterest' | 'identityStatus' | 'opsRecords'>('companies');
+  const [activeTab, setActiveTab] = useState<'companies' | 'users' | 'scheduled' | 'callbacks' | 'plans' | 'requests' | 'deposits' | 'credits' | 'allCampaigns' | 'stats' | 'billing' | 'syncAgents' | 'auditLogs' | 'lineGroups' | 'templates' | 'loginBlocks' | 'agentDeploy' | 'marketingDiagnosis' | 'spamBlock' | 'geoAccess' | 'helpQuestions' | 'agencyMail' | 'agencyLedger' | 'adminAccounts' | 'precheckUsage' | 'featureInterest' | 'identityStatus' | 'introLeads' | 'opsRecords'>('companies');
   // ★ 2026-06-11: 감사 로그 열람 권한 (AUDIT_LOG_VIEWER_IDS — 기본 ceo 전용) — 허용 계정에만 메뉴/탭 노출
   const [auditAccessAllowed, setAuditAccessAllowed] = useState(false);
   // ★ 2026-08-27 직원 계정·권한 (전송자격인증 3.2·3.3) — 권한분류표 원본은 서버(utils/admin-role.ts)
@@ -122,6 +123,7 @@ export default function AdminDashboard() {
   const [helpQAccessAllowed, setHelpQAccessAllowed] = useState(false); // ★ 2026-08-24 도움말 질문 이력(ceo 전용)
   const [featureInterestAllowed, setFeatureInterestAllowed] = useState(false); // ★ 2026-10-06 기능 관심 업체(ceo 전용)
   const [identityStatusAllowed, setIdentityStatusAllowed] = useState(false); // ★ 2026-10-07 본인인증 현황(ceo 전용)
+  const [introLeadsAllowed, setIntroLeadsAllowed] = useState(false); // ★ 2026-10-07 소개 방문 · 시연 요청(ceo · suran)
   const [precheckUsageAllowed, setPrecheckUsageAllowed] = useState(false); // ★ 2026-09-26 스팸 검사·맞춤법 사용 현황(ceo 전용)
   // ★ 2026-08-24 AI 영업 아웃리치(ceo 전용 · 모달) — 서버 /access가 유일 소스, 미허용 = 메뉴 자체 미노출
   const [outreachAllowed, setOutreachAllowed] = useState(false);
@@ -1151,6 +1153,13 @@ useEffect(() => {
       const d = await r.json();
       setIdentityStatusAllowed(d.allowed === true);
     } catch { setIdentityStatusAllowed(false); }
+    try {
+      const token = localStorage.getItem('token');
+      // ★ 2026-10-07 소개 방문 · 시연 요청 — 허용 계정(기본 ceo · suran)에만 메뉴 노출
+      const r = await fetch('/api/admin/intro-leads/access', { headers: { Authorization: `Bearer ${token}` } });
+      const d = await r.json();
+      setIntroLeadsAllowed(d.allowed === true);
+    } catch { setIntroLeadsAllowed(false); }
     try {
       const token = localStorage.getItem('token');
       // ★ 2026-08-16: 신규마케팅진단 접근(mount 1회) — 허용이면 신규 리드 뱃지도 함께
@@ -4720,6 +4729,8 @@ const handleApproveRequest = async (id: string) => {
                   { key: 'users', label: '사용자 관리' },
                   // ★ 2026-08-16: 신규마케팅진단 = 허용 계정(기본 ceo)에만 노출 · 뱃지 = 신규 리드 수(60초 주기)
                   ...(diagnosisAllowed ? [{ key: 'marketingDiagnosis', label: '신규마케팅진단', badge: diagnosisBadge }] : []),
+                  // ★ 2026-10-07 (Harold) 소개 방문 · 시연 요청 = 허용 계정(기본 ceo · suran)에만 노출
+                  ...(introLeadsAllowed ? [{ key: 'introLeads', label: '소개 방문 · 시연 요청' }] : []),
                   // ★ 2026-08-24: AI 영업 = 허용 계정(★1003 ceo · suran)에만 노출 · 별도 모달(탭 아님 — 닫으면 고객사 탭 복귀)
                   ...(outreachAllowed ? [{ key: 'salesOutreach', label: 'AI 영업', onClick: () => setOutreachOpen(true) }] : []),
                 ],
@@ -6026,6 +6037,7 @@ const handleApproveRequest = async (id: string) => {
         )}
         {activeTab === 'featureInterest' && featureInterestAllowed && <FeatureInterestTab />}
         {activeTab === 'identityStatus' && identityStatusAllowed && <IdentityStatusTab />}
+        {activeTab === 'introLeads' && introLeadsAllowed && <IntroLeadsTab />}
 
         {activeTab === 'geoAccess' && (
           <div className="space-y-6">

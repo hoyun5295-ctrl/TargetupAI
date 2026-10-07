@@ -1026,6 +1026,7 @@ export const NOT_DOCUMENTED_ROUTES: Record<string, string> = {
   '/': '대시보드 진입(= /dashboard)',
   '/dashboard': '진입 화면 자체. 각 작업의 entry가 이 화면을 가리킨다',
   '/login': '로그인',
+  '/intro': '로그인 전 공개 소개 페이지(영상 · 기능 이름 · 시연 요청) · 고객 작업 화면 아님', // ★2026-10-07
   '/terms': '약관',
   '/privacy': '개인정보처리방침',
   '/payment/result': '결제 결과 리다이렉트',
