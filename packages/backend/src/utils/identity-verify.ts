@@ -111,15 +111,41 @@ export function isIdentityVerifyEnforced(now: Date = new Date()): boolean {
   return isEnforcedFrom(process.env.IDENTITY_VERIFY_ENFORCE_FROM, now);
 }
 
+/** 명단 원문(소문자 · 빈칸 제거) — 판정(`isIdentityVerifyTarget`)과 슈퍼관리자 「본인인증 현황」이 같은 목록을 읽는다 */
+export function identityPilotList(): string[] {
+  return String(process.env.IDENTITY_VERIFY_PILOT_LOGIN_IDS || '')
+    .split(',')
+    .map((s) => s.trim().toLowerCase())
+    .filter(Boolean);
+}
+
+/**
+ * ★ 2026-10-07 지금 시행 상태 — 슈퍼관리자 「본인인증 현황」 머리 칸이 그린다(ENV 를 읽는 곳은 이 CT 하나).
+ * 판정 함수와 같은 값을 쓴다: 시행 = 시행일 · 명단 · 인증기관 셋이 모두 성립할 때만.
+ */
+export function identityRolloutState(now: Date = new Date()): {
+  enforceFrom: string | null;
+  enforced: boolean;
+  pilot: string[];
+  allAccounts: boolean;
+  provider: string | null;
+} {
+  const pilot = identityPilotList();
+  return {
+    enforceFrom: String(process.env.IDENTITY_VERIFY_ENFORCE_FROM || '').trim() || null,
+    enforced: isIdentityVerifyEnforced(now),
+    pilot: pilot.filter((id) => id !== '*'),
+    allAccounts: pilot.includes('*'),
+    provider: resolveIdentityProvider()?.name ?? null,
+  };
+}
+
 /**
  * 명단 판정 — 빈 명단은 "아무도 아님"이다. 전 계정은 `*`를 명시한다.
  * (다중인증의 빈 명단 = 전면 시행과 반대다. 그 뜻을 이미 쓰고 있는 축은 건드리지 않고 이 축만 이렇게 접는다)
  */
 export function isIdentityVerifyTarget(loginId: string | null | undefined): boolean {
-  const list = String(process.env.IDENTITY_VERIFY_PILOT_LOGIN_IDS || '')
-    .split(',')
-    .map((s) => s.trim().toLowerCase())
-    .filter(Boolean);
+  const list = identityPilotList();
   if (list.length === 0) return false;
   if (list.includes('*')) return true;
   const id = String(loginId || '').trim().toLowerCase();

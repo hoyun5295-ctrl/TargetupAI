@@ -1397,7 +1397,7 @@ Codex 적대 검토 1R(`gpt-6-astra`) = critical · high 0 · medium 1 — 「�
 
 **★1007 체크(Harold 1006 「내일 직원들 다 등록하고 테스트하고 나면 로그 찍어서 보완 마무리」)**
 - [ ] 직원 4계정(`gwchae` · `sgbaek` · `psy5868` · `mobile`) PC 로그인 → 본인인증(KMC 창 · 통신사 고르기 · 문자 또는 PASS 앱 · PASS인증서 아님 · 테스트폰 등록 불필요 = 등록 없이 1006 성공)
-- [ ] 로그 찍기 — ① `identity_verifications` 4행 verified(이름 · 번호 끝 4자리 · KMC 요청번호 · 인증 시각) ② 감사 기록 `identity_verify_start` · `identity_verified` · `identity_verify_fail`(인증 건 번호 · 거절 코드) ③ 계정 이름 그대로 · `phone` = `mfa_phone` = 인증 번호 ④ `pm2 logs targetup-backend` 의 `[kmc-crypto]` · `[identity-verify]` 줄 ⑤ KMC 관리 화면 인증내역(요청번호 = 인증 건 번호 하이픈 제거)과 대조
+- [ ] 로그 찍기(★1007 배포 뒤 = 슈퍼관리자 「본인인증 현황」 화면이 ① · ② 실패 · ③ 번호 일치 · ⑤ 요청번호를 한 화면에 · 이름 · 번호 가림이라 캡처 그대로 증빙) — ① `identity_verifications` 4행 verified(이름 · 번호 끝 4자리 · KMC 요청번호 · 인증 시각) ② 감사 기록 `identity_verify_start` · `identity_verified` · `identity_verify_fail`(인증 건 번호 · 거절 코드) ③ 계정 이름 그대로 · `phone` = `mfa_phone` = 인증 번호 ④ `pm2 logs targetup-backend` 의 `[kmc-crypto]` · `[identity-verify]` 줄 ⑤ KMC 관리 화면 인증내역(요청번호 = 인증 건 번호 하이픈 제거)과 대조
 - [ ] 보완 — 실패 · 거절 코드가 있으면 원인 수정 → 증빙 캡처(설정 「계정 담당자」 카드 · 위 조회) → 증빙 대장 3.4 ② · ③ · 3.5 ② 채움 → 2.1 3절 · 3.4 2절 · 3.5 ② 「시행 중」으로 다시 쓰기(계정 이름 안 바뀜 · 번호만 담당자 번호)
 - [ ] 고객사 시행 전 — KMC 오픈 상태 · 과금조건 확인(마이페이지 → 고객사정보) · 슈퍼관리자 번호 직접 입력 경로(`PUT /users/:id/mfa-phone`) 닫기 · 휴대폰(새 탭) 흐름 시험 · DI 중복 계정은 기록만(추천 · Harold 결정 대기) · 10/26 명단 `*`
 

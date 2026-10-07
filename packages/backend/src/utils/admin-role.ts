@@ -171,6 +171,13 @@ export const PERMISSION_MATRIX: PermissionRow[] = [
     levels: { super: 'R', lead: 'NONE', support: 'NONE' },
   },
   {
+    // ★ 2026-10-07 본인인증 현황 — ENV 허용 목록(기본 ceo)과 AND(Harold 「슈퍼관리자에 나만 볼 수 있게」 · 이름 · 번호는 가린 값)
+    key: 'identityStatus',
+    area: '본인인증 현황',
+    screens: '본인인증 현황(시행 상태 · 인증 이력 · 실패 기록)',
+    levels: { super: 'R', lead: 'NONE', support: 'NONE' },
+  },
+  {
     // ★ 2026-10-03 운영 기록 대장(로그 점검 · 방화벽 정책 변경 · 접근권한 점검 · 전송자격인증 3.1 ④ · 3.3 · 4.3).
     //   작성 · 확인은 대표 · 지원팀장. 고치기 · 지우기는 없다(정정은 새 기록).
     //   ★ 같은 날 저녁 보안 · 인증 묶음(Harold) — 지원팀원 조회도 닫는다.
