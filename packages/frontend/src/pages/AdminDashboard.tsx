@@ -12,6 +12,7 @@ import SearchableSelect from '../components/SearchableSelect'; // ★ D144 P11+P
 // ★ 2026-07-31 정산 메일 수신자 — 담당자 이메일 칸 하나를 유형별·복수 행 편집으로 대체
 import BillingRecipientsEditor, { type BillingRecipient } from '../components/BillingRecipientsEditor';
 import ListPager, { pageSlice } from '../components/shared/ListPager'; // ★ 2026-10-07 목록 쪽 넘김(20건)
+import { readAlimtalkSplit, alimtalkFallbackRows } from '../utils/alimtalk-split'; // ★ 2026-10-07 알림톡 시도 · 대체 문자 분리
 import LoginBlocksManagement from '../components/admin/LoginBlocksManagement'; // ★ D145 P0 (2026-05-07): 로그인 차단 관리 (B안: IP+loginId 쌍)
 import AgentChargePanel from '../components/AgentChargePanel'; // ★ 2026-07-24 §5-3 에이전트 충전 실행 (게이트웨이 지갑)
 import AgentDeployWizard from '../components/admin/AgentDeployWizard'; // 싱크에이전트 OS별 배포 위저드
@@ -7205,12 +7206,15 @@ const handleApproveRequest = async (id: string) => {
                   {allCampaigns.length === 0 ? (
                     <tr><td colSpan={12} className="px-4 py-12 text-center text-gray-400">캠페인이 없습니다.</td></tr>
                   ) : allCampaigns.map((c: any) => {
-                    const sent = parseInt(c.total_sent) || 0;
-                    const success = parseInt(c.total_success) || 0;
-                    const fail = parseInt(c.total_fail) || 0;
-                    const pending = c.total_pending != null ? (parseInt(c.total_pending) || 0) : Math.max(0, sent - success - fail);
+                    // ★ 2026-10-07 (박성용 접수) 알림톡 캠페인 = 알림톡 시도로 세고, 대체로 나간 문자는 아래 줄로(거래내역서와 같은 기준)
+                    const split = readAlimtalkSplit(c);
+                    const sent = split ? split.total : (parseInt(c.total_sent) || 0);
+                    const success = split ? split.success : (parseInt(c.total_success) || 0);
+                    const fail = split ? split.fail : (parseInt(c.total_fail) || 0);
+                    const pending = split ? split.pending : (c.total_pending != null ? (parseInt(c.total_pending) || 0) : Math.max(0, sent - success - fail));
                     return (
-                    <tr key={c.id} className="hover:bg-gray-50">
+                    <Fragment key={c.id}>
+                    <tr className="hover:bg-gray-50">
                       <td className="px-3 py-3 text-gray-700">
                         <div>{c.company_name || '-'}</div>
                         {c.created_by_login && <div className="text-xs text-gray-400">{c.created_by_login}</div>}
@@ -7251,6 +7255,19 @@ const handleApproveRequest = async (id: string) => {
                         )}
                       </td>
                     </tr>
+                    {split && alimtalkFallbackRows(split).map((f) => (
+                      <tr key={`${c.id}-${f.type}`} className="bg-gray-50/70">
+                        <td className="px-3 py-1.5" />
+                        <td className="px-3 py-1.5 text-xs text-gray-500" colSpan={4}>↳ 알림톡 실패분</td>
+                        <td className="px-3 py-1.5 text-center text-xs text-gray-600 whitespace-nowrap">대체 {f.type}</td>
+                        <td className="px-3 py-1.5 text-center text-xs text-gray-700">{f.total.toLocaleString()}</td>
+                        <td className="px-3 py-1.5 text-center text-xs text-green-600 font-medium">{f.success.toLocaleString()}</td>
+                        <td className="px-3 py-1.5 text-center text-xs text-red-600">{f.fail.toLocaleString()}</td>
+                        <td className="px-3 py-1.5 text-center text-xs text-amber-600">{f.pending.toLocaleString()}</td>
+                        <td className="px-3 py-1.5" colSpan={2} />
+                      </tr>
+                    ))}
+                    </Fragment>
                     );
                   })}
                 </tbody>
@@ -10816,9 +10833,10 @@ const handleApproveRequest = async (id: string) => {
                             {r.msgContents ? (r.msgContents.length > 40 ? r.msgContents.substring(0, 40) + '…' : r.msgContents) : '-'}
                           </div>
                         </td>
-                        <td className="px-3 py-2 text-center text-xs text-gray-600">{r.msgType}</td>
-                        <td className="px-3 py-2 text-center text-xs text-gray-600">{r.carrier}</td>
-                        <td className="px-3 py-2 text-center">
+                        {/* ★ 2026-10-07 칸 넘침 정정(박성용 접수) — 타입 · 통신사 · 결과는 한 줄 고정 */}
+                        <td className="px-3 py-2 text-center text-xs text-gray-600 whitespace-nowrap">{r.msgType}</td>
+                        <td className="px-3 py-2 text-center text-xs text-gray-600 whitespace-nowrap">{r.carrier}</td>
+                        <td className="px-3 py-2 text-center whitespace-nowrap">
                           {/* ★ 2026-06-13: 발송 예약(미발송) 행은 파란 칩 — 결과 대기와 구분 */}
                           <span className={`inline-flex px-1.5 py-0.5 rounded text-xs font-medium ${
                             r.statusType === 'success' ? 'bg-green-100 text-green-700' :
@@ -10826,6 +10844,7 @@ const handleApproveRequest = async (id: string) => {
                             r.statusType === 'pending' ? 'bg-amber-100 text-amber-700' :
                             'bg-red-100 text-red-700'
                           }`}>{r.statusText}</span>
+                          {r.isFallback && <div className="text-[11px] text-gray-400 mt-0.5">알림톡 실패</div>}
                         </td>
                       </tr>
                     ))}

@@ -1,8 +1,9 @@
-import { useEffect, useState } from 'react';
+import { Fragment, useEffect, useState } from 'react';
 import { calculateSmsBytes, formatCampaignMessageForDisplay, formatPhoneNumber } from '../utils/formatDate';
 import MmsImagePreview from './shared/MmsImagePreview';
 import CalendarModal from './CalendarModal';
 import CampaignDetailModal from './CampaignDetailModal';
+import { readAlimtalkSplit, alimtalkFallbackRows } from '../utils/alimtalk-split'; // ★ 2026-10-07 알림톡 시도 · 대체 문자 분리
 import {
   Calendar,
   CheckCircle2,
@@ -549,7 +550,12 @@ export default function ResultsModal({ onClose, token, customerDbEnabled, isSubs
                   //     계산되는 것은 기존 동작 그대로이고, 분리는 서버 실측 축이 필요한 별건이다.
                   //   ★ 2026-09-13 친구·비친구 단가가 다르다 — 캠페인 대상(kakao_targeting)으로 고른다(차감과 같은 판정).
                   if (isBrandOnlyChannel(c)) return sum + success * (isBrandFriendTargeting(c.kakao_targeting) ? perBrand : perBrandNonfriend);
-                  if (isAlimtalkChannel(c)) return sum + success * perKakao;
+                  if (isAlimtalkChannel(c)) {
+                    // ★ 2026-10-07 (박성용 접수) 대체로 나간 문자는 그 문자 단가 — 청구(거래내역서)와 같은 기준. 분리값이 없으면 옛 계산
+                    const sp = readAlimtalkSplit(c);
+                    if (!sp) return sum + success * perKakao;
+                    return sum + sp.success * perKakao + sp.fallback.LMS.success * perLms + sp.fallback.SMS.success * perSms;
+                  }
                   if (type === 'MMS') return sum + success * perMms;
                   if (type === 'LMS') return sum + success * perLms;
                   return sum + success * perSms;
@@ -680,14 +686,17 @@ export default function ResultsModal({ onClose, token, customerDbEnabled, isSubs
                         <tr><td colSpan={12} className="px-4 py-10 text-center text-neutral-400">조회된 데이터가 없습니다.</td></tr>
                       ) : (
                         pageRows.map((c) => {
-                          const sent = c.sent_count || c.target_count || 0;
-                          const successCnt = c.success_count || 0;
-                          const failCnt = c.fail_count || 0;
-                          const pendingCnt = c.pending_count != null ? Number(c.pending_count) : Math.max(0, sent - successCnt - failCnt);
+                          // ★ 2026-10-07 (박성용 접수) 알림톡 캠페인 = 알림톡 시도로 세고 대체 문자는 아래 줄(거래내역서와 같은 기준)
+                          const split = readAlimtalkSplit(c);
+                          const sent = split ? split.total : (c.sent_count || c.target_count || 0);
+                          const successCnt = split ? split.success : (c.success_count || 0);
+                          const failCnt = split ? split.fail : (c.fail_count || 0);
+                          const pendingCnt = split ? split.pending : (c.pending_count != null ? Number(c.pending_count) : Math.max(0, sent - successCnt - failCnt));
                           const rate = sent > 0 ? Math.round((successCnt / sent) * 100) : 0;
                           const ch = channelChip(c);
                           return (
-                          <tr key={c.id} className="border-t border-neutral-100 hover:bg-indigo-50/50 transition-colors">
+                          <Fragment key={c.id}>
+                          <tr className="border-t border-neutral-100 hover:bg-indigo-50/50 transition-colors">
                             <td className="px-3 py-3 whitespace-nowrap">
                               <span
                                 className={`inline-block px-2 py-0.5 rounded-md text-xs font-medium ${getStatusColor(c)}`}
@@ -761,6 +770,19 @@ export default function ResultsModal({ onClose, token, customerDbEnabled, isSubs
                               </div>
                             </td>
                           </tr>
+                          {split && alimtalkFallbackRows(split).map((f) => (
+                            <tr key={`${c.id}-${f.type}`} className="bg-neutral-50/70">
+                              <td className="px-3 py-1.5" />
+                              <td className="px-3 py-1.5 text-[12px] text-neutral-500" colSpan={4}>↳ 알림톡 실패분</td>
+                              <td className="px-3 py-1.5 text-center text-[12px] font-semibold text-neutral-600 whitespace-nowrap">대체 {f.type}</td>
+                              <td className="px-3 py-1.5 text-center text-[12px] font-medium text-neutral-700">{f.total.toLocaleString()}</td>
+                              <td className="px-3 py-1.5 text-center text-[12px] text-emerald-600 font-medium">{f.success.toLocaleString()}</td>
+                              <td className="px-3 py-1.5 text-center text-[12px] text-rose-600 font-medium">{f.fail.toLocaleString()}</td>
+                              <td className="px-3 py-1.5 text-center text-[12px] text-amber-500 font-medium">{f.pending.toLocaleString()}</td>
+                              <td className="px-3 py-1.5" colSpan={2} />
+                            </tr>
+                          ))}
+                          </Fragment>
                           );
                         })
                       )}
@@ -774,8 +796,9 @@ export default function ResultsModal({ onClose, token, customerDbEnabled, isSubs
                     <div className="px-4 py-10 text-center text-neutral-400 text-sm">조회된 데이터가 없습니다.</div>
                   ) : (
                     pageRows.map((c) => {
-                      const sent = c.sent_count || c.target_count || 0;
-                      const successCnt = c.success_count || 0;
+                      const split = readAlimtalkSplit(c);   // ★ 2026-10-07 알림톡 시도 · 대체 문자 분리
+                      const sent = split ? split.total : (c.sent_count || c.target_count || 0);
+                      const successCnt = split ? split.success : (c.success_count || 0);
                       const rate = sent > 0 ? Math.round((successCnt / sent) * 100) : 0;
                       const ch = channelChip(c);
                       const msgPreview = formatCampaignMessageForDisplay(c);
@@ -805,6 +828,9 @@ export default function ResultsModal({ onClose, token, customerDbEnabled, isSubs
                             </span>
                             {c.created_by_name && <span className="text-neutral-400 ml-auto">{c.created_by_name}</span>}
                           </div>
+                          {split && alimtalkFallbackRows(split).map((f) => (
+                            <div key={f.type} className="mt-1.5 text-xs text-neutral-500">↳ 알림톡 실패분 · 대체 {f.type} <span className="font-medium text-neutral-700">{f.total.toLocaleString()}</span> · 성공 <span className="font-medium text-emerald-600">{f.success.toLocaleString()}</span></div>
+                          ))}
                         </div>
                       );
                     })

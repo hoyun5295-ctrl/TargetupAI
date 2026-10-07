@@ -1,7 +1,7 @@
 /**
  * AboutPage — 한줄로 공개 소개 페이지 `/about` (★ 2026-10-07 대개편 · 승인 목업 3안 · 설계서 docs/2026-10-07-about-page-redesign-design.md)
  *
- * ★ 2026-10-07 Harold: 로그인한 사람만 연다(App.tsx PrivateRoute · 로그인 화면 링크 없음). 옛 주소 `/about-ai-operator.html` 은 여기로 넘기는 안내 파일이다.
+ * ★ 2026-10-07 Harold: 숨김 — 허용 계정(기본 hoyun)만 연다(App.tsx AboutGate · 판정 = 서버 /api/ai/about-page/access). 옛 주소 `/about-ai-operator.html` 은 여기로 넘기는 안내 파일이다.
  * 기능 문장 · 영상은 앱 기능 안내 창과 같은 원장(`constants/plan-feature-intros.ts`)을 읽는다 — 이 파일에 기능 문장을 쓰지 않는다.
  * 묶음 · 순서 · 첫 화면 · 「지키는 것」은 `constants/about-page.ts`.
  *

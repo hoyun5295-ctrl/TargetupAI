@@ -108,9 +108,9 @@ describe('주소', () => {
   it('/about = 로그인한 사람만 · 로그인 화면 링크 0 · 대시보드 링크 = /about · 옛 주소는 /about 으로 넘긴다', () => {
     const app = read('src/App.tsx');
     // ★ 2026-10-07 Harold: 소개는 로그인한 사람만 · 로그인 화면엔 소개 링크 없음
-    expect(app).toContain('<Route path="/about" element={<PrivateRoute><AboutPage /></PrivateRoute>} />');
+    expect(app).toContain('<Route path="/about" element={<PrivateRoute><AboutGate><AboutPage /></AboutGate></PrivateRoute>} />');
     expect(read('src/pages/LoginPage.tsx')).not.toContain('href="/about"');
-    expect(read('src/pages/Dashboard.tsx')).toContain('<a href="/about" target="_blank"');
+    expect(read('src/pages/Dashboard.tsx')).not.toContain('href="/about"');   // ★ 2026-10-07 숨김 — 대시보드 링크도 제거
     for (const f of ['src/pages/LoginPage.tsx', 'src/pages/Dashboard.tsx']) expect(read(f)).not.toContain('about-ai-operator.html?v=');
     const old = read('public/about-ai-operator.html');
     expect(old).toContain('<meta http-equiv="refresh" content="0; url=/about" />');

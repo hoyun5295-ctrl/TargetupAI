@@ -7,13 +7,13 @@
  * ★ 기능 2 추가: aggregateCampaignPerformance() — AI 캠페인 추천용 성과 집계
  */
 
-import { query, mysqlQuery } from '../config/database';
+import { query, mysqlQuery, mysqlBillingQuery } from '../config/database';
 import { CAMPAIGN_OPT080_SELECT_EXPR, CAMPAIGN_OPT080_LEFT_JOIN } from './unsubscribe-helper';
 // ★ D144: PG sent_count 캐시 의존 제거 — MySQL 직접 카운트로 전환
 // ★ 2026-06-11: 카운트는 smsCampaignCountsSafe(이력=결과/라이브=대기 분리) — 이동 중 이중 카운트 차단
 import { getAllSmsTablesWithLogs, getCompanySmsTablesWithLogs, smsCampaignCountsSafe } from './sms-queue';
 import { classifyResultTables, computeDisplayCounts, DisplayCounts } from './sms-table-split';
-import { SUCCESS_CODES_SQL, PENDING_CODES_SQL, tallySmsChannelCounts, SmsChannel, ChannelCount } from './sms-result-map';
+import { SUCCESS_CODES_SQL, PENDING_CODES_SQL, tallySmsChannelCounts, tallyAlimtalkFallback, SmsChannel, ChannelCount, type AlimtalkFallbackCount } from './sms-result-map';
 import { CampaignTableMeta, recordedLiveTables, logTablesForLive } from './stats-table-scope';
 import { expandMonthlyRange } from './stats-period';
 import { resolveChargeUnitPrice } from './unit-price';
@@ -390,7 +390,53 @@ export async function aggregateSmsChannelSplitByCampaign(
   campaigns: CampaignTableMeta[]
 ): Promise<Map<string, Record<SmsChannel, ChannelCount>>> {
   const result = new Map<string, Record<SmsChannel, ChannelCount>>();
-  if (campaigns.length === 0) return result;
+  for (const [cid, rows] of await fetchSmsChannelRawByCampaign(campaigns)) result.set(cid, tallySmsChannelCounts(rows));
+  return result;
+}
+
+/**
+ * ★ 2026-10-07 알림톡 캠페인 목록(관리자 발송 내역 · 고객사 발송결과)용 — 알림톡 시도와 대체 문자를 따로(tallyAlimtalkFallback).
+ *   조회는 엑셀 채널 분리(aggregateSmsChannelSplitByCampaign)와 같은 한 문장이다 — 세는 규칙만 다르다.
+ */
+export async function aggregateAlimtalkFallbackByCampaign(
+  campaigns: CampaignTableMeta[]
+): Promise<Map<string, AlimtalkFallbackCount>> {
+  const result = new Map<string, AlimtalkFallbackCount>();
+  for (const [cid, rows] of await fetchSmsChannelRawByCampaign(campaigns)) result.set(cid, tallyAlimtalkFallback(rows));
+  return result;
+}
+
+const ALIMTALK_SPLIT_LIST_TIMEOUT_MS = 4000;
+
+/**
+ * 목록 라우트용 — 알림톡 캠페인(send_channel='alimtalk')만 골라 집계한다. 조회가 실패해도 목록은 그대로(빈 Map · 화면은 옛 표시).
+ */
+export async function loadAlimtalkFallbackForList(rows: Array<CampaignTableMeta & { send_channel?: string | null }>): Promise<Map<string, AlimtalkFallbackCount>> {
+  const targets = rows.filter((c) => c.send_channel === 'alimtalk');
+  if (targets.length === 0) return new Map();
+  // ★ 2026-10-07 Codex 1R medium — 목록 응답을 붙잡지 않는다: 상한(4초) 넘으면 이번 응답은 분리 없이(화면 = 옛 표시)
+  try {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const capped = new Promise<Map<string, AlimtalkFallbackCount>>((resolve) => {
+      timer = setTimeout(() => { console.warn('[stats] 알림톡 대체 집계 시간 상한 초과 — 이번 목록은 합계만'); resolve(new Map()); }, ALIMTALK_SPLIT_LIST_TIMEOUT_MS);
+    });
+    try {
+      return await Promise.race([aggregateAlimtalkFallbackByCampaign(targets), capped]);
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
+  } catch (e: any) {
+    console.warn('[stats] 알림톡 대체 집계 실패 — 목록은 합계만 표시:', e?.message || e);
+    return new Map();
+  }
+}
+
+/** 캠페인별 (msg_type · 대체 여부 · 결과 코드) 행 수 — 채널 분리 집계 두 함수의 공용 조회 */
+async function fetchSmsChannelRawByCampaign(
+  campaigns: CampaignTableMeta[]
+): Promise<Map<string, Array<{ msg_type: string; k_oriseq: number | null; status_code: number; cnt: number }>>> {
+  const rawByCampaign = new Map<string, Array<{ msg_type: string; k_oriseq: number | null; status_code: number; cnt: number }>>();
+  if (campaigns.length === 0) return rawByCampaign;
 
   // 테이블셋 그룹핑 — ★ 2026-07-17 resolveCampaignTableGroups 공용 (sentTables 기록 축소 + 현행 fallback)
   const byTableSet = await resolveCampaignTableGroups(campaigns);
@@ -400,7 +446,8 @@ export async function aggregateSmsChannelSplitByCampaign(
   //   (결과 행은 이력에서만 — smsCampaignCountsSafe와 동일 산식)
   // ★ 2026-07-04: smsCampaignCountsSafe와 동일하게 "LOG 짝 없는 LIVE(라인13 등)"는 대기 필터 제외 →
   //   결과까지 집계(LOG 부재 = 유일 소스라 이중카운트 불가). 짝 있는 LIVE만 대기 필터 유지.
-  const rawByCampaign = new Map<string, Array<{ msg_type: string; k_oriseq: number | null; status_code: number; cnt: number }>>();
+  // ★ 2026-10-07 Codex 1R high — LOG 짝 있는 LIVE 는 대기 + 「만료 실패」(expired-pending-sweeper 4000 · mobsend NULL)까지 읽는다.
+  //   smsCampaignCountsSafe(sms-queue.ts liveAgg lf)와 같은 조건 — 옛 조회는 대기만 읽어 만료 실패가 엑셀 채널 분리에서도 빠졌다.
   for (const [, group] of byTableSet) {
     if (group.ids.length === 0 || group.tables.length === 0) continue;
     const placeholders = group.ids.map(() => '?').join(',');
@@ -410,7 +457,7 @@ export async function aggregateSmsChannelSplitByCampaign(
       .map(t => `SELECT app_etc1 AS _grp, msg_type,
                    CASE WHEN k_oriseq IS NOT NULL AND k_oriseq > 0 THEN 1 ELSE 0 END AS is_sub,
                    status_code, COUNT(*) AS cnt
-                 FROM ${t} WHERE app_etc1 IN (${placeholders})${pendingOnly.has(t) ? ` AND status_code IN (${PENDING_CODES_SQL})` : ''}
+                 FROM ${t} WHERE app_etc1 IN (${placeholders})${pendingOnly.has(t) ? ` AND (status_code IN (${PENDING_CODES_SQL}) OR (status_code NOT IN (${SUCCESS_CODES_SQL}, ${PENDING_CODES_SQL}) AND mobsend_time IS NULL))` : ''}
                  GROUP BY app_etc1, msg_type, is_sub, status_code`)
       .join(' UNION ALL ');
     // 같은 캠페인이 LIVE+LOG 여러 테이블로 쪼개질 수 있어 outer 재합산
@@ -418,7 +465,8 @@ export async function aggregateSmsChannelSplitByCampaign(
                  FROM (${unions}) u GROUP BY _grp, msg_type, is_sub, status_code`;
     const params: any[] = [];
     for (let i = 0; i < group.tables.length; i++) params.push(...group.ids);
-    const rows = await mysqlQuery(sql, params) as any[];
+    // ★ 2026-10-07 Codex 1R medium — 발송 풀이 아니라 정산 전용 풀(실행 시간 상한 포함) · 목록 조회가 발송 연결을 붙잡지 않게
+    const rows = await mysqlBillingQuery(sql, params) as any[];
     for (const r of rows) {
       const cid = String(r._grp);
       if (!rawByCampaign.has(cid)) rawByCampaign.set(cid, []);
@@ -431,8 +479,7 @@ export async function aggregateSmsChannelSplitByCampaign(
     }
   }
 
-  for (const [cid, rows] of rawByCampaign) result.set(cid, tallySmsChannelCounts(rows));
-  return result;
+  return rawByCampaign;
 }
 
 /**

@@ -9,6 +9,7 @@ import {
 } from '../utils/automarketing-preview';   // ★ 2026-10-05 자동 마케팅 미리보기 · 승인 창
 import { translateAudience } from '../utils/audience-translate';   // ★ 2026-10-05 대상 번역(신뢰 설계 §2-2)
 import { validateOperatorInput } from '../utils/continuous-operator';
+import { isAboutPageViewer } from '../utils/about-page-access';   // ★ 2026-10-07 소개 페이지 숨김(hoyun 전용)
 import { buildGenderFilter, buildGradeFilter, buildRegionFilter, getGenderVariants, getRegionVariants } from '../utils/normalize';
 import { FIELD_MAP, FIELD_DISPLAY_MAP, reverseDisplayValue, getColumnFields, renderFieldValue } from '../utils/standard-field-map';
 import { replaceVariables } from '../utils/messageUtils';
@@ -1128,6 +1129,11 @@ router.post('/refine-message', requirePlanFeature('ai_messaging'), async (req: R
     console.error('[ai/refine-message] 오류:', err);
     return res.status(500).json({ success: false, error: err?.message || 'AI 다듬기 실패' });
   }
+});
+
+// ★ 2026-10-07 (Harold) 소개 페이지 열람 가능 여부 — 허용 계정(기본 hoyun)만 · 화면은 이 값으로만 그린다(utils/about-page-access.ts)
+router.get('/about-page/access', (req: Request, res: Response) => {
+  res.json({ success: true, allowed: isAboutPageViewer(req.user) });
 });
 
 // ============================================================

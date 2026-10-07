@@ -15,7 +15,7 @@ import {
 import { BRAND_CAMPAIGN_CHANNELS } from '../utils/billing-types';
 import { STATUS_CODE_MAP, CARRIER_MAP, SUCCESS_CODES, PENDING_CODES, getStatusLabel, getStatusType, getCarrierLabel, getSendTypeLabel, getQueueRowStatus, getDisplayContents, SUBSTITUTE_ROW_SQL } from '../utils/sms-result-map';
 import { DEFAULT_COSTS, getCompanyCosts, redis, CACHE_TTL } from '../config/defaults';
-import { buildDateRangeFilter, buildPeriodFilter, STAT_DATE_EXPR, STAT_STARTED_GUARD, aggregateSmsCountsByCampaign, aggregateSmsSendTimesByCampaign } from '../utils/stats-aggregation';
+import { buildDateRangeFilter, buildPeriodFilter, STAT_DATE_EXPR, STAT_STARTED_GUARD, aggregateSmsCountsByCampaign, aggregateSmsSendTimesByCampaign, loadAlimtalkFallbackForList } from '../utils/stats-aggregation';
 import { computeDisplayCounts } from '../utils/sms-table-split';
 import { CAMPAIGN_OPT080_SELECT_EXPR, CAMPAIGN_OPT080_LEFT_JOIN } from '../utils/unsubscribe-helper';
 import { buildCampaignListCsv, channelPlainLabel, CampaignCsvRow } from '../utils/campaign-list-csv';
@@ -347,9 +347,12 @@ router.get('/campaigns', async (req: Request, res: Response) => {
     // ★ 2026-07-30: 브랜드 행이 SMSQ(msg_type='F')로 합류 — SMS 집계가 전 채널을 담는다.
     const campListSmsMap = await aggregateSmsCountsByCampaign(campListNonFinal);
     const campListSentTimeMap = await aggregateSmsSendTimesByCampaign(campListNonFinal);
+    // ★ 2026-10-07 (박성용 접수) 알림톡 캠페인 = 알림톡 시도 · 대체 문자 분리(완료 캠페인도 · 청구와 같은 판정) — 화면 목록 · 예상 비용
+    const campListAlimtalkMap = await loadAlimtalkFallbackForList(result.rows);
     const campaigns = result.rows.map((row: any) => {
       // ★ 2026-09-14: send_config(sentTables)는 집계 테이블 해석용으로만 싣는다 — 응답에는 내지 않는다(내부 테이블명).
-      const { send_config: _sentTables, ...c } = row;
+      const { send_config: _sentTables, ...rest } = row;
+      const c = { ...rest, alimtalk_split: campListAlimtalkMap.get(row.id) ?? null };
       if (c.result_final) {
         // PG 캐시 — 6h 경과 완료 캠페인 (워커 확정값). 대기는 정의상 0.
         const dc = computeDisplayCounts(true, c.sent_count, Number(c.success_count || 0), Number(c.fail_count || 0), 0);

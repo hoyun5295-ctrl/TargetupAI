@@ -33,14 +33,14 @@ import { revokeTakeoverPasses, maskPhone, isMfaSchemaMissing } from '../utils/mf
 import { restrictAccount, isRestrictedStatus, RestrictionOutcome } from '../utils/account-action';
 import { DASHBOARD_CARD_POOL, validateCardIds, getRequiredFields, filterPoolByAvailableData, generateDynamicCards } from '../utils/dashboard-card-pool';
 import { detectEnabledFields, clearEnabledFieldsCache } from '../utils/enabled-fields';
-import { spamResultRowStatus, SUCCESS_CODES_SQL, PENDING_CODES_SQL, getStatusLabel, getStatusType, getCarrierLabel, isSuccess, isPending, getSendTypeLabel, getCampaignChannelLabel, getQueueRowStatus, getDisplayContents } from '../utils/sms-result-map';
+import { spamResultRowStatus, SUCCESS_CODES_SQL, PENDING_CODES_SQL, getStatusLabel, getStatusType, getCarrierLabel, isSuccess, isPending, getSendTypeLabel, getCampaignChannelLabel, getQueueRowStatus, getDisplayContents, classifyMsgChannel } from '../utils/sms-result-map';
 import { DEFAULT_COSTS, getCompanyCosts } from '../config/defaults';
 import { round2 } from '../utils/unit-price';
 import { validateSmsTables } from '../utils/sms-table-validator';
 // ★ D145 P0: 예약 캠페인 자동 정리 (모든 발송 관련 라우트 정합성)
 import { cleanupScheduledCampaigns, cancelCampaign } from '../utils/campaign-lifecycle';
 import { getUserUnsubscribes, deleteUserUnsubscribes, exportUserUnsubscribes, CAMPAIGN_OPT080_SELECT_EXPR, CAMPAIGN_OPT080_LEFT_JOIN } from '../utils/unsubscribe-helper';
-import { buildDateRangeFilter, aggregateSmsCountsByCampaign, aggregateSmsChannelSplitByCampaign, aggregateSmsSendTimesByCampaign, getCampaignResultCounts, STAT_DATE_EXPR, STAT_STARTED_GUARD } from '../utils/stats-aggregation';
+import { buildDateRangeFilter, aggregateSmsCountsByCampaign, aggregateSmsChannelSplitByCampaign, aggregateSmsSendTimesByCampaign, getCampaignResultCounts, loadAlimtalkFallbackForList, STAT_DATE_EXPR, STAT_STARTED_GUARD } from '../utils/stats-aggregation';
 // ★ 2026-07-23: 슈퍼관리자 발송통계 웹/에이전트 구분 — 에이전트(엔진) 통계 CT 병행 반환
 import {
   queryPayAgentStatsAllCompanies, queryPayAgentStoreBreakdown, validateStatsDateRange, isPayStatsConfigured,
@@ -3415,6 +3415,8 @@ router.get('/campaigns/all', authenticate, requireSuperAdmin, async (req: Reques
     const adminResultMap = await getCampaignResultCounts(result.rows);
     const adminNonFinal = result.rows.filter((c: any) => !c.result_final);
     const adminCampSentTimeMap = await aggregateSmsSendTimesByCampaign(adminNonFinal);
+    // ★ 2026-10-07 (박성용 접수) 알림톡 캠페인 = 알림톡 시도 · 대체 문자 분리(거래내역서와 같은 판정)
+    const adminAlimtalkMap = await loadAlimtalkFallbackForList(result.rows);
 
     // ★ D144 P4/P7 후속 (2026-05-07): status='sending' 자동 정리 — 결과 모두 도착(대기 0 + 성공/실패 > 0)이면 completed.
     const autoCompleteIds: string[] = [];
@@ -3432,6 +3434,7 @@ router.get('/campaigns/all', authenticate, requireSuperAdmin, async (req: Reques
         total_success: cnt.success,
         total_fail: cnt.fail,
         total_pending: cnt.pending,
+        alimtalk_split: adminAlimtalkMap.get(c.id) ?? null,
         sent_at: c.result_final ? c.sent_at : (adminCampSentTimeMap.get(c.id) ?? c.sent_at),
       };
     });
@@ -3595,6 +3598,8 @@ router.get('/campaigns/:id/sms-detail', authenticate, requireSuperAdmin, async (
           msgContents: getDisplayContents(r.msg_type, r.msg_contents),
           msgType: r.msg_type === 'S' ? 'SMS' : r.msg_type === 'L' ? 'LMS' : r.msg_type === 'M' ? 'MMS' : getSendTypeLabel(r.msg_type, r.k_oriseq, r.status_code),
           sendType: getSendTypeLabel(r.msg_type, r.k_oriseq, r.status_code),
+          // ★ 2026-10-07 알림톡 실패 후 문자 대체 행 — 화면이 결과 아래 「알림톡 실패」를 붙인다(글자 말고 판정으로)
+          isFallback: classifyMsgChannel(r.msg_type, r.k_oriseq, r.status_code).startsWith('substitute'),
           statusCode: r.status_code,
           statusText: rowStatus.label,
           statusType: rowStatus.type,

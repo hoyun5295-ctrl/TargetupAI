@@ -72,14 +72,14 @@ describe('통계 채널 분리 (슈퍼관리자 발송통계 엑셀 「알림톡
 
 describe('유형 라벨 (발송결과 상세·엑셀·관리자 상세·고객 타임라인)', () => {
   it('K + 7831/7830 은 대체발송 라벨 · K + 1800 은 알림톡', () => {
-    expect(getSendTypeLabel('K', null, 7831)).toBe('카카오실패 대체발송(LMS)');
-    expect(getSendTypeLabel('K', 0, 7830)).toBe('카카오실패 대체발송(SMS)');
+    expect(getSendTypeLabel('K', null, 7831)).toBe('대체 LMS');
+    expect(getSendTypeLabel('K', 0, 7830)).toBe('대체 SMS');
     expect(getSendTypeLabel('K', null, 1800)).toBe('알림톡');
     expect(getSendTypeLabel('K', null)).toBe('알림톡');
   });
 
   it('옛 모양 라벨은 그대로다', () => {
-    expect(getSendTypeLabel('L', 361669)).toBe('카카오실패 대체발송(LMS)');
+    expect(getSendTypeLabel('L', 361669)).toBe('대체 LMS');
     expect(getSendTypeLabel('L', null, 7831)).toBe('LMS');
   });
 });

@@ -140,8 +140,9 @@ export const STATUS_CODE_MAP: Record<number, StatusCodeInfo> = {
   7323: { label: '메시지그룹 미존재',      type: 'fail' },
   7324: { label: '이미지 전송불가',        type: 'fail' },
   7421: { label: '카카오 타임아웃',        type: 'fail' },
-  7830: { label: '카카오실패→SMS성공',     type: 'success' },
-  7831: { label: '카카오실패→LMS성공',     type: 'success' },
+  // ★ 2026-10-07 짧게(칸 넘침 · 박성용 접수) — 알림톡 실패는 화면이 결과 아래 작은 글씨로 붙인다
+  7830: { label: 'SMS 대체 성공',          type: 'success' },
+  7831: { label: 'LMS 대체 성공',          type: 'success' },
   63:   { label: '카카오 일일한도 초과',   type: 'fail' },
   64:   { label: '카카오 총한도 초과',     type: 'fail' },
   65:   { label: '친구톡 일일한도 초과',   type: 'fail' },
@@ -257,9 +258,9 @@ export const SUBSTITUTE_ROW_SQL =
 /**
  * 발송내역 행별 유형 라벨 (QTmsg SMSQ_SEND의 msg_type + k_oriseq 기반).
  * 발송내역 상세/엑셀에서 행마다 표시. 카카오 실패 후 LMS 대체발송을 별도 구분.
- * - 'K' + 7830/7831(status_code)  → 카카오실패 대체발송(SMS/LMS) — 비토 라인 모양(★2026-10-03)
+ * - 'K' + 7830/7831(status_code)  → 대체 SMS · 대체 LMS — 비토 라인 모양(★2026-10-03)
  * - 'K'                          → 알림톡
- * - 'L' + k_oriseq(원본 K행 seqno) → 카카오실패 대체발송
+ * - 'L' + k_oriseq(원본 K행 seqno) → 대체 LMS · 대체 SMS
  * - 'L'                          → LMS
  * - 'S'                          → SMS
  * - 'M'                          → MMS
@@ -287,11 +288,12 @@ export function getSendTypeLabel(msgType: string, kOriseq?: number | string | nu
   const isSub = kOriseq != null && kOriseq !== '' && !Number.isNaN(ori) && ori > 0;
   // ★ 2026-10-03 비토 라인 = K행 결과코드로 대체 성공(위 KAKAO_FALLBACK_* 주석)
   const inRow = alimtalkFallbackMsgType(msgType, statusCode);
-  if (inRow) return inRow === 'L' ? '카카오실패 대체발송(LMS)' : '카카오실패 대체발송(SMS)';
+  // ★ 2026-10-07 짧게(옛 「카카오실패 대체발송(LMS)」가 칸에서 4줄로 깨졌다 · 박성용 접수)
+  if (inRow) return inRow === 'L' ? '대체 LMS' : '대체 SMS';
   if (msgType === 'K') return '알림톡';
   if (msgType === 'F') return '브랜드메시지';   // ★ 2026-07-30 브랜드 SMSQ 합류(msg_type='F')
-  if (msgType === 'L') return isSub ? '카카오실패 대체발송(LMS)' : 'LMS';
-  if (msgType === 'S') return isSub ? '카카오실패 대체발송(SMS)' : 'SMS';
+  if (msgType === 'L') return isSub ? '대체 LMS' : 'LMS';
+  if (msgType === 'S') return isSub ? '대체 SMS' : 'SMS';
   if (msgType === 'M') return 'MMS';
   return msgType;
 }
@@ -355,6 +357,50 @@ export function tallySmsChannelCounts(
     if (isSuccess(code)) b.success += cnt;
     else if (isPending(code)) b.pending += cnt;
     else b.fail += cnt;
+  }
+  return out;
+}
+
+/**
+ * ★ 2026-10-07 (박성용 접수 cmuxvwasa0pvajnn462s5ubyr) 알림톡 캠페인 = 「알림톡 시도」와 「대체 문자」를 따로 센다.
+ *   옛 목록은 대체로 나간 문자까지 알림톡 성공으로 셌다(3건 성공 · 실제 = 알림톡 2 성공 + 1 실패 → LMS 대체 1 성공).
+ *   청구(send-usage-aggregation)는 대체 성공을 문자 유형으로 센다 — 이 집계가 같은 판정(alimtalkFallbackMsgType · k_oriseq)을 쓴다.
+ *   - 알림톡 시도 = K행 전부. K+7830/7831(비토 라인 = 같은 행에 대체 결과) = 알림톡 실패 + 대체 성공 1건씩.
+ *   - 옛 라인 = 실패한 K행(알림톡 실패) + 별도 L/S행(k_oriseq>0 = 대체 · 그 행의 결과대로).
+ *   그 밖의 행(브랜드·일반 문자)은 세지 않는다(알림톡 캠페인 행만 넘어온다).
+ */
+export interface AlimtalkFallbackCount extends ChannelCount {
+  fallback: { LMS: ChannelCount; SMS: ChannelCount };
+}
+
+export function tallyAlimtalkFallback(
+  rows: Array<{ msg_type: string; k_oriseq?: number | string | null; status_code: number | string; cnt: number | string }>,
+): AlimtalkFallbackCount {
+  const init = (): ChannelCount => ({ total: 0, success: 0, fail: 0, pending: 0 });
+  const out: AlimtalkFallbackCount = { ...init(), fallback: { LMS: init(), SMS: init() } };
+  const add = (b: ChannelCount, code: number, cnt: number) => {
+    b.total += cnt;
+    if (isSuccess(code)) b.success += cnt;
+    else if (isPending(code)) b.pending += cnt;
+    else b.fail += cnt;
+  };
+  for (const r of rows) {
+    const cnt = Number(r.cnt || 0);
+    const code = Number(r.status_code);
+    if (r.msg_type === 'K') {
+      const inRow = alimtalkFallbackMsgType('K', code);
+      if (inRow) {
+        out.total += cnt; out.fail += cnt;                                          // 알림톡은 실패했고
+        const f = out.fallback[inRow === 'L' ? 'LMS' : 'SMS'];
+        f.total += cnt; f.success += cnt;                                            // 같은 행에서 문자로 대체 성공
+      } else {
+        add(out, code, cnt);
+      }
+      continue;
+    }
+    const ori = Number(r.k_oriseq);
+    const isSub = r.k_oriseq != null && r.k_oriseq !== '' && !Number.isNaN(ori) && ori > 0;
+    if (isSub && (r.msg_type === 'L' || r.msg_type === 'S')) add(out.fallback[r.msg_type === 'L' ? 'LMS' : 'SMS'], code, cnt);
   }
   return out;
 }
