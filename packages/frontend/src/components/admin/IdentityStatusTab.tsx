@@ -8,6 +8,7 @@
  * 톤 = 부모 화면(슈퍼관리자 라이트) · 강조색 = 보안 · 인증 묶음색(rose).
  */
 import { useCallback, useEffect, useRef, useState } from 'react';
+import ListPager, { pageSlice } from '../shared/ListPager';
 
 type RowStatus = 'verified' | 'pending' | 'lapsed' | 'superseded';
 
@@ -60,6 +61,10 @@ export default function IdentityStatusTab() {
   const [data, setData] = useState<StatusData | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // ★ 2026-10-07 목록 쪽 넘김(20건 · 받아 둔 목록을 자른다)
+  const [pilotPage, setPilotPage] = useState(1);
+  const [historyPage, setHistoryPage] = useState(1);
+  const [failPage, setFailPage] = useState(1);
   // 새로고침을 빨리 두 번 눌렀을 때 늦게 온 옛 응답이 새 화면을 덮지 않게
   const seq = useRef(0);
 
@@ -142,7 +147,7 @@ export default function IdentityStatusTab() {
                   </tr>
                 </thead>
                 <tbody>
-                  {data.pilot.map((p) => (
+                  {pageSlice(data.pilot, pilotPage).map((p) => (
                     <tr key={p.loginId} className="border-t border-gray-100">
                       <td className={`${td} font-medium`}>{p.loginId}</td>
                       {!p.found ? (
@@ -170,6 +175,7 @@ export default function IdentityStatusTab() {
                 </tbody>
               </table>
             </div>
+              <ListPager page={pilotPage} total={data.pilot.length} onPage={setPilotPage} />
           </div>
         </div>
       )}
@@ -190,7 +196,7 @@ export default function IdentityStatusTab() {
               <tbody>
                 {loading && !data && <tr><td colSpan={10} className="px-3 py-8 text-center text-gray-400">불러오는 중</td></tr>}
                 {data && data.history.length === 0 && <tr><td colSpan={10} className="px-3 py-8 text-center text-gray-400">아직 본인인증 기록이 없습니다</td></tr>}
-                {(data?.history || []).map((h) => (
+                {pageSlice(data?.history || [], historyPage).map((h) => (
                   <tr key={h.id} className="border-t border-gray-100">
                     <td className={`${td} tabular-nums`}>{fmt(h.at)}</td>
                     <td className={td}>{h.companyName || '-'}</td>
@@ -207,6 +213,7 @@ export default function IdentityStatusTab() {
               </tbody>
             </table>
           </div>
+            <ListPager page={historyPage} total={(data?.history || []).length} onPage={setHistoryPage} />
         </div>
       </div>
 
@@ -223,7 +230,7 @@ export default function IdentityStatusTab() {
               </thead>
               <tbody>
                 {data && data.failures.length === 0 && <tr><td colSpan={8} className="px-3 py-6 text-center text-gray-400">최근 30일 실패가 없습니다</td></tr>}
-                {(data?.failures || []).map((f, i) => (
+                {pageSlice(data?.failures || [], failPage).map((f, i) => (
                   <tr key={`${f.at}-${i}`} className="border-t border-gray-100">
                     <td className={`${td} tabular-nums`}>{fmt(f.at)}</td>
                     <td className={td}>{f.companyName || '-'}</td>
@@ -238,6 +245,7 @@ export default function IdentityStatusTab() {
               </tbody>
             </table>
           </div>
+            <ListPager page={failPage} total={(data?.failures || []).length} onPage={setFailPage} />
         </div>
       </div>
 

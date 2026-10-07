@@ -11,6 +11,7 @@ import MessageDetailModal from '../components/MessageDetailModal'; // ★ D144 �
 import SearchableSelect from '../components/SearchableSelect'; // ★ D144 P11+P13: 검색 가능 select (사용자 추가 소속회사 + 발송통계 회사 필터)
 // ★ 2026-07-31 정산 메일 수신자 — 담당자 이메일 칸 하나를 유형별·복수 행 편집으로 대체
 import BillingRecipientsEditor, { type BillingRecipient } from '../components/BillingRecipientsEditor';
+import ListPager, { pageSlice } from '../components/shared/ListPager'; // ★ 2026-10-07 목록 쪽 넘김(20건)
 import LoginBlocksManagement from '../components/admin/LoginBlocksManagement'; // ★ D145 P0 (2026-05-07): 로그인 차단 관리 (B안: IP+loginId 쌍)
 import AgentChargePanel from '../components/AgentChargePanel'; // ★ 2026-07-24 §5-3 에이전트 충전 실행 (게이트웨이 지갑)
 import AgentDeployWizard from '../components/admin/AgentDeployWizard'; // 싱크에이전트 OS별 배포 위저드
@@ -105,6 +106,9 @@ export default function AdminDashboard() {
   const [adminRoleOptions, setAdminRoleOptions] = useState<any[]>([]);
   const [adminLevelLabels, setAdminLevelLabels] = useState<Record<string, string>>({});
   const [adminRoleHistory, setAdminRoleHistory] = useState<any[]>([]);
+  // ★ 2026-10-07 쪽 넘김(20건 · 받아 둔 목록을 자른다)
+  const [adminAccountsPage, setAdminAccountsPage] = useState(1);
+  const [adminRoleHistoryPage, setAdminRoleHistoryPage] = useState(1);
   const [adminRoleEdit, setAdminRoleEdit] = useState<{ id: string; login_id: string; role: string; reason: string } | null>(null);
   const [adminCreate, setAdminCreate] = useState<{ loginId: string; name: string; email: string; role: string; password: string; reason: string } | null>(null);
   const [adminActiveEdit, setAdminActiveEdit] = useState<{ id: string; login_id: string; isActive: boolean; reason: string } | null>(null);
@@ -237,6 +241,10 @@ export default function AdminDashboard() {
   // ★ 2026-08-18 금칙어 차단(전송자격인증 5.2) — 조합 규칙·시뮬레이션·탐지 이력
   const [spamRules, setSpamRules] = useState<any[]>([]);
   const [spamHits, setSpamHits] = useState<any[]>([]);
+  // ★ 2026-10-07 쪽 넘김(20건) — 결과 로그 = 서버가 쪽마다 · 차단정보 목록 = 받아 둔 목록을 자른다
+  const [spamHitsPage, setSpamHitsPage] = useState(1);
+  const [spamHitsTotal, setSpamHitsTotal] = useState(0);
+  const [spamRulesPage, setSpamRulesPage] = useState(1);
   const [spamBlockNotice, setSpamBlockNotice] = useState('');
   const [spamRuleName, setSpamRuleName] = useState('');
   const [spamElements, setSpamElements] = useState<Array<{ type: string; value: string }>>([
@@ -251,6 +259,10 @@ export default function AdminDashboard() {
   const [geoExceptions, setGeoExceptions] = useState<any[]>([]);
   const [geoHits, setGeoHits] = useState<any[]>([]);
   const [geoHitsDenied, setGeoHitsDenied] = useState(false); // 403 = 권한 없음. "기록 없음"으로 그리면 거짓이다
+  // ★ 2026-10-07 쪽 넘김(20건 · ListPager) — 차단 로그 = 서버가 쪽마다 · 예외 승인 = 받아 둔 목록을 자른다
+  const [geoHitsPage, setGeoHitsPage] = useState(1);
+  const [geoHitsTotal, setGeoHitsTotal] = useState(0);
+  const [geoExPage, setGeoExPage] = useState(1);
   // ★ 2026-10-02 expiresAt = 허용 만료일(YYYY-MM-DD · 비우면 기한 없음) — 전송자격인증 2.2 ③
   const [geoForm, setGeoForm] = useState({ scope: 'user', target: '', cidr: '', reason: '', expiresAt: '' });
   const [geoBusy, setGeoBusy] = useState(false);
@@ -258,15 +270,24 @@ export default function AdminDashboard() {
   const loadGeoAccess = async () => {
     const token = localStorage.getItem('token');
     const headers = { 'Authorization': `Bearer ${token}` };
-    const [statusRes, exRes, hitsRes] = await Promise.all([
+    const [statusRes, exRes] = await Promise.all([
       fetch('/api/admin/geo/status', { headers }),
       fetch('/api/admin/geo/exceptions', { headers }),
-      fetch('/api/admin/geo/hits?limit=200', { headers }),
+      loadGeoHits(geoHitsPage),
     ]);
     if (statusRes.ok) setGeoStatus(await statusRes.json());
     if (exRes.ok) setGeoExceptions((await exRes.json()).exceptions || []);
-    if (hitsRes.ok) { setGeoHits((await hitsRes.json()).hits || []); setGeoHitsDenied(false); }
-    else setGeoHitsDenied(hitsRes.status === 403);
+  };
+
+  const loadGeoHits = async (page: number) => {
+    const res = await fetch(`/api/admin/geo/hits?page=${page}`, { headers: { 'Authorization': `Bearer ${localStorage.getItem('token')}` } });
+    if (res.ok) {
+      const d = await res.json();
+      setGeoHits(d.hits || []);
+      setGeoHitsTotal(Number(d.total) || 0);
+      setGeoHitsPage(Number(d.page) || page);
+      setGeoHitsDenied(false);
+    } else setGeoHitsDenied(res.status === 403);
   };
 
   const geoPost = async (url: string, body: any, method: string = 'POST') => {
@@ -386,9 +407,9 @@ export default function AdminDashboard() {
   const loadSpamBlock = async () => {
     const token = localStorage.getItem('token');
     const headers = { 'Authorization': `Bearer ${token}` };
-    const [rulesRes, hitsRes] = await Promise.all([
+    const [rulesRes] = await Promise.all([
       fetch('/api/admin/spam-block/rules', { headers }),
-      fetch('/api/admin/spam-block/hits?limit=100', { headers }),
+      loadSpamHits(spamHitsPage),
     ]);
     if (rulesRes.ok) {
       const body = await rulesRes.json();
@@ -396,7 +417,15 @@ export default function AdminDashboard() {
       // 차단 안내 문구는 서버(spam-block.ts 상수)가 유일한 원본 — 화면에 복사해 두지 않는다
       setSpamBlockNotice(body.blockNotice || '');
     }
-    if (hitsRes.ok) setSpamHits((await hitsRes.json()).hits || []);
+  };
+
+  const loadSpamHits = async (page: number) => {
+    const res = await fetch(`/api/admin/spam-block/hits?page=${page}`, { headers: { 'Authorization': `Bearer ${localStorage.getItem('token')}` } });
+    if (!res.ok) return;
+    const d = await res.json();
+    setSpamHits(d.hits || []);
+    setSpamHitsTotal(Number(d.total) || 0);
+    setSpamHitsPage(Number(d.page) || page);
   };
 
   const spamElementsPayload = () => spamElements.filter((e) => e.value.trim()).map((e) => ({ type: e.type, value: e.value.trim() }));
@@ -1292,7 +1321,7 @@ const loadAuditLogs = async (page: number) => {
   setAuditLogsLoading(true);
   try {
     const token = localStorage.getItem('token');
-    const params = new URLSearchParams({ page: String(page), limit: '10' });
+    const params = new URLSearchParams({ page: String(page), limit: '20' });   // ★ 2026-10-07 보안·인증 목록 20건 통일
     if (auditActionFilter !== 'all') params.set('action', auditActionFilter);
     if (auditCompanyFilter !== 'all') params.set('companyId', auditCompanyFilter);
     if (auditFromDate) params.set('fromDate', auditFromDate);
@@ -5833,7 +5862,7 @@ const handleApproveRequest = async (id: string) => {
                         {adminAccounts.length === 0 && (
                           <tr><td colSpan={7} className="px-4 py-8 text-center text-gray-400 text-xs">계정이 없습니다.</td></tr>
                         )}
-                        {adminAccounts.map((a) => {
+                        {pageSlice(adminAccounts, adminAccountsPage).map((a) => {
                           const opt = adminRoleOptions.find((o) => o.value === a.role);
                           return (
                             <tr key={a.id} className={a.is_active ? '' : 'opacity-45'}>
@@ -5873,6 +5902,7 @@ const handleApproveRequest = async (id: string) => {
                       </tbody>
                     </table>
                   </div>
+                  <ListPager page={adminAccountsPage} total={adminAccounts.length} onPage={setAdminAccountsPage} />
                 </div>
 
                 <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
@@ -5949,7 +5979,7 @@ const handleApproveRequest = async (id: string) => {
                         {adminRoleHistory.length === 0 && (
                           <tr><td colSpan={7} className="px-4 py-8 text-center text-gray-400 text-xs">변경 이력이 없습니다.</td></tr>
                         )}
-                        {adminRoleHistory.map((h) => {
+                        {pageSlice(adminRoleHistory, adminRoleHistoryPage).map((h) => {
                           const d = h.details || {};
                           const roleName = (v: any) => adminRoleOptions.find((o) => o.value === v)?.label || v || '-';
                           // ★0827 등급 변경 말고도 생성·중지·재개가 같은 대장에 쌓인다.
@@ -5979,6 +6009,7 @@ const handleApproveRequest = async (id: string) => {
                       </tbody>
                     </table>
                   </div>
+                  <ListPager page={adminRoleHistoryPage} total={adminRoleHistory.length} onPage={setAdminRoleHistoryPage} />
                 </div>
               </>
             )}
@@ -6147,7 +6178,7 @@ const handleApproveRequest = async (id: string) => {
                     {geoExceptions.length === 0 && (
                       <tr><td colSpan={8} className="px-3 py-8 text-center text-gray-400 text-xs">등록된 예외가 없습니다.</td></tr>
                     )}
-                    {geoExceptions.map((x) => (
+                    {pageSlice(geoExceptions, geoExPage).map((x) => (
                       <tr key={x.id} className={x.is_active && !x.is_expired ? '' : 'opacity-45'}>
                         <td className="px-3 py-2 text-xs text-gray-700">
                           {x.scope === 'user' ? '계정' : x.scope === 'company_api' ? '회사 API' : x.scope === 'company_agent' ? '회사 에이전트' : '전역'}
@@ -6178,6 +6209,7 @@ const handleApproveRequest = async (id: string) => {
                   </tbody>
                 </table>
               </div>
+              <ListPager page={geoExPage} total={geoExceptions.length} onPage={setGeoExPage} />
             </div>
 
             <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
@@ -6219,6 +6251,7 @@ const handleApproveRequest = async (id: string) => {
                   </tbody>
                 </table>
               </div>
+              <ListPager page={geoHitsPage} total={geoHitsTotal} onPage={(p) => { void loadGeoHits(p); }} />
             </div>
           </div>
         )}
@@ -6346,7 +6379,7 @@ const handleApproveRequest = async (id: string) => {
                     {spamRules.length === 0 && (
                       <tr><td colSpan={5} className="px-4 py-8 text-center text-gray-400 text-xs">등록된 차단정보가 없습니다. 차단정보가 없으면 발송은 그대로 나갑니다.</td></tr>
                     )}
-                    {spamRules.map((r) => (
+                    {pageSlice(spamRules, spamRulesPage).map((r) => (
                       <tr key={r.id}>
                         <td className="px-4 py-2 font-medium text-gray-900">{r.name}</td>
                         <td className="px-4 py-2">
@@ -6378,6 +6411,7 @@ const handleApproveRequest = async (id: string) => {
                   </tbody>
                 </table>
               </div>
+              <ListPager page={spamRulesPage} total={spamRules.length} onPage={setSpamRulesPage} />
             </div>
 
             <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
@@ -6420,6 +6454,7 @@ const handleApproveRequest = async (id: string) => {
                   </tbody>
                 </table>
               </div>
+              <ListPager page={spamHitsPage} total={spamHitsTotal} onPage={(p) => { void loadSpamHits(p); }} />
             </div>
           </div>
         )}

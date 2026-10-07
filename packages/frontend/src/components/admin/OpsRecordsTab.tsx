@@ -13,6 +13,7 @@
  */
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { AUDIT_ACTION_LABEL } from '../../constants/audit-action-labels';
+import ListPager, { pageSlice } from '../shared/ListPager';
 
 type Kind = 'log_review' | 'firewall_change' | 'access_review';
 type System = 'hanjul' | 'gateway' | 'common';
@@ -179,6 +180,7 @@ function SummaryTable({ summary }: { summary: Summary }) {
 export default function OpsRecordsTab() {
   const [meta, setMeta] = useState<Meta | null>(null);
   const [records, setRecords] = useState<OpsRecord[]>([]);
+  const [recordsPage, setRecordsPage] = useState(1);   // ★ 2026-10-07 쪽 넘김(20건) · 다시 읽으면 1쪽으로
   const [kindFilter, setKindFilter] = useState<'all' | Kind>('all');
   const [systemFilter, setSystemFilter] = useState<'all' | System>('all');
   const [loading, setLoading] = useState(false);
@@ -231,6 +233,7 @@ export default function OpsRecordsTab() {
       const d = await r.json();
       if (!r.ok) throw new Error(d?.error || '운영 기록을 불러오지 못했습니다.');
       setRecords(d.records || []);
+      setRecordsPage(1);
     } catch (e: any) {
       setError(e?.message || '운영 기록을 불러오지 못했습니다.');
       setRecords([]);
@@ -472,7 +475,7 @@ export default function OpsRecordsTab() {
               {!loading && records.length === 0 && (
                 <tr><td colSpan={7} className="px-4 py-10 text-center text-gray-400">아직 남긴 기록이 없습니다.</td></tr>
               )}
-              {!loading && records.map((r) => {
+              {!loading && pageSlice(records, recordsPage).map((r) => {
                 const mine = !!meta?.me && r.recorder?.loginId === meta.me.loginId;
                 const open = expanded === r.id;
                 return (
@@ -491,6 +494,7 @@ export default function OpsRecordsTab() {
             </tbody>
           </table>
         </div>
+        <ListPager page={recordsPage} total={records.length} onPage={setRecordsPage} />
       </div>
 
       {form && (

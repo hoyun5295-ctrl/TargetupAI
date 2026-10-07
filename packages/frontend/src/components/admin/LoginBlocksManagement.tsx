@@ -5,6 +5,7 @@
 import { useEffect, useState } from 'react';
 import { useToast } from '../ToastProvider';
 import ConfirmModal, { type ConfirmState } from '../ConfirmModal';
+import ListPager, { pageSlice, LIST_PAGE_SIZE } from '../shared/ListPager';
 
 interface LoginBlock {
   id: string;
@@ -46,6 +47,7 @@ export default function LoginBlocksManagement() {
   const [historyBlocks, setHistoryBlocks] = useState<LoginBlock[]>([]);
   const [historyTotal, setHistoryTotal] = useState(0);
   const [historyPage, setHistoryPage] = useState(1);
+  const [activePage, setActivePage] = useState(1);   // ★ 2026-10-07 현재 차단 목록 쪽 넘김(20건)
   const [filterIp, setFilterIp] = useState('');
   const [filterLoginId, setFilterLoginId] = useState('');
   const [loading, setLoading] = useState(false);
@@ -83,7 +85,7 @@ export default function LoginBlocksManagement() {
     try {
       const params = new URLSearchParams();
       params.set('page', String(page));
-      params.set('limit', '50');
+      params.set('limit', String(LIST_PAGE_SIZE));   // ★ 2026-10-07 20건 통일
       if (filterIp) params.set('ip', filterIp);
       if (filterLoginId) params.set('loginId', filterLoginId);
       const res = await fetch(`/api/admin/login-blocks/history?${params.toString()}`, {
@@ -262,7 +264,7 @@ export default function LoginBlocksManagement() {
               {activeBlocks.length === 0 ? (
                 <tr><td colSpan={8} className="px-3 py-8 text-center text-gray-400">현재 차단된 항목이 없습니다.</td></tr>
               ) : (
-                activeBlocks.map((b) => (
+                pageSlice(activeBlocks, activePage).map((b) => (
                   <tr key={b.id} className="border-b hover:bg-gray-50">
                     <td className="px-3 py-2 text-sm font-mono">{b.ip_address}</td>
                     <td className="px-3 py-2 text-sm">{b.login_id}</td>
@@ -284,6 +286,7 @@ export default function LoginBlocksManagement() {
               )}
             </tbody>
           </table>
+          <ListPager page={activePage} total={activeBlocks.length} onPage={setActivePage} />
         </div>
       )}
 
@@ -329,19 +332,8 @@ export default function LoginBlocksManagement() {
               </tbody>
             </table>
           </div>
-          {historyTotal > 50 && (
-            <div className="px-6 py-3 border-t flex justify-center gap-1">
-              {Array.from({ length: Math.ceil(historyTotal / 50) }, (_, i) => i + 1).slice(0, 20).map((p) => (
-                <button
-                  key={p}
-                  onClick={() => loadHistory(p)}
-                  className={`px-3 py-1 text-sm rounded ${p === historyPage ? 'bg-blue-600 text-white' : 'bg-gray-100 hover:bg-gray-200'}`}
-                >
-                  {p}
-                </button>
-              ))}
-            </div>
-          )}
+          {/* ★ 2026-10-07 공용 쪽 넘김(20건 · 옛: 쪽 번호 20개까지만 보였다) */}
+          <ListPager page={historyPage} total={historyTotal} onPage={(p) => { void loadHistory(p); }} />
         </>
       )}
 

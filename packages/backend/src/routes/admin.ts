@@ -1028,18 +1028,23 @@ router.post('/spam-block/simulate', authenticate, requireSuperAdmin, requireAdmi
 
 router.get('/spam-block/hits', authenticate, requireSuperAdmin, requireAdminArea('spamBlock'), async (req: Request, res: Response) => {
   try {
-    const limit = Math.min(Math.max(Number(req.query.limit) || 100, 1), 500);
-    const result = await query(
-      `SELECT h.id, h.rule_id, r.name AS rule_name, h.company_id, c.company_name,
-              h.send_source, h.mode, h.action_taken, h.affected_rows, h.content_sample, h.created_at
-         FROM spam_block_hits h
-         LEFT JOIN spam_block_rules r ON r.id = h.rule_id
-         LEFT JOIN companies c ON c.id = h.company_id
-        ORDER BY h.created_at DESC
-        LIMIT $1`,
-      [limit]
-    );
-    return res.json({ hits: result.rows });
+    // ★ 2026-10-07 쪽 넘김(Harold: 20건씩) — 옛: 최근 100건을 한 번에 내려 목록이 길고 100건 밖은 볼 수 없었다
+    const pageSize = 20;
+    const page = Math.max(1, Math.floor(Number(req.query.page) || 1));
+    const [result, cnt] = await Promise.all([
+      query(
+        `SELECT h.id, h.rule_id, r.name AS rule_name, h.company_id, c.company_name,
+                h.send_source, h.mode, h.action_taken, h.affected_rows, h.content_sample, h.created_at
+           FROM spam_block_hits h
+           LEFT JOIN spam_block_rules r ON r.id = h.rule_id
+           LEFT JOIN companies c ON c.id = h.company_id
+          ORDER BY h.created_at DESC
+          LIMIT $1 OFFSET $2`,
+        [pageSize, (page - 1) * pageSize]
+      ),
+      query(`SELECT COUNT(*)::int AS n FROM spam_block_hits`),
+    ]);
+    return res.json({ hits: result.rows, total: cnt.rows[0]?.n || 0, page, pageSize });
   } catch (error: any) {
     if (String(error?.message || '').includes('does not exist')) {
       return res.status(503).json({ error: 'DB 마이그레이션 필요: spam_block_hits 생성 요청', code: 'DB_MIGRATION_PENDING' });
@@ -1446,19 +1451,24 @@ router.get('/geo/hits', authenticate, requireSuperAdmin, requireAdminArea('geoHi
     if (!(await isGeoHitsViewer(req.user?.userId))) {
       return res.status(403).json({ error: '접근 이력 열람 권한이 없습니다.' });
     }
-    const limit = Math.min(Number(req.query.limit) || 200, 500);
-    const result = await query(
-      `SELECT l.id, l.action, l.details, host(l.ip_address) AS ip_address, l.created_at,
-              u.login_id, c.company_name
-         FROM audit_logs l
-         LEFT JOIN users u ON u.id = l.user_id
-         LEFT JOIN companies c ON c.id = u.company_id
-        WHERE l.action IN ('foreign_access_detected', 'foreign_access_blocked')
-        ORDER BY l.created_at DESC
-        LIMIT $1`,
-      [limit]
-    );
-    return res.json({ hits: result.rows });
+    // ★ 2026-10-07 쪽 넘김(Harold: 20건씩) — 옛: 최근 200건을 한 번에 내려 목록이 끝없이 길고 200건 밖은 볼 수 없었다
+    const pageSize = 20;
+    const page = Math.max(1, Math.floor(Number(req.query.page) || 1));
+    const [result, cnt] = await Promise.all([
+      query(
+        `SELECT l.id, l.action, l.details, host(l.ip_address) AS ip_address, l.created_at,
+                u.login_id, c.company_name
+           FROM audit_logs l
+           LEFT JOIN users u ON u.id = l.user_id
+           LEFT JOIN companies c ON c.id = u.company_id
+          WHERE l.action IN ('foreign_access_detected', 'foreign_access_blocked')
+          ORDER BY l.created_at DESC
+          LIMIT $1 OFFSET $2`,
+        [pageSize, (page - 1) * pageSize]
+      ),
+      query(`SELECT COUNT(*)::int AS n FROM audit_logs WHERE action IN ('foreign_access_detected', 'foreign_access_blocked')`),
+    ]);
+    return res.json({ hits: result.rows, total: cnt.rows[0]?.n || 0, page, pageSize });
   } catch (error) {
     console.error('국외 접근 이력 조회 실패:', error);
     return res.status(500).json({ error: '국외 접근 이력 조회 실패' });
