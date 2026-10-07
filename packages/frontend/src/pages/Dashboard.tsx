@@ -198,6 +198,16 @@ export default function Dashboard() {
     if (senderAuthPreview) { searchParams.delete('senderAuthPreview'); setSearchParams(searchParams); }
   };
   const { user, logout } = useAuthStore();
+  // ★ 2026-10-07 하단 「미팅 자료」(소개 페이지) = 허용 계정(hoyun)에게만 · 판정 = 서버(AboutGate 와 같은 경로)
+  const [aboutLinkAllowed, setAboutLinkAllowed] = useState(false);
+  useEffect(() => {
+    let alive = true;
+    fetch('/api/ai/about-page/access', { headers: { Authorization: `Bearer ${localStorage.getItem('token')}` } })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => { if (alive) setAboutLinkAllowed(d?.allowed === true); })
+      .catch(() => undefined);
+    return () => { alive = false; };
+  }, []);
 
   // 기능 제한 체크 헬퍼
   const isHidden = (feature: string) => (user as any)?.hiddenFeatures?.includes(feature);
@@ -3976,10 +3986,14 @@ const campaignData = {
 
       {/* 하단 링크 — 2026-07-05 (Harold 명시): 매뉴얼 링크 헤더 → 푸터 복귀 (헤더 간소화, 매뉴얼 강조 제거) */}
       <div className="max-w-7xl mx-auto px-4 py-6 mt-8 border-t border-gray-200 text-center text-xs text-gray-400 space-x-3">
-        {/* ★ 2026-08-22 옛 정적 매뉴얼(3개월 정지) → 기능 안내(/guide, 도움말 봇과 같은 원장) */}
-        <a href="/guide" className="hover:text-gray-600 transition">기능 안내</a>
-        <span>|</span>
-        {/* ★ 2026-10-07 「AI Operator 소개」 링크 제거 — 소개 페이지는 숨김(허용 계정만 · 주소 직접 입력) */}
+        {/* ★ 2026-10-07 Harold: 「기능 안내」 링크 제거(도움말 봇 「자세히」로만 · constants/guide-path.ts) ·
+            소개 페이지(/about) 링크는 허용 계정(hoyun)에게만 · 이름도 소개라고 쓰지 않는다 */}
+        {aboutLinkAllowed && (
+          <>
+            <a href="/about" className="hover:text-gray-600 transition">미팅 자료</a>
+            <span>|</span>
+          </>
+        )}
         <a href="/privacy" target="_blank" className="hover:text-gray-600 transition">개인정보처리방침</a>
         <span>|</span>
         <a href="/terms" target="_blank" className="hover:text-gray-600 transition">이용약관</a>

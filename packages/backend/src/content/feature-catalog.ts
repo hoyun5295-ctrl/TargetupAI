@@ -1038,8 +1038,7 @@ export const NOT_DOCUMENTED_ROUTES: Record<string, string> = {
   '/onboarding': '기존 온보딩 마법사(봇이 딥링크로 부른다)',
   '/diagnosis': '로그인 전 공개 진단(로그인 화면 링크). 로그인 고객의 진입은 대시보드 카드(= marketing-diagnosis)',
   '/about': '로그인 전 공개 소개 페이지(로그인 화면 · 대시보드 바닥 링크 · 옛 /about-ai-operator.html 대체)', // ★2026-10-07 소개 페이지 대개편
-  '/guide': '안내 화면 자체',
-  '/guide/:jobId': '안내 화면 상세',
+  // ★ 2026-10-07 안내 화면 주소 = frontend constants/guide-path.ts(App.tsx 가 상수로 등록 · 도움말 봇 「자세히」로만 들어온다)
   '/admin': '슈퍼관리자',
   '/admin/ai-training': '슈퍼관리자',
   '/admin/alimtalk-senders': '슈퍼관리자',

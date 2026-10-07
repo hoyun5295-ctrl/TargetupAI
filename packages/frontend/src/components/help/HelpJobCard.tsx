@@ -6,6 +6,7 @@
 import { useLocation, useNavigate } from 'react-router-dom';
 import { ChevronDown, ArrowRight, Lock, BookOpen, MapPin } from 'lucide-react';
 import { helpEntryHref, isAlreadyHere, type HelpJob } from './help-api';
+import { GUIDE_PATH } from '../../constants/guide-path';
 import {
   HELP_BLOCKER, HELP_BLOCKER_FIX, HELP_BLOCKER_SYMPTOM, HELP_BTN_GHOST, HELP_BTN_PRIMARY, HELP_CARD, HELP_CARD_ACTIONS,
   HELP_CARD_BODY, HELP_CARD_GOAL, HELP_CARD_HEAD, HELP_CARD_NUM, HELP_CARD_TITLE, HELP_HERE_NOW, HELP_LOCK,
@@ -92,7 +93,7 @@ export default function HelpJobCard({ job, index, open, onToggle, onNavigate, sh
               </button>
             )}
             {showGuideLink && (
-              <button type="button" onClick={() => go(`/guide/${job.id}`)} className={HELP_BTN_GHOST}>
+              <button type="button" onClick={() => go(`${GUIDE_PATH}/${job.id}`)} className={HELP_BTN_GHOST}>
                 <BookOpen className="w-3.5 h-3.5" strokeWidth={2} />자세히
               </button>
             )}

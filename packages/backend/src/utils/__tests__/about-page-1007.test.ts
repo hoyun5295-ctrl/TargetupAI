@@ -113,7 +113,11 @@ describe('주소', () => {
     // ★ 2026-10-07 Harold: 소개는 로그인한 사람만 · 로그인 화면엔 소개 링크 없음
     expect(app).toContain('<Route path="/about" element={<PrivateRoute><AboutGate><AboutPage /></AboutGate></PrivateRoute>} />');
     expect(read('src/pages/LoginPage.tsx')).not.toContain('href="/about"');
-    expect(read('src/pages/Dashboard.tsx')).not.toContain('href="/about"');   // ★ 2026-10-07 숨김 — 대시보드 링크도 제거
+    // ★ 2026-10-07 대시보드 하단 링크 = 허용 계정(hoyun)에게만 · 이름 「미팅 자료」 · 기능 안내 링크는 없다
+    const dash = read('src/pages/Dashboard.tsx');
+    expect(dash).toContain('{aboutLinkAllowed && (\n          <>\n            <a href="/about" className="hover:text-gray-600 transition">미팅 자료</a>');
+    expect(dash.match(/href="\/about"/g)?.length).toBe(1);
+    expect(dash).not.toContain('href="/guide"');
     for (const f of ['src/pages/LoginPage.tsx', 'src/pages/Dashboard.tsx']) expect(read(f)).not.toContain('about-ai-operator.html?v=');
     const old = read('public/about-ai-operator.html');
     // ★ 2026-10-07 Harold: 상세 소개는 hoyun 전용 · 바깥에 낸 옛 주소는 공개 소개(/intro)로

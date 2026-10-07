@@ -40,7 +40,8 @@ const PricingPage = lazyPage(() => import('./pages/PricingPage'));
 const AboutPage = lazyPage(() => import('./pages/AboutPage'));
 const IntroPage = lazyPage(() => import('./pages/IntroPage')); // ★ 2026-10-07 공개 소개(영상 · 기능 이름 · 시연 요청)
 import AboutGate from './components/AboutGate';   // ★ 2026-10-07 소개 페이지 숨김 문(허용 계정만)   // ★ 2026-10-07 공개 소개 페이지(옛 /about-ai-operator.html 대체)
-const GuidePage = lazyPage(() => import('./pages/GuidePage')); // ★ 2026-08-22 기능 안내(/guide) — 도움말 봇과 같은 원장
+const GuidePage = lazyPage(() => import('./pages/GuidePage')); // ★ 2026-08-22 기능 안내 — 도움말 봇과 같은 원장 · ★1007 주소 = GUIDE_PATH(도움말 봇 「자세히」로만)
+import { GUIDE_PATH } from './constants/guide-path';
 const AgencySendPage = lazyPage(() => import('./pages/AgencySendPage')); // ★ 2026-08-22 대행발송 셀프 접수
 const SnsPage = lazyPage(() => import('./pages/SnsPage')); // ★ 2026-09-20 SNS 게시(S1 계정 연결)
 const AgencyApprovePage = lazyPage(() => import('./pages/AgencyApprovePage')); // ★ 2026-08-25 담당자 링크 승인(인증 X)
@@ -750,8 +751,8 @@ function App() {
             </PrivateRoute>
           }
         />
-        <Route path="/guide" element={<PrivateRoute><GuidePage /></PrivateRoute>} />
-        <Route path="/guide/:jobId" element={<PrivateRoute><GuidePage /></PrivateRoute>} />
+        <Route path={GUIDE_PATH} element={<PrivateRoute><GuidePage /></PrivateRoute>} />
+        <Route path={`${GUIDE_PATH}/:jobId`} element={<PrivateRoute><GuidePage /></PrivateRoute>} />
         <Route path="/privacy" element={<PrivacyPage />} />
         <Route path="/terms" element={<TermsPage />} />
         {/* ★ 2026-07-03 카페24 앱 실행 랜딩 (심사위원 동선) — 공개, 페이지가 로그인 3분기 판별 */}

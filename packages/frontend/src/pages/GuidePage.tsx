@@ -9,6 +9,7 @@ import { Link, useNavigate, useParams } from 'react-router-dom';
 import { ArrowLeft, ArrowRight, BookOpen, Lock, Search } from 'lucide-react';
 import { CUI_FIELD, CUI_FIELD_INPUT, CUI_PAGE, CUI_WRAP } from '../utils/console-ui';
 import HelpJobCard from '../components/help/HelpJobCard';
+import { GUIDE_PATH } from '../constants/guide-path';
 import { fetchHelpCatalog, fetchHelpJob, type HelpJob } from '../components/help/help-api';
 import {
   GUIDE_BACK, GUIDE_CARD, GUIDE_CARD_GOAL, GUIDE_CARD_TITLE, GUIDE_DETAIL, GUIDE_GRID, GUIDE_GROUP, GUIDE_GROUP_TITLE, GUIDE_HERO,
@@ -67,7 +68,7 @@ export default function GuidePage() {
           <div className="space-y-3"><div className={HELP_SKELETON} /><div className={HELP_SKELETON} /><div className={HELP_SKELETON} /></div>
         ) : detail ? (
           <div className="space-y-6">
-            <Link to="/guide" className={GUIDE_BACK}><ArrowLeft className="w-4 h-4" />전체 안내</Link>
+            <Link to={GUIDE_PATH} className={GUIDE_BACK}><ArrowLeft className="w-4 h-4" />전체 안내</Link>
             <div className={GUIDE_DETAIL}>
               <div>
                 <div className="flex items-center gap-2 flex-wrap">
@@ -109,7 +110,7 @@ export default function GuidePage() {
                 {filtered.length === 0 ? (
                   <p className="text-[13px] text-neutral-500">맞는 기능이 없습니다. 다른 말로 찾아보거나 오른쪽 아래 도움말에 물어보세요.</p>
                 ) : (
-                  <div className={GUIDE_GRID}>{filtered.map((j) => <Card key={j.id} job={j} onClick={() => navigate(`/guide/${j.id}`)} />)}</div>
+                  <div className={GUIDE_GRID}>{filtered.map((j) => <Card key={j.id} job={j} onClick={() => navigate(`${GUIDE_PATH}/${j.id}`)} />)}</div>
                 )}
               </section>
             ) : (
@@ -119,7 +120,7 @@ export default function GuidePage() {
                 return (
                   <section key={g.key} className={GUIDE_GROUP}>
                     <h2 className={GUIDE_GROUP_TITLE}>{g.label}</h2>
-                    <div className={GUIDE_GRID}>{jobs.map((j) => <Card key={j.id} job={j} onClick={() => navigate(`/guide/${j.id}`)} />)}</div>
+                    <div className={GUIDE_GRID}>{jobs.map((j) => <Card key={j.id} job={j} onClick={() => navigate(`${GUIDE_PATH}/${j.id}`)} />)}</div>
                   </section>
                 );
               })
