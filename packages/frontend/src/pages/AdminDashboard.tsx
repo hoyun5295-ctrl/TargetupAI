@@ -251,7 +251,6 @@ export default function AdminDashboard() {
   const [geoExceptions, setGeoExceptions] = useState<any[]>([]);
   const [geoHits, setGeoHits] = useState<any[]>([]);
   const [geoHitsDenied, setGeoHitsDenied] = useState(false); // 403 = 권한 없음. "기록 없음"으로 그리면 거짓이다
-  const [geoCidrInput, setGeoCidrInput] = useState('');
   // ★ 2026-10-02 expiresAt = 허용 만료일(YYYY-MM-DD · 비우면 기한 없음) — 전송자격인증 2.2 ③
   const [geoForm, setGeoForm] = useState({ scope: 'user', target: '', cidr: '', reason: '', expiresAt: '' });
   const [geoBusy, setGeoBusy] = useState(false);
@@ -279,24 +278,6 @@ export default function AdminDashboard() {
     });
     const data = await res.json().catch(() => ({} as any));
     return { ok: res.ok, data };
-  };
-
-  const handleGeoCidrBulk = async () => {
-    setGeoBusy(true);
-    try {
-      const { ok, data } = await geoPost('/api/admin/geo/cidrs/bulk', { cidrs: geoCidrInput });
-      if (!ok) {
-        // ★0827 어느 값이 왜 막혔는지 화면에 남긴다 — "등록 실패" 한 줄이면 고칠 방법이 없다
-        const detail = Array.isArray(data?.invalid) && data.invalid.length > 0
-          ? `\n\n${data.invalid.slice(0, 10).join('\n')}`
-          : '';
-        showAlert('오류', `${data?.error || '대역 등록에 실패했습니다.'}${detail}`, 'error');
-        return;
-      }
-      setGeoCidrInput('');
-      await loadGeoAccess();
-      showAlert('성공', `${Number(data.replaced).toLocaleString()}개 대역으로 교체되었습니다(이전 ${Number(data.before).toLocaleString()}개).`, 'success');
-    } finally { setGeoBusy(false); }
   };
 
   const handleGeoExceptionCreate = async () => {
@@ -6087,37 +6068,7 @@ const handleApproveRequest = async (id: string) => {
               </div>
             </div>
 
-            <div className="bg-white rounded-xl border border-gray-200 p-5">
-              <h3 className="text-base font-semibold text-gray-900">차단 예외 대역 등록 (화이트리스트)</h3>
-              <p className="mt-1 text-xs text-gray-500 leading-relaxed">
-                여기 등록한 국내 할당 대역만 차단에서 제외됩니다. <span className="font-medium">등록되지 않은 IP는 전부 차단 대상</span>입니다.
-                대역이 하나도 없으면 판정 자체를 하지 않습니다(전원 통과).
-                줄바꿈·쉼표·공백 어느 것으로 구분해도 됩니다. <span className="font-medium">등록할 때마다 전체가 교체</span>됩니다.
-              </p>
-              <p className="mt-1.5 text-[11px] text-gray-400 leading-relaxed">
-                네트워크 주소로 넣어주세요. <span className="font-medium text-gray-500">단일 IP 하나는 /32</span>입니다
-                (예: 115.138.27.202/32). 115.138.27.202/16 처럼 대역 가운데 주소를 적으면 등록되지 않고,
-                어느 값을 어떻게 고쳐야 하는지 알려줍니다.
-              </p>
-              <textarea
-                value={geoCidrInput}
-                onChange={(e) => setGeoCidrInput(e.target.value)}
-                rows={5}
-                placeholder={'211.234.0.0/16\n1.201.0.0/16\n14.32.0.0/15'}
-                className="mt-3 w-full rounded-lg border border-gray-200 px-3 py-2 font-mono text-xs outline-none focus:border-indigo-500 focus:ring-4 focus:ring-indigo-600/10"
-              />
-              <div className="mt-3 flex items-center justify-between">
-                <span className="text-[11px] text-gray-400">APNIC delegated 목록의 KR 행에서 뽑습니다.</span>
-                <button
-                  onClick={handleGeoCidrBulk}
-                  disabled={geoBusy || !geoCidrInput.trim()}
-                  className="px-4 py-2 rounded-lg bg-indigo-600 text-white text-sm font-semibold hover:bg-indigo-700 disabled:opacity-40"
-                >
-                  {geoBusy ? '등록 중...' : '전체 교체 등록'}
-                </button>
-              </div>
-            </div>
-
+            {/* ★ 2026-10-07 「국내 대역 일괄 등록」 카드 삭제(Harold) — 한국 IP 기준표는 직원이 바꾸는 값이 아니다(1007 IP 하나로 덮여 국내 로그인 전부 차단). 갱신 = 서버 명령 · OPS §2-2-F */}
             <div className="bg-white rounded-xl border border-gray-200 p-5">
               <h3 className="text-base font-semibold text-gray-900">관리자 수동 승인 (예외 IP 허용)</h3>
               <p className="mt-1 text-xs text-gray-500 leading-relaxed">
@@ -6139,7 +6090,7 @@ const handleApproveRequest = async (id: string) => {
                 <input
                   value={geoForm.target}
                   onChange={(e) => setGeoForm({ ...geoForm, target: e.target.value })}
-                  placeholder={geoForm.scope === 'user' ? '대상 계정 UUID' : geoForm.scope === 'global' ? '전역 (비워둠)' : '대상 고객사 UUID'}
+                  placeholder={geoForm.scope === 'user' ? '대상 계정 아이디 또는 UUID' : geoForm.scope === 'global' ? '전역 (비워둠)' : '대상 고객사 이름 또는 UUID'}
                   disabled={geoForm.scope === 'global'}
                   className="px-3 py-2 border border-gray-200 rounded-lg text-sm outline-none focus:border-indigo-500 disabled:bg-gray-50"
                 />

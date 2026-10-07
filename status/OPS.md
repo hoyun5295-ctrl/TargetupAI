@@ -481,7 +481,10 @@ cd /home/administrator/targetup-app/packages/backend && grep -q '^OUTREACH_HASH_
 1. 원천 재다운로드: `https://ftp.apnic.net/stats/apnic/delegated-apnic-extended-latest` (약 9MB)
 2. 변환(로컬): `node packages/backend/scripts/build-kr-cidrs.js <받은 파일> packages/backend/scripts/data/kr-cidrs.txt`
    - 표본 국내 IP 3개 커버·정렬·최소 1,000개 단언 내장. 실패하면 적재로 넘어가지 않는다.
-3. 적재: 슈퍼관리자 시스템 관리 → 국외 접속 통제 카드 → 대역 일괄 등록 textarea에 `kr-cidrs.txt` 내용 전체 붙여넣기 → 등록(전체 교체 · `POST /api/admin/geo/cidrs/bulk`)
+3. 적재: `kr-cidrs.txt` 커밋 · push · 서버 pull 뒤 .62(administrator)에서 아래 한 줄(파일이 비면 아무것도 안 함 · 한 트랜잭션 · 실패 = 원상). ★2026-10-07 화면 일괄 등록 카드 · `POST /geo/cidrs/bulk` 삭제(그 칸에 IP 하나가 들어가 기준표가 1개 → 국내 로그인 전부 차단 · 같은 날 이 명령으로 복구). 직원은 예외 승인만 쓴다.
+```bash
+cd /home/administrator/targetup-app && test -s packages/backend/scripts/data/kr-cidrs.txt && ( echo "BEGIN; DELETE FROM geo_allow_cidrs;"; awk 'NF{printf "INSERT INTO geo_allow_cidrs (id, cidr, country_code, source, updated_at) VALUES (gen_random_uuid(), %c%s%c, %cKR%c, %capnic%c, NOW());\n",39,$1,39,39,39,39,39}' packages/backend/scripts/data/kr-cidrs.txt; echo "COMMIT;" ) | docker exec -i targetup-postgres psql -U targetup targetup -q -v ON_ERROR_STOP=1 && echo RESTORED
+```
 4. 재검증:
 ```bash
 docker exec -i targetup-postgres psql -U targetup targetup -c "SELECT COUNT(*) AS n, COUNT(*) FILTER (WHERE '115.138.27.202'::inet <<= cidr) AS 표본커버 FROM geo_allow_cidrs;"

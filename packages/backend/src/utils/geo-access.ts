@@ -159,6 +159,25 @@ export function isPrivateIp(raw: string | null | undefined): boolean {
   return false;
 }
 
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/**
+ * ★ 2026-10-07 예외 승인 대상 해석 — UUID 그대로 · 아니면 계정은 로그인 아이디, 고객사는 회사 이름(정확히 일치)으로 찾는다.
+ *   0건 · 여러 건이면 무엇이 문제인지 돌려준다(옛: 글자를 그대로 uuid 로 넣다가 500 「접근 예외 등록 실패」).
+ */
+export async function resolveExceptionTarget(
+  kind: 'user' | 'company', raw: unknown,
+): Promise<{ ok: true; id: string } | { ok: false; reason: string }> {
+  const v = String(raw || '').trim();
+  if (!v) return { ok: false, reason: kind === 'user' ? '대상 계정을 입력해주세요.' : '대상 고객사를 입력해주세요.' };
+  const r = UUID_RE.test(v)
+    ? await query(kind === 'user' ? `SELECT id FROM users WHERE id = $1::uuid` : `SELECT id FROM companies WHERE id = $1::uuid`, [v])
+    : await query(kind === 'user' ? `SELECT id FROM users WHERE login_id = $1 LIMIT 2` : `SELECT id FROM companies WHERE company_name = $1 LIMIT 2`, [v]);
+  if (r.rows.length === 0) return { ok: false, reason: kind === 'user' ? `「${v}」 계정을 찾지 못했습니다.` : `「${v}」 고객사를 찾지 못했습니다.` };
+  if (r.rows.length > 1) return { ok: false, reason: `「${v}」와 같은 ${kind === 'user' ? '아이디' : '이름'}가 여러 개입니다. UUID로 입력해주세요.` };
+  return { ok: true, id: String(r.rows[0].id) };
+}
+
 /** 대역 보유 여부 캐시 — 비어 있으면 판정 자체를 하지 않는다(매 로그인 COUNT를 피한다) */
 const HAS_DATA_TTL_MS = 300_000;
 let hasDataCache: { value: boolean; expires: number } | null = null;

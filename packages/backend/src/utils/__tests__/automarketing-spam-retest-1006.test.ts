@@ -135,7 +135,8 @@ describe('회차 자동 검사 — 실제 발송과 같은 기본 발신번호�
   const round = op.slice(op.indexOf('// 9. ★ D227+ 스팸 안전망'), op.indexOf('const tested: Array<'));
 
   it('검사에 넘기는 번호 = 기본 발신번호(없으면 종전 값) · 자격 판정 값은 그대로', () => {
-    expect(round).toContain('const spamCallback = (await loadDefaultCallback(operator.companyId)) || callbackForSpam;');
+    // ★ 2026-10-07 고른 회신번호가 있으면 그 번호 · 없으면(개별 회신 포함) 기본 발신번호
+    expect(round).toContain('const spamCallback = (await loadOperatorCallback(operator.companyId, operator.useIndividualCallback ? null : operator.callbackNumber)) || callbackForSpam;');
     expect(round).toContain('callbackNumber: spamCallback,');
     expect(round).not.toContain('callbackNumber: callbackForSpam');
     expect(op).toContain("const canAutoSend = !!bestMessage && !!callbackForSpam && channelForSpam !== '카카오'");
@@ -144,7 +145,10 @@ describe('회차 자동 검사 — 실제 발송과 같은 기본 발신번호�
   it('기본 발신번호 = 발송(dispatchProposalSend)과 같은 조건', () => {
     const helper = op.slice(op.indexOf('async function loadDefaultCallback('), op.indexOf('/** 화면이 검사 진행'));
     expect(helper).toContain("FROM callback_numbers WHERE company_id = $1 AND is_default = true LIMIT 1");
-    expect(op).toContain("`SELECT REPLACE(phone, '-', '') AS phone FROM callback_numbers WHERE company_id = $1 AND is_default = true LIMIT 1`,\n      [companyId],\n    );\n    callback = cbRes.rows[0]?.phone || null;");
+    // ★ 2026-10-07 발송도 같은 함수(고른 번호 → 없으면 기본 번호)를 쓴다
+    const pick = op.slice(op.indexOf('async function loadOperatorCallback('), op.indexOf('async function loadOperatorCallback(') + 400);
+    expect(pick).toContain('return c || loadDefaultCallback(companyId);');
+    expect(op).toContain('callback = await loadOperatorCallback(companyId, chosenCb) || null;');
   });
 
   it('직접 쓴 문안의 통과 기록 지문에 발신번호가 들어간다(080 으로 검사한 옛 통과가 실제 번호 검사를 건너뛰지 않게)', () => {

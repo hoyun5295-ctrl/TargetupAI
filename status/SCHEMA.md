@@ -2690,6 +2690,8 @@ cd /home/administrator/targetup-app/packages/backend && npm install web-push @ty
 | approved_until | timestamptz | 승인 기간 끝(KST 그날 밤 12시) — 기간 안 회차 = 자율 자격 (★2026-10-05 ALTER 실행완료) |
 | approval_meta | jsonb | `{ approvedAt, approvedBy, windowStart, renewalNoticeFor }` — 기간 시작 · 갱신 안내 선점(NULL = 아직 안 보냄) (★2026-10-05 ALTER 실행완료) |
 | round_log | jsonb | 회차 기록 `[{ at, outcome, count, reason }]` 최근 60 — 0명인 날 · 멈춤도 남는다(승인 기간 요약) (★2026-10-05 ALTER 실행완료) |
+| callback_number | varchar(20) | 자동 마케팅 회신번호(숫자만) · NULL = 회사 기본 번호 · 등록 번호만 저장(`checkOperatorCallback`) · 발송 때 등록 목록에 없으면 보류 (★2026-10-07 ADD · **배포 뒤 실행 대기** · 임은지 접수) |
+| use_individual_callback | boolean NOT NULL DEFAULT false | 개별 회신 = 고객별 매장번호(store_phone) · 미보유·미등록 고객은 차감 전에 빼고 보낸다 (★2026-10-07 ADD · **배포 뒤 실행 대기**) · 두 칸 모두 발송 경로는 `to_jsonb(o)` 로 읽어 DDL 전에도 안전 · 저장만 503 |
 - INDEX: company_id, status WHERE status='active'
 - INDEX: status, next_run_at WHERE status='active' (worker 호출용)
 - 2026-06-26 information_schema 덤프 = 위 33컬럼 전부 존재 확정. 중복 4컬럼(notify_phones/backup_phones/notify_channel/lead_minutes)은 DROP 완료(데이터 0). 재질의 금지.

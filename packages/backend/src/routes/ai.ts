@@ -82,6 +82,9 @@ import {
   // ★ 2026-08-04 리마인드 명단 — 발송과 같은 코호트를 읽는다(보여준 수 = 나가는 수)
   readCampaignQueuedPhones,
   OPERATOR_STATUSES,
+  checkOperatorCallback,   // ★ 2026-10-07 회신번호(등록 번호 · 고객별 매장번호)
+  checkOperatorCallbackFor,
+  OperatorCallbackError,
 } from '../utils/continuous-operator';
 // ★ D177 (2026-05-19): Self-Optimizing Bandit (Thompson Sampling)
 // ★ D188 Phase 2-B-3 (2026-05-21): journey_step_variants CRUD + reward + 추천 헬퍼 import 추가.
@@ -1527,6 +1530,7 @@ router.post('/operator/preview-recipients', async (req: Request, res: Response) 
         age: r.age,
         grade: r.grade,
         ...custom,
+        store_phone: r.store_phone || '',   // ★ 2026-10-07 개별 회신용 · custom 뒤에 둬서 같은 이름 사용자 칸이 덮지 못하게
       };
     });
 
@@ -2191,11 +2195,16 @@ router.post('/operator/continuous', async (req: Request, res: Response) => {
         error: `${tr.unresolved.map((u) => `「${u.term}」`).join(' · ')}을(를) 어느 칸으로 판단할지 정해야 해요. 자동 마케팅 첫 화면의 한 줄 입력으로 시작하면 칸을 고를 수 있어요.`,
       });
     }
+    // ★ 2026-10-07 회신번호 — 화면이 바꿨을 때만 온다(안 오면 기본 번호 · 칸 없는 DB 에서도 등록이 막히지 않는다). 등록(차감) 전에 검사한다.
+    const cbInput = req.body?.callback_number !== undefined || req.body?.use_individual_callback !== undefined
+      ? await checkOperatorCallback(companyId, userId, { callbackNumber: req.body.callback_number, useIndividualCallback: req.body.use_individual_callback })
+      : null;
     const operator = await createOperator({
       ...baseInput,
       segmentKey: tr.kind === 'axis' ? tr.segmentKey : null,
       segmentParams: tr.kind === 'axis' ? tr.segmentParams : null,
       audienceConditions: tr.kind === 'filters' ? tr.conditions : null,
+      callback: cbInput,   // 같은 INSERT 한 문장(차감 전 · Codex 1R)
     });
     const appliedSegment = tr.kind === 'axis' && tr.mapped ? { key: tr.segmentKey, label: tr.label } : null;
     // ★ 2026-07-05: 캘린더 경유 등록 기록 — 실패해도 등록은 성공(fire-safe, 테이블 미생성 = 내부 생략)
@@ -2610,7 +2619,12 @@ router.put('/operator/continuous/:id', async (req: Request, res: Response) => {
     } = req.body;
     // ★ 2026-07-12 C-2: 죽은 설정 수신 제거(delivery_policy·verification_required_days·opt_out_minutes·
     //   spam_score_threshold·max_spam_retries) — 소비 로직 0. 구클라이언트가 보내도 무시(에러 없음).
+    // ★ 2026-10-07 회신번호 — 화면이 바꿨을 때만 온다. 검사만 먼저 하고 저장은 아래 UPDATE 한 문장(Codex 1R: 따로 저장하면 수정 실패 때 회신번호만 바뀐다)
+    const cbPatch = req.body?.callback_number !== undefined || req.body?.use_individual_callback !== undefined
+      ? await checkOperatorCallbackFor(companyId, req.params.id, { callbackNumber: req.body.callback_number, useIndividualCallback: req.body.use_individual_callback })
+      : undefined;
     const operator = await updateOperator(companyId, req.params.id, {
+      ...(cbPatch ? { callback: cbPatch } : {}),
       name, objective, schedule, scheduleTime: schedule_time,
       // ★ 2026-09-27 한줄로 V2 R080 — 선언된 상태값만(목록 밖 = 변경 없음 · 화면은 편집 때 현재 상태를 그대로 보낸다)
       status: (OPERATOR_STATUSES as readonly string[]).includes(status) ? status : undefined,
@@ -2648,6 +2662,7 @@ router.put('/operator/continuous/:id', async (req: Request, res: Response) => {
     return res.json({ success: true, operator });
   } catch (err: any) {
     const msg = err?.message || '';
+    if (err instanceof OperatorCallbackError) return res.status(400).json({ success: false, error: err.message, code: 'CALLBACK_NOT_REGISTERED' });
     if (err?.code === 'DB_MIGRATION_PENDING' || err?.code === '42P01') {
       return res.status(503).json({ success: false, error: '지난번과 달라진 점을 찾는 조건은 준비 중입니다. 다른 조건으로 저장해 주세요.', code: 'DB_MIGRATION_PENDING' });
     }

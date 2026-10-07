@@ -119,7 +119,8 @@ export function buildSendableRecipientsSql(
   const params = [...baseParams, ...filterParams];
   const where = buildAudienceWhere(params, filterWhere, storeFilter, gates);
   const sql =
-    `SELECT c.id, c.phone, c.name, c.gender, c.region, c.birth_date, c.age, c.grade, c.custom_fields
+    // ★ 2026-10-07 store_phone = 한줄로 개별 회신(고객별 매장번호 · /direct-send CT-08이 callback으로 옮겨 검사)
+    `SELECT c.id, c.phone, c.name, c.gender, c.region, c.birth_date, c.age, c.grade, c.custom_fields, c.store_phone
      FROM customers c
      WHERE ${where}
      LIMIT ${SENDABLE_RECIPIENTS_LIMIT}`;
@@ -231,15 +232,19 @@ export function buildSendableStagingInsertSql(
   storeFilter: string,   // ' AND id IN (...)' 또는 '' — 넘길 경우 $1=company·$2=storeCodes 기준으로 합성됨.
   // ★ 2026-07-05 발송 피로도 · 미클릭 — 게이트는 객체 하나로 받는다(1R 정정).
   gates: AudienceGates = {},
+  // ★ 2026-10-07 개별 회신(자동 마케팅) — 고객별 매장번호를 staging callback 에 함께 싣는다(판정 · 제외는 호출부가 CT-08로). 없으면 종전 그대로.
+  opts: { callbackFromStorePhone?: boolean } = {},
 ): { sql: string; params: any[] } {
   const params: any[] = [...baseParams, ...filterParams];
   const where = buildAudienceWhere(params, filterWhere, storeFilter, gates);
   params.push(stagingId);
   const stgIdx = params.length;
+  const cbCol = opts.callbackFromStorePhone ? ', callback' : '';
+  const cbVal = opts.callbackFromStorePhone ? ", NULLIF(btrim(COALESCE(c.store_phone, '')), '')" : '';
   const sql =
-    `INSERT INTO campaign_send_staging (staging_id, company_id, phone, name)
+    `INSERT INTO campaign_send_staging (staging_id, company_id, phone, name${cbCol})
      SELECT $${stgIdx}::uuid, $1::uuid,
-            COALESCE(regexp_replace(c.phone, '[^0-9]', '', 'g'), ''), c.name
+            COALESCE(regexp_replace(c.phone, '[^0-9]', '', 'g'), ''), c.name${cbVal}
        FROM customers c
       WHERE ${where}`;
   return { sql, params };

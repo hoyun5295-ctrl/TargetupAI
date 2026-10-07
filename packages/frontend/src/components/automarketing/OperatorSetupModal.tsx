@@ -1,12 +1,13 @@
 // 세부설정으로 시작 — 풀 컨트롤 모달 (2026-06-27)
 // 기본 4개(이름·목표·채널·주기+시각)는 펼쳐 두고, 고급 4개는 요약만 보이는 접힘 카드.
 // 다크 톤 모달: bg-slate-900 + border-white/10 + rounded-2xl + shadow-2xl. 콘텐츠 티어 z-50(인터럽트 z-[2000] 아래).
-import { ReactNode, useState } from 'react';
+import { ReactNode, useEffect, useState } from 'react';
 import {
   Brain, X, Gift, Layers, Bell, Wallet, ChevronDown, ChevronUp, Loader2, AlertCircle,
 } from 'lucide-react';
 import { ContinuousOperator, Schedule, OperatorStatus, won } from './types';
 import CopyStylePicker from './CopyStylePicker';
+import { normalizePhoneKr } from '../../utils/formatDate';
 // ★ 2026-08-03 타겟팅 재설계: 발송 대상은 계약으로 고른다(회사 데이터로 열리고 잠긴다).
 import SegmentPicker from './SegmentPicker';
 // ★ 2026-07-30 (임은지 접수): MMS 이미지 첨부 — 여정 MMS 업로더 재사용(300KB JPG·최대 3장·라이브러리 자동 변환)
@@ -14,6 +15,8 @@ import JourneyMmsUploader from '../journey/JourneyMmsUploader';
 
 const INP = 'w-full px-3 py-2 bg-white border border-slate-200 rounded-lg text-sm text-slate-900 placeholder-slate-400 focus:outline-none focus:border-indigo-300 transition-colors';
 const LAB = 'text-xs font-medium text-slate-600 block mb-1.5';
+/** 회신번호 select 특수값 — 고객별 등록매장 번호(개별 회신) · DmSendAndTrackModal 과 같은 값 */
+const INDIVIDUAL_CB = '__individual__';
 
 interface Props {
   editing: Partial<ContinuousOperator>;
@@ -27,6 +30,21 @@ interface Props {
 export default function OperatorSetupModal({ editing, setEditing, saving, error, onClose, onSubmit }: Props) {
   const isEdit = !!editing.id;
   const phones = editing.adminPhoneNumbers || [];
+  // ★ 2026-10-07 (임은지 접수) 회신번호 고르기 — 등록 번호 목록(직접발송과 같은 조회)
+  const [cbList, setCbList] = useState<Array<{ phone: string; isDefault: boolean }>>([]);
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      try {
+        const r = await fetch('/api/companies/callback-numbers', { headers: { Authorization: `Bearer ${localStorage.getItem('token')}` } });
+        const d = r.ok ? await r.json().catch(() => null) : null;
+        if (alive) setCbList((Array.isArray(d?.numbers) ? d.numbers : []).filter((c: any) => c?.phone).map((c: any) => ({ phone: String(c.phone), isDefault: !!c.is_default })));
+      } catch { /* 목록 실패 = 기본 번호만 보인다 */ }
+    })();
+    return () => { alive = false; };
+  }, []);
+  const cbValue = editing.useIndividualCallback ? INDIVIDUAL_CB : (editing.callbackNumber || '');
+  const defaultCb = cbList.find((c) => c.isDefault)?.phone;
   // ★ 2026-08-04: 리마인드를 켰으면 문안 필수 — 켜 놓고 비우면 매 1차 발송마다 "문안 없음" 통지만 나간다.
   const canSubmit = !!editing.name?.trim() && !!editing.objective?.trim() && !saving
     && !(editing.sequenceEnabled && !editing.sequenceReminderContent?.trim());
@@ -83,6 +101,26 @@ export default function OperatorSetupModal({ editing, setEditing, saving, error,
                 <div className="text-[10px] text-slate-400 mt-1.5">MMS로 나가는 매 발송에 이 이미지가 첨부됩니다. 비워두면 이미지 없이 발송됩니다.</div>
               </div>
             )}
+          </div>
+
+          <div>
+            <label className={LAB}>회신번호</label>
+            <select
+              value={cbValue}
+              onChange={(e) => {
+                const v = e.target.value;
+                setEditing({ ...editing, callbackTouched: true, useIndividualCallback: v === INDIVIDUAL_CB, callbackNumber: v && v !== INDIVIDUAL_CB ? v : null });
+              }}
+              disabled={saving}
+              className={INP}
+            >
+              <option value="">기본 번호{defaultCb ? ` (${defaultCb})` : ''}</option>
+              {cbList.filter((c) => !c.isDefault || normalizePhoneKr(c.phone) === normalizePhoneKr(cbValue)).map((c) => <option key={c.phone} value={normalizePhoneKr(c.phone)}>{c.phone}</option>)}
+              {/* 저장된 번호가 목록에서 빠졌어도 보이게(그대로 두면 발송이 보류된다) */}
+              {cbValue && cbValue !== INDIVIDUAL_CB && !cbList.some((c) => normalizePhoneKr(c.phone) === cbValue) && <option value={cbValue}>{cbValue} (등록 목록에 없음)</option>}
+              <option value={INDIVIDUAL_CB}>고객별 매장번호 (개별 회신)</option>
+            </select>
+            {editing.useIndividualCallback && <div className="text-[10px] text-slate-400 mt-1">매장번호가 없거나 등록 안 된 번호인 고객은 빼고 보냅니다.</div>}
           </div>
 
           <div>

@@ -18,7 +18,7 @@ import { query } from '../config/database';
 import {
   isGeoBlockEnforced, isGeoSchemaMissing, normalizeIp, isPrivateIp,
   classifyOrigin, evaluateLoginOrigin, invalidateGeoCache,
-  isOriginAllowlistEnforced, evaluateMachineOrigin,
+  isOriginAllowlistEnforced, evaluateMachineOrigin, resolveExceptionTarget,
 } from './geo-access';
 
 const q = query as unknown as ReturnType<typeof vi.fn>;
@@ -248,5 +248,27 @@ describe('★ 기계 경로(SDK · 싱크에이전트) — 국가로 막지 않�
     mockGeo({ hasData: true, matches: false, exception: false });
     const v = await evaluateMachineOrigin({ ip: '10.0.0.5', companyId: 'c1', scope: 'company_api', now: new Date('2026-12-01T00:00:00+09:00') });
     expect(v.decision).toBe('allow');
+  });
+});
+
+/** ★ 2026-10-07 예외 승인 대상 — 로그인 아이디 · 회사 이름도 받는다(옛: 글자를 uuid 로 넣다가 500) */
+describe('resolveExceptionTarget', () => {
+  const U = '11111111-2222-3333-4444-555555555555';
+  it('로그인 아이디 1건 = 그 계정 UUID', async () => {
+    q.mockReset(); q.mockResolvedValueOnce({ rows: [{ id: U }] });
+    expect(await resolveExceptionTarget('user', 'shadmin')).toEqual({ ok: true, id: U });
+    expect(String(q.mock.calls[0][0])).toContain('login_id = $1');
+  });
+  it('UUID 는 그대로 존재만 확인', async () => {
+    q.mockReset(); q.mockResolvedValueOnce({ rows: [{ id: U }] });
+    expect(await resolveExceptionTarget('user', U)).toEqual({ ok: true, id: U });
+    expect(String(q.mock.calls[0][0])).toContain('id = $1::uuid');
+  });
+  it('없음 · 여러 건 · 빈 값 = 사유(등록 안 함)', async () => {
+    q.mockReset(); q.mockResolvedValueOnce({ rows: [] });
+    expect((await resolveExceptionTarget('user', 'nobody')).ok).toBe(false);
+    q.mockReset(); q.mockResolvedValueOnce({ rows: [{ id: U }, { id: 'x' }] });
+    expect((await resolveExceptionTarget('company', '같은이름')).ok).toBe(false);
+    expect((await resolveExceptionTarget('user', '  ')).ok).toBe(false);
   });
 });

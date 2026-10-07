@@ -154,7 +154,7 @@ describe('3-2. 라우트마다 빠짐없이 붙어 있다', () => {
 
   it('국외 라우트 — 이력은 geoHits, 그 밖 전부 geoAccess', () => {
     const lines = routeLines(/router\.(get|post|put|patch|delete)\('\/geo\//);
-    expect(lines.length).toBeGreaterThanOrEqual(6);
+    expect(lines.length).toBeGreaterThanOrEqual(5);   // ★ 2026-10-07 대역 일괄 교체 라우트 삭제(Harold) · 6 → 5
     for (const l of lines) {
       const key = l.includes("'/geo/hits'") ? 'geoHits' : 'geoAccess';
       expect(l, l).toContain(`authenticate, requireSuperAdmin, requireAdminArea('${key}'), async`);

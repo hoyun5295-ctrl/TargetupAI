@@ -57,6 +57,9 @@ import { useMmsUpload } from '../hooks/useMmsUpload';
 import { toMmsImagePaths } from '../utils/mmsImage';
 import { validateMmsBeforeSend } from '../utils/formatDate';
 
+/** 회신번호 select 특수값 — 고객별 등록매장 번호(개별 회신) · DmSendAndTrackModal 과 같은 값 */
+const INDIVIDUAL_CB = '__individual__';
+
 // ============================================================
 // 타입 정의
 // ============================================================
@@ -293,6 +296,18 @@ export default function AiOperatorPage() {
   const { user } = useAuthStore();
   const companyName = (user as any)?.company?.name || '';
   // 종량제: AI 크레딧 잔여 (헤더 칩 — creditEnabled일 때만 표시)
+  // ★ 2026-10-07 임은지 접수: 회신번호 고르기(등록 번호 · 고객별 매장번호). '' = 회사 기본 번호(종전 동작 그대로)
+  const [cbList, setCbList] = useState<Array<{ phone: string; isDefault: boolean }>>([]);
+  const [cbChoice, setCbChoice] = useState('');
+  useEffect(() => {
+    (async () => {
+      try {
+        const r = await fetch('/api/companies/callback-numbers', { headers: { Authorization: `Bearer ${localStorage.getItem('token')}` } });
+        const d = r.ok ? await r.json().catch(() => null) : null;
+        setCbList((Array.isArray(d?.numbers) ? d.numbers : []).filter((c: any) => c?.phone).map((c: any) => ({ phone: String(c.phone), isDefault: !!c.is_default })));
+      } catch { /* 목록 실패 = 기본 번호로 보낸다(종전 동작) */ }
+    })();
+  }, []);
   const [aiCredit, setAiCredit] = useState<any>(null);
   const [showCreditHistory, setShowCreditHistory] = useState(false); // 크레딧 사용 이력 모달
   const [showWhat, setShowWhat] = useState(false); // ★ 2026-08-21 제목 옆 ! 버튼 — 호버(데스크톱)·탭(모바일)로 설명을 연다
@@ -724,6 +739,17 @@ export default function AiOperatorPage() {
       const sendData = await sendRes.json();
       // ★ 2026-09-12 발신 인증(전송자격인증 3.5) — 인증 뒤 이 발송을 그대로 다시 실행한다
       if (senderAuth.handleResponse(sendData, () => performDirectSend(sendBody, suggestedName))) return;
+      // ★ 2026-10-07 개별 회신 — 회신번호 없는·미등록 고객 제외 확인(직접발송과 같은 응답)
+      if (sendRes.ok && sendData.callbackConfirmRequired) {
+        setConfirm({
+          mode: 'warning',
+          title: '회신번호 없는 고객 제외',
+          description: String(sendData.message || ''),
+          confirmLabel: '제외하고 보내기',
+          onConfirm: () => performDirectSend({ ...sendBody, confirmCallbackExclusion: true }, suggestedName),
+        });
+        return;
+      }
       if (!sendRes.ok || !sendData.success) {
         throw new Error(sendData.error || '발송 처리 실패');
       }
@@ -774,7 +800,9 @@ export default function AiOperatorPage() {
       if (audienceTotal > recipients.length) {
         throw new Error(`발송 대상이 ${audienceTotal.toLocaleString()}명이라 보내지 않았습니다. AI 운영자 승인 발송은 한 번에 ${recipients.length.toLocaleString()}명까지 보낼 수 있습니다. 조건을 좁혀 다시 제안받아 주세요.`);
       }
-      if (!previewData.defaultCallback) {
+      const individualCb = cbChoice === INDIVIDUAL_CB;
+      const chosenCb = individualCb ? '' : (cbChoice || previewData.defaultCallback || '');
+      if (!individualCb && !chosenCb) {
         throw new Error('기본 회신번호가 등록되지 않았습니다. 발신번호 관리에서 등록 후 다시 시도해주세요.');
       }
 
@@ -857,7 +885,9 @@ export default function AiOperatorPage() {
         msgType: channel,
         subject,
         message: body,
-        callback: previewData.defaultCallback,
+        // ★ 2026-10-07 개별 회신 = 고객별 매장번호(store_phone) · 미보유·미등록 고객은 /direct-send CT-08이 제외 확인을 돌려준다
+        callback: individualCb ? undefined : chosenCb,
+        useIndividualCallback: individualCb,
         recipients,
         adEnabled, // ★ 2026-07-22 사용자 광고표기 토글(직접발송 미러·기본 ON) — /direct-send가 D143로 사용자 선택 존중
         scheduled,
@@ -1793,6 +1823,23 @@ export default function AiOperatorPage() {
 
             {/* ★ D166: 승인 발송 활성화 — preview-recipients + /direct-send 2-step */}
             {/* ★ 2026-07-08: 타겟 0건 = 발송/요약 버튼 숨김 (조건 재입력 안내 카드가 대체) */}
+            {/* ★ 2026-10-07 회신번호 — 기본 = 회사 기본 번호(종전 동작) · 등록 번호 · 고객별 매장번호 */}
+            {!isZeroTarget && (
+              <div className="mb-3 flex items-center gap-2 flex-wrap">
+                <span className="text-[13px] font-semibold text-slate-700">회신번호</span>
+                <select
+                  value={cbChoice}
+                  onChange={(e) => setCbChoice(e.target.value)}
+                  disabled={sending}
+                  className="h-9 px-2.5 rounded-lg bg-white border border-slate-300 text-[13px] text-slate-900 outline-none focus:border-indigo-300"
+                >
+                  <option value="">기본 번호{cbList.find((c) => c.isDefault) ? ` (${cbList.find((c) => c.isDefault)!.phone})` : ''}</option>
+                  {cbList.filter((c) => !c.isDefault).map((c) => <option key={c.phone} value={c.phone}>{c.phone}</option>)}
+                  <option value={INDIVIDUAL_CB}>고객별 매장번호 (개별 회신)</option>
+                </select>
+                {cbChoice === INDIVIDUAL_CB && <span className="text-[12px] text-slate-500">매장번호가 없거나 등록 안 된 번호인 고객은 확인 뒤 빼고 보내요</span>}
+              </div>
+            )}
             {!isZeroTarget && (
             <div className="flex flex-col sm:flex-row gap-3">
               <button

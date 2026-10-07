@@ -63,7 +63,8 @@ import { isUuid } from './normalize';
 // ★ 2026-08-04 변화 축 — 회차 스냅샷(자동마케팅 고유 어휘의 유일한 근거).
 //   기준선 보충(DO NOTHING)과 발송분 갱신(DO UPDATE) 두 문뿐 — 전체 교체는 폐기(Codex R3).
 import { hasCycleBaseline, ensureCycleBaselineRows, advanceCycleSnapshotForPhones } from './operator-cycle-snapshot';
-import { createDirectSendCampaign } from './direct-send-core';
+import { createDirectSendCampaign, planIndividualCallbackExclusion } from './direct-send-core';
+import { getRegisteredCallbackSet, callbackAssignmentUserId } from './callback-filter';   // ★ 2026-10-07 자동 마케팅 회신번호
 import { DirectSendError } from './direct-send-spec';
 // ★ 2026-07-30 (Codex 2R): MMS 이미지 필수 가드 CT(D131) — 자율발송 경로 배선
 import { validateMmsPayload } from './mms-validator';
@@ -131,6 +132,8 @@ export interface CreateOperatorInput {
   audienceConditions?: AudienceCondition[] | null;
   copyMode?: 'ai' | 'fixed' | null;
   fixedCopy?: { subject?: string; body: string } | null;
+  // ★ 2026-10-07 회신번호 — 라우트가 checkOperatorCallback 으로 검사한 값 · 없으면 칸을 참조하지 않는다(DDL 전 등록 그대로)
+  callback?: { callbackNumber: string | null; useIndividualCallback: boolean } | null;
 }
 
 /** ★ 2026-10-05 직접 쓴 문안 — spam = 같은 문안 1회 검사 결과(지문) */
@@ -210,6 +213,9 @@ export interface ContinuousOperator {
   approvedUntil: Date | null;
   approvalMeta: Record<string, any> | null;
   roundLog: RoundLogEntry[];
+  // ★ 2026-10-07 회신번호(임은지 접수 · DDL 전 = 기본 번호 · 개별 회신 꺼짐)
+  callbackNumber: string | null;
+  useIndividualCallback: boolean;
 }
 
 export interface OperatorProposal {
@@ -378,6 +384,14 @@ export async function createOperator(input: CreateOperatorInput): Promise<Contin
   }
   let v2Cols = '';
   let v2Vals = '';
+  // ★ 2026-10-07 회신번호 — 같은 INSERT 한 문장(Codex 1R high: 등록 · 차감 뒤 따로 저장하면 실패해도 등록 · 차감이 남는다)
+  let cbCols = '';
+  let cbVals = '';
+  if (input.callback) {
+    insertParams.push(input.callback.callbackNumber, input.callback.useIndividualCallback);
+    cbCols = ', callback_number, use_individual_callback';
+    cbVals = `, $${insertParams.length - 1}, $${insertParams.length}`;
+  }
   if (wantsV2) {
     insertParams.push(
       audienceConditions ? JSON.stringify({ conditions: audienceConditions, confirmedAt: new Date().toISOString() }) : null,
@@ -394,7 +408,7 @@ export async function createOperator(input: CreateOperatorInput): Promise<Contin
       channel, benefit_content, admin_phone_numbers, backup_admin_phone, admin_alert_channel,
       auto_send_lead_minutes, budget_monthly, budget_daily, budget_alert_threshold, delivery_policy,
       sequence_enabled, sequence_delay_days, sequence_reminder_content, send_time_mode, copy_style,
-      schedule_month, target_hint, mms_image_paths${segCols}${v2Cols},
+      schedule_month, target_hint, mms_image_paths${segCols}${cbCols}${v2Cols},
       created_at, updated_at
     ) VALUES (
       gen_random_uuid(), $1::uuid, $2::uuid, $3, $4,
@@ -402,7 +416,7 @@ export async function createOperator(input: CreateOperatorInput): Promise<Contin
       $10, $11, $12, $13, $14,
       $15, $16, $17, $18, $19,
       $20, $21, $22, $23, $24,
-      $25, $26, $27::text[]${segVals}${v2Vals},
+      $25, $26, $27::text[]${segVals}${cbVals}${v2Vals},
       NOW(), NOW()
     ) RETURNING *`,
     insertParams,
@@ -486,6 +500,8 @@ export async function updateOperator(
     copyStyle?: string | null;
     // ★ 2026-07-30 (임은지 접수): MMS 이미지 — undefined = 유지, null/[] = 해제, 배열 = 교체(최대 3)
     mmsImagePaths?: string[] | null;
+    // ★ 2026-10-07 회신번호 — 검사된 값(checkOperatorCallback) · undefined = 유지
+    callback?: { callbackNumber: string | null; useIndividualCallback: boolean };
   }
 ): Promise<ContinuousOperator | null> {
   // ★ 2026-07-12 C-1: 야간 광고 발송 제한 — 발송 희망 시각 변경도 발송 가능 창 안만 허용.
@@ -604,6 +620,7 @@ export async function updateOperator(
       ${withSegment ? 'segment_key = $28, segment_params = $29::jsonb,' : ''}
       ${hintAssign === 'null' ? 'target_hint = NULL,' : ''}
       ${withHintParam ? `target_hint = $${withSegment ? 30 : 28},` : ''}
+      ${patch.callback ? `callback_number = $${28 + (withSegment ? 2 : 0) + (withHintParam ? 1 : 0)}, use_individual_callback = $${29 + (withSegment ? 2 : 0) + (withHintParam ? 1 : 0)},` : ''}
       updated_at = NOW()
      WHERE id = $1::uuid AND company_id = $2::uuid
      RETURNING *`,
@@ -644,6 +661,8 @@ export async function updateOperator(
       nextMmsImages,
       ...(withSegment ? [segFinalKey, segFinalParams ? JSON.stringify(segFinalParams) : null] : []),
       ...(withHintParam ? [hintValue] : []),
+      // ★ 2026-10-07 회신번호 — 같은 UPDATE 한 문장(Codex 1R high: 따로 저장하면 수정 실패 때 회신번호만 바뀐다) · 값은 라우트가 checkOperatorCallback 으로 검사한 것
+      ...(patch.callback ? [patch.callback.callbackNumber, patch.callback.useIndividualCallback] : []),
     ]
   );
 
@@ -1361,7 +1380,8 @@ export async function generateProposalForOperator(operatorId: string, opts?: { p
       // ★ 2026-10-06 검사 발신번호 = 실제 발송과 같은 기본 발신번호(dispatchProposalSend · 검사 조건 = 발송 조건).
       //   옛: callbackForSpam 은 companyInfo 에 발신번호 칸이 없어 늘 080 수신거부 번호였다(10-01~10-06 실측 9건 전부 080).
       //   기본 발신번호가 없으면 종전 값 — 그 회사는 발송 단계에서 「발신번호 미설정」으로 보류된다. 자격 판정(canAutoSend)은 그대로.
-      const spamCallback = (await loadDefaultCallback(operator.companyId)) || callbackForSpam;
+      // ★ 2026-10-07 고른 회신번호가 있으면 그 번호로 검사(발송과 같은 번호 · 개별 회신 = 기본 번호)
+      const spamCallback = (await loadOperatorCallback(operator.companyId, operator.useIndividualCallback ? null : operator.callbackNumber)) || callbackForSpam;
       // ★ 2026-10-05 직접 쓴 문안(Q17) — 같은 문안(지문)이 이미 통과했으면 다시 검사하지 않는다 · 재생성 0(사람 문안을 AI 가 바꾸지 않는다).
       //   ★ 2026-10-06 지문에 검사 발신번호를 넣는다 — 080 으로 검사한 옛 통과 기록이 실제 번호 검사를 건너뛰지 않게(번호가 바뀌어도 다시 검사).
       const fixedHash = isFixedCopy ? computeMessageHash(`${spamCallback}\n${bestSubject}\n${bestMessage}`) : '';
@@ -1787,7 +1807,8 @@ export async function startProposalSpamRetest(
 ): Promise<{ ok: true; spamRetest: any } | { ok: false; reason: string; code?: string }> {
   const notTestable = '승인 전 제안에서만 스팸 검사를 할 수 있습니다.';
   const pRes = await query(
-    `SELECT p.status, p.proposal_json, o.created_by
+    `SELECT p.status, p.proposal_json, o.created_by,
+            CASE WHEN COALESCE((to_jsonb(o) ->> 'use_individual_callback')::boolean, false) THEN NULL ELSE to_jsonb(o) ->> 'callback_number' END AS cb_number
        FROM operator_proposals p JOIN continuous_operators o ON o.id = p.operator_id
       WHERE p.id = $1::uuid AND p.company_id = $2::uuid`,
     [proposalId, companyId],
@@ -1797,7 +1818,7 @@ export async function startProposalSpamRetest(
   if (!['pending', 'admin_review'].includes(String(row.status))) return { ok: false, reason: notTestable };
   const copy = resolveRetestCopy(row.proposal_json, sel);
   if (!copy.ok) return { ok: false, reason: copy.reason };
-  const callback = await loadDefaultCallback(companyId);
+  const callback = await loadOperatorCallback(companyId, row.cb_number);   // ★ 2026-10-07 고른 회신번호 · 없으면 기본 번호
   if (!callback) return { ok: false, reason: '기본 발신번호가 없어 검사할 수 없습니다. 발신번호를 등록해 주세요.' };
   const opt080 = await getOpt080Number(row.created_by || null, companyId);
   if (!opt080) return { ok: false, reason: '광고 무료거부 번호(080)가 없어 검사할 수 없습니다. 080 번호를 등록해 주세요.' };
@@ -1883,6 +1904,56 @@ async function loadDefaultCallback(companyId: string): Promise<string> {
     [companyId],
   );
   return String(r.rows[0]?.phone || '');
+}
+
+/** ★ 2026-10-07 자동 마케팅 회신번호 = 고른 번호(없으면 회사 기본 번호) — 스팸 검사 · 발송이 같은 번호를 쓴다 */
+async function loadOperatorCallback(companyId: string, chosen: string | null | undefined): Promise<string> {
+  const c = String(chosen || '').replace(/\D/g, '');
+  return c || loadDefaultCallback(companyId);
+}
+
+/** ★ 2026-10-07 회신번호 칸 2개(callback_number · use_individual_callback)가 준비됐는가 — DDL 전이면 저장만 503 */
+let operatorCallbackColumnsReady = false;
+async function hasOperatorCallbackColumns(): Promise<boolean> {
+  if (operatorCallbackColumnsReady) return true;
+  const r = await query(
+    `SELECT COUNT(*)::int AS n FROM information_schema.columns
+      WHERE table_name = 'continuous_operators' AND column_name IN ('callback_number', 'use_individual_callback')`,
+  );
+  operatorCallbackColumnsReady = (Number(r.rows[0]?.n) || 0) === 2;
+  return operatorCallbackColumnsReady;
+}
+
+/**
+ * ★ 2026-10-07 (임은지 접수) 자동 마케팅 회신번호 검사 — callbackNumber null = 회사 기본 번호.
+ *   등록 번호만 받는다(만든 사람 기준 배정 판정 = 발송 워커와 같은 CT). 개별 회신이면 번호 칸은 비운다.
+ *   등록 전에 부른다 — 칸이 없거나 번호가 틀리면 등록(차감) 전에 멈춘다.
+ */
+export async function checkOperatorCallback(
+  companyId: string, creatorId: string | null, input: { callbackNumber?: unknown; useIndividualCallback?: unknown },
+): Promise<{ callbackNumber: string | null; useIndividualCallback: boolean }> {
+  if (!(await hasOperatorCallbackColumns())) {
+    throw new Error('DB 마이그레이션 필요: continuous_operators callback_number column does not exist');
+  }
+  const individual = input.useIndividualCallback === true;
+  const cb = individual ? '' : String(input.callbackNumber || '').replace(/\D/g, '');
+  if (cb) {
+    const u = creatorId ? await query(`SELECT user_type FROM users WHERE id = $1::uuid`, [creatorId]) : { rows: [] as any[] };
+    const registered = await getRegisteredCallbackSet(companyId, callbackAssignmentUserId(u.rows[0]?.user_type, creatorId) || undefined);
+    if (!registered.has(cb)) throw new OperatorCallbackError('등록된 발신번호만 회신번호로 고를 수 있어요. 발신번호 관리에서 등록해 주세요.');
+  }
+  return { callbackNumber: cb || null, useIndividualCallback: individual };
+}
+
+export class OperatorCallbackError extends Error {}
+
+/** 수정용 — 그 오퍼레이터를 만든 사람 기준으로 검사한다(발송 때 배정 판정과 같은 사람) · 없는 오퍼레이터 = null */
+export async function checkOperatorCallbackFor(
+  companyId: string, operatorId: string, input: { callbackNumber?: unknown; useIndividualCallback?: unknown },
+): Promise<{ callbackNumber: string | null; useIndividualCallback: boolean } | null> {
+  const own = await query(`SELECT created_by FROM continuous_operators WHERE id = $1::uuid AND company_id = $2::uuid`, [operatorId, companyId]);
+  if (own.rows.length === 0) return null;
+  return checkOperatorCallback(companyId, own.rows[0].created_by || null, input);
 }
 
 /** 화면이 검사 진행 · 결과를 다시 읽는다(회사 범위) */
@@ -2475,6 +2546,9 @@ async function dispatchProposalSend(
   let stagingId = '';
   let recipientTotal = 0;
   let callback: string | null = null;
+  // ★ 2026-10-07 개별 회신(고객별 매장번호) · 회신번호 배정 판정 사용자(발송 워커와 같은 값을 spec 에 싣는다)
+  let useIndividualCb = false;
+  let cbFilterUserId: string | null = null;
   // 발송 타겟 필터 — try 밖(발송 후 예측 분모 적재)에서도 참조하므로 함수 스코프에 둔다.
   // ★ Phase3 C — 리마인드면 미클릭가드(excludeClickedSince)로 1차 클릭 고객 제외.
   const filters = pj.target?.filters || {};
@@ -2496,8 +2570,12 @@ async function dispatchProposalSend(
     const opRes = await query(
       `SELECT created_by, name, admin_phone_numbers, backup_admin_phone,
               sequence_enabled, sequence_delay_days, sequence_reminder_content, benefit_content,
-              budget_monthly, budget_daily, budget_alert_threshold
-       FROM continuous_operators WHERE id = $1::uuid`,
+              budget_monthly, budget_daily, budget_alert_threshold,
+              -- ★ 2026-10-07 회신번호 — to_jsonb 로 읽어 DDL 전에도 이 문이 깨지지 않는다(없음 = 기본 번호 · 개별 회신 꺼짐)
+              to_jsonb(o) ->> 'callback_number' AS cb_number,
+              COALESCE((to_jsonb(o) ->> 'use_individual_callback')::boolean, false) AS cb_individual,
+              (SELECT u.user_type FROM users u WHERE u.id = o.created_by) AS creator_type
+       FROM continuous_operators o WHERE o.id = $1::uuid`,
       [p.operator_id],
     );
     op = opRes.rows[0] || {};
@@ -2548,12 +2626,21 @@ async function dispatchProposalSend(
     }
 
     // 발송 발신번호 먼저 확인 (없으면 staging 적재 자체가 무의미 — 매 사이클 대량 적재+삭제 낭비 차단).
-    const cbRes = await query(
-      `SELECT REPLACE(phone, '-', '') AS phone FROM callback_numbers WHERE company_id = $1 AND is_default = true LIMIT 1`,
-      [companyId],
-    );
-    callback = cbRes.rows[0]?.phone || null;
-    if (!callback) {
+    // ★ 2026-10-07 (임은지 접수) 회신번호 = 고른 등록 번호 · 없으면 회사 기본 번호 · 개별 회신 = 고객별 매장번호(기본 번호는 판정용 폴백).
+    //   고른 번호가 그 사이 등록에서 빠졌으면 보내지 않는다(검토로 내린다 · 미등록 번호 발송 = 통신사 반려).
+    useIndividualCb = op.cb_individual === true;
+    cbFilterUserId = callbackAssignmentUserId(op.creator_type, op.created_by || null) ?? null;
+    const chosenCb = useIndividualCb ? '' : String(op.cb_number || '').replace(/\D/g, '');
+    if (chosenCb) {
+      const registered = await getRegisteredCallbackSet(companyId, cbFilterUserId || undefined);
+      if (!registered.has(chosenCb)) {
+        await query(`UPDATE operator_proposals SET status = 'admin_review', scheduled_send_at = NULL, auto_execute_reason = '고른 회신번호가 등록 목록에 없음. 발송 보류' WHERE id = $1::uuid`, [proposalId]);
+        await notify('[AI 자동마케팅] 발송 보류', `'${op.name || ''}' 고른 회신번호가 등록 목록에 없어 발송을 보류했습니다. 자동마케팅 수정에서 회신번호를 다시 골라 주세요.`);
+        return { action: 'skipped', reason: '고른 회신번호 미등록' };
+      }
+    }
+    callback = await loadOperatorCallback(companyId, chosenCb) || null;
+    if (!callback && !useIndividualCb) {
       await query(`UPDATE operator_proposals SET status = 'admin_review', scheduled_send_at = NULL, auto_execute_reason = '발신번호 미설정. 발송 보류' WHERE id = $1::uuid`, [proposalId]);
       await notify('[AI 자동마케팅] 발송 보류', `'${op.name || ''}' 등록된 발신번호가 없어 발송을 보류했습니다.`);
       return { action: 'skipped', reason: '발신번호 미설정' };
@@ -2643,7 +2730,7 @@ async function dispatchProposalSend(
     sendFatigueCap = sendGates.fatigueCap ?? null;
     // ⛔ 4R: 추출 시각 경계(CTE)는 폐기했다 — 리마인드를 보류하기로 하면서 그 값을 쓸 곳이 없어졌다.
     //   구조를 고치면 덧댔던 장치도 함께 사라지는 게 정상이다.
-    const { sql: insSql, params: insParams } = buildSendableStagingInsertSql(stagingId, sendBaseParams, filterWhere, filterParams, sendStoreFilter, sendGates);
+    const { sql: insSql, params: insParams } = buildSendableStagingInsertSql(stagingId, sendBaseParams, filterWhere, filterParams, sendStoreFilter, sendGates, { callbackFromStorePhone: useIndividualCb });
     if (pj.meta?.is_reminder === true) {
       // 리마인드 = 1차 수신자 코호트(대상 칸은 표시용) — 계약 비교 밖
       recipientTotal = (await query(insSql, insParams)).rowCount || 0;
@@ -2661,6 +2748,24 @@ async function dispatchProposalSend(
         return { action: 'skipped', reason: '대상 조건 확인 전 · 변경. 발송 보류' };
       }
       recipientTotal = staged;
+    }
+
+    // ★ 2026-10-07 개별 회신 — 매장번호가 없거나 등록 안 된 번호인 고객은 차감 · 상한 검사 **전에** 뺀다(직접발송 확정 입구와 같은 판정 CT).
+    //   사람이 확인할 창이 없는 발송이라 묻지 않고 빼고 보낸다(자동발송 auto-campaign-worker 와 같은 정책) · 뺀 수는 로그와 담당자 안내에 남긴다.
+    //   이 묶음(stagingId)은 이 시도 전용이라 행을 지워도 다른 발송에 영향이 없다.
+    if (useIndividualCb && recipientTotal > 0) {
+      const plan = await planIndividualCallbackExclusion(stagingId, companyId, cbFilterUserId || undefined, true);
+      if (plan.moveIds.length > 0) {
+        await query(`DELETE FROM campaign_send_staging WHERE staging_id = $1::uuid AND id = ANY($2::bigint[])`, [stagingId, plan.moveIds]);
+        recipientTotal = Math.max(0, recipientTotal - plan.moveIds.length);
+        console.log(`[ContinuousOperator AutoSend] 개별 회신 제외 ${plan.removed}명(미보유 ${plan.callbackMissingCount} · 미등록 ${plan.callbackUnregisteredCount}) — proposal=${proposalId}`);
+      }
+      if (plan.remaining === 0) {
+        await cleanupOrphanStaging(stagingId);
+        await query(`UPDATE operator_proposals SET status = 'admin_review', scheduled_send_at = NULL, auto_execute_reason = '고객별 매장번호가 모두 없거나 미등록. 발송 보류' WHERE id = $1::uuid`, [proposalId]);
+        await notify('[AI 자동마케팅] 발송 보류', `'${op.name || ''}' 대상 고객의 매장번호가 없거나 등록되지 않은 번호라 발송을 보류했습니다. 회신번호를 기본 번호로 바꾸거나 매장번호를 등록해 주세요.`);
+        return { action: 'skipped', reason: '개별 회신번호 전원 제외. 발송 보류' };
+      }
     }
 
     // ⛔ 7R 정정: 재추출된 **실제 건수**로 상한·예산을 다시 본다. 종전엔 제안 시점 수로 통과한 뒤
@@ -2824,6 +2929,8 @@ async function dispatchProposalSend(
         msgType, message: trackedBody, subject: resolvedSubject || null, callback, sendChannel: 'sms',
         adEnabled: isAd, total: recipientTotal, dedupEnabled: true, unsubFilterEnabled: true,
         mmsImagePaths,
+        // ★ 2026-10-07 개별 회신 — 워커가 staging callback 을 행마다 싣는다 · 배정 판정은 위 제외와 같은 사용자
+        ...(useIndividualCb ? { useIndividualCallback: true, callbackFilterUserId: cbFilterUserId } : {}),
       },
       { companyId, userId },
       { finalSource: 'selected_as_is', aiMessages: [trackedBody] },
@@ -3762,6 +3869,9 @@ export function mapRowToOperator(row: any): ContinuousOperator {
     mmsImagePaths: Array.isArray(row.mms_image_paths) ? row.mms_image_paths.filter((p: any) => typeof p === 'string' && p.trim()) : [],
     // ★ 2026-10-05 신뢰 설계 — 칸 미생성(DDL 전) · NULL = 비어 있음(옛 동작)
     audienceConditions: Array.isArray(row.audience_filters?.conditions) && row.audience_filters.conditions.length > 0 ? row.audience_filters.conditions : null,
+    // ★ 2026-10-07 회신번호 — 칸 미생성(DDL 전) · NULL = 회사 기본 번호 · 개별 회신 꺼짐(옛 동작)
+    callbackNumber: row.callback_number ? String(row.callback_number) : null,
+    useIndividualCallback: row.use_individual_callback === true,
     copyMode: row.copy_mode === 'fixed' && row.fixed_copy && typeof row.fixed_copy.body === 'string' && row.fixed_copy.body.trim() ? 'fixed' : 'ai',
     fixedCopy: row.fixed_copy && typeof row.fixed_copy.body === 'string'
       ? { subject: String(row.fixed_copy.subject || ''), body: row.fixed_copy.body, spam: row.fixed_copy.spam || null }

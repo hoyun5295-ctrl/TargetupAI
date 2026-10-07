@@ -67,6 +67,10 @@ export interface ContinuousOperator {
   // 문안 스타일 4종 — null/미지정 = 브랜드 톤 자동
   copyStyle?: 'courteous' | 'friendly' | 'witty' | 'punchy' | null;
   channel?: 'sms' | 'lms' | 'mms';
+  // ★ 2026-10-07 회신번호 — null = 회사 기본 번호 · 개별 회신 = 고객별 매장번호. callbackTouched = 화면 전용(바꿨을 때만 저장에 싣는다)
+  callbackNumber?: string | null;
+  useIndividualCallback?: boolean;
+  callbackTouched?: boolean;
   // ★ 2026-07-30 (임은지 접수): 채널 mms 첨부 이미지(serverPath, 최대 3) — 매 자율 발송에 첨부
   mmsImagePaths?: string[] | null;
   benefitContent?: string | null;

@@ -5,7 +5,7 @@
  *   DM   = POST /api/dm/:id/send-to-target(검증된 발송 파이프라인 그대로) · 발행비는 선견적(GET publish-quote)으로 먼저 보이고
  *          누르는 순간 서버 값이 이긴다(PUBLISH_FEE_REQUIRED → 확인 창 → confirmPublishFee 재요청) · 잠금은 서버(S6~S8).
  *   이메일 = 완성(50 · 처음 한 번) → POST /api/email/campaigns/:id/send · 받는 사람 고르기는 EmailRecipientsModal(원본 이관).
- * 문자 기본 문안은 DM 내용으로 채운다(AI 0 · 자동 과금 0). 더 자세한 설정(AI 문안·꾸미기·스팸 검사·개별 회신)은 [자세히 설정] = 기존 발송 창.
+ * 문자 기본 문안은 DM 내용으로 채운다(AI 0 · 자동 과금 0). 개별 회신(고객별 매장번호)은 보내는 번호 칸에서 고른다(★1007). 더 자세한 설정(AI 문안·꾸미기·스팸 검사)은 [자세히 설정] = 기존 발송 창.
  * ⛔ native dialog 0 · 모델명 0 · 금액 하드코딩 0(서버 견적·단가 표 CT).
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -41,6 +41,8 @@ const localNextMorning = () => {
 };
 
 type When = 'now' | 'scheduled' | 'recommend';
+/** 발신번호 select 특수값 — 고객별 등록매장 번호(개별 회신) · DmSendAndTrackModal 과 같은 값 */
+const INDIVIDUAL_CB = '__individual__';
 
 export default function MakeSendModal({
   open, onClose, channel: initialChannel, dm, email, beforeSend, makeOther, onSent, onOpenAdvancedDm, onSmtpChanged,
@@ -193,6 +195,7 @@ function DmCard({ dm, beforeSend, onSent, onOpenAdvanced }: { dm: SendDm; before
   const effectiveTime = useMemo(() => (when === 'now' ? new Date() : scheduledAt ? new Date(scheduledAt) : null), [when, scheduledAt]);
   const night = isAd && !!effectiveTime && isNightAdHour(effectiveTime);
   const count = target?.channelEligibleCount ?? 0;
+  const isIndividualCb = callback === INDIVIDUAL_CB;
   const feeCost = quote?.required ? (quote.cost || CONFIRM_CREDIT_COSTS[quote.source] || 0) : 0;
 
   const checks: Array<{ ok: boolean; label: string }> = [
@@ -224,7 +227,8 @@ function DmCard({ dm, beforeSend, onSent, onOpenAdvanced }: { dm: SendDm; before
         body: JSON.stringify({
           filter: target.filter, allCustomers: !!target.isAll,
           messageText: message.trim(), subject: subject.trim(), isAd,
-          callback, useIndividualCallback: false,
+          // ★ 2026-10-07 남지현 접수: 개별 회신 = 자세히 설정 창과 같은 값(callback 비움 + 플래그) · 미등록·미보유 고객은 서버 CT-08이 제외 확인
+          callback: isIndividualCb ? undefined : callback, useIndividualCallback: isIndividualCb,
           confirmCallbackExclusion: !!opts.exclusion,
           confirmPublishFee: !!opts.feeConfirmed,
           scheduledAt: when === 'now' ? null : new Date(scheduledAt).toISOString(),
@@ -244,7 +248,7 @@ function DmCard({ dm, beforeSend, onSent, onOpenAdvanced }: { dm: SendDm; before
     } finally {
       setBusy(null);
     }
-  }, [dm.id, target, message, subject, isAd, callback, when, scheduledAt, toast, onSent]);
+  }, [dm.id, target, message, subject, isAd, callback, isIndividualCb, when, scheduledAt, toast, onSent]);
 
   /** 발행비 견적 두 벌(발송 · 링크)을 서버에서 다시 받는다 — 실패 = 모름(null · 링크만 받기 잠김) */
   const reloadQuotes = useCallback(async () => {
@@ -355,6 +359,7 @@ function DmCard({ dm, beforeSend, onSent, onOpenAdvanced }: { dm: SendDm; before
         {callbacks.length > 0 ? (
           <select value={callback} onChange={(e) => setCallback(e.target.value)} className="h-9 px-2.5 rounded-lg bg-slate-100 border border-slate-300 text-[13px] text-slate-900 outline-none">
             {callbacks.map((c) => <option key={c.phone} value={c.phone}>{c.phone}{c.isDefault ? ' (기본)' : ''}</option>)}
+            <option value={INDIVIDUAL_CB}>고객별 매장번호 (개별 회신)</option>
           </select>
         ) : <span className="text-[12.5px] text-slate-500">{ready ? '등록된 번호가 없어요' : '불러오는 중'}</span>}
       </Row>

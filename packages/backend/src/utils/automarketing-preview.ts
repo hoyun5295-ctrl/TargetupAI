@@ -24,6 +24,7 @@ import {
   explainEmptyRound, findOpenProposalForOperator,
   loadOperatorCompanyContext, buildOperatorOrchestrateContext,
   approveOperatorWindow, normalizeFixedCopyInput, normalizeOperatorBenefit, mapRowToOperator, operatorContract, type FixedCopy,
+  OperatorCallbackError,
 } from './continuous-operator';
 import { computeApprovalWindow, countEmptyRounds, parseScheduleFromText, approvalSummarySince } from './autosend-policy';
 
@@ -78,6 +79,8 @@ export function operatorSaveErrorResponse(err: any): { status: number; body: Rec
   if (err?.code === 'AUDIENCE_REQUIRED' || err instanceof AudienceConditionError) {
     return { status: 400, body: { success: false, error: err.message, code: err?.code || 'AUDIENCE_INVALID' } };
   }
+  // ★ 2026-10-07 회신번호 = 등록 번호만(400 · 차감 0)
+  if (err instanceof OperatorCallbackError) return { status: 400, body: { success: false, error: err.message, code: 'CALLBACK_NOT_REGISTERED' } };
   if (err instanceof InsufficientCreditError) {
     return { status: 402, body: { success: false, error: '자동 마케팅 시작에 필요한 크레딧이 부족합니다. 크레딧을 충전해 주세요.', code: 'INSUFFICIENT_CREDIT' } };
   }

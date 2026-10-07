@@ -1,7 +1,7 @@
 import bcrypt from 'bcryptjs';
 import { validateElements, matchesRule, invalidateSpamBlockCache, maskSample, parseBlockMode, SPAM_BLOCK_NOTICE } from '../utils/spam-block';
 import { composeSpamCheckText } from '../utils/messageUtils';
-import { isGeoBlockEnforced, isGeoSchemaMissing, invalidateGeoCache, GEO_BLOCK_NOTICE, validateCidrToken, isInvalidCidrError, parseExceptionExpiry } from '../utils/geo-access';
+import { isGeoBlockEnforced, isGeoSchemaMissing, GEO_BLOCK_NOTICE, validateCidrToken, parseExceptionExpiry, resolveExceptionTarget } from '../utils/geo-access';
 import { checkSenderLineLimit, isLineLimitSchemaMissing, getSenderLinePolicy, lineKindOf, parseLineLimitInput } from '../utils/sender-line-limit';
 import { logPrivacyExport, logPrivacyPurge } from '../utils/privacy-audit';
 import crypto from 'crypto';
@@ -1086,89 +1086,9 @@ router.get('/geo/status', authenticate, requireSuperAdmin, requireAdminArea('geo
 });
 
 /**
- * 국내 대역 일괄 등록. 기존분을 지우고 새로 넣는다(전체 교체) — 부분 갱신은 누락 대역을 남긴다.
- * ⛔ 빈 목록으로 교체하지 않는다 — 대역이 0이면 판정이 통째로 unknown이 되어 통제가 사라진다.
+ * ★ 2026-10-07 국내 대역 일괄 교체 · 되돌리기 라우트 삭제(Harold) — 「어디가 한국 IP 인가」 기준표는 직원 화면에서 바꾸는 값이 아니다.
+ *   1007 그 칸에 IP 하나가 들어가 기준표가 1개가 되며 국내 로그인이 전부 막혔다. 갱신 = 서버 명령(status/OPS.md §2-2-F) · 직원은 예외 승인만.
  */
-router.post('/geo/cidrs/bulk', authenticate, requireSuperAdmin, requireAdminArea('geoAccess'), async (req: Request, res: Response) => {
-  try {
-    const raw = String(req.body?.cidrs || '');
-    const source = String(req.body?.source || 'apnic').slice(0, 50);
-    // ⛔ ★0819 Codex 정정 — 잘못된 토큰을 filter로 버리면 **조용히 빠진 채 전체가 교체**된다.
-    //   IPv6를 함께 올렸다가 통째로 누락되면 시행 후 정상 국내 IPv6 사용자를 막고 구제할 방법도 없다.
-    //   하나라도 어긋나면 DELETE 전에 요청 전체를 거부한다.
-    const tokens = raw.split(/[\s,]+/).map((v) => v.trim()).filter((v) => v.length > 0);
-    // ★0827 정규식만으로는 `115.138.27.202/0`처럼 **PG가 거부하는 값**이 통과했다.
-    //   그러면 DELETE 뒤 INSERT에서 터져 롤백되고 화면에는 이유가 남지 않는다. 값을 지목해 돌려준다.
-    const invalid = tokens
-      .map((v) => ({ v, r: validateCidrToken(v) }))
-      .filter((x) => !x.r.ok)
-      .map((x) => `${x.v} (${(x.r as { ok: false; reason: string }).reason})`);
-    if (invalid.length > 0) {
-      return res.status(400).json({
-        error: `등록할 수 없는 값이 ${invalid.length}건 있습니다. 전체를 반영하지 않았습니다. ${invalid.slice(0, 3).join(' · ')}`,
-        invalid: invalid.slice(0, 20),
-      });
-    }
-    const parsed = Array.from(new Set(tokens));
-    if (parsed.length === 0) {
-      return res.status(400).json({ error: 'CIDR 형식(예: 211.234.0.0/16)이 하나도 없습니다.' });
-    }
-
-    // ⛔ DELETE와 INSERT를 한 트랜잭션에 묶는다 — 사이에서 끊기면 대역이 **0건**이 되고,
-    //   그러면 판정이 통째로 unknown이 되어 국외 통제가 조용히 사라진다.
-    const geoClient = await pool.connect();
-    let before = 0;
-    try {
-      await geoClient.query('BEGIN');
-      // ⛔ 교체끼리 겹치면 서로의 미커밋 INSERT를 못 봐 합집합·충돌이 된다. 교체는 한 번에 하나만
-      await geoClient.query(`SELECT pg_advisory_xact_lock(hashtext('geo_allow_cidrs'))`);
-      const beforeRes = await geoClient.query(`SELECT COUNT(*)::int AS n FROM geo_allow_cidrs`);
-      before = beforeRes.rows[0]?.n || 0;
-      await geoClient.query(`DELETE FROM geo_allow_cidrs`);
-      // 한 문으로 넣는다 — 수천 행을 한 건씩 INSERT하면 커넥션을 오래 잡는다.
-      //   PG 바인딩 상한(65535)을 넘지 않도록 청크로 끊는다(행당 2개 → 청크 2,000행).
-      for (let start = 0; start < parsed.length; start += 2000) {
-        const chunk = parsed.slice(start, start + 2000);
-        const values: string[] = [];
-        const args: any[] = [];
-        let i = 1;
-        for (const cidr of chunk) {
-          values.push(`(gen_random_uuid(), $${i++}::cidr, 'KR', $${i++}, NOW())`);
-          args.push(cidr, source);
-        }
-        await geoClient.query(
-          `INSERT INTO geo_allow_cidrs (id, cidr, country_code, source, updated_at) VALUES ${values.join(', ')}`,
-          args
-        );
-      }
-      await geoClient.query('COMMIT');
-    } catch (txErr) {
-      await geoClient.query('ROLLBACK').catch(() => {});
-      throw txErr;
-    } finally {
-      geoClient.release();
-    }
-    invalidateGeoCache();
-
-    await recordAuditLog({
-      actorUserId: req.user?.userId,
-      action: 'geo_cidrs_replaced',
-      targetType: 'geo_allow_cidrs',
-      details: { before, after: parsed.length, source },
-      req,
-    });
-    return res.json({ replaced: parsed.length, before });
-  } catch (error: any) {
-    if (isGeoSchemaMissing(error)) return res.status(503).json(GEO_MIGRATION_HINT);
-    // ★0827 사전 검증이 IPv6 호스트 비트까지 보지는 않는다 — PG가 거부하면 그 사실을 그대로 알린다(500 금지)
-    if (isInvalidCidrError(error)) {
-      return res.status(400).json({ error: `대역 형식을 PostgreSQL이 거부했습니다. 전체를 반영하지 않았습니다. (${String(error?.message || '').slice(0, 160)})` });
-    }
-    console.error('허용 대역 등록 실패:', error);
-    return res.status(500).json({ error: '허용 대역 등록 실패' });
-  }
-});
-
 router.get('/geo/exceptions', authenticate, requireSuperAdmin, requireAdminArea('geoAccess'), async (_req: Request, res: Response) => {
   try {
     const result = await query(
@@ -1208,11 +1128,17 @@ router.post('/geo/exceptions', authenticate, requireSuperAdmin, requireAdminArea
     const reason = String(req.body?.reason || '').trim();
     if (!reason) return res.status(400).json({ error: '승인 사유를 입력해주세요. 사유 없는 예외는 등록할 수 없습니다.' });
 
-    const companyId = req.body?.companyId || null;
-    const userId = req.body?.userId || null;
-    if (scope === 'user' && !userId) return res.status(400).json({ error: '계정 범위는 대상 계정이 필요합니다.' });
-    if ((scope === 'company_api' || scope === 'company_agent') && !companyId) {
-      return res.status(400).json({ error: '회사 범위는 대상 고객사가 필요합니다.' });
+    // ★ 2026-10-07 대상 = UUID · 로그인 아이디 · 회사 이름 모두 받는다(CT 가 UUID 로 바꾼다 · 못 찾으면 400 사유)
+    let companyId: string | null = null;
+    let userId: string | null = null;
+    if (scope === 'user') {
+      const t = await resolveExceptionTarget('user', req.body?.userId);
+      if (!t.ok) return res.status(400).json({ error: t.reason });
+      userId = t.id;
+    } else if (scope === 'company_api' || scope === 'company_agent') {
+      const t = await resolveExceptionTarget('company', req.body?.companyId);
+      if (!t.ok) return res.status(400).json({ error: t.reason });
+      companyId = t.id;
     }
     // ★ 2026-10-02 허용 만료일(전송자격인증 2.2 ③) — 검사 없이 DB에 넘기던 값을 CT가 거른다. 비우면 기한 없음
     const expiry = parseExceptionExpiry(req.body?.expiresAt);

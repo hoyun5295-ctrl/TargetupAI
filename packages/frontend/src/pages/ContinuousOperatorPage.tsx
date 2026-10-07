@@ -198,6 +198,8 @@ export default function ContinuousOperatorPage() {
     //   계약을 고르면 서버가 상호배타로 해제하므로 그때는 보낼 필요가 없다.
     ...(e.targetHintTouched ? { target_hint: null } : {}),
     channel: e.channel || 'lms',
+    // ★ 2026-10-07 회신번호 — 바꿨을 때만 보낸다(안 바꾼 저장은 서버 값 그대로)
+    ...(e.callbackTouched ? { callback_number: e.useIndividualCallback ? null : (e.callbackNumber ?? null), use_individual_callback: e.useIndividualCallback === true } : {}),
     // ★ 2026-07-30 (임은지 접수): MMS 이미지 — mms가 아니면 null(해제)로 보내 채널 전환 시 이미지 잔존 차단
     mms_image_paths: (e.channel === 'mms') ? (e.mmsImagePaths ?? []) : null,
     benefit_content: e.benefitContent ?? null,

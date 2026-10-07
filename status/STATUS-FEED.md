@@ -144,7 +144,7 @@
 > ★ 로그인 안내 창(`AiOperatorLoginPromo.tsx` · Harold 「로그인 후 · 지금 바로가기」) = AI Operator 잠긴 회사에 로그인 1회마다 1번 · 영상 + 칩 5줄 → `/ai-operator` · 기록 = 같은 audit_logs(featureId `login-promo` · `plan_feature_open` · `plan_feature_go`) · 「기능 관심 업체」에서 봄 · 설계서 §11 · Codex 3R 지적 없음 · **배포완료(1006 Harold)**
 > ★ 만들기 재오픈 2건(배포완료 1006 Harold · 프론트만 · DDL 0) = [B-1006-1](BUGS.md) 「넣은 재료 다시 보기」 주소 · 읽은 재료 · 체크 복구(이메일 같음) · [B-1006-2](BUGS.md) 수정 화면 장 · 쪽 빼기(옆으로 넘기기 · 책처럼 · 2쪽 잠금 해제)
 > ★1007 **공개 소개 페이지 대개편** = 앱 공개 화면 `/about`(옛 `about-ai-operator.html` → 안내 파일) · 기능 11개 × 예시 영상(썸네일 → 눌러서 한 편만 재생) · 문장 = 기능 안내 창과 같은 원장(`tagline` 칸 추가) · 목업 3안 승인 · **배포완료(1007 Harold · `434f9993`)** · 설계서 [2026-10-07-about-page-redesign-design](../docs/2026-10-07-about-page-redesign-design.md)
-> 다음 = 접수 직원 실측(그룹웨어) · §9 남은 것(허브 카드 한 줄 설명 · SNS 개방 · 도움말 카탈로그) 착수 판단 Harold · 소개 페이지 배포 뒤 확인 3가지(로그인 「서비스 소개 보기」 → `/about` · 옛 주소 넘김 · 휴대폰 폭)
+> 다음 = 접수 직원 실측(그룹웨어) · §9 남은 것(허브 카드 한 줄 설명 · SNS 개방 · 도움말 카탈로그) 착수 판단 Harold · 소개 페이지 배포 뒤 확인 3가지(로그인 「서비스 소개 보기」 → `/about` · 옛 주소 넘김 · 휴대폰 폭) · **나중에 할 것(Harold 1007 「지금 말고 나중에」)** = 「기능 관심 업체」 업체별 표 10개씩 페이지 나누기(공용 `components/common/TablePagination.tsx` 재사용 · 조건 바뀌면 1쪽으로 · 설계서 §10 끝)
 
 <a id="n01"></a>
 
