@@ -12,7 +12,7 @@
  */
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Building2, ChevronRight, X } from 'lucide-react';
-import { PLAN_FEATURE_INTROS, findPlanFeatureIntro } from '../../constants/plan-feature-intros';
+import { usePlanFeatureIntros } from '../../constants/plan-feature-intros'; // ★ 2026-10-07 원장 = 서버(로그인한 사람에게만)
 import ListPager, { pageSlice } from '../shared/ListPager';   // ★ 2026-10-07 업체 목록 쪽 넘김(20건)
 
 type Period = 'today' | '7d' | 'month' | 'all';
@@ -54,7 +54,9 @@ const segBtn = (on: boolean) =>
   `px-3 py-1.5 text-sm transition-colors ${on ? 'bg-cyan-50 text-cyan-700 font-medium' : 'text-gray-600 hover:bg-gray-100'}`;
 // ★ 2026-10-06 로그인 안내 창(AiOperatorLoginPromo) = 기능 원장 밖 항목 · 「지금 바로가기」(go) 가 다음 행동
 const LOGIN_PROMO_ID = 'login-promo';
-const featureName = (id: string) => (id === LOGIN_PROMO_ID ? '로그인 안내 창' : findPlanFeatureIntro(id)?.title || id);
+/** 기능 id → 이름 — 원장을 받으면 채운다(받기 전엔 id 그대로) */
+let FEATURE_TITLES = new Map<string, string>();
+const featureName = (id: string) => (id === LOGIN_PROMO_ID ? '로그인 안내 창' : FEATURE_TITLES.get(id) || id);
 const EVENT_LABEL: Record<'open' | 'pricing' | 'go', string> = { open: '안내 창 열람', pricing: '요금제 보기', go: '지금 바로가기' };
 const fmt = (iso: string) => new Date(iso).toLocaleString('ko-KR', {
   timeZone: 'Asia/Seoul', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false,
@@ -184,6 +186,8 @@ function CompanyDetailModal({ c, onClose }: { c: CompanyRow; onClose: () => void
 }
 
 export default function FeatureInterestTab() {
+  const intros = usePlanFeatureIntros();
+  if (intros && FEATURE_TITLES.size === 0) FEATURE_TITLES = new Map(intros.intros.map((f) => [f.id, f.title]));
   const [period, setPeriod] = useState<Period>('7d');
   const [featureId, setFeatureId] = useState('all');
   const [plan, setPlan] = useState<PlanFilter>('all');
@@ -250,7 +254,7 @@ export default function FeatureInterestTab() {
           className="border rounded-lg px-3 py-1.5 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-cyan-200">
           <option value="all">모든 기능</option>
           <option value={LOGIN_PROMO_ID}>로그인 안내 창</option>
-          {PLAN_FEATURE_INTROS.map((f) => <option key={f.id} value={f.id}>{f.title}</option>)}
+          {(intros?.intros ?? []).map((f) => <option key={f.id} value={f.id}>{f.title}</option>)}
         </select>
         <span className="text-sm text-gray-500 font-medium">회사</span>
         <div className="inline-flex rounded-lg border border-gray-200 bg-white overflow-hidden divide-x divide-gray-200">

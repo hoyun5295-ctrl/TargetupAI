@@ -4,6 +4,7 @@ import { query } from '../config/database';
 import { readPlanFreeQuotas } from '../utils/free-messaging';
 import { authenticate } from '../middlewares/auth';
 import { parseFeatureSeen, recordFeatureSeen, FEATURE_SEEN_RATE } from '../utils/feature-interest';
+import { buildFeatureIntrosPayload, resolveSignedMedia } from '../utils/plan-feature-intros-serve';
 
 const router = Router();
 
@@ -47,6 +48,26 @@ router.post('/feature-seen', authenticate, featureSeenLimiter, async (req: Reque
   const input = parseFeatureSeen(req.body);
   if (input) await recordFeatureSeen(req, input);
   return res.status(204).end();
+});
+
+// ★ 2026-10-07 기능 안내 원장 · 영상 — 로그인한 사람에게만(Harold 「구멍 자체를 만들지 마」) · 소유 = utils/plan-feature-intros-serve.ts
+router.get('/feature-intros', authenticate, async (req: Request, res: Response) => {
+  try {
+    const payload = await buildFeatureIntrosPayload(req.user as any);
+    res.setHeader('Cache-Control', 'private, no-store');
+    return res.json({ success: true, ...payload });
+  } catch (err: any) {
+    console.error('[plans/feature-intros] 실패:', err?.message);
+    return res.status(500).json({ success: false, error: '기능 안내를 불러오지 못했습니다.' });
+  }
+});
+
+// 영상 · 첫 장면 그림 — 서명 주소만(<video> 는 토큰 머리글을 못 싣는다) · 틀리거나 만료면 404(있는지도 드러내지 않는다)
+router.get('/feature-media', (req: Request, res: Response) => {
+  const abs = resolveSignedMedia(String(req.query.f || ''), req.query);
+  if (!abs) return res.status(404).end();
+  res.setHeader('Cache-Control', 'private, max-age=3600');
+  return res.sendFile(abs);
 });
 
 export default router;

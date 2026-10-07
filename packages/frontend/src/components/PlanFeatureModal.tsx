@@ -17,7 +17,8 @@ import { useLightSurface } from './zone/surface-tone';
 import { useEffect, useMemo, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { ArrowRight, Coins, ListChecks, Lock, ShieldCheck, SlidersHorizontal, X } from 'lucide-react';
-import { findPlanFeatureIntro, PLAN_FEATURE_MIN_PLAN } from '../constants/plan-feature-intros';
+import { usePlanFeatureIntros, PLAN_FEATURE_MIN_PLAN } from '../constants/plan-feature-intros';
+import FeatureWatermark from './FeatureWatermark'; // ★ 2026-10-07 기능 설명 화면 워터마크(미가입 · 무료 체험만 · 판정 = 서버)
 import { reportPlanFeature } from '../utils/plan-feature-report'; // ★ 2026-10-06 기능 관심 업체 원천(로그인 안내 창과 같은 함수)
 
 interface PlanFeatureModalProps {
@@ -29,7 +30,10 @@ interface PlanFeatureModalProps {
 export default function PlanFeatureModal({ featureId, onClose }: PlanFeatureModalProps) {
   const light = useLightSurface(); // ★ 2026-09-30 AI 존(밝은 작업대)에서 열리면 밝은 짝 · 그 밖은 원래 짙은 값
   const navigate = useNavigate();
-  const intro = featureId ? findPlanFeatureIntro(featureId) : null;
+  // ★ 2026-10-07 원장 = 서버(로그인한 사람에게만) · 받기 전에는 창을 그리지 않는다
+  const intros = usePlanFeatureIntros();
+  const intro = featureId && intros ? intros.find(featureId) : null;
+  const watermark = intros?.watermark === true;
   const primaryRef = useRef<HTMLButtonElement>(null);
   // 호출부가 매 렌더 새 함수를 넘겨도 포커스·키 처리가 다시 걸리지 않게 최신 값만 참조한다
   const onCloseRef = useRef(onClose);
@@ -137,6 +141,7 @@ export default function PlanFeatureModal({ featureId, onClose }: PlanFeatureModa
         className={light ? "fixed inset-0 z-[70] flex items-end sm:items-center justify-center sm:p-4 bg-slate-100 backdrop-blur-[6px] animate-[fadeIn_0.2s_ease-out]" : "fixed inset-0 z-[70] flex items-end sm:items-center justify-center sm:p-4 bg-slate-950/60 backdrop-blur-[6px] animate-[fadeIn_0.2s_ease-out]"}
         onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}
       >
+        <FeatureWatermark on={watermark} />
         <div
           role="dialog"
           aria-modal="true"
@@ -296,6 +301,7 @@ export default function PlanFeatureModal({ featureId, onClose }: PlanFeatureModa
       className={light ? "fixed inset-0 z-[70] flex items-end sm:items-center justify-center sm:p-4 bg-slate-100 backdrop-blur-[6px] animate-[fadeIn_0.2s_ease-out]" : "fixed inset-0 z-[70] flex items-end sm:items-center justify-center sm:p-4 bg-slate-950/60 backdrop-blur-[6px] animate-[fadeIn_0.2s_ease-out]"}
       onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}
     >
+      <FeatureWatermark on={watermark} />
       <div
         role="dialog"
         aria-modal="true"

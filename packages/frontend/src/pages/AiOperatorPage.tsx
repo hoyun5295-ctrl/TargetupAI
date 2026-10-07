@@ -46,7 +46,7 @@ import { useAuthStore } from '../stores/authStore';
 import { SUB_MODULE_CARDS, HUB_CARD_ROWS, isCardOpen } from '../constants/ai-operator-modules';
 import { SurfaceToneProvider } from '../components/zone/surface-tone';
 import PlanFeatureModal from '../components/PlanFeatureModal';
-import { findPlanFeatureIntro, planFeatureIdForPath, PLAN_FEATURE_MIN_PLAN } from '../constants/plan-feature-intros';
+import { usePlanFeatureIntros, loadPlanFeatureIntros, PLAN_FEATURE_MIN_PLAN } from '../constants/plan-feature-intros';
 import { fetchAiOperatorAccess, fetchAiOperatorFeatures } from '../utils/ai-operator-access';
 import ConfirmModal, { type ConfirmState } from '../components/ConfirmModal';
 import { LineFactsAskModal } from '../components/zone/LineFacts';   // ★ 2026-10-05 한줄로 시그니처 — 판정이 걸리면 생성 전에 한 번만 묻는다
@@ -328,6 +328,8 @@ export default function AiOperatorPage() {
   const [planFeatureId, setPlanFeatureId] = useState<string | null>(null);
   // ★ 2026-09-20 기능별 개방 플래그 — 카드 필터 축(설계서 §3-11). 모르면 빈 객체 = 그 카드는 안 보인다.
   const [featureFlags, setFeatureFlags] = useState<Record<string, boolean>>({});
+  // ★ 2026-10-07 기능 안내 원장 = 서버(로그인한 사람에게만) · 화면에 들어오면 미리 받아 둔다
+  const featureIntros = usePlanFeatureIntros();
   const [searchParams, setSearchParams] = useSearchParams();
   useEffect(() => {
     let alive = true;
@@ -339,7 +341,7 @@ export default function AiOperatorPage() {
       // 기능 화면 주소로 직접 들어왔다가 입구(PlanGate)에서 돌아온 경우 = 그 기능의 안내를 바로 연다
       const intro = searchParams.get('intro');
       if (intro) {
-        if (locked && findPlanFeatureIntro(intro)) setPlanFeatureId(intro);
+        if (locked) void loadPlanFeatureIntros().then((d) => { if (alive && d?.find(intro)) setPlanFeatureId(intro); });
         const next = new URLSearchParams(searchParams);
         next.delete('intro');
         setSearchParams(next, { replace: true });
@@ -1965,9 +1967,11 @@ export default function AiOperatorPage() {
                           <button
                             key={card.label}
                             type="button"
-                            onClick={() => {
+                            onClick={async () => {
                               // ★ 2026-09-15 못 쓰는 회사 = 이동 대신 그 기능의 안내(요금제 공통 안내 창)
-                              const featureId = planFeatureIdForPath(card.path);
+                              // ★ 2026-10-07 원장을 아직 못 받았으면 받은 뒤 판정(받기 전 눌러도 안내 없이 들어가지 않게)
+                              const intros = featureIntros ?? await loadPlanFeatureIntros();
+                              const featureId = intros?.idForPath(card.path) ?? null;
                               if (planLocked && featureId) { setPlanFeatureId(featureId); return; }
                               // ★ 2026-09-20 순차 개방 중인 기능(카드 flag) = 카드는 보이되 아직인 회사는 같은 안내 창으로.
                               //   숨기지 않는다 — 없는 메뉴는 물어볼 수도 없다(Harold 확정).

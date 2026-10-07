@@ -6,14 +6,16 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'fs';
 import { resolve } from 'path';
-import { ABOUT_GROUPS, ABOUT_GUARDS, ABOUT_HERO, ABOUT_SLOT_IDS, ABOUT_CONTACT_PATH } from '../../../../frontend/src/constants/about-page';
+// ★ 2026-10-07 원장 · 구성은 서버(허용 계정에만 응답) · 상담 주소만 화면에 남는다
+import { ABOUT_GROUPS, ABOUT_GUARDS, ABOUT_HERO, ABOUT_SLOT_IDS } from '../../content/about-page';
+import { ABOUT_CONTACT_PATH } from '../../../../frontend/src/constants/about-page';
 
 const FE = resolve(__dirname, '../../../../frontend');
 const read = (rel: string) => readFileSync(resolve(FE, rel), 'utf8').replace(/\r\n/g, '\n');
-const INTROS = read('src/constants/plan-feature-intros.ts');
+const INTROS = readFileSync(resolve(__dirname, '../../content/plan-feature-intros.ts'), 'utf8').replace(/\r\n/g, '\n');
 const PAGE = read('src/pages/AboutPage.tsx');
 const CSS = read('src/pages/about-page.css');
-const CONF = read('src/constants/about-page.ts');
+const CONF = readFileSync(resolve(__dirname, '../../content/about-page.ts'), 'utf8').replace(/\r\n/g, '\n');
 
 /** 원장 한 항목(맨 위 `{` 블록) — 다른 테스트와 같은 나눔 */
 function entry(id: string): string {
@@ -60,7 +62,8 @@ describe('구성 ↔ 원장', () => {
 
 describe('화면 규약', () => {
   it('기능 문장은 원장에서 읽는다(페이지에 기능 문장 0) · 뼈대 문장 유지', () => {
-    expect(PAGE).toContain("import { PLAN_FEATURE_INTROS, PLAN_FEATURE_MIN_PLAN, type PlanFeatureIntro } from '../constants/plan-feature-intros';");
+    expect(PAGE).toContain("import { usePlanFeatureIntros, PLAN_FEATURE_MIN_PLAN, type PlanFeatureIntro } from '../constants/plan-feature-intros';");
+    expect(PAGE).toContain('if (!about) return null;'); // 구성을 못 받으면(허용 계정 아님) 아무것도 그리지 않는다
     expect(PAGE).toContain('<p>{f.tagline || f.summary}</p>');
     expect(PAGE).toContain('<b>발송 승인은 언제나 사람이 합니다.</b>');
   });

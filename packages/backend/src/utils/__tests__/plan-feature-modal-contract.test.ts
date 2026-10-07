@@ -22,6 +22,9 @@ import { findJob } from '../../content/feature-catalog';
 
 const FRONT = join(__dirname, '../../../../frontend/src');
 const read = (p: string) => readFileSync(join(FRONT, p), 'utf8');
+// ★ 2026-10-07 원장 · 영상은 화면 코드 · 공개 폴더 밖(서버)으로 옮겼다(Harold 「구멍 자체를 만들지 마」)
+const readLedger = () => readFileSync(join(__dirname, '../../content/plan-feature-intros.ts'), 'utf8');
+const MEDIA = join(__dirname, '../../../assets/plan-feature');
 function stripComments(src: string): string {
   return src
     .replace(/\/\*[\s\S]*?\*\//g, '')
@@ -30,7 +33,7 @@ function stripComments(src: string): string {
     .join('\n');
 }
 
-const INTROS = stripComments(read('constants/plan-feature-intros.ts'));
+const INTROS = stripComments(readLedger());
 const MODULES = read('constants/ai-operator-modules.ts');
 const DASH = stripComments(read('pages/Dashboard.tsx'));
 const HUB = stripComments(read('pages/AiOperatorPage.tsx'));
@@ -125,7 +128,7 @@ describe('AI Operator 허브 — 서버 판정으로 막고 공통 안내 창을
     const tiles = HUB.slice(start, start + 4000);
     // ★ 2026-09-20 조각 단정으로 바꿈 — 순차 개방 플래그 분기가 같은 자리에 하나 더 들어갔다(아래 테스트가 그것을 본다).
     //   의도는 그대로다: 잠긴 카드는 **이동하지 않고** 그 기능의 안내를 연다.
-    expect(tiles).toMatch(/const featureId = planFeatureIdForPath\(card\.path\);/);
+    expect(tiles).toMatch(/const featureId = intros\?\.idForPath\(card\.path\) \?\? null;/);
     expect(tiles).toMatch(/if \(planLocked && featureId\) \{ setPlanFeatureId\(featureId\); return; \}/);
     expect(tiles).toMatch(/navigate\(card\.path\);/);
     // 안내를 여는 분기가 navigate 보다 **앞**에 있어야 한다(뒤에 있으면 이미 이동한 뒤다)
@@ -148,7 +151,7 @@ describe('AI Operator 허브 — 서버 판정으로 막고 공통 안내 창을
 
   it('기능 화면 입구에서 돌아오면(intro) 그 기능의 안내를 연다', () => {
     expect(HUB).toMatch(/searchParams\.get\('intro'\)/);
-    expect(HUB).toMatch(/if \(locked && findPlanFeatureIntro\(intro\)\) setPlanFeatureId\(intro\);/);
+    expect(HUB).toContain('if (locked) void loadPlanFeatureIntros().then((d) => { if (alive && d?.find(intro)) setPlanFeatureId(intro); });'); // ★ 2026-10-07 원장 = 서버
   });
 });
 
@@ -201,8 +204,9 @@ describe('예시 영상 + 상세 설명', () => {
     for (const id of VIDEO_IDS) {
       const b = block(id);
       expect(b, id).toContain(`video: { src: '/videos/plan-feature/${id}.mp4', poster: '/videos/plan-feature/${id}.jpg' }`);
-      expect(existsSync(join(PUBLIC, 'videos', 'plan-feature', `${id}.mp4`)), `${id}.mp4`).toBe(true);
-      expect(existsSync(join(PUBLIC, 'videos', 'plan-feature', `${id}.jpg`)), `${id}.jpg`).toBe(true);
+      expect(existsSync(join(MEDIA, `${id}.mp4`)), `${id}.mp4`).toBe(true);
+      expect(existsSync(join(PUBLIC, 'videos', 'plan-feature', `${id}.mp4`)), `공개 폴더에 ${id}.mp4`).toBe(false);
+      expect(existsSync(join(MEDIA, `${id}.jpg`)), `${id}.jpg`).toBe(true);
       expect(b, `${id} options`).toMatch(/options: \[\s*\{/);
       expect(b, `${id} safeguards`).toMatch(/safeguards: \[\s*\{/);
     }
@@ -238,7 +242,7 @@ describe('예시 영상 + 상세 설명', () => {
  *   ③ 여정 통과 알림 = 단계별 설정(기본 첫·마지막) · 검사 자체는 모든 단계 ④ 스튜디오 문구 위치 = 행사 포스터만 ⑤ 짧은 휴대폰 화면에서 설명이 사라짐
  */
 describe('Codex 1R — 적용 조건까지 적는다 · 짧은 화면', () => {
-  const INTROS_RAW = read('constants/plan-feature-intros.ts');
+  const INTROS_RAW = readLedger();
   it('적용 조건 문장', () => {
     expect(INTROS_RAW).toContain('그 달 발송 처리가 시작되기 전에 취소하면');
     expect(INTROS_RAW).not.toContain('아무것도 나가지 않은 채 취소하면');
@@ -276,7 +280,7 @@ describe('허브 카드 12개 — 상세 설명이 모두 있다', () => {
   });
 
   it('바로잡은 옛 문구: 자사몰 연동 매일 분석은 연동 탓이 아니다 · 이메일 제목은 허브 카드와 같다', () => {
-    const raw = read('constants/plan-feature-intros.ts');
+    const raw = readLedger();
     expect(raw).not.toContain('연동하면 고객 수에 맞춰 매일 분석 크레딧이 듭니다');
     expect(raw).toContain("costNote: '연동 자체에는 크레딧이 들지 않습니다'");
     expect(raw).toContain("id: 'email-campaign', path: '/email-campaigns', title: '이메일 마케팅'");

@@ -18,10 +18,13 @@ import { useNavigate } from 'react-router-dom';
 import { ArrowRight, X } from 'lucide-react';
 import { fetchAiOperatorAccess } from '../utils/ai-operator-access';
 import { reportPlanFeature } from '../utils/plan-feature-report';
+import { usePlanFeatureIntros } from '../constants/plan-feature-intros'; // ★ 2026-10-07 영상 = 서버 서명 주소(공개 폴더에서 뺐다)
+import FeatureWatermark from './FeatureWatermark';
 
 export const LOGIN_PROMO_FEATURE_ID = 'login-promo';
 const SEEN_KEY = 'ai-op-login-promo-seen';
-const PROMO_VIDEO = { src: '/videos/plan-feature/auto-marketing.mp4', poster: '/videos/plan-feature/auto-marketing.jpg' };
+/** 예시 영상 = 기능 안내 원장의 자동 마케팅 영상(서버가 로그인한 사람에게만 서명 주소로 준다) */
+const PROMO_FEATURE_ID = 'auto-marketing';
 
 /** 이 로그인의 표식(토큰 끝부분) — 토큰은 로그인할 때만 바뀐다 */
 function loginMark(): string | null {
@@ -38,6 +41,8 @@ function writeSeen(mark: string): boolean {
 
 export default function AiOperatorLoginPromo({ blocked = false }: { /** 다른 자동 안내 창이 열려 있으면 true — 닫힐 때까지 기다린다 */ blocked?: boolean }) {
   const navigate = useNavigate();
+  const intros = usePlanFeatureIntros();
+  const promoVideo = intros?.find(PROMO_FEATURE_ID)?.video;
   const [eligible, setEligible] = useState(false);
   const [open, setOpen] = useState(false);
   const shownRef = useRef(false); // 한 화면에서 한 번 — 닫은 뒤 효과가 다시 돌아도 다시 띄우지 않는다
@@ -131,6 +136,7 @@ export default function AiOperatorLoginPromo({ blocked = false }: { /** 다른 �
       className="fixed inset-0 z-[70] flex items-end sm:items-center justify-center sm:p-4 bg-slate-950/60 backdrop-blur-[6px] animate-[fadeIn_0.2s_ease-out]"
       onMouseDown={(e) => { if (e.target === e.currentTarget) close(); }}
     >
+      <FeatureWatermark on={intros?.watermark === true} />
       <div
         ref={dialogRef}
         role="dialog"
@@ -141,8 +147,8 @@ export default function AiOperatorLoginPromo({ blocked = false }: { /** 다른 �
         <div className="flex sm:flex-col items-center justify-center gap-3 bg-slate-50 p-4 sm:p-5">
           <video
             ref={videoRef}
-            src={PROMO_VIDEO.src}
-            poster={PROMO_VIDEO.poster}
+            src={promoVideo?.src}
+            poster={promoVideo?.poster}
             muted
             loop
             playsInline

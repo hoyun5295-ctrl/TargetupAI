@@ -28,7 +28,7 @@ const SNS_VIEW = readFileSync(resolve(FRONT, 'utils/sns-view.ts'), 'utf8');
 const MODULES = readFileSync(resolve(FRONT, 'constants/ai-operator-modules.ts'), 'utf8');
 const HUB = readFileSync(resolve(FRONT, 'pages/AiOperatorPage.tsx'), 'utf8');
 const WALK = readFileSync(resolve(FRONT, 'components/AiOperatorWalkthroughModal.tsx'), 'utf8');
-const INTROS = readFileSync(resolve(FRONT, 'constants/plan-feature-intros.ts'), 'utf8');
+const INTROS = readFileSync(resolve(__dirname, '../../content/plan-feature-intros.ts'), 'utf8'); // ★ 2026-10-07 원장 = 서버
 const APP = readFileSync(resolve(FRONT, 'App.tsx'), 'utf8');
 const PLAN_GUARD = readFileSync(resolve(__dirname, '../plan-guard.ts'), 'utf8');
 const ROUTE_SRC = readFileSync(resolve(__dirname, '../../routes/sns.ts'), 'utf8');

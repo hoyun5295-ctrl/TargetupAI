@@ -217,7 +217,7 @@ describe('4K 격상 제거(0930 · 생성 모델이 새 그림을 그렸다)', (
   it('화면: 스튜디오 4K 버튼 · 요금 안내의 4K 항목이 없다', () => {
     const fe = (...p: string[]) => fs.readFileSync(path.join(__dirname, '..', '..', '..', '..', 'frontend', 'src', ...p), 'utf8');
     expect(fe('pages', 'ImageStudioPage.tsx')).not.toMatch(/'4K'|targetSize|Maximize2/);  // 주석의 경위 설명은 대상 아님
-    expect(fe('constants', 'plan-feature-intros.ts')).not.toContain('image-studio-4k');
+    expect(fs.readFileSync(path.join(__dirname, '..', '..', 'content', 'plan-feature-intros.ts'), 'utf8')).not.toContain('image-studio-4k'); // ★ 2026-10-07 원장 = 서버
   });
 });
 

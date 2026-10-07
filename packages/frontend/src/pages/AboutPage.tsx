@@ -2,8 +2,9 @@
  * AboutPage — 한줄로 공개 소개 페이지 `/about` (★ 2026-10-07 대개편 · 승인 목업 3안 · 설계서 docs/2026-10-07-about-page-redesign-design.md)
  *
  * ★ 2026-10-07 Harold: 숨김 — 허용 계정(기본 hoyun)만 연다(App.tsx AboutGate · 판정 = 서버 /api/ai/about-page/access). 옛 주소 `/about-ai-operator.html` 은 여기로 넘기는 안내 파일이다.
- * 기능 문장 · 영상은 앱 기능 안내 창과 같은 원장(`constants/plan-feature-intros.ts`)을 읽는다 — 이 파일에 기능 문장을 쓰지 않는다.
- * 묶음 · 순서 · 첫 화면 · 「지키는 것」은 `constants/about-page.ts`.
+ * 기능 문장 · 영상은 앱 기능 안내 창과 같은 원장을 읽는다 — 이 파일에 기능 문장을 쓰지 않는다.
+ * ★ 2026-10-07 원장 · 묶음 구성은 서버가 허용 계정에만 내려준다(GET /api/plans/feature-intros · 원장 = backend/src/content).
+ *   화면 코드에는 기능 문장 · 구성이 없다(누구나 받는 파일이라). 워터마크 = 서버 판정(미가입 · 무료 체험).
  *
  * ⛔ 지킬 것(계약 = backend/src/utils/__tests__/about-page-1007.test.ts)
  *   - 영상은 동시에 하나만 돈다: 첫 화면 가운데 한 편(보일 때만) · 상세 창 한 편. 카드는 정지 그림이다(Harold 1007 「동시에 나오면 정신없다」).
@@ -12,8 +13,9 @@
  */
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { PLAN_FEATURE_INTROS, PLAN_FEATURE_MIN_PLAN, type PlanFeatureIntro } from '../constants/plan-feature-intros';
-import { ABOUT_CONTACT_PATH, ABOUT_GROUPS, ABOUT_GUARDS, ABOUT_HERO, ABOUT_SLOT_IDS } from '../constants/about-page';
+import { usePlanFeatureIntros, PLAN_FEATURE_MIN_PLAN, type PlanFeatureIntro } from '../constants/plan-feature-intros';
+import FeatureWatermark from '../components/FeatureWatermark';
+import { ABOUT_CONTACT_PATH } from '../constants/about-page';
 import './about-page.css';
 
 const SLOT_MS = 2200;
@@ -31,7 +33,13 @@ function useReducedMotion(): boolean {
 }
 
 export default function AboutPage() {
-  const byId = useMemo(() => new Map(PLAN_FEATURE_INTROS.map((f) => [f.id, f])), []);
+  const data = usePlanFeatureIntros();
+  const about = data?.about ?? null;
+  const ABOUT_GROUPS = about?.groups ?? [];
+  const ABOUT_GUARDS = about?.guards ?? [];
+  const ABOUT_SLOT_IDS = about?.slotIds ?? [];
+  const ABOUT_HERO = about?.hero ?? { center: '', left: '', right: '' };
+  const byId = useMemo(() => new Map((data?.intros ?? []).map((f) => [f.id, f])), [data]);
   const feature = (id: string): PlanFeatureIntro | undefined => byId.get(id);
   const reduce = useReducedMotion();
   const [slot, setSlot] = useState(0);
@@ -48,10 +56,10 @@ export default function AboutPage() {
 
   // 첫 화면 빈칸 — 기능 이름이 차례로
   useEffect(() => {
-    if (reduce) return;
+    if (reduce || ABOUT_SLOT_IDS.length === 0) return;
     const t = window.setInterval(() => setSlot((v) => (v + 1) % ABOUT_SLOT_IDS.length), SLOT_MS);
     return () => window.clearInterval(t);
-  }, [reduce]);
+  }, [reduce, ABOUT_SLOT_IDS.length]);
 
   // 첫 화면 가운데 한 편만 — 화면에 보일 때만 받고 재생(데이터 아끼기)
   useEffect(() => {
@@ -62,7 +70,7 @@ export default function AboutPage() {
     }, { threshold: 0.35 });
     io.observe(v);
     return () => io.disconnect();
-  }, [reduce]);
+  }, [reduce, about]);
 
   // 상세 창 — 열 때 그 영상 하나만 처음부터 · 첫 화면 영상은 멈춤 · Esc 닫기 · Tab 은 창 안에서만 · 닫으면 포커스 복귀 · 뒤 화면 스크롤 잠금
   useEffect(() => {
@@ -99,8 +107,12 @@ export default function AboutPage() {
   const hero = { center: feature(ABOUT_HERO.center), left: feature(ABOUT_HERO.left), right: feature(ABOUT_HERO.right) };
   const opened = openId ? feature(openId) : undefined;
 
+  // 원장 · 구성을 받기 전(또는 허용 계정이 아니면) 아무것도 그리지 않는다
+  if (!about) return null;
+
   return (
-    <div className="hj-about">
+    <div className="hj-about" style={{ position: 'relative' }}>
+      <FeatureWatermark on={data?.watermark === true} />
       <header className="top">
         <div className="wrap">
           <Link className="brand" to="/">한줄로<span className="blank" /></Link>
