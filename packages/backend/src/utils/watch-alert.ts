@@ -78,6 +78,20 @@ export function parseKisaWhois(text: string): { org: string; kind: string; addre
   return { org: last['기관명'] || '', kind: last['네트워크 구분'] || '', address: last['주소'] || '' };
 }
 
+/**
+ * ★ 2026-10-07 통신사 본사 주소는 위치가 아니다(Harold 실측: 거여동 집 회선이 「용산구 한강대로 32」 = LG U+ 본사로 나옴).
+ *   통신사가 고객 위치를 따로 신고하지 않은 회선은 본사 주소가 찍힌다 → 「위치 모름」으로 그린다.
+ */
+const CARRIER_HQ_ADDRESS = ['불정로 90', '정자동 KT본사', '한강대로 32', '을지로 65', '을지로65', '퇴계로 24'];
+
+export function formatIpOwner(p: { org: string; kind: string; address: string }): string {
+  const compact = p.address.replace(/\s+/g, ' ');
+  const hq = CARRIER_HQ_ADDRESS.some((a) => compact.includes(a));
+  if (p.kind === 'INFRA') return `${p.org} · 휴대폰 등 통신사 공용 · 위치 모름`;
+  if (hq) return `${p.org} · 통신사 본사 주소만 등록 · 위치 모름`;
+  return `${p.org} · 회선 등록 주소 ${p.address}`;
+}
+
 const ownerCache = new Map<string, { at: number; text: string }>();
 
 /** IP 주인 한 줄(예: 「LG유플러스 · 기업 회선 · 경기도 안양시 만안구 덕천로 37」) — 실패하면 「주인 조회 실패」 */
@@ -104,10 +118,7 @@ export async function describeIpOwner(ip: string): Promise<string> {
     });
   });
   const parsed = parseKisaWhois(text);
-  const out = parsed
-    ? [parsed.org, parsed.kind === 'CUSTOMER' ? '회선을 받은 곳' : parsed.kind === 'INFRA' ? '통신사 공용(휴대폰 등)' : '', parsed.address]
-      .filter(Boolean).join(' · ')
-    : '주인 조회 실패';
+  const out = parsed ? formatIpOwner(parsed) : '주인 조회 실패';
   if (parsed) ownerCache.set(key, { at: Date.now(), text: out });
   return out;
 }

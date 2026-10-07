@@ -11,7 +11,7 @@ vi.mock('../system-alert', () => ({ sendSystemAlert: vi.fn(async (p: any) => { h
 vi.mock('../audit-log', () => ({ recordAuditLog: vi.fn(async (a: any) => { h.audits.push(a); }) }));
 vi.mock('../../config/database', () => ({ query: vi.fn(async () => ({ rows: [{ n: h.loginCount, prev_at: null }] })) }));
 
-import { handleWatchEvent, parseKisaWhois, isOffHours, watchAlertPhones, isWatchedLoginId } from '../watch-alert';
+import { handleWatchEvent, parseKisaWhois, formatIpOwner, isOffHours, watchAlertPhones, isWatchedLoginId } from '../watch-alert';
 import { PERMISSION_MATRIX } from '../admin-role';
 
 beforeEach(() => {
@@ -71,6 +71,13 @@ describe('IP 주인 = 가장 좁은 할당의 기관명', () => {
       'IPv4주소           : 61.74.181.32 - 61.74.181.63 (/27)', '기관명             : (주)한화63시티', '네트워크 구분      : CUSTOMER', '주소               : 서울특별시 서초구 강남대로 311'].join('\n');
     expect(parseKisaWhois(t)).toEqual({ org: '(주)한화63시티', kind: 'CUSTOMER', address: '서울특별시 서초구 강남대로 311' });
     expect(parseKisaWhois('nothing')).toBeNull();
+  });
+  it('★ 통신사 본사 주소는 위치로 그리지 않는다(집 회선이 용산 LG U+ 본사로 나온 실측)', () => {
+    expect(formatIpOwner({ org: '(주)엘지유플러스', kind: 'CUSTOMER', address: '서울특별시 용산구 한강대로 32' })).toBe('(주)엘지유플러스 · 통신사 본사 주소만 등록 · 위치 모름');
+    expect(formatIpOwner({ org: '(주) 케이티', kind: 'CUSTOMER', address: '경기도 성남시 분당구  불정로 90(KT본사)' })).toContain('위치 모름');
+    expect(formatIpOwner({ org: '에스케이브로드밴드주식회사', kind: 'CUSTOMER', address: '서울특별시 중구 퇴계로 24' })).toContain('위치 모름');
+    expect(formatIpOwner({ org: '에스케이텔레콤(주)', kind: 'INFRA', address: '서울특별시 중구 을지로65' })).toContain('위치 모름');
+    expect(formatIpOwner({ org: 'LG유플러스', kind: 'CUSTOMER', address: '경기도 안양시 만안구 덕천로 37' })).toBe('LG유플러스 · 회선 등록 주소 경기도 안양시 만안구 덕천로 37');
   });
 });
 
