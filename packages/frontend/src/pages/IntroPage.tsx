@@ -183,7 +183,7 @@ export default function IntroPage() {
           <p className="mt-3 text-sm text-gray-500">시연 뒤 35만원 요금제 기능 7일 무료 체험</p>
         </div>
         <div className="mx-auto w-full max-w-[320px]">
-          <video src="/intro/hanjul-allinone.mp4" poster="/intro/hanjul-allinone-poster.jpg" controls playsInline preload="metadata"
+          <video src="/intro-media/hanjul-allinone.mp4" poster="/intro-media/hanjul-allinone-poster.jpg" controls playsInline preload="metadata"
             controlsList="nodownload noplaybackrate" disablePictureInPicture onContextMenu={(e) => e.preventDefault()}
             className="w-full aspect-[9/16] rounded-3xl bg-white border border-gray-200 shadow-[0_20px_60px_-20px_rgba(0,0,0,0.25)]" />
         </div>

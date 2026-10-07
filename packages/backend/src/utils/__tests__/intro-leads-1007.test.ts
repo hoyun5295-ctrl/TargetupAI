@@ -3,7 +3,7 @@
  *   영상은 정보 입력 없이 재생 · 개인정보는 시연 요청 때만 · 방문은 서버가 IP 를 남긴다.
  */
 import { describe, it, expect } from 'vitest';
-import { readFileSync } from 'fs';
+import { readFileSync, readdirSync } from 'fs';
 import { join } from 'path';
 import { parseDemoRequest, parseIntroLeadsQuery, INTRO_ACTIONS } from '../intro-leads';
 import { PERMISSION_MATRIX } from '../admin-role';
@@ -61,11 +61,18 @@ describe('화면', () => {
   });
   it('영상은 입력 없이 바로 재생 · 다운로드 버튼 없음', () => {
     const page = front('src/pages/IntroPage.tsx');
-    expect(page).toContain('<video src="/intro/hanjul-allinone.mp4"');
+    expect(page).toContain('<video src="/intro-media/hanjul-allinone.mp4"');
     expect(page).toContain('controlsList="nodownload');
     expect(page).not.toContain('동의하고 보기');
     // 입력 칸은 시연 요청 창 안에만 · 페이지 본문(영상 둘레)에는 입력 칸이 없다
     expect(page.slice(page.indexOf('export default function IntroPage'))).not.toContain('<input');
+  });
+  it('★ 공개 폴더 이름이 화면 주소와 겹치지 않는다(겹치면 nginx 가 폴더로 보고 /intro → /intro/ → 403 · 1007 실측)', () => {
+    const app = front('src/App.tsx');
+    const routes = new Set([...app.matchAll(/path="\/([A-Za-z0-9_-]+)"/g)].map((m) => m[1]));
+    const dirs = readdirSync(join(__dirname, '..', '..', '..', '..', 'frontend', 'public'), { withFileTypes: true })
+      .filter((d) => d.isDirectory()).map((d) => d.name);
+    expect(dirs.filter((d) => routes.has(d))).toEqual([]);
   });
   it('로그인 화면 소개 링크 = /intro · 옛 소개 주소도 /intro', () => {
     const login = front('src/pages/LoginPage.tsx');
