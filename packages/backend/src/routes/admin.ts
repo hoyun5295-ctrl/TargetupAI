@@ -79,7 +79,8 @@ import { applyPlanRequestWithClient, PlanTermError, planTermManagedSql, planTerm
 // ★ 2026-06-11: 감사 로그 CT — 라인그룹 지정/해제 책임 추적 (에이치피오 예약취소 사고 후속)
 import { loadAgencyCallbackKinds } from '../utils/agency-send-intake';
 import { switchCompanyBillingType } from '../utils/billing-type-history';
-import { recordAuditLog, isAuditLogViewer, isAiTrainingViewer, isGeoHitsViewer, isHelpQuestionViewer, isLineGroupAdmin, isSettlementOverviewViewer, isBestLayoutViewer, isPrecheckUsageViewer, isFeatureInterestViewer, isIdentityStatusViewer, isIntroLeadsViewer, diffFields } from '../utils/audit-log';
+import { recordAuditLog, isAuditLogViewer, isAiTrainingViewer, isGeoHitsViewer, isHelpQuestionViewer, isLineGroupAdmin, isSettlementOverviewViewer, isBestLayoutViewer, isPrecheckUsageViewer, isFeatureInterestViewer, isIdentityStatusViewer, isIntroLeadsViewer, isWatchLogViewer, diffFields } from '../utils/audit-log';
+import { loadWatchIps, loadWatchIpEvents } from '../utils/watch-alert'; // ★ 2026-10-07 감시 기록(ceo 전용)
 import { loadIntroLeads, parseIntroLeadsQuery } from '../utils/intro-leads'; // ★ 2026-10-07 소개 방문 · 시연 요청(ceo · suran)
 import { loadFeatureInterest, parseFeatureInterestQuery } from '../utils/feature-interest'; // ★ 2026-10-06 기능 관심 업체(ceo 전용)
 import { loadIdentityStatus } from '../utils/identity-status'; // ★ 2026-10-07 본인인증 현황(ceo 전용)
@@ -4980,6 +4981,33 @@ router.get('/feature-interest', authenticate, requireSuperAdmin, async (req: Req
   } catch (err: any) {
     console.error('[admin/feature-interest] 조회 실패:', err);
     return res.status(500).json({ success: false, error: '기능 관심 업체를 불러오지 못했습니다.' });
+  }
+});
+
+// ★ 2026-10-07: 감시 기록 — ceo 전용 (WATCH_VIEWER_IDS, 기본 'ceo'). 메뉴 노출 게이팅용 · 소유 = utils/watch-alert.ts
+router.get('/watch-log/access', authenticate, requireSuperAdmin, async (req: Request, res: Response) => {
+  res.json({ allowed: await isWatchLogViewer(req.user?.userId) });
+});
+
+router.get('/watch-log', authenticate, requireSuperAdmin, async (req: Request, res: Response) => {
+  try {
+    if (!(await isWatchLogViewer(req.user?.userId))) return res.status(403).json({ success: false, error: '감시 기록 열람 권한이 없습니다.' });
+    const data = await loadWatchIps(Number(req.query.page) || 1);
+    return res.json({ success: true, ...data });
+  } catch (err: any) {
+    console.error('[admin/watch-log] 조회 실패:', err);
+    return res.status(500).json({ success: false, error: '감시 기록을 불러오지 못했습니다.' });
+  }
+});
+
+router.get('/watch-log/events', authenticate, requireSuperAdmin, async (req: Request, res: Response) => {
+  try {
+    if (!(await isWatchLogViewer(req.user?.userId))) return res.status(403).json({ success: false, error: '감시 기록 열람 권한이 없습니다.' });
+    const events = await loadWatchIpEvents(String(req.query.loginId || ''), String(req.query.ip || ''));
+    return res.json({ success: true, events });
+  } catch (err: any) {
+    console.error('[admin/watch-log/events] 조회 실패:', err);
+    return res.status(500).json({ success: false, error: '감시 기록을 불러오지 못했습니다.' });
   }
 });
 

@@ -199,10 +199,10 @@ describe('5. 화면 — 메뉴 7묶음 · 노출 · 뱃지', () => {
     expect(labels).toEqual(['고객 관리', '발송 관리', '대행 발송', '요금/정산', '보안 · 인증', '연동 · 인프라', 'AI · 콘텐츠']);
   });
 
-  it('항목 34개 · 각 1번(삭제 0 · 중복 0)', () => {
+  it('항목 35개 · 각 1번(삭제 0 · 중복 0)', () => {
     const keys = [...menu.matchAll(/\{ key: '(\w+)', label: '/g)].map((m) => m[1]);
-    expect(keys.length).toBe(34); // ★ 2026-10-07 소개 방문 · 시연 요청(introLeads) 추가
-    expect(new Set(keys).size).toBe(34);
+    expect(keys.length).toBe(35); // ★ 2026-10-07 소개 방문 · 시연 요청(introLeads) · 감시 기록(watchLog) 추가
+    expect(new Set(keys).size).toBe(35);
     for (const k of ['companies', 'users', 'marketingDiagnosis', 'salesOutreach', 'callbacks', 'templates', 'scheduled', 'allCampaigns', 'stats',
       'agencyMail', 'agencyLedger', 'campaignAgency', 'plans', 'requests', 'deposits', 'credits', 'billing',
       'adminAccounts', 'loginBlocks', 'geoAccess', 'spamBlock', 'auditLogs', 'identityStatus', 'opsRecords',

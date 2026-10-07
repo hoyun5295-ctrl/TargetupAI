@@ -16,6 +16,7 @@ import { generateToken, JwtPayload } from '../middlewares/auth';
 import { rotateUserSession, newSessionId, SessionConflict } from './session-manager';
 import { clearBlocksOnSuccess } from './login-block';
 import type { IdentityClearance } from './identity-verify';
+import { handleWatchEvent } from './watch-alert'; // ★ 2026-10-07 지정 계정 감시 알림(로그인 영향 0)
 
 /**
  * 로그인 판정에 쓰는 사용자 행 — `/auth/login`의 조회와 같은 컬럼을 계정 id로 읽는다.
@@ -97,11 +98,13 @@ export async function issueUserLogin(params: {
   }
 
   if (rotate.status === 'conflict') {
+    // ★ 2026-10-07 liveIp = 지금 쓰고 있는 쪽 접속 IP(감사 기록에만 · 화면 응답에는 싣지 않는다)
     await query(
       `INSERT INTO audit_logs (id, user_id, action, target_type, details, ip_address, user_agent, created_at)
        VALUES (gen_random_uuid(), $1, 'login_session_conflict', 'user', $2, $3, $4, NOW())`,
-      [user.id, JSON.stringify({ loginId, companyName: user.company_name }), req.ip, req.headers['user-agent'] || '']
+      [user.id, JSON.stringify({ loginId, companyName: user.company_name, liveIp: rotate.liveIp ?? null }), req.ip, req.headers['user-agent'] || '']
     );
+    void handleWatchEvent({ kind: 'conflict', userId: user.id, loginId: user.login_id, ip: req.ip || '', otherIp: rotate.liveIp, req });
     return { status: 'conflict', conflict: rotate.conflict };
   }
 
@@ -114,11 +117,13 @@ export async function issueUserLogin(params: {
   }
 
   if (rotate.takeover) {
+    // ★ 2026-10-07 takenOverIp = 밀려난 쪽 접속 IP(그전에는 남지 않아 「어디를 밀어냈는지」 알 수 없었다)
     await query(
       `INSERT INTO audit_logs (id, user_id, action, target_type, details, ip_address, user_agent, created_at)
        VALUES (gen_random_uuid(), $1, 'login_takeover', 'user', $2, $3, $4, NOW())`,
-      [user.id, JSON.stringify({ loginId, companyName: user.company_name }), req.ip, req.headers['user-agent'] || '']
+      [user.id, JSON.stringify({ loginId, companyName: user.company_name, takenOverIp: rotate.liveIp ?? null }), req.ip, req.headers['user-agent'] || '']
     );
+    void handleWatchEvent({ kind: 'takeover', userId: user.id, loginId: user.login_id, ip: req.ip || '', otherIp: rotate.liveIp, req });
   }
 
   // 로그인 기록
@@ -127,6 +132,9 @@ export async function issueUserLogin(params: {
      VALUES (gen_random_uuid(), $1, 'login_success', 'user', $2, $3, $4, NOW())`,
     [user.id, JSON.stringify({ loginId, companyName: user.company_name, userType: user.user_type }), req.ip, req.headers['user-agent'] || '']
   );
+
+  // ★ 2026-10-07 감시 대상이면 사무실 밖 로그인 알림(로그인 기록 INSERT 뒤 · 몇 번째 IP 인지 세려고) · 응답을 기다리게 하지 않는다
+  void handleWatchEvent({ kind: 'login', userId: user.id, loginId: user.login_id, ip: req.ip || '', req });
 
   // ★ D145: 성공 시 같은 (ip, loginId)의 미만료 차단 자동 해제
   await clearBlocksOnSuccess(ipForBlock, loginId, user.id);

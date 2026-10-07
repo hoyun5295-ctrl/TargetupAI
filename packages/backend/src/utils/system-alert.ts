@@ -60,7 +60,12 @@ async function markSentNow(dedupKey: string): Promise<void> {
 
 /** .env SYSTEM_ALERT_PHONES 파싱 — 유효한 휴대폰 번호만 반환 */
 export function getSystemAlertPhones(): string[] {
-  const raw = String(process.env.SYSTEM_ALERT_PHONES || '').trim();
+  return parseAlertPhones(process.env.SYSTEM_ALERT_PHONES);
+}
+
+/** 쉼표로 적은 번호 목록 파싱 — 유효한 휴대폰 번호만(중복 제거) */
+export function parseAlertPhones(rawValue: string | null | undefined): string[] {
+  const raw = String(rawValue || '').trim();
   if (!raw) return [];
   const phones: string[] = [];
   for (const part of raw.split(',')) {
@@ -91,6 +96,11 @@ export interface SystemAlertParams {
   action?: string;
   /** 쿨다운(ms). 기본 6시간. */
   cooldownMs?: number;
+  /**
+   * ★ 2026-10-07 받는 사람을 따로 정한다(감시 알림 = 대표 번호만 · WATCH_ALERT_PHONES).
+   *   주면 SYSTEM_ALERT_PHONES 대신 이 번호로만 보낸다 · 비면 보내지 않는다(다른 운영자에게 새지 않게).
+   */
+  phones?: string[];
 }
 
 /**
@@ -130,9 +140,9 @@ export function buildSystemAlertBody(p: SystemAlertParams): string {
  */
 export async function sendSystemAlert(params: SystemAlertParams): Promise<number> {
   try {
-    const phones = getSystemAlertPhones();
+    const phones = params.phones ? parseAlertPhones(params.phones.join(',')) : getSystemAlertPhones();
     if (phones.length === 0) {
-      log(`수신자 미설정(SYSTEM_ALERT_PHONES) — 발송 생략: ${params.dedupKey}`);
+      log(`수신자 미설정(${params.phones ? '지정 번호' : 'SYSTEM_ALERT_PHONES'}) — 발송 생략: ${params.dedupKey}`);
       return 0;
     }
 

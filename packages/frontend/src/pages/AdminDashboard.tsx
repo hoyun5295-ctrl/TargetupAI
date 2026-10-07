@@ -22,6 +22,7 @@ import HelpQuestionsTab from '../components/admin/HelpQuestionsTab'; // ★ 2026
 import FeatureInterestTab from '../components/admin/FeatureInterestTab'; // ★ 2026-10-06 기능 관심 업체(ceo 전용)
 import IdentityStatusTab from '../components/admin/IdentityStatusTab'; // ★ 2026-10-07 본인인증 현황(ceo 전용)
 import IntroLeadsTab from '../components/admin/IntroLeadsTab'; // ★ 2026-10-07 소개 방문 · 시연 요청(ceo · suran)
+import WatchLogTab from '../components/admin/WatchLogTab'; // ★ 2026-10-07 감시 기록(ceo 전용)
 import PrecheckUsageTab from '../components/admin/PrecheckUsageTab'; // ★ 2026-09-26 스팸 검사·맞춤법 사용 현황(ceo 전용)
 import SalesOutreachModal from '../components/admin/SalesOutreachModal'; // ★ 2026-08-24 AI 영업 아웃리치(ceo 전용 · 모달)
 import AgencyEmailSendersModal from '../components/admin/AgencyEmailSendersModal'; // ★ 2026-08-26 대행발송 허용 발신 이메일(§18)
@@ -98,7 +99,7 @@ export default function AdminDashboard() {
   const navigate = useNavigate();
   const { user, logout } = useAuthStore();
 
-  const [activeTab, setActiveTab] = useState<'companies' | 'users' | 'scheduled' | 'callbacks' | 'plans' | 'requests' | 'deposits' | 'credits' | 'allCampaigns' | 'stats' | 'billing' | 'syncAgents' | 'auditLogs' | 'lineGroups' | 'templates' | 'loginBlocks' | 'agentDeploy' | 'marketingDiagnosis' | 'spamBlock' | 'geoAccess' | 'helpQuestions' | 'agencyMail' | 'agencyLedger' | 'adminAccounts' | 'precheckUsage' | 'featureInterest' | 'identityStatus' | 'introLeads' | 'opsRecords'>('companies');
+  const [activeTab, setActiveTab] = useState<'companies' | 'users' | 'scheduled' | 'callbacks' | 'plans' | 'requests' | 'deposits' | 'credits' | 'allCampaigns' | 'stats' | 'billing' | 'syncAgents' | 'auditLogs' | 'lineGroups' | 'templates' | 'loginBlocks' | 'agentDeploy' | 'marketingDiagnosis' | 'spamBlock' | 'geoAccess' | 'helpQuestions' | 'agencyMail' | 'agencyLedger' | 'adminAccounts' | 'precheckUsage' | 'featureInterest' | 'identityStatus' | 'introLeads' | 'watchLog' | 'opsRecords'>('companies');
   // ★ 2026-06-11: 감사 로그 열람 권한 (AUDIT_LOG_VIEWER_IDS — 기본 ceo 전용) — 허용 계정에만 메뉴/탭 노출
   const [auditAccessAllowed, setAuditAccessAllowed] = useState(false);
   // ★ 2026-08-27 직원 계정·권한 (전송자격인증 3.2·3.3) — 권한분류표 원본은 서버(utils/admin-role.ts)
@@ -124,6 +125,7 @@ export default function AdminDashboard() {
   const [featureInterestAllowed, setFeatureInterestAllowed] = useState(false); // ★ 2026-10-06 기능 관심 업체(ceo 전용)
   const [identityStatusAllowed, setIdentityStatusAllowed] = useState(false); // ★ 2026-10-07 본인인증 현황(ceo 전용)
   const [introLeadsAllowed, setIntroLeadsAllowed] = useState(false); // ★ 2026-10-07 소개 방문 · 시연 요청(ceo · suran)
+  const [watchLogAllowed, setWatchLogAllowed] = useState(false); // ★ 2026-10-07 감시 기록(ceo 전용)
   const [precheckUsageAllowed, setPrecheckUsageAllowed] = useState(false); // ★ 2026-09-26 스팸 검사·맞춤법 사용 현황(ceo 전용)
   // ★ 2026-08-24 AI 영업 아웃리치(ceo 전용 · 모달) — 서버 /access가 유일 소스, 미허용 = 메뉴 자체 미노출
   const [outreachAllowed, setOutreachAllowed] = useState(false);
@@ -1160,6 +1162,13 @@ useEffect(() => {
       const d = await r.json();
       setIntroLeadsAllowed(d.allowed === true);
     } catch { setIntroLeadsAllowed(false); }
+    try {
+      const token = localStorage.getItem('token');
+      // ★ 2026-10-07 감시 기록 — 허용 계정(기본 ceo)에만 메뉴 노출
+      const r = await fetch('/api/admin/watch-log/access', { headers: { Authorization: `Bearer ${token}` } });
+      const d = await r.json();
+      setWatchLogAllowed(d.allowed === true);
+    } catch { setWatchLogAllowed(false); }
     try {
       const token = localStorage.getItem('token');
       // ★ 2026-08-16: 신규마케팅진단 접근(mount 1회) — 허용이면 신규 리드 뱃지도 함께
@@ -4791,6 +4800,8 @@ const handleApproveRequest = async (id: string) => {
                   ...(auditAccessAllowed ? [{ key: 'auditLogs', label: '감사 로그' }] : []),
                   // ★ 2026-10-07 (Harold) 본인인증 현황 = 허용 계정(기본 ceo)에만 노출 · 다른 계정은 메뉴 자체가 없다
                   ...(identityStatusAllowed ? [{ key: 'identityStatus', label: '본인인증 현황' }] : []),
+                  // ★ 2026-10-07 (Harold) 감시 기록 = 허용 계정(기본 ceo)에만 노출
+                  ...(watchLogAllowed ? [{ key: 'watchLog', label: '감시 기록' }] : []),
                   // ★ 2026-10-03 운영 기록 대장 — 작성 · 확인은 화면이 서버 판정(meta)을 받아 연다
                   ...(myPermRead.opsRecords === true ? [{ key: 'opsRecords', label: '운영 기록 대장' }] : []),
                 ],
@@ -6038,6 +6049,7 @@ const handleApproveRequest = async (id: string) => {
         {activeTab === 'featureInterest' && featureInterestAllowed && <FeatureInterestTab />}
         {activeTab === 'identityStatus' && identityStatusAllowed && <IdentityStatusTab />}
         {activeTab === 'introLeads' && introLeadsAllowed && <IntroLeadsTab />}
+        {activeTab === 'watchLog' && watchLogAllowed && <WatchLogTab />}
 
         {activeTab === 'geoAccess' && (
           <div className="space-y-6">

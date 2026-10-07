@@ -171,6 +171,13 @@ export const PERMISSION_MATRIX: PermissionRow[] = [
     levels: { super: 'R', lead: 'NONE', support: 'NONE' },
   },
   {
+    // ★ 2026-10-07 감시 기록 — ENV 허용 목록(기본 ceo)과 AND(Harold 「감시는 대표만」)
+    key: 'watchLog',
+    area: '감시 기록',
+    screens: '감시 기록(지정 계정 접속 IP · 동시 접속 · 연 화면)',
+    levels: { super: 'R', lead: 'NONE', support: 'NONE' },
+  },
+  {
     // ★ 2026-10-07 공개 소개 페이지 방문 · 시연 요청 — ENV 허용 목록(기본 ceo,suran)과 AND(Harold 「나랑 suran 만」)
     key: 'introLeads',
     area: '소개 방문 · 시연 요청',

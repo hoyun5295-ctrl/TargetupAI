@@ -116,6 +116,14 @@ export function isFeatureInterestViewer(superAdminId?: string | null): Promise<b
 }
 
 /**
+ * ★ 2026-10-07 감시 기록(지정 계정이 쓴 IP · 동시 접속 · 연 화면) 열람 권한 — WATCH_VIEWER_IDS(기본 'ceo').
+ * Harold 명시: 감시는 대표만 본다 · 다른 계정은 메뉴 자체가 없다. 다른 축과 별도 env.
+ */
+export function isWatchLogViewer(superAdminId?: string | null): Promise<boolean> {
+  return isSuperAdminAllowed(superAdminId, 'WATCH_VIEWER_IDS', 'ceo', 'watch-log', 'watchLog');
+}
+
+/**
  * ★ 2026-10-07 공개 소개 페이지 방문 · 시연 요청 열람 권한 — INTRO_LEADS_VIEWER_IDS(기본 'ceo,suran').
  * Harold 명시: 「슈퍼관리자에 나랑 suran 이 계정만 볼 수 있도록」. 다른 축과 별도 env.
  */

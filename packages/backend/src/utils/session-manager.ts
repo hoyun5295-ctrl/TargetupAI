@@ -148,8 +148,9 @@ export interface SessionConflict {
 
 /** 세션 회전 결과 — 불리언으로 접지 않는다(회전됨 / 인계 동의 대기 는 다른 상태다) */
 export type RotateOutcome =
-  | { status: 'rotated'; takeover: boolean }
-  | { status: 'conflict'; conflict: SessionConflict }
+  // ★ 2026-10-07 liveIp = 밀려난(또는 지금 쓰는) 쪽 세션의 접속 IP — 감시 알림 · 감사 기록용(화면 응답에는 싣지 않는다)
+  | { status: 'rotated'; takeover: boolean; liveIp?: string | null }
+  | { status: 'conflict'; conflict: SessionConflict; liveIp?: string | null }
   /** 국외 접근 차단 — 세션을 만들지 않았다(전송자격인증 2.2) */
   | { status: 'geo_blocked'; message: string }
   /**
@@ -420,13 +421,14 @@ export async function rotateUserSession(
         },
         takeoverTicket: issueTakeoverTicket(params.userId, params.appSource, live.id),
       },
+      liveIp: live.ip_address ? String(live.ip_address) : null,
     };
   }
 
   // 만료된 채 is_active=true로 남은 행도 여기서 함께 정리된다
   await invalidateAppSessions(params.userId, params.appSource);
   await createUserSession(params);
-  return { status: 'rotated', takeover: !!live };
+  return { status: 'rotated', takeover: !!live, liveIp: live?.ip_address ? String(live.ip_address) : null };
 }
 
 /**

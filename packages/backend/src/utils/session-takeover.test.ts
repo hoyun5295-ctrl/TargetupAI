@@ -85,7 +85,7 @@ describe('접속 인계 — 동의 없이는 기존 세션을 끊지 않는다',
 
     const outcome = await rotateUserSession(params());
 
-    expect(outcome).toEqual({ status: 'rotated', takeover: false });
+    expect(outcome).toEqual({ status: 'rotated', takeover: false, liveIp: null });
     expect(writeCalls()).toHaveLength(2); // 무효화 + 생성
   });
 
@@ -98,7 +98,7 @@ describe('접속 인계 — 동의 없이는 기존 세션을 끊지 않는다',
     mockDb([LIVE_ROW]);
     const second = await rotateUserSession(params(first.conflict.takeoverTicket));
 
-    expect(second).toEqual({ status: 'rotated', takeover: true });
+    expect(second).toEqual({ status: 'rotated', takeover: true, liveIp: '211.234.56.78' }); // ★1007 밀려난 쪽 IP(감시 · 감사 기록용)
     expect(writeCalls()).toHaveLength(2);
   });
 
