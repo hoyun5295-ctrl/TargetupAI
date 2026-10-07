@@ -290,3 +290,47 @@ describe('로그인 안내 창 — 못 쓰는 회사 · 로그인마다 한 번 
     expect(tab).toContain("const next = f.featureId === LOGIN_PROMO_ID ? f.goCompanies : f.pricingCompanies;");
   });
 });
+
+/**
+ * ★ 2026-10-07 업체별 표 = 한 줄 · 본 기능 말줄임 + 말풍선 · 상세 창(Harold 목업 2안 「회사명부터 다 깨진다 · 클릭하면 모달」)
+ */
+describe('업체별 표 — 한 줄 · 상세 창', () => {
+  const tab = front('components/admin/FeatureInterestTab.tsx');
+  const code = tab.replace(/\/\*[\s\S]*?\*\/|\/\/[^\n]*/g, '');
+  const table = tab.slice(tab.indexOf('업체별 · 마지막 본 순'), tab.indexOf('{tip && ('));
+
+  it('줄마다 한 줄 — 줄바꿈 금지 · 회사명 · 본 기능은 칸 안 상자가 말줄임', () => {
+    expect(table).toContain('cursor-pointer whitespace-nowrap');
+    expect(table).toContain('<span className="block max-w-[200px] truncate" title={c.companyName}>{c.companyName}</span>');
+    expect(table).toContain('className="block max-w-[260px] truncate text-cyan-800"');
+    // 옛 펼침 줄 · 칩 여러 줄 · 사람 이름 두 줄은 없어졌다
+    expect(code).not.toContain('openRow');
+    expect(code).not.toContain('Fragment');
+    expect(table).not.toContain('c.users.slice(0, 2)');
+  });
+
+  it('본 기능 말풍선 = 화면 기준 자리(가로 스크롤 상자에 잘리지 않게) · 스크롤하면 닫힘', () => {
+    expect(tab).toContain('className="fixed z-[60]');
+    expect(tab).toContain("window.addEventListener('scroll', hide, true);");
+    expect(table).toContain('onMouseLeave={() => setTip(null)}');
+  });
+
+  it('줄을 누르면(Enter · Space 도) 상세 창 · 닫기 = X · [닫기] · ESC 만(배경 클릭 닫기 없음)', () => {
+    expect(table).toContain('onClick={() => { setTip(null); setDetail(c); }}');
+    expect(table).toContain("if (e.key === 'Enter' || e.key === ' ')");
+    expect(tab).toContain('{detail && <CompanyDetailModal c={detail} onClose={() => setDetail(null)} />}');
+    const modal = tab.slice(tab.indexOf('function CompanyDetailModal'), tab.indexOf('export default function FeatureInterestTab'));
+    expect(modal).toContain("if (e.key === 'Escape' && !e.isComposing)");
+    expect(modal).toContain('role="dialog" aria-modal="true"');
+    expect(modal).not.toMatch(/bg-gray-900\/45[^"]*"\s+onClick/);
+    expect(modal.match(/onClick=\{onClose\}/g)?.length).toBe(2);
+    // 상세 창은 표 응답 값만 그린다(서버 조회 추가 없음)
+    expect(modal).not.toContain('fetch(');
+  });
+
+  it('줄표 · 모델명 · native dialog 0', () => {
+    expect(code).not.toContain('—');
+    expect(code).not.toMatch(/Opus|Sonnet|Haiku|GPT|Claude|Anthropic|claude-/);
+    expect(code).not.toMatch(/\b(alert|confirm|prompt)\(/);
+  });
+});
