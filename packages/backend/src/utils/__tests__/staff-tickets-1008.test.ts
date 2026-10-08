@@ -45,6 +45,7 @@ describe('직원 접수 1008', () => {
     const src = read('backend/src/routes/admin.ts');
     expect(src.match(/hiddenAccessOwnerIds\(req\.user\?\.userId\)/g)?.length).toBe(3);
     expect(src.match(/user_id::text <> ALL\(\$\d::text\[\]\)/g)?.length).toBe(4);
+    expect(src.match(/scope = 'global' AND COALESCE\((a\.)?approved_by::text, ''\) = ANY\(\$1::text\[\]\)/g)?.length).toBe(2);
     expect(read('backend/src/utils/audit-log.ts')).toContain("process.env.PRIVATE_ACCESS_LOGIN_IDS || 'ceo'");
   });
 

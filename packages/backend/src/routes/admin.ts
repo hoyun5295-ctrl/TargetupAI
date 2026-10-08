@@ -1075,7 +1075,7 @@ router.get('/geo/status', authenticate, requireSuperAdmin, requireAdminArea('geo
     const hidden = await hiddenAccessOwnerIds(req.user?.userId);
     const [cidrs, exceptions] = await Promise.all([
       query(`SELECT COUNT(*)::int AS n, MAX(updated_at) AS updated_at FROM geo_allow_cidrs`),
-      query(`SELECT COUNT(*)::int AS n FROM access_origin_allowlist WHERE is_active = true AND (user_id IS NULL OR user_id::text <> ALL($1::text[]))`, [hidden]),
+      query(`SELECT COUNT(*)::int AS n FROM access_origin_allowlist WHERE is_active = true AND (user_id IS NULL OR user_id::text <> ALL($1::text[])) AND NOT (scope = 'global' AND COALESCE(approved_by::text, '') = ANY($1::text[]))`, [hidden]),
     ]);
     return res.json({
       cidrCount: cidrs.rows[0]?.n || 0,
@@ -1114,6 +1114,8 @@ router.get('/geo/exceptions', authenticate, requireSuperAdmin, requireAdminArea(
          LEFT JOIN users u ON u.id = a.user_id
          LEFT JOIN super_admins s ON s.id = a.approved_by
         WHERE (a.user_id IS NULL OR a.user_id::text <> ALL($1::text[]))
+          -- ★1008 본인 전용 계정이 직접 승인한 global 예외(출장 IP)도 본인에게만 — 슈퍼관리자는 user_id 칸(→ users)에 못 들어가 global 로 건다
+          AND NOT (a.scope = 'global' AND COALESCE(a.approved_by::text, '') = ANY($1::text[]))
         ORDER BY a.is_active DESC, a.approved_at DESC
         LIMIT 300`,
       [hidden]
