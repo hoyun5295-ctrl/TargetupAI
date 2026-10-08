@@ -335,8 +335,8 @@ export default function DirectSendPanel(props: DirectSendPanelProps) {
     onSendAnyway: () => { void stageAndConfirm(); },
   });
 
-  // ── 본문 칸: 창(전체 화면) 높이를 채우고 넘치면 칸 안 스크롤 + 미리보기 안내 = 공용 훅(★2026-09-29 R112 · 직접 타겟 발송 창과 같이 쓴다) ──
-  const { editorScrollRef, editorOverflow, syncEditorOverflow, focusEditorFromBlank } = useEditorFill(
+  // ── 본문 칸: 창(전체 화면) 높이를 채우고 넘치면 칸 안 스크롤 = 공용 훅(★2026-09-29 R112 · 직접 타겟 발송 창과 같이 쓴다) ──
+  const { editorScrollRef, focusEditorFromBlank } = useEditorFill(
     directTextareaRef, directCursorPosRef,
     [directMessage, directMsgType, adTextEnabled, mmsUploadedImages.length, directSendChannel],
   );
@@ -734,7 +734,6 @@ export default function DirectSendPanel(props: DirectSendPanelProps) {
                     ref={editorScrollRef}
                     className="ds-editor-body ds-editor-flow"
                     onMouseDown={focusEditorFromBlank}
-                    onScroll={syncEditorOverflow}
                   >
                     {adTextEnabled && (
                       <span className="ds-ad-prefix absolute left-0 top-0 z-10">(광고)</span>
@@ -758,12 +757,6 @@ export default function DirectSendPanel(props: DirectSendPanelProps) {
                       </div>
                     )}
                   </div>
-                  {editorOverflow && (
-                    <div className="ds-editor-more">
-                      글이 길어 아래가 가려져 있어요
-                      <button type="button" onClick={openDirectPreview}>미리보기로 한 번에 보기</button>
-                    </div>
-                  )}
 
                   {/* MMS 이미지 박스 */}
                   {directMsgType === 'MMS' && (

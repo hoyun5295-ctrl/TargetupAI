@@ -1645,20 +1645,6 @@
 .ds-optout-line svg { color: var(--ds-amber-600); width: 12px; height: 12px; }
 .ds-optout-line small { font-size: 11px; color: var(--ds-stone-400); font-weight: 500; margin-left: 4px; opacity: 0; transition: opacity .15s; }
 .ds-optout-line:hover small { opacity: 1; }
-.ds-editor-more {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-top: 6px;
-  padding: 7px 10px;
-  border-radius: 8px;
-  background: var(--ds-stone-50);
-  border: 1px solid var(--ds-stone-150);
-  font-size: 12px;
-  color: var(--ds-stone-600);
-  flex-shrink: 0;
-}
-.ds-editor-more button { margin-left: auto; border: 0; background: transparent; color: var(--ds-emerald-700); font-weight: 700; font-size: 12px; cursor: pointer; font-family: inherit; }
 
 /* 편집 칸 안 도구 줄 — 줄바꿈 금지 · 버튼은 줄지 않는다 */
 .ds-editor-tools {

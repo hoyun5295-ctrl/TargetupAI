@@ -698,6 +698,8 @@ grep "bind ack" /home/administrator/agent*/logs/*mtdeliver.txt
 
 ### 6-4-A. Agent가 죽었을 때 복구 순서 (★2026-08-31 실사고 기반 런북)
 
+> ⛔ **이 런북은 QTmsg 라인(SMSQ_SEND_1~11) 전용이다.** 비토 라인(13~16)은 엔진에 넘긴 뒤 결과가 올 때까지 SMSQ 행을 `100` 으로 둔다 = **결과 대기**. 비토 라인의 「시각 지난 100」은 **비토엔진 관제(.65)의 결과 대기 수와 먼저 대조**하고, 같으면 4000 으로 닫지 않는다(잘못된 환불). ★1007 실측 = 4,480 = 4,480.
+
 > ⛔ **재기동을 먼저 하지 않는다.** 올리는 순간 `status_code=100` 중 발송 시각이 지난 건이 즉시 나간다.
 > 늦은 발송은 0611 에이치피오 사고(250만원)의 형태다. **적체를 판정하고 늦은 건을 닫은 뒤에 올린다.**
 
@@ -742,6 +744,22 @@ docker exec -i targetup-mysql mysql -usmsuser -p smsdb -e "SELECT status_code, C
 `100`이 줄고 성공 코드가 늘면 정상 소화 중이다.
 
 > **실사고 기록(2026-08-31)** — agent6이 18:32:16에 JVM SIGSEGV(`GCTaskThread`·`libjvm.so`)로 죽었다. 로그는 PING/PONG 정상 중 예고 없이 끊겼고 시스템 로그엔 흔적이 없었으며 OOM도 아니었다. `hs_err_pid1779348.log`가 유일한 증거였다. **11개 에이전트 통틀어 크래시 덤프 1건 = 일회성**(반복이면 JVM 버전·서버 메모리를 봐야 한다). 영향 = 어제 접수 721건 미발송(7개 캠페인·아난티 등) + 오늘 740건 지연. 조치 = 721건 4000 마킹(잔존 0 확인) 후 재기동.
+
+### 6-4-B. .62 재부팅 뒤 기동 순서 (★2026-10-07 실측 · Harold 실행)
+
+도커 4개 · 비토 에이전트 4개 · tailscale 은 저절로 뜬다. **pm2 · QTmsg 는 손으로 켠다**(자동 기동 장치 없음 · SERVERS.md .62 절).
+```bash
+# 1) 재부팅 전(administrator) — 상태 기록 · pm2 목록 저장 · 꺼진 QTmsg 찾기(커맨드라인에 agentN 이 안 찍히니 관리 포트로)
+pm2 save; pm2 list; ss -ltn | grep -oE ':(900[1-9]|901[01])\b' | sort -uV | tr '\n' ' '
+# 2) 재부팅 뒤(administrator) — 도커 확인 · pm2 되살리기
+docker ps --format '{{.Names}}  {{.Status}}'; pm2 resurrect; pm2 list
+# 3) QTmsg 11개(administrator)
+for i in 1 2 3 4 5 6 7 8 9 10 11; do (cd /home/administrator/agent$i/bin && ./qtmsg.sh start >/dev/null 2>&1); done
+# 4) 비토 에이전트(root) — failed 면 /run/vito-agent 부터 본다(★1007 tmpfiles 등록으로 해소 · /etc/tmpfiles.d/vito-agent.conf)
+systemctl is-active bito-agent bito-agent-hanjul02 bito-agent-hanjul03 bito-agent-hanjul-04 tailscaled
+```
+- 재시작 권한(systemctl restart)은 **root 로**. administrator 로 하면 비밀번호 창이 뜬다(넣지 말고 취소).
+- 끝나면 바깥에서 `hanjul.ai` · `/api/plans` 200 확인 · 다음 날 08:30 백업 점검 문자 확인.
 
 ### 6-5. 백엔드 라인그룹 기반 분배
 - 환경변수: `SMS_TABLES=SMSQ_SEND_1,SMSQ_SEND_2,SMSQ_SEND_3,SMSQ_SEND_4,SMSQ_SEND_5,SMSQ_SEND_6,SMSQ_SEND_7,SMSQ_SEND_8,SMSQ_SEND_9,SMSQ_SEND_10,SMSQ_SEND_11`

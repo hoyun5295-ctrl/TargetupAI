@@ -1,4 +1,4 @@
-import { Sparkles, Users, Eye, Type, Archive, Save, ImagePlus, Bell, Search, RotateCcw, Trash2, Wand2, Loader2, Megaphone, Clock, Server, RefreshCw, X, Plus, ChevronDown, Link2 } from 'lucide-react';
+import { Sparkles, Users, Eye, Type, Archive, Save, ImagePlus, Bell, Search, RotateCcw, Trash2, Wand2, Loader2, Megaphone, Server, RefreshCw, X, Plus, ChevronDown, Link2 } from 'lucide-react';
 import SendWorkspaceShell, { FIELD_CLASS_INDIGO, WorkspaceNotice } from './shared/SendWorkspaceShell';
 import { CUI_PILL_BASE, CUI_PANEL, CUI_SCROLL_X, CUI_THEAD, CUI_TH, CUI_TR, CUI_TD, CUI_CELL_DATA, CUI_BTN_GHOST, CUI_BTN_OUTLINE } from '../utils/console-ui';
 import { useEffect, useRef, useState } from 'react';
@@ -22,7 +22,7 @@ import { useSendPrecheck } from './direct-send/useSendPrecheck';
 import { useEditorFill } from './direct-send/useEditorFill';
 import SendBar from './direct-send/SendBar';
 import {
-  searchTargetExtraction, removeFromTargetExtraction, longestRowOf, formatExtractionDeadline,
+  searchTargetExtraction, removeFromTargetExtraction, longestRowOf,
   type TargetExtraction,
 } from '../utils/target-extraction';
 
@@ -361,7 +361,7 @@ export default function TargetSendModal({
   };
 
   // ====== ★ 2026-09-29 R112 본문 칸 = 직접발송과 같은 공용 훅(창 높이를 채우고 넘치면 칸 안 스크롤) ======
-  const { editorScrollRef, editorOverflow, syncEditorOverflow, focusEditorFromBlank } = useEditorFill(
+  const { editorScrollRef, focusEditorFromBlank } = useEditorFill(
     smsTextareaRef, null,
     [targetMessage, targetMsgType, adTextEnabled, mmsUploadedImages.length, targetSendChannel, show],
   );
@@ -523,7 +523,6 @@ export default function TargetSendModal({
   const rows = searchMode ? (searchResult?.rows ?? []) : sample;
   const restCount = Math.max(0, count - sample.length);
   const approvedTpl = ['approved', 'APPROVED', 'APR', 'A'].includes(kakaoSelectedTemplate?.status);
-  const deadline = extraction?.expiresAt ? formatExtractionDeadline(extraction.expiresAt) : '';
 
   const SEG_ON = 'flex-1 h-9 rounded-lg text-[13px] font-semibold text-indigo-700 bg-white shadow-sm transition';
   const SEG_OFF = 'flex-1 h-9 rounded-lg text-[13px] font-medium text-slate-500 hover:text-slate-900 transition';
@@ -572,7 +571,6 @@ export default function TargetSendModal({
           <div
             ref={editorScrollRef}
             onMouseDown={focusEditorFromBlank}
-            onScroll={syncEditorOverflow}
             className="flex-1 min-h-[120px] overflow-y-auto px-4 pt-4 pb-3 cursor-text"
           >
             <div className="relative">
@@ -599,12 +597,6 @@ export default function TargetSendModal({
               </div>
             )}
           </div>
-          {editorOverflow && (
-            <div className="shrink-0 mx-4 mb-2 flex items-center gap-2 px-2.5 py-1.5 rounded-lg bg-slate-50 ring-1 ring-slate-200 text-[12px] text-slate-600">
-              글이 길어 아래가 가려져 있어요
-              <button type="button" onClick={handlePreview} className="ml-auto font-bold text-emerald-700 hover:text-emerald-800">미리보기로 한 번에 보기</button>
-            </div>
-          )}
           {/* ★ 2026-09-10 문자로 보낼 수 없는 글자 — 누르면 본문·제목을 대체표로 바꾼다 */}
           <SmsCharsetNotice
             className="shrink-0 mx-4 mb-3"
@@ -911,13 +903,10 @@ export default function TargetSendModal({
           <div className="flex items-center gap-2.5 flex-wrap">
             <span className="text-[15px] font-semibold text-slate-900">수신자 목록</span>
             <span className={`${CUI_PILL_BASE} bg-indigo-100 text-indigo-700 tabular-nums`}>총 {count.toLocaleString()}건</span>
-            {extractionExpired ? (
+            {/* ★1008 보관 마감 시각 줄 제거(남지현 접수 · 예약 시각과 헷갈림) — 만료됐을 때만 알린다 */}
+            {extractionExpired && (
               <span className={`${CUI_PILL_BASE} bg-slate-100 text-slate-600`}>만료됨</span>
-            ) : deadline ? (
-              <span className={`${CUI_PILL_BASE} bg-white text-slate-600 font-medium ring-1 ring-slate-200`} title="추출한 명단은 23시간 동안 보관돼 그 안에 보낼 수 있습니다">
-                <Clock className="w-3.5 h-3.5 text-slate-400" />{deadline}까지 발송 가능
-              </span>
-            ) : null}
+            )}
             {selectedPhones.size > 0 && <span className={`${CUI_PILL_BASE} bg-slate-100 text-slate-600`}>{selectedPhones.size}건 선택</span>}
           </div>
           {!extractionExpired && (

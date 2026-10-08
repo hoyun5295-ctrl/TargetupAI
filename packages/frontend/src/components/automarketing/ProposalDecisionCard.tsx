@@ -12,6 +12,7 @@ import StatusBadge from './StatusBadge';
 import TargetRecipientsModal, { arrayPager, TargetRecipient } from '../TargetRecipientsModal';
 import SmsCharsetNotice from '../SmsCharsetNotice';
 import { hasUnsupportedSmsChars, SMS_CHARSET_BLOCK_MESSAGE } from '../../utils/smsSafeChars';
+import { buildAdMessageFront, buildAdSubjectFront } from '../../utils/formatDate';
 
 // [타겟확인] 응답 — 1회 로드(LIMIT 100) 후 클라 페이징(서버 재호출 0)
 interface TargetListInfo {
@@ -279,13 +280,13 @@ export default function ProposalDecisionCard({
       <div className="text-[10px] text-slate-400 mb-1">
         발송 문안 · 변형 {variantLetter(effectiveIdx)}{(editedBody != null || editedSubject != null) ? ' · 편집됨' : ''}
       </div>
-      {/* ★ 2026-07-10: LMS/MMS 제목 표시 — 광고 발송 시 "(광고)"는 발송 시점 자동 부착(buildAdSubject) */}
+      {/* ★ 2026-10-08 (남지현 접수) 고객이 받는 모양 그대로 — 자동마케팅 = 늘 광고. (광고) · 무료수신거부를 발송과 같은 CT 미러로 붙인다 */}
       {isLongType && (
         <div className="text-[12px] text-slate-700 mb-1.5 pb-1.5 border-b border-slate-200">
-          <span className="text-slate-400 mr-1.5">제목</span>{effectiveSubject || <span className="text-rose-700">제목 없음. 상세에서 입력해주세요</span>}
+          <span className="text-slate-400 mr-1.5">제목</span>{effectiveSubject ? buildAdSubjectFront(effectiveSubject, channelName, true) : <span className="text-rose-700">제목 없음. 상세에서 입력해주세요</span>}
         </div>
       )}
-      <div className="text-[13px] text-slate-700 leading-relaxed whitespace-pre-wrap">{effectiveBody}</div>
+      <div className="text-[13px] text-slate-700 leading-relaxed whitespace-pre-wrap">{buildAdMessageFront(effectiveBody, channelName, true, proposal.adOptOut || '')}</div>
     </div>
   );
 

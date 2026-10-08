@@ -95,18 +95,3 @@ export function fillTargetExtractionCallback(ext: TargetExtraction, column: stri
 export function longestRowOf(ext: TargetExtraction | null): any[] {
   return ext ? [ext.longest] : [];
 }
-
-/** 만료 시각 표시(예: "내일 오전 11:40") — 오늘·내일·그 밖은 날짜 */
-export function formatExtractionDeadline(expiresAt: string, now: Date = new Date()): string {
-  const t = new Date(expiresAt);
-  if (Number.isNaN(t.getTime())) return '';
-  const kst = (d: Date) => new Date(d.toLocaleString('en-US', { timeZone: 'Asia/Seoul' }));
-  const a = kst(now);
-  const b = kst(t);
-  const dayDiff = Math.round((new Date(b.getFullYear(), b.getMonth(), b.getDate()).getTime()
-    - new Date(a.getFullYear(), a.getMonth(), a.getDate()).getTime()) / 86400000);
-  const time = t.toLocaleTimeString('ko-KR', { timeZone: 'Asia/Seoul', hour: 'numeric', minute: '2-digit' });
-  if (dayDiff === 0) return `오늘 ${time}`;
-  if (dayDiff === 1) return `내일 ${time}`;
-  return `${t.toLocaleDateString('ko-KR', { timeZone: 'Asia/Seoul', month: 'long', day: 'numeric' })} ${time}`;
-}

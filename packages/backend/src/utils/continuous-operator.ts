@@ -38,7 +38,7 @@ import { insertProposalVariants, recommendVariantForProposal, recordVariantRewar
 import { recordAdminStopLearning, decideSpamOutcome, buildSpamRegeneratePrompt, spamCheckPassedIndex, AUTO_SEND_SPAM_VERIFIED_SQL, PROPOSAL_SPAM_RETEST_LIMIT, resolveRetestCopy } from './continuous-operator-policy';
 import { resolveAutoSendLeadMinutes, computeScheduledSendAt, decideSendOutcome, decideStuckSendingRecovery, decideBudgetGuard, decideBudgetAlert, isSendableHourKst, validateScheduleTimeSendable, buildAutoSendPrepInfoBody, buildPendingReviewNoticeBody, computeNextOccurrence, computeNextGenerationRun, normalizeSendTimeMode, SendTimeMode, normalizeCopyStyle, buildCopyStylePromptBlock, CopyStyle, wrapOperatorNoticeBody, normalizeTargetHint, TargetHint, applyBenefitToBody, hasUneditedBenefitPlaceholder, detectMissedOperatorRound , computeApprovalWindow, buildRenewalNoticeBody, countEmptyRounds, isWithinApprovalWindow, approvalSummarySince } from './autosend-policy';
 import { stableJson } from './agent-protocol';
-import { getOpt080Number } from './messageUtils';
+import { getOpt080Number, buildAdMessage } from './messageUtils';
 // ★ D227+ 검증된 스팸 자산 재사용 (auto-campaign-worker와 동일 패턴) — 실제 테스트폰 발송 + AI 재생성 + 재테스트
 import { autoSpamTestWithRegenerate, computeMessageHash } from './spam-test-queue';
 import { generateMessages, stripIncompatibleEmojis } from '../services/ai';
@@ -237,6 +237,8 @@ export interface OperatorProposal {
   createdAt: Date;
   operatorName?: string;
   operatorObjective?: string;
+  /** ★ 2026-10-08 광고 무료거부 번호(080) — 화면이 문안을 실제 발송 모양으로 보여 줄 때 쓴다(listProposals 만 채움) */
+  adOptOut?: string;
 }
 
 // ════════════════════════════════════════════════════════════════════
@@ -1254,6 +1256,9 @@ export async function generateProposalForOperator(operatorId: string, opts?: { p
   // ★ 2026-06-06 광고 가드: 광고면 무료거부 번호(080) 해석 결과가 있어야 자율 발송 자격(정보통신망법). 발송 직전 dispatchProposalSend에서도 재확인.
   const adOpt080 = isAd ? await getOpt080Number(operator.createdBy, operator.companyId) : '';
   const adRejectOk = !isAd || !!adOpt080;
+  // ★ 2026-10-08 (남지현 접수 cmuyx9jav0sedjnn4y7clu5sq) 담당자 문자의 「실제 발송될 문안」 = 고객이 받는 모양 그대로.
+  //   옛: 순수 본문만 보내 (광고) · 무료수신거부가 빠져 보였다(실발송 · 3사 검사는 붙는다). 같은 CT(buildAdMessage) · 같은 080.
+  const toSentCopy = (body: string) => buildAdMessage(body, channelForSpam, isAd, adOpt080);
 
   // ★ D210+ Phase 3 B-1: risk 회사별 max_risk 비교 (low<medium<high — 회사 max 초과 차단)
   const riskRank: Record<string, number> = { low: 1, medium: 2, high: 3 };
@@ -1396,7 +1401,8 @@ export async function generateProposalForOperator(operatorId: string, opts?: { p
         subject: bestSubject || undefined,
         variants: spamVariants.length > 0 ? spamVariants : [{ variantId: 'A', messageText: bestMessage, subject: bestSubject || undefined }],
         isAd: !!isAd,
-        rejectNumber: ctx.reject_number || undefined,
+        // ★ 2026-10-08 검사 080 = 실제 발송과 같은 값(getOpt080Number · 담당자 본인 080 먼저). 옛: 회사 번호라 담당자 080 이 다르면 검사 문안 ≠ 발송 문안
+        rejectNumber: adOpt080 || ctx.reject_number || undefined,
         maxRetries: isFixedCopy ? 0 : 2,  // ★ Harold 2026-05-31: AI 재생성 2회 · ★ 2026-10-05 직접 쓴 문안 = 0
         stopOnFirstPass: true,
         budgetMs: TIMEOUTS.operatorSpamVariantsBudget,
@@ -1409,7 +1415,7 @@ export async function generateProposalForOperator(operatorId: string, opts?: { p
             const regen = await runInCreditBundle(() => generateMessages(
               buildSpamRegeneratePrompt(operator.objective, buildCopyStylePromptBlock(operator.copyStyle)),
               { total_count: recipientCount },
-              { channel: channelForSpam, isAd: !!isAd, rejectNumber: ctx.reject_number || undefined, model: 'opus', companyId: operator.companyId },
+              { channel: channelForSpam, isAd: !!isAd, rejectNumber: adOpt080 || ctx.reject_number || undefined, model: 'opus', companyId: operator.companyId },
             ));
             const nv = regen.variants?.[0] as any;
             if (nv) return { messageText: String(nv.message_text || nv.sms_text || nv.lms_text || nv.body || ''), subject: nv.subject };
@@ -1505,7 +1511,7 @@ export async function generateProposalForOperator(operatorId: string, opts?: { p
         //   ★ Codex 1R — 아직 자동 발송 예정이고 사람이 손대지 않은 제안일 때만(검사 중 승인·중지됐으면 알림이 사실과 다르다)
         if (autoExecuteEligible && untouched && liveStatus === 'scheduled') {
           // ★ 2026-07-02: 재생성으로 문안이 교체됐으면 실제 발송될 통과 문안을 통지 (직전엔 원본을 보내 통지≠실발송 불일치)
-          await sendAutoSendPrepNotice(operator, proposalRes.rows[0].id, finalNoticeCopy, scheduledSendAt, {
+          await sendAutoSendPrepNotice(operator, proposalRes.rows[0].id, toSentCopy(finalNoticeCopy), scheduledSendAt, {
             recipientCount,
             costEstimate,
             channelLabel: channelForSpam,
@@ -1536,7 +1542,7 @@ export async function generateProposalForOperator(operatorId: string, opts?: { p
     const curRes = await query(`SELECT status FROM operator_proposals WHERE id = $1::uuid`, [proposalRes.rows[0].id]);
     if (curRes.rows[0]?.status === 'pending') {
       if (finalNoticeCopy.trim()) {
-        await notifyOperatorAdmins(operator, '[AI 자동마케팅] 추천 문안', finalNoticeCopy);
+        await notifyOperatorAdmins(operator, '[AI 자동마케팅] 추천 문안', toSentCopy(finalNoticeCopy));
       }
       await notifyOperatorAdmins(
         operator,
@@ -1675,7 +1681,7 @@ export async function listProposals(
   if (scopeUserId) { params.push(scopeUserId); ownerFilter = `AND o.created_by = $${params.length}::uuid`; }
   params.push(Math.min(limit, 200));
   const result = await query(
-    `SELECT p.*, o.name AS operator_name, o.objective AS operator_objective
+    `SELECT p.*, o.name AS operator_name, o.objective AS operator_objective, o.created_by AS operator_created_by
      FROM operator_proposals p
      LEFT JOIN continuous_operators o ON p.operator_id = o.id
      WHERE p.company_id = $1::uuid ${statusFilter} ${ownerFilter}
@@ -1683,7 +1689,13 @@ export async function listProposals(
      LIMIT $${params.length}`,
     params
   );
-  return result.rows.map(mapRowToProposal);
+  // ★ 2026-10-08 (남지현 접수 cmuyx9jav0sedjnn4y7clu5sq) 승인 화면 문안도 고객이 받는 모양으로 — 발송과 같은 080(getOpt080Number · 오퍼레이터 등록자 기준)
+  const opt080By = new Map<string, Promise<string>>();
+  return Promise.all(result.rows.map(async (row: any) => {
+    const owner = row.operator_created_by ? String(row.operator_created_by) : '';
+    if (!opt080By.has(owner)) opt080By.set(owner, getOpt080Number(owner || null, companyId).catch(() => ''));
+    return { ...mapRowToProposal(row), adOptOut: await opt080By.get(owner)! };
+  }));
 }
 
 export async function approveProposal(

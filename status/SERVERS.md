@@ -26,7 +26,7 @@
 ### ★2026-10-06 보안 조치 (.62 · .65 · 특부가 재등록 ⑯ 실측 · Harold 실행)
 - **두 서버 공통**: 침입탐지 Suricata 7.0.3(af-packet `eno1` · `copy-mode` 없음 = 탐지 전용 · ET Open 룰 · `/etc/cron.daily/suricata-update` · systemd 드롭인 `suricata.service.d/limits.conf` CPUQuota .62 200% · .65 400% · Nice 10 · IO idle · 로그 주 1회 × 26) · 웹방화벽 ModSecurity 3.0.12 + CRS 3.3.5(`/etc/nginx/conf.d/modsecurity.conf` → `/etc/nginx/modsec/main.conf` · **DetectionOnly** · 감사 로그 `/var/log/nginx/modsec_audit.log` 헤더만) · ClamAV(`/etc/cron.weekly/clamav-scan` · nice/ionice) · AIDE(초기 색인) · auditd · sysstat · acct · pwquality · SSH 드롭인 `sshd_config.d/90-hardening.conf`(MaxAuthTries 3 · X11 no · ClientAliveCountMax 2 · LogLevel VERBOSE) · `sysctl.d/90-hardening.conf`(리다이렉트 · martians · dmesg/kptr · suid_dumpable · **ip_forward 미변경**) · `modprobe.d/90-hardening.conf`(dccp · sctp · rds · tipc · usb-storage) · core dump 차단 · 경고문 · login.defs 90일(신규 계정만). Lynis .62 66→74 · .65 70→76.
 - **.65**: 자동 보안 업데이트가 `20auto-upgrades` "0" 으로 꺼져 125건 밀려 있었다 → 일괄 적용 · 재부팅(00:44 · 약 2분 정지 · 직전 10분 발송 0 · 고객 Agent 재접속 확인) · 커널 6.8.0-142 · 자동 업데이트 "1" + `needrestart/conf.d/90-list-only.conf`(자동 재시작 안 함 · 도커 무단 재시작 방지). ops.hanjulgw.com 보안 헤더 5종(`snippets/security-headers.conf` · 원본 `/root/bito-dashboard.bak-20261006`) · `server_tokens off`. **관리 API Node 18.19.1 = 지원 종료**.
-- **.62**: 커널 6.8.0-142 설치 · **구동은 124(재부팅 대기)** · 재부팅 전제 = PM2 부팅 자동 기동 · QTmsg 에이전트 기동 정리(아래 리스크 원장 재부팅 공백).
+- **.62**: 커널 6.8.0-142 설치 · ~~구동은 124(재부팅 대기)~~ → **★1007 재부팅 완료(아래 「★1007 재부팅」)** · 재부팅 전제 = PM2 부팅 자동 기동 · QTmsg 에이전트 기동 정리(아래 리스크 원장 재부팅 공백).
 - **TLS 1.0 · 1.1 이 두 서버 모든 도메인에서 실제로 받아진다**(사이트 블록에 1.2+ 를 적어도 `nginx.conf:35` 기본값이 이김 · openssl 실측). Suricata eve 의 TLS 버전으로 24시간 센 뒤 끈다.
 - **⑯에 「조치 예정」으로 약속한 날짜**: TLS 1.2+ · fail2ban 로그 26주 = 10-07 / npm 호환 업데이트(fast-xml-parser critical 포함) = 10-09 / .62 재부팅 = 10-11 / 웹방화벽 차단 전환 = 10-13 / 큰 버전 의존성 · Node 20 · 기존 계정 비밀번호 기간 · DB 복원 시험 = 10-31. 원장 = `docs/2026-08-18-transmission-qualification-cert.md` ★1005~06 줄.
 - [범위 밖 · 기록만] .62 `sites-enabled` 에 한줄전단 `.bak` 사이트 파일 2개가 같이 실려 있다(`include sites-enabled/*`).
@@ -50,6 +50,14 @@
 - ⚠ **23388 = `pay-ingest-db`(MariaDB) 외부 개방** — 상세 §3.
 - ⚠ **재부팅 시 자동 복구 공백(2026-08-16 실측)** — 도커 4종(DB)은 restart 정책으로 자동 복구되지만, **pm2 3종(systemd 유닛 없음 — dump는 저장돼 있어 `pm2 resurrect` 한 줄로 복원)과 QTmsg 발송 에이전트 11프로세스(0731 21:30 수동 기동 — 자동 기동 장치 전무)는 재부팅 후 수동 기동 필요.** Tomcat은 현재 미가동. 재부팅은 Harold 접속 가능 시간대로만 + 직후 pm2 resurrect·에이전트 기동. 근본 개선(자동 기동 등록)은 별도 과제.
 - ⚠ **frontend 빌드 간헐 네이티브 크래시(2026-08-16 저녁 실측)** — 같은 코드·같은 node(1/13 설치 v20.20.0)에서 build:safe가 18:26 Segfault → 재시도 성공 → 18:53 V8 Sweeper Check failed → 18:57 Segfault. 자원 정상(가용 46G·디스크 5%·load 0.4)·pm2 3종 온라인·kern.log에는 우리 세그폴트조차 미기록(판정 채널 침묵). 당시 uptime 59일. **가설 = 메모리 계통 누적(커널/RAM) — 확정 수단은 재부팅 후 관찰, 재발 시 memtest.** atomic 안전망이 매번 dist를 보존해 서비스 영향 0. 운영 프로세스가 아닌 빌드류 대용량 작업에서만 관측됨.
+
+- **★1007 재부팅 (Harold 22:07 · 커널 124 → 142 · 111일 만)** — 실행 순서와 결과(전부 실측):
+  - 재부팅 전 = **QTmsg 6번(:9006)이 9/24 09:39 JVM 크래시(`hs_err_pid4130093.log`) 이후 2주 꺼져 있었다** · 8/31 에 이어 같은 6번 두 번째 · 큐 적체 0 · **꺼져도 알림 없음**(과제).
+  - 도커 4개 자동 기동 · pm2 = `pm2 resurrect`(administrator) · QTmsg 11개 = 수동 기동(OPS §6-4) · **비토 에이전트 4개 전부 failed** = `/run/vito-agent: No such file or directory`(유닛 마운트 이름공간 · `/run` 은 재부팅 때 비워짐 · 그동안 손으로 만든 폴더로 돌았다) → **`/etc/tmpfiles.d/vito-agent.conf`(`d /run/vito-agent 0755 root root -`) 등록 + `systemd-tmpfiles --create` + 재시작 = 4개 active · 다음 재부팅부터 자동**.
+  - **MySQL 이 종료 도중 죽었다**(`free(): invalid size` → `signal 6` · 13:06:18 UTC · 「하드웨어 이상일 수도」 안내) · 재기동 InnoDB 초기화 0.75초 · 오류 기록 없음(복구 세부 줄은 로그 설정상 안 찍혀 정밀 확정 미검증). PostgreSQL = 정상 종료 → 정상 기동(복구 단계 없음).
+  - 비토 라인 13·14·15 「시각 지난 100」 4,480건 = **비토엔진 관제 결과 대기 4,480 과 일치 = 결과 대기분**(미발송 아님 · 실패 처리 금지 · OPS §6-4-A 는 QTmsg 전용).
+  - 전수 점검(22:26) = 자원 · 서비스 · 도커 재시작 정책 · pm2 · 발송 · 보안 서비스 · nginx 문법 · 백업 예약 이상 없음 · 바깥 실측 = 3000 · 3001 · 9001~9011 · 23388 막힘 · 22 열림.
+  - **남은 과제** = ① 메모리 점검(memtest · 신호 3개 = MySQL 종료 충돌 · 6번 JVM 2회 · 빌드 간헐 충돌) ② QTmsg 에이전트 감시 알림 ③ pm2 · QTmsg 부팅 자동 기동 ④ SSH 비밀번호 로그인 · 접속지 제한 없음 ⑤ `pg_checksums` 는 이번에 안 함 ⑥ 기존 결함 = `cdp_push_subscriptions.is_active` 없는 칸 조회(`source-aware-channel-selector.ts:132` · `unified-customer-profile.ts:154`) · AI Operator 미리보기 날짜 형식 오류(7/2부터 · 숫자 날짜 20260515110000).
 
 ### .65 — 비토 게이트웨이 (58.227.193.65 / `invito`)
 가장 좋은 CPU에 부하가 낮다. 실사용 트래픽 이관 전이라 여력이 크다.
@@ -76,11 +84,13 @@
 ### .58 — invito58 (58.227.193.58)
 유일한 **물리 서버**(efivarfs·/dev/sda). 접속자 22명 = 사람이 상시 쓰는 서버.
 - ⚠ **스왑 758Mi 사용** — 지금 24Gi가 남는데도 스왑이 나간 건 과거 메모리 압박 흔적. 피크 때 무엇이 먹었는지 확인 가치 있음.
-- 브랜드메시지 **미지원 중계**(0814 확인 — 접수 후 5초 뒤 `7421` 거절).
+- 브랜드메시지 **미지원 중계**(0814 확인 — 접수 후 5초 뒤 `7421` 거절). ★1007 원인 = 브랜드 모듈 `top_kpm`(KPM)이 **.58 에 없다**(.57 에만 설치).
+- **★1007 보안 점검(우리 계정 `mmsr3` · root 없음 = 중계사가 안 줌)** — ① **`portfwd_mysql` 이 `/tmp/go-build…` 임시 실행 파일로 2025-12-10 부터 301일 · 인터넷에 23316 열림 · 붙은 연결 0**(잊힌 시험 프로그램) ② **SSH 52873 인터넷 개방 · fail2ban 꺼짐 · 설정 파일에 비밀번호 로그인 끄는 줄 없음**(실제 적용값은 root 필요) ③ 공용 계정 `mmsr3` 를 사람 · 서버(.56 매일 01:00 자동 접속 · 125.180.94.43) 셋이 같이 씀 ④ 관리 웹 `:16358`(java KAW · 고객사별 발송 현황) **HTTP · 인터넷 개방** ⑤ 자동 보안 업데이트 꺼짐 · 커널 6.8.0-88 · 305일 무재부팅. 바깥 실측 열림 = 16358 · 23316 · 26352(`cms`) · 52873(SSH) · 나머지 12개 막힘.
+- **전송자격인증 범위에서 제외된 서버**(Harold) · linkguard 설치 안 함(비토엔진에 설치됨) · **연말 정리 대상**.
 
 ### .57 — mmsr3 (중계, 컨테이너)
 QtMsg 3.0(`test11/12`)·4.0(`insvc11/12`)·KAW(웹)·ngen(GemTek 문자) 구동.
-- **카카오/브랜드 트래픽 0** — 0815 실측(로그 PING/PONG만, 키워드 0건). 브랜드는 여기서 나가지 않는다.
+- ~~카카오/브랜드 트래픽 0 — 0815 실측~~ → **★1007 정정: 브랜드메시지 모듈 `top_kpm`(`odp_kpm1~5` · `~/ngen/kpm/` · 로그 2025-10-30~) 이 .57 에만 있다 = 브랜드는 .57 에서만 나간다**(Harold 「57에서밖에 안 나간다」 · 고객사 큐 `ODP_KPM1~5`).
 - ⚠ **1204일 무재부팅 · 커널 2023년** — 상세 §3.
 
 ### .54 — mmsr-qtmsg (중계, **현역**)

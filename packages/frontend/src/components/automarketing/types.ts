@@ -276,6 +276,8 @@ export interface OperatorProposal {
   createdAt: string;
   operatorName?: string;
   operatorObjective?: string;
+  /** ★ 2026-10-08 광고 무료거부 번호(080 · 발송과 같은 값) — 문안을 고객이 받는 모양으로 보여 줄 때 */
+  adOptOut?: string;
 }
 
 // ★ 2026-07-09 승인 시 사용자가 고른 변형 + (편집 시) 본문 — 없으면 백엔드가 Bandit 추천 사용(자동 발송 경로 동일).

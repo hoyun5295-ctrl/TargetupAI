@@ -55,6 +55,16 @@
 
 ## 2) 활성 버그
 
+### 🔵 B-1007-1 QTmsg 6번 에이전트가 9/24 JVM 크래시 뒤 2주 꺼져 있었는데 아무 알림이 없었다 (🔵 · .62 재부팅 점검 중 발견 · 1007 재기동 완료) · 2026-10-07 실측
+- 8/31 에 이어 같은 6번 두 번째 크래시(`hs_err_pid4130093.log` · 9/24 09:39). 큐 적체 0(그 사이 6번 라인 유입 없음).
+- 처방(귀국 뒤) = QTmsg 관리 포트 9001~9011 감시 → 빠지면 대표 문자(`system-alert`) · 반복 크래시라 메모리 점검(memtest)과 JVM 버전 확인. 상세 = [SERVERS.md](SERVERS.md) .62 「★1007 재부팅」.
+
+### 🔵 B-1007-2 `cdp_push_subscriptions.is_active` 칸이 운영에 없어 조회 2곳이 반복 오류 (🔵 · 기존 결함 · 1007 PG 로그 실측)
+- `utils/source-aware-channel-selector.ts:132` · `utils/unified-customer-profile.ts:154` 가 `is_active = true` 로 조회 → `column "is_active" does not exist` 가 1~2분마다. 웹 푸시 구독 판정 경로. 처방 전 = `information_schema` 로 표 실제 칸 확인 → 코드 기준(칸 추가 vs 조건 정정) 결정.
+
+### 🔵 B-1007-3 AI Operator 대상 미리보기 · 대상 고객 조회 날짜 형식 오류 (🔵 · 기존 결함 · 7/2 부터 · 1007 백엔드 로그 실측)
+- `date/time field value out of range: "20260515110000"` — 고객 데이터의 날짜가 숫자 14자리로 들어온 회사에서 미리보기 · 대상 조회가 실패. 발생 = 7/2~8/18 · 10/7. 처방 전 = 해당 회사 · 필드 확인(정규화 CT 경유 여부).
+
 ### 🟡 B-1006-3 한국모바일인증 첫 실측 — 본인인증한 계정 이름이 `%EC%9C%A0…`(URL 인코딩)로 바뀌었다 (🟡 1006 수정 · **배포 완료(1006 · `0f09de43` · Harold)** · 데이터 정리 완료(Harold 실행) · **실측 완료(1007 · 직원 4명 + 대표 = 5계정 인증 · 수신 번호 = 인증 번호 5/5 · 실패 0 · 증빙 H49~H51)** · DDL 0) · 2026-10-06 Harold 실측
 - **원인**: KMC 결과의 이름 칸이 URL 인코딩(UTF-8)으로 온다. 규격서 · NodeJS 예제 어디에도 없던 모양이라 예제처럼 그대로 썼고, 시험은 이름이 그대로 온다고 지어낸 응답으로만 했다(LESSONS_BACKEND 「외부 API 응답의 테스트 대역은 원문으로」 재발). 그 값이 계정 이름(`users.name`)과 인증 이력 이름에 저장돼 대시보드 머리에 그대로 보였다.
 - **수정**: `identity-provider-kmc.ts` `kmcText`(`%` · `+` 가 있으면 풀고 못 풀면 거절 · 이름 · 번호) · 계약 = `identity-provider-kmc-1006.test.ts`(인코딩 이름 · `+` 공백 · 깨진 인코딩 거절). **같은 자리 Harold 결정** = 계정 이름은 덮지 않는다 · 번호만 담당자 번호로(`identity-verify.ts` `UPDATE users SET phone = $2, mfa_phone = $2` · 설정 카드 = 인증 이력 이름) · 감사 기록에 인증 건 번호 · 거절 사유 코드. 원장 = [전송자격인증 1006 한국모바일인증 절](../docs/2026-08-18-transmission-qualification-cert.md).
