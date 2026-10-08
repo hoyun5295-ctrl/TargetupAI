@@ -225,6 +225,14 @@ export const SUCCESS_CODES_SQL = SUCCESS_CODES.join(', ');
 export const PENDING_CODES_SQL = PENDING_CODES.join(', ');
 
 /**
+ * ★ 2026-10-08 결과 코드로 있을 수 없는 상태값의 하한 — 이 표의 코드는 전부 4자리 이하다(5자리 이상 0개 · 1008 실측).
+ *   사례 = 게스 SMSQ_SEND_14 seqno 2380726 · 100 이 67108964(100 + 2^26)로 바뀌어 에이전트가 영영 안 가져갔다(10/5~10/8 대기 잔존).
+ *   대기(100 · 104)는 이 하한보다 작아 절대 걸리지 않는다(비토 100 = 결과 대기 보호).
+ *   소비 = expired-pending-sweeper(48h 뒤 실패 마킹) · system-monitor-worker(즉시 경보).
+ */
+export const ABNORMAL_STATUS_MIN = 100000;
+
+/**
  * ★ 2026-10-03 카카오 실패 → 문자 대체 성공의 두 모양 (서수란 접수 · 크로커다일 9/29 대체 LMS 가 알림톡으로 청구됨)
  *   ① 옛 QTmsg 라인 = 대체 문자가 별도 행(L/S + k_oriseq = 원본 K행 seqno)
  *   ② 비토 게이트웨이 라인(SMSQ_SEND_13~16) = 별도 행 없이 **원래 알림톡(K) 행**의 결과코드가 7830(SMS)·7831(LMS)

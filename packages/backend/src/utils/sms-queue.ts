@@ -980,6 +980,20 @@ export async function getInactiveLineGroupTables(): Promise<string[]> {
 }
 
 /**
+ * ★ 2026-10-08 발송 대기열 표 목록의 **단일 입구** — 시스템 전체 표가 필요한 곳은 이것만 쓴다.
+ *   all  = 활성 bulk(QTmsg) + 활성 bito + 꺼진 라인(실존분)  ← 집계 · 정산 · 큐 작업 · 안전망
+ *   bulk = 활성 bulk 만  ← QTmsg 전용 규칙(rsv1='3' 만료 · 100 지연 경보)을 적용할 표
+ *   bito = 활성 bito 만  ← 비토 100 은 「결과 대기」라 QTmsg 규칙을 쓰면 안 된다(정상분을 실패로 닫음)
+ *   옛: 쓰는 쪽이 getAllBulkSmsTables · getBitoSmsTables 를 각자 합쳤다 → 합치기를 빠뜨린 곳이 비토를 조용히 놓쳤다
+ *   (7/17 정산 · 9/14 큐 작업 · 10/8 자동 정리 워커 · 큐 지연 경보 = 같은 부류 세 번째). 계약 = staff-tickets-1008.test.ts
+ *   ⛔ 이 파일 밖에서 getAllBulkSmsTables 를 직접 부르지 않는다(위 테스트가 막는다).
+ */
+export async function getQueueTableSets(): Promise<{ all: string[]; bulk: string[]; bito: string[] }> {
+  const [bulk, bito, inactive] = await Promise.all([getAllBulkSmsTables(), getBitoSmsTables(), getInactiveLineGroupTables()]);
+  return { all: mergeLineTables(mergeLineTables(bulk, bito), inactive), bulk, bito };
+}
+
+/**
  * ★ 2026-06-11: 발송 큐 변경(취소/수신자삭제/예약시간변경/문안수정) 전용 — live 라인 테이블 합집합.
  *   배경 — 에이치피오 예약취소 미삭제 발송 사고: 적재는 사용자 라인(getCompanySmsTables(companyId, userId)),
  *   취소는 회사 라인(getCompanySmsTables(companyId))만 DELETE → 0건 삭제 → PG만 cancelled 표시 → 예약 시각 실발송.
@@ -991,20 +1005,12 @@ export async function getCompanyAllLiveSmsTables(companyId: string, userId?: str
   const userLive = await getCompanySmsTables(companyId, userId);
   const companyLive = userId ? await getCompanySmsTables(companyId) : userLive;
   const allUserLive = await getAllCompanyUserLineTables(companyId);
-  const allBulk = await getAllBulkSmsTables();
-  // ★ 2026-09-14 (B-0914-1): 전 bito 라인도 합친다 — 0717 정산(getBillingCompanyTables)과 같은 처방.
-  //   전 bulk 는 넣으면서 bito 는 현재 배정분만 넣던 탓에, 금강제화 9/4 33,346건(SMSQ_SEND_13)이
-  //   회사 라인 재배정(→ 대량발송(2){4,5,6}) 뒤 이 합집합에서 사라졌다. 재대조 워커가 0건을 읽어
-  //   PG 카운트를 0/0/0 으로 덮었고 목록·상세 분포·발송내역·엑셀·통계가 전부 0 이 됐다.
-  //   "라인 해제/재배정 후에도 과거 발송 라인이 항상 보인다"는 이 함수의 약속을 bito 에도 지킨다.
+  // ★ 2026-09-14 (B-0914-1): 전 bito 라인도 합친다 — 금강제화 9/4 33,346건(SMSQ_SEND_13)이 회사 라인 재배정 뒤
+  //   이 합집합에서 사라져 재대조 워커가 PG 카운트를 0/0/0 으로 덮었다. ★ 2026-09-27 꺼진 라인 그룹의 실존 테이블도.
+  // ★ 2026-10-08 전 bulk · 전 bito · 꺼진 라인 = 단일 입구 getQueueTableSets().all (합치는 순서 = 옛 코드와 같다 · 결과 동일)
   //   발송 경로(getCompanySmsTables)는 그대로다 — 여기는 집계·큐 작업 전용이다.
-  const allBito = await getBitoSmsTables();
-  // ★ 2026-09-27 한줄로 V2 m063 — 꺼진 라인 그룹의 실존 테이블도(그룹을 끈 뒤에도 과거 발송 행을 본다 · 발송 경로는 무관)
-  const inactive = await getInactiveLineGroupTables();
-  return mergeLineTables(
-    mergeLineTables(mergeLineTables(mergeLineTables(mergeLineTables(userLive, companyLive), allUserLive), allBulk), allBito),
-    inactive,
-  );
+  const { all } = await getQueueTableSets();
+  return mergeLineTables(mergeLineTables(mergeLineTables(userLive, companyLive), allUserLive), all);
 }
 
 /**

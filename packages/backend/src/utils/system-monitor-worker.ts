@@ -31,8 +31,9 @@
  */
 
 import { query, mysqlQuery } from '../config/database';
-import { getAllBulkSmsTables } from './sms-queue';
+import { getQueueTableSets } from './sms-queue';
 import { sendSystemAlert } from './system-alert';
+import { ABNORMAL_STATUS_MIN } from './sms-result-map';
 
 const PASS_INTERVAL_MS = 5 * 60 * 1000;        // 5분 주기
 const FIRST_DELAY_MS = 60 * 1000;              // 기동 60초 후 첫 실행
@@ -57,9 +58,40 @@ function log(...args: any[]) {
   console.log('[system-monitor]', ...args);
 }
 
-/** 1) 발송 큐 지연 잔존 행 감지 */
+/**
+ * 1-B) ★ 2026-10-08 이상 상태값 행 감지 — 결과 코드로 있을 수 없는 값(ABNORMAL_STATUS_MIN 이상) + 한 번도 안 나감. 전 라인(bulk + bito).
+ *   에이전트는 100 만 가져가므로 이런 행은 영영 대기로 남는다(게스 10/5 67108964 사례 · 사흘 뒤 직원 접수로 알았다).
+ *   48시간 뒤 expired-pending-sweeper 가 실패로 닫지만, 그 전에 바로 알린다(원인 = 큐 행 값이 바뀜 · 서버 점검 신호).
+ */
+async function checkAbnormalStatusRows(all: string[]): Promise<void> {
+  let total = 0;
+  const lines: string[] = [];
+  for (const t of all) {
+    try {
+      const rows = (await mysqlQuery(
+        `SELECT COUNT(*) AS cnt, MIN(sendreq_time) AS oldest FROM ${t} WHERE status_code >= ${ABNORMAL_STATUS_MIN} AND mobsend_time IS NULL`,
+      )) as any[];
+      const cnt = Number(rows[0]?.cnt || 0);
+      if (cnt > 0) { total += cnt; lines.push(`${t} ${cnt}행`); }
+    } catch (err: any) {
+      console.error(`[system-monitor] ${t} 이상 상태값 스캔 오류:`, err?.message || err);
+    }
+  }
+  if (total === 0) return;
+  await sendSystemAlert({
+    dedupKey: 'queue-abnormal-status',
+    cooldownMs: 12 * 60 * 60 * 1000,
+    title: '발송 대기열에 결과 코드가 아닌 상태값 행이 있습니다.',
+    details: [`${total.toLocaleString()}행 · ${lines.slice(0, 4).join(' / ')}`, '이 행은 에이전트가 가져가지 않아 대기로 남습니다(48시간 뒤 자동 실패 처리).'],
+    action: '서버 상태(메모리 · 커널 기록)를 점검해 주세요.',
+  });
+  log(`이상 상태값 통지 — ${total}행 (${lines.join(', ')})`);
+}
+
+/** 1) 발송 큐 지연 잔존 행 감지 — QTmsg 표만(비토 100 = 결과 대기라 이 규칙을 쓰면 하루 종일 울린다) */
 async function checkDelayedQueueRows(): Promise<void> {
-  const tables = await getAllBulkSmsTables();
+  const { bulk: tables, all } = await getQueueTableSets();
+  await checkAbnormalStatusRows(all);
   if (tables.length === 0) return;
 
   // 캠페인 키별 합산 (여러 라인 테이블에 분산 적재될 수 있음)

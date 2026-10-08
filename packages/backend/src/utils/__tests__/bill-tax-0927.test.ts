@@ -180,9 +180,12 @@ describe('m063 비활성 라인 그룹의 실존 테이블도 집계·정산에'
   it('집계 합집합·정산 테이블이 합친다(발송 경로·비토 발신키 판정은 그대로)', () => {
     const sq = src('sms-queue.ts');
     const all = sq.slice(sq.indexOf('export async function getCompanyAllLiveSmsTables('), sq.indexOf('export async function getCampaignQueueTables('));
-    expect(all).toContain('await getInactiveLineGroupTables()');
+    // ★ 2026-10-08 꺼진 라인은 단일 입구 getQueueTableSets 가 합친다 — 두 소비처는 그 입구를 쓴다
+    const sets = sq.slice(sq.indexOf('export async function getQueueTableSets('), sq.indexOf('export async function getQueueTableSets(') + 400);
+    expect(sets).toContain('getInactiveLineGroupTables()');
+    expect(all).toContain('await getQueueTableSets()');
     const agg = src('send-usage-aggregation.ts');
-    expect(agg).toMatch(/getBillingCompanyTables = async[\s\S]{0,300}getInactiveLineGroupTables\(\)/);
+    expect(agg).toMatch(/getBillingCompanyTables = async[\s\S]{0,120}getQueueTableSets\(\)\)\.all/);
     expect(sq.slice(sq.indexOf('export async function getBitoSmsTables('), sq.indexOf('export async function getBitoSmsTables(') + 900)).not.toContain('getInactiveLineGroupTables');
   });
 });

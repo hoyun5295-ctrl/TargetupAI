@@ -16,7 +16,7 @@
 
 import pool, { mysqlBillingQuery, MYSQL_BILLING_POOL_LIMIT } from '../config/database';
 import { SUCCESS_CODES_SQL, PENDING_CODES_SQL, spamBilledResultSql, spamFailedResultSql, ALIMTALK_FALLBACK_TYPE_WHEN_SQL } from './sms-result-map';
-import { getAllBulkSmsTables, getBitoSmsTables, getTestSmsTables, mergeLineTables, getInactiveLineGroupTables } from './sms-queue';
+import { getQueueTableSets, getTestSmsTables } from './sms-queue';
 import { queryPayAgentStoreBreakdown, type PayAgentStoreRow } from './pay-stats';
 import { loadBillingLedger, hasAgentMapping, type BillingLedger } from './billing-ledger';
 import { floorWon } from './money';
@@ -181,10 +181,8 @@ export function resolveBillingUnitPricesDetailed(co: any): { prices: Record<stri
 //   비토 게이트웨이 라인(13·14·15) 발송분이 정산에서 통째로 빠져 있었다.
 // ★ 2026-09-27 한줄로 V2 m063 — 꺼진(비활성) 라인 그룹의 실존 테이블도 합친다. 그룹을 끄면 그 라인의 과거 발송분(LIVE·LOG)이
 //   정산에서 통째로 빠졌다. 발송 경로는 활성 그룹만 그대로다(여기는 청구 집계 전용).
-export const getBillingCompanyTables = async (_companyId: string) => {
-  const [bulk, bito, inactive] = await Promise.all([getAllBulkSmsTables(), getBitoSmsTables(), getInactiveLineGroupTables()]);
-  return mergeLineTables(mergeLineTables(bulk, bito), inactive);
-};
+// ★ 2026-10-08 = 단일 입구 getQueueTableSets().all(같은 세 묶음 · 같은 순서 · 결과 동일)
+export const getBillingCompanyTables = async (_companyId: string) => (await getQueueTableSets()).all;
 export const getBillingTestTables = () => getTestSmsTables();
 
 export async function getBillingLogTables(): Promise<Set<string>> {

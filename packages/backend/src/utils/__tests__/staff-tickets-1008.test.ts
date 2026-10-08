@@ -49,6 +49,38 @@ describe('직원 접수 1008', () => {
     expect(read('backend/src/utils/audit-log.ts')).toContain("process.env.PRIVATE_ACCESS_LOGIN_IDS || 'ceo'");
   });
 
+  it('발송 대기열 표 목록 = 단일 입구(getQueueTableSets) · 이 파일 밖에서 bulk 전용 목록을 직접 부르지 않는다', () => {
+    const { readdirSync, statSync } = require('fs') as typeof import('fs');
+    const walk = (d: string): string[] => readdirSync(d).flatMap((n: string) => {
+      const p = resolve(d, n);
+      return statSync(p).isDirectory() ? (n === '__tests__' || n === 'node_modules' ? [] : walk(p)) : (/\.ts$/.test(n) && !/\.(test|verify|sanity)\.ts$/.test(n) ? [p] : []);
+    });
+    const offenders = walk(resolve(ROOT, 'backend/src'))
+      .filter((p) => !p.replace(/\\/g, '/').endsWith('utils/sms-queue.ts'))
+      .filter((p) => /getAllBulkSmsTables\s*\(/.test(readFileSync(p, 'utf8')));
+    expect(offenders).toEqual([]);
+    const sq = read('backend/src/utils/sms-queue.ts');
+    expect(sq).toContain('return { all: mergeLineTables(mergeLineTables(bulk, bito), inactive), bulk, bito };');
+  });
+
+  it('자동 정리 워커 = QTmsg 규칙은 bulk 표만(옛 동작) · 이상 상태값 규칙은 전 표 · 대기 100/104 는 하한 밖', async () => {
+    const src = read('backend/src/utils/expired-pending-sweeper.ts');
+    expect(src).toContain('markFailed(bulk, EXPIRE_WHERE');
+    expect(src).toContain('markFailed(all, ABNORMAL_WHERE');
+    expect(src).toContain("rsv1 = '3' AND status_code IN (100, 104)");
+    const map = await import('../sms-result-map');
+    expect(map.ABNORMAL_STATUS_MIN).toBeGreaterThan(Math.max(...map.PENDING_CODES, ...map.SUCCESS_CODES));
+    const mapSrc = read('backend/src/utils/sms-result-map.ts').replace(/\/\*[\s\S]*?\*\/|\/\/.*$/gm, '').replace(/ABNORMAL_STATUS_MIN = \d+/, '');
+    expect(mapSrc.match(/(?<![\w.])\d{5,}(?![\w.])/g)).toBeNull();   // 결과 코드 표에 5자리 이상 코드가 생기면 하한을 다시 정해야 한다
+    expect(map.ABNORMAL_STATUS_MIN).toBeLessThanOrEqual(67108964);   // 게스 사례는 잡힌다
+  });
+
+  it('큐 지연 경보 = 100 지연은 QTmsg 표만 · 이상 상태값은 전 표', () => {
+    const src = read('backend/src/utils/system-monitor-worker.ts');
+    expect(src).toContain('const { bulk: tables, all } = await getQueueTableSets();');
+    expect(src).toContain('await checkAbnormalStatusRows(all);');
+  });
+
   it('감싼 문안 모양(LMS) = (광고) 머리 · 무료수신거부 꼬리', () => {
     expect(buildAdMessage('본문\n[주식회사 인비토]', 'LMS', true, '080-000-0000'))
       .toBe('(광고) 본문\n[주식회사 인비토]\n무료수신거부 080-000-0000');
