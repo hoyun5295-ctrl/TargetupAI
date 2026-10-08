@@ -35,7 +35,8 @@ import type { FixItem } from '../../utils/make-flow';
 
 // 렌더러가 실제로 읽는 타입에만 조작을 보인다(백엔드 EMAIL_* 미러 · EmailVisualEditor 와 같은 표 · 계약 = email-editor-parity.test)
 const EMAIL_ALIGN_AWARE = new Set<SectionType>(['hero', 'header', 'text_card']);
-const EMAIL_ACCENT_AWARE = new Set<SectionType>(['text_card', 'cta', 'coupon', 'promo_code', 'sns', 'store_info', 'product_carousel']);
+// ★ 2026-10-08 버튼(cta) 제외 — 버튼마다 「버튼 색 · 글씨 색」이 내용 칸에 있다(DM 과 같은 공용 편집기 · 임은지 접수)
+const EMAIL_ACCENT_AWARE = new Set<SectionType>(['text_card', 'coupon', 'promo_code', 'sns', 'store_info', 'product_carousel']);
 const EMAIL_BAND_AWARE = new Set<SectionType>(['text_card', 'cta', 'coupon', 'promo_code', 'product_carousel', 'reviews']);
 const EMAIL_MOTIF_AWARE = new Set<SectionType>(['hero', 'text_card']);
 const INBOX_ID = '__inbox__';

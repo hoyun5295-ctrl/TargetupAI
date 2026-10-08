@@ -31,16 +31,20 @@ export default function CtaSection({ props, onEdit, treatment }: { props: CtaPro
   ) : (b.label || '자세히 보기');
 
   // ★ 2026-07-15 버튼 색 직접 지정(남지현·임은지) — SSR ctaBtnColorStyle 미러. 미지정 = 프리셋 유지.
-  const btnColorStyle = (b: { color?: string; style?: string }): CSSProperties =>
-    !b.color ? {}
+  //   ★ 2026-10-08 글씨 색(text_color)은 버튼 색 뒤에 덮는다(SSR 미러 · 임은지 접수).
+  const tcOf = (b: { text_color?: string }) => (typeof b.text_color === 'string' && b.text_color.trim() ? b.text_color.trim() : '');
+  const btnColorStyle = (b: { color?: string; style?: string; text_color?: string }): CSSProperties => ({
+    ...(!b.color ? {}
       : b.style === 'outline' ? { borderColor: b.color, color: b.color }
-      : { background: b.color, backgroundImage: 'none', color: '#fff' };
+      : { background: b.color, backgroundImage: 'none', color: '#fff' }),
+    ...(tcOf(b) ? { color: tcOf(b) } : {}),
+  });
 
   // ── 바: 첫 버튼 강조 바 + 화살표 ──
   if (t === 'bar' && buttons.length > 0) {
     const b = buttons[0];
     const more = buttons.slice(1);
-    const barStyle: CSSProperties = { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 'var(--dm-sp-3)', background: b.color || 'var(--dm-primary)', color: '#fff', padding: 'var(--dm-sp-5) var(--dm-sp-6)', fontSize: 'var(--dm-fs-h3)', fontWeight: 700, letterSpacing: '-0.01em', borderRadius: 16, boxShadow: 'var(--dm-shadow-md)' };
+    const barStyle: CSSProperties = { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 'var(--dm-sp-3)', background: b.color || 'var(--dm-primary)', color: tcOf(b) || '#fff', padding: 'var(--dm-sp-5) var(--dm-sp-6)', fontSize: 'var(--dm-fs-h3)', fontWeight: 700, letterSpacing: '-0.01em', borderRadius: 16, boxShadow: 'var(--dm-shadow-md)' };
     const arrow = <span aria-hidden="true" style={{ width: 28, height: 28, borderRadius: '50%', background: 'rgba(255,255,255,0.18)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: 15, flexShrink: 0 }}>→</span>;
     return (
       <div className="dm-section dm-cta-section" style={{ padding: 'var(--dm-sp-5)' }}>
@@ -52,9 +56,9 @@ export default function CtaSection({ props, onEdit, treatment }: { props: CtaPro
         {more.length > 0 && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--dm-sp-2)', padding: 'var(--dm-sp-4) 0 0' }}>
             {more.map((x, i) => editable ? (
-              <span key={i + 1} className="dm-cta dm-cta-secondary" style={{ display: 'inline-flex', alignItems: 'center' }}>{labelEl(i + 1, x)}</span>
+              <span key={i + 1} className="dm-cta dm-cta-secondary" style={{ display: 'inline-flex', alignItems: 'center', ...btnColorStyle({ ...x, style: 'secondary' }) }}>{labelEl(i + 1, x)}</span>
             ) : (
-              <a key={i + 1} href={x.url || '#'} className="dm-cta dm-cta-secondary" target="_blank" rel="noreferrer">{x.label || '자세히 보기'}</a>
+              <a key={i + 1} href={x.url || '#'} className="dm-cta dm-cta-secondary" target="_blank" rel="noreferrer" style={btnColorStyle({ ...x, style: 'secondary' })}>{x.label || '자세히 보기'}</a>
             ))}
           </div>
         )}
@@ -78,7 +82,10 @@ export default function CtaSection({ props, onEdit, treatment }: { props: CtaPro
           ...(isRow ? { flexWrap: 'wrap' as const, justifyContent: 'var(--dm-section-justify, center)' } : {}),
         }}>
           {buttons.map((b, i) => {
-            const ghostStyle: CSSProperties = b.color ? { ...ghostStyleBase, borderColor: b.color, color: b.color } : ghostStyleBase;
+            const ghostStyle: CSSProperties = {
+              ...(b.color ? { ...ghostStyleBase, borderColor: b.color, color: b.color } : ghostStyleBase),
+              ...(tcOf(b) ? { color: tcOf(b) } : {}),
+            };
             return editable ? (
               <div key={i} style={ghostStyle}>{labelEl(i, b)}</div>
             ) : (
@@ -95,7 +102,7 @@ export default function CtaSection({ props, onEdit, treatment }: { props: CtaPro
     const b = buttons[0];
     const stickyStyle: CSSProperties = {
       display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 'var(--dm-sp-2)',
-      background: b.color || 'color-mix(in srgb, var(--dm-primary) 92%, transparent)', color: '#fff',
+      background: b.color || 'color-mix(in srgb, var(--dm-primary) 92%, transparent)', color: tcOf(b) || '#fff',
       padding: 'var(--dm-sp-4) var(--dm-sp-6)', fontSize: 'var(--dm-fs-body)', fontWeight: 800,
       letterSpacing: '-0.01em', borderRadius: 999,
       boxShadow: '0 10px 30px -8px color-mix(in srgb, var(--dm-primary) 60%, transparent)',

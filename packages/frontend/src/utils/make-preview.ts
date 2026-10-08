@@ -15,6 +15,8 @@ export const MK_PREVIEW_SRC = 'mk-preview';
 
 export type MkPreviewInbound =
   | { src: typeof MK_PREVIEW_SRC; type: 'ready' }
+  /** 그림까지 다 받아 높이가 정해졌다(★1008 · 부모가 이때 새 문서로 바꿔 끼운다) */
+  | { src: typeof MK_PREVIEW_SRC; type: 'loaded' }
   | { src: typeof MK_PREVIEW_SRC; type: 'tap'; id: string }
   | { src: typeof MK_PREVIEW_SRC; type: 'scroll'; y: number }
   /** 고른 블록이 화면 안 어디에 있는가(문서 좌표 아님 · iframe 보이는 영역 기준) — 휴대폰 위 도구줄 자리 */
@@ -39,12 +41,20 @@ function bridgeSource(tap: boolean): string {
     'var a=t.closest("a[href]");if(a){e.preventDefault();}',
     'if(TAP){var w=t.closest("[data-section-id]");if(w){send({type:"tap",id:w.getAttribute("data-section-id")});}}},true);',
     'document.addEventListener("submit",function(e){e.preventDefault();},true);',
+    // ★ 2026-10-08 (남지현 접수 cmuz1os880) 스크롤 복원 = 그림이 다 들어와 문서가 자랄 때까지 다시 맞춘다.
+    //   옛: ready(그림 받기 전) 한 번만 scrollTo → 문서가 짧아 위쪽에서 멈추고, 그 멈춘 값이 scroll 로 부모에 보고돼 기억까지 덮였다(고칠 때마다 맨 위).
+    //   WANT = 돌아갈 자리. 맞출 때까지 scroll 보고를 하지 않는다 · 사람이 직접 움직이면(휠·터치·누름·키) 바로 내려놓는다 · 3초 뒤 포기.
+    'var WANT=-1;function stopWant(){WANT=-1;}',
+    'function apply(){if(WANT<0)return;window.scrollTo(0,WANT);if(Math.abs((window.scrollY||0)-WANT)<2)WANT=-1;}',
+    'var HUMAN=["wheel","touchstart","mousedown","keydown"];for(var hi=0;hi<HUMAN.length;hi++){window.addEventListener(HUMAN[hi],stopWant,{passive:true});}',
+    'window.addEventListener("load",function(){apply();send({type:"loaded"});});',
+    'document.addEventListener("load",function(){apply();},true);',
     'var q=false;window.addEventListener("scroll",function(){if(q)return;q=true;',
-    '(window.requestAnimationFrame||setTimeout)(function(){q=false;send({type:"scroll",y:window.scrollY||0});report();});},{passive:true});',
+    '(window.requestAnimationFrame||setTimeout)(function(){q=false;if(WANT<0)send({type:"scroll",y:window.scrollY||0});report();});},{passive:true});',
     // 장 넘김(가로 슬라이드)처럼 창이 아닌 칸이 움직이면 창 scroll 이 안 온다 — 칸 안 스크롤도 받아 자리를 다시 알린다
     'document.addEventListener("scroll",function(){if(SEL)report();},true);',
     'window.addEventListener("message",function(e){if(e.source!==P)return;var d=e.data||{};if(d.src!==SRC)return;',
-    'if(d.type==="scrollTo"&&typeof d.y==="number"){window.scrollTo(0,d.y);}',
+    'if(d.type==="scrollTo"&&typeof d.y==="number"){WANT=d.y;apply();setTimeout(stopWant,3000);}',
     'if(d.type==="select"){mark(d.id||null);if(d.id&&d.reveal){var el=document.querySelector("[data-section-id=\\""+String(d.id).replace(/"/g,"")+"\\"]");',
     // ★ 2026-10-01 장 넘김 효과(책장 넘김·페이드) DM 은 장을 한자리에 겹쳐 두어 스크롤이 없다 — scrollIntoView 로는 고른 장으로 가지 않았다
     //   (편집기 왼쪽에서 쪽을 골라도 미리보기가 1쪽에 멈춤 · 박성용 접수 cmunux3e4). 그 장의 점을 눌러 뷰어의 장 이동(goToPage → fxGo)을 탄다.
@@ -79,6 +89,7 @@ export function readPreviewMessage(e: MessageEvent, frame: HTMLIFrameElement | n
   const d = e.data as Record<string, unknown> | null;
   if (!d || typeof d !== 'object' || d.src !== MK_PREVIEW_SRC) return null;
   if (d.type === 'ready') return { src: MK_PREVIEW_SRC, type: 'ready' };
+  if (d.type === 'loaded') return { src: MK_PREVIEW_SRC, type: 'loaded' };
   if (d.type === 'tap' && typeof d.id === 'string' && d.id) return { src: MK_PREVIEW_SRC, type: 'tap', id: d.id };
   if (d.type === 'scroll' && typeof d.y === 'number' && Number.isFinite(d.y)) return { src: MK_PREVIEW_SRC, type: 'scroll', y: d.y };
   if (d.type === 'rect' && typeof d.top === 'number' && typeof d.height === 'number') return { src: MK_PREVIEW_SRC, type: 'rect', id: typeof d.id === 'string' ? d.id : null, top: d.top, height: d.height };

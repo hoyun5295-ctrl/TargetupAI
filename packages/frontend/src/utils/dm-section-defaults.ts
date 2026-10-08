@@ -160,6 +160,8 @@ export type CtaButton = {
   icon?: string;
   // ★ 2026-07-15 버튼 색 직접 지정(남지현·임은지 신고) — 미지정 = 스타일 프리셋 색 유지(회귀 0). backend registry 미러.
   color?: string;
+  // ★ 2026-10-08 버튼 글씨 색(임은지 접수) — 미지정 = 구도·스타일 기본 글씨색. backend registry 미러.
+  text_color?: string;
 };
 
 export type CtaProps = {

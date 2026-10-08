@@ -383,6 +383,9 @@ function renderButton(btn: CtaButton, b: EmailBrand, invert = false): string {
       vmlFill = customColor; vmlStroke = '';
     }
   }
+  // ★ 2026-10-08 버튼 글씨 색(임은지 접수 cmuz1aijm0) — DM ctaBtnColorStyle 과 같은 규칙: 버튼 색 뒤에 덮는다(VML 글씨도 같이)
+  const customText = typeof btn.text_color === 'string' && btn.text_color.trim() ? esc(btn.text_color.trim()) : '';
+  if (customText) color = customText;
   const vml = `<!--[if mso]><v:roundrect xmlns:v="urn:schemas-microsoft-com:vml" xmlns:w="urn:schemas-microsoft-com:office:word" href="${esc(url)}" style="height:46px;v-text-anchor:middle;width:230px" arcsize="30%" fillcolor="${vmlFill}" ${vmlStroke ? `strokecolor="${vmlStroke}"` : 'stroke="f"'}><w:anchorlock/><center style="color:${color};font-family:sans-serif;font-size:15px;font-weight:800">${esc(btn.label)}</center></v:roundrect><![endif]-->`;
   const htmlBtn = `<table role="presentation" cellpadding="0" cellspacing="0" style="margin:0 auto;${ROUND_CELL_TABLE}"><tr><td style="border-radius:14px;background:${bg};background-image:${bgImage};border:1px solid ${border};box-shadow:${shadow}"><a href="${esc(url)}" style="display:inline-block;padding:14px 34px;font-size:${b.type.body.size};font-weight:800;letter-spacing:-0.01em;color:${color};text-decoration:none">${esc(btn.label)}</a></td></tr></table>`;
   return `${vml}<!--[if !mso]><!-->${htmlBtn}<!--<![endif]-->`;

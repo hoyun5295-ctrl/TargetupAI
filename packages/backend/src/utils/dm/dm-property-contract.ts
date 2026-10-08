@@ -127,6 +127,7 @@ export const DM_COLOR_TABLE_2026_07_15: Array<{ section: string; prop: string; d
   { section: 'header', prop: 'title_color', desc: '헤더 제목(브랜드명) 색' },
   { section: 'header', prop: 'show_brand_name', desc: '브랜드명 표시/로고만' },
   { section: 'cta', prop: 'button.color', desc: 'CTA 버튼 색' },
+  { section: 'cta', prop: 'button.text_color', desc: 'CTA 버튼 글씨 색 (★1008 · 구도 4종 · 바 둘째 버튼 포함)' },
   { section: 'coupon', prop: 'button_color', desc: '쿠폰코드 알약 배경색 (2026-07-23 재정의, 옛 CTA 색 · 상세=DM_COLOR_TABLE_2026_07_23)' },
   { section: 'product_carousel', prop: 'background_color', desc: '상품슬라이드 배경색' },
   { section: 'product_carousel', prop: 'caption_bg_color', desc: '상품슬라이드 글씨공간 색' },

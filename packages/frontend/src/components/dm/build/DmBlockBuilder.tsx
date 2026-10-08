@@ -13,7 +13,7 @@ import BlockEditModal from './BlockEditModal';
 import CatalogPageModal, { CATALOG_BLOCKS, type CatalogTemplateKey } from './CatalogPageModal';
 import type { Section } from '../../../utils/dm-section-defaults';
 import { useMediaQuery } from '../../../hooks/useMediaQuery';
-import { MK_BACK, MK_BTN_PRIMARY, MK_HEADER, MK_HEADER_ROW, MK_HEAD_BTN, MK_PAGE } from '../../../utils/make-ui';
+import { MK_BACK, MK_BTN_PRIMARY, MK_HEADER, MK_HEADER_ROW, MK_HEAD_BTN, MK_PAGE, MK_SIDE_STICKY } from '../../../utils/make-ui';
 import { SurfaceToneProvider } from '../../zone/surface-tone';
 
 const EFFECTS: Array<{ k: 'slide' | 'flip' | 'fade'; n: string; d: string }> = [
@@ -152,8 +152,8 @@ export default function DmBlockBuilder({ onDone, onBack, onBlankCanvas }: {
       </header>
 
       <div className={`max-w-[1320px] mx-auto px-6 py-5 grid grid-cols-1 ${dockedEditing ? 'lg:grid-cols-[250px_minmax(0,1fr)_400px]' : 'lg:grid-cols-[250px_minmax(0,1fr)_300px]'} gap-4 items-start`}>
-        {/* 왼쪽 — 블록 팔레트 */}
-        <div className="rounded-2xl border border-slate-200 bg-white p-3">
+        {/* 왼쪽 — 블록 팔레트 · ★1008 양옆 칸은 화면에 붙어 따라온다(남지현 접수 cmuz1s8l80 · 붙은 편집 창 BlockEditModal docked 와 같은 값) */}
+        <div className={`${MK_SIDE_STICKY} rounded-2xl border border-slate-200 bg-white p-3`}>
           <div className="text-[12px] text-slate-600 mb-2 font-bold">블록 고르기</div>
           {DM_BLOCK_GROUPS.map((g) => (
             <div key={g}>
@@ -217,7 +217,7 @@ export default function DmBlockBuilder({ onDone, onBack, onBlankCanvas }: {
             onUpdate={(patch) => { if (editingSection) updateSectionProps(editingSection.id, patch as any); }}
           />
         ) : (
-        <div className="rounded-2xl border border-slate-200 bg-white p-3">
+        <div className={`${MK_SIDE_STICKY} rounded-2xl border border-slate-200 bg-white p-3`}>
           <div className="text-[12px] text-slate-600 mb-2 font-bold">쌓인 블록 {sections.length}개</div>
           {sections.length === 0 ? (
             <div className="text-[11.5px] text-slate-400 leading-relaxed py-3">

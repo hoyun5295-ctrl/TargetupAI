@@ -68,6 +68,10 @@ export default function CtaEditor({ props, onUpdate, treatment }: EditorProps<Ct
           <Field label="버튼 색" hint="미지정 = 스타일 기본색">
             <ColorOverride value={b.color} onChange={(v) => updateBtn(i, { color: v })} />
           </Field>
+          {/* ★ 2026-10-08 (임은지 접수) 버튼 글씨 색 — 옛 오른쪽 「색」은 버튼 색과 겹쳐 바뀌는 곳이 안 보였다 → 그 자리를 글씨 색으로 */}
+          <Field label="글씨 색" hint="미지정 = 스타일 기본 글씨색">
+            <ColorOverride value={b.text_color} onChange={(v) => updateBtn(i, { text_color: v })} />
+          </Field>
         </div>
       ))}
 

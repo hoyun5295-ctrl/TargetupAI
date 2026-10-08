@@ -447,12 +447,20 @@ function renderTextCardClassic(props: TextCardProps): string {
 
 // ★ 2026-07-15 버튼 색 직접 지정(남지현·임은지 신고) — 미지정 = 스타일 프리셋(dm-cta-*) 유지(회귀 0).
 //   채움(primary/secondary) = 배경색으로(그라데이션 덮기 background-image:none), 외곽선(outline) = 테두리·글자색으로.
-function ctaBtnColorStyle(color?: string, style?: string): string {
-  if (!color) return '';
-  const c = escapeHtml(color);
-  return style === 'outline'
-    ? `border-color:${c};color:${c}`
-    : `background:${c};background-image:none;color:#fff`;
+// ★ 2026-10-08 글씨 색(text_color)은 버튼 색 규칙 뒤에 덮는다 — 사람이 고른 글씨색이 스타일 기본 글씨색보다 우선(임은지 접수).
+function ctaBtnColorStyle(color?: string, style?: string, textColor?: string): string {
+  const parts: string[] = [];
+  if (color) {
+    const c = escapeHtml(color);
+    parts.push(style === 'outline' ? `border-color:${c};color:${c}` : `background:${c};background-image:none;color:#fff`);
+  }
+  const tc = ctaTextColor(textColor);
+  if (tc) parts.push(`color:${tc}`);
+  return parts.join(';');
+}
+/** 버튼 글씨 색(지정했을 때만 · escape 끝난 값) — 구도별 렌더가 같은 함수로 읽는다 */
+function ctaTextColor(textColor?: string): string {
+  return typeof textColor === 'string' && textColor.trim() ? escapeHtml(textColor.trim()) : '';
 }
 // 쿠폰 "쿠폰 사용하기" 버튼(항상 채움형) 색 오버라이드.
 /** ★ 2026-07-23 (임은지) 색 오버라이드 → escape된 값 또는 기본값(토큰/리터럴). 미지정=기본(회귀 0). 편집기 ColorOverride와 짝. */
@@ -477,7 +485,7 @@ function renderCtaSticky(props: CtaProps): string {
   const b = buttons[0];
   const stickyBg = b.color ? escapeHtml(b.color) : 'color-mix(in srgb, var(--dm-primary) 92%, transparent)';
   return `<div class="dm-section dm-cta-section" data-section-type="cta" style="padding:var(--dm-sp-3) var(--dm-sp-4)">
-    <a href="${safeUrl(b.url)}" target="_blank" class="dm-sticky-bar" style="display:flex;align-items:center;justify-content:center;gap:var(--dm-sp-2);background:${stickyBg};color:#fff;padding:var(--dm-sp-4) var(--dm-sp-6);font-size:var(--dm-fs-body);font-weight:800;letter-spacing:-0.01em;border-radius:999px;box-shadow:0 10px 30px -8px color-mix(in srgb, var(--dm-primary) 60%, transparent)">
+    <a href="${safeUrl(b.url)}" target="_blank" class="dm-sticky-bar" style="display:flex;align-items:center;justify-content:center;gap:var(--dm-sp-2);background:${stickyBg};color:${ctaTextColor(b.text_color) || '#fff'};padding:var(--dm-sp-4) var(--dm-sp-6);font-size:var(--dm-fs-body);font-weight:800;letter-spacing:-0.01em;border-radius:999px;box-shadow:0 10px 30px -8px color-mix(in srgb, var(--dm-primary) 60%, transparent)">
       <span>${escapeHtml(b.label || '자세히 보기')}</span>
       <span aria-hidden="true">→</span>
     </a>
@@ -504,7 +512,7 @@ function renderCtaClassic(props: CtaProps): string {
   const btnHtml = buttons.map((b) => {
     const styleClass = b.style === 'secondary' ? 'dm-cta-secondary' : b.style === 'outline' ? 'dm-cta-outline' : 'dm-cta-primary';
     const icon = b.icon ? `<span style="margin-right:var(--dm-sp-1)">${escapeHtml(b.icon)}</span>` : '';
-    const colorStyle = ctaBtnColorStyle(b.color, b.style);
+    const colorStyle = ctaBtnColorStyle(b.color, b.style, b.text_color);
     return `<a href="${safeUrl(b.url)}" class="dm-cta ${styleClass}" target="_blank"${colorStyle ? ` style="${colorStyle}"` : ''}>${icon}${escapeHtml(b.label || '자세히 보기')}</a>`;
   }).join('');
 
@@ -558,10 +566,14 @@ function renderCtaBar(props: CtaProps): string {
   if (buttons.length === 0) return '';
   const b = buttons[0];
   const more = buttons.slice(1);
-  const moreHtml = more.map((x) => `<a href="${safeUrl(x.url)}" class="dm-cta dm-cta-secondary" target="_blank">${escapeHtml(x.label || '자세히 보기')}</a>`).join('');
+  // ★ 2026-10-08 바 구도 둘째 버튼도 버튼 색 · 글씨 색을 읽는다(옛: 둘째 버튼만 지정색이 죽어 있었다 · 같은 부류 전수 점검)
+  const moreHtml = more.map((x) => {
+    const st = ctaBtnColorStyle(x.color, 'secondary', x.text_color);
+    return `<a href="${safeUrl(x.url)}" class="dm-cta dm-cta-secondary" target="_blank"${st ? ` style="${st}"` : ''}>${escapeHtml(x.label || '자세히 보기')}</a>`;
+  }).join('');
   const barBg = b.color ? escapeHtml(b.color) : 'var(--dm-primary)';
   return `<div class="dm-section dm-cta-section" data-section-type="cta" style="padding:var(--dm-sp-5)">
-    <a href="${safeUrl(b.url)}" target="_blank" style="display:flex;align-items:center;justify-content:space-between;gap:var(--dm-sp-3);background:${barBg};color:#fff;padding:var(--dm-sp-5) var(--dm-sp-6);font-size:var(--dm-fs-h3);font-weight:700;letter-spacing:-0.01em;border-radius:16px;box-shadow:var(--dm-shadow-md)">
+    <a href="${safeUrl(b.url)}" target="_blank" style="display:flex;align-items:center;justify-content:space-between;gap:var(--dm-sp-3);background:${barBg};color:${ctaTextColor(b.text_color) || '#fff'};padding:var(--dm-sp-5) var(--dm-sp-6);font-size:var(--dm-fs-h3);font-weight:700;letter-spacing:-0.01em;border-radius:16px;box-shadow:var(--dm-shadow-md)">
       <span>${escapeHtml(b.label || '자세히 보기')}</span>
       <span aria-hidden="true" style="width:28px;height:28px;border-radius:50%;background:rgba(255,255,255,0.18);display:inline-flex;align-items:center;justify-content:center;font-size:15px;flex-shrink:0">→</span>
     </a>
@@ -579,7 +591,7 @@ function renderCtaGhost(props: CtaProps): string {
   const row = isCtaRow(props, 'ghost');
   const btnHtml = buttons.map((b) => {
     const gc = b.color ? escapeHtml(b.color) : 'var(--dm-primary)';
-    return `<a href="${safeUrl(b.url)}" target="_blank" style="display:block;${row ? 'flex:1 1 0;min-width:0;' : ''}text-align:center;border:2px solid ${gc};color:${gc};border-radius:var(--dm-radius-lg);padding:var(--dm-sp-4);font-size:var(--dm-fs-body);font-weight:700;letter-spacing:0.5px">${escapeHtml(b.label || '자세히 보기')}</a>`;
+    return `<a href="${safeUrl(b.url)}" target="_blank" style="display:block;${row ? 'flex:1 1 0;min-width:0;' : ''}text-align:center;border:2px solid ${gc};color:${ctaTextColor(b.text_color) || gc};border-radius:var(--dm-radius-lg);padding:var(--dm-sp-4);font-size:var(--dm-fs-body);font-weight:700;letter-spacing:0.5px">${escapeHtml(b.label || '자세히 보기')}</a>`;
   }).join('');
   const flex = row
     ? 'flex-direction:row;flex-wrap:wrap;justify-content:var(--dm-section-justify,center)'

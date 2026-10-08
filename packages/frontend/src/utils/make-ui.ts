@@ -7,6 +7,8 @@
 export const MK_PAGE = 'relative min-h-screen bg-slate-100 text-slate-900';
 export const MK_HEADER = 'sticky top-0 z-30 border-b border-white/10 bg-slate-900 text-white';
 export const MK_HEADER_ROW = 'h-14 md:h-16 flex items-center gap-3 px-4 md:px-6';
+/** ★1008 머리 아래 화면에 붙어 따라오는 옆 칸(넓은 화면만 · 길면 칸 안 스크롤) — 블록으로 만들기 양옆 칸 · 붙은 편집 창과 같은 자리 */
+export const MK_SIDE_STICKY = 'lg:sticky lg:top-[72px] lg:max-h-[calc(100vh-88px)] lg:overflow-y-auto';
 export const MK_BACK = 'w-9 h-9 rounded-lg flex items-center justify-center text-white/70 hover:bg-white/10 hover:text-white transition-colors shrink-0';
 export const MK_TILE = 'w-10 h-10 rounded-[10px] flex items-center justify-center flex-shrink-0 shadow-md text-white';
 export const MK_TITLE = 'text-[16px] md:text-[18px] font-semibold tracking-[-0.02em] text-white leading-tight flex items-center gap-2 min-w-0';

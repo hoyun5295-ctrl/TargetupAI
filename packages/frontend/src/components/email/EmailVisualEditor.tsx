@@ -48,7 +48,7 @@ const EMAIL_BLOCK_TYPES: SectionType[] = [
 //   강조색 = 이메일 렌더러가 primary 파생(버튼·쿠폰·태그·코드·SNS칩·카운트다운·상품 할인가·웹사이트 링크)을 쓰는 타입.
 const EMAIL_ALIGN_AWARE = new Set<SectionType>(['hero', 'header', 'text_card']);
 const EMAIL_ACCENT_AWARE = new Set<SectionType>([
-  'text_card', 'cta', 'coupon', 'promo_code', 'sns', 'store_info', 'product_carousel',
+  'text_card', 'coupon', 'promo_code', 'sns', 'store_info', 'product_carousel',   // ★1008 cta 제외(버튼마다 버튼 색 · 글씨 색)
 ]);
 // ★ 2026-07-13 배경면(리듬) 노출 대상 — 렌더러가 밴드 래핑을 소비하는 본문 타입만(죽은 컨트롤 금지)
 const EMAIL_BAND_AWARE = new Set<SectionType>([

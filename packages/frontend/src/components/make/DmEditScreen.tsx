@@ -30,7 +30,8 @@ import { useToast } from '../ToastProvider';
 
 const authGet = () => ({ Authorization: `Bearer ${localStorage.getItem('token')}` });
 const authJson = () => ({ 'Content-Type': 'application/json', Authorization: `Bearer ${localStorage.getItem('token')}` });
-const ACCENT_AWARE = new Set(['cta', 'coupon', 'promo_code', 'product_carousel', 'countdown', 'instant_coupon', 'text_card']);
+// ★ 2026-10-08 버튼(cta) 제외 — 버튼마다 「버튼 색 · 글씨 색」이 내용 칸에 있어 이 「색」은 바뀌는 곳이 안 보였다(임은지 접수)
+const ACCENT_AWARE = new Set(['coupon', 'promo_code', 'product_carousel', 'countdown', 'instant_coupon', 'text_card']);
 const TEXT_SIZE_AWARE = true;
 
 function relTime(ts: number | null): string {

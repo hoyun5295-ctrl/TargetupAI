@@ -97,6 +97,7 @@ export const EMAIL_HEADER_PROPS: Array<{ prop: string; desc: string; probe: unkn
  *  ⛔ 스타일 3종 전부에서 반영돼야 한다 — 하나라도 빠지면 "스타일을 바꾸면 색이 사라진다"가 된다. */
 export const EMAIL_CTA_BUTTON_PROPS: Array<{ prop: string; desc: string; probe: unknown }> = [
   { prop: 'color', desc: '버튼 색 (미지정 = 스타일 기본색 · outline은 테두리·글씨, 그 외는 배경)', probe: '#0f766e' },
+  { prop: 'text_color', desc: '버튼 글씨 색 (★1008 · 미지정 = 스타일 기본 글씨색 · 버튼 색 뒤에 덮는다)', probe: '#a1b2c3' },
 ];
 
 /** CTA 버튼 스타일 = 이 셋 전부에서 지정색이 반영돼야 한다(편집기 Select의 값과 같아야 한다). */
