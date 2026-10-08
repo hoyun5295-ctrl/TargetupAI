@@ -79,7 +79,7 @@ import { applyPlanRequestWithClient, PlanTermError, planTermManagedSql, planTerm
 // ★ 2026-06-11: 감사 로그 CT — 라인그룹 지정/해제 책임 추적 (에이치피오 예약취소 사고 후속)
 import { loadAgencyCallbackKinds } from '../utils/agency-send-intake';
 import { switchCompanyBillingType } from '../utils/billing-type-history';
-import { recordAuditLog, isAuditLogViewer, isAiTrainingViewer, isGeoHitsViewer, isHelpQuestionViewer, isLineGroupAdmin, isSettlementOverviewViewer, isBestLayoutViewer, isPrecheckUsageViewer, isFeatureInterestViewer, isIdentityStatusViewer, isIntroLeadsViewer, isWatchLogViewer, diffFields } from '../utils/audit-log';
+import { recordAuditLog, isAuditLogViewer, isAiTrainingViewer, isGeoHitsViewer, isHelpQuestionViewer, isLineGroupAdmin, isSettlementOverviewViewer, isBestLayoutViewer, isPrecheckUsageViewer, isFeatureInterestViewer, isIdentityStatusViewer, isIntroLeadsViewer, isWatchLogViewer, hiddenAccessOwnerIds, diffFields } from '../utils/audit-log';
 import { loadWatchIps, loadWatchIpEvents } from '../utils/watch-alert'; // ★ 2026-10-07 감시 기록(ceo 전용)
 import { loadIntroLeads, parseIntroLeadsQuery } from '../utils/intro-leads'; // ★ 2026-10-07 소개 방문 · 시연 요청(ceo · suran)
 import { loadFeatureInterest, parseFeatureInterestQuery } from '../utils/feature-interest'; // ★ 2026-10-06 기능 관심 업체(ceo 전용)
@@ -1069,11 +1069,13 @@ const GEO_MIGRATION_HINT = {
 };
 // IPv4 · IPv6 CIDR 모양. 실제 유효성은 PG의 ::cidr 캐스팅이 확정한다(트랜잭션 안이라 실패 시 롤백)
 
-router.get('/geo/status', authenticate, requireSuperAdmin, requireAdminArea('geoAccess'), async (_req: Request, res: Response) => {
+router.get('/geo/status', authenticate, requireSuperAdmin, requireAdminArea('geoAccess'), async (req: Request, res: Response) => {
   try {
+    // ★ 2026-10-08 본인 전용 계정(PRIVATE_ACCESS_LOGIN_IDS)의 예외는 본인에게만 센다(목록 · 건수 같은 기준)
+    const hidden = await hiddenAccessOwnerIds(req.user?.userId);
     const [cidrs, exceptions] = await Promise.all([
       query(`SELECT COUNT(*)::int AS n, MAX(updated_at) AS updated_at FROM geo_allow_cidrs`),
-      query(`SELECT COUNT(*)::int AS n FROM access_origin_allowlist WHERE is_active = true`),
+      query(`SELECT COUNT(*)::int AS n FROM access_origin_allowlist WHERE is_active = true AND (user_id IS NULL OR user_id::text <> ALL($1::text[]))`, [hidden]),
     ]);
     return res.json({
       cidrCount: cidrs.rows[0]?.n || 0,
@@ -1096,8 +1098,10 @@ router.get('/geo/status', authenticate, requireSuperAdmin, requireAdminArea('geo
  * ★ 2026-10-07 국내 대역 일괄 교체 · 되돌리기 라우트 삭제(Harold) — 「어디가 한국 IP 인가」 기준표는 직원 화면에서 바꾸는 값이 아니다.
  *   1007 그 칸에 IP 하나가 들어가 기준표가 1개가 되며 국내 로그인이 전부 막혔다. 갱신 = 서버 명령(status/OPS.md §2-2-F) · 직원은 예외 승인만.
  */
-router.get('/geo/exceptions', authenticate, requireSuperAdmin, requireAdminArea('geoAccess'), async (_req: Request, res: Response) => {
+router.get('/geo/exceptions', authenticate, requireSuperAdmin, requireAdminArea('geoAccess'), async (req: Request, res: Response) => {
   try {
+    // ★ 2026-10-08 본인 전용 계정의 예외 행은 본인에게만(기록은 남는다 · 화면 조회만 거른다)
+    const hidden = await hiddenAccessOwnerIds(req.user?.userId);
     const result = await query(
       `SELECT a.id, a.scope, a.company_id, a.user_id,
               host(a.cidr) || '/' || masklen(a.cidr) AS cidr,
@@ -1109,8 +1113,10 @@ router.get('/geo/exceptions', authenticate, requireSuperAdmin, requireAdminArea(
          LEFT JOIN companies c ON c.id = a.company_id
          LEFT JOIN users u ON u.id = a.user_id
          LEFT JOIN super_admins s ON s.id = a.approved_by
+        WHERE (a.user_id IS NULL OR a.user_id::text <> ALL($1::text[]))
         ORDER BY a.is_active DESC, a.approved_at DESC
-        LIMIT 300`
+        LIMIT 300`,
+      [hidden]
     );
     return res.json({ exceptions: result.rows });
   } catch (error: any) {
@@ -1456,6 +1462,8 @@ router.get('/geo/hits', authenticate, requireSuperAdmin, requireAdminArea('geoHi
     // ★ 2026-10-07 쪽 넘김(Harold: 20건씩) — 옛: 최근 200건을 한 번에 내려 목록이 끝없이 길고 200건 밖은 볼 수 없었다
     const pageSize = 20;
     const page = Math.max(1, Math.floor(Number(req.query.page) || 1));
+    // ★ 2026-10-08 본인 전용 계정(PRIVATE_ACCESS_LOGIN_IDS · 기본 ceo)의 해외 접속 행은 본인에게만 — 이미 남은 행도 같이 걸러진다
+    const hidden = await hiddenAccessOwnerIds(req.user?.userId);
     const [result, cnt] = await Promise.all([
       query(
         `SELECT l.id, l.action, l.details, host(l.ip_address) AS ip_address, l.created_at,
@@ -1464,11 +1472,12 @@ router.get('/geo/hits', authenticate, requireSuperAdmin, requireAdminArea('geoHi
            LEFT JOIN users u ON u.id = l.user_id
            LEFT JOIN companies c ON c.id = u.company_id
           WHERE l.action IN ('foreign_access_detected', 'foreign_access_blocked')
+            AND (l.user_id IS NULL OR l.user_id::text <> ALL($3::text[]))
           ORDER BY l.created_at DESC
           LIMIT $1 OFFSET $2`,
-        [pageSize, (page - 1) * pageSize]
+        [pageSize, (page - 1) * pageSize, hidden]
       ),
-      query(`SELECT COUNT(*)::int AS n FROM audit_logs WHERE action IN ('foreign_access_detected', 'foreign_access_blocked')`),
+      query(`SELECT COUNT(*)::int AS n FROM audit_logs WHERE action IN ('foreign_access_detected', 'foreign_access_blocked') AND (user_id IS NULL OR user_id::text <> ALL($1::text[]))`, [hidden]),
     ]);
     return res.json({ hits: result.rows, total: cnt.rows[0]?.n || 0, page, pageSize });
   } catch (error) {

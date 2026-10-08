@@ -74,6 +74,22 @@ async function isSuperAdminAllowed(
 }
 
 /**
+ * ★ 2026-10-08 본인 전용 기록 — PRIVATE_ACCESS_LOGIN_IDS(기본 'ceo') 계정의 해외 접속 · 접근 예외 기록은
+ *   그 계정으로 로그인했을 때만 화면에 보인다(Harold 「직원에게 해외 접속 보이기 싫다 · 내 것에선 보이고」).
+ *   기록 자체는 그대로 남긴다(전송자격인증 2.2 예외 승인 이력) — 숨기는 것은 화면 조회뿐이다.
+ * 돌려주는 값 = 이 열람자에게서 숨길 super_admins.id 목록(문자열). 열람자 본인이 그 계정이면 빈 목록.
+ * ⛔ 조회 실패는 던진다 — 빈 목록으로 접으면 숨겨야 할 기록이 직원 화면에 나간다(호출부 catch = 500).
+ */
+export async function hiddenAccessOwnerIds(viewerSuperAdminId?: string | null): Promise<string[]> {
+  const loginIds = (process.env.PRIVATE_ACCESS_LOGIN_IDS || 'ceo').split(',').map((s) => s.trim()).filter(Boolean);
+  if (loginIds.length === 0) return [];
+  const r = await query(`SELECT id FROM super_admins WHERE login_id = ANY($1::text[])`, [loginIds]);
+  const owners = r.rows.map((x: any) => String(x.id));
+  if (viewerSuperAdminId && owners.includes(String(viewerSuperAdminId))) return [];
+  return owners;
+}
+
+/**
  * 감사 로그 열람 권한 — AUDIT_LOG_VIEWER_IDS(기본 'ceo')에 포함된 super_admins.login_id만 허용.
  * Harold 명시 2026-06-11: 감사 로그는 ceo 계정에서만 열람.
  */

@@ -41,6 +41,13 @@ describe('직원 접수 1008', () => {
     expect(card).toContain('buildAdSubjectFront(effectiveSubject, channelName, true)');
   });
 
+  it('본인 전용 계정의 해외 접속 · 접근 예외는 본인 화면에서만(현황 건수 · 예외 목록 · 해외 접속 이력 + 건수)', () => {
+    const src = read('backend/src/routes/admin.ts');
+    expect(src.match(/hiddenAccessOwnerIds\(req\.user\?\.userId\)/g)?.length).toBe(3);
+    expect(src.match(/user_id::text <> ALL\(\$\d::text\[\]\)/g)?.length).toBe(4);
+    expect(read('backend/src/utils/audit-log.ts')).toContain("process.env.PRIVATE_ACCESS_LOGIN_IDS || 'ceo'");
+  });
+
   it('감싼 문안 모양(LMS) = (광고) 머리 · 무료수신거부 꼬리', () => {
     expect(buildAdMessage('본문\n[주식회사 인비토]', 'LMS', true, '080-000-0000'))
       .toBe('(광고) 본문\n[주식회사 인비토]\n무료수신거부 080-000-0000');
