@@ -11,7 +11,7 @@
  */
 
 export type JourneyLane = 'signup' | 'first_purchase' | 'repurchase' | 'product' | 'winback' | 'moment' | 'standing';
-export type LineState = 'connected' | 'leak' | 'no_receiver' | 'receiver_draft' | 'receiver_off' | 'receiver_locked' | 'reentry_off';
+export type LineState = 'connected' | 'leak' | 'no_receiver' | 'receiver_draft' | 'receiver_off' | 'receiver_locked' | 'reentry_off' | 'sender_off' | 'dormant_mismatch';
 export type LineTier = 'solid' | 'warn' | 'empty';
 
 export interface MapStep {
@@ -24,8 +24,17 @@ export interface MapStep {
   intervalLabel: string;
   preview: string;
   waitingHere: number;
+  /** 최근 W일 들어온 고객 중 이 칸을 받은 사람. */
+  reached: number;
   exitsAfter: number | null;
+  /** 이미 사서 이 칸 다음 차례 직전에 마칠 예정 · null = 판정 안 함. */
+  pendingHere: number | null;
+  /** 이 칸 시점이 숫자 창보다 뒤(도달 0 을 "아직 없음"으로 읽지 않게). */
+  outOfWindow: boolean;
 }
+
+/** 칸 편집 정책(서버 stepEditPolicy 결과 그대로 · 화면이 판정하지 않는다). */
+export interface StepEditPolicy { copy: boolean; timing: boolean; structure: boolean; ops: boolean; reason: string }
 
 export interface MapJourney {
   id: string;
@@ -45,12 +54,18 @@ export interface MapJourney {
   thresholdRecipients: number | null;
   targetSummary: string;
   broadAudience: boolean;
-  counts: { activeNow: number; entered30d: number; goalMet30d: number; completed30d: number };
+  /** 상태 숫자(activeNow · inProgress) = 지금 · 누적 숫자(entered · goalMet · completed) = 최근 windowDays 일 들어온 고객. */
+  counts: { activeNow: number; inProgress: number; entered: number; goalMet: number; completed: number };
+  windowDays: number;
   pendingGoalExit: number | null;
   exitsBeforeFirst: number | null;
+  /** 바닥 한 줄(언제 끝나는가 · 서버 문구). */
+  endNote: string;
+  /** 같은 상품을 다시 사면 처음부터(진입 교체). */
+  entryReplace: boolean;
   steps: MapStep[];
   graph: { edges: Array<{ from: number; to: number; kind: string }>; exitSlots: number[]; issues: string[] };
-  lock: { level: 'full' | 'append_only' | 'copy_only' | 'none'; reason: string };
+  edit: StepEditPolicy;
   capability: { available: boolean; reason: string } | null;
   updatedAt: string | null;
   /** ★ 0930 V2 5차 — 계보 · 새 판 */
@@ -72,6 +87,9 @@ export interface MapLine {
   goalMet: number;
   handedOver: number | null;
   handedOver7d: number | null;
+  /** 받는 여정의 같은 창 전체 진입(분모) · 받는 여정 없음 = null. */
+  receiverEntered: number | null;
+  windowDays: number;
   fix: AttachFix | null;
 }
 
@@ -88,11 +106,15 @@ export interface LifecycleMapData {
 }
 
 /** 선 색 · 모양(시각 3종 · 선 모양이 2차 단서 = 색만으로 가르지 않는다). SVG 속성값. */
+// ★ 2026-10-09 고객 관계 지도 — 밝은 판 기준으로 다시 맞춤. 옛 "비어 있음" = 흰색 35%라 흰 판에서 선이 보이지 않았다(칩만 떠 보인 원인).
+//   이어짐 = 짙은 회색 실선(보라 일색 = "AI 티" · 1006 Harold) · 최근 7일 이어받음이 있으면 보라 흐름 점이 지난다(journey-map.css).
 export const LINE_STYLE: Record<LineTier, { stroke: string; dash?: string; label: string }> = {
-  solid: { stroke: '#8b5cf6', label: '이어짐' },
-  warn: { stroke: '#f59e0b', dash: '5 4', label: '손봐야 함' },
-  empty: { stroke: 'rgba(255,255,255,0.35)', dash: '2 5', label: '비어 있음' },
+  solid: { stroke: '#334155', label: '이어짐' },
+  warn: { stroke: '#f59e0b', dash: '6 4', label: '손봐야 함' },
+  empty: { stroke: '#94a3b8', dash: '3 5', label: '비어 있음' },
 };
+/** 구매 확인 출구(눈금 · 레일 · ◆) 색 = 목표(emerald). */
+export const EXIT_STROKE = '#10b981';
 
 /** 선 위 짧은 이름(사유 전문은 서버 reason · 누르면 보인다). */
 export const LINE_SHORT: Record<LineState, string> = {
@@ -103,6 +125,8 @@ export const LINE_SHORT: Record<LineState, string> = {
   receiver_off: '받는 여정 멈춤',
   receiver_locked: '연동이 필요해요',
   reentry_off: '다시 받기 막힘',
+  sender_off: '보내는 여정 꺼짐',
+  dormant_mismatch: '휴면 기준일 다름',
 };
 
 /** 칸 종류 → 모양 · 색(Tailwind 완성 리터럴 · 조립 금지). */

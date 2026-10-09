@@ -78,6 +78,31 @@ export interface JourneyAIGenerateInput {
    *   사용 기간은 담당자가 확정한 일수 → 첫 문자 대기(delay)에 그대로 저장한다(AI 가 정하지 않는다).
    */
   product?: { keys: string[]; names: string[]; door: PurchaseDoor; periodDays: number };
+  /**
+   * ★ 2026-10-09 AI 진단 추천(설계서 docs/2026-10-09-journey-crm-map-design.md §5) — 칸 수 · 시점은 서버가 실측으로 정한 값.
+   *   프롬프트(목표 문장)에 싣고, 생성 뒤 프리셋 고정 **다음** 자리에서 같은 값으로 다시 덮는다(AI 값 무시 · 순서 테스트).
+   *   dormantDays = 휴면 전환 · 휴면 복귀 두 여정이 같은 기준일을 쓰게(회의론자 D1).
+   */
+  timing?: { daysFromStart: number[]; dormantDays?: number | null };
+}
+
+/** 휴면 기준일을 쓰는 시작 사건(대상 필터 dormant_days 를 읽는 둘). */
+const DORMANT_DAYS_TRIGGERS = new Set(['customer.dormant', 'customer.dormant_return']);
+
+/**
+ * 추천 시점으로 칸을 맞춘다(순수) — 칸 수가 모자라면 throw(같은 과금 묶음 안 1회 재요청 대상 · JourneyInputError 아님),
+ * 넘치면 자른다. 누적 일수 → 칸 사이 대기(시간).
+ */
+export function applyRecoTiming(steps: GeneratedStep[], daysFromStart: number[]): GeneratedStep[] {
+  const n = daysFromStart.length;
+  if (n === 0) return steps;
+  if (steps.length < n) throw new Error(`추천 칸 수(${n})보다 적게 설계됐습니다(${steps.length}).`);
+  return steps.slice(0, n).map((s, i) => {
+    const hours = Math.max(0, daysFromStart[i] - (i === 0 ? 0 : daysFromStart[i - 1])) * 24;
+    // 계획(buildFlowPlan)이 이미 상한 안으로 맞춘다 — 여기서 넘치면 몰래 자르지 않고 거부한다(표시와 다른 시점 발송 금지 · Codex 1R).
+    if (clampStepDelayHours(hours) !== hours) throw new JourneyInputError('추천 간격이 칸 사이 최대 대기를 넘어요. 진단을 다시 열어 주세요.');
+    return { ...s, stepOrder: i + 1, delayHours: hours };
+  });
 }
 
 export interface GeneratedStep {
@@ -695,6 +720,15 @@ VIP 회원님만을 위해 마련한 이번 특별 안내,
   if (productFilters) {
     triggerFilters = { ...productFilters, entry_replace: true };
     if (steps.length > 0) steps[0] = { ...steps[0], delayHours: clampStepDelayHours(productPeriodDays * 24) };
+  }
+  // ★ 2026-10-09 AI 진단 추천 — 프리셋 고정(조건 비움) **뒤**에서 덮는다. 앞에 두면 위 프리셋 블록이 dormant_days 를 지운다(회의론자 D2).
+  if (input.timing && !productFilters) {
+    const timed = applyRecoTiming(steps, input.timing.daysFromStart);
+    steps.splice(0, steps.length, ...timed);
+    const dd = Number(input.timing.dormantDays);
+    if (DORMANT_DAYS_TRIGGERS.has(triggerEvent) && Number.isFinite(dd) && dd > 0) {
+      triggerFilters = { ...triggerFilters, dormant_days: Math.round(dd) };
+    }
   }
 
   // ★ 2026-09-29 여정 V2 0차 ① — AI 가 고른 시작 사건은 레지스트리 목록 안에서만 받는다.

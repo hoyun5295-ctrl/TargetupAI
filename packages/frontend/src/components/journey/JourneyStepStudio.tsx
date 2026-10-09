@@ -46,18 +46,18 @@ interface Props {
   index: number;
   onIndex: (i: number) => void;
   onPatch: (i: number, patch: Partial<StudioStep>) => void;
-  onAdd: () => void;
-  onDelete: (i: number) => void;
+  onAdd?: () => void;
+  onDelete?: (i: number) => void;
   onSave: () => void;
   /** AI 문안생성·다듬기 — 본문이 비어 있어도 부를 수 있다(생성 모드). */
-  onAi: (i: number) => void;
+  onAi?: (i: number) => void;
   /**
    * AI 꾸미기 — 회사 보유 컬럼을 %변수%로 녹인다.
    * ★ 2026-08-08 — **고른 컬럼만** 넘긴다(Harold 접수). 전체를 넘기면 AI가 아무 컬럼이나 골라 넣는다.
    *   선택 UI는 날짜축 빌더·AI Operator와 같은 규약(0개면 잠금).
    */
-  onDecorate: (i: number, selectedTokens: string[]) => void;
-  onSpamTest: (i: number) => void;
+  onDecorate?: (i: number, selectedTokens: string[]) => void;
+  onSpamTest?: (i: number) => void;
   /**
    * ★ 2026-08-08 — 마무리 입력 카드. placeholder가 남은 스텝이 있을 때만 그 줄이 보인다.
    *   값을 받으면 **전 스텝의 placeholder를 일괄 치환**한다(치환은 페이지가 소유 — 스텝마다 다시 묻지 않는다).
@@ -86,6 +86,18 @@ interface Props {
   aiBusy?: boolean;
   saving?: boolean;
   maxSteps: number;
+  /**
+   * ★ 2026-10-09 고객 관계 지도 — 칸 하나만 고치는 창(지도 편집 창)용. 넘기지 않으면 기존 동작 그대로(여정 만들기 화면).
+   *   single = 스텝 이동 · 추가 · 지우기 · 저장 버튼을 숨긴다(이동은 창의 미니 척추 · 저장은 창의 바닥 줄이 맡는다)
+   *   bare = 바깥 테두리 · 그림자를 뺀다(창 안 이중 테두리 방지) · stacked = 좁은 창에서 한 줄로 쌓는다
+   *   lockChannel · lockTiming = 서버 편집 정책(stepEditPolicy)이 막은 묶음 — 화면은 그 값대로 잠그기만 한다.
+   */
+  single?: boolean;
+  bare?: boolean;
+  stacked?: boolean;
+  lockChannel?: boolean;
+  lockTiming?: boolean;
+  lockNote?: string;
 }
 
 /**
@@ -119,6 +131,7 @@ export default function JourneyStepStudio({
   sampleCustomer = null, sampleCustomerFields = null, opt080Number = '',
   variables = [], decorateVars = [], triggerLabel, objective,
   aiBusy = false, saving = false, maxSteps,
+  single = false, bare = false, stacked = false, lockChannel = false, lockTiming = false, lockNote,
 }: Props) {
   const step = steps[index];
   const taRef = useRef<HTMLTextAreaElement | null>(null);
@@ -229,7 +242,7 @@ export default function JourneyStepStudio({
   };
 
   return (
-    <div className="rounded-2xl border border-slate-200 bg-white shadow-2xl overflow-hidden">
+    <div className={bare ? 'bg-white' : 'rounded-2xl border border-slate-200 bg-white shadow-2xl overflow-hidden'}>
       {/* 헤더 — 지금이 몇 번째인지 한눈에 */}
       <div className="sticky top-0 z-10 flex flex-wrap items-center gap-3 border-b border-slate-200 bg-white px-4 py-3 backdrop-blur md:px-5">
         <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br from-violet-500 to-fuchsia-500 text-sm font-bold text-white">
@@ -245,7 +258,7 @@ export default function JourneyStepStudio({
           </div>
         </div>
 
-        <div className="flex items-center gap-1.5">
+        {!single && <div className="flex items-center gap-1.5">
           <button
             type="button"
             onClick={() => onIndex(Math.max(0, index - 1))}
@@ -275,13 +288,16 @@ export default function JourneyStepStudio({
           >
             <ChevronRight className="h-4 w-4" />
           </button>
-        </div>
+        </div>}
       </div>
+      {lockNote && (
+        <div className="mx-4 mt-3 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-[11px] leading-relaxed text-slate-500 md:mx-5">{lockNote}</div>
+      )}
 
-      <div className="grid gap-4 p-4 md:grid-cols-5 md:p-5">
+      <div className={`grid gap-4 p-4 md:p-5 ${stacked ? '' : 'md:grid-cols-5'}`}>
         {/* 좌 — 문안 */}
-        <div className="space-y-3 md:col-span-3">
-          <div className="flex flex-wrap items-center gap-2">
+        <div className={`space-y-3 ${stacked ? '' : 'md:col-span-3'}`}>
+          <fieldset disabled={lockChannel} className="flex flex-wrap items-center gap-2 disabled:opacity-60">
             {(['sms', 'lms', 'mms'] as StudioChannel[]).map((c) => (
               <button
                 key={c}
@@ -298,7 +314,7 @@ export default function JourneyStepStudio({
               {bytes} / {maxBytes} byte
               {isAdStep && <span className="ml-1 font-sans text-[10px] text-slate-400">(광고 표기 포함)</span>}
             </span>
-          </div>
+          </fieldset>
 
           {channel !== 'sms' && (
             <input
@@ -488,8 +504,8 @@ export default function JourneyStepStudio({
           </div>
 
           {/* 액션 3 — 오퍼레이터 화면과 같은 정렬 */}
-          <div className="flex flex-wrap gap-2">
-            <button
+          {(onAi || onDecorate || onSpamTest) && <div className="flex flex-wrap gap-2">
+            {onAi && <button
               type="button"
               onClick={() => onAi(index)}
               disabled={aiBusy}
@@ -497,8 +513,8 @@ export default function JourneyStepStudio({
             >
               {aiBusy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5" />}
               {(step.messageTemplate || '').trim().length >= 5 ? 'AI 다듬기' : 'AI 문안생성'}
-            </button>
-            <button
+            </button>}
+            {onDecorate && <button
               type="button"
               onClick={() => onDecorate(index, Array.from(selectedVars))}
               disabled={aiBusy || selectedVars.size === 0}
@@ -506,15 +522,15 @@ export default function JourneyStepStudio({
               className="inline-flex items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 transition-colors hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50"
             >
               <Wand2 className="h-3.5 w-3.5" /> AI 꾸미기{selectedVars.size > 0 ? ` (${selectedVars.size})` : ''}
-            </button>
-            <button
+            </button>}
+            {onSpamTest && <button
               type="button"
               onClick={() => onSpamTest(index)}
               className="inline-flex items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 transition-colors hover:bg-slate-100"
             >
               <Beaker className="h-3.5 w-3.5" /> 스팸필터 테스트
-            </button>
-          </div>
+            </button>}
+          </div>}
 
           {(step.messageTemplate || '').trim() && (
             <div className="rounded-xl border border-slate-200 bg-slate-100 p-3">
@@ -542,8 +558,8 @@ export default function JourneyStepStudio({
         </div>
 
         {/* 우 — 언제 보낼지 */}
-        <div className="space-y-3 md:col-span-2">
-          <div className="rounded-xl border border-slate-200 bg-slate-100 p-3">
+        <div className={`space-y-3 ${stacked ? '' : 'md:col-span-2'}`}>
+          <fieldset disabled={lockTiming} className="rounded-xl border border-slate-200 bg-slate-100 p-3 disabled:opacity-60">
             <div className="mb-2 flex items-center gap-1.5 text-xs font-semibold text-slate-600">
               <Clock className="h-3.5 w-3.5 text-violet-700" />
               {index === 0 ? '트리거가 발생하면' : '앞 스텝을 보낸 뒤'}
@@ -628,7 +644,7 @@ export default function JourneyStepStudio({
                 ))}
               </select>
             )}
-          </div>
+          </fieldset>
 
           {/* 야간 안내 — 광고성은 21~08시 발송 금지 */}
           {step.isAd !== false && (
@@ -656,7 +672,7 @@ export default function JourneyStepStudio({
           )}
 
           <div className="space-y-2">
-            <button
+            {onAdd && !single && <button
               type="button"
               onClick={onAdd}
               disabled={steps.length >= maxSteps}
@@ -664,8 +680,8 @@ export default function JourneyStepStudio({
             >
               <Plus className="h-4 w-4" />
               {steps.length >= maxSteps ? `스텝은 최대 ${maxSteps}개` : '스텝 추가'}
-            </button>
-            <button
+            </button>}
+            {!single && <button
               type="button"
               onClick={onSave}
               disabled={saving}
@@ -673,8 +689,8 @@ export default function JourneyStepStudio({
             >
               {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
               저장하기
-            </button>
-            {steps.length > 1 && (
+            </button>}
+            {onDelete && !single && steps.length > 1 && (
               <button
                 type="button"
                 onClick={() => onDelete(index)}

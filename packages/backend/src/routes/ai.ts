@@ -185,7 +185,7 @@ import { diagnoseJourneySteps, recommendNextJourneyStep } from '../utils/journey
 // ★ D211+ Phase A (2026-05-23 Harold 명시): CT-60/CT-61 시뮬레이션 + variant 자동 생성 + 실시간 위치
 import { simulateJourney } from '../utils/journey-simulator';
 // ★ 2026-06-29: "오늘의 여정 기회" — 회사 실데이터로 여정 빈 지점 산출 (랜딩 1클릭 생성)
-import { buildJourneyOpportunities } from '../utils/journey-opportunities';
+import { buildJourneyOpportunities, buildJourneyDiagnosis, recoPlanFor, recoRequestId } from '../utils/journey-opportunities';
 // ★ 2026-09-29 여정 V2 1차 — 생애 지도 단일 조회(읽기 전용 · 화면은 그리기만).
 import { buildLifecycleMap } from '../utils/journey-lifecycle-map';
 import { activateJourneyGuarded, activateJourneysInOrder, MAX_BATCH_ACTIVATION } from '../utils/journey-activation';
@@ -3756,6 +3756,75 @@ router.get('/operator/journeys-opportunities', async (req: Request, res: Respons
   }
 });
 
+// ★ 2026-10-09 고객 관계 지도 — AI 진단(설계서 docs/2026-10-09-journey-crm-map-design.md §5).
+//   사실 · 간격 = 구매 원장 실측(SQL · AI 0 · 차감 0) · 창을 열 때만 부른다(지도 60초 갱신에 묶지 않는다 · 리듬 사실은 24시간 캐시).
+router.get('/operator/journeys-diagnosis', async (req: Request, res: Response) => {
+  try {
+    const companyId = req.user?.companyId;
+    if (!companyId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
+    const planCtx = await loadPlanContext(companyId);
+    if (!planCtx) return res.status(404).json({ success: false, error: '회사 정보를 찾을 수 없습니다.' });
+    if (!isAiOperatorAllowed(planCtx, req.user)) {
+      return res.status(403).json({ success: false, error: 'AI Operator 진입 권한이 없습니다.', code: 'AI_OPERATOR_GATED' });
+    }
+    const diagnosis = await buildJourneyDiagnosis(companyId);
+    return res.json({ success: true, diagnosis });
+  } catch (err: any) {
+    console.error('[Journeys diagnosis] 오류:', err);
+    return res.status(500).json({ success: false, error: '진단을 불러오지 못했어요. 잠시 뒤 다시 시도해 주세요.' });
+  }
+});
+
+// ★ 2026-10-09 — 추천 계획으로 초안 만들기. 계획은 서버가 다시 계산한다(화면이 보낸 간격 · 칸 수는 받지 않는다).
+//   차감 · 멱등 · 저장 = 문장으로 만들기와 같은 경로(designJourneyFromInterview · 요청 키 = 회사 · 계획 내용에서 결정적 = recoRequestId).
+router.post('/operator/journeys-reco/design', async (req: Request, res: Response) => {
+  try {
+    const companyId = req.user?.companyId;
+    const userId = req.user?.userId;
+    if (!companyId || !userId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
+    const planCtx = await loadPlanContext(companyId);
+    if (!planCtx) return res.status(404).json({ success: false, error: '회사 정보를 찾을 수 없습니다.' });
+    if (!isAiOperatorAllowed(planCtx, req.user)) {
+      return res.status(403).json({ success: false, error: 'AI Operator 진입 권한이 없습니다.', code: 'AI_OPERATOR_GATED' });
+    }
+    const { triggerEvent, callbackNumber, shownDays } = req.body || {};
+    const plan = await recoPlanFor(companyId, String(triggerEvent || ''));
+    if (!plan) return res.status(400).json({ success: false, error: '추천에 없는 시작 사건이에요. 진단을 다시 열어 주세요.' });
+    if (plan.status === 'locked') return res.status(409).json({ success: false, error: plan.reason || '지금 데이터로는 만들 수 없어요.', code: 'TRIGGER_LOCKED' });
+    const out = await designJourneyFromInterview({
+      companyId,
+      userId,
+      // 요청 키 = 계획 내용에서 결정적(화면 키 · 날짜를 쓰지 않는다 · 다시 열거나 새로고침 · 자정을 넘겨도 같은 요청 = 중복 생성 · 차감 0)
+      interviewId: recoRequestId(companyId, plan),
+      plan: { key: `reco-${plan.key}`, triggerEvent: plan.triggerEvent, title: plan.title, objective: plan.objective },
+      // 시작 사건을 명시한다 — 추천 답(같은 레인 첫 열린 사건)에 맡기면 잠긴 사건이 다른 사건으로 바뀌어 만들어진다(명시 + 잠김 = 거절).
+      answers: { [`reco-${plan.key}:trigger`]: plan.triggerEvent, [`reco-${plan.key}:messages`]: String(plan.daysFromStart.length) },
+      callbackNumber: callbackNumber ? String(callbackNumber) : null,
+      timing: { daysFromStart: plan.daysFromStart, dormantDays: plan.dormantDays },
+    });
+    // 창에서 본 시점과 다시 계산한 시점이 다르면 알린다(리듬 캐시가 그 사이 갱신된 경우 · 회의론자 D8).
+    const shown = Array.isArray(shownDays) ? shownDays.map(Number) : null;
+    const recalculated = !!shown && (shown.length !== plan.daysFromStart.length || shown.some((d, i) => d !== plan.daysFromStart[i]));
+    return res.json({ success: true, ...out, daysFromStart: plan.daysFromStart, recalculated });
+  } catch (err: any) {
+    if (err instanceof InsufficientCreditError) {
+      return res.status(402).json({ success: false, error: '여정 초안을 만드는 데 필요한 크레딧이 부족합니다. 크레딧을 충전해 주세요.', code: 'INSUFFICIENT_CREDIT' });
+    }
+    if (err instanceof JourneyInputError) {
+      return res.status(400).json({ success: false, error: err.message, code: err.code });
+    }
+    if (err instanceof JourneyStepGateError) {
+      return res.status(409).json({ success: false, error: err.message, code: err.code });
+    }
+    const cm = err?.message || '';
+    if (cm.includes('column') && cm.includes('does not exist')) {
+      return res.status(503).json({ success: false, error: 'DB 마이그레이션 필요: 운영자에게 journeys/journey_steps ALTER 실행 요청 의무', code: 'DB_MIGRATION_PENDING' });
+    }
+    console.error('[Journeys reco design] 오류:', err);
+    return res.status(500).json({ success: false, error: '추천 여정을 만들지 못했어요. 잠시 뒤 다시 시도해 주세요.' });
+  }
+});
+
 // POST /api/ai/operator/journeys — 신규 여정 생성 (템플릿 또는 자연어)
 router.post('/operator/journeys', async (req: Request, res: Response) => {
   try {
@@ -4034,6 +4103,7 @@ router.patch('/operator/journeys/:id/steps/:stepId', async (req: Request, res: R
       mmsImagePaths,
       notifyManagerOnPretest,
       allowActiveMessageEdit,
+      delayMode, targetHourKst,
     } = req.body || {};
     // ★ 2026-07-27: 알림톡 전환재발송 검증은 updateJourneyStep 안에서 기존값과 병합한 최종 상태로 한다.
     //   여기서 요청값만 보고 판정하면, 제목만 ''로 보내는 요청은 검증을 건너뛰고 타입만 보내는 요청은
@@ -4055,6 +4125,9 @@ router.patch('/operator/journeys/:id/steps/:stepId', async (req: Request, res: R
       alimtalkNextSubject,
       mmsImagePaths,
       notifyManagerOnPretest,
+      // ★ 2026-10-09 고객 관계 지도 — 편집 창의 "보내는 시각" 이 저장되도록(옛: 라우트가 버려 눌러도 안 바뀌었다).
+      delayMode: delayMode !== undefined ? delayMode : undefined,
+      targetHourKst: targetHourKst !== undefined && targetHourKst !== null && Number.isFinite(Number(targetHourKst)) ? Number(targetHourKst) : undefined,
     });
     if (!ok) return res.status(404).json({ success: false, error: 'step을 찾을 수 없거나 수정 권한이 없습니다.' });
     return res.json({ success: true });

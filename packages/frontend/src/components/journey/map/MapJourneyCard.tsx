@@ -50,7 +50,7 @@ function ExitMarker({ n, label, first }: { n: number; label: string; first?: boo
   return (
     <div className="flex items-center gap-1.5 pl-3 text-[11px] text-emerald-700">
       <Target className="w-3 h-3 shrink-0" />
-      <span>{first ? '첫 문자 전에' : '여기서'} {label} {n.toLocaleString('ko-KR')}명 빠짐</span>
+      <span>{first ? '첫 문자 전에' : '여기서'} {label} {n.toLocaleString('ko-KR')}명 마침</span>
     </div>
   );
 }
@@ -96,13 +96,13 @@ export default function MapJourneyCard({
             <div className="text-xs font-semibold text-slate-900 tabular-nums">{countText(j.counts.activeNow, '0')}</div>
           </div>
           <div className="rounded-lg bg-white px-1 py-1.5">
-            <div className="text-[11px] text-slate-400">30일 진입</div>
-            <div className="text-xs font-semibold text-slate-900 tabular-nums">{countText(j.counts.entered30d, '0')}</div>
+            <div className="text-[11px] text-slate-400">{j.windowDays}일 진입</div>
+            <div className="text-xs font-semibold text-slate-900 tabular-nums">{countText(j.counts.entered, '0')}</div>
           </div>
           <div className="rounded-lg bg-white px-1 py-1.5">
             <div className="text-[11px] text-slate-400 truncate">{j.goalLabel}</div>
             <div className="text-xs font-semibold text-emerald-700 tabular-nums">
-              {j.goalExitEnabled ? countText(j.counts.goalMet30d, '0') : '꺼짐'}
+              {j.goalExitEnabled ? countText(j.counts.goalMet, '아직 없음') : '꺼짐'}
             </div>
           </div>
         </div>
@@ -110,7 +110,7 @@ export default function MapJourneyCard({
         {j.pendingGoalExit != null && j.pendingGoalExit > 0 && (
           <div className="flex items-start gap-1.5 text-[11px] leading-relaxed text-emerald-700">
             <Target className="w-3 h-3 mt-0.5 shrink-0" />
-            <span>이미 구매해서 다음 칸 전에 빠질 고객 약 {j.pendingGoalExit.toLocaleString('ko-KR')}명</span>
+            <span>이미 구매해서 다음 칸 전에 마칠 고객 약 {j.pendingGoalExit.toLocaleString('ko-KR')}명</span>
           </div>
         )}
         {j.notices.map((n) => (
@@ -206,21 +206,25 @@ export default function MapJourneyCard({
                     {br && (
                       <div className="mt-1 text-[11px] text-slate-500">{br.met} · {br.notMet}</div>
                     )}
-                    {s.waitingHere > 0 && (
-                      <div className="mt-1 text-[11px] text-slate-400 tabular-nums">이 칸 차례 {s.waitingHere.toLocaleString('ko-KR')}명</div>
+                    {(s.waitingHere > 0 || s.kind === 'message') && (
+                      <div className="mt-1 flex gap-2 text-[11px] text-slate-400 tabular-nums">
+                        {s.waitingHere > 0 && <span>지금 {s.waitingHere.toLocaleString('ko-KR')}명</span>}
+                        {s.kind === 'message' && <span className="ml-auto">{s.outOfWindow ? `${j.windowDays}일 창 밖` : `받음 ${countText(s.reached, '0')}`}</span>}
+                      </div>
                     )}
                   </button>
                   {s.exitsAfter != null && <ExitMarker n={s.exitsAfter} label={j.goalLabel} />}
                 </div>
               );
             })}
-            <div className="flex items-center gap-1.5 pl-3 text-[11px] text-slate-400">
-              <span className="w-1.5 h-1.5 rounded-full bg-slate-200" aria-hidden />
-              <span>여정 끝</span>
+            <div className="flex items-center gap-1.5 pl-3 text-[11px] text-slate-500">
+              <span className="w-1.5 h-1.5 rounded-full bg-slate-300" aria-hidden />
+              <span className="flex-1">{j.entryReplace ? '같은 상품을 다시 사면 처음부터' : j.endNote}</span>
+              <span className="tabular-nums text-slate-400">끝까지 {countText(j.counts.completed, '0')}</span>
             </div>
             <div className="flex items-start gap-1.5 text-[11px] leading-relaxed text-slate-400 pt-1">
               <Lock className="w-3 h-3 mt-0.5 shrink-0" />
-              <span>{j.lock.reason}</span>
+              <span>{j.edit.reason}</span>
             </div>
             {j.canNewVersion && (
               <button

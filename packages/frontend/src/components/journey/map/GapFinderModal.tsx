@@ -8,8 +8,10 @@
  *   ④데이터가 있어야 열리는 여정 — 무엇을 연동하면 열리는지.
  * ⛔ 성과를 약속하는 숫자(예상 매출 · 전환)를 만들어 내지 않는다. 서버가 준 대상 수만 쓴다.
  */
+import { useState } from 'react';
 import { AlertCircle, ArrowRight, Lock, Plus, Sparkles, Users, X } from 'lucide-react';
 import JourneyModalShell from '../JourneyModalShell';
+import JourneyDiagnosisPanel from './JourneyDiagnosisPanel';
 import { LINE_SHORT, type AttachFix, type CreateMode, type LifecycleMapData } from '../../../utils/journey-map';
 
 export interface GapOpportunity {
@@ -30,6 +32,8 @@ interface Props {
   onCreate: (triggerEvent: string, objective?: string, mode?: CreateMode) => void;
   onFocusJourney: (id: string) => void;
   onFix: (fix: AttachFix) => void;
+  /** ★ 2026-10-09 AI 진단 — 추천대로 만든 초안 → 페이지가 다시 읽고 켜기 전 점검을 연다. */
+  onDrafted: (journeyIds: string[]) => void;
 }
 
 function Group({ title, count, desc, children }: { title: string; count: number; desc: string; children: React.ReactNode }) {
@@ -49,7 +53,8 @@ function Empty({ text }: { text: string }) {
   return <div className="rounded-lg border border-dashed border-slate-200 px-3 py-2.5 text-[11px] text-slate-400">{text}</div>;
 }
 
-export default function GapFinderModal({ open, onClose, data, opportunities, onCreate, onFocusJourney, onFix }: Props) {
+export default function GapFinderModal({ open, onClose, data, opportunities, onCreate, onFocusJourney, onFix, onDrafted }: Props) {
+  const [busy, setBusy] = useState(false);
   const nameOf = (id: string) => data.journeys.find((j) => j.id === id)?.name || '여정';
 
   // ① 비어 있는 구간 — 기회 카드(대상 수가 있다)를 먼저, 같은 시작 사건의 유령 카드는 합친다.
@@ -78,21 +83,22 @@ export default function GapFinderModal({ open, onClose, data, opportunities, onC
   );
 
   return (
-    <JourneyModalShell open={open} onClose={onClose} labelledBy="jmap-gap-title" panelClassName="w-full max-w-2xl">
+    <JourneyModalShell open={open} onClose={onClose} labelledBy="jmap-gap-title" panelClassName="w-full max-w-3xl" disableDismiss={busy}>
       <div className="flex items-start gap-3 px-5 pt-5 pb-3 border-b border-slate-200">
         <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-violet-500 to-fuchsia-500 flex items-center justify-center shrink-0">
           <Sparkles className="w-4 h-4 text-white" />
         </div>
         <div className="flex-1 min-w-0">
-          <h2 id="jmap-gap-title" className="text-sm font-semibold text-slate-900">빈 곳 찾기</h2>
-          <p className="mt-0.5 text-[11px] text-slate-500">지금 있는 여정을 보고 비어 있거나 손봐야 할 곳을 모았어요.</p>
+          <h2 id="jmap-gap-title" className="text-sm font-semibold text-slate-900">AI 진단</h2>
+          <p className="mt-0.5 text-[11px] text-slate-500">고객이 사는 리듬을 재서 가입부터 다시 오기까지 여정을 추천하고, 비어 있거나 손봐야 할 곳을 모았어요.</p>
         </div>
-        <button type="button" onClick={onClose} className="p-1.5 rounded-lg text-slate-500 hover:text-slate-900 hover:bg-slate-100" aria-label="닫기">
+        <button type="button" onClick={onClose} disabled={busy} className="p-1.5 rounded-lg text-slate-500 hover:text-slate-900 hover:bg-slate-100 disabled:opacity-30" aria-label="닫기">
           <X className="w-4 h-4" />
         </button>
       </div>
 
       <div className="flex-1 overflow-y-auto px-5 py-4 space-y-6">
+        <JourneyDiagnosisPanel open={open} onDrafted={(ids) => { onClose(); onDrafted(ids); }} onBusyChange={setBusy} />
         <Group title="비어 있는 구간" count={opportunities.length + ghostsOpen.length} desc={`초안 만들기 ${data.costs.generate} 크레딧 · 켜기 전에는 아무것도 발송되지 않습니다.`}>
           {opportunities.length === 0 && ghostsOpen.length === 0 && <Empty text="지금 데이터로 비어 보이는 구간이 없어요." />}
           {opportunities.map((o) => (
@@ -217,7 +223,7 @@ export default function GapFinderModal({ open, onClose, data, opportunities, onC
       </div>
 
       <div className="px-5 py-3 border-t border-slate-200 text-[10px] text-slate-400 italic">
-        출처: 여정 · 여정 진행 기록 · 고객 데이터 실시간 집계(AI 호출 없음)
+        출처: 여정 · 여정 진행 기록 · 고객 데이터 · 구매 원장 집계(진단을 여는 데 AI 호출 없음)
       </div>
     </JourneyModalShell>
   );

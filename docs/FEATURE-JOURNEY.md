@@ -57,6 +57,7 @@
 | **화면 — 모달 껍데기** | `frontend/components/journey/JourneyModalShell.tsx` | dialog 의미 · 초기 포커스 · Tab 가둠 · Esc · 포커스 복귀. 여정 모달 전부가 이 안에 |
 | **칸 한도** (★0929 V2) | `utils/journey-step-limits.ts` | 칸 종류 화이트리스트 · 칸 수 · 대기 상한 단일 출처 · 넘치면 거부(자르지 않음) · 모르는 종류 거부 · `JourneyInputError`(400) |
 | **V2 설계 · 차수** | [여정 V2 마스터 설계서](2026-09-29-journey-v2-master-design.md) | 생애 지도 · 칸 서랍 · 문장으로 만들기 · 0~5차 · 구현 기록 §13 |
+| **고객 관계 지도(1009)** | [고객 관계 지도 설계서](2026-10-09-journey-crm-map-design.md) | 지도 흐름도 개편 · 칸 편집 창 · 편집 정책 stepEditPolicy · 숫자 한 벌 · AI 진단 · 시연 데이터 v2 |
 
 **정합 가드** — `journey-trigger-catalog-parity.test.ts`가 카탈로그↔백엔드↔AI 추천 집합 일치를 고정한다. 어긋나면 화면엔 보이는데 0건이 된다.
 

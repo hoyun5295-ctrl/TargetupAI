@@ -16,6 +16,7 @@
  *      journeys: template_code, status, archived_at
  */
 
+import { createHash } from 'crypto';
 import { query } from '../config/database';
 // ★ 2026-08-08 이어달리기 — 후속 간선·겹침·카드 모양은 계약이 소유한다(여기서 다시 적지 않는다).
 import {
@@ -34,6 +35,10 @@ import { getCompanyJourneyFacts } from './company-data-profile';
 // ★ 2026-09-29 여정 V2 1차 — 정보 알림(알림톡 · 광고 아님)은 마케팅 구간을 채운 것으로 세지 않는다(생애 지도와 같은 판정).
 import { MARKETING_JOURNEY_SQL } from './journey-lifecycle-map';
 import { triggerLabel, isProductPickTrigger } from './journey-trigger-capability';
+// ★ 2026-10-09 AI 진단 — 구매 리듬 · 상품 주기 = journey-product CT(같은 문 · 같은 키 규칙) · 휴면 기본값 = 생애 지도와 같은 상수
+import { currentPurchaseDoor, loadPurchaseRhythm, loadProductCycles, type PurchaseRhythm, type ProductCycle } from './journey-product';
+import { DEFAULT_DORMANT_DAYS } from './journey-lifecycle-map';
+import { getCreditCost } from './ai-credit-calc';
 
 export type JourneyOpportunityType =
   | 'cart_recovery' | 'onboarding' | 'dormant' | 'birthday' | 'repurchase_due' | 'wishlist'
@@ -90,18 +95,22 @@ export async function buildJourneyOpportunities(companyId: string): Promise<Jour
   // 2) 회사 구매 분포 — 데이터 기반 임계값 (하드코딩 대신 분포에서 도출)
   const statRes = await query(
     `SELECT
-       PERCENTILE_CONT(0.5)  WITHIN GROUP (ORDER BY avg_order_value) FILTER (WHERE avg_order_value > 0) AS median_aov,
-       PERCENTILE_CONT(0.5)  WITHIN GROUP (ORDER BY (CURRENT_DATE - recent_purchase_date)) FILTER (WHERE recent_purchase_date IS NOT NULL) AS median_days,
-       PERCENTILE_CONT(0.75) WITHIN GROUP (ORDER BY (CURRENT_DATE - recent_purchase_date)) FILTER (WHERE recent_purchase_date IS NOT NULL) AS p75_days
+       PERCENTILE_CONT(0.5)  WITHIN GROUP (ORDER BY avg_order_value) FILTER (WHERE avg_order_value > 0) AS median_aov
      FROM customers
      WHERE company_id = $1 AND is_active = true AND COALESCE(is_invalid, false) = false`,
     [companyId],
   );
   const srow = statRes.rows[0] || {};
   const medianAov = Math.max(0, Number(srow.median_aov || 0));
-  // 데이터가 부족하면(분포 NULL) 보수적 기본 — 그래도 회사 분포가 있으면 그 값을 우선.
-  const medianDays = Math.max(14, Math.round(Number(srow.median_days || 45)));
-  const p75Days = Math.max(medianDays + 7, Math.round(Number(srow.p75_days || 90)));
+  // ★ 2026-10-09 — 휴면 · 재구매 주기 기준 = 구매 리듬(재구매 간격 분포 · AI 진단과 같은 값).
+  //   옛: "마지막 구매 후 지난 일수" 분포를 "평소 재구매 주기"라 불렀고, 비면 45 · 90일 상수로 채웠다(주기가 아니다 · 임의 상수).
+  //   표본이 부족하면 두 카드는 내지 않는다(지어낸 기준으로 권하지 않는다).
+  const rhythm = await loadCompanyRhythm(companyId).catch(() => null);
+  const dormantCut = dormantDaysFromRhythm(rhythm);
+  const repurStart = rhythm?.gap.p50 ?? null;
+  const rhythmOk = dormantCut != null && repurStart != null && repurStart < dormantCut;
+  const p75Days = rhythmOk ? dormantCut! : 100000;
+  const medianDays = rhythmOk ? repurStart! : 100000;
 
   // 3) 단일 스캔으로 모든 신호 집계 (FILTER 절)
   const aggRes = await query(
@@ -157,11 +166,11 @@ export async function buildJourneyOpportunities(companyId: string): Promise<Jour
       suggestedObjective: '신규 가입자 환영 시리즈: 첫 인사 + 첫 구매 유도',
     });
   }
-  if (!activeTriggers.has('customer.dormant') && num(a.dorm_cnt) > 0) {
+  if (rhythmOk && !activeTriggers.has('customer.dormant') && num(a.dorm_cnt) > 0) {
     out.push({
       type: 'dormant', templateCode: 'dormant', title: '장기 무구매 휴면', preferTriggerEvent: 'customer.dormant',
       count: num(a.dorm_cnt), valueAtStake: num(a.dorm_val), priority: 'medium',
-      description: `평소 구매 주기를 넘겨 ${p75Days}일 이상 무구매인 ${num(a.dorm_cnt).toLocaleString()}명. 누적 ${won(num(a.dorm_val))} 구매한 고객층이라 재활성 가치가 높습니다.`,
+      description: `다시 사는 간격(열에 아홉이 ${p75Days}일 안)을 넘겨 ${p75Days}일 이상 무구매인 ${num(a.dorm_cnt).toLocaleString()}명. 누적 ${won(num(a.dorm_val))} 구매한 고객층이라 재활성 가치가 높습니다.`,
       suggestedObjective: '장기 휴면 고객 복귀 유도: 재방문 안내',
     });
   }
@@ -173,11 +182,11 @@ export async function buildJourneyOpportunities(companyId: string): Promise<Jour
       suggestedObjective: '생일 7일 전 사전 축하 + 등급별 인사',
     });
   }
-  if (!activeTriggers.has('customer.cycle_lapsed') && num(a.repur_cnt) > 0) {
+  if (rhythmOk && !activeTriggers.has('customer.cycle_lapsed') && num(a.repur_cnt) > 0) {
     out.push({
       type: 'repurchase_due', templateCode: 'repeat', title: '재구매 주기 도래', preferTriggerEvent: 'customer.cycle_lapsed',
       count: num(a.repur_cnt), valueAtStake: num(a.repur_val), priority: 'medium',
-      description: `평소 재구매 주기(${medianDays}~${p75Days}일)에 접어든 ${num(a.repur_cnt).toLocaleString()}명. 휴면 전 리마인드 적기입니다.`,
+      description: `다시 살 때(보통 ${medianDays}일)를 지나 휴면 기준(${p75Days}일) 전인 ${num(a.repur_cnt).toLocaleString()}명. 휴면 전 리마인드 적기입니다.`,
       suggestedObjective: '재구매 주기 도래 고객 리마인드: 재구매 유도',
     });
   }
@@ -363,4 +372,223 @@ async function buildSuccessionOpportunities(
     }
   }
   return out;
+}
+
+// ════════════════════════════════════════════════════════════════════
+// ★ 2026-10-09 고객 관계 지도 — AI 진단(설계서 docs/2026-10-09-journey-crm-map-design.md §5)
+//
+//   사실 · 간격은 SQL(구매 리듬 · 상품별 주기 = journey-product CT) · AI 는 초안의 문안 · 이름만(여기서는 호출 0 · 차감 0).
+//   표본 미달 · 연동 잠금 · 이미 있음을 숨기지 않고 상태 문구로 보여 준다. 캐시는 리듬 사실만(빈 곳 판정은 매번 · 회의론자 D7).
+// ════════════════════════════════════════════════════════════════════
+
+export type FlowPlanKey = 'signup' | 'first_purchase' | 'repurchase' | 'dormant' | 'dormant_return';
+
+export interface FlowPlanItem {
+  key: FlowPlanKey;
+  triggerEvent: string;
+  title: string;
+  objective: string;
+  /** 칸마다 시작부터 누적 일수(D+N). 칸 수 = 길이(1~4). */
+  daysFromStart: number[];
+  /** 휴면 2종만 — 두 여정이 같은 값(회의론자 D1). */
+  dormantDays: number | null;
+  /** 실측으로 정한 간격인가(false = 참고 간격 · 이유는 evidence). */
+  measured: boolean;
+  evidence: string;
+  sample: number | null;
+  /** ready = 만들 수 있음 · exists = 켜진 여정 있음 · drafted = 초안 · 멈춤만 있음(다시 권하지 않는다) · locked = 데이터 연동 필요. */
+  status: 'ready' | 'exists' | 'drafted' | 'locked';
+  reason: string;
+}
+
+export interface JourneyDiagnosis {
+  computedAt: string;
+  /** null = 구매 데이터가 없다(연동 전). */
+  rhythm: PurchaseRhythm | null;
+  facts: Array<{ label: string; value: string }>;
+  flowPlan: FlowPlanItem[];
+  products: Array<ProductCycle & { status: 'ready' | 'exists' }>;
+  quote: { draftEach: number; activateEach: number };
+  source: string;
+}
+
+/** 이탈 기준일 = 재구매 간격 p90 을 30~365 로 묶은 값(표본 미달 = null · 지어내지 않는다). */
+export function dormantDaysFromRhythm(r: PurchaseRhythm | null): number | null {
+  if (!r || r.gap.p90 == null) return null;
+  return Math.min(365, Math.max(30, r.gap.p90));
+}
+
+/** 칸 사이 최대 대기(일) — 생성기 · 저장 상한(MAX_STEP_DELAY_HOURS = 365일)과 같은 값. 계획에서 미리 맞춘다(저장이 몰래 자르지 않게 · Codex 1R). */
+export const PLAN_MAX_GAP_DAYS = 365;
+const increasing = (xs: number[]): number[] => {
+  const out: number[] = [];
+  for (const x of xs) {
+    const prev = out.length === 0 ? 0 : out[out.length - 1];
+    const lo = out.length === 0 ? 0 : prev + 1;
+    out.push(Math.min(prev + PLAN_MAX_GAP_DAYS, Math.max(lo, Math.round(x))));
+  }
+  return out;
+};
+const wasCapped = (xs: number[], out: number[]) => xs.some((x, i) => Math.round(x) > out[i]);
+
+/** 계획 세트(순수 · DB 0) — 레인마다 하나. 간격 규칙과 근거 문장을 같이 낸다. */
+export function buildFlowPlan(
+  rhythm: PurchaseRhythm | null,
+  activeTriggers: Set<string>,
+  availability: Record<string, { available: boolean; reason: string } | undefined>,
+  draftedTriggers: Set<string> = new Set(),
+): FlowPlanItem[] {
+  const f2s = rhythm?.firstToSecond;
+  const gap = rhythm?.gap;
+  const dormant = dormantDaysFromRhythm(rhythm);
+  const dormantDays = dormant ?? DEFAULT_DORMANT_DAYS;
+  const short = (n: number) => `표본 ${n.toLocaleString()}건이라 아직 실측으로 정하지 않았어요. 참고 간격으로 시작하고 초안에서 고칠 수 있어요.`;
+  const items: Array<Omit<FlowPlanItem, 'status' | 'reason'>> = [
+    {
+      key: 'signup', triggerEvent: 'customer.created', title: '신규 가입 환영',
+      objective: '가입한 고객을 반기고 첫 구매로 이어지게 합니다.',
+      daysFromStart: [0, 2, 5], dormantDays: null, measured: false, sample: null,
+      evidence: '가입한 날을 따로 받지 않아 가입부터 첫 구매까지 걸린 날은 잴 수 없어요. 참고 간격으로 시작해요.',
+    },
+    f2s && f2s.p50 != null && f2s.p75 != null
+      ? {
+        key: 'first_purchase', triggerEvent: 'purchase.first', title: '첫 구매 감사',
+        objective: '첫 구매에 감사하고 두 번째 구매로 이어지게 합니다.',
+        daysFromStart: [1, f2s.p50, f2s.p75], dormantDays: null, measured: true, sample: f2s.sample,
+        evidence: `첫 구매 뒤 두 번째 구매까지 보통 ${f2s.p50}일, 늦어도 ${f2s.p75}일 안에 사요(${f2s.sample.toLocaleString()}명).`,
+      }
+      : {
+        key: 'first_purchase', triggerEvent: 'purchase.first', title: '첫 구매 감사',
+        objective: '첫 구매에 감사하고 두 번째 구매로 이어지게 합니다.',
+        daysFromStart: [1, 14, 28], dormantDays: null, measured: false, sample: f2s?.sample ?? 0, evidence: short(f2s?.sample ?? 0),
+      },
+    gap && gap.p50 != null
+      ? {
+        key: 'repurchase', triggerEvent: 'cdp.purchase', title: '단골 재구매',
+        objective: '다시 산 고객에게 감사하고 다음 구매를 권합니다.',
+        daysFromStart: [3, gap.p50], dormantDays: null, measured: true, sample: gap.sample,
+        evidence: `다시 사는 간격이 보통 ${gap.p50}일이에요(${gap.sample.toLocaleString()}건).`,
+      }
+      : {
+        key: 'repurchase', triggerEvent: 'cdp.purchase', title: '단골 재구매',
+        objective: '다시 산 고객에게 감사하고 다음 구매를 권합니다.',
+        daysFromStart: [3, 30], dormantDays: null, measured: false, sample: gap?.sample ?? 0, evidence: short(gap?.sample ?? 0),
+      },
+    {
+      key: 'dormant', triggerEvent: 'customer.dormant', title: '휴면 고객 다시 만나기',
+      objective: '한동안 구매가 없는 고객에게 다시 인사하고 다시 오게 합니다.',
+      daysFromStart: [0, 7], dormantDays, measured: dormant != null, sample: gap?.sample ?? 0,
+      evidence: dormant != null
+        ? `열에 아홉은 ${gap!.p90}일 안에 다시 사요. 그보다 오래(${dormantDays}일) 안 사면 휴면으로 봅니다.`
+        : `재구매 표본이 부족해 기본 기준(${dormantDays}일)으로 시작해요.`,
+    },
+    {
+      key: 'dormant_return', triggerEvent: 'customer.dormant_return', title: '돌아온 고객 환영',
+      objective: '오랜만에 다시 산 고객을 반기고 단골로 이어지게 합니다.',
+      daysFromStart: [1], dormantDays, measured: dormant != null, sample: gap?.sample ?? 0,
+      evidence: `휴면 여정과 같은 기준(${dormantDays}일)으로 복귀를 봅니다.`,
+    },
+  ];
+  return items.map((raw) => {
+    const daysFromStart = increasing(raw.daysFromStart);
+    const it = wasCapped(raw.daysFromStart, daysFromStart)
+      ? { ...raw, daysFromStart, evidence: `${raw.evidence} 칸 사이 간격은 최대 ${PLAN_MAX_GAP_DAYS}일이라 그 안으로 맞췄어요.` }
+      : { ...raw, daysFromStart };
+    const cap = availability[triggerKeyForEvent(it.triggerEvent) || ''];
+    if (activeTriggers.has(it.triggerEvent)) return { ...it, status: 'exists' as const, reason: '이미 켜진 여정이 있어요.' };
+    if (draftedTriggers.has(it.triggerEvent)) return { ...it, status: 'drafted' as const, reason: '만들어 둔 초안이 있어요. 켜기 전 점검에서 확인하고 켜 주세요.' };
+    if (cap && !cap.available) return { ...it, status: 'locked' as const, reason: cap.reason };
+    return { ...it, status: 'ready' as const, reason: '' };
+  });
+}
+
+const DIAG_TTL_MS = 24 * 60 * 60 * 1000;
+const diagCache = new Map<string, { at: number; rhythm: PurchaseRhythm | null; products: ProductCycle[] }>();
+
+async function loadDiagnosisFacts(companyId: string): Promise<{ at: number; rhythm: PurchaseRhythm | null; products: ProductCycle[] }> {
+  const hit = diagCache.get(companyId);
+  if (hit && Date.now() - hit.at < DIAG_TTL_MS) return hit;
+  const door = await currentPurchaseDoor(companyId);
+  const rhythm = await loadPurchaseRhythm(companyId, door);
+  const products = rhythm.buyers > 0 ? await loadProductCycles(companyId, door) : [];
+  const entry = { at: Date.now(), rhythm: rhythm.buyers > 0 ? rhythm : null, products };
+  diagCache.set(companyId, entry);
+  return entry;
+}
+
+/** 리듬 사실 캐시 비우기(시드 스크립트가 데이터를 넣은 직후 · 테스트). */
+export function clearDiagnosisCache(companyId?: string): void {
+  if (companyId) diagCache.delete(companyId); else diagCache.clear();
+}
+
+/** 리듬 사실만(캐시) — 기회 카드의 휴면 · 재구매 주기 기준이 같은 값을 쓴다(두 벌 금지). */
+export async function loadCompanyRhythm(companyId: string): Promise<PurchaseRhythm | null> {
+  return (await loadDiagnosisFacts(companyId)).rhythm;
+}
+
+export async function buildJourneyDiagnosis(companyId: string): Promise<JourneyDiagnosis> {
+  const facts0 = await loadDiagnosisFacts(companyId);
+  const activeRes = await query(
+    `SELECT DISTINCT j.trigger_event, j.status FROM journeys j
+      WHERE j.company_id = $1 AND j.status IN ('active', 'paused', 'draft') AND j.archived_at IS NULL AND ${MARKETING_JOURNEY_SQL}`,
+    [companyId],
+  );
+  const activeTriggers = new Set<string>(activeRes.rows.filter((r: any) => r.status === 'active').map((r: any) => String(r.trigger_event)));
+  // 초안 · 멈춤만 있는 레인 = 다시 권하지 않는다(만든 초안을 또 만들어 또 과금하지 않게 · Codex 1R medium).
+  const draftedTriggers = new Set<string>(activeRes.rows.filter((r: any) => r.status !== 'active').map((r: any) => String(r.trigger_event)));
+  const productRes = await query(
+    `SELECT trigger_filters FROM journeys
+      WHERE company_id = $1 AND trigger_event = 'purchase.product' AND status IN ('active', 'paused', 'draft') AND archived_at IS NULL`,
+    [companyId],
+  );
+  const coveredKeys = new Set<string>();
+  for (const r of productRes.rows) for (const k of ((r.trigger_filters || {}).product_keys || [])) coveredKeys.add(String(k));
+  const availability = toAvailabilityMap(resolveTriggerAvailability(await getCompanyJourneyFacts(companyId)));
+  const rhythm = facts0.rhythm;
+  const dormant = dormantDaysFromRhythm(rhythm);
+  const facts: JourneyDiagnosis['facts'] = [];
+  if (rhythm) {
+    facts.push({ label: '구매한 고객', value: `${rhythm.buyers.toLocaleString()}명 · 두 번 이상 산 고객 ${rhythm.repeaters.toLocaleString()}명` });
+    const f = rhythm.firstToSecond;
+    facts.push({
+      label: '첫 구매 뒤 두 번째 구매까지',
+      value: f.p50 != null ? `보통 ${f.p50}일 · 가운데 절반이 ${f.p25}~${f.p75}일` : `표본 ${f.sample.toLocaleString()}건이라 아직 말하기 어려워요`,
+    });
+    const g = rhythm.gap;
+    facts.push({
+      label: '다시 사는 간격',
+      value: g.p50 != null ? `보통 ${g.p50}일 · 열에 아홉은 ${g.p90}일 안에` : `표본 ${g.sample.toLocaleString()}건이라 아직 말하기 어려워요`,
+    });
+    facts.push({ label: '휴면으로 볼 기준', value: dormant != null ? `${dormant}일 넘게 안 사면` : `표본이 부족해 기본 기준(${DEFAULT_DORMANT_DAYS}일)` });
+  }
+  return {
+    computedAt: new Date(facts0.at).toISOString(),
+    rhythm,
+    facts,
+    flowPlan: buildFlowPlan(rhythm, activeTriggers, availability, draftedTriggers),
+    products: facts0.products.map((p) => ({ ...p, status: coveredKeys.has(p.key) ? 'exists' as const : 'ready' as const })),
+    quote: { draftEach: getCreditCost('journey-ai-generate'), activateEach: getCreditCost('journey-activate') },
+    source: rhythm
+      ? `숫자는 구매 원장 실측(${rhythm.door === 'mall' ? '자사몰 주문' : '매장 구매 내역'} · 최근 730일 · 하루 한 번으로 셈)`
+      : '구매 데이터가 아직 없어 실측할 수 없어요. 구매 내역을 연동하면 간격을 실측으로 정합니다.',
+  };
+}
+
+/**
+ * 추천 초안 요청 키(결정적) — 회사 · 시작 사건 · 간격 · 휴면 기준일 **내용만**으로 계산한다(Codex 3R high · 4R medium).
+ *   화면이 만든 무작위 키는 화면 수명(창 · 페이지)이 끝날 때마다 새로 생겨, 결과를 모르는 요청을 다시 보낼 때 다른 요청으로 보였다.
+ *   날짜도 넣지 않는다 — 넣으면 자정을 넘긴 재시도가 다른 요청이 된다. 같은 내용 = 같은 키 → 과금 원장 시도 키(차감이 있으면 DRAFT_ALREADY_MADE).
+ *   대가: 같은 내용의 초안을 다시 만들 수 없다(실측 간격이 바뀌면 키가 바뀐다 · 직접 만들기 경로는 그대로).
+ */
+export function recoRequestId(companyId: string, plan: Pick<FlowPlanItem, 'triggerEvent' | 'daysFromStart' | 'dormantDays'>): string {
+  const h = createHash('sha256')
+    .update(`${companyId}|reco|${plan.triggerEvent}|${plan.daysFromStart.join(',')}|${plan.dormantDays ?? ''}`)
+    .digest('hex');
+  return `${h.slice(0, 8)}-${h.slice(8, 12)}-${h.slice(12, 16)}-${h.slice(16, 20)}-${h.slice(20, 32)}`;
+}
+
+/** 추천 계획 하나를 서버가 다시 계산해 돌려준다(화면이 보낸 숫자는 믿지 않는다 · 설계서 §5). */
+export async function recoPlanFor(companyId: string, triggerEvent: string): Promise<FlowPlanItem | null> {
+  const d = await buildJourneyDiagnosis(companyId);
+  return d.flowPlan.find((p) => p.triggerEvent === triggerEvent) || null;
 }

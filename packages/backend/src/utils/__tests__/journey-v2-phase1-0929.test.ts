@@ -155,18 +155,22 @@ describe('생애 지도 — 선 상태', () => {
     expect(j.broadAudience).toBe(true);
     expect(j.band).toBe('standing');
   });
-  it('목표 이름 = 목표 종류(포인트 = 포인트 줄어듦) · 가입 + 자동 종료 = 환영 대신 첫 구매 안내', async () => {
+  it('목표 이름 = 목표 종류(포인트 = 포인트 줄어듦) · 가입 + 자동 종료 안내는 구매 문마다 사실대로(★ 1009)', async () => {
     mockMap([J('A', 'customer.created'), J('P', 'customer.points_expiring', { goal_kind: 'points_used' })], [S('A'), S('P')]);
     const m = await buildLifecycleMap('c');
     expect(m.journeys.find((j) => j.id === 'P')!.goalLabel).toBe('포인트 줄어듦');
     expect(m.journeys.find((j) => j.id === 'A')!.goalLabel).toBe('구매 확인');
-    expect(m.journeys.find((j) => j.id === 'A')!.notices.join()).toContain('첫 구매 여정이 맞이');
+    // 매장 원장 문(자사몰 구매 사건 없음) = 같은 날 가입 · 구매는 둘 다 받는다(구매일이 진입 시각보다 앞)
+    expect(m.journeys.find((j) => j.id === 'A')!.notices.join()).toContain('둘 다 받아요');
     expect(m.journeys.find((j) => j.id === 'P')!.notices).toEqual([]);
   });
-  it('잠금 수준 = 상태별(초안 자유 · 멈춤 끝에 붙이기 · 켜짐 문안만)', async () => {
+  it('편집 정책 = 상태별(초안 자유 · 진행 중 없는 멈춤 자유 · 켜짐 문안만 · ★ 1009 stepEditPolicy)', async () => {
     mockMap([J('A', 'customer.created', { status: 'draft' }), J('B', 'purchase.first', { status: 'paused' }), J('C', 'cdp.purchase')], [S('A'), S('B'), S('C')]);
     const m = await buildLifecycleMap('c');
-    expect(m.journeys.map((j) => j.lock.level)).toEqual(['full', 'append_only', 'copy_only']);
+    const by = (id: string) => m.journeys.find((j) => j.id === id)!.edit;
+    expect(by('A').structure).toBe(true);
+    expect(by('B').structure).toBe(true);
+    expect([by('C').copy, by('C').timing, by('C').structure, by('C').ops]).toEqual([true, false, false, true]);
   });
 });
 

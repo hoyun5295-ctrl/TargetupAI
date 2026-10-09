@@ -249,3 +249,78 @@ export const PRODUCT_REPURCHASE_SINCE_ENTRY_SQL = `SELECT 1
        AND p.purchase_date > ($3::timestamptz AT TIME ZONE 'Asia/Seoul')
        AND ${ledgerProductKeySql('p')} = ANY($4::text[])
   )`;
+
+// ── ⑤ 구매 리듬(★ 2026-10-09 고객 관계 지도 · AI 진단 · 설계서 docs/2026-10-09-journey-crm-map-design.md §5) ──
+//   회사 **현역 문 하나**에서만 센다(두 문을 합치면 같은 구매가 두 번 잡혀 간격이 0 으로 무너진다 · 회의론자 D6).
+//   하루 단위(같은 날 여러 건 = 1) · 730일 · 고객별 차례(n) · 직전 구매와의 간격(일).
+
+export interface PurchaseRhythm {
+  door: PurchaseDoor;
+  buyers: number;
+  repeaters: number;
+  /** 첫 구매 → 두 번째 구매 간격(일). 표본 미달이면 값 null(표본 수는 그대로). */
+  firstToSecond: { p25: number | null; p50: number | null; p75: number | null; sample: number };
+  /** 모든 재구매 간격(일). */
+  gap: { p50: number | null; p75: number | null; p90: number | null; sample: number };
+}
+
+function rhythmBuysSql(door: PurchaseDoor): string {
+  return door === 'mall'
+    ? `SELECT DISTINCT e.customer_id, (e.occurred_at AT TIME ZONE 'Asia/Seoul')::date AS d
+         FROM cdp_events e
+        WHERE e.company_id = $1::uuid AND e.event_name = 'purchase' AND e.customer_id IS NOT NULL
+          AND e.occurred_at >= NOW() - ($2 || ' days')::interval`
+    : `SELECT DISTINCT p.customer_id, p.purchase_date::date AS d
+         FROM purchases p
+        WHERE p.company_id = $1::uuid AND p.customer_id IS NOT NULL AND p.purchase_date IS NOT NULL
+          AND p.purchase_date >= ((NOW() AT TIME ZONE 'Asia/Seoul') - ($2 || ' days')::interval)`;
+}
+
+const roundOrNull = (v: unknown, ok: boolean): number | null => (ok && v != null && Number.isFinite(Number(v)) ? Math.max(1, Math.round(Number(v))) : null);
+
+export async function loadPurchaseRhythm(companyId: string, door: PurchaseDoor): Promise<PurchaseRhythm> {
+  const r = await query(
+    `WITH buys AS (${rhythmBuysSql(door)}),
+          seq AS (
+            SELECT customer_id, ROW_NUMBER() OVER w AS n, d - LAG(d) OVER w AS gap
+              FROM buys WINDOW w AS (PARTITION BY customer_id ORDER BY d)
+          )
+     SELECT percentile_cont(0.25) WITHIN GROUP (ORDER BY gap) FILTER (WHERE n = 2) AS f2s_p25,
+            percentile_cont(0.5)  WITHIN GROUP (ORDER BY gap) FILTER (WHERE n = 2) AS f2s_p50,
+            percentile_cont(0.75) WITHIN GROUP (ORDER BY gap) FILTER (WHERE n = 2) AS f2s_p75,
+            COUNT(*) FILTER (WHERE n = 2)::int AS f2s_n,
+            percentile_cont(0.5)  WITHIN GROUP (ORDER BY gap) FILTER (WHERE n >= 2) AS gap_p50,
+            percentile_cont(0.75) WITHIN GROUP (ORDER BY gap) FILTER (WHERE n >= 2) AS gap_p75,
+            percentile_cont(0.9)  WITHIN GROUP (ORDER BY gap) FILTER (WHERE n >= 2) AS gap_p90,
+            COUNT(*) FILTER (WHERE n >= 2)::int AS gap_n,
+            COUNT(DISTINCT customer_id)::int AS buyers,
+            COUNT(DISTINCT customer_id) FILTER (WHERE n >= 2)::int AS repeaters
+       FROM seq`,
+    [companyId, String(PRODUCT_PERIOD_LOOKBACK_DAYS)],
+  );
+  const x = r.rows[0] || {};
+  const f2sN = Number(x.f2s_n || 0);
+  const gapN = Number(x.gap_n || 0);
+  const f2sOk = f2sN >= MIN_PERIOD_SAMPLE;
+  const gapOk = gapN >= MIN_PERIOD_SAMPLE;
+  return {
+    door,
+    buyers: Number(x.buyers || 0),
+    repeaters: Number(x.repeaters || 0),
+    firstToSecond: { p25: roundOrNull(x.f2s_p25, f2sOk), p50: roundOrNull(x.f2s_p50, f2sOk), p75: roundOrNull(x.f2s_p75, f2sOk), sample: f2sN },
+    gap: { p50: roundOrNull(x.gap_p50, gapOk), p75: roundOrNull(x.gap_p75, gapOk), p90: roundOrNull(x.gap_p90, gapOk), sample: gapN },
+  };
+}
+
+export interface ProductCycle { key: string; name: string; buyers: number; medianDays: number; sample: number }
+
+/** 다시 많이 사는 상품 — 관측 목록 상위에서 사용 기간 중앙값이 잡히는 것만(같은 CT · 같은 키 규칙 · 새 SQL 0 · 회의론자 D4). */
+export async function loadProductCycles(companyId: string, door: PurchaseDoor, limit = 3, scan = 8): Promise<ProductCycle[]> {
+  const { products } = await listObservedProducts(companyId, door);
+  const out: ProductCycle[] = [];
+  for (const p of products.slice(0, scan)) {
+    const s = await suggestUsagePeriod(companyId, door, [p.key]);
+    if (s.medianDays != null) out.push({ key: p.key, name: p.name, buyers: p.buyers, medianDays: s.medianDays, sample: s.sample });
+  }
+  return out.sort((a, b) => b.sample - a.sample).slice(0, limit);
+}

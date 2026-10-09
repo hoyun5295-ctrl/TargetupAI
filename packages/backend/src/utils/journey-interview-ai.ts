@@ -111,6 +111,8 @@ export async function designJourneyFromInterview(input: {
   plan: InterviewPlan;
   answers: InterviewAnswers;
   callbackNumber?: string | null;
+  /** ★ 2026-10-09 AI 진단 추천 — 서버가 다시 계산한 칸 시점(누적 일수) · 휴면 기준일. 화면 값이 아니다(라우트가 다시 계산해 넘긴다). */
+  timing?: { daysFromStart: number[]; dormantDays?: number | null };
 }): Promise<InterviewDesignResult> {
   const key = `${input.companyId}:${input.interviewId}:${input.plan.key}`;
   const now = Date.now();
@@ -138,12 +140,17 @@ export async function designJourneyFromInterview(input: {
     const cost = getCreditCost('journey-ai-generate');
     const chargeKey = await nextDraftChargeKey(input.companyId, `journey-interview:${input.companyId}:${input.interviewId}:${plan.key}`);
     await checkCredit(input.companyId, cost);
+    // 추천 시점은 AI 호출 **전에** 목표 문장에 싣는다(문안의 경과 표현이 실제 시점과 맞게 · 회의론자 D3) · 생성 뒤 같은 값으로 다시 고정.
+    const timingText = input.timing && input.timing.daysFromStart.length > 0
+      ? ` 보내는 시점은 ${input.timing.daysFromStart.map((d, i) => `${i + 1}번째 ${d === 0 ? '시작하자마자' : `시작 ${d}일 뒤`}`).join(', ')}입니다.`
+      : '';
     const gen = () => generateJourneyPackage({
       companyId: input.companyId,
       createdBy: input.userId,
-      objective: spec.objective,
+      objective: `${spec.objective}${timingText}`,
       preferTriggerEvent: spec.triggerEvent,
       benefitText: spec.benefitText || undefined,
+      timing: input.timing,
     });
     const pkg = await runInCreditBundle(async () => {
       try {

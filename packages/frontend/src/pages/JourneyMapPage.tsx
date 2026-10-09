@@ -19,14 +19,14 @@ import { zoneModule } from '../constants/ai-operator-modules';
 import { goBackOr } from '../lib/scroll-restoration';
 import LifecycleMapCanvas, { type MapStatusFilter } from '../components/journey/map/LifecycleMapCanvas';
 import GapFinderModal, { type GapOpportunity } from '../components/journey/map/GapFinderModal';
-import MapStepDrawer from '../components/journey/map/MapStepDrawer';
+import MapStepEditModal from '../components/journey/map/MapStepEditModal';
 import InterviewModal from '../components/journey/map/InterviewModal';
 import BatchActivateModal from '../components/journey/map/BatchActivateModal';
 import ProductJourneyModal from '../components/journey/map/ProductJourneyModal';
 import JourneyMessageEditModal from '../components/journey/JourneyMessageEditModal';
 import ConfirmModal, { type ConfirmState } from '../components/ConfirmModal';
 import { useToast } from '../components/ToastProvider';
-import { LINE_STYLE, type AttachFix, type CreateMode, type LifecycleMapData, type MapJourney, type MapStep } from '../utils/journey-map';
+import { type AttachFix, type CreateMode, type LifecycleMapData, type MapJourney, type MapStep } from '../utils/journey-map';
 
 const REFRESH_MS = 60_000;
 
@@ -285,7 +285,7 @@ export default function JourneyMapPage() {
       stamp={{ text: `${timeText(data.generatedAt)} 기준 · 다시 읽기`, onRefresh: () => void load(true), loading: refreshing }}
       start={{
         items: [
-          { icon: Sparkles, title: '빈 곳 찾기', desc: gapCount > 0 ? `손볼 곳 ${gapCount}곳을 찾아 한 번에 채워요` : '비어 있는 여정 자리를 찾아 채워요', tint: 'from-fuchsia-400 to-purple-500', featured: gapCount > 0, badge: gapCount > 0 ? `${gapCount}곳` : undefined, onClick: () => setGapOpen(true) },
+          { icon: Sparkles, title: 'AI 진단', desc: gapCount > 0 ? `고객 구매 리듬으로 여정을 추천하고 손볼 곳 ${gapCount}곳을 채워요` : '고객 구매 리듬을 재서 가입부터 재구매까지 여정을 추천해요', tint: 'from-fuchsia-400 to-purple-500', featured: true, badge: gapCount > 0 ? `${gapCount}곳` : undefined, onClick: () => setGapOpen(true) },
           { icon: MessageSquarePlus, title: '문장으로 만들기', desc: '하고 싶은 것을 문장으로 쓰면 지도에 놓아요', tint: 'from-sky-400 to-indigo-500', onClick: () => setInterviewOpen(true) },
         ],
       }}
@@ -310,15 +310,6 @@ export default function JourneyMapPage() {
               className="w-full h-10 pl-9 pr-3 rounded-xl bg-white border border-slate-200 shadow-sm text-[13px] text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-100"
             />
           </label>
-          <div className="hidden xl:flex items-center gap-3 ml-auto text-[11px] text-slate-500">
-            {(['solid', 'warn', 'empty'] as const).map((t) => (
-              <span key={t} className="inline-flex items-center gap-1.5">
-                <svg width="22" height="6" aria-hidden><line x1="0" y1="3" x2="22" y2="3" stroke={LINE_STYLE[t].stroke} strokeWidth="2" strokeDasharray={LINE_STYLE[t].dash} /></svg>
-                {LINE_STYLE[t].label}
-              </span>
-            ))}
-            <span className="inline-flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-sm bg-rose-200 border border-rose-300" aria-hidden />같이 받음</span>
-          </div>
         </div>
       </div>
 
@@ -337,7 +328,7 @@ export default function JourneyMapPage() {
           onNewVersion={(j) => void newVersion(j)}
         />
         <div className={`${OUI_WRAP_FULL} pb-6 ${OUI_SRC}`}>
-          출처: 여정 · 여정 진행 기록(최근 30일) · {timeText(data.generatedAt)} 기준
+          출처: 여정 · 여정 진행 기록(여정마다 최근 30~180일 들어온 고객 · 마지막 칸 시점에 맞춤) · {timeText(data.generatedAt)} 기준
           {data.judgedAt ? ` · 구매 확인 예정은 ${timeText(data.judgedAt)} 판정` : ''}
         </div>
       </div>
@@ -363,6 +354,7 @@ export default function JourneyMapPage() {
         onCreate={(t, o, mode) => { setGapOpen(false); create(t, o, mode); }}
         onFocusJourney={focusJourney}
         onFix={(f) => void handleFix(f)}
+        onDrafted={(ids) => { void load(true).then(() => setBatch({ open: true, preselect: ids })); }}
       />
       <InterviewModal
         open={interviewOpen}
@@ -389,12 +381,14 @@ export default function JourneyMapPage() {
         }}
         onDone={() => void load(true)}
       />
-      <MapStepDrawer
-        journey={drawer?.journey || null}
+      <MapStepEditModal
+        journey={drawer ? (data.journeys.find((x) => x.id === drawer.journey.id) || drawer.journey) : null}
         step={drawer?.step || null}
+        generatedAt={data.generatedAt}
         onClose={() => setDrawer(null)}
         onOpenJourney={openJourney}
-        onEditMessages={(j) => { setDrawer(null); setEditTarget({ journey: j, returnToBatch: null }); }}
+        onNewVersion={(j) => void newVersion(j)}
+        onSaved={() => void load(true)}
       />
       {editTarget && (
         <JourneyMessageEditModal

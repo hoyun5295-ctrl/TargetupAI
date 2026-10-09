@@ -34,6 +34,7 @@ import { buildJourneyGraph } from './journey-graph';
 import { lineageColumnsReady, lockLineageEntry, CLOSE_OTHER_VERSIONS_ENTRY_SQL, INHERIT_ENTRY_CURSORS_SQL } from './journey-lineage';
 // ★ 2026-09-29 V2 (회의론자 0차 검증 2-나) — 생성 경로의 타이밍 필터도 옵션 PATCH 와 같은 정규화를 지난다(AI 가 지은 값 clamp).
 import { normalizeJourneyOptions } from './journey-options-validator';
+import { stepEditPolicy, blockedStepEditGroups, stepEditBlockedMessage } from './journey-step-edit-policy';
 import { getCompanyJourneyFacts } from './company-data-profile';
 // ★ 2026-09-29 여정 V2 0차 ⑧⑩ — 칸 종류 · 개수 · 대기 상한은 CT 한 곳(자르지 않고 거부 · 모르는 종류는 거부).
 import {
@@ -1158,23 +1159,21 @@ export async function updateJourneyStep(
   if (patch.stepType !== undefined && patch.stepType !== null && !isKnownStepType(patch.stepType)) {
     throw new JourneyInputError('알 수 없는 칸 종류라 저장하지 않았어요. 문자 · 대기 · 조건 중에서 골라 주세요.');
   }
-  // ⛔ 2026-08-02 Codex 5R — 활성 상태 게이트는 **잠금 안에서** 판정한다(아래 withJourneyValidationReset).
+  // ★ 2026-10-09 — 지도 편집 창이 대기 방식을 보낸다(라우트가 이제 넘긴다) · 추가 경로와 같은 화이트리스트.
+  if (patch.delayMode !== undefined && patch.delayMode !== null && !STEP_DELAY_MODES.includes(patch.delayMode)) {
+    throw new JourneyInputError('알 수 없는 발송 시점 방식이라 저장하지 않았어요.');
+  }
+  // ⛔ 2026-08-02 Codex 5R — 상태 게이트는 **잠금 안에서** 판정한다(아래 withJourneyValidationReset).
   //   여기서 미리 읽으면 그 직후 활성화가 먼저 잠금을 가져갔을 때, 운영 중 여정을 비활성인 줄 알고 고친다.
-  const assertActiveEditAllowed = (status: string): boolean => {
-    if (status !== 'active') return false;
-    const structuralKeys: Array<keyof typeof patch> = [
-      'channel', 'delayHours', 'isAd', 'stepType', 'conditionJsonb',
-      'alimtalkProfileId', 'alimtalkTemplateCode', 'alimtalkVariableMap',
-      'alimtalkNextType', 'alimtalkNextContents', 'alimtalkNextSubject',
-      'mmsImagePaths', 'delayMode', 'targetHourKst',
-    ];
-    const touchesStructure = structuralKeys.some((k) => patch[k] !== undefined);
-    const touchesMessage = patch.messageTemplate !== undefined || patch.subject !== undefined;
-    if (!patch.allowActiveMessageEdit || touchesStructure || !touchesMessage) {
-      throw new Error('활성 상태 여정은 문안(본문·제목)만 수정할 수 있습니다. 구조·일정 변경은 먼저 일시정지해주세요.');
-    }
-    return true;
+  // ★ 2026-10-09 고객 관계 지도 — 판정 = stepEditPolicy 한 곳(지도 응답과 같은 함수 · 설계서 §4).
+  //   진행 중 수도 같은 잠금 안에서 센다. 거절 = JourneyStepGateError(409 · 옛: 일반 Error 500).
+  const assertStepEditAllowed = async (run: SqlRunner, status: string): Promise<void> => {
+    const inProgress = status === 'paused' ? await countInProgressExecutions(run, journeyId) : 0;
+    const policy = stepEditPolicy(status, inProgress);
+    const blocked = blockedStepEditGroups(policy, patch as Record<string, unknown>, status);
+    if (blocked.length > 0) throw new JourneyStepGateError(stepEditBlockedMessage(policy, blocked), 'STEP_EDIT_LOCKED');
   };
+  const touchesCopy = patch.messageTemplate !== undefined || patch.subject !== undefined;
 
   // ★ D188 Phase 2-B-1: step_type 변경 시 conditionJsonb 정합 검증 (condition은 conditionJsonb 필수).
   if (patch.stepType === 'condition' && (!patch.conditionJsonb || typeof patch.conditionJsonb !== 'object')) {
@@ -1230,8 +1229,9 @@ export async function updateJourneyStep(
   // ⛔ 2026-08-02 Codex 4R — 스텝 변경과 검증 무효화를 **한 트랜잭션**에서 커밋한다.
   //   따로 나가면 그 사이에 활성화가 끼어들어, 바뀐 문안을 옛 통과 마커로 켠다.
   let isActive = false;
-  const r = (await withJourneyValidationReset(companyId, journeyId, (run, journey) => {
-    isActive = assertActiveEditAllowed(journey.status);   // 잠근 상태로 판정(5R)
+  const r = (await withJourneyValidationReset(companyId, journeyId, async (run, journey) => {
+    await assertStepEditAllowed(run, journey.status);   // 잠근 상태로 판정(5R)
+    isActive = journey.status === 'active' && touchesCopy;
     return run(
     `UPDATE journey_steps SET
        message_template = COALESCE($4, message_template),
@@ -1629,12 +1629,17 @@ export async function addJourneyStep(
  *   진행 중(active · paused) 실행이 하나라도 있으면 거부한다 — 갈래 번호(not_met_goto)와 current_step_order 가 함께 어긋난다.
  *   구조를 바꾸려면 새 판(5차)으로 고친다.
  */
-async function assertNoInProgressForBranchEdit(run: SqlRunner, journeyId: string): Promise<void> {
+/** 진행 중(active · paused) 실행 수 — 갈림 잠금 · 칸 편집 정책이 같은 조회를 쓴다(잠금 안에서 부른다). */
+export async function countInProgressExecutions(run: SqlRunner, journeyId: string): Promise<number> {
   const r = await run(
-    `SELECT 1 FROM journey_executions WHERE journey_id = $1::uuid AND status IN ('active', 'paused') LIMIT 1`,
+    `SELECT COUNT(*)::int AS n FROM journey_executions WHERE journey_id = $1::uuid AND status IN ('active', 'paused')`,
     [journeyId],
   );
-  if (r.rows.length > 0) {
+  return Number(r.rows[0]?.n || 0);
+}
+
+async function assertNoInProgressForBranchEdit(run: SqlRunner, journeyId: string): Promise<void> {
+  if ((await countInProgressExecutions(run, journeyId)) > 0) {
     throw new JourneyStepGateError('갈림이 있는 여정은 진행 중인 고객이 있으면 칸을 넣거나 지울 수 없어요. 새 판으로 고쳐 주세요.', 'BRANCH_LOCKED');
   }
 }
