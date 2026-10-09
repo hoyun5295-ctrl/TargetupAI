@@ -130,7 +130,12 @@ async function main(): Promise<void> {
       ? String(has.rows[0].id)
       : (await createJourneyFromTemplate({ companyId, createdBy: userId, templateCode: j.code, name: j.name, callbackNumber: DEMO_CALLBACK, steps: j.steps })).journeyId;
     // 문안 검증 표식 — 시연 회사는 스팸 검사(검사 발송)를 하지 않으므로 세팅 때 통과로 둔다
-    await query(`UPDATE journeys SET last_pretest_passed_at = NOW() WHERE id = $1::uuid AND company_id = $2::uuid`, [journeyId, companyId]);
+    // 한 번에 보낼 최대 인원 — 커서 경로가 아닌 트리거는 켜기 필수(journey-builder 켜기 검사) · 하루 합성분(수십 명)보다 넉넉히
+    await query(
+      `UPDATE journeys SET last_pretest_passed_at = NOW(), threshold_recipients_per_step = COALESCE(threshold_recipients_per_step, 500)
+        WHERE id = $1::uuid AND company_id = $2::uuid`,
+      [journeyId, companyId],
+    );
     const act = await activateJourneyGuarded(companyId, journeyId, userId);
     console.log(`여정 ${act.ok === true ? '켬' : `켜기 실패(${'code' in act ? act.code : ''}: ${'message' in act ? act.message : ''})`}: ${j.name}`);
   }
