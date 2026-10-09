@@ -5,7 +5,7 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync, readdirSync } from 'fs';
 import { join } from 'path';
-import { parseDemoRequest, parseIntroLeadsQuery, INTRO_ACTIONS } from '../intro-leads';
+import { parseDemoRequest, parseIntroLeadsQuery, INTRO_ACTIONS, isIntroBot, INTRO_BOT_UA_PATTERN } from '../intro-leads';
 import { PERMISSION_MATRIX } from '../admin-role';
 
 const back = (p: string) => readFileSync(join(__dirname, '..', '..', p), 'utf8');
@@ -79,5 +79,45 @@ describe('화면', () => {
     expect(login.match(/to="\/intro"/g)?.length).toBe(2);
     expect(login).not.toContain('to="/about"');
     expect(front('public/about-ai-operator.html')).toContain("location.replace('/intro')");
+  });
+});
+
+/**
+ * ★ 2026-10-09 (Harold 「밤 12시 방문 수상하다」) — 실측 원문 4건(audit_logs intro_view · .62 조회)으로 고정한다.
+ *   스스로 로봇이라고 밝힌 방문만 「검색 로봇」 · 방문 숫자에서 뺀다. 로봇 표시 없는 데이터센터 크롬은 방문으로 둔다.
+ */
+describe('검색 로봇 판정 = 브라우저 원문이 로봇이라고 밝힌 것만', () => {
+  const AHREFS = 'Mozilla/5.0 (compatible; AhrefsBot/7.0; +http://ahrefs.com/robot/)';
+  const BING = 'Mozilla/5.0 AppleWebKit/537.36 (KHTML, like Gecko; compatible; bingbot/2.0; +http://www.bing.com/bingbot.htm) Chrome/136.0.0.0 Safari/537.36';
+  const AWS_CHROME = 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.0.0 Safari/537.36';
+  const NAVERWORKS_IPAD = 'Mozilla/5.0 (iPad; CPU OS 18_7 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) ipad WorksMobile/4.6.1.13 (NaverWorks) GSaaSMobileApp';
+
+  it('실측 4건 = 로봇 2 · 사람/미상 2', () => {
+    expect(isIntroBot(AHREFS)).toBe(true);
+    expect(isIntroBot(BING)).toBe(true);
+    expect(isIntroBot(AWS_CHROME)).toBe(false);
+    expect(isIntroBot(NAVERWORKS_IPAD)).toBe(false);
+  });
+  it('국내 검색 로봇(이름에 bot 없음) · 빈 값 · 카카오톡 안', () => {
+    expect(isIntroBot('Mozilla/5.0 (compatible; Yeti/1.1; +http://naver.me/spd)')).toBe(true);
+    expect(isIntroBot('Mozilla/5.0 (compatible; Daum/4.1; +http://cs.daum.net/faq/15/4118.html?faqId=28966) Daumoa')).toBe(true);
+    expect(isIntroBot('')).toBe(false);
+    expect(isIntroBot(null)).toBe(false);
+    expect(isIntroBot('Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148 KAKAOTALK 10.8.0')).toBe(false);
+  });
+  it('집계 SQL 이 같은 글자로 가른다(JS 판정과 두 벌이 아니다) · 방문 숫자는 로봇 제외', () => {
+    const src = back('utils/intro-leads.ts');
+    expect(src).toContain("COALESCE(user_agent, '') ~* $3 AS bot");
+    expect(src).toContain('[INTRO_ACTIONS.view, INTRO_ACTIONS.request, INTRO_BOT_UA_PATTERN]');
+    expect(src).toMatch(/AND NOT bot AND created_at >= date_trunc\('day'/);
+    expect(src).toContain("AND NOT bot AND created_at >= NOW() - INTERVAL '7 days')::int AS week");
+    expect(INTRO_BOT_UA_PATTERN).toMatch(/^[a-z|]+$/); // PostgreSQL ~* 와 JS RegExp 공통 문법만
+  });
+  it('화면: 구분 칸 = 검색 로봇 · 아이패드 분리 · 네이버웍스 안 · 7일 카드에 제외 건수', () => {
+    const tab = front('src/components/admin/IntroLeadsTab.tsx');
+    expect(tab).toContain("r.isBot ? '검색 로봇' : '방문'");
+    expect(tab).toContain("/iPad/i.test(ua) ? 'iPad'");
+    expect(tab).toContain("'네이버웍스 안'");
+    expect(tab).toContain('검색 로봇 ${s.bots7d.toLocaleString()}건 제외');
   });
 });

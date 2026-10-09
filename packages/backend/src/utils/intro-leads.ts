@@ -72,10 +72,22 @@ export function parseIntroLeadsQuery(q: any): { kind: IntroLeadKind; page: numbe
   return { kind, page };
 }
 
+/**
+ * ★ 2026-10-09 검색 로봇 판정(Harold 「밤 12시 방문 수상하다」 → 실측 = AhrefsBot · bingbot 이 로그인 화면 「한줄로 AI 소개」 링크를 따라 /intro 를 연 것).
+ * 브라우저 원문이 스스로 로봇이라고 밝힌 것만 센다(로봇 표시 없는 데이터센터 크롬은 방문으로 둔다 · IP 대역 판정은 하지 않는다).
+ * 같은 글자를 PostgreSQL `~*` 와 JS `RegExp(…, 'i')` 가 함께 쓴다 — 두 문법에 공통인 `|` 묶음만 쓴다.
+ * 기록은 그대로 남기고 읽을 때 가른다(이미 쌓인 행도 같이 분류된다).
+ */
+export const INTRO_BOT_UA_PATTERN = 'bot|crawl|spider|slurp|headless|yeti|daumoa'; // yeti = 네이버 · daumoa = 다음(이름에 bot 이 없다)
+const BOT_RE = new RegExp(INTRO_BOT_UA_PATTERN, 'i');
+export const isIntroBot = (userAgent: string | null | undefined): boolean => BOT_RE.test(String(userAgent || ''));
+
 export interface IntroLeadRow {
   id: string;
   at: string;
   kind: 'request' | 'view';
+  /** 브라우저 원문이 로봇이라고 밝힌 방문(검색 로봇) — 방문 숫자에서 뺀다 */
+  isBot: boolean;
   ip: string;
   userAgent: string;
   from: string;
@@ -85,7 +97,8 @@ export interface IntroLeadRow {
 }
 
 export interface IntroLeadsData {
-  summary: { viewsToday: number; views7d: number; requests: number };
+  /** 방문 숫자 = 검색 로봇 제외 · bots7d = 최근 7일에 뺀 로봇 방문 수 */
+  summary: { viewsToday: number; views7d: number; bots7d: number; requests: number };
   total: number;
   page: number;
   rows: IntroLeadRow[];
@@ -110,11 +123,13 @@ export async function loadIntroLeads(q: { kind: IntroLeadKind; page: number }): 
     ),
     query(`SELECT COUNT(*)::int AS n FROM audit_logs WHERE action = ANY($1::text[])`, [actions]),
     query(
-      `SELECT COUNT(*) FILTER (WHERE action = $1 AND created_at >= date_trunc('day', NOW() AT TIME ZONE 'Asia/Seoul') AT TIME ZONE 'Asia/Seoul')::int AS today,
-              COUNT(*) FILTER (WHERE action = $1 AND created_at >= NOW() - INTERVAL '7 days')::int AS week,
+      `SELECT COUNT(*) FILTER (WHERE action = $1 AND NOT bot AND created_at >= date_trunc('day', NOW() AT TIME ZONE 'Asia/Seoul') AT TIME ZONE 'Asia/Seoul')::int AS today,
+              COUNT(*) FILTER (WHERE action = $1 AND NOT bot AND created_at >= NOW() - INTERVAL '7 days')::int AS week,
+              COUNT(*) FILTER (WHERE action = $1 AND bot AND created_at >= NOW() - INTERVAL '7 days')::int AS bots_week,
               COUNT(*) FILTER (WHERE action = $2)::int AS requests
-         FROM audit_logs WHERE action IN ($1, $2)`,
-      [INTRO_ACTIONS.view, INTRO_ACTIONS.request],
+         FROM (SELECT action, created_at, COALESCE(user_agent, '') ~* $3 AS bot
+                 FROM audit_logs WHERE action IN ($1, $2)) t`,
+      [INTRO_ACTIONS.view, INTRO_ACTIONS.request, INTRO_BOT_UA_PATTERN],
     ),
   ]);
 
@@ -145,6 +160,7 @@ export async function loadIntroLeads(q: { kind: IntroLeadKind; page: number }): 
       id: r.id,
       at: new Date(r.created_at).toISOString(),
       kind: isRequest ? 'request' : 'view',
+      isBot: !isRequest && isIntroBot(r.user_agent),
       ip: String(r.ip || ''),
       userAgent: String(r.user_agent || ''),
       from: isRequest ? '' : String(d.from || ''),
@@ -158,7 +174,7 @@ export async function loadIntroLeads(q: { kind: IntroLeadKind; page: number }): 
 
   const s = summary.rows[0] || {};
   return {
-    summary: { viewsToday: Number(s.today) || 0, views7d: Number(s.week) || 0, requests: Number(s.requests) || 0 },
+    summary: { viewsToday: Number(s.today) || 0, views7d: Number(s.week) || 0, bots7d: Number(s.bots_week) || 0, requests: Number(s.requests) || 0 },
     total: Number(count.rows[0]?.n) || 0,
     page: q.page,
     rows,

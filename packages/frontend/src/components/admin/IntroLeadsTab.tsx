@@ -14,6 +14,8 @@ interface Row {
   id: string;
   at: string;
   kind: 'request' | 'view';
+  /** 서버 판정(utils/intro-leads.ts isIntroBot) — 브라우저 원문이 로봇이라고 밝힌 방문 */
+  isBot: boolean;
   ip: string;
   userAgent: string;
   from: string;
@@ -22,7 +24,7 @@ interface Row {
 }
 
 interface Data {
-  summary: { viewsToday: number; views7d: number; requests: number };
+  summary: { viewsToday: number; views7d: number; bots7d: number; requests: number };
   total: number;
   rows: Row[];
 }
@@ -41,7 +43,12 @@ const phoneFmt = (p: string) => (p.length === 11 ? `${p.slice(0, 3)}-${p.slice(3
 /** 브라우저 정보 한 줄 요약 — 표에서는 짧게, 펼치면 원문 */
 const uaShort = (ua: string) => {
   if (/KAKAOTALK/i.test(ua)) return '카카오톡 안';
-  const dev = /iPhone|iPad/i.test(ua) ? 'iPhone' : /Android/i.test(ua) ? 'Android' : /Windows/i.test(ua) ? 'Windows' : /Mac OS/i.test(ua) ? 'Mac' : '기타';
+  // ★ 2026-10-09 네이버웍스(사내 메신저) 앱 안 · 아이패드를 아이폰으로 묶던 것 분리 · 로봇은 이름을 그대로(브라우저 원문의 이름표)
+  const dev0 = /iPad/i.test(ua) ? 'iPad' : /iPhone/i.test(ua) ? 'iPhone' : '';
+  if (/NaverWorks|WorksMobile/i.test(ua)) return dev0 ? `${dev0} · 네이버웍스 안` : '네이버웍스 안';
+  const botName = ua.match(/([A-Za-z-]*bot|Yeti|Daumoa)\//i)?.[1];
+  if (botName) return botName;
+  const dev = dev0 ? dev0 : /Android/i.test(ua) ? 'Android' : /Windows/i.test(ua) ? 'Windows' : /Mac OS/i.test(ua) ? 'Mac' : '기타';
   const br = /Edg\//.test(ua) ? 'Edge' : /Whale/.test(ua) ? 'Whale' : /Chrome\//.test(ua) ? 'Chrome' : /Safari\//.test(ua) ? 'Safari' : '';
   return br ? `${dev} · ${br}` : dev;
 };
@@ -75,10 +82,11 @@ export default function IntroLeadsTab() {
   return (
     <div className="space-y-4">
       <div className="grid grid-cols-3 gap-3">
-        {([['오늘 방문', s?.viewsToday], ['최근 7일 방문', s?.views7d], ['시연 요청(전체)', s?.requests]] as [string, number | undefined][]).map(([label, n]) => (
+        {([['오늘 방문', s?.viewsToday, ''], ['최근 7일 방문', s?.views7d, s && s.bots7d > 0 ? `검색 로봇 ${s.bots7d.toLocaleString()}건 제외` : ''], ['시연 요청(전체)', s?.requests, '']] as [string, number | undefined, string][]).map(([label, n, sub]) => (
           <div key={label} className="bg-white rounded-xl border px-5 py-4">
             <p className="text-sm text-gray-500">{label}</p>
             <p className="mt-1 text-2xl font-bold tabular-nums text-gray-900">{n === undefined ? '-' : n.toLocaleString()}</p>
+            {sub && <p className="mt-0.5 text-xs text-gray-400">{sub}</p>}
           </div>
         ))}
       </div>
@@ -121,8 +129,8 @@ export default function IntroLeadsTab() {
                   <tr onClick={() => setOpen(open === r.id ? null : r.id)} className="border-t hover:bg-gray-50 cursor-pointer">
                     <td className="px-4 py-2.5 whitespace-nowrap tabular-nums text-gray-700">{fmt(r.at)}</td>
                     <td className="px-4 py-2.5 whitespace-nowrap">
-                      <span className={`inline-flex px-2 py-0.5 rounded-full text-xs ${r.kind === 'request' ? 'bg-emerald-50 text-emerald-700' : 'bg-gray-100 text-gray-600'}`}>
-                        {r.kind === 'request' ? '시연 요청' : '방문'}
+                      <span className={`inline-flex px-2 py-0.5 rounded-full text-xs ${r.kind === 'request' ? 'bg-emerald-50 text-emerald-700' : r.isBot ? 'bg-violet-50 text-violet-700' : 'bg-gray-100 text-gray-600'}`}>
+                        {r.kind === 'request' ? '시연 요청' : r.isBot ? '검색 로봇' : '방문'}
                       </span>
                     </td>
                     <td className="px-4 py-2.5 whitespace-nowrap text-gray-900">
