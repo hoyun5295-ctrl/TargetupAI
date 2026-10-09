@@ -8,9 +8,12 @@
  * 지킴(하나라도 어기면 아무것도 안 한다):
  *   - 대상 회사 = is_demo true + 회사 코드 HJDEMO_ 로 시작(시드 --rebuild 가 붙인 은퇴 표식) + 로그인 hanjulai 없음 + 지금 .env 싱크 키의 회사가 아님
  *   - 지울 행 중 company_id 가 이 회사가 아닌 행(다른 회사 · 빈 값)이 하나라도 있으면 중단(다른 회사 데이터 0)
+ *   - 지울 행이 외래키로 가리키는 대상이 삭제 집합 밖이면 중단(다른 회사 사용자 · 자산에 걸친 행 = 소유 증명 실패 · company_id 없는 표 포함 · Codex 1R)
+ *   - 자기참조 · 순환 외래키(지우는 규칙)가 걸리면 중단(연쇄 삭제가 점검 · 백업 밖 행을 지울 수 있다 · Codex 1R)
  *   - 여러 칸 외래키가 지울 행을 가리키면 중단(이 스크립트가 다루지 않는 모양)
- *   - 실행은 --apply --expect=<점검 총 건수> 일 때만 · 한 트랜잭션 · 회사 행 FOR UPDATE · 다시 센 수 ≠ expect 면 중단
- *   - 지우기 전에 지울 행 전부를 권한 600 파일(JSON 한 줄씩)로 남긴다(되돌릴 길) · 표마다 지운 수 = 센 수가 아니면 롤백
+ *   - 실행은 --apply --expect=<점검 총 건수> 일 때만 · REPEATABLE READ 한 트랜잭션 · 회사 행 FOR UPDATE 뒤 자격을 다시 확인 ·
+ *     다시 센 수 ≠ expect 면 중단 · 그 사이 다른 쪽이 행을 바꾸면 직렬화 오류로 전부 되돌린다(세기 · 백업 · 삭제가 같은 시점을 본다)
+ *   - 지우기 전에 지울 행 전부를 실행마다 새 파일(독점 생성 · 권한 600 · JSON 한 줄씩)로 남긴다 · 표마다 지운 수 = 센 수가 아니면 롤백
  *
  * 실행(운영 서버 · packages/backend):
  *   점검: npx ts-node scripts/purge-retired-demo-company.ts <회사 id>
@@ -43,6 +46,12 @@ async function main(): Promise<void> {
 
   const client = await pool.connect();
   try {
+    // ── 트랜잭션 · 잠금 먼저, 그다음 자격 확인(확인과 삭제 사이에 자격이 바뀌지 않게 · Codex 1R)
+    await client.query(apply ? 'BEGIN ISOLATION LEVEL REPEATABLE READ' : 'BEGIN');
+    if (apply) {
+      await client.query(`SET LOCAL lock_timeout = '5s'`);
+      await client.query(`SELECT id FROM companies WHERE id = $1::uuid FOR UPDATE`, [companyId]);
+    }
     // ── 대상 확인
     const c = await client.query(`SELECT id, company_code, is_demo, api_key FROM companies WHERE id = $1::uuid`, [companyId]);
     if (c.rows.length === 0) throw new Error('회사가 없습니다.');
@@ -89,6 +98,7 @@ async function main(): Promise<void> {
     const warnings: string[] = [];
     for (const fk of fks) {
       if (removing(fk) && affected.has(fk.parent) && fk.childCols.length !== 1) warnings.push(`여러 칸 외래키 ${fk.name}(${fk.child} → ${fk.parent}) — 이 스크립트가 다루지 않는 모양`);
+      if (removing(fk) && affected.has(fk.parent) && fk.child === fk.parent) warnings.push(`순환 외래키 ${fk.name}(${fk.child} → ${fk.parent}) — 자기참조`);
     }
 
     // ── 표마다 조건(재귀 · 순환은 건너뛰고 기록) · 깊이(부모보다 깊게 = 먼저 지운다)
@@ -106,7 +116,7 @@ async function main(): Promise<void> {
       if (t !== 'companies' && hasCompanyId.has(t)) { conds.push(`${qi('company_id')} = $1::uuid`); via.push('company_id'); depth = Math.max(depth, 1); }
       for (const fk of fks) {
         if (fk.child !== t || !removing(fk) || !affected.has(fk.parent) || fk.childCols.length !== 1) continue;
-        if (stack.has(fk.parent)) { if (fk.parent !== t) warnings.push(`순환 외래키 ${fk.name}(${fk.child} → ${fk.parent}) — 이 경로는 따로 따라가지 않음`); continue; }
+        if (stack.has(fk.parent)) { if (fk.parent !== t) warnings.push(`순환 외래키 ${fk.name}(${fk.child} → ${fk.parent}) — 여러 표에 걸친 순환`); continue; }
         const p = build(fk.parent);
         conds.push(`${qi(fk.childCols[0])} IN (SELECT ${qi(fk.parentCols[0])} FROM ${qi(fk.parent)} WHERE ${p.pred})`);
         via.push(`${fk.parent}.${fk.parentCols[0]} (${DEL_RULE[fk.delType]})`);
@@ -118,11 +128,6 @@ async function main(): Promise<void> {
       return { pred, depth };
     };
 
-    await client.query('BEGIN');
-    if (apply) {
-      await client.query(`SET LOCAL lock_timeout = '5s'`);
-      await client.query(`SELECT id FROM companies WHERE id = $1::uuid FOR UPDATE`, [companyId]);
-    }
     const plan: PlanRow[] = [];
     for (const t of affected) {
       const { pred, depth } = build(t);
@@ -130,9 +135,29 @@ async function main(): Promise<void> {
       const n = await client.query(`SELECT COUNT(*)::int AS n FROM ${qi(t)} WHERE ${pred}`, [companyId]);
       const rows = Number(n.rows[0].n || 0);
       if (rows === 0) continue;
+      // 소유 확인(Codex 1R) — 다른 회사 소유 행에 걸친 공유 행을 지우지 않는다.
+      //   ①company_id 칸이 있으면 이 회사여야 한다
+      //   ②외래키 대상이 회사 표면 이 회사만 · 대상 표에 company_id 가 있으면 다른 회사 행을 가리키면 안 된다
+      //     (남는 전역 행 = 슈퍼관리자 계정 · 공용 표를 가리키는 것은 괜찮다 · 지워도 그 행은 남는다)
+      //   ③대상 표에 company_id 가 없으면 소유를 판정할 수 없다 → 삭제 집합 밖을 가리키면 중단(보수적)
+      const outside: string[] = [];
+      if (hasCompanyId.has(t) && t !== 'companies') outside.push(`${qi('company_id')} IS DISTINCT FROM $1::uuid`);
+      for (const fk of fks) {
+        if (fk.child !== t || fk.childCols.length !== 1 || !affected.has(fk.parent)) continue;
+        const col = qi(fk.childCols[0]);
+        const pcol = qi(fk.parentCols[0]);
+        if (fk.parent === 'companies') {
+          outside.push(`(${col} IS NOT NULL AND ${col} <> $1::uuid)`);
+        } else if (hasCompanyId.has(fk.parent)) {
+          outside.push(`${col} IN (SELECT ${pcol} FROM ${qi(fk.parent)} WHERE ${qi('company_id')} IS NOT NULL AND ${qi('company_id')} <> $1::uuid)`);
+        } else {
+          const p = build(fk.parent);
+          outside.push(`(${col} IS NOT NULL AND ${col} NOT IN (SELECT ${pcol} FROM ${qi(fk.parent)} WHERE ${p.pred} AND ${pcol} IS NOT NULL))`);
+        }
+      }
       let foreign = 0;
-      if (hasCompanyId.has(t) && t !== 'companies') {
-        const f = await client.query(`SELECT COUNT(*)::int AS n FROM ${qi(t)} WHERE ${pred} AND ${qi('company_id')} IS DISTINCT FROM $1::uuid`, [companyId]);
+      if (outside.length) {
+        const f = await client.query(`SELECT COUNT(*)::int AS n FROM ${qi(t)} WHERE ${pred} AND (${outside.join(' OR ')})`, [companyId]);
         foreign = Number(f.rows[0].n || 0);
       }
       plan.push({ table: t, depth, pred, rows, foreign, via: viaMemo.get(t) || [] });
@@ -143,16 +168,17 @@ async function main(): Promise<void> {
 
     console.log(`\n── 지울 대상: 회사 ${companyId} (${co.company_code}) ──`);
     for (const p of plan) {
-      console.log(`${String(p.rows).padStart(7)}  ${p.table}${LOG_LIKE.test(p.table) ? '  [기록성 표]' : ''}${p.foreign ? `  ⚠다른 회사·빈 값 ${p.foreign}` : ''}  ← ${p.via.join(' · ')}`);
+      console.log(`${String(p.rows).padStart(7)}  ${p.table}${LOG_LIKE.test(p.table) ? '  [기록성 표]' : ''}${p.foreign ? `  [삭제 집합 밖을 가리킴 ${p.foreign}]` : ''}  ← ${p.via.join(' · ')}`);
     }
     const setNull = fks.filter((fk) => (fk.delType === 'n' || fk.delType === 'd') && affected.has(fk.parent) && plan.some((p) => p.table === fk.parent));
     if (setNull.length) console.log(`(값만 비워지는 외래키 ${setNull.length}개: ${setNull.map((f) => `${f.child}.${f.childCols.join(',')}`).join(' · ')})`);
     for (const w of [...new Set(warnings)]) console.log(`주의: ${w}`);
-    console.log(`총 ${total}행 · 다른 회사·빈 값 ${foreignTotal}행`);
+    console.log(`총 ${total}행 · 소유를 증명하지 못한 행 ${foreignTotal}행`);
 
-    if (foreignTotal > 0 || warnings.some((w) => w.startsWith('여러 칸'))) {
+    const blocking = warnings.some((w) => w.startsWith('여러 칸') || w.startsWith('순환'));
+    if (foreignTotal > 0 || blocking) {
       await client.query('ROLLBACK');
-      throw new Error('다른 회사 · 빈 값 행이 걸리거나 다루지 않는 외래키가 있어 지우지 않습니다. 위 목록을 그대로 보내 주세요.');
+      throw new Error('삭제 집합 밖을 가리키는 행 · 순환 외래키 · 다루지 않는 외래키가 있어 지우지 않습니다. 위 목록을 그대로 보내 주세요.');
     }
     if (!apply) {
       await client.query('ROLLBACK');
@@ -165,8 +191,11 @@ async function main(): Promise<void> {
     }
 
     // ── 백업(지우기 전 · 권한 600) → 깊은 표부터 지우기 → 표마다 지운 수 = 센 수
-    const backupPath = path.join(os.homedir(), `demo-purge-${companyId}.jsonl`);
-    const fd = fs.openSync(backupPath, 'w', 0o600);
+    const stamp = new Date().toISOString().replace(/[-:.TZ]/g, '').slice(0, 14);
+    const backupPath = path.join(os.homedir(), `demo-purge-${companyId}-${stamp}.jsonl`);
+    // 'wx' = 이미 있으면(파일 · 링크) 실패 → 권한 600 이 새 파일에만 적용되는 문제 · 링크 따라 덮어쓰기를 막는다(Codex 1R)
+    const fd = fs.openSync(backupPath, 'wx', 0o600);
+    fs.fchmodSync(fd, 0o600);
     try {
       for (const p of plan) {
         const rows = await client.query(`SELECT row_to_json(x) AS j FROM ${qi(p.table)} x WHERE ${p.pred}`, [companyId]);
