@@ -299,7 +299,9 @@ export function composeOutreachStandard(input: ComposeStandardInput): Section[] 
       title: '', images: [{ url: input.hero.url, link_url: input.hero.linkUrl, caption: '' }], layout: 'list_1xN', full_bleed: true, enable_zoom: false, enable_fullscreen: false,
     }));
   }
-  const products = (input.products || []).filter((p) => p && p.image_url && p.link_url && String(p.name || '').trim()).slice(0, OUTREACH_STD_PRODUCTS_MAX);
+  const usable = (input.products || []).filter((p) => p && p.image_url && p.link_url && String(p.name || '').trim()).slice(0, OUTREACH_STD_PRODUCTS_MAX);
+  // ★ 2026-10-09 R8 상품 1개 = 블록 없음 · 2개 이상 = 짝수(2/4/6)로 자른다 — 2열 격자에 빈 칸이 남아 "비어 보이던" 것(서수란 접수 3)
+  const products = usable.length >= 2 ? usable.slice(0, usable.length - (usable.length % 2)) : [];
   if (products.length) {
     out.push(mk('product_carousel', 'so-std-products', order++, {
       title: '',

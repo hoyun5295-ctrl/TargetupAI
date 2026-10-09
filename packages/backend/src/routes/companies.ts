@@ -13,7 +13,7 @@ import { getOpt080Number } from '../utils/messageUtils';
 // ★ 2026-09-27 한줄로 V2 R105 — 공개 문의 메일 본문 이스케이프 CT
 import { escapeHtml } from '../utils/dm/dm-section-renderer';
 import { normalizeOpt080Input, findLinkDefectInText, findLinkDefectDeep, webLinkReason } from '../utils/normalize';
-import { grantFreeTrial, isTrialApplyOpen } from '../utils/basic-trial';
+import { grantFreeTrial, isTrialApplyOpen, ADMIN_WEEK_TRIAL } from '../utils/basic-trial';
 // ★ 2026-07-25 요금제 변경 이력 CT — 청구서 일할계산의 진실의 원천(빠지면 그 구간이 증발)
 import { recordPlanChange, alertPlanChangeFailure } from '../utils/plan-change-log';
 // ★ 2026-10-04 선불 요금제 이용 기간 — 관리 중 게이트 · my-plan 표시(docs/2026-10-04-prepaid-plan-term-design.md)
@@ -2106,10 +2106,12 @@ router.post(
 router.post('/:id/grant-basic-trial', requireUuidId, requireSuperAdmin, async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
-    const days = Math.max(1, Math.min(Number((req.body as any)?.days) || 30, 365));
+    // ★ 2026-10-08 「7일 체험」 = kind 'week' — 일수 · 크레딧을 서버가 정한다(ADMIN_WEEK_TRIAL · 화면은 숫자를 안 보낸다)
+    const week = (req.body as any)?.kind === 'week';
+    const days = week ? ADMIN_WEEK_TRIAL.days : Math.max(1, Math.min(Number((req.body as any)?.days) || 30, 365));
     const exists = await query(`SELECT id FROM companies WHERE id = $1`, [id]);
     if (exists.rows.length === 0) return res.status(404).json({ error: '고객사를 찾을 수 없습니다.' });
-    const company = await grantFreeTrial(id, days);
+    const company = await grantFreeTrial(id, days, week ? { credits: ADMIN_WEEK_TRIAL.credits } : {});
     return res.json({
       success: true,
       // ★ 2026-07-28 연장이면 문구를 바꾼다 — 같은 버튼이 두 가지 일을 하므로 결과를 구분해 알린다.

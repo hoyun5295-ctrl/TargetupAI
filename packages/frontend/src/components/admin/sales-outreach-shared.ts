@@ -66,6 +66,13 @@ export interface WorkbenchCard {
   send: { id: string; outcome: string; reviewFlag: string | null; mode: string; at: string } | null;
   directLast: { outcome: string; detail: string; at: string; mode: string } | null;
   mailResult: string | null;
+  /** ★ 2026-10-09 R13 판정 카드 — 메일 첫 화면의 히어로 · 고른 템플릿과 이유 · 재료 수(옛 서버 응답에는 없다) */
+  heroUrl?: string | null;
+  heroKind?: 'poster' | 'banner' | 'card' | null;
+  templateName?: string | null;
+  templateReason?: string | null;
+  productCount?: number | null;
+  eventCount?: number | null;
 }
 
 export type WorkbenchLane = 'reading' | 'confirm' | 'producing' | 'review' | 'hold' | 'send' | 'sent' | 'post_review' | 'failed';
@@ -92,6 +99,23 @@ export const WORKBENCH_LANES: Array<{ key: WorkbenchLane; label: string }> = [
   { key: 'post_review', label: '사후 확인' },
   { key: 'failed', label: '실패' },
 ];
+
+/**
+ * ★ 2026-10-09 R12 머리 띠 탭 3개 = 줄 묶음(줄 키·서버 계산값 불변 · 화면 묶음만)
+ *   사후 확인([잘못 나감] = 자동 발송 정지 장치)·실패는 "확인할 것" 안에서 건수가 있으면 늘 보인다.
+ */
+export type WorkbenchGroup = 'making' | 'check' | 'sent';
+export const WORKBENCH_GROUPS: Array<{ id: WorkbenchGroup; label: string; lanes: WorkbenchLane[] }> = [
+  { id: 'making', label: '만드는 중', lanes: ['reading', 'producing'] },
+  { id: 'check', label: '확인할 것', lanes: ['review', 'confirm', 'post_review', 'failed', 'hold'] },
+  { id: 'sent', label: '보낸 것', lanes: ['send', 'sent'] },
+];
+export function groupOfLane(lane: WorkbenchLane): WorkbenchGroup {
+  return (WORKBENCH_GROUPS.find((g) => g.lanes.includes(lane)) || WORKBENCH_GROUPS[1]).id;
+}
+
+/** 히어로 종류 이름(판정 카드 한 줄) */
+export const HERO_KIND_LABEL: Record<'poster' | 'banner' | 'card', string> = { poster: '스튜디오 포스터', banner: '홈 배너', card: '행사 배너' };
 
 /** 담당자 도메인 뱃지(같음 녹색 · 개인 메일 주황 · 다른 회사 빨강) */
 export const DOMAIN_BADGE: Record<ContactDomainVerdict, { label: string; cls: string }> = {

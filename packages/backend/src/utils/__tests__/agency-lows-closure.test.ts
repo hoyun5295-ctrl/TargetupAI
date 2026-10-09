@@ -8,6 +8,7 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import fs from 'fs';
 import path from 'path';
+import { readAdminScreenSource } from './source-scan';
 
 const read = (p: string) => fs.readFileSync(path.join(__dirname, p), 'utf8').replace(/\r\n/g, '\n');
 const worker = read('../agency-send-worker.ts');
@@ -18,7 +19,7 @@ const admin = read('../../routes/admin.ts');
 const app = read('../../app.ts');
 const directWorker = read('../direct-send-worker.ts');
 const mailWorker = read('../agency-send-mail-worker.ts');
-const adminDashboard = read('../../../../frontend/src/pages/AdminDashboard.tsx');
+const adminDashboard = readAdminScreenSource(); // ★ 2026-10-09 파일 분리 E 뒤 = 본체 + 옮겨 간 화면 합본
 const between = (s: string, a: string, b: string) => {
   const i = s.indexOf(a);
   const j = s.indexOf(b, i + 1);
@@ -219,7 +220,7 @@ describe('싱크 ③④', () => {
   });
 
   it('사용 토글은 방금 받은 1회 노출 시크릿을 지우지 않는다(같은 키일 때만)', () => {
-    const seg = between(adminDashboard, 'const handleSyncToggle = async', '// 슈퍼관리자 고객 목록 로드');
+    const seg = between(adminDashboard, 'const handleSyncToggle = async', "console.error('SyncAgent 토글 실패:'"); // 함수 = 싱크 탭 파일로 옮겨 감
     expect(seg).toMatch(/prev\.api_secret && prev\.api_key === data\.syncKeys\?\.api_key \? \{ api_secret: prev\.api_secret \} : \{\}/);
   });
 });

@@ -70,4 +70,16 @@ describe('standardMaterialsOf — 행사 블록 이미지', () => {
     expect(std.events[1]).toMatchObject({ imageUrl: 'https://hanjul.ai/copy/p2.png', linkUrl: `${HOME}/promotion/benefit` });
     expect(std.events[2]).toMatchObject({ imageUrl: null, linkUrl: `${HOME}/promotion/benefit` });
   });
+
+  it('★ 1009 상세 주소가 같은(홈) 카드가 여럿이어도 슬라이스는 첫 카드만 갖는다(헤라 실측 · 같은 이미지 반복 차단)', () => {
+    const input = { ...base, eventSlices: { detailUrl: HOME, finalUrl: '', images: [], candidates: 0, at: '' }, eventCards: [
+      { title: 'NEW 리플렉션 리퀴드 블러쉬', periodRaw: null, endDate: null, bannerUrl: null, bannerSize: null, detailUrl: HOME, licensed: false },
+      { title: 'NEW 센슈얼 틴티드 샤인 립 세럼', periodRaw: null, endDate: null, bannerUrl: null, bannerSize: null, detailUrl: `${HOME}/`, licensed: false },
+    ] } as any;
+    const std = standardMaterialsOf(input, media)!;
+    expect(std.events[0].imageUrl).toBe('https://hanjul.ai/copy/s1.jpg');
+    expect(std.events[0].slices).toHaveLength(3);
+    expect(std.events[1].slices).toEqual([]);
+    expect(std.events[1].imageUrl).toBeNull();
+  });
 });

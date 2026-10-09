@@ -49,6 +49,8 @@ export interface OutreachStyleGuide {
     /** ★ 2026-09-23 첫 화면 헤드라인(이 메일에서 'AI' 는 여기와 footer 고지 두 번뿐) */
     opener: { headline: (companyName: string) => string };
     sample: { tag: string; headline: (companyName: string) => string };
+    /** ★ 2026-10-09 R7 메일 첫 화면 이미지 대체 글자(이미지 차단 메일에서도 뜻이 남게) */
+    alt: { hero: (companyName: string) => string; dmFrame: (companyName: string) => string };
     /** ★ 2026-09-23 시안에 담은 확정 행사 요약(제목 · 기간 줄 · 원문 인용 덤프 없음) */
     events: { tag: string; headline: string };
     showcase: { tag: string; headline: string };
@@ -109,6 +111,7 @@ const STYLE_GUIDE_V1: OutreachStyleGuide = {
     greeting: (n) => `${n}님, 안녕하세요.`,
     opener: { headline: (c) => `${c} 홈페이지만 읽고 AI가 만든 모바일 DM 시안입니다` },
     sample: { tag: '브랜드 이메일 시안', headline: (c) => `${c} 이름으로 나가는 이메일은 이런 모습입니다` },
+    alt: { hero: (c) => `${c} 브랜드 이미지`, dmFrame: (c) => `${c} 문자 DM 첫 화면` },
     events: { tag: '이번 시안에 담은 소식', headline: '홈페이지에서 확인한 진행 중 소식으로 만들었습니다' },
     showcase: { tag: '문자 문안 예시', headline: '이런 문안으로 보낼 수 있습니다' },
     more: {

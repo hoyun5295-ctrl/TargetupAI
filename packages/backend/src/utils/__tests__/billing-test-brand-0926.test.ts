@@ -10,6 +10,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { readFileSync } from 'fs';
 import { join } from 'path';
+import { readAdminScreenSource } from './source-scan';
 
 const mysqlCalls: Array<{ sql: string; params: any[] }> = [];
 vi.mock('../../config/database', async (importOriginal) => {
@@ -99,7 +100,7 @@ describe('배선', () => {
   });
   it('라벨: PDF·관리자 화면', () => {
     expect(src('utils/billing-pdf.ts')).toContain("TEST_BRAND: '테스트브랜드메시지'");
-    expect(readFileSync(join(__dirname, '..', '..', '..', '..', 'frontend', 'src', 'pages', 'AdminDashboard.tsx'), 'utf8'))
+    expect(readAdminScreenSource())
       .toContain("TEST_BRAND: '테스트브랜드메시지'");
   });
 });

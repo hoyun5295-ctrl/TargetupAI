@@ -19,6 +19,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { readFileSync } from 'fs';
 import { join } from 'path';
+import { readAdminScreenSource } from './source-scan';
 
 // middlewares/auth.ts 는 불러올 때 JWT_SECRET 이 없으면 프로세스를 끝낸다 — 시험 전용 값(도달 불가)을 먼저 둔다
 vi.hoisted(() => { if (!process.env.JWT_SECRET) process.env.JWT_SECRET = 'test-only-not-a-secret'; });
@@ -191,11 +192,12 @@ describe('4. AI 영업 = ceo · suran', () => {
 });
 
 describe('5. 화면 — 메뉴 7묶음 · 노출 · 뱃지', () => {
-  const page = readFileSync(join(SRC, '../../frontend/src/pages/AdminDashboard.tsx'), 'utf8');
-  const menu = page.slice(page.indexOf('{/* 드롭다운 그룹 메뉴 */}'), page.indexOf('const c = colorMap[group.color] || colorMap.blue;'));
+  const page = readAdminScreenSource(); // ★ 2026-10-09 파일 분리 E 뒤 = 본체(맨 앞) + 옮겨 간 화면 합본
+  // ★ 2026-10-09 묶음별 색(colorMap)을 걷어(강조색 하나) 끝 표지 = 메뉴 다음 첫 탭 자리 · 묶음 이름 = items 바로 앞 label
+  const menu = page.slice(page.indexOf('{/* 드롭다운 그룹 메뉴 */}'), page.indexOf('{/* 고객사 관리 탭 */}'));
 
   it('묶음 7개 · 순서', () => {
-    const labels = [...menu.matchAll(/label: '([^']+)', color: '(\w+)'/g)].map((m) => m[1]);
+    const labels = [...menu.matchAll(/label: '([^']+)',\s*items: \[/g)].map((m) => m[1]);
     expect(labels).toEqual(['고객 관리', '발송 관리', '대행 발송', '요금/정산', '보안 · 인증', '연동 · 인프라', 'AI · 콘텐츠']);
   });
 
@@ -230,7 +232,8 @@ describe('5. 화면 — 메뉴 7묶음 · 노출 · 뱃지', () => {
 
   it('직원 계정 쓰기 버튼은 서버 canWrite 일 때만', () => {
     expect(page).toContain('setAdminAccountsCanWrite(body.canWrite === true);');
-    const tab = page.slice(page.indexOf("{activeTab === 'adminAccounts' && ("), page.indexOf('접근권한 변경 이력 대장'));
+    const tabStart = page.indexOf('export default function AdminAccountsTab('); // 탭 본문 = 옮겨 간 파일
+    const tab = page.slice(tabStart, page.indexOf('접근권한 변경 이력 대장', tabStart));
     expect(tab.indexOf('{adminAccountsCanWrite ? (')).toBeGreaterThan(-1);
     expect(tab.indexOf('{adminAccountsCanWrite ? (')).toBeLessThan(tab.indexOf('setAdminCreate('));
     const rowBtns = tab.slice(tab.indexOf('<td className="px-4 py-2 text-right whitespace-nowrap">'));

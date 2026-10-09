@@ -45,17 +45,24 @@ export function isTrialApplyOpen(now: Date = new Date()): boolean {
  *   - 크레딧: **연장에서는 건드리지 않는다.** 연장할 때마다 월 기본분을 다시 채우면 과다 지급이 된다
  *     (같은 계열 사고 경고 = plan-change-log.ts 크레딧 일할 주석).
  */
+/**
+ * ★ 2026-10-08 슈퍼관리자 「7일 체험」(Harold 「시연 뒤 7일 · 크레딧 300 · 30일 750 은 그대로」).
+ *   크레딧은 서버가 정한다 — 화면은 종류(week)만 보낸다(숫자를 받지 않는다).
+ *   마케팅 진단 자동 체험(DIAGNOSIS_TRIAL_DAYS = 7)은 이 값을 쓰지 않는다(종전 그대로 TRIAL 요금제 월 기본분).
+ */
+export const ADMIN_WEEK_TRIAL = { days: 7, credits: 300 } as const;
+
 export async function grantFreeTrial(
   companyId: string,
   days = 30,
-  opts: { client?: PoolClient } = {},
+  opts: { client?: PoolClient; credits?: number } = {},
 ): Promise<any> {
   // ★ 2026-08-16 client 주입 (마케팅 진단 §4-1 — 진단 저장과 체험 지급이 한 트랜잭션이어야 한다).
   //   client가 오면 호출부가 BEGIN/COMMIT/ROLLBACK/실패 알림을 소유한다 — 여기서는 아무것도 걸지 않는다.
   //   내부 SQL은 플랜 조회까지 **전부** 그 client를 탄다: 전역 query가 한 줄이라도 남으면
   //   호출부 트랜잭션이 풀 커넥션을 추가 요구해 풀 고갈 데드락이 된다(Codex high — 설계서 §4-1).
   if (opts.client) {
-    return grantFreeTrialWithClient(opts.client, companyId, days);
+    return grantFreeTrialWithClient(opts.client, companyId, days, opts.credits);
   }
 
   // ★ 2026-07-25 플랜 변경과 이력 기록을 한 트랜잭션으로 묶는다(Codex 지적 C).
@@ -63,7 +70,7 @@ export async function grantFreeTrial(
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
-    const result = await grantFreeTrialWithClient(client, companyId, days);
+    const result = await grantFreeTrialWithClient(client, companyId, days, opts.credits);
     await client.query('COMMIT');
     return result;
   } catch (err) {
@@ -86,6 +93,8 @@ async function grantFreeTrialWithClient(
   client: PoolClient,
   companyId: string,
   days: number,
+  /** 신규 부여 때 줄 기본 크레딧 — 없으면 TRIAL 요금제 월 기본분(종전). 연장에서는 어느 경우든 쓰지 않는다 */
+  creditsOverride?: number,
 ): Promise<any> {
   const trial = await client.query(
     `SELECT id, COALESCE(ai_credits_per_month, 0) AS credits
@@ -93,7 +102,7 @@ async function grantFreeTrialWithClient(
   );
   if (trial.rows.length === 0) throw new Error('무료체험 요금제가 존재하지 않습니다.');
   const trialPlanId = trial.rows[0].id;
-  const trialCredits = Number(trial.rows[0].credits) || 0;
+  const trialCredits = creditsOverride !== undefined ? Math.max(0, Math.floor(creditsOverride)) : (Number(trial.rows[0].credits) || 0);
 
   // 연장인지 신규인지는 **잠근 행의 갱신 전 값**으로 판정한다(동시 클릭이 서로의 판정을 오염시키지 않게).
   const cur = await client.query(

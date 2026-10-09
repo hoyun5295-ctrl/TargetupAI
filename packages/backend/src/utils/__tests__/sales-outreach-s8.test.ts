@@ -111,9 +111,10 @@ describe('제안 메일 — 자리표시자 노출 0 · ★ 2026-09-23 재구성
     const s = buildProposalEmailSections(guide, base) as any[];
     const all = JSON.stringify(s);
     expect(all).not.toContain(P);
-    const opener = s[1];
-    expect(opener.props.body).toContain('티퍼런스 컬렉션이 인상적이었습니다.');
-    expect(opener.props.body).not.toContain('티퍼런스 기프트 컬렉션 최대 20% OFF');
+    // ★ 2026-10-09 서두는 첫 [DM 열어보기] 바로 뒤 카드(헤드라인 카드는 호칭만)
+    const intro = s[s.findIndex((x) => x.type === 'cta') + 1];
+    expect(intro.props.body).toContain('티퍼런스 컬렉션이 인상적이었습니다.');
+    expect(intro.props.body).not.toContain('티퍼런스 기프트 컬렉션 최대 20% OFF');
     const copy = s.find((x) => x.props?.tag === guide.emailCopy.showcase.tag);
     expect(copy.props.body).toContain('기프트 컬렉션은 https://hlj.kr/x 에서 확인하세요.');
     expect(copy.props.body).not.toContain('OFF 행사');
@@ -123,7 +124,7 @@ describe('제안 메일 — 자리표시자 노출 0 · ★ 2026-09-23 재구성
   it('문안이 자리표시자만 남으면 문안 블록을 생략한다 · 서두가 비면 기본 서두', () => {
     const s = buildProposalEmailSections(guide, { ...base, copyBody: `최대 ${P} OFF`, intro: `${P}` }) as any[];
     expect(s.some((x) => x.props?.tag === guide.emailCopy.showcase.tag)).toBe(false);
-    expect(s[1].props.body).toContain(guide.emailCopy.introDefault('아이소이'));
+    expect(s[s.findIndex((x) => x.type === 'cta') + 1].props.body).toContain(guide.emailCopy.introDefault('아이소이'));
   });
   it('순서 = header · 헤드라인 · [DM 열어보기] · (시안 표지 · 시안) · (행사 요약) · 문안 · 요약 카드 · 버튼 묶음 · 서비스(회신 문장) · footer · gallery 0 · 캡처 카드 0', () => {
     const s = buildProposalEmailSections(guide, base) as any[];

@@ -18,6 +18,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import { readFileSync } from 'fs';
 import { join } from 'path';
+import { readAdminScreenSource } from './source-scan';
 
 const src = (...p: string[]) => readFileSync(join(__dirname, '..', ...p), 'utf8');
 const issue = src('billing-issue.ts');
@@ -251,6 +252,6 @@ describe('m060 테스트 MMS = 회사 MMS 단가', () => {
     expect(resolveBillingUnitPricesDetailed({ cost_per_sms: 10, cost_per_lms: 30, cost_per_mms: null } as any).unsetKeys).toContain('TEST_MMS');
     expect(issue).toContain('(totalTestMms * prices.TEST_MMS)');
     expect(src('billing-pdf.ts')).toContain("TEST_MMS: '테스트MMS'");
-    expect(readFileSync(join(__dirname, '..', '..', '..', '..', 'frontend', 'src', 'pages', 'AdminDashboard.tsx'), 'utf8')).toContain("TEST_MMS: '테스트MMS'");
+    expect(readAdminScreenSource()).toContain("TEST_MMS: '테스트MMS'");
   });
 });

@@ -17,11 +17,16 @@ import { ownedOutreachDmIds } from './sales-outreach-dm-ownership';
 // routes/cdp.ts INAPP_IMAGE_BASE와 동일 정의 미러(단일 env 소스 — utils/assets.ts와 같은 관례)
 const INAPP_IMAGE_BASE = process.env.INAPP_IMAGE_PATH || path.resolve('./uploads/inapp');
 
+/** ★ 2026-10-09 공개 이미지 URL → 우리 저장소 파일 경로(형식 밖 = null) · 지우기·읽기가 같은 해석을 쓴다 */
+export function publicImagePath(url: string): string | null {
+  const m = String(url || '').match(/\/api\/cdp\/inapp\/image\/([0-9a-f-]{36})\/([A-Za-z0-9._-]+)$/i);
+  return m ? path.join(INAPP_IMAGE_BASE, m[1], m[2]) : null;
+}
+
 /** 공개 이미지 URL(/api/cdp/inapp/image/{companyId}/{filename}) → 파일 삭제(멱등). 형식 밖 URL은 건너뜀. 지웠으면 true. */
 export function unlinkPublicImage(url: string): boolean {
-  const m = String(url || '').match(/\/api\/cdp\/inapp\/image\/([0-9a-f-]{36})\/([A-Za-z0-9._-]+)$/i);
-  if (!m) return false;
-  const filePath = path.join(INAPP_IMAGE_BASE, m[1], m[2]);
+  const filePath = publicImagePath(url);
+  if (!filePath) return false;
   try {
     fs.unlinkSync(filePath);
     dropServeVariants(filePath);   // ★ 2026-09-29 메일용 사본(.mail.jpg|png)·서빙 변환본도 함께(CT · best-effort)
@@ -58,6 +63,9 @@ export async function purgeOutreachJobArtifacts(jobId: string, companyId: string
       if (unlinkPublicImage(String(u || ''))) filesDeleted += 1;
     }
   }
+  // ★ 2026-10-09 R7 메일 첫 화면의 휴대폰 틀 DM 캡처(제안 메일 조립 때 만든 사본)
+  const mails = await query(`SELECT payload FROM sales_outreach_assets WHERE job_id = $1 AND kind = 'email_html'`, [jobId]);
+  for (const a of mails.rows) if (a.payload?.dmFrameUrl && unlinkPublicImage(String(a.payload.dmFrameUrl))) filesDeleted += 1;
   const images = await query(`SELECT payload FROM sales_outreach_assets WHERE job_id = $1 AND kind = 'studio_image'`, [jobId]);
   for (const a of images.rows) {
     if (unlinkPublicImage(String(a.payload?.url || ''))) filesDeleted += 1;

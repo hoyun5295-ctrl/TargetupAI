@@ -8,6 +8,7 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'fs';
 import { resolve } from 'path';
 import { buildAdMessage } from '../messageUtils';
+import { readAdminScreenSource } from './source-scan';
 
 const ROOT = resolve(__dirname, '..', '..', '..', '..');
 const read = (p: string) => readFileSync(resolve(ROOT, p), 'utf8').replace(/\r\n/g, '\n');
@@ -79,6 +80,18 @@ describe('직원 접수 1008', () => {
     const src = read('backend/src/utils/system-monitor-worker.ts');
     expect(src).toContain('const { bulk: tables, all } = await getQueueTableSets();');
     expect(src).toContain('await checkAbnormalStatusRows(all);');
+  });
+
+  it('7일 체험 = 서버가 일수 · 크레딧(300)을 정한다 · 화면은 kind 만 · 30일은 종전 그대로', async () => {
+    const { ADMIN_WEEK_TRIAL } = await import('../basic-trial');
+    expect(ADMIN_WEEK_TRIAL).toEqual({ days: 7, credits: 300 });
+    const route = read('backend/src/routes/companies.ts');
+    expect(route).toContain("const week = (req.body as any)?.kind === 'week';");
+    expect(route).toContain('grantFreeTrial(id, days, week ? { credits: ADMIN_WEEK_TRIAL.credits } : {})');
+    const ct = read('backend/src/utils/basic-trial.ts');
+    expect(ct).toContain("CASE WHEN $5::boolean THEN ai_credits_base_remaining ELSE $3 END");   // 연장 = 크레딧 그대로
+    const ui = readAdminScreenSource(); // 부여 버튼 = 고객사 상세 설정 창(파일 분리 E로 옮겨 감)
+    expect(ui).toContain("body: JSON.stringify(week ? { kind: 'week' } : { days: 30 })");
   });
 
   it('감싼 문안 모양(LMS) = (광고) 머리 · 무료수신거부 꼬리', () => {

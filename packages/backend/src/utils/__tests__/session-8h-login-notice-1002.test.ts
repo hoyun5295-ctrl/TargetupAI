@@ -15,6 +15,7 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'fs';
 import { join } from 'path';
+import { readAdminScreenSource } from './source-scan';
 import { TIMEOUTS } from '../../config/defaults';
 
 const be = (...p: string[]) => readFileSync(join(__dirname, '..', '..', ...p), 'utf8');
@@ -66,7 +67,7 @@ describe('고객사 세션 기본 8시간', () => {
     expect(app).toContain('useSessionTimeout({ onLogout: handleSessionLogout })');
     expect(app).toContain('<SessionTimeoutModal');
     // 슈퍼관리자 화면은 세션이 30분이라 타이머를 그대로 둔다
-    expect(fe('pages', 'AdminDashboard.tsx')).toContain('<SessionTimer />');
+    expect(readAdminScreenSource()).toContain('<SessionTimer />');
   });
 });
 

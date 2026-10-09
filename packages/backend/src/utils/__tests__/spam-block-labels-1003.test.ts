@@ -10,6 +10,7 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync, readdirSync, statSync } from 'fs';
 import { join, resolve } from 'path';
 import { DIRECT_PIPELINE_SEND_TYPES } from '../send-type-axis';
+import { readAdminScreenSource } from './source-scan';
 
 const SRC = resolve(__dirname, '../..');
 const FRONT = resolve(SRC, '../../frontend/src');
@@ -57,7 +58,7 @@ describe('금칙어 화면 경로 이름표', () => {
   });
 
   it('화면은 원값 대신 이름표 함수를 쓰고, 출처 설명에 테이블 이름이 없다', () => {
-    const page = readFileSync(join(FRONT, 'pages/AdminDashboard.tsx'), 'utf8');
+    const page = readAdminScreenSource(); // ★ 2026-10-09 파일 분리 E 뒤 = 본체 + 옮겨 간 화면 합본
     expect(page).toContain('{resolveSpamHitSourceLabel(h.send_source)}');
     expect(page).toContain('{resolveSpamRuleSourceLabel(r.source)}');
     expect(page).not.toContain('(spam_block_hits)');

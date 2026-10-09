@@ -183,12 +183,14 @@ export function buildPosterPrompt(input: {
   /** ★ 2026-08-09 문구 위치(위/중앙/아래) — 지정 시 템플릿 textStyle의 배치 문구보다 우선. 미지정 = 템플릿 기본(예시 배치도 미지정). */
   textPosition?: 'top' | 'center' | 'bottom' | null;
   now?: Date;
+  /** ★ 2026-10-09 장면 문장 덮어쓰기(AI 영업이 소품 문장을 지운 판을 넘긴다) · 미지정 = template.scaffold 그대로 */
+  scaffold?: string | null;
 }): string {
   const { template, preset, texts } = input;
   const lines: string[] = [];
 
   // 1. 장면 스캐폴드(은닉 — 템플릿이 품은 정교한 지시)
-  lines.push(template.scaffold);
+  lines.push(input.scaffold || template.scaffold);
   // 1-1. ★ 2026-08-09(2) 문구 위치 지정 시 — 장면 단계에서 그 자리를 비워 구도가 텍스트와 싸우지 않게 한다.
   //      (실측: 최후미 규칙만으로는 textStyle 상단 문구 + 장면 구도에 밀려 미준수 — 모순 제거가 뿌리 수정)
   if (input.textPosition) {

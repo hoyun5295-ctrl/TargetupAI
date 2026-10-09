@@ -6,6 +6,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { readFileSync } from 'fs';
 import { join, resolve } from 'path';
+import { readAdminScreenSource } from './source-scan';
 
 vi.mock('../../config/database', () => ({ query: vi.fn(), pool: { connect: vi.fn() } }));
 vi.mock('../plan-guard', () => ({
@@ -216,7 +217,7 @@ describe('화면 — 안내 창 한 곳에서 보내고 · 메뉴는 허용 계�
   });
 
   it('슈퍼관리자 메뉴 = 허용 응답일 때만', () => {
-    const dash = front('pages/AdminDashboard.tsx');
+    const dash = readAdminScreenSource(); // ★ 2026-10-09 파일 분리 E 뒤 = 본체 + 옮겨 간 화면 합본
     expect(dash).toContain("fetch('/api/admin/feature-interest/access'");
     expect(dash).toContain("...(featureInterestAllowed ? [{ key: 'featureInterest', label: '기능 관심 업체' }] : []),");
     expect(dash).toContain("{activeTab === 'featureInterest' && featureInterestAllowed && <FeatureInterestTab />}");

@@ -1045,6 +1045,8 @@ export const NOT_DOCUMENTED_ROUTES: Record<string, string> = {
   '/admin/best-copy': '슈퍼관리자',
   '/admin/best-layout': '슈퍼관리자(ceo 전용 · 베스트 구성 = 참조 골격 승격·자동 생성 적용)',
   '/admin/outreach-grab': '슈퍼관리자(AI 영업 · 네이버 스토어 북마크 버튼이 여는 수신 탭 · 메뉴 없음)',
+  '/admin/outreach': '슈퍼관리자(AI 영업 작업대 · ★ 2026-10-09 옛 모달을 페이지로 · 고객 기능 아님)',
+  '/admin/outreach/:jobId': '슈퍼관리자(AI 영업 상세·등록 · 고객 기능 아님)',
   '/admin/campaign-agency': '슈퍼관리자',
   '/ai-journeys/:id': '여정 상세(= journeys)',
   '/ai-journeys/map': '여정 지도(= journeys · 여정 목록 머리 [지도로 보기])',

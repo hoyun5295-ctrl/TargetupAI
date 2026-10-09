@@ -747,12 +747,14 @@ docker exec -i targetup-mysql mysql -usmsuser -p smsdb -e "SELECT status_code, C
 
 ### 6-4-B. .62 재부팅 뒤 기동 순서 (★2026-10-07 실측 · Harold 실행)
 
-도커 4개 · 비토 에이전트 4개 · tailscale 은 저절로 뜬다. **pm2 · QTmsg 는 손으로 켠다**(자동 기동 장치 없음 · SERVERS.md .62 절).
+도커 4개 · 비토 에이전트 4개 · tailscale · **pm2(★1008 `pm2-administrator.service` 등록 · `pm2 save` 완료)** 는 저절로 뜬다. **QTmsg 는 손으로 켠다**(자동 기동 장치 없음 · 지금 QTmsg 경로 발송 0).
+> ★1008 실제 복구 순서(하나로호스팅 재부팅 뒤 · 전부 정상) = 접속 → `journalctl -b -1 --no-pager > ~/boot-prev-MMDD.log`(원인 기록 먼저 저장) → 도커 · MySQL `ready for connections` · PG `ready to accept connections` → pm2 → 비토 에이전트 → 바깥 200 → 비토 대기열(13~16 · 상태 100)을 관제 「결과 대기」와 대조 → QTmsg.
+> ⛔ DB 조회 명령은 **`docker exec -i` + psql `-P pager=off`** 만(★1008 `-it` 로 Windows SSH 창이 멈춤 · memory `feedback_docker_exec_never_tty_from_windows_ssh`).
 ```bash
 # 1) 재부팅 전(administrator) — 상태 기록 · pm2 목록 저장 · 꺼진 QTmsg 찾기(커맨드라인에 agentN 이 안 찍히니 관리 포트로)
 pm2 save; pm2 list; ss -ltn | grep -oE ':(900[1-9]|901[01])\b' | sort -uV | tr '\n' ' '
-# 2) 재부팅 뒤(administrator) — 도커 확인 · pm2 되살리기
-docker ps --format '{{.Names}}  {{.Status}}'; pm2 resurrect; pm2 list
+# 2) 재부팅 뒤(administrator) — 도커 확인 · pm2 확인(★1008 부터 자동 · 목록이 비었을 때만 resurrect)
+docker ps --format '{{.Names}}  {{.Status}}'; pm2 list
 # 3) QTmsg 11개(administrator)
 for i in 1 2 3 4 5 6 7 8 9 10 11; do (cd /home/administrator/agent$i/bin && ./qtmsg.sh start >/dev/null 2>&1); done
 # 4) 비토 에이전트(root) — failed 면 /run/vito-agent 부터 본다(★1007 tmpfiles 등록으로 해소 · /etc/tmpfiles.d/vito-agent.conf)

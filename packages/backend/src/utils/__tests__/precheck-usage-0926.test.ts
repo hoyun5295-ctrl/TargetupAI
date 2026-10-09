@@ -9,6 +9,7 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'fs';
 import { join } from 'path';
+import { readAdminScreenSource } from './source-scan';
 import {
   parsePrecheckUsageQuery, precheckPeriodStartSql, spamSourceBucket, summarizePrecheckGroups,
   buildPrecheckCompanyRows, precheckSubLabel, precheckResultLabel,
@@ -113,7 +114,7 @@ describe('ceo 전용 게이트', () => {
   });
 
   it('화면: 허용 계정에만 메뉴 항목 · 탭도 허용일 때만 그린다', () => {
-    const d = front('pages/AdminDashboard.tsx');
+    const d = readAdminScreenSource(); // ★ 2026-10-09 파일 분리 E 뒤 = 본체 + 옮겨 간 화면 합본
     expect(d).toContain("...(precheckUsageAllowed ? [{ key: 'precheckUsage', label: '점검 사용 현황' }] : [])");
     expect(d).toContain("{activeTab === 'precheckUsage' && precheckUsageAllowed && (");
     expect(d).toContain("fetch('/api/admin/precheck-usage/access'");

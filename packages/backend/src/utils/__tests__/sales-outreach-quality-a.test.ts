@@ -159,9 +159,10 @@ describe('A4 메일 — 시안에 행사 카드가 있으면 요약 카드를 �
     subject: '제목', intro: '서두', now: new Date('2026-09-24T03:00:00Z'),
     confirmedEvents: [{ title: '추석 맞이 톤28 윷놀이 행운의 혜택', periodRaw: '9/27까지' }],
   };
-  it('시안에 so-std-event 카드가 있으면 "이번 시안에 담은 소식" 0 · 없으면 1', () => {
+  it('★ 2026-10-09 메일은 시안의 행사 카드를 싣지 않는다(DM 안에서 본다) → "이번 시안에 담은 소식" 요약은 늘 1', () => {
     const withEvents = buildProposalEmailSections(guide, { ...base, brandSections: [...base.brandSections, sec('text_card', 'so-std-event1', { tag: '이벤트', headline: '추석 맞이 톤28 윷놀이 행운의 혜택' }, 1)] }) as any[];
-    expect(withEvents.some((x) => x.props?.tag === guide.emailCopy.events.tag)).toBe(false);
+    expect(withEvents.some((x) => x.props?.tag === guide.emailCopy.events.tag)).toBe(true);
+    expect(JSON.stringify(withEvents)).not.toContain('윷놀이 행운의 혜택');
     const without = buildProposalEmailSections(guide, base) as any[];
     expect(without.some((x) => x.props?.tag === guide.emailCopy.events.tag)).toBe(true);
   });

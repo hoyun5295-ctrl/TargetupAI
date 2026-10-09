@@ -284,14 +284,16 @@ describe('A-2 제안 메일 조립', () => {
       }
     }
   });
-  it('★ 2026-09-23 첫 화면 = 발신 헤더 → 헤드라인·서두 → [DM 열어보기] → 브랜드 시안 머리 · 시안 footer 는 빼고 끝 footer 하나 · 두 번째 버튼 묶음', () => {
-    const withFooter = { ...base, brandSections: [...base.brandSections, sec('footer', { legal_text: '브랜드 법정 표기' }, 2)] };
+  it('★ 2026-10-09 첫 화면 = 발신 헤더 → 헤드라인 → 그 브랜드 머리·히어로 → [DM 열어보기] → 서두 · 시안 나머지·footer 는 빼고 끝 footer 하나 · 두 번째 버튼 묶음', () => {
+    const withFooter = { ...base, brandSections: [...base.brandSections, sec('text_card', { headline: '시안 본문' }, 2), sec('footer', { legal_text: '브랜드 법정 표기' }, 3)] };
     const s = buildProposalEmailSections(guide, withFooter);
     const types = s.map((x) => x.type);
-    expect(types.slice(0, 5)).toEqual(['header', 'text_card', 'cta', 'text_card', 'header']);
+    expect(types.slice(0, 6)).toEqual(['header', 'text_card', 'header', 'hero', 'cta', 'text_card']);
+    expect(JSON.stringify(s)).not.toContain('시안 본문');
     const opener = s[1] as any;
     expect(opener.props.headline).toBe(guide.emailCopy.opener.headline('브랜드'));
-    const firstCta = s[2] as any;
+    expect((s[5] as any).props.body).toBe(base.intro);
+    const firstCta = s[4] as any;
     expect(firstCta.props.buttons).toEqual([{ label: guide.emailCopy.cta.secondary, url: base.dmUrl, style: 'primary' }]);
     // 시안 footer(그 브랜드 법정 표기)는 빠지고 맨 끝 footer 하나만
     expect(types.filter((t) => t === 'footer')).toHaveLength(1);

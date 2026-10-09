@@ -11,10 +11,9 @@
  *   2. 메뉴 항목은 이미 그 탭일 때(다시 누름)만 새로 조회한다.
  */
 import { describe, it, expect } from 'vitest';
-import { readFileSync } from 'fs';
-import { join } from 'path';
+import { readAdminScreenSource } from './source-scan';
 
-const page = readFileSync(join(__dirname, '../../../../frontend/src/pages/AdminDashboard.tsx'), 'utf8');
+const page = readAdminScreenSource(); // ★ 2026-10-09 파일 분리 E 뒤 = 본체 + 옮겨 간 화면 합본
 
 describe('발송 통계 진입 = 요청 1번', () => {
   it('탭 진입 조회는 activeTab 효과가 한다', () => {

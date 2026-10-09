@@ -60,8 +60,8 @@ export default function ZoneFrame({ command, blocks = [], start, emphasis, width
   const wrap = width === 'full' ? 'w-full px-4 md:px-6' : 'max-w-[1240px] mx-auto px-4 md:px-6';
   return (
     <SurfaceToneProvider tone="light">
-      <ZoneModuleContext.Provider value={head.moduleId}>
-        <div className="relative min-h-screen bg-slate-100 text-slate-900" data-zone-frame={head.moduleId}>
+      <ZoneModuleContext.Provider value={typeof head.moduleId === 'string' ? head.moduleId : null}>
+        <div className="relative min-h-screen bg-slate-100 text-slate-900" data-zone-frame={typeof head.moduleId === 'string' ? head.moduleId : head.moduleId.id}>
           {/* 머리 + 명령 카드가 걸치는 띠 = 한 덩어리 바탕(빛이 끊기지 않게) */}
           <div style={{ background: zoneBand(head.moduleId) }}>
             <ZoneHeader {...head} paint={false} full={width === 'full'} />

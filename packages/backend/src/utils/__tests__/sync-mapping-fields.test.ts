@@ -6,8 +6,7 @@
  *   customer_phone·purchase_date를 못 찾아 98,600건을 통째로 버렸다(성공 0). BUGS B-0902-4.
  */
 import { describe, it, expect } from 'vitest';
-import { readFileSync } from 'fs';
-import { resolve } from 'path';
+import { readAdminScreenSource } from './source-scan';
 import {
   SYNC_CUSTOMER_TARGET_FIELDS,
   SYNC_PURCHASE_TARGET_FIELDS,
@@ -92,10 +91,9 @@ describe('부분 갱신(dry-run)에서는 필수 누락으로 막지 않는다',
 
 describe('프론트 목록과 백엔드 계약이 같은 벌이다', () => {
   // 어긋나면 "화면에서 고를 수 있는데 저장이 거절되는" 상태가 된다(또는 그 반대).
-  const FRONT = resolve(__dirname, '../../../../frontend/src/pages/AdminDashboard.tsx');
 
   const literalsOf = (constName: string): string[] => {
-    const src = readFileSync(FRONT, 'utf8');
+    const src = readAdminScreenSource(); // ★ 2026-10-09 목록 = 싱크 매핑 창 파일로 옮겨 감(파일 분리 E)
     const m = src.match(new RegExp(`const ${constName} = \\[([\\s\\S]*?)\\];`));
     if (!m) throw new Error(`${constName}를 프론트에서 찾지 못했다 — 이름이 바뀌었으면 이 테스트도 함께 고친다.`);
     return [...m[1].matchAll(/'([a-z_0-9]+)'/g)].map((x) => x[1]);

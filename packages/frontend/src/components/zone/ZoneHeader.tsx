@@ -13,9 +13,8 @@ import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { Link, useNavigate } from 'react-router-dom';
 import { ArrowLeft, CircleHelp, Ellipsis, RotateCw, type LucideIcon } from 'lucide-react';
-import { zoneModule, type ZoneModuleId } from '../../constants/ai-operator-modules';
 import { goBackOr, goUpTo } from '../../lib/scroll-restoration';
-import { zoneBand } from './zone-color';
+import { zoneBand, resolveZoneModule, type ZoneModuleRef } from './zone-color';
 
 export interface ZoneAction {
   label: string;
@@ -61,7 +60,8 @@ export interface ZoneStamp {
 }
 
 export interface ZoneHeaderProps {
-  moduleId: ZoneModuleId;
+  /** 허브 메뉴 id · ★ 2026-10-09 또는 허브 밖 화면의 사용자 정의 모듈(제목·설명·아이콘·색) */
+  moduleId: ZoneModuleRef;
   /** 하위 위치(예: '지도', 여정 이름) — 제목 뒤에 "› sub" */
   sub?: string | null;
   /** 뒤로가기 목적지(기본 = 허브) · onBack 이 있으면 그것을 부른다(작성 중 확인 등) */
@@ -217,7 +217,7 @@ export default function ZoneHeader({
 }: ZoneHeaderProps) {
   const box = full ? 'w-full px-4 md:px-6' : 'max-w-[1240px] mx-auto px-4 md:px-6';
   const navigate = useNavigate();
-  const m = zoneModule(moduleId);
+  const m = resolveZoneModule(moduleId);
   const Icon = m.icon;
   // ★ 2026-10-01 메뉴 첫 화면(부모 = 허브)은 항상 허브로(goUpTo · D177) — 앞 칸으로 가면 만들기·결과·짝 전환을 거친 뒤 두세 번 눌러야 했다.
   //   하위 화면(부모 = 여정 목록 · 플래너 · AI 메모리 등)은 종전대로 앞 화면(goBackOr).

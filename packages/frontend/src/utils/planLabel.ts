@@ -43,3 +43,34 @@ export function formatPlanOptionLabel(
   if (!Number.isFinite(price) || price <= 0) return name;
   return `${name} (월 ${price.toLocaleString()}원)`;
 }
+
+/**
+ * ★ 2026-10-09 무료체험 남은 날(D-n) — 고객사 목록 · 상세 설정 창이 같은 셈을 쓴다(지났으면 0 · 만료일 없으면 null).
+ */
+export function trialDaysLeft(expiresAt: string | null | undefined, now: number = Date.now()): number | null {
+  if (!expiresAt) return null;
+  const t = new Date(expiresAt).getTime();
+  if (!Number.isFinite(t)) return null;
+  return Math.max(0, Math.ceil((t - now) / 86400000));
+}
+
+/**
+ * ★ 2026-10-09 고객사 목록의 요금 구분(슈퍼관리자 · 목업 v2 「요금제」 거르기 · 숫자 카드).
+ *
+ * 체험 판정 = 서버 강등 워커와 같은 두 축(utils/trial-downgrade-worker.ts TRIAL_DOWNGRADE_TARGET_WHERE):
+ *   plan_code 'TRIAL' 이거나 subscription_status 'trial' + 만료일 있음. 만료일 없는 'trial' 은 판정 근거가 없어 체험으로 세지 않는다.
+ * none = 미가입(FREE · 요금제 없음) · internal = 임직원(STAFF) · paid = 그 밖(판매 요금제).
+ */
+export type CompanyPlanState = 'trial' | 'paid' | 'none' | 'internal';
+
+export function companyPlanState(c: {
+  plan_code?: string | null;
+  subscription_status?: string | null;
+  trial_expires_at?: string | null;
+}): CompanyPlanState {
+  const code = String(c.plan_code || '').toUpperCase();
+  if (code === 'TRIAL' || (c.subscription_status === 'trial' && !!c.trial_expires_at)) return 'trial';
+  if (!code || code === 'FREE') return 'none';
+  if (code === 'STAFF') return 'internal';
+  return 'paid';
+}

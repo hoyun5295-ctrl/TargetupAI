@@ -10,9 +10,9 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'fs';
 import { join } from 'path';
+import { readAdminScreenSource } from './source-scan';
 
 const src = (...p: string[]) => readFileSync(join(__dirname, '..', ...p), 'utf8');
-const fe = (...p: string[]) => readFileSync(join(__dirname, '..', '..', '..', '..', 'frontend', 'src', ...p), 'utf8');
 const between = (s: string, a: string, b: string) => {
   const i = s.indexOf(a);
   if (i < 0) throw new Error(`못 찾음: ${a}`);
@@ -80,6 +80,6 @@ describe('STUDIO · AI · ANAL · OPS · ADMIN 개선', () => {
   it('R064 에이전트 상세 실패 상세 = 5건 + 총수', () => {
     const s = src('..', 'routes', 'admin-sync.ts');
     expect(s).toContain('AS failures_total');
-    expect(fe('pages', 'AdminDashboard.tsx')).toContain('(log.failures_total ?? log.failures.length) > 5');
+    expect(readAdminScreenSource()).toContain('(log.failures_total ?? log.failures.length) > 5'); // ★ 2026-10-09 싱크 상세 창 = 옮겨 간 파일
   });
 });

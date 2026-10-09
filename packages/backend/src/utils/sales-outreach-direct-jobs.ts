@@ -28,6 +28,7 @@ import {
 import { parseNaverStoreState, pickNaverStoreState, naverStoreStateFromHtml } from './sales-outreach-naver-store';
 import { sendOutreachDirectMail, sendOutreachCopyMail, isOutreachMailerReady } from './outreach-mailer';
 import { PUBLIC_BASE } from './sales-outreach-produce';
+import { getTemplate } from './image-studio-templates';
 import { getActiveStyleGuide } from './sales-outreach-style';
 import { createSlotQueue } from './outreach-slot-queue';
 
@@ -756,6 +757,30 @@ export function laneOf(input: { stage: string; reviewed: boolean; hold: boolean;
   return 'reading';
 }
 
+/**
+ * ★ 2026-10-09 R13 판정 카드 히어로(순수) — 메일 첫 화면과 같은 원천: 시안의 첫 gallery(표준 조립 히어로 · id 접미 = 종류) → 없으면 포스터.
+ * 템플릿 이름은 포스터가 있을 때만(배너 히어로 = 템플릿 무관) · 재료 수 = DM 레시피 계수.
+ */
+export function cardHeroOf(row: Row): { heroUrl: string | null; heroKind: 'poster' | 'banner' | 'card' | null; templateName: string | null; templateReason: string | null; productCount: number | null; eventCount: number | null } {
+  const sections: Row[] = Array.isArray(row.brand_sections) ? row.brand_sections : [];
+  const g = sections.find((s) => s?.type === 'gallery' && Array.isArray(s?.props?.images) && s.props.images[0]?.url);
+  const id = String(g?.id || '');
+  const kindFromId = id.startsWith('so-std-hero-') ? id.slice('so-std-hero-'.length) : null;
+  const heroUrl: string | null = g ? String(g.props.images[0].url) : (row.poster_url ? String(row.poster_url) : null);
+  const heroKind = kindFromId === 'poster' || kindFromId === 'banner' || kindFromId === 'card' ? kindFromId : (heroUrl && !g ? 'poster' : (heroUrl ? 'banner' : null));
+  const posterShown = heroKind === 'poster' && !!row.poster_url;
+  const m = row.recipe_materials && typeof row.recipe_materials === 'object' ? row.recipe_materials : null;
+  const num = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) ? v : null);
+  return {
+    heroUrl,
+    heroKind: heroUrl ? heroKind : null,
+    templateName: posterShown && row.template_id ? (getTemplate(String(row.template_id))?.name || null) : null,
+    templateReason: posterShown && row.template_reason ? String(row.template_reason).slice(0, 80) : null,
+    productCount: m ? num(m.products) : null,
+    eventCount: m ? num(m.eventCards) : null,
+  };
+}
+
 export async function getOutreachWorkbench(filter: { batch?: string | null }, operatorSuperAdminId: string | null | undefined): Promise<Row> {
   await assertOperator(operatorSuperAdminId);
   const batches = await query(
@@ -784,10 +809,14 @@ export async function getOutreachWorkbench(filter: { batch?: string | null }, op
             e.payload->'adFooter'->>'unsubscribeUrl' AS unsub_url,
             CASE WHEN $1 = '' THEN TRUE ELSE position($1 IN COALESCE(e.payload->>'html', '')) > 0 END AS unsub_applied,
             d.payload->>'captureUrl' AS capture_url, d.payload->'visionScore' AS vision, d.payload->>'dmUrl' AS dm_url,
+            -- ★ 2026-10-09 R13 판정 카드 재료: 포스터 · 템플릿 · 고른 이유 · 시안 히어로 · 재료 수
+            i.payload->>'url' AS poster_url, i.payload->>'templateId' AS template_id, j.stage_results->'template_pick'->>'reason' AS template_reason,
+            e.payload->'brandSections' AS brand_sections, d.payload->'recipe'->'materials' AS recipe_materials,
             s.id AS send_id, s.outcome AS send_outcome, s.review_flag, s.mode AS send_mode, s.created_at AS send_at
        FROM sales_outreach_jobs j
        LEFT JOIN LATERAL (SELECT a.id, a.payload FROM sales_outreach_assets a WHERE a.job_id = j.id AND a.kind = 'email_html' ORDER BY a.created_at DESC LIMIT 1) e ON TRUE
        LEFT JOIN LATERAL (SELECT a.payload FROM sales_outreach_assets a WHERE a.job_id = j.id AND a.kind = 'dm' ORDER BY a.created_at DESC LIMIT 1) d ON TRUE
+       LEFT JOIN LATERAL (SELECT a.payload FROM sales_outreach_assets a WHERE a.job_id = j.id AND a.kind = 'studio_image' ORDER BY a.created_at DESC LIMIT 1) i ON TRUE
        LEFT JOIN LATERAL (SELECT x.id, x.outcome, x.review_flag, x.mode, x.created_at FROM sales_outreach_sends x WHERE x.job_id = j.id ORDER BY x.created_at DESC LIMIT 1) s ON TRUE
       WHERE ${where}
       ORDER BY COALESCE((j.stage_results->'chain'->>'index')::int, 0), j.created_at DESC
@@ -864,6 +893,8 @@ export async function getOutreachWorkbench(filter: { batch?: string | null }, op
       send: row.send_id ? { id: row.send_id, outcome: row.send_outcome, reviewFlag: row.review_flag || null, mode: row.send_mode, at: row.send_at } : null,
       directLast: row.direct_last || null,
       mailResult: row.mail_result || null,
+      // ★ 2026-10-09 R13 3초 판정 카드 — 메일 첫 화면에 실리는 히어로 · 고른 템플릿과 이유 · 상품·행사 수
+      ...cardHeroOf(row),
     };
   });
   const laneCounts: Record<string, number> = {};

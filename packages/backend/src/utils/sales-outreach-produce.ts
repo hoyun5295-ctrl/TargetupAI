@@ -32,7 +32,9 @@ import {
   companyTempUsageBytes, STUDIO_TEMP_CAP_BYTES, StudioError,
 } from './image-studio';
 import sharp from 'sharp';
-import { STUDIO_TEMPLATES, type StudioTemplate, type TemplateCategory } from './image-studio-templates';
+import { STUDIO_TEMPLATES, getTemplate, type StudioTemplate, type TemplateCategory } from './image-studio-templates';
+import { SUB_BY_ID } from './image-studio-template-subs';
+import { publicImagePath } from './sales-outreach-purge';
 import { extractJson, DM_EDITABLE_TEXT_KEYS } from './dm/dm-ai';
 import { createDm, publishDm, updateDm } from './dm/dm-builder';
 import { renderEmailSections, EMAIL_FOOTER_SLOT, esc as escHtml } from './email/email-section-renderer';
@@ -82,7 +84,7 @@ import {
 } from './sales-outreach-slices';
 
 /** ★ v4-3 판정에 보낼 이미지 상한(한 호출) · 장당 크기 상한 */
-export const OUTREACH_IMAGE_KIND_MAX = 14;
+export const OUTREACH_IMAGE_KIND_MAX = 17;
 export const OUTREACH_IMAGE_KIND_MAX_BYTES = 1_200_000;
 
 /**
@@ -399,6 +401,141 @@ export function pickTemplate(industry: string | null | undefined, seed: string, 
   return pool[hashSeed(seed) % pool.length];
 }
 
+// ===== ★ 2026-10-09 템플릿 판단 선택(설계서 docs/2026-10-09-outreach-redesign-design.md R1·R2) =====
+
+/** 잡에 저장하는 순위(stage_results.template_pick) — 같은 잡은 다시 부르지 않는다 */
+export interface OutreachTemplatePick { product: string[]; event: string[]; reason: string; source: 'ai' | 'hash'; at: string }
+export const OUTREACH_TEMPLATE_RANK = 3;
+
+/** 판단 후보 = 업종 풀(제품·행사) 중 이번 달 맞는 것(순수). 하나도 안 맞으면 그 풀 그대로. */
+export function templatePickCandidates(industry: string | null | undefined, now: Date = new Date()): { product: StudioTemplate[]; event: StudioTemplate[] } {
+  const code: IndustryCode = isIndustryCode(industry) ? industry : 'etc';
+  const month = kstMonth(now);
+  const fit = (list: StudioTemplate[]) => { const f = list.filter((t) => templateFitsMonth(t.id, month)); return f.length ? f : list; };
+  return { product: fit(TEMPLATE_POOLS[code].product), event: fit(TEMPLATE_POOLS[code].event) };
+}
+
+/** 해시 순위(판단 실패·빈 쪽 채우기) — pickTemplate 과 같은 풀에서 seed 만 바꿔 서로 다른 3개(순수) */
+export function hashTemplateRank(industry: string | null | undefined, jobId: string, kind: 'product' | 'event', now: Date = new Date()): string[] {
+  const out: string[] = [];
+  for (let i = 0; out.length < OUTREACH_TEMPLATE_RANK && i < 12; i++) {
+    const t = pickTemplate(industry, `${jobId}:rank:${i}`, kind === 'product', now);
+    if (!out.includes(t.id)) out.push(t.id);
+  }
+  return out;
+}
+
+/** 모델 응답 → 순위(순수) · 후보 밖 id 는 버린다 · 한쪽이 비면 그 쪽은 빈 배열(호출부가 해시로 채운다) */
+export function parseTemplatePick(raw: string, allowed: { product: readonly string[]; event: readonly string[] }): { product: string[]; event: string[]; reason: string } | null {
+  const m = String(raw || '').match(/\{[\s\S]*\}/);
+  if (!m) return null;
+  let j: any;
+  try { j = extractJsonFromAiText(m[0]); } catch { return null; }
+  if (!j || typeof j !== 'object') return null;
+  const take = (v: unknown, ok: readonly string[]) => (Array.isArray(v) ? v : []).map((x) => String(x || '').trim())
+    .filter((id, i, arr) => ok.includes(id) && arr.indexOf(id) === i).slice(0, OUTREACH_TEMPLATE_RANK);
+  const product = take(j.product, allowed.product);
+  const event = take(j.event, allowed.event);
+  if (!product.length && !event.length) return null;
+  return { product, event, reason: String(j.reason || '').replace(/\s+/g, ' ').trim().slice(0, 80) };
+}
+
+export interface TemplateJudgeInput {
+  jobId: string;
+  companyName: string;
+  industry: string | null;
+  /** 확정 행사 제목(면허와 무관하게 숫자는 가린다 · 모델이 혜택형으로 오인하지 않게) */
+  eventTitles: readonly string[];
+  productNames: readonly string[];
+  /** 강조 포인트가 원문에서 찾은 구간(R9) · 없으면 null */
+  focusQuote: string | null;
+  now?: Date;
+}
+
+/** 판단 프롬프트(순수) — 테스트가 숫자 가림·후보 줄을 본다 */
+export function buildTemplateJudgePrompt(input: TemplateJudgeInput, cands: { product: readonly StudioTemplate[]; event: readonly StudioTemplate[] }): { system: string; user: string } {
+  const mask = (s: string) => String(s || '').replace(/[0-9０-９]+/g, '#').replace(/\s+/g, ' ').trim().slice(0, 60);
+  const line = (t: StudioTemplate) => `${t.id} | ${SUB_BY_ID[t.id] || t.category} | ${t.name} | ${t.useCase}`;
+  const system = [
+    '너는 마케팅 포스터 아트 디렉터다. 브랜드의 대표 상품과 지금 내세우는 행사에 가장 잘 맞는 포스터 템플릿을 고른다.',
+    '제품 템플릿(PRODUCT)은 제품 사진을 얹는 장면이고, 행사 템플릿(EVENT)은 제품 없이 성립하는 장면이다.',
+    '판단 기준: ① 상품군(스킨케어·메이크업·신발 등)과 템플릿 세부가 맞는가 ② 행사 성격(신제품·시즌·멤버십·세일)과 용도가 맞는가 ③ 브랜드 결(고급·밝음·자연)에 어울리는가.',
+    '반드시 아래 목록의 id 만 쓴다. 출력은 JSON 하나만: {"product":["id","id","id"],"event":["id","id","id"],"reason":"30자 이내 한 줄"} · 앞이 1순위 · 설명 금지.',
+  ].join('\n');
+  const user = [
+    `[브랜드] ${input.companyName} (업종: ${isIndustryCode(input.industry) ? industryLabel(input.industry) : '기타'})`,
+    `[대표 상품] ${input.productNames.map(mask).filter(Boolean).slice(0, 6).join(' / ') || '없음'}`,
+    `[지금 내세우는 행사] ${input.eventTitles.map(mask).filter(Boolean).slice(0, 3).join(' / ') || '없음'}`,
+    ...(input.focusQuote ? [`[영업 담당이 짚은 강조점(홈페이지 원문)] ${mask(input.focusQuote)}`] : []),
+    '',
+    '[PRODUCT]',
+    ...cands.product.map(line),
+    '',
+    '[EVENT]',
+    ...cands.event.map(line),
+  ].join('\n');
+  return { system, user };
+}
+
+/**
+ * 템플릿 판단(텍스트 1회 · 이미지 0) — 실패 = 해시 순위. 대기열(imageSlot) 밖에서 부른다.
+ * 빈 쪽은 해시로 채운다(누끼 유무에 따라 어느 쪽이든 쓸 수 있게).
+ */
+export async function judgeOutreachTemplates(input: TemplateJudgeInput): Promise<OutreachTemplatePick> {
+  const now = input.now || new Date();
+  const cands = templatePickCandidates(input.industry, now);
+  const at = now.toISOString();
+  const hashProduct = () => hashTemplateRank(input.industry, input.jobId, 'product', now);
+  const hashEvent = () => hashTemplateRank(input.industry, input.jobId, 'event', now);
+  try {
+    const p = buildTemplateJudgePrompt(input, cands);
+    const raw = await callOutreachAi({ system: p.system, userMessage: p.user, maxTokens: 200, temperature: 0, source: 'sales-outreach-template-pick' });
+    const parsed = parseTemplatePick(raw, { product: cands.product.map((t) => t.id), event: cands.event.map((t) => t.id) });
+    if (parsed) {
+      return { product: parsed.product.length ? parsed.product : hashProduct(), event: parsed.event.length ? parsed.event : hashEvent(), reason: parsed.reason, source: 'ai', at };
+    }
+    console.log('[sales-outreach] 템플릿 판단 응답 해석 실패(해시로):', input.jobId, String(raw || '').replace(/\s+/g, ' ').slice(0, 160));
+  } catch (err: any) {
+    console.log('[sales-outreach] 템플릿 판단 불가(해시로):', input.jobId, err?.message);
+  }
+  return { product: hashProduct(), event: hashEvent(), reason: '', source: 'hash', at };
+}
+
+/** 순위에서 이번 판의 템플릿(순수) — 순위[regenSeq % 길이] · 순위가 없거나 id 가 사라졌으면 옛 해시 */
+export function templateFromRank(rank: Pick<OutreachTemplatePick, 'product' | 'event'> | null | undefined, kind: 'product' | 'event', regenSeq: number, fallback: () => StudioTemplate): StudioTemplate {
+  const list = (rank && Array.isArray(rank[kind]) ? rank[kind] : []).map((id) => getTemplate(String(id))).filter((t): t is StudioTemplate => !!t && (t.kind ?? 'product') === kind);
+  if (!list.length) return fallback();
+  return list[Math.max(0, regenSeq) % list.length];
+}
+
+/**
+ * ★ 2026-10-09 R9 강조 포인트 → 원문 구간(순수) — 사람이 적은 낱말은 문안이 아니라 검색어다. 크롤 원문에서 그 낱말이 든 한 토막(줄·문장 경계 · ≤40자)만 돌려준다.
+ * 못 찾으면 null(쓰지 않는다). 돌려준 값은 원문의 부분 문자열이라 포스터 제목 게이트(quote.includes)를 그대로 통과·거절한다.
+ */
+export const OUTREACH_FOCUS_MAX = 40;
+export function focusQuoteOf(hint: string | null | undefined, text: string | null | undefined): string | null {
+  const h = String(hint || '').replace(/\s+/g, ' ').trim();
+  const src = String(text || '');
+  if (h.length < 2 || !src) return null;
+  const at = src.toLowerCase().indexOf(h.toLowerCase());
+  if (at < 0) return null;
+  const isStop = (ch: string) => /[\n.!?·|]/.test(ch);
+  let a = at; while (a > 0 && !isStop(src[a - 1]) && at - a < OUTREACH_FOCUS_MAX) a--;
+  let b = at + h.length; while (b < src.length && !isStop(src[b]) && b - a < OUTREACH_FOCUS_MAX) b++;
+  const seg = src.slice(a, b).replace(/\s+/g, ' ').trim();
+  if (seg.length <= OUTREACH_FOCUS_MAX) return seg;
+  // 너무 길면 낱말을 가운데 둔 40자(원문 부분 문자열 유지)
+  const start = Math.max(a, Math.min(at - Math.floor((OUTREACH_FOCUS_MAX - h.length) / 2), b - OUTREACH_FOCUS_MAX));
+  return src.slice(start, start + OUTREACH_FOCUS_MAX).trim();
+}
+
+/** 템플릿 장면에서 소품·제품 자리 문장만 지운다(순수 · 덮어쓰는 지시 추가 0 · LESSONS_BACKEND 0809) — 서버가 제품을 얹고 배경엔 소품을 두지 않는다 */
+export function stripScaffoldProps(scaffold: string): string {
+  const sentences = String(scaffold || '').split(/(?<=[.!?])\s+/);
+  const kept = sentences.filter((s) => !/\bprops?\b|\bproducts?\s+(stands?|sits?|rests?|is placed|placed)\b/i.test(s));
+  return (kept.length ? kept : sentences).join(' ').trim();
+}
+
 // ===== 재료 수집 (★ A-10b 이미지 실측·격상·사본 — 프로토 실측으로 확정된 규칙) =====
 
 export interface OutreachMediaProduct extends OutreachProduct {
@@ -474,7 +611,8 @@ export async function collectOutreachMedia(input: {
     const tempId = writeTempBuffer(input.companyId, buffer, { kind: 'source', ext: meta.ext, mime: meta.mime, width: meta.width, height: meta.height });
     const moved = moveTempToPermanent(input.companyId, tempId);
     const url = moved ? PUBLIC_BASE + moved.url : null;
-    if (url && remembered.size < 40) remembered.set(url, { buffer, mime: meta.mime });
+    // ★ 2026-10-09 40 → 48 — 갤러리 8 + 카드 6 + 슬라이스 20 + 로고 1 뒤에 오는 상품 6장도 판정 대상이라(R3) 기억해야 한다
+    if (url && remembered.size < 48) remembered.set(url, { buffer, mime: meta.mime });
     return url;
   };
   let host = '';
@@ -570,7 +708,9 @@ export async function collectOutreachMedia(input: {
     }
   }
   // ★ v4-3 이미지 종류 판정(모델 1회) — 슬라이스 전부 + 홈 갤러리 앞 8장(홈 상단 배너 후보). 실패 = 판정 없음(선별 폴백).
-  const judgeTargets = [...slicePick.images, ...homeGallery.slice(0, 8)]
+  // ★ 2026-10-09 R3 상품 사본 상위 3장을 앞에 더한다(누끼 원천은 product 판정만 · 상한 14 → 17 이라 기존 14장 판정은 그대로)
+  const judgeTargets = [...products.slice(0, 3).map((p) => ({ url: p.image_url })), ...slicePick.images, ...homeGallery.slice(0, 8)]
+    .filter((s, i, arr) => arr.findIndex((x) => x.url === s.url) === i)
     .map((s) => ({ url: s.url, ...(remembered.get(s.url) || { buffer: Buffer.alloc(0), mime: 'image/jpeg' }) }))
     .filter((x) => x.buffer.length > 0);
   const imageKinds = judgeTargets.length ? await classifyOutreachImages(judgeTargets) : null;
@@ -927,6 +1067,41 @@ export async function storeViewportCapture(base64: string, companyId: string | n
   }
 }
 
+/**
+ * ★ 2026-10-09 R7 DM 첫 화면 캡처 → 휴대폰 틀 안 JPEG(메일 첫 화면용 · AI 0 · sharp). 600폭 흰 바탕 가운데 틀(화면 300×620 · 테두리 12 · 모서리 34).
+ * JPEG 인 이유 = 메일에 알파 PNG 직삽 금지(다크 클라이언트 흰 프린지 · 기존 규칙).
+ */
+export const OUTREACH_PHONE_FRAME = { width: 600, screenW: 300, screenH: 620, bezel: 12, radius: 34, pad: 20 } as const;
+export async function framePhoneCapture(capture: Buffer): Promise<Buffer> {
+  const F = OUTREACH_PHONE_FRAME;
+  const inner = F.radius - F.bezel;
+  const screen = await sharp(capture, { failOn: 'none' }).resize({ width: F.screenW, height: F.screenH, fit: 'cover', position: 'top' }).png().toBuffer();
+  const mask = Buffer.from(`<svg width="${F.screenW}" height="${F.screenH}"><rect width="${F.screenW}" height="${F.screenH}" rx="${inner}" ry="${inner}"/></svg>`);
+  const rounded = await sharp(screen).composite([{ input: mask, blend: 'dest-in' }]).png().toBuffer();
+  const fw = F.screenW + F.bezel * 2;
+  const fh = F.screenH + F.bezel * 2;
+  const h = fh + F.pad * 2;
+  const left = Math.round((F.width - fw) / 2);
+  const body = Buffer.from(`<svg width="${F.width}" height="${h}"><rect x="${left}" y="${F.pad}" width="${fw}" height="${fh}" rx="${F.radius}" ry="${F.radius}" fill="#1f2937"/></svg>`);
+  return sharp({ create: { width: F.width, height: h, channels: 3, background: '#ffffff' } })
+    .composite([{ input: body, top: 0, left: 0 }, { input: rounded, top: F.pad + F.bezel, left: left + F.bezel }])
+    .jpeg({ quality: 86 }).toBuffer();
+}
+
+/** 캡처 사본(우리 저장소) → 틀 끼운 사본 URL · 파일 없음·실패 = null(메일은 틀 칸 없이 계속) */
+export async function storeFramedDmCapture(captureUrl: string | null | undefined, companyId: string | null | undefined): Promise<string | null> {
+  if (!captureUrl || !companyId) return null;
+  try {
+    const file = publicImagePath(String(captureUrl));
+    if (!file || !fs.existsSync(file)) return null;
+    const framed = await framePhoneCapture(fs.readFileSync(file));
+    return await storeViewportCapture(framed.toString('base64'), companyId);
+  } catch (err: any) {
+    console.log('[sales-outreach] 휴대폰 틀 캡처 실패(틀 없이 계속):', err?.message);
+    return null;
+  }
+}
+
 async function scoreDmCapture(screenshotBase64: string): Promise<DmVisionScore> {
   try {
     const raw = await callOutreachAi({
@@ -1011,7 +1186,12 @@ export interface OutreachImageInput {
    *   사람이 고른 건은 옛 규칙(person 확정만 제외)을 그대로 쓴다. 설계서 §7.
    */
   strictPerson?: boolean;
+  /** ★ 2026-10-09 R1 템플릿 판단 순위(stage_results.template_pick) · 없으면 옛 해시 */
+  templateRank?: Pick<OutreachTemplatePick, 'product' | 'event'> | null;
 }
+
+/** ★ 2026-10-09 R3 누끼 해상도 하한(짧은 변) — 포스터에 폭 0.62배로 얹는다 → 3:4 기준 약 670px 필요 · 옛 300 은 2배 넘게 확대돼 뭉갰다(서수란 접수 1) · 시작값 · 실측으로 조정 */
+export const OUTREACH_CUTOUT_MIN_SIDE = 600;
 
 async function produceOutreachImageExclusive(input: OutreachImageInput): Promise<OutreachImageResult> {
   const ctx = getOutreachContext();
@@ -1048,7 +1228,7 @@ async function produceOutreachImageExclusive(input: OutreachImageInput): Promise
         } else if (img.ext === 'png' && pngHasAlpha(img.buffer)) {
           // ★ S3 몰이 준 누끼 PNG — rembg(단일 워커) 우회 · 해상도 게이트만
           const size = readImageSize(img.buffer);
-          if (!size || Math.min(size.width, size.height) < 300) {
+          if (!size || Math.min(size.width, size.height) < OUTREACH_CUTOUT_MIN_SIDE) {
             skippedReason = '이미지 해상도가 낮아 생성 이미지로만 제작했습니다.';
           } else {
             const cut = allocTempPath(ctx.companyId, 'png');
@@ -1064,7 +1244,7 @@ async function produceOutreachImageExclusive(input: OutreachImageInput): Promise
           if (!src) throw new Error('임시 저장소 기록에 실패했습니다.');
           const cut = allocTempPath(ctx.companyId, 'png');
           const { width, height } = await removeBackground(src.absPath, cut.absPath);
-          if (Math.min(width, height) < 300) {
+          if (Math.min(width, height) < OUTREACH_CUTOUT_MIN_SIDE) {
             // 해상도 게이트 — 저해상 누끼를 포스터 히어로로 쓰면 뭉갠다(디자이너 R9)
             skippedReason = '이미지 해상도가 낮아 생성 이미지로만 제작했습니다.';
           } else {
@@ -1084,10 +1264,15 @@ async function produceOutreachImageExclusive(input: OutreachImageInput): Promise
       companyName: input.companyName, industry: input.industry, eventQuote: input.eventQuote || null, eventQuotes: input.eventQuotes, products: input.products || [], siteTitle: input.siteTitle || null,
     });
     const fontPath = outreachPosterFontPath();
-    const template = pickTemplate(input.industry, `${input.jobId}:${input.regenSeq || 0}`, !!cutout);
+    // ★ 2026-10-09 R1·R2 템플릿 = 판단 순위[regenSeq] 하나(재시도·배너도 같은 것 · 옛 seedSuffix 로 다른 템플릿을 뽑던 경로 제거)
+    const template = templateFromRank(input.templateRank, cutout ? 'product' : 'event', input.regenSeq || 0,
+      () => pickTemplate(input.industry, `${input.jobId}:${input.regenSeq || 0}`, !!cutout));
+    // ★ R5 장면의 소품·제품 자리 문장을 지운 판(우리 "no props" 지시와 부딪히지 않게)
+    const scaffold = stripScaffoldProps(template.scaffold);
     const preset = resolvePreset('poster');
-    const buildPrompt = (seedSuffix: string) => buildPosterPrompt({
-      template: seedSuffix ? pickTemplate(input.industry, `${input.jobId}:${input.regenSeq || 0}:${seedSuffix}`, !!cutout) : template,
+    const buildPrompt = () => buildPosterPrompt({
+      template,
+      scaffold,
       preset,
       texts: {},
       // 배경만 생성 — 제품은 서버 합성(누끼 있으면 빈 진열면을 요구하고, 없으면 상품 0)
@@ -1117,21 +1302,23 @@ async function produceOutreachImageExclusive(input: OutreachImageInput): Promise
       return { absPath: out.absPath, tempId: out.tempId, composed, bgPath: posterFile.absPath, ink };
     };
 
-    let made = await renderPoster(buildPrompt(''));
+    let made = await renderPoster(buildPrompt());
     // ★ S3 유출 검사(1순위 숫자·%·원) — 배경에 걸리면 배경만 1회 다시 만든다(기존 재생성 상한과 별개 · 자동 1회)
     let posterScore: PosterScore | null = null;
     let posterRegenerated = false;
     try {
       posterScore = await scoreOutreachPoster(fs.readFileSync(made.bgPath).toString('base64'), 'image/jpeg');
       if (posterScore.digits === true) {
-        const retry = await renderPoster(buildPrompt('retry'));
+        const retry = await renderPoster(buildPrompt());
         const again = await scoreOutreachPoster(fs.readFileSync(retry.bgPath).toString('base64'), 'image/jpeg');
         posterRegenerated = true;
-        if (again.digits !== true) { made = retry; posterScore = again; }
+        if (again.digits !== true) { made = retry; posterScore = again; } else { posterScore = again; }
       }
     } catch (err: any) {
       console.log('[sales-outreach] 포스터 유출 검사 건너뜀:', err?.message);
     }
+    // ★ 2026-10-09 R2 다시 그려도 숫자가 남으면 포스터를 버린다 — 호출부가 url null 행을 남기고 히어로는 홈 배너로(기존 폴백)
+    if (posterRegenerated && posterScore?.digits === true) throw new Error('포스터 배경에 숫자가 두 번 나와 생성 이미지를 쓰지 않았습니다.');
     const moved = moveTempToPermanent(ctx.companyId, made.tempId);
     if (!moved) throw new Error('이미지 저장에 실패했습니다.');
 
@@ -1142,9 +1329,8 @@ async function produceOutreachImageExclusive(input: OutreachImageInput): Promise
     if (input.wantBanner) {
       try {
         const bPreset = resolvePreset('email-hero');
-        const bTemplate = pickTemplate(input.industry, `${input.jobId}:${input.regenSeq || 0}:banner`, !!cutout);
-        // ★ 2026-09-10 배너도 배경만 생성 + 서버 합성(제품 오른쪽 · 문구 아래)
-        const bPrompt = buildPosterPrompt({ template: bTemplate, preset: bPreset, texts: {}, hasProduct: false, userHint: posterStyleHint(input.brandColor || null, false, !!cutout), textPosition: 'bottom' });
+        // ★ 2026-09-10 배너도 배경만 생성 + 서버 합성(제품 오른쪽 · 문구 아래) · ★ 2026-10-09 R2 포스터와 같은 템플릿
+        const bPrompt = buildPosterPrompt({ template, scaffold, preset: bPreset, texts: {}, hasProduct: false, userHint: posterStyleHint(input.brandColor || null, false, !!cutout), textPosition: 'bottom' });
         const b = await generatePosterWithRetry(() => generatePoster(bPrompt, bPreset, null), input.jobId);
         const bExt = b.mime.includes('png') ? 'png' : 'jpeg';
         const bTempId = writeTempBuffer(ctx.companyId, Buffer.from(b.base64, 'base64'), { kind: 'poster', ext: bExt, mime: b.mime, prompt: bPrompt, presetKey: 'email-hero', channelSpec: 'email', width: null, height: null });
@@ -2355,10 +2541,12 @@ export function standardMaterialsOf(input: ProduceDmInput | Omit<ProduceDmInput,
         ? { url: card1.bannerUrl, kind: 'card', linkUrl: heroLink }
         : null;
   const sliceKey = normalizeUrlKey(input.eventSlices?.detailUrl || '');
-  const events: StandardEvent[] = cards.map((c) => {
+  // ★ 2026-10-09 기획전 슬라이스는 주소가 맞는 첫 카드 한 건만 갖는다 — 홈 인용문 행사처럼 상세 주소가 같은(홈) 카드가 여럿이면 같은 슬라이스가 카드마다 반복됐다(헤라 실측 · 서수란 접수)
+  const sliceOwner = sliceKey ? cards.findIndex((c) => !!c.detailUrl && normalizeUrlKey(c.detailUrl) === sliceKey) : -1;
+  const events: StandardEvent[] = cards.map((c, i) => {
     // ★ 2026-09-24 품질 A(A2) — 행사 카드 제목 = 괄호 설명("(3만원 이상 구매)")을 뺀 뒤 30자 낱말 경계(포스터·제목 계열 18 은 그대로)
     const h = headlineFromCard({ title: String(c.title || '').replace(/\s*[(（][^)）]*[)）]/g, ' ') }, c.licensed, 6, OUTREACH_STD_EVENT_TITLE_MAX);
-    const isSliceCard = !!sliceKey && !!c.detailUrl && normalizeUrlKey(c.detailUrl) === sliceKey;
+    const isSliceCard = i === sliceOwner;
     // ★ v5 행사 블록 슬라이스 = 판정 선별(문서 제외 · 배너·상품 → 분위기 ≤2 · 홈 배너 제외 · 문서만이면 0장)
     const slices = isSliceCard ? selectEventSlices(media?.slices || [], media?.imageKinds || null, OUTREACH_STD_EVENT_SLICES_MAX) : [];
     // ★ 코덱스 자문(0909) 수용 — 정제에서 탈락(demoted)한 제목을 원문으로 되살리면 면허 없는 수치가 preset 경로(차단기 0)로 나간다 → 정제본이 짧으면 중립 문구
@@ -2387,7 +2575,7 @@ export function standardMaterialsOf(input: ProduceDmInput | Omit<ProduceDmInput,
   });
   const ctaUrl = cards.length ? String(cards[cards.length - 1].detailUrl || galleryLink) : galleryLink;
   const lastCard = cards.length ? cards[cards.length - 1] : null;
-  const lastIsSlice = !!lastCard && !!sliceKey && !!lastCard.detailUrl && normalizeUrlKey(lastCard.detailUrl) === sliceKey;
+  const lastIsSlice = !!lastCard && sliceOwner === cards.length - 1;
   const ctaLabel = lastCard ? sliceCtaLabel(lastCard.title, input.companyName, eventCtaLabel(lastCard), lastIsSlice ? 'product' : 'event') : `${input.companyName} 바로가기`.slice(0, 16);
   return { hero, products, events, ctaLabel, ctaUrl };
 }
@@ -2823,6 +3011,8 @@ export interface ProposalEmailInput {
    *   (전송자 명칭 · 발신 주소 · 수신거부 링크). 발송 html = 이 asset html 이다(발송 시점 변형은 제목 접두 1개뿐).
    */
   adFooter?: { fromName: string; fromEmail: string; unsubscribeUrl: string } | null;
+  /** ★ 2026-10-09 R7 휴대폰 틀 안 DM 첫 화면(storeFramedDmCapture) · 없으면 그 칸 생략 */
+  dmFrameUrl?: string | null;
 }
 
 function kstDateDash(d: Date): string {
@@ -2888,37 +3078,46 @@ export function buildProposalEmailSections(guide: OutreachStyleGuide, input: Pro
     ...(extra || {}),
   } as unknown as Section);
 
+  // ★ 2026-10-09 R7 첫 화면 재구성(설계서 docs/2026-10-09-outreach-redesign-design.md §3) — 옛 첫 화면은 우리 머리·글뿐이고 그 브랜드 시안은 스크롤 아래였다(서수란 접수 5 "메일로 받으면 눈에 안 들어옴").
+  //   새 순서 = 한줄로 머리 → 글 한 줄(이 메일이 무엇인지 · 이미지 차단에도 남는다) → 그 브랜드 머리 + 히어로 → 휴대폰 틀 안 DM 첫 화면 → [DM 열어보기] → 서두.
+  //   시안의 나머지(상품·행사·슬라이스)는 메일에서 빼고 DM 안에서 본다(메일 ≠ DM). 확정 행사 요약 카드는 그래서 늘 나온다.
+  const brandHeader = input.brandSections.find((s) => (s as any)?.type === 'header');
+  // 히어로 = 표준 조립은 첫 gallery(풀폭 1장) · AI 골격은 hero 블록 — 둘 중 먼저 나오는 것 하나
+  const brandHero = input.brandSections.find((s) => (s as any)?.type === 'gallery' || (s as any)?.type === 'hero');
+  // 순번(order)은 화면 순서대로 매긴다 — 브랜드 머리는 발신 머리·헤드라인 뒤에 만든다
+  const brandHeadOf = (): Section[] => {
+    const brandHead: Section[] = [];
+    if (brandHeader) brandHead.push({ ...(brandHeader as any), id: `so-${order}-header`, order: order++ } as Section);
+    if (brandHero && (brandHero as any).type === 'hero') {
+      brandHead.push({ ...(brandHero as any), id: `so-${order}-hero`, order: order++ } as Section);
+    } else if (brandHero) {
+      const hp: any = (brandHero as any).props || {};
+      const imgs = (Array.isArray(hp.images) ? hp.images : []).slice(0, 1).map((im: any) => ({ ...im, caption: c.alt.hero(input.companyName) }));
+      if (imgs.length) brandHead.push({ ...(brandHero as any), id: `so-${order}-gallery`, order: order++, props: { ...hp, images: imgs } } as Section);
+    }
+    return brandHead;
+  };
   const head: Section[] = [
     sec('header', { variant: 'logo', align: 'left', brand_name: c.senderBrandName, brand_size: 'sm', show_brand_name: true }),
     sec('text_card', {
       headline: c.opener.headline(input.companyName),
-      body: [name ? c.greeting(name) : '', introClean].filter(Boolean).join('\n'),
+      body: name ? c.greeting(name) : '',
       align: 'left', image_position: 'top',
     }),
+    ...brandHeadOf(),
+    ...(input.dmFrameUrl ? [sec('gallery', {
+      title: '', images: [{ url: input.dmFrameUrl, link_url: input.dmUrl, caption: c.alt.dmFrame(input.companyName) }],
+      layout: 'list_1xN', full_bleed: true, enable_zoom: false, enable_fullscreen: false,
+    })] : []),
     // 첫 화면 안의 버튼 — 담당자가 가장 먼저 누를 실물(모바일 DM)
     sec('cta', {
       layout: 'stack',
       buttons: [{ label: assertButtonLabel(c.cta.secondary), url: input.dmUrl, style: 'primary' }],
     }, { treatment: 'bar' }),
+    sec('text_card', { body: introClean, align: 'left', image_position: 'top' }),
   ];
 
-  const showcase: Section[] = [];
-  if (input.brandSections.length > 0) {
-    showcase.push(sec('text_card', {
-      tag: c.sample.tag,
-      headline: c.sample.headline(input.companyName),
-      align: 'left', image_position: 'top',
-    }, { background: 'soft' }));
-    // 시안의 footer(그 브랜드 법정 표기)는 이 메일 안에서 빼고, 발신자 표기는 맨 끝 footer 하나만 둔다
-    for (const s of input.brandSections) {
-      if ((s as any)?.type === 'footer') continue;
-      showcase.push({ ...(s as any), id: `so-${order}-${s.type}`, order: order++ } as Section);
-    }
-  }
-
-  // ★ 2026-09-24 품질 A(A4) — 시안(표준 조립)에 행사 카드가 이미 있으면 요약 카드는 같은 제목의 반복이라 뺀다
-  const draftHasEvents = input.brandSections.some((s) => String((s as any)?.id || '').startsWith('so-std-event'));
-  const eventLines = draftHasEvents ? [] : confirmedEventLines(input.confirmedEvents);
+  const eventLines = confirmedEventLines(input.confirmedEvents);
   const tail: Section[] = [
     ...(eventLines.length ? [sec('text_card', {
       tag: c.events.tag,
@@ -2964,7 +3163,7 @@ export function buildProposalEmailSections(guide: OutreachStyleGuide, input: Pro
       show_unsubscribe_link: false,
     }),
   ];
-  return [...head, ...showcase, ...tail];
+  return [...head, ...tail];
 }
 
 /** 평문 대체본(★ C-1 · 공용 extractEmailText는 cta·footer를 못 읽는다) — ★ 2026-09-23 html 과 같은 순서 */
@@ -2979,8 +3178,9 @@ export function buildOutreachPlainText(guide: OutreachStyleGuide, input: Proposa
     '',
     c.opener.headline(input.companyName),
     name ? c.greeting(name) : '',
-    dropPlaceholderSentences(input.intro) || c.introDefault(input.companyName),
     `${c.cta.secondary}: ${input.dmUrl}`,
+    '',
+    dropPlaceholderSentences(input.intro) || c.introDefault(input.companyName),
     '',
     ...(eventLines.length ? [`${c.events.tag}:`, ...eventLines, ''] : []),
     ...(copyOk ? [`${c.showcase.tag}:`, copyForEmail, ''] : []),

@@ -13,10 +13,9 @@
  * (선례 = brand-axis-invariants.test.ts — backend 러너가 frontend 소스를 읽는다).
  */
 import { describe, it, expect } from 'vitest';
-import { readFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { readAdminScreenSource } from './__tests__/source-scan';
 
-const admin = readFileSync(join(__dirname, '../../../frontend/src/pages/AdminDashboard.tsx'), 'utf8');
+const admin = readAdminScreenSource(); // ★ 2026-10-09 본체 + 옮겨 간 슈퍼관리자 화면 파일 전부(파일 분리 E)
 const norm = (s: string) => s.replace(/\s+/g, ' ');
 
 /** 주석은 검사 대상이 아니다 — 주석에 남은 옛 서술만으로 통과·실패하면 검출기가 거짓말을 한다. */

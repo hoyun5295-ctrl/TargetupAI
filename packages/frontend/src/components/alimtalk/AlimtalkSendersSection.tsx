@@ -340,14 +340,14 @@ export default function AlimtalkSendersSection({ onChanged }: AlimtalkSendersSec
     <div className="bg-white rounded-lg shadow">
       <ConfirmModal state={confirm} onClose={() => setConfirm(null)} />
       {/* 섹션 헤더 */}
-      <div className="px-6 py-4 border-b flex justify-between items-center">
+      <div className="px-5 py-3.5 border-b border-gray-100 flex flex-wrap justify-between items-center gap-3">
         <div>
-          <h2 className="text-lg font-semibold">👤 발신 프로필 관리</h2>
+          <h2 className="text-base font-semibold text-gray-900">발신 프로필 관리</h2>
           <p className="text-xs text-gray-500 mt-1">
             알림톡 발신프로필 · 등록 요청 → 슈퍼관리자 승인 → 회사 전체 공유
           </p>
         </div>
-        <div className="flex gap-2 items-center">
+        <div className="flex flex-wrap gap-2 items-center">
           <input
             type="text"
             value={senderSearch}
@@ -359,7 +359,7 @@ export default function AlimtalkSendersSection({ onChanged }: AlimtalkSendersSec
             type="button"
             onClick={syncCategories}
             disabled={syncing}
-            className="px-3 py-1.5 text-sm bg-amber-100 hover:bg-amber-200 text-amber-700 rounded-lg disabled:opacity-50"
+            className="whitespace-nowrap px-3 py-1.5 text-[13px] bg-amber-100 hover:bg-amber-200 text-amber-700 rounded-lg disabled:opacity-50"
           >
             카테고리 동기화
           </button>
@@ -367,7 +367,7 @@ export default function AlimtalkSendersSection({ onChanged }: AlimtalkSendersSec
             type="button"
             onClick={syncSenders}
             disabled={syncing}
-            className="px-3 py-1.5 text-sm bg-emerald-100 hover:bg-emerald-200 text-emerald-700 rounded-lg disabled:opacity-50"
+            className="whitespace-nowrap px-3 py-1.5 text-[13px] bg-emerald-100 hover:bg-emerald-200 text-emerald-700 rounded-lg disabled:opacity-50"
           >
             상태 동기화
           </button>
@@ -377,7 +377,7 @@ export default function AlimtalkSendersSection({ onChanged }: AlimtalkSendersSec
           <button
             type="button"
             onClick={() => setShowImcImport(true)}
-            className="px-3 py-1.5 text-sm bg-violet-100 hover:bg-violet-200 text-violet-700 rounded-lg"
+            className="whitespace-nowrap px-3 py-1.5 text-[13px] bg-violet-100 hover:bg-violet-200 text-violet-700 rounded-lg"
           >
             IMC에서 가져오기
           </button>

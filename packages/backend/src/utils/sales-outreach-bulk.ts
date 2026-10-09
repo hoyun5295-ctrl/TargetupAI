@@ -17,6 +17,26 @@ import { normalizeContactEmail, normalizeContactName, normalizeContactBasis, par
 
 export const OUTREACH_BULK_MAX_ROWS = 20;
 
+/**
+ * ★ 2026-10-09 R9(설계서 docs/2026-10-09-outreach-redesign-design.md §3) 사람이 넣는 제작 재료 2칸 — 단건 등록·엑셀 공용 정규화(CT).
+ *   대표 상품 이미지 URL = 누끼 원천 지정(이미지 내려받기 전용 · 페이지 크롤 0) · 강조 포인트 = 문안이 아니라 원문 검색어(≤40자).
+ */
+export const OUTREACH_FOCUS_HINT_MAX = 40;
+export function normalizeRepImageUrl(raw: unknown): string | null {
+  let v = String(raw ?? '').trim();
+  if (!v || /^\(.*\)$/.test(v)) return null;
+  // 다른 스킴(ftp:·javascript: 등)은 거절 · 스킴이 없으면 https 를 붙인다
+  if (/^[a-z][a-z0-9+.-]*:/i.test(v) && !/^https?:\/\//i.test(v)) return null;
+  if (!/^https?:\/\//i.test(v)) v = 'https://' + v;
+  if (v.length > 500) return null;
+  try { const u = new URL(v); return u.protocol === 'http:' || u.protocol === 'https:' ? u.toString() : null; } catch { return null; }
+}
+export function normalizeFocusHint(raw: unknown): string | null {
+  const v = String(raw ?? '').replace(/\s+/g, ' ').trim();
+  if (!v || /^\(.*\)$/.test(v)) return null;
+  return v.slice(0, OUTREACH_FOCUS_HINT_MAX);
+}
+
 export interface OutreachBulkRow {
   companyName: string;
   homepageUrl: string;
@@ -26,6 +46,9 @@ export interface OutreachBulkRow {
   contactEmail: string | null;
   contactName: string | null;
   contactBasis: string | null;
+  /** ★ 2026-10-09 R9 */
+  repImageUrl: string | null;
+  focusHint: string | null;
 }
 
 export interface OutreachBulkParseResult {
@@ -53,11 +76,11 @@ const EXAMPLE_FONT = 'FF9CA3AF';
 const BORDER_COLOR = 'FFE5E7EB';
 
 /** 양식 머리줄(입력 7열) — 파서의 열 찾기 표와 짝이다 */
-export const OUTREACH_BULK_HEADERS = ['업체명', '홈페이지', '업종 (선택)', '네이버 스토어 (선택)', '담당자 이메일', '담당자명 (선택)', '수신 근거'] as const;
+export const OUTREACH_BULK_HEADERS = ['업체명', '홈페이지', '업종 (선택)', '네이버 스토어 (선택)', '담당자 이메일', '담당자명 (선택)', '수신 근거', '대표 상품 이미지 URL (선택)', '강조 포인트 (선택)'] as const;
 const INPUT_COLS = OUTREACH_BULK_HEADERS.length;
 const EXAMPLE_COL = INPUT_COLS + 2; // 한 열 띄우고 예시(I열)
 
-type Field = 'name' | 'url' | 'industry' | 'store' | 'email' | 'contactName' | 'basis';
+type Field = 'name' | 'url' | 'industry' | 'store' | 'email' | 'contactName' | 'basis' | 'repImage' | 'focus';
 
 /** 머리줄 칸 → 필드(공백·괄호·"선택" 제거 후 정확 일치 · 흔한 별칭 포함) */
 const HEADER_ALIASES: Record<string, Field> = {
@@ -68,6 +91,8 @@ const HEADER_ALIASES: Record<string, Field> = {
   담당자이메일: 'email', 이메일: 'email', 담당자메일: 'email', 메일: 'email',
   담당자명: 'contactName', 담당자: 'contactName', 담당자이름: 'contactName',
   수신근거: 'basis', 근거: 'basis', 주소근거: 'basis',
+  대표상품이미지URL: 'repImage', 대표상품이미지: 'repImage', 대표이미지: 'repImage', 대표상품URL: 'repImage',
+  강조포인트: 'focus', 강조점: 'focus', 킬러포인트: 'focus',
 };
 
 function headerKey(v: unknown): string {
@@ -124,9 +149,9 @@ export async function buildOutreachTemplateXlsx(): Promise<Buffer> {
   exTitle.font = { bold: true, size: 11, color: { argb: CAPTION_FONT } };
   ws.mergeCells(1, EXAMPLE_COL, 1, EXAMPLE_COL + INPUT_COLS - 1);
   const examples = [
-    ['힐링뷰티', 'www.healingbeauty.co.kr', '뷰티/화장품', 'brand.naver.com/healingbeauty', 'marketing@healingbeauty.co.kr', '김지은', '명함'],
-    ['어반핏', 'urbanfit.kr', '패션/의류/잡화', '(비워도 됩니다)', 'partner@urbanfit.kr', '(비워도 됩니다)', '제휴 문의 페이지'],
-    ['모던리빙', 'www.modernliving.co.kr', '(비워도 됩니다)', '(비워도 됩니다)', '(비우면 발송만 잠깁니다)', '', '기존 대화'],
+    ['힐링뷰티', 'www.healingbeauty.co.kr', '뷰티/화장품', 'brand.naver.com/healingbeauty', 'marketing@healingbeauty.co.kr', '김지은', '명함', 'www.healingbeauty.co.kr/img/serum.png', '수분 세럼'],
+    ['어반핏', 'urbanfit.kr', '패션/의류/잡화', '(비워도 됩니다)', 'partner@urbanfit.kr', '(비워도 됩니다)', '제휴 문의 페이지', '(비워도 됩니다)', '가을 신상'],
+    ['모던리빙', 'www.modernliving.co.kr', '(비워도 됩니다)', '(비워도 됩니다)', '(비우면 발송만 잠깁니다)', '', '기존 대화', '', ''],
   ];
   examples.forEach((row, i) => {
     row.forEach((v, j) => {
@@ -141,6 +166,7 @@ export async function buildOutreachTemplateXlsx(): Promise<Buffer> {
     '담당자 이메일은 명함 · 기존 대화 · 제휴 문의 페이지처럼 알게 된 근거와 함께 적어 주세요. 근거가 비어 있으면 제작은 되고 발송만 잠깁니다.',
     '네이버 스토어 주소는 저장만 하고 지금은 읽지 않습니다(홈페이지를 읽어 만듭니다).',
     '업종은 아래 목록의 표기를 그대로 쓰거나 비워 두세요(비우면 홈페이지에서 읽은 값을 씁니다). 한 번에 최대 20곳.',
+    '대표 상품 이미지 URL: 배경 없이 제품만 찍힌 사진 주소를 적으면 그 사진으로 포스터를 만듭니다. 강조 포인트: 홈페이지에 있는 낱말(예: 수분 세럼)을 적으면 그 문구를 찾아 포스터에 씁니다.',
   ];
   guides.forEach((g, i) => {
     const c = ws.getCell(6 + i, EXAMPLE_COL);
@@ -149,12 +175,12 @@ export async function buildOutreachTemplateXlsx(): Promise<Buffer> {
     ws.mergeCells(6 + i, EXAMPLE_COL, 6 + i, EXAMPLE_COL + INPUT_COLS - 1);
   });
   INDUSTRY_CODES.forEach((code, i) => {
-    const c = ws.getCell(10 + i, EXAMPLE_COL);
+    const c = ws.getCell(11 + i, EXAMPLE_COL);
     c.value = INDUSTRY_LABELS[code];
     c.font = { size: 10, color: { argb: CAPTION_FONT } };
   });
 
-  const widths = [22, 30, 18, 30, 30, 16, 20];
+  const widths = [22, 30, 18, 30, 30, 16, 20, 34, 18];
   widths.forEach((w, i) => { ws.getColumn(i + 1).width = w; ws.getColumn(EXAMPLE_COL + i).width = w; });
   ws.getColumn(INPUT_COLS + 1).width = 3;
   ws.views = [{ state: 'frozen', ySplit: 1 }];
@@ -235,7 +261,13 @@ export function parseOutreachBulkRows(raw: unknown[][]): OutreachBulkParseResult
     const contactBasis = normalizeContactBasis(cell(cells, 'basis'));
     if (contactEmail && !contactBasis) warnings.push({ line, reason: '수신 근거가 비어 있어 발송만 잠깁니다(나중에 화면에서 적을 수 있습니다).' });
 
-    rows.push({ companyName: name, homepageUrl: url, industryCategory, naverStore, contactEmail, contactName, contactBasis });
+    // ★ 2026-10-09 R9 선택 칸 — 형식이 틀리면 그 칸만 비우고 경고
+    const repRaw = cell(cells, 'repImage');
+    const repImageUrl = normalizeRepImageUrl(repRaw);
+    if (repRaw && !/^\(.*\)$/.test(repRaw) && !repImageUrl) warnings.push({ line, reason: '대표 상품 이미지 주소 형식이 아니어서 비워 두었습니다.' });
+    const focusHint = normalizeFocusHint(cell(cells, 'focus'));
+
+    rows.push({ companyName: name, homepageUrl: url, industryCategory, naverStore, contactEmail, contactName, contactBasis, repImageUrl, focusHint });
   }
 
   const rejectedOverflow = Math.max(0, rejected.length - OUTREACH_BULK_REJECT_CAP);

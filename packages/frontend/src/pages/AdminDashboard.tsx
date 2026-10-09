@@ -24,7 +24,6 @@ import IdentityStatusTab from '../components/admin/IdentityStatusTab'; // ★ 20
 import IntroLeadsTab from '../components/admin/IntroLeadsTab'; // ★ 2026-10-07 소개 방문 · 시연 요청(ceo · suran)
 import WatchLogTab from '../components/admin/WatchLogTab'; // ★ 2026-10-07 감시 기록(ceo 전용)
 import PrecheckUsageTab from '../components/admin/PrecheckUsageTab'; // ★ 2026-09-26 스팸 검사·맞춤법 사용 현황(ceo 전용)
-import SalesOutreachModal from '../components/admin/SalesOutreachModal'; // ★ 2026-08-24 AI 영업 아웃리치(ceo 전용 · 모달)
 import AgencyEmailSendersModal from '../components/admin/AgencyEmailSendersModal'; // ★ 2026-08-26 대행발송 허용 발신 이메일(§18)
 import AgencyMailIntakePanel from '../components/admin/AgencyMailIntakePanel'; // ★ 2026-08-26 대행발송 메일 접수 관제(§18)
 import AgencySendLedgerPanel from '../components/admin/AgencySendLedgerPanel'; // ★ 2026-08-26(2) 대행발송 내역(전 고객사 진행현황)
@@ -44,56 +43,55 @@ import QtyAdjustModal, { type QtyAdjustTarget } from '../components/QtyAdjustMod
 import { creditTxLabel } from '../constants/credit'; // 크레딧 사용 이력 작업명 라벨
 import { resolveChannelLabel, resolveSendTypeChipClass, resolveSendTypeLabel } from '../utils/campaign-axis';
 
-interface Company {
-  id: string;
-  company_code: string;
-  company_name: string;
-  contact_name: string;
-  contact_email: string;
-  contact_phone: string;
-  status: string;
-  total_customers: number;
-  plan_id: string;
-  plan_name: string;
-  reject_number: string;
-  created_at: string;
-  usage_type?: 'web' | 'agent' | 'both'; // ★ 2026-07-03 사용구분
-}
-
-interface Plan {
-  id: string;
-  plan_code: string;
-  plan_name: string;
-  max_customers: number;
-  monthly_price: number;
-}
-
-interface User {
-  id: string;
-  login_id: string;
-  name: string;
-  email: string;
-  phone: string;
-  department: string;
-  user_type: string;
-  status: string;
-  company_id: string;
-  company_name: string;
-  last_login_at: string;
-  created_at: string;
-}
-
-// 커스텀 모달 타입
-interface ModalState {
-  type: 'confirm' | 'alert' | 'password' | null;
-  title: string;
-  message: string;
-  variant?: 'success' | 'error' | 'warning' | 'info';
-  password?: string;
-  smsSent?: boolean;
-  phone?: string;
-  onConfirm?: () => void;
-}
+import type { Company, Plan, User, ModalState } from '../components/admin/admin-types'; // ★ 2026-10-09 분리 E
+import PlansTab from '../components/admin/tabs/PlansTab'; // ★ 2026-10-09 분리 E
+import CompaniesTab from '../components/admin/tabs/CompaniesTab'; // ★ 2026-10-09 분리 E
+import UsersTab from '../components/admin/tabs/UsersTab'; // ★ 2026-10-09 분리 E
+import ScheduledTab from '../components/admin/tabs/ScheduledTab'; // ★ 2026-10-09 분리 E
+import CallbacksTab from '../components/admin/tabs/CallbacksTab'; // ★ 2026-10-09 분리 E
+import AdminAccountsTab from '../components/admin/tabs/AdminAccountsTab'; // ★ 2026-10-09 분리 E
+import GeoAccessTab from '../components/admin/tabs/GeoAccessTab'; // ★ 2026-10-09 분리 E
+import SpamBlockTab from '../components/admin/tabs/SpamBlockTab'; // ★ 2026-10-09 분리 E
+import PlanRequestsTab from '../components/admin/tabs/PlanRequestsTab'; // ★ 2026-10-09 분리 E
+import CreditsTab from '../components/admin/tabs/CreditsTab'; // ★ 2026-10-09 분리 E
+import DepositsTab from '../components/admin/tabs/DepositsTab'; // ★ 2026-10-09 분리 E
+import AllCampaignsTab from '../components/admin/tabs/AllCampaignsTab'; // ★ 2026-10-09 분리 E
+import SendStatsTab from '../components/admin/tabs/SendStatsTab'; // ★ 2026-10-09 분리 E
+import TemplatesTab from '../components/admin/tabs/TemplatesTab'; // ★ 2026-10-09 분리 E
+import SyncAgentsTab from '../components/admin/tabs/SyncAgentsTab'; // ★ 2026-10-09 분리 E
+import LineGroupsTab from '../components/admin/tabs/LineGroupsTab'; // ★ 2026-10-09 분리 E
+import AuditLogsTab from '../components/admin/tabs/AuditLogsTab'; // ★ 2026-10-09 분리 E
+import AdminCreateModal from '../components/admin/modals/AdminCreateModal'; // ★ 2026-10-09 분리 E
+import AdminActiveEditModal from '../components/admin/modals/AdminActiveEditModal'; // ★ 2026-10-09 분리 E
+import AdminRoleEditModal from '../components/admin/modals/AdminRoleEditModal'; // ★ 2026-10-09 분리 E
+import TemplateDetailModal from '../components/admin/modals/TemplateDetailModal'; // ★ 2026-10-09 분리 E
+import ManualTemplateFormModal from '../components/admin/modals/ManualTemplateFormModal'; // ★ 2026-10-09 분리 E
+import TemplateRejectModal from '../components/admin/modals/TemplateRejectModal'; // ★ 2026-10-09 분리 E
+import CompanyCreateModal from '../components/admin/modals/CompanyCreateModal'; // ★ 2026-10-09 분리 E
+import UserCreateModal from '../components/admin/modals/UserCreateModal'; // ★ 2026-10-09 분리 E
+import UserEditModal from '../components/admin/modals/UserEditModal'; // ★ 2026-10-09 분리 E
+import CompanyDetailModal from '../components/admin/company-detail/CompanyDetailModal'; // ★ 2026-10-09 분리 E
+import SmsDetailModal from '../components/admin/modals/SmsDetailModal'; // ★ 2026-10-09 분리 E
+import CancelScheduledModal from '../components/admin/modals/CancelScheduledModal'; // ★ 2026-10-09 분리 E
+import CallbackEditModal from '../components/admin/modals/CallbackEditModal'; // ★ 2026-10-09 분리 E
+import CallbackCreateModal from '../components/admin/modals/CallbackCreateModal'; // ★ 2026-10-09 분리 E
+import SenderRegDetailModal from '../components/admin/modals/SenderRegDetailModal'; // ★ 2026-10-09 분리 E
+import PlanCreateModal from '../components/admin/modals/PlanCreateModal'; // ★ 2026-10-09 분리 E
+import PlanEditModal from '../components/admin/modals/PlanEditModal'; // ★ 2026-10-09 분리 E
+import StatsDetailModal from '../components/admin/modals/StatsDetailModal'; // ★ 2026-10-09 분리 E
+import LineGroupEditModal from '../components/admin/modals/LineGroupEditModal'; // ★ 2026-10-09 분리 E
+import SyncDetailModal from '../components/admin/modals/SyncDetailModal'; // ★ 2026-10-09 분리 E
+import SyncConfigModal from '../components/admin/modals/SyncConfigModal'; // ★ 2026-10-09 분리 E
+import SyncDeleteModal from '../components/admin/modals/SyncDeleteModal'; // ★ 2026-10-09 분리 E
+import SyncMappingModal from '../components/admin/modals/SyncMappingModal'; // ★ 2026-10-09 분리 E
+import SyncReleaseModal from '../components/admin/modals/SyncReleaseModal'; // ★ 2026-10-09 분리 E
+import SyncCommandModal from '../components/admin/modals/SyncCommandModal'; // ★ 2026-10-09 분리 E
+import RequestRejectModal from '../components/admin/modals/RequestRejectModal'; // ★ 2026-10-09 분리 E
+import DepositApproveModal from '../components/admin/modals/DepositApproveModal'; // ★ 2026-10-09 분리 E
+import DepositRejectModal from '../components/admin/modals/DepositRejectModal'; // ★ 2026-10-09 분리 E
+import AdminCustomerDeleteModal from '../components/admin/modals/AdminCustomerDeleteModal'; // ★ 2026-10-09 분리 E
+import CustomerDeleteAllModal from '../components/admin/modals/CustomerDeleteAllModal'; // ★ 2026-10-09 분리 E
+import { AdminPill, PILL } from '../components/admin/ui/admin-ui'; // ★ 2026-10-09 슈퍼관리자 다듬기(목업 v2)
 
 export default function AdminDashboard() {
   const navigate = useNavigate();
@@ -129,7 +127,6 @@ export default function AdminDashboard() {
   const [precheckUsageAllowed, setPrecheckUsageAllowed] = useState(false); // ★ 2026-09-26 스팸 검사·맞춤법 사용 현황(ceo 전용)
   // ★ 2026-08-24 AI 영업 아웃리치(ceo 전용 · 모달) — 서버 /access가 유일 소스, 미허용 = 메뉴 자체 미노출
   const [outreachAllowed, setOutreachAllowed] = useState(false);
-  const [outreachOpen, setOutreachOpen] = useState(false);
   // ★ 2026-09-14 (Harold) AI 영업 뱃지 제거 — 실패·미확인 수가 "고객 관리" 메뉴에 빨간 점으로 상시 켜져 있었다.
   //   AI 영업은 ceo 전용 작업 화면이라 상단 메뉴 알림 축이 아니다(옛 /api/sales-outreach/badge 소비 0).
   // ★ 2026-06-13: AI 학습 데이터 열람 권한 (AI_TRAINING_VIEWER_IDS — 기본 ceo 전용) — 허용 계정에만 진입 버튼 노출
@@ -295,38 +292,6 @@ export default function AdminDashboard() {
     } else setGeoHitsDenied(res.status === 403);
   };
 
-  const geoPost = async (url: string, body: any, method: string = 'POST') => {
-    const token = localStorage.getItem('token');
-    const res = await fetch(url, {
-      method,
-      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-      body: JSON.stringify(body),
-    });
-    const data = await res.json().catch(() => ({} as any));
-    return { ok: res.ok, data };
-  };
-
-  const handleGeoExceptionCreate = async () => {
-    setGeoBusy(true);
-    try {
-      const payload: any = { scope: geoForm.scope, cidr: geoForm.cidr.trim(), reason: geoForm.reason.trim() };
-      if (geoForm.scope === 'user') payload.userId = geoForm.target.trim();
-      else if (geoForm.scope !== 'global') payload.companyId = geoForm.target.trim();
-      if (geoForm.expiresAt) payload.expiresAt = geoForm.expiresAt;
-      const { ok, data } = await geoPost('/api/admin/geo/exceptions', payload);
-      if (!ok) { showAlert('오류', data?.error || '예외 등록에 실패했습니다.', 'error'); return; }
-      setGeoForm({ scope: 'user', target: '', cidr: '', reason: '', expiresAt: '' });
-      await loadGeoAccess();
-      showAlert('성공', '예외가 승인되었습니다. 승인자 · 사유 · 허용 기간이 이력에 남습니다.', 'success');
-    } finally { setGeoBusy(false); }
-  };
-
-  const handleGeoExceptionRevoke = async (id: string) => {
-    const { ok, data } = await geoPost(`/api/admin/geo/exceptions/${id}`, {}, 'DELETE');
-    if (!ok) { showAlert('오류', data?.error || '회수에 실패했습니다.', 'error'); return; }
-    await loadGeoAccess();
-  };
-
   // ★ 2026-08-27 직원 계정·권한 — 권한분류표·등급 정의는 서버가 소유한다(화면이 표를 만들지 않는다)
   const loadAdminAccounts = async () => {
     const token = localStorage.getItem('token');
@@ -347,66 +312,6 @@ export default function AdminDashboard() {
       setAdminAccountsAllowed(false);
     }
     if (histRes.ok) setAdminRoleHistory((await histRes.json()).history || []);
-  };
-
-  const handleAdminRoleSave = async () => {
-    if (!adminRoleEdit) return;
-    if (!adminRoleEdit.reason.trim()) { showAlert('확인', '변경 사유를 입력해주세요.', 'error'); return; }
-    setAdminRoleBusy(true);
-    try {
-      const token = localStorage.getItem('token');
-      const res = await fetch(`/api/admin/admin-accounts/${adminRoleEdit.id}/role`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-        body: JSON.stringify({ role: adminRoleEdit.role, reason: adminRoleEdit.reason.trim() }),
-      });
-      const data = await res.json().catch(() => ({} as any));
-      if (!res.ok) { showAlert('오류', data?.error || '등급 변경에 실패했습니다.', 'error'); return; }
-      setAdminRoleEdit(null);
-      await loadAdminAccounts();
-    } finally { setAdminRoleBusy(false); }
-  };
-
-  const handleAdminCreate = async () => {
-    if (!adminCreate) return;
-    setAdminRoleBusy(true);
-    try {
-      const token = localStorage.getItem('token');
-      const res = await fetch('/api/admin/admin-accounts', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-        body: JSON.stringify(adminCreate),
-      });
-      const data = await res.json().catch(() => ({} as any));
-      if (!res.ok) { showAlert('오류', data?.error || '계정 생성에 실패했습니다.', 'error'); return; }
-      setAdminCreate(null);
-      await loadAdminAccounts();
-      showAlert('완료', '계정을 만들었습니다.\n최초 로그인에서 OTP 등록 화면이 뜨고, 그 다음 비밀번호를 바꿔야 들어갈 수 있습니다.', 'success');
-    } finally { setAdminRoleBusy(false); }
-  };
-
-  const handleAdminActiveSave = async () => {
-    if (!adminActiveEdit) return;
-    if (!adminActiveEdit.reason.trim()) { showAlert('확인', '사유를 입력해주세요.', 'error'); return; }
-    setAdminRoleBusy(true);
-    try {
-      const token = localStorage.getItem('token');
-      const res = await fetch(`/api/admin/admin-accounts/${adminActiveEdit.id}/active`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-        body: JSON.stringify({ isActive: adminActiveEdit.isActive, reason: adminActiveEdit.reason.trim() }),
-      });
-      const data = await res.json().catch(() => ({} as any));
-      if (!res.ok) { showAlert('오류', data?.error || '상태 변경에 실패했습니다.', 'error'); return; }
-      const wasDisable = !adminActiveEdit.isActive;
-      setAdminActiveEdit(null);
-      await loadAdminAccounts();
-      // ★1003 중지는 접속 중인 세션까지 끊는다(서버가 끊은 건수를 돌려준다)
-      if (wasDisable) {
-        const ended = Number(data?.sessionsEnded || 0);
-        showAlert('완료', ended > 0 ? `사용을 중지했습니다. 접속 중이던 세션 ${ended}건을 끊었습니다.` : '사용을 중지했습니다. 접속 중인 세션은 없었습니다.', 'success');
-      }
-    } finally { setAdminRoleBusy(false); }
   };
 
   const loadSpamBlock = async () => {
@@ -433,68 +338,8 @@ export default function AdminDashboard() {
     setSpamHitsPage(Number(d.page) || page);
   };
 
-  const spamElementsPayload = () => spamElements.filter((e) => e.value.trim()).map((e) => ({ type: e.type, value: e.value.trim() }));
-
-  // ★ 규칙을 등록하기 전에 실제 발송 문안으로 돌려본다 — 정상 문자가 잡히는지 눈으로 본다
-  const handleSpamSimulate = async () => {
-    setSpamBusy(true);
-    setSpamSim(null);
-    try {
-      const token = localStorage.getItem('token');
-      const res = await fetch('/api/admin/spam-block/simulate', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-        body: JSON.stringify({ elements: spamElementsPayload(), days: 7 }),
-      });
-      const data = await res.json().catch(() => ({} as any));
-      if (!res.ok) { showAlert('오류', data?.error || '시뮬레이션에 실패했습니다.', 'error'); return; }
-      setSpamSim(data);
-    } finally { setSpamBusy(false); }
-  };
-
-  const handleSpamCreate = async () => {
-    if (!spamRuleName.trim()) { showAlert('확인', '규칙 이름을 입력해주세요.', 'error'); return; }
-    setSpamBusy(true);
-    try {
-      const token = localStorage.getItem('token');
-      const res = await fetch('/api/admin/spam-block/rules', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-        body: JSON.stringify({ name: spamRuleName.trim(), elements: spamElementsPayload() }),
-      });
-      const data = await res.json().catch(() => ({} as any));
-      if (!res.ok) { showAlert('오류', data?.error || '규칙 생성에 실패했습니다.', 'error'); return; }
-      setSpamRuleName('');
-      setSpamElements([{ type: 'keyword', value: '' }, { type: 'keyword', value: '' }]);
-      setSpamSim(null);
-      await loadSpamBlock();
-      showAlert('성공', '규칙이 탐지로 등록되었습니다. 결과 로그에서 무엇이 걸리는지 확인한 뒤 목록에서 차단으로 전환하세요.', 'success');
-    } finally { setSpamBusy(false); }
-  };
-
   // ★ 2026-10-03 규칙별 탐지 · 차단 전환(전송자격인증 5.2 차단 승격). 서버가 전후 값을 감사 기록에 남긴다.
   const [spamModeBusyId, setSpamModeBusyId] = useState<string | null>(null);
-  const handleSpamModeChange = (r: any) => {
-    const next = r.mode === 'block' ? 'detect' : 'block';
-    const message = next === 'block'
-      ? `「${r.name}」을 차단으로 전환합니다.\n\n이 조합에 걸리는 문자 발송은 차감 전에 중지되고 발송자에게 안내가 표시됩니다. 최근 발송 문안으로 오탐 확인을 마친 규칙만 전환하세요.`
-      : `「${r.name}」을 탐지로 전환합니다.\n\n이 조합에 걸려도 발송은 그대로 나가고 결과 로그에만 남습니다.`;
-    showConfirm(next === 'block' ? '차단으로 전환' : '탐지로 전환', message, async () => {
-      setSpamModeBusyId(r.id);
-      try {
-        const token = localStorage.getItem('token');
-        const res = await fetch(`/api/admin/spam-block/rules/${r.id}/mode`, {
-          method: 'PATCH',
-          headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-          body: JSON.stringify({ mode: next }),
-        });
-        const data = await res.json().catch(() => ({} as any));
-        if (!res.ok) { showAlert('오류', data?.error || '전환에 실패했습니다.', 'error'); return; }
-        await loadSpamBlock();
-        showAlert('성공', next === 'block' ? '차단으로 전환했습니다. 지금부터 이 조합의 문자 발송이 중지됩니다.' : '탐지로 전환했습니다.', 'success');
-      } finally { setSpamModeBusyId(null); }
-    });
-  };
 
   // ★ 2026-08-18 발신번호 회선 정책(전송자격인증 2.1) — 상한은 신규 등록에만 걸린다(기존 보유분 불변)
   const [linePolicy, setLinePolicy] = useState<{
@@ -598,7 +443,6 @@ const [messageDetailContent, setMessageDetailContent] = useState<{ name: string;
   const [expandedCompanies, setExpandedCompanies] = useState<Set<string>>(new Set());
   // ★ 회사 그룹 20개씩 페이지네이션
   const [userPage, setUserPage] = useState(1);
-  const USERS_COMPANIES_PER_PAGE = 20;
 
   // 발신번호 관리
   const [callbackNumbers, setCallbackNumbers] = useState<any[]>([]);
@@ -607,11 +451,9 @@ const [messageDetailContent, setMessageDetailContent] = useState<{ name: string;
   const [expandedCallbackCompanies, setExpandedCallbackCompanies] = useState<Set<string>>(new Set());
   // ★ D135+ (B10): 회사별 발신번호 페이지네이션 — 한 회사당 160개 등 무한 스크롤 방지, 10개씩 페이징
   const [callbackCompanyPages, setCallbackCompanyPages] = useState<Record<string, number>>({});
-  const CALLBACKS_PER_COMPANY_PAGE = 10;
   // ★ 2026-07-25 (서수란) 회사 목록 자체가 무페이징이라 화면이 아래로 끝없이 늘어남 → 회사 단위 페이징.
   //   회사별 번호 페이징(위)은 이미 있었고, 바깥 회사 루프만 빠져 있었다.
   const [callbackCompanyListPage, setCallbackCompanyListPage] = useState(1);
-  const CALLBACK_COMPANIES_PER_PAGE = 20;
   const [newCallback, setNewCallback] = useState({
     companyId: '',
     phone: '',
@@ -641,18 +483,18 @@ const [messageDetailContent, setMessageDetailContent] = useState<{ name: string;
   // 회사 목록 검색/필터
   const [companySearch, setCompanySearch] = useState('');
   const [companyStatusFilter, setCompanyStatusFilter] = useState('all');
+  // ★ 2026-10-09 목업 v2 고객사 목록 거르기 둘 — 탭을 옮겨 다녀도 값이 남도록 본체에 둔다(검색 · 상태와 같은 자리)
+  const [companyPlanFilter, setCompanyPlanFilter] = useState<'all' | 'paid' | 'trial' | 'none' | 'internal'>('all');
+  const [companyUsageFilter, setCompanyUsageFilter] = useState<'all' | 'web' | 'agent' | 'both'>('all');
   const [companyPage, setCompanyPage] = useState(1);
-  const companyPerPage = 10;
 
   // 요금제 관리
   const [planList, setPlanList] = useState<any[]>([]);
   const [planPage, setPlanPage] = useState(1);
-  const planPerPage = 10;
   
   // 플랜 신청 관리
   const [planRequests, setPlanRequests] = useState<any[]>([]);
   const [requestPage, setRequestPage] = useState(1);
-  const requestPerPage = 10;
   const [showRejectModal, setShowRejectModal] = useState(false);
   const [rejectTarget, setRejectTarget] = useState<any>(null);
   const [rejectReason, setRejectReason] = useState('');
@@ -893,7 +735,6 @@ const [emailResendAt, setEmailResendAt] = useState<string | null>(null);
   // ★ 2026-07-20: 이관으로 템플릿이 4,400건대가 되면서 전량 렌더가 사실상 못 쓰는 상태 → 페이징
   //   행 높이가 2줄(템플릿명+코드)이라 20건도 스크롤이 길어 10건으로 확정(고객사 목록과 동일 기준)
   const [templatePage, setTemplatePage] = useState(1);
-  const templatePerPage = 10;
   // 검색·상태 필터는 알림톡/RCS 공통 규칙 — 한 곳에만 정의해 두 목록이 같은 기준을 쓰게 한다
   const filterTemplateRows = (list: any[]) =>
     list.filter((t: any) => {
@@ -971,108 +812,6 @@ const [emailResendAt, setEmailResendAt] = useState<string | null>(null);
       }
     } catch {
       setAgentIds([]);
-    }
-  };
-
-  const handleAddAgentId = async () => {
-    const value = newAgentSendId.trim();
-    if (!value || !editCompany.id) return;
-    setAgentIdSaving(true);
-    try {
-      const token = localStorage.getItem('token');
-      const res = await fetch(`/api/companies/${editCompany.id}/agent-ids`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-        body: JSON.stringify({ agentSendId: value, memo: newAgentMemo.trim() }),
-      });
-      const data = await res.json();
-      if (!res.ok) {
-        showAlert('오류', data.error || '발송ID 등록 실패', 'error');
-      } else {
-        setNewAgentSendId('');
-        setNewAgentMemo('');
-        await loadAgentIds(editCompany.id);
-      }
-    } catch {
-      showAlert('오류', '서버 오류', 'error');
-    } finally {
-      setAgentIdSaving(false);
-    }
-  };
-
-  const handleRemoveAgentId = async (rowId: string) => {
-    if (!editCompany.id) return;
-    try {
-      const token = localStorage.getItem('token');
-      const res = await fetch(`/api/companies/${editCompany.id}/agent-ids/${rowId}`, {
-        method: 'DELETE',
-        headers: { 'Authorization': `Bearer ${token}` },
-      });
-      const data = await res.json();
-      if (!res.ok) {
-        showAlert('오류', data.error || '발송ID 삭제 실패', 'error');
-      } else {
-        await loadAgentIds(editCompany.id);
-      }
-    } catch {
-      showAlert('오류', '서버 오류', 'error');
-    }
-  };
-
-  // ★ 2026-07-24 §5-1 — 발송ID 원장(선/후불·단가·메모) 인라인 편집
-  // 단가 입력 정제: 숫자+점 하나만 허용 ('1.2.3' 차단 — Codex 5R-2), 저장 시 점만 남은 값은 빈 값 처리
-  const sanitizeCostInput = (v: string) => {
-    const c = v.replace(/[^0-9.]/g, '');
-    const i = c.indexOf('.');
-    return i === -1 ? c : c.slice(0, i + 1) + c.slice(i + 1).replace(/\./g, '');
-  };
-  const normalizeCostForSave = (v: string) => {
-    const t = v.trim();
-    return t === '.' ? '' : t;
-  };
-
-  const openAgentLedgerEdit = (a: (typeof agentIds)[number]) => {
-    setEditingAgentRowId(a.id);
-    setEditAgentLedger({
-      billingType: a.billing_type === 'prepaid' ? 'prepaid' : 'postpaid',
-      costPerSms: a.cost_per_sms != null && String(a.cost_per_sms) !== '' ? String(Number(a.cost_per_sms)) : '',
-      costPerLms: a.cost_per_lms != null && String(a.cost_per_lms) !== '' ? String(Number(a.cost_per_lms)) : '',
-      costPerMms: a.cost_per_mms != null && String(a.cost_per_mms) !== '' ? String(Number(a.cost_per_mms)) : '',
-      costPerKakao: a.cost_per_kakao != null && String(a.cost_per_kakao) !== '' ? String(Number(a.cost_per_kakao)) : '',
-      costPerBrand: a.cost_per_brand != null && String(a.cost_per_brand) !== '' ? String(Number(a.cost_per_brand)) : '',
-      memo: a.memo || '',
-    });
-  };
-
-  const handleSaveAgentLedger = async () => {
-    if (!editCompany.id || !editingAgentRowId) return;
-    setAgentLedgerSaving(true);
-    try {
-      const token = localStorage.getItem('token');
-      const res = await fetch(`/api/companies/${editCompany.id}/agent-ids/${editingAgentRowId}`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-        body: JSON.stringify({
-          billingType: editAgentLedger.billingType,
-          costPerSms: normalizeCostForSave(editAgentLedger.costPerSms),
-          costPerLms: normalizeCostForSave(editAgentLedger.costPerLms),
-          costPerMms: normalizeCostForSave(editAgentLedger.costPerMms),
-          costPerKakao: normalizeCostForSave(editAgentLedger.costPerKakao),
-          costPerBrand: normalizeCostForSave(editAgentLedger.costPerBrand),
-          memo: editAgentLedger.memo.trim(),
-        }),
-      });
-      const data = await res.json();
-      if (!res.ok) {
-        showAlert('오류', data.error || '발송ID 설정 저장 실패', 'error');
-      } else {
-        setEditingAgentRowId(null);
-        await loadAgentIds(editCompany.id);
-      }
-    } catch {
-      showAlert('오류', '서버 오류', 'error');
-    } finally {
-      setAgentLedgerSaving(false);
     }
   };
 
@@ -1280,61 +1019,6 @@ const loadAdminRcsTemplates = async () => {
   } catch { /* ignore */ }
 };
 
-// ★ 2026-08-17 RCS 분기 제거 — 알림톡 전용으로 좁혔다.
-//   RCS 검수 주체는 외부(RCS Biz Center)라 우리 DB status를 손으로 바꾸는 것은 승인이 아니었다.
-//   그 상태로 "승인"이 보이면 발송 가능으로 읽히는데 실제로는 아니다(설계서 §2-2 fail-closed).
-const handleTemplateApprove = async (id: string) => {
-  try {
-    const tk = localStorage.getItem('token');
-    const res = await fetch(`/api/admin/kakao-templates/${id}/approve`, { method: 'PUT', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${tk}` }, body: JSON.stringify({}) });
-    const data = await res.json();
-    if (data.success) { loadAdminTemplates(); loadAdminRcsTemplates(); setModal({ type: 'alert', title: '승인 완료', message: '템플릿이 승인되었습니다', variant: 'success' }); }
-    else setModal({ type: 'alert', title: '승인 실패', message: data.error, variant: 'error' });
-  } catch { setModal({ type: 'alert', title: '오류', message: '서버 오류', variant: 'error' }); }
-};
-
-// ★ D96: prompt() → 커스텀 모달로 변경
-const handleTemplateReject = (id: string) => {
-  setRejectModal({ show: true, id, reason: '' });
-};
-
-const handleTemplateRejectConfirm = async () => {
-  if (!rejectModal.reason.trim()) {
-    setModal({ type: 'alert', title: '입력 오류', message: '반려 사유를 입력해주세요', variant: 'error' });
-    return;
-  }
-  try {
-    const tk = localStorage.getItem('token');
-    const res = await fetch(`/api/admin/kakao-templates/${rejectModal.id}/reject`, { method: 'PUT', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${tk}` }, body: JSON.stringify({ rejectReason: rejectModal.reason.trim() }) });
-    const data = await res.json();
-    setRejectModal({ show: false, id: '', reason: '' });
-    if (data.success) { loadAdminTemplates(); loadAdminRcsTemplates(); setModal({ type: 'alert', title: '반려 완료', message: '템플릿이 반려되었습니다', variant: 'success' }); }
-    else setModal({ type: 'alert', title: '반려 실패', message: data.error, variant: 'error' });
-  } catch { setModal({ type: 'alert', title: '오류', message: '서버 오류', variant: 'error' }); }
-};
-
-const handleManualTemplateSubmit = async () => {
-  if (!manualForm.companyId || !manualForm.templateName || !manualForm.content) {
-    setModal({ type: 'alert', title: '입력 오류', message: '고객사, 템플릿명, 본문은 필수입니다', variant: 'error' });
-    return;
-  }
-  try {
-    const tk = localStorage.getItem('token');
-    const res = await fetch('/api/admin/kakao-templates/manual', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${tk}` },
-      body: JSON.stringify(manualForm),
-    });
-    const data = await res.json();
-    if (data.success) {
-      setShowManualTemplateForm(false);
-      setManualForm({ companyId: '', templateCode: '', templateName: '', category: '', messageType: 'BA', content: '' });
-      loadAdminTemplates();
-      setModal({ type: 'alert', title: '등록 완료', message: '템플릿이 승인 상태로 등록되었습니다', variant: 'success' });
-    } else setModal({ type: 'alert', title: '등록 실패', message: data.error, variant: 'error' });
-  } catch { setModal({ type: 'alert', title: '오류', message: '서버 오류', variant: 'error' }); }
-};
-
 // 감사 로그 조회
 const loadAuditLogs = async (page: number) => {
   setAuditLogsLoading(true);
@@ -1362,18 +1046,6 @@ const loadAuditLogs = async (page: number) => {
   finally { setAuditLogsLoading(false); }
 };
 
-// 잔액 변동 이력 조회 (고객사 상세)
-const loadBalanceTx = async (companyId: string) => {
-  setBalanceTxLoading(true);
-  try {
-    const token = localStorage.getItem('token');
-    const res = await fetch(`/api/admin/companies/${companyId}/balance-transactions?page=1&limit=10`, { headers: { Authorization: `Bearer ${token}` } });
-    const data = await res.json();
-    setBalanceTxList(data.transactions || []);
-  } catch (e) { console.error('잔액 이력 조회 실패:', e); }
-  finally { setBalanceTxLoading(false); }
-};
-
 // ===== 발송 라인그룹 함수 =====
 const loadLineGroups = async () => {
   setLineGroupsLoading(true);
@@ -1385,72 +1057,6 @@ const loadLineGroups = async () => {
     setLineGroupCanManage(!!data.canManage);
   } catch (e) { console.error('라인그룹 조회 실패:', e); }
   finally { setLineGroupsLoading(false); }
-};
-
-const saveLineGroup = async (id: string | null, data: any) => {
-  const token = localStorage.getItem('token');
-  const url = id ? `/api/admin/line-groups/${id}` : '/api/admin/line-groups';
-  const method = id ? 'PUT' : 'POST';
-  const res = await fetch(url, {
-    method, headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify(data)
-  });
-  if (!res.ok) { const err = await res.json(); throw new Error(err.error); }
-  await loadLineGroups();
-  return await res.json();
-};
-
-const deleteLineGroup = async (id: string) => {
-  const token = localStorage.getItem('token');
-  const res = await fetch(`/api/admin/line-groups/${id}`, {
-    method: 'DELETE', headers: { Authorization: `Bearer ${token}` }
-  });
-  if (!res.ok) { const err = await res.json(); throw new Error(err.error); }
-  await loadLineGroups();
-};
-
-// ★ 2026-07-17 발송 라인 설정 탭 — 저장/삭제 핸들러.
-//   sms_tables는 화면에서 콤마 구분 문자열로 다루고, 저장 직전 배열로 되돌린다.
-//   테이블명 유효성(SMSQ_SEND[_n][_yyyymm])은 백엔드 validateSmsTables가 최종 판정 — 프론트는 형식만 다듬는다.
-const handleSaveLineGroup = async () => {
-  if (!editingLineGroup) return;
-  const groupName = String(editingLineGroup.group_name || '').trim();
-  const tables = String(editingLineGroup.sms_tables || '')
-    .split(',').map((t: string) => t.trim()).filter(Boolean);
-  if (!groupName) return showAlert('입력 확인', '그룹명을 입력해주세요.', 'warning');
-  if (tables.length === 0) return showAlert('입력 확인', '발송 테이블을 1개 이상 입력해주세요.', 'warning');
-
-  setLineGroupSaving(true);
-  try {
-    await saveLineGroup(editingLineGroup.id || null, {
-      groupName,
-      groupType: editingLineGroup.group_type,
-      smsTables: tables,
-      sortOrder: Number(editingLineGroup.sort_order) || 0,
-      ...(editingLineGroup.id ? { isActive: !!editingLineGroup.is_active } : {}),
-    });
-    setEditingLineGroup(null);
-    showAlert('저장 완료', `${groupName} 라인그룹이 저장되었습니다.`, 'success');
-  } catch (e: any) {
-    showAlert('저장 실패', e?.message || '라인그룹 저장에 실패했습니다.', 'error');
-  } finally {
-    setLineGroupSaving(false);
-  }
-};
-
-const handleDeleteLineGroup = (lg: any) => {
-  showConfirm(
-    '라인그룹 삭제',
-    `"${lg.group_name}" 라인그룹을 삭제하시겠습니까?\n이 라인으로 발송한 과거 캠페인의 집계·정산 조회 범위가 바뀔 수 있습니다.`,
-    async () => {
-      try {
-        await deleteLineGroup(lg.id);
-        showAlert('삭제 완료', `${lg.group_name} 라인그룹이 삭제되었습니다.`, 'success');
-      } catch (e: any) {
-        showAlert('삭제 실패', e?.message || '라인그룹 삭제에 실패했습니다.', 'error');
-      }
-    }
-  );
 };
 useEffect(() => { if (billingToast) { const t = setTimeout(() => setBillingToast(null), 3000); return () => clearTimeout(t); } }, [billingToast]);
 // ※ 옛 정산용 계정 목록 로드는 폐기했다(2026-07-26) — 단일 계정 발행 자체가 서버에서 차단되고,
@@ -1471,312 +1077,6 @@ const loadSyncAgents = async () => {
     console.error('Sync Agent 목록 조회 실패:', e);
   } finally {
     setSyncAgentsLoading(false);
-  }
-};
-
-const loadSyncAgentDetail = async (agentId: string) => {
-  setSyncDetailLoading(true);
-  setShowSyncDetailModal(true);
-  try {
-    const token = localStorage.getItem('token');
-    const res = await fetch(`/api/admin/sync/agents/${agentId}`, {
-      headers: { 'Authorization': `Bearer ${token}` }
-    });
-    if (!res.ok) throw new Error('조회 실패');
-    const data = await res.json();
-    setSyncAgentDetail(data);
-  } catch (e) {
-    showAlert('오류', 'Agent 상세 조회 실패', 'error');
-    setShowSyncDetailModal(false);
-  } finally {
-    setSyncDetailLoading(false);
-  }
-};
-
-const handleSyncConfigSave = async () => {
-  if (!syncSelectedAgent) return;
-  try {
-    const token = localStorage.getItem('token');
-    const res = await fetch(`/api/admin/sync/agents/${syncSelectedAgent.id}/config`, {
-      method: 'PUT',
-      headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify(syncConfigForm)
-    });
-    if (!res.ok) {
-      const data = await res.json();
-      throw new Error(data.error || '설정 변경 실패');
-    }
-    setShowSyncConfigModal(false);
-    showAlert('성공', '설정이 저장되었습니다. Agent가 다음 config 조회 시 반영됩니다.', 'success');
-    loadSyncAgents();
-  } catch (e: any) {
-    showAlert('오류', e.message || '설정 변경 실패', 'error');
-  }
-};
-
-// ★ D131 후속(2026-04-21): Agent 삭제 (버려진/중복 정리)
-//   활성 Agent(30분 이내 heartbeat)는 서버에서 409 반환 → force=true로 강제 가능.
-const handleSyncDelete = async (force = false) => {
-  if (!syncSelectedAgent) return;
-  setSyncDeleting(true);
-  try {
-    const token = localStorage.getItem('token');
-    const url = `/api/admin/sync/agents/${syncSelectedAgent.id}${force ? '?force=true' : ''}`;
-    const res = await fetch(url, {
-      method: 'DELETE',
-      headers: { 'Authorization': `Bearer ${token}` },
-    });
-    const data = await res.json();
-    if (!res.ok) {
-      if (data.code === 'AGENT_ACTIVE') {
-        // 활성 Agent — 사용자에게 강제 삭제 여부 확인
-        showConfirm('강제 삭제', `${data.error}\n\n그래도 강제 삭제하시겠습니까?`, () => { void handleSyncDelete(true); });
-        setSyncDeleting(false);
-        return;
-      }
-      throw new Error(data.error || 'Agent 삭제 실패');
-    }
-    setShowSyncDeleteModal(false);
-    showAlert('성공', `${data.deleted?.agent_name || 'Agent'}를 삭제했습니다${data.forced ? ' (강제)' : ''}.`, 'success');
-    loadSyncAgents();
-  } catch (e: any) {
-    showAlert('오류', e.message || 'Agent 삭제 실패', 'error');
-  } finally {
-    setSyncDeleting(false);
-  }
-};
-
-const handleSyncCommand = async () => {
-  if (!syncSelectedAgent) return;
-  try {
-    const token = localStorage.getItem('token');
-    const res = await fetch(`/api/admin/sync/agents/${syncSelectedAgent.id}/command`, {
-      method: 'POST',
-      headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ type: syncCommandType })
-    });
-    if (!res.ok) throw new Error('명령 전송 실패');
-    setShowSyncCommandModal(false);
-    // ★ D131 후속(2026-04-21): 명령 전송 후 목록 즉시 재조회 — Agent가 실제 pause/resume 수행 후
-    //   다음 heartbeat(최대 60분 소요)에 status 반영될 때까지 UI는 기존 상태로 보임.
-    //   명령 전송 직후 최소한 "명령 큐에 등록됐다"는 피드백과 함께 목록 리프레시.
-    const commandLabels: Record<string, string> = {
-      full_sync: '전체 동기화',
-      pause: '일시정지',
-      resume: '재개',
-      restart: '재시작',
-      report_logs: '최근 로그 요청',
-      test_connection: '소스 DB 연결 테스트',
-    };
-    const label = commandLabels[syncCommandType] || syncCommandType;
-    const ackNote = syncAgentSupportsAck(syncSelectedAgent.agent_version)
-      ? ' 실행 결과는 상세 화면의 "명령 결과"에서 확인할 수 있습니다.'
-      : '';
-    showAlert('성공', `${label} 명령이 등록되었습니다. Agent가 다음 heartbeat(최대 60분)에 수행하고 상태가 반영됩니다.${ackNote}`, 'success');
-    loadSyncAgents();
-  } catch (e) {
-    showAlert('오류', '명령 전송 실패', 'error');
-  }
-};
-
-// ★ 2026-07-10 원격 관리: ACK(v1.6.1+) 지원 여부 — 진단 명령·dry-run 노출 판단 (백엔드 agent-protocol과 동일 기준)
-const syncAgentSupportsAck = (version: string | null | undefined): boolean => {
-  const m = String(version || '').trim().replace(/^v/i, '').match(/^(\d+)\.(\d+)(?:\.(\d+))?/);
-  if (!m) return false;
-  const [a, b, c] = [parseInt(m[1], 10), parseInt(m[2], 10), parseInt(m[3] || '0', 10)];
-  if (a !== 1) return a > 1;
-  if (b !== 6) return b > 6;
-  return c >= 1;
-};
-
-// ★ 2026-07-01: 원격 컬럼 매핑 편집(update_config) — 소스컬럼 → 표준/custom 슬롯
-const SYNC_CUSTOM_SLOTS = Array.from({ length: 15 }, (_, i) => `custom_${i + 1}`);
-const SYNC_CUSTOMER_TARGET_FIELDS = [
-  'phone', 'name', 'gender', 'birth_date', 'email', 'address', 'region', 'grade',
-  'store_phone', 'points', 'store_code', 'store_name', 'registered_store',
-  'registered_store_number', 'registration_type', 'callback', 'sms_opt_in',
-  'recent_purchase_date', 'recent_purchase_amount', 'recent_purchase_store',
-  'total_purchase_amount', 'purchase_count', ...SYNC_CUSTOM_SLOTS,
-];
-const SYNC_PURCHASE_TARGET_FIELDS = [
-  'customer_phone', 'purchase_date', 'total_amount', 'quantity',
-  'store_code', 'store_name', 'product_code', 'product_name', 'unit_price', ...SYNC_CUSTOM_SLOTS,
-];
-
-// ★ 2026-07-10 원격 관리 P0-2: 모달 오픈 = 에이전트 자기 보고(reported) 로드 → 기존 매핑 프리필.
-//   옛 구조(항상 빈 행)는 "한 줄 추가 저장 = 그 대상 매핑 전체 소실" 함정이었다(에이전트는 타겟 단위 통째 교체 — 실측).
-const openSyncMappingModal = async (agent: any) => {
-  setSyncSelectedAgent(agent);
-  setSyncMapReported(null);
-  setSyncMapAckSupported(false);
-  setSyncMapCustomers([]);
-  setSyncMapPurchases([]);
-  setShowSyncMappingModal(true);
-  setSyncMapReportLoading(true);
-  try {
-    const token = localStorage.getItem('token');
-    const res = await fetch(`/api/admin/sync/agents/${agent.id}`, {
-      headers: { 'Authorization': `Bearer ${token}` },
-    });
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.error || 'Agent 상세 조회 실패');
-    const reported = data.agent?.reported || null;
-    setSyncMapReported(reported);
-    setSyncMapAckSupported(!!data.agent?.supports_ack);
-    if (reported?.appliedMapping) {
-      const labels = reported.appliedMapping.customFieldLabels || {};
-      const custRows = Object.entries(reported.appliedMapping.customers || {}).map(([src, target]) => ({
-        src,
-        target: String(target),
-        label: /^custom_\d+$/.test(String(target)) ? String(labels[String(target)] || '') : '',
-      }));
-      const purchRows = Object.entries(reported.appliedMapping.purchases || {}).map(([src, target]) => ({
-        src,
-        target: String(target),
-        label: '',
-      }));
-      setSyncMapCustomers(custRows);
-      setSyncMapPurchases(purchRows);
-    }
-  } catch (e: any) {
-    showAlert('오류', e.message || 'Agent 상세 조회 실패', 'error');
-  } finally {
-    setSyncMapReportLoading(false);
-  }
-};
-
-// 편집 행 → 전송 payload (저장·dry-run 공용). 빈 행 제외.
-const buildSyncMappingPayload = () => {
-  const customers: Record<string, string> = {};
-  const customFieldLabels: Record<string, string> = {};
-  for (const r of syncMapCustomers) {
-    const src = r.src.trim();
-    const target = r.target.trim();
-    if (!src || !target) continue;
-    customers[src] = target;
-    if (/^custom_\d+$/.test(target) && r.label.trim()) customFieldLabels[target] = r.label.trim();
-  }
-  const purchases: Record<string, string> = {};
-  for (const r of syncMapPurchases) {
-    const src = r.src.trim();
-    const target = r.target.trim();
-    if (!src || !target) continue;
-    purchases[src] = target;
-  }
-  const mapping: any = {};
-  if (Object.keys(customers).length) mapping.customers = customers;
-  if (Object.keys(purchases).length) mapping.purchases = purchases;
-  if (Object.keys(customFieldLabels).length) mapping.customFieldLabels = customFieldLabels;
-  return { mapping, custCount: Object.keys(customers).length, purchCount: Object.keys(purchases).length };
-};
-
-// ★ 2026-07-10 P0-2: 저장 = "전체 교체" 확인 모달을 거친 후에만 전송 (부분 추가 저장 사고 차단)
-const handleSyncMappingSave = () => {
-  if (!syncSelectedAgent) return;
-  if (!syncMapReported) {
-    showAlert('저장 불가', '에이전트가 아직 적용 매핑을 보고하지 않았습니다(구버전 또는 첫 heartbeat 전). 빈 화면 저장은 기존 매핑 전체를 지울 수 있어 차단됩니다.', 'error');
-    return;
-  }
-  const { mapping, custCount, purchCount } = buildSyncMappingPayload();
-  if (!mapping.customers && !mapping.purchases) {
-    showAlert('입력 오류', '매핑을 한 개 이상 입력해주세요.', 'error');
-    return;
-  }
-  showConfirm(
-    '매핑 전체 교체',
-    `이 저장은 전송한 대상의 매핑 전체를 교체합니다.\n\n전송: 고객 ${custCount}행 · 구매 ${purchCount}행\n(행을 모두 지운 대상은 전송되지 않아 기존 매핑이 유지됩니다)\n\n적용 후 바뀐 대상만 전체 재동기화가 실행됩니다. 진행할까요?`,
-    () => { void doSyncMappingSend(mapping); },
-  );
-};
-
-const doSyncMappingSend = async (mapping: any) => {
-  if (!syncSelectedAgent) return;
-  setSyncMapSaving(true);
-  try {
-    const token = localStorage.getItem('token');
-    const res = await fetch(`/api/admin/sync/agents/${syncSelectedAgent.id}/command`, {
-      method: 'POST',
-      headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ type: 'update_config', mapping }),
-    });
-    const data = await res.json();
-    // ★2026-09-02 매핑 검증 실패는 사유를 줄줄이 보여준다 — "무엇이 틀렸는지"를 모르면 담당자가 고칠 수 없다.
-    //   서버가 잘못된 필드·빠진 필수 필드를 issues로 내려준다(BUGS B-0902-4 · 구매 98,600건 전량 드롭).
-    if (!res.ok && Array.isArray(data?.issues) && data.issues.length > 0) {
-      const lines = data.issues.map((it: any) => `· ${it.message}`).join('\n');
-      throw new Error(`${data.error || '매핑을 저장할 수 없습니다.'}\n\n${lines}`);
-    }
-    if (!res.ok) throw new Error(data.error || '매핑 전송 실패');
-    setShowSyncMappingModal(false);
-    showAlert('성공', `매핑이 전송되었습니다. Agent가 다음 heartbeat(최대 60분)에 매핑을 갱신하고 바뀐 대상만 전체 재동기화합니다.${syncMapAckSupported ? '\n적용 결과는 상세 화면의 "명령 결과"에서 확인할 수 있습니다.' : ''}`, 'success');
-    loadSyncAgents();
-  } catch (e: any) {
-    showAlert('오류', e.message || '매핑 전송 실패', 'error');
-  } finally {
-    setSyncMapSaving(false);
-  }
-};
-
-// ★ 2026-07-10 P2-9: 매핑 dry-run — 편집 중 매핑을 소스 1행에 적용한 미리보기(저장·적용 없음).
-//   결과는 에이전트 ACK로 상세 "명령 결과"에 도착(부스트로 보통 1~2분).
-const handleSyncMappingDryRun = async () => {
-  if (!syncSelectedAgent) return;
-  const { mapping } = buildSyncMappingPayload();
-  delete mapping.customFieldLabels; // dry-run은 라벨 불요
-  if (!mapping.customers && !mapping.purchases) {
-    showAlert('입력 오류', 'dry-run할 매핑을 한 개 이상 입력해주세요.', 'error');
-    return;
-  }
-  setSyncMapDryRunning(true);
-  try {
-    const token = localStorage.getItem('token');
-    const res = await fetch(`/api/admin/sync/agents/${syncSelectedAgent.id}/command`, {
-      method: 'POST',
-      headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ type: 'mapping_dryrun', mapping }),
-    });
-    const data = await res.json();
-    // 매핑 검증 사유도 그대로 보여준다(저장 경로와 같은 형태).
-    if (!res.ok && Array.isArray(data?.issues) && data.issues.length > 0) {
-      throw new Error(`${data.error || '매핑을 확인해 주세요.'}\n\n${data.issues.map((it: any) => `· ${it.message}`).join('\n')}`);
-    }
-    if (!res.ok) throw new Error(data.error || 'dry-run 전송 실패');
-    showAlert('전송됨', '매핑 미리보기(dry-run) 명령을 보냈습니다. 결과는 상세 화면의 "명령 결과"에 도착합니다(에이전트 응답 주기에 따라 수 분 소요). 저장·적용은 일어나지 않습니다.', 'success');
-  } catch (e: any) {
-    showAlert('오류', e.message || 'dry-run 전송 실패', 'error');
-  } finally {
-    setSyncMapDryRunning(false);
-  }
-};
-
-// ★ 2026-07-01: 자동 업데이트 릴리즈 등록 — 서버 exe 업로드 후 sync_releases 등록 → 박스 매시간 자동 수령
-const handleSyncReleaseSubmit = async () => {
-  const version = syncReleaseForm.version.trim();
-  if (!/^\d+\.\d+\.\d+$/.test(version)) {
-    showAlert('입력 오류', '버전은 x.y.z 형식이어야 합니다 (예: 1.5.7).', 'error');
-    return;
-  }
-  setSyncReleaseSaving(true);
-  try {
-    const token = localStorage.getItem('token');
-    const res = await fetch('/api/admin/sync/releases', {
-      method: 'POST',
-      headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        version,
-        checksum: syncReleaseForm.checksum.trim() || undefined,
-        force_update: syncReleaseForm.force_update,
-        tier: syncReleaseForm.tier || undefined,
-      }),
-    });
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.error || '릴리즈 등록 실패');
-    setShowSyncReleaseModal(false);
-    showAlert('성공', `${version} 릴리즈가 등록됐습니다. 각 Agent가 다음 정각(매시간) 버전 확인 때 자동으로 받아 교체합니다.`, 'success');
-  } catch (e: any) {
-    showAlert('오류', e.message || '릴리즈 등록 실패', 'error');
-  } finally {
-    setSyncReleaseSaving(false);
   }
 };
 
@@ -2679,99 +1979,6 @@ const handleBillingDelete = async () => {
   }
 };
 
-// 고객 전체 삭제 실행
-const handleCustomerDeleteAll = async () => {
-  setCustomerDeleteLoading(true);
-  try {
-    const token = localStorage.getItem('token');
-    const res = await fetch('/api/customers/delete-all', {
-      method: 'POST',
-      headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ targetCompanyId: editCompany.id, confirmCompanyName: customerDeleteConfirmName })
-    });
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.error || '삭제 실패');
-    setShowCustomerDeleteAll(false);
-    setCustomerDeleteConfirmName('');
-    showAlert('삭제 완료', `${data.deletedCount}명의 고객 데이터가 삭제되었습니다.\n구매내역 ${data.deletedPurchases}건도 함께 삭제되었습니다.`, 'success');
-    loadData();
-  } catch (e: any) {
-    showAlert('오류', e.message || '삭제 실패', 'error');
-  } finally {
-    setCustomerDeleteLoading(false);
-  }
-};
-
-// SyncAgent 키 로드
-const loadSyncKeys = async (companyId: string) => {
-  setSyncLoading(true);
-  try {
-    const res = await fetch(`/api/admin/companies/${companyId}/sync-keys`, {
-      headers: { 'Authorization': `Bearer ${localStorage.getItem('token')}` }
-    });
-    if (res.ok) {
-      const data = await res.json();
-      setSyncKeys(data.syncKeys);
-    }
-  } catch (error) {
-    console.error('SyncAgent 키 로드 실패:', error);
-  } finally {
-    setSyncLoading(false);
-    setSyncKeyVisible(false);
-    setSyncSecretVisible(false);
-  }
-};
-
-// SyncAgent 키 재발급
-const handleSyncRegenerate = async () => {
-  if (!editCompany.id) return;
-  setSyncLoading(true);
-  try {
-    const res = await fetch(`/api/admin/companies/${editCompany.id}/sync-keys/regenerate`, {
-      method: 'POST',
-      headers: { 'Authorization': `Bearer ${localStorage.getItem('token')}` }
-    });
-    if (res.ok) {
-      const data = await res.json();
-      setSyncKeys(data.syncKeys);
-      setSyncKeyVisible(true);
-      setSyncSecretVisible(true);
-      showAlert('재발급 완료', data.message, 'success');
-    }
-  } catch (error) {
-    console.error('SyncAgent 키 재발급 실패:', error);
-  } finally {
-    setSyncLoading(false);
-    setShowSyncRegenConfirm(false);
-  }
-};
-
-// SyncAgent use_db_sync 토글
-const handleSyncToggle = async (useDbSync: boolean) => {
-  if (!editCompany.id) return;
-  setSyncLoading(true);
-  try {
-    const res = await fetch(`/api/admin/companies/${editCompany.id}/sync-keys`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${localStorage.getItem('token')}` },
-      body: JSON.stringify({ useDbSync })
-    });
-    if (res.ok) {
-      const data = await res.json();
-      // ★2026-09-13(3) 토글 응답에는 시크릿 원문이 없다(서버에 남지 않는다 · 싱크 등재분 ③).
-      //   방금 재발급해 한 번만 보여 주던 원문을 토글 한 번에 지우지 않는다(같은 키일 때만 이어 둔다).
-      setSyncKeys((prev) => ({
-        ...data.syncKeys,
-        ...(prev.api_secret && prev.api_key === data.syncKeys?.api_key ? { api_secret: prev.api_secret } : {}),
-      }));
-    }
-  } catch (error) {
-    console.error('SyncAgent 토글 실패:', error);
-  } finally {
-    setSyncLoading(false);
-  }
-};
-
 // 슈퍼관리자 고객 목록 로드
 const loadAdminCustomers = async (page = 1) => {
   if (!editCompany.id) return;
@@ -2787,33 +1994,6 @@ const loadAdminCustomers = async (page = 1) => {
     setAdminCustSelected(new Set());
   } catch (e) { console.error('고객 목록 조회 실패:', e); }
   finally { setAdminCustLoading(false); }
-};
-
-// 슈퍼관리자 고객 삭제 실행
-const executeAdminCustDelete = async () => {
-  if (!adminCustDeleteTarget) return;
-  setAdminCustDeleteLoading(true);
-  try {
-    const token = localStorage.getItem('token');
-    if (adminCustDeleteTarget.type === 'individual' && adminCustDeleteTarget.customer) {
-      const res = await fetch(`/api/customers/${adminCustDeleteTarget.customer.id}?companyId=${editCompany.id}`, {
-        method: 'DELETE', headers: { 'Authorization': `Bearer ${token}` }
-      });
-      if (!res.ok) { const d = await res.json(); throw new Error(d.error); }
-    } else if (adminCustDeleteTarget.type === 'bulk') {
-      const res = await fetch('/api/customers/bulk-delete', {
-        method: 'POST',
-        headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ids: Array.from(adminCustSelected), companyId: editCompany.id })
-      });
-      if (!res.ok) { const d = await res.json(); throw new Error(d.error); }
-    }
-    setShowAdminCustDeleteModal(false);
-    setAdminCustDeleteTarget(null);
-    showAlert('성공', '삭제되었습니다.', 'success');
-    loadAdminCustomers(adminCustPage.page);
-  } catch (e: any) { showAlert('오류', e.message || '삭제 실패', 'error'); }
-  finally { setAdminCustDeleteLoading(false); }
 };
 
 const downloadBillingPdf = async (id: string, label: string) => {
@@ -3113,76 +2293,6 @@ const handleSendBillingEmail = async (resend = false) => {
     }
   };
 
-  const loadSenderRegDetail = async (id: string) => {
-    try {
-      const token = localStorage.getItem('token');
-      const res = await fetch(`/api/sender-registration/admin/${id}`, {
-        headers: { 'Authorization': `Bearer ${token}` }
-      });
-      if (res.ok) {
-        const data = await res.json();
-        setSenderRegDetail(data.registration);
-        setShowSenderRegDetailModal(true);
-        setRejectReasonInput('');
-      }
-    } catch (error) {
-      console.error('신청 상세 로드 실패:', error);
-    }
-  };
-
-  const handleApproveSenderReg = async (id: string) => {
-    try {
-      const token = localStorage.getItem('token');
-      const res = await fetch(`/api/sender-registration/admin/${id}/approve`, {
-        method: 'POST',
-        headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' }
-      });
-      const data = await res.json();
-      if (res.ok) {
-        setModal({ type: 'alert', title: '승인 완료', message: '발신번호가 승인되어 등록되었습니다.', variant: 'success' });
-        setShowSenderRegDetailModal(false);
-        setSenderRegDetail(null);
-        loadSenderRegistrations(senderRegFilter);
-        loadSenderRegPendingCount();
-        loadCallbackNumbers();
-      } else {
-        setModal({ type: 'alert', title: '승인 실패', message: data.error || '승인 처리에 실패했습니다.', variant: 'error' });
-      }
-    } catch (error) {
-      console.error('승인 처리 실패:', error);
-      setModal({ type: 'alert', title: '오류', message: '승인 처리 중 오류가 발생했습니다.', variant: 'error' });
-    }
-  };
-
-  const handleRejectSenderReg = async (id: string) => {
-    if (!rejectReasonInput.trim()) {
-      setModal({ type: 'alert', title: '입력 필요', message: '반려 사유를 입력해주세요.', variant: 'warning' });
-      return;
-    }
-    try {
-      const token = localStorage.getItem('token');
-      const res = await fetch(`/api/sender-registration/admin/${id}/reject`, {
-        method: 'POST',
-        headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ rejectReason: rejectReasonInput.trim() })
-      });
-      const data = await res.json();
-      if (res.ok) {
-        setModal({ type: 'alert', title: '반려 완료', message: '신청이 반려되었습니다.', variant: 'success' });
-        setShowSenderRegDetailModal(false);
-        setSenderRegDetail(null);
-        setRejectReasonInput('');
-        loadSenderRegistrations(senderRegFilter);
-        loadSenderRegPendingCount();
-      } else {
-        setModal({ type: 'alert', title: '반려 실패', message: data.error || '반려 처리에 실패했습니다.', variant: 'error' });
-      }
-    } catch (error) {
-      console.error('반려 처리 실패:', error);
-      setModal({ type: 'alert', title: '오류', message: '반려 처리 중 오류가 발생했습니다.', variant: 'error' });
-    }
-  };
-
   const downloadSenderDoc = async (filename: string, originalName?: string) => {
     try {
       const token = localStorage.getItem('token');
@@ -3221,53 +2331,6 @@ const handleSendBillingEmail = async (resend = false) => {
       }
     } catch (error) {
       console.error('담당자 목록 로드 실패:', error);
-    }
-  };
-
-  const handleApproveManager = async (id: string) => {
-    try {
-      const token = localStorage.getItem('token');
-      const res = await fetch(`/api/sender-registration/admin/managers/${id}/approve`, {
-        method: 'POST',
-        headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' }
-      });
-      const data = await res.json();
-      if (res.ok) {
-        setModal({ type: 'alert', title: '승인 완료', message: '담당자 위임장이 승인되었습니다.', variant: 'success' });
-        loadAllManagers();
-        loadSenderRegPendingCount();
-      } else {
-        setModal({ type: 'alert', title: '승인 실패', message: data.error || '승인 처리에 실패했습니다.', variant: 'error' });
-      }
-    } catch (error) {
-      console.error('담당자 승인 실패:', error);
-      setModal({ type: 'alert', title: '오류', message: '승인 처리 중 오류가 발생했습니다.', variant: 'error' });
-    }
-  };
-
-  const handleRejectManager = async (id: string, reason: string) => {
-    if (!reason.trim()) {
-      setModal({ type: 'alert', title: '입력 필요', message: '반려 사유를 입력해주세요.', variant: 'warning' });
-      return;
-    }
-    try {
-      const token = localStorage.getItem('token');
-      const res = await fetch(`/api/sender-registration/admin/managers/${id}/reject`, {
-        method: 'POST',
-        headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ rejectReason: reason.trim() })
-      });
-      const data = await res.json();
-      if (res.ok) {
-        setModal({ type: 'alert', title: '반려 완료', message: '담당자 위임장이 반려되었습니다.', variant: 'success' });
-        loadAllManagers();
-        loadSenderRegPendingCount();
-      } else {
-        setModal({ type: 'alert', title: '반려 실패', message: data.error || '반려 처리에 실패했습니다.', variant: 'error' });
-      }
-    } catch (error) {
-      console.error('담당자 반려 실패:', error);
-      setModal({ type: 'alert', title: '오류', message: '반려 처리 중 오류가 발생했습니다.', variant: 'error' });
     }
   };
 
@@ -3355,56 +2418,6 @@ const handleSendBillingEmail = async (resend = false) => {
     setChargeTxLoading(false);
   };
 
-  const handleApproveDeposit = async () => {
-    if (!depositTarget) return;
-    try {
-      const token = localStorage.getItem('token');
-      const res = await fetch(`/api/admin/deposit-requests/${depositTarget.id}/approve`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-        // ★ 2026-08-19 전송자격인증 2.3 — 명의 확인 건은 확인 표시 없이 서버가 거절한다.
-        //   모달에서 사유와 소명을 보고 누른 것이므로 여기서 true를 실어 보낸다.
-        body: JSON.stringify({ adminNote: depositAdminNote || null, resolveHold: Boolean(depositTarget.held_reason) })
-      });
-      if (res.ok) {
-        setModal({ type: 'alert', title: '승인 완료', message: `${Number(depositTarget.amount).toLocaleString()}원이 충전되었습니다.`, variant: 'success' });
-        setShowDepositApproveModal(false);
-        setDepositTarget(null);
-        setDepositAdminNote('');
-        loadChargeManagement(chargeTxPage);
-      } else {
-        const err = await res.json();
-        setModal({ type: 'alert', title: '승인 실패', message: err.error || '처리 중 오류 발생', variant: 'error' });
-      }
-    } catch (error) {
-      setModal({ type: 'alert', title: '오류', message: '네트워크 오류', variant: 'error' });
-    }
-  };
-
-  const handleRejectDeposit = async () => {
-    if (!depositTarget) return;
-    try {
-      const token = localStorage.getItem('token');
-      const res = await fetch(`/api/admin/deposit-requests/${depositTarget.id}/reject`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-        body: JSON.stringify({ adminNote: depositAdminNote || '거절' })
-      });
-      if (res.ok) {
-        setModal({ type: 'alert', title: '거절 완료', message: '충전 요청이 거절되었습니다.', variant: 'success' });
-        setShowDepositRejectModal(false);
-        setDepositTarget(null);
-        setDepositAdminNote('');
-        loadChargeManagement(chargeTxPage);
-      } else {
-        const err = await res.json();
-        setModal({ type: 'alert', title: '거절 실패', message: err.error || '처리 중 오류 발생', variant: 'error' });
-      }
-    } catch (error) {
-      setModal({ type: 'alert', title: '오류', message: '네트워크 오류', variant: 'error' });
-    }
-  };
-
   // ── AI 크레딧 충전 요청 (후불 — 슈퍼관리자 승인) ───────────────
   const loadAllCreditTx = async (page = 1, company = creditTxCompany) => {
     setCreditTxLoading(true);
@@ -3433,73 +2446,6 @@ const handleSendBillingEmail = async (resend = false) => {
       const res = await fetch('/api/admin/credit-risk-companies', { headers: { Authorization: `Bearer ${token}` } });
       if (res.ok) { const d = await res.json(); setCreditRiskCompanies(d.companies || []); }
     } catch (e) { console.error('크레딧 위험 회사 로드 실패:', e); }
-  };
-
-  // 예측 일괄 분석·차감 수동 실행 (9시 대기 없이 검증·복구·시연). 멱등키로 같은 날 중복 차감 0.
-  const handleRunPredictiveNow = () => {
-    showConfirm(
-      '예측 일괄 실행',
-      '요금제 가입 회사(고객 DB 보유) 전체에 지금 즉시 DB 규모별 예측 분석·크레딧 차감을 1회 실행합니다.\n오늘 이미 차감된 회사는 중복 차감되지 않습니다. 진행하시겠습니까?',
-      async () => {
-        setPredictiveRunning(true);
-        try {
-          const token = localStorage.getItem('token');
-          const res = await fetch('/api/admin/predictive/run-now', { method: 'POST', headers: { Authorization: `Bearer ${token}` } });
-          const d = await res.json();
-          if (res.ok && d.success) {
-            if (d.ran === false) {
-              showAlert('진행 중', '예측 배치가 이미 실행 중입니다. 잠시 후 다시 시도해 주세요.', 'info');
-            } else {
-              showAlert('예측 실행 완료', `회사 ${d.companiesProcessed}개 분석 · 고객 ${Number(d.totalUpdated).toLocaleString()}명 갱신 (크레딧 부족 skip ${d.creditSkipped}).`, 'success');
-              loadCreditRisk();
-              loadAllCreditTx(1);
-            }
-          } else {
-            showAlert('오류', d.error || '예측 수동 실행 실패', 'error');
-          }
-        } catch {
-          showAlert('오류', '예측 수동 실행 실패', 'error');
-        } finally {
-          setPredictiveRunning(false);
-        }
-      }
-    );
-  };
-
-  const handleApproveCreditRequest = (cr: any) => {
-    setModal({
-      type: 'confirm', title: 'AI 크레딧 충전 승인', variant: 'info',
-      message: `${cr.company_name} · ${Number(cr.credits).toLocaleString()} 크레딧을 지급하고 ${Number(cr.total_amount).toLocaleString()}원을 월말 청구 대상으로 처리합니다. 승인할까요?`,
-      onConfirm: async () => {
-        try {
-          const token = localStorage.getItem('token');
-          const res = await fetch(`/api/admin/credit-requests/${cr.id}/approve`, { method: 'PUT', headers: { Authorization: `Bearer ${token}` } });
-          const d = await res.json().catch(() => ({}));
-          // 크레딧 목록은 페이지 단위(20)라 길이로 뱃지를 세면 안 된다 — 카운트를 따로 다시 부른다(즉시 반영).
-          if (res.ok) { setModal({ type: 'alert', title: '승인 완료', message: d.message || '지급되었습니다.', variant: 'success' }); loadCreditRequests(); loadPendingBadges(); }
-          else setModal({ type: 'alert', title: '승인 실패', message: d.error || '오류', variant: 'error' });
-        } catch { setModal({ type: 'alert', title: '오류', message: '네트워크 오류', variant: 'error' }); }
-      },
-    });
-  };
-
-  const handleRejectCreditRequest = (cr: any) => {
-    setModal({
-      type: 'confirm', title: 'AI 크레딧 충전 거절', variant: 'warning',
-      message: `${cr.company_name}의 ${Number(cr.credits).toLocaleString()} 크레딧 충전 요청을 거절할까요?`,
-      onConfirm: async () => {
-        try {
-          const token = localStorage.getItem('token');
-          const res = await fetch(`/api/admin/credit-requests/${cr.id}/reject`, {
-            method: 'PUT', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-            body: JSON.stringify({ adminNote: '슈퍼관리자 거절' }),
-          });
-          const d = await res.json().catch(() => ({}));
-          if (res.ok) { setModal({ type: 'alert', title: '거절 완료', message: d.message || '거절되었습니다.', variant: 'success' }); loadCreditRequests(); loadPendingBadges(); }
-          else setModal({ type: 'alert', title: '거절 실패', message: d.error || '오류', variant: 'error' });
-        } catch { setModal({ type: 'alert', title: '오류', message: '네트워크 오류', variant: 'error' }); }
-      },
-    });
   };
 
   const loadAllCampaigns = async (page = 1) => {
@@ -3612,76 +2558,6 @@ const loadStatsDetail = async (date: string, companyId: string, companyName: str
   }
 };
 
-const handleApproveRequest = async (id: string) => {
-  setModal({
-      type: 'confirm',
-      title: '플랜 변경 승인',
-      // ★ 2026-10-04 선불 이용 기간 회사는 돈이 함께 움직인다(올림 = 남은 기간 차액 즉시 · 내림 = 만료 다음 날부터 · 잠김 = 1개월 결제로 다시 열기)
-      message: '이 신청을 승인하시겠습니까?\n승인 시 즉시 플랜이 변경됩니다.\n선불 이용 기간 회사: 올림은 남은 기간 차액을 충전 잔액에서 바로 빼고, 내림은 만료 다음 날부터 적용합니다.',
-      onConfirm: async () => {
-        try {
-          const token = localStorage.getItem('token');
-          const res = await fetch(`/api/admin/plan-requests/${id}/approve`, {
-            method: 'PUT',
-            headers: {
-              'Authorization': `Bearer ${token}`,
-              'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({})
-          });
-          
-          if (res.ok) {
-            const okData = await res.json().catch(() => ({}));
-            closeModal();
-            // ★ 2026-10-04 선불 이용 기간 처리 결과(차감액·적용일)는 서버 문장을 그대로 보인다
-            setModal({ type: 'alert', title: '승인 완료', message: okData?.plan_term ? okData.message : '플랜이 변경되었습니다.', variant: 'success' });
-            loadPlanRequests();
-            loadData();
-          } else {
-            const data = await res.json();
-            closeModal();
-            setModal({ type: 'alert', title: '승인 실패', message: data.error || '승인에 실패했습니다.', variant: 'error' });
-          }
-        } catch (error) {
-          closeModal();
-          setModal({ type: 'alert', title: '오류', message: '처리 중 오류가 발생했습니다.', variant: 'error' });
-        }
-      }
-    });
-  };
-
-  const handleRejectRequest = async () => {
-    if (!rejectTarget || !rejectReason.trim()) {
-      setModal({ type: 'alert', title: '입력 오류', message: '거절 사유를 입력해주세요.', variant: 'warning' });
-      return;
-    }
-    
-    try {
-      const token = localStorage.getItem('token');
-      const res = await fetch(`/api/admin/plan-requests/${rejectTarget.id}/reject`, {
-        method: 'PUT',
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({ adminNote: rejectReason.trim() })
-      });
-      
-      if (res.ok) {
-        setShowRejectModal(false);
-        setRejectTarget(null);
-        setRejectReason('');
-        setModal({ type: 'alert', title: '거절 완료', message: '신청이 거절되었습니다.', variant: 'success' });
-        loadPlanRequests();
-      } else {
-        const data = await res.json();
-        setModal({ type: 'alert', title: '거절 실패', message: data.error || '거절에 실패했습니다.', variant: 'error' });
-      }
-    } catch (error) {
-      setModal({ type: 'alert', title: '오류', message: '처리 중 오류가 발생했습니다.', variant: 'error' });
-    }
-  };
-
   // 모달 헬퍼 함수
   const showAlert = (title: string, message: string, variant: 'success' | 'error' | 'warning' | 'info' = 'info') => {
     setModal({ type: 'alert', title, message, variant });
@@ -3719,11 +2595,6 @@ const handleApproveRequest = async (id: string) => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [editCompany?.id]);
 
-  const showPasswordModal = (password: string, smsSent?: boolean, phone?: string) => {
-    setCopied(false);
-    setModal({ type: 'password', title: '임시 비밀번호 발급', message: '', password, smsSent, phone });
-  };
-
   const closeModal = () => {
     setModal({ type: null, title: '', message: '' });
     setCopied(false);
@@ -3734,366 +2605,6 @@ const handleApproveRequest = async (id: string) => {
       await navigator.clipboard.writeText(modal.password);
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
-    }
-  };
-
-  const handleCreateCompany = async (e: React.FormEvent) => {
-    e.preventDefault();
-    try {
-      await companiesApi.create(newCompany);
-      setShowCompanyModal(false);
-      setNewCompany({
-        companyCode: '',
-        companyName: '',
-        contactName: '',
-        contactEmail: '',
-        contactPhone: '',
-        planId: '',
-        usageType: 'web',
-      });
-      loadData();
-      showAlert('성공', '고객사가 생성되었습니다.', 'success');
-    } catch (error: any) {
-      showAlert('오류', error.response?.data?.error || '생성 실패', 'error');
-    }
-  };
-
-  const handleCreateUser = async (e: React.FormEvent) => {
-    e.preventDefault();
-    try {
-      const token = localStorage.getItem('token');
-      const res = await fetch('/api/admin/users', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`
-        },
-        body: JSON.stringify({
-          ...newUser,
-          storeCodes: newUser.storeCodes ? newUser.storeCodes.split(',').map(s => s.trim()).filter(Boolean) : null
-        })
-      });
-      
-      if (!res.ok) {
-        const data = await res.json();
-        throw new Error(data.error || '생성 실패');
-      }
-      
-      setShowUserModal(false);
-      setNewUser({
-        companyId: '',
-        loginId: '',
-        password: '',
-        name: '',
-        email: '',
-        phone: '',
-        department: '',
-        userType: 'user',
-        storeCodes: '',
-      });
-      loadUsers();
-      showAlert('성공', '사용자가 생성되었습니다.', 'success');
-    } catch (error: any) {
-      showAlert('오류', error.message || '생성 실패', 'error');
-    }
-  };
-
-  const handleResetPassword = async (userId: string, userName: string) => {
-    showConfirm(
-      '비밀번호 초기화',
-      `${userName}님의 비밀번호를 초기화하시겠습니까?`,
-      async () => {
-        closeModal();
-        try {
-          const token = localStorage.getItem('token');
-          const res = await fetch(`/api/admin/users/${userId}/reset-password`, {
-            method: 'POST',
-            headers: { 'Authorization': `Bearer ${token}` }
-          });
-          
-          if (!res.ok) throw new Error('초기화 실패');
-          
-          const data = await res.json();
-          showPasswordModal(data.tempPassword, data.smsSent, data.phone);
-        } catch (error) {
-          showAlert('오류', '비밀번호 초기화 실패', 'error');
-        }
-      }
-    );
-  };
-
-  const handleDeleteUser = async (userId: string, userName: string) => {
-    showConfirm(
-      '사용자 삭제',
-      `${userName}님을 삭제하시겠습니까?\n이 작업은 되돌릴 수 없습니다.`,
-      async () => {
-        closeModal();
-        try {
-          const token = localStorage.getItem('token');
-          const res = await fetch(`/api/admin/users/${userId}`, {
-            method: 'DELETE',
-            headers: { 'Authorization': `Bearer ${token}` }
-          });
-          
-          if (!res.ok) throw new Error('삭제 실패');
-          
-          loadUsers();
-          showAlert('성공', '삭제되었습니다.', 'success');
-        } catch (error) {
-          showAlert('오류', '삭제 실패', 'error');
-        }
-      }
-    );
-  };
-
-  const handleEditUser = (user: any) => {
-    setEditingUser({
-      ...user,
-      storeCodes: user.store_codes ? user.store_codes.join(', ') : ''
-    });
-  };
-
-  const handleUpdateUser = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!editingUser) return;
-
-    try {
-      const token = localStorage.getItem('token');
-      const res = await fetch(`/api/admin/users/${editingUser.id}`, {
-        method: 'PUT',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`
-        },
-        body: JSON.stringify({
-          name: editingUser.name,
-          email: editingUser.email,
-          phone: editingUser.phone,
-          department: editingUser.department,
-          userType: editingUser.user_type,
-          status: editingUser.status,
-          storeCodes: editingUser.storeCodes ? editingUser.storeCodes.split(',').map((s: string) => s.trim()).filter(Boolean) : null,
-          lineGroupId: editingUser.line_group_id || null,
-          optOut080Number: editingUser.opt_out_080_number || null,
-          optOutAutoSync: editingUser.opt_out_auto_sync || false
-        })
-      });
-
-      if (!res.ok) throw new Error('수정 실패');
-
-      // ★ 2026-08-18 로그인 인증번호는 별도 endpoint — 변경 시 신뢰 기기 해제 + 전용 이력이 남는다
-      const mfaRes = await fetch(`/api/admin/users/${editingUser.id}/mfa-phone`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-        body: JSON.stringify({ mfaPhone: editingUser.mfa_phone || '' }),
-      });
-      if (!mfaRes.ok) {
-        const mfaErr = await mfaRes.json().catch(() => ({} as any));
-        setEditingUser(null);
-        loadUsers();
-        showAlert('일부 저장됨', mfaErr?.error || '로그인 인증번호는 저장하지 못했습니다.', 'error');
-        return;
-      }
-
-      setEditingUser(null);
-      loadUsers();
-      showAlert('성공', '사용자 정보가 수정되었습니다.', 'success');
-    } catch (error) {
-      showAlert('오류', '수정 실패', 'error');
-    }
-  };
-
-  const handleDeactivateCompany = (company: Company) => {
-    showConfirm(
-      '고객사 해지',
-      `${company.company_name}을(를) 해지하시겠습니까?\n해당 회사의 모든 사용자도 비활성화됩니다.`,
-      async () => {
-        closeModal();
-        try {
-          const token = localStorage.getItem('token');
-          const res = await fetch(`/api/admin/companies/${company.id}`, {
-            method: 'DELETE',
-            headers: { 'Authorization': `Bearer ${token}` }
-          });
-          
-          if (!res.ok) {
-            const data = await res.json();
-            throw new Error(data.error || '해지 실패');
-          }
-          
-          loadData();
-          loadUsers();
-          showAlert('성공', '고객사가 해지되었습니다.', 'success');
-        } catch (error: any) {
-          showAlert('오류', error.message || '해지 실패', 'error');
-        }
-      }
-    );
-  };
-
-  // ★ 2026-08-18 회선 정책 저장 — 회사 수정과 별도 endpoint(파라미터 40개 라우트에 끼우면 번호가 밀린다)
-  const handleSaveLinePolicy = async () => {
-    if (!editCompany.id || !linePolicy) return;
-    setLinePolicySaving(true);
-    try {
-      const token = localStorage.getItem('token');
-      const res = await fetch(`/api/admin/companies/${editCompany.id}/sender-line-policy`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-        body: JSON.stringify({
-          subscriberType: linePolicy.subscriberType || '',
-          mobileLineLimit: linePolicy.mobileLineLimit,
-          landlineLineLimit: linePolicy.landlineLineLimit,
-        }),
-      });
-      const data = await res.json().catch(() => ({} as any));
-      if (!res.ok) {
-        showAlert('오류', data?.error || '회선 정책 저장에 실패했습니다.', 'error');
-        return;
-      }
-      const refreshed = await fetch(`/api/admin/companies/${editCompany.id}/sender-line-policy`, {
-        headers: { 'Authorization': `Bearer ${token}` },
-      });
-      if (refreshed.ok) setLinePolicy(await refreshed.json());
-      showAlert('성공', '발신번호 회선 정책이 저장되었습니다.', 'success');
-    } catch {
-      showAlert('오류', '회선 정책 저장에 실패했습니다.', 'error');
-    } finally {
-      setLinePolicySaving(false);
-    }
-  };
-
-  const handleEditCompany = async (company: Company) => {
-    try {
-      const token = localStorage.getItem('token');
-      // ★ 2026-08-18 발신번호 회선 정책 — 현재 상한과 보유 수를 함께 읽는다(판정과 같은 수를 본다)
-      setLinePolicy(null);
-      fetch(`/api/admin/companies/${company.id}/sender-line-policy`, { headers: { 'Authorization': `Bearer ${token}` } })
-        .then((r) => (r.ok ? r.json() : null))
-        .then((j) => { if (j) setLinePolicy(j); })
-        .catch(() => {});
-      // ★ 2026-07-21 문안 참조 업종 목록 — 정적 SSOT라 최초 1회만 로드(회사와 무관)
-      if (industryOptions.length === 0) {
-        fetch('/api/admin/industry-codes', { headers: { 'Authorization': `Bearer ${token}` } })
-          .then((r) => (r.ok ? r.json() : null))
-          .then((j) => { if (j?.industries) setIndustryOptions(j.industries); })
-          .catch(() => {});
-      }
-      const [res, fieldsRes, enabledRes, dataCheckRes, cardsRes] = await Promise.all([
-        fetch(`/api/admin/companies/${company.id}`, {
-          headers: { 'Authorization': `Bearer ${token}` }
-        }),
-        fetch('/api/admin/standard-fields', {
-          headers: { 'Authorization': `Bearer ${token}` }
-        }),
-        fetch(`/api/admin/companies/${company.id}/fields`, {
-          headers: { 'Authorization': `Bearer ${token}` }
-        }),
-        fetch(`/api/admin/companies/${company.id}/field-data-check`, {
-          headers: { 'Authorization': `Bearer ${token}` }
-        }),
-        fetch(`/api/admin/companies/${company.id}/dashboard-cards`, {
-          headers: { 'Authorization': `Bearer ${token}` }
-        })
-      ]);
-      if (res.ok) {
-        const data = await res.json();
-        const c = data.company;
-        if (fieldsRes.ok) {
-          const fData = await fieldsRes.json();
-          setStandardFields(fData.fields || []);
-        }
-        if (dataCheckRes.ok) {
-          const dcData = await dataCheckRes.json();
-          setFieldDataCheck(dcData.dataCheck || {});
-        }
-        // D41 카드 설정 로드
-        if (cardsRes.ok) {
-          const cardsData = await cardsRes.json();
-          setDashboardCardIds(cardsData.selectedCards || []);
-          setDashboardCardCount(cardsData.selectedCards?.length || 0);
-          // ★ D80: API 응답의 동적 필터링된 풀 사용 (고객사 DB 데이터 유무 기반)
-          if (cardsData.pool && Array.isArray(cardsData.pool)) {
-            setDashboardCardPool(cardsData.pool.map((c: any) => ({
-              cardId: c.cardId,
-              label: c.label,
-              emoji: c.emoji || '📋',
-              description: c.description,
-            })));
-          }
-        } else {
-          setDashboardCardIds([]);
-          setDashboardCardCount(0);
-          setDashboardCardPool([]);
-        }
-        setEditCompany({
-          id: c.id,
-          companyName: c.company_name || '',
-          contactName: c.contact_name || '',
-          contactEmail: c.contact_email || '',
-          contactPhone: c.contact_phone || '',
-          status: c.status || 'active',
-          planId: c.plan_id || '',
-          rejectNumber: c.reject_number || '',
-          businessNumber: c.business_number || '',
-          ceoName: c.ceo_name || '',
-          businessType: c.business_type || '',
-          businessItem: c.business_item || '',
-          industryCode: c.industry_code || '',
-          address: c.address || '',
-          sendHourStart: c.send_start_hour ?? 9,
-          sendHourEnd: c.send_end_hour ?? 21,
-          dailyLimit: c.daily_limit_per_customer ?? 0,
-          duplicateDays: c.duplicate_prevention_days ?? 7,
-          // ★ 2026-07-26 미설정(NULL)을 기본단가로 위장하지 않는다 — 그대로 저장하면 계약과 다른 단가가 굳는다.
-          //   ★ 전환 전(vat_included) 회사는 저장값이 **VAT 포함가**다. 그걸 "VAT 별도" 칸에 그대로 채우면
-          //     수정 없이 저장만 해도 그 숫자가 공급가로 재해석돼 10% 과청구가 된다(Codex #1).
-          //     그래서 공급가 상당액(÷1.1)으로 환산해 채운다 — 그대로 저장하면 지불액이 그대로 유지된다.
-          ...toSupplyInputs(c),
-          unitPriceBasis: c.unit_price_basis === 'vat_excluded' ? 'vat_excluded' : 'vat_included',
-          billingType: c.billing_type || 'postpaid',
-          balance: Number(c.balance) || 0,
-          balanceAdjustType: 'charge' as 'charge' | 'deduct',
-          balanceAdjustAmount: '',
-          balanceAdjustReason: '',
-          balanceAdjusting: false,
-          targetStrategy: c.target_strategy || 'balanced',
-          crossCategoryAllowed: c.cross_category_allowed ?? true,
-          excludedSegments: c.excluded_segments || [],
-          approvalRequired: c.approval_required ?? false,
-          allowCallbackSelfRegister: c.allow_callback_self_register ?? false,
-          maxUsers: c.max_users ?? 5,
-          sessionTimeoutMinutes: c.session_timeout_minutes ?? 480,
-          storeCodeList: c.store_code_list || [],
-          newStoreCode: '',
-          newExcludedSegment: '',
-          lineGroupId: c.line_group_id || '',
-          kakaoEnabled: c.kakao_enabled ?? false,
-          userIsolationEnabled: c.user_isolation_enabled ?? false,  // ★ D162-3 수신거부 사용자격리
-          usageType: c.usage_type || 'web',  // ★ 2026-07-03 사용구분
-          useAiOrchestrator: c.use_ai_orchestrator ?? false,  // ★ D190 #2 AI Orchestrator
-          cdpAutoExecuteEnabled: c.cdp_auto_execute_enabled ?? false,  // ★ 2026-06-06 자동마케팅 자율발송 게이트
-          cdpAutoExecuteMaxRecipients: c.cdp_auto_execute_max_recipients ?? 1000,
-          cdpAutoExecuteMaxCostKrw: c.cdp_auto_execute_max_cost_krw ?? 50000,
-          cdpAutoExecuteMaxRisk: c.cdp_auto_execute_max_risk ?? 'low',
-          agencySendEnabled: c.agency_send_enabled ?? false,  // ★ 2026-08-22 대행발송 스위치
-          subscriptionStatus: c.subscription_status || 'trial',
-          // ★ CT-17
-          trialExpiresAt: c.trial_expires_at || '',
-          planCode: c.plan_code || '',
-          // ★ D219+ Part 2: AI 오퍼레이션 무료체험 컬럼 (DB ALTER 미실행 회사 = '' 정합)
-          aiOperatorTrialStartedAt: c.ai_operator_trial_started_at || '',
-          aiOperatorTrialUntil: c.ai_operator_trial_until || '',
-        });
-        setEditCompanyTab('basic');
-        // ★ 2026-07-03 에이전트 발송ID 매핑 로드 (사용구분 관리)
-        setNewAgentSendId('');
-        setNewAgentMemo('');
-        loadAgentIds(c.id);
-        setShowEditCompanyModal(true);
-      }
-    } catch (error) {
-      console.error('회사 정보 로드 실패:', error);
     }
   };
 
@@ -4120,511 +2631,22 @@ const handleApproveRequest = async (id: string) => {
   const [btBizDraft, setBtBizDraft] = useState<any>({});
   const [btBizExtracting, setBtBizExtracting] = useState(false);
 
-  // ★ 2026-07-28 사업자등록증 자동입력 — 파일 선택 즉시 판독해 입력칸을 채운다(저장은 사람이 확정)
-  const handleBizRegistrationFile = async (file: File | null) => {
-    if (!file) return;
-    setBtBizExtracting(true);
-    try {
-      const token = localStorage.getItem('token');
-      const form = new FormData();
-      form.append('image', file);
-      const res = await fetch('/api/admin/billing/biz-registration-extract', {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${token}` },
-        body: form,
-      });
-      const data = await res.json();
-      if (!res.ok || !data?.success) throw new Error(data?.error || '사업자등록증 판독 실패');
-      const info = data.info || {};
-      setBtBizDraft((prev: any) => ({
-        ...prev,
-        taxbill_biz_number: info.biz_number || prev.taxbill_biz_number || '',
-        taxbill_company_name: info.company_name || prev.taxbill_company_name || '',
-        taxbill_ceo_name: info.ceo_name || prev.taxbill_ceo_name || '',
-        taxbill_address: info.address || prev.taxbill_address || '',
-        taxbill_biz_type: info.biz_type || prev.taxbill_biz_type || '',
-        taxbill_biz_item: info.biz_item || prev.taxbill_biz_item || '',
-      }));
-      showAlert('완료', '사업자등록증에서 정보를 읽어 입력칸에 채웠습니다. 내용을 확인한 뒤 적용해 주세요.', 'success');
-    } catch (e: any) {
-      showAlert('오류', e?.message || '사업자등록증 판독 실패', 'error');
-    } finally {
-      setBtBizExtracting(false);
-    }
-  };
-
-  const loadBillingTab = async (companyId: string) => {
-    if (!companyId) return;
-    setBtLoading(true);
-    try {
-      const token = localStorage.getItem('token');
-      const [sRes, uRes] = await Promise.all([
-        fetch(`/api/admin/billing/company-billing-settings/${companyId}`, { headers: { Authorization: `Bearer ${token}` } }),
-        fetch(`/api/admin/billing/company-users/${companyId}`, { headers: { Authorization: `Bearer ${token}` } }),
-      ]);
-      const sData = await sRes.json();
-      const uData = await uRes.json();
-      if (!sRes.ok) throw new Error(sData?.error || '정산 설정 조회 실패');
-      const contacts: any[] = Array.isArray(sData.contacts) ? sData.contacts : [];
-      setBtRecipients(Array.isArray(sData.recipients) ? sData.recipients : []);
-      const companyC = contacts.find((c: any) => !c.user_id);
-      setBtSettings({
-        issue_scope: sData?.settings?.issueScope || 'combined',
-        taxbill_day_policy: sData?.settings?.taxbillDayPolicy || 'last_day',
-        require_taxbill_remark: sData?.settings?.requireTaxbillRemark === true,
-        manual_billing: sData?.settings?.manualBilling === true,
-      });
-      setBtCompanyContact({
-        name: companyC?.contact_name || '', email: companyC?.contact_email || '',
-        taxbill_biz_number: companyC?.taxbill_biz_number || '', taxbill_company_name: companyC?.taxbill_company_name || '',
-        taxbill_ceo_name: companyC?.taxbill_ceo_name || '', taxbill_address: companyC?.taxbill_address || '',
-        taxbill_biz_type: companyC?.taxbill_biz_type || '', taxbill_biz_item: companyC?.taxbill_biz_item || '',
-      });
-      const users: any[] = Array.isArray(uData) ? uData : [];
-      setBtAccounts(users.map((u: any) => {
-        const c: any = contacts.find((x: any) => String(x.user_id) === String(u.id)) || {};
-        return {
-          user_id: u.id, name: u.name, login_id: u.login_id,
-          contact_name: c.contact_name || '', contact_email: c.contact_email || '',
-          taxbill_biz_number: c.taxbill_biz_number || '', taxbill_company_name: c.taxbill_company_name || '',
-          taxbill_ceo_name: c.taxbill_ceo_name || '', taxbill_address: c.taxbill_address || '',
-          taxbill_biz_type: c.taxbill_biz_type || '', taxbill_biz_item: c.taxbill_biz_item || '',
-        };
-      }));
-    } catch (e: any) {
-      showAlert('오류', e?.message || '정산 설정을 불러오지 못했습니다.', 'error');
-    } finally {
-      setBtLoading(false);
-    }
-  };
-
-  const handleSaveBillingTab = async () => {
-    if (!editCompany.id) return;
-    // ★ 2026-07-31 이메일 검증은 여기서 하지 않는다 — 수신자는 `billing_recipients` 편집기가
-    //   행 단위로 즉시 저장하며 형식 검증도 그쪽(서버 CT 포함)에서 한다.
-    setBtSaving(true);
-    try {
-      const token = localStorage.getItem('token');
-      const res = await fetch(`/api/admin/billing/company-billing-settings/${editCompany.id}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-        body: JSON.stringify({
-          issue_scope: btSettings.issue_scope,
-          taxbill_day_policy: btSettings.taxbill_day_policy,
-          require_taxbill_remark: btSettings.require_taxbill_remark,
-          manual_billing: btSettings.manual_billing,
-          // 회사 레벨은 담당자 + 계산서 사업자를 함께 보낸다. 사업자를 비워 보내면 그대로 NULL이 되고,
-          // 발급 시 회사 기본정보(companies)로 내려간다 — 우선순위는 SoT §5 참조.
-          // ★ 2026-07-31 `email`은 더 이상 보내지 않는다 — 수신자 원장이 `billing_recipients`로 옮겨졌고,
-          //   이 컬럼을 계속 채우면 "어느 쪽이 진짜 수신자인가"가 다시 갈린다(저장할 때마다 NULL로 빠진다).
-          company_contact: {
-            name: btCompanyContact.name,
-            taxbill_biz_number: btCompanyContact.taxbill_biz_number, taxbill_company_name: btCompanyContact.taxbill_company_name,
-            taxbill_ceo_name: btCompanyContact.taxbill_ceo_name, taxbill_address: btCompanyContact.taxbill_address,
-            taxbill_biz_type: btCompanyContact.taxbill_biz_type, taxbill_biz_item: btCompanyContact.taxbill_biz_item,
-          },
-          // 토글이 전체 발급이어도 계정 담당자 입력분은 보존 저장한다 — 토글을 되돌렸을 때 다시 입력하지 않게.
-          account_contacts: btAccounts.map((a) => ({
-            // label = 사업자번호 검증 오류에 "어느 계정인지"를 담기 위한 표시용(서버 저장 대상 아님).
-            user_id: a.user_id, label: a.name || a.login_id, name: a.contact_name,
-            taxbill_biz_number: a.taxbill_biz_number, taxbill_company_name: a.taxbill_company_name,
-            taxbill_ceo_name: a.taxbill_ceo_name, taxbill_address: a.taxbill_address,
-            taxbill_biz_type: a.taxbill_biz_type, taxbill_biz_item: a.taxbill_biz_item,
-          })),
-        }),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data?.error || '정산 설정 저장 실패');
-      showAlert('성공', '정산 설정이 저장되었습니다. 이메일이 등록된 회사는 거래내역서가 자동 발송됩니다.', 'success');
-    } catch (e: any) {
-      showAlert('오류', e?.message || '정산 설정 저장 실패', 'error');
-    } finally {
-      setBtSaving(false);
-    }
-  };
-
-  // ★ 2026-06-08: 30일 PRO 무료체험(grant-trial/revoke-trial) 제거 — BASIC 1개월 무료체험으로 통합(handleGrantBasicTrial/handleRevokeBasicTrial).
-
-  // ★ 2026-06-08: BASIC 1개월 무료체험 부여 (PRO 체험 + AI op overlay 체험 대체)
-  //   plan=BASIC + base 크레딧(750) 30일 → trial-downgrade-worker가 30일 후 FREE 자동 강등.
-  const handleGrantBasicTrial = () => {
-    if (!editCompany.id) return;
-    // ★ 2026-07-28 같은 버튼이 신규 부여와 추가 부여(연장) 두 가지를 한다 — 문구로 구분한다.
-    const isExtending = editCompany.subscriptionStatus === 'trial';
-    showConfirm(
-      isExtending ? '무료체험 1개월 추가 부여' : '무료체험 1개월 부여',
-      isExtending
-        ? `"${editCompany.companyName}" 의 무료체험을 1개월 더 연장할까요?\n\n· 남은 기간에 30일이 더해집니다\n· 크레딧은 다시 채우지 않습니다(중복 지급 방지)`
-        : `"${editCompany.companyName}" 에 1개월 무료체험을 부여할까요?\n\n· 베이직과 같은 기능 + 크레딧 1개월 개방 (요금 0원)\n· 30일 후 자동으로 미가입(FREE)으로 강등`,
-      async () => {
-        try {
-          const token = localStorage.getItem('token');
-          const res = await fetch(`/api/companies/${editCompany.id}/grant-basic-trial`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-            body: JSON.stringify({ days: 30 }),
-          });
-          const data = await res.json();
-          if (!res.ok) throw new Error(data?.error || 'BASIC 무료체험 부여 실패');
-          if (data.company) {
-            setEditCompany((prev) => ({
-              ...prev,
-              subscriptionStatus: data.company.subscription_status || 'trial',
-              trialExpiresAt: data.company.trial_expires_at || '',
-              planId: data.company.plan_id || prev.planId,
-              planCode: data.company.plan_code || 'TRIAL',
-            }));
-          }
-          showAlert('성공', data.message || 'BASIC 무료체험이 부여되었습니다.', 'success');
-          loadData();
-        } catch (err: any) {
-          showAlert('실패', err?.message || 'BASIC 무료체험 부여 실패', 'error');
-        }
-      },
-    );
-  };
-
-  // ★ 2026-06-08: BASIC 무료체험 즉시 취소 (FREE 강등)
-  const handleRevokeBasicTrial = () => {
-    if (!editCompany.id) return;
-    showConfirm(
-      'BASIC 무료체험 취소',
-      `"${editCompany.companyName}" 의 무료체험을 즉시 취소하고 미가입(FREE)으로 강등할까요?`,
-      async () => {
-        try {
-          const token = localStorage.getItem('token');
-          const res = await fetch(`/api/companies/${editCompany.id}/revoke-basic-trial`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-          });
-          const data = await res.json();
-          if (!res.ok) throw new Error(data?.error || 'BASIC 무료체험 취소 실패');
-          if (data.company) {
-            setEditCompany((prev) => ({
-              ...prev,
-              subscriptionStatus: data.company.subscription_status || 'trial_expired',
-              planId: data.company.plan_id || prev.planId,
-              planCode: data.company.plan_code || 'FREE',
-            }));
-          }
-          showAlert('완료', data.message || '무료체험이 취소되었습니다.', 'success');
-          loadData();
-        } catch (err: any) {
-          showAlert('실패', err?.message || 'BASIC 무료체험 취소 실패', 'error');
-        }
-      },
-    );
-  };
-
-  // ★ 2026-07-26 단가 저장 — 기본정보 수정과 분리된 전용 경로.
-  //   저장 성공 시 그 회사의 기준이 'vat_excluded'로 전환되므로, 화면 상태도 즉시 맞춰
-  //   같은 화면에서 두 번 저장했을 때 안내 문구가 어긋나지 않게 한다.
-  const handleSaveUnitPrices = async () => {
-    if (!editCompany?.id) return;
-    setSavingUnitPrices(true);
-    try {
-      const res = await unitPriceApi.save(
-        editCompany.id,
-        {
-          sms: editCompany.costPerSms,
-          lms: editCompany.costPerLms,
-          mms: editCompany.costPerMms,
-          kakao: editCompany.costPerKakao,
-          brand: editCompany.costPerBrand,
-          brandNonfriend: editCompany.costPerBrandNonfriend,
-          testSms: editCompany.costPerTestSms,
-          testLms: editCompany.costPerTestLms,
-        },
-        applyUnitPriceToAgents,
-      );
-      if (!res.data?.success) throw new Error(res.data?.error || '단가 저장 실패');
-      // ★ 2026-07-26 서버가 반올림해 실제로 저장한 값을 화면에 되돌린다(Codex #10).
-      //   요청값을 그대로 두면 7.199처럼 입력한 뒤 화면과 DB가 갈린다.
-      const saved = res.data.company || {};
-      setEditCompany((prev: any) => ({
-        ...prev,
-        ...toSupplyInputs({ ...saved, unit_price_basis: 'vat_excluded' }),
-        unitPriceBasis: 'vat_excluded',
-      }));
-      setApplyUnitPriceToAgents(false);
-      setBillingToast({ msg: res.data.message || '단가를 저장했습니다.', type: 'success' });
-      await loadData();
-    } catch (err: any) {
-      setBillingToast({ msg: err?.response?.data?.error || err?.message || '단가 저장 실패', type: 'error' });
-    } finally {
-      setSavingUnitPrices(false);
-    }
-  };
-
-  const handleUpdateCompany = async (e: React.FormEvent) => {
-    e.preventDefault();
-    try {
-      const token = localStorage.getItem('token');
-      const [res, fieldsRes, cardsRes] = await Promise.all([
-        fetch(`/api/admin/companies/${editCompany.id}`, {
-          method: 'PUT',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${token}`
-          },
-          body: JSON.stringify(editCompany)
-        }),
-        fetch(`/api/admin/companies/${editCompany.id}/fields`, {
-          method: 'PUT',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${token}`
-          },
-          body: JSON.stringify({ enabledFields })
-        }),
-        fetch(`/api/admin/companies/${editCompany.id}/dashboard-cards`, {
-          method: 'PUT',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${token}`
-          },
-          body: JSON.stringify({ cards: dashboardCardIds, cardCount: dashboardCardIds.length })
-        })
-      ]);
-      
-      if (!res.ok) {
-        const data = await res.json();
-        throw new Error(data.error || '수정 실패');
-      }
-      
-      setShowEditCompanyModal(false);
-      loadData();
-      showAlert('성공', '고객사 정보가 수정되었습니다.', 'success');
-    } catch (error: any) {
-      showAlert('오류', error.message || '수정 실패', 'error');
-    }
-  };
-
-  const openCancelModal = (id: string, name: string) => {
-    setCancelTarget({ id, name });
-    setCancelReason('');
-    setShowCancelModal(true);
-  };
-
-  const handleCancelCampaign = async () => {
-    if (!cancelTarget || !cancelReason.trim()) {
-      showAlert('오류', '취소 사유를 입력해주세요.', 'error');
-      return;
-    }
-
-    try {
-      const token = localStorage.getItem('token');
-      const res = await fetch(`/api/admin/campaigns/${cancelTarget.id}/cancel`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`
-        },
-        body: JSON.stringify({ reason: cancelReason })
-      });
-
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        throw new Error(data.error || '취소 실패');
-      }
-
-      setShowCancelModal(false);
-      setCancelTarget(null);
-      setCancelReason('');
-      loadScheduledCampaigns();
-      // ★ 2026-09-26 한줄로 V2 F35 — 서버 문구를 그대로 보여 준다(적재 중이던 캠페인은 워커가 결말을 정한다는 안내)
-      showAlert('성공', data.message || '예약이 취소되었습니다.', 'success');
-    } catch (error: any) {
-      showAlert('오류', error.message || '취소 실패', 'error');
-    }
-  };
-
-  const handleCreateCallback = async (e: React.FormEvent) => {
-    e.preventDefault();
-    try {
-      const token = localStorage.getItem('token');
-      const res = await fetch('/api/admin/callback-numbers', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`
-        },
-        body: JSON.stringify(newCallback)
-      });
-      
-      if (!res.ok) {
-        const data = await res.json();
-        throw new Error(data.error || '등록 실패');
-      }
-      
-      setShowCallbackModal(false);
-      setNewCallback({ companyId: '', phone: '', label: '', isDefault: false });
-      loadCallbackNumbers();
-      showAlert('성공', '발신번호가 등록되었습니다.', 'success');
-    } catch (error: any) {
-      showAlert('오류', error.message || '등록 실패', 'error');
-    }
-  };
-
   const [editingCallback, setEditingCallback] = useState<any>(null);
-
-  const handleUpdateCallback = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!editingCallback) return;
-    try {
-      const token = localStorage.getItem('token');
-      const res = await fetch(`/api/admin/callback-numbers/${editingCallback.id}`, {
-        method: 'PUT',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`
-        },
-        body: JSON.stringify({ phone: editingCallback.phone, label: editingCallback.label })
-      });
-      if (!res.ok) throw new Error('수정 실패');
-      setEditingCallback(null);
-      loadCallbackNumbers();
-      showAlert('성공', '발신번호가 수정되었습니다.', 'success');
-    } catch (error) {
-      showAlert('오류', '수정 실패', 'error');
-    }
-  };
-
-  const handleDeleteCallback = (id: string, phone: string) => {
-    showConfirm(
-      '발신번호 삭제',
-      `${phone} 번호를 삭제하시겠습니까?`,
-      async () => {
-        closeModal();
-        try {
-          const token = localStorage.getItem('token');
-          const res = await fetch(`/api/admin/callback-numbers/${id}`, {
-            method: 'DELETE',
-            headers: { 'Authorization': `Bearer ${token}` }
-          });
-          
-          if (!res.ok) throw new Error('삭제 실패');
-          
-          loadCallbackNumbers();
-          showAlert('성공', '삭제되었습니다.', 'success');
-        } catch (error) {
-          showAlert('오류', '삭제 실패', 'error');
-        }
-      }
-    );
-  };
-
-  const handleSetDefault = async (id: string) => {
-    try {
-      const token = localStorage.getItem('token');
-      const res = await fetch(`/api/admin/callback-numbers/${id}/default`, {
-        method: 'PUT',
-        headers: { 'Authorization': `Bearer ${token}` }
-      });
-      
-      if (!res.ok) throw new Error('설정 실패');
-      
-      loadCallbackNumbers();
-      showAlert('성공', '대표번호로 설정되었습니다.', 'success');
-    } catch (error) {
-      showAlert('오류', '설정 실패', 'error');
-    }
-  };
-
-  const handleCreatePlan = async (e: React.FormEvent) => {
-    e.preventDefault();
-    try {
-      const token = localStorage.getItem('token');
-      const res = await fetch('/api/admin/plans', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`
-        },
-        body: JSON.stringify(newPlan)
-      });
-      
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || '등록 실패');
-      
-      setShowPlanModal(false);
-      setNewPlan({ planCode: '', planName: '', maxCustomers: 1000, monthlyPrice: 0 });
-      loadPlans();
-      showAlert('성공', '요금제가 등록되었습니다.', 'success');
-    } catch (error: any) {
-      showAlert('오류', error.message || '등록 실패', 'error');
-    }
-  };
-
-  const handleUpdatePlan = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!editingPlan) return;
-    
-    try {
-      const token = localStorage.getItem('token');
-      const res = await fetch(`/api/admin/plans/${editingPlan.id}`, {
-        method: 'PUT',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`
-        },
-        body: JSON.stringify({
-          planName: editingPlan.plan_name,
-          maxCustomers: editingPlan.max_customers,
-          monthlyPrice: editingPlan.monthly_price,
-          isActive: editingPlan.is_active,
-          aiCreditsPerMonth: editingPlan.ai_credits_per_month,
-        })
-      });
-      
-      if (!res.ok) throw new Error('수정 실패');
-      
-      setEditingPlan(null);
-      loadPlans();
-      showAlert('성공', '수정되었습니다.', 'success');
-    } catch (error) {
-      showAlert('오류', '수정 실패', 'error');
-    }
-  };
-
-  const handleDeletePlan = (id: string, name: string) => {
-    showConfirm(
-      '요금제 삭제',
-      `"${name}" 요금제를 삭제하시겠습니까?`,
-      async () => {
-        closeModal();
-        try {
-          const token = localStorage.getItem('token');
-          const res = await fetch(`/api/admin/plans/${id}`, {
-            method: 'DELETE',
-            headers: { 'Authorization': `Bearer ${token}` }
-          });
-          
-          const data = await res.json();
-          if (!res.ok) throw new Error(data.error || '삭제 실패');
-          
-          loadPlans();
-          showAlert('성공', '삭제되었습니다.', 'success');
-        } catch (error: any) {
-          showAlert('오류', error.message || '삭제 실패', 'error');
-        }
-      }
-    );
-  };
 
   const handleLogout = () => {
     logout();
     navigate('/login');
   };
 
+  // ★ 2026-10-09 슈퍼관리자 다듬기 — 알약 = 공용 부품(admin-ui PILL 의미 색)
   const getStatusBadge = (status: string) => {
-    const styles: Record<string, string> = {
-      trial: 'bg-yellow-100 text-yellow-800',
-      active: 'bg-green-100 text-green-800',
-      suspended: 'bg-red-100 text-red-800',
-      terminated: 'bg-gray-100 text-gray-800',
-      locked: 'bg-red-100 text-red-800',
-      dormant: 'bg-gray-100 text-gray-800',
+    const tones: Record<string, keyof typeof PILL> = {
+      trial: 'blue',
+      active: 'green',
+      suspended: 'rose',
+      terminated: 'gray',
+      locked: 'rose',
+      dormant: 'gray',
     };
     const labels: Record<string, string> = {
       trial: '체험',
@@ -4634,65 +2656,33 @@ const handleApproveRequest = async (id: string) => {
       locked: '잠금',
       dormant: '휴면',
     };
-    return (
-      <span className={`px-2 py-1 rounded-full text-xs font-medium ${styles[status] || styles.active}`}>
-        {labels[status] || status}
-      </span>
-    );
-  };
-
-  const getUserTypeBadge = (userType: string) => {
-    if (userType === 'admin') {
-      return <span className="px-2 py-1 rounded-full text-xs font-medium bg-purple-100 text-purple-800">관리자</span>;
-    }
-    return <span className="px-2 py-1 rounded-full text-xs font-medium bg-gray-100 text-gray-800">일반</span>;
-  };
-
-  // 필터링된 회사 목록 — D144 P9: 회사명 오름차순 정렬로 안정화 (수정 후 페이지 흔들림 방지)
-  const filteredCompanies = companies.filter((company) => {
-    const matchesSearch = companySearch === '' ||
-      company.company_code.toLowerCase().includes(companySearch.toLowerCase()) ||
-      company.company_name.toLowerCase().includes(companySearch.toLowerCase()) ||
-      (company.contact_name && company.contact_name.toLowerCase().includes(companySearch.toLowerCase()));
-
-    const matchesStatus = companyStatusFilter === 'all' || company.status === companyStatusFilter;
-
-    return matchesSearch && matchesStatus;
-  }).sort((a, b) => (a.company_name || '').localeCompare(b.company_name || '', 'ko'));
-
-  // 임시 비밀번호 생성
-  const generateTempPassword = () => {
-    const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789';
-    let password = '';
-    for (let i = 0; i < 8; i++) {
-      password += chars.charAt(Math.floor(Math.random() * chars.length));
-    }
-    setNewUser({ ...newUser, password });
+    return <AdminPill tone={tones[status] || 'green'}>{labels[status] || status}</AdminPill>;
   };
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-slate-50 flex items-center justify-center">
+      <div className="min-h-screen bg-[#f5f6f8] flex items-center justify-center">
         <div className="text-gray-500">로딩 중...</div>
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-slate-50">
+    <div className="min-h-screen bg-[#f5f6f8]">
       {/* 헤더 */}
-      <header className="bg-white/90 backdrop-blur-sm border-b border-gray-200 sticky top-0 z-40">
-        <div className="max-w-7xl mx-auto px-4 py-3.5 flex justify-between items-center">
+      {/* ★ 2026-10-09 슈퍼관리자 다듬기(Harold 목업 v2) — 구조 그대로 · 글씨 한 단계 작게 · 강조색 emerald 하나 */}
+      <header className="bg-white border-b border-gray-200 sticky top-0 z-40">
+        <div className="max-w-7xl mx-auto px-4 md:px-6 h-[52px] flex justify-between items-center">
         <div className="flex items-center gap-4">
-            <h1 className="text-lg font-bold tracking-tight text-gray-900 cursor-pointer hover:text-blue-600 transition-colors" onClick={() => window.location.reload()}>시스템 관리</h1>
+            <h1 className="text-base font-bold tracking-tight text-gray-900 cursor-pointer hover:text-emerald-700 transition-colors" onClick={() => window.location.reload()}>시스템 관리</h1>
             {/* ★ D152: ServiceSwitcher 제거 — hanjulDM 분리, admin.hanjuldm.kr 별도 도메인 */}
           </div>
-          <div className="flex items-center gap-4">
+          <div className="flex items-center gap-3.5">
             <SessionTimer />
-            <span className="text-sm text-gray-600">{user?.name}님</span>
+            <span className="text-[13px] text-gray-700">{user?.name}님</span>
             <button
               onClick={handleLogout}
-              className="text-sm text-gray-500 hover:text-gray-700"
+              className="whitespace-nowrap text-[13px] text-gray-500 hover:text-gray-800"
             >
               로그아웃
             </button>
@@ -4701,38 +2691,38 @@ const handleApproveRequest = async (id: string) => {
       </header>
 
       {/* 메인 */}
-      <main className="max-w-7xl mx-auto px-4 py-8">
+      <main className="max-w-7xl mx-auto px-4 md:px-6 pt-[18px] pb-10">
         {/* 통계 카드 */}
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-3 md:gap-4 mb-8">
-          <div className="bg-white rounded-2xl border border-gray-200/70 shadow-sm p-5 hover:shadow-md transition-shadow">
-            <div className="text-xs font-medium text-gray-500">전체 고객사</div>
-            <div className="text-3xl font-bold tracking-tight text-gray-900 mt-1 tabular-nums">{companies.length}</div>
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-3">
+          <div className="bg-white rounded-xl border border-gray-200/80 px-4 py-3.5">
+            <div className="text-xs text-gray-500">전체 고객사</div>
+            <div className="text-2xl font-extrabold tracking-tight text-gray-900 mt-0.5 tabular-nums">{companies.length}</div>
           </div>
-          <div className="bg-white rounded-2xl border border-gray-200/70 shadow-sm p-5 hover:shadow-md transition-shadow">
-            <div className="text-xs font-medium text-gray-500">활성 고객사</div>
-            <div className="text-3xl font-bold tracking-tight text-emerald-600 mt-1 tabular-nums">
+          <div className="bg-white rounded-xl border border-gray-200/80 px-4 py-3.5">
+            <div className="text-xs text-gray-500">활성 고객사</div>
+            <div className="text-2xl font-extrabold tracking-tight text-emerald-700 mt-0.5 tabular-nums">
               {companies.filter(c => c.status === 'active').length}
             </div>
           </div>
-          <div className="bg-white rounded-2xl border border-gray-200/70 shadow-sm p-5 hover:shadow-md transition-shadow">
-            <div className="text-xs font-medium text-gray-500">전체 사용자</div>
-            <div className="text-3xl font-bold tracking-tight text-blue-600 mt-1 tabular-nums">{users.length}</div>
+          <div className="bg-white rounded-xl border border-gray-200/80 px-4 py-3.5">
+            <div className="text-xs text-gray-500">전체 사용자</div>
+            <div className="text-2xl font-extrabold tracking-tight text-indigo-700 mt-0.5 tabular-nums">{users.length}</div>
           </div>
-          <div className="bg-white rounded-2xl border border-gray-200/70 shadow-sm p-5 hover:shadow-md transition-shadow">
-            <div className="text-xs font-medium text-gray-500">요금제</div>
-            <div className="text-3xl font-bold tracking-tight text-violet-600 mt-1 tabular-nums">{plans.length}<span className="text-lg text-gray-400 font-semibold">개</span></div>
+          <div className="bg-white rounded-xl border border-gray-200/80 px-4 py-3.5">
+            <div className="text-xs text-gray-500">요금제</div>
+            <div className="text-2xl font-extrabold tracking-tight text-violet-700 mt-0.5 tabular-nums">{plans.length}<span className="text-[13px] text-gray-400 font-semibold ml-px">개</span></div>
           </div>
         </div>
 
         {/* 드롭다운 그룹 메뉴 */}
-        <div ref={menuRef} className="bg-white rounded-2xl border border-gray-200/70 shadow-sm mb-6">
-          <div className="px-3 py-2 flex items-center gap-1 flex-wrap">
+        <div ref={menuRef} className="bg-white rounded-xl border border-gray-200/80 mb-3">
+          <div className="p-1.5 flex items-center gap-0.5 flex-wrap">
             {[
               // ★ 2026-10-03 (Harold) 4묶음 → 7묶음 · 항목 삭제 0 · key 변경 0(설계서 docs/2026-10-03-admin-dashboard-split-design.md §2).
               //   묶음의 「활성」은 항목 key 에서 계산한다 — 그전에는 묶음마다 탭 목록(tabs)을 손으로 따로 적어
               //   「시스템」 목록에 금칙어 · 국외 접근 통제가 빠져 그 화면을 열어도 묶음에 불이 안 들어왔다.
               {
-                label: '고객 관리', color: 'blue',
+                label: '고객 관리',
                 items: [
                   { key: 'companies', label: '고객사 관리' },
                   { key: 'users', label: '사용자 관리' },
@@ -4740,12 +2730,12 @@ const handleApproveRequest = async (id: string) => {
                   ...(diagnosisAllowed ? [{ key: 'marketingDiagnosis', label: '신규마케팅진단', badge: diagnosisBadge }] : []),
                   // ★ 2026-10-07 (Harold) 소개 방문 · 시연 요청 = 허용 계정(기본 ceo · suran)에만 노출
                   ...(introLeadsAllowed ? [{ key: 'introLeads', label: '소개 방문 · 시연 요청' }] : []),
-                  // ★ 2026-08-24: AI 영업 = 허용 계정(★1003 ceo · suran)에만 노출 · 별도 모달(탭 아님 — 닫으면 고객사 탭 복귀)
-                  ...(outreachAllowed ? [{ key: 'salesOutreach', label: 'AI 영업', onClick: () => setOutreachOpen(true) }] : []),
+                  // ★ 2026-08-24: AI 영업 = 허용 계정(★1003 ceo · suran)에만 노출 · ★ 2026-10-09 별도 페이지(/admin/outreach · 뒤로가기 = 이 화면)
+                  ...(outreachAllowed ? [{ key: 'salesOutreach', label: 'AI 영업', onClick: () => navigate('/admin/outreach') }] : []),
                 ],
               },
               {
-                label: '발송 관리', color: 'emerald',
+                label: '발송 관리',
                 items: [
                   // ★ 2026-08-08 상단 메뉴는 **두 축의 합** — "발신번호 관리에 볼 일 N건"이 여기선 맞는 말이다.
                   //   화면에 보이는 두 탭 뱃지의 합으로 만든다(서버 total을 따로 받으면 뱃지끼리 어긋날 수 있다).
@@ -4760,7 +2750,7 @@ const handleApproveRequest = async (id: string) => {
                 ],
               },
               {
-                label: '대행 발송', color: 'violet',
+                label: '대행 발송',
                 items: [
                   // ★ 2026-08-26 §18 이메일 접수 관제 — 반려·격리 메일의 유일한 노출면
                   { key: 'agencyMail', label: '대행발송 접수' },
@@ -4771,7 +2761,7 @@ const handleApproveRequest = async (id: string) => {
                 ],
               },
               {
-                label: '요금/정산', color: 'amber',
+                label: '요금/정산',
                 items: [
                   { key: 'plans', label: '요금제 관리' },
                   // ★ 2026-08-11 (서수란 접수) 뱃지 = 목록 길이가 아니라 **카운트 state**.
@@ -4788,7 +2778,7 @@ const handleApproveRequest = async (id: string) => {
               {
                 // ★ 2026-10-03 (Harold) 보안 · 인증 = 대표 · 지원팀장(ceo · suran)만. 노출은 서버 등급표(my-permissions · 각 /access)가 정한다.
                 //   감사 로그는 대표만(AUDIT_LOG_VIEWER_IDS) · 직원 계정 · 권한은 지원팀장 조회만.
-                label: '보안 · 인증', color: 'rose',
+                label: '보안 · 인증',
                 items: [
                   ...(adminAccountsAllowed ? [{ key: 'adminAccounts', label: '직원 계정·권한' }] : []),
                   ...(myPermRead.loginBlocks === true ? [{ key: 'loginBlocks', label: '로그인 차단 관리' }] : []),
@@ -4807,7 +2797,7 @@ const handleApproveRequest = async (id: string) => {
                 ],
               },
               {
-                label: '연동 · 인프라', color: 'slate',
+                label: '연동 · 인프라',
                 items: [
                   { key: 'syncAgents', label: 'Sync 모니터링' },
                   { key: 'agentDeploy', label: '싱크에이전트 배포' },
@@ -4816,7 +2806,7 @@ const handleApproveRequest = async (id: string) => {
                 ],
               },
               {
-                label: 'AI · 콘텐츠', color: 'cyan',
+                label: 'AI · 콘텐츠',
                 items: [
                   // ★ 2026-07-04: 베스트 문안(업종 큐레이션) = 슈퍼관리자 공용(직원 큐레이션, ceo 게이트 없음)
                   { key: 'bestCopy', label: '베스트 문안', onClick: () => navigate('/admin/best-copy') },
@@ -4836,34 +2826,24 @@ const handleApproveRequest = async (id: string) => {
               // 묶음 활성 = 지금 탭이 이 묶음의 항목인가(항목 목록 하나가 유일한 기준)
               const isGroupActive = group.items.some((it: any) => it.key === activeTab);
               const isOpen = openMenu === group.label;
-              const colorMap: Record<string, { active: string; hover: string; bg: string; border: string }> = {
-                blue: { active: 'text-blue-600', hover: 'hover:text-blue-600', bg: 'bg-blue-50', border: 'border-blue-500' },
-                emerald: { active: 'text-emerald-600', hover: 'hover:text-emerald-600', bg: 'bg-emerald-50', border: 'border-emerald-500' },
-                violet: { active: 'text-violet-600', hover: 'hover:text-violet-600', bg: 'bg-violet-50', border: 'border-violet-500' },
-                amber: { active: 'text-amber-600', hover: 'hover:text-amber-600', bg: 'bg-amber-50', border: 'border-amber-500' },
-                rose: { active: 'text-rose-600', hover: 'hover:text-rose-600', bg: 'bg-rose-50', border: 'border-rose-500' },
-                slate: { active: 'text-slate-700', hover: 'hover:text-slate-700', bg: 'bg-slate-100', border: 'border-slate-500' },
-                cyan: { active: 'text-cyan-700', hover: 'hover:text-cyan-700', bg: 'bg-cyan-50', border: 'border-cyan-500' },
-                gray: { active: 'text-gray-700', hover: 'hover:text-gray-600', bg: 'bg-gray-50', border: 'border-gray-500' },
-              };
-              const c = colorMap[group.color] || colorMap.blue;
+              // ★ 2026-10-09 묶음마다 다르던 색(colorMap 8색)을 걷었다 — 슈퍼관리자 강조색 = emerald 하나(Harold 「담백하게」)
 
               return (
                 <div key={group.label} className="relative">
                   <button
                     onClick={() => setOpenMenu(isOpen ? null : group.label)}
-                    className={`px-4 py-2.5 text-sm font-medium rounded-lg transition-all flex items-center gap-1.5 ${
-                      isGroupActive ? `${c.active} ${c.bg}` : `text-gray-500 ${c.hover} hover:bg-gray-50`
+                    className={`h-[34px] px-3 text-[13px] rounded-lg transition-colors flex items-center gap-1.5 ${
+                      isGroupActive ? 'bg-emerald-50 text-emerald-700 font-semibold' : 'text-gray-700 hover:bg-gray-100'
                     }`}
                   >
                     {group.label}
                     {group.items.some((it: any) => it.badge > 0) && (
-                      <span className="w-2 h-2 rounded-full bg-red-500"></span>
+                      <span className="w-1.5 h-1.5 rounded-full bg-rose-500"></span>
                     )}
-                    <svg className={`w-3.5 h-3.5 transition-transform ${isOpen ? 'rotate-180' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" /></svg>
+                    <svg className={`w-3 h-3 opacity-60 transition-transform ${isOpen ? 'rotate-180' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" /></svg>
                   </button>
                   {isOpen && (
-                    <div className="absolute top-full left-0 mt-1 bg-white border border-gray-200 rounded-xl shadow-lg py-1 min-w-[180px] z-50"
+                    <div className="absolute top-full left-0 mt-1 bg-white border border-gray-200 rounded-[10px] shadow-[0_12px_30px_rgba(17,24,39,0.08)] p-1.5 min-w-[190px] z-50"
                          style={{ animation: 'fadeIn 0.15s ease-out' }}>
                       {group.items.map((item: any) => (
                         <button key={item.key}
@@ -4873,13 +2853,13 @@ const handleApproveRequest = async (id: string) => {
                             item.onClick?.();
                             setOpenMenu(null);
                           }}
-                          className={`w-full text-left px-4 py-2.5 text-sm transition-colors flex items-center justify-between ${
-                            activeTab === item.key ? `${c.active} ${c.bg} font-medium` : 'text-gray-600 hover:bg-gray-50'
+                          className={`whitespace-nowrap w-full text-left px-2.5 py-[7px] rounded-md text-[13px] transition-colors flex items-center justify-between ${
+                            activeTab === item.key ? 'bg-emerald-50 text-emerald-700 font-semibold' : 'text-gray-700 hover:bg-gray-100'
                           }`}
                         >
                           {item.label}
                           {item.badge > 0 && (
-                            <span className="ml-2 bg-red-500 text-white text-xs rounded-full w-5 h-5 flex items-center justify-center font-bold">
+                            <span className="ml-2 bg-rose-500 text-white text-[11px] rounded-full min-w-[18px] h-[18px] px-1.5 inline-flex items-center justify-center font-bold tabular-nums">
                               {item.badge}
                             </span>
                           )}
@@ -4893,1151 +2873,20 @@ const handleApproveRequest = async (id: string) => {
           </div>
         </div>
         <style>{`@keyframes fadeIn { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: translateY(0); } }`}</style>
-        {/* ★ 2026-08-24 AI 영업 아웃리치 모달 — 메뉴 클릭이 activeTab을 'salesOutreach'로 바꾸므로 닫을 때 고객사 탭으로 복귀 */}
-        {outreachOpen && (
-          <SalesOutreachModal onClose={() => { setOutreachOpen(false); if ((activeTab as string) === 'salesOutreach') setActiveTab('companies'); }} />
-        )}
         {/* 고객사 관리 탭 */}
-        {activeTab === 'companies' && (
-          <div className="bg-white rounded-2xl border border-gray-200/70 shadow-sm">
-            <div className="px-6 py-4 border-b flex justify-between items-center">
-              <h2 className="text-lg font-semibold">고객사 목록</h2>
-              <button
-                onClick={() => setShowCompanyModal(true)}
-                className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg text-sm font-medium"
-              >
-                + 고객사 추가
-              </button>
-            </div>
-
-            {/* 검색/필터 */}
-            <div className="px-6 py-3 border-b bg-gray-50 flex gap-4 items-center">
-              <div className="flex-1">
-                <input
-                  type="text"
-                  value={companySearch}
-                  onChange={(e) => { setCompanySearch(e.target.value); setCompanyPage(1); }}
-                  placeholder="회사코드, 회사명, 담당자명 검색..."
-                  className="w-full max-w-xs px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none"
-                />
-              </div>
-              <div className="flex items-center gap-2">
-                <span className="text-sm text-gray-500">상태:</span>
-                <select
-                  value={companyStatusFilter}
-                  onChange={(e) => { setCompanyStatusFilter(e.target.value); setCompanyPage(1); }}
-                  className="px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none"
-                >
-                  <option value="all">전체</option>
-                  <option value="active">활성</option>
-                  <option value="trial">체험</option>
-                  <option value="suspended">정지</option>
-                  <option value="terminated">해지</option>
-                </select>
-              </div>
-              <div className="text-sm text-gray-500">
-                {filteredCompanies.length}개 / 총 {companies.length}개
-              </div>
-            </div>
-
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead className="bg-gray-50">
-                  <tr>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 whitespace-nowrap">코드</th>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 whitespace-nowrap">회사명</th>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 whitespace-nowrap">담당자</th>
-                    <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 whitespace-nowrap">사용구분</th>
-                    <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 whitespace-nowrap">요금제</th>
-                    <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 whitespace-nowrap">상태</th>
-                    <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 whitespace-nowrap">고객 수</th>
-                    <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 whitespace-nowrap">등록일</th>
-                    <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 whitespace-nowrap">관리</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-gray-200">
-                {filteredCompanies.length === 0 ? (
-                    <tr>
-                      <td colSpan={9} className="px-6 py-12 text-center text-gray-500">
-                        {companies.length === 0 ? '등록된 고객사가 없습니다.' : '검색 결과가 없습니다.'}
-                      </td>
-                    </tr>
-                  ) : (
-                    filteredCompanies
-                      .slice((companyPage - 1) * companyPerPage, companyPage * companyPerPage)
-                      .map((company) => (
-                      <tr key={company.id} className="hover:bg-gray-50">
-                        <td className="px-4 py-3 font-medium text-gray-900 whitespace-nowrap">
-                          {company.company_code}
-                        </td>
-                        <td className="px-4 py-3 text-gray-900">{company.company_name}</td>
-                        <td className="px-4 py-3 text-gray-500">{company.contact_name || '-'}</td>
-                        <td className="px-4 py-3 text-center whitespace-nowrap">
-                          {/* ★ 2026-07-03 사용구분 배지 */}
-                          {company.usage_type === 'agent' ? (
-                            <span className="inline-block px-2 py-0.5 rounded-full text-xs bg-amber-100 text-amber-700">에이전트</span>
-                          ) : company.usage_type === 'both' ? (
-                            <span className="inline-block px-2 py-0.5 rounded-full text-xs bg-purple-100 text-purple-700">웹+에이전트</span>
-                          ) : (
-                            <span className="inline-block px-2 py-0.5 rounded-full text-xs bg-blue-50 text-blue-600">웹</span>
-                          )}
-                        </td>
-                        <td className="px-4 py-3 text-center text-gray-500 whitespace-nowrap">{company.plan_name || '-'}</td>
-                        <td className="px-4 py-3 text-center">{getStatusBadge(company.status)}</td>
-                        <td className="px-4 py-3 text-center text-gray-500 whitespace-nowrap">
-                          {company.total_customers?.toLocaleString() || 0}
-                        </td>
-                        <td className="px-4 py-3 text-center text-gray-500 whitespace-nowrap">
-                          {formatDate(company.created_at)}
-                        </td>
-                        <td className="px-4 py-3 text-center">
-                          <button 
-                            onClick={() => handleEditCompany(company)}
-                            className="text-blue-600 hover:text-blue-800 text-sm mr-2"
-                          >
-                            수정
-                          </button>
-                          {company.status !== 'terminated' && (
-                            <button 
-                              onClick={() => handleDeactivateCompany(company)}
-                              className="text-red-600 hover:text-red-800 text-sm"
-                            >
-                              해지
-                            </button>
-                          )}
-                        </td>
-                      </tr>
-                    ))
-                  )}
-                </tbody>
-                </table>
-            </div>
-            <TablePagination
-              total={filteredCompanies.length}
-              page={companyPage}
-              perPage={companyPerPage}
-              onChange={setCompanyPage}
-            />
-          </div>
-        )}
+        {activeTab === 'companies' && <CompaniesTab {...{ closeModal, companies, companyPage, companyPlanFilter, companySearch, companyStatusFilter, companyUsageFilter, getStatusBadge, industryOptions, loadAgentIds, loadData, loadUsers, setCompanyPage, setCompanyPlanFilter, setCompanySearch, setCompanyStatusFilter, setCompanyUsageFilter, setDashboardCardCount, setDashboardCardIds, setDashboardCardPool, setEditCompany, setEditCompanyTab, setFieldDataCheck, setIndustryOptions, setLinePolicy, setNewAgentMemo, setNewAgentSendId, setShowCompanyModal, setShowEditCompanyModal, setStandardFields, showAlert, showConfirm }} />}
 
         {/* 사용자 관리 탭 */}
-        {activeTab === 'users' && (
-          <div className="bg-white rounded-2xl border border-gray-200/70 shadow-sm">
-            <div className="px-6 py-4 border-b flex justify-between items-center">
-              <h2 className="text-lg font-semibold">사용자 목록</h2>
-              <button
-                onClick={() => setShowUserModal(true)}
-                className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg text-sm font-medium"
-              >
-                + 사용자 추가
-              </button>
-            </div>
-
-            {/* 검색/필터 */}
-            <div className="px-6 py-3 bg-gray-50 border-b flex gap-4 items-center">
-              <div className="flex-1">
-                <input
-                  type="text"
-                  value={userSearch}
-                  onChange={(e) => { setUserSearch(e.target.value); setUserPage(1); }}
-                  placeholder="🔍 아이디, 이름으로 검색..."
-                  className="w-full max-w-xs px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none"
-                />
-              </div>
-              <div className="flex items-center gap-2">
-                <label className="text-sm text-gray-600">회사:</label>
-                <select
-                  value={userCompanyFilter}
-                  onChange={(e) => { setUserCompanyFilter(e.target.value); setUserPage(1); }}
-                  className="px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none"
-                >
-                  <option value="all">전체</option>
-                  {companies.map(c => (
-                    <option key={c.id} value={c.id}>{c.company_name}</option>
-                  ))}
-                </select>
-              </div>
-              <span className="text-sm text-gray-500">
-                총 {users.filter(u => {
-                  const matchSearch = !userSearch || 
-                    u.login_id.toLowerCase().includes(userSearch.toLowerCase()) ||
-                    u.name.toLowerCase().includes(userSearch.toLowerCase());
-                  const matchCompany = userCompanyFilter === 'all' || u.company_id === userCompanyFilter;
-                  return matchSearch && matchCompany;
-                }).length}명
-              </span>
-            </div>
-
-            <div className="overflow-x-auto">
-              {(() => {
-                // 필터링된 사용자
-                const filteredUsers = users.filter(u => {
-                  const matchSearch = !userSearch || 
-                    u.login_id.toLowerCase().includes(userSearch.toLowerCase()) ||
-                    u.name.toLowerCase().includes(userSearch.toLowerCase()) ||
-                    (u.company_name || '').toLowerCase().includes(userSearch.toLowerCase());
-                  const matchCompany = userCompanyFilter === 'all' || u.company_id === userCompanyFilter;
-                  return matchSearch && matchCompany;
-                });
-
-                // 회사별 그룹핑
-                const groupedUsers = filteredUsers.reduce((acc, user) => {
-                  const companyId = user.company_id || 'none';
-                  if (!acc[companyId]) {
-                    acc[companyId] = {
-                      companyName: user.company_name || '소속 없음',
-                      users: []
-                    };
-                  }
-                  acc[companyId].users.push(user);
-                  return acc;
-                }, {} as Record<string, { companyName: string; users: typeof users }>);
-
-                const companyIds = Object.keys(groupedUsers);
-
-                if (filteredUsers.length === 0) {
-                  return (
-                    <div className="px-6 py-12 text-center text-gray-500">
-                      {users.length === 0 ? '등록된 사용자가 없습니다.' : '검색 결과가 없습니다.'}
-                    </div>
-                  );
-                }
-
-                // ★ 회사 그룹 20개씩 페이지네이션
-                const totalUserPages = Math.max(1, Math.ceil(companyIds.length / USERS_COMPANIES_PER_PAGE));
-                const safeUserPage = Math.min(Math.max(1, userPage), totalUserPages);
-                const pagedCompanyIds = companyIds.slice(
-                  (safeUserPage - 1) * USERS_COMPANIES_PER_PAGE,
-                  safeUserPage * USERS_COMPANIES_PER_PAGE
-                );
-
-                return (
-                  <>
-                  <div className="divide-y">
-                    {pagedCompanyIds.map(companyId => {
-                      const group = groupedUsers[companyId];
-                      const isExpanded = expandedCompanies.has(companyId);
-                      
-                      return (
-                        <div key={companyId}>
-                          <button
-                            onClick={() => {
-                              const newSet = new Set(expandedCompanies);
-                              if (isExpanded) {
-                                newSet.delete(companyId);
-                              } else {
-                                newSet.add(companyId);
-                              }
-                              setExpandedCompanies(newSet);
-                            }}
-                            className="w-full px-6 py-3 bg-gray-50 hover:bg-gray-100 flex items-center justify-between transition-colors"
-                          >
-                            <div className="flex items-center gap-3">
-                              <span className={`text-gray-400 transition-transform duration-200 ${isExpanded ? 'rotate-90' : ''}`}>
-                                ▶
-                              </span>
-                              <span className="font-semibold text-gray-800">{group.companyName}</span>
-                              <span className="text-sm text-gray-500">({group.users.length}명)</span>
-                            </div>
-                          </button>
-                          
-                          {isExpanded && (
-                            <table className="w-full text-sm">
-                              <thead className="bg-gray-50/50">
-                                <tr>
-                                  <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 whitespace-nowrap">로그인ID</th>
-                                  <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 whitespace-nowrap">이름</th>
-                                  <th className="px-4 py-2 text-center text-xs font-medium text-gray-500 whitespace-nowrap">권한</th>
-                                  <th className="px-4 py-2 text-center text-xs font-medium text-gray-500 whitespace-nowrap">담당 브랜드</th>
-                                  <th className="px-4 py-2 text-center text-xs font-medium text-gray-500 whitespace-nowrap">상태</th>
-                                  <th className="px-4 py-2 text-center text-xs font-medium text-gray-500 whitespace-nowrap">최근로그인</th>
-                                  <th className="px-4 py-2 text-center text-xs font-medium text-gray-500 whitespace-nowrap">관리</th>
-                                </tr>
-                              </thead>
-                              <tbody className="divide-y divide-gray-100">
-                                {group.users.map((u) => (
-                                  <tr key={u.id} className="hover:bg-blue-50/30">
-                                    <td className="px-4 py-2.5 font-medium text-gray-900">{u.login_id}</td>
-                                    <td className="px-4 py-2.5 text-gray-900">{u.name}</td>
-                                    <td className="px-4 py-2.5 text-center">{getUserTypeBadge(u.user_type)}</td>
-                                    <td className="px-4 py-2.5 text-center text-gray-600">
-                                      {(u as any).store_codes && (u as any).store_codes.length > 0 
-                                        ? (u as any).store_codes.join(', ') 
-                                        : <span className="text-gray-400">전체</span>}
-                                    </td>
-                                    <td className="px-4 py-2.5 text-center">{getStatusBadge(u.status)}</td>
-                                    <td className="px-4 py-2.5 text-center text-gray-500">
-                                      {u.last_login_at ? formatDateTime(u.last_login_at) : '-'}
-                                    </td>
-                                    <td className="px-4 py-2.5 text-center">
-                                      <button 
-                                        onClick={() => handleEditUser(u)}
-                                        className="text-blue-600 hover:text-blue-800 text-sm mr-2"
-                                      >
-                                        수정
-                                      </button>
-                                      <button 
-                                        onClick={() => handleResetPassword(u.id, u.name)}
-                                        className="text-orange-600 hover:text-orange-800 text-sm mr-2"
-                                      >
-                                        비번초기화
-                                      </button>
-                                      <button 
-                                        onClick={() => handleDeleteUser(u.id, u.name)}
-                                        className="text-red-600 hover:text-red-800 text-sm"
-                                      >
-                                        삭제
-                                      </button>
-                                    </td>
-                                  </tr>
-                                ))}
-                              </tbody>
-                            </table>
-                          )}
-                        </div>
-                      );
-                    })}
-                  </div>
-                  {/* ★ 회사 그룹 페이지네이션 */}
-                  {totalUserPages > 1 && (
-                    <div className="px-6 py-4 border-t flex items-center justify-between bg-gray-50">
-                      <span className="text-sm text-gray-500">
-                        총 {companyIds.length}개 회사 중 {(safeUserPage - 1) * USERS_COMPANIES_PER_PAGE + 1}-{Math.min(safeUserPage * USERS_COMPANIES_PER_PAGE, companyIds.length)}
-                      </span>
-                      <div className="flex items-center gap-1">
-                        <button
-                          onClick={() => setUserPage(p => Math.max(1, p - 1))}
-                          disabled={safeUserPage === 1}
-                          className="px-3 py-1.5 text-sm rounded-md border bg-white hover:bg-gray-100 disabled:opacity-40 disabled:cursor-not-allowed"
-                        >◀ 이전</button>
-                        {Array.from({ length: totalUserPages }, (_, i) => i + 1).map(p => (
-                          <button
-                            key={p}
-                            onClick={() => setUserPage(p)}
-                            className={`min-w-[36px] px-3 py-1.5 text-sm rounded-md transition-colors ${
-                              p === safeUserPage ? 'bg-blue-600 text-white' : 'bg-white border hover:bg-gray-100'
-                            }`}
-                          >{p}</button>
-                        ))}
-                        <button
-                          onClick={() => setUserPage(p => Math.min(totalUserPages, p + 1))}
-                          disabled={safeUserPage === totalUserPages}
-                          className="px-3 py-1.5 text-sm rounded-md border bg-white hover:bg-gray-100 disabled:opacity-40 disabled:cursor-not-allowed"
-                        >다음 ▶</button>
-                      </div>
-                    </div>
-                  )}
-                  </>
-                );
-              })()}
-            </div>
-            </div>
-        )}
+        {activeTab === 'users' && <UsersTab {...{ closeModal, companies, expandedCompanies, getStatusBadge, loadUsers, setCopied, setEditingUser, setExpandedCompanies, setModal, setShowUserModal, setUserCompanyFilter, setUserPage, setUserSearch, showAlert, showConfirm, userCompanyFilter, userPage, userSearch, users }} />}
 
         {/* 예약 관리 탭 */}
-        {activeTab === 'scheduled' && (
-          <div className="bg-white rounded-2xl border border-gray-200/70 shadow-sm">
-            <div className="px-6 py-4 border-b">
-              <h2 className="text-lg font-semibold">예약 캠페인 관리</h2>
-            </div>
-
-            {/* 검색 필터 */}
-            <div className="px-6 py-3 border-b bg-gray-50 flex flex-wrap gap-3 items-center">
-              <select value={scheduledCompanyFilter} onChange={(e) => setScheduledCompanyFilter(e.target.value)}
-                className="px-3 py-2 border rounded-lg text-sm bg-white">
-                <option value="">전체 고객사</option>
-                {companies.map(c => <option key={c.id} value={c.id}>{c.company_name}</option>)}
-              </select>
-              <select value={scheduledStatusFilter} onChange={(e) => setScheduledStatusFilter(e.target.value)}
-                className="px-3 py-2 border rounded-lg text-sm bg-white">
-                <option value="">전체 상태</option>
-                <option value="scheduled">예약</option>
-                <option value="cancelled">취소</option>
-              </select>
-              <input type="date" value={scheduledStartDate} onChange={(e) => setScheduledStartDate(e.target.value)}
-                className="px-3 py-2 border rounded-lg text-sm" />
-              <span className="text-gray-400">~</span>
-              <input type="date" value={scheduledEndDate} onChange={(e) => setScheduledEndDate(e.target.value)}
-                className="px-3 py-2 border rounded-lg text-sm" />
-              <input type="text" value={scheduledLoginId} onChange={(e) => setScheduledLoginId(e.target.value)}
-                placeholder="계정(로그인ID)" className="w-36 px-3 py-2 border rounded-lg text-sm"
-                onKeyDown={(e) => e.key === 'Enter' && loadScheduledCampaigns(1)} />
-              <input type="text" value={scheduledSearch} onChange={(e) => setScheduledSearch(e.target.value)}
-                placeholder="캠페인명/회사명 검색" className="w-48 px-3 py-2 border rounded-lg text-sm"
-                onKeyDown={(e) => e.key === 'Enter' && loadScheduledCampaigns(1)} />
-              <button onClick={() => loadScheduledCampaigns(1)}
-                className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm hover:bg-blue-700">조회</button>
-              <span className="text-sm text-gray-500 ml-auto">총 {scheduledTotal}건</span>
-            </div>
-
-            <div className="overflow-x-auto">
-              {/* ★ D145 P0 (2026-05-07): 컴팩트 — text-xs base + py-2 + 짧은 일시 포맷 + 캠페인명 240px */}
-              <table className="w-full text-xs">
-              <thead className="bg-gray-50">
-                  <tr>
-                    <th className="px-3 py-2 text-left font-medium text-gray-500 whitespace-nowrap">고객사</th>
-                    <th className="px-3 py-2 text-left font-medium text-gray-500 whitespace-nowrap">캠페인명</th>
-                    <th className="px-3 py-2 text-center font-medium text-gray-500 whitespace-nowrap">대상</th>
-                    <th className="px-3 py-2 text-center font-medium text-gray-500 whitespace-nowrap">생성자</th>
-                    <th className="px-3 py-2 text-center font-medium text-gray-500 whitespace-nowrap">등록</th>
-                    <th className="px-3 py-2 text-center font-medium text-gray-500 whitespace-nowrap">예약시간</th>
-                    <th className="px-3 py-2 text-center font-medium text-gray-500 whitespace-nowrap">상태</th>
-                    <th className="px-3 py-2 text-center font-medium text-gray-500 whitespace-nowrap">상세</th>
-                    <th className="px-3 py-2 text-center font-medium text-gray-500 whitespace-nowrap">관리</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-gray-200">
-                  {scheduledCampaigns.length === 0 ? (
-                    <tr><td colSpan={9} className="px-6 py-12 text-center text-gray-500">예약/취소 캠페인이 없습니다.</td></tr>
-                  ) : scheduledCampaigns.map((campaign) => (
-                      <tr key={campaign.id} className="hover:bg-gray-50">
-                        <td className="px-3 py-2 text-gray-900 whitespace-nowrap">
-                          {campaign.company_name}
-                          <span className="text-gray-400 ml-1">({campaign.company_code})</span>
-                        </td>
-                        <td className="px-3 py-2 text-gray-900" style={{ maxWidth: '240px' }}>
-                          <div className="truncate" title={campaign.campaign_name}>{campaign.campaign_name}</div>
-                        </td>
-                        <td className="px-3 py-2 text-center text-gray-500 whitespace-nowrap">
-                          {campaign.target_count?.toLocaleString() || 0}명
-                        </td>
-                        <td className="px-3 py-2 text-center text-gray-500 whitespace-nowrap">
-                          {campaign.created_by_name || '-'}
-                          {campaign.created_by_login && <span className="text-gray-400 ml-0.5">({campaign.created_by_login})</span>}
-                        </td>
-                        <td className="px-3 py-2 text-center text-gray-500 whitespace-nowrap">
-                          {campaign.created_at ? formatDateTimeShort(campaign.created_at) : '-'}
-                        </td>
-                        <td className="px-3 py-2 text-center text-gray-500 whitespace-nowrap">
-                          {campaign.scheduled_at ? formatDateTimeShort(campaign.scheduled_at) : '-'}
-                        </td>
-                        <td className="px-3 py-2 text-center whitespace-nowrap" style={{ minWidth: '70px' }}>
-                          {campaign.status === 'scheduled' ? (
-                            <span className="px-2 py-0.5 rounded-full font-medium bg-blue-100 text-blue-800">예약</span>
-                          ) : (
-                            <div>
-                              <span className="px-2 py-0.5 rounded-full font-medium bg-gray-100 text-gray-800">취소</span>
-                              {campaign.cancelled_by_type === 'super_admin' && (
-                                <span className="ml-1 text-red-500">(관리자)</span>
-                              )}
-                            </div>
-                          )}
-                        </td>
-                        <td className="px-3 py-2 text-center whitespace-nowrap" style={{ minWidth: '60px' }}>
-                          <button onClick={() => openSmsDetail(campaign.id)}
-                            className="text-blue-600 hover:text-blue-800 font-medium">[조회]</button>
-                        </td>
-                        <td className="px-3 py-2 text-center whitespace-nowrap" style={{ minWidth: '60px' }}>
-                          {campaign.status === 'scheduled' ? (
-                            <button onClick={() => openCancelModal(campaign.id, campaign.campaign_name)}
-                              className="text-red-600 hover:text-red-800">취소</button>
-                          ) : (
-                            <span className="text-gray-400" title={campaign.cancel_reason || ''}>
-                              {campaign.cancel_reason ? `사유: ${campaign.cancel_reason.substring(0, 15)}${campaign.cancel_reason.length > 15 ? '…' : ''}` : '-'}
-                            </span>
-                          )}
-                        </td>
-                      </tr>
-                    ))
-                  }
-                </tbody>
-              </table>
-            </div>
-
-            {/* 서버사이드 페이징 */}
-            {scheduledTotal > scheduledPerPage && (
-              <div className="px-6 py-4 border-t flex items-center justify-between">
-                <span className="text-sm text-gray-500">총 {scheduledTotal}건</span>
-                <div className="flex gap-1">
-                  <button onClick={() => loadScheduledCampaigns(Math.max(1, scheduledPage - 1))} disabled={scheduledPage === 1}
-                    className="px-3 py-1 rounded border text-sm disabled:opacity-40 hover:bg-gray-50">◀</button>
-                  <span className="px-3 py-1 text-sm text-gray-600">{scheduledPage} / {Math.ceil(scheduledTotal / scheduledPerPage)}</span>
-                  <button onClick={() => loadScheduledCampaigns(Math.min(Math.ceil(scheduledTotal / scheduledPerPage), scheduledPage + 1))}
-                    disabled={scheduledPage >= Math.ceil(scheduledTotal / scheduledPerPage)}
-                    className="px-3 py-1 rounded border text-sm disabled:opacity-40 hover:bg-gray-50">▶</button>
-                </div>
-              </div>
-            )}
-            </div>
-        )}
+        {activeTab === 'scheduled' && <ScheduledTab {...{ companies, loadScheduledCampaigns, openSmsDetail, scheduledCampaigns, scheduledCompanyFilter, scheduledEndDate, scheduledLoginId, scheduledPage, scheduledPerPage, scheduledSearch, scheduledStartDate, scheduledStatusFilter, scheduledTotal, setCancelReason, setCancelTarget, setScheduledCompanyFilter, setScheduledEndDate, setScheduledLoginId, setScheduledSearch, setScheduledStartDate, setScheduledStatusFilter, setShowCancelModal }} />}
 
         {/* 발신번호 관리 탭 */}
-        {activeTab === 'callbacks' && (
-          <div className="bg-white rounded-2xl border border-gray-200/70 shadow-sm">
-            {/* 서브탭 */}
-            <div className="border-b flex">
-              <button
-                onClick={() => setCallbackSubTab('manage')}
-                className={`px-6 py-3 text-sm font-medium border-b-2 ${
-                  callbackSubTab === 'manage'
-                    ? 'border-blue-500 text-blue-600'
-                    : 'border-transparent text-gray-500 hover:text-gray-700'
-                }`}
-              >
-                발신번호 관리
-              </button>
-              <button
-                onClick={() => setCallbackSubTab('registrations')}
-                className={`px-6 py-3 text-sm font-medium border-b-2 ${
-                  callbackSubTab === 'registrations'
-                    ? 'border-blue-500 text-blue-600'
-                    : 'border-transparent text-gray-500 hover:text-gray-700'
-                }`}
-              >
-                등록 신청 관리
-                {senderRegPendingCount > 0 && (
-                  <span className="ml-1.5 inline-flex items-center justify-center w-5 h-5 text-xs font-bold text-white bg-red-500 rounded-full">
-                    {senderRegPendingCount}
-                  </span>
-                )}
-              </button>
-              <button
-                onClick={() => setCallbackSubTab('managers')}
-                className={`px-6 py-3 text-sm font-medium border-b-2 ${
-                  callbackSubTab === 'managers'
-                    ? 'border-blue-500 text-blue-600'
-                    : 'border-transparent text-gray-500 hover:text-gray-700'
-                }`}
-              >
-                등록현황 관리
-                {/* ★ 2026-08-08 (임은지 접수 3) 위임장 대기는 **이 탭**의 일이다 — 그전에는 옆 탭(등록 신청 관리)
-                    뱃지로 떠서, 알림을 보고 간 담당자가 빈 목록을 보고 되돌아왔다. */}
-                {pendingManagerCount > 0 && (
-                  <span className="ml-1.5 inline-flex items-center justify-center w-5 h-5 text-xs font-bold text-white bg-red-500 rounded-full">
-                    {pendingManagerCount}
-                  </span>
-                )}
-              </button>
-            </div>
-
-            {/* 서브탭: 발신번호 관리 */}
-            {callbackSubTab === 'manage' && (
-              <>
-            <div className="px-6 py-4 border-b flex justify-between items-center">
-              <h2 className="text-lg font-semibold">발신번호 관리</h2>
-              <button
-                onClick={() => setShowCallbackModal(true)}
-                className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg text-sm font-medium"
-              >
-                + 발신번호 등록
-              </button>
-            </div>
-
-            <div className="px-6 py-3 border-b bg-gray-50 flex gap-4 items-center">
-              <input
-                type="text"
-                value={callbackSearch}
-                onChange={(e) => { setCallbackSearch(e.target.value); setCallbackCompanyListPage(1); }}
-                placeholder="고객사명, 번호로 검색..."
-                className="w-full max-w-xs px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none"
-              />
-              {/* 검색과 무관한 전체 등록 수 — 검색 결과 건수는 아래 페이저가 '총 N개 회사 중' 으로 따로 보여준다 */}
-              <span className="text-sm text-gray-500">전체 등록 {callbackNumbers.length}개</span>
-            </div>
-
-            <div>
-              {(() => {
-                // D144 P12: 번호 검색 추가 — 회사명 OR 번호(대시 제거 숫자 비교)
-                const filtered = callbackNumbers.filter(cb => {
-                  if (!callbackSearch) return true;
-                  const searchLower = callbackSearch.toLowerCase();
-                  if ((cb.company_name || '').toLowerCase().includes(searchLower)) return true;
-                  const searchDigits = callbackSearch.replace(/[^0-9]/g, '');
-                  if (searchDigits.length >= 2) {
-                    const phoneDigits = String(cb.phone || '').replace(/[^0-9]/g, '');
-                    if (phoneDigits.includes(searchDigits)) return true;
-                  }
-                  return false;
-                });
-
-                const grouped = filtered.reduce((acc: Record<string, { companyName: string; companyCode: string; items: any[] }>, cb: any) => {
-                  const cid = cb.company_id || 'none';
-                  if (!acc[cid]) {
-                    acc[cid] = { companyName: cb.company_name || '미지정', companyCode: cb.company_code || '', items: [] };
-                  }
-                  acc[cid].items.push(cb);
-                  return acc;
-                }, {});
-
-                const companyIds = Object.keys(grouped);
-                // ★ 2026-07-25 (서수란) 회사 목록 페이징.
-                //   '미지정'(회사 연결이 없는 발신번호)은 항상 첫 페이지에 둔다 — 페이징 때문에 뒤 페이지로 밀려
-                //   슈퍼관리자 눈에서 사라지면 안 된다. 발신번호는 발송 가능 번호 원장이라 안 보이는 것 자체가 위험.
-                const orderedCompanyIds = [...companyIds].sort((a, b) => {
-                  if (a === 'none') return -1;
-                  if (b === 'none') return 1;
-                  return (grouped[a].companyName || '').localeCompare(grouped[b].companyName || '');
-                });
-                const companyTotalPages = Math.max(1, Math.ceil(orderedCompanyIds.length / CALLBACK_COMPANIES_PER_PAGE));
-                // 삭제·승인 후 재조회로 회사 수가 줄면 현재 페이지가 범위를 넘어 빈 화면이 되므로 표시용으로 clamp
-                const safeCompanyPage = Math.min(callbackCompanyListPage, companyTotalPages);
-                const pagedCompanyIds = orderedCompanyIds.slice(
-                  (safeCompanyPage - 1) * CALLBACK_COMPANIES_PER_PAGE,
-                  safeCompanyPage * CALLBACK_COMPANIES_PER_PAGE,
-                );
-
-                if (filtered.length === 0) {
-                  return (
-                    <div className="px-6 py-12 text-center text-gray-500">
-                      {callbackNumbers.length === 0 ? '등록된 발신번호가 없습니다.' : '검색 결과가 없습니다.'}
-                    </div>
-                  );
-                }
-
-                return (
-                  <>
-                  <div className="divide-y">
-                    {pagedCompanyIds.map(cid => {
-                      const group = grouped[cid];
-                      const isExpanded = expandedCallbackCompanies.has(cid);
-                      return (
-                        <div key={cid}>
-                          <button
-                            onClick={() => {
-                              const newSet = new Set(expandedCallbackCompanies);
-                              if (isExpanded) newSet.delete(cid); else newSet.add(cid);
-                              setExpandedCallbackCompanies(newSet);
-                            }}
-                            className="w-full px-6 py-3 bg-gray-50 hover:bg-gray-100 flex items-center justify-between transition-colors"
-                          >
-                            <div className="flex items-center gap-3">
-                              <span className={`text-gray-400 transition-transform duration-200 ${isExpanded ? 'rotate-90' : ''}`}>▶</span>
-                              <span className="font-semibold text-gray-800">{group.companyName}</span>
-                              <span className="text-xs text-gray-400">({group.companyCode})</span>
-                              <span className="text-sm text-gray-500">{group.items.length}개</span>
-                            </div>
-                          </button>
-                          {isExpanded && (() => {
-                            // ★ D135+ (B10): 회사당 10개씩 페이징. 금강제화 등 160개 업체 무한 스크롤 방지.
-                            const currentPage = callbackCompanyPages[cid] || 1;
-                            const totalItems = group.items.length;
-                            const totalPages = Math.max(1, Math.ceil(totalItems / CALLBACKS_PER_COMPANY_PAGE));
-                            const safePage = Math.min(currentPage, totalPages);
-                            const startIdx = (safePage - 1) * CALLBACKS_PER_COMPANY_PAGE;
-                            const endIdx = Math.min(startIdx + CALLBACKS_PER_COMPANY_PAGE, totalItems);
-                            const paged = group.items.slice(startIdx, endIdx);
-                            const setCompanyPage = (p: number) =>
-                              setCallbackCompanyPages(prev => ({ ...prev, [cid]: Math.max(1, Math.min(totalPages, p)) }));
-                            // 페이지 번호 목록 (7개 이상이면 축약: 1 ... n-1 n n+1 ... N)
-                            const pageNums: (number | string)[] = [];
-                            if (totalPages <= 7) {
-                              for (let i = 1; i <= totalPages; i++) pageNums.push(i);
-                            } else {
-                              pageNums.push(1);
-                              if (safePage > 3) pageNums.push('...');
-                              for (let i = Math.max(2, safePage - 1); i <= Math.min(totalPages - 1, safePage + 1); i++) pageNums.push(i);
-                              if (safePage < totalPages - 2) pageNums.push('...');
-                              pageNums.push(totalPages);
-                            }
-                            return (
-                              <>
-                                <table className="w-full text-sm">
-                                  <thead className="bg-gray-50/50">
-                                    <tr>
-                                      <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 whitespace-nowrap">발신번호</th>
-                                      <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 whitespace-nowrap">별칭</th>
-                                      <th className="px-4 py-2 text-center text-xs font-medium text-gray-500 whitespace-nowrap">대표</th>
-                                      <th className="px-4 py-2 text-center text-xs font-medium text-gray-500 whitespace-nowrap">등록일</th>
-                                      <th className="px-4 py-2 text-center text-xs font-medium text-gray-500 whitespace-nowrap">관리</th>
-                                    </tr>
-                                  </thead>
-                                  <tbody className="divide-y divide-gray-100">
-                                    {paged.map((cb: any) => (
-                                      <tr key={cb.id} className="hover:bg-blue-50/30">
-                                        <td className="px-4 py-2.5 font-medium text-gray-900">{cb.phone}</td>
-                                        <td className="px-4 py-2.5 text-gray-500">{cb.label || '-'}</td>
-                                        <td className="px-4 py-2.5 text-center">
-                                          {cb.is_default ? (
-                                            <span className="px-2 py-1 rounded-full text-xs font-medium bg-green-100 text-green-800">대표</span>
-                                          ) : (
-                                            <button onClick={() => handleSetDefault(cb.id)} className="text-blue-600 hover:text-blue-800 text-xs">대표설정</button>
-                                          )}
-                                        </td>
-                                        <td className="px-4 py-2.5 text-center text-gray-500">{formatDate(cb.created_at)}</td>
-                                        <td className="px-4 py-2.5 text-center">
-                                          <button onClick={() => setEditingCallback({ id: cb.id, phone: cb.phone, label: cb.label || '' })} className="text-blue-600 hover:text-blue-800 text-sm mr-2">수정</button>
-                                          <button onClick={() => handleDeleteCallback(cb.id, cb.phone)} className="text-red-600 hover:text-red-800 text-sm">삭제</button>
-                                        </td>
-                                      </tr>
-                                    ))}
-                                  </tbody>
-                                </table>
-                                {totalPages > 1 && (
-                                  <div className="px-4 py-2.5 border-t bg-gray-50/30 flex items-center justify-between">
-                                    <span className="text-xs text-gray-500">
-                                      {startIdx + 1}~{endIdx} / {totalItems}개
-                                    </span>
-                                    <div className="flex items-center gap-1">
-                                      <button
-                                        onClick={() => setCompanyPage(safePage - 1)}
-                                        disabled={safePage === 1}
-                                        className="px-2.5 py-1 text-xs rounded border bg-white hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed transition"
-                                      >
-                                        이전
-                                      </button>
-                                      {pageNums.map((p, i) =>
-                                        p === '...' ? (
-                                          <span key={`d-${cid}-${i}`} className="px-1.5 text-gray-400">…</span>
-                                        ) : (
-                                          <button
-                                            key={`p-${cid}-${p}`}
-                                            onClick={() => setCompanyPage(p as number)}
-                                            className={`px-2.5 py-1 text-xs rounded transition ${
-                                              p === safePage
-                                                ? 'bg-blue-600 text-white'
-                                                : 'bg-white border text-gray-600 hover:bg-gray-50'
-                                            }`}
-                                          >
-                                            {p}
-                                          </button>
-                                        )
-                                      )}
-                                      <button
-                                        onClick={() => setCompanyPage(safePage + 1)}
-                                        disabled={safePage === totalPages}
-                                        className="px-2.5 py-1 text-xs rounded border bg-white hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed transition"
-                                      >
-                                        다음
-                                      </button>
-                                    </div>
-                                  </div>
-                                )}
-                              </>
-                            );
-                          })()}
-                        </div>
-                      );
-                    })}
-                  </div>
-                  {/* ★ 2026-07-25 회사 단위 페이저 — 회사 20개 이하면 컴포넌트가 스스로 렌더하지 않는다 */}
-                  <TablePagination
-                    total={orderedCompanyIds.length}
-                    page={safeCompanyPage}
-                    perPage={CALLBACK_COMPANIES_PER_PAGE}
-                    onChange={setCallbackCompanyListPage}
-                    unit="개 회사"
-                  />
-                  </>
-                );
-              })()}
-            </div>
-              </>
-            )}
-
-            {/* 서브탭: 등록 신청 관리 */}
-            {callbackSubTab === 'registrations' && (
-              <>
-                <div className="px-6 py-4 border-b flex justify-between items-center">
-                  <h2 className="text-lg font-semibold">발신번호 등록 신청 관리</h2>
-                  <div className="flex gap-2">
-                    {(['pending', 'approved', 'rejected', 'all'] as const).map(f => (
-                      <button
-                        key={f}
-                        onClick={() => setSenderRegFilter(f)}
-                        className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
-                          senderRegFilter === f
-                            ? f === 'pending' ? 'bg-yellow-100 text-yellow-800'
-                            : f === 'approved' ? 'bg-green-100 text-green-800'
-                            : f === 'rejected' ? 'bg-red-100 text-red-800'
-                            : 'bg-blue-100 text-blue-800'
-                            : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
-                        }`}
-                      >
-                        {f === 'pending' ? '승인대기' : f === 'approved' ? '승인완료' : f === 'rejected' ? '반려' : '전체'}
-                        {f === 'pending' && senderRegPendingCount > 0 && (
-                          <span className="ml-1 text-xs font-bold">({senderRegPendingCount})</span>
-                        )}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-
-                {/* === 발신번호 등록 신청 목록 === */}
-                {senderRegLoading ? (
-                  <div className="px-6 py-12 text-center text-gray-500">로딩 중...</div>
-                ) : senderRegistrations.length === 0 ? (
-                  <div className="px-6 py-12 text-center text-gray-500">
-                    {senderRegFilter === 'pending' ? '승인 대기 중인 신청이 없습니다.' : '해당 조건의 신청 내역이 없습니다.'}
-                  </div>
-                ) : (
-                  <div className="overflow-x-auto">
-                    <table className="w-full text-sm">
-                      <thead className="bg-gray-50">
-                        <tr>
-                          <th className="px-4 py-3 text-left text-xs font-medium text-gray-500">고객사</th>
-                          <th className="px-4 py-3 text-left text-xs font-medium text-gray-500">발신번호</th>
-                          <th className="px-4 py-3 text-left text-xs font-medium text-gray-500">별칭</th>
-                          <th className="px-4 py-3 text-left text-xs font-medium text-gray-500">매장</th>
-                          <th className="px-4 py-3 text-center text-xs font-medium text-gray-500">첨부</th>
-                          <th className="px-4 py-3 text-center text-xs font-medium text-gray-500">상태</th>
-                          <th className="px-4 py-3 text-center text-xs font-medium text-gray-500">신청일</th>
-                          <th className="px-4 py-3 text-center text-xs font-medium text-gray-500">관리</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-gray-200">
-                        {senderRegistrations.map((reg: any) => (
-                          <tr key={reg.id} className="hover:bg-gray-50">
-                            <td className="px-4 py-3 text-gray-900 font-medium">{reg.company_name || '-'}</td>
-                            <td className="px-4 py-3 text-gray-900 font-mono">{reg.phone}</td>
-                            <td className="px-4 py-3 text-gray-600">{reg.label || '-'}</td>
-                            <td className="px-4 py-3 text-gray-600">{reg.store_name || '-'}</td>
-                            <td className="px-4 py-3 text-center">
-                              <span className="text-blue-600">{(reg.documents || []).length}건</span>
-                            </td>
-                            <td className="px-4 py-3 text-center">
-                              <span className={`px-2 py-1 rounded-full text-xs font-medium ${
-                                reg.status === 'pending' ? 'bg-yellow-100 text-yellow-800'
-                                : reg.status === 'approved' ? 'bg-green-100 text-green-800'
-                                : 'bg-red-100 text-red-800'
-                              }`}>
-                                {reg.status === 'pending' ? '대기' : reg.status === 'approved' ? '승인' : '반려'}
-                              </span>
-                            </td>
-                            <td className="px-4 py-3 text-center text-gray-500">{formatDate(reg.created_at)}</td>
-                            <td className="px-4 py-3 text-center">
-                              <button
-                                onClick={() => loadSenderRegDetail(reg.id)}
-                                className="text-blue-600 hover:text-blue-800 text-sm font-medium"
-                              >
-                                상세
-                              </button>
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                )}
-              </>
-            )}
-
-            {/* 서브탭: 등록현황 관리 (담당자 위임장) */}
-            {callbackSubTab === 'managers' && (
-              <>
-                <div className="px-6 py-4 border-b">
-                  <div className="flex justify-between items-center mb-3">
-                    <h2 className="text-lg font-semibold">등록현황 관리</h2>
-                    <div className="flex gap-2">
-                      {(['all', 'pending', 'approved', 'rejected'] as const).map(f => (
-                        <button
-                          key={f}
-                          onClick={() => setMgrFilter(f)}
-                          className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
-                            mgrFilter === f
-                              ? f === 'pending' ? 'bg-yellow-100 text-yellow-800'
-                              : f === 'approved' ? 'bg-green-100 text-green-800'
-                              : f === 'rejected' ? 'bg-red-100 text-red-800'
-                              : 'bg-blue-100 text-blue-800'
-                              : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
-                          }`}
-                        >
-                          {f === 'all' ? '전체' : f === 'pending' ? '승인대기' : f === 'approved' ? '승인완료' : '반려'}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                  <input
-                    type="text"
-                    value={mgrSearch}
-                    onChange={(e) => setMgrSearch(e.target.value)}
-                    placeholder="업체명 또는 담당자 이름으로 검색..."
-                    className="w-full max-w-sm px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none"
-                  />
-                </div>
-
-                {(() => {
-                  const filteredMgrs = allManagers.filter(mgr => {
-                    if (!mgrSearch.trim()) return true;
-                    const q = mgrSearch.trim().toLowerCase();
-                    return (mgr.company_name || '').toLowerCase().includes(q)
-                      || (mgr.manager_name || '').toLowerCase().includes(q)
-                      || (mgr.manager_phone || '').includes(q);
-                  });
-                  return filteredMgrs.length === 0 ? (
-                    <div className="px-6 py-12 text-center text-gray-500">
-                      {mgrSearch.trim() ? '검색 결과가 없습니다.' : '등록된 담당자가 없습니다.'}
-                    </div>
-                  ) : (
-                    <div className="overflow-x-auto">
-                      <table className="w-full text-sm">
-                        <thead className="bg-gray-50">
-                          <tr>
-                            <th className="px-4 py-3 text-left text-xs font-medium text-gray-500">고객사</th>
-                            <th className="px-4 py-3 text-left text-xs font-medium text-gray-500">담당자</th>
-                            <th className="px-4 py-3 text-left text-xs font-medium text-gray-500">연락처</th>
-                            <th className="px-4 py-3 text-left text-xs font-medium text-gray-500">이메일</th>
-                            <th className="px-4 py-3 text-center text-xs font-medium text-gray-500">위임장</th>
-                            <th className="px-4 py-3 text-center text-xs font-medium text-gray-500">상태</th>
-                            <th className="px-4 py-3 text-left text-xs font-medium text-gray-500">반려사유</th>
-                            <th className="px-4 py-3 text-center text-xs font-medium text-gray-500">관리</th>
-                          </tr>
-                        </thead>
-                        <tbody className="divide-y divide-gray-200">
-                          {filteredMgrs.map((mgr: any) => (
-                            <tr key={mgr.id} className="hover:bg-gray-50">
-                              <td className="px-4 py-3 text-gray-900 font-medium">{mgr.company_name || '-'}</td>
-                              <td className="px-4 py-3 text-gray-900">{mgr.manager_name}</td>
-                              <td className="px-4 py-3 text-gray-600 font-mono text-xs">{mgr.manager_phone}</td>
-                              <td className="px-4 py-3 text-gray-500 text-xs">{mgr.manager_email || '-'}</td>
-                              <td className="px-4 py-3 text-center">
-                                {mgr.authorization_doc ? (
-                                  <button onClick={() => downloadSenderDoc(mgr.authorization_doc.storedName, mgr.authorization_doc.originalName)}
-                                    className="text-blue-600 hover:text-blue-800 text-xs underline">다운로드</button>
-                                ) : (
-                                  <span className="text-gray-300 text-xs">없음</span>
-                                )}
-                              </td>
-                              <td className="px-4 py-3 text-center">
-                                <span className={`px-2 py-1 rounded-full text-xs font-medium ${
-                                  mgr.status === 'pending' ? 'bg-yellow-100 text-yellow-800'
-                                  : mgr.status === 'approved' ? 'bg-green-100 text-green-800'
-                                  : 'bg-red-100 text-red-800'
-                                }`}>
-                                  {mgr.status === 'pending' ? '대기' : mgr.status === 'approved' ? '승인' : '반려'}
-                                </span>
-                              </td>
-                              <td className="px-4 py-3 text-gray-500 text-xs">{mgr.reject_reason || '-'}</td>
-                              <td className="px-4 py-3 text-center">
-                                {mgr.status === 'pending' && mgrRejectId !== mgr.id && (
-                                  <div className="flex gap-1 justify-center">
-                                    <button onClick={() => handleApproveManager(mgr.id)}
-                                      className="px-2.5 py-1 bg-green-600 text-white rounded text-xs font-medium hover:bg-green-700">승인</button>
-                                    <button onClick={() => { setMgrRejectId(mgr.id); setMgrRejectReason(''); }}
-                                      className="px-2.5 py-1 bg-red-600 text-white rounded text-xs font-medium hover:bg-red-700">반려</button>
-                                  </div>
-                                )}
-                                {mgr.status === 'pending' && mgrRejectId === mgr.id && (
-                                  <div className="flex items-center gap-1">
-                                    <input type="text" value={mgrRejectReason} onChange={(e) => setMgrRejectReason(e.target.value)}
-                                      placeholder="반려 사유" className="px-2 py-1 border rounded text-xs w-32" />
-                                    <button onClick={() => { handleRejectManager(mgr.id, mgrRejectReason); setMgrRejectId(null); }}
-                                      disabled={!mgrRejectReason.trim()}
-                                      className="px-2 py-1 bg-red-600 text-white rounded text-xs hover:bg-red-700 disabled:opacity-40">확인</button>
-                                    <button onClick={() => setMgrRejectId(null)}
-                                      className="px-2 py-1 bg-gray-200 text-gray-700 rounded text-xs hover:bg-gray-300">취소</button>
-                                  </div>
-                                )}
-                                {mgr.status !== 'pending' && <span className="text-xs text-gray-300">-</span>}
-                              </td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
-                  );
-                })()}
-              </>
-            )}
-            </div>
-        )}
+        {activeTab === 'callbacks' && <CallbacksTab {...{ allManagers, callbackCompanyListPage, callbackCompanyPages, callbackNumbers, callbackSearch, callbackSubTab, closeModal, downloadSenderDoc, expandedCallbackCompanies, loadAllManagers, loadCallbackNumbers, loadSenderRegPendingCount, mgrFilter, mgrRejectId, mgrRejectReason, mgrSearch, pendingManagerCount, senderRegFilter, senderRegLoading, senderRegPendingCount, senderRegistrations, setCallbackCompanyListPage, setCallbackCompanyPages, setCallbackSearch, setCallbackSubTab, setEditingCallback, setExpandedCallbackCompanies, setMgrFilter, setMgrRejectId, setMgrRejectReason, setMgrSearch, setModal, setRejectReasonInput, setSenderRegDetail, setSenderRegFilter, setShowCallbackModal, setShowSenderRegDetailModal, showAlert, showConfirm }} />}
 
         {/* ★ 2026-08-27 직원 계정·권한 (전송자격인증 3.2·3.3) */}
-        {activeTab === 'adminAccounts' && (
-          <div className="space-y-6">
-            {!adminAccountsAllowed ? (
-              <div className="bg-white rounded-xl border border-gray-200 px-5 py-10 text-center text-sm text-gray-500">
-                직원 계정·권한은 대표 · 지원팀장 등급 계정에서만 볼 수 있습니다.
-              </div>
-            ) : (
-              <>
-                <div className="rounded-xl border border-gray-800 bg-gray-900 p-5 text-white">
-                  <div className="text-[11px] font-semibold tracking-wide text-gray-400">접근권한 관리</div>
-                  <h3 className="mt-1 text-lg font-bold">직원 계정 등급 · 권한분류표</h3>
-                  <p className="mt-1.5 text-xs leading-relaxed text-gray-300">
-                    등급마다 접근할 수 있는 영역과 권한 수준(조회 · 변경 · 삭제)이 정해져 있습니다.
-                    등급을 바꾸려면 사유를 남겨야 하고, 그 기록이 아래 변경 이력 대장에 남습니다.
-                  </p>
-                </div>
-
-                <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
-                  <div className="px-5 py-3 border-b border-gray-100 flex items-center justify-between gap-3">
-                    <div>
-                      <h3 className="text-base font-semibold text-gray-900">계정 목록</h3>
-                      <p className="text-[10px] text-gray-500 mt-0.5 italic">Data source: 관리자 계정 원장</p>
-                    </div>
-                    {/* ★ 2026-10-03 지원팀장은 조회만 — 계정 추가 · 등급 · 중지는 대표만(서버 canWrite) */}
-                    {adminAccountsCanWrite ? (
-                      <button
-                        onClick={() => setAdminCreate({ loginId: '', name: '', email: '', role: 'support', password: '', reason: '' })}
-                        className="px-3.5 py-2 rounded-lg bg-indigo-600 text-white text-xs font-semibold hover:bg-indigo-700"
-                      >
-                        계정 추가
-                      </button>
-                    ) : (
-                      <span className="text-[11px] text-gray-400">조회 전용 · 변경은 대표 등급만</span>
-                    )}
-                  </div>
-                  <div className="overflow-x-auto">
-                    <table className="w-full text-sm">
-                      <thead className="bg-gray-50 text-xs text-gray-500">
-                        <tr>
-                          <th className="px-4 py-2 text-left">계정 ID</th>
-                          <th className="px-4 py-2 text-left">이름</th>
-                          <th className="px-4 py-2 text-left">소속</th>
-                          <th className="px-4 py-2 text-left">등급</th>
-                          <th className="px-4 py-2 text-left">상태</th>
-                          <th className="px-4 py-2 text-left">최종 접속</th>
-                          <th className="px-4 py-2 text-right">등급 변경</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-gray-100">
-                        {adminAccounts.length === 0 && (
-                          <tr><td colSpan={7} className="px-4 py-8 text-center text-gray-400 text-xs">계정이 없습니다.</td></tr>
-                        )}
-                        {pageSlice(adminAccounts, adminAccountsPage).map((a) => {
-                          const opt = adminRoleOptions.find((o) => o.value === a.role);
-                          return (
-                            <tr key={a.id} className={a.is_active ? '' : 'opacity-45'}>
-                              <td className="px-4 py-2 font-mono text-xs text-gray-900">{a.login_id}</td>
-                              <td className="px-4 py-2 text-xs text-gray-900">{a.name || '-'}</td>
-                              <td className="px-4 py-2 text-xs text-gray-600">{a.role === 'super' ? '대표' : '모바일 지원팀'}</td>
-                              <td className="px-4 py-2">
-                                <span className={`px-2 py-0.5 text-[11px] rounded ${a.role === 'super' ? 'bg-indigo-100 text-indigo-700' : a.role === 'lead' ? 'bg-emerald-100 text-emerald-700' : 'bg-gray-100 text-gray-600'}`}>
-                                  {opt?.label || a.role}
-                                </span>
-                              </td>
-                              <td className="px-4 py-2 text-xs text-gray-600">{a.is_active ? '사용 중' : '비활성'}</td>
-                              <td className="px-4 py-2 text-[11px] text-gray-400">{a.last_login_at ? formatDateTime(a.last_login_at) : '-'}</td>
-                              <td className="px-4 py-2 text-right whitespace-nowrap">
-                                {adminAccountsCanWrite ? (
-                                  <>
-                                    <button
-                                      onClick={() => setAdminRoleEdit({ id: a.id, login_id: a.login_id, role: a.role, reason: '' })}
-                                      className="px-2.5 py-1 rounded-lg border border-gray-200 text-xs text-gray-600 hover:bg-gray-50"
-                                    >
-                                      등급
-                                    </button>
-                                    <button
-                                      onClick={() => setAdminActiveEdit({ id: a.id, login_id: a.login_id, isActive: !a.is_active, reason: '' })}
-                                      className="ml-1.5 px-2.5 py-1 rounded-lg border border-gray-200 text-xs text-gray-600 hover:bg-gray-50"
-                                    >
-                                      {a.is_active ? '중지' : '재개'}
-                                    </button>
-                                  </>
-                                ) : (
-                                  <span className="text-[11px] text-gray-300">-</span>
-                                )}
-                              </td>
-                            </tr>
-                          );
-                        })}
-                      </tbody>
-                    </table>
-                  </div>
-                  <ListPager page={adminAccountsPage} total={adminAccounts.length} onPage={setAdminAccountsPage} />
-                </div>
-
-                <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
-                  <div className="px-5 py-3 border-b border-gray-100">
-                    <h3 className="text-base font-semibold text-gray-900">권한분류표</h3>
-                    <p className="text-[10px] text-gray-500 mt-0.5 italic">Data source: 권한 판정 컨트롤타워 (화면이 표를 만들지 않는다)</p>
-                  </div>
-                  <div className="px-5 py-3 flex flex-wrap gap-3 border-b border-gray-100">
-                    {adminRoleOptions.map((o) => (
-                      <div key={o.value} className="text-[11px] text-gray-600">
-                        <span className="font-semibold text-gray-900">{o.label}</span>
-                        <span className="ml-1.5 text-gray-400">{o.desc}</span>
-                      </div>
-                    ))}
-                  </div>
-                  <div className="overflow-x-auto">
-                    <table className="w-full text-sm">
-                      <thead className="bg-gray-50 text-xs text-gray-500">
-                        <tr>
-                          <th className="px-4 py-2 text-left">영역</th>
-                          <th className="px-4 py-2 text-left">해당 화면</th>
-                          {adminRoleOptions.map((o) => (
-                            <th key={o.value} className="px-4 py-2 text-center">{o.label}</th>
-                          ))}
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-gray-100">
-                        {adminMatrix.map((row) => (
-                          <tr key={row.key}>
-                            <td className="px-4 py-2 text-xs font-medium text-gray-900">{row.area}</td>
-                            <td className="px-4 py-2 text-[11px] text-gray-500">{row.screens}</td>
-                            {adminRoleOptions.map((o) => {
-                              const lv = row.levels?.[o.value] || 'NONE';
-                              return (
-                                <td key={o.value} className="px-4 py-2 text-center">
-                                  <span className={`inline-block px-2 py-0.5 text-[11px] rounded ${
-                                    lv === 'NONE' ? 'bg-gray-100 text-gray-400'
-                                      : lv === 'R' ? 'bg-sky-50 text-sky-700'
-                                      : lv === 'RW' ? 'bg-emerald-50 text-emerald-700'
-                                      : 'bg-indigo-50 text-indigo-700'}`}>
-                                    {adminLevelLabels[lv] || lv}
-                                  </span>
-                                </td>
-                              );
-                            })}
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                </div>
-
-                <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
-                  <div className="px-5 py-3 border-b border-gray-100">
-                    <h3 className="text-base font-semibold text-gray-900">접근권한 변경 이력 대장</h3>
-                    <p className="text-[10px] text-gray-500 mt-0.5 italic">Data source: 감사 로그 (admin_role_changed 외)</p>
-                  </div>
-                  <div className="overflow-x-auto">
-                    <table className="w-full text-sm">
-                      <thead className="bg-gray-50 text-xs text-gray-500">
-                        <tr>
-                          <th className="px-4 py-2 text-left">일시</th>
-                          {/* ★ 2026-10-02 승인자 열(전송자격인증 3.2 ③ · 3.3 ②) — 이 대장의 변경은 대표 등급만 할 수 있어
-                              승인과 처리가 같은 사람이다. 심사 확인사항이 두 항목을 따로 적으므로 열도 따로 둔다 */}
-                          <th className="px-4 py-2 text-left">승인자</th>
-                          <th className="px-4 py-2 text-left">처리자</th>
-                          <th className="px-4 py-2 text-left">대상 계정</th>
-                          <th className="px-4 py-2 text-left">변경</th>
-                          <th className="px-4 py-2 text-left">사유</th>
-                          <th className="px-4 py-2 text-left">접속 IP</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-gray-100">
-                        {adminRoleHistory.length === 0 && (
-                          <tr><td colSpan={7} className="px-4 py-8 text-center text-gray-400 text-xs">변경 이력이 없습니다.</td></tr>
-                        )}
-                        {pageSlice(adminRoleHistory, adminRoleHistoryPage).map((h) => {
-                          const d = h.details || {};
-                          const roleName = (v: any) => adminRoleOptions.find((o) => o.value === v)?.label || v || '-';
-                          // ★0827 등급 변경 말고도 생성·중지·재개가 같은 대장에 쌓인다.
-                          //   before/after만 보면 그 행들이 「- → -」가 되어 심사 제출물에 빈칸이 남는다.
-                          const change =
-                            h.action === 'admin_role_changed'
-                              ? `${roleName(d.before)} → ${roleName(d.after)}`
-                              : h.action === 'admin_account_created'
-                                ? `계정 생성 · ${roleName(d.role)}`
-                                : h.action === 'admin_account_disabled'
-                                  ? '사용 중지'
-                                  : h.action === 'admin_account_enabled'
-                                    ? '사용 재개'
-                                    : '-';
-                          return (
-                            <tr key={h.id}>
-                              <td className="px-4 py-2 text-xs text-gray-500">{formatDateTime(h.created_at)}</td>
-                              <td className="px-4 py-2 text-xs text-gray-900">{h.actor_name || h.actor_login_id || '-'}</td>
-                              <td className="px-4 py-2 text-xs text-gray-900">{h.actor_name || h.actor_login_id || '-'}</td>
-                              <td className="px-4 py-2 font-mono text-xs text-gray-700">{d.login_id || '-'}</td>
-                              <td className="px-4 py-2 text-xs text-gray-700 whitespace-nowrap">{change}</td>
-                              <td className="px-4 py-2 text-xs text-gray-600 max-w-xs truncate">{d.reason || '-'}</td>
-                              <td className="px-4 py-2 font-mono text-[11px] text-gray-500">{h.ip_address || '-'}</td>
-                            </tr>
-                          );
-                        })}
-                      </tbody>
-                    </table>
-                  </div>
-                  <ListPager page={adminRoleHistoryPage} total={adminRoleHistory.length} onPage={setAdminRoleHistoryPage} />
-                </div>
-              </>
-            )}
-          </div>
-        )}
+        {activeTab === 'adminAccounts' && <AdminAccountsTab {...{ adminAccounts, adminAccountsAllowed, adminAccountsCanWrite, adminAccountsPage, adminLevelLabels, adminMatrix, adminRoleHistory, adminRoleHistoryPage, adminRoleOptions, setAdminAccountsPage, setAdminActiveEdit, setAdminCreate, setAdminRoleEdit, setAdminRoleHistoryPage }} />}
 
         {/* ★ 2026-08-19 국외 접근 통제 (전송자격인증 2.2) */}
         {activeTab === 'helpQuestions' && helpQAccessAllowed && (
@@ -6051,2040 +2900,44 @@ const handleApproveRequest = async (id: string) => {
         {activeTab === 'introLeads' && introLeadsAllowed && <IntroLeadsTab />}
         {activeTab === 'watchLog' && watchLogAllowed && <WatchLogTab />}
 
-        {activeTab === 'geoAccess' && (
-          <div className="space-y-6">
-            {/* ★0827 차단 정책 선언 — 심사(2.2)는 "국외 IP 대역을 차단하는 정책"이 화면에서 읽히는지를 본다.
-                판정 로직은 무변경이다. 허용 대역은 그 차단 정책의 예외 목록이지 정책 자체가 아니다. */}
-            <div className="rounded-xl border border-gray-800 bg-gray-900 p-5 text-white">
-              <div className="flex items-start justify-between gap-4 flex-wrap">
-                <div>
-                  <div className="text-[11px] font-semibold tracking-wide text-gray-400">접근제어 정책</div>
-                  <h3 className="mt-1 text-lg font-bold">국외 IP 대역 전면 차단</h3>
-                  <p className="mt-1.5 text-xs leading-relaxed text-gray-300">
-                    기본 정책은 <span className="font-semibold text-white">차단</span>입니다.
-                    아래 허용 대역(화이트리스트)에 드는 IP와 관리자가 수동 승인한 예외만 통과하고,
-                    그 밖의 모든 국외 IP는 로그인·세션 발급 단계에서 차단됩니다.
-                  </p>
-                </div>
-                {/* ★0827 시행 상태 3단 — 「시행일이 안 잡힘」과 「시행일이 잡혔는데 아직 안 옴」은 다른 상태다.
-                    둘을 똑같이 '미시행'으로 그리면 시행일을 정해 둔 통제가 통제 없음으로 읽힌다. */}
-                {(() => {
-                  const enforced = geoStatus?.enforced === true;
-                  const rawFrom = String(geoStatus?.enforceFrom || '').trim();
-                  const fromDate = rawFrom ? new Date(rawFrom) : null;
-                  const validFrom = fromDate && !Number.isNaN(fromDate.getTime()) ? fromDate : null;
-                  const fromText = validFrom
-                    ? `${validFrom.getFullYear()}년 ${validFrom.getMonth() + 1}월 ${validFrom.getDate()}일`
-                    : rawFrom;
-                  const scheduled = !enforced && !!validFrom;
-                  const tone = enforced
-                    ? 'bg-rose-500/20 border border-rose-400/40'
-                    : scheduled
-                      ? 'bg-amber-500/15 border border-amber-400/40'
-                      : 'bg-gray-800 border border-gray-700';
-                  const titleTone = enforced ? 'text-rose-300' : scheduled ? 'text-amber-200' : 'text-gray-400';
-                  return (
-                    <div className={`shrink-0 rounded-lg px-4 py-2.5 text-center ${tone}`}>
-                      <div className="text-[10px] text-gray-400">정책 시행</div>
-                      <div className={`text-base font-bold ${titleTone}`}>
-                        {enforced ? '시행 중' : scheduled ? '시행 예정' : '시행일 미지정'}
-                      </div>
-                      <div className="mt-0.5 text-[10px] text-gray-500">
-                        {enforced ? `${fromText}부터` : scheduled ? `${fromText}부터 차단` : '탐지·기록만'}
-                      </div>
-                    </div>
-                  );
-                })()}
-              </div>
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-              <div className="bg-white rounded-xl border border-gray-200 p-5">
-                <div className="text-xs text-gray-500">차단 예외 · 허용 대역</div>
-                <div className="mt-1.5 text-2xl font-bold text-gray-900 tabular-nums">
-                  {Number(geoStatus?.cidrCount || 0).toLocaleString()}<span className="ml-1 text-sm font-semibold text-gray-400">개</span>
-                </div>
-                <div className="mt-1 text-[11px] text-gray-400">
-                  {geoStatus?.cidrUpdatedAt ? `갱신 ${formatDateTime(geoStatus.cidrUpdatedAt)}` : '아직 등록되지 않았습니다'}
-                </div>
-              </div>
-              <div className="bg-white rounded-xl border border-gray-200 p-5">
-                <div className="text-xs text-gray-500">차단 예외 · 수동 승인</div>
-                <div className="mt-1.5 text-2xl font-bold text-gray-900 tabular-nums">
-                  {Number(geoStatus?.exceptionCount || 0).toLocaleString()}<span className="ml-1 text-sm font-semibold text-gray-400">건</span>
-                </div>
-                <div className="mt-1 text-[11px] text-gray-400">해외 근무자 · 해외 본사 서버</div>
-              </div>
-              <div className="bg-white rounded-xl border border-gray-200 p-5">
-                <div className="text-xs text-gray-500">차단 시 이용자 안내</div>
-                <div className="mt-1.5 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-[11px] leading-relaxed text-rose-800">
-                  {geoStatus?.blockNotice || '차단 안내 문구를 불러오지 못했습니다'}
-                </div>
-                <div className="mt-1 text-[10px] text-gray-400 italic">Data source: 서버 차단 응답 문구</div>
-              </div>
-            </div>
-
-            {/* ★ 2026-10-07 「국내 대역 일괄 등록」 카드 삭제(Harold) — 한국 IP 기준표는 직원이 바꾸는 값이 아니다(1007 IP 하나로 덮여 국내 로그인 전부 차단). 갱신 = 서버 명령 · OPS §2-2-F */}
-            <div className="bg-white rounded-xl border border-gray-200 p-5">
-              <h3 className="text-base font-semibold text-gray-900">관리자 수동 승인 (예외 IP 허용)</h3>
-              <p className="mt-1 text-xs text-gray-500 leading-relaxed">
-                차단 정책에서 개별로 빼줄 대상을 등록합니다. <span className="font-medium">사유 없이는 등록되지 않습니다</span>. 이 기록이 심사에 내는 예외 승인 대장입니다.
-                <br />
-                SDK·싱크에이전트는 국가로 막지 않습니다. 해외 본사를 둔 고객사는 <span className="font-medium">회사 API · 회사 에이전트</span> 범위로 그 대역을 등록해주세요.
-              </p>
-              <div className="mt-3 grid grid-cols-1 md:grid-cols-5 gap-2">
-                <select
-                  value={geoForm.scope}
-                  onChange={(e) => setGeoForm({ ...geoForm, scope: e.target.value })}
-                  className="px-3 py-2 border border-gray-200 rounded-lg text-sm outline-none focus:border-indigo-500"
-                >
-                  <option value="user">계정 (해외 근무 담당자)</option>
-                  <option value="company_api">회사 API (SDK·자사몰)</option>
-                  <option value="company_agent">회사 에이전트 (사내 서버)</option>
-                  <option value="global">전역</option>
-                </select>
-                <input
-                  value={geoForm.target}
-                  onChange={(e) => setGeoForm({ ...geoForm, target: e.target.value })}
-                  placeholder={geoForm.scope === 'user' ? '대상 계정 아이디 또는 UUID' : geoForm.scope === 'global' ? '전역 (비워둠)' : '대상 고객사 이름 또는 UUID'}
-                  disabled={geoForm.scope === 'global'}
-                  className="px-3 py-2 border border-gray-200 rounded-lg text-sm outline-none focus:border-indigo-500 disabled:bg-gray-50"
-                />
-                <input
-                  value={geoForm.cidr}
-                  onChange={(e) => setGeoForm({ ...geoForm, cidr: e.target.value })}
-                  placeholder="203.0.113.0/24 (단일 IP는 /32)"
-                  className="px-3 py-2 border border-gray-200 rounded-lg font-mono text-xs outline-none focus:border-indigo-500"
-                />
-                <input
-                  value={geoForm.reason}
-                  onChange={(e) => setGeoForm({ ...geoForm, reason: e.target.value })}
-                  placeholder="승인 사유 (필수)"
-                  className="px-3 py-2 border border-gray-200 rounded-lg text-sm outline-none focus:border-indigo-500"
-                />
-                {/* ★ 2026-10-02 허용 만료일 — 비우면 기한 없음. 그 날짜 끝까지 유효하다 */}
-                <label className="flex items-center gap-2 px-3 py-2 border border-gray-200 rounded-lg text-sm focus-within:border-indigo-500">
-                  <span className="shrink-0 text-xs text-gray-500">허용 만료일</span>
-                  <input
-                    type="date"
-                    value={geoForm.expiresAt}
-                    min={kstTodayStr()}
-                    onChange={(e) => setGeoForm({ ...geoForm, expiresAt: e.target.value })}
-                    className="min-w-0 flex-1 bg-transparent text-xs text-gray-700 outline-none"
-                  />
-                </label>
-              </div>
-              <p className="mt-1.5 text-[11px] text-gray-400">허용 만료일을 비우면 기한 없이 유지됩니다. 넣으면 그 날짜가 지난 뒤 자동으로 통과가 끊깁니다.</p>
-              <div className="mt-2 flex justify-end">
-                <button
-                  onClick={handleGeoExceptionCreate}
-                  disabled={geoBusy || !geoForm.cidr.trim() || !geoForm.reason.trim()}
-                  className="px-4 py-2 rounded-lg bg-indigo-600 text-white text-sm font-semibold hover:bg-indigo-700 disabled:opacity-40"
-                >
-                  예외 승인
-                </button>
-              </div>
-
-              <div className="mt-4 overflow-x-auto">
-                <table className="w-full text-sm">
-                  <thead className="bg-gray-50 text-xs text-gray-500">
-                    <tr>
-                      <th className="px-3 py-2 text-left">범위</th>
-                      <th className="px-3 py-2 text-left">대상</th>
-                      <th className="px-3 py-2 text-left">대역</th>
-                      <th className="px-3 py-2 text-left">사유</th>
-                      <th className="px-3 py-2 text-left">승인자</th>
-                      <th className="px-3 py-2 text-left">승인 일시</th>
-                      <th className="px-3 py-2 text-left">허용 기간</th>
-                      <th className="px-3 py-2 text-right">회수</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-gray-100">
-                    {geoExceptions.length === 0 && (
-                      <tr><td colSpan={8} className="px-3 py-8 text-center text-gray-400 text-xs">등록된 예외가 없습니다.</td></tr>
-                    )}
-                    {pageSlice(geoExceptions, geoExPage).map((x) => (
-                      <tr key={x.id} className={x.is_active && !x.is_expired ? '' : 'opacity-45'}>
-                        <td className="px-3 py-2 text-xs text-gray-700">
-                          {x.scope === 'user' ? '계정' : x.scope === 'company_api' ? '회사 API' : x.scope === 'company_agent' ? '회사 에이전트' : '전역'}
-                        </td>
-                        <td className="px-3 py-2 text-xs text-gray-900">{x.login_id || x.company_name || '-'}</td>
-                        <td className="px-3 py-2 font-mono text-xs text-gray-700">{x.cidr}</td>
-                        <td className="px-3 py-2 text-xs text-gray-600 max-w-xs truncate">{x.reason}</td>
-                        <td className="px-3 py-2 text-xs text-gray-900 whitespace-nowrap">{x.approver_name || x.approver_login_id || '-'}</td>
-                        <td className="px-3 py-2 text-[11px] text-gray-400 whitespace-nowrap">{formatDateTime(x.approved_at)}</td>
-                        <td className="px-3 py-2 text-xs text-gray-700 whitespace-nowrap">
-                          {formatDate(x.approved_at)} ~ {x.expires_at ? formatDate(x.expires_at) : '기한 없음'}
-                          {x.is_expired && <span className="ml-1.5 px-1.5 py-0.5 rounded bg-gray-100 text-[10px] text-gray-500">만료</span>}
-                        </td>
-                        <td className="px-3 py-2 text-right">
-                          {x.is_active ? (
-                            <button
-                              onClick={() => handleGeoExceptionRevoke(x.id)}
-                              className="px-2.5 py-1 rounded-lg border border-gray-200 text-xs text-gray-600 hover:bg-gray-50"
-                            >
-                              회수
-                            </button>
-                          ) : (
-                            <span className="text-[11px] text-gray-400">회수됨</span>
-                          )}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-              <ListPager page={geoExPage} total={geoExceptions.length} onPage={setGeoExPage} />
-            </div>
-
-            <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
-              <div className="px-5 py-3 border-b border-gray-100">
-                <h3 className="text-base font-semibold text-gray-900">국외 IP 탐지 · 차단 결과 로그</h3>
-                <p className="text-[10px] text-gray-500 mt-0.5 italic">Data source: 감사 로그 (foreign_access_detected · foreign_access_blocked)</p>
-              </div>
-              <div className="overflow-x-auto">
-                <table className="w-full text-sm">
-                  <thead className="bg-gray-50 text-xs text-gray-500">
-                    <tr>
-                      <th className="px-4 py-2 text-left">시각</th>
-                      <th className="px-4 py-2 text-left">계정</th>
-                      <th className="px-4 py-2 text-left">고객사</th>
-                      <th className="px-4 py-2 text-left">IP</th>
-                      <th className="px-4 py-2 text-left">처리</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-gray-100">
-                    {geoHits.length === 0 && (
-                      <tr><td colSpan={5} className="px-4 py-8 text-center text-gray-400 text-xs">
-                        {geoHitsDenied ? '접근 이력은 허용된 계정에서만 볼 수 있습니다.' : '국외 접근 기록이 없습니다.'}
-                      </td></tr>
-                    )}
-                    {geoHits.map((h) => (
-                      <tr key={h.id}>
-                        <td className="px-4 py-2 text-xs text-gray-500">{formatDateTime(h.created_at)}</td>
-                        <td className="px-4 py-2 text-xs text-gray-900">{h.login_id || '-'}</td>
-                        <td className="px-4 py-2 text-xs text-gray-700">{h.company_name || '-'}</td>
-                        <td className="px-4 py-2 font-mono text-xs text-gray-700">{h.ip_address || '-'}</td>
-                        <td className="px-4 py-2">
-                          {/* ★1005 전송자격인증 2.2 — 시행 뒤 예외 승인으로 통과한 감지(details.exempted)를 「기록만」으로 그리면 사실과 다르다 */}
-                          <span className={`px-2 py-0.5 text-[11px] rounded ${h.action === 'foreign_access_blocked' ? 'bg-rose-100 text-rose-700' : h.details?.exempted === true ? 'bg-amber-100 text-amber-700' : 'bg-gray-100 text-gray-600'}`}>
-                            {h.action === 'foreign_access_blocked' ? '차단' : h.details?.exempted === true ? '예외 통과' : '기록만'}
-                          </span>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-              <ListPager page={geoHitsPage} total={geoHitsTotal} onPage={(p) => { void loadGeoHits(p); }} />
-            </div>
-          </div>
-        )}
+        {activeTab === 'geoAccess' && <GeoAccessTab {...{ geoBusy, geoExPage, geoExceptions, geoForm, geoHits, geoHitsDenied, geoHitsPage, geoHitsTotal, geoStatus, loadGeoAccess, loadGeoHits, setGeoBusy, setGeoExPage, setGeoForm, showAlert }} />}
 
         {/* 요금제 관리 탭 */}
-        {activeTab === 'spamBlock' && (
-          <div className="space-y-6">
-            {/* ★0827 차단 체계 선언 — 심사(5.2)는 "발송 요청 시 자동 차단"이 화면에서 읽히는지를 본다. */}
-            <div className="rounded-xl border border-gray-800 bg-gray-900 p-5 text-white">
-              <div className="flex items-start justify-between gap-4 flex-wrap">
-                <div>
-                  <div className="text-[11px] font-semibold tracking-wide text-gray-400">발송 요청 필터링 정책</div>
-                  <h3 className="mt-1 text-lg font-bold">금칙어 · 악성 URL 자동 차단</h3>
-                  <p className="mt-1.5 text-xs leading-relaxed text-gray-300">
-                    모든 문자(SMS · LMS · MMS) 발송 요청은 요금 차감과 큐 적재 전에 차단정보와 대조합니다.
-                    <span className="font-semibold text-white"> 차단</span>으로 둔 조합에 걸린 문안은 <span className="font-semibold text-white">발송이 중지</span>되고
-                    발송자에게 안내가 표시되며, 그 사실이 차단 결과 로그에 남습니다.
-                    <span className="font-semibold text-white"> 탐지</span>로 둔 조합은 발송을 막지 않고 기록만 합니다.
-                  </p>
-                </div>
-                <div className="shrink-0 rounded-lg border border-gray-700 bg-gray-800 px-4 py-2.5 text-center">
-                  <div className="text-[10px] text-gray-400">발송 차단 중인 차단정보</div>
-                  <div className="text-base font-bold text-white tabular-nums">
-                    {spamRules.filter((r) => r.is_active && r.mode === 'block').length}<span className="ml-0.5 text-xs font-semibold text-gray-400">건</span>
-                  </div>
-                  <div className="mt-0.5 text-[10px] text-gray-500">탐지 {spamRules.filter((r) => r.is_active && r.mode !== 'block').length}건 · 문자 발송 전 경로</div>
-                </div>
-              </div>
-              {spamBlockNotice && (
-                <div className="mt-4 rounded-lg border border-rose-400/40 bg-rose-500/15 px-4 py-3">
-                  <div className="text-[10px] font-semibold text-rose-300">차단 시 발송자에게 표시되는 안내</div>
-                  <p className="mt-1 text-xs leading-relaxed text-rose-100">{spamBlockNotice}</p>
-                  <div className="mt-1 text-[10px] text-gray-500 italic">Data source: 서버 차단 응답 문구</div>
-                </div>
-              )}
-            </div>
+        {activeTab === 'spamBlock' && <SpamBlockTab {...{ loadSpamBlock, loadSpamHits, setSpamBusy, setSpamElements, setSpamModeBusyId, setSpamRuleName, setSpamRulesPage, setSpamSim, showAlert, showConfirm, spamBlockNotice, spamBusy, spamElements, spamHits, spamHitsPage, spamHitsTotal, spamModeBusyId, spamRuleName, spamRules, spamRulesPage, spamSim }} />}
 
-            <div className="bg-white rounded-xl border border-gray-200 p-5">
-              <h3 className="text-base font-semibold text-gray-900">차단정보 등록</h3>
-              <p className="text-xs text-gray-500 mt-1 leading-relaxed">
-                키워드 · URL · 전화번호를 <span className="font-medium">2~5개 조합</span>으로 만듭니다. 요소가 <span className="font-medium">전부 맞을 때만</span> 걸립니다.
-                단일 키워드는 정상 문자를 막기 때문에 등록되지 않습니다.
-              </p>
-              <p className="text-xs text-gray-500 mt-2 leading-relaxed">
-                새 규칙은 <span className="font-medium text-gray-700">탐지</span>로 시작합니다. <span className="font-medium text-gray-700">최근 발송 문안으로 오탐을 먼저 확인</span>한 뒤 목록에서 차단으로 전환하세요.
-                정상 문안이 걸리는 조합을 차단으로 두면 그 고객사의 발송이 실제로 멈춥니다.
-              </p>
-
-              <div className="mt-4 space-y-3">
-                <input type="text" value={spamRuleName} onChange={(e) => setSpamRuleName(e.target.value)}
-                  placeholder="규칙 이름 (예: 무직자 당일대출 스팸)"
-                  className="w-full px-3 py-2 text-sm border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none" />
-
-                {spamElements.map((el, i) => (
-                  <div key={i} className="flex gap-2">
-                    <select value={el.type}
-                      onChange={(e) => setSpamElements(spamElements.map((x, xi) => xi === i ? { ...x, type: e.target.value } : x))}
-                      className="w-32 px-3 py-2 text-sm border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none">
-                      <option value="keyword">키워드</option>
-                      <option value="url">URL</option>
-                      <option value="phone">전화번호</option>
-                    </select>
-                    <input type="text" value={el.value}
-                      onChange={(e) => setSpamElements(spamElements.map((x, xi) => xi === i ? { ...x, value: e.target.value } : x))}
-                      placeholder={el.type === 'url' ? 'bit.ly' : el.type === 'phone' ? '010-0000-0000' : '무직자'}
-                      className="flex-1 px-3 py-2 text-sm border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none" />
-                    {spamElements.length > 2 && (
-                      <button type="button" onClick={() => setSpamElements(spamElements.filter((_, xi) => xi !== i))}
-                        className="px-3 py-2 text-xs text-gray-500 border border-gray-200 rounded-lg hover:bg-gray-50">삭제</button>
-                    )}
-                  </div>
-                ))}
-
-                <div className="flex flex-wrap gap-2">
-                  {spamElements.length < 5 && (
-                    <button type="button" onClick={() => setSpamElements([...spamElements, { type: 'keyword', value: '' }])}
-                      className="px-3 py-2 text-xs border border-gray-200 rounded-lg hover:bg-gray-50">요소 추가</button>
-                  )}
-                  <button type="button" onClick={handleSpamSimulate} disabled={spamBusy || spamElementsPayload().length < 2}
-                    className="px-4 py-2 text-xs font-medium border border-blue-200 text-blue-700 bg-blue-50 rounded-lg hover:bg-blue-100 disabled:opacity-50">
-                    {spamBusy ? '확인 중…' : '최근 발송 문안으로 오탐 확인'}
-                  </button>
-                  <button type="button" onClick={handleSpamCreate} disabled={spamBusy || spamElementsPayload().length < 2}
-                    className="px-4 py-2 text-xs font-medium bg-blue-600 hover:bg-blue-700 disabled:bg-blue-300 text-white rounded-lg">
-                    차단정보 등록
-                  </button>
-                </div>
-
-                {spamSim && (
-                  <div className={`rounded-lg border px-4 py-3 text-xs ${spamSim.matchedCount > 0 ? 'bg-amber-50 border-amber-200 text-amber-800' : 'bg-emerald-50 border-emerald-200 text-emerald-800'}`}>
-                    <p className="font-medium">
-                      최근 {spamSim.scannedDays}일 발송 문안 {spamSim.scanned}건 중 <span className="font-bold">{spamSim.matchedCount}건</span> 일치
-                    </p>
-                    {spamSim.matchedCount > 0 && (
-                      <>
-                        <p className="mt-1 text-[11px]">아래 문안이 정상이라면 조합을 더 좁혀주세요.</p>
-                        <ul className="mt-2 space-y-1">
-                          {spamSim.samples?.map((sm: any, i: number) => (
-                            <li key={i} className="bg-white/70 rounded px-2 py-1 text-[11px] text-gray-700 truncate">{sm.sample}</li>
-                          ))}
-                        </ul>
-                      </>
-                    )}
-                  </div>
-                )}
-              </div>
-            </div>
-
-            <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
-              <div className="px-5 py-3 border-b border-gray-100">
-                <h3 className="text-base font-semibold text-gray-900">차단정보 목록</h3>
-              </div>
-              <div className="overflow-x-auto">
-                <table className="w-full text-sm">
-                  <thead className="bg-gray-50 text-xs text-gray-500">
-                    <tr>
-                      <th className="px-4 py-2 text-left">이름</th>
-                      <th className="px-4 py-2 text-left">조합</th>
-                      <th className="px-4 py-2 text-left">출처</th>
-                      <th className="px-4 py-2 text-right">탐지</th>
-                      <th className="px-4 py-2 text-left">처리</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-gray-100">
-                    {spamRules.length === 0 && (
-                      <tr><td colSpan={5} className="px-4 py-8 text-center text-gray-400 text-xs">등록된 차단정보가 없습니다. 차단정보가 없으면 발송은 그대로 나갑니다.</td></tr>
-                    )}
-                    {pageSlice(spamRules, spamRulesPage).map((r) => (
-                      <tr key={r.id}>
-                        <td className="px-4 py-2 font-medium text-gray-900">{r.name}</td>
-                        <td className="px-4 py-2">
-                          <div className="flex flex-wrap gap-1">
-                            {(r.elements || []).map((el: any, i: number) => (
-                              <span key={i} className="px-2 py-0.5 text-[11px] bg-gray-100 text-gray-700 rounded">
-                                {el.type === 'url' ? 'URL' : el.type === 'phone' ? '번호' : '키워드'} · {el.value}
-                              </span>
-                            ))}
-                          </div>
-                        </td>
-                        <td className="px-4 py-2 text-xs text-gray-500">{resolveSpamRuleSourceLabel(r.source)}</td>
-                        <td className="px-4 py-2 text-right text-xs text-gray-700">{r.hit_count}</td>
-                        <td className="px-4 py-2">
-                          <div className="flex items-center gap-2 whitespace-nowrap">
-                            <span className={`px-2 py-0.5 text-[11px] rounded ${!r.is_active ? 'bg-gray-100 text-gray-500' : r.mode === 'block' ? 'bg-rose-100 text-rose-700' : 'bg-amber-100 text-amber-700'}`}>
-                              {!r.is_active ? '사용 안 함' : r.mode === 'block' ? '발송 차단' : '탐지만'}
-                            </span>
-                            {r.is_active && (
-                              <button type="button" onClick={() => handleSpamModeChange(r)} disabled={spamModeBusyId === r.id}
-                                className={`px-2.5 py-1 text-[11px] font-medium rounded-lg border disabled:opacity-50 ${r.mode === 'block' ? 'border-gray-200 text-gray-600 hover:bg-gray-50' : 'border-rose-200 text-rose-700 bg-rose-50 hover:bg-rose-100'}`}>
-                                {spamModeBusyId === r.id ? '전환 중…' : r.mode === 'block' ? '탐지로 전환' : '차단으로 전환'}
-                              </button>
-                            )}
-                          </div>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-              <ListPager page={spamRulesPage} total={spamRules.length} onPage={setSpamRulesPage} />
-            </div>
-
-            <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
-              <div className="px-5 py-3 border-b border-gray-100">
-                <h3 className="text-base font-semibold text-gray-900">탐지 · 차단 결과 로그</h3>
-                <p className="text-[10px] text-gray-500 mt-0.5 italic">Data source: 금칙어 탐지 · 차단 기록</p>
-              </div>
-              <div className="overflow-x-auto">
-                <table className="w-full text-sm">
-                  <thead className="bg-gray-50 text-xs text-gray-500">
-                    <tr>
-                      <th className="px-4 py-2 text-left">시각</th>
-                      <th className="px-4 py-2 text-left">규칙</th>
-                      <th className="px-4 py-2 text-left">고객사</th>
-                      <th className="px-4 py-2 text-left">경로</th>
-                      <th className="px-4 py-2 text-left">처리</th>
-                      <th className="px-4 py-2 text-right">건수</th>
-                      <th className="px-4 py-2 text-left">문안</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-gray-100">
-                    {spamHits.length === 0 && (
-                      <tr><td colSpan={7} className="px-4 py-8 text-center text-gray-400 text-xs">탐지 이력이 없습니다.</td></tr>
-                    )}
-                    {spamHits.map((h) => (
-                      <tr key={h.id}>
-                        <td className="px-4 py-2 text-xs text-gray-500">{new Date(h.created_at).toLocaleString('ko-KR')}</td>
-                        <td className="px-4 py-2 text-xs text-gray-900">{h.rule_name || '-'}</td>
-                        <td className="px-4 py-2 text-xs text-gray-700">{h.company_name || '-'}</td>
-                        <td className="px-4 py-2 text-xs text-gray-500">{resolveSpamHitSourceLabel(h.send_source)}</td>
-                        <td className="px-4 py-2">
-                          <span className={`px-2 py-0.5 text-[11px] rounded whitespace-nowrap ${h.action_taken === 'block' ? 'bg-rose-100 text-rose-700' : 'bg-amber-100 text-amber-700'}`}>
-                            {h.action_taken === 'block' ? '발송 차단' : h.mode === 'block' ? '탐지 · 차단 규칙' : '탐지'}
-                          </span>
-                        </td>
-                        <td className="px-4 py-2 text-right text-xs text-gray-700">{h.affected_rows}</td>
-                        <td className="px-4 py-2 text-xs text-gray-500 max-w-xs truncate">{h.content_sample}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-              <ListPager page={spamHitsPage} total={spamHitsTotal} onPage={(p) => { void loadSpamHits(p); }} />
-            </div>
-          </div>
-        )}
-
-        {activeTab === 'plans' && (
-          <div className="bg-white rounded-2xl border border-gray-200/70 shadow-sm">
-            <div className="px-6 py-4 border-b flex justify-between items-center">
-              <h2 className="text-lg font-semibold">요금제 관리</h2>
-              <button
-                onClick={() => setShowPlanModal(true)}
-                className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg text-sm font-medium"
-              >
-                + 요금제 추가
-              </button>
-            </div>
-
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead className="bg-gray-50">
-                  <tr>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 whitespace-nowrap">코드</th>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 whitespace-nowrap">요금제명</th>
-                    <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 whitespace-nowrap">월 요금</th>
-                    <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 whitespace-nowrap">사용 회사</th>
-                    <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 whitespace-nowrap">상태</th>
-                    <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 whitespace-nowrap">관리</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-gray-200">
-                  {planList.length === 0 ? (
-                    <tr>
-                      <td colSpan={6} className="px-6 py-12 text-center text-gray-500">
-                        등록된 요금제가 없습니다.
-                      </td>
-                    </tr>
-                  ) : (
-                    planList
-                      .slice((planPage - 1) * planPerPage, planPage * planPerPage)
-                      .map((plan) => (
-                      <tr key={plan.id} className="hover:bg-gray-50">
-                        <td className="px-4 py-3 font-medium text-gray-900 whitespace-nowrap">{plan.plan_code}</td>
-                        <td className="px-4 py-3 text-gray-900">{plan.plan_name}</td>
-                        <td className="px-4 py-3 text-center text-gray-900 whitespace-nowrap font-medium">
-                          {Number(plan.monthly_price).toLocaleString()}원
-                        </td>
-                        <td className="px-4 py-3 text-center">
-                          <span className="text-blue-600 font-medium">{plan.company_count || 0}개</span>
-                        </td>
-                        <td className="px-4 py-3 text-center">
-                          {plan.is_active ? (
-                            <span className="px-2 py-1 rounded-full text-xs font-medium bg-green-100 text-green-800">활성</span>
-                          ) : (
-                            <span className="px-2 py-1 rounded-full text-xs font-medium bg-gray-100 text-gray-800">비활성</span>
-                          )}
-                        </td>
-                        <td className="px-4 py-3 text-center">
-                          <div className="flex justify-center gap-2">
-                            <button
-                              onClick={() => setEditingPlan({ ...plan })}
-                              className="text-blue-600 hover:text-blue-800 text-sm"
-                            >
-                              수정
-                            </button>
-                            <button
-                              onClick={() => handleDeletePlan(plan.id, plan.plan_name)}
-                              className="text-red-600 hover:text-red-800 text-sm"
-                            >
-                              삭제
-                            </button>
-                          </div>
-                        </td>
-                      </tr>
-                    ))
-                  )}
-                </tbody>
-                </table>
-            </div>
-            {planList.length > planPerPage && (
-              <div className="px-6 py-4 border-t flex items-center justify-between">
-                <span className="text-sm text-gray-500">
-                  총 {planList.length}개 중 {(planPage - 1) * planPerPage + 1}-{Math.min(planPage * planPerPage, planList.length)}
-                </span>
-                <div className="flex gap-1">
-                  <button onClick={() => setPlanPage(p => Math.max(1, p - 1))} disabled={planPage === 1}
-                    className="px-3 py-1 rounded border text-sm disabled:opacity-40 hover:bg-gray-50">◀ 이전</button>
-                  {Array.from({ length: Math.ceil(planList.length / planPerPage) }, (_, i) => i + 1).map(p => (
-                    <button key={p} onClick={() => setPlanPage(p)}
-                      className={`px-3 py-1 rounded border text-sm ${planPage === p ? 'bg-blue-600 text-white border-blue-600' : 'hover:bg-gray-50'}`}>{p}</button>
-                  ))}
-                  <button onClick={() => setPlanPage(p => Math.min(Math.ceil(planList.length / planPerPage), p + 1))}
-                    disabled={planPage >= Math.ceil(planList.length / planPerPage)}
-                    className="px-3 py-1 rounded border text-sm disabled:opacity-40 hover:bg-gray-50">다음 ▶</button>
-                </div>
-              </div>
-            )}
-            </div>
-        )}
+        {activeTab === 'plans' && <PlansTab {...{ closeModal, loadPlans, planList, planPage, setEditingPlan, setPlanPage, setShowPlanModal, showAlert, showConfirm }} />}
 
         {/* 플랜 신청 관리 탭 */}
-        {activeTab === 'requests' && (
-          <div className="bg-white rounded-2xl border border-gray-200/70 shadow-sm">
-            <div className="px-6 py-4 border-b">
-              <h2 className="text-lg font-semibold">플랜 변경 신청 목록</h2>
-            </div>
-
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead className="bg-gray-50">
-                  <tr>
-                    <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 whitespace-nowrap">신청일시</th>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 whitespace-nowrap">회사</th>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 whitespace-nowrap">신청자</th>
-                    <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 whitespace-nowrap">현재 플랜</th>
-                    <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 whitespace-nowrap">신청 플랜</th>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 whitespace-nowrap">메시지</th>
-                    <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 whitespace-nowrap">상태</th>
-                    <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 whitespace-nowrap">처리</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-gray-200">
-                  {planRequests.length === 0 ? (
-                    <tr>
-                      <td colSpan={8} className="px-6 py-12 text-center text-gray-500">
-                        플랜 변경 신청이 없습니다.
-                      </td>
-                    </tr>
-                  ) : (
-                    planRequests
-                      .slice((requestPage - 1) * requestPerPage, requestPage * requestPerPage)
-                      .map((req) => (
-                      <tr key={req.id} className={`hover:bg-gray-50 ${req.status === 'pending' ? 'bg-yellow-50' : ''}`}>
-                        <td className="px-4 py-3 text-center text-gray-600 whitespace-nowrap">
-                          {formatDateTime(req.created_at)}
-                        </td>
-                        <td className="px-4 py-3">
-                          <div className="font-medium text-gray-900">{req.company_name}</div>
-                          <div className="text-xs text-gray-500">{req.company_code}</div>
-                        </td>
-                        <td className="px-4 py-3 text-gray-900">
-                          {req.user_name} ({req.user_login_id})
-                        </td>
-                        <td className="px-4 py-3 text-center text-gray-600 whitespace-nowrap">
-                          {req.current_plan_name || '-'}
-                        </td>
-                        <td className="px-4 py-3 text-center">
-                          <span className="font-medium text-blue-600">{req.requested_plan_name}</span>
-                          {typeof req.message === 'string' && req.message.startsWith('[무료체험]') && (
-                            <span className="ml-1 inline-block px-1.5 py-0.5 rounded text-[10px] font-semibold bg-fuchsia-100 text-fuchsia-700 align-middle">무료체험</span>
-                          )}
-                          <div className="text-xs text-gray-500">
-                            {Number(req.requested_plan_price).toLocaleString()}원/월
-                          </div>
-                        </td>
-                        <td className="px-4 py-3 text-gray-600 max-w-[200px] truncate" title={req.message}>
-                          {req.message || '-'}
-                        </td>
-                        <td className="px-4 py-3 text-center">
-                          {req.status === 'pending' && (
-                            <span className="px-2 py-1 rounded-full text-xs font-medium bg-yellow-100 text-yellow-800">대기</span>
-                          )}
-                          {req.status === 'approved' && (
-                            <span className="px-2 py-1 rounded-full text-xs font-medium bg-green-100 text-green-800">승인</span>
-                          )}
-                          {req.status === 'rejected' && (
-                            <span className="px-2 py-1 rounded-full text-xs font-medium bg-red-100 text-red-800">거절</span>
-                          )}
-                        </td>
-                        <td className="px-4 py-3 text-center">
-                          {req.status === 'pending' ? (
-                            <div className="flex justify-center gap-2">
-                              <button
-                                onClick={() => handleApproveRequest(req.id)}
-                                className="px-3 py-1 bg-green-600 text-white rounded text-sm hover:bg-green-700"
-                              >
-                                승인
-                              </button>
-                              <button
-                                onClick={() => {
-                                  setRejectTarget(req);
-                                  setRejectReason('');
-                                  setShowRejectModal(true);
-                                }}
-                                className="px-3 py-1 bg-red-600 text-white rounded text-sm hover:bg-red-700"
-                              >
-                                거절
-                              </button>
-                            </div>
-                          ) : (
-                            <div className="text-xs text-gray-500">
-                              <div>{req.processed_by_name || '-'}</div>
-                              {req.processed_at && (
-                                <div>{formatDate(req.processed_at)}</div>
-                              )}
-                              {req.admin_note && (
-                                <div className="text-red-600 mt-1" title={req.admin_note}>
-                                  {req.admin_note.length > 10 ? req.admin_note.slice(0, 10) + '...' : req.admin_note}
-                                </div>
-                              )}
-                            </div>
-                          )}
-                        </td>
-                      </tr>
-                    ))
-                  )}
-                </tbody>
-                </table>
-            </div>
-            {planRequests.length > requestPerPage && (
-              <div className="px-6 py-4 border-t flex items-center justify-between">
-                <span className="text-sm text-gray-500">
-                  총 {planRequests.length}개 중 {(requestPage - 1) * requestPerPage + 1}-{Math.min(requestPage * requestPerPage, planRequests.length)}
-                </span>
-                <div className="flex gap-1">
-                  <button onClick={() => setRequestPage(p => Math.max(1, p - 1))} disabled={requestPage === 1}
-                    className="px-3 py-1 rounded border text-sm disabled:opacity-40 hover:bg-gray-50">◀ 이전</button>
-                  {Array.from({ length: Math.ceil(planRequests.length / requestPerPage) }, (_, i) => i + 1).map(p => (
-                    <button key={p} onClick={() => setRequestPage(p)}
-                      className={`px-3 py-1 rounded border text-sm ${requestPage === p ? 'bg-blue-600 text-white border-blue-600' : 'hover:bg-gray-50'}`}>{p}</button>
-                  ))}
-                  <button onClick={() => setRequestPage(p => Math.min(Math.ceil(planRequests.length / requestPerPage), p + 1))}
-                    disabled={requestPage >= Math.ceil(planRequests.length / requestPerPage)}
-                    className="px-3 py-1 rounded border text-sm disabled:opacity-40 hover:bg-gray-50">다음 ▶</button>
-                </div>
-              </div>
-            )}
-          </div>
-        )}
+        {activeTab === 'requests' && <PlanRequestsTab {...{ closeModal, loadData, loadPlanRequests, planRequests, requestPage, setModal, setRejectReason, setRejectTarget, setRequestPage, setShowRejectModal }} />}
 
         {/* 크레딧 관리 탭 — AI 크레딧 충전 요청(후불 승인) + 전체 회사 사용 이력 */}
-        {activeTab === 'credits' && (
-          <div className="space-y-4">
-            {/* 크레딧 요약 타일 3칸 — 클릭 시 모달 상세 (가로 여백 축소) */}
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-              <button
-                onClick={() => setCreditPanel('requests')}
-                className="text-left bg-white rounded-2xl border border-gray-200/70 shadow-sm p-5 hover:shadow-md hover:border-violet-200 transition-all"
-              >
-                <div className="flex items-center justify-between">
-                  <span className="text-sm font-semibold text-gray-700">크레딧 충전 요청</span>
-                  {creditRequests.length > 0 && <span className="w-2 h-2 rounded-full bg-violet-500"></span>}
-                </div>
-                <div className="mt-2 text-3xl font-bold tracking-tight text-violet-700 tabular-nums">
-                  {creditRequests.length}<span className="text-base text-gray-400 font-semibold">건</span>
-                </div>
-                <div className="text-[11px] text-gray-400 mt-1">후불 승인 대기 · 클릭해 상세</div>
-              </button>
-
-              <button
-                onClick={() => setCreditPanel('risk')}
-                className="text-left bg-white rounded-2xl border border-gray-200/70 shadow-sm p-5 hover:shadow-md hover:border-rose-200 transition-all"
-              >
-                <div className="flex items-center justify-between">
-                  <span className="text-sm font-semibold text-gray-700">크레딧 위험 회사</span>
-                  {creditRiskCompanies.length > 0 && <span className="w-2 h-2 rounded-full bg-rose-500"></span>}
-                </div>
-                <div className="mt-2 text-3xl font-bold tracking-tight text-rose-600 tabular-nums">
-                  {creditRiskCompanies.length}<span className="text-base text-gray-400 font-semibold">건</span>
-                </div>
-                <div className="text-[11px] text-gray-400 mt-1">소진·마이너스 · 업셀/해지방어</div>
-              </button>
-
-              <button
-                onClick={() => setCreditPanel('predictive')}
-                className="text-left bg-white rounded-2xl border border-gray-200/70 shadow-sm p-5 hover:shadow-md hover:border-indigo-200 transition-all"
-              >
-                <div className="flex items-center justify-between">
-                  <span className="text-sm font-semibold text-gray-700">예측 일괄 분석·차감</span>
-                  <svg className="w-4 h-4 text-gray-300" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" /></svg>
-                </div>
-                <div className="mt-2 text-lg font-bold tracking-tight text-indigo-700">매일 오전 9시 자동</div>
-                <div className="text-[11px] text-gray-400 mt-1">클릭해 지금 실행</div>
-              </button>
-            </div>
-
-            {/* 크레딧 충전 요청 모달 */}
-            {creditPanel === 'requests' && (
-              <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
-                <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[85vh] flex flex-col overflow-hidden" onClick={(e) => e.stopPropagation()}>
-                  <div className="px-6 py-4 border-b flex items-center justify-between">
-                    <h3 className="text-lg font-semibold text-gray-900">크레딧 충전 요청 {creditRequests.length}건 <span className="text-sm font-normal text-gray-400">(후불)</span></h3>
-                    <button onClick={() => setCreditPanel(null)} className="text-gray-400 hover:text-gray-600 p-1 rounded-lg hover:bg-gray-100"><svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg></button>
-                  </div>
-                  <div className="p-5 overflow-y-auto">
-                    {creditRequests.length === 0 ? (
-                      <p className="text-sm text-gray-500 py-10 text-center">대기 중인 크레딧 충전 요청이 없습니다.</p>
-                    ) : (
-                      <div className="space-y-2">
-                        {creditRequests.map((cr) => (
-                          <div key={cr.id} className="flex items-center justify-between bg-gray-50 rounded-xl px-4 py-3 border border-gray-100 flex-wrap gap-2">
-                            <div className="flex items-center gap-4 flex-wrap">
-                              <span className="px-2 py-0.5 rounded text-xs font-medium bg-violet-100 text-violet-800">크레딧 충전</span>
-                              <span className="font-medium text-gray-900">{cr.company_name}</span>
-                              <span className="font-bold text-lg text-violet-700">{Number(cr.credits).toLocaleString()} 크레딧</span>
-                              <span className="text-sm text-gray-500">월말 청구 {Number(cr.total_amount).toLocaleString()}원</span>
-                              <span className="text-xs text-gray-400">{formatDateTime(cr.created_at)}</span>
-                            </div>
-                            <div className="flex gap-2 flex-shrink-0">
-                              <button onClick={() => handleApproveCreditRequest(cr)} className="px-4 py-1.5 bg-violet-600 text-white rounded-lg text-sm font-medium hover:bg-violet-700 transition-colors">승인</button>
-                              <button onClick={() => handleRejectCreditRequest(cr)} className="px-4 py-1.5 bg-red-500 text-white rounded-lg text-sm font-medium hover:bg-red-600 transition-colors">거절</button>
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                </div>
-              </div>
-            )}
-
-            {/* 크레딧 위험 회사 모달 */}
-            {creditPanel === 'risk' && (
-              <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
-                <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[85vh] flex flex-col overflow-hidden" onClick={(e) => e.stopPropagation()}>
-                  <div className="px-6 py-4 border-b flex items-center justify-between">
-                    <div>
-                      <h3 className="text-lg font-semibold text-gray-900">크레딧 위험 회사 {creditRiskCompanies.length}건</h3>
-                      <span className="text-[11px] text-gray-400">소진 임박·0·마이너스: 업셀/해지방어 대상</span>
-                    </div>
-                    <button onClick={() => setCreditPanel(null)} className="text-gray-400 hover:text-gray-600 p-1 rounded-lg hover:bg-gray-100"><svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg></button>
-                  </div>
-                  <div className="p-5 overflow-y-auto">
-                    {creditRiskCompanies.length === 0 ? (
-                      <p className="text-sm text-gray-500 py-10 text-center">위험 회사가 없습니다.</p>
-                    ) : (
-                      <div className="space-y-2">
-                        {creditRiskCompanies.map((co) => {
-                          const badge = co.risk === 'negative'
-                            ? { t: co.nearCap ? '마이너스 · 상한 근접' : '마이너스', c: 'bg-rose-600 text-white' }
-                            : co.risk === 'depleted'
-                              ? { t: '소진(0)', c: 'bg-rose-200 text-rose-800' }
-                              : { t: '소진 임박', c: 'bg-amber-200 text-amber-800' };
-                          return (
-                            <div key={co.id} className="flex items-center justify-between bg-gray-50 rounded-xl px-4 py-2.5 border border-gray-100 flex-wrap gap-2">
-                              <div className="flex items-center gap-3 flex-wrap">
-                                <span className={`px-2 py-0.5 rounded text-xs font-medium ${badge.c}`}>{badge.t}</span>
-                                <span className="font-medium text-gray-900">{co.companyName}</span>
-                                <span className="text-xs text-gray-400">{co.planName}</span>
-                              </div>
-                              <div className="flex items-center gap-4 text-sm flex-shrink-0">
-                                <span className={`font-bold tabular-nums ${co.total < 0 ? 'text-rose-600' : 'text-gray-700'}`}>잔액 {Number(co.total).toLocaleString()}</span>
-                                <span className="text-xs text-gray-400">월 {Number(co.planCredits).toLocaleString()}</span>
-                              </div>
-                            </div>
-                          );
-                        })}
-                      </div>
-                    )}
-                  </div>
-                </div>
-              </div>
-            )}
-
-            {/* 예측 일괄 분석·차감 실행 모달 */}
-            {creditPanel === 'predictive' && (
-              <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
-                <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden" onClick={(e) => e.stopPropagation()}>
-                  <div className="px-6 py-4 border-b flex items-center justify-between">
-                    <h3 className="text-lg font-semibold text-gray-900">예측 일괄 분석·차감 실행</h3>
-                    <button onClick={() => setCreditPanel(null)} className="text-gray-400 hover:text-gray-600 p-1 rounded-lg hover:bg-gray-100"><svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg></button>
-                  </div>
-                  <div className="p-6">
-                    <p className="text-sm text-gray-600 leading-relaxed">요금제 가입 회사(고객 DB 보유) 전체를 지금 즉시 분석·차감합니다. 매일 오전 9시 자동 실행과 동일하며, 오늘 이미 차감된 회사는 중복되지 않습니다.</p>
-                    <button
-                      onClick={() => { setCreditPanel(null); handleRunPredictiveNow(); }}
-                      disabled={predictiveRunning}
-                      className="mt-5 w-full px-4 py-2.5 bg-indigo-600 text-white rounded-xl text-sm font-medium hover:bg-indigo-700 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
-                    >
-                      {predictiveRunning ? '실행 중…' : '지금 실행'}
-                    </button>
-                  </div>
-                </div>
-              </div>
-            )}
-
-            {/* 크레딧 사용 이력 — 전체 회사 */}
-            <div className="bg-white rounded-2xl border border-gray-200/70 shadow-sm">
-              <div className="px-6 py-4 border-b flex flex-wrap justify-between items-center gap-3">
-                <h2 className="text-lg font-semibold">크레딧 사용 이력</h2>
-                <div className="flex items-center gap-2">
-                  <input
-                    value={creditTxCompany}
-                    onChange={(e) => setCreditTxCompany(e.target.value)}
-                    onKeyDown={(e) => { if (e.key === 'Enter') loadAllCreditTx(1); }}
-                    placeholder="회사 ID로 필터 (선택 · 비우면 전체)"
-                    className="px-3 py-1.5 border border-gray-200 rounded-lg text-sm w-64"
-                  />
-                  <button onClick={() => loadAllCreditTx(1)} className="px-4 py-1.5 bg-gray-100 hover:bg-gray-200 rounded-lg text-sm font-medium transition-colors">조회</button>
-                </div>
-              </div>
-              <div className="overflow-x-auto">
-                <table className="w-full text-sm">
-                  <thead>
-                    <tr className="text-left text-gray-500 border-b">
-                      <th className="px-4 py-2 font-medium">회사</th>
-                      <th className="px-4 py-2 font-medium">작업</th>
-                      <th className="px-4 py-2 font-medium">사용자</th>
-                      <th className="px-4 py-2 font-medium text-right">변동</th>
-                      <th className="px-4 py-2 font-medium text-right">잔여</th>
-                      <th className="px-4 py-2 font-medium text-right">일시</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {creditTxLoading ? (
-                      <tr><td colSpan={6} className="px-4 py-8 text-center text-gray-400">불러오는 중...</td></tr>
-                    ) : creditTxAll.length === 0 ? (
-                      <tr><td colSpan={6} className="px-4 py-8 text-center text-gray-400">사용 이력이 없습니다.</td></tr>
-                    ) : (
-                      creditTxAll.map((tx) => {
-                        // ★ 2026-08-13 환불(refund)도 잔액이 늘어나는 축 — CreditHistoryModal isPlus와 같은 기준.
-                        const plus = tx.type === 'grant' || tx.type === 'purchase' || tx.type === 'postpaid_grant' || tx.type === 'refund';
-                        const after = Number(tx.balance_base_after || 0) + Number(tx.balance_purchased_after || 0);
-                        return (
-                          <tr key={tx.id} className="border-b last:border-0 hover:bg-gray-50">
-                            <td className="px-4 py-2 text-gray-900">{tx.company_name || '-'}</td>
-                            <td className="px-4 py-2 text-gray-700">{creditTxLabel(tx.type, tx.source)}</td>
-                            <td className="px-4 py-2 text-gray-600">{tx.created_by_name || '자동'}</td>
-                            <td className={`px-4 py-2 text-right font-semibold ${plus ? 'text-emerald-600' : 'text-rose-600'}`}>{plus ? '+' : '-'}{Number(tx.amount).toLocaleString()}</td>
-                            <td className="px-4 py-2 text-right text-gray-500">{after.toLocaleString()}</td>
-                            <td className="px-4 py-2 text-right text-gray-400 whitespace-nowrap">{formatDateTime(tx.created_at)}</td>
-                          </tr>
-                        );
-                      })
-                    )}
-                  </tbody>
-                </table>
-              </div>
-              <div className="flex items-center justify-center gap-2 px-6 py-3 border-t">
-                <button disabled={creditTxPage <= 1} onClick={() => loadAllCreditTx(creditTxPage - 1)} className="px-3 py-1 rounded border border-gray-200 text-sm disabled:opacity-30">이전</button>
-                <span className="text-sm text-gray-500">{creditTxPage} / {creditTxTotalPages}</span>
-                <button disabled={creditTxPage >= creditTxTotalPages} onClick={() => loadAllCreditTx(creditTxPage + 1)} className="px-3 py-1 rounded border border-gray-200 text-sm disabled:opacity-30">다음</button>
-              </div>
-            </div>
-          </div>
-        )}
+        {activeTab === 'credits' && <CreditsTab {...{ creditPanel, creditRequests, creditRiskCompanies, creditTxAll, creditTxCompany, creditTxLoading, creditTxPage, creditTxTotalPages, loadAllCreditTx, loadCreditRequests, loadCreditRisk, loadPendingBadges, predictiveRunning, setCreditPanel, setCreditTxCompany, setModal, setPredictiveRunning, showAlert, showConfirm }} />}
 
         {/* 충전 관리 탭 — 한줄로 / 에이전트 지갑 분리 (★ 2026-07-26) */}
-        {activeTab === 'deposits' && (
-          <div className="space-y-4">
-            <div className="bg-white rounded-2xl border border-gray-200/70 shadow-sm p-1.5 flex gap-1.5">
-              {([
-                ['web', '한줄로 충전', '웹 선불 잔액 · 무통장입금 승인'],
-                ['agent', '에이전트 충전', '발송ID(게이트웨이) 지갑'],
-              ] as const).map(([key, label, hint]) => (
-                <button
-                  key={key}
-                  type="button"
-                  onClick={() => setChargeScope(key)}
-                  className={`flex-1 rounded-xl px-4 py-2.5 text-left transition-colors ${
-                    chargeScope === key ? 'bg-indigo-600 text-white' : 'hover:bg-gray-50 text-gray-600'
-                  }`}
-                >
-                  <div className="text-sm font-bold flex items-center gap-2">
-                    {label}
-                    {key === 'web' && pendingDeposits.length > 0 && (
-                      <span className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${chargeScope === key ? 'bg-white/25 text-white' : 'bg-amber-100 text-amber-800'}`}>
-                        대기 {pendingDeposits.length}
-                      </span>
-                    )}
-                  </div>
-                  <div className={`text-[11px] mt-0.5 ${chargeScope === key ? 'text-indigo-100' : 'text-gray-400'}`}>{hint}</div>
-                </button>
-              ))}
-            </div>
-
-            {/* 대기 건 알림 */}
-            {chargeScope === 'web' && pendingDeposits.length > 0 && (
-              <div className="bg-amber-50 border border-amber-200 rounded-lg p-4">
-                <div className="flex items-center gap-2 mb-3">
-                  <span className="text-lg">⏳</span>
-                  <h3 className="font-semibold text-amber-800">승인 대기 {pendingDeposits.length}건</h3>
-                </div>
-                <div className="space-y-2">
-                  {pendingDeposits.map((dr) => (
-                    <div key={dr.id} className="flex items-center justify-between bg-white rounded-lg px-4 py-3 border border-amber-100">
-                      <div className="flex items-center gap-4">
-                        <span className="px-2 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-800">무통장입금</span>
-                        <span className="font-medium text-gray-900">{dr.company_name}</span>
-                        <span className="font-bold text-lg text-gray-900">{Number(dr.amount).toLocaleString()}원</span>
-                        <span className="text-sm text-gray-500">입금자: {dr.depositor_name}</span>
-                        {dr.held_reason && (
-                          <span className="px-2 py-0.5 rounded text-xs font-semibold bg-rose-100 text-rose-700">
-                            명의 확인 필요{dr.explanation_note ? ' · 소명 도착' : ''}
-                          </span>
-                        )}
-                        <span className="text-xs text-gray-400">{formatDateTime(dr.created_at)}</span>
-                      </div>
-                      <div className="flex gap-2">
-                        <button
-                          onClick={() => { setDepositTarget(dr); setDepositAdminNote(''); setShowDepositApproveModal(true); }}
-                          className="px-4 py-1.5 bg-emerald-600 text-white rounded-lg text-sm font-medium hover:bg-emerald-700 transition-colors"
-                        >
-                          승인
-                        </button>
-                        <button
-                          onClick={() => { setDepositTarget(dr); setDepositAdminNote(''); setShowDepositRejectModal(true); }}
-                          className="px-4 py-1.5 bg-red-500 text-white rounded-lg text-sm font-medium hover:bg-red-600 transition-colors"
-                        >
-                          거절
-                        </button>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            {/* ★ 2026-07-24 §5-3 에이전트 충전 실행 — 웹 잔액과 별개 지갑(게이트웨이 원장 직결) */}
-            {/* ★ 2026-08-11 접수함 건수를 상위 뱃지로 올린다 — 반려·충전 등록 직후 60초를 기다리지 않게. */}
-            {chargeScope === 'agent' && <AgentChargePanel onPendingOrdersChange={setAgentOrderPendingCount} />}
-
-            {/* 전체 잔액 변동 이력 — 한줄로(웹) 지갑 */}
-            <div className={`bg-white rounded-2xl border border-gray-200/70 shadow-sm ${chargeScope === 'web' ? '' : 'hidden'}`}>
-              <div className="px-6 py-4 border-b">
-                <div className="flex flex-wrap justify-between items-center gap-3 mb-3">
-                  <h2 className="text-lg font-semibold">💰 잔액 변동 이력</h2>
-                  <button
-                    onClick={() => loadChargeManagement(1)}
-                    className="px-4 py-2 bg-gray-100 hover:bg-gray-200 rounded-lg text-sm font-medium transition-colors"
-                  >
-                    새로고침
-                  </button>
-                </div>
-                <div className="flex flex-wrap gap-2">
-                  {/* ★ D150-5 (2026-05-09) PDF #2: 입력 검색 가능하도록 SearchableSelect 적용 */}
-                  <div className="min-w-[200px]">
-                    <SearchableSelect
-                      options={companies.filter((c: any) => c.billing_type === 'prepaid').map((c: any) => ({
-                        value: c.id,
-                        label: c.company_name,
-                      }))}
-                      value={chargeTxCompanyFilter === 'all' ? '' : chargeTxCompanyFilter}
-                      onChange={(value) => setChargeTxCompanyFilter(value || 'all')}
-                      placeholder="고객사 검색..."
-                      emptyLabel="전체 고객사"
-                      className="w-full"
-                    />
-                  </div>
-                  <select
-                    value={chargeTxTypeFilter}
-                    onChange={(e) => setChargeTxTypeFilter(e.target.value)}
-                    className="px-3 py-2 border rounded-lg text-sm"
-                  >
-                    <option value="all">전체 구분</option>
-                    <option value="charge">충전</option>
-                    <option value="deduct">차감</option>
-                    <option value="refund">환불</option>
-                  </select>
-                  <select
-                    value={chargeTxMethodFilter}
-                    onChange={(e) => setChargeTxMethodFilter(e.target.value)}
-                    className="px-3 py-2 border rounded-lg text-sm"
-                  >
-                    <option value="all">전체 결제수단</option>
-                    <option value="bank_transfer">무통장입금</option>
-                    <option value="card">카드결제</option>
-                    <option value="virtual_account">가상계좌</option>
-                    <option value="admin">관리자</option>
-                    <option value="system">시스템(발송)</option>
-                  </select>
-                  <input
-                    type="date"
-                    value={chargeTxStartDate}
-                    onChange={(e) => setChargeTxStartDate(e.target.value)}
-                    className="px-3 py-2 border rounded-lg text-sm"
-                  />
-                  <span className="flex items-center text-gray-400">~</span>
-                  <input
-                    type="date"
-                    value={chargeTxEndDate}
-                    onChange={(e) => setChargeTxEndDate(e.target.value)}
-                    className="px-3 py-2 border rounded-lg text-sm"
-                  />
-                  {(chargeTxCompanyFilter !== 'all' || chargeTxTypeFilter !== 'all' || chargeTxMethodFilter !== 'all' || chargeTxStartDate || chargeTxEndDate) && (
-                    <button
-                      onClick={() => { setChargeTxCompanyFilter('all'); setChargeTxTypeFilter('all'); setChargeTxMethodFilter('all'); setChargeTxStartDate(''); setChargeTxEndDate(''); }}
-                      className="px-3 py-2 text-sm text-red-500 hover:text-red-700 hover:bg-red-50 rounded-lg transition-colors"
-                    >
-                      필터 초기화
-                    </button>
-                  )}
-                </div>
-              </div>
-
-              <div className="overflow-x-auto">
-                <table className="w-full text-sm">
-                  <thead className="bg-gray-50">
-                    <tr>
-                      <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 whitespace-nowrap">일시</th>
-                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 whitespace-nowrap">고객사</th>
-                      <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 whitespace-nowrap">구분</th>
-                      <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 whitespace-nowrap">결제수단</th>
-                      <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 whitespace-nowrap">금액</th>
-                      <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 whitespace-nowrap">변동 후 잔액</th>
-                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 whitespace-nowrap">설명</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-gray-200">
-                    {chargeTxLoading ? (
-                      <tr>
-                        <td colSpan={7} className="px-6 py-12 text-center text-gray-500">불러오는 중...</td>
-                      </tr>
-                    ) : chargeTxList.length === 0 ? (
-                      <tr>
-                        <td colSpan={7} className="px-6 py-12 text-center text-gray-500">잔액 변동 이력이 없습니다.</td>
-                      </tr>
-                    ) : (
-                      chargeTxList.map((tx) => {
-                        const typeConfig: Record<string, { label: string; color: string; sign: string }> = {
-                          admin_charge: { label: '충전', color: 'bg-emerald-100 text-emerald-800', sign: '+' },
-                          charge: { label: '충전', color: 'bg-emerald-100 text-emerald-800', sign: '+' },
-                          deposit_charge: { label: '충전', color: 'bg-emerald-100 text-emerald-800', sign: '+' },
-                          admin_deduct: { label: '차감', color: 'bg-red-100 text-red-800', sign: '-' },
-                          deduct: { label: '차감', color: 'bg-red-100 text-red-800', sign: '-' },
-                          refund: { label: '환불', color: 'bg-blue-100 text-blue-800', sign: '+' },
-                        };
-                        const methodConfig: Record<string, { label: string; color: string }> = {
-                          bank_transfer: { label: '무통장입금', color: 'bg-blue-50 text-blue-700' },
-                          card: { label: '카드결제', color: 'bg-purple-50 text-purple-700' },
-                          virtual_account: { label: '가상계좌', color: 'bg-indigo-50 text-indigo-700' },
-                          admin: { label: '관리자', color: 'bg-gray-100 text-gray-700' },
-                          system: { label: '시스템', color: 'bg-orange-50 text-orange-700' },
-                        };
-                        // ★ 2026-10-04 요금제 이용료(선불 이용 기간)는 같은 차감 type이라 참조 유형으로 가른다
-                        const tc = (tx.type === 'deduct' && (tx as any).reference_type === 'plan_term')
-                          ? { label: '요금제 이용료', color: 'bg-red-100 text-red-800', sign: '-' }
-                          : (typeConfig[tx.type] || { label: tx.type, color: 'bg-gray-100 text-gray-600', sign: '' });
-                        const mc = methodConfig[tx.payment_method] || { label: tx.payment_method || '-', color: 'bg-gray-50 text-gray-600' };
-                        const isPlus = ['admin_charge', 'charge', 'deposit_charge', 'refund'].includes(tx.type);
-
-                        return (
-                          <tr key={tx.id} className="hover:bg-gray-50">
-                            <td className="px-4 py-3 text-center text-gray-600 whitespace-nowrap text-xs">
-                              {formatDateTime(tx.created_at)}
-                            </td>
-                            <td className="px-4 py-3 font-medium text-gray-900 whitespace-nowrap">
-                              {tx.company_name}
-                            </td>
-                            <td className="px-4 py-3 text-center">
-                              <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${tc.color}`}>{tc.label}</span>
-                            </td>
-                            <td className="px-4 py-3 text-center">
-                              <span className={`px-2 py-0.5 rounded text-xs font-medium ${mc.color}`}>{mc.label}</span>
-                            </td>
-                            <td className={`px-4 py-3 text-right font-bold whitespace-nowrap ${isPlus ? 'text-emerald-600' : 'text-red-600'}`}>
-                              {tc.sign}{Number(tx.amount).toLocaleString()}원
-                            </td>
-                            <td className="px-4 py-3 text-right text-gray-600 whitespace-nowrap">
-                              {Number(tx.balance_after).toLocaleString()}원
-                            </td>
-                            <td className="px-4 py-3 text-gray-600 max-w-[300px]">
-                              <div className="truncate" title={tx.description || ''}>
-                                {tx.description || '-'}
-                              </div>
-                              {tx.admin_name && (
-                                <div className="text-xs text-gray-400">처리: {tx.admin_name}</div>
-                              )}
-                            </td>
-                          </tr>
-                        );
-                      })
-                    )}
-                  </tbody>
-                </table>
-              </div>
-
-              {chargeTxTotal > chargeTxPerPage && (
-                <div className="px-6 py-4 border-t flex items-center justify-between">
-                  <span className="text-sm text-gray-500">
-                    총 {chargeTxTotal}건 중 {(chargeTxPage - 1) * chargeTxPerPage + 1}-{Math.min(chargeTxPage * chargeTxPerPage, chargeTxTotal)}
-                  </span>
-                  <div className="flex gap-1">
-                    <button onClick={() => loadChargeManagement(chargeTxPage - 1)} disabled={chargeTxPage === 1}
-                      className="px-3 py-1 rounded border text-sm disabled:opacity-40 hover:bg-gray-50">◀ 이전</button>
-                    {(() => {
-                      const totalPages = Math.ceil(chargeTxTotal / chargeTxPerPage);
-                      const pages: number[] = [];
-                      const start = Math.max(1, chargeTxPage - 2);
-                      const end = Math.min(totalPages, start + 4);
-                      for (let i = start; i <= end; i++) pages.push(i);
-                      return pages.map(p => (
-                        <button key={p} onClick={() => loadChargeManagement(p)}
-                          className={`px-3 py-1 rounded border text-sm ${chargeTxPage === p ? 'bg-blue-600 text-white border-blue-600' : 'hover:bg-gray-50'}`}>{p}</button>
-                      ));
-                    })()}
-                    <button onClick={() => loadChargeManagement(chargeTxPage + 1)}
-                      disabled={chargeTxPage >= Math.ceil(chargeTxTotal / chargeTxPerPage)}
-                      className="px-3 py-1 rounded border text-sm disabled:opacity-40 hover:bg-gray-50">다음 ▶</button>
-                  </div>
-                </div>
-              )}
-            </div>
-          </div>
-        )}
+        {activeTab === 'deposits' && <DepositsTab {...{ chargeScope, chargeTxCompanyFilter, chargeTxEndDate, chargeTxList, chargeTxLoading, chargeTxMethodFilter, chargeTxPage, chargeTxPerPage, chargeTxStartDate, chargeTxTotal, chargeTxTypeFilter, companies, loadChargeManagement, pendingDeposits, setAgentOrderPendingCount, setChargeScope, setChargeTxCompanyFilter, setChargeTxEndDate, setChargeTxMethodFilter, setChargeTxStartDate, setChargeTxTypeFilter, setDepositAdminNote, setDepositTarget, setShowDepositApproveModal, setShowDepositRejectModal }} />}
 
         {/* 전체 캠페인 탭 */}
-        {activeTab === 'allCampaigns' && (
-          <div className="bg-white rounded-2xl border border-gray-200/70 shadow-sm">
-            <div className="px-6 py-4 border-b">
-              <div className="flex flex-wrap gap-3 items-center">
-                <select value={allCampaignsCompany} onChange={(e) => setAllCampaignsCompany(e.target.value)}
-                  className="px-3 py-2 border rounded-lg text-sm">
-                  <option value="">전체 고객사</option>
-                  {companies.map(c => <option key={c.id} value={c.id}>{c.company_name}</option>)}
-                </select>
-                <select value={allCampaignsStatus} onChange={(e) => setAllCampaignsStatus(e.target.value)}
-                  className="px-3 py-2 border rounded-lg text-sm">
-                  <option value="">전체 상태</option>
-                  <option value="draft">임시저장</option>
-                  <option value="scheduled">예약</option>
-                  <option value="sending">발송중</option>
-                  <option value="completed">완료</option>
-                  <option value="cancelled">취소</option>
-                </select>
-                <input type="date" value={allCampaignsStartDate} onChange={(e) => setAllCampaignsStartDate(e.target.value)}
-                  className="px-3 py-2 border rounded-lg text-sm" />
-                <span className="text-gray-400">~</span>
-                <input type="date" value={allCampaignsEndDate} onChange={(e) => setAllCampaignsEndDate(e.target.value)}
-                  className="px-3 py-2 border rounded-lg text-sm" />
-                <input type="text" placeholder="캠페인명 / 회사명 / 계정" value={allCampaignsSearch}
-                  onChange={(e) => setAllCampaignsSearch(e.target.value)}
-                  onKeyDown={(e) => e.key === 'Enter' && loadAllCampaigns(1)}
-                  className="px-3 py-2 border rounded-lg text-sm w-52" />
-                <button onClick={() => loadAllCampaigns(1)}
-                  className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm hover:bg-blue-700">조회</button>
-                <span className="text-sm text-gray-500 ml-auto">총 {allCampaignsTotal}건</span>
-              </div>
-            </div>
-
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead className="bg-gray-50">
-                  <tr>
-                    <th className="px-3 py-3 text-left text-gray-600 font-medium">회사(계정)</th>
-                    <th className="px-3 py-3 text-left text-gray-600 font-medium">캠페인명</th>
-                    <th className="px-3 py-3 text-center text-gray-600 font-medium">등록일시</th>
-                    <th className="px-3 py-3 text-center text-gray-600 font-medium">발송일시</th>
-                    <th className="px-3 py-3 text-center text-gray-600 font-medium">유형</th>
-                    <th className="px-3 py-3 text-center text-gray-600 font-medium">문자</th>
-                    <th className="px-3 py-3 text-center text-gray-600 font-medium">총건수</th>
-                    <th className="px-3 py-3 text-center text-gray-600 font-medium">성공</th>
-                    <th className="px-3 py-3 text-center text-gray-600 font-medium">실패</th>
-                    <th className="px-3 py-3 text-center text-gray-600 font-medium">대기</th>
-                    <th className="px-3 py-3 text-center text-gray-600 font-medium">상태</th>
-                    <th className="px-3 py-3 text-center text-gray-600 font-medium">상세</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y">
-                  {allCampaigns.length === 0 ? (
-                    <tr><td colSpan={12} className="px-4 py-12 text-center text-gray-400">캠페인이 없습니다.</td></tr>
-                  ) : allCampaigns.map((c: any) => {
-                    // ★ 2026-10-07 (박성용 접수) 알림톡 캠페인 = 알림톡 시도로 세고, 대체로 나간 문자는 아래 줄로(거래내역서와 같은 기준)
-                    const split = readAlimtalkSplit(c);
-                    const sent = split ? split.total : (parseInt(c.total_sent) || 0);
-                    const success = split ? split.success : (parseInt(c.total_success) || 0);
-                    const fail = split ? split.fail : (parseInt(c.total_fail) || 0);
-                    const pending = split ? split.pending : (c.total_pending != null ? (parseInt(c.total_pending) || 0) : Math.max(0, sent - success - fail));
-                    return (
-                    <Fragment key={c.id}>
-                    <tr className="hover:bg-gray-50">
-                      <td className="px-3 py-3 text-gray-700">
-                        <div>{c.company_name || '-'}</div>
-                        {c.created_by_login && <div className="text-xs text-gray-400">{c.created_by_login}</div>}
-                      </td>
-                      <td className="px-3 py-3 font-medium text-gray-900">{c.name}</td>
-                      <td className="px-3 py-3 text-center text-gray-500 text-xs whitespace-nowrap">
-                        {c.created_at ? formatDateTimeShort(c.created_at) : '-'}
-                      </td>
-                      <td className="px-3 py-3 text-center text-gray-500 text-xs whitespace-nowrap">
-                        {/* ★ 발송일시 = 송출일 기준(예약시각 우선) — 발송통계·상세와 일치 */}
-                        {c.scheduled_at ? formatDateTimeShort(c.scheduled_at) : c.sent_at ? formatDateTimeShort(c.sent_at) : '-'}
-                      </td>
-                      <td className="px-3 py-3 text-center">
-                        <span className={`inline-flex px-2 py-0.5 rounded-full text-xs font-medium ${
-                          resolveSendTypeChipClass(c.send_type)
-                        }`}>{resolveSendTypeLabel(c.send_type)}</span>
-                      </td>
-                      <td className="px-3 py-3 text-center text-xs text-gray-600">{resolveChannelLabel(c)}</td>
-                      <td className="px-3 py-3 text-center text-gray-700">{sent.toLocaleString()}</td>
-                      <td className="px-3 py-3 text-center text-green-600 font-medium">{success.toLocaleString()}</td>
-                      <td className="px-3 py-3 text-center text-red-600">{fail.toLocaleString()}</td>
-                      <td className="px-3 py-3 text-center text-amber-600">{pending.toLocaleString()}</td>
-                      <td className="px-3 py-3 text-center">
-                        <span className={`inline-flex px-2 py-0.5 rounded-full text-xs font-medium ${
-                          c.status === 'completed' ? 'bg-green-100 text-green-700' :
-                          c.status === 'sending' ? 'bg-amber-100 text-amber-700' :
-                          c.status === 'scheduled' ? 'bg-blue-100 text-blue-700' :
-                          c.status === 'cancelled' ? 'bg-red-100 text-red-700' :
-                          'bg-gray-100 text-gray-700'
-                        }`}>
-                          {c.status === 'completed' ? '완료' : c.status === 'sending' ? '발송중' : c.status === 'scheduled' ? '예약' : c.status === 'cancelled' ? '취소' : c.status === 'draft' ? '임시' : c.status}
-                        </span>
-                      </td>
-                      <td className="px-3 py-3 text-center">
-                        {c.status !== 'draft' && (
-                          <button onClick={() => openSmsDetail(c.id)}
-                            className="text-blue-600 hover:text-blue-800 text-xs font-medium">[조회]</button>
-                        )}
-                      </td>
-                    </tr>
-                    {split && alimtalkFallbackRows(split).map((f) => (
-                      <tr key={`${c.id}-${f.type}`} className="bg-gray-50/70">
-                        <td className="px-3 py-1.5" />
-                        <td className="px-3 py-1.5 text-xs text-gray-500" colSpan={4}>↳ 알림톡 실패분</td>
-                        <td className="px-3 py-1.5 text-center text-xs text-gray-600 whitespace-nowrap">대체 {f.type}</td>
-                        <td className="px-3 py-1.5 text-center text-xs text-gray-700">{f.total.toLocaleString()}</td>
-                        <td className="px-3 py-1.5 text-center text-xs text-green-600 font-medium">{f.success.toLocaleString()}</td>
-                        <td className="px-3 py-1.5 text-center text-xs text-red-600">{f.fail.toLocaleString()}</td>
-                        <td className="px-3 py-1.5 text-center text-xs text-amber-600">{f.pending.toLocaleString()}</td>
-                        <td className="px-3 py-1.5" colSpan={2} />
-                      </tr>
-                    ))}
-                    </Fragment>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-
-            {allCampaignsTotal > 10 && (
-              <div className="px-6 py-4 border-t flex items-center justify-between">
-                <span className="text-sm text-gray-500">총 {allCampaignsTotal}건</span>
-                <div className="flex gap-1">
-                  <button onClick={() => loadAllCampaigns(Math.max(1, allCampaignsPage - 1))} disabled={allCampaignsPage === 1}
-                    className="px-3 py-1 rounded border text-sm disabled:opacity-40 hover:bg-gray-50">◀</button>
-                  {Array.from({ length: Math.ceil(allCampaignsTotal / 10) }, (_, i) => i + 1).slice(
-                    Math.max(0, allCampaignsPage - 3), Math.min(Math.ceil(allCampaignsTotal / 10), allCampaignsPage + 2)
-                  ).map(p => (
-                    <button key={p} onClick={() => loadAllCampaigns(p)}
-                      className={`w-8 h-8 rounded text-sm ${p === allCampaignsPage ? 'bg-blue-600 text-white' : 'text-gray-600 hover:bg-gray-100'}`}>{p}</button>
-                  ))}
-                  <button onClick={() => loadAllCampaigns(Math.min(Math.ceil(allCampaignsTotal / 10), allCampaignsPage + 1))}
-                    disabled={allCampaignsPage >= Math.ceil(allCampaignsTotal / 10)}
-                    className="px-3 py-1 rounded border text-sm disabled:opacity-40 hover:bg-gray-50">▶</button>
-                </div>
-              </div>
-            )}
-          </div>
-        )}
+        {activeTab === 'allCampaigns' && <AllCampaignsTab {...{ allCampaigns, allCampaignsCompany, allCampaignsEndDate, allCampaignsPage, allCampaignsSearch, allCampaignsStartDate, allCampaignsStatus, allCampaignsTotal, companies, loadAllCampaigns, openSmsDetail, setAllCampaignsCompany, setAllCampaignsEndDate, setAllCampaignsSearch, setAllCampaignsStartDate, setAllCampaignsStatus }} />}
 
         {/* 발송 통계 탭 */}
-        {activeTab === 'stats' && (
-          <div className="space-y-4">
-            {/* ★ 2026-07-23 채널 탭 — 웹/에이전트 구분 */}
-            <div className="flex items-center gap-1 border-b border-gray-200">
-              {([['web', '웹 발송'], ['agent', '에이전트 발송']] as const).map(([key, label]) => (
-                <button key={key} onClick={() => { setStatsChannel(key); loadSendStats(1); }}
-                  className={`px-4 py-2 text-sm font-semibold border-b-2 -mb-px transition ${statsChannel === key ? 'border-blue-600 text-blue-600' : 'border-transparent text-gray-400 hover:text-gray-600'}`}>
-                  {label}
-                </button>
-              ))}
-            </div>
-            {/* 요약 바 (얇게) — 채널별 */}
-            {(statsChannel === 'agent' ? sendStats?.agentSummary : sendStats?.summary) && (() => {
-              const s = statsChannel === 'agent' ? sendStats.agentSummary : sendStats.summary;
-              const sent = Number(s.total_sent);
-              const success = Number(s.total_success);
-              const fail = Number(s.total_fail);
-              const pending = s.total_pending != null ? Number(s.total_pending) : Math.max(0, sent - success - fail);
-              // D183 fix: 성공률 = 전송 대비 성공 비율 (대기 영역 포함 분모) — 사용자 관점 정합
-              const rate = sent > 0 ? (success / sent * 100).toFixed(1) : '-';
-              return (
-                <div className="bg-white rounded-2xl border border-gray-200/70 shadow-sm px-6 py-3 flex items-center gap-8 text-sm">
-                  <span className="text-gray-500">조회 기간 합계</span>
-                  <span className="font-semibold text-blue-600">전송 {sent.toLocaleString()}</span>
-                  <span className="font-semibold text-green-600">성공 {success.toLocaleString()}</span>
-                  <span className="font-semibold text-red-600">실패 {fail.toLocaleString()}</span>
-                  <span className="font-semibold text-amber-600">대기 {pending.toLocaleString()}</span>
-                  <span className="font-semibold text-gray-700">성공률 {sent > 0 ? `${rate}%` : '-'}</span>
-                </div>
-              );
-            })()}
-           
-            {/* 필터 영역 */}
-            <div className="bg-white rounded-2xl border border-gray-200/70 shadow-sm px-6 py-4 flex flex-wrap gap-3 items-center">
-              <div className="flex bg-gray-100 rounded-lg p-1">
-                {([['daily', '일별'], ['monthly', '월별']] as const).map(([key, label]) => (
-                  <button
-                    key={key}
-                    onClick={() => { setStatsView(key); loadSendStats(1, key); }}
-                    className={`px-4 py-1.5 rounded-md text-sm font-medium transition-colors ${
-                      statsView === key ? 'bg-white text-blue-600 shadow-sm' : 'text-gray-500 hover:text-gray-700'
-                    }`}
-                  >
-                    {label}
-                  </button>
-                ))}
-              </div>
-              <div className="flex items-center gap-2 text-sm">
-                <input
-                  type="date"
-                  value={statsStartDate}
-                  onChange={(e) => setStatsStartDate(e.target.value)}
-                  className="px-3 py-1.5 border rounded-lg text-sm"
-                />
-                <span className="text-gray-400">~</span>
-                <input
-                  type="date"
-                  value={statsEndDate}
-                  onChange={(e) => setStatsEndDate(e.target.value)}
-                  className="px-3 py-1.5 border rounded-lg text-sm"
-                />
-              </div>
-              {/* ★ D144 P13: 검색 가능 select — 회사명 입력으로 검색, 67개+ 스크롤 대신 */}
-              <SearchableSelect
-                options={companies.map(c => ({ value: c.id, label: c.company_name }))}
-                value={statsCompanyFilter}
-                onChange={setStatsCompanyFilter}
-                emptyLabel="전체 고객사"
-                placeholder="고객사 선택/검색..."
-                className="w-48"
-              />
-              <button
-                onClick={() => loadSendStats(1)}
-                className="px-4 py-1.5 bg-blue-600 text-white rounded-lg text-sm hover:bg-blue-700"
-              >
-                조회
-              </button>
-              {/* ★ D114 P10: 발송통계 엑셀(CSV) 다운로드 — fetch+blob (Authorization 헤더 필수).
-                  ★2026-07-24 에이전트 탭도 지원 — /stats/export/agent (기간×고객사×발송ID×발급명×대상ID×유형, 정산 대조용) */}
-              <button
-                onClick={async () => {
-                  const token = localStorage.getItem('token');
-                  if (!statsStartDate || !statsEndDate) { showAlert('안내', '시작일과 종료일을 선택해주세요.', 'warning'); return; }
-                  const isAgent = statsChannel === 'agent';
-                  const params = new URLSearchParams();
-                  params.set('startDate', statsStartDate);
-                  params.set('endDate', statsEndDate);
-                  if (statsCompanyFilter) params.set('companyId', statsCompanyFilter);
-                  if (isAgent) params.set('view', statsView);
-                  try {
-                    const res = await fetch(`/api/admin/stats/export${isAgent ? '/agent' : ''}?${params.toString()}`, {
-                      headers: { Authorization: `Bearer ${token}` },
-                    });
-                    if (!res.ok) { const err = await res.json().catch(() => ({})); showAlert('오류', (err as any).error || '다운로드 실패', 'error'); return; }
-                    const blob = await res.blob();
-                    const url = URL.createObjectURL(blob);
-                    const a = document.createElement('a');
-                    a.href = url;
-                    // ★ 2026-07-25 CSV → .xlsx (서버가 exceljs로 서식·숫자형까지 넣어 내려준다)
-                    a.download = `${isAgent ? '에이전트발송통계' : '발송통계'}_${statsStartDate}_${statsEndDate}.xlsx`;
-                    a.click();
-                    URL.revokeObjectURL(url);
-                  } catch { showAlert('오류', '다운로드 중 오류가 발생했습니다.', 'error'); }
-                }}
-                className="px-4 py-1.5 bg-emerald-600 text-white rounded-lg text-sm hover:bg-emerald-700"
-              >
-                엑셀 다운로드
-              </button>
-              <span className="text-sm text-gray-400 ml-auto">총 {statsChannel === 'agent' ? (sendStats?.agentTotal || 0) : statsTotal}건</span>
-            </div>
-
-            {/* 테이블 */}
-            <div className="bg-white rounded-2xl border border-gray-200/70 shadow-sm">
-              <div className="overflow-x-auto">
-                <table className="w-full text-sm">
-                  <thead className="bg-gray-50">
-                  <tr>
-                      <th className="px-4 py-3 text-left text-gray-600 font-medium">{statsView === 'daily' ? '날짜' : '월'}</th>
-                      <th className="px-4 py-3 text-left text-gray-600 font-medium">고객사</th>
-                      {/* ★ 2026-07-24 발송ID(CustId) — 고객사 화면과 동일 축(정산 대조) */}
-                      {statsChannel === 'agent' && <th className="px-4 py-3 text-left text-gray-600 font-medium">발송ID</th>}
-                      {statsChannel === 'agent' && <th className="px-4 py-3 text-left text-gray-600 font-medium">유형</th>}
-                      <th className="px-4 py-3 text-center text-gray-600 font-medium">전송</th>
-                      <th className="px-4 py-3 text-center text-gray-600 font-medium">성공</th>
-                      <th className="px-4 py-3 text-center text-gray-600 font-medium">실패</th>
-                      <th className="px-4 py-3 text-center text-gray-600 font-medium">대기</th>
-                      <th className="px-4 py-3 text-center text-gray-600 font-medium">성공률</th>
-                      <th className="px-4 py-3 text-center text-gray-600 font-medium">발송라인</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y">
-                    {!(statsChannel === 'agent' ? sendStats?.agentRows : sendStats?.rows)?.length ? (
-                      <tr><td colSpan={statsChannel === 'agent' ? 10 : 8} className="px-4 py-12 text-center text-gray-400">데이터가 없습니다.</td></tr>
-                    ) : (statsChannel === 'agent'
-                        ? agentStatsRows.slice((agentStatsSafePage - 1) * AGENT_STATS_PER_PAGE, agentStatsSafePage * AGENT_STATS_PER_PAGE)
-                        : sendStats.rows
-                      ).map((row: any, idx: number) => {
-                      const sent = Number(row.sent);
-                      const success = Number(row.success);
-                      const fail = Number(row.fail);
-                      const pending = row.pending != null ? Number(row.pending) : Math.max(0, sent - success - fail);
-                      // D183 fix: 성공률 = 전송 대비 성공 비율 (대기 영역 포함 분모) — 사용자 관점 정합
-                      const rate = sent > 0 ? (success / sent * 100).toFixed(1) : '-';
-                      return (
-                        <tr key={idx} className="hover:bg-gray-50">
-                          <td className="px-4 py-3 font-medium text-gray-900 font-mono">{row.date || row.month || row.period}</td>
-                          <td className="px-4 py-3 text-gray-700">{row.company_name}</td>
-                          {statsChannel === 'agent' && (
-                            <td className="px-4 py-3 font-mono text-xs text-gray-600">
-                              {row.agent_send_id || '-'}{row.cust_name ? <span className="text-gray-400"> / {row.cust_name}</span> : null}
-                              {/* ★ 2026-07-25 부달 재전송 귀속분(공용 엔진 계정 → 원 발송ID). 해석 실패분은 고객사가 (미귀속)으로 표시된다 */}
-                              {row.is_relay ? <span className="ml-1.5 px-1.5 py-0.5 rounded bg-amber-50 text-amber-700 border border-amber-200 text-[10px] font-sans">부달 재전송</span> : null}
-                            </td>
-                          )}
-                          {statsChannel === 'agent' && <td className="px-4 py-3"><span className="px-2 py-0.5 rounded-md bg-violet-50 text-violet-700 text-xs font-medium">{row.type_label || row.msg_type}</span></td>}
-                          <td className="px-4 py-3 text-center text-blue-600 font-medium">{sent.toLocaleString()}</td>
-                          <td className="px-4 py-3 text-center text-green-600">{success.toLocaleString()}</td>
-                          <td className="px-4 py-3 text-center text-red-600">{fail.toLocaleString()}</td>
-                          <td className="px-4 py-3 text-center text-amber-600">{pending.toLocaleString()}</td>
-                          <td className="px-4 py-3 text-center font-medium">{sent > 0 ? `${rate}%` : '-'}</td>
-                          <td className="px-4 py-3 text-center">
-                            {statsChannel === 'agent' ? (
-                              <span className="px-2 py-1 bg-violet-50 text-violet-700 text-xs rounded-full font-medium">에이전트</span>
-                            ) : row.line_group_name ? (
-                              <span className="px-2 py-1 bg-blue-50 text-blue-700 text-xs rounded-full font-medium">{row.line_group_name}</span>
-                            ) : (
-                              <span className="text-xs text-gray-400">미배정</span>
-                            )}
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
-
-              {/* 페이징 — 웹은 서버 페이징, 에이전트는 클라이언트 페이징(서버가 전량 반환하는 축) */}
-              {statsChannel === 'agent' && agentStatsTotalPages > 1 && (
-                <div className="px-6 py-4 border-t flex items-center justify-between">
-                  <span className="text-xs text-gray-400 tabular-nums">
-                    {(agentStatsSafePage - 1) * AGENT_STATS_PER_PAGE + 1}–
-                    {Math.min(agentStatsSafePage * AGENT_STATS_PER_PAGE, agentStatsRows.length)} / 전체 {agentStatsRows.length}건
-                  </span>
-                  <div className="flex justify-center gap-2">
-                    <button onClick={() => setAgentStatsPage(Math.max(1, agentStatsSafePage - 1))} disabled={agentStatsSafePage === 1}
-                      className="px-3 h-8 rounded text-sm text-gray-600 hover:bg-gray-100 disabled:opacity-40 disabled:cursor-not-allowed">이전</button>
-                    {Array.from({ length: agentStatsTotalPages }, (_, i) => i + 1).slice(
-                      Math.max(0, agentStatsSafePage - 3), Math.min(agentStatsTotalPages, agentStatsSafePage + 2)
-                    ).map(p => (
-                      <button key={p} onClick={() => setAgentStatsPage(p)}
-                        className={`w-8 h-8 rounded text-sm ${p === agentStatsSafePage ? 'bg-blue-600 text-white' : 'text-gray-600 hover:bg-gray-100'}`}>
-                        {p}
-                      </button>
-                    ))}
-                    <button onClick={() => setAgentStatsPage(Math.min(agentStatsTotalPages, agentStatsSafePage + 1))} disabled={agentStatsSafePage === agentStatsTotalPages}
-                      className="px-3 h-8 rounded text-sm text-gray-600 hover:bg-gray-100 disabled:opacity-40 disabled:cursor-not-allowed">다음</button>
-                  </div>
-                </div>
-              )}
-              {statsChannel === 'web' && statsTotal > 10 && (
-                <div className="px-6 py-4 border-t flex justify-center gap-2">
-                  {Array.from({ length: Math.ceil(statsTotal / 10) }, (_, i) => i + 1).slice(
-                    Math.max(0, statsPage - 3), Math.min(Math.ceil(statsTotal / 10), statsPage + 2)
-                  ).map(p => (
-                    <button
-                      key={p}
-                      onClick={() => loadSendStats(p)}
-                      className={`w-8 h-8 rounded text-sm ${p === statsPage ? 'bg-blue-600 text-white' : 'text-gray-600 hover:bg-gray-100'}`}
-                    >
-                      {p}
-                    </button>
-                  ))}
-                </div>
-              )}
-            </div>
-
-            {!sendStats && (
-              <div className="text-center py-12 text-gray-400">통계 데이터를 불러오는 중...</div>
-            )}
-          </div>
-        )}
+        {activeTab === 'stats' && <SendStatsTab {...{ AGENT_STATS_PER_PAGE, agentStatsRows, agentStatsSafePage, agentStatsTotalPages, companies, loadSendStats, sendStats, setAgentStatsPage, setStatsChannel, setStatsCompanyFilter, setStatsEndDate, setStatsStartDate, setStatsView, showAlert, statsChannel, statsCompanyFilter, statsEndDate, statsPage, statsStartDate, statsTotal, statsView }} />}
 
       {/* ═══ 템플릿 관리 탭 ═══ */}
-      {activeTab === 'templates' && (
-        <div className="space-y-4">
-        {/* 발신 프로필 관리 — D130 AlimtalkSendersSection (IMC 연동 + 승인 워크플로우) */}
-        <AlimtalkSendersSection onChanged={loadPendingBadges} />
-
-        {/* 템플릿 관리 */}
-        <div className="bg-white rounded-2xl border border-gray-200/70 shadow-sm">
-          <div className="px-6 py-4 border-b flex justify-between items-center">
-            <div>
-              <h2 className="text-lg font-semibold">💬 템플릿 관리</h2>
-              <p className="text-xs text-gray-500 mt-1">고객사 알림톡/RCS 템플릿 승인·반려 및 수동 등록</p>
-            </div>
-            <div className="flex items-center gap-2">
-              {/* ★ 2026-08-04 딜러 이관은 발신프로필이 먼저 끝나고 템플릿이 뒤따르는 일이 잦아,
-                  프로필 연결 뒤 템플릿만 다시 받아야 한다. 그 진입점을 템플릿 화면에도 둔다. */}
-              <button onClick={() => setShowImcTemplateImport(true)}
-                className="bg-violet-100 hover:bg-violet-200 text-violet-700 px-4 py-2 rounded-lg text-sm font-medium">
-                IMC에서 가져오기
-              </button>
-              <button onClick={() => setShowManualTemplateForm(true)}
-                className="bg-amber-600 hover:bg-amber-700 text-white px-4 py-2 rounded-lg text-sm font-medium">
-                + 수동 등록 (기존 템플릿)
-              </button>
-            </div>
-          </div>
-
-          {/* 서브탭 + 검색 + 필터 */}
-          <div className="px-6 py-3 border-b flex items-center justify-between gap-3">
-            <div className="flex gap-2 flex-shrink-0">
-              <button onClick={() => setTemplateSubTab('alimtalk')}
-                className={`px-3 py-1.5 rounded-full text-xs font-medium transition ${templateSubTab === 'alimtalk' ? 'bg-amber-600 text-white' : 'bg-gray-100 text-gray-600'}`}>
-                알림톡
-              </button>
-              <button onClick={() => setTemplateSubTab('rcs')}
-                className={`px-3 py-1.5 rounded-full text-xs font-medium transition ${templateSubTab === 'rcs' ? 'bg-purple-600 text-white' : 'bg-gray-100 text-gray-600'}`}>
-                RCS
-              </button>
-            </div>
-            <input
-              type="text"
-              value={templateSearch}
-              onChange={(e) => setTemplateSearch(e.target.value)}
-              placeholder="고객사·템플릿명·템플릿코드·관리코드 검색"
-              className="flex-1 min-w-0 max-w-sm px-3 py-1.5 border rounded-lg text-sm"
-            />
-            <div className="flex gap-1 flex-shrink-0">
-              {(['all', 'pending', 'approved', 'rejected'] as const).map(f => (
-                <button key={f} onClick={() => setTemplateFilter(f)}
-                  className={`px-2.5 py-1 rounded text-xs transition ${templateFilter === f ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-500 hover:bg-gray-200'}`}>
-                  {f === 'all' ? '전체' : f === 'pending' ? '승인대기' : f === 'approved' ? '승인' : '반려'}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          {/* 알림톡 목록 */}
-          {templateSubTab === 'alimtalk' && (
-            <>
-            <div className="overflow-x-auto">
-              {templatesLoading ? (
-                <div className="text-center py-12 text-gray-400">로딩 중...</div>
-              ) : filteredAlimtalkTemplates.length === 0 ? (
-                <div className="text-center py-12 text-gray-400">
-                  {adminTemplates.length === 0 ? '템플릿이 없습니다' : '검색 결과가 없습니다'}
-                </div>
-              ) : (
-                <table className="w-full text-sm">
-                  <thead className="bg-gray-50 border-b">
-                    <tr>
-                      <th className="px-4 py-3 text-left font-medium text-gray-600">고객사</th>
-                      {/* ★ 2026-08-04 채널 컬럼 — 대행사는 한 회사 밑에 여러 브랜드 채널을 갖는다.
-                          회사명만 보이면 어느 채널 템플릿인지 상세를 열어야 알 수 있었다. */}
-                      <th className="px-4 py-3 text-left font-medium text-gray-600">채널</th>
-                      <th className="px-4 py-3 text-left font-medium text-gray-600">템플릿명</th>
-                      <th className="px-4 py-3 text-left font-medium text-gray-600">카테고리</th>
-                      <th className="px-4 py-3 text-center font-medium text-gray-600">상태</th>
-                      <th className="px-4 py-3 text-left font-medium text-gray-600">요청일</th>
-                      <th className="px-4 py-3 text-center font-medium text-gray-600">관리</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-gray-100">
-                    {filteredAlimtalkTemplates
-                      .slice((templatePage - 1) * templatePerPage, templatePage * templatePerPage)
-                      .map((t: any) => (
-                      <tr key={t.id} className="hover:bg-gray-50">
-                        <td className="px-4 py-3 text-gray-900 font-medium">{t.company_name || '-'}</td>
-                        <td className="px-4 py-3">
-                          {t.profile_name || t.yellow_id ? (
-                            <>
-                              <div className="text-gray-700">{t.profile_name || '-'}</div>
-                              {t.yellow_id && <div className="text-xs text-gray-400">{t.yellow_id}</div>}
-                            </>
-                          ) : (
-                            <span className="text-gray-300">-</span>
-                          )}
-                        </td>
-                        <td className="px-4 py-3">
-                          <div className="text-gray-900">{t.template_name}</div>
-                          {t.template_code && (
-                            <div
-                              className="text-xs text-gray-400 hover:text-blue-600 cursor-pointer inline-block"
-                              style={{ userSelect: 'text' }}
-                              title="클릭하면 복사"
-                              onClick={() => { navigator.clipboard.writeText(t.template_code); showAlert('복사 완료', '템플릿코드를 복사했습니다.', 'success'); }}
-                            >{t.template_code}</div>
-                          )}
-                          {/* ★ 2026-07-22(접수2): 고객사 지정 관리코드 표시 + 검색 대상 */}
-                          {t.custom_template_code && (
-                            <div className="text-[11px] text-gray-400" style={{ userSelect: 'text' }}>관리코드: {t.custom_template_code}</div>
-                          )}
-                        </td>
-                        <td className="px-4 py-3 text-gray-600">{t.category || '-'}</td>
-                        <td className="px-4 py-3 text-center">
-                          <span className={`inline-block px-2 py-0.5 rounded-full text-xs font-medium ${getAlimtalkTemplateStatus(t.status).badgeClass}`}>
-                            {getAlimtalkTemplateStatus(t.status).label}
-                          </span>
-                          {/* ★ CT-87 (2026-06-10): 검수 승인이어도 카카오 활성상태(A 외)면 발송 거부 — 실상태 병기 */}
-                          {getAlimtalkTemplateStatus(t.status).label === '승인' && t.imc_template_status && t.imc_template_status !== 'A' && (
-                            <span
-                              className={`inline-block px-2 py-0.5 rounded-full text-xs font-medium ml-1 ${t.imc_template_status === 'R' ? 'bg-amber-100 text-amber-700' : 'bg-rose-100 text-rose-700'}`}
-                              title="카카오 측 템플릿 활성상태가 A(정상)가 아니면 발송이 거부됩니다."
-                            >
-                              {t.imc_template_status === 'R' ? '활성 대기 · 발송불가' : t.imc_template_status === 'S' ? '중단 · 발송불가' : `${t.imc_template_status} · 발송불가`}
-                            </span>
-                          )}
-                        </td>
-                        <td className="px-4 py-3 text-gray-500 text-xs">{t.requested_at ? new Date(t.requested_at).toLocaleDateString('ko-KR') : '-'}</td>
-                        <td className="px-4 py-3 text-center">
-                          <div className="flex gap-1 justify-center items-center">
-                            <button onClick={() => setTemplateDetail(t)}
-                              className="text-xs px-2 py-1 bg-blue-50 text-blue-700 rounded hover:bg-blue-100">상세</button>
-                            {getAlimtalkTemplateStatus(t.status).label === '검수중' && (
-                              <>
-                                <button onClick={() => handleTemplateApprove(t.id)}
-                                  className="text-xs px-2 py-1 bg-green-50 text-green-700 rounded hover:bg-green-100">승인</button>
-                                <button onClick={() => handleTemplateReject(t.id)}
-                                  className="text-xs px-2 py-1 bg-red-50 text-red-700 rounded hover:bg-red-100">반려</button>
-                              </>
-                            )}
-                          </div>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              )}
-            </div>
-            <TablePagination
-              total={filteredAlimtalkTemplates.length}
-              page={templatePage}
-              perPage={templatePerPage}
-              onChange={setTemplatePage}
-              unit="건"
-            />
-            </>
-          )}
-
-          {/* RCS 목록 */}
-          {templateSubTab === 'rcs' && (
-            <>
-            <div className="overflow-x-auto">
-              {filteredRcsTemplates.length === 0 ? (
-                <div className="text-center py-12 text-gray-400">
-                  {adminRcsTemplates.length === 0 ? 'RCS 템플릿이 없습니다' : '검색 결과가 없습니다'}
-                </div>
-              ) : (
-                <table className="w-full text-sm">
-                  <thead className="bg-gray-50 border-b">
-                    <tr>
-                      <th className="px-4 py-3 text-left font-medium text-gray-600">고객사</th>
-                      <th className="px-4 py-3 text-left font-medium text-gray-600">템플릿명</th>
-                      <th className="px-4 py-3 text-left font-medium text-gray-600">유형</th>
-                      <th className="px-4 py-3 text-center font-medium text-gray-600">상태</th>
-                      <th className="px-4 py-3 text-center font-medium text-gray-600">관리</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-gray-100">
-                    {filteredRcsTemplates
-                      .slice((templatePage - 1) * templatePerPage, templatePage * templatePerPage)
-                      .map((t: any) => (
-                      <tr key={t.id} className="hover:bg-gray-50">
-                        <td className="px-4 py-3 text-gray-900 font-medium">{t.company_name || '-'}</td>
-                        <td className="px-4 py-3 text-gray-900">{t.template_name}</td>
-                        <td className="px-4 py-3 text-gray-600">{t.message_type}</td>
-                        <td className="px-4 py-3 text-center">
-                          <span className={`inline-block px-2 py-0.5 rounded-full text-xs font-medium ${getAlimtalkTemplateStatus(t.status).badgeClass}`}>
-                            {getAlimtalkTemplateStatus(t.status).label}
-                          </span>
-                        </td>
-                        <td className="px-4 py-3 text-center">
-                          {/* ★ 2026-08-17 RCS 승인·반려 버튼 제거 — 이 버튼은 우리 DB의 status만 바꿨고
-                              실제 검수 주체(RCS Biz Center)와 아무 관계가 없었다. 그 상태로 "승인"을 보면
-                              발송 가능으로 읽히지만 실제로는 그렇지 않다. 검수 상태는 연동 동기화로만 채운다
-                              (설계 = docs/2026-08-17-rcs-integration-design.md §2-2). 상세 보기는 유지. */}
-                          <div className="flex gap-1 justify-center items-center">
-                            <button onClick={() => setTemplateDetail(t)}
-                              className="text-xs px-2 py-1 bg-blue-50 text-blue-700 rounded hover:bg-blue-100">상세</button>
-                          </div>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              )}
-            </div>
-            <TablePagination
-              total={filteredRcsTemplates.length}
-              page={templatePage}
-              perPage={templatePerPage}
-              onChange={setTemplatePage}
-              unit="건"
-            />
-            </>
-          )}
-        </div>
-        </div>
-      )}
+      {activeTab === 'templates' && <TemplatesTab {...{ adminRcsTemplates, adminTemplates, filteredAlimtalkTemplates, filteredRcsTemplates, loadAdminRcsTemplates, loadAdminTemplates, loadPendingBadges, setModal, setRejectModal, setShowImcTemplateImport, setShowManualTemplateForm, setTemplateDetail, setTemplateFilter, setTemplatePage, setTemplateSearch, setTemplateSubTab, showAlert, templateFilter, templatePage, templateSearch, templateSubTab, templatesLoading }} />}
 
       {/* ★ D130: 레거시 발신 프로필 등록 모달(Sender Key 수동 입력) 제거됨 — AlimtalkSendersSection의 SenderRegistrationWizard로 대체 */}
 
       {/* ★ 2026-08-27 계정 생성 모달 — 초기 비밀번호는 이 화면에서만 다루고 어디에도 남기지 않는다 */}
-      {adminCreate && (
-        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4 z-50">
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden max-h-[90vh] flex flex-col" onClick={(e) => e.stopPropagation()}>
-            <div className="px-6 py-4 border-b flex justify-between items-center flex-shrink-0">
-              <div>
-                <h3 className="text-lg font-bold">직원 계정 추가</h3>
-                <p className="text-xs text-gray-500">최초 로그인에서 OTP 등록과 비밀번호 변경을 거칩니다</p>
-              </div>
-              <button onClick={() => setAdminCreate(null)} className="text-gray-400 hover:text-gray-600 text-xl">&times;</button>
-            </div>
-            <div className="p-6 space-y-3.5 overflow-auto">
-              <div>
-                <label className="block text-xs font-medium text-gray-600 mb-1.5">아이디</label>
-                <input
-                  value={adminCreate.loginId}
-                  onChange={(e) => setAdminCreate({ ...adminCreate, loginId: e.target.value.toLowerCase().replace(/[^a-z0-9_]/g, '') })}
-                  placeholder="suran"
-                  className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg font-mono outline-none focus:border-indigo-500"
-                />
-                <p className="mt-1 text-[11px] text-gray-400">영문 소문자·숫자·밑줄 3~50자. 로그를 사람 단위로 남기려면 공용 아이디를 쓰지 않습니다.</p>
-              </div>
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-xs font-medium text-gray-600 mb-1.5">이름</label>
-                  <input
-                    value={adminCreate.name}
-                    onChange={(e) => setAdminCreate({ ...adminCreate, name: e.target.value })}
-                    placeholder="서수란"
-                    className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg outline-none focus:border-indigo-500"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-medium text-gray-600 mb-1.5">등급</label>
-                  <select
-                    value={adminCreate.role}
-                    onChange={(e) => setAdminCreate({ ...adminCreate, role: e.target.value })}
-                    className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg outline-none focus:border-indigo-500"
-                  >
-                    {adminRoleOptions.map((o) => (<option key={o.value} value={o.value}>{o.label}</option>))}
-                  </select>
-                </div>
-              </div>
-              <div>
-                <label className="block text-xs font-medium text-gray-600 mb-1.5">이메일 (선택)</label>
-                <input
-                  value={adminCreate.email}
-                  onChange={(e) => setAdminCreate({ ...adminCreate, email: e.target.value })}
-                  className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg outline-none focus:border-indigo-500"
-                />
-              </div>
-              <div>
-                <label className="block text-xs font-medium text-gray-600 mb-1.5">초기 비밀번호</label>
-                <input
-                  type="password"
-                  value={adminCreate.password}
-                  onChange={(e) => setAdminCreate({ ...adminCreate, password: e.target.value })}
-                  className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg outline-none focus:border-indigo-500"
-                />
-                <p className="mt-1 text-[11px] text-gray-400">10자 이상. 본인이 첫 로그인에서 반드시 바꿉니다.</p>
-              </div>
-              <div>
-                <label className="block text-xs font-medium text-gray-600 mb-1.5">발급 사유 (선택)</label>
-                <input
-                  value={adminCreate.reason}
-                  onChange={(e) => setAdminCreate({ ...adminCreate, reason: e.target.value })}
-                  placeholder="예: 지원팀장 개인 계정 발급"
-                  className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg outline-none focus:border-indigo-500"
-                />
-              </div>
-            </div>
-            <div className="px-6 py-4 border-t flex justify-end gap-2 flex-shrink-0">
-              <button onClick={() => setAdminCreate(null)} className="px-4 py-2 text-sm border border-gray-200 rounded-lg text-gray-600 hover:bg-gray-50">취소</button>
-              <button
-                onClick={handleAdminCreate}
-                disabled={adminRoleBusy || !adminCreate.loginId.trim() || !adminCreate.name.trim() || adminCreate.password.length < 10}
-                className="px-4 py-2 text-sm font-semibold bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-40"
-              >
-                {adminRoleBusy ? '만드는 중...' : '계정 만들기'}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      {adminCreate && <AdminCreateModal {...{ adminCreate, adminRoleBusy, adminRoleOptions, loadAdminAccounts, setAdminCreate, setAdminRoleBusy, showAlert }} />}
 
       {/* ★ 2026-08-27 사용 중지·재개 모달 — 행을 지우지 않는다(지우면 심사에 낼 이력이 사라진다) */}
-      {adminActiveEdit && (
-        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4 z-50">
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden" onClick={(e) => e.stopPropagation()}>
-            <div className="px-6 py-4 border-b flex justify-between items-center">
-              <div>
-                <h3 className="text-lg font-bold">{adminActiveEdit.isActive ? '계정 사용 재개' : '계정 사용 중지'}</h3>
-                <p className="text-xs text-gray-500 font-mono">{adminActiveEdit.login_id}</p>
-              </div>
-              <button onClick={() => setAdminActiveEdit(null)} className="text-gray-400 hover:text-gray-600 text-xl">&times;</button>
-            </div>
-            <div className="p-6 space-y-3">
-              <p className="text-xs text-gray-500 leading-relaxed">
-                계정 행은 지우지 않고 사용만 막습니다. 지우면 그 계정이 남긴 기록의 주인이 사라져 심사에 낼 이력이 끊깁니다.
-              </p>
-              <div>
-                <label className="block text-xs font-medium text-gray-600 mb-1.5">사유 (필수)</label>
-                <input
-                  value={adminActiveEdit.reason}
-                  onChange={(e) => setAdminActiveEdit({ ...adminActiveEdit, reason: e.target.value })}
-                  placeholder="예: 공용 계정 폐지 · 개인 계정으로 전환"
-                  className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg outline-none focus:border-indigo-500"
-                />
-              </div>
-            </div>
-            <div className="px-6 py-4 border-t flex justify-end gap-2">
-              <button onClick={() => setAdminActiveEdit(null)} className="px-4 py-2 text-sm border border-gray-200 rounded-lg text-gray-600 hover:bg-gray-50">취소</button>
-              <button
-                onClick={handleAdminActiveSave}
-                disabled={adminRoleBusy || !adminActiveEdit.reason.trim()}
-                className={`px-4 py-2 text-sm font-semibold text-white rounded-lg disabled:opacity-40 ${adminActiveEdit.isActive ? 'bg-emerald-600 hover:bg-emerald-700' : 'bg-rose-600 hover:bg-rose-700'}`}
-              >
-                {adminRoleBusy ? '저장 중...' : adminActiveEdit.isActive ? '사용 재개' : '사용 중지'}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      {adminActiveEdit && <AdminActiveEditModal {...{ adminActiveEdit, adminRoleBusy, loadAdminAccounts, setAdminActiveEdit, setAdminRoleBusy, showAlert }} />}
 
       {/* ★ 2026-08-27 등급 변경 모달 — 사유 없이는 저장되지 않는다(전송자격인증 3.3 변경 이력 및 사유) */}
-      {adminRoleEdit && (
-        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4 z-50">
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden" onClick={(e) => e.stopPropagation()}>
-            <div className="px-6 py-4 border-b flex justify-between items-center">
-              <div>
-                <h3 className="text-lg font-bold">등급 변경</h3>
-                <p className="text-xs text-gray-500 font-mono">{adminRoleEdit.login_id}</p>
-              </div>
-              <button onClick={() => setAdminRoleEdit(null)} className="text-gray-400 hover:text-gray-600 text-xl">&times;</button>
-            </div>
-            <div className="p-6 space-y-4">
-              <div>
-                <label className="block text-xs font-medium text-gray-600 mb-1.5">등급</label>
-                <select
-                  value={adminRoleEdit.role}
-                  onChange={(e) => setAdminRoleEdit({ ...adminRoleEdit, role: e.target.value })}
-                  className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg outline-none focus:border-indigo-500"
-                >
-                  {adminRoleOptions.map((o) => (
-                    <option key={o.value} value={o.value}>{o.label}</option>
-                  ))}
-                </select>
-                <p className="mt-1.5 text-[11px] text-gray-500 leading-relaxed">
-                  {adminRoleOptions.find((o) => o.value === adminRoleEdit.role)?.desc || ''}
-                </p>
-              </div>
-              <div>
-                <label className="block text-xs font-medium text-gray-600 mb-1.5">변경 사유 (필수)</label>
-                <input
-                  value={adminRoleEdit.reason}
-                  onChange={(e) => setAdminRoleEdit({ ...adminRoleEdit, reason: e.target.value })}
-                  placeholder="예: 지원팀장 승진에 따른 권한 조정"
-                  className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg outline-none focus:border-indigo-500"
-                />
-                <p className="mt-1.5 text-[11px] text-gray-400">이 사유가 접근권한 변경 이력 대장에 그대로 남습니다.</p>
-              </div>
-            </div>
-            <div className="px-6 py-4 border-t flex justify-end gap-2">
-              <button onClick={() => setAdminRoleEdit(null)} className="px-4 py-2 text-sm border border-gray-200 rounded-lg text-gray-600 hover:bg-gray-50">취소</button>
-              <button
-                onClick={handleAdminRoleSave}
-                disabled={adminRoleBusy || !adminRoleEdit.reason.trim()}
-                className="px-4 py-2 text-sm font-semibold bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-40"
-              >
-                {adminRoleBusy ? '저장 중...' : '변경 저장'}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      {adminRoleEdit && <AdminRoleEditModal {...{ adminRoleBusy, adminRoleEdit, adminRoleOptions, loadAdminAccounts, setAdminRoleBusy, setAdminRoleEdit, showAlert }} />}
 
       {/* 템플릿 상세 모달 — 고객사 업로드 템플릿 정보 확인 (발송/승인 내용·반려 사유) */}
-      {templateDetail && (
-        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4 z-50">
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-hidden flex flex-col" onClick={(e) => e.stopPropagation()}>
-            <div className="px-6 py-4 border-b bg-gradient-to-r from-blue-50 to-white flex justify-between items-center flex-shrink-0">
-              <div>
-                <h3 className="text-lg font-bold">템플릿 상세</h3>
-                <p className="text-xs text-gray-500">{templateDetail.company_name || '-'} · {getAlimtalkTemplateStatus(templateDetail.status).label}</p>
-              </div>
-              <button onClick={() => setTemplateDetail(null)} className="text-gray-400 hover:text-gray-600 text-xl">&times;</button>
-            </div>
-            <div className="p-6 overflow-auto space-y-4 text-sm" style={{ userSelect: 'text' }}>
-              <div className="grid grid-cols-2 gap-3">
-                <div><div className="text-xs text-gray-400 mb-0.5">템플릿명</div><div className="text-gray-800">{templateDetail.template_name || '-'}</div></div>
-                <div><div className="text-xs text-gray-400 mb-0.5">템플릿코드</div><div className="text-gray-800 font-mono">{templateDetail.template_code || '-'}</div></div>
-                <div><div className="text-xs text-gray-400 mb-0.5">카테고리</div><div className="text-gray-800">{templateDetail.category || '-'}</div></div>
-                <div><div className="text-xs text-gray-400 mb-0.5">유형</div><div className="text-gray-800">{templateDetail.message_type || '-'}</div></div>
-                <div><div className="text-xs text-gray-400 mb-0.5">발신프로필</div><div className="text-gray-800">{templateDetail.profile_name || '-'}</div></div>
-                <div><div className="text-xs text-gray-400 mb-0.5">요청일</div><div className="text-gray-800">{(templateDetail.requested_at || templateDetail.created_at) ? new Date(templateDetail.requested_at || templateDetail.created_at).toLocaleString('ko-KR') : '-'}</div></div>
-              </div>
-              <div>
-                <div className="text-xs text-gray-400 mb-1">템플릿 내용</div>
-                <div className="bg-gray-50 border rounded-lg p-3 whitespace-pre-wrap break-words text-gray-800">{templateDetail.content || '-'}</div>
-              </div>
-              {/* ★ 2026-06-22: 강조 표기 + 버튼 + 부가정보 — 검수/문의 응대 시 등록 내용 확인 (처리메모 요청) */}
-              {templateDetail.emphasize_type && templateDetail.emphasize_type !== 'NONE' && (
-                <div>
-                  <div className="text-xs text-gray-400 mb-1">강조 표기 ({templateDetail.emphasize_type})</div>
-                  <div className="bg-amber-50 border border-amber-100 rounded-lg p-3 whitespace-pre-wrap break-words text-gray-800">{templateDetail.emphasize_title || '-'}</div>
-                </div>
-              )}
-              {(() => {
-                const raw = (templateDetail as any).buttons;
-                let btns: any[] = [];
-                if (Array.isArray(raw)) btns = raw;
-                else if (typeof raw === 'string' && raw.trim()) { try { const p = JSON.parse(raw); if (Array.isArray(p)) btns = p; } catch { /* 파싱 실패 무시 */ } }
-                if (btns.length === 0) return null;
-                return (
-                  <div>
-                    <div className="text-xs text-gray-400 mb-1">버튼 ({btns.length})</div>
-                    <div className="space-y-1">
-                      {btns.map((b: any, i: number) => {
-                        const nm = b?.name || b?.buttonName || b?.title || `버튼 ${i + 1}`;
-                        const tp = b?.linkType || b?.type || b?.linkTypeCode || '';
-                        const url = b?.linkMo || b?.urlMobile || b?.url || b?.linkPc || b?.urlPc || '';
-                        return (
-                          <div key={i} className="bg-gray-50 border rounded px-3 py-1.5 text-xs text-gray-800">
-                            <span className="font-medium">{nm}</span>
-                            {tp ? <span className="text-gray-400"> · {tp}</span> : null}
-                            {url ? <span className="text-gray-400 break-all"> · {url}</span> : null}
-                          </div>
-                        );
-                      })}
-                    </div>
-                  </div>
-                );
-              })()}
-              {/* ★ 2026-07-28 서수란 접수 — 업체가 등록 시 입력한 부가기능이 상세에 하나도 안 나와
-                  발송 실패 원인(대표링크 누락 등)을 슈퍼관리자에서 확인할 수 없었다(무주덕유산리조트).
-                  값은 이미 kakao_templates에 저장돼 있고 목록 API가 kt.*로 실어 보낸다 — 렌더만 없었다.
-                  대표링크만 채우면 같은 접수가 반복되므로 등록 폼이 받는 항목을 한 번에 노출한다.
-                  값이 없는 항목은 그리지 않는다(기존 강조표기·버튼 블록과 동일한 규칙). */}
-              {(() => {
-                const raw = (templateDetail as any).represent_link;
-                let rl: any = null;
-                if (raw && typeof raw === 'object') rl = raw;
-                else if (typeof raw === 'string' && raw.trim()) { try { rl = JSON.parse(raw); } catch { /* 파싱 실패 무시 */ } }
-                const mo = rl?.urlMobile || rl?.linkMo || '';
-                const pc = rl?.urlPc || rl?.linkPc || '';
-                const ios = rl?.schemeIos || '';
-                const and = rl?.schemeAndroid || '';
-                if (!mo && !pc && !ios && !and) return null;
-                return (
-                  <div>
-                    <div className="text-xs text-gray-400 mb-1">대표링크 (말풍선 전역 클릭)</div>
-                    <div className="bg-blue-50 border border-blue-100 rounded-lg p-3 space-y-1 text-xs text-gray-800">
-                      {mo && <div><span className="text-gray-400">Mobile</span> <span className="break-all">{mo}</span></div>}
-                      {pc && <div><span className="text-gray-400">PC</span> <span className="break-all">{pc}</span></div>}
-                      {ios && <div><span className="text-gray-400">iOS scheme</span> <span className="break-all">{ios}</span></div>}
-                      {and && <div><span className="text-gray-400">Android scheme</span> <span className="break-all">{and}</span></div>}
-                    </div>
-                  </div>
-                );
-              })()}
-              {templateDetail.preview_message && (
-                <div>
-                  <div className="text-xs text-gray-400 mb-1">미리보기 메시지 (앱 알림 문구)</div>
-                  <div className="bg-gray-50 border rounded-lg p-3 whitespace-pre-wrap break-words text-gray-800">{templateDetail.preview_message}</div>
-                </div>
-              )}
-              {templateDetail.template_header && (
-                <div>
-                  <div className="text-xs text-gray-400 mb-1">헤더</div>
-                  <div className="bg-gray-50 border rounded-lg p-3 whitespace-pre-wrap break-words text-gray-800">{templateDetail.template_header}</div>
-                </div>
-              )}
-              {templateDetail.ad_content && (
-                <div>
-                  <div className="text-xs text-gray-400 mb-1">광고 문구</div>
-                  <div className="bg-gray-50 border rounded-lg p-3 whitespace-pre-wrap break-words text-gray-800">{templateDetail.ad_content}</div>
-                </div>
-              )}
-              {(() => {
-                const raw = (templateDetail as any).quick_replies;
-                let qrs: any[] = [];
-                if (Array.isArray(raw)) qrs = raw;
-                else if (typeof raw === 'string' && raw.trim()) { try { const p = JSON.parse(raw); if (Array.isArray(p)) qrs = p; } catch { /* 파싱 실패 무시 */ } }
-                if (qrs.length === 0) return null;
-                return (
-                  <div>
-                    <div className="text-xs text-gray-400 mb-1">바로연결 ({qrs.length})</div>
-                    <div className="space-y-1">
-                      {qrs.map((q: any, i: number) => (
-                        <div key={i} className="bg-gray-50 border rounded px-3 py-1.5 text-xs text-gray-800">
-                          <span className="font-medium">{q?.name || q?.title || `바로연결 ${i + 1}`}</span>
-                          {(q?.linkMo || q?.urlMobile) ? <span className="text-gray-400 break-all"> · {q.linkMo || q.urlMobile}</span> : null}
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                );
-              })()}
-              {templateDetail.security_flag && (
-                <div className="bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 text-xs text-amber-800">
-                  보안 템플릿: 메인 디바이스(모바일) 외 서브 디바이스에는 메시지 내용이 노출되지 않습니다.
-                </div>
-              )}
-              {templateDetail.extra_content && (
-                <div>
-                  <div className="text-xs text-gray-400 mb-1">부가 정보</div>
-                  <div className="bg-gray-50 border rounded-lg p-3 whitespace-pre-wrap break-words text-gray-800">{templateDetail.extra_content}</div>
-                </div>
-              )}
-              {templateDetail.reject_reason && (
-                <div>
-                  <div className="text-xs text-gray-400 mb-1">반려 사유</div>
-                  <div className="bg-red-50 border border-red-100 rounded-lg p-3 whitespace-pre-wrap break-words text-red-700">{templateDetail.reject_reason}</div>
-                </div>
-              )}
-            </div>
-            <div className="px-6 py-3 border-t bg-gray-50 flex justify-end flex-shrink-0">
-              <button onClick={() => setTemplateDetail(null)} className="px-4 py-2 bg-gray-100 hover:bg-gray-200 rounded-lg text-sm font-medium">닫기</button>
-            </div>
-          </div>
-        </div>
-      )}
+      {templateDetail && <TemplateDetailModal {...{ setTemplateDetail, templateDetail }} />}
 
       {/* ★ 2026-08-04 IMC에서 템플릿 가져오기 — 이미 연결된 발신프로필을 골라 그 프로필 템플릿만 들여온다 */}
       {showImcTemplateImport && (
@@ -8097,2803 +2950,25 @@ const handleApproveRequest = async (id: string) => {
       )}
 
       {/* 수동 등록 모달 */}
-      {showManualTemplateForm && (
-        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4 z-50">
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg overflow-hidden">
-            <div className="px-6 py-4 border-b bg-gradient-to-r from-amber-50 to-white flex justify-between items-center">
-              <div>
-                <h3 className="text-lg font-bold">기존 템플릿 수동 등록</h3>
-                <p className="text-xs text-gray-500">이미 카카오에 등록된 템플릿을 승인 상태로 직접 등록합니다</p>
-              </div>
-              <button onClick={() => setShowManualTemplateForm(false)} className="text-gray-400 hover:text-gray-600 text-xl">&times;</button>
-            </div>
-            <div className="px-6 py-4 space-y-3">
-              <div>
-                <label className="block text-xs font-medium text-gray-600 mb-1">고객사 <span className="text-red-500">*</span></label>
-                <select value={manualForm.companyId} onChange={e => setManualForm({ ...manualForm, companyId: e.target.value })}
-                  className="w-full border border-gray-300 rounded-lg px-3 py-1.5 text-sm">
-                  <option value="">선택</option>
-                  {companies.map((c: any) => <option key={c.id} value={c.id}>{c.companyName || c.company_name}</option>)}
-                </select>
-              </div>
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-xs font-medium text-gray-600 mb-1">템플릿 코드</label>
-                  <input value={manualForm.templateCode} onChange={e => setManualForm({ ...manualForm, templateCode: e.target.value })}
-                    className="w-full border border-gray-300 rounded-lg px-3 py-1.5 text-sm" />
-                </div>
-                <div>
-                  <label className="block text-xs font-medium text-gray-600 mb-1">카테고리</label>
-                  <select value={manualForm.category} onChange={e => setManualForm({ ...manualForm, category: e.target.value })}
-                    className="w-full border border-gray-300 rounded-lg px-3 py-1.5 text-sm">
-                    <option value="">선택</option>
-                    {['결제/입금','배송/물류','예약/일정','회원가입/인증','공지/안내','주문/구매','이벤트/프로모션','고객관리','기타'].map(c => <option key={c} value={c}>{c}</option>)}
-                  </select>
-                </div>
-              </div>
-              <div>
-                <label className="block text-xs font-medium text-gray-600 mb-1">템플릿명 <span className="text-red-500">*</span></label>
-                <input value={manualForm.templateName} onChange={e => setManualForm({ ...manualForm, templateName: e.target.value })}
-                  className="w-full border border-gray-300 rounded-lg px-3 py-1.5 text-sm" />
-              </div>
-              <div>
-                <label className="block text-xs font-medium text-gray-600 mb-1">본문 <span className="text-red-500">*</span></label>
-                <textarea value={manualForm.content} onChange={e => setManualForm({ ...manualForm, content: e.target.value })}
-                  rows={5} className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm resize-none" />
-              </div>
-            </div>
-            <div className="px-6 py-3 border-t bg-gray-50 flex justify-end gap-3">
-              <button onClick={() => setShowManualTemplateForm(false)}
-                className="px-5 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-lg text-sm">취소</button>
-              <button onClick={handleManualTemplateSubmit}
-                className="px-5 py-2 bg-amber-600 hover:bg-amber-700 text-white rounded-lg text-sm font-medium">승인 상태로 등록</button>
-            </div>
-          </div>
-        </div>
-      )}
+      {showManualTemplateForm && <ManualTemplateFormModal {...{ companies, loadAdminTemplates, manualForm, setManualForm, setModal, setShowManualTemplateForm }} />}
 
       {/* ★ D96: 반려 사유 입력 모달 */}
-      {rejectModal.show && (
-        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4 z-[60]">
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden animate-[zoomIn_0.25s_ease-out]">
-            <div className="px-6 pt-6 pb-2 text-center">
-              <div className="w-12 h-12 bg-amber-100 rounded-full flex items-center justify-center mx-auto mb-3">
-                <svg className="w-6 h-6 text-amber-600" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z" />
-                </svg>
-              </div>
-              <h3 className="text-lg font-bold text-gray-900">템플릿 반려</h3>
-              <p className="text-sm text-gray-500 mt-1">반려 사유를 입력해주세요</p>
-            </div>
-            <div className="px-6 py-3">
-              <textarea
-                value={rejectModal.reason}
-                onChange={e => setRejectModal(prev => ({ ...prev, reason: e.target.value }))}
-                placeholder="반려 사유를 입력하세요..."
-                rows={3}
-                className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm resize-none focus:outline-none focus:ring-2 focus:ring-amber-500 focus:border-amber-500"
-                autoFocus
-              />
-            </div>
-            <div className="px-6 pb-6 pt-2 flex gap-3">
-              <button
-                onClick={() => setRejectModal({ show: false, id: '', reason: '' })}
-                className="flex-1 bg-gray-100 hover:bg-gray-200 text-gray-700 font-medium py-2.5 rounded-xl text-sm transition"
-              >
-                취소
-              </button>
-              <button
-                onClick={handleTemplateRejectConfirm}
-                className="flex-1 bg-amber-600 hover:bg-amber-700 text-white font-medium py-2.5 rounded-xl text-sm transition"
-              >
-                반려
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      {rejectModal.show && <TemplateRejectModal {...{ loadAdminRcsTemplates, loadAdminTemplates, rejectModal, setModal, setRejectModal }} />}
 
       {/* 고객사 추가 모달 */}
-      {showCompanyModal && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md">
-            <div className="px-6 py-4 border-b">
-              <h3 className="text-lg font-semibold">새 고객사 추가</h3>
-            </div>
-            <form onSubmit={handleCreateCompany} className="p-6 space-y-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  고객사 코드 *
-                </label>
-                <input
-                  type="text"
-                  value={newCompany.companyCode}
-                  onChange={(e) => setNewCompany({ ...newCompany, companyCode: e.target.value })}
-                  className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
-                  placeholder="예: ABC001"
-                  required
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  회사명 *
-                </label>
-                <input
-                  type="text"
-                  value={newCompany.companyName}
-                  onChange={(e) => setNewCompany({ ...newCompany, companyName: e.target.value })}
-                  className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
-                  placeholder="예: ABC 주식회사"
-                  required
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  담당자명
-                </label>
-                <input
-                  type="text"
-                  value={newCompany.contactName}
-                  onChange={(e) => setNewCompany({ ...newCompany, contactName: e.target.value })}
-                  className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  이메일
-                </label>
-                <input
-                  type="email"
-                  value={newCompany.contactEmail}
-                  onChange={(e) => setNewCompany({ ...newCompany, contactEmail: e.target.value })}
-                  className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  요금제 *
-                </label>
-                <select
-                  value={newCompany.planId}
-                  onChange={(e) => setNewCompany({ ...newCompany, planId: e.target.value })}
-                  className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
-                  required
-                >
-                  <option value="">선택하세요</option>
-                  {plans.map((plan) => (
-                    <option key={plan.id} value={plan.id}>
-                      {formatPlanOptionLabel(plan.plan_name, plan.monthly_price)}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              {/* ★ 2026-07-03 사용구분 — web(웹발송) / agent(QTmsg 에이전트 전용) / both(웹+에이전트) */}
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  사용구분 *
-                </label>
-                <div className="grid grid-cols-3 gap-2">
-                  {([
-                    { value: 'web', label: '웹발송', desc: '한줄로 전체 기능' },
-                    { value: 'agent', label: '에이전트', desc: '카카오템플릿+결과만' },
-                    { value: 'both', label: '웹+에이전트', desc: '웹 발송과 에이전트 발송을 함께 사용' },
-                  ] as const).map((opt) => (
-                    <button
-                      key={opt.value}
-                      type="button"
-                      onClick={() => setNewCompany({ ...newCompany, usageType: opt.value })}
-                      className={`px-2 py-2 rounded-lg border text-center transition ${
-                        newCompany.usageType === opt.value
-                          ? 'border-blue-500 bg-blue-50 text-blue-700'
-                          : 'border-gray-200 text-gray-600 hover:bg-gray-50'
-                      }`}
-                    >
-                      <div className="text-sm font-medium">{opt.label}</div>
-                      <div className="text-[10px] text-gray-400 mt-0.5">{opt.desc}</div>
-                    </button>
-                  ))}
-                </div>
-                {newCompany.usageType === 'agent' && (
-                  <p className="text-xs text-amber-600 mt-1.5">
-                    에이전트 전용 계정은 로그인 시 카카오 템플릿 관리만 접근 가능합니다 (대시보드 차단).
-                  </p>
-                )}
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  담당 분류 코드
-                </label>
-                {(() => {
-                  const selectedCompany = companies.find(c => c.id === newUser.companyId);
-                  const storeList = (selectedCompany as any)?.store_code_list || [];
-                  
-                  if (!newUser.companyId) {
-                    return <p className="text-xs text-gray-400">먼저 소속 회사를 선택하세요</p>;
-                  }
-                  if (storeList.length === 0) {
-                    return <p className="text-xs text-gray-400">이 회사는 분류 코드가 없습니다 (전체 접근)</p>;
-                  }
-                  
-                  return (
-                    <div className="flex flex-wrap gap-2 mt-2">
-                      {storeList.map((code: string) => {
-                        const selected = newUser.storeCodes.split(',').map(s => s.trim()).filter(Boolean);
-                        const isChecked = selected.includes(code);
-                        return (
-                          <label key={code} className={`inline-flex items-center gap-1 px-3 py-1.5 rounded-full text-sm cursor-pointer border transition-colors ${isChecked ? 'bg-blue-100 text-blue-800 border-blue-300' : 'bg-gray-50 text-gray-600 border-gray-200 hover:bg-gray-100'}`}>
-                            <input
-                              type="checkbox"
-                              checked={isChecked}
-                              onChange={(e) => {
-                                const newSelected = e.target.checked
-                                  ? [...selected, code]
-                                  : selected.filter(s => s !== code);
-                                setNewUser({ ...newUser, storeCodes: newSelected.join(', ') });
-                              }}
-                              className="sr-only"
-                            />
-                            {code}
-                          </label>
-                        );
-                      })}
-                    </div>
-                  );
-                })()}
-                <p className="text-xs text-gray-500 mt-2">비워두면 전체 고객 조회 가능</p>
-              </div>
-              <div className="flex gap-3 pt-4">
-                <button
-                  type="button"
-                  onClick={() => setShowCompanyModal(false)}
-                  className="flex-1 px-4 py-2 border rounded-lg text-gray-700 hover:bg-gray-50"
-                >
-                  취소
-                </button>
-                <button
-                  type="submit"
-                  className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
-                >
-                  추가
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
+      {showCompanyModal && <CompanyCreateModal {...{ companies, loadData, newCompany, newUser, plans, setNewCompany, setNewUser, setShowCompanyModal, showAlert }} />}
 
       {/* 사용자 추가 모달 */}
-      {showUserModal && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md max-h-[90vh] overflow-y-auto">
-            <div className="px-6 py-4 border-b">
-              <h3 className="text-lg font-semibold">새 사용자 추가</h3>
-            </div>
-            <form onSubmit={handleCreateUser} className="p-6 space-y-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  소속 회사 *
-                </label>
-                {/* ★ D144 P11: 검색 가능 select — 회사명 입력으로 검색, 67개+ 스크롤 대신 */}
-                <SearchableSelect
-                  options={companies.map((company) => ({
-                    value: company.id,
-                    label: `${company.company_name} (${company.company_code})`,
-                  }))}
-                  value={newUser.companyId}
-                  onChange={(v) => setNewUser({ ...newUser, companyId: v })}
-                  placeholder="회사명 검색..."
-                  required
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  로그인 ID *
-                </label>
-                <input
-                  type="text"
-                  value={newUser.loginId}
-                  onChange={(e) => setNewUser({ ...newUser, loginId: e.target.value })}
-                  className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
-                  placeholder="영문, 숫자 조합"
-                  required
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  초기 비밀번호 *
-                </label>
-                <div className="flex gap-2">
-                  <input
-                    type="text"
-                    value={newUser.password}
-                    onChange={(e) => setNewUser({ ...newUser, password: e.target.value })}
-                    className="flex-1 px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
-                    placeholder="8자 이상"
-                    required
-                  />
-                  <button
-                    type="button"
-                    onClick={generateTempPassword}
-                    className="px-3 py-2 bg-gray-100 hover:bg-gray-200 rounded-lg text-sm"
-                  >
-                    자동생성
-                  </button>
-                </div>
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  이름 *
-                </label>
-                <input
-                  type="text"
-                  value={newUser.name}
-                  onChange={(e) => setNewUser({ ...newUser, name: e.target.value })}
-                  className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
-                  required
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  이메일
-                </label>
-                <input
-                  type="email"
-                  value={newUser.email}
-                  onChange={(e) => setNewUser({ ...newUser, email: e.target.value })}
-                  className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  연락처
-                </label>
-                <input
-                  type="text"
-                  value={newUser.phone}
-                  onChange={(e) => setNewUser({ ...newUser, phone: e.target.value })}
-                  className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
-                  placeholder="010-0000-0000"
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  부서
-                </label>
-                <input
-                  type="text"
-                  value={newUser.department}
-                  onChange={(e) => setNewUser({ ...newUser, department: e.target.value })}
-                  className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  권한 *
-                </label>
-                <select
-                  value={newUser.userType}
-                  onChange={(e) => setNewUser({ ...newUser, userType: e.target.value })}
-                  className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
-                >
-                  <option value="user">일반 사용자</option>
-                  <option value="admin">회사 관리자</option>
-                  </select>
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  담당 분류 코드
-                </label>
-                {(() => {
-                  const selectedCompany = companies.find(c => c.id === newUser.companyId);
-                  const storeList = (selectedCompany as any)?.store_code_list || [];
-                  
-                  if (!newUser.companyId) {
-                    return <p className="text-xs text-gray-400 py-2">먼저 소속 회사를 선택하세요</p>;
-                  }
-                  if (storeList.length === 0) {
-                    return <p className="text-xs text-gray-400 py-2">이 회사는 분류 코드가 없습니다 (전체 접근)</p>;
-                  }
-                  
-                  return (
-                    <div className="flex flex-wrap gap-2 mt-2">
-                      {storeList.map((code: string) => {
-                        const selected = newUser.storeCodes.split(',').map(s => s.trim()).filter(Boolean);
-                        const isChecked = selected.includes(code);
-                        return (
-                          <label key={code} className={`inline-flex items-center gap-1 px-3 py-1.5 rounded-full text-sm cursor-pointer border transition-colors ${isChecked ? 'bg-blue-100 text-blue-800 border-blue-300' : 'bg-gray-50 text-gray-600 border-gray-200 hover:bg-gray-100'}`}>
-                            <input
-                              type="checkbox"
-                              checked={isChecked}
-                              onChange={(e) => {
-                                const newSelected = e.target.checked
-                                  ? [...selected, code]
-                                  : selected.filter(s => s !== code);
-                                setNewUser({ ...newUser, storeCodes: newSelected.join(', ') });
-                              }}
-                              className="sr-only"
-                            />
-                            {code}
-                          </label>
-                        );
-                      })}
-                    </div>
-                  );
-                })()}
-                <p className="text-xs text-gray-500 mt-2">비워두면 전체 고객 조회 가능</p>
-              </div>
-              <div className="flex gap-3 pt-4">
-                <button
-                  type="button"
-                  onClick={() => setShowUserModal(false)}
-                  className="flex-1 px-4 py-2 border rounded-lg text-gray-700 hover:bg-gray-50"
-                >
-                  취소
-                </button>
-                <button
-                  type="submit"
-                  className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
-                >
-                  추가
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
+      {showUserModal && <UserCreateModal {...{ companies, loadUsers, newUser, setNewUser, setShowUserModal, showAlert }} />}
 
       {/* 사용자 수정 모달 */}
-      {editingUser && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden">
-            <div className="px-6 py-4 border-b bg-gradient-to-r from-blue-50 to-indigo-50">
-              <h3 className="text-lg font-semibold text-gray-800">✏️ 사용자 수정</h3>
-            </div>
-            <form onSubmit={handleUpdateUser} className="p-6 space-y-4 max-h-[70vh] overflow-y-auto">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">로그인 ID</label>
-                <input
-                  type="text"
-                  value={editingUser.login_id}
-                  disabled
-                  className="w-full px-3 py-2 border rounded-lg bg-gray-100 text-gray-500"
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">이름 *</label>
-                <input
-                  type="text"
-                  value={editingUser.name}
-                  onChange={(e) => setEditingUser({ ...editingUser, name: e.target.value })}
-                  className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
-                  required
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">이메일</label>
-                <input
-                  type="email"
-                  value={editingUser.email || ''}
-                  onChange={(e) => setEditingUser({ ...editingUser, email: e.target.value })}
-                  className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">연락처</label>
-                <input
-                  type="text"
-                  value={editingUser.phone || ''}
-                  onChange={(e) => setEditingUser({ ...editingUser, phone: e.target.value })}
-                  className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">부서</label>
-                <input
-                  type="text"
-                  value={editingUser.department || ''}
-                  onChange={(e) => setEditingUser({ ...editingUser, department: e.target.value })}
-                  className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
-                />
-              </div>
-              {/* ★ 2026-08-18 로그인 인증번호 — 계정당 하나. 계약 담당자 번호를 여기서 등록한다 */}
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  로그인 인증번호 <span className="text-xs font-normal text-gray-400">(휴대폰 · 계정당 1개)</span>
-                </label>
-                <input
-                  type="text"
-                  inputMode="numeric"
-                  placeholder="01012345678 (비우면 인증 해제)"
-                  value={editingUser.mfa_phone || ''}
-                  onChange={(e) => setEditingUser({ ...editingUser, mfa_phone: e.target.value.replace(/\D/g, '').slice(0, 11) })}
-                  className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
-                />
-                <p className="text-[11px] text-gray-400 mt-1">
-                  로그인 시 이 번호로 6자리를 보냅니다. 번호를 바꾸면 기존 기기 인증이 모두 해제됩니다.
-                </p>
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">권한</label>
-                <select
-                  value={editingUser.user_type}
-                  onChange={(e) => setEditingUser({ ...editingUser, user_type: e.target.value })}
-                  className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
-                >
-                  <option value="user">일반 사용자</option>
-                  <option value="admin">회사 관리자</option>
-                </select>
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">발송 라인그룹</label>
-                <select
-                  value={editingUser.line_group_id || ''}
-                  onChange={(e) => setEditingUser({ ...editingUser, line_group_id: e.target.value || null })}
-                  className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
-                >
-                  <option value="">회사 기본 라인그룹 사용</option>
-                  {lineGroups.filter((lg: any) => (lg.group_type === 'bulk' || lg.group_type === 'bito') && lg.is_active).map((lg: any) => (
-                    <option key={lg.id} value={lg.id}>{lg.group_name} ({lg.sms_tables?.length || 0}개 테이블)</option>
-                  ))}
-                </select>
-                <p className="text-xs text-gray-400 mt-1">개별 라인그룹 설정 시 이 사용자의 발송은 해당 라인으로 분리됩니다</p>
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">담당 분류 코드</label>
-                {(() => {
-                  const selectedCompany = companies.find(c => c.id === editingUser.company_id);
-                  const storeList = (selectedCompany as any)?.store_code_list || [];
-                  
-                  if (storeList.length === 0) {
-                    return <p className="text-xs text-gray-400">이 회사는 분류 코드가 없습니다 (전체 접근)</p>;
-                  }
-                  
-                  return (
-                    <div className="flex flex-wrap gap-2 mt-2">
-                      {storeList.map((code: string) => {
-                        const selected = (editingUser.storeCodes || '').split(',').map((s: string) => s.trim()).filter(Boolean);
-                        const isChecked = selected.includes(code);
-                        return (
-                          <label key={code} className={`inline-flex items-center gap-1 px-3 py-1.5 rounded-full text-sm cursor-pointer border transition-colors ${isChecked ? 'bg-blue-100 text-blue-800 border-blue-300' : 'bg-gray-50 text-gray-600 border-gray-200 hover:bg-gray-100'}`}>
-                            <input
-                              type="checkbox"
-                              checked={isChecked}
-                              onChange={(e) => {
-                                const newSelected = e.target.checked
-                                  ? [...selected, code]
-                                  : selected.filter((s: string) => s !== code);
-                                setEditingUser({ ...editingUser, storeCodes: newSelected.join(', ') });
-                              }}
-                              className="sr-only"
-                            />
-                            {code}
-                          </label>
-                        );
-                      })}
-                    </div>
-                  );
-                })()}
-                <p className="text-xs text-gray-500 mt-2">비워두면 전체 고객 조회 가능</p>
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">상태</label>
-                <select
-                  value={editingUser.status}
-                  onChange={(e) => setEditingUser({ ...editingUser, status: e.target.value })}
-                  className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
-                >
-                  <option value="active">활성</option>
-                  <option value="locked">잠금</option>
-                  <option value="dormant">휴면</option>
-                  </select>
-              </div>
-
-              {/* 080 수신거부 자동연동 섹션 */}
-              <div className="border-t pt-4 mt-4">
-                <div className="text-sm font-semibold text-gray-700 mb-3 flex items-center gap-2">
-                  📱 080 수신거부 자동연동 (나래인터넷)
-                </div>
-                <div className="space-y-3">
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">080 수신거부번호</label>
-                    <input
-                      type="text"
-                      value={editingUser.opt_out_080_number || ''}
-                      onChange={(e) => setEditingUser({ ...editingUser, opt_out_080_number: e.target.value })}
-                      className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
-                      placeholder="예: 080-719-6700"
-                    />
-                    <p className="text-xs text-gray-400 mt-1">나래인터넷에서 발급받은 080번호 입력. 콜백 시 이 번호로 사용자 매칭</p>
-                  </div>
-                  <div className="flex items-center gap-3">
-                    <label className="block text-sm font-medium text-gray-700">자동연동</label>
-                    <button
-                      type="button"
-                      onClick={() => setEditingUser({ ...editingUser, opt_out_auto_sync: !editingUser.opt_out_auto_sync })}
-                      className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${editingUser.opt_out_auto_sync ? 'bg-green-500' : 'bg-gray-300'}`}
-                    >
-                      <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${editingUser.opt_out_auto_sync ? 'translate-x-6' : 'translate-x-1'}`} />
-                    </button>
-                    <span className={`text-sm ${editingUser.opt_out_auto_sync ? 'text-green-600 font-medium' : 'text-gray-400'}`}>
-                      {editingUser.opt_out_auto_sync ? 'ON' : 'OFF'}
-                    </span>
-                  </div>
-                  {!editingUser.opt_out_080_number && editingUser.opt_out_auto_sync && (
-                    <p className="text-xs text-orange-500">⚠️ 080번호를 입력해야 자동연동이 작동합니다</p>
-                  )}
-                </div>
-
-                {/* 업로드 고객 DB 현황 */}
-                {editingUser.uploaded_customer_count > 0 && (
-                  <div className="mt-3 p-3 bg-blue-50 rounded-lg">
-                    <div className="flex items-center justify-between">
-                      <span className="text-sm text-gray-600">업로드 고객 DB: <strong>{Number(editingUser.uploaded_customer_count).toLocaleString()}건</strong></span>
-                      <button
-                        type="button"
-                        onClick={() => showConfirm('고객 DB 삭제', `이 사용자가 업로드한 고객 ${Number(editingUser.uploaded_customer_count).toLocaleString()}건을 전부 삭제하시겠습니까?\n연관 구매내역도 함께 삭제되며, 복구할 수 없습니다.`, async () => {
-                          try {
-                            const token = localStorage.getItem('token');
-                            const res = await fetch(`/api/admin/users/${editingUser.id}/customers`, {
-                              method: 'DELETE',
-                              headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` }
-                            });
-                            if (res.ok) {
-                              const data = await res.json();
-                              showAlert('성공', `${data.deletedCount}명 삭제 (구매내역 ${data.deletedPurchases}건 포함)`, 'success');
-                              setEditingUser({ ...editingUser, uploaded_customer_count: 0 });
-                            } else {
-                              const data = await res.json();
-                              showAlert('오류', data.error || '삭제 실패', 'error');
-                            }
-                          } catch { showAlert('오류', '삭제 실패', 'error'); }
-                        })}
-                        className="px-3 py-1 text-xs bg-red-100 text-red-700 rounded-lg hover:bg-red-200"
-                      >
-                        🗑️ 고객 DB 삭제
-                      </button>
-                    </div>
-                  </div>
-                )}
-
-                {/* 수신거부 현황 */}
-                {editingUser.unsubscribe_count > 0 && (
-                  <div className="mt-3 p-3 bg-gray-50 rounded-lg">
-                    <div className="flex items-center justify-between mb-2">
-                      <span className="text-sm text-gray-600">수신거부: <strong>{Number(editingUser.unsubscribe_count).toLocaleString()}건</strong></span>
-                      <div className="flex gap-2">
-                        <button
-                          type="button"
-                          onClick={async () => {
-                            try {
-                              const token = localStorage.getItem('token');
-                              const res = await fetch(`/api/admin/users/${editingUser.id}/unsubscribes/export`, {
-                                headers: { 'Authorization': `Bearer ${token}` }
-                              });
-                              if (!res.ok) throw new Error('다운로드 실패');
-                              const blob = await res.blob();
-                              const url = window.URL.createObjectURL(blob);
-                              const a = document.createElement('a');
-                              a.href = url;
-                              a.download = `unsubscribes_${editingUser.name}_${new Date().toISOString().slice(0,10)}.csv`;
-                              a.click();
-                              window.URL.revokeObjectURL(url);
-                            } catch { showAlert('오류', '다운로드 실패', 'error'); }
-                          }}
-                          className="px-3 py-1 text-xs bg-blue-100 text-blue-700 rounded-lg hover:bg-blue-200"
-                        >
-                          📥 다운로드
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => showConfirm('수신거부 삭제', `이 사용자의 수신거부 ${Number(editingUser.unsubscribe_count).toLocaleString()}건을 전부 삭제하시겠습니까?\n삭제 후 복구할 수 없습니다.`, async () => {
-                            try {
-                              const token = localStorage.getItem('token');
-                              const res = await fetch(`/api/admin/users/${editingUser.id}/unsubscribes`, {
-                                method: 'DELETE',
-                                headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` }
-                              });
-                              if (res.ok) {
-                                const data = await res.json();
-                                showAlert('성공', `${data.deletedCount}건 삭제되었습니다.`, 'success');
-                                setEditingUser({ ...editingUser, unsubscribe_count: 0 });
-                              }
-                            } catch { showAlert('오류', '삭제 실패', 'error'); }
-                          })}
-                          className="px-3 py-1 text-xs bg-red-100 text-red-700 rounded-lg hover:bg-red-200"
-                        >
-                          🗑️ 전체삭제
-                        </button>
-                      </div>
-                    </div>
-                  </div>
-                )}
-              </div>
-
-              <div className="flex gap-3 pt-4">
-                <button
-                  type="button"
-                  onClick={() => setEditingUser(null)}
-                  className="flex-1 px-4 py-2 border rounded-lg text-gray-700 hover:bg-gray-50"
-                >
-                  취소
-                </button>
-                <button
-                  type="submit"
-                  className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
-                >
-                  저장
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
+      {editingUser && <UserEditModal {...{ companies, editingUser, lineGroups, loadUsers, setEditingUser, showAlert, showConfirm }} />}
 
       {/* 고객사 수정 모달 */}
-      {showEditCompanyModal && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
-          <div className={`bg-white rounded-2xl shadow-2xl w-full ${editCompanyTab === 'customers' || editCompanyTab === 'cards' ? 'max-w-4xl' : 'max-w-2xl'} max-h-[90vh] flex flex-col transition-all`}>
-            <div className="px-6 py-4 border-b">
-              <h3 className="text-lg font-semibold">고객사 상세 설정</h3>
-              <p className="text-xs text-gray-500 mt-1">{editCompany.companyName}</p>
-            </div>
-
-            {/* 탭 네비게이션 */}
-            <div className="flex flex-shrink-0 border-b px-1 bg-gray-50">
-              {[
-                { key: 'basic', label: '기본정보', icon: '🏢' },
-                { key: 'send', label: '발송정책', icon: '📋' },
-                { key: 'cost', label: '단가/요금', icon: '💰' },
-                { key: 'ai', label: '크레딧', icon: '💳' },
-                { key: 'store', label: '분류코드', icon: '🏷️' },
-                { key: 'billing', label: '정산', icon: '🧾' },
-                { key: 'cards', label: '대시보드', icon: '📊' },
-                { key: 'customers', label: '고객DB', icon: '👥' },
-                { key: 'sync', label: 'Sync', icon: '🔄' },
-              ].map((tab) => (
-                <button
-                  key={tab.key}
-                  type="button"
-                  onClick={() => {
-                    setEditCompanyTab(tab.key as any);
-                    if (tab.key === 'customers') { setAdminCustSearch(''); loadAdminCustomers(1); }
-                    if (tab.key === 'cost' && editCompany?.billingType === 'prepaid') { loadBalanceTx(editCompany.id); }
-                    if (tab.key === 'sync') { loadSyncKeys(editCompany.id); }
-                    if (tab.key === 'billing') { loadBillingTab(editCompany.id); }
-                  }}
-                  className={`flex-1 py-2.5 text-[11px] font-medium text-center border-b-2 transition-colors ${
-                    editCompanyTab === tab.key
-                      ? 'border-indigo-600 text-indigo-600 bg-white'
-                      : 'border-transparent text-gray-500 hover:text-gray-700'
-                  }`}
-                >
-                  <span className="block text-sm leading-tight">{tab.icon}</span>
-                  <span className="block mt-0.5 leading-tight">{tab.label}</span>
-                </button>
-              ))}
-            </div>
-
-            <form onSubmit={handleUpdateCompany} className="flex-1 overflow-y-auto p-6">
-              {/* 기본정보 탭 */}
-              {editCompanyTab === 'basic' && (
-                <div className="space-y-4">
-                  <div className="flex items-center gap-2">
-                    <span className="text-[11px] font-bold tracking-wide text-indigo-600">회사 정보</span>
-                    <div className="h-px flex-1 bg-gray-100"></div>
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">회사명 *</label>
-                    <input type="text" value={editCompany.companyName}
-                      onChange={(e) => setEditCompany({ ...editCompany, companyName: e.target.value })}
-                      className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none" required />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">사업자번호</label>
-                    <input type="text" value={editCompany.businessNumber}
-                      onChange={(e) => setEditCompany({ ...editCompany, businessNumber: e.target.value })}
-                      className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none" placeholder="000-00-00000" />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">대표자</label>
-                    <input type="text" value={editCompany.ceoName}
-                      onChange={(e) => setEditCompany({ ...editCompany, ceoName: e.target.value })}
-                      className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none" />
-                  </div>
-                  <div className="grid grid-cols-2 gap-3">
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">업태</label>
-                      <input type="text" value={editCompany.businessType}
-                        onChange={(e) => setEditCompany({ ...editCompany, businessType: e.target.value })}
-                        className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none" placeholder="도소매업" />
-                    </div>
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">종목</label>
-                      <input type="text" value={editCompany.businessItem}
-                        onChange={(e) => setEditCompany({ ...editCompany, businessItem: e.target.value })}
-                        className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none" placeholder="화장품" />
-                    </div>
-                  </div>
-                  {/* ★ 2026-07-21 문안 생성 참조 업종 — 사업자등록증 업태/종목(위)과 별개. 브랜드보이스 미등록 업체 문안 생성 시 참조 카테고리. */}
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">문안 생성 참조 업종</label>
-                    <select value={editCompany.industryCode}
-                      onChange={(e) => setEditCompany({ ...editCompany, industryCode: e.target.value })}
-                      className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none bg-white">
-                      <option value="">미지정</option>
-                      {industryOptions.map((o) => (
-                        <option key={o.code} value={o.code}>{o.label}</option>
-                      ))}
-                    </select>
-                    <p className="text-xs text-gray-400 mt-1">브랜드보이스 미등록 업체의 문안 생성 시 참조하는 업종입니다. 사업자등록증 업태·종목과 무관하게 실제 판매 카테고리로 지정하세요.</p>
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">주소</label>
-                    <input type="text" value={editCompany.address}
-                      onChange={(e) => setEditCompany({ ...editCompany, address: e.target.value })}
-                      className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none" placeholder="서울시 강남구..." />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">담당자명</label>
-                    <input type="text" value={editCompany.contactName}
-                      onChange={(e) => setEditCompany({ ...editCompany, contactName: e.target.value })}
-                      className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none" />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">이메일</label>
-                    <input type="email" value={editCompany.contactEmail}
-                      onChange={(e) => setEditCompany({ ...editCompany, contactEmail: e.target.value })}
-                      className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none" />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">연락처</label>
-                    <input type="text" value={editCompany.contactPhone}
-                      onChange={(e) => setEditCompany({ ...editCompany, contactPhone: e.target.value })}
-                      className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none" placeholder="010-0000-0000" />
-                  </div>
-                  <div className="flex items-center gap-2 pt-2">
-                    <span className="text-[11px] font-bold tracking-wide text-indigo-600">요금제·상태</span>
-                    <div className="h-px flex-1 bg-gray-100"></div>
-                  </div>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">요금제 *</label>
-                    <select value={editCompany.planId}
-                      onChange={(e) => setEditCompany({ ...editCompany, planId: e.target.value })}
-                      className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none" required>
-                      <option value="">선택하세요</option>
-                      {plans.map((plan) => (
-                        <option key={plan.id} value={plan.id}>{formatPlanOptionLabel(plan.plan_name, plan.monthly_price)}</option>
-                      ))}
-                    </select>
-                    {/* ★ 2026-10-04 선불 이용 기간 중 회사 = 요금제 직접 변경 불가(서버 409) — 미리 알린다 */}
-                    {editCompany.billingType === 'prepaid' && <PlanTermLockNote companyId={editCompany.id} />}
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">상태 *</label>
-                    <select value={editCompany.status}
-                      onChange={(e) => setEditCompany({ ...editCompany, status: e.target.value })}
-                      className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none">
-                      <option value="trial">체험</option>
-                      <option value="active">활성</option>
-                      <option value="suspended">정지</option>
-                      <option value="terminated">해지</option>
-                    </select>
-                  </div>
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">구독 상태 *</label>
-                    <select value={editCompany.subscriptionStatus}
-                      onChange={(e) => setEditCompany({ ...editCompany, subscriptionStatus: e.target.value })}
-                      className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none">
-                      <option value="trial">체험 (trial)</option>
-                      <option value="trial_expired">체험만료 (trial_expired)</option>
-                      <option value="paid">정식 구독 (paid)</option>
-                      <option value="active">정상 구독 (active)</option>
-                      <option value="expired">만료 (expired)</option>
-                      <option value="suspended">정지 (suspended)</option>
-                    </select>
-                    <p className="text-xs text-gray-400 mt-1">expired/suspended 시 전 기능 차단. trial_expired 는 FREE plan 자동 강등 후 마커.</p>
-                  </div>
-                  {/* ★ 2026-06-08: BASIC 1개월 무료체험 (PRO 체험 + AI op overlay 체험 대체) */}
-                  <div className="col-span-2 rounded-lg border border-indigo-200 bg-indigo-50/40 p-3">
-                    <div className="flex items-center justify-between gap-3 flex-wrap">
-                      <div>
-                        <p className="text-sm font-semibold text-indigo-900">무료체험 (베이직과 같은 기능 · 요금 0원)</p>
-                        {editCompany.subscriptionStatus === 'trial' && editCompany.trialExpiresAt ? (
-                          <p className="text-xs text-indigo-700 mt-0.5">
-                            체험 중 · 만료: <b>{new Date(editCompany.trialExpiresAt).toLocaleString('ko-KR')}</b>
-                            {' '}
-                            (D-{Math.max(0, Math.ceil((new Date(editCompany.trialExpiresAt).getTime() - Date.now()) / 86400000))})
-                          </p>
-                        ) : (
-                          <p className="text-xs text-indigo-600 mt-0.5">체험 미부여 상태. 부여 시 무료체험 요금제(베이직과 같은 기능·크레딧, 요금 0원) 1개월 개방, 30일 후 자동 미가입(FREE) 강등.</p>
-                        )}
-                      </div>
-                      <div className="flex gap-2">
-                        <button
-                          type="button"
-                          onClick={handleGrantBasicTrial}
-                          className="px-3 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-xs font-semibold"
-                        >
-                          {editCompany.subscriptionStatus === 'trial' ? '1개월 추가 부여' : '1개월 체험 부여'}
-                        </button>
-                        {editCompany.subscriptionStatus === 'trial' && (
-                          <button
-                            type="button"
-                            onClick={handleRevokeBasicTrial}
-                            className="px-3 py-2 bg-white border border-red-200 text-red-600 hover:bg-red-50 rounded-lg text-xs font-semibold"
-                          >
-                            체험 취소
-                          </button>
-                        )}
-                      </div>
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-2 pt-2">
-                    <span className="text-[11px] font-bold tracking-wide text-indigo-600">계정 정책</span>
-                    <div className="h-px flex-1 bg-gray-100"></div>
-                  </div>
-                  {/* ★ 2026-07-03 사용구분 + 에이전트 발송ID 매핑 */}
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">사용구분 *</label>
-                    <div className="grid grid-cols-3 gap-2">
-                      {([
-                        { value: 'web', label: '웹발송', desc: '한줄로 전체 기능' },
-                        { value: 'agent', label: '에이전트', desc: '카카오템플릿+결과만' },
-                        { value: 'both', label: '웹+에이전트', desc: '웹 발송과 에이전트 발송을 함께 사용' },
-                      ] as const).map((opt) => (
-                        <button
-                          key={opt.value}
-                          type="button"
-                          onClick={() => setEditCompany({ ...editCompany, usageType: opt.value })}
-                          className={`px-2 py-2 rounded-lg border text-center transition ${
-                            editCompany.usageType === opt.value
-                              ? 'border-indigo-500 bg-indigo-50 text-indigo-700'
-                              : 'border-gray-200 text-gray-600 hover:bg-gray-50'
-                          }`}
-                        >
-                          <div className="text-sm font-medium">{opt.label}</div>
-                          <div className="text-[10px] text-gray-400 mt-0.5">{opt.desc}</div>
-                        </button>
-                      ))}
-                    </div>
-                    {editCompany.usageType === 'agent' && (
-                      <p className="text-xs text-amber-600 mt-1.5">
-                        에이전트 전용 계정은 로그인 시 카카오 템플릿 관리만 접근 가능합니다 (대시보드 차단). 다음 로그인부터 적용됩니다.
-                      </p>
-                    )}
-                  </div>
-                  {(editCompany.usageType === 'agent' || editCompany.usageType === 'both') && (
-                    <div className="rounded-lg border border-gray-200 bg-gray-50/60 p-3">
-                      <p className="text-sm font-semibold text-gray-800">에이전트 발송ID 매핑</p>
-                      <p className="text-xs text-gray-500 mt-0.5 mb-2">이 회사에 속한 QTmsg 발송ID 목록. 발송량 조회·정산 합산의 기준이 됩니다.</p>
-                      {agentIds.length > 0 ? (
-                        <div className="space-y-1.5 mb-2">
-                          {agentIds.map((a) => {
-                            const costSummary = [
-                              { l: 'S', v: a.cost_per_sms },
-                              { l: 'L', v: a.cost_per_lms },
-                              { l: 'M', v: a.cost_per_mms },
-                              { l: '카카오', v: a.cost_per_kakao },
-                              { l: '브랜드', v: a.cost_per_brand },
-                            ].filter((c) => c.v != null && String(c.v) !== '').map((c) => `${c.l} ${Number(c.v)}`).join(' · ');
-                            return (
-                              <div key={a.id} className="bg-white rounded-lg border border-gray-200 px-3 py-1.5">
-                                <div className="flex items-center justify-between">
-                                  <div className="min-w-0 flex items-center gap-2 flex-wrap">
-                                    <span className="text-sm font-mono text-gray-800">{formatAgentIdLabel(a.agent_send_id, a.cust_name)}</span>
-                                    <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium ${a.billing_type === 'prepaid' ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' : 'bg-gray-100 text-gray-500'}`}>
-                                      {a.billing_type === 'prepaid' ? '선불' : '후불'}
-                                    </span>
-                                    {costSummary && <span className="text-[10px] text-gray-400 tabular-nums">{costSummary}</span>}
-                                    {a.memo && <span className="text-xs text-gray-400">{a.memo}</span>}
-                                  </div>
-                                  <div className="flex items-center gap-2 shrink-0 ml-2">
-                                    <button
-                                      type="button"
-                                      onClick={() => (editingAgentRowId === a.id ? setEditingAgentRowId(null) : openAgentLedgerEdit(a))}
-                                      className="text-xs text-indigo-600 hover:text-indigo-800"
-                                    >
-                                      설정
-                                    </button>
-                                    <button
-                                      type="button"
-                                      onClick={() => handleRemoveAgentId(a.id)}
-                                      className="text-xs text-red-500 hover:text-red-700"
-                                    >
-                                      해제
-                                    </button>
-                                  </div>
-                                </div>
-                                {editingAgentRowId === a.id && (
-                                  <div className="mt-1.5 rounded-lg border border-indigo-200 bg-indigo-50/40 p-2.5 space-y-2">
-                                    <div className="flex items-center gap-2 flex-wrap">
-                                      {(['prepaid', 'postpaid'] as const).map((bt) => (
-                                        <button
-                                          key={bt}
-                                          type="button"
-                                          onClick={() => setEditAgentLedger({ ...editAgentLedger, billingType: bt })}
-                                          className={`px-2.5 py-1 rounded-lg border text-xs transition ${
-                                            editAgentLedger.billingType === bt
-                                              ? bt === 'prepaid'
-                                                ? 'border-emerald-500 bg-emerald-50 text-emerald-700'
-                                                : 'border-indigo-500 bg-indigo-50 text-indigo-700'
-                                              : 'border-gray-200 text-gray-500 hover:bg-gray-50'
-                                          }`}
-                                        >
-                                          {bt === 'prepaid' ? '선불' : '후불'}
-                                        </button>
-                                      ))}
-                                      <span className="text-[10px] text-gray-400">선불 지정 시 고객 대시보드 잔액 표시·충전 대상</span>
-                                    </div>
-                                    {/* ★ 2026-07-26 발송ID 단가도 회사 단가와 **같은 기준(VAT 별도 공급가)** 으로 해석된다.
-                                        라벨 없이 두면 계약서의 VAT 포함가를 그대로 넣어 10% 과청구가 난다(Codex #7). */}
-                                    <div className="rounded-lg bg-emerald-50/70 px-2 py-1.5 text-[10px] text-emerald-800">
-                                      발송ID 단가도 <b>VAT 별도 공급가</b>로 입력합니다. 건별 VAT 10%는 시스템이 자동 합산합니다.
-                                    </div>
-                                    <div className="grid grid-cols-3 lg:grid-cols-5 gap-1.5">
-                                      {([['costPerSms', 'SMS'], ['costPerLms', 'LMS'], ['costPerMms', 'MMS'], ['costPerKakao', '카카오'], ['costPerBrand', '브랜드']] as const).map(([k, label]) => {
-                                        const raw = editAgentLedger[k];
-                                        const pv = previewUnitPrice(raw);
-                                        const empty = raw === '' || raw === null || raw === undefined;
-                                        return (
-                                          <div key={k}>
-                                            <label className="block text-[10px] text-gray-500 mb-0.5">{label} 단가 <span className="text-emerald-700">(VAT 별도)</span></label>
-                                            <input
-                                              type="text"
-                                              value={raw}
-                                              onChange={(e) => setEditAgentLedger({ ...editAgentLedger, [k]: sanitizeCostInput(e.target.value) })}
-                                              className="w-full px-2 py-1 border rounded-lg text-xs focus:ring-2 focus:ring-indigo-500 outline-none"
-                                              placeholder="미설정"
-                                            />
-                                            <div className="mt-0.5 text-[10px] text-emerald-700">
-                                              {empty ? <span className="text-gray-400">미설정: 청구 차단</span> : <>VAT 포함 {fmtPrice(pv.withVat)}원</>}
-                                            </div>
-                                          </div>
-                                        );
-                                      })}
-                                    </div>
-                                    <div className="flex gap-1.5">
-                                      <input
-                                        type="text"
-                                        value={editAgentLedger.memo}
-                                        onChange={(e) => setEditAgentLedger({ ...editAgentLedger, memo: e.target.value })}
-                                        className="flex-1 px-2 py-1 border rounded-lg text-xs focus:ring-2 focus:ring-indigo-500 outline-none"
-                                        placeholder="메모(선택)"
-                                      />
-                                      <button
-                                        type="button"
-                                        onClick={handleSaveAgentLedger}
-                                        disabled={agentLedgerSaving}
-                                        className="px-3 py-1 bg-indigo-600 hover:bg-indigo-700 disabled:bg-gray-300 text-white rounded-lg text-xs shrink-0"
-                                      >
-                                        {agentLedgerSaving ? '저장 중...' : '저장'}
-                                      </button>
-                                      <button
-                                        type="button"
-                                        onClick={() => setEditingAgentRowId(null)}
-                                        className="px-2.5 py-1 text-gray-500 hover:text-gray-700 text-xs shrink-0"
-                                      >
-                                        취소
-                                      </button>
-                                    </div>
-                                  </div>
-                                )}
-                              </div>
-                            );
-                          })}
-                        </div>
-                      ) : (
-                        <p className="text-xs text-gray-400 mb-2">등록된 발송ID가 없습니다.</p>
-                      )}
-                      <div className="flex gap-2">
-                        <input type="text" value={newAgentSendId}
-                          onChange={(e) => setNewAgentSendId(e.target.value)}
-                          className="flex-1 px-3 py-1.5 border rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 outline-none"
-                          placeholder="발송ID" />
-                        <input type="text" value={newAgentMemo}
-                          onChange={(e) => setNewAgentMemo(e.target.value)}
-                          className="w-28 px-3 py-1.5 border rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 outline-none"
-                          placeholder="메모(선택)" />
-                        <button
-                          type="button"
-                          onClick={handleAddAgentId}
-                          disabled={agentIdSaving || !newAgentSendId.trim()}
-                          className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 disabled:bg-gray-300 text-white rounded-lg text-sm shrink-0"
-                        >
-                          {agentIdSaving ? '등록 중...' : '추가'}
-                        </button>
-                      </div>
-                    </div>
-                  )}
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">최대 사용자 수</label>
-                    <div className="flex items-center gap-2">
-                      <input type="number" value={editCompany.maxUsers}
-                        onChange={(e) => setEditCompany({ ...editCompany, maxUsers: Math.max(1, Number(e.target.value)) })}
-                        className="w-24 px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none" min={1} />
-                      <span className="text-sm text-gray-500">명</span>
-                    </div>
-                    <p className="text-xs text-gray-400 mt-1">고객사 관리자가 생성할 수 있는 최대 사용자 계정 수</p>
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">세션 타임아웃</label>
-                    <div className="flex items-center gap-2">
-                      <input type="number" value={editCompany.sessionTimeoutMinutes}
-                        onChange={(e) => setEditCompany({ ...editCompany, sessionTimeoutMinutes: Math.min(480, Math.max(5, Number(e.target.value))) })}
-                        className="w-24 px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none" min={5} max={480} />
-                      <span className="text-sm text-gray-500">분</span>
-                    </div>
-                    <p className="text-xs text-gray-400 mt-1">비활동 시 자동 로그아웃 시간 (5~480분 · 기본 480분 = 8시간)</p>
-                  </div>
-                  </div>
-                  <div className="flex items-center gap-2 pt-2">
-                    <span className="text-[11px] font-bold tracking-wide text-indigo-600">발송 설정</span>
-                    <div className="h-px flex-1 bg-gray-100"></div>
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">발송 라인</label>
-                    <select value={editCompany.lineGroupId}
-                      onChange={(e) => setEditCompany({ ...editCompany, lineGroupId: e.target.value })}
-                      className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none">
-                      <option value="">미할당 (전체 라인 사용)</option>
-                      {lineGroups.filter((lg: any) => (lg.group_type === 'bulk' || lg.group_type === 'bito') && lg.is_active).map((lg: any) => (
-                        <option key={lg.id} value={lg.id}>{lg.group_name} ({(lg.sms_tables || []).join(', ')})</option>
-                      ))}
-                    </select>
-                    <p className="text-xs text-gray-400 mt-1">대량발송 시 사용할 전용 라인그룹 (미할당 시 전체 라인 라운드로빈)</p>
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">080 수신거부번호</label>
-                    <input type="text" value={editCompany.rejectNumber}
-                      onChange={(e) => setEditCompany({ ...editCompany, rejectNumber: e.target.value })}
-                      className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none" placeholder="080-000-0000" />
-                  </div>
-                  {/* ★ 2026-08-18 발신번호 회선 정책 — 전송자격인증 2.1 */}
-                  <div className="border border-gray-200 rounded-xl p-4 bg-gray-50/60">
-                    <div className="flex items-center justify-between mb-3">
-                      <div>
-                        <h4 className="text-sm font-semibold text-gray-800">발신번호 회선 정책</h4>
-                        <p className="text-[11px] text-gray-500 mt-0.5">
-                          상한은 <span className="font-medium">신규 등록에만</span> 적용됩니다. 이미 등록된 번호는 그대로 유지됩니다.
-                        </p>
-                      </div>
-                      <button type="button" onClick={handleSaveLinePolicy} disabled={!linePolicy || linePolicySaving}
-                        className="px-3 py-1.5 text-xs font-medium bg-indigo-600 hover:bg-indigo-700 disabled:bg-indigo-300 text-white rounded-lg transition-colors">
-                        {linePolicySaving ? '저장 중…' : '회선 정책 저장'}
-                      </button>
-                    </div>
-
-                    {!linePolicy ? (
-                      <p className="text-xs text-gray-400">불러오는 중…</p>
-                    ) : (
-                      <div className="space-y-3">
-                        <div className="flex flex-wrap gap-3 text-xs">
-                          <span className="px-2 py-1 rounded-md bg-white border border-gray-200 text-gray-600">
-                            현재 보유 · 무선 <span className="font-semibold text-gray-900">{linePolicy.held.mobile}</span>
-                          </span>
-                          <span className="px-2 py-1 rounded-md bg-white border border-gray-200 text-gray-600">
-                            현재 보유 · 유선 <span className="font-semibold text-gray-900">{linePolicy.held.landline}</span>
-                          </span>
-                          <span className="px-2 py-1 rounded-md bg-white border border-gray-200 text-gray-600">
-                            적용 상한 · 무선 <span className="font-semibold text-gray-900">{linePolicy.effective.mobile ?? '제한 없음'}</span>
-                            {linePolicy.perAccount && (
-                              <span className="text-gray-500"> (활성 계정 {linePolicy.perAccount.activeAccounts}개 × {linePolicy.perAccount.perAccount})</span>
-                            )}
-                            {' / '}유선 <span className="font-semibold text-gray-900">{linePolicy.effective.landline ?? '제한 없음'}</span>
-                          </span>
-                        </div>
-
-                        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                          <div>
-                            <label className="block text-xs font-medium text-gray-700 mb-1">가입자 유형</label>
-                            <select
-                              value={linePolicy.subscriberType || ''}
-                              onChange={(e) => setLinePolicy({ ...linePolicy, subscriberType: e.target.value || null })}
-                              className="w-full px-3 py-2 text-sm border rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none">
-                              <option value="">미설정</option>
-                              <option value="corporate">법인</option>
-                              <option value="individual">개인</option>
-                              <option value="foreigner">외국인</option>
-                            </select>
-                          </div>
-                          <div>
-                            <label className="block text-xs font-medium text-gray-700 mb-1">무선 상한</label>
-                            <input type="number" min={1} placeholder="비우면 제한 없음"
-                              disabled={linePolicy.subscriberType === 'individual' || linePolicy.subscriberType === 'foreigner'}
-                              value={linePolicy.mobileLineLimit ?? ''}
-                              onChange={(e) => setLinePolicy({ ...linePolicy, mobileLineLimit: e.target.value === '' ? null : Number(e.target.value) })}
-                              className="w-full px-3 py-2 text-sm border rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none disabled:bg-gray-100 disabled:text-gray-400" />
-                          </div>
-                          <div>
-                            <label className="block text-xs font-medium text-gray-700 mb-1">유선 상한</label>
-                            <input type="number" min={1} placeholder="비우면 제한 없음"
-                              disabled={linePolicy.subscriberType === 'individual' || linePolicy.subscriberType === 'foreigner'}
-                              value={linePolicy.landlineLineLimit ?? ''}
-                              onChange={(e) => setLinePolicy({ ...linePolicy, landlineLineLimit: e.target.value === '' ? null : Number(e.target.value) })}
-                              className="w-full px-3 py-2 text-sm border rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none disabled:bg-gray-100 disabled:text-gray-400" />
-                          </div>
-                        </div>
-
-                        {(linePolicy.subscriberType === 'individual' || linePolicy.subscriberType === 'foreigner') && (
-                          <p className="text-[11px] text-amber-700 bg-amber-50 border border-amber-100 rounded-lg px-3 py-2">
-                            개인·외국인은 고시 기준값이 적용됩니다. 무선 {linePolicy.subscriberType === 'foreigner' ? 2 : 3}회선 · 유선 5회선. 상한을 따로 지정할 수 없습니다.
-                          </p>
-                        )}
-                        {linePolicy.subscriberType === 'corporate' && linePolicy.landlineLineLimit === null && (
-                          <p className="text-[11px] text-gray-500">
-                            법인 유선 상한은 종사자 수 확인 자료(고용보험 자료 등)를 받아 입력합니다. 비워 두면 제한이 걸리지 않습니다.
-                          </p>
-                        )}
-                      </div>
-                    )}
-                  </div>
-                  <div className="flex items-center gap-2 pt-2">
-                    <span className="text-[11px] font-bold tracking-wide text-indigo-600">기능</span>
-                    <div className="h-px flex-1 bg-gray-100"></div>
-                  </div>
-                  {/* ★ D162-3 (2026-05-15) 수신거부 사용자격리 ON/OFF — 실무 스위치(0826 정리에서 본문 유지) */}
-                  <div className="flex items-start justify-between gap-3 rounded-xl border border-gray-200 bg-white px-3.5 py-3">
-                    <div className="min-w-0">
-                      <p className="text-[13px] font-semibold text-gray-800">수신거부 사용자격리</p>
-                      <p className="text-[11px] text-gray-500 mt-0.5 leading-relaxed">
-                        ON: 멀티 브랜드 회사용. 고객사관리자는 조회만 가능하고, 사용자가 등록한 수신거부가 관리자에게 자동 동기화됩니다.
-                        OFF: 누구든 등록·삭제 가능, 회사 전체 동일 수신거부(기본).
-                      </p>
-                    </div>
-                    <label className="relative inline-flex items-center cursor-pointer shrink-0 mt-0.5">
-                      <input
-                        type="checkbox"
-                        checked={editCompany.userIsolationEnabled}
-                        onChange={(e) => setEditCompany({ ...editCompany, userIsolationEnabled: e.target.checked })}
-                        className="sr-only peer"
-                      />
-                      <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-indigo-500"></div>
-                    </label>
-                  </div>
-                  {/* ★ 2026-08-22 대행발송 스위치 (docs/2026-08-22-agency-send-design.md §4-1)
-                      메뉴는 모든 회사에 보이고, 이 스위치 AND 유료 요금제일 때만 화면으로 들어간다.
-                      끄면 새 접수만 막히고 이미 승인된 건은 예정대로 나간다. */}
-                  <div className="border border-indigo-200 bg-indigo-50/40 rounded-xl p-4">
-                    <div className="flex items-start justify-between">
-                      <div>
-                        <div className="flex items-center gap-2">
-                          <span className="font-semibold text-gray-800">대행발송</span>
-                          <span className="text-xs bg-indigo-500 text-white px-1.5 py-0.5 rounded">NEW</span>
-                        </div>
-                        <p className="text-xs text-gray-500 mt-1">
-                          ON = 이 회사가 대행발송 화면으로 들어가 명단·문안을 직접 접수합니다 (요금제를 쓰는 계정만).
-                          OFF = 메뉴는 보이되 안내만 나갑니다. 끄더라도 이미 승인된 건은 예정대로 발송됩니다.
-                        </p>
-                      </div>
-                      <label className="relative inline-flex items-center cursor-pointer ml-3">
-                        <input
-                          type="checkbox"
-                          checked={editCompany.agencySendEnabled}
-                          onChange={async (e) => {
-                            const next = e.target.checked;
-                            setEditCompany({ ...editCompany, agencySendEnabled: next });
-                            try {
-                              const token = localStorage.getItem('token');
-                              const res = await fetch(`/api/admin/companies/${editCompany.id}/agency-send`, {
-                                method: 'PATCH',
-                                headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-                                body: JSON.stringify({ enabled: next }),
-                              });
-                              const data = await res.json();
-                              if (!res.ok) {
-                                setEditCompany({ ...editCompany, agencySendEnabled: !next }); // 서버가 거절하면 되돌린다
-                                showAlert('오류', data?.error || '대행발송 스위치 저장 실패', 'error');
-                              } else {
-                                setEditCompany({ ...editCompany, agencySendEnabled: !!data.company?.agency_send_enabled });
-                                showAlert('완료', data?.message || '대행발송 스위치 저장 완료', 'success');
-                              }
-                            } catch (err: any) {
-                              setEditCompany({ ...editCompany, agencySendEnabled: !next });
-                              showAlert('오류', err?.message || '네트워크 오류', 'error');
-                            }
-                          }}
-                          className="sr-only peer"
-                        />
-                        <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-0.5 after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-indigo-500"></div>
-                      </label>
-                    </div>
-                    {/* ★2026-08-26 §18 허용 발신 이메일 — 스위치와 독립(OFF여도 주소는 관리한다). 건수가 곧 상태 표시다 */}
-                    <div className="mt-3 pt-3 border-t border-indigo-100 flex items-center justify-between gap-3">
-                      <p className="text-xs text-gray-500 min-w-0">
-                        이메일 접수: 등록된 주소에서 온 요청서 메일만 자동 접수됩니다.
-                        {editCompany.agencySendEnabled && agencyEmailActiveCount === 0 && (
-                          <span className="ml-1 text-amber-600 font-medium">활성 주소가 0개라 접수 메일이 전부 무시됩니다.</span>
-                        )}
-                      </p>
-                      <button
-                        type="button"
-                        onClick={() => setAgencyEmailModalOpen(true)}
-                        className="shrink-0 text-xs font-semibold text-indigo-600 hover:text-indigo-800 hover:underline"
-                      >
-                        허용 이메일 {agencyEmailActiveCount === null ? '' : `${agencyEmailActiveCount}개 `}관리
-                      </button>
-                    </div>
-                  </div>
-                  {/* ★ 2026-08-26 실험실 — 실사용 0~1개사 기능을 접어 정리(실측: 카카오 0사 · Orchestrator 1사 · 자율발송 0사).
-                      기능·값·저장 계약(카카오 = 폼 통째 저장 · Orchestrator = 즉시 PATCH · 자율발송 = 자체 저장 버튼)은 무변경 */}
-                  <div className="border border-gray-200 rounded-xl overflow-hidden">
-                    <button
-                      type="button"
-                      onClick={() => setLabOpen((v) => !v)}
-                      className="w-full flex items-center justify-between px-4 py-2.5 bg-gray-50 hover:bg-gray-100 transition-colors"
-                    >
-                      <span className="flex items-center gap-2">
-                        <span className="text-[12.5px] font-semibold text-gray-600">실험실</span>
-                        <span className="text-[10.5px] text-gray-400">카카오 채널 · AI 흐름 · 자율발송</span>
-                        {[editCompany.kakaoEnabled, editCompany.useAiOrchestrator, editCompany.cdpAutoExecuteEnabled].filter(Boolean).length > 0 && (
-                          <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-indigo-50 text-indigo-600 border border-indigo-200">
-                            ON {[editCompany.kakaoEnabled, editCompany.useAiOrchestrator, editCompany.cdpAutoExecuteEnabled].filter(Boolean).length}
-                          </span>
-                        )}
-                      </span>
-                      <svg className={`w-3.5 h-3.5 text-gray-400 transition-transform ${labOpen ? 'rotate-180' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-                      </svg>
-                    </button>
-                    {labOpen && (
-                      <div className="p-3.5 space-y-3 border-t border-gray-200 bg-white">
-                      <div className="flex items-center justify-between gap-3 rounded-lg border border-gray-200 bg-white px-3.5 py-2.5">
-                        <div className="min-w-0">
-                          <p className="text-[13px] font-semibold text-gray-800">카카오 브랜드메시지</p>
-                          <p className="text-[11px] text-gray-500 mt-0.5">켜면 이 고객사에서 카카오 채널 발송이 가능합니다. 저장 버튼으로 반영됩니다.</p>
-                        </div>
-                        <label className="relative inline-flex items-center cursor-pointer shrink-0">
-                          <input
-                            type="checkbox"
-                            checked={editCompany.kakaoEnabled}
-                            onChange={(e) => setEditCompany({ ...editCompany, kakaoEnabled: e.target.checked })}
-                            className="sr-only peer"
-                          />
-                          <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-indigo-500"></div>
-                        </label>
-                      </div>
-                  {/* ★ D190 #2 (2026-05-22): AI Orchestrator (Tool Use) 회사별 토글 — 토글 변경 시 즉시 PATCH 호출 */}
-                  <div className="flex items-start justify-between gap-3 rounded-lg border border-gray-200 bg-white px-3.5 py-3">
-                    <div className="flex-1">
-                      <div className="flex items-center gap-2">
-                        <span className="font-semibold text-gray-800">AI Orchestrator (Tool Use)</span>
-                        <span className="text-[10px] bg-gray-400 text-white px-1.5 py-0.5 rounded">BETA</span>
-                      </div>
-                      <p className="text-xs text-gray-500 mt-1">
-                        ON = AI Operator 동적 흐름 결정 모드 활성 (target → count → message → compliance 순서 자율 판단).<br/>
-                        OFF = 기존 고정 순서 (안정 영역, default). ENT 1사 한정 활성 → PM2 로그 모니터링 후 단계적 확장 권장.
-                      </p>
-                    </div>
-                    <label className="relative inline-flex items-center cursor-pointer">
-                      <input
-                        type="checkbox"
-                        checked={editCompany.useAiOrchestrator}
-                        onChange={async (e) => {
-                          const next = e.target.checked;
-                          const prev = editCompany.useAiOrchestrator;
-                          setEditCompany({ ...editCompany, useAiOrchestrator: next });
-                          try {
-                            const token = localStorage.getItem('token');
-                            const res = await fetch(`/api/admin/companies/${editCompany.id}/ai-orchestrator`, {
-                              method: 'PATCH',
-                              headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-                              body: JSON.stringify({ enabled: next }),
-                            });
-                            const data = await res.json();
-                            if (!res.ok) {
-                              showAlert('오류', data?.error || 'AI Orchestrator 토글 실패', 'error');
-                              setEditCompany({ ...editCompany, useAiOrchestrator: prev });
-                            } else {
-                              showAlert('완료', data?.message || 'AI Orchestrator 토글 완료', 'success');
-                            }
-                          } catch (err: any) {
-                            showAlert('오류', err?.message || '네트워크 오류', 'error');
-                            setEditCompany({ ...editCompany, useAiOrchestrator: prev });
-                          }
-                        }}
-                        className="sr-only peer"
-                      />
-                      <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-indigo-500"></div>
-                    </label>
-                  </div>
-                  {/* ★ 2026-06-06 자동마케팅 자율발송 게이트 — 슈퍼관리자 회사별 ON/임계값 (cdp_auto_execute_*) */}
-                  <div className="rounded-lg border border-gray-200 bg-white px-3.5 py-3">
-                    <div className="flex items-start justify-between">
-                      <div className="flex-1">
-                        <div className="flex items-center gap-2">
-                          <span className="font-semibold text-gray-800">자동마케팅 자율발송 게이트</span>
-                          <span className="text-[10px] bg-gray-400 text-white px-1.5 py-0.5 rounded">BETA</span>
-                        </div>
-                        <p className="text-xs text-gray-500 mt-1">
-                          ON = AI 자동마케팅 제안서가 담당자 승인 없이 임계값 이내에서 <b>자율 발송</b> (회사 잔액 자동 차감 + 고객 자동 발송).<br/>
-                          OFF = 제안서는 담당자 수동 승인 대기 (기본). 발신번호·무료거부(080)·잔액은 발송 직전 자동 확인.
-                        </p>
-                      </div>
-                      <label className="relative inline-flex items-center cursor-pointer ml-3">
-                        <input
-                          type="checkbox"
-                          checked={editCompany.cdpAutoExecuteEnabled}
-                          onChange={(e) => setEditCompany({ ...editCompany, cdpAutoExecuteEnabled: e.target.checked })}
-                          className="sr-only peer"
-                        />
-                        <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-indigo-500"></div>
-                      </label>
-                    </div>
-                    <div className={`grid grid-cols-3 gap-2 mt-3 ${editCompany.cdpAutoExecuteEnabled ? '' : 'opacity-40 pointer-events-none'}`}>
-                      <div>
-                        <label className="block text-[11px] font-medium text-gray-600 mb-1">최대 수신자(명)</label>
-                        <input type="number" min="1" value={editCompany.cdpAutoExecuteMaxRecipients}
-                          onChange={(e) => setEditCompany({ ...editCompany, cdpAutoExecuteMaxRecipients: Number(e.target.value) })}
-                          className="w-full px-2 py-1.5 border rounded text-sm focus:ring-2 focus:ring-indigo-500 outline-none" />
-                      </div>
-                      <div>
-                        <label className="block text-[11px] font-medium text-gray-600 mb-1">최대 회당 비용(원)</label>
-                        <input type="number" min="1" value={editCompany.cdpAutoExecuteMaxCostKrw}
-                          onChange={(e) => setEditCompany({ ...editCompany, cdpAutoExecuteMaxCostKrw: Number(e.target.value) })}
-                          className="w-full px-2 py-1.5 border rounded text-sm focus:ring-2 focus:ring-indigo-500 outline-none" />
-                      </div>
-                      <div>
-                        <label className="block text-[11px] font-medium text-gray-600 mb-1">최대 위험도</label>
-                        <select value={editCompany.cdpAutoExecuteMaxRisk}
-                          onChange={(e) => setEditCompany({ ...editCompany, cdpAutoExecuteMaxRisk: e.target.value })}
-                          className="w-full px-2 py-1.5 border rounded text-sm focus:ring-2 focus:ring-indigo-500 outline-none bg-white">
-                          <option value="low">low</option>
-                          <option value="medium">medium</option>
-                          <option value="high">high</option>
-                        </select>
-                      </div>
-                    </div>
-                    <button
-                      type="button" // 0826 정정: type 미지정이라 폼 submit(통째 저장)까지 함께 나가던 결함
-                      onClick={async () => {
-                        try {
-                          const token = localStorage.getItem('token');
-                          const res = await fetch(`/api/admin/companies/${editCompany.id}/cdp-auto-execute`, {
-                            method: 'PATCH',
-                            headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-                            body: JSON.stringify({
-                              enabled: editCompany.cdpAutoExecuteEnabled,
-                              maxRecipients: editCompany.cdpAutoExecuteMaxRecipients,
-                              maxCostKrw: editCompany.cdpAutoExecuteMaxCostKrw,
-                              maxRisk: editCompany.cdpAutoExecuteMaxRisk,
-                            }),
-                          });
-                          const data = await res.json();
-                          if (!res.ok) {
-                            showAlert('오류', data?.error || '자율발송 게이트 저장 실패', 'error');
-                          } else {
-                            const cc = data.company;
-                            setEditCompany({ ...editCompany,
-                              cdpAutoExecuteEnabled: cc.cdp_auto_execute_enabled,
-                              cdpAutoExecuteMaxRecipients: cc.cdp_auto_execute_max_recipients,
-                              cdpAutoExecuteMaxCostKrw: cc.cdp_auto_execute_max_cost_krw,
-                              cdpAutoExecuteMaxRisk: cc.cdp_auto_execute_max_risk,
-                            });
-                            showAlert('완료', data?.message || '자율발송 게이트 저장 완료', 'success');
-                          }
-                        } catch (err: any) {
-                          showAlert('오류', err?.message || '네트워크 오류', 'error');
-                        }
-                      }}
-                      className="mt-3 w-full py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-medium rounded-lg transition-colors">
-                      자율발송 게이트 저장
-                    </button>
-                  </div>
-                      </div>
-                    )}
-                  </div>
-                </div>
-              )}
-
-              {/* 발송정책 탭 */}
-              {editCompanyTab === 'send' && (
-                <div className="space-y-4">
-                  <div className="grid grid-cols-2 gap-3">
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">발송 시작 시간</label>
-                      <select value={editCompany.sendHourStart}
-                        onChange={(e) => setEditCompany({ ...editCompany, sendHourStart: Number(e.target.value) })}
-                        className="w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none">
-                        {Array.from({ length: 24 }, (_, i) => (
-                          <option key={i} value={i}>{String(i).padStart(2, '0')}:00</option>
-                        ))}
-                      </select>
-                    </div>
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">발송 종료 시간</label>
-                      <select value={editCompany.sendHourEnd}
-                        onChange={(e) => setEditCompany({ ...editCompany, sendHourEnd: Number(e.target.value) })}
-                        className="w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none">
-                        {Array.from({ length: 24 }, (_, i) => (
-                          <option key={i} value={i}>{String(i).padStart(2, '0')}:00</option>
-                        ))}
-                      </select>
-                    </div>
-                  </div>
-                  {/* ★ 2026-07-11 거짓 설정 정리: 일일 발송 한도·중복 방지 기간 입력 제거 —
-                      발송 경로 소비처 0곳(저장만 되던 죽은 설정). 실동작 제한 = 고객사 Settings 발송 피로도 보호.
-                      state/저장 통로는 하위호환 유지(editCompany.dailyLimit/duplicateDays — 기존 값 보존 전송). */}
-                                    <div className="flex items-center gap-2">
-                    <input type="checkbox" id="approvalRequired" checked={editCompany.approvalRequired}
-                      onChange={(e) => setEditCompany({ ...editCompany, approvalRequired: e.target.checked })}
-                      className="w-4 h-4 text-blue-600 rounded focus:ring-blue-500" />
-                    <label htmlFor="approvalRequired" className="text-sm text-gray-700">발송 전 승인 필요</label>
-                    </div>
-                  <div className="flex items-center gap-2">
-                    <input type="checkbox" id="allowCallbackSelfRegister" checked={editCompany.allowCallbackSelfRegister}
-                      onChange={(e) => setEditCompany({ ...editCompany, allowCallbackSelfRegister: e.target.checked })}
-                      className="w-4 h-4 text-blue-600 rounded focus:ring-blue-500" />
-                    <label htmlFor="allowCallbackSelfRegister" className="text-sm text-gray-700">발신번호 자체 등록 허용</label>
-                  </div>
-                  <div className="bg-blue-50 rounded-lg p-3 mt-2">
-                    <p className="text-xs text-blue-700">
-                      💡 발송 시간은 한국 시간(KST) 기준이며, 광고성 메시지는 08:00~21:00 사이에만 발송할 수 있습니다.
-                    </p>
-                  </div>
-                </div>
-              )}
-
-              {/* 단가/요금 탭 */}
-              {editCompanyTab === 'cost' && (
-                <div className="space-y-4">
-                  {/* 요금제 유형 전환 */}
-                  <div className="bg-gradient-to-r from-blue-50 to-indigo-50 rounded-xl p-4 border border-blue-200">
-                    <div className="flex items-center justify-between mb-2">
-                      <div>
-                        <div className="text-sm font-bold text-gray-800">요금제 유형</div>
-                        <div className="text-xs text-gray-500 mt-0.5">
-                          {editCompany.billingType === 'prepaid' ? '선불: 충전 후 차감' : '후불: 월말 정산'}
-                        </div>
-                      </div>
-                      <div className="flex bg-white rounded-lg border shadow-sm overflow-hidden">
-                        <button type="button"
-                          onClick={async () => {
-                            if (editCompany.billingType === 'postpaid') return;
-                            try {
-                              const token = localStorage.getItem('token');
-                              const res = await fetch(`/api/admin/companies/${editCompany.id}/billing-type`, {
-                                method: 'PATCH', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-                                body: JSON.stringify({ billingType: 'postpaid' })
-                              });
-                              const data = await res.json();
-                              if (res.ok) {
-                                setEditCompany({ ...editCompany, billingType: 'postpaid' });
-                                setModal({ type: 'alert', title: '변경 완료', message: data.message, variant: 'success' });
-                              } else {
-                                setModal({ type: 'alert', title: '변경 실패', message: data.error, variant: 'error' });
-                              }
-                            } catch { setModal({ type: 'alert', title: '오류', message: '요금제 유형 변경 실패', variant: 'error' }); }
-                          }}
-                          className={`px-4 py-2 text-xs font-medium transition-colors ${editCompany.billingType === 'postpaid' ? 'bg-blue-600 text-white' : 'text-gray-500 hover:bg-gray-50'}`}
-                        >후불</button>
-                        <button type="button"
-                          onClick={async () => {
-                            if (editCompany.billingType === 'prepaid') return;
-                            try {
-                              const token = localStorage.getItem('token');
-                              const res = await fetch(`/api/admin/companies/${editCompany.id}/billing-type`, {
-                                method: 'PATCH', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-                                body: JSON.stringify({ billingType: 'prepaid' })
-                              });
-                              const data = await res.json();
-                              if (res.ok) {
-                                setEditCompany({ ...editCompany, billingType: 'prepaid' });
-                                setModal({ type: 'alert', title: '변경 완료', message: data.message, variant: 'success' });
-                              } else {
-                                setModal({ type: 'alert', title: '변경 실패', message: data.error, variant: 'error' });
-                              }
-                            } catch { setModal({ type: 'alert', title: '오류', message: '요금제 유형 변경 실패', variant: 'error' }); }
-                          }}
-                          className={`px-4 py-2 text-xs font-medium transition-colors ${editCompany.billingType === 'prepaid' ? 'bg-emerald-600 text-white' : 'text-gray-500 hover:bg-gray-50'}`}
-                        >선불</button>
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* 선불 잔액 관리 (선불일 때만) */}
-                  {editCompany.billingType === 'prepaid' && (
-                    <div className="bg-gradient-to-r from-emerald-50 to-teal-50 rounded-xl p-4 border border-emerald-200">
-                      <div className="flex items-center justify-between mb-3">
-                        <div className="text-sm font-bold text-gray-800">💰 충전 잔액</div>
-                        <div className={`text-xl font-bold ${editCompany.balance < 10000 ? 'text-red-600' : 'text-emerald-700'}`}>
-                          {editCompany.balance.toLocaleString()}원
-                        </div>
-                      </div>
-                      <div className="flex gap-2 mb-3">
-                        <button type="button" onClick={() => setEditCompany({ ...editCompany, balanceAdjustType: 'charge' })}
-                          className={`flex-1 py-1.5 text-xs font-medium rounded-lg transition-colors ${editCompany.balanceAdjustType === 'charge' ? 'bg-emerald-600 text-white' : 'bg-white border text-gray-600'}`}
-                        >충전</button>
-                        <button type="button" onClick={() => setEditCompany({ ...editCompany, balanceAdjustType: 'deduct' })}
-                          className={`flex-1 py-1.5 text-xs font-medium rounded-lg transition-colors ${editCompany.balanceAdjustType === 'deduct' ? 'bg-red-600 text-white' : 'bg-white border text-gray-600'}`}
-                        >차감</button>
-                      </div>
-                      <div className="space-y-2">
-                        <input type="number" placeholder="금액 (원)" value={editCompany.balanceAdjustAmount}
-                          onChange={(e) => setEditCompany({ ...editCompany, balanceAdjustAmount: e.target.value })}
-                          className="w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-emerald-500 outline-none" />
-                        <input type="text" placeholder="사유 (필수)" value={editCompany.balanceAdjustReason}
-                          onChange={(e) => setEditCompany({ ...editCompany, balanceAdjustReason: e.target.value })}
-                          className="w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-emerald-500 outline-none" />
-                        <button type="button" disabled={editCompany.balanceAdjusting || !editCompany.balanceAdjustAmount || !editCompany.balanceAdjustReason}
-                          onClick={async () => {
-                            setEditCompany(prev => ({ ...prev, balanceAdjusting: true }));
-                            try {
-                              const token = localStorage.getItem('token');
-                              const res = await fetch(`/api/admin/companies/${editCompany.id}/balance-adjust`, {
-                                method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-                                body: JSON.stringify({ type: editCompany.balanceAdjustType, amount: Number(editCompany.balanceAdjustAmount), reason: editCompany.balanceAdjustReason })
-                              });
-                              const data = await res.json();
-                              if (res.ok) {
-                                setEditCompany(prev => ({ ...prev, balance: data.balance, balanceAdjustAmount: '', balanceAdjustReason: '', balanceAdjusting: false }));
-                                loadBalanceTx(editCompany.id);
-                                setModal({ type: 'alert', title: '완료', message: data.message, variant: 'success' });
-                              } else {
-                                setEditCompany(prev => ({ ...prev, balanceAdjusting: false }));
-                                setModal({ type: 'alert', title: '실패', message: data.error, variant: 'error' });
-                              }
-                            } catch { setEditCompany(prev => ({ ...prev, balanceAdjusting: false })); setModal({ type: 'alert', title: '오류', message: '잔액 조정 실패', variant: 'error' }); }
-                          }}
-                          className={`w-full py-2.5 text-sm font-medium rounded-lg transition-colors disabled:opacity-50 ${
-                            editCompany.balanceAdjustType === 'charge' ? 'bg-emerald-600 hover:bg-emerald-700 text-white' : 'bg-red-600 hover:bg-red-700 text-white'
-                          }`}
-                        >{editCompany.balanceAdjusting ? '처리 중...' : editCompany.balanceAdjustType === 'charge' ? '충전하기' : '차감하기'}</button>
-                      </div>
-
-                      {/* 잔액 변동 이력 */}
-                      <div className="mt-3 pt-3 border-t border-emerald-200">
-                        <div className="flex items-center justify-between mb-2">
-                          <span className="text-xs font-bold text-gray-700">📊 최근 변동 이력</span>
-                          <button type="button" onClick={() => loadBalanceTx(editCompany.id)}
-                            className="text-[10px] text-emerald-600 hover:underline">새로고침</button>
-                        </div>
-                        {balanceTxLoading ? (
-                          <div className="text-xs text-gray-400 text-center py-2">불러오는 중...</div>
-                        ) : balanceTxList.length === 0 ? (
-                          <div className="text-xs text-gray-400 text-center py-2">
-                            변동 이력이 없습니다.
-                            <button type="button" onClick={() => loadBalanceTx(editCompany.id)} className="ml-1 text-emerald-600 hover:underline">조회</button>
-                          </div>
-                        ) : (
-                          <div className="max-h-[180px] overflow-y-auto space-y-1">
-                            {balanceTxList.map((tx: any) => {
-                              const typeColors: Record<string, string> = {
-                                admin_charge: 'text-emerald-600', charge: 'text-emerald-600', deposit_charge: 'text-emerald-600',
-                                admin_deduct: 'text-red-600', deduct: 'text-red-600',
-                                refund: 'text-blue-600',
-                              };
-                              const typeLabels: Record<string, string> = {
-                                admin_charge: '관리자 충전', charge: '충전', deposit_charge: '입금 충전',
-                                admin_deduct: '관리자 차감', deduct: '발송 차감',
-                                refund: '환불',
-                              };
-                              const isPlus = ['admin_charge', 'charge', 'deposit_charge', 'refund'].includes(tx.type);
-                              return (
-                                <div key={tx.id} className="flex items-center justify-between text-[11px] py-1 px-2 bg-white rounded border">
-                                  <div className="flex-1">
-                                    <span className={`font-medium ${typeColors[tx.type] || 'text-gray-600'}`}>
-                                      {/* ★ 2026-10-04 요금제 이용료(선불 이용 기간)는 같은 차감 type이라 참조 유형으로 가른다 */}
-                                      {tx.type === 'deduct' && tx.reference_type === 'plan_term' ? '요금제 이용료' : (typeLabels[tx.type] || tx.type)}
-                                    </span>
-                                    <span className="text-gray-400 ml-2">{tx.description?.slice(0, 30) || ''}</span>
-                                  </div>
-                                  <div className="flex items-center gap-3">
-                                    <span className={`font-bold ${isPlus ? 'text-emerald-600' : 'text-red-600'}`}>
-                                      {isPlus ? '+' : '-'}{Number(tx.amount).toLocaleString()}원
-                                    </span>
-                                    <span className="text-gray-400 w-[55px] text-right">{formatDateTime(tx.created_at).slice(5, 16)}</span>
-                                  </div>
-                                </div>
-                              );
-                            })}
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  )}
-
-                  {/* ★ 2026-10-04 선불 요금제 이용 기간(docs/2026-10-04-prepaid-plan-term-design.md §7) — 잔액 조정과 같은 화면에서 */}
-                  {editCompany.billingType === 'prepaid' && <PlanTermBox companyId={editCompany.id} />}
-
-                  {/* ★ 2026-07-26 단가 입력 = 부가세 별도(공급가). 시스템이 건별 VAT를 자동 합산한다.
-                      배경: 단가가 부가세 포함으로 입력돼 있었는데 청구가 10%를 또 더해 과청구가 났다.
-                      화면에 기준을 못 박고, 칸마다 실제 차감액을 같이 보여줘 입력 즉시 검산되게 한다. */}
-                  <div className="rounded-xl border border-emerald-200 bg-emerald-50/60 p-4">
-                    <div className="flex items-start justify-between gap-3">
-                      <div>
-                        <div className="text-sm font-bold text-gray-900">
-                          {editCompany.companyName || '고객사'} 공급 단가 (VAT 별도)
-                        </div>
-                        <p className="mt-1 text-xs leading-relaxed text-gray-600">
-                          입력값은 <b>VAT 별도 공급가</b>입니다. 발송 시 건별 VAT 10%를 자동 계산해 합산하고,
-                          저장 즉시 이 고객사의 청구·차감에 적용됩니다.
-                        </p>
-                      </div>
-                      <span className="shrink-0 rounded-lg bg-emerald-600 px-2.5 py-1 text-[11px] font-bold text-white">VAT 10% 자동</span>
-                    </div>
-                    {editCompany.unitPriceBasis !== 'vat_excluded' && (
-                      <div className="mt-3 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-800">
-                        이 고객사는 아직 <b>부가세 포함 단가</b>로 저장돼 있습니다. 계약서의 <b>공급가(VAT 별도)</b>를 입력해 저장하면
-                        기준이 전환되고, 그때부터 청구서에 부가세가 한 번만 붙습니다.
-                      </div>
-                    )}
-                  </div>
-
-                  <div className="grid grid-cols-2 gap-3">
-                    {([
-                      ['costPerSms', 'SMS', '단문 문자'],
-                      ['costPerLms', 'LMS', '장문 문자'],
-                      ['costPerMms', 'MMS', '이미지 문자'],
-                      ['costPerKakao', '알림톡', '카카오 알림톡'],
-                      ['costPerBrand', '브랜드메시지 친구', '채널 친구 대상 · 알림톡과 별도'],
-                      ['costPerBrandNonfriend', '브랜드메시지 비친구', '마수동 전체·비친구 대상'],
-                      ['costPerTestSms', '테스트 SMS', '비우면 SMS 단가'],
-                      ['costPerTestLms', '테스트 LMS', '비우면 LMS 단가'],
-                    ] as const).map(([key, label, hint]) => {
-                      const raw = (editCompany as any)[key];
-                      const p = previewUnitPrice(raw);
-                      const empty = raw === '' || raw === null || raw === undefined;
-                      return (
-                        <div key={key} className="rounded-xl border border-gray-200 bg-white p-4">
-                          <div className="mb-2 flex items-baseline justify-between">
-                            <label className="text-sm font-bold text-gray-900">{label}</label>
-                            <span className="text-[11px] text-gray-400">{hint}</span>
-                          </div>
-                          <div className="flex items-center gap-1 rounded-lg border border-gray-200 px-3 py-2 focus-within:ring-2 focus-within:ring-emerald-500">
-                            <input
-                              type="number" step="0.01" min="0" inputMode="decimal"
-                              value={raw as any}
-                              placeholder={key.startsWith('costPerTest') || key === 'costPerBrandNonfriend' ? '비우면 상속' : '0.00'}
-                              onChange={(e) => setEditCompany({ ...editCompany, [key]: e.target.value === '' ? '' : e.target.value })}
-                              className="w-full bg-transparent text-lg font-bold text-gray-900 outline-none"
-                            />
-                            <span className="shrink-0 text-xs text-gray-400">원 / 건</span>
-                          </div>
-                          {/* ★ 2026-09-04 문구 정정(서수란 접수 후속) — 종전엔 비어 있기만 하면 조건 없이
-                              "청구서 발행이 차단됩니다"라고 했다. 실제 게이트는 **그 유형으로 성공 발송이
-                              있을 때만** 막고(findUnsetPricedTypes·priceBillingRows), 테스트 단가는
-                              비면 SMS·LMS를 상속한다(TEST_SMS: testSmsRaw ?? sms). 그래서 "안 쓰는 업체는
-                              미지정인데 발행이 됐다"는 접수가 나왔다 — 화면이 거짓을 말하고 있었다. */}
-                          <div className="mt-2 text-[11px] font-semibold text-emerald-700">
-                            {empty
-                              ? (key.startsWith('costPerTest')
-                                  ? <span className="text-gray-400">미설정. {key === 'costPerTestSms' ? 'SMS' : 'LMS'} 단가를 따릅니다</span>
-                                  : key === 'costPerBrandNonfriend'
-                                    ? <span className="text-gray-400">미설정. 브랜드메시지 친구 단가를 따릅니다</span>
-                                    : <span className="text-gray-400">미설정. 이 유형으로 발송이 있으면 청구서 발행이 차단됩니다</span>)
-                              : <>VAT {fmtPrice(p.vat)}원 · <span className="text-emerald-800">VAT 포함 {fmtPrice(p.withVat)}원 차감</span></>}
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-
-                  <label className="flex items-start gap-2 rounded-lg bg-gray-50 px-3 py-2.5 text-xs text-gray-600">
-                    <input
-                      type="checkbox"
-                      checked={applyUnitPriceToAgents}
-                      onChange={(e) => setApplyUnitPriceToAgents(e.target.checked)}
-                      className="mt-0.5"
-                    />
-                    <span>
-                      단가가 <b>비어 있는 발송ID</b>에도 이 값을 함께 적용합니다.
-                      이미 값이 있는 발송ID는 건드리지 않습니다. 발송ID마다 계약이 다를 수 있어 자동 상속은 하지 않습니다.
-                    </span>
-                  </label>
-
-                  <div className="flex items-center justify-between gap-3 rounded-xl border border-gray-200 bg-white p-3">
-                    <p className="text-[11px] leading-relaxed text-gray-500">
-                      VAT는 건별 공급가의 10%를 소수점 둘째 자리로 반올림합니다.
-                      선불은 VAT 포함 금액을 발송 시 차감하고 최종 실패 건만 같은 금액으로 환불합니다.
-                      스팸필터 테스트는 별도 단가 없이 SMS·LMS 단가를 그대로 적용합니다.
-                    </p>
-                    <button
-                      onClick={handleSaveUnitPrices}
-                      disabled={savingUnitPrices}
-                      className="shrink-0 rounded-lg bg-emerald-600 px-5 py-2.5 text-sm font-bold text-white transition hover:bg-emerald-700 disabled:opacity-50"
-                    >
-                      {savingUnitPrices ? '저장 중...' : '단가 저장'}
-                    </button>
-                  </div>
-                </div>
-              )}
-
-              {/* 크레딧 탭 (AI설정 → 종량제 크레딧 관리 전환) */}
-              {editCompanyTab === 'ai' && (
-                <div className="space-y-4">
-                  {/* AI 크레딧 (종량제 Phase 4 — 모든 요금제) */}
-                  <div className="bg-gradient-to-r from-violet-50 to-fuchsia-50 rounded-xl p-4 border border-violet-200">
-                    <div className="flex items-center justify-between mb-3">
-                      <div className="text-sm font-bold text-gray-800">AI 크레딧</div>
-                      <button type="button" onClick={async () => {
-                        try {
-                          const token = localStorage.getItem('token');
-                          const res = await fetch(`/api/admin/companies/${editCompany.id}/credit`, { headers: { Authorization: `Bearer ${token}` } });
-                          if (res.ok) { const d = await res.json(); setCompanyCredit({ ...d, _forId: editCompany.id }); }
-                          else { const d = await res.json().catch(() => ({})); setModal({ type: 'alert', title: '조회 실패', message: d.error || '오류', variant: 'error' }); }
-                        } catch { setModal({ type: 'alert', title: '오류', message: '크레딧 조회 실패', variant: 'error' }); }
-                      }} className="text-[10px] text-violet-600 hover:underline">조회 / 새로고침</button>
-                    </div>
-                    {companyCredit && companyCredit._forId === editCompany.id ? (
-                      <>
-                        {/* 총 잔여 — 큰 숫자 + 기본분/구매분 게이지 */}
-                        <div className="rounded-lg border border-violet-100 bg-white/70 p-3 mb-3">
-                          <div className="flex items-end justify-between">
-                            <div>
-                              <div className="text-[11px] text-gray-500">총 잔여</div>
-                              <div className="text-2xl font-bold tabular-nums text-violet-700">
-                                {Number(companyCredit.total || 0).toLocaleString()}
-                                <span className="ml-1 text-xs font-normal text-gray-400">크레딧</span>
-                              </div>
-                            </div>
-                            <span className="rounded-full bg-violet-100 px-2 py-0.5 text-[10px] font-medium text-violet-700">
-                              {companyCredit.billingType === 'postpaid' ? '후불' : '선불'}
-                            </span>
-                          </div>
-                          {(() => {
-                            const base = Math.max(0, Number(companyCredit.baseRemaining || 0));
-                            const pur = Math.max(0, Number(companyCredit.purchased || 0));
-                            const gmax = Math.max(Number(companyCredit.planCredits || 0), base + pur, 1);
-                            const bp = Math.max(0, Math.min(100, (base / gmax) * 100));
-                            const pp = Math.max(0, Math.min(100 - bp, (pur / gmax) * 100));
-                            return (
-                              <div className="mt-2 h-2 w-full overflow-hidden rounded-full bg-violet-100">
-                                <div className="flex h-full">
-                                  <div className="h-full bg-violet-500" style={{ width: `${bp}%` }} />
-                                  <div className="h-full bg-fuchsia-400" style={{ width: `${pp}%` }} />
-                                </div>
-                              </div>
-                            );
-                          })()}
-                          <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-gray-500">
-                            <span className="inline-flex items-center gap-1"><i className="inline-block h-2 w-2 rounded-full bg-violet-500" /> 기본분 {Number(companyCredit.baseRemaining || 0).toLocaleString()}</span>
-                            <span className="inline-flex items-center gap-1"><i className="inline-block h-2 w-2 rounded-full bg-fuchsia-400" /> 구매분 {Number(companyCredit.purchased || 0).toLocaleString()}</span>
-                            <span className="text-gray-400">이번달 사용 {Number(companyCredit.monthlyUsed || 0).toLocaleString()}</span>
-                          </div>
-                        </div>
-                        <div className="flex gap-2 mb-2">
-                          <button type="button" onClick={() => setCreditAdj({ ...creditAdj, type: 'grant' })}
-                            className={`flex-1 py-1.5 text-xs font-medium rounded-lg ${creditAdj.type === 'grant' ? 'bg-violet-600 text-white' : 'bg-white border text-gray-600'}`}>지급</button>
-                          <button type="button" onClick={() => setCreditAdj({ ...creditAdj, type: 'admin_deduct' })}
-                            className={`flex-1 py-1.5 text-xs font-medium rounded-lg ${creditAdj.type === 'admin_deduct' ? 'bg-rose-600 text-white' : 'bg-white border text-gray-600'}`}>차감</button>
-                        </div>
-                        <div className="space-y-2">
-                          <input type="number" placeholder="크레딧" value={creditAdj.amount}
-                            onChange={(e) => setCreditAdj({ ...creditAdj, amount: e.target.value })}
-                            className="w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-violet-500 outline-none" />
-                          <input type="text" placeholder="사유 (필수)" value={creditAdj.reason}
-                            onChange={(e) => setCreditAdj({ ...creditAdj, reason: e.target.value })}
-                            className="w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-violet-500 outline-none" />
-                          <button type="button" disabled={creditAdj.busy || !creditAdj.amount || !creditAdj.reason}
-                            onClick={async () => {
-                              const idemKey = (typeof crypto !== 'undefined' && crypto.randomUUID) ? crypto.randomUUID() : `a-${Date.now()}-${Math.random().toString(36).slice(2)}`;
-                              setCreditAdj(prev => ({ ...prev, busy: true }));
-                              try {
-                                const token = localStorage.getItem('token');
-                                const res = await fetch(`/api/admin/companies/${editCompany.id}/credit-adjust`, {
-                                  method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-                                  body: JSON.stringify({ type: creditAdj.type, amount: Number(creditAdj.amount), reason: creditAdj.reason, idempotencyKey: idemKey })
-                                });
-                                const data = await res.json();
-                                if (res.ok) {
-                                  setCreditAdj({ type: 'grant', amount: '', reason: '', busy: false });
-                                  const r2 = await fetch(`/api/admin/companies/${editCompany.id}/credit`, { headers: { Authorization: `Bearer ${token}` } });
-                                  if (r2.ok) { const d2 = await r2.json(); setCompanyCredit({ ...d2, _forId: editCompany.id }); }
-                                  setModal({ type: 'alert', title: '완료', message: data.message, variant: 'success' });
-                                } else {
-                                  setCreditAdj(prev => ({ ...prev, busy: false }));
-                                  setModal({ type: 'alert', title: '실패', message: data.error, variant: 'error' });
-                                }
-                              } catch { setCreditAdj(prev => ({ ...prev, busy: false })); setModal({ type: 'alert', title: '오류', message: '크레딧 조정 실패', variant: 'error' }); }
-                            }}
-                            className={`w-full py-2.5 text-sm font-medium rounded-lg disabled:opacity-50 ${creditAdj.type === 'grant' ? 'bg-violet-600 hover:bg-violet-700 text-white' : 'bg-rose-600 hover:bg-rose-700 text-white'}`}
-                          >{creditAdj.busy ? '처리 중...' : creditAdj.type === 'grant' ? '지급하기' : '차감하기'}</button>
-                        </div>
-                        {companyCredit.billingType === 'postpaid' && (
-                          <div className="mt-3 pt-3 border-t border-violet-200">
-                            <label className="text-[11px] font-bold text-gray-700">후불 추가 사용 한도 (크레딧)</label>
-                            <div className="flex gap-2 mt-1">
-                              <input type="number" defaultValue={Number(companyCredit.overageLimit || 0)} id="overageLimitInput"
-                                className="flex-1 px-3 py-1.5 border rounded-lg text-sm focus:ring-2 focus:ring-violet-500 outline-none" />
-                              <button type="button" onClick={async () => {
-                                const el = document.getElementById('overageLimitInput') as HTMLInputElement | null;
-                                const v = Number(el?.value || 0);
-                                try {
-                                  const token = localStorage.getItem('token');
-                                  const res = await fetch(`/api/admin/companies/${editCompany.id}/postpaid-overage-limit`, {
-                                    method: 'PUT', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-                                    body: JSON.stringify({ overageLimit: v })
-                                  });
-                                  const data = await res.json();
-                                  if (res.ok) { setCompanyCredit({ ...companyCredit, overageLimit: data.overageLimit }); setModal({ type: 'alert', title: '완료', message: data.message, variant: 'success' }); }
-                                  else setModal({ type: 'alert', title: '실패', message: data.error, variant: 'error' });
-                                } catch { setModal({ type: 'alert', title: '오류', message: '한도 설정 실패', variant: 'error' }); }
-                              }} className="px-3 py-1.5 bg-violet-600 text-white text-xs rounded-lg hover:bg-violet-700">저장</button>
-                            </div>
-                          </div>
-                        )}
-                      </>
-                    ) : (
-                      <div className="text-xs text-gray-400 text-center py-2">위 조회 버튼으로 크레딧 현황을 불러오세요.</div>
-                    )}
-                  </div>
-
-                  <div className="pt-3 mt-1 border-t border-gray-100">
-                    <div className="text-[11px] font-semibold text-gray-400">AI 타겟 전략 (고급)</div>
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">타겟 전략</label>
-                    <select value={editCompany.targetStrategy}
-                      onChange={(e) => setEditCompany({ ...editCompany, targetStrategy: e.target.value })}
-                      className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none">
-                      <option value="balanced">균형형 (Balanced)</option>
-                      <option value="aggressive">공격형 (Aggressive) - 넓은 타겟</option>
-                      <option value="conservative">보수형 (Conservative) - 정밀 타겟</option>
-                    </select>
-                    <p className="text-xs text-gray-500 mt-1">AI가 타겟을 추출할 때 적용하는 전략입니다.</p>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <input type="checkbox" id="crossCategory" checked={editCompany.crossCategoryAllowed}
-                      onChange={(e) => setEditCompany({ ...editCompany, crossCategoryAllowed: e.target.checked })}
-                      className="w-4 h-4 text-blue-600 rounded focus:ring-blue-500" />
-                    <label htmlFor="crossCategory" className="text-sm text-gray-700">교차 카테고리 타겟 허용</label>
-                  </div>
-                  <p className="text-xs text-gray-500 -mt-2 ml-6">예: 스킨케어 구매자에게 색조 제품 추천</p>
-                  
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">제외 세그먼트</label>
-                    <p className="text-xs text-gray-500 mb-2">AI 타겟에서 항상 제외할 고객 그룹</p>
-                    <div className="flex flex-wrap gap-2 mb-3">
-                      {editCompany.excludedSegments.map((seg: string, idx: number) => (
-                        <span key={idx} className="inline-flex items-center gap-1 px-3 py-1 bg-red-100 text-red-800 rounded-full text-sm">
-                          {seg}
-                          <button type="button"
-                            onClick={() => setEditCompany({
-                              ...editCompany,
-                              excludedSegments: editCompany.excludedSegments.filter((_: string, i: number) => i !== idx)
-                            })}
-                            className="text-red-600 hover:text-red-800 font-bold">×</button>
-                        </span>
-                      ))}
-                      {editCompany.excludedSegments.length === 0 && (
-                        <span className="text-gray-400 text-sm">제외 세그먼트 없음</span>
-                      )}
-                    </div>
-                    <div className="flex gap-2">
-                      <input type="text" value={editCompany.newExcludedSegment}
-                        onChange={(e) => setEditCompany({ ...editCompany, newExcludedSegment: e.target.value })}
-                        className="flex-1 px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none"
-                        placeholder="예: 탈퇴요청, VIP제외, 휴면고객"
-                        onKeyDown={(e) => {
-                          if (e.key === 'Enter') {
-                            e.preventDefault();
-                            const seg = editCompany.newExcludedSegment.trim();
-                            if (seg && !editCompany.excludedSegments.includes(seg)) {
-                              setEditCompany({
-                                ...editCompany,
-                                excludedSegments: [...editCompany.excludedSegments, seg],
-                                newExcludedSegment: ''
-                              });
-                            }
-                          }
-                        }} />
-                      <button type="button"
-                        onClick={() => {
-                          const seg = editCompany.newExcludedSegment.trim();
-                          if (seg && !editCompany.excludedSegments.includes(seg)) {
-                            setEditCompany({
-                              ...editCompany,
-                              excludedSegments: [...editCompany.excludedSegments, seg],
-                              newExcludedSegment: ''
-                            });
-                          }
-                        }}
-                        className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 text-sm">
-                        추가
-                      </button>
-                    </div>
-                  </div>
-
-                  <div className="bg-purple-50 rounded-lg p-3 mt-2">
-                    <p className="text-xs text-purple-700">
-                      🤖 이 설정은 AI가 캠페인 타겟을 추출할 때 기본 조건으로 적용됩니다.
-                    </p>
-                  </div>
-                </div>
-              )}
-
-              {/* 분류코드 탭 */}
-              {editCompanyTab === 'store' && (
-                <div className="space-y-4">
-                  <p className="text-sm text-gray-500">브랜드, 팀 등으로 고객/사용자를 구분할 때 사용합니다.</p>
-                  <div className="flex flex-wrap gap-2 mb-3">
-                    {editCompany.storeCodeList.map((code: string, idx: number) => (
-                      <span key={idx} className="inline-flex items-center gap-1 px-3 py-1 bg-blue-100 text-blue-800 rounded-full text-sm">
-                        {code}
-                        <button type="button"
-                          onClick={() => setEditCompany({
-                            ...editCompany,
-                            storeCodeList: editCompany.storeCodeList.filter((_: string, i: number) => i !== idx)
-                          })}
-                          className="text-blue-600 hover:text-blue-800 font-bold">×</button>
-                      </span>
-                    ))}
-                    {editCompany.storeCodeList.length === 0 && (
-                      <span className="text-gray-400 text-sm">분류 코드 없음 (전체 공유)</span>
-                    )}
-                  </div>
-                  <div className="flex gap-2">
-                    <input type="text" value={editCompany.newStoreCode}
-                      onChange={(e) => setEditCompany({ ...editCompany, newStoreCode: e.target.value.toUpperCase() })}
-                      className="flex-1 px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none"
-                      placeholder="예: LUNA, BLOOM, ONLINE"
-                      onKeyDown={(e) => {
-                        if (e.key === 'Enter') {
-                          e.preventDefault();
-                          const code = editCompany.newStoreCode.trim();
-                          if (code && !editCompany.storeCodeList.includes(code)) {
-                            setEditCompany({
-                              ...editCompany,
-                              storeCodeList: [...editCompany.storeCodeList, code],
-                              newStoreCode: ''
-                            });
-                          }
-                        }
-                      }} />
-                    <button type="button"
-                      onClick={() => {
-                        const code = editCompany.newStoreCode.trim();
-                        if (code && !editCompany.storeCodeList.includes(code)) {
-                          setEditCompany({
-                            ...editCompany,
-                            storeCodeList: [...editCompany.storeCodeList, code],
-                            newStoreCode: ''
-                          });
-                        }
-                      }}
-                      className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 text-sm">
-                      추가
-                    </button>
-                  </div>
-                </div>
-              )}
-
-              {/* ★ 2026-07-28 정산 탭 (필터항목 대체 — Harold 판정: 의미 없는 메뉴) — SoT §2 */}
-              {editCompanyTab === 'billing' && (
-                <div className="space-y-5">
-                  {btLoading ? (
-                    <p className="text-sm text-gray-400 py-8 text-center">정산 설정을 불러오는 중...</p>
-                  ) : (
-                    <>
-                      {/* 발행 단위 토글 */}
-                      <div className="rounded-lg border border-gray-200 p-4">
-                        <p className="text-sm font-semibold text-gray-800 mb-1">거래내역서 발행 단위</p>
-                        <p className="text-xs text-gray-500 mb-3">일괄발급 화면에서 이 회사가 기본으로 앉는 자리입니다. 계정별 = 계정 장 N개 + 공통 장(테스트·스팸·크레딧·요금제) 1개.</p>
-                        <div className="flex rounded-lg overflow-hidden border border-gray-300 w-fit">
-                          <button type="button" onClick={() => setBtSettings({ ...btSettings, issue_scope: 'combined' })}
-                            className={`px-4 py-2 text-sm font-semibold transition-colors ${btSettings.issue_scope === 'combined' ? 'bg-indigo-600 text-white' : 'bg-white text-gray-600 hover:bg-gray-50'}`}>
-                            고객사 전체 발급
-                          </button>
-                          <button type="button" onClick={() => setBtSettings({ ...btSettings, issue_scope: 'by_user' })}
-                            className={`px-4 py-2 text-sm font-semibold transition-colors ${btSettings.issue_scope === 'by_user' ? 'bg-indigo-600 text-white' : 'bg-white text-gray-600 hover:bg-gray-50'}`}>
-                            개별(계정별) 발급
-                          </button>
-                        </div>
-                      </div>
-
-                      {/* ★ 2026-07-29 수동 정산 회사 — 일괄발급 담기에서 자동으로 빠진다 (목록에서 숨기지는 않는다) */}
-                      <div className={`rounded-lg border p-4 ${btSettings.manual_billing ? 'border-amber-300 bg-amber-50/50' : 'border-gray-200'}`}>
-                        <label className="flex items-start gap-3 cursor-pointer">
-                          <input type="checkbox" checked={btSettings.manual_billing}
-                            onChange={(e) => setBtSettings({ ...btSettings, manual_billing: e.target.checked })}
-                            className="mt-0.5 w-4 h-4 accent-amber-600" />
-                          <span className="flex-1 min-w-0">
-                            <span className="block text-sm font-semibold text-gray-800">수동 정산 회사: 일괄발급 대상 제외</span>
-                            <span className="block text-xs text-gray-500 mt-1">
-                              우리 정산으로 거래내역서를 발행할 수 없어 사람이 따로 처리하는 회사입니다. 켜두면 일괄발급 화면의
-                              [전체 담기]와 [선택 담기] 양쪽에서 이 회사가 빠집니다. 목록에서 숨기지는 않습니다.
-                              그 달 처리 여부를 볼 수 있어야 하고, 처리했으면 그 화면에서 [수동 정산완료]를 눌러 목록에서 뺍니다.
-                            </span>
-                          </span>
-                        </label>
-                      </div>
-
-                      {/* 회사 정산 담당자 — 전체 발급 수신자 + 계정별일 때 공통 장 수신자 */}
-                      <div className="rounded-lg border border-gray-200 p-4">
-                        <p className="text-sm font-semibold text-gray-800 mb-1">회사 정산 담당자</p>
-                        <p className="text-xs text-gray-500 mb-3">거래내역서 자동 발송 수신자입니다. 기본정보 탭의 담당자(마케팅)와 별개입니다. 계정별 발급이어도 공통 장은 여기로 갑니다.</p>
-                        <input type="text" value={btCompanyContact.name} placeholder="담당자 이름"
-                          onChange={(e) => setBtCompanyContact({ ...btCompanyContact, name: e.target.value })}
-                          className="w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 outline-none" />
-                        {/* ★ 2026-07-31 이메일은 칸 하나가 아니라 수신자 목록이다 — 유형(거래내역서/세금계산서)이
-                            다를 수 있고 여러 명일 수 있다. 저장 버튼과 무관하게 즉시 반영된다(행 단위 CRUD). */}
-                        <BillingRecipientsEditor
-                          companyId={editCompany.id}
-                          userId={null}
-                          recipients={btRecipients}
-                          onChanged={setBtRecipients}
-                          onError={(m) => showAlert('오류', m, 'error')}
-                        />
-                        {/* ★ 2026-07-28 회사 기본 사업자 — 전체 발급이면 이 사업자로 계산서가 나간다.
-                            계정별과 같은 모달·같은 사업자등록증 자동입력을 쓴다(문구만 분기). */}
-                        <div className="mt-3 pt-3 border-t border-gray-100 flex items-center gap-2">
-                          <div className="flex-1 min-w-0">
-                            <p className="text-xs font-medium text-gray-700">계산서 발급 사업자 (회사 기본)</p>
-                            <p className="text-[11px] text-gray-400 truncate">
-                              {btCompanyContact.taxbill_biz_number
-                                ? `${btCompanyContact.taxbill_company_name || ''} ${btCompanyContact.taxbill_biz_number}`.trim()
-                                : '미등록. 비워두면 기본정보 탭의 회사 사업자정보로 발급됩니다.'}
-                            </p>
-                          </div>
-                          <button type="button"
-                            onClick={() => { setBtBizDraft({ ...btCompanyContact }); setBtBizTarget('company'); }}
-                            className={`shrink-0 px-2.5 py-1.5 rounded text-[11px] font-semibold border ${btCompanyContact.taxbill_biz_number ? 'border-emerald-300 bg-emerald-50 text-emerald-700' : 'border-indigo-300 bg-indigo-50 text-indigo-700 hover:bg-indigo-100'}`}>
-                            {btCompanyContact.taxbill_biz_number ? '사업자 수정' : '사업자등록증 등록'}
-                          </button>
-                        </div>
-                      </div>
-
-                      {/* 계산서 발급일자 정책 */}
-                      <div className="rounded-lg border border-gray-200 p-4">
-                        <p className="text-sm font-semibold text-gray-800 mb-1">세금계산서 작성일자</p>
-                        <p className="text-xs text-gray-500 mb-3">컨펌(또는 3일 경과) 후 자동 발급될 때 계산서에 적히는 작성일자입니다.</p>
-                        <select value={btSettings.taxbill_day_policy}
-                          onChange={(e) => setBtSettings({ ...btSettings, taxbill_day_policy: e.target.value })}
-                          className="w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 outline-none">
-                          <option value="last_day">대상월 말일 (30일 달이면 30일, 2월이면 28·29일)</option>
-                          <option value="first_day">익월 1일 (12월분은 익년 1월 1일)</option>
-                          <option value="manual">직접선택 (중간정산 등, 발급 때마다 날짜 지정, 자동 발급 제외)</option>
-                        </select>
-                        {/* ★ 2026-07-28 예시 월을 글자로 적어두면 그 달에만 맞는 안내가 된다 — 현재 달 기준으로 계산해 보여준다(CT: utils/taxbillDate) */}
-                        <p className="mt-2 text-xs text-indigo-600">{taxbillIssueDatePreviewText(btSettings.taxbill_day_policy as TaxbillDayPolicy)}</p>
-                      </div>
-
-                      {/* ★ 2026-08-21 계산서 비고(PO) 필수 — 시세이도처럼 부서 PO를 계산서 비고에 실어야 하는 회사. 켜면 작성일자 지정·변경 때 비고가 비어 있으면 막는다. */}
-                      <div className="rounded-lg border border-gray-200 p-4">
-                        <label className="flex items-start gap-2 cursor-pointer">
-                          <input type="checkbox" checked={btSettings.require_taxbill_remark}
-                            onChange={(e) => setBtSettings({ ...btSettings, require_taxbill_remark: e.target.checked })}
-                            className="mt-0.5 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500" />
-                          <span>
-                            <span className="text-sm font-semibold text-gray-800">계산서 비고(PO번호) 필수</span>
-                            <span className="block text-xs text-gray-500 mt-0.5">작성일자를 지정할 때 비고(PO번호 등)를 반드시 입력하게 합니다. 입력한 값은 세금계산서 비고란에 그대로 인쇄됩니다.</span>
-                          </span>
-                        </label>
-                      </div>
-
-                      {/* 계정별 담당자·사업자 (개별 발급일 때 펼침) */}
-                      {btSettings.issue_scope === 'by_user' && (
-                        <div className="rounded-lg border border-gray-200 p-4">
-                          <p className="text-sm font-semibold text-gray-800 mb-1">계정별 정산 담당자</p>
-                          <p className="text-xs text-gray-500 mb-3">계정 장은 여기 등록된 이메일로 각각 발송·컨펌됩니다. 사업장이 다른 계정은 [계산서 사업자]로 별도 사업자를 등록하세요. 미등록이면 회사 기본 사업자로 발급됩니다.</p>
-                          <div className="space-y-2">
-                            {btAccounts.length === 0 && <p className="text-xs text-gray-400">활성 계정이 없습니다.</p>}
-                            {btAccounts.map((a) => (
-                              <div key={a.user_id} className="border rounded-lg px-3 py-2">
-                                <div className="flex items-center gap-2">
-                                  <div className="w-32 shrink-0">
-                                    <p className="text-sm font-medium text-gray-800 truncate">{a.name || a.login_id}</p>
-                                    <p className="text-[10px] text-gray-400 truncate">{a.login_id}</p>
-                                  </div>
-                                  <input type="text" value={a.contact_name} placeholder="담당자 이름"
-                                    onChange={(e) => setBtAccounts((prev) => prev.map((x) => x.user_id === a.user_id ? { ...x, contact_name: e.target.value } : x))}
-                                    className="flex-1 px-2 py-1.5 border rounded text-xs focus:ring-1 focus:ring-indigo-500 outline-none" />
-                                  <button type="button"
-                                    onClick={() => { setBtBizDraft({ ...a }); setBtBizTarget(a.user_id); }}
-                                    className={`shrink-0 px-2.5 py-1.5 rounded text-[11px] font-semibold border ${a.taxbill_biz_number ? 'border-emerald-300 bg-emerald-50 text-emerald-700' : 'border-gray-300 text-gray-500 hover:bg-gray-50'}`}>
-                                    {a.taxbill_biz_number ? `사업자 ${a.taxbill_biz_number}` : '계산서 사업자'}
-                                  </button>
-                                </div>
-                                {/* 계정 장의 수신자 — 회사 레벨과 같은 편집기·같은 규칙(유형별 대표 1명 + 참조) */}
-                                <div className="mt-2">
-                                  <BillingRecipientsEditor
-                                    companyId={editCompany.id}
-                                    userId={a.user_id}
-                                    recipients={btRecipients}
-                                    onChanged={setBtRecipients}
-                                    onError={(m) => showAlert('오류', m, 'error')}
-                                    compact
-                                  />
-                                </div>
-                              </div>
-                            ))}
-                          </div>
-                        </div>
-                      )}
-
-                      <button type="button" onClick={handleSaveBillingTab} disabled={btSaving}
-                        className="w-full py-2.5 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white rounded-lg text-sm font-semibold">
-                        {btSaving ? '저장 중...' : '정산 설정 저장'}
-                      </button>
-                    </>
-                  )}
-
-                  {/* 계산서 발급 사업자 등록 모달 — 회사 기본('company')과 계정별(user_id)이 같은 화면을 쓴다 */}
-                  {btBizTarget && (
-                    <div className="fixed inset-0 z-[60] bg-black/50 flex items-center justify-center p-4" onClick={() => setBtBizTarget(null)}>
-                      <div className="bg-white rounded-xl shadow-xl w-full max-w-md p-5" onClick={(e) => e.stopPropagation()}>
-                        <h3 className="text-base font-bold text-gray-900 mb-1">
-                          {btBizTarget === 'company' ? '회사 기본 계산서 사업자' : '계산서 발급 사업자 등록'}
-                        </h3>
-                        <p className="text-xs text-gray-500 mb-3">
-                          {btBizTarget === 'company'
-                            ? '고객사 전체 발급이면 이 사업자로 세금계산서가 나갑니다. 전부 비우면 기본정보 탭의 회사 사업자정보로 발급됩니다.'
-                            : '이 계정의 계산서를 받을 사업자 정보입니다. 전부 비우면 회사 기본 사업자로 발급됩니다.'}
-                        </p>
-                        {/* ★ 2026-07-28 사업자등록증 자동입력 — 파일을 올리면 상호·사업자번호·대표자·주소·업태·종목을 읽어 채운다 */}
-                        <label className={`flex items-center justify-center gap-2 mb-4 px-3 py-2.5 border-2 border-dashed rounded-lg cursor-pointer text-xs font-semibold ${btBizExtracting ? 'border-gray-200 text-gray-400' : 'border-indigo-300 text-indigo-600 hover:bg-indigo-50'}`}>
-                          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v2a2 2 0 002 2h12a2 2 0 002-2v-2M7 9l5-5 5 5M12 4v12" />
-                          </svg>
-                          {btBizExtracting ? '사업자등록증 읽는 중...' : '사업자등록증으로 자동입력 (JPG·PNG·WebP·PDF)'}
-                          <input type="file" accept="image/jpeg,image/png,image/webp,application/pdf" className="hidden" disabled={btBizExtracting}
-                            onChange={(e) => { handleBizRegistrationFile(e.target.files?.[0] || null); e.target.value = ''; }} />
-                        </label>
-                        <div className="space-y-2.5">
-                          {[
-                            { k: 'taxbill_biz_number', label: '사업자등록번호', ph: '000-00-00000' },
-                            { k: 'taxbill_company_name', label: '상호', ph: '' },
-                            { k: 'taxbill_ceo_name', label: '대표자명', ph: '' },
-                            { k: 'taxbill_address', label: '사업장 주소', ph: '' },
-                            { k: 'taxbill_biz_type', label: '업태', ph: '' },
-                            { k: 'taxbill_biz_item', label: '종목', ph: '' },
-                          ].map((f) => (
-                            <div key={f.k}>
-                              <label className="block text-xs font-medium text-gray-600 mb-1">{f.label}</label>
-                              <input type="text" value={btBizDraft[f.k] || ''} placeholder={f.ph}
-                                onChange={(e) => setBtBizDraft({ ...btBizDraft, [f.k]: e.target.value })}
-                                className="w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 outline-none" />
-                            </div>
-                          ))}
-                        </div>
-                        <div className="flex gap-2 mt-5">
-                          <button type="button" onClick={() => setBtBizTarget(null)}
-                            className="flex-1 py-2 border border-gray-300 rounded-lg text-sm text-gray-600 hover:bg-gray-50">취소</button>
-                          <button type="button"
-                            onClick={() => {
-                              // 회사 기본은 담당자 이름·이메일을 덮지 않도록 사업자 6필드만 병합한다(모달 draft에 담당자 값이 섞여 들어온다).
-                              if (btBizTarget === 'company') {
-                                setBtCompanyContact((prev: any) => ({
-                                  ...prev,
-                                  taxbill_biz_number: btBizDraft.taxbill_biz_number || '',
-                                  taxbill_company_name: btBizDraft.taxbill_company_name || '',
-                                  taxbill_ceo_name: btBizDraft.taxbill_ceo_name || '',
-                                  taxbill_address: btBizDraft.taxbill_address || '',
-                                  taxbill_biz_type: btBizDraft.taxbill_biz_type || '',
-                                  taxbill_biz_item: btBizDraft.taxbill_biz_item || '',
-                                }));
-                              } else {
-                                setBtAccounts((prev) => prev.map((x) => x.user_id === btBizTarget ? { ...x, ...btBizDraft } : x));
-                              }
-                              setBtBizTarget(null);
-                            }}
-                            className="flex-1 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-sm font-semibold">적용 (저장 버튼으로 확정)</button>
-                        </div>
-                      </div>
-                    </div>
-                  )}
-                </div>
-              )}
-
-              {/* D41 대시보드 카드 설정 탭 */}
-              {/* ★ D142+ (2026-04-29) 카드 순서 변경 기능 추가:
-               *   기존: 체크박스로 선택만 가능. 새 카드 체크 시 항상 배열 끝에 추가 → 순서 조작 불가.
-               *   변경: 두 영역 분리 (선택된 카드 / 추가 가능 카드)
-               *         - 선택된 카드: 드래그(HTML5 native) + ↑↓ 버튼 + × 제거. 표시 순서 = 배열 순서.
-               *         - 추가 가능 카드: 체크박스(추가 시 끝에 append). 미선택 카드만 표시.
-               *   백엔드 변경 0건 — `company_settings.dashboard_cards` JSON 배열 순서 그대로 저장.
-               */}
-              {editCompanyTab === 'cards' && (() => {
-                const selectedCards = dashboardCardIds
-                  .map(id => dashboardCardPool.find(c => c.cardId === id))
-                  .filter((c): c is { cardId: string; label: string; emoji: string; description: string } => !!c);
-                const unselectedCards = dashboardCardPool.filter(c => !dashboardCardIds.includes(c.cardId));
-
-                const moveUp = (idx: number) => {
-                  if (idx === 0) return;
-                  const newIds = [...dashboardCardIds];
-                  [newIds[idx - 1], newIds[idx]] = [newIds[idx], newIds[idx - 1]];
-                  setDashboardCardIds(newIds);
-                };
-                const moveDown = (idx: number) => {
-                  if (idx >= dashboardCardIds.length - 1) return;
-                  const newIds = [...dashboardCardIds];
-                  [newIds[idx + 1], newIds[idx]] = [newIds[idx], newIds[idx + 1]];
-                  setDashboardCardIds(newIds);
-                };
-                const removeCard = (cardId: string) => {
-                  setDashboardCardIds(dashboardCardIds.filter(id => id !== cardId));
-                };
-                const addCard = (cardId: string) => {
-                  if (dashboardCardIds.includes(cardId)) return;
-                  setDashboardCardIds([...dashboardCardIds, cardId]);
-                };
-                const handleDrop = (targetIdx: number) => {
-                  if (draggedCardIdx === null || draggedCardIdx === targetIdx) {
-                    setDraggedCardIdx(null);
-                    return;
-                  }
-                  const newIds = [...dashboardCardIds];
-                  const [moved] = newIds.splice(draggedCardIdx, 1);
-                  newIds.splice(targetIdx, 0, moved);
-                  setDashboardCardIds(newIds);
-                  setDraggedCardIdx(null);
-                };
-
-                return (
-                  <div className="space-y-4">
-                    <p className="text-sm text-gray-600">이 고객사의 대시보드에 표시할 카드와 순서를 설정하세요.</p>
-
-                    {/* 안내 박스 */}
-                    <div className="flex items-center gap-3 p-3 bg-blue-50 rounded-lg border border-blue-200">
-                      <span className="text-sm text-gray-600">
-                        선택된 카드는 <strong>드래그</strong>하거나 <strong>↑↓ 버튼</strong>으로 순서를 변경할 수 있습니다. 대시보드에서 <strong>6개씩 페이징</strong>으로 표시됩니다.
-                      </span>
-                      <span className="text-xs text-gray-400 ml-auto whitespace-nowrap">
-                        선택: <span className="font-bold text-blue-600">{dashboardCardIds.length}</span>개
-                        {dashboardCardIds.length > 6 && <span className="text-gray-400 ml-1">({Math.ceil(dashboardCardIds.length / 6)}페이지)</span>}
-                      </span>
-                    </div>
-
-                    {/* ===== 선택된 카드 영역 ===== */}
-                    <div>
-                      <div className="flex items-center justify-between mb-2">
-                        <h4 className="text-sm font-semibold text-gray-800">📌 선택된 카드 ({selectedCards.length}개)</h4>
-                        <span className="text-xs text-gray-400">위에서 아래 순서로 표시됩니다</span>
-                      </div>
-                      {selectedCards.length === 0 ? (
-                        <div className="p-6 bg-gray-50 border-2 border-dashed border-gray-300 rounded-lg text-center">
-                          <p className="text-sm text-gray-500">선택된 카드가 없습니다.</p>
-                          <p className="text-xs text-amber-600 mt-1">⚠️ 카드를 선택하지 않으면 고객사 대시보드에 DB현황이 표시되지 않습니다.</p>
-                        </div>
-                      ) : (
-                        <div className="space-y-1.5 p-3 bg-blue-50/40 border border-blue-200 rounded-lg">
-                          {selectedCards.map((card, idx) => {
-                            const isFirst = idx === 0;
-                            const isLast = idx === selectedCards.length - 1;
-                            const isDragging = draggedCardIdx === idx;
-                            const isPageBreak = (idx + 1) % 6 === 0 && idx !== selectedCards.length - 1;
-                            return (
-                              <div key={card.cardId}>
-                                <div
-                                  draggable
-                                  onDragStart={() => setDraggedCardIdx(idx)}
-                                  onDragOver={(e) => e.preventDefault()}
-                                  onDrop={() => handleDrop(idx)}
-                                  onDragEnd={() => setDraggedCardIdx(null)}
-                                  className={`flex items-center gap-2 p-2.5 bg-white border rounded-lg transition-all cursor-move select-none ${
-                                    isDragging ? 'opacity-40 border-blue-400 shadow-lg' : 'border-gray-200 hover:border-blue-300 hover:shadow-sm'
-                                  }`}
-                                >
-                                  {/* 드래그 핸들 */}
-                                  <span className="text-gray-400 text-lg leading-none flex-shrink-0" title="드래그하여 순서 변경">⋮⋮</span>
-                                  {/* 순번 */}
-                                  <span className="text-xs font-bold text-blue-600 w-6 text-center flex-shrink-0">{idx + 1}</span>
-                                  {/* 카드 정보 */}
-                                  <span className="text-base flex-shrink-0">{card.emoji}</span>
-                                  <div className="flex-1 min-w-0">
-                                    <span className="text-sm font-medium text-gray-800">{card.label}</span>
-                                    <span className="text-xs text-gray-400 ml-2 hidden xl:inline">{card.description}</span>
-                                  </div>
-                                  {/* ↑ 위로 */}
-                                  <button
-                                    type="button"
-                                    onClick={() => moveUp(idx)}
-                                    disabled={isFirst}
-                                    title="위로 이동"
-                                    className={`w-7 h-7 flex items-center justify-center rounded transition-colors flex-shrink-0 ${
-                                      isFirst ? 'text-gray-300 cursor-not-allowed' : 'text-gray-600 hover:bg-blue-100 hover:text-blue-700'
-                                    }`}
-                                  >
-                                    ↑
-                                  </button>
-                                  {/* ↓ 아래로 */}
-                                  <button
-                                    type="button"
-                                    onClick={() => moveDown(idx)}
-                                    disabled={isLast}
-                                    title="아래로 이동"
-                                    className={`w-7 h-7 flex items-center justify-center rounded transition-colors flex-shrink-0 ${
-                                      isLast ? 'text-gray-300 cursor-not-allowed' : 'text-gray-600 hover:bg-blue-100 hover:text-blue-700'
-                                    }`}
-                                  >
-                                    ↓
-                                  </button>
-                                  {/* × 제거 */}
-                                  <button
-                                    type="button"
-                                    onClick={() => removeCard(card.cardId)}
-                                    title="제거"
-                                    className="w-7 h-7 flex items-center justify-center rounded text-gray-400 hover:bg-red-50 hover:text-red-600 transition-colors flex-shrink-0"
-                                  >
-                                    ×
-                                  </button>
-                                </div>
-                                {/* 페이지 구분선 (6개 단위) */}
-                                {isPageBreak && (
-                                  <div className="flex items-center gap-2 my-2">
-                                    <div className="flex-1 h-px bg-gray-300" />
-                                    <span className="text-[10px] text-gray-400 font-medium px-2">▼ {Math.floor(idx / 6) + 2}페이지 ▼</span>
-                                    <div className="flex-1 h-px bg-gray-300" />
-                                  </div>
-                                )}
-                              </div>
-                            );
-                          })}
-                        </div>
-                      )}
-                    </div>
-
-                    {/* ===== 추가 가능 카드 영역 ===== */}
-                    {unselectedCards.length > 0 && (
-                      <div>
-                        <h4 className="text-sm font-semibold text-gray-800 mb-2">➕ 추가 가능한 카드 ({unselectedCards.length}개)</h4>
-                        <div className="grid grid-cols-2 gap-1.5">
-                          {unselectedCards.map((card) => (
-                            <button
-                              type="button"
-                              key={card.cardId}
-                              onClick={() => addCard(card.cardId)}
-                              className="flex items-center gap-2 p-2 rounded-lg border bg-white border-gray-200 hover:bg-blue-50 hover:border-blue-300 transition-all text-left"
-                              title="클릭하여 추가"
-                            >
-                              <span className="text-blue-500 text-base font-bold flex-shrink-0">+</span>
-                              <span className="text-base flex-shrink-0">{card.emoji}</span>
-                              <div className="flex-1 min-w-0">
-                                <span className="text-sm font-medium text-gray-800">{card.label}</span>
-                                <span className="text-xs text-gray-400 ml-1 hidden xl:inline">{card.description}</span>
-                              </div>
-                            </button>
-                          ))}
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                );
-              })()}
-
-              {/* 고객DB 탭 — D144 P10 (2026-05-07 정정):
-                   Harold님 의도: 고객 DB 정보 출력은 제거 + 전체 삭제 기능만 유지.
-                   개별/선택 삭제 + 검색/테이블/페이지네이션 제거. 전체 삭제 모달은 그대로 사용. */}
-              {editCompanyTab === 'customers' && (
-                <div className="space-y-3">
-                  {/* 안내 + 총 고객 수만 표시 (정보 출력 없음) */}
-                  <div className="p-4 bg-gray-50 border border-gray-200 rounded-lg">
-                    <div className="text-sm font-medium text-gray-700 mb-1">고객 DB 관리</div>
-                    <p className="text-xs text-gray-500">
-                      등록된 고객: <span className="font-semibold text-gray-800">{adminCustPage.total.toLocaleString()}명</span>
-                    </p>
-                    <p className="text-xs text-gray-400 mt-1">
-                      개별 고객 데이터 조회/삭제는 고객사관리자가 자기 화면에서 수행합니다. 슈퍼관리자는 전체 초기화만 가능합니다.
-                    </p>
-                  </div>
-
-                  {/* 전체 삭제 (P10 정정 — 유지) */}
-                  <div className="pt-3 border-t border-red-200">
-                    <div className="flex items-center justify-between">
-                      <div>
-                        <div className="text-xs font-medium text-red-600">⚠️ 전체 삭제</div>
-                        <p className="text-[11px] text-gray-400">이 회사의 모든 고객 및 구매내역 영구 삭제</p>
-                      </div>
-                      <button type="button"
-                        onClick={() => { setCustomerDeleteConfirmName(''); setShowCustomerDeleteAll(true); }}
-                        className="px-3 py-1.5 bg-red-50 text-red-600 border border-red-200 rounded-lg text-xs font-medium hover:bg-red-100 transition">
-                        전체 삭제
-                      </button>
-                    </div>
-                  </div>
-
-                  {/* 닫기 버튼 */}
-                  <div className="flex pt-4 mt-4 border-t">
-                    <button type="button" onClick={() => setShowEditCompanyModal(false)}
-                      className="w-full px-4 py-2 border rounded-lg text-gray-700 hover:bg-gray-50">
-                      닫기
-                    </button>
-                  </div>
-                </div>
-              )}
-
-              {/* SyncAgent 탭 */}
-              {editCompanyTab === 'sync' && (
-                <div className="space-y-5">
-                  {syncLoading ? (
-                    <div className="text-center py-8 text-gray-500">로딩 중...</div>
-                  ) : (
-                    <>
-                      {/* use_db_sync 토글 */}
-                      <div className="flex items-center justify-between p-4 bg-gray-50 rounded-lg">
-                        <div>
-                          <div className="text-sm font-medium text-gray-800">SyncAgent 활성화</div>
-                          <p className="text-xs text-gray-500 mt-0.5">고객사 DB 자동 동기화 기능</p>
-                        </div>
-                        <button
-                          type="button"
-                          onClick={() => handleSyncToggle(!syncKeys.use_db_sync)}
-                          className={`relative w-12 h-6 rounded-full transition-colors ${syncKeys.use_db_sync ? 'bg-blue-600' : 'bg-gray-300'}`}
-                        >
-                          <span className={`absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform ${syncKeys.use_db_sync ? 'translate-x-6' : ''}`} />
-                        </button>
-                      </div>
-
-                      {/* API Key 영역 */}
-                      <div className={`space-y-4 ${!syncKeys.use_db_sync ? 'opacity-50 pointer-events-none' : ''}`}>
-                        <div>
-                          <label className="block text-sm font-medium text-gray-700 mb-1">API Key</label>
-                          <div className="flex gap-2">
-                            <div className="flex-1 relative">
-                              <input type="text" readOnly
-                                value={syncKeys.api_key ? (syncKeyVisible ? syncKeys.api_key : '••••••••••••••••••••') : '(미발급)'}
-                                className="w-full px-3 py-2 border rounded-lg bg-gray-50 text-sm font-mono pr-10"
-                              />
-                              {syncKeys.api_key && (
-                                <button type="button" onClick={() => setSyncKeyVisible(!syncKeyVisible)}
-                                  className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 text-xs">
-                                  {syncKeyVisible ? '숨김' : '보기'}
-                                </button>
-                              )}
-                            </div>
-                            {syncKeys.api_key && syncKeyVisible && (
-                              <button type="button"
-                                onClick={() => { navigator.clipboard.writeText(syncKeys.api_key || ''); showAlert('복사 완료', '복사되었습니다.', 'success'); }}
-                                className="px-3 py-2 border rounded-lg text-xs text-gray-600 hover:bg-gray-50 whitespace-nowrap">
-                                복사
-                              </button>
-                            )}
-                          </div>
-                        </div>
-
-                        {/* ★2026-09-12 시크릿은 서버에 원문으로 남지 않는다. 재발급 직후 이 화면에서만 보인다. */}
-                        <div>
-                          <label className="block text-sm font-medium text-gray-700 mb-1">API Secret</label>
-                          <div className="flex gap-2">
-                            <div className="flex-1 relative">
-                              <input type="text" readOnly
-                                value={syncKeys.api_secret
-                                  ? (syncSecretVisible ? syncKeys.api_secret : '••••••••••••••••••••')
-                                  : (syncKeys.has_secret ? '발급되어 있습니다 (다시 볼 수 없음)' : '(미발급)')}
-                                className="w-full px-3 py-2 border rounded-lg bg-gray-50 text-sm font-mono pr-10"
-                              />
-                              {syncKeys.api_secret && (
-                                <button type="button" onClick={() => setSyncSecretVisible(!syncSecretVisible)}
-                                  className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 text-xs">
-                                  {syncSecretVisible ? '숨김' : '보기'}
-                                </button>
-                              )}
-                            </div>
-                            {syncKeys.api_secret && syncSecretVisible && (
-                              <button type="button"
-                                onClick={() => { navigator.clipboard.writeText(syncKeys.api_secret || ''); showAlert('복사 완료', '복사되었습니다.', 'success'); }}
-                                className="px-3 py-2 border rounded-lg text-xs text-gray-600 hover:bg-gray-50 whitespace-nowrap">
-                                복사
-                              </button>
-                            )}
-                          </div>
-                          <p className="mt-1 text-xs text-gray-500">
-                            {syncKeys.api_secret
-                              ? '지금 화면을 벗어나면 다시 볼 수 없습니다. 설치에 쓸 값을 복사해 두세요.'
-                              : '보안을 위해 서버에 원문을 두지 않습니다. 값이 필요하면 아래에서 재발급하세요.'}
-                          </p>
-                        </div>
-
-                        {/* 재발급 버튼 */}
-                        <div className="pt-3 border-t">
-                          {!showSyncRegenConfirm ? (
-                            <button type="button" onClick={() => setShowSyncRegenConfirm(true)}
-                              className="w-full px-4 py-2.5 bg-orange-50 text-orange-700 border border-orange-200 rounded-lg text-sm font-medium hover:bg-orange-100 transition">
-                              API Key 재발급
-                            </button>
-                          ) : (
-                            <div className="p-4 bg-red-50 border border-red-200 rounded-lg space-y-3">
-                              <div className="text-sm text-red-700 font-medium">정말 재발급하시겠습니까?</div>
-                              <p className="text-xs text-red-600">기존 API Key는 즉시 무효화됩니다. 해당 고객사의 SyncAgent가 새 키로 재설정되어야 합니다.</p>
-                              <div className="flex gap-2">
-                                <button type="button" onClick={() => setShowSyncRegenConfirm(false)}
-                                  className="flex-1 px-3 py-2 border rounded-lg text-sm text-gray-600 hover:bg-gray-50">
-                                  취소
-                                </button>
-                                <button type="button" onClick={handleSyncRegenerate}
-                                  className="flex-1 px-3 py-2 bg-red-600 text-white rounded-lg text-sm font-medium hover:bg-red-700">
-                                  재발급 확인
-                                </button>
-                              </div>
-                            </div>
-                          )}
-                        </div>
-
-                        <p className="text-xs text-gray-400">
-                          SyncAgent 설치 시 위 API Key/Secret을 고객사 에이전트 설정 파일에 입력합니다.
-                          재발급 시 기존 키는 즉시 무효화되므로, 에이전트 설정도 함께 변경해야 합니다.
-                        </p>
-                      </div>
-                    </>
-                  )}
-
-                  {/* 닫기 버튼 */}
-                  <div className="flex pt-4 mt-4 border-t">
-                    <button type="button" onClick={() => setShowEditCompanyModal(false)}
-                      className="w-full px-4 py-2 border rounded-lg text-gray-700 hover:bg-gray-50">
-                      닫기
-                    </button>
-                  </div>
-                </div>
-              )}
-
-              {editCompanyTab !== 'customers' && editCompanyTab !== 'sync' && (
-              <div className="flex gap-3 pt-6 mt-4 border-t">
-                <button type="button" onClick={() => setShowEditCompanyModal(false)}
-                  className="flex-1 px-4 py-2 border rounded-lg text-gray-700 hover:bg-gray-50">
-                  취소
-                </button>
-                <button type="submit"
-                  className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700">
-                  저장
-                </button>
-              </div>
-              )}
-            </form>
-          </div>
-        </div>
-      )}
+      {showEditCompanyModal && <CompanyDetailModal {...{ adminCustPage, getStatusBadge, agencyEmailActiveCount, agentIdSaving, agentIds, agentLedgerSaving, applyUnitPriceToAgents, balanceTxList, balanceTxLoading, btAccounts, btBizDraft, btBizExtracting, btBizTarget, btCompanyContact, btLoading, btRecipients, btSaving, btSettings, companyCredit, creditAdj, dashboardCardIds, dashboardCardPool, draggedCardIdx, editAgentLedger, editCompany, editCompanyTab, editingAgentRowId, enabledFields, industryOptions, labOpen, lineGroups, linePolicy, linePolicySaving, loadAdminCustomers, loadAgentIds, loadData, newAgentMemo, newAgentSendId, plans, savingUnitPrices, setAdminCustSearch, setAgencyEmailModalOpen, setAgentIdSaving, setAgentLedgerSaving, setApplyUnitPriceToAgents, setBalanceTxList, setBalanceTxLoading, setBillingToast, setBtAccounts, setBtBizDraft, setBtBizExtracting, setBtBizTarget, setBtCompanyContact, setBtLoading, setBtRecipients, setBtSaving, setBtSettings, setCompanyCredit, setCreditAdj, setCustomerDeleteConfirmName, setDashboardCardIds, setDraggedCardIdx, setEditAgentLedger, setEditCompany, setEditCompanyTab, setEditingAgentRowId, setLabOpen, setLinePolicy, setLinePolicySaving, setModal, setNewAgentMemo, setNewAgentSendId, setSavingUnitPrices, setShowCustomerDeleteAll, setShowEditCompanyModal, setShowSyncRegenConfirm, setSyncKeyVisible, setSyncKeys, setSyncLoading, setSyncSecretVisible, showAlert, showConfirm, showSyncRegenConfirm, syncKeyVisible, syncKeys, syncLoading, syncSecretVisible }} />}
 
       {/* SMS 상세 조회 모달 */}
-      {smsDetailModal && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-5xl overflow-hidden animate-in fade-in zoom-in" style={{ maxHeight: '90vh', display: 'flex', flexDirection: 'column' }}>
-            {/* 헤더 */}
-            <div className="px-6 py-4 border-b bg-gradient-to-r from-blue-50 to-white flex items-center justify-between flex-shrink-0">
-              <div>
-                <h3 className="text-lg font-semibold text-gray-900">📨 발송 상세 내역</h3>
-                {smsDetailCampaign && (
-                  <div className="flex flex-wrap gap-3 mt-1 text-xs text-gray-500">
-                    <span>{smsDetailCampaign.company_name} ({smsDetailCampaign.created_by_login || '-'})</span>
-                    <span>•</span>
-                    <span className="font-medium text-gray-700">{smsDetailCampaign.campaign_name}</span>
-                    <span>•</span>
-                    <span>{resolveChannelLabel(smsDetailCampaign)}</span>
-                    <span>•</span>
-                    <span className={`font-medium ${smsDetailCampaign.status === 'completed' ? 'text-green-600' : smsDetailCampaign.status === 'scheduled' ? 'text-blue-600' : 'text-gray-600'}`}>
-                      {smsDetailCampaign.status === 'completed' ? '완료' : smsDetailCampaign.status === 'scheduled' ? '예약' : smsDetailCampaign.status === 'sending' ? '발송중' : smsDetailCampaign.status === 'cancelled' ? '취소' : smsDetailCampaign.status}
-                    </span>
-                  </div>
-                )}
-              </div>
-              <button onClick={() => setSmsDetailModal(false)}
-                className="w-8 h-8 flex items-center justify-center rounded-full hover:bg-gray-100 text-gray-400 hover:text-gray-600 transition-colors">✕</button>
-            </div>
-
-            {/* 필터 */}
-            <div className="px-6 py-3 border-b bg-gray-50 flex flex-wrap gap-3 items-center flex-shrink-0">
-              <select value={smsDetailStatus} onChange={(e) => setSmsDetailStatus(e.target.value)}
-                className="px-3 py-1.5 border rounded-lg text-sm bg-white">
-                <option value="">전체 결과</option>
-                <option value="success">성공</option>
-                <option value="fail">실패</option>
-                <option value="pending">대기</option>
-              </select>
-              <select value={smsDetailSearchType} onChange={(e) => setSmsDetailSearchType(e.target.value)}
-                className="px-3 py-1.5 border rounded-lg text-sm bg-white">
-                <option value="dest_no">수신번호</option>
-                <option value="call_back">회신번호</option>
-              </select>
-              <input type="text" value={smsDetailSearchValue} onChange={(e) => setSmsDetailSearchValue(e.target.value)}
-                placeholder="번호 검색..." className="w-40 px-3 py-1.5 border rounded-lg text-sm"
-                onKeyDown={(e) => e.key === 'Enter' && smsDetailCampaign && loadSmsDetail(smsDetailCampaign.id, 1)} />
-              <button onClick={() => smsDetailCampaign && loadSmsDetail(smsDetailCampaign.id, 1)}
-                className="px-3 py-1.5 bg-blue-600 text-white rounded-lg text-sm hover:bg-blue-700">검색</button>
-              <div className="ml-auto flex items-center gap-3">
-                {/* ★ 2026-06-15: 슈퍼관리자 상세 엑셀 다운로드 (현재 상태 필터 그대로, 사용자 export와 동일 CT) */}
-                <button
-                  onClick={async () => {
-                    if (!smsDetailCampaign) return;
-                    const token = localStorage.getItem('token');
-                    const params = new URLSearchParams();
-                    if (smsDetailStatus) params.set('status', smsDetailStatus);
-                    try {
-                      const res = await fetch(`/api/admin/campaigns/${smsDetailCampaign.id}/sms-detail/export?${params.toString()}`, {
-                        headers: { Authorization: `Bearer ${token}` },
-                      });
-                      if (!res.ok) { const err = await res.json().catch(() => ({})); showAlert('오류', (err as any).error || '다운로드 실패', 'error'); return; }
-                      const blob = await res.blob();
-                      const url = URL.createObjectURL(blob);
-                      const a = document.createElement('a');
-                      a.href = url;
-                      a.download = `발송상세_${smsDetailCampaign.campaign_name || smsDetailCampaign.id}.csv`;
-                      a.click();
-                      URL.revokeObjectURL(url);
-                    } catch { showAlert('오류', '다운로드 중 오류가 발생했습니다.', 'error'); }
-                  }}
-                  className="px-3 py-1.5 bg-emerald-600 text-white rounded-lg text-sm hover:bg-emerald-700">
-                  엑셀 다운로드
-                </button>
-                <span className="text-sm text-gray-500">총 {smsDetailTotal.toLocaleString()}건</span>
-              </div>
-            </div>
-
-            {/* 테이블 */}
-            <div className="overflow-auto flex-1">
-              {smsDetailLoading ? (
-                <div className="flex items-center justify-center py-20 text-gray-400">
-                  <svg className="animate-spin h-6 w-6 mr-2" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" fill="none" stroke="currentColor" strokeWidth="3" strokeDasharray="60" strokeLinecap="round" /></svg>
-                  조회 중...
-                </div>
-              ) : (
-                <table className="w-full text-sm">
-                  <thead className="bg-gray-50 sticky top-0">
-                    <tr>
-                      <th className="px-3 py-2.5 text-center text-xs font-medium text-gray-500 whitespace-nowrap">No.</th>
-                      <th className="px-3 py-2.5 text-center text-xs font-medium text-gray-500 whitespace-nowrap">등록일시</th>
-                      <th className="px-3 py-2.5 text-center text-xs font-medium text-gray-500 whitespace-nowrap">발송일시</th>
-                      <th className="px-3 py-2.5 text-center text-xs font-medium text-gray-500 whitespace-nowrap">유형</th>
-                      <th className="px-3 py-2.5 text-center text-xs font-medium text-gray-500 whitespace-nowrap">수신번호</th>
-                      <th className="px-3 py-2.5 text-center text-xs font-medium text-gray-500 whitespace-nowrap">회신번호</th>
-                      <th className="px-3 py-2.5 text-left text-xs font-medium text-gray-500 whitespace-nowrap">메시지 내용</th>
-                      <th className="px-3 py-2.5 text-center text-xs font-medium text-gray-500 whitespace-nowrap">타입</th>
-                      <th className="px-3 py-2.5 text-center text-xs font-medium text-gray-500 whitespace-nowrap">통신사</th>
-                      <th className="px-3 py-2.5 text-center text-xs font-medium text-gray-500 whitespace-nowrap">결과</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-gray-100">
-                    {smsDetailRows.length === 0 ? (
-                      <tr><td colSpan={10} className="px-4 py-12 text-center text-gray-400">
-                        {smsDetailCampaign?.status === 'scheduled' ? '아직 발송 전입니다.' : '발송 내역이 없습니다.'}
-                      </td></tr>
-                    ) : smsDetailRows.map((r: any, idx: number) => (
-                      <tr key={r.seqno} className="hover:bg-blue-50/30">
-                        <td className="px-3 py-2 text-center text-xs text-gray-400">{(smsDetailPage - 1) * 50 + idx + 1}</td>
-                        {/* ★ D124: 등록일시 = 캠페인 created_at (모든 행 동일) */}
-                        <td className="px-3 py-2 text-center text-xs text-gray-500 whitespace-nowrap">{smsDetailCampaign?.created_at ? new Date(smsDetailCampaign.created_at).toLocaleString('ko-KR', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }) : '-'}</td>
-                        {/* ★ 발송일시 = sendreqTime(발송요청/예약 시각, KST) — 목록·통계와 동일 기준(D233+). mobsendTime(통신사 응답)은 지연 시 다음날·대기 시 빈칸이라 불일치 */}
-                        <td className="px-3 py-2 text-center text-xs text-gray-500 whitespace-nowrap">{r.sendreqTime ? new Date(r.sendreqTime).toLocaleString('ko-KR', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }) : '-'}</td>
-                        <td className="px-3 py-2 text-center text-xs text-gray-600 whitespace-nowrap">{r.sendType || '-'}</td>
-                        <td className="px-3 py-2 text-center text-gray-700 font-mono text-xs hover:text-blue-600 cursor-pointer" style={{ userSelect: 'text' }} title="클릭하면 복사" onClick={() => { if (r.destNo) { navigator.clipboard.writeText(String(r.destNo)); showAlert('복사 완료', '수신번호를 복사했습니다.', 'success'); } }}>{r.destNo}</td>
-                        <td className="px-3 py-2 text-center text-gray-500 font-mono text-xs hover:text-blue-600 cursor-pointer" style={{ userSelect: 'text' }} title="클릭하면 복사" onClick={() => { if (r.callBack) { navigator.clipboard.writeText(String(r.callBack)); showAlert('복사 완료', '회신번호를 복사했습니다.', 'success'); } }}>{r.callBack}</td>
-                        <td className="px-3 py-2 text-gray-700 text-xs max-w-xs">
-                          <div
-                            className="truncate cursor-pointer hover:text-blue-600 hover:underline"
-                            title="클릭하면 전체 메시지 + 복사"
-                            onClick={() => r.msgContents && setSmsDetailMsgModal(r.msgContents)}
-                          >
-                            {r.msgContents ? (r.msgContents.length > 40 ? r.msgContents.substring(0, 40) + '…' : r.msgContents) : '-'}
-                          </div>
-                        </td>
-                        {/* ★ 2026-10-07 칸 넘침 정정(박성용 접수) — 타입 · 통신사 · 결과는 한 줄 고정 */}
-                        <td className="px-3 py-2 text-center text-xs text-gray-600 whitespace-nowrap">{r.msgType}</td>
-                        <td className="px-3 py-2 text-center text-xs text-gray-600 whitespace-nowrap">{r.carrier}</td>
-                        <td className="px-3 py-2 text-center whitespace-nowrap">
-                          {/* ★ 2026-06-13: 발송 예약(미발송) 행은 파란 칩 — 결과 대기와 구분 */}
-                          <span className={`inline-flex px-1.5 py-0.5 rounded text-xs font-medium ${
-                            r.statusType === 'success' ? 'bg-green-100 text-green-700' :
-                            r.statusType === 'scheduled' ? 'bg-blue-100 text-blue-700' :
-                            r.statusType === 'pending' ? 'bg-amber-100 text-amber-700' :
-                            'bg-red-100 text-red-700'
-                          }`}>{r.statusText}</span>
-                          {r.isFallback && <div className="text-[11px] text-gray-400 mt-0.5">알림톡 실패</div>}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              )}
-            </div>
-
-            {/* 하단 페이징 */}
-            {smsDetailTotal > 50 && (
-              <div className="px-6 py-3 border-t bg-gray-50 flex items-center justify-between flex-shrink-0">
-                <span className="text-xs text-gray-500">{smsDetailPage} / {Math.ceil(smsDetailTotal / 50)} 페이지</span>
-                <div className="flex gap-1">
-                  <button onClick={() => smsDetailCampaign && loadSmsDetail(smsDetailCampaign.id, Math.max(1, smsDetailPage - 1))}
-                    disabled={smsDetailPage === 1}
-                    className="px-3 py-1 rounded border text-xs disabled:opacity-40 hover:bg-white">◀ 이전</button>
-                  <button onClick={() => smsDetailCampaign && loadSmsDetail(smsDetailCampaign.id, Math.min(Math.ceil(smsDetailTotal / 50), smsDetailPage + 1))}
-                    disabled={smsDetailPage >= Math.ceil(smsDetailTotal / 50)}
-                    className="px-3 py-1 rounded border text-xs disabled:opacity-40 hover:bg-white">다음 ▶</button>
-                </div>
-              </div>
-            )}
-          </div>
-        </div>
-      )}
+      {smsDetailModal && <SmsDetailModal {...{ loadSmsDetail, setSmsDetailModal, setSmsDetailMsgModal, setSmsDetailSearchType, setSmsDetailSearchValue, setSmsDetailStatus, showAlert, smsDetailCampaign, smsDetailLoading, smsDetailPage, smsDetailRows, smsDetailSearchType, smsDetailSearchValue, smsDetailStatus, smsDetailTotal }} />}
 
       {/* ★ D144 후속: 발송 상세 내역 모달 메시지 셀 클릭 시 표시 + 복사 */}
       <MessageDetailModal
@@ -10902,448 +2977,22 @@ const handleApproveRequest = async (id: string) => {
       />
 
       {/* 예약 취소 모달 */}
-      {showCancelModal && cancelTarget && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden">
-            <div className="p-6">
-              <div className="w-12 h-12 rounded-full bg-red-100 flex items-center justify-center mx-auto mb-4">
-                <svg className="w-6 h-6 text-red-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
-                </svg>
-              </div>
-              <h3 className="text-lg font-semibold text-center text-gray-900 mb-2">예약 취소</h3>
-              <p className="text-sm text-center text-gray-600 mb-4">
-                <span className="font-medium text-gray-900">"{cancelTarget.name}"</span> 캠페인을 취소하시겠습니까?
-              </p>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  취소 사유 <span className="text-red-500">*</span>
-                </label>
-                <textarea
-                  value={cancelReason}
-                  onChange={(e) => setCancelReason(e.target.value)}
-                  className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-red-500 outline-none resize-none"
-                  rows={3}
-                  placeholder="취소 사유를 입력해주세요 (이력 관리용)"
-                  required
-                />
-              </div>
-            </div>
-            <div className="flex border-t">
-              <button
-                onClick={() => {
-                  setShowCancelModal(false);
-                  setCancelTarget(null);
-                  setCancelReason('');
-                }}
-                className="flex-1 px-4 py-3 text-gray-700 font-medium hover:bg-gray-50 transition-colors border-r"
-              >
-                닫기
-              </button>
-              <button
-                onClick={handleCancelCampaign}
-                className="flex-1 px-4 py-3 text-red-600 font-medium hover:bg-red-50 transition-colors"
-              >
-                취소하기
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      {showCancelModal && cancelTarget && <CancelScheduledModal {...{ cancelReason, cancelTarget, loadScheduledCampaigns, setCancelReason, setCancelTarget, setShowCancelModal, showAlert }} />}
 
       {/* 발신번호 수정 모달 */}
-      {editingCallback && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden">
-            <div className="p-6">
-              <h3 className="text-lg font-semibold text-gray-800 mb-4">📞 발신번호 수정</h3>
-              <form onSubmit={handleUpdateCallback} className="space-y-4">
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">발신번호 *</label>
-                  <input
-                    type="text"
-                    value={editingCallback.phone}
-                    onChange={(e) => setEditingCallback({ ...editingCallback, phone: e.target.value })}
-                    className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
-                    required
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">별칭</label>
-                  <input
-                    type="text"
-                    value={editingCallback.label}
-                    onChange={(e) => setEditingCallback({ ...editingCallback, label: e.target.value })}
-                    className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
-                    placeholder="예: 대표번호, 강남점"
-                  />
-                </div>
-                <div className="flex gap-2 pt-2">
-                  <button type="button" onClick={() => setEditingCallback(null)}
-                    className="flex-1 px-4 py-2 border rounded-lg text-gray-700 hover:bg-gray-50">취소</button>
-                  <button type="submit"
-                    className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700">저장</button>
-                </div>
-              </form>
-            </div>
-          </div>
-        </div>
-      )}
+      {editingCallback && <CallbackEditModal {...{ editingCallback, loadCallbackNumbers, setEditingCallback, showAlert }} />}
 
       {/* 발신번호 등록 모달 */}
-      {showCallbackModal && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden">
-            <div className="px-6 py-4 border-b bg-gradient-to-r from-blue-50 to-indigo-50">
-              <h3 className="text-lg font-semibold text-gray-800">📞 발신번호 등록</h3>
-            </div>
-            <form onSubmit={handleCreateCallback} className="p-6 space-y-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  고객사 *
-                </label>
-                {/* ★ D145 P3 (2026-05-07): SearchableSelect 적용 — 162개+ 고객사 스크롤 대신 입력으로 검색 */}
-                <SearchableSelect
-                  options={companies.map((company) => ({
-                    value: company.id,
-                    label: `${company.company_name} (${company.company_code})`,
-                  }))}
-                  value={newCallback.companyId}
-                  onChange={(value) => setNewCallback({ ...newCallback, companyId: value })}
-                  placeholder="고객사 선택 또는 입력 검색..."
-                  required
-                  className="w-full"
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  발신번호 *
-                </label>
-                <input
-                  type="text"
-                  value={newCallback.phone}
-                  onChange={(e) => setNewCallback({ ...newCallback, phone: e.target.value })}
-                  className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
-                  placeholder="02-1234-5678"
-                  required
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  별칭
-                </label>
-                <input
-                  type="text"
-                  value={newCallback.label}
-                  onChange={(e) => setNewCallback({ ...newCallback, label: e.target.value })}
-                  className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
-                  placeholder="대표번호, 고객센터 등"
-                />
-              </div>
-              <div className="flex items-center gap-2">
-                <input
-                  type="checkbox"
-                  id="isDefault"
-                  checked={newCallback.isDefault}
-                  onChange={(e) => setNewCallback({ ...newCallback, isDefault: e.target.checked })}
-                  className="w-4 h-4 text-blue-600 rounded focus:ring-blue-500"
-                />
-                <label htmlFor="isDefault" className="text-sm text-gray-700">
-                  대표번호로 설정
-                </label>
-              </div>
-              <div className="flex gap-3 pt-4">
-                <button
-                  type="button"
-                  onClick={() => {
-                    setShowCallbackModal(false);
-                    setNewCallback({ companyId: '', phone: '', label: '', isDefault: false });
-                  }}
-                  className="flex-1 px-4 py-2 border rounded-lg text-gray-700 hover:bg-gray-50"
-                >
-                  취소
-                </button>
-                <button
-                  type="submit"
-                  className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
-                >
-                  등록
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
+      {showCallbackModal && <CallbackCreateModal {...{ companies, loadCallbackNumbers, newCallback, setNewCallback, setShowCallbackModal, showAlert }} />}
 
       {/* 발신번호 등록 신청 상세 모달 */}
-      {showSenderRegDetailModal && senderRegDetail && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl overflow-hidden max-h-[90vh] flex flex-col">
-            <div className="px-6 py-4 border-b bg-gradient-to-r from-blue-50 to-indigo-50 flex justify-between items-center">
-              <h3 className="text-lg font-semibold text-gray-800">발신번호 등록 신청 상세</h3>
-              <button onClick={() => { setShowSenderRegDetailModal(false); setSenderRegDetail(null); }} className="text-gray-400 hover:text-gray-600 text-xl">&times;</button>
-            </div>
-            <div className="p-6 space-y-5 overflow-y-auto">
-              {/* 기본 정보 */}
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <span className="text-xs text-gray-500 block">고객사</span>
-                  <span className="text-sm font-medium text-gray-900">{senderRegDetail.company_name || '-'}</span>
-                </div>
-                <div>
-                  <span className="text-xs text-gray-500 block">발신번호</span>
-                  <span className="text-sm font-mono font-medium text-gray-900">{senderRegDetail.phone}</span>
-                </div>
-                <div>
-                  <span className="text-xs text-gray-500 block">별칭</span>
-                  <span className="text-sm text-gray-700">{senderRegDetail.label || '-'}</span>
-                </div>
-                <div>
-                  <span className="text-xs text-gray-500 block">매장</span>
-                  <span className="text-sm text-gray-700">{senderRegDetail.store_name || '-'}{senderRegDetail.store_code ? ` (${senderRegDetail.store_code})` : ''}</span>
-                </div>
-                <div>
-                  <span className="text-xs text-gray-500 block">신청자</span>
-                  <span className="text-sm text-gray-700">{senderRegDetail.requested_by_name || '-'}</span>
-                </div>
-                <div>
-                  <span className="text-xs text-gray-500 block">신청일</span>
-                  <span className="text-sm text-gray-700">{formatDateTime(senderRegDetail.created_at)}</span>
-                </div>
-                <div className="col-span-2">
-                  <span className="text-xs text-gray-500 block">상태</span>
-                  <span className={`inline-block px-2 py-1 rounded-full text-xs font-medium mt-0.5 ${
-                    senderRegDetail.status === 'pending' ? 'bg-yellow-100 text-yellow-800'
-                    : senderRegDetail.status === 'approved' ? 'bg-green-100 text-green-800'
-                    : 'bg-red-100 text-red-800'
-                  }`}>
-                    {senderRegDetail.status === 'pending' ? '승인 대기' : senderRegDetail.status === 'approved' ? '승인 완료' : '반려'}
-                  </span>
-                </div>
-              </div>
-
-              {/* 요청 메모 */}
-              {senderRegDetail.request_note && (
-                <div>
-                  <span className="text-xs text-gray-500 block mb-1">신청 메모</span>
-                  <p className="text-sm text-gray-700 bg-gray-50 rounded-lg p-3">{senderRegDetail.request_note}</p>
-                </div>
-              )}
-
-              {/* 첨부 문서 */}
-              <div>
-                <span className="text-xs text-gray-500 block mb-2">첨부 문서</span>
-                {(senderRegDetail.documents || []).length === 0 ? (
-                  <p className="text-sm text-gray-400">첨부된 문서가 없습니다.</p>
-                ) : (
-                  <div className="space-y-2">
-                    {(senderRegDetail.documents || []).map((doc: any, idx: number) => (
-                      <div key={idx} className="flex items-center justify-between bg-gray-50 rounded-lg p-3">
-                        <div>
-                          <span className={`inline-block px-2 py-0.5 rounded text-xs font-medium mr-2 ${
-                            doc.type === 'telecom_cert' ? 'bg-blue-100 text-blue-700' : 'bg-purple-100 text-purple-700'
-                          }`}>
-                            {doc.type === 'telecom_cert' ? '통신가입증명원' : '위임장'}
-                          </span>
-                          <span className="text-sm text-gray-700">{doc.originalName}</span>
-                          {doc.fileSize && <span className="text-xs text-gray-400 ml-2">({(doc.fileSize / 1024).toFixed(0)}KB)</span>}
-                        </div>
-                        <button
-                          onClick={() => downloadSenderDoc(doc.storedName, doc.originalName)}
-                          className="text-blue-600 hover:text-blue-800 text-sm font-medium"
-                        >
-                          다운로드
-                        </button>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-
-              {/* 반려 사유 (반려된 경우) */}
-              {senderRegDetail.status === 'rejected' && senderRegDetail.reject_reason && (
-                <div>
-                  <span className="text-xs text-gray-500 block mb-1">반려 사유</span>
-                  <p className="text-sm text-red-600 bg-red-50 rounded-lg p-3">{senderRegDetail.reject_reason}</p>
-                </div>
-              )}
-
-              {/* 승인/반려 액션 (pending일 때만) */}
-              {senderRegDetail.status === 'pending' && (
-                <div className="border-t pt-5 space-y-4">
-                  <div className="flex gap-3">
-                    <button
-                      onClick={() => handleApproveSenderReg(senderRegDetail.id)}
-                      className="flex-1 px-4 py-2.5 bg-green-600 text-white rounded-lg hover:bg-green-700 font-medium text-sm"
-                    >
-                      승인 (발신번호 등록)
-                    </button>
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">반려 사유</label>
-                    <textarea
-                      value={rejectReasonInput}
-                      onChange={(e) => setRejectReasonInput(e.target.value)}
-                      placeholder="반려 사유를 입력해주세요..."
-                      className="w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-red-500 outline-none resize-none"
-                      rows={2}
-                    />
-                    <button
-                      onClick={() => handleRejectSenderReg(senderRegDetail.id)}
-                      className="mt-2 w-full px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 font-medium text-sm"
-                    >
-                      반려
-                    </button>
-                  </div>
-                </div>
-              )}
-            </div>
-          </div>
-        </div>
-      )}
+      {showSenderRegDetailModal && senderRegDetail && <SenderRegDetailModal {...{ downloadSenderDoc, loadCallbackNumbers, loadSenderRegPendingCount, loadSenderRegistrations, rejectReasonInput, senderRegDetail, senderRegFilter, setModal, setRejectReasonInput, setSenderRegDetail, setShowSenderRegDetailModal }} />}
 
       {/* 요금제 추가 모달 */}
-      {showPlanModal && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden">
-            <div className="px-6 py-4 border-b bg-gradient-to-r from-green-50 to-emerald-50">
-              <h3 className="text-lg font-semibold text-gray-800">💳 요금제 추가</h3>
-            </div>
-            <form onSubmit={handleCreatePlan} className="p-6 space-y-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">요금제 코드 *</label>
-                <input
-                  type="text"
-                  value={newPlan.planCode}
-                  onChange={(e) => setNewPlan({ ...newPlan, planCode: e.target.value })}
-                  className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-green-500 outline-none"
-                  placeholder="예: BASIC, PRO, ENTERPRISE"
-                  required
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">요금제명 *</label>
-                <input
-                  type="text"
-                  value={newPlan.planName}
-                  onChange={(e) => setNewPlan({ ...newPlan, planName: e.target.value })}
-                  className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-green-500 outline-none"
-                  placeholder="예: 베이직, 프로, 엔터프라이즈"
-                  required
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">월 요금 (원) *</label>
-                <input
-                  type="number"
-                  value={newPlan.monthlyPrice}
-                  onChange={(e) => setNewPlan({ ...newPlan, monthlyPrice: Number(e.target.value) })}
-                  className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-green-500 outline-none"
-                  min="0"
-                  required
-                />
-              </div>
-              <div className="flex gap-3 pt-4">
-                <button
-                  type="button"
-                  onClick={() => {
-                    setShowPlanModal(false);
-                    setNewPlan({ planCode: '', planName: '', maxCustomers: 1000, monthlyPrice: 0 });
-                  }}
-                  className="flex-1 px-4 py-2 border rounded-lg text-gray-700 hover:bg-gray-50"
-                >
-                  취소
-                </button>
-                <button
-                  type="submit"
-                  className="flex-1 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700"
-                >
-                  등록
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
+      {showPlanModal && <PlanCreateModal {...{ loadPlans, newPlan, setNewPlan, setShowPlanModal, showAlert }} />}
 
       {/* 요금제 수정 모달 */}
-      {editingPlan && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden">
-            <div className="px-6 py-4 border-b bg-gradient-to-r from-blue-50 to-indigo-50">
-              <h3 className="text-lg font-semibold text-gray-800">✏️ 요금제 수정</h3>
-            </div>
-            <form onSubmit={handleUpdatePlan} className="p-6 space-y-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">요금제 코드</label>
-                <input
-                  type="text"
-                  value={editingPlan.plan_code}
-                  disabled
-                  className="w-full px-3 py-2 border rounded-lg bg-gray-100 text-gray-500"
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">요금제명 *</label>
-                <input
-                  type="text"
-                  value={editingPlan.plan_name}
-                  onChange={(e) => setEditingPlan({ ...editingPlan, plan_name: e.target.value })}
-                  className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
-                  required
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">월 요금 (원) *</label>
-                <input
-                  type="number"
-                  value={editingPlan.monthly_price}
-                  onChange={(e) => setEditingPlan({ ...editingPlan, monthly_price: Number(e.target.value) })}
-                  className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
-                  min="0"
-                  required
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">월 AI 크레딧</label>
-                <input
-                  type="number"
-                  value={editingPlan.ai_credits_per_month ?? ''}
-                  onChange={(e) => setEditingPlan({ ...editingPlan, ai_credits_per_month: e.target.value === '' ? null : Number(e.target.value) })}
-                  className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-violet-500 outline-none"
-                  min="0"
-                  placeholder="비워두면 크레딧 차감 미적용 (NULL)"
-                />
-              </div>
-              <div className="flex items-center gap-2">
-                <input
-                  type="checkbox"
-                  id="planActive"
-                  checked={editingPlan.is_active}
-                  onChange={(e) => setEditingPlan({ ...editingPlan, is_active: e.target.checked })}
-                  className="w-4 h-4 text-blue-600 rounded focus:ring-blue-500"
-                />
-                <label htmlFor="planActive" className="text-sm text-gray-700">활성화</label>
-              </div>
-              <div className="flex gap-3 pt-4">
-                <button
-                  type="button"
-                  onClick={() => setEditingPlan(null)}
-                  className="flex-1 px-4 py-2 border rounded-lg text-gray-700 hover:bg-gray-50"
-                >
-                  취소
-                </button>
-                <button
-                  type="submit"
-                  className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
-                >
-                  저장
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
+      {editingPlan && <PlanEditModal {...{ editingPlan, loadPlans, setEditingPlan, showAlert }} />}
 
       {/* ★2026-08-26 §18 대행발송 메일 접수 관제 탭 */}
       {activeTab === 'agencyMail' && <AgencyMailIntakePanel />}
@@ -11367,7 +3016,7 @@ const handleApproveRequest = async (id: string) => {
 
       {/* 확인 모달 (Confirm) */}
       {modal.type === 'confirm' && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-[60]">
+        <div className="fixed inset-0 bg-gray-900/40 flex items-center justify-center p-4 z-[60]">
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden animate-in fade-in zoom-in duration-200">
             <div className="p-6">
               <div className="w-12 h-12 rounded-full bg-orange-100 flex items-center justify-center mx-auto mb-4">
@@ -11375,19 +3024,19 @@ const handleApproveRequest = async (id: string) => {
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
                 </svg>
               </div>
-              <h3 className="text-lg font-semibold text-center text-gray-900 mb-2">{modal.title}</h3>
+              <h3 className="text-base font-semibold text-center text-gray-900 mb-2">{modal.title}</h3>
               <p className="text-sm text-center text-gray-600 whitespace-pre-line">{modal.message}</p>
             </div>
             <div className="flex border-t">
               <button
                 onClick={closeModal}
-                className="flex-1 px-4 py-3 text-gray-700 font-medium hover:bg-gray-50 transition-colors border-r"
+                className="whitespace-nowrap flex-1 px-4 py-3 text-gray-700 font-medium hover:bg-gray-50 transition-colors border-r"
               >
                 취소
               </button>
               <button
                 onClick={() => modal.onConfirm?.()}
-                className="flex-1 px-4 py-3 text-orange-600 font-medium hover:bg-orange-50 transition-colors"
+                className="whitespace-nowrap flex-1 px-4 py-3 text-orange-600 font-medium hover:bg-orange-50 transition-colors"
               >
                 확인
               </button>
@@ -11398,7 +3047,7 @@ const handleApproveRequest = async (id: string) => {
 
       {/* 알림 모달 (Alert) */}
       {modal.type === 'alert' && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-[60]">
+        <div className="fixed inset-0 bg-gray-900/40 flex items-center justify-center p-4 z-[60]">
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden animate-in fade-in zoom-in duration-200">
             <div className="p-6">
               <div className={`w-12 h-12 rounded-full flex items-center justify-center mx-auto mb-4 ${
@@ -11427,16 +3076,16 @@ const handleApproveRequest = async (id: string) => {
                   </svg>
                 )}
               </div>
-              <h3 className="text-lg font-semibold text-center text-gray-900 mb-2">{modal.title}</h3>
+              <h3 className="text-base font-semibold text-center text-gray-900 mb-2">{modal.title}</h3>
               <p className="text-sm text-center text-gray-600">{modal.message}</p>
             </div>
             <div className="border-t">
               <button
                 onClick={closeModal}
-                className={`w-full px-4 py-3 font-medium transition-colors ${
+                className={`whitespace-nowrap w-full px-4 py-3 font-medium transition-colors ${
                   modal.variant === 'success' ? 'text-green-600 hover:bg-green-50' :
                   modal.variant === 'error' ? 'text-red-600 hover:bg-red-50' :
-                  modal.variant === 'warning' ? 'text-yellow-600 hover:bg-yellow-50' : 'text-blue-600 hover:bg-blue-50'
+                  modal.variant === 'warning' ? 'text-yellow-600 hover:bg-yellow-50' : 'text-emerald-700 hover:bg-emerald-50'
                 }`}
               >
                 확인
@@ -11448,7 +3097,7 @@ const handleApproveRequest = async (id: string) => {
 
       {/* 비밀번호 모달 (복사 기능 포함) */}
       {modal.type === 'password' && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-[60]">
+        <div className="fixed inset-0 bg-gray-900/40 flex items-center justify-center p-4 z-[60]">
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden animate-in fade-in zoom-in duration-200">
             <div className="p-6">
               <div className="w-12 h-12 rounded-full bg-green-100 flex items-center justify-center mx-auto mb-4">
@@ -11456,7 +3105,7 @@ const handleApproveRequest = async (id: string) => {
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z" />
                 </svg>
               </div>
-              <h3 className="text-lg font-semibold text-center text-gray-900 mb-4">{modal.title}</h3>
+              <h3 className="text-base font-semibold text-center text-gray-900 mb-4">{modal.title}</h3>
               
               <div className="bg-gray-50 rounded-xl p-4 mb-4">
                 <p className="text-xs text-gray-500 mb-2 text-center">임시 비밀번호</p>
@@ -11466,7 +3115,7 @@ const handleApproveRequest = async (id: string) => {
                   </code>
                   <button
                     onClick={handleCopyPassword}
-                    className={`p-2 rounded-lg transition-all ${
+                    className={`whitespace-nowrap p-2 rounded-lg transition-all ${
                       copied 
                         ? 'bg-green-100 text-green-600' 
                         : 'bg-gray-200 text-gray-600 hover:bg-gray-300'
@@ -11492,7 +3141,7 @@ const handleApproveRequest = async (id: string) => {
               {modal.smsSent && modal.phone && (
                 <div className="bg-blue-50 rounded-lg p-3 mb-4">
                   <p className="text-sm text-blue-800 text-center">
-                    📱 <strong>{modal.phone}</strong>로 SMS 발송 완료
+                    <strong>{modal.phone}</strong>로 SMS 발송 완료
                   </p>
                 </div>
               )}
@@ -11512,7 +3161,7 @@ const handleApproveRequest = async (id: string) => {
             <div className="border-t">
               <button
                 onClick={closeModal}
-                className="w-full px-4 py-3 text-blue-600 font-medium hover:bg-blue-50 transition-colors"
+                className="whitespace-nowrap w-full px-4 py-3 text-emerald-700 font-medium hover:bg-emerald-50 transition-colors"
               >
                 확인
               </button>
@@ -11521,178 +3170,17 @@ const handleApproveRequest = async (id: string) => {
         </div>
       )}
 {/* 발송 통계 상세 모달 */}
-{statsDetailInfo && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-[60]">
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-4xl max-h-[85vh] overflow-hidden">
-            <div className="px-6 py-4 border-b flex items-center justify-between">
-              <div>
-                <h3 className="text-lg font-semibold text-gray-900">발송 통계 상세</h3>
-                <p className="text-sm text-gray-500 mt-0.5">
-                  {statsDetailInfo.date} · {statsDetailInfo.companyName}
-                </p>
-              </div>
-              <button
-                onClick={() => { setStatsDetail(null); setStatsDetailInfo(null); }}
-                className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
-              >
-                <svg className="w-5 h-5 text-gray-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                </svg>
-              </button>
-            </div>
-
-            <div className="overflow-y-auto max-h-[calc(85vh-64px)] p-6 space-y-6">
-              {statsDetailLoading ? (
-                <div className="text-center py-12 text-gray-400">로딩 중...</div>
-              ) : statsDetail ? (
-                <>
-                  {/* 사용자별 요약 */}
-                  <div>
-                    <h4 className="text-sm font-semibold text-gray-700 mb-3 flex items-center gap-2">
-                      <svg className="w-4 h-4 text-blue-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
-                      </svg>
-                      사용자별 발송 현황
-                    </h4>
-                    <div className="bg-gray-50 rounded-lg overflow-hidden">
-                      <table className="w-full text-sm">
-                        <thead className="bg-gray-100">
-                          <tr>
-                            <th className="px-4 py-2.5 text-left text-gray-600 font-medium">사용자</th>
-                            <th className="px-4 py-2.5 text-left text-gray-600 font-medium">아이디</th>
-                            <th className="px-4 py-2.5 text-center text-gray-600 font-medium">부서</th>
-                            <th className="px-4 py-2.5 text-center text-gray-600 font-medium">담당 브랜드</th>
-                            <th className="px-4 py-2.5 text-center text-gray-600 font-medium">캠페인수</th>
-                            <th className="px-4 py-2.5 text-center text-gray-600 font-medium">전송</th>
-                            <th className="px-4 py-2.5 text-center text-gray-600 font-medium">성공</th>
-                            <th className="px-4 py-2.5 text-center text-gray-600 font-medium">실패</th>
-                            <th className="px-4 py-2.5 text-center text-gray-600 font-medium">성공률</th>
-                          </tr>
-                        </thead>
-                        <tbody className="divide-y divide-gray-200">
-                          {statsDetail.userStats?.length === 0 ? (
-                            <tr><td colSpan={9} className="px-4 py-8 text-center text-gray-400">데이터가 없습니다.</td></tr>
-                          ) : statsDetail.userStats?.map((u: any, idx: number) => {
-                            const sent = Number(u.sent);
-                            const success = Number(u.success);
-                            const fail = Number(u.fail);
-                            const rate = sent > 0 ? (success / sent * 100).toFixed(1) : '-';
-                            return (
-                              <tr key={idx} className="hover:bg-white">
-                                <td className="px-4 py-2.5 font-medium text-gray-900">{u.user_name || '(알 수 없음)'}</td>
-                                <td className="px-4 py-2.5 text-gray-500 font-mono text-xs">{u.login_id || '-'}</td>
-                                <td className="px-4 py-2.5 text-center text-gray-500">{u.department || '-'}</td>
-                                <td className="px-4 py-2.5 text-center text-gray-500">{u.store_codes?.length > 0 ? u.store_codes.join(', ') : '-'}</td>
-                                <td className="px-4 py-2.5 text-center text-gray-700">{Number(u.runs)}</td>
-                                <td className="px-4 py-2.5 text-center text-blue-600 font-medium">{sent.toLocaleString()}</td>
-                                <td className="px-4 py-2.5 text-center text-green-600">{success.toLocaleString()}</td>
-                                <td className="px-4 py-2.5 text-center text-red-600">{fail.toLocaleString()}</td>
-                                <td className="px-4 py-2.5 text-center font-medium">{rate}%</td>
-                              </tr>
-                            );
-                          })}
-                        </tbody>
-                      </table>
-                    </div>
-                  </div>
-
-                  {/* 캠페인별 상세 */}
-                  <div>
-                    <h4 className="text-sm font-semibold text-gray-700 mb-3 flex items-center gap-2">
-                      <svg className="w-4 h-4 text-orange-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
-                      </svg>
-                      캠페인별 발송 내역
-                    </h4>
-                    <div className="bg-gray-50 rounded-lg overflow-hidden">
-                      <table className="w-full text-sm">
-                        <thead className="bg-gray-100">
-                          <tr>
-                            <th className="px-4 py-2.5 text-left text-gray-600 font-medium">캠페인명</th>
-                            <th className="px-4 py-2.5 text-center text-gray-600 font-medium">유형</th>
-                            <th className="px-4 py-2.5 text-center text-gray-600 font-medium">발송자</th>
-                            <th className="px-4 py-2.5 text-center text-gray-600 font-medium">대상</th>
-                            <th className="px-4 py-2.5 text-center text-gray-600 font-medium">전송</th>
-                            <th className="px-4 py-2.5 text-center text-gray-600 font-medium">성공</th>
-                            <th className="px-4 py-2.5 text-center text-gray-600 font-medium">실패</th>
-                            <th className="px-4 py-2.5 text-center text-gray-600 font-medium">타입</th>
-                            <th className="px-4 py-2.5 text-left text-gray-600 font-medium">메시지내용</th>
-                            <th className="px-4 py-2.5 text-center text-gray-600 font-medium">등록일시</th>
-                            <th className="px-4 py-2.5 text-center text-gray-600 font-medium">발송일시</th>
-                          </tr>
-                        </thead>
-                        <tbody className="divide-y divide-gray-200">
-                          {statsDetail.campaigns?.length === 0 ? (
-                            <tr><td colSpan={11} className="px-4 py-8 text-center text-gray-400">데이터가 없습니다.</td></tr>
-                          ) : statsDetail.campaigns?.map((c: any, idx: number) => (
-                            <tr key={idx} className="hover:bg-white">
-                              <td className="px-4 py-2.5 font-medium text-gray-900 max-w-[200px] truncate" title={c.campaign_name}>
-                                {c.campaign_name}
-                              </td>
-                              <td className="px-4 py-2.5 text-center">
-                                <span className={`inline-block px-2 py-0.5 rounded text-xs font-medium ${resolveSendTypeChipClass(c.send_type)}`}>
-                                  {resolveSendTypeLabel(c.send_type)}
-                                </span>
-                              </td>
-                              <td className="px-4 py-2.5 text-center text-gray-600">{c.user_name || '-'}</td>
-                              <td className="px-4 py-2.5 text-center text-gray-500">{Number(c.target_count || 0).toLocaleString()}</td>
-                              <td className="px-4 py-2.5 text-center text-blue-600 font-medium">{Number(c.sent_count || 0).toLocaleString()}</td>
-                              <td className="px-4 py-2.5 text-center text-green-600">{Number(c.success_count || 0).toLocaleString()}</td>
-                              <td className="px-4 py-2.5 text-center text-red-600">{Number(c.fail_count || 0).toLocaleString()}</td>
-                              <td className="px-4 py-2.5 text-center">
-                                <span className={`inline-block px-2 py-0.5 rounded text-xs ${
-                                  c.message_type === 'LMS' ? 'bg-blue-100 text-blue-700' :
-                                  c.message_type === 'MMS' ? 'bg-indigo-100 text-indigo-700' : 'bg-gray-100 text-gray-600'
-                                }`}>
-                                  {resolveChannelLabel(c)}
-                                </span>
-                              </td>
-                              <td className="px-4 py-2.5 text-left text-xs text-gray-600 max-w-[250px]">
-                                {c.message_content ? (
-                                  (() => {
-                                    // ★ B2: 컨트롤타워 — opt_out_080_number 기반 (광고)+080 부착
-                                    const fullMsg = formatCampaignMessageForDisplay(c);
-                                    return (
-                                      <div
-                                        className="truncate cursor-pointer hover:text-blue-600"
-                                        title="클릭하여 전체 메시지 보기"
-                                        onClick={() => setMessageDetailContent({ name: c.campaign_name, content: fullMsg })}
-                                      >
-                                        {fullMsg.substring(0, 50)}{fullMsg.length > 50 ? '...' : ''}
-                                      </div>
-                                    );
-                                  })()
-                                ) : '-'}
-                              </td>
-                              <td className="px-4 py-2.5 text-center text-gray-500 font-mono text-xs">
-                                {c.created_at ? new Date(c.created_at).toLocaleString('ko-KR', { timeZone: 'Asia/Seoul', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }) : '-'}
-                              </td>
-                              <td className="px-4 py-2.5 text-center text-gray-500 font-mono text-xs">
-                                {/* ★ 2026-06-13: 예약 우선 — 예약 캠페인 sent_at은 등록 시점 값(0609 교훈) */}
-                                {(c.scheduled_at || c.sent_at) ? new Date(c.scheduled_at || c.sent_at).toLocaleString('ko-KR', { timeZone: 'Asia/Seoul', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }) : '-'}
-                              </td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
-                  </div>
-                </>
-              ) : null}
-            </div>
-          </div>
-        </div>
-      )}
+{statsDetailInfo && <StatsDetailModal {...{ setMessageDetailContent, setStatsDetail, setStatsDetailInfo, statsDetail, statsDetailInfo, statsDetailLoading }} />}
       {/* ★ D102: 메시지 내용 상세 모달 */}
       {messageDetailContent && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-gray-900/40">
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg mx-4 max-h-[80vh] overflow-auto" onClick={e => e.stopPropagation()}>
             <div className="px-6 pt-5 pb-3 border-b bg-gray-50 rounded-t-2xl flex justify-between items-center">
               <div>
                 <h3 className="text-base font-bold text-gray-900">메시지 내용</h3>
                 <p className="text-xs text-gray-500 mt-0.5">{messageDetailContent.name}</p>
               </div>
-              <button onClick={() => setMessageDetailContent(null)} className="text-gray-400 hover:text-gray-600 text-lg leading-none">&times;</button>
+              <button onClick={() => setMessageDetailContent(null)} className="whitespace-nowrap text-gray-400 hover:text-gray-600 text-lg leading-none">&times;</button>
             </div>
             <div className="p-6 whitespace-pre-wrap break-words text-sm text-gray-700">{messageDetailContent.content}</div>
           </div>
@@ -11708,7 +3196,7 @@ const handleApproveRequest = async (id: string) => {
         </div>
       )}
       {activeTab === 'billing' && (
-        <div className="bg-white rounded-2xl border border-gray-200/70 shadow-sm">
+        <div className="bg-white rounded-xl border border-gray-200/80 shadow-sm">
           {/* ===== 1. 정산 생성 ===== */}
           <div className="px-6 py-5 border-b">
             <h3 className="text-base font-semibold text-gray-800 mb-4 flex items-center gap-2">
@@ -11738,13 +3226,13 @@ const handleApproveRequest = async (id: string) => {
                 {/* ★ 2026-08-20 기간을 바꾸면 정산월 명시 선택을 초기화한다(Codex 1R medium 수용) —
                     선택은 그 기간에 대한 것이다. 남겨 두면 옛 선택이 나중 기간에서 조용히 되살아난다. */}
                 <input type="date" value={billingStart} onChange={e => { setBillingStart(e.target.value); setBillingLabelMonth(''); }}
-                  className="px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 outline-none" />
+                  className="px-3 py-1.5 border border-gray-200 rounded-lg text-[13px] focus:ring-2 focus:ring-emerald-500/30 outline-none" />
               </div>
               {/* 종료일 */}
               <div>
                 <label className="block text-xs font-medium text-gray-500 mb-1">종료일</label>
                 <input type="date" value={billingEnd} onChange={e => { setBillingEnd(e.target.value); setBillingLabelMonth(''); }}
-                  className="px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 outline-none" />
+                  className="px-3 py-1.5 border border-gray-200 rounded-lg text-[13px] focus:ring-2 focus:ring-emerald-500/30 outline-none" />
               </div>
               {/* ★ 2026-08-20 정산월(라벨) — 서수란 0819 접수. 역월 정산은 표시만(입력 없음),
                   기간이 두 역월에 걸치는 중간정산에서만 선택이 나타난다(기본 종료월). */}
@@ -11752,7 +3240,7 @@ const handleApproveRequest = async (id: string) => {
                 <label className="block text-xs font-medium text-gray-500 mb-1">정산월</label>
                 {billingLabelOptions.length > 1 ? (
                   <select value={billingLabelEffective} onChange={e => setBillingLabelMonth(e.target.value)}
-                    className="px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 outline-none bg-white">
+                    className="px-3 py-1.5 border border-gray-200 rounded-lg text-[13px] focus:ring-2 focus:ring-emerald-500/30 outline-none bg-white">
                     {billingLabelOptions.map(ym => <option key={ym} value={ym}>{billingLabelText(ym)}</option>)}
                   </select>
                 ) : (
@@ -11761,11 +3249,11 @@ const handleApproveRequest = async (id: string) => {
               </div>
               {/* 발행 단위 */}
               <div className="flex items-center gap-3 pb-0.5">
-                <label className="flex items-center gap-1.5 text-sm cursor-pointer">
+                <label className="flex items-center gap-1.5 text-[13px] cursor-pointer">
                   <input type="radio" checked={billingScope === 'company'} onChange={() => setBillingScope('company')} className="accent-indigo-600" />
                   고객사 전체
                 </label>
-                <label className="flex items-center gap-1.5 text-sm cursor-pointer">
+                <label className="flex items-center gap-1.5 text-[13px] cursor-pointer">
                   <input type="radio" checked={billingScope === 'user'} onChange={() => setBillingScope('user')} className="accent-indigo-600" />
                   계정별
                 </label>
@@ -11782,7 +3270,7 @@ const handleApproveRequest = async (id: string) => {
               <button
                 onClick={openBillingGenerateConfirm}
                 disabled={generating}
-                className="px-5 py-2 bg-indigo-600 text-white rounded-lg text-sm font-medium hover:bg-indigo-700 disabled:opacity-50 transition-colors"
+                className="whitespace-nowrap px-5 py-2 bg-emerald-600 text-white rounded-lg text-[13px] font-medium hover:bg-emerald-700 disabled:opacity-50 transition-colors"
               >
                 {generating ? '생성 중...' : '정산 생성'}
               </button>
@@ -11798,7 +3286,7 @@ const handleApproveRequest = async (id: string) => {
                 </svg>
                 거래내역서 일괄발급
               </h3>
-              <div className="flex items-center gap-2">
+              <div className="flex flex-wrap items-center gap-2">
                 <input type="month" value={bulkMonth}
                   onChange={(e) => {
                     // ★ Codex 1R·2R HIGH 수용 — 월을 바꾸면 담긴 목록·조회 결과를 비우고,
@@ -11809,25 +3297,25 @@ const handleApproveRequest = async (id: string) => {
                     setBulkList(null); setBulkSelected([]); setBulkCombined([]); setBulkByUser([]); setBulkPage(1);
                     setBulkPickedSel([]); setBulkManualRows([]); setBulkManualOpen(false); setBulkManualAsk(null);
                   }}
-                  className="px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-violet-500 outline-none" />
+                  className="px-3 py-1.5 border border-gray-200 rounded-lg text-[13px] focus:ring-2 focus:ring-violet-500 outline-none" />
                 {/* ★ 2026-08-05 (서수란 접수) 재클릭이 닫히지 않던 것 — 옆 [세금계산서·컨펌 현황]만 토글이었다.
                     닫을 때는 목록만 감춘다(담아 둔 회사는 그대로 두고, 다시 열 때 `refreshBulkList`가 살린다).
                     `loadBulkList`는 keepPicked=false라 재클릭이 담긴 목록까지 지웠다 — 그래서 여기서 쓰지 않는다. */}
                 <button onClick={() => { if (bulkList !== null) { setBulkList(null); return; } refreshBulkList(); }} disabled={bulkListLoading}
-                  className={`px-4 py-2 rounded-lg text-sm font-medium disabled:opacity-50 ${bulkList !== null ? 'bg-slate-700 text-white hover:bg-slate-800' : 'bg-violet-600 text-white hover:bg-violet-700'}`}>
+                  className={`whitespace-nowrap px-4 py-2 rounded-lg text-[13px] font-medium disabled:opacity-50 ${bulkList !== null ? 'bg-slate-700 text-white hover:bg-slate-800' : 'bg-violet-600 text-white hover:bg-violet-700'}`}>
                   {bulkListLoading ? '조회 중...' : bulkList !== null ? '미발급 대상 닫기' : '미발급 대상 불러오기'}
                 </button>
                 <button onClick={() => { const next = !confirmBoardOpen; setConfirmBoardOpen(next); if (next) loadConfirmBoard(); }}
-                  className={`px-4 py-2 rounded-lg text-sm font-medium border ${confirmBoardOpen ? 'bg-slate-700 text-white border-slate-700' : 'text-slate-600 border-slate-300 hover:bg-slate-50'}`}>
+                  className={`whitespace-nowrap px-4 py-2 rounded-lg text-[13px] font-medium border ${confirmBoardOpen ? 'bg-slate-700 text-white border-slate-700' : 'text-slate-600 border-slate-300 hover:bg-slate-50'}`}>
                   세금계산서·컨펌 현황
                 </button>
                 {/* ★ 2026-07-30 추가 청구(080 매핑·KT 명세서·부가서비스 수기) + 최소과금 정액 발행 (서수란 접수) */}
                 <button onClick={() => setBilling080Open(true)}
-                  className="px-4 py-2 rounded-lg text-sm font-medium border text-slate-600 border-slate-300 hover:bg-slate-50">
+                  className="whitespace-nowrap px-4 py-2 rounded-lg text-[13px] font-medium border text-slate-600 border-slate-300 hover:bg-slate-50">
                   추가 청구 관리
                 </button>
                 <button onClick={() => setMinChargeOpen(true)}
-                  className="px-4 py-2 rounded-lg text-sm font-medium border text-slate-600 border-slate-300 hover:bg-slate-50">
+                  className="whitespace-nowrap px-4 py-2 rounded-lg text-[13px] font-medium border text-slate-600 border-slate-300 hover:bg-slate-50">
                   최소과금
                 </button>
               </div>
@@ -11882,15 +3370,15 @@ const handleApproveRequest = async (id: string) => {
                       </div>
                       <div className="flex items-center gap-1.5">
                         <button onClick={() => setBulkManualAsk([...bulkSelected])} disabled={bulkSelected.length === 0 || bulkManualBusy}
-                          className="px-3 py-1.5 border border-amber-300 text-amber-700 bg-amber-50 rounded text-xs font-semibold hover:bg-amber-100 disabled:opacity-40">
+                          className="whitespace-nowrap px-3 py-1.5 border border-amber-300 text-amber-700 bg-amber-50 rounded text-xs font-semibold hover:bg-amber-100 disabled:opacity-40">
                           선택 수동 정산완료 ({bulkSelected.length})
                         </button>
                         <button onClick={bulkAddSelected} disabled={bulkSelected.length === 0}
-                          className="px-3 py-1.5 bg-indigo-600 text-white rounded text-xs font-semibold disabled:opacity-40">
+                          className="whitespace-nowrap px-3 py-1.5 bg-emerald-600 text-white rounded text-xs font-semibold disabled:opacity-40">
                           선택 담기 ({bulkSelected.length})
                         </button>
                         <button onClick={bulkAddAll} disabled={availAuto.length === 0}
-                          className="px-3 py-1.5 bg-violet-600 text-white rounded text-xs font-semibold hover:bg-violet-700 disabled:opacity-40">
+                          className="whitespace-nowrap px-3 py-1.5 bg-violet-600 text-white rounded text-xs font-semibold hover:bg-violet-700 disabled:opacity-40">
                           전체 {availAuto.length}개사 담기{availManual > 0 ? ` (수동·최소과금 ${availManual} 제외)` : ''}
                         </button>
                       </div>
@@ -11936,10 +3424,10 @@ const handleApproveRequest = async (id: string) => {
                         {totalPages > 1 && (
                           <div className="flex items-center justify-center gap-2 py-2">
                             <button onClick={() => setBulkPage(Math.max(1, page - 1))} disabled={page <= 1}
-                              className="px-2 py-1 text-xs text-gray-500 disabled:opacity-30">이전</button>
+                              className="whitespace-nowrap px-2 py-1 text-xs text-gray-500 disabled:opacity-30">이전</button>
                             <span className="text-xs text-gray-500">{page} / {totalPages}</span>
                             <button onClick={() => setBulkPage(Math.min(totalPages, page + 1))} disabled={page >= totalPages}
-                              className="px-2 py-1 text-xs text-gray-500 disabled:opacity-30">다음</button>
+                              className="whitespace-nowrap px-2 py-1 text-xs text-gray-500 disabled:opacity-30">다음</button>
                           </div>
                         )}
                       </>
@@ -11961,7 +3449,7 @@ const handleApproveRequest = async (id: string) => {
                               <span className="text-sm text-gray-800 shrink-0">{m.company_name}</span>
                               <span className="text-[11px] text-gray-500 flex-1 min-w-0 truncate">{m.reason || '사유 없음'}</span>
                               <button onClick={() => handleManualRelease(m.id)} disabled={bulkManualBusy}
-                                className="shrink-0 text-[11px] text-amber-700 hover:underline disabled:opacity-40">해제</button>
+                                className="whitespace-nowrap shrink-0 text-[11px] text-amber-700 hover:underline disabled:opacity-40">해제</button>
                             </div>
                           ))}
                         </div>
@@ -11978,11 +3466,11 @@ const handleApproveRequest = async (id: string) => {
                           bulkPickedSel.length === bulkCombined.length + bulkByUser.length
                             ? []
                             : [...bulkCombined, ...bulkByUser].map((c) => c.id))}
-                          className="px-3 py-1.5 border border-gray-300 text-gray-600 rounded text-xs font-semibold hover:bg-gray-50">
+                          className="whitespace-nowrap px-3 py-1.5 border border-gray-300 text-gray-600 rounded text-xs font-semibold hover:bg-gray-50">
                           {bulkPickedSel.length === bulkCombined.length + bulkByUser.length ? '전체 해제' : '전체 선택'}
                         </button>
                         <button onClick={bulkRemoveSelected} disabled={bulkPickedSel.length === 0}
-                          className="px-3 py-1.5 border border-rose-300 text-rose-600 bg-rose-50 rounded text-xs font-semibold hover:bg-rose-100 disabled:opacity-40">
+                          className="whitespace-nowrap px-3 py-1.5 border border-rose-300 text-rose-600 bg-rose-50 rounded text-xs font-semibold hover:bg-rose-100 disabled:opacity-40">
                           선택 빼기 ({bulkPickedSel.length})
                         </button>
                       </div>
@@ -12002,8 +3490,8 @@ const handleApproveRequest = async (id: string) => {
                               className="w-4 h-4 shrink-0 accent-rose-600" />
                             <span className="text-sm text-gray-800 flex-1 min-w-0 truncate">{c.company_name}</span>
                             {!c.company_contact_email && <span className="shrink-0 text-[10px] text-rose-500">메일 없음</span>}
-                            <button onClick={() => bulkMoveToByUser(c.id)} className="shrink-0 text-[11px] text-sky-600 hover:underline">계정별 ▶</button>
-                            <button onClick={() => bulkRemove(c.id)} className="shrink-0 text-[11px] text-gray-400 hover:text-rose-500">빼기</button>
+                            <button onClick={() => bulkMoveToByUser(c.id)} className="whitespace-nowrap shrink-0 text-[11px] text-sky-600 hover:underline">계정별 ▶</button>
+                            <button onClick={() => bulkRemove(c.id)} className="whitespace-nowrap shrink-0 text-[11px] text-gray-400 hover:text-rose-500">빼기</button>
                           </div>
                         ))}
                       </div>
@@ -12021,8 +3509,8 @@ const handleApproveRequest = async (id: string) => {
                             {!c.company_contact_email && <span className="shrink-0 text-[10px] text-rose-500">메일 없음</span>}
                             {/* ★ Codex 2R 수용 — 이 pane에 있으면 실제 발급이 계정별이다. 저장 scope와 무관하게 계정 메일 누락을 보여준다 */}
                             {Number(c.missing_account_emails) > 0 && <span className="shrink-0 text-[10px] text-orange-500">계정 메일 {c.missing_account_emails}건 미등록</span>}
-                            <button onClick={() => bulkMoveToCombined(c.id)} className="shrink-0 text-[11px] text-indigo-600 hover:underline">◀ 전체</button>
-                            <button onClick={() => bulkRemove(c.id)} className="shrink-0 text-[11px] text-gray-400 hover:text-rose-500">빼기</button>
+                            <button onClick={() => bulkMoveToCombined(c.id)} className="whitespace-nowrap shrink-0 text-[11px] text-emerald-700 hover:underline">◀ 전체</button>
+                            <button onClick={() => bulkRemove(c.id)} className="whitespace-nowrap shrink-0 text-[11px] text-gray-400 hover:text-rose-500">빼기</button>
                           </div>
                         ))}
                       </div>
@@ -12030,7 +3518,7 @@ const handleApproveRequest = async (id: string) => {
                   </div>
 
                   <button onClick={handleBulkStart} disabled={bulkStarting || (bulkCombined.length + bulkByUser.length === 0)}
-                    className="w-full py-2.5 bg-violet-600 hover:bg-violet-700 text-white rounded-lg text-sm font-semibold disabled:opacity-40">
+                    className="whitespace-nowrap w-full py-2.5 bg-violet-600 hover:bg-violet-700 text-white rounded-lg text-[13px] font-semibold disabled:opacity-40">
                     {bulkStarting ? '접수 중...' : `일괄 발급 시작 (${bulkCombined.length + bulkByUser.length}개사)`}
                   </button>
                 </div>
@@ -12039,7 +3527,7 @@ const handleApproveRequest = async (id: string) => {
 
             {/* 수동 정산완료 사유 입력 — 청구서를 만들지 않으므로 금액이 남지 않는다. 사유가 유일한 근거다 */}
             {bulkManualAsk !== null && (
-              <div className="fixed inset-0 z-[2000] bg-black/50 flex items-center justify-center p-4">
+              <div className="fixed inset-0 z-[2000] bg-gray-900/40 flex items-center justify-center p-4">
                 <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md p-5">
                   <h3 className="text-base font-bold text-gray-900 mb-1">수동 정산완료 ({bulkManualAsk.length}개사)</h3>
                   <p className="text-xs text-gray-500 mb-3">
@@ -12048,14 +3536,14 @@ const handleApproveRequest = async (id: string) => {
                   </p>
                   <textarea value={bulkManualReason} onChange={(e) => setBulkManualReason(e.target.value)} rows={3} maxLength={500}
                     placeholder="예) 별도 양식으로 직접 청구, 담당자 협의분"
-                    className="w-full px-3 py-2 border rounded-lg text-sm resize-none focus:ring-2 focus:ring-amber-500 outline-none" autoFocus />
+                    className="w-full px-3 py-1.5 border border-gray-200 rounded-lg text-[13px] resize-none focus:ring-2 focus:ring-amber-500 outline-none" autoFocus />
                   <div className="flex gap-2 mt-4">
                     <button onClick={() => { setBulkManualAsk(null); setBulkManualReason(''); }} disabled={bulkManualBusy}
-                      className="flex-1 py-2 border border-gray-300 text-gray-600 rounded-lg text-sm font-medium hover:bg-gray-50 disabled:opacity-40">
+                      className="whitespace-nowrap flex-1 py-2 border border-gray-300 text-gray-600 rounded-lg text-[13px] font-medium hover:bg-gray-50 disabled:opacity-40">
                       취소
                     </button>
                     <button onClick={handleManualComplete} disabled={bulkManualBusy}
-                      className="flex-1 py-2 bg-amber-600 hover:bg-amber-700 text-white rounded-lg text-sm font-semibold disabled:opacity-40">
+                      className="whitespace-nowrap flex-1 py-2 bg-amber-600 hover:bg-amber-700 text-white rounded-lg text-[13px] font-semibold disabled:opacity-40">
                       {bulkManualBusy ? '처리 중...' : '수동 정산완료로 표시'}
                     </button>
                   </div>
@@ -12108,11 +3596,11 @@ const handleApproveRequest = async (id: string) => {
                   {['', 'pending', 'confirmed', 'objected', 'manual_wait', 'ready', 'issued'].map((s) => (
                     <button key={s || 'all'}
                       onClick={() => { setConfirmStatusFilter(s); loadConfirmBoard(s); }}
-                      className={`px-2.5 py-1 rounded-full text-[11px] font-semibold border ${confirmStatusFilter === s ? 'bg-slate-700 text-white border-slate-700' : 'text-slate-500 border-slate-300 hover:bg-slate-50'}`}>
+                      className={`whitespace-nowrap px-2.5 py-1 rounded-full text-[11px] font-semibold border ${confirmStatusFilter === s ? 'bg-slate-700 text-white border-slate-700' : 'text-slate-500 border-slate-300 hover:bg-slate-50'}`}>
                       {s === '' ? '전체' : CONFIRM_STATUS_LABELS[s]}
                     </button>
                   ))}
-                  <button onClick={() => loadConfirmBoard()} className="ml-auto text-[11px] text-slate-500 hover:underline">새로고침</button>
+                  <button onClick={() => loadConfirmBoard()} className="whitespace-nowrap ml-auto text-[11px] text-slate-500 hover:underline">새로고침</button>
                 </div>
                 {confirmTruncated && (
                   <p className="mb-2 px-2 py-1.5 bg-amber-50 text-amber-700 rounded text-[11px]">500건을 넘어 일부만 표시 중입니다. 상태 필터로 좁혀 주세요.</p>
@@ -12161,7 +3649,7 @@ const handleApproveRequest = async (id: string) => {
                               <span className="flex items-center gap-1 ml-auto">
                                 <input type="date" value={manualDateDraft[r.id] || ''}
                                   onChange={(e) => setManualDateDraft((prev) => ({ ...prev, [r.id]: e.target.value }))}
-                                  className="px-1.5 py-0.5 border rounded text-[10px]" />
+                                  className="px-1.5 py-0.5 border border-gray-200 rounded text-[10px]" />
                                 {/* ★ 2026-08-21 계산서 비고(PO번호) — 같은 통보로 오는 값이라 날짜 옆 한 자리. 필수 회사는 표시·차단. */}
                                 <input type="text" value={manualRemarkDraft[r.id] || ''} maxLength={150}
                                   onChange={(e) => setManualRemarkDraft((prev) => ({ ...prev, [r.id]: e.target.value }))}
@@ -12169,14 +3657,14 @@ const handleApproveRequest = async (id: string) => {
                                   title="계산서 비고란에 그대로 인쇄됩니다"
                                   className={`px-1.5 py-0.5 border rounded text-[10px] w-40 ${r.require_taxbill_remark ? 'border-amber-400 bg-amber-50' : ''}`} />
                                 <button onClick={() => handleManualIssueDate(r.id, r.require_taxbill_remark === true)}
-                                  className="px-2 py-0.5 bg-amber-500 text-white rounded text-[10px] font-semibold">작성일자 지정</button>
+                                  className="whitespace-nowrap px-2 py-0.5 bg-amber-500 text-white rounded text-[10px] font-semibold">작성일자 지정</button>
                               </span>
                             ) : (
                               <span className="flex items-center gap-1 ml-auto">
                                 <span className="text-[10px] text-gray-400">컨펌 전: 작성일자를 지정할 수 없습니다</span>
                                 <button onClick={() => { setAdminConfirmTarget(r); setAdminConfirmNote(''); }}
                                   title="업체가 메일·전화로 확인해 준 경우, 근거를 적고 컨펌을 대신 기록합니다."
-                                  className="px-2 py-0.5 border border-sky-300 bg-sky-50 text-sky-700 rounded text-[10px] font-semibold hover:bg-sky-100">업체 확인 기록</button>
+                                  className="whitespace-nowrap px-2 py-0.5 border border-sky-300 bg-sky-50 text-sky-700 rounded text-[10px] font-semibold hover:bg-sky-100">업체 확인 기록</button>
                               </span>
                             )
                           )}
@@ -12193,17 +3681,17 @@ const handleApproveRequest = async (id: string) => {
                 <div className="mt-4 pt-3 border-t">
                   <div className="flex flex-wrap items-center gap-1.5 mb-2">
                     <button onClick={() => { const next = !taxbillBoardOpen; setTaxbillBoardOpen(next); if (next) loadTaxbillIssues(); }}
-                      className={`px-2.5 py-1 rounded-full text-[11px] font-semibold border ${taxbillBoardOpen ? 'bg-slate-700 text-white border-slate-700' : 'text-slate-600 border-slate-300 hover:bg-slate-50'}`}>
+                      className={`whitespace-nowrap px-2.5 py-1 rounded-full text-[11px] font-semibold border ${taxbillBoardOpen ? 'bg-slate-700 text-white border-slate-700' : 'text-slate-600 border-slate-300 hover:bg-slate-50'}`}>
                       세금계산서 장부 {taxbillBoardOpen ? '접기' : '열기'}
                     </button>
                     {taxbillBoardOpen && ['', 'ready', 'submitted', 'issued', 'failed'].map((s) => (
                       <button key={s || 'all'}
                         onClick={() => { setTaxbillStatusFilter(s); loadTaxbillIssues(s); }}
-                        className={`px-2.5 py-1 rounded-full text-[11px] font-semibold border ${taxbillStatusFilter === s ? 'bg-indigo-600 text-white border-indigo-600' : 'text-slate-500 border-slate-300 hover:bg-slate-50'}`}>
+                        className={`whitespace-nowrap px-2.5 py-1 rounded-full text-[11px] font-semibold border ${taxbillStatusFilter === s ? 'bg-emerald-600 text-white border-emerald-600' : 'text-slate-500 border-slate-300 hover:bg-slate-50'}`}>
                         {s === '' ? '전체' : TAXBILL_STATUS_LABELS[s]}
                       </button>
                     ))}
-                    {taxbillBoardOpen && <button onClick={() => loadTaxbillIssues()} className="ml-auto text-[11px] text-slate-500 hover:underline">새로고침</button>}
+                    {taxbillBoardOpen && <button onClick={() => loadTaxbillIssues()} className="whitespace-nowrap ml-auto text-[11px] text-slate-500 hover:underline">새로고침</button>}
                   </div>
                   {taxbillBoardOpen && (
                     taxbillLoading ? (
@@ -12253,11 +3741,11 @@ const handleApproveRequest = async (id: string) => {
                                 {t.status === 'issued' && t.is_test === false && (
                                   <button onClick={() => { setTaxbillResendTarget(t); setTaxbillResendEmail(''); }}
                                     title="발행된 계산서 메일을 다시 보냅니다. 계산서를 새로 만들지 않습니다."
-                                    className="shrink-0 px-2 py-0.5 border border-emerald-300 bg-emerald-50 text-emerald-700 rounded text-[10px] font-semibold hover:bg-emerald-100">메일 재발송</button>
+                                    className="whitespace-nowrap shrink-0 px-2 py-0.5 border border-emerald-300 bg-emerald-50 text-emerald-700 rounded text-[10px] font-semibold hover:bg-emerald-100">메일 재발송</button>
                                 )}
                                 {t.status === 'issued' && t.nts_confirm_num && t.is_test === false && (
                                   <button onClick={() => openModifyModal(t)}
-                                    className="shrink-0 px-2 py-0.5 bg-orange-500 text-white rounded text-[10px] font-semibold hover:bg-orange-600">수정발행</button>
+                                    className="whitespace-nowrap shrink-0 px-2 py-0.5 bg-orange-500 text-white rounded text-[10px] font-semibold hover:bg-orange-600">수정발행</button>
                                 )}
                                 {/* 수정 장은 열지 않는다 — 당초 승인번호가 테스트베드 것이라 운영에는 그 원본이 없다(서버도 거부한다).
                                     ★ 2026-08-06 (Codex medium) **화이트리스트로 판정한다.** `!== 'modify'`는 NULL·미지의 종류까지
@@ -12265,7 +3753,7 @@ const handleApproveRequest = async (id: string) => {
                                 {t.status === 'issued' && t.is_test === true && t.kind === 'original' && (
                                   <button onClick={() => setTaxbillProdTarget(t)}
                                     title="이 문서는 국세청에 없습니다. 같은 문서번호로 운영에 다시 발행합니다."
-                                    className="shrink-0 px-2 py-0.5 bg-rose-600 text-white rounded text-[10px] font-semibold hover:bg-rose-700">운영으로 재발행</button>
+                                    className="whitespace-nowrap shrink-0 px-2 py-0.5 bg-rose-600 text-white rounded text-[10px] font-semibold hover:bg-rose-700">운영으로 재발행</button>
                                 )}
                                 {/* ★ 2026-08-07 수정(취소·정정) 장 재시도는 확인 모달을 지난다 — 그 문서는 이미 국세청에 있는
                                     원본을 건드린다. 원본 장 재시도는 안 나간 청구서를 같은 번호로 다시 보내는 것이라 그대로. */}
@@ -12277,21 +3765,21 @@ const handleApproveRequest = async (id: string) => {
                                     title={t.kind === 'modify'
                                       ? '수정(취소·정정) 장입니다. 확인 후 재시도합니다.'
                                       : '같은 문서번호로 다시 발행합니다.'}
-                                    className="shrink-0 px-2 py-0.5 bg-slate-500 text-white rounded text-[10px] font-semibold hover:bg-slate-600">재시도</button>
+                                    className="whitespace-nowrap shrink-0 px-2 py-0.5 bg-slate-500 text-white rounded text-[10px] font-semibold hover:bg-slate-600">재시도</button>
                                 )}
                                                 {/* ★ 2026-08-05 발급 대기 취소 — 워커가 국세청으로 보내기 전 유일한 제동 장치다.
                                     그전에는 되돌리는 경로가 고객 이의신청뿐이라 담당자가 손댈 곳이 없었다. */}
                                 {t.status === 'ready' && (
                                   <button onClick={() => { setTaxbillCancelTarget(t); setTaxbillCancelReason(''); }}
                                     title="아직 발행 전입니다. 큐에서 내려 워커가 보내지 않게 합니다."
-                                    className="shrink-0 px-2 py-0.5 border border-rose-300 bg-rose-50 text-rose-700 rounded text-[10px] font-semibold hover:bg-rose-100">발급 대기 취소</button>
+                                    className="whitespace-nowrap shrink-0 px-2 py-0.5 border border-rose-300 bg-rose-50 text-rose-700 rounded text-[10px] font-semibold hover:bg-rose-100">발급 대기 취소</button>
                                 )}
                                 {/* ★ 2026-08-21 작성일자 변경(서수란 접수 — 라프레리) — 자동 정책(익월 1일)이 만든 작성일자를
                                     발행 전에 고치는 유일한 창구. 승인번호가 생긴 뒤에는 국세청 사실이라 잠근다(서버와 같은 화이트리스트). */}
                                 {(t.status === 'ready' || t.status === 'failed') && t.kind === 'original' && !t.nts_confirm_num && (
                                   <button onClick={() => { setTaxbillDateTarget(t); setTaxbillDateValue(String(t.issue_date || '').slice(0, 10)); setTaxbillDateRemark(String(t.taxbill_remark || '')); }}
                                     title="계산서에 적힐 작성일자를 바꿉니다. 문서번호는 그대로입니다."
-                                    className="shrink-0 px-2 py-0.5 border border-indigo-300 bg-indigo-50 text-indigo-700 rounded text-[10px] font-semibold hover:bg-indigo-100">작성일자 변경</button>
+                                    className="whitespace-nowrap shrink-0 px-2 py-0.5 border border-emerald-300 bg-emerald-50 text-emerald-700 rounded text-[10px] font-semibold hover:bg-emerald-100">작성일자 변경</button>
                                 )}
                               </div>
                               <div className="flex items-center gap-2 mt-1 text-[10px] text-gray-400">
@@ -12316,10 +3804,10 @@ const handleApproveRequest = async (id: string) => {
 
             {/* ── 테스트베드 발행분 운영 재발행 모달 (★2026-08-05) ── */}
             {taxbillProdTarget && (
-              <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-[60]">
+              <div className="fixed inset-0 bg-gray-900/40 flex items-center justify-center p-4 z-[60]">
                 <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden animate-in fade-in zoom-in duration-200">
                   <div className="p-6">
-                    <h3 className="text-lg font-semibold text-gray-900 mb-1">운영으로 재발행</h3>
+                    <h3 className="text-base font-semibold text-gray-900 mb-1">운영으로 재발행</h3>
                     <p className="text-sm text-gray-600 mb-1">
                       <strong>{taxbillProdTarget.company_name}</strong> · 작성일자 {taxbillProdTarget.issue_date}
                       {' · '}{(Number(taxbillProdTarget.total_amount) || 0).toLocaleString()}원
@@ -12334,9 +3822,9 @@ const handleApproveRequest = async (id: string) => {
                   </div>
                   <div className="flex border-t">
                     <button onClick={() => setTaxbillProdTarget(null)} disabled={taxbillProdBusy}
-                      className="flex-1 px-4 py-3 text-gray-700 font-medium hover:bg-gray-50 transition-colors border-r">취소</button>
+                      className="whitespace-nowrap flex-1 px-4 py-3 text-gray-700 font-medium hover:bg-gray-50 transition-colors border-r">취소</button>
                     <button onClick={handleTaxbillReissueProduction} disabled={taxbillProdBusy}
-                      className="flex-1 px-4 py-3 bg-rose-600 text-white font-semibold hover:bg-rose-700 transition-colors disabled:opacity-50">
+                      className="whitespace-nowrap flex-1 px-4 py-3 bg-rose-600 text-white font-semibold hover:bg-rose-700 transition-colors disabled:opacity-50">
                       {taxbillProdBusy ? '올리는 중...' : '국세청으로 발행'}
                     </button>
                   </div>
@@ -12346,10 +3834,10 @@ const handleApproveRequest = async (id: string) => {
 
             {/* ── 발급 대기 취소 모달 (★2026-08-05) ── */}
             {taxbillCancelTarget && (
-              <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-[60]">
+              <div className="fixed inset-0 bg-gray-900/40 flex items-center justify-center p-4 z-[60]">
                 <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden animate-in fade-in zoom-in duration-200">
                   <div className="p-6">
-                    <h3 className="text-lg font-semibold text-gray-900 mb-1">발급 대기 취소</h3>
+                    <h3 className="text-base font-semibold text-gray-900 mb-1">발급 대기 취소</h3>
                     <p className="text-sm text-gray-600 mb-1">
                       <strong>{taxbillCancelTarget.company_name}</strong> · 작성일자 {taxbillCancelTarget.issue_date}
                       {' · '}{(Number(taxbillCancelTarget.total_amount) || 0).toLocaleString()}원
@@ -12359,7 +3847,7 @@ const handleApproveRequest = async (id: string) => {
                     <label className="block text-xs font-semibold text-gray-600 mb-1">취소 사유</label>
                     <textarea value={taxbillCancelReason} onChange={(e) => setTaxbillCancelReason(e.target.value)} rows={3} maxLength={200}
                       placeholder="예) 업체 확인 결과 8월 LMS 수량이 달라 재발행 예정"
-                      className="w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-rose-500 outline-none resize-none" />
+                      className="w-full px-3 py-1.5 border border-gray-200 rounded-lg text-[13px] focus:ring-2 focus:ring-rose-500 outline-none resize-none" />
 
                     <div className="mt-3 px-3 py-2 bg-rose-50 rounded-lg text-[11px] text-rose-800">
                       큐에서 내리면 이 계산서는 발행되지 않습니다. 금액을 고치려면 그 뒤 <strong>수량 조정 재발행</strong> 또는
@@ -12368,9 +3856,9 @@ const handleApproveRequest = async (id: string) => {
                   </div>
                   <div className="flex border-t">
                     <button onClick={() => { setTaxbillCancelTarget(null); setTaxbillCancelReason(''); }} disabled={taxbillCancelBusy}
-                      className="flex-1 px-4 py-3 text-gray-700 font-medium hover:bg-gray-50 transition-colors border-r">닫기</button>
+                      className="whitespace-nowrap flex-1 px-4 py-3 text-gray-700 font-medium hover:bg-gray-50 transition-colors border-r">닫기</button>
                     <button onClick={handleTaxbillCancel} disabled={taxbillCancelBusy || !taxbillCancelReason.trim()}
-                      className="flex-1 px-4 py-3 bg-rose-600 text-white font-semibold hover:bg-rose-700 transition-colors disabled:opacity-50">
+                      className="whitespace-nowrap flex-1 px-4 py-3 bg-rose-600 text-white font-semibold hover:bg-rose-700 transition-colors disabled:opacity-50">
                       {taxbillCancelBusy ? '처리 중...' : '발급 대기에서 내리기'}
                     </button>
                   </div>
@@ -12380,10 +3868,10 @@ const handleApproveRequest = async (id: string) => {
 
             {/* ── 작성일자 변경 모달 (★2026-08-21 서수란 접수 — 라프레리) ── */}
             {taxbillDateTarget && (
-              <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-[60]">
+              <div className="fixed inset-0 bg-gray-900/40 flex items-center justify-center p-4 z-[60]">
                 <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden animate-in fade-in zoom-in duration-200">
                   <div className="p-6">
-                    <h3 className="text-lg font-semibold text-gray-900 mb-1">작성일자 변경</h3>
+                    <h3 className="text-base font-semibold text-gray-900 mb-1">작성일자 변경</h3>
                     <p className="text-sm text-gray-600 mb-1">
                       <strong>{taxbillDateTarget.company_name}</strong> · 현재 작성일자 {String(taxbillDateTarget.issue_date || '').slice(0, 10)}
                       {' · '}{(Number(taxbillDateTarget.total_amount) || 0).toLocaleString()}원
@@ -12392,13 +3880,13 @@ const handleApproveRequest = async (id: string) => {
 
                     <label className="block text-xs font-semibold text-gray-600 mb-1">새 작성일자</label>
                     <input type="date" value={taxbillDateValue} onChange={(e) => setTaxbillDateValue(e.target.value)}
-                      className="w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 outline-none" />
+                      className="w-full px-3 py-1.5 border border-gray-200 rounded-lg text-[13px] focus:ring-2 focus:ring-emerald-500/30 outline-none" />
 
                     {/* ★ 2026-08-21 계산서 비고(PO번호) — 발행 패스가 팝빌 비고란에 그대로 싣는다. 기존 값이 기본으로 채워진다. */}
                     <label className="block text-xs font-semibold text-gray-600 mb-1 mt-3">계산서 비고 (PO번호 등 · 선택)</label>
                     <input type="text" value={taxbillDateRemark} maxLength={150} onChange={(e) => setTaxbillDateRemark(e.target.value)}
                       placeholder="예) PO-2026-0831 (계산서 비고란에 인쇄됩니다)"
-                      className="w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 outline-none" />
+                      className="w-full px-3 py-1.5 border border-gray-200 rounded-lg text-[13px] focus:ring-2 focus:ring-emerald-500/30 outline-none" />
 
                     <div className="mt-3 px-3 py-2 bg-indigo-50 rounded-lg text-[11px] text-indigo-800">
                       오늘이거나 지난 날짜면 5분 안에 자동 발행되고, 미래 날짜면 그날 발행됩니다. 발행 실패 상태였던 건은
@@ -12407,9 +3895,9 @@ const handleApproveRequest = async (id: string) => {
                   </div>
                   <div className="flex border-t">
                     <button onClick={() => { setTaxbillDateTarget(null); setTaxbillDateValue(''); setTaxbillDateRemark(''); }} disabled={taxbillDateBusy}
-                      className="flex-1 px-4 py-3 text-gray-700 font-medium hover:bg-gray-50 transition-colors border-r">닫기</button>
+                      className="whitespace-nowrap flex-1 px-4 py-3 text-gray-700 font-medium hover:bg-gray-50 transition-colors border-r">닫기</button>
                     <button onClick={handleTaxbillIssueDateChange} disabled={taxbillDateBusy || !taxbillDateValue}
-                      className="flex-1 px-4 py-3 bg-indigo-600 text-white font-semibold hover:bg-indigo-700 transition-colors disabled:opacity-50">
+                      className="whitespace-nowrap flex-1 px-4 py-3 bg-emerald-600 text-white font-semibold hover:bg-emerald-700 transition-colors disabled:opacity-50">
                       {taxbillDateBusy ? '처리 중...' : '변경하고 발급 대기에 올리기'}
                     </button>
                   </div>
@@ -12421,10 +3909,10 @@ const handleApproveRequest = async (id: string) => {
                 원본 재시도는 안 나간 청구서를 같은 문서번호로 다시 보내는 것이라 그대로 두고,
                 수정 장만 이 관문을 지난다 — 그 문서는 **이미 국세청에 있는 원본을 취소·정정한다.** */}
             {taxbillRetryTarget && (
-              <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-[60]">
+              <div className="fixed inset-0 bg-gray-900/40 flex items-center justify-center p-4 z-[60]">
                 <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden animate-in fade-in zoom-in duration-200">
                   <div className="p-6">
-                    <h3 className="text-lg font-semibold text-gray-900 mb-1">수정 계산서 재발행 확인</h3>
+                    <h3 className="text-base font-semibold text-gray-900 mb-1">수정 계산서 재발행 확인</h3>
                     <p className="text-sm text-gray-600 mb-1">
                       <strong>{taxbillRetryTarget.company_name}</strong> · 작성일자 {taxbillRetryTarget.issue_date}
                       {' · '}{(Number(taxbillRetryTarget.total_amount) || 0).toLocaleString()}원
@@ -12439,7 +3927,7 @@ const handleApproveRequest = async (id: string) => {
                     <label className="block text-xs font-semibold text-gray-600 mb-1">재발행 사유</label>
                     <textarea value={taxbillRetryReason} onChange={(e) => setTaxbillRetryReason(e.target.value)} rows={3} maxLength={200}
                       placeholder="예) 업체 확인 결과 8월 LMS 수량이 달라 정정이 필요함"
-                      className="w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-amber-500 outline-none resize-none" />
+                      className="w-full px-3 py-1.5 border border-gray-200 rounded-lg text-[13px] focus:ring-2 focus:ring-amber-500 outline-none resize-none" />
 
                     <div className="mt-3 px-3 py-2 bg-amber-50 rounded-lg text-[11px] text-amber-900">
                       이 재시도가 성공하면 <strong>국세청에 있는 당초 문서가 실제로 취소·정정됩니다.</strong>
@@ -12448,10 +3936,10 @@ const handleApproveRequest = async (id: string) => {
                   </div>
                   <div className="flex border-t">
                     <button onClick={() => { setTaxbillRetryTarget(null); setTaxbillRetryReason(''); }}
-                      className="flex-1 px-4 py-3 text-gray-700 font-medium hover:bg-gray-50 transition-colors border-r">닫기</button>
+                      className="whitespace-nowrap flex-1 px-4 py-3 text-gray-700 font-medium hover:bg-gray-50 transition-colors border-r">닫기</button>
                     <button onClick={() => handleTaxbillRetry(taxbillRetryTarget.id, { reason: taxbillRetryReason.trim() })}
                       disabled={!taxbillRetryReason.trim()}
-                      className="flex-1 px-4 py-3 bg-amber-600 text-white font-semibold hover:bg-amber-700 transition-colors disabled:opacity-50">
+                      className="whitespace-nowrap flex-1 px-4 py-3 bg-amber-600 text-white font-semibold hover:bg-amber-700 transition-colors disabled:opacity-50">
                       확인하고 재발행
                     </button>
                   </div>
@@ -12461,10 +3949,10 @@ const handleApproveRequest = async (id: string) => {
 
             {/* ── 업체 확인 대리 기록 모달 (★2026-08-05 서수란 접수) ── */}
             {adminConfirmTarget && (
-              <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-[60]">
+              <div className="fixed inset-0 bg-gray-900/40 flex items-center justify-center p-4 z-[60]">
                 <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden animate-in fade-in zoom-in duration-200">
                   <div className="p-6">
-                    <h3 className="text-lg font-semibold text-gray-900 mb-1">업체 확인 기록</h3>
+                    <h3 className="text-base font-semibold text-gray-900 mb-1">업체 확인 기록</h3>
                     <p className="text-sm text-gray-600 mb-1">
                       <strong>{adminConfirmTarget.company_name}</strong>
                       {adminConfirmTarget.account_name && ` (${adminConfirmTarget.account_name})`}
@@ -12475,7 +3963,7 @@ const handleApproveRequest = async (id: string) => {
                     <label className="block text-xs font-semibold text-gray-600 mb-1">어떻게 확인받았습니까</label>
                     <textarea value={adminConfirmNote} onChange={(e) => setAdminConfirmNote(e.target.value)} rows={3} maxLength={200}
                       placeholder="예) 8/5 구매팀 김OO 과장 메일로 8월 3일자 발행 요청 (PO 첨부)"
-                      className="w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-sky-500 outline-none resize-none" />
+                      className="w-full px-3 py-1.5 border border-gray-200 rounded-lg text-[13px] focus:ring-2 focus:ring-sky-500 outline-none resize-none" />
 
                     <div className="mt-3 px-3 py-2 bg-sky-50 rounded-lg text-[11px] text-sky-800">
                       업체가 컨펌 링크를 누르지 않고 메일·전화로 확인해 준 경우에만 씁니다. 기록하면 컨펌 시각이 남아
@@ -12484,9 +3972,9 @@ const handleApproveRequest = async (id: string) => {
                   </div>
                   <div className="flex border-t">
                     <button onClick={() => { setAdminConfirmTarget(null); setAdminConfirmNote(''); }} disabled={adminConfirmBusy}
-                      className="flex-1 px-4 py-3 text-gray-700 font-medium hover:bg-gray-50 transition-colors border-r">취소</button>
+                      className="whitespace-nowrap flex-1 px-4 py-3 text-gray-700 font-medium hover:bg-gray-50 transition-colors border-r">취소</button>
                     <button onClick={handleAdminConfirm} disabled={adminConfirmBusy || !adminConfirmNote.trim()}
-                      className="flex-1 px-4 py-3 bg-sky-600 text-white font-semibold hover:bg-sky-700 transition-colors disabled:opacity-50">
+                      className="whitespace-nowrap flex-1 px-4 py-3 bg-sky-600 text-white font-semibold hover:bg-sky-700 transition-colors disabled:opacity-50">
                       {adminConfirmBusy ? '기록 중...' : '확인 기록'}
                     </button>
                   </div>
@@ -12496,10 +3984,10 @@ const handleApproveRequest = async (id: string) => {
 
             {/* ── 계산서 메일 재발송 모달 (★2026-08-05 서수란 접수) ── */}
             {taxbillResendTarget && (
-              <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-[60]">
+              <div className="fixed inset-0 bg-gray-900/40 flex items-center justify-center p-4 z-[60]">
                 <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden animate-in fade-in zoom-in duration-200">
                   <div className="p-6">
-                    <h3 className="text-lg font-semibold text-gray-900 mb-1">계산서 메일 재발송</h3>
+                    <h3 className="text-base font-semibold text-gray-900 mb-1">계산서 메일 재발송</h3>
                     <p className="text-sm text-gray-600 mb-1">
                       <strong>{taxbillResendTarget.company_name}</strong> · 작성일자 {taxbillResendTarget.issue_date}
                       {' · '}{(Number(taxbillResendTarget.total_amount) || 0).toLocaleString()}원
@@ -12509,7 +3997,7 @@ const handleApproveRequest = async (id: string) => {
                     <label className="block text-xs font-semibold text-gray-600 mb-1">받는 사람 (선택)</label>
                     <input type="email" value={taxbillResendEmail} onChange={(e) => setTaxbillResendEmail(e.target.value)}
                       placeholder="비우면 등록된 계산서 수신자 전원에게 보냅니다"
-                      className="w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-emerald-500 outline-none" />
+                      className="w-full px-3 py-1.5 border border-gray-200 rounded-lg text-[13px] focus:ring-2 focus:ring-emerald-500 outline-none" />
 
                     <div className="mt-3 px-3 py-2 bg-emerald-50 rounded-lg text-[11px] text-emerald-800">
                       이미 발행된 <strong>그 계산서를 그대로 다시 메일링</strong>합니다. 계산서를 새로 만들지 않으므로
@@ -12518,9 +4006,9 @@ const handleApproveRequest = async (id: string) => {
                   </div>
                   <div className="flex border-t">
                     <button onClick={() => { setTaxbillResendTarget(null); setTaxbillResendEmail(''); }} disabled={taxbillResendBusy}
-                      className="flex-1 px-4 py-3 text-gray-700 font-medium hover:bg-gray-50 transition-colors border-r">취소</button>
+                      className="whitespace-nowrap flex-1 px-4 py-3 text-gray-700 font-medium hover:bg-gray-50 transition-colors border-r">취소</button>
                     <button onClick={handleTaxbillResend} disabled={taxbillResendBusy}
-                      className="flex-1 px-4 py-3 bg-emerald-600 text-white font-semibold hover:bg-emerald-700 transition-colors disabled:opacity-50">
+                      className="whitespace-nowrap flex-1 px-4 py-3 bg-emerald-600 text-white font-semibold hover:bg-emerald-700 transition-colors disabled:opacity-50">
                       {taxbillResendBusy ? '보내는 중...' : '메일 다시 보내기'}
                     </button>
                   </div>
@@ -12530,10 +4018,10 @@ const handleApproveRequest = async (id: string) => {
 
             {/* ── 수정세금계산서 발급 모달 (★2026-07-30) ── */}
             {modifyTarget && (
-              <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-[60]">
+              <div className="fixed inset-0 bg-gray-900/40 flex items-center justify-center p-4 z-[60]">
                 <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden animate-in fade-in zoom-in duration-200">
                   <div className="p-6">
-                    <h3 className="text-lg font-semibold text-gray-900 mb-1">수정세금계산서 발급</h3>
+                    <h3 className="text-base font-semibold text-gray-900 mb-1">수정세금계산서 발급</h3>
                     <p className="text-sm text-gray-600 mb-1"><strong>{modifyTarget.company_name}</strong> · 당초 작성일자 {modifyTarget.issue_date}</p>
                     <p className="text-xs text-gray-500 mb-4">
                       당초 공급가액 {Number(modifyTarget.supply_amount).toLocaleString()}원 · 세액 {Number(modifyTarget.tax_amount).toLocaleString()}원 · 승인번호 {modifyTarget.nts_confirm_num}
@@ -12541,7 +4029,7 @@ const handleApproveRequest = async (id: string) => {
 
                     <label className="block text-xs font-semibold text-gray-600 mb-1">수정 사유</label>
                     <select value={modifyCode} onChange={(e) => setModifyCode(Number(e.target.value))}
-                      className="w-full px-3 py-2 border rounded-lg text-sm mb-3 focus:ring-2 focus:ring-indigo-500 outline-none">
+                      className="w-full px-3 py-1.5 border border-gray-200 rounded-lg text-[13px] mb-3 focus:ring-2 focus:ring-emerald-500/30 outline-none">
                       {[6, 4, 2, 1].map((c) => <option key={c} value={c}>{MODIFY_CODE_LABELS[c]}</option>)}
                     </select>
 
@@ -12549,7 +4037,7 @@ const handleApproveRequest = async (id: string) => {
                       <div className="mb-3">
                         <label className="block text-xs font-semibold text-gray-600 mb-1">{modifyCode === 2 ? '변동일 (작성일자)' : '해제일 (작성일자)'}</label>
                         <input type="date" value={modifyWriteDate} onChange={(e) => setModifyWriteDate(e.target.value)}
-                          className="w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 outline-none" />
+                          className="w-full px-3 py-1.5 border border-gray-200 rounded-lg text-[13px] focus:ring-2 focus:ring-emerald-500/30 outline-none" />
                         {modifyCode === 2 && <p className="mt-1 text-[10px] text-amber-600">공급가액 변동은 변동일 기준 익월 10일이 발급 기한입니다.</p>}
                       </div>
                     )}
@@ -12559,12 +4047,12 @@ const handleApproveRequest = async (id: string) => {
                         <div>
                           <label className="block text-xs font-semibold text-gray-600 mb-1">공급가액 변동분 (±원)</label>
                           <input type="number" step="1" value={modifyDeltaSupply} onChange={(e) => setModifyDeltaSupply(e.target.value)} placeholder="-200000"
-                            className="w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 outline-none" />
+                            className="w-full px-3 py-1.5 border border-gray-200 rounded-lg text-[13px] focus:ring-2 focus:ring-emerald-500/30 outline-none" />
                         </div>
                         <div>
                           <label className="block text-xs font-semibold text-gray-600 mb-1">세액 변동분 (±원)</label>
                           <input type="number" step="1" value={modifyDeltaTax} onChange={(e) => setModifyDeltaTax(e.target.value)} placeholder="-20000"
-                            className="w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 outline-none" />
+                            className="w-full px-3 py-1.5 border border-gray-200 rounded-lg text-[13px] focus:ring-2 focus:ring-emerald-500/30 outline-none" />
                         </div>
                       </div>
                     )}
@@ -12574,12 +4062,12 @@ const handleApproveRequest = async (id: string) => {
                         <div>
                           <label className="block text-xs font-semibold text-gray-600 mb-1">정정 후 공급가액 (원)</label>
                           <input type="number" step="1" value={modifyCorrectedSupply} onChange={(e) => setModifyCorrectedSupply(e.target.value)}
-                            className="w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 outline-none" />
+                            className="w-full px-3 py-1.5 border border-gray-200 rounded-lg text-[13px] focus:ring-2 focus:ring-emerald-500/30 outline-none" />
                         </div>
                         <div>
                           <label className="block text-xs font-semibold text-gray-600 mb-1">정정 후 세액 (원)</label>
                           <input type="number" step="1" value={modifyCorrectedTax} onChange={(e) => setModifyCorrectedTax(e.target.value)}
-                            className="w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 outline-none" />
+                            className="w-full px-3 py-1.5 border border-gray-200 rounded-lg text-[13px] focus:ring-2 focus:ring-emerald-500/30 outline-none" />
                         </div>
                       </div>
                     )}
@@ -12594,9 +4082,9 @@ const handleApproveRequest = async (id: string) => {
                   </div>
                   <div className="flex border-t">
                     <button onClick={() => setModifyTarget(null)} disabled={modifySubmitting}
-                      className="flex-1 px-4 py-3 text-gray-700 font-medium hover:bg-gray-50 transition-colors border-r">취소</button>
+                      className="whitespace-nowrap flex-1 px-4 py-3 text-gray-700 font-medium hover:bg-gray-50 transition-colors border-r">취소</button>
                     <button onClick={handleModifySubmit} disabled={modifySubmitting}
-                      className="flex-1 px-4 py-3 bg-orange-500 text-white font-semibold hover:bg-orange-600 transition-colors disabled:opacity-50">
+                      className="whitespace-nowrap flex-1 px-4 py-3 bg-orange-500 text-white font-semibold hover:bg-orange-600 transition-colors disabled:opacity-50">
                       {modifySubmitting ? '요청 중...' : '발급 대기에 올리기'}
                     </button>
                   </div>
@@ -12607,14 +4095,14 @@ const handleApproveRequest = async (id: string) => {
 
           {/* ===== 2. 정산 목록 ===== */}
           <div className="px-6 py-5 border-b">
-            <div className="flex items-center justify-between mb-4">
+            <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
               <h3 className="text-base font-semibold text-gray-800 flex items-center gap-2">
                 <svg className="w-5 h-5 text-emerald-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 7h6m0 10v-3m-3 3h.01M9 17h.01M9 14h.01M12 14h.01M15 11h.01M12 11h.01M9 11h.01M7 21h10a2 2 0 002-2V5a2 2 0 00-2-2H7a2 2 0 00-2 2v14a2 2 0 002 2z" />
                 </svg>
                 정산 목록
               </h3>
-              <div className="flex items-center gap-2">
+              <div className="flex flex-wrap items-center gap-2">
                 {/* ★ 2026-08-05 (서수란 접수) 선택 건 일괄 처리 — 한 건씩 확정하고 메일도 한 건씩 누르던 것.
                     진행 중에는 진행률만 남기고 버튼을 감춘다(중복 클릭 = 중복 발송). */}
                 {billingBulk ? (
@@ -12627,16 +4115,16 @@ const handleApproveRequest = async (id: string) => {
                         재조회 중이거나 적재 실패 상태의 billings 위에서는 실행하지 않는다. runBillingBulk 입구도 같은 잠금. */}
                     <button type="button" onClick={() => runBillingBulk('confirm')} disabled={billingsLoading || billingsKey !== billingFilterKey}
                       title="선택한 초안을 한 번에 청구 확정합니다. 수금 관리 표시이며 발송·세금계산서와 무관합니다."
-                      className="px-3 py-1.5 rounded-lg text-sm font-semibold border border-blue-300 bg-blue-50 text-blue-700 hover:bg-blue-100 transition-colors disabled:opacity-50 disabled:cursor-not-allowed">
+                      className="whitespace-nowrap px-3 py-1.5 rounded-lg text-[13px] font-semibold border border-emerald-300 bg-emerald-50 text-emerald-700 hover:bg-emerald-100 transition-colors disabled:opacity-50 disabled:cursor-not-allowed">
                       선택 청구 확정 ({billingSel.length})
                     </button>
                     <button type="button" onClick={() => runBillingBulk('send')} disabled={billingsLoading || billingsKey !== billingFilterKey}
                       title="선택한 건 중 아직 발송되지 않은 청구서를 한 번에 보냅니다. 이미 나간 건은 행의 [재발송]으로 확인 후 보냅니다."
-                      className="px-3 py-1.5 rounded-lg text-sm font-semibold border border-amber-300 bg-amber-50 text-amber-700 hover:bg-amber-100 transition-colors disabled:opacity-50 disabled:cursor-not-allowed">
+                      className="whitespace-nowrap px-3 py-1.5 rounded-lg text-[13px] font-semibold border border-amber-300 bg-amber-50 text-amber-700 hover:bg-amber-100 transition-colors disabled:opacity-50 disabled:cursor-not-allowed">
                       선택 발송 ({billingSel.length})
                     </button>
                     <button type="button" onClick={() => setBillingSel([])}
-                      className="px-2 py-1.5 rounded-lg text-sm text-gray-500 hover:bg-gray-50 transition-colors">선택 해제</button>
+                      className="whitespace-nowrap px-2 py-1.5 rounded-lg text-[13px] text-gray-500 hover:bg-gray-50 transition-colors">선택 해제</button>
                   </>
                 )}
                 {/* ★ 2026-08-05 총 정산표 — 소유자(ceo) 전용. 전 고객사 총 청구금·수금·미납을 한 화면에.
@@ -12644,33 +4132,33 @@ const handleApproveRequest = async (id: string) => {
                 {canViewSettlementOverview && (
                   <button type="button" onClick={() => setShowSettlementOverview(true)}
                     title="전 고객사의 총 청구금·수금완료·미납을 한 화면에서 봅니다"
-                    className="px-3 py-1.5 rounded-lg text-sm font-semibold border border-emerald-300 bg-emerald-50 text-emerald-700 hover:bg-emerald-100 transition-colors">
+                    className="whitespace-nowrap px-3 py-1.5 rounded-lg text-[13px] font-semibold border border-emerald-300 bg-emerald-50 text-emerald-700 hover:bg-emerald-100 transition-colors">
                     총 정산표
                   </button>
                 )}
                 {/* ★ 2026-07-28 발행됐는데 고객에게 안 나간 장. 금액 불일치로 발송이 막힌 장은 컨펌 추적 목록에 안 뜬다 */}
                 <button type="button" onClick={() => setBillingUnsentOnly(!billingUnsentOnly)}
-                  className={`px-3 py-1.5 rounded-lg text-sm font-semibold border transition-colors ${billingUnsentOnly ? 'border-amber-300 bg-amber-50 text-amber-700' : 'border-gray-300 text-gray-500 hover:bg-gray-50'}`}>
+                  className={`whitespace-nowrap px-3 py-1.5 rounded-lg text-[13px] font-semibold border transition-colors ${billingUnsentOnly ? 'border-amber-300 bg-amber-50 text-amber-700' : 'border-gray-300 text-gray-500 hover:bg-gray-50'}`}>
                   발행됨 · 미발송만
                 </button>
                 {/* ★ 2026-08-06 검색 (Harold 지시) — 목록이 길어 원하는 회사를 찾기 어려웠다. 화면 안에서만 좁힌다. */}
                 <div className="relative">
                   <input type="text" value={billingSearch} onChange={(e) => setBillingSearch(e.target.value)}
                     placeholder="고객사·계정 검색"
-                    className="w-44 pl-3 pr-7 py-1.5 border rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 outline-none" />
+                    className="w-44 pl-3 pr-7 py-1.5 border border-gray-200 rounded-lg text-[13px] focus:ring-2 focus:ring-emerald-500/30 outline-none" />
                   {billingSearch && (
                     <button type="button" onClick={() => setBillingSearch('')}
                       aria-label="검색어 지우기"
-                      className="absolute right-1.5 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 text-sm">×</button>
+                      className="whitespace-nowrap absolute right-1.5 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 text-[13px]">×</button>
                   )}
                 </div>
                 <select value={filterYear} onChange={e => setFilterYear(Number(e.target.value))}
-                  className="px-3 py-1.5 border rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 outline-none">
+                  className="px-3 py-1.5 border border-gray-200 rounded-lg text-[13px] focus:ring-2 focus:ring-emerald-500/30 outline-none">
                   {billingYearOptions.map(y => <option key={y} value={y}>{y}년</option>)}
                 </select>
                 {/* ★ 2026-08-20 정산월 필터 (서수란 0819 접수 — 월별 관리) */}
                 <select value={filterMonth} onChange={e => setFilterMonth(Number(e.target.value))}
-                  className="px-3 py-1.5 border rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 outline-none">
+                  className="px-3 py-1.5 border border-gray-200 rounded-lg text-[13px] focus:ring-2 focus:ring-emerald-500/30 outline-none">
                   <option value={0}>전체 월</option>
                   {Array.from({ length: 12 }, (_, i) => i + 1).map(m => <option key={m} value={m}>{m}월</option>)}
                 </select>
@@ -12683,13 +4171,13 @@ const handleApproveRequest = async (id: string) => {
               <div className="text-center py-8 text-gray-400">정산 데이터가 없습니다</div>
             ) : (
               <div className="overflow-x-auto">
-                <table className="w-full text-sm">
+                <table className="w-full text-[13px]">
                   <thead className="bg-gray-50">
                     <tr>
                       {/* ★ 2026-08-05 (서수란 접수) 전체 선택. ★2026-08-06 페이징이 생기면서 기준을 **이 페이지**로
                           한다(일괄발급 목록과 같은 규약) — 안 보이는 건까지 한 번에 선택되면 그게 사고다.
                           선택 자체는 페이지를 넘겨도 유지되므로 여러 페이지에 걸쳐 고를 수 있다. */}
-                      <th className="px-3 py-2.5 text-center w-10">
+                      <th className="whitespace-nowrap px-3 py-2 text-center w-10">
                         {(() => {
                           const pageIds = billingVisible.map((b: any) => b.id);
                           const pageAll = pageIds.length > 0 && pageIds.every((id: string) => billingSel.includes(id));
@@ -12703,17 +4191,17 @@ const handleApproveRequest = async (id: string) => {
                           );
                         })()}
                       </th>
-                      <th className="px-4 py-2.5 text-left text-gray-600 font-medium">고객사</th>
-                      <th className="px-4 py-2.5 text-center text-gray-600 font-medium">구분</th>
-                      <th className="px-4 py-2.5 text-center text-gray-600 font-medium">정산월</th>
+                      <th className="whitespace-nowrap px-4 py-2 text-left text-gray-500 font-medium">고객사</th>
+                      <th className="whitespace-nowrap px-4 py-2 text-center text-gray-500 font-medium">구분</th>
+                      <th className="whitespace-nowrap px-4 py-2 text-center text-gray-500 font-medium">정산월</th>
                       {/* ★ 2026-08-04 SMS·LMS 두 컬럼을 '유형별'로 교체. 청구 축은 최대 14종(웹 4 + 에이전트 4 +
                           테스트 2 + 스팸 2 + 요금제 + AI 크레딧)이라 두 컬럼으로는 담기지 않는다 —
                           SMS/LMS뿐인 회사에선 맞아 보이고 `both` 회사에선 틀려 보였다. */}
-                      <th className="px-4 py-2.5 text-center text-gray-600 font-medium">유형별</th>
-                      <th className="px-4 py-2.5 text-right text-gray-600 font-medium">합계</th>
-                      <th className="px-4 py-2.5 text-center text-gray-600 font-medium">상태</th>
-                      <th className="px-4 py-2.5 text-center text-gray-600 font-medium">발송일</th>
-                      <th className="px-4 py-2.5 text-center text-gray-600 font-medium">관리</th>
+                      <th className="whitespace-nowrap px-4 py-2 text-center text-gray-500 font-medium">유형별</th>
+                      <th className="whitespace-nowrap px-4 py-2 text-right text-gray-500 font-medium">합계</th>
+                      <th className="whitespace-nowrap px-4 py-2 text-center text-gray-500 font-medium">상태</th>
+                      <th className="whitespace-nowrap px-4 py-2 text-center text-gray-500 font-medium">발송일</th>
+                      <th className="whitespace-nowrap px-4 py-2 text-center text-gray-500 font-medium">관리</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-gray-100">
@@ -12740,7 +4228,7 @@ const handleApproveRequest = async (id: string) => {
                         <td className="px-4 py-2.5 text-center">
                           <button
                             onClick={(e) => { e.stopPropagation(); openBillingDetail(b.id); }}
-                            className="px-2.5 py-1 text-xs font-medium text-indigo-600 border border-indigo-200 rounded-md hover:bg-indigo-50 transition-colors">
+                            className="whitespace-nowrap px-2.5 py-1 text-xs font-medium text-emerald-700 border border-emerald-200 rounded-md hover:bg-emerald-50 transition-colors">
                             유형별
                           </button>
                         </td>
@@ -12770,7 +4258,7 @@ const handleApproveRequest = async (id: string) => {
                               <button onClick={() => handleRetryConfirmations(b.id, b.company_name)}
                                 disabled={retryingBillingId === b.id}
                                 title="거래내역서 PDF와 컨펌 링크를 등록된 정산 수신자에게 보냅니다"
-                                className="px-2 py-1 text-xs bg-amber-100 text-amber-700 rounded hover:bg-amber-200 disabled:opacity-50 transition-colors">
+                                className="whitespace-nowrap px-2 py-1 text-xs bg-amber-100 text-amber-700 rounded hover:bg-amber-200 disabled:opacity-50 transition-colors">
                                 {retryingBillingId === b.id ? '발송 중...' : '발송'}
                               </button>
                             )}
@@ -12783,12 +4271,12 @@ const handleApproveRequest = async (id: string) => {
                             {b.emailed_at && (
                               <button onClick={() => openEmailModal(b)}
                                 title="이미 발송된 거래내역서를 다시 보냅니다. 언제·누구에게 나갔는지 확인한 뒤에만 재발송됩니다."
-                                className="px-2 py-1 text-xs bg-amber-50 text-amber-700 border border-amber-200 rounded hover:bg-amber-100 transition-colors">
+                                className="whitespace-nowrap px-2 py-1 text-xs bg-amber-50 text-amber-700 border border-amber-200 rounded hover:bg-amber-100 transition-colors">
                                 재발송
                               </button>
                             )}
                             <button onClick={() => downloadBillingPdf(b.id, `${b.company_name}_${b.billing_year}_${b.billing_month}`)}
-                              className="px-2 py-1 text-xs bg-indigo-100 text-indigo-700 rounded hover:bg-indigo-200 transition-colors">PDF</button>
+                              className="whitespace-nowrap px-2 py-1 text-xs bg-emerald-100 text-emerald-700 rounded hover:bg-indigo-200 transition-colors">PDF</button>
                             {/* ★ 2026-08-05 (서수란 질의 "확정 버튼의 의미가 뭔가요?") — 축을 눈에 보이게 갈랐다.
                                 발송·PDF는 **발행 축**이고, 아래 둘은 **수금 축**(draft → confirmed → paid)이다.
                                 확정은 발행의 관문이 아니다 — 발송은 status를 보지 않고, 세금계산서는 고객 컨펌
@@ -12798,12 +4286,12 @@ const handleApproveRequest = async (id: string) => {
                             {b.status === 'draft' && (
                               <button onClick={() => handleBillingStatusChange(b.id, 'confirmed')}
                                 title="수금 관리용 표시입니다. 이 금액으로 굳혔다는 뜻이고, 발송·세금계산서 발행과는 무관합니다. 확정 뒤에는 삭제할 때 사유가 필요합니다."
-                                className="px-2 py-1 text-xs bg-blue-100 text-blue-700 rounded hover:bg-blue-200 transition-colors">청구 확정</button>
+                                className="whitespace-nowrap px-2 py-1 text-xs bg-emerald-100 text-emerald-700 rounded hover:bg-blue-200 transition-colors">청구 확정</button>
                             )}
                             {b.status === 'confirmed' && (
                               <button onClick={() => handleBillingStatusChange(b.id, 'paid')}
                                 title="입금을 받았다는 표시입니다. 총 정산표의 미납 집계에서 빠집니다."
-                                className="px-2 py-1 text-xs bg-green-100 text-green-700 rounded hover:bg-green-200 transition-colors">수금완료</button>
+                                className="whitespace-nowrap px-2 py-1 text-xs bg-green-100 text-green-700 rounded hover:bg-green-200 transition-colors">수금완료</button>
                             )}
                             {/* ★ 2026-08-04 옛 [발송](openEmailModal → POST /:id/send-email)을 여기서 뺐다.
                                 그 경로는 emailed_at만 찍고 컨펌 추적행을 만들지 않아, 누르는 순간 그 청구서가
@@ -12812,9 +4300,9 @@ const handleApproveRequest = async (id: string) => {
                                 — 완전 철거는 소비처 grep 후 별건(0728 필터항목 탭과 같은 방식). */}
                             {/* ★ 2026-08-04 업체와 수량이 다를 때 사람이 실제 수량을 적고 다시 발행한다(서수란 접수). */}
                             <button onClick={() => setQtyAdjustTarget({ id: b.id, companyName: b.company_name, accountName: b.account_name || null })}
-                              className="px-2 py-1 text-xs bg-violet-100 text-violet-700 rounded hover:bg-violet-200 transition-colors">수량 조정</button>
+                              className="whitespace-nowrap px-2 py-1 text-xs bg-violet-100 text-violet-700 rounded hover:bg-violet-200 transition-colors">수량 조정</button>
                             <button onClick={() => { setDeleteTargetId(b.id); setDeleteReason(''); setShowBillingDeleteConfirm(true); }}
-                              className="px-2 py-1 text-xs bg-red-100 text-red-600 rounded hover:bg-red-200 transition-colors">삭제</button>
+                              className="whitespace-nowrap px-2 py-1 text-xs bg-red-100 text-red-600 rounded hover:bg-red-200 transition-colors">삭제</button>
                           </div>
                         </td>
                       </tr>
@@ -12830,14 +4318,14 @@ const handleApproveRequest = async (id: string) => {
                   <div className="flex items-center justify-center gap-3 py-3 border-t">
                     <button type="button" onClick={() => setBillingPage(Math.max(1, billingPageNow - 1))}
                       disabled={billingPageNow <= 1}
-                      className="px-2 py-1 text-xs text-gray-500 disabled:opacity-30 hover:text-gray-800">이전</button>
+                      className="whitespace-nowrap px-2 py-1 text-xs text-gray-500 disabled:opacity-30 hover:text-gray-800">이전</button>
                     <span className="text-xs text-gray-500 tabular-nums">
                       {billingPageNow} / {billingTotalPages}
                       <span className="ml-2 text-gray-400">({billingRows.length}건)</span>
                     </span>
                     <button type="button" onClick={() => setBillingPage(Math.min(billingTotalPages, billingPageNow + 1))}
                       disabled={billingPageNow >= billingTotalPages}
-                      className="px-2 py-1 text-xs text-gray-500 disabled:opacity-30 hover:text-gray-800">다음</button>
+                      className="whitespace-nowrap px-2 py-1 text-xs text-gray-500 disabled:opacity-30 hover:text-gray-800">다음</button>
                   </div>
                 )}
               </div>
@@ -12853,7 +4341,7 @@ const handleApproveRequest = async (id: string) => {
 
           {/* ===== 정산 생성 확인 모달 (★2026-08-04 발행 전 점검 — 미리보기 금액·차단 사유 동반) ===== */}
           {showGenerateConfirm && (
-            <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-[60]">
+            <div className="fixed inset-0 bg-gray-900/40 flex items-center justify-center p-4 z-[60]">
               <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden animate-in fade-in zoom-in duration-200">
                 <div className="p-6 max-h-[75vh] overflow-y-auto">
                   <div className="w-12 h-12 rounded-full bg-indigo-100 flex items-center justify-center mx-auto mb-4">
@@ -12861,7 +4349,7 @@ const handleApproveRequest = async (id: string) => {
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 7h6m0 10v-3m-3 3h.01M9 17h.01M9 14h.01M12 14h.01M15 11h.01M12 11h.01M9 11h.01M7 21h10a2 2 0 002-2V5a2 2 0 00-2-2H7a2 2 0 00-2 2v14a2 2 0 002 2z" />
                     </svg>
                   </div>
-                  <h3 className="text-lg font-semibold text-center text-gray-900 mb-2">정산 생성</h3>
+                  <h3 className="text-base font-semibold text-center text-gray-900 mb-2">정산 생성</h3>
                   <p className="text-sm text-center text-gray-600 mb-1">
                     <strong>{companies.find(c => c.id === billingCompanyId)?.company_name}</strong>
                   </p>
@@ -12924,11 +4412,11 @@ const handleApproveRequest = async (id: string) => {
                 </div>
                 <div className="flex border-t">
                   <button onClick={() => setShowGenerateConfirm(false)}
-                    className="flex-1 px-4 py-3 text-gray-700 font-medium hover:bg-gray-50 transition-colors border-r">취소</button>
+                    className="whitespace-nowrap flex-1 px-4 py-3 text-gray-700 font-medium hover:bg-gray-50 transition-colors border-r">취소</button>
                   <button
                     onClick={handleBillingGenerate}
                     disabled={generating || billingPreviewLoading || billingPreview?.billing_guard?.billable === false}
-                    className="flex-1 px-4 py-3 text-indigo-600 font-medium hover:bg-indigo-50 transition-colors disabled:opacity-40 disabled:hover:bg-transparent">
+                    className="whitespace-nowrap flex-1 px-4 py-3 text-emerald-700 font-medium hover:bg-emerald-50 transition-colors disabled:opacity-40 disabled:hover:bg-transparent">
                     {generating ? '생성 중...' : billingPreviewLoading ? '집계 중...' : '발행'}
                   </button>
                 </div>
@@ -12938,7 +4426,7 @@ const handleApproveRequest = async (id: string) => {
 
           {/* ===== 정산 삭제 확인 모달 ===== */}
           {showBillingDeleteConfirm && (
-            <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-[60]">
+            <div className="fixed inset-0 bg-gray-900/40 flex items-center justify-center p-4 z-[60]">
               <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden animate-in fade-in zoom-in duration-200">
                 <div className="p-6">
                   <div className="w-12 h-12 rounded-full bg-red-100 flex items-center justify-center mx-auto mb-4">
@@ -12946,7 +4434,7 @@ const handleApproveRequest = async (id: string) => {
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
                     </svg>
                   </div>
-                  <h3 className="text-lg font-semibold text-center text-gray-900 mb-2">정산 삭제</h3>
+                  <h3 className="text-base font-semibold text-center text-gray-900 mb-2">정산 삭제</h3>
                   <p className="text-sm text-center text-gray-600">
                     이 정산과 일자별 상세 데이터가 모두 삭제됩니다.<br />
                     계정별 묶음 발행분은 <strong>묶음 전체(계정 장 + 공통 장)</strong>가 함께 삭제됩니다.<br />계속하시겠습니까?
@@ -12956,14 +4444,14 @@ const handleApproveRequest = async (id: string) => {
                     <label className="block text-xs font-medium text-gray-500 mb-1">삭제 사유 (확정·수금·메일 발송분은 필수)</label>
                     <textarea value={deleteReason} onChange={e => setDeleteReason(e.target.value)} rows={2}
                       placeholder="예: 단가 오설정으로 금액 오류, 재발행 예정"
-                      className="w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-red-400 outline-none resize-none" />
+                      className="w-full px-3 py-1.5 border border-gray-200 rounded-lg text-[13px] focus:ring-2 focus:ring-red-400 outline-none resize-none" />
                   </div>
                 </div>
                 <div className="flex border-t">
                   <button onClick={() => setShowBillingDeleteConfirm(false)}
-                    className="flex-1 px-4 py-3 text-gray-700 font-medium hover:bg-gray-50 transition-colors border-r">취소</button>
+                    className="whitespace-nowrap flex-1 px-4 py-3 text-gray-700 font-medium hover:bg-gray-50 transition-colors border-r">취소</button>
                   <button onClick={handleBillingDelete}
-                    className="flex-1 px-4 py-3 text-red-600 font-medium hover:bg-red-50 transition-colors">삭제</button>
+                    className="whitespace-nowrap flex-1 px-4 py-3 text-red-600 font-medium hover:bg-red-50 transition-colors">삭제</button>
                 </div>
               </div>
             </div>
@@ -12972,12 +4460,12 @@ const handleApproveRequest = async (id: string) => {
 
           {/* ===== 정산 상세 모달 ===== */}
           {showBillingDetail && (
-            <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-[60]">
+            <div className="fixed inset-0 bg-gray-900/40 flex items-center justify-center p-4 z-[60]">
               <div className="bg-white rounded-2xl shadow-2xl w-full max-w-4xl max-h-[90vh] overflow-hidden animate-in fade-in zoom-in duration-200 flex flex-col">
                 {/* 모달 헤더 */}
-                <div className="px-6 py-4 border-b bg-gradient-to-r from-indigo-50 to-white flex items-center justify-between flex-shrink-0">
+                <div className="px-5 py-3.5 border-b border-gray-100 bg-gradient-to-r from-indigo-50 to-white flex items-center justify-between flex-shrink-0">
                   <div>
-                    <h3 className="text-lg font-semibold text-gray-900">
+                    <h3 className="text-base font-semibold text-gray-900">
                       정산 상세
                     </h3>
                     {detailBilling && (
@@ -13027,13 +4515,13 @@ const handleApproveRequest = async (id: string) => {
 
                       {detailLines.length > 0 && (
                         <div className="border rounded-lg overflow-hidden mb-4">
-                          <table className="w-full text-sm">
+                          <table className="w-full text-[13px]">
                             <thead className="bg-gray-50">
                               <tr>
-                                <th className="px-3 py-2 text-left text-gray-600 font-medium">항목</th>
-                                <th className="px-3 py-2 text-right text-gray-600 font-medium">수량</th>
-                                <th className="px-3 py-2 text-right text-gray-600 font-medium">단가</th>
-                                <th className="px-3 py-2 text-right text-gray-600 font-medium">금액</th>
+                                <th className="whitespace-nowrap px-3 py-2 text-left text-gray-500 font-medium">항목</th>
+                                <th className="whitespace-nowrap px-3 py-2 text-right text-gray-500 font-medium">수량</th>
+                                <th className="whitespace-nowrap px-3 py-2 text-right text-gray-500 font-medium">단가</th>
+                                <th className="whitespace-nowrap px-3 py-2 text-right text-gray-500 font-medium">금액</th>
                               </tr>
                             </thead>
                             <tbody className="divide-y divide-gray-100">
@@ -13082,20 +4570,20 @@ const handleApproveRequest = async (id: string) => {
                         <div className="text-center py-6 text-gray-400 text-sm">상세 데이터가 없습니다</div>
                       ) : (
                         <div className="overflow-x-auto border rounded-lg">
-                          <table className="w-full text-sm">
+                          <table className="w-full text-[13px]">
                             <thead className="bg-gray-50">
                               <tr>
-                                <th className="px-3 py-2 text-left text-gray-600 font-medium">일자</th>
+                                <th className="whitespace-nowrap px-3 py-2 text-left text-gray-500 font-medium">일자</th>
                                 {/* ★ 2026-07-26 '구분' 열 — 축이 채널·계정·발송ID로 쪼개지면서 같은 날 같은 유형
                                     행이 여러 줄 생긴다. 구분이 없으면 중복 오류로 보인다(PDF 2페이지와 같은 열). */}
-                                <th className="px-3 py-2 text-left text-gray-600 font-medium">구분</th>
-                                <th className="px-3 py-2 text-left text-gray-600 font-medium">유형</th>
-                                <th className="px-3 py-2 text-right text-gray-600 font-medium">전송</th>
-                                <th className="px-3 py-2 text-right text-gray-600 font-medium">성공</th>
-                                <th className="px-3 py-2 text-right text-gray-600 font-medium">실패</th>
-                                <th className="px-3 py-2 text-right text-gray-600 font-medium">대기</th>
-                                <th className="px-3 py-2 text-right text-gray-600 font-medium">단가</th>
-                                <th className="px-3 py-2 text-right text-gray-600 font-medium">금액</th>
+                                <th className="whitespace-nowrap px-3 py-2 text-left text-gray-500 font-medium">구분</th>
+                                <th className="whitespace-nowrap px-3 py-2 text-left text-gray-500 font-medium">유형</th>
+                                <th className="whitespace-nowrap px-3 py-2 text-right text-gray-500 font-medium">전송</th>
+                                <th className="whitespace-nowrap px-3 py-2 text-right text-gray-500 font-medium">성공</th>
+                                <th className="whitespace-nowrap px-3 py-2 text-right text-gray-500 font-medium">실패</th>
+                                <th className="whitespace-nowrap px-3 py-2 text-right text-gray-500 font-medium">대기</th>
+                                <th className="whitespace-nowrap px-3 py-2 text-right text-gray-500 font-medium">단가</th>
+                                <th className="whitespace-nowrap px-3 py-2 text-right text-gray-500 font-medium">금액</th>
                               </tr>
                             </thead>
                             <tbody className="divide-y divide-gray-100">
@@ -13185,12 +4673,12 @@ const handleApproveRequest = async (id: string) => {
                       {detailBilling.status === 'draft' && (
                         <button onClick={() => handleBillingStatusChange(detailBilling.id, 'confirmed')}
                           title="수금 관리용 표시입니다. 이 금액으로 굳혔다는 뜻이고, 발송·세금계산서 발행과는 무관합니다. 확정 뒤에는 삭제할 때 사유가 필요합니다."
-                          className="px-3 py-1.5 text-xs bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors">청구 확정</button>
+                          className="whitespace-nowrap px-3 py-1.5 text-xs bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 transition-colors">청구 확정</button>
                       )}
                       {detailBilling.status === 'confirmed' && (
                         <button onClick={() => handleBillingStatusChange(detailBilling.id, 'paid')}
                           title="입금을 받았다는 표시입니다. 총 정산표의 미납 집계에서 빠집니다."
-                          className="px-3 py-1.5 text-xs bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors">수금완료</button>
+                          className="whitespace-nowrap px-3 py-1.5 text-xs bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors">수금완료</button>
                       )}
                       <span className="text-[11px] text-gray-400">수금 관리 · 발행과 무관</span>
                     </div>
@@ -13203,7 +4691,7 @@ const handleApproveRequest = async (id: string) => {
                         <button onClick={() => handleRetryConfirmations(detailBilling.id, detailBilling.company_name)}
                           disabled={retryingBillingId === detailBilling.id}
                           title="거래내역서 PDF와 컨펌 링크를 등록된 정산 수신자에게 보냅니다"
-                          className="px-4 py-1.5 text-sm bg-amber-500 text-white rounded-lg hover:bg-amber-600 disabled:opacity-50 transition-colors flex items-center gap-1.5">
+                          className="px-4 py-1.5 text-[13px] bg-amber-500 text-white rounded-lg hover:bg-amber-600 disabled:opacity-50 transition-colors flex items-center gap-1.5">
                           <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
                           </svg>
@@ -13214,7 +4702,7 @@ const handleApproveRequest = async (id: string) => {
                       {detailBilling.emailed_at && (
                         <button onClick={() => openEmailModal(detailBilling)}
                           title="이미 발송된 거래내역서를 다시 보냅니다. 언제·누구에게 나갔는지 확인한 뒤에만 재발송됩니다."
-                          className="px-4 py-1.5 text-sm border border-amber-300 bg-amber-50 text-amber-700 rounded-lg hover:bg-amber-100 transition-colors flex items-center gap-1.5">
+                          className="px-4 py-1.5 text-[13px] border border-amber-300 bg-amber-50 text-amber-700 rounded-lg hover:bg-amber-100 transition-colors flex items-center gap-1.5">
                           <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
                           </svg>
@@ -13222,14 +4710,14 @@ const handleApproveRequest = async (id: string) => {
                         </button>
                       )}
                       <button onClick={() => downloadBillingPdf(detailBilling.id, `${detailBilling.company_name}_${detailBilling.billing_year}_${detailBilling.billing_month}`)}
-                        className="px-4 py-1.5 text-sm bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors flex items-center gap-1.5">
+                        className="px-4 py-1.5 text-[13px] bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 transition-colors flex items-center gap-1.5">
                         <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
                         </svg>
                         PDF 다운로드
                       </button>
                       <button onClick={() => setShowBillingDetail(false)}
-                        className="px-4 py-1.5 text-sm text-gray-600 border rounded-lg hover:bg-gray-100 transition-colors">닫기</button>
+                        className="whitespace-nowrap px-4 py-1.5 text-[13px] text-gray-600 border rounded-lg hover:bg-gray-100 transition-colors">닫기</button>
                     </div>
                   </div>
                 )}
@@ -13239,7 +4727,7 @@ const handleApproveRequest = async (id: string) => {
 
           {/* ===== 정산서 이메일 발송 모달 ===== */}
           {showEmailModal && emailTarget && (
-            <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-[60]">
+            <div className="fixed inset-0 bg-gray-900/40 flex items-center justify-center p-4 z-[60]">
               <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden animate-in fade-in zoom-in duration-200">
                 <div className="p-6">
                   <div className="w-12 h-12 rounded-full bg-amber-100 flex items-center justify-center mx-auto mb-4">
@@ -13247,7 +4735,7 @@ const handleApproveRequest = async (id: string) => {
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
                     </svg>
                   </div>
-                  <h3 className="text-lg font-semibold text-center text-gray-900 mb-2">정산서 이메일 발송</h3>
+                  <h3 className="text-base font-semibold text-center text-gray-900 mb-2">정산서 이메일 발송</h3>
                   <p className="text-sm text-center text-gray-500 mb-5">
                     <strong>{emailTarget.company_name}</strong> · {emailTarget.billing_year}년 {emailTarget.billing_month}월
                   </p>
@@ -13275,7 +4763,7 @@ const handleApproveRequest = async (id: string) => {
                       type="email"
                       value={emailTo}
                       onChange={e => setEmailTo(e.target.value)}
-                      className="w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-amber-500 outline-none"
+                      className="w-full px-3 py-1.5 border border-gray-200 rounded-lg text-[13px] focus:ring-2 focus:ring-amber-500 outline-none"
                       placeholder="다른 사람에게만 보낼 때만 입력"
                     />
                   </div>
@@ -13287,7 +4775,7 @@ const handleApproveRequest = async (id: string) => {
                       type="text"
                       value={emailSubject}
                       onChange={e => setEmailSubject(e.target.value)}
-                      className="w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-amber-500 outline-none"
+                      className="w-full px-3 py-1.5 border border-gray-200 rounded-lg text-[13px] focus:ring-2 focus:ring-amber-500 outline-none"
                     />
                   </div>
 
@@ -13328,7 +4816,7 @@ const handleApproveRequest = async (id: string) => {
                 <div className="flex border-t">
                   <button
                     onClick={() => { setShowEmailModal(false); setEmailResendInfo(null); setEmailResendAt(null); }}
-                    className="flex-1 px-4 py-3 text-gray-700 font-medium hover:bg-gray-50 transition-colors border-r"
+                    className="whitespace-nowrap flex-1 px-4 py-3 text-gray-700 font-medium hover:bg-gray-50 transition-colors border-r"
                     disabled={emailSending}
                   >
                     취소
@@ -13336,7 +4824,7 @@ const handleApproveRequest = async (id: string) => {
                   <button
                     onClick={() => handleSendBillingEmail(Boolean(emailResendInfo))}
                     disabled={emailSending}
-                    className="flex-1 px-4 py-3 text-amber-600 font-medium hover:bg-amber-50 transition-colors disabled:opacity-50 flex items-center justify-center gap-1.5"
+                    className="whitespace-nowrap flex-1 px-4 py-3 text-amber-600 font-medium hover:bg-amber-50 transition-colors disabled:opacity-50 flex items-center justify-center gap-1.5"
                   >
                     {emailSending ? (
                       <>
@@ -13359,136 +4847,7 @@ const handleApproveRequest = async (id: string) => {
       {/* 싱크에이전트 OS별 배포 위저드 탭 */}
       {activeTab === 'agentDeploy' && <AgentDeployWizard />}
       {/* Sync 모니터링 탭 */}
-      {activeTab === 'syncAgents' && (
-        <div className="bg-white rounded-2xl border border-gray-200/70 shadow-sm">
-          <div className="px-6 py-4 border-b flex justify-between items-center">
-            <h2 className="text-lg font-semibold">Sync Agent 모니터링</h2>
-            <div className="flex items-center gap-3">
-              <button
-                onClick={() => { setSyncReleaseForm({ version: '', checksum: '', force_update: true, tier: 'win-legacy' }); setShowSyncReleaseModal(true); }}
-                className="text-sm text-violet-600 hover:text-violet-800 font-medium flex items-center gap-1"
-              >
-                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16V4m0 0L3 8m4-4l4 4m6 0v12m0 0l4-4m-4 4l-4-4" /></svg>
-                버전 배포
-              </button>
-              <button
-                onClick={loadSyncAgents}
-                className="text-sm text-blue-600 hover:text-blue-800 font-medium flex items-center gap-1"
-              >
-                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>
-                새로고침
-              </button>
-            </div>
-          </div>
-
-          {syncAgentsLoading ? (
-            <div className="p-12 text-center text-gray-500">로딩 중...</div>
-          ) : syncAgents.length === 0 ? (
-            <div className="p-12 text-center text-gray-400">
-              <svg className="w-12 h-12 mx-auto mb-3 text-gray-300" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M5 12h14M5 12a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v4a2 2 0 01-2 2M5 12a2 2 0 00-2 2v4a2 2 0 002 2h14a2 2 0 002-2v-4a2 2 0 00-2-2" /></svg>
-              <p>등록된 Sync Agent가 없습니다.</p>
-            </div>
-          ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead className="bg-gray-50 border-b">
-                  <tr>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">고객사</th>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Agent명</th>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">버전</th>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">DB</th>
-                    <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase">상태</th>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">마지막 Heartbeat</th>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">마지막 동기화</th>
-                    <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">고객 수</th>
-                    <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">오늘 동기화</th>
-                    <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">에러</th>
-                    <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase">관리</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y">
-                  {syncAgents.map((agent: any) => (
-                    <tr key={agent.id} className="hover:bg-gray-50">
-                      <td className="px-4 py-3 font-medium text-gray-900">{agent.company_name || '-'}</td>
-                      <td className="px-4 py-3 text-gray-700">{agent.agent_name || '-'}</td>
-                      <td className="px-4 py-3 text-gray-500">{agent.agent_version || '-'}</td>
-                      <td className="px-4 py-3 text-gray-500">{agent.db_type || '-'}</td>
-                      <td className="px-4 py-3 text-center">{getSyncOnlineBadge(agent.online_status, agent.status, agent.heartbeat_interval_min, agent.sync_interval_customers_min)}</td>
-                      <td className="px-4 py-3 text-gray-500">{syncTimeAgo(agent.last_heartbeat_at)}</td>
-                      <td className="px-4 py-3 text-gray-500">
-                        {syncTimeAgo(agent.last_sync_at)}
-                        {/* ★ 2026-06-13: 통신은 정상인데 동기화만 3시간+ 멈춘 상태 표시 (인비토 6/13 06:00 중단 실측 후속) */}
-                        {agent.is_online && agent.last_sync_at && (Date.now() - new Date(agent.last_sync_at).getTime() > 3 * 3600 * 1000) && (
-                          <span className="ml-1.5 px-1.5 py-0.5 rounded text-[10px] font-medium bg-amber-100 text-amber-700">동기화 지연</span>
-                        )}
-                      </td>
-                      <td className="px-4 py-3 text-right text-gray-700">{(agent.total_customers_synced || 0).toLocaleString()}</td>
-                      <td className="px-4 py-3 text-right text-gray-700">{agent.today_sync_count || 0}건</td>
-                      <td className="px-4 py-3 text-right">
-                        <span className={agent.recent_error_count > 0 ? 'text-red-600 font-medium' : 'text-gray-400'}>
-                          {agent.recent_error_count || 0}건
-                        </span>
-                      </td>
-                      <td className="px-4 py-3 text-center">
-                        <div className="flex items-center justify-center gap-1">
-                          <button
-                            onClick={() => { setSyncSelectedAgent(agent); loadSyncAgentDetail(agent.id); }}
-                            className="text-blue-600 hover:text-blue-800 text-xs font-medium px-2 py-1 rounded hover:bg-blue-50"
-                          >
-                            상세
-                          </button>
-                          <button
-                            onClick={() => {
-                              setSyncSelectedAgent(agent);
-                              // ★ 2026-09-27 한줄로 V2 R271 — 행의 실제 주기로 연다(옛: 60/30 고정값이라 저장하면 실제 주기를 덮었다)
-                              setSyncConfigForm({
-                                sync_interval_customers: Number(agent.sync_interval_customers_min) || 60,
-                                sync_interval_purchases: Number(agent.sync_interval_purchases_min) || 30,
-                              });
-                              setShowSyncConfigModal(true);
-                            }}
-                            className="text-gray-600 hover:text-gray-800 text-xs font-medium px-2 py-1 rounded hover:bg-gray-100"
-                          >
-                            설정
-                          </button>
-                          <button
-                            onClick={() => {
-                              setSyncSelectedAgent(agent);
-                              // ★ D131 후속: paused 상태면 기본값을 'resume'으로 자동 선택
-                              setSyncCommandType(agent.status === 'paused' ? 'resume' : 'full_sync');
-                              setShowSyncCommandModal(true);
-                            }}
-                            className="text-emerald-600 hover:text-emerald-800 text-xs font-medium px-2 py-1 rounded hover:bg-emerald-50"
-                          >
-                            명령
-                          </button>
-                          {/* ★ 2026-07-01: 매핑 — 원격 컬럼 매핑 편집(재설치 없이) */}
-                          <button
-                            onClick={() => openSyncMappingModal(agent)}
-                            className="text-violet-600 hover:text-violet-800 text-xs font-medium px-2 py-1 rounded hover:bg-violet-50"
-                          >
-                            매핑
-                          </button>
-                          {/* ★ D131 후속(2026-04-21): 삭제 버튼 — 버려진/중복 Agent 정리 */}
-                          <button
-                            onClick={() => {
-                              setSyncSelectedAgent(agent);
-                              setShowSyncDeleteModal(true);
-                            }}
-                            className="text-red-600 hover:text-red-800 text-xs font-medium px-2 py-1 rounded hover:bg-red-50"
-                          >
-                            삭제
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </div>
-      )}
+      {activeTab === 'syncAgents' && <SyncAgentsTab {...{ getSyncOnlineBadge, loadSyncAgents, setShowSyncCommandModal, setShowSyncConfigModal, setShowSyncDeleteModal, setShowSyncDetailModal, setShowSyncMappingModal, setShowSyncReleaseModal, setSyncAgentDetail, setSyncCommandType, setSyncConfigForm, setSyncDetailLoading, setSyncMapAckSupported, setSyncMapCustomers, setSyncMapPurchases, setSyncMapReportLoading, setSyncMapReported, setSyncReleaseForm, setSyncSelectedAgent, showAlert, syncAgents, syncAgentsLoading, syncTimeAgo }} />}
 
       {/* ★ D145 P0: 로그인 차단 관리 탭 */}
       {activeTab === 'loginBlocks' && (
@@ -13499,182 +4858,10 @@ const handleApproveRequest = async (id: string) => {
       {activeTab === 'opsRecords' && <OpsRecordsTab />}
 
       {/* ★ 2026-07-17 발송 라인 설정 탭 — LINE_GROUP_ADMIN_USERS(기본 ceo,admin) 전용 */}
-      {activeTab === 'lineGroups' && lineGroupCanManage && (
-        <div className="bg-white rounded-2xl border border-gray-200/70 shadow-sm">
-          <div className="px-6 py-4 border-b flex items-center justify-between gap-4">
-            <div>
-              <h2 className="text-lg font-semibold">발송 라인 설정</h2>
-              <p className="text-xs text-gray-500 mt-1">
-                라인그룹은 발송 라우팅 축입니다. 바꾸면 적재·취소·집계·정산이 함께 움직입니다.
-              </p>
-            </div>
-            <button
-              onClick={() => setEditingLineGroup({ group_name: '', group_type: 'bulk', sms_tables: '', sort_order: lineGroups.length + 1, is_active: true })}
-              className="px-4 py-2 bg-blue-500 text-white rounded-lg text-sm font-medium hover:bg-blue-600 transition-colors whitespace-nowrap"
-            >
-              새 라인그룹
-            </button>
-          </div>
-
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead className="bg-gray-50">
-                <tr>
-                  <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 whitespace-nowrap">순서</th>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 whitespace-nowrap">그룹명</th>
-                  <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 whitespace-nowrap">타입</th>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 whitespace-nowrap">발송 테이블</th>
-                  <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 whitespace-nowrap">배정 고객사</th>
-                  <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 whitespace-nowrap">상태</th>
-                  <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 whitespace-nowrap">관리</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-gray-200">
-                {lineGroupsLoading ? (
-                  <tr><td colSpan={7} className="px-6 py-12 text-center text-gray-500">불러오는 중...</td></tr>
-                ) : lineGroups.length === 0 ? (
-                  <tr><td colSpan={7} className="px-6 py-12 text-center text-gray-500">등록된 라인그룹이 없습니다.</td></tr>
-                ) : (
-                  lineGroups.map((lg: any) => {
-                    const typeLabels: Record<string, { label: string; cls: string }> = {
-                      bulk: { label: '대량발송', cls: 'bg-blue-100 text-blue-700' },
-                      test: { label: '테스트', cls: 'bg-amber-100 text-amber-700' },
-                      auth: { label: '인증', cls: 'bg-purple-100 text-purple-700' },
-                      bito: { label: '자체 게이트웨이', cls: 'bg-emerald-100 text-emerald-700' },
-                    };
-                    const t = typeLabels[lg.group_type] || { label: lg.group_type, cls: 'bg-gray-100 text-gray-700' };
-                    return (
-                      <tr key={lg.id} className="hover:bg-gray-50">
-                        <td className="px-4 py-2.5 text-center text-gray-500">{lg.sort_order}</td>
-                        <td className="px-4 py-2.5 font-medium text-gray-900">{lg.group_name}</td>
-                        <td className="px-4 py-2.5 text-center">
-                          <span className={`px-2 py-0.5 rounded text-xs font-medium ${t.cls}`}>{t.label}</span>
-                        </td>
-                        <td className="px-4 py-2.5 font-mono text-xs text-gray-600">{(lg.sms_tables || []).join(', ')}</td>
-                        <td className="px-4 py-2.5 text-center text-gray-700">{Number(lg.company_count || 0).toLocaleString()}</td>
-                        <td className="px-4 py-2.5 text-center">
-                          <span className={`px-2 py-0.5 rounded text-xs font-medium ${lg.is_active ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500'}`}>
-                            {lg.is_active ? '활성' : '비활성'}
-                          </span>
-                        </td>
-                        <td className="px-4 py-2.5 text-center whitespace-nowrap">
-                          <button
-                            onClick={() => setEditingLineGroup({ ...lg, sms_tables: (lg.sms_tables || []).join(', ') })}
-                            className="px-2.5 py-1 text-xs border rounded-lg text-gray-700 hover:bg-gray-100"
-                          >
-                            수정
-                          </button>
-                          <button
-                            onClick={() => handleDeleteLineGroup(lg)}
-                            className="ml-1.5 px-2.5 py-1 text-xs border border-red-200 rounded-lg text-red-600 hover:bg-red-50"
-                          >
-                            삭제
-                          </button>
-                        </td>
-                      </tr>
-                    );
-                  })
-                )}
-              </tbody>
-            </table>
-          </div>
-
-          <div className="px-6 py-3 border-t text-xs text-gray-400">
-            고객사·사용자 배정은 [고객 관리 → 고객사 관리 → 수정 → 발송 라인] 및 [사용자 관리 → 수정 → 발송 라인그룹]에서 합니다.
-          </div>
-        </div>
-      )}
+      {activeTab === 'lineGroups' && lineGroupCanManage && <LineGroupsTab {...{ lineGroups, lineGroupsLoading, loadLineGroups, setEditingLineGroup, showAlert, showConfirm }} />}
 
       {/* ★ 2026-07-17 라인그룹 생성/수정 모달 */}
-      {editingLineGroup && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden">
-            <div className="px-6 py-4 border-b bg-gradient-to-r from-blue-50 to-indigo-50">
-              <h3 className="text-lg font-semibold text-gray-800">
-                {editingLineGroup.id ? '라인그룹 수정' : '새 라인그룹'}
-              </h3>
-            </div>
-            <div className="p-6 space-y-4 max-h-[70vh] overflow-y-auto">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">그룹명 *</label>
-                <input
-                  type="text"
-                  value={editingLineGroup.group_name}
-                  onChange={(e) => setEditingLineGroup({ ...editingLineGroup, group_name: e.target.value })}
-                  placeholder="비토게이트웨이 2"
-                  className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">타입 *</label>
-                <select
-                  value={editingLineGroup.group_type}
-                  onChange={(e) => setEditingLineGroup({ ...editingLineGroup, group_type: e.target.value })}
-                  className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
-                >
-                  <option value="bulk">대량발송 (bulk)</option>
-                  <option value="bito">자체 게이트웨이 (bito)</option>
-                  <option value="test">테스트 (test)</option>
-                  <option value="auth">인증 (auth)</option>
-                </select>
-                <p className="text-xs text-gray-400 mt-1">
-                  대량발송·자체 게이트웨이만 고객사/사용자 배정 드롭다운에 노출됩니다. 테스트·인증은 시스템 전용입니다.
-                </p>
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">발송 테이블 *</label>
-                <input
-                  type="text"
-                  value={editingLineGroup.sms_tables}
-                  onChange={(e) => setEditingLineGroup({ ...editingLineGroup, sms_tables: e.target.value })}
-                  placeholder="SMSQ_SEND_14"
-                  className="w-full px-3 py-2 border rounded-lg font-mono text-sm focus:ring-2 focus:ring-blue-500 outline-none"
-                />
-                <p className="text-xs text-gray-400 mt-1">
-                  콤마로 구분. 2개 이상이면 라운드로빈으로 나눠 적재합니다. MySQL에 실재하는 테이블만 넣어야 합니다.
-                </p>
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">정렬 순서</label>
-                <input
-                  type="number"
-                  value={editingLineGroup.sort_order}
-                  onChange={(e) => setEditingLineGroup({ ...editingLineGroup, sort_order: e.target.value })}
-                  className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
-                />
-              </div>
-              {editingLineGroup.id && (
-                <label className="flex items-center gap-2 text-sm text-gray-700">
-                  <input
-                    type="checkbox"
-                    checked={!!editingLineGroup.is_active}
-                    onChange={(e) => setEditingLineGroup({ ...editingLineGroup, is_active: e.target.checked })}
-                    className="w-4 h-4"
-                  />
-                  활성 (비활성하면 이 라인으로 새 발송이 나가지 않습니다)
-                </label>
-              )}
-              <div className="flex gap-3 pt-2">
-                <button
-                  type="button"
-                  onClick={() => setEditingLineGroup(null)}
-                  className="flex-1 px-4 py-2 border rounded-lg text-gray-700 hover:bg-gray-50"
-                >
-                  취소
-                </button>
-                <button
-                  type="button"
-                  onClick={handleSaveLineGroup}
-                  disabled={lineGroupSaving}
-                  className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50"
-                >
-                  {lineGroupSaving ? '저장 중...' : '저장'}
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
+      {editingLineGroup && <LineGroupEditModal {...{ editingLineGroup, lineGroupSaving, loadLineGroups, setEditingLineGroup, setLineGroupSaving, showAlert }} />}
 
       {/* ★ 2026-08-16 신규마케팅진단 탭 — ceo 전용(서버 게이트 404 은닉과 이중) */}
       {activeTab === 'marketingDiagnosis' && diagnosisAllowed && (
@@ -13685,1087 +4872,41 @@ const handleApproveRequest = async (id: string) => {
       )}
 
       {/* 감사 로그 탭 */}
-      {activeTab === 'auditLogs' && auditAccessAllowed && (
-        <div className="bg-white rounded-2xl border border-gray-200/70 shadow-sm">
-          <div className="px-6 py-4 border-b">
-            <h2 className="text-lg font-semibold">📋 감사 로그</h2>
-            <p className="text-xs text-gray-500 mt-1">로그인, 삭제, 설정 변경 등 주요 활동 기록</p>
-          </div>
-
-          {/* 필터 */}
-          <div className="px-6 py-3 border-b bg-gray-50 flex flex-wrap items-center gap-3">
-            <span className="text-sm text-gray-500 font-medium">기간</span>
-            <input type="date" value={auditFromDate} onChange={(e) => setAuditFromDate(e.target.value)}
-              className="border rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-200" />
-            <span className="text-gray-400">~</span>
-            <input type="date" value={auditToDate} onChange={(e) => setAuditToDate(e.target.value)}
-              className="border rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-200" />
-            <div className="w-px h-6 bg-gray-200" />
-            <span className="text-sm text-gray-500 font-medium">액션</span>
-            <select value={auditActionFilter} onChange={(e) => setAuditActionFilter(e.target.value)}
-              className="border rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-200">
-              <option value="all">전체</option>
-              {auditActions.map(a => <option key={a} value={a}>{AUDIT_ACTION_LABEL[a] || a}</option>)}
-            </select>
-            <span className="text-sm text-gray-500 font-medium">고객사</span>
-            <select value={auditCompanyFilter} onChange={(e) => setAuditCompanyFilter(e.target.value)}
-              className="border rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-200">
-              <option value="all">전체</option>
-              {companies.map(c => <option key={c.id} value={c.id}>{c.company_name}</option>)}
-            </select>
-            <button onClick={() => loadAuditLogs(1)}
-              className="px-4 py-1.5 bg-blue-500 text-white rounded-lg text-sm font-medium hover:bg-blue-600 transition-colors">
-              조회
-            </button>
-          </div>
-
-          {/* 총 건수 */}
-          <div className="px-6 py-2 text-xs text-gray-500">
-            총 {auditLogsTotal.toLocaleString()}건 · {auditLogsPage} / {auditLogsTotalPages} 페이지
-          </div>
-
-          {/* 테이블 */}
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead className="bg-gray-50">
-                <tr>
-                  <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 whitespace-nowrap">일시</th>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 whitespace-nowrap">사용자</th>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 whitespace-nowrap">고객사</th>
-                  <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 whitespace-nowrap">액션</th>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 whitespace-nowrap">상세</th>
-                  <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 whitespace-nowrap">IP</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-gray-200">
-                {auditLogsLoading ? (
-                  <tr><td colSpan={6} className="px-6 py-12 text-center text-gray-500">불러오는 중...</td></tr>
-                ) : auditLogs.length === 0 ? (
-                  <tr><td colSpan={6} className="px-6 py-12 text-center text-gray-500">조회된 로그가 없습니다.</td></tr>
-                ) : (
-                  auditLogs.map((log) => {
-                    // ★ 2026-08-24 라벨·상세 조립 = constants/audit-action-labels.ts CT 소유(인라인 맵 금지)
-                    const detailText = formatAuditDetail(log.action, log.details);
-
-                    return (
-                      <tr key={log.id} className="hover:bg-gray-50">
-                        <td className="px-4 py-3 text-center text-gray-600 whitespace-nowrap text-xs">
-                          {formatDateTime(log.created_at)}
-                        </td>
-                        <td className="px-4 py-3 text-left">
-                          <div className="font-medium text-gray-800 text-xs">{log.user_name || '-'}</div>
-                          <div className="text-[10px] text-gray-400">{log.login_id || ''}</div>
-                        </td>
-                        <td className="px-4 py-3 text-left text-xs text-gray-600">
-                          {log.company_name || '-'}
-                        </td>
-                        <td className="px-4 py-3 text-center">
-                          <span className={`px-2 py-1 rounded-full text-[11px] font-medium ${AUDIT_ACTION_COLOR[log.action] || 'bg-gray-100 text-gray-600'}`}>
-                            {AUDIT_ACTION_LABEL[log.action] || log.action}
-                          </span>
-                        </td>
-                        <td className="px-4 py-3 text-left text-xs text-gray-500 max-w-[300px] truncate" title={detailText}>
-                          {detailText || '-'}
-                        </td>
-                        <td className="px-4 py-3 text-center text-xs text-gray-400 whitespace-nowrap">
-                          {log.ip_address || '-'}
-                        </td>
-                      </tr>
-                    );
-                  })
-                )}
-              </tbody>
-            </table>
-          </div>
-
-          {/* 페이지네이션 */}
-          {auditLogsTotalPages > 1 && (
-            <div className="px-6 py-3 border-t flex justify-center gap-1">
-              <button onClick={() => loadAuditLogs(1)} disabled={auditLogsPage === 1}
-                className="px-2 py-1 text-xs border rounded hover:bg-gray-50 disabled:opacity-30">«</button>
-              <button onClick={() => loadAuditLogs(auditLogsPage - 1)} disabled={auditLogsPage === 1}
-                className="px-2 py-1 text-xs border rounded hover:bg-gray-50 disabled:opacity-30">‹</button>
-              {Array.from({ length: auditLogsTotalPages }, (_, i) => i + 1)
-                .filter(p => Math.abs(p - auditLogsPage) <= 2 || p === 1 || p === auditLogsTotalPages)
-                .map((p, idx, arr) => (
-                  <span key={p}>
-                    {idx > 0 && arr[idx - 1] !== p - 1 && <span className="px-1 text-gray-400">…</span>}
-                    <button onClick={() => loadAuditLogs(p)}
-                      className={`px-3 py-1 text-xs border rounded ${p === auditLogsPage ? 'bg-blue-500 text-white' : 'hover:bg-gray-50'}`}>{p}</button>
-                  </span>
-                ))}
-              <button onClick={() => loadAuditLogs(auditLogsPage + 1)} disabled={auditLogsPage === auditLogsTotalPages}
-                className="px-2 py-1 text-xs border rounded hover:bg-gray-50 disabled:opacity-30">›</button>
-              <button onClick={() => loadAuditLogs(auditLogsTotalPages)} disabled={auditLogsPage === auditLogsTotalPages}
-                className="px-2 py-1 text-xs border rounded hover:bg-gray-50 disabled:opacity-30">»</button>
-            </div>
-          )}
-        </div>
-      )}
+      {activeTab === 'auditLogs' && auditAccessAllowed && <AuditLogsTab {...{ auditActionFilter, auditActions, auditCompanyFilter, auditFromDate, auditLogs, auditLogsLoading, auditLogsPage, auditLogsTotal, auditLogsTotalPages, auditToDate, companies, loadAuditLogs, setAuditActionFilter, setAuditCompanyFilter, setAuditFromDate, setAuditToDate }} />}
 
       
       </main>
-      {showSyncDetailModal && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-          <div className="bg-white rounded-2xl shadow-2xl w-[700px] max-h-[85vh] overflow-hidden animate-in fade-in zoom-in">
-            <div className="p-5 border-b bg-gradient-to-r from-blue-50 to-indigo-50">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 bg-blue-100 rounded-full flex items-center justify-center">
-                    <svg className="w-5 h-5 text-blue-600" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 12h14M5 12a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v4a2 2 0 01-2 2M5 12a2 2 0 00-2 2v4a2 2 0 002 2h14a2 2 0 002-2v-4a2 2 0 00-2-2" /></svg>
-                  </div>
-                  <div>
-                    <h3 className="text-lg font-bold text-gray-800">Agent 상세</h3>
-                    <p className="text-xs text-gray-500">{syncSelectedAgent?.company_name} · {syncSelectedAgent?.agent_name}</p>
-                  </div>
-                </div>
-                <button onClick={() => setShowSyncDetailModal(false)} className="text-gray-400 hover:text-gray-600">
-                  <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
-                </button>
-              </div>
-            </div>
-            <div className="p-5 overflow-y-auto max-h-[calc(85vh-80px)]">
-              {syncDetailLoading ? (
-                <div className="text-center py-8 text-gray-500">로딩 중...</div>
-              ) : syncAgentDetail ? (
-                <>
-                  {/* 기본 정보 */}
-                  <div className="grid grid-cols-3 gap-3 mb-5">
-                    <div className="bg-gray-50 rounded-lg p-3">
-                      <div className="text-xs text-gray-400 mb-1">버전</div>
-                      <div className="font-medium text-gray-800">{syncAgentDetail.agent?.agent_version || '-'}</div>
-                    </div>
-                    <div className="bg-gray-50 rounded-lg p-3">
-                      <div className="text-xs text-gray-400 mb-1">OS</div>
-                      <div className="font-medium text-gray-800 text-xs">{syncAgentDetail.agent?.os_info || '-'}</div>
-                    </div>
-                    <div className="bg-gray-50 rounded-lg p-3">
-                      <div className="text-xs text-gray-400 mb-1">상태</div>
-                      <div>{getSyncOnlineBadge(syncAgentDetail.agent?.online_status, syncAgentDetail.agent?.status, undefined, syncAgentDetail.agent?.sync_interval_customers)}</div>
-                    </div>
-                  </div>
-
-                  {/* 통계 카드 */}
-                  <div className="grid grid-cols-4 gap-3 mb-5">
-                    <div className="bg-blue-50 rounded-lg p-3 text-center">
-                      <div className="text-xl font-bold text-blue-700">{syncAgentDetail.stats?.total_syncs_today || 0}</div>
-                      <div className="text-xs text-blue-500">오늘 동기화</div>
-                    </div>
-                    <div className="bg-red-50 rounded-lg p-3 text-center">
-                      <div className="text-xl font-bold text-red-700">{syncAgentDetail.stats?.total_errors_today || 0}</div>
-                      <div className="text-xs text-red-500">오늘 에러</div>
-                    </div>
-                    <div className="bg-emerald-50 rounded-lg p-3 text-center">
-                      <div className="text-xl font-bold text-emerald-700">{(syncAgentDetail.stats?.total_customers || 0).toLocaleString()}</div>
-                      <div className="text-xs text-emerald-500">총 고객</div>
-                    </div>
-                    <div className="bg-purple-50 rounded-lg p-3 text-center">
-                      <div className="text-xl font-bold text-purple-700">{(syncAgentDetail.stats?.total_purchases || 0).toLocaleString()}</div>
-                      <div className="text-xs text-purple-500">총 구매</div>
-                    </div>
-                  </div>
-
-                  {/* ★ 2026-07-10 원격 관리 P0: 에이전트 자기 보고 — 적용 매핑·소스 컬럼 (서버 사본, 진실 이원화 해소) */}
-                  <h4 className="text-sm font-semibold text-gray-700 mb-2">에이전트 자기 보고</h4>
-                  {syncAgentDetail.agent?.reported ? (
-                    <div className="border rounded-lg p-3 mb-5 text-xs space-y-2 bg-emerald-50/40 border-emerald-200">
-                      <div className="flex flex-wrap gap-x-4 gap-y-1 text-gray-600">
-                        <span>보고 시각 <b className="text-gray-800">{syncAgentDetail.agent.reported.reportedAt ? formatDateTimeShort(syncAgentDetail.agent.reported.reportedAt) : '-'}</b></span>
-                        <span>매핑 해시 <b className="font-mono text-gray-800">{syncAgentDetail.agent.reported.configVersion || '-'}</b></span>
-                        <span>고객 매핑 <b className="text-gray-800">{Object.keys(syncAgentDetail.agent.reported.appliedMapping?.customers || {}).length}건</b></span>
-                        <span>구매 매핑 <b className="text-gray-800">{Object.keys(syncAgentDetail.agent.reported.appliedMapping?.purchases || {}).length}건</b></span>
-                        <span>소스 컬럼 고객 <b className="text-gray-800">{(syncAgentDetail.agent.reported.sourceColumns?.customers || []).length}개</b>{syncAgentDetail.agent.reported.sourceColumns?.purchases ? <> · 구매 <b className="text-gray-800">{syncAgentDetail.agent.reported.sourceColumns.purchases.length}개</b></> : null}</span>
-                      </div>
-                      <details>
-                        <summary className="cursor-pointer text-emerald-700 font-medium">적용 매핑 펼쳐보기</summary>
-                        <div className="mt-2 grid grid-cols-2 gap-3">
-                          <div>
-                            <div className="text-gray-500 mb-1">고객</div>
-                            <div className="bg-white border rounded p-2 max-h-40 overflow-y-auto font-mono text-[11px] space-y-0.5">
-                              {Object.entries(syncAgentDetail.agent.reported.appliedMapping?.customers || {}).map(([s, t]: any) => (
-                                <div key={s}>{s} → {String(t)}{/^custom_\d+$/.test(String(t)) && syncAgentDetail.agent.reported.appliedMapping?.customFieldLabels?.[String(t)] ? ` (${syncAgentDetail.agent.reported.appliedMapping.customFieldLabels[String(t)]})` : ''}</div>
-                              ))}
-                              {Object.keys(syncAgentDetail.agent.reported.appliedMapping?.customers || {}).length === 0 && <div className="text-gray-400">없음</div>}
-                            </div>
-                          </div>
-                          <div>
-                            <div className="text-gray-500 mb-1">구매</div>
-                            <div className="bg-white border rounded p-2 max-h-40 overflow-y-auto font-mono text-[11px] space-y-0.5">
-                              {Object.entries(syncAgentDetail.agent.reported.appliedMapping?.purchases || {}).map(([s, t]: any) => (
-                                <div key={s}>{s} → {String(t)}</div>
-                              ))}
-                              {Object.keys(syncAgentDetail.agent.reported.appliedMapping?.purchases || {}).length === 0 && <div className="text-gray-400">없음</div>}
-                            </div>
-                          </div>
-                        </div>
-                      </details>
-                    </div>
-                  ) : (
-                    <div className="border border-amber-200 bg-amber-50 rounded-lg p-3 mb-5 text-xs text-amber-800">
-                      아직 자기 보고가 없습니다. 구버전(v1.6.1 미만) 또는 신버전 첫 heartbeat 전입니다.
-                    </div>
-                  )}
-
-                  {/* ★ 2026-07-10 P1: 대기 명령 + 명령 결과 (ACK) */}
-                  {(syncAgentDetail.agent?.pending_commands || []).length > 0 && (
-                    <>
-                      <h4 className="text-sm font-semibold text-gray-700 mb-2">대기 중 명령</h4>
-                      <div className="border rounded-lg p-3 mb-5 text-xs space-y-1">
-                        {(syncAgentDetail.agent.pending_commands || []).map((c: any, i: number) => (
-                          <div key={c.id || i} className="flex items-center justify-between gap-2">
-                            <span className="font-medium text-gray-700">{c.type}</span>
-                            <span className="text-gray-400">
-                              등록 {c.created_at ? formatDateTimeShort(c.created_at) : '-'}
-                              {c.attempts ? ` · 전달 ${c.attempts}회` : ' · 미전달'}
-                              {c.delivered_at ? ` (최근 ${formatDateTimeShort(c.delivered_at)})` : ''}
-                            </span>
-                          </div>
-                        ))}
-                        <div className="text-gray-400 pt-1">{syncAgentDetail.agent?.supports_ack ? '에이전트 실행 확인(ACK) 수신 시 목록에서 사라집니다. 5회 재전달 미응답 시 실패로 만료됩니다.' : '구버전 에이전트: 다음 heartbeat에 전달 후 목록에서 사라집니다(결과 회신 없음).'}</div>
-                      </div>
-                    </>
-                  )}
-                  <h4 className="text-sm font-semibold text-gray-700 mb-2">명령 결과 (최근 {(syncAgentDetail.agent?.command_results || []).length}건)</h4>
-                  <div className="border rounded-lg overflow-hidden mb-5">
-                    {(syncAgentDetail.agent?.command_results || []).length === 0 ? (
-                      <div className="px-3 py-4 text-center text-xs text-gray-400">
-                        {syncAgentDetail.agent?.supports_ack ? '아직 회신된 명령 결과가 없습니다.' : '구버전 에이전트(v1.6.1 미만)는 명령 결과를 회신하지 않습니다.'}
-                      </div>
-                    ) : (
-                      <div className="divide-y">
-                        {[...(syncAgentDetail.agent.command_results || [])].reverse().map((r: any, i: number) => (
-                          <div key={`${r.commandId || i}`} className="px-3 py-2 text-xs">
-                            <div className="flex items-center gap-2 flex-wrap">
-                              <span className={`px-1.5 py-0.5 rounded font-medium ${r.ok ? 'bg-emerald-100 text-emerald-700' : 'bg-red-100 text-red-700'}`}>{r.ok ? '성공' : '실패'}</span>
-                              <span className="font-medium text-gray-700">{r.type}</span>
-                              <span className="text-gray-400">{r.completedAt ? formatDateTimeShort(r.completedAt) : '-'}</span>
-                            </div>
-                            {r.message && <div className="mt-1 text-gray-600">{r.message}</div>}
-                            {/* report_logs — 로그 열람 */}
-                            {Array.isArray(r.data?.lines) && r.data.lines.length > 0 && (
-                              <details className="mt-1">
-                                <summary className="cursor-pointer text-indigo-600">로그 {r.data.lines.length}줄 보기{r.data.truncated ? ' (앞부분 생략됨)' : ''}</summary>
-                                <pre className="mt-1 bg-gray-900 text-gray-100 rounded p-2 max-h-64 overflow-auto text-[10px] leading-relaxed whitespace-pre-wrap">{r.data.lines.join('\n')}</pre>
-                              </details>
-                            )}
-                            {/* mapping_dryrun — 소스 1행 → 매핑 결과 미리보기 */}
-                            {(r.data?.customers || r.data?.purchases) && (
-                              <details className="mt-1">
-                                <summary className="cursor-pointer text-indigo-600">매핑 미리보기 결과</summary>
-                                <pre className="mt-1 bg-gray-50 border rounded p-2 max-h-64 overflow-auto text-[10px] leading-relaxed whitespace-pre-wrap">{JSON.stringify(r.data, null, 2)}</pre>
-                              </details>
-                            )}
-                            {/* test_connection — 상세 */}
-                            {typeof r.data?.connected === 'boolean' && (
-                              <div className="mt-1 text-gray-500">연결 {r.data.connected ? '정상' : '실패'}{typeof r.data.customerColumns === 'number' ? ` · 고객 ${r.data.customerColumns}컬럼` : ''}{typeof r.data.purchaseColumns === 'number' ? ` · 구매 ${r.data.purchaseColumns}컬럼` : ''}{r.data.error ? ` · ${r.data.error}` : ''}</div>
-                            )}
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-
-                  {/* 동기화 이력 */}
-                  <h4 className="text-sm font-semibold text-gray-700 mb-2">최근 동기화 이력</h4>
-                  <div className="border rounded-lg overflow-hidden">
-                    <table className="w-full text-xs">
-                      <thead className="bg-gray-50">
-                        <tr>
-                          <th className="px-3 py-2 text-left text-gray-500">시각</th>
-                          <th className="px-3 py-2 text-left text-gray-500">타입</th>
-                          <th className="px-3 py-2 text-left text-gray-500">모드</th>
-                          <th className="px-3 py-2 text-right text-gray-500">건수</th>
-                          <th className="px-3 py-2 text-right text-gray-500">성공</th>
-                          <th className="px-3 py-2 text-right text-gray-500">실패</th>
-                          <th className="px-3 py-2 text-right text-gray-500">소요</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y">
-                        {(syncAgentDetail.recent_logs || []).map((log: any) => (
-                          <Fragment key={log.id}>
-                          <tr className="hover:bg-gray-50">
-                            <td className="px-3 py-2 text-gray-500">{(log.started_at || log.completed_at) ? formatDateTimeShort(log.started_at || log.completed_at) : '-'}</td>
-                            <td className="px-3 py-2">
-                              <span className={`px-1.5 py-0.5 rounded text-xs ${log.sync_type === 'customers' ? 'bg-blue-100 text-blue-700' : 'bg-purple-100 text-purple-700'}`}>
-                                {log.sync_type === 'customers' ? '고객' : '구매'}
-                              </span>
-                            </td>
-                            <td className="px-3 py-2 text-gray-500">{log.mode === 'full' ? '전체' : '증분'}</td>
-                            <td className="px-3 py-2 text-right text-gray-700">{log.total_count || 0}</td>
-                            <td className="px-3 py-2 text-right text-green-600">{log.success_count || 0}</td>
-                            <td className="px-3 py-2 text-right">
-                              <span className={log.fail_count > 0 ? 'text-red-600 font-medium' : 'text-gray-400'}>{log.fail_count || 0}</span>
-                            </td>
-                            <td className="px-3 py-2 text-right text-gray-500">{log.duration_ms ? `${(log.duration_ms / 1000).toFixed(1)}초` : '-'}</td>
-                          </tr>
-                          {/* ★ 2026-06-13: 실패 행 상세(failures jsonb) — 어떤 행이 왜 실패했는지 표시 (식별 불가 구멍 해소) */}
-                          {Array.isArray(log.failures) && log.failures.length > 0 && (
-                            <tr className="bg-red-50/60">
-                              <td colSpan={7} className="px-3 py-1.5 text-[11px] text-red-700">
-                                실패 상세: {log.failures.slice(0, 5).map((f: any, i: number) => (
-                                  <span key={i} className="mr-3 font-mono">{f.phone || '(번호 없음)'}: {f.reason || '원인 미기록'}</span>
-                                ))}
-                                {(log.failures_total ?? log.failures.length) > 5 && <span className="text-red-400">외 {(log.failures_total ?? log.failures.length) - 5}건</span>}
-                              </td>
-                            </tr>
-                          )}
-                          </Fragment>
-                        ))}
-                        {(!syncAgentDetail.recent_logs || syncAgentDetail.recent_logs.length === 0) && (
-                          <tr><td colSpan={7} className="px-3 py-4 text-center text-gray-400">동기화 이력이 없습니다.</td></tr>
-                        )}
-                      </tbody>
-                    </table>
-                  </div>
-                </>
-              ) : (
-                <div className="text-center py-8 text-gray-400">데이터를 불러올 수 없습니다.</div>
-              )}
-            </div>
-          </div>
-        </div>
-      )}
+      {showSyncDetailModal && <SyncDetailModal {...{ getSyncOnlineBadge, setShowSyncDetailModal, syncAgentDetail, syncDetailLoading, syncSelectedAgent }} />}
 
       {/* Sync 설정 변경 모달 */}
-      {showSyncConfigModal && syncSelectedAgent && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-          <div className="bg-white rounded-2xl shadow-2xl w-[400px] overflow-hidden animate-in fade-in zoom-in">
-            <div className="p-5 border-b bg-gradient-to-r from-gray-50 to-slate-50">
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 bg-gray-100 rounded-full flex items-center justify-center">
-                  <svg className="w-5 h-5 text-gray-600" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
-                </div>
-                <div>
-                  <h3 className="text-lg font-bold text-gray-800">동기화 설정</h3>
-                  <p className="text-xs text-gray-500">{syncSelectedAgent.company_name} · {syncSelectedAgent.agent_name}</p>
-                </div>
-              </div>
-            </div>
-            <div className="p-5 space-y-4">
-              <div>
-                <label className="text-xs text-gray-500 font-medium mb-1.5 block">고객 동기화 주기 (분)</label>
-                <input
-                  type="number"
-                  min={5}
-                  value={syncConfigForm.sync_interval_customers}
-                  onChange={(e) => setSyncConfigForm({ ...syncConfigForm, sync_interval_customers: parseInt(e.target.value) || 5 })}
-                  className="w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none"
-                />
-              </div>
-              <div>
-                <label className="text-xs text-gray-500 font-medium mb-1.5 block">구매 동기화 주기 (분)</label>
-                <input
-                  type="number"
-                  min={5}
-                  value={syncConfigForm.sync_interval_purchases}
-                  onChange={(e) => setSyncConfigForm({ ...syncConfigForm, sync_interval_purchases: parseInt(e.target.value) || 5 })}
-                  className="w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none"
-                />
-              </div>
-              <p className="text-xs text-gray-400">Agent가 다음 config 조회 시 변경사항이 반영됩니다.</p>
-            </div>
-            <div className="flex border-t">
-              <button
-                onClick={() => setShowSyncConfigModal(false)}
-                className="flex-1 px-4 py-3 text-gray-700 font-medium hover:bg-gray-50 transition-colors border-r"
-              >
-                취소
-              </button>
-              <button
-                onClick={handleSyncConfigSave}
-                className="flex-1 px-4 py-3 text-blue-600 font-medium hover:bg-blue-50 transition-colors"
-              >
-                저장하기
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      {showSyncConfigModal && syncSelectedAgent && <SyncConfigModal {...{ loadSyncAgents, setShowSyncConfigModal, setSyncConfigForm, showAlert, syncConfigForm, syncSelectedAgent }} />}
 
       {/* ★ D131 후속(2026-04-21): Sync Agent 삭제 확인 모달 */}
-      {showSyncDeleteModal && syncSelectedAgent && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-          <div className="bg-white rounded-2xl shadow-2xl w-[420px] overflow-hidden animate-in fade-in zoom-in">
-            <div className="p-5 border-b bg-gradient-to-r from-red-50 to-orange-50">
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 bg-red-100 rounded-full flex items-center justify-center">
-                  <svg className="w-5 h-5 text-red-600" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6M1 7h22M8 7V4a2 2 0 012-2h4a2 2 0 012 2v3" /></svg>
-                </div>
-                <div>
-                  <h3 className="text-lg font-bold text-gray-800">Agent 삭제</h3>
-                  <p className="text-xs text-gray-500">{syncSelectedAgent.company_name} · {syncSelectedAgent.agent_name}</p>
-                </div>
-              </div>
-            </div>
-            <div className="p-5 space-y-3">
-              <p className="text-sm text-gray-700">
-                이 Agent 레코드를 서버에서 <b className="text-red-600">영구 삭제</b>합니다.
-              </p>
-              <div className="bg-gray-50 border border-gray-200 rounded-lg p-3 text-xs text-gray-600 space-y-1.5">
-                <div className="flex justify-between"><span className="text-gray-500">Agent ID</span><span className="font-mono">{String(syncSelectedAgent.id).slice(0, 13)}…</span></div>
-                <div className="flex justify-between"><span className="text-gray-500">버전</span><span>{syncSelectedAgent.agent_version || '-'}</span></div>
-                <div className="flex justify-between"><span className="text-gray-500">마지막 heartbeat</span><span>{syncTimeAgo(syncSelectedAgent.last_heartbeat_at)}</span></div>
-                <div className="flex justify-between"><span className="text-gray-500">동기화된 고객</span><span>{(syncSelectedAgent.total_customers_synced || 0).toLocaleString()}건</span></div>
-              </div>
-              <div className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg p-3 space-y-1">
-                <div>⚠️ 이미 동기화된 고객 데이터는 유지되지만 <b>해당 Agent의 동기화 이력(sync_logs)은 함께 삭제</b>됩니다.</div>
-                <div>⚠️ Agent가 아직 실행 중이면 다음 heartbeat 때 자동 재등록되어 레코드가 다시 생길 수 있습니다. 먼저 Agent 프로세스를 종료하세요.</div>
-              </div>
-            </div>
-            <div className="flex border-t">
-              <button
-                onClick={() => setShowSyncDeleteModal(false)}
-                disabled={syncDeleting}
-                className="flex-1 px-4 py-3 text-gray-700 font-medium hover:bg-gray-50 transition-colors border-r disabled:opacity-50"
-              >
-                취소
-              </button>
-              <button
-                onClick={() => handleSyncDelete(false)}
-                disabled={syncDeleting}
-                className="flex-1 px-4 py-3 text-red-600 font-medium hover:bg-red-50 transition-colors disabled:opacity-50"
-              >
-                {syncDeleting ? '삭제 중...' : '삭제'}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      {showSyncDeleteModal && syncSelectedAgent && <SyncDeleteModal {...{ loadSyncAgents, setShowSyncDeleteModal, setSyncDeleting, showAlert, showConfirm, syncDeleting, syncSelectedAgent, syncTimeAgo }} />}
 
       {/* ★ 2026-07-01: 원격 컬럼 매핑 편집 모달 (update_config) */}
-      {showSyncMappingModal && syncSelectedAgent && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-2xl shadow-2xl w-[680px] max-h-[90vh] overflow-hidden flex flex-col animate-in fade-in zoom-in">
-            <div className="p-5 border-b bg-gradient-to-r from-violet-50 to-fuchsia-50">
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 bg-violet-100 rounded-full flex items-center justify-center">
-                  <svg className="w-5 h-5 text-violet-600" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h7" /></svg>
-                </div>
-                <div>
-                  <h3 className="text-lg font-bold text-gray-800">컬럼 매핑 편집</h3>
-                  <p className="text-xs text-gray-500">{syncSelectedAgent.company_name} · {syncSelectedAgent.agent_name}</p>
-                </div>
-              </div>
-            </div>
-
-            <div className="p-5 space-y-5 overflow-y-auto">
-              {/* ★ 2026-07-10 P0: 에이전트 자기 보고 상태 배너 — 프리필 원천·구버전 정직 안내 */}
-              {syncMapReportLoading ? (
-                <div className="px-3 py-2 rounded-lg bg-gray-50 border border-gray-200 text-xs text-gray-500">
-                  에이전트 보고(적용 매핑·소스 컬럼)를 불러오는 중...
-                </div>
-              ) : syncMapReported ? (
-                <div className="px-3 py-2 rounded-lg bg-emerald-50 border border-emerald-200 text-xs text-emerald-800 flex items-center justify-between flex-wrap gap-2">
-                  <div>
-                    에이전트 보고 기준 프리필: 보고 {syncMapReported.reportedAt ? formatDateTimeShort(syncMapReported.reportedAt) : '-'}
-                    {' '}· 매핑 해시 <span className="font-mono">{syncMapReported.configVersion || '-'}</span>
-                    {' '}· 소스 컬럼 고객 {(syncMapReported.sourceColumns?.customers || []).length}개
-                    {syncMapReported.sourceColumns?.purchases ? ` / 구매 ${syncMapReported.sourceColumns.purchases.length}개` : ''}
-                  </div>
-                  {(() => {
-                    const used = new Set<string>();
-                    for (const r of [...syncMapCustomers, ...syncMapPurchases]) {
-                      if (/^custom_\d+$/.test(r.target)) used.add(r.target);
-                    }
-                    return (
-                      <span className={`px-2 py-0.5 rounded-full font-medium ${used.size >= 15 ? 'bg-red-100 text-red-700' : 'bg-violet-100 text-violet-700'}`}>
-                        custom 슬롯 {used.size}/15 사용 · 잔여 {Math.max(0, 15 - used.size)}
-                      </span>
-                    );
-                  })()}
-                </div>
-              ) : (
-                <div className="px-3 py-2 rounded-lg bg-amber-50 border border-amber-200 text-xs text-amber-800">
-                  에이전트 보고 대기. 현재 적용 매핑을 아직 보고하지 않았습니다(구버전 v{syncSelectedAgent.agent_version || '?'} 또는 첫 heartbeat 전).
-                  기존 매핑을 볼 수 없는 상태의 저장은 <b>매핑 전체 소실</b> 위험이 있어 차단됩니다. v1.6.1 이상 배포 후 사용해주세요.
-                </div>
-              )}
-
-              {/* 고객 매핑 */}
-              <div>
-                <div className="flex items-center justify-between mb-2">
-                  <label className="text-sm font-semibold text-gray-700">고객 매핑</label>
-                  <button
-                    onClick={() => setSyncMapCustomers([...syncMapCustomers, { src: '', target: '', label: '' }])}
-                    className="text-xs text-violet-600 hover:text-violet-800 font-medium"
-                  >+ 행 추가</button>
-                </div>
-                <div className="space-y-2">
-                  {syncMapCustomers.map((row, i) => (
-                    <div key={i} className="flex items-center gap-2">
-                      {/* ★ 2026-07-10 P0: 소스 컬럼 = 보고된 실컬럼 드롭다운(자유 타이핑 폐지 — 오타 매핑 차단). 보고 없으면 입력 유지 */}
-                      {(syncMapReported?.sourceColumns?.customers || []).length > 0 ? (
-                        <select
-                          value={row.src}
-                          onChange={(e) => { const n = [...syncMapCustomers]; n[i] = { ...n[i], src: e.target.value }; setSyncMapCustomers(n); }}
-                          className="flex-1 px-2 py-1.5 border rounded-lg text-xs bg-white focus:ring-2 focus:ring-violet-500 outline-none"
-                        >
-                          <option value="">소스 컬럼 선택</option>
-                          {row.src && !(syncMapReported.sourceColumns.customers as string[]).includes(row.src) && (
-                            <option value={row.src}>{row.src} (보고 목록 밖)</option>
-                          )}
-                          {(syncMapReported.sourceColumns.customers as string[]).map((c) => <option key={c} value={c}>{c}</option>)}
-                        </select>
-                      ) : (
-                        <input
-                          placeholder="소스 컬럼 (예: 신규등록일자)"
-                          value={row.src}
-                          onChange={(e) => { const n = [...syncMapCustomers]; n[i] = { ...n[i], src: e.target.value }; setSyncMapCustomers(n); }}
-                          className="flex-1 px-2 py-1.5 border rounded-lg text-xs focus:ring-2 focus:ring-violet-500 outline-none"
-                        />
-                      )}
-                      <span className="text-gray-400 text-xs">→</span>
-                      <select
-                        value={row.target}
-                        onChange={(e) => { const n = [...syncMapCustomers]; n[i] = { ...n[i], target: e.target.value }; setSyncMapCustomers(n); }}
-                        className="w-36 px-2 py-1.5 border rounded-lg text-xs bg-white focus:ring-2 focus:ring-violet-500 outline-none"
-                      >
-                        <option value="">타겟 선택</option>
-                        {SYNC_CUSTOMER_TARGET_FIELDS.map((f) => <option key={f} value={f}>{f}</option>)}
-                      </select>
-                      {/^custom_\d+$/.test(row.target) && (
-                        <input
-                          placeholder="라벨 (예: 등록일자)"
-                          value={row.label}
-                          onChange={(e) => { const n = [...syncMapCustomers]; n[i] = { ...n[i], label: e.target.value }; setSyncMapCustomers(n); }}
-                          className="w-28 px-2 py-1.5 border rounded-lg text-xs focus:ring-2 focus:ring-violet-500 outline-none"
-                        />
-                      )}
-                      <button
-                        onClick={() => setSyncMapCustomers(syncMapCustomers.filter((_, j) => j !== i))}
-                        className="text-red-400 hover:text-red-600 text-sm px-1"
-                        title="행 삭제"
-                      >✕</button>
-                    </div>
-                  ))}
-                  {syncMapCustomers.length === 0 && !syncMapReportLoading && (
-                    <p className="text-xs text-gray-400">{syncMapReported ? '보고된 고객 매핑이 없습니다. 행 추가로 입력하세요.' : '행 추가로 매핑을 입력하세요.'}</p>
-                  )}
-                </div>
-              </div>
-
-              {/* 구매 매핑 */}
-              <div>
-                <div className="flex items-center justify-between mb-2">
-                  <label className="text-sm font-semibold text-gray-700">구매 매핑</label>
-                  <button
-                    onClick={() => setSyncMapPurchases([...syncMapPurchases, { src: '', target: '', label: '' }])}
-                    className="text-xs text-violet-600 hover:text-violet-800 font-medium"
-                  >+ 행 추가</button>
-                </div>
-                <div className="space-y-2">
-                  {syncMapPurchases.map((row, i) => (
-                    <div key={i} className="flex items-center gap-2">
-                      {(syncMapReported?.sourceColumns?.purchases || []).length > 0 ? (
-                        <select
-                          value={row.src}
-                          onChange={(e) => { const n = [...syncMapPurchases]; n[i] = { ...n[i], src: e.target.value }; setSyncMapPurchases(n); }}
-                          className="flex-1 px-2 py-1.5 border rounded-lg text-xs bg-white focus:ring-2 focus:ring-violet-500 outline-none"
-                        >
-                          <option value="">소스 컬럼 선택</option>
-                          {row.src && !(syncMapReported.sourceColumns.purchases as string[]).includes(row.src) && (
-                            <option value={row.src}>{row.src} (보고 목록 밖)</option>
-                          )}
-                          {(syncMapReported.sourceColumns.purchases as string[]).map((c) => <option key={c} value={c}>{c}</option>)}
-                        </select>
-                      ) : (
-                        <input
-                          placeholder="소스 컬럼 (예: 고객전화)"
-                          value={row.src}
-                          onChange={(e) => { const n = [...syncMapPurchases]; n[i] = { ...n[i], src: e.target.value }; setSyncMapPurchases(n); }}
-                          className="flex-1 px-2 py-1.5 border rounded-lg text-xs focus:ring-2 focus:ring-violet-500 outline-none"
-                        />
-                      )}
-                      <span className="text-gray-400 text-xs">→</span>
-                      <select
-                        value={row.target}
-                        onChange={(e) => { const n = [...syncMapPurchases]; n[i] = { ...n[i], target: e.target.value }; setSyncMapPurchases(n); }}
-                        className="w-36 px-2 py-1.5 border rounded-lg text-xs bg-white focus:ring-2 focus:ring-violet-500 outline-none"
-                      >
-                        <option value="">타겟 선택</option>
-                        {SYNC_PURCHASE_TARGET_FIELDS.map((f) => <option key={f} value={f}>{f}</option>)}
-                      </select>
-                      <button
-                        onClick={() => setSyncMapPurchases(syncMapPurchases.filter((_, j) => j !== i))}
-                        className="text-red-400 hover:text-red-600 text-sm px-1"
-                        title="행 삭제"
-                      >✕</button>
-                    </div>
-                  ))}
-                  {syncMapPurchases.length === 0 && <p className="text-xs text-gray-400">구매 매핑이 없으면 비워두세요.</p>}
-                </div>
-              </div>
-
-              <div className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg p-3 space-y-1">
-                <div>• <b>저장은 전송한 대상의 매핑 전체를 교체</b>합니다. 남길 매핑도 화면에 남아 있어야 합니다.</div>
-                <div>• 저장 시 Agent가 다음 heartbeat(최대 60분)에 매핑을 갱신하고 <b>바뀐 대상만</b> 전체 재동기화합니다.</div>
-                <div>• custom 슬롯은 라벨이 화면 표시명이 됩니다(비우면 슬롯명 표시).</div>
-                <div>• <b>미리보기(dry-run)</b>는 소스 1행에 적용한 결과만 회신하고 저장·적용하지 않습니다. 결과는 상세의 "명령 결과"에 도착합니다.</div>
-              </div>
-            </div>
-
-            <div className="flex border-t">
-              <button
-                onClick={() => setShowSyncMappingModal(false)}
-                disabled={syncMapSaving || syncMapDryRunning}
-                className="flex-1 px-4 py-3 text-gray-700 font-medium hover:bg-gray-50 transition-colors border-r disabled:opacity-50"
-              >취소</button>
-              {/* ★ 2026-07-10 P2-9: dry-run — v1.6.1+(ACK) 전용 */}
-              <button
-                onClick={handleSyncMappingDryRun}
-                disabled={syncMapSaving || syncMapDryRunning || !syncMapAckSupported}
-                title={!syncMapAckSupported ? '에이전트 v1.6.1 이상에서 지원' : undefined}
-                className="flex-1 px-4 py-3 text-indigo-600 font-medium hover:bg-indigo-50 transition-colors border-r disabled:opacity-50"
-              >{syncMapDryRunning ? '전송 중...' : '미리보기(dry-run)'}</button>
-              <button
-                onClick={handleSyncMappingSave}
-                disabled={syncMapSaving || syncMapDryRunning || syncMapReportLoading || !syncMapReported}
-                title={!syncMapReported ? '에이전트 보고 수신 후 저장 가능(빈 화면 저장 차단)' : undefined}
-                className="flex-1 px-4 py-3 text-violet-600 font-medium hover:bg-violet-50 transition-colors disabled:opacity-50"
-              >{syncMapSaving ? '전송 중...' : '매핑 저장 및 전송'}</button>
-            </div>
-          </div>
-        </div>
-      )}
+      {showSyncMappingModal && syncSelectedAgent && <SyncMappingModal {...{ loadSyncAgents, setShowSyncMappingModal, setSyncMapCustomers, setSyncMapDryRunning, setSyncMapPurchases, setSyncMapSaving, showAlert, showConfirm, syncMapAckSupported, syncMapCustomers, syncMapDryRunning, syncMapPurchases, syncMapReportLoading, syncMapReported, syncMapSaving, syncSelectedAgent }} />}
 
       {/* ★ 2026-07-01: 자동 업데이트 릴리즈 등록 모달 */}
-      {showSyncReleaseModal && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-2xl shadow-2xl w-[460px] overflow-hidden animate-in fade-in zoom-in">
-            <div className="p-5 border-b bg-gradient-to-r from-violet-50 to-indigo-50">
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 bg-violet-100 rounded-full flex items-center justify-center">
-                  <svg className="w-5 h-5 text-violet-600" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16V4m0 0L3 8m4-4l4 4m6 0v12m0 0l4-4m-4 4l-4-4" /></svg>
-                </div>
-                <div>
-                  <h3 className="text-lg font-bold text-gray-800">Agent 버전 배포</h3>
-                  <p className="text-xs text-gray-500">서버 exe 업로드 후 등록 → 각 Agent가 매시간 자동 수령·교체</p>
-                </div>
-              </div>
-            </div>
-            <div className="p-5 space-y-4">
-              <div>
-                <label className="text-xs text-gray-500 font-medium mb-1.5 block">버전 (x.y.z)</label>
-                <input
-                  value={syncReleaseForm.version}
-                  onChange={(e) => setSyncReleaseForm({ ...syncReleaseForm, version: e.target.value })}
-                  placeholder="1.5.7"
-                  className="w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-violet-500 outline-none"
-                />
-              </div>
-              <div>
-                <label className="text-xs text-gray-500 font-medium mb-1.5 block">OS 티어 (이 exe가 도는 환경)</label>
-                <select
-                  value={syncReleaseForm.tier}
-                  onChange={(e) => setSyncReleaseForm({ ...syncReleaseForm, tier: e.target.value })}
-                  className="w-full px-3 py-2 border rounded-lg text-sm bg-white focus:ring-2 focus:ring-violet-500 outline-none"
-                >
-                  <option value="win-legacy">win-legacy: Windows 7 · Server 2008 R2 (isae)</option>
-                  <option value="win-mid">win-mid: Windows 8.1 · Server 2012 R2</option>
-                  <option value="win-modern">win-modern: Windows 10/11 · Server 2016+</option>
-                  <option value="linux-legacy">linux-legacy: CentOS 7 · RHEL 7</option>
-                  <option value="linux-modern">linux-modern: Ubuntu 20+ · RHEL 8+</option>
-                </select>
-                <p className="text-[11px] text-gray-400 mt-1">이 티어의 에이전트에게만 배포됩니다(다른 티어 오배포 차단).</p>
-              </div>
-              <div>
-                <label className="text-xs text-gray-500 font-medium mb-1.5 block">체크섬 (SHA-256, 선택)</label>
-                <input
-                  value={syncReleaseForm.checksum}
-                  onChange={(e) => setSyncReleaseForm({ ...syncReleaseForm, checksum: e.target.value })}
-                  placeholder="서버 sha256sum 결과 (무결성 검증용)"
-                  className="w-full px-3 py-2 border rounded-lg text-sm font-mono focus:ring-2 focus:ring-violet-500 outline-none"
-                />
-              </div>
-              <label className="flex items-center gap-2 text-sm text-gray-700">
-                <input type="checkbox" checked={syncReleaseForm.force_update} onChange={(e) => setSyncReleaseForm({ ...syncReleaseForm, force_update: e.target.checked })} className="text-violet-600" />
-                강제 업데이트 (감지 즉시 교체)
-              </label>
-              <div className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg p-3 space-y-1">
-                <div>• 먼저 <code className="bg-amber-100 px-1 rounded">sync-agent-{'{버전}'}.exe</code>를 서버 <code className="bg-amber-100 px-1 rounded">agent-releases/</code>에 업로드하세요.</div>
-                <div>• 등록하면 각 Agent가 다음 정각(매시간) 버전 확인 때 자동으로 받아 교체합니다(박스 원격 불필요).</div>
-              </div>
-            </div>
-            <div className="flex border-t">
-              <button
-                onClick={() => setShowSyncReleaseModal(false)}
-                disabled={syncReleaseSaving}
-                className="flex-1 px-4 py-3 text-gray-700 font-medium hover:bg-gray-50 transition-colors border-r disabled:opacity-50"
-              >취소</button>
-              <button
-                onClick={handleSyncReleaseSubmit}
-                disabled={syncReleaseSaving}
-                className="flex-1 px-4 py-3 text-violet-600 font-medium hover:bg-violet-50 transition-colors disabled:opacity-50"
-              >{syncReleaseSaving ? '등록 중...' : '릴리즈 등록'}</button>
-            </div>
-          </div>
-        </div>
-      )}
+      {showSyncReleaseModal && <SyncReleaseModal {...{ setShowSyncReleaseModal, setSyncReleaseForm, setSyncReleaseSaving, showAlert, syncReleaseForm, syncReleaseSaving }} />}
 
       {/* Sync 명령 전송 모달 */}
-      {showSyncCommandModal && syncSelectedAgent && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-          <div className="bg-white rounded-2xl shadow-2xl w-[400px] overflow-hidden animate-in fade-in zoom-in">
-            <div className="p-5 border-b bg-gradient-to-r from-emerald-50 to-green-50">
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 bg-emerald-100 rounded-full flex items-center justify-center">
-                  <svg className="w-5 h-5 text-emerald-600" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" /></svg>
-                </div>
-                <div>
-                  <h3 className="text-lg font-bold text-gray-800">Agent 명령 전송</h3>
-                  <p className="text-xs text-gray-500">{syncSelectedAgent.company_name} · {syncSelectedAgent.agent_name}</p>
-                </div>
-              </div>
-            </div>
-            <div className="p-5 space-y-3">
-              <label className="text-xs text-gray-500 font-medium mb-1.5 block">명령 유형</label>
-              {/* ★ D131 후속(2026-04-21 3차 수정): 자동 선택/비활성 로직 복원.
-                  백엔드가 pause/resume 명령 등록 시 sync_agents.status를 즉시 UPDATE하므로
-                  UI가 DB 실시간 상태 기반으로 재개/일시정지 활성화 판단 가능 (heartbeat 지연 없음).
-                  - paused: pause/full_sync 비활성 (무의미), resume/restart 활성
-                  - active: resume 비활성 (재개할 게 없음), pause/full_sync/restart 활성
-                  - offline: 경고 + 모두 활성 (Agent 복귀 후 실행) */}
-              {(() => {
-                const isPaused = syncSelectedAgent.status === 'paused';
-                const isOffline = syncSelectedAgent.status === 'inactive' || syncSelectedAgent.status === 'error';
-                return (
-                  <>
-                    {isOffline && (
-                      <div className="px-3 py-2 rounded-lg bg-amber-50 border border-amber-200 text-xs text-amber-700">
-                        ⚠️ Agent 오프라인 상태입니다. 명령은 Agent 복귀 후 실행됩니다.
-                      </div>
-                    )}
-                    {isPaused && (
-                      <div className="px-3 py-2 rounded-lg bg-orange-50 border border-orange-200 text-xs text-orange-700">
-                        ⏸️ 현재 일시정지 상태입니다. <b>재개</b> 명령을 선택하세요.
-                      </div>
-                    )}
-                    <div className="space-y-2">
-                      <label className={`flex items-center gap-3 p-3 border rounded-lg transition-colors ${syncCommandType === 'full_sync' ? 'border-emerald-500 bg-emerald-50' : 'hover:bg-gray-50'} ${isPaused ? 'opacity-40 cursor-not-allowed' : 'cursor-pointer'}`}>
-                        <input type="radio" name="cmdType" value="full_sync" checked={syncCommandType === 'full_sync'} onChange={() => setSyncCommandType('full_sync')} className="text-emerald-600" disabled={isPaused} />
-                        <div>
-                          <div className="text-sm font-medium text-gray-800">🔄 전체 동기화</div>
-                          <div className="text-xs text-gray-500">{isPaused ? '일시정지 중: 재개 후 실행 가능' : '모든 고객/구매 데이터를 다시 동기화합니다'}</div>
-                        </div>
-                      </label>
-                      <label className={`flex items-center gap-3 p-3 border rounded-lg transition-colors ${syncCommandType === 'pause' ? 'border-orange-500 bg-orange-50' : 'hover:bg-gray-50'} ${isPaused ? 'opacity-40 cursor-not-allowed' : 'cursor-pointer'}`}>
-                        <input type="radio" name="cmdType" value="pause" checked={syncCommandType === 'pause'} onChange={() => setSyncCommandType('pause')} className="text-orange-600" disabled={isPaused} />
-                        <div>
-                          <div className="text-sm font-medium text-gray-800">⏸️ 동기화 일시정지</div>
-                          <div className="text-xs text-gray-500">{isPaused ? '이미 일시정지 상태입니다' : '스케줄러만 중단 (Agent는 계속 살아있음, heartbeat 유지)'}</div>
-                        </div>
-                      </label>
-                      <label className={`flex items-center gap-3 p-3 border rounded-lg transition-colors ${syncCommandType === 'resume' ? 'border-blue-500 bg-blue-50' : 'hover:bg-gray-50'} ${!isPaused ? 'opacity-40 cursor-not-allowed' : 'cursor-pointer'}`}>
-                        <input type="radio" name="cmdType" value="resume" checked={syncCommandType === 'resume'} onChange={() => setSyncCommandType('resume')} className="text-blue-600" disabled={!isPaused} />
-                        <div>
-                          <div className="text-sm font-medium text-gray-800">▶️ 동기화 재개</div>
-                          <div className="text-xs text-gray-500">{!isPaused ? '이미 실행 중입니다' : '일시정지된 스케줄러를 다시 시작합니다'}</div>
-                        </div>
-                      </label>
-                      <label className={`flex items-center gap-3 p-3 border rounded-lg cursor-pointer transition-colors ${syncCommandType === 'restart' ? 'border-emerald-500 bg-emerald-50' : 'hover:bg-gray-50'}`}>
-                        <input type="radio" name="cmdType" value="restart" checked={syncCommandType === 'restart'} onChange={() => setSyncCommandType('restart')} className="text-emerald-600" />
-                        <div>
-                          <div className="text-sm font-medium text-gray-800">🔁 Agent 재시작</div>
-                          <div className="text-xs text-gray-500">Agent 프로세스를 종료 (서비스로 설치된 경우 자동 재시작)</div>
-                        </div>
-                      </label>
-                      {/* ★ 2026-07-10 원격 관리 P2: 진단 2종 — v1.6.1+(결과 회신 지원) 전용 */}
-                      {(() => {
-                        const ackOk = syncAgentSupportsAck(syncSelectedAgent.agent_version);
-                        return (
-                          <>
-                            <label className={`flex items-center gap-3 p-3 border rounded-lg transition-colors ${syncCommandType === 'report_logs' ? 'border-indigo-500 bg-indigo-50' : 'hover:bg-gray-50'} ${!ackOk ? 'opacity-40 cursor-not-allowed' : 'cursor-pointer'}`}>
-                              <input type="radio" name="cmdType" value="report_logs" checked={syncCommandType === 'report_logs'} onChange={() => setSyncCommandType('report_logs')} className="text-indigo-600" disabled={!ackOk} />
-                              <div>
-                                <div className="text-sm font-medium text-gray-800">📄 최근 로그 요청</div>
-                                <div className="text-xs text-gray-500">{ackOk ? '에이전트 최근 로그 200줄을 회신받아 상세에서 열람' : 'v1.6.1 이상에서 지원'}</div>
-                              </div>
-                            </label>
-                            <label className={`flex items-center gap-3 p-3 border rounded-lg transition-colors ${syncCommandType === 'test_connection' ? 'border-cyan-500 bg-cyan-50' : 'hover:bg-gray-50'} ${!ackOk ? 'opacity-40 cursor-not-allowed' : 'cursor-pointer'}`}>
-                              <input type="radio" name="cmdType" value="test_connection" checked={syncCommandType === 'test_connection'} onChange={() => setSyncCommandType('test_connection')} className="text-cyan-600" disabled={!ackOk} />
-                              <div>
-                                <div className="text-sm font-medium text-gray-800">🔌 소스 DB 연결 테스트</div>
-                                <div className="text-xs text-gray-500">{ackOk ? '고객사 소스 DB 연결·컬럼 조회 상태를 회신받아 확인' : 'v1.6.1 이상에서 지원'}</div>
-                              </div>
-                            </label>
-                          </>
-                        );
-                      })()}
-                    </div>
-                  </>
-                );
-              })()}
-              <p className="text-xs text-gray-400">명령 등록 시 상태가 즉시 반영됩니다. Agent는 다음 heartbeat(최대 60분) 때 실제 실행합니다.</p>
-            </div>
-            <div className="flex border-t">
-              <button
-                onClick={() => setShowSyncCommandModal(false)}
-                className="flex-1 px-4 py-3 text-gray-700 font-medium hover:bg-gray-50 transition-colors border-r"
-              >
-                취소
-              </button>
-              <button
-                onClick={handleSyncCommand}
-                className="flex-1 px-4 py-3 text-emerald-600 font-medium hover:bg-emerald-50 transition-colors"
-              >
-                명령 전송
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      {showSyncCommandModal && syncSelectedAgent && <SyncCommandModal {...{ loadSyncAgents, setShowSyncCommandModal, setSyncCommandType, showAlert, syncCommandType, syncSelectedAgent }} />}
 
       {/* 플랜 신청 거절 모달 */}
-      {showRejectModal && rejectTarget && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-[60]">
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden">
-            <div className="p-6">
-              <div className="w-12 h-12 rounded-full bg-red-100 flex items-center justify-center mx-auto mb-4">
-                <svg className="w-6 h-6 text-red-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                </svg>
-              </div>
-              <h3 className="text-lg font-semibold text-center text-gray-900 mb-2">플랜 신청 거절</h3>
-              <p className="text-sm text-center text-gray-600 mb-4">
-                <strong>{rejectTarget.company_name}</strong>의<br/>
-                {rejectTarget.requested_plan_name} 플랜 신청을 거절합니다.
-              </p>
-              
-              <div className="mb-4">
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  거절 사유 *
-                </label>
-                <textarea
-                  value={rejectReason}
-                  onChange={(e) => setRejectReason(e.target.value)}
-                  className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-red-500 outline-none resize-none"
-                  rows={3}
-                  placeholder="거절 사유를 입력해주세요."
-                />
-              </div>
-            </div>
-            <div className="flex border-t">
-              <button
-                onClick={() => {
-                  setShowRejectModal(false);
-                  setRejectTarget(null);
-                  setRejectReason('');
-                }}
-                className="flex-1 px-4 py-3 text-gray-700 font-medium hover:bg-gray-50 transition-colors border-r"
-              >
-                취소
-              </button>
-              <button
-                onClick={handleRejectRequest}
-                className="flex-1 px-4 py-3 text-red-600 font-medium hover:bg-red-50 transition-colors"
-              >
-                거절하기
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      {showRejectModal && rejectTarget && <RequestRejectModal {...{ loadPlanRequests, rejectReason, rejectTarget, setModal, setRejectReason, setRejectTarget, setShowRejectModal }} />}
 
       {/* 충전 승인 확인 모달 */}
-      {showDepositApproveModal && depositTarget && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-          <div className="bg-white rounded-2xl shadow-2xl w-[400px] overflow-hidden animate-in fade-in zoom-in">
-            <div className="p-5 border-b bg-gradient-to-r from-emerald-50 to-green-50">
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 bg-emerald-100 rounded-full flex items-center justify-center text-xl">✅</div>
-                <div>
-                  <h3 className="text-lg font-bold text-gray-800">충전 승인</h3>
-                  <p className="text-xs text-gray-500">승인 시 잔액이 즉시 충전됩니다</p>
-                </div>
-              </div>
-            </div>
-            <div className="p-5">
-              <div className="bg-gray-50 rounded-xl p-4 space-y-2 mb-4">
-                <div className="flex justify-between text-sm">
-                  <span className="text-gray-400">회사</span>
-                  <span className="font-medium text-gray-800">{depositTarget.company_name}</span>
-                </div>
-                <div className="flex justify-between text-sm">
-                  <span className="text-gray-400">결제수단</span>
-                  <span className="font-medium">{depositTarget.payment_method === 'deposit' ? '무통장입금' : depositTarget.payment_method === 'card' ? '카드결제' : '가상계좌'}</span>
-                </div>
-                <div className="flex justify-between text-sm">
-                  <span className="text-gray-400">금액</span>
-                  <span className="font-bold text-emerald-700">{Number(depositTarget.amount).toLocaleString()}원</span>
-                </div>
-                <div className="flex justify-between text-sm">
-                  <span className="text-gray-400">입금자명</span>
-                  <span className="font-medium">{depositTarget.depositor_name}</span>
-                </div>
-                {/* ★ 2026-08-19 전송자격인증 2.3 — 명의 확인 건은 사유와 소명을 보고 판단한다 */}
-                {depositTarget.held_reason && (
-                  <div className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2.5 space-y-1.5">
-                    <div className="text-xs font-semibold text-rose-700">명의 확인 필요</div>
-                    <div className="text-xs text-rose-800 leading-relaxed">{depositTarget.held_reason}</div>
-                    <div className="text-[11px] text-gray-600 leading-relaxed border-t border-rose-200 pt-1.5">
-                      <span className="font-medium">고객사 소명</span>
-                      {' · '}
-                      {depositTarget.explanation_note
-                        ? depositTarget.explanation_note
-                        : <span className="text-gray-400">아직 제출되지 않았습니다</span>}
-                    </div>
-                  </div>
-                )}
-                <div className="flex justify-between text-sm border-t pt-2">
-                  <span className="text-gray-400">현재 잔액</span>
-                  <span className="font-medium">{Number(depositTarget.balance || 0).toLocaleString()}원</span>
-                </div>
-                <div className="flex justify-between text-sm">
-                  <span className="text-gray-400">충전 후 잔액</span>
-                  <span className="font-bold text-blue-700">{(Number(depositTarget.balance || 0) + Number(depositTarget.amount)).toLocaleString()}원</span>
-                </div>
-              </div>
-              <div>
-                <label className="text-xs text-gray-500 font-medium mb-1.5 block">관리자 메모 (선택)</label>
-                <input
-                  type="text"
-                  value={depositAdminNote}
-                  onChange={(e) => setDepositAdminNote(e.target.value)}
-                  placeholder="입금 확인 메모"
-                  className="w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-emerald-500 outline-none"
-                />
-              </div>
-            </div>
-            <div className="flex border-t">
-              <button
-                onClick={() => { setShowDepositApproveModal(false); setDepositTarget(null); setDepositAdminNote(''); }}
-                className="flex-1 px-4 py-3 text-gray-700 font-medium hover:bg-gray-50 transition-colors border-r"
-              >
-                취소
-              </button>
-              <button
-                onClick={handleApproveDeposit}
-                className="flex-1 px-4 py-3 text-emerald-600 font-medium hover:bg-emerald-50 transition-colors"
-              >
-                승인하기
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      {showDepositApproveModal && depositTarget && <DepositApproveModal {...{ chargeTxPage, depositAdminNote, depositTarget, loadChargeManagement, setDepositAdminNote, setDepositTarget, setModal, setShowDepositApproveModal }} />}
 
       {/* 충전 거절 모달 */}
-      {showDepositRejectModal && depositTarget && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-          <div className="bg-white rounded-2xl shadow-2xl w-[400px] overflow-hidden animate-in fade-in zoom-in">
-            <div className="p-5 border-b bg-red-50">
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 bg-red-100 rounded-full flex items-center justify-center text-xl">❌</div>
-                <div>
-                  <h3 className="text-lg font-bold text-gray-800">충전 거절</h3>
-                  <p className="text-xs text-gray-500">{depositTarget.company_name} · {Number(depositTarget.amount).toLocaleString()}원</p>
-                </div>
-              </div>
-            </div>
-            <div className="p-5">
-              <label className="text-xs text-gray-500 font-medium mb-1.5 block">거절 사유 *</label>
-              <textarea
-                value={depositAdminNote}
-                onChange={(e) => setDepositAdminNote(e.target.value)}
-                className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-red-500 outline-none resize-none"
-                rows={3}
-                placeholder="거절 사유를 입력해주세요."
-              />
-            </div>
-            <div className="flex border-t">
-              <button
-                onClick={() => { setShowDepositRejectModal(false); setDepositTarget(null); setDepositAdminNote(''); }}
-                className="flex-1 px-4 py-3 text-gray-700 font-medium hover:bg-gray-50 transition-colors border-r"
-              >
-                취소
-              </button>
-              <button
-                onClick={handleRejectDeposit}
-                className="flex-1 px-4 py-3 text-red-600 font-medium hover:bg-red-50 transition-colors"
-              >
-                거절하기
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      {showDepositRejectModal && depositTarget && <DepositRejectModal {...{ chargeTxPage, depositAdminNote, depositTarget, loadChargeManagement, setDepositAdminNote, setDepositTarget, setModal, setShowDepositRejectModal }} />}
 
       {/* ===== 고객 개별/선택 삭제 확인 모달 (최상위) ===== */}
-      {showAdminCustDeleteModal && adminCustDeleteTarget && editCompany && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-[70]">
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden animate-in fade-in zoom-in duration-200">
-            <div className="p-6">
-              <div className="w-12 h-12 rounded-full bg-red-100 flex items-center justify-center mx-auto mb-4">
-                <svg className="w-6 h-6 text-red-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                </svg>
-              </div>
-              <h3 className="text-lg font-semibold text-center text-gray-900 mb-2">
-                {adminCustDeleteTarget.type === 'individual' ? '고객 삭제' : '선택 삭제'}
-              </h3>
-              <p className="text-sm text-center text-gray-600 mb-1">
-                {adminCustDeleteTarget.type === 'individual'
-                  ? `"${adminCustDeleteTarget.customer?.name || adminCustDeleteTarget.customer?.phone}" 고객을 삭제합니다.`
-                  : `선택한 ${adminCustDeleteTarget.count}명의 고객을 삭제합니다.`}
-              </p>
-              <p className="text-xs text-red-500 text-center font-medium">삭제된 데이터는 복구할 수 없습니다.</p>
-            </div>
-            <div className="flex border-t">
-              <button onClick={() => { setShowAdminCustDeleteModal(false); setAdminCustDeleteTarget(null); }}
-                className="flex-1 px-4 py-3 text-gray-700 font-medium hover:bg-gray-50 transition-colors border-r">취소</button>
-              <button onClick={executeAdminCustDelete} disabled={adminCustDeleteLoading}
-                className="flex-1 px-4 py-3 text-red-600 font-bold hover:bg-red-50 transition-colors disabled:opacity-50">
-                {adminCustDeleteLoading ? '삭제 중...' : '삭제'}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      {showAdminCustDeleteModal && adminCustDeleteTarget && editCompany && <AdminCustomerDeleteModal {...{ adminCustDeleteLoading, adminCustDeleteTarget, adminCustPage, adminCustSelected, editCompany, loadAdminCustomers, setAdminCustDeleteLoading, setAdminCustDeleteTarget, setShowAdminCustDeleteModal, showAlert }} />}
 
       {/* ===== 고객 전체 삭제 확인 모달 (최상위) ===== */}
-      {showCustomerDeleteAll && editCompany && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-[70]">
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden animate-in fade-in zoom-in duration-200">
-            <div className="p-6">
-              <div className="w-12 h-12 rounded-full bg-red-100 flex items-center justify-center mx-auto mb-4">
-                <svg className="w-6 h-6 text-red-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L4.082 16.5c-.77.833.192 2.5 1.732 2.5z" />
-                </svg>
-              </div>
-              <h3 className="text-lg font-semibold text-center text-gray-900 mb-2">⚠️ 고객 데이터 전체 삭제</h3>
-              <p className="text-sm text-center text-gray-600 mb-1">
-                <span className="font-bold text-red-600">{editCompany.companyName}</span>의
-              </p>
-              <p className="text-sm text-center text-gray-600 mb-4">
-                모든 고객 데이터와 구매내역이 <span className="font-bold text-red-600">영구 삭제</span>됩니다.
-              </p>
-              <div>
-                <label className="block text-xs font-medium text-gray-500 mb-1">
-                  확인을 위해 회사명을 정확히 입력해주세요
-                </label>
-                <input
-                  type="text"
-                  value={customerDeleteConfirmName}
-                  onChange={(e) => setCustomerDeleteConfirmName(e.target.value)}
-                  placeholder={editCompany.companyName}
-                  className="w-full px-3 py-2 border border-red-200 rounded-lg text-sm focus:ring-2 focus:ring-red-500 outline-none"
-                />
-              </div>
-            </div>
-            <div className="flex border-t">
-              <button onClick={() => { setShowCustomerDeleteAll(false); setCustomerDeleteConfirmName(''); }}
-                className="flex-1 px-4 py-3 text-gray-700 font-medium hover:bg-gray-50 transition-colors border-r">취소</button>
-              <button
-                onClick={handleCustomerDeleteAll}
-                disabled={customerDeleteConfirmName !== editCompany.companyName || customerDeleteLoading}
-                className="flex-1 px-4 py-3 text-red-600 font-bold hover:bg-red-50 transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
-              >
-                {customerDeleteLoading ? '삭제 중...' : '전체 삭제'}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      {showCustomerDeleteAll && editCompany && <CustomerDeleteAllModal {...{ customerDeleteConfirmName, customerDeleteLoading, editCompany, loadData, setCustomerDeleteConfirmName, setCustomerDeleteLoading, setShowCustomerDeleteAll, showAlert }} />}
     </div>
   );
 }

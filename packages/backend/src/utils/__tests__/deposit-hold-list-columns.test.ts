@@ -11,6 +11,7 @@
 import { describe, it, expect } from 'vitest';
 import * as fs from 'fs';
 import * as path from 'path';
+import { readAdminScreenSource } from './source-scan';
 
 function read(rel: string): string {
   const cands = [path.resolve(process.cwd(), rel), path.resolve(process.cwd(), 'packages/backend', rel), path.resolve(process.cwd(), 'packages', rel.replace(/^\.\.\//, ''))];
@@ -44,7 +45,7 @@ describe('무통장입금 대기 목록 — 보류 컬럼', () => {
   });
 
   it('화면: 대기 목록 = charge-management pendingRequests · 승인 요청의 resolveHold = 그 행의 held_reason', () => {
-    const dash = read('../frontend/src/pages/AdminDashboard.tsx');
+    const dash = readAdminScreenSource(); // ★ 2026-10-09 파일 분리 E 뒤 = 본체 + 옮겨 간 화면 합본
     expect(dash).toContain('const pending = data.pendingRequests || [];');
     expect(dash).toContain('resolveHold: Boolean(depositTarget.held_reason)');
   });

@@ -19,8 +19,9 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { readAdminScreenSource } from './__tests__/source-scan';
 
-const admin = readFileSync(join(__dirname, '../../../frontend/src/pages/AdminDashboard.tsx'), 'utf8');
+const admin = readAdminScreenSource(); // ★ 2026-10-09 본체 + 옮겨 간 슈퍼관리자 화면 파일 전부(파일 분리 E)
 const panel = readFileSync(join(__dirname, '../../../frontend/src/components/AgentChargePanel.tsx'), 'utf8');
 
 /** 주석은 검사 대상이 아니다 — 주석에 남은 옛 서술만으로 통과·실패하면 검출기가 거짓말을 한다. */

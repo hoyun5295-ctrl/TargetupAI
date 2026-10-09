@@ -33,6 +33,10 @@ import {
   assembleOutreachDm, publishOutreachDm, updateOutreachDm, produceResultOf, autoRetryReasons, bannerCardsFromTranscripts, assertLicensedQuoteSources,
   callOutreachAi, withOutreachAiMeter, newOutreachAiCost, addOutreachAiCost,
   PUBLIC_BASE, OUTREACH_PREVIEW_DAYS, OUTREACH_CUTOUT_TRY_MAX, type OutreachMedia, type OutreachAiCost,
+  // ★ 2026-10-09 R1 템플릿 판단 · R9 강조 포인트
+  judgeOutreachTemplates, focusQuoteOf, type OutreachTemplatePick,
+  // ★ 2026-10-09 R7 메일 첫 화면 휴대폰 틀
+  storeFramedDmCapture,
 } from './sales-outreach-produce';
 // ★ 2026-09-15 아웃리치 카탈로그 DM(AI 0 · 크레딧 0) — 계획(순수) → 상품 카드 합성 → 발행 · 실패는 여기서 격리(DM 단계 실패 0)
 import { planOutreachCatalog, buildOutreachCatalog, type CatalogBuildResult } from './sales-outreach-catalog';
@@ -82,6 +86,7 @@ const OUTREACH_EVENT_BANNER_BUDGET_MS = 40_000;
 import { isSameSite } from './sales-outreach-render-guard';
 // ★ 2026-09-06 S4 파기 공용(sweeper 와 같은 본문)
 import { purgeOutreachJobArtifacts, unlinkPublicImage } from './sales-outreach-purge';
+import { normalizeRepImageUrl, normalizeFocusHint } from './sales-outreach-bulk';
 // ★ 2026-09-06 v3 행사 카드(엔진 타입 · 엔진은 이 파일을 모른다) · 레시피 승격(best-copy CT · 쓰기는 그 CT 만)
 import type { EngineEventCard } from './campaign-engine';
 import { insertOutreachRecipe, findOutreachRecipeByJob } from './best-copy-assets';
@@ -662,6 +667,19 @@ export interface EnqueueInput {
   contactName?: string | null;
   contactBasis?: string | null;
   naverStoreUrl?: string | null;
+  /** ★ 2026-10-09 R9 제작 재료(사람이 넣은 값 · brand_profile 에 저장 · 재크롤에도 보존) */
+  repImageUrl?: string | null;
+  focusHint?: string | null;
+}
+
+/** ★ 2026-10-09 사람이 넣은 제작 재료(brand_profile 키) — 크롤·재크롤이 brand_profile 을 새로 쓸 때 보존한다(extraNotes 와 같은 축) */
+export function humanProfileInputsOf(bp: any): { repImageUrl?: string; focusHint?: string } {
+  const out: { repImageUrl?: string; focusHint?: string } = {};
+  const rep = normalizeRepImageUrl(bp?.repImageUrl);
+  const focus = normalizeFocusHint(bp?.focusHint);
+  if (rep) out.repImageUrl = rep;
+  if (focus) out.focusHint = focus;
+  return out;
 }
 
 /** ★ 2026-09-23 등록 입력의 담당자·스토어 칸 정규화 — 비면 null · 형식 불량 = VALIDATION(단건 입력은 바로 고칠 수 있다) */
@@ -746,7 +764,8 @@ export async function enqueueOutreachJob(
                                       contact_email, contact_name, contact_basis, naver_store_slug)
      VALUES ($1, $2, $3, 'queued', $4, $5::jsonb, $6, $7, $8, $9)
      RETURNING id`,
-    [companyName, industry, homepageUrl, operatorSuperAdminId, JSON.stringify(extraNotes ? { extraNotes } : {}),
+    [companyName, industry, homepageUrl, operatorSuperAdminId,
+     JSON.stringify({ ...(extraNotes ? { extraNotes } : {}), ...humanProfileInputsOf({ repImageUrl: input.repImageUrl, focusHint: input.focusHint }) }),
      contact.contactEmail, contact.contactName, contact.contactBasis, contact.naverStore],
   );
   const id = result.rows[0].id as string;
@@ -781,6 +800,7 @@ async function runCrawlAndAnalyzeMetered(jobId: string, meter: OutreachAiCost): 
   if (claimed.rows.length === 0) return; // 다른 실행이 선점 — 아무것도 바꾸지 않는다
   const job = claimed.rows[0];
   const keepNotes: string | null = job.brand_profile?.extraNotes ? String(job.brand_profile.extraNotes) : null;
+  const keepInputs = humanProfileInputsOf(job.brand_profile);
 
   // --- 크롤 (가드 경로만 — extractBrandFromUrl 사용 금지) ---
   // ★ 2026-08-26 소스 1개로 되돌림 — HTML을 한 번만 받아 행사 텍스트와 이미지 후보를 함께 뽑는다(같은 URL 두 번 금지).
@@ -1129,6 +1149,8 @@ async function runCrawlAndAnalyzeMetered(jobId: string, meter: OutreachAiCost): 
     ctaLinks: mergeCtaLinks(rendered ? buildCtaLinkMap(rendered.html, finalUrl) : {}, page ? buildCtaLinkMap(page.html, staticUrl) : {}),
     legal: homeText ? extractLegal(homeText) : null,
     extraNotes: keepNotes,
+    // ★ 2026-10-09 R9 사람이 넣은 제작 재료 보존
+    ...keepInputs,
     // ★ 2026-09-06 재료 v2(DDL 0 · jsonb 키) — 계측·배너 alt·사회적 증거·승격 기록. 화면 재료 카드와 S2 게이트의 원천.
     materials: hasSource
       ? buildMaterialsV2({
@@ -1358,7 +1380,8 @@ async function confirmSelectionCore(
      JSON.stringify({ ...profile, selectedImageUrl }),
      industry, lockToken,
      // 자동 확정 흔적은 되돌리기(RESETTABLE_KEYS)가 지우지 않는다 — "자동 확정 뒤 사람이 행사를 바꿨는가"(단계 3 조건)의 원천
-     JSON.stringify(actor.kind === 'auto' ? { auto_confirmed_at: confirmedAt } : {}),
+     // ★ 2026-10-09 R1 행사가 다시 확정되면 템플릿 판단도 다시(null = 없음 · 키 삭제는 resetJobTo 만 한다는 불변)
+     JSON.stringify({ template_pick: null, ...(actor.kind === 'auto' ? { auto_confirmed_at: confirmedAt } : {}) }),
      // ★0924 자동 확정은 스토어 문구가 붙은 건을 잡지 않는다(확인과 확정 사이에 붙어도 이 조건이 막는다 · 사람 확정은 무관)
      actor.kind],
   );
@@ -1740,8 +1763,26 @@ async function runProductionMetered(jobId: string, lockToken: string, meter: Out
           const selectedSrc: string | null = bp.selectedImageUrl ? String(bp.selectedImageUrl) : null;
           const selectedCopy = selectedSrc && media ? (media.gallery || []).find((g) => g.srcUrl === selectedSrc) : undefined;
           const selectedKind = selectedCopy && media?.imageKinds ? (media.imageKinds[selectedCopy.url]?.kind || null) : null;
-          const productCutouts = (media?.products || []).map((p) => String(p.image_url || '')).filter(Boolean).slice(0, OUTREACH_CUTOUT_TRY_MAX);
-          const cutoutOrder = (selectedKind === null || selectedKind === 'product' ? [selectedSrc, ...productCutouts] : [...productCutouts, selectedSrc]).filter((u): u is string => !!u);
+          // ★ 2026-10-09 R3 배너·사진·문서 판정은 누끼 원천에서 **제외**(옛 = 뒤로 미루기 → 상품이 없으면 결국 배너에서 땄다 · 서수란 접수 4) · 판정 없음 = 통과(모델 부재 폴백)
+          const notCutout = (k: string | null | undefined) => k === 'banner' || k === 'photo' || k === 'document';
+          const kinds = media?.imageKinds || null;
+          const productCutouts = (media?.products || []).map((p) => String(p.image_url || '')).filter((u) => !!u && !notCutout(kinds?.[u]?.kind)).slice(0, OUTREACH_CUTOUT_TRY_MAX);
+          // ★ R9 엑셀 "대표 상품 이미지 URL" = 사람이 지정한 누끼 원천(맨 앞 · 인물 판정·600 하한은 그대로 통과해야 한다)
+          const repSrc: string | null = typeof bp.repImageUrl === 'string' && /^https?:\/\//i.test(bp.repImageUrl) ? String(bp.repImageUrl) : null;
+          const cutoutOrder = [repSrc, ...(notCutout(selectedKind) ? [] : [selectedSrc]), ...productCutouts].filter((u, i, arr): u is string => !!u && arr.indexOf(u) === i);
+          // ★ R9 강조 포인트 = 원문 검색어(문안 아님) — 찾은 원문 구간만 판단 입력·포스터 제목 후보 맨 앞
+          const focusQuote = focusQuoteOf(typeof bp.focusHint === 'string' ? bp.focusHint : null, materialText(bp.eventTextFull, bp.excerpt, 6000));
+          // ★ R1 템플릿 판단(텍스트 1회 · 대기열 밖) — 잡에 저장된 순위가 있으면 다시 부르지 않는다(같은 잡 = 같은 순위)
+          let templatePick: OutreachTemplatePick | null = sr.template_pick && Array.isArray(sr.template_pick.product) ? sr.template_pick : null;
+          if (!templatePick) {
+            templatePick = await judgeOutreachTemplates({
+              jobId, companyName: job.company_name, industry: job.industry_category,
+              eventTitles: selectedList.map((c) => String(c.origin === 'card' ? (c.title || c.quote) : (c.parts?.title || c.quote) || '')).filter(Boolean),
+              productNames: (media?.products?.length ? media.products : (Array.isArray(bp.listProducts) ? bp.listProducts : [])).map((p: any) => String(p?.name || '')).filter(Boolean),
+              focusQuote,
+            });
+            if (!(await mergeStageResultsOwned(jobId, lockToken, { template_pick: templatePick }))) return;
+          }
           try {
             img = await produceOutreachImage({
               jobId,
@@ -1754,12 +1795,13 @@ async function runProductionMetered(jobId: string, lockToken: string, meter: Out
               // ★ 2026-09-06 S3 문구 3칸 재료 · 실측 배너 0장이면 16:9 배너 1장
               eventQuote: selected?.quote || null,
               // ★ 2026-09-24 품질 A — 포스터 제목 출처 = 확정 행사 전부(누른 순서 · 조각 제목이 원문보다 먼저)
-              eventQuotes: selectedList.flatMap((c) => [c.parts?.title, c.origin === 'card' ? c.title : c.quote]).filter((t): t is string => !!t),
+              eventQuotes: [focusQuote, ...selectedList.flatMap((c) => [c.parts?.title, c.origin === 'card' ? c.title : c.quote])].filter((t): t is string => !!t),
               products: media?.products?.length ? media.products : (Array.isArray(bp.listProducts) ? bp.listProducts : []),
               siteTitle: bp.siteTitle || null,
               wantBanner: !(media && Array.isArray(media.gallery) && media.gallery.length > 0),
               // ★ 2026-09-23 자동 확정 건 = 사람이 이미지를 보지 않았다 → 누끼 원천은 인물 판정 none 만(fail-closed · 설계서 §7)
               strictPerson: job.event_quote?.confirmedBy === 'auto:v1',
+              templateRank: templatePick,
             });
           } catch (err: any) {
             studioError = detailOf(err);
@@ -1994,6 +2036,11 @@ async function runProductionMetered(jobId: string, lockToken: string, meter: Out
         // ★ C4-3 사람이 숨긴 시안 블록은 override 데이터로 재적용(같은 조립 경로 · 불변 16)
         const brandApplied = applySectionOverrides(brandSectionsBase, (sr.section_overrides?.email as SectionOverride | undefined) || null);
         const brandSections: any[] = brandApplied.sections;
+        // ★ 2026-10-09 R7 휴대폰 틀 안 DM 첫 화면 — 같은 캡처면 직전 판의 틀 사본을 그대로(재조립마다 새 파일 0) · 없으면 칸 생략
+        const dmCapture: string | null = dmAsset?.captureUrl ? String(dmAsset.captureUrl) : null;
+        const dmFrameUrl: string | null = dmCapture && prevEmail?.dmFrameFrom === dmCapture && prevEmail?.dmFrameUrl
+          ? String(prevEmail.dmFrameUrl)
+          : await storeFramedDmCapture(dmCapture, ctx.companyId);
         const email = assembleProposalEmail({
           companyName: job.company_name,
           industry: job.industry_category,
@@ -2015,9 +2062,12 @@ async function runProductionMetered(jobId: string, lockToken: string, meter: Out
           contactName: job.contact_name ? String(job.contact_name) : null,
           confirmedEvents: selectedList.map((c) => ({ title: c.origin === 'card' ? String(c.title || c.quote) : String(c.parts?.title || c.quote), periodRaw: c.periodRaw || c.parts?.period || null })),
           adFooter,
+          dmFrameUrl,
         });
         if (!(await insertAssetOwned(jobId, 'email_html', {
           subject: email.subject, intro: email.intro, html: email.html, text: email.text, placeholderCount: email.placeholderCount,
+          // ★ 2026-10-09 R7 틀 사본(파기 대상) · 그 원천 캡처(같으면 재사용)
+          dmFrameUrl, dmFrameFrom: dmFrameUrl ? dmCapture : null,
           subjectCandidates,
           // 이 판에 수신거부 링크가 들어갔는가(직접 발송 잠금 UNSUB_LINK_STALE 는 html 을 직접 본다 · 이 값은 표시용)
           adFooter: adFooter ? { fromEmail: adFooter.fromEmail, unsubscribeUrl: adFooter.unsubscribeUrl } : null,
@@ -2102,7 +2152,9 @@ const RESETTABLE_KEYS = ['regen', 'crawling', 'analyzing', 'crawling_sub', 'anal
   // ★ 2026-09-06 S1 렌더 3값 별 키 · S2 재료 게이트
   'rendering', 'rendering_detail', 'render_meta', 'crawl_engine', 'material', 'material_override',
   // ★ 2026-09-06 v3 — 새 stage_results 키는 전부 여기 등재(타입이 막는다 · 재크롤 뒤 잔존 0 · 설계서 §7-8): 이벤트 목록 3값 · 카드 상세 3값 · 팔레트 렌더 3값 · 자동 재조립 카운터 · AI 호출 계수 · 사람 수정 원장 · 회신 문장
-  'event_list', 'crawling_cards', 'palette_render', 'auto_seq', 'ai_cost', 'edits', 'reply_line'] as const;
+  'event_list', 'crawling_cards', 'palette_render', 'auto_seq', 'ai_cost', 'edits', 'reply_line',
+  // ★ 2026-10-09 R1 템플릿 판단 순위(재크롤·재료 바뀌면 다시 판단)
+  'template_pick'] as const;
 type ResettableKey = (typeof RESETTABLE_KEYS)[number];
 
 /**
@@ -2115,14 +2167,14 @@ async function resetJobTo(jobId: string, opts: {
   /** 새 lock_token(uuid) · null = 미선점(queued) */
   lockToken: string | null;
   clear: readonly ResettableKey[];
-  set?: { stageResults?: Record<string, unknown>; homepageUrl?: string; clearProfile?: boolean; keepNotes?: string | null; brandProfilePatch?: Record<string, unknown> };
+  set?: { stageResults?: Record<string, unknown>; homepageUrl?: string; clearProfile?: boolean; keepNotes?: string | null; keepInputs?: Record<string, unknown>; brandProfilePatch?: Record<string, unknown> };
 }): Promise<boolean> {
   const clearExpr = opts.clear.filter((k) => (RESETTABLE_KEYS as readonly string[]).includes(k)).map((k) => ` - '${k}'`).join('');
   const params: unknown[] = [jobId, opts.to, JSON.stringify(opts.set?.stageResults || {}), opts.lockToken, opts.expect];
   const extra: string[] = [];
   if (opts.set?.homepageUrl) { params.push(opts.set.homepageUrl); extra.push(`homepage_url = $${params.length}`); }
   if (opts.set?.clearProfile) {
-    params.push(JSON.stringify(opts.set.keepNotes ? { extraNotes: opts.set.keepNotes } : {}));
+    params.push(JSON.stringify({ ...(opts.set.keepNotes ? { extraNotes: opts.set.keepNotes } : {}), ...(opts.set.keepInputs || {}) }));
     extra.push(`event_quote = NULL`, `brand_profile = $${params.length}::jsonb`);
   } else if (opts.set?.brandProfilePatch) {
     // ★ 0905(3) C4-2 최상위 키 얕은 병합(mediaSelection) — media 안을 건드리지 않는다
@@ -2757,7 +2809,7 @@ export async function recrawlOutreachJob(jobId: string, input: { homepageUrl?: s
     to: 'queued',
     lockToken: null,
     clear: RESETTABLE_KEYS,
-    set: { homepageUrl, clearProfile: true, keepNotes },
+    set: { homepageUrl, clearProfile: true, keepNotes, keepInputs: humanProfileInputsOf(cur.rows[0].brand_profile) },
   });
   if (!ok) throw new OutreachError('CONFLICT', '다시 읽을 수 있는 상태가 아닙니다.');
   runOutreachJob(jobId).catch((err: any) => {
@@ -3117,6 +3169,9 @@ export interface BulkEnqueueInput {
   contactEmail?: string | null;
   contactName?: string | null;
   contactBasis?: string | null;
+  /** ★ 2026-10-09 R9 */
+  repImageUrl?: string | null;
+  focusHint?: string | null;
 }
 
 /** ★ 2026-09-23 일괄 옵션(설계서 §6·§7) */
@@ -3171,11 +3226,13 @@ export async function enqueueOutreachJobsBulk(
       }
       const r = await query(
         `INSERT INTO sales_outreach_jobs (company_name, industry_category, homepage_url, stage, created_by, stage_results,
-                                          contact_email, contact_name, contact_basis, naver_store_slug)
-         VALUES ($1, $2, $3, 'queued', $4, $5::jsonb, $6, $7, $8, $9) RETURNING id`,
+                                          contact_email, contact_name, contact_basis, naver_store_slug, brand_profile)
+         VALUES ($1, $2, $3, 'queued', $4, $5::jsonb, $6, $7, $8, $9, $10::jsonb) RETURNING id`,
         [companyName, industry, homepageUrl, operatorSuperAdminId,
          JSON.stringify({ chain: { batch, index: i + 1, total }, ...(options.autoSendApproval ? { auto_send: options.autoSendApproval } : {}) }),
-         contactEmail, normalizeContactName(row.contactName), normalizeContactBasis(row.contactBasis), naverStore],
+         contactEmail, normalizeContactName(row.contactName), normalizeContactBasis(row.contactBasis), naverStore,
+         // ★ 2026-10-09 R9 사람이 넣은 제작 재료
+         JSON.stringify(humanProfileInputsOf({ repImageUrl: row.repImageUrl, focusHint: row.focusHint }))],
       );
       acceptedIds.push(r.rows[0].id as string);
     } catch (err: any) {

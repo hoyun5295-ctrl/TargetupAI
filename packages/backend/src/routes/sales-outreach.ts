@@ -109,6 +109,9 @@ router.post('/jobs', async (req: Request, res: Response) => {
       contactName: req.body?.contactName ?? null,
       contactBasis: req.body?.contactBasis ?? null,
       naverStoreUrl: req.body?.naverStoreUrl ?? null,
+      // ★ 2026-10-09 R9 제작 재료(선택)
+      repImageUrl: req.body?.repImageUrl ?? null,
+      focusHint: req.body?.focusHint ?? null,
     }, req.user?.userId);
     console.log('[sales-outreach] 등록:', id, req.user?.userId);
     audit(req, 'enqueue', id, { companyName: String(req.body?.companyName || '').slice(0, 100), force: req.body?.force === true });

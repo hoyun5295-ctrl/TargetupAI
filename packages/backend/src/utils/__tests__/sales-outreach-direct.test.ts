@@ -389,7 +389,7 @@ describe('엑셀 머리줄 파서(옛 3열 호환 · 경고는 거절과 별도)
     expect(mapBulkHeader(['A', 'B'])).toBeNull();
   });
   it('옛 3열 양식(머리줄 업체명·홈페이지·업종) = 머리줄로 같은 열을 찾는다 · 예시 영역 무시 · 머리줄 없는 표 = 위치(A~C)', () => {
-    const want = [{ companyName: 'a사', homepageUrl: 'a.co.kr', industryCategory: null, naverStore: null, contactEmail: null, contactName: null, contactBasis: null }];
+    const want = [{ companyName: 'a사', homepageUrl: 'a.co.kr', industryCategory: null, naverStore: null, contactEmail: null, contactName: null, contactBasis: null, repImageUrl: null, focusHint: null }];
     const old = parseOutreachBulkRows([['업체명', '홈페이지', '업종 (선택)', '', '작성 예시 (이 영역은 지우지 않아도 됩니다 · 읽지 않습니다)'], ['a사', 'a.co.kr', '', '', '힐링뷰티']]);
     expect(old.rows).toEqual(want);
     const bare = parseOutreachBulkRows([['a사', 'a.co.kr', '']]);

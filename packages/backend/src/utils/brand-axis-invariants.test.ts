@@ -14,7 +14,7 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'fs';
 import { join } from 'path';
 // ★2026-08-17 소스 전수 스캔은 공용 헬퍼가 루트별 1회만 한다(테스트마다 다시 읽던 것이 pre-push 타임아웃의 뿌리).
-import { scanSources, SCAN_TIMEOUT_MS } from './__tests__/source-scan';
+import { scanSources, SCAN_TIMEOUT_MS, readAdminScreenSource } from './__tests__/source-scan';
 import { BRAND_CAMPAIGN_CHANNELS, BRAND_CHANNEL_SQL_IN, isBrandOnlyChannel, resolveRefundAxes, BILLING_TYPES } from './billing-types';
 import { MSG_TYPE_TO_USAGE_KEY } from './send-usage-aggregation';
 import { SEND_TYPE_LABEL, SEND_TYPES, isSendTypeFilter } from './send-type-axis';
@@ -468,7 +468,7 @@ describe('브랜드 친구·비친구 단가 — 표시·입력 (2026-09-13)', (
   });
 
   it('단가 저장 요청이 비친구 칸을 싣는다 — 안 실으면 입력해도 저장되지 않는다', () => {
-    const dash = stripComments(readFileSync(join(__dirname, '../../../frontend/src/pages/AdminDashboard.tsx'), 'utf8'));
+    const dash = stripComments(readAdminScreenSource()); // ★ 2026-10-09 파일 분리 E 뒤 = 본체 + 옮겨 간 화면 합본
     const start = dash.indexOf('const handleSaveUnitPrices');
     const body = dash.slice(start, dash.indexOf('applyUnitPriceToAgents,', start));
     expect(body).toContain('brandNonfriend: editCompany.costPerBrandNonfriend');

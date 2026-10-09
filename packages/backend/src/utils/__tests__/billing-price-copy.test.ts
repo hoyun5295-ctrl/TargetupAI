@@ -13,11 +13,10 @@
  * 이 파일은 **문구와 게이트가 갈라지는 것**을 막는다. 문구를 되돌리면 여기서 깨진다.
  */
 import { describe, it, expect } from 'vitest';
-import { readFileSync } from 'node:fs';
-import { resolve } from 'node:path';
+import { readAdminScreenSource } from './source-scan';
 import { findUnsetPricedTypes, priceBillingRows, type BillingUsageRow, type AgentUnitPriceRow } from '../send-usage-aggregation';
 
-const admin = readFileSync(resolve(process.cwd(), '../frontend/src/pages/AdminDashboard.tsx'), 'utf8');
+const admin = readAdminScreenSource(); // ★ 2026-10-09 파일 분리 E 뒤 = 본체 + 옮겨 간 화면 합본
 
 describe('단가 화면 문구 ↔ 발행 게이트 일치 (2026-09-04)', () => {
   it('게이트는 실적이 없으면 막지 않는다 — 문구의 근거', () => {

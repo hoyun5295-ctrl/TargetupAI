@@ -48,3 +48,20 @@ export function scanSources(root: string): ScannedFile[] {
 
 /** IO가 느린 환경(실시간 검사·병렬 러너)에서도 첫 스캔이 끝나도록 주는 여유. */
 export const SCAN_TIMEOUT_MS = 60_000;
+
+/**
+ * ★2026-10-09 슈퍼관리자 화면 = 본체(pages/AdminDashboard.tsx) + 옮겨 간 파일 전부를 한 글로.
+ * 파일 분리 E(docs/2026-10-03-admin-dashboard-split-design.md §5-4) 뒤로 탭 · 창 · 고객사 상세 설정이 components/admin 아래로 갔다.
+ * 계약 시험은 기대 문자열을 고치지 않고 읽는 범위만 이 합본으로 넓힌다(「없어야 한다」 검사도 합본 전체에서 본다).
+ * 본체가 맨 앞 · 나머지는 경로 순.
+ */
+export function readAdminScreenSource(): string {
+  const front = join(__dirname, '../../../../frontend/src');
+  const admin = join(front, 'components/admin');
+  const files = [
+    readFileSync(join(front, 'pages/AdminDashboard.tsx'), 'utf8'),
+    readFileSync(join(admin, 'admin-types.ts'), 'utf8'),
+    ...['ui', 'tabs', 'modals', 'company-detail'].flatMap((d) => [...scanSources(join(admin, d))].sort((a, b) => a.rel.localeCompare(b.rel)).map((f) => f.src)),
+  ];
+  return files.join('\n').replace(/\r\n/g, '\n'); // 줄바꿈 = LF(체크아웃 줄바꿈과 무관하게 같은 글)
+}

@@ -14,6 +14,7 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
+import { readAdminScreenSource } from './__tests__/source-scan';
 
 const read = (p: string) => readFileSync(resolve(__dirname, p), 'utf8');
 const appSrc = read('../app.ts');
@@ -727,9 +728,7 @@ describe('계산서 비고(PO) 경로 계약 (2026-08-21)', () => {
 
     it('상세 행의 유형 칸은 PDF·화면이 같은 규약을 쓴다 — 항목명 우선, 없으면 유형 표시명', () => {
       expect(pdfSrc).toContain('extraLabel || typeLabel[item.message_type]');
-      const adminUiSrc = readFileSync(
-        resolve(__dirname, '../../../frontend/src/pages/AdminDashboard.tsx'), 'utf8',
-      );
+      const adminUiSrc = readAdminScreenSource(); // ★ 2026-10-09 파일 분리 E 뒤 = 본체 + 옮겨 간 화면 합본
       expect(adminUiSrc).toContain('extraLabel || billingTypeLabel[item.message_type]');
       // 화면이 내부 키를 그대로 노출하던 결함의 재발 차단 — 라벨표에 EXTRA_* 키가 있어야 한다.
       expect(adminUiSrc).toContain("EXTRA_MANUAL: '부가서비스'");
@@ -752,9 +751,7 @@ describe('계산서 비고(PO) 경로 계약 (2026-08-21)', () => {
 
     it('추가 항목 행은 발송 수량 4칸을 표시하지 않는다 — PDF와 화면이 같은 판정(0이 "9건인데 0"으로 읽힌다)', () => {
       expect(pdfSrc).toContain("if (ch === 'plan' || ch === 'extra')");
-      const adminUiSrc = readFileSync(
-        resolve(__dirname, '../../../frontend/src/pages/AdminDashboard.tsx'), 'utf8',
-      );
+      const adminUiSrc = readAdminScreenSource(); // ★ 2026-10-09 파일 분리 E 뒤 = 본체 + 옮겨 간 화면 합본
       expect(adminUiSrc).toContain("const noQtyAxis = isPlan || ch === 'extra'");
       expect(adminUiSrc).toContain('{noQtyAxis ? (');
     });

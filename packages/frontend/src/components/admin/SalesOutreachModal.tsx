@@ -167,7 +167,22 @@ function latestAssetOf(job: OutreachJob | null, kind: string): any | null {
 }
 
 
-export default function SalesOutreachModal({ onClose }: { onClose: () => void }) {
+/**
+ * ★ 2026-10-09 R10·R14(설계서 docs/2026-10-09-outreach-redesign-design.md) — variant 'page' = /admin/outreach/:jobId 페이지 안에 그린다.
+ *   페이지에서는 주소가 건을 정한다(initialJobId · 최근 건 자동 이어받기 0) · 건이 바뀌면 onJobChange 로 주소를 맞춘다 · ESC·닫기·안쪽 작업대 없음.
+ *   기능 동작은 모달과 같다(이번 개편에서 상세 기능은 바꾸지 않는다).
+ */
+export interface SalesOutreachModalProps {
+  onClose: () => void;
+  variant?: 'modal' | 'page';
+  initialJobId?: string | null;
+  initialNavIds?: string[];
+  onJobChange?: (id: string) => void;
+  onOpenWorkbench?: () => void;
+}
+
+export default function SalesOutreachModal({ onClose, variant = 'modal', initialJobId = null, initialNavIds, onJobChange, onOpenWorkbench }: SalesOutreachModalProps) {
+  const page = variant === 'page';
   const toast = useToast();
   const [job, setJob] = useState<OutreachJob | null>(null);
   // 자사 수신함 목록(OUTREACH_MAIL_TO) · 검수 허용 도메인 · 발송 ENV 상태 — 확인 모달·잠금 문구가 사실대로 적는다
@@ -191,6 +206,9 @@ export default function SalesOutreachModal({ onClose }: { onClose: () => void })
   const [contactName, setContactName] = useState('');
   const [contactBasis, setContactBasis] = useState('');
   const [naverStoreUrl, setNaverStoreUrl] = useState('');
+  // ★ 2026-10-09 R9 제작 재료(선택) — 대표 상품 이미지 주소(누끼 원천) · 강조 포인트(홈페이지 원문 검색어)
+  const [repImageUrl, setRepImageUrl] = useState('');
+  const [focusHint, setFocusHint] = useState('');
   const [basisPresets, setBasisPresets] = useState<string[]>([]);
   const [testAddresses, setTestAddresses] = useState<string[]>([]);
   const [directEnvStage, setDirectEnvStage] = useState(0);
@@ -199,7 +217,7 @@ export default function SalesOutreachModal({ onClose }: { onClose: () => void })
   const [bulkAutoSend, setBulkAutoSend] = useState(false);
   // ★ 2026-09-23 작업대 · 작업대에서 연 건의 이전·다음 · 이 모달 위에 뜬 창(ESC 가 모달을 닫지 않게)
   const [workbenchOpen, setWorkbenchOpen] = useState(false);
-  const [navIds, setNavIds] = useState<string[]>([]);
+  const [navIds, setNavIds] = useState<string[]>(initialNavIds || []);
   const [overlayOpen, setOverlayOpen] = useState(false);
   const [storeBusy, setStoreBusy] = useState(false);
 
@@ -265,14 +283,14 @@ export default function SalesOutreachModal({ onClose }: { onClose: () => void })
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       // 작업대·발송 확인 창이 위에 떠 있으면 그 창이 ESC 를 가진다
-      if (e.key === 'Escape' && !confirmState && !workbenchOpen && !overlayOpen) {
+      if (e.key === 'Escape' && !page && !confirmState && !workbenchOpen && !overlayOpen) {
         e.stopPropagation();
         onClose();
       }
     };
     window.addEventListener('keydown', onKey, true);
     return () => window.removeEventListener('keydown', onKey, true);
-  }, [onClose, confirmState, workbenchOpen, overlayOpen]);
+  }, [onClose, confirmState, workbenchOpen, overlayOpen, page]);
 
   useEffect(() => () => { abortRef.current?.abort(); }, []);
 
@@ -332,6 +350,11 @@ export default function SalesOutreachModal({ onClose }: { onClose: () => void })
         if (r.ok && Array.isArray(d?.contactBasisPresets)) setBasisPresets(d.contactBasisPresets.map((x: unknown) => String(x)));
         if (r.ok && d?.direct) setDirectEnvStage(Number(d.direct.envStage) || 0);
       } catch { /* 문구 폴백 */ }
+      // ★ 2026-10-09 페이지 = 주소의 건만 연다(최근 건 자동 이어받기 0 · 주소가 이긴다)
+      if (page) {
+        if (initialJobId) await loadJob(initialJobId);
+        return;
+      }
       try {
         const r = await authFetch('/api/sales-outreach/jobs/latest');
         const d = await r.json();
@@ -344,6 +367,12 @@ export default function SalesOutreachModal({ onClose }: { onClose: () => void })
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // ★ 2026-10-09 페이지 — 연 건이 바뀌면(등록 · 이전·다음 · 기존 건 열기) 주소를 맞춘다(쌓지 않고 바꿔 끼운다)
+  useEffect(() => {
+    if (page && job?.id && job.id !== initialJobId) onJobChange?.(job.id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [job?.id]);
 
   // 진행 중 잡 2초 폴링 — 실제 상태만 그린다(연출 타이머 0)
   useEffect(() => {
@@ -521,6 +550,8 @@ export default function SalesOutreachModal({ onClose }: { onClose: () => void })
           // ★ 2026-09-23 담당자(사람이 넣은 값) · 네이버 스토어 주소(저장만)
           contactEmail: contactEmail.trim() || null, contactName: contactName.trim() || null, contactBasis: contactBasis.trim() || null,
           naverStoreUrl: naverStoreUrl.trim() || null,
+          // ★ 2026-10-09 R9
+          repImageUrl: repImageUrl.trim() || null, focusHint: focusHint.trim() || null,
         }),
       });
       const d = await r.json().catch(() => ({}));
@@ -985,15 +1016,18 @@ export default function SalesOutreachModal({ onClose }: { onClose: () => void })
     </button>
   );
 
-  return createPortal(
-    <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-2 md:p-4">
-      <div className="w-full max-w-[1100px] bg-white rounded-2xl border border-gray-200/70 shadow-2xl max-h-[94vh] overflow-hidden flex flex-col">
+  const shell = (
+    <div className={page ? 'relative' : 'fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-2 md:p-4'}>
+      <div className={page ? 'w-full bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden flex flex-col' : 'w-full max-w-[1100px] bg-white rounded-2xl border border-gray-200/70 shadow-2xl max-h-[94vh] overflow-hidden flex flex-col'}>
         {/* 헤더 */}
         <div className="px-4 md:px-6 py-4 border-b border-gray-200/70 flex items-center justify-between shrink-0 gap-2">
-          <div className="min-w-0">
-            <h2 className="text-lg font-semibold text-gray-900">AI 영업</h2>
-            <p className="text-xs text-gray-500 mt-0.5 truncate">업체 홈페이지를 읽고 맞춤 제안 세트를 만들어, 확인한 뒤 담당자 또는 회사 수신함으로 보냅니다</p>
-          </div>
+          {/* 페이지에서는 제목이 머리 띠에 있다(두 번 쓰지 않는다) */}
+          {page ? <div /> : (
+            <div className="min-w-0">
+              <h2 className="text-lg font-semibold text-gray-900">AI 영업</h2>
+              <p className="text-xs text-gray-500 mt-0.5 truncate">업체 홈페이지를 읽고 맞춤 제안 세트를 만들어, 확인한 뒤 담당자 또는 회사 수신함으로 보냅니다</p>
+            </div>
+          )}
           <div className="flex items-center gap-2 shrink-0">
             {/* ★ 2026-09-23 작업대에서 연 건 — 같은 줄 이전·다음 */}
             {!listMode && job && navIndex >= 0 && navIds.length > 1 && (
@@ -1003,7 +1037,7 @@ export default function SalesOutreachModal({ onClose }: { onClose: () => void })
                 <button onClick={() => goNav(1)} disabled={navIndex >= navIds.length - 1} className="px-2 py-1.5 rounded-lg border border-gray-200 hover:bg-gray-50 disabled:opacity-30">다음</button>
               </span>
             )}
-            <button onClick={() => setWorkbenchOpen(true)}
+            <button onClick={() => (page && onOpenWorkbench ? onOpenWorkbench() : setWorkbenchOpen(true))}
               className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm border border-gray-200 text-gray-600 hover:bg-gray-50">
               <LayoutGrid className="w-4 h-4" /> 작업대
             </button>
@@ -1013,9 +1047,11 @@ export default function SalesOutreachModal({ onClose }: { onClose: () => void })
               }`}>
               <List className="w-4 h-4" /> {listMode ? '단건 등록' : '진행 목록'}
             </button>
-            <button onClick={onClose} className="p-2 rounded-lg text-gray-400 hover:text-gray-600 hover:bg-gray-50">
-              <X className="w-5 h-5" />
-            </button>
+            {!page && (
+              <button onClick={onClose} className="p-2 rounded-lg text-gray-400 hover:text-gray-600 hover:bg-gray-50">
+                <X className="w-5 h-5" />
+              </button>
+            )}
           </div>
         </div>
 
@@ -1262,6 +1298,22 @@ export default function SalesOutreachModal({ onClose }: { onClose: () => void })
                   placeholder="예: brand.naver.com/브랜드아이디"
                   className="w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none" />
               </div>
+              {/* ★ 2026-10-09 R9 포스터 재료(선택) — 비우면 홈페이지에서 고른다 */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">대표 상품 이미지 주소 <span className="text-gray-400 font-normal">(선택)</span></label>
+                  <input value={repImageUrl} onChange={(e) => setRepImageUrl(e.target.value.slice(0, 500))}
+                    placeholder="배경 없이 제품만 찍힌 사진 주소"
+                    className="w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none" />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">강조 포인트 <span className="text-gray-400 font-normal">(선택)</span></label>
+                  <input value={focusHint} onChange={(e) => setFocusHint(e.target.value.slice(0, 40))}
+                    placeholder="홈페이지에 있는 낱말 · 예: 수분 세럼"
+                    className="w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none" />
+                </div>
+                <p className="sm:col-span-2 text-[11px] text-gray-400 -mt-1">강조 포인트는 그대로 쓰지 않고, 홈페이지에서 그 낱말이 든 문구를 찾아 포스터 제목과 템플릿 고르기에 씁니다.</p>
+              </div>
               {/* ★ 2026-09-23 담당자(사람이 확인한 주소만 · 근거와 함께) — 비워도 제작은 되고 발송만 잠긴다 */}
               <div className="rounded-xl border border-gray-200/70 p-3 space-y-2">
                 <div className="text-sm font-medium text-gray-700">담당자 <span className="text-gray-400 font-normal text-xs">(선택 · 비워도 제작은 되고, 담당자에게 보낼 때 적으면 됩니다)</span></div>
@@ -1309,7 +1361,7 @@ export default function SalesOutreachModal({ onClose }: { onClose: () => void })
               {/* 대량 등록 — 엑셀 양식(옆에 작성 예시 포함)으로 한 번에 최대 20곳 */}
               <div className="mt-6 pt-5 border-t border-gray-200/70">
                 <div className="text-sm font-medium text-gray-700 mb-1">여러 업체 한번에 등록</div>
-                <p className="text-xs text-gray-500 mb-3">엑셀 양식(업체명 · 홈페이지 · 네이버 스토어 · 담당자 이메일 · 담당자명 · 수신 근거)을 받아 작성한 뒤 올리면 한 번에 최대 20곳을 순서대로 자동 처리합니다. 진행 상황은 [작업대]에서 봅니다.</p>
+                <p className="text-xs text-gray-500 mb-3">엑셀 양식(업체명 · 홈페이지 · 네이버 스토어 · 담당자 이메일 · 담당자명 · 수신 근거 · 대표 상품 이미지 · 강조 포인트)을 받아 작성한 뒤 올리면 한 번에 최대 20곳을 순서대로 자동 처리합니다. 진행 상황은 [작업대]에서 봅니다.</p>
                 {/* ★ 2026-09-23 일괄 옵션 */}
                 <div className="mb-3 space-y-1.5 text-xs text-gray-700">
                   <label className="flex items-start gap-2 cursor-pointer">
@@ -2088,9 +2140,9 @@ export default function SalesOutreachModal({ onClose }: { onClose: () => void })
           }}
         />
       )}
-      {/* ★ 2026-09-23 작업대(전체 화면 · 이 모달 위) */}
-      {workbenchOpen && <SalesOutreachWorkbench onClose={() => setWorkbenchOpen(false)} onOpenJob={openFromWorkbench} />}
-    </div>,
-    document.body,
+      {/* ★ 2026-09-23 작업대(전체 화면 · 이 모달 위) · ★ 2026-10-09 페이지에서는 작업대가 별도 주소 */}
+      {!page && workbenchOpen && <SalesOutreachWorkbench onClose={() => setWorkbenchOpen(false)} onOpenJob={openFromWorkbench} />}
+    </div>
   );
+  return page ? shell : createPortal(shell, document.body);
 }

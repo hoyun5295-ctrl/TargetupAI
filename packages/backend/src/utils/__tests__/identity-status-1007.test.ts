@@ -15,6 +15,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { readFileSync } from 'fs';
 import { join, resolve } from 'path';
+import { readAdminScreenSource } from './source-scan';
 
 vi.mock('../../config/database', () => {
   const pool = { connect: vi.fn() };
@@ -224,12 +225,12 @@ describe('5. 열람은 Harold님만', () => {
 });
 
 describe('6. 화면', () => {
-  const dash = front('pages/AdminDashboard.tsx');
+  const dash = readAdminScreenSource(); // ★ 2026-10-09 파일 분리 E 뒤 = 본체 + 옮겨 간 화면 합본
   const tab = front('components/admin/IdentityStatusTab.tsx');
 
   it('메뉴 = 보안 · 인증 묶음 · 허용 응답일 때만', () => {
     expect(dash).toContain("fetch('/api/admin/identity-status/access'");
-    const group = dash.slice(dash.indexOf("label: '보안 · 인증', color: 'rose'"), dash.indexOf("label: '연동 · 인프라'"));
+    const group = dash.slice(dash.indexOf("label: '보안 · 인증',"), dash.indexOf("label: '연동 · 인프라'"));
     expect(group).toContain("...(identityStatusAllowed ? [{ key: 'identityStatus', label: '본인인증 현황' }] : []),");
     expect(dash).toContain("{activeTab === 'identityStatus' && identityStatusAllowed && <IdentityStatusTab />}");
   });

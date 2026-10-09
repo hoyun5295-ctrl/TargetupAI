@@ -122,20 +122,21 @@ export default function LoginPage() {
 
     login(user, token);
 
+    // ★ 2026-10-09 로그인 성공 이동은 전부 replace — 로그인 페이지가 방문 기록에 남으면 뒤로가기 한 번에 로그인 화면이 뜬다(서수란 접수 · AI 영업 작업대)
     if (user.userType === 'super_admin') {
-      navigate('/admin');
+      navigate('/admin', { replace: true });
     } else if (user.company?.usageType === 'agent') {
       // ★ 2026-07-03 에이전트(QTmsg) 전용 회사 — 카카오&RCS 랜딩 (대시보드 차단)
-      navigate('/kakao-rcs');
+      navigate('/kakao-rcs', { replace: true });
     } else {
       // ★ 2026-07-03 카페24 앱 실행 랜딩 복귀 — 비로그인으로 /cafe24/launch 진입 시 저장한 mall_id로 복귀
       const cafe24Mall = sessionStorage.getItem('cafe24_return_mall_id');
       if (cafe24Mall) {
         sessionStorage.removeItem('cafe24_return_mall_id');
-        navigate(`/cafe24/launch?mall_id=${encodeURIComponent(cafe24Mall)}`);
+        navigate(`/cafe24/launch?mall_id=${encodeURIComponent(cafe24Mall)}`, { replace: true });
       } else {
         // ★ 2026-10-04 로그인 전에 가려던 화면(허용 경로만 · 플래너 행사 확인 등) → 없으면 대시보드
-        navigate(takeLoginReturn() || '/dashboard');
+        navigate(takeLoginReturn() || '/dashboard', { replace: true });
       }
     }
   };
@@ -338,7 +339,7 @@ export default function LoginPage() {
       }
       localStorage.setItem('sessionTimeoutMinutes', String(result.sessionTimeoutMinutes || 30));
       login(result.user, result.token);
-      navigate('/admin');
+      navigate('/admin', { replace: true });
     } catch (err: any) {
       setEnrollError('등록 중 오류가 발생했습니다.');
     } finally {
@@ -382,13 +383,13 @@ export default function LoginPage() {
         body: JSON.stringify({ userId: tempUser.id, currentPassword: currentPw, newPassword: newPw }),
       });
       login({ ...tempUser, mustChangePassword: false }, tempToken);
-      if (tempUser.userType === 'super_admin') { navigate('/admin'); }
-      else if (tempUser.company?.usageType === 'agent') { navigate('/kakao-rcs'); } // ★ 2026-07-03 에이전트 전용 랜딩
+      if (tempUser.userType === 'super_admin') { navigate('/admin', { replace: true }); }
+      else if (tempUser.company?.usageType === 'agent') { navigate('/kakao-rcs', { replace: true }); } // ★ 2026-07-03 에이전트 전용 랜딩
       else {
         // ★ 2026-07-03 카페24 앱 실행 랜딩 복귀
         const cafe24Mall = sessionStorage.getItem('cafe24_return_mall_id');
-        if (cafe24Mall) { sessionStorage.removeItem('cafe24_return_mall_id'); navigate(`/cafe24/launch?mall_id=${encodeURIComponent(cafe24Mall)}`); }
-        else { navigate(takeLoginReturn() || '/dashboard'); }
+        if (cafe24Mall) { sessionStorage.removeItem('cafe24_return_mall_id'); navigate(`/cafe24/launch?mall_id=${encodeURIComponent(cafe24Mall)}`, { replace: true }); }
+        else { navigate(takeLoginReturn() || '/dashboard', { replace: true }); }
       }
     } catch (err: any) { setPwError('비밀번호 변경에 실패했습니다.'); }
     finally { setPwLoading(false); }

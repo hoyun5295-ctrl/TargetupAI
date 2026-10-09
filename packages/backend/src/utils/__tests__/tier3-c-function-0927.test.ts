@@ -17,6 +17,7 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'fs';
 import { join } from 'path';
+import { readAdminScreenSource } from './source-scan';
 
 const src = (...p: string[]) => readFileSync(join(__dirname, '..', ...p), 'utf8');
 const between = (s: string, a: string, b: string) => {
@@ -165,7 +166,7 @@ describe('R271 · R065 싱크 에이전트 관리', () => {
   it('설정 창은 행의 실제 주기로 연다(목록이 구매 주기도 내려준다)', () => {
     const s = src('..', 'routes', 'admin-sync.ts');
     expect(s).toContain('sync_interval_purchases_min: intervals.purchasesMin,');
-    const d = readFileSync(join(__dirname, '..', '..', '..', '..', 'frontend', 'src', 'pages', 'AdminDashboard.tsx'), 'utf8');
+    const d = readAdminScreenSource(); // ★ 2026-10-09 파일 분리 E 뒤 = 본체 + 옮겨 간 화면 합본
     expect(d).not.toContain('setSyncConfigForm({ sync_interval_customers: 60, sync_interval_purchases: 30 });');
     expect(d).toContain('sync_interval_customers: Number(agent.sync_interval_customers_min) || 60,');
     expect(d).toContain('sync_interval_purchases: Number(agent.sync_interval_purchases_min) || 30,');
