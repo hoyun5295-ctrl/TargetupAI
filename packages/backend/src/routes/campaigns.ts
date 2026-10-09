@@ -1,4 +1,5 @@
 import { randomUUID } from 'crypto';
+import { demoBlock } from '../utils/demo-company';   // ★ 2026-10-09 시연 회사 = 사람이 누르는 발송·돈 입구 거절(설계서 docs/2026-10-09-demo-company-design.md §3)
 import { Request, Response, Router } from 'express';
 import { mysqlQuery, query } from '../config/database';
 import { checkBrandSendGate } from '../utils/kakao-brand-gate';
@@ -105,6 +106,8 @@ import { SPAM_TRIAL_SOURCE, isSpamTestBillable } from '../utils/spam-trial';
 const router = Router();
 
 router.use(authenticate);
+// ★ 2026-10-09 시연 회사 = 사람이 누르는 발송 입구 거절(설계서 docs/2026-10-09-demo-company-design.md §3) · 핸들러보다 먼저 등록
+router.post(['/test-send', '/:id/send', '/direct-send/commit', '/direct-send', '/brand-send'], demoBlock);
 
 // GET /api/campaigns - 캠페인 목록 (캘린더용)
 router.get('/', async (req: Request, res: Response) => {

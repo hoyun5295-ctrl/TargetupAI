@@ -2,6 +2,7 @@ import dotenv from 'dotenv';
 // ★ 보안: dotenv를 최우선 로딩 — 이후 모듈들이 환경변수에 의존하므로 반드시 첫 줄
 dotenv.config();
 
+import { startDemoDataWorker } from './utils/demo-data';   // ★ 2026-10-09 시연 회사 합성 데이터 워커
 import aiRoutes from './routes/ai';
 import aiMemoryRoutes from './routes/ai-memory';
 import aiUsageRoutes from './routes/ai-usage';
@@ -658,6 +659,10 @@ app.listen(PORT, () => {
 
   // ★ D218+ (2026-05-26): 7일 KPI 누적 + ai_company_memory 자동 학습 (1시간 cron)
   startAiMemoryAccumulatorWorker();
+
+  // ★ 2026-10-09 시연 회사 합성 데이터(매일 07:00 KST 이후 1회 · 싱크 수집 경로 루프백) — ENV DEMO_SYNC_API_KEY·DEMO_SYNC_SECRET 이 없으면 시작하지 않는다.
+  //   키가 시연 회사 것이 아니면 넣지 않는다(demo-data.ts). 설계서 docs/2026-10-09-demo-company-design.md §8.
+  startDemoDataWorker();
 
   // ★ D176 (2026-05-19): Continuous Operator — 5분 주기 due Operator 체크 + 매일 09:00 KST 제안서 박음
   //   AI 단독 실행 X 영구 원칙 — 제안서만 박고 사용자 승인 대기. ENT 자동 실행 옵션은 default OFF + 임계값 통과 시만

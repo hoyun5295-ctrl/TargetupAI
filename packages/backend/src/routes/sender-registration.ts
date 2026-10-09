@@ -1,4 +1,5 @@
 import { Router, Request, Response } from 'express';
+import { demoBlock } from '../utils/demo-company';   // ★ 2026-10-09 시연 회사 = 사람이 누르는 발송·돈 입구 거절(설계서 docs/2026-10-09-demo-company-design.md §3)
 import { authenticate, requireCompanyAdmin, requireSuperAdmin } from '../middlewares/auth';
 import multer from 'multer';
 import path from 'path';
@@ -83,7 +84,7 @@ router.get('/managers', authenticate, requireCompanyAdmin, async (req: Request, 
 });
 
 // POST /managers — 담당자 등록 (위임장 파일 첨부 필수)
-router.post('/managers', authenticate, requireCompanyAdmin, docUpload.single('authorizationDoc'), async (req: Request, res: Response) => {
+router.post('/managers', authenticate, requireCompanyAdmin, demoBlock, docUpload.single('authorizationDoc'), async (req: Request, res: Response) => {
   try {
     const companyId = (req as any).user!.companyId;
     const { managerName, managerPhone, managerEmail } = req.body;
@@ -140,6 +141,7 @@ router.delete('/managers/:id', authenticate, requireCompanyAdmin, async (req: Re
 router.post(
   '/',
   authenticate,
+  demoBlock,
   requireCompanyAdmin,
   docUpload.array('documents', 5),
   async (req: Request, res: Response) => {

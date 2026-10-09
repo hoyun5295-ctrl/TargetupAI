@@ -12,6 +12,7 @@
  * D78: 프로 요금제 자동 스팸검사 기능
  */
 
+import { isDemoCompany } from './demo-company';   // ★ 2026-10-09 시연 회사 = 검사 발송 0
 import { createHash } from 'crypto';
 import pool, { mysqlQuery, query } from '../config/database';
 import { TIMEOUTS } from '../config/defaults';
@@ -1031,6 +1032,17 @@ export async function autoSpamTestWithRegenerate(params: {
 
   const batchId = crypto.randomUUID();
   const isLmsType = messageType === 'LMS' || messageType === 'MMS';
+
+  // ★ 2026-10-09 시연 회사 = 실제 검사 발송 0 — 검사하지 않고 통과로 본다(자동마케팅 · 리마인드 · 화면 재검사 공통 · 발송은 경로 층에서 끝난다)
+  if (await isDemoCompany(companyId)) {
+    return {
+      batchId,
+      variants: variants.map((v) => ({ variantId: v.variantId, messageText: v.messageText, subject: v.subject, spamResult: 'pass' as const, carrierResults: [], regenerated: false, regenerateCount: 0 })),
+      ...(params.stopOnFirstPass ? { passedVariantId: variants[0]?.variantId ?? null } : {}),
+      totalTestCount: 0,
+      totalRegenerateCount: 0,
+    };
+  }
 
   const resultVariants: AutoSpamTestResult['variants'] = [];
   let totalTestCount = 0;

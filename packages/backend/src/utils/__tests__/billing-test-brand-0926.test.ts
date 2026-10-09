@@ -21,6 +21,9 @@ vi.mock('../../config/database', async (importOriginal) => {
   };
 });
 
+// ★ 2026-10-09 적재 CT 의 시연 회사 최후 방어는 PG 를 읽는다 — 이 테스트는 MySQL 구문만 보므로 시연 아님으로 고정
+vi.mock('../demo-company', () => ({ guardDemoLeak: vi.fn(async () => {}), isDemoCompany: vi.fn(async () => false) }));
+
 import { BILLING_TYPES, testBillingTypeKey } from '../billing-types';
 import { resolveBillingUnitPricesDetailed } from '../send-usage-aggregation';
 import { insertBrandQueue } from '../sms-queue';

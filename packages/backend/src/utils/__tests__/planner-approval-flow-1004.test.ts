@@ -364,7 +364,8 @@ describe('⑦ 화면 계약(상태 사전 · 로그인 복귀 · 공개 고지)'
     expect(util).toContain(String.raw`/^\/marketing-planner\/events\/`);
     expect(front('App.tsx')).toContain('rememberLoginReturn(`${location.pathname}${location.search}`)');
     const login = front('pages/LoginPage.tsx');
-    expect((login.match(/takeLoginReturn\(\) \|\| '\/dashboard'/g) || []).length).toBe(2);
+    // ★ 2026-10-09 비밀번호 변경 뒤에는 새 비밀번호로 다시 로그인한다(서버가 변경 전 세션을 주지 않는다) → 성공 분기 1곳만 복귀 키를 쓴다
+    expect((login.match(/takeLoginReturn\(\) \|\| '\/dashboard'/g) || []).length).toBe(1);
   });
 
   it('무로그인 화면 3종 공통 고지 · 확인 화면 토큰은 # 뒤에서 읽고 본문으로만 보낸다', () => {

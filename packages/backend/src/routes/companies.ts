@@ -1,4 +1,5 @@
 import { Request, Response, Router } from 'express';
+import { demoBlock } from '../utils/demo-company';   // ★ 2026-10-09 시연 회사 = 사람이 누르는 발송·돈 입구 거절(설계서 docs/2026-10-09-demo-company-design.md §3)
 import nodemailer from 'nodemailer';
 import rateLimit from 'express-rate-limit';
 import pool, { query } from '../config/database';
@@ -384,7 +385,7 @@ router.get('/my-credit/transactions', async (req: Request, res: Response) => {
 });
 
 // POST /api/companies/my-credit/recharge - 선불 즉시 충전 (발송 잔액 차감 + 크레딧 지급)
-router.post('/my-credit/recharge', async (req: Request, res: Response) => {
+router.post('/my-credit/recharge', demoBlock, async (req: Request, res: Response) => {
   try {
     const companyId = (req as any).user?.companyId;
     const userId = (req as any).user?.userId;
@@ -411,7 +412,7 @@ router.post('/my-credit/recharge', async (req: Request, res: Response) => {
 });
 
 // POST /api/companies/my-credit/recharge-request - 후불 충전 요청 (슈퍼관리자 승인 대기)
-router.post('/my-credit/recharge-request', async (req: Request, res: Response) => {
+router.post('/my-credit/recharge-request', demoBlock, async (req: Request, res: Response) => {
   try {
     const companyId = (req as any).user?.companyId;
     const userId = (req as any).user?.userId;
@@ -560,7 +561,7 @@ router.post('/plan-change/ack', async (req: Request, res: Response) => {
 });
 
 // POST /api/companies/plan-request - 플랜 변경 신청
-router.post('/plan-request', async (req: Request, res: Response) => {
+router.post('/plan-request', demoBlock, async (req: Request, res: Response) => {
   try {
     const companyId = (req as any).user?.companyId;
     const userId = (req as any).user?.userId;

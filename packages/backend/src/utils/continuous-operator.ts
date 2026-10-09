@@ -26,6 +26,7 @@
  */
 
 // ★ 2026-09-27 한줄로 V2 R197 — 운영자 일·월 예산 창 = KST(옛 CURRENT_DATE·date_trunc는 UTC 세션 기준)
+import { isDemoCompany } from './demo-company';   // ★ 2026-10-09 시연 회사 = 발송 엔진 앞 절단
 import { KST_TODAY_START_SQL, KST_MONTH_START_SQL } from './stats-aggregation';
 import { query, pool } from '../config/database';
 import { orchestrate, type AgentContext } from '../services/ai-orchestrator';
@@ -2485,6 +2486,8 @@ async function dispatchProposalSend(
   const proposalId: string = p.id;
   const companyId: string = p.company_id;
   const pj: any = p.proposal_json || {};
+  // ★ 2026-10-09 시연 회사 — 실발송 전용 검사(080 · 등록 발신번호)는 건너뛰고, 대상 계산·문안 검증 뒤 캠페인 생성 앞에서 시연 기록으로 마감한다(Codex 1R medium)
+  const demo = await isDemoCompany(companyId);
 
   // ★ 2026-08-04 리마인드 되살림 — 하드 차단(2026-08-03 6R) 제거. 보류 사유였던 "1차 수신자를 모른다"가
   //   발송 큐 원장(readCampaignQueuedPhones)으로 해소됐다. 대상 추출은 아래 코호트 분기가 소유하고,
@@ -2610,7 +2613,8 @@ async function dispatchProposalSend(
     }
 
     // 광고 가드 — 광고면 무료거부 번호(080) 해석 결과 필수(정보통신망법). 없으면 발송 보류(담당자 검토).
-    if (isAd) {
+    //   ★ 2026-10-09 시연 회사는 실제로 보내지 않으므로 080 등록을 요구하지 않는다(등록 입구도 막혀 있다)
+    if (isAd && !demo) {
       const opt080 = await getOpt080Number(op.created_by || null, companyId);
       if (!opt080) {
         await query(`UPDATE operator_proposals SET status = 'admin_review', scheduled_send_at = NULL, auto_execute_reason = '광고 무료거부 번호(080) 미설정. 발송 보류' WHERE id = $1::uuid`, [proposalId]);
@@ -2643,7 +2647,7 @@ async function dispatchProposalSend(
     useIndividualCb = op.cb_individual === true;
     cbFilterUserId = callbackAssignmentUserId(op.creator_type, op.created_by || null) ?? null;
     const chosenCb = useIndividualCb ? '' : String(op.cb_number || '').replace(/\D/g, '');
-    if (chosenCb) {
+    if (chosenCb && !demo) {
       const registered = await getRegisteredCallbackSet(companyId, cbFilterUserId || undefined);
       if (!registered.has(chosenCb)) {
         await query(`UPDATE operator_proposals SET status = 'admin_review', scheduled_send_at = NULL, auto_execute_reason = '고른 회신번호가 등록 목록에 없음. 발송 보류' WHERE id = $1::uuid`, [proposalId]);
@@ -2651,6 +2655,7 @@ async function dispatchProposalSend(
         return { action: 'skipped', reason: '고른 회신번호 미등록' };
       }
     }
+    // ★ 2026-10-09 시연 회사도 같은 함수 — 고른 번호를 그대로 돌려준다(등록 여부 검사는 위 chosenCb && !demo 에서 건너뛰었다)
     callback = await loadOperatorCallback(companyId, chosenCb) || null;
     if (!callback && !useIndividualCb) {
       await query(`UPDATE operator_proposals SET status = 'admin_review', scheduled_send_at = NULL, auto_execute_reason = '발신번호 미설정. 발송 보류' WHERE id = $1::uuid`, [proposalId]);
@@ -2914,6 +2919,20 @@ async function dispatchProposalSend(
   const trackedBody = chosenVariantId
     ? await shortenUrlsInText(resolvedBody, { companyId, variantId: chosenVariantId }).catch(() => resolvedBody)
     : resolvedBody;
+
+  // ★ 2026-10-09 시연 회사 절단점(설계서 docs/2026-10-09-demo-company-design.md §2) — 적재 표식·캠페인 생성·크레딧 앞.
+  //   대상 계산·문안·단축 URL 까지는 진짜로 돌고, 캠페인·큐·크레딧·통지·밴딧에는 닿지 않는다. 제안은 'sent' 로 마감(meta.demo).
+  if (demo) {
+    await cleanupOrphanStaging(stagingId);
+    await query(
+      `UPDATE operator_proposals
+          SET status = 'sent', auto_sent_at = NOW(),
+              proposal_json = jsonb_set(${PROPOSAL_META_BASE_SQL}, '{meta,demo}', jsonb_build_object('simulated', true, 'recipients', $2::int, 'at', NOW()))
+        WHERE id = $1::uuid AND status = 'sending'`,
+      [proposalId, recipientTotal],
+    );
+    return { action: 'sent', sentCount: recipientTotal };
+  }
 
   // 발송 (직접발송 파이프라인 공유) — 잔액 부족이면 skip+통지
   //   MMS면 위 게이트에서 확정한 mmsImagePaths가 spec → campaigns.mms_image_paths/send_config → file_name 1~3로 흐른다(기존 계약).
@@ -3642,6 +3661,8 @@ export async function notifyOperatorAdmins(
   //   마케팅 플래너처럼 축이 다른 담당자 통지가 자기 머리말을 준다. 발송 경로(무과금 인증 라인·대표 발신번호·폴백)는 이 함수 하나로 유지한다.
   opts?: { noticeHeader?: string },
 ): Promise<boolean> {
+  // ★ 2026-10-09 시연 회사 = 담당자 통지 0(폴백이 실제 사람 번호로 갈 수 있다 · 설계서 §2)
+  if (await isDemoCompany(operator.companyId)) return false;
   const phones = [...(operator.adminPhoneNumbers || []), operator.backupAdminPhone || '']
     .map((p) => String(p || '').replace(/\D/g, ''))
     .filter((p) => /^01\d{8,9}$/.test(p));

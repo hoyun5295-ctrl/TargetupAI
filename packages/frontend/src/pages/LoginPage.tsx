@@ -377,20 +377,19 @@ export default function LoginPage() {
     if (currentPw === newPw) { setPwError('기존 비밀번호와 다른 비밀번호를 입력하세요.'); return; }
     setPwLoading(true);
     try {
-      await fetch('/api/auth/change-password', {
+      // ★ 2026-10-09 응답을 확인한다(옛: 실패해도 그대로 로그인됐다) · 서버는 변경 전 세션을 주지 않으므로 새 비밀번호로 다시 로그인한다
+      //   (설계서 docs/2026-10-09-demo-company-design.md §7 · 슈퍼관리자 초기 비밀번호 경로와 같은 흐름)
+      const res = await fetch('/api/auth/change-password', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ userId: tempUser.id, currentPassword: currentPw, newPassword: newPw }),
       });
-      login({ ...tempUser, mustChangePassword: false }, tempToken);
-      if (tempUser.userType === 'super_admin') { navigate('/admin', { replace: true }); }
-      else if (tempUser.company?.usageType === 'agent') { navigate('/kakao-rcs', { replace: true }); } // ★ 2026-07-03 에이전트 전용 랜딩
-      else {
-        // ★ 2026-07-03 카페24 앱 실행 랜딩 복귀
-        const cafe24Mall = sessionStorage.getItem('cafe24_return_mall_id');
-        if (cafe24Mall) { sessionStorage.removeItem('cafe24_return_mall_id'); navigate(`/cafe24/launch?mall_id=${encodeURIComponent(cafe24Mall)}`, { replace: true }); }
-        else { navigate(takeLoginReturn() || '/dashboard', { replace: true }); }
-      }
+      const data = await res.json().catch(() => ({} as any));
+      if (!res.ok) { setPwError(data?.error || '비밀번호 변경에 실패했습니다.'); return; }
+      setShowPasswordModal(false);
+      setTempUser(null); setTempToken('');
+      setNewPw(''); setNewPwConfirm(''); setPassword('');
+      setError('비밀번호가 바뀌었습니다. 새 비밀번호로 다시 로그인해주세요.');
     } catch (err: any) { setPwError('비밀번호 변경에 실패했습니다.'); }
     finally { setPwLoading(false); }
   };

@@ -5,6 +5,7 @@
  * 함수로 추출. 동작은 원본과 동일(2026-06-04 톤28 504 정정 = 즉시 응답 + COUNT-only 보존).
  * 검증(라인그룹·회신번호 등록·알림톡 게이트)은 호출부(commit/autosend)가 선행한다.
  */
+import { assertNotDemoCompany } from './demo-company';   // ★ 2026-10-09 시연 회사 = 발송 0
 import { query } from '../config/database';
 import { prepaidDeduct, prepaidRefund, REFUND_KEYS } from './prepaid';
 // ★ 2026-07-30 차감 축 판정 — 환불 축과 같은 CT를 쓴다(갈리면 회계가 어긋난다)
@@ -219,6 +220,8 @@ export async function createDirectSendCampaign(
   },
   training?: { finalSource?: 'manual' | 'selected_as_is' | 'edited'; userPrompt?: string; aiMessages?: string[] },
 ): Promise<{ campaignId: string; accepted: number }> {
+  // ★ 2026-10-09 시연 회사 = 발송 0 — 사람 직접 발송 · DM 대상 발송 · 플래너 · 대행의 공통 길목(자동마케팅은 이보다 앞에서 끊는다)
+  await assertNotDemoCompany(ctx.companyId);
   // ★ 2026-07-02 링크 placeholder 발송 가드 — [링크를 입력해주세요]/{{LINK: 잔존 시 실발송 차단.
   //   직접발송 commit + 자율발송 + DM 공통 길목 (혜택 placeholder 차단과 동일 철학 — 미완성 문안 고객 발송 0).
   // ★ 2026-09-30 AI 혜택 자리까지 · 제목도(발송 길목 CT send-placeholder-gate · 링크 문구 · 코드는 종전 그대로).

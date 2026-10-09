@@ -1,4 +1,5 @@
 import { Request, Response, Router } from 'express';
+import { isDemoCompany } from '../utils/demo-company';   // ★ 2026-10-09 시연 회사 = 여정 활성화 비용 0
 import { query } from '../config/database';
 import { authenticate } from '../middlewares/auth';
 import { checkAPIStatus, extractVarCatalog, filterVarCatalogByData, generateCustomMessages, generateMessages, parseBriefing, recommendTarget, countFilteredCustomers, recommendNextCampaign, refineDirectMessage, callAIWithFallback } from '../services/ai';
@@ -5018,7 +5019,9 @@ router.post('/operator/journeys/:id/pretest-validate', async (req: Request, res:
     );
     const revBefore: string | null = beforeRow.rows[0]?.rev ?? null;
 
-    const result = await validateJourneyForActivation(companyId, req.params.id, userId);
+    const validated = await validateJourneyForActivation(companyId, req.params.id, userId);
+    // ★ 2026-10-09 시연 회사 = 발송 비용 0(차감이 생기지 않는다) — 화면의 잔액 잠금이 저절로 풀린다(설계서 docs/2026-10-09-demo-company-design.md §6)
+    const result = (await isDemoCompany(companyId)) ? { ...validated, totalCost: 0 } : validated;
     // ★ Fix #4 (2026-06-05): 검증 통과 시 발송 전 검증 마커 기록 — /activate가 이 마커로 미검증(프론트 우회) 활성화를 차단한다.
     if (result.ok) {
       const mark = await query(

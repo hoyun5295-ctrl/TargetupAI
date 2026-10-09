@@ -77,6 +77,7 @@ import { getTriggerContract } from './journey-trigger-capability';
 // ★ 2026-09-30 여정 V2 3차 — 상품 재구매 목표(같은 상품을 다시 샀는가) · 키 규칙은 journey-product 한 곳.
 import { PRODUCT_REPURCHASE_SINCE_ENTRY_SQL } from './journey-product';
 import { isSingleStepKind, normalizeStartKind } from './journey-start-kind';
+import { isDemoCompany } from './demo-company';   // ★ 2026-10-09 시연 회사 = 발송 엔진 앞 절단(설계서 docs/2026-10-09-demo-company-design.md §2)
 
 // ════════════════════════════════════════════════════════════════════
 // 타입
@@ -690,8 +691,9 @@ async function processExecution(exec: ExecutionRow): Promise<StepOutcome> {
     return 'skipped_opt_out';
   }
 
-  // 5. 라인그룹 검증
-  if (!(await hasCompanyLineGroup(exec.company_id))) {
+  // 5. 라인그룹 검증 — ★ 2026-10-09 시연 회사는 라인그룹을 일부러 두지 않는다(2차 벽) · 발송은 아래 절단점에서 끝난다
+  const demoCompany = await isDemoCompany(exec.company_id);
+  if (!demoCompany && !(await hasCompanyLineGroup(exec.company_id))) {
     await pauseJourney(exec.journey_id, '발송 라인그룹 미설정');
     await logFailedStep(exec.execution_id, step.id, 'line_group_not_set');
     return 'failed';
@@ -968,6 +970,19 @@ async function processExecution(exec: ExecutionRow): Promise<StepOutcome> {
   if (statusCheck2.rows[0]?.estatus === 'paused' || statusCheck2.rows[0]?.jstatus !== 'active') {
     console.log(`[JourneyExecutor] execution=${exec.execution_id} 발송 직전 정지 감지(execution/journey) → skip (잔액 차감 X / queue INSERT X)`);
     return 'paused_external';
+  }
+
+  // ★ 2026-10-09 시연 회사 절단점(잔액 확인 앞) — 문안 치환·스팸 판정·단축 URL 까지는 진짜로 돌고,
+  //   캠페인 생성 · 선불 차감 · 학습 적재 · 큐 적재 · 운영 크레딧 · 밴딧 보상에는 닿지 않는다.
+  //   시연 기록(error_reason='demo_simulated') 으로 남기고 다음 단계로 진행한다(여정 지도가 실제 진행처럼 보인다 · 목업 0).
+  if (demoCompany) {
+    await query(
+      `INSERT INTO journey_step_logs (id, execution_id, step_id, campaign_id, sent_at, status, cost, error_reason)
+       VALUES (gen_random_uuid(), $1::uuid, $2::uuid, NULL, NOW(), 'sent', 0, 'demo_simulated')`,
+      [exec.execution_id, step.id]
+    );
+    await advanceOrComplete(exec, step, 0);
+    return 'sent';
   }
 
   // 8. 잔액 사전 확인 (read-only 게이트) — 실제 차감은 단계 캠페인을 잡은 직후·큐 적재 전(아래).

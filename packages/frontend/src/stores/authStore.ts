@@ -14,6 +14,8 @@ interface User {
     code: string;
     // ★ 2026-07-03 사용구분: web(웹발송) / agent(QTmsg 에이전트 전용 — 메뉴 게이팅) / both
     usageType?: 'web' | 'agent' | 'both';
+    /** ★ 2026-10-09 시연 회사(화면 띠 전용 · 발송·돈 차단 판정은 서버가 한다) */
+    isDemo?: boolean;
   };
 }
 

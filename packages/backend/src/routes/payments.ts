@@ -6,6 +6,7 @@
 //   기존 = process.env.PUBLIC_BASE_URL 정적 baseUrl → 사용자 진입 origin (hanjul.ai) ≠ closeUrl domain (app.hanjul.ai) 불일치
 //   정정 = utils/inicis-client.ts getInicisCallbackUrls(req) helper 활용 = 동적 baseUrl (req.get('host') 정합)
 
+import { demoBlock } from '../utils/demo-company';   // ★ 2026-10-09 시연 회사 = 사람이 누르는 발송·돈 입구 거절(설계서 docs/2026-10-09-demo-company-design.md §3)
 import { Router, Request, Response, urlencoded } from 'express';
 import { pool } from '../config/database';
 import { parseWonAmount } from '../utils/normalize';
@@ -373,7 +374,7 @@ router.get('/inicis/return', async (req: Request, res: Response) => {
 router.use(authenticate);
 
 // POST /api/payments/inicis/prepare — 결제창 호출
-router.post('/inicis/prepare', async (req: Request, res: Response) => {
+router.post('/inicis/prepare', demoBlock, async (req: Request, res: Response) => {
   try {
     const companyId = req.user?.companyId;
     const userId = req.user?.userId;

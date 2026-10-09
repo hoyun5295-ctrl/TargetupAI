@@ -1,4 +1,5 @@
 import { Router, Request, Response } from 'express';
+import { demoBlock } from '../utils/demo-company';   // ★ 2026-10-09 시연 회사 = 사람이 누르는 발송·돈 입구 거절(설계서 docs/2026-10-09-demo-company-design.md §3)
 import { query } from '../config/database';
 import { parsePageParams, parseWonAmount } from '../utils/normalize';
 import { authenticate } from '../middlewares/auth';
@@ -184,7 +185,7 @@ router.get('/summary', async (req: Request, res: Response) => {
 });
 
 // POST /api/balance/deposit-request - 무통장입금 요청
-router.post('/deposit-request', async (req: Request, res: Response) => {
+router.post('/deposit-request', demoBlock, async (req: Request, res: Response) => {
   try {
     const companyId = req.user?.companyId;
     if (!companyId) {

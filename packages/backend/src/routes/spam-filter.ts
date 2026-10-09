@@ -1,4 +1,5 @@
 import { createHash } from 'crypto';
+import { demoBlock } from '../utils/demo-company';   // ★ 2026-10-09 시연 회사 = 사람이 누르는 발송·돈 입구 거절(설계서 docs/2026-10-09-demo-company-design.md §3)
 import { Request, Response, Router } from 'express';
 import pool, { mysqlQuery, query } from '../config/database';
 import { TIMEOUTS } from '../config/defaults';
@@ -51,7 +52,7 @@ function rejectSpamAppRequest(req: Request, res: Response): Response | null {
 // ============================================================
 // [POST] /api/spam-filter/test — 스팸필터 테스트 요청
 // ============================================================
-router.post('/test', authenticate, async (req: Request, res: Response) => {
+router.post('/test', authenticate, demoBlock, async (req: Request, res: Response) => {
   try {
     const userId = (req as any).user.userId;
     const companyId = (req as any).user.companyId;

@@ -138,6 +138,17 @@ function PrivateRoute({ children, allowedTypes }: { children: React.ReactNode; a
   return <>{children}</>;
 }
 
+// ★ 2026-10-09 시연 회사 띠(설계서 docs/2026-10-09-demo-company-design.md §6) — 로그인 응답 company.isDemo 일 때만 · 모든 화면 위 한 줄
+function DemoCompanyBanner() {
+  const { isAuthenticated, user } = useAuthStore();
+  if (!isAuthenticated || !user?.company?.isDemo) return null;
+  return (
+    <div role="status" className="w-full bg-slate-800 text-slate-100 text-[12.5px] leading-7 px-4 text-center truncate" data-demo-banner>
+      시연 회사 · 고객·구매는 매일 만들어지는 가상 데이터이고 문자는 실제로 나가지 않습니다
+    </div>
+  );
+}
+
 // 세션 감시 + 강제 로그아웃 모달
 function SessionGuard() {
   const navigate = useNavigate();
@@ -330,6 +341,7 @@ function App() {
       <ToastProvider>
       {/* 세션 감시 (로그인 상태일 때만 활성) */}
       <SessionGuard />
+      <DemoCompanyBanner />
       {/* ★ 2026-09-11 서비스 페이지 접속 기록 (전송자격인증 4.1 · 로그인 상태에서만) */}
       <PageViewTracker />
       <SessionTimeoutGuard>

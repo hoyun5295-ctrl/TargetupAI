@@ -8,6 +8,7 @@
 //     활성화 try/catch에 삼켜져 조용히 깨져 있었음 → 폐기하고 실제 next_run_at 스캔으로 교체.
 //   - dedup = journey_pretest_schedules에 (journey, step, KST날짜) 처리 기록.
 
+import { isDemoCompany } from './demo-company';
 import { query } from '../config/database';
 import { generatePauseToken, pauseJourney } from './journey-pause-handler';
 import { getAuthSmsTable, bulkInsertSmsQueue, getPlatformNoticeCallback } from './sms-queue';
@@ -166,6 +167,7 @@ async function safeNotify(b: PretestBundle, preview: string, mode: PretestMode):
 
 // ── 담당자 LMS 알림 (2시간 전 안내 / 자동보정 / 정지) — 인증 라인 큐 ──
 async function notifyManagerForStep(b: PretestBundle, messagePreview: string, mode: PretestMode): Promise<void> {
+  if (await isDemoCompany(b.companyId)) return;   // ★ 2026-10-09 시연 회사 = 담당자 문자 0(설계서 docs/2026-10-09-demo-company-design.md §2)
   const managerRes = await query(
     `SELECT phone_number FROM kakao_alarm_users
       WHERE company_id = $1 AND COALESCE(active_yn, 'Y') = 'Y'

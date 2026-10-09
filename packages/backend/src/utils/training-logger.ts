@@ -15,6 +15,7 @@
  * ============================================================
  */
 
+import { isDemoCompany } from './demo-company';   // ★ 2026-10-09 시연 회사 = 학습 적재 0
 import pool from '../config/database';
 import crypto from 'crypto';
 import { AI_MODELS } from '../config/defaults';
@@ -274,6 +275,8 @@ function buildCandidates(aiMessages: string[], companyName?: string): Candidate[
 // ============================================================
 export async function logTrainingData(params: TrainingLogParams): Promise<void> {
   try {
+    // ★ 2026-10-09 시연 회사 = 회사 간 학습 풀 오염 0(설계서 docs/2026-10-09-demo-company-design.md §5)
+    if (await isDemoCompany(params.companyId)) return;
     // ★ 2026-10-05 허브 3안 선택 기록(원값 검증 · 계산 = 이 try 안). 고른 안을 그대로 보냈는지는 화면이 아는 편집 여부로 정한다
     //   (본문 비교는 광고 표기 · 링크 치환 · 자리 채움 때문에 늘 '편집'으로 잡힌다).
     const hub = parseHubVariantsRecord(params.aiVariantsRaw);

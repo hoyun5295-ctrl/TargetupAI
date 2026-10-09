@@ -35,6 +35,8 @@ export interface JourneyOverview {
   totalSent: number;
   totalFailed: number;
   totalSkipped: number;
+  /** ★ 2026-10-09 시연 회사 시연 기록(실제 발송 아님 · 발송 수에서 뺐다) */
+  totalDemoSimulated: number;
   avgCompletionHours: number | null;
   completionRate: number;  // completed / totalEntered
 }
@@ -48,6 +50,8 @@ export interface JourneyStepStat {
   sentCount: number;
   failedCount: number;
   skippedCount: number;
+  /** ★ 2026-10-09 시연 기록(실제 발송 아님 · sentCount 에서 뺐다) */
+  demoSimulatedCount: number;
   totalCost: number;
   clickCount: number;
   conversionCount: number;
@@ -159,7 +163,9 @@ async function getJourneyOverview(journeyId: string): Promise<JourneyOverview> {
 
   const logRes = await query(
     `SELECT
-       COUNT(*) FILTER (WHERE l.status = 'sent') AS total_sent,
+       -- ★ 2026-10-09 시연 기록(error_reason='demo_simulated')은 발송이 아니다 — 따로 센다(설계서 docs/2026-10-09-demo-company-design.md §6)
+       COUNT(*) FILTER (WHERE l.status = 'sent' AND COALESCE(l.error_reason, '') <> 'demo_simulated') AS total_sent,
+       COUNT(*) FILTER (WHERE l.status = 'sent' AND l.error_reason = 'demo_simulated') AS total_demo_simulated,
        COUNT(*) FILTER (WHERE l.status = 'failed') AS total_failed,
        COUNT(*) FILTER (WHERE l.status = 'skipped') AS total_skipped
      FROM journey_step_logs l
@@ -187,6 +193,7 @@ async function getJourneyOverview(journeyId: string): Promise<JourneyOverview> {
     totalSent: Number(log.total_sent) || 0,
     totalFailed: Number(log.total_failed) || 0,
     totalSkipped: Number(log.total_skipped) || 0,
+    totalDemoSimulated: Number(log.total_demo_simulated) || 0,
     avgCompletionHours: exec.avg_completion_hours != null ? Number(exec.avg_completion_hours) : null,
     // ★ 2026-07-11: 완주율 분모 = 발송군(홀드아웃 제외) — 대조군이 완주율을 희석하지 않게
     completionRate: (totalEntered - holdout) > 0 ? completed / (totalEntered - holdout) : 0,
@@ -212,7 +219,8 @@ async function getJourneyStepStats(journeyId: string): Promise<JourneyStepStat[]
        s.step_type,
        s.channel,
        COUNT(DISTINCT l.execution_id) AS entered_count,
-       COUNT(*) FILTER (WHERE l.status = 'sent') AS sent_count,
+       COUNT(*) FILTER (WHERE l.status = 'sent' AND COALESCE(l.error_reason, '') <> 'demo_simulated') AS sent_count,
+       COUNT(*) FILTER (WHERE l.status = 'sent' AND l.error_reason = 'demo_simulated') AS demo_simulated_count,
        COUNT(*) FILTER (WHERE l.status = 'failed') AS failed_count,
        COUNT(*) FILTER (WHERE l.status = 'skipped') AS skipped_count,
        COUNT(*) FILTER (WHERE l.status = 'skipped' AND COALESCE(l.error_reason, '') LIKE '%hours%') AS skipped_hours_count,
@@ -270,6 +278,7 @@ async function getJourneyStepStats(journeyId: string): Promise<JourneyStepStat[]
       sentCount,
       failedCount: Number(row.failed_count) || 0,
       skippedCount: Number(row.skipped_count) || 0,
+      demoSimulatedCount: Number(row.demo_simulated_count) || 0,
       totalCost: Number(row.total_cost) || 0,
       clickCount,
       conversionCount,
@@ -356,7 +365,7 @@ async function getJourneyHourlyStats(journeyId: string): Promise<JourneyHourlySt
        COUNT(*) AS sent_count
      FROM journey_step_logs l
      INNER JOIN journey_executions e ON e.id = l.execution_id
-     WHERE e.journey_id = $1::uuid AND l.status = 'sent'
+     WHERE e.journey_id = $1::uuid AND l.status = 'sent' AND COALESCE(l.error_reason, '') <> 'demo_simulated'
      GROUP BY hour
      ORDER BY hour`,
     [journeyId]
@@ -399,7 +408,7 @@ async function getJourneyWeekdayStats(journeyId: string): Promise<JourneyWeekday
        COUNT(*) AS sent_count
      FROM journey_step_logs l
      INNER JOIN journey_executions e ON e.id = l.execution_id
-     WHERE e.journey_id = $1::uuid AND l.status = 'sent'
+     WHERE e.journey_id = $1::uuid AND l.status = 'sent' AND COALESCE(l.error_reason, '') <> 'demo_simulated'
      GROUP BY weekday`,
     [journeyId]
   );

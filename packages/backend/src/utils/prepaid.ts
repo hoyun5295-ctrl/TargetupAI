@@ -3,6 +3,7 @@
 // 포인트 차감/환불은 이 모듈을 통해서만 수행한다.
 // 하드코딩 금지. DB 기반 단가 조회.
 
+import { isDemoCompany } from './demo-company';   // ★ 2026-10-09 시연 회사 = 차감 0(설계서 docs/2026-10-09-demo-company-design.md §4)
 import type { PoolClient } from 'pg';
 import pool, { query } from '../config/database';
 import { buildDeductDescription, type AlimtalkSettleUnits } from './deduct-reference';
@@ -134,6 +135,11 @@ export async function prepaidDeduct(
   //   세이브포인트로 감싸 실패는 차감분만 되돌리고, 호출자 트랜잭션의 커밋·롤백·연결 반납은 호출자가 한다.
   opts?: { alimtalk?: boolean; client?: PoolClient },
 ): Promise<{ ok: boolean; error?: string; amount?: number; balance?: number; insufficientBalance?: boolean; freeUsed?: number }> {
+  // ★ 2026-10-09 시연 회사 최후 방어 — 경로 층이 차감 앞에서 끊으므로 여기 도달 = 누락 사고. 원장 0 · 실패로 돌려 발송을 멈춘다.
+  if (await isDemoCompany(companyId)) {
+    console.error(`[DEMO-LEAK] prepaidDeduct 에 시연 회사가 도달했다 — 경로 층 누락 · 차감·발송 차단 company=${companyId} ref=${referenceType}:${referenceId}`);
+    return { ok: false, error: '시연 회사는 차감하지 않습니다(DEMO_LEAK)' };
+  }
   const callerClient = opts?.client;
   const tx = callerClient
     ? { begin: 'SAVEPOINT prepaid_deduct', commit: 'RELEASE SAVEPOINT prepaid_deduct', rollback: 'ROLLBACK TO SAVEPOINT prepaid_deduct' }
@@ -327,6 +333,11 @@ export async function prepaidRefund(
   //     새 환불을 막는다. 목표 = min(차감, 건수 × 차감 단가) · 지급 = 목표 − 순환불(차액 제외) · 상한 = 차감 − 순환불(전체). 키 필수.
   opts: { mode?: 'cumulative' | 'additional'; refundKey?: string; forceKeyedPot?: boolean; keepCount?: number; targetAmount?: number; netTargetCount?: number } = {}
 ): Promise<{ refunded: number; ok: boolean }> {
+  // ★ 2026-10-09 시연 회사 = 차감 행이 없으므로 환불도 없다 · throw 하지 않는다(정산 스위퍼의 회사 루프를 멈추지 않게)
+  if (await isDemoCompany(companyId)) {
+    console.error(`[DEMO-LEAK] prepaidRefund 에 시연 회사가 도달했다 — 환불 0 company=${companyId} ref=${referenceType}:${campaignId}`);
+    return { refunded: 0, ok: true };
+  }
   const keepMode = typeof opts.keepCount === 'number' && Number.isFinite(opts.keepCount);
   const amountMode = !keepMode && typeof opts.targetAmount === 'number' && Number.isFinite(opts.targetAmount);
   const netMode = !keepMode && !amountMode && typeof opts.netTargetCount === 'number' && Number.isFinite(opts.netTargetCount);

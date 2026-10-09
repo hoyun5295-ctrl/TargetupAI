@@ -13,6 +13,7 @@
  *  - prepaid 자동충전·월 상한 적용은 이후 단계.
  */
 
+import { isDemoCompany } from './demo-company';   // ★ 2026-10-09 시연 회사 = AI 크레딧 차감 0
 import { pool } from '../config/database';
 import { needsMonthlyReset } from './ai-credit-calc';
 import { setCreditEvent } from './request-context';
@@ -103,6 +104,7 @@ export async function hasCreditForStrict(companyId: string, cost: number, source
 /** 호출 전 사전 차단 — 보유 크레딧이 작업 비용보다 적으면 throw InsufficientCreditError. */
 export async function checkCredit(companyId: string, cost: number): Promise<void> {
   if (!companyId || !cost || cost <= 0) return;
+  if (await isDemoCompany(companyId)) return;   // ★ 2026-10-09 시연 회사 = 크레딧 차단 없음(차감도 0)
   const st = await getCreditState(companyId);
   if (!st.creditEnabled) return;  // 크레딧제 미적용(요금제 크레딧 미설정) → 통과(차단 X)
   // ★ D227+ 후불은 추가 사용 한도까지 통과(월말 청구). 선불은 보유 부족 시 차단.
@@ -158,6 +160,8 @@ export async function deductCredit(opts: {
 }): Promise<DeductResult> {
   const empty: DeductResult = { deducted: false, fromBase: 0, fromPurchased: 0, baseAfter: 0, purchasedAfter: 0 };
   if (!opts.companyId || !opts.cost || opts.cost <= 0) return empty;
+  // ★ 2026-10-09 시연 회사 = 크레딧 차감 대상 아님(not_applicable · 결과 판정은 deductCreditOutcome 이 그대로 '차감 의무 없음'으로 읽는다)
+  if (await isDemoCompany(opts.companyId)) return { ...empty, skipReason: 'not_applicable' };
 
   const now = new Date();
   const client = await pool.connect();

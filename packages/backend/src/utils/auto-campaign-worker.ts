@@ -26,6 +26,7 @@
  * 실패 정책: 스킵 + failed 기록 → next_run_at 다음 스케줄로 갱신 (중복 발송 방지)
  */
 
+import { isDemoCompany } from './demo-company';   // ★ 2026-10-09 시연 회사 = 옛 자동발송 0
 import { storeMembershipClause } from './store-scope';
 import { resolveConsentScope, consentSql, brandConsentOption } from './mall-consent';
 import { query } from '../config/database';
@@ -201,6 +202,7 @@ async function runMessageGeneration(): Promise<void> {
 }
 
 async function generateMessageForAutoCampaign(ac: any): Promise<void> {
+  if (await isDemoCompany(ac.company_id)) { console.log(`[auto-worker] 시연 회사 — 자동발송 건너뜀 ${ac.id}`); return; }   // ★ 2026-10-09 시연 회사 = 발송 0
   const logPrefix = `[auto-worker][gen][${ac.id}]`;
 
   try {
@@ -558,6 +560,7 @@ async function runPreNotification(): Promise<void> {
 }
 
 async function sendPreNotification(ac: any): Promise<void> {
+  if (await isDemoCompany(ac.company_id)) { console.log(`[auto-worker] 시연 회사 — 자동발송 건너뜀 ${ac.id}`); return; }   // ★ 2026-10-09 시연 회사 = 발송 0
   const logPrefix = `[auto-worker][notify][${ac.id}]`;
 
   try {
@@ -672,6 +675,7 @@ async function sendPreNotification(ac: any): Promise<void> {
 // ============================================================
 
 async function executeAutoCampaign(ac: any): Promise<void> {
+  if (await isDemoCompany(ac.company_id)) { console.log(`[auto-worker] 시연 회사 — 자동발송 건너뜀 ${ac.id}`); return; }   // ★ 2026-10-09 시연 회사 = 발송 0
   const logPrefix = `[auto-worker][${ac.id}][${ac.campaign_name}]`;
   // ★ 2026-09-27 한줄로 V2 m088 — 차감이 끝났는가(바깥 catch가 환불 의무를 남길 근거). 적재·정산 경로가 끝나면 비운다.
   let deductedFor: { campaignId: string; count: number; messageType: string } | null = null;
@@ -1313,6 +1317,7 @@ async function runPreSendSpamTest(): Promise<void> {
 }
 
 async function executePreSendSpamTest(ac: any): Promise<void> {
+  if (await isDemoCompany(ac.company_id)) { console.log(`[auto-worker] 시연 회사 — 자동발송 건너뜀 ${ac.id}`); return; }   // ★ 2026-10-09 시연 회사 = 발송 0
   const logPrefix = `[auto-worker][spam][${ac.id}]`;
 
   try {

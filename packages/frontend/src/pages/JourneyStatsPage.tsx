@@ -63,6 +63,8 @@ interface JourneyStatsData {
     sentCount: number;
     failedCount: number;
     skippedCount: number;
+    /** ★ 2026-10-09 시연 회사 시연 기록(실제 발송 아님 · 발송 수에서 빠져 있다 · 옛 서버 응답에는 없다) */
+    demoSimulatedCount?: number;
     totalCost: number;
     clickCount: number;
     conversionCount: number;
@@ -236,7 +238,7 @@ export default function JourneyStatsPage() {
                     <td className="px-3 py-2.5 text-xs">{stepTypeLabel(s.stepType)}</td>
                     <td className="px-3 py-2.5 text-xs uppercase">{s.channel || '-'}</td>
                     <td className="px-3 py-2.5 text-right font-mono">{s.enteredCount.toLocaleString()}</td>
-                    <td className="px-3 py-2.5 text-right font-mono">{s.sentCount.toLocaleString()}</td>
+                    <td className="px-3 py-2.5 text-right font-mono">{s.sentCount.toLocaleString()}{s.demoSimulatedCount ? <span className="ml-1 text-[11px] text-slate-500 font-sans" title="시연 회사 기록 · 실제 발송 아님">· 시연 {s.demoSimulatedCount.toLocaleString()}</span> : null}</td>
                     <td className="px-3 py-2.5 text-right font-mono text-rose-700">{s.failedCount.toLocaleString()}</td>
                     <td className="px-3 py-2.5 text-right font-mono text-amber-700">{s.skippedCount.toLocaleString()}</td>
                     <td className="px-3 py-2.5 text-right font-mono text-cyan-700">{s.clickCount.toLocaleString()}</td>

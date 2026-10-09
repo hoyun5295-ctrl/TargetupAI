@@ -4,6 +4,7 @@
 // 하드코딩 금지. 환경변수/설정파일 기반.
 
 import { mysqlQuery } from '../config/database';
+import { guardDemoLeak } from './demo-company';   // ★ 2026-10-09 시연 회사 최후 방어(적재 = 사고)
 import { loadActiveRules, evaluateContent, logSpamBlockHits, SpamBlockLogEntry } from './spam-block';
 import { CACHE_TTL, BATCH_SIZES } from '../config/defaults';
 import { isValidSmsTable } from './sms-table-validator';
@@ -172,6 +173,8 @@ export async function insertTestSmsQueue(
   subject: string,
   extra?: { companyId?: string; billId?: string; mmsImages?: string[] }
 ): Promise<void> {
+  // ★ 2026-10-09 시연 회사 최후 방어 — 회사를 아는 분기만(인자 없는 분기 = 시스템 경로)
+  await guardDemoLeak('insertTestSmsQueue', extra?.companyId);
   const testTables = await getTestSmsTables();
   const table = testTables[0];
   const mType = toQtmsgType(msgType);
@@ -1195,6 +1198,8 @@ export async function insertBrandQueue(
   billId?: string,
 ): Promise<number> {
   if (rows.length === 0) return 0;
+  // ★ 2026-10-09 시연 회사 최후 방어
+  for (const id of new Set(rows.map((r) => r.companyId).filter(Boolean))) await guardDemoLeak('insertBrandQueue', id);
   if (tables.length === 0) throw new BrandQueueInsertError('브랜드메시지 발송 테이블이 없습니다', 0);
 
   const table = tables[0]; // 알림톡과 동일 — 첫 번째 테이블 사용
@@ -1304,6 +1309,8 @@ export async function insertAlimtalkQueue(
   appEtc1?: string,   // ★ #4-c (2026-06-01): app_etc1 = 캠페인/추적 식별자 — 결과·정산 매칭(results.ts WHERE app_etc1=?). 누락 시 알림톡 발송 결과 미조회.
 ): Promise<number> {
   if (rows.length === 0) return 0;
+  // ★ 2026-10-09 시연 회사 최후 방어
+  for (const id of new Set(rows.map((r) => r.companyId).filter(Boolean))) await guardDemoLeak('insertAlimtalkQueue', id);
 
   const table = tables[0]; // 알림톡은 첫 번째 테이블 사용
   let inserted = 0;
@@ -1571,6 +1578,8 @@ export async function bulkInsertSmsQueue(
   ctx?: SpamBlockContext,
 ): Promise<number> {
   if (rows.length === 0) return 0;
+  // ★ 2026-10-09 시연 회사 최후 방어 — 회사 = ctx 또는 행의 app_etc2(row[7])
+  for (const id of new Set([(ctx as any)?.companyId, ...rows.map((r) => r[7])].filter((v) => typeof v === 'string' && v))) await guardDemoLeak('bulkInsertSmsQueue', id as string);
 
   // ★ 2026-08-18 전송자격인증 5.2 — 금칙어 **탐지**(0819 탐지 전용 · 임계 경로 밖).
   //   발송이 실제로 시작되는 길목이 여기다(소비처 17곳이 전부 이 함수를 지난다).

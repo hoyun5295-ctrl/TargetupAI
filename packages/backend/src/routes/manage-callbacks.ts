@@ -1,4 +1,5 @@
 import { Router, Request, Response } from 'express';
+import { demoBlock } from '../utils/demo-company';   // ★ 2026-10-09 시연 회사 = 사람이 누르는 발송·돈 입구 거절(설계서 docs/2026-10-09-demo-company-design.md §3)
 import { checkSenderLineLimit } from '../utils/sender-line-limit';
 import { authenticate, requireCompanyAdmin } from '../middlewares/auth';
 import pool from '../config/database';
@@ -85,7 +86,7 @@ router.get('/', async (req: Request, res: Response) => {
 });
 
 // POST / - 발신번호 등록
-router.post('/', async (req: Request, res: Response) => {
+router.post('/', demoBlock, async (req: Request, res: Response) => {
   const { userType: callerType, companyId: callerCompanyId } = (req as any).user!;
   const { companyId, phone, label, isDefault, storeCode, storeName } = req.body;
 

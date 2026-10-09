@@ -9,6 +9,7 @@
  * 호출부는 이 함수만 부르고 자체 세션 SQL·응답 조립을 작성하지 않는다.
  */
 
+import { isDemoCompany } from './demo-company';   // ★ 2026-10-09 로그인 응답 시연 표식
 import type { Request } from 'express';
 import { query } from '../config/database';
 import { TIMEOUTS } from '../config/defaults';
@@ -59,6 +60,26 @@ export async function issueUserLogin(params: {
   identity: IdentityClearance;
 }): Promise<LoginIssueResult> {
   const { user, loginId, appSource, req, takeoverTicket, ipForBlock } = params;
+
+  // ★ 2026-10-09 첫 로그인 비밀번호 변경 = 서버 강제(설계서 docs/2026-10-09-demo-company-design.md §7).
+  //   옛: 플래그만 응답에 싣고 토큰은 그대로 발급해 화면만 막았다(변경 실패해도 로그인됐다). 이제 세션·토큰을 만들지 않는다 —
+  //   화면은 변경 창을 띄우고 /auth/change-password(현재 비밀번호 확인) 뒤 새 비밀번호로 다시 로그인한다(슈퍼관리자 경로와 같은 규칙).
+  if (user.must_change_password === true) {
+    await query(
+      `INSERT INTO audit_logs (id, user_id, action, target_type, details, ip_address, user_agent, created_at)
+       VALUES (gen_random_uuid(), $1, 'login_password_change_required', 'user', $2, $3, $4, NOW())`,
+      [user.id, JSON.stringify({ loginId, companyName: user.company_name }), req.ip, req.headers['user-agent'] || '']
+    );
+    return {
+      status: 'ok',
+      // ⛔ passwordChangeRequired 이름을 쓰지 않는다 — 그 키는 슈퍼관리자 초기 비밀번호 응답(changeToken)이고 화면이 그쪽으로 보낸다(Codex 1R high).
+      //   일반 계정은 user.mustChangePassword 로만 알린다 → 화면 applyLoginSuccess 가 /auth/change-password 창을 띄운다(로그인 · MFA · 본인인증 · 인계 공통).
+      body: {
+        token: null,
+        user: { id: user.id, loginId: user.login_id, name: user.name, userType: user.user_type === 'admin' ? 'company_admin' : 'company_user', mustChangePassword: true },
+      },
+    };
+  }
 
   const sessionId = newSessionId();
   const payload: JwtPayload = {
@@ -166,6 +187,8 @@ export async function issueUserLogin(params: {
           subscriptionStatus: user.subscription_status || 'trial',
           // ★ 2026-07-03 사용구분: web(웹발송) / agent(QTmsg 에이전트 전용 — 메뉴 게이팅) / both
           usageType: user.usage_type || 'web',
+          // ★ 2026-10-09 시연 회사 표식(화면 띠 전용 · 차단 판정은 서버가 따로 한다)
+          isDemo: await isDemoCompany(user.company_id),
         },
       },
       sessionTimeoutMinutes,

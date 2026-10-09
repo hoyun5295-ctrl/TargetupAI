@@ -8,6 +8,7 @@
  * 한줄로 AI 프로 요금제 이상.
  */
 
+import { demoBlock } from '../utils/demo-company';   // ★ 2026-10-09 시연 회사 = 사람이 누르는 발송·돈 입구 거절(설계서 docs/2026-10-09-demo-company-design.md §3)
 import { findInventedBenefits, replaceInventedBenefits } from '../utils/copy-benefit-detector';
 import { Request, Response, Router, json } from 'express';
 import path from 'path';
@@ -1227,7 +1228,7 @@ dmRouter.get('/sample-customers', async (req: any, res: any) => {
 // POST /api/dm/:id/send-to-target — 타겟 추출 대상에게 수신자별 개인화 DM 링크 문자 발송 (P4)
 //   직접발송 파이프라인(createDirectSendCampaign) 재사용 = 크레딧·수신거부/무효·(광고)/080·취소 스위퍼 안전망 보존.
 //   수신자별 고유 링크(?r=<token>) = staging extra1 → 템플릿 %기타1% 치환(direct-send-worker).
-dmRouter.post('/:id/send-to-target', requireDmAccess, async (req: any, res: any) => {
+dmRouter.post('/:id/send-to-target', requireDmAccess, demoBlock, async (req: any, res: any) => {
   try {
     const companyId = req.user?.companyId;
     const userId = req.user?.userId || companyId;
@@ -1989,7 +1990,7 @@ dmRouter.post('/:id/convert-to-scroll', requireDmAccess, async (req: any, res: a
 // ============================================================
 
 // POST /api/dm/:id/test-send — 담당자 번호로 테스트 SMS + DM 링크
-dmRouter.post('/:id/test-send', requireDmAccess, async (req: any, res: any) => {
+dmRouter.post('/:id/test-send', requireDmAccess, demoBlock, async (req: any, res: any) => {
   try {
     const companyId = req.user?.companyId;
     const userId = req.user?.userId;
