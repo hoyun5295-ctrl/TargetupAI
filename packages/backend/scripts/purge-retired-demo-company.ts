@@ -29,6 +29,8 @@ const RETIRED_CODE_PREFIX = 'HJDEMO_';
 const DEMO_LOGIN_ID = 'hanjulai';
 
 interface Fk { name: string; child: string; parent: string; childCols: string[]; parentCols: string[]; delType: string }
+/** 순환 외래키(지우는 규칙) — 관련 표 중 하나라도 지울 행이 있을 때만 막는다(지울 행이 없으면 연쇄 삭제도 없다 · 1010 점검 실측). */
+interface Cycle { fk: string; tables: string[]; note: string }
 interface PlanRow { table: string; depth: number; pred: string; rows: number; foreign: number; via: string[] }
 
 const qi = (s: string) => `"${s.replace(/"/g, '""')}"`;
@@ -96,9 +98,10 @@ async function main(): Promise<void> {
       }
     }
     const warnings: string[] = [];
+    const cycles: Cycle[] = [];
     for (const fk of fks) {
       if (removing(fk) && affected.has(fk.parent) && fk.childCols.length !== 1) warnings.push(`여러 칸 외래키 ${fk.name}(${fk.child} → ${fk.parent}) — 이 스크립트가 다루지 않는 모양`);
-      if (removing(fk) && affected.has(fk.parent) && fk.child === fk.parent) warnings.push(`순환 외래키 ${fk.name}(${fk.child} → ${fk.parent}) — 자기참조`);
+      if (removing(fk) && affected.has(fk.parent) && fk.child === fk.parent) cycles.push({ fk: fk.name, tables: [fk.child], note: '자기참조' });
     }
 
     // ── 표마다 조건(재귀 · 순환은 건너뛰고 기록) · 깊이(부모보다 깊게 = 먼저 지운다)
@@ -116,7 +119,7 @@ async function main(): Promise<void> {
       if (t !== 'companies' && hasCompanyId.has(t)) { conds.push(`${qi('company_id')} = $1::uuid`); via.push('company_id'); depth = Math.max(depth, 1); }
       for (const fk of fks) {
         if (fk.child !== t || !removing(fk) || !affected.has(fk.parent) || fk.childCols.length !== 1) continue;
-        if (stack.has(fk.parent)) { if (fk.parent !== t) warnings.push(`순환 외래키 ${fk.name}(${fk.child} → ${fk.parent}) — 여러 표에 걸친 순환`); continue; }
+        if (stack.has(fk.parent)) { if (fk.parent !== t) cycles.push({ fk: fk.name, tables: [...stack], note: '여러 표에 걸친 순환' }); continue; }
         const p = build(fk.parent);
         conds.push(`${qi(fk.childCols[0])} IN (SELECT ${qi(fk.parentCols[0])} FROM ${qi(fk.parent)} WHERE ${p.pred})`);
         via.push(`${fk.parent}.${fk.parentCols[0]} (${DEL_RULE[fk.delType]})`);
@@ -172,10 +175,16 @@ async function main(): Promise<void> {
     }
     const setNull = fks.filter((fk) => (fk.delType === 'n' || fk.delType === 'd') && affected.has(fk.parent) && plan.some((p) => p.table === fk.parent));
     if (setNull.length) console.log(`(값만 비워지는 외래키 ${setNull.length}개: ${setNull.map((f) => `${f.child}.${f.childCols.join(',')}`).join(' · ')})`);
+    const planTables = new Set(plan.map((p) => p.table));
+    const liveCycles = cycles.filter((cy) => cy.tables.some((t) => planTables.has(t)));
+    for (const cy of cycles) {
+      const live = liveCycles.includes(cy);
+      warnings.push(`순환 외래키 ${cy.fk}(${cy.tables.join(' → ')} · ${cy.note}) — ${live ? '지울 행이 있는 표라 막음' : '지울 행이 없는 표라 영향 없음'}`);
+    }
     for (const w of [...new Set(warnings)]) console.log(`주의: ${w}`);
     console.log(`총 ${total}행 · 소유를 증명하지 못한 행 ${foreignTotal}행`);
 
-    const blocking = warnings.some((w) => w.startsWith('여러 칸') || w.startsWith('순환'));
+    const blocking = warnings.some((w) => w.startsWith('여러 칸')) || liveCycles.length > 0;
     if (foreignTotal > 0 || blocking) {
       await client.query('ROLLBACK');
       throw new Error('삭제 집합 밖을 가리키는 행 · 순환 외래키 · 다루지 않는 외래키가 있어 지우지 않습니다. 위 목록을 그대로 보내 주세요.');
