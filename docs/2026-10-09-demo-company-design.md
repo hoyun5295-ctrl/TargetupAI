@@ -24,6 +24,7 @@
 | 여정 | journey-executor processExecution · 발송 직전 상태 재확인 뒤 · 잔액 확인 앞 | step_log `status='sent'` · cost 0 · campaign_id NULL · `error_reason='demo_simulated'` → advanceOrComplete. 라인그룹 검사는 시연이면 건너뛴다(시연 회사는 라인그룹 미배정 = 2차 벽) |
 | 자동마케팅(continuous-operator) | dispatchProposalSend · 적재 표식·createDirectSendCampaign 앞(시연 판정은 함수 첫머리 · 실발송 전용 080·등록 발신번호 검사는 시연이면 건너뛴다 · Codex 1R) | 제안 `sent` 마감 + meta `{ demo:{simulated, recipients, at} }` · 크레딧 차감 미도달 |
 | 스팸 검사 공용 CT | autoSpamTestWithRegenerate(자동마케팅 · 리마인드 · 화면 재검사 공통) | 시연이면 검사 발송 없이 통과 |
+| 여정 스팸 검사(★1010 추가) | runStepSpamTest(발송 2시간 전 스캐너 · 활성화 검증 공용) | 시연이면 검사 발송 없이 통과 · 1010 운영 로그 `[DEMO-LEAK] prepaidDeduct ref=spam:` 1건으로 발견(최후 방어가 막음 · 돈 · 발송 0) |
 | 여정 발송 전 담당자 문자 | journey-pretest-notifier notifyManagerForStep | 시연이면 return |
 | 담당자 통지 | notifyOperatorAdmins | 시연이면 맨 앞 return |
 | 옛 자동발송(auto-campaign-worker · 신규 생성 410) | executeAutoCampaign · 사전알림 · 문안 알림 | 시연이면 return(기록 없음) |

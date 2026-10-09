@@ -15,6 +15,7 @@ import { enqueueSpamTest, getSpamTestBatchResults } from './spam-test-queue';
 import { buildAdMessage, buildAdSubject, getOpt080Number } from './messageUtils';
 import { getCompanyCosts } from '../config/defaults';
 import { randomUUID } from 'crypto';
+import { isDemoCompany } from './demo-company';   // ★ 2026-10-10 시연 회사 = 검사 발송 0(발송 2시간 전 스캐너 · 활성화 검증 공용)
 
 export type FailedReason =
   | 'placeholder_unedited'
@@ -277,7 +278,13 @@ export async function runStepSpamTest(params: {
   opt080: string;
   variantId?: string;
 }): Promise<StepSpamTestResult> {
+  // ★ 2026-10-10 시연 회사 = 실제 검사 발송 0 — 검사하지 않고 통과로 본다(자동마케팅 autoSpamTestWithRegenerate 와 같은 규칙).
+  //   옛: 발송 2시간 전 스캐너가 시연 회사도 검사 대기열에 넣어 선불 차감 최후 방어에서 [DEMO-LEAK] 로 막히고 주기마다 다시 시도했다(1010 운영 로그).
+  //   판정 조회 실패는 아래 catch 가 받는다(enqueueOk false = 기존 실패 처리 · 스캐너는 다음 주기 재시도).
   try {
+    if (await isDemoCompany(params.companyId)) {
+      return { ok: true, enqueueOk: true, failedCarriers: [], matchedStopWords: [], score: 100 };
+    }
     const batchId = randomUUID();
     const stMsgType = params.channel.toUpperCase() as 'SMS' | 'LMS' | 'MMS';
     // 실제 발송(journey-executor prepareSendMessage)과 동일하게 (광고)+무료거부+제목 합성 후 검증.

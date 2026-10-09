@@ -32,6 +32,7 @@ import { isDemoCompany, demoBlock, guardDemoLeak, DemoLeakError, __resetDemoComp
 import { bulkInsertSmsQueue, insertAlimtalkQueue, insertTestSmsQueue } from '../sms-queue';
 import { prepaidDeduct, prepaidRefund } from '../prepaid';
 import { autoSpamTestWithRegenerate } from '../spam-test-queue';
+import { runStepSpamTest } from '../journey-pretest-validator';
 import { demoPhone, demoIdentity, buildDailyBatch, buildSeedData, DEMO_SEED_CUSTOMERS } from '../demo-data';
 import { normalizePhone } from '../normalize';
 
@@ -81,6 +82,12 @@ describe('스팸 검사 CT — 시연 회사 = 검사 발송 0 · 통과로 본�
     expect(r.passedVariantId).toBe('A');
     expect(r.totalTestCount).toBe(0);
     expect(mysqlCalls).toHaveLength(0);
+  });
+  it('발송 2시간 전 스캐너 · 활성화 검증 공용 검사(runStepSpamTest) = 시연 회사는 큐 등록 · 차감 없이 통과(★ 1010 운영 [DEMO-LEAK])', async () => {
+    const r = await runStepSpamTest({ companyId: DEMO, userId: 'u', body: '안녕', subject: null, channel: 'lms', isAd: true, callbackNumber: '01000000000', opt080: '' });
+    expect(r).toMatchObject({ ok: true, enqueueOk: true });
+    expect(mysqlCalls).toHaveLength(0);
+    expect(poolConnect).not.toHaveBeenCalled();
   });
 });
 
