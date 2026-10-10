@@ -11,6 +11,10 @@ import { authenticate } from '../middlewares/auth';
 import { getCafe24Integration, getCafe24ByoCredentials, fetchCafe24ProductsRaw, fetchCafe24Products } from '../utils/cafe24-client';
 import { getNaverCommerceIntegration, getNaverCommerceCredentials, fetchNaverProductsRaw, fetchNaverProducts } from '../utils/naver-commerce-client';
 import { matchMallProductByName } from '../utils/mall-product-match';
+// ★ 2026-10-10 한 줄 DM 강화 — 후보의 재조회 상품번호 · 검색어 정확 일치 · 고른 상품 → 확정 카드(상품 바꾸기)
+import { mallProductNoFrom, normalizeNameForMatch, type MallProduct } from '../utils/mall-product-normalize';
+import { sanitizeLineProducts } from '../utils/one-line-facts';
+import { resolveLineMallCards } from '../utils/line-mall-cards';
 // ★ 2026-09-14 W5 우커머스 — Store API 공개 조회(키 불필요) · 몰별 탭 provider = woocommerce:{mall}
 import { listWooIntegrations, getWooIntegration, fetchWooStoreProducts, fetchWooStoreProductsRaw } from '../utils/woocommerce-client';
 import { normalizeWooMallId } from '../utils/woocommerce-core';
@@ -18,6 +22,15 @@ import { normalizeWooMallId } from '../utils/woocommerce-core';
 import { resolveIntegrationActor, canTouchIntegration, type IntegrationActor } from '../utils/integration-scope';
 
 const WOO_PREFIX = 'woocommerce:';
+
+/**
+ * ★ 2026-10-10 /search 응답 항목에 더하는 두 칸(기존 칸 무변경) — no = 재조회 상품번호(없으면 null = 한 줄 확정 후보가 못 된다) ·
+ * exact = 검색어와 정규화 후 같은 이름인가(화면은 표식만 · 미리 체크하지 않는다 · 설계서 §1 H1).
+ */
+function withLineFields(products: MallProduct[], q: string | undefined): Array<MallProduct & { no: string | null; exact: boolean }> {
+  const target = q ? normalizeNameForMatch(q) : '';
+  return products.map((p) => ({ ...p, no: mallProductNoFrom(p), exact: !!target && normalizeNameForMatch(p.name) === target }));
+}
 /**
  * provider 'woocommerce:{mall}' → 이 회사 소속 + 이 주체가 다룰 수 있는 몰 행(없으면 undefined).
  * 타사 몰 주소로 조회하는 길과, 남의 분류코드 몰을 provider 문자열로 찍어 읽는 길을 함께 막는다.
@@ -111,7 +124,7 @@ mallProductsRouter.get('/search', async (req: any, res: Response) => {
       if (!integ) return res.status(404).json({ success: false, error: '카페24 연동이 없습니다.' });
       const creds = await getCafe24ByoCredentials(companyId, integ.mallId).catch(() => undefined);
       const products = await fetchCafe24Products(integ, { q, limit }, creds);
-      return res.json({ success: true, provider, products });
+      return res.json({ success: true, provider, products: withLineFields(products, q) });
     }
 
     if (provider === 'naver') {
@@ -120,14 +133,14 @@ mallProductsRouter.get('/search', async (req: any, res: Response) => {
       const creds = (await getNaverCommerceCredentials(companyId).catch(() => null)) || undefined;
       // storeUrl(스마트스토어 주소 슬러그) 확정 전 — 링크는 null. 확정 후 opts.storeUrl 주입.
       const products = await fetchNaverProducts(integ, { q, size: limit }, creds);
-      return res.json({ success: true, provider, products });
+      return res.json({ success: true, provider, products: withLineFields(products, q) });
     }
 
     if (provider.startsWith('woocommerce:')) {
       const integ = await wooMallOf(companyId, provider, await resolveIntegrationActor(req.user));
       if (!integ) return res.status(404).json({ success: false, error: '우커머스 연동이 없는 몰입니다.' });
       const products = await fetchWooStoreProducts(integ.siteUrl, { q, limit }, integ.mallId);
-      return res.json({ success: true, provider, products });
+      return res.json({ success: true, provider, products: withLineFields(products, q) });
     }
 
     return res.status(400).json({
@@ -137,6 +150,22 @@ mallProductsRouter.get('/search', async (req: any, res: Response) => {
   } catch (err: any) {
     console.error('[mall-products search] 오류:', err?.message);
     return res.status(502).json({ success: false, error: err?.message || '상품 조회 실패' });
+  }
+});
+
+// ★ 2026-10-10 POST /cards { products: [{ provider, no }] } — 사람이 고른 상품 → 확정 카드(결과 화면 [몰에서 상품 바꾸기]).
+//   한 줄 생성과 같은 CT(범위 확인 → 상품번호 재조회 → ok 만 카드 · discount_rate 없음) · AI 0 · 차감 0.
+mallProductsRouter.post('/cards', async (req: any, res: Response) => {
+  try {
+    const companyId = req.user?.companyId;
+    if (!companyId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
+    const refs = sanitizeLineProducts(req.body?.products);
+    if (refs === 'invalid' || !refs || refs.length === 0) return res.status(400).json({ success: false, error: '고를 상품을 다시 확인해 주세요.', code: 'LINE_PRODUCTS_INVALID' });
+    const r = await resolveLineMallCards(companyId, await resolveIntegrationActor(req.user), refs);
+    return res.json({ success: true, cards: r.cards, excluded: r.excluded });
+  } catch (err: any) {
+    console.error('[mall-products cards] 오류:', err?.message);
+    return res.status(502).json({ success: false, error: '몰에서 상품을 확인하지 못했어요. 잠시 후 다시 시도해 주세요.' });
   }
 });
 

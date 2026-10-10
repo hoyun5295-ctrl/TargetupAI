@@ -41,7 +41,8 @@ import RecipientsModal from '../components/email/EmailRecipientsModal';
 // ★ 2026-09-27 만들기 개편 — 첫 화면(만들기 카드 · 다른 방법 접힘 · 카드칩 · 상세 창) · 수정 화면(EmailEditScreen · DM 과 같은 칸) · 보내기 창
 import { Layers } from 'lucide-react';
 import EmailEditScreen from '../components/make/EmailEditScreen';
-import { newAttemptToken, appendToOneLine } from '../utils/one-line';   // ★ 2026-10-05 한줄로 시그니처
+import { newAttemptToken, appendToOneLine, fetchOneLineGaps, readPartOf, readsInLine, type LineMallCandidate, type LineProductRef } from '../utils/one-line';   // ★ 2026-10-05 한줄로 시그니처 · ★1010 묻는 창 · 몰 상품
+import { LineFactsAskModal } from '../components/zone/LineFacts';   // ★ 2026-10-10 한 줄 이메일 — 판정이 걸릴 때만 생성 전에 묻는다
 import EmailDetailModal from '../components/make/EmailDetailModal';
 import MakeSendModal from '../components/make/MakeSendModal';
 import SmtpConnectModal from '../components/email/SmtpConnectModal';
@@ -128,6 +129,15 @@ export default function EmailCampaignsPage() {
 
   // ★ 2026-06-13: AI 원샷 생성 영역
   const [aiPrompt, setAiPrompt] = useState('');
+  // ★ 2026-10-10 한 줄 이메일 강화 — 판정 조회 중(두 번 눌러도 한 번) · 묻는 창(혜택 · 몰 상품) · 고른 후보 · 후보가 실제로 보였는가
+  const [lineChecking, setLineChecking] = useState(false);
+  const lineCheckingRef = useRef(false);
+  const [lineAsk, setLineAsk] = useState<{ line: string; askBenefit: boolean; terms: string[]; percents: number[]; reads: string[] } | null>(null);
+  // ★ 2026-10-10 H3 — 한 줄 칸에 붙인 사진 글 조각 · 「사진에서 읽은 숫자도 그대로 쓰기」(기본 꺼짐)
+  const [lineReads, setLineReads] = useState<string[]>([]);
+  const [lineReadOk, setLineReadOk] = useState(false);
+  const [lineMallPicked, setLineMallPicked] = useState<LineMallCandidate[]>([]);
+  const [lineMallShown, setLineMallShown] = useState(false);
   const [aiAsAd, setAiAsAd] = useState(true);
   const [genStep, setGenStep] = useState<number | null>(null); // null=비진행, 0~5=진행 단계
   const genTimer = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -487,7 +497,7 @@ export default function EmailCampaignsPage() {
   //   블록 생성(/ai/generate-sections) → 비주얼 편집기로 진입. 시작 방식 = 템플릿/비주얼/프롬프트 전부 비주얼 편집기 1개.
   // ★ 2026-10-05 한줄로 시그니처 — 한 줄 입구 표시 + 시도 토큰(서버가 스위치를 본다 · 스위치 밖이면 응답 그대로).
   //   line = 처음 적은 한 줄(혜택을 넣어 새로 만들 때도 다시 입력하지 않는다).
-  const handleAiGenerate = async (opts: { prompt?: string; line?: string }) => {
+  const handleAiGenerate = async (opts: { prompt?: string; line?: string; facts?: { benefit: string | null }; products?: LineProductRef[]; reads?: string[]; readLicensed?: boolean }) => {
     if (customerGate.isEmpty) { setShowDataGate(true); return; }
     if (genStep !== null) return; // 중복 방지
     if (!opts.prompt?.trim()) {
@@ -503,14 +513,33 @@ export default function EmailCampaignsPage() {
       const res = await fetch('/api/email/ai/generate-sections', {
         method: 'POST',
         headers: authHeaders(),
-        body: JSON.stringify({ prompt: opts.prompt.trim(), is_ad: aiAsAd, one_line: true, attempt_token: newAttemptToken() }),
+        body: JSON.stringify({
+          prompt: opts.prompt.trim(), is_ad: aiAsAd, one_line: true, attempt_token: newAttemptToken(),
+          // ★ 2026-10-10 묻는 창의 답(혜택) · 고른 몰 상품(상품번호만 · 후보가 보였을 때만 · 빈 배열 = 안 고름)
+          ...(opts.facts ? { facts: opts.facts } : {}),
+          ...(opts.products ? { products: opts.products.map((p) => ({ provider: p.provider, no: p.no })) } : {}),
+          ...(opts.reads && opts.reads.length > 0 ? { read_texts: opts.reads, read_licensed: opts.readLicensed === true } : {}),
+        }),
       });
       const data = await res.json();
       if (data?.code === 'INSUFFICIENT_CREDIT') { showToast('크레딧이 부족합니다. 충전 후 이용해주세요.', 'warning'); return; }
+      if (data?.code === 'MALL_PRODUCTS_UNAVAILABLE') {
+        // ★ 2026-10-10 고른 상품이 전부 빠졌다(품절 · 장애 · 범위 밖) — 차감 전에 멈췄다. 상품 없이 만들지 묻는다.
+        const reasons = (Array.isArray(data.excluded) ? data.excluded : []).map((e: any) => `${e?.name ? `${e.name}: ` : ''}${e?.reason || ''}`).slice(0, 3).join(' · ');
+        const retry = { prompt: opts.prompt, line: opts.line, facts: opts.facts, reads: opts.reads, readLicensed: opts.readLicensed };
+        setConfirmState({
+          mode: 'warning', title: '고른 상품을 지금 쓸 수 없어요',
+          description: `${reasons ? `${reasons}. ` : ''}상품 없이 만들까요? 크레딧은 아직 쓰지 않았어요.`,
+          confirmLabel: '상품 없이 만들기',
+          onConfirm: () => { void handleAiGenerateRef.current?.({ ...retry, products: [] }); },
+        });
+        return;
+      }
       if (handle503(data)) return;
       if (data.success && data.data) {
         const g = data.data;
         setAiPrompt('');
+        setLineReads([]);
         setVisualEditor({
           sections: (g.sections || []) as Section[],
           name: g.name || '',
@@ -518,10 +547,12 @@ export default function EmailCampaignsPage() {
           isAd: aiAsAd,
           aiGenerated: true,
           // ★ 2026-07-13 — AI 프리헤더 회생(design.preheader로 수용 — 옛 흐름은 버렸음)
-          design: g.preheader ? { preheader: String(g.preheader).slice(0, 90) } : null,
+          // ★ 2026-10-10 스위치 켠 회사 = 서버가 회사 디자인(저장 주색 · 회사 또는 업종 아트디렉션 · 프리헤더)을 실어 준다
+          design: g.design && typeof g.design === 'object' ? g.design : (g.preheader ? { preheader: String(g.preheader).slice(0, 90) } : null),
           line: g.one_line?.enabled ? { text: (opts.line ?? opts.prompt).trim(), gapBenefit: g.one_line.gaps?.benefit === true } : null,
         });
-        showToast('AI 생성 완료. 비주얼 편집기에서 확인하고 다듬어주세요. (3 크레딧)', 'success');
+        const notes: string[] = Array.isArray(g.one_line?.notes) ? g.one_line.notes.map(String).filter(Boolean) : [];
+        showToast(notes.length > 0 ? `AI 생성 완료. ${notes[0]}` : 'AI 생성 완료. 비주얼 편집기에서 확인하고 다듬어주세요. (3 크레딧)', notes.length > 0 ? 'info' : 'success');
       } else {
         showToast(data.error || 'AI 생성 실패', 'error');
       }
@@ -534,6 +565,33 @@ export default function EmailCampaignsPage() {
   };
 
   useEffect(() => () => { if (genTimer.current) clearInterval(genTimer.current); }, []);
+  // ★ 2026-10-10 「상품 없이 만들기」 확인 창이 최신 함수를 부르게
+  const handleAiGenerateRef = useRef<typeof handleAiGenerate | null>(null);
+  handleAiGenerateRef.current = handleAiGenerate;
+
+  // ★ 2026-10-10 한 줄 이메일 — 제출 즉시 조회 중으로 막고(두 번 눌러도 한 번) 판정이 걸릴 때만 묻는 창 · 안 걸리면 지금처럼 바로 만든다
+  const submitEmailLine = async () => {
+    const t = aiPrompt.trim();
+    if (!t || genStep !== null || lineCheckingRef.current) return;
+    if (customerGate.isEmpty) { setShowDataGate(true); return; }
+    lineCheckingRef.current = true;
+    setLineChecking(true);
+    try {
+      const reads = readsInLine(t, lineReads);
+      const g = await fetchOneLineGaps(t, reads);
+      if (g?.enabled && (g.gaps.benefit || g.productTerms.length > 0 || reads.length > 0)) {
+        setLineMallPicked([]);
+        setLineMallShown(false);
+        setLineReadOk(false);
+        setLineAsk({ line: t, askBenefit: g.gaps.benefit, terms: g.productTerms, percents: g.benefitPercents, reads });
+        return;
+      }
+    } finally {
+      lineCheckingRef.current = false;
+      setLineChecking(false);
+    }
+    void handleAiGenerate({ prompt: t });
+  };
 
   // ★ 2026-07-07(4) 행사 캠페인 — EventCampaignModal이 생성해둔 이메일 초안 자동 적용 (30분 TTL, 1회 소비)
   useEffect(() => {
@@ -734,11 +792,11 @@ export default function EmailCampaignsPage() {
         line: {
           value: aiPrompt,
           onChange: setAiPrompt,
-          onSubmit: () => handleAiGenerate({ prompt: aiPrompt }),
+          onSubmit: () => { void submitEmailLine(); },
           placeholder: emailOneLine.placeholder,
           verb: emailOneLine.verb,
           icon: Wand2,
-          busy: genStep !== null,
+          busy: genStep !== null || lineChecking,
           credit: `${AI_GENERATE_COSTS['email-ai-generate']}크레딧`,
           extra: (
             <>
@@ -748,7 +806,7 @@ export default function EmailCampaignsPage() {
               </label>
               <ImageToCopyButton
                 label="이미지"
-                onExtracted={(t) => setAiPrompt((prev) => appendToOneLine(prev, t))}
+                onExtracted={(t) => { setAiPrompt((prev) => appendToOneLine(prev, t)); const r = readPartOf(t); if (r) setLineReads((prev) => [...prev.filter((x) => x !== r), r].slice(-5)); }}
                 disabled={genStep !== null}
                 className={MK_LINE_EXTRA_BTN}
               />
@@ -1120,6 +1178,27 @@ export default function EmailCampaignsPage() {
 
       {/* ConfirmModal */}
       <ConfirmModal state={confirmState} onClose={() => setConfirmState(null)} />
+      {/* ★ 2026-10-10 한 줄 이메일 — 생성 전 묻는 창(혜택 · 몰 상품 · [만들기] 하나 · 비워도 만든다) */}
+      <LineFactsAskModal
+        open={!!lineAsk}
+        line={lineAsk?.line || ''}
+        askBenefit={!!lineAsk?.askBenefit}
+        mall={lineAsk && lineAsk.terms.length > 0 ? { terms: lineAsk.terms, percents: lineAsk.percents, picked: lineMallPicked, onPicked: setLineMallPicked, onShown: setLineMallShown } : undefined}
+        readCheck={lineAsk && lineAsk.reads.length > 0 ? { checked: lineReadOk, onChange: setLineReadOk } : undefined}
+        onCancel={() => setLineAsk(null)}
+        onSubmit={() => { /* onSubmitAll 이 대신한다 */ }}
+        onSubmitAll={(benefit) => {
+          const a = lineAsk;
+          setLineAsk(null);
+          if (!a) return;
+          void handleAiGenerate({
+            prompt: a.line, line: a.line,
+            ...(a.askBenefit ? { facts: { benefit: benefit ?? null } } : {}),
+            ...(a.terms.length > 0 && lineMallShown ? { products: lineMallPicked.map((p) => ({ provider: p.provider, no: p.no })) } : {}),
+            ...(a.reads.length > 0 ? { reads: a.reads, readLicensed: lineReadOk } : {}),
+          });
+        }}
+      />
       {/* 고객 데이터 없음 — 생성 차단 안내 */}
       <CustomerDataRequiredModal open={showDataGate} onClose={() => setShowDataGate(false)} />
     </ZoneFrame>

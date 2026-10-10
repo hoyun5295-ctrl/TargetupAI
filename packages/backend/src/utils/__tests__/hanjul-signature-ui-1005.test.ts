@@ -78,11 +78,15 @@ describe('3. 이메일 완성도 줄 = 발송 관문 정규식', () => {
 describe('4. 입구 배선', () => {
   it('DM: 한 줄 입구만 one_line · 판정은 서버 · 실패해도 한 줄 유지', () => {
     const d = FRONT('pages', 'DmBuilderPage.tsx');
-    expect(d).toContain('...(opts.oneLine ? { one_line: true, attempt_token: newAttemptToken()');
-    expect(d).toContain('const g = await fetchOneLineGaps(t);');
+    // ★ 2026-10-10 한 줄 요청은 화면 CT 한 곳(requestLineDm)이 보낸다 · 한 줄 입구(opts.oneLine)에서만 부른다
+    expect(d).toContain('if (opts.oneLine) {');
+    expect(d).toContain("const r = await requestLineDm({ line: opts.prompt || '', facts: opts.facts, products: opts.products, reads: opts.reads, readLicensed: opts.readLicensed });");
+    expect(FRONT('utils', 'one-line.ts')).toContain("prompt: req.line, one_line: true, attempt_token: newAttemptToken(), land: 'result',");
+    expect(d).toContain("const res = await api.post('/dm/ai/one-shot-generate', { prompt: opts.prompt || '', scenario: opts.scenario });");
+    expect(d).toContain('const g = await fetchOneLineGaps(t, reads);');   // ★ 2026-10-10 H3 사진 글 조각을 함께(판정은 여전히 서버)
     const fin = d.slice(d.indexOf('    } finally {\n      clearInterval(stepTimer);'), d.indexOf('  }, [generating, createNew, applyAiGenerated'));
     expect(fin).not.toContain("setNaturalLanguage('')");
-    expect(d).toContain('extraContent={pendingGen?.askBenefit ? <LineFactsInline');
+    expect(d).toContain('extraContent={pendingGen && (pendingGen.askBenefit || (pendingGen.terms?.length ?? 0) > 0 || (pendingGen.reads?.length ?? 0) > 0) ? (');
   });
   it('이메일 · 인앱: 한 줄 입구가 one_line 을 보낸다(빠른 시작은 보내지 않는다)', () => {
     const e = FRONT('pages', 'EmailCampaignsPage.tsx');

@@ -12,7 +12,8 @@ import type { AxiosInstance } from 'axios';
 function emit(used?: string | null, balance?: string | null, source?: string | null) {
   if (!used || !source) return;
   window.dispatchEvent(new CustomEvent('credit:used', {
-    detail: { used: Number(used), balance: Number(balance), source },
+    // ★ 2026-10-10 잔여 헤더가 없으면 null(옛 Number(null)=0 은 「잔여 0」으로 읽혀 대시보드 숫자를 0으로 만든다)
+    detail: { used: Number(used), balance: balance != null && balance !== '' ? Number(balance) : null, source },
   }));
 }
 

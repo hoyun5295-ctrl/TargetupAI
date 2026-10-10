@@ -63,3 +63,8 @@
 @keyframes mk-sheet-in { from { transform: translateY(24px); opacity: 0; } to { transform: none; opacity: 1; } }
 .mk-sheet-in { animation: mk-sheet-in 0.18s ease-out; }
 @media (prefers-reduced-motion: reduce) { .mk-sheet-in { animation: none; } }
+
+/* ★ 2026-10-10 휴대폰 실제 보이는 높이(주소창 · 툴바 제외) — dvh 를 모르는 브라우저는 앞줄 vh 로 */
+.mk-dvh { height: 100vh; height: 100dvh; }
+.mk-max-h-94 { max-height: 94vh; max-height: 94dvh; }
+.mk-max-h-62 { max-height: 62vh; max-height: 62dvh; }

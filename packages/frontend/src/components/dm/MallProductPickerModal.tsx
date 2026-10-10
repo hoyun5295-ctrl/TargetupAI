@@ -18,16 +18,20 @@ export interface PickedMallProduct {
   discountRate: number; // %
   imageUrl: string | null;
   productUrl: string | null;
+  /** ★ 2026-10-10 서버가 다시 읽을 상품번호(/search 응답 · 없으면 null) */
+  no?: string | null;
 }
 
 interface ProviderTab { provider: string; label: string; }
 
 const won = (n: number) => `${Math.round(Number(n) || 0).toLocaleString()}원`;
 
-export default function MallProductPickerModal({ open, onClose, onPick }: {
+export default function MallProductPickerModal({ open, onClose, onPick, providerFilter }: {
   open: boolean;
   onClose: () => void;
   onPick: (products: PickedMallProduct[]) => void;
+  /** ★ 2026-10-10 보일 몰만(결과 화면 [몰에서 상품 바꾸기] = 상품번호로 다시 읽을 수 있는 몰만) · 미지정 = 지금 그대로 */
+  providerFilter?: (provider: string) => boolean;
 }) {
   const [providers, setProviders] = useState<ProviderTab[]>([]);
   const [provider, setProvider] = useState<string>('');
@@ -68,7 +72,8 @@ export default function MallProductPickerModal({ open, onClose, onPick }: {
     fetch('/api/mall-products/providers', { headers: { Authorization: `Bearer ${token()}` } })
       .then((r) => r.json())
       .then((data) => {
-        const list: ProviderTab[] = Array.isArray(data?.providers) ? data.providers : [];
+        const all: ProviderTab[] = Array.isArray(data?.providers) ? data.providers : [];
+        const list = providerFilter ? all.filter((p) => providerFilter(String(p.provider || ''))) : all;
         setProviders(list);
         if (list.length > 0) {
           setProvider(list[0].provider);

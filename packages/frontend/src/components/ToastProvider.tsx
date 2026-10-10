@@ -106,8 +106,9 @@ function ToastBox({ item, onClose }: { item: ToastItem; onClose: () => void }) {
   }, [item.duration, onClose]);
 
   return (
+    // ★ 2026-10-10 대시보드 모션 F — 오른쪽에서 한 번 미끄러져 들어온다(나가기 없음). 움직임 줄이기 = 그냥 나타남
     <div
-      className="relative overflow-hidden bg-slate-900/95 backdrop-blur-xl border border-white/10 rounded-xl shadow-2xl shadow-black/40 pl-4 pr-3 py-3 min-w-[280px] max-w-md flex items-start gap-3 pointer-events-auto"
+      className="relative overflow-hidden bg-slate-900/95 backdrop-blur-xl border border-white/10 rounded-xl shadow-2xl shadow-black/40 pl-4 pr-3 py-3 min-w-[280px] max-w-md flex items-start gap-3 pointer-events-auto animate-in fade-in slide-in-from-right-4 duration-200 fill-mode-backwards motion-reduce:animate-none"
       role="status"
     >
       <span className={`absolute left-0 top-0 bottom-0 w-1 ${config.accent}`} aria-hidden />

@@ -318,9 +318,10 @@ function DistributionList({ items }: { items: { label: string; count: number }[]
               </span>
             </div>
             <div className="h-1.5 bg-gray-100 rounded-full overflow-hidden">
+              {/* ★ 2026-10-10 대시보드 모션 I — 대시보드 카드 막대와 같이 한 번 왼쪽에서 차오른다(줄마다 0.04초) */}
               <div
-                className="h-full bg-gradient-to-r from-violet-400 to-fuchsia-500 rounded-full transition-all duration-700"
-                style={{ width: `${barWidth}%` }}
+                className="h-full bg-gradient-to-r from-violet-400 to-fuchsia-500 rounded-full transition-all duration-700 animate-in slide-in-from-left-full ease-out fill-mode-backwards motion-reduce:animate-none"
+                style={{ width: `${barWidth}%`, animationDelay: `${Math.min(i, 12) * 40}ms` }}
               />
             </div>
           </div>
@@ -402,10 +403,10 @@ export default function CardDetailModal({ card, onClose }: CardDetailModalProps)
 
   return (
     <div
-      className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center z-[60] p-0 md:p-4 animate-[fadeIn_0.18s_ease-out]"
+      className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center z-[60] p-0 md:p-4 animate-backdrop-in motion-reduce:animate-none"
     >
       <div
-        className="bg-white w-full md:max-w-5xl md:rounded-3xl md:max-h-[90vh] max-h-screen overflow-hidden flex flex-col shadow-2xl animate-[zoomIn_0.22s_ease-out]"
+        className="bg-white w-full md:max-w-5xl md:rounded-3xl md:max-h-[90vh] max-h-screen overflow-hidden flex flex-col shadow-2xl animate-dialog-in motion-reduce:animate-none"
         onClick={(e) => e.stopPropagation()}
       >
         {/* 헤더 sticky */}
@@ -440,7 +441,7 @@ export default function CardDetailModal({ card, onClose }: CardDetailModalProps)
         <div className="flex-1 overflow-y-auto px-5 md:px-7 py-6 bg-gradient-to-b from-gray-50/60 to-white">
           {loading && !detail ? (
             <div className="flex flex-col items-center justify-center py-24 gap-3">
-              <Sparkles className="w-8 h-8 text-violet-400 animate-pulse" />
+              <Sparkles className="w-8 h-8 text-violet-400 motion-safe:animate-pulse" />
               <span className="text-sm text-gray-500">불러오는 중...</span>
             </div>
           ) : detail?.blocked ? (
@@ -650,17 +651,6 @@ export default function CardDetailModal({ card, onClose }: CardDetailModalProps)
         </div>
       </div>
 
-      {/* 애니메이션 정의 (Tailwind 안 keyframes 직접 정의) */}
-      <style>{`
-        @keyframes fadeIn {
-          from { opacity: 0; }
-          to { opacity: 1; }
-        }
-        @keyframes zoomIn {
-          from { opacity: 0; transform: scale(0.96) translateY(8px); }
-          to { opacity: 1; transform: scale(1) translateY(0); }
-        }
-      `}</style>
     </div>
   );
 }

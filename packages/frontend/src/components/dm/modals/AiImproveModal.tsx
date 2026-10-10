@@ -9,7 +9,7 @@
  */
 import { useEffect, useMemo, useState } from 'react';
 import axios from 'axios';
-import { useDmBuilderStore } from '../../../stores/dmBuilderStore';
+import { useDmBuilderStore, selectAllSectionsFlat } from '../../../stores/dmBuilderStore';
 import { diffByWord, type DiffChunk } from '../../../utils/dm-text-diff';
 import ModalBase, { ModalButton } from './ModalBase';
 
@@ -30,8 +30,15 @@ type Suggestion = {
 
 type Decision = 'pending' | 'accept' | 'reject';
 
-export default function AiImproveModal({ open, onClose }: { open: boolean; onClose: () => void }) {
-  const sections = useDmBuilderStore((s) => s.sections);
+export default function AiImproveModal({ open, onClose, onlySectionId }: {
+  open: boolean;
+  onClose: () => void;
+  /** ★ 2026-10-10 결과 화면 블록 시트 — 누른 블록 하나만 보내고 그 블록만 다듬는다(Harold 결정 H4 · 미지정 = 지금 장 전체) */
+  onlySectionId?: string | null;
+}) {
+  const pageSections = useDmBuilderStore((s) => s.sections);
+  const flatSections = useDmBuilderStore(selectAllSectionsFlat);
+  const sections = onlySectionId ? flatSections.filter((x) => x.id === onlySectionId) : pageSections;
   const brandKit = useDmBuilderStore((s) => s.brandKit);
   const updateSectionProps = useDmBuilderStore((s) => s.updateSectionProps);
   const setToast = useDmBuilderStore((s) => s.setToast);

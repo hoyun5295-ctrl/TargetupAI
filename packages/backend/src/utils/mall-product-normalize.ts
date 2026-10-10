@@ -29,6 +29,16 @@ export function extractMallProductNo(url: any): string | null {
   return null;
 }
 
+/**
+ * ★ 2026-10-10 한 줄 DM 강화 — 정규화 상품의 **재조회 상품번호**(사람이 고른 후보를 서버가 다시 읽을 때의 키).
+ * 카페24 `code` 는 product_code(P0000BKA 형식)라 재조회 키가 아니다 → 상품 링크의 product_no · 우커머스 = id(숫자) · 그 밖 = null(재조회 길 없음).
+ */
+export function mallProductNoFrom(p: Pick<MallProduct, 'provider' | 'code' | 'productUrl'>): string | null {
+  if (p.provider === 'cafe24') return extractMallProductNo(p.productUrl);
+  if (String(p.provider || '').startsWith('woocommerce:')) return /^\d+$/.test(String(p.code || '')) ? String(p.code) : null;
+  return null;
+}
+
 export interface MallProduct {
   provider: string;
   code: string;          // 몰 상품 코드/번호 (식별)

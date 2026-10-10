@@ -341,6 +341,13 @@ export function kstTodayStr(): string {
   return new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' }).format(new Date());
 }
 
+/** ★ 2026-10-10 「17:42 기준」 — 한국 시각 24시간 시:분(seconds = 시:분:초). 대시보드 기준 시각 표기용. */
+export function formatKstClock(date: Date, seconds = false): string {
+  return date.toLocaleTimeString('ko-KR', {
+    timeZone: 'Asia/Seoul', hour12: false, hour: '2-digit', minute: '2-digit', ...(seconds ? { second: '2-digit' as const } : {}),
+  });
+}
+
 /**
  * ★ D137: 파일명용 압축 타임스탬프 YYYYMMDDHHmmss (14자)
  * 이전 inline 정규식 패턴(toISOString에서 대시·콜론·T 문자 제거)이 Tailwind JIT에

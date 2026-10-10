@@ -26,11 +26,15 @@ interface Props {
   description?: string;     // 작업 맥락 1줄 (예: 빠른시작 시나리오 설명) — 있으면 차감 안내 위에 표시
   // ★ 2026-07-07: 확인과 함께 받을 부가 입력 슬롯(마케팅 캘린더 담당자 연락처 등) — 미지정 = 기존 호출부 전부 무영향.
   extraContent?: ReactNode;
+  /** ★ 2026-10-10 머리 제목(미지정 = '크레딧 차감 확인') — 묻는 칸이 있는 생성 전 확인에서 '만들기 전에 확인해 주세요' */
+  title?: string;
+  /** ★ 2026-10-10 내용만 스크롤 · 버튼 줄 고정(휴대폰 낮은 높이에서 [진행]이 화면 밖으로 밀리지 않게 · 미지정 = 지금 그대로) */
+  scrollBody?: boolean;
   onConfirm: () => void;
   onCancel: () => void;
 }
 
-export default function CreditConfirmModal({ open, source, quantity, costOverride, description, extraContent, onConfirm, onCancel }: Props) {
+export default function CreditConfirmModal({ open, source, quantity, costOverride, description, extraContent, title, scrollBody, onConfirm, onCancel }: Props) {
   // ★ 2026-08-22 인터럽트 표시 — 도움말 런처가 크레딧 확인창을 덮지 않게 숨는다(조기 return 위)
   useBodyFlag('data-interrupt-open', open);
   const unitCost = CONFIRM_CREDIT_COSTS[source] ?? 0;
@@ -80,7 +84,7 @@ export default function CreditConfirmModal({ open, source, quantity, costOverrid
       className="fixed inset-0 z-[2000] flex items-center justify-center bg-black/60 backdrop-blur-sm px-4"
     >
       <div
-        className="w-full max-w-sm bg-white border border-slate-200 rounded-2xl shadow-2xl p-6"
+        className={scrollBody ? 'w-full max-w-sm bg-white border border-slate-200 rounded-2xl shadow-2xl p-6 max-h-[calc(100dvh-2rem)] flex flex-col' : 'w-full max-w-sm bg-white border border-slate-200 rounded-2xl shadow-2xl p-6'}
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center gap-3 mb-4">
@@ -88,7 +92,7 @@ export default function CreditConfirmModal({ open, source, quantity, costOverrid
             <Sparkles className="w-5 h-5 text-white" />
           </div>
           <div className="min-w-0">
-            <div className="text-sm font-semibold text-slate-900">크레딧 차감 확인</div>
+            <div className="text-sm font-semibold text-slate-900">{title || '크레딧 차감 확인'}</div>
             <div className="text-[11px] text-slate-400 truncate">{label}</div>
           </div>
           <button
@@ -100,12 +104,25 @@ export default function CreditConfirmModal({ open, source, quantity, costOverrid
           </button>
         </div>
 
-        {description && (
-          <div className="text-[12px] text-slate-600 leading-relaxed mb-3 rounded-lg bg-white border border-slate-200 px-3 py-2 break-words">
-            {description}
+        {scrollBody ? (
+          <div className="min-h-0 overflow-y-auto -mx-1 px-1 mb-3">
+            {description && (
+              <div className="text-[12px] text-slate-600 leading-relaxed mb-3 rounded-lg bg-white border border-slate-200 px-3 py-2 break-words">
+                {description}
+              </div>
+            )}
+            {extraContent}
           </div>
+        ) : (
+          <>
+            {description && (
+              <div className="text-[12px] text-slate-600 leading-relaxed mb-3 rounded-lg bg-white border border-slate-200 px-3 py-2 break-words">
+                {description}
+              </div>
+            )}
+            {extraContent && <div className="mb-3">{extraContent}</div>}
+          </>
         )}
-        {extraContent && <div className="mb-3">{extraContent}</div>}
         <div className="text-[13px] text-slate-700 leading-relaxed mb-4">
           <span className="font-semibold text-slate-900">{label}</span>
           {showUnitBreakdown ? ` ${qty}건` : ''} 사용으로{' '}

@@ -23,6 +23,7 @@ import type { EmailCampaign } from '../email/email-campaign-types';
 import { hasUnsupportedSmsChars, SMS_CHARSET_BLOCK_MESSAGE } from '../../utils/smsSafeChars';
 import { CONFIRM_CREDIT_COSTS } from '../../constants/credit';
 import { defaultDmSmsText, isNightAdHour } from '../../utils/make-flow';
+import '../../styles/make.css';   // ★ 2026-10-10 mk-max-h-94(휴대폰 보이는 높이)
 import { MK_BTN_OUTLINE, MK_BTN_PRIMARY, MK_MODAL, MK_MODAL_BACKDROP } from '../../utils/make-ui';
 
 export interface SendDm { id: string; title: string; brand?: string | null; heroSub?: string | null }
@@ -70,7 +71,7 @@ export default function MakeSendModal({
 
   return (
     <div className={MK_MODAL_BACKDROP} onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}>
-      <div className={`${MK_MODAL} w-full max-w-[560px] max-h-[94vh] overflow-y-auto mk-scroll p-5 md:p-6`} role="dialog" aria-label="보내기">
+      <div className={`${MK_MODAL} w-full max-w-[560px] mk-max-h-94 overflow-y-auto mk-scroll p-5 md:p-6`} role="dialog" aria-label="보내기">
         <div className="flex items-center justify-between mb-4">
           <h2 className="text-[18px] font-bold text-slate-900">보내기</h2>
           <button type="button" onClick={onClose} className="p-1.5 rounded-lg text-slate-500 hover:text-slate-900 hover:bg-slate-100" aria-label="닫기"><X className="w-5 h-5" /></button>

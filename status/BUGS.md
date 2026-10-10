@@ -55,6 +55,35 @@
 
 ## 2) 활성 버그
 
+### 🔵 B-1010-6 정의 없는 fadeIn·zoomIn 을 쓰는 창 15곳 = 들어오기 움직임이 원래부터 무효 (🔵 · 기존 · 1010 대시보드 모션 회의에서 확인 · 미착수)
+- 전역 keyframes 정의가 없고, 남의 인라인 `<style>` 이 붙어 있을 때만 움직인다. LoginPage(7) · PricingPage · CustomModal · TemplateRejectModal · IdentityVerifyModal · PlanFeatureModal · SenderAuthModal · AiMessageSuggestModal · StatsTab-company · manage/UsersTab · StatsTab · ScheduledTab · CallbacksTab. 처방 후보 = 공용 토큰 `animate-backdrop-in`·`animate-dialog-in` + `motion-reduce`(대시보드 모션 I 와 같은 방식). 같은 부류: 임의 값 `ease-[...]`·`duration-[...]` 는 애니메이션 플러그인(tailwind.config.js `ease`·`duration` 재등록)과 이름이 겹쳐 CSS 가 생성되지 않는다(빌드 경고 ambiguous) · 현재 `ResultsModal.tsx` 403 · `utils/console-ui.ts` 66 의 `ease-[cubic-bezier(.22,1,.36,1)]`.
+
+### 🔵 B-1010-7 직접발송 완료 토스트 「발송 완료: 성공 N건」 = 적재 끝을 성공으로 말함 (🔵 · 기존 문구 · 1010 확인 · 미착수)
+- `Dashboard.tsx` 직접발송 3초 폴링이 단계 `sent`(적재 끝 · 0건이면 status=failed · 취소면 cancelled)에서 「성공」이라 띄운다. 같은 순간 띠는 「발송 접수를 마쳤어요」(status 로 가름). 문구 · 가름 정정은 별건.
+
+### 🔵 B-1010-8 대시보드 setToast 변환이 표시 시간을 버림 · ToastBox 타이머가 새 토스트마다 다시 시작 (🔵 · 기존 · 1010 확인 · 미착수)
+- `Dashboard.tsx` 의 setToast shim 이 duration 을 넘기지 않아 5~6초 의도가 3초로 끝난다. `ToastProvider.tsx` onClose 가 렌더마다 새 함수라 토스트가 하나 더 붙을 때 기존 토스트 타이머가 처음부터 다시 돈다.
+
+### 🔵 B-1010-9 발송 성공 창: 「대상 N명」 출처 · 「즉시 발송 완료」 문구 · 나머지 이모지 (🔵 · 기존 · 1010 회의 지적 · 출처 미검증 · 미착수)
+- `Dashboard.tsx` 2018행대 `setSuccessTargetCount(aiResult?.target?.count)` — 발송 응답의 실제 건수(`sendResult.data`)가 아니다(회의 지적 · 값 차이는 미검증). `/:id/send` 는 적재 끝이라 「완료」 표현 검토. 행 이모지(💬📱👥🚫⏰📅)는 그대로 둠(모션 A 는 🎉 자리만 체크로).
+
+### 🔵 B-1010-10 재업로드 뒤 DB 현황 숫자가 최대 10분 묵음 (🔵 · 기존 · 1010 확인 · 미착수)
+- `dashboard-cards` 캐시(신선 60초 · 묵은 값 600초 · `companies.ts` swrCache)가 업로드로 무효화되지 않는다. 이제 「HH:MM 기준」이 계산 시각을 정직하게 보이지만 값 자체는 늦다. 처방 후보 = 업로드 완료 길목에서 캐시 키 삭제(키에 범위 · 카드 목록 · 몰 동의 꼬리가 붙어 패턴 삭제 필요).
+
+### 🔵 B-1010-11 업로드 창 문구 「창을 닫으셔도 처리는 계속」 ↔ 진행 중 닫기 버튼 없음 · 같은 탭 재로그인 때 대시보드 들어오기 없음 (🔵 · 기존 · 1010 확인 · 미착수)
+- `UploadProgressModal.tsx` 닫기는 끝(done · failed)에서만 보인다. 대시보드 들어오기 1회 표식(`dashboardIntroDone`)은 로그아웃에서 되돌리지 않는다(새로고침하면 다시 함).
+
+### 🔵 B-1010-1 이메일 한 줄: AI가 쓴 상품 가격이 원문 대조 없이 진짜 몰 링크와 함께 나갈 수 있음 (🔵 · 기존 경로 · 1010 한 줄 DM 강화 회의론자 최종 검증 · 미착수)
+- 이메일 한 줄은 요청 글만 보내 원문(eventText)이 비어 상품 가격 원문 대조(`email-ai.ts` `if (input.eventText)`)가 돌지 않고, 혜택 가드도 가격 칸은 건너뛴다. 그 뒤 이름 자동 첨부(`mall-product-match.ts` 83-86)는 빈 칸만 채워 AI 가격이 남은 채 진짜 사진 · 링크가 붙는다. 1010 변경으로 **후보를 보여 준 요청(products 칸)** 은 첨부를 하지 않고 확정 카드만 싣지만, 후보를 못 보여 준 요청(검색 실패 · 미연동)은 지금 그대로다. 처방 후보 = 한 줄 이메일도 요청 글로 상품 가격 원문 대조 · 또는 첨부 때 몰 값 세트로 덮고 `discount_rate` 지움. 설계서 = docs/2026-10-10-oneline-dm-email-design.md §7.
+### 🔵 B-1010-2 이름 매칭 몰 첨부가 담당자 몰 범위를 보지 않음 (🔵 · 기존 · 1010 확인 · 미착수)
+- `/search` 는 우커머스 담당자 범위(`canTouchIntegration`)를 보는데 `matchMallProductByName` · `GET /mall-products/match` · 생성 뒤 자동 첨부는 회사 전체 우커머스 몰을 돈다(`mall-product-match.ts` 27). 1010 확정 카드 경로(`line-mall-cards.ts`)는 범위를 본다.
+### 🔵 B-1010-3 스위치 꺼진 회사의 한 줄 생성은 멱등이 없음 (🔵 · 기존 · 1010 확인 · 미착수)
+- 한 줄 DM · 이메일 생성 멱등키는 `ONE_LINE_FACTS_COMPANY_IDS` 켠 회사만(`dm.ts` · `email.ts` attemptToken). 꺼진 회사는 더블클릭 · 재시도 때 이중 차감될 수 있다(시그니처 §2 기록과 같은 구멍).
+### 🔵 B-1010-4 원스텝 인터뷰에서 고른 몰 상품이 생성에 들어가지 않음 (🔵 · 기존 · 1010 확인 · 미착수)
+- 인터뷰 상품 타입에 상품번호가 없고(`content-interview.ts` 35-40) 결정값 `mallProducts` 소비처가 0, 생성 호출에 상품 인자가 없다. 상품 수만 캐러셀 유무를 정한다. 원스텝 정리 때 1010 확정 카드 계약(`line-mall-cards.ts`)으로 닫는다.
+### 🔵 B-1010-5 카페24 토큰 동시 재발급 잠금 없음 · 카페24 상품 요청에 시간 제한 없음 (🔵 · 기존 · 영향 미검증 · 1010 확인 · 미착수)
+- `ensureFreshCafe24Token`(`cafe24-client.ts` 347-373)은 만료 5분 전 구간에서 요청마다 같은 refresh token 으로 재발급한다(단일 실행 잠금 없음). 카페24 fetch 에는 signal 이 없다(413-423). 1010 몰 후보 검색은 화면이 몰 · 낱말을 순서대로 불러 동시 재발급을 피한다.
+
 ### 🔵 B-1009-4 싱크 고객사 · 같은 날 가입하고 산 고객이 환영 문자와 첫 구매 문자를 둘 다 받음 (🔵 · 기존 동작 · 1009 고객 관계 지도 회의에서 코드로 확인 · 미착수)
 - 고객과 구매가 같은 묶음으로 오고 구매일(어제)이 가입 여정 진입 시각(오늘)보다 앞서면, 실행기 구매 판정(진입 뒤 구매 · `journey-executor` `hasPurchasedSince`)이 잡지 못해 가입 여정이 끝까지 간다. 첫 구매 여정도 같은 구매로 시작한다. 지도 안내문은 1009 에 구매 문별로 사실대로 바꿨다(`journey-lifecycle-map` `journeyNotices`). 처방 후보 = 가입 진입 시 같은 묶음 구매를 목표로 보는 규칙(엔진 동작 변경 · Harold 착수 판단).
 

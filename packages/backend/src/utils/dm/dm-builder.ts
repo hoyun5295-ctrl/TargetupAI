@@ -145,6 +145,15 @@ export function extractPagesFromDm(dm: any): DmPageGroup[] {
   return [];
 }
 
+/**
+ * ★ 2026-10-10 한 줄 DM 강화 — 생성기의 장 묶음(Section[][]) → 저장 모양 `{ id, sections }[]`.
+ * 편집기 · 뷰어 · 검수는 `pages[0].sections` 가 있어야 장을 읽는다(위 extractPagesFromDm · 화면 normalizePagesFromDm).
+ * 장마다 순서(order)를 0부터 다시 매긴다(화면이 저장할 때와 같은 모양).
+ */
+export function pagesFromSectionGroups(groups: readonly (readonly any[])[], newId: () => string = () => crypto.randomUUID()): DmPageGroup[] {
+  return groups.map((g) => ({ id: newId(), sections: g.map((s, i) => ({ ...s, order: i })) }));
+}
+
 // ────────────────── CRUD ──────────────────
 
 export async function createDm(companyId: string, userId: string, data: DmPageInput) {

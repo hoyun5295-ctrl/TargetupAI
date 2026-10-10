@@ -137,6 +137,7 @@ describe('무과금 근거 — AI · DB import 0', () => {
   it('import 목록', () => {
     const src = readFileSync(join(__dirname, 'one-line-facts.ts'), 'utf8');
     const imports = Array.from(src.matchAll(/^import .* from '([^']+)';$/gm)).map((m) => m[1]);
-    expect(imports.sort()).toEqual(['./content-interview', './sns-constants', 'crypto']);
+    // ★ 2026-10-10 './woocommerce-core' = 몰 식별자 정규화(순수 · DB · AI 0) — 확정 상품 provider 검증
+    expect(imports.sort()).toEqual(['./content-interview', './sns-constants', './woocommerce-core', 'crypto']);
   });
 });

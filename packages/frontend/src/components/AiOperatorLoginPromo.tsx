@@ -133,7 +133,7 @@ export default function AiOperatorLoginPromo({ blocked = false }: { /** 다른 �
 
   return (
     <div
-      className="fixed inset-0 z-[70] flex items-end sm:items-center justify-center sm:p-4 bg-slate-950/60 backdrop-blur-[6px] animate-[fadeIn_0.2s_ease-out]"
+      className="fixed inset-0 z-[70] flex items-end sm:items-center justify-center sm:p-4 bg-slate-950/60 backdrop-blur-[6px] animate-backdrop-in motion-reduce:animate-none"
       onMouseDown={(e) => { if (e.target === e.currentTarget) close(); }}
     >
       <FeatureWatermark on={intros?.watermark === true} />
@@ -142,7 +142,7 @@ export default function AiOperatorLoginPromo({ blocked = false }: { /** 다른 �
         role="dialog"
         aria-modal="true"
         aria-labelledby="ai-op-login-promo-title"
-        className="w-full sm:max-w-[760px] max-h-[92vh] overflow-y-auto overscroll-contain bg-white text-slate-900 rounded-t-2xl sm:rounded-[22px] shadow-[0_40px_90px_-30px_rgba(0,0,0,0.6)] sm:grid sm:grid-cols-[280px_minmax(0,1fr)] animate-[zoomIn_0.25s_ease-out]"
+        className="w-full sm:max-w-[760px] max-h-[92vh] overflow-y-auto overscroll-contain bg-white text-slate-900 rounded-t-2xl sm:rounded-[22px] shadow-[0_40px_90px_-30px_rgba(0,0,0,0.6)] sm:grid sm:grid-cols-[280px_minmax(0,1fr)] animate-dialog-in motion-reduce:animate-none"
       >
         <div className="flex sm:flex-col items-center justify-center gap-3 bg-slate-50 p-4 sm:p-5">
           <video

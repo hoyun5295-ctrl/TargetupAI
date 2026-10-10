@@ -76,6 +76,11 @@ export interface BuildDraftState {
   catalogTitle: string;
   /** ★ 2026-10-06 주소 읽기 결과와 고른 상태(없으면 null) — 「넣은 재료 다시 보기」에서 읽은 행사·사진·상품을 그대로 보이고 고칠 수 있게 */
   pageRead?: BuildPageRead | null;
+  /**
+   * ★ 2026-10-10 이 재료로 만든 결과(초안 id). 결과 화면은 이 값이 그 결과와 같을 때만 재료를 쓴다(다른 채널 · 다시 만들기 · 안내 · 최근 주소).
+   * 재료를 고치면(자동 저장) 사라진다 = 그 재료는 더 이상 그 결과의 재료가 아니다(어제 남은 재료로 차감하지 않는 안전 실패).
+   */
+  resultId?: string;
   savedAt: number;
 }
 
@@ -242,6 +247,7 @@ export function loadBuildDraft(): BuildDraftState | null {
       catalogImages: Array.isArray(d.catalogImages) ? d.catalogImages.filter((im) => im && typeof im.url === 'string').map((im) => ({ url: im.url, width: im.width ?? null, height: im.height ?? null })) : [],
       catalogTitle: typeof d.catalogTitle === 'string' ? d.catalogTitle : '',
       pageRead: pageReadOf(d.pageRead),
+      ...(typeof d.resultId === 'string' && d.resultId ? { resultId: d.resultId } : {}),
       savedAt: d.savedAt,
     };
   } catch {
@@ -259,6 +265,23 @@ export function clearBuildDraft(): void {
   try { localStorage.removeItem(AI_BUILD_DRAFT_KEY); } catch { /* 없음 */ }
 }
 
+/** ★ 2026-10-10 지금 저장된 재료 초안에 「이 재료로 만든 결과」를 찍는다(생성 성공 직후 · 다른 칸은 그대로). */
+export function bindBuildDraftResult(resultId: string): void {
+  try {
+    const raw = localStorage.getItem(AI_BUILD_DRAFT_KEY);
+    if (!raw || !resultId) return;
+    const d = JSON.parse(raw);
+    if (!d || typeof d !== 'object') return;
+    localStorage.setItem(AI_BUILD_DRAFT_KEY, JSON.stringify({ ...d, resultId }));
+  } catch { /* 결박 실패 = 결과 화면이 재료를 쓰지 않는다(안전 실패) */ }
+}
+
+/** ★ 2026-10-10 결과 화면이 재료 초안을 써도 되는가 — 이 결과(또는 짝)로 결박된 초안만. 결박 없는 옛 초안 = 거짓. */
+export function draftBelongsTo(draft: Pick<BuildDraftState, 'resultId'> | null, ...ids: Array<string | null | undefined>): boolean {
+  if (!draft?.resultId) return false;
+  return ids.some((id) => !!id && id === draft.resultId);
+}
+
 // ===== 편집기로 넘기는 결과(결과 바) — 생성 응답의 materials 계측 그대로 · 세션 한정 =====
 
 export interface BuildResultHandoff {
@@ -270,6 +293,8 @@ export interface BuildResultHandoff {
   heroFallback: boolean;
   benefitStripped: number;
   createdAt: number;
+  /** ★ 2026-10-10 한 줄로 만든 결과(재료 초안이 없다) — 결과 화면 [같은 한 줄로 다시 만들기]의 입력(같은 한 줄 + 답 + 고른 상품) */
+  origin?: { kind: 'line'; line: string; facts?: { benefit: string | null }; products?: Array<{ provider: string; no: string }>; reads?: string[]; readLicensed?: boolean };
 }
 
 export function saveBuildResult(r: BuildResultHandoff): void {

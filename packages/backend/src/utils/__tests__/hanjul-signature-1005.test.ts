@@ -130,9 +130,10 @@ describe('4. 라우트 게이트', () => {
     expect(d).toContain('...(idemKey ? { idempotencyKey: idemKey } : {})');
     expect(d).toContain('if (lineLock) releaseInflight(lineLock);');
     // 스위치 밖인데 답이 오면 조용히 버리지 않는다
-    expect(d).toContain("if (lineFacts !== undefined && !lineOn) {");
+    // ★ 2026-10-10 고른 몰 상품도 같은 규칙(스위치 밖 = 400)
+    expect(d).toContain("if ((lineFacts !== undefined || lineProducts !== undefined || lineReads !== undefined) && !lineOn) {");
     // 이미 낸 키는 생성 전에 막는다(생성 → 차감 순서보다 앞)
-    expect(d.indexOf('await isChargedByKey(companyId, idemKey)')).toBeLessThan(d.indexOf('const r = await oneShotGenerate({ prompt: effectivePrompt'));
+    expect(d.indexOf('await isChargedByKey(companyId, idemKey)')).toBeLessThan(d.indexOf('prompt: effectivePrompt, scenario, brandName, companyId, eventText,'));
   });
   it('이메일: 원문 자리는 옮기지 않고 멱등만 · 인앱: 원문 없을 때만 한 줄을 원문으로', () => {
     const e = SRC('routes', 'email.ts');

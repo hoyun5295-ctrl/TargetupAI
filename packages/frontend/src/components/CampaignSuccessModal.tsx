@@ -43,11 +43,13 @@ export default function CampaignSuccessModal({ show, onClose, onShowCalendar, se
   };
 
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 animate-fadeIn">
-      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm text-center overflow-hidden animate-zoomIn">
+    // ★ 2026-10-10 대시보드 모션 A — 옛 animate-fadeIn·animate-zoomIn 은 어디에도 정의가 없어 창이 툭 떴다 → 공용 토큰.
+    //   체크 원만 한 번 튀어나온다(축하 연출 없음). 움직임 줄이기 = 즉시 정지 화면
+    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 animate-backdrop-in motion-reduce:animate-none">
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm text-center overflow-hidden animate-dialog-in motion-reduce:animate-none">
         <div className="px-8 pt-8 pb-2">
-          <div className="w-16 h-16 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-4">
-            <span className="text-3xl">🎉</span>
+          <div className="w-16 h-16 bg-emerald-100 rounded-full flex items-center justify-center mx-auto mb-4 animate-in zoom-in-50 fade-in duration-300 delay-150 fill-mode-backwards motion-reduce:animate-none">
+            <Check className="w-8 h-8 text-emerald-600" strokeWidth={3} />
           </div>
           <h3 className="text-xl font-bold text-gray-800 mb-1">캠페인이 확정되었습니다!</h3>
           <p className="text-sm text-gray-500 mb-5">발송이 정상적으로 등록되었습니다</p>
@@ -91,7 +93,7 @@ export default function CampaignSuccessModal({ show, onClose, onShowCalendar, se
                 이 설정을 저장하기
               </button>
             ) : (
-              <div className="border border-green-200 rounded-xl p-3 bg-green-50/30 space-y-2.5 animate-in fade-in duration-150">
+              <div className="border border-green-200 rounded-xl p-3 bg-green-50/30 space-y-2.5 animate-in fade-in duration-150 motion-reduce:animate-none">
                 <div className="flex gap-2">
                   <div className="flex gap-1 flex-wrap">
                     {EMOJI_OPTIONS.map(e => (

@@ -22,6 +22,8 @@ interface Props {
   onFirstSend?: () => void;
   /** ★2026-08-16 Harold 지시 — 지급 자격 회사에만 7일 보상 문구(거짓 약속 차단) */
   showTrialReward?: boolean;
+  /** ★2026-10-10 초대 점을 두 번 퍼뜨릴지 — 대시보드를 새로 열 때만(다른 화면 갔다 오면 정지 점) */
+  attention?: boolean;
 }
 
 function dDay(trialExpiresAt?: string | null): number | null {
@@ -31,7 +33,7 @@ function dDay(trialExpiresAt?: string | null): number | null {
   return Math.ceil(diff / (24 * 60 * 60 * 1000));
 }
 
-export default function DiagnosisHeroCard({ variant, companyName, trialExpiresAt, onStart, onFirstSend, showTrialReward = false }: Props) {
+export default function DiagnosisHeroCard({ variant, companyName, trialExpiresAt, onStart, onFirstSend, showTrialReward = false, attention = true }: Props) {
   if (variant === 'trial') {
     const d = dDay(trialExpiresAt);
     if (d == null) return null;
@@ -75,7 +77,8 @@ export default function DiagnosisHeroCard({ variant, companyName, trialExpiresAt
         <div className="flex items-center gap-3">
           <span className="relative grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-white/20">
             <Stethoscope className="h-5 w-5 text-white" aria-hidden />
-            <span className="absolute -right-1 -top-1 h-2.5 w-2.5 rounded-full bg-sky-200 motion-safe:animate-ping" aria-hidden />
+            {/* ★ 2026-10-10 대시보드 모션 I — 초대 점은 두 번 퍼지고 멈춘다(무한 ping 은 「지금 켜져 있다」 점에만) */}
+            <span className={`absolute -right-1 -top-1 h-2.5 w-2.5 rounded-full bg-sky-200 ${attention ? 'motion-safe:animate-ping-twice' : ''}`} aria-hidden />
             <span className="absolute -right-1 -top-1 h-2.5 w-2.5 rounded-full bg-sky-200" aria-hidden />
           </span>
           <span>

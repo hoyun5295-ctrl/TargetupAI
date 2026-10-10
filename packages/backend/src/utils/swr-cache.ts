@@ -83,6 +83,15 @@ function genGuardedSet(
 }
 
 export async function swrCache<T>(opts: SwrCacheOptions<T>): Promise<T> {
+  return (await swrCacheWithAt(opts)).value;
+}
+
+/**
+ * ★ 2026-10-10 swrCache 와 같은 동작 + 돌려준 값을 계산한 시각(epoch ms).
+ *   화면이 「HH:MM 기준」을 말할 때 브라우저 시각이 아니라 이 시각을 쓴다(묵은 값 = 최대 hard TTL 전 계산).
+ *   at = null 은 구형식 엔벨로프(시각 모름) — 화면은 기준 시각을 숨긴다.
+ */
+export async function swrCacheWithAt<T>(opts: SwrCacheOptions<T>): Promise<{ value: T; at: number | null }> {
   const { key, softTtlSec, hardTtlSec, compute, generationKey } = opts;
 
   let raw: string | null = null;
@@ -93,18 +102,19 @@ export async function swrCache<T>(opts: SwrCacheOptions<T>): Promise<T> {
   }
 
   const entry = classifySwrEntry<T>(raw, softTtlSec, Date.now());
-  if (entry.state === 'fresh' || entry.state === 'legacy') return entry.value as T;
+  if (entry.state === 'fresh' || entry.state === 'legacy') return { value: entry.value as T, at: entry.at ?? null };
   if (entry.state === 'stale') {
     scheduleRefresh(key, hardTtlSec, compute, generationKey);
-    return entry.value as T;
+    return { value: entry.value as T, at: entry.at ?? null };
   }
 
   // miss — 동기 계산. 세대 가드: 계산 도중 무효화(INCR)가 끼면 저장 생략(변형 전 결과 부활 차단).
   // ★ Codex 5R: 세대 확인+저장 = Lua 원자 실행 — 확인과 setex 사이에 무효화가 끼는 잔여 창 제거.
   const genBefore = await readGeneration(generationKey);
   const value = await compute();
+  const at = Date.now();
   try {
-    const envelope = buildSwrEnvelope(value, Date.now());
+    const envelope = buildSwrEnvelope(value, at);
     if (generationKey) {
       await genGuardedSet(key, generationKey, genBefore, hardTtlSec, envelope, false);
     } else {
@@ -113,7 +123,7 @@ export async function swrCache<T>(opts: SwrCacheOptions<T>): Promise<T> {
   } catch {
     /* 캐시 저장 실패 무시 */
   }
-  return value;
+  return { value, at };
 }
 
 /**

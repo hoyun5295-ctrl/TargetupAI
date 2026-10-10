@@ -20,6 +20,9 @@ import { dailyDbAnalysisCredits } from '../constants/credit';
 import CalendarModal from '../components/CalendarModal';
 import DeltaBadge from '../components/dashboard/DeltaBadge';
 import CardDetailModal from '../components/dashboard/CardDetailModal';
+import CountUp from '../components/dashboard/CountUp'; // ★ 2026-10-10 대시보드 B안 — 숫자 한 번 채우기
+import LiveAutomationStrip, { type LiveTarget } from '../components/dashboard/LiveAutomationStrip'; // ★ 2026-10-10 지금 돌고 있는 자동화 띠
+import { ENTER_ONCE, dashboardIntroPending, markDashboardIntroDone, fetchJson, serialRunner } from '../utils/dashboard-live';
 import CampaignSuccessModal from '../components/CampaignSuccessModal';
 import { LmsConvertModal, SmsConvertModal } from '../components/ChannelConvertModals';
 import CustomerDBModal from '../components/CustomerDBModal';
@@ -51,7 +54,7 @@ import SyncActiveBlockModal from '../components/SyncActiveBlockModal';
 import TodayStatsModal from '../components/TodayStatsModal';
 import UploadProgressModal from '../components/UploadProgressModal';
 import { useAuthStore } from '../stores/authStore';
-import { formatDate, formatPreviewValue, formatByType, calculateSmsBytes, truncateToSmsBytes, DIRECT_VAR_MAP, DIRECT_VAR_TO_FIELD, DIRECT_FIELD_LABELS, DIRECT_MAPPING_FIELDS, replaceDirectVars, formatPhoneNumber, mmsServerPathToUrl, resolveRecipientCallback, buildAdMessageFront, validateMmsBeforeSend, getMaxByteMessage, cellToString } from '../utils/formatDate';
+import { formatDate, formatPreviewValue, formatByType, calculateSmsBytes, truncateToSmsBytes, DIRECT_VAR_MAP, DIRECT_VAR_TO_FIELD, DIRECT_FIELD_LABELS, DIRECT_MAPPING_FIELDS, replaceDirectVars, formatPhoneNumber, mmsServerPathToUrl, resolveRecipientCallback, buildAdMessageFront, validateMmsBeforeSend, getMaxByteMessage, cellToString, formatKstClock } from '../utils/formatDate';
 import { insertAtCursorOrAppend } from '../utils/textInsert';
 import { formatAgentIdLabel, formatAgentBalance } from '../utils/agentLabel'; // ★ 2026-07-27 발송ID 표시 규칙 단일 소스
 // ★ 2026-07-02 특수문자 세트 컨트롤타워 (MessageEditorModal과 공유 — 목록 변경은 utils/smsSafeChars.ts 1곳)
@@ -171,7 +174,11 @@ interface DashboardCardsResponse {
   cardCount: number;
   hasCustomerData?: boolean;
   cards: DashboardCardData[];
+  /** ★ 2026-10-10 서버 계산 시각(epoch ms) — 캐시 값이면 그 값을 계산한 때 */
+  asOf?: number | null;
 }
+
+const fmtInt = (v: number) => v.toLocaleString();
 
 export default function Dashboard() {
   const navigate = useNavigate();
@@ -357,6 +364,19 @@ export default function Dashboard() {
   // D41 동적 카드 + D77 페이징 뷰 (6개씩)
   const [dashboardCards, setDashboardCards] = useState<DashboardCardsResponse | null>(null);
   const [dbCardPage, setDbCardPage] = useState(0); // 현재 페이지 (0-indexed)
+  // ★ 2026-10-10 대시보드 B안 — DB 현황 기준 시각(늘 깜빡이던 REAL-TIME 대신) · 쪽을 넘긴 뒤에는 들어오기 · 숫자 채우기를 다시 하지 않는다
+  const [dbAsOf, setDbAsOf] = useState<Date | null>(null);
+  const [dbPaged, setDbPaged] = useState(false);
+  const [dbReveal, setDbReveal] = useState(false); // ★ 2026-10-10 첫 업로드 공개 1회
+  // ★ 2026-10-10 들어오기 · 숫자 채우기 = 페이지를 새로 열 때 1회(다른 화면 갔다 오면 없음 · 새로고침이면 다시)
+  const [intro] = useState(dashboardIntroPending);
+  useEffect(() => { markDashboardIntroDone(); }, []);
+  const ENTER = intro ? ENTER_ONCE : '';
+  const goDbPage = (next: (p: number) => number) => { setDbPaged(true); setDbCardPage(next); };
+  // ★ 2026-10-10 켜진 여정 + 켜진 자동 마케팅 수(띠가 서버에서 읽어 알려 준다) — AI Operator 버튼 「N개 작동 중」
+  const [liveRunning, setLiveRunning] = useState(0);
+  // ★ 2026-10-10 대시보드 모션 C — 직접발송 · 타겟발송 접수마다 오른다 → 띠가 바로 다시 읽는다
+  const [liveRefresh, setLiveRefresh] = useState(0);
   // 5개 카드 모달 state
   const [showRecentCampaigns, setShowRecentCampaigns] = useState(false);
   const [showFileUpload, setShowFileUpload] = useState(false);
@@ -370,6 +390,17 @@ export default function Dashboard() {
   const [showInsights, setShowInsights] = useState(false);
   const [showTodayStats, setShowTodayStats] = useState(false);
   const [showScheduled, setShowScheduled] = useState(false);
+  // ★ 2026-10-10 AI Operator 버튼 · 자동화 띠 공용 입구. 예약 대기 = 기존 예약 창.
+  //   ★ 2026-09-15 Harold 지시 그대로 — 요금제와 상관없이 들어가고 기능 사용 가부는 들어간 화면이 서버 판정으로 가른다. 구독 만료·정지만 여기서 막는다.
+  const openLive = (to: LiveTarget) => {
+    if (to === 'scheduled') { setShowScheduled(true); return; }
+    if (to === 'results') { setShowResults(true); return; }
+    if (to === 'pricing') { navigate('/pricing'); return; }
+    if (isSubscriptionLocked) { setShowSubscriptionLock(true); return; }
+    if (to === 'journeys') navigate('/ai-journeys');
+    else if (to === 'auto') navigate('/continuous-operator');
+    else navigate('/ai-operator');
+  };
   // 모달용 데이터
   const [recentCampaigns, setRecentCampaigns] = useState<any[]>([]);
   const [scheduledCampaigns, setScheduledCampaigns] = useState<any[]>([]);
@@ -410,14 +441,40 @@ export default function Dashboard() {
   // 종량제 Phase 5: AI 크레딧 잔여 조회 (상시 노출 카드용 — creditEnabled일 때만 표시)
   const [creditInfo, setCreditInfo] = useState<any>(null);
   const [showCreditHistory, setShowCreditHistory] = useState(false); // 크레딧 사용 이력 모달
+  // ★ 2026-10-10 Codex 1~4R — 잔여를 쓰는 곳이 둘(이 조회 응답 · 아래 차감 이벤트).
+  //   조회는 하나씩만(serialRunner · 도는 동안 들어온 요청은 끝난 뒤 한 번으로 합침) → 서버 읽기 순서 = 반영 순서.
+  //   조회하는 사이 이 창에 차감 이벤트가 끼면 응답이 차감 전 값일 수 있다 → 버리지 않고 그 사이 차감 잔여의 최솟값보다 크게 쓰지 않는다.
+  const creditGen = useRef(0);
+  const creditEvents = useRef<{ gen: number; balance: number }[]>([]);
+  const loadCredit = useRef(serialRunner(async () => {
+    const gen = creditGen.current;
+    const r = await fetchJson('/api/companies/my-credit');
+    const d = r.body;
+    if (!r.ok || !d || d.success === false) return; // 조회 실패 시 카드 숨김(처음) · 직전 값 유지(그 뒤)
+    const during = creditEvents.current.filter((e) => e.gen > gen).map((e) => e.balance);
+    const cap = during.length ? Math.min(...during) : null;
+    setCreditInfo(cap !== null && Number(d.total) > cap ? { ...d, total: cap } : d);
+  })).current;
+  useEffect(() => { void loadCredit(); }, []);
+  // 지금 화면의 잔여(이벤트 판정용 · 렌더마다 갱신)
+  const creditTotalRef = useRef<number | null>(null);
+  creditTotalRef.current = creditInfo ? Number(creditInfo.total) || 0 : null;
+  // ★ 2026-10-10 대시보드 모션 G — AI 작업으로 크레딧이 빠지면(전역 credit:used · 차감 때만 온다) 카드 숫자도 서버 잔여로.
+  //   잔여 = baseAfter + purchasedAfter = my-credit total 과 같은 정의. 응답 순서가 뒤집혀도 늘어나지 않게 작은 값만 받는다.
+  //   이벤트 잔여가 화면보다 크면(월초 리셋 · 다른 탭 충전 뒤) 버리지 않고 원장을 한 번 다시 읽는다.
   useEffect(() => {
-    (async () => {
-      try {
-        const token = localStorage.getItem('token');
-        const res = await fetch('/api/companies/my-credit', { headers: { Authorization: `Bearer ${token}` } });
-        if (res.ok) { const d = await res.json(); if (d && d.success !== false) setCreditInfo(d); }
-      } catch { /* 조회 실패 시 카드 숨김 */ }
-    })();
+    const onCredit = (e: Event) => {
+      const b = (e as CustomEvent).detail?.balance;
+      if (typeof b !== 'number' || !Number.isFinite(b) || b < 0) return;
+      creditGen.current += 1; // 진행 중인 조회 응답은 이 차감 전 값일 수 있다 → 응답을 이 잔여로 눌러 쓴다
+      creditEvents.current = [...creditEvents.current.slice(-19), { gen: creditGen.current, balance: b }];
+      const cur = creditTotalRef.current;
+      if (cur === null) return;
+      if (b > cur) { void loadCredit(); return; }
+      setCreditInfo((c: any) => (c ? { ...c, total: Math.min(Number(c.total) || 0, b) } : c));
+    };
+    window.addEventListener('credit:used', onCredit);
+    return () => window.removeEventListener('credit:used', onCredit);
   }, []);
   // ★ D162-4 (2026-05-15) PDF 0515 알림톡 #1+#3 후속: 알림톡 발송 전용 풀 화면 모달 진입 state.
   //   Harold님 명시 의도 — 직접발송 모달에 알림톡 squeeze 사고 영구 종결. AlimtalkSendModal 별도 풀 화면.
@@ -734,6 +791,7 @@ export default function Dashboard() {
       }
       loadRecentCampaigns();
       loadScheduledCampaigns();
+      setLiveRefresh((n) => n + 1); // ★ 2026-10-10 대시보드 모션 C — 방금 접수한 발송을 띠가 바로 다시 읽는다
       // 진행률 polling (3초) — sent/failed 시 완료 토스트
       const poll = setInterval(async () => {
         try {
@@ -947,6 +1005,7 @@ export default function Dashboard() {
         setMmsUploadedImages([]);  // ★ MMS 이미지 초기화
         loadRecentCampaigns();
         loadScheduledCampaigns();
+        setLiveRefresh((n) => n + 1); // ★ 2026-10-10 대시보드 모션 C — 방금 접수한 발송을 띠가 바로 다시 읽는다
       } else {
         setToast({show: true, type: 'error', message: data.error || '발송 접수에 실패했습니다.'});
         setTimeout(() => setToast({show: false, type: 'error', message: ''}), 3000);
@@ -1239,6 +1298,7 @@ export default function Dashboard() {
           headers: { 'Authorization': `Bearer ${localStorage.getItem('token')}` }
         });
         const pData = await pRes.json();
+        if (pData?.status === 'unknown') return; // ★ 2026-10-10 진행 막대가 0으로 줄었다 다시 차지 않게
         setUploadProgress(pData);
         if (pData.status === 'completed' || pData.status === 'failed') {
           if (uploadProgressIntervalRef.current) clearInterval(uploadProgressIntervalRef.current);
@@ -1387,15 +1447,7 @@ export default function Dashboard() {
         .catch(() => {});
 
       // D41 대시보드 동적 카드 조회
-      try {
-        const cardsRes = await fetch('/api/companies/dashboard-cards', {
-          headers: { Authorization: `Bearer ${token}` },
-        });
-        if (cardsRes.ok) {
-          const cardsData = await cardsRes.json();
-          setDashboardCards(cardsData);
-        }
-      } catch {}
+      await loadDashboardCards();
 
       // 요금제 승인 알림 체크
       const approvalRes = await fetch('/api/companies/plan-request/status', {
@@ -1414,6 +1466,23 @@ export default function Dashboard() {
       setLoading(false);
     }
   };
+  // D41 대시보드 동적 카드 조회 — ★ 2026-10-10 함수로 뺐다(첫 업로드 공개 때 이것만 다시 부른다)
+  //   읽기는 하나씩만(serialRunner · 크레딧과 같은 규칙) — 첫 진입 읽기와 첫 업로드 공개 읽기가 겹쳐도 순서가 뒤집히지 않는다
+  const loadDashboardCards = useRef(serialRunner(async () => {
+    const r = await fetchJson('/api/companies/dashboard-cards');
+    if (!r.ok || !r.body) return;
+    const cardsData = r.body as DashboardCardsResponse;
+    setDashboardCards(cardsData);
+    // ★ 2026-10-10 서버가 이 숫자를 계산한 시각(캐시면 그때). 없으면 기준 시각을 숨긴다
+    setDbAsOf(typeof cardsData?.asOf === 'number' ? new Date(cardsData.asOf) : null);
+  })).current;
+  // ★ 2026-10-10 대시보드 모션 H — 첫 업로드(카드가 블러였던 회사)를 마치고 창을 닫으면 DB 카드가 한 번 들어오며 숫자를 채운다.
+  //   이미 데이터가 있던 회사는 카드 캐시가 업로드로 무효화되지 않아 값이 그대로다 → 움직임 없음.
+  const revealAfterUpload = async () => {
+    if (dashboardCards?.hasCustomerData === false) { setDbPaged(false); setDbReveal(true); }
+    await loadDashboardCards();
+  };
+
   // 최근 캠페인 로드
   const loadRecentCampaigns = async () => {
     try {
@@ -2279,6 +2348,7 @@ const campaignData = {
         {diagnosisHero === 'invite' && (
           <DiagnosisHeroCard
             variant="invite"
+            attention={intro}
             showTrialReward={diagnosisState?.grantable === 'available'}
             onStart={() => setShowDiagnosisWizard(true)}
           />
@@ -2293,6 +2363,11 @@ const campaignData = {
         {/* ★ D225+ Brand Voice 미등록 회사 강력 push 카드 — 진단 카드 노출 중에는 suppress(소견이 흡수) */}
         <BrandVoiceNudgeCard suppress={diagnosisHero === 'invite'} />
 
+        {/* ★ 2026-10-10 대시보드 B안 — 지금 돌고 있는 자동화(AI 기능을 숨긴 계정은 없음) */}
+        {!hideAi && (
+          <LiveAutomationStrip scheduled={scheduledCampaigns} onOpen={openLive} onRunningChange={setLiveRunning} intro={intro} refreshKey={liveRefresh} />
+        )}
+
         {/* ===== 상단: 좌(60%) + 우(40%) 통합 — D186: 모바일 stacked + 데스크탑 좌우 ===== */}
         <div className="flex flex-col lg:flex-row gap-4 mb-4">
           {/* ===== 좌측 60%: 요금제/발송현황 + 동적카드 ===== */}
@@ -2302,7 +2377,8 @@ const campaignData = {
               {/* 요금제 현황 */}
               <div
                 onClick={() => navigate('/pricing')}
-                className="w-full sm:w-[40%] bg-white rounded-2xl p-5 cursor-pointer hover:shadow-md transition-all border border-gray-100 shadow-sm"
+                className={`w-full sm:w-[40%] bg-white rounded-2xl p-5 cursor-pointer hover:shadow-md transition-all border border-gray-100 shadow-sm ${ENTER}`}
+                style={{ animationDelay: '60ms' }}
               >
                 <div className="flex items-center justify-between mb-3">
                   <div className="flex items-center gap-2">
@@ -2317,10 +2393,23 @@ const campaignData = {
                     {planInfo?.prepaid_term?.state === 'blocked' ? planInfo.prepaid_term.plan_name : (planInfo?.plan_name || '로딩...')}
                   </span>
                   {/* ★ 2026-10-04 선불 요금제 이용 기간 — 잠김 / 남은 날(자동 연장이 꺼져 있고 7일 이하면 주황) */}
+                  {/* ★ 2026-10-10 대시보드 모션 I — 발송이 막혔거나(잠김) 곧 막히는(자동 연장 꺼짐 + 3일 이하) 때만 점이 두 번 퍼지고 멈춘다 */}
                   {planInfo?.prepaid_term && (planInfo.prepaid_term.state === 'blocked' ? (
-                    <span className="px-2 py-0.5 bg-rose-100 text-rose-700 text-[11px] font-bold rounded-full whitespace-nowrap">잠김</span>
+                    <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-rose-100 text-rose-700 text-[11px] font-bold rounded-full whitespace-nowrap">
+                      <span className="relative flex h-1.5 w-1.5" aria-hidden>
+                        <span className={`absolute inline-flex h-full w-full rounded-full bg-rose-400 ${intro ? 'motion-safe:animate-ping-twice' : ''}`} />
+                        <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-rose-500" />
+                      </span>
+                      잠김
+                    </span>
                   ) : (
-                    <span className={`px-2 py-0.5 text-[11px] font-bold rounded-full whitespace-nowrap ${!planInfo.prepaid_term.auto_renew && planInfo.prepaid_term.days_left <= 7 ? 'bg-amber-100 text-amber-700' : 'bg-slate-100 text-slate-600'}`}>
+                    <span className={`inline-flex items-center gap-1 px-2 py-0.5 text-[11px] font-bold rounded-full whitespace-nowrap ${!planInfo.prepaid_term.auto_renew && planInfo.prepaid_term.days_left <= 7 ? 'bg-amber-100 text-amber-700' : 'bg-slate-100 text-slate-600'}`}>
+                      {!planInfo.prepaid_term.auto_renew && planInfo.prepaid_term.days_left <= 3 && (
+                        <span className="relative flex h-1.5 w-1.5" aria-hidden>
+                          <span className={`absolute inline-flex h-full w-full rounded-full bg-amber-400 ${intro ? 'motion-safe:animate-ping-twice' : ''}`} />
+                          <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-amber-500" />
+                        </span>
+                      )}
                       {planInfo.prepaid_term.days_left <= 1 ? '오늘까지' : `${planInfo.prepaid_term.days_left}일 남음`}
                     </span>
                   ))}
@@ -2344,7 +2433,7 @@ const campaignData = {
                 {/* AI 크레딧 — 카드 중심(크게). 클릭 시 이력 모달 (카드 navigate와 분리). DB 사용량 바는 v2에서 폐지(상한 없음). */}
                 {creditInfo?.creditEnabled && (creditInfo.planCredits > 0 || creditInfo.purchased > 0) ? (
                   <button
-                    onClick={(e) => { e.stopPropagation(); setShowCreditHistory(true); }}
+                    onClick={(e) => { e.stopPropagation(); setShowCreditHistory(true); void loadCredit(); }}
                     className="mt-3 w-full rounded-xl border border-violet-100 bg-gradient-to-br from-violet-50 to-fuchsia-50/40 p-3.5 text-left transition-all hover:border-violet-200 hover:shadow-sm group"
                   >
                     <div className="flex items-center gap-1.5">
@@ -2355,7 +2444,7 @@ const campaignData = {
                       <span className="ml-auto text-[11px] text-violet-400 group-hover:text-violet-600 transition-colors">사용 이력 →</span>
                     </div>
                     <div className="mt-1.5 flex items-end gap-1">
-                      <span className="text-3xl font-bold tabular-nums text-violet-700">{Number(creditInfo.total || 0).toLocaleString()}</span>
+                      <span className="text-3xl font-bold tabular-nums text-violet-700"><CountUp value={Number(creditInfo.total || 0)} format={fmtInt} animate={intro} animateChanges /></span>
                       <span className="mb-1 text-xs text-slate-400">크레딧</span>
                     </div>
                     {planInfo?.plan_code !== 'FREE' && (
@@ -2380,7 +2469,7 @@ const campaignData = {
               )}
 
               {/* 발송 현황 */}
-              <div className="w-full sm:w-[60%] bg-white rounded-2xl p-5 border border-gray-100 shadow-sm">
+              <div className={`w-full sm:w-[60%] bg-white rounded-2xl p-5 border border-gray-100 shadow-sm ${ENTER}`} style={{ animationDelay: '120ms' }}>
                 <div className="flex items-center justify-between mb-3">
                   <div className="flex items-center gap-2">
                     <div className="w-1 h-4 bg-green-600 rounded-full" />
@@ -2393,19 +2482,20 @@ const campaignData = {
                 {/* 발송 실적 — 전송/성공/실패/성공률 */}
                 <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
                   <div className="text-center p-2.5 bg-gray-50 rounded-lg">
-                    <div className="text-lg font-bold text-gray-800">{(stats?.monthly_total || 0).toLocaleString()}</div>
+                    <div className="text-lg font-bold text-gray-800 tabular-nums"><CountUp value={stats?.monthly_total || 0} format={fmtInt} animate={intro} /></div>
                     <div className="text-[11px] text-gray-400 mt-0.5">전송건수</div>
                   </div>
                   <div className="text-center p-2.5 bg-emerald-50/70 rounded-lg">
-                    <div className="text-lg font-bold text-emerald-600">{(stats?.monthly_sent || 0).toLocaleString()}</div>
+                    <div className="text-lg font-bold text-emerald-600 tabular-nums"><CountUp value={stats?.monthly_sent || 0} format={fmtInt} animate={intro} /></div>
                     <div className="text-[11px] text-gray-400 mt-0.5">성공건수</div>
                   </div>
                   <div className="text-center p-2.5 bg-rose-50/60 rounded-lg">
-                    <div className="text-lg font-bold text-rose-500">{(stats?.monthly_fail || 0).toLocaleString()}</div>
+                    <div className="text-lg font-bold text-rose-500 tabular-nums"><CountUp value={stats?.monthly_fail || 0} format={fmtInt} animate={intro} /></div>
                     <div className="text-[11px] text-gray-400 mt-0.5">실패건수</div>
                   </div>
                   <div className="text-center p-2.5 bg-gray-50 rounded-lg">
-                    <div className="text-lg font-bold text-gray-800">{stats?.success_rate || '0'}<span className="text-xs font-normal text-gray-400">%</span></div>
+                    {/* 서버 값 = 소수 한 자리 글자(없으면 '0') — 끝난 뒤 그 글자 그대로 */}
+                    <div className="text-lg font-bold text-gray-800 tabular-nums"><CountUp value={Number(stats?.success_rate) || 0} decimals={1} animate={intro} format={(v) => (v === (Number(stats?.success_rate) || 0) ? String(stats?.success_rate || '0') : v.toFixed(1))} /><span className="text-xs font-normal text-gray-400">%</span></div>
                     <div className="text-[11px] text-gray-400 mt-0.5">성공률</div>
                   </div>
                 </div>
@@ -2419,14 +2509,14 @@ const campaignData = {
                   ].map((ch) => (
                     <div key={ch.label} className="flex flex-col items-center justify-center p-2 bg-white border border-gray-100 rounded-lg">
                       <div className="text-[10px] font-medium text-gray-400">{ch.label}</div>
-                      <div className="text-sm font-bold text-gray-700 mt-0.5 tabular-nums">{(ch.value || 0).toLocaleString()}</div>
+                      <div className="text-sm font-bold text-gray-700 mt-0.5 tabular-nums"><CountUp value={ch.value || 0} format={fmtInt} animate={intro} /></div>
                     </div>
                   ))}
                 </div>
                 {/* 총 사용금액 */}
                 <div className="mt-2 flex items-center justify-between rounded-lg border border-gray-100 bg-gradient-to-r from-gray-50 to-gray-50/40 px-3.5 py-2.5">
                   <span className="text-xs font-medium text-gray-500">총 사용금액</span>
-                  <span className="text-lg font-bold text-gray-800 tabular-nums">{(stats?.monthly_cost || 0).toLocaleString()}<span className="text-xs font-normal text-gray-400">원</span></span>
+                  <span className="text-lg font-bold text-gray-800 tabular-nums"><CountUp value={stats?.monthly_cost || 0} format={fmtInt} animate={intro} /><span className="text-xs font-normal text-gray-400">원</span></span>
                 </div>
                 {/* ★ 2026-07-24 §5-2 에이전트 발송 잔액 — 선불 발송ID별 게이트웨이 실값 표시 (웹 잔액과 다른 지갑) */}
                 {agentBalances.length > 0 && (
@@ -2458,7 +2548,7 @@ const campaignData = {
 
 
             {/* 2행: DB 현황 — 모던 본격 디자인 (D224+ Harold 명시 본격 재정정 — Linear/Stripe/Vercel 동급) */}
-            <div className="relative bg-white rounded-3xl border border-gray-200/60 shadow-sm hover:shadow-md transition-all flex-1 overflow-hidden">
+            <div className={`relative bg-white rounded-3xl border border-gray-200/60 shadow-sm hover:shadow-md transition-all flex-1 overflow-hidden ${ENTER}`} style={{ animationDelay: '180ms' }}>
               {/* 미세 dot 패턴 배경 (subtle) */}
               <div
                 className="absolute inset-0 opacity-[0.018] pointer-events-none"
@@ -2471,13 +2561,13 @@ const campaignData = {
                   <div className="flex items-center gap-2.5">
                     <div className="w-1.5 h-5 bg-gradient-to-b from-emerald-500 to-green-600 rounded-full" />
                     <span className="text-base font-bold text-gray-900 tracking-tight">DB 현황</span>
-                    <span className="inline-flex items-center gap-1.5 text-[10px] font-bold tracking-wider px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-100">
-                      <span className="relative flex w-1.5 h-1.5">
-                        <span className="absolute inline-flex w-full h-full rounded-full bg-emerald-400 opacity-75 animate-ping" />
-                        <span className="relative inline-flex w-1.5 h-1.5 rounded-full bg-emerald-500" />
+                    {/* ★ 2026-10-10 대시보드 B안 — 늘 깜빡이던 REAL-TIME 대신 불러온 시각(데이터와 상관없이 깜빡이면 거짓 신호) */}
+                    {dbAsOf && (
+                      <span className="inline-flex items-center gap-1.5 text-[11px] font-semibold px-2 py-0.5 rounded-full bg-gray-50 text-gray-500 border border-gray-200 tabular-nums">
+                        <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+                        {formatKstClock(dbAsOf)} 기준
                       </span>
-                      REAL-TIME
-                    </span>
+                    )}
                   </div>
                   {/* ★ 2026-08-22 요금제 게이트 — 고객 DB 조회는 STARTER+(`customer_db_enabled`).
                       그전에는 구독 잠금만 봐서 FREE도 열렸다. 같은 카드의 "고객 DB 업로드"는 이미 이 기준을 쓰고 있었다(일관성 정정). */}
@@ -2552,18 +2642,22 @@ const campaignData = {
                     store_distribution:  { line: 'from-indigo-500 to-purple-500',   iconFrom: 'from-indigo-100',  iconTo: 'to-indigo-50',   iconText: 'text-indigo-600',  ring: 'ring-indigo-100',  glowHover: 'group-hover:shadow-indigo-200/40' },
                   };
                   const DEFAULT_ACCENT = { line: 'from-violet-500 to-fuchsia-500', iconFrom: 'from-violet-100', iconTo: 'to-violet-50', iconText: 'text-violet-600', ring: 'ring-violet-100', glowHover: 'group-hover:shadow-violet-200/40' };
+                  // ★ 2026-10-10 대시보드 B안 — 처음 열 때만 카드가 차례로 들어오고(0.06초 간격) 숫자 · 막대가 한 번 찬다
+                  const dbIntro = (intro || dbReveal) && !dbPaged;
 
                   return (
                     <div>
                       <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
-                        {pageCards.map((card) => {
+                        {pageCards.map((card, ci) => {
                           const accent = CARD_ACCENT_MAP[card.cardId] || DEFAULT_ACCENT;
                           const IconComp = CARD_ICON_MAP[card.icon] || HelpCircle;
+                          const enter = dbIntro ? ENTER_ONCE : '';
+                          const enterDelay = dbIntro ? { animationDelay: `${240 + ci * 60}ms` } : undefined;
 
                           // 데이터 없는 카드
                           if (!card.hasData) {
                             return (
-                              <div key={card.cardId} className="relative p-5 rounded-2xl border border-gray-100 bg-gray-50/40 overflow-hidden">
+                              <div key={card.cardId} className={`relative p-5 rounded-2xl border border-gray-100 bg-gray-50/40 overflow-hidden ${enter}`} style={enterDelay}>
                                 <div className="text-xs text-gray-400 mb-2">{card.label}</div>
                                 <div className="text-2xl font-bold text-gray-200 tracking-tight">-</div>
                                 <span className="absolute top-3 right-3 text-[9px] text-gray-400 bg-white border border-gray-200 px-1.5 py-0.5 rounded-md font-medium tracking-wider">N/A</span>
@@ -2580,13 +2674,14 @@ const campaignData = {
                               <div
                                 key={card.cardId}
                                 onClick={() => setDetailCard(card)}
-                                className={`group relative p-5 rounded-2xl border border-gray-100 bg-white hover:border-gray-200 hover:shadow-xl ${accent.glowHover} hover:-translate-y-1 cursor-pointer transition-all duration-300 overflow-hidden`}
+                                className={`group relative p-5 rounded-2xl border border-gray-100 bg-white hover:border-gray-200 hover:shadow-xl ${accent.glowHover} hover:-translate-y-1 motion-reduce:hover:translate-y-0 motion-reduce:transition-none cursor-pointer transition-all duration-300 overflow-hidden ${enter}`}
+                                style={enterDelay}
                               >
                                 {/* 상단 accent line */}
                                 <div className={`absolute top-0 left-0 right-0 h-[3px] bg-gradient-to-r ${accent.line}`} />
 
                                 <div className="flex items-center justify-between mb-4">
-                                  <div className={`w-10 h-10 rounded-xl bg-gradient-to-br ${accent.iconFrom} ${accent.iconTo} ring-1 ${accent.ring} flex items-center justify-center group-hover:scale-110 group-hover:rotate-[-4deg] transition-all duration-300`}>
+                                  <div className={`w-10 h-10 rounded-xl bg-gradient-to-br ${accent.iconFrom} ${accent.iconTo} ring-1 ${accent.ring} flex items-center justify-center group-hover:scale-110 group-hover:rotate-[-4deg] motion-reduce:group-hover:scale-100 motion-reduce:group-hover:rotate-0 transition-all duration-300`}>
                                     <IconComp className={`w-5 h-5 ${accent.iconText}`} />
                                   </div>
                                   <span className="text-sm text-gray-700 font-semibold tracking-tight">{card.label}</span>
@@ -2604,9 +2699,10 @@ const campaignData = {
                                           </span>
                                         </div>
                                         <div className="h-1.5 bg-gray-100 rounded-full overflow-hidden">
+                                          {/* 처음 열 때만 왼쪽에서 차오른다(틀 밖은 잘려 보이지 않는다) */}
                                           <div
-                                            className={`h-full bg-gradient-to-r ${accent.line} rounded-full transition-all duration-700`}
-                                            style={{ width: `${(item.count / maxCount) * 100}%` }}
+                                            className={`h-full bg-gradient-to-r ${accent.line} rounded-full transition-all duration-700 ${dbIntro ? 'animate-in slide-in-from-left-full duration-700 ease-out fill-mode-backwards motion-reduce:animate-none' : ''}`}
+                                            style={{ width: `${(item.count / maxCount) * 100}%`, ...(dbIntro ? { animationDelay: `${360 + ci * 60}ms` } : {}) }}
                                           />
                                         </div>
                                       </div>
@@ -2620,10 +2716,13 @@ const campaignData = {
 
                           // count / rate / sum 타입 — 본격 모던 숫자 카드
                           const numVal = typeof card.value === 'number' ? card.value : 0;
-                          let displayVal = numVal.toLocaleString();
+                          // ★ 2026-10-10 표기 규칙은 그대로 · 숫자 채우기가 도는 동안에도 같은 규칙으로 그린다
+                          const formatVal = (v: number) => card.type === 'rate' ? v.toFixed(1)
+                            : card.type === 'sum' && v >= 10000 ? `${Math.round(v / 10000).toLocaleString()}만`
+                            : v.toLocaleString();
                           let suffix = '';
-                          if (card.type === 'rate') { displayVal = numVal.toFixed(1); suffix = '%'; }
-                          else if (card.type === 'sum') { displayVal = numVal >= 10000 ? `${Math.round(numVal / 10000).toLocaleString()}만` : numVal.toLocaleString(); suffix = '원'; }
+                          if (card.type === 'rate') { suffix = '%'; }
+                          else if (card.type === 'sum') { suffix = '원'; }
                           else if (card.cardId === 'active_campaigns') { suffix = '건'; }
                           else { suffix = '명'; }
 
@@ -2631,7 +2730,8 @@ const campaignData = {
                             <div
                               key={card.cardId}
                               onClick={() => setDetailCard(card)}
-                              className={`group relative p-5 rounded-2xl border border-gray-100 bg-white hover:border-gray-200 hover:shadow-xl ${accent.glowHover} hover:-translate-y-1 cursor-pointer transition-all duration-300 overflow-hidden`}
+                              className={`group relative p-5 rounded-2xl border border-gray-100 bg-white hover:border-gray-200 hover:shadow-xl ${accent.glowHover} hover:-translate-y-1 motion-reduce:hover:translate-y-0 motion-reduce:transition-none cursor-pointer transition-all duration-300 overflow-hidden ${enter}`}
+                              style={enterDelay}
                             >
                               {/* 상단 accent line */}
                               <div className={`absolute top-0 left-0 right-0 h-[3px] bg-gradient-to-r ${accent.line}`} />
@@ -2645,7 +2745,7 @@ const campaignData = {
                               <div className="relative">
                                 {/* 아이콘 + 라벨 (헤더) */}
                                 <div className="flex items-center justify-between mb-4">
-                                  <div className={`w-10 h-10 rounded-xl bg-gradient-to-br ${accent.iconFrom} ${accent.iconTo} ring-1 ${accent.ring} flex items-center justify-center group-hover:scale-110 group-hover:rotate-[-4deg] transition-all duration-300`}>
+                                  <div className={`w-10 h-10 rounded-xl bg-gradient-to-br ${accent.iconFrom} ${accent.iconTo} ring-1 ${accent.ring} flex items-center justify-center group-hover:scale-110 group-hover:rotate-[-4deg] motion-reduce:group-hover:scale-100 motion-reduce:group-hover:rotate-0 transition-all duration-300`}>
                                     <IconComp className={`w-5 h-5 ${accent.iconText}`} />
                                   </div>
                                   <span className="text-sm text-gray-700 font-semibold tracking-tight">{card.label}</span>
@@ -2653,7 +2753,9 @@ const campaignData = {
 
                                 {/* 본격 숫자 영역 — tabular + baseline + 단위 분리 */}
                                 <div className="flex items-baseline gap-1.5">
-                                  <span className="text-2xl font-bold text-gray-900 tracking-tight tabular-nums leading-none">{displayVal}</span>
+                                  <span className="text-2xl font-bold text-gray-900 tracking-tight tabular-nums leading-none">
+                                    <CountUp value={numVal} format={formatVal} decimals={card.type === 'rate' ? 1 : 0} animate={dbIntro} />
+                                  </span>
                                   <span className="text-xs font-medium text-gray-400 leading-none">{suffix}</span>
                                 </div>
 
@@ -2674,7 +2776,7 @@ const campaignData = {
                       {totalPages > 1 && (
                         <div className="flex items-center justify-between mt-6">
                           <button
-                            onClick={() => setDbCardPage(p => Math.max(0, p - 1))}
+                            onClick={() => goDbPage(p => Math.max(0, p - 1))}
                             disabled={safePage === 0}
                             className="w-9 h-9 rounded-xl flex items-center justify-center text-gray-600 bg-white border border-gray-200 hover:border-gray-300 hover:bg-gray-50 disabled:opacity-30 disabled:hover:bg-white disabled:hover:border-gray-200 transition-all shadow-sm"
                           >
@@ -2684,7 +2786,7 @@ const campaignData = {
                             {Array.from({ length: totalPages }, (_, idx) => (
                               <button
                                 key={idx}
-                                onClick={() => setDbCardPage(idx)}
+                                onClick={() => goDbPage(() => idx)}
                                 className={`h-2 rounded-full transition-all duration-500 ${
                                   idx === safePage
                                     ? 'bg-gradient-to-r from-violet-500 to-fuchsia-500 w-8 shadow-md shadow-violet-400/40'
@@ -2694,7 +2796,7 @@ const campaignData = {
                             ))}
                           </div>
                           <button
-                            onClick={() => setDbCardPage(p => Math.min(totalPages - 1, p + 1))}
+                            onClick={() => goDbPage(p => Math.min(totalPages - 1, p + 1))}
                             disabled={safePage >= totalPages - 1}
                             className="w-9 h-9 rounded-xl flex items-center justify-center text-gray-600 bg-white border border-gray-200 hover:border-gray-300 hover:bg-gray-50 disabled:opacity-30 disabled:hover:bg-white disabled:hover:border-gray-200 transition-all shadow-sm"
                           >
@@ -2718,7 +2820,8 @@ const campaignData = {
               <>
                 <button
                   onClick={() => { setShowDirectTargeting(true); }}
-                  className="group relative overflow-hidden p-5 bg-gradient-to-br from-emerald-600 to-teal-500 hover:from-emerald-500 hover:to-teal-400 rounded-xl ring-1 ring-white/20 transition-all shadow-lg shadow-emerald-500/25 hover:shadow-xl hover:shadow-emerald-500/40 text-right flex-1 flex flex-col justify-between"
+                  className={`group relative overflow-hidden p-5 bg-gradient-to-br from-emerald-600 to-teal-500 hover:from-emerald-500 hover:to-teal-400 rounded-xl ring-1 ring-white/20 transition-all shadow-lg shadow-emerald-500/25 hover:shadow-xl hover:shadow-emerald-500/40 text-right flex-1 flex flex-col justify-between ${ENTER}`}
+                  style={{ animationDelay: '120ms' }}
                 >
                   <div className="absolute -top-16 -right-16 w-48 h-48 rounded-full bg-white/10 blur-3xl" />
                   <Send className="absolute -bottom-4 -left-4 w-24 h-24 text-white/10" />
@@ -2738,7 +2841,8 @@ const campaignData = {
                 {!hideFileUpload && (
                 <button
                   onClick={() => openFileUpload()}
-                  className="group relative overflow-hidden p-5 bg-gradient-to-br from-amber-500 to-orange-500 hover:from-amber-400 hover:to-orange-400 rounded-xl ring-1 ring-white/20 transition-all shadow-lg shadow-amber-500/25 hover:shadow-xl hover:shadow-amber-500/40 text-right flex-1 flex flex-col justify-between"
+                  className={`group relative overflow-hidden p-5 bg-gradient-to-br from-amber-500 to-orange-500 hover:from-amber-400 hover:to-orange-400 rounded-xl ring-1 ring-white/20 transition-all shadow-lg shadow-amber-500/25 hover:shadow-xl hover:shadow-amber-500/40 text-right flex-1 flex flex-col justify-between ${ENTER}`}
+                  style={{ animationDelay: '180ms' }}
                 >
                   <div className="absolute -top-16 -right-16 w-48 h-48 rounded-full bg-white/10 blur-3xl" />
                   <UserPlus className="absolute -bottom-4 -left-4 w-24 h-24 text-white/10" />
@@ -2761,13 +2865,9 @@ const campaignData = {
               <>
                 {/* AI Operator — D222+ Phase 1 정정: 라벨 "AI Operator" + 보라 그라데이션 + navigate('/ai-operator') 직접 진입 */}
                 <button
-                  onClick={() => {
-                    // ★ 2026-09-15 Harold 지시 — 요금제와 상관없이 허브로 들어간다. 기능 사용 가부는 허브가 서버 판정으로 가르고
-                    //   못 쓰면 공통 안내 창을 연다(옛 요금제 잠금·진입 확인·진단 분기·안내 모달 분기 제거). 구독 만료·정지만 여기서 막는다.
-                    if (isSubscriptionLocked) { setShowSubscriptionLock(true); return; }
-                    navigate('/ai-operator');
-                  }}
-                  className={`group relative overflow-hidden p-5 bg-gradient-to-br from-violet-700 via-purple-700 to-fuchsia-600 hover:from-violet-600 hover:via-purple-600 hover:to-fuchsia-500 rounded-xl ring-1 ring-white/20 transition-all shadow-lg shadow-violet-500/25 hover:shadow-xl hover:shadow-violet-500/40 text-right flex-1 flex flex-col justify-between ${isSubscriptionLocked ? 'opacity-60' : ''}`}
+                  onClick={() => openLive('hub')}
+                  className={`group relative overflow-hidden p-5 bg-gradient-to-br from-violet-700 via-purple-700 to-fuchsia-600 hover:from-violet-600 hover:via-purple-600 hover:to-fuchsia-500 rounded-xl ring-1 ring-white/20 transition-all shadow-lg shadow-violet-500/25 hover:shadow-xl hover:shadow-violet-500/40 text-right flex-1 flex flex-col justify-between ${isSubscriptionLocked ? 'opacity-60' : ''} ${ENTER}`}
+                  style={{ animationDelay: '120ms' }}
                 >
                   <div className="absolute -top-16 -right-16 w-48 h-48 rounded-full bg-white/10 blur-3xl" />
                   <Sparkles className="absolute -bottom-4 -left-4 w-24 h-24 text-white/10" />
@@ -2780,8 +2880,20 @@ const campaignData = {
                       <div className="text-sm text-white/75">자연어 한 줄로 AI가 자동 설계</div>
                     </div>
                   </div>
-                  <div className="relative self-end w-9 h-9 rounded-full bg-white/15 ring-1 ring-white/25 flex items-center justify-center group-hover:translate-x-0.5 transition-transform">
-                    <ChevronRight className="w-5 h-5 text-white" />
+                  <div className="relative self-end flex items-center gap-2">
+                    {/* ★ 2026-10-10 대시보드 B안 — 켜진 여정 · 자동 마케팅이 있을 때만(서버 상태) */}
+                    {liveRunning > 0 && (
+                      <span className="inline-flex items-center gap-1.5 rounded-full bg-white/15 px-2.5 py-1 text-xs font-semibold text-white ring-1 ring-white/25">
+                        <span className="relative flex h-1.5 w-1.5">
+                          <span className="absolute inline-flex h-full w-full rounded-full bg-white opacity-75 motion-safe:animate-ping" />
+                          <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-white" />
+                        </span>
+                        자동화 {liveRunning}개 작동 중
+                      </span>
+                    )}
+                    <div className="w-9 h-9 rounded-full bg-white/15 ring-1 ring-white/25 flex items-center justify-center group-hover:translate-x-0.5 transition-transform">
+                      <ChevronRight className="w-5 h-5 text-white" />
+                    </div>
                   </div>
                 </button>
 
@@ -2792,7 +2904,8 @@ const campaignData = {
                     if (isCustomerDbLocked) { openPlanFeature('send-target'); return; }
                     setShowDirectTargeting(true);
                   }}
-                  className={`group relative overflow-hidden p-5 bg-gradient-to-br from-emerald-600 to-teal-500 hover:from-emerald-500 hover:to-teal-400 rounded-xl ring-1 ring-white/20 transition-all shadow-lg shadow-emerald-500/25 hover:shadow-xl hover:shadow-emerald-500/40 text-right flex-1 flex flex-col justify-between ${isSubscriptionLocked || isCustomerDbLocked ? 'opacity-60' : ''}`}
+                  className={`group relative overflow-hidden p-5 bg-gradient-to-br from-emerald-600 to-teal-500 hover:from-emerald-500 hover:to-teal-400 rounded-xl ring-1 ring-white/20 transition-all shadow-lg shadow-emerald-500/25 hover:shadow-xl hover:shadow-emerald-500/40 text-right flex-1 flex flex-col justify-between ${isSubscriptionLocked || isCustomerDbLocked ? 'opacity-60' : ''} ${ENTER}`}
+                  style={{ animationDelay: '180ms' }}
                 >
                   <div className="absolute -top-16 -right-16 w-48 h-48 rounded-full bg-white/10 blur-3xl" />
                   <Send className="absolute -bottom-4 -left-4 w-24 h-24 text-white/10" />
@@ -2818,7 +2931,8 @@ const campaignData = {
                     if (isCustomerDbLocked) { openPlanFeature('upload-customers'); return; }
                     setShowFileUpload(true);
                   }}
-                  className={`group relative overflow-hidden p-5 bg-gradient-to-br from-amber-500 to-orange-500 hover:from-amber-400 hover:to-orange-400 rounded-xl ring-1 ring-white/20 transition-all shadow-lg shadow-amber-500/25 hover:shadow-xl hover:shadow-amber-500/40 text-right flex-1 flex flex-col justify-between ${isSubscriptionLocked || isCustomerDbLocked ? 'opacity-60' : ''}`}
+                  className={`group relative overflow-hidden p-5 bg-gradient-to-br from-amber-500 to-orange-500 hover:from-amber-400 hover:to-orange-400 rounded-xl ring-1 ring-white/20 transition-all shadow-lg shadow-amber-500/25 hover:shadow-xl hover:shadow-amber-500/40 text-right flex-1 flex flex-col justify-between ${isSubscriptionLocked || isCustomerDbLocked ? 'opacity-60' : ''} ${ENTER}`}
+                  style={{ animationDelay: '240ms' }}
                 >
                   <div className="absolute -top-16 -right-16 w-48 h-48 rounded-full bg-white/10 blur-3xl" />
                   <UserPlus className="absolute -bottom-4 -left-4 w-24 h-24 text-white/10" />
@@ -3227,7 +3341,7 @@ const campaignData = {
       <UploadProgressModal
         show={showUploadProgressModal}
         uploadProgress={uploadProgress}
-        onClose={() => setShowUploadProgressModal(false)}
+        onClose={() => { setShowUploadProgressModal(false); if (uploadProgress?.status === 'completed') void revealAfterUpload(); }}
       />
       <PlanLimitModal show={showPlanLimitError} onClose={() => setShowPlanLimitError(false)} planLimitInfo={planLimitInfo} />
 

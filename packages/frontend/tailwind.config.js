@@ -67,6 +67,9 @@ export default {
       animation: {
         'dialog-in': 'dialog-in 180ms cubic-bezier(0.22, 1, 0.36, 1)',
         'backdrop-in': 'backdrop-in 160ms ease-out',
+        // ★ 2026-10-10 대시보드 모션 — 주의 점은 두 번 퍼지고 멈춘다(무한 ping = 「지금 켜져 있다」 점에만).
+        //   반복 횟수를 단축 속성 한 줄에 넣는다 — 따로 쓴 반복 횟수 클래스는 motion-safe: 단축 속성이 뒤에서 덮어 무한으로 되돌린다.
+        'ping-twice': 'ping 1s cubic-bezier(0, 0, 0.2, 1) 2',
       },
     },
   },

@@ -2143,7 +2143,7 @@ router.get('/:id/send-progress', async (req: Request, res: Response) => {
     const companyId = (req as any).user?.companyId;
     if (!companyId) return res.status(401).json({ success: false, error: '인증 필요' });
     const result = await query(
-      `SELECT target_count, processed_count, send_phase, sent_count, fail_count, created_by FROM campaigns WHERE id = $1 AND company_id = $2`,
+      `SELECT target_count, processed_count, send_phase, sent_count, fail_count, created_by, status FROM campaigns WHERE id = $1 AND company_id = $2`,
       [req.params.id, companyId]
     );
     if (result.rows.length === 0) return res.status(404).json({ success: false, error: '캠페인을 찾을 수 없습니다' });
@@ -2157,6 +2157,8 @@ router.get('/:id/send-progress', async (req: Request, res: Response) => {
       success: true,
       total, processed, percent,
       phase: r.send_phase || null,
+      // ★ 2026-10-10 대시보드 띠 — 단계 'sent' 는 적재 끝일 뿐이다(0건이면 status=failed · 적재 중 취소면 cancelled). 끝 상태 문구는 status 로 가른다
+      status: r.status || null,
       sentCount: r.sent_count || 0,
       failCount: r.fail_count || 0,
     });

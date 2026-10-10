@@ -25,6 +25,8 @@ import {
 } from '../event-brief';
 // ★ 2026-07-13 — 상품 URL 페이지의 og:image 자동 채움 (브랜드 추출기 CT 재사용)
 import { fetchProductOgImages } from './dm-brand-extractor';
+// ★ 2026-10-10 한 줄 DM 강화 — 사람이 고른 몰 상품의 확정 카드 배치(CT)
+import { placeLineMallCards, type LineMallCard } from '../line-mall-cards';
 import {
   SECTION_META, SECTION_DEFAULTS, type Section, type SectionType,
   createSection,
@@ -858,6 +860,14 @@ export async function oneShotGenerate(opts: {
    * 기본 false. opt-in이 아니라 opt-out인 이유 = 소비처 4곳을 각각 배선하면 빠뜨린 곳이 조용히 옛 동작으로 남는다.
    */
   disableLearnedStructure?: boolean;
+  /**
+   * ★ 2026-10-10 한 줄 DM 강화(설계서 docs/2026-10-10-oneline-dm-email-design.md §3-8) — **사람이 고른 몰 상품의 확정 카드**(재조회 ok 만).
+   * 오면 AI 상품 추출을 건너뛰고, 장 나누기 · 검산 **전에** 첫 상품 슬라이드를 이 카드로 통째 바꾼다(없으면 히어로 뒤에 하나).
+   * 검산에서는 브리프 상품을 뺀다(한 줄의 「니트 3종」이 몰 상품명으로 바뀌어도 누락으로 세지 않게). 미지정 = 지금 그대로.
+   */
+  confirmedCards?: LineMallCard[];
+  /** ★ 2026-10-10 — 회사가 저장한 주색(읽히게 보정한 값). 오면 비주얼 디렉터 팔레트 주색을 이 값으로 고정한다. 미지정 = 지금 그대로. */
+  pinPrimary?: string;
 }): Promise<OneShotResult> {
   const prompt = (opts.prompt || '').trim();
   const structure = opts.structure && Array.isArray(opts.structure.sectionTypes) && opts.structure.sectionTypes.length > 0
@@ -981,7 +991,8 @@ export async function oneShotGenerate(opts: {
   // ★ 2026-07-16 M1 — 브리프가 있으면 브리프 상품(이미 원문 검증 통과)을 사용 — 추출 AI 이중 호출 제거
   const productSource = rawEvent || prompt;
   const carouselIdx = sections.findIndex((s) => s.type === 'product_carousel');
-  if (carouselIdx >= 0 && productSource) {
+  const confirmed = Array.isArray(opts.confirmedCards) && opts.confirmedCards.length > 0 ? opts.confirmedCards : null;
+  if (!confirmed && carouselIdx >= 0 && productSource) {
     // ★ Codex 1R — 브리프 추출이 실패(폴백 브리프)하거나 상품 0이면 옛 전용 상품 추출기로 재시도
     //   (일시 JSON 실패가 상품 placeholder 캐러셀로 끝나던 회귀 차단)
     const extracted = (brief && brief.products.length > 0)
@@ -1005,19 +1016,26 @@ export async function oneShotGenerate(opts: {
 
   // ★ 2026-07-16 M1 — 브리프 확정 사실 주입 → 커버리지 1차 → 결정적 보강(원문 그대로 인용) → 최종 커버리지.
   //   남은 missing은 숨기지 않고 응답에 실어 사용자에게 표시한다 (겉만 화려한 빈껍데기 차단 게이트).
-  let assembled: Section[] = sections;
+  // ★ 2026-10-10 — 사람이 고른 몰 상품(확정 카드)은 여기서 놓는다(장 나누기 · 검산 · 비주얼 디렉터보다 앞 · 가격은 AI 를 지나지 않는다).
+  let assembled: Section[] = confirmed
+    ? placeLineMallCards(sections, confirmed, { newId: () => randomUUID(), makeCarousel: (order) => createSection('product_carousel', randomUUID(), order) })
+    : sections;
   let coverage: { missing: BriefCoverageItem[] } | undefined;
   if (brief) {
-    assembled = applyBriefToSections(assembled, brief);
-    const first = computeBriefCoverage(brief, sectionsFactText(assembled));
-    if (first.missing.length > 0) assembled = repairBriefCoverage(assembled, brief, first.missing);
-    coverage = computeBriefCoverage(brief, sectionsFactText(assembled));
+    // 확정 카드가 있으면 브리프 상품은 검산 대상이 아니다(한 줄의 상품 표현이 몰 상품명으로 바뀐다 · CTA 남은 링크 배정도 상품 링크를 빼지 않는다)
+    const factBrief: EventBrief = confirmed ? { ...brief, products: [] } : brief;
+    assembled = applyBriefToSections(assembled, factBrief);
+    const first = computeBriefCoverage(factBrief, sectionsFactText(assembled));
+    if (first.missing.length > 0) assembled = repairBriefCoverage(assembled, factBrief, first.missing);
+    coverage = computeBriefCoverage(factBrief, sectionsFactText(assembled));
   }
 
   // ★ AI 비주얼 디렉터 — 캠페인별 색·무드·강조 + 섹션 구도(treatment)를 설계해 섹션에 입힘(사진 없어도 완성형).
   // ★ 2026-09-27 한줄로 V2 R210 — 회사가 저장한 브랜드 킷(설정한 경우만)을 넘긴다. 옛: undefined라 대표 색이 프롬프트에 안 들어가 생성 색이 브랜드와 무관했다.
   const brandKitRaw = opts.companyId ? await getCompanyBrandKitRaw(opts.companyId).catch(() => null) : null;
   const concept = await designVisualConcept(spec, (brandKitRaw || undefined) as DmBrandKit | undefined, opts.companyId);
+  // ★ 2026-10-10 — 회사 저장 주색 고정(읽히게 보정한 값만 온다). 히어로 배경 · 글자색이 이 값으로 정해진다(렌더러 무접촉 · 새 초안 값만).
+  if (opts.pinPrimary) concept.palette = { ...concept.palette, primary: opts.pinPrimary };
   // 디렉터의 섹션 타입별 treatment 추천 → 섹션 id 맵(없으면 applyVisualDirection이 typeScale 기반 기본 적용).
   const treatmentById: Record<string, string> = {};
   if (concept.treatments) {

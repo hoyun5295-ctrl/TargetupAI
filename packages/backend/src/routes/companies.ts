@@ -35,7 +35,7 @@ import {
 import { buildXlsxBuffer, XLSX_CONTENT_TYPE, xlsxContentDisposition } from '../utils/xlsx-writer';
 import { buildRcsTemplateSheet, templateExportFilename } from '../utils/template-export';
 // ★ 2026-09-28 한줄로 V2 R106 — 대시보드 카드 집계 캐시(고객 통계와 같은 SWR 정책)
-import { swrCache } from '../utils/swr-cache';
+import { swrCacheWithAt } from '../utils/swr-cache';
 import { CACHE_TTL } from '../config/defaults';
 
 const router = Router();
@@ -1401,7 +1401,8 @@ router.get('/dashboard-cards', async (req: Request, res: Response) => {
     const cardScope = userType === 'company_user' && userId ? `u:${userId}` : 'all';
     // ★ 2026-10-02 몰 동의로 읽는 카드는 키를 따로 둔다(읽기 강제를 켠 직후 옛 수신동의 수가 남지 않게)
     const cardConsentScope = await resolveViewerConsentScope(companyId, { userId, userType });
-    const cards = await swrCache({
+    // ★ 2026-10-10 대시보드 「HH:MM 기준」 = 이 값을 계산한 서버 시각(묵은 값이면 그때 시각)
+    const { value: cards, at: cardsAt } = await swrCacheWithAt({
       key: `dashboard-cards:${companyId}:${cardScope}:${cardIds.join(',')}${cardConsentScope.mode === 'mall' ? `:mall:${userId || ''}` : ''}`,   // 몰 동의 = 보는 사람의 수신거부를 빼므로 사람마다 따로
       softTtlSec: CACHE_TTL.customerStats,
       hardTtlSec: 600,
@@ -1413,6 +1414,7 @@ router.get('/dashboard-cards', async (req: Request, res: Response) => {
       cardCount,
       hasCustomerData: true,
       cards,
+      asOf: cardsAt,
     });
   } catch (error) {
     console.error('대시보드 카드 조회 실패:', error);

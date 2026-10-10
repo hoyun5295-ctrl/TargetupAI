@@ -30,7 +30,11 @@ import { useDmStorePreview } from '../components/make/useDmStorePreview';
 import { fetchEmailPreview, useRenderedHtml } from '../hooks/useRenderedHtml';
 import {
   buildErrorMessage, buildMaterialsPayload, loadBuildDraft, newAttemptToken, peekBuildResult, unappliedItemsOf,
+  draftBelongsTo, saveBuildResult,
 } from '../utils/ai-build';
+// ★ 2026-10-10 한 줄 DM 강화 — 한 줄로 만든 결과의 다시 만들기 · 상품 바꾸기(재조회 가능한 몰만)
+import { requestLineDm, lineResultNotes, isLineMallProvider } from '../utils/one-line';
+import MallProductPickerModal, { type PickedMallProduct } from '../components/dm/MallProductPickerModal';
 import { AI_GENERATE_COSTS } from '../constants/credit';
 import { fixHeadline, fixItemsOf, makeResultPath, type FixItem, type MakeChannel } from '../utils/make-flow';
 import { FixRow } from '../components/zone/ZoneCompletion';   // ★ 2026-10-05 한줄로 시그니처 — 완성도 줄과 같은 부품
@@ -113,12 +117,15 @@ export default function QuickCampaignResultPage() {
 
   const handoff = useMemo(() => (dmId ? peekBuildResult(dmId) : null) || (emailId ? peekBuildResult(emailId) : null), [dmId, emailId]);
   const draft = useMemo(() => loadBuildDraft(), []);
+  // ★ 2026-10-10 재료 초안은 이 결과(또는 짝)로 결박된 것만 쓴다(어제 남은 재료로 차감 · 엉뚱한 링크 · 안내 0) · 한 줄 결과는 재료 초안이 없다
+  const draftOwned = draftBelongsTo(draft, draftId, pairId);
+  const lineOrigin = handoff?.origin?.kind === 'line' ? handoff.origin : null;
   const extraInfo = useMemo(() => {
     const out = handoff ? unappliedItemsOf(handoff) : [];
     // 직접 적은 상품(몰 미연동)은 카드가 아니라 글로 실린다(재료 계약 · 서버 resolveBuildProducts)
-    if (draft?.products?.some((p) => p.source === 'manual')) out.unshift('상품이 글로 실렸어요 · 몰을 연동하면 사진과 구매 버튼이 붙어요');
+    if (draftOwned && draft?.products?.some((p) => p.source === 'manual')) out.unshift('상품이 글로 실렸어요 · 몰을 연동하면 사진과 구매 버튼이 붙어요');
     return out;
-  }, [handoff, draft]);
+  }, [handoff, draft, draftOwned]);
   const dmItems: FixItem[] = useMemo(() => (dmReady ? fixItemsOf(validation, flat, extraInfo) : []), [dmReady, validation, flat, extraInfo]);
 
   // ── 이메일(여기서는 보기만 · 고치기 = 자세히 편집) ──
@@ -162,7 +169,7 @@ export default function QuickCampaignResultPage() {
   const otherCost = AI_GENERATE_COSTS[otherChannel === 'email' ? 'email-ai-generate' : 'dm-ai-generate'];
   const [makingOther, setMakingOther] = useState(false);
   // 남아 있는 재료 초안이 이 완성본의 것인가(카탈로그 ↔ 카탈로그 재료 · 그 밖 ↔ 그 밖). 다르면 그 재료로 다시 만들기·다른 채널 만들기를 권하지 않는다.
-  const draftFits = !!draft && (draft.channel === 'catalog') === isCatalog;
+  const draftFits = draftOwned && !!draft && (draft.channel === 'catalog') === isCatalog;
   // 다른 채널 1클릭 = 사진·글 재료가 있을 때만(카탈로그 재료 = 쪽 사진뿐이라 이메일·일반 DM 을 만들 수 없다 · 서버 견적이 재료 부족으로 돌려준다)
   const canMakeOther = draftFits && !isCatalog;
   const makeChannel = channel === 'email' ? 'email' : isCatalog ? 'catalog' : 'dm';
@@ -192,6 +199,53 @@ export default function QuickCampaignResultPage() {
     }
   }, [draft, canMakeOther, makingOther, otherChannel, channel, draftId, setParams, toast]);
 
+  // ★ 2026-10-10 한 줄로 만든 결과 = 같은 한 줄 + 답 + 고른 상품으로 다시 만든다(새 시도 토큰 · 그 채널 생성비 1회 · 지금 초안은 남는다)
+  const [regenLine, setRegenLine] = useState(false);
+  const runLineRegen = useCallback(async () => {
+    if (!lineOrigin || regenLine) return;
+    setRegenLine(true);
+    try {
+      const r = await requestLineDm({ line: lineOrigin.line, facts: lineOrigin.facts, products: lineOrigin.products, reads: lineOrigin.reads, readLicensed: lineOrigin.readLicensed });
+      const newId = String(r.data?.draft_id || '');
+      if (!r.ok || !newId) {
+        if (r.code === 'MALL_PRODUCTS_UNAVAILABLE') throw new Error('고른 상품을 지금 쓸 수 없어요. 첫 화면에서 한 줄로 다시 만들어 주세요.');
+        throw new Error(buildErrorMessage(r.code, r.error, '다시 만들지 못했어요. 잠시 후 다시 시도해 주세요.'));
+      }
+      saveBuildResult({ channel: 'dm', draftId: newId, materials: { notes: lineResultNotes(r.data) }, quoteTotal: AI_GENERATE_COSTS['dm-ai-generate'], heroFallback: false, benefitStripped: 0, createdAt: Date.now(), origin: lineOrigin });
+      toast.success('같은 한 줄로 새 초안을 만들었어요.');
+      navigate(makeResultPath('dm', newId));
+    } catch (e: any) {
+      toast.error(e?.message || '다시 만들지 못했어요.');
+    } finally {
+      setRegenLine(false);
+    }
+  }, [lineOrigin, regenLine, navigate, toast]);
+
+  // ★ 2026-10-10 상품 블록 [몰에서 상품 바꾸기] — 고른 상품번호를 서버가 다시 읽어 그 블록 상품을 통째 교체(AI 0 · 0크레딧 · 할인율 칸 없음)
+  const [swapOpen, setSwapOpen] = useState(false);
+  const [swapping, setSwapping] = useState(false);
+  const swapProducts = useCallback(async (picked: PickedMallProduct[]) => {
+    const sectionId = selectedId;
+    if (!sectionId) return;
+    const refs = picked.map((p) => ({ provider: p.provider, no: String(p.no || '') })).filter((r) => /^\d+$/.test(r.no));
+    if (refs.length === 0) { toast.warning('이 상품은 몰에서 다시 확인할 수 없어요. 다른 상품을 골라 주세요.'); return; }
+    setSwapping(true);
+    try {
+      const r = await fetch('/api/mall-products/cards', { method: 'POST', headers: authJson(), body: JSON.stringify({ products: refs }) });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok || d?.success === false) throw new Error(String(d?.error || '몰에서 상품을 확인하지 못했어요.'));
+      const cards: any[] = Array.isArray(d.cards) ? d.cards : [];
+      if (cards.length === 0) throw new Error('고른 상품을 지금 쓸 수 없어요(품절 · 판매 중지 · 사진 없음).');
+      updateSectionProps(sectionId, { products: cards.map((c, i) => ({ id: globalThis.crypto?.randomUUID?.() ?? `p-${Date.now()}-${i}`, ...c })) });
+      const dropped = Array.isArray(d.excluded) ? d.excluded.length : 0;
+      toast.success(dropped > 0 ? `상품을 바꿨어요. ${dropped}개는 쓸 수 없어 뺐어요.` : '상품을 바꿨어요.');
+    } catch (e: any) {
+      toast.error(e?.message || '상품을 바꾸지 못했어요.');
+    } finally {
+      setSwapping(false);
+    }
+  }, [selectedId, updateSectionProps, toast]);
+
   // ── 보내기 · 다시 만들기 · PC 크게 보기 ──
   const [sendOpen, setSendOpen] = useState(false);
   const [pcOpen, setPcOpen] = useState<null | 'dm' | 'email'>(null);
@@ -211,11 +265,11 @@ export default function QuickCampaignResultPage() {
     const site = String(brandKit?.contact?.website || '').trim();
     if (site) out.push({ label: '우리 홈페이지', url: /^https?:\/\//.test(site) ? site : `https://${site}`, icon: 'home' });
     const recent = flat.flatMap((s) => (s.type === 'cta' ? ((s.props as any)?.buttons || []) : [])).map((b: any) => String(b?.url || '').trim()).find((u: string) => /^https?:\/\//.test(u));
-    const readLink = draft?.cards?.find((c) => c.link)?.link;
+    const readLink = draftOwned ? draft?.cards?.find((c) => c.link)?.link : undefined;
     const r = recent || readLink;
     if (r && r !== out[0]?.url) out.push({ label: `최근 쓴 주소 · ${r.replace(/^https?:\/\//, '').slice(0, 32)}`, url: r, icon: 'recent' });
     return out;
-  }, [brandKit, flat, draft]);
+  }, [brandKit, flat, draft, draftOwned]);
 
   if (!draftId) return <ZoneFrame moduleId="make" sub="완성본" backTo="/quick-campaign"><div className="py-24 text-center text-slate-500 text-sm">열 초안이 없어요.</div></ZoneFrame>;
 
@@ -228,10 +282,15 @@ export default function QuickCampaignResultPage() {
     const pair = other && other !== id ? `&pair=${encodeURIComponent(other)}` : '';
     return c === 'dm' ? `/dm-builder?id=${encodeURIComponent(id)}${pair}` : `/email-campaigns?edit=${encodeURIComponent(id)}${pair}`;
   };
+  const onFixItem = (it: FixItem) => {
+    if (channel === 'dm' && it.sectionId && !isCatalog) { focusSection(it.sectionId); setSheetOpen(true); }
+    else if (it.kind === 'must' || (channel === 'dm' && it.sectionId)) navigate(editPath(channel, draftId));
+  };
+  const lineRegenCost = AI_GENERATE_COSTS['dm-ai-generate'];
 
   return (
     <SurfaceToneProvider tone="light">
-    <div className="relative bg-slate-100 text-slate-900 flex flex-col" style={{ height: '100vh', overflow: 'hidden' }}>
+    <div className="relative bg-slate-100 text-slate-900 flex flex-col mk-dvh" style={{ overflow: 'hidden' }}>
       {/* ★ 2026-09-30 AI 존 대개편: 편집기 변형 머리(같은 남색 띠 · 같은 좌표) · 제목 칸 = 초안 이름 + 상태 · 오른쪽 끝 = 보내기 */}
       <ZoneHeader
         moduleId="make"
@@ -276,14 +335,20 @@ export default function QuickCampaignResultPage() {
           </div>
           <div className="flex-1 min-h-0 overflow-y-auto mk-scroll space-y-2.5">
             {primaryLoading && <Loader2 className="w-5 h-5 animate-spin text-slate-400" />}
-            {items.map((it, i) => <FixRow key={i} item={it} onClick={() => {
-              if (channel === 'dm' && it.sectionId && !isCatalog) { focusSection(it.sectionId); setSheetOpen(true); }
-              else if (it.kind === 'must' || (channel === 'dm' && it.sectionId)) navigate(editPath(channel, draftId));
-            }} />)}
+            {items.map((it, i) => <FixRow key={i} item={it} onClick={() => onFixItem(it)} />)}
           </div>
           <div className="pt-4 space-y-2.5 border-t border-slate-200 mt-3">
             {/* ★ 2026-10-01 만든 채널로 돌아간다(카탈로그 = 카탈로그 채널 · 금액 = 원장) — 옛: 늘 dm 이라 올린 쪽이 안 보이고 다시 만들기가 5 크레딧으로 적혀 아무 일도 안 일어났다 */}
-            {!primaryLoading && <button type="button" onClick={() => navigate(`/quick-campaign?channel=${makeChannel}`)} className="flex items-center gap-2 text-[12.5px] text-slate-500 hover:text-slate-900"><Eye className="w-4 h-4" />넣은 재료 다시 보기</button>}
+            {!primaryLoading && draftOwned && <button type="button" onClick={() => navigate(`/quick-campaign?channel=${makeChannel}`)} className="flex items-center gap-2 text-[12.5px] text-slate-500 hover:text-slate-900"><Eye className="w-4 h-4" />넣은 재료 다시 보기</button>}
+            {!primaryLoading && channel === 'dm' && lineOrigin && (
+              <button type="button" disabled={regenLine} onClick={() => setConfirm({
+                mode: 'warning', title: '같은 한 줄로 다시 만들까요?',
+                description: `"${lineOrigin.line}" 한 줄로 새 초안을 만들어요(${lineRegenCost} 크레딧). 지금 초안은 목록에 그대로 남아요.`,
+                confirmLabel: '다시 만들기', onConfirm: () => { void runLineRegen(); },
+              })} className="flex items-center gap-2 text-[12.5px] text-slate-500 hover:text-slate-900 disabled:opacity-50">
+                {regenLine ? <Loader2 className="w-4 h-4 animate-spin" /> : <RotateCcw className="w-4 h-4" />}같은 한 줄로 다시 만들기 · {lineRegenCost} 크레딧
+              </button>
+            )}
             {!primaryLoading && draftFits && (
               <button type="button" onClick={() => setConfirm({
                 mode: 'warning', title: '같은 재료로 다시 만들까요?',
@@ -297,6 +362,13 @@ export default function QuickCampaignResultPage() {
 
         {/* 가운데 — 받는 사람 실물 */}
         <main className="flex-1 min-w-0 flex flex-col items-center border-r border-slate-200 px-4 py-5 overflow-hidden">
+          {/* ★ 2026-10-10 휴대폰 폭 = 왼쪽 고칠 곳 칸이 숨으므로 미리보기 위 한 줄로(같은 FixRow · 보내기 전에 채울 것만 두 줄까지) */}
+          {!primaryLoading && items.length > 0 && (
+            <div className="md:hidden w-full max-w-[380px] mb-3 rounded-xl border border-slate-200 bg-white px-3 py-2.5" data-make="fix-mobile">
+              <div className={`text-[13px] font-bold ${head.tone === 'good' ? 'text-emerald-700' : 'text-slate-900'}`}>{head.tone === 'warn' ? `보내기 전에 ${head.count}곳만 채워 주세요` : head.text}</div>
+              {items.filter((it) => it.kind === 'must').slice(0, 2).map((it, i) => <div key={i} className="mt-2"><FixRow item={it} onClick={() => onFixItem(it)} /></div>)}
+            </div>
+          )}
           <div className="w-full max-w-[380px] flex items-center justify-between mb-3">
             <div className="flex items-center gap-1.5 text-[13px] font-semibold text-slate-700">{channel === 'dm' ? <Smartphone className="w-4 h-4 text-violet-700" /> : <Mail className="w-4 h-4 text-violet-700" />}{channel === 'dm' ? '모바일 DM' : '이메일'}</div>
             <div className="flex items-center gap-3 text-[11.5px] text-slate-400">
@@ -370,9 +442,15 @@ export default function QuickCampaignResultPage() {
           saving={isSaving}
           suggestions={suggestions}
           onAiRewrite={() => setOpenModal('ai-improve')}
+          topSlot={selected.type === 'product_carousel' ? (
+            <button type="button" onClick={() => setSwapOpen(true)} disabled={swapping} className="mb-3 w-full inline-flex items-center justify-center gap-1.5 h-10 rounded-xl border border-emerald-300 bg-emerald-50 text-[13px] font-semibold text-emerald-800 hover:bg-emerald-100 disabled:opacity-50">
+              {swapping ? <Loader2 className="w-4 h-4 animate-spin" /> : <ShoppingBag className="w-4 h-4" />}몰에서 상품 바꾸기
+            </button>
+          ) : undefined}
         />
       )}
-      <AiImproveModal open={openModal === 'ai-improve'} onClose={() => setOpenModal(null)} />
+      <MallProductPickerModal open={swapOpen} onClose={() => setSwapOpen(false)} providerFilter={isLineMallProvider} onPick={(picked) => { setSwapOpen(false); void swapProducts(picked); }} />
+      <AiImproveModal open={openModal === 'ai-improve'} onClose={() => setOpenModal(null)} onlySectionId={selectedId} />
       <MakeSendModal
         open={sendOpen}
         onClose={() => setSendOpen(false)}
@@ -396,14 +474,16 @@ function PhoneShell({ html, loading, error, selectedId, onTap, inbox, small = fa
 }) {
   const box = useRef<HTMLDivElement | null>(null);
   const [h, setH] = useState(640);
+  const [boxW, setBoxW] = useState(PHONE_W + 24);
   useEffect(() => {
     const el = box.current;
     if (!el || typeof ResizeObserver === 'undefined') return;
-    const ro = new ResizeObserver(() => setH(Math.max(360, Math.min(small ? 620 : 700, el.clientHeight - 24))));
+    const ro = new ResizeObserver(() => { setH(Math.max(360, Math.min(small ? 620 : 700, el.clientHeight - 24))); setBoxW(el.clientWidth); });
     ro.observe(el);
     return () => ro.disconnect();
   }, [small]);
-  const w = small ? 280 : PHONE_W;
+  // ★ 2026-10-10 폰 틀(폭 + 20)이 칸보다 넓으면 360 폭 단말에서 넘친다 → 칸 폭에 맞춰 줄인다(최소 260)
+  const w = small ? 280 : Math.max(260, Math.min(PHONE_W, boxW - 24));
   const headH = inbox ? 64 : 0;
   return (
     <div ref={box} className="flex-1 min-h-0 w-full flex justify-center">

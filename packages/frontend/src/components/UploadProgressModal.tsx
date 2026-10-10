@@ -57,7 +57,11 @@ export default function UploadProgressModal({
 
         <div className={CUI_MODAL_HEAD}>
           <div className="flex items-center gap-3 min-w-0">
-            <div className={`h-9 w-9 shrink-0 rounded-xl text-white grid place-items-center ${tone.badge}`}>
+            {/* ★ 2026-10-10 대시보드 모션 H — 끝나는 순간 상태 아이콘이 한 번 튀어나온다(key = 상태 · 바뀔 때만 다시 붙음) */}
+            <div
+              key={uploadProgress.status}
+              className={`h-9 w-9 shrink-0 rounded-xl text-white grid place-items-center ${tone.badge} ${running ? '' : 'animate-in zoom-in-50 fade-in duration-300 motion-reduce:animate-none'}`}
+            >
               {done
                 ? <CheckCircle2 className="w-4 h-4" strokeWidth={1.9} />
                 : failed
@@ -78,8 +82,10 @@ export default function UploadProgressModal({
           {/* 진행바 */}
           <div className="h-2 w-full rounded-full bg-neutral-100 overflow-hidden">
             <div
-              className={`h-full rounded-full transition-all duration-500 ease-out ${tone.bar}`}
-              style={{ width: `${uploadProgress.percent || 0}%` }}
+              // ★ 2026-10-10 진행 중 = 2초마다 오는 값 사이를 같은 속도로 이어 간다(멈췄다 뛰지 않게) · 끝 = 0.3초 · 움직임 줄이기 = 바로
+              //   시간은 인라인 · 임의 길이 duration 클래스는 애니메이션 플러그인과 이름이 겹쳐 CSS 가 생성되지 않는다(빌드 경고 ambiguous)
+              className={`h-full rounded-full transition-[width] motion-reduce:transition-none ${running ? 'ease-linear' : 'ease-out'} ${tone.bar}`}
+              style={{ width: `${uploadProgress.percent || 0}%`, transitionDuration: running ? '1900ms' : '300ms' }}
             />
           </div>
 
@@ -105,7 +111,7 @@ export default function UploadProgressModal({
 
           {running && (
             <div className={CUI_INFO}>
-              <Loader2 className={`${CUI_INFO_ICON} animate-spin`} size={15} strokeWidth={1.9} />
+              <Loader2 className={`${CUI_INFO_ICON} motion-safe:animate-spin`} size={15} strokeWidth={1.9} />
               <p className={CUI_INFO_TEXT}>창을 닫거나 다른 일을 하셔도 처리는 계속됩니다.</p>
             </div>
           )}

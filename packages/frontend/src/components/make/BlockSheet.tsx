@@ -5,7 +5,7 @@
  * 그 밖의 블록 = 기존 블록 편집기(SectionPropsEditor)를 그대로(make.css .mk-editor 가 변수를 정의한다 · 편집기 코드 무수정).
  * 고친 값은 스토어에 바로 들어가고 [저장] = 즉시 저장(자동 저장도 따로 돈다).
  */
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, type ReactNode } from 'react';
 import { X, Globe, RotateCcw, Type, Trash2, Loader2 } from 'lucide-react';
 import SectionPropsEditor from '../dm/panels/SectionPropsEditor';
 import type { Section } from '../../utils/dm-section-defaults';
@@ -16,7 +16,7 @@ import '../../styles/make.css';
 const CTA_LABEL_MAX = 13;
 
 export default function BlockSheet({
-  section, onUpdate, onClose, onRemove, onDone, saving, suggestions, onAiRewrite,
+  section, onUpdate, onClose, onRemove, onDone, saving, suggestions, onAiRewrite, topSlot,
 }: {
   section: Section;
   onUpdate: (patch: Record<string, any>) => void;
@@ -26,6 +26,8 @@ export default function BlockSheet({
   saving?: boolean;
   suggestions: Array<{ label: string; url: string; icon: 'home' | 'recent' }>;
   onAiRewrite?: () => void;
+  /** ★ 2026-10-10 블록 편집기 위에 얹는 칸(상품 블록 = [몰에서 상품 바꾸기]) · 미지정 = 지금 그대로 */
+  topSlot?: ReactNode;
 }) {
   const urlRef = useRef<HTMLInputElement | null>(null);
   const isCta = section.type === 'cta';
@@ -44,7 +46,7 @@ export default function BlockSheet({
 
   return (
     <div className="fixed inset-x-0 bottom-0 z-[900] flex justify-center px-3 pointer-events-none">
-      <div className="mk-sheet-in pointer-events-auto w-full max-w-[520px] max-h-[62vh] flex flex-col rounded-t-2xl border border-slate-300 border-b-0 bg-white shadow-[0_-20px_50px_-20px_rgba(0,0,0,0.8)]" role="dialog" aria-label={`${blockLabel(section)} 고치기`}>
+      <div className="mk-sheet-in pointer-events-auto w-full max-w-[520px] mk-max-h-62 flex flex-col rounded-t-2xl border border-slate-300 border-b-0 bg-white shadow-[0_-20px_50px_-20px_rgba(0,0,0,0.8)]" role="dialog" aria-label={`${blockLabel(section)} 고치기`}>
         <div className="flex justify-center pt-2"><span className="w-10 h-1 rounded-full bg-slate-200" /></div>
         <div className="flex items-center justify-between px-5 pt-2 pb-3">
           <b className="text-[16px] text-slate-900">{blockLabel(section)} 고치기</b>
@@ -77,6 +79,7 @@ export default function BlockSheet({
             </div>
           ) : (
             <div className="mk-editor">
+              {topSlot}
               <SectionPropsEditor key={section.id} section={section} onUpdate={onUpdate} />
             </div>
           )}

@@ -18,6 +18,8 @@ export interface SwrClassification<T> {
    */
   state: 'fresh' | 'stale' | 'legacy' | 'miss';
   value?: T;
+  /** ★ 2026-10-10 fresh·stale 값을 계산한 시각(epoch ms). legacy·miss = 없음 */
+  at?: number;
 }
 
 interface SwrEnvelope<T> {
@@ -41,7 +43,7 @@ export function classifySwrEntry<T>(
   }
   if (parsed && parsed.__swr === 1 && typeof parsed.at === 'number') {
     const ageSec = (nowMs - parsed.at) / 1000;
-    return { state: ageSec <= softTtlSec ? 'fresh' : 'stale', value: parsed.v as T };
+    return { state: ageSec <= softTtlSec ? 'fresh' : 'stale', value: parsed.v as T, at: parsed.at };
   }
   // 구형식(엔벨로프 없이 payload 직저장): 물리 TTL이 60초였으므로 항상 60초 내 값 — fresh 취급
   return { state: 'legacy', value: parsed as T };

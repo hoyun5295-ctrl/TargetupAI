@@ -37,7 +37,7 @@ import { formatDateValue, getOpt080Number, buildAdMessage, buildAdSubject } from
 import { resolveJourneyAdFlag } from '../utils/journey-ad-policy';
 import { loadPlanContext, canUseFeature, requirePlanFeature, isBetaAccessAllowed, isAiOperatorAllowed } from '../utils/plan-guard';
 import { snsPublishEnabled } from '../utils/sns-constants';   // ★ 2026-09-20 허브 SNS 플래그(§3-11)
-import { oneLineFactsEnabled, oneLineGaps, sanitizeLineFacts, pickCopyCVariant } from '../utils/one-line-facts';   // ★ 2026-10-05 한줄로 시그니처
+import { oneLineFactsEnabled, oneLineGaps, sanitizeLineFacts, pickCopyCVariant, lineProductTerms, lineBenefitPercents, sanitizeLineReads, applyLineReads } from '../utils/one-line-facts';   // ★ 2026-10-05 한줄로 시그니처 · ★1010 몰 후보 검색어
 import { getCompanyCosts } from '../config/defaults';
 // ★ D209+ (Harold 명시 2026-05-22) Phase D 비용 안전 매트릭스 — 회사별 월 한도 + cache 통계
 import { getMonthlyUsage, getDailyUsage, getModelBreakdown, checkAiRateLimit, AiRateLimitExceeded, recordAiCall } from '../utils/ai-rate-limit';
@@ -1171,7 +1171,16 @@ router.post('/one-line/gaps', (req: Request, res: Response) => {
   const companyId = req.user?.companyId;
   const line = typeof req.body?.line === 'string' ? req.body.line.slice(0, 2000) : '';
   const enabled = oneLineFactsEnabled(companyId);
-  return res.json({ success: true, enabled, gaps: enabled ? oneLineGaps(line) : { benefit: false } });
+  // ★ 2026-10-10 H3 — 혜택 판정은 사진에서 읽은 조각의 숫자를 지운 글로(사진에만 혜택이 있으면 묻는다) · 검색어는 원래 글로
+  const reads = sanitizeLineReads(req.body?.read_texts);
+  const judged = applyLineReads(line, reads === 'invalid' ? undefined : reads, false);
+  // ★ 2026-10-10 한 줄 DM 강화 — 몰 후보 검색어 · 혜택 % 값(여전히 AI 0 · DB 0 · 판정이 아니라 찾기 입력). 스위치 밖 = 빈 값.
+  return res.json({
+    success: true, enabled,
+    gaps: enabled ? oneLineGaps(judged) : { benefit: false },
+    product_terms: enabled ? lineProductTerms(line) : [],
+    benefit_percents: enabled ? lineBenefitPercents(line) : [],
+  });
 });
 
 // ============================================================

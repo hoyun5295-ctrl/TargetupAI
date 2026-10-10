@@ -52,7 +52,7 @@ import DmQuickBar from '../components/dm/DmQuickBar';
 // ★ 2026-09-14 T5·T6 AI 자동제작 — 목록 카드띠(입구) · 편집 캔버스 위 결과 바 · 노출 스위치(신규 ENV)
 import AiBuildEntryStrip from '../components/ai-build/AiBuildEntryStrip';
 import BuildResultBar from '../components/ai-build/BuildResultBar';
-import { peekBuildResult, clearBuildResult, useAiAutoBuildEnabled, type BuildResultHandoff } from '../utils/ai-build';
+import { peekBuildResult, clearBuildResult, useAiAutoBuildEnabled, saveBuildResult, type BuildResultHandoff } from '../utils/ai-build';
 import AbTestModal from '../components/dm/modals/AbTestModal';
 import ModalBase, { ModalButton } from '../components/dm/modals/ModalBase';
 import '../styles/dm-builder.css';
@@ -67,11 +67,11 @@ import DmEditScreen from '../components/make/DmEditScreen';
 import MakeSendModal from '../components/make/MakeSendModal';
 import DmDetailModal from '../components/make/DmDetailModal';
 import { ListHead, DmChip, Meter, fmtDate } from '../components/make/HomeParts';
-import { dmChipStatus, fixItemsOf, type ChipStatus, type FixItem } from '../utils/make-flow';
+import { dmChipStatus, fixItemsOf, makeResultPath, type ChipStatus, type FixItem } from '../utils/make-flow';
 // ★ 2026-10-05 한줄로 시그니처(설계서 docs/2026-10-05-hanjul-signature-design.md §5) — 한 줄 판정 · 확인 창 혜택 칸 · 완성도 줄
 import ZoneCompletion from '../components/zone/ZoneCompletion';
 import { LineFactsInline, typedBenefit, type LineFactsValues } from '../components/zone/LineFacts';
-import { fetchOneLineGaps, newAttemptToken, appendToOneLine } from '../utils/one-line';
+import { fetchOneLineGaps, appendToOneLine, requestLineDm, lineResultNotes, readPartOf, readsInLine, type LineMallCandidate, type LineProductRef } from '../utils/one-line';
 import { CONFIRM_CREDIT_COSTS } from '../constants/credit';
 
 const LINE_BENEFIT_SUGGEST = '혜택을 적어 주시면 첫 줄이 혜택으로 시작해요';
@@ -174,6 +174,14 @@ export default function DmBuilderPage() {
   //   보내기 전에 N곳 = 서버 검수의 넘길 수 없는 치명 + 첫 발행 관문 앞 두 칸(링크 결함 · 채울 자리)과 같은 기준.
   // ★ 2026-10-05 한줄로 시그니처 — 확인 창 혜택 칸 값 · 한 줄로 만든 DM 의 완성도 줄(서버 검수 + 첫 발행 관문 앞 두 칸 + 반영 검산)
   const [lineValues, setLineValues] = useState<LineFactsValues>({});
+  // ★ 2026-10-10 한 줄 DM 강화 — 확인 창의 몰 상품 칸(고른 후보 · 후보가 실제로 보였는가) · 판정 조회 중 두 번 눌림 막기
+  const [lineMallPicked, setLineMallPicked] = useState<LineMallCandidate[]>([]);
+  const [lineMallShown, setLineMallShown] = useState(false);
+  const lineCheckingRef = useRef(false);
+  // ★ 2026-10-10 H3 — 한 줄 칸에 붙인 사진 글 조각 · 「사진에서 읽은 숫자도 그대로 쓰기」(기본 꺼짐)
+  const [lineReads, setLineReads] = useState<string[]>([]);
+  const [lineReadOk, setLineReadOk] = useState(false);
+  const addLineRead = (text: string) => { const r = readPartOf(text); if (r) setLineReads((prev) => [...prev.filter((x) => x !== r), r].slice(-5)); };
   const [lineResult, setLineResult] = useState<{ dmId: string; line: string; gapBenefit: boolean; benefit: string | null; missing: string[] } | null>(null);
   const [lineValidation, setLineValidation] = useState<any>(null);
   const [lineChecking, setLineChecking] = useState(false);
@@ -253,7 +261,7 @@ export default function DmBuilderPage() {
   const DM_PAGE_SIZE = 10;
   const [currentPage, setCurrentPage] = useState(1);
   // 빠른시작·자연어 생성 전 5크레딧 차감 확인 (Harold 명시 — 즉시 차감 X)
-  const [pendingGen, setPendingGen] = useState<{ prompt?: string; scenario?: string; desc: string; oneLine?: boolean; askBenefit?: boolean } | null>(null);
+  const [pendingGen, setPendingGen] = useState<{ prompt?: string; scenario?: string; desc: string; oneLine?: boolean; askBenefit?: boolean; terms?: string[]; percents?: number[]; reads?: string[] } | null>(null);
   // ★ 2026-08-13 원스텝 — 질문에 답하면 그 답이 마스터프롬프트가 되어 생성으로 이어진다.
   const [oneStepOpen, setOneStepOpen] = useState(false);
 
@@ -341,7 +349,7 @@ export default function DmBuilderPage() {
   const applyAiGenerated = useDmBuilderStore((s) => s.applyAiGenerated);
   const save = useDmBuilderStore((s) => s.save);
 
-  const handleAutoGenerate = useCallback(async (opts: { prompt?: string; scenario?: string; oneLine?: boolean; facts?: { benefit: string | null } }) => {
+  const handleAutoGenerate = useCallback(async (opts: { prompt?: string; scenario?: string; oneLine?: boolean; facts?: { benefit: string | null }; products?: LineProductRef[]; reads?: string[]; readLicensed?: boolean }) => {
     if (customerGate.isEmpty) { setShowDataGate(true); return; }
     if (generating) return;
     if (!opts.prompt && !opts.scenario) {
@@ -359,19 +367,52 @@ export default function DmBuilderPage() {
 
     try {
       const titleHint = opts.scenario || opts.prompt?.slice(0, 30) || '신규 DM';
-      // 1. 신규 DM 생성 (모드는 AI 응답으로 applyAiGenerated에서 확정)
-      createNew({ title: titleHint });
-      // 2. AI 통합 생성 호출 (one-shot)
-      const res = await api.post('/dm/ai/one-shot-generate', {
-        prompt: opts.prompt || '',
-        scenario: opts.scenario,
-        // ★ 2026-10-05 한줄로 시그니처 — 한 줄 입구 표시 · 칸에 적은 답 · 시도 토큰(서버가 스위치를 다시 본다 · 스위치 밖이면 지금 그대로)
-        ...(opts.oneLine ? { one_line: true, attempt_token: newAttemptToken(), ...(opts.facts ? { facts: opts.facts } : {}) } : {}),
-      });
-      if (!res.data?.success) {
-        throw new Error(res.data?.error || 'AI 생성 실패');
+      let generated: any;
+      if (opts.oneLine) {
+        // ★ 2026-10-10 한 줄 DM 강화 — 서버가 초안을 먼저 만들고 차감한다(land:'result') → 결과 화면 착지. 고른 몰 상품은 상품번호만 보낸다.
+        //   서버 스위치가 그 사이 꺼졌으면 초안 없이 섹션이 온다 → 아래 옛 흐름(편집기)으로 이어 간다(만든 결과를 버리지 않는다).
+        const r = await requestLineDm({ line: opts.prompt || '', facts: opts.facts, products: opts.products, reads: opts.reads, readLicensed: opts.readLicensed });
+        if (!r.ok) {
+          if (r.code === 'MALL_PRODUCTS_UNAVAILABLE') {
+            const reasons = r.excluded.map((e) => `${e.name ? `${e.name}: ` : ''}${e.reason}`).slice(0, 3).join(' · ');
+            const line = opts.prompt || '';
+            const facts = opts.facts;
+            setConfirm({
+              mode: 'warning', title: '고른 상품을 지금 쓸 수 없어요',
+              description: `${reasons ? `${reasons}. ` : ''}상품 없이 만들까요? 크레딧은 아직 쓰지 않았어요.`,
+              confirmLabel: '상품 없이 만들기',
+              onConfirm: () => { void handleAutoGenerateRef.current?.({ prompt: line, oneLine: true, facts, products: [], reads: opts.reads, readLicensed: opts.readLicensed }); },
+            });
+            return;
+          }
+          throw new Error(r.code === 'INSUFFICIENT_CREDIT' ? '크레딧이 부족합니다. 충전 후 이용해주세요.' : (r.error || 'AI 생성 실패'));
+        }
+        generated = r.data || {};
+        const landed = String(generated.draft_id || '');
+        if (landed) {
+          clearInterval(stepTimer);
+          saveBuildResult({
+            channel: 'dm', draftId: landed, materials: { notes: lineResultNotes(generated) }, quoteTotal: CONFIRM_CREDIT_COSTS['dm-ai-generate'] ?? 0,
+            heroFallback: false, benefitStripped: 0, createdAt: Date.now(),
+            origin: { kind: 'line', line: opts.prompt || '', ...(opts.facts ? { facts: opts.facts } : {}), ...(opts.products ? { products: opts.products } : {}), ...(opts.reads && opts.reads.length > 0 ? { reads: opts.reads, readLicensed: opts.readLicensed === true } : {}) },
+          });
+          setNaturalLanguage('');
+          setLineReads([]);
+          navigate(makeResultPath('dm', landed));
+          return;
+        }
+        createNew({ title: titleHint });
+      } else {
+        // 1. 신규 DM 생성 (모드는 AI 응답으로 applyAiGenerated에서 확정)
+        createNew({ title: titleHint });
+        // 2. AI 통합 생성 호출 (one-shot)
+        const res = await api.post('/dm/ai/one-shot-generate', { prompt: opts.prompt || '', scenario: opts.scenario });
+        if (!res.data?.success) {
+          throw new Error(res.data?.error || 'AI 생성 실패');
+        }
+        generated = res.data.data || {};
       }
-      const { sections, brand_kit, pages, layout_mode, one_line: lineMeta, coverage } = res.data.data || {};
+      const { sections, brand_kit, pages, layout_mode, one_line: lineMeta, coverage } = generated;
       // 3. 섹션 + brandKit + 레이아웃 모드/페이지 적용 (slides면 여러 페이지)
       applyAiGenerated(sections || [], brand_kit, opts.prompt || opts.scenario || '', { pages, layoutMode: layout_mode });
       // 4. 신규 dmId 저장
@@ -409,7 +450,10 @@ export default function DmBuilderPage() {
       setGenerationStep(-1);
       // ★ 2026-10-05 한줄로 시그니처 §3-1 — 실패해도 한 줄은 지우지 않는다(성공했을 때만 비운다 · 다시 입력 요구 0)
     }
-  }, [generating, createNew, applyAiGenerated, save, setToast, customerGate.isEmpty]);
+  }, [generating, createNew, applyAiGenerated, save, setToast, customerGate.isEmpty, navigate]);
+  // ★ 2026-10-10 「상품 없이 만들기」 확인 창이 그때의 최신 함수를 부르게(확인 창은 나중에 눌린다)
+  const handleAutoGenerateRef = useRef<typeof handleAutoGenerate | null>(null);
+  handleAutoGenerateRef.current = handleAutoGenerate;
 
   // ★ 2026-07-07(4) 행사 캠페인 — EventCampaignModal이 생성해둔 DM 초안 자동 적용 (30분 TTL, 1회 소비)
   useEffect(() => {
@@ -968,12 +1012,25 @@ export default function DmBuilderPage() {
   const dmOneLine = zoneModule('dm').oneLine!;
   const startOneLine = async () => {
     const t = naturalLanguage.trim();
-    if (!t || generating) return;
+    if (!t || generating || lineCheckingRef.current) return;
     // ★ 2026-10-05 한줄로 시그니처 — 판정은 서버(AI 0 · 무과금). 걸리면 원래 뜨던 확인 창 안에 혜택 칸이 하나 생긴다(새 단계 0).
     //   조회 실패 = 지금 그대로(묻지 않는다).
-    const g = await fetchOneLineGaps(t);
-    setLineValues({});
-    setPendingGen({ prompt: t, desc: `"${t}" 내용으로 AI가 섹션과 카피를 자동 생성합니다.`, oneLine: !!g?.enabled, askBenefit: !!g?.enabled && g.gaps.benefit });
+    // ★ 2026-10-10 몰 후보 검색어가 오면 같은 확인 창에 몰 상품 칸(체크 0 · 누른 것만 담는다) · 판정 조회 중 두 번 눌러도 한 번만.
+    lineCheckingRef.current = true;
+    try {
+      const reads = readsInLine(t, lineReads);
+      const g = await fetchOneLineGaps(t, reads);
+      setLineValues({});
+      setLineMallPicked([]);
+      setLineMallShown(false);
+      setLineReadOk(false);
+      setPendingGen({
+        prompt: t, desc: `"${t}" 내용으로 AI가 섹션과 카피를 자동 생성합니다.`, oneLine: !!g?.enabled, askBenefit: !!g?.enabled && g.gaps.benefit,
+        terms: g?.enabled ? g.productTerms : [], percents: g?.enabled ? g.benefitPercents : [], reads: g?.enabled ? reads : [],
+      });
+    } finally {
+      lineCheckingRef.current = false;
+    }
   };
   return (
     <ZoneFrame
@@ -990,13 +1047,14 @@ export default function DmBuilderPage() {
           extra: (
         <ImageToCopyButton
           label="이미지로 불러오기"
-          onExtracted={(t) => setNaturalLanguage((prev) => appendToOneLine(prev, t))}
+          onExtracted={(t) => { setNaturalLanguage((prev) => appendToOneLine(prev, t)); addLineRead(t); }}
           onStructured={({ events, text }) => {
             // ★ 기획전 스샷 → 행사별 [히어로+상품 카드] 즉시 조립 (AI 생성 없이 코드 매핑 — 크레딧 추가 0)
             try {
               const sections = buildDmSectionsFromEvents(events);
               if (sections.length === 0) {
                 setNaturalLanguage((prev) => appendToOneLine(prev, text));
+                addLineRead(text);
                 return;
               }
               createNew({ title: deriveDmTitleFromEvents(events) });
@@ -1008,6 +1066,7 @@ export default function DmBuilderPage() {
             } catch {
               // 조립 실패 = 산문 폴백(기존 흐름 무손상)
               setNaturalLanguage((prev) => appendToOneLine(prev, text));
+              addLineRead(text);
             }
           }}
           disabled={generating}
@@ -1226,7 +1285,17 @@ export default function DmBuilderPage() {
         open={!!pendingGen}
         source="dm-ai-generate"
         description={pendingGen?.desc}
-        extraContent={pendingGen?.askBenefit ? <LineFactsInline values={lineValues} onChange={setLineValues} /> : undefined}
+        title={pendingGen && (pendingGen.askBenefit || (pendingGen.terms?.length ?? 0) > 0 || (pendingGen.reads?.length ?? 0) > 0) ? '만들기 전에 확인해 주세요' : undefined}
+        scrollBody={!!pendingGen && (!!pendingGen.askBenefit || (pendingGen.terms?.length ?? 0) > 0 || (pendingGen.reads?.length ?? 0) > 0)}
+        extraContent={pendingGen && (pendingGen.askBenefit || (pendingGen.terms?.length ?? 0) > 0 || (pendingGen.reads?.length ?? 0) > 0) ? (
+          <LineFactsInline
+            values={lineValues}
+            onChange={setLineValues}
+            askBenefit={!!pendingGen.askBenefit}
+            mall={(pendingGen.terms?.length ?? 0) > 0 ? { terms: pendingGen.terms || [], percents: pendingGen.percents || [], picked: lineMallPicked, onPicked: setLineMallPicked, onShown: setLineMallShown } : undefined}
+            readCheck={(pendingGen.reads?.length ?? 0) > 0 ? { checked: lineReadOk, onChange: setLineReadOk } : undefined}
+          />
+        ) : undefined}
         onConfirm={() => {
           const g = pendingGen;
           setPendingGen(null);
@@ -1234,6 +1303,10 @@ export default function DmBuilderPage() {
             prompt: g.prompt, scenario: g.scenario, oneLine: g.oneLine,
             // 칸을 보여 줬으면 답을 함께 보낸다(비우면 없음 = null · 서버가 [혜택] 줄로 원문에 붙인다)
             ...(g.askBenefit ? { facts: { benefit: lineValues.benefit === null ? null : typedBenefit(lineValues) } } : {}),
+            // ★ 2026-10-10 후보가 실제로 보였으면 고른 상품(빈 배열 포함)을 보낸다 · 못 보였으면(0건 · 실패 · 미연동) 보내지 않는다 = 지금처럼
+            ...((g.terms?.length ?? 0) > 0 && lineMallShown ? { products: lineMallPicked.map((p) => ({ provider: p.provider, no: p.no })) } : {}),
+            // ★ 2026-10-10 H3 — 사진 글 조각은 따로 보낸다(체크가 없으면 서버가 그 조각의 숫자를 지우고 쓴다)
+            ...((g.reads?.length ?? 0) > 0 ? { reads: g.reads, readLicensed: lineReadOk } : {}),
           });
         }}
         onCancel={() => setPendingGen(null)}

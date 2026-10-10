@@ -28,7 +28,7 @@ import {
 } from '../components/make/MakeInputs';
 import {
   buildErrorMessage, buildMaterialsPayload, clearBuildDraft, loadBuildDraft, newAttemptToken, readSummaryOf,
-  saveBuildDraft, saveBuildResult,
+  saveBuildDraft, saveBuildResult, bindBuildDraftResult,
   type BuildCardValue, type BuildChannel, type BuildImageRole, type BuildImageValue, type BuildProductValue, type BuildReadResult,
 } from '../utils/ai-build';
 import { makeResultPath } from '../utils/make-flow';
@@ -329,6 +329,8 @@ export default function QuickCampaignPage() {
       const draftId = String(data.draft_id || '');
       if (!draftId) throw new Error('완성본은 만들었지만 초안을 찾지 못했어요. 목록에서 확인해 주세요.');
       saveBuildResult({ channel, draftId, materials: data.materials || {}, quoteTotal: quote.total, heroFallback: data.heroFallback === true, benefitStripped: Number(data.benefitStripped) || 0, createdAt: Date.now() });
+      // ★ 2026-10-10 이 재료로 만든 결과를 재료 초안에 찍는다(결과 화면은 결박된 재료만 쓴다 · 어제 남은 재료로 차감 0)
+      bindBuildDraftResult(draftId);
       attemptRef.current = null;
       setPhase('done');
       navigate(makeResultPath(channel === 'email' ? 'email' : 'dm', draftId));

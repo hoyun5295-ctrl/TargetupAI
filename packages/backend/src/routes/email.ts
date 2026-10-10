@@ -98,14 +98,19 @@ import { normalizeEmailDesign } from '../utils/email/email-tokens';
 import { resolveEmailSectionsForCustomer } from '../utils/email/email-personalization';
 import { rate, relativeDelta, pointDelta } from '../utils/email/email-analytics-calc';
 import { buildPreviewCustomers } from '../utils/inapp-personalization';
-import { getCompanyBrandKit } from '../utils/dm/dm-brand-kit';
+import { getCompanyBrandKit, getCompanyBrandKitRaw } from '../utils/dm/dm-brand-kit';
 import { normalizeEventText } from '../utils/event-brief';
 // ★ 2026-07-08 연동 몰 상품 자동 첨부 (이메일 상품 블록 항목명 → 몰 이름매칭 이미지·링크)
 import { attachMallImagesToProductCarousels } from '../utils/mall-product-match';
 import { industryLabel } from '../utils/industry-codes';
 import type { Section } from '../utils/dm/dm-section-registry';
 import { checkCredit, deductCreditSafe, InsufficientCreditError, isChargedByKey } from '../utils/ai-credit';
-import { oneLineFactsEnabled, oneLineGaps, isValidAttemptToken, buildOneLineIdempotencyKey, oneLineInflightKey } from '../utils/one-line-facts';   // ★ 2026-10-05 한줄로 시그니처
+import { oneLineFactsEnabled, oneLineGaps, isValidAttemptToken, buildOneLineIdempotencyKey, oneLineInflightKey, sanitizeLineFacts, buildLineEventText, sanitizeLineProducts, lineProductsKey, sanitizeLineReads, applyLineReads } from '../utils/one-line-facts';   // ★ 2026-10-05 한줄로 시그니처 · ★1010 혜택 답 · 몰 상품 확정
+import { resolveLineMallCards, placeLineMallCards, linePriceNotes, linePinnedPrimary, lineEmailDesign, type LineMallCard, type LineMallExcluded } from '../utils/line-mall-cards';   // ★ 2026-10-10 한 줄 이메일 강화
+import { resolveIntegrationActor } from '../utils/integration-scope';
+import { getBrandBasicInfo } from '../utils/brand-basic-info';
+import { createSection } from '../utils/dm/dm-section-registry';
+import { randomUUID } from 'crypto';
 import { getCreditCost } from '../utils/ai-credit-calc';
 // ★ 2026-09-06 S6 재료 입구(이미지·행사 텍스트 → 아웃리치 브랜드 이메일 시안 경로)
 import { generateEmailFromMaterials, quickMaterialsEnabled, generateFromBuildMaterials, buildGenerateResponse } from '../utils/campaign-quick';
@@ -1154,8 +1159,29 @@ router.post('/ai/generate-sections', async (req: Request, res: Response) => {
     //   이메일은 요청 글이 이미 혜택 근거다(email-ai generateEmailSections 의 근거 = 요청 · 원문) → 원문 자리는 옮기지 않는다.
     //   빠진 혜택 · 기간은 생성기가 남긴 자리에서 화면이 0크레딧으로 채운다.
     const lineOn = req.body?.one_line === true && oneLineFactsEnabled(auth.companyId);
+    // ★ 2026-10-10 한 줄 이메일 강화(설계서 docs/2026-10-10-oneline-dm-email-design.md §3) — 생성 전 묻는 창의 답(혜택) · 사람이 고른 몰 상품(provider + 상품번호만).
+    //   이메일은 요청 글이 혜택 근거라 혜택 답은 요청 글에 [혜택] 줄로 붙인다(원문 자리로 옮기지 않는다 · 시그니처 §5). 스위치 밖인데 오면 400.
+    const oneLineReq = req.body?.one_line === true;
+    const lineFacts = oneLineReq ? sanitizeLineFacts(req.body?.facts) : undefined;
+    if (lineFacts === 'invalid') {
+      return res.status(400).json({ success: false, error: '혜택은 300자 이내로 적어 주세요.', code: 'LINE_FACTS_INVALID' });
+    }
+    const lineProducts = oneLineReq ? sanitizeLineProducts(req.body?.products) : undefined;
+    if (lineProducts === 'invalid') {
+      return res.status(400).json({ success: false, error: '고른 상품을 다시 확인해 주세요.', code: 'LINE_PRODUCTS_INVALID' });
+    }
+    // ★ 2026-10-10 Harold 결정 H3 — 사진에서 읽은 글 조각은 체크가 없으면 숫자 값을 지우고 쓴다(면허 아님)
+    const lineReads = oneLineReq ? sanitizeLineReads(req.body?.read_texts) : undefined;
+    if (lineReads === 'invalid') {
+      return res.status(400).json({ success: false, error: '사진에서 읽은 글을 다시 확인해 주세요.', code: 'LINE_READS_INVALID' });
+    }
+    if ((lineFacts !== undefined || lineProducts !== undefined || lineReads !== undefined) && !lineOn) {
+      return res.status(400).json({ success: false, error: '이 기능은 아직 열리지 않았습니다. 화면을 새로 고친 뒤 다시 시도해 주세요.', code: 'FEATURE_DISABLED' });
+    }
+    const linePrompt = lineOn ? applyLineReads(prompt, lineReads, req.body?.read_licensed === true) : prompt;
+    const genPrompt = lineOn && lineFacts ? buildLineEventText(linePrompt, lineFacts) : linePrompt;
     const attemptToken = lineOn && isValidAttemptToken(req.body?.attempt_token) ? String(req.body.attempt_token) : null;
-    const idemKey = attemptToken ? buildOneLineIdempotencyKey(auth.companyId, 'email', attemptToken, { prompt, scenario: scenario || null, isAd, eventText }) : undefined;
+    const idemKey = attemptToken ? buildOneLineIdempotencyKey(auth.companyId, 'email', attemptToken, { prompt: genPrompt, scenario: scenario || null, isAd, eventText, ...(lineProducts !== undefined ? { products: lineProductsKey(lineProducts) } : {}) }) : undefined;
     const lineLock = attemptToken ? oneLineInflightKey(auth.companyId, 'email', attemptToken) : '';
     if (lineLock && !tryAcquireInflight(lineLock)) {
       return res.status(409).json({ success: false, error: '지금 만드는 중이에요. 완성되면 이어서 진행해 주세요.', code: 'IN_FLIGHT' });
@@ -1170,14 +1196,53 @@ router.post('/ai/generate-sections', async (req: Request, res: Response) => {
           return res.status(409).json({ success: false, error: '이 요청은 이미 처리됐어요. 다시 만들려면 [만들기]를 한 번 더 눌러 주세요.', code: 'ALREADY_DONE' });
         }
       }
+      // ★ 2026-10-10 고른 상품은 AI 호출 · 차감 앞에서 몰에서 다시 읽는다(재조회 ok 만 카드 · 전부 빠지면 409 · 돈 0).
+      let lineCards: LineMallCard[] = [];
+      let lineExcluded: LineMallExcluded[] = [];
+      if (lineProducts && lineProducts.length > 0) {
+        const r = await resolveLineMallCards(auth.companyId, await resolveIntegrationActor(req.user), lineProducts);
+        lineCards = r.cards;
+        lineExcluded = r.excluded;
+        if (lineCards.length === 0) {
+          return res.status(409).json({ success: false, error: '고른 상품을 지금 쓸 수 없어요. 상품 없이 만들 수 있어요.', code: 'MALL_PRODUCTS_UNAVAILABLE', excluded: lineExcluded });
+        }
+      }
       const cost = getCreditCost('email-ai-generate'); // 3
       await checkCredit(auth.companyId, cost);
-      const result = await generateEmailSections({ companyId: auth.companyId, userId: auth.userId, prompt, scenario, isAd, eventText });
+      const result = await generateEmailSections({ companyId: auth.companyId, userId: auth.userId, prompt: genPrompt, scenario, isAd, eventText });
       await deductCreditSafe({ companyId: auth.companyId, cost, source: 'email-ai-generate', createdBy: auth.userId, ...(idemKey ? { idempotencyKey: idemKey } : {}) });
-      // ★ 2026-07-08 연동 몰 상품 자동 첨부 — 상품 슬라이드 항목명 이름매칭 → 이미지·링크·정가·할인가(빈 값만, 실패 skip). 발송 코어 무관(생성 결과 후처리).
-      try { await attachMallImagesToProductCarousels(auth.companyId, (result as any)?.sections); } catch { /* best-effort */ }
+      if (lineProducts === undefined) {
+        // ★ 2026-07-08 연동 몰 상품 자동 첨부 — 상품 슬라이드 항목명 이름매칭 → 이미지·링크·정가·할인가(빈 값만, 실패 skip). 발송 코어 무관(생성 결과 후처리).
+        // ★ 2026-10-10 후보를 보여 준 한 줄 요청(products 칸이 옴)은 이름 자동 첨부를 하지 않는다(확정은 사람의 탭만).
+        try { await attachMallImagesToProductCarousels(auth.companyId, (result as any)?.sections); } catch { /* best-effort */ }
+      } else if (lineCards.length > 0 && Array.isArray((result as any)?.sections)) {
+        // ★ 2026-10-10 확정 카드 = 첫 상품 슬라이드 통째 교체 · 다른 상품 슬라이드 제거(AI 가 쓴 상품 · 가격이 나가지 않게) · 없으면 히어로 뒤
+        (result as any).sections = placeLineMallCards((result as any).sections, lineCards, { newId: () => randomUUID(), makeCarousel: (order) => createSection('product_carousel', randomUUID(), order) });
+      }
+      if (!lineOn) return res.json({ success: true, data: result });
       // ★ 2026-10-05 한줄로 시그니처 — 화면이 완성도 줄 · 보강 시트를 그릴지(스위치 켠 회사의 한 줄 요청만)
-      return res.json({ success: true, data: lineOn ? { ...result, one_line: { enabled: true, gaps: oneLineGaps(prompt) } } : result });
+      // ★ 2026-10-10 회사 디자인(저장 주색 · 회사 또는 업종 아트디렉션 · 프리헤더) · 결과 안내(뺀 상품 · 한 줄 값과 몰 값이 다를 때)
+      const companyKitRaw = (await getCompanyBrandKitRaw(auth.companyId).catch(() => null)) as Record<string, unknown> | null;
+      const basic = await getBrandBasicInfo(auth.companyId).catch(() => null);
+      const design = lineEmailDesign({
+        pinned: linePinnedPrimary(companyKitRaw),
+        companyArtDirection: companyKitRaw?.art_direction ?? null,
+        industry: String((basic as any)?.industry_code || '').trim() || null,
+        preheader: typeof (result as any)?.preheader === 'string' ? String((result as any).preheader).slice(0, 90) : null,
+      });
+      return res.json({
+        success: true,
+        data: {
+          ...result,
+          ...(design ? { design } : {}),
+          one_line: {
+            enabled: true, gaps: oneLineGaps(linePrompt),
+            // ★ Codex 1R medium — 비교 입력 = 한 줄 + 혜택 칸 답(genPrompt)
+            notes: [...lineExcluded.map((e) => `상품${e.name ? ` "${e.name}"` : ''} 제외: ${e.reason}`), ...linePriceNotes(genPrompt, lineCards)],
+            mall_cards: lineCards.length,
+          },
+        },
+      });
     } finally {
       if (lineLock) releaseInflight(lineLock);
     }
