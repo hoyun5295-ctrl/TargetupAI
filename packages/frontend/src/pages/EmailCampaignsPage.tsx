@@ -8,6 +8,9 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 import AiBuildEntryStrip from '../components/ai-build/AiBuildEntryStrip';
 import { useAiAutoBuildEnabled } from '../utils/ai-build';
 import { AI_GENERATE_COSTS } from '../constants/credit';
+// ★ 2026-10-10 한 줄 묻기 — 질문이면 회사 데이터로 답한다(설계서 docs/2026-10-10-oneline-ask-design.md)
+import { useLineAsk } from '../hooks/useLineAsk';
+import LineAnswer from '../components/zone/LineAnswer';
 import { goBackOr } from '../lib/scroll-restoration';
 import {
   AlertCircle, AlertTriangle, ArrowLeft, BarChart3, Check, ChevronDown, ChevronUp, Clock,
@@ -129,6 +132,7 @@ export default function EmailCampaignsPage() {
 
   // ★ 2026-06-13: AI 원샷 생성 영역
   const [aiPrompt, setAiPrompt] = useState('');
+  const lineQ = useLineAsk('email');   // ★ 2026-10-10 한 줄 묻기(이름 = lineQ · 아래 lineAsk 는 C24 확인 창 상태)
   // ★ 2026-10-10 한 줄 이메일 강화 — 판정 조회 중(두 번 눌러도 한 번) · 묻는 창(혜택 · 몰 상품) · 고른 후보 · 후보가 실제로 보였는가
   const [lineChecking, setLineChecking] = useState(false);
   const lineCheckingRef = useRef(false);
@@ -570,15 +574,18 @@ export default function EmailCampaignsPage() {
   handleAiGenerateRef.current = handleAiGenerate;
 
   // ★ 2026-10-10 한 줄 이메일 — 제출 즉시 조회 중으로 막고(두 번 눌러도 한 번) 판정이 걸릴 때만 묻는 창 · 안 걸리면 지금처럼 바로 만든다
-  const submitEmailLine = async () => {
-    const t = aiPrompt.trim();
+  // ★ 2026-10-10 한 줄 묻기 — override = 답 카드가 채운 뼈대 문장 · skipAsk = 「이 문장 그대로 만들기」(다시 판정하지 않는다)
+  const submitEmailLine = async (override?: string, skipAsk = false) => {
+    const t = (override ?? aiPrompt).trim();
     if (!t || genStep !== null || lineCheckingRef.current) return;
     if (customerGate.isEmpty) { setShowDataGate(true); return; }
     lineCheckingRef.current = true;
     setLineChecking(true);
     try {
       const reads = readsInLine(t, lineReads);
-      const g = await fetchOneLineGaps(t, reads);
+      const g = await fetchOneLineGaps(t, reads, 'email');
+      // ★ 2026-10-10 한 줄 묻기 — 질문이면 답만 연다(만들지 않음 · 같은 판정 응답을 쓴다 · 왕복 0)
+      if (!skipAsk && (await lineQ.route(t, { gaps: g }))) return;
       if (g?.enabled && (g.gaps.benefit || g.productTerms.length > 0 || reads.length > 0)) {
         setLineMallPicked([]);
         setLineMallShown(false);
@@ -796,7 +803,7 @@ export default function EmailCampaignsPage() {
           placeholder: emailOneLine.placeholder,
           verb: emailOneLine.verb,
           icon: Wand2,
-          busy: genStep !== null || lineChecking,
+          busy: genStep !== null || lineChecking || lineQ.judging,
           credit: `${AI_GENERATE_COSTS['email-ai-generate']}크레딧`,
           extra: (
             <>
@@ -821,7 +828,25 @@ export default function EmailCampaignsPage() {
         { label: '반송률', value: campaigns.length ? `${stats.bounceRate.toFixed(1)}%` : '—' },
       ]}
       stamp={{ text: '다시 읽기', onRefresh: loadAll, loading }}
-      start={{
+      emphasis={lineQ.ask ? (
+        <LineAnswer
+          ask={lineQ.ask}
+          busy={genStep !== null}
+          cardCost={(c) => (c.action.kind === 'fill' ? `${AI_GENERATE_COSTS['email-ai-generate']}크레딧` : undefined)}
+          makeCost={`${AI_GENERATE_COSTS['email-ai-generate']}크레딧`}
+          onClose={lineQ.close}
+          onPick={(c) => {
+            if (c.action.kind === 'open') { navigate(c.action.path); return; }
+            if (c.action.kind !== 'fill') return;
+            const fill = c.action.line;
+            lineQ.close();
+            setAiPrompt(fill);
+            void submitEmailLine(fill, true);
+          }}
+          onMakeAnyway={() => { const t = lineQ.ask!.line; lineQ.close(); void submitEmailLine(t, true); }}
+        />
+      ) : undefined}
+      start={lineQ.hasCards ? null : {
         items: [
           { icon: Package, title: '재료로 만들기', desc: '행사 주소·사진만 넣으면 완성', tint: 'from-blue-400 to-cyan-500', featured: true, badge: '추천', onClick: () => navigate('/quick-campaign?channel=email'), disabled: genStep !== null },
           { icon: Layers, title: '블록으로 직접', desc: '빈 캔버스에서 블록을 직접 조립해요', tint: 'from-violet-400 to-fuchsia-500', onClick: () => setVisualEditor({ sections: [], isAd: true, aiGenerated: false }), disabled: genStep !== null },

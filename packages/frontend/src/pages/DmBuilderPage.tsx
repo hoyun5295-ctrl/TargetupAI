@@ -72,7 +72,10 @@ import { dmChipStatus, fixItemsOf, makeResultPath, type ChipStatus, type FixItem
 import ZoneCompletion from '../components/zone/ZoneCompletion';
 import { LineFactsInline, typedBenefit, type LineFactsValues } from '../components/zone/LineFacts';
 import { fetchOneLineGaps, appendToOneLine, requestLineDm, lineResultNotes, readPartOf, readsInLine, type LineMallCandidate, type LineProductRef } from '../utils/one-line';
-import { CONFIRM_CREDIT_COSTS } from '../constants/credit';
+import { CONFIRM_CREDIT_COSTS, AI_GENERATE_COSTS } from '../constants/credit';
+// ★ 2026-10-10 한 줄 묻기 — 질문이면 회사 데이터로 답한다(설계서 docs/2026-10-10-oneline-ask-design.md)
+import { useLineAsk } from '../hooks/useLineAsk';
+import LineAnswer from '../components/zone/LineAnswer';
 
 const LINE_BENEFIT_SUGGEST = '혜택을 적어 주시면 첫 줄이 혜택으로 시작해요';
 
@@ -249,6 +252,7 @@ export default function DmBuilderPage() {
     avg_ctr_30d: number;
   } | null>(null);
   const [naturalLanguage, setNaturalLanguage] = useState('');
+  const lineAsk = useLineAsk('dm');   // ★ 2026-10-10 한 줄 묻기(잠김 화면 return 보다 앞 · 훅 순서 고정)
   const [detailExpanded, setDetailExpanded] = useState(false);
   const [generating, setGenerating] = useState(false);
   // ★ D216+ 6 sub-agent 진행 시각 효과 (design_quality_minimum_journey_level 영구 룰 정합)
@@ -1010,8 +1014,9 @@ export default function DmBuilderPage() {
   };
   const metricsLoading = !overviewTried;
   const dmOneLine = zoneModule('dm').oneLine!;
-  const startOneLine = async () => {
-    const t = naturalLanguage.trim();
+  // ★ 2026-10-10 한 줄 묻기 — override = 답 카드가 채운 뼈대 문장 · skipAsk = 「이 문장 그대로 만들기」(다시 판정하지 않는다)
+  const startOneLine = async (override?: string, skipAsk = false) => {
+    const t = (override ?? naturalLanguage).trim();
     if (!t || generating || lineCheckingRef.current) return;
     // ★ 2026-10-05 한줄로 시그니처 — 판정은 서버(AI 0 · 무과금). 걸리면 원래 뜨던 확인 창 안에 혜택 칸이 하나 생긴다(새 단계 0).
     //   조회 실패 = 지금 그대로(묻지 않는다).
@@ -1019,7 +1024,9 @@ export default function DmBuilderPage() {
     lineCheckingRef.current = true;
     try {
       const reads = readsInLine(t, lineReads);
-      const g = await fetchOneLineGaps(t, reads);
+      const g = await fetchOneLineGaps(t, reads, 'dm');
+      // ★ 2026-10-10 한 줄 묻기 — 질문이면 답만 연다(만들지 않음 · 같은 판정 응답을 쓴다 · 왕복 0)
+      if (!skipAsk && (await lineAsk.route(t, { gaps: g }))) return;
       setLineValues({});
       setLineMallPicked([]);
       setLineMallShown(false);
@@ -1043,7 +1050,7 @@ export default function DmBuilderPage() {
           placeholder: dmOneLine.placeholder,
           verb: dmOneLine.verb,
           icon: Sparkles,
-          busy: generating,
+          busy: generating || lineAsk.judging,
           extra: (
         <ImageToCopyButton
           label="이미지로 불러오기"
@@ -1081,7 +1088,25 @@ export default function DmBuilderPage() {
         { label: '30일 응답', value: metricsLoading ? '—' : ov.total_responses_30d.toLocaleString() },
         { label: '평균 클릭률', value: metricsLoading ? '—' : `${ov.avg_ctr_30d}%` },
       ]}
-      start={{
+      emphasis={lineAsk.ask ? (
+        <LineAnswer
+          ask={lineAsk.ask}
+          busy={generating}
+          cardCost={(c) => (c.action.kind === 'fill' ? `${AI_GENERATE_COSTS['dm-ai-generate']}크레딧` : undefined)}
+          makeCost={`${AI_GENERATE_COSTS['dm-ai-generate']}크레딧`}
+          onClose={lineAsk.close}
+          onPick={(c) => {
+            if (c.action.kind === 'open') { navigate(c.action.path); return; }
+            if (c.action.kind !== 'fill') return;
+            const fill = c.action.line;
+            lineAsk.close();
+            setNaturalLanguage(fill);
+            void startOneLine(fill, true);
+          }}
+          onMakeAnyway={() => { const t = lineAsk.ask!.line; lineAsk.close(); void startOneLine(t, true); }}
+        />
+      ) : undefined}
+      start={lineAsk.hasCards ? null : {
         items: [
           { icon: Package, title: '재료로 만들기', desc: '행사 주소·사진만 넣으면 완성', tint: 'from-amber-400 to-orange-500', featured: true, badge: '추천', onClick: () => navigate('/quick-campaign?channel=dm'), disabled: generating },
           { icon: Layers, title: '블록으로 직접', desc: '블록을 고르면 필요한 것만 물어봐요', tint: 'from-violet-400 to-fuchsia-500', onClick: handleStartBlockBuild, disabled: generating },

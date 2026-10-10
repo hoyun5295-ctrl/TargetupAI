@@ -37,7 +37,7 @@ import { formatDateValue, getOpt080Number, buildAdMessage, buildAdSubject } from
 import { resolveJourneyAdFlag } from '../utils/journey-ad-policy';
 import { loadPlanContext, canUseFeature, requirePlanFeature, isBetaAccessAllowed, isAiOperatorAllowed } from '../utils/plan-guard';
 import { snsPublishEnabled } from '../utils/sns-constants';   // ★ 2026-09-20 허브 SNS 플래그(§3-11)
-import { oneLineFactsEnabled, oneLineGaps, sanitizeLineFacts, pickCopyCVariant, lineProductTerms, lineBenefitPercents, sanitizeLineReads, applyLineReads } from '../utils/one-line-facts';   // ★ 2026-10-05 한줄로 시그니처 · ★1010 몰 후보 검색어
+import { oneLineFactsEnabled, oneLineGaps, sanitizeLineFacts, pickCopyCVariant, lineProductTerms, lineBenefitPercents, sanitizeLineReads, applyLineReads, oneLineAskEnabled, oneLineIntent, oneLineAskTopic, lineWithoutReads } from '../utils/one-line-facts';   // ★ 2026-10-05 한줄로 시그니처 · ★1010 몰 후보 검색어
 import { getCompanyCosts } from '../config/defaults';
 // ★ D209+ (Harold 명시 2026-05-22) Phase D 비용 안전 매트릭스 — 회사별 월 한도 + cache 통계
 import { getMonthlyUsage, getDailyUsage, getModelBreakdown, checkAiRateLimit, AiRateLimitExceeded, recordAiCall } from '../utils/ai-rate-limit';
@@ -1174,12 +1174,21 @@ router.post('/one-line/gaps', (req: Request, res: Response) => {
   // ★ 2026-10-10 H3 — 혜택 판정은 사진에서 읽은 조각의 숫자를 지운 글로(사진에만 혜택이 있으면 묻는다) · 검색어는 원래 글로
   const reads = sanitizeLineReads(req.body?.read_texts);
   const judged = applyLineReads(line, reads === 'invalid' ? undefined : reads, false);
+  // ★ 2026-10-10 한 줄 묻기(설계서 docs/2026-10-10-oneline-ask-design.md §3-1) — 질문인가 만들기인가(AI 0 · DB 0 · 별도 스위치).
+  //   사용자가 친 글만 본다(사진 조각 제외) · 내용 채널(DM · 이메일 · SNS)은 무엇을 보낼지 묻는 말이 있어야 질문 · 스위치 밖 = 늘 make.
+  const askEnabled = oneLineAskEnabled(companyId);
+  const menu = typeof req.body?.menu === 'string' ? req.body.menu : '';
+  const typed = lineWithoutReads(line, reads === 'invalid' ? undefined : reads);
+  const intent = askEnabled ? oneLineIntent(typed, { contentChannel: menu === 'dm' || menu === 'email' || menu === 'sns' }) : 'make';
   // ★ 2026-10-10 한 줄 DM 강화 — 몰 후보 검색어 · 혜택 % 값(여전히 AI 0 · DB 0 · 판정이 아니라 찾기 입력). 스위치 밖 = 빈 값.
   return res.json({
     success: true, enabled,
     gaps: enabled ? oneLineGaps(judged) : { benefit: false },
     product_terms: enabled ? lineProductTerms(line) : [],
     benefit_percents: enabled ? lineBenefitPercents(line) : [],
+    ask_enabled: askEnabled,
+    intent,
+    ask_topic: intent === 'ask' ? oneLineAskTopic(typed) : null,
   });
 });
 
@@ -2591,19 +2600,28 @@ router.get('/operator/marketing-calendar', async (req: Request, res: Response) =
 });
 
 // ★ 2026-07-02 3단계: 오늘의 추천 브리핑 — 매일 9시 일일 분석이 저장한 최신 브리핑(회사 격리, 읽기 전용).
+/** ★ 2026-10-10 오늘의 추천 숫자를 볼 수 있는 사람 = 고객사 관리자 · 슈퍼관리자(담당자는 회사 전체 숫자를 보지 않는다) */
+function isBriefAdmin(req: Request): boolean {
+  const t = req.user?.userType;
+  return t === 'company_admin' || t === 'super_admin';
+}
+
 router.get('/operator/daily-brief', async (req: Request, res: Response) => {
   try {
     const companyId = req.user?.companyId;
     if (!companyId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
     const r = await query(
-      `SELECT brief_date, headline, recommendations, created_at
+      `SELECT brief_date, headline, recommendations, created_at, signals
          FROM company_daily_briefs
         WHERE company_id = $1::uuid
         ORDER BY brief_date DESC
         LIMIT 1`,
       [companyId],
     );
-    return res.json({ success: true, brief: r.rows[0] || null });
+    // ★ 2026-10-10 한 줄 묻기 0단계 — 보는 사람에 맞춰 내보낸다(담당자 = 숫자 · 이유 숨김 · 관리자 = 지어낸 숫자 검산 · CT 하나)
+    const { briefForViewer } = await import('../utils/daily-brief-policy');
+    const { findNewNumbers } = await import('../utils/copy-benefit-detector');
+    return res.json({ success: true, brief: briefForViewer(r.rows[0], { isAdmin: isBriefAdmin(req) }, findNewNumbers) });
   } catch (err: any) {
     const msg = err?.message || '';
     if (msg.includes('does not exist')) {
@@ -3751,7 +3769,8 @@ router.get('/operator/journeys-opportunities', async (req: Request, res: Respons
       return res.status(403).json({ success: false, error: 'AI Operator 진입 권한이 없습니다.', code: 'AI_OPERATOR_GATED' });
     }
 
-    const opportunities = await buildJourneyOpportunities(companyId);
+    // ★ 2026-10-10 한 줄 묻기 0단계 — 담당자는 자기 분류코드 고객만 센다(관리자 = 회사 전체 · 한 줄 답과 같은 숫자)
+    const opportunities = await buildJourneyOpportunities(companyId, req.user?.userId);
     return res.json({ success: true, opportunities });
   } catch (err: any) {
     // DB 마이그레이션 미실행(신규 CDP 컬럼 부재) 케이스 — 503 + 친화 안내 (db_alter_safety_net)
@@ -3762,6 +3781,48 @@ router.get('/operator/journeys-opportunities', async (req: Request, res: Respons
     console.error('[Journeys opportunities] 오류:', err);
     // 기회 카드는 보조 기능 — 실패해도 빈 배열로 페이지 정상 동작
     return res.json({ success: true, opportunities: [] });
+  }
+});
+
+// ★ 2026-10-10 한 줄 묻기(설계서 docs/2026-10-10-oneline-ask-design.md §3-2) — 질문이면 회사 데이터로 답한다(AI 0 · 차감 0 · 아무것도 만들지 않음).
+//   문 = 이 메뉴와 같은 isAiOperatorAllowed · 판정(질문인가)은 /one-line/gaps 가 하고, 화면은 질문일 때만 여기를 부른다.
+router.post('/operator/journeys-ask', async (req: Request, res: Response) => {
+  try {
+    const companyId = req.user?.companyId;
+    if (!companyId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
+    const planCtx = await loadPlanContext(companyId);
+    if (!planCtx) return res.status(404).json({ success: false, error: '회사 정보를 찾을 수 없습니다.' });
+    if (!isAiOperatorAllowed(planCtx, req.user)) {
+      return res.status(403).json({ success: false, error: 'AI Operator 진입 권한이 없습니다.', code: 'AI_OPERATOR_GATED' });
+    }
+    const { oneLineAskEnabled } = await import('../utils/one-line-facts');
+    const { buildJourneyAsk, parseAskLine, LINE_ASK_DISABLED } = await import('../utils/one-line-ask');
+    if (!oneLineAskEnabled(companyId)) return res.status(404).json(LINE_ASK_DISABLED);
+    if (!parseAskLine(req.body)) return res.status(400).json({ success: false, error: '물어볼 내용을 한 줄로 적어 주세요.' });
+    return res.json({ success: true, answer: await buildJourneyAsk(companyId, req.user?.userId) });
+  } catch (err: any) {
+    console.error('[Journeys ask] 오류:', err);
+    return res.status(500).json({ success: false, error: '답을 준비하지 못했어요. 잠시 뒤 다시 물어봐 주세요.' });
+  }
+});
+
+router.post('/operator/continuous-ask', async (req: Request, res: Response) => {
+  try {
+    const companyId = req.user?.companyId;
+    if (!companyId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
+    const planCtx = await loadPlanContext(companyId);
+    if (!planCtx) return res.status(404).json({ success: false, error: '회사 정보를 찾을 수 없습니다.' });
+    if (!isAiOperatorAllowed(planCtx, req.user)) {
+      return res.status(403).json({ success: false, error: 'AI Operator 진입 권한이 없습니다.', code: 'AI_OPERATOR_GATED' });
+    }
+    const { oneLineAskEnabled } = await import('../utils/one-line-facts');
+    const { buildAutoAsk, parseAskLine, LINE_ASK_DISABLED } = await import('../utils/one-line-ask');
+    if (!oneLineAskEnabled(companyId)) return res.status(404).json(LINE_ASK_DISABLED);
+    if (!parseAskLine(req.body)) return res.status(400).json({ success: false, error: '물어볼 내용을 한 줄로 적어 주세요.' });
+    return res.json({ success: true, answer: await buildAutoAsk(companyId, isBriefAdmin(req)) });
+  } catch (err: any) {
+    console.error('[Continuous ask] 오류:', err);
+    return res.status(500).json({ success: false, error: '답을 준비하지 못했어요. 잠시 뒤 다시 물어봐 주세요.' });
   }
 });
 
@@ -5375,11 +5436,14 @@ router.get('/operator/self-diagnosis', async (req: Request, res: Response) => {
     let brief: any = null;
     try {
       const br = await query(
-        `SELECT brief_date, headline, recommendations FROM company_daily_briefs
+        `SELECT brief_date, headline, recommendations, signals FROM company_daily_briefs
           WHERE company_id = $1::uuid ORDER BY brief_date DESC LIMIT 1`,
         [companyId],
       );
-      brief = br.rows[0] || null;
+      // ★ 2026-10-10 한 줄 묻기 0단계 — GET daily-brief 와 같은 CT(담당자 숨김 · 관리자 검산)
+      const { briefForViewer } = await import('../utils/daily-brief-policy');
+      const { findNewNumbers } = await import('../utils/copy-benefit-detector');
+      brief = briefForViewer(br.rows[0], { isAdmin: isBriefAdmin(req) }, findNewNumbers);
     } catch (e: any) {
       // 테이블 미생성(마이그레이션 전) = 브리핑 없음으로 처리 — 진단 응답은 정상 유지.
       if (!(e?.message || '').includes('does not exist')) console.warn('[SelfDiagnosis] 브리핑 조회 경고:', e?.message);

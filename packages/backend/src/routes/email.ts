@@ -1105,6 +1105,22 @@ router.post('/ai/generate', async (req: Request, res: Response) => {
 });
 
 // 비주얼 빌더 — AI가 이메일 블록 Section[]을 생성(이미지·혜택은 빈 자리). 크레딧 3.
+// ★ 2026-10-10 한 줄 묻기(설계서 docs/2026-10-10-oneline-ask-design.md §3-2) — 이메일 한 줄 질문의 답(AI 0 · 차감 0). 문 = ensureEmailAccess.
+router.post('/one-line/ask', async (req: Request, res: Response) => {
+  const auth = await ensureEmailAccess(req, res);
+  if (!auth) return;
+  try {
+    const { oneLineAskEnabled } = await import('../utils/one-line-facts');
+    const { buildContentAsk, parseAskLine, LINE_ASK_DISABLED } = await import('../utils/one-line-ask');
+    if (!oneLineAskEnabled(auth.companyId)) return res.status(404).json(LINE_ASK_DISABLED);
+    if (!parseAskLine(req.body)) return res.status(400).json({ success: false, error: '물어볼 내용을 한 줄로 적어 주세요.' });
+    return res.json({ success: true, answer: await buildContentAsk(auth.companyId, auth.userId, 'email', auth.ownerId) });
+  } catch (err: any) {
+    console.error('[Email one-line ask] 오류:', err);
+    return res.status(500).json({ success: false, error: '답을 준비하지 못했어요. 잠시 뒤 다시 물어봐 주세요.' });
+  }
+});
+
 router.post('/ai/generate-sections', async (req: Request, res: Response) => {
   const auth = await ensureEmailAccess(req, res);
   if (!auth) return;

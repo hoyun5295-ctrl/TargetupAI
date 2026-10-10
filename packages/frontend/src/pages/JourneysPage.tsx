@@ -75,6 +75,10 @@ import { highlightVars, mergeAndHighlightVars, mergeVarsPlain } from '../utils/h
 import ConfirmModal, { type ConfirmState } from '../components/ConfirmModal';
 import JourneyOptionsEditor from '../components/journey/JourneyOptionsEditor';
 import { useToast } from '../components/ToastProvider';
+// ★ 2026-10-10 한 줄 묻기 — 질문이면 회사 데이터로 답한다(설계서 docs/2026-10-10-oneline-ask-design.md)
+import { useLineAsk } from '../hooks/useLineAsk';
+import LineAnswer from '../components/zone/LineAnswer';
+import { AI_GENERATE_COSTS } from '../constants/credit';
 
 // ★ D210+ Phase 2-fix6 (Harold 명시 2026-05-23): 여정 생성 6 sub-agent 진행 카드 매트릭스.
 //   본질 = 옛 단순 로딩 → 6 sub-agent 시각 효과 → 사용자가 5~10초 기다리기 편함.
@@ -678,6 +682,9 @@ export default function JourneysPage() {
   const [lineFactsOn, setLineFactsOn] = useState(false);
   useEffect(() => { void fetchOneLineEnabled().then(setLineFactsOn); }, []);
   const [generating, setGenerating] = useState(false);
+  // ★ 2026-10-10 한 줄 묻기 — 판정은 입구에서만(목록 한 줄 · 지도 ?objective= 자동 경로). handleAIGenerate 는 그대로다(다시 만들기 · 카드 등 다른 입구 무변).
+  const lineAsk = useLineAsk('journeys');
+  const journeyCost = `${AI_GENERATE_COSTS['journey-ai-generate']}크레딧`;
   // ★ 2026-08-01 설계서 §2-3 — 이 회사가 지금 만들 수 있는 여정. 못 만드는 것은 사유와 함께 잠근다.
   //   조회 실패면 잠그지 않는다(화면 편의 게이트). 실제 발송 차단은 백엔드가 담당한다.
   const [dataCap, setDataCap] = useState<Record<string, { available: boolean; reason: string }> | null>(null);
@@ -820,8 +827,12 @@ export default function JourneysPage() {
     setSearchParams({}, { replace: true });
     if (preset) { void handleAIGenerate(undefined, queryObjective || undefined, preset); return; }
     // ★ 2026-09-30 AI 존 대개편(Codex R1): 지도 탭 명령 카드의 한 줄(목표만 · preset 없음)도 같은 가드 뒤 한 번만 생성한다 — 목록 한 줄과 같은 자유 문장 경로.
+    // ★ 2026-10-10 한 줄 묻기 — 지도 한 줄도 질문이면 답만 연다(목록 한 줄과 같은 판정 · 여정을 만들지 않는다)
     setObjective(queryObjective);
-    void handleAIGenerate(undefined, queryObjective, undefined, benefitText);
+    void (async () => {
+      if (await lineAsk.route(queryObjective)) return;
+      void handleAIGenerate(undefined, queryObjective, undefined, benefitText);
+    })();
   }, [customerGate.loading]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ★ D189 #2 (2026-05-22): 알림톡 발신프로필 + 템플릿 + 활성 필드 fetch (review view 알림톡 step UI용)
@@ -1900,7 +1911,7 @@ export default function JourneysPage() {
                       <div className="mt-3 flex flex-wrap items-center gap-2">
                         <button
                           onClick={() => handleAIGenerate(undefined, undefined, nextDef.triggerEvent)}
-                          disabled={generating}
+                          disabled={generating || lineAsk.judging}
                           className="flex items-center justify-center gap-1.5 rounded-lg border border-indigo-200 bg-white text-indigo-700 hover:bg-indigo-50 px-3 h-8 text-[13px] font-semibold disabled:opacity-50"
                         >
                           <Sparkles className="h-3.5 w-3.5" /> 이어서 만들기
@@ -1980,7 +1991,7 @@ export default function JourneysPage() {
                           )}
                           <button
                             onClick={() => handleAIGenerate(undefined, op.suggestedObjective, op.preferTriggerEvent)}
-                            disabled={generating}
+                            disabled={generating || lineAsk.judging}
                             className="h-9 px-3 rounded-[10px] border border-indigo-200 bg-white text-indigo-700 hover:bg-indigo-50 text-[13px] font-semibold disabled:opacity-50 flex items-center justify-center gap-1.5"
                           >
                             <Sparkles className="w-3.5 h-3.5" /> 1클릭 생성
@@ -2012,11 +2023,16 @@ export default function JourneysPage() {
         line: {
           value: objective,
           onChange: setObjective,
-          onSubmit: () => { void handleAIGenerate(undefined, undefined, undefined, lineFactsOn ? undefined : benefitText); },
+          onSubmit: () => {
+            void (async () => {
+              if (await lineAsk.route(objective)) return;
+              void handleAIGenerate(undefined, undefined, undefined, lineFactsOn ? undefined : benefitText);
+            })();
+          },
           placeholder: journeyOneLine.placeholder,
           verb: journeyOneLine.verb,
           icon: Sparkles,
-          busy: generating,
+          busy: generating || lineAsk.judging,
         },
       } : null}
       blocks={[
@@ -2025,14 +2041,32 @@ export default function JourneysPage() {
       ]}
       links={view === 'main' ? [{ label: `만들 수 있는 여정 ${journeyScope.availableCount}/${scopeTotal}종 · ${showScopeNote ? '접기' : '자세히'}`, onClick: () => setShowScopeNote((v) => !v) }] : []}
       stamp={view === 'main' ? { text: '다시 읽기', onRefresh: loadAll, loading } : null}
-      start={view === 'main' ? {
+      start={view === 'main' && !lineAsk.hasCards ? {
         items: [
           { icon: Megaphone, title: '마케팅 여정', desc: '빠른 시작을 고르고 혜택까지 넣어 설계', tint: 'from-fuchsia-400 to-purple-500', featured: true, badge: '추천', onClick: () => setPurpose('marketing-modal') },
           { icon: Bell, title: '정보 알림', desc: '주문·배송 같은 거래가 일어나면 알림톡', tint: 'from-teal-400 to-emerald-500', onClick: () => setPurpose('info-alert') },
           { icon: CalendarClock, title: '날짜축 여정', desc: '정해 둔 날짜 기준 D-7·D-3·D-1·당일', tint: 'from-indigo-400 to-violet-500', onClick: () => setPurpose('date-anchor') },
         ],
       } : null}
-      emphasis={journeyEmphasis}
+      emphasis={view === 'main' && lineAsk.ask ? (
+        <LineAnswer
+          ask={lineAsk.ask}
+          busy={generating}
+          cardCost={(c) => (c.action.kind === 'journey' ? journeyCost : undefined)}
+          makeCost={journeyCost}
+          onClose={lineAsk.close}
+          onPick={(c) => {
+            if (c.action.kind !== 'journey') return;
+            lineAsk.close();
+            void handleAIGenerate(undefined, c.action.objective, c.action.preferTriggerEvent);
+          }}
+          onMakeAnyway={() => {
+            const line = lineAsk.ask!.line;
+            lineAsk.close();
+            void handleAIGenerate(undefined, line, undefined, lineFactsOn ? undefined : benefitText);
+          }}
+        />
+      ) : journeyEmphasis}
     >
         {view === 'main' && customerGate.isEmpty && <CustomerDataRequiredBanner className="mb-4 md:mb-5" />}
         {view === 'main' && showScopeNote && (

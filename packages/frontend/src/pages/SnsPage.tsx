@@ -36,6 +36,9 @@ import {
 import { Sparkles } from 'lucide-react';
 import ZoneFrame from '../components/zone/ZoneFrame';
 import { zoneModule } from '../constants/ai-operator-modules';
+// ★ 2026-10-10 한 줄 묻기 — 질문이면 이번 달 행사로 답한다(설계서 docs/2026-10-10-oneline-ask-design.md)
+import { useLineAsk } from '../hooks/useLineAsk';
+import LineAnswer from '../components/zone/LineAnswer';
 
 function daysLeft(iso: string | null | undefined): number | null {
   if (!iso) return null;
@@ -63,6 +66,7 @@ export default function SnsPage() {
   const [historyKey, setHistoryKey] = useState(0);
   const [composeRequest, setComposeRequest] = useState<SnsComposeRequest | null>(null);
   const [snsLine, setSnsLine] = useState('');
+  const lineAsk = useLineAsk('sns');   // ★ 2026-10-10 한 줄 묻기(로딩 화면 return 보다 앞 · 훅 순서 고정)
   const [composerAiBusy, setComposerAiBusy] = useState(false);
   const [focusPostId, setFocusPostId] = useState<string | null>(null);
 
@@ -419,14 +423,36 @@ export default function SnsPage() {
           value: snsLine,
           onChange: setSnsLine,
           // 한 줄 → 작성기 글 칸에 넣고 기존 [AI로 캡션 쓰기]와 같은 경로로 채널 글을 쓴다(SnsComposer seed 요청)
-          onSubmit: () => { setComposeRequest({ kind: 'seed', text: snsLine.trim(), nonce: Date.now() }); setSnsLine(''); },
+          // ★ 2026-10-10 한 줄 묻기 — 질문이면 답만 연다(줄을 비우지 않는다 · 탈출구가 같은 문장을 쓴다)
+          onSubmit: () => {
+            const t = snsLine.trim();
+            void (async () => {
+              if (await lineAsk.route(t)) return;
+              setComposeRequest({ kind: 'seed', text: t, nonce: Date.now() });
+              setSnsLine('');
+            })();
+          },
           placeholder: composerOn ? snsOneLine.placeholder : '먼저 아래에서 채널을 연결해 주세요',
           verb: snsOneLine.verb,
           icon: Sparkles,
           disabled: !composerOn,
-          busy: composerAiBusy,
+          busy: composerAiBusy || lineAsk.judging,
         },
       } : null}
+      emphasis={enabled && lineAsk.ask ? (
+        <LineAnswer
+          ask={lineAsk.ask}
+          busy={composerAiBusy}
+          onClose={lineAsk.close}
+          onPick={(c) => {
+            if (c.action.kind === 'open') { navigate(c.action.path); return; }
+            if (c.action.kind !== 'fill') return;
+            lineAsk.close();
+            setComposeRequest({ kind: 'seed', text: c.action.line, nonce: Date.now() });
+          }}
+          onMakeAnyway={() => { const t = lineAsk.ask!.line; lineAsk.close(); setComposeRequest({ kind: 'seed', text: t, nonce: Date.now() }); setSnsLine(''); }}
+        />
+      ) : undefined}
     >
       <div>
         {!enabled ? (

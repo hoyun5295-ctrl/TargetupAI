@@ -83,6 +83,68 @@ export function extractJsonObject(text: string): any | null {
   }
 }
 
+/**
+ * ★ 2026-10-10 한 줄 묻기 0단계 — 저장된 오늘의 추천을 **보는 사람에게 내보내는 모양**(설계서 docs/2026-10-10-oneline-ask-design.md §4-3).
+ *   내보내는 곳 = GET /operator/daily-brief · /operator/self-diagnosis · 한 줄 답(자동 마케팅) — 셋 다 이 함수 하나로 읽는다(입구마다 숨기면 다른 입구로 샌다).
+ *   - 담당자 = 제목 · 목표 · 종류 · 채널만(칸을 골라 담는다 · 펼쳐 담지 않는다). 머리 문장 · 이유 · 대상 수 · 규모는 회사 전체 고객으로 센 값이라 숨긴다.
+ *     제목 · 목표에 숫자가 있으면(「휴면 1,240명 복귀」) 같은 행 신호의 코드 뼈대(제목 · 권장 목표)로 바꾸고, 뼈대가 없으면 그 추천을 뺀다.
+ *     ponytail: 숫자 판정은 아라비아 숫자만 — 「천여 명」 같은 글자 수는 못 거른다(AI 규칙 1 = 실측 숫자만 · 지금 저장본은 숫자로 쓴다).
+ *   - 관리자 = 이유 문장의 숫자를 같은 행에 저장된 신호(signals)와 대조해, 근거에 없는 숫자(AI 가 지어낸 수)가 있으면 이유를 비운다.
+ *     (오늘 다시 계산한 신호와 대조하지 않는다 — 단위 정정 같은 변경 뒤 첫날 옛 행이 전부 걸린다)
+ */
+export interface StoredBriefRow {
+  brief_date: unknown;
+  headline: string | null;
+  recommendations: unknown;
+  created_at?: unknown;
+  signals?: unknown;
+}
+
+export function briefForViewer(
+  row: StoredBriefRow | null | undefined,
+  viewer: { isAdmin: boolean },
+  findNew: (output: string, source: string) => string[],
+): { brief_date: unknown; headline: string | null; recommendations: BriefRecommendation[]; created_at?: unknown } | null {
+  if (!row) return null;
+  const recs: BriefRecommendation[] = Array.isArray(row.recommendations) ? (row.recommendations as BriefRecommendation[]) : [];
+  if (!viewer.isAdmin) {
+    const skeletons: any[] = Array.isArray((row.signals as any)?.opportunities) ? (row.signals as any).opportunities : [];
+    const recommendations: BriefRecommendation[] = [];
+    for (const r of recs) {
+      let title = String(r?.title || '');
+      let objective = String(r?.objective || '');
+      if (/\d/.test(title) || /\d/.test(objective)) {
+        const s = r?.opportunityType ? skeletons.find((x) => x?.type === r.opportunityType) : undefined;
+        if (!s?.title || !s?.suggestedObjective) continue;
+        title = String(s.title);
+        objective = String(s.suggestedObjective);
+      }
+      recommendations.push({
+        title,
+        objective,
+        reason: '',
+        opportunityType: r?.opportunityType ?? null,
+        targetCount: null,
+        valueAtStake: null,
+        recommendedChannel: r?.recommendedChannel ?? null,
+      });
+    }
+    return {
+      brief_date: row.brief_date,
+      headline: null,
+      recommendations,
+      ...(row.created_at !== undefined ? { created_at: row.created_at } : {}),
+    };
+  }
+  const source = JSON.stringify(row.signals ?? {});
+  return {
+    brief_date: row.brief_date,
+    headline: row.headline && findNew(row.headline, source).length === 0 ? row.headline : null,
+    recommendations: recs.map((r) => (r.reason && findNew(r.reason, source).length > 0 ? { ...r, reason: '' } : r)),
+    ...(row.created_at !== undefined ? { created_at: row.created_at } : {}),
+  };
+}
+
 export function buildDailyBriefSystemPrompt(): string {
   return `당신은 한줄로(마케팅 자동화 서비스)의 AI 마케팅 전략가입니다.
 회사의 실측 데이터(고객 신호·누적 학습·운영 현황)를 보고 "오늘 이 회사에 가장 효과가 클 마케팅"을 추천합니다.

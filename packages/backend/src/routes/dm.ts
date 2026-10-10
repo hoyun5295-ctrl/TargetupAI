@@ -953,6 +953,23 @@ dmRouter.get('/:id/stats', requireDmAccess, async (req: any, res: any) => {
 // ============================================================
 
 // ★ D216+ POST /api/dm/ai/one-shot-generate — 자연어 OR 시나리오 → 완성된 sections[] 통합 생성
+// ★ 2026-10-10 한 줄 묻기(설계서 docs/2026-10-10-oneline-ask-design.md §3-2) — DM 한 줄 질문의 답(AI 0 · 차감 0). 문 = dmRouter(모바일 DM 요금제).
+dmRouter.post('/one-line/ask', async (req: any, res: any) => {
+  try {
+    const companyId = req.user?.companyId;
+    if (!companyId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
+    const { oneLineAskEnabled } = await import('../utils/one-line-facts');
+    const { buildContentAsk, parseAskLine, LINE_ASK_DISABLED } = await import('../utils/one-line-ask');
+    const { resolveOwnerScope } = await import('../utils/owner-scope');
+    if (!oneLineAskEnabled(companyId)) return res.status(404).json(LINE_ASK_DISABLED);
+    if (!parseAskLine(req.body)) return res.status(400).json({ success: false, error: '물어볼 내용을 한 줄로 적어 주세요.' });
+    return res.json({ success: true, answer: await buildContentAsk(companyId, req.user?.userId, 'dm', resolveOwnerScope(req)) });
+  } catch (err: any) {
+    console.error('[DM one-line ask] 오류:', err);
+    return res.status(500).json({ success: false, error: '답을 준비하지 못했어요. 잠시 뒤 다시 물어봐 주세요.' });
+  }
+});
+
 dmRouter.post('/ai/one-shot-generate', async (req: any, res: any) => {
   try {
     const companyId = req.user?.companyId;

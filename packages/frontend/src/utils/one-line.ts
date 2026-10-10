@@ -16,26 +16,38 @@ export interface OneLineGapsResult {
   productTerms: string[];
   /** ★ 2026-10-10 한 줄에 적은 혜택 % 값(담은 상품 아래 안내 한 줄용) */
   benefitPercents: number[];
+  /** ★ 2026-10-10 한 줄 묻기 — 이 회사가 질문을 받는가(서버 스위치) · 질문인가 만들기인가 · 질문의 종류 */
+  askEnabled: boolean;
+  intent: 'ask' | 'make';
+  askTopic: 'what' | 'how' | null;
 }
+
+/** ★ 2026-10-10 한 줄 묻기 — 한 줄 입력이 있는 메뉴(서버 판정 · 답 경로가 메뉴로 갈린다) */
+export type LineAskMenu = 'journeys' | 'auto-marketing' | 'inapp' | 'dm' | 'email' | 'sns';
 
 /**
  * 한 줄 판정(AI 0 · 무과금). 조회 실패 = null → 호출부는 지금 화면 그대로 간다(모르면 묻지 않는다).
  * ★ 2026-10-10 reads = 한 줄 칸에 붙인 사진 글 조각(서버가 그 조각의 숫자를 지운 글로 혜택을 판정한다 · H3).
  */
-export async function fetchOneLineGaps(line: string, reads?: readonly string[]): Promise<OneLineGapsResult | null> {
+export async function fetchOneLineGaps(line: string, reads?: readonly string[], menu?: LineAskMenu): Promise<OneLineGapsResult | null> {
   try {
     const res = await fetch('/api/ai/one-line/gaps', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${localStorage.getItem('token') || ''}` },
-      body: JSON.stringify({ line: String(line || '').slice(0, 2000), ...(reads && reads.length > 0 ? { read_texts: reads.slice(0, 5) } : {}) }),
+      body: JSON.stringify({ line: String(line || '').slice(0, 2000), ...(reads && reads.length > 0 ? { read_texts: reads.slice(0, 5) } : {}), ...(menu ? { menu } : {}) }),
     });
     const d = await res.json().catch(() => null);
     if (!res.ok || !d?.success) return null;
+    const askEnabled = d.ask_enabled === true;
+    const intent: 'ask' | 'make' = askEnabled && d.intent === 'ask' ? 'ask' : 'make';
     return {
       enabled: d.enabled === true,
       gaps: { benefit: d.gaps?.benefit === true },
       productTerms: Array.isArray(d.product_terms) ? d.product_terms.map(String).filter(Boolean).slice(0, 3) : [],
       benefitPercents: Array.isArray(d.benefit_percents) ? d.benefit_percents.map(Number).filter((n: number) => Number.isFinite(n) && n > 0) : [],
+      askEnabled,
+      intent,
+      askTopic: intent === 'ask' ? (d.ask_topic === 'how' ? 'how' : 'what') : null,
     };
   } catch {
     return null;
@@ -274,4 +286,60 @@ export function countEmailGatePlaceholders(texts: readonly string[]): number {
   let n = 0;
   for (const t of texts) n += (String(t || '').match(re) || []).length;
   return n;
+}
+
+// ─────────────── 한 줄 묻기 답 (★ 2026-10-10 · 설계서 docs/2026-10-10-oneline-ask-design.md §3-2) ───────────────
+
+export type LineAskAction =
+  | { kind: 'journey'; objective: string; preferTriggerEvent: string }
+  | { kind: 'auto'; brief: any }
+  | { kind: 'inapp'; objective: string }
+  | { kind: 'fill'; line: string }
+  | { kind: 'open'; path: string };
+
+export interface LineAskCard {
+  key: string;
+  title: string;
+  count: number | null;
+  countNote?: string;
+  why: string;
+  notices?: string[];
+  action: LineAskAction;
+}
+
+export interface LineAskAnswer {
+  head: string;
+  basis: { scope: 'mine' | 'company'; at: string; note?: string };
+  cards: LineAskCard[];
+  blocked: Array<{ title: string; reason: string }>;
+  failed: string[];
+}
+
+/** 메뉴 → 답 경로(그 메뉴의 권한 문을 그대로 지난다) */
+export const LINE_ASK_PATHS: Record<LineAskMenu, string> = {
+  journeys: '/api/ai/operator/journeys-ask',
+  'auto-marketing': '/api/ai/operator/continuous-ask',
+  inapp: '/api/cdp/inapp/ask',
+  dm: '/api/dm/one-line/ask',
+  email: '/api/email/one-line/ask',
+  sns: '/api/sns/one-line/ask',
+};
+
+/** 답 읽기(AI 0 · 0크레딧). 실패하면 던진다 — 호출부는 「읽지 못했어요」를 보이고 자동으로 만들지 않는다. */
+export async function fetchLineAnswer(menu: LineAskMenu, line: string): Promise<LineAskAnswer> {
+  const res = await fetch(LINE_ASK_PATHS[menu], {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${localStorage.getItem('token') || ''}` },
+    body: JSON.stringify({ line: String(line || '').slice(0, 2000) }),
+  });
+  const d = await res.json().catch(() => null);
+  if (!res.ok || !d?.success || !d.answer) throw new Error(d?.error || '답을 읽지 못했어요.');
+  const a = d.answer;
+  return {
+    head: String(a.head || ''),
+    basis: { scope: a.basis?.scope === 'mine' ? 'mine' : 'company', at: String(a.basis?.at || ''), ...(a.basis?.note ? { note: String(a.basis.note) } : {}) },
+    cards: Array.isArray(a.cards) ? a.cards.slice(0, 3) : [],
+    blocked: Array.isArray(a.blocked) ? a.blocked : [],
+    failed: Array.isArray(a.failed) ? a.failed.map(String) : [],
+  };
 }

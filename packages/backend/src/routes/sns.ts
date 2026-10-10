@@ -143,6 +143,22 @@ router.use((req: Request, res: Response, next) => {
   next();
 });
 
+// ★ 2026-10-10 한 줄 묻기(설계서 docs/2026-10-10-oneline-ask-design.md §3-2) — SNS 한 줄 질문의 답(AI 0 · 차감 0). 문 = 위 SNS 요금제 · 회사 스위치.
+router.post('/one-line/ask', async (req: Request, res: Response) => {
+  try {
+    const companyId = (req as any).user?.companyId as string;
+    const { oneLineAskEnabled } = await import('../utils/one-line-facts');
+    const { buildContentAsk, parseAskLine, LINE_ASK_DISABLED } = await import('../utils/one-line-ask');
+    const { resolveOwnerScope } = await import('../utils/owner-scope');
+    if (!oneLineAskEnabled(companyId)) return res.status(404).json(LINE_ASK_DISABLED);
+    if (!parseAskLine(req.body)) return res.status(400).json({ success: false, error: '물어볼 내용을 한 줄로 적어 주세요.' });
+    return res.json({ success: true, answer: await buildContentAsk(companyId, (req as any).user?.userId, 'sns', resolveOwnerScope(req)) });
+  } catch (err: any) {
+    console.error('[SNS one-line ask] 오류:', err);
+    return res.status(500).json({ success: false, error: '답을 준비하지 못했어요. 잠시 뒤 다시 물어봐 주세요.' });
+  }
+});
+
 /**
  * 연결 시작 — state 를 서명해 발급하고 `sns_oauth_states` 에 1회용 행을 남긴다.
  * 두 겹인 이유 = 서명(위조 차단) + DB 행(재사용 차단). §3-10.

@@ -32,6 +32,9 @@ import OperatorsManageList from '../components/automarketing/OperatorsManageList
 import DailyBriefCard, { DailyBrief, DailyBriefRecommendation } from '../components/automarketing/DailyBriefCard';
 import OperatorPreviewModal, { OperatorPreviewData } from '../components/automarketing/OperatorPreviewModal';
 import { MK_LINE_EXTRA_BTN } from '../utils/make-ui';
+// ★ 2026-10-10 한 줄 묻기 — 질문이면 오늘의 추천으로 답한다(설계서 docs/2026-10-10-oneline-ask-design.md)
+import { useLineAsk } from '../hooks/useLineAsk';
+import LineAnswer from '../components/zone/LineAnswer';
 
 /** 하위 보기의 머리 표시(제목은 메뉴 이름 한 벌 · 하위 위치만 "› …") */
 const VIEW_SUB: Partial<Record<AutoMarketingView, string>> = {
@@ -78,6 +81,8 @@ export default function ContinuousOperatorPage() {
   const [preview, setPreview] = useState<{ mode: 'new' | 'renewal'; config: Partial<ContinuousOperator>; data: OperatorPreviewData | null; operatorId: string | null } | null>(null);
   const [previewBusy, setPreviewBusy] = useState(false);
   const [ownCopy, setOwnCopy] = useState(false);   // [문안 직접 쓰기] — 켜면 AI 문안 없이 대상만(0크레딧)
+  // ★ 2026-10-10 한 줄 묻기 — 판정은 한 줄 입구에서만(「자세히 쓰기」 · 오늘의 추천 카드는 그대로)
+  const lineAsk = useLineAsk('auto-marketing');
   const [previewing, setPreviewing] = useState(false);
   const [startConfirm, setStartConfirm] = useState(false);
   const [starting, setStarting] = useState(false);
@@ -612,11 +617,17 @@ export default function ContinuousOperatorPage() {
         line: {
           value: line,
           onChange: setLine,
-          onSubmit: () => handleNaturalSubmit(line.trim(), null),
+          onSubmit: () => {
+            const t = line.trim();
+            void (async () => {
+              if (await lineAsk.route(t)) return;
+              void handleNaturalSubmit(t, null);
+            })();
+          },
           placeholder: oneLine.placeholder,
           verb: oneLine.verb,
           icon: Sparkles,
-          busy: creating || previewing,
+          busy: creating || previewing || lineAsk.judging,
           // ★ 2026-10-05 문안 직접 쓰기(Q15) — 켜면 AI 문안 없이 대상만 뽑아 보여 준다(0크레딧)
           credit: ownCopy ? '0크레딧' : `${AI_GENERATE_COSTS['ai-operator-propose']}크레딧`,
           extra: (
@@ -632,7 +643,7 @@ export default function ContinuousOperatorPage() {
         },
       }}
       stamp={{ text: stampText, onRefresh: loadAll, loading }}
-      start={subView ? null : {
+      start={subView || lineAsk.hasCards ? null : {
         items: [
           { icon: LayoutGrid, title: '시나리오로 시작', desc: '검증된 시나리오를 골라 바로 시작', tint: 'from-indigo-500 to-violet-500', featured: true, badge: '추천', onClick: () => setView('scenario') },
           { icon: SlidersHorizontal, title: '세부설정으로 시작', desc: '채널·주기·예산을 직접 잡아 시작', tint: 'from-sky-400 to-indigo-500', onClick: () => setEditing({ ...SMART_DEFAULTS, name: '', objective: '' }) },
@@ -641,8 +652,33 @@ export default function ContinuousOperatorPage() {
         ],
       }}
       blocks={error ? [{ text: error, tone: 'rose' }] : []}
-      emphasis={view === 'recommendations' && dailyBrief ? (
-        <DailyBriefCard brief={dailyBrief} submitting={creating} onStart={handleBriefStart} />
+      emphasis={lineAsk.ask ? (
+        // ★ 2026-10-10 한 줄 묻기 — 답이 열려 있으면 어느 보기에서든 답이 먼저다(실행 중 탭에서 물어도 보이게)
+        <LineAnswer
+          ask={lineAsk.ask}
+          busy={creating || previewing}
+          // 카드 = 오늘의 추천 1클릭과 같은 함수(handleBriefStart = 늘 AI 문안 · [문안 직접 쓰기]와 무관) · 여정으로 넘기기 · 이메일 · DM 안내는 이동만이라 표시 없음
+          cardCost={(c) => {
+            if (c.action.kind !== 'auto') return undefined;
+            const rec = c.action.brief as DailyBriefRecommendation;
+            if (rec.opportunityType === 'journey_promotion' || rec.recommendedChannel === 'email' || rec.recommendedChannel === 'dm') return undefined;
+            return `${AI_GENERATE_COSTS['ai-operator-propose']}크레딧`;
+          }}
+          makeCost={ownCopy ? '0크레딧' : `${AI_GENERATE_COSTS['ai-operator-propose']}크레딧`}
+          onClose={lineAsk.close}
+          onPick={(c) => {
+            if (c.action.kind !== 'auto') return;
+            lineAsk.close();
+            handleBriefStart(c.action.brief as DailyBriefRecommendation);
+          }}
+          onMakeAnyway={() => {
+            const t = lineAsk.ask!.line;
+            lineAsk.close();
+            void handleNaturalSubmit(t, null);
+          }}
+        />
+      ) : view === 'recommendations' && dailyBrief ? (
+        <DailyBriefCard brief={dailyBrief} submitting={creating || lineAsk.judging} onStart={handleBriefStart} />
       ) : null}
     >
       {loading && !subView ? (

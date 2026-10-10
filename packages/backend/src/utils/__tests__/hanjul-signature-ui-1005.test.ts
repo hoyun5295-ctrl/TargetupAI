@@ -83,7 +83,7 @@ describe('4. 입구 배선', () => {
     expect(d).toContain("const r = await requestLineDm({ line: opts.prompt || '', facts: opts.facts, products: opts.products, reads: opts.reads, readLicensed: opts.readLicensed });");
     expect(FRONT('utils', 'one-line.ts')).toContain("prompt: req.line, one_line: true, attempt_token: newAttemptToken(), land: 'result',");
     expect(d).toContain("const res = await api.post('/dm/ai/one-shot-generate', { prompt: opts.prompt || '', scenario: opts.scenario });");
-    expect(d).toContain('const g = await fetchOneLineGaps(t, reads);');   // ★ 2026-10-10 H3 사진 글 조각을 함께(판정은 여전히 서버)
+    expect(d).toContain("const g = await fetchOneLineGaps(t, reads, 'dm');");   // ★ 2026-10-10 H3 사진 글 조각을 함께(판정은 여전히 서버) · ★ 같은 날 한 줄 묻기 = 메뉴를 함께(질문 판정)
     const fin = d.slice(d.indexOf('    } finally {\n      clearInterval(stepTimer);'), d.indexOf('  }, [generating, createNew, applyAiGenerated'));
     expect(fin).not.toContain("setNaturalLanguage('')");
     expect(d).toContain('extraContent={pendingGen && (pendingGen.askBenefit || (pendingGen.terms?.length ?? 0) > 0 || (pendingGen.reads?.length ?? 0) > 0) ? (');

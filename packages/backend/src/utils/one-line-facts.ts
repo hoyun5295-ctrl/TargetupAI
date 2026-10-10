@@ -319,10 +319,8 @@ const LINE_READ_SEPARATOR = ' · ';
  * 남아 있으면 그 구간의 혜택 값을 지운다(면허 아님 · H3). 담당자가 「사진에서 읽은 숫자도 그대로 쓰기」를 켰거나 조각을 고쳐 더는 그 모양이 아니면 손대지 않는다.
  * ★ Codex 3R medium — 위치는 바꾸기 전 원문에서 모두 정하고, 겹치는 구간은 합쳐 한 번에 바꾼다(조각 순서에 따라 숫자가 남거나 「15%」 안의 「5%」를 지우는 일 0).
  */
-export function applyLineReads(line: string, reads: readonly string[] | undefined, licensed: boolean): string {
-  // ★ Codex 4R — 앞뒤 공백은 떼고 본다(판정 · 생성 호출부가 같은 글로 판단 · 끝 공백 하나로 경계가 어긋나지 않게)
-  const src = String(line || '').trim();
-  if (licensed || !reads || reads.length === 0) return src;
+/** (순수) 사진 조각이 칸에 붙은 모양 그대로 남은 구간(겹치면 합침 · 원문 위치) — applyLineReads · lineWithoutReads 가 같은 경계를 쓴다 */
+function lineReadSpans(src: string, reads: readonly string[]): Array<[number, number]> {
   const sep = LINE_READ_SEPARATOR;
   const spans: Array<[number, number]> = [];
   for (const r of reads) {
@@ -334,7 +332,6 @@ export function applyLineReads(line: string, reads: readonly string[] | undefine
       if (startsAtBoundary && endsAtBoundary) spans.push([i, end]);
     }
   }
-  if (spans.length === 0) return src;
   spans.sort((a, b) => a[0] - b[0] || b[1] - a[1]);
   const merged: Array<[number, number]> = [];
   for (const [a, b] of spans) {
@@ -342,6 +339,15 @@ export function applyLineReads(line: string, reads: readonly string[] | undefine
     if (last && a < last[1]) last[1] = Math.max(last[1], b);
     else merged.push([a, b]);
   }
+  return merged;
+}
+
+export function applyLineReads(line: string, reads: readonly string[] | undefined, licensed: boolean): string {
+  // ★ Codex 4R — 앞뒤 공백은 떼고 본다(판정 · 생성 호출부가 같은 글로 판단 · 끝 공백 하나로 경계가 어긋나지 않게)
+  const src = String(line || '').trim();
+  if (licensed || !reads || reads.length === 0) return src;
+  const merged = lineReadSpans(src, reads);
+  if (merged.length === 0) return src;
   let out = '';
   let at = 0;
   for (const [a, b] of merged) {
@@ -349,6 +355,69 @@ export function applyLineReads(line: string, reads: readonly string[] | undefine
     at = b;
   }
   return out + src.slice(at);
+}
+
+/** (순수) ★ 2026-10-10 한 줄 묻기 — 사용자가 친 부분만(사진에서 읽은 조각 구간을 뺀다 · 경계 = applyLineReads 와 같다) */
+export function lineWithoutReads(line: string, reads: readonly string[] | undefined): string {
+  const src = String(line || '').trim();
+  if (!reads || reads.length === 0) return src;
+  const merged = lineReadSpans(src, reads);
+  if (merged.length === 0) return src;
+  let out = '';
+  let at = 0;
+  for (const [a, b] of merged) { out += src.slice(at, a); at = b; }
+  out += src.slice(at);
+  return out.split(LINE_READ_SEPARATOR).map((x) => x.trim()).filter(Boolean).join(LINE_READ_SEPARATOR);
+}
+
+// ─────────────── 한 줄 묻기 판정 (★ 2026-10-10 · 설계서 docs/2026-10-10-oneline-ask-design.md §2) ───────────────
+//   AI 0 · DB 0 · 무과금. 애매하면 만들기(오늘과 같은 흐름) — 질문으로 오판하면 0크레딧 답 + [이 문장 그대로 만들기] 탈출구.
+
+/** 질문을 받는 회사 명단(한 줄 보강 스위치와 따로 · 비면 꺼짐 · `*` = 전 회사) */
+export function oneLineAskEnabled(
+  companyId: string | null | undefined,
+  env: string | undefined = process.env.ONE_LINE_ASK_COMPANY_IDS,
+): boolean {
+  return companyListAllows(companyId, String(env || ''));
+}
+
+/** 만들어 달라는 요청(동사 + 요청 어미) — 「만들어 줘」 「보내 줄래?」 「써 주세요」 */
+const ASK_MAKE_RE = /(?:만들어|보내|써|작성해|생성해|띄워|짜|불러와|돌려|설계해|구성해|꾸며|올려|준비해)\s*(?:줘|주세요|줄래|줄래요|주실래요|주시겠|주라|줄\s*수\s*있|봐|볼래|보자)/;
+/** 추천 동사(「추천해서 만들어 줘」는 사람이 고르게 답으로 · 「추천 상품」 같은 이름말은 아니다) */
+const ASK_RECO_VERB_RE = /추천\s*(?:해|하)|골라/;
+/** 추천 · 알려 달라는 요청으로 끝남(줄 끝) */
+const ASK_RECO_END_RE = /(?:추천|골라|알려)\s*(?:해|하)?\s*(?:줘|주세요|줄래|줄래요|주실래요|주시겠|봐|볼래)?\s*[?？.!~]*\s*$/;
+/** 질문 끝맺음(줄 끝 12자 안) */
+const ASK_QUESTION_END_RE = /(?:\?|？|뭐야|뭘까|뭐예요|뭐에요|좋을까요?|할까요?|해야\s*(?:해|돼|할까)|될까요?|어때요?|있을까요?|나을까요?|낫나요?|일까요?|인가요|건가요)\s*[?？.!~]*\s*$/;
+/** 질문 단서 */
+const ASK_CLUE_RE = /뭐|뭘|뭔|무엇|무슨|어떤|어느|어떻게|왜|언제|얼마나|몇|가장|제일|추천|골라/;
+/** 내용 채널(DM · 이메일 · SNS)은 무엇을 보낼지 · 만들지를 물을 때만 질문(「이번 겨울 어떤 코트가 어울릴까?」 같은 문안 훅은 만들기) */
+const ASK_CONTENT_TARGET_RE = /보내|보낼|만들|DM|디엠|메일|문자|글|게시|올릴|캠페인|뭘|무엇을|뭐를/i;
+/** 「어떻게」류 = 사용법 질문(도움말 답) */
+const ASK_HOW_RE = /어떻게|방법|설정|연동|어디서|어디에서/;
+const ASK_URL_RE = /https?:\/\/|www\./i;
+
+export type OneLineIntent = 'ask' | 'make';
+
+/**
+ * (순수) 한 줄 → 질문(ask)인가 만들기(make)인가. 사진 조각은 뺀 글(lineWithoutReads)을 넣는다.
+ * @param opts.contentChannel DM · 이메일 · SNS 한 줄이면 true(무엇을 보낼지 묻는 말이 있어야 질문)
+ */
+export function oneLineIntent(line: string, opts: { contentChannel?: boolean } = {}): OneLineIntent {
+  const t = String(line || '').trim();
+  if (t.length < 2) return 'make';
+  if (ASK_URL_RE.test(t) || hasConcreteBenefit(t)) return 'make';
+  if (ASK_MAKE_RE.test(t)) return ASK_RECO_VERB_RE.test(t) ? 'ask' : 'make';
+  const tail = t.slice(-12);
+  const asks = ASK_RECO_END_RE.test(tail) || (ASK_QUESTION_END_RE.test(tail) && ASK_CLUE_RE.test(t));
+  if (!asks) return 'make';
+  if (opts.contentChannel && !ASK_CONTENT_TARGET_RE.test(t) && !ASK_HOW_RE.test(t)) return 'make';
+  return 'ask';
+}
+
+/** (순수) 질문의 종류 — 사용법(how = 도움말 답) · 그 밖(what = 데이터 답) */
+export function oneLineAskTopic(line: string): 'how' | 'what' {
+  return ASK_HOW_RE.test(String(line || '')) ? 'how' : 'what';
 }
 
 /** (순수) 멱등 지문 조각 — 고른 상품(순서 무관). 상품을 바꿔 보내면 새 차감이 된다. */

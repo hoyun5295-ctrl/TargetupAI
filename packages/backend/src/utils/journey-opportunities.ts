@@ -39,6 +39,8 @@ import { triggerLabel, isProductPickTrigger } from './journey-trigger-capability
 import { currentPurchaseDoor, loadPurchaseRhythm, loadProductCycles, type PurchaseRhythm, type ProductCycle } from './journey-product';
 import { DEFAULT_DORMANT_DAYS } from './journey-lifecycle-map';
 import { getCreditCost } from './ai-credit-calc';
+// ★ 2026-10-10 한 줄 묻기 0단계 — 담당자 범위(관리자 · 분류 없는 회사 = 빈 조각 = 종전 SQL 그대로)
+import { getOwnerCustomerScopeSql } from './store-scope';
 
 export type JourneyOpportunityType =
   | 'cart_recovery' | 'onboarding' | 'dormant' | 'birthday' | 'repurchase_due' | 'wishlist'
@@ -78,7 +80,12 @@ function perHead(total: number, cnt: number): string {
  * 회사의 여정 기회를 실데이터 분석으로 산출. 의미 있는 신호만, 매출 규모 우선순위로 정렬.
  * 같은 유형 활성 여정이 이미 있거나 count=0인 신호는 제외한다(노출할 것만 반환).
  */
-export async function buildJourneyOpportunities(companyId: string): Promise<JourneyOpportunity[]> {
+/**
+ * @param ownerUserId ★ 2026-10-10 한 줄 묻기 0단계 — 보는 사람(담당자면 자기 분류코드 고객만 센다 · 관리자 · 없음 = 회사 전체).
+ *   범위는 **인원 · 규모 집계에만** 건다. 켜진 여정 판정 · 리듬 · 진단 계획은 회사 전체 그대로(캐시 키 · 결정적 요청 키).
+ */
+export async function buildJourneyOpportunities(companyId: string, ownerUserId?: string | null): Promise<JourneyOpportunity[]> {
+  const scopeSql = await getOwnerCustomerScopeSql(companyId, ownerUserId, 'c');
   // 1) 활성(미보관) 여정 유형 — 이미 커버 중인 기회는 제안하지 않는다.
   //    ★ 2026-08-08 이어달리기 — trigger_event도 함께 읽는다. 후속 트리거 3종이 전부 template_code='repeat'을
   //      공유해, 이어달리기 dedup을 template_code로 하면 서로를 오차단한다(설계서 사실 10).
@@ -113,11 +120,14 @@ export async function buildJourneyOpportunities(companyId: string): Promise<Jour
   const medianDays = rhythmOk ? repurStart! : 100000;
 
   // 3) 단일 스캔으로 모든 신호 집계 (FILTER 절)
+  // ★ 2026-10-10 한 줄 묻기 0단계 — 규모는 모든 칸이 **1회 구매액** 축이다(1인 = 평균 구매단가 · 없으면 최근 구매액 · 그것도 없으면 회사 중앙 구매단가).
+  //   옛: 휴면만 평생 누적 구매액(total_purchase_amount) 합이라 늘 1위였다 · 장바구니는 구매 이력 없는 사람을 0원으로 셌다(찜 · 가입 · 생일은 중앙값).
+  //   휴면 설명 문장의 「누적」은 따로 센다(dorm_total).
   const aggRes = await query(
     `SELECT
        COUNT(*) FILTER (WHERE last_cart_add_at >= NOW() - INTERVAL '14 days'
                           AND (recent_purchase_date IS NULL OR recent_purchase_date < last_cart_add_at::date)) AS cart_cnt,
-       COALESCE(SUM(COALESCE(avg_order_value, recent_purchase_amount, 0))
+       COALESCE(SUM(COALESCE(avg_order_value, recent_purchase_amount, $4::numeric))
                 FILTER (WHERE last_cart_add_at >= NOW() - INTERVAL '14 days'
                           AND (recent_purchase_date IS NULL OR recent_purchase_date < last_cart_add_at::date)), 0) AS cart_val,
 
@@ -125,24 +135,27 @@ export async function buildJourneyOpportunities(companyId: string): Promise<Jour
 
        COUNT(*) FILTER (WHERE recent_purchase_date IS NOT NULL
                           AND (CURRENT_DATE - recent_purchase_date) > $2) AS dorm_cnt,
-       COALESCE(SUM(total_purchase_amount)
+       COALESCE(SUM(COALESCE(avg_order_value, recent_purchase_amount, $4::numeric))
                 FILTER (WHERE recent_purchase_date IS NOT NULL
                           AND (CURRENT_DATE - recent_purchase_date) > $2), 0) AS dorm_val,
+       COALESCE(SUM(total_purchase_amount)
+                FILTER (WHERE recent_purchase_date IS NOT NULL
+                          AND (CURRENT_DATE - recent_purchase_date) > $2), 0) AS dorm_total,
 
        COUNT(*) FILTER (WHERE birth_date IS NOT NULL
                           AND ((CAST(to_char(birth_date, 'DDD') AS int) - CAST(to_char(CURRENT_DATE, 'DDD') AS int) + 366) % 366) <= 7) AS bday_cnt,
 
        COUNT(*) FILTER (WHERE purchase_count >= 2 AND recent_purchase_date IS NOT NULL
                           AND (CURRENT_DATE - recent_purchase_date) BETWEEN $3 AND $2) AS repur_cnt,
-       COALESCE(SUM(COALESCE(avg_order_value, 0))
+       COALESCE(SUM(COALESCE(avg_order_value, recent_purchase_amount, $4::numeric))
                 FILTER (WHERE purchase_count >= 2 AND recent_purchase_date IS NOT NULL
                           AND (CURRENT_DATE - recent_purchase_date) BETWEEN $3 AND $2), 0) AS repur_val,
 
        COUNT(*) FILTER (WHERE last_wishlist_add_at >= NOW() - INTERVAL '14 days'
                           AND (recent_purchase_date IS NULL OR recent_purchase_date < last_wishlist_add_at::date)) AS wish_cnt
-     FROM customers
-     WHERE company_id = $1 AND is_active = true AND COALESCE(is_invalid, false) = false`,
-    [companyId, p75Days, medianDays],
+     FROM customers c
+     WHERE company_id = $1 AND is_active = true AND COALESCE(is_invalid, false) = false${scopeSql}`,
+    [companyId, p75Days, medianDays, medianAov],
   );
   const a = aggRes.rows[0] || {};
   const num = (v: any) => Number(v || 0);
@@ -170,7 +183,7 @@ export async function buildJourneyOpportunities(companyId: string): Promise<Jour
     out.push({
       type: 'dormant', templateCode: 'dormant', title: '장기 무구매 휴면', preferTriggerEvent: 'customer.dormant',
       count: num(a.dorm_cnt), valueAtStake: num(a.dorm_val), priority: 'medium',
-      description: `다시 사는 간격(열에 아홉이 ${p75Days}일 안)을 넘겨 ${p75Days}일 이상 무구매인 ${num(a.dorm_cnt).toLocaleString()}명. 누적 ${won(num(a.dorm_val))} 구매한 고객층이라 재활성 가치가 높습니다.`,
+      description: `다시 사는 간격(열에 아홉이 ${p75Days}일 안)을 넘겨 ${p75Days}일 이상 무구매인 ${num(a.dorm_cnt).toLocaleString()}명. 누적 ${won(num(a.dorm_total))} 구매한 고객층이라 재활성 가치가 높습니다.`,
       suggestedObjective: '장기 휴면 고객 복귀 유도: 재방문 안내',
     });
   }
@@ -202,7 +215,7 @@ export async function buildJourneyOpportunities(companyId: string): Promise<Jour
   // ★ 2026-08-08 이어달리기 — 앞 여정에서 실제로 전환한 고객을 받아줄 여정이 없을 때만.
   //   실패해도 나머지 카드는 그대로 나간다(추천 하나가 화면 전체를 비우지 않는다).
   try {
-    out.push(...(await buildSuccessionOpportunities(companyId, activeTriggers)));
+    out.push(...(await buildSuccessionOpportunities(companyId, activeTriggers, scopeSql)));
   } catch (e: any) {
     console.log('[journey-opportunities] 이어달리기 신호 생략:', e?.message || e);
   }
@@ -302,6 +315,7 @@ function toCardTemplateCode(code: string | null): JourneyOpportunity['templateCo
 async function buildSuccessionOpportunities(
   companyId: string,
   activeTriggers: Set<string>,
+  scopeSql = '',
 ): Promise<JourneyOpportunity[]> {
   const sourceEvents = TRIGGER_CONTRACTS.filter((c) => (c.nextEvents || []).length > 0).map((c) => c.event);
   if (sourceEvents.length === 0) return [];
@@ -324,7 +338,8 @@ async function buildSuccessionOpportunities(
             COUNT(*)::int AS goal_met_count,
             COALESCE(SUM(COALESCE(c.avg_order_value, 0)), 0) AS value_at_stake
        FROM converted cv
-       LEFT JOIN customers c ON c.id = cv.customer_id AND c.company_id = $1::uuid
+       LEFT JOIN customers c ON c.id = cv.customer_id AND c.company_id = $1::uuid${scopeSql ? `
+      WHERE TRUE${scopeSql}` : ''}
       GROUP BY cv.trigger_event`,
     [companyId, sourceEvents],
   );
@@ -512,7 +527,8 @@ async function loadDiagnosisFacts(companyId: string): Promise<{ at: number; rhyt
   const rhythm = await loadPurchaseRhythm(companyId, door);
   const products = rhythm.buyers > 0 ? await loadProductCycles(companyId, door) : [];
   const entry = { at: Date.now(), rhythm: rhythm.buyers > 0 ? rhythm : null, products };
-  diagCache.set(companyId, entry);
+  // ★ 2026-10-10 한 줄 묻기 0단계 — 구매 데이터가 없는 결과(null)는 기억하지 않는다(연동 직후 하루 동안 「연동하세요」가 남지 않게).
+  if (entry.rhythm) diagCache.set(companyId, entry);
   return entry;
 }
 

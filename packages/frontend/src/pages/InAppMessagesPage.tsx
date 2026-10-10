@@ -61,6 +61,9 @@ import { LineFacts, LineFactsSheet, typedBenefit, type LineFactsValues } from '.
 import { countSlots, fillSlots, fillSlotsDeep, stringsDeep, appendToOneLine } from '../utils/one-line';
 import type { FixItem } from '../utils/make-flow';
 import InAppEntryGallery from '../components/inapp/InAppEntryGallery';
+// ★ 2026-10-10 한 줄 묻기 — 질문이면 자사몰 신호로 답한다(설계서 docs/2026-10-10-oneline-ask-design.md)
+import { useLineAsk } from '../hooks/useLineAsk';
+import LineAnswer from '../components/zone/LineAnswer';
 import { PosterStage, SlideRail, SlidePanel, LayoutSwitcher, ImageSourceMenu, useImageSources, readField, writeField, FIELD_MAX } from '../components/inapp/PosterEditor';
 import { resolvePosterLayout, type PosterLayout, type SheetEditKey } from '../components/inapp/PosterSheetPreview';
 import {
@@ -386,6 +389,9 @@ export default function InAppMessagesPage() {
   const [aiGenerating, setAiGenerating] = useState(false);
   const [aiProgressStep, setAiProgressStep] = useState<number>(-1);
   const [aiObjective, setAiObjective] = useState('');
+  // ★ 2026-10-10 한 줄 묻기 — 판정은 한 줄 입구 두 곳(시작 화면 · 채널 화면)에서만. 채널 고르기 창 · 빠른 시작은 그대로.
+  const lineAsk = useLineAsk('inapp');
+  const inappCost = `${AI_GENERATE_COSTS['inapp-ai-generator']}크레딧`;
   // ★ 2026-10-05 한 줄로 만든 메시지(스위치 켠 회사) — 편집기에 완성도 줄 · 혜택 채우기 시트를 그린다
   const [inappLine, setInappLine] = useState<string | null>(null);
 
@@ -917,15 +923,32 @@ export default function InAppMessagesPage() {
           line: {
             value: aiObjective,
             onChange: setAiObjective,
-            onSubmit: () => { if (customerGate.isEmpty) { setShowDataGate(true); return; } setObjectivePick(aiObjective.trim()); },
+            onSubmit: () => {
+              if (customerGate.isEmpty) { setShowDataGate(true); return; }
+              const t = aiObjective.trim();
+              void (async () => {
+                if (await lineAsk.route(t)) return;
+                setObjectivePick(t);
+              })();
+            },
             placeholder: inappOneLine.placeholder,
             verb: inappOneLine.verb,
             icon: Sparkles,
-            busy: aiGenerating,
-            extra: <ImageToCopyButton label="이미지" onExtracted={(t) => setAiObjective((prev) => appendToOneLine(prev, t))} disabled={aiGenerating} className={MK_LINE_EXTRA_BTN} />,
+            busy: aiGenerating || lineAsk.judging,
+            extra: <ImageToCopyButton label="이미지" onExtracted={(t) => { setAiObjective((prev) => appendToOneLine(prev, t)); lineAsk.noteRead(t); }} disabled={aiGenerating} className={MK_LINE_EXTRA_BTN} />,
           },
         }}
-        emphasis={
+        emphasis={lineAsk.ask ? (
+          <LineAnswer
+            ask={lineAsk.ask}
+            busy={aiGenerating}
+            cardCost={(c) => (c.action.kind === 'inapp' ? inappCost : undefined)}
+            makeCost={inappCost}
+            onClose={lineAsk.close}
+            onPick={(c) => { if (c.action.kind !== 'inapp') return; lineAsk.close(); setObjectivePick(c.action.objective); }}
+            onMakeAnyway={() => { const t = lineAsk.ask!.line; lineAsk.close(); setObjectivePick(t); }}
+          />
+        ) : (
           <ZoneEmphasis kind="ai" title="빠른 시작" meta="시나리오만 고르면 AI가 제목·본문·트리거까지">
           <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
             {(Object.keys(SCENARIO_VISUAL) as QuickStartScenario[]).map((sc, i, all) => {
@@ -947,7 +970,7 @@ export default function InAppMessagesPage() {
             })}
           </div>
           </ZoneEmphasis>
-        }
+        )}
       >
         <div className="space-y-7">
           {customerGate.isEmpty && <CustomerDataRequiredBanner />}
@@ -1137,12 +1160,18 @@ export default function InAppMessagesPage() {
         line: {
           value: aiObjective,
           onChange: setAiObjective,
-          onSubmit: () => handleAIGenerate(aiObjective, undefined, undefined, true),
+          onSubmit: () => {
+            const t = aiObjective;
+            void (async () => {
+              if (await lineAsk.route(t)) return;
+              void handleAIGenerate(t, undefined, undefined, true);
+            })();
+          },
           placeholder: inappOneLine.placeholder,
           verb: inappOneLine.verb,
           icon: Sparkles,
-          busy: aiGenerating,
-          extra: <ImageToCopyButton label="이미지" onExtracted={(t) => setAiObjective((prev) => appendToOneLine(prev, t))} disabled={aiGenerating} className={MK_LINE_EXTRA_BTN} />,
+          busy: aiGenerating || lineAsk.judging,
+          extra: <ImageToCopyButton label="이미지" onExtracted={(t) => { setAiObjective((prev) => appendToOneLine(prev, t)); lineAsk.noteRead(t); }} disabled={aiGenerating} className={MK_LINE_EXTRA_BTN} />,
         },
       }}
       stamp={{ text: '다시 읽기', onRefresh: loadAll, loading }}
@@ -1161,7 +1190,17 @@ export default function InAppMessagesPage() {
           onAction: () => navigate('/cdp-settings'),
         }] : []),
       ]}
-      emphasis={
+      emphasis={lineAsk.ask ? (
+        <LineAnswer
+          ask={lineAsk.ask}
+          busy={aiGenerating}
+          cardCost={(c) => (c.action.kind === 'inapp' ? inappCost : undefined)}
+          makeCost={inappCost}
+          onClose={lineAsk.close}
+          onPick={(c) => { if (c.action.kind !== 'inapp') return; lineAsk.close(); void handleAIGenerate(c.action.objective, undefined, undefined, true); }}
+          onMakeAnyway={() => { const t = lineAsk.ask!.line; lineAsk.close(); void handleAIGenerate(t, undefined, undefined, true); }}
+        />
+      ) : (
         <ZoneEmphasis kind="ai" title="빠른 시작" meta="카드에 적힌 대상·시점이 그대로 설정됩니다">
           <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-2.5">
             {quickStartCards.map((card) => {
@@ -1171,7 +1210,7 @@ export default function InAppMessagesPage() {
                 <button
                   key={card.scenario}
                   onClick={() => handleAIGenerate('', card.scenario)}
-                  disabled={aiGenerating}
+                  disabled={aiGenerating || lineAsk.judging}
                   className="group text-left bg-white hover:bg-slate-100 border border-slate-200 hover:border-violet-300 rounded-2xl p-3.5 transition-all disabled:opacity-40 disabled:cursor-not-allowed"
                 >
                   <div className={`w-9 h-9 rounded-xl bg-gradient-to-br ${visual.gradient} flex items-center justify-center mb-2.5 shadow-md group-hover:scale-105 transition-transform`}>
@@ -1184,7 +1223,7 @@ export default function InAppMessagesPage() {
             })}
           </div>
         </ZoneEmphasis>
-      }
+      )}
     >
         <AssetLibraryPickerModal
           open={startLibOpen}
