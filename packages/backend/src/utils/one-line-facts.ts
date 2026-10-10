@@ -391,6 +391,13 @@ const ASK_RECO_END_RE = /(?:추천|골라|알려)\s*(?:해|하)?\s*(?:줘|주세
 const ASK_QUESTION_END_RE = /(?:\?|？|뭐야|뭘까|뭐예요|뭐에요|좋을까요?|할까요?|해야\s*(?:해|돼|할까)|될까요?|어때요?|있을까요?|나을까요?|낫나요?|일까요?|인가요|건가요)\s*[?？.!~]*\s*$/;
 /** 질문 단서 */
 const ASK_CLUE_RE = /뭐|뭘|뭔|무엇|무슨|어떤|어느|어떻게|왜|언제|얼마나|몇|가장|제일|추천|골라/;
+/**
+ * ★ 1011 예 · 아니오 질문 끝맺음 — 여정 · 자동 마케팅 · 인앱에만(Harold 실측: 「추가할만한 여정이 있니?」가 의문사가 없어 만들기로 가 여정이 생성됐다).
+ *   잘못 질문으로 보면 = 0크레딧 답 + 탈출구 1번 · 잘못 만들기로 보면 = 크레딧 + 엉뚱한 결과 → 이 메뉴들은 질문꼴이면 의문사 없이도 질문.
+ *   내용 채널(DM · 이메일 · SNS)은 한 줄이 곧 문안 재료라 물음꼴 훅이 흔하다(「따뜻한 연말 보내고 계신가요?」 「가장 소중한 사람에게 보낼 선물이 있나요」)
+ *   → 배포 전 식(위 두 정규식)을 글자 그대로 쓴다(Codex R3 · R4 · 두 정책을 한 식에 섞으면 한쪽 정정이 다른 쪽으로 샌다).
+ */
+const ASK_YESNO_END_RE = /(?:어떨까요?|있니|있나요?|없니|없나요?|없을까요?|괜찮을까요?|되나요?|되니|맞나요?|맞니)\s*[?？.!~]*\s*$/;
 /** 내용 채널(DM · 이메일 · SNS)은 무엇을 보낼지 · 만들지를 물을 때만 질문(「이번 겨울 어떤 코트가 어울릴까?」 같은 문안 훅은 만들기) */
 const ASK_CONTENT_TARGET_RE = /보내|보낼|만들|DM|디엠|메일|문자|글|게시|올릴|캠페인|뭘|무엇을|뭐를/i;
 /** 「어떻게」류 = 사용법 질문(도움말 답) */
@@ -409,7 +416,9 @@ export function oneLineIntent(line: string, opts: { contentChannel?: boolean } =
   if (ASK_URL_RE.test(t) || hasConcreteBenefit(t)) return 'make';
   if (ASK_MAKE_RE.test(t)) return ASK_RECO_VERB_RE.test(t) ? 'ask' : 'make';
   const tail = t.slice(-12);
-  const asks = ASK_RECO_END_RE.test(tail) || (ASK_QUESTION_END_RE.test(tail) && ASK_CLUE_RE.test(t));
+  const asks = ASK_RECO_END_RE.test(tail) || (opts.contentChannel
+    ? ASK_QUESTION_END_RE.test(tail) && ASK_CLUE_RE.test(t)                  // 내용 채널 = 배포 전 규칙 그대로
+    : ASK_QUESTION_END_RE.test(tail) || ASK_YESNO_END_RE.test(tail));       // 여정 · 자동 · 인앱 = 질문꼴이면 질문
   if (!asks) return 'make';
   if (opts.contentChannel && !ASK_CONTENT_TARGET_RE.test(t) && !ASK_HOW_RE.test(t)) return 'make';
   return 'ask';

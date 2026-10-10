@@ -83,7 +83,7 @@
 - 찜(관심 상품) 카드는 같은 시작 사건 여정이 켜져 있어도 다시 추천된다(장바구니 · 휴면 · 재구매 카드는 `activeTriggers` 로 거름).
 
 ### 🔵 B-1010-15 여정 화면 출처 문구에 내부 표 이름 (🔵 · 기존 · 1010 확인 · 미착수)
-- `JourneysPage.tsx` 1999 「Data source: customers · journeys 실시간 집계」 — 고객 화면에 DB 표 이름이 보인다. 「고객 · 여정 실시간 집계」로.
+- `JourneysPage.tsx` 「Data source: customers · journeys 실시간 집계」 · `JourneyOptionsEditor.tsx` 「Data source: journeys.trigger_filters + 옵션 컬럼」(1011 여정 상세 창 실측에서 확인) — 고객 화면에 DB 표 이름이 보인다. 「고객 · 여정 실시간 집계」 · 「여정 시작 조건 · 옵션」으로.
 
 ### 🔵 B-1010-1 이메일 한 줄: AI가 쓴 상품 가격이 원문 대조 없이 진짜 몰 링크와 함께 나갈 수 있음 (🔵 · 기존 경로 · 1010 한 줄 DM 강화 회의론자 최종 검증 · 미착수)
 - 이메일 한 줄은 요청 글만 보내 원문(eventText)이 비어 상품 가격 원문 대조(`email-ai.ts` `if (input.eventText)`)가 돌지 않고, 혜택 가드도 가격 칸은 건너뛴다. 그 뒤 이름 자동 첨부(`mall-product-match.ts` 83-86)는 빈 칸만 채워 AI 가격이 남은 채 진짜 사진 · 링크가 붙는다. 1010 변경으로 **후보를 보여 준 요청(products 칸)** 은 첨부를 하지 않고 확정 카드만 싣지만, 후보를 못 보여 준 요청(검색 실패 · 미연동)은 지금 그대로다. 처방 후보 = 한 줄 이메일도 요청 글로 상품 가격 원문 대조 · 또는 첨부 때 몰 값 세트로 덮고 `discount_rate` 지움. 설계서 = docs/2026-10-10-oneline-dm-email-design.md §7.

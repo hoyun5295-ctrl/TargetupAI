@@ -302,6 +302,7 @@
 | 모바일 반응형 (flex-wrap + md:/lg: 분기 + grid-cols-2 md:grid-cols-4) | 모든 페이지 |
 | ConfirmModal + useToast (native dialog 0건) | 모든 페이지 |
 | 모달 = 흰 판(`MK_MODAL`) · 존 밖과 같이 쓰는 공용 창은 `useLightSurface()` 로 밝은 짝 | 모든 모달 |
+| **목록 카드 = 다열**(`grid-cols-1 md:grid-cols-2 lg:grid-cols-3`) · 한 줄 꽉 찬 얇은 카드(왼쪽 글 · 오른쪽 버튼 · 가운데 빈칸) 금지 · 아래로 펼치기 대신 **누르면 상세 창** · 숫자 칸은 자르지 않는다(`flex-1 min-w-fit` · 모자라면 줄바꿈) · ★1011 Harold 「왜 늘 공간 낭비하냐」(여정 · 자동 마케팅 3곳) | 카드 목록 |
 
 > 라벨 3단 정책·1클릭 UX 정합·절대금지 항목은 **CLAUDE.md가 소유**한다(`design_quality_minimum_ceiling_free` / `marketing_user_ux_priority`). 여기 복사하지 않는다.
 

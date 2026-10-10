@@ -40,8 +40,9 @@ export default function OperatorsManageList({ operators, onRunNow, onEdit, onApp
     );
   }
 
+  // ★ 2026-10-11 Harold: 「한 줄 꽉 찬 카드 = 공간 낭비 · 3열」 — 카드 = 이름 · 상태 · 목표 · 일정 · 예산 · 동작(바닥 한 줄)
   return (
-    <div className="space-y-3">
+    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
       {operators.map((op) => {
         const monthSpent = op.budgetSpentMonth || 0;
         const monthBudget = op.budgetMonthly || 0;
@@ -50,22 +51,19 @@ export default function OperatorsManageList({ operators, onRunNow, onEdit, onApp
         const isAlert = monthBudget > 0 && monthPct >= threshold;
         const isOver = monthBudget > 0 && monthPct >= 100;
         return (
-          <div key={op.id} className="bg-white border border-slate-200 rounded-xl p-5">
-            <div className="flex items-start justify-between gap-4">
-              <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-2 mb-1 flex-wrap">
-                  <div className="text-base font-semibold text-slate-900">{op.name}</div>
-                  <StatusBadge status={op.status} />
-                  {(() => { const a = approvalState(op); return <span className={`text-[11px] px-2 py-0.5 rounded-full border ${a.tone}`}>{a.label}</span>; })()}
-                </div>
-                <div className="text-sm text-slate-600 mb-2">{op.objective}</div>
-                <div className="flex flex-wrap gap-x-3 gap-y-1 text-xs text-slate-500">
-                  <span><Clock className="w-3 h-3 inline" /> {POLICY_LABEL[op.schedule] || op.schedule}{op.schedule === 'yearly' && op.scheduleMonth ? ` ${op.scheduleMonth}월 ${op.scheduleDayOfMonth ?? 1}일` : ''} {op.scheduleTime} (KST)</span>
-                  <span>·</span>
-                  <span>다음 실행 {op.nextRunAt ? new Date(op.nextRunAt).toLocaleString('ko-KR') : '-'}</span>
-                  <span>·</span>
-                  <span>제안 {op.totalProposals}건 (승인 {op.totalApproved} / 거부 {op.totalRejected} / 자동 {op.totalAutoExecuted})</span>
-                </div>
+          <div key={op.id} className="flex flex-col min-w-0 bg-white border border-slate-200 rounded-2xl p-4 shadow-[0_1px_2px_rgba(15,23,42,0.05)]">
+            <div className="min-w-0">
+              <div className="text-[15px] font-semibold text-slate-900 truncate" title={op.name}>{op.name}</div>
+              <div className="mt-1 flex items-center gap-1.5 flex-wrap">
+                <StatusBadge status={op.status} />
+                {(() => { const a = approvalState(op); return <span className={`text-[11px] px-2 py-0.5 rounded-full border ${a.tone}`}>{a.label}</span>; })()}
+              </div>
+              <div className="mt-2 text-[13px] leading-relaxed text-slate-600 line-clamp-2 break-keep" title={op.objective}>{op.objective}</div>
+              <div className="mt-2 space-y-0.5 text-xs text-slate-500">
+                <div><Clock className="w-3 h-3 inline" /> {POLICY_LABEL[op.schedule] || op.schedule}{op.schedule === 'yearly' && op.scheduleMonth ? ` ${op.scheduleMonth}월 ${op.scheduleDayOfMonth ?? 1}일` : ''} {op.scheduleTime} (KST)</div>
+                <div>다음 실행 {op.nextRunAt ? new Date(op.nextRunAt).toLocaleString('ko-KR') : '-'}</div>
+                <div>제안 {op.totalProposals}건 (승인 {op.totalApproved} / 거부 {op.totalRejected} / 자동 {op.totalAutoExecuted})</div>
+              </div>
 
                 {monthBudget > 0 && (
                   <div className="mt-3 p-2.5 bg-slate-100 border border-slate-200 rounded-lg">
@@ -80,9 +78,10 @@ export default function OperatorsManageList({ operators, onRunNow, onEdit, onApp
                     {!isOver && isAlert && <div className="mt-1.5 text-[10px] text-amber-700 flex items-center gap-1"><AlertCircle className="w-2.5 h-2.5" /> 알림 임계값 {threshold}% 도달</div>}
                   </div>
                 )}
-              </div>
+            </div>
 
-              <div className="flex flex-col gap-1.5 shrink-0">
+            <div className="mt-auto pt-3">
+              <div className="flex flex-wrap gap-1.5 border-t border-slate-100 pt-3">
                 <button onClick={() => onApprove(op)} className="text-xs bg-amber-100 hover:bg-amber-200 text-amber-900 px-2 py-1 rounded flex items-center gap-1 border border-amber-200 transition-colors">
                   <ShieldCheck className="w-3 h-3" /> {approvalState(op).action}
                 </button>

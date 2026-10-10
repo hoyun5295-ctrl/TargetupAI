@@ -2,6 +2,8 @@
 // 버리는 데이터 0: proposal_json(orchestrate 결과 전체)을 위계로 렌더한다.
 //   히어로(기대 매출·ROI) → 근거(왜 지금·등급별 전환·안전·채널) → 보조(변형·인사이트·전략·리스크·비용·통합 분석).
 import { ReactNode, useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
+import { MK_MODAL, MK_MODAL_BACKDROP } from '../../utils/make-ui';
 import {
   X, ChevronDown, ChevronUp, Target, ShieldCheck,
   Send, GitMerge, MessageSquare, AlertCircle, Check, Pencil, Users, Loader2,
@@ -537,36 +539,68 @@ export default function ProposalDecisionCard({
     );
   }
 
+  // ★ 2026-10-11 Harold: 「한 줄 꽉 찬 카드 = 공간 낭비 · 3열 · 누르면 모달」 — 접힌 카드 = 이름 · 목표 · 숫자 세 칸 / 펼친 내용(옛 아래 펼침) = 상세 창
   return (
-    <div className="bg-white border border-slate-200 rounded-xl">
-      <button onClick={onToggleExpand} className="w-full flex items-center gap-3 px-4 py-3 text-left">
-        <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-2">
-            <span className="text-sm font-medium text-slate-900 truncate">{proposal.operatorName || '제안'}</span>
+    <>
+      <button
+        type="button"
+        onClick={onToggleExpand}
+        aria-haspopup="dialog"
+        className="w-full h-full min-w-0 flex flex-col text-left bg-white border border-slate-200 rounded-2xl p-4 shadow-[0_1px_2px_rgba(15,23,42,0.05)] hover:border-indigo-200 hover:shadow-[0_2px_4px_rgba(15,23,42,0.06),0_12px_28px_-14px_rgba(15,23,42,0.22)] transition-[border-color,box-shadow]"
+      >
+        <div className="min-w-0 w-full">
+          <div className="flex items-center gap-2 min-w-0">
+            <span className="text-sm font-semibold text-slate-900 truncate">{proposal.operatorName || '제안'}</span>
             <StatusBadge status={proposal.status} />
           </div>
-          {proposal.operatorObjective && <div className="text-[11px] text-slate-500 mt-0.5 truncate">{proposal.operatorObjective}</div>}
+          {proposal.operatorObjective && <div className="text-[12px] leading-relaxed text-slate-500 mt-1 line-clamp-2 break-keep">{proposal.operatorObjective}</div>}
         </div>
-        <div className="text-right shrink-0">
-          <div className="text-sm font-semibold text-slate-900 tabular-nums">{revenue != null ? won(revenue) : '—'}</div>
-          {roi != null && <div className="text-[11px] text-emerald-700 tabular-nums">ROI {roi.toFixed(1)}×</div>}
-        </div>
-        {expanded ? <ChevronUp className="w-4 h-4 text-slate-400 shrink-0" /> : <ChevronDown className="w-4 h-4 text-slate-400 shrink-0" />}
+        <dl className="mt-auto pt-3 flex flex-wrap w-full gap-2">
+          <div className="flex-1 min-w-fit rounded-lg bg-slate-50 px-2.5 py-2">
+            <dt className="text-[11px] text-slate-500">기대 매출</dt>
+            <dd className="text-[14px] font-semibold text-slate-900 tabular-nums whitespace-nowrap">{revenue != null ? won(revenue) : '—'}</dd>
+          </div>
+          <div className="flex-1 min-w-fit rounded-lg bg-slate-50 px-2.5 py-2">
+            <dt className="text-[11px] text-slate-500">ROI</dt>
+            <dd className="text-[14px] font-semibold text-emerald-700 tabular-nums whitespace-nowrap">{roi != null ? `${roi.toFixed(1)}×` : '—'}</dd>
+          </div>
+          <div className="flex-1 min-w-fit rounded-lg bg-slate-50 px-2.5 py-2">
+            <dt className="text-[11px] text-slate-500">대상</dt>
+            <dd className="text-[14px] font-semibold text-slate-900 tabular-nums whitespace-nowrap">{proposal.recipientCount.toLocaleString()}명</dd>
+          </div>
+        </dl>
       </button>
-      {expanded && (
-        <div className="px-4 pb-4">
-          {reviewNotice}
-          <div className="mt-1">{hero}</div>
-          {diagnosisBlock}
-          {gradeBlock}
-          {chips}
-          {messagePreview}
-          {actions(false)}
-          {detail}
-        </div>
+      {expanded && createPortal(
+        <div className={MK_MODAL_BACKDROP} onMouseDown={(e) => { if (e.target === e.currentTarget) onToggleExpand(); }}>
+          <div className={`${MK_MODAL} w-full max-w-[860px] max-h-[92vh] flex flex-col overflow-hidden`} role="dialog" aria-modal="true" aria-label={`${proposal.operatorName || '제안'} 상세`}>
+            <div className="flex items-start gap-3 px-5 py-4 border-b border-slate-200">
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className="text-[15px] font-semibold text-slate-900">{proposal.operatorName || '제안'}</span>
+                  <StatusBadge status={proposal.status} />
+                </div>
+                {proposal.operatorObjective && <div className="text-[12px] text-slate-500 mt-0.5 break-keep">목표: {proposal.operatorObjective}</div>}
+              </div>
+              <button type="button" onClick={onToggleExpand} aria-label="상세 닫기" className="shrink-0 h-9 w-9 rounded-lg text-slate-400 hover:bg-slate-100 hover:text-slate-700 flex items-center justify-center">
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            <div className="flex-1 min-h-0 overflow-y-auto mk-scroll px-5 pb-5">
+              {reviewNotice}
+              <div className="mt-4">{hero}</div>
+              {diagnosisBlock}
+              {gradeBlock}
+              {chips}
+              {messagePreview}
+              {actions(false)}
+              {detail}
+            </div>
+          </div>
+        </div>,
+        document.body,
       )}
       {targetModal}
-    </div>
+    </>
   );
 }
 

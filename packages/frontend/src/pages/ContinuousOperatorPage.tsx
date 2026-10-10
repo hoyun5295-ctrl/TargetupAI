@@ -739,8 +739,9 @@ export default function ContinuousOperatorPage() {
                       <button type="button" onClick={() => setView('operators')} className="mt-3 text-[13px] font-semibold text-indigo-600 hover:underline">실행 중 {activeCount} →</button>
                     )}
                   </div>
-                ) : (
-                  proposals.map((p) => (
+                ) : (() => {
+                  // ★ 2026-10-11 Harold: 「한 줄 꽉 찬 카드 = 공간 낭비 · 3열 · 누르면 모달」 — 맨 위 결정 카드(featured) 1장은 그대로 · 나머지 = 3열 카드
+                  const card = (p: OperatorProposal) => (
                     <ProposalDecisionCard
                       key={p.id}
                       proposal={p}
@@ -753,8 +754,15 @@ export default function ContinuousOperatorPage() {
                       onStop={() => handleStop(p.id)}
                       onPromoteToJourney={() => handlePromoteToJourney(p)}
                     />
-                  ))
-                )}
+                  );
+                  const rest = proposals.filter((p) => p.id !== featuredId);
+                  return (
+                    <>
+                      {proposals.filter((p) => p.id === featuredId).map((p) => card(p))}
+                      {rest.length > 0 && <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">{rest.map((p) => card(p))}</div>}
+                    </>
+                  );
+                })()}
                 </div>
               </div>
             </div>

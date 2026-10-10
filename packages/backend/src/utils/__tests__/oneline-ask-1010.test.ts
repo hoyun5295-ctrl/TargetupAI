@@ -55,7 +55,16 @@ describe('① 판정 — 화면이 내보내는 명령 문장은 전부 만들�
       '추천해서 만들어 줘',
       '이번 달 어떤 자동 마케팅을 돌려야 할까',
     ]) expect(oneLineIntent(q), q).toBe('ask');
+    // ★ 1011 Harold 실측 — 의문사 없는 예 · 아니오 질문도 질문(옛: 의문사를 요구해 여정이 생성됐다)
+    for (const q of [
+      '추가할만한 여정이 있니?',
+      '추가할만한 여정 있니',
+      '지금 켜 둘 만한 자동 마케팅 있나요',
+      '휴면 고객 여정 먼저 하는 게 좋을까?',
+      '생일 여정 만들어도 괜찮을까',
+    ]) expect(oneLineIntent(q), q).toBe('ask');
     expect(oneLineIntent('이번 주에 뭐 보내면 좋을까', { contentChannel: true })).toBe('ask');
+    expect(oneLineIntent('이번 주말에 뭐 보낼 만한 거 있을까?', { contentChannel: true })).toBe('ask');
     expect(oneLineIntent('어떻게 하면 휴면 고객 부를 수 있을까')).toBe('ask');
     expect(oneLineAskTopic('어떻게 하면 휴면 고객 부를 수 있을까')).toBe('how');
     expect(oneLineAskTopic('가장 효율 좋을 여정이 뭐야?')).toBe('what');
@@ -66,6 +75,14 @@ describe('① 판정 — 화면이 내보내는 명령 문장은 전부 만들�
     expect(oneLineIntent('VIP 고객에게 신상 안내 보내줄래?')).toBe('make');
     expect(oneLineIntent('어떤 니트가 좋을까? 가을 신상 3종 첫 구매 10%')).toBe('make');   // 혜택 값
     expect(oneLineIntent('이번 겨울 어떤 코트가 어울릴까?', { contentChannel: true })).toBe('make');   // 문안 훅
+    expect(oneLineIntent('이번 주말 놓치실 건가요?', { contentChannel: true })).toBe('make');   // 의문사 없는 문안 훅(1011)
+    expect(oneLineIntent('신상 니트 입고 소식 들으셨나요?', { contentChannel: true })).toBe('make');
+    // 내용 채널은 의문사가 있어야 질문 — 「보내」가 든 물음꼴 훅도 만들기(Codex R3 · 배포 전과 같음)
+    expect(oneLineIntent('소중한 사람과 따뜻한 연말 보내고 계신가요?', { contentChannel: true })).toBe('make');
+    expect(oneLineIntent('이번 주말 특가 문자 받아보셨나요?', { contentChannel: true })).toBe('make');
+    // 새 예 · 아니오 어미는 내용 채널에 새지 않는다 — 의문사 + 대상 말이 있어도 만들기(Codex R4 · 같은 문장이 여정에선 질문)
+    expect(oneLineIntent('가장 소중한 사람에게 보낼 선물이 있나요', { contentChannel: true })).toBe('make');
+    expect(oneLineIntent('가장 소중한 사람에게 보낼 선물이 있나요')).toBe('ask');
     expect(oneLineIntent('https://shop.example.com/event 이거 뭐야?')).toBe('make');
     expect(oneLineIntent('')).toBe('make');
   });
