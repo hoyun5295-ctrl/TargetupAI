@@ -14,6 +14,10 @@ const { DEMO, REAL, state, mysqlCalls, poolConnect } = vi.hoisted(() => ({
 vi.mock('../../config/database', () => {
   const query = vi.fn(async (sql: string, params: any[] = []) => {
     if (/SELECT is_demo FROM companies/.test(sql)) {
+      // 실제 PG 처럼 UUID 모양이 아니면 ::uuid 캐스트에서 거절한다(★1011 — 흉내가 DB 보다 너그러우면 결함을 못 잡는다)
+      if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(String(params[0]))) {
+        const e: any = new Error(`invalid input syntax for type uuid: "${params[0]}"`); e.code = '22P02'; throw e;
+      }
       if (state.failWith) { const e: any = new Error(state.failWith.message); e.code = state.failWith.code; throw e; }
       return { rows: [{ is_demo: params[0] === DEMO }] };
     }
@@ -72,6 +76,14 @@ describe('최후 방어 층 — 시연 회사는 큐·차감에 닿지 않는다
   });
   it('일반 회사는 그대로 통과(가드가 막지 않는다)', async () => {
     await expect(guardDemoLeak('t', REAL)).resolves.toBeUndefined();
+  });
+  it('운영자 문자 꼬리표(app_etc2 = system-alert · charge-approve)는 회사 ID 가 아니다 = 통과 · 적재까지 간다(★1011 서버 점검: 10-09 부터 경보 · 충전 승인 문자 0통)', async () => {
+    expect(await isDemoCompany('system-alert')).toBe(false);
+    await expect(guardDemoLeak('bulkInsertSmsQueue', 'charge-approve')).resolves.toBeUndefined();
+    const before = mysqlCalls.length;
+    const row = ['01000000001', '01000000000', '본문', 'L', '[한줄로 시스템 알림]', null, '', 'system-alert', '', '', ''];
+    await expect(bulkInsertSmsQueue(['SMSQ_SEND_1'], [row], true)).resolves.toBeTypeOf('number');
+    expect(mysqlCalls.length).toBeGreaterThan(before);
   });
 });
 

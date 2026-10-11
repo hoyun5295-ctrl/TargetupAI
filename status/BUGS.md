@@ -55,6 +55,14 @@
 
 ## 2) 활성 버그
 
+### 🟠 B-1011-1 시스템 경보 · 충전 승인 문자가 10-09 배포부터 0통 (🟠 · 1011 서버 점검 실측 · 수정 완료 · 배포 대기)
+- **실측**: .62 백엔드 오류 로그 `[system-alert] 발송 오류: invalid input syntax for type uuid: "system-alert"` 매시 52분 2건(10-11 00시~) = 환불 스위퍼 `[불변식위반]` 경보 2건이 문자로 못 나감.
+- **원인**: 10-09 시연 회사 최후 방어(`sms-queue.ts` `bulkInsertSmsQueue` → `guardDemoLeak`)가 모든 행의 `app_etc2` 를 회사 ID 로 보고 `isDemoCompany` 에서 `::uuid` 조회 → 운영자 문자 꼬리표(`'system-alert'` · `'charge-approve'`)에서 PG 22P02 → 적재 전 예외. 그 밖의 적재 호출처 18곳은 회사 UUID 라 영향 없음(전수 grep).
+- **정정**: `demo-company.ts` `isDemoCompany` — UUID 모양(`normalize.ts isUuid`)이 아니면 시연 아님. 테스트 DB 흉내를 PG 처럼 UUID 아니면 거절로 바꿈 · 변이 시험 = 옛 줄에서 서버와 같은 오류로 실패.
+
+### 🔵 B-1011-2 테스트계정 직접발송 2건 돈 불변식 위반 「SMS 부담 0 ≠ 성공 3」(🔵 · 1011 확인 · 원인 미확인 · 미착수)
+- 캠페인 `626171b7…` · `635beba7…`(테스트계정 · direct · SMS · 각 3건 성공 · 09-28 11:01). 환불 스위퍼가 「초과환불 잔존」으로 매시간 경보(B-1011-1 로 문자는 안 나갔다). 실제 고객사 아님 · 원인(시험 회사 청구 면제 여부 등) 미확인.
+
 ### 🔵 B-1010-6 정의 없는 fadeIn·zoomIn 을 쓰는 창 15곳 = 들어오기 움직임이 원래부터 무효 (🔵 · 기존 · 1010 대시보드 모션 회의에서 확인 · 미착수)
 - 전역 keyframes 정의가 없고, 남의 인라인 `<style>` 이 붙어 있을 때만 움직인다. LoginPage(7) · PricingPage · CustomModal · TemplateRejectModal · IdentityVerifyModal · PlanFeatureModal · SenderAuthModal · AiMessageSuggestModal · StatsTab-company · manage/UsersTab · StatsTab · ScheduledTab · CallbacksTab. 처방 후보 = 공용 토큰 `animate-backdrop-in`·`animate-dialog-in` + `motion-reduce`(대시보드 모션 I 와 같은 방식). 같은 부류: 임의 값 `ease-[...]`·`duration-[...]` 는 애니메이션 플러그인(tailwind.config.js `ease`·`duration` 재등록)과 이름이 겹쳐 CSS 가 생성되지 않는다(빌드 경고 ambiguous) · 현재 `ResultsModal.tsx` 403 · `utils/console-ui.ts` 66 의 `ease-[cubic-bezier(.22,1,.36,1)]`.
 

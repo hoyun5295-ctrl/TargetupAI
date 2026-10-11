@@ -1021,6 +1021,7 @@ tail -20 /home/administrator/targetup-app/packages/backend/.env
 | 로컬 보관 | 7일 (`find -mtime +7 -delete`) |
 
 ### 10-4. 관리 명령어
+> ★1011 실측: 백업 파일은 날짜 폴더가 아니라 `/home/administrator/backups/` 바로 아래 `pg_targetup_YYYYMMDD_HHMMSS.sql.gz.gpg` · `mysql_smsdb_….sql.gz.gpg`(GPG 암호화)로 쌓인다 · 날짜 폴더는 0725 가 마지막. 아래 복원 명령은 옛 형식(복호 단계 없음)이라 쓰기 전에 정정 필요. 59 원격 확인은 **administrator 로**(root 에는 59 호스트 지문이 없다 · `su - administrator -c "ssh -p 27616 …"`).
 ```bash
 # 수동 백업 실행
 source /home/administrator/backups/.env && /home/administrator/backups/backup.sh

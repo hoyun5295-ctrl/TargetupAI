@@ -10,6 +10,7 @@
  * 캐시 = 짧은 TTL(true/false 둘 다) · 시드는 is_demo 를 INSERT 와 같은 문장에서 넣으므로 "생성 직후 false 캐시" 틈이 없다.
  */
 import { query } from '../config/database';
+import { isUuid } from './normalize';
 
 const TTL_MS = 30_000;
 const cache = new Map<string, { v: boolean; at: number }>();
@@ -23,7 +24,9 @@ function isMissingColumn(err: any): boolean {
 /** 시연 회사인가 — companyId 가 비면 false(시스템 경로) */
 export async function isDemoCompany(companyId: string | null | undefined): Promise<boolean> {
   const id = String(companyId || '').trim();
-  if (!id) return false;
+  // ★ 2026-10-11 회사 ID 모양(UUID)이 아니면 시연 회사일 수 없다 — 운영자 문자는 app_etc2 에 'system-alert' · 'charge-approve' 같은 꼬리표를 싣는데,
+  //   이것을 ::uuid 로 조회하다 PG 가 거절해 적재 최후 방어(guardDemoLeak)가 예외를 던졌고 경보 · 충전 승인 문자가 10-09 부터 한 통도 안 나갔다(1011 서버 점검 실측).
+  if (!id || !isUuid(id)) return false;
   const hit = cache.get(id);
   if (hit && Date.now() - hit.at < TTL_MS) return hit.v;
   let v = false;
