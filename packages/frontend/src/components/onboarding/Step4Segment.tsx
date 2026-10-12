@@ -36,7 +36,7 @@ const EXAMPLE_PROMPTS = [
   '30일 안 구매하지 않은 30대 여성',
   'VIP 등급 + 누적 구매 100만원 이상',
   '서울 거주 + 최근 3개월 안 1회 이상 구매한 고객',
-  '결혼기념일이 이번 달인 고객',
+  '생일이 이번 달인 고객',
 ];
 
 export default function Step4Segment({ state, onNext, onSync }: Props) {

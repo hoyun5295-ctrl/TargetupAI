@@ -743,13 +743,17 @@ export default function AiOperatorPage() {
       // ★ 2026-09-12 발신 인증(전송자격인증 3.5) — 인증 뒤 이 발송을 그대로 다시 실행한다
       if (senderAuth.handleResponse(sendData, () => performDirectSend(sendBody, suggestedName))) return;
       // ★ 2026-10-07 개별 회신 — 회신번호 없는·미등록 고객 제외 확인(직접발송과 같은 응답)
+      // ★ 2026-10-12 남지현 접수: 이 발송을 부르는 확인 창 onConfirm 은 발송을 기다리지 않는다(void · 아래 두 곳 포함).
+      //   공용 확인 창은 onConfirm 이 끝나면 자기를 닫는데(onClose = setConfirm(null)), 기다리게 두면 여기서 연 이 창까지
+      //   함께 지워져 [예약하기]를 눌러도 창만 꺼지고 예약이 안 됐다(운영 로그 4건 모두 이 확인 반환 · 제외 확인 0건).
+      //   다른 발송 창(MakeSendModal · DmSendAndTrackModal)과 같은 형태다. 요청 중 표시는 아래 [발송 처리 중...] 버튼이 한다.
       if (sendRes.ok && sendData.callbackConfirmRequired) {
         setConfirm({
           mode: 'warning',
           title: '회신번호 없는 고객 제외',
           description: String(sendData.message || ''),
           confirmLabel: '제외하고 보내기',
-          onConfirm: () => performDirectSend({ ...sendBody, confirmCallbackExclusion: true }, suggestedName),
+          onConfirm: () => { void performDirectSend({ ...sendBody, confirmCallbackExclusion: true }, suggestedName); },
         });
         return;
       }
@@ -933,7 +937,7 @@ export default function AiOperatorPage() {
           title: '즉시 발송: 회수 불가',
           description: confirmMsg,
           confirmLabel: '지금 발송',
-          onConfirm: () => performDirectSend(sendBody, suggestedName),
+          onConfirm: () => { void performDirectSend(sendBody, suggestedName); },
         });
         return;
       }
@@ -951,7 +955,7 @@ export default function AiOperatorPage() {
         title: '예약 발송: 지금 나가지 않습니다',
         description: `${recipients.length.toLocaleString()}명에게 ${scheduledLabel}에 발송됩니다.\n지금은 나가지 않으며, 그전까지 예약내역에서 취소할 수 있습니다.`,
         confirmLabel: '예약하기',
-        onConfirm: () => performDirectSend(sendBody, suggestedName),
+        onConfirm: () => { void performDirectSend(sendBody, suggestedName); },
       });
     } catch (err) {
       setSendError(err instanceof Error ? err.message : '발송 오류가 발생했습니다.');
@@ -2017,9 +2021,11 @@ export default function AiOperatorPage() {
             onClick={(e) => e.stopPropagation()}
           >
             <div className="relative p-8">
+              {/* ★ 2026-10-12 남지현 접수: X = [새 캠페인]과 같다(제안을 지우고 첫 화면). 옛: 결과 창만 닫혀 보낸 제안·[승인 후 발송 시작]이
+                  그대로 남아 같은 대상에게 한 번 더 예약·발송할 수 있었다(/direct-send 는 부를 때마다 새 캠페인을 만든다). */}
               <button
                 type="button"
-                onClick={() => setSendResult(null)}
+                onClick={handleReset}
                 className="absolute top-5 right-5 w-9 h-9 rounded-full flex items-center justify-center text-slate-500 hover:text-slate-900 hover:bg-slate-100 transition-all"
                 aria-label="닫기"
               >

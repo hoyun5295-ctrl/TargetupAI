@@ -12,7 +12,7 @@
  *     - AI는 SQL 직접 생성 절대 X = CT-01 structured filter 매트릭스만 출력
  *     - 출력 직후 buildCustomerFilter 호환 검증 (dry-run) 의무 — 실패 시 throw
  *     - 0건 결과 = 자동 완화 X (D171 영구 룰)
- *     - 모든 필드 = 표준 컬럼 또는 custom_fields.{key} 매트릭스만 허용
+ *     - 모든 필드 = 표준 컬럼(FIELD_MAP) 또는 회사 커스텀 칸 맨 키(custom_1~15)만 허용 · 적용 못 하는 조건은 거절(2026-10-12)
  *
  * 📋 흐름
  *   1. companyId + naturalLanguage → AI system prompt (지원 필드 매트릭스 + structured filter schema)
@@ -29,6 +29,8 @@ import { callAIWithFallback } from '../services/ai';
 import { buildCustomerFilter } from './customer-filter';
 import { ownerConsentSql } from './mall-consent';
 import { getFieldByKey, StandardFieldMapping } from './standard-field-map';
+import { buildEnabledFieldsPayload } from './enabled-fields';
+import { isValidCustomFieldKey } from './safe-field-name';
 import { query } from '../config/database';
 // ★ 2026-09-27 한줄로 V2 R161 — 프롬프트 날짜 = KST(옛: 오늘 날짜가 없고 예시만 UTC toISOString)
 import { kstDateString } from './planner-execution';
@@ -40,7 +42,10 @@ import { kstDateString } from './planner-execution';
 export interface GenerateSegmentInput {
   companyId: string;
   naturalLanguage: string;
-  /** 회사별 custom_fields 키 목록 (admin enabled_fields 활용). */
+  /**
+   * (쓰지 않음) ★ 2026-10-12부터 회사 커스텀 칸은 서버가 직접 읽는다(loadCustomFieldLines).
+   * 이 값을 보내던 화면이 0곳이라 AI가 커스텀 칸을 한 번도 몰랐다. 라우트 호환을 위해 자리만 남긴다.
+   */
   customFieldKeys?: string[];
   /** ★2026-10-02 요청자 — 매칭 수를 그 사람의 발송과 같은 수신동의 기준으로 센다(몰 동의 회사 · 없으면 관리자 기준). */
   ownerUserId?: string | null;
@@ -81,6 +86,9 @@ export class SegmentGenerationError extends Error {
 // AI 시스템 프롬프트 — 지원 필드 매트릭스 + structured filter schema 명시
 // ════════════════════════════════════════════════════════════════════
 
+// ★ 2026-10-12 키는 FIELD_MAP 키만 — 옛 목록의 avg_order_value · ltv_score · is_married · wedding_anniversary 는
+//   FIELD_MAP 에 없어 구조형 빌더가 조용히 버렸다("VIP + LTV 80 이상" → 등급만 남아 대상이 넓어짐 · 빌더 실행 실측).
+//   여기 키를 더하면 FIELD_MAP 에도 있어야 한다(없으면 아래 조건별 검증이 그 조건을 거절한다).
 const STANDARD_FIELDS = [
   { key: 'gender', label: '성별', type: 'string', allowed: 'eq / in', valueExample: '"M" 또는 "F" 또는 ["M","F"]' },
   { key: 'age', label: '나이', type: 'number', allowed: 'eq / gte / lte / between', valueExample: '30 또는 [20,29]' },
@@ -91,17 +99,54 @@ const STANDARD_FIELDS = [
   { key: 'recent_purchase_amount', label: '최근 구매 금액', type: 'number', allowed: 'gte / lte / between', valueExample: '50000' },
   { key: 'total_purchase_amount', label: '누적 구매 금액', type: 'number', allowed: 'gte / lte / between', valueExample: '500000' },
   { key: 'purchase_count', label: '구매 횟수', type: 'number', allowed: 'gte / lte / between / eq', valueExample: '3' },
-  { key: 'avg_order_value', label: '평균 구매 금액 (AOV)', type: 'number', allowed: 'gte / lte / between', valueExample: '30000' },
-  { key: 'ltv_score', label: 'LTV 점수', type: 'number', allowed: 'gte / lte / between', valueExample: '80' },
   { key: 'points', label: '포인트', type: 'number', allowed: 'gte / lte / between', valueExample: '10000' },
   { key: 'store_name', label: '매장명', type: 'string', allowed: 'eq / contains / in', valueExample: '"강남점"' },
-  { key: 'is_married', label: '결혼 여부', type: 'boolean', allowed: 'eq', valueExample: 'true / false' },
-  { key: 'wedding_anniversary', label: '결혼기념일', type: 'date', allowed: 'days_within / birth_month / gte / lte', valueExample: 'days_within: 30' },
 ];
 
-function buildSystemPrompt(customFieldKeys: string[]): string {
-  const customFieldsBlock = customFieldKeys.length > 0
-    ? `\n[회사별 사용자 정의 필드 (custom_fields)]\n${customFieldKeys.map((k) => `- custom_fields.${k}`).join('\n')}\n위 키는 \`custom_fields.{키}\` 형식으로 사용 (예: "custom_fields.region": { "operator": "eq", "value": "강남" })\n`
+/**
+ * 프롬프트에 싣는 커스텀 칸 실제 값 수 · 값 길이 상한(목록이 길면 고르는 데 도움이 안 되고 프롬프트만 길어진다).
+ * 값은 자르지 않는다 — 잘린 값을 AI가 고르면 정확 일치(eq)가 0건이 된다. 길거나 줄바꿈이 있는 값은 빼고 싣는다.
+ */
+const CUSTOM_VALUE_LIMIT = 30;
+const CUSTOM_VALUE_MAX_LEN = 40;
+
+/**
+ * ★ 2026-10-12 (임은지 접수 · 직접타겟 AI 자연어 모드가 커스텀 칸을 못 읽음) 회사 커스텀 칸을 프롬프트 줄로 만든다.
+ * 원천 = 직접 타겟 화면과 같은 CT-18(buildEnabledFieldsPayload · 회사 전체 범위) · 이름 = 회사가 붙인 이름 · 형식 = CT-18 판별.
+ * 옛: 호출부가 customFieldKeys 를 보내야만 실렸는데 보내는 화면이 0곳이었고, 실려도 이름 없는 `custom_fields.{키}` 형식이라
+ * 구조형 빌더가 그 조건을 버렸다. 키는 빌더가 받는 맨 키(custom_1~15)만 싣는다(그 밖의 JSONB 키는 빌더가 거르지 못한다).
+ */
+async function loadCustomFieldLines(companyId: string): Promise<{ lines: string[]; labels: Record<string, string> }> {
+  const { fields, options } = await buildEnabledFieldsPayload({
+    companyId,
+    scopeWhere: 'company_id = $1 AND is_active = true',
+    scopeParams: [companyId],
+  });
+  const lines: string[] = [];
+  const labels: Record<string, string> = {};
+  for (const f of fields) {
+    if (!f.is_custom || !isValidCustomFieldKey(f.field_key)) continue;
+    const label = String(f.display_name || '').replace(/\s+/g, ' ').trim() || f.field_key;
+    labels[f.field_key] = label;
+    const head = `- ${f.field_key} (${label})`;
+    if (f.data_type === 'number') lines.push(`${head}: type: number / operators: eq / gte / lte / between`);
+    else if (f.data_type === 'date') lines.push(`${head}: type: date / operators: gte / lte / between / 값 형식: "YYYY-MM-DD"`);
+    else {
+      const raw = options[f.field_key] || [];
+      const vals = raw
+        .map((v) => String(v ?? ''))
+        .filter((v) => v.trim() && v.length <= CUSTOM_VALUE_MAX_LEN && !/[\r\n]/.test(v))
+        .slice(0, CUSTOM_VALUE_LIMIT);
+      const partial = vals.length < raw.length ? ' (일부만 표시)' : '';
+      lines.push(`${head}: type: string / operators: eq / in / contains${vals.length ? ` / 실제 값${partial}: ${vals.join(', ')}` : ''}`);
+    }
+  }
+  return { lines, labels };
+}
+
+function buildSystemPrompt(customFieldLines: string[]): string {
+  const customFieldsBlock = customFieldLines.length > 0
+    ? `\n[회사별 사용자 정의 필드 (키는 앞의 custom_N 그대로 · 괄호 안은 회사가 붙인 이름)]\n${customFieldLines.join('\n')}\n`
     : '';
 
   const fieldsBlock = STANDARD_FIELDS.map((f) =>
@@ -135,6 +180,8 @@ ${customFieldsBlock}
 5. 위 [지원 operator] 목록에 없는 연산자 = 사용 X
 6. 자동 완화 절대 X. 0건 매칭 위험이 있어도 사용자 조건 그대로 변환 의무
 7. 사용자가 조건 없이 전체 발송을 원하면(예: "전체 고객", "모든 고객에게", "전부 발송") = "all_customers": true + "filter": {} 출력
+8. 사용자가 회사가 붙인 이름(위 괄호 안)으로 말하면 그 칸의 키(custom_N)를 필드명으로 쓴다. "실제 값"이 적힌 칸은 그 값 중에서 띄어쓰기·대소문자 그대로 고른다. "(일부만 표시)" 칸에서 맞는 값이 목록에 없으면 사용자가 쓴 값을 그대로 쓴다
+9. 사용자 정의 날짜 칸에는 days_within·birth_month를 쓰지 않는다. 기준 날짜로 계산한 "YYYY-MM-DD" 값으로 gte / lte / between 을 쓴다
 
 [응답 형식: JSON 단일]
 \`\`\`json
@@ -204,14 +251,14 @@ export async function convertNaturalLanguageToFilter(
   input: GenerateSegmentInput,
 ): Promise<{ filter: GenerateSegmentResult['filter']; explanation: string; isAll?: boolean }> {
   const { companyId, naturalLanguage } = input;
-  const customFieldKeys = input.customFieldKeys || [];
 
   if (!naturalLanguage?.trim()) {
     throw new SegmentGenerationError('EMPTY_INPUT', '자연어 입력이 비어있습니다.');
   }
 
   // 1. AI 호출
-  const system = buildSystemPrompt(customFieldKeys);
+  const custom = await loadCustomFieldLines(companyId);
+  const system = buildSystemPrompt(custom.lines);
   const userMessage = `사용자 입력: ${naturalLanguage.trim()}\n\n위 입력을 structured filter JSON으로 변환해주세요.`;
 
   const aiResult = await callAIWithFallback({
@@ -256,20 +303,32 @@ export async function convertNaturalLanguageToFilter(
   }
 
   // 3. CT-01 buildCustomerFilter 호환 검증 (dry-run — SQL 실행 X)
+  //   ★ 2026-10-12 조건마다 따로 본다. 옛: 전체 SQL 이 비었는지만 봐서, 빌더가 적용하지 못하는 조건(FIELD_MAP 밖 키 ·
+  //   `custom_fields.custom_1` 형식 · 빈 값)이 다른 조건과 섞이면 그 조건만 조용히 빠지고 더 넓은 대상이 추출됐다.
+  //   이제 하나라도 SQL 이 안 되면 멈춘다(빼고 진행하지 않는다 · "단 1의 오차도 없는 타겟").
+  const unapplied: string[] = [];
   try {
-    const buildResult = buildCustomerFilter(filter, {
-      tableAlias: 'c',
-      startParamIndex: 2,
-      storeCodeMode: 'skip',
-      inputFormat: 'structured',
-    });
-    if (!buildResult.sql || buildResult.params.length === 0) {
-      throw new Error('필터 조건이 SQL로 변환되지 않았습니다.');
+    for (const [key, condition] of Object.entries(filter)) {
+      const one = buildCustomerFilter({ [key]: condition }, {
+        tableAlias: 'c',
+        startParamIndex: 2,
+        storeCodeMode: 'skip',
+        inputFormat: 'structured',
+      });
+      // 값이 null(달력에 없는 날짜) · NaN(숫자 아닌 값)인 조건도 적용 못 한 것이다 — 그대로 두면 0건으로만 보여 이유를 모른다
+      const badValue = one.params.some((p) => p === null || (typeof p === 'number' && Number.isNaN(p)));
+      if (!one.sql.trim() || one.params.length === 0 || badValue) unapplied.push(custom.labels[key] || getFieldByKey(key)?.displayName || key);
     }
   } catch (e: any) {
     throw new SegmentGenerationError(
       'FILTER_VALIDATION_FAILED',
       `필터 검증 실패: ${e.message}. 조건을 정정해주세요.`,
+    );
+  }
+  if (unapplied.length > 0) {
+    throw new SegmentGenerationError(
+      'FILTER_VALIDATION_FAILED',
+      `적용할 수 없는 조건이 있어 멈췄습니다(${unapplied.join(', ')}). 조건을 다르게 적어 다시 시도해주세요.`,
     );
   }
 

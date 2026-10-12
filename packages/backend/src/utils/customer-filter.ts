@@ -91,6 +91,35 @@ function isDateLikeValue(value: any): boolean {
   return normalizeDate(s) !== null;
 }
 
+// ★ 2026-10-12 (Codex 1R medium · 직원 접수 AI 자연어 커스텀 칸) 커스텀 칸 저장값은 원문 문자열이라 빈 값 · 글자 ·
+//   '2026.10.12' · '1,000' 이 섞인다. 옛: 저장값을 그대로 ::date · ::numeric 으로 바꿔, 그런 값이 범위 안에 한 건만 있어도
+//   쿼리 전체가 실패(500)했다. 이제 저장값은 바꾸지 않고 비교한다. 모양이 아닌 값 = NULL = 그 고객은 조건에 안 맞는다
+//   (조건을 빼지 않는다). 운영 PG 15 라 pg_input_is_valid(16+)는 쓰지 않는다.
+//   ⛔ 검사식에 \s · \d 같은 문자 분류를 쓰지 않는다 — DB 로캘에 따라 전각 공백(U+3000) · 아랍 숫자까지 들어온다(Codex 3R).
+//      허용 글자를 ASCII 로 직접 적는다(허용 목록).
+const CUSTOM_DATE_RE = `'^([0-9]{4})[-/.]([0-9]{1,2})[-/.]([0-9]{1,2})'`;
+/** 커스텀 칸 저장값 → 'YYYYMMDD' 글자(같은 길이 숫자 글자 비교 = 날짜 순서). 앞부분이 날짜 모양이 아니면 NULL. 캐스팅 없음. */
+function customDateKeyExpr(cfCol: string): string {
+  const m = `regexp_match(${cfCol}, ${CUSTOM_DATE_RE})`;
+  return `(CASE WHEN ${cfCol} ~ ${CUSTOM_DATE_RE} THEN (${m})[1] || lpad((${m})[2], 2, '0') || lpad((${m})[3], 2, '0')`
+    + ` WHEN ${cfCol} ~ '^[0-9]{8}' THEN left(${cfCol}, 8) END)`;
+}
+/**
+ * 커스텀 칸 저장값 → numeric. 숫자 모양(쉼표 허용)일 때만 바꾸고 그 밖은 NULL.
+ * 검사식은 "변환이 반드시 성공하는 값"의 부분집합이어야 한다(Codex 2R: 지수 '1e131072' 는 모양은 맞아도 numeric 범위를 넘어
+ * 쿼리 전체가 실패했다). 그래서 지수 표기는 받지 않고 자릿수를 묶는다(정수부 30 · 소수부 20 = numeric 한도의 극히 일부).
+ * 받는 글자 = ASCII 공백(0x20) · 부호 하나 · 0-9 · 점 하나뿐(Codex 3R: \s · \d 는 로캘에 따라 numeric 이 못 받는 글자를 통과시켰다).
+ */
+function customNumberExpr(cfCol: string): string {
+  const v = `replace(${cfCol}, ',', '')`;
+  return `(CASE WHEN ${v} ~ '^ *[-+]?([0-9]{1,30}([.][0-9]{0,20})?|[.][0-9]{1,20}) *$' THEN (${v})::numeric END)`;
+}
+/** 비교값 → 'YYYYMMDD'(customDateKeyExpr 와 같은 모양). 달력에 없으면 null = 비교 결과 NULL = 매칭 0. */
+function customDateKeyParam(value: any): string | null {
+  const n = normalizeDate(String(value ?? '').trim());
+  return n ? n.replace(/-/g, '') : null;
+}
+
 /** 컬럼명에 테이블 alias 접두사 적용 */
 function col(alias: string, column: string): string {
   return alias ? `${alias}.${column}` : column;
@@ -340,30 +369,30 @@ export function buildCustomerFilter(filters: any, options: FilterOptions): Filte
           sql += ` AND ${cfCol} = $${paramIndex++}`;
           params.push(String(value));
         } else if (operator === 'gte') {
-          // ★ D77: 날짜형 값 자동 감지 — ::numeric 대신 ::date 캐스팅
+          // ★ D77: 날짜형 값 자동 감지 — 날짜 비교 / 숫자 비교 (★ 2026-10-12 저장값 직변환 없음 · 위 customDateKeyExpr)
           if (isDateLikeValue(value)) {
-            sql += ` AND (${cfCol})::date >= $${paramIndex++}`;
-            params.push(value);
+            sql += ` AND ${customDateKeyExpr(cfCol)} >= $${paramIndex++}`;
+            params.push(customDateKeyParam(value));
           } else {
-            sql += ` AND (${cfCol})::numeric >= $${paramIndex++}`;
+            sql += ` AND ${customNumberExpr(cfCol)} >= $${paramIndex++}`;
             params.push(Number(value));
           }
         } else if (operator === 'lte') {
           // ★ D77: 날짜형 값 자동 감지
           if (isDateLikeValue(value)) {
-            sql += ` AND (${cfCol})::date <= $${paramIndex++}`;
-            params.push(value);
+            sql += ` AND ${customDateKeyExpr(cfCol)} <= $${paramIndex++}`;
+            params.push(customDateKeyParam(value));
           } else {
-            sql += ` AND (${cfCol})::numeric <= $${paramIndex++}`;
+            sql += ` AND ${customNumberExpr(cfCol)} <= $${paramIndex++}`;
             params.push(Number(value));
           }
         } else if (operator === 'between' && Array.isArray(value)) {
           // ★ D77: 날짜형 값 자동 감지
           if (isDateLikeValue(value[0]) || isDateLikeValue(value[1])) {
-            sql += ` AND (${cfCol})::date BETWEEN $${paramIndex++} AND $${paramIndex++}`;
-            params.push(value[0], value[1]);
+            sql += ` AND ${customDateKeyExpr(cfCol)} BETWEEN $${paramIndex++} AND $${paramIndex++}`;
+            params.push(customDateKeyParam(value[0]), customDateKeyParam(value[1]));
           } else {
-            sql += ` AND (${cfCol})::numeric BETWEEN $${paramIndex++} AND $${paramIndex++}`;
+            sql += ` AND ${customNumberExpr(cfCol)} BETWEEN $${paramIndex++} AND $${paramIndex++}`;
             params.push(Number(value[0]), Number(value[1]));
           }
         } else if (operator === 'in' && Array.isArray(value)) {
@@ -374,11 +403,11 @@ export function buildCustomerFilter(filters: any, options: FilterOptions): Filte
           sql += ` AND ${cfCol} ILIKE $${paramIndex++}`;
           params.push(`%${value}%`);
         } else if (operator === 'date_gte') {
-          sql += ` AND (${cfCol})::date >= $${paramIndex++}`;
-          params.push(value);
+          sql += ` AND ${customDateKeyExpr(cfCol)} >= $${paramIndex++}`;
+          params.push(customDateKeyParam(value));
         } else if (operator === 'date_lte') {
-          sql += ` AND (${cfCol})::date <= $${paramIndex++}`;
-          params.push(value);
+          sql += ` AND ${customDateKeyExpr(cfCol)} <= $${paramIndex++}`;
+          params.push(customDateKeyParam(value));
         }
       }
     }
@@ -587,30 +616,30 @@ export function buildCustomerFilter(filters: any, options: FilterOptions): Filte
           sql += ` AND ${cfCol} = $${paramIndex++}`;
           params.push(value);
         } else if (operator === 'gte') {
-          // ★ D77: 날짜형 값 자동 감지 — ::numeric 대신 ::date 캐스팅
+          // ★ D77: 날짜형 값 자동 감지 — 날짜 비교 / 숫자 비교 (★ 2026-10-12 저장값 직변환 없음 · 위 customDateKeyExpr)
           if (isDateLikeValue(value)) {
-            sql += ` AND (${cfCol})::date >= $${paramIndex++}`;
-            params.push(value);
+            sql += ` AND ${customDateKeyExpr(cfCol)} >= $${paramIndex++}`;
+            params.push(customDateKeyParam(value));
           } else {
-            sql += ` AND (${cfCol})::numeric >= $${paramIndex++}`;
+            sql += ` AND ${customNumberExpr(cfCol)} >= $${paramIndex++}`;
             params.push(value);
           }
         } else if (operator === 'lte') {
           // ★ D77: 날짜형 값 자동 감지
           if (isDateLikeValue(value)) {
-            sql += ` AND (${cfCol})::date <= $${paramIndex++}`;
-            params.push(value);
+            sql += ` AND ${customDateKeyExpr(cfCol)} <= $${paramIndex++}`;
+            params.push(customDateKeyParam(value));
           } else {
-            sql += ` AND (${cfCol})::numeric <= $${paramIndex++}`;
+            sql += ` AND ${customNumberExpr(cfCol)} <= $${paramIndex++}`;
             params.push(value);
           }
         } else if (operator === 'between' && Array.isArray(value)) {
           // ★ D77: 날짜형 값 자동 감지
           if (isDateLikeValue(value[0]) || isDateLikeValue(value[1])) {
-            sql += ` AND (${cfCol})::date BETWEEN $${paramIndex++} AND $${paramIndex++}`;
-            params.push(value[0], value[1]);
+            sql += ` AND ${customDateKeyExpr(cfCol)} BETWEEN $${paramIndex++} AND $${paramIndex++}`;
+            params.push(customDateKeyParam(value[0]), customDateKeyParam(value[1]));
           } else {
-            sql += ` AND (${cfCol})::numeric BETWEEN $${paramIndex++} AND $${paramIndex++}`;
+            sql += ` AND ${customNumberExpr(cfCol)} BETWEEN $${paramIndex++} AND $${paramIndex++}`;
             params.push(Number(value[0]), Number(value[1]));
           }
         } else if (operator === 'in' && Array.isArray(value)) {
@@ -620,11 +649,11 @@ export function buildCustomerFilter(filters: any, options: FilterOptions): Filte
           sql += ` AND ${cfCol} ILIKE $${paramIndex++}`;
           params.push(`%${value}%`);
         } else if (operator === 'date_gte') {
-          sql += ` AND (${cfCol})::date >= $${paramIndex++}`;
-          params.push(value);
+          sql += ` AND ${customDateKeyExpr(cfCol)} >= $${paramIndex++}`;
+          params.push(customDateKeyParam(value));
         } else if (operator === 'date_lte') {
-          sql += ` AND (${cfCol})::date <= $${paramIndex++}`;
-          params.push(value);
+          sql += ` AND ${customDateKeyExpr(cfCol)} <= $${paramIndex++}`;
+          params.push(customDateKeyParam(value));
         }
       }
     }

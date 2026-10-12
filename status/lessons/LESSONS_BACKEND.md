@@ -827,3 +827,10 @@ else concat(concat(concat('{"sendercode":"',sender_code),'",'), replace(k_etc_js
 - **뿌리**: 표 목록 함수가 `getAllBulkSmsTables`(QTmsg) · `getBitoSmsTables`(비토)로 갈라져 쓰는 쪽이 각자 합쳤다 → 합치기를 빠뜨린 곳이 조용히 비토를 놓쳤다(7/17 정산 · 9/14 큐 작업 · 10/8 = 세 번째). 전수점검을 했는데도 못 잡은 이유 = 「소비처 전수 grep 표」를 만들지 않고 증상 난 곳만 봤다.
 - **처방**: `utils/sms-queue.ts` `getQueueTableSets()` 하나가 all · bulk · bito 를 준다. 이 파일 밖에서 `getAllBulkSmsTables(` 를 부르면 `staff-tickets-1008.test.ts` 가 깨진다. QTmsg 전용 규칙(rsv1=3 만료 · 100 지연 경보)은 `.bulk` 로, 전 라인 규칙은 `.all` 로. **비토 100 = 결과 대기** — QTmsg 규칙을 비토 표에 쓰지 않는다.
 - **규칙**: 라우팅 축(라인 종류 · 그룹 · 표)을 바꾸거나 새 종류를 들일 때는 표 목록 함수의 **소비처 전부**를 grep 해 「포함 여부」 표를 보고에 첨부한다(6원칙 ④의 실행 형태).
+
+## ★2026-10-11 길목 가드는 그 칸에 실제로 들어오는 값 전부로 시험한다 — 운영자 경보가 이틀 동안 0통 ([B-1011-1](../BUGS.md))
+
+- **증상**: 10-09 시연 회사 최후 방어(`bulkInsertSmsQueue` → `guardDemoLeak`) 배포 뒤 시스템 경보 · 충전 승인 문자가 한 통도 안 나갔다. 귀국 전 서버 점검에서 오류 로그(매시 52분 2건)로 처음 드러났다 · 화면 · 테스트 어디에도 안 보였다.
+- **뿌리**: 가드가 행의 `app_etc2` 를 「회사 ID」로 가정했는데 운영자 문자는 그 칸에 꼬리표(`'system-alert'` · `'charge-approve'`)를 싣는다 → `::uuid` 조회가 PG 22P02 → 적재 전 예외. 테스트의 DB 흉내는 UUID 가 아니어도 오류를 내지 않아(DB 보다 너그러움) 못 잡았다. 경보 경로가 죽어도 그 사실을 알릴 길이 경보 경로뿐이었다.
+- **처방**: `isDemoCompany` = UUID 모양(`normalize.ts isUuid`)이 아니면 시연 아님 · 테스트 흉내를 PG 처럼 UUID 아니면 거절로.
+- **규칙**: 발송 · 돈 길목에 새 판정을 넣을 때는 그 칸에 **실제로 들어오는 값의 종류**를 호출처 전수 grep 으로 표로 만든다(회사 ID · null · 꼬리표). 흉내(mock)는 DB 보다 너그럽게 두지 않는다(memory `feedback_mock_must_not_be_more_generous_than_the_db` 같은 축). 운영자 경보 경로를 바꾸는 변경은 배포 뒤 경보 1건이 실제로 적재되는지 로그로 확인한다.

@@ -55,7 +55,7 @@
 
 ## 2) 활성 버그
 
-### 🟠 B-1011-1 시스템 경보 · 충전 승인 문자가 10-09 배포부터 0통 (🟠 · 1011 서버 점검 실측 · 수정 완료 · 배포 대기)
+### 🟢 B-1011-1 시스템 경보 · 충전 승인 문자가 10-09 배포부터 0통 (🟢 · 1011 서버 점검 실측 · 수정 · 배포 `19560965` · 16:41:40 경보 2건 × 2명 적재 실측 = 해소)
 - **실측**: .62 백엔드 오류 로그 `[system-alert] 발송 오류: invalid input syntax for type uuid: "system-alert"` 매시 52분 2건(10-11 00시~) = 환불 스위퍼 `[불변식위반]` 경보 2건이 문자로 못 나감.
 - **원인**: 10-09 시연 회사 최후 방어(`sms-queue.ts` `bulkInsertSmsQueue` → `guardDemoLeak`)가 모든 행의 `app_etc2` 를 회사 ID 로 보고 `isDemoCompany` 에서 `::uuid` 조회 → 운영자 문자 꼬리표(`'system-alert'` · `'charge-approve'`)에서 PG 22P02 → 적재 전 예외. 그 밖의 적재 호출처 18곳은 회사 UUID 라 영향 없음(전수 grep).
 - **정정**: `demo-company.ts` `isDemoCompany` — UUID 모양(`normalize.ts isUuid`)이 아니면 시연 아님. 테스트 DB 흉내를 PG 처럼 UUID 아니면 거절로 바꿈 · 변이 시험 = 옛 줄에서 서버와 같은 오류로 실패.
