@@ -72,7 +72,7 @@ import { getFatigueCap, getFatigueBlockedSet, recordFatigueSends } from '../util
 import { deduplicateByPhone } from '../utils/deduplicate';
 import { getUserTestContacts } from '../utils/test-contact-helper';
 import { validateScheduledAt } from '../utils/campaign-validation';
-import { isWithinBrandSendWindow, parseSplitSetting, planSplitSchedule, splitSendTime, splitSpanError } from '../utils/send-time-util';
+import { isWithinBrandSendWindow, parseSplitSetting, planSplitSchedule, splitSendTime, splitSpanError, resolveSplitFirstSend } from '../utils/send-time-util';
 import { countStagingFiltered, countStagingChecks, planIndividualCallbackExclusion, createDirectSendCampaign, effectiveUnsubFilter } from '../utils/direct-send-core';
 import { DirectSendError, loadedSendFailureMessage } from '../utils/direct-send-spec';
 import { findUneditedSendPlaceholder } from '../utils/send-placeholder-gate';
@@ -2197,8 +2197,8 @@ router.post('/direct-send', async (req: Request, res: Response) => {
       recipients,     // [{phone, name, extra1, extra2, extra3}]
       customMessages, // ★ S9-01: [{phone, message}] — 프론트에서 치환 완료된 개인화 메시지
       adEnabled,      // 광고문구 포함 여부
-      scheduled,      // 예약 여부
-      scheduledAt,    // 예약 시간
+      scheduled: scheduledInput,     // 예약 여부(요청값 · 아래에서 분할 첫 회차로 정규화한 `scheduled`를 쓴다 · B-1013-1)
+      scheduledAt: scheduledAtInput, // 예약 시간(요청값)
       splitEnabled,   // 분할전송 여부
       splitCount,     // 한 묶음 건수
       splitIntervalMinutes, // ★ 0928 묶음 간격(분) — 안 보내면 1분(옛 화면과 같다)
@@ -2232,6 +2232,9 @@ router.post('/direct-send', async (req: Request, res: Response) => {
       campaignName,         // (선택) 호출부가 지은 캠페인명. 없으면 서버가 `직접발송 {일시}`로 짓는다
       sendType,             // (선택) send_type 값. CT 화이트리스트 밖이면 무시하고 'direct'
     } = req.body;
+    // ★ 2026-10-13 B-1013-1 — 예약 값은 요청값으로 검증·야간 광고 판정을 마친 뒤, 분할 첫 회차 시각으로 정규화해 쓴다(아래).
+    let scheduled: any = scheduledInput;
+    let scheduledAt: any = scheduledAtInput;
 
     // ★ 2026-09-28 분할 값 검사(CT) — 서버가 건수를 안 보던 구멍 · 간격(분) 추가. 범위 밖은 돈이 움직이기 전에 거절.
     const splitParsed = parseSplitSetting(splitEnabled, splitCount, splitIntervalMinutes);
@@ -2379,6 +2382,14 @@ router.post('/direct-send', async (req: Request, res: Response) => {
     // ★ 2026-09-28 한줄로 V2 m076 후속(Codex 1R medium) — 발송 기준 시각은 요청에 **한 번**만 만든다.
     //   피로도 판정 · 분할 적재 · 피로도 기록이 같은 값을 쓴다. 옛: 판정 뒤 조회를 거쳐 기준을 다시 만들어,
     //   분할 마지막 회차가 발송 창(21시)을 넘어 다음 날로 밀리면 판정은 오늘까지만 보고 적재·기록은 내일이 됐다.
+    // ★ 2026-10-13 B-1013-1 — 분할 첫 회차가 접수 시각보다 뒤면(발송 창 밖 접수 = 다음 날 08:00) 그 시각의 예약으로 기록한다.
+    //   큐에 실리는 시각과 캠페인 행(상태 · scheduled_at) · 응답 문구가 같은 계산을 본다(commit 경로 direct-send-core 와 같은 CT).
+    //   야간 광고 차단(위)은 요청값으로 이미 판정했다 — 광고를 이 정규화로 통과시키지 않는다.
+    if (split) {
+      const firstSend = resolveSplitFirstSend({ scheduled, scheduledAt, split });
+      scheduled = firstSend.scheduled;
+      scheduledAt = firstSend.scheduledAt;
+    }
     const directSendBase = scheduled && scheduledAt ? new Date(scheduledAt) : new Date();
     let directFatigueSkipped = 0;
     if (adEnabled === true) {

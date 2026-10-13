@@ -21,7 +21,7 @@ import { checkSpamBlockBeforeCharge } from './spam-block';
 // ★ 2026-07-12 D-2: 야간 광고 발송 제한 — SEND_HOURS 창 밖 광고 접수 거부(순수 판정 CT 재사용)
 import { nightAdRestrictionMessage } from './autosend-policy';
 import { SEND_HOURS } from '../config/defaults';
-import { parseSplitSetting, splitSpanError } from './send-time-util';
+import { parseSplitSetting, splitSpanError, resolveSplitFirstSend } from './send-time-util';
 import { filterByIndividualCallback, buildCallbackConfirmResponse, buildCallbackErrorResponse } from './callback-filter';
 
 /**
@@ -261,7 +261,15 @@ export async function createDirectSendCampaign(
     const splitBase = spec.scheduled && spec.scheduledAt ? new Date(spec.scheduledAt) : new Date();
     const spanErr = splitSpanError(splitBase, spec.total, splitParsed.split);
     if (spanErr) throw new DirectSendError('SPLIT_SPAN_TOO_LONG', spanErr, 400);
-    spec = { ...spec, splitEnabled: true, splitCount: splitParsed.split.count, splitIntervalMinutes: splitParsed.split.intervalMinutes };
+    // ★ 2026-10-13 B-1013-1 — 분할 첫 회차가 접수 시각보다 뒤면(발송 창 밖 접수 = 다음 날 08:00) 그 시각의 예약으로
+    //   기록한다. 아래 INSERT(상태 · scheduled_at) · 워커 시각 계산(send_config) · 종결 상태 · 응답 문구가 이 값을 따른다.
+    //   야간 광고 차단(위)은 접수 값으로 이미 판정했다 — 광고를 이 정규화로 통과시키지 않는다.
+    const firstSend = resolveSplitFirstSend({ scheduled: spec.scheduled, scheduledAt: spec.scheduledAt, split: splitParsed.split });
+    spec = {
+      ...spec,
+      splitEnabled: true, splitCount: splitParsed.split.count, splitIntervalMinutes: splitParsed.split.intervalMinutes,
+      scheduled: firstSend.scheduled, scheduledAt: firstSend.scheduledAt,
+    };
   }
 
   const campaignResult = await query(CAMPAIGN_INSERT_SQL, buildDirectSendCampaignParams(spec, ctx));

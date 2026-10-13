@@ -173,6 +173,40 @@ export function splitSpanError(base: Date, total: number, split: SplitSetting): 
 }
 
 /**
+ * ★ 2026-10-13 분할 첫 회차 시각 = 캠페인의 예약 시각 ([B-1013-1](../../../../status/BUGS.md)).
+ *
+ * 분할이 켜져 있으면 첫 회차는 calcSplitSendTime 이 정한다 — 발송 가능 창(SEND_HOURS) 밖에서 접수한 즉시 발송은
+ * 다음 창 시작(다음 날 08:00:00)으로 밀린다. 큐에는 그 시각이 실리는데 캠페인 행은 사용자가 예약을 안 눌렀다는
+ * 이유로 즉시 발송(scheduled_at 없음 · sent_at = 접수 시각)으로 남아, 목록 · 통계 · 수명주기(발송일시 =
+ * COALESCE(scheduled_at, sent_at))는 접수일로, 상세(큐 sendreq_time)와 엔진은 다음 날 08시로 갈렸다
+ * (톤28 10-09 23:45 · 23:47 → 10-10 08:00 · 서수란 접수). 사용자에게도 「발송 완료」라고 답했다.
+ *
+ * 규칙 하나 — **큐에 적는 첫 회차 시각과 캠페인 행의 예약 시각은 같은 계산에서 나온다.** 첫 회차가 접수 시각보다
+ * 뒤면 그 시각의 예약 발송이다(상태 scheduled · 취소 게이트 안 · 응답 「예약」). 창 안이면 결과가 입력과 같다.
+ * 예약을 지정한 요청도 같은 규칙이다(예약 시각이 창 밖이면 큐가 가는 시각으로 맞춘다).
+ * 분할이 없으면 손대지 않는다 — 즉시 발송(분할 없음)의 야간 허용 여부는 이 함수가 정할 정책이 아니다.
+ *
+ * 직접발송 commit(`direct-send-core.ts`)과 동기 `/direct-send`(`routes/campaigns.ts`)가 같은 함수를 부른다.
+ */
+export function resolveSplitFirstSend(
+  input: { scheduled?: unknown; scheduledAt?: string | Date | null; split: SplitSetting | null },
+  now: Date = new Date(),
+): { scheduled: boolean; scheduledAt: string | null } {
+  // ⛔ 예약 여부는 두 라우트와 같은 해석(truthy)이다 — `=== true`로 좁히면 "true"·1 로 온 예약이 즉시로 강등돼
+  //    지정 시각보다 먼저 나간다(Codex 1013 1R medium). 예약 시각 검증(validateScheduledAt)도 같은 truthy 로 본다.
+  const userScheduled = !!input.scheduled && !!input.scheduledAt;
+  const base = userScheduled ? new Date(input.scheduledAt as any) : now;
+  if (!input.split || Number.isNaN(base.getTime())) {
+    return userScheduled ? { scheduled: true, scheduledAt: base.toISOString() } : { scheduled: false, scheduledAt: null };
+  }
+  const first = calcSplitSendTime(base, 0);
+  if (userScheduled || first.getTime() > now.getTime()) {
+    return { scheduled: true, scheduledAt: first.toISOString() };
+  }
+  return { scheduled: false, scheduledAt: null };
+}
+
+/**
  * 발송 가능 시간(SEND_HOURS) 밖이면 다음 발송 가능 시각(startHour)으로 이동.
  * - 새벽(0 ~ startHour 미만) → 당일 startHour
  * - endHour 이후(21시~) → 익일 startHour

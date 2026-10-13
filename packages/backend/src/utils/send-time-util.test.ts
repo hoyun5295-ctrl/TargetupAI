@@ -8,7 +8,7 @@
  *    오전 금지 창이 그만큼 열린다(0818 Codex 5R 실측 — 내가 만든 결함).
  */
 import { describe, it, expect, vi, afterAll } from 'vitest';
-import { isWithinBrandSendWindow, calcSplitSendTime } from './send-time-util';
+import { isWithinBrandSendWindow, calcSplitSendTime, resolveSplitFirstSend } from './send-time-util';
 
 /** KST 벽시계 h:m → UTC Date */
 const kst = (h: number, m: number) => new Date(Date.UTC(2027, 7, 18, h - 9, m, 0));
@@ -144,5 +144,65 @@ describe('calcSplitSendTime — 발송 가능 시간 안에서만 흐른다', ()
     expect(kstStr(calcSplitSendTime(at('2026-09-25T22:00:00'), 0))).toBe('2026-09-26 08:00:00');
     expect(kstStr(calcSplitSendTime(at('2026-09-25T06:00:00'), 0))).toBe('2026-09-25 08:00:00');
     expect(kstStr(calcSplitSendTime(at('2026-09-25T21:00:00'), 0))).toBe('2026-09-26 08:00:00');
+  });
+});
+
+/**
+ * ★ 2026-10-13 B-1013-1 — 분할 첫 회차 시각 = 캠페인 예약 시각.
+ * 톤28 10-09 23:45 즉시 발송(분할 3,000건 · 1분)이 큐에는 10-10 08:00 으로 실렸는데 캠페인 행은 즉시 발송으로 남아
+ * 목록 · 통계(접수일)와 상세 · 엔진(다음 날 08시)이 갈렸다. 첫 회차가 접수 시각보다 뒤면 그 시각의 예약이다.
+ */
+describe('resolveSplitFirstSend — 분할 첫 회차가 접수 시각보다 뒤면 예약 발송', () => {
+  const at = (s: string) => new Date(s + '+09:00');
+  const kstStr = (d: Date) => new Date(d.getTime() + 9 * 3600e3).toISOString().slice(0, 19).replace('T', ' ');
+  const split = { count: 3000, intervalMinutes: 1 };
+
+  it('창 밖(23:45) 즉시 + 분할 → 다음 날 08:00 예약', () => {
+    const now = at('2026-10-09T23:45:15');
+    const r = resolveSplitFirstSend({ scheduled: false, scheduledAt: null, split }, now);
+    expect(r.scheduled).toBe(true);
+    expect(kstStr(new Date(r.scheduledAt!))).toBe('2026-10-10 08:00:00');
+  });
+
+  it('창 안(23:38 이 아니라 14:00) 즉시 + 분할 → 그대로 즉시(접수값 무변경)', () => {
+    const r = resolveSplitFirstSend({ scheduled: false, scheduledAt: null, split }, at('2026-10-09T14:00:00'));
+    expect(r).toEqual({ scheduled: false, scheduledAt: null });
+  });
+
+  it('분할이 없으면 손대지 않는다 — 즉시는 즉시 · 예약은 예약 그대로', () => {
+    const now = at('2026-10-09T23:38:41');
+    expect(resolveSplitFirstSend({ scheduled: false, scheduledAt: null, split: null }, now)).toEqual({ scheduled: false, scheduledAt: null });
+    const r = resolveSplitFirstSend({ scheduled: true, scheduledAt: '2026-10-10T01:10:00.000Z', split: null }, now);
+    expect(r.scheduled).toBe(true);
+    expect(kstStr(new Date(r.scheduledAt!))).toBe('2026-10-10 10:10:00');
+  });
+
+  it('예약 지정 + 분할 · 예약 시각이 창 안이면 그 시각 그대로(10:10 = 10:10)', () => {
+    const r = resolveSplitFirstSend({ scheduled: true, scheduledAt: '2026-10-10T01:10:00.000Z', split }, at('2026-10-09T23:42:57'));
+    expect(r.scheduled).toBe(true);
+    expect(kstStr(new Date(r.scheduledAt!))).toBe('2026-10-10 10:10:00');
+  });
+
+  it('예약 지정 + 분할 · 예약 시각이 창 밖(23:00)이면 큐가 가는 시각(다음 날 08:00)으로 맞춘다', () => {
+    const r = resolveSplitFirstSend({ scheduled: true, scheduledAt: '2026-10-10T14:00:00.000Z', split }, at('2026-10-09T20:00:00'));
+    expect(kstStr(new Date(r.scheduledAt!))).toBe('2026-10-11 08:00:00');
+  });
+
+  it('예약 플래그만 있고 시각이 없으면 즉시로 본다(옛 요청과 같다)', () => {
+    const r = resolveSplitFirstSend({ scheduled: true, scheduledAt: null, split }, at('2026-10-09T14:00:00'));
+    expect(r).toEqual({ scheduled: false, scheduledAt: null });
+  });
+
+  it('예약 플래그가 "true" · 1 로 와도(라우트와 같은 truthy 해석) 예약이 즉시로 강등되지 않는다 — Codex 1013 1R', () => {
+    const now = at('2026-10-09T14:00:00');
+    for (const flag of ['true', 1, 'Y'] as unknown[]) {
+      const r = resolveSplitFirstSend({ scheduled: flag, scheduledAt: '2026-10-10T01:10:00.000Z', split }, now);
+      expect(r.scheduled).toBe(true);
+      expect(kstStr(new Date(r.scheduledAt!))).toBe('2026-10-10 10:10:00');
+    }
+    // 거짓 값은 종전처럼 즉시(창 안)
+    for (const flag of [false, 0, '', null, undefined] as unknown[]) {
+      expect(resolveSplitFirstSend({ scheduled: flag, scheduledAt: '2026-10-10T01:10:00.000Z', split }, now)).toEqual({ scheduled: false, scheduledAt: null });
+    }
   });
 });

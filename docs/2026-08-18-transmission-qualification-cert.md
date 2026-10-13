@@ -826,6 +826,7 @@ JWT를 주고 화면에서 가리는 방식은 통제가 아니다(그 토큰으
 
 1. 슈퍼관리자 사용자 수정에서 hoyun·psy5868·suran 세 계정에 2차 인증 번호 등록(`mfa_phone_changed` 기록이 남는다)
 2. `packages/backend/.env`에 `MFA_ENFORCE_FROM=2026-09-11` · `MFA_PILOT_LOGIN_IDS=hoyun,psy5868,suran` **두 줄을 함께** → `pm2 restart targetup-backend --update-env`
+   ★2026-10-13 명단 = `hoyun,psy5868,suran,gwchae,sgbaek,mobile`(6명 · 백업 `.env.bak-1013`). 직원 「본인인증 했는데 인증번호 안 옴」 접수 → 감사 기록 실측 = 명단 밖 계정은 `mfa_challenge` 없이 `login_success`(설정대로) · 명단 안은 로그인마다 수 초 안에 통과. **본인인증 명단(`IDENTITY_VERIFY_PILOT_LOGIN_IDS`)은 담당자 번호만 채우고, 로그인 인증 대상은 이 명단이 정한다.** suran · eunji_admin 은 슈퍼관리자 로그인(구글 OTP)이라 인증번호 경로가 아니다.
    ⛔ **코드 배포보다 먼저 넣지 않는다** — 옛 코드는 명단을 모르므로 번호가 등록된 계정 전부에 인증이 걸린다. 명단 없이 스위치만 넣어도 같다
 3. 명단 계정으로 로그인 → 문자 인증 → 감사 로그에 `2차 인증 요청`·`2차 인증 성공` 확인 후 캡처
 4. 메뉴 몇 개 이동 · 고객DB 목록·상세 열람 · 테스트 고객 1건 수정 → `화면 접속`·`개인정보 조회`·`개인정보 등록·수정` 확인 후 캡처
@@ -884,6 +885,7 @@ JWT를 주고 화면에서 가리는 방식은 통제가 아니다(그 토큰으
 3. 시범 계정 3개에 담당자 번호가 이미 등록돼 있는지 확인(4-J 1번에서 등록 완료)
 4. `.env`에 **두 줄을 함께** → `pm2 restart targetup-backend --update-env`
    `SENDER_AUTH_ENFORCE_FROM=2026-09-12` · `SENDER_AUTH_PILOT_LOGIN_IDS=hoyun,psy5868,suran`
+   ★2026-10-13 명단 = `hoyun,psy5868,suran,gwchae,sgbaek,mobile`(로그인 인증 명단과 같은 날 같은 6명으로 · 경위는 §4-J 운영 투입 순서 2번 ★1013 줄)
    ⛔ 명단 없이 시행일만 넣으면 **번호가 등록된 계정 전부**가 발송 때 인증을 요구받는다.
 5. 명단 계정으로 문자 1건 발송 → 팝업 → 인증 → 발송 진행 → 감사 로그에 `발신 인증 요청`·`발신 인증 성공` 확인 후 캡처
 
