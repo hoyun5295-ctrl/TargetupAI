@@ -36,12 +36,8 @@ import {
   createSection, normalizeOrder, resequence, moveWithin, SECTION_META, type Section,
 } from '../../utils/dm-section-defaults';
 import type { SectionType } from '../../utils/dm-section-defaults';
-
-// 이메일에서 렌더 가능한 블록(백엔드 EMAIL_BLOCK_WHITELIST 미러 — 추가 메뉴용).
-const EMAIL_BLOCK_TYPES: SectionType[] = [
-  'header', 'hero', 'text_card', 'product_carousel', 'gallery',
-  'coupon', 'promo_code', 'cta', 'store_info', 'sns', 'reviews', 'footer',
-];
+// ★ 2026-10-14 이메일 블록 목록 사본 1벌(make-flow) — 백엔드 EMAIL_BLOCK_WHITELIST 와의 일치는 email-block-copies.test.ts가 고정
+import { EMAIL_PALETTE_TYPES } from '../../utils/make-flow';
 
 // ★ 2026-07-12 블록 스타일 공통 컨트롤 — 렌더러가 실제 소비하는 타입에만 노출(죽은 컨트롤 금지, LESSONS_FRONTEND 07-10).
 //   정렬 = 백엔드 EMAIL_ALIGN_AWARE 미러(section.align → props.align 주입 대상).
@@ -657,7 +653,7 @@ export default function EmailVisualEditor({
               </button>
               {addOpen && (
                 <div className="absolute bottom-12 left-2 right-2 bg-slate-100 border border-slate-300 rounded-xl shadow-2xl p-1.5 max-h-72 overflow-y-auto z-10">
-                  {EMAIL_BLOCK_TYPES.map((t) => (
+                  {EMAIL_PALETTE_TYPES.map((t) => (
                     <button key={t} onClick={() => addBlock(t)} className="w-full flex items-center gap-2 rounded-lg px-2 py-1.5 text-xs text-slate-700 hover:bg-violet-100 text-left">
                       <span>{SECTION_META[t]?.icon || '▫️'}</span><span>{SECTION_META[t]?.label || t}</span>
                     </button>

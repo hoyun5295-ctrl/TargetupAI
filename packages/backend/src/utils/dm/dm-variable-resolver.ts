@@ -9,6 +9,7 @@
 import { replaceVariables } from '../messageUtils';
 import { prepareFieldMappings } from '../messageUtils';
 import type { Section, SectionProps, VariableBinding } from './dm-section-registry';
+import { PARTICIPATION_TYPES } from './dm-section-registry';
 
 // ────────────── 기본 fallback 매핑 ──────────────
 
@@ -40,6 +41,11 @@ const STRING_FIELD_KEYS: Record<string, readonly string[]> = {
   // ★ 2026-07-02(2) 상품 슬라이드 제목도 치환 대상 (예: "%고객명%님을 위한 셀렉션")
   product_carousel: ['title'],
 };
+// ★ 2026-10-14 (임은지 접수 ②) 참여 8종 완료 문구도 치환 대상 — 목록은 registry PARTICIPATION_TYPES가 소유(손 목록 X).
+//   설문은 옛 칸(completion_reward_text)이 완료 문구로도 쓰이므로 함께. 변수가 없으면 아래 hasAnyVariable 판정이 걸러 출력 불변.
+for (const t of PARTICIPATION_TYPES) {
+  STRING_FIELD_KEYS[t] = t === 'survey' ? ['completion_reward_text', 'success_text'] : ['success_text'];
+}
 
 // ────────────── 변수 감지 ──────────────
 

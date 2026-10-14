@@ -158,7 +158,7 @@
       `/codex:review` = 코드 신설·정정 후(5분+ 작업) / `/codex:adversarial-review` = DB 마이그레이션·돈·환불·balance·큰 영구 룰 / `/codex:rescue` = 디버깅 막힘·3회+ fix 실패·사이트 다운.
       [흐름] 작성 → tsc 0 + 자가 grep → **내 적대 검토** → Codex → 정정 → 표준 종료 멘트.
       [범위 — 0804 확정] **돈·국세청 문서·DB 마이그레이션 경로에만.** UI·React 상호작용은 **대상 제외**(수치 근거 = memory `feedback_codex_scope_write_path_or_ddl_only`).
-      [종료 조건] `critical`·`high`가 0이면 종료. `medium` 이하는 SoT 문서에 등재만 하고 넘어간다. **라운드 최대 2회** — 넘기면 멈추고 Harold님께 남은 지적과 판단을 보고한다.
+      [종료 조건 — ★1014 Harold 개정] **Codex가 지적 0(approve)으로 닫을 때까지 돌린다. 라운드 상한 없음.** 등급 무관하게 지적마다 수용·불수용을 판정하고(불수용은 근거를 다음 요청문 ⑤에 적는다) 수용분을 고친 뒤 **바로 다음 라운드**를 띄운다. 상한을 이유로 멈춰 보고하지 않는다(0926 · 1014 두 번 지적). 멈추는 경우는 둘뿐 — Codex가 멈췄을 때(런북 §3) · 같은 지적이 근거 불수용에도 세 번째 반복될 때(그때 Harold님 판단).
       [면제] typo·주석·메모리·SCHEMA.md·STATUS.md·Harold 명시 면제 · **★0825 발송·돈·정산에 닿지 않는 로그성 테이블의 nullable 컬럼 추가(부재 시 코드 폴백 동반)는 DDL이어도 면제**(경위 = memory `feedback_codex_scope_write_path_or_ddl_only`). [실행 절차] `status/CODEX-RUNBOOK.md`
     </RULE>
 

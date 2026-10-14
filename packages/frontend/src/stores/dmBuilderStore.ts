@@ -214,7 +214,8 @@ export type DmBuilderState = {
 
   // ── Actions: Persistence ──
   loadDm: (id: string) => Promise<void>;
-  save: (opts?: { silent?: boolean }) => Promise<void>;
+  /** ★ 2026-10-14 실제로 저장됐으면 true(발행 DM의 silent 저장은 차단 = false · 스냅샷 오기록 차단) */
+  save: (opts?: { silent?: boolean }) => Promise<boolean>;
   createNew: (opts?: { title?: string; storeName?: string; layoutMode?: LayoutMode; catalogView?: boolean }) => void;
   reset: () => void;
 
@@ -338,6 +339,16 @@ function scheduleHistoryPush(push: () => void) {
 // ★ 2026-07-16 (Codex 1R) — 편집 시퀀스 카운터: save()가 요청 중 들어온 편집을 "저장된 것"으로
 //   오인해 isDirty를 지우던 경합 차단. markDirty마다 증가, save 성공 시 시작 시점과 비교.
 let editCounter = 0;
+// ★ 2026-10-14 편집 세션 토큰 — DM id 와 별개다(신규 DM 은 첫 저장에서 id 가 null → 발급으로 바뀌고, 같은 DM 을 다시 열어도 새 세션이다).
+//   loadDm · createNew · reset 마다 오른다. 저장 뒤 화면 전환(나가기 · 보내기 창)은 "확인창을 열 때 잡은 토큰 == 지금 토큰"일 때만 한다(Codex 1R·2R 세션 경합).
+let editSession = 0;
+export const getEditSession = (): number => editSession;
+// ★ 2026-10-14 저장 차례(Codex 5R·6R) — 진행 중인 저장(어느 세션이든)이 끝날 때까지 다음 저장은 기다렸다가 들어간다.
+//   세션(reset·createNew·loadDm)과 독립이라 같은 DM 재진입 때 옛 PUT 뒤에 새 PUT 이 가고, 신규 DM 첫 POST 가 겹쳐 두 행이 생기지 않는다.
+//   막힌 저장을 false 로 버리면(5R 이전 · 옛 isSaving 가드도 같았다) 새 세션의 자동 저장이 유실된다(6R) → 버리지 않고 기다린다.
+//   무응답 한 건이 뒤 세션 전부를 막지 못하게 저장 요청엔 timeout 을 둔다(axios 기본 0).
+let inflight: Promise<void> | null = null;
+const SAVE_TIMEOUT_MS = 30_000;
 function markDirty<T extends Partial<DmBuilderState>>(patch: T): T & { isDirty: true } {
   editCounter++;
   return { ...patch, isDirty: true };
@@ -875,9 +886,15 @@ export const useDmBuilderStore = create<DmBuilderState>((set, get) => ({
 
   // ── Persistence ──
   loadDm: async (id) => {
+    // ★ 2026-10-14 요청별 토큰 — 응답이 왔을 때 이 요청이 시작된 세션이 아니면(그 사이 다른 DM 로드·새로 만들기·초기화) 버린다.
+    //   늦게 온 GET 이 지금 편집 중인 DM 을 덮어쓰고 저장 뒤 화면 전환 가드까지 통과시키던 경합(Codex 3R).
+    //   isSaving 은 건드리지 않는다 — 옛 세션의 PUT 이 아직 진행 중이면 새 세션도 "저장 중"이고, 그 PUT 이 끝날 때까지 save 가드가 다음 PUT 을 막아
+    //   같은 DM 을 다시 연 경우의 저장 순서(옛 PUT 뒤에 새 PUT)를 지킨다(Codex 4R).
+    const token = ++editSession;
     set({ loadError: null });
     try {
       const res = await api.get(`/dm/${id}`);
+      if (token !== editSession) return;
       const dm = res.data as any;
       const pages = normalizePagesFromDm(dm);
       const rawBrand = dm.brand_kit
@@ -908,19 +925,27 @@ export const useDmBuilderStore = create<DmBuilderState>((set, get) => ({
         loadError: null,
       });
     } catch (err: any) {
+      if (token !== editSession) return;
       set({ loadError: err?.response?.data?.error || err?.message || '불러오기 실패' });
     }
   },
 
   save: async (opts) => {
     const silent = !!opts?.silent;
+    // 차례 기다리기 — 기다리는 동안 세션이 바뀌었으면(다른 DM 로드·새로 만들기·초기화) 그 세션의 내용을 대신 저장하지 않는다
+    const token0 = editSession;
+    while (inflight) await inflight;
+    if (token0 !== editSession) return false;
     const s = get();
-    if (s.isSaving) return;
     // ★ 2026-07-14 발행 DM 데이터 유실(임은지): 발행된 DM은 자동저장(silent)이 라이브 URL을 덮어쓰지 않게 차단.
     //   명시적 '저장'/'발행'(비-silent)만 반영. 미저장 편집분은 isDirty 유지 → 상단 "변경사항 있음" + 이탈 경고가 보호.
     //   초안(미발행) DM은 라이브 URL이 없어 자동저장 그대로.
-    if (silent && s.isPublished) return;
+    if (silent && s.isPublished) return false;
     const seqAtStart = editCounter; // ★ Codex 1R — 요청 스냅샷 시점의 편집 시퀀스
+    // ★ 2026-10-14 세션 토큰 — 요청이 끝났을 때 세션이 바뀌었으면(다른 DM 로드·새로 만들기·초기화) 결과를 새 세션에 적지 않는다(Codex 3R · 늦은 POST 가 dmId 를 덮어쓰던 경합)
+    const token = editSession;
+    let done: () => void = () => {};
+    inflight = new Promise<void>((r) => { done = r; });
     set({ isSaving: true });
     try {
       // pages 구조로 저장 + 하위호환을 위해 전체 섹션 flat도 동봉
@@ -942,21 +967,34 @@ export const useDmBuilderStore = create<DmBuilderState>((set, get) => ({
         ai_prompt: s.aiPrompt,
       };
       if (s.dmId) {
-        await api.put(`/dm/${s.dmId}`, body);
+        await api.put(`/dm/${s.dmId}`, body, { timeout: SAVE_TIMEOUT_MS });
       } else {
-        const res = await api.post('/dm', body);
+        const res = await api.post('/dm', body, { timeout: SAVE_TIMEOUT_MS });
         const created = res.data as any;
+        if (token !== editSession) return false;
         set({ dmId: created.id || created.dmId });
       }
+      // 세션이 바뀌었으면 결과를 적지 않는다(옛 세션 것) — 차례·표시 해제는 finally
+      if (token !== editSession) return false;
       // ★ Codex 1R — 요청 중 새 편집이 들어왔으면 isDirty 유지 (스냅샷 밖 편집분이 "저장됨"으로 오인되던 경합 차단)
-      set({ isDirty: editCounter !== seqAtStart, lastSavedAt: Date.now(), isSaving: false });
+      set({ isDirty: editCounter !== seqAtStart, lastSavedAt: Date.now() });
       if (!silent) set({ toast: { type: 'success', message: '저장했어요.' } });
+      return true;
     } catch (err: any) {
-      set({ isSaving: false, toast: { type: 'error', message: err?.response?.data?.error || '저장 실패' } });
+      if (token !== editSession) return false;
+      const timedOut = err?.code === 'ECONNABORTED';
+      set({ toast: { type: 'error', message: timedOut ? '저장 응답이 없어요. 잠시 뒤 다시 저장해 주세요.' : (err?.response?.data?.error || '저장 실패') } });
+      return false;
+    } finally {
+      // 요청이 어떻게 끝나든(성공 · 오류 · 시간 초과 · 세션 교체) 차례를 넘기고 저장 중 표시를 내린다 — 차례의 주인만 여기 온다
+      inflight = null;
+      done();
+      set({ isSaving: false });
     }
   },
 
   createNew: (opts) => {
+    editSession++;
     if (autosaveTimer) { clearTimeout(autosaveTimer); autosaveTimer = null; }
     const initialPage = emptyPage();
     set({
@@ -973,6 +1011,7 @@ export const useDmBuilderStore = create<DmBuilderState>((set, get) => ({
   },
 
   reset: () => {
+    editSession++;
     if (autosaveTimer) { clearTimeout(autosaveTimer); autosaveTimer = null; }
     const initialPage = emptyPage();
     set({
@@ -1020,6 +1059,11 @@ export const selectSelectedSection = (state: DmBuilderState): Section | null => 
 };
 
 /** 전체 페이지의 섹션을 평평하게 반환 (검수/AI개선 등 전역 작업용) */
+/** ★ 2026-10-14 자동 저장이 막히는가 = save({silent}) 차단 조건(발행 · 중지분 포함). "저장해야 남아요" 류 안내는 이것을 본다. */
+export const selectAutosaveBlocked = (state: DmBuilderState): boolean => state.isPublished;
+/** ★ 2026-10-14 받는 사람 화면 ≠ 편집 화면(발행 · 고친 내용 있음 · 중지 아님). "받는 사람은 아직 옛 화면" 류 문구의 뜻은 이것을 본다. */
+export const selectLiveGap = (state: DmBuilderState): boolean => state.isPublished && state.isDirty && !state.isStopped;
+
 export const selectAllSectionsFlat = (state: DmBuilderState): Section[] =>
   state.pages.flatMap((p) => p.sections);
 

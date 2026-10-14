@@ -56,6 +56,7 @@
 | DB | `sales` |
 | **localhost 접속 = root만** | `docker exec -it pay-ingest-db mariadb -uroot -p sales` (비번 프롬프트) |
 | `sales` 계정 | **게이트웨이 IP(54·57·58)+비토(139.150.81.213) 전용** → localhost 접속 시 `ERROR 1045` = 정상(보안). 검증은 반드시 `-uroot` |
+| **23388 방화벽 소유** | **`/etc/systemd/system/pay-ingest-fw.service` 하나**(★1014 개정 · `-F DOCKER-USER` → DROP → 허용 `-I` 5개 = .54·.57·.58·**.65**·139.150.81.213 · `.service.bak-20261014`). 허용 IP 를 더할 때는 **이 파일에 줄을 넣고 `systemctl daemon-reload && systemctl restart pay-ingest-fw`** — 손 `iptables -I` 는 재부팅에 사라지거나(★1014) 서비스 묶음 아래로 밀려 DROP 에 가려진다. 검증 = `iptables -S DOCKER-USER`(묶음 하나 · DROP 맨 끝) |
 
 **반복 실수 방지 (2026-07-16 실측 시행착오):**
 - 호스트(`administrator@invito`)에 mysql/mariadb 클라이언트 **없음** → 반드시 `docker exec`로 컨테이너 안 **`mysql`** 사용(★2026-08-28 실측 정정 — `mariadb`는 컨테이너에 없다) (`sudo apt install` 금지).

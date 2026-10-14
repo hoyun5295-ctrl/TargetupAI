@@ -60,6 +60,16 @@ export const SECTION_TYPES: readonly SectionType[] = [
   'youtube_embed', 'instagram_embed', 'map_store_locator', 'reviews',
 ] as const;
 
+/**
+ * ★ 2026-10-14 참여 8종(임은지 접수 ② 완료 문구) — "받는 사람이 눌러서 서버에 남기는" 블록.
+ *  완료 문구(`success_text`)·변수 치환표·뷰어 완료 분기·커버리지 테스트가 전부 이 하나를 읽는다(손 목록 3벌 금지).
+ *  렌더러가 `data-dm-result`를 내는 타입과 같아야 하고(테스트 고정) 프론트 미러 = `dm-section-defaults.ts` PARTICIPATION_TYPES.
+ */
+export const PARTICIPATION_TYPES: readonly SectionType[] = [
+  'poll', 'survey', 'email_capture', 'click_rewards',
+  'lucky_draw', 'roulette', 'instant_coupon', 'limited_quantity',
+] as const;
+
 // ────────────── Props 타입 (섹션별) ──────────────
 
 export type HeaderProps = {
@@ -227,8 +237,6 @@ export type ProductCarouselProps = {
   title?: string;
   products: ProductCarouselItem[];
   show_indicator?: boolean;
-  auto_slide?: boolean;
-  slide_interval_ms?: number;
   // ★ 2026-07-14 이미지 맞춤(남지현) — 프론트 미러(옛 프론트에만 있던 필드 정합)
   image_fit?: 'cover' | 'contain';
   image_focus?: 'top' | 'center' | 'bottom';
@@ -287,6 +295,9 @@ export type TabCardItem = {
 export type TabCardsProps = {
   tabs: TabCardItem[];
   default_tab_index?: number;
+  // ★ 2026-07-23 (임은지) 활성 탭 버튼 배경/글씨색 — 프론트 미러(옛 프론트에만 있던 필드 정합 · 렌더러는 이미 읽음)
+  tab_active_bg?: string;
+  tab_active_text_color?: string;
 };
 
 // 카테고리 B. 인터랙션 수집형
@@ -300,8 +311,9 @@ export type PollProps = {
   question: string;
   options: PollOption[];
   allow_multiple?: boolean;
-  show_result_after_vote?: boolean;
   one_vote_per_user: boolean;
+  /** ★ 2026-10-14 완료 문구 — 참여 8종(PARTICIPATION_TYPES) 공용 칸. 미지정 = 뷰어 기본 문구(출력 불변). */
+  success_text?: string;
 };
 
 export type SurveyQuestion = {
@@ -317,6 +329,7 @@ export type SurveyProps = {
   questions: SurveyQuestion[];
   show_progress?: boolean;
   completion_reward_text?: string;
+  success_text?: string; // ★ 2026-10-14 완료 문구(공용 칸) · 비면 completion_reward_text가 완료 문구로(renderer doneTextOf)
 };
 
 export type EmailCaptureProps = {
@@ -334,6 +347,7 @@ export type ClickRewardsProps = {
   target_count: number;
   reward_description: string;
   show_progress: boolean;
+  success_text?: string; // ★ 2026-10-14 완료 문구(공용 칸)
 };
 
 // 카테고리 C. 참여형 이벤트
@@ -358,6 +372,7 @@ export type LuckyDrawProps = {
   result_announce_url?: string;
   consent_text: string;
   prizes?: LuckyDrawPrize[];
+  success_text?: string; // ★ 2026-10-14 완료 문구(공용 칸)
 };
 
 export type RouletteSegment = {
@@ -372,6 +387,7 @@ export type RouletteProps = {
   segments: RouletteSegment[];
   one_spin_per_user: boolean;
   spin_animation_ms?: number;
+  success_text?: string; // ★ 2026-10-14 당첨 시 안내 문구(공용 칸 · 당첨 분기 둘째 줄에만)
 };
 
 export type InstantCouponProps = {
@@ -380,6 +396,10 @@ export type InstantCouponProps = {
   expires_at?: string;
   conditions?: string;
   usage_instructions?: string;
+  // ★ 2026-07-23 (임은지) '쿠폰 받기' 버튼 배경/글씨색 — 프론트 미러(옛 프론트에만 있던 필드 정합 · 렌더러는 이미 읽음)
+  button_bg_color?: string;
+  button_text_color?: string;
+  success_text?: string; // ★ 2026-10-14 완료 문구(공용 칸) · 지정 시 usage_instructions 합성 문구 대신
 };
 
 export type LimitedQuantityProps = {
@@ -388,6 +408,7 @@ export type LimitedQuantityProps = {
   total_quantity: number;
   current_remaining?: number;
   signup_url?: string;
+  success_text?: string; // ★ 2026-10-14 완료 문구(공용 칸 · signup_url 있으면 버튼이 링크라 편집기가 숨김)
 };
 
 // 카테고리 D. 외부 임베드 + 매장 안내
@@ -414,7 +435,6 @@ export type MapStore = {
 
 export type MapStoreLocatorProps = {
   stores: MapStore[];
-  enable_user_location?: boolean;
   default_zoom?: number;
 };
 
@@ -565,8 +585,6 @@ export const SECTION_DEFAULTS: { [K in SectionType]: SectionPropsMap[K] } = {
   product_carousel: {
     products: [],
     show_indicator: true,
-    auto_slide: false,
-    slide_interval_ms: 4000,
   },
   gallery: {
     images: [],
@@ -594,7 +612,6 @@ export const SECTION_DEFAULTS: { [K in SectionType]: SectionPropsMap[K] } = {
       { id: '2', label: '옵션 2' },
     ],
     one_vote_per_user: true,
-    show_result_after_vote: true,
     allow_multiple: false,
   },
   survey: {
@@ -647,7 +664,6 @@ export const SECTION_DEFAULTS: { [K in SectionType]: SectionPropsMap[K] } = {
   },
   map_store_locator: {
     stores: [],
-    enable_user_location: false,
     default_zoom: 14,
   },
   reviews: {

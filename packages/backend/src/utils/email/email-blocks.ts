@@ -14,6 +14,13 @@ export const EMAIL_BLOCK_WHITELIST: readonly SectionType[] = [
   'product_carousel', 'gallery', 'store_info', 'sns', 'reviews', 'footer',
 ] as const;
 
+/** ★ 2026-10-14 AI 비주얼 생성 프롬프트(email-ai.ts EMAIL_BLOCKS_SYSTEM)가 "사용 가능한 블록"으로 적는 타입 — 화이트리스트의 부분집합.
+ *  sns·reviews·promo_code는 AI가 채울 재료가 없어 프롬프트에서 뺀다. 프롬프트 본문의 `- type:` 줄 집합과 이 상수가 같아야 한다
+ *  (email-block-copies.test.ts가 고정 · 사본 4벌이 각자 늘던 뿌리). */
+export const EMAIL_AI_BLOCK_TYPES: readonly SectionType[] = [
+  'header', 'hero', 'text_card', 'product_carousel', 'gallery', 'coupon', 'cta', 'store_info', 'footer',
+] as const;
+
 // 비호환(인터랙티브/JS/임베드) → 'static': 정적 요약 렌더 / 'skip': 렌더 0(메뉴에서도 제외)
 export const EMAIL_INCOMPATIBLE: Record<string, 'static' | 'skip'> = {
   countdown: 'static',          // D-day 텍스트만

@@ -3,6 +3,8 @@
  * 27 섹션(기존 11 + D216+ 신규 16) 전부 우측 속성 패널 편집 가능.
  */
 import type { Section } from '../../../utils/dm-section-defaults';
+import { PARTICIPATION_TYPES } from '../../../utils/dm-section-defaults';
+import { Field, TextArea } from './FormControls';
 import HeaderEditor from './editors/HeaderEditor';
 import HeroEditor from './editors/HeroEditor';
 import CouponEditor from './editors/CouponEditor';
@@ -63,7 +65,7 @@ export default function SectionPropsEditor({
     onUpdate,
     hidden: (field: string) => !!hiddenFields && hiddenFields.includes(field),
   };
-  switch (section.type) {
+  const inner = (() => { switch (section.type) {
     case 'header':     return <HeaderEditor     {...common} />;
     case 'hero':       return <HeroEditor       {...common} />;
     case 'coupon':     return <CouponEditor     {...common} />;
@@ -93,5 +95,40 @@ export default function SectionPropsEditor({
     case 'map_store_locator': return <MapStoreLocatorEditor  {...common} />;
     case 'reviews':           return <ReviewsEditor          {...common} />;
     default:                  return null;
-  }
+  } })();
+  // ★ 2026-10-14 (임은지 접수 ②) 참여 8종 공통 "완료 문구" 칸 — 장치 하나(백엔드 renderSection 래퍼 data-success-text → 뷰어 wrapInfo.done).
+  //   선착순은 참여 링크(signup_url)가 있으면 버튼이 링크라 완료 문구가 뜰 자리가 없어 감춘다.
+  const p = section.props as any;
+  const showDone = (PARTICIPATION_TYPES as readonly string[]).includes(section.type) && !(section.type === 'limited_quantity' && p?.signup_url);
+  return (
+    <>
+      {inner}
+      {showDone && <DoneTextField type={section.type} value={p?.success_text} onUpdate={onUpdate} />}
+    </>
+  );
+}
+
+/** 완료 문구 기본값 — 뷰어(dm-viewer.ts) 완료 분기의 글자와 같아야 한다(backend dm-participation-viewer.test.ts가 고정 · 힌트 표시용). */
+const DONE_DEFAULT: Record<string, string> = {
+  poll: '투표해주셔서 감사합니다!',
+  survey: '설문이 제출되었습니다. 감사합니다!',
+  email_capture: '참여가 완료되었습니다. 감사합니다!',
+  lucky_draw: '참여가 완료되었습니다. 감사합니다!',
+  click_rewards: '참여가 완료되었습니다. 감사합니다!',
+  instant_coupon: '쿠폰이 발급되었습니다. 결제 시 적용해주세요.',
+  limited_quantity: '참여가 완료되었습니다!',
+};
+
+function DoneTextField({ type, value, onUpdate }: { type: string; value: string | undefined; onUpdate: (patch: Record<string, any>) => void }) {
+  const roulette = type === 'roulette';
+  const hint = roulette
+    ? '당첨 안내 아래 둘째 줄로 떠요(꽝에는 안 떠요) · 비우면 당첨 안내만'
+    : type === 'survey'
+      ? `참여가 끝나면 버튼 아래에 떠요 · 비우면 '제출 전 안내' 문구가, 그것도 비면 '${DONE_DEFAULT.survey}'`
+      : `참여가 끝나면 버튼 아래에 떠요 · 비우면 '${DONE_DEFAULT[type] || ''}'`;
+  return (
+    <Field label={roulette ? '당첨 시 안내 문구 (선택)' : '완료 문구 (선택)'} hint={hint}>
+      <TextArea value={value} onChange={(v) => onUpdate({ success_text: v })} placeholder="예: 매장 카운터에 이 화면을 보여주세요" rows={2} />
+    </Field>
+  );
 }

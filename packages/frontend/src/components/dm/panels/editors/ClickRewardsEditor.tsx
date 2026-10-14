@@ -18,7 +18,7 @@ export default function ClickRewardsEditor({ props, onUpdate }: EditorProps<Clic
       </Field>
       <Field label="목표 횟수"><TextInput type="number" value={props.target_count} onChange={(v) => onUpdate({ target_count: v ? Number(v) : 0 })} placeholder="10" /></Field>
       <Field label="보상 설명" hint="회사가 직접 작성"><TextInput value={props.reward_description} onChange={(v) => onUpdate({ reward_description: v })} placeholder="[직접 작성해주세요]" /></Field>
-      <Field label="진행률 표시"><Toggle value={props.show_progress ?? true} onChange={(v) => onUpdate({ show_progress: v })} /></Field>
+      <Field label="진행률 표시"><Toggle value={props.show_progress ?? false} onChange={(v) => onUpdate({ show_progress: v })} /></Field>
     </>
   );
 }

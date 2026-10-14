@@ -13,7 +13,7 @@ import { DmMiniCover } from '../components/dm/DmThumbnails';
 import DmBlockBuilder from '../components/dm/build/DmBlockBuilder';
 import axios from 'axios';
 import { attachCreditInterceptor } from '../lib/credit-interceptor';
-import { useDmBuilderStore, selectAllSectionsFlat } from '../stores/dmBuilderStore';
+import { useDmBuilderStore, getEditSession, selectAllSectionsFlat } from '../stores/dmBuilderStore';
 import { createSection } from '../utils/dm-section-defaults';
 import { formatDateTimeShort } from '../utils/formatDate';
 import { uploadOne } from '../components/dm/panels/FormControls';
@@ -228,7 +228,6 @@ export default function DmBuilderPage() {
       setPendingGen({ prompt: lineResult.line, desc: `"${lineResult.line}" 내용으로 새 DM을 만들어요. 지금 DM은 그대로 남아요.`, oneLine: true, askBenefit: true });
     }
   };
-  const [confirmBackOpen, setConfirmBackOpen] = useState(false);
   // ★ 2026-09-27 만들기 개편 — 첫 화면 상태 · 보내기 창 · 발행(플래너)·자세한 발송 창 신호(TopBarWithBack 이 흐름을 그대로 가진다)
   // ★ 2026-09-30 AI 존 보정: 접힌 "다른 방법" 패널 폐지 — ?other=1(만들기 화면의 [한 줄로 자동 생성]·[이미지로 불러오기]) 은 명령 카드·그 밖에 줄이 처음부터 보이므로 펼칠 것이 없다
   const [listFilter, setListFilter] = useState<'all' | ChipStatus>('all');
@@ -800,11 +799,20 @@ export default function DmBuilderPage() {
 
   // ← 상단바 뒤로가기: 변경사항 있으면 경고 모달, 없으면 즉시 목록으로
   const handleBackRequest = () => {
-    if (isDirty) {
-      setConfirmBackOpen(true);
-    } else {
-      handleBackToList();
-    }
+    if (!isDirty) { handleBackToList(); return; }
+    // ★ 2026-10-14 (⑧ 1단계) 나가기 창에 [저장하고 나가기] — 저장은 기존 save() 하나(새 쓰기 경로 0)
+    const g = useDmBuilderStore.getState();
+    setConfirm({
+      mode: 'danger', title: '고친 내용을 버리고 나갈까요?',
+      description: g.isPublished
+        ? `저장하지 않은 변경은 사라져요. [저장하고 나가기]를 누르면 받는 사람 화면에도 반영돼요.${prizeNote(g)}`
+        : '저장하지 않은 변경은 사라지고 되돌릴 수 없어요.',
+      confirmLabel: '버리고 나가기', cancelLabel: '계속 편집', altLabel: '저장하고 나가기',
+      // 저장이 끝났을 때 아직 같은 편집 세션(getEditSession · id 가 아니라 토큰)일 때만 나간다 — 응답 지연 중 다른 DM 을 열거나 같은 DM 을 다시 열면 그 화면을 초기화하지 않고,
+      //   신규 DM 의 첫 저장(id null → 발급)은 같은 세션으로 본다(Codex 1R·2R)
+      onAlt: async () => { const token = getEditSession(); const ok = await useDmBuilderStore.getState().save(); const st = useDmBuilderStore.getState(); if (ok && getEditSession() === token && !st.isDirty) handleBackToList(); },
+      onConfirm: () => { handleBackToList(); },
+    });
   };
 
   // ── 편집 모드 ──
@@ -843,9 +851,10 @@ export default function DmBuilderPage() {
             if (g.isPublished && g.isDirty) {
               setConfirm({
                 mode: 'warning', title: '고친 내용을 저장하고 보낼까요?',
-                description: '이미 보낸 DM이에요. 저장하면 먼저 보낸 링크로 들어오는 사람도 고친 화면을 봐요.',
+                description: `이미 보낸 DM이에요. 저장하면 먼저 보낸 링크로 들어오는 사람도 고친 화면을 봐요.${prizeNote(g)}`,
                 confirmLabel: '저장하고 보내기', cancelLabel: '계속 고치기',
-                onConfirm: async () => { await useDmBuilderStore.getState().save(); if (!useDmBuilderStore.getState().isDirty) setMakeSendOpen(true); },
+                // 저장이 끝났을 때 아직 같은 편집 세션(getEditSession 토큰)이어야 보내기 창을 연다(Codex 1R·2R · 세션 경합)
+                onConfirm: async () => { const token = getEditSession(); const ok = await useDmBuilderStore.getState().save(); const st = useDmBuilderStore.getState(); if (ok && getEditSession() === token && !st.isDirty) setMakeSendOpen(true); },
               });
               return;
             }
@@ -885,14 +894,6 @@ export default function DmBuilderPage() {
           onOpenAdvancedDm={() => { setMakeSendOpen(false); setAdvSendSignal((v) => v + 1); }}
         />
         <EditorModals />
-        <ConfirmDiscardModal
-          open={confirmBackOpen}
-          onClose={() => setConfirmBackOpen(false)}
-          onConfirm={() => {
-            setConfirmBackOpen(false);
-            handleBackToList();
-          }}
-        />
         <ConfirmModal state={confirm} onClose={() => setConfirm(null)} />
 
         {/* ★ D216+ 1-click floating action bar (자동 생성 직후 만족 강화) */}
@@ -1540,36 +1541,10 @@ function TopBarWithBack({ onBack, onPublishDone, hidden = false, sendSignal = 0 
   );
 }
 
-// ← 경고 모달: 편집 중 뒤로가기 시 확인
-function ConfirmDiscardModal({
-  open,
-  onClose,
-  onConfirm,
-}: {
-  open: boolean;
-  onClose: () => void;
-  onConfirm: () => void;
-}) {
-  return (
-    <ModalBase
-      open={open}
-      onClose={onClose}
-      title="편집을 취소하고 나가시겠어요?"
-      subtitle="저장하지 않은 모든 변경사항이 사라집니다."
-      size="sm"
-      footer={
-        <>
-          <ModalButton variant="secondary" onClick={onClose}>계속 편집</ModalButton>
-          <ModalButton variant="danger" onClick={onConfirm}>나가기</ModalButton>
-        </>
-      }
-    >
-      <div style={{ fontSize: 13, color: '#4b5563', lineHeight: 1.6 }}>
-        지금 나가면 이번 편집 세션의 변경 내용이 모두 사라지고 되돌릴 수 없어요.
-        계속 편집하려면 <strong>"계속 편집"</strong>을, 나가려면 <strong>"나가기"</strong>를 선택하세요.
-      </div>
-    </ModalBase>
-  );
+/** ★ 2026-10-14 발행된 룰렛·추첨이 있는 DM을 저장하면 경품 재고(dm_prizes)는 발행 때만 맞춰진다 — 확인창 한 줄(쓰기 경로 불변 · 실제 동기화 = 다음 축 [반영]) */
+function prizeNote(g: { pages: Array<{ sections: Array<{ type: string }> }> }): string {
+  const has = g.pages.some((p) => (p.sections || []).some((s) => s.type === 'roulette' || s.type === 'lucky_draw'));
+  return has ? '\n룰렛·추첨 경품 재고는 반영되지 않아요(발행 때만 맞춰요).' : '';
 }
 
 function EditorModals() {

@@ -733,6 +733,8 @@ ${catalog ? renderCatalogScript() : ''}${renderEffectScript(fx)}
   sendTrack(true);
 
   // ── 인터랙션 제출 (B 2026-06-14) — 룰렛 즉시추첨 / 폼 응모 / 투표. native dialog 0 (섹션 내 안내). ──
+  // ⛔ 표식(dm-participation:begin~end) 사이는 dm-participation-viewer.test.ts가 떼어 가짜 DOM으로 실제 클릭 실행한다 — 지우지 마라.
+  /* dm-participation:begin */
   function submitInteraction(sectionId, sectionType, data) {
     return fetch(TRACK_URL + '/' + CODE + '/event-response', {
       method: 'POST',
@@ -742,9 +744,16 @@ ${catalog ? renderCatalogScript() : ''}${renderEffectScript(fx)}
   }
   function wrapInfo(el) {
     var w = el.closest ? el.closest('.dm-section-wrap') : null;
-    return w ? { id: w.getAttribute('data-section-id'), type: w.getAttribute('data-section-type') } : null;
+    // ★ 2026-10-14 done = 회사가 적은 완료 문구(래퍼 data-success-text · 참여 8종 공통 · 미지정 = '')
+    return w ? { id: w.getAttribute('data-section-id'), type: w.getAttribute('data-section-type'), done: w.getAttribute('data-success-text') || '' } : null;
   }
-  function showMsg(box, text, ok) {
+  // 완료 분기 전용 — 회사 문구가 있으면 그 문구(append = 당첨·이미 참여처럼 기본 문구 뒤 둘째 줄), 없으면 기본 문구 그대로(바이트 불변).
+  //   줄바꿈 보존(pre-line)은 회사 문구를 실제로 쓴 때만 — 미지정 캠페인의 합성 문구·서버 오류 글자는 옛 모양 그대로(Codex 1R). 꽝·검증·오류·마감 분기는 부르지 않는다.
+  function showDone(box, info, text, ok, append) {
+    var has = !!(info && info.done);
+    showMsg(box, has ? (append ? text + '\\n' + info.done : info.done) : text, ok, has);
+  }
+  function showMsg(box, text, ok, pre) {
     var r = box.querySelector('[data-dm-result]');
     if (!r) return;
     r.style.display = 'block';
@@ -753,6 +762,7 @@ ${catalog ? renderCatalogScript() : ''}${renderEffectScript(fx)}
     r.style.fontWeight = '700';
     r.style.textAlign = 'center';
     r.style.color = ok ? '#059669' : '#dc2626';
+    if (pre) r.style.whiteSpace = 'pre-line';
     r.textContent = text;
   }
 
@@ -780,7 +790,8 @@ ${catalog ? renderCatalogScript() : ''}${renderEffectScript(fx)}
         var target = 360 * 4 + (360 - (idx * per + per / 2));
         if (wheel) { wheel.style.transition = 'transform 2.4s cubic-bezier(0.16,1,0.3,1)'; wheel.style.transform = 'rotate(' + target + 'deg)'; }
         setTimeout(function () {
-          if (spin && spin.won) showMsg(box, '🎉 ' + (spin.reward || spin.label || '') + ' 당첨!', true);
+          // ★ 2026-10-14 당첨에만 회사 완료 문구 둘째 줄(꽝·이미 참여 = 불변 · 꽝 손님에게 수령 안내는 거짓 약속)
+          if (spin && spin.won) showDone(box, info, '🎉 ' + (spin.reward || spin.label || '') + ' 당첨!', true, true);
           else if (res && res.already) showMsg(box, '이미 참여하셨습니다.', false);
           else showMsg(box, '아쉽지만 다음 기회에!', false);
         }, 2500);
@@ -803,10 +814,9 @@ ${catalog ? renderCatalogScript() : ''}${renderEffectScript(fx)}
       if (info.type === 'lucky_draw' && (!data.phone || !String(data.phone).trim())) { showMsg(box, '전화번호를 입력해주세요.', false); return; }
       if (info.type === 'email_capture' && (!data.email || !String(data.email).trim())) { showMsg(box, '이메일을 입력해주세요.', false); return; }
       btn.disabled = true; btn.style.opacity = '0.6';
-      // ★ 2026-07-22 (임은지) 편집기 "완료 문구"(success_text) — 폼에 실린 값을 성공 메시지로. 미지정=기본 문구.
-      var successText = box.getAttribute('data-success-text');
+      // ★ 2026-10-14 완료 문구 = 래퍼 마커(wrapInfo.done · 참여 8종 공통). 옛 0722 폼 속성 읽기는 지웠다.
       submitInteraction(info.id, info.type, data).then(function (res) {
-        if (res && res.success) showMsg(box, res.already ? '이미 참여하셨습니다.' : (successText || '참여가 완료되었습니다. 감사합니다!'), true);
+        if (res && res.success) showDone(box, info, res.already ? '이미 참여하셨습니다.' : '참여가 완료되었습니다. 감사합니다!', true, !!res.already);
         else { btn.disabled = false; btn.style.opacity = '1'; showMsg(box, (res && res.error) || '잠시 후 다시 시도해주세요.', false); }
       }).catch(function () { btn.disabled = false; btn.style.opacity = '1'; showMsg(box, '잠시 후 다시 시도해주세요.', false); });
     });
@@ -831,25 +841,25 @@ ${catalog ? renderCatalogScript() : ''}${renderEffectScript(fx)}
       });
       var submitBtn = box.querySelector('[data-dm-poll-submit]');
       if (submitBtn) submitBtn.addEventListener('click', function () {
-        if (box.getAttribute('data-voted') === '1') { showMsg(box, '이미 투표하셨습니다.', true); return; }
+        if (box.getAttribute('data-voted') === '1') { showDone(box, info, '이미 투표하셨습니다.', true, true); return; }
         var ids = Object.keys(selected);
         if (!ids.length) { showMsg(box, '항목을 선택해주세요.', false); return; }
         box.setAttribute('data-voted', '1');
         submitInteraction(info.id, info.type, { option_ids: ids }).then(function (res) {
           // ★ 2026-07-21 실패 응답(success:false)도 성공 처리하던 결함 정정 — 거부 시 재시도 가능하게 data-voted 해제.
           if (!res || res.success === false) { box.removeAttribute('data-voted'); showMsg(box, '잠시 후 다시 시도해주세요.', false); return; }
-          showMsg(box, res.already ? '이미 투표하셨습니다.' : '투표해주셔서 감사합니다!', true);
+          showDone(box, info, res.already ? '이미 투표하셨습니다.' : '투표해주셔서 감사합니다!', true, !!res.already);
         }).catch(function () { box.removeAttribute('data-voted'); showMsg(box, '잠시 후 다시 시도해주세요.', false); });
       });
     } else {
       Array.prototype.forEach.call(opts, function (opt) {
         opt.addEventListener('click', function () {
-          if (box.getAttribute('data-voted') === '1') { showMsg(box, '이미 투표하셨습니다.', true); return; }
+          if (box.getAttribute('data-voted') === '1') { showDone(box, info, '이미 투표하셨습니다.', true, true); return; }
           box.setAttribute('data-voted', '1');
           submitInteraction(info.id, info.type, { option_ids: [opt.getAttribute('data-option-id')] }).then(function (res) {
             // ★ 2026-07-21 실패 응답(success:false)도 성공 처리하던 결함 정정 — 거부 시 재시도 가능하게 data-voted 해제.
             if (!res || res.success === false) { box.removeAttribute('data-voted'); showMsg(box, '잠시 후 다시 시도해주세요.', false); return; }
-            showMsg(box, res.already ? '이미 투표하셨습니다.' : '투표해주셔서 감사합니다!', true);
+            showDone(box, info, res.already ? '이미 투표하셨습니다.' : '투표해주셔서 감사합니다!', true, !!res.already);
             opt.style.background = '#ede9fe'; opt.style.borderColor = '#7c3aed';
           }).catch(function () { box.removeAttribute('data-voted'); showMsg(box, '잠시 후 다시 시도해주세요.', false); });
         });
@@ -1045,7 +1055,7 @@ ${catalog ? renderCatalogScript() : ''}${renderEffectScript(fx)}
       if (missing) { showMsg(box, '필수 질문에 답해주세요.', false); return; }
       btn.disabled = true; btn.style.opacity = '0.6';
       submitInteraction(info.id, info.type, answers).then(function (res) {
-        if (res && res.success) showMsg(box, res.already ? '이미 참여하셨습니다.' : '설문이 제출되었습니다. 감사합니다!', true);
+        if (res && res.success) showDone(box, info, res.already ? '이미 참여하셨습니다.' : '설문이 제출되었습니다. 감사합니다!', true, !!res.already);
         else { btn.disabled = false; btn.style.opacity = '1'; showMsg(box, (res && res.error) || '잠시 후 다시 시도해주세요.', false); }
       }).catch(function () { btn.disabled = false; btn.style.opacity = '1'; showMsg(box, '잠시 후 다시 시도해주세요.', false); });
     });
@@ -1060,11 +1070,12 @@ ${catalog ? renderCatalogScript() : ''}${renderEffectScript(fx)}
       if (btn.disabled) return;
       btn.disabled = true; btn.style.opacity = '0.6';
       submitInteraction(info.id, info.type, {}).then(function (res) {
-        if (res && res.success) showMsg(box, res.already ? '이미 참여하셨습니다.' : (btn.getAttribute('data-claim-success') || '참여가 완료되었습니다!'), true);
+        if (res && res.success) showDone(box, info, res.already ? '이미 참여하셨습니다.' : (btn.getAttribute('data-claim-success') || '참여가 완료되었습니다!'), true, !!res.already);
         else { btn.disabled = false; btn.style.opacity = '1'; showMsg(box, (res && res.error) || '잠시 후 다시 시도해주세요.', false); }
       }).catch(function () { btn.disabled = false; btn.style.opacity = '1'; showMsg(box, '잠시 후 다시 시도해주세요.', false); });
     });
   });
+  /* dm-participation:end */
 })();
 ${hasCountdown ? COUNTDOWN_SCRIPT : ''}
 </script>

@@ -525,6 +525,7 @@ cd /var/lib/bito-agent-control/<AGENT>/package-v1.0.20 && bash install.sh --conf
 **★0820 접두 `V` 확정(Harold) — 1호 발급 = `V0001`(api-rabd-api-01, 수동 UPDATE).** 운영 DB 접속 = `.65` 네이티브 PG(`psql "postgres://…127.0.0.1:5432/bito_gateway"` — compose의 bito-postgres 컨테이너는 로컬 개발용, 운영엔 없다 0820 실측).
 
 **★0820 첫 적재 실측 성공** — `V0001` 행 2개(8/19·8/20 각 `K·OkCnt=1`) `SysId=65`로 적재, 소급 3일(lookback) 동작 확인. 개통 과정에서 걷어낸 막힘 둘(다음 업체 개통 때는 없다):
+- **★1014 재발·복구** — .62 재부팅(10-07 22:07) 뒤 SysId 65 적재만 멈춤(마지막 10-07 22:05 · 중계 54·57·58 정상). 원인 = 0707 `pay-ingest-fw.service`(.65 없음)가 부팅 때 체인 위에 자기 묶음을 넣어 그 DROP 이 아래(after.rules) .65 허용을 가림. 처방 = 서비스가 `-F` 뒤 허용 5(+.65)·DROP 을 쓰게 개정 → 13:18 재개 · 리포터 소급(운영 10일 · staleRetry)이 10-08~14 를 스스로 채움(수동 백필 0 · 게이트웨이 재기동 0). 기록 = SERVERS .62 ★1014 · OPS §1-3 · [B-1014-1](../status/BUGS.md).
 - **방화벽** — `.62` `DOCKER-USER` 체인이 23388을 소스 4개(139.150.81.213·.54·.57·.58)만 허용 + 전부 DROP이라 `.65`가 timeout으로 막혔다(문서의 "0815 계정 신설"은 DB 계정 축이고 방화벽 허용은 별개 축이었다). `iptables -I DOCKER-USER 6 -p tcp -s 58.227.193.65 -m conntrack --ctorigdstport 23388 -j ACCEPT`로 DROP 앞에 삽입. **영속화 완료(0820)** — 기존 4규칙도 휘발 상태였음을 실측(4개 영속 후보지 전부 빈 것 확인) → `/etc/ufw/after.rules`에 전 규칙 블록(`*filter`+`:DOCKER-USER - [0:0]`+`COMMIT`) 등재, `ufw reload` 후 중복 없이 한 벌 적용 실측
 - **비밀번호** — `GW_PAY_STATS_DSN`에 root 비번이 들어 있었고 `sales@.65` 계정 비번과 달라 1045. `sales@.65`를 그 값으로 ALTER해 개통(호스트별 행이라 중계 3대 무영향). ⚠**전용 새 비번 로테이션 = 운영 잔여**(root 비번이 계정·env 파일 두 곳에 퍼진 상태 — ①새 비번 ALTER ②DSN 교체 ③`systemctl restart bito-gateway`)
 

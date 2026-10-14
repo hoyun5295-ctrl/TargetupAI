@@ -635,6 +635,10 @@ describe('상품 슬라이드 제목 크기·색 — 세 구도 전부 소비', 
 describe('제거된 죽은 컨트롤 — 되살리면 계약이 깨진다', () => {
   const EDITOR_PATH: Record<string, string> = {
     coupon: '../frontend/src/components/dm/panels/editors/CouponEditor.tsx',
+    // ★ 2026-10-14 원장(DM_PROP_EXEMPT kind=removed)에 0721 제거분 4건을 올리며 경로 등재
+    poll: '../frontend/src/components/dm/panels/editors/PollEditor.tsx',
+    map_store_locator: '../frontend/src/components/dm/panels/editors/MapStoreLocatorEditor.tsx',
+    product_carousel: '../frontend/src/components/dm/panels/editors/ProductCarouselEditor.tsx',
   };
   for (const { section, prop, reason } of DM_REMOVED_DEAD_CONTROLS) {
     it(`${section}.${prop} — 편집기가 다시 노출하지 않는다 (${reason})`, () => {
@@ -642,7 +646,7 @@ describe('제거된 죽은 컨트롤 — 되살리면 계약이 깨진다', () =
       expect(path, `${section} 편집기 경로가 표에 없다 — 제거 항목을 늘렸으면 경로도 함께 등재한다`).toBeTruthy();
       const src = readFileSync(resolve(process.cwd(), path), 'utf8');
       // 주석의 "다시 넣지 말 것" 설명은 허용하고, 실제 배선(onUpdate·value 바인딩)만 잡는다.
-      const wired = src.split('\n').filter((l) => l.includes(prop) && !l.trimStart().startsWith('*') && !l.trimStart().startsWith('//'));
+      const wired = src.split('\n').filter((l) => l.includes(prop) && !l.trimStart().startsWith('*') && !l.trimStart().startsWith('//') && !l.trimStart().startsWith('{/*'));
       expect(wired, `${prop}가 편집기에 다시 배선됐다: ${wired.join(' | ')}`).toEqual([]);
     });
 

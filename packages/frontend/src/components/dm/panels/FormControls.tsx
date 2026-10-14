@@ -111,6 +111,52 @@ export function TextArea({
   );
 }
 
+// ────────────── 줄 목록(한 줄에 하나) ──────────────
+
+/** 저장값 = 빈 줄만 뺀 줄 목록(줄 안 공백 보존). 줄 목록 칸의 쓰기는 이 한 곳만 거친다. */
+export function toLines(draft: string): string[] {
+  return draft.split('\n').filter((s) => s.trim().length > 0);
+}
+
+/**
+ * ★ 2026-10-14 (임은지 접수 1014 ①) "한 줄에 하나" 칸의 유일한 구현.
+ * 옛 방식(값을 join('\n')으로 보여 주고 onChange마다 split·trim·filter로 저장)은 Enter를 치는 순간 빈 줄이 걸러져
+ * 줄바꿈이 안 됐고, 글자 사이 공백도 trim에 지워져 "매우 만족"을 칠 수 없었다.
+ * 여기서는 **초안 문자열을 자기 state로** 들고, 저장값(string[])은 toLines 한 곳에서만 만든다.
+ * 바깥 값이 초안의 정리 결과와 다를 때(다른 문항으로 바뀜·되돌리기)만 초안을 바깥 값으로 교체한다.
+ * 게이트 = backend dm-editor-coverage.test.ts(편집기 onChange 안 split 0건).
+ */
+export function LineListInput({
+  value, onChange, placeholder, rows = 3, hint,
+}: {
+  value: string[] | undefined;
+  onChange: (lines: string[]) => void;
+  placeholder?: string;
+  rows?: number;
+  hint?: string;
+}) {
+  const outside = (value || []).join('\n');
+  const [draft, setDraft] = useState(outside);
+  const [seen, setSeen] = useState(outside);
+  if (outside !== seen) {
+    // 바깥 값이 바뀌었다 — 내 초안의 정리 결과와 같으면(내가 방금 쓴 것) 초안을 지키고, 다르면 바깥 값으로
+    setSeen(outside);
+    if (toLines(draft).join('\n') !== outside) setDraft(outside);
+  }
+  return (
+    <>
+      <textarea
+        value={draft}
+        onChange={(e) => { setDraft(e.target.value); onChange(toLines(e.target.value)); }}
+        placeholder={placeholder}
+        rows={rows}
+        style={{ ...inputStyle, height: 'auto', minHeight: rows * 18 + 16, padding: 8, resize: 'vertical', lineHeight: 1.5 }}
+      />
+      {hint && <div style={{ fontSize: 10, color: 'var(--dm-neutral-500)', marginTop: 3 }}>{hint}</div>}
+    </>
+  );
+}
+
 // ────────────── Select ──────────────
 
 export function Select<T extends string>({

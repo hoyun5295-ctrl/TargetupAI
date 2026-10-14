@@ -7,7 +7,7 @@
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Palette, Sparkles, BookOpen, Upload, Wand2, FolderOpen, ChevronDown, ChevronRight, History, FlaskConical, ShieldCheck, Plus, X, Loader2, Image as ImageIcon, Link2, Trash2 } from 'lucide-react';
-import { useDmBuilderStore, selectAllSectionsFlat } from '../../stores/dmBuilderStore';
+import { useDmBuilderStore, selectAllSectionsFlat, selectAutosaveBlocked, selectLiveGap } from '../../stores/dmBuilderStore';
 import SectionPropsEditor from '../dm/panels/SectionPropsEditor';
 import CatalogPageModal, { CATALOG_BLOCKS, type CatalogTemplateKey } from '../dm/build/CatalogPageModal';
 import StudioInsertModal from '../dm/build/StudioInsertModal';
@@ -70,10 +70,18 @@ export default function DmEditScreen({ onBack, onSend, pair, banner }: {
     st.selectSection(id);
   }, []);
 
-  const save: { tone: SaveTone; text: string; onSaveNow?: () => void } = s.isSaving
+  // ★ 2026-10-14 (⑧ 1단계) 저장 안내는 "자동 저장이 막히는가"(발행 · 중지 포함)를, 문구의 뜻은 "받는 사람 화면과 다른가"(중지 아님)를 본다.
+  const autosaveBlocked = selectAutosaveBlocked(s);
+  const liveGap = selectLiveGap(s);
+  const save: { tone: SaveTone; text: string; onSaveNow?: () => void; saveLabel?: string } = s.isSaving
     ? { tone: 'saving', text: '저장하는 중' }
-    : s.isPublished && s.isDirty
-      ? { tone: 'manual', text: '보낸 DM이에요 · 고친 내용은 저장해야 받는 사람에게 반영돼요', onSaveNow: () => { void s.save(); } }
+    : autosaveBlocked && s.isDirty
+      ? {
+        tone: 'manual',
+        text: liveGap ? '보낸 DM · 받는 사람은 아직 고치기 전 화면이에요' : '중지된 DM · 고친 내용은 저장해야 남아요',
+        onSaveNow: () => { void s.save(); },
+        saveLabel: liveGap ? '반영' : '저장',
+      }
       : s.isDirty ? { tone: 'dirty', text: '고치는 중 · 곧 자동 저장돼요' }
         : { tone: 'saved', text: `${s.isPublished ? '저장됨' : '자동 저장됨'} · ${relTime(s.lastSavedAt) || '방금'}` };
 
@@ -138,10 +146,20 @@ export default function DmEditScreen({ onBack, onSend, pair, banner }: {
       emptyText={!s.dmId ? '블록을 넣으면 여기에 받는 사람 화면이 보여요' : null}
       selectedId={s.selectedSectionId}
       onTap={(id) => focus(id)}
-      phoneTop={isSlides ? (
-        <div className="flex items-center justify-between gap-2">
+      phoneTop={(isSlides || liveGap) ? (
+        <div className="space-y-2">
+          {/* ★ 2026-10-14 (⑧ 1단계) 발행본을 고치는 중 — 이 미리보기는 수정본이고 받는 사람은 아직 옛 화면 */}
+          {liveGap && (
+            <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-1.5 text-[11.5px] font-medium text-amber-900">
+              이 휴대폰은 수정본이에요 · 받는 사람에게는 아직 안 보여요
+            </div>
+          )}
+          {isSlides && (
+          <div className="flex items-center justify-between gap-2">
           <span className="text-[12px] text-slate-500">넘김 효과</span>
           <Segmented value={s.pageEffect} onChange={(v) => s.setPageEffect(v)} options={[{ value: 'slide', label: '밀어내기' }, { value: 'flip', label: '책장 넘김' }, { value: 'fade', label: '페이드' }]} />
+          </div>
+          )}
         </div>
       ) : undefined}
       blockTools={selected && !isCatalog ? {
@@ -390,7 +408,11 @@ function DmGlobalPanel({ onValidate }: { onValidate: () => void }) {
     setBusy('snap');
     try {
       const st = useDmBuilderStore.getState();
-      if (st.isDirty) await st.save({ silent: true });
+      if (st.isDirty) {
+        // ★ 2026-10-14 보낸 DM은 자동 저장이 막혀 있어(0714 라이브 보호) 옛 모습이 "남겼어요"로 기록되던 오기록 차단 — 저장됐을 때만 남긴다
+        const saved = await st.save({ silent: true });
+        if (!saved) { toast.error('고친 내용을 먼저 저장해야 지금 모습을 남길 수 있어요.'); return; }
+      }
       const r = await fetch(`/api/dm/${dmId}/versions`, { method: 'POST', headers: authJson(), body: JSON.stringify({ label: `${new Date().toLocaleString('ko-KR', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })} 모습`, note: null }) });
       if (!r.ok) throw new Error((await r.json().catch(() => ({})))?.error || '남기지 못했어요.');
       toast.success('지금 모습을 남겼어요.');

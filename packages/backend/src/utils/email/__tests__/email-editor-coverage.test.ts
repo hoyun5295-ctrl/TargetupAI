@@ -19,6 +19,8 @@ import {
   EMAIL_HIDDEN_EDITOR_FIELDS, EMAIL_ITEM_PROPS,
 } from '../email-property-contract';
 import { EMAIL_BLOCK_WHITELIST } from '../email-blocks';
+// ★ 2026-10-14 키 뽑기 = DM 커버리지와 같은 구문 트리 추출기(옛 정규식은 onUpdate({a, b})의 둘째 키부터 흘렸다)
+import { extractEditorKeys } from '../../dm/__tests__/editor-keys';
 
 const EDITOR_DIR = join(__dirname, '../../../../../frontend/src/components/dm/panels/editors');
 const EMAIL_EDITOR_TSX = join(__dirname, '../../../../../frontend/src/components/email/EmailVisualEditor.tsx');
@@ -35,12 +37,9 @@ function renderBody(fnName: string): string {
   return nextIdx < 0 ? rest : rest.slice(0, nextIdx);
 }
 
-/** 공용 편집기가 최상위로 패치하는 속성명 전량(`onUpdate({ x: …`). */
+/** 공용 편집기가 최상위로 패치하는 속성명 전량(구문 트리 · 다중 키·축약 포함). */
 function editorProps(file: string): string[] {
-  const src = readFileSync(join(EDITOR_DIR, file), 'utf8');
-  const out = new Set<string>();
-  for (const m of src.matchAll(/onUpdate\(\{\s*([A-Za-z_][A-Za-z0-9_]*)\s*:/g)) out.add(m[1]);
-  return [...out].sort();
+  return extractEditorKeys(readFileSync(join(EDITOR_DIR, file), 'utf8'), file).top;
 }
 
 const exemptKey = (section: string, prop: string) => `${section}.${prop}`;

@@ -184,6 +184,13 @@
 > 검증 = FE · BE tsc 0 · vitest 595파일 8,371건 · 렌더 108곳 · Codex 적대 1R approve(gpt-6-astra · 지적 0 · 지정 파일 66개 + 분리 전 원본을 읽고 대조)
 > 다음 = 배포(백엔드 reload + 프론트 build:safe · AI 영업 C12 와 한 번에) → 실측(목록 숫자 카드 값 · 상세 창 저장 · 7일 부여 1회)
 
+<a id="c29"></a>
+
+### C29 · ★1014 모바일 DM·이메일 편집기 「결함이 반복되지 않는 구조」 — 코드 완료 · Codex · 배포 대기
+> 호출어 **"DM 편집기 / 완료 문구 / 커버리지 테스트"** → 상설 = [FEATURE-DM-EMAIL-BUILDER.md](../docs/FEATURE-DM-EMAIL-BUILDER.md)(불변 §2 12개 · 구조 §3 · 테스트 §4) · 시점 = [설계서 2026-10-14](../docs/2026-10-14-dm-email-structure-design.md)(뿌리 §1 · 결정 §2 · 영향표 §3 · 바뀌는 출력 §5 · 다음 축 §6) · 접수 = BUGS B-1014-2 · 범위 밖 = B-1014-3
+> ⛔ 편집기 새 컨트롤 = 등재 절차 없이 커버리지 테스트가 자동으로 밟는다(안 읽히면 원장에 사유 의무 · "아직" 금지) / 완료 문구는 `success_text` 하나 · 래퍼 마커 하나 · `wrapInfo().done` 하나 / 줄 목록 칸은 `LineListInput` 하나 / 발행본 확인창 2곳은 기존 `save()` 외 쓰기 0 · 같은 세션일 때만 진행 / 미지정 출력 바이트 불변 / DDL 0
+> 잔여 = Codex 7R approve 로 종결 → tp-push → 배포(pull · frontend build:safe · pm2 restart) → 실측 1건(B-1014-2 시나리오) → 다음 축(B1 발행본 편집 본체 · B2 서버 뜻 7건 · C Harold 승인 항목)은 착수 판단 대기
+
 <a id="c24"></a>
 
 <a id="c28"></a>

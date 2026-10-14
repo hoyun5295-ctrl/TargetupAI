@@ -29,6 +29,9 @@ export interface ConfirmState {
   confirmLabel?: string;
   cancelLabel?: string;
   onConfirm: () => void | Promise<void>;
+  /** ★ 2026-10-14 둘째 동작(선택) — "반영하고 테스트 / 수정 전 화면으로 테스트"처럼 갈림길이 둘일 때. 미지정 = 종전 두 버튼 그대로. */
+  altLabel?: string;
+  onAlt?: () => void | Promise<void>;
 }
 
 interface Props {
@@ -99,18 +102,19 @@ export default function ConfirmModal({ state, onClose }: Props) {
 
   useEffect(() => {
     if (!open) return;
-    const onEsc = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
+    // ★ 2026-10-14 실행 중(running)엔 닫지 않는다 — 저장이 끝나기 전에 창을 닫고 다른 화면으로 가면 완료 콜백이 엉뚱한 상태에 적용된다(Codex 1R)
+    const onEsc = (e: KeyboardEvent) => { if (e.key === 'Escape' && !running) onClose(); };
     window.addEventListener('keydown', onEsc);
     setTimeout(() => confirmBtnRef.current?.focus(), 50);
     return () => window.removeEventListener('keydown', onEsc);
-  }, [open, onClose]);
+  }, [open, onClose, running]);
 
   if (!open || !state) return null;
 
-  const handleConfirm = async () => {
+  const run = async (fn: () => void | Promise<void>) => {
     setRunning(true);
     try {
-      await state.onConfirm();
+      await fn();
       onClose();
     } catch {
       // 호출자가 에러 핸들링 의무 — modal은 닫지 않음
@@ -118,6 +122,7 @@ export default function ConfirmModal({ state, onClose }: Props) {
       setRunning(false);
     }
   };
+  const handleConfirm = () => run(state.onConfirm);
 
   return createPortal(
     // ★ 2026-06-25: 확인/차단 모달 통일 티어 z-[2000] — DM ModalBase(1000) 위, 시스템 모달(9997+) 아래.
@@ -140,8 +145,9 @@ export default function ConfirmModal({ state, onClose }: Props) {
             <h3 className={light ? "text-base font-semibold text-slate-900" : "text-base font-semibold text-white"}>{state.title}</h3>
           </div>
           <button
-            onClick={onClose}
-            className={light ? "p-1.5 hover:bg-slate-100 rounded-lg transition-colors" : "p-1.5 hover:bg-white/10 rounded-lg transition-colors"}
+            onClick={() => { if (!running) onClose(); }}
+            disabled={running}
+            className={light ? "p-1.5 hover:bg-slate-100 rounded-lg transition-colors disabled:opacity-40" : "p-1.5 hover:bg-white/10 rounded-lg transition-colors disabled:opacity-40"}
             aria-label="닫기"
           >
             <X className={light ? "w-4 h-4 text-slate-500" : "w-4 h-4 text-white/50"} />
@@ -166,6 +172,15 @@ export default function ConfirmModal({ state, onClose }: Props) {
           >
             {state.cancelLabel || '취소'}
           </button>
+          {state.onAlt && (
+            <button
+              onClick={() => { void run(state.onAlt!); }}
+              disabled={running}
+              className={light ? "flex-1 px-4 py-2 bg-white border border-slate-200 hover:bg-slate-50 disabled:opacity-50 text-slate-700 rounded-lg text-sm font-medium transition-colors" : "flex-1 px-4 py-2 bg-white/5 hover:bg-white/10 disabled:opacity-50 text-white/80 rounded-lg text-sm font-medium transition-colors"}
+            >
+              {state.altLabel || '다른 방법'}
+            </button>
+          )}
           <button
             ref={confirmBtnRef}
             onClick={handleConfirm}

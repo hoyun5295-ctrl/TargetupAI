@@ -58,6 +58,12 @@ export const SECTION_TYPES: readonly SectionType[] = [
   'youtube_embed', 'instagram_embed', 'map_store_locator', 'reviews',
 ] as const;
 
+/** ★ 2026-10-14 참여 8종(완료 문구 공용 칸 대상) — 백엔드 registry PARTICIPATION_TYPES 미러(테스트가 같음을 고정). */
+export const PARTICIPATION_TYPES: readonly SectionType[] = [
+  'poll', 'survey', 'email_capture', 'click_rewards',
+  'lucky_draw', 'roulette', 'instant_coupon', 'limited_quantity',
+] as const;
+
 // ────────────── Props 타입 ──────────────
 
 export type HeaderProps = {
@@ -217,7 +223,7 @@ export type FooterProps = {
 
 export type ProductCarouselItem = { id?: string; image_url: string; name: string; price: number; discount_price?: number; discount_rate?: number; link_url?: string; };
 // image_fit: 채우기(cover=꽉 차게·기존 기본) / 맞추기(contain=전체 보임·잘림 X). image_focus: cover일 때 보일 초점(정렬). 미지정=cover/center(회귀 0).
-export type ProductCarouselProps = { title?: string; products: ProductCarouselItem[]; show_indicator?: boolean; auto_slide?: boolean; slide_interval_ms?: number; image_fit?: 'cover' | 'contain'; image_focus?: 'top' | 'center' | 'bottom'; background_color?: string; caption_bg_color?: string; image_height?: 'sm' | 'md' | 'lg'; /* ★ 2026-08-26 제목 크기·색(임은지) — 백엔드 dm-section-registry 미러 */ title_size?: 'sm' | 'md' | 'lg'; title_color?: string; };
+export type ProductCarouselProps = { title?: string; products: ProductCarouselItem[]; show_indicator?: boolean; image_fit?: 'cover' | 'contain'; image_focus?: 'top' | 'center' | 'bottom'; background_color?: string; caption_bg_color?: string; image_height?: 'sm' | 'md' | 'lg'; /* ★ 2026-08-26 제목 크기·색(임은지) — 백엔드 dm-section-registry 미러 */ title_size?: 'sm' | 'md' | 'lg'; title_color?: string; };
 
 export type GalleryImage = { url: string; caption?: string; link_url?: string; };
 export type GalleryProps = { title?: string; images: GalleryImage[]; layout: 'grid_2x2' | 'grid_3x3' | 'list_1xN' | 'masonry'; enable_zoom?: boolean; enable_fullscreen?: boolean; full_bleed?: boolean; };
@@ -234,33 +240,34 @@ export type TabCardItem = { label: string; content_type: 'text' | 'image' | 'pro
 export type TabCardsProps = { tabs: TabCardItem[]; default_tab_index?: number; tab_active_bg?: string; tab_active_text_color?: string; };
 
 export type PollOption = { id: string; label: string; };
-export type PollProps = { question: string; options: PollOption[]; allow_multiple?: boolean; show_result_after_vote?: boolean; one_vote_per_user: boolean; };
+// ★ 2026-10-14 success_text = 완료 문구(참여 8종 공용 칸 · 백엔드 미러)
+export type PollProps = { question: string; options: PollOption[]; allow_multiple?: boolean; one_vote_per_user: boolean; success_text?: string; };
 
 export type SurveyQuestion = { id: string; type: 'single' | 'multiple' | 'text' | 'rating'; question: string; options?: string[]; required?: boolean; };
-export type SurveyProps = { title?: string; questions: SurveyQuestion[]; show_progress?: boolean; completion_reward_text?: string; };
+export type SurveyProps = { title?: string; questions: SurveyQuestion[]; show_progress?: boolean; completion_reward_text?: string; success_text?: string; };
 
 export type EmailCaptureProps = { headline: string; description?: string; reward_description?: string; consent_text: string; consent_required: boolean; success_text?: string; legal_notice?: string; };
 
-export type ClickRewardsProps = { reward_type: 'like' | 'share' | 'scroll'; target_count: number; reward_description: string; show_progress: boolean; };
+export type ClickRewardsProps = { reward_type: 'like' | 'share' | 'scroll'; target_count: number; reward_description: string; show_progress: boolean; success_text?: string; };
 
 export type LuckyDrawFormField = { name: 'name' | 'phone' | 'email'; required: boolean; };
 export type LuckyDrawPrize = { rank: number; name: string; count: number; };
-export type LuckyDrawProps = { title: string; description?: string; form_fields: LuckyDrawFormField[]; draw_at: string; result_announce_url?: string; consent_text: string; prizes?: LuckyDrawPrize[]; };
+export type LuckyDrawProps = { title: string; description?: string; form_fields: LuckyDrawFormField[]; draw_at: string; result_announce_url?: string; consent_text: string; prizes?: LuckyDrawPrize[]; success_text?: string; };
 
 export type RouletteSegment = { id: string; label: string; probability: number; reward_description?: string; prize_count?: number; };
-export type RouletteProps = { segments: RouletteSegment[]; one_spin_per_user: boolean; spin_animation_ms?: number; };
+export type RouletteProps = { segments: RouletteSegment[]; one_spin_per_user: boolean; spin_animation_ms?: number; success_text?: string; };
 
 // ★ 2026-07-23 (임은지) button_bg_color/button_text_color = '쿠폰 받기' 버튼 배경/글씨색(미지정=primary/#fff·회귀 0). backend 미러.
-export type InstantCouponProps = { coupon_label: string; discount_description: string; expires_at?: string; conditions?: string; usage_instructions?: string; button_bg_color?: string; button_text_color?: string; };
+export type InstantCouponProps = { coupon_label: string; discount_description: string; expires_at?: string; conditions?: string; usage_instructions?: string; button_bg_color?: string; button_text_color?: string; success_text?: string; };
 
-export type LimitedQuantityProps = { title: string; description?: string; total_quantity: number; current_remaining?: number; signup_url?: string; };
+export type LimitedQuantityProps = { title: string; description?: string; total_quantity: number; current_remaining?: number; signup_url?: string; success_text?: string; };
 
 export type YoutubeEmbedProps = { video_url: string; auto_play?: boolean; thumbnail_url?: string; };
 
 export type InstagramEmbedProps = { post_url: string; };
 
 export type MapStore = { id: string; name: string; address: string; lat: number; lng: number; phone?: string; hours?: string; };
-export type MapStoreLocatorProps = { stores: MapStore[]; enable_user_location?: boolean; default_zoom?: number; };
+export type MapStoreLocatorProps = { stores: MapStore[]; default_zoom?: number; };
 
 export type ReviewItem = { rating: number; author: string; body: string; date?: string; };
 export type ReviewsProps = { title?: string; reviews: ReviewItem[]; show_average_rating?: boolean; show_more_link?: string; star_color?: string; };
@@ -345,7 +352,6 @@ export const SECTION_DEFAULTS: { [K in SectionType]: SectionPropsMap[K] } = {
   header: {
     variant: 'logo',
     brand_name: '',
-    align: 'center',
   },
   hero: {
     headline: '',
@@ -389,11 +395,11 @@ export const SECTION_DEFAULTS: { [K in SectionType]: SectionPropsMap[K] } = {
     show_unsubscribe_link: true,
   },
   // D216+ 신규 16
-  product_carousel: { products: [], show_indicator: true, auto_slide: false, slide_interval_ms: 4000 },
+  product_carousel: { products: [], show_indicator: true },
   gallery: { images: [], layout: 'grid_2x2', enable_zoom: true, enable_fullscreen: false },
   slideshow: { slides: [], interval_ms: 4000, slide_ratio: '16:9', show_pause: true, show_indicator: true },
   tab_cards: { tabs: [{ label: '탭 1', content_type: 'text', content: '[직접 작성해주세요]' }], default_tab_index: 0 },
-  poll: { question: '[직접 작성해주세요]', options: [{ id: '1', label: '옵션 1' }, { id: '2', label: '옵션 2' }], one_vote_per_user: true, show_result_after_vote: true, allow_multiple: false },
+  poll: { question: '[직접 작성해주세요]', options: [{ id: '1', label: '옵션 1' }, { id: '2', label: '옵션 2' }], one_vote_per_user: true, allow_multiple: false },
   survey: { questions: [], show_progress: true },
   email_capture: { headline: '[직접 작성해주세요]', consent_text: '개인정보 수집 및 마케팅 정보 수신 동의', consent_required: true },
   click_rewards: { reward_type: 'like', target_count: 10, reward_description: '[직접 작성해주세요]', show_progress: true },
@@ -403,7 +409,7 @@ export const SECTION_DEFAULTS: { [K in SectionType]: SectionPropsMap[K] } = {
   limited_quantity: { title: '[직접 작성해주세요]', total_quantity: 100 },
   youtube_embed: { video_url: '', auto_play: false },
   instagram_embed: { post_url: '' },
-  map_store_locator: { stores: [], enable_user_location: false, default_zoom: 14 },
+  map_store_locator: { stores: [], default_zoom: 14 },
   reviews: { reviews: [], show_average_rating: true },
 };
 
@@ -554,7 +560,7 @@ export const SECTION_META: Record<SectionType, SectionMeta> = {
   gallery: { label: '갤러리', description: '다중 사진 그리드 (2×2 / 3×3 / 1×N)', icon: '🖼️', maxCount: 5, defaultStyleVariant: 'default', supportsStyleVariants: ['default', 'minimal', 'editorial'], aiAware: true, category: 'hero_visual' },
   slideshow: { label: '자동 슬라이드쇼', description: '3~5초 자동 전환 + 일시정지', icon: '🎞️', maxCount: 2, defaultStyleVariant: 'default', supportsStyleVariants: ['default'], aiAware: true, category: 'hero_visual' },
   tab_cards: { label: '탭 카드', description: '카테고리별 탭 분기 콘텐츠', icon: '📑', maxCount: 3, defaultStyleVariant: 'default', supportsStyleVariants: ['default'], aiAware: false, category: 'commerce' },
-  poll: { label: '실시간 투표', description: '질문 + 옵션 + 실시간 결과 %', icon: '📊', maxCount: 2, defaultStyleVariant: 'default', supportsStyleVariants: ['default'], aiAware: true, category: 'interactive', beta: true },
+  poll: { label: '실시간 투표', description: '질문 + 선택지 · 1인 1회', icon: '📊', maxCount: 2, defaultStyleVariant: 'default', supportsStyleVariants: ['default'], aiAware: true, category: 'interactive', beta: true },
   survey: { label: '설문', description: '다중 질문 + 진행률 + 완료 보상', icon: '📝', maxCount: 1, defaultStyleVariant: 'default', supportsStyleVariants: ['default'], aiAware: true, category: 'interactive', beta: true },
   email_capture: { label: '이메일 수집', description: '이메일 입력 + 동의 + 즉시 쿠폰 발급', icon: '✉️', maxCount: 1, defaultStyleVariant: 'default', supportsStyleVariants: ['default'], aiAware: true, category: 'interactive' },
   click_rewards: { label: '참여 보상', description: '좋아요 / 공유 / 스크롤 적립', icon: '⭐', maxCount: 1, defaultStyleVariant: 'default', supportsStyleVariants: ['default'], aiAware: false, category: 'interactive', beta: true },

@@ -25,7 +25,7 @@ export default function EditShell({
 }: {
   title: string;
   onTitle: (v: string) => void;
-  save: { tone: SaveTone; text: string; onSaveNow?: () => void };
+  save: { tone: SaveTone; text: string; onSaveNow?: () => void; saveLabel?: string };
   channel: 'dm' | 'email';
   /** 같은 재료로 만든 다른 채널(있으면 머리 전환) */
   pair?: { onSwitch: () => void } | null;
@@ -72,7 +72,7 @@ export default function EditShell({
             <div className={`text-[11.5px] mt-0.5 inline-flex items-center gap-1 ${MK_HEAD_SAVE_TONE[save.tone]}`}>
               {save.tone === 'saved' ? <Check className="w-3 h-3" /> : save.tone === 'saving' ? <Loader2 className="w-3 h-3 animate-spin" /> : save.tone === 'error' || save.tone === 'manual' ? <AlertCircle className="w-3 h-3" /> : null}
               {save.text}
-              {save.onSaveNow && <button type="button" onClick={save.onSaveNow} className="ml-1.5 font-bold text-white underline underline-offset-2 decoration-white/40 hover:decoration-white">저장</button>}
+              {save.onSaveNow && <button type="button" onClick={save.onSaveNow} className="ml-1.5 font-bold text-white underline underline-offset-2 decoration-white/40 hover:decoration-white">{save.saveLabel || '저장'}</button>}
             </div>
           </div>
 

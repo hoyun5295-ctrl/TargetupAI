@@ -17,6 +17,8 @@
  *  - style_variant는 data 속성으로 전달 (CSS 측에서 상세 매핑)
  */
 import type { Section, SectionType, HeaderProps, HeroProps, CouponProps, CountdownProps, TextCardProps, CtaProps, VideoProps, StoreInfoProps, SnsProps, PromoCodeProps, FooterProps } from './dm-section-registry';
+// ★ 2026-10-14 참여 8종 목록(완료 문구 마커 대상) — registry 소유
+import { PARTICIPATION_TYPES } from './dm-section-registry';
 import type { DmBrandKit } from './dm-tokens';
 import { publicImageUrl, youtubeEmbedUrl } from './dm-viewer-utils';
 import { dmIcon, dmEventCard } from './dm-render-primitives';
@@ -1201,9 +1203,8 @@ function renderEmailCapture(p: any): string {
     <button data-dm-submit class="dm-cta dm-cta-primary" style="width:100%">${escapeHtml(p.reward_description ? `참여하고 ${p.reward_description}` : '참여하기')}</button>
     ${p.legal_notice ? `<div style="font-size:var(--dm-fs-tiny);color:var(--dm-neutral-500);margin-top:var(--dm-sp-2);line-height:1.5">${escapeHtml(p.legal_notice)}</div>` : ''}
     <div data-dm-result style="display:none"></div>`;
-  // ★ 2026-07-22 (임은지) 완료 문구(success_text) — 지정 시 폼에 data-success-text로 실어 뷰어 성공 메시지가 이 값을 쓴다(미지정=기본 문구·회귀 0).
-  const successAttr = p.success_text ? ` data-success-text="${escapeHtml(p.success_text)}"` : '';
-  return `<div class="dm-section dm-email-capture" data-dm-form${successAttr}>${dmEventCard({ accentVar: '--dm-primary', icon: 'mail', overline: 'JOIN US', body })}</div>`;
+  // ★ 2026-10-14 완료 문구(success_text)는 renderSection 래퍼가 참여 8종 공통으로 싣는다(doneTextOf) — 옛 0722 폼 안쪽 속성은 지웠다.
+  return `<div class="dm-section dm-email-capture" data-dm-form>${dmEventCard({ accentVar: '--dm-primary', icon: 'mail', overline: 'JOIN US', body })}</div>`;
 }
 
 function renderClickRewards(p: any): string {
@@ -1390,6 +1391,19 @@ function renderReviewsQuote(p: any, reviews: any[]): string {
 }
 
 /** 단일 섹션 렌더링 */
+/**
+ * ★ 2026-10-14 (임은지 접수 ②) 참여 블록 완료 문구 — 장치 하나.
+ *  편집기 공용 칸 `success_text`가 우선이고, 설문은 옛 칸 `completion_reward_text`(제출 전 안내)를 완료 문구로도 쓴다
+ *  (0722에 이메일수집만 고쳐지고 설문엔 안 퍼진 뿌리 = 블록마다 장치가 달랐던 것). 빈 값 = '' → 래퍼 마커 미출력(바이트 불변).
+ *  소비처 = renderSection 래퍼 `data-success-text` → 뷰어 wrapInfo().done → 완료 분기(doneText/doneAppend).
+ */
+export function doneTextOf(type: string, p: any): string {
+  const s = typeof p?.success_text === 'string' ? p.success_text.trim() : '';
+  if (s) return s;
+  if (type === 'survey' && typeof p?.completion_reward_text === 'string') return p.completion_reward_text.trim();
+  return '';
+}
+
 export function renderSection(section: Section, ctx: SectionRenderContext): string {
   if (!section.visible) return '';
   const fn = RENDERERS[section.type];
@@ -1440,7 +1454,10 @@ export function renderSection(section: Section, ctx: SectionRenderContext): stri
   } else if (bgKey) {
     wrapClasses += ` dm-bgx-${bgKey}`;
   }
-  return `<div class="${wrapClasses}" data-section-id="${escapeHtml(section.id)}" data-section-type="${escapeHtml(section.type)}" data-variant="${escapeHtml(variant)}"${treatmentAttr} style="${wrapStyle}">${bodyHtml}</div>`;
+  // ★ 2026-10-14 참여 8종 완료 문구 마커 — 값 있을 때만(미지정 = 바이트 불변). 뷰어 wrapInfo가 래퍼에서 읽는다.
+  const doneText = (PARTICIPATION_TYPES as readonly string[]).includes(section.type) ? doneTextOf(section.type, section.props) : '';
+  const doneAttr = doneText ? ` data-success-text="${escapeHtml(doneText)}"` : '';
+  return `<div class="${wrapClasses}" data-section-id="${escapeHtml(section.id)}" data-section-type="${escapeHtml(section.type)}" data-variant="${escapeHtml(variant)}"${treatmentAttr}${doneAttr} style="${wrapStyle}">${bodyHtml}</div>`;
 }
 
 /** 섹션 배열 전체를 세로 스크롤로 렌더링 */

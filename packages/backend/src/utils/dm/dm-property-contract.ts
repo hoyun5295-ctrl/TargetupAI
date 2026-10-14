@@ -89,8 +89,9 @@ export const DM_WIRED_ORPHAN_MARKERS = {
   gallery_enable_zoom: 'data-dm-zoom',
   poll_allow_multiple: 'data-dm-poll-multi',
   survey_show_progress: 'data-dm-survey-progress',
-  // ★ 2026-07-22 (임은지) 이메일 수집 "완료 문구"(success_text) — 편집기 입력이 발행 폼에 data-success-text로 실리고
-  //   뷰어(dm-viewer.ts) 폼 제출 성공 메시지가 이 값을 쓴다(미지정=기존 기본 문구). 종전엔 렌더/뷰어 어디서도 소비 안 됨(고아).
+  // ★ 2026-07-22 (임은지) 이메일 수집 "완료 문구"(success_text) — 종전엔 렌더/뷰어 어디서도 소비 안 됨(고아).
+  //   ★ 2026-10-14 (임은지 접수 ②) 자리를 **renderSection 래퍼**로 옮겨 참여 8종(PARTICIPATION_TYPES) 공통 마커가 됐다 —
+  //   렌더러 doneTextOf → 래퍼 data-success-text → 뷰어 wrapInfo().done → 완료 분기. 블록 안쪽 속성(옛 자리)은 없다.
   email_success_text: 'data-success-text',
 } as const;
 
@@ -103,9 +104,237 @@ export const DM_WIRED_ORPHAN_MARKERS = {
  *  한쪽만 넣으면 "편집기에는 있는데 발행물엔 없음"이 그대로 재생산된다.
  *  같은 판단 선례 = 위 주석의 `show_result_after_vote`·`enable_user_location`(no_dead_controls).
  *  게이트 = `dm-editor-parity.test.ts` "제거된 죽은 컨트롤" 절(기본값·편집기 소스 양쪽 잔존 0). */
-export const DM_REMOVED_DEAD_CONTROLS: Array<{ section: string; prop: string; reason: string }> = [
-  { section: 'coupon', prop: 'discount_type', reason: '캔버스·DM SSR·이메일 어디도 안 읽던 고아 속성(2026-09-04 제거)' },
+export type DmPropExempt = {
+  section: string;
+  prop: string;
+  /** 어느 면에서 탐침이 출력을 못 바꾸는가: ssr(발행 렌더) · canvas(편집 캔버스 이름 대조) · email(이메일 렌더) */
+  surface: 'ssr' | 'canvas' | 'email';
+  /** 왜 그런가: server(서버가 읽는다 → reader 본문에 `.prop` 실재) · viewer(뷰어가 data-*로 읽는다) ·
+   *  n/a(그 면에서 뜻이 없다 · 다른 면이 소비) · removed(편집기·기본값 양쪽에서 지웠고 되살리면 실패) */
+  kind: 'server' | 'viewer' | 'n/a' | 'removed';
+  /** 20자 이상 · "아직"·"예정"·"미구현" 금지(미검토는 DM_PROP_UNREVIEWED 래칫으로) */
+  why: string;
+  /** kind=server일 때 그 값을 읽는 함수 이름(dm-interaction*.ts) — 본문에 `.prop`이 있어야 통과(파일 전체 스캔 X) */
+  reader?: string;
+  /** 이 구도에서만 면제(CTA 배치처럼 구도가 소비 여부를 가르는 경우) */
+  treatment?: string;
+};
+
+/** ★ 2026-10-14 DM 속성 예외 원장 — `dm-editor-coverage.test.ts`가 "편집기 속성 전수 × 발행 면"을 기계로 밟는다(이메일 0916 이식).
+ *  값을 바꿔 렌더해도 출력이 안 달라지는 속성은 여기 **사유와 함께** 있어야 통과한다. 편집기에서 사라진 행은 실패(원장 부패 차단).
+ *  등재된 것만 지키던 옛 표(위 DM_*_TABLE·MARKERS)는 그대로 두고, 이 원장은 "등재 안 된 전부"를 잡는다. */
+export const DM_PROP_EXEMPT: DmPropExempt[] = [
+  // ── 제거된 죽은 컨트롤 — 되살리려면 세 렌더 면(캔버스·DM SSR·이메일)과 두 계약표에 함께 등재한다 ──
+  { section: 'coupon', prop: 'discount_type', surface: 'ssr', kind: 'removed', why: '캔버스·DM SSR·이메일 어디도 안 읽던 고아 속성(2026-09-04 제거)' },
+  { section: 'poll', prop: 'show_result_after_vote', surface: 'ssr', kind: 'removed', why: '실시간 득표 집계 API가 없어 켜도 발송물 무변화(2026-07-21 편집기 제거 · 2026-10-14 기본값·타입도 제거)' },
+  { section: 'map_store_locator', prop: 'enable_user_location', surface: 'ssr', kind: 'removed', why: '매장 좌표 스키마·Geolocation 미구축이라 켜도 무변화(2026-07-21 편집기 제거 · 2026-10-14 기본값·타입도 제거)' },
+  { section: 'product_carousel', prop: 'auto_slide', surface: 'ssr', kind: 'removed', why: '자동 전환 미도입(수신자 수동 스와이프) · 렌더·뷰어 어디도 안 읽음(2026-10-14 기본값·타입 제거)' },
+  { section: 'product_carousel', prop: 'slide_interval_ms', surface: 'ssr', kind: 'removed', why: '자동 전환 미도입이라 간격도 뜻 없음 · 렌더·뷰어 어디도 안 읽음(2026-10-14 기본값·타입 제거)' },
+  // ── 서버가 읽는 규칙(이름 걸림 통과 근거 = reader 본문) ──
+  { section: 'email_capture', prop: 'consent_required', surface: 'ssr', kind: 'server', reader: 'submitEventResponse', why: '제출 때 동의 체크를 서버가 강제한다(명시 true일 때 · 추첨은 늘)' },
+  { section: 'roulette', prop: 'segments[].probability', surface: 'ssr', kind: 'server', reader: 'runRouletteDraw', why: '당첨 칸은 서버가 확률로 뽑는다(클라이언트는 결과만 받아 돌린다)' },
+  { section: 'roulette', prop: 'segments[].prize_count', surface: 'ssr', kind: 'server', reader: 'syncPrizesFromSections', why: '발행 때 dm_prizes 재고로 동기화되고 당첨은 재고에서 차감된다' },
+  // ── 구도가 소유하는 값(그 구도에서는 뜻이 없다 · 2026-10-14 첫 실측) ──
+  { section: 'cta', prop: 'layout', surface: 'ssr', treatment: 'bar', kind: 'n/a', why: '구도가 배치를 소유(ctaLayoutApplies) · bar=첫 버튼 강조+목록이라 늘어놓을 것이 없다(편집기도 감춘다)' },
+  { section: 'cta', prop: 'layout', surface: 'ssr', treatment: 'sticky', kind: 'n/a', why: '구도가 배치를 소유(ctaLayoutApplies) · sticky=첫 버튼만 고정이라 배치 개념이 없다(편집기도 감춘다)' },
+  { section: 'cta', prop: 'layout', surface: 'email', treatment: 'bar', kind: 'n/a', why: '구도가 배치를 소유(ctaLayoutApplies) · bar=첫 버튼 강조+목록이라 늘어놓을 것이 없다(편집기도 감춘다)' },
+  { section: 'cta', prop: 'buttons[].style', surface: 'ssr', treatment: 'bar', kind: 'n/a', why: '구도가 버튼 모양을 소유 · bar=첫 버튼 강조 바 + 나머지 목록이라 개별 style을 안 읽는다' },
+  { section: 'cta', prop: 'buttons[].style', surface: 'ssr', treatment: 'ghost', kind: 'n/a', why: '구도가 버튼 모양을 소유 · ghost=버튼 전부를 고스트로 그린다' },
+  { section: 'cta', prop: 'buttons[].style', surface: 'ssr', treatment: 'sticky', kind: 'n/a', why: '구도가 버튼 모양을 소유 · sticky=첫 버튼 하나를 고정 바로 그린다' },
+  { section: 'cta', prop: 'buttons[].style', surface: 'email', treatment: 'bar', kind: 'n/a', why: '구도가 버튼 모양을 소유 · bar=첫 버튼 강조 바 + 나머지 목록이라 개별 style을 안 읽는다' },
+  { section: 'cta', prop: 'buttons[].style', surface: 'email', treatment: 'ghost', kind: 'n/a', why: '구도가 버튼 모양을 소유 · ghost=버튼 전부를 고스트로 그린다' },
+  { section: 'coupon', prop: 'button_color', surface: 'ssr', treatment: 'ticket', kind: 'n/a', why: '티켓 코드는 알약 없는 평문이라 알약 배경색이 없다(0723 색 분리 결정 · 알약은 classic만)' },
+  { section: 'coupon', prop: 'button_color', surface: 'ssr', treatment: 'spotlight', kind: 'n/a', why: '스포트라이트 코드는 알약 없는 평문이라 알약 배경색이 없다(0723 색 분리 결정 · 알약은 classic만)' },
+  { section: 'gallery', prop: 'layout', surface: 'ssr', treatment: 'mosaic', kind: 'n/a', why: '모자이크 구도가 격자(2열)를 소유한다 · layout 값은 classic 구도에서만 읽는다' },
+  { section: 'product_carousel', prop: 'show_indicator', surface: 'ssr', treatment: 'focus', kind: 'n/a', why: '점 인디케이터는 가로 스와이프(classic · 3개+)에만 있다 · focus 구도는 세로로 전량 펼친다' },
+  { section: 'product_carousel', prop: 'show_indicator', surface: 'ssr', treatment: 'list', kind: 'n/a', why: '점 인디케이터는 가로 스와이프(classic · 3개+)에만 있다 · list 구도는 세로 행으로 전량 펼친다' },
+  { section: 'hero', prop: 'image_url', surface: 'ssr', treatment: 'typographic', kind: 'n/a', why: '타이포그래픽 구도는 이미지 없는 글자 구도 · 이미지·초점·맞춤·오버레이·높이 전부 뜻이 없다' },
+  { section: 'hero', prop: 'focus', surface: 'ssr', treatment: 'typographic', kind: 'n/a', why: '타이포그래픽 구도는 이미지 없는 글자 구도 · 이미지 초점이 뜻이 없다' },
+  { section: 'hero', prop: 'image_fit', surface: 'ssr', treatment: 'typographic', kind: 'n/a', why: '타이포그래픽 구도는 이미지 없는 글자 구도 · 이미지 맞춤이 뜻이 없다' },
+  { section: 'hero', prop: 'overlay', surface: 'ssr', treatment: 'typographic', kind: 'n/a', why: '타이포그래픽 구도는 이미지 없는 글자 구도 · 이미지 위 오버레이가 뜻이 없다' },
+  { section: 'hero', prop: 'overlay_gradient', surface: 'ssr', treatment: 'typographic', kind: 'n/a', why: '타이포그래픽 구도는 이미지 없는 글자 구도 · 이미지 위 그라데이션이 뜻이 없다' },
+  { section: 'hero', prop: 'height', surface: 'ssr', treatment: 'typographic', kind: 'n/a', why: '타이포그래픽 구도는 글자 분량이 높이를 정한다(이미지 영역 높이 값을 안 쓴다)' },
+  { section: 'hero', prop: 'image_url', surface: 'email', treatment: 'typographic', kind: 'n/a', why: '타이포그래픽 구도는 이미지 없는 글자 구도 · 이미지·초점·맞춤·오버레이·높이 전부 뜻이 없다' },
+  { section: 'hero', prop: 'focus', surface: 'email', treatment: 'typographic', kind: 'n/a', why: '타이포그래픽 구도는 이미지 없는 글자 구도 · 이미지 초점이 뜻이 없다' },
+  { section: 'hero', prop: 'image_fit', surface: 'email', treatment: 'typographic', kind: 'n/a', why: '타이포그래픽 구도는 이미지 없는 글자 구도 · 이미지 맞춤이 뜻이 없다' },
+  { section: 'hero', prop: 'overlay_gradient', surface: 'email', treatment: 'typographic', kind: 'n/a', why: '타이포그래픽 구도는 이미지 없는 글자 구도 · 이미지 위 그라데이션이 뜻이 없다' },
+  { section: 'hero', prop: 'height', surface: 'email', treatment: 'typographic', kind: 'n/a', why: '타이포그래픽 구도는 글자 분량이 높이를 정한다(이미지 영역 높이 값을 안 쓴다)' },
+  { section: 'text_card', prop: 'image_url', surface: 'ssr', treatment: 'lead', kind: 'n/a', why: '리드 구도는 이미지 없는 글자 구도(첫 문단 강조)' },
+  { section: 'text_card', prop: 'image_url', surface: 'ssr', treatment: 'quote', kind: 'n/a', why: '인용 구도는 이미지 없는 글자 구도(따옴표 인용)' },
+  { section: 'text_card', prop: 'image_position', surface: 'ssr', treatment: 'lead', kind: 'n/a', why: '리드 구도는 이미지 없는 글자 구도라 이미지 위치도 뜻이 없다' },
+  { section: 'text_card', prop: 'image_position', surface: 'ssr', treatment: 'quote', kind: 'n/a', why: '인용 구도는 이미지 없는 글자 구도라 이미지 위치도 뜻이 없다' },
+  // ── 화면 글자가 아닌 값 ──
+  { section: 'roulette', prop: 'segments[].probability', surface: 'ssr', kind: 'n/a', why: '확률은 서버 추첨값(runRouletteDraw) · 발행물·data-segments 에 싣지 않는 것이 정답(수신자에게 확률 노출 X)' },
+  { section: 'survey', prop: 'questions[].id', surface: 'ssr', kind: 'n/a', why: '문항 식별자(응답 키 q_<id>) · 화면 글자가 아니다 · 뷰어가 data-dm-q로 읽는다' },
+  { section: 'map_store_locator', prop: 'stores[].id', surface: 'ssr', kind: 'n/a', why: '매장 식별자(항목 정렬·삭제 키) · 화면 글자가 아니다' },
+  // ── 캔버스(편집 미리보기)에 없는 것이 정답인 동작 ──
+  { section: 'email_capture', prop: 'success_text', surface: 'canvas', kind: 'n/a', why: '완료 문구는 참여를 마친 뒤 뷰어가 띄우는 글자 · 캔버스는 참여 전 모습만 그린다' },
+  { section: 'poll', prop: 'success_text', surface: 'canvas', kind: 'n/a', why: '완료 문구는 참여를 마친 뒤 뷰어가 띄우는 글자 · 캔버스는 참여 전 모습만 그린다' },
+  { section: 'survey', prop: 'success_text', surface: 'canvas', kind: 'n/a', why: '완료 문구는 참여를 마친 뒤 뷰어가 띄우는 글자 · 캔버스는 참여 전 모습만 그린다' },
+  { section: 'click_rewards', prop: 'success_text', surface: 'canvas', kind: 'n/a', why: '완료 문구는 참여를 마친 뒤 뷰어가 띄우는 글자 · 캔버스는 참여 전 모습만 그린다' },
+  { section: 'lucky_draw', prop: 'success_text', surface: 'canvas', kind: 'n/a', why: '완료 문구는 참여를 마친 뒤 뷰어가 띄우는 글자 · 캔버스는 참여 전 모습만 그린다' },
+  { section: 'roulette', prop: 'success_text', surface: 'canvas', kind: 'n/a', why: '당첨 시 안내 문구는 추첨 뒤 뷰어가 띄우는 글자 · 캔버스는 참여 전 모습만 그린다' },
+  { section: 'instant_coupon', prop: 'success_text', surface: 'canvas', kind: 'n/a', why: '완료 문구는 쿠폰을 받은 뒤 뷰어가 띄우는 글자 · 캔버스는 참여 전 모습만 그린다' },
+  { section: 'limited_quantity', prop: 'success_text', surface: 'canvas', kind: 'n/a', why: '완료 문구는 참여를 마친 뒤 뷰어가 띄우는 글자 · 캔버스는 참여 전 모습만 그린다' },
+  { section: 'email_capture', prop: 'consent_required', surface: 'canvas', kind: 'n/a', why: '캔버스에는 제출이 없어 동의 강제(체크 검증)를 흉내내지 않는다 · 발행 SSR·서버가 소비' },
+  { section: 'gallery', prop: 'enable_zoom', surface: 'canvas', kind: 'n/a', why: '확대 보기는 뷰어 스크립트 동작(라이트박스) · 캔버스 클릭은 블록 선택이다' },
+  { section: 'gallery', prop: 'images[].link_url', surface: 'canvas', kind: 'n/a', why: '캔버스 이미지 클릭은 블록 선택이라 링크로 열지 않는다 · 발행 SSR이 소비' },
+  { section: 'slideshow', prop: 'slides[].link_url', surface: 'canvas', kind: 'n/a', why: '캔버스 슬라이드 클릭은 블록 선택이라 링크로 열지 않는다 · 발행 SSR이 소비' },
+  { section: 'slideshow', prop: 'interval_ms', surface: 'canvas', kind: 'n/a', why: '캔버스는 자동 전환을 돌리지 않는다(정지 미리보기) · 뷰어가 소비' },
+  { section: 'product_carousel', prop: 'title_color', surface: 'canvas', kind: 'n/a', why: '제목 스타일은 공용 도우미(productTitleStyle)가 만든다 · 함수 본문 이름 대조(근사)의 사각' },
+  { section: 'product_carousel', prop: 'title_size', surface: 'canvas', kind: 'n/a', why: '제목 스타일은 공용 도우미(productTitleStyle)가 만든다 · 함수 본문 이름 대조(근사)의 사각' },
+  { section: 'roulette', prop: 'segments[].probability', surface: 'canvas', kind: 'n/a', why: '확률은 서버 추첨값(runRouletteDraw) · 화면에 표시되지 않는다' },
 ];
+
+/** 제거된 죽은 컨트롤 = 위 원장의 kind=removed 행(파리티 테스트 "제거된 죽은 컨트롤" 절이 편집기·기본값 잔존 0을 밟는다). */
+export const DM_REMOVED_DEAD_CONTROLS: Array<{ section: string; prop: string; reason: string }> =
+  DM_PROP_EXEMPT.filter((e) => e.kind === 'removed').map((e) => ({ section: e.section, prop: e.prop, reason: e.why }));
+
+/** ★ 2026-10-14 "서버 규칙"처럼 읽히는 이름 — 발행물에 안 나와도 그냥 통과시키면 안 된다. 서버가 실제로 읽어야 규칙이다.
+ *  원장 kind=server + reader 실재로만 통과. 못 대면 아래 PENDING에 이름을 둔다(줄기만 하는 래칫 · 늘면 실패). */
+export const DM_SERVER_RULE_NAME = /^one_|^consent_required$|^(required|quantity|probability)$|^expires|_count$|_quantity$/;
+/** 2026-10-14 첫 실측 7건 — 이름은 규칙인데 서버가 안 읽는다(= R3 서버 뜻 축 · 설계서 §6 B2). 서버에 넣으면 kind=server로 올리고 여기서 뺀다. */
+export const DM_SERVER_RULES_PENDING: readonly string[] = [
+  'poll.one_vote_per_user',            // 1인 1회 토글 — 서버는 늘 UNIQUE(토글 무관) · 장식
+  'roulette.one_spin_per_user',        // 위와 같음
+  'survey.questions[].required',       // 필수 = 뷰어만 막는다(data-required) · 서버 미검증
+  'lucky_draw.form_fields[].required', // 위와 같음(뷰어 전화번호만 검증)
+  'click_rewards.target_count',        // 목표 횟수 = 화면 표시만 · 서버 집계 없음
+  'instant_coupon.expires_at',         // 만료 = 화면 표시만 · 서버가 만료 뒤 발급을 안 막는다
+  'limited_quantity.total_quantity',   // 총 수량 = 화면 표시만 · 서버 차감 없음
+];
+export const DM_SERVER_RULES_PENDING_MAX = 7;
+
+/** ★ 2026-10-14 미검토 래칫 — 첫 실측에서 빨갛던 속성 이름 목록. 항목이 통과하게 되면 실패시켜 목록에서 빼게 한다(이름 바꿔치기 차단).
+ *  길이는 MAX를 넘을 수 없고 MAX는 줄이기만 한다. kind 4종 밖의 새 분류를 만들지 않는다. */
+export const DM_PROP_UNREVIEWED: readonly string[] = [
+  // 2026-10-14 첫 실측 31건. 형식 = 면:섹션.속성[@구도]. 판단(렌더에 넣기 / 그 구도에서 컨트롤 감추기 / n/a 등재)은 Harold님 승인 항목.
+  'ssr:hero.overlay@classic',                 // 오버레이 프리셋은 full_bleed만 읽는다 · classic은 overlay_gradient(켬/끔)만
+  'ssr:hero.overlay@split',
+  'ssr:hero.overlay@editorial_overlap',
+  'ssr:hero.overlay_gradient@full_bleed',     // full_bleed는 overlay 프리셋이 그라데이션을 대신한다
+  'ssr:hero.overlay_gradient@split',
+  'ssr:hero.overlay_gradient@editorial_overlap',
+  'ssr:hero.focus@split',                     // 분할·겹침 구도는 이미지 초점·맞춤을 안 읽는다
+  'ssr:hero.focus@editorial_overlap',
+  'ssr:hero.image_fit@split',
+  'ssr:hero.image_fit@editorial_overlap',
+  'ssr:hero.height@split',                    // 분할·겹침 구도는 높이 값을 안 읽는다
+  'ssr:hero.height@editorial_overlap',
+  'ssr:hero.headline_emphasis@split',         // 제목 강조(마커·밑줄)가 classic·full_bleed에서만 산다
+  'ssr:hero.headline_emphasis@editorial_overlap',
+  'ssr:hero.headline_emphasis@typographic',
+  'ssr:text_card.image_position@framed',      // 액자 구도는 이미지 위치를 고정한다
+  'ssr:reviews.reviews[].date@quote',         // 인용 구도는 날짜·평균 별점을 안 그린다
+  'ssr:reviews.show_average_rating@quote',
+  'ssr:lucky_draw.form_fields[].required',    // 필수 표시가 발행 폼에 없다(뷰어도 전화번호만 검증) · R3
+  'ssr:map_store_locator.stores[].lat',       // 지도는 주소 글자만 그린다 · 좌표 입력칸이 죽어 있다(0721 enable_user_location과 같은 뿌리)
+  'ssr:map_store_locator.stores[].lng',
+  'canvas:map_store_locator.stores[].lat',
+  'canvas:map_store_locator.stores[].lng',
+  'canvas:slideshow.show_indicator',          // 캔버스 슬라이드쇼가 점 인디케이터를 안 그린다
+  'email:hero.overlay',                       // 이메일 히어로는 오버레이 프리셋을 안 읽는다
+  'email:hero.overlay_gradient@split',
+  'email:hero.headline_size@split',           // 이메일 분할 구도는 제목 크기 px를 안 읽는다
+  'email:text_card.body_size@lead',           // 이메일 리드·인용 구도는 본문 크기 px를 안 읽는다
+  'email:text_card.body_size@quote',
+  'email:gallery.full_bleed',                 // 이메일 갤러리는 풀화면 토글을 안 읽는다
+  'email:gallery.images[].caption',           // 이메일 갤러리는 설명을 alt에만 싣는다(보이지 않는다)
+];
+export const DM_PROP_UNREVIEWED_MAX = 31;
+
+/** ★ 2026-10-14 탐침 문맥 — 탐침 값은 기본값의 타입에서 파생한다(boolean 반전 · number +7 · *_color · *url · 문자열 '탐침_'+prop).
+ *  파생이 안 되는 것만 여기 적는다(빠지면 테스트가 그 이름으로 실패한다 · 손 등재 최소):
+ *   base  = 섹션별 바탕 보정(기본값이 빈 배열인 항목 1개 · 값이 뜻을 갖는 전제 조건). 키 = 섹션 타입.
+ *   enums = 열거형 탐침 값(기본값과 달라야 한다). 키 = 'type.prop' 또는 'type.arr[].field'. */
+export const DM_PROBE_CONTEXT: {
+  base: Record<string, Record<string, unknown>>;
+  /** 그 속성을 탐침할 때만 얹는 전제(예: 헤더 행사명은 variant=countdown에서만 뜻이 있다). 키 = 'type.prop' */
+  with: Record<string, Record<string, unknown>>;
+  enums: Record<string, unknown>;
+} = {
+  base: {
+    header: { brand_name: '한줄로' },
+    hero: { headline: '제목', sub_copy: '부제', image_url: 'https://img.example/hero.jpg' },
+    text_card: { tag: '태그', headline: '제목', body: '본문', image_url: 'https://img.example/card.jpg' },
+    coupon: { discount_label: '10% 할인', coupon_code: 'CODE10' },
+    cta: { buttons: [{ label: '첫째', url: 'https://a.example', style: 'primary' }, { label: '둘째', url: 'https://b.example', style: 'secondary' }] },
+    video: { video_url: 'https://www.youtube.com/watch?v=abcdefghijk' },
+    store_info: { address: '서울시 어딘가 1' },
+    sns: { channels: [{ type: 'instagram', url: 'https://instagram.com/x', handle: '@x' }] },
+    promo_code: { code: 'PROMO1', description: '설명' },
+    product_carousel: { products: [{ image_url: 'https://img.example/p.jpg', name: '상품', price: 10000, link_url: 'https://shop.example/p' }] },
+    gallery: { images: [{ url: 'https://img.example/g.jpg', caption: '설명' }] },
+    slideshow: { slides: [{ image_url: 'https://img.example/s.jpg', caption: '설명' }] },
+    survey: { questions: [{ id: 'q1', type: 'single', question: '질문', options: ['A', 'B'], required: false }] },
+    lucky_draw: { prizes: [{ rank: 1, name: '경품', count: 1 }] },
+    youtube_embed: { video_url: 'https://www.youtube.com/watch?v=abcdefghijk' },
+    instagram_embed: { post_url: 'https://www.instagram.com/p/abc/' },
+    map_store_locator: { stores: [{ id: 's1', name: '매장', address: '주소', lat: 37.5, lng: 127.0 }] },
+    reviews: { reviews: [{ rating: 5, author: '작성자', body: '후기' }] },
+  },
+  with: {
+    'header.banner_image_url': { variant: 'banner' },
+    'header.event_title': { variant: 'countdown' },
+    'header.event_date': { variant: 'countdown' },
+    'header.coupon_code': { variant: 'coupon' },
+    'header.discount_label': { variant: 'coupon' },
+    'header.logo_size': { logo_url: 'https://img.example/logo.png' },
+    'video.autoplay': { video_type: 'direct', video_url: 'https://cdn.example/v.mp4' },
+    'video.thumbnail_url': { video_type: 'direct', video_url: 'https://cdn.example/v.mp4' },
+    'product_carousel.show_indicator': { products: [1, 2, 3].map((i) => ({ image_url: `https://img.example/p${i}.jpg`, name: `상품${i}`, price: 10000 })) },
+    'product_carousel.title_color': { title: '추천 상품' },
+    'product_carousel.title_size': { title: '추천 상품' },
+    'promo_code.cta_label': { cta_url: 'https://x.example' },
+    'roulette.segments[].reward_description': { segments: [{ id: '1', label: '경품', probability: 0.5, prize_count: 1 }, { id: '2', label: '꽝', probability: 0.5 }] },
+    'slideshow.show_indicator': { slides: [{ image_url: 'https://img.example/s1.jpg' }, { image_url: 'https://img.example/s2.jpg' }] },
+    'slideshow.show_pause': { slides: [{ image_url: 'https://img.example/s1.jpg' }, { image_url: 'https://img.example/s2.jpg' }] },
+    'sns.channels[].handle': { layout: 'buttons' },
+    'tab_cards.tab_active_bg': { tabs: [{ label: '탭 1', content_type: 'text', content: 'a' }, { label: '탭 2', content_type: 'text', content: 'b' }] },
+    'tab_cards.tabs[].link_url': { tabs: [{ label: '탭', content_type: 'image', content: 'https://img.example/t.jpg' }] },
+  },
+  enums: {
+    'header.variant': 'countdown',
+    'header.brand_size': 'lg',
+    'header.logo_size': 'lg',
+    'hero.height': 'lg',
+    'hero.focus': 'top',
+    'hero.image_fit': 'contain',
+    'hero.overlay': 'strong',
+    'hero.headline_emphasis': 'marker',
+    'hero.headline_size': 28,
+    'hero.sub_copy_size': 18,
+    'hero.overlay_gradient': false,
+    'text_card.image_position': 'bottom',
+    'text_card.headline_emphasis': 'marker',
+    'text_card.headline_size': 24,
+    'text_card.body_size': 18,
+    'coupon.min_purchase': 30000,
+    'countdown.end_datetime': '2027-01-01T00:00:00.000Z',
+    'header.event_date': '2027-01-01T00:00:00.000Z',
+    'lucky_draw.draw_at': '2027-01-01T00:00:00.000Z',
+    'instant_coupon.expires_at': '2027-01-01T00:00:00.000Z',
+    'click_rewards.reward_type': 'share',
+    'video.video_type': 'direct',
+    'cta.layout': 'row',
+    'cta.buttons[].style': 'outline',
+    'sns.layout': 'buttons',
+    'sns.channels[].type': 'youtube',
+    'product_carousel.image_fit': 'contain',
+    'product_carousel.image_focus': 'bottom',
+    'product_carousel.image_height': 'lg',
+    'product_carousel.title_size': 'lg',
+    'gallery.layout': 'grid_3x3', // 편집기의 'masonry' 값은 렌더러가 안 읽는다(모자이크는 구도) — [범위 밖] BUGS 등재
+    'gallery.full_bleed': true,
+    'product_carousel.products[].discount_price': 8000,
+    'reviews.reviews[].rating': 3,
+    'roulette.segments[].prize_count': 2, // 재고 > 0 이면 당첨 경품 칩이 발행물에 뜬다(0722) · 기본 항목은 재고 없음
+    'survey.questions[].options': ['X1', 'X2'],
+    'slideshow.slide_ratio': '3:4',
+    'tab_cards.tabs[].content_type': 'image',
+    'survey.questions[].type': 'rating',
+  },
+};
 
 /** ★ 2026-07-21 (#3 남지현) 매장/고객센터 라벨 = 구도별 발송 SSR 라벨을 캔버스가 미러해야 편집=발송.
  *  card 구도 = 웹/메일/영업(renderStoreInfoCard), classic = 홈페이지/이메일/영업시간(renderStoreInfoClassic).
