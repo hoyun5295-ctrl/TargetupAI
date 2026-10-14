@@ -80,8 +80,8 @@ COMBOS=(
   "linux-legacy-mysql|sync-agent-linux-legacy-mysql.zip|sync-agent-linux-legacy|docker|centos:7|mysql|$MYSQL_CT|3306|smokedb|root|full"
   "linux-legacy-pg|sync-agent-linux-legacy-pg.zip|sync-agent-linux-legacy|docker|centos:7|postgres|$PG_CT|5432|smokedb|postgres|full"
   # Oracle 11g XE(gvenzl/oracle-xe:11-slim). 11g는 thin이 안 되므로 thick + Instant Client가 필요하고,
-  # IC는 win-legacy zip에만 동봉된다(실측: win-legacy 921개 항목 / 나머지 티어 0개).
-  # 나머지 티어는 oracle_ic_missing()이 풀린 zip을 보고 SKIP으로 뺀다.
+  # ★2026-10-14 IC는 Windows 티어 oracle zip 전부에 동봉된다(win-modern·win-mid 는 oracledb 사이드카도 · build-tiers.js).
+  # Linux 티어는 IC 미동봉 → oracle_ic_missing()이 풀린 zip을 보고 SKIP으로 뺀다.
   "win-legacy-oracle|sync-agent-win-legacy-oracle.zip|SyncAgent/sync-agent.exe|host|-|oracle|127.0.0.1|$ORACLE_HOST_PORT|XE|smoke|launch"
   "win-modern-oracle|sync-agent-win-modern-oracle.zip|SyncAgent/sync-agent.exe|host|-|oracle|127.0.0.1|$ORACLE_HOST_PORT|XE|smoke|full"
   "linux-modern-oracle|sync-agent-linux-modern-oracle.zip|sync-agent-linux-modern|docker|ubuntu:24.04|oracle|$ORACLE_CT|1521|XE|smoke|full"
@@ -237,7 +237,7 @@ host_path() {
 
 # ── Oracle thick 가능 여부 ────────────────────────────────────────────────
 # Oracle 10g·11g는 thin이 안 된다 — thick 모드이고 Instant Client가 있어야 붙는다.
-# IC는 win-legacy zip에만 동봉된다(2026-07-28 실측: win-legacy 921개 항목 / 나머지 티어 0개).
+# ★2026-10-14 IC는 Windows 티어 oracle zip 전부에 동봉된다(옛: win-legacy 만). Linux 는 미동봉.
 # IC 없는 zip이 11g에 못 붙는 건 설계상 결과지 결함이 아니므로 FAIL이 아니라 SKIP으로 뺀다.
 #
 # 판정을 build-manifest.json 의 blockers 로 하지 않는다 — 그 선언이 산출물과 어긋나 있다.

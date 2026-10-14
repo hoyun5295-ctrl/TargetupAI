@@ -92,6 +92,9 @@ export async function runTestDb(argv: string[]): Promise<void> {
     : (flagValue(argv, '--pass') || '');
   const ssl = hasFlag(argv, '--ssl');
   const sslCaPath = flagValue(argv, '--ssl-ca');
+  // ★ 2026-10-14 Oracle 드라이버 모드(thick = 10g·11g · thin = 12c+). 미지정 = 동봉 클라가 있으면 thick.
+  const oracleClientRaw = flagValue(argv, '--oracle-client');
+  const oracleClient = oracleClientRaw === 'thick' || oracleClientRaw === 'thin' ? oracleClientRaw : undefined;
   const wantTable = flagValue(argv, '--table');
   const queryTimeout = parseInt(flagValue(argv, '--timeout') || '15000', 10);
 
@@ -106,7 +109,7 @@ export async function runTestDb(argv: string[]): Promise<void> {
     emit({ ok: false, stage: 'args', error: `필수 인자 누락: ${missing.join(', ')}` });
     console.log('');
     console.log('  예) sync-agent --test-db --type mysql --host 10.0.0.5 --port 3306 \\');
-    console.log('        --db shop --user readonly --pass-env DBPW [--ssl] [--ssl-ca /path/ca.pem] [--table members]');
+    console.log('        --db shop --user readonly --pass-env DBPW [--ssl] [--ssl-ca /path/ca.pem] [--table members] [--oracle-client thick|thin]');
     process.exit(2);
     return;
   }
@@ -128,6 +131,7 @@ export async function runTestDb(argv: string[]): Promise<void> {
     queryTimeout: Number.isFinite(queryTimeout) ? queryTimeout : 15000,
     ssl,
     sslCaPath: sslCaPath || undefined,
+    oracleClient,
   };
 
   const started = Date.now();

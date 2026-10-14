@@ -130,6 +130,7 @@ export function printConfig(config: AgentConfig): void {
   console.log(`  │  비밀번호:    ${maskPassword(d.password)}`);
   console.log(`  │  쿼리 타임아웃: ${d.queryTimeout}ms`);
   console.log(`  │  암호화(TLS): ${d.ssl ? (d.sslCaPath ? '사용 (인증서 검증)' : '사용 (검증 안 함)') : '사용 안 함'}`);
+  if (d.type === 'oracle') console.log(`  │  Oracle 모드:  ${d.oracleClient === 'thin' ? '12c 이상 (thin)' : d.oracleClient === 'thick' ? '11g 이하 (동봉 클라이언트)' : '미지정 (동봉 클라이언트 있으면 11g 이하 방식)'}`);
   console.log('  └───────────────────────────────────────────────┘');
 
   // ③ 동기화

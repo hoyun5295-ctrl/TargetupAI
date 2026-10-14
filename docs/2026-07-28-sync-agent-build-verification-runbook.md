@@ -94,7 +94,7 @@ zip은 20개지만 **실제 바이너리는 5개**다 — 같은 티어의 4개 
 
 **드라이버 축 잔여**
 - MSSQL — 이미지 확보 필요(`mcr.microsoft.com/mssql/server`). `mssql-2008 × modern 티어`는 코드가 이미 `blocked`(node20 OpenSSL3 × 옛 TLS)라 검증 대상이 아니다.
-- Oracle — 로컬 이미지가 `gvenzl/oracle-xe:11-slim`(11g)뿐인데 11g는 thick이라 Instant Client가 있어야 붙는다. **레포에 IC가 없다.** IC를 확보하거나 12c 이상 이미지로 thin 검증을 해야 한다.
+- Oracle — ~~로컬 이미지가 `gvenzl/oracle-xe:11-slim`(11g)뿐인데 11g는 thick이라 Instant Client가 있어야 붙는다. 레포에 IC가 없다.~~ **★2026-10-14 닫음**: IC 11.2는 이 PC 스테이징(`C:/Users/ceo/oracle-client-11.2-stage`)에 있고 `build-tiers.js`가 Windows 티어 oracle zip 전부에 동봉한다(win-modern·win-mid는 oracledb 사이드카 포함). `smoke-combos.sh --only win-modern-oracle` = 11g XE PASS(1.7.2). Linux 티어는 여전히 thin(12.1+)만.
 
 ---
 
@@ -130,7 +130,7 @@ node scripts/build-tier.js win-modern   # 단일 티어
 2. PASS 조합을 `VERIFIED_COMBOS`에 등재 — 어디까지를 등재 기준으로 볼지 확정 필요(접속·조회까지인지, 전체 동기화까지인지)
 3. ~~슈퍼관리자 메뉴에서 candidate 다운로드 제거~~ — 2026-08-03 완료(서버 403 게이트 + 화면 안내)
 4. MSSQL 이미지 확보 → 3조합 추가
-5. Oracle IC 또는 12c+ 이미지 확보 → 3조합 추가
+5. ~~Oracle IC 또는 12c+ 이미지 확보 → 3조합 추가~~ ★2026-10-14 win-modern-oracle PASS(IC 동봉). linux-oracle 2조합은 Linux IC 확보 또는 12c+ 이미지
 6. Server 2012 R2 · 2008 R2 VM 상설 구축 → 8조합
 7. 마법사 탈출구 두 줄(CLI 배너 `--setup-web` / 웹 배너 `--setup-cli`) — 1.6.5에 아직 안 들어갔다
 

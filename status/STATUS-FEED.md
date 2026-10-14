@@ -184,6 +184,15 @@
 > 검증 = FE · BE tsc 0 · vitest 595파일 8,371건 · 렌더 108곳 · Codex 적대 1R approve(gpt-6-astra · 지적 0 · 지정 파일 66개 + 분리 전 원본을 읽고 대조)
 > 다음 = 배포(백엔드 reload + 프론트 build:safe · AI 영업 C12 와 한 번에) → 실측(목록 숫자 카드 값 · 상세 창 저장 · 7일 부여 1회)
 
+<a id="c30"></a>
+
+### C30 · ★1014 엠티콜렉션(메트로시티) 싱크에이전트 출고 준비 — 1단계 완료 · 2단계 = 보완 회신 대기
+> 호출어 **"엠티콜렉션 싱크 / 메트로시티 싱크 / 질의서 v1.2"** → [FEATURE-SYNC-AGENT.md](../docs/FEATURE-SYNC-AGENT.md) §7 2026-10-14 행 · §7-2 엠티콜렉션 행 · §10 2단계 · 질의서 SoT = [PREINSTALL-QUESTIONNAIRE.md](../sync-agent/PREINSTALL-QUESTIONNAIRE.md) §3 v1.2 · 메모리 [[project_2026_1014_mt_collection_sync_agent]]
+> ⛔ 회신 없이 출고하지 않는다(DESC 전체 · 판매 뷰 단위 · 일시·탈퇴 컬럼 · YN_SMS 분포 · 회사 범위) / Oracle 11g = thick · Windows oracle zip 전부 IC 동봉 / 등재 = 엠티 스키마 픽스처 마법사 주행 뒤 `win-modern__oracle-11g__1.7.2` + `CURRENT_AGENT_VERSION` 1.7.2 / 뷰에 여러 회사면 고객사 WHERE
+> Codex 적대 6R approve(1R high 2 · 2R medium 3 · 3R medium 2 · 4R medium 1 · 5R medium 1 · 6R approve — VC80 런타임 동봉+설치 bat 종료 코드 분기 · Oracle 모드 설정 결정 · 같은 프로세스 모드 변경 불가 안내 · 5.x 재초기화 · testConnection 이유째 throw + 연 풀만 정리 + close 오류가 검증 오류를 안 덮음) · 재빌드 smoke PASS · 11g 실측(thin = NJS-138 안내가 진단 JSON 까지 / thick PASS)
+> vcredist_x64.exe 스테이징·재빌드 완료(Harold 1014 · blocker 해제 · zip 150MB · CRT 8.0.50727.6195 정책에 .762 포함 · VC80 없는 서버 실제 로드는 엠티 설치 때 VCREDIST_EXIT 로 확인)
+> 잔여 = Harold → 유종오님께 보완 요청 6건 + 443 개방 IP(58.227.193.62) 회신 → 2단계(픽스처 · 주행 · 등재 · 출고 세트) · 추가 과제 = 다른 DB 커넥터 testConnection 도 이유째 throw(마법사 TLS 3159 등 안내 전달)
+
 <a id="c29"></a>
 
 ### C29 · ★1014 모바일 DM·이메일 편집기 「결함이 반복되지 않는 구조」 — 코드 완료 · Codex · 배포 대기

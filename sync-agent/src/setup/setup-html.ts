@@ -284,6 +284,16 @@ export const SETUP_HTML = `<!DOCTYPE html>
         <option value="postgres">PostgreSQL</option>
       </select>
     </div>
+    <div class="form-group" id="dbOracleClientGroup" style="display:none;">
+      <label>Oracle DB 버전</label>
+      <select id="dbOracleClient">
+        <option value="thick">11g 이하 (10g · 11g): 동봉 Oracle Client 로 접속</option>
+        <option value="thin">12c 이상 (12c · 18c · 19c · 21c · 23ai)</option>
+      </select>
+      <div style="font-size:12px;color:#888;margin-top:4px;">
+        Oracle 만 해당합니다. 버전이 맞지 않으면 접속이 거부됩니다(11g 에 "12c 이상" = NJS-138 · 12c 이상에 "11g 이하" = ORA-28040).
+      </div>
+    </div>
     <div class="form-row">
       <div class="form-group">
         <label>호스트</label>
@@ -954,6 +964,7 @@ export const SETUP_HTML = `<!DOCTYPE html>
         queryTimeout: 30000,
         ssl: $('dbSsl').checked, // ★ 2026-07-27 암호화 연결(클라우드 DB)
         sslCaPath: $('dbSslCa').value.trim() || undefined,
+        oracleClient: $('dbType').value === 'oracle' ? $('dbOracleClient').value : undefined, // ★ 2026-10-14
       },
       sync: {
         customerInterval: parseInt($('customerInterval').value, 10),
@@ -1015,6 +1026,8 @@ export const SETUP_HTML = `<!DOCTYPE html>
       // "테스트는 됐는데 본 연결이 막히는" 불일치가 된다(Codex 2R-5).
       ssl: $('dbSsl').checked,
       sslCaPath: $('dbSslCa').value.trim() || undefined,
+      // 접속 테스트도 본 연결과 같은 드라이버 모드로(★ 2026-10-14)
+      oracleClient: $('dbType').value === 'oracle' ? $('dbOracleClient').value : undefined,
     };
   }
 
@@ -1026,6 +1039,8 @@ export const SETUP_HTML = `<!DOCTYPE html>
   // DB 타입 변경 시 포트 자동 변경
   $('dbType').addEventListener('change', function() {
     $('dbPort').value = DEFAULT_PORTS[this.value] || 1433;
+    // ★ 2026-10-14 Oracle 일 때만 드라이버 모드(버전) 질문을 보인다
+    $('dbOracleClientGroup').style.display = this.value === 'oracle' ? '' : 'none';
   });
 </script>
 

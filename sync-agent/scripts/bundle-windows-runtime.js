@@ -18,7 +18,11 @@ fs.mkdirSync(abs(outDir), { recursive: true });
 
 // 1) exe(고정명 sync-agent.exe) + wasm
 fs.copyFileSync(abs(exePath), path.join(abs(outDir), 'sync-agent.exe'));
-fs.copyFileSync(path.join(ROOT, 'release/sql-wasm.wasm'), path.join(abs(outDir), 'sql-wasm.wasm'));
+// ★ 2026-10-14 wasm 은 방금 그 티어가 prebundle:wasm 으로 만든 dist/sql-wasm.wasm 이 원본이다 — 옛 코드는 아무 스크립트도 만들지 않는
+//   공유 release/sql-wasm.wasm 을 읽어 깨끗한 작업 트리에서 ENOENT 로 죽었다(--tiers win-modern 단독 빌드 실측). release 는 폴백.
+const wasmSrc = ['dist/sql-wasm.wasm', 'release/sql-wasm.wasm'].map((p) => path.join(ROOT, p)).find((p) => fs.existsSync(p));
+if (!wasmSrc) { console.error('sql-wasm.wasm 이 없습니다 — npm run prebundle:wasm 먼저'); process.exit(1); }
+fs.copyFileSync(wasmSrc, path.join(abs(outDir), 'sql-wasm.wasm'));
 
 // 2)·3) 런타임 DLL 동봉 — 구형 OS(2008R2/Win7)만. modern은 --no-runtime로 건너뜀.
 let dllCount = 0;

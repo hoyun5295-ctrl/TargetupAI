@@ -15,6 +15,22 @@ set "LOG=%~dp0diagnose.txt"
 echo === Sync Agent self-contained === > "%LOG%"
 ver >> "%LOG%"
 echo.>> "%LOG%"
+
+REM -- 2026-10-14 Oracle zip only: the bundled Oracle Client 11.2 (oracle-client\) needs the VC++ 2005 SP1 x64
+REM    runtime (Microsoft.VC80.CRT 8.0.50727.762). Server 2016 does not ship it, so oci.dll would fail to load.
+REM    The redistributable, when bundled, is ALWAYS run (/q is idempotent and also repairs an older/broken VC80 -
+REM    checking WinSxS folder names cannot tell 8.0.50727.42 from the required .762). Exit code decides:
+REM    0 = ok, 3010 = installed but Windows must restart (stop here, user reruns after reboot), other = stop + report.
+set "VCR=0"
+if exist "%~dp0oracle-client\vcredist_x64.exe" (
+  echo [vc80] running bundled VC++ 2005 SP1 x64 runtime installer ^(vcredist_x64.exe /q^) >> "%LOG%"
+  "%~dp0oracle-client\vcredist_x64.exe" /q >> "%LOG%" 2>&1
+  set "VCR=!errorlevel!"
+  echo VCREDIST_EXIT=!VCR! >> "%LOG%"
+  echo.>> "%LOG%"
+)
+if "!VCR!"=="3010" goto :vcr_reboot
+if not "!VCR!"=="0" goto :vcr_fail
 echo [0] sync-agent.exe --version >> "%LOG%"
 sync-agent.exe --version >> "%LOG%" 2>&1
 set "EC=!errorlevel!"
@@ -72,5 +88,22 @@ if "!EC!"=="0" if "!SVC!"=="0" (
     goto :done
   )
 )
+pause
+goto :done
+
+:vcr_reboot
+echo.
+echo  [REBOOT REQUIRED] VC++ 2005 runtime was installed but Windows must restart first.
+echo  Restart this server, then run this file again. Nothing else was installed yet.
+echo  ^(diagnose.txt: VCREDIST_EXIT=3010^)
+echo.
+pause
+goto :done
+
+:vcr_fail
+echo.
+echo  [FAIL] VC++ 2005 runtime install FAILED  EXIT=!VCR!  - the bundled Oracle client cannot load.
+echo  Nothing else was installed. ^>^>^>  SEND this file:  diagnose.txt
+echo.
 pause
 :done

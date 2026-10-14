@@ -22,6 +22,10 @@ import { getLogger } from '../logger';
 
 const logger = getLogger('db:oracle');
 
+// ★ 2026-10-14 thick 초기화는 프로세스당 한 번 — oracledb 5.x 엔 oracledb.thin 이 없어 두 번째 커넥터(마법사 접속 테스트 → 테이블 조회)가
+//   initOracleClient 를 다시 부르면 예외다(같은 인자 재호출 허용은 6.0 부터 · Codex 3R). 성공했을 때만 기록해 실제 로드 실패는 다음 접속에서 다시 시도된다.
+let thickInitialized = false;
+
 export class OracleConnector implements IDbConnector {
   readonly dbType = 'oracle' as const;
   private pool: any = null;
@@ -57,35 +61,57 @@ export class OracleConnector implements IDbConnector {
         throw new Error(`oracledb 네이티브 로드 실패: ${m}`);
       }
 
-      // 드라이버 모드 — Oracle Client 라이브러리가 있으면 thick(11g/10g 지원), 없으면 thin(DB 12.1+만).
+      // 드라이버 모드 — thin(DB 12.1+ · 순수 JS · 12c 인증 지원) 과 thick(Oracle Client 필요 · 10g/11g 도 접속).
       //  ★ 2026-06-24: 고객 박스에 11.2+ 클라가 없어도(예: 10g만 설치) 연결되도록, 실행 파일 옆
-      //    `oracle-client/` 폴더(동봉한 11.2 클라 = full home 서브셋)를 1순위로 감지해 thick으로 잡는다.
-      //    없으면 ORACLE_HOME(고객 PC에 클라가 있는 경우)로 폴백.
-      //    · node12 oracledb 5.x = 항상 thick → 동봉 클라 필수 / node14+ 6.x = 동봉 있으면 thick, 없으면 thin.
-      //    full home 서브셋이라 데이터 파일(NLS 등)을 찾도록 ORACLE_HOME을 그 폴더로 함께 지정한다.
-      try {
-        const pathMod = require('path');
-        const fsMod = require('fs');
-        const isWin = process.platform === 'win32';
-        const exeDir = pathMod.dirname(process.execPath || process.argv[0] || process.cwd());
-        const bundled = pathMod.join(exeDir, 'oracle-client');
-        const bundledLib = pathMod.join(bundled, isWin ? 'bin' : 'lib');
-        let libDir: string | null = null;
-        if (fsMod.existsSync(bundledLib)) {
-          libDir = bundledLib;
-          process.env.ORACLE_HOME = bundled;
-          logger.info('동봉 Oracle Client 감지', { bundled });
-        } else if (process.env.ORACLE_HOME) {
-          libDir = pathMod.join(process.env.ORACLE_HOME, isWin ? 'bin' : 'lib');
+      //    `oracle-client/` 폴더(동봉한 11.2 클라 = full home 서브셋)를 감지해 thick 으로 잡는다. 없으면 ORACLE_HOME 폴백.
+      //    full home 서브셋이라 데이터 파일(NLS 등)을 찾도록 ORACLE_HOME 을 그 폴더로 함께 지정한다.
+      //  ★ 2026-10-14 모드는 **접속 전에 설정(config.oracleClient)으로 정한다**(Codex 1R high).
+      //    · "thin 먼저, 실패하면 thick" 은 못 쓴다 — createPool(poolMin 1) 은 11g 에도 thin 으로 일단 성공한 채 남아 그 뒤
+      //      initOracleClient 가 NJS-118 로 막히고, 남은 thin 풀의 재접속 반복이 11g XE processes 를 2분 만에 소진했다(ORA-00020 · 2026-10-14 실측).
+      //    · "동봉 클라가 있으면 무조건 thick" 도 못 쓴다 — Windows oracle zip 전부에 11.2 클라를 동봉하므로 12c+ 서버의
+      //      SQLNET.ALLOWED_LOGON_VERSION_SERVER=12a 인증을 11.2 클라가 못 넘는다(ORA-28040).
+      //    → 마법사(Oracle 버전 질문)·설정·--test-db --oracle-client 가 정한다. 미지정 = 옛 동작(동봉 클라·ORACLE_HOME 있으면 thick).
+      //    node12 oracledb 5.x 는 thin 이 없어 늘 thick(동봉 클라 필수).
+      const pathMod = require('path');
+      const fsMod = require('fs');
+      const isWin = process.platform === 'win32';
+      const exeDir = pathMod.dirname(process.execPath || process.argv[0] || process.cwd());
+      const bundled = pathMod.join(exeDir, 'oracle-client');
+      const bundledLib = pathMod.join(bundled, isWin ? 'bin' : 'lib');
+      const thickLibDir = (): string | null => {
+        if (fsMod.existsSync(bundledLib)) { process.env.ORACLE_HOME = bundled; logger.info('동봉 Oracle Client 감지', { bundled }); return bundledLib; }
+        if (process.env.ORACLE_HOME) return pathMod.join(process.env.ORACLE_HOME, isWin ? 'bin' : 'lib');
+        return null;
+      };
+      const thinAvailable = typeof this.oracledb.thin === 'boolean'; // 6.x = thin 모드 존재 · 5.x(node12) = 없음
+      const hasClient = fsMod.existsSync(bundledLib) || !!process.env.ORACLE_HOME;
+      const mode: 'thick' | 'thin' = !thinAvailable ? 'thick' : (this.config.oracleClient ?? (hasClient ? 'thick' : 'thin'));
+      // ★ 모드는 프로세스당 한 번만 정해진다(initOracleClient 는 되돌릴 수 없고, thin 접속을 한 번 만들면 thick 도 못 켠다 NJS-118).
+      //   마법사에서 "11g 이하"로 시험한 뒤 "12c 이상"으로 바꿔 다시 시험하면(또는 반대) 같은 프로세스라 바뀌지 않는다 → 요청과 실제를 대조해
+      //   어긋나면 마법사를 다시 실행하라고 분명히 말한다(Codex 2R · 조용히 옛 모드로 붙지 않는다).
+      const RESTART_HINT = '설치 마법사(또는 이 명령)를 닫고 다시 실행한 뒤 Oracle DB 버전을 다시 고르세요. 드라이버 모드는 프로세스당 한 번만 정해집니다.';
+      if (mode === 'thick') {
+        const libDir = thickLibDir();
+        if (!libDir) throw new Error('Oracle thick 클라이언트가 없습니다(동봉 oracle-client 도 ORACLE_HOME 도 없음). 10g·11g 는 Oracle Client 가 있어야 붙습니다');
+        if (thickInitialized || this.oracledb.thin === false) {
+          logger.info('Oracle thick 모드(10g·11g) · 이미 초기화됨', { libDir });
+        } else {
+          try {
+            this.oracledb.initOracleClient({ libDir });
+            thickInitialized = true;
+            logger.info('Oracle thick 모드(10g·11g)', { libDir, oracleClient: this.config.oracleClient ?? '(미지정 → 클라 있음)' });
+          } catch (err) {
+            const m = err instanceof Error ? err.message : String(err);
+            if (/NJS-118/.test(m)) throw new Error(`${m}\n→ 이 프로세스는 이미 thin(12c 이상)으로 접속한 적이 있어 11g 이하 방식으로 바꿀 수 없습니다. ${RESTART_HINT}`);
+            // 클라이언트 로드 실패(DPI-1047 · VC++ 2005 런타임 없음 · 파일 손상)는 숨기지 않는다 — 여기서 삼키면 thin 으로 붙어 NJS-138 이 엉뚱하게 뜬다
+            throw new Error(`${m}\n→ 동봉 Oracle Client 를 불러오지 못했습니다. oracle-client 폴더와 VC++ 2005 SP1 x64 런타임(diagnose.txt 의 VCREDIST_EXIT)을 확인하세요.`);
+          }
         }
-        if (libDir) {
-          this.oracledb.initOracleClient({ libDir });
-          logger.info('Oracle thick 클라이언트 경로 지정', { libDir });
+      } else {
+        if (thickInitialized || this.oracledb.thin === false) {
+          throw new Error(`이 프로세스는 이미 Oracle Client(11g 이하 방식)로 초기화돼 12c 이상(thin) 방식으로 바꿀 수 없습니다. ${RESTART_HINT}`);
         }
-      } catch (err) {
-        logger.warn('initOracleClient 결과', {
-          error: err instanceof Error ? err.message : String(err),
-        });
+        logger.info('Oracle thin 모드(12c 이상)', { oracleClient: this.config.oracleClient ?? '(미지정 → 클라 없음)' });
       }
 
       this.oracledb.outFormat = this.oracledb.OUT_FORMAT_OBJECT;
@@ -94,8 +120,14 @@ export class OracleConnector implements IDbConnector {
 
       // 연결 문자열: host:port/database (Service Name 방식)
       const connectString = `${this.config.host}:${this.config.port}/${this.config.database}`;
-
-      this.pool = await this.oracledb.createPool({
+      // 모드가 서버와 안 맞을 때의 두 오류에 설정으로 가는 길을 붙인다(--test-db JSON · 로그에 그대로 나온다)
+      const withModeHint = (err: unknown): unknown => {
+        const m = err instanceof Error ? err.message : String(err);
+        if (/NJS-138/.test(m)) return new Error(`${m}\n→ 이 DB 는 12.1 미만입니다. 설정 database.oracleClient 를 'thick' 으로(마법사: Oracle DB 버전 = 11g 이하).`);
+        if (/ORA-28040/.test(m)) return new Error(`${m}\n→ 서버가 11.2 클라이언트를 거부합니다(ALLOWED_LOGON_VERSION). 설정 database.oracleClient 를 'thin' 으로(마법사: Oracle DB 버전 = 12c 이상).`);
+        return err;
+      };
+      const openPool = async () => this.oracledb.createPool({
         user: this.config.username,
         password: this.config.password,
         connectString,
@@ -113,12 +145,29 @@ export class OracleConnector implements IDbConnector {
           );
         },
       });
+      // ★ 2026-10-14 thin 은 풀보다 먼저 **단일 접속**으로 서버 세대를 확인한다 — createPool(poolMin 1) 은 11g 에도 "성공"한 채 남아
+      //   그 뒤 getConnection 에서 NJS-138 이 나고, 그렇게 남은 풀의 재접속 반복이 11g 의 processes 를 소진한다(실측). 단일 접속은 NJS-138 로 즉시 끝나고 아무것도 남기지 않는다.
+      if (mode === 'thin') {
+        try {
+          const probe = await this.oracledb.getConnection({ user: this.config.username, password: this.config.password, connectString });
+          await probe.close();
+        } catch (err) {
+          throw withModeHint(err);
+        }
+      }
+      this.pool = await openPool();
 
-      // 연결 확인 + NLS 설정 검증
-      const conn = await this.pool.getConnection();
-      await conn.execute("ALTER SESSION SET NLS_LANGUAGE='KOREAN' NLS_TERRITORY='KOREA'");
-      await conn.execute('SELECT 1 FROM DUAL');
-      await conn.close();
+      // 연결 확인 + NLS 설정 검증 — 실패하면 풀을 닫고 던진다(반쯤 열린 접속을 들고 있지 않는다)
+      try {
+        const conn = await this.pool.getConnection();
+        await conn.execute("ALTER SESSION SET NLS_LANGUAGE='KOREAN' NLS_TERRITORY='KOREA'");
+        await conn.execute('SELECT 1 FROM DUAL');
+        await conn.close();
+      } catch (err) {
+        const p = this.pool; this.pool = null;
+        try { await p.close(0); } catch { /* 닫기 실패는 원래 오류를 가리지 않는다 */ }
+        throw withModeHint(err);
+      }
 
       logger.info('Oracle 연결 성공', {
         host: this.config.host,
@@ -145,18 +194,29 @@ export class OracleConnector implements IDbConnector {
     return this.pool !== null;
   }
 
+  /** ★ 2026-10-14 접속 실패는 이유째로 던진다 — false 로 접으면 모드 안내(NJS-138 · ORA-28040 · 재실행)가 마법사 응답·진단 JSON 에 닿지 않는다(Codex 3R).
+   *  호출부 8곳(setup/server.ts ×3 · setup/cli.ts ×2 · setup/test-db.ts · index.ts · sync/engine.ts)은 모두 try/catch 로 message 를 받는다.
+   *  connect() 가 이미 'Oracle 연결 실패' 를 로그한다. false = 붙었는데 검증 쿼리 결과가 없음. */
   async testConnection(): Promise<boolean> {
+    const openedHere = !this.pool;
+    await this.connect();
     try {
-      await this.connect();
       const conn = await this.pool.getConnection();
-      const result = await conn.execute('SELECT 1 AS test FROM DUAL');
-      await conn.close();
+      let result: any;
+      try {
+        result = await conn.execute('SELECT 1 AS test FROM DUAL');
+      } catch (error) {
+        // 검증 오류를 보존한다 — finally 로 두면 close() 의 실패(E2)가 검증 실패(E1)를 덮어 마법사·진단에 원인이 안 남는다(Codex 5R). close 실패는 보조 로그만.
+        await conn.close().catch((e: unknown) => logger.warn('검증 커넥션 close 실패', { error: e instanceof Error ? e.message : String(e) }));
+        throw error;
+      }
+      await conn.close(); // 검증이 성공한 뒤의 close 실패는 그대로 전파(정리 실패도 감지)
       return result.rows?.length > 0;
     } catch (error) {
-      logger.error('Oracle 연결 테스트 실패', {
-        error: error instanceof Error ? error.message : String(error),
-      });
-      return false;
+      // 이 호출이 연 풀만 닫는다(마법사·CLI·진단의 임시 커넥터) — 종전엔 false 를 돌려줘 호출부가 disconnect() 를 불렀지만 예외 경로에선 못 부른다(Codex 4R).
+      // 엔진이 공유하는(이미 열려 있던) 풀은 건드리지 않는다 — testSource() 의 일시 실패로 본 동기화 풀을 닫으면 안 된다.
+      if (openedHere) await this.disconnect().catch(() => undefined);
+      throw error;
     }
   }
 

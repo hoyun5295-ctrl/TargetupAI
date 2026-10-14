@@ -283,6 +283,14 @@ async function stepDbConnection(): Promise<{
     ? await ask('CA 인증서 파일 경로 (Enter=검증 없이 암호화만)')
     : '';
 
+  // ★ 2026-10-14 Oracle 은 접속 전에 드라이버 모드를 정한다(10g·11g = 동봉 클라 thick · 12c 이상 = thin). 자동 판정이 없는 이유 = db/oracle.ts.
+  const oracleClient = dbType === 'oracle'
+    ? await askSelect('Oracle DB 버전:', [
+        { name: '11g 이하 (10g · 11g): 동봉 Oracle Client 로 접속', value: 'thick' },
+        { name: '12c 이상 (12c · 18c · 19c · 21c · 23ai)', value: 'thin' },
+      ])
+    : undefined;
+
   const dbConfig: DbConnectionConfig = {
     type: dbType as DbConnectionConfig['type'],
     host,
@@ -293,6 +301,7 @@ async function stepDbConnection(): Promise<{
     queryTimeout: 30000,
     ssl: useSsl,
     sslCaPath: sslCa.trim() || undefined,
+    oracleClient: oracleClient as DbConnectionConfig['oracleClient'],
   };
 
   // 접속 테스트
@@ -921,6 +930,7 @@ export async function startSetupCli(
         queryTimeout: dbConfig.queryTimeout || 30000,
         ssl: dbConfig.ssl === true, // ★ 2026-07-27 암호화 연결 여부 저장(설치 후 재기동에도 유지)
         sslCaPath: dbConfig.sslCaPath,
+        oracleClient: dbConfig.oracleClient, // ★ 2026-10-14 Oracle 모드(접속 전 결정 · 재기동에도 유지)
         delimiter: dbConfig.delimiter || ',',
         encoding: dbConfig.encoding || 'utf-8',
         watchMode: dbConfig.watchMode || false,

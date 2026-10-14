@@ -20,7 +20,7 @@ from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.worksheet.datavalidation import DataValidation
 
 ROOT = Path(__file__).resolve().parent
-DEFAULT_VERSION = "1.1"
+DEFAULT_VERSION = "1.2"
 TITLE = "Sync Agent 설치 사전 질의서"
 
 FONT_NAME = "맑은 고딕"
@@ -52,8 +52,10 @@ SECTIONS = [
         ("2-4", "에이전트 설치 서버에서 DB 호스트 · 포트로 접속", ["가능", "방화벽 신청 필요"], ""),
     ]),
     ("3. 고객 · 구매 데이터 구성 (가장 중요합니다)", [
-        ("3-1", "고객(회원) 데이터의 위치: DB(스키마)명과 테이블 또는 뷰 이름", None, "예: shop.member_view (뷰)"),
-        ("3-2", "구매(주문) 데이터의 위치: DB(스키마)명과 테이블 또는 뷰 이름", None, "예: shop.order_view (뷰)"),
+        ("3-1", "고객(회원) 데이터의 위치: DB(스키마 · 소유 계정)명과 테이블 또는 뷰 이름", None,
+         "예: shop.member_view (뷰) / Oracle 이면 CRM.MEMBER_VIEW 처럼 소유 계정명까지"),
+        ("3-2", "구매(주문) 데이터의 위치: DB(스키마 · 소유 계정)명과 테이블 또는 뷰 이름 · 한 행이 전표(주문) 한 건인지, 고객별 누계인지", None,
+         "예: shop.order_view (뷰) · 전표 단위\n고객별 합계만 있는 표로는 구매 이력이 들어오지 않습니다"),
         ("3-3", "원본이 접속 DB와 다른 DB에 있어 뷰로 모아 노출하는 구성", ["예", "아니오"], "예: 고객 · 주문 원본이 각각 다른 DB"),
         ("3-4", "대략 몇 행입니까", None, "예: 고객 약 30만 · 주문 약 500만\n「확인 명령」 시트 4번"),
         ("3-5", "한 행을 고유하게 식별하는 컬럼", None,
@@ -64,8 +66,10 @@ SECTIONS = [
          "표시 컬럼에 남긴다면 컬럼 이름과 값을 오른쪽 답 칸에 함께 적어 주세요"),
         ("3-8", "문자(광고) 수신동의 컬럼의 이름과 실제로 들어 있는 값 전부", None,
          "예: SMS_YN (Y · N · 공란)\n「확인 명령」 시트 5번 결과를 그대로 적어 주세요"),
-        ("3-9", "고객 · 구매 표(뷰)의 구조", ["시트에 붙였음", "파일로 첨부함"],
-         "「확인 명령」 시트 3번 결과를 「고객 표 구조」 · 「구매 표 구조」 시트에 붙여 주세요"),
+        ("3-9", "고객 · 구매 표(뷰)의 구조 (첫 줄부터 끝 줄까지 전부)", ["시트에 붙였음", "파일로 첨부함"],
+         "「확인 명령」 시트 3번 결과를 「고객 표 구조」 · 「구매 표 구조」 시트에 첫 줄부터 끝 줄까지 전부 붙여 주세요\n일부만 오면 3-5~3-8 을 판정할 수 없어 설치가 미뤄집니다"),
+        ("3-10", "그 표(뷰)에 여러 회사 · 사업부 · 브랜드의 데이터가 섞여 있는지", ["아니오", "예"],
+         "섞여 있으면 한줄로로 보낼 회사를 가르는 컬럼 이름과 값을 오른쪽 답 칸에 함께 적어 주세요\n예: 예 · COMPANY_CD = 'A1' 만"),
     ]),
     ("4. 접속 계정 (비밀번호는 적지 마세요)", [
         ("4-1", "에이전트용 읽기 전용 계정 이름 (새로 만드는 것을 권합니다)", None, "예: sync_reader"),
@@ -93,14 +97,16 @@ COMMAND_GROUPS = [
         ("MySQL · Aurora 버전", "SELECT VERSION();"),
         ("MySQL · Aurora 암호화 연결 강제", "SHOW VARIABLES LIKE 'require_secure_transport';"),
         ("SQL Server 버전", "SELECT @@VERSION;"),
+        ("SQL Server 암호화 연결", "SELECT encrypt_option FROM sys.dm_exec_connections WHERE session_id = @@SPID;"),
         ("Oracle 버전", "SELECT banner FROM v$version;"),
+        ("Oracle 암호화 연결(tcps 면 암호화)", "SELECT SYS_CONTEXT('USERENV','NETWORK_PROTOCOL') FROM dual;"),
         ("PostgreSQL 버전", "SELECT version();"),
         ("PostgreSQL 암호화 연결", "SHOW ssl;"),
     ]),
     ("3. 표 구조 (고객 표와 구매 표 둘 다 · 표이름 자리에 실제 이름)", [
         ("MySQL · Aurora (테이블 · 뷰 공통)", "SHOW CREATE TABLE 표이름;"),
         ("SQL Server", "EXEC sp_help '표이름';"),
-        ("Oracle", "DESC 표이름"),
+        ("Oracle (결과가 잘리지 않게 두 줄을 차례로)", "SET LINESIZE 200\nDESC 표이름"),
         ("PostgreSQL", "\\d 표이름"),
     ]),
     ("4. 행 수 (고객 표와 구매 표 둘 다)", [
@@ -244,9 +250,9 @@ def build_commands(ws):
 def build_paste(ws, which):
     for col in "ABCDEFGH":
         ws.column_dimensions[col].width = 22
-    title_block(ws, f"{which} 구조", f"「확인 명령」 시트 3번을 {which}에 실행한 결과를 아래 노란 칸(A5부터)에 그대로 붙여 주세요.", "H")
+    title_block(ws, f"{which} 구조", f"「확인 명령」 시트 3번을 {which}에 실행한 결과를 아래 노란 칸(A5부터)에 첫 줄부터 끝 줄까지 전부 붙여 주세요.", "H")
     ws.merge_cells("A3:H3")
-    put(ws, "A3", "결과가 길면 파일로 저장해 메일에 첨부하셔도 됩니다. 데이터(행 값)는 붙이지 않으셔도 됩니다.",
+    put(ws, "A3", "컬럼이 많아 칸이 모자라면 파일로 저장해 메일에 첨부해 주세요. 일부만 붙이면 설치가 미뤄집니다. 데이터(행 값)는 붙이지 않으셔도 됩니다.",
         fnt=font(9.5), align=WRAP_CENTER, border=False)
     for row in range(5, 65):
         for col in "ABCDEFGH":

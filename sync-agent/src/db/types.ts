@@ -32,6 +32,15 @@ export interface DbConnectionConfig {
    */
   sslCaPath?: string;
 
+  // ─── Oracle 드라이버 모드 (★ 2026-10-14) ─────────────────
+  /**
+   * Oracle 전용. 접속 **전에** 정해야 하는 값이라 설정으로 받는다(자동 판정 없음 — 이유는 db/oracle.ts).
+   *   'thick' = 10g·11g. 실행 파일 옆 동봉 oracle-client(Instant Client 11.2) 또는 ORACLE_HOME 으로 접속.
+   *   'thin'  = 12c 이상. 순수 JS 드라이버(12c 인증 지원 · Oracle Client 불필요).
+   * 미지정 = 옛 동작(동봉 클라·ORACLE_HOME 이 있으면 thick, 없으면 thin · oracledb 5.x 는 늘 thick).
+   */
+  oracleClient?: 'thick' | 'thin';
+
   // ─── Excel/CSV 전용 (optional) ──────────────────────
   /** 파일 경로 (excel/csv 타입 시 필수) */
   filePath?: string;
@@ -58,7 +67,7 @@ export interface IDbConnector {
   /** 연결 상태 확인 */
   isConnected(): boolean;
 
-  /** 연결 테스트 (설치 시 사용) */
+  /** 연결 테스트 (설치 시 사용). ★2026-10-14 Oracle 은 접속 실패를 이유째로 throw 한다(모드 안내 전달) — 호출부는 try/catch 로 message 를 받는다. */
   testConnection(): Promise<boolean>;
 
   /**

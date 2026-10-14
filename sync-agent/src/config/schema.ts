@@ -35,6 +35,8 @@ const DatabaseConfigSchema = z.object({
   // ★ 2026-07-27 클라우드 DB(Aurora/RDS/Azure) TLS 강제 대응. 기본 false = 기존 동작 보존.
   ssl: z.boolean().default(false),
   sslCaPath: z.string().optional(),
+  // ★ 2026-10-14 Oracle 드라이버 모드(10g·11g = thick · 12c+ = thin). 미지정 = 옛 동작. 뜻 = db/types.ts
+  oracleClient: z.enum(['thick', 'thin']).optional(),
 
   // Excel/CSV 전용 (optional)
   filePath: z.string().optional(),
