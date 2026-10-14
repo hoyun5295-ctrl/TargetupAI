@@ -1303,7 +1303,7 @@ export default function SalesOutreachModal({ onClose, variant = 'modal', initial
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">대표 상품 이미지 주소 <span className="text-gray-400 font-normal">(선택)</span></label>
                   <input value={repImageUrl} onChange={(e) => setRepImageUrl(e.target.value.slice(0, 500))}
-                    placeholder="배경 없이 제품만 찍힌 사진 주소"
+                    placeholder="제품컷이면 누끼 · 글자 없는 사진이면 사진 카드"
                     className="w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none" />
                 </div>
                 <div>
@@ -1837,7 +1837,9 @@ export default function SalesOutreachModal({ onClose, variant = 'modal', initial
                           {imageAsset?.url ? (
                             <img src={imageAsset.url} alt="대표 이미지" className="max-w-[480px] w-full mx-auto rounded-xl" />
                           ) : <div className="text-white/40 text-sm p-8">이미지가 없습니다</div>}
-                          {imageAsset?.category && <p className="mt-2 text-[11px] text-white/40">템플릿 {imageAsset.category} · {imageAsset.kind === 'event' ? '행사형' : '제품형'}{imageAsset.usedCutout ? ' · 선택 이미지 누끼 사용' : ''}</p>}
+                          {imageAsset?.category && <p className="mt-2 text-[11px] text-white/40">템플릿 {imageAsset.category} · {imageAsset.kind === 'event' ? '행사형' : '제품형'}{imageAsset.heroRung?.poster?.label ? ` · ${imageAsset.heroRung.poster.label}` : (imageAsset.usedCutout ? ' · 선택 이미지 누끼 사용' : '')}</p>}
+                          {/* ★ 2026-10-13 최소 품질 — 단이 내려간 사유(서버 문장 그대로) */}
+                          {imageAsset?.heroRung?.poster?.reasonText && <p className="mt-1 text-[11px] text-amber-300/80">{imageAsset.heroRung.poster.reasonText}</p>}
                           {stage === 'ready' && <div className="mt-4 flex justify-center">{regenButton('image', '이미지 다시 만들기', true)}</div>}
                         </div>
                       )}

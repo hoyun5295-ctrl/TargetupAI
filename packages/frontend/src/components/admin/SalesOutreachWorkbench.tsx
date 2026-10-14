@@ -262,8 +262,9 @@ export default function SalesOutreachWorkbench({ onClose, onOpenJob, variant = '
             const b = DOMAIN_BADGE[c.domainVerdict];
             const on = i === focus;
             const canSelect = c.lane === 'send' && stage >= 2 && sendable.some((x) => x.id === c.id);
+            // ★ 2026-10-13 최소 품질 — 첫 칸 = 포스터 히어로면 단 이름(서버 문장 · 누끼 / 사진 카드 / 글자 포스터), 아니면 히어로 종류(홈 배너·행사 배너 = 사다리 밖) · 한 칸에 하나
             const facts = [
-              c.heroKind ? HERO_KIND_LABEL[c.heroKind] : null,
+              c.heroTier || (c.heroKind ? HERO_KIND_LABEL[c.heroKind] : null),
               typeof c.productCount === 'number' ? `상품 ${c.productCount}` : null,
               typeof c.eventCount === 'number' ? `행사 ${c.eventCount}` : null,
             ].filter(Boolean).join(' · ');
@@ -295,6 +296,7 @@ export default function SalesOutreachWorkbench({ onClose, onOpenJob, variant = '
                       : c.naverStoreUrl && <span className="text-[10.5px] px-1.5 py-0.5 rounded bg-green-50 text-green-700 inline-flex items-center gap-0.5"><Store className="w-3 h-3" /> 스토어</span>}
                   </div>
                   {facts && <div className="text-slate-600">{facts}</div>}
+                  {c.heroTierReason && <div className="text-amber-700">{c.heroTierReason}</div>}
                   {c.templateName && (
                     <div className="text-slate-500 truncate" title={c.templateReason || undefined}>템플릿 {c.templateName}{c.templateReason ? ` · ${c.templateReason}` : ''}</div>
                   )}

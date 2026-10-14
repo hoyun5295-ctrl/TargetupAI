@@ -73,6 +73,9 @@ export interface WorkbenchCard {
   templateReason?: string | null;
   productCount?: number | null;
   eventCount?: number | null;
+  /** ★ 2026-10-13 최소 품질 — 포스터 히어로의 단 이름(누끼 / 사진 카드 / 글자 포스터 · 코드 배경)과 사유 문장(서버 완성 · 없으면 칩을 그리지 않는다) */
+  heroTier?: string | null;
+  heroTierReason?: string | null;
 }
 
 export type WorkbenchLane = 'reading' | 'confirm' | 'producing' | 'review' | 'hold' | 'send' | 'sent' | 'post_review' | 'failed';

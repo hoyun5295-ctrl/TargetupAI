@@ -80,7 +80,7 @@
 
 <a id="c12"></a>
 
-### C12 · AI 영업 아웃리치 — **★1009 개편 코드완료·배포 대기**([설계서](../docs/2026-10-09-outreach-redesign-design.md) · 템플릿 판단 · 누끼 600 · 메일 첫 화면 · /admin/outreach 페이지 · DDL 0) · ★1001 접수 2건 배포([B-1001-2](BUGS.md) · 삭제 건 DM 숨김 · 미리 만든 DM 불러오기 · 템플릿 달) · ★0924 품질 A · B 스토어 판독기 배포완료 · 실측 대기([A](../docs/2026-09-24-outreach-quality-a-design.md) · [B](../docs/2026-09-24-outreach-naver-store-reader-design.md))
+### C12 · AI 영업 아웃리치 — **★1013 최소 품질 장치 코드 완료 · Codex · 배포 대기**([설계서](../docs/2026-10-13-outreach-minimum-quality-design.md) · 서수란 1008 접수 · 브레인스토밍 5역할 수렴 · 사다리 = 주인공(누끼 → 사진 카드 → 없음) × 배경(AI → 코드) · 카드 입장·산식 · 알파 비율 · 행사 장면 필터 44 · `heroRung` · 작업대 칩 · DDL 0 · 범위 밖 = 설계서 §7 · [B-1013-2](BUGS.md)) · **★1009 개편 배포 완료(1012 22:29)**([설계서](../docs/2026-10-09-outreach-redesign-design.md) · 템플릿 판단 · 누끼 600 · 메일 첫 화면 · /admin/outreach 페이지 · DDL 0) · ★1001 접수 2건 배포([B-1001-2](BUGS.md) · 삭제 건 DM 숨김 · 미리 만든 DM 불러오기 · 템플릿 달) · ★0924 품질 A · B 스토어 판독기 배포완료 · 실측 대기([A](../docs/2026-09-24-outreach-quality-a-design.md) · [B](../docs/2026-09-24-outreach-naver-store-reader-design.md))
 > 호출어 **"영업 아웃리치"** → **[FEATURE-SALES-OUTREACH.md](../docs/FEATURE-SALES-OUTREACH.md)가 전부 소유**(불변 51 §2 · 파일별 §3 · ENV §4 · 이력 §5) · 0923 근거 = [직접 발송 설계서](../docs/2026-09-23-outreach-direct-send-design.md) · 배포 = **[OPS §2-2-E ⑨](OPS.md)**
 > ⛔ 요지: 발송 코어 1곳(승인 기록 필수 · 진입점 3) · 수신처 = 행 값(요청 인자 0) · 한 트랜잭션(수신거부·상한·같은 회사 UNIQUE) · 확인한 판만 · 법정 footer 는 조립 시점 · 네이버 스토어 서버 fetch 0(북마크 판 2 = 스토어 상태 허용 칸만 · B) · 담당자 주소 크롤 추출 0
 > ★1009 = 브레인스토밍 5역할 수렴 → 1~3단계 구현(backend 8371 통과 · tsc 0 · 작업대 5폭 실측) · 접수 2건 선수정([B-1009-1](BUGS.md) 뒤로가기 · [B-1009-2](BUGS.md) 헤라 중복) · 배포 뒤 실측 = 새 잡 1곳(템플릿 이유 · 누끼 · 휴대폰 틀) · [다른 안] 2위 전환 · 검수 메일 3곳 · 누끼 0건 비율 · 개편 전 10곳 점수 기록(읽기 SQL) · 추가 과제 = 설계서 §6

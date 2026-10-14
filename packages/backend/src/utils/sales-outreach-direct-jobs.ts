@@ -27,7 +27,7 @@ import {
 // ★ 2026-09-24 B 네이버 스토어 전용 판독기(허용 칸 · 순수)
 import { parseNaverStoreState, pickNaverStoreState, naverStoreStateFromHtml } from './sales-outreach-naver-store';
 import { sendOutreachDirectMail, sendOutreachCopyMail, isOutreachMailerReady } from './outreach-mailer';
-import { PUBLIC_BASE } from './sales-outreach-produce';
+import { PUBLIC_BASE, heroRungOf, floorMissText } from './sales-outreach-produce';
 import { getTemplate } from './image-studio-templates';
 import { getActiveStyleGuide } from './sales-outreach-style';
 import { createSlotQueue } from './outreach-slot-queue';
@@ -761,7 +761,7 @@ export function laneOf(input: { stage: string; reviewed: boolean; hold: boolean;
  * ★ 2026-10-09 R13 판정 카드 히어로(순수) — 메일 첫 화면과 같은 원천: 시안의 첫 gallery(표준 조립 히어로 · id 접미 = 종류) → 없으면 포스터.
  * 템플릿 이름은 포스터가 있을 때만(배너 히어로 = 템플릿 무관) · 재료 수 = DM 레시피 계수.
  */
-export function cardHeroOf(row: Row): { heroUrl: string | null; heroKind: 'poster' | 'banner' | 'card' | null; templateName: string | null; templateReason: string | null; productCount: number | null; eventCount: number | null } {
+export function cardHeroOf(row: Row): { heroUrl: string | null; heroKind: 'poster' | 'banner' | 'card' | null; templateName: string | null; templateReason: string | null; productCount: number | null; eventCount: number | null; heroTier: string | null; heroTierReason: string | null } {
   const sections: Row[] = Array.isArray(row.brand_sections) ? row.brand_sections : [];
   const g = sections.find((s) => s?.type === 'gallery' && Array.isArray(s?.props?.images) && s.props.images[0]?.url);
   const id = String(g?.id || '');
@@ -771,6 +771,8 @@ export function cardHeroOf(row: Row): { heroUrl: string | null; heroKind: 'poste
   const posterShown = heroKind === 'poster' && !!row.poster_url;
   const m = row.recipe_materials && typeof row.recipe_materials === 'object' ? row.recipe_materials : null;
   const num = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) ? v : null);
+  // ★ 2026-10-13 최소 품질 — 포스터 히어로의 단(누끼 / 사진 카드 / 글자 포스터 · 코드 배경)과 사유. 옛 행은 usedCutout 으로 추정(label 만). 문장은 서버가 완성(shared.ts:4).
+  const rung = posterShown ? heroRungOf({ url: row.poster_url, usedCutout: row.used_cutout === true || row.used_cutout === 'true', cutoutFrom: null, heroRung: row.hero_rung }) : null;
   return {
     heroUrl,
     heroKind: heroUrl ? heroKind : null,
@@ -778,6 +780,8 @@ export function cardHeroOf(row: Row): { heroUrl: string | null; heroKind: 'poste
     templateReason: posterShown && row.template_reason ? String(row.template_reason).slice(0, 80) : null,
     productCount: m ? num(m.products) : null,
     eventCount: m ? num(m.eventCards) : null,
+    heroTier: rung ? rung.poster.label : null,
+    heroTierReason: rung ? (rung.poster.reasonText || floorMissText(rung.floor.miss)) : null,
   };
 }
 
@@ -811,6 +815,8 @@ export async function getOutreachWorkbench(filter: { batch?: string | null }, op
             d.payload->>'captureUrl' AS capture_url, d.payload->'visionScore' AS vision, d.payload->>'dmUrl' AS dm_url,
             -- ★ 2026-10-09 R13 판정 카드 재료: 포스터 · 템플릿 · 고른 이유 · 시안 히어로 · 재료 수
             i.payload->>'url' AS poster_url, i.payload->>'templateId' AS template_id, j.stage_results->'template_pick'->>'reason' AS template_reason,
+            -- ★ 2026-10-13 최소 품질: 포스터 단 기록(없는 옛 행은 usedCutout 으로 추정)
+            i.payload->'heroRung' AS hero_rung, i.payload->>'usedCutout' AS used_cutout,
             e.payload->'brandSections' AS brand_sections, d.payload->'recipe'->'materials' AS recipe_materials,
             s.id AS send_id, s.outcome AS send_outcome, s.review_flag, s.mode AS send_mode, s.created_at AS send_at
        FROM sales_outreach_jobs j

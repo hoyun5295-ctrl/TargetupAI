@@ -74,7 +74,7 @@ import {
   type RenderResult, type MaterialSource, type EscalationReason,
 } from './sales-outreach-render';
 // ★ 2026-09-09 기획전 슬라이스 재료 판정(렌더 기하 → 세로로 이어진 넓은 이미지 묶음) · ★ v4 홈 상단 배너
-import { detectEventSlices, heroBannersOf, promoCardTitleOf, normalizeUrlKey, pickEventBannerImage, type EventSliceMaterial, type HeroBanner } from './sales-outreach-slices';
+import { detectEventSlices, heroBannersOf, promoCardTitleOf, normalizeUrlKey, pickEventBannerImage, type EventSliceMaterial, type HeroBanner, type ImageKindJudge } from './sales-outreach-slices';
 
 /** ★ 2026-09-09 v4 홈에 걸린 프로모션 페이지 시도 상한 · 페이지당 렌더 예산 · 총 벽시계 */
 const OUTREACH_PROMO_PAGES_MAX = 3;
@@ -1763,13 +1763,23 @@ async function runProductionMetered(jobId: string, lockToken: string, meter: Out
           const selectedSrc: string | null = bp.selectedImageUrl ? String(bp.selectedImageUrl) : null;
           const selectedCopy = selectedSrc && media ? (media.gallery || []).find((g) => g.srcUrl === selectedSrc) : undefined;
           const selectedKind = selectedCopy && media?.imageKinds ? (media.imageKinds[selectedCopy.url]?.kind || null) : null;
-          // ★ 2026-10-09 R3 배너·사진·문서 판정은 누끼 원천에서 **제외**(옛 = 뒤로 미루기 → 상품이 없으면 결국 배너에서 땄다 · 서수란 접수 4) · 판정 없음 = 통과(모델 부재 폴백)
-          const notCutout = (k: string | null | undefined) => k === 'banner' || k === 'photo' || k === 'document';
+          // ★ 2026-10-09 R3 배너·문서 판정은 누끼 원천에서 **제외**(옛 = 뒤로 미루기 → 상품이 없으면 결국 배너에서 땄다 · 서수란 접수 4) · 판정 없음 = 통과(모델 부재 폴백)
+          // ★ 2026-10-13 최소 품질 — photo 는 후보에 넣는다(제작이 rembg 를 건너뛰고 사진 카드 입장으로 처리 · 글자 없는 사진만 카드가 된다)
+          const notCutout = (k: string | null | undefined) => k === 'banner' || k === 'document';
           const kinds = media?.imageKinds || null;
           const productCutouts = (media?.products || []).map((p) => String(p.image_url || '')).filter((u) => !!u && !notCutout(kinds?.[u]?.kind)).slice(0, OUTREACH_CUTOUT_TRY_MAX);
           // ★ R9 엑셀 "대표 상품 이미지 URL" = 사람이 지정한 누끼 원천(맨 앞 · 인물 판정·600 하한은 그대로 통과해야 한다)
           const repSrc: string | null = typeof bp.repImageUrl === 'string' && /^https?:\/\//i.test(bp.repImageUrl) ? String(bp.repImageUrl) : null;
           const cutoutOrder = [repSrc, ...(notCutout(selectedKind) ? [] : [selectedSrc]), ...productCutouts].filter((u, i, arr): u is string => !!u && arr.indexOf(u) === i);
+          // ★ 2026-10-13 후보 URL → 종류 판정(판정 키는 사본 URL · 사람 선택은 selectedCopy · 대표 이미지는 srcUrl 이 같은 사본이 있으면 그것) · 없는 후보는 제작이 1회 판정한다
+          const cardKinds: Record<string, ImageKindJudge> = {};
+          for (const u of productCutouts) { const k = kinds?.[u]; if (k) cardKinds[u] = k; }
+          if (selectedSrc && selectedCopy && kinds?.[selectedCopy.url]) cardKinds[selectedSrc] = kinds[selectedCopy.url];
+          if (repSrc && kinds) {
+            const repCopy = (media?.gallery || []).find((g) => g.srcUrl === repSrc)?.url || (media?.products || []).find((p) => p.srcImageUrl === repSrc)?.image_url || null;
+            if (repCopy && kinds[repCopy]) cardKinds[repSrc] = kinds[repCopy];
+          }
+          const designatedUrls = [repSrc, selectedSrc].filter((u): u is string => !!u);
           // ★ R9 강조 포인트 = 원문 검색어(문안 아님) — 찾은 원문 구간만 판단 입력·포스터 제목 후보 맨 앞
           const focusQuote = focusQuoteOf(typeof bp.focusHint === 'string' ? bp.focusHint : null, materialText(bp.eventTextFull, bp.excerpt, 6000));
           // ★ R1 템플릿 판단(텍스트 1회 · 대기열 밖) — 잡에 저장된 순위가 있으면 다시 부르지 않는다(같은 잡 = 같은 순위)
@@ -1802,6 +1812,9 @@ async function runProductionMetered(jobId: string, lockToken: string, meter: Out
               // ★ 2026-09-23 자동 확정 건 = 사람이 이미지를 보지 않았다 → 누끼 원천은 인물 판정 none 만(fail-closed · 설계서 §7)
               strictPerson: job.event_quote?.confirmedBy === 'auto:v1',
               templateRank: templatePick,
+              // ★ 2026-10-13 최소 품질 — 사진 카드 입장 판정 재료 · 사람이 정한 원천
+              cardKinds,
+              designatedUrls,
             });
           } catch (err: any) {
             studioError = detailOf(err);
@@ -1827,6 +1840,8 @@ async function runProductionMetered(jobId: string, lockToken: string, meter: Out
             bannerUrl: img.bannerUrl, bannerSize: img.bannerSize,
             // ★ 2026-09-15 B-0915-4 글자색 근거(배경 밝기 실측 · light = 흰 글자)
             posterInk: img.posterInk, bannerInk: img.bannerInk,
+            // ★ 2026-10-13 최소 품질 — 사다리 단 기록(주인공 × 배경 · 사유 · 최소선) · 작업대 칩·상세 설명 줄이 label·reasonText 를 그대로 그린다
+            heroRung: img.heroRung,
             regenCount: regenSeqOf(sr, 'image'),
           }, 'producing_image', lockToken, regenSeqOf(sr, 'image')))) return;
         }

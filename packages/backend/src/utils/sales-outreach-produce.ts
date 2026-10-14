@@ -391,13 +391,10 @@ export function templateFitsMonth(templateId: string, month: number): boolean {
 export function pickTemplate(industry: string | null | undefined, seed: string, needProduct: boolean, now: Date = new Date()): StudioTemplate {
   const code: IndustryCode = isIndustryCode(industry) ? industry : 'etc';
   const wantKind = needProduct ? 'product' : 'event';
-  let pool = TEMPLATE_POOLS[code][wantKind];
+  // ★ 2026-10-01 이번 달(한국 시간)에 어울리는 것만 · ★ 2026-10-13 행사 장면 필터 — 둘 다 outreachTemplatePool 하나가 소유(비면 원래 풀)
+  let pool = outreachTemplatePool(code, wantKind, now);
   if (pool.length === 0) pool = STUDIO_TEMPLATES.filter((t) => (t.kind ?? 'product') === wantKind);
   if (pool.length === 0) pool = STUDIO_TEMPLATES;
-  // ★ 2026-10-01 이번 달(한국 시간)에 어울리는 것만. 하나도 없으면 옛 묶음 그대로(선택이 비지 않게).
-  const month = kstMonth(now);
-  const fitting = pool.filter((t) => templateFitsMonth(t.id, month));
-  if (fitting.length > 0) pool = fitting;
   return pool[hashSeed(seed) % pool.length];
 }
 
@@ -410,9 +407,8 @@ export const OUTREACH_TEMPLATE_RANK = 3;
 /** 판단 후보 = 업종 풀(제품·행사) 중 이번 달 맞는 것(순수). 하나도 안 맞으면 그 풀 그대로. */
 export function templatePickCandidates(industry: string | null | undefined, now: Date = new Date()): { product: StudioTemplate[]; event: StudioTemplate[] } {
   const code: IndustryCode = isIndustryCode(industry) ? industry : 'etc';
-  const month = kstMonth(now);
-  const fit = (list: StudioTemplate[]) => { const f = list.filter((t) => templateFitsMonth(t.id, month)); return f.length ? f : list; };
-  return { product: fit(TEMPLATE_POOLS[code].product), event: fit(TEMPLATE_POOLS[code].event) };
+  // ★ 2026-10-13 달 필터 + 행사 장면 필터 = outreachTemplatePool 하나
+  return { product: outreachTemplatePool(code, 'product', now), event: outreachTemplatePool(code, 'event', now) };
 }
 
 /** 해시 순위(판단 실패·빈 쪽 채우기) — pickTemplate 과 같은 풀에서 seed 만 바꿔 서로 다른 3개(순수) */
@@ -501,9 +497,12 @@ export async function judgeOutreachTemplates(input: TemplateJudgeInput): Promise
   return { product: hashProduct(), event: hashEvent(), reason: '', source: 'hash', at };
 }
 
-/** 순위에서 이번 판의 템플릿(순수) — 순위[regenSeq % 길이] · 순위가 없거나 id 가 사라졌으면 옛 해시 */
+/**
+ * 순위에서 이번 판의 템플릿(순수) — 순위[regenSeq % 길이] · 순위가 없거나 id 가 사라졌으면 옛 해시
+ * ★ 2026-10-13 저장된 순위(stage_results.template_pick)는 이미지를 다시 만들어도 지워지지 않으므로(jobs) 장면 필터를 여기서 한 번 더 건다(회의론자 f). 전부 걸러지면 해시.
+ */
 export function templateFromRank(rank: Pick<OutreachTemplatePick, 'product' | 'event'> | null | undefined, kind: 'product' | 'event', regenSeq: number, fallback: () => StudioTemplate): StudioTemplate {
-  const list = (rank && Array.isArray(rank[kind]) ? rank[kind] : []).map((id) => getTemplate(String(id))).filter((t): t is StudioTemplate => !!t && (t.kind ?? 'product') === kind);
+  const list = (rank && Array.isArray(rank[kind]) ? rank[kind] : []).map((id) => getTemplate(String(id))).filter((t): t is StudioTemplate => !!t && (t.kind ?? 'product') === kind && outreachSceneAllowed(t));
   if (!list.length) return fallback();
   return list[Math.max(0, regenSeq) % list.length];
 }
@@ -529,11 +528,33 @@ export function focusQuoteOf(hint: string | null | undefined, text: string | nul
   return src.slice(start, start + OUTREACH_FOCUS_MAX).trim();
 }
 
-/** 템플릿 장면에서 소품·제품 자리 문장만 지운다(순수 · 덮어쓰는 지시 추가 0 · LESSONS_BACKEND 0809) — 서버가 제품을 얹고 배경엔 소품을 두지 않는다 */
+/**
+ * 템플릿 장면에서 소품·제품 자리 문장만 지운다(순수 · 덮어쓰는 지시 추가 0 · LESSONS_BACKEND 0809) — 서버가 제품을 얹고 배경엔 소품을 두지 않는다
+ * ★ 2026-10-13 최소 품질(설계서 F) — "the product standing/centered" · "platform for the product" 3문장(templates 366·375·546)이 안 걸리던 것 보강.
+ *   `products?` 가 같은 문장에 있을 때만 지운다(회의론자 d: 느슨한 낱말 추가는 "long-standing" 같은 주문장까지 지워 모델이 빈자리를 채운다).
+ */
 export function stripScaffoldProps(scaffold: string): string {
   const sentences = String(scaffold || '').split(/(?<=[.!?])\s+/);
-  const kept = sentences.filter((s) => !/\bprops?\b|\bproducts?\s+(stands?|sits?|rests?|is placed|placed)\b/i.test(s));
+  const kept = sentences.filter((s) => !/\bprops?\b|\bproducts?\s+(stands?|standing|sits?|rests?|is placed|placed|centered)\b|\b(platform|stage|ledge|surface|pedestal|podium)\s+for\s+the\s+products?\b/i.test(s));
   return (kept.length ? kept : sentences).join(' ').trim();
+}
+
+/**
+ * ★ 2026-10-13 최소 품질(설계서 F) — 행사 장면 중 물건·숫자를 직접 그리는 장면은 아웃리치 후보에서 뺀다(순수).
+ *   누끼·카드 없이 행사 템플릿으로 갈 때 모델이 상자·병·선물을 브랜드 것처럼 지어냈고(B-0909-3 ⑤), 달력·숫자 조형은 숫자 유출을 스스로 부른다.
+ *   스튜디오 목록은 그대로(아웃리치 후보 풀만). 주재자 실측 = 행사 173 중 44 제외 · 풀이 비면 원래 풀.
+ */
+export const OUTREACH_EVENT_SCENE_EXCLUDE_RE = /\b(bottles?|jars?|box(es)?|gifts?|bags?|perfumes?|tubes?|containers?|packag(es?|ing)|parcels?|number(ed|s)?|numerals?|calendars?)\b/i;
+export function outreachSceneAllowed(t: Pick<StudioTemplate, 'kind' | 'scaffold'>): boolean {
+  return t.kind !== 'event' || !OUTREACH_EVENT_SCENE_EXCLUDE_RE.test(String(t.scaffold || ''));
+}
+/** 아웃리치 후보 풀 하나(순수) — 업종 풀 → (행사면 장면 필터 · 비면 원래 풀) → 이번 달 맞는 것(비면 그대로). 판단 후보·해시·순위 재검이 전부 이 함수를 쓴다. */
+export function outreachTemplatePool(code: IndustryCode, kind: 'product' | 'event', now: Date = new Date()): StudioTemplate[] {
+  let pool: StudioTemplate[] = TEMPLATE_POOLS[code][kind];
+  if (kind === 'event') { const f = pool.filter(outreachSceneAllowed); if (f.length) pool = f; }
+  const month = kstMonth(now);
+  const fitting = pool.filter((t) => templateFitsMonth(t.id, month));
+  return fitting.length ? fitting : pool;
 }
 
 // ===== 재료 수집 (★ A-10b 이미지 실측·격상·사본 — 프로토 실측으로 확정된 규칙) =====
@@ -796,6 +817,8 @@ export interface OutreachImageResult {
   /** ★ 2026-09-15 B-0915-4 실측 근거 — 글자 띠 밝기로 고른 글자색(포스터 · 배너는 만들었을 때만) */
   posterInk: PosterInk;
   bannerInk: PosterInk | null;
+  /** ★ 2026-10-13 최소 품질 — 사다리 단 기록(주인공 × 배경 · 사유 · 최소선) · 화면은 label·reasonText 만 그린다 */
+  heroRung: HeroRung;
 }
 
 // ===== ★ 2026-09-06 S3 포스터 문구 3칸(순수 · 회의 수렴안 D5) =====
@@ -933,6 +956,15 @@ export function posterInkFor(meanLuma: number | null | undefined): PosterInk {
 
 /** 배경 파일의 글자 띠 평균 밝기(0~255 · greyscale 평균). 파일 부재·디코드 실패 = null(던지지 않는다 · 호출부는 현행 색). */
 export async function measurePosterInkZone(bgPath: string, zone: 'top' | 'bottom'): Promise<number | null> {
+  const s = await measurePosterInkStats(bgPath, zone);
+  return s ? s.mean : null;
+}
+
+/**
+ * ★ 2026-10-13 최소 품질(설계서 H) — 같은 띠의 평균 + 표준편차(어수선함 실측값 · heroRung.inkStd 기록 전용 · 판정에는 아직 쓰지 않는다 · 실측 뒤 scrim 결정).
+ * 기존 소비처(measurePosterInkZone)는 평균만 받는다(반환 형식 불변).
+ */
+export async function measurePosterInkStats(bgPath: string, zone: 'top' | 'bottom'): Promise<{ mean: number; std: number } | null> {
   try {
     const img = sharp(bgPath, { failOn: 'none' });
     const meta = await img.metadata();
@@ -946,8 +978,10 @@ export async function measurePosterInkZone(bgPath: string, zone: 'top' | 'bottom
     const band = await img.extract({ left: 0, top, width: w, height }).removeAlpha().greyscale().resize({ width: Math.min(128, w) }).raw().toBuffer();
     if (!band.length) return null;
     let sum = 0;
-    for (let i = 0; i < band.length; i++) sum += band[i];
-    return sum / band.length;
+    let sq = 0;
+    for (let i = 0; i < band.length; i++) { sum += band[i]; sq += band[i] * band[i]; }
+    const mean = sum / band.length;
+    return { mean, std: Math.sqrt(Math.max(0, sq / band.length - mean * mean)) };
   } catch (err: any) {
     console.log('[sales-outreach] 포스터 글자 띠 밝기 측정 실패(현행 색으로):', err?.message);
     return null;
@@ -1188,10 +1222,250 @@ export interface OutreachImageInput {
   strictPerson?: boolean;
   /** ★ 2026-10-09 R1 템플릿 판단 순위(stage_results.template_pick) · 없으면 옛 해시 */
   templateRank?: Pick<OutreachTemplatePick, 'product' | 'event'> | null;
+  /** ★ 2026-10-13 최소 품질 — 누끼 후보 URL → 이미지 종류 판정(사본 키를 호출부가 후보 URL 로 매핑) · 없는 후보는 제작 자리에서 1회 판정 */
+  cardKinds?: Record<string, ImageKindJudge> | null;
+  /** ★ 2026-10-13 사람이 정한 원천(대표 이미지 · 사람 선택) — 사진 카드로 통과하면 그 자리에서 멈춘다(확정한 것이 산출물에서 사라지지 않게) */
+  designatedUrls?: readonly string[];
 }
 
 /** ★ 2026-10-09 R3 누끼 해상도 하한(짧은 변) — 포스터에 폭 0.62배로 얹는다 → 3:4 기준 약 670px 필요 · 옛 300 은 2배 넘게 확대돼 뭉갰다(서수란 접수 1) · 시작값 · 실측으로 조정 */
 export const OUTREACH_CUTOUT_MIN_SIDE = 600;
+
+// ===== ★ 2026-10-13 최소 품질 장치(설계서 docs/2026-10-13-outreach-minimum-quality-design.md · 브레인스토밍 수렴안) =====
+// 사다리 = 주인공(누끼 → 사진 카드 → 없음) × 배경(AI → 코드). 재료가 적어도 포스터가 비거나 버려지지 않는다.
+
+export type HeroSubject = 'cutout' | 'photo_card' | 'none';
+export type HeroBg = 'ai' | 'code';
+export type HeroFloorMiss = 'subject' | 'title' | 'digits' | 'font';
+/** 한 판(포스터 또는 배너)의 단 기록 — 화면은 label·reasonText 문자열만 그린다(판정 복제 0) */
+export interface HeroRungPart {
+  subject: HeroSubject;
+  bg: HeroBg;
+  /** 주인공 원천 URL(누끼·카드) · 없음 = null */
+  from: string | null;
+  /** 카드 확대 배율 · 카드 짧은 변(실측 캔버스 px) */
+  scale: number | null;
+  shortPx: number | null;
+  /** 마지막 누끼 시도의 불투명 비율(시작값 보정용) */
+  alpha: number | null;
+  /** 단이 내려간 사유 코드(예: low_res:480 · person · banner · text · no_judge · card_small:650 · digits_twice · bg_failed) */
+  reason: string | null;
+  reasonText: string | null;
+  label: string;
+  bytes: number | null;
+  inkStd: number | null;
+}
+export interface HeroRung { poster: HeroRungPart; banner: HeroRungPart | null; floor: { ok: boolean; miss: HeroFloorMiss[] } }
+
+/** 프리셋 명목 캔버스 — 카드 통과 판정은 생성 **전**(템플릿 분기·진열면 지시가 결과를 쓴다)에 이 크기로 하고, 실측 캔버스에서는 크기만 다시 잰다(회의론자 c). */
+export const OUTREACH_CANVAS_NOMINAL: Record<'top' | 'bottom', { width: number; height: number }> = { top: { width: 1792, height: 2400 }, bottom: { width: 1920, height: 1080 } };
+/** 누끼 성공 판정 = 알파 ≥128 픽셀 비율. rembg 는 0.08~0.85(배경째 돌아온 것 = 접수 ④ 차단) · 몰 알파 PNG 는 하한만(꽉 찬 상자형 패키지 보존). 시작값. */
+export const OUTREACH_CUTOUT_ALPHA = { min: 0.08, maxRembg: 0.85 } as const;
+/**
+ * 사진 카드 산식(캔버스 짧은 변 S 기준 비율 · 3:4·16:9 공용). 자리 = 글자 띠 밖(3:4 는 POSTER_INK_ZONE.top.to 아래 · 16:9 는 bottom 띠 위).
+ * trim → contain → 확대 상한 1.5 → 통과 = 사진 짧은 변 ≥ 0.40·S(3:4 = 717px · 16:9 = 432px). 모양 = 흰 매트 · 둥근 모서리 · 그림자 한 가지.
+ */
+export const OUTREACH_PHOTO_CARD = {
+  box: { top: { x0: 0.08, x1: 0.92, y0: 0.30, y1: 0.92 }, bottom: { x0: 0.20, x1: 0.80, y0: 0.06, y1: 0.52 } },
+  upscaleMax: 1.5,
+  minShort: 0.40,
+  mat: 0.02,
+  radius: 0.035,
+  shadow: { alpha: 0.30, dy: 0.012, blur: 0.02 },
+} as const;
+
+export interface PhotoCardRect { left: number; top: number; width: number; height: number; scale: number; shortPx: number }
+/** 카드 자리 계산(순수) — 사진(매트 안쪽) 크기·위치 · 게이트 미달 = null. `gate:false` = 실측 캔버스에서 크기만 다시 잰다(생성 전 명목 캔버스로 이미 통과한 카드 · 탈락 없음). */
+export function photoCardRect(canvasW: number, canvasH: number, zone: 'top' | 'bottom', srcW: number, srcH: number, opts: { gate?: boolean } = {}): PhotoCardRect | null {
+  if (!(canvasW > 0 && canvasH > 0 && srcW > 0 && srcH > 0)) return null;
+  const S = Math.min(canvasW, canvasH);
+  const b = OUTREACH_PHOTO_CARD.box[zone];
+  const mat = OUTREACH_PHOTO_CARD.mat * S;
+  const boxW = (b.x1 - b.x0) * canvasW - mat * 2;
+  const boxH = (b.y1 - b.y0) * canvasH - mat * 2;
+  if (boxW <= 0 || boxH <= 0) return null;
+  const scale = Math.min(boxW / srcW, boxH / srcH, OUTREACH_PHOTO_CARD.upscaleMax);
+  const width = Math.max(1, Math.round(srcW * scale));
+  const height = Math.max(1, Math.round(srcH * scale));
+  const shortPx = Math.min(width, height);
+  if (opts.gate !== false && shortPx < OUTREACH_PHOTO_CARD.minShort * S) return null;
+  const left = Math.round((canvasW * (b.x0 + b.x1)) / 2 - width / 2);
+  const top = Math.round((canvasH * (b.y0 + b.y1)) / 2 - height / 2);
+  return { left, top, width, height, scale, shortPx };
+}
+
+/** 카드 원천 입장(순수 · 회의론자 기준) — product 통과 · photo·other 는 글자 없을 때만 · banner·document·판정 없음 금지 · 인물은 none 만(strictPerson 무관 · 사진 전체가 보인다) */
+export function photoCardAdmit(judge: ImageKindJudge | null | undefined, person: PersonJudge | null | undefined): { ok: boolean; reason: string | null } {
+  if (person !== 'none') return { ok: false, reason: person === 'person' ? 'person' : 'person_unsure' };
+  if (!judge) return { ok: false, reason: 'no_judge' };
+  if (judge.kind === 'product') return { ok: true, reason: null };
+  if (judge.kind === 'banner' || judge.kind === 'document') return { ok: false, reason: judge.kind };
+  return judge.text === false ? { ok: true, reason: null } : { ok: false, reason: 'text' };
+}
+
+/**
+ * 카드 원천 정규화(sharp · AI 0) — EXIF 회전 적용 + 균일 여백 trim(threshold 12 · 카탈로그 선례 · 8px 미만이면 원본). 게이트·실측·합성이 **같은 버퍼·치수**를 쓴다.
+ * (Codex 1R: 회전 전 치수로 게이트를 통과한 사진이 합성에서 늘어났고, 여백째 잰 치수가 최소 크기를 대신 채웠다.) 실패 = null.
+ */
+export async function normalizePhotoForCard(buf: Buffer): Promise<{ buffer: Buffer; width: number; height: number } | null> {
+  try {
+    const rotated = await sharp(buf, { failOn: 'none' }).rotate().png().toBuffer();
+    let out = rotated;
+    try {
+      const t = await sharp(rotated).trim({ threshold: 12 }).toBuffer({ resolveWithObject: true });
+      if (t.info.width >= 8 && t.info.height >= 8) out = t.data;
+    } catch { out = rotated; }
+    const meta = await sharp(out).metadata();
+    const width = Number(meta.width) || 0;
+    const height = Number(meta.height) || 0;
+    if (!width || !height) return null;
+    return { buffer: out, width, height };
+  } catch { return null; }
+}
+
+/** 누끼 PNG 의 불투명 비율(0~1 · 알파 ≥128). 디코드 실패 = null(호출부는 현행 = 통과). sharp · AI 0. */
+export async function cutoutOpaqueRatio(png: Buffer): Promise<number | null> {
+  try {
+    const { data, info } = await sharp(png, { failOn: 'none' }).ensureAlpha().resize({ width: 256, height: 256, fit: 'inside', withoutEnlargement: true }).raw().toBuffer({ resolveWithObject: true });
+    const n = info.width * info.height;
+    if (!n || info.channels < 4) return null;
+    let opaque = 0;
+    for (let i = 3; i < data.length; i += info.channels) if (data[i] >= 128) opaque++;
+    return opaque / n;
+  } catch { return null; }
+}
+/** 비율 → 누끼 성공(순수). 측정 실패(null) = 현행(통과). */
+export function cutoutAlphaOk(ratio: number | null, source: 'alpha_png' | 'rembg'): boolean {
+  if (ratio === null) return true;
+  if (ratio < OUTREACH_CUTOUT_ALPHA.min) return false;
+  return source === 'alpha_png' ? true : ratio <= OUTREACH_CUTOUT_ALPHA.maxRembg;
+}
+
+/** 오버레이를 캔버스 안으로 잘라 넣는다(sharp 는 캔버스 밖으로 나가는 composite 를 거부한다). 전부 밖이면 null. */
+async function fitOverlay(buf: Buffer, left: number, top: number, canvasW: number, canvasH: number): Promise<{ input: Buffer; left: number; top: number } | null> {
+  const meta = await sharp(buf).metadata();
+  const w = Number(meta.width) || 0;
+  const h = Number(meta.height) || 0;
+  const x0 = Math.max(0, left);
+  const y0 = Math.max(0, top);
+  const x1 = Math.min(canvasW, left + w);
+  const y1 = Math.min(canvasH, top + h);
+  if (x1 <= x0 || y1 <= y0) return null;
+  if (x0 === left && y0 === top && x1 === left + w && y1 === top + h) return { input: buf, left, top };
+  const cut = await sharp(buf).extract({ left: x0 - left, top: y0 - top, width: x1 - x0, height: y1 - y0 }).png().toBuffer();
+  return { input: cut, left: x0, top: y0 };
+}
+
+/**
+ * 사진 카드 합성(sharp · AI 0) — 배경 위에 흰 매트 + 둥근 모서리(svg rect dest-in · framePhoneCapture 방식) + 그림자. PNG 반환(중간본 · JPEG 두 번 압축 안 함).
+ * 글자는 여기서 찍지 않는다(호출부가 composeImage typography · 한글 폰트 보증 · 카탈로그 카드와 같은 조합).
+ */
+export async function framePhotoCard(bg: Buffer, photo: Buffer, rect: PhotoCardRect, canvasW: number, canvasH: number): Promise<Buffer> {
+  const C = OUTREACH_PHOTO_CARD;
+  const S = Math.min(canvasW, canvasH);
+  const mat = Math.max(1, Math.round(C.mat * S));
+  const radius = Math.max(1, Math.round(C.radius * S));
+  const cardW = rect.width + mat * 2;
+  const cardH = rect.height + mat * 2;
+  const photoPng = await sharp(photo, { failOn: 'none' }).rotate().flatten({ background: '#ffffff' }).resize({ width: rect.width, height: rect.height, fit: 'fill' }).png().toBuffer();
+  const card = await sharp({ create: { width: cardW, height: cardH, channels: 4, background: '#ffffff' } })
+    .composite([{ input: photoPng, left: mat, top: mat }]).png().toBuffer();
+  const mask = Buffer.from(`<svg width="${cardW}" height="${cardH}"><rect width="${cardW}" height="${cardH}" rx="${radius}" ry="${radius}"/></svg>`);
+  const rounded = await sharp(card).composite([{ input: mask, blend: 'dest-in' }]).png().toBuffer();
+  const dy = Math.round(C.shadow.dy * S);
+  const blur = Math.max(0.3, C.shadow.blur * S);
+  const pad = Math.ceil(blur * 2.5);
+  const shadowSvg = Buffer.from(`<svg width="${cardW + pad * 2}" height="${cardH + pad * 2}"><rect x="${pad}" y="${pad}" width="${cardW}" height="${cardH}" rx="${radius}" ry="${radius}" fill="rgba(0,0,0,${C.shadow.alpha})"/></svg>`);
+  const shadow = await sharp(shadowSvg).png().blur(blur).png().toBuffer();
+  const left = rect.left - mat;
+  const top = rect.top - mat;
+  const layers = (await Promise.all([fitOverlay(shadow, left - pad, top - pad + dy, canvasW, canvasH), fitOverlay(rounded, left, top, canvasW, canvasH)]))
+    .filter((l): l is { input: Buffer; left: number; top: number } => !!l);
+  return sharp(bg, { failOn: 'none' }).rotate().resize({ width: canvasW, height: canvasH, fit: 'fill' }).composite(layers).png().toBuffer();
+}
+
+/** 6자리 hex → rgb(순수) · 아니면 null */
+export function hexRgb(color: string | null | undefined): { r: number; g: number; b: number } | null {
+  const m = String(color || '').trim().match(/^#?([0-9a-f]{6})$/i);
+  if (!m) return null;
+  const n = parseInt(m[1], 16);
+  return { r: (n >> 16) & 255, g: (n >> 8) & 255, b: n & 255 };
+}
+/** 코드 배경 색(순수) — 브랜드 색 → 템플릿 accent → 중립. 위 = 흰색 55% 섞음 · 아래 = 그 색. */
+export function codeBackdropColors(brandColor: string | null | undefined, accent: string | null | undefined): { top: string; bottom: string } {
+  const base = hexRgb(brandColor) || hexRgb(accent) || { r: 107, g: 114, b: 128 };
+  const mix = (c: number) => Math.round(c + (255 - c) * 0.55);
+  const hex = (c: { r: number; g: number; b: number }) => `#${[c.r, c.g, c.b].map((v) => v.toString(16).padStart(2, '0')).join('')}`;
+  return { top: hex({ r: mix(base.r), g: mix(base.g), b: mix(base.b) }), bottom: hex(base) };
+}
+/** 코드 배경(sharp · AI 0 · 숫자가 생길 수 없다) — 세로 그라데이션 PNG */
+export async function codeBackdrop(width: number, height: number, colors: { top: string; bottom: string }): Promise<Buffer> {
+  const svg = `<svg width="${width}" height="${height}" xmlns="http://www.w3.org/2000/svg"><defs><linearGradient id="g" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="${colors.top}"/><stop offset="1" stop-color="${colors.bottom}"/></linearGradient></defs><rect width="${width}" height="${height}" fill="url(#g)"/></svg>`;
+  return sharp(Buffer.from(svg)).png().toBuffer();
+}
+
+/** 단 이름(순수 · 화면 문장) */
+export function heroRungLabel(subject: HeroSubject, bg: HeroBg): string {
+  const s = subject === 'cutout' ? '누끼' : subject === 'photo_card' ? '사진 카드' : '글자 포스터';
+  return bg === 'code' ? `${s} · 코드 배경` : s;
+}
+/** 사유 코드 → 사람 문장(순수 · 서버 완성 · 화면은 그대로 그린다) */
+export function heroRungReasonText(subject: HeroSubject, bg: HeroBg, reason: string | null): string | null {
+  const parts: string[] = [];
+  const r = String(reason || '');
+  const why = (code: string): string | null => {
+    const [k, v] = code.split(':');
+    switch (k) {
+      case 'no_source': return '쓸 이미지가 없어';
+      case 'download': return '이미지를 내려받지 못해';
+      case 'person': return '인물이 있어';
+      case 'person_unsure': return '인물 여부가 확실하지 않아';
+      case 'low_res': return `해상도가 낮아(짧은 변 ${v}px)`;
+      case 'alpha': return `누끼가 배경째 나와(불투명 ${Math.round(Number(v) * 100)}%)`;
+      case 'banner': return '글자가 든 배너라';
+      case 'document': return '문서 이미지라';
+      case 'text': return '사진에 글자가 있어';
+      case 'no_judge': return '이미지 종류를 판정하지 못해';
+      case 'photo': return '제품컷이 아닌 사진이라';
+      case 'card_small': return `사진이 작아(카드 짧은 변 ${v}px)`;
+      default: return null;
+    }
+  };
+  const w = r ? why(r.split('|')[0]) : null;
+  if (subject === 'photo_card') parts.push(w ? `${w} 누끼 대신 사진 카드로 만들었습니다.` : '사진 카드로 만들었습니다.');
+  else if (subject === 'none') parts.push(w ? `${w} 사진 없이 글자 포스터로 만들었습니다.` : '사진 없이 글자 포스터로 만들었습니다.');
+  if (bg === 'code') parts.push(r.includes('digits_twice') ? '생성 배경에 숫자가 두 번 나와 코드 배경으로 바꿨습니다.' : '배경 생성에 실패해 코드 배경으로 바꿨습니다.');
+  return parts.length ? parts.join(' ') : null;
+}
+/** 최소선 판정(순수 · 경고만 · 발송 잠금 0 · 불변 27) — subject 없음 · 제목이 업체명 대체 · AI 배경 숫자 잔존 · 폰트 없음 */
+export function posterFloorOf(input: { subject: HeroSubject; bg: HeroBg; title: string | null; companyName: string; digits: boolean | null; fontPath: string | null }): { ok: boolean; miss: HeroFloorMiss[] } {
+  const miss: HeroFloorMiss[] = [];
+  if (input.subject === 'none') miss.push('subject');
+  if (!input.title || input.title.trim() === String(input.companyName || '').trim()) miss.push('title');
+  if (input.bg === 'ai' && input.digits === true) miss.push('digits');
+  if (!input.fontPath) miss.push('font');
+  return { ok: miss.length === 0, miss };
+}
+/** 최소선 첫 미달 → 사람 문장(순수) */
+export function floorMissText(miss: readonly HeroFloorMiss[]): string | null {
+  switch (miss[0]) {
+    case 'subject': return '제품 사진이 한 장도 들어가지 않았습니다.';
+    case 'title': return '행사 제목을 찾지 못해 업체명으로 대신했습니다.';
+    case 'digits': return '생성 배경에 숫자가 남아 있습니다.';
+    case 'font': return '한글 폰트를 찾지 못했습니다.';
+    default: return null;
+  }
+}
+/** payload → 단 기록(순수) — 새 행은 저장값 그대로 · 옛 행(heroRung 없음)은 usedCutout 으로 추정(label 만 · 사유 없음) · 이미지 없는 행 = null */
+export function heroRungOf(payload: Record<string, any> | null | undefined): HeroRung | null {
+  if (!payload || typeof payload !== 'object') return null;
+  const hr = payload.heroRung;
+  if (hr && typeof hr === 'object' && hr.poster && typeof hr.poster.subject === 'string') return hr as HeroRung;
+  if (!payload.url) return null;
+  const subject: HeroSubject = payload.usedCutout ? 'cutout' : 'none';
+  const part: HeroRungPart = { subject, bg: 'ai', from: payload.cutoutFrom ? String(payload.cutoutFrom) : null, scale: null, shortPx: null, alpha: null, reason: null, reasonText: null, label: heroRungLabel(subject, 'ai'), bytes: null, inkStd: null };
+  return { poster: part, banner: null, floor: { ok: true, miss: [] } };
+}
 
 async function produceOutreachImageExclusive(input: OutreachImageInput): Promise<OutreachImageResult> {
   const ctx = getOutreachContext();
@@ -1208,28 +1482,63 @@ async function produceOutreachImageExclusive(input: OutreachImageInput): Promise
     let cutoutSource: 'alpha_png' | 'rembg' | null = null;
     let personJudge: PersonJudge | null = null;
     let skippedReason: string | null = null;
+    // ★ 2026-10-13 최소 품질(설계서 B·C) — 누끼 실패 원본을 사진 카드 원천으로 기억한다(추가 다운로드 0) · 단 하락 사유 · 알파 비율
+    let card: { buffer: Buffer; from: string; width: number; height: number; reason: string | null } | null = null;
+    let firstFail: string | null = null;   // 첫 후보가 누끼에서 떨어진 사유 코드
+    let cardFail: string | null = null;    // 첫 카드 입장 실패 사유 코드
+    let lastAlpha: number | null = null;
+    let judgedExtra = 0;
+    const designated = new Set((input.designatedUrls || []).filter(Boolean));
+    const cardKinds: Record<string, ImageKindJudge> = { ...(input.cardKinds || {}) };
 
     // ★ 2026-09-09(6) 누끼 원천 = 순서 있는 후보 목록(사람이 고른 이미지 → 상품 사본 상위 3 · 최대 3번 시도). 첫 후보가 배너·사진이라 누끼가 안 나오면
     //   상품 사진에서 딴다(톤28 2차 실측: 누끼 없이 '이벤트' 템플릿으로 가 모델이 지어낸 병·패키지가 히어로에 실렸다). 누끼가 나오면 멈춘다.
     let cutoutFrom: string | null = null;
     const cutoutSources = [input.selectedImageUrl, ...(input.cutoutCandidates || [])].filter((u, i, arr): u is string => !!u && arr.indexOf(u) === i).slice(0, OUTREACH_CUTOUT_TRY_MAX);
+    if (!cutoutSources.length) firstFail = 'no_source';
     for (const srcUrl of cutoutSources) {
+      let fail: string | null = null;
       const img = await fetchImageGuarded(srcUrl);
+      let isAlphaPng = false;
       if (!img) {
         skippedReason = '선택한 이미지를 내려받지 못해 생성 이미지로만 제작했습니다.';
+        fail = 'download';
       } else {
         personJudge = await judgePersonInImage(img.buffer.toString('base64'), img.mime);
+        isAlphaPng = img.ext === 'png' && pngHasAlpha(img.buffer);
+        // ★ 2026-10-13 판정 없는 후보(대표 이미지 · 홈 판정 대상 밖 선택)는 rembg **앞에서** 같은 판정기로 1장만 판정한다(회의론자 a · 최대 2회). 알파 PNG 는 누끼 그 자체라 판정하지 않는다.
+        if (!isAlphaPng && !cardKinds[srcUrl] && judgedExtra < 2 && personJudge !== 'person') {
+          judgedExtra++;
+          const judged = await classifyOutreachImages([{ url: srcUrl, buffer: img.buffer, mime: img.mime }]);
+          if (judged && judged[srcUrl]) cardKinds[srcUrl] = judged[srcUrl];
+        }
+        const kind = cardKinds[srcUrl]?.kind || null;
         if (personJudge === 'person') {
           // Harold 보강 ① — 인물 확정만 기계가 제외한다(마네킹·일러스트 오탐은 none으로 통과)
           skippedReason = '인물이 포함된 것으로 판정되어 해당 이미지는 사용하지 않았습니다.';
+          fail = 'person';
         } else if (input.strictPerson && personJudge !== 'none') {
           // ★ 2026-09-23 자동 확정 건은 판정이 확실하지 않으면(undetermined·unavailable) 쓰지 않는다(fail-closed)
           skippedReason = '인물 포함 여부가 확실하지 않아 해당 이미지는 사용하지 않았습니다(자동 확정 건).';
-        } else if (img.ext === 'png' && pngHasAlpha(img.buffer)) {
-          // ★ S3 몰이 준 누끼 PNG — rembg(단일 워커) 우회 · 해상도 게이트만
+          fail = 'person_unsure';
+        } else if (kind === 'banner' || kind === 'document') {
+          // ★ 2026-10-13 배너·문서는 누끼도 카드도 아니다(배너에서 누끼를 따면 배경이 따라온다 · 접수 ④) · 알파 PNG 여도 기존 판정이 앞선다(Codex 1R)
+          skippedReason = kind === 'banner' ? '글자가 든 배너라 해당 이미지는 사용하지 않았습니다.' : '문서 이미지라 해당 이미지는 사용하지 않았습니다.';
+          fail = kind;
+        } else if (!isAlphaPng && (kind === 'photo' || kind === 'other')) {
+          // ★ 2026-10-13 분위기 사진은 딸 제품이 없다 → rembg 건너뛰고 아래 카드 입장으로
+          skippedReason = '제품컷이 아닌 사진이라 누끼를 따지 않았습니다.';
+          fail = 'photo';
+        } else if (isAlphaPng) {
+          // ★ S3 몰이 준 누끼 PNG — rembg(단일 워커) 우회 · 해상도 게이트 + ★ 2026-10-13 알파 비율 하한
           const size = readImageSize(img.buffer);
+          lastAlpha = await cutoutOpaqueRatio(img.buffer);
           if (!size || Math.min(size.width, size.height) < OUTREACH_CUTOUT_MIN_SIDE) {
             skippedReason = '이미지 해상도가 낮아 생성 이미지로만 제작했습니다.';
+            fail = `low_res:${size ? Math.min(size.width, size.height) : 0}`;
+          } else if (!cutoutAlphaOk(lastAlpha, 'alpha_png')) {
+            skippedReason = '누끼 PNG 에 제품이 거의 없어 해당 이미지는 사용하지 않았습니다.';
+            fail = `alpha:${(lastAlpha ?? 0).toFixed(2)}`;
           } else {
             const cut = allocTempPath(ctx.companyId, 'png');
             fs.writeFileSync(cut.absPath, img.buffer);
@@ -1247,16 +1556,41 @@ async function produceOutreachImageExclusive(input: OutreachImageInput): Promise
           if (Math.min(width, height) < OUTREACH_CUTOUT_MIN_SIDE) {
             // 해상도 게이트 — 저해상 누끼를 포스터 히어로로 쓰면 뭉갠다(디자이너 R9)
             skippedReason = '이미지 해상도가 낮아 생성 이미지로만 제작했습니다.';
+            fail = `low_res:${Math.min(width, height)}`;
           } else {
-            writeTempMeta(ctx.companyId, cut.tempId, { kind: 'cutout', ext: 'png', mime: 'image/png', width, height });
-            cutout = { base64: fs.readFileSync(cut.absPath).toString('base64'), mime: 'image/png' };
-            cutoutPath = cut.absPath;
-            cutoutSource = 'rembg';
+            // ★ 2026-10-13 알파 비율 — 배경째 돌아온 누끼(0.85 초과)·제품이 거의 없는 누끼(0.08 미만)는 실패(접수 ④)
+            lastAlpha = await cutoutOpaqueRatio(fs.readFileSync(cut.absPath));
+            if (!cutoutAlphaOk(lastAlpha, 'rembg')) {
+              skippedReason = '누끼가 배경째 나와 해당 이미지는 누끼로 쓰지 않았습니다.';
+              fail = `alpha:${(lastAlpha ?? 0).toFixed(2)}`;
+            } else {
+              writeTempMeta(ctx.companyId, cut.tempId, { kind: 'cutout', ext: 'png', mime: 'image/png', width, height });
+              cutout = { base64: fs.readFileSync(cut.absPath).toString('base64'), mime: 'image/png' };
+              cutoutPath = cut.absPath;
+              cutoutSource = 'rembg';
+            }
           }
         }
       }
       if (cutout) { cutoutFrom = srcUrl; skippedReason = null; break; }
+      if (!firstFail) firstFail = fail;
       console.log('[sales-outreach] 누끼 후보 건너뜀(다음 후보):', input.jobId, srcUrl.slice(0, 120), skippedReason);
+      // ★ 2026-10-13 누끼는 못 땄지만 사진은 있다 → 사진 카드 입장(설계서 C · 명목 캔버스로 생성 전에 판정 · 회의론자 c).
+      //   첫 통과분만 기억하고 상품 사본은 누끼를 계속 찾는다. 사람이 정한 원천이 통과하면 그 자리에서 멈춘다(회의론자 b).
+      if (img && !card && fail && fail !== 'download' && !fail.startsWith('person')) {
+        // 기존 종류 판정이 알파 여부보다 앞선다(판정 없는 알파 PNG 만 제품으로 본다) · 입장 전 회전·trim 정규화 → 게이트·합성이 같은 버퍼·치수(Codex 1R)
+        const judge = cardKinds[srcUrl] || (isAlphaPng ? { kind: 'product' as const, text: false } : null);
+        const admit = photoCardAdmit(judge, personJudge);
+        const norm = admit.ok ? await normalizePhotoForCard(img.buffer) : null;
+        const nominal = OUTREACH_CANVAS_NOMINAL.top;
+        const rect = norm ? photoCardRect(nominal.width, nominal.height, 'top', norm.width, norm.height) : null;
+        if (admit.ok && norm && rect) {
+          card = { buffer: norm.buffer, from: srcUrl, width: norm.width, height: norm.height, reason: fail };
+          if (designated.has(srcUrl)) break;
+        } else if (!cardFail) {
+          cardFail = admit.ok ? `card_small:${norm ? Math.min(norm.width, norm.height) : 0}` : admit.reason;
+        }
+      }
     }
 
     // ★ S3 문구 3칸(원문 대조본만 · 숫자·혜택어 0) — 프롬프트에는 문구를 넘기지 않고(배경만 생성 · 상단 문구 구역 확보) 서버 합성이 코드로 찍는다(오철자 0 · 잠금이 못 보는 면에 글자를 코드가 보증)
@@ -1264,9 +1598,14 @@ async function produceOutreachImageExclusive(input: OutreachImageInput): Promise
       companyName: input.companyName, industry: input.industry, eventQuote: input.eventQuote || null, eventQuotes: input.eventQuotes, products: input.products || [], siteTitle: input.siteTitle || null,
     });
     const fontPath = outreachPosterFontPath();
+    // ★ 2026-10-13 최소 품질 — 주인공 확정(생성 전 · 템플릿 분기와 진열면 지시가 이 값을 쓴다). 카드는 명목 캔버스로 이미 통과했다.
+    const subject: HeroSubject = cutout ? 'cutout' : card ? 'photo_card' : 'none';
+    const hasSubject = subject !== 'none';
+    if (subject === 'photo_card') skippedReason = null;   // 사진은 썼다(카드) — 사유는 heroRung.reasonText 가 말한다
     // ★ 2026-10-09 R1·R2 템플릿 = 판단 순위[regenSeq] 하나(재시도·배너도 같은 것 · 옛 seedSuffix 로 다른 템플릿을 뽑던 경로 제거)
-    const template = templateFromRank(input.templateRank, cutout ? 'product' : 'event', input.regenSeq || 0,
-      () => pickTemplate(input.industry, `${input.jobId}:${input.regenSeq || 0}`, !!cutout));
+    // ★ 2026-10-13 사진 카드도 제품 순위(세부 카테고리 유지 · 카드가 제품 자리를 맡는다 · 설계서 E)
+    const template = templateFromRank(input.templateRank, hasSubject ? 'product' : 'event', input.regenSeq || 0,
+      () => pickTemplate(input.industry, `${input.jobId}:${input.regenSeq || 0}`, hasSubject));
     // ★ R5 장면의 소품·제품 자리 문장을 지운 판(우리 "no props" 지시와 부딪히지 않게)
     const scaffold = stripScaffoldProps(template.scaffold);
     const preset = resolvePreset('poster');
@@ -1275,50 +1614,113 @@ async function produceOutreachImageExclusive(input: OutreachImageInput): Promise
       scaffold,
       preset,
       texts: {},
-      // 배경만 생성 — 제품은 서버 합성(누끼 있으면 빈 진열면을 요구하고, 없으면 상품 0)
+      // 배경만 생성 — 제품은 서버 합성(누끼·카드가 있으면 빈 진열면을 요구하고, 없으면 상품 0)
       hasProduct: false,
-      userHint: posterStyleHint(input.brandColor || null, false, !!cutout),
+      userHint: posterStyleHint(input.brandColor || null, false, hasSubject),
       textPosition: 'top',
     });
+    const backdropColors = codeBackdropColors(input.brandColor || null, template.accent || null);
+    const lastAiDims: Record<'top' | 'bottom', { width: number; height: number } | null> = { top: null, bottom: null };
+    /** 이 판(zone)에 카드를 얹는가 — 명목 캔버스 게이트(생성 전 · 실측 캔버스에서는 크기만 다시 잰다) */
+    const cardFor = (zone: 'top' | 'bottom') => (card && !cutoutPath && photoCardRect(OUTREACH_CANVAS_NOMINAL[zone].width, OUTREACH_CANVAS_NOMINAL[zone].height, zone, card.width, card.height) ? card : null);
 
     // ★ 2026-09-10 제품은 모델에게 맡기지 않는다 — 배경만 생성(누끼 미첨부 · 빈 진열면 요구)하고 서버가 누끼 PNG 를 픽셀 그대로 얹는다(라벨 글자 보존 · 지어낸 제품 0).
     //   유출 검사(숫자)는 배경에만 한다(제품 라벨의 "50ml" 는 사실이지 유출이 아니다).
-    const renderPoster = async (prompt: string): Promise<{ absPath: string; tempId: string; composed: { width: number; height: number }; bgPath: string; ink: PosterInk }> => {
-      const poster = await generatePosterWithRetry(() => generatePoster(prompt, preset, null), input.jobId);
-      const posterExt = poster.mime.includes('png') ? 'png' : 'jpeg';
-      const posterTempId = writeTempBuffer(ctx.companyId, Buffer.from(poster.base64, 'base64'),
-        { kind: 'poster', ext: posterExt, mime: poster.mime, prompt, presetKey: 'poster', channelSpec: 'poster', width: null, height: null });
-      const posterFile = findTempFile(ctx.companyId, posterTempId);
-      if (!posterFile) throw new Error('포스터 임시 저장에 실패했습니다.');
+    // ★ 2026-10-13 포스터·배너가 같은 합성 함수를 쓴다(설계서 D·G). bg='code' 면 sharp 그라데이션(AI 0). 카드는 sharp 가 배경에 먼저 얹고 글자만 compose 가 찍는다.
+    //   돌려주는 bgPath 는 언제나 생성(또는 코드) 배경 원본이다 — 유출 검사는 그 파일만 본다(sharp 중간본 아님).
+    type Made = { absPath: string; tempId: string; composed: { width: number; height: number; bytes: number }; bgPath: string; ink: PosterInk; bg: HeroBg; inkStd: number | null; cardRect: PhotoCardRect | null };
+    const renderComposite = async (zone: 'top' | 'bottom', zonePreset: ReturnType<typeof resolvePreset>, prompt: string, bgSource: HeroBg): Promise<Made> => {
+      let bgPath: string;
+      if (bgSource === 'ai') {
+        const poster = await generatePosterWithRetry(() => generatePoster(prompt, zonePreset, null), input.jobId);
+        const posterExt = poster.mime.includes('png') ? 'png' : 'jpeg';
+        const posterTempId = writeTempBuffer(ctx.companyId, Buffer.from(poster.base64, 'base64'),
+          { kind: 'poster', ext: posterExt, mime: poster.mime, prompt, presetKey: zone === 'top' ? 'poster' : 'email-hero', channelSpec: zone === 'top' ? 'poster' : 'email', width: null, height: null });
+        const posterFile = findTempFile(ctx.companyId, posterTempId);
+        if (!posterFile) throw new Error('포스터 임시 저장에 실패했습니다.');
+        bgPath = posterFile.absPath;
+        const dims = readImageSize(fs.readFileSync(bgPath));
+        if (dims) lastAiDims[zone] = dims;
+      } else {
+        const dims = lastAiDims[zone] || OUTREACH_CANVAS_NOMINAL[zone];
+        const png = await codeBackdrop(dims.width, dims.height, backdropColors);
+        const bgTempId = writeTempBuffer(ctx.companyId, png, { kind: 'background', ext: 'png', mime: 'image/png', width: dims.width, height: dims.height });
+        const bgFile = findTempFile(ctx.companyId, bgTempId);
+        if (!bgFile) throw new Error('포스터 임시 저장에 실패했습니다.');
+        bgPath = bgFile.absPath;
+      }
+      // ★ 2026-09-15 B-0915-4 글자 띠 밝기 실측 → 어두우면 흰 글자 + 그림자(측정 실패 = 현행) · 카드는 띠 밖이라 배경 원본에 잰다
+      const stats = await measurePosterInkStats(bgPath, zone);
+      const ink = posterInkFor(stats ? stats.mean : null);
+      let composeBg = bgPath;
+      let cardRect: PhotoCardRect | null = null;
+      const zoneCard = cardFor(zone);
+      if (zoneCard) {
+        const dims = readImageSize(fs.readFileSync(bgPath)) || OUTREACH_CANVAS_NOMINAL[zone];
+        cardRect = photoCardRect(dims.width, dims.height, zone, zoneCard.width, zoneCard.height, { gate: false });
+        if (cardRect) {
+          const framed = await framePhotoCard(fs.readFileSync(bgPath), zoneCard.buffer, cardRect, dims.width, dims.height);
+          const framedId = writeTempBuffer(ctx.companyId, framed, { kind: 'composite', ext: 'png', mime: 'image/png', width: dims.width, height: dims.height });
+          const framedFile = findTempFile(ctx.companyId, framedId);
+          if (!framedFile) throw new Error('포스터 임시 저장에 실패했습니다.');
+          composeBg = framedFile.absPath;
+        }
+      }
       // 이메일 삽입은 JPEG만(알파 PNG 직삽 금지 — 다크 클라이언트 흰 프린지·용량) · 문구는 서버 타이포(코드 보증)
       const out = allocTempPath(ctx.companyId, 'jpeg');
-      // ★ 2026-09-15 B-0915-4 글자 띠(상단 30%) 밝기 실측 → 어두우면 흰 글자 + 그림자(측정 실패 = 현행)
-      const ink = posterInkFor(await measurePosterInkZone(posterFile.absPath, 'top'));
       const composed = await composeImage({
-        bgPath: posterFile.absPath, cutoutPath: cutoutPath, layout: cutoutPath ? OUTREACH_POSTER_CUTOUT_LAYOUT : null, outPath: out.absPath, format: 'jpeg',
-        typography: buildPosterTypography(posterTexts, { brandColor: input.brandColor || null, zone: 'top', fontPath, ink }),
+        bgPath: composeBg, cutoutPath: cutoutPath, layout: cutoutPath ? (zone === 'top' ? OUTREACH_POSTER_CUTOUT_LAYOUT : OUTREACH_BANNER_CUTOUT_LAYOUT) : null, outPath: out.absPath, format: 'jpeg',
+        typography: buildPosterTypography(posterTexts, { brandColor: input.brandColor || null, zone, fontPath, ink }),
       });
       writeTempMeta(ctx.companyId, out.tempId, { kind: 'composite', ext: 'jpeg', mime: 'image/jpeg', width: composed.width, height: composed.height });
-      return { absPath: out.absPath, tempId: out.tempId, composed, bgPath: posterFile.absPath, ink };
+      return { absPath: out.absPath, tempId: out.tempId, composed, bgPath, ink, bg: bgSource, inkStd: stats ? stats.std : null, cardRect };
     };
+    /** 생성 실패를 코드 배경으로 받는가 — 스튜디오 미준비만 그대로 던진다(코드 배경도 compose 가 필요하다) */
+    const codeFallbackFor = (err: unknown): boolean => err instanceof StudioError && err.code !== 'STUDIO_NOT_READY';
 
-    let made = await renderPoster(buildPrompt());
-    // ★ S3 유출 검사(1순위 숫자·%·원) — 배경에 걸리면 배경만 1회 다시 만든다(기존 재생성 상한과 별개 · 자동 1회)
+    let posterBgReason: string | null = null;
+    let made: Made;
+    try {
+      made = await renderComposite('top', preset, buildPrompt(), 'ai');
+    } catch (err: any) {
+      if (!codeFallbackFor(err)) throw err;
+      // ★ 2026-10-13 배경 생성 최종 실패(세이프티 거부 · 재시도 소진)도 포스터를 버리지 않는다 → 코드 배경(옛 = studio_error → 히어로 홈 배너)
+      console.log('[sales-outreach] 포스터 배경 생성 실패 → 코드 배경으로:', input.jobId, err?.message);
+      posterBgReason = 'bg_failed';
+      made = await renderComposite('top', preset, '', 'code');
+    }
+    // ★ S3 유출 검사(1순위 숫자·%·원) — 배경에 걸리면 배경만 1회 다시 만든다(기존 재생성 상한과 별개 · 자동 1회) · 코드 배경은 숫자가 생길 수 없어 검사하지 않는다
     let posterScore: PosterScore | null = null;
     let posterRegenerated = false;
-    try {
-      posterScore = await scoreOutreachPoster(fs.readFileSync(made.bgPath).toString('base64'), 'image/jpeg');
-      if (posterScore.digits === true) {
-        const retry = await renderPoster(buildPrompt());
-        const again = await scoreOutreachPoster(fs.readFileSync(retry.bgPath).toString('base64'), 'image/jpeg');
+    // 검사 자체의 장애(파일 읽기 · 채점 불가)만 삼킨다 — 합성·저장 오류는 전파한다(Codex 1R: 숫자가 검출된 포스터가 코드 배경 실패 뒤 그대로 발행되던 구멍)
+    const scoreBg = async (p: string): Promise<PosterScore | null> => {
+      try { return await scoreOutreachPoster(fs.readFileSync(p).toString('base64'), 'image/jpeg'); } catch (err: any) { console.log('[sales-outreach] 포스터 유출 검사 건너뜀:', err?.message); return null; }
+    };
+    if (made.bg === 'ai') {
+      posterScore = await scoreBg(made.bgPath);
+      if (posterScore?.digits === true) {
         posterRegenerated = true;
-        if (again.digits !== true) { made = retry; posterScore = again; } else { posterScore = again; }
+        let retry: Made | null = null;
+        try {
+          retry = await renderComposite('top', preset, buildPrompt(), 'ai');
+        } catch (err: any) {
+          if (!codeFallbackFor(err)) throw err;
+          console.log('[sales-outreach] 포스터 배경 재생성 실패 → 코드 배경으로:', input.jobId, err?.message);
+        }
+        const again = retry ? await scoreBg(retry.bgPath) : null;
+        if (retry && again && again.digits !== true) {
+          made = retry;
+          posterScore = again;
+        } else {
+          // ★ 2026-10-13 다시 그려도 숫자가 남으면(또는 다시 그리지 못하면) 포스터를 버리지 않고 코드 배경으로(옛 R2 = throw → url null → 히어로 홈 배너 사본 · 숫자 검사 없는 배너가 실렸다)
+          //   코드 배경 합성이 실패하면 그대로 던진다(url null) — 숫자가 검출된 포스터는 발행하지 않는다.
+          console.log('[sales-outreach] 포스터 배경 숫자 2회 → 코드 배경으로:', input.jobId);
+          if (again) posterScore = again;
+          posterBgReason = retry ? 'digits_twice' : 'bg_failed';
+          made = await renderComposite('top', preset, '', 'code');
+        }
       }
-    } catch (err: any) {
-      console.log('[sales-outreach] 포스터 유출 검사 건너뜀:', err?.message);
     }
-    // ★ 2026-10-09 R2 다시 그려도 숫자가 남으면 포스터를 버린다 — 호출부가 url null 행을 남기고 히어로는 홈 배너로(기존 폴백)
-    if (posterRegenerated && posterScore?.digits === true) throw new Error('포스터 배경에 숫자가 두 번 나와 생성 이미지를 쓰지 않았습니다.');
     const moved = moveTempToPermanent(ctx.companyId, made.tempId);
     if (!moved) throw new Error('이미지 저장에 실패했습니다.');
 
@@ -1326,31 +1728,54 @@ async function produceOutreachImageExclusive(input: OutreachImageInput): Promise
     let bannerUrl: string | null = null;
     let bannerSize: { width: number; height: number } | null = null;
     let bannerInk: PosterInk | null = null;
+    let bannerMade: Made | null = null;
+    let bannerBgReason: string | null = null;
     if (input.wantBanner) {
       try {
         const bPreset = resolvePreset('email-hero');
         // ★ 2026-09-10 배너도 배경만 생성 + 서버 합성(제품 오른쪽 · 문구 아래) · ★ 2026-10-09 R2 포스터와 같은 템플릿
-        const bPrompt = buildPosterPrompt({ template, scaffold, preset: bPreset, texts: {}, hasProduct: false, userHint: posterStyleHint(input.brandColor || null, false, !!cutout), textPosition: 'bottom' });
-        const b = await generatePosterWithRetry(() => generatePoster(bPrompt, bPreset, null), input.jobId);
-        const bExt = b.mime.includes('png') ? 'png' : 'jpeg';
-        const bTempId = writeTempBuffer(ctx.companyId, Buffer.from(b.base64, 'base64'), { kind: 'poster', ext: bExt, mime: b.mime, prompt: bPrompt, presetKey: 'email-hero', channelSpec: 'email', width: null, height: null });
-        const bFile = findTempFile(ctx.companyId, bTempId);
-        if (bFile) {
-          const bOut = allocTempPath(ctx.companyId, 'jpeg');
-          // ★ 2026-09-15 B-0915-4 배너 글자 띠(하단 45%)도 같은 규칙
-          const bInk = posterInkFor(await measurePosterInkZone(bFile.absPath, 'bottom'));
-          const bComposed = await composeImage({
-            bgPath: bFile.absPath, cutoutPath: cutoutPath, layout: cutoutPath ? OUTREACH_BANNER_CUTOUT_LAYOUT : null, outPath: bOut.absPath, format: 'jpeg',
-            typography: buildPosterTypography(posterTexts, { brandColor: input.brandColor || null, zone: 'bottom', fontPath, ink: bInk }),
-          });
-          writeTempMeta(ctx.companyId, bOut.tempId, { kind: 'composite', ext: 'jpeg', mime: 'image/jpeg', width: bComposed.width, height: bComposed.height });
-          const bMoved = moveTempToPermanent(ctx.companyId, bOut.tempId);
-          if (bMoved) { bannerUrl = PUBLIC_BASE + bMoved.url; bannerSize = { width: bComposed.width, height: bComposed.height }; bannerInk = bInk; }
+        const bPrompt = buildPosterPrompt({ template, scaffold, preset: bPreset, texts: {}, hasProduct: false, userHint: posterStyleHint(input.brandColor || null, false, hasSubject), textPosition: 'bottom' });
+        let b: Made;
+        try {
+          b = await renderComposite('bottom', bPreset, bPrompt, 'ai');
+        } catch (err: any) {
+          if (!codeFallbackFor(err)) throw err;
+          bannerBgReason = 'bg_failed';
+          b = await renderComposite('bottom', bPreset, '', 'code');
         }
+        const bMoved = moveTempToPermanent(ctx.companyId, b.tempId);
+        if (bMoved) { bannerUrl = PUBLIC_BASE + bMoved.url; bannerSize = { width: b.composed.width, height: b.composed.height }; bannerInk = b.ink; bannerMade = b; }
       } catch (err: any) {
         console.log('[sales-outreach] 16:9 배너 생성 실패(격리):', err?.message);
       }
     }
+
+    // ★ 2026-10-13 단 기록(설계서 H) — 사유 = 카드 입장 실패 사유 → 첫 후보 누끼 실패 사유 · 배경 사유는 뒤에 붙인다
+    const rungPart = (m: Made, zone: 'top' | 'bottom', bgReason: string | null): HeroRungPart => {
+      const zoneSubject: HeroSubject = cutout ? 'cutout' : (cardFor(zone) ? 'photo_card' : 'none');
+      const subjectReason = zoneSubject === 'cutout' ? null
+        : zoneSubject === 'photo_card' ? (card ? card.reason : null)
+          : (card ? `card_small:${Math.min(card.width, card.height)}` : (cardFail || firstFail));
+      const reason = [subjectReason, bgReason].filter(Boolean).join('|') || null;
+      return {
+        subject: zoneSubject, bg: m.bg,
+        from: zoneSubject === 'cutout' ? cutoutFrom : zoneSubject === 'photo_card' && card ? card.from : null,
+        scale: m.cardRect ? Number(m.cardRect.scale.toFixed(3)) : null,
+        shortPx: m.cardRect ? m.cardRect.shortPx : null,
+        alpha: lastAlpha === null ? null : Number(lastAlpha.toFixed(3)),
+        reason,
+        reasonText: heroRungReasonText(zoneSubject, m.bg, reason),
+        label: heroRungLabel(zoneSubject, m.bg),
+        bytes: Number.isFinite(m.composed.bytes) ? m.composed.bytes : null,
+        inkStd: m.inkStd === null ? null : Number(m.inkStd.toFixed(1)),
+      };
+    };
+    const posterPart = rungPart(made, 'top', posterBgReason);
+    const heroRung: HeroRung = {
+      poster: posterPart,
+      banner: bannerMade ? rungPart(bannerMade, 'bottom', bannerBgReason) : null,
+      floor: posterFloorOf({ subject: posterPart.subject, bg: made.bg, title: posterTexts.title, companyName: input.companyName, digits: posterScore?.digits ?? null, fontPath }),
+    };
 
     return {
       publicUrl: PUBLIC_BASE + moved.url,
@@ -1372,6 +1797,7 @@ async function produceOutreachImageExclusive(input: OutreachImageInput): Promise
       bannerSize,
       posterInk: made.ink,
       bannerInk,
+      heroRung,
     };
   }
 }
