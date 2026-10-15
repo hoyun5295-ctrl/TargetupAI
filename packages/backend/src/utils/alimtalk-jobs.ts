@@ -19,6 +19,8 @@ import { getAuthSmsTable, bulkInsertSmsQueue } from './sms-queue';
 // ★ 2026-06-13: 검수 진입 시 발급되는 IMC 템플릿코드를 상태 동기화 때 함께 반영 (반려 템플릿 코드 미반영 구멍 fix)
 import { syncSingleTemplateCode } from './kakao-template-sync';
 import { buildTemplateInspectionNotifyMessage } from './auto-notify-message';
+// ★ 2026-10-15 (박성용 접수 · 에스디몰 스마일패스): IMC 가 삭제(D)한 발신프로필은 「사용 중지」 CT 로 활성까지 내린다(같은 판정 · 같은 감사 기록)
+import { disableSenderProfile } from './kakao-sender-profile-admin';
 
 // ════════════════════════════════════════════════════════════
 // 공통 유틸
@@ -725,6 +727,7 @@ export async function syncSenderStatusJob(): Promise<void> {
   if (rows.length === 0) return;
 
   let updated = 0;
+  let disabledByImc = 0;   // ★ 2026-10-15 IMC 삭제(D) → 사용 중지로 내린 건수
   let rawLogged = false;
   // ★ 2026-09-12 침묵 제거 — 키가 바뀐 프로필(휴면삭제 뒤 `_unused`)이 여기서 조용히 빠졌다
   const skippedByCode = new Map<string, number>();
@@ -774,12 +777,25 @@ export async function syncSenderStatusJob(): Promise<void> {
         [d.status || null, d.uuid || null, blockYn, dormantYn, brandYn, channelCreatedAt, row.id],
       );
       updated++;
+
+      // ★ 2026-10-15 (박성용 접수 · 에스디몰 스마일패스): IMC 상태 D(삭제)는 그동안 status 에 적히기만 하고 is_active 는 그대로라
+      //   고객사 화면에 살아 있는 프로필로 남았다(휴면 장기 미사용 삭제 → 채널 ID 가 `_미사용` 으로 바뀐 채). 상태를 받았으면 효과(활성 플래그)까지
+      //   같은 자리에서 잇는다 — 9월 12일 「사용 중지」 CT 를 그대로 불러 status=DELETED · is_active=false · 감사 기록(행위자 없음 = 동기화).
+      //   다음 주기부터는 위 SELECT 가 DELETED 를 빼므로 다시 조회하지 않는다. 재등록은 중복 검사·유니크 인덱스가 활성만 보므로 막히지 않는다.
+      if (d.status === 'D') {
+        const r = await disableSenderProfile({ profileId: row.id, actorUserId: null });
+        if (r.ok) {
+          disabledByImc++;
+          log('senderStatusSync', `IMC 삭제(D) 프로필 사용 중지 — id=${row.id} name=${r.profile.profileName ?? ''} yellow=${r.profile.yellowId ?? ''}`);
+        }
+      }
     } catch (err) {
       logErr(`senderStatusSync-${row.profile_key}`, err);
     }
   }
   const senderSkipped = Array.from(skippedByCode.values()).reduce((a, b) => a + b, 0);
   log('senderStatusSync', `${updated}/${rows.length}건 상태 갱신`
+    + (disabledByImc > 0 ? ` · IMC 삭제로 사용 중지 ${disabledByImc}건` : '')
     + (senderSkipped > 0
       ? ` · 건너뜀 ${senderSkipped}건 [${Array.from(skippedByCode.entries()).map(([c, n]) => `${c}:${n}`).join(' ')}]`
       : ''));
