@@ -115,7 +115,7 @@ export async function finalizePaymentSuccess(input: FinalizePaymentSuccessInput)
 
     // 1) pending payment row lock + 조회
     const pendingResult = await client.query(
-      `SELECT id, company_id, user_id, amount, status, pg_payment_key
+      `SELECT id, company_id, user_id, amount, status, pg_payment_key, payment_method
        FROM payments
        WHERE pg_order_id = $1 AND pg_provider = 'inicis'
        FOR UPDATE`,
@@ -219,13 +219,16 @@ export async function finalizePaymentSuccess(input: FinalizePaymentSuccessInput)
     // 5) balance_transactions INSERT (charge)
     const description = `카드결제 충전 (${dbAmount.toLocaleString()}원${approval.cardName ? ` · ${approval.cardName}` : ''}${approval.cardQuota && Number(approval.cardQuota) > 0 ? ` · ${approval.cardQuota}개월` : ''})`;
 
+    // ★ 2026-10-15 B-1015-4 (임은지 접수 · 충전관리 「카드결제」 조회 0건): 이 INSERT 만 payment_method 를 안 넣어 카드 충전이
+    //   NULL(→ 조회의 COALESCE 가 '시스템')로 적혔다. 결제 원장(payments.payment_method · card/virtual_account/transfer)을 그대로 잇는다.
+    //   무통장(deposit-approve 'deposit')·관리자(admin.ts 'admin')는 각자 넣고 있었다. 기존 행은 같은 결제 원장으로 UPDATE 1회(BUGS B-1015-4).
     await client.query(
       `INSERT INTO balance_transactions (
         company_id, type, amount, balance_after, description,
-        reference_type, reference_id, created_by, created_at
+        reference_type, reference_id, created_by, payment_method, created_at
       ) VALUES (
         $1, 'charge', $2, $3, $4,
-        'payment', $5, $6, NOW()
+        'payment', $5, $6, $7, NOW()
       )`,
       [
         pending.company_id,
@@ -234,6 +237,7 @@ export async function finalizePaymentSuccess(input: FinalizePaymentSuccessInput)
         description,
         pending.id,
         pending.user_id,
+        pending.payment_method || 'card',
       ]
     );
 

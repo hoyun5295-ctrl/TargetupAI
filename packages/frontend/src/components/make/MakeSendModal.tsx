@@ -22,7 +22,7 @@ import SmtpConnectModal from '../email/SmtpConnectModal';
 import type { EmailCampaign } from '../email/email-campaign-types';
 import { hasUnsupportedSmsChars, SMS_CHARSET_BLOCK_MESSAGE } from '../../utils/smsSafeChars';
 import { CONFIRM_CREDIT_COSTS } from '../../constants/credit';
-import { defaultDmSmsText, isNightAdHour } from '../../utils/make-flow';
+import { defaultDmSmsText, isNightAdHour, fixItemsOf, type FixItem } from '../../utils/make-flow';
 import '../../styles/make.css';   // ★ 2026-10-10 mk-max-h-94(휴대폰 보이는 높이)
 import { MK_BTN_OUTLINE, MK_BTN_PRIMARY, MK_MODAL, MK_MODAL_BACKDROP } from '../../utils/make-ui';
 
@@ -77,7 +77,7 @@ export default function MakeSendModal({
           <button type="button" onClick={onClose} className="p-1.5 rounded-lg text-slate-500 hover:text-slate-900 hover:bg-slate-100" aria-label="닫기"><X className="w-5 h-5" /></button>
         </div>
 
-        {active === 'dm' && dm && <DmCard dm={dm} beforeSend={beforeSend} onSent={() => { onSent?.('dm'); onClose(); }} onOpenAdvanced={onOpenAdvancedDm} />}
+        {active === 'dm' && dm && <DmCard dm={dm} beforeSend={beforeSend} onSent={() => { onSent?.('dm'); onClose(); }} onOpenAdvanced={onOpenAdvancedDm} onGoFix={onClose} />}
         {active === 'email' && email && <EmailCard email={email} beforeSend={beforeSend} onSent={() => { onSent?.('email'); onClose(); }} onSmtpChanged={onSmtpChanged} />}
         {((active === 'dm' && !dm) || (active === 'email' && !email)) && (
           <div className="rounded-2xl border border-slate-200 bg-white p-5 text-[13px] text-slate-500">먼저 저장된 초안이 있어야 보낼 수 있어요.</div>
@@ -109,7 +109,7 @@ export default function MakeSendModal({
 
 interface Quote { required: boolean; cost: number; source: string }
 
-function DmCard({ dm, beforeSend, onSent, onOpenAdvanced }: { dm: SendDm; beforeSend?: (c: SendChannel) => Promise<boolean>; onSent: () => void; onOpenAdvanced?: () => void }) {
+function DmCard({ dm, beforeSend, onSent, onOpenAdvanced, onGoFix }: { dm: SendDm; beforeSend?: (c: SendChannel) => Promise<boolean>; onSent: () => void; onOpenAdvanced?: () => void; /** ★ 2026-10-15 B-1015-5 창을 닫고 만들기 화면의 [고치기]로 */ onGoFix?: () => void }) {
   const toast = useToast();
   const [ready, setReady] = useState(false);
   const [quote, setQuote] = useState<Quote | null>(null);
@@ -123,6 +123,8 @@ function DmCard({ dm, beforeSend, onSent, onOpenAdvanced }: { dm: SendDm; before
   const [callback, setCallback] = useState('');
   const [opt080, setOpt080] = useState<string | null>(null);
   const [fatal, setFatal] = useState<{ link: boolean; blocking: number } | null>(null);
+  // ★ 2026-10-15 B-1015-5 (임은지 접수): "고칠 곳 N곳" 개수만 보여 어디를 고칠지 몰랐다 → 검수 항목을 만들기 화면과 같은 변환기(fixItemsOf)로 사람 말로 바꿔 함께 보여 준다
+  const [fatalItems, setFatalItems] = useState<FixItem[]>([]);
   const [isAd, setIsAd] = useState(true);
   const [subject, setSubject] = useState((dm.title || '').trim().slice(0, 40));
   const [message, setMessage] = useState(() => defaultDmSmsText({ brand: dm.brand, title: dm.title, sub: dm.heroSub }));
@@ -184,7 +186,10 @@ function DmCard({ dm, beforeSend, onSent, onOpenAdvanced }: { dm: SendDm; before
           const r = await fetch(`/api/dm/${dm.id}/validate`, { method: 'POST', headers: authJson(), body: '{}' });
           const d = await r.json().catch(() => ({}));
           const items: any[] = Array.isArray(d?.items) ? d.items : [];
-          if (alive && r.ok) setFatal({ link: items.some((i) => i.area === 'link' && i.severity === 'fatal'), blocking: items.filter((i) => i.severity === 'fatal' && !i.overridable).length });
+          if (alive && r.ok) {
+            setFatal({ link: items.some((i) => i.area === 'link' && i.severity === 'fatal'), blocking: items.filter((i) => i.severity === 'fatal' && !i.overridable).length });
+            setFatalItems(fixItemsOf({ items }, [], []).filter((it) => it.kind === 'must'));
+          }
         })(),
       ];
       await Promise.allSettled(jobs);
@@ -416,6 +421,19 @@ function DmCard({ dm, beforeSend, onSent, onOpenAdvanced }: { dm: SendDm; before
         </div>
       )}
       {blockMsg && <div className="mt-3 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2.5 text-[12.5px] text-rose-900 inline-flex items-start gap-2 w-full"><AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />{blockMsg}</div>}
+      {fatalItems.length > 0 && (
+        <div className="mt-3 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2.5 w-full">
+          <div className="text-[12.5px] font-semibold text-rose-900 inline-flex items-center gap-2"><AlertCircle className="w-4 h-4 shrink-0" />고칠 곳 {fatalItems.length}곳 · 만들기 화면에서 채우면 보낼 수 있어요</div>
+          <ul className="mt-1.5 space-y-1 pl-6">
+            {fatalItems.map((it, i) => (
+              <li key={`${it.sectionId || 'x'}-${i}`} className="text-[12.5px] text-slate-800 list-disc">
+                <b>{it.title}</b>{it.sub ? <span className="text-slate-500"> · {it.sub}</span> : null}
+              </li>
+            ))}
+          </ul>
+          {onGoFix && <button type="button" onClick={onGoFix} className="mt-2 ml-6 text-[12.5px] font-semibold text-violet-700 hover:underline">만들기 화면에서 고치기</button>}
+        </div>
+      )}
 
       <div className="flex items-center justify-end gap-2 pt-4 flex-wrap">
         {onOpenAdvanced && <button type="button" onClick={onOpenAdvanced} className="mr-auto inline-flex items-center gap-1.5 text-[12.5px] text-slate-500 hover:text-slate-900"><Settings2 className="w-4 h-4" />자세히 설정</button>}

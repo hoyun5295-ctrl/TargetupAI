@@ -55,17 +55,29 @@
 
 ## 2) 활성 버그
 
-### 🟢 B-1015-3 휴머스온에서 삭제된 발신프로필이 한줄로엔 살아 있음(박성용 1015 · 에스디몰 「스마일패스」) → 동기화가 사용 중지까지 내림 · 코드 완료 · Codex 1R approve · 배포 대기
+### 🟢 B-1015-4 슈퍼관리자 충전관리 「카드결제」 조회 0건(임은지 1015 cmv8xo7z11enpjnn4hrpy97os · P2) → 카드 충전 INSERT 가 결제수단을 안 적음 · 코드 완료 · Codex 1R approve · 배포 대기
+- 원인(코드): `utils/payment-processor.ts` 의 `balance_transactions` INSERT 만 `payment_method` 열이 없어 카드 충전이 NULL(조회 `COALESCE(...,'system')` = 「시스템」 라벨)로 적혔다. 무통장(`bank_transfer`)·관리자(`admin`)는 각자 넣고 있었다. 화면 옵션 값 = `card`.
+- 수정: pending 결제 행 조회에 `payment_method` 추가 · INSERT 에 `payment_method = payments.payment_method || 'card'`. 테스트 = `staff-tickets-1015b.test.ts`.
+- 배포 뒤 Harold: 기존 NULL 행 채우기 1회 — `UPDATE balance_transactions bt SET payment_method = COALESCE(p.payment_method,'card') FROM payments p WHERE bt.reference_type = 'payment' AND bt.reference_id = p.id AND bt.payment_method IS NULL AND bt.type = 'charge';` → 충전관리 「카드결제」 조회로 확인(임은지 실측).
+
+### 🟢 B-1015-5 DM 보내기 창 「고칠 곳 N곳」이 어디인지 안 알려 줌(임은지 1015 cmv8v9nyf1e8pjnn4050isyjl · P2) · 코드 완료 · 배포 대기 · 실측 = 임은지
+- 원인(코드): `MakeSendModal` 이 검수 API(`/api/dm/:id/validate`) 결과에서 개수만 남기고 항목(영역·블록·문장·고치는 법)을 버렸다. 만들기 화면의 「보내기 전에 N곳」 줄은 같은 결과를 `fixItemsOf` 로 사람 말로 바꿔 [고치기]까지 단다.
+- 수정: 보내기 창이 같은 변환기(`fixItemsOf` · must)로 항목을 목록으로 보여 주고 「만들기 화면에서 고치기」(창 닫기)를 단다. 막는 판정·문구는 그대로(표시만 추가 · UI 라 Codex 대상 제외). 테스트 = `staff-tickets-1015b.test.ts`.
+- 실측(배포 뒤 임은지): 필수 칸이 빈 DM 으로 보내기 창을 열면 「고칠 곳 N곳」 아래 항목이 보이고, 버튼으로 만들기 화면에 돌아가 [고치기]가 있는지.
+
+### 🟢 B-1015-3 휴머스온에서 삭제된 발신프로필이 한줄로엔 살아 있음(박성용 1015 · 에스디몰 「스마일패스」) → 동기화가 사용 중지까지 내림 · 코드 완료 · Codex 1R approve · 배포 완료 1015
 - 실측(SQL): 「스마일패스」 두 줄. 옛 줄 = 채널 ID `@스마일패스_미사용` · status D · is_active t(휴머스온이 장기 미사용으로 삭제 · 1시간 동기화가 상태 D 는 받아 적었으나 활성은 그대로). 새 줄 = `@스마일패스` · A · 승인됨(재등록은 이미 돼 있음).
 - 원인: `syncSenderStatusJob` 이 IMC 상태를 적기만 하고 효과(활성 플래그)로 잇지 않았다. 9월 12일 「사용 중지」 CT(`disableSenderProfile`)와 활성 한정 중복 검사·유니크 인덱스는 이미 있었다.
+- 배포: 1015 12:49 backend 빌드 + pm2 reload(Harold). 동기화는 부팅 즉시가 아니라 1시간 뒤 첫 실행 → 13:50 KST 쯤 옛 줄 is_active=f · status=DELETED 확인(SQL = 메모리).
+- 사고 1건(배포 전 12:44 KST): 슈퍼관리자 화면에서 이름이 같은 두 줄 중 **살아 있는 `@스마일패스`(A)** 가 「사용 중지」 됐다(감사 기록 user_id 없음 = 슈퍼관리자 계정). 12:5x SQL 로 is_active=t · status=A 복구(Harold). 추가 과제 = 「사용 중지」 확인 창에 휴머스온 상태(A 정상이면 경고 · D 면 삭제됨)를 보여 주고, 같은 이름 두 줄은 채널 ID 를 크게.
 - 수정: 동기화에서 IMC 상태 D 를 받으면 같은 CT 로 status=DELETED · is_active=false · 감사 기록(행위자 없음). 다음 주기 SELECT 는 DELETED 를 뺀다. 4011(키 자체 소멸)은 종전대로 건너뛰고 세기만(추가 과제) · [범위 밖 Codex] 자동발송 워커 알림톡 가드(auto-campaign-worker.ts 998)가 프로필 활성을 안 봄(자동발송 폐기 상태 · 재가동 과제). 테스트 = `sender-profile-deleted-sync-1015.test.ts`. 박성용 과장 질문 ② 답 = 상태값은 이미 1시간마다 받고 있고(A/S/D · 차단 · 휴면) 이번에 삭제 → 사용 중지까지 자동.
 
-### 🔴 B-1015-2 AI 오퍼레이션 LMS 제목이 중간에 잘림 (Harold 1015 접수 · 「(광고) [테스트계정] 쿠폰 아직 못 받」 · 「[테스트계정] 가을맞이 전 제품」)
+### 🟢 B-1015-2 AI 오퍼레이션 LMS 제목이 중간에 잘림 (Harold 1015 접수 · 「(광고) [테스트계정] 쿠폰 아직 못 받」 · 「[테스트계정] 가을맞이 전 제품」)
 - 현상(화면 3장): 제안 문안의 제목이 브랜드 표기 뒤 아홉 글자쯤에서 끊긴다. 세 사례 모두 브랜드 표기 포함 17자에서 잘렸다.
 - 원인(코드 실측): AiOperatorPage 만 제목을 17자로 잘랐다(resolveSubject · 발송 · 입력칸 · 07-10 주석 "17자 = 기존 발송 계약" 인데 백엔드에 그런 상한은 없다). AI 는 제목에 「[브랜드명] 」 을 넣으므로 브랜드가 길수록 제목이 깎인다. 다른 발송 화면·자동 마케팅은 40자, 큐 `title_str` 은 varchar(200). 프롬프트의 LMS 규칙은 본문 줄 규칙(한 줄 17자)과 제목 규칙이 한 문장에 섞여 있었다.
 - 수정(코드 완료 · Codex 3R approve(1R medium 1 · 2R high 1 KISA · 3R approve) · 배포 대기): 프론트 CT 상수 `LMS_SUBJECT_MAX_CHARS = 40`(formatDate.ts) 을 허브 세 자리가 쓴다 · 프롬프트 제목 규칙 = "공백 포함 20자(40바이트) 이내 · 브랜드 표기 포함" 으로 본문 줄 규칙과 분리. 테스트 = `operator-subject-1015.test.ts`. 배포 = frontend 빌드 + backend 재시작.
 
-### 🔴 B-1015-1 AI 오퍼레이션 「전체 고객」 목표가 추출 0명 → 발송 불가 (남지현 1015 09:33 접수 · P1 · 접수번호 cmv8t2aui1dttjnn4en153ne8)
+### 🟢 B-1015-1 AI 오퍼레이션 「전체 고객」 목표가 추출 0명 → 발송 불가 (남지현 1015 09:33 접수 · P1 · 접수번호 cmv8t2aui1dttjnn4en153ne8)
 - 현상(화면 3장 실측): 「전체고객에게 가을 신상품 입고 문자 보내줘」 → 제안 화면은 추천 타겟 1,501명(전체 1,501 중 100% · "별도 필터 없이 SMS 수신동의 고객 전원") 인데 「추출 대상 리스트 보기」 = 약 0명(0.0%) + 「승인 후 발송 시작」 = 발송 오류 "AI가 이 목표를 조건으로 옮기지 못했습니다. 조건을 더 구체적으로…". 접수자: 기존에는 같은 명령으로 정상 추출.
 - 원인(코드 + 서버 error 로그 실측): 빈 조건 `{}` 를 세 경로가 다르게 읽었다 — 제안 카드(`countFilteredCustomers`) = 전원 · 리스트(`compileOperatorAudience` 10-05) = 거절 · 발송(`preview-recipients` 08-18) = 거절. 08-18 에 「조건 못 옮김 = {}」(유호윤 접수)을 막으면서 「전체 고객」 신호를 만들지 않았고, AI 필드 목록이 `sms_opt_in` 을 빼므로 전체 목표는 늘 `{}` 로만 온다. 거절 로그 12건 전부 `filters={}` · 첫 거절 10-07(보관 09-13부터). 1012~1014 배포분은 이 경로를 건드리지 않았다.
 - 수정(코드 완료 · Codex 4R approve(1R medium 1 · 2R approve+범위 밖 1 · 3R medium 1 · 4R approve) · 배포 대기): 전체 고객 신호 CT `utils/all-customers-signal.ts` — AI 타겟 추천이 `all_customers` 를 명시(+ 조건 없는 전체 문장 허용 목록) → 제안 `target.allCustomers` → 화면이 리스트·발송 요청에 넘김 → 두 라우트는 플래그가 있을 때만 빈 조건을 전원으로 연다. 신호 없는 `{}` 는 제안 카드부터 같은 문장으로 0명 + 사유(옛: 1,501명 보여 주고 발송에서 터짐). `/recommend-target`(자동발송 추천)도 전체 선언 없는 `{}` 는 0. 같은 뿌리(Codex 2R 범위 밖 → Harold 지시로 착수) = 자동발송 `auto_campaigns` 저장(생성·수정)에서 WHERE 를 못 만드는 조건을 400 으로 막고, 실행 워커는 빈 WHERE 면 보내지 않고 failed 로 남긴다(옛: 회사 전원에게 나감 · D-1 통지도 전원 수). 저장 판정은 워커와 같은 빌더(`buildFilterQueryCompat` · 브랜드 단독 조건 오판 방지 · Codex 3R). 자동발송은 POST 410 · 워커 `AUTO_CAMPAIGN_RETIRED=true` 라 지금 살아 있는 건 PUT 검증뿐이고 나머지는 재가동 안전망. 자동 마케팅(계약 축)·직접 타겟 AI 모드·브리핑(언급 없으면 전체 = 의도)은 무변경. 테스트 = `staff-tickets-1015.test.ts`.
