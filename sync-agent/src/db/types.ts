@@ -101,11 +101,13 @@ export interface IDbConnector {
 
   /**
    * 전체 데이터 조회 (OFFSET 페이지네이션)
+   * ★ 2026-10-15 keyColumns = 엔진이 정한 원본 행 키(메타 PK · 지정 키). Oracle 만 쓴다 — 지정 키 NUMBER 문자열 수신 · ROWID 없는 뷰의 정렬 기준.
    */
   fetchAll(
     tableName: string,
     limit: number,
     offset: number,
+    keyColumns?: string[],
   ): Promise<RawRow[]>;
 
   /**
@@ -113,12 +115,15 @@ export interface IDbConnector {
    * ★ 2026-06-30: 깊은 OFFSET 재스캔이 없어 대용량/라이브 테이블에서도 중간 짧은·빈
    *   페이지로 인한 조기 종료가 없다(이새에프앤씨 full 조기종료 사고 근본 정정).
    *   afterKey=null이면 처음부터. 반환 lastKey를 다음 호출 afterKey로 넘긴다.
+   *   lastKey 는 어댑터만 아는 문자열이다(엔진은 열어 보지 않는다 · Oracle = ROWID 또는 키 값 JSON).
    *   미구현 어댑터는 엔진이 자동으로 OFFSET 경로로 폴백한다(optional).
+   *   keyColumns = fetchAll 과 같은 뜻(★ 2026-10-15).
    */
   fetchAllKeyset?(
     tableName: string,
     limit: number,
     afterKey: string | null,
+    keyColumns?: string[],
   ): Promise<{ rows: RawRow[]; lastKey: string | null }>;
 
   /**

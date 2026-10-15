@@ -32,7 +32,7 @@ const SYNC_CUSTOM_SLOTS = Array.from({ length: 15 }, (_, i) => `custom_${i + 1}`
 const SYNC_CUSTOMER_TARGET_FIELDS = [
   'phone', 'name', 'gender', 'birth_date', 'email', 'address', 'region', 'grade',
   'store_phone', 'points', 'store_code', 'store_name', 'registered_store',
-  'registered_store_number', 'registration_type', 'callback', 'sms_opt_in',
+  'registered_store_number', 'registration_type', 'callback', 'sms_opt_in', 'is_opt_out',
   'recent_purchase_date', 'recent_purchase_amount', 'recent_purchase_store',
   'total_purchase_amount', 'purchase_count', ...SYNC_CUSTOM_SLOTS,
 ];

@@ -4,6 +4,7 @@
  * 소유하는 것
  *   1) 원본 행 키(source_row_key) 정규화 — 고객사 소스 테이블의 PK 값을 그대로 받는다.
  *   2) 구매 원장 적재 SQL 조립(멱등 UPSERT / legacy INSERT).
+ *   3) 구매 custom_fields(custom_1~15) 값 정리 — ★ 2026-10-15 적재 시작.
  *
  * 왜 필요했나 (2026-08-03 실측)
  *   원장에 멱등키가 없어 같은 구매가 두 번 오면 두 행이 됐다. 지금까지 안 터진 이유는
@@ -66,6 +67,44 @@ export function dedupeBySourceRowKey<T extends { source_row_key: string | null }
   return [...noKey, ...keyed];
 }
 
+/** PostgreSQL JSON 파서가 거부하는 글자 — NUL · 짝 없는 서로게이트(앞·뒤) */
+const JSONB_NUL_RE = /\u0000/g;
+const JSONB_LONE_SURROGATE_RE = /[\ud800-\udbff](?![\udc00-\udfff])|(?<![\ud800-\udbff])[\udc00-\udfff]/g;
+
+/**
+ * custom_fields 값 객체의 글자 값에서 JSONB 가 거부하는 글자를 뺀다(NUL 은 지우고 짝 없는 서로게이트는 U+FFFD).
+ * ★ 2026-10-15: 이 글자 하나가 섞이면 JSONB 입력 오류로 그 행 전체(고객·구매)가 적재 실패 → 에이전트 커서는 넘어가 영구 누락.
+ *   바뀌는 값은 어차피 저장될 수 없던 값뿐이다(그 밖의 값·키는 그대로).
+ */
+export function jsonbSafeCustomValues(obj: Record<string, unknown>): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(obj)) {
+    out[k] = typeof v === 'string'
+      ? v.replace(JSONB_NUL_RE, '').replace(JSONB_LONE_SURROGATE_RE, '�')
+      : v;
+  }
+  return out;
+}
+
+/** 구매 custom 슬롯 키 — custom_1 ~ custom_15 (고객과 같은 슬롯 체계) */
+const PURCHASE_CUSTOM_KEY_RE = /^custom_(?:[1-9]|1[0-5])$/;
+
+/**
+ * 에이전트가 보낸 구매 custom_fields(mapRow 결과 · 에이전트가 날짜 글자를 이미 정리) → JSONB 문자열.
+ * ★ 2026-10-15 신설: 그동안 서버가 이 값을 읽지 않아 구매 custom 슬롯 값이 전부 버려졌다
+ *   (매핑 검증·AI 매핑은 구매 custom_1~15 를 허용하고 에이전트도 보내는데 적재만 빠져 있었다).
+ * 받는 것 = custom_1~15 키의 글자·숫자·불리언·null. 그 밖의 키·값(객체·배열)은 버린다. 남는 게 없으면 null.
+ */
+export function normalizePurchaseCustomFields(raw: unknown): string | null {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
+  const out: Record<string, string | number | boolean | null> = {};
+  for (const [k, v] of Object.entries(raw as Record<string, unknown>)) {
+    if (!PURCHASE_CUSTOM_KEY_RE.test(k)) continue;
+    if (v === null || typeof v === 'string' || typeof v === 'number' || typeof v === 'boolean') out[k] = v;
+  }
+  return Object.keys(out).length > 0 ? JSON.stringify(jsonbSafeCustomValues(out)) : null;
+}
+
 export interface PurchaseIngestRow {
   phone: string;
   purchase_date: string | null;
@@ -76,6 +115,8 @@ export interface PurchaseIngestRow {
   quantity: number | null;
   unit_price: number | null;
   total_amount: number | null;
+  /** normalizePurchaseCustomFields 결과(JSONB 문자열) */
+  custom_fields: string | null;
   source_row_key: string | null;
 }
 
@@ -93,7 +134,7 @@ export function buildPurchaseIngestSql(
   phoneToCustomerId: Record<string, string | null>,
   withSourceKey: boolean,
 ): { sql: string; params: any[] } {
-  const cols = withSourceKey ? 12 : 11;
+  const cols = withSourceKey ? 13 : 12;
   const params: any[] = [];
   const valueClauses: string[] = [];
 
@@ -108,7 +149,7 @@ export function buildPurchaseIngestSql(
       companyId, phoneToCustomerId[r.phone] || null, r.phone,
       r.purchase_date, r.store_code, r.store_name,
       r.product_code, r.product_name,
-      r.quantity, r.unit_price, r.total_amount,
+      r.quantity, r.unit_price, r.total_amount, r.custom_fields,
     );
     if (withSourceKey) params.push(r.source_row_key);
   }
@@ -116,10 +157,10 @@ export function buildPurchaseIngestSql(
   const columnList = withSourceKey
     ? `company_id, customer_id, customer_phone, purchase_date,
        store_code, store_name, product_code, product_name,
-       quantity, unit_price, total_amount, source_row_key, created_at`
+       quantity, unit_price, total_amount, custom_fields, source_row_key, created_at`
     : `company_id, customer_id, customer_phone, purchase_date,
        store_code, store_name, product_code, product_name,
-       quantity, unit_price, total_amount, created_at`;
+       quantity, unit_price, total_amount, custom_fields, created_at`;
 
   // ⛔ created_at은 SET 목록에 없다(도착 축 보존 — 파일 상단 주석).
   const conflictClause = withSourceKey
@@ -134,8 +175,11 @@ export function buildPurchaseIngestSql(
          product_name   = EXCLUDED.product_name,
          quantity       = EXCLUDED.quantity,
          unit_price     = EXCLUDED.unit_price,
-         total_amount   = EXCLUDED.total_amount`
+         total_amount   = EXCLUDED.total_amount,
+         custom_fields  = EXCLUDED.custom_fields`
     : '';
+  // custom_fields 는 병합하지 않고 바꾼다 — 한 행 = 원본 한 행이라 지금 보낸 값이 진실이다(매핑에서 뺀 슬롯은 사라진다).
+  //   고객은 업로드 등 다른 문의 값을 지키려 병합하지만, 구매 원장은 싱크만 쓴다.
 
   const sql =
     `INSERT INTO purchases (${columnList})

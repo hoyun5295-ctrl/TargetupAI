@@ -210,7 +210,7 @@ function buildPurchaseFieldReference(): string {
   return lines.join('\n');
 }
 
-function buildFieldMapReference(): string {
+export function buildFieldMapReference(): string {
   const lines: string[] = [];
   lines.push('한줄로 표준 필드 정의 (36개 필드 = 직접 컬럼 21개 + 커스텀 15개):');
   lines.push('');
@@ -220,6 +220,9 @@ function buildFieldMapReference(): string {
     const aliases = f.aliases && f.aliases.length > 0 ? ` (동의어: ${f.aliases.join(', ')})` : '';
     lines.push(`- ${f.fieldKey}: ${f.displayName}${extra}${aliases}`);
   }
+  // ★ 2026-10-15 싱크 전용 칸 — FIELD_MAP 에 없다(업로드 경로 불변). 에이전트가 거부·탈퇴 값이면 sms_opt_in=false 로 접어 보낸다.
+  //   종전에는 목록에 없어 엠티콜렉션 YN_WITHDRAW 가 custom_2 로 가고 탈퇴 회원 18명이 발송 대상으로 남았다.
+  lines.push('- is_opt_out: 탈퇴·수신거부 표시 (Y·1·탈퇴 = 발송 제외)');
   lines.push('- custom_1 ~ custom_15: 커스텀 슬롯 (표준 필드에 해당 없는 데이터용, 최대 15개)');
   lines.push('');
   lines.push('매핑 규칙:');
@@ -239,6 +242,9 @@ function buildFieldMapReference(): string {
   lines.push('   - recent_purchase_date: 최근구매일');
   lines.push('   - recent_purchase_amount vs total_purchase_amount');
   lines.push('   - purchase_count: 구매횟수');
+  lines.push('8. 탈퇴 여부 컬럼(YN_WITHDRAW, WITHDRAW_YN, SECESSION_YN 등)과 수신거부 표시 컬럼은 custom 이 아니라 is_opt_out 이다.');
+  lines.push('   탈퇴 여부(Y/N)와 탈퇴일이 함께 있으면 여부 컬럼만 is_opt_out 으로, 탈퇴일은 custom 으로.');
+  lines.push('   수신동의(Y=동의)는 sms_opt_in, 탈퇴·거부(Y=거부)는 is_opt_out. 둘은 극성이 반대다.');
   lines.push('');
   lines.push('응답 형식: JSON만 (설명 없이)');
   lines.push('{"소스컬럼명": "field_key 또는 null", ...}');
@@ -327,7 +333,7 @@ function parseMappingJson(text: string): Record<string, string | null> {
 }
 
 /** 매핑 결과 정리: 유효 field_key만 남기고 중복 제거 + custom_1~15 순서 재배정. */
-function sanitizeMapping(
+export function sanitizeMapping(
   mapping: Record<string, string | null>,
   columns: string[],
   target: MappingTarget = 'customers'
@@ -342,6 +348,7 @@ function sanitizeMapping(
           ...FIELD_MAP.filter((f) => f.storageType === 'column').map((f) => f.fieldKey),
           ...Array.from({ length: 15 }, (_, i) => `custom_${i + 1}`),
           'birth_year', // 파생 필드 허용 (upload.ts와 동일)
+          'is_opt_out', // ★ 2026-10-15 싱크 전용 탈퇴·거부 표시(프롬프트 필드표와 짝 · sync-mapping-fields.ts 계약에도 있다)
         ]
   );
 

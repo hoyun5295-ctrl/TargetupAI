@@ -22,6 +22,7 @@ import {
 } from '../config';
 // ★2026-09-13(3) 싱크 ⓑ 가리는 모양은 masking.ts 한 곳이 정한다(키 = 앞뒤 4자 · 시크릿·비밀번호 = 전부)
 import { maskApiKey, maskPassword } from '../logger/masking';
+import { customSlotSources, resolveCustomFieldLabels } from '../mapping/templates';
 
 // ─── readline 유틸 ──────────────────────────────────────
 
@@ -152,7 +153,8 @@ export function printConfig(config: AgentConfig): void {
   // ④ 매핑
   const custMapCount = Object.keys(m.customers).length;
   const purMapCount = Object.keys(m.purchases).length;
-  const customLabels = m.customFieldLabels || {};
+  // ★ 2026-10-15 표시 = 기동 시 서버에 등록되는 라벨(CT) — 저장 라벨이 없는 슬롯은 원본 컬럼명
+  const customLabels = resolveCustomFieldLabels(m.customers, m.customFieldLabels);
   const customLabelCount = Object.keys(customLabels).length;
 
   console.log('');
@@ -333,13 +335,14 @@ async function editMapping(config: AgentConfig): Promise<AgentConfig> {
         ? `로컬 폴백 (${ai.fallbackReason || ''})`
         : `AI 모델${ai.cacheHit ? ' · 캐시적중' : ''}`;
       console.log(`  ✅ AI 재매핑 완료 — ${Object.keys(ai.mapping).length}개 컬럼 / ${tag}`);
+      // ★ 2026-10-15 라벨은 고객 슬롯 전용(서버 고객 필드 정의). 고객을 다시 매핑하면 소스 컬럼이 그대로인 슬롯만
+      //   저장 라벨을 잇고 나머지는 원본 컬럼명. 옛: 구매 재매핑의 슬롯 라벨까지 섞어 고객 필드 이름으로 올렸다.
       const nextMapping = {
         ...config.mapping,
         [scope]: ai.mapping,
-        customFieldLabels: {
-          ...(config.mapping.customFieldLabels || {}),
-          ...ai.customFieldLabels,
-        },
+        customFieldLabels: scope === 'customers'
+          ? resolveCustomFieldLabels(ai.mapping, config.mapping.customFieldLabels, config.mapping.customers)
+          : config.mapping.customFieldLabels,
       };
       return { ...config, mapping: nextMapping };
     } catch (e: any) {
@@ -353,29 +356,19 @@ async function editMapping(config: AgentConfig): Promise<AgentConfig> {
   //     (기존: customFieldLabels에 이미 있는 항목만 수정 가능 → 새로 추가한 custom 슬롯에
   //      라벨을 못 달던 문제. isae 고객 custom 15개 라벨 지정 불가로 발견 2026-07-01.)
   //     기본값 = 현재 라벨 또는 소스 컬럼명이라, Enter만 눌러도 컬럼명으로 라벨이 붙는다.
+  //   ★ 2026-10-15 대상 = 고객 매핑의 custom 슬롯만(라벨은 서버 고객 필드 정의로 올라간다).
+  //     옛: 구매 매핑 슬롯까지 모아, 고객이 안 쓰는 번호에 구매 컬럼 이름이 고객 필드 라벨로 붙었다.
   if (target === 'customLabels') {
-    const labels = { ...(config.mapping.customFieldLabels || {}) };
+    const labels = resolveCustomFieldLabels(config.mapping.customers, config.mapping.customFieldLabels);
+    const slotSource = customSlotSources(config.mapping.customers);
 
-    // 고객·구매 매핑에서 custom_N 슬롯과 소스 컬럼(라벨 기본값) 수집
-    const slotSource = new Map<string, string>();
-    for (const map of [config.mapping.customers, config.mapping.purchases]) {
-      for (const [src, dst] of Object.entries(map || {})) {
-        if (/^custom_\d+$/.test(dst) && !slotSource.has(dst)) slotSource.set(dst, src);
-      }
-    }
-    const slots = [...slotSource.keys()].sort(
-      (a, b) => parseInt(a.slice(7), 10) - parseInt(b.slice(7), 10),
-    );
-
-    if (slots.length === 0) {
-      console.log('  ⚠  매핑된 custom 슬롯이 없습니다.');
+    if (slotSource.size === 0) {
+      console.log('  ⚠  고객 매핑에 custom 슬롯이 없습니다.');
     } else {
       console.log('');
       console.log('  custom 슬롯 라벨 지정 (Enter = 현재값/컬럼명 유지):');
-      for (const slot of slots) {
-        const src = slotSource.get(slot)!;
-        const def = labels[slot] || src; // 현재 라벨 또는 소스 컬럼명
-        const newLabel = await ask(`${slot} (${src}) 라벨`, def);
+      for (const [slot, src] of slotSource) {
+        const newLabel = await ask(`${slot} (${src}) 라벨`, labels[slot]);
         if (newLabel) labels[slot] = newLabel;
       }
     }
@@ -449,6 +442,10 @@ async function editMapping(config: AgentConfig): Promise<AgentConfig> {
   const updatedMapping = { ...config.mapping };
   if (target === 'customers') {
     updatedMapping.customers = currentMapping;
+    // ★ 2026-10-15 슬롯을 옮기거나 지우면 라벨도 따라간다 — 소스 컬럼이 그대로인 슬롯만 저장 라벨 유지(CT)
+    updatedMapping.customFieldLabels = resolveCustomFieldLabels(
+      currentMapping, config.mapping.customFieldLabels, config.mapping.customers,
+    );
   } else {
     updatedMapping.purchases = currentMapping;
   }

@@ -123,6 +123,27 @@ export function normalizeSmsOptIn(value: any): boolean | null {
 }
 
 // ============================================================
+// 탈퇴·거부 표시(is_opt_out) 정규화 — true = 거부·탈퇴(발송 제외) / false = 아님
+// ★ 2026-10-15 엠티콜렉션 YN_WITHDRAW(Y = 탈퇴). 수신동의와 극성이 반대라 낱말표를 따로 둔다.
+// ============================================================
+const OPT_OUT_TRUE = new Set([
+  'true', 'Y', 'y', 'yes', 'YES', 'Yes', '1', 'T', 't', 'O', 'o',
+  '거부', '수신거부', '수신 거부', '거절', '탈퇴', '탈퇴회원', '해지', '철회',
+]);
+const OPT_OUT_FALSE = new Set([
+  'false', 'N', 'n', 'no', 'NO', 'No', '0', 'F', 'f', 'X', 'x', '정상',
+]);
+
+export function normalizeOptOutFlag(value: any): boolean | null {
+  if (value == null || value === '') return null;
+  if (typeof value === 'boolean') return value;
+  const v = String(value).trim();
+  if (OPT_OUT_TRUE.has(v)) return true;
+  if (OPT_OUT_FALSE.has(v)) return false;
+  return null;
+}
+
+// ============================================================
 // 결혼 여부 정규화 — 표준값: true (기혼) / false (미혼)
 // ============================================================
 const MARRIED_TRUE = new Set(['true', 'Y', 'y', '기혼', 'married', 'Married', 'MARRIED', '1']);
@@ -510,6 +531,22 @@ export function normalizeCustomer(
   }
   if (consentUnrecognized) result.sms_opt_in_unknown = String(rawConsent).trim().slice(0, 20);
 
+  // ★ 2026-10-15 탈퇴·거부 표시(is_opt_out)는 수신거부로 접는다. 서버 sync 는 is_opt_out 을 받지 않는다(FIELD_MAP 21 컬럼 ·
+  //   Zod 도 지운다) — sms_opt_in=false 로 보내야 서버 reconcileSyncUnsubscribes 가 수신거부로 등록한다(엠티 YN_WITHDRAW · 질의서 3-7).
+  //   알아볼 수 없는 값(탈퇴일 등)도 거부로 접는다 — 탈퇴 회원 광고 발송 = 정보통신망법. 그 글자는 opt_out_unknown 으로 배치 한 줄 로그(engine).
+  //   ⛔ 빈 값·N 은 손대지 않는다(수신동의 미제공이면 미제공 그대로 = 서버 기존 값 보존).
+  if ('is_opt_out' in result) {
+    const rawOptOut = result.is_opt_out;
+    delete result.is_opt_out;
+    const flag = normalizeOptOutFlag(rawOptOut);
+    const optOutUnknown = flag === null && rawOptOut != null && String(rawOptOut).trim() !== '';
+    if (flag === true || optOutUnknown) {
+      result.sms_opt_in = false;
+      delete result.sms_opt_in_unknown;
+      if (optOutUnknown) result.opt_out_unknown = String(rawOptOut).trim().slice(0, 20);
+    }
+  }
+
   // 생년월일 파생 필드 계산 (FIELD_MAP에 없는 파생 필드)
   if (result.birth_date && typeof result.birth_date === 'string') {
     const parts = result.birth_date.split('-');
@@ -534,19 +571,25 @@ export function normalizeCustomer(
   }
 
   // ★2026-09-13(3) 싱크 ⓒ 동기화 매핑(mapRow)은 custom 슬롯을 custom_fields 아래에 넣는다 — 위 최상위 루프가 닿지 않던 자리.
-  //   ⛔ 새 객체로 만든다(위 `{ ...mapped }`는 얕은 복사라 제자리 수정은 넘긴 행을 바꾼다).
-  //   ⛔ Buffer 값은 키를 뺀다. null로 보내면 서버 병합이 저장된 값을 지운다.
-  const cf = result.custom_fields;
-  if (cf && typeof cf === 'object' && !Array.isArray(cf)) {
-    const out: Record<string, unknown> = {};
-    for (const [k, val] of Object.entries(cf as Record<string, unknown>)) {
-      if (Buffer.isBuffer(val)) continue;
-      out[k] = normalizeSyncCustomFieldValue(val, opts?.dbType);
-    }
-    result.custom_fields = out;
-  }
+  if (result.custom_fields) result.custom_fields = normalizeSyncCustomFields(result.custom_fields, opts?.dbType);
 
   return result;
+}
+
+/**
+ * 동기화 매핑 custom_fields(mapRow 결과) 값 정리 — 고객·구매 공용(★ 2026-10-15 구매도 같은 규칙).
+ *   ⛔ 새 객체로 만든다(호출부 `{ ...mapped }`는 얕은 복사라 제자리 수정은 넘긴 행을 바꾼다).
+ *   ⛔ Buffer 값은 키를 뺀다. null로 보내면 서버 병합이 저장된 값을 지운다.
+ *   객체가 아니면 손대지 않는다.
+ */
+function normalizeSyncCustomFields(cf: unknown, dbType?: string): unknown {
+  if (!cf || typeof cf !== 'object' || Array.isArray(cf)) return cf;
+  const out: Record<string, unknown> = {};
+  for (const [k, val] of Object.entries(cf as Record<string, unknown>)) {
+    if (Buffer.isBuffer(val)) continue;
+    out[k] = normalizeSyncCustomFieldValue(val, dbType);
+  }
+  return out;
 }
 
 // ─── 구매 데이터 정규화 ─────────────────────────────────
@@ -582,6 +625,10 @@ export function normalizePurchase(
     const num = Number(cleaned);
     result.quantity = isNaN(num) ? null : Math.round(num);
   }
+
+  // ★ 2026-10-15 구매 custom 슬롯도 고객과 같은 규칙(날짜 = 원본 벽시계 글자 · Buffer 제외) — 서버가 구매 custom_fields 로 적재한다.
+  //   옛: 정리 없이 보내 날짜 칸이 UTC ISO 글자(KST 자정 = 전날 15:00Z)로 나갔다(서버는 그동안 받지 않고 버렸다).
+  if (result.custom_fields) result.custom_fields = normalizeSyncCustomFields(result.custom_fields, opts?.dbType);
 
   return result;
 }

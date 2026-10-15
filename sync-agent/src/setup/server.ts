@@ -250,7 +250,6 @@ export async function startSetupWizard(
       res.json({
         success: true,
         mapping: result.mapping,
-        customFieldLabels: result.customFieldLabels,
         overflowColumns: result.overflowColumns,
         unmappedColumns: result.unmappedColumns,
         modelUsed: 'AI 모델',

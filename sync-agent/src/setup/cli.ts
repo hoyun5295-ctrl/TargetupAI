@@ -22,7 +22,7 @@
 import * as readline from 'node:readline';
 import { createDbConnector } from '../db';
 import type { DbConnectionConfig } from '../db/types';
-import { autoSuggestMapping, assignCustomFieldSlots } from '../mapping/templates';
+import { autoSuggestMapping, assignCustomFieldSlots, customSlotSources, resolveCustomFieldLabels } from '../mapping/templates';
 import { COMPOSITE_FIELDS } from '../mapping';
 import {
   saveConfigEncrypted,
@@ -579,7 +579,6 @@ async function stepColumnMapping(
   }
 
   let customerResult: { mapping: Record<string, string>; unmapped: string[] };
-  let aiLabelsFromApi: Record<string, string> = {};
   if (useAi && canUseAi) {
     console.log('  🤖 AI 자동 매핑 호출 중... (월 10회 쿼터)');
     try {
@@ -596,7 +595,6 @@ async function stepColumnMapping(
         mapping: ai.mapping,
         unmapped: ai.unmappedColumns,
       };
-      aiLabelsFromApi = ai.customFieldLabels;
       const tag = ai.fallbackUsed
         ? `로컬 폴백 (${ai.fallbackReason || 'AI 호출 실패'})`
         : `AI 모델${ai.cacheHit ? ' · 캐시적중' : ''}`;
@@ -627,45 +625,40 @@ async function stepColumnMapping(
   }
 
   // ── 커스텀 필드 자동 배정 (v1.4.0) ──
-  // 표준 필드에 매핑 안 된 컬럼 → custom_1~custom_15 슬롯
-  // v1.5.0: AI가 이미 custom_N을 배정한 경우 그 라벨 유지
+  // 표준 필드에 매핑 안 된 컬럼 → custom_1~custom_15 슬롯 (AI 가 이미 배정한 슬롯은 건너뛴다)
   const mappedCustomerCols = new Set(Object.keys(customerMapping));
   const unmappedForCustom = customerColumns.filter((col) => !mappedCustomerCols.has(col));
-  let customFieldLabels: Record<string, string> = { ...aiLabelsFromApi };
-
   if (unmappedForCustom.length > 0) {
     console.log('');
     console.log(`  📋 미매핑 컬럼 ${unmappedForCustom.length}개 → 커스텀 필드 슬롯 자동 배정`);
-
     const customResult = assignCustomFieldSlots(customerMapping, unmappedForCustom);
     customerMapping = customResult.mapping;
-    // AI 라벨 + 로컬 배정 라벨 병합 (AI 우선)
-    customFieldLabels = { ...customResult.customFieldLabels, ...aiLabelsFromApi, ...customFieldLabels };
-
-    if (Object.keys(customFieldLabels).length > 0) {
-      console.log('');
-      console.log('  [ 커스텀 필드 배정 결과 ]');
-      console.log('  ┌─────────────────────────┬──────────┬─────────────────────┐');
-      console.log('  │  DB 컬럼                 │  슬롯     │  라벨               │');
-      console.log('  ├─────────────────────────┼──────────┼─────────────────────┤');
-      for (const [slot, label] of Object.entries(customFieldLabels)) {
-        // 역으로 소스 컬럼 찾기
-        const srcCol = Object.entries(customerMapping).find(([, v]) => v === slot)?.[0] || '';
-        console.log(`  │  ${srcCol.padEnd(23)}│  ${slot.padEnd(8)}│  ${label.padEnd(19)}│`);
-      }
-      console.log('  └─────────────────────────┴──────────┴─────────────────────┘');
-    }
-
     if (customResult.overflowColumns.length > 0) {
       console.log(`  ⚠  슬롯 초과 (무시됨): ${customResult.overflowColumns.join(', ')}`);
     }
+  }
 
-    // 커스텀 라벨 수정 기회
+  // ★ 2026-10-15 라벨 = 고객 매핑에 쓰인 custom 슬롯 전부(AI 배정 슬롯 포함 · CT resolveCustomFieldLabels).
+  //   옛: 여기서 새로 배정한 슬롯에만 라벨이 생겨 AI 배정 슬롯은 표·요약·서버 등록에서 빠졌다(엠티 VM 5개 중 2개).
+  const customFieldLabels = resolveCustomFieldLabels(customerMapping);
+  const slotSources = customSlotSources(customerMapping);
+  if (slotSources.size > 0) {
+    console.log('');
+    console.log('  [ 커스텀 필드 배정 결과 ]');
+    console.log('  ┌─────────────────────────┬──────────┬─────────────────────┐');
+    console.log('  │  DB 컬럼                 │  슬롯     │  라벨               │');
+    console.log('  ├─────────────────────────┼──────────┼─────────────────────┤');
+    for (const [slot, srcCol] of slotSources) {
+      console.log(`  │  ${srcCol.padEnd(23)}│  ${slot.padEnd(8)}│  ${customFieldLabels[slot].padEnd(19)}│`);
+    }
+    console.log('  └─────────────────────────┴──────────┴─────────────────────┘');
+
+    // 커스텀 라벨 수정 기회 (Enter = 지금 라벨 유지)
     const editLabels = await askConfirm('커스텀 필드 라벨을 수정하시겠습니까?', false);
     if (editLabels) {
-      for (const [slot, currentLabel] of Object.entries(customFieldLabels)) {
-        const newLabel = await ask(`  ${slot} 라벨`, currentLabel);
-        customFieldLabels[slot] = newLabel;
+      for (const [slot, srcCol] of slotSources) {
+        const newLabel = await ask(`  ${slot} (${srcCol}) 라벨`, customFieldLabels[slot]);
+        if (newLabel.trim()) customFieldLabels[slot] = newLabel.trim();
       }
       console.log('  ✅ 커스텀 필드 라벨 수정 완료');
     }
@@ -712,6 +705,17 @@ async function stepColumnMapping(
       PURCHASE_STANDARD_FIELDS,
       '구매'
     );
+  }
+
+  // ★ 2026-10-15 구매도 남은 컬럼을 custom 슬롯에 배정한다(서버가 구매 custom_fields 로 적재).
+  //   표는 "custom_1~15 슬롯에 자동 배정됩니다"라고 알리는데 AI 를 안 쓴 갈래만 배정하지 않았다(AI·AI 실패 폴백은 이미 배정).
+  const unmappedPurchase = purchaseColumns.filter((col) => !(col in purchaseMapping));
+  if (unmappedPurchase.length > 0) {
+    const purchaseCustom = assignCustomFieldSlots(purchaseMapping, unmappedPurchase);
+    purchaseMapping = purchaseCustom.mapping;
+    if (purchaseCustom.overflowColumns.length > 0) {
+      console.log(`  ⚠  구매 슬롯 초과 (무시됨): ${purchaseCustom.overflowColumns.join(', ')}`);
+    }
   }
 
   return { customerMapping, purchaseMapping, customFieldLabels };

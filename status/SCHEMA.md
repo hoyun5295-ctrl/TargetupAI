@@ -1932,6 +1932,7 @@ kind별 payload 키:
 | description | text | 설명/사유 |
 | reference_type | varchar(30) | campaign/payment/admin 등 |
 | reference_id | uuid | 연관 ID |
+| payment_method | varchar(20) | ★2026-10-15 등재(기존 컬럼 · 미등재였음). 값 = `bank_transfer`(무통장 승인 deposit-approve) / `card`·`virtual_account`·`transfer`(PG 결제 원장 `payments.payment_method` 그대로 · **B-1015-4 부터 기록** · 그전 카드 충전 행은 NULL → 배포 뒤 UPDATE 1회) / `admin`(관리자 조정) / `system`(차감). 충전관리 조회는 `COALESCE(payment_method,'system')` · 화면 옵션 값 `card` |
 | admin_id | uuid | 관리자 수동 조정 시 |
 | created_by | uuid | ★ D98: 차감 실행 사용자 (사용자별 사용금액 격리) |
 | message_type | varchar(10) | ★ D145 P0+ (2026-05-07): SMS/LMS/MMS/KAKAO 분리 — `directChannel='both'` 환불 차단 위험 해결. 옛 row는 NULL (호환). prepaidRefund alreadyRefunded/totalDeducted 조회 시 `message_type = $X OR IS NULL` 필터 적용 |

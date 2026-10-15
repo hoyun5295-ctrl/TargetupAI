@@ -192,6 +192,7 @@
 > B-1015-4(임은지 · 다음 배포): 충전관리 「카드결제」 0건 → 카드 충전 INSERT 에 결제수단(Codex 1R approve) · 배포 뒤 NULL 행 UPDATE 1회(BUGS) / B-1015-5(임은지): DM 보내기 창 「고칠 곳」 항목 표시 + 만들기 화면으로(UI · Codex 제외)
 > B-1015-3(같은 배포 · 박성용 접수): 휴머스온 삭제(D) 발신프로필을 동기화가 「사용 중지」 CT 로 내린다(Codex 1R approve) · 스마일패스 옛 줄은 배포 뒤 첫 동기화에서 자동 중지
 > B-1015-2(같은 배포): 허브 LMS 제목 17자 잘림 → 프론트 CT 상수 40자 + 프롬프트 제목 규칙 분리(Codex 3R approve(1R medium 1 · 2R high 1 KISA · 3R approve))
+> ★ 남은 확인(1015 체크리스트) = ① B-1015-1·2 시연 회사 실측(카드 수 = 리스트 수 · 제목 끝까지) ② B-1015-3 13:50 KST 동기화 뒤 옛 줄 DELETED·f(SQL = 메모리) + `audit_logs.user_id` 널 허용 확인 ③ B-1015-4·5 push·배포(backend 재시작 + frontend 빌드) → 카드 충전 NULL 행 UPDATE 1회(BUGS) → 임은지 실측 2건 ④ 추가 과제 = 「사용 중지」 확인 창에 휴머스온 상태 · 4011 반복 프로필 표기 · 자동발송 재가동 3건
 > 배포 = backend 재시작 + frontend 빌드(AiOperatorPage · AutoSendFormModal · formatDate) / 배포 전 확인 = 저장된 자동발송 중 WHERE 가 비는 조건이 있는지 SQL(아래 메모리) / 배포 뒤 실측 1건 = 시연 회사에서 「전체 고객에게 안부 문자」 → 카드 N명 · 리스트 N명 · 발송 승인 창까지(실발송은 안 함)
 
 <a id="c30"></a>
@@ -201,7 +202,7 @@
 > ⛔ 회신 없이 출고하지 않는다(DESC 전체 · 판매 뷰 단위 · 일시·탈퇴 컬럼 · YN_SMS 분포 · 회사 범위) / Oracle 11g = thick · Windows oracle zip 전부 IC 동봉 / 등재 = 엠티 스키마 픽스처 마법사 주행 뒤 `win-modern__oracle-11g__1.7.2` + `CURRENT_AGENT_VERSION` 1.7.2 / 뷰에 여러 회사면 고객사 WHERE
 > Codex 적대 6R approve(1R high 2 · 2R medium 3 · 3R medium 2 · 4R medium 1 · 5R medium 1 · 6R approve — VC80 런타임 동봉+설치 bat 종료 코드 분기 · Oracle 모드 설정 결정 · 같은 프로세스 모드 변경 불가 안내 · 5.x 재초기화 · testConnection 이유째 throw + 연 풀만 정리 + close 오류가 검증 오류를 안 덮음) · 재빌드 smoke PASS · 11g 실측(thin = NJS-138 안내가 진단 JSON 까지 / thick PASS)
 > vcredist_x64.exe 스테이징·재빌드 완료(Harold 1014 · blocker 해제 · zip 150MB · CRT 8.0.50727.6195 정책에 .762 포함 · VC80 없는 서버 실제 로드는 엠티 설치 때 VCREDIST_EXIT 로 확인)
-> 잔여 = Harold → 유종오님께 보완 요청 6건 + 443 개방 IP(58.227.193.62) 회신 → 2단계(픽스처 · 주행 · 등재 · 출고 세트) · 추가 과제 = 다른 DB 커넥터 testConnection 도 이유째 throw(마법사 TLS 3159 등 안내 전달)
+> 잔여 = Harold → 유종오님께 보완 요청 메일(Downloads 에 본문·v1.2 선채움 xlsx 준비됨) → 회신 → 2단계(픽스처 · 주행 · 등재 · 출고 세트) · 추가 과제 = 다른 DB 커넥터 testConnection 도 이유째 throw(마법사 TLS 3159 등 안내 전달)
 
 <a id="c29"></a>
 

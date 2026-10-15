@@ -18,14 +18,20 @@
  *   `__tests__/sync-mapping-fields.test.ts`가 두 파일을 대조해 어긋나면 실패한다.
  */
 
+import { isAgentVersionGte } from './agent-protocol';
+
 /** custom_1 ~ custom_15 — 고객·구매 양쪽 공통 슬롯 */
 export const SYNC_CUSTOM_SLOTS: string[] = Array.from({ length: 15 }, (_, i) => `custom_${i + 1}`);
 
-/** 고객 동기화에서 소스 컬럼이 갈 수 있는 표준 필드 */
+/**
+ * 고객 동기화에서 소스 컬럼이 갈 수 있는 표준 필드
+ * ★ 2026-10-15 `is_opt_out` = 탈퇴·수신거부 표시. 서버에 그대로 오지 않는다 — 에이전트 `normalizeCustomer` 가
+ *   거부·탈퇴 값이면 `sms_opt_in=false` 로 접어 보낸다(엠티콜렉션 YN_WITHDRAW · 질의서 3-7).
+ */
 export const SYNC_CUSTOMER_TARGET_FIELDS: string[] = [
   'phone', 'name', 'gender', 'birth_date', 'email', 'address', 'region', 'grade',
   'store_phone', 'points', 'store_code', 'store_name', 'registered_store',
-  'registered_store_number', 'registration_type', 'callback', 'sms_opt_in',
+  'registered_store_number', 'registration_type', 'callback', 'sms_opt_in', 'is_opt_out',
   'recent_purchase_date', 'recent_purchase_amount', 'recent_purchase_store',
   'total_purchase_amount', 'purchase_count', ...SYNC_CUSTOM_SLOTS,
 ];
@@ -134,4 +140,23 @@ export function validateSyncMapping(
   if (mapping?.customers) issues.push(...validateSyncMappingTarget('customers', mapping.customers, opts));
   if (mapping?.purchases) issues.push(...validateSyncMappingTarget('purchases', mapping.purchases, opts));
   return issues;
+}
+
+/**
+ * 에이전트가 그 판부터 읽는 고객 필드. 옛 판은 이 키를 Zod 검증에서 지워 아무 일도 안 일어난다.
+ * ★ 2026-10-15 is_opt_out(탈퇴·거부 → 수신거부)은 1.7.2 부터. 옛 판에 저장되면 "막았다"는 착각만 남는다(옵션≠동작).
+ */
+export const SYNC_CUSTOMER_FIELD_MIN_AGENT_VERSION: Record<string, string> = { is_opt_out: '1.7.2' };
+
+/** 이 에이전트 판이 아직 못 읽는 필드를 고객 매핑에서 찾는다(원격 매핑 저장 전 검사 · 판 알 수 없음 = 옛 판 취급). */
+export function syncFieldsNeedingNewerAgent(
+  mapping: { customers?: Record<string, unknown> },
+  agentVersion: string | null | undefined,
+): Array<{ field: string; minVersion: string }> {
+  const out: Array<{ field: string; minVersion: string }> = [];
+  const used = new Set(Object.values(mapping?.customers || {}).map((v) => String(v)));
+  for (const [field, minVersion] of Object.entries(SYNC_CUSTOMER_FIELD_MIN_AGENT_VERSION)) {
+    if (used.has(field) && !isAgentVersionGte(agentVersion, minVersion)) out.push({ field, minVersion });
+  }
+  return out;
 }

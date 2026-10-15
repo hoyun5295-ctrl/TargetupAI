@@ -26,7 +26,7 @@
 1. **`'ai'`를 오퍼레이터 발송에 재사용하지 마라.** 그 값은 `campaign_runs`를 갖는 타겟 조건 캠페인의 값이고, 결과 동기화·환불이 그 runs를 순회하는 분기가 처리한다. 오퍼레이터 발송은 runs가 없어 그 분기에 안 걸리고, 2번 분기를 `'ai'`까지 넓히면 기존 AI 캠페인이 **양쪽에서 처리돼 이중 환불**이 된다.
 2. **출처 축을 늘리면 그 축을 읽는 곳을 같이 늘려라.** `send_type='direct'`를 **동작 조건**으로 쓰던 3곳(결과 동기화+실패 환불 1 · 청구 집계 2)을 같이 안 고치면 그 발송은 **결과도 환불도 청구도 안 되는 유령**이 된다. 집합은 `DIRECT_PIPELINE_SEND_TYPES` 하나가 소유한다.
 3. **"화면 필터가 아는 값"과 "이 배관이 만들어도 되는 값"은 다른 물음이다.** 같은 함수로 답하지 마라 — `isSendTypeFilter`(필터) ≠ `isDirectPipelineSendType`(출처 게이트).
-4. **빈 조건은 전원이 아니라 거절이다.** "못 만들었다"와 "전체를 의도했다"는 같은 신호로 표현될 수 없다. 전체 발송이 정말 필요하면 `dm.ts`처럼 **명시 플래그**를 받아라.
+4. **빈 조건은 전원이 아니라 거절이다.** "못 만들었다"와 "전체를 의도했다"는 같은 신호로 표현될 수 없다. 전체 발송이 정말 필요하면 `dm.ts`처럼 **명시 플래그**를 받아라. ★2026-10-15 그 플래그를 만들었다 = **전체 고객 신호**(`packages/backend/src/utils/all-customers-signal.ts` · AI 타겟 추천 `all_customers`(AI 명시 또는 조건 없는 전체 문장) → 제안 `target.allCustomers` → 리스트·발송 요청 `allCustomers`). 신호 없는 빈 조건은 **제안 카드부터** 같은 문장(`HUB_TARGET_EMPTY_MESSAGE`)으로 멈춘다. 08-18 에 이 플래그를 만들지 않아 허브 전체 발송이 두 달 끊겼다([B-1015-1](../status/BUGS.md) · §4-4).
 5. **빈 조건 판정은 키 개수가 아니라 만들어진 WHERE로 한다.** `{grade: null}`처럼 키는 있고 조건은 없는 형태가 키 개수 판정을 통과한다.
 6. **자유 입력 필드의 값 목록을 AI 프롬프트에 싣지 마라.** `FREE_TEXT_FIELDS`(name·address·email) — 값 수집과 값 출력이 **같은 목록을 본다**. 한쪽만 늘면 그 필드 값이 조용히 프롬프트로 샌다.
 7. **청구 축의 `send_phase` 두 조건은 서로의 여집합이어야 한다.** 어디에도 안 걸리는 phase가 생기면 그 발송은 청구에서 사라진다. `<> 'sent'`는 NULL을 빠뜨린다 — 반드시 `IS DISTINCT FROM`.
@@ -80,7 +80,12 @@
 
 ---
 
+### 4-4. 전체 고객 신호 — 08-18 공백 메움 (2026-10-15 · B-1015-1 남지현 접수 · Codex 4R approve)
+
+08-18 뒤 `{}` 를 세 경로가 다르게 읽었다: 제안 카드(`countFilteredCustomers`) = 전원 · 리스트(`compileOperatorAudience` · 10-05) = 거절 · 발송(`preview-recipients`) = 거절. 첫 시도가 10-07 이라 두 달 드러나지 않았다(서버 error 로그 12건 전부 `filters={}`). 수정 = 신호 하나를 CT 가 소유: `isPlainAllCustomersRequest`(09-26 허용 목록 · ai-segment-generator 에서 이동) · `isEmptyFilters`(진짜 빈 객체만 · 문자열·배열은 빈 조건이 아님 · Codex 1R) · `isUnresolvedEmptyTarget`(전체 선언 + 키 0 만 전체 · 그 밖은 **빌더 WHERE 가 비었는가** · §2-5) · `HUB_TARGET_EMPTY_MESSAGE`. `recommendTarget` 프롬프트에 「전체 고객 판단」 규칙 + `all_customers` 출력. orchestrate/orchestrateWithAI 허브 분기는 전체 선언 없는 빈 조건을 `HubTargetEmptyError` 로 count 0 + 카드 사유. 두 라우트는 `allCustomers === true` 일 때만 빈 WHERE 를 연다(target-recipients 는 컴파일을 건너뛴다 · 컴파일 본문은 그대로). 자동발송 폼 `/recommend-target` 도 전체 선언 없는 `{}` 는 0. 같은 뿌리로 자동발송(`auto_campaigns`) 저장 검증(워커와 같은 빌더 `isEmptyAutoSendFilter`) + 워커 fail-closed(폐기 상태 · 재가동 안전망). 테스트 = `staff-tickets-1015.test.ts`.
+
 ## §5 남은 것
+- **운영 실측(1015 · Harold 몫)** — 시연 회사에서 「전체 고객에게 안부 문자」 → 카드 수 = 리스트 수 · 승인 창까지(실발송 X) · 제목이 끝까지 보이는지(B-1015-2 · 허브 제목 상한 40자 CT 상수 `LMS_SUBJECT_MAX_CHARS` · 프롬프트 제목 규칙 분리).
 
 - **나머지 3개 호출부의 출처 값** — 자동마케팅(`continuous-operator`) · 마케팅 플래너(2곳) · 모바일 DM. 구조는 열려 있고 값만 `'direct'`다. 값을 정하려면 각각 환불·청구 집합에 넣을지 판단이 필요하다.
 - **`getValue` fail-open** — `{operator:'eq'}`처럼 **value 키가 빠진** 엔트리를 만나면 객체 자체를 값으로 돌려줘 `col = $1`에 객체가 실린다(`customer-filter.ts:60`). 안 고친 이유 = 이 CT를 여러 경로가 공유하고, 조건을 그냥 빼면 남은 필터만으로 **대상이 넓어진다**. 고친다면 무효 날짜와 같은 fail-closed(`AND FALSE`)여야 한다. 좌표는 `customer-filter.name-axis.test.ts` 주석이 보존.

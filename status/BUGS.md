@@ -55,7 +55,20 @@
 
 ## 2) 활성 버그
 
-### 🟢 B-1015-4 슈퍼관리자 충전관리 「카드결제」 조회 0건(임은지 1015 cmv8xo7z11enpjnn4hrpy97os · P2) → 카드 충전 INSERT 가 결제수단을 안 적음 · 코드 완료 · Codex 1R approve · 배포 대기
+### 🟢 B-1015-6 싱크에이전트 커스텀 필드: 고객 라벨 일부만 등록 + 구매 custom 값 버림(엠티 1.7.2 VM 실설치 1015 · P2) · 코드 완료 · 백엔드 배포 · 1.7.2 재빌드 · VM 재검증 대기
+- 실측: VM 오라클 판 AI 매핑 고객 custom_1~5 → 마법사 요약 「커스텀 필드: 2개 슬롯 배정」 · 서비스 로그 등록 2개(custom_4 `DM_REGISTER` · custom_5 `DM_CHANGE`). 운영 PG(Harold) 테스트계정 고객 `custom_fields` 키 = custom_1~5 전부(값은 적재 · 빠진 것은 필드 정의). `public.purchases.custom_fields` jsonb nullable 실재(Harold information_schema).
+- 원인 1(라벨): 라벨을 만드는 자리가 여럿이었고 `assignCustomFieldSlots` 는 자기가 새로 배정한 슬롯에만 라벨을 만들었다. 기동 등록(`sync-agent/src/index.ts`)은 저장 라벨이 「전부 비었을 때만」 매핑에서 역추출 → AI 배정 슬롯과 마법사 배정 슬롯이 섞이면 AI 배정분이 영영 빠진다(전부 AI 배정이면 역추출이 돌아 증상 없음). 같은 뿌리: 설정 편집 라벨 편집이 구매 슬롯 이름까지 고객 라벨로 올림 · 원격 매핑(슈퍼관리자 모달)에서 라벨 칸을 비운 슬롯 정의 누락 · 슬롯을 옮겨도 옛 라벨이 붙음.
+- 원인 2(구매 값): 매핑 검증·AI 매핑은 구매 custom_1~15 를 허용하고 에이전트도 보내는데, 서버 구매 적재(`utils/sync-ingest.ts`)만 `custom_fields` 를 읽지 않아 전부 버렸다(2026-06-30 이새 인계 문서에 관찰만 있고 결정 기록 없음). 에이전트도 구매 custom 날짜를 정리 없이 보내 UTC ISO 글자로 나갔다.
+- 수정(에이전트): 라벨 단일 결정 CT `resolveCustomFieldLabels`·`customSlotSources`·`labelsAfterMappingUpdate`(`mapping/templates.ts`) · 소비처 = 기동 등록 · 원격 매핑 갱신 · 마법사 표·요약·라벨 수정 · 설정 편집 4곳(표시·AI 재매핑·라벨 편집·매핑 편집) · 라벨을 내던 `assignCustomFieldSlots`·`suggestMappingWithAI`·`/api/setup/ai-mapping` 응답에서 라벨 제거. 구매 custom 값도 고객과 같은 정리(`normalizeSyncCustomFields` 공용). 마법사 비AI 갈래도 구매 남은 컬럼을 custom 슬롯에 배정(표 안내와 일치). 매뉴얼 Step 4 문장 정정 + docx 재생성.
+- 수정(서버): 구매 적재에 `custom_fields`(custom_1~15 키의 글자·숫자·불리언·null · 재전송 = 교체) · JSONB 거부 글자(NUL·짝 없는 서로게이트) 제거를 고객·구매 custom_fields 공용으로(`jsonbSafeCustomValues` · 섞이면 그 행 전체가 적재 실패해 영구 누락 · 거부 근거 = PostgreSQL 문서, 운영 실측 전). DDL 0 · 돈 경로 아님 = Codex 대상 아님.
+- 검증: 에이전트 `mapping/custom-labels.test.ts`(10) · `normalize/purchase-custom-fields.test.ts`(6) · 백엔드 `utils/sync-ingest.test.ts`(+8) · 변이 = 라벨 결정 한 줄·구매 정리 한 줄 되돌리면 8건 실패 · 옛 적재 SQL 로 되돌리면 4건 실패.
+- 재빌드·VM 재검증 완료(1015 22:46~22:54 · Harold 승인): 새 zip oracle `74787f21…` · mysql `9c12a95a…`(exe `c0e49402…`) · smoke 두 조합 PASS · 같은 설정 파일로 오라클 기동 라벨 2 → 4개 · MySQL 2 → 3개(옛 판도 custom_1 `CM_LDATE` 누락 = 같은 결함) · 서버 등록 완료 로그 · 증분 오류 0. 21:22 zip(`9bf14688`·`c279428b`)은 폐기. 운영 PG(Harold) `customer_field_definitions` = custom_1 `CD_CUSTOMER` · custom_2 `CM_NO` · custom_3 `DT_WITHDRAW` · custom_4 `DM_REGISTER` · custom_5 `DM_CHANGE`(예상과 일치 · custom_1 오라클 라벨은 옛 판이 한 번도 못 올린 값).
+- 남은 것(Harold): 백엔드 배포 → 전량 재동기화 뒤 `purchases.custom_fields` 채워짐 확인 → 새 zip 업로드 · 매뉴얼 PDF. 기존 구매 행은 전체 재동기화 때 채워진다. 옛 에이전트(≤1.7.1)가 보내는 구매 custom 날짜는 UTC ISO 글자로 적재된다(1.7.2 전체 재동기화 때 교체).
+- 기록만(못 닫는 이유): 고객 매핑에서 슬롯을 빼도 그 슬롯의 옛 값은 남는다(`customer-upsert.ts` 병합 · 업로드 등 다른 문의 값을 지키는 규칙이라 지우는 규칙은 운영 판단 선행) · 표준 글자 칸(이름 등)의 NUL 도 PostgreSQL text 가 거부할 것(미실측 · 커스텀 필드 축 밖 · 표준 칸 정규화 전체를 건드리는 일).
+
+### 🟢 B-1015-4 슈퍼관리자 충전관리 「카드결제」 조회 0건(임은지 1015 cmv8xo7z11enpjnn4hrpy97os · P2) → 카드 충전 INSERT 가 결제수단을 안 적음 · 코드 완료 · Codex 1R approve · 배포 완료 · 기존 행 UPDATE 완료 1015
+- 재오픈(1015 14:04 임은지 「카드결제가 시스템(발송)으로 들어간다 · 시스템은 환불·발송 차감만」) = 배포는 됐으나(서버 dist grep 1) 기존 행 UPDATE 전이었다. 실측 SQL: 카드 충전 39건 전부 `payment_method` NULL(마지막 10-15 08:11 KST · 수정 전) · 39건 모두 `payments.payment_method = card` → 아래 UPDATE 실행 `UPDATE 39` → 재조회 card 39 · NULL 0. 남은 NULL = `admin_deduct`·campaign 4건(5/19~6/4 · 초과 환불 자동 회수 = prepaid.ts 가 지금은 'system' 으로 적는 종류)이라 「시스템(발송)」이 맞다. 코드 변경 없음.
+- 돌고 있는 프로세스 = 수정본 확인(Harold 서버 실측): `dist/utils/payment-processor.js` 10-15 13:49:33 KST < `targetup-backend` 시작 10-15 15:05:32 → 새 카드 충전은 `card` 로 적힌다(배포 뒤 카드 충전은 아직 0건). 남은 것 = 화면 「충전 + 카드결제」 조회 39건 = 임은지 실측.
 - 원인(코드): `utils/payment-processor.ts` 의 `balance_transactions` INSERT 만 `payment_method` 열이 없어 카드 충전이 NULL(조회 `COALESCE(...,'system')` = 「시스템」 라벨)로 적혔다. 무통장(`bank_transfer`)·관리자(`admin`)는 각자 넣고 있었다. 화면 옵션 값 = `card`.
 - 수정: pending 결제 행 조회에 `payment_method` 추가 · INSERT 에 `payment_method = payments.payment_method || 'card'`. 테스트 = `staff-tickets-1015b.test.ts`.
 - 배포 뒤 Harold: 기존 NULL 행 채우기 1회 — `UPDATE balance_transactions bt SET payment_method = COALESCE(p.payment_method,'card') FROM payments p WHERE bt.reference_type = 'payment' AND bt.reference_id = p.id AND bt.payment_method IS NULL AND bt.type = 'charge';` → 충전관리 「카드결제」 조회로 확인(임은지 실측).
@@ -68,7 +81,7 @@
 ### 🟢 B-1015-3 휴머스온에서 삭제된 발신프로필이 한줄로엔 살아 있음(박성용 1015 · 에스디몰 「스마일패스」) → 동기화가 사용 중지까지 내림 · 코드 완료 · Codex 1R approve · 배포 완료 1015
 - 실측(SQL): 「스마일패스」 두 줄. 옛 줄 = 채널 ID `@스마일패스_미사용` · status D · is_active t(휴머스온이 장기 미사용으로 삭제 · 1시간 동기화가 상태 D 는 받아 적었으나 활성은 그대로). 새 줄 = `@스마일패스` · A · 승인됨(재등록은 이미 돼 있음).
 - 원인: `syncSenderStatusJob` 이 IMC 상태를 적기만 하고 효과(활성 플래그)로 잇지 않았다. 9월 12일 「사용 중지」 CT(`disableSenderProfile`)와 활성 한정 중복 검사·유니크 인덱스는 이미 있었다.
-- 배포: 1015 12:49 backend 빌드 + pm2 reload(Harold). 동기화는 부팅 즉시가 아니라 1시간 뒤 첫 실행 → 13:50 KST 쯤 옛 줄 is_active=f · status=DELETED 확인(SQL = 메모리).
+- 배포: 1015 12:49 backend 빌드 + pm2 reload(Harold). 동기화는 부팅 즉시가 아니라 1시간 뒤 첫 실행 → 13:50 KST 쯤 옛 줄 is_active=f · status=DELETED 확인(SQL = 메모리) → **실측 완료 1015**: 옛 줄 13:50:28 KST DELETED·f · 새 줄 A·t 유지.
 - 사고 1건(배포 전 12:44 KST): 슈퍼관리자 화면에서 이름이 같은 두 줄 중 **살아 있는 `@스마일패스`(A)** 가 「사용 중지」 됐다(감사 기록 user_id 없음 = 슈퍼관리자 계정). 12:5x SQL 로 is_active=t · status=A 복구(Harold). 추가 과제 = 「사용 중지」 확인 창에 휴머스온 상태(A 정상이면 경고 · D 면 삭제됨)를 보여 주고, 같은 이름 두 줄은 채널 ID 를 크게.
 - 수정: 동기화에서 IMC 상태 D 를 받으면 같은 CT 로 status=DELETED · is_active=false · 감사 기록(행위자 없음). 다음 주기 SELECT 는 DELETED 를 뺀다. 4011(키 자체 소멸)은 종전대로 건너뛰고 세기만(추가 과제) · [범위 밖 Codex] 자동발송 워커 알림톡 가드(auto-campaign-worker.ts 998)가 프로필 활성을 안 봄(자동발송 폐기 상태 · 재가동 과제). 테스트 = `sender-profile-deleted-sync-1015.test.ts`. 박성용 과장 질문 ② 답 = 상태값은 이미 1시간마다 받고 있고(A/S/D · 차단 · 휴면) 이번에 삭제 → 사용 중지까지 자동.
 

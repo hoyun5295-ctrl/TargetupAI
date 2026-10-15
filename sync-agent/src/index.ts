@@ -43,6 +43,7 @@ import { Scheduler } from './scheduler';
 import { AlertManager, loadAlertConfig } from './alert';
 import { AGENT_VERSION } from './version';
 import { selfHealBinaries } from './updater';
+import { resolveCustomFieldLabels, labelsAfterMappingUpdate } from './mapping/templates';
 
 // ★ v1.5.1: Windows 서비스 실행 시 cwd=C:\Windows\System32 → config/data/logs 경로 틀어짐
 //   → 바이너리 실행 경로(process.execPath) 기준으로 cwd 강제 설정
@@ -205,22 +206,14 @@ async function main(): Promise<void> {
     log.info(`Agent ID: ${state.agentId}`);
   }
 
-  // 8.5. 커스텀 필드 정의 등록 (v1.4.0 → D137 D10 근본 수정)
-  //   ★ D137 D10: customFieldLabels 자동 유도 —
-  //     config에 customFieldLabels가 비어있으면 mapping.customers의 `custom_N` 매핑에서
-  //     원본 DB 컬럼명을 라벨로 역추출 (setup을 AI 매핑 없이 수동으로 했거나, 이관 계정에서 설정 누락된 경우 보완).
-  //     → 한줄로 슈퍼관리자 대시보드 카드 설정에서 `custom_1` 대신 업체 DB 원본 컬럼명이 표시됨.
-  const customFieldLabels: Record<string, string> = { ...(config.mapping.customFieldLabels || {}) };
-  if (Object.keys(customFieldLabels).length === 0 && config.mapping.customers) {
-    for (const [srcCol, destKey] of Object.entries(config.mapping.customers)) {
-      if (typeof destKey === 'string' && destKey.startsWith('custom_')) {
-        customFieldLabels[destKey] = srcCol;
-      }
-    }
-    if (Object.keys(customFieldLabels).length > 0) {
-      log.info(`커스텀 필드 라벨 자동 유도: ${Object.keys(customFieldLabels).length}개 (mapping.customers 역추출)`);
-    }
-  }
+  // 8.5. 커스텀 필드 정의 등록 (v1.4.0 → D137 D10 → ★ 2026-10-15)
+  //   라벨 = 고객 매핑의 custom 슬롯 전부(CT resolveCustomFieldLabels) · 저장 라벨이 없는 슬롯은 원본 DB 컬럼명.
+  //   ★ 2026-10-15 옛(D137 D10): 저장 라벨이 "전부 비었을 때만" 매핑에서 역추출 → 마법사가 일부(직접 배정한 슬롯)만
+  //     저장한 설정은 AI 가 배정한 슬롯이 영영 등록되지 않았다(엠티 VM 실설치 = 5개 중 2개). 기동마다 슬롯별로 채우므로
+  //     이미 설치된 설정도 다음 기동에 메워진다. 고객 매핑에 없는 슬롯 라벨(구매·안 쓰는 옛 슬롯)은 올리지 않는다.
+  const customFieldLabels = resolveCustomFieldLabels(config.mapping.customers, config.mapping.customFieldLabels);
+  // heartbeat 자기 보고(appliedMapping.customFieldLabels)도 서버에 등록한 라벨과 같게
+  config.mapping.customFieldLabels = customFieldLabels;
   const hasCustomFieldLabels = Object.keys(customFieldLabels).length > 0;
 
   if (hasCustomFieldLabels) {
@@ -362,20 +355,23 @@ async function main(): Promise<void> {
     // ★ 2026-07-01: 원격 update_config 매핑 갱신 → config.enc 영구 저장 + 필드정의 재등록.
     //   engine 런타임 교체는 scheduler가 담당, 여기서는 영속화(재시작해도 유지)와 라벨 재등록만.
     scheduler.setMappingUpdateHandler(async (mapping) => {
+      // ★ 2026-10-15 라벨은 새 고객 매핑으로 다시 정한다(CT · 기동 등록과 같은 규칙).
+      //   옛: 보낸 라벨만 그대로 저장·등록해 라벨 칸을 비운 슬롯은 정의가 빠졌다.
+      const customFieldLabels = labelsAfterMappingUpdate(config.mapping, mapping);
       try {
         updateConfigEncrypted((current) => ({
           ...current,
           mapping: {
             customers: mapping.customers ?? current.mapping.customers,
             purchases: mapping.purchases ?? current.mapping.purchases,
-            customFieldLabels: mapping.customFieldLabels ?? current.mapping.customFieldLabels,
+            customFieldLabels,
           },
         }));
         // ★ v1.6.1: 메모리 config도 동기 갱신 — heartbeat 자기 보고(customFieldLabels)가 최신을 반영하도록.
         config.mapping = {
           customers: mapping.customers ?? config.mapping.customers,
           purchases: mapping.purchases ?? config.mapping.purchases,
-          customFieldLabels: mapping.customFieldLabels ?? config.mapping.customFieldLabels,
+          customFieldLabels,
         };
         log.info('원격 매핑 갱신 — config.enc 영구 저장 완료');
       } catch (error) {
@@ -383,10 +379,10 @@ async function main(): Promise<void> {
           error: error instanceof Error ? error.message : String(error),
         });
       }
-      // custom 라벨 변경 시 서버 필드정의 재등록 (화면 표시명 반영)
-      if (mapping.customFieldLabels && apiClient) {
+      // 고객 매핑·라벨이 바뀌면 서버 필드정의 재등록 (화면 표시명 반영)
+      if ((mapping.customers || mapping.customFieldLabels) && apiClient && Object.keys(customFieldLabels).length > 0) {
         try {
-          const definitions = Object.entries(mapping.customFieldLabels).map(([key, label]) => ({
+          const definitions = Object.entries(customFieldLabels).map(([key, label]) => ({
             field_key: key,
             field_label: label,
             field_type: 'string' as const,

@@ -134,6 +134,26 @@ describe('뷰 소스 지정 키 — PK 메타 없는 소스의 증분', () => {
     expect(fetchIncrementalKeyset).not.toHaveBeenCalled();
   });
 
+  it('전체 동기화가 원본 행 키(지정 키)를 어댑터에 넘긴다 — Oracle 지정 키 NUMBER 문자열 수신·ROWID 없는 뷰 키 순서의 근거(★2026-10-15)', async () => {
+    const { db } = makeDb([], VIEW_COLS);
+    const fetchAllKeyset = vi.fn(async () => ({ rows: [] as RawRow[], lastKey: null }));
+    (db as any).fetchAllKeyset = fetchAllKeyset;
+    const engine = new SyncEngine(db, makeApi(), makeState(), { ...BASE, purchaseKeyColumns: ['ORDER_NO'] });
+    await engine.runFull('purchases');
+    expect(fetchAllKeyset).toHaveBeenCalled();
+    expect((fetchAllKeyset.mock.calls[0] as any[])[3]).toEqual(['ORDER_NO']);
+  });
+
+  it('키셋 전량이 실패해 OFFSET 으로 내려가도 같은 키를 넘긴다(★2026-10-15)', async () => {
+    const { db } = makeDb([], VIEW_COLS);
+    (db as any).fetchAllKeyset = vi.fn(async () => { throw new Error('키셋 실패'); });
+    const engine = new SyncEngine(db, makeApi(), makeState(), { ...BASE, purchaseKeyColumns: ['ORDER_NO'] });
+    await engine.runFull('purchases');
+    const fetchAll = db.fetchAll as unknown as ReturnType<typeof vi.fn>;
+    expect(fetchAll).toHaveBeenCalled();
+    expect((fetchAll.mock.calls[0] as any[])[3]).toEqual(['ORDER_NO']);
+  });
+
   it('지정 키가 날짜형이면 잠근다 (비스칼라 PK와 같은 계약)', async () => {
     const { db, fetchIncrementalKeyset } = makeDb([], VIEW_COLS);
     const engine = new SyncEngine(db, makeApi(), makeState(), { ...BASE, purchaseKeyColumns: ['ORD_DT'] });

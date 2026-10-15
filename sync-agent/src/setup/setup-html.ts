@@ -569,8 +569,9 @@ export const SETUP_HTML = `<!DOCTYPE html>
     { value: 'grade',  label: 'grade (고객등급)' },
     { value: 'points', label: 'points (보유포인트)' },
 
-    // ── marketing (수신동의) — 1개 ──
+    // ── marketing (수신동의 · 탈퇴·거부 표시) — 2개 ──
     { value: 'sms_opt_in', label: 'sms_opt_in (수신동의여부)' },
+    { value: 'is_opt_out', label: 'is_opt_out (탈퇴·수신거부 표시 · Y면 발송 제외)' },
 
     // ── custom (커스텀 슬롯) — 15개 ──
     { value: 'custom_1',  label: 'custom_1 (커스텀 슬롯 1)' },

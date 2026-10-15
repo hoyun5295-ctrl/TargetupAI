@@ -138,7 +138,8 @@ const CUSTOMER_RULES: MappingRule[] = [
   { targetField: 'birth_month_day',        patterns: ['BIRTH_MD', 'BIRTH_MMDD'], priority: 90 },
   { targetField: 'wedding_anniversary',    patterns: ['WEDDING_DT', 'WEDDING_DATE', 'ANNIVERSARY'], priority: 90 },
   { targetField: 'sms_opt_in',             patterns: ['SMS_YN', 'SMS_RCV_YN', 'SMS_OPT', 'SMS_AGREE', 'MKT_AGREE', 'RECV_YN'], priority: 90 },
-  { targetField: 'is_opt_out',             patterns: ['OPT_OUT', 'REJECT_YN', 'DENY_YN', 'BLOCK_YN', 'BLK_YN'], priority: 90 },
+  // ★ 2026-10-15 탈퇴 표시도 여기(normalizeCustomer 가 수신거부로 접는다 · 엠티 YN_WITHDRAW)
+  { targetField: 'is_opt_out',             patterns: ['OPT_OUT', 'REJECT_YN', 'DENY_YN', 'BLOCK_YN', 'BLK_YN', 'WITHDRAW', 'WDR_YN', 'SECESSION', 'SECEDE'], priority: 90 },
   { targetField: 'registration_type',      patterns: ['REG_TYPE', 'JOIN_TYPE', 'REG_GB', 'REG_DT'], priority: 80 },
 
   // ── 중간: 일반 패턴 ──
@@ -345,8 +346,6 @@ const MAX_CUSTOM_SLOTS = 15;
 export interface CustomFieldAssignment {
   /** 확장된 매핑 (기존 + custom_1~15 배정 추가) */
   mapping: ColumnMapping;
-  /** 커스텀 슬롯 라벨 { custom_1: "원본컬럼명", ... } */
-  customFieldLabels: Record<string, string>;
   /** 슬롯 초과로 무시된 컬럼 */
   overflowColumns: string[];
 }
@@ -354,16 +353,19 @@ export interface CustomFieldAssignment {
 /**
  * 표준 17개에 매핑 안 된 POS 컬럼 → custom_1~custom_15에 자동 배정
  *
+ * ★ 2026-10-15 라벨은 여기서 만들지 않는다 — resolveCustomFieldLabels 가 매핑 전체에서 정한다.
+ *   옛: 이 함수가 새로 배정한 슬롯에만 라벨을 만들어, AI 가 먼저 배정한 슬롯은 서버 필드 정의에서 빠졌다
+ *   (엠티 VM 실설치 = 고객 custom 5개 중 2개만 등록).
+ *
  * @param baseMapping autoSuggestMapping 결과 (표준 필드 매핑)
  * @param unmappedColumns 매핑 안 된 소스 컬럼 목록
- * @returns 확장된 매핑 + 커스텀 라벨
+ * @returns 확장된 매핑 + 슬롯 초과 컬럼
  */
 export function assignCustomFieldSlots(
   baseMapping: ColumnMapping,
   unmappedColumns: string[],
 ): CustomFieldAssignment {
   const mapping = { ...baseMapping };
-  const customFieldLabels: Record<string, string> = {};
   const overflowColumns: string[] = [];
 
   // 이미 custom_N에 배정된 슬롯 확인 (edit-config로 수동 지정한 경우)
@@ -385,12 +387,63 @@ export function assignCustomFieldSlots(
       continue;
     }
 
-    const slotKey = `custom_${nextSlot}`;
-    mapping[col] = slotKey;
-    customFieldLabels[slotKey] = col; // 기본 라벨 = 원본 컬럼명
+    mapping[col] = `custom_${nextSlot}`;
     usedSlots.add(nextSlot);
     nextSlot++;
   }
 
-  return { mapping, customFieldLabels, overflowColumns };
+  return { mapping, overflowColumns };
+}
+
+// ─── 커스텀 필드 라벨 (★ 2026-10-15 단일 결정 자리) ─────
+//   라벨 = 서버 고객 필드 정의(customer_field_definitions)로 올라가는 이름. 고객 매핑의 custom 슬롯마다 하나.
+//   마법사·설정 편집·원격 매핑·기동 등록이 모두 이 함수로 정한다(자리마다 따로 만들다 슬롯이 빠졌다).
+
+/**
+ * 매핑의 custom 슬롯 → 소스 컬럼(슬롯 번호 순).
+ * 한 슬롯에 컬럼이 둘이면 먼저 나온 것 — mapRow 가 값을 읽는 컬럼과 같다.
+ */
+export function customSlotSources(mapping: ColumnMapping = {}): Map<string, string> {
+  const pairs: Array<[string, string]> = [];
+  const seen = new Set<string>();
+  for (const [src, dst] of Object.entries(mapping)) {
+    if (typeof dst !== 'string' || !/^custom_\d+$/.test(dst) || seen.has(dst)) continue;
+    seen.add(dst);
+    pairs.push([dst, src]);
+  }
+  pairs.sort((a, b) => parseInt(a[0].slice(7), 10) - parseInt(b[0].slice(7), 10));
+  return new Map(pairs);
+}
+
+/**
+ * 고객 매핑의 custom 슬롯마다 라벨 하나.
+ *  - 저장된 라벨이 있으면 그것, 없으면 소스 컬럼명
+ *  - 고객 매핑에 없는 슬롯의 라벨은 버린다(구매 슬롯·안 쓰는 옛 슬롯이 고객 필드 이름으로 올라가지 않게)
+ *  - previousMapping 을 주면 소스 컬럼이 바뀐 슬롯의 저장 라벨은 버린다(번호만 같고 다른 컬럼이 됐다)
+ */
+export function resolveCustomFieldLabels(
+  customerMapping: ColumnMapping = {},
+  labels: Record<string, string> = {},
+  previousMapping?: ColumnMapping,
+): Record<string, string> {
+  const prev = previousMapping ? customSlotSources(previousMapping) : null;
+  const out: Record<string, string> = {};
+  for (const [slot, src] of customSlotSources(customerMapping)) {
+    const saved = typeof labels[slot] === 'string' ? labels[slot].trim() : '';
+    out[slot] = saved && (!prev || prev.get(slot) === src) ? saved : src;
+  }
+  return out;
+}
+
+/**
+ * 원격 매핑 갱신(update_config) 뒤 고객 라벨.
+ *  - 고객 매핑을 보냈으면 전체 교체(슈퍼관리자 매핑 모달) = 보낸 라벨 + 나머지 슬롯은 원본 컬럼명
+ *  - 라벨만 보냈으면 지금 고객 매핑 위에 덮는다 · 구매만 보냈으면 지금 라벨 그대로
+ */
+export function labelsAfterMappingUpdate(
+  current: { customers?: ColumnMapping; customFieldLabels?: Record<string, string> },
+  update: { customers?: ColumnMapping; customFieldLabels?: Record<string, string> },
+): Record<string, string> {
+  if (update.customers) return resolveCustomFieldLabels(update.customers, update.customFieldLabels);
+  return resolveCustomFieldLabels(current.customers, { ...current.customFieldLabels, ...update.customFieldLabels });
 }

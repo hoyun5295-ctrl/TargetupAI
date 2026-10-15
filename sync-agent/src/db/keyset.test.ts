@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   buildKeysetPredicate,
+  buildKeyTuplePredicate,
   escapeKeyPart,
   serializeSourceRowKey,
   cursorKeysValid,
@@ -31,6 +32,19 @@ describe('buildKeysetPredicate — (ts, pk...) 전개형', () => {
   it('PK 없음(방어): ts 단독 비교', () => {
     const sql = buildKeysetPredicate('"TS"', (t) => t, () => ':cts', []);
     expect(sql).toBe('"TS" > :cts');
+  });
+});
+
+describe('buildKeyTuplePredicate — 키만 비교(★2026-10-15 Oracle ROWID 없는 뷰 전량)', () => {
+  it('복합 키 전개형 · bind 순서 = SQL 텍스트 순서', () => {
+    const calls: string[] = [];
+    const bind = (name: string) => { calls.push(name); return '?'; };
+    expect(buildKeyTuplePredicate(bind, ['"A"', '"B"'])).toBe('"A" > ? OR ("A" = ? AND ("B" > ?))');
+    expect(calls).toEqual(['k0', 'k0', 'k1']);
+  });
+
+  it('키가 없으면 던진다(빈 비교식으로 전부 통과시키지 않는다)', () => {
+    expect(() => buildKeyTuplePredicate(() => '?', [])).toThrow();
   });
 });
 

@@ -35,6 +35,8 @@ import {
   normalizeSourceRowKey,
   dedupeBySourceRowKey,
   buildPurchaseIngestSql,
+  normalizePurchaseCustomFields,
+  jsonbSafeCustomValues,
   isUndefinedColumnError,
   PurchaseIngestRow,
   SYNC_RETRY_HTTP_STATUS,
@@ -795,7 +797,8 @@ router.post('/customers', async (req: SyncAuthRequest, res: Response) => {
           customObj[cf.columnName] = normalizeCustomFieldValue(c[cf.fieldKey]);
         }
       }
-      row.custom_fields = Object.keys(customObj).length > 0 ? JSON.stringify(customObj) : null;
+      // ★ 2026-10-15 JSONB 가 거부하는 글자(NUL 등)는 빼고 적재 — 섞이면 이 고객 행 전체가 실패해 영구 누락됐다
+      row.custom_fields = Object.keys(customObj).length > 0 ? JSON.stringify(jsonbSafeCustomValues(customObj)) : null;
 
       // 매장은 dedupe 전에 모은다(같은 폰의 두 번째 행이 들고 온 매장도 살린다).
       if (row.store_code && row.phone) {
@@ -1140,6 +1143,8 @@ router.post('/purchases', async (req: SyncAuthRequest, res: Response) => {
         product_code: p.product_code || null, product_name: p.product_name || null,
         // ★ 2026-09-27 한줄로 V2 R346 — 0은 0으로(옛 || null이 0을 NULL로 바꿨다) · 빈 값·숫자 아님만 NULL(금액 정규화 CT)
         quantity: normalizeAmount(p.quantity), unit_price: normalizeAmount(p.unit_price), total_amount: normalizeAmount(p.total_amount),
+        // ★ 2026-10-15 구매 custom 슬롯 값 적재(옛: 읽지 않아 전부 버려졌다 · 컬럼 실측 public.purchases.custom_fields jsonb)
+        custom_fields: normalizePurchaseCustomFields(p.custom_fields),
         source_row_key: keyResult.value,
       });
     }

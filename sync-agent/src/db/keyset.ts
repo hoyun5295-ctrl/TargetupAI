@@ -51,12 +51,23 @@ export function buildKeysetPredicate(
   if (pkColExprs.length === 0) {
     return `${tsColExpr} > ${wrapTsBind(bind('ts'))}`;
   }
+  // ⛔ 키 비교식은 ts 바인드 두 번 **뒤에** 만든다 — 위치 기반 dialect(?)의 push 순서 = SQL 텍스트 순서.
+  return `(${tsColExpr} > ${wrapTsBind(bind('ts'))} OR (${tsColExpr} = ${wrapTsBind(bind('ts'))} AND (${buildKeyTuplePredicate(bind, pkColExprs)})))`;
+}
+
+/**
+ * 키 튜플 비교의 전개형 — (k0 > p0 OR (k0 = p0 AND (k1 > p1 ...))).
+ * 키셋 증분(위)과 ★2026-10-15 Oracle 「ROWID 없는 뷰」 전량 키 순서 조회가 같이 쓴다.
+ * bind 호출 순서 = SQL 텍스트 순서('k{i}'는 마지막 키 이전에 두 번).
+ */
+export function buildKeyTuplePredicate(bind: (name: string) => string, pkColExprs: string[]): string {
+  if (pkColExprs.length === 0) throw new Error('키 컬럼이 없습니다');
   const tail = (i: number): string => {
     const gt = `${pkColExprs[i]} > ${bind(`k${i}`)}`;
     if (i === pkColExprs.length - 1) return gt;
     return `${gt} OR (${pkColExprs[i]} = ${bind(`k${i}`)} AND (${tail(i + 1)}))`;
   };
-  return `(${tsColExpr} > ${wrapTsBind(bind('ts'))} OR (${tsColExpr} = ${wrapTsBind(bind('ts'))} AND (${tail(0)})))`;
+  return tail(0);
 }
 
 // ─── source_row_key 직렬화 ──────────────────────────────

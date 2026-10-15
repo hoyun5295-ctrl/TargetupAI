@@ -33,9 +33,16 @@ describe('다운로드 게이트 — 검증된 조합만 내보낸다 (2026-08-0
     expect(resolveAgentBuild('windows', 'win-2008r2', 'oracle-10g').state).toBe('candidate');
   });
 
+  it('1.7.2 Oracle 은 11g 만 verified — 같은 zip 을 쓰는 다른 Oracle 판은 화면 판정에서 candidate 그대로', () => {
+    expect(resolveAgentBuild('windows', 'win-modern', 'oracle-11g').state).toBe('verified');
+    expect(resolveAgentBuild('windows', 'win-modern', 'oracle-12c').state).toBe('candidate');
+  });
+
   it('packageKey 게이트 — 등재 조합이 매핑된 zip만 열린다(fail-closed)', () => {
     expect(isPackageKeyVerified('win-modern-mysql')).toBe(true);
-    expect(isPackageKeyVerified('win-modern-oracle')).toBe(false);
+    // ★ 2026-10-15 win-modern__oracle-11g__1.7.2 등재 — oracle zip 하나가 10g~21c 를 싣는다(§5 · 하나라도 verified 면 열림)
+    expect(isPackageKeyVerified('win-modern-oracle')).toBe(true);
+    expect(isPackageKeyVerified('win-modern-mssql')).toBe(false);
     expect(isPackageKeyVerified('win-legacy-oracle')).toBe(false);
     expect(isPackageKeyVerified('linux-modern-mysql')).toBe(false);
     expect(isPackageKeyVerified('없는-키')).toBe(false);

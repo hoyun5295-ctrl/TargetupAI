@@ -210,19 +210,24 @@ export const DB_OPTIONS: DbOption[] = [
 // ★ 2026-08-03: 검증은 **버전 세대에 귀속**된다 — 1.7.0은 커서·적재가 통째로 바뀐 다른 물건이라
 //   옛 버전에서 통과한 조합이 승계되지 않는다(같은 라벨 다른 물건 금지의 검증판).
 //   이 값은 sync-agent/package.json version과 세트로 올린다(에이전트 버전 올림 = 여기도 올림 = 전 조합 자연 폐쇄).
-export const CURRENT_AGENT_VERSION = '1.7.1';
+export const CURRENT_AGENT_VERSION = '1.7.2';
 
 // 실연결 스모크 통과 조합(`<osTierId>__<dbId>__<version>`) — 단일 진실원.
 // CURRENT_AGENT_VERSION과 일치하는 등재만 verified다. 비어 있으면 전부 candidate — fail-closed.
 // [이력 — 현 세대 미승계]
 //   win-2008r2__oracle-10g : 2026-06-24 VM(2008R2 RTM 6.1.7600) + Oracle 10g(10.2.0.4) 스모크 통과(당시 1.5.x 세대).
-//   win-modern__mysql      : 2026-07-27 Server 2016 VM 전체 통과(1.6.4 세대) → 2026-08-03 1.7.0 smoke PASS(커서 재설계 세대).
+//   win-modern__mysql      : 2026-07-27 Server 2016 VM 전체 통과(1.6.4 세대) → 2026-08-03 1.7.0 smoke PASS(커서 재설계 세대)
+//                            → 2026-08-13 1.7.1 smoke PASS 68ms + 마법사 전 구간 자동 주행(아난티 설치 실측 정정 세대).
 export const VERIFIED_COMBOS = new Set<string>([
   // 조합별 스모크 통과 시마다 여기 추가한다(케이스바이케이스 개방).
-  // 2026-08-13 smoke-combos PASS — v1.7.1 exe 실행·도커 MySQL 접속·테이블/컬럼 판독·PK 해석(member_id) 68ms.
-  //   1.7.1 = 아난티 설치 실측 정정 세대(뷰 목록 포함 · 뷰 지정 키 + 유일성 실측 · 마법사 콘솔 인코딩 · 0건 가드).
-  //   마법사 전 구간 자동 주행 실측(뷰 전용 계정 · 복합 키 중복 검출 → 재선택 → 통과)까지 확인 후 등재.
-  'win-modern__mysql__1.7.1',
+  // 1.7.2 = Oracle 뷰 소스 정정(다른 스키마 뷰 목록 · 키 유일성 · ROWID 불가 뷰 키 순서 전량) + 탈퇴·거부 표시(is_opt_out) → 수신거부 세대.
+  // 2026-10-15 smoke PASS 3,276ms(11g XE) + Server 2016 Standard 한국어 로캘(chcp 949) VM 실설치 사람 경로 끝까지 —
+  //   VC++ 2005 설치 0 · 동봉 Instant Client thick 접속 · 다른 스키마 뷰 2개 · 유일성 거부/통과 · 예약 작업 전량·증분 ·
+  //   탈퇴 18명 수신거부 접기(운영 PG 실측 발송 가능 0). 근거 = docs/FEATURE-SYNC-AGENT.md §7 2026-10-15 밤·밤(2).
+  'win-modern__oracle-11g__1.7.2',
+  // 2026-10-15 smoke PASS 79ms + 같은 VM 에서 MySQL 8.0 뷰 전용 계정 구성(원본 DB 2개 → 한 스키마 뷰) 마법사 전 구간 —
+  //   뷰 목록 · 전표번호만 = 중복 거부 → 복합 키 통과 · 예약 작업 전량 · 운영 PG 고객·구매·합계 원본 일치. 근거 = §7 밤(3).
+  'win-modern__mysql__1.7.2',
 ]);
 
 /**

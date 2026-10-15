@@ -105,7 +105,7 @@ export function mapBatch(rows: RawRow[], mapping: ColumnMapping): Record<string,
  * 처리 순서:
  *   1. 서버 /api/sync/ai-mapping 호출 (설계서 §5)
  *   2. 서버 응답 실패(쿼터 초과/서비스 장애) 시 → 로컬 autoSuggestMapping 폴백
- *   3. custom_N 자동 배정 + 커스텀 라벨 생성
+ *   3. custom_N 자동 배정 (라벨은 호출부가 resolveCustomFieldLabels 로 정한다)
  *
  * ⚠️ PII 금지: 컬럼명만 전송. 샘플 데이터 절대 전송하지 않음.
  *
@@ -114,7 +114,7 @@ export function mapBatch(rows: RawRow[], mapping: ColumnMapping): Record<string,
  * @param tableName 소스 DB 테이블명 (프롬프트 컨텍스트용)
  * @param dbType 소스 DB 타입
  * @param sourceColumns 소스 컬럼명 목록
- * @returns 매핑 + 커스텀 라벨 + 모델 정보 + 폴백 여부
+ * @returns 매핑 + 모델 정보 + 폴백 여부
  */
 export interface SuggestMappingWithAIOptions {
   serverUrl: string;
@@ -126,8 +126,8 @@ export interface SuggestMappingWithAIOptions {
 }
 
 export interface SuggestMappingWithAIResult {
+  /** 라벨은 여기 없다(★ 2026-10-15) — 고객 라벨은 templates.resolveCustomFieldLabels 가 매핑에서 정한다 */
   mapping: ColumnMapping;
-  customFieldLabels: Record<string, string>;
   overflowColumns: string[];
   unmappedColumns: string[];
   modelUsed: string;
@@ -160,13 +160,12 @@ export async function suggestMappingWithAI(
     const unmapped = sourceColumns.filter((c) => !aiMapping[c]);
 
     // custom_N 자동 배정 (AI가 이미 custom_N을 지정한 경우 그 순서 유지 + 나머지 매핑 안 된 것 이어서 배정)
-    const { mapping, customFieldLabels, overflowColumns } = assignCustomFieldSlots(aiMapping, unmapped);
+    const { mapping, overflowColumns } = assignCustomFieldSlots(aiMapping, unmapped);
 
     logger.info(`AI 매핑 완료: 매핑=${Object.keys(mapping).length}/${sourceColumns.length}, cacheHit=${aiResult.cacheHit}`);
 
     return {
       mapping,
-      customFieldLabels,
       overflowColumns,
       unmappedColumns: sourceColumns.filter((c) => !mapping[c]),
       modelUsed: aiResult.modelUsed,
@@ -181,11 +180,10 @@ export async function suggestMappingWithAI(
 
     // 2차: 로컬 폴백
     const local = autoSuggestMapping(sourceColumns, target);
-    const { mapping, customFieldLabels, overflowColumns } = assignCustomFieldSlots(local.mapping, local.unmapped);
+    const { mapping, overflowColumns } = assignCustomFieldSlots(local.mapping, local.unmapped);
 
     return {
       mapping,
-      customFieldLabels,
       overflowColumns,
       unmappedColumns: sourceColumns.filter((c) => !mapping[c]),
       modelUsed: 'local_fallback',

@@ -853,7 +853,8 @@ export class SyncEngine {
       try {
         let afterKey: string | null = null;
         while (true) {
-          const { rows, lastKey } = await fetchKeyset(tableName, this.config.batchSize, afterKey);
+          // ★ 2026-10-15 원본 행 키를 넘긴다 — Oracle 이 지정 키 NUMBER 를 문자열로 받고, ROWID 없는 뷰를 키 순서로 읽는다
+          const { rows, lastKey } = await fetchKeyset(tableName, this.config.batchSize, afterKey, fullPkCols);
           if (rows.length === 0) break;
           await processFullBatch(rows);
           // 키셋은 짧은 페이지가 곧 끝(키 이후 행 없음) — OFFSET과 달리 신뢰 가능.
@@ -880,7 +881,7 @@ export class SyncEngine {
       let emptyRetries = 0;
       const MAX_EMPTY_RETRIES = 3;
       while (totalRows === 0 || offset < totalRows) {
-        const rows = await this.db.fetchAll(tableName, this.config.batchSize, offset);
+        const rows = await this.db.fetchAll(tableName, this.config.batchSize, offset, fullPkCols);
         if (rows.length === 0) {
           // 총건수 모를 때(0)는 빈 페이지가 곧 끝. 알 때는 일시 오류 가능 → 제한 재시도.
           if (totalRows === 0 || ++emptyRetries > MAX_EMPTY_RETRIES) break;
@@ -1029,13 +1030,23 @@ export class SyncEngine {
     if (target === 'customers') {
       const words = new Set<string>();
       let n = 0;
+      // ★ 2026-10-15 탈퇴·거부 표시도 같은 방식 — 매핑을 잘못 걸면(상태 코드 컬럼 등) 대량 수신거부가 되므로 배치마다 드러낸다
+      const optOutWords = new Set<string>();
+      let optOutN = 0;
       for (const r of normalizeResult.normalized) {
         if (typeof r.sms_opt_in_unknown === 'string') { n++; words.add(r.sms_opt_in_unknown); }
+        if (typeof r.opt_out_unknown === 'string') { optOutN++; optOutWords.add(r.opt_out_unknown); }
       }
       if (n > 0) {
         errors.push({
           code: 'CONSENT_VALUE_UNKNOWN',
           message: `수신동의 값을 알아볼 수 없는 행 ${n}건 — 신규 고객은 미동의로 들어갑니다(표기: ${[...words].slice(0, 5).join(', ')})`,
+        });
+      }
+      if (optOutN > 0) {
+        errors.push({
+          code: 'OPT_OUT_VALUE_UNKNOWN',
+          message: `탈퇴·거부 표시 값을 알아볼 수 없는 행 ${optOutN}건. 수신거부로 처리했습니다(표기: ${[...optOutWords].slice(0, 5).join(', ')})`,
         });
       }
     }

@@ -18,7 +18,7 @@ import { PLATFORMS, OS_TIERS, DB_OPTIONS, VERIFIED_COMBOS, resolveAgentBuild, bu
 // ★ 2026-07-10 원격 관리: 진단 명령 버전 게이트 (v1.6.1+ ACK 전용)
 import { isAgentVersionGte, ACK_MIN_AGENT_VERSION } from '../utils/agent-protocol';
 // ★ 2026-09-02 매핑 계약 — 대상별 허용 필드·필수 필드 검증 CT
-import { validateSyncMapping } from '../utils/sync-mapping-fields';
+import { validateSyncMapping, syncFieldsNeedingNewerAgent } from '../utils/sync-mapping-fields';
 // ★ 2026-09-02(2) 주기 해석 CT — 온라인 판정을 고객사별 실제 설정으로 자른다(상수 금지)
 import { resolveAgentIntervals, AGENT_INTERVAL_DEFAULTS, SCHEDULABLE_INTERVALS_MIN } from '../utils/sync-intervals';
 import path from 'path';
@@ -482,6 +482,18 @@ router.post('/agents/:agentId/command', authenticate, requireSuperAdmin, async (
         error: `이 명령은 에이전트 v${ACK_MIN_AGENT_VERSION} 이상에서만 지원됩니다. (현재 v${rows[0].agent_version || '알 수 없음'}, 버전 배포 후 사용)`,
         code: 'AGENT_VERSION_TOO_OLD',
       });
+    }
+
+    // ★ 2026-10-15 그 판부터 읽는 매핑 필드(is_opt_out = 탈퇴·거부 → 수신거부)를 옛 에이전트에 걸면 조용히 버려진다 → 저장 전에 거절.
+    if (type === 'update_config' || type === 'mapping_dryrun') {
+      const needNewer = syncFieldsNeedingNewerAgent(mapping || {}, rows[0].agent_version);
+      if (needNewer.length > 0) {
+        return res.status(400).json({
+          success: false,
+          error: `${needNewer.map((n) => n.field).join(', ')} 칸은 에이전트 v${needNewer[0].minVersion} 이상에서만 동작합니다. (현재 v${rows[0].agent_version || '알 수 없음'}, 버전 배포 후 사용)`,
+          code: 'AGENT_VERSION_TOO_OLD',
+        });
+      }
     }
 
     // 새 명령 추가 — ★ 2026-07-10 Codex 지적 정정: 옛 read-modify-write(JS push 후 전체 배열 덮어쓰기)는
