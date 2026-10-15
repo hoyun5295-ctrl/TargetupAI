@@ -1069,6 +1069,12 @@ export function buildAdMessageFront(
 }
 
 /**
+ * ★ 2026-10-15 B-1015-2 LMS/MMS 제목 글자 상한 — 발송 화면이 같은 값을 쓴다(직접발송·DM·자동 마케팅 입력칸 40 · 큐 title_str 은 200).
+ *   AI 오퍼레이션 허브만 17자로 잘라 「[브랜드명] 」 뒤 제목이 중간에 끊겼다. 숫자를 화면마다 다시 적지 않는다.
+ */
+export const LMS_SUBJECT_MAX_CHARS = 40;
+
+/**
  * ★ KISA 2026-05: LMS/MMS 제목에 (광고) 자동 부착 (프론트 미리보기/표시용)
  * - 백엔드 messageUtils.ts buildAdSubject와 동일 로직
  * - isAd=true + LMS/MMS일 때만 제목 앞에 "(광고) " 접두사

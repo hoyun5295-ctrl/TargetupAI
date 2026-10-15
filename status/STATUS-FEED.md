@@ -189,7 +189,8 @@
 ### C31 · ★1015 AI 오퍼레이션 「전체 고객」 발송 복구 — 코드 완료 · Codex 4R approve(1R medium 1 · 2R approve+범위 밖 1 · 3R medium 1 · 4R approve) · 배포 대기
 > 호출어 **"전체 고객 신호 / all_customers / 추출 불가"** → 접수 = [B-1015-1](BUGS.md) · CT = `packages/backend/src/utils/all-customers-signal.ts` · 테스트 = `utils/__tests__/staff-tickets-1015.test.ts` · 메모리 [[project_2026_1015_ai_operator_all_customers]]
 > 원인 = `{}` 가 「조건 못 옮김」과 「전체 고객」 두 뜻 · 08-18 거절을 넣으며 전체 신호를 안 만듦 · 카드만 전원을 셈 / 수정 = AI 타겟 추천 `all_customers` → 제안 `target.allCustomers` → 리스트·발송 플래그 · 신호 없는 `{}` 는 카드부터 0명 + 사유 · `/recommend-target` 도 0 · 같은 뿌리 = 자동발송 저장 검증(WHERE 없는 조건 400) + 실행 워커 fail-closed(빈 WHERE = 보내지 않고 failed)
-> 배포 = backend 재시작 + frontend 빌드(AiOperatorPage · AutoSendFormModal) / 배포 전 확인 = 저장된 자동발송 중 WHERE 가 비는 조건이 있는지 SQL(아래 메모리) / 배포 뒤 실측 1건 = 시연 회사에서 「전체 고객에게 안부 문자」 → 카드 N명 · 리스트 N명 · 발송 승인 창까지(실발송은 안 함)
+> B-1015-2(같은 배포): 허브 LMS 제목 17자 잘림 → 프론트 CT 상수 40자 + 프롬프트 제목 규칙 분리(Codex 3R approve(1R medium 1 · 2R high 1 KISA · 3R approve))
+> 배포 = backend 재시작 + frontend 빌드(AiOperatorPage · AutoSendFormModal · formatDate) / 배포 전 확인 = 저장된 자동발송 중 WHERE 가 비는 조건이 있는지 SQL(아래 메모리) / 배포 뒤 실측 1건 = 시연 회사에서 「전체 고객에게 안부 문자」 → 카드 N명 · 리스트 N명 · 발송 승인 창까지(실발송은 안 함)
 
 <a id="c30"></a>
 

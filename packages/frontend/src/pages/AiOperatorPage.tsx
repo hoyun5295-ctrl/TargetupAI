@@ -56,7 +56,7 @@ import { useCustomerDataGate, CustomerDataRequiredBanner, CustomerDataRequiredMo
 import MmsUploadModal from '../components/MmsUploadModal';
 import { useMmsUpload } from '../hooks/useMmsUpload';
 import { toMmsImagePaths } from '../utils/mmsImage';
-import { validateMmsBeforeSend } from '../utils/formatDate';
+import { validateMmsBeforeSend, LMS_SUBJECT_MAX_CHARS } from '../utils/formatDate';
 
 /** 회신번호 select 특수값 — 고객별 등록매장 번호(개별 회신) · DmSendAndTrackModal 과 같은 값 */
 const INDIVIDUAL_CB = '__individual__';
@@ -476,12 +476,14 @@ export default function AiOperatorPage() {
   // 실효 발송 채널 = 사용자 변경값 우선, 없으면 AI 추천
   const effectiveChannel = (channelOverride || proposal?.channel?.recommended || 'SMS').toUpperCase();
   // ★ 2026-07-10 (임은지 리포트): LMS/MMS 제목 단일 산출 — 제목 입력창 표시 값 = handleApprove 발송 값.
-  //   편집값 → AI 제목 → 캠페인명 → 회사명 fallback. 17자 = 기존 발송 계약(slice) 유지.
+  //   편집값 → AI 제목 → 캠페인명 → 회사명 fallback.
+  //   ★ 2026-10-15 B-1015-2: 상한 = 다른 발송 화면과 같은 LMS_SUBJECT_MAX_CHARS(40). 옛 17자는 AI 가 넣는 「[브랜드명] 」 까지 세어
+  //   「쿠폰 아직 못 받」처럼 제목을 중간에서 잘랐다(브랜드가 길수록 더 짧아졌다).
   const resolveSubject = (idx: number): string => {
     const ov = subjectOverrides[idx];
     if (ov != null) return ov;
     const v = proposal?.messages?.[idx];
-    return (v?.subject || proposal?.target?.suggestedName || `${companyName || ''} AI 캠페인`.trim() || 'AI Operator').slice(0, 17);
+    return (v?.subject || proposal?.target?.suggestedName || `${companyName || ''} AI 캠페인`.trim() || 'AI Operator').slice(0, LMS_SUBJECT_MAX_CHARS);
   };
   // 실효 단가/예상비용 — 채널 변경 시 회사 실단가로 재계산 (미변경 시 백엔드 계산값=진실)
   const effectiveUnitCost = (() => {
@@ -826,8 +828,8 @@ export default function AiOperatorPage() {
 
       const channel = effectiveChannel; // 사용자 유형 변경(SMS/LMS/MMS) 반영
       const isLmsOrMms = channel === 'LMS' || channel === 'MMS';
-      // ★ 2026-07-10: LMS/MMS subject = 화면 제목 입력창과 동일 산출(resolveSubject — 편집값 → AI 제목 → 캠페인명 fallback, 17자)
-      const subject = isLmsOrMms ? resolveSubject(idx).slice(0, 17) : '';
+      // ★ 2026-07-10: LMS/MMS subject = 화면 제목 입력창과 동일 산출(resolveSubject — 편집값 → AI 제목 → 캠페인명 fallback · 상한 = LMS_SUBJECT_MAX_CHARS)
+      const subject = isLmsOrMms ? resolveSubject(idx).slice(0, LMS_SUBJECT_MAX_CHARS) : '';
       if (isLmsOrMms && !subject.trim()) {
         throw new Error('제목이 비어있습니다. 본문 위 제목 입력창에 제목을 입력해주세요.');
       }
@@ -1471,8 +1473,8 @@ export default function AiOperatorPage() {
                                 type="text"
                                 value={resolveSubject(safeIdx)}
                                 onChange={(e) => setSubjectOverrides((prev) => ({ ...prev, [safeIdx]: e.target.value }))}
-                                maxLength={17}
-                                placeholder="제목 입력 (최대 17자)"
+                                maxLength={LMS_SUBJECT_MAX_CHARS}
+                                placeholder={`제목 입력 (최대 ${LMS_SUBJECT_MAX_CHARS}자)`}
                                 className={`w-full ${isAd ? 'pl-[54px]' : 'pl-3'} pr-3 py-2 rounded-xl bg-indigo-50 border border-slate-200 text-sm text-slate-900 placeholder-slate-400 focus:border-amber-300 focus:outline-none transition-colors`}
                               />
                             </div>
