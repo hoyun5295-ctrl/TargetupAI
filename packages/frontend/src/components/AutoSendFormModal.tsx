@@ -379,7 +379,11 @@ export default function AutoSendFormModal({ campaign, aiPremiumEnabled, onClose,
           setSampleCustomersRaw(data.sample_customers_raw);
         }
         if (Object.keys(filters).length === 0) {
-          setToast({ show: true, type: 'warning', message: 'AI가 타겟 조건을 인식하지 못했습니다. 좀 더 구체적으로 입력해주세요.' });
+          // ★ 2026-10-15 B-1015-1: 서버가 전체 고객을 명시(all_customers)해도 자동발송은 조건 없는 전체 발송을 받지 않는다(아래 저장 검증과 같은 규칙).
+          //   전체 선언 없는 빈 조건은 서버가 수를 0 으로 준다(옛: 전원 수로 보였다).
+          setToast({ show: true, type: 'warning', message: data.all_customers
+            ? '자동발송은 전체 고객 발송을 받지 않습니다. 발송 대상 조건을 적어주세요.'
+            : 'AI가 타겟 조건을 인식하지 못했습니다. 좀 더 구체적으로 입력해주세요.' });
         } else {
           setToast({ show: true, type: 'success', message: `타겟 조건이 설정되었습니다. 현재 기준 약 ${(data.estimated_count || 0).toLocaleString()}명` });
         }

@@ -39,6 +39,8 @@ import {
 //   종전 countFilteredCustomers는 게이트를 안 봐서 제안 수·통지 수가 실발송보다 컸다).
 //   ⛔ 1R 정정: 이 문은 audienceScope==='operator'일 때만. 공용 제안 경로는 countFilteredCustomers 그대로.
 import { countOperatorAudienceFor, resolveOperatorStoreScope } from '../utils/operator-audience';
+// ★ 2026-10-15 B-1015-1 전체 고객 신호 — 허브 제안의 빈 조건 판정(전체 / 못 옮김)을 CT 한 곳이 가른다
+import { isUnresolvedEmptyTarget, HubTargetEmptyError, HUB_TARGET_EMPTY_MESSAGE } from '../utils/all-customers-signal';
 // ★ 2026-08-03 A-7: 세그먼트 계약 — 축이 정해지면 SQL이 정해진다(AI 해석 개입 없음).
 import { normalizeSegmentParams, getSegmentContract, contractCriteriaText } from '../utils/automarketing-segment';
 // 성과 추정도 대상 수와 같은 최종 WHERE(안전필터·미클릭·피로도 포함)를 쓰게 하려고 공용 조각 빌더를 함께 쓴다.
@@ -143,6 +145,12 @@ export interface OrchestratorResult {
     totalCount: number;
     criteria: string;
     filters: Record<string, any>;
+    /**
+     * ★ 2026-10-15 B-1015-1 전체 고객 신호 — true 면 filters {} 가 "전체 고객" 이다(AI 명시 또는 조건 없는 전체 문장).
+     *   화면은 이 값을 리스트·발송 요청에 그대로 넘기고, 라우트는 이 값이 있을 때만 빈 조건을 전원으로 연다.
+     *   없는 {} 는 제안 단계에서 이미 count 0 + criteria 사유로 멈춘다. 허브 제안 전용(계약 축 제안은 늘 false).
+     */
+    allCustomers?: boolean;
     suggestedName: string;
     /**
      * ★ 2026-08-03 A-7: 계약으로 뽑은 제안이면 축과 파라미터가 여기 남는다.
@@ -473,6 +481,9 @@ async function _orchestrateImpl(ctx: AgentContext): Promise<OrchestratorResult> 
       const estWhere = buildAudienceWhere(estParams, measured.compiled.filterWhere, scope.storeFilter, measured.gates);
       audienceWhere = { sql: estWhere, params: estParams.slice(1) };
     } else {
+      // ★ 2026-10-15 B-1015-1 허브 제안: 전체 선언(all_customers) 없는 빈 조건은 전원이 아니라 "못 옮김" 이다.
+      //   옛: {} 를 countFilteredCustomers 가 전원으로 세어 카드는 1,501명인데 리스트·발송은 거절 — 세 경로가 같은 문장으로 멈춘다.
+      if (isUnresolvedEmptyTarget(targetResult)) throw new HubTargetEmptyError();
       const cnt = await countFilteredCustomers(ctx.companyId, targetResult.filters, ctx.userId || '');
       actual = cnt.count;
     }
@@ -626,8 +637,10 @@ async function _orchestrateImpl(ctx: AgentContext): Promise<OrchestratorResult> 
       totalCount: parseInt(ctx.customerStats.total || '0'),
       // ⛔ 7R 정정: 계약이 있으면 기준 설명도 계약이 근거다. AI reasoning을 그대로 쓰면 화면이
       //   실제 대상과 다른 사람을 설명한다(대상은 생일 고객인데 기준은 VIP 재구매라고 적힌다).
-      criteria: contractCriteria || targetResult.reasoning,
+      // ★ 2026-10-15 B-1015-1 허브: 대상 수 판정이 멈춘 사유(countError)가 있으면 카드가 그 사유를 보여준다(옛: AI 설명만 보여 0명의 이유를 몰랐다).
+      criteria: contractCriteria || (!isOperatorScope && countError ? countError : targetResult.reasoning),
       filters: targetResult.filters,
+      allCustomers: !isOperatorScope && !rawSegmentKey && targetResult.all_customers === true && Object.keys(targetResult.filters || {}).length === 0,
       suggestedName: contractLabel || targetResult.suggested_campaign_name,
       // ★ 2026-08-03 A-7: 저장된 제안이 발송·명단 조회에서 같은 축으로 다시 컴파일되게 축을 함께 남긴다.
       ...(contractKey ? { segmentKey: contractKey, segmentParams: contractParams } : {}),
@@ -772,6 +785,7 @@ async function _orchestrateWithAIImpl(ctx: AgentContext): Promise<OrchestratorRe
   let targetResult: any = null;
   let estimatedCount = 0;
   let countVerified = false;
+  let hubTargetEmpty = false;   // ★ 2026-10-15 B-1015-1 허브 빈 조건(전체 선언 없음) — 카드 사유 · allCustomers 판정
   let normalizedMessages: OrchestratorResult['messages'] = [];
   let messagesResult: any = null;
   let compliance: ComplianceResult = { passed: false, riskLevel: 'high', warnings: ['Compliance 미실행'], suggestions: [] };
@@ -808,8 +822,11 @@ async function _orchestrateWithAIImpl(ctx: AgentContext): Promise<OrchestratorRe
         try {
           // ★ 2026-08-03 A-1 / 1R 정정: 자동마케팅 회차만 발송 게이트를 포함한 단일 문으로 센다.
           //   이 tool 흐름은 공용 제안(/operator/propose)도 쓰므로 범위 밖에는 종전 count를 유지한다.
+          // ★ 2026-10-15 B-1015-1 허브: 전체 선언 없는 빈 조건은 세지 않는다(orchestrate 와 같은 판정 · 같은 문장).
+          hubTargetEmpty = ctx.audienceScope !== 'operator' && isUnresolvedEmptyTarget(targetResult);
           const actual = ctx.audienceScope === 'operator'
             ? (await countOperatorAudienceFor({ companyId: ctx.companyId, legacyFilters: targetResult.filters, ownerUserId: ctx.userId || null })).count
+            : hubTargetEmpty ? 0
             : (await countFilteredCustomers(ctx.companyId, targetResult.filters, ctx.userId || '')).count;
           estimatedCount = actual;
           countVerified = true;
@@ -817,7 +834,9 @@ async function _orchestrateWithAIImpl(ctx: AgentContext): Promise<OrchestratorRe
           return {
             actual_count: actual,
             // ★ Zero-Count 영구 원칙 안내 (Harold 명시 D171)
-            warning: actual === 0
+            warning: hubTargetEmpty
+              ? `★ ${HUB_TARGET_EMPTY_MESSAGE} 자동완화 절대 금지. message_composition 호출 X.`
+              : actual === 0
               ? '★ 매칭 0건. 발송 차단 정합 (Harold 영구 원칙). 자동완화 절대 금지. message_composition 호출 X. 사용자에게 조건 재입력 안내 제공할 것.'
               : null,
           };
@@ -1105,8 +1124,10 @@ ${memoryContext}
     target: {
       count: estimatedCount,
       totalCount: parseInt(ctx.customerStats.total || '0'),
-      criteria: targetResult.reasoning || '',
+      // ★ 2026-10-15 B-1015-1 허브: 빈 조건으로 멈췄으면 카드가 그 사유를 보여준다(orchestrate 와 같은 문장).
+      criteria: hubTargetEmpty ? HUB_TARGET_EMPTY_MESSAGE : (targetResult.reasoning || ''),
       filters: targetResult.filters || {},
+      allCustomers: ctx.audienceScope !== 'operator' && targetResult.all_customers === true && Object.keys(targetResult.filters || {}).length === 0,
       suggestedName: targetResult.suggested_campaign_name || '',
     },
     messages: normalizedMessages,

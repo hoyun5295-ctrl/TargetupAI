@@ -29,6 +29,9 @@ import {
   resolveOperatorAudienceGates, compileOperatorAudience, listSegmentAvailability, resolveOperatorStoreScope,
   assertSegmentUsable,
 } from '../utils/operator-audience';
+// ★ 2026-10-15 B-1015-1 전체 고객 신호 — 빈 조건의 뜻(전체 / 못 옮김)을 한 곳이 가른다
+import { isEmptyFilters, isUnresolvedEmptyTarget, HUB_TARGET_EMPTY_MESSAGE } from '../utils/all-customers-signal';
+import type { FilterCountResult } from '../services/ai';
 // ★ 2026-08-04 변화 축 — 기준선 유무 판정(화면 첫 회차 안내가 서버 답을 쓴다).
 import { segmentNeedsCycleBaseline, normalizeSegmentKey, schedulePeriod } from '../utils/automarketing-segment';
 import { hasCycleBaseline } from '../utils/operator-cycle-snapshot';
@@ -464,8 +467,11 @@ router.post('/recommend-target', async (req: Request, res: Response) => {
     console.log('AI 필터 결과:', JSON.stringify(result.filters, null, 2));
 
     // ★ 실제 타겟 수 계산 — countFilteredCustomers 공통 함수 사용
-    // 빈 필터({})도 정상 카운트 (AI가 전체 대상을 의도한 경우 포함)
-    const filterResult = await countFilteredCustomers(companyId, result.filters, userId!, storeFilter, baseParams);
+    // ★ 2026-10-15 B-1015-1: 빈 필터({})는 AI 가 전체를 명시했을 때(all_customers)만 전원으로 센다.
+    //   옛: "빈 필터도 정상 카운트" 라 조건을 못 옮긴 결과도 전원 수로 보였다(08-18 접수와 같은 모양).
+    const filterResult: FilterCountResult = isUnresolvedEmptyTarget(result)
+      ? { count: 0, unsubscribeCount: 0 }
+      : await countFilteredCustomers(companyId, result.filters, userId!, storeFilter, baseParams);
     const actualCount = filterResult.count;
     const unsubscribeCount = filterResult.unsubscribeCount;
     console.log(`[AI] 필터 카운트 결과: ${actualCount}명 (수신거부: ${unsubscribeCount}명)`);
@@ -490,6 +496,8 @@ router.post('/recommend-target', async (req: Request, res: Response) => {
     // - sample_customer_raw: column 키 + custom_fields (백엔드 replaceVariables용)
     // 최신 필터 기준으로 WHERE 재생성 (자동완화 시 result.filters가 변경됨)
     const { sql: sampleFilterWhere, params: sampleFilterParams } = buildFilterWhereClauseCompat(result.filters, baseParams.length + 1);
+    // ★ 2026-10-15 B-1015-1: 전체 선언 없는 빈 조건은 대상이 0 이다 — 샘플도 비운다(옛: {} 로 아무 고객이나 샘플로 나갔다)
+    const sampleWhere = isUnresolvedEmptyTarget(result) ? ' AND FALSE' : sampleFilterWhere;
     const sampleUnsubIdx = baseParams.length + sampleFilterParams.length + 1;
 
     let sampleCustomer: Record<string, string> = {};
@@ -507,7 +515,7 @@ router.post('/recommend-target', async (req: Request, res: Response) => {
                 recent_purchase_amount, total_purchase_amount, purchase_count,
                 birth_date, recent_purchase_date, custom_fields
          FROM customers c
-         WHERE c.company_id = $1 AND c.is_active = true AND ${consentC.isTrue}${storeFilter} ${sampleFilterWhere}
+         WHERE c.company_id = $1 AND c.is_active = true AND ${consentC.isTrue}${storeFilter} ${sampleWhere}
          AND NOT EXISTS (SELECT 1 FROM unsubscribes u WHERE u.user_id = $${sampleUnsubIdx} AND u.phone = c.phone)
          ORDER BY c.updated_at DESC NULLS LAST LIMIT 100`,
         [...baseParams, ...sampleFilterParams, userId]
@@ -1501,7 +1509,7 @@ router.post('/operator/preview-recipients', async (req: Request, res: Response) 
       return res.status(403).json({ success: false, error: '본 기능은 요금제 가입 후 이용 가능합니다.', code: 'BETA_GATE' });
     }
 
-    const { filters } = req.body;
+    const { filters, allCustomers } = req.body;
     if (!filters || typeof filters !== 'object') {
       return res.status(400).json({ success: false, error: 'filters가 필요합니다.' });
     }
@@ -1527,13 +1535,14 @@ router.post('/operator/preview-recipients', async (req: Request, res: Response) 
     //   빈 필터를 "전체 의도"로 읽던 해석이 원인이다 — 그 둘은 같은 신호로 표현될 수 없다.
     //   판정은 **만들어진 WHERE가 비었는가**로 한다. 키 개수로 세면 `{grade: null}`처럼
     //   키는 있는데 조건이 안 붙는 형태가 그대로 통과한다.
-    //   전체 발송이 정말 필요하면 `dm.ts`처럼 명시 플래그를 받는 게 맞다 — 지금 그 신호는 없다.
-    if (!filterWhere.trim()) {
+    //   ★ 2026-10-15 B-1015-1: 그 신호가 `allCustomers`(제안 target.allCustomers · AI 가 전체를 명시한 제안만 true)다.
+    //   플래그 없는 빈 조건은 종전대로 거절 — 08-18 접수(조건 못 옮김 = 전체 6명) 재발 방지.
+    if (!filterWhere.trim() && allCustomers !== true) {
       console.warn(`[AI Operator] 빈 조건 발송 차단 — company=${companyId} filters=${JSON.stringify(filters).slice(0, 200)}`);
       return res.status(400).json({
         success: false,
         code: 'TARGET_FILTER_EMPTY',
-        error: 'AI가 이 목표를 조건으로 옮기지 못했습니다. 조건을 더 구체적으로 적어주시거나, 특정 고객 몇 명에게만 보낼 때는 직접발송에서 고객을 직접 골라 보내주세요.',
+        error: HUB_TARGET_EMPTY_MESSAGE,
       });
     }
 
@@ -1634,7 +1643,7 @@ router.post('/operator/target-recipients', async (req: Request, res: Response) =
     }
 
     // ★ 2026-08-03 A-7: 계약 축(segment_key)이 오면 그 축으로, 아니면 종전대로 filters로.
-    const { filters, segment_key, segment_params, operator_id } = req.body;
+    const { filters, segment_key, segment_params, operator_id, allCustomers } = req.body;
     const hasSegment = typeof segment_key === 'string' && segment_key.trim();
     if (!hasSegment && (!filters || typeof filters !== 'object')) {
       return res.status(400).json({ success: false, error: 'filters 또는 segment_key가 필요합니다.' });
@@ -1683,7 +1692,11 @@ router.post('/operator/target-recipients', async (req: Request, res: Response) =
       }
     }
 
-    const compiled = await compileOperatorAudience({
+    // ★ 2026-10-15 B-1015-1 허브 전체 고객: 제안이 전체를 명시(allCustomers)한 빈 조건은 컴파일을 거치지 않고 조건 없는 WHERE 로 연다
+    //   (preview-recipients 와 같은 판정). 계약 축 · 플래그 없는 빈 조건은 종전대로 컴파일이 판정한다(빈 조건 = 거절).
+    const compiled = (!hasSegment && allCustomers === true && isEmptyFilters(filters))
+      ? { filterWhere: '', filterParams: [] as any[], segmentKey: null as string | null, basis: 'legacy_filters' as const }
+      : await compileOperatorAudience({
       companyId,
       segmentKey: hasSegment ? String(segment_key) : null,
       segmentParams: segment_params,
@@ -1732,7 +1745,7 @@ router.post('/operator/target-recipients', async (req: Request, res: Response) =
       return res.status(400).json({
         success: false,
         code: 'TARGET_FILTER_EMPTY',
-        error: 'AI가 이 목표를 조건으로 옮기지 못했습니다. 조건을 더 구체적으로 적어주시거나, 특정 고객 몇 명에게만 보낼 때는 직접발송에서 고객을 직접 골라 보내주세요.',
+        error: HUB_TARGET_EMPTY_MESSAGE,
       });
     }
     console.error('[AI Operator] target-recipients 오류:', err);

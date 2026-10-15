@@ -34,6 +34,7 @@ import { isValidCustomFieldKey } from './safe-field-name';
 import { query } from '../config/database';
 // ★ 2026-09-27 한줄로 V2 R161 — 프롬프트 날짜 = KST(옛: 오늘 날짜가 없고 예시만 UTC toISOString)
 import { kstDateString } from './planner-execution';
+import { isPlainAllCustomersRequest } from './all-customers-signal';
 
 // ════════════════════════════════════════════════════════════════════
 // 타입
@@ -218,24 +219,9 @@ ${customFieldsBlock}
 // 메인 함수
 // ════════════════════════════════════════════════════════════════════
 
-/** 전체를 뜻하는 말 */
-const ALL_WORDS_RE = /(전체|모든|모두|전부)/g;
-/**
- * 전체 요청 문장에 붙는 채움말(허용 목록). 이것과 전체를 뜻하는 말을 지우고 남는 것이 없어야 "조건 없는 전체 요청"이다.
- * 긴 말을 먼저 둔다(짧은 말이 긴 말의 일부를 먼저 지우지 않게).
- */
-const ALL_FILLER_RE = /(보내주세요|보내줘요|보내줘|보내기|보내|해주세요|해줘요|해줘|하기|발송|대상으로|대상|타겟|타깃|등록된|가입한|가입된|우리|저희|고객님|고객|회원|에게|한테|으로|로|을|를|의|들|님|께)/g;
-
-/**
- * ★ 2026-09-26 한줄로 V2 R1-21 — 입력이 **조건 없는 전체 요청**인가("전체 고객" · "모든 고객에게 보내줘" · "고객 전체").
- * 공백·문장부호를 지우고, 전체를 뜻하는 말과 채움말을 지운 뒤 남는 것이 없을 때만 참.
- * "서울 지역 모든 고객"처럼 조건이 섞이면 거짓(남는 말 = 조건). 거짓 쪽이 안전하다(되묻기).
- */
-export function isPlainAllCustomersRequest(text: string): boolean {
-  const t = String(text || '').replace(/[\s.,!?~·'"()\[\]]/g, '');
-  if (!t || !new RegExp(ALL_WORDS_RE.source).test(t)) return false;
-  return t.replace(ALL_WORDS_RE, '').replace(ALL_FILLER_RE, '').length === 0;
-}
+// ★ 2026-10-15 B-1015-1 — "조건 없는 전체 요청" 판정은 허브(AI 오퍼레이션)도 쓰므로 CT(all-customers-signal)로 옮겼다.
+//   본문은 그대로이고 여기서는 기존 import 호환을 위해 다시 내보낸다.
+export { isPlainAllCustomersRequest } from './all-customers-signal';
 
 /**
  * 자연어 → CT-01 structured filter 변환 (AI 호출 + 파싱 + 호환 검증).

@@ -91,6 +91,8 @@ export interface ProposalResponse {
     totalCount: number;
     criteria: string;
     filters: Record<string, unknown>;
+    /** ★ 2026-10-15 B-1015-1 전체 고객 신호 — true 면 빈 filters 가 "전체 고객". 리스트·발송 요청에 그대로 넘긴다. */
+    allCustomers?: boolean;
     suggestedName: string;
   };
   messages: ProposalMessage[];
@@ -422,7 +424,8 @@ export default function AiOperatorPage() {
       targetAllRef.current = fetch('/api/ai/operator/target-recipients', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ filters: proposal.target.filters }),
+        // ★ 2026-10-15 B-1015-1: 전체 고객 제안은 allCustomers 로 연다(빈 filters 만 보내면 서버가 "조건 못 옮김" 으로 거절)
+        body: JSON.stringify({ filters: proposal.target.filters, allCustomers: proposal.target.allCustomers === true }),
       })
         .then((r) => r.json())
         .then((d) => {
@@ -791,7 +794,8 @@ export default function AiOperatorPage() {
       const previewRes = await fetch('/api/ai/operator/preview-recipients', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ filters: proposal.target.filters }),
+        // ★ 2026-10-15 B-1015-1: 전체 고객 제안은 allCustomers 로 연다(리스트 조회와 같은 신호)
+        body: JSON.stringify({ filters: proposal.target.filters, allCustomers: proposal.target.allCustomers === true }),
       });
       const previewData = await previewRes.json();
       if (!previewRes.ok || !previewData.success) {

@@ -441,6 +441,8 @@ async function generateMessageForAutoCampaign(ac: any): Promise<void> {
           const d1ConsentScope = await resolveConsentScope(ac.company_id, ac.store_code ? [ac.store_code] : null);
           const d1Consent = consentSql(d1ConsentScope, 'c');
           const filterRes = buildFilterQueryCompat(ac.target_filter, ac.company_id, brandConsentOption(d1ConsentScope));
+          // ★ 2026-10-15 B-1015-1: 조건이 WHERE 를 못 만들면 발송 경로가 보내지 않으므로 통지 인원도 전원이 아니라 0 이다
+          if (!filterRes.where.trim()) throw new Error('발송 대상 조건이 비어 있음 (조건 없는 전체 발송 차단)');
           let countStoreFilter = '';
           const countStoreParams: any[] = [];
           if (ac.store_code) {
@@ -585,6 +587,8 @@ async function sendPreNotification(ac: any): Promise<void> {
       const countConsentScope = await resolveConsentScope(ac.company_id, ac.store_code ? [ac.store_code] : null);
       const countConsent = consentSql(countConsentScope, 'c');
       const filterResult = buildFilterQueryCompat(ac.target_filter, ac.company_id, brandConsentOption(countConsentScope));
+      // ★ 2026-10-15 B-1015-1: 발송 경로와 같은 판정 — 빈 WHERE 는 세지 않는다(전원으로 보이지 않게)
+      if (!filterResult.where.trim()) throw new Error('발송 대상 조건이 비어 있음 (조건 없는 전체 발송 차단)');
       let storeFilter = '';
       const storeParams: any[] = [];
       if (ac.store_code) {
@@ -750,6 +754,13 @@ async function executeAutoCampaign(ac: any): Promise<void> {
     if (sendConsentScope.mode === 'mall') console.log(`${logPrefix} 발송 자격 = 몰 동의 codes=${sendConsentScope.codes.join(',')} admin=${sendConsentScope.admin}`);
     // ★ customer-filter로 타겟 필터링
     const filterResult = buildFilterQueryCompat(ac.target_filter, ac.company_id, brandConsentOption(sendConsentScope));
+    // ★ 2026-10-15 B-1015-1 (Codex 2R 범위 밖 → 착수): 저장된 조건이 WHERE 를 만들지 못하면({} · {grade: ''} · 옛 데이터) 회사 전원에게
+    //   나가던 길이다. 자동발송은 조건 없는 전체 발송을 받지 않으므로 보내지 않고 실패로 남긴다(5회 누적 시 자동 일시정지 · 운영 화면에서 보인다).
+    if (!filterResult.where.trim()) {
+      console.error(`${logPrefix} 발송 대상 조건이 비어 있어 보내지 않음 (조건 없는 전체 발송 차단) target_filter=${JSON.stringify(ac.target_filter).slice(0, 200)}`);
+      await markFailed(ac, '발송 대상 조건이 비어 있어 보내지 않았습니다 (조건 없는 전체 발송 차단). 자동발송을 열어 대상 조건을 다시 설정해주세요.');
+      return;
+    }
 
     // store_code 필터
     let storeFilter = '';

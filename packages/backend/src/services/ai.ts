@@ -7,6 +7,7 @@ import { AI_MODELS, AI_MAX_TOKENS, TIMEOUTS, claudeRequestShape, copyThinkingEna
 import { buildFilterWhereClauseCompat } from '../utils/customer-filter';
 import { buildJourneySafetyFilter } from '../utils/journey-safety-filter';
 import { ownerConsentTrue } from '../utils/mall-consent';
+import { isPlainAllCustomersRequest } from '../utils/all-customers-signal';   // ★ 2026-10-15 B-1015-1 전체 고객 신호
 import { cleanLeftoverVars } from '../utils/messageUtils';
 // ★ D210+ Phase 2 (Harold 명시 2026-05-23): CT-58 — 회사별 customer DB 실측 데이터 프로필.
 //   AI 시스템 프롬프트 안 동적 주입 → 어설픈 개인화 사고 차단.
@@ -1877,6 +1878,12 @@ export async function recommendTarget(
   options?: { model?: 'sonnet' | 'opus'; targetDirective?: string }
 ): Promise<{
   filters: any;
+  /**
+   * ★ 2026-10-15 B-1015-1 전체 고객 신호 — 조건이 비었을 때 "전체가 대상" 과 "조건을 못 옮김" 을 가른다.
+   *   true = filters {} 이고 전체 고객이 대상(AI 가 명시했거나 입력 문장 자체가 조건 없는 전체 요청).
+   *   false 인 {} 는 어디서도 전원이 되지 않는다(제안 카드 · 리스트 · 발송 모두 멈춘다).
+   */
+  all_customers: boolean;
   reasoning: string;
   estimated_count: number;
   recommended_channel: string;
@@ -1891,6 +1898,7 @@ export async function recommendTarget(
   if (!process.env.ANTHROPIC_API_KEY) {
     return {
       filters: {},
+      all_customers: false,
       reasoning: 'API 키가 설정되지 않았습니다.',
       estimated_count: 0,
       recommended_channel: 'SMS',
@@ -2010,6 +2018,11 @@ ${varCatalogPrompt}
 - 개인화 사용 시 personalization_vars에는 위 "사용 가능한 개인화 변수" 목록에 있는 변수명만 포함!
 - ⚠️ personalization_vars에 위 목록에 없는 변수를 절대 넣지 마세요!
 
+## 전체 고객 판단 (⚠️ 중요!)
+- 목표가 대상을 한정하지 않고 전체 고객에게 보내는 것이면: filters 는 {} 로 비우고 all_customers 를 true 로.
+- 목표에 대상을 한정하는 말(특정 이름·등급·지역·성별·나이·기간·매장·구매 이력 등)이 있는데 위 필터 필드로 옮길 수 없으면: filters 는 {} 로 두고 all_customers 를 false 로, reasoning 에 어떤 조건을 옮기지 못했는지 적으세요.
+- 조건을 옮기지 못했다고 전체 고객으로 넓히지 마세요. all_customers 가 true 인데 filters 에 조건이 있으면 조건이 우선합니다.
+
 현재 요청 분석:
 - 개인화 요청: ${usePersonalization ? '예' : '아니오'}
 - 개별회신번호 요청: ${useIndividualCallback ? '예' : '아니오'}
@@ -2020,6 +2033,7 @@ ${varCatalogPrompt}
   "filters": {
     "필드명": { "operator": "연산자", "value": 값 }
   },
+  "all_customers": true 또는 false,
   "reasoning": "이 타겟을 추천하는 이유 (한글 1~2문장)",
   "estimated_percentage": 예상 타겟 비율(%),
   "recommended_channel": "SMS 또는 LMS 또는 MMS",
@@ -2066,9 +2080,24 @@ ${varCatalogPrompt}
         : (aiPersonalizationVars.length > 0 ? aiPersonalizationVars : personalizationVars))
       : [];
     
+    // ★ 2026-10-15 B-1015-1 전체 고객 신호 — 조건이 비었을 때만 뜻을 가른다. AI 가 명시했거나(all_customers)
+    //   입력 문장 자체가 조건 없는 전체 요청이면 전체. 조건이 있으면 조건이 이긴다(전체 선언은 버린다).
+    //   filters 가 객체가 아니면 {} 로 — 옛 코드는 undefined 를 그대로 돌려줘 호출부 Object.keys 가 터질 수 있었다.
+    //   ★ Codex 1R(1015): filters 가 객체가 아닌 값(조건이 든 JSON 문자열 등)이면 {} 로 버린 뒤 전체로 승격하면 조건이 사라진다 —
+    //   전체 선언은 **진짜 빈 객체(또는 키 자체가 없음)** 에만 붙인다. 잘못된 형식은 전체도 조건도 아닌 "못 옮김"(0명 + 사유)으로 멈춘다.
+    const rawFilters = result.filters;
+    const filtersIsObject = rawFilters !== null && typeof rawFilters === 'object' && !Array.isArray(rawFilters);
+    if (rawFilters != null && !filtersIsObject) {
+      console.warn(`[AI] 타겟 추천 filters 형식 이상(객체 아님) — 전체 선언 무시: ${String(typeof rawFilters)} ${JSON.stringify(rawFilters).slice(0, 120)}`);
+    }
+    const filtersOut: Record<string, any> = filtersIsObject ? rawFilters : {};
+    const allCustomers = (rawFilters == null || (filtersIsObject && Object.keys(filtersOut).length === 0))
+      && (result.all_customers === true || isPlainAllCustomersRequest(cleanObjective));
+
     // ★ D142+ B1(0429 PDF B2): [브랜드] placeholder → [실제브랜드명] 후처리
     return deepReplaceBrand({
-      filters: result.filters,
+      filters: filtersOut,
+      all_customers: allCustomers,
       reasoning: result.reasoning,
       estimated_count: Math.round((customerStats.total * (result.estimated_percentage ?? 10)) / 100),
       recommended_channel: result.recommended_channel || 'SMS',
@@ -2084,6 +2113,7 @@ ${varCatalogPrompt}
     console.error('AI 타겟 추천 오류:', error);
     return {
       filters: {},
+      all_customers: false,
       reasoning: '추천 생성 중 오류가 발생했습니다.',
       estimated_count: 0,
       recommended_channel: 'SMS',

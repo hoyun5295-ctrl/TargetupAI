@@ -18,6 +18,10 @@ import { authenticate } from '../middlewares/auth';
 import { getStoreScope, storeMembershipClause } from '../utils/store-scope';
 import { resolveConsentScope, consentSql, brandConsentOption } from '../utils/mall-consent';
 import { buildFilterQueryCompat } from '../utils/customer-filter';
+// ★ 2026-10-15 B-1015-1 같은 뿌리: 조건이 WHERE 를 만들지 못하면(빈 객체 · 값이 빈 조건 · 객체 아님) 저장하지 않는다 — 자동발송은 조건 없는 전체 발송을 받지 않는다.
+//   판정은 실행 워커와 같은 빌더(buildFilterQueryCompat)로(Codex 3R: 브랜드 단독 조건 오판 방지).
+import { isEmptyAutoSendFilter } from '../utils/all-customers-signal';
+const EMPTY_TARGET_FILTER_MESSAGE = '발송 대상 조건이 비어 있습니다. 자동발송은 조건 없는 전체 발송을 보내지 않습니다. 대상 조건을 다시 설정해주세요.';
 import { buildUnsubscribeFilter, CAMPAIGN_OPT080_SELECT_EXPR, buildCampaignOpt080LeftJoin } from '../utils/unsubscribe-helper';
 import { fetchTargetSampleCustomer } from '../utils/target-sample';
 import { kstToUtc, calcNextRunAt } from '../utils/auto-campaign-worker';
@@ -381,6 +385,10 @@ async function _deprecatedCreateAutoCampaign(req: Request, res: Response) {
     if (!target_filter || typeof target_filter !== 'object') {
       return res.status(400).json({ error: '타겟 필터를 설정해주세요.' });
     }
+    // ★ 2026-10-15 B-1015-1: 키가 있어도 WHERE 가 안 붙는 조건({grade: ''} 등)은 실행 때 전원에게 나간다 — 저장에서 막는다(화면 검증은 빈 객체만 봤다)
+    if (isEmptyAutoSendFilter(target_filter, companyId)) {
+      return res.status(400).json({ error: EMPTY_TARGET_FILTER_MESSAGE, code: 'TARGET_FILTER_EMPTY' });
+    }
     // ★ AI 문안생성 모드: 프리미엄 게이팅 + 필수값 검증
     if (ai_generate_enabled) {
       const aiPremium = await checkAiPremiumGating(companyId);
@@ -605,6 +613,11 @@ router.put('/:id', async (req: Request, res: Response) => {
     // ★ B11(0417 PDF #11): 'daily' 제거
     if (schedule_type && !['monthly', 'weekly'].includes(schedule_type)) {
       return res.status(400).json({ error: '스케줄 유형은 monthly, weekly 중 하나여야 합니다.' });
+    }
+    // ★ 2026-10-15 B-1015-1: 수정으로 조건을 비우는 길도 막는다(생성과 같은 판정 · 보내지 않으면 종전 값 유지)
+    if (target_filter !== undefined && target_filter !== null
+      && (typeof target_filter !== 'object' || isEmptyAutoSendFilter(target_filter, companyId))) {
+      return res.status(400).json({ error: EMPTY_TARGET_FILTER_MESSAGE, code: 'TARGET_FILTER_EMPTY' });
     }
 
     // ★ AI 문안생성 모드 활성화/수정 시: 프리미엄 게이팅 + 필수값 검증

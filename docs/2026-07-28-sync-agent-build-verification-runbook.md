@@ -66,7 +66,10 @@ sync-agent --test-db --type mysql --host 10.0.0.5 --port 3306 --db shop --user r
 bash scripts/smoke-combos.sh              # 전체
 bash scripts/smoke-combos.sh --only linux # 부분
 bash scripts/smoke-combos.sh --keep       # DB 컨테이너 남김
+bash scripts/smoke-combos.sh --only win-modern-oracle   # 단일 조합(11g XE · ★2026-10-14 IC 동봉 뒤 PASS)
 ```
+
+★2026-10-14 Oracle 모드 안내 실측 = `--keep` 로 컨테이너를 남긴 뒤 zip 을 풀어 `SyncAgent\sync-agent.exe --test-db --type oracle --host 127.0.0.1 --port 11521 --db XE --user smoke --pass-env <비밀번호 환경변수> --oracle-client thin` (= NJS-138 + "11g 이하로" 안내가 진단 JSON error 에 실린다) / `--oracle-client thick` (= PASS). 끝나면 `docker rm -f smoke-oracle smoke-mysql smoke-pg`. 이 PC 는 VC80 런타임이 있어 oracle zip 의 런타임 동봉 여부는 smoke 로 못 잡는다 — manifest blocker 와 FEATURE-SYNC-AGENT §5 가 지킨다.
 
 DB 컨테이너 기동(**127.0.0.1 바인딩 강제**) → 테스트 데이터 5행 → zip 해제 → `--version`으로 기동·버전 확인 → `--test-db` → 판정 → 정리까지 한다. `PASS`한 조합만 `VERIFIED_COMBOS`에 넣는다.
 
@@ -116,7 +119,10 @@ zip은 20개지만 **실제 바이너리는 5개**다 — 같은 티어의 4개 
 cd C:\Users\ceo\projects\targetup\sync-agent
 npm run build:tiers          # 전 티어 20 zip (15분 안팎)
 node scripts/build-tier.js win-modern   # 단일 티어
+node scripts/build-tiers.js --tiers win-modern   # 단일 티어 + manifest 병합(★2026-10-14 · 빈 값이면 exit 1)
 ```
+
+★2026-10-14 oracle zip 동봉물 = Instant Client 11.2(`C:/Users/ceo/oracle-client-11.2-stage`) + win-modern·win-mid 는 `oracledb/` 사이드카 + `oracle-client/vcredist_x64.exe`(스테이징에 있을 때 · 없으면 manifest blocker = 출고 불가). 규칙 소유 = FEATURE-SYNC-AGENT §5.
 
 ⚠ **`build:tiers`는 `dist-tiers/downloads/`의 zip을 `-Force`로 덮어쓴다.** 검증 통과한 산출물이 거기 있으면 먼저 `release-verified/<버전>/`로 복사한다.
 
