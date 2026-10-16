@@ -205,3 +205,13 @@ export function formatWhen(at: Date): string {
   const mi = String(kst.getUTCMinutes()).padStart(2, '0');
   return `${mm}월 ${dd}일 ${hh}:${mi}`;
 }
+
+/**
+ * ★2026-10-16 링크를 받지 않는 담당자 번호에 붙는 한 줄(설계서 docs/2026-10-16-agency-send-mobile-control-design.md §2 축 0).
+ * 승인 링크는 계정 MFA 번호와 같은 번호에만 간다. 나머지 번호는 로그인 승인 안내와 함께 누가 휴대폰으로 승인하는지 안다.
+ * 링크 받는 번호가 하나도 없으면 빈 문자열(로그인 안내만).
+ */
+export function buildNoLinkApproverLine(linkPhones: string[]): string {
+  const tails = (linkPhones || []).map((p) => String(p || '').replace(/\D/g, '').slice(-4)).filter((t) => t.length === 4);
+  return tails.length > 0 ? `승인은 끝자리 ${tails.join(', ')} 담당자가 휴대폰으로 합니다.` : '';
+}

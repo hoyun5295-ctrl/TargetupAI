@@ -10,6 +10,9 @@
  *   (조립하면 서버와 화면의 판정이 갈려 "묻지도 않고 막히는" 상태가 생긴다).
  *
  * 발송 경로가 여럿이라(직접발송·타겟발송·AI 오퍼레이터 승인) 화면마다 상태를 복제하지 않도록 훅 하나가 갖는다.
+ *
+ * ★2026-10-16 대행발송 링크 승인(로그인 없음)도 같은 훅을 쓴다 — 확인 요청만 바꿔 끼운다(`verifyRequest`).
+ *   기본값 = 로그인 토큰으로 `/api/auth/sender-auth/verify`. 링크 화면은 토큰 헤더로 `/api/agency-approve/sender-auth/verify`.
  */
 import { useRef, useState } from 'react';
 import type { SenderAuthReason, SenderAuthState } from '../components/SenderAuthModal';
@@ -22,7 +25,20 @@ export interface SenderAuthChallenge {
   reason: SenderAuthReason;
 }
 
-export function useSenderAuth() {
+/** 인증번호 확인 요청 — 서버 응답 몸통(`{ success, error, code }`)을 그대로 돌려준다 */
+export type SenderAuthVerifyRequest = (challengeId: string, code: string) => Promise<any>;
+
+const verifyWithLogin: SenderAuthVerifyRequest = async (challengeId, code) => {
+  const token = localStorage.getItem('token');
+  const res = await fetch('/api/auth/sender-auth/verify', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+    body: JSON.stringify({ challengeId, code }),
+  });
+  return res.json();
+};
+
+export function useSenderAuth(opts?: { verifyRequest?: SenderAuthVerifyRequest }) {
   const [challenge, setChallenge] = useState<SenderAuthChallenge | null>(null);
   const [code, setCode] = useState('');
   const [error, setError] = useState('');
@@ -61,15 +77,9 @@ export function useSenderAuth() {
     setBusy(true);
     setError('');
     try {
-      const token = localStorage.getItem('token');
-      const res = await fetch('/api/auth/sender-auth/verify', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ challengeId: challenge.challengeId, code }),
-      });
-      const data = await res.json();
-      if (!data.success) {
-        setError(data.error || '인증에 실패했습니다.');
+      const data = await (opts?.verifyRequest || verifyWithLogin)(challenge.challengeId, code);
+      if (!data?.success) {
+        setError(data?.error || '인증에 실패했습니다.');
         return;
       }
       const retry = retryRef.current;

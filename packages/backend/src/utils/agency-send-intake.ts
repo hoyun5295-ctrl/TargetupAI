@@ -86,15 +86,22 @@ export async function loadSendWindow(companyId: string, isAd: boolean): Promise<
  * 대표 번호도 함께 본다(고정 번호 방식은 그 번호 하나로 나간다).
  * @returns rowCallbacks = 수신자 행의 고객별 번호(중복 제거 · 저장 컬럼이 없으면 빈 배열) · missing = 미등록 번호
  */
+/**
+ * ★2026-10-16 수신자 행에 실린 고객별 회신번호(중복 제거). 하나라도 있으면 **수신자별 번호 방식**으로 나간다(워커 적재 판정).
+ * 승인의 발신 인증 키(3.5)도 이 판정 하나를 쓴다 — 발송 방식과 다른 번호를 인증하지 않게(설계서 2026-10-16 최종 검증 7).
+ */
+export async function loadRequestRowCallbacks(requestId: string): Promise<string[]> {
+  if (!(await hasAgencyColumn(pool, 'callback', 'agency_send_recipients'))) return [];
+  return (await query(
+    `SELECT DISTINCT callback FROM agency_send_recipients WHERE request_id = $1::uuid AND callback IS NOT NULL`,
+    [requestId],
+  )).rows.map((r: any) => String(r.callback));
+}
+
 export async function findUnregisteredRequestCallbacks(req: {
   id: string; company_id: string; created_by: string | null; callback_number: string | null;
 }): Promise<{ rowCallbacks: string[]; missing: string[] }> {
-  const rowCallbacks = await hasAgencyColumn(pool, 'callback', 'agency_send_recipients')
-    ? (await query(
-        `SELECT DISTINCT callback FROM agency_send_recipients WHERE request_id = $1::uuid AND callback IS NOT NULL`,
-        [req.id],
-      )).rows.map((r: any) => String(r.callback))
-    : [];
+  const rowCallbacks = await loadRequestRowCallbacks(req.id);
   const primary = normalizePhone(String(req.callback_number || ''));
   const toVerify = [...new Set([...rowCallbacks, ...(primary ? [primary] : [])])];
   if (toVerify.length === 0) return { rowCallbacks, missing: [] };

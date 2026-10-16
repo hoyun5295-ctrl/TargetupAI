@@ -15,17 +15,58 @@
  * ⛔ 승인의 기준은 행 수정 번호(revision) CAS다(★2026-08-23 Codex 2R high). 링크 경로도
  *   화면과 똑같이 "담당자가 본 revision"을 받아 CAS를 지난다.
  * ⛔ 화면 경로는 회사 범위(company_id)를 잠금 SELECT와 UPDATE 양쪽에 건다.
+ *
+ * ★2026-10-16 승인 = 발송 결정이라 **발신 인증(전송자격인증 3.5)** 을 이 함수가 건다(설계서 docs/2026-10-16-agency-send-mobile-control-design.md §2 축 0).
+ *   입구가 둘(로그인 화면 · 담당자 링크)이어도 게이트는 여기 하나다. 순서가 곧 안전이다:
+ *   ① 사전 읽기 → ② 링크면 승인 계정 판정(토큰 번호 = 계정 MFA 번호) → ③ **승인 가능 판정**(안 되면 인증번호 문자를 보내지 않는다)
+ *   → ④ `checkSenderAuthGate`(BEGIN **앞** · 인증번호 문자는 외부 호출이라 잠금을 쥔 채 부르지 않는다) → ⑤ BEGIN · 잠금 · 재판정.
+ *   인증 키는 발송과 같은 판정(수신자 회신번호가 하나라도 있으면 계정 축 `*`).
+ *   링크 승인은 승인 계정을 approved_by 에 남긴다(종전 NULL · 이력 `by`).
  */
-import { pool } from '../config/database';
+import { pool, query } from '../config/database';
 import { checkApproval } from './agency-send-state';
 import { triggerAgencySendDispatch } from './agency-send-worker';
-import { agencyManagerPhones } from './agency-send-link';
+import { agencyManagerPhones, resolveLinkApprovers } from './agency-send-link';
+import { loadRequestRowCallbacks } from './agency-send-intake';
+import { checkSenderAuthGate, isSenderAuthEnforced, SENDER_AUTH_NOTICE, type SenderAuthGate } from './sender-auth';
 
 export type ApproveVia = 'screen' | 'link';
 
 export type ApproveOutcome =
   | { ok: true; row: any }
-  | { ok: false; status: number; error: string; code?: string };
+  | {
+      ok: false; status: number; error: string; code?: string;
+      /** 403 SENDER_AUTH_REQUIRED 일 때만 — 라우트가 `senderAuthRejection` 몸통으로 바꿔 준다 */
+      senderAuth?: Extract<SenderAuthGate, { ok: false }>;
+    };
+
+/** 승인 판정 실패를 응답으로(사전 판정 · 잠금 아래 재판정이 같은 규칙) */
+function approvalRejection(check: { code?: string; error?: string }, status: string): ApproveOutcome {
+  // ★Codex 적대 2R: FOR UPDATE 직렬화 뒤에는 "동시 승인의 패자"가 여기로 온다(이미 approved라
+  //   상태 판정에서 걸린다). 그 경우는 종전 계약대로 409 CONFLICT로 답한다 — 중복 클릭·응답
+  //   유실 재시도가 400(승인 불가 상태)과 409(이미 처리됨)를 다르게 읽는다.
+  if (check.code === 'NOT_APPROVABLE' && ['approved', 'final_testing', 'queued'].includes(String(status))) {
+    return { ok: false, status: 409, error: '이미 처리된 접수입니다. 화면을 새로 고쳐 주세요.', code: 'CONFLICT' };
+  }
+  return { ok: false, status: 400, error: check.error || '지금은 승인할 수 없습니다.', code: check.code };
+}
+
+function approvalCheckOf(row: any, revision: number) {
+  // ⛔ `final_test_at`을 함께 넘긴다(★2026-08-23(2)) — 당일 접수 건은 접수 검사가 곧 당일 검사라
+  //   재검사가 없다. 그런 건에 2시간을 요구하면 하지도 않을 검사를 이유로 승인을 막는다.
+  return checkApproval(
+    {
+      status: row.status,
+      revision: Number(row.revision),
+      requestedAt: new Date(row.requested_at),
+      finalTestedAt: row.final_test_at ? new Date(row.final_test_at) : null,
+    },
+    revision,
+    new Date(),
+  );
+}
+
+const LINK_INVALID: ApproveOutcome = { ok: false, status: 404, error: '유효하지 않거나 만료된 주소입니다.' };
 
 export async function approveAgencyRequestTx(opts: {
   requestId: string;
@@ -33,9 +74,11 @@ export async function approveAgencyRequestTx(opts: {
   revision: number;
   /** 화면 경로의 회사 범위. 링크 경로는 토큰이 접수를 지목한다 */
   companyId?: string | null;
-  /** 로그인 승인 = 사용자 id. 링크 승인 = null */
+  /** 로그인 승인 = 사용자 id. 링크 승인 = null(승인 계정은 이 함수가 토큰 번호로 판정해 채운다) */
   approvedBy: string | null;
   via: ApproveVia;
+  /** ★2026-10-16 발신 인증 세션 판정 재료(IP 대역 · 브라우저) — 라우트가 넘긴다 */
+  req?: { ip?: string; headers?: any };
   /**
    * 링크 경로의 권한 재료. 잠금 아래에서 다시 검증한다:
    *   phone이 **지금도** 담당자 목록에 있어야 하고, contentVersion이 **지금 문안 버전**이어야 한다
@@ -46,12 +89,48 @@ export async function approveAgencyRequestTx(opts: {
   if (opts.via === 'link' && !opts.link) {
     return { ok: false, status: 400, error: '승인 정보가 올바르지 않습니다.' };
   }
+
+  const scope = opts.companyId ? ' AND company_id = $2::uuid' : '';
+  const params: any[] = opts.companyId ? [opts.requestId, opts.companyId] : [opts.requestId];
+
+  // ① 사전 읽기(잠금 없음) — 인증번호 문자를 보낼지 정하는 재료. 최종 판정은 아래 잠금 구간이 다시 한다.
+  const pre = await query(`SELECT * FROM agency_send_requests WHERE id = $1::uuid${scope}`, params);
+  if (pre.rows.length === 0) return { ok: false, status: 404, error: '접수를 찾을 수 없습니다.' };
+  const preRow = pre.rows[0];
+
+  // ② 링크 = 토큰 번호가 지금도 담당자이고 · 문안 버전이 지금 것이고 · 그 번호의 승인 계정이 있어야 한다
+  let approverUserId: string | null = opts.approvedBy;
+  if (opts.link) {
+    if (!agencyManagerPhones(preRow).includes(opts.link.phone)
+      || Number(preRow.content_version) !== Number(opts.link.contentVersion)) return LINK_INVALID;
+    approverUserId = (await resolveLinkApprovers(preRow)).get(opts.link.phone) || null;
+    if (!approverUserId) return LINK_INVALID;
+  }
+
+  // ③ 승인할 수 없는 건에는 인증번호를 보내지 않는다(문자 비용 · 의미 없는 인증)
+  const preCheck = approvalCheckOf(preRow, opts.revision);
+  if (!preCheck.ok) return approvalRejection(preCheck, String(preRow.status));
+
+  // ④ 발신 인증(3.5) — 잠금을 쥐기 전에. 스위치가 꺼져 있으면 게이트는 DB 를 건드리지 않고 통과한다.
+  if (approverUserId) {
+    const useIndividualCallback = isSenderAuthEnforced()
+      ? (await loadRequestRowCallbacks(String(preRow.id))).length > 0
+      : false;
+    const gate = await checkSenderAuthGate({
+      req: opts.req || {},
+      userId: approverUserId,
+      companyId: String(preRow.company_id),
+      callback: preRow.callback_number,
+      useIndividualCallback,
+      recipientCount: Number(preRow.recipient_count || 0),
+    });
+    if (!gate.ok) return { ok: false, status: 403, error: SENDER_AUTH_NOTICE, code: 'SENDER_AUTH_REQUIRED', senderAuth: gate };
+  }
+
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
 
-    const scope = opts.companyId ? ' AND company_id = $2::uuid' : '';
-    const params: any[] = opts.companyId ? [opts.requestId, opts.companyId] : [opts.requestId];
     const r = await client.query(`SELECT * FROM agency_send_requests WHERE id = $1::uuid${scope} FOR UPDATE`, params);
     if (r.rows.length === 0) {
       await client.query('ROLLBACK');
@@ -60,35 +139,20 @@ export async function approveAgencyRequestTx(opts: {
     const row = r.rows[0];
 
     // 링크 권한 재검증(잠금 아래) — 담당자에서 빠진 번호·다듬어진 문안의 옛 링크는 여기서 끝난다
+    // ★2026-10-16 승인 계정도 같은 트랜잭션에서 다시 본다(그 사이 강등·비활성·번호 변경 = 인증한 계정과 다르면 무효)
     if (opts.link) {
       if (!agencyManagerPhones(row).includes(opts.link.phone)
-        || Number(row.content_version) !== Number(opts.link.contentVersion)) {
+        || Number(row.content_version) !== Number(opts.link.contentVersion)
+        || (await resolveLinkApprovers(row, client)).get(opts.link.phone) !== approverUserId) {
         await client.query('ROLLBACK');
-        return { ok: false, status: 404, error: '유효하지 않거나 만료된 주소입니다.' };
+        return LINK_INVALID;
       }
     }
 
-    // ⛔ `final_test_at`을 함께 넘긴다(★2026-08-23(2)) — 당일 접수 건은 접수 검사가 곧 당일 검사라
-    //   재검사가 없다. 그런 건에 2시간을 요구하면 하지도 않을 검사를 이유로 승인을 막는다.
-    const check = checkApproval(
-      {
-        status: row.status,
-        revision: Number(row.revision),
-        requestedAt: new Date(row.requested_at),
-        finalTestedAt: row.final_test_at ? new Date(row.final_test_at) : null,
-      },
-      opts.revision,
-      new Date(),
-    );
+    const check = approvalCheckOf(row, opts.revision);
     if (!check.ok) {
       await client.query('ROLLBACK');
-      // ★Codex 적대 2R: FOR UPDATE 직렬화 뒤에는 "동시 승인의 패자"가 여기로 온다(이미 approved라
-      //   상태 판정에서 걸린다). 그 경우는 종전 계약대로 409 CONFLICT로 답한다 — 중복 클릭·응답
-      //   유실 재시도가 400(승인 불가 상태)과 409(이미 처리됨)를 다르게 읽는다.
-      if (check.code === 'NOT_APPROVABLE' && ['approved', 'final_testing', 'queued'].includes(String(row.status))) {
-        return { ok: false, status: 409, error: '이미 처리된 접수입니다. 화면을 새로 고쳐 주세요.', code: 'CONFLICT' };
-      }
-      return { ok: false, status: 400, error: check.error || '지금은 승인할 수 없습니다.', code: check.code };
+      return approvalRejection(check, String(row.status));
     }
 
     const updated = await client.query(
@@ -99,8 +163,8 @@ export async function approveAgencyRequestTx(opts: {
           AND status IN ('awaiting_approval','reapproval') AND revision = $3
         RETURNING *`,
       opts.companyId
-        ? [opts.approvedBy, opts.requestId, opts.revision, opts.companyId]
-        : [opts.approvedBy, opts.requestId, opts.revision],
+        ? [approverUserId, opts.requestId, opts.revision, opts.companyId]
+        : [approverUserId, opts.requestId, opts.revision],
     );
     if (updated.rows.length === 0) {
       await client.query('ROLLBACK');
@@ -113,7 +177,7 @@ export async function approveAgencyRequestTx(opts: {
       [opts.requestId, JSON.stringify({
         revision: opts.revision,
         via: opts.via,
-        ...(opts.approvedBy ? { by: opts.approvedBy } : {}),
+        ...(approverUserId ? { by: approverUserId } : {}),
         ...(opts.link?.phone ? { phone: opts.link.phone } : {}),
         ...(opts.link?.ip ? { ip: opts.link.ip } : {}),
         ...(opts.link?.ua ? { ua: String(opts.link.ua).slice(0, 200) } : {}),

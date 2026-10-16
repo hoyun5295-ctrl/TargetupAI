@@ -351,12 +351,20 @@ export async function verifySenderAuthChallenge(params: {
   // ⛔ 성공 기록은 한 문장 안에서 조건과 함께 남긴다 (Codex 적대검토 high)
   //   조회와 기록이 갈라져 있으면, 그 사이에 다른 요청이 코드를 잠그거나 폐기해도
   //   정답 요청이 무조건 verified_at을 찍어 **없던 인증이 생긴다.**
+  // ★2026-10-16 Codex 적대 1R high — 세션 환경(IP·브라우저)은 **인증번호를 확인한 요청**의 것으로 같은 문장에서 덮는다.
+  //   쿨다운 안 재요청은 같은 challenge 를 돌려주므로 발급 환경이 남으면, 발급을 일으킨 다른 사람(전달받은 대행 링크)이
+  //   번호 주인의 확인으로 인증 없이 통과한다. 발급 환경은 감사 로그 sender_auth_challenge 에 따로 남아 있다.
   const updated = await query(
     `UPDATE sender_auth_challenges
-        SET verified_at = NOW(), consumed_at = NOW()
+        SET verified_at = NOW(), consumed_at = NOW(), ip_address = $3, user_agent = $4
       WHERE id = $1 AND consumed_at IS NULL AND expires_at > NOW() AND attempts < $2
       RETURNING id`,
-    [params.challengeId, SENDER_AUTH_MAX_ATTEMPTS]
+    [
+      params.challengeId,
+      SENDER_AUTH_MAX_ATTEMPTS,
+      params.req?.ip || '',
+      String(params.req?.headers?.['user-agent'] || ''),
+    ]
   );
   if ((updated.rows?.length || 0) === 0) return { status: 'expired' };
 
@@ -369,6 +377,24 @@ export async function verifySenderAuthChallenge(params: {
   });
 
   return { status: 'ok', callbackNumber: String(row.callback_number || '') };
+}
+
+/**
+ * ★2026-10-16 인증번호 확인 응답 — 로그인 경로(`/api/auth/sender-auth/verify`)와 대행 링크 경로
+ * (`/api/agency-approve/sender-auth/verify`)가 같은 문구·코드를 쓰도록 CT가 만든다(라우트마다 적으면 한쪽만 바뀐다).
+ */
+export function senderAuthVerifyResponse(verdict: SenderAuthVerdict): { status: number; body: any } {
+  if (verdict.status === 'ok') return { status: 200, body: { success: true, callback: verdict.callbackNumber } };
+  if (verdict.status === 'expired') {
+    return { status: 400, body: { success: false, code: 'SENDER_AUTH_EXPIRED', error: '인증번호가 만료되었습니다. 재발송을 눌러주세요.' } };
+  }
+  if (verdict.status === 'locked') {
+    return { status: 400, body: { success: false, code: 'SENDER_AUTH_LOCKED', error: '인증 시도 횟수를 넘었습니다. 재발송을 눌러주세요.' } };
+  }
+  return {
+    status: 400,
+    body: { success: false, code: 'SENDER_AUTH_INVALID', error: `인증번호가 일치하지 않습니다. (남은 시도 ${verdict.remaining}회)` },
+  };
 }
 
 /**

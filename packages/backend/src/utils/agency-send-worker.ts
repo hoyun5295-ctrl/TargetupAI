@@ -28,8 +28,9 @@ import { refineForSpam } from './agency-send-refine';
 import {
   buildApprovedExpiredNotify, buildExpiredNotify, buildFinalBlockedNotify, buildPassedNotify,
   buildQueueFailedNotify, buildReapprovalNotify, buildTestFailedNotify, buildTooTightNotify, formatWhen, shortLabel,
+  buildNoLinkApproverLine,
 } from './agency-send-notify';
-import { agencyManagerPhones, buildShortAgencyApproveUrl } from './agency-send-link';
+import { agencyManagerPhones, buildShortAgencyApproveUrl, resolveLinkApprovers } from './agency-send-link';
 import {
   isApprovalCurrent, isApprovalExpired, isFinalTestDue, isLockStale, isQueueDue, isSameKstDay,
   isAttemptStuck, ATTEMPT_STUCK_AFTER_DUE_MINUTES,
@@ -285,16 +286,33 @@ async function freshLinkFields(requestId: string): Promise<any | null> {
 /**
  * 담당자별 승인 문장 목록 — 번호마다 자기 번호로 서명한 **단축** 승인 주소를 싣는다(★2026-08-26(4) Harold).
  * 단축은 번호당 DB INSERT 1회(담당자 최대 10명)라 순차로 충분하다. 단축이 실패한 번호는 원본 주소를 받는다.
+ *
+ * ★2026-10-16 승인 주소는 **승인 계정이 있는 번호에만** 싣는다(설계서 docs/2026-10-16-agency-send-mobile-control-design.md §2 축 0).
+ *   승인 계정 = 그 번호가 접수 계정 또는 관리자 한 명의 MFA 번호인 계정(`resolveLinkApprovers` · 링크 열기·승인 잠금 구간과 같은 함수).
+ *   나머지 번호는 로그인 승인 안내 + 「승인은 끝자리 XXXX 담당자가 휴대폰으로 합니다」(테스트 문자는 그대로 받는다).
+ *   ⛔ 판정 조회가 실패하면 링크 없이 보낸다 — 링크는 선택 입구이고(PC 승인은 그대로), 실패를 던지면 1차 검사 통과 건이 되돌아간다.
  */
 async function buildApproveTexts(
   phones: string[],
-  compose: (approveUrl: string) => string,
+  compose: (approveUrl?: string) => string,
   companyId: string,
   requestId: string,
   linkRow: any,
+  createdBy: string | null,
 ): Promise<Array<{ phone: string; text: string }>> {
+  let approvers = new Map<string, string>();
+  try {
+    approvers = await resolveLinkApprovers({ company_id: companyId, created_by: createdBy, manager_phones: phones });
+  } catch (err: any) {
+    console.warn(`${LOG} 승인 계정 판정 실패(링크 없이 안내) request=${requestId}:`, err?.message);
+  }
+  const noLinkLine = buildNoLinkApproverLine(Array.from(approvers.keys()));
   const out: Array<{ phone: string; text: string }> = [];
   for (const phone of phones) {
+    if (!approvers.has(phone)) {
+      out.push({ phone, text: [compose(undefined), noLinkLine].filter(Boolean).join('\n') });
+      continue;
+    }
     const approveUrl = await buildShortAgencyApproveUrl(
       companyId, requestId, phone, Number(linkRow.content_version), new Date(linkRow.requested_at),
     );
@@ -563,7 +581,7 @@ async function runFirstTest(onlyRequestId?: string): Promise<void> {
         text: buildPassedNotify({ label, whenText, count, originalWhenText, spellCount }),
         perPhoneTexts: await buildApproveTexts(managerPhonesOf(linkRow), (approveUrl) =>
           buildPassedNotify({ label, whenText, count, originalWhenText, approveUrl, spellCount }),
-          row.company_id, row.id, linkRow),
+          row.company_id, row.id, linkRow, row.created_by ?? null),
       });
       console.log(`${LOG} 1차 검사 통과 request=${row.id} rounds=${rounds}`);
     } catch (err: any) {
@@ -713,7 +731,7 @@ async function finalTestRow(row: any, now: Date): Promise<void> {
         text: buildReapprovalNotify({ label, whenText: formatWhen(new Date(target.requested_at)), count: reappCount }),
         perPhoneTexts: await buildApproveTexts(managerPhonesOf(reappRow), (approveUrl) =>
           buildReapprovalNotify({ label, whenText: formatWhen(new Date(reappRow.requested_at)), count: reappCount, approveUrl }),
-          target.company_id, target.id, reappRow),
+          target.company_id, target.id, reappRow, target.created_by ?? null),
       });
       return;
     }
@@ -1036,7 +1054,7 @@ async function dispatchAttempt(
       text: buildReapprovalNotify({ label, whenText: formatWhen(new Date(row.requested_at)), count: unappCount }),
       perPhoneTexts: await buildApproveTexts(managerPhonesOf(unappRow), (approveUrl) =>
         buildReapprovalNotify({ label, whenText: formatWhen(new Date(unappRow.requested_at)), count: unappCount, approveUrl }),
-        row.company_id, row.id, unappRow),
+        row.company_id, row.id, unappRow, row.created_by ?? null),
     });
     return;
   }

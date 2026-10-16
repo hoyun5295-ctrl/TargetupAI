@@ -371,9 +371,12 @@ describe('⑦ 화면 계약(상태 사전 · 로그인 복귀 · 공개 고지)'
   it('무로그인 화면 3종 공통 고지 · 확인 화면 토큰은 # 뒤에서 읽고 본문으로만 보낸다', () => {
     const notice = '이 화면은 입력을 받지 않습니다. 로그인은 hanjul.ai 로그인 화면에서만 합니다.';
     for (const f of ['pages/AgencyApprovePage.tsx', 'pages/ChargeApprovePage.tsx', 'pages/PlannerConfirmPage.tsx']) {
-      expect(front(f), f).toContain(notice);
+      expect(front(f), f).toContain('로그인은 hanjul.ai 로그인 화면에서만');
       expect(front(f), f).not.toContain('로그인·비밀번호·결제정보를 묻는 비슷한 화면은 가짜');
     }
+    for (const f of ['pages/ChargeApprovePage.tsx', 'pages/PlannerConfirmPage.tsx']) expect(front(f), f).toContain(notice);
+    // ★2026-10-16 대행 승인 화면은 발신 인증(3.5) 인증번호를 받는다 — 「입력을 받지 않습니다」는 거짓이 되므로 인증번호 고지로 바꾼다
+    expect(front('pages/AgencyApprovePage.tsx')).toContain('인증번호는 이 화면에만 입력합니다.');
     const page = front('pages/PlannerConfirmPage.tsx');
     expect(page).toContain('useApproveToken()');
     expect(page).toContain("'/api/marketing-planner/confirm-view', { body: { token }, auth: false }");

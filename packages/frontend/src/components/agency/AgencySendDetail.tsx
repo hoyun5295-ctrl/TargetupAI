@@ -15,6 +15,8 @@ import AgencyEventLog from './AgencyEventLog';
 import SmsCharsetNotice from '../SmsCharsetNotice';
 import { hasUnsupportedSmsChars, SMS_CHARSET_BLOCK_MESSAGE } from '../../utils/smsSafeChars';
 import { withMmsImageNames } from '../../utils/mmsImage';
+import SenderAuthModal from '../SenderAuthModal';
+import { useSenderAuth } from '../../hooks/useSenderAuth';
 import {
   CUI_BTN_DANGER, CUI_BTN_GHOST, CUI_BTN_OUTLINE, CUI_BTN_PRIMARY, CUI_CELL_META, CUI_DANGER_BOX, CUI_DANGER_ICON,
   CUI_DANGER_TEXT, CUI_HINT, CUI_INFO, CUI_INFO_ICON, CUI_INFO_TEXT, CUI_INPUT, CUI_LABEL, CUI_MODAL,
@@ -37,6 +39,7 @@ interface Props {
 
 export default function AgencySendDetail({ requestId, onClose, onChanged }: Props) {
   const toast = useToast();
+  const senderAuth = useSenderAuth();
   const [req, setReq] = useState<AgencySendRequest | null>(null);
   const [events, setEvents] = useState<AgencySendEvent[]>([]);
   const [loading, setLoading] = useState(false);
@@ -135,6 +138,9 @@ export default function AgencySendDetail({ requestId, onClose, onChanged }: Prop
       apply(await approveAgencyRequest(req.id, req.revision));
       toast.success('승인했습니다. 요청한 시각에 나가도록 예약됩니다.');
     } catch (e: any) {
+      // ★2026-10-16 승인 = 발송 결정이라 발신 인증(3.5)을 서버가 요구할 수 있다 — 인증 창을 띄우고, 통과하면 이 승인을 다시 보낸다
+      //   (판정은 서버 소유 · 화면은 응답 코드만 본다 · 설계서 docs/2026-10-16-agency-send-mobile-control-design.md §2 축 0)
+      if (senderAuth.handleResponse(e?.data, () => { void doApprove(); })) return;
       toast.error(e?.message || '승인하지 못했습니다.');
       await refresh();
     } finally { setBusy(false); }
@@ -370,6 +376,21 @@ export default function AgencySendDetail({ requestId, onClose, onChanged }: Prop
           )}
         </div>
       </div>
+
+      {/* ★2026-10-16 승인의 발신 인증(3.5) — 통과하면 눌렀던 승인이 그대로 이어진다 */}
+      {senderAuth.state && (
+        <SenderAuthModal
+          state={senderAuth.state}
+          code={senderAuth.code}
+          onCodeChange={senderAuth.setCode}
+          error={senderAuth.error}
+          busy={senderAuth.busy}
+          onVerify={senderAuth.verify}
+          onResend={senderAuth.resend}
+          onProceed={senderAuth.cancel}
+          onCancel={senderAuth.cancel}
+        />
+      )}
 
       {/* ★2026-08-28(2) 받는 사람별 미리보기 — 별도 모달(portal). 부모 모달의 overflow-hidden에 잘리지 않는다 */}
       {req && (

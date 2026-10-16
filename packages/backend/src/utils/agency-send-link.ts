@@ -20,6 +20,7 @@
  *   랜딩 주소도 fragment(#t=)뿐이다(★0830 확정 · query ?t=는 JS 전에 접근 로그로 전송돼 페이지도 안 받는다).
  */
 import jwt from 'jsonwebtoken';
+import { query } from '../config/database';
 import { normalizePhone } from './normalize-phone';
 import { createShortUrl } from './short-url';
 
@@ -137,4 +138,84 @@ export function agencyManagerPhones(row: any): string[] {
     out.push(phone);
   }
   return out;
+}
+
+/** 승인 계정 후보 한 행(users) — 판정에 쓰는 칸만 */
+export interface LinkApproverCandidate { id: string; company_id?: string | null; user_type: string | null; mfa_phone: string | null }
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/**
+ * ★2026-10-16 직원 회사 명단(ENV `AGENCY_STAFF_COMPANY_IDS` · 쉼표 구분 회사 id).
+ * Harold 1016: 고객사에 넘기기 전 직원이 업체 접수에 자기 번호를 담당자로 넣어 승인·발송을 검증한다.
+ * 그 직원 계정이 속한 회사를 여기 적는다. ⛔ 전 회사(`*`)는 받지 않는다 — 아무 회사 계정이나 남의 접수를 승인하게 된다.
+ * 비면 직원 승인 없음(축 0 그대로).
+ */
+export function agencyStaffCompanyIds(env: string | undefined = process.env.AGENCY_STAFF_COMPANY_IDS): string[] {
+  // 소문자로 맞춘다(★Codex 3R) — PG 는 uuid 를 소문자로 돌려주므로 대문자 ENV 면 직원 비교가 어긋난다
+  return String(env || '').split(',').map((s) => s.trim().toLowerCase()).filter((s) => UUID_RE.test(s));
+}
+
+/**
+ * ★2026-10-16 (순수) 담당자 번호 → 링크 승인 계정(설계서 docs/2026-10-16-agency-send-mobile-control-design.md §2 축 0).
+ *
+ * 승인 링크는 **계정 MFA 번호와 같은 담당자 번호에만** 간다. 승인할 때 그 계정으로 발신 인증(3.5) 인증번호를 받으므로,
+ * 링크를 받는 번호와 인증번호를 받는 번호가 같은 계정에 속해야 한다. 링크 열기만으로는 소지 증명이 안 된다(카톡 전달).
+ *   - 접수 계정(created_by)의 MFA 번호와 같으면 접수 계정
+ *   - 아니면 접수 회사 관리자(DB 어휘 `admin` · JWT 어휘 company_admin 아님 · 불변 11) 중 **정확히 하나**일 때 그 관리자
+ *   - 아니면 직원 회사(`agencyStaffCompanyIds`) 계정 중 정확히 하나(여럿이면 그중 관리자 정확히 하나)일 때 그 직원
+ *     (★1016 Harold · 직원 검증 · 인증번호는 직원 자기 계정 MFA 번호로 · 고객사가 본인 번호를 등록하면 위 두 줄이 먼저다)
+ *   - 그 밖(일반 사용자 · 둘 이상 · 없음 · 다른 고객사 계정)은 링크 없음
+ * 후보는 이미 활성 · 비시스템으로 거른 목록이다(`resolveLinkApprovers`).
+ */
+export function pickLinkApprovers(
+  phones: string[], createdBy: string | null | undefined, users: LinkApproverCandidate[],
+  scope: { companyId: string; staffCompanyIds?: string[] },
+): Map<string, string> {
+  const out = new Map<string, string>();
+  const staff = new Set(scope.staffCompanyIds || []);
+  const isAdmin = (u: LinkApproverCandidate) => String(u.user_type || '') === 'admin';
+  const onlyOne = (list: LinkApproverCandidate[]) => (list.length === 1 ? list[0] : undefined);
+  const byPhone = new Map<string, LinkApproverCandidate[]>();
+  for (const u of users || []) {
+    const p = normalizePhone(String(u?.mfa_phone || ''));
+    if (!p || p.length < 10) continue;
+    if (!byPhone.has(p)) byPhone.set(p, []);
+    byPhone.get(p)!.push(u);
+  }
+  for (const raw of phones || []) {
+    const phone = normalizePhone(String(raw || ''));
+    const owners = byPhone.get(phone) || [];
+    const creator = createdBy ? owners.find((u) => String(u.id) === String(createdBy)) : undefined;
+    if (creator) { out.set(phone, String(creator.id)); continue; }
+    const admin = onlyOne(owners.filter((u) => isAdmin(u) && String(u.company_id) === String(scope.companyId)));
+    if (admin) { out.set(phone, String(admin.id)); continue; }
+    const staffOwners = owners.filter((u) => staff.has(String(u.company_id)));
+    const member = onlyOne(staffOwners) || onlyOne(staffOwners.filter(isAdmin));
+    if (member) out.set(phone, String(member.id));
+  }
+  return out;
+}
+
+/**
+ * ★2026-10-16 이 접수의 링크 승인 계정(담당자 번호 → 계정 id). **발급(워커) · 링크 열기 · 승인 잠금 구간** 세 곳이
+ * 이 함수 하나를 부른다 — 강등·비활성·번호 변경 뒤에도 7일 링크가 살아 있지 않게 쓰는 순간마다 다시 본다.
+ * `db` 를 넘기면 그 연결(트랜잭션)에서 읽는다.
+ */
+export async function resolveLinkApprovers(
+  row: { company_id: string; created_by?: string | null; manager_phones?: any; manager_phone?: any },
+  db: { query: (text: string, params?: any[]) => Promise<any> } = { query },
+): Promise<Map<string, string>> {
+  const phones = agencyManagerPhones(row);
+  if (phones.length === 0 || !row?.company_id) return new Map();
+  const staffCompanyIds = agencyStaffCompanyIds();
+  const r = await db.query(
+    `SELECT id, company_id, user_type, mfa_phone FROM users
+      WHERE is_active = true AND COALESCE(is_system, false) = false AND mfa_phone IS NOT NULL
+        AND ((company_id = $1::uuid AND (id = $2::uuid OR user_type = 'admin')) OR company_id = ANY($3::uuid[]))`,
+    [row.company_id, row.created_by || null, staffCompanyIds],
+  );
+  return pickLinkApprovers(phones, row.created_by || null, r.rows as LinkApproverCandidate[], {
+    companyId: String(row.company_id), staffCompanyIds,
+  });
 }

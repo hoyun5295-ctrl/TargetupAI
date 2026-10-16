@@ -102,6 +102,8 @@ export default function SenderAuthModal({
             <input
               type="text"
               inputMode="numeric"
+              // ★2026-10-16 같은 폰으로 온 인증 문자를 키보드가 바로 채운다(대행 링크 승인 · 모든 발송 경로 공통)
+              autoComplete="one-time-code"
               autoFocus
               maxLength={6}
               value={code}

@@ -26,6 +26,7 @@ import { buildSlotPlan, extractAgencyVars } from '../utils/agency-send-vars';
 import { AGENCY_PREVIEW_LIMIT, buildRenderedSamples, measureAgencyMaxSmsBytes, AGENCY_SMS_BYTES_MAX_CANDIDATES } from '../utils/agency-send-preview';
 import { SMS_MAX_BYTES } from '../utils/message-byte';
 import { approveAgencyRequestTx } from '../utils/agency-send-approve';
+import { senderAuthRejection } from '../utils/sender-auth';
 import { cancelAgencyRequestTx } from '../utils/agency-send-cancel';
 import { ATTEMPT_LOCK_PREFIX, attemptBlocksChange, attemptIdleSql } from '../utils/agency-send-worker';
 // ★2026-09-25 맞춤법 검사(설계 docs/2026-09-25-agency-spell-check-design.md · 자동 교정 0 · 결과는 문안 버전에 묶인다)
@@ -686,14 +687,17 @@ router.post('/:id/approve', async (req: Request, res: Response) => {
     //   시각만 바뀐 건은 상태도 버전도 그대로라, 담당자가 **못 본 시각**으로 옛 승인이 통과한다.
     // ★2026-08-25 판정·전이·이력·워커 기동은 승인 효과 CT 하나가 소유한다(utils/agency-send-approve.ts).
     //   입구가 둘이어도(이 로그인 경로 · 담당자 링크 경로) 같은 함수를 지난다.
+    // ★2026-10-16 승인 = 발송 결정이라 발신 인증(3.5)을 승인 CT 가 건다(막히면 403 · 직접발송과 같은 몸통 · 화면 인증 창)
     const outcome = await approveAgencyRequestTx({
       requestId: req.params.id,
       revision: Number(req.body?.revision),
       companyId: auth.companyId,
       approvedBy: auth.userId,
       via: 'screen',
+      req: { ip: req.ip, headers: req.headers },
     });
     if (!outcome.ok) {
+      if (outcome.senderAuth) return res.status(403).json(senderAuthRejection(outcome.senderAuth));
       return res.status(outcome.status).json({ success: false, error: outcome.error, ...(outcome.code ? { code: outcome.code } : {}) });
     }
     return res.json({ success: true, request: await toPublicWithKinds(outcome.row) });

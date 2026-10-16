@@ -490,6 +490,24 @@ describe('인증번호 검증', () => {
     expect(verdict).toEqual({ status: 'expired' });
   });
 
+  /**
+   * ★2026-10-16 Codex 적대 1R high(대행 링크 승인) — 세션의 환경은 **인증번호를 확인한 요청**의 것이어야 한다.
+   *   쿨다운 안 재요청은 같은 challenge 를 돌려주므로, A(전달받은 링크)가 발급을 일으키고 B(번호 주인)가 확인하면
+   *   발급 환경(A)이 남아 A 가 인증번호 없이 통과했다. 성공 기록이 확인 요청의 IP·브라우저를 같은 문장에서 덮는다.
+   */
+  it('★성공 기록은 확인한 요청의 IP·브라우저를 세션 환경으로 남긴다(발급 환경이 아니라)', async () => {
+    wireRow(LIVE);
+    const VERIFIER: any = { ip: '211.36.140.7', headers: { 'user-agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0)' } };
+    await verifySenderAuthChallenge({ challengeId: 'x', userId: USER, code: '123456', req: VERIFIER });
+    const success = q.mock.calls.find(([sql]: any[]) =>
+      /UPDATE sender_auth_challenges/i.test(String(sql)) && /verified_at\s*=\s*NOW\(\)/i.test(String(sql)));
+    const sql = String(success[0]);
+    expect(sql, '세션 환경을 확인 요청으로 덮지 않는다').toMatch(/ip_address\s*=\s*\$\d/);
+    expect(sql).toMatch(/user_agent\s*=\s*\$\d/);
+    expect(success[1]).toContain('211.36.140.7');
+    expect(success[1]).toContain('Mozilla/5.0 (iPhone; CPU iPhone OS 18_0)');
+  });
+
   it('★코드가 맞으면 verified_at을 찍는다 — 이것이 유지 시간 세션의 근거다', async () => {
     wireRow(LIVE);
     const verdict = await verifySenderAuthChallenge({ challengeId: 'x', userId: USER, code: '123456', req: REQ });

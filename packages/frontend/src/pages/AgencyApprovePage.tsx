@@ -5,6 +5,8 @@
  * 폰에서 열리는 것이 기본이므로 모바일 우선 한 컬럼으로 그린다.
  *
  * ⛔ 이 화면이 하는 일은 승인 하나뿐이다. 문안 수정·시각 변경·취소는 로그인 화면 소유.
+ * ★2026-10-16 승인은 발신 인증(3.5) 인증번호를 받을 수 있다(서버가 요구할 때만 · 링크 번호 = 계정 MFA 번호).
+ *   흐름은 로그인 화면과 같은 훅(`useSenderAuth`) · 확인만 토큰 헤더 경로로 바꿔 끼운다. 설계서 2026-10-16 §2 축 0.
  * ⛔ 서버가 주는 것만 그린다(수신자 명단 없음). 판정(approvable·409)은 전부 서버가 한다.
  * ⛔ 문구에 줄표 0. 톤 = 인디고 콘솔 라이트(CUI_ 계열 색).
  */
@@ -16,6 +18,9 @@ import {
 import { CUI_BTN_PRIMARY, CUI_PILL_BASE, CUI_PILL_TONE } from '../utils/console-ui';
 import { buildAdSubjectFront } from '../utils/formatDate';
 import { useApproveToken } from '../hooks/useApproveToken';
+import { useSenderAuth } from '../hooks/useSenderAuth';
+import SenderAuthModal from '../components/SenderAuthModal';
+import { verifyAgencyLinkSenderAuth } from '../components/agency/agency-send-api';
 
 interface ApprovalView {
   label: string;
@@ -55,6 +60,8 @@ export default function AgencyApprovePage() {
   tokenRef.current = token;
   const [state, setState] = useState<ViewState>({ kind: 'loading' });
   const [approving, setApproving] = useState(false);
+  // ★2026-10-16 발신 인증 — 확인은 이 화면의 토큰으로(로그인 없음)
+  const senderAuth = useSenderAuth({ verifyRequest: (challengeId, code) => verifyAgencyLinkSenderAuth(token, challengeId, code) });
 
   // ⛔ 토큰은 API에 **헤더로만** 보낸다 — URL에 실으면 서버 요청 로그에 승인권이 평문으로 남는다.
   //   랜딩 주소의 토큰은 위에서 캡처 즉시 지웠다(C6) — 새로고침은 안내 문자의 주소로 다시 연다.
@@ -97,6 +104,8 @@ export default function AgencyApprovePage() {
         setState({ kind: 'done', request: data.request });
         return;
       }
+      // ★2026-10-16 인증번호 요구 — 창을 띄우고, 통과하면 같은 토큰일 때만 이 승인을 다시 보낸다(재진입으로 토큰이 바뀌었으면 버린다)
+      if (senderAuth.handleResponse(data, () => { if (tokenRef.current === token) void approve(); })) return;
       // 그 사이 내용이 바뀌었거나 이미 처리됐다 — 서버가 준 최신 상태를 다시 보여준다
       await load(data?.error || '내용이 바뀌어 다시 불러왔습니다. 확인 후 승인해 주세요.');
     } catch {
@@ -122,7 +131,7 @@ export default function AgencyApprovePage() {
       <main className="flex-1 w-full max-w-[560px] mx-auto px-5 py-6">{children}</main>
       <footer className="w-full max-w-[560px] mx-auto px-5 pb-6 space-y-1">
         <p className="text-[11px] text-neutral-400">한줄로 대행발송 · 이 화면은 안내 문자를 받은 담당자용입니다</p>
-        <p className="text-[11px] text-neutral-400">이 화면은 입력을 받지 않습니다. 로그인은 hanjul.ai 로그인 화면에서만 합니다.</p>
+        <p className="text-[11px] text-neutral-400">인증번호는 이 화면에만 입력합니다. 로그인은 hanjul.ai 로그인 화면에서만 하며, 전화나 메시지로 인증번호를 묻지 않습니다.</p>
       </footer>
     </div>
   );
@@ -157,6 +166,7 @@ export default function AgencyApprovePage() {
   const done = state.kind === 'done' || r.status === 'approved' || r.status === 'final_testing' || r.status === 'queued';
 
   return (
+    <>
     <Shell>
       {state.kind === 'ready' && state.notice && (
         <div className="mb-4 flex gap-2.5 p-3.5 rounded-lg border border-amber-200 bg-amber-50">
@@ -251,5 +261,22 @@ export default function AgencyApprovePage() {
         )}
       </div>
     </Shell>
+
+      {/* ★2026-10-16 승인의 발신 인증(3.5) — 끝자리 표시 · 같은 폰 문자 자동 채움 · 통과하면 승인이 이어진다
+          Shell 밖에 둔다(Shell 은 렌더마다 새 컴포넌트라 안에 두면 글자 입력마다 입력칸이 다시 마운트된다) */}
+      {senderAuth.state && (
+        <SenderAuthModal
+          state={senderAuth.state}
+          code={senderAuth.code}
+          onCodeChange={senderAuth.setCode}
+          error={senderAuth.error}
+          busy={senderAuth.busy}
+          onVerify={senderAuth.verify}
+          onResend={senderAuth.resend}
+          onProceed={senderAuth.cancel}
+          onCancel={senderAuth.cancel}
+        />
+      )}
+    </>
   );
 }
