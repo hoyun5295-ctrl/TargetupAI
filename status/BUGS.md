@@ -55,6 +55,14 @@
 
 ## 2) 활성 버그
 
+### 🟡 B-1016-3 1016 이미지 스튜디오 구조체크·회의·Codex 에서 짚은 범위 밖 기존 결함(등재만 · 착수 판단 = Harold님) · 2026-10-16
+- ① `backend/src/app.ts:545` `/api/image-studio` 에 서버 쪽 요금제 검사가 없다(화면 PlanGate 뿐 · PlanGate 는 기능별이 아니라 AI Operator 접근 하나만 본다).
+- ② `routes/image-studio.ts` `/generate` · `/edit` = 화면이 떠나도 서버는 성공 뒤 차감한다 · 멱등키를 성공 뒤 서버가 새로 만들어 응답 유실 뒤 재시도 = 새 생성·새 차감(구조체크 후보 3 · 기능 문서 §8). 운영 nginx `/api/` 응답 대기 시간 미실측(짧으면 생성 응답이 중간에 끊기고 크레딧만 빠진다).
+- ③ `routes/image-studio.ts` `/save` 가 임시 파일을 영구 위치로 옮긴(소비) 뒤 `cdp_assets` 등재 → 등재가 실패하면 같은 임시 그림으로 다시 저장할 수 없고 라이브러리 목록 복구도 안 된다(Codex 1016 1R [범위 밖]).
+- ④ `CatalogPageModal` 쪽 사진 자리에 문구가 새겨진 스튜디오 포스터를 넣으면 쪽 합성 제목과 글자가 이중으로 들어간다.
+- ⑤ 체험 회사(FREE + AI Operator 체험)가 스튜디오 발사대·결과 카드에서 이메일로 넘어가면 이메일 편집기 저장에서 403(`EmailCampaignsPage` 잠금 처리 없음 · DM 은 잠금 화면). 발사대에 원래 있던 경로.
+- 경위 = [설계서](../docs/2026-10-16-image-studio-picker-channel-design.md) §7.
+
 ### 🟡 B-1016-2 대행발송 승인에 발신 인증(3.5)이 없다 · 링크 열기 = 승인(대행발송 개편 축 0 · 접수 `cmval4qz81ivjjnn4w1xkcp93` + 직원 의견서 · 10/26 법 시행 · P1) · 코드 완료 · Codex 적대 4R approve · 배포 완료 1016 21시(ENV 프로세스 확인 · 66 동기화 보류) · 운영 실측 대기
 - **원인(코드)**: 직접발송·캠페인·AI 운영자 승인은 0912 에 3.5 게이트를 지났는데, 대행발송 승인(`agency-send /:id/approve` · 문자 링크 `/api/agency-approve/approve`)은 「우리 직원 승인 축」으로 잘못 분류돼 빠졌다(전송자격인증 원장 925줄). 실제 승인자는 고객사 담당자이고 승인이 곧 발송 결정이다. 링크는 열기만으로 승인돼 카톡 전달·유출이 곧 발송이었다.
 - **처방**: [설계서](../docs/2026-10-16-agency-send-mobile-control-design.md) §2 축 0 — 비토 구조체크 → 브레인스토밍 5역할 수렴. ① 게이트는 승인 CT `approveAgencyRequestTx` 안, BEGIN 앞 하나(사전 판정 실패 시 인증번호 문자 0) ② 인증 키 = 발송과 같은 판정 `loadRequestRowCallbacks` ③ 승인 링크 = 계정 MFA 번호와 같은 담당자 번호에만(접수 계정 우선 · 관리자 정확히 한 명) · 판정 `resolveLinkApprovers` 하나를 발급 · 링크 열기 · 잠금 구간이 부른다 ④ 링크 화면 인증번호 확인 `POST /api/agency-approve/sender-auth/verify`(응답 문구 = `senderAuthVerifyResponse` · 로그인 경로와 같은 CT) ⑤ 링크 승인도 `approved_by` = 승인 계정 ⑥ 링크 없는 번호의 안내 문자 = 로그인 승인 안내 + 「승인은 끝자리 XXXX 담당자가 휴대폰으로 합니다」 ⑦ 화면 = PC 상세 · 모바일 링크 화면 인증 창(같은 훅 `useSenderAuth` · `verifyRequest` 주입 · 입력칸 `one-time-code`). ⑧ 직원 검증 단계(★1016 Harold): 고객사에 넘기기 전 직원이 업체 접수에 자기 번호를 담당자로 넣어 승인한다 → 접수 계정·접수 회사 관리자 다음 순위로 **직원 회사(ENV `AGENCY_STAFF_COMPANY_IDS`) 계정 정확히 하나**(여럿이면 그중 관리자 하나)도 승인 계정이 된다. 인증번호는 직원 자기 MFA 번호로. 고객사 담당자가 자기 계정에 휴대폰 번호를 등록하면 고객사 쪽이 먼저다.

@@ -79,6 +79,7 @@ export default function CatalogPageModal({
         title={`${def.icon} ${def.label}`}
         subtitle={`${def.desc} · 사진 ${def.photos}장`}
         size="md"
+        closeOnEsc={studioAt === null /* ★ 2026-10-16 위에 뜬 스튜디오 창의 Esc 가 이 창까지 닫지 않게(Esc 는 창마다 전역으로 듣는다) */}
         footer={<ModalButton variant="primary" onClick={make} disabled={busy}>{busy ? '만드는 중...' : '쪽 만들어 넣기'}</ModalButton>}
       >
         <div className="space-y-3">

@@ -4,51 +4,44 @@ import { ChevronRight } from 'lucide-react';
  * ImageStudioPage — P4 AI 이미지 스튜디오 (2026-07-19 v2 · 템플릿 갤러리 재정의)
  *
  * 흐름(Harold 확정): 템플릿(=서버 은닉 프롬프트) 선택 → 원본 이미지 넣기(누끼 자동) → 간단 문구 입력
- *   → 생성 AI가 [제품 + 어울리는 배경 + 지정 문구 타이포]를 한 장의 완성 포스터로 렌더
- *   → 인앱(3:4)·모바일DM(1:1)·이메일(16:9)·MMS(≤300KB 자동) 사이즈로 각각 제작 → 라이브러리 저장.
+ *   → 생성 AI가 [제품 + 어울리는 배경 + 지정 문구 타이포]를 한 장의 완성 포스터(3:4)로 렌더 → 결과 카드에서 채널로.
  *  - 문구 = 고객사가 직접 지정한 텍스트만 이미지에 새김(AI 임의 혜택 생성 없음).
  *  - temp 산출물 = fetch+blob 표시(인증 endpoint) · 7일 후 자동 삭제.
- *  - 모델명 UI 노출 금지 / native dialog 금지(useToast).
+ *  - 모델명 UI 노출 금지 / native dialog 금지(useToast · ConfirmModal).
+ *
+ * ★ 2026-10-16 개편(설계서 docs/2026-10-16-image-studio-picker-channel-design.md)
+ *   - 고르기 = 공용 TemplatePicker(DM 삽입 창과 같은 부품) · hidden 감싸개로 숨겨 보던 쪽을 지킨다(언마운트 금지).
+ *   - 만들기 = 공용 StudioMake(DM 삽입 창과 같은 부품).
+ *   - 결과 카드에서 채널로 바로: 저장(이미 저장됐으면 생략) → 성공했을 때만 편집기로. 저장해도 카드를 지우지 않는다.
  */
-import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
-  ArrowLeft, ImagePlus, Loader2, ShoppingBag, Upload, Wand2,
-  Check, Save, PenLine, ChevronLeft, Sparkles, FolderOpen,
-  Layers, Smartphone, Mail, X, Search,
+  Loader2, Wand2, Check, Save, ChevronLeft, Sparkles, FolderOpen,
+  Layers, Smartphone, Mail, X, type LucideIcon,
 } from 'lucide-react';
-import ZoneSegmented from '../components/zone/ZoneSegmented';
-import { goBackOr } from '../lib/scroll-restoration';
 import { putStudioDraft, STUDIO_INAPP_DRAFT_KEY, STUDIO_DM_DRAFT_KEY, STUDIO_EMAIL_DRAFT_KEY } from '../lib/studio-draft';
 import { useToast } from '../components/ToastProvider';
 import { useAuthStore } from '../stores/authStore';
-import MallProductPickerModal, { type PickedMallProduct } from '../components/dm/MallProductPickerModal';
 import AssetLibraryPickerModal from '../components/assets/AssetLibraryPickerModal';
+import ConfirmModal, { type ConfirmState } from '../components/ConfirmModal';
+import TemplatePicker, { type StudioTemplatePublic } from '../components/studio/TemplatePicker';
+import { useStudioMake, StudioMakeFields, TemplateExampleCard } from '../components/studio/StudioMake';
+import StudioWatermark from '../components/studio/StudioWatermark';
+import { saveStudioTemp, studioPost, type SavedStudioAsset } from '../lib/studio-api';
 
 const token = () => localStorage.getItem('token');
 const authFetch = (url: string, opts: RequestInit = {}) =>
   fetch(url, { ...opts, headers: { ...(opts.headers || {}), Authorization: `Bearer ${token()}` } });
-const postJson = async (url: string, body: any) => {
-  const r = await authFetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
-  const d = await r.json().catch(() => ({}));
-  return { r, d };
-};
-const won = (n: number) => `${Math.round(Number(n) || 0).toLocaleString()}원`;
 
-interface StudioTemplatePublic {
-  id: string; name: string; category: string; desc: string; accent: string;
-  /** ★ 2026-08-11 추천 용도 — "어떤 제품라인·행사에 쓰면 좋은가". desc가 그림이면 이쪽은 고르는 기준이다. */
-  useCase?: string;
-  /** ★ 2026-07-31 트랙 축 — 'product'(제품 포스터) / 'event'(행사 포스터·제품 없이 성립). 서버 미제공 시 product */
-  kind?: 'product' | 'event';
-  exampleUrl: string | null;
-  defaultTexts: { label?: string; title?: string; subtitle?: string };
-  /** 카드 목업 예시 카피(템플릿 무드별 실카피). */
-  sample?: { title: string; subtitle?: string };
-  /** ★ 2026-10-06 세부 카테고리(20종 이상 카테고리만 · 없으면 null) — 갤러리 걸러보기 축. */
-  sub?: string | null;
+interface Candidate {
+  tempId: string; url: string; blob: string | null; presetKey: string; title?: string;
+  /** ★ 2026-10-16 저장되면 카드에 남는다 · 채널 버튼은 이 주소로 바로 간다(다시 저장하지 않는다 · 두 번째 저장 = 409) */
+  saved?: SavedStudioAsset;
+  /** 저장 실패 표시 — storage_full = 정리 뒤 다시 저장 가능 · expired = 임시 그림 기간 만료 */
+  note?: 'storage_full' | 'expired';
 }
-interface Candidate { tempId: string; url: string; blob?: string; presetKey: string; title?: string }
+type LibAsset = { id: string; url: string; filename: string | null; bytes: number; channelSpec?: string | null };
 
 // ★ 2026-07-30 채널 축 폐기(Harold) — 생성 = 'poster' 단일(3:4·채널 무관·2크레딧). 완성 포스터는 인앱/DM/이메일 어디든 통짜 삽입.
 // ★ MMS 전용 생성 없음(Harold 확정 2026-07-19) — 항상 고품질 생성·저장, MMS는 발송 시 라이브러리 소재 자동 변환.
@@ -58,18 +51,23 @@ const presetLabel = (key: string) =>
 // 소재 channel_spec → 짧은 한글 라벨(용도 배지·캡션). 백엔드 channelLabelKo 미러.
 const specKo = (s?: string | null) => (s === 'poster' ? '포스터' : s === 'inapp-poster' ? '인앱' : s === 'dm' ? 'DM' : s === 'email' ? '이메일' : s === 'mms' ? 'MMS' : s === 'free' ? '자유' : '소재');
 
-// ★ 2026-07-21 스크린샷 유출 억제 워터마크(CSS 오버레이) — 화면 표시본에만. 발송물 원본 무손(오버레이는 DOM).
-//   대각선 반복 텍스트 = 회사명·사용자. 유출돼도 출처 추적. pointer-events:none·select-none로 조작·선택 차단.
-function StudioWatermark({ text }: { text: string }) {
-  if (!text) return null;
+// ★ 2026-10-16 채널 버튼 목록 하나 — 발사대 창과 결과 카드가 같은 목록을 그린다.
+//   인앱메시지 = 회사 관리자 전용(공유 화면 · LESSONS_FRONTEND 2026-07-21 역할 게이트). 판정은 ChannelButtons 한 곳.
+interface StudioChannel { key: 'inapp' | 'dm' | 'email'; label: string; draftKey: string; path: string; adminOnly?: boolean; icon: LucideIcon; box: string; iconColor: string }
+const STUDIO_CHANNELS: StudioChannel[] = [
+  { key: 'inapp', label: '인앱메시지 만들기', draftKey: STUDIO_INAPP_DRAFT_KEY, path: '/inapp-messages', adminOnly: true, icon: Layers, box: 'border-rose-300 bg-rose-50 hover:bg-rose-100', iconColor: 'text-rose-700' },
+  { key: 'dm', label: '모바일 DM 만들기', draftKey: STUDIO_DM_DRAFT_KEY, path: '/dm-builder', icon: Smartphone, box: 'border-amber-300 bg-amber-50 hover:bg-amber-100', iconColor: 'text-amber-700' },
+  { key: 'email', label: '이메일 만들기', draftKey: STUDIO_EMAIL_DRAFT_KEY, path: '/email-campaigns', icon: Mail, box: 'border-cyan-300 bg-cyan-50 hover:bg-cyan-100', iconColor: 'text-cyan-700' },
+];
+function ChannelButtons({ isAdmin, disabled, onPick }: { isAdmin: boolean; disabled?: boolean; onPick: (ch: StudioChannel) => void }) {
   return (
-    <div aria-hidden className="pointer-events-none select-none absolute inset-0 overflow-hidden z-10">
-      <div className="absolute inset-[-60%] flex flex-wrap content-center justify-center gap-x-6 gap-y-5 -rotate-[28deg]">
-        {Array.from({ length: 80 }).map((_, i) => (
-          <span key={i} className="whitespace-nowrap text-slate-900 text-[11px] font-semibold" style={{ opacity: 0.16, textShadow: '0 1px 2px rgba(0,0,0,0.35)' }}>{text}</span>
-        ))}
-      </div>
-    </div>
+    <>
+      {STUDIO_CHANNELS.filter((ch) => !ch.adminOnly || isAdmin).map((ch) => (
+        <button key={ch.key} type="button" onClick={() => onPick(ch)} disabled={disabled} className={`flex items-center gap-2 px-3.5 py-3 rounded-xl border ${ch.box} text-xs font-semibold text-slate-800 transition disabled:opacity-40`}>
+          <ch.icon className={`w-4 h-4 ${ch.iconColor}`} /> {ch.label}
+        </button>
+      ))}
+    </>
   );
 }
 
@@ -79,37 +77,20 @@ export default function ImageStudioPage() {
   const navigate = useNavigate();
   const toast = useToast();
   const authUser = useAuthStore((s) => s.user);
-  // 워터마크 추적 텍스트 = 회사명 · 사용자(로그인ID). 유출 시 출처 식별.
-  const wmText = useMemo(() => {
-    const co = authUser?.company?.name || '';
-    const who = authUser?.name || authUser?.loginId || '';
-    return [co, who].filter(Boolean).join(' · ') || '한줄로';
-  }, [authUser]);
-  // ★ 인앱메시지 = 회사 관리자 전용(공유 화면). 사용자에겐 발사대에서 인앱 버튼 숨김.
+  // ★ 인앱메시지 = 회사 관리자 전용(공유 화면). 사용자에겐 채널 버튼에서 인앱을 숨김.
   const isCompanyAdmin = authUser?.userType === 'company_admin' || authUser?.userType === 'super_admin';
 
   const [ready, setReady] = useState(true);
   const [stage, setStage] = useState<Stage>('gallery');
   const [busyMsg, setBusyMsg] = useState('');
-
-  // 템플릿 — 카테고리 우선 탐색(카테고리 목록 → 템플릿 목록 2단)
-  const [templates, setTemplates] = useState<StudioTemplatePublic[]>([]);
-  const [category, setCategory] = useState<string | null>(null);
   const [template, setTemplate] = useState<StudioTemplatePublic | null>(null);
-  // ★ 2026-07-31 트랙 축 — 제품 포스터(누끼) / 행사 포스터(멤버십데이·오픈·시즌 행사, 제품 없이 성립)
-  const [trackKind, setTrackKind] = useState<'product' | 'event'>('product');
-  // ★ 2026-10-06 (Harold) 세부 카테고리 칩 · 템플릿 검색 — 502종을 카테고리 한 겹으로는 못 고른다.
-  //   sub = '' 이면 카테고리 전체. 검색어가 있으면 트랙 · 카테고리와 무관하게 전부에서 찾는다.
-  const [subOrder, setSubOrder] = useState<Record<string, string[]>>({});
-  const [sub, setSub] = useState('');
-  const [query, setQuery] = useState('');
-  // ★ 2026-08-09 행사 포스터 문구 위치(위/중앙/아래) — 기본 위(Harold 재확정: 갤러리 예시와 같은 구도로 시작, 중앙·아래는 선택). 제품 포스터는 템플릿 기본 배치 유지라 미전달.
-  const [textPosition, setTextPosition] = useState<'top' | 'center' | 'bottom'>('top');
+  const make = useStudioMake(template);
+  const [confirm, setConfirm] = useState<ConfirmState | null>(null);
 
-  // 내 라이브러리(저장 소재) — 갤러리 상단 폴더. 소재 클릭 = 채널 발사대(인앱/DM/이메일/MMS 변환).
-  const [assetAction, setAssetAction] = useState<{ id: string; url: string; filename: string | null; bytes: number; channelSpec?: string | null } | null>(null);
+  // 내 라이브러리(저장 소재) — 갤러리 첫 화면 폴더. 소재 클릭 = 채널 발사대(인앱/DM/이메일).
+  const [assetAction, setAssetAction] = useState<LibAsset | null>(null);
   const [libManageOpen, setLibManageOpen] = useState(false); // 전체 보기·관리(검색·삭제) — 픽커 재사용
-  const [libAssets, setLibAssets] = useState<{ id: string; url: string; filename: string | null; bytes: number; channelSpec?: string | null }[]>([]);
+  const [libAssets, setLibAssets] = useState<LibAsset[]>([]);
   const [libUsage, setLibUsage] = useState<{ usedBytes: number; limitBytes: number } | null>(null);
   const loadLibrary = useCallback(async () => {
     try {
@@ -121,17 +102,6 @@ export default function ImageStudioPage() {
       }
     } catch { /* 표시 전용 — 실패 무시 */ }
   }, []);
-
-  // 상품·누끼
-  const [product, setProduct] = useState<PickedMallProduct | null>(null);
-  const [cutoutTempId, setCutoutTempId] = useState<string | null>(null);
-  const [cutoutBlob, setCutoutBlob] = useState<string | null>(null);
-  const [pickerOpen, setPickerOpen] = useState(false);
-  const fileRef = useRef<HTMLInputElement>(null);
-
-  // 문구·힌트 (채널 선택 없음 — 단일 포스터 생성)
-  const [texts, setTexts] = useState({ label: '', title: '', subtitle: '' });
-  const [hint, setHint] = useState('');
 
   // 결과
   const [candidates, setCandidates] = useState<Candidate[]>([]);
@@ -149,167 +119,20 @@ export default function ImageStudioPage() {
 
   useEffect(() => {
     authFetch('/api/image-studio/status').then((r) => r.json()).then((d) => setReady(!!d?.ready)).catch(() => setReady(true));
-    authFetch('/api/image-studio/templates').then((r) => r.json()).then((d) => {
-      setTemplates(Array.isArray(d?.templates) ? d.templates : []);
-      setSubOrder(d?.subOrder && typeof d.subOrder === 'object' ? d.subOrder : {});
-    }).catch(() => setTemplates([]));
     loadLibrary();
     return () => { objectUrls.current.forEach((u) => URL.revokeObjectURL(u)); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const categories = useMemo(() => {
-    const map = new Map<string, { count: number; accents: string[] }>();
-    for (const t of templates) {
-      if ((t.kind || 'product') !== trackKind) continue;
-      const e = map.get(t.category) || { count: 0, accents: [] };
-      e.count++;
-      if (e.accents.length < 3) e.accents.push(t.accent);
-      map.set(t.category, e);
-    }
-    return Array.from(map.entries()).map(([name, v]) => ({ name, ...v }));
-  }, [templates, trackKind]);
-  // 검색 — 공백을 지우고 대소문자를 무시해 이름 · 카테고리 · 세부 · 추천 용도 · 설명 · 예시 문구에서 찾는다.
-  //   순서 = 카테고리 · 세부 이름이 맞는 것 → 템플릿 이름이 맞는 것 → 설명 · 용도 · 예시 문구만 맞는 것(같은 순위 안은 카탈로그 순서).
-  const searchKey = query.replace(/\s+/g, '').toLowerCase();
-  const searchResults = useMemo(() => {
-    if (!searchKey) return [];
-    const has = (s?: string | null) => (s || '').replace(/\s+/g, '').toLowerCase().includes(searchKey);
-    const rank = (t: StudioTemplatePublic) => {
-      if (has(t.category) || has(t.sub)) return 0;
-      if (has(t.name)) return 1;
-      if (has(t.useCase) || has(t.desc) || has(t.sample?.title) || has(t.sample?.subtitle)) return 2;
-      return -1;
-    };
-    return templates
-      .map((t) => ({ t, r: rank(t) }))
-      .filter((x) => x.r >= 0)
-      .sort((a, b) => a.r - b.r)
-      .map((x) => x.t);
-  }, [templates, searchKey]);
-  const inCategory = useMemo(
-    () => (category ? templates.filter((t) => (t.kind || 'product') === trackKind && t.category === category) : []),
-    [templates, category, trackKind],
-  );
-  // 세부 칩 = 서버가 준 순서 · 그 카테고리에 실제 있는 것만 · 맨 앞 「전체」.
-  const subItems = useMemo(() => {
-    const order = (category && subOrder[category]) || [];
-    const items = order
-      .map((s) => ({ id: s, label: s, count: inCategory.filter((t) => t.sub === s).length }))
-      .filter((it) => it.count > 0);
-    return items.length ? [{ id: '', label: '전체', count: inCategory.length }, ...items] : [];
-  }, [category, subOrder, inCategory]);
-  const visibleTemplates = useMemo(
-    () => (searchKey ? searchResults : sub ? inCategory.filter((t) => t.sub === sub) : inCategory),
-    [searchKey, searchResults, sub, inCategory],
-  );
-
-  // ★ 2026-08-11 갤러리 페이징 (Harold 지시) — 한 페이지 10개, 카드를 키워 예시가 실제로 보이게 한다.
-  //   카탈로그가 249종이라 한 카테고리가 30종을 넘는다. 나열하면 카드를 줄여야 하고, 줄이면 예시를 못 본다.
-  const TPL_PAGE_SIZE = 10;
-  const [tplPage, setTplPage] = useState(1);
-  const tplTotalPages = Math.max(1, Math.ceil(visibleTemplates.length / TPL_PAGE_SIZE));
-  const pagedTemplates = useMemo(
-    () => visibleTemplates.slice((tplPage - 1) * TPL_PAGE_SIZE, tplPage * TPL_PAGE_SIZE),
-    [visibleTemplates, tplPage],
-  );
-  // ⛔ 페이지 초기화는 **카테고리·트랙을 바꿀 때만**이다(Harold 지시).
-  //   템플릿을 골랐다가 돌아올 때 1페이지로 되돌리면, 3페이지에서 고른 사람은 매번 그 페이지를 다시 찾아가야 한다.
-  //   stage 전환은 이 의존성에 없으므로 갤러리로 돌아와도 보던 페이지가 그대로 남는다.
-  useEffect(() => { setTplPage(1); }, [category, trackKind, sub, searchKey]);
-  // 카테고리 · 트랙을 바꾸면 세부는 「전체」로 — 다른 카테고리에 없는 세부가 남아 빈 목록이 뜨는 것을 막는다.
-  useEffect(() => { setSub(''); }, [category, trackKind]);
-  // 목록이 줄어 현재 페이지가 비면(예: 검색·데이터 갱신) 마지막 페이지로 당긴다 — 빈 화면 방지.
-  useEffect(() => { if (tplPage > tplTotalPages) setTplPage(tplTotalPages); }, [tplPage, tplTotalPages]);
-
-  // 템플릿·상품 변경 시 문구 자동 채움 ({productName}/{salePrice} = 몰 실데이터 — 사용자 수정 가능)
-  const fillTokens = useCallback((s?: string) => (s || '')
-    .replace(/\{productName\}/g, product?.name || '')
-    .replace(/\{salePrice\}/g, product?.salePrice ? won(product.salePrice) : ''), [product]);
-  useEffect(() => {
-    if (!template) return;
-    setTexts({
-      label: fillTokens(template.defaultTexts.label),
-      title: fillTokens(template.defaultTexts.title),
-      subtitle: fillTokens(template.defaultTexts.subtitle),
-    });
-  }, [template, product, fillTokens]);
-
-  // ── 상품 준비: 인제스트/업로드 → 누끼 ─────────────────────────
-  const prepareProduct = async (imageUrl: string | null, fromUpload?: File) => {
-    setBusyMsg('상품 이미지 준비 중...');
-    try {
-      let sourceTempId: string | null = null;
-      if (fromUpload) {
-        const fd = new FormData();
-        fd.append('image', fromUpload);
-        const r = await authFetch('/api/image-studio/upload-product', { method: 'POST', body: fd });
-        const d = await r.json().catch(() => ({}));
-        if (!r.ok || !d?.success) throw new Error(d?.error || '업로드 실패');
-        sourceTempId = d.source.tempId;
-      } else if (imageUrl) {
-        const { r, d } = await postJson('/api/image-studio/ingest-product', { url: imageUrl });
-        if (!r.ok || !d?.success) throw new Error(d?.error || '상품 이미지를 가져오지 못했어요');
-        sourceTempId = d.source.tempId;
-      }
-      if (!sourceTempId) throw new Error('상품 이미지가 없습니다');
-
-      setBusyMsg('제품 누끼 따는 중... (배경 자동 제거)');
-      const { r: r2, d: d2 } = await postJson('/api/image-studio/remove-bg', { sourceTempId });
-      if (!r2.ok || !d2?.success) throw new Error(d2?.error || '누끼에 실패했어요');
-      setCutoutTempId(d2.cutout.tempId);
-      setCutoutBlob(await loadBlob(`/api/image-studio/temp/${d2.cutout.tempId}`));
-      toast.success('제품 준비 완료. 원본 그대로 포스터에 들어갑니다');
-    } catch (e: any) {
-      toast.error(e?.message || '상품 준비에 실패했어요');
-    } finally {
-      setBusyMsg('');
-    }
-  };
-
-  const onPickMall = (products: PickedMallProduct[]) => {
-    const p = products[0];
-    if (!p) return;
-    setProduct(p);
-    setCutoutTempId(null); setCutoutBlob(null);
-    if (p.imageUrl) prepareProduct(p.imageUrl);
-    else toast.error('이 상품은 이미지가 없어요. 다른 상품을 선택해주세요');
-  };
-  const onUpload = (e: ChangeEvent<HTMLInputElement>) => {
-    const f = e.target.files?.[0];
-    if (!f) return;
-    setProduct(null);
-    setCutoutTempId(null); setCutoutBlob(null);
-    prepareProduct(null, f);
-    e.target.value = '';
-  };
-
   // ── 완성 포스터 생성 (템플릿 + 누끼 + 지정 문구, 2크레딧·1장) ──
   const generate = async () => {
     if (!template) { toast.error('템플릿을 먼저 골라주세요'); return; }
     if (!ready) { toast.error('이미지 스튜디오가 준비 중입니다'); return; }
-    const useKey = GENERATE_PRESET_KEY;
-    setBusyMsg('완성 포스터를 만드는 중... (약 20~30초)');
-    try {
-      const { r, d } = await postJson('/api/image-studio/generate', {
-        templateId: template.id, presetKey: useKey,
-        texts, userHint: hint || null, cutoutTempId,
-        textPosition: (template.kind || 'product') === 'event' ? textPosition : null,
-      });
-      if (r.status === 402) { toast.error('크레딧이 부족합니다. 충전 후 다시 시도해주세요'); return; }
-      if (r.status === 409) { toast.error(d?.error || '다른 생성이 진행 중입니다'); return; }
-      if (!r.ok || !d?.success) throw new Error(d?.error || '생성에 실패했어요');
-      if (d.benefitNotice) toast.success(d.benefitNotice);
-      // ★ 2026-07-21 헤드라인을 candidate 스냅샷으로 — 저장 시 파일명(헤드라인_채널) 생성용(생성 시점 문구 고정)
-      const imgs: Candidate[] = (d.images || []).map((im: any) => ({ ...im, presetKey: im.presetKey || useKey, title: texts.title }));
-      for (const im of imgs) im.blob = await loadBlob(im.url);
-      setCandidates((prev) => [...imgs, ...prev]);
-      setStage('result');
-    } catch (e: any) {
-      toast.error(e?.message || '생성에 실패했어요');
-    } finally {
-      setBusyMsg('');
-    }
+    const r = await make.generate();
+    if (!r) return;
+    if (r.preview) objectUrls.current.push(r.preview);
+    setCandidates((prev) => [{ tempId: r.tempId, url: r.url, blob: r.preview, presetKey: GENERATE_PRESET_KEY, title: r.title }, ...prev]);
+    setStage('result');
   };
 
   // ── AI 수정 ──────────────────────────
@@ -318,11 +141,11 @@ export default function ImageStudioPage() {
   const editPoster = async (c: Candidate, instruction: string) => {
     setBusyMsg('AI가 포스터를 수정하는 중...');
     try {
-      const { r, d } = await postJson('/api/image-studio/edit', { tempId: c.tempId, instruction });
-      if (r.status === 402) { toast.error('크레딧이 부족합니다'); return; }
-      if (!r.ok || !d?.success) throw new Error(d?.error || '수정에 실패했어요');
-      const blob = await loadBlob(d.image.url);
-      setCandidates((prev) => [{ tempId: d.image.tempId, url: d.image.url, blob, presetKey: c.presetKey, title: c.title }, ...prev]);
+      const { status, ok, data } = await studioPost('/api/image-studio/edit', { tempId: c.tempId, instruction });
+      if (status === 402) { toast.error('크레딧이 부족합니다'); return; }
+      if (!ok) throw new Error(data?.error || '수정에 실패했어요');
+      const blob = await loadBlob(data.image.url);
+      setCandidates((prev) => [{ tempId: data.image.tempId, url: data.image.url, blob, presetKey: c.presetKey, title: c.title }, ...prev]);
       toast.success('수정 완료');
       setEditFor(null); setEditText('');
     } catch (e: any) {
@@ -332,34 +155,103 @@ export default function ImageStudioPage() {
     }
   };
 
-  // ── 저장 (MMS 트랙 = 서버가 ≤300KB 자동 압축) ─────────────────
-  const save = async (c: Candidate) => {
+  // ── 저장 (공용 saveStudioTemp · 저장 공간 가득 / 이미 저장됨을 DM 삽입 창과 같은 방식으로 가른다) ──
+  //   ★ 2026-10-16 저장해도 카드를 지우지 않는다(옛: 지워서 채널로 갈 재료가 사라졌다). 저장된 카드는 AI 수정을 숨긴다(저장이 임시 그림을 소비해 /edit 404).
+  const saveCandidate = async (c: Candidate): Promise<SavedStudioAsset | null> => {
+    if (c.saved) return c.saved;
+    const r = await saveStudioTemp(c.tempId, c.title);
+    if (r.ok) {
+      setCandidates((prev) => prev.map((x) => (x.tempId === c.tempId ? { ...x, saved: r.asset, note: undefined } : x)));
+      setEditFor((cur) => (cur === c.tempId ? null : cur));
+      return r.asset;
+    }
+    const note = r.code === 'STORAGE_FULL' ? 'storage_full' : r.code === 'EXPIRED' ? 'expired' : undefined;
+    if (note) setCandidates((prev) => prev.map((x) => (x.tempId === c.tempId ? { ...x, note } : x)));
+    toast.error(r.error);
+    return null;
+  };
+
+  const saveOnly = async (c: Candidate) => {
     setBusyMsg('라이브러리에 저장 중...');
     try {
-      const { r, d } = await postJson('/api/image-studio/save', { tempId: c.tempId, title: c.title });
-      if (r.status === 503 && d?.code === 'DB_MIGRATION_PENDING') { toast.error('라이브러리 준비 중. 운영자에게 문의해주세요'); return; }
-      if (r.status === 409) { toast.error(d?.error || '이미 저장됐어요'); return; }
-      if (!r.ok || !d?.success) throw new Error(d?.error || '저장에 실패했어요');
-      toast.success('라이브러리에 저장했어요. MMS 발송 시엔 첨부 창에서 자동 변환돼요');
-      setCandidates((prev) => prev.filter((x) => x.tempId !== c.tempId));
-      loadLibrary(); // 상단 라이브러리 폴더 즉시 갱신
-    } catch (e: any) {
-      toast.error(e?.message || '저장에 실패했어요');
+      if (await saveCandidate(c)) {
+        toast.success('라이브러리에 저장했어요. 위 버튼으로 바로 채널에 쓸 수 있어요');
+        loadLibrary();
+      }
     } finally {
       setBusyMsg('');
     }
   };
 
-  // ── 라이브러리 소재 발사대 — 채널 편집기 주입 / MMS 변환 ─────────
-  const launchChannel = (draftKey: string, path: string) => {
-    if (!assetAction) return;
-    putStudioDraft(draftKey, { imageUrl: assetAction.url, name: assetAction.filename });
-    navigate(path);
+  // ── 채널로 보내기 — 편집기가 초안을 1회 꺼내 쓴다(studio-draft · 맨 주소 = 딥링크면 받는 쪽이 초안을 건너뛴다) ──
+  const launch = (ch: StudioChannel, asset: { url: string; filename?: string | null }) => {
+    putStudioDraft(ch.draftKey, { imageUrl: asset.url, name: asset.filename || null });
+    navigate(ch.path);
   };
+  // 누른 카드를 먼저 저장 → 나머지를 차례로(병렬 금지 · 서버 용량 판정에 잠금이 없다) → 첫 실패에서 멈추고 이동하지 않는다.
+  const saveAndGo = async (c: Candidate, ch: StudioChannel, others: Candidate[]) => {
+    setBusyMsg('라이브러리에 저장 중...');
+    try {
+      const asset = await saveCandidate(c);
+      if (!asset) return;
+      for (const o of others) {
+        if (!(await saveCandidate(o))) return;
+      }
+      launch(ch, { url: asset.url, filename: c.title || null });
+    } finally {
+      setBusyMsg('');
+    }
+  };
+  // 확인 단계는 한 곳: 저장 안 한 다른 포스터가 있을 때만(이 화면을 떠나면 다시 볼 수 없다 · 되돌릴 수 없는 일).
+  const goChannel = (c: Candidate, ch: StudioChannel) => {
+    const others = candidates.filter((x) => x.tempId !== c.tempId && !x.saved && x.note !== 'expired');
+    if (!others.length) { void saveAndGo(c, ch, []); return; }
+    setConfirm({
+      mode: 'warning',
+      title: '저장하지 않은 포스터가 있어요',
+      description: `저장하지 않은 포스터 ${others.length}장은 이 화면을 떠나면 다시 볼 수 없어요.`,
+      confirmLabel: '모두 저장하고 이동',
+      onConfirm: () => saveAndGo(c, ch, others),
+      altLabel: '이것만 저장하고 이동',
+      onAlt: () => saveAndGo(c, ch, []),
+      cancelLabel: '머무르기',
+    });
+  };
+
   // ★ 2026-07-21 다운로드 제거(전 직원 요청 — 악용 소지). 소재는 한줄로 채널/발송으로만 활용, 파일 반출 차단.
   //   화면 표시본엔 워터마크 오버레이(스크린샷 유출 억제), 발송물은 원본 유지.
 
-  const busy = !!busyMsg;
+  const busy = !!busyMsg || !!make.busyMsg;
+  const overlayMsg = busyMsg || make.busyMsg;
+
+  // 0단계 — 내 라이브러리 폴더(저장 소재 띠) · 고르기 첫 화면에만(TemplatePicker rootExtra)
+  const libraryStrip = libAssets.length > 0 ? (
+    <section className="rounded-2xl border border-slate-200 bg-white p-4">
+      <div className="flex items-center justify-between mb-3">
+        <h2 className="text-sm font-bold flex items-center gap-2">
+          <FolderOpen className="w-4 h-4 text-violet-700" /> 내 라이브러리
+          <span className="text-[11px] text-slate-400 font-normal">
+            {libAssets.length}개{libUsage ? ` · ${(libUsage.usedBytes / 1048576).toFixed(1)}MB / ${(libUsage.limitBytes / 1073741824).toFixed(1)}GB` : ''}
+          </span>
+        </h2>
+        <button onClick={() => setLibManageOpen(true)} className="text-xs px-3 py-1.5 rounded-lg border border-slate-200 text-slate-500 hover:text-slate-900 hover:bg-slate-100">
+          전체 보기·관리
+        </button>
+      </div>
+      <div className="flex gap-2.5 overflow-x-auto pb-1">
+        {libAssets.slice(0, 14).map((a) => (
+          <button key={a.id} onClick={() => setAssetAction(a)} className="shrink-0 w-20 text-left group" title={a.filename || ''}>
+            <div className="relative rounded-lg overflow-hidden border border-slate-200 group-hover:border-violet-300 transition">
+              <img src={a.url} alt={a.filename || ''} loading="lazy" draggable={false} onContextMenu={(e) => e.preventDefault()} className="w-20 h-20 object-cover" />
+              {a.channelSpec && <span className="absolute top-1 left-1 text-[8px] px-1 py-px rounded bg-black/65 text-white/85 font-semibold">{specKo(a.channelSpec)}</span>}
+            </div>
+            {a.filename && <div className="mt-0.5 text-[9px] text-slate-400 truncate">{a.filename.replace(/\.[^.]+$/, '')}</div>}
+          </button>
+        ))}
+      </div>
+      <p className="text-[10px] text-slate-400 italic mt-2">Data source: 소재를 클릭하면 인앱·DM·이메일로 바로 만들거나 MMS로 변환할 수 있어요.</p>
+    </section>
+  ) : null;
 
   const studioSteps: Array<[Stage, string]> = [['gallery', '템플릿'], ['setup', '문구·상품'], ['result', '완성 포스터']];
   return (
@@ -385,307 +277,20 @@ export default function ImageStudioPage() {
       blocks={!ready ? [{ text: '이미지 스튜디오가 준비 중입니다. 잠시 후 다시 시도해주세요.' }] : []}
     >
       <div className="space-y-6">
-        {/* 0단계 — 내 라이브러리 폴더 (저장 소재 스트립) */}
-        {stage === 'gallery' && !category && !searchKey && libAssets.length > 0 && (
-          <section className="rounded-2xl border border-slate-200 bg-white p-4">
-            <div className="flex items-center justify-between mb-3">
-              <h2 className="text-sm font-bold flex items-center gap-2">
-                <FolderOpen className="w-4 h-4 text-violet-700" /> 내 라이브러리
-                <span className="text-[11px] text-slate-400 font-normal">
-                  {libAssets.length}개{libUsage ? ` · ${(libUsage.usedBytes / 1048576).toFixed(1)}MB / ${(libUsage.limitBytes / 1073741824).toFixed(1)}GB` : ''}
-                </span>
-              </h2>
-              <button onClick={() => setLibManageOpen(true)} className="text-xs px-3 py-1.5 rounded-lg border border-slate-200 text-slate-500 hover:text-slate-900 hover:bg-slate-100">
-                전체 보기·관리
-              </button>
-            </div>
-            <div className="flex gap-2.5 overflow-x-auto pb-1">
-              {libAssets.slice(0, 14).map((a) => (
-                <button key={a.id} onClick={() => setAssetAction(a)} className="shrink-0 w-20 text-left group" title={a.filename || ''}>
-                  <div className="relative rounded-lg overflow-hidden border border-slate-200 group-hover:border-violet-300 transition">
-                    <img src={a.url} alt={a.filename || ''} loading="lazy" draggable={false} onContextMenu={(e) => e.preventDefault()} className="w-20 h-20 object-cover" />
-                    {a.channelSpec && <span className="absolute top-1 left-1 text-[8px] px-1 py-px rounded bg-black/65 text-white/85 font-semibold">{specKo(a.channelSpec)}</span>}
-                  </div>
-                  {a.filename && <div className="mt-0.5 text-[9px] text-slate-400 truncate">{a.filename.replace(/\.[^.]+$/, '')}</div>}
-                </button>
-              ))}
-            </div>
-            <p className="text-[10px] text-slate-400 italic mt-2">Data source: 소재를 클릭하면 인앱·DM·이메일로 바로 만들거나 MMS로 변환할 수 있어요.</p>
-          </section>
-        )}
+        {/* 1단계 — 템플릿 고르기. ⛔ 언마운트하지 않고 숨긴다(보던 쪽 유지 · 감싸개에 display 클래스 금지). */}
+        <div hidden={stage !== 'gallery'}>
+          <TemplatePicker onPick={(t) => { setTemplate(t); setStage('setup'); }} rootExtra={libraryStrip} />
+        </div>
 
-        {/* ★ 2026-10-06 템플릿 검색(Harold) — 제품 · 행사 · 모든 카테고리를 한 번에 찾는다. 지우면 보던 화면으로 돌아간다. */}
-        {stage === 'gallery' && (
-          <div className="relative mb-4">
-            <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
-            <input
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              placeholder="템플릿 찾기 (예: 오픈, 립, 국물, 멤버십)"
-              aria-label="템플릿 찾기"
-              className="w-full h-10 pl-9 pr-9 rounded-xl border border-slate-200 bg-white text-sm text-slate-900 placeholder-slate-400 focus:outline-none focus:border-violet-300"
-            />
-            {query && (
-              <button type="button" onClick={() => setQuery('')} aria-label="검색어 지우기" className="absolute right-2 top-1/2 -translate-y-1/2 w-7 h-7 flex items-center justify-center rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100">
-                <X className="w-4 h-4" />
-              </button>
-            )}
-          </div>
-        )}
-
-        {/* 1단계-a — 카테고리 선택 */}
-        {stage === 'gallery' && !category && !searchKey && (
-          <section>
-            {/* ★ 2026-07-31 트랙 축 — 제품 포스터 / 행사 포스터 명확 분리 (Harold) */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-5">
-              <button
-                onClick={() => { setTrackKind('product'); setCategory(null); }}
-                className={`rounded-2xl border p-4 text-left transition ${trackKind === 'product' ? 'border-violet-300 bg-violet-50' : 'border-slate-200 bg-white hover:border-slate-300'}`}
-              >
-                <div className="flex items-center gap-2 mb-1">
-                  <ShoppingBag className={`w-4 h-4 ${trackKind === 'product' ? 'text-violet-700' : 'text-slate-400'}`} />
-                  <span className="text-sm font-bold">제품 포스터</span>
-                </div>
-                <p className="text-[11px] text-slate-400 leading-relaxed">내 상품이 주인공: 제품 사진을 넣으면 원본 그대로 보존하고 배경·문구를 새로 그립니다.</p>
-              </button>
-              <button
-                onClick={() => { setTrackKind('event'); setCategory(null); }}
-                className={`rounded-2xl border p-4 text-left transition ${trackKind === 'event' ? 'border-fuchsia-300 bg-fuchsia-50' : 'border-slate-200 bg-white hover:border-slate-300'}`}
-              >
-                <div className="flex items-center gap-2 mb-1">
-                  <Sparkles className={`w-4 h-4 ${trackKind === 'event' ? 'text-fuchsia-700' : 'text-slate-400'}`} />
-                  <span className="text-sm font-bold">행사 포스터</span>
-                </div>
-                <p className="text-[11px] text-slate-400 leading-relaxed">멤버십데이·오픈·시즌 행사 안내: 제품 없이 행사명과 문구만으로 완성됩니다.</p>
-              </button>
-            </div>
-            <h2 className="text-sm font-bold text-slate-800 mb-3">{trackKind === 'event' ? '어떤 행사인가요?' : '어떤 종류의 포스터인가요?'}</h2>
-            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
-              {categories.map((c) => (
-                <button key={c.name} onClick={() => setCategory(c.name)} className="rounded-2xl border border-slate-200 bg-white p-4 text-left hover:border-violet-300 hover:bg-slate-100 transition">
-                  <div className="flex gap-1.5 mb-3">
-                    {c.accents.map((a, i) => (
-                      <span key={i} className="w-6 h-6 rounded-lg border border-slate-200" style={{ background: a }} />
-                    ))}
-                  </div>
-                  <div className="text-sm font-semibold">{c.name}</div>
-                  <div className="text-[10px] text-slate-400 mt-0.5">템플릿 {c.count}종</div>
-                </button>
-              ))}
-            </div>
-            <p className="text-[10px] text-slate-400 italic mt-3">Data source: 카테고리를 고르면 템플릿 목록으로 이동합니다. 생성 1회 2크레딧.</p>
-          </section>
-        )}
-
-        {/* 1단계-b — 템플릿 선택 (컴팩트 카드) */}
-        {stage === 'gallery' && (category || searchKey) && (
-          <section>
-            {searchKey ? (
-              <div className="flex items-center gap-2 mb-3 flex-wrap">
-                <button onClick={() => setQuery('')} className="flex items-center gap-1 text-xs px-2.5 py-1.5 rounded-lg border border-slate-200 text-slate-500 hover:text-slate-900 hover:bg-slate-100">
-                  <ChevronLeft className="w-3.5 h-3.5" /> {category ? category : '카테고리'}
-                </button>
-                <h2 className="text-sm font-bold text-slate-800">「{query.trim()}」 검색 결과</h2>
-                <span className="text-[11px] text-slate-400">총 {visibleTemplates.length}종 · 제품 · 행사 전체</span>
-              </div>
-            ) : (
-              <>
-                <div className="flex items-center gap-2 mb-3">
-                  <button onClick={() => setCategory(null)} className="flex items-center gap-1 text-xs px-2.5 py-1.5 rounded-lg border border-slate-200 text-slate-500 hover:text-slate-900 hover:bg-slate-100">
-                    <ChevronLeft className="w-3.5 h-3.5" /> 카테고리
-                  </button>
-                  <h2 className="text-sm font-bold text-slate-800">{category}</h2>
-                  <span className="text-[11px] text-slate-400">총 {visibleTemplates.length}종</span>
-                </div>
-                {/* ★ 2026-10-06 세부 카테고리 — 누르면 그 세부만. 20종 이상 카테고리만 칩이 있다. */}
-                {subItems.length > 0 && (
-                  <div className="mb-4">
-                    <ZoneSegmented items={subItems} value={sub} onChange={setSub} ariaLabel={`${category} 세부 카테고리`} />
-                  </div>
-                )}
-              </>
-            )}
-            {searchKey && visibleTemplates.length === 0 && (
-              <div className="rounded-2xl border border-dashed border-slate-200 bg-white px-4 py-8 text-center text-sm text-slate-500">
-                「{query.trim()}」에 맞는 템플릿이 없어요. 다른 말로 찾아보세요 (예: 오픈 · 립 · 국물 · 멤버십)
-              </div>
-            )}
-            {/* ★ 2026-08-11 5열 × 2행 = 한 페이지 10개. 열을 줄여 카드가 커지고 예시가 실제로 읽힌다. */}
-            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4">
-              {pagedTemplates.map((t) => (
-                <button
-                  key={t.id}
-                  onClick={() => { setTemplate(t); setStage('setup'); }}
-                  className="group relative rounded-2xl border border-slate-200 overflow-hidden text-left hover:border-violet-300 hover:bg-white transition bg-slate-100"
-                >
-                  {/* ★ 2026-10-06 제품 · 행사 칩 — 검색 결과처럼 두 트랙이 섞여도 바로 구분된다. */}
-                  <span className={`absolute top-2 left-2 z-10 px-2 py-0.5 rounded-full text-[10px] font-bold shadow-sm ${(t.kind || 'product') === 'event' ? 'bg-fuchsia-100 text-fuchsia-800' : 'bg-violet-100 text-violet-800'}`}>
-                    {(t.kind || 'product') === 'event' ? '행사' : '제품'}
-                  </span>
-                  {t.exampleUrl ? (
-                    <img src={t.exampleUrl} alt={t.name} loading="lazy" className="w-full aspect-[3/4] object-cover" />
-                  ) : (
-                    <div className="w-full aspect-[3/4] relative flex flex-col items-center justify-end p-3" style={{ background: `linear-gradient(160deg, ${t.accent}cc, ${t.accent}55 60%, #0f172a)` }}>
-                      <div className="absolute top-4 left-0 right-0 text-center space-y-1 px-3">
-                        {t.defaultTexts.label ? <div className="text-[8px] tracking-[0.2em] text-slate-600 truncate">{t.defaultTexts.label.slice(0, 18)}</div> : null}
-                        <div className="text-[13px] font-bold text-slate-900 leading-tight">{t.sample?.title || t.name}</div>
-                        {t.sample?.subtitle ? <div className="text-[10px] text-slate-500 truncate">{t.sample.subtitle}</div> : null}
-                      </div>
-                      {(t.kind || 'product') === 'product' && <div className="w-9 h-12 rounded bg-slate-200 border border-slate-300 mb-4" title="상품 자리" />}
-                    </div>
-                  )}
-                  <div className="p-3">
-                    <div className="text-[13px] font-semibold truncate">{t.name}</div>
-                    {searchKey && <div className="text-[10px] text-violet-700 truncate mt-0.5">{t.category}{t.sub ? ` · ${t.sub}` : ''}</div>}
-                    <div className="text-[10px] text-slate-400 truncate mt-0.5">{t.desc}</div>
-                    {/* 추천 용도 — 185종을 하나씩 열어 보지 않고 고르게 하는 축(2줄까지 보여준다). */}
-                    {t.useCase && (
-                      <div className="mt-2 pt-2 border-t border-slate-100 text-[10px] leading-snug text-violet-800 line-clamp-2">
-                        {t.useCase}
-                      </div>
-                    )}
-                  </div>
-                </button>
-              ))}
-            </div>
-
-            {tplTotalPages > 1 && (
-              <div className="mt-4 flex items-center justify-center gap-2">
-                <button
-                  type="button"
-                  disabled={tplPage <= 1}
-                  onClick={() => setTplPage((p) => Math.max(1, p - 1))}
-                  className="px-3 py-1.5 rounded-lg border border-slate-200 text-xs text-slate-600 hover:bg-slate-100 disabled:opacity-30 disabled:hover:bg-transparent"
-                >
-                  이전
-                </button>
-                <span className="text-xs text-slate-500 tabular-nums px-1">{tplPage} / {tplTotalPages}</span>
-                <button
-                  type="button"
-                  disabled={tplPage >= tplTotalPages}
-                  onClick={() => setTplPage((p) => Math.min(tplTotalPages, p + 1))}
-                  className="px-3 py-1.5 rounded-lg border border-slate-200 text-xs text-slate-600 hover:bg-slate-100 disabled:opacity-30 disabled:hover:bg-transparent"
-                >
-                  다음
-                </button>
-              </div>
-            )}
-            <p className="text-[10px] text-slate-400 italic mt-3">Data source: 템플릿을 고르면 상품과 문구를 넣는 단계로 이동합니다. 돌아오면 보던 페이지{searchKey ? '와 검색 결과' : ''}가 유지됩니다.</p>
-          </section>
-        )}
-
-        {/* 2단계 — 상품 + 문구 + 채널 */}
+        {/* 2단계 — 상품 + 문구 (공용 StudioMake · DM 삽입 창과 같은 부품) */}
         {stage === 'setup' && template && (
           <section className="grid grid-cols-1 lg:grid-cols-9 gap-5">
             {/* 좌: 예시 프리뷰(깨끗한 대형 이미지 하나) — 상품·문구·힌트는 전부 우측이 든다 */}
             <div className="lg:col-span-3 space-y-4">
-              {/* ★ 2026-08-13 (Harold 지시 2차 확정) 예시는 크게, 이미지는 깨끗하게 — 오버레이·슬롯은 예시의
-                  실제 타이포를 가리고 위치도 실물과 어긋나서 접었다. "문구가 바뀐다·누끼 자동" 안내는
-                  우측 문구 입력칸 위 Tip 한 덩어리가 담당한다. */}
-              <div className="rounded-2xl border border-slate-200 bg-white overflow-hidden">
-                {template.exampleUrl ? (
-                  <img src={template.exampleUrl} alt={`${template.name} 예시`} className="w-full aspect-[3/4] object-cover" />
-                ) : (
-                  <div className="w-full aspect-[3/4] relative flex flex-col items-center justify-end p-4" style={{ background: `linear-gradient(160deg, ${template.accent}cc, ${template.accent}55 60%, #0f172a)` }}>
-                    <div className="absolute top-6 left-0 right-0 text-center px-4">
-                      <div className="text-lg font-bold text-slate-900 leading-tight">{template.sample?.title || template.name}</div>
-                      {template.sample?.subtitle && <div className="text-xs text-slate-600 mt-1">{template.sample.subtitle}</div>}
-                    </div>
-                    {(template.kind || 'product') === 'product' && <div className="w-16 h-24 rounded bg-slate-200 border border-slate-300 mb-6" />}
-                  </div>
-                )}
-                <div className="p-3">
-                  <div className="flex items-baseline gap-2 min-w-0">
-                    <div className="text-sm font-bold truncate">{template.name}</div>
-                    <div className="text-[11px] text-slate-400 truncate">{template.desc}</div>
-                  </div>
-                  {template.useCase && (
-                    <div className="mt-2 rounded-lg bg-violet-50 border border-violet-200 px-2.5 py-1.5">
-                      <span className="text-[9px] tracking-wider text-violet-700 mr-1.5">이럴 때 좋아요</span>
-                      <span className="text-[11px] leading-snug text-violet-900">{template.useCase}</span>
-                    </div>
-                  )}
-                  <p className="mt-2 text-[10px] text-slate-400 italic">
-                    {template.exampleUrl ? '갤러리에서 보신 예시 그대로입니다. 문구와 상품만 바뀝니다.' : '예시 이미지 준비 중. 카드 스타일로 표시됩니다.'}
-                  </p>
-                </div>
-              </div>
-
+              <TemplateExampleCard template={template} />
             </div>
-
-            {/* 우: 문구 + 상품 + 힌트 + 생성 (★2026-07-30 채널 사이즈 픽커 폐기 — 단일 포스터가 전 채널 통짜 삽입) */}
             <div className="lg:col-span-6 space-y-4">
-              <div className="rounded-2xl border border-fuchsia-200 bg-gradient-to-br from-fuchsia-50 to-indigo-50 p-4 space-y-2.5">
-                <h3 className="text-sm font-bold flex items-center gap-2"><PenLine className="w-4 h-4 text-fuchsia-700" /> 포스터에 들어갈 문구</h3>
-                {/* ★ 2026-08-13 Tip — 문구·상품 두 줄로 갈라 키워드만 강조(한 문단 뭉침은 줄바꿈이 흉하게 갈라진다).
-                    break-keep = 한국어 어절 단위 줄바꿈. */}
-                <div className="rounded-xl bg-fuchsia-50 border border-fuchsia-200 px-3.5 py-3 space-y-2">
-                  <div className="flex items-start gap-2.5">
-                    <PenLine className="w-3.5 h-3.5 text-fuchsia-700 shrink-0 mt-0.5" />
-                    <p className="text-[12px] leading-relaxed text-slate-600 break-keep">
-                      예시 속 글자 자리에 <b className="text-fuchsia-800 font-semibold">아래 입력값이 그대로</b> 새겨져요. 배경·분위기는 예시 그대로.
-                    </p>
-                  </div>
-                  {(template.kind || 'product') === 'product' && (
-                    <div className="flex items-start gap-2.5">
-                      <ShoppingBag className="w-3.5 h-3.5 text-emerald-700 shrink-0 mt-0.5" />
-                      <p className="text-[12px] leading-relaxed text-slate-600 break-keep">
-                        상품 사진은 <b className="text-emerald-800 font-semibold">배경이 자동으로 제거</b>되어 장면에 자연스럽게 들어가요.
-                      </p>
-                    </div>
-                  )}
-                </div>
-                <input value={texts.label} onChange={(e) => setTexts({ ...texts, label: e.target.value })} placeholder={(template.kind || 'product') === 'event' ? '작은 라벨 (예: MEMBERSHIP DAY)' : '작은 라벨 (예: ONLINE EXCLUSIVE)'} className="w-full px-3 py-2 bg-slate-100 border border-slate-200 rounded-lg text-xs text-slate-900 placeholder-slate-400 focus:outline-none focus:border-fuchsia-300" />
-                <input value={texts.title} onChange={(e) => setTexts({ ...texts, title: e.target.value })} placeholder={(template.kind || 'product') === 'event' ? '행사명 (예: 멤버십 데이)' : '헤드라인 (예: 제품명 30% 할인 · 2+1 이벤트)'} className="w-full px-3 py-2 bg-slate-100 border border-slate-200 rounded-lg text-sm font-semibold text-slate-900 placeholder-slate-400 focus:outline-none focus:border-fuchsia-300" />
-                <input value={texts.subtitle} onChange={(e) => setTexts({ ...texts, subtitle: e.target.value })} placeholder={(template.kind || 'product') === 'event' ? '안내 문구 (예: 행사 기간·안내를 적어주세요)' : '부제 (예: 한정 수량 특별 혜택)'} className="w-full px-3 py-2 bg-slate-100 border border-slate-200 rounded-lg text-xs text-slate-900 placeholder-slate-400 focus:outline-none focus:border-fuchsia-300" />
-                {(template.kind || 'product') === 'event' && (
-                  <div className="flex flex-wrap items-center gap-2 pt-1">
-                    <span className="text-[11px] text-slate-400">문구 위치</span>
-                    {([['top', '위'], ['center', '중앙'], ['bottom', '아래']] as const).map(([k, lbl]) => (
-                      <button key={k} onClick={() => setTextPosition(k)} className={`px-3 py-1.5 rounded-full border text-[11px] transition ${textPosition === k ? 'border-fuchsia-300 bg-fuchsia-100 text-fuchsia-800 font-semibold' : 'border-slate-200 bg-white text-slate-500 hover:border-slate-300'}`}>{lbl}</button>
-                    ))}
-                  </div>
-                )}
-                <p className="text-[10px] text-slate-400 italic">혜택·수치는 AI가 만들지 않아요. 직접 입력해주세요.</p>
-              </div>
-
-              {/* ★ 2026-08-13 상품 이미지 — 좌측에서 우측으로 이동(Harold 지시 — 좌측은 예시 하나로 고정, 우측 높이로 균형) */}
-              <div className="rounded-2xl border border-slate-200 bg-white p-4">
-                <h3 className="text-sm font-bold mb-1 flex items-center gap-2"><ShoppingBag className="w-4 h-4 text-violet-700" /> {(template.kind || 'product') === 'event' ? '제품 이미지 (선택)' : '상품 이미지'}</h3>
-                <p className="text-[11px] text-slate-400 mb-3">
-                  {(template.kind || 'product') === 'event'
-                    ? '행사 포스터는 제품 없이 완성됩니다. 포스터에 제품을 함께 넣고 싶을 때만 첨부하세요.'
-                    : '제품 원본은 그대로 보존하고(누끼) 배경·문구만 새로 그립니다.'}
-                </p>
-                <div className="flex flex-wrap gap-2">
-                  <button onClick={() => setPickerOpen(true)} disabled={busy} className="text-white flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-xs font-semibold disabled:opacity-40">
-                    <ShoppingBag className="w-3.5 h-3.5" /> 연동 몰에서
-                  </button>
-                  <button onClick={() => fileRef.current?.click()} disabled={busy} className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl border border-slate-300 text-xs text-slate-700 hover:bg-slate-100 disabled:opacity-40">
-                    <Upload className="w-3.5 h-3.5" /> 사진 업로드
-                  </button>
-                  <input ref={fileRef} type="file" accept="image/*" onChange={onUpload} className="hidden" />
-                </div>
-                {cutoutBlob && (
-                  <div className="mt-3 flex items-center gap-3">
-                    <img src={cutoutBlob} alt="누끼" className="w-20 h-20 object-contain rounded-lg border border-emerald-200 bg-slate-100" />
-                    <div className="text-[11px] text-emerald-700 flex items-center gap-1"><Check className="w-3.5 h-3.5" /> 배경 제거 완료. 원본 그대로 들어갑니다</div>
-                  </div>
-                )}
-                {product && <div className="mt-2 text-[11px] text-slate-500 truncate">{product.name}{product.salePrice ? ` · ${won(product.salePrice)}` : ''}</div>}
-                {(template.kind || 'product') === 'product' && (
-                  <>
-                    <p className="text-[10px] text-slate-400 italic mt-2">상품 없이도 생성할 수 있어요(문구 포스터). 단일 제품 사진에서 가장 잘 작동합니다.</p>
-                    <p className="text-[10px] text-amber-700 italic mt-1">의류는 모델 착용컷 대신 옷 단독컷을 권장해요. 착용컷은 배경과 합성한 티가 나기 쉬워요.</p>
-                  </>
-                )}
-              </div>
-
-              <div className="rounded-2xl border border-slate-200 bg-white p-4">
-                <label className="text-xs font-semibold text-slate-600 flex items-center gap-1.5 mb-2"><Wand2 className="w-3.5 h-3.5 text-fuchsia-700" /> 장면 힌트 (선택)</label>
-                <input value={hint} onChange={(e) => setHint(e.target.value)} placeholder="예: 대리석 카운터, 은은한 램프 조명" className="w-full px-3 py-2 bg-slate-100 border border-slate-200 rounded-lg text-xs text-slate-900 placeholder-slate-400 focus:outline-none focus:border-violet-300" />
-              </div>
-
+              <StudioMakeFields make={make} disabled={busy} />
               <button onClick={() => generate()} disabled={busy || !ready} className="text-white w-full flex items-center justify-center gap-2 px-4 py-3.5 rounded-2xl bg-indigo-600 hover:bg-indigo-700 text-sm font-bold disabled:opacity-40">
                 <Sparkles className="w-4 h-4" /> 완성 포스터 만들기 · 2크레딧
               </button>
@@ -693,12 +298,12 @@ export default function ImageStudioPage() {
           </section>
         )}
 
-        {/* 3단계 — 결과 */}
+        {/* 3단계 — 결과 · 카드에서 채널로 바로 */}
         {stage === 'result' && (
           <section className="space-y-4">
             <div className="flex flex-wrap items-center gap-2">
               <h2 className="text-sm font-bold text-slate-800 mr-2">완성 포스터</h2>
-              <span className="text-[11px] text-slate-400 mr-1">이 포스터는 인앱·DM·이메일 어디서든 그대로 쓸 수 있어요. 저장하면 각 채널에 자동으로 맞춰 들어갑니다.</span>
+              <span className="text-[11px] text-slate-400 mr-1">채널 버튼을 누르면 라이브러리에 저장하고 바로 그 편집기가 열려요. MMS는 발송 화면에서 첨부할 때 자동 변환돼요.</span>
               <button onClick={() => setStage('setup')} className="ml-auto text-xs text-slate-400 hover:text-slate-600">문구·상품 수정</button>
             </div>
 
@@ -706,20 +311,45 @@ export default function ImageStudioPage() {
               {candidates.map((c) => (
                 <div key={c.tempId} className="rounded-2xl border border-slate-200 overflow-hidden bg-slate-100">
                   <div className="relative">
-                    {c.blob ? <img src={c.blob} alt="완성 포스터" draggable={false} onContextMenu={(e) => e.preventDefault()} className="w-full object-contain max-h-[480px] bg-slate-100" /> : <div className="h-64 flex items-center justify-center"><Loader2 className="w-5 h-5 animate-spin text-slate-400" /></div>}
-                    {c.blob && <StudioWatermark text={wmText} />}
+                    {c.blob
+                      ? <img src={c.blob} alt="완성 포스터" draggable={false} onContextMenu={(e) => e.preventDefault()} className="w-full object-contain max-h-[480px] bg-slate-100" />
+                      : <div className="h-64 flex items-center justify-center px-6 text-center text-[12px] text-slate-500">미리보기를 불러오지 못했어요. 저장하면 라이브러리에서 볼 수 있어요.</div>}
+                    {c.blob && <StudioWatermark />}
                     <span className="absolute top-2 left-2 z-20 text-[10px] px-2 py-0.5 rounded-full bg-black/60 text-white/70 border border-slate-300">{presetLabel(c.presetKey)}</span>
                   </div>
-                  <div className="p-3 space-y-2">
-                    <div className="flex flex-wrap gap-2">
-                      <button onClick={() => save(c)} disabled={busy} className="text-white flex-1 min-w-[8rem] flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-xs font-semibold disabled:opacity-40">
-                        <Save className="w-3.5 h-3.5" /> 라이브러리에 저장
-                      </button>
-                      <button onClick={() => { setEditFor(editFor === c.tempId ? null : c.tempId); setEditText(''); }} disabled={busy} className="flex items-center gap-1 px-3 py-2 rounded-lg border border-slate-200 text-xs text-slate-600 hover:bg-slate-100 disabled:opacity-40">
-                        <Wand2 className="w-3.5 h-3.5" /> AI 수정 <span className="text-slate-400">1</span>
-                      </button>
-                    </div>
-                    {editFor === c.tempId && (
+                  <div className="p-3 space-y-2 bg-white">
+                    {c.note === 'expired' ? (
+                      <p className="text-[12px] text-rose-700">기간이 지나 저장할 수 없어요. 다시 만들어 주세요.</p>
+                    ) : (
+                      <div className="flex flex-col gap-2">
+                        <ChannelButtons isAdmin={isCompanyAdmin} disabled={busy} onPick={(ch) => goChannel(c, ch)} />
+                      </div>
+                    )}
+                    {c.note === 'storage_full' && (
+                      <div className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-[11.5px] text-rose-800 flex items-center gap-2 flex-wrap">
+                        <span className="flex-1 min-w-[10rem]">저장 공간이 가득 찼어요. 안 쓰는 소재를 정리한 뒤 다시 눌러 주세요.</span>
+                        <button type="button" onClick={() => setLibManageOpen(true)} className="px-3 py-1.5 rounded-lg border border-rose-300 bg-white text-rose-800 font-semibold hover:bg-rose-100">저장 소재 정리</button>
+                      </div>
+                    )}
+                    {c.note !== 'expired' && (
+                      <div className="flex flex-wrap gap-2">
+                        {c.saved ? (
+                          <span className="flex-1 min-w-[8rem] flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg border border-emerald-200 bg-emerald-50 text-xs font-semibold text-emerald-800">
+                            <Check className="w-3.5 h-3.5" /> 라이브러리에 저장됨
+                          </span>
+                        ) : (
+                          <>
+                            <button onClick={() => saveOnly(c)} disabled={busy} className="flex-1 min-w-[8rem] flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg border border-slate-300 text-xs font-semibold text-slate-700 hover:bg-slate-100 disabled:opacity-40">
+                              <Save className="w-3.5 h-3.5" /> 라이브러리에 저장
+                            </button>
+                            <button onClick={() => { setEditFor(editFor === c.tempId ? null : c.tempId); setEditText(''); }} disabled={busy} className="flex items-center gap-1 px-3 py-2 rounded-lg border border-slate-200 text-xs text-slate-600 hover:bg-slate-100 disabled:opacity-40">
+                              <Wand2 className="w-3.5 h-3.5" /> AI 수정 <span className="text-slate-400">1</span>
+                            </button>
+                          </>
+                        )}
+                      </div>
+                    )}
+                    {editFor === c.tempId && !c.saved && (
                       <div className="flex gap-2">
                         <input value={editText} onChange={(e) => setEditText(e.target.value)} placeholder="배경·무드를 어떻게 바꿀까요? (예: 더 밝고 화사하게)" className="flex-1 px-3 py-2 bg-slate-100 border border-slate-200 rounded-lg text-xs text-slate-900 placeholder-slate-400 focus:outline-none focus:border-violet-300"
                           onKeyDown={(e) => { if (e.key === 'Enter' && editText.trim()) editPoster(c, editText.trim()); }} />
@@ -730,7 +360,7 @@ export default function ImageStudioPage() {
                 </div>
               ))}
             </div>
-            <p className="text-[10px] text-slate-400 italic">Data source: 생성 약 30초 · 저장 전 산출물은 7일 후 자동 삭제 · MMS는 발송 시 첨부 창에서 자동 변환</p>
+            <p className="text-[10px] text-slate-400 italic">Data source: 생성 약 30초 · 저장하지 않은 결과는 이 화면을 떠나면 볼 수 없어요(7일 뒤 자동 삭제) · MMS는 발송 시 첨부 창에서 자동 변환</p>
           </section>
         )}
       </div>
@@ -750,7 +380,7 @@ export default function ImageStudioPage() {
               <div className="md:w-[58%] bg-slate-100 p-4 flex items-center justify-center">
                 <div className="relative w-full max-h-[64vh] flex items-center justify-center">
                   <img src={assetAction.url} alt="" draggable={false} onContextMenu={(e) => e.preventDefault()} className="max-w-full max-h-[64vh] object-contain rounded-lg" />
-                  <StudioWatermark text={wmText} />
+                  <StudioWatermark />
                 </div>
               </div>
               {/* 우 — 채널 메뉴 (전 채널 그대로 사용 · 변환 없음) */}
@@ -759,17 +389,7 @@ export default function ImageStudioPage() {
                   {assetAction.filename && <div className="text-slate-600 font-medium break-all leading-snug">{assetAction.filename.replace(/\.[^.]+$/, '')}</div>}
                   <div className="mt-2 text-slate-400 leading-relaxed">이 포스터는 문구·상품이 이미 들어가 있어, 어느 채널이든 <b className="text-slate-500 font-semibold">전체가 그대로</b> 쓰여요. 잘림·추가 비용 없음.</div>
                 </div>
-                {isCompanyAdmin && (
-                  <button onClick={() => launchChannel(STUDIO_INAPP_DRAFT_KEY, '/inapp-messages')} className="flex items-center gap-2 px-3.5 py-3 rounded-xl border border-rose-300 bg-rose-50 text-xs font-semibold text-slate-800 hover:bg-rose-100 transition">
-                    <Layers className="w-4 h-4 text-rose-700" /> 인앱메시지 만들기
-                  </button>
-                )}
-                <button onClick={() => launchChannel(STUDIO_DM_DRAFT_KEY, '/dm-builder')} className="flex items-center gap-2 px-3.5 py-3 rounded-xl border border-amber-300 bg-amber-50 text-xs font-semibold text-slate-800 hover:bg-amber-100 transition">
-                  <Smartphone className="w-4 h-4 text-amber-700" /> 모바일 DM 만들기
-                </button>
-                <button onClick={() => launchChannel(STUDIO_EMAIL_DRAFT_KEY, '/email-campaigns')} className="flex items-center gap-2 px-3.5 py-3 rounded-xl border border-cyan-300 bg-cyan-50 text-xs font-semibold text-slate-800 hover:bg-cyan-100 transition">
-                  <Mail className="w-4 h-4 text-cyan-700" /> 이메일 만들기
-                </button>
+                <ChannelButtons isAdmin={isCompanyAdmin} onPick={(ch) => launch(ch, assetAction)} />
                 <div className="mt-1 text-[10px] text-slate-400 leading-relaxed">MMS로 보낼 때는 발송 화면의 ‘라이브러리에서 가져오기’로 첨부하면 자동으로 규격(≤300KB)에 맞춰져요. 특정 채널 전용 비율이 필요하면 스튜디오에서 그 비율로 새로 만들면 돼요.</div>
               </div>
             </div>
@@ -782,13 +402,13 @@ export default function ImageStudioPage() {
         <div className="fixed inset-0 z-[2500] flex items-center justify-center bg-black/70 backdrop-blur-sm">
           <div className="text-center">
             <Loader2 className="w-8 h-8 animate-spin text-violet-700 mx-auto mb-3" />
-            <p className="text-sm text-slate-700">{busyMsg}</p>
+            <p className="text-sm text-slate-700">{overlayMsg}</p>
             <p className="text-[11px] text-slate-400 mt-1">창을 닫지 마세요</p>
           </div>
         </div>
       )}
 
-      <MallProductPickerModal open={pickerOpen} onClose={() => setPickerOpen(false)} onPick={onPickMall} />
+      <ConfirmModal state={confirm} onClose={() => setConfirm(null)} />
 
       {/* 라이브러리 전체 보기·관리 — 검색·삭제(픽커 재사용), 소재 클릭 = 발사대 모달 */}
       <AssetLibraryPickerModal

@@ -1,0 +1,17 @@
+{
+  "detector": {
+    "ignoreRules": [],
+    "ignoreFiles": [],
+    "ignoreValues": [
+      {
+        "rule": "ai-color-palette",
+        "value": "*",
+        "files": [
+          "src/components/studio/StudioMake.tsx"
+        ],
+        "createdAt": "2026-10-16T14:27:55.532Z",
+        "reason": "Claude 판단: ImageStudioPage 기존 제작 화면을 로직 그대로 공용 부품으로 옮긴 코드(보라 강조 = AI 존 기존 색 체계 · LESSONS_FRONTEND violet 액센트) · 새 디자인 선택 아님"
+      }
+    ]
+  }
+}

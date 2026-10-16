@@ -104,6 +104,7 @@ export default function BlockEditModal({
           subtitle={def?.desc}
           size="md"
           badge={badge}
+          closeOnEsc={!studioOpen /* ★ 2026-10-16 위에 뜬 스튜디오 창의 Esc 가 이 창까지 닫지 않게(붙은 창은 위 효과가 같은 규칙) */}
           footer={footer}
         >
           {body}

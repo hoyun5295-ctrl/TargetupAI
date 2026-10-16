@@ -93,7 +93,7 @@ export default function BrandBasicInfoTab({ apiBase, token, onToast }: Props) {
           <div><label className={LB}>상호(법인명)</label><input className={IN} value={info.company_name || ''} onChange={(e) => setInfo((s) => ({ ...s, company_name: e.target.value }))} placeholder="예: (주)폴라초이스코리아" /></div>
           <div><label className={LB}>사업자등록번호</label><input className={IN} value={info.business_number || ''} onChange={(e) => setInfo((s) => ({ ...s, business_number: e.target.value }))} placeholder="000-00-00000" /></div>
           <div>
-            <label className={LB}>업종 (문안 생성 참조)</label>
+            <label className={LB}>업종 (문안·템플릿 추천 참조)</label>
             <select className={IN + ' [&>option]:bg-slate-800'} value={info.industry_code || ''} onChange={(e) => setInfo((s) => ({ ...s, industry_code: e.target.value }))}>
               <option value="">선택 안 함</option>
               {industries.map((i) => <option key={i.code} value={i.code}>{i.label}</option>)}

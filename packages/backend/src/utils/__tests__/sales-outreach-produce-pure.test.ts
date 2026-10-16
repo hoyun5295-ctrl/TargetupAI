@@ -14,13 +14,40 @@ import {
   TEMPLATE_POOLS, INDUSTRY_TEMPLATE_MAP, pickTemplate, sanitizeDmCopyBenefits, fillOutreachDmMedia, sectionsFromAiJson,
   buildProposalEmailSections, buildOutreachPlainText, assembleProposalEmail, generateSubjectIntro, buildEmailIntroPrompt, buildOutreachSubject,
   buildOutreachMaterialBlock, buildDmSectionsPrompt, buildEmailSectionsPrompt, countBenefitPlaceholders, type ProposalEmailInput,
+  studioIndustryCategories,
 } from '../sales-outreach-produce';
+import { STUDIO_TEMPLATES } from '../image-studio-templates';
 import { getActiveStyleGuide } from '../sales-outreach-style';
 import { INDUSTRY_CODES } from '../industry-codes';
 import { BENEFIT_PLACEHOLDER } from '../copy-benefit-detector';
 import type { Section } from '../dm/dm-section-registry';
 
 const sec = (type: string, props: any, order = 0): Section => ({ id: `t-${order}-${type}`, type, order, visible: true, props } as unknown as Section);
+
+// ★ 2026-10-16 이미지 스튜디오 「우리 업종 먼저」 — 고객사 업종 셋만 인정(설계서 2026-10-16-image-studio-picker-channel §2-3)
+describe('studioIndustryCategories — 스튜디오 업종 화이트리스트', () => {
+  it('뷰티·의류·요식만 표의 제품 카테고리를 돌려준다', () => {
+    expect(studioIndustryCategories('beauty')).toEqual(INDUSTRY_TEMPLATE_MAP.beauty.product);
+    expect(studioIndustryCategories('fashion')).toEqual(INDUSTRY_TEMPLATE_MAP.fashion.product);
+    expect(studioIndustryCategories('food')).toEqual(INDUSTRY_TEMPLATE_MAP.food.product);
+  });
+  it('그 밖 업종 · 미설정 · 모르는 값 = null(추측 추천 0 · 리빙 추천 금지)', () => {
+    for (const code of INDUSTRY_CODES.filter((c) => !['beauty', 'fashion', 'food'].includes(c))) {
+      expect(studioIndustryCategories(code), code).toBeNull();
+    }
+    for (const v of [null, undefined, '', 'BEAUTY', 'living']) expect(studioIndustryCategories(v as any)).toBeNull();
+  });
+  it('돌려주는 값은 실제 제품 트랙 카테고리이고, 표 원본을 바꾸지 못하는 사본이다', () => {
+    const productCats = new Set(STUDIO_TEMPLATES.filter((t) => (t.kind ?? 'product') === 'product').map((t) => t.category));
+    for (const code of ['beauty', 'fashion', 'food']) {
+      const cats = studioIndustryCategories(code)!;
+      expect(cats.length).toBeGreaterThan(0);
+      for (const c of cats) expect(productCats.has(c), `${code} → ${c}`).toBe(true);
+      cats.push('미니멀');
+      expect(INDUSTRY_TEMPLATE_MAP[code as 'beauty'].product).not.toContain('미니멀');
+    }
+  });
+});
 
 describe('A-4 템플릿 풀·선택', () => {
   it('15 업종 × {product, event} 풀이 전부 1개 이상', () => {

@@ -35,8 +35,9 @@ export interface ComposeInput {
   now?: Date;
 }
 
-/** 회사 업종 코드 조회 (companies.industry_code — 미설정 시 null, 실패해도 null) */
-async function resolveCompanyIndustry(companyId: string): Promise<string | null> {
+/** 회사 업종 코드 조회 (companies.industry_code — 미설정 시 null, 실패해도 null)
+ *  ★ 2026-10-16 export — 이미지 스튜디오 /templates 업종 먼저(같은 SELECT 를 또 쓰지 않는다 · 설계서 2026-10-16-image-studio-picker-channel §2-3) */
+export async function resolveCompanyIndustry(companyId: string): Promise<string | null> {
   try {
     const r = await pool.query('SELECT industry_code FROM companies WHERE id = $1', [companyId]);
     const code = r.rows[0]?.industry_code;

@@ -4,17 +4,24 @@
  * 새 생성 엔진을 만들지 않는다. 기존 경로를 그대로 지난다:
  *   GET /api/image-studio/templates → POST /api/image-studio/generate(2크레딧·서버 차감) → POST /api/image-studio/save(라이브러리 보관)
  * 저장된 그림의 공개 주소를 호출부(블록)에 돌려준다. 실패하면 블록은 사진 없는 상태로 남는다(조립이 막히지 않는다).
+ *
+ * ★ 2026-10-16 스튜디오와 같은 고르기 → 만들기 → 결과 (설계서 2026-10-16-image-studio-picker-channel §2-4)
+ *   - 고르기 = 공용 TemplatePicker(검색 · 카테고리 · 세부 · 우리 업종). 첫 장 자동 선택은 폐기(Harold 1016) · 고르기 전엔 만들기 버튼을 그리지 않는다.
+ *   - 만들기 = 스튜디오 제작 화면과 같은 부품(문구 · 행사면 위치 기본 위 · 상품 · 장면 힌트).
+ *   - 닫기 = 숨김(취소 아님): 단계 · 만드는 중 · 결과는 이 부품에 산다(ModalBase 는 닫히면 null 만 돌려준다).
+ *     다시 열면 이어서 보인다 → 2크레딧 낸 그림을 잃지 않는다. 처음 상태로 돌리는 것은 「넣기 성공」 뒤뿐.
+ *   - 저장은 공용 saveStudioTemp(저장 공간 가득 · 이미 저장됨을 스튜디오와 같은 방식으로 가른다).
  */
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import ModalBase, { ModalButton } from '../modals/ModalBase';
 import { useToast } from '../../ToastProvider';
-import { fetchAuthObjectUrl } from '../../../lib/auth-download';
+import TemplatePicker, { type StudioTemplatePublic } from '../../studio/TemplatePicker';
+import { useStudioMake, StudioMakeFields, TemplateExampleCard } from '../../studio/StudioMake';
+import StudioWatermark from '../../studio/StudioWatermark';
+import AssetLibraryPickerModal from '../../assets/AssetLibraryPickerModal';
+import { saveStudioTemp } from '../../../lib/studio-api';
 
-const token = () => localStorage.getItem('token');
-const authFetch = (url: string, opts: RequestInit = {}) =>
-  fetch(url, { ...opts, headers: { ...(opts.headers || {}), Authorization: `Bearer ${token()}` } });
-
-interface StudioTemplate { id: string; name: string; category: string; exampleUrl: string | null }
+type Step = 'pick' | 'make' | 'result';
 
 export default function StudioInsertModal({
   open, onClose, onInserted, defaultTitle, defaultSubtitle,
@@ -26,15 +33,18 @@ export default function StudioInsertModal({
   defaultSubtitle?: string;
 }) {
   const toast = useToast();
-  const [templates, setTemplates] = useState<StudioTemplate[]>([]);
-  const [picked, setPicked] = useState<string>('');
-  const [title, setTitle] = useState(defaultTitle || '');
-  const [subtitle, setSubtitle] = useState(defaultSubtitle || '');
-  const [busy, setBusy] = useState<'gen' | 'save' | null>(null);
+  const [step, setStep] = useState<Step>('pick');
+  const [template, setTemplate] = useState<StudioTemplatePublic | null>(null);
+  // 호출부가 넘긴 블록 문구가 먼저다 · 빈 칸만 템플릿 기본 문구로 채운다(lib/studio-texts)
+  const initialTexts = useMemo(() => ({ label: '', title: defaultTitle || '', subtitle: defaultSubtitle || '' }), [defaultTitle, defaultSubtitle]);
+  const make = useStudioMake(template, initialTexts);
   // ★ 2026-09-23 미리보기는 blob 주소로 띄운다. 만든 그림의 주소(`/api/image-studio/temp/:id`)는 로그인 토큰이
   //   있어야 열리는데 `<img src>` 는 토큰을 못 붙여 결과 화면이 빈칸이었다(0922 남지현 접수 · 「이 그림 넣기」는 tempId 로 저장해 정상).
   //   preview = null 은 미리보기를 못 받은 경우다 — 넣기는 그대로 된다.
   const [made, setMade] = useState<{ tempId: string; preview: string | null } | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [storageFull, setStorageFull] = useState(false);
+  const [libOpen, setLibOpen] = useState(false);
   const previewUrl = useRef<string | null>(null);
   const dropPreview = useCallback(() => {
     if (previewUrl.current) URL.revokeObjectURL(previewUrl.current);
@@ -42,124 +52,119 @@ export default function StudioInsertModal({
   }, []);
   useEffect(() => dropPreview, [dropPreview]);
 
+  const generating = !!make.busyMsg;
+  // 처음 상태로 여는 것은 「처음 열 때」와 「넣기 성공 뒤 다음에 열 때」뿐이다. 그 밖의 다시 열기는 쓰던 그대로 이어서(닫기 = 숨김) —
+  //   작성 중 · 만드는 중 · 생성 실패 뒤 · 결과 대기 모두 지우지 않는다(Codex 1016 1R · 설계서 §2-4).
+  const freshRef = useRef(true);
+
   useEffect(() => {
-    if (!open) { dropPreview(); return; }
+    if (!open || !freshRef.current) return;
+    freshRef.current = false;
+    setStep('pick');
+    setTemplate(null);
+    setStorageFull(false);
+    make.reset(initialTexts);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open]);
+
+  const generate = async () => {
+    if (generating) return;
+    const r = await make.generate();
+    if (!r) return;
     dropPreview();
-    setMade(null);
-    setTitle(defaultTitle || '');
-    setSubtitle(defaultSubtitle || '');
-    authFetch('/api/image-studio/templates')
-      .then((r) => r.json())
-      .then((d) => {
-        const list: StudioTemplate[] = Array.isArray(d?.templates) ? d.templates : (Array.isArray(d?.data) ? d.data : []);
-        setTemplates(list);
-        setPicked((p) => p || list[0]?.id || '');
-      })
-      .catch(() => setTemplates([]));
-  }, [open, defaultTitle, defaultSubtitle, dropPreview]);
+    previewUrl.current = r.preview;
+    setMade({ tempId: r.tempId, preview: r.preview });
+    setStorageFull(false);
+    setStep('result');
+  };
 
-  const generate = useCallback(async () => {
-    if (!picked || busy) return;
-    setBusy('gen');
+  const insert = async () => {
+    if (!made || saving) return;
+    setSaving(true);
     try {
-      const r = await authFetch('/api/image-studio/generate', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ templateId: picked, presetKey: 'poster', texts: { title, subtitle } }),
-      });
-      const d = await r.json().catch(() => ({}));
-      if (!r.ok || !d?.success || !d?.images?.[0]) {
-        toast.error(d?.error || '그림을 만들지 못했어요. 잠시 후 다시 시도해주세요.');
+      const r = await saveStudioTemp(made.tempId, make.texts.title || '블록 사진');
+      if (!r.ok) {
+        toast.error(r.error);
+        if (r.code === 'STORAGE_FULL') setStorageFull(true);
+        if (r.code === 'EXPIRED') { dropPreview(); setMade(null); setStep('make'); }
         return;
       }
-      let preview: string | null = null;
-      try { preview = await fetchAuthObjectUrl(d.images[0].url); } catch { /* 미리보기만 못 띄운다 · 넣기는 tempId 로 된다 */ }
-      dropPreview();
-      previewUrl.current = preview;
-      setMade({ tempId: d.images[0].tempId, preview });
-    } finally {
-      setBusy(null);
-    }
-  }, [picked, title, subtitle, busy, toast, dropPreview]);
-
-  const insert = useCallback(async () => {
-    if (!made || busy) return;
-    setBusy('save');
-    try {
-      const r = await authFetch('/api/image-studio/save', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ tempId: made.tempId, title: title || '블록 사진' }),
-      });
-      const d = await r.json().catch(() => ({}));
-      if (!r.ok || !d?.success || !d?.asset?.url) {
-        toast.error(d?.error || '그림을 보관하지 못했어요.');
-        return;
-      }
-      onInserted(d.asset.url);
+      onInserted(r.asset.url);
       toast.success('만든 그림을 블록에 넣었어요. 라이브러리에도 보관했어요.');
+      // 처음 상태로 돌리는 것은 넣기 성공 뒤뿐 — 다음에 열 때 그 블록의 문구로 새로 시작한다
+      dropPreview();
+      setMade(null);
+      setStorageFull(false);
+      setTemplate(null);
+      setStep('pick');
+      freshRef.current = true;
     } finally {
-      setBusy(null);
+      setSaving(false);
     }
-  }, [made, title, busy, onInserted, toast]);
+  };
+
+  const remake = () => { dropPreview(); setMade(null); setStorageFull(false); setStep('make'); };
+
+  const footer = step === 'make' ? (
+    <div className="flex items-center gap-2 flex-wrap justify-end w-full">
+      {generating && <span className="flex-1 min-w-[12rem] text-[11.5px] text-slate-500">만드는 중이에요(약 20~30초). 창을 닫아도 다시 열면 이어서 볼 수 있어요.</span>}
+      <ModalButton onClick={() => setStep('pick')} disabled={generating}>다른 템플릿</ModalButton>
+      <ModalButton variant="primary" onClick={generate} disabled={generating}>{generating ? '만드는 중...' : '만들기 (2크레딧)'}</ModalButton>
+    </div>
+  ) : step === 'result' ? (
+    <div className="flex items-center gap-2 justify-end w-full">
+      <ModalButton onClick={remake} disabled={saving}>다시 만들기</ModalButton>
+      <ModalButton variant="primary" onClick={insert} disabled={saving}>{saving ? '넣는 중...' : '이 그림 넣기'}</ModalButton>
+    </div>
+  ) : undefined;
 
   return (
-    <ModalBase
-      open={open}
-      onClose={onClose}
-      title="✨ 이미지 스튜디오"
-      subtitle="템플릿을 고르고 문구를 넣으면 이 블록의 사진 자리에 바로 들어갑니다"
-      size="lg"
-      footer={made
-        ? <ModalButton variant="primary" onClick={insert} disabled={busy === 'save'}>{busy === 'save' ? '넣는 중...' : '이 그림 넣기'}</ModalButton>
-        : <ModalButton variant="primary" onClick={generate} disabled={!picked || busy === 'gen'}>{busy === 'gen' ? '만드는 중...' : '만들기 (2크레딧)'}</ModalButton>}
-    >
-      {made ? (
-        <div className="space-y-3">
-          {made.preview
-            ? <img src={made.preview} alt="만든 그림 미리보기" className="w-full max-h-[52vh] object-contain rounded-xl border border-slate-200 bg-slate-100" />
-            : (
+    <>
+      <ModalBase
+        open={open}
+        onClose={onClose}
+        title="✨ 이미지 스튜디오"
+        subtitle="템플릿을 고르고 문구를 넣으면 이 블록의 사진 자리에 바로 들어갑니다"
+        size="lg"
+        closeOnEsc={!libOpen && !make.pickerOpen}
+        footer={footer}
+      >
+        {step === 'pick' && (
+          <TemplatePicker
+            onPick={(t) => { setTemplate(t); setStep('make'); }}
+            autoOpenIndustry
+            gridClassName="grid grid-cols-2 sm:grid-cols-3 gap-3"
+          />
+        )}
+        {step === 'make' && template && (
+          <div className="grid grid-cols-1 sm:grid-cols-5 gap-4">
+            <div className="sm:col-span-2"><TemplateExampleCard template={template} /></div>
+            <div className="sm:col-span-3"><StudioMakeFields make={make} /></div>
+          </div>
+        )}
+        {step === 'result' && made && (
+          <div className="space-y-3">
+            {made.preview ? (
+              <div className="relative rounded-xl overflow-hidden border border-slate-200 bg-slate-100">
+                <img src={made.preview} alt="만든 그림 미리보기" draggable={false} onContextMenu={(e) => e.preventDefault()} className="w-full max-h-[52vh] object-contain" />
+                <StudioWatermark />
+              </div>
+            ) : (
               <div className="w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-10 text-center text-[12.5px] text-slate-500">
                 미리보기를 불러오지 못했어요. 「이 그림 넣기」를 누르면 만든 그림이 그대로 들어갑니다.
               </div>
             )}
-          <button type="button" onClick={() => { dropPreview(); setMade(null); }} className="text-[12px] text-slate-500 hover:text-slate-800">다시 만들기</button>
-        </div>
-      ) : (
-        <div className="space-y-3">
-          <div className="grid grid-cols-3 sm:grid-cols-5 gap-2 max-h-[38vh] overflow-auto pr-1">
-            {templates.map((t) => (
-              <button
-                key={t.id}
-                type="button"
-                onClick={() => setPicked(t.id)}
-                className={`rounded-xl overflow-hidden border text-left transition ${picked === t.id ? 'border-violet-500 ring-2 ring-violet-200' : 'border-slate-200 hover:border-slate-300'}`}
-              >
-                {t.exampleUrl
-                  ? <img src={t.exampleUrl} alt={t.name} loading="lazy" className="w-full aspect-[3/4] object-cover" />
-                  : <div className="w-full aspect-[3/4] bg-slate-50" />}
-                <div className="px-2 py-1.5 text-[11px] font-semibold truncate">{t.name}</div>
-              </button>
-            ))}
-            {templates.length === 0 && <div className="col-span-full text-[12px] text-slate-500 py-6 text-center">템플릿을 불러오는 중이에요</div>}
+            {storageFull && (
+              <div className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-[12px] text-rose-800 flex items-center gap-2 flex-wrap">
+                <span className="flex-1 min-w-[12rem]">저장 공간이 가득 찼어요. 안 쓰는 소재를 정리한 뒤 「이 그림 넣기」를 다시 눌러 주세요.</span>
+                <button type="button" onClick={() => setLibOpen(true)} className="px-3 py-1.5 rounded-lg border border-rose-300 bg-white text-rose-800 text-[11.5px] font-semibold hover:bg-rose-100">저장 소재 정리</button>
+              </div>
+            )}
           </div>
-          <div className="grid grid-cols-2 gap-2">
-            <label className="block">
-              <span className="block text-[11px] text-slate-500 mb-1">제목</span>
-              <input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="가을 신상 20종 입고"
-                className="w-full px-3 py-2 rounded-[10px] bg-white border border-slate-300 text-[13px] text-slate-900 placeholder-slate-400 outline-none" />
-            </label>
-            <label className="block">
-              <span className="block text-[11px] text-slate-500 mb-1">부제</span>
-              <input value={subtitle} onChange={(e) => setSubtitle(e.target.value)} placeholder="이번 주말까지 무료 배송"
-                className="w-full px-3 py-2 rounded-[10px] bg-white border border-slate-300 text-[13px] text-slate-900 placeholder-slate-400 outline-none" />
-            </label>
-          </div>
-          <p className="text-[11px] text-slate-500 leading-relaxed">
-            넣은 문구만 그림에 새겨집니다. 가격·할인율은 새기지 않아요. 만든 그림은 라이브러리에도 보관됩니다.
-          </p>
-        </div>
-      )}
-    </ModalBase>
+        )}
+      </ModalBase>
+      {/* 저장 공간 정리 = 공용 소재 창(검색 · 삭제). 소재를 눌러도 이 블록에는 넣지 않는다(만든 그림이 우선). */}
+      <AssetLibraryPickerModal open={libOpen} onClose={() => setLibOpen(false)} onPick={() => { /* 정리 전용 */ }} />
+    </>
   );
 }

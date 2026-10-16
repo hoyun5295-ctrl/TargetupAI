@@ -22,7 +22,8 @@ import multer from 'multer';
 import fs from 'fs';
 import path from 'path';
 // ★ 2026-09-27 R126 — 가드 이미지 CT
-import { fetchImageGuarded } from '../utils/sales-outreach-produce';
+import { fetchImageGuarded, studioIndustryCategories } from '../utils/sales-outreach-produce';
+import { resolveCompanyIndustry } from '../utils/copy-prompt-composer';
 import { authenticate } from '../middlewares/auth';
 import { resolveOwnerScope } from '../utils/owner-scope';
 import { LIMITS } from '../config/defaults';
@@ -97,13 +98,17 @@ imageStudioRouter.get('/status', (req: any, res: Response) => {
 
 // ── GET /templates — 갤러리 공개 목록(★은닉 스캐폴드 미포함) ─────────
 //   ★2026-07-31 exampleUrl 폴백 — 카탈로그 미지정이어도 배치 생성 실샘플 파일이 있으면 카드에 표시.
-imageStudioRouter.get('/templates', (_req: any, res: Response) => {
+//   ★2026-10-16 industryCategories = 이 회사 업종(뷰티·의류·요식만)의 제품 카테고리 · 그 밖·미설정·조회 실패 = null.
+//     ⛔ 회사별 값이 섞인 응답이다 · 공용 캐시(Cache-Control public 등)를 붙이지 않는다(다른 회사로 샌다).
+imageStudioRouter.get('/templates', async (req: any, res: Response) => {
   const templates = listTemplatesPublic().map((t) => ({
     ...t,
     exampleUrl: t.exampleUrl || (findTemplateSample(t.id) ? `/api/image-studio/template-sample/${t.id}` : null),
   }));
+  const companyId = req.user?.companyId;
+  const industryCategories = companyId ? studioIndustryCategories(await resolveCompanyIndustry(companyId)) : null;
   // ★ 2026-10-06 subOrder = 카테고리별 세부 칩 순서(화면이 이 순서로 칩을 그린다)
-  return res.json({ success: true, templates, subOrder: SUB_ORDER });
+  return res.json({ success: true, templates, subOrder: SUB_ORDER, industryCategories });
 });
 
 // ── POST /template-samples/generate — 예시 실샘플 배치 생성 (★슈퍼관리자 전용·내부 원가) ──

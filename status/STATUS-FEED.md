@@ -185,6 +185,13 @@
 > 검증 = FE · BE tsc 0 · vitest 595파일 8,371건 · 렌더 108곳 · Codex 적대 1R approve(gpt-6-astra · 지적 0 · 지정 파일 66개 + 분리 전 원본을 읽고 대조)
 > 다음 = 배포(백엔드 reload + 프론트 build:safe · AI 영업 C12 와 한 번에) → 실측(목록 숫자 카드 값 · 상세 창 저장 · 7일 부여 1회)
 
+<a id="c33"></a>
+
+### C33 · ★1016 이미지 스튜디오 개편 + 템플릿 +80 — 코드 완료 · Codex approve(개편 2R · 템플릿 4R) · 배포 대기 · DDL 0
+> 호출어 **"스튜디오 개편 / 템플릿 고르기 / 결과에서 채널로 / 템플릿 80"** → 설계서 = [스튜디오 고르기·채널](../docs/2026-10-16-image-studio-picker-channel-design.md) · 기능 SoT = [FEATURE-IMAGE-STUDIO](../docs/FEATURE-IMAGE-STUDIO.md) §4-1-D · 범위 밖 = [B-1016-3](BUGS.md)
+> 경로 = 비토 구조체크(후보 4) → 브레인스토밍 5역할 + 회의론자 최종 검증 8건 → Harold 승인(DM 창 첫 장 자동 선택 폐기) → 구현. 공용 TemplatePicker·StudioMake(스튜디오 · DM 삽입 창) · 결과 카드 채널 버튼(저장 성공 뒤에만 이동) · `/templates` `industryCategories`(뷰티·의류·요식만) · `/save` 409 공용 처리(`lib/studio-api`).
+> 템플릿 = 요식업 44 · 시즌 12 · 공통 판촉·참여 16 · 뷰티·의류 8 · 세부 신설 4 · 영업 달 표 10. ★ 남은 확인 = 배포 뒤 ① 예시 배치 80장(§5) ② 업종 분포 SELECT ③ 결과 카드 → 모바일 DM 1건 · DM 창 행사 템플릿 문구 위치 1건.
+
 <a id="c32"></a>
 
 ### C32 · ★1016 알림톡 대체발송 축 + 대행발송 승인 3.5 — 배포 완료 1016 21시(`675ce1c9` · B-1016-1 커밋 `f9eb2837` 포함) · 66 동기화 보류 · DDL 0

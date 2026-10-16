@@ -41,12 +41,18 @@ describe('블록 조립 계약', () => {
   });
 
   it('3. 이미지 스튜디오 삽입 = 기존 생성·저장 경로', () => {
+    // ★ 2026-10-16 창이 스튜디오와 같은 공용 부품을 지난다(고르기 TemplatePicker · 만들기 StudioMake · 저장 lib/studio-api)
     const src = front('components/dm/build/StudioInsertModal.tsx');
-    expect(src).toContain('/api/image-studio/templates');
-    expect(src).toContain('/api/image-studio/generate');
-    expect(src).toContain('/api/image-studio/save');
+    expect(src).toContain("from '../../studio/TemplatePicker'");
+    expect(src).toContain("from '../../studio/StudioMake'");
+    expect(src).toContain('saveStudioTemp(');
+    expect(front('components/studio/TemplatePicker.tsx')).toContain('/api/image-studio/templates');
+    expect(front('components/studio/StudioMake.tsx')).toContain('/api/image-studio/generate');
+    expect(front('lib/studio-api.ts')).toContain('/api/image-studio/save');
     // 새 생성 엔진·새 크레딧 키를 만들지 않는다
-    expect(src).not.toMatch(/deductCredit|creditKey|new-credit/i);
+    for (const f of ['components/dm/build/StudioInsertModal.tsx', 'components/studio/StudioMake.tsx', 'lib/studio-api.ts']) {
+      expect(front(f)).not.toMatch(/deductCredit|creditKey|new-credit/i);
+    }
   });
 
   it('4. 조립 캔버스 = 편집기와 같은 DmCanvas · 저장도 스토어 한 곳', () => {

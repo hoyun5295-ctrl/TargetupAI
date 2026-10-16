@@ -20,6 +20,9 @@ const LIGHT_SURFACE_FILES = [
   'components/dm/build/BlockEditModal.tsx',
   'components/dm/build/StudioInsertModal.tsx',
   'components/dm/build/CatalogPageModal.tsx',
+  // ★ 2026-10-16 스튜디오 창이 쓰는 공용 부품(스튜디오 화면과 공유) — 창 안에서 그려진다
+  'components/studio/TemplatePicker.tsx',
+  'components/studio/StudioMake.tsx',
 ];
 
 /** 흰 표면에서 글씨가 묻는 다크 전제 색 */
@@ -49,7 +52,8 @@ describe('블록 조립 창 표면 색', () => {
   });
 
   it('입력칸은 글씨·안내 글씨 색을 명시한다 (브라우저 기본색에 기대지 않는다)', () => {
-    for (const file of ['components/dm/build/StudioInsertModal.tsx', 'components/dm/build/CatalogPageModal.tsx']) {
+    // ★ 2026-10-16 스튜디오 창의 입력칸은 공용 만들기 부품(StudioMake)으로 옮겨 갔다
+    for (const file of ['components/studio/StudioMake.tsx', 'components/studio/TemplatePicker.tsx', 'components/dm/build/CatalogPageModal.tsx']) {
       const src = front(file);
       const inputs = src.split('\n').filter((l) => l.includes('<input') || l.includes('className="w-full px-3 py-2 rounded'));
       expect(inputs.length, `${file} 에 입력칸이 있어야 한다`).toBeGreaterThan(0);

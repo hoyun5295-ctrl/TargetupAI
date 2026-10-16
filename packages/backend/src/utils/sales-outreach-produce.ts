@@ -339,6 +339,17 @@ export const INDUSTRY_TEMPLATE_MAP: Record<IndustryCode, { product: TemplateCate
   etc:     { product: ['세일·이벤트'], event: ['팝업·페스티벌'] },
 };
 
+/**
+ * ★ 2026-10-16 이미지 스튜디오 「우리 업종 먼저」 — 위 표의 product 열을 고객사 업종 셋(뷰티·의류·요식)만 읽는다.
+ * 그 밖 12코드 · 미설정 · 모르는 값 = null(추측 추천 0 · 리빙 추천 금지). 이 표를 고치면 스튜디오 순서도 같이 바뀐다(단일 출처).
+ * 설계서 = docs/2026-10-16-image-studio-picker-channel-design.md §2-3
+ */
+const STUDIO_INDUSTRY_CODES: readonly IndustryCode[] = ['beauty', 'fashion', 'food'];
+export function studioIndustryCategories(code: string | null | undefined): TemplateCategory[] | null {
+  const c = String(code || '') as IndustryCode;
+  return STUDIO_INDUSTRY_CODES.includes(c) ? [...INDUSTRY_TEMPLATE_MAP[c].product] : null;
+}
+
 /** 모듈 로드 시 1회 파생. 빈 풀 판정은 계약 테스트가 소유한다(import 시점 throw 금지 — app 부팅 체인). */
 export const TEMPLATE_POOLS: Record<IndustryCode, { product: StudioTemplate[]; event: StudioTemplate[] }> = Object.fromEntries(
   INDUSTRY_CODES.map((code) => [code, {
@@ -367,10 +378,14 @@ export const OUTREACH_TEMPLATE_MONTHS: Readonly<Record<string, readonly number[]
   'event-season-boknal': [7, 8], 'event-season-seollal': [1, 2], 'event-season-daeboreum': [2, 3], 'event-season-cherryfest': [3, 4],
   'event-season-monsoon': [6, 7], 'event-season-foliage': [10, 11], 'event-season-kimjang': [11, 12], 'event-season-longholiday': [5, 9, 10],
   'event-season-backtoschool': [2, 8], 'event-season-heatwave': [7, 8], 'event-season-firstcold': [10, 11],
+  // ★ 2026-10-16 시즌·명절 행사 보강
+  'event-season-giftguide': [11, 12], 'event-season-holiday-edition': [11, 12], 'event-season-winter-kids': [12, 1, 2], 'event-season-holiday-hours': [1, 2, 9, 10], 'event-season-yearend-thanks': [12], 'event-season-spring-preview': [2, 3], 'event-season-newyear-reset': [12, 1],
   // 데이·기념일
   'event-day-valentine': [2], 'event-day-whiteday': [3], 'event-day-carnation': [5], 'event-day-children': [5], 'event-day-newsemester': [2, 3],
   'event-day-suneung': [11], 'event-day-halloween': [10], 'event-day-roseday': [5], 'event-day-pepero': [11], 'event-day-teacher': [5],
   'event-day-adult': [5], 'event-day-black': [4], 'event-day-advent': [12], 'event-day-samgyeop': [3], 'event-day-earth': [4], 'event-day-firstsnow': [11, 12],
+  // ★ 2026-10-16 데이·기념일 보강
+  'event-day-examticket': [11, 12], 'event-day-graduation': [1, 2], 'event-day-ipchun': [2],
   // 시즌(제품 누끼)
   'season-korean-holiday': [1, 2, 8, 9], 'season-yearend-festive': [12], 'season-spring-blossom': [3, 4], 'season-rainy-mood': [6, 7],
   'season-first-snow': [11, 12], 'season-golden-hour': [8, 9], 'season-fresh-green': [5, 6], 'season-summer-night': [6, 7, 8],

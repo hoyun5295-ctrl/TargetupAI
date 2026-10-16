@@ -5,7 +5,7 @@
  * 개편은 화면의 틀·색을 바꾸고 기능은 1비트도 바꾸지 않는다. 그 약속을 사람 눈이 아니라 기계가 지키게
  * 개편 직전 소스에서 "AI 존이 부르는 서버 경로(횟수 포함)와 이동 목적지"를 뽑아 기준표로 고정한다.
  *
- * 범위 = 뒤로가기 뿌리가 `/ai-operator`인 루트 페이지 25 → 상대 import 전이 폐포(pages·components).
+ * 범위 = 뒤로가기 뿌리가 `/ai-operator`인 루트 페이지 25 → 상대 import 전이 폐포(pages·components · ★1016 lib 포함).
  */
 import { readFileSync, readdirSync, existsSync } from 'fs';
 import { join, resolve, dirname, normalize, relative } from 'path';
@@ -80,7 +80,8 @@ export function zoneFiles(): string[] {
     const src = files().get(f) || '';
     for (const m of src.matchAll(/(?:import|export)[^'"`]*?from\s+['"]([^'"]+)['"]|import\(\s*['"]([^'"]+)['"]\s*\)/g)) {
       const dep = resolveImport(f, m[1] || m[2]);
-      if (dep && (dep.startsWith('pages/') || dep.startsWith('components/'))) stack.push(dep);
+      // ★ 2026-10-16 lib/ 도 따라간다 — 화면 두 곳의 호출을 공용 요청 모듈(lib/studio-api 등)로 모으면 그 호출이 존 밖으로 사라진 것처럼 셌다
+      if (dep && (dep.startsWith('pages/') || dep.startsWith('components/') || dep.startsWith('lib/'))) stack.push(dep);
     }
   }
   return [...seen].sort();
