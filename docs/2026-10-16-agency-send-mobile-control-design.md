@@ -25,7 +25,7 @@
 
 ## 2. 수렴안 (축별)
 
-### 축 0. 승인의 법정 추가 인증 (10/26 전 · 1순위) ← 이번 구현
+### 축 0. 승인의 법정 추가 인증 (10/26 전 · 1순위) ← 배포 완료 1016 21시(직원 번호 승인 포함 · Codex 적대 4R approve)
 - **게이트 자리 = 승인 CT 하나**(`approveAgencyRequestTx`). PC 승인·링크 승인이 같은 함수를 지나므로 두 입구에 함께 걸린다(지금은 PC 승인에도 없다 · `routes/agency-send.ts:672`).
   - 순서 = 사전 읽기 → **승인 가능 판정(안 되면 인증번호 문자를 보내지 않는다)** → `checkSenderAuthGate`(BEGIN **앞** · 인증번호 문자는 외부 호출) → BEGIN → 잠금 → 재판정 → 전이·이력 → COMMIT.
   - 인증 키 = 발송과 같은 판정(최종 검증 7): 수신자 행에 회신번호가 하나라도 있으면 `*`(계정 축), 없으면 대표 번호. 판정 = `findUnregisteredRequestCallbacks(row).rowCallbacks.length > 0`(워커 적재와 같은 함수 · `agency-send-worker.ts:1093`).
