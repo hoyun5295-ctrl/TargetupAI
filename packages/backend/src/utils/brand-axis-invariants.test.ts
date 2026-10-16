@@ -409,9 +409,11 @@ describe('브랜드 친구·비친구 단가 배선 (2026-09-13 · 소스 스캔
     const issue = stripComments(read('./billing-issue.ts'));
     const start = issue.indexOf('const subtotalExact =');
     const expr = issue.slice(start, issue.indexOf(';', start));
-    for (const t of BILLING_TYPES.filter((b) => b.companyPriceColumn)) {
-      expect(expr, `공급가액 식에 prices.${t.key} 누락`).toContain(`prices.${t.key}`);
-    }
+    // ★ 2026-10-16 손 나열 → 유형 표 순회(B-1016-1). 표의 모든 키가 구조적으로 들어간다 — 회사 단가 칸이 있는 키만이 아니라 전부.
+    expect(expr).toContain('BILLING_TYPES.reduce(');
+    expect(expr).toContain('totals[t.key]');
+    expect(expr).toContain('allPrices[t.key]');
+    expect(BILLING_TYPES.filter((b) => b.companyPriceColumn).length).toBeGreaterThan(0);
   });
 
   it('매장별 정산 미리보기가 비친구 브랜드 줄을 센다 — 빠지면 매장 합계가 combined와 갈린다', () => {

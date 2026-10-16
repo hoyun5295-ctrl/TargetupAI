@@ -255,20 +255,28 @@ export interface BillingTypeDef {
   /** 게이트웨이 `RSRM_SalesStts.MsgType`(에이전트). null = 에이전트 발송이 없는 유형 */
   agentCode: string | null;
   /**
-   * ★ 2026-09-04 같은 유형키로 흡수할 게이트웨이 코드(별칭). 단가·청구줄을 `key`와 공유한다.
-   *
-   * 카카오 실패 전환분(`KS` = SMS 대체 · `KL` = LMS 대체)이 그것이다. 게이트웨이는 전환 자식을
-   * 별도 코드로 적재하는데(`paystats/reporter.go payMsgType`), 그 실체는 **그 문자 자체**라
-   * 문자 단가로 청구한다. 별칭을 안 두면 유형키가 원본 코드(`KL`)로 남아 청구 단가 정의도
-   * 단가 입력 칸도 없는 상태가 되고 발행이 통째로 막힌다(0904 랩디 접수).
-   *
-   * ⛔ 전용 단가 컬럼을 새로 만들지 않는다 — 쓰는 회사가 한 곳인데 전 고객사 단가 화면에
-   *   칸을 둘 늘리면 0814에 정리한 "안 쓰는 유형이 목록을 채우는" 소음이 되살아난다.
-   * ⚠ 별칭은 `agentCode`·다른 별칭과 겹치면 안 된다(겹치면 한 코드가 두 유형으로 갈린다) —
-   *   `billing-type-axis.test.ts`가 중복 0을 고정한다.
+   * ★ 2026-10-16 정산서 2쪽·관리자 정산 모달의 좁은 유형 칸 이름(B-1016-1). 없으면 `label`.
+   * 그 전에는 PDF 2쪽과 화면이 라벨표 사본을 각자 들고 있어 유형을 늘리면 1쪽만 바뀌었다(대체발송 「반영 안 됨」의 기계적 이유).
    */
-  agentCodeAliases?: readonly string[];
+  shortLabel?: string;
+  /**
+   * ★ 2026-10-16 단가·미설정·무료 제공·헤더 수량의 **상속원 유형키**(B-1016-1). 없으면 자기 자신.
+   *
+   * 알림톡 실패 → 문자 대체분(SMS_FB·LMS_FB)이 그것이다. 실체는 그 문자라 단가는 문자 단가, 무료 LMS 도 덮고,
+   * `billings` 헤더·미리보기 요약은 종전처럼 문자 수량에 합친다. 표시와 청구 줄만 따로 선다.
+   * ⛔ 전용 단가 컬럼을 새로 만들지 않는다(0904 결정 유지 — 안 쓰는 유형이 전 고객사 단가 화면을 채운다).
+   * 소비처 = `billingBaseType`·`foldInheritedTotals`·`billingBaseTypeSql`(아래) 를 통해서만 읽는다.
+   */
+  inheritFrom?: string;
 }
+
+/**
+ * ★ 2026-10-16 알림톡 실패 → 문자 대체분의 청구 집계 코드(B-1016-1).
+ * 웹 SMSQ 는 두 모양(비토 K행 7830·7831 · 옛 S/L + k_oriseq)을 청구 식이 이 코드로 바꾸고(sms-result-map),
+ * 에이전트는 게이트웨이가 같은 코드로 적재한다(`paystats/reporter.go payMsgType`). 그래서 웹·에이전트가 한 유형이다.
+ * 옛(0904): 에이전트만 별칭으로 SMS·LMS 에 흡수 · 웹은 L·S 로 접음 → 정산서에서 대체 여부가 사라졌다.
+ */
+export const FALLBACK_BILLING_CODE = { S: 'KS', L: 'KL' } as const;
 
 /**
  * ★ 2026-09-13 비친구 브랜드메시지 집계 코드. 큐에는 여전히 `F` 하나로 적재된다 —
@@ -277,12 +285,17 @@ export interface BillingTypeDef {
 export const BRAND_NONFRIEND_SMSQ_CODE = 'FN';
 
 export const BILLING_TYPES: readonly BillingTypeDef[] = [
-  { key: 'SMS',      label: 'SMS',           companyPriceColumn: 'cost_per_sms',      agentPriceColumn: 'cost_per_sms',   smsqCode: 'S',  agentCode: 'S', agentCodeAliases: ['KS'] },
-  { key: 'LMS',      label: 'LMS',           companyPriceColumn: 'cost_per_lms',      agentPriceColumn: 'cost_per_lms',   smsqCode: 'L',  agentCode: 'L', agentCodeAliases: ['KL'] },
+  { key: 'SMS',      label: 'SMS',           companyPriceColumn: 'cost_per_sms',      agentPriceColumn: 'cost_per_sms',   smsqCode: 'S',  agentCode: 'S' },
+  { key: 'LMS',      label: 'LMS',           companyPriceColumn: 'cost_per_lms',      agentPriceColumn: 'cost_per_lms',   smsqCode: 'L',  agentCode: 'L' },
   { key: 'MMS',      label: 'MMS',           companyPriceColumn: 'cost_per_mms',      agentPriceColumn: 'cost_per_mms',   smsqCode: 'M',  agentCode: 'M' },
   // ★ 2026-07-25 '카카오' → '카카오알림톡'. 같은 엑셀의 에이전트 행이 '카카오알림톡'이라
   //   한 '유형' 컬럼에 알림톡이 두 이름으로 갈리면 피벗에서 두 줄이 되어 정산 대조가 깨진다.
-  { key: 'KAKAO',    label: '카카오알림톡',    companyPriceColumn: 'cost_per_kakao',    agentPriceColumn: 'cost_per_kakao', smsqCode: 'K',  agentCode: 'K' },
+  // 2쪽 짧은 이름 '카카오' = 고객이 받아 온 PDF 표기(칸 55pt 에 '카카오알림톡'은 두 줄 · 1016 실측)
+  { key: 'KAKAO',    label: '카카오알림톡',    shortLabel: '카카오', companyPriceColumn: 'cost_per_kakao',    agentPriceColumn: 'cost_per_kakao', smsqCode: 'K',  agentCode: 'K' },
+  // ★ 2026-10-16 알림톡 실패 → 문자 대체분(B-1016-1 · 서수란 접수). 단가·무료·헤더 수량은 문자 그대로(inheritFrom),
+  //   청구 줄과 이름만 따로 선다. smsqCode 는 큐 값이 아니라 청구 식이 만드는 집계 코드다(FN 과 같은 예외).
+  { key: 'SMS_FB',   label: 'SMS(대체발송)',   shortLabel: 'SMS(대체)', companyPriceColumn: null, agentPriceColumn: 'cost_per_sms', smsqCode: FALLBACK_BILLING_CODE.S, agentCode: FALLBACK_BILLING_CODE.S, inheritFrom: 'SMS' },
+  { key: 'LMS_FB',   label: 'LMS(대체발송)',   shortLabel: 'LMS(대체)', companyPriceColumn: null, agentPriceColumn: 'cost_per_lms', smsqCode: FALLBACK_BILLING_CODE.L, agentCode: FALLBACK_BILLING_CODE.L, inheritFrom: 'LMS' },
   // ★ 2026-07-29 브랜드메시지(구 친구톡).
   //   ★ 2026-07-30 재구축: 웹도 SMSQ 큐에 `msg_type='F'`로 적재된다 — smsqCode 'F' 등재로
   //   일자·상세 정산 두 축의 유형키 맵(MSG_TYPE_TO_USAGE_KEY)이 자동 확장된다(전용 IMC arm 폐기).
@@ -291,25 +304,57 @@ export const BILLING_TYPES: readonly BillingTypeDef[] = [
   //   비친구 칸이 비면 친구 단가로 청구된다(resolveBillingUnitPricesDetailed). 발송ID(에이전트) 축은 두지 않는다 —
   //   에이전트로는 브랜드를 보낼 수 없고 게이트웨이 통계에 대상 구분이 없어 읽을 곳이 없다.
   { key: 'BRAND_NF', label: '브랜드메시지(비친구)', companyPriceColumn: 'cost_per_brand_nonfriend', agentPriceColumn: null, smsqCode: BRAND_NONFRIEND_SMSQ_CODE, agentCode: null },
-  { key: 'TEST_SMS', label: '테스트 SMS',     companyPriceColumn: 'cost_per_test_sms', agentPriceColumn: null,             smsqCode: null, agentCode: null },
-  { key: 'TEST_LMS', label: '테스트 LMS',     companyPriceColumn: 'cost_per_test_lms', agentPriceColumn: null,             smsqCode: null, agentCode: null },
+  // 2쪽 짧은 이름(테스트SMS 등) = 고객이 받아 온 PDF 표기 그대로(★2026-10-16 사본 삭제 때 옮겼다)
+  { key: 'TEST_SMS', label: '테스트 SMS',     shortLabel: '테스트SMS', companyPriceColumn: 'cost_per_test_sms', agentPriceColumn: null,             smsqCode: null, agentCode: null },
+  { key: 'TEST_LMS', label: '테스트 LMS',     shortLabel: '테스트LMS', companyPriceColumn: 'cost_per_test_lms', agentPriceColumn: null,             smsqCode: null, agentCode: null },
   // ★ 2026-09-27 한줄로 V2 m060(Harold 결정 「회사 MMS 단가로 청구」) — 테스트 MMS가 테스트 LMS 단가로 청구되던 것을 가른다.
   //   전용 칸을 두지 않고 회사 MMS 단가를 따른다(선불 테스트 차감도 MMS 단가 · 테스트 브랜드와 같은 형태).
-  { key: 'TEST_MMS', label: '테스트 MMS',     companyPriceColumn: null,                agentPriceColumn: null,             smsqCode: null, agentCode: null },
+  { key: 'TEST_MMS', label: '테스트 MMS',     shortLabel: '테스트MMS', companyPriceColumn: null,                agentPriceColumn: null,             smsqCode: null, agentCode: null },
   // ★ 2026-09-26 한줄로 V2 S1-H06 담당자 브랜드메시지 테스트(Harold 결정 「브랜드 단가로 청구」). 전용 단가 칸을 두지 않고
   //   브랜드(친구) 단가를 따른다 — 스팸테스트가 일반 단가를 따르는 것과 같은 형태(단가 화면에 칸이 늘지 않는다).
-  { key: 'TEST_BRAND', label: '테스트 브랜드메시지', companyPriceColumn: null,           agentPriceColumn: null,             smsqCode: null, agentCode: null },
+  { key: 'TEST_BRAND', label: '테스트 브랜드메시지', shortLabel: '테스트브랜드메시지', companyPriceColumn: null,           agentPriceColumn: null,             smsqCode: null, agentCode: null },
   // 스팸테스트는 전용 단가가 없고 일반 SMS/LMS 단가를 그대로 쓴다(D16) — 그래서 컬럼이 없다.
-  { key: 'SPAM_SMS', label: '스팸테스트 SMS', companyPriceColumn: null,                agentPriceColumn: null,             smsqCode: null, agentCode: null },
-  { key: 'SPAM_LMS', label: '스팸테스트 LMS', companyPriceColumn: null,                agentPriceColumn: null,             smsqCode: null, agentCode: null },
+  { key: 'SPAM_SMS', label: '스팸테스트 SMS', shortLabel: '스팸SMS', companyPriceColumn: null,                agentPriceColumn: null,             smsqCode: null, agentCode: null },
+  { key: 'SPAM_LMS', label: '스팸테스트 LMS', shortLabel: '스팸LMS', companyPriceColumn: null,                agentPriceColumn: null,             smsqCode: null, agentCode: null },
 ];
+
+const INHERIT_FROM: Record<string, string> = Object.fromEntries(
+  BILLING_TYPES.flatMap((t) => (t.inheritFrom ? [[t.key, t.inheritFrom] as const] : [])),
+);
+
+/** ★ 2026-10-16 유형키의 상속원(없으면 자기 자신) — 단가·미설정·무료 제공·헤더 수량이 이 값으로 묶인다(B-1016-1) */
+export function billingBaseType(key: string): string {
+  const k = String(key || '');
+  return INHERIT_FROM[k] || k;
+}
+
+/**
+ * ★ 2026-10-16 (순수) 유형키별 수량 → 상속원별 수량. 상속 유형은 상속원에 더하고 자기 키는 남기지 않는다.
+ * 소비처 = `billings` 헤더 sms/lms_success · 정산 미리보기 요약·매장별. 이 화면들은 문자 칸만 있어 대체분을
+ * 종전처럼 문자 수량에 합쳐야 값이 바뀌지 않는다(대체분이 따로 서는 곳은 청구 줄·정산서뿐이다).
+ */
+export function foldInheritedTotals(totals: Record<string, number>): Record<string, number> {
+  const out: Record<string, number> = {};
+  for (const [k, v] of Object.entries(totals || {})) {
+    const base = billingBaseType(k);
+    out[base] = (out[base] || 0) + (Number(v) || 0);
+  }
+  return out;
+}
+
+/** ★ 2026-10-16 SQL용: 유형키 칸을 상속원으로 바꾸는 식(무료 사용량 조회가 공제 배분과 같은 상속원을 보게 한다) */
+export function billingBaseTypeSql(column: string): string {
+  const whens = Object.entries(INHERIT_FROM).map(([k, base]) => `WHEN '${k}' THEN '${base}'`).join(' ');
+  return whens ? `(CASE ${column} ${whens} ELSE ${column} END)` : column;
+}
 
 /**
  * 테스트 라인 행(`app_etc1 = 'test'`)의 청구 유형키. 일자축·상세축 두 집계가 이 한 벌을 쓴다.
  * ★ 2026-09-26 한줄로 V2 S1-H06 — 브랜드(F · 비친구 집계 코드 FN 포함)는 테스트 브랜드. 그 밖은 종전 그대로(S = 테스트 SMS · 나머지 = 테스트 LMS).
  */
 export function testBillingTypeKey(msgType: string): 'TEST_SMS' | 'TEST_LMS' | 'TEST_MMS' | 'TEST_BRAND' {
-  if (msgType === 'S') return 'TEST_SMS';
+  // ★ 2026-10-16 청구 식이 대체분을 KS·KL 로 낸다(B-1016-1) — KS 가 기본값(테스트 LMS)으로 떨어지면 조용한 오청구다
+  if (msgType === 'S' || msgType === FALLBACK_BILLING_CODE.S) return 'TEST_SMS';
   if (msgType === 'M') return 'TEST_MMS';   // ★ 2026-09-27 m060
   if (msgType === 'F' || msgType === BRAND_NONFRIEND_SMSQ_CODE) return 'TEST_BRAND';
   return 'TEST_LMS';

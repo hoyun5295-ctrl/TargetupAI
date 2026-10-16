@@ -9,7 +9,7 @@ import { loadActiveRules, evaluateContent, logSpamBlockHits, SpamBlockLogEntry }
 import { CACHE_TTL, BATCH_SIZES } from '../config/defaults';
 import { isValidSmsTable } from './sms-table-validator';
 import { query } from '../config/database';
-import { SUCCESS_CODES, PENDING_CODES } from './sms-result-map';
+import { SUCCESS_CODES, PENDING_CODES, SMS_SUB_ROW_SQL, KAKAO_FALLBACK_SMS_CODE, KAKAO_FALLBACK_LMS_CODE } from './sms-result-map';
 import { classifyResultTables, mergeCampaignCounts, type CampaignAggCounts } from './sms-table-split';
 import type { AlimtalkResultAgg } from './refund-calc';
 import { splitLinesByMsgType } from './sms-line-split';
@@ -512,8 +512,9 @@ export async function smsBatchAggByGroup(
   return result;
 }
 
-/** 알림톡 실패 대체 행(자식 행) 판정 — smsCampaignSubRowCounts · smsAlimtalkResultAgg · 원 행 범위('primary')가 같은 조건을 쓴다 */
-export const SMS_SUB_ROW_SQL = 'k_oriseq IS NOT NULL AND k_oriseq > 0';
+/** 알림톡 실패 대체 행(자식 행) 판정 — smsCampaignSubRowCounts · smsAlimtalkResultAgg · 원 행 범위('primary')가 같은 조건을 쓴다.
+ *  ★ 2026-10-16 정의는 sms-result-map(대체 판정 소유)으로 옮겼다 · 기존 import 경로를 위해 다시 내보낸다(B-1016-1) */
+export { SMS_SUB_ROW_SQL };
 
 /**
  * 행 범위 조건 — 'brand' = msg_type 'F'만 · 'nonBrand' = 그 외 · 'primary' = 대체 행을 뺀 원 행 · 'all' = 조건 없음('').
@@ -602,8 +603,8 @@ export async function smsAlimtalkResultAgg(
   const SUB = SMS_SUB_ROW_SQL;
   const agg = await smsBatchAggByGroup(resultTables, 'app_etc1', `
         SUM(CASE WHEN msg_type = 'K' AND status_code = 1800 THEN 1 ELSE 0 END) AS kakao,
-        SUM(CASE WHEN msg_type = 'K' AND status_code = 7830 THEN 1 ELSE 0 END) AS inRowSms,
-        SUM(CASE WHEN msg_type = 'K' AND status_code = 7831 THEN 1 ELSE 0 END) AS inRowLms,
+        SUM(CASE WHEN msg_type = 'K' AND status_code = ${KAKAO_FALLBACK_SMS_CODE} THEN 1 ELSE 0 END) AS inRowSms,
+        SUM(CASE WHEN msg_type = 'K' AND status_code = ${KAKAO_FALLBACK_LMS_CODE} THEN 1 ELSE 0 END) AS inRowLms,
         SUM(CASE WHEN msg_type = 'S' AND ${SUB} AND status_code IN (${SUC}) THEN 1 ELSE 0 END) AS subSms,
         SUM(CASE WHEN msg_type = 'L' AND ${SUB} AND status_code IN (${SUC}) THEN 1 ELSE 0 END) AS subLms,
         SUM(CASE WHEN ${SUB} THEN 1 ELSE 0 END) AS sub`, ids);

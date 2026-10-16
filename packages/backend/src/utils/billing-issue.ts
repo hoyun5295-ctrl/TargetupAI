@@ -28,7 +28,9 @@ import {
   type PricedBillingItem, type BillingScope,
 } from './send-usage-aggregation';
 // ★ 2026-07-30 절사 위치 정정 — 헤더·장 공급가액을 절사된 항목줄 합에서 파생(그룹핑·절사 단일원).
-import { sumFlooredInvoiceLines } from './billing-invoice-lines';
+import { sumFlooredInvoiceLines, billingTypeLabel } from './billing-invoice-lines';
+// ★ 2026-10-16 대체발송 유형(SMS_FB·LMS_FB) — 헤더 금액 항등식은 유형 표에서 · 헤더 수량은 상속원으로 접는다(B-1016-1)
+import { BILLING_TYPES, foldInheritedTotals } from './billing-types';
 // ★ 2026-08-04 수량 수정 발행 — 사람이 넣은 조정을 같은 유형·같은 단가 줄로 얹는다(서수란 0804 접수).
 import {
   loadQtyAdjustments, buildAdjustmentBillingItems, findNegativeAdjustedTypes, QtyAdjustmentError,
@@ -456,14 +458,13 @@ export async function issueBilling(input: IssueBillingInput): Promise<any> {
   // 7) 합산 — ★ 2026-07-25 미리보기와 같은 함수로(금액 불일치 차단)
   const totals = buildBillingTotals(dayData);
   logUnbillableUsageKeys(dayData, `정산생성 company=${company_id} ${billing_start}~${billing_end}`);
-  const totalSms = totals.SMS, totalLms = totals.LMS, totalMms = totals.MMS, totalKakao = totals.KAKAO;
-  // ★ 2026-07-29 브랜드메시지 — 항등식에서 빠지면 상세합과 공급가액이 갈려 BILLING_AMOUNT_MISMATCH로 발행이 막힌다.
-  const totalBrand = totals.BRAND;
-  const totalBrandNf = totals.BRAND_NF;   // ★ 2026-09-13 비친구 브랜드 — 빠지면 같은 이유로 발행이 막힌다
-  const totalTestSms = totals.TEST_SMS, totalTestLms = totals.TEST_LMS;
-  const totalTestBrand = totals.TEST_BRAND;
-  const totalTestMms = totals.TEST_MMS;   // ★ 2026-09-27 한줄로 V2 m060 — 테스트 MMS(회사 MMS 단가) · 빠지면 상세합≠공급가액으로 발행이 막힌다   // ★ 2026-09-26 S1-H06 — 빠지면 상세합≠공급가액으로 발행이 막힌다(BRAND 선례)
-  const totalSpamSms = totals.SPAM_SMS, totalSpamLms = totals.SPAM_LMS;
+  // ★ 2026-10-16 응답 요약 수량은 상속원으로 접는다(대체 LMS 는 종전처럼 LMS 수량에 · B-1016-1). 금액 항등식은 아래에서 유형 표 전체로.
+  const baseTotals = foldInheritedTotals(totals);
+  const totalSms = baseTotals.SMS || 0, totalLms = baseTotals.LMS || 0, totalMms = baseTotals.MMS || 0, totalKakao = baseTotals.KAKAO || 0;
+  const totalBrand = baseTotals.BRAND || 0;
+  const totalBrandNf = baseTotals.BRAND_NF || 0;
+  const totalTestSms = baseTotals.TEST_SMS || 0, totalTestLms = baseTotals.TEST_LMS || 0;
+  const totalSpamSms = baseTotals.SPAM_SMS || 0, totalSpamLms = baseTotals.SPAM_LMS || 0;
 
   // 스팸필터 단가 = 일반 단가와 동일 (D16 결정)
   const spamSmsCost = prices.SMS;
@@ -526,7 +527,7 @@ export async function issueBilling(input: IssueBillingInput): Promise<any> {
   const webUnsetPriced = findUnsetPricedTypes(webUnsetPriceKeys, usage.rows);
   if (webUnsetPriced.length > 0) {
     throw new BillingIssueError(422, {
-      error: `고객사 단가가 설정되지 않은 발송 유형이 있어 발행을 중단했습니다. 고객사 관리에서 단가를 채운 뒤 다시 발행해 주세요: ${summarizeBlockList(webUnsetPriced.map((u) => `${u.key}(성공 ${u.success.toLocaleString()})`))}`,
+      error: `고객사 단가가 설정되지 않은 발송 유형이 있어 발행을 중단했습니다. 고객사 관리에서 단가를 채운 뒤 다시 발행해 주세요: ${summarizeBlockList(webUnsetPriced.map((u) => `${billingTypeLabel(u.key)}(성공 ${u.success.toLocaleString()})`))}`,
       code: 'WEB_UNIT_PRICE_UNSET',
       unset_price_types: webUnsetPriced,
     });
@@ -557,14 +558,14 @@ export async function issueBilling(input: IssueBillingInput): Promise<any> {
   // 단가를 못 정하는 유형이 남아 있으면 그 유형은 0원으로 청구된다 — 발행 전에 막는다.
   if (priced.unbillableTypes.length > 0) {
     throw new BillingIssueError(422, {
-      error: `청구 단가가 정의되지 않은 발송 유형이 있어 발행을 중단했습니다: ${summarizeBlockList(priced.unbillableTypes.map((u) => `${u.key}(성공 ${u.success.toLocaleString()})`))}. 그대로 발행하면 이 유형이 0원으로 청구됩니다.`,
+      error: `청구 단가가 정의되지 않은 발송 유형이 있어 발행을 중단했습니다: ${summarizeBlockList(priced.unbillableTypes.map((u) => `${billingTypeLabel(u.key)}(성공 ${u.success.toLocaleString()})`))}. 그대로 발행하면 이 유형이 0원으로 청구됩니다.`,
       code: 'UNBILLABLE_TYPE_KEY',
       unbillable_types: priced.unbillableTypes,
     });
   }
   if (priced.missingAgentPrices.length > 0) {
     throw new BillingIssueError(422, {
-      error: `에이전트 발송ID 단가가 설정되지 않아 발행을 중단했습니다. 발송ID별 단가를 채운 뒤 다시 발행해 주세요: ${summarizeBlockList(priced.missingAgentPrices.map((m) => `${m.agentSendId} ${m.typeKey}(성공 ${m.success.toLocaleString()})`))}`,
+      error: `에이전트 발송ID 단가가 설정되지 않아 발행을 중단했습니다. 발송ID별 단가를 채운 뒤 다시 발행해 주세요: ${summarizeBlockList(priced.missingAgentPrices.map((m) => `${m.agentSendId} ${billingTypeLabel(m.typeKey)}(성공 ${m.success.toLocaleString()})`))}`,
       code: 'AGENT_UNIT_PRICE_MISSING',
       missing_agent_prices: priced.missingAgentPrices,
     });
@@ -777,11 +778,11 @@ export async function issueBilling(input: IssueBillingInput): Promise<any> {
 
     // ★ 2026-07-26 금액 항등식 — 헤더는 `totals × 단가`, 상세는 `priceBillingRows`로 **서로 다른 코드가 계산한다.**
     //   대조는 **절사 전** 값끼리 한다.
+    // ★ 2026-10-16 유형별 항은 **유형 표 전체를 돈다**(B-1016-1). 옛: 유형을 손으로 나열해 새 유형(BRAND · BRAND_NF · TEST_MMS ·
+    //   TEST_BRAND · 이번 SMS_FB·LMS_FB)마다 "빠지면 발행이 막힌다" 주석과 함께 한 줄씩 더했다. 단가는 발행과 같은 allPrices
+    //   (스팸 = 일반 단가 · D16). totals 는 buildBillingTotals 가 표의 키로만 만든다.
     const subtotalExact =
-      (totalSms * prices.SMS) + (totalLms * prices.LMS) +
-      (totalMms * prices.MMS) + (totalKakao * prices.KAKAO) + (totalBrand * prices.BRAND) + (totalBrandNf * prices.BRAND_NF) +
-      (totalTestSms * prices.TEST_SMS) + (totalTestLms * prices.TEST_LMS) + (totalTestBrand * prices.TEST_BRAND) + (totalTestMms * prices.TEST_MMS) +
-      (totalSpamSms * spamSmsCost) + (totalSpamLms * spamLmsCost) +
+      BILLING_TYPES.reduce((s, t) => s + (Number(totals[t.key]) || 0) * (Number(allPrices[t.key]) || 0), 0) +
       agentAmountExact +
       planAmount +
       extraSupply + // ★ 2026-07-30 080 등 월별 추가 항목 — 빠지면 상세합≠공급가액으로 발행이 막힌다(BRAND 선례)
@@ -862,7 +863,8 @@ export async function issueBilling(input: IssueBillingInput): Promise<any> {
       // ★ 2026-07-30 장 공급가액 = 그 장의 절사된 항목줄 합 — 문서에 인쇄되는 항목표와 정의상 일치.
       const sheetSubtotal = sheetFloored[sheetIdx] + (carries ? aiCreditSupply : 0);
       const sheetVat = vatOfSupply(sheetSubtotal);
-      const t = sheet.totals;
+      // ★ 2026-10-16 헤더 sms/lms_success 는 상속원 수량(대체분 포함 · 종전 값 유지 · B-1016-1). 대체 줄은 billing_items 가 따로 싣는다.
+      const t = foldInheritedTotals(sheet.totals);
 
       const billingResult = await client.query(
         `INSERT INTO billings (
@@ -876,10 +878,10 @@ export async function issueBilling(input: IssueBillingInput): Promise<any> {
         RETURNING *`,
         [
           company_id, sheet.userId, billing_year, billing_month, billing_start, billing_end,
-          t.SMS, t.LMS, t.MMS, t.KAKAO,
+          t.SMS || 0, t.LMS || 0, t.MMS || 0, t.KAKAO || 0,
           prices.SMS, prices.LMS, prices.MMS, prices.KAKAO,
-          t.TEST_SMS, t.TEST_LMS, prices.TEST_SMS, prices.TEST_LMS,
-          t.SPAM_SMS, t.SPAM_LMS, spamSmsCost, spamLmsCost,
+          t.TEST_SMS || 0, t.TEST_LMS || 0, prices.TEST_SMS, prices.TEST_LMS,
+          t.SPAM_SMS || 0, t.SPAM_LMS || 0, spamSmsCost, spamLmsCost,
           sheetSubtotal, sheetVat, sheetSubtotal + sheetVat,
           carries ? aiCreditCount : 0, carries ? aiCreditSupply : 0,
           adminId, sheet.sheetScope, batchId,

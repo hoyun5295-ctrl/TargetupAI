@@ -55,6 +55,15 @@
 
 ## 2) 활성 버그
 
+### 🟡 B-1016-1 알림톡 실패 → 문자 대체가 통계 엑셀엔 「알림톡 0건」, 정산서엔 그냥 「LMS」(서수란 1016 `cmvaear5e1hyajnn445hdnx59` · 크로커다일 피에르가르뎅(플러스) 10/13 · P2 · 같은 부류 세 번째) · 코드 완료 · Codex 4R approve · 배포 대기
+- **원인(코드)**: 「대체」 판정이 다섯 군데에 따로 있었다. 통계 엑셀(`tallySmsChannelCounts` · 행 1 = 채널 1)은 비토 K행 7831 을 대체로만 세어 알림톡 0 · 목록(`tallyAlimtalkFallback`)은 알림톡 실패 1 + 대체 1. 청구 식(`BILLING_MSG_TYPE_SQL`)은 대체를 L·S 로 접고 에이전트 KS·KL 도 별칭으로 SMS·LMS 에 흡수 → 정산서가 대체 여부를 그릴 재료가 없었다. 표시명도 세 벌(축 · PDF 2쪽 사본 · 관리자 모달 사본). B-1003-1(단가) · 1007 박성용(목록)이 각자 표면 하나만 고쳤다.
+- **처방**: [설계서](../docs/2026-10-16-alimtalk-fallback-axis-design.md) — 비토 구조체크 → 브레인스토밍 4역할 수렴. ① 판정 `sms-result-map fallbackOf` 하나 · 통계 엑셀 = 목록과 같은 집계(알림톡 행 = 시도 전체) ② 청구 유형 `SMS_FB`·`LMS_FB`(「LMS(대체발송)」 · 2쪽 「LMS(대체)」 · 집계 코드 KS·KL = 에이전트와 같은 유형 · `inheritFrom` 이 단가·미설정·무료 공제·헤더 수량을 문자로 묶음) ③ 표시명 서버 확정(`type_label` · 사본 2벌 삭제 · 차단 문구도 표시명) ④ 계약 `alimtalk-fallback-axis-1016.test.ts`(구현 전 28 실패). 헤더 금액 항등식은 유형 표 순회 · 테스트 라인 상세축도 같은 청구 식.
+- **검증**: tsc 0(백·프) · vitest 612파일 8,740건 · 계약 `alimtalk-fallback-axis-1016.test.ts`(구현 전 28 실패) · Codex 적대 1R medium(배포 전 「LMS」 수량 조정 재발행이 대체분만 있는 기간에 422) → 2R high(조정 화면만 발송ID 범위 없이 줄 판정) → 3R medium(줄 없는 조정이 다른 발송ID 줄에 표시) → 4R approve. 조정 줄 판정 = `billing-qty-adjust adjustmentLineType` 하나(같은 유형 → 없으면 같은 상속원 줄 하나 · 범위 = 채널·발송ID) · 발행·조정 화면·재발행 사전 검사 공용. 일반 LMS·LMS_FB 가 둘 다 있는 기간의 옛 LMS 감액이 일반 LMS 수량보다 크면 발행 422(롤백 · 원 정산 보존 · 조정 삭제 → 재발행 → 새 줄에 재등록).
+- **금액**: 단가 상속이라 같음. 단 항목줄이 「LMS」·「LMS(대체발송)」 둘로 갈려 줄마다 원 미만 절사 → 소수 단가 회사는 총액 최대 1원 감소(고객 유리). 이미 발행된 정산서는 그대로(크로커다일 10월은 초안 → 배포 뒤 재생성).
+- **화면에 보이는 변화**: 고객사 통계 「카카오(LMS대체)」→「LMS(대체발송)」 · 관리자 정산 모달 「카카오알림톡」→「카카오」·「080 번호 이용료」→「080 이용료」(PDF 2쪽 기준) · PDF 2쪽 브랜드 줄 원문 키 → 「브랜드메시지」.
+- **배포 전 실측(Harold)**: k_oriseq 칸 전 SMSQ 테이블(테스트·LOG 포함) · billing_items.message_type CHECK · 크로커다일 10월 수량 조정 행. 배포 뒤: 크로커다일 10월 미리보기 「LMS(대체발송)」 1건 · 슈퍼관리자 통계 엑셀 10/13 알림톡 1/0/1/0 + LMS(대체발송) 1/1/0/0.
+- **범위 밖(등재만 · 착수 판단 = Harold님)**: ① 선불 직접발송 알림톡이 알림톡 성공분까지 LMS 무료를 쓴다(`campaigns.ts:2697`) ② 사용자별 비용 추정이 알림톡 캠페인 성공을 LMS 단가로 센다(`stats-aggregation.ts:796`) ③ 정산서 어디에도 무료 공제 수량이 그려지지 않는다(1쪽 수량 < 2쪽 성공이 설명 없이 보임) ④ TEST·SPAM·BRAND_NF 단가 상속을 `inheritFrom` 으로 옮기는 일 ⑤ 브랜드 F행 대체 · 대체까지 실패 구분(B-1003-1 추가 과제 그대로).
+
 ### 🟢 B-1015-6 싱크에이전트 커스텀 필드: 고객 라벨 일부만 등록 + 구매 custom 값 버림(엠티 1.7.2 VM 실설치 1015 · P2) · 코드 완료 · 백엔드 배포 · 1.7.2 재빌드 · VM 재검증 대기
 - 실측: VM 오라클 판 AI 매핑 고객 custom_1~5 → 마법사 요약 「커스텀 필드: 2개 슬롯 배정」 · 서비스 로그 등록 2개(custom_4 `DM_REGISTER` · custom_5 `DM_CHANGE`). 운영 PG(Harold) 테스트계정 고객 `custom_fields` 키 = custom_1~5 전부(값은 적재 · 빠진 것은 필드 정의). `public.purchases.custom_fields` jsonb nullable 실재(Harold information_schema).
 - 원인 1(라벨): 라벨을 만드는 자리가 여럿이었고 `assignCustomFieldSlots` 는 자기가 새로 배정한 슬롯에만 라벨을 만들었다. 기동 등록(`sync-agent/src/index.ts`)은 저장 라벨이 「전부 비었을 때만」 매핑에서 역추출 → AI 배정 슬롯과 마법사 배정 슬롯이 섞이면 AI 배정분이 영영 빠진다(전부 AI 배정이면 역추출이 돌아 증상 없음). 같은 뿌리: 설정 편집 라벨 편집이 구매 슬롯 이름까지 고객 라벨로 올림 · 원격 매핑(슈퍼관리자 모달)에서 라벨 칸을 비운 슬롯 정의 누락 · 슬롯을 옮겨도 옛 라벨이 붙음.
@@ -63,7 +72,8 @@
 - 수정(서버): 구매 적재에 `custom_fields`(custom_1~15 키의 글자·숫자·불리언·null · 재전송 = 교체) · JSONB 거부 글자(NUL·짝 없는 서로게이트) 제거를 고객·구매 custom_fields 공용으로(`jsonbSafeCustomValues` · 섞이면 그 행 전체가 적재 실패해 영구 누락 · 거부 근거 = PostgreSQL 문서, 운영 실측 전). DDL 0 · 돈 경로 아님 = Codex 대상 아님.
 - 검증: 에이전트 `mapping/custom-labels.test.ts`(10) · `normalize/purchase-custom-fields.test.ts`(6) · 백엔드 `utils/sync-ingest.test.ts`(+8) · 변이 = 라벨 결정 한 줄·구매 정리 한 줄 되돌리면 8건 실패 · 옛 적재 SQL 로 되돌리면 4건 실패.
 - 재빌드·VM 재검증 완료(1015 22:46~22:54 · Harold 승인): 새 zip oracle `74787f21…` · mysql `9c12a95a…`(exe `c0e49402…`) · smoke 두 조합 PASS · 같은 설정 파일로 오라클 기동 라벨 2 → 4개 · MySQL 2 → 3개(옛 판도 custom_1 `CM_LDATE` 누락 = 같은 결함) · 서버 등록 완료 로그 · 증분 오류 0. 21:22 zip(`9bf14688`·`c279428b`)은 폐기. 운영 PG(Harold) `customer_field_definitions` = custom_1 `CD_CUSTOMER` · custom_2 `CM_NO` · custom_3 `DT_WITHDRAW` · custom_4 `DM_REGISTER` · custom_5 `DM_CHANGE`(예상과 일치 · custom_1 오라클 라벨은 옛 판이 한 번도 못 올린 값).
-- 남은 것(Harold): 백엔드 배포 → 전량 재동기화 뒤 `purchases.custom_fields` 채워짐 확인 → 새 zip 업로드 · 매뉴얼 PDF. 기존 구매 행은 전체 재동기화 때 채워진다. 옛 에이전트(≤1.7.1)가 보내는 구매 custom 날짜는 UTC ISO 글자로 적재된다(1.7.2 전체 재동기화 때 교체).
+- 배포(Harold 1015 23시대) 뒤 실측: VM 두 판 전량 재동기화(오라클 고객 1,000 · 구매 1,002 / MySQL 1,000 · 1,000 · 오류 0) → 운영 PG(Harold) 테스트계정 구매 total 2,002 · `custom_fields` 있음 2,002 · 샘플 `{"custom_1": "T00000500", "custom_2": 2, "custom_3": "2026-08-09 09:00:00"}` = 픽스처 원본(2026-01-01 09:00 + 220일)과 같은 벽시계 글자. 매뉴얼 PDF 새 문장으로 재생성(옛 문장 0).
+- 남은 것(Harold): 새 zip 업로드(`upload:agents`) 확인. 기존 구매 행은 전체 재동기화 때 채워진다. 옛 에이전트(≤1.7.1)가 보내는 구매 custom 날짜는 UTC ISO 글자로 적재된다(1.7.2 전체 재동기화 때 교체).
 - 기록만(못 닫는 이유): 고객 매핑에서 슬롯을 빼도 그 슬롯의 옛 값은 남는다(`customer-upsert.ts` 병합 · 업로드 등 다른 문의 값을 지키는 규칙이라 지우는 규칙은 운영 판단 선행) · 표준 글자 칸(이름 등)의 NUL 도 PostgreSQL text 가 거부할 것(미실측 · 커스텀 필드 축 밖 · 표준 칸 정규화 전체를 건드리는 일).
 
 ### 🟢 B-1015-4 슈퍼관리자 충전관리 「카드결제」 조회 0건(임은지 1015 cmv8xo7z11enpjnn4hrpy97os · P2) → 카드 충전 INSERT 가 결제수단을 안 적음 · 코드 완료 · Codex 1R approve · 배포 완료 · 기존 행 UPDATE 완료 1015

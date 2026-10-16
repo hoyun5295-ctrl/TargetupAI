@@ -15,7 +15,7 @@
  */
 
 import pool, { mysqlBillingQuery, MYSQL_BILLING_POOL_LIMIT } from '../config/database';
-import { SUCCESS_CODES_SQL, PENDING_CODES_SQL, spamBilledResultSql, spamFailedResultSql, ALIMTALK_FALLBACK_TYPE_WHEN_SQL } from './sms-result-map';
+import { SUCCESS_CODES_SQL, PENDING_CODES_SQL, spamBilledResultSql, spamFailedResultSql, FALLBACK_BILLING_CODE_WHEN_SQL } from './sms-result-map';
 import { getQueueTableSets, getTestSmsTables } from './sms-queue';
 import { queryPayAgentStoreBreakdown, type PayAgentStoreRow } from './pay-stats';
 import { loadBillingLedger, hasAgentMapping, type BillingLedger } from './billing-ledger';
@@ -63,13 +63,16 @@ const BRAND_SMSQ_CODE = BILLING_TYPES.find((t) => t.key === 'BRAND')?.smsqCode |
  *   이 식이 msg_type 만 보면 대체 LMS 가 알림톡 단가로 청구된다(크로커다일 9/29 접수). 문자 단가 청구 = 에이전트
  *   대체분 KS·KL 별칭(billing-types `agentCodeAliases` · 0904 결정) · 옛 QTmsg 대체 L행과 같은 규칙.
  *   청구 일자축·상세축이 같은 식 하나를 쓰므로 두 축 대조(diffBillingRowsVsDayData)는 그대로 성립한다.
+ * ★ 2026-10-16 대체분은 문자(S·L)가 아니라 대체 집계 코드 KS·KL 로 낸다(B-1016-1 · 정산서에 대체발송이 안 보인다는 두 번째 접수).
+ *   두 모양 모두(비토 K행 7830·7831 · 옛 S/L + k_oriseq) → 유형 SMS_FB·LMS_FB(단가·무료는 문자 상속 · 에이전트 KS·KL 과 같은 유형).
+ *   판정·조각 소유 = sms-result-map(fallbackOf · FALLBACK_BILLING_CODE_WHEN_SQL). 테스트 라인 상세축도 이 식을 쓴다(아래 testSmsAggByUserDateType).
  */
 export const BILLING_MSG_TYPE_SQL =
   `CASE WHEN msg_type = '${BRAND_SMSQ_CODE}' THEN `
   + `(CASE WHEN JSON_VALID(k_etc_json) = 1 THEN `
   + `(CASE WHEN JSON_UNQUOTE(JSON_EXTRACT(k_etc_json, '$.TARGETING')) IN (${BRAND_FRIEND_TARGETINGS.map((t) => `'${t}'`).join(', ')}) `
   + `THEN '${BRAND_SMSQ_CODE}' ELSE '${BRAND_NONFRIEND_SMSQ_CODE}' END) `
-  + `ELSE '${BRAND_NONFRIEND_SMSQ_CODE}' END) ${ALIMTALK_FALLBACK_TYPE_WHEN_SQL} ELSE msg_type END`;
+  + `ELSE '${BRAND_NONFRIEND_SMSQ_CODE}' END) ${FALLBACK_BILLING_CODE_WHEN_SQL} ELSE msg_type END`;
 
 export interface UsageDayCounts { total: number; success: number; fail: number; pending: number }
 /** 일자(YYYY-MM-DD) → 유형키 → 카운트 */
@@ -152,6 +155,10 @@ export function resolveBillingUnitPricesDetailed(co: any): { prices: Record<stri
     SPAM_LMS: lms,
   };
 
+  // ★ 2026-10-16 상속 유형(대체발송 SMS_FB·LMS_FB)은 상속원 단가 그대로 · 상속원이 미설정이면 함께 미설정(B-1016-1).
+  //   표(BILLING_TYPES.inheritFrom)에서 파생한다 — 손으로 한 줄씩 적으면 빠진 키가 아래 `||0`(priceBillingRows)에서 조용히 0원이 된다.
+  for (const t of BILLING_TYPES) if (t.inheritFrom) prices[t.key] = prices[t.inheritFrom] ?? 0;
+
   const unsetKeys: string[] = [];
   if (smsRaw === null) unsetKeys.push('SMS');
   if (lmsRaw === null) unsetKeys.push('LMS');
@@ -166,6 +173,7 @@ export function resolveBillingUnitPricesDetailed(co: any): { prices: Record<stri
   if (mmsRaw === null) unsetKeys.push('TEST_MMS');
   if (smsRaw === null) unsetKeys.push('SPAM_SMS');
   if (lmsRaw === null) unsetKeys.push('SPAM_LMS');
+  for (const t of BILLING_TYPES) if (t.inheritFrom && unsetKeys.includes(t.inheritFrom)) unsetKeys.push(t.key);
 
   return { prices, unsetKeys };
 }
@@ -317,6 +325,9 @@ export async function smsAggByRunDateType(
 /**
  * 테스트 라인 테이블에서 (계정 × 일자 × msg_type) 카운트.
  * 계정은 `bill_id`에 들어간다 — `sms-queue.ts insertTestSmsQueue`가 `extra.billId = userId`로 적재한다.
+ * ★ 2026-10-16 유형은 일자축(smsAggByDateType)과 **같은 청구 식**으로 낸다(B-1016-1). 옛: 원 msg_type 이라
+ *   테스트 K행 7830 이 일자축은 테스트 SMS · 상세축은 테스트 LMS 로 갈려 두 축 대조(422)가 날 수 있었다.
+ *   GROUP BY 도 같은 식 — MySQL 은 같은 이름의 원 컬럼을 별칭보다 먼저 찾는다(BILLING_MSG_TYPE_SQL 주석).
  */
 export async function testSmsAggByUserDateType(tables: string[], whereClause: string, params: any[]): Promise<any[]> {
   // ★ 2026-07-26 직렬 `for await`를 동시성 상한 병렬로 바꿨다. 테이블 수만큼 왕복이 순차라
@@ -324,13 +335,13 @@ export async function testSmsAggByUserDateType(tables: string[], whereClause: st
   //   풀(10)을 독점하지 않도록 상한을 둔다 — 발송·환불 워커가 같은 풀을 쓴다.
   const perTable = await mapWithConcurrency(tables, MYSQL_BILLING_POOL_LIMIT, async (t) => {
     return await mysqlBillingQuery(
-      `SELECT bill_id, msg_type, DATE(sendreq_time) as send_date,
+      `SELECT bill_id, ${BILLING_MSG_TYPE_SQL} AS msg_type, DATE(sendreq_time) as send_date,
               COUNT(*) as total_count,
               SUM(CASE WHEN status_code IN (${SUCCESS_CODES_SQL}) THEN 1 ELSE 0 END) as success_count,
               SUM(CASE WHEN status_code NOT IN (${SUCCESS_CODES_SQL},${PENDING_CODES_SQL}) THEN 1 ELSE 0 END) as fail_count,
               SUM(CASE WHEN status_code IN (${PENDING_CODES_SQL}) THEN 1 ELSE 0 END) as pending_count
        FROM ${t} WHERE ${whereClause}
-       GROUP BY bill_id, msg_type, DATE(sendreq_time)`,
+       GROUP BY bill_id, ${BILLING_MSG_TYPE_SQL}, DATE(sendreq_time)`,
       params
     ) as any[];
   });
@@ -964,13 +975,10 @@ export interface BillingUsageResult {
  * 2026-07-26 실측에서 `G`(여미지 B0227, 7월 성공 42,833건)가 그 자리에 있었다.
  * 원본으로 남겨야 `findUnbillableUsageKeys`가 발행 시점에 집어낸다.
  */
+// ★ 2026-10-16 카카오 실패 전환분 KS·KL 은 별칭이 아니라 자기 유형(SMS_FB·LMS_FB)의 agentCode 다(B-1016-1 · 0904 별칭 흡수 폐기).
+//   단가는 문자 칸(agentPriceColumn)을 그대로 읽어 금액은 0904 와 같고, 청구 줄·이름만 웹 대체분과 한 유형으로 선다.
 export const AGENT_MSG_TYPE_TO_USAGE_KEY: Record<string, string> = Object.fromEntries(
-  BILLING_TYPES.flatMap((t) => {
-    // ★ 2026-09-04 별칭(카카오 실패 전환분 KS·KL)도 같은 유형키로 흡수한다 — 목록을 두 벌 두지 않는다.
-    //   축 정의(`billing-types.ts` agentCodeAliases)에만 넣으면 여기가 자동으로 넓어진다.
-    const codes = [t.agentCode, ...(t.agentCodeAliases || [])].filter(Boolean) as string[];
-    return codes.map((code) => [code, t.key] as const);
-  }),
+  BILLING_TYPES.flatMap((t) => (t.agentCode ? [[t.agentCode, t.key] as const] : [])),
 );
 
 /** ★ 2026-08-20 발송ID 표기 정규화 — 저장(등록 endpoint)·비교(집계) 공용. PG UNIQUE가 case-sensitive라

@@ -1832,7 +1832,7 @@ kind별 payload 키:
 | store_id | varchar(100) NULL | ★2026-07-25 ALTER 신설. 에이전트 대상ID(`RSRM_SalesStts.StoreId`) |
 | channel | varchar(20) NOT NULL DEFAULT 'web' | ★2026-07-25 ALTER 신설. `web`/`agent`/`test`/`spam` — 암묵 판별(message_type 접두) 폐기 |
 | item_date | date NOT NULL | |
-| message_type | varchar NOT NULL | 유형키(SMS/LMS/MMS/KAKAO/TEST_*/SPAM_*) |
+| message_type | **varchar(20)** NOT NULL | 유형키(SMS/LMS/MMS/KAKAO/SMS_FB/LMS_FB/TEST_*/SPAM_*/PLAN_*/EXTRA_*). ★2026-10-16 실측(`information_schema` · CHECK 제약 0건) — 길이 20 = `PLAN_` + 플랜코드 15자 상한과 맞물린다. 대체발송 SMS_FB·LMS_FB 신설([B-1016-1](BUGS.md)) |
 | total_count · success_count · fail_count · pending_count | integer NOT NULL | **청구 수량 = success_count** |
 | unit_price | **numeric(12,2) NOT NULL** | 단가 스냅샷. **★2026-07-28 (6,2)→(12,2) ALTER** — 요금제 행이 월정액을 이 칸에 싣는데 상한 9,999.99를 넘어 `numeric field overflow`(22003)로 **발행이 통째로 실패**했다(0727 5건). 원본 `company_plan_changes.to_monthly_price`가 (12,2)인데 저장 칸만 좁았던 것 |
 | amount | numeric(12,2) NOT NULL | 단가 × 성공 |

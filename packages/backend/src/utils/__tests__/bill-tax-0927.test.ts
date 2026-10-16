@@ -250,8 +250,11 @@ describe('m060 테스트 MMS = 회사 MMS 단가', () => {
     expect(r.prices.TEST_MMS).toBe(r.prices.MMS);   // 회사 MMS 단가(공급가 환산 규칙까지 같은 값)
     expect(r.prices.TEST_MMS).not.toBe(r.prices.TEST_LMS);
     expect(resolveBillingUnitPricesDetailed({ cost_per_sms: 10, cost_per_lms: 30, cost_per_mms: null } as any).unsetKeys).toContain('TEST_MMS');
-    expect(issue).toContain('(totalTestMms * prices.TEST_MMS)');
-    expect(src('billing-pdf.ts')).toContain("TEST_MMS: '테스트MMS'");
-    expect(readAdminScreenSource()).toContain("TEST_MMS: '테스트MMS'");
+    // ★ 2026-10-16 항등식 = 유형 표 순회(TEST_MMS 포함 전 키) · 표시 이름 = 축의 짧은 이름 하나(PDF·화면 사본 삭제 · B-1016-1)
+    expect(issue).toContain('BILLING_TYPES.reduce(');
+    expect(BILLING_TYPES.find((t) => t.key === 'TEST_MMS')?.shortLabel).toBe('테스트MMS');
+    const { billingDetailTypeLabel } = await import('../billing-invoice-lines');
+    expect(billingDetailTypeLabel({ channel: 'test', message_type: 'TEST_MMS' })).toBe('테스트MMS');
+    expect(readAdminScreenSource()).toContain('item.type_label || item.message_type');
   });
 });

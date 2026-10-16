@@ -727,11 +727,17 @@ describe('계산서 비고(PO) 경로 계약 (2026-08-21)', () => {
     });
 
     it('상세 행의 유형 칸은 PDF·화면이 같은 규약을 쓴다 — 항목명 우선, 없으면 유형 표시명', () => {
-      expect(pdfSrc).toContain('extraLabel || typeLabel[item.message_type]');
+      // ★ 2026-10-16 규약을 CT 함수 하나로(B-1016-1). 옛: PDF·화면이 각자 라벨표를 들고 같은 순서를 지켰다 →
+      //   유형이 늘면 1쪽만 바뀌었다(대체발송). 이제 PDF 는 함수를 부르고 화면은 서버가 내린 type_label 만 그린다.
+      expect(pdfSrc).toContain('billingDetailTypeLabel({ ...item, item_label: toSingleLine(item.item_label) })');
+      expect(pdfSrc).not.toMatch(/const typeLabel\s*:\s*Record/);
       const adminUiSrc = readAdminScreenSource(); // ★ 2026-10-09 파일 분리 E 뒤 = 본체 + 옮겨 간 화면 합본
-      expect(adminUiSrc).toContain('extraLabel || billingTypeLabel[item.message_type]');
-      // 화면이 내부 키를 그대로 노출하던 결함의 재발 차단 — 라벨표에 EXTRA_* 키가 있어야 한다.
-      expect(adminUiSrc).toContain("EXTRA_MANUAL: '부가서비스'");
+      expect(adminUiSrc).toContain('item.type_label || item.message_type');
+      expect(adminUiSrc).not.toContain('billingTypeLabel');
+      // 화면이 내부 키를 그대로 노출하던 결함의 재발 차단 — 이제 서버 함수가 EXTRA_* 이름을 소유한다.
+      const linesSrc = read('./billing-invoice-lines.ts');
+      expect(linesSrc).toContain("EXTRA_MANUAL: '부가서비스'");
+      expect(linesSrc).toContain('return extraLabel || DETAIL_TYPE_LABEL[key] || key;');
     });
 
     it('메일 본문에 사람이 적은 항목명이 이스케이프 없이 들어가지 않는다 — ★ 차수 3 R097: 본문은 한줄로 양식 CT(항목 내역은 첨부 PDF)', () => {

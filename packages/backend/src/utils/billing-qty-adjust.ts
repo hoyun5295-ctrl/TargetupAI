@@ -19,7 +19,45 @@
 
 import type { PricedBillingItem } from './send-usage-aggregation';
 // ★ 2026-08-05 청구 수량 정의는 CT 하나가 소유한다 — 판정 축과 인쇄 축이 갈리지 않게.
-import { billableQuantity } from './billing-types';
+import { billableQuantity, billingBaseType } from './billing-types';
+
+/**
+ * ★ 2026-10-16 (순수) 조정의 유형키 → 이번 청구의 어느 줄인가(B-1016-1 · Codex 1R).
+ *
+ * 정확히 같은 유형 줄이 있으면 그 줄. 없으면 **같은 상속원 줄이 하나뿐일 때** 그 줄.
+ * 배포 전에 등록된 「LMS」 조정은 대체분까지 포함한 LMS 를 뜻했다(그때는 대체가 LMS 줄에 섞여 있었다).
+ * 유형 축이 LMS·LMS(대체발송)로 갈라진 뒤 그 기간을 재발행하면 대체분만 있는 기간은 「LMS」 줄이 없어
+ * 조정이 빌려 쓸 단가를 못 찾고 발행이 막혔다. 둘 이상이면 어느 줄인지 정할 수 없어 null(= 줄 없음 · fail-closed).
+ * 소비처는 이 함수를 직접 부르지 않고 아래 `adjustmentLineType`(범위 거르기 포함)을 쓴다.
+ */
+export function resolveAdjustmentTypeKey(typeKey: string, presentTypeKeys: Iterable<string>): string | null {
+  const present = new Set(Array.from(presentTypeKeys || [], (k) => String(k)));
+  const want = String(typeKey || '');
+  if (present.has(want)) return want;
+  const base = billingBaseType(want);
+  const family = Array.from(present).filter((k) => billingBaseType(k) === base);
+  return family.length === 1 ? family[0] : null;
+}
+
+/** 조정 줄 판정에 쓰는 청구 줄 한 행(소비처마다 행 모양이 달라 이 모양으로 옮겨 넘긴다) */
+export interface AdjustmentLineCandidate { channel: string; typeKey: string; agentId?: string | null }
+
+/**
+ * ★ 2026-10-16 (순수) 조정 한 행이 실릴 줄의 유형키 — **범위(채널 · 발송ID) 거르기까지** 여기서 한다(Codex 2R high).
+ * 범위를 소비처에 맡겼더니 조정 화면만 발송ID 범위를 빼고 채널 전체에서 골라, 발행과 다른 줄의 원래 수량을 계산했다.
+ * 발행(buildAdjustmentBillingItems) · 조정 화면(GET qty-adjustments) · 재발행 사전 검사가 이 함수 하나만 부른다.
+ * 발송ID 범위 = 조정에 발송ID 가 있으면 그 발송ID 행만 · 없으면 그 채널 전부(옛 발행 매칭과 같다).
+ */
+export function adjustmentLineType(
+  adj: { channel: any; type_key: any; agent_id?: any },
+  rows: AdjustmentLineCandidate[],
+): string | null {
+  const channel = String(adj.channel || '');
+  const agentId = adj.agent_id ? String(adj.agent_id) : null;
+  const scope = (rows || []).filter((r) =>
+    String(r.channel) === channel && (agentId ? String(r.agentId || '') === agentId : true));
+  return resolveAdjustmentTypeKey(String(adj.type_key || ''), scope.map((r) => String(r.typeKey)));
+}
 
 export interface QtyAdjustmentRow {
   id: string;
@@ -87,11 +125,13 @@ export function buildAdjustmentBillingItems(
     const agentId = r.agent_id ? String(r.agent_id) : null;
     const delta = Math.round(Number(r.qty_delta) || 0);
     if (delta === 0) continue;
-    const src = (priced || []).find((p) =>
+    // ★ 2026-10-16 줄 판정 = adjustmentLineType(범위 + 같은 유형 → 없으면 같은 상속원 줄 하나 · 조정 화면·재발행 사전 검사와 같은 함수)
+    const lineType = adjustmentLineType(r, (priced || []).map((p) => ({ channel: String(p.channel), typeKey: String(p.typeKey), agentId: p.agentId })));
+    const src = lineType ? (priced || []).find((p) =>
       String(p.channel) === channel
-      && String(p.typeKey) === typeKey
-      && (agentId ? String(p.agentId || '') === agentId : true));
-    if (!src) { missing.push(r); continue; }
+      && String(p.typeKey) === lineType
+      && (agentId ? String(p.agentId || '') === agentId : true)) : undefined;
+    if (!src || !lineType) { missing.push(r); continue; }
     const unitPrice = Number(src.unitPrice) || 0;
     const amount = delta * unitPrice;
     out.push({
@@ -100,7 +140,7 @@ export function buildAdjustmentBillingItems(
       freeCount: 0,
       channel: channel as any,
       itemDate,
-      typeKey,
+      typeKey: lineType,   // 빌린 줄의 유형 — 같은 단가·같은 유형이라 buildInvoiceLines 가 그 줄에 합친다
       userId: r.user_id ? String(r.user_id) : null,
       agentSendId: null,
       agentId,

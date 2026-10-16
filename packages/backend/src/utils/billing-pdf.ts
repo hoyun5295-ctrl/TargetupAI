@@ -18,7 +18,7 @@
 import { INVITO_INFO } from '../config/defaults';
 import { drawPartyBlock, drawThanksNote, THANKS_NOTE_HEIGHT } from './pdf-party-block';
 import { toDayKey } from './send-usage-aggregation';
-import { buildInvoiceLines } from './billing-invoice-lines';
+import { buildInvoiceLines, billingDetailTypeLabel } from './billing-invoice-lines';
 import { resolveBillingScopeLabel } from './billing-scope-label';
 import { getAgentCustNameMap } from './pay-stats';
 import { floorWon } from './money';
@@ -470,15 +470,6 @@ export async function renderBillingStatementPdf(bil: any, items: any[]): Promise
 
       drawDetailHeader();
 
-      const typeLabel: Record<string, string> = {
-        SMS: 'SMS', LMS: 'LMS', MMS: 'MMS', KAKAO: '카카오',
-        TEST_SMS: '테스트SMS', TEST_LMS: '테스트LMS', TEST_BRAND: '테스트브랜드메시지',   // ★ 2026-09-26 S1-H06
-        TEST_MMS: '테스트MMS',   // ★ 2026-09-27 m060
-        SPAM_SMS: '스팸SMS', SPAM_LMS: '스팸LMS',
-        // ★ 2026-07-30 080·부가서비스·최소과금 청구. 내부 키(EXTRA_*)는 고객에게 보일 값이 아니다.
-        EXTRA_080_FEE: '080 이용료', EXTRA_080_SVC: '080 부가서비스', EXTRA_080_CALL: '080 통화료',
-        EXTRA_MANUAL: '부가서비스', EXTRA_BASE_FEE: '기본요금',
-      };
 
       let detailSubtotal = 0;
       items.forEach((item: any, idx: number) => {
@@ -492,14 +483,9 @@ export async function renderBillingStatementPdf(bil: any, items: any[]): Promise
         //   그 전에는 여기와 AdminDashboard에 인라인 두 벌이라 이미 갈려 있었다 —
         //   에이전트 발급명이 화면에만 있었고, `extra` 행은 화면에서 원문 'extra'로 노출됐다.
         const scopeLabel = resolveBillingScopeLabel(item);
-        // 요금제 행의 '유형' 칸은 플랜 코드다 — `PLAN_` 접두는 내부 키라 고객에게 보일 값이 아니다.
-        // ★ 2026-09-16 수기 부가서비스는 **입력한 항목명**이 유형 칸이다(서수란 접수).
-        //   '부가서비스'라고만 찍히면 고객은 무엇을 청구받는지 알 수 없다 — 이름은 입력한 사람이 안다.
+        // 유형 칸 = 상세 행 표시명 CT 하나(요금제 플랜 코드 · 추가 항목 입력명 · 짧은 이름 · ★2026-10-16 B-1016-1 라벨표 사본 삭제).
         //   개행·제어문자는 지운다(§2-16 — 우리가 형식을 통제하지 못하는 값이 이 칸에 들어온다).
-        const extraLabel = toSingleLine(item.item_label).trim();
-        const typeText = ch === 'plan'
-          ? String(item.message_type || '').replace(/^PLAN_/, '')
-          : (extraLabel || typeLabel[item.message_type] || item.message_type);
+        const typeText = billingDetailTypeLabel({ ...item, item_label: toSingleLine(item.item_label) });
 
         // ★ 2026-08-06 한 행의 칸을 **먼저 목록으로 만들고, 같은 목록으로 재고 같은 목록으로 그린다.**
         //   재는 옵션과 그리는 옵션이 다르면 행 높이가 실제 그림과 어긋난다(Codex 적대검증 high).

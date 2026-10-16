@@ -197,12 +197,12 @@
 
 <a id="c30"></a>
 
-### C30 · ★1014 엠티콜렉션(메트로시티) 싱크에이전트 출고 준비 — 1단계 완료 · 2단계 = 보완 회신 대기
+### C30 · ★1014 엠티콜렉션(메트로시티) 싱크에이전트 출고 준비 — 1015 출고 세트 완료(1.7.2 등재 · 전용 전달 묶음 · 발송 = Harold) · 남은 것 = 설치 당일 확인
 > 호출어 **"엠티콜렉션 싱크 / 메트로시티 싱크 / 질의서 v1.2"** → [FEATURE-SYNC-AGENT.md](../docs/FEATURE-SYNC-AGENT.md) §7 2026-10-14 행 · §7-2 엠티콜렉션 행 · §10 2단계 · 질의서 SoT = [PREINSTALL-QUESTIONNAIRE.md](../sync-agent/PREINSTALL-QUESTIONNAIRE.md) §3 v1.2 · 메모리 [[project_2026_1014_mt_collection_sync_agent]]
 > ⛔ 회신 없이 출고하지 않는다(DESC 전체 · 판매 뷰 단위 · 일시·탈퇴 컬럼 · YN_SMS 분포 · 회사 범위) / Oracle 11g = thick · Windows oracle zip 전부 IC 동봉 / 등재 = 엠티 스키마 픽스처 마법사 주행 뒤 `win-modern__oracle-11g__1.7.2` + `CURRENT_AGENT_VERSION` 1.7.2 / 뷰에 여러 회사면 고객사 WHERE
 > Codex 적대 6R approve(1R high 2 · 2R medium 3 · 3R medium 2 · 4R medium 1 · 5R medium 1 · 6R approve — VC80 런타임 동봉+설치 bat 종료 코드 분기 · Oracle 모드 설정 결정 · 같은 프로세스 모드 변경 불가 안내 · 5.x 재초기화 · testConnection 이유째 throw + 연 풀만 정리 + close 오류가 검증 오류를 안 덮음) · 재빌드 smoke PASS · 11g 실측(thin = NJS-138 안내가 진단 JSON 까지 / thick PASS)
 > vcredist_x64.exe 스테이징·재빌드 완료(Harold 1014 · blocker 해제 · zip 150MB · CRT 8.0.50727.6195 정책에 .762 포함 · VC80 없는 서버 실제 로드는 엠티 설치 때 VCREDIST_EXIT 로 확인)
-> 잔여 = Harold → 유종오님께 보완 요청 메일(Downloads 에 본문·v1.2 선채움 xlsx 준비됨) → 회신 → 2단계(픽스처 · 주행 · 등재 · 출고 세트) · 추가 과제 = 다른 DB 커넥터 testConnection 도 이유째 throw(마법사 TLS 3159 등 안내 전달)
+> ~~잔여 = 보완 요청 메일 → 회신 → 2단계~~ **1015 종결**: v1.2 회신 받음 · 보완 요청은 보내지 않기로(Harold) · Oracle 뷰 소스 A·B·D 정정 + 로컬 11g 실측 → VM 실설치 시험 → 탈퇴 접기 · 커스텀 필드 정정 → 1.7.2 등재 · `Downloads\엠티콜렉션_SyncAgent_v1.7.2\` 전달 묶음(§7 2026-10-15 행·밤·밤(2)~(4)) · 남은 것 = 설치 당일 확인(§7-2 엠티 행) · 추가 과제 = 다른 DB 커넥터 testConnection 도 이유째 throw · MSSQL·PG 키 유일성 검사 없음 · Oracle 증분 키셋 ORDER BY 문자 키 NLS 정렬 미고정
 
 <a id="c29"></a>
 

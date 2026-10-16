@@ -118,13 +118,15 @@ describe('MSG_TYPE_TO_USAGE_KEY — SMSQ 유형코드 → 청구 유형키 (2026
   });
 
   it('청구 합산이 읽는 키와 정확히 일치한다 — 어긋나면 그 유형이 0원 청구된다', () => {
-    // billing.ts 합산부가 읽는 키: SMS·LMS·MMS·KAKAO·BRAND·BRAND_NF.
+    // billing.ts 합산부가 읽는 키: SMS·LMS·MMS·KAKAO·BRAND·BRAND_NF · ★2026-10-16 대체발송 SMS_FB·LMS_FB(청구 식 KS·KL · B-1016-1).
     // 과거 'M'·'K'가 변환되지 않아 MMS·알림톡이 통째로 청구에서 빠졌다.
-    const billingKeys = ['SMS', 'LMS', 'MMS', 'KAKAO', 'BRAND', 'BRAND_NF'];
+    const billingKeys = ['SMS', 'LMS', 'MMS', 'KAKAO', 'SMS_FB', 'LMS_FB', 'BRAND', 'BRAND_NF'];
     for (const v of Object.values(MSG_TYPE_TO_USAGE_KEY)) {
       expect(billingKeys).toContain(v);
     }
-    expect(new Set(Object.values(MSG_TYPE_TO_USAGE_KEY)).size).toBe(6); // 중복 매핑 없음
+    expect(new Set(Object.values(MSG_TYPE_TO_USAGE_KEY)).size).toBe(8); // 중복 매핑 없음
+    expect(MSG_TYPE_TO_USAGE_KEY.KS).toBe('SMS_FB');
+    expect(MSG_TYPE_TO_USAGE_KEY.KL).toBe('LMS_FB');
   });
 });
 
@@ -157,9 +159,10 @@ describe('buildBillingTotals — 청구 수량 합산 (2026-07-25)', () => {
 
   // ★ 2026-09-26 S1-H06 테스트 브랜드(TEST_BRAND) 합류 — 11개
   // ★ 2026-09-27 한줄로 V2 m060 — 테스트 MMS 유형키 추가(12개)
-  it('빈 입력 — 12개 유형키가 전부 0으로 존재한다', () => {
+  // ★ 2026-10-16 대체발송 SMS_FB·LMS_FB(B-1016-1) — 14개
+  it('빈 입력 — 14개 유형키가 전부 0으로 존재한다', () => {
     const t = buildBillingTotals({});
-    expect(t).toEqual({ SMS: 0, LMS: 0, MMS: 0, KAKAO: 0, BRAND: 0, BRAND_NF: 0, TEST_SMS: 0, TEST_LMS: 0, TEST_MMS: 0, TEST_BRAND: 0, SPAM_SMS: 0, SPAM_LMS: 0 });
+    expect(t).toEqual({ SMS: 0, LMS: 0, MMS: 0, KAKAO: 0, SMS_FB: 0, LMS_FB: 0, BRAND: 0, BRAND_NF: 0, TEST_SMS: 0, TEST_LMS: 0, TEST_MMS: 0, TEST_BRAND: 0, SPAM_SMS: 0, SPAM_LMS: 0 });
     expect(buildBillingTotals(undefined as any).SMS).toBe(0);
   });
 
@@ -958,7 +961,8 @@ describe('resolveBillingUnitPricesDetailed — 미설정 유형키 색출 (2026-
 
   it('자기도 비고 상속원도 비면 테스트·스팸까지 잡힌다', () => {
     const { unsetKeys } = resolveBillingUnitPricesDetailed({ cost_per_mms: 90, cost_per_kakao: 8 });
-    expect(unsetKeys).toEqual(['SMS', 'LMS', 'BRAND', 'BRAND_NF', 'TEST_SMS', 'TEST_LMS', 'TEST_BRAND', 'SPAM_SMS', 'SPAM_LMS']);
+    // ★ 2026-10-16 대체발송(SMS_FB·LMS_FB)은 상속원(SMS·LMS)이 비면 함께 미설정(B-1016-1 · inheritFrom 파생)
+    expect(unsetKeys).toEqual(['SMS', 'LMS', 'BRAND', 'BRAND_NF', 'TEST_SMS', 'TEST_LMS', 'TEST_BRAND', 'SPAM_SMS', 'SPAM_LMS', 'SMS_FB', 'LMS_FB']);
   });
 
   // ★ 2026-09-13 브랜드 비친구 — 비친구 칸은 비면 친구 단가(cost_per_brand)를 따른다(테스트 단가 상속과 같은 방식).
@@ -1682,12 +1686,17 @@ describe('findBlockingPendingRows — 발행 차단 대기 판정 (2026-07-31)',
  * 전환분의 실체는 그 문자 자체이므로 **문자 단가로 청구한다**(별도 단가 컬럼을 만들지 않는다 —
  * 쓰는 회사가 한 곳인데 전 고객사 단가 화면에 칸을 둘 늘리면 0814에 정리한 소음이 되살아난다).
  */
-describe('카카오 전환분 KS·KL — 문자 유형으로 흡수 (2026-09-04 랩디)', () => {
-  it('전환 코드가 문자 유형키로 매핑된다', () => {
-    expect(agentUsageKey('KS')).toBe('SMS');
-    expect(agentUsageKey('KL')).toBe('LMS');
-    expect(AGENT_MSG_TYPE_TO_USAGE_KEY.KS).toBe('SMS');
-    expect(AGENT_MSG_TYPE_TO_USAGE_KEY.KL).toBe('LMS');
+/**
+ * ★ 2026-10-16 B-1016-1 — 0904 의 「문자 유형으로 흡수」 중 **청구 줄 합치기만** 뒤집었다(Harold 승인 · 서수란 접수
+ * 「정산서에서 대체발송 건수를 확인할 수 없다」 두 번째). 전환분은 자기 유형(SMS_FB·LMS_FB)으로 줄이 서고,
+ * **단가는 0904 그대로 그 문자 칸**(agentPriceColumn cost_per_sms·cost_per_lms)이라 금액은 같다. 발행이 안 막히는 것도 그대로다.
+ */
+describe('카카오 전환분 KS·KL — 자기 유형 · 문자 단가 (2026-09-04 랩디 · ★2026-10-16 줄 분리)', () => {
+  it('전환 코드가 대체발송 유형키로 매핑된다', () => {
+    expect(agentUsageKey('KS')).toBe('SMS_FB');
+    expect(agentUsageKey('KL')).toBe('LMS_FB');
+    expect(AGENT_MSG_TYPE_TO_USAGE_KEY.KS).toBe('SMS_FB');
+    expect(AGENT_MSG_TYPE_TO_USAGE_KEY.KL).toBe('LMS_FB');
   });
 
   it('원래 코드는 그대로 — 흡수가 기존 매핑을 덮지 않는다', () => {
@@ -1722,15 +1731,15 @@ describe('카카오 전환분 KS·KL — 문자 유형으로 흡수 (2026-09-04 
       { id: 'a1', agent_send_id: 'V0001', cost_per_sms: 7.2, cost_per_lms: 23.5, cost_per_mms: 50, cost_per_kakao: 4.5, cost_per_brand: null },
     ];
     const priced = priceBillingRows(rows, {}, agentPrices, 'vat_excluded');
-    const kl = priced.items.find((i) => i.typeKey === 'LMS');
-    const ks = priced.items.find((i) => i.typeKey === 'SMS');
+    const kl = priced.items.find((i) => i.typeKey === 'LMS_FB');
+    const ks = priced.items.find((i) => i.typeKey === 'SMS_FB');
     expect(kl?.unitPrice).toBe(23.5);
     expect(kl?.amount).toBe(13 * 23.5);
     expect(ks?.unitPrice).toBe(7.2);
     expect(ks?.amount).toBe(2 * 7.2);
   });
 
-  it('전환분과 일반 문자가 같은 날 같은 발송ID면 한 줄로 합쳐진다 — 청구서에 유형이 갈리지 않게', () => {
+  it('전환분과 일반 문자가 같은 날 같은 발송ID면 두 줄이다 — 단가는 같다(★2026-10-16 정산서에 대체발송이 보이게)', () => {
     const rolled = rollupAgentRowsForBilling(
       [
         { agent_send_id: 'V0001', period: '2026-08-30', msg_type: 'L', sent: 10, success: 10, fail: 0, pending: 0 } as any,
@@ -1739,8 +1748,11 @@ describe('카카오 전환분 KS·KL — 문자 유형으로 흡수 (2026-09-04 
       new Set(['V0001']),
     );
     const lms = rolled.rows.filter((r) => r.typeKey === 'LMS');
-    expect(lms, '전환분이 별도 행으로 남으면 같은 단가의 줄이 둘로 갈린다').toHaveLength(1);
-    expect(lms[0].success).toBe(23);
-    expect(lms[0].total).toBe(24);
+    const fb = rolled.rows.filter((r) => r.typeKey === 'LMS_FB');
+    expect(lms).toHaveLength(1);
+    expect(fb, '전환분 = LMS(대체발송) 줄').toHaveLength(1);
+    expect(lms[0].success).toBe(10);
+    expect(fb[0].success).toBe(13);
+    expect(fb[0].total).toBe(14);
   });
 });

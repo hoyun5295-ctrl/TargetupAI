@@ -18,6 +18,7 @@
  */
 
 import pool, { query } from '../config/database';
+import { billingBaseType, billingBaseTypeSql } from './billing-types';
 
 /** 무료 제공 대상 유형 축. `key`는 `prepaidDeduct(messageType)`·`billing_items.message_type`과 같은 값이다. */
 export interface FreeMessagingTypeDef {
@@ -72,13 +73,15 @@ const KST_PERIOD_MONTH_SQL = `date_trunc('month', (NOW() AT TIME ZONE 'Asia/Seou
  *
  * ★ 2026-09-27 한줄로 V2 R234 — 항목을 **그 회사 청구서(billings · 회사당 몇 장)를 거쳐** 찾는다. billing_items 인덱스는
  *   (billing_id, channel)뿐이라 company_id로만 거르면 선불 발송마다 항목 전체를 훑었다. 항목의 회사 = 그 청구서의 회사라 결과는 같다(DDL 0).
+ * ★ 2026-10-16 항목 유형을 **상속원**으로 맞춰 대조한다(B-1016-1). 대체 LMS(LMS_FB) 줄도 LMS 무료로 공제되므로(allocateFreeToRows)
+ *   그 소비 마커를 LMS 지급 행이 읽어야 한다. 옛 등호(`= g.msg_type`)면 중간정산 뒤 재발행에서 같은 무료가 한 번 더 빠진다.
  */
 const REMAINING_EXPR = `GREATEST(0, g.granted_qty - g.used_qty - COALESCE((
   SELECT SUM(bi.free_count) FROM billing_items bi
    WHERE bi.billing_id IN (SELECT b.id FROM billings b WHERE b.company_id = g.company_id)
      AND bi.company_id = g.company_id
      AND bi.channel = 'web'
-     AND bi.message_type = g.msg_type
+     AND ${billingBaseTypeSql('bi.message_type')} = g.msg_type
      AND date_trunc('month', bi.item_date)::date = g.period_month
 ), 0))`;
 
@@ -412,6 +415,10 @@ export function freeDeductibleFingerprint(map: Record<string, number>): string {
  * 청구에서 한 번 더 빠지고 이월 금지도 깨진다.
  *
  * 배분 순서 = 이른 일자 → 유형 → 계정(같은 입력이면 항상 같은 결과). 성공 합보다 많은 한도는 남긴다.
+ *
+ * ★ 2026-10-16 유형은 **상속원**으로 본다(B-1016-1). 대체 LMS(LMS_FB)는 LMS 무료로 덮는다(현행 유지 · 가격 불변).
+ *   순서 = 일자 → 상속원 → 계정 → 유형 — 옛 한 줄(LMS)이 LMS·LMS_FB 두 줄로 갈려도 계정별 공제량이 종전과 같다
+ *   (유형을 계정보다 앞에 두면 같은 날 모든 계정의 LMS 줄이 먼저 가져가 무료가 붙는 계정 장이 바뀐다 · 회의론자 최종 검증 2).
  */
 export function allocateFreeToRows<T extends { channel: string; typeKey: string; itemDate?: string | null; userId?: string | null; success?: number }>(
   rows: T[],
@@ -424,17 +431,19 @@ export function allocateFreeToRows<T extends { channel: string; typeKey: string;
   }
   if (remaining.size === 0) return alloc;
 
-  const keyOf = (r: T) => freeQuotaKey(monthStartOf(r.itemDate), String(r.typeKey));
+  const baseOf = (r: T) => billingBaseType(String(r.typeKey).toUpperCase());
+  const keyOf = (r: T) => freeQuotaKey(monthStartOf(r.itemDate), baseOf(r));
 
   const targets = (rows || [])
     .filter((r) => r.channel === 'web'
-      && FREE_TYPE_KEYS.has(String(r.typeKey).toUpperCase())
+      && FREE_TYPE_KEYS.has(baseOf(r))
       && remaining.has(keyOf(r))
       && (Number(r.success) || 0) > 0)
     .sort((a, b) =>
       String(a.itemDate || '').localeCompare(String(b.itemDate || ''))
-      || String(a.typeKey).localeCompare(String(b.typeKey))
-      || String(a.userId || '').localeCompare(String(b.userId || '')));
+      || baseOf(a).localeCompare(baseOf(b))
+      || String(a.userId || '').localeCompare(String(b.userId || ''))
+      || String(a.typeKey).localeCompare(String(b.typeKey)));
 
   for (const r of targets) {
     const key = keyOf(r);

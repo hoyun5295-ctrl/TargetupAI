@@ -65,6 +65,35 @@ const TYPE_LABEL: Record<string, string> = {
   EXTRA_MANUAL: '부가서비스', EXTRA_BASE_FEE: '기본요금',
 };
 
+/**
+ * ★ 2026-10-16 2쪽 일자별 상세·관리자 정산 모달의 **좁은 유형 칸** 이름(B-1016-1).
+ * 축의 짧은 이름(BILLING_TYPES.shortLabel) → 없으면 위 긴 이름. 추가 항목(EXTRA_*)은 축에 없어 여기만 둔다.
+ * 옛: PDF 2쪽(`billing-pdf.ts typeLabel`)과 화면(`AdminDashboard billingTypeLabel`)이 각자 라벨표를 들고 있어
+ *   유형을 늘리면 1쪽만 바뀌었다(대체발송 「정산서 반영 안 됨」 · PDF 2쪽 브랜드 줄은 내부 키가 그대로 인쇄됐다).
+ *   기준 = 고객이 받아 온 PDF 2쪽 표기(화면이 그쪽을 따른다).
+ */
+const DETAIL_TYPE_LABEL: Record<string, string> = {
+  ...TYPE_LABEL,
+  ...Object.fromEntries(BILLING_TYPES.flatMap((t) => (t.shortLabel ? [[t.key, t.shortLabel] as const] : []))),
+  EXTRA_080_FEE: '080 이용료',
+};
+
+/** ★ 2026-10-16 유형키 → 긴 이름(1쪽 항목 · 차단 문구). 모르는 키는 그대로(드러나야 고친다) */
+export function billingTypeLabel(typeKey: string): string {
+  return TYPE_LABEL[typeKey] || String(typeKey || '');
+}
+
+/**
+ * ★ 2026-10-16 (순수) 상세 행 → 좁은 유형 칸 문구. PDF 2쪽·정산 상세 응답(`type_label`)이 이 함수 하나를 쓴다.
+ * 요금제 = 플랜 코드(`PLAN_` 접두는 내부 키) · 추가 항목 = 입력한 항목명(서수란 0916 접수) · 그 밖 = 짧은 이름.
+ */
+export function billingDetailTypeLabel(item: { channel?: any; message_type?: any; item_label?: any }): string {
+  const key = String(item?.message_type || '');
+  if (String(item?.channel || 'web') === 'plan') return key.replace(/^PLAN_/, '');
+  const extraLabel = String(item?.item_label ?? '').trim();   // 한 줄 접기는 그리는 쪽(PDF toSingleLine)이 한다
+  return extraLabel || DETAIL_TYPE_LABEL[key] || key;
+}
+
 const CHANNEL_ORDER = ['plan', 'web', 'agent', 'test', 'spam', 'extra'];
 const TYPE_ORDER = BILLING_TYPES.map((t) => t.key);
 

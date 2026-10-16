@@ -33,14 +33,16 @@ import { revokeTakeoverPasses, maskPhone, isMfaSchemaMissing } from '../utils/mf
 import { restrictAccount, isRestrictedStatus, RestrictionOutcome } from '../utils/account-action';
 import { DASHBOARD_CARD_POOL, validateCardIds, getRequiredFields, filterPoolByAvailableData, generateDynamicCards } from '../utils/dashboard-card-pool';
 import { detectEnabledFields, clearEnabledFieldsCache } from '../utils/enabled-fields';
-import { spamResultRowStatus, SUCCESS_CODES_SQL, PENDING_CODES_SQL, getStatusLabel, getStatusType, getCarrierLabel, isSuccess, isPending, getSendTypeLabel, getCampaignChannelLabel, getQueueRowStatus, getDisplayContents, classifyMsgChannel } from '../utils/sms-result-map';
+import { spamResultRowStatus, SUCCESS_CODES_SQL, PENDING_CODES_SQL, getStatusLabel, getStatusType, getCarrierLabel, isSuccess, isPending, getSendTypeLabel, getCampaignChannelLabel, getQueueRowStatus, getDisplayContents, fallbackOf } from '../utils/sms-result-map';
+// ★ 2026-10-16 통계 엑셀 대체 행 이름 = 청구서와 같은 유형 표시명(B-1016-1)
+import { billingTypeLabel } from '../utils/billing-invoice-lines';
 import { DEFAULT_COSTS, getCompanyCosts } from '../config/defaults';
 import { round2 } from '../utils/unit-price';
 import { validateSmsTables } from '../utils/sms-table-validator';
 // ★ D145 P0: 예약 캠페인 자동 정리 (모든 발송 관련 라우트 정합성)
 import { cleanupScheduledCampaigns, cancelCampaign } from '../utils/campaign-lifecycle';
 import { getUserUnsubscribes, deleteUserUnsubscribes, exportUserUnsubscribes, CAMPAIGN_OPT080_SELECT_EXPR, CAMPAIGN_OPT080_LEFT_JOIN } from '../utils/unsubscribe-helper';
-import { buildDateRangeFilter, aggregateSmsCountsByCampaign, aggregateSmsChannelSplitByCampaign, aggregateSmsSendTimesByCampaign, getCampaignResultCounts, loadAlimtalkFallbackForList, STAT_DATE_EXPR, STAT_STARTED_GUARD } from '../utils/stats-aggregation';
+import { buildDateRangeFilter, aggregateSmsCountsByCampaign, aggregateAlimtalkFallbackByCampaign, aggregateSmsSendTimesByCampaign, getCampaignResultCounts, loadAlimtalkFallbackForList, STAT_DATE_EXPR, STAT_STARTED_GUARD } from '../utils/stats-aggregation';
 // ★ 2026-07-23: 슈퍼관리자 발송통계 웹/에이전트 구분 — 에이전트(엔진) 통계 CT 병행 반환
 import {
   queryPayAgentStatsAllCompanies, queryPayAgentStoreBreakdown, validateStatsDateRange, isPayStatsConfigured,
@@ -3612,7 +3614,7 @@ router.get('/campaigns/:id/sms-detail', authenticate, requireSuperAdmin, async (
           msgType: r.msg_type === 'S' ? 'SMS' : r.msg_type === 'L' ? 'LMS' : r.msg_type === 'M' ? 'MMS' : getSendTypeLabel(r.msg_type, r.k_oriseq, r.status_code),
           sendType: getSendTypeLabel(r.msg_type, r.k_oriseq, r.status_code),
           // ★ 2026-10-07 알림톡 실패 후 문자 대체 행 — 화면이 결과 아래 「알림톡 실패」를 붙인다(글자 말고 판정으로)
-          isFallback: classifyMsgChannel(r.msg_type, r.k_oriseq, r.status_code).startsWith('substitute'),
+          isFallback: fallbackOf(r.msg_type, r.k_oriseq, r.status_code) !== null,   // ★ 2026-10-16 대체 판정 하나(B-1016-1)
           statusCode: r.status_code,
           statusText: rowStatus.label,
           statusType: rowStatus.type,
@@ -6435,9 +6437,11 @@ router.get('/stats/export', authenticate, requireSuperAdmin, async (req: Request
     // 일반 캠페인 — result_final 캐시 우선(완료 MySQL skip). 알림톡은 채널 분리라 실시간 유지.
     // ★ 2026-07-30: 브랜드 행(msg_type='F')이 SMSQ 합류 — getCampaignResultCounts가 전 채널을 담는다.
     const exportResultMap = await getCampaignResultCounts(exportMetaResult.rows);
-    // 알림톡 캠페인만 채널 분리 집계(알림톡 K / 대체발송 L·k_oriseq>0) → 엑셀에서 2행으로 분리
+    // 알림톡 캠페인 = 알림톡 시도 행 + 대체 문자 행. ★ 2026-10-16 캠페인 목록과 같은 집계 하나(B-1016-1 · 서수란 접수).
+    //   옛 엑셀 전용 분류(행 1 = 채널 1)는 비토 라인 K행 대체(7830·7831)를 대체로만 세어 「알림톡 0」을 찍었다.
+    //   ⛔ 목록용 loadAlimtalkFallbackForList(4초 상한 · 넘으면 빈 결과)를 쓰지 않는다 — 엑셀 알림톡 행이 조용히 0이 된다.
     const alimtalkCampaigns = exportMetaResult.rows.filter((c: any) => c.send_channel === 'alimtalk');
-    const exportSplitMap = await aggregateSmsChannelSplitByCampaign(alimtalkCampaigns);
+    const exportSplitMap = await aggregateAlimtalkFallbackByCampaign(alimtalkCampaigns);
 
     type ExportBucket = {
       send_date: string; company_name: any; company_code: any; login_id: any; user_name: any;
@@ -6468,19 +6472,19 @@ router.get('/stats/export', authenticate, requireSuperAdmin, async (req: Request
 
     for (const c of exportMetaResult.rows) {
       if (c.send_channel === 'alimtalk') {
+        const zero = { total: 0, success: 0, fail: 0, pending: 0 };
         const split = exportSplitMap.get(c.id);
-        const a = split?.alimtalk ?? { total: 0, success: 0, fail: 0, pending: 0 };
-        const sLms = split?.substitute_lms ?? { total: 0, success: 0, fail: 0, pending: 0 };
-        const sSms = split?.substitute_sms ?? { total: 0, success: 0, fail: 0, pending: 0 };
-        // 알림톡 행 — SMS 큐 K 실측(옛 카카오 IMC 합산은 2026-07-30 폐기 — 항상 0이었다). 대상건수는 여기에 귀속.
+        const sLms = split?.fallback.LMS ?? zero;
+        const sSms = split?.fallback.SMS ?? zero;
+        // 알림톡 행 — 알림톡 시도 전체(대체로 넘어간 건은 알림톡 실패로 · 접수 기대 = 전송 1 · 실패 1). 대상건수는 여기에 귀속.
         addExportBucket(c, 'alimtalk', '알림톡', Number(c.target_count || 0),
-          a.total, a.success, a.fail, a.pending);
-        // 알림톡대체발송 — 카카오 실패 후 LMS/SMS 대체분 각각(0이면 행 생략, 대상건수 중복 방지 0). 정산 단가 구분용.
+          split?.total ?? 0, split?.success ?? 0, split?.fail ?? 0, split?.pending ?? 0);
+        // 대체 문자 행 — LMS/SMS 각각(0이면 행 생략, 대상건수 중복 방지 0). 이름 = 청구서와 같은 유형 표시명(LMS(대체발송)).
         if (sLms.total > 0) {
-          addExportBucket(c, 'substitute_lms', '알림톡대체발송(LMS)', 0, sLms.total, sLms.success, sLms.fail, sLms.pending);
+          addExportBucket(c, 'fallback_lms', billingTypeLabel('LMS_FB'), 0, sLms.total, sLms.success, sLms.fail, sLms.pending);
         }
         if (sSms.total > 0) {
-          addExportBucket(c, 'substitute_sms', '알림톡대체발송(SMS)', 0, sSms.total, sSms.success, sSms.fail, sSms.pending);
+          addExportBucket(c, 'fallback_sms', billingTypeLabel('SMS_FB'), 0, sSms.total, sSms.success, sSms.fail, sSms.pending);
         }
       } else {
         const counts = exportResultMap.get(c.id) || { sent: 0, success: 0, fail: 0, pending: 0 };

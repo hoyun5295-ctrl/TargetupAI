@@ -89,7 +89,9 @@ describe('배선', () => {
     expect(a.match(/testBillingTypeKey\(row\.msg_type\)/g)?.length).toBe(2);
   });
   it('발행 항등식에 테스트 브랜드가 들어간다', () => {
-    expect(src('utils/billing-issue.ts')).toContain('(totalTestBrand * prices.TEST_BRAND)');
+    // ★ 2026-10-16 손 나열 → 유형 표 순회(B-1016-1) — TEST_BRAND 는 표에 있어 구조적으로 들어간다
+    expect(src('utils/billing-issue.ts')).toContain('BILLING_TYPES.reduce(');
+    expect(src('utils/billing-types.ts')).toContain("key: 'TEST_BRAND'");
   });
   it('테스트 결과 화면은 표시 CT로 유형·본문을 내고 브랜드는 브랜드 단가로 센다', () => {
     const c = src('routes/campaigns.ts');
@@ -102,8 +104,9 @@ describe('배선', () => {
     expect(src('routes/manage-stats.ts')).toContain('msgType: getSendTypeLabel(r.msg_type),');
   });
   it('라벨: PDF·관리자 화면', () => {
-    expect(src('utils/billing-pdf.ts')).toContain("TEST_BRAND: '테스트브랜드메시지'");
-    expect(readAdminScreenSource())
-      .toContain("TEST_BRAND: '테스트브랜드메시지'");
+    // ★ 2026-10-16 이름 = 축의 짧은 이름 하나(PDF 2쪽·서버 type_label 이 같은 함수 · 화면 사본 삭제 · B-1016-1)
+    expect(src('utils/billing-types.ts')).toContain("shortLabel: '테스트브랜드메시지'");
+    expect(src('utils/billing-pdf.ts')).toContain('billingDetailTypeLabel(');
+    expect(readAdminScreenSource()).toContain('item.type_label || item.message_type');
   });
 });

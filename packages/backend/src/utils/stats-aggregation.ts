@@ -13,7 +13,7 @@ import { CAMPAIGN_OPT080_SELECT_EXPR, CAMPAIGN_OPT080_LEFT_JOIN } from './unsubs
 // ★ 2026-06-11: 카운트는 smsCampaignCountsSafe(이력=결과/라이브=대기 분리) — 이동 중 이중 카운트 차단
 import { getAllSmsTablesWithLogs, getCompanySmsTablesWithLogs, smsCampaignCountsSafe } from './sms-queue';
 import { classifyResultTables, computeDisplayCounts, DisplayCounts } from './sms-table-split';
-import { SUCCESS_CODES_SQL, PENDING_CODES_SQL, tallySmsChannelCounts, tallyAlimtalkFallback, SmsChannel, ChannelCount, type AlimtalkFallbackCount } from './sms-result-map';
+import { SUCCESS_CODES_SQL, PENDING_CODES_SQL, SMS_SUB_ROW_SQL, tallyAlimtalkFallback, type AlimtalkFallbackCount } from './sms-result-map';
 import { CampaignTableMeta, recordedLiveTables, logTablesForLive } from './stats-table-scope';
 import { expandMonthlyRange } from './stats-period';
 import { resolveChargeUnitPrice } from './unit-price';
@@ -380,23 +380,10 @@ export async function aggregateSmsCountsByCampaign(
 }
 
 /**
- * ★ 알림톡 통계 분리 — 캠페인의 SMS 큐를 채널(알림톡 K / 대체발송 L·k_oriseq>0 / lms·sms·mms)별로
- *   성공·실패·대기 집계. 통계 엑셀에서 알림톡 캠페인을 "알림톡"/"알림톡대체발송" 2행으로 가르는 전용.
- *   aggregateSmsCountsByCampaign(전 통계·결과 공유)은 불변 — 이 함수는 엑셀에서만 호출.
- *   ★ 신규 SQL 컬럼 0: msg_type·k_oriseq·status_code·app_etc1 모두 SMSQ_SEND 실측(29컬럼 덤프) 확정.
- * @returns Map<campaignId, Record<SmsChannel, {total,success,fail,pending}>>
- */
-export async function aggregateSmsChannelSplitByCampaign(
-  campaigns: CampaignTableMeta[]
-): Promise<Map<string, Record<SmsChannel, ChannelCount>>> {
-  const result = new Map<string, Record<SmsChannel, ChannelCount>>();
-  for (const [cid, rows] of await fetchSmsChannelRawByCampaign(campaigns)) result.set(cid, tallySmsChannelCounts(rows));
-  return result;
-}
-
-/**
- * ★ 2026-10-07 알림톡 캠페인 목록(관리자 발송 내역 · 고객사 발송결과)용 — 알림톡 시도와 대체 문자를 따로(tallyAlimtalkFallback).
- *   조회는 엑셀 채널 분리(aggregateSmsChannelSplitByCampaign)와 같은 한 문장이다 — 세는 규칙만 다르다.
+ * ★ 2026-10-07 알림톡 캠페인 = 알림톡 시도와 대체 문자를 따로(tallyAlimtalkFallback).
+ * ★ 2026-10-16 슈퍼관리자 통계 엑셀도 이 함수 하나를 쓴다(옛 엑셀 전용 aggregateSmsChannelSplitByCampaign 삭제 · B-1016-1).
+ *   같은 조회에 세는 규칙이 두 벌이라 엑셀은 비토 라인 대체 행을 「알림톡 0」으로 셌다(서수란 접수 · 같은 부류 세 번째).
+ *   ⛔ 엑셀은 이 함수를 직접 부른다 — 목록용 loadAlimtalkFallbackForList(4초 상한 · 넘으면 빈 결과)를 쓰면 알림톡 행이 조용히 0이 된다.
  */
 export async function aggregateAlimtalkFallbackByCampaign(
   campaigns: CampaignTableMeta[]
@@ -431,7 +418,7 @@ export async function loadAlimtalkFallbackForList(rows: Array<CampaignTableMeta 
   }
 }
 
-/** 캠페인별 (msg_type · 대체 여부 · 결과 코드) 행 수 — 채널 분리 집계 두 함수의 공용 조회 */
+/** 캠페인별 (msg_type · 대체 여부 · 결과 코드) 행 수 — 알림톡 시도·대체 집계의 조회(대체 판정 = sms-result-map) */
 async function fetchSmsChannelRawByCampaign(
   campaigns: CampaignTableMeta[]
 ): Promise<Map<string, Array<{ msg_type: string; k_oriseq: number | null; status_code: number; cnt: number }>>> {
@@ -455,7 +442,7 @@ async function fetchSmsChannelRawByCampaign(
     const pendingOnly = new Set(pendingLiveTables);
     const unions = group.tables
       .map(t => `SELECT app_etc1 AS _grp, msg_type,
-                   CASE WHEN k_oriseq IS NOT NULL AND k_oriseq > 0 THEN 1 ELSE 0 END AS is_sub,
+                   CASE WHEN ${SMS_SUB_ROW_SQL} THEN 1 ELSE 0 END AS is_sub,
                    status_code, COUNT(*) AS cnt
                  FROM ${t} WHERE app_etc1 IN (${placeholders})${pendingOnly.has(t) ? ` AND (status_code IN (${PENDING_CODES_SQL}) OR (status_code NOT IN (${SUCCESS_CODES_SQL}, ${PENDING_CODES_SQL}) AND mobsend_time IS NULL))` : ''}
                  GROUP BY app_etc1, msg_type, is_sub, status_code`)
@@ -472,7 +459,7 @@ async function fetchSmsChannelRawByCampaign(
       if (!rawByCampaign.has(cid)) rawByCampaign.set(cid, []);
       rawByCampaign.get(cid)!.push({
         msg_type: String(r.msg_type),
-        k_oriseq: Number(r.is_sub) === 1 ? 1 : null,  // 옛 대체 행 = k_oriseq>0 여부 · 비토 대체 = K+7830/7831(status_code로 판정 · ★2026-10-03)
+        k_oriseq: Number(r.is_sub) === 1 ? 1 : null,  // 옛 대체 행 = SMS_SUB_ROW_SQL 여부 · 비토 대체 = K행 결과코드(fallbackOf 가 판정 · ★2026-10-03)
         status_code: Number(r.status_code),
         cnt: Number(r.cnt || 0),
       });

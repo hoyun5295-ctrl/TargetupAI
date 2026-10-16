@@ -35,7 +35,7 @@ import { retryUnsentConfirmations, ensureConfirmationToken, renderConfirmBlockHt
 // ★ 2026-08-05 회사 단위 정산 잠금 CT — 발행·반영·취소·수동완료가 **같은 두 겹**을 잡아야 서로를 막는다.
 import { lockCompanyForBilling, lockCompaniesForBilling } from '../utils/billing-lock';
 import { normalizeUnitPriceBasis } from '../utils/unit-price';
-import { buildInvoiceLines, checkInvoiceLinesAgainstHeader, sumFlooredInvoiceLines, invoiceLineLabel, escapeInvoiceHtml } from '../utils/billing-invoice-lines';
+import { buildInvoiceLines, checkInvoiceLinesAgainstHeader, sumFlooredInvoiceLines, invoiceLineLabel, escapeInvoiceHtml, billingTypeLabel, billingDetailTypeLabel } from '../utils/billing-invoice-lines';
 import { resolveBillingScopeLabel } from '../utils/billing-scope-label';
 import {
   loadPlanChanges, buildPlanSegments, sumPlanSegments, evaluatePlanHistoryGate,
@@ -62,7 +62,9 @@ import { readPeriodBillingType, describePeriodBillingTypeBlock } from '../utils/
 // ★ 2026-08-05 요금제 무료 제공 — 미리보기가 발행과 같은 공제를 적용하게 한다(§2-4 규약)
 import { readFreeDeductibleForBilling } from '../utils/free-messaging';
 // ★ 2026-08-05 청구 수량 정의 CT — 미리보기가 발행·인쇄와 같은 식을 쓰게 한다
-import { billableQuantity, BILLING_TYPES } from '../utils/billing-types';
+import { billableQuantity, BILLING_TYPES, billingBaseType, foldInheritedTotals } from '../utils/billing-types';
+// ★ 2026-10-16 조정이 어느 줄인가 = 발행과 같은 판정(B-1016-1 · Codex 1R)
+import { adjustmentLineType } from '../utils/billing-qty-adjust';
 // ★ 2026-08-20(2) 스키마 부재 503 판정 CT(SQLSTATE 42P01·42703 + 메시지) — KT 반영 catch가 쓴다
 import { handleDbMigrationError } from '../utils/db-migration-error';
 
@@ -1943,10 +1945,18 @@ router.get('/:id/qty-adjustments', async (req: Request, res: Response) => {
       [req.params.id],
     );
     // 저장된 델타(표시용)와 **이 청구서에 실제로 실린 델타**(base 계산용)를 나눠 센다.
+    // ★ 2026-10-16 조정 → 줄은 발행과 같은 판정(resolveAdjustmentTypeKey). 배포 전 「LMS」 조정이 재발행 뒤 「LMS(대체발송)」 줄에
+    //   실렸으면 그 줄의 원래 수량에서 빼야 한다 — 유형키 그대로 묶으면 다음 조정의 델타가 그만큼 틀린다.
+    //   범위(채널 · 발송ID)까지 발행과 같은 함수가 거른다(Codex 2R high — 화면만 채널 전체에서 골라 다른 줄을 봤다).
+    const lineCandidates = (itemRows.rows as any[]).map((it) => ({ channel: String(it.channel), typeKey: String(it.message_type), agentId: it.agent_id }));
     const deltaByKey = new Map<string, number>();
     const appliedByKey = new Map<string, number>();
     for (const a of r.rows) {
-      const k = `${a.channel} ${a.type_key}`;
+      const lineType = adjustmentLineType(a, lineCandidates);
+      // 실릴 줄이 없는 조정(발행도 fail-closed)은 어느 줄에도 묶지 않는다 — 유형키로 되돌려 묶으면 다른 발송ID 의
+      //   같은 유형 줄에 감액이 표시된다(Codex 3R). 그 조정은 응답 adjustments 목록에 그대로 남는다.
+      if (!lineType) continue;
+      const k = `${a.channel} ${lineType}`;
       const d = Number(a.qty_delta) || 0;
       deltaByKey.set(k, (deltaByKey.get(k) || 0) + d);
       appliedByKey.set(k, (appliedByKey.get(k) || 0) + (Number(a.applied_delta) || 0));
@@ -2209,7 +2219,8 @@ router.get('/agent-price-gaps', async (_req: Request, res: Response) => {
     const usedByCustId = new Map<string, Set<string>>();
     for (const u of usedTypes || []) {
       const set = usedByCustId.get(u.custId) || new Set<string>();
-      set.add(agentUsageKey(u.msgType));   // MsgType → 청구 유형키 (CT 재사용 — 매핑 두 벌 금지)
+      // MsgType → 청구 유형키 (CT 재사용 — 매핑 두 벌 금지) → 상속원(★2026-10-16 KL = LMS_FB 의 단가 칸은 cost_per_lms · 아래 미설정 칸과 같은 이름)
+      set.add(billingBaseType(agentUsageKey(u.msgType)));
       usedByCustId.set(u.custId, set);
     }
 
@@ -2329,6 +2340,8 @@ router.get('/:id/items', async (req: Request, res: Response) => {
           item_date: toDayKey(r.item_date),
           cust_name,
           scope_label: resolveBillingScopeLabel({ ...r, cust_name }),
+          // ★ 2026-10-16 유형 칸도 서버가 확정한다(B-1016-1 · 「LMS(대체)」). 화면 라벨표 사본은 삭제 — PDF 2쪽과 같은 함수.
+          type_label: billingDetailTypeLabel(r),
         };
       }),
       lines,
@@ -2555,9 +2568,11 @@ const handleBillingDelete = async (req: Request, res: Response) => {
         );
         const bad: string[] = [];
         for (const a of adjRows.rows) {
+          // ★ 2026-10-16 조정 → 줄은 발행과 같은 함수(adjustmentLineType · 범위 거르기 포함 · B-1016-1)
+          const lineType = adjustmentLineType(a, agg.rows.map((g: any) => ({ channel: String(g.channel), typeKey: String(g.message_type), agentId: g.agent_id })));
           const hits = agg.rows.filter((g: any) =>
             String(g.channel) === String(a.channel)
-            && String(g.message_type) === String(a.type_key)
+            && String(g.message_type) === lineType
             && (a.agent_id ? String(g.agent_id || '') === String(a.agent_id) : true));
           if (hits.length === 0) { bad.push(`${a.channel}/${a.type_key}: 청구 항목 없음`); continue; }
           const base = hits.reduce((s: number, g: any) => s + (Number(g.cnt) || 0), 0) - (Number(a.applied_delta) || 0);
@@ -2985,9 +3000,10 @@ router.get('/preview', async (req: Request, res: Response) => {
     // ★ 2026-07-31 결과 미확정 — **차단하지 않고 보여준다**(billing-issue와 같은 판정·같은 정책).
     //   차단으로 두면 채널별 종결 의미가 달라 구멍이 남는 채 "막혔으니 안전"이라는 거짓 확신을 주고,
     //   워커 교착 시 정산이 멈춘다. 수치는 아래 billing_guard.pending_types로 화면에 내려 사람이 판단한다.
-    if (unbillable.length > 0) block('UNBILLABLE_TYPE_KEY', `청구 단가가 정의되지 않은 유형: ${summarizeBlockList(unbillable.map((u) => u.key))}`);
-    if (webUnsetPriced.length > 0) block('WEB_UNIT_PRICE_UNSET', `고객사 단가 미설정: ${summarizeBlockList(webUnsetPriced.map((u) => u.key))}`);
-    if (priced.missingAgentPrices.length > 0) block('AGENT_UNIT_PRICE_MISSING', `에이전트 발송ID 단가 미설정: ${summarizeBlockList(priced.missingAgentPrices.map((m) => `${m.agentSendId} ${m.typeKey}`))}`);
+    // ★ 2026-10-16 문구는 내부 유형키가 아니라 표시명(B-1016-1 · 0904 랩디 「KL」 오해와 같은 일을 막는다)
+    if (unbillable.length > 0) block('UNBILLABLE_TYPE_KEY', `청구 단가가 정의되지 않은 유형: ${summarizeBlockList(unbillable.map((u) => billingTypeLabel(u.key)))}`);
+    if (webUnsetPriced.length > 0) block('WEB_UNIT_PRICE_UNSET', `고객사 단가 미설정: ${summarizeBlockList(webUnsetPriced.map((u) => billingTypeLabel(u.key)))}`);
+    if (priced.missingAgentPrices.length > 0) block('AGENT_UNIT_PRICE_MISSING', `에이전트 발송ID 단가 미설정: ${summarizeBlockList(priced.missingAgentPrices.map((m) => `${m.agentSendId} ${billingTypeLabel(m.typeKey)}`))}`);
     if (usage.agentMappingMissing) block('AGENT_MAPPING_MISSING', `에이전트 사용 설정(usage_type=${ledger.usageType})인데 발송ID 매핑 0건. 게이트웨이 발송분이 통째로 빠진다`);
     if (!planGate.ok) {
       block('PLAN_HISTORY_MISSING', planGate.blockReason === 'history_absent'
@@ -3057,7 +3073,8 @@ router.get('/preview', async (req: Request, res: Response) => {
           const store = storeMap[row.run_id] || { store_code: 'default', store_name: '본사' };
           const b = ensureStore(store.store_code, store.store_name);
           const n = Number(row.success_count) || 0;
-          switch (MSG_TYPE_TO_USAGE_KEY[row.msg_type]) {
+          // ★ 2026-10-16 대체분(SMS_FB·LMS_FB)은 상속원 문자 칸에 합친다 — 이 표는 문자 칸만 있고 단가도 같다(B-1016-1)
+          switch (billingBaseType(MSG_TYPE_TO_USAGE_KEY[row.msg_type] || '')) {
             case 'SMS': b.sms_success += n; break;
             case 'LMS': b.lms_success += n; break;
             case 'MMS': b.mms_success += n; break;
@@ -3089,27 +3106,30 @@ router.get('/preview', async (req: Request, res: Response) => {
     //   `totals`는 일자축 성공 합이라 무료를 모르는데 발행은 공제 후로 나간다 —
     //   그대로 두면 같은 응답 안에서 미리보기 금액과 발행 예정 금액이 갈린다(§2-4 "미리보기는 발행과 같은 값").
     //   빼는 값은 한도가 아니라 **실제 배분된 양**(priced.items의 freeCount)이다.
+    // ★ 2026-10-16 요약은 문자 칸만 있다 — 대체분(SMS_FB·LMS_FB)은 수량·무료 모두 상속원으로 접는다(종전 값 유지 · B-1016-1).
     const previewFreeByType: Record<string, number> = {};
     for (const it of priced.items) {
       const f = Number((it as any).freeCount) || 0;
       if (it.channel !== 'web' || f <= 0) continue;
-      previewFreeByType[it.typeKey] = (previewFreeByType[it.typeKey] || 0) + f;
+      const base = billingBaseType(it.typeKey);
+      previewFreeByType[base] = (previewFreeByType[base] || 0) + f;
     }
+    const baseTotals = foldInheritedTotals(totals);
     const billableQty = (key: string) =>
-      billableQuantity({ success: Number((totals as any)[key]) || 0, freeCount: previewFreeByType[key] || 0 });
+      billableQuantity({ success: Number(baseTotals[key]) || 0, freeCount: previewFreeByType[key] || 0 });
     const summary = {
       sms_success: billableQty('SMS'),
       lms_success: billableQty('LMS'),
       mms_success: billableQty('MMS'),
       kakao_success: billableQty('KAKAO'),
-      brand_success: totals.BRAND,
-      brand_nf_success: totals.BRAND_NF,
+      brand_success: baseTotals.BRAND || 0,
+      brand_nf_success: baseTotals.BRAND_NF || 0,
       sms_amount: billableQty('SMS') * prices.SMS,
       lms_amount: billableQty('LMS') * prices.LMS,
       mms_amount: billableQty('MMS') * prices.MMS,
       kakao_amount: billableQty('KAKAO') * prices.KAKAO,
-      brand_amount: totals.BRAND * prices.BRAND,
-      brand_nf_amount: totals.BRAND_NF * prices.BRAND_NF,
+      brand_amount: (baseTotals.BRAND || 0) * prices.BRAND,
+      brand_nf_amount: (baseTotals.BRAND_NF || 0) * prices.BRAND_NF,
     };
 
     return res.json({ type: 'combined', summary, test, spam, agent, plan, ai_credit, amounts, billing_guard });

@@ -6,7 +6,7 @@
 // 참조: campaigns.ts, results.ts, spam-filter.ts, ResultsModal.tsx (백엔드→프론트 전달)
 // ============================================================
 
-import { isBrandOnlyChannel } from './billing-types';
+import { isBrandOnlyChannel, FALLBACK_BILLING_CODE } from './billing-types';
 
 // ========================
 // Part 1: QTmsg status_code 매핑
@@ -240,23 +240,44 @@ export const ABNORMAL_STATUS_MIN = 100000;
  *   ②를 알림톡 성공으로 세면 통계는 대체분을 놓치고 정산은 알림톡 단가로 청구한다.
  *   판정은 여기 하나가 소유한다(JS 판정 · SQL 조각이 같은 상수에서 나온다).
  *   ⛔ 브랜드(F) 행은 이 판정에 넣지 않았다 — 같은 코드가 F행에도 실리는지 운영 실측 전이다(BUGS B-1003-1 추가 과제).
+ *
+ * ★ 2026-10-16 판정을 `fallbackOf` 하나로 모았다(B-1016-1 · 같은 부류 세 번째 접수).
+ *   옛: 통계 엑셀(classifyMsgChannel · 행 1 = 채널 1)과 캠페인 목록(tallyAlimtalkFallback · 시도 + 대체)이 같은 행을 다르게 셌고,
+ *   청구 식은 대체를 L·S 로 접어 정산서에서 대체 여부가 사라졌다. 이제 집계·라벨·관리자 상세·청구 식이 이 판정 하나를 쓴다.
  */
 export const KAKAO_FALLBACK_SMS_CODE = 7830;
 export const KAKAO_FALLBACK_LMS_CODE = 7831;
 
-/** 알림톡(K) 행이 문자로 대체 성공했으면 그 문자 유형('S'|'L'), 아니면 null */
-export function alimtalkFallbackMsgType(msgType: string, statusCode?: number | string | null): 'S' | 'L' | null {
-  if (msgType !== 'K' || statusCode == null || statusCode === '') return null;
-  const code = Number(statusCode);
-  if (code === KAKAO_FALLBACK_SMS_CODE) return 'S';
-  if (code === KAKAO_FALLBACK_LMS_CODE) return 'L';
-  return null;
+/** 옛 모양의 대체 행(자식 행) 조건 — k_oriseq = 원본 K행 seqno. ★2026-10-16 sms-queue 에서 옮겼다(판정 소유 = 이 파일) */
+export const SMS_SUB_ROW_SQL = 'k_oriseq IS NOT NULL AND k_oriseq > 0';
+
+/**
+ * 이 행이 알림톡 실패 뒤 문자 대체인가 → 그 문자 유형('S'|'L'), 아니면 null. 대체 판정의 유일한 정의.
+ *   - 비토 모양 = K행 결과코드 7830(SMS)·7831(LMS) — 그 행은 대체 성공이다
+ *   - 옛 모양 = S/L 행 + k_oriseq > 0 — 결과(성공·실패·대기)는 그 행의 결과코드대로
+ */
+export function fallbackOf(msgType: string, kOriseq?: number | string | null, statusCode?: number | string | null): 'S' | 'L' | null {
+  if (msgType === 'K') {
+    if (statusCode == null || statusCode === '') return null;
+    const code = Number(statusCode);
+    if (code === KAKAO_FALLBACK_SMS_CODE) return 'S';
+    if (code === KAKAO_FALLBACK_LMS_CODE) return 'L';
+    return null;
+  }
+  if (msgType !== 'S' && msgType !== 'L') return null;
+  const ori = Number(kOriseq);
+  return kOriseq != null && kOriseq !== '' && !Number.isNaN(ori) && ori > 0 ? msgType : null;
 }
 
-/** SQL용: 청구 유형 식(CASE)에 끼우는 WHEN 절 — K행 대체 성공을 그 문자 유형으로 (alimtalkFallbackMsgType 과 같은 규칙) */
-export const ALIMTALK_FALLBACK_TYPE_WHEN_SQL =
-  `WHEN msg_type = 'K' AND status_code = ${KAKAO_FALLBACK_SMS_CODE} THEN 'S' `
-  + `WHEN msg_type = 'K' AND status_code = ${KAKAO_FALLBACK_LMS_CODE} THEN 'L'`;
+/**
+ * SQL용: 청구 유형 식(CASE)에 끼우는 WHEN 절 — 두 모양의 대체를 청구 집계 코드 KS·KL 로(fallbackOf 와 같은 규칙).
+ * ★ 2026-10-16 옛: 'S'·'L'(문자와 한 줄) → 정산서 「LMS」 · 이제 = 「LMS(대체발송)」 줄(billing-types SMS_FB·LMS_FB · 단가는 문자 상속).
+ */
+export const FALLBACK_BILLING_CODE_WHEN_SQL =
+  `WHEN msg_type = 'K' AND status_code = ${KAKAO_FALLBACK_SMS_CODE} THEN '${FALLBACK_BILLING_CODE.S}' `
+  + `WHEN msg_type = 'K' AND status_code = ${KAKAO_FALLBACK_LMS_CODE} THEN '${FALLBACK_BILLING_CODE.L}' `
+  + `WHEN msg_type = 'S' AND ${SMS_SUB_ROW_SQL} THEN '${FALLBACK_BILLING_CODE.S}' `
+  + `WHEN msg_type = 'L' AND ${SMS_SUB_ROW_SQL} THEN '${FALLBACK_BILLING_CODE.L}'`;
 
 /** SQL용: 카카오 실패 대체발송 행 — ① 별도 문자 행 + ② K행 대체 성공 (발송결과·엑셀의 「대체발송」 필터) */
 export const SUBSTITUTE_ROW_SQL =
@@ -265,10 +286,9 @@ export const SUBSTITUTE_ROW_SQL =
 
 /**
  * 발송내역 행별 유형 라벨 (QTmsg SMSQ_SEND의 msg_type + k_oriseq 기반).
- * 발송내역 상세/엑셀에서 행마다 표시. 카카오 실패 후 LMS 대체발송을 별도 구분.
- * - 'K' + 7830/7831(status_code)  → 대체 SMS · 대체 LMS — 비토 라인 모양(★2026-10-03)
+ * 발송내역 상세/엑셀에서 행마다 표시. 카카오 실패 후 LMS 대체발송을 별도 구분(판정 = fallbackOf).
+ * - 대체(K + 7830/7831 · S/L + k_oriseq) → 대체 SMS · 대체 LMS
  * - 'K'                          → 알림톡
- * - 'L' + k_oriseq(원본 K행 seqno) → 대체 LMS · 대체 SMS
  * - 'L'                          → LMS
  * - 'S'                          → SMS
  * - 'M'                          → MMS
@@ -292,16 +312,13 @@ export function getDisplayContents(msgType: string, msgContents: any): string {
 }
 
 export function getSendTypeLabel(msgType: string, kOriseq?: number | string | null, statusCode?: number | string | null): string {
-  const ori = Number(kOriseq);
-  const isSub = kOriseq != null && kOriseq !== '' && !Number.isNaN(ori) && ori > 0;
-  // ★ 2026-10-03 비토 라인 = K행 결과코드로 대체 성공(위 KAKAO_FALLBACK_* 주석)
-  const inRow = alimtalkFallbackMsgType(msgType, statusCode);
-  // ★ 2026-10-07 짧게(옛 「카카오실패 대체발송(LMS)」가 칸에서 4줄로 깨졌다 · 박성용 접수)
-  if (inRow) return inRow === 'L' ? '대체 LMS' : '대체 SMS';
+  // ★ 2026-10-16 대체 판정 = fallbackOf 하나(두 모양) · ★ 2026-10-07 짧게(옛 「카카오실패 대체발송(LMS)」가 칸에서 4줄로 깨졌다 · 박성용 접수)
+  const fb = fallbackOf(msgType, kOriseq, statusCode);
+  if (fb) return fb === 'L' ? '대체 LMS' : '대체 SMS';
   if (msgType === 'K') return '알림톡';
   if (msgType === 'F') return '브랜드메시지';   // ★ 2026-07-30 브랜드 SMSQ 합류(msg_type='F')
-  if (msgType === 'L') return isSub ? '대체 LMS' : 'LMS';
-  if (msgType === 'S') return isSub ? '대체 SMS' : 'SMS';
+  if (msgType === 'L') return 'LMS';
+  if (msgType === 'S') return 'SMS';
   if (msgType === 'M') return 'MMS';
   return msgType;
 }
@@ -323,59 +340,16 @@ export function getCampaignChannelLabel(sendChannel: string | null | undefined, 
   return String(messageType || '').trim() || '(유형 미상)';
 }
 
-/**
- * 발송 채널 분류 (집계 키) — getSendTypeLabel과 동일 규칙의 영문 키 버전.
- * 통계에서 알림톡(K)과 카카오실패 대체발송(L·k_oriseq>0 · K+7830/7831)을 분리 집계할 때 사용.
- */
-export type SmsChannel = 'alimtalk' | 'brand' | 'substitute_lms' | 'substitute_sms' | 'lms' | 'sms' | 'mms' | 'other';
-
-export function classifyMsgChannel(msgType: string, kOriseq?: number | string | null, statusCode?: number | string | null): SmsChannel {
-  const ori = Number(kOriseq);
-  const isSub = kOriseq != null && kOriseq !== '' && !Number.isNaN(ori) && ori > 0;
-  // ★ 2026-10-03 비토 라인 = K행 결과코드로 대체 성공(위 KAKAO_FALLBACK_* 주석)
-  const inRow = alimtalkFallbackMsgType(msgType, statusCode);
-  if (inRow) return inRow === 'L' ? 'substitute_lms' : 'substitute_sms';
-  if (msgType === 'K') return 'alimtalk';
-  if (msgType === 'F') return 'brand';   // ★ 2026-07-30 브랜드 SMSQ 합류
-  if (msgType === 'L') return isSub ? 'substitute_lms' : 'lms';  // 카카오 실패 → LMS 대체
-  if (msgType === 'S') return isSub ? 'substitute_sms' : 'sms';  // 카카오 실패 → SMS 대체
-  if (msgType === 'M') return 'mms';
-  return 'other';
-}
-
 export interface ChannelCount { total: number; success: number; fail: number; pending: number; }
-
-/**
- * msg_type/k_oriseq/status_code별 집계 행 배열을 채널별 성공·실패·대기로 누적.
- * status 판정은 SUCCESS_CODES/PENDING_CODES(이 파일) 단일 진실 재사용.
- */
-export function tallySmsChannelCounts(
-  rows: Array<{ msg_type: string; k_oriseq?: number | string | null; status_code: number | string; cnt: number | string }>
-): Record<SmsChannel, ChannelCount> {
-  const init = (): ChannelCount => ({ total: 0, success: 0, fail: 0, pending: 0 });
-  const out: Record<SmsChannel, ChannelCount> = {
-    alimtalk: init(), brand: init(), substitute_lms: init(), substitute_sms: init(), lms: init(), sms: init(), mms: init(), other: init(),
-  };
-  for (const r of rows) {
-    const ch = classifyMsgChannel(r.msg_type, r.k_oriseq, r.status_code);
-    const cnt = Number(r.cnt || 0);
-    const code = Number(r.status_code);
-    const b = out[ch];
-    b.total += cnt;
-    if (isSuccess(code)) b.success += cnt;
-    else if (isPending(code)) b.pending += cnt;
-    else b.fail += cnt;
-  }
-  return out;
-}
 
 /**
  * ★ 2026-10-07 (박성용 접수 cmuxvwasa0pvajnn462s5ubyr) 알림톡 캠페인 = 「알림톡 시도」와 「대체 문자」를 따로 센다.
  *   옛 목록은 대체로 나간 문자까지 알림톡 성공으로 셌다(3건 성공 · 실제 = 알림톡 2 성공 + 1 실패 → LMS 대체 1 성공).
- *   청구(send-usage-aggregation)는 대체 성공을 문자 유형으로 센다 — 이 집계가 같은 판정(alimtalkFallbackMsgType · k_oriseq)을 쓴다.
  *   - 알림톡 시도 = K행 전부. K+7830/7831(비토 라인 = 같은 행에 대체 결과) = 알림톡 실패 + 대체 성공 1건씩.
  *   - 옛 라인 = 실패한 K행(알림톡 실패) + 별도 L/S행(k_oriseq>0 = 대체 · 그 행의 결과대로).
  *   그 밖의 행(브랜드·일반 문자)은 세지 않는다(알림톡 캠페인 행만 넘어온다).
+ * ★ 2026-10-16 통계 엑셀도 이 집계 하나를 쓴다(옛 엑셀 전용 classifyMsgChannel·tallySmsChannelCounts 삭제 · B-1016-1).
+ *   대체 판정 = fallbackOf · 청구 식 = 같은 규칙의 SQL 조각(FALLBACK_BILLING_CODE_WHEN_SQL).
  */
 export interface AlimtalkFallbackCount extends ChannelCount {
   fallback: { LMS: ChannelCount; SMS: ChannelCount };
@@ -395,20 +369,18 @@ export function tallyAlimtalkFallback(
   for (const r of rows) {
     const cnt = Number(r.cnt || 0);
     const code = Number(r.status_code);
+    const fb = fallbackOf(r.msg_type, r.k_oriseq, code);
     if (r.msg_type === 'K') {
-      const inRow = alimtalkFallbackMsgType('K', code);
-      if (inRow) {
+      if (fb) {
         out.total += cnt; out.fail += cnt;                                          // 알림톡은 실패했고
-        const f = out.fallback[inRow === 'L' ? 'LMS' : 'SMS'];
+        const f = out.fallback[fb === 'L' ? 'LMS' : 'SMS'];
         f.total += cnt; f.success += cnt;                                            // 같은 행에서 문자로 대체 성공
       } else {
         add(out, code, cnt);
       }
       continue;
     }
-    const ori = Number(r.k_oriseq);
-    const isSub = r.k_oriseq != null && r.k_oriseq !== '' && !Number.isNaN(ori) && ori > 0;
-    if (isSub && (r.msg_type === 'L' || r.msg_type === 'S')) add(out.fallback[r.msg_type === 'L' ? 'LMS' : 'SMS'], code, cnt);
+    if (fb) add(out.fallback[fb === 'L' ? 'LMS' : 'SMS'], code, cnt);               // 옛 모양 대체 행 = 그 행의 결과대로
   }
   return out;
 }
