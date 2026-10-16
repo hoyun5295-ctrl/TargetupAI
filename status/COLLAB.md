@@ -81,15 +81,15 @@
 7. **승인 후** 설계문서 `docs/YYYY-MM-DD-<주제>-design.md` 작성 → 자가 검토(빈칸·모순·범위·중의성) → Harold님 검토 → 구현.
 8. **구현은 주재자 단독·순차.** 에이전트는 구현에 관여하지 않는다.
 
-### 1-7. superpowers:brainstorming 스킬 접목
+### 1-7. 회의 운영 보조 (★2026-10-17 superpowers 제거 · 옛 brainstorming 스킬 접목 절)
 
-발동 시 `superpowers:brainstorming` 스킬을 호출해 그 체크리스트를 따른다. 단 아래 두 지점은 CLAUDE.md가 우선이므로 조정해서 쓴다.
+superpowers 를 지웠으므로 brainstorming 스킬은 호출하지 않는다. 옛 접목에서 남긴 원칙은 아래 표대로 그대로 지킨다. 회의 앞 단계로 「비토 구조체크」(기존 코드 개선)·「비토 질문」(설계 좁히기)을 쓸 수 있다 · 원래 안건을 안건 첫 줄에 고정(메모리 `feedback_dont_defer_the_original_ask`).
 
 | 스킬 기본 | 우리 적용 | 근거 |
 |-----------|-----------|------|
 | "2~3개 접근안을 제시" | **발산은 회의 안에서만.** Harold님께는 정답 1개만 올린다 | CLAUDE.md `no_option_recommend` |
 | Visual Companion(브라우저 목업) | **비활성** | preview 도구 금지 (LESSONS_META) |
-| 스펙 경로 `docs/superpowers/specs/...` | `docs/YYYY-MM-DD-<주제>-design.md` | 프로젝트 관례. 스킬도 "사용자 선호가 우선"이라 명시 |
+| 스펙 경로(옛 superpowers 관례) | `docs/YYYY-MM-DD-<주제>-design.md` | 프로젝트 관례 |
 
 스킬의 HARD-GATE(설계 제시·승인 전 구현 착수 금지)와 "질문은 한 번에 하나"는 그대로 지킨다. CLAUDE.md `workflow_4_1`과 같은 취지다.
 
@@ -102,23 +102,20 @@
 
 ---
 
-## 2) superpowers 스킬 매핑 (조회표)
+## 2) 스킬 매핑 (조회표) — ★2026-10-17 superpowers 제거 · mattpocock 한줄로 적용판 4종
 
-CLAUDE.md `superpowers_workflow_default`의 자가 질의("어떤 skill 호출 의무?")에 답할 때 참조한다.
+CLAUDE.md `skill_workflow_default`의 자가 질의("어떤 skill 호출 의무?")에 답할 때 참조한다. 스킬 파일 = `~/.claude/skills/<이름>/SKILL.md`(맨 위 「한줄로 적용 규칙」이 원문보다 우선).
 
 | 상황 | 스킬 |
 |------|------|
-| 큰 작업 진입 직전(의도·요구사항 탐색) | `superpowers:brainstorming` — 우리는 §1 회의 규격과 함께 쓴다 |
-| 다단계 작업 설계 | `superpowers:writing-plans` |
-| 계획 실행 | `superpowers:executing-plans` (별도 세션) / `superpowers:subagent-driven-development` (본 세션 분할) |
-| 신규 기능·버그 수정 | `superpowers:test-driven-development` (RED-GREEN-REFACTOR) |
-| 완료 보고 직전 | `superpowers:verification-before-completion` — 실제 검증 명령 실행 + 증거 출력 의무 |
-| 디버깅·원인 불명 | `superpowers:systematic-debugging` |
-| 독립 과제 2건 이상 | `superpowers:dispatching-parallel-agents` — **단 우리는 쓰기 병렬 금지. 읽기·조사에만 해당** |
-| 작업 공간 격리 | `superpowers:using-git-worktrees` |
-| 작업 종결·머지/PR | `superpowers:finishing-a-development-branch` |
-| 코드 리뷰 요청·수용 | `superpowers:requesting-code-review` / `receiving-code-review` |
-| 신규 스킬 작성 | `superpowers:writing-skills` |
+| 버그·「안 된다」·성능 저하 | `diagnosing-bugs`(자동) — 피드백 루프 먼저 · 운영 진단은 SQL·화면 실측 먼저 · 가설은 검증 명령과 짝지은 미검증 후보로만 |
+| 신규 기능·버그 수정 구현 | `tdd`(자동) — 설계안 동의 뒤 · seam = 설계서 「시험」 절 · 프론트는 backend vitest 로 import·소스 계약 |
+| 기존 코드 개선 설계 앞 | `improve-codebase-architecture` = 애칭 **「비토 구조체크」**일 때만 |
+| 계획·설계 좁히기 | `grill-me` = 애칭 **「비토 질문」**일 때만 |
+| 브레인스토밍 회의 | 이 문서 §1(스킬 없음 · 「발동」 필요) |
+| 완료 보고 직전 | 스킬 없음 — CLAUDE.md `skill_workflow_default` 의무(검증 명령 실행 + 증거) |
+| 코드 리뷰 요청·수용 | Codex = §3 · `status/CODEX-RUNBOOK.md` |
+| 독립 과제 2건 이상 | 쓰기 병렬 금지 · 읽기·조사 에이전트는 Harold 「발동」 때만(CLAUDE.md `no_parallel_tasks`) |
 
 ---
 
@@ -127,7 +124,7 @@ CLAUDE.md `superpowers_workflow_default`의 자가 질의("어떤 skill 호출 �
 호출 의무 단계와 면제 범위는 CLAUDE.md `codex_review_after_code_change`가 소유한다. 여기는 운영 방법만 담는다.
 
 - **라운드 운영**: 본 AI 작성 → tsc 0 + 자가 grep → **본 AI 적대 검토** → Codex 호출 → 정정 → 재검증. **최대 2라운드**(★2026-08-04 5→2). `critical`·`high` 0이면 종료, `medium` 이하는 SoT 등재만. 범위·종료 조건의 원천 = CLAUDE.md `codex_review_after_code_change`.
-- **지적 수용 원칙**: 무조건 수용하지 않는다. `superpowers:receiving-code-review`대로 실무 위험 기준으로 취사한다. 과한 처방(예: 연결 강제 종료)은 거부하고 단순한 대안으로 대체한 전례가 있다.
+- **지적 수용 원칙**: 무조건 수용하지 않는다. 실무 위험 기준으로 취사한다(옛 superpowers receiving-code-review 원칙 · CLAUDE.md `review_findings_fix_root_not_symptom`). 과한 처방(예: 연결 강제 종료)은 거부하고 단순한 대안으로 대체한 전례가 있다.
 - **같은 스레드 이어가기**: 후속 라운드는 `SendMessage`로 기존 에이전트에 이어 붙인다. 새로 띄우면 앞 맥락이 사라진다.
 - **설치**(최초 1회, Harold님 직접): `/plugin marketplace add openai/codex-plugin-cc` → `/plugin install codex@openai-codex` → `/reload-plugins` → `/codex:setup`
 

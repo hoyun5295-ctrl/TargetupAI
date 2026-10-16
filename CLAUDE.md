@@ -198,9 +198,10 @@
       [자가 검증] 신규 frontend 흐름 작성 직전 — "클릭 1회인가? 추가 입력이 없는가? AI 자동 흐름인가?" (상세 = memory `feedback_marketing_user_ux_priority`)
     </RULE>
 
-    <RULE id="superpowers_workflow_default">
-      큰 작업 진입 직전 "어떤 superpowers skill이 의무인가" 자가 질의.
-      완료 보고 직전 = `verification-before-completion`(실제 검증 명령 실행 + 증거 출력) / 버그·신규 기능 = `test-driven-development` / 디버깅 = `systematic-debugging`.
+    <RULE id="skill_workflow_default">
+      큰 작업 진입 직전 "어떤 skill이 의무인가" 자가 질의. ★2026-10-17 superpowers 제거(Harold) → mattpocock 한줄로 적용판으로 교체.
+      버그·「안 된다」·성능 저하 = `diagnosing-bugs`(피드백 루프 먼저 · 운영 진단은 실측 먼저) / 신규 기능·버그 수정 구현 = `tdd`(설계안 동의 뒤 · seam = 설계서 「시험」 절).
+      완료 보고 직전 = 실제 검증 명령 실행 + 증거 출력(tsc · 테스트 전체 · 실측 · Codex — 별도 스킬 없이 이 규칙이 의무다).
       [상황↔스킬 매핑] `status/COLLAB.md` §2
     </RULE>
 
