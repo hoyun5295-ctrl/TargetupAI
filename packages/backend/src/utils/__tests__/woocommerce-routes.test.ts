@@ -134,8 +134,11 @@ describe('배선 — app.ts · register-providers.ts · 워커', () => {
 describe('W5 — 상품 API 접점(mall-products · 이름 매칭 · AI 자동제작 재조회) 소스 계약', () => {
   it('mall-products: providers 에 우커머스 몰별 탭(woocommerce:{mall}) · search/preview 는 회사 소속 몰만(getWooIntegration) · Store API 공개 조회', () => {
     const r = code('routes/mall-products.ts');
-    expect(r).toContain('listWooIntegrations(');
-    expect(r).toMatch(/provider: `woocommerce:\$\{/);
+    // ★ 2026-10-17 몰 탭 목록 = 판정 한 벌(utils/mall-providers.ts · 단계 모달 후보 조회와 같은 함수)
+    const providers = code('utils/mall-providers.ts');
+    expect(r).toContain('listMallProviders(');
+    expect(providers).toContain('listWooIntegrations(');
+    expect(providers).toMatch(/provider: `woocommerce:\$\{/);
     expect(r).toContain("startsWith('woocommerce:')");
     expect(r).toContain('getWooIntegration(');
     expect(r).toContain('fetchWooStoreProducts(');

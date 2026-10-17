@@ -185,6 +185,13 @@
 > 검증 = FE · BE tsc 0 · vitest 595파일 8,371건 · 렌더 108곳 · Codex 적대 1R approve(gpt-6-astra · 지적 0 · 지정 파일 66개 + 분리 전 원본을 읽고 대조)
 > 다음 = 배포(백엔드 reload + 프론트 build:safe · AI 영업 C12 와 한 번에) → 실측(목록 숫자 카드 값 · 상세 창 저장 · 7일 부여 1회)
 
+<a id="c34"></a>
+
+### C34 · ★1017 한 줄 단계 모달 — Codex 적대 3R approve · 코드 완료 · 배포 대기 · DDL 0
+> 호출어 **"한 줄 단계 모달 / 질문하고 재료 받기 / 한 줄 완성"** → 설계서 = [한 줄 단계 모달](../docs/2026-10-17-oneline-steps-modal-design.md)(§10 구현 기록 · Codex 라운드 · 실측 1건) · 범위 밖 = [B-1017-1](BUGS.md)
+> 경로 = 구조체크 → 브레인스토밍 5역할(회의론자 최종 검증 15건) → Harold 결정(단계별 모달 · 깔끔 · 요금 2안 · 직접 상품 사진 허용 · DM 확인 창 → 만들기 단계) → 구현. 판정 = 서버 순수 CT(AI 0 · 닫힌 키 5 · 상한 4 + 만들기) · 몰 분기 = 상품 낱말마다 · 재료는 AI 를 지나지 않고 코드가 놓는다 · 원장 한 행 `oneline-complete`.
+> 켜는 순서 = 배포(백엔드 먼저) → 사내 회사 1곳 `ONE_LINE_STEPS_COMPANY_IDS`(그 회사가 `ONE_LINE_FACTS_COMPANY_IDS` 에도 있어야 동작) → 세 채널 × 몰 있음 · 없음 한 줄씩 실측 → 확대.
+
 <a id="c33"></a>
 
 ### C33 · ★1016 이미지 스튜디오 개편 + 템플릿 +80 — Codex approve(개편 2R · 템플릿 4R) · 배포 완료 1017 0시(Harold · pull · backend·frontend build:safe · reload) · 예시 배치 진행(결과 미확인) · 66 동기화 대기 · DDL 0

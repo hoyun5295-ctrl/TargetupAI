@@ -58,7 +58,8 @@ import EditShell, { type SaveTone } from '../components/make/EditShell';
 // ★ 2026-10-05 한줄로 시그니처(설계서 docs/2026-10-05-hanjul-signature-design.md §5) — 한 줄 원문 · 완성도 줄 · 혜택 자리 0크레딧 채우기
 import ZoneCompletion from '../components/zone/ZoneCompletion';
 import { LineFacts, LineFactsSheet, typedBenefit, type LineFactsValues } from '../components/zone/LineFacts';
-import { countSlots, fillSlots, fillSlotsDeep, stringsDeep, appendToOneLine } from '../utils/one-line';
+import { countSlots, fillSlots, fillSlotsDeep, stringsDeep, appendToOneLine, fetchOneLineGaps, newAttemptToken, clearLineStepsAnswers } from '../utils/one-line';
+import LineStepsModal, { lineStepsFailNotice, type LineStepsOpen } from '../components/zone/LineStepsModal';   // ★ 2026-10-17 한 줄 단계 모달
 import type { FixItem } from '../utils/make-flow';
 import InAppEntryGallery from '../components/inapp/InAppEntryGallery';
 // ★ 2026-10-10 한 줄 묻기 — 질문이면 자사몰 신호로 답한다(설계서 docs/2026-10-10-oneline-ask-design.md)
@@ -391,7 +392,10 @@ export default function InAppMessagesPage() {
   const [aiObjective, setAiObjective] = useState('');
   // ★ 2026-10-10 한 줄 묻기 — 판정은 한 줄 입구 두 곳(시작 화면 · 채널 화면)에서만. 채널 고르기 창 · 빠른 시작은 그대로.
   const lineAsk = useLineAsk('inapp');
-  const inappCost = `${AI_GENERATE_COSTS['inapp-ai-generator']}크레딧`;
+  // ★ 2026-10-17 한 줄 단계 모달(스위치 켠 회사) — 열린 모달 · 만들 채널(웹 · 앱) · 판정 조회 중 두 번 눌림 막기
+  const [inappSteps, setInappSteps] = useState<{ open: LineStepsOpen; channel: 'web' | 'app' } | null>(null);
+  const inappStepsCheckingRef = useRef(false);
+  const inappCost = `${lineAsk.stepsCost ?? AI_GENERATE_COSTS['inapp-ai-generator']}크레딧`;
   // ★ 2026-10-05 한 줄로 만든 메시지(스위치 켠 회사) — 편집기에 완성도 줄 · 혜택 채우기 시트를 그린다
   const [inappLine, setInappLine] = useState<string | null>(null);
 
@@ -583,13 +587,30 @@ export default function InAppMessagesPage() {
   // AI 자동 생성 (자연어 + 빠른 시작)
   // ────────────────────────────────────────────────────────────────
 
-  const handleAIGenerate = async (objective: string, templateHint?: QuickStartScenario, channelOverride?: 'web' | 'app', oneLine = false) => {
+  const handleAIGenerate = async (objective: string, templateHint?: QuickStartScenario, channelOverride?: 'web' | 'app', oneLine = false, steps?: { body: Record<string, unknown>; cost: number; storeKey: string; reopen: LineStepsOpen }) => {
     if (customerGate.isEmpty) { setShowDataGate(true); return; }
     // ★ 2026-07-06 표시 가능성 가드 — 웹에 표시할 곳이 없으면 AI 생성(크레딧) 진입 자체를 차단
     if ((channelOverride || channel || 'web') === 'web' && webBlocked) { setShowDisplayBlock(true); return; }
     if (!objective.trim() && !templateHint) {
       showToast('자연어 목표 또는 빠른 시작 카드 선택 필수', { type: 'warning' });
       return;
+    }
+    // ★ 2026-10-17 한 줄 단계 모달(스위치 켠 회사) — 관문(고객 데이터 · 표시 가능) 뒤 판정 · 질문이 0 이어도 만들기 단계 한 장(금액 확인)
+    if (oneLine && !templateHint && !steps) {
+      if (inappStepsCheckingRef.current) return;
+      inappStepsCheckingRef.current = true;
+      try {
+        const t = objective.trim();
+        const reads = lineAsk.readsFor(t);
+        const g = await fetchOneLineGaps(t, reads, 'inapp');
+        if (g?.stepsEnabled && g.plan) {
+          if (g.plan.block) { setShowDisplayBlock(true); return; }
+          setInappSteps({ open: { line: t, reads, plan: g.plan, fallbackCost: g.stepsCost }, channel: channelOverride || channel || 'web' });
+          return;
+        }
+      } finally {
+        inappStepsCheckingRef.current = false;
+      }
     }
     setAiGenerating(true);
     setAiProgressStep(0);
@@ -605,7 +626,11 @@ export default function InAppMessagesPage() {
         method: 'POST',
         headers: authHeaders(),
         // ★ 2026-10-05 한 줄 입구 표시(서버가 스위치를 보고 한 줄을 사용자 원문으로 쓴다 · 스위치 밖이면 지금 그대로)
-        body: JSON.stringify({ objective, templateHint, ...(oneLine ? { one_line: true } : {}) }),
+        // ★ 2026-10-17 단계 모달 = 시도 토큰 + 단계 답 몸통 · 사진 글 조각(서버가 한 줄 지문에서만 뺀다)
+        body: JSON.stringify({
+          objective, templateHint, ...(oneLine ? { one_line: true } : {}),
+          ...(steps ? { attempt_token: newAttemptToken(), ...steps.body, ...(steps.reopen.reads.length > 0 ? { read_texts: steps.reopen.reads } : {}) } : {}),
+        }),
       });
       const data = await res.json();
       clearInterval(stepInterval);
@@ -615,12 +640,19 @@ export default function InAppMessagesPage() {
       }
       if (!data.success) {
         if (data.code === 'INAPP_DISPLAY_UNAVAILABLE') { setAiGenerating(false); setShowDisplayBlock(true); return; }
+        if (steps) {
+          // ★ 2026-10-17 단계 모달 요청 실패 = 크레딧 없이 만들기 단계로 다시 연다(답 그대로 · 바뀐 금액 · 쓸 수 없는 몰 상품은 뺀다)
+          setAiGenerating(false);
+          setInappSteps({ open: { ...steps.reopen, atMake: true, notice: lineStepsFailNotice(String(data.code || ''), String(data.error || ''), Array.isArray(data.excluded) ? data.excluded : []), dropPicks: data.code === 'MALL_PRODUCTS_UNAVAILABLE', costOverride: data.code === 'PRICE_CHANGED' && Number.isFinite(data.cost) ? Number(data.cost) : steps.reopen.costOverride }, channel: channelOverride || channel || 'web' });
+          return;
+        }
         showToast(data.error || 'AI 생성 실패', { type: 'error' });
         setAiGenerating(false);
         return;
       }
 
       const pkg = data.package;
+      if (steps) clearLineStepsAnswers(steps.storeKey);
       setInappLine(oneLine && data.one_line?.enabled ? objective.trim() : null);
       // 편집 진입 — placeholder 직접 작성 의무
       setEditing({
@@ -657,14 +689,30 @@ export default function InAppMessagesPage() {
       setTimeout(() => {
         setAiGenerating(false);
         setAiObjective('');
-        showToast('AI 메시지 생성 완료. 혜택 부분 직접 작성 후 저장해주세요.', { type: 'success' });
+        showToast(steps ? `인앱 메시지를 만들었어요(${steps.cost}크레딧). 확인한 뒤 저장해 주세요` : 'AI 메시지 생성 완료. 혜택 부분 직접 작성 후 저장해주세요.', { type: 'success' });
       }, 400);
     } catch (e: any) {
       clearInterval(stepInterval);
       setAiGenerating(false);
-      showToast(e?.message || 'AI 생성 중 오류', { type: 'error' });
+      if (steps) setInappSteps({ open: { ...steps.reopen, atMake: true, notice: lineStepsFailNotice('NETWORK', '연결이 끊겨 만들지 못했어요.') }, channel: channelOverride || channel || 'web' });
+      else showToast(e?.message || 'AI 생성 중 오류', { type: 'error' });
     }
   };
+  // ★ 2026-10-17 한 줄 단계 모달 — 진입 화면 · 채널 화면 두 곳에 같은 모달(만들기 = 모달을 닫고 지금 진행 표시로 만든다)
+  const inappStepsModal = (
+    <LineStepsModal
+      open={!!inappSteps}
+      channel="inapp"
+      state={inappSteps?.open ?? null}
+      onClose={() => setInappSteps(null)}
+      onMake={(made) => {
+        const st = inappSteps;
+        setInappSteps(null);
+        if (!st) return;
+        void handleAIGenerate(st.open.line, undefined, st.channel, true, { body: made.body, cost: made.cost, storeKey: made.storeKey, reopen: { ...st.open, notice: null, dropPicks: false } });
+      }}
+    />
+  );
 
   // ────────────────────────────────────────────────────────────────
   // 1-click 액션 (AI 다듬기 / 시간대 / 세그먼트)
@@ -935,7 +983,7 @@ export default function InAppMessagesPage() {
             verb: inappOneLine.verb,
             icon: Sparkles,
             busy: aiGenerating || lineAsk.judging,
-            extra: <ImageToCopyButton label="이미지" onExtracted={(t) => { setAiObjective((prev) => appendToOneLine(prev, t)); lineAsk.noteRead(t); }} disabled={aiGenerating} className={MK_LINE_EXTRA_BTN} />,
+            extra: <ImageToCopyButton label="사진 속 글 읽기" onExtracted={(t) => { setAiObjective((prev) => appendToOneLine(prev, t)); lineAsk.noteRead(t); }} disabled={aiGenerating} className={MK_LINE_EXTRA_BTN} />,
           },
         }}
         emphasis={lineAsk.ask ? (
@@ -1137,6 +1185,7 @@ export default function InAppMessagesPage() {
 
         {/* 고객 데이터 없음 — 생성 차단 안내 (진입 화면 공용) */}
         <CustomerDataRequiredModal open={showDataGate} onClose={() => setShowDataGate(false)} />
+        {inappStepsModal}
         {/* 표시 채널 없음 — 생성 차단 안내 */}
         {showDisplayBlock && (
           <InAppDisplayBlockModal
@@ -1171,7 +1220,7 @@ export default function InAppMessagesPage() {
           verb: inappOneLine.verb,
           icon: Sparkles,
           busy: aiGenerating || lineAsk.judging,
-          extra: <ImageToCopyButton label="이미지" onExtracted={(t) => { setAiObjective((prev) => appendToOneLine(prev, t)); lineAsk.noteRead(t); }} disabled={aiGenerating} className={MK_LINE_EXTRA_BTN} />,
+          extra: <ImageToCopyButton label="사진 속 글 읽기" onExtracted={(t) => { setAiObjective((prev) => appendToOneLine(prev, t)); lineAsk.noteRead(t); }} disabled={aiGenerating} className={MK_LINE_EXTRA_BTN} />,
         },
       }}
       stamp={{ text: '다시 읽기', onRefresh: loadAll, loading }}
@@ -1509,6 +1558,7 @@ export default function InAppMessagesPage() {
       <ConfirmModal state={confirmState} onClose={() => setConfirmState(null)} />
       {/* 고객 데이터 없음 — 생성 차단 안내 */}
       <CustomerDataRequiredModal open={showDataGate} onClose={() => setShowDataGate(false)} />
+      {inappStepsModal}
       {/* 표시 채널 없음 — 생성 차단 안내 */}
       {showDisplayBlock && (
         <InAppDisplayBlockModal

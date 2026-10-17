@@ -309,18 +309,23 @@ describe('7. 배선 계약', () => {
     expect(landAttach).toBeLessThan(c);
   });
   it('Codex 1R · 2R — 미과금 초안은 건네지 않는다 · 같은 시도 재요청 = 낸 초안 재사용 · 못 거둔 초안은 다시 거둔다 · 가격 안내 = 한 줄 + 혜택 답', () => {
-    const prior = dmRoute.indexOf('const prior = lineLand && idemKey ? recallLineDraft(idemKey) : null;');
+    // ★ 2026-10-17 같은 시도의 키 목록(단계 요청 = 오늘 · 어제 KST · 그 밖 = 멱등키 하나)에서 초안을 찾는다
+    const prior = dmRoute.indexOf('const priorKey = lineLand ? attemptKeys.find((k) => recallLineDraft(k) !== null) : undefined;');
+    expect(dmRoute).toContain("const attemptKeys = steps && stepsPayload ? lineStepsAttemptKeys(steps, companyId, 'dm', stepsPayload) : (idemKey ? [idemKey] : []);");
+    expect(dmRoute).toContain('forgetLineDraft(priorKey);');
     expect(prior).toBeGreaterThan(0);
     expect(prior).toBeLessThan(dmRoute.indexOf('await oneShotGenerate({'));
     expect(prior).toBeLessThan(dmRoute.indexOf('await checkCredit(companyId, genCost)'));
-    const priorBlock = between(dmRoute, 'const prior = lineLand && idemKey', 'if (idemKey) {');
+    const priorBlock = between(dmRoute, 'const priorKey = lineLand', 'if (idemKey) {');
     expect(priorBlock).not.toContain('deductCreditOutcome(');
     expect(priorBlock).toContain("if (prior.state === 'paid') {");
     expect(priorBlock).toContain("code: 'LINE_DRAFT_PENDING'");
     const ded = dmRoute.indexOf('outcome = await deductCreditOutcome(');
     const paid = dmRoute.indexOf("if (idemKey) rememberLineDraft(idemKey, lineDraftId, 'paid');");
     expect(paid).toBeGreaterThan(ded);
-    expect(dmRoute.slice(ded, paid)).toContain("if (outcome === 'deducted' || outcome === 'duplicate' || outcome === 'not_applicable') {");
+    // ★ 2026-10-17 결말 판정 = 세 채널 한 규칙(line-steps-context lineStepsCollected · 같은 집합 = 냄 · 같은 키로 이미 냄 · 크레딧제 미적용)
+    expect(dmRoute.slice(ded, paid)).toContain('if (lineStepsCollected(outcome)) {');
+    expect(BACK('utils', 'line-steps-context.ts')).toContain("return outcome === 'deducted' || outcome === 'duplicate' || outcome === 'not_applicable';");
     expect(dmRoute.indexOf("rememberLineDraft(idemKey, draftToRemove, 'orphan')")).toBeGreaterThan(paid);
     expect(dmRoute).toContain('lineChargeFailed = true;');
     expect(dmRoute.indexOf('if (lineChargeFailed) {')).toBeLessThan(dmRoute.indexOf('sections: result.sections,'));

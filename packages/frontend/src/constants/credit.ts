@@ -99,6 +99,8 @@ export const CREDIT_SOURCE_LABELS: Record<string, string> = {
   'planner-touchpoint-send': '마케팅 플래너 발송 문안',
   'predictive-daily': '예측 분석',
   'dm-ai-generate': '모바일 DM 생성', 'dm-builder': '모바일 DM 발행', 'dm-interaction-publish': '인터랙션 DM 발행',
+  // ★ 2026-10-17 한 줄 완성(생성비 포함 한 행 · DM 15 · 이메일 13 · 인앱 13)
+  'oneline-complete': '한 줄 완성',
   // ★ 2026-09-15 AI 자동제작 카탈로그 채널(쪽 이미지 → 카탈로그 DM · Harold 확정 10)
   'catalog-dm-build': '카탈로그 DM 생성',
   // ★ 2026-08-22: 백엔드 CREDIT_COST_MAP에만 있고 여기 라벨이 없어 사용 내역에 "AI 작업"으로 뜨던 유일한 키.

@@ -54,7 +54,9 @@ describe('routes/mall-products.ts — 사용자 범위', () => {
     expect(r).toContain('resolveIntegrationActor(');
     expect(r).toContain('canTouchIntegration(');
     const providers = r.slice(r.indexOf("'/providers'"), r.indexOf("'/preview'"));
-    expect(providers).toMatch(/canTouchIntegration\(actor, m\.storeCode\)/);
+    // ★ 2026-10-17 몰 목록 판정 한 벌(utils/mall-providers.ts) — 라우트는 행위자를 넘기고, 권한 CT 는 목록 함수 안에서
+    expect(providers).toContain('listMallProviders(companyId, actor)');
+    expect(code('utils/mall-providers.ts')).toMatch(/canTouchIntegration\(actor, m\.storeCode\)/);
     const helper = r.slice(r.indexOf('async function wooMallOf'), r.indexOf('export const mallProductsRouter'));
     expect(helper).toContain('canTouchIntegration(');
   });

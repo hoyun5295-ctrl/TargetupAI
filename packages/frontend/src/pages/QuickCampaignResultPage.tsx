@@ -201,17 +201,31 @@ export default function QuickCampaignResultPage() {
 
   // ★ 2026-10-10 한 줄로 만든 결과 = 같은 한 줄 + 답 + 고른 상품으로 다시 만든다(새 시도 토큰 · 그 채널 생성비 1회 · 지금 초안은 남는다)
   const [regenLine, setRegenLine] = useState(false);
-  const runLineRegen = useCallback(async () => {
+  // ★ 2026-10-17 단계 모달로 만든 결과 = 단계 답을 그대로 실어 생성비만(같은 날 같은 한 줄) · 날이 바뀌면 서버가 PRICE_CHANGED → 새 금액을 확인받고 다시
+  const runLineRegen = useCallback(async (expected?: number) => {
     if (!lineOrigin || regenLine) return;
     setRegenLine(true);
+    const stepsCost = lineOrigin.steps ? (expected ?? lineOrigin.steps.generate ?? AI_GENERATE_COSTS['dm-ai-generate']) : null;
     try {
-      const r = await requestLineDm({ line: lineOrigin.line, facts: lineOrigin.facts, products: lineOrigin.products, reads: lineOrigin.reads, readLicensed: lineOrigin.readLicensed });
+      const r = await requestLineDm({
+        line: lineOrigin.line, facts: lineOrigin.facts, products: lineOrigin.products, reads: lineOrigin.reads, readLicensed: lineOrigin.readLicensed,
+        ...(lineOrigin.steps && stepsCost !== null ? { steps: { ...lineOrigin.steps.body, expected_cost: stepsCost } } : {}),
+      });
+      if (!r.ok && r.code === 'PRICE_CHANGED' && r.cost !== undefined && lineOrigin.steps) {
+        const c = r.cost;
+        setConfirm({
+          mode: 'warning', title: '금액이 바뀌었어요',
+          description: `오늘 이 한 줄로 처음 만드는 거라 한 줄 완성이 함께 붙어요. ${c} 크레딧으로 새 초안을 만들까요? 지금 초안은 목록에 그대로 남아요.`,
+          confirmLabel: `${c} 크레딧으로 만들기`, onConfirm: () => { void runLineRegenRef.current?.(c); },
+        });
+        return;
+      }
       const newId = String(r.data?.draft_id || '');
       if (!r.ok || !newId) {
         if (r.code === 'MALL_PRODUCTS_UNAVAILABLE') throw new Error('고른 상품을 지금 쓸 수 없어요. 첫 화면에서 한 줄로 다시 만들어 주세요.');
         throw new Error(buildErrorMessage(r.code, r.error, '다시 만들지 못했어요. 잠시 후 다시 시도해 주세요.'));
       }
-      saveBuildResult({ channel: 'dm', draftId: newId, materials: { notes: lineResultNotes(r.data) }, quoteTotal: AI_GENERATE_COSTS['dm-ai-generate'], heroFallback: false, benefitStripped: 0, createdAt: Date.now(), origin: lineOrigin });
+      saveBuildResult({ channel: 'dm', draftId: newId, materials: { notes: lineResultNotes(r.data) }, quoteTotal: stepsCost ?? AI_GENERATE_COSTS['dm-ai-generate'], heroFallback: false, benefitStripped: 0, createdAt: Date.now(), origin: lineOrigin });
       toast.success('같은 한 줄로 새 초안을 만들었어요.');
       navigate(makeResultPath('dm', newId));
     } catch (e: any) {
@@ -220,6 +234,9 @@ export default function QuickCampaignResultPage() {
       setRegenLine(false);
     }
   }, [lineOrigin, regenLine, navigate, toast]);
+  // 금액 확인 창은 나중에 눌린다 — 그때의 최신 함수를 부른다
+  const runLineRegenRef = useRef<typeof runLineRegen | null>(null);
+  runLineRegenRef.current = runLineRegen;
 
   // ★ 2026-10-10 상품 블록 [몰에서 상품 바꾸기] — 고른 상품번호를 서버가 다시 읽어 그 블록 상품을 통째 교체(AI 0 · 0크레딧 · 할인율 칸 없음)
   const [swapOpen, setSwapOpen] = useState(false);
@@ -286,7 +303,7 @@ export default function QuickCampaignResultPage() {
     if (channel === 'dm' && it.sectionId && !isCatalog) { focusSection(it.sectionId); setSheetOpen(true); }
     else if (it.kind === 'must' || (channel === 'dm' && it.sectionId)) navigate(editPath(channel, draftId));
   };
-  const lineRegenCost = AI_GENERATE_COSTS['dm-ai-generate'];
+  const lineRegenCost = lineOrigin?.steps?.generate ?? AI_GENERATE_COSTS['dm-ai-generate'];
 
   return (
     <SurfaceToneProvider tone="light">

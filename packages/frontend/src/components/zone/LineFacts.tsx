@@ -167,7 +167,7 @@ function lineAskTitle(askBenefit: boolean, mall: boolean, read = false): string 
 
 /** ★ 2026-10-10 Harold 결정 H3 — 사진에서 읽은 글의 숫자는 기본으로 쓰지 않는다(판독 오독 방지) · 켜면 그대로 쓴다 */
 export interface LineReadCheck { checked: boolean; onChange: (v: boolean) => void }
-function LineReadToggle({ read }: { read: LineReadCheck }) {
+export function LineReadToggle({ read }: { read: LineReadCheck }) {
   return (
     <label className="flex items-start gap-2.5 rounded-xl border border-slate-200 bg-white px-3 py-2.5 cursor-pointer select-none" data-line="read-check">
       <input type="checkbox" className="mt-0.5 accent-violet-600" checked={read.checked} onChange={(e) => read.onChange(e.target.checked)} />

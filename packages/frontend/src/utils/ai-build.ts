@@ -294,7 +294,11 @@ export interface BuildResultHandoff {
   benefitStripped: number;
   createdAt: number;
   /** ★ 2026-10-10 한 줄로 만든 결과(재료 초안이 없다) — 결과 화면 [같은 한 줄로 다시 만들기]의 입력(같은 한 줄 + 답 + 고른 상품) */
-  origin?: { kind: 'line'; line: string; facts?: { benefit: string | null }; products?: Array<{ provider: string; no: string }>; reads?: string[]; readLicensed?: boolean };
+  origin?: {
+    kind: 'line'; line: string; facts?: { benefit: string | null }; products?: Array<{ provider: string; no: string }>; reads?: string[]; readLicensed?: boolean;
+    /** ★ 2026-10-17 단계 모달로 만든 결과 — 단계 답 몸통 그대로 · 다시 만들기 금액(생성비 · 날이 바뀌면 서버가 PRICE_CHANGED 로 새 금액) */
+    steps?: { body: Record<string, unknown>; generate: number | null };
+  };
 }
 
 export function saveBuildResult(r: BuildResultHandoff): void {

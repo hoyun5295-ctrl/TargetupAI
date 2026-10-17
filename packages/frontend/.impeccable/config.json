@@ -11,6 +11,15 @@
         ],
         "createdAt": "2026-10-16T14:27:55.532Z",
         "reason": "Claude 판단: ImageStudioPage 기존 제작 화면을 로직 그대로 공용 부품으로 옮긴 코드(보라 강조 = AI 존 기존 색 체계 · LESSONS_FRONTEND violet 액센트) · 새 디자인 선택 아님"
+      },
+      {
+        "rule": "gray-on-color",
+        "value": "*",
+        "files": [
+          "src/components/zone/LineStepsModal.tsx"
+        ],
+        "createdAt": "2026-10-17T00:42:06.382Z",
+        "reason": "Claude: amber-500 + slate-900 is the project paid-button token MK_BTN_AI (utils/make-ui.ts:33); slate-900 is near-black, not washed-out gray"
       }
     ]
   }

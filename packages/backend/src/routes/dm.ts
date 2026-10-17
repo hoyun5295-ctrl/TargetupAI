@@ -47,6 +47,9 @@ import { checkCredit, deductCreditSafe, deductCreditOutcome, InsufficientCreditE
 import { oneLineFactsEnabled, oneLineGaps, sanitizeLineFacts, buildLineEventText, isValidAttemptToken, buildOneLineIdempotencyKey, oneLineInflightKey, sanitizeLineProducts, lineProductsKey, sanitizeLineReads, applyLineReads } from '../utils/one-line-facts';   // ★ 2026-10-05 한줄로 시그니처 · ★1010 몰 상품 확정
 import { resolveLineMallCards, linePriceNotes, linePinnedPrimary, mergeLineBrandKit, type LineMallCard, type LineMallExcluded } from '../utils/line-mall-cards';   // ★ 2026-10-10 한 줄 DM 강화
 import { resolveIntegrationActor } from '../utils/integration-scope';
+// ★ 2026-10-17 한 줄 단계 모달(설계서 docs/2026-10-17-oneline-steps-modal-design.md §3 · §4-3) — 단계 답 · 직접 상품 · 대표 사진 · 버튼 주소 · 한 줄 완성 금액
+import { oneLineStepsEnabled, buildLineStepsEventText } from '../utils/one-line-steps';
+import { prepareLineStepsRequest, isLineStepsReqError, lineStepsKeyFor, settleLineStepsPrice, resolveLineStepsDelivery, lineStepsAttemptCharged, lineStepsLineLockKey, lineStepsCollected, lineStepsAttemptKeys } from '../utils/line-steps-context';
 import { recallLineDraft, rememberLineDraft, forgetLineDraft, deleteLineDraftWithRetry } from '../utils/line-draft-memo';   // ★ 2026-10-10 Codex 1R
 // ★ 2026-09-27 만들기 개편 S6 — 첫 발행 잠금·발행비 판정은 CT 가 소유(두 발행 문이 같은 판정)
 import { dmPublishBlocker, dmPublishStaticBlock, resolveSendPublishFeeGate, quoteDmPublishFee } from '../utils/dm/dm-publish-gate';
@@ -1026,7 +1029,19 @@ dmRouter.post('/ai/one-shot-generate', async (req: any, res: any) => {
     //   사용자 글자가 된다. 칸에 적은 답(facts)은 [혜택] 줄로 붙인다(원스텝 원문 직렬화와 같은 라벨). 스위치 밖인데 답이 오면 400(조용히 버리지 않는다).
     const oneLineReq = req.body?.one_line === true;
     const lineOn = oneLineReq && oneLineFactsEnabled(companyId);
-    const lineFacts = oneLineReq ? sanitizeLineFacts(req.body?.facts) : undefined;
+    // ★ 2026-10-17 한 줄 단계 모달 — `steps` 칸이 온 요청만(스위치 = 한 줄 보강 스위치 안에서만) · 답 칸 모양이 달라 혜택은 단계 답에서 읽는다
+    const rawLine = prompt;
+    const stepsNow = Date.now();
+    const stepsReads = oneLineReq ? sanitizeLineReads(req.body?.read_texts) : undefined;
+    const steps = oneLineReq
+      ? prepareLineStepsRequest(req.body, companyId, rawLine, stepsReads === 'invalid' ? undefined : stepsReads, stepsNow, lineOn && oneLineStepsEnabled(companyId))
+      : undefined;
+    if (isLineStepsReqError(steps)) return res.status(steps.status).json({ success: false, error: steps.error, code: steps.code });
+    // 단계 요청은 결과 화면 착지 경로만(서버 초안 → 차감 → 낸 것만 건넨다 · 미과금 결과 0 · 10-10 계약 그대로)
+    if (steps && req.body?.land !== 'result') return res.status(400).json({ success: false, error: '단계에서 받은 답을 다시 확인해 주세요.', code: 'LINE_STEPS_INVALID' });
+    const lineFacts = oneLineReq
+      ? (steps ? (steps.body.facts.benefit !== undefined ? { benefit: steps.body.facts.benefit } : undefined) : sanitizeLineFacts(req.body?.facts))
+      : undefined;
     if (lineFacts === 'invalid') {
       return res.status(400).json({ success: false, error: '혜택은 300자 이내로 적어 주세요.', code: 'LINE_FACTS_INVALID' });
     }
@@ -1048,7 +1063,10 @@ dmRouter.post('/ai/one-shot-generate', async (req: any, res: any) => {
     const lineLand = lineOn && req.body?.land === 'result';
     const typedLine = prompt;
     if (lineOn && prompt && !eventText && !scenario) {
-      eventText = normalizeEventText(buildLineEventText(prompt, lineFacts));
+      // ★ 2026-10-17 단계 답 = [혜택] · [기간](날짜를 친 것과 같게) · [상품](글로만 소개할 직접 상품) 줄
+      eventText = normalizeEventText(steps
+        ? buildLineStepsEventText(prompt, { benefit: lineFacts ? lineFacts.benefit : null, periodEnd: steps.body.facts.periodEnd ?? null, textProducts: steps.textProducts })
+        : buildLineEventText(prompt, lineFacts));
       prompt = '';
     }
     if (!prompt && !scenario && !eventText) {
@@ -1066,21 +1084,41 @@ dmRouter.post('/ai/one-shot-generate', async (req: any, res: any) => {
     //   키 = 시도 토큰 + 생성 입력 지문(내용을 바꿔 보내면 새 차감) · 같은 토큰 동시 요청 = 409 · 이미 차감된 키 = 생성하지 않고 409 · 원장 조회 실패 = 503.
     const attemptToken = lineOn && isValidAttemptToken(req.body?.attempt_token) ? String(req.body.attempt_token) : null;
     // ★ 2026-10-10 고른 상품을 지문에 넣는다(상품만 바꿔 같은 토큰으로 보내면 새 차감) · 상품 칸이 없는 요청은 키가 지금과 같다.
-    const idemKey = attemptToken ? buildOneLineIdempotencyKey(companyId, 'dm', attemptToken, { prompt, eventText, scenario: scenario || null, ...(lineProducts !== undefined ? { products: lineProductsKey(lineProducts) } : {}) }) : undefined;
+    // ★ 2026-10-17 단계 요청 = 한 줄 완성 원장 키(회사 · 채널 · KST 날짜 · 한 줄 지문 · 시도 지문) · 생성 입력 전부를 지문에(직접 상품 전부 · 대표 사진 · 주소 답)
+    const stepsPayload = steps
+      ? { prompt, eventText, scenario: scenario || null, products: lineProductsKey(lineProducts || []), manual: steps.body.manual, hero: steps.hero, link: steps.body.facts.link ?? null }
+      : null;
+    const idemKey = attemptToken
+      ? (steps
+        ? lineStepsKeyFor(steps, companyId, 'dm', stepsPayload)
+        : buildOneLineIdempotencyKey(companyId, 'dm', attemptToken, { prompt, eventText, scenario: scenario || null, ...(lineProducts !== undefined ? { products: lineProductsKey(lineProducts) } : {}) }))
+      : undefined;
     const lineLock = attemptToken ? oneLineInflightKey(companyId, 'dm', attemptToken) : '';
     if (lineLock && !tryAcquireInflight(lineLock)) {
       return res.status(409).json({ success: false, error: '지금 만드는 중이에요. 완성되면 이어서 진행해 주세요.', code: 'IN_FLIGHT' });
     }
+    // ★ 2026-10-17 단계 요청 = 한 줄 단위 잠금(금액 확정 ~ 차감 · 다른 시도의 같은 한 줄이 한 줄 완성을 두 번 내지 않게 · Codex 1017 1R)
+    const stepsLock = steps ? lineStepsLineLockKey(steps, companyId, 'dm') : '';
+    let stepsLockHeld = false;
     let result: Awaited<ReturnType<typeof oneShotGenerate>>;
     let lineCards: LineMallCard[] = [];
     let lineExcluded: LineMallExcluded[] = [];
     let lineDraftId = '';
     let lineChargeFailed = false;
+    /** ★ 2026-10-17 단계 요청의 금액 결과(응답 · 로그용) */
+    let stepsResult: { cost: number; completion: boolean } | null = null;
     try {
+      if (stepsLock) {
+        if (!tryAcquireInflight(stepsLock)) return res.status(409).json({ success: false, error: '같은 한 줄로 지금 만드는 중이에요. 완성되면 다시 시도해 주세요.', code: 'IN_FLIGHT' });
+        stepsLockHeld = true;
+      }
       // ★ 2026-10-10 Codex 1R · 2R — 착지 경로는 **돈을 안 낸 초안을 건네지 않는다.** 같은 시도(같은 멱등키)의 재요청:
       //   paid = 낸 초안을 그대로 돌려준다(새 AI 호출 · 새 행 0) · orphan = 지난 시도가 거두지 못한 미과금 초안 → 다시 거둔다(못 거두면 503 · 새로 만들지 않는다).
-      const prior = lineLand && idemKey ? recallLineDraft(idemKey) : null;
-      if (prior && idemKey) {
+      // ★ 2026-10-17 단계 요청 = 오늘 · 어제(KST) 키 둘 다에서 찾는다(원장 판정과 같은 목록 · 자정 전 못 거둔 초안을 자정 뒤 재전송이 건너뛰지 않게)
+      const attemptKeys = steps && stepsPayload ? lineStepsAttemptKeys(steps, companyId, 'dm', stepsPayload) : (idemKey ? [idemKey] : []);
+      const priorKey = lineLand ? attemptKeys.find((k) => recallLineDraft(k) !== null) : undefined;
+      const prior = priorKey ? recallLineDraft(priorKey) : null;
+      if (prior && priorKey) {
         if (prior.state === 'paid') {
           return res.json({
             success: true,
@@ -1093,20 +1131,30 @@ dmRouter.post('/ai/one-shot-generate', async (req: any, res: any) => {
         if (!(await deleteLineDraftWithRetry(() => deleteDm(prior.draftId, companyId), `dm=${prior.draftId} company=${companyId}`))) {
           return res.status(503).json({ success: false, error: '잠시 후 다시 시도해 주세요.', code: 'LINE_DRAFT_PENDING' });
         }
-        forgetLineDraft(idemKey);
+        forgetLineDraft(priorKey);
       }
       if (idemKey) {
         let charged: boolean;
-        try { charged = await isChargedByKey(companyId, idemKey); } catch {
+        // ★ 2026-10-17 단계 요청 = 오늘 · 어제(KST) 키 둘 다(자정을 넘긴 같은 시도의 재전송이 새 날짜 키로 다시 차감되지 않게)
+        try { charged = steps ? await lineStepsAttemptCharged(steps, companyId, 'dm', stepsPayload) : await isChargedByKey(companyId, idemKey); } catch {
           return res.status(503).json({ success: false, error: '잠시 후 다시 시도해 주세요.', code: 'CREDIT_STATE_UNKNOWN' });
         }
         if (charged) {
           return res.status(409).json({ success: false, error: '이 요청은 이미 처리됐어요. 다시 만들려면 [만들기]를 한 번 더 눌러 주세요.', code: 'ALREADY_DONE' });
         }
       }
+      // ★ 2026-10-17 단계 요청 = 금액 확정(오늘 이 한 줄로 한 줄 완성을 냈으면 생성비만) · 화면 금액과 다르면 409 · 원장 모름 = 503 — AI · 차감 · 몰 조회 전
+      let stepsCharge: { cost: number; source: string; completionDue: boolean } | null = null;
+      if (steps) {
+        const price = await settleLineStepsPrice(steps, companyId, 'dm', stepsNow);
+        if (isLineStepsReqError(price)) return res.status(price.status).json({ success: false, error: price.error, code: price.code, ...(price.cost !== undefined ? { cost: price.cost, breakdown: price.breakdown } : {}) });
+        stepsCharge = price;
+        stepsResult = { cost: price.cost, completion: price.completionDue };
+      }
       // ★ 2026-10-10 고른 상품은 AI 호출 · 차감 **앞에서** 몰에서 다시 읽는다(재조회 ok 만 카드 · 전부 빠지면 409 · 돈 0 · 범위 밖 몰 = 재조회 0).
+      const lineActor = await resolveIntegrationActor(req.user);
       if (lineProducts && lineProducts.length > 0) {
-        const r = await resolveLineMallCards(companyId, await resolveIntegrationActor(req.user), lineProducts);
+        const r = await resolveLineMallCards(companyId, lineActor, lineProducts);
         lineCards = r.cards;
         lineExcluded = r.excluded;
         if (lineCards.length === 0) {
@@ -1117,17 +1165,23 @@ dmRouter.post('/ai/one-shot-generate', async (req: any, res: any) => {
       const companyKitRaw = lineOn ? ((await getCompanyBrandKitRaw(companyId).catch(() => null)) as Record<string, unknown> | null) : null;
       const pinPrimary = lineOn ? linePinnedPrimary(companyKitRaw) : null;
       // ★ 종량제: DM 생성(돌려보기) = 3크레딧 묶음 (내부 parse/copy/tone은 집계만, 차감 0). 발행 시 30 별도.
-      const genCost = getCreditCost('dm-ai-generate');  // 3
+      // ★ 2026-10-17 단계 요청 = 한 줄 완성 금액(생성비 + 10 · 같은 날 같은 한 줄 다시 만들기 = 생성비만) · 원천 = 'oneline-complete' 또는 생성 원천
+      const genCost = stepsCharge ? stepsCharge.cost : getCreditCost('dm-ai-generate');
+      const genSource = stepsCharge ? stepsCharge.source : 'dm-ai-generate';
+      // ★ 2026-10-17 확정 카드 = 몰 상품(재조회 ok) + 직접 넣은 상품(사진 + 가격) · 대표 사진 · 버튼 주소는 서버가 정해 생성기가 놓는다
+      const allCards: LineMallCard[] = [...lineCards, ...(steps ? steps.manualCards : [])];
+      const stepsDelivery = steps ? await resolveLineStepsDelivery(companyId, lineActor, steps, { channel: 'dm', line: typedLine, cards: allCards, companyKitRaw }) : null;
       await checkCredit(companyId, genCost);
       result = await runInCreditBundle(async () => {
         const r = await oneShotGenerate({
           prompt: effectivePrompt, scenario, brandName, companyId, eventText,
-          ...(lineCards.length > 0 ? { confirmedCards: lineCards } : {}),
+          ...(allCards.length > 0 ? { confirmedCards: allCards } : {}),
           ...(pinPrimary ? { pinPrimary } : {}),
+          ...(stepsDelivery ? { lineMaterials: { heroImageUrl: stepsDelivery.hero, linkUrl: stepsDelivery.link } } : {}),
         });
         if (lineOn) r.brandKit = mergeLineBrandKit(companyKitRaw, r.brandKit as Record<string, unknown>, pinPrimary) as typeof r.brandKit;
         if (!lineLand) {
-          await deductCreditSafe({ companyId, cost: genCost, source: 'dm-ai-generate', createdBy: req.user?.userId, ...(idemKey ? { idempotencyKey: idemKey } : {}) });
+          await deductCreditSafe({ companyId, cost: genCost, source: genSource, createdBy: req.user?.userId, ...(idemKey ? { idempotencyKey: idemKey } : {}) });
           return r;
         }
         // ★ 2026-10-10 결과 화면 착지 = 서버가 초안 행을 먼저 만들고 차감한다(AI 자동제작과 같은 돈 순서 · 응답이 유실돼도 낸 돈의 결과가 남는다).
@@ -1147,14 +1201,14 @@ dmRouter.post('/ai/one-shot-generate', async (req: any, res: any) => {
         } as any);
         lineDraftId = String(row.id);
         let thrown: unknown = null;
-        let outcome = '';
+        let outcome: Awaited<ReturnType<typeof deductCreditOutcome>> | '' = '';
         try {
-          outcome = await deductCreditOutcome({ companyId, cost: genCost, source: 'dm-ai-generate', createdBy: req.user?.userId, ...(idemKey ? { idempotencyKey: idemKey } : {}), throwOnInsufficient: true });
+          outcome = await deductCreditOutcome({ companyId, cost: genCost, source: genSource, createdBy: req.user?.userId, ...(idemKey ? { idempotencyKey: idemKey } : {}), throwOnInsufficient: true });
         } catch (e) {
           thrown = e;
         }
         // 낸 것(deducted · 같은 키로 이미 냄 · 크레딧제 미적용 면제)만 건넨다 → 같은 시도의 재요청은 이 초안을 돌려받는다
-        if (outcome === 'deducted' || outcome === 'duplicate' || outcome === 'not_applicable') {
+        if (lineStepsCollected(outcome)) {
           if (idemKey) rememberLineDraft(idemKey, lineDraftId, 'paid');
           return r;
         }
@@ -1170,6 +1224,7 @@ dmRouter.post('/ai/one-shot-generate', async (req: any, res: any) => {
         return r;
       });
     } finally {
+      if (stepsLockHeld) releaseInflight(stepsLock);
       if (lineLock) releaseInflight(lineLock);
     }
     // ★ 2026-10-10 Codex 2R — 착지 초안의 차감 기록을 남기지 못했으면 초안을 거뒀다 → 다시 시도하게 한다(미과금 결과 0)
@@ -1182,6 +1237,10 @@ dmRouter.post('/ai/one-shot-generate', async (req: any, res: any) => {
     //   착지 초안은 이미 저장됐으므로 첨부하지 않는다(저장본과 응답이 갈라지지 않게).
     if (lineProducts === undefined && !lineDraftId) {
       try { await attachMallImagesToProductCarousels(companyId, result.sections); } catch { /* best-effort */ }
+    }
+    // ★ 2026-10-17 단계 요청 기록(판정에 쓰지 않는다 · 「규칙이 놓친 질문」 측정용 · stdout)
+    if (steps && stepsResult) {
+      console.log(`[one-line steps] dm company=${companyId} cost=${stepsResult.cost} completion=${stepsResult.completion} shown=${steps.body.meta.shown.join(',')} answered=${steps.body.meta.answered.join(',')} skipped=${steps.body.meta.skipped.join(',')} manual_cards=${steps.manualCards.length} hero=${steps.hero ? 1 : 0}`);
     }
     return res.json({
       success: true,
@@ -1202,6 +1261,8 @@ dmRouter.post('/ai/one-shot-generate', async (req: any, res: any) => {
           // ★ Codex 1R medium — 비교 입력 = 사용자가 친 한 줄 + 혜택 칸 답(몰 텍스트 · 사진 판독본은 넣지 않는다)
           notes: [...lineExcluded.map((e) => `상품${e.name ? ` "${e.name}"` : ''} 제외: ${e.reason}`), ...linePriceNotes(buildLineEventText(typedLine, lineFacts), lineCards)],
           mall_cards: lineCards.length,
+          // ★ 2026-10-17 단계 요청 = 낸 금액 · 한 줄 완성이 붙었는가
+          ...(stepsResult ? { steps: stepsResult } : {}),
         } : null,
         // ★ 2026-10-10 결과 화면 착지 초안(land:'result' 요청만)
         ...(lineDraftId ? { draft_id: lineDraftId } : {}),

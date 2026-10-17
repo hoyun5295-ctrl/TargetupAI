@@ -104,10 +104,14 @@ import { normalizeEventText } from '../utils/event-brief';
 import { attachMallImagesToProductCarousels } from '../utils/mall-product-match';
 import { industryLabel } from '../utils/industry-codes';
 import type { Section } from '../utils/dm/dm-section-registry';
-import { checkCredit, deductCreditSafe, InsufficientCreditError, isChargedByKey } from '../utils/ai-credit';
+import { checkCredit, deductCreditSafe, deductCreditOutcome, InsufficientCreditError, isChargedByKey } from '../utils/ai-credit';
 import { oneLineFactsEnabled, oneLineGaps, isValidAttemptToken, buildOneLineIdempotencyKey, oneLineInflightKey, sanitizeLineFacts, buildLineEventText, sanitizeLineProducts, lineProductsKey, sanitizeLineReads, applyLineReads } from '../utils/one-line-facts';   // ★ 2026-10-05 한줄로 시그니처 · ★1010 혜택 답 · 몰 상품 확정
 import { resolveLineMallCards, placeLineMallCards, linePriceNotes, linePinnedPrimary, lineEmailDesign, type LineMallCard, type LineMallExcluded } from '../utils/line-mall-cards';   // ★ 2026-10-10 한 줄 이메일 강화
 import { resolveIntegrationActor } from '../utils/integration-scope';
+// ★ 2026-10-17 한 줄 단계 모달(설계서 docs/2026-10-17-oneline-steps-modal-design.md §3 · §4-3) — 단계 답 · 직접 상품 · 대표 사진 · 버튼 주소 · 한 줄 완성 금액
+import { oneLineStepsEnabled, buildLineStepsEventText } from '../utils/one-line-steps';
+import { prepareLineStepsRequest, isLineStepsReqError, lineStepsKeyFor, settleLineStepsPrice, resolveLineStepsDelivery, lineStepsAttemptCharged, lineStepsLineLockKey, lineStepsCollected } from '../utils/line-steps-context';
+import { placeLineHero, placeLineLink } from '../utils/line-materials';
 import { getBrandBasicInfo } from '../utils/brand-basic-info';
 import { createSection } from '../utils/dm/dm-section-registry';
 import { randomUUID } from 'crypto';
@@ -1178,7 +1182,16 @@ router.post('/ai/generate-sections', async (req: Request, res: Response) => {
     // ★ 2026-10-10 한 줄 이메일 강화(설계서 docs/2026-10-10-oneline-dm-email-design.md §3) — 생성 전 묻는 창의 답(혜택) · 사람이 고른 몰 상품(provider + 상품번호만).
     //   이메일은 요청 글이 혜택 근거라 혜택 답은 요청 글에 [혜택] 줄로 붙인다(원문 자리로 옮기지 않는다 · 시그니처 §5). 스위치 밖인데 오면 400.
     const oneLineReq = req.body?.one_line === true;
-    const lineFacts = oneLineReq ? sanitizeLineFacts(req.body?.facts) : undefined;
+    // ★ 2026-10-17 한 줄 단계 모달 — `steps` 칸이 온 요청만(스위치 = 한 줄 보강 스위치 안에서만) · 혜택은 단계 답에서 읽는다
+    const stepsNow = Date.now();
+    const stepsReads = oneLineReq ? sanitizeLineReads(req.body?.read_texts) : undefined;
+    const steps = oneLineReq
+      ? prepareLineStepsRequest(req.body, auth.companyId, prompt, stepsReads === 'invalid' ? undefined : stepsReads, stepsNow, lineOn && oneLineStepsEnabled(auth.companyId))
+      : undefined;
+    if (isLineStepsReqError(steps)) return res.status(steps.status).json({ success: false, error: steps.error, code: steps.code });
+    const lineFacts = oneLineReq
+      ? (steps ? (steps.body.facts.benefit !== undefined ? { benefit: steps.body.facts.benefit } : undefined) : sanitizeLineFacts(req.body?.facts))
+      : undefined;
     if (lineFacts === 'invalid') {
       return res.status(400).json({ success: false, error: '혜택은 300자 이내로 적어 주세요.', code: 'LINE_FACTS_INVALID' });
     }
@@ -1195,45 +1208,94 @@ router.post('/ai/generate-sections', async (req: Request, res: Response) => {
       return res.status(400).json({ success: false, error: '이 기능은 아직 열리지 않았습니다. 화면을 새로 고친 뒤 다시 시도해 주세요.', code: 'FEATURE_DISABLED' });
     }
     const linePrompt = lineOn ? applyLineReads(prompt, lineReads, req.body?.read_licensed === true) : prompt;
-    const genPrompt = lineOn && lineFacts ? buildLineEventText(linePrompt, lineFacts) : linePrompt;
+    // ★ 2026-10-17 단계 답 = [혜택] · [기간](날짜를 친 것과 같게) · [상품](글로만 소개할 직접 상품) 줄
+    const genPrompt = steps
+      ? buildLineStepsEventText(linePrompt, { benefit: lineFacts ? lineFacts.benefit : null, periodEnd: steps.body.facts.periodEnd ?? null, textProducts: steps.textProducts })
+      : (lineOn && lineFacts ? buildLineEventText(linePrompt, lineFacts) : linePrompt);
     const attemptToken = lineOn && isValidAttemptToken(req.body?.attempt_token) ? String(req.body.attempt_token) : null;
-    const idemKey = attemptToken ? buildOneLineIdempotencyKey(auth.companyId, 'email', attemptToken, { prompt: genPrompt, scenario: scenario || null, isAd, eventText, ...(lineProducts !== undefined ? { products: lineProductsKey(lineProducts) } : {}) }) : undefined;
+    // ★ 2026-10-17 단계 요청 = 한 줄 완성 원장 키 · 생성 입력 전부를 지문에(직접 상품 전부 · 대표 사진 · 주소 답)
+    const stepsPayload = steps
+      ? { prompt: genPrompt, scenario: scenario || null, isAd, eventText, products: lineProductsKey(lineProducts || []), manual: steps.body.manual, hero: steps.hero, link: steps.body.facts.link ?? null }
+      : null;
+    const idemKey = attemptToken
+      ? (steps
+        ? lineStepsKeyFor(steps, auth.companyId, 'email', stepsPayload)
+        : buildOneLineIdempotencyKey(auth.companyId, 'email', attemptToken, { prompt: genPrompt, scenario: scenario || null, isAd, eventText, ...(lineProducts !== undefined ? { products: lineProductsKey(lineProducts) } : {}) }))
+      : undefined;
     const lineLock = attemptToken ? oneLineInflightKey(auth.companyId, 'email', attemptToken) : '';
     if (lineLock && !tryAcquireInflight(lineLock)) {
       return res.status(409).json({ success: false, error: '지금 만드는 중이에요. 완성되면 이어서 진행해 주세요.', code: 'IN_FLIGHT' });
     }
+    // ★ 2026-10-17 단계 요청 = 한 줄 단위 잠금(금액 확정 ~ 차감 · 다른 시도의 같은 한 줄이 한 줄 완성을 두 번 내지 않게)
+    const stepsLock = steps ? lineStepsLineLockKey(steps, auth.companyId, 'email') : '';
+    let stepsLockHeld = false;
     try {
+      if (stepsLock) {
+        if (!tryAcquireInflight(stepsLock)) return res.status(409).json({ success: false, error: '같은 한 줄로 지금 만드는 중이에요. 완성되면 다시 시도해 주세요.', code: 'IN_FLIGHT' });
+        stepsLockHeld = true;
+      }
       if (idemKey) {
         let charged: boolean;
-        try { charged = await isChargedByKey(auth.companyId, idemKey); } catch {
+        // 단계 요청 = 오늘 · 어제(KST) 키 둘 다(자정을 넘긴 같은 시도의 재전송)
+        try { charged = steps ? await lineStepsAttemptCharged(steps, auth.companyId, 'email', stepsPayload) : await isChargedByKey(auth.companyId, idemKey); } catch {
           return res.status(503).json({ success: false, error: '잠시 후 다시 시도해 주세요.', code: 'CREDIT_STATE_UNKNOWN' });
         }
         if (charged) {
           return res.status(409).json({ success: false, error: '이 요청은 이미 처리됐어요. 다시 만들려면 [만들기]를 한 번 더 눌러 주세요.', code: 'ALREADY_DONE' });
         }
       }
+      // ★ 2026-10-17 단계 요청 = 금액 확정(오늘 이 한 줄로 한 줄 완성을 냈으면 생성비만) · 화면 금액과 다르면 409 · 원장 모름 = 503 — AI · 차감 · 몰 조회 전
+      let stepsCharge: { cost: number; source: string; completionDue: boolean } | null = null;
+      if (steps) {
+        const price = await settleLineStepsPrice(steps, auth.companyId, 'email', stepsNow);
+        if (isLineStepsReqError(price)) return res.status(price.status).json({ success: false, error: price.error, code: price.code, ...(price.cost !== undefined ? { cost: price.cost, breakdown: price.breakdown } : {}) });
+        stepsCharge = price;
+      }
       // ★ 2026-10-10 고른 상품은 AI 호출 · 차감 앞에서 몰에서 다시 읽는다(재조회 ok 만 카드 · 전부 빠지면 409 · 돈 0).
       let lineCards: LineMallCard[] = [];
       let lineExcluded: LineMallExcluded[] = [];
+      const lineActor = await resolveIntegrationActor(req.user);
       if (lineProducts && lineProducts.length > 0) {
-        const r = await resolveLineMallCards(auth.companyId, await resolveIntegrationActor(req.user), lineProducts);
+        const r = await resolveLineMallCards(auth.companyId, lineActor, lineProducts);
         lineCards = r.cards;
         lineExcluded = r.excluded;
         if (lineCards.length === 0) {
           return res.status(409).json({ success: false, error: '고른 상품을 지금 쓸 수 없어요. 상품 없이 만들 수 있어요.', code: 'MALL_PRODUCTS_UNAVAILABLE', excluded: lineExcluded });
         }
       }
-      const cost = getCreditCost('email-ai-generate'); // 3
+      // ★ 2026-10-17 단계 요청 = 한 줄 완성 금액(생성비 + 10 · 같은 날 같은 한 줄 다시 만들기 = 생성비만)
+      const cost = stepsCharge ? stepsCharge.cost : getCreditCost('email-ai-generate'); // 3
       await checkCredit(auth.companyId, cost);
       const result = await generateEmailSections({ companyId: auth.companyId, userId: auth.userId, prompt: genPrompt, scenario, isAd, eventText });
-      await deductCreditSafe({ companyId: auth.companyId, cost, source: 'email-ai-generate', createdBy: auth.userId, ...(idemKey ? { idempotencyKey: idemKey } : {}) });
+      // 단계 요청의 차감은 재료까지 놓은 뒤(아래) — 그 밖 요청 = 지금 그대로
+      if (!stepsCharge) {
+        await deductCreditSafe({ companyId: auth.companyId, cost, source: 'email-ai-generate', createdBy: auth.userId, ...(idemKey ? { idempotencyKey: idemKey } : {}) });
+      }
+      // ★ 2026-10-17 확정 카드 = 몰 상품(재조회 ok) + 직접 넣은 상품(사진 + 가격)
+      const allCards: LineMallCard[] = [...lineCards, ...(steps ? steps.manualCards : [])];
       if (lineProducts === undefined) {
         // ★ 2026-07-08 연동 몰 상품 자동 첨부 — 상품 슬라이드 항목명 이름매칭 → 이미지·링크·정가·할인가(빈 값만, 실패 skip). 발송 코어 무관(생성 결과 후처리).
         // ★ 2026-10-10 후보를 보여 준 한 줄 요청(products 칸이 옴)은 이름 자동 첨부를 하지 않는다(확정은 사람의 탭만).
         try { await attachMallImagesToProductCarousels(auth.companyId, (result as any)?.sections); } catch { /* best-effort */ }
-      } else if (lineCards.length > 0 && Array.isArray((result as any)?.sections)) {
+      } else if (allCards.length > 0 && Array.isArray((result as any)?.sections)) {
         // ★ 2026-10-10 확정 카드 = 첫 상품 슬라이드 통째 교체 · 다른 상품 슬라이드 제거(AI 가 쓴 상품 · 가격이 나가지 않게) · 없으면 히어로 뒤
-        (result as any).sections = placeLineMallCards((result as any).sections, lineCards, { newId: () => randomUUID(), makeCarousel: (order) => createSection('product_carousel', randomUUID(), order) });
+        (result as any).sections = placeLineMallCards((result as any).sections, allCards, { newId: () => randomUUID(), makeCarousel: (order) => createSection('product_carousel', randomUUID(), order) });
+      }
+      // ★ 2026-10-17 대표 사진(메일 맨 위 · 직접 올린 사진만 · 몰 사진은 외부 주소라 쓰지 않는다) · 버튼 주소(생성기가 늘 비운다 → 코드가 채운다)
+      let stepsHero = false;
+      if (steps && Array.isArray((result as any)?.sections)) {
+        const delivery = await resolveLineStepsDelivery(auth.companyId, lineActor, steps, { channel: 'email', line: linePrompt, cards: allCards });
+        (result as any).sections = placeLineLink(placeLineHero((result as any).sections, delivery.hero, (order) => createSection('hero', randomUUID(), order)), delivery.link);
+        stepsHero = !!delivery.hero;
+      }
+      // ★ 2026-10-17 단계 요청 = 결과(재료까지 놓은 것)가 준비된 뒤 1회 차감 · 낸 것만 건넨다(잔액 부족 = 402 · 원장 쓰기 실패 = 503 · 결과 0)
+      if (steps && stepsCharge) {
+        const outcome = await deductCreditOutcome({ companyId: auth.companyId, cost, source: stepsCharge.source, createdBy: auth.userId, ...(idemKey ? { idempotencyKey: idemKey } : {}), throwOnInsufficient: true });
+        if (!lineStepsCollected(outcome)) {
+          console.log(`[CREDIT][MISS] one-line steps email 결과 안 건넴 company=${auth.companyId} key=${idemKey || 'none'} cost=${cost} outcome=${outcome}`);
+          return res.status(503).json({ success: false, error: '크레딧 기록을 확인하지 못해 결과를 건네지 않았어요. 잠시 후 다시 시도해 주세요.', code: 'CREDIT_STATE_UNKNOWN' });
+        }
+        console.log(`[one-line steps] email company=${auth.companyId} cost=${cost} completion=${stepsCharge.completionDue} shown=${steps.body.meta.shown.join(',')} answered=${steps.body.meta.answered.join(',')} skipped=${steps.body.meta.skipped.join(',')} manual_cards=${steps.manualCards.length} hero=${stepsHero ? 1 : 0}`);
       }
       if (!lineOn) return res.json({ success: true, data: result });
       // ★ 2026-10-05 한줄로 시그니처 — 화면이 완성도 줄 · 보강 시트를 그릴지(스위치 켠 회사의 한 줄 요청만)
@@ -1256,10 +1318,13 @@ router.post('/ai/generate-sections', async (req: Request, res: Response) => {
             // ★ Codex 1R medium — 비교 입력 = 한 줄 + 혜택 칸 답(genPrompt)
             notes: [...lineExcluded.map((e) => `상품${e.name ? ` "${e.name}"` : ''} 제외: ${e.reason}`), ...linePriceNotes(genPrompt, lineCards)],
             mall_cards: lineCards.length,
+            // ★ 2026-10-17 단계 요청 = 낸 금액 · 한 줄 완성이 붙었는가
+            ...(stepsCharge ? { steps: { cost, completion: stepsCharge.completionDue } } : {}),
           },
         },
       });
     } finally {
+      if (stepsLockHeld) releaseInflight(stepsLock);
       if (lineLock) releaseInflight(lineLock);
     }
   } catch (err: any) {

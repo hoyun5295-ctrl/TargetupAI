@@ -71,7 +71,8 @@ import { dmChipStatus, fixItemsOf, makeResultPath, type ChipStatus, type FixItem
 // ★ 2026-10-05 한줄로 시그니처(설계서 docs/2026-10-05-hanjul-signature-design.md §5) — 한 줄 판정 · 확인 창 혜택 칸 · 완성도 줄
 import ZoneCompletion from '../components/zone/ZoneCompletion';
 import { LineFactsInline, typedBenefit, type LineFactsValues } from '../components/zone/LineFacts';
-import { fetchOneLineGaps, appendToOneLine, requestLineDm, lineResultNotes, readPartOf, readsInLine, type LineMallCandidate, type LineProductRef } from '../utils/one-line';
+import { fetchOneLineGaps, appendToOneLine, requestLineDm, lineResultNotes, readPartOf, readsInLine, clearLineStepsAnswers, type LineMallCandidate, type LineProductRef } from '../utils/one-line';
+import LineStepsModal, { lineStepsFailNotice, type LineStepsOpen } from '../components/zone/LineStepsModal';   // ★ 2026-10-17 한 줄 단계 모달
 import { CONFIRM_CREDIT_COSTS, AI_GENERATE_COSTS } from '../constants/credit';
 // ★ 2026-10-10 한 줄 묻기 — 질문이면 회사 데이터로 답한다(설계서 docs/2026-10-10-oneline-ask-design.md)
 import { useLineAsk } from '../hooks/useLineAsk';
@@ -184,6 +185,8 @@ export default function DmBuilderPage() {
   // ★ 2026-10-10 H3 — 한 줄 칸에 붙인 사진 글 조각 · 「사진에서 읽은 숫자도 그대로 쓰기」(기본 꺼짐)
   const [lineReads, setLineReads] = useState<string[]>([]);
   const [lineReadOk, setLineReadOk] = useState(false);
+  // ★ 2026-10-17 한 줄 단계 모달(스위치 켠 회사 · 크레딧 확인 창 대신 모달의 만들기 단계) — 열린 단계 모달 상태(실패하면 만들기 단계로 다시 연다)
+  const [lineSteps, setLineSteps] = useState<LineStepsOpen | null>(null);
   const addLineRead = (text: string) => { const r = readPartOf(text); if (r) setLineReads((prev) => [...prev.filter((x) => x !== r), r].slice(-5)); };
   const [lineResult, setLineResult] = useState<{ dmId: string; line: string; gapBenefit: boolean; benefit: string | null; missing: string[] } | null>(null);
   const [lineValidation, setLineValidation] = useState<any>(null);
@@ -352,7 +355,7 @@ export default function DmBuilderPage() {
   const applyAiGenerated = useDmBuilderStore((s) => s.applyAiGenerated);
   const save = useDmBuilderStore((s) => s.save);
 
-  const handleAutoGenerate = useCallback(async (opts: { prompt?: string; scenario?: string; oneLine?: boolean; facts?: { benefit: string | null }; products?: LineProductRef[]; reads?: string[]; readLicensed?: boolean }) => {
+  const handleAutoGenerate = useCallback(async (opts: { prompt?: string; scenario?: string; oneLine?: boolean; facts?: { benefit: string | null }; products?: LineProductRef[]; reads?: string[]; readLicensed?: boolean; steps?: { body: Record<string, unknown>; cost: number; storeKey: string; reopen: LineStepsOpen } }) => {
     if (customerGate.isEmpty) { setShowDataGate(true); return; }
     if (generating) return;
     if (!opts.prompt && !opts.scenario) {
@@ -374,7 +377,14 @@ export default function DmBuilderPage() {
       if (opts.oneLine) {
         // ★ 2026-10-10 한 줄 DM 강화 — 서버가 초안을 먼저 만들고 차감한다(land:'result') → 결과 화면 착지. 고른 몰 상품은 상품번호만 보낸다.
         //   서버 스위치가 그 사이 꺼졌으면 초안 없이 섹션이 온다 → 아래 옛 흐름(편집기)으로 이어 간다(만든 결과를 버리지 않는다).
-        const r = await requestLineDm({ line: opts.prompt || '', facts: opts.facts, products: opts.products, reads: opts.reads, readLicensed: opts.readLicensed });
+        const r = await requestLineDm({ line: opts.prompt || '', facts: opts.facts, products: opts.products, reads: opts.reads, readLicensed: opts.readLicensed, ...(opts.steps ? { steps: opts.steps.body } : {}) });
+        if (!r.ok && opts.steps) {
+          // ★ 2026-10-17 단계 모달 요청이 실패하면 크레딧 없이 만들기 단계로 다시 연다(답은 그대로 · 금액이 바뀌었으면 새 금액 · 쓸 수 없는 몰 상품은 뺀다)
+          const st = opts.steps.reopen;
+          clearInterval(stepTimer);
+          setLineSteps({ ...st, atMake: true, notice: lineStepsFailNotice(r.code, r.error, r.excluded), dropPicks: r.code === 'MALL_PRODUCTS_UNAVAILABLE', costOverride: r.code === 'PRICE_CHANGED' && r.cost !== undefined ? r.cost : st.costOverride });
+          return;
+        }
         if (!r.ok) {
           if (r.code === 'MALL_PRODUCTS_UNAVAILABLE') {
             const reasons = r.excluded.map((e) => `${e.name ? `${e.name}: ` : ''}${e.reason}`).slice(0, 3).join(' · ');
@@ -394,10 +404,14 @@ export default function DmBuilderPage() {
         const landed = String(generated.draft_id || '');
         if (landed) {
           clearInterval(stepTimer);
+          if (opts.steps) clearLineStepsAnswers(opts.steps.storeKey);
           saveBuildResult({
-            channel: 'dm', draftId: landed, materials: { notes: lineResultNotes(generated) }, quoteTotal: CONFIRM_CREDIT_COSTS['dm-ai-generate'] ?? 0,
+            channel: 'dm', draftId: landed, materials: { notes: lineResultNotes(generated) }, quoteTotal: opts.steps ? opts.steps.cost : (CONFIRM_CREDIT_COSTS['dm-ai-generate'] ?? 0),
             heroFallback: false, benefitStripped: 0, createdAt: Date.now(),
-            origin: { kind: 'line', line: opts.prompt || '', ...(opts.facts ? { facts: opts.facts } : {}), ...(opts.products ? { products: opts.products } : {}), ...(opts.reads && opts.reads.length > 0 ? { reads: opts.reads, readLicensed: opts.readLicensed === true } : {}) },
+            origin: {
+              kind: 'line', line: opts.prompt || '', ...(opts.facts ? { facts: opts.facts } : {}), ...(opts.products ? { products: opts.products } : {}), ...(opts.reads && opts.reads.length > 0 ? { reads: opts.reads, readLicensed: opts.readLicensed === true } : {}),
+              ...(opts.steps ? { steps: { body: opts.steps.body, generate: opts.steps.reopen.plan.cost?.generate ?? null } } : {}),
+            },
           });
           setNaturalLanguage('');
           setLineReads([]);
@@ -1028,6 +1042,12 @@ export default function DmBuilderPage() {
       const g = await fetchOneLineGaps(t, reads, 'dm');
       // ★ 2026-10-10 한 줄 묻기 — 질문이면 답만 연다(만들지 않음 · 같은 판정 응답을 쓴다 · 왕복 0)
       if (!skipAsk && (await lineAsk.route(t, { gaps: g }))) return;
+      // ★ 2026-10-17 단계 모달(스위치 켠 회사) — 관문(고객 데이터)을 먼저 보고, 질문이 0 이어도 만들기 단계 한 장(금액 확인)
+      if (g?.stepsEnabled && g.plan) {
+        if (customerGate.isEmpty) { setShowDataGate(true); return; }
+        setLineSteps({ line: t, reads, plan: g.plan, fallbackCost: g.stepsCost });
+        return;
+      }
       setLineValues({});
       setLineMallPicked([]);
       setLineMallShown(false);
@@ -1054,7 +1074,7 @@ export default function DmBuilderPage() {
           busy: generating || lineAsk.judging,
           extra: (
         <ImageToCopyButton
-          label="이미지로 불러오기"
+          label="사진 속 글 읽기"
           onExtracted={(t) => { setNaturalLanguage((prev) => appendToOneLine(prev, t)); addLineRead(t); }}
           onStructured={({ events, text }) => {
             // ★ 기획전 스샷 → 행사별 [히어로+상품 카드] 즉시 조립 (AI 생성 없이 코드 매핑 — 크레딧 추가 0)
@@ -1093,8 +1113,8 @@ export default function DmBuilderPage() {
         <LineAnswer
           ask={lineAsk.ask}
           busy={generating}
-          cardCost={(c) => (c.action.kind === 'fill' ? `${AI_GENERATE_COSTS['dm-ai-generate']}크레딧` : undefined)}
-          makeCost={`${AI_GENERATE_COSTS['dm-ai-generate']}크레딧`}
+          cardCost={(c) => (c.action.kind === 'fill' ? `${lineAsk.stepsCost ?? AI_GENERATE_COSTS['dm-ai-generate']}크레딧` : undefined)}
+          makeCost={`${lineAsk.stepsCost ?? AI_GENERATE_COSTS['dm-ai-generate']}크레딧`}
           onClose={lineAsk.close}
           onPick={(c) => {
             if (c.action.kind === 'open') { navigate(c.action.path); return; }
@@ -1304,6 +1324,20 @@ export default function DmBuilderPage() {
                 ? `${sections.length}개 섹션으로 만들었어요. 반영되지 않은 항목 ${missing}건은 편집기에서 확인해 주세요`
                 : `${sections.length}개 섹션으로 만들었어요. 문구와 이미지만 다듬으면 됩니다`,
           });
+        }}
+      />
+
+      {/* ★ 2026-10-17 한 줄 단계 모달 — [만들기] = 모달을 닫고 지금 진행 표시로 만든다(결과 화면 착지) */}
+      <LineStepsModal
+        open={!!lineSteps}
+        channel="dm"
+        state={lineSteps}
+        onClose={() => setLineSteps(null)}
+        onMake={(made) => {
+          const st = lineSteps;
+          setLineSteps(null);
+          if (!st) return;
+          void handleAutoGenerate({ prompt: st.line, oneLine: true, ...(st.reads.length > 0 ? { reads: st.reads, readLicensed: made.readLicensed } : {}), steps: { body: made.body, cost: made.cost, storeKey: made.storeKey, reopen: { ...st, notice: null, dropPicks: false } } });
         }}
       />
 

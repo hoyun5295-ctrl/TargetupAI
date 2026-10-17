@@ -136,6 +136,23 @@ export async function isChargedByKey(companyId: string, idempotencyKey: string):
 }
 
 /**
+ * ★ 2026-10-17 한 줄 완성(설계서 docs/2026-10-17-oneline-steps-modal-design.md §3-11) — 이 원천 · 이 키 접두로 이미 차감된 행이 있는가.
+ *   「오늘 이 한 줄로 한 줄 완성을 냈는가」(다시 만들기 = 생성비만)를 **원장에 직접** 묻는다(사본 표식 0 · isChargedByKey 와 같은 원칙).
+ *   ⛔ 조회 실패는 던진다(호출부 503) · 접두는 고정 형식(영숫자 · 하이픈 · 콜론)만 받는다(LIKE 와일드카드 주입 차단).
+ */
+export async function hasChargeWithKeyPrefix(companyId: string, source: string, keyPrefix: string): Promise<boolean> {
+  if (!companyId || !source || !keyPrefix) return false;
+  if (!/^[A-Za-z0-9:-]+$/.test(keyPrefix)) throw new Error('invalid key prefix');
+  const r = await pool.query(
+    `SELECT 1 FROM ai_credit_transactions
+      WHERE company_id = $1::uuid AND type = 'deduct' AND source = $2 AND idempotency_key LIKE $3
+      LIMIT 1`,
+    [companyId, source, `${keyPrefix}%`],
+  );
+  return r.rows.length > 0;
+}
+
+/**
  * ★ 2026-09-29 여러 멱등 키 중 이미 과금된 키(isChargedByKey 묶음판 · 목록 화면이 한 번에 묻는다).
  *   인앱 만들기 개편 — 편집기 초안(멈춤)을 게시할 때 과금 확인 창을 띄울지 서버 과금 이력으로 정한다(설계서 §1-4).
  */

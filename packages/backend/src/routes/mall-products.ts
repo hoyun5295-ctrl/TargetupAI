@@ -12,11 +12,14 @@ import { getCafe24Integration, getCafe24ByoCredentials, fetchCafe24ProductsRaw, 
 import { getNaverCommerceIntegration, getNaverCommerceCredentials, fetchNaverProductsRaw, fetchNaverProducts } from '../utils/naver-commerce-client';
 import { matchMallProductByName } from '../utils/mall-product-match';
 // ★ 2026-10-10 한 줄 DM 강화 — 후보의 재조회 상품번호 · 검색어 정확 일치 · 고른 상품 → 확정 카드(상품 바꾸기)
-import { mallProductNoFrom, normalizeNameForMatch, type MallProduct } from '../utils/mall-product-normalize';
+import { type MallProduct } from '../utils/mall-product-normalize';
 import { sanitizeLineProducts } from '../utils/one-line-facts';
 import { resolveLineMallCards } from '../utils/line-mall-cards';
+// ★ 2026-10-17 한 줄 단계 모달 — 몰 목록 판정 한 벌(카페24 = 상태 active 만) · 낱말별 후보(설계서 docs/2026-10-17-oneline-steps-modal-design.md §4-2)
+import { listMallProviders } from '../utils/mall-providers';
+import { findLineMallCandidates, lineMatchFieldsOf } from '../utils/line-mall-candidates';
 // ★ 2026-09-14 W5 우커머스 — Store API 공개 조회(키 불필요) · 몰별 탭 provider = woocommerce:{mall}
-import { listWooIntegrations, getWooIntegration, fetchWooStoreProducts, fetchWooStoreProductsRaw } from '../utils/woocommerce-client';
+import { getWooIntegration, fetchWooStoreProducts, fetchWooStoreProductsRaw } from '../utils/woocommerce-client';
 import { normalizeWooMallId } from '../utils/woocommerce-core';
 // ★ 2026-09-18 몰별 사용자 범위 — 관리자는 회사 전체 몰 · 사용자는 자기 분류코드 몰만(설계서 docs/2026-09-18-mall-integration-user-scope-design.md §3-5)
 import { resolveIntegrationActor, canTouchIntegration, type IntegrationActor } from '../utils/integration-scope';
@@ -28,8 +31,7 @@ const WOO_PREFIX = 'woocommerce:';
  * exact = 검색어와 정규화 후 같은 이름인가(화면은 표식만 · 미리 체크하지 않는다 · 설계서 §1 H1).
  */
 function withLineFields(products: MallProduct[], q: string | undefined): Array<MallProduct & { no: string | null; exact: boolean }> {
-  const target = q ? normalizeNameForMatch(q) : '';
-  return products.map((p) => ({ ...p, no: mallProductNoFrom(p), exact: !!target && normalizeNameForMatch(p.name) === target }));
+  return products.map((p) => ({ ...p, ...lineMatchFieldsOf(p, q) }));
 }
 /**
  * provider 'woocommerce:{mall}' → 이 회사 소속 + 이 주체가 다룰 수 있는 몰 행(없으면 undefined).
@@ -50,17 +52,11 @@ mallProductsRouter.get('/providers', async (req: any, res: Response) => {
   try {
     const companyId = req.user?.companyId;
     if (!companyId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
-    const providers: Array<{ provider: string; label: string }> = [];
-    const cafe = await getCafe24Integration(companyId).catch(() => null);
-    if (cafe) providers.push({ provider: 'cafe24', label: '카페24' });
-    const naver = await getNaverCommerceIntegration(companyId).catch(() => null);
-    if (naver) providers.push({ provider: 'naver', label: '네이버 스마트스토어' });
-    // 우커머스 — 몰별 탭(해제 몰 제외). Store API 가 공개라 연결 검증 전이라도 상품은 읽힌다.
-    //   ★ 2026-09-18 사용자는 자기 분류코드 몰만(관리자는 전체 · 분류 미배정 사용자는 0개).
+    // ★ 2026-10-17 판정 한 벌(`listMallProviders`) — 카페24 는 상태 active 만(옛: 휴면 · 해제도 탭이 떠 검색이 늘 실패) ·
+    //   우커머스 = 해제 몰 제외 · 사용자는 자기 분류코드 몰만(2026-09-18) · relookup = 한 줄 확정에 쓸 수 있는 몰(화면 판정 사본 대신 이 값)
     const actor = await resolveIntegrationActor(req.user);
-    const woo = (await listWooIntegrations(companyId).catch(() => [])).filter((m) => canTouchIntegration(actor, m.storeCode));
-    for (const m of woo) providers.push({ provider: `woocommerce:${m.mallId}`, label: `우커머스 · ${m.mallId}` });
-    return res.json({ success: true, providers });
+    const { list, failed } = await listMallProviders(companyId, actor);
+    return res.json({ success: true, providers: list.map((p) => ({ provider: p.provider, label: p.label, relookup: p.relookup })), ...(failed ? { partial: true } : {}) });
   } catch (err: any) {
     console.error('[mall-products providers] 오류:', err?.message);
     return res.status(500).json({ success: false, error: err?.message || '연동 몰 조회 실패' });
@@ -166,6 +162,22 @@ mallProductsRouter.post('/cards', async (req: any, res: Response) => {
   } catch (err: any) {
     console.error('[mall-products cards] 오류:', err?.message);
     return res.status(502).json({ success: false, error: '몰에서 상품을 확인하지 못했어요. 잠시 후 다시 시도해 주세요.' });
+  }
+});
+
+// ★ 2026-10-17 POST /line-candidates { line, channel } — 한 줄 단계 모달의 몰 후보(낱말별 · 있음 / 없음 / 확인하지 못함 · 주소로 찾은 상품).
+//   검색어 = 판정과 같은 함수 · 재조회 가능한 몰만 · 순서대로 · 전체 5초 · AI 0 · 차감 0 · 값은 표시용(확정 = 생성 직전 재조회).
+mallProductsRouter.post('/line-candidates', async (req: any, res: Response) => {
+  try {
+    const companyId = req.user?.companyId;
+    if (!companyId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
+    const line = typeof req.body?.line === 'string' ? req.body.line.slice(0, 2000) : '';
+    const maxTerms = req.body?.channel === 'inapp' ? 1 : 3;
+    const r = await findLineMallCandidates(companyId, await resolveIntegrationActor(req.user), line, { maxTerms });
+    return res.json({ success: true, ...r });
+  } catch (err: any) {
+    console.error('[mall-products line-candidates] 오류:', err?.message);
+    return res.status(502).json({ success: false, error: '몰에서 상품을 확인하지 못했어요.' });
   }
 });
 

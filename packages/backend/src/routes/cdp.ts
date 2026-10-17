@@ -83,6 +83,7 @@ import {
   sanitizePosterSlidesActionUrls,
   parseInAppNotPublishable,
   INAPP_DRAFT_ON_LIVE_ERROR,
+  INAPP_TEMPLATE_ALLOWED_BLOCKS,   // ★ 2026-10-17 한 줄 단계 모달 — 재료 블록(사진 · 상품)을 템플릿이 허용할 때만 놓는다
 } from '../utils/inapp-message';
 // ★ 2026-07-18 P3 에셋 라이브러리 — 업로드 자동 등재 + 플랜별 용량 한도
 import { registerAsset, getStorageUsage, isAssetsTableMissing } from '../utils/assets';
@@ -111,7 +112,15 @@ import {
 } from '../utils/inapp-quick-action';
 import { query } from '../config/database';
 import { checkCredit, deductCreditSafe, deductCreditOutcome, isChargedByKey, chargedKeysAmong, InsufficientCreditError } from '../utils/ai-credit';
-import { oneLineFactsEnabled } from '../utils/one-line-facts';   // ★ 2026-10-05 한줄로 시그니처
+import { oneLineFactsEnabled, sanitizeLineProducts, lineProductsKey, sanitizeLineReads } from '../utils/one-line-facts';   // ★ 2026-10-05 한줄로 시그니처
+// ★ 2026-10-17 한 줄 단계 모달(설계서 docs/2026-10-17-oneline-steps-modal-design.md §3-12) — 인앱도 같은 돈 계약(시도 토큰 · 잠금 · 결과 뒤 1회 차감)
+import { oneLineStepsEnabled, buildLineStepsEventText } from '../utils/one-line-steps';
+import { prepareLineStepsRequest, isLineStepsReqError, lineStepsKeyFor, settleLineStepsPrice, resolveLineStepsDelivery, lineStepsAttemptCharged, lineStepsLineLockKey, lineStepsCollected } from '../utils/line-steps-context';
+import { placeInAppLineMaterials, type LineInAppMessage } from '../utils/line-materials';
+import { resolveLineMallCards, type LineMallCard } from '../utils/line-mall-cards';
+import { resolveIntegrationActor } from '../utils/integration-scope';
+import { tryAcquireInflight, releaseInflight } from '../utils/inflight-lock';
+import { runInCreditBundle } from '../utils/ai-credit-context';
 import { sendSystemAlert } from '../utils/system-alert';
 // ★ 2026-09-26 한줄로 V2 R1-03(Codex 7차 2R) — 같은 인앱 메시지의 게시 PUT 직렬화(공용 잠금 CT)
 import { withKeyedLock, uuidLockKey } from '../utils/keyed-lock';
@@ -1599,6 +1608,74 @@ router.post('/inapp/ai-generate', async (req: Request, res: Response) => {
       return res.status(400).json({ success: false, error: elig.blockReasonWeb, code: 'INAPP_DISPLAY_UNAVAILABLE' });
     }
     const { objective, templateHint, event_text } = req.body;
+    // ★ 2026-10-17 한 줄 단계 모달 — `steps` 칸이 온 한 줄 요청만(스위치 = 한 줄 보강 스위치 안에서만 · 그 밖 요청 = 아래 지금 그대로).
+    //   돈 순서: 같은 시도 재요청 판정 → 금액 확정(화면 금액과 다르면 409) → 몰 재조회 → 잔액 확인 → 생성(묶음 · 안쪽 차감 0) → 재료 놓기 → 1회 차감(잔액 부족 = 402 · 결과 안 건넴).
+    if (req.body?.one_line === true && req.body?.steps !== undefined) {
+      const stepsNow = Date.now();
+      const rawLine = typeof objective === 'string' ? objective.trim().slice(0, 2000) : '';
+      const stepsOn = oneLineFactsEnabled(auth.companyId) && oneLineStepsEnabled(auth.companyId);
+      // 사진 글 조각 = 한 줄 지문에서만 뺀다(판정 응답의 line_fp 와 같은 지문 · 원장 접두가 갈리지 않게) · 원문은 그대로 생성기에
+      const stepsReads = sanitizeLineReads(req.body?.read_texts);
+      const steps = prepareLineStepsRequest(req.body, auth.companyId, rawLine, stepsReads === 'invalid' ? undefined : stepsReads, stepsNow, stepsOn);
+      if (isLineStepsReqError(steps)) return res.status(steps.status).json({ success: false, error: steps.error, code: steps.code });
+      if (!steps || !rawLine) return res.status(400).json({ success: false, error: '만들 내용을 한 줄로 적어 주세요.', code: 'LINE_STEPS_INVALID' });
+      const lineProducts = sanitizeLineProducts(req.body?.products);
+      if (lineProducts === 'invalid' || (lineProducts && lineProducts.length > 1)) return res.status(400).json({ success: false, error: '고른 상품을 다시 확인해 주세요.', code: 'LINE_PRODUCTS_INVALID' });
+      // 생성 입력 전부를 지문에(직접 상품 전부 · 대표 사진 · 주소 답 · 혜택)
+      const stepsPayload = {
+        objective: rawLine, templateHint: templateHint || null, products: lineProductsKey(lineProducts || []),
+        benefit: steps.body.facts.benefit ?? null, manual: steps.body.manual, hero: steps.hero, link: steps.body.facts.link ?? null,
+      };
+      const idemKey = lineStepsKeyFor(steps, auth.companyId, 'inapp', stepsPayload);
+      // 잠금 둘 — 같은 시도 토큰 · 같은 한 줄(금액 확정 ~ 차감 · 다른 시도가 한 줄 완성을 두 번 내지 않게 · Codex 1017 1R)
+      const lock = `oneline-steps:${auth.companyId}:inapp:${steps.token}`;
+      const lineLock = lineStepsLineLockKey(steps, auth.companyId, 'inapp');
+      if (!tryAcquireInflight(lock)) return res.status(409).json({ success: false, error: '지금 만드는 중이에요. 완성되면 이어서 진행해 주세요.', code: 'IN_FLIGHT' });
+      let lineLockHeld = false;
+      try {
+        if (!tryAcquireInflight(lineLock)) return res.status(409).json({ success: false, error: '같은 한 줄로 지금 만드는 중이에요. 완성되면 다시 시도해 주세요.', code: 'IN_FLIGHT' });
+        lineLockHeld = true;
+        let charged: boolean;
+        // 오늘 · 어제(KST) 키 둘 다(자정을 넘긴 같은 시도의 재전송)
+        try { charged = await lineStepsAttemptCharged(steps, auth.companyId, 'inapp', stepsPayload); } catch {
+          return res.status(503).json({ success: false, error: '잠시 후 다시 시도해 주세요.', code: 'CREDIT_STATE_UNKNOWN' });
+        }
+        if (charged) return res.status(409).json({ success: false, error: '이 요청은 이미 처리됐어요. 다시 만들려면 [만들기]를 한 번 더 눌러 주세요.', code: 'ALREADY_DONE' });
+        const price = await settleLineStepsPrice(steps, auth.companyId, 'inapp', stepsNow);
+        if (isLineStepsReqError(price)) return res.status(price.status).json({ success: false, error: price.error, code: price.code, ...(price.cost !== undefined ? { cost: price.cost, breakdown: price.breakdown } : {}) });
+        const actor = await resolveIntegrationActor(req.user);
+        let mallCards: LineMallCard[] = [];
+        const notes: string[] = [];
+        if (lineProducts && lineProducts.length > 0) {
+          const r = await resolveLineMallCards(auth.companyId, actor, lineProducts);
+          mallCards = r.cards;
+          if (mallCards.length === 0) return res.status(409).json({ success: false, error: '고른 상품을 지금 쓸 수 없어요. 상품 없이 만들 수 있어요.', code: 'MALL_PRODUCTS_UNAVAILABLE', excluded: r.excluded });
+          for (const e of r.excluded) notes.push(`상품${e.name ? ` "${e.name}"` : ''} 제외: ${e.reason}`);
+        }
+        const allCards: LineMallCard[] = [...mallCards, ...steps.manualCards];
+        const eventText = buildLineStepsEventText(rawLine, { benefit: steps.body.facts.benefit ?? null, textProducts: steps.textProducts });
+        await checkCredit(auth.companyId, price.cost);
+        // 생성기는 바깥 묶음이 차감을 소유하면 안쪽에서 빼지 않는다(inapp-ai-generator isInCreditBundle) — 차감은 아래 이 키로 1회
+        const pkg = await runInCreditBundle(() => generateInAppMessagePackage({ companyId: auth.companyId, createdBy: auth.userId, objective: rawLine, templateHint, eventText }));
+        const delivery = await resolveLineStepsDelivery(auth.companyId, actor, steps, { channel: 'inapp', line: rawLine, cards: allCards });
+        pkg.message = placeInAppLineMaterials(
+          pkg.message as unknown as LineInAppMessage,
+          { imageUrl: delivery.hero, linkUrl: delivery.link, card: allCards[0] ?? null },
+          (template, blockType) => { const set = INAPP_TEMPLATE_ALLOWED_BLOCKS[template]; return !set || set.has(blockType); },
+        ) as unknown as typeof pkg.message;
+        // 낸 것만 건넨다(잔액 부족 = 402 · 원장 쓰기 실패 = 503 · 결과 0)
+        const outcome = await deductCreditOutcome({ companyId: auth.companyId, cost: price.cost, source: price.source, createdBy: auth.userId, idempotencyKey: idemKey, throwOnInsufficient: true });
+        if (!lineStepsCollected(outcome)) {
+          console.log(`[CREDIT][MISS] one-line steps inapp 결과 안 건넴 company=${auth.companyId} key=${idemKey} cost=${price.cost} outcome=${outcome}`);
+          return res.status(503).json({ success: false, error: '크레딧 기록을 확인하지 못해 결과를 건네지 않았어요. 잠시 후 다시 시도해 주세요.', code: 'CREDIT_STATE_UNKNOWN' });
+        }
+        console.log(`[one-line steps] inapp company=${auth.companyId} cost=${price.cost} completion=${price.completionDue} shown=${steps.body.meta.shown.join(',')} answered=${steps.body.meta.answered.join(',')} skipped=${steps.body.meta.skipped.join(',')} manual_cards=${steps.manualCards.length} hero=${delivery.hero ? 1 : 0}`);
+        return res.json({ success: true, package: pkg, one_line: { enabled: true, steps: { cost: price.cost, completion: price.completionDue }, notes } });
+      } finally {
+        if (lineLockHeld) releaseInflight(lineLock);
+        releaseInflight(lock);
+      }
+    }
     // ★ 2026-10-05 한줄로 시그니처(설계서 §5) — 한 줄 입구(one_line:true) + 스위치 켠 회사 + 원문 없음일 때만 한 줄을 사용자 원문으로 쓴다.
     //   옛: 원문이 없으면 혜택 블록을 무조건 자리표시로 바꿔(inapp-ai-generator.ts:369-371) 사용자가 쓴 혜택도 사라지고 다시 물었다.
     const lineOn = req.body?.one_line === true && oneLineFactsEnabled(auth.companyId);

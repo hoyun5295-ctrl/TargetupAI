@@ -53,7 +53,8 @@ describe('★ T4 라우트 — materials v1 분기 · ENV AND · 잠금 · 오�
     expect(route).toContain('generateEmailFromMaterials(');
     // ★ 2026-10-10 한 줄 이메일 — 혜택 답이 있을 때만 요청 글에 [혜택] 줄(genPrompt = prompt · 답 없으면 같은 글)
     expect(route).toContain('const result = await generateEmailSections({ companyId: auth.companyId, userId: auth.userId, prompt: genPrompt, scenario, isAd, eventText });');
-    expect(route).toContain('const genPrompt = lineOn && lineFacts ? buildLineEventText(linePrompt, lineFacts) : linePrompt;');
+    // ★ 2026-10-17 단계 모달 요청이 아니면 옛 조립 그대로(단계 요청 = buildLineStepsEventText)
+    expect(route).toContain('(lineOn && lineFacts ? buildLineEventText(linePrompt, lineFacts) : linePrompt);');
   });
   it('견적 — POST /materials/quote(v1 · 정규화·게이트·역할·견적) · aiAutoBuildEnabled 403 · 오류 매핑 · GET 옛 견적 그대로', () => {
     const ec = code('routes/event-campaigns.ts');

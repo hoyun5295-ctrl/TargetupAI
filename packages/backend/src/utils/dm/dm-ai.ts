@@ -27,6 +27,7 @@ import {
 import { fetchProductOgImages } from './dm-brand-extractor';
 // ★ 2026-10-10 한 줄 DM 강화 — 사람이 고른 몰 상품의 확정 카드 배치(CT)
 import { placeLineMallCards, type LineMallCard } from '../line-mall-cards';
+import { placeLineHero, placeLineLink } from '../line-materials';   // ★ 2026-10-17 한 줄 단계 모달 — 대표 사진 · 버튼 주소(코드가 놓는다)
 import {
   SECTION_META, SECTION_DEFAULTS, type Section, type SectionType,
   createSection,
@@ -868,6 +869,11 @@ export async function oneShotGenerate(opts: {
   confirmedCards?: LineMallCard[];
   /** ★ 2026-10-10 — 회사가 저장한 주색(읽히게 보정한 값). 오면 비주얼 디렉터 팔레트 주색을 이 값으로 고정한다. 미지정 = 지금 그대로. */
   pinPrimary?: string;
+  /**
+   * ★ 2026-10-17 한 줄 단계 모달(설계서 docs/2026-10-17-oneline-steps-modal-design.md §3-8 · §3-9) — 사람이 올린 대표 사진 · 버튼 주소.
+   * 확정 카드와 같은 자리(장 나누기 · 비주얼 디렉터보다 앞)에서 코드가 놓는다(AI 를 지나지 않는다). 미지정 = 지금 그대로.
+   */
+  lineMaterials?: { heroImageUrl?: string | null; linkUrl?: string | null };
 }): Promise<OneShotResult> {
   const prompt = (opts.prompt || '').trim();
   const structure = opts.structure && Array.isArray(opts.structure.sectionTypes) && opts.structure.sectionTypes.length > 0
@@ -1020,6 +1026,10 @@ export async function oneShotGenerate(opts: {
   let assembled: Section[] = confirmed
     ? placeLineMallCards(sections, confirmed, { newId: () => randomUUID(), makeCarousel: (order) => createSection('product_carousel', randomUUID(), order) })
     : sections;
+  // ★ 2026-10-17 한 줄 단계 모달 — 대표 사진(히어로 · 없으면 머리 뒤에 하나) · 비주얼 디렉터가 사진 있는 히어로로 구도를 고른다
+  if (opts.lineMaterials?.heroImageUrl) {
+    assembled = placeLineHero(assembled, opts.lineMaterials.heroImageUrl, (order) => createSection('hero', randomUUID(), order));
+  }
   let coverage: { missing: BriefCoverageItem[] } | undefined;
   if (brief) {
     // 확정 카드가 있으면 브리프 상품은 검산 대상이 아니다(한 줄의 상품 표현이 몰 상품명으로 바뀐다 · CTA 남은 링크 배정도 상품 링크를 빼지 않는다)
@@ -1029,6 +1039,8 @@ export async function oneShotGenerate(opts: {
     if (first.missing.length > 0) assembled = repairBriefCoverage(assembled, factBrief, first.missing);
     coverage = computeBriefCoverage(factBrief, sectionsFactText(assembled));
   }
+  // ★ 2026-10-17 한 줄 단계 모달 — 버튼 주소(첫 CTA 첫 버튼이 비어 있을 때만 · 브리프가 원문 주소로 채운 것은 덮지 않는다)
+  if (opts.lineMaterials?.linkUrl) assembled = placeLineLink(assembled, opts.lineMaterials.linkUrl);
 
   // ★ AI 비주얼 디렉터 — 캠페인별 색·무드·강조 + 섹션 구도(treatment)를 설계해 섹션에 입힘(사진 없어도 완성형).
   // ★ 2026-09-27 한줄로 V2 R210 — 회사가 저장한 브랜드 킷(설정한 경우만)을 넘긴다. 옛: undefined라 대표 색이 프롬프트에 안 들어가 생성 색이 브랜드와 무관했다.

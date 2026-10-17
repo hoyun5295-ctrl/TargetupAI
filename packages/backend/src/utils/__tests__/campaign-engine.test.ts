@@ -334,6 +334,7 @@ describe('소스 계약 — 엔진 격리 · 라우트 분기', () => {
     // 무후퇴 — 옛 경로 문자열이 그대로 남아 있다
     // ★ 2026-10-10 한 줄 이메일 — 혜택 답이 있을 때만 요청 글에 [혜택] 줄(genPrompt = prompt · 답 없으면 같은 글)
     expect(email).toContain('const result = await generateEmailSections({ companyId: auth.companyId, userId: auth.userId, prompt: genPrompt, scenario, isAd, eventText });');
-    expect(email).toContain('const genPrompt = lineOn && lineFacts ? buildLineEventText(linePrompt, lineFacts) : linePrompt;');
+    // ★ 2026-10-17 단계 모달 요청이 아니면 옛 조립 그대로(단계 요청 = buildLineStepsEventText)
+    expect(email).toContain('(lineOn && lineFacts ? buildLineEventText(linePrompt, lineFacts) : linePrompt);');
   });
 });

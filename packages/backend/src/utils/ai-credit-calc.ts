@@ -130,6 +130,11 @@ export const CREDIT_COST_MAP: Record<string, number> = {
   'predictive-daily': 3,
   // 모바일 DM 생성(돌려보기) 5 — 자연어→sections + 슬라이드 분할 + 전 섹션 카피까지 생성(범위 넓음). 호출마다 5. 발행은 'dm-builder' 30 별도.
   'dm-ai-generate': 5,
+  // ★ 2026-10-17 한 줄 완성 10 — Harold 2안 확정(설계서 docs/2026-10-17-oneline-steps-modal-design.md §3-11).
+  //   한 줄 단계 모달(질문 · 재료 받기 · 몰 상품 확정 · 재료 배치)을 거친 만들기 = 그 채널 생성비 + 10(DM 15 · 이메일 13 · 인앱 13 · 원장 한 행).
+  //   AI 원가가 아니라 완성 대행 가치다(묻기 · 몰 찾기 · 사진 올리기는 0 · 판정 AI 0). 같은 날 같은 한 줄로 다시 만들면 생성비만.
+  //   ⛔ 발행 · 게시 · 이메일 완성은 각자 키로 따로(여기 포함하지 않는다 · 이중 과금 0).
+  'oneline-complete': 10,
   // ★ 2026-09-15 카탈로그 DM 생성 10 — Harold 확정. AI 자동제작 카탈로그 채널(쪽 이미지 N장 · 수량 제한 없음 → 장당 1쪽 슬라이드 DM + settings.catalog).
   //   AI·판독 0(쪽을 그대로 싣는다) · 멱등키 quick:{company}:catalog:{attemptToken}:{과금 지문16}(duplicate 무료) · 발행은 'dm-builder' 별도.
   'catalog-dm-build': 10,

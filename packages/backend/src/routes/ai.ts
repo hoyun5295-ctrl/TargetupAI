@@ -41,6 +41,10 @@ import { resolveJourneyAdFlag } from '../utils/journey-ad-policy';
 import { loadPlanContext, canUseFeature, requirePlanFeature, isBetaAccessAllowed, isAiOperatorAllowed } from '../utils/plan-guard';
 import { snsPublishEnabled } from '../utils/sns-constants';   // ★ 2026-09-20 허브 SNS 플래그(§3-11)
 import { oneLineFactsEnabled, oneLineGaps, sanitizeLineFacts, pickCopyCVariant, lineProductTerms, lineBenefitPercents, sanitizeLineReads, applyLineReads, oneLineAskEnabled, oneLineIntent, oneLineAskTopic, lineWithoutReads } from '../utils/one-line-facts';   // ★ 2026-10-05 한줄로 시그니처 · ★1010 몰 후보 검색어
+// ★ 2026-10-17 한 줄 단계 모달(설계서 docs/2026-10-17-oneline-steps-modal-design.md §4-1) — 판정 응답에 단계 목록(plan) · 버튼 라벨 금액
+import { buildLineStepsPlan, oneLineStepsEnabled, isLineStepsChannel, lineStepsFp } from '../utils/one-line-steps';
+import { loadLineStepsCompanyFacts, lineStepsFullCost } from '../utils/line-steps-context';
+import { resolveIntegrationActor } from '../utils/integration-scope';
 import { getCompanyCosts } from '../config/defaults';
 // ★ D209+ (Harold 명시 2026-05-22) Phase D 비용 안전 매트릭스 — 회사별 월 한도 + cache 통계
 import { getMonthlyUsage, getDailyUsage, getModelBreakdown, checkAiRateLimit, AiRateLimitExceeded, recordAiCall } from '../utils/ai-rate-limit';
@@ -1175,7 +1179,7 @@ router.get('/operator/access', async (req: Request, res: Response) => {
 // ★ 2026-10-05 한줄로 시그니처(설계서 docs/2026-10-05-hanjul-signature-design.md §3) — 한 줄 판정.
 //   AI 0 · DB 0 · 무과금. 화면은 이 응답으로만 칸을 그린다(판정 규칙을 화면에 다시 두지 않는다).
 //   스위치 밖 회사 = enabled:false · 묻는 칸 0 → 지금 화면 그대로.
-router.post('/one-line/gaps', (req: Request, res: Response) => {
+router.post('/one-line/gaps', async (req: Request, res: Response) => {
   const companyId = req.user?.companyId;
   const line = typeof req.body?.line === 'string' ? req.body.line.slice(0, 2000) : '';
   const enabled = oneLineFactsEnabled(companyId);
@@ -1188,6 +1192,31 @@ router.post('/one-line/gaps', (req: Request, res: Response) => {
   const menu = typeof req.body?.menu === 'string' ? req.body.menu : '';
   const typed = lineWithoutReads(line, reads === 'invalid' ? undefined : reads);
   const intent = askEnabled ? oneLineIntent(typed, { contentChannel: menu === 'dm' || menu === 'email' || menu === 'sns' }) : 'make';
+  // ★ 2026-10-17 한 줄 단계 모달 — menu ∈ dm · email · inapp + 스위치(한 줄 보강 스위치 안에서만) 켠 회사만 단계 목록을 계산한다.
+  //   판정 자체는 순수 CT(AI 0) · 회사 사실은 칸마다 따로 시도(실패 = 그 칸만 기본값) · 그 밖 메뉴 · 회사 = 칸이 없다(지금 그대로).
+  let stepsEnabled = false;
+  let stepsCost: number | null = null;
+  let plan: ReturnType<typeof buildLineStepsPlan> | null = null;
+  if (companyId && isLineStepsChannel(menu) && oneLineStepsEnabled(companyId)) {
+    stepsEnabled = true;
+    stepsCost = lineStepsFullCost(menu).total;
+    if (line.trim()) {
+      try {
+        const readList = reads === 'invalid' ? undefined : reads;
+        const lineFp = lineStepsFp(line, readList);
+        const facts = await loadLineStepsCompanyFacts(companyId, await resolveIntegrationActor(req.user), menu, lineFp, Date.now());
+        plan = buildLineStepsPlan({
+          judged, line, typed, channel: menu, lineFp,
+          mall: facts.mall, inappBlocked: facts.inappBlocked, upload: facts.upload,
+          website: facts.website, mallHome: facts.mallHome, cost: facts.cost,
+        });
+      } catch (err: any) {
+        // 단계 판정이 실패해도 판정 응답 자체는 지킨다(plan 없음 = 화면은 지금 흐름) · 원인은 남긴다
+        console.log(`[one-line steps] plan 실패 company=${companyId} menu=${menu} err=${err?.message}`);
+        plan = null;
+      }
+    }
+  }
   // ★ 2026-10-10 한 줄 DM 강화 — 몰 후보 검색어 · 혜택 % 값(여전히 AI 0 · DB 0 · 판정이 아니라 찾기 입력). 스위치 밖 = 빈 값.
   return res.json({
     success: true, enabled,
@@ -1197,6 +1226,9 @@ router.post('/one-line/gaps', (req: Request, res: Response) => {
     ask_enabled: askEnabled,
     intent,
     ask_topic: intent === 'ask' ? oneLineAskTopic(typed) : null,
+    steps_enabled: stepsEnabled,
+    steps_cost: stepsCost,
+    plan,
   });
 });
 

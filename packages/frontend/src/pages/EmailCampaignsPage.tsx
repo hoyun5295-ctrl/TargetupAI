@@ -44,8 +44,9 @@ import RecipientsModal from '../components/email/EmailRecipientsModal';
 // ★ 2026-09-27 만들기 개편 — 첫 화면(만들기 카드 · 다른 방법 접힘 · 카드칩 · 상세 창) · 수정 화면(EmailEditScreen · DM 과 같은 칸) · 보내기 창
 import { Layers } from 'lucide-react';
 import EmailEditScreen from '../components/make/EmailEditScreen';
-import { newAttemptToken, appendToOneLine, fetchOneLineGaps, readPartOf, readsInLine, type LineMallCandidate, type LineProductRef } from '../utils/one-line';   // ★ 2026-10-05 한줄로 시그니처 · ★1010 묻는 창 · 몰 상품
+import { newAttemptToken, appendToOneLine, fetchOneLineGaps, readPartOf, readsInLine, clearLineStepsAnswers, type LineMallCandidate, type LineProductRef } from '../utils/one-line';   // ★ 2026-10-05 한줄로 시그니처 · ★1010 묻는 창 · 몰 상품
 import { LineFactsAskModal } from '../components/zone/LineFacts';   // ★ 2026-10-10 한 줄 이메일 — 판정이 걸릴 때만 생성 전에 묻는다
+import LineStepsModal, { lineStepsFailNotice, type LineStepsOpen } from '../components/zone/LineStepsModal';   // ★ 2026-10-17 한 줄 단계 모달
 import EmailDetailModal from '../components/make/EmailDetailModal';
 import MakeSendModal from '../components/make/MakeSendModal';
 import SmtpConnectModal from '../components/email/SmtpConnectModal';
@@ -137,6 +138,8 @@ export default function EmailCampaignsPage() {
   const [lineChecking, setLineChecking] = useState(false);
   const lineCheckingRef = useRef(false);
   const [lineAsk, setLineAsk] = useState<{ line: string; askBenefit: boolean; terms: string[]; percents: number[]; reads: string[] } | null>(null);
+  // ★ 2026-10-17 한 줄 단계 모달(스위치 켠 회사) — 열린 단계 모달 상태(실패하면 만들기 단계로 다시 연다)
+  const [emailSteps, setEmailSteps] = useState<LineStepsOpen | null>(null);
   // ★ 2026-10-10 H3 — 한 줄 칸에 붙인 사진 글 조각 · 「사진에서 읽은 숫자도 그대로 쓰기」(기본 꺼짐)
   const [lineReads, setLineReads] = useState<string[]>([]);
   const [lineReadOk, setLineReadOk] = useState(false);
@@ -501,7 +504,7 @@ export default function EmailCampaignsPage() {
   //   블록 생성(/ai/generate-sections) → 비주얼 편집기로 진입. 시작 방식 = 템플릿/비주얼/프롬프트 전부 비주얼 편집기 1개.
   // ★ 2026-10-05 한줄로 시그니처 — 한 줄 입구 표시 + 시도 토큰(서버가 스위치를 본다 · 스위치 밖이면 응답 그대로).
   //   line = 처음 적은 한 줄(혜택을 넣어 새로 만들 때도 다시 입력하지 않는다).
-  const handleAiGenerate = async (opts: { prompt?: string; line?: string; facts?: { benefit: string | null }; products?: LineProductRef[]; reads?: string[]; readLicensed?: boolean }) => {
+  const handleAiGenerate = async (opts: { prompt?: string; line?: string; facts?: { benefit: string | null }; products?: LineProductRef[]; reads?: string[]; readLicensed?: boolean; steps?: { body: Record<string, unknown>; cost: number; storeKey: string; reopen: LineStepsOpen } }) => {
     if (customerGate.isEmpty) { setShowDataGate(true); return; }
     if (genStep !== null) return; // 중복 방지
     if (!opts.prompt?.trim()) {
@@ -519,13 +522,22 @@ export default function EmailCampaignsPage() {
         headers: authHeaders(),
         body: JSON.stringify({
           prompt: opts.prompt.trim(), is_ad: aiAsAd, one_line: true, attempt_token: newAttemptToken(),
-          // ★ 2026-10-10 묻는 창의 답(혜택) · 고른 몰 상품(상품번호만 · 후보가 보였을 때만 · 빈 배열 = 안 고름)
-          ...(opts.facts ? { facts: opts.facts } : {}),
-          ...(opts.products ? { products: opts.products.map((p) => ({ provider: p.provider, no: p.no })) } : {}),
+          // ★ 2026-10-17 단계 모달 = 단계 답 몸통(혜택 · 상품 · 직접 상품 · 사진 · 주소 · 기간 · 금액) · 그 밖 = 묻는 창의 답
+          ...(opts.steps ? opts.steps.body : {
+            // ★ 2026-10-10 묻는 창의 답(혜택) · 고른 몰 상품(상품번호만 · 후보가 보였을 때만 · 빈 배열 = 안 고름)
+            ...(opts.facts ? { facts: opts.facts } : {}),
+            ...(opts.products ? { products: opts.products.map((p) => ({ provider: p.provider, no: p.no })) } : {}),
+          }),
           ...(opts.reads && opts.reads.length > 0 ? { read_texts: opts.reads, read_licensed: opts.readLicensed === true } : {}),
         }),
       });
       const data = await res.json();
+      if (opts.steps && !data?.success) {
+        // ★ 2026-10-17 단계 모달 요청 실패 = 크레딧 없이 만들기 단계로 다시 연다(답 그대로 · 바뀐 금액 · 쓸 수 없는 몰 상품은 뺀다)
+        const st = opts.steps.reopen;
+        setEmailSteps({ ...st, atMake: true, notice: lineStepsFailNotice(String(data?.code || ''), String(data?.error || ''), Array.isArray(data?.excluded) ? data.excluded : []), dropPicks: data?.code === 'MALL_PRODUCTS_UNAVAILABLE', costOverride: data?.code === 'PRICE_CHANGED' && Number.isFinite(data?.cost) ? Number(data.cost) : st.costOverride });
+        return;
+      }
       if (data?.code === 'INSUFFICIENT_CREDIT') { showToast('크레딧이 부족합니다. 충전 후 이용해주세요.', 'warning'); return; }
       if (data?.code === 'MALL_PRODUCTS_UNAVAILABLE') {
         // ★ 2026-10-10 고른 상품이 전부 빠졌다(품절 · 장애 · 범위 밖) — 차감 전에 멈췄다. 상품 없이 만들지 묻는다.
@@ -542,6 +554,7 @@ export default function EmailCampaignsPage() {
       if (handle503(data)) return;
       if (data.success && data.data) {
         const g = data.data;
+        if (opts.steps) clearLineStepsAnswers(opts.steps.storeKey);
         setAiPrompt('');
         setLineReads([]);
         setVisualEditor({
@@ -556,12 +569,13 @@ export default function EmailCampaignsPage() {
           line: g.one_line?.enabled ? { text: (opts.line ?? opts.prompt).trim(), gapBenefit: g.one_line.gaps?.benefit === true } : null,
         });
         const notes: string[] = Array.isArray(g.one_line?.notes) ? g.one_line.notes.map(String).filter(Boolean) : [];
-        showToast(notes.length > 0 ? `AI 생성 완료. ${notes[0]}` : 'AI 생성 완료. 비주얼 편집기에서 확인하고 다듬어주세요. (3 크레딧)', notes.length > 0 ? 'info' : 'success');
+        showToast(notes.length > 0 ? `AI 생성 완료. ${notes[0]}` : opts.steps ? `이메일을 만들었어요(${opts.steps.cost}크레딧). 편집기에서 확인하고 다듬어 주세요` : 'AI 생성 완료. 비주얼 편집기에서 확인하고 다듬어주세요. (3 크레딧)', notes.length > 0 ? 'info' : 'success');
       } else {
         showToast(data.error || 'AI 생성 실패', 'error');
       }
     } catch (e: any) {
-      showToast(e?.message || 'AI 생성 중 오류', 'error');
+      if (opts.steps) setEmailSteps({ ...opts.steps.reopen, atMake: true, notice: lineStepsFailNotice('NETWORK', '연결이 끊겨 만들지 못했어요.') });
+      else showToast(e?.message || 'AI 생성 중 오류', 'error');
     } finally {
       if (genTimer.current) { clearInterval(genTimer.current); genTimer.current = null; }
       setGenStep(null);
@@ -586,6 +600,11 @@ export default function EmailCampaignsPage() {
       const g = await fetchOneLineGaps(t, reads, 'email');
       // ★ 2026-10-10 한 줄 묻기 — 질문이면 답만 연다(만들지 않음 · 같은 판정 응답을 쓴다 · 왕복 0)
       if (!skipAsk && (await lineQ.route(t, { gaps: g }))) return;
+      // ★ 2026-10-17 단계 모달(스위치 켠 회사) — 질문이 0 이어도 만들기 단계 한 장(금액 확인)
+      if (g?.stepsEnabled && g.plan) {
+        setEmailSteps({ line: t, reads, plan: g.plan, fallbackCost: g.stepsCost });
+        return;
+      }
       if (g?.enabled && (g.gaps.benefit || g.productTerms.length > 0 || reads.length > 0)) {
         setLineMallPicked([]);
         setLineMallShown(false);
@@ -804,7 +823,7 @@ export default function EmailCampaignsPage() {
           verb: emailOneLine.verb,
           icon: Wand2,
           busy: genStep !== null || lineChecking || lineQ.judging,
-          credit: `${AI_GENERATE_COSTS['email-ai-generate']}크레딧`,
+          credit: `${lineQ.stepsCost ?? AI_GENERATE_COSTS['email-ai-generate']}크레딧`,
           extra: (
             <>
               <label className={`${MK_LINE_EXTRA_BTN} cursor-pointer select-none ${aiAsAd ? '!border-amber-300 !bg-amber-50 !text-amber-900' : ''}`} title='광고성 이메일로 만들기: 발송 시 "(광고)" + 수신거부 링크 자동 부착'>
@@ -812,7 +831,7 @@ export default function EmailCampaignsPage() {
                 광고성
               </label>
               <ImageToCopyButton
-                label="이미지"
+                label="사진 속 글 읽기"
                 onExtracted={(t) => { setAiPrompt((prev) => appendToOneLine(prev, t)); const r = readPartOf(t); if (r) setLineReads((prev) => [...prev.filter((x) => x !== r), r].slice(-5)); }}
                 disabled={genStep !== null}
                 className={MK_LINE_EXTRA_BTN}
@@ -832,8 +851,8 @@ export default function EmailCampaignsPage() {
         <LineAnswer
           ask={lineQ.ask}
           busy={genStep !== null}
-          cardCost={(c) => (c.action.kind === 'fill' ? `${AI_GENERATE_COSTS['email-ai-generate']}크레딧` : undefined)}
-          makeCost={`${AI_GENERATE_COSTS['email-ai-generate']}크레딧`}
+          cardCost={(c) => (c.action.kind === 'fill' ? `${lineQ.stepsCost ?? AI_GENERATE_COSTS['email-ai-generate']}크레딧` : undefined)}
+          makeCost={`${lineQ.stepsCost ?? AI_GENERATE_COSTS['email-ai-generate']}크레딧`}
           onClose={lineQ.close}
           onPick={(c) => {
             if (c.action.kind === 'open') { navigate(c.action.path); return; }
@@ -1222,6 +1241,19 @@ export default function EmailCampaignsPage() {
             ...(a.terms.length > 0 && lineMallShown ? { products: lineMallPicked.map((p) => ({ provider: p.provider, no: p.no })) } : {}),
             ...(a.reads.length > 0 ? { reads: a.reads, readLicensed: lineReadOk } : {}),
           });
+        }}
+      />
+      {/* ★ 2026-10-17 한 줄 단계 모달 — [만들기] = 모달을 닫고 지금 진행 표시로 만든다(편집기 착지) */}
+      <LineStepsModal
+        open={!!emailSteps}
+        channel="email"
+        state={emailSteps}
+        onClose={() => setEmailSteps(null)}
+        onMake={(made) => {
+          const st = emailSteps;
+          setEmailSteps(null);
+          if (!st) return;
+          void handleAiGenerate({ prompt: st.line, line: st.line, ...(st.reads.length > 0 ? { reads: st.reads, readLicensed: made.readLicensed } : {}), steps: { body: made.body, cost: made.cost, storeKey: made.storeKey, reopen: { ...st, notice: null, dropPicks: false } } });
         }}
       />
       {/* 고객 데이터 없음 — 생성 차단 안내 */}

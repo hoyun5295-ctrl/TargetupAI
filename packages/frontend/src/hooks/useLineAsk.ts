@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { fetchLineAnswer, fetchOneLineGaps, readPartOf, readsInLine, type LineAskAnswer, type LineAskMenu, type OneLineGapsResult } from '../utils/one-line';
 import { askHelp, type HelpAskResult } from '../components/help/help-api';
 
@@ -17,8 +17,29 @@ export interface LineAskState {
   error: string | null;
 }
 
+/** ★ 2026-10-17 한 줄 단계 모달 금액(로그인 · 메뉴 단위 기억) — 스위치 켠 회사의 한 줄 버튼 금액 라벨 */
+const stepsCostCache = new Map<string, Promise<number | null>>();
+function lineStepsCostOf(menu: LineAskMenu): Promise<number | null> {
+  const key = `${localStorage.getItem('token') || ''}:${menu}`;
+  let p = stepsCostCache.get(key);
+  if (!p) {
+    p = fetchOneLineGaps('', undefined, menu).then((g) => (g?.stepsEnabled ? g.stepsCost : null));
+    p.then((v) => { if (v === null) stepsCostCache.delete(key); }, () => stepsCostCache.delete(key));
+    stepsCostCache.set(key, p);
+  }
+  return p;
+}
+
 export function useLineAsk(menu: LineAskMenu) {
   const [ask, setAsk] = useState<LineAskState | null>(null);
+  // ★ 2026-10-17 단계 모달이 켜진 메뉴(DM · 이메일 · 인앱)의 한 줄 완성 금액 — 모르면 null(호출부는 지금 금액 라벨)
+  const [stepsCost, setStepsCost] = useState<number | null>(null);
+  useEffect(() => {
+    if (menu !== 'dm' && menu !== 'email' && menu !== 'inapp') return;
+    let alive = true;
+    void lineStepsCostOf(menu).then((v) => { if (alive) setStepsCost(v); }).catch(() => {});
+    return () => { alive = false; };
+  }, [menu]);
   const [judging, setJudging] = useState(false);
   const busy = useRef(false);
   // 사진에서 읽은 글 조각(최대 5) — 판정에서 뺀다(사진 속 「어떤 스타일이 좋을까?」가 질문으로 잡히지 않게) · 자기 조각을 따로 들고 있는 화면(DM · 이메일)은 gaps 를 넘긴다
@@ -65,5 +86,7 @@ export function useLineAsk(menu: LineAskMenu) {
   const close = useCallback(() => setAsk(null), []);
   /** 답 카드가 1장 이상 열려 있는가(시작 카드를 숨길지) */
   const hasCards = !!ask?.answer && ask.answer.cards.length > 0;
-  return { ask, judging, route, close, hasCards, noteRead };
+  /** 이 한 줄에 그대로 남은 사진 글 조각(자기 조각을 따로 들지 않는 화면 · 인앱) */
+  const readsFor = useCallback((line: string) => readsInLine(String(line || '').trim(), reads.current), []);
+  return { ask, judging, route, close, hasCards, noteRead, stepsCost, readsFor };
 }
