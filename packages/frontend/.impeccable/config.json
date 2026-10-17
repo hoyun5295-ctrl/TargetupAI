@@ -20,6 +20,15 @@
         ],
         "createdAt": "2026-10-17T00:42:06.382Z",
         "reason": "Claude: amber-500 + slate-900 is the project paid-button token MK_BTN_AI (utils/make-ui.ts:33); slate-900 is near-black, not washed-out gray"
+      },
+      {
+        "rule": "broken-image",
+        "value": "*",
+        "files": [
+          "src/utils/__tests__/line-template-campaign-1017.test.ts"
+        ],
+        "createdAt": "2026-10-17T04:25:43.353Z",
+        "reason": "Claude: line 30 is a regex in a backend vitest file that extracts img src from rendered HTML, not markup"
       }
     ]
   }

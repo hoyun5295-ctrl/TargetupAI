@@ -192,6 +192,7 @@ import { eventCampaignRouter } from './routes/event-campaigns';
 
 // ★ 2026-07-14 디자인 4.0 — 정예 골든 템플릿 조회 (design-core 컴파일, 읽기 전용)
 import { designTemplatesRouter } from './routes/design-templates';
+import { lineTemplatesRouter } from './routes/line-templates';   // ★ 2026-10-17 한 줄 템플릿 캠페인
 
 // ★ 2026-07-08 연동 몰 상품 조회 (DM 상품 슬라이드 자동 채우기 — 카페24·네이버 raw preview 실측부터)
 import { mallProductsRouter } from './routes/mall-products';
@@ -539,6 +540,7 @@ app.use('/api/dm', dmRouter);
 app.use('/api/event-campaigns', eventCampaignRouter);
 // ★ 2026-07-14 디자인 4.0 — 정예 골든 템플릿 (3채널 컴파일 조회 전용)
 app.use('/api/design', designTemplatesRouter);
+app.use('/api/line-templates', lineTemplatesRouter);   // ★ 2026-10-17 템플릿 목록 · 예시(스위치 켠 회사만 · AI 0)
 // ★ 2026-07-08 연동 몰 상품 조회 (DM 상품 자동 채우기 — preview 실측)
 app.use('/api/mall-products', mallProductsRouter);
 app.use('/api/assets', assetsRouter); // ★ 2026-07-18 P3 에셋 라이브러리

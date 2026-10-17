@@ -338,6 +338,9 @@ export type Section = {
   pull_up?: boolean;
   /** ★ 2026-09-04 (남지현 접수) 이 블록만 포인트 장식(모티프) 끄기. 미설정 = 캠페인 테마를 따름. backend 미러 */
   motif?: 'none';
+  /** ★ 2026-10-17 템플릿 캠페인 — 슬라이드 장 채움(남은 높이) · 템플릿 장 키(배치 전환 다시 묶기). backend 미러 · 미설정 = 현행 */
+  fit?: 'grow';
+  tpl_slot?: string;
   /** 개인화 조건부 표시 — 충족 안 하는 수신자에겐 이 섹션 제외(미설정=항상 표시). 이메일 발송 시 평가 */
   display_condition?: {
     field: string;

@@ -524,6 +524,11 @@ export type Section = {
   //   미설정 = 캠페인 design의 accentMotif를 따른다(현행 출력 무변화). 'none' = 이 블록에만 장식 0.
   //   소비 = email-section-renderer renderBlock. 계약 = email-property-contract.EMAIL_SECTION_MOTIF_OFF
   motif?: 'none';
+  // ★ 2026-10-17 템플릿 캠페인(docs/2026-10-17-line-template-campaign-design.md §2-4 · §2-8) — 미설정 = 현행 출력 그대로.
+  //   fit = 슬라이드 장에서 남은 높이를 이 섹션이 채운다(뷰어가 장 클래스를 계산 · 장 설정 깃발 금지 = 편집기 저장이 지운다).
+  //   tpl_slot = 템플릿 장 키 `p{n}.{부분}`(배치 전환 = 이 키로 다시 묶기 · 서버 호출 0). 둘 다 섹션 최상위라 편집기 저장을 지난다.
+  fit?: 'grow';
+  tpl_slot?: string;
   // 개인화 조건부 표시 — 충족 안 하는 수신자에겐 이 섹션 제외(미설정=항상 표시). 이메일 발송 시 평가
   display_condition?: {
     field: string;

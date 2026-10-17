@@ -76,6 +76,16 @@ export function expandSlidePagesForSwipe(pages: SlidePage[]): SlidePage[] {
  *   화면 무대(dm-page--stage)로 그린다 — 상하 중앙·화면 맞춤·장 안 스크롤 0. 제목·버튼·상품이 섞인 장,
  *   격자 갤러리(1:1 크롭이 의도), 2장 이상은 대상이 아니다(현행 그대로).
  */
+/**
+ * ★ 2026-10-17 템플릿 캠페인 — 장 채움 판정(순수 · 뷰어가 장 클래스를 계산 · 장 설정 깃발은 편집기 저장이 지우므로 쓰지 않는다).
+ *   'fill' = 섹션 하나라도 fit:'grow' 를 가진 DM 의 장 중 grow 섹션이 있는 장 · 'center' = 같은 DM 의 grow 없는 장 · null = 현행(장 채움 아님).
+ */
+export function slideFillClassOf(page: SlidePage, dmHasFit: boolean): 'fill' | 'center' | null {
+  if (!dmHasFit) return null;
+  const secs = Array.isArray(page?.sections) ? page.sections : [];
+  return secs.some((s: any) => s?.fit === 'grow') ? 'fill' : 'center';
+}
+
 export function isSwipeImagePage(page: SlidePage): boolean {
   const secs = Array.isArray(page?.sections) ? page.sections : [];
   if (secs.length !== 1) return false;

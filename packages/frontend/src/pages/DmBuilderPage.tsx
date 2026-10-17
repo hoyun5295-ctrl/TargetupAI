@@ -1045,7 +1045,8 @@ export default function DmBuilderPage() {
       // ★ 2026-10-17 단계 모달(스위치 켠 회사) — 관문(고객 데이터)을 먼저 보고, 질문이 0 이어도 만들기 단계 한 장(금액 확인)
       if (g?.stepsEnabled && g.plan) {
         if (customerGate.isEmpty) { setShowDataGate(true); return; }
-        setLineSteps({ line: t, reads, plan: g.plan, fallbackCost: g.stepsCost });
+        // ★ 2026-10-17 템플릿 캠페인(스위치 켠 회사) — 고르기 판부터(추천 · 템플릿마다 재료 단계는 서버 판정)
+        setLineSteps({ line: t, reads, plan: g.plan, fallbackCost: g.stepsCost, ...(g.templatesEnabled && g.templatePlans ? { templates: { ranks: g.templates, plans: g.templatePlans } } : {}) });
         return;
       }
       setLineValues({});

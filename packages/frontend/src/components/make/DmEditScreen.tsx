@@ -25,6 +25,7 @@ import { DM_TREATMENTS } from '../../utils/dm-treatment';
 import { DM_DESIGN_THEMES } from '../../utils/dm-themes';
 import { DM_FONT_CATALOG } from '../../utils/dm-tokens';
 import { SECTION_META, styleVariantLabel, type Section } from '../../utils/dm-section-defaults';
+import { isLineTemplateDm } from '../../utils/one-line';   // ★ 2026-10-17 템플릿 DM 표식
 import { CONFIRM_CREDIT_COSTS } from '../../constants/credit';
 import { useToast } from '../ToastProvider';
 
@@ -233,12 +234,14 @@ function PageChips({ onRemove }: { onRemove: (idx: number) => void }) {
   const cur = useDmBuilderStore((s) => s.currentPageIndex);
   const selectPage = useDmBuilderStore((s) => s.selectPage);
   const addPage = useDmBuilderStore((s) => s.addPage);
+  // ★ 2026-10-17 템플릿 DM = 장이 템플릿 기승전결이라 장 추가를 숨긴다(장 안 블록 편집은 그대로)
+  const templateDm = useDmBuilderStore((s) => isLineTemplateDm(s.templateId));
   return (
     <div className="flex flex-wrap gap-1.5 mb-3">
       {pages.map((p, i) => (
         <button key={p.id} type="button" onClick={() => selectPage(i)} className={`h-7 px-2.5 rounded-lg text-[12px] font-semibold ${i === cur ? 'bg-violet-600 text-white' : 'bg-white text-slate-500 hover:text-slate-900'}`}>{i + 1}장</button>
       ))}
-      <button type="button" onClick={() => addPage()} className="h-7 px-2.5 rounded-lg text-[12px] font-semibold border border-dashed border-slate-300 text-slate-500 hover:text-slate-900 inline-flex items-center gap-1"><Plus className="w-3.5 h-3.5" />장 추가</button>
+      {!templateDm && <button type="button" onClick={() => addPage()} className="h-7 px-2.5 rounded-lg text-[12px] font-semibold border border-dashed border-slate-300 text-slate-500 hover:text-slate-900 inline-flex items-center gap-1"><Plus className="w-3.5 h-3.5" />장 추가</button>}
       {pages.length > 1 && (
         <button type="button" onClick={() => onRemove(cur)} className="h-7 px-2.5 rounded-lg text-[12px] font-semibold text-slate-500 hover:text-rose-700 hover:bg-rose-50 inline-flex items-center gap-1" data-make="slides-remove-page"><Trash2 className="w-3.5 h-3.5" />{cur + 1}장 빼기</button>
       )}
@@ -365,6 +368,7 @@ function DmGlobalPanel({ onValidate }: { onValidate: () => void }) {
   const catalogView = useDmBuilderStore((s) => s.catalogView);
   const setLayoutMode = useDmBuilderStore((s) => s.setLayoutMode);
   const setCatalogView = useDmBuilderStore((s) => s.setCatalogView);
+  const templateDm = useDmBuilderStore((s) => isLineTemplateDm(s.templateId));
   const setOpenModal = useDmBuilderStore((s) => s.setOpenModal);
   const loadDm = useDmBuilderStore((s) => s.loadDm);
   const [companyKit, setCompanyKit] = useState<Record<string, any> | null>(null);
@@ -452,7 +456,8 @@ function DmGlobalPanel({ onValidate }: { onValidate: () => void }) {
         </div>
       </div>
       <PanelBlock title="보기 방식">
-        <Segmented value={view} onChange={setView} options={[{ value: 'scroll', label: '세로로 길게' }, { value: 'slides', label: '옆으로 넘기기' }, { value: 'catalog', label: <span className="inline-flex items-center gap-1"><BookOpen className="w-3.5 h-3.5" />책처럼(카탈로그)</span> }]} />
+        {/* ★ 2026-10-17 템플릿 DM = 카탈로그(책) 보기 숨김 · 세로 ↔ 옆으로 = 템플릿 장 키로 다시 묶기 */}
+        <Segmented value={view} onChange={setView} options={[{ value: 'scroll', label: '세로로 길게' }, { value: 'slides', label: '옆으로 넘기기' }, ...(templateDm ? [] : [{ value: 'catalog' as const, label: <span className="inline-flex items-center gap-1"><BookOpen className="w-3.5 h-3.5" />책처럼(카탈로그)</span> }])]} />
       </PanelBlock>
       <PanelBlock title="버전 기록" hint="남긴 모습으로 되돌릴 수 있어요" right={<button type="button" onClick={() => { void snapshot(); }} disabled={busy === 'snap'} className="text-[11.5px] font-semibold text-violet-700 hover:text-violet-800 disabled:opacity-40">{busy === 'snap' ? '남기는 중' : '지금 모습 남기기'}</button>}>
         {versions === null ? <Loader2 className="w-4 h-4 animate-spin text-slate-400" /> : versions.length === 0 ? (

@@ -110,6 +110,54 @@ export function hasConcreteBenefit(line: string): boolean {
     || anyInContext(t, KOR_WON_RE, moneyIsBenefit);
 }
 
+/** (순수) 한 줄을 구획으로 나눈다(「,」 뒤가 숫자면 금액 자릿점 · 「/」는 앞뒤가 띄어졌을 때만 · 주소 속 「/」를 지키려고) */
+export function lineSegments(line: string): string[] {
+  return String(line || '').split(/,(?!\d)|[·|\n]|\s\/\s/).map((s) => s.trim()).filter(Boolean);
+}
+
+/** 혜택이 아니라는 말(「무료배송 제외」 · 「쿠폰 적용 불가」) — 한 줄 어디든 있으면 미리 채우지 않는다 */
+const BENEFIT_NEGATION_RE = /제외|불가|미적용|불포함|미포함|해당\s*없|적용\s*안|되지\s*않|없음|없어|없습니다|아님|아닙니다|아닌|빼고|별도|종료|끝났|끝납|마감됐|마감되었|중단/;
+/** 혜택을 좁히는 말(「5만원 이상 구매 시」 · 「첫 구매」 · 「선착순 10명」 · 「VIP 고객만」) — 한 줄 어디든 있으면 미리 채우지 않는다 */
+const BENEFIT_CONDITION_RE = /이상|이하|부터|미만|구매\s*시|주문\s*시|결제\s*시|하면|하시면|하신|첫\s*구매|신규|회원|가입|선착순|한정|\d+\s*(?:명|분|개|매)|조건|일부|대상|단\s|전용|[가-힣A-Za-z)]만(?:\s|$|[,.!])/;
+/** 수식어 — 한 줄에 있으면 미리 채운 글에도 있어야 한다(「최대」가 빠지면 최대 할인율이 확정 할인율로 바뀐다) */
+const BENEFIT_MODIFIERS = ['최대', '최소', '추가', '즉시'] as const;
+/**
+ * 미리 채울 수 있는 혜택 꼴(허용 목록 · 전체 일치) — 수식어(최대 · 추가 · 즉시)는 붙은 것 전부.
+ *   N% 할인 · N원 할인/쿠폰/적립 · N+N · ○○ 증정 · 무료배송 · 반값. 이 밖의 꼴은 미리 채우지 않는다.
+ */
+const BENEFIT_SHAPES: readonly RegExp[] = [
+  // 앞 경계 = 숫자 · 점 · 쉼표 · 만 · 천 뒤(사이 공백 포함)에서 시작하지 않는다(「1만 5,000원」 · 「1천 500원」의 뒷부분만 맞추지 않게 · 7R)
+  /(?:(?:최대|최소|추가|즉시)\s*)*(?<![\d.,만천]\s*)\d{1,2}(?:\.\d)?\s*(?:%|퍼센트)\s*(?:할인|세일|off|dc)/gi,
+  /(?:(?:최대|최소|추가|즉시)\s*)*(?<![\d.,만천]\s*)\d[\d,]*(?:\.\d+)?\s*(?:만\s*(?:\d+\s*천\s*)?|천\s*)?원\s*(?:할인|쿠폰|적립)/g,
+  /(?<!\d)\d\s*\+\s*\d(?!\d)/g,
+  /(?<![가-힣A-Za-z0-9])[가-힣A-Za-z0-9]{1,12}\s*증정/g,
+  /무료\s*배송/g,
+  /반값/g,
+];
+
+/**
+ * (순수) 템플릿 혜택 단계의 **제안 칩** — 기본값이 아니다(사람이 눌러야 칸이 채워진다 · 생성은 답만 읽는다 · Codex 1017 템플릿 1R high · 5R).
+ * ★ 4R — 차단 목록을 늘리던 추출을 **허용 목록**으로 뒤집었다(메모리 「허용 목록」 원칙): 한 줄에 부정 · 좁히는 말이 없고,
+ *   허용 꼴(BENEFIT_SHAPES)에 맞는 자리가 한 줄 전체에 **딱 하나**이며, 한 줄의 수식어가 그 자리에 모두 들어 있을 때만 그 글자 그대로.
+ *   그 밖은 비운다(사람이 적는다 · 안전 쪽 실패).
+ */
+export function lineBenefitPrefill(line: string): string | null {
+  const t = String(line || '');
+  if (BENEFIT_NEGATION_RE.test(t) || BENEFIT_CONDITION_RE.test(t)) return null;
+  const hits: Array<{ s: number; e: number; text: string }> = [];
+  for (const re of BENEFIT_SHAPES) {
+    re.lastIndex = 0;
+    for (const m of t.matchAll(re)) hits.push({ s: m.index ?? 0, e: (m.index ?? 0) + m[0].length, text: m[0].trim() });
+  }
+  // 겹치는 자리(「텀블러 증정」 안의 숫자 등)는 긴 쪽 하나
+  hits.sort((a, b) => a.s - b.s || b.e - a.e);
+  const spans = hits.filter((h, i) => !hits.some((o, j) => j !== i && o.s <= h.s && o.e >= h.e && (o.e - o.s > h.e - h.s || j < i)));
+  if (spans.length !== 1) return null;
+  const out = spans[0].text;
+  if (BENEFIT_MODIFIERS.some((w) => t.includes(w) && !out.includes(w))) return null;
+  return out.length <= 30 ? out : null;
+}
+
 /** 한 줄이 행사(혜택이 있을 법한 알림)를 말하는가. */
 export function hasPromotionIntent(line: string): boolean {
   const t = String(line || '');

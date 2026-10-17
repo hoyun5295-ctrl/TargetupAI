@@ -110,6 +110,10 @@ import { resolveLineMallCards, placeLineMallCards, linePriceNotes, linePinnedPri
 import { resolveIntegrationActor } from '../utils/integration-scope';
 // ★ 2026-10-17 한 줄 단계 모달(설계서 docs/2026-10-17-oneline-steps-modal-design.md §3 · §4-3) — 단계 답 · 직접 상품 · 대표 사진 · 버튼 주소 · 한 줄 완성 금액
 import { oneLineStepsEnabled, buildLineStepsEventText } from '../utils/one-line-steps';
+import { getLineTemplate, lineTemplatesEnabled } from '../utils/design-core/line-templates';   // ★ 2026-10-17 템플릿 캠페인
+import { resolveLinePage, isLinePageError, type LinePageMaterial } from '../utils/line-template-page';
+import { draftLineTemplate, buildLineTemplateEmail, lineTemplateBrand, lineTemplateManual, LineTemplateError } from '../utils/line-template-run';
+import { runInCreditBundle } from '../utils/ai-credit-context';
 import { prepareLineStepsRequest, isLineStepsReqError, lineStepsKeyFor, settleLineStepsPrice, resolveLineStepsDelivery, lineStepsAttemptCharged, lineStepsLineLockKey, lineStepsCollected } from '../utils/line-steps-context';
 import { placeLineHero, placeLineLink } from '../utils/line-materials';
 import { getBrandBasicInfo } from '../utils/brand-basic-info';
@@ -1189,6 +1193,10 @@ router.post('/ai/generate-sections', async (req: Request, res: Response) => {
       ? prepareLineStepsRequest(req.body, auth.companyId, prompt, stepsReads === 'invalid' ? undefined : stepsReads, stepsNow, lineOn && oneLineStepsEnabled(auth.companyId))
       : undefined;
     if (isLineStepsReqError(steps)) return res.status(steps.status).json({ success: false, error: steps.error, code: steps.code });
+    // ★ 2026-10-17 템플릿 캠페인 — 템플릿 칸이 온 단계 요청만(스위치 밖인데 오면 400)
+    const tplSel = steps && steps.body.template ? steps.body.template : null;
+    const tplDef = tplSel ? getLineTemplate(tplSel.id) : null;
+    if (tplSel && !lineTemplatesEnabled(auth.companyId, true)) return res.status(400).json({ success: false, error: '이 기능은 아직 열리지 않았습니다. 화면을 새로 고친 뒤 다시 시도해 주세요.', code: 'FEATURE_DISABLED' });
     const lineFacts = oneLineReq
       ? (steps ? (steps.body.facts.benefit !== undefined ? { benefit: steps.body.facts.benefit } : undefined) : sanitizeLineFacts(req.body?.facts))
       : undefined;
@@ -1214,8 +1222,9 @@ router.post('/ai/generate-sections', async (req: Request, res: Response) => {
       : (lineOn && lineFacts ? buildLineEventText(linePrompt, lineFacts) : linePrompt);
     const attemptToken = lineOn && isValidAttemptToken(req.body?.attempt_token) ? String(req.body.attempt_token) : null;
     // ★ 2026-10-17 단계 요청 = 한 줄 완성 원장 키 · 생성 입력 전부를 지문에(직접 상품 전부 · 대표 사진 · 주소 답)
+    // ★ 템플릿 요청 = 템플릿 · 배치 · 페이지도 지문에(1017 요청 키는 그대로)
     const stepsPayload = steps
-      ? { prompt: genPrompt, scenario: scenario || null, isAd, eventText, products: lineProductsKey(lineProducts || []), manual: steps.body.manual, hero: steps.hero, link: steps.body.facts.link ?? null }
+      ? { prompt: genPrompt, scenario: scenario || null, isAd, eventText, products: lineProductsKey(lineProducts || []), manual: steps.body.manual, hero: steps.hero, link: steps.body.facts.link ?? null, ...(tplSel ? { template: tplSel, page: steps.body.page } : {}) }
       : null;
     const idemKey = attemptToken
       ? (steps
@@ -1262,6 +1271,59 @@ router.post('/ai/generate-sections', async (req: Request, res: Response) => {
         if (lineCards.length === 0) {
           return res.status(409).json({ success: false, error: '고른 상품을 지금 쓸 수 없어요. 상품 없이 만들 수 있어요.', code: 'MALL_PRODUCTS_UNAVAILABLE', excluded: lineExcluded });
         }
+      }
+      // ★ 2026-10-17 템플릿 요청 = 범용 생성 경로와 나란한 한 벌(같은 돈 순서 · 범용 경로는 바이트 그대로).
+      //   페이지 다시 읽기(지문 대조 · 0원) → 잔액 확인 → 문구 AI 1회(묶음 · 안쪽 차감 0) + 조립 + 품질 관문 → 1회 차감 → 낸 것만 건넨다.
+      //   상품 · 사진 · 주소는 템플릿 조립이 놓는다(1017 끼우기 · 몰 이름 첨부 0).
+      if (tplDef && steps && stepsCharge) {
+        let tplPage: LinePageMaterial | null = null;
+        if (steps.body.page) {
+          const pg = await resolveLinePage(auth.companyId, steps.body.page);
+          if (isLinePageError(pg)) return res.status(pg.status).json({ success: false, error: pg.error, code: pg.code });
+          tplPage = pg;
+        }
+        const tplCost = stepsCharge.cost;
+        await checkCredit(auth.companyId, tplCost);
+        const kitRaw = (await getCompanyBrandKitRaw(auth.companyId).catch(() => null)) as Record<string, unknown> | null;
+        const brand = await lineTemplateBrand(auth.companyId, kitRaw);
+        const manualT = lineTemplateManual(steps.body.manual);
+        const tplCards: LineMallCard[] = [...lineCards, ...manualT.cards];
+        const delivery = await resolveLineStepsDelivery(auth.companyId, lineActor, steps, { channel: 'email', line: linePrompt, cards: tplCards, companyKitRaw: kitRaw });
+        const draft = await runInCreditBundle(() => draftLineTemplate({
+          template: tplDef, channel: 'email', companyId: auth.companyId, line: linePrompt, ...brand,
+          pinnedPrimary: linePinnedPrimary(kitRaw), cards: tplCards, textProducts: manualT.textProducts, heroUpload: steps.hero, page: tplPage,
+          benefitAnswer: steps.body.facts.benefit, periodEnd: steps.body.facts.periodEnd ?? null,
+          link: steps.body.facts.link ?? tplPage?.url ?? delivery.link ?? null,
+        }, { userId: auth.userId, source: 'email-ai-generate' }));
+        const em = buildLineTemplateEmail(draft);
+        const tplOutcome = await deductCreditOutcome({ companyId: auth.companyId, cost: tplCost, source: stepsCharge.source, createdBy: auth.userId, ...(idemKey ? { idempotencyKey: idemKey } : {}), throwOnInsufficient: true });
+        if (!lineStepsCollected(tplOutcome)) {
+          console.log(`[CREDIT][MISS] one-line template email 결과 안 건넴 company=${auth.companyId} key=${idemKey || 'none'} cost=${tplCost} outcome=${tplOutcome}`);
+          return res.status(503).json({ success: false, error: '크레딧 기록을 확인하지 못해 결과를 건네지 않았어요. 잠시 후 다시 시도해 주세요.', code: 'CREDIT_STATE_UNKNOWN' });
+        }
+        console.log(`[one-line steps] email company=${auth.companyId} cost=${tplCost} completion=${stepsCharge.completionDue} shown=${steps.body.meta.shown.join(',')} answered=${steps.body.meta.answered.join(',')} skipped=${steps.body.meta.skipped.join(',')} manual_cards=${manualT.cards.length} hero=${steps.hero ? 1 : 0} template=${tplDef.id} page=${steps.body.page ? 1 : 0}`);
+        const tplBasic = await getBrandBasicInfo(auth.companyId).catch(() => null);
+        const tplDesign = lineEmailDesign({
+          pinned: draft.t.design.primary,
+          companyArtDirection: kitRaw?.art_direction ?? null,
+          industry: String((tplBasic as any)?.industry_code || '').trim() || null,
+          preheader: em.preheader.slice(0, 90),
+        });
+        return res.json({
+          success: true,
+          data: {
+            sections: em.sections, subjects: [em.subject], preheader: em.preheader,
+            name: (brand.brandName ? `${brand.brandName} ${tplDef.label}` : tplDef.label).slice(0, 40),
+            ...(tplDesign ? { design: tplDesign } : {}),
+            one_line: {
+              enabled: true, gaps: oneLineGaps(linePrompt),
+              notes: [...lineExcluded.map((e) => `상품${e.name ? ` "${e.name}"` : ''} 제외: ${e.reason}`), ...linePriceNotes(genPrompt, lineCards)],
+              mall_cards: lineCards.length,
+              steps: { cost: tplCost, completion: stepsCharge.completionDue },
+              template: { id: tplDef.id, layout: 'page' },
+            },
+          },
+        });
       }
       // ★ 2026-10-17 단계 요청 = 한 줄 완성 금액(생성비 + 10 · 같은 날 같은 한 줄 다시 만들기 = 생성비만)
       const cost = stepsCharge ? stepsCharge.cost : getCreditCost('email-ai-generate'); // 3
@@ -1328,6 +1390,11 @@ router.post('/ai/generate-sections', async (req: Request, res: Response) => {
       if (lineLock) releaseInflight(lineLock);
     }
   } catch (err: any) {
+    // ★ 2026-10-17 템플릿 생성 실패 = 정해 둔 상태 · 문장(차감 전 · 영어 코드 노출 0)
+    if (err instanceof LineTemplateError) {
+      console.error(`[Email template] ${err.code} ${err.detail}`);
+      return res.status(err.status).json({ success: false, error: err.message, code: err.code });
+    }
     console.error('[Email /ai/generate-sections] 오류:', err);
     if (err instanceof InsufficientCreditError) {
       return res.status(402).json({ success: false, error: err.message, code: 'INSUFFICIENT_CREDIT' });

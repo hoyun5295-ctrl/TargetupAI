@@ -43,6 +43,8 @@ import { snsPublishEnabled } from '../utils/sns-constants';   // ★ 2026-09-20 
 import { oneLineFactsEnabled, oneLineGaps, sanitizeLineFacts, pickCopyCVariant, lineProductTerms, lineBenefitPercents, sanitizeLineReads, applyLineReads, oneLineAskEnabled, oneLineIntent, oneLineAskTopic, lineWithoutReads } from '../utils/one-line-facts';   // ★ 2026-10-05 한줄로 시그니처 · ★1010 몰 후보 검색어
 // ★ 2026-10-17 한 줄 단계 모달(설계서 docs/2026-10-17-oneline-steps-modal-design.md §4-1) — 판정 응답에 단계 목록(plan) · 버튼 라벨 금액
 import { buildLineStepsPlan, oneLineStepsEnabled, isLineStepsChannel, lineStepsFp } from '../utils/one-line-steps';
+import { LINE_TEMPLATES, rankLineTemplates, lineTemplatesEnabled } from '../utils/design-core/line-templates';   // ★ 2026-10-17 템플릿 캠페인
+import { buildLineTemplatePlan, type LineTemplatePlan } from '../utils/line-template-plan';
 import { loadLineStepsCompanyFacts, lineStepsFullCost } from '../utils/line-steps-context';
 import { resolveIntegrationActor } from '../utils/integration-scope';
 import { getCompanyCosts } from '../config/defaults';
@@ -1197,23 +1199,35 @@ router.post('/one-line/gaps', async (req: Request, res: Response) => {
   let stepsEnabled = false;
   let stepsCost: number | null = null;
   let plan: ReturnType<typeof buildLineStepsPlan> | null = null;
+  // ★ 2026-10-17 템플릿 캠페인 — 템플릿 스위치(한 줄 단계 스위치 안에서만) 켠 회사만 추천 · 템플릿마다 재료 단계(같은 회사 사실 · AI 0)
+  let templatesEnabled = false;
+  let templates: ReturnType<typeof rankLineTemplates> | null = null;
+  let templatePlans: Record<string, LineTemplatePlan> | null = null;
   if (companyId && isLineStepsChannel(menu) && oneLineStepsEnabled(companyId)) {
     stepsEnabled = true;
     stepsCost = lineStepsFullCost(menu).total;
+    templatesEnabled = lineTemplatesEnabled(companyId, true);
     if (line.trim()) {
       try {
         const readList = reads === 'invalid' ? undefined : reads;
         const lineFp = lineStepsFp(line, readList);
         const facts = await loadLineStepsCompanyFacts(companyId, await resolveIntegrationActor(req.user), menu, lineFp, Date.now());
-        plan = buildLineStepsPlan({
+        const planInput = {
           judged, line, typed, channel: menu, lineFp,
           mall: facts.mall, inappBlocked: facts.inappBlocked, upload: facts.upload,
           website: facts.website, mallHome: facts.mallHome, cost: facts.cost,
-        });
+        };
+        plan = buildLineStepsPlan(planInput);
+        if (templatesEnabled) {
+          templates = rankLineTemplates(typed);
+          templatePlans = Object.fromEntries(LINE_TEMPLATES.map((t) => [t.id, buildLineTemplatePlan(t, planInput)]));
+        }
       } catch (err: any) {
         // 단계 판정이 실패해도 판정 응답 자체는 지킨다(plan 없음 = 화면은 지금 흐름) · 원인은 남긴다
         console.log(`[one-line steps] plan 실패 company=${companyId} menu=${menu} err=${err?.message}`);
         plan = null;
+        templates = null;
+        templatePlans = null;
       }
     }
   }
@@ -1229,6 +1243,9 @@ router.post('/one-line/gaps', async (req: Request, res: Response) => {
     steps_enabled: stepsEnabled,
     steps_cost: stepsCost,
     plan,
+    templates_enabled: templatesEnabled,
+    templates,
+    template_plans: templatePlans,
   });
 });
 

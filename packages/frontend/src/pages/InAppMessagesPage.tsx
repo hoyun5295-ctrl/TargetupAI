@@ -605,7 +605,9 @@ export default function InAppMessagesPage() {
         const g = await fetchOneLineGaps(t, reads, 'inapp');
         if (g?.stepsEnabled && g.plan) {
           if (g.plan.block) { setShowDisplayBlock(true); return; }
-          setInappSteps({ open: { line: t, reads, plan: g.plan, fallbackCost: g.stepsCost }, channel: channelOverride || channel || 'web' });
+          // ★ 2026-10-17 템플릿 캠페인 — 웹(자사몰) 인앱만(center_modal 블록 = 웹 SDK 기준 · 앱 SDK 표시는 미검증이라 앱은 지금 단계 흐름 그대로)
+          const inappCh = channelOverride || channel || 'web';
+          setInappSteps({ open: { line: t, reads, plan: g.plan, fallbackCost: g.stepsCost, ...(inappCh === 'web' && g.templatesEnabled && g.templatePlans ? { templates: { ranks: g.templates, plans: g.templatePlans } } : {}) }, channel: inappCh });
           return;
         }
       } finally {

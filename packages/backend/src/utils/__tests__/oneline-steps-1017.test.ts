@@ -295,7 +295,7 @@ describe('라우트 소스 계약 — 돈 순서', () => {
     expect(src).toContain('if (stepsLockHeld) releaseInflight(stepsLock);');
     const settle = at(src, "await settleLineStepsPrice(steps, companyId, 'dm', stepsNow)");
     const mall = at(src, 'await resolveLineMallCards(companyId, lineActor, lineProducts)');
-    const gen = at(src, 'const r = await oneShotGenerate({');
+    const gen = at(src, 'const r = tplDef ? await generateTemplateDm() : await oneShotGenerate({');
     const deduct = at(src, 'outcome = await deductCreditOutcome({ companyId, cost: genCost, source: genSource');
     expect(charged).toBeLessThan(settle);
     expect(settle).toBeLessThan(mall);

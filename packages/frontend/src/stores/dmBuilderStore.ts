@@ -15,6 +15,7 @@ import axios from 'axios';
 import { attachCreditInterceptor } from '../lib/credit-interceptor';
 import type { Section, SectionType, SectionProps } from '../utils/dm-section-defaults';
 import { createSection as newSection, normalizeOrder, isMaxCountExceeded, SECTION_META } from '../utils/dm-section-defaults';
+import { isLineTemplateDm, regroupLineTemplatePages } from '../utils/one-line';   // ★ 2026-10-17 템플릿 캠페인 배치 전환
 
 // ────────────── 타입 ──────────────
 
@@ -515,7 +516,9 @@ export const useDmBuilderStore = create<DmBuilderState>((set, get) => ({
       // slides 전환: 아직 한 페이지면 자동 분할, 이미 여러 페이지로 편집했으면 사용자 구조 보존
       if (layoutMode === 'slides') {
         if (s.pages.length > 1) return markDirty({ layoutMode });
-        const pages = splitSectionsForMode(allSections, 'slides').map((secs) => ({ id: newPageId(), sections: normalizeOrder(secs) }));
+        // ★ 2026-10-17 템플릿 DM = 템플릿 장 키(tpl_slot)로 다시 묶는다(기승전결 장 그대로 · 서버 호출 0) · 그 밖 = 범용 나누기
+        const tplGroups = isLineTemplateDm(s.templateId) ? regroupLineTemplatePages(allSections) : null;
+        const pages = (tplGroups ?? splitSectionsForMode(allSections, 'slides')).map((secs) => ({ id: newPageId(), sections: normalizeOrder(secs) }));
         return markDirty({ layoutMode, pages, currentPageIndex: 0, sections: pages[0]?.sections || [], selectedSectionId: null });
       }
       // scroll 전환: 전체 섹션을 한 페이지로 병합 · 카탈로그는 slides 위에서만 살므로 함께 내린다

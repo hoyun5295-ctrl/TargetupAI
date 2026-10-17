@@ -19,7 +19,7 @@ import { resolveSections } from './dm-variable-resolver';
 import { prepareFieldMappings } from '../messageUtils';
 import type { Section } from './dm-section-registry';
 import type { DmBrandKit } from './dm-tokens';
-import { expandSlidePagesForSwipe, isSwipeImagePage } from './dm-slides-expand';
+import { expandSlidePagesForSwipe, isSwipeImagePage, slideFillClassOf } from './dm-slides-expand';
 // ★ 2026-09-15 카탈로그 보기(PC 책 펼침) — 게이트·og 메타·viewport·CSS/HTML/스크립트 조각. 조건 밖 DM 출력은 바이트 동일.
 import { isCatalogDm, isCatalogEnabled, catalogFirstImageUrl, CATALOG_VIEWPORT_META, renderCatalogOgMeta, renderCatalogCss, renderCatalogHtml, renderCatalogScript, renderCatalogMobileGridButton } from './dm-viewer-catalog';
 // ★ 2026-09-16 장 넘김 효과(settings.effect · 밀어내기 기본 = 미삽입 = 현행 바이트 동일)
@@ -376,6 +376,7 @@ function renderPagesHtml(
 
   // ★ 2026-07-13 디자인 3.0 — brand_kit.art_direction 영속분 실주입(옛 Task 7 완결).
   //   미설정 DM = tone 기반 정규화 기본값... 이 아니라 중립 기본과 동일 출력을 위해 raw 없으면 null 정규화(기존 발행물 무변화).
+  const dmHasFit = allSections.some((s: any) => s?.fit === 'grow');
   const adRaw = (brandKit as any)?.art_direction || null;
   const artDirection = adRaw ? normalizeArtDirection(adRaw, '', brandKit?.tone) : normalizeArtDirection(null, '');
   const pagesHtml = pages.map((page, i) => {
@@ -389,7 +390,9 @@ function renderPagesHtml(
     });
     // ★ 2026-09-14 (박성용 접수) 슬라이드 모드에서 이미지 1장짜리 장 = 무대(dm-page--stage). 판정 = dm-slides-expand 순수 함수.
     const stage = mode === 'slides' && isSwipeImagePage(page as any);
-    return `<section class="dm-page${stage ? ' dm-page--stage' : ''}" data-page-idx="${i}" data-page-id="${escapeHtml(page.id)}">${secHtml}</section>`;
+    // ★ 2026-10-17 템플릿 캠페인 장 채움 — fit 섹션이 있는 DM 의 슬라이드만(그 밖 = 클래스 0 · 현행 출력 그대로)
+    const fill = mode === 'slides' && !stage ? slideFillClassOf(page as any, dmHasFit) : null;
+    return `<section class="dm-page${stage ? ' dm-page--stage' : ''}${fill === 'fill' ? ' dm-page--fill' : fill === 'center' ? ' dm-page--fill dm-page--center' : ''}" data-page-idx="${i}" data-page-id="${escapeHtml(page.id)}">${secHtml}</section>`;
   }).join('');
 
   const tokensCss = renderDmTokensCss(brandKit);
@@ -414,7 +417,7 @@ html,body{height:100%;margin:0;overflow:hidden;touch-action:pan-y}
 .dm-page--stage .dm-gal-grid{display:flex!important;flex-direction:column;align-items:center}
 .dm-page--stage .dm-gal-grid img{width:auto!important;height:auto!important;max-width:100%;max-height:calc(var(--dm-vh,100vh) - 68px);object-fit:contain}
 .dm-page--stage .dm-gal-caption{text-align:center}
-/* 아래 띠(56px · 열 폭 안) = 진행 막대(현재/전체) + 점 스트립(5px · 가로 스크롤 · 활성 점 가운데) + 카운터. 이미지 위에 아무것도 얹지 않는다(제품 코드 글자를 가리던 우상단 카운터 폐기). */
+${dmHasFit ? FILL_CSS : ''}/* 아래 띠(56px · 열 폭 안) = 진행 막대(현재/전체) + 점 스트립(5px · 가로 스크롤 · 활성 점 가운데) + 카운터. 이미지 위에 아무것도 얹지 않는다(제품 코드 글자를 가리던 우상단 카운터 폐기). */
 .dm-page-dots{position:fixed;left:0;right:0;bottom:0;height:56px;max-width:var(--dm-mobile-max,430px);margin:0 auto;display:flex;align-items:center;justify-content:center;background:linear-gradient(to top,rgba(255,255,255,0.96) 70%,rgba(255,255,255,0));z-index:50}
 .dm-page-bar{position:absolute;left:16px;right:16px;top:0;height:2px;background:rgba(0,0,0,0.08);border-radius:1px;overflow:hidden}
 .dm-page-bar-in{height:100%;width:0;background:var(--dm-primary);transition:width 200ms}
@@ -1097,6 +1100,31 @@ function resolvePagesMode(dm: any, pages: DmPageGroup[]): SectionsLayoutMode | n
   if (m === 'slides') return 'slides';
   return 'scroll';
 }
+
+/**
+ * ★ 2026-10-17 템플릿 캠페인 장 채움 CSS — fit 섹션이 있는 DM 의 슬라이드에만 싣는다(옛 DM = 이 블록 0 · 출력 바이트 무변경).
+ */
+const FILL_CSS = `/* ★ 2026-10-17 템플릿 캠페인 장 채움: 장 = 세로 flex · 아래 56px(띠 자리) · grow 섹션이 남은 높이(최소 140px) · grow 없는 장 = 내용 가운데 + 꼬리말 아래.
+   :has() 금지(옛 안드로이드 웹뷰). 섹션 인라인 높이(min-height px)는 grow 안에서만 푼다(옛 DM 은 클래스가 없어 무관). */
+.dm-page--fill{display:flex;flex-direction:column;padding-bottom:56px;box-sizing:border-box}
+.dm-page--fill>.dm-section-wrap{flex:0 0 auto}
+.dm-page--fill>.dm-section-wrap[data-fit="grow"]{flex:1 1 0;min-height:140px;display:flex;flex-direction:column}
+.dm-page--fill>.dm-section-wrap[data-fit="grow"]>.dm-section{flex:1 1 auto;display:flex;flex-direction:column;min-height:0!important}
+.dm-page--fill [data-fit="grow"] .dm-hero{justify-content:center}
+.dm-page--fill [data-fit="grow"] .dm-hero>div:last-child{flex:1 1 auto;min-height:0!important}
+.dm-page--fill [data-fit="grow"][data-treatment="split"] .dm-hero>div:last-child{flex:0 0 auto}
+.dm-page--fill [data-fit="grow"][data-treatment="split"] .dm-hero>img{flex:1 1 0;min-height:120px;height:auto;object-fit:contain!important;background:#fff}
+.dm-page--fill [data-fit="grow"] .dm-pc-items{flex:1 1 auto;align-content:stretch;min-height:0}
+.dm-page--fill [data-fit="grow"] .dm-pc-items>*{display:flex!important;flex-direction:column}
+.dm-page--fill [data-fit="grow"] .dm-pc-items img{flex:1 1 0;height:auto!important;min-height:96px}
+.dm-page--fill [data-fit="grow"] .dm-pc-items>*>div{flex:0 0 auto!important}
+.dm-page--fill [data-fit="grow"][data-treatment="full_bleed"] .dm-hero>div:last-child{justify-content:flex-end!important;padding-bottom:40px!important}
+.dm-page--center{background:var(--dm-bg);background:color-mix(in srgb, var(--dm-primary) 7%, var(--dm-bg))}
+.dm-page--center>.dm-section-wrap[data-section-type="text_card"]>.dm-section,.dm-page--center>.dm-section-wrap[data-section-type="cta"]>.dm-section{background:transparent!important}
+.dm-page--center>.dm-section-wrap:first-child{margin-top:auto}
+.dm-page--center>.dm-section-wrap:last-child{margin-bottom:auto}
+.dm-page--center>.dm-section-wrap[data-section-type="footer"]{margin-top:auto;margin-bottom:0}
+`;
 
 export function renderDmViewerHtml(dm: any, trackApiBase: string): string {
   const pages = parsePages(dm);

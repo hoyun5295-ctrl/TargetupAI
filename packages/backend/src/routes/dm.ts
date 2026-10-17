@@ -49,6 +49,9 @@ import { resolveLineMallCards, linePriceNotes, linePinnedPrimary, mergeLineBrand
 import { resolveIntegrationActor } from '../utils/integration-scope';
 // ★ 2026-10-17 한 줄 단계 모달(설계서 docs/2026-10-17-oneline-steps-modal-design.md §3 · §4-3) — 단계 답 · 직접 상품 · 대표 사진 · 버튼 주소 · 한 줄 완성 금액
 import { oneLineStepsEnabled, buildLineStepsEventText } from '../utils/one-line-steps';
+import { getLineTemplate, lineTemplatesEnabled } from '../utils/design-core/line-templates';   // ★ 2026-10-17 템플릿 캠페인
+import { resolveLinePage, isLinePageError, type LinePageMaterial } from '../utils/line-template-page';
+import { draftLineTemplate, buildLineTemplateDm, lineTemplateBrand, lineTemplateDmMarker, lineTemplateManual, LineTemplateError } from '../utils/line-template-run';
 import { prepareLineStepsRequest, isLineStepsReqError, lineStepsKeyFor, settleLineStepsPrice, resolveLineStepsDelivery, lineStepsAttemptCharged, lineStepsLineLockKey, lineStepsCollected, lineStepsAttemptKeys } from '../utils/line-steps-context';
 import { recallLineDraft, rememberLineDraft, forgetLineDraft, deleteLineDraftWithRetry } from '../utils/line-draft-memo';   // ★ 2026-10-10 Codex 1R
 // ★ 2026-09-27 만들기 개편 S6 — 첫 발행 잠금·발행비 판정은 CT 가 소유(두 발행 문이 같은 판정)
@@ -1039,6 +1042,10 @@ dmRouter.post('/ai/one-shot-generate', async (req: any, res: any) => {
     if (isLineStepsReqError(steps)) return res.status(steps.status).json({ success: false, error: steps.error, code: steps.code });
     // 단계 요청은 결과 화면 착지 경로만(서버 초안 → 차감 → 낸 것만 건넨다 · 미과금 결과 0 · 10-10 계약 그대로)
     if (steps && req.body?.land !== 'result') return res.status(400).json({ success: false, error: '단계에서 받은 답을 다시 확인해 주세요.', code: 'LINE_STEPS_INVALID' });
+    // ★ 2026-10-17 템플릿 캠페인 — 템플릿 칸이 온 단계 요청만(스위치 = 한 줄 단계 스위치 안에서만 · 밖인데 오면 400 · 조용히 버리지 않는다)
+    const tplSel = steps && steps.body.template ? steps.body.template : null;
+    const tplDef = tplSel ? getLineTemplate(tplSel.id) : null;
+    if (tplSel && !lineTemplatesEnabled(companyId, true)) return res.status(400).json({ success: false, error: '이 기능은 아직 열리지 않았습니다. 화면을 새로 고친 뒤 다시 시도해 주세요.', code: 'FEATURE_DISABLED' });
     const lineFacts = oneLineReq
       ? (steps ? (steps.body.facts.benefit !== undefined ? { benefit: steps.body.facts.benefit } : undefined) : sanitizeLineFacts(req.body?.facts))
       : undefined;
@@ -1085,8 +1092,9 @@ dmRouter.post('/ai/one-shot-generate', async (req: any, res: any) => {
     const attemptToken = lineOn && isValidAttemptToken(req.body?.attempt_token) ? String(req.body.attempt_token) : null;
     // ★ 2026-10-10 고른 상품을 지문에 넣는다(상품만 바꿔 같은 토큰으로 보내면 새 차감) · 상품 칸이 없는 요청은 키가 지금과 같다.
     // ★ 2026-10-17 단계 요청 = 한 줄 완성 원장 키(회사 · 채널 · KST 날짜 · 한 줄 지문 · 시도 지문) · 생성 입력 전부를 지문에(직접 상품 전부 · 대표 사진 · 주소 답)
+    // ★ 템플릿 요청 = 템플릿 · 배치 · 페이지(주소 + 그대로 쓰기 지문)도 지문에(바꾸면 새 시도 · 1017 요청 키는 그대로)
     const stepsPayload = steps
-      ? { prompt, eventText, scenario: scenario || null, products: lineProductsKey(lineProducts || []), manual: steps.body.manual, hero: steps.hero, link: steps.body.facts.link ?? null }
+      ? { prompt, eventText, scenario: scenario || null, products: lineProductsKey(lineProducts || []), manual: steps.body.manual, hero: steps.hero, link: steps.body.facts.link ?? null, ...(tplSel ? { template: tplSel, page: steps.body.page } : {}) }
       : null;
     const idemKey = attemptToken
       ? (steps
@@ -1107,6 +1115,8 @@ dmRouter.post('/ai/one-shot-generate', async (req: any, res: any) => {
     let lineChargeFailed = false;
     /** ★ 2026-10-17 단계 요청의 금액 결과(응답 · 로그용) */
     let stepsResult: { cost: number; completion: boolean } | null = null;
+    /** ★ 템플릿 요청이 실제로 낸 배치(슬라이드가 3장 미만이면 한 페이지) */
+    let tplLayout: 'slides' | 'page' | null = null;
     try {
       if (stepsLock) {
         if (!tryAcquireInflight(stepsLock)) return res.status(409).json({ success: false, error: '같은 한 줄로 지금 만드는 중이에요. 완성되면 다시 시도해 주세요.', code: 'IN_FLIGHT' });
@@ -1161,6 +1171,13 @@ dmRouter.post('/ai/one-shot-generate', async (req: any, res: any) => {
           return res.status(409).json({ success: false, error: '고른 상품을 지금 쓸 수 없어요. 상품 없이 만들 수 있어요.', code: 'MALL_PRODUCTS_UNAVAILABLE', excluded: lineExcluded });
         }
       }
+      // ★ 2026-10-17 템플릿 요청 = 읽은 이벤트 페이지를 서버가 다시 얻어 지문 대조(바뀌었으면 409 · AI · 차감 전 · 0원)
+      let tplPage: LinePageMaterial | null = null;
+      if (tplSel && steps && steps.body.page) {
+        const pg = await resolveLinePage(companyId, steps.body.page);
+        if (isLinePageError(pg)) return res.status(pg.status).json({ success: false, error: pg.error, code: pg.code });
+        tplPage = pg;
+      }
       // ★ 2026-10-10 회사가 저장한 주색(읽히게 보정한 값만)을 생성기 팔레트에 고정하고, 결과 킷 = 회사 킷 + AI 아트디렉션(회사 저장값이 이긴다).
       const companyKitRaw = lineOn ? ((await getCompanyBrandKitRaw(companyId).catch(() => null)) as Record<string, unknown> | null) : null;
       const pinPrimary = lineOn ? linePinnedPrimary(companyKitRaw) : null;
@@ -1171,15 +1188,35 @@ dmRouter.post('/ai/one-shot-generate', async (req: any, res: any) => {
       // ★ 2026-10-17 확정 카드 = 몰 상품(재조회 ok) + 직접 넣은 상품(사진 + 가격) · 대표 사진 · 버튼 주소는 서버가 정해 생성기가 놓는다
       const allCards: LineMallCard[] = [...lineCards, ...(steps ? steps.manualCards : [])];
       const stepsDelivery = steps ? await resolveLineStepsDelivery(companyId, lineActor, steps, { channel: 'dm', line: typedLine, cards: allCards, companyKitRaw }) : null;
+      // ★ 템플릿 요청 재료 — 대표 사진 = 올린 사진 → 페이지 표지 사진(상품 사진 대체 0) · 버튼 주소 = 답 → 읽은 페이지 → 1017 순서
+      const tplBrand = tplDef ? await lineTemplateBrand(companyId, companyKitRaw) : null;
+      // 템플릿 직접 상품 = 사진이 있으면 카드(가격 없어도) · 1017 나누기는 그대로
+      const tplManual = tplDef && steps ? lineTemplateManual(steps.body.manual) : null;
+      // 템플릿 생성 = 문구 AI 1회 + 조립 + 품질 관문(바깥 묶음 안에서 불린다 · 안쪽 차감 0 · 실패 = 던짐 = 초안 · 차감 전)
+      const generateTemplateDm = async (): Promise<Awaited<ReturnType<typeof oneShotGenerate>>> => {
+        const draft = await draftLineTemplate({
+          template: tplDef!, channel: 'dm', companyId, line: typedLine, ...tplBrand!, brandName: tplBrand!.brandName || brandName || '',
+          pinnedPrimary: pinPrimary, cards: [...lineCards, ...tplManual!.cards], textProducts: tplManual!.textProducts, heroUpload: steps!.hero, page: tplPage,
+          benefitAnswer: steps!.body.facts.benefit, periodEnd: steps!.body.facts.periodEnd ?? null,
+          link: steps!.body.facts.link ?? tplPage?.url ?? stepsDelivery?.link ?? null,
+        }, { userId: req.user?.userId, source: 'dm-ai-generate' });
+        const dmR = buildLineTemplateDm(draft, tplSel!.layout);
+        tplLayout = dmR.layout;
+        return {
+          sections: dmR.sections, pages: dmR.pages.map((pg) => pg.sections), layoutMode: dmR.layoutMode,
+          brandKit: mergeLineBrandKit(companyKitRaw, { ...dmR.brandKitPatch }, pinPrimary),
+          spec: null, scenario: null, brief: null, coverage: null,
+        } as unknown as Awaited<ReturnType<typeof oneShotGenerate>>;
+      };
       await checkCredit(companyId, genCost);
       result = await runInCreditBundle(async () => {
-        const r = await oneShotGenerate({
+        const r = tplDef ? await generateTemplateDm() : await oneShotGenerate({
           prompt: effectivePrompt, scenario, brandName, companyId, eventText,
           ...(allCards.length > 0 ? { confirmedCards: allCards } : {}),
           ...(pinPrimary ? { pinPrimary } : {}),
           ...(stepsDelivery ? { lineMaterials: { heroImageUrl: stepsDelivery.hero, linkUrl: stepsDelivery.link } } : {}),
         });
-        if (lineOn) r.brandKit = mergeLineBrandKit(companyKitRaw, r.brandKit as Record<string, unknown>, pinPrimary) as typeof r.brandKit;
+        if (lineOn && !tplDef) r.brandKit = mergeLineBrandKit(companyKitRaw, r.brandKit as Record<string, unknown>, pinPrimary) as typeof r.brandKit;
         if (!lineLand) {
           await deductCreditSafe({ companyId, cost: genCost, source: genSource, createdBy: req.user?.userId, ...(idemKey ? { idempotencyKey: idemKey } : {}) });
           return r;
@@ -1198,6 +1235,8 @@ dmRouter.post('/ai/one-shot-generate', async (req: any, res: any) => {
           brand_kit: r.brandKit,
           ai_prompt: typedLine.slice(0, 2000),
           approval_status: 'draft',
+          // ★ 템플릿 DM 표식(편집 화면 = 카탈로그 보기 · 장 추가 숨김 · 배치 전환 = 장 키로 다시 묶기)
+          ...(tplDef ? { template_id: lineTemplateDmMarker(tplDef.id) } : {}),
         } as any);
         lineDraftId = String(row.id);
         let thrown: unknown = null;
@@ -1240,7 +1279,7 @@ dmRouter.post('/ai/one-shot-generate', async (req: any, res: any) => {
     }
     // ★ 2026-10-17 단계 요청 기록(판정에 쓰지 않는다 · 「규칙이 놓친 질문」 측정용 · stdout)
     if (steps && stepsResult) {
-      console.log(`[one-line steps] dm company=${companyId} cost=${stepsResult.cost} completion=${stepsResult.completion} shown=${steps.body.meta.shown.join(',')} answered=${steps.body.meta.answered.join(',')} skipped=${steps.body.meta.skipped.join(',')} manual_cards=${steps.manualCards.length} hero=${steps.hero ? 1 : 0}`);
+      console.log(`[one-line steps] dm company=${companyId} cost=${stepsResult.cost} completion=${stepsResult.completion} shown=${steps.body.meta.shown.join(',')} answered=${steps.body.meta.answered.join(',')} skipped=${steps.body.meta.skipped.join(',')} manual_cards=${steps.manualCards.length} hero=${steps.hero ? 1 : 0}${tplSel ? ` template=${tplSel.id} layout=${tplLayout} page=${steps.body.page ? 1 : 0}` : ''}`);
     }
     return res.json({
       success: true,
@@ -1263,6 +1302,8 @@ dmRouter.post('/ai/one-shot-generate', async (req: any, res: any) => {
           mall_cards: lineCards.length,
           // ★ 2026-10-17 단계 요청 = 낸 금액 · 한 줄 완성이 붙었는가
           ...(stepsResult ? { steps: stepsResult } : {}),
+          // ★ 템플릿 요청 = 고른 템플릿 · 실제로 낸 배치
+          ...(tplSel ? { template: { id: tplSel.id, layout: tplLayout } } : {}),
         } : null,
         // ★ 2026-10-10 결과 화면 착지 초안(land:'result' 요청만)
         ...(lineDraftId ? { draft_id: lineDraftId } : {}),
@@ -1271,6 +1312,11 @@ dmRouter.post('/ai/one-shot-generate', async (req: any, res: any) => {
   } catch (err: any) {
     // ★ 2026-10-10 잔액 부족은 402(옛: 500) — 화면은 같은 문구를 보인다
     if (err instanceof InsufficientCreditError) return res.status(402).json({ success: false, error: err.message, code: 'INSUFFICIENT_CREDIT' });
+    // ★ 2026-10-17 템플릿 생성 실패 = 정해 둔 상태 · 문장(차감 전 · 초안 0)
+    if (err instanceof LineTemplateError) {
+      console.error(`[DM template] ${err.code} ${err.detail}`);
+      return res.status(err.status).json({ success: false, error: err.message, code: err.code });
+    }
     console.error('[DM AI one-shot-generate] 오류:', err.message);
     return res.status(500).json({ success: false, error: err.message || 'AI 통합 생성 실패' });
   }

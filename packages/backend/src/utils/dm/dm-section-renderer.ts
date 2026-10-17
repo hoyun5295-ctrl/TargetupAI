@@ -1457,7 +1457,9 @@ export function renderSection(section: Section, ctx: SectionRenderContext): stri
   // ★ 2026-10-14 참여 8종 완료 문구 마커 — 값 있을 때만(미지정 = 바이트 불변). 뷰어 wrapInfo가 래퍼에서 읽는다.
   const doneText = (PARTICIPATION_TYPES as readonly string[]).includes(section.type) ? doneTextOf(section.type, section.props) : '';
   const doneAttr = doneText ? ` data-success-text="${escapeHtml(doneText)}"` : '';
-  return `<div class="${wrapClasses}" data-section-id="${escapeHtml(section.id)}" data-section-type="${escapeHtml(section.type)}" data-variant="${escapeHtml(variant)}"${treatmentAttr}${doneAttr} style="${wrapStyle}">${bodyHtml}</div>`;
+  // ★ 2026-10-17 템플릿 캠페인 장 채움 — fit 이 있을 때만(미지정 = 바이트 불변). 뷰어 슬라이드 CSS(.dm-page--fill)가 읽는다.
+  const fitAttr = section.fit === 'grow' ? ' data-fit="grow"' : '';
+  return `<div class="${wrapClasses}" data-section-id="${escapeHtml(section.id)}" data-section-type="${escapeHtml(section.type)}" data-variant="${escapeHtml(variant)}"${treatmentAttr}${doneAttr}${fitAttr} style="${wrapStyle}">${bodyHtml}</div>`;
 }
 
 /** 섹션 배열 전체를 세로 스크롤로 렌더링 */

@@ -15,6 +15,9 @@
 import { Router, Request, Response } from 'express';
 import multer from 'multer';
 import { authenticate } from '../middlewares/auth';
+import { lineTemplatesEnabled } from '../utils/design-core/line-templates';   // ★ 2026-10-17 템플릿 캠페인 이벤트 페이지 읽기
+import { oneLineStepsEnabled } from '../utils/one-line-steps';
+import { lineBannerOf } from '../utils/line-template-page';
 import { resolveOwnerScope } from '../utils/owner-scope';
 import { query } from '../config/database';
 import { normalizeEventText } from '../utils/event-brief';
@@ -104,12 +107,14 @@ eventCampaignRouter.get('/materials/quote', async (req: any, res: Response) => {
 eventCampaignRouter.post('/materials/read-url', async (req: any, res: Response) => {
   const companyId = req.user?.companyId;
   if (!companyId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
-  if (!aiAutoBuildEnabled(companyId)) return res.status(403).json({ success: false, error: '이 기능은 아직 열리지 않았습니다.', code: 'FEATURE_DISABLED' });
+  // ★ 2026-10-17 템플릿 캠페인 이벤트 페이지 단계도 같은 읽기를 쓴다(템플릿 스위치 켠 회사 · AI 0 · 0원)
+  if (!aiAutoBuildEnabled(companyId) && !lineTemplatesEnabled(companyId, oneLineStepsEnabled(companyId))) return res.status(403).json({ success: false, error: '이 기능은 아직 열리지 않았습니다.', code: 'FEATURE_DISABLED' });
   const lockKey = `make-read-url:${companyId}`;
   if (!tryAcquireInflight(lockKey)) return res.status(409).json({ success: false, error: '지금 다른 주소를 읽는 중이에요. 잠시 뒤 다시 눌러 주세요.', code: 'IN_FLIGHT' });
   try {
     const r = await readBrandPage(companyId, req.body?.url);
-    return res.json({ success: true, ...r });
+    // ★ 2026-10-17 템플릿 캠페인 — 표지로 쓸 사진(생성과 같은 고르기 함수 · 화면은 이 값만 본다 · 칸 추가만)
+    return res.json({ success: true, ...r, line_banner: lineBannerOf(r) });
   } catch (err: any) {
     if (err instanceof PageReadError) return res.status(err.status).json({ success: false, error: err.message, code: err.code });
     console.error('[event-campaigns materials/read-url] 오류:', err?.message);

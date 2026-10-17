@@ -13,13 +13,14 @@
 import { createHash } from 'crypto';
 import { companyListAllows } from './sns-constants';
 import { validateAnswer } from './content-interview';
-import { oneLineFactsEnabled, oneLineGaps, hasPromotionIntent, lineProductTerms, lineMoneyAmounts, lineWithoutReads } from './one-line-facts';
+import { oneLineFactsEnabled, oneLineGaps, hasPromotionIntent, lineProductTerms, lineMoneyAmounts, lineWithoutReads, lineSegments } from './one-line-facts';
+import { getLineTemplate, type LineTemplateId, type LineLayout } from './design-core/line-templates';
 
 export type LineStepsChannel = 'dm' | 'email' | 'inapp';
 export const LINE_STEPS_CHANNELS: readonly LineStepsChannel[] = ['dm', 'email', 'inapp'];
 
-/** 단계 키 닫힌 목록(화면 부품표와 짝 테스트로 묶인다) */
-export const LINE_STEP_KEYS = ['benefit', 'product', 'hero_photo', 'link', 'period'] as const;
+/** 단계 키 닫힌 목록(화면 부품표와 짝 테스트로 묶인다) · event_page · products = 템플릿 캠페인 단계(★ 2026-10-17 · line-template-plan.ts) */
+export const LINE_STEP_KEYS = ['benefit', 'product', 'hero_photo', 'link', 'period', 'event_page', 'products'] as const;
 export type LineStepKey = (typeof LINE_STEP_KEYS)[number];
 
 /** 질문 단계 상한(만들기 단계 제외 · Harold 결정 · 설계서 §3-3) */
@@ -74,9 +75,48 @@ export function lineUrls(line: string): string[] {
   return out;
 }
 
-/** (순수) 한 줄을 상품 구획으로 나눈다(「,」 뒤가 숫자면 금액 자릿점 · 「/」는 앞뒤가 띄어졌을 때만 · 주소 속 「/」를 지키려고) */
-function lineSegments(line: string): string[] {
-  return String(line || '').split(/,(?!\d)|[·|\n]|\s\/\s/).map((s) => s.trim()).filter(Boolean);
+/**
+ * (순수) 한 줄에 적은 **마감 날짜** → 'YYYY-MM-DD'(KST · 단계 미리 채움 · 사람이 확인해야 결과에 실린다).
+ *   **허용 꼴만**(Codex 2R~5R) — 연도가 있는 날짜(「2026.10.31」 · 「2026년 10월 31일」) 또는 「10월 31일」이 한 줄에 **딱 하나**이고,
+ *   그 바로 뒤에 「까지」(사이에 「(토)」 같은 요일만 허용)가 붙어 **끝이라고 적힌 날짜**일 때만 채운다.
+ *   「부터」 · 「~」가 붙은 시작일 · 끝을 생략한 기간 · 숫자만 있는 날짜 꼴(「10.31」 · 금액 「1.5만원」과 갈리지 않음)이 남은 줄 = 비운다.
+ *   행사 끝이 아닌 기한(배송 · 도착 · 발송 · 출고 · 예약 · 접수)을 말하는 줄 · 연도를 말로 적은 줄(내년 · 「27년」) = 비운다(5R).
+ *   제안 칩일 뿐 기본값이 아니다 — 사람이 눌러야 답이 된다.
+ *   연도가 없으면 올해 · 이미 지난 날은 연말(10~12월)에 적은 1~3월만 내년(그 밖 = null) · 달력에 없거나 범위 밖 = null.
+ */
+export function lineEndDatePrefill(line: string, nowMs: number): string | null {
+  const t = String(line || '');
+  if (/배송|도착|발송|출고|예약|접수|수령/.test(t) || /내년|올해|작년|내후년|(?<!\d)\d{2}\s*년/.test(t)) return null;
+  const today = kstDayOf(nowMs);
+  const year = Number(today.slice(0, 4));
+  const found: Array<{ at: number; end: number; y: number | null; m: number; d: number }> = [];
+  const taken: Array<[number, number]> = [];
+  for (const m of t.matchAll(/(?<!\d)(\d{4})\s*(?:[.\-/]|년)\s*(\d{1,2})\s*(?:[.\-/]|월)\s*(\d{1,2})(?!\d)/g)) {
+    const at = m.index ?? 0;
+    taken.push([at, at + m[0].length]);
+    found.push({ at, end: at + m[0].length, y: Number(m[1]), m: Number(m[2]), d: Number(m[3]) });
+  }
+  for (const m of t.matchAll(/(?<!\d)(\d{1,2})\s*월\s*(\d{1,2})\s*일/g)) {
+    const at = m.index ?? 0;
+    if (taken.some(([s, e]) => at < e && at + m[0].length > s)) continue;   // 연도 있는 날짜의 일부 = 이미 읽었다(연도 보존)
+    found.push({ at, end: at + m[0].length, y: null, m: Number(m[1]), d: Number(m[2]) });
+  }
+  if (found.length !== 1) return null;
+  // 읽은 날짜를 지운 나머지에 숫자 날짜 꼴이 남아 있으면(기간의 다른 끝 · 금액 소수) 모호 = 비운다
+  let rest = t;
+  for (const [s, e] of taken) rest = rest.slice(0, s) + ' '.repeat(e - s) + rest.slice(e);   // 길이를 지키며 먼저 지운다(위치가 원문 기준)
+  rest = rest.replace(/(?<!\d)(\d{1,2})\s*월\s*(\d{1,2})\s*일/g, ' ');
+  if (/\d{1,2}\s*[./]\s*\d{1,2}/.test(rest)) return null;
+  const last = found[0];
+  // 월 · 일만 읽었는데 연도 표기(「2027년도」 · 「2027」)가 남아 있으면 연도를 놓친 것 = 제안 없음(6R)
+  if (last.y === null && /(?:19|20)\d{2}\s*(?:년|[./-])|년도/.test(rest)) return null;
+  // 끝이라고 적힌 날짜만(바로 뒤 「일」 · 요일 괄호 · 「까지」) — 「부터」 · 「~」 · 아무 표지 없음 = 비운다
+  if (!/^\s*일?\s*(?:\(\s*[월화수목금토일]\s*\)\s*)?까지/.test(t.slice(last.end))) return null;
+  const fmt = (y: number) => `${y}-${String(last.m).padStart(2, '0')}-${String(last.d).padStart(2, '0')}`;
+  let ymd = fmt(last.y ?? year);
+  const nowMonth = Number(today.slice(4, 6));
+  if (last.y === null && ymd.replace(/-/g, '') < kstDayOf(nowMs - 86_400_000) && nowMonth >= 10 && last.m <= 3) ymd = fmt(year + 1);
+  return isValidLinePeriodEnd(ymd, nowMs) ? ymd : null;
 }
 
 /**
@@ -116,7 +156,8 @@ export function lineStepsFp(line: string, reads: readonly string[] | undefined):
 
 // ─────────────── 단계 목록 ───────────────
 
-export type LineStepSkipIf = 'product_photo' | 'manual_photo' | 'product_link';
+/** page_banner = 이벤트 페이지에서 표지로 쓸 사진을 읽었으면 건너뜀(템플릿 대표 사진 단계) */
+export type LineStepSkipIf = 'product_photo' | 'manual_photo' | 'product_link' | 'page_banner';
 
 export interface LineStep {
   key: LineStepKey;
@@ -124,11 +165,22 @@ export interface LineStep {
   item?: string;
   /** 상품 단계 = 몰에서 못 찾아도 직접 넣기로 물을 수 있는가(한 줄에 그 상품의 가격 · 주소가 있음) */
   manual_ok?: boolean;
-  /** 직접 넣기 칸에 미리 채울 한 줄 값(사용자가 친 글자) */
+  /** 직접 넣기 칸에 미리 채울 한 줄 값(사용자가 친 글자) · event_page = 한 줄에 친 주소(열자마자 읽는다) */
   price?: number;
   url?: string;
   /** 화면이 해석하는 조건 하나(서버가 정한 규칙 · 화면은 사본을 두지 않는다) */
   skip_if?: LineStepSkipIf;
+  /** 템플릿 단계 — 필수(건너뛰기 없음 · 미루지 않음) */
+  required?: boolean;
+  /**
+   * 템플릿 단계 — 한 줄에서 찾은 값(혜택 문구 · 마감 날짜)의 **제안 칩**. 칸에 기본값으로 넣지 않는다 — 사람이 칩을 눌러야 채워지고
+   * 필수 단계는 고르기 전까지 다음으로 못 간다(Codex 1017 템플릿 5R · 추출값이 기본값으로 확정되던 구조를 뺐다).
+   */
+  suggest?: string;
+  /** products 단계 — 한 줄 낱말 탭 · 담을 개수(채널 상한) · 낱말에 붙은 가격 · 주소(직접 넣기 미리 채움) */
+  terms?: Array<{ item: string; price?: number; url?: string }>;
+  min?: number;
+  max?: number;
 }
 
 export interface LineStepsPlanInput {
@@ -244,9 +296,16 @@ export interface LineStepsBody {
   heroImage: string | null;
   expectedCost: number | null;
   meta: { shown: string[]; answered: string[]; skipped: string[] };
+  /** ★ 템플릿 캠페인 — 고른 템플릿 · 배치(없으면 1017 단계 생성 그대로) */
+  template: { id: LineTemplateId; layout: LineLayout } | null;
+  /** ★ 템플릿 캠페인 — 읽은 이벤트 페이지 주소 + 「이 문구 그대로 쓰기」를 켠 카드 지문(서버가 다시 읽어 대조한다) */
+  page: { url: string; licensedHashes: string[] } | null;
 }
 
 export const LINE_STEPS_MANUAL_MAX = 3;
+/** 템플릿 캠페인 직접 상품 상한(템플릿 DM 상품 상한 8 · 몰 상품과 합쳐 템플릿 상한으로 자른다) */
+export const LINE_TEMPLATE_MANUAL_MAX = 8;
+const PAGE_HASH_RE = /^[0-9a-f]{16}$/;
 const NAME_MAX = 60;
 const URL_MAX = 500;
 const IMAGE_MAX = 300;
@@ -309,8 +368,26 @@ export function sanitizeLineStepsBody(body: Record<string, unknown> | null | und
     facts.link = u;
   } else if (f.link === null) facts.link = null;
 
+  // ★ 템플릿 캠페인 — 템플릿 · 배치(닫힌 목록) · 이벤트 페이지(주소 + 카드 지문 ≤3)
+  let template: LineStepsBody['template'] = null;
+  if (b.template !== undefined && b.template !== null) {
+    const tr = b.template as Record<string, unknown>;
+    if (typeof tr !== 'object' || Array.isArray(tr) || !getLineTemplate(tr.id) || (tr.layout !== 'slides' && tr.layout !== 'page')) return 'invalid';
+    template = { id: tr.id as LineTemplateId, layout: tr.layout };
+  }
+  let page: LineStepsBody['page'] = null;
+  if (b.page !== undefined && b.page !== null) {
+    if (!template) return 'invalid';
+    const pr = b.page as Record<string, unknown>;
+    if (typeof pr !== 'object' || Array.isArray(pr)) return 'invalid';
+    const url = sanitizeLineUrl(pr.url);
+    const hashes = pr.licensed_hashes ?? [];
+    if (!url || !Array.isArray(hashes) || hashes.length > 3 || !hashes.every((h) => typeof h === 'string' && PAGE_HASH_RE.test(h))) return 'invalid';
+    page = { url, licensedHashes: Array.from(new Set(hashes as string[])) };
+  }
+
   const manualRaw = b.manual_products ?? [];
-  if (!Array.isArray(manualRaw) || manualRaw.length > LINE_STEPS_MANUAL_MAX) return 'invalid';
+  if (!Array.isArray(manualRaw) || manualRaw.length > (template ? LINE_TEMPLATE_MANUAL_MAX : LINE_STEPS_MANUAL_MAX)) return 'invalid';
   const manual: LineStepsManualProduct[] = [];
   for (const item of manualRaw) {
     if (!item || typeof item !== 'object' || Array.isArray(item)) return 'invalid';
@@ -352,6 +429,7 @@ export function sanitizeLineStepsBody(body: Record<string, unknown> | null | und
   return {
     facts, manual, heroImage, expectedCost,
     meta: { shown: strList(metaRaw.shown), answered: strList(metaRaw.answered), skipped: strList(metaRaw.skipped) },
+    template, page,
   };
 }
 

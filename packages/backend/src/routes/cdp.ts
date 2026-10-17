@@ -84,6 +84,7 @@ import {
   parseInAppNotPublishable,
   INAPP_DRAFT_ON_LIVE_ERROR,
   INAPP_TEMPLATE_ALLOWED_BLOCKS,   // ★ 2026-10-17 한 줄 단계 모달 — 재료 블록(사진 · 상품)을 템플릿이 허용할 때만 놓는다
+  filterBlocksForTemplate, sanitizeInAppDesign,   // ★ 2026-10-17 템플릿 캠페인 인앱 한 장
 } from '../utils/inapp-message';
 // ★ 2026-07-18 P3 에셋 라이브러리 — 업로드 자동 등재 + 플랜별 용량 한도
 import { registerAsset, getStorageUsage, isAssetsTableMissing } from '../utils/assets';
@@ -112,12 +113,15 @@ import {
 } from '../utils/inapp-quick-action';
 import { query } from '../config/database';
 import { checkCredit, deductCreditSafe, deductCreditOutcome, isChargedByKey, chargedKeysAmong, InsufficientCreditError } from '../utils/ai-credit';
-import { oneLineFactsEnabled, sanitizeLineProducts, lineProductsKey, sanitizeLineReads } from '../utils/one-line-facts';   // ★ 2026-10-05 한줄로 시그니처
+import { oneLineFactsEnabled, sanitizeLineProducts, lineProductsKey, sanitizeLineReads, applyLineReads } from '../utils/one-line-facts';   // ★ 2026-10-05 한줄로 시그니처
 // ★ 2026-10-17 한 줄 단계 모달(설계서 docs/2026-10-17-oneline-steps-modal-design.md §3-12) — 인앱도 같은 돈 계약(시도 토큰 · 잠금 · 결과 뒤 1회 차감)
 import { oneLineStepsEnabled, buildLineStepsEventText } from '../utils/one-line-steps';
+import { getLineTemplate, lineTemplatesEnabled } from '../utils/design-core/line-templates';   // ★ 2026-10-17 템플릿 캠페인
+import { resolveLinePage, isLinePageError, type LinePageMaterial } from '../utils/line-template-page';
+import { draftLineTemplate, buildLineTemplateInapp, lineTemplateBrand, lineTemplateManual, LineTemplateError } from '../utils/line-template-run';
 import { prepareLineStepsRequest, isLineStepsReqError, lineStepsKeyFor, settleLineStepsPrice, resolveLineStepsDelivery, lineStepsAttemptCharged, lineStepsLineLockKey, lineStepsCollected } from '../utils/line-steps-context';
 import { placeInAppLineMaterials, type LineInAppMessage } from '../utils/line-materials';
-import { resolveLineMallCards, type LineMallCard } from '../utils/line-mall-cards';
+import { resolveLineMallCards, linePinnedPrimary, type LineMallCard } from '../utils/line-mall-cards';
 import { resolveIntegrationActor } from '../utils/integration-scope';
 import { tryAcquireInflight, releaseInflight } from '../utils/inflight-lock';
 import { runInCreditBundle } from '../utils/ai-credit-context';
@@ -1619,12 +1623,18 @@ router.post('/inapp/ai-generate', async (req: Request, res: Response) => {
       const steps = prepareLineStepsRequest(req.body, auth.companyId, rawLine, stepsReads === 'invalid' ? undefined : stepsReads, stepsNow, stepsOn);
       if (isLineStepsReqError(steps)) return res.status(steps.status).json({ success: false, error: steps.error, code: steps.code });
       if (!steps || !rawLine) return res.status(400).json({ success: false, error: '만들 내용을 한 줄로 적어 주세요.', code: 'LINE_STEPS_INVALID' });
+      // ★ 2026-10-17 템플릿 캠페인 — 템플릿 칸이 온 단계 요청만(스위치 밖인데 오면 400)
+      const tplSel = steps.body.template;
+      const tplDef = tplSel ? getLineTemplate(tplSel.id) : null;
+      if (tplSel && !lineTemplatesEnabled(auth.companyId, stepsOn)) return res.status(400).json({ success: false, error: '이 기능은 아직 열리지 않았습니다. 화면을 새로 고친 뒤 다시 시도해 주세요.', code: 'FEATURE_DISABLED' });
       const lineProducts = sanitizeLineProducts(req.body?.products);
       if (lineProducts === 'invalid' || (lineProducts && lineProducts.length > 1)) return res.status(400).json({ success: false, error: '고른 상품을 다시 확인해 주세요.', code: 'LINE_PRODUCTS_INVALID' });
       // 생성 입력 전부를 지문에(직접 상품 전부 · 대표 사진 · 주소 답 · 혜택)
       const stepsPayload = {
         objective: rawLine, templateHint: templateHint || null, products: lineProductsKey(lineProducts || []),
         benefit: steps.body.facts.benefit ?? null, manual: steps.body.manual, hero: steps.hero, link: steps.body.facts.link ?? null,
+        // ★ 템플릿 요청 = 템플릿 · 배치 · 페이지도 지문에(1017 요청 키는 그대로)
+        ...(tplSel ? { template: tplSel, page: steps.body.page } : {}),
       };
       const idemKey = lineStepsKeyFor(steps, auth.companyId, 'inapp', stepsPayload);
       // 잠금 둘 — 같은 시도 토큰 · 같은 한 줄(금액 확정 ~ 차감 · 다른 시도가 한 줄 완성을 두 번 내지 않게 · Codex 1017 1R)
@@ -1654,23 +1664,59 @@ router.post('/inapp/ai-generate', async (req: Request, res: Response) => {
         }
         const allCards: LineMallCard[] = [...mallCards, ...steps.manualCards];
         const eventText = buildLineStepsEventText(rawLine, { benefit: steps.body.facts.benefit ?? null, textProducts: steps.textProducts });
+        // ★ 2026-10-17 템플릿 요청 = 읽은 이벤트 페이지를 서버가 다시 얻어 지문 대조(바뀌었으면 409 · AI · 차감 전 · 0원)
+        let tplPage: LinePageMaterial | null = null;
+        if (tplDef && steps.body.page) {
+          const pg = await resolveLinePage(auth.companyId, steps.body.page);
+          if (isLinePageError(pg)) return res.status(pg.status).json({ success: false, error: pg.error, code: pg.code });
+          tplPage = pg;
+        }
         await checkCredit(auth.companyId, price.cost);
-        // 생성기는 바깥 묶음이 차감을 소유하면 안쪽에서 빼지 않는다(inapp-ai-generator isInCreditBundle) — 차감은 아래 이 키로 1회
-        const pkg = await runInCreditBundle(() => generateInAppMessagePackage({ companyId: auth.companyId, createdBy: auth.userId, objective: rawLine, templateHint, eventText }));
         const delivery = await resolveLineStepsDelivery(auth.companyId, actor, steps, { channel: 'inapp', line: rawLine, cards: allCards });
-        pkg.message = placeInAppLineMaterials(
-          pkg.message as unknown as LineInAppMessage,
-          { imageUrl: delivery.hero, linkUrl: delivery.link, card: allCards[0] ?? null },
-          (template, blockType) => { const set = INAPP_TEMPLATE_ALLOWED_BLOCKS[template]; return !set || set.has(blockType); },
-        ) as unknown as typeof pkg.message;
+        let pkg: Awaited<ReturnType<typeof generateInAppMessagePackage>>;
+        if (tplDef) {
+          // ★ 템플릿 요청 = 문구 AI 1회(묶음 · 안쪽 차감 0) + center_modal 한 장 조립(상품 · 사진 · 주소 = 템플릿이 놓는다 · 1017 끼우기 안 함)
+          //   근거 글 = 사진 조각은 그대로 쓰기를 켰을 때만 숫자를 살린다(DM · 이메일과 같은 규칙)
+          const kitRaw = (await getCompanyBrandKitRaw(auth.companyId).catch(() => null)) as Record<string, unknown> | null;
+          const brand = await lineTemplateBrand(auth.companyId, kitRaw);
+          const groundLine = applyLineReads(rawLine, stepsReads === 'invalid' ? undefined : stepsReads, req.body?.read_licensed === true);
+          const manualT = lineTemplateManual(steps.body.manual);
+          const draft = await runInCreditBundle(() => draftLineTemplate({
+            template: tplDef, channel: 'inapp', companyId: auth.companyId, line: groundLine, ...brand,
+            pinnedPrimary: linePinnedPrimary(kitRaw), cards: [...mallCards, ...manualT.cards], textProducts: manualT.textProducts, heroUpload: steps.hero, page: tplPage,
+            benefitAnswer: steps.body.facts.benefit, periodEnd: steps.body.facts.periodEnd ?? null,
+            link: steps.body.facts.link ?? tplPage?.url ?? delivery.link ?? null,
+          }, { userId: auth.userId, source: 'inapp-ai-generator' }));
+          const msg = buildLineTemplateInapp(draft);
+          pkg = {
+            message: {
+              ...msg,
+              content_blocks: filterBlocksForTemplate(msg.template, msg.content_blocks),
+              background_color: '#ffffff', text_color: '#111827',
+              segment_conditions: {}, trigger_conditions: { event: 'page_load' }, personalization_vars: [],
+              display_frequency: 'once_per_session', auto_dismiss_seconds: null, max_displays_per_user: null,
+              send_start_hour: null, send_end_hour: null, allowed_weekdays: [0, 1, 2, 3, 4, 5, 6],
+              animation: 'fade', is_ad: true, design: sanitizeInAppDesign({ motion: 'rich' }),
+            } as unknown as typeof pkg.message,
+            reasoning: '', progress_steps: [],
+          };
+        } else {
+          // 생성기는 바깥 묶음이 차감을 소유하면 안쪽에서 빼지 않는다(inapp-ai-generator isInCreditBundle) — 차감은 아래 이 키로 1회
+          pkg = await runInCreditBundle(() => generateInAppMessagePackage({ companyId: auth.companyId, createdBy: auth.userId, objective: rawLine, templateHint, eventText }));
+          pkg.message = placeInAppLineMaterials(
+            pkg.message as unknown as LineInAppMessage,
+            { imageUrl: delivery.hero, linkUrl: delivery.link, card: allCards[0] ?? null },
+            (template, blockType) => { const set = INAPP_TEMPLATE_ALLOWED_BLOCKS[template]; return !set || set.has(blockType); },
+          ) as unknown as typeof pkg.message;
+        }
         // 낸 것만 건넨다(잔액 부족 = 402 · 원장 쓰기 실패 = 503 · 결과 0)
         const outcome = await deductCreditOutcome({ companyId: auth.companyId, cost: price.cost, source: price.source, createdBy: auth.userId, idempotencyKey: idemKey, throwOnInsufficient: true });
         if (!lineStepsCollected(outcome)) {
           console.log(`[CREDIT][MISS] one-line steps inapp 결과 안 건넴 company=${auth.companyId} key=${idemKey} cost=${price.cost} outcome=${outcome}`);
           return res.status(503).json({ success: false, error: '크레딧 기록을 확인하지 못해 결과를 건네지 않았어요. 잠시 후 다시 시도해 주세요.', code: 'CREDIT_STATE_UNKNOWN' });
         }
-        console.log(`[one-line steps] inapp company=${auth.companyId} cost=${price.cost} completion=${price.completionDue} shown=${steps.body.meta.shown.join(',')} answered=${steps.body.meta.answered.join(',')} skipped=${steps.body.meta.skipped.join(',')} manual_cards=${steps.manualCards.length} hero=${delivery.hero ? 1 : 0}`);
-        return res.json({ success: true, package: pkg, one_line: { enabled: true, steps: { cost: price.cost, completion: price.completionDue }, notes } });
+        console.log(`[one-line steps] inapp company=${auth.companyId} cost=${price.cost} completion=${price.completionDue} shown=${steps.body.meta.shown.join(',')} answered=${steps.body.meta.answered.join(',')} skipped=${steps.body.meta.skipped.join(',')} manual_cards=${steps.manualCards.length} hero=${delivery.hero ? 1 : 0}${tplDef ? ` template=${tplDef.id} page=${steps.body.page ? 1 : 0}` : ''}`);
+        return res.json({ success: true, package: pkg, one_line: { enabled: true, steps: { cost: price.cost, completion: price.completionDue }, notes, ...(tplDef ? { template: { id: tplDef.id, layout: 'page' } } : {}) } });
       } finally {
         if (lineLockHeld) releaseInflight(lineLock);
         releaseInflight(lock);
@@ -1694,6 +1740,11 @@ router.post('/inapp/ai-generate', async (req: Request, res: Response) => {
   } catch (err: any) {
     // ★ 2026-09-27 한줄로 V2 R246 — 크레딧 부족은 402(충전 안내 · 사전 확인과 성공 뒤 차감 확정 둘 다 여기로 온다)
     if (err instanceof InsufficientCreditError) return res.status(402).json({ success: false, error: err.message, code: 'INSUFFICIENT_CREDIT' });
+    // ★ 2026-10-17 템플릿 생성 실패 = 정해 둔 상태 · 문장(차감 전)
+    if (err instanceof LineTemplateError) {
+      console.error(`[CDP inapp template] ${err.code} ${err.detail}`);
+      return res.status(err.status).json({ success: false, error: err.message, code: err.code });
+    }
     console.error('[CDP /inapp/ai-generate] 오류:', err);
     if (handleDbMigrationError(err, res, 'cdp_inapp_messages')) return;
     return res.status(500).json({ success: false, error: err?.message || 'AI 생성 실패' });

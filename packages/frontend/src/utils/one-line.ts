@@ -24,12 +24,17 @@ export interface OneLineGapsResult {
   stepsEnabled: boolean;
   stepsCost: number | null;
   plan: LineStepsPlan | null;
+  /** ★ 2026-10-17 템플릿 캠페인 — 이 회사에 열려 있는가 · 한 줄 추천(걸린 낱말 = 이유) · 템플릿마다 재료 단계(서버 판정) */
+  templatesEnabled: boolean;
+  templates: LineTemplateRank[] | null;
+  templatePlans: Record<string, LineStepsPlan> | null;
 }
 
 // ─────────────── 한 줄 단계 모달 (★ 2026-10-17 · 설계서 docs/2026-10-17-oneline-steps-modal-design.md §3 · §4) ───────────────
 
 export type LineStepsChannel = 'dm' | 'email' | 'inapp';
-export type LineStepKey = 'benefit' | 'product' | 'hero_photo' | 'link' | 'period';
+export type LineStepKey = 'benefit' | 'product' | 'hero_photo' | 'link' | 'period' | 'event_page' | 'products';
+type LineSkipIf = 'product_photo' | 'manual_photo' | 'product_link' | 'page_banner';
 /** 서버 단계 하나(키 닫힌 목록 · 문구는 화면이 소유 · skip_if 는 서버가 정한 조건 이름) */
 export interface LineStep {
   key: LineStepKey;
@@ -37,7 +42,13 @@ export interface LineStep {
   manual_ok?: boolean;
   price?: number;
   url?: string;
-  skip_if?: 'product_photo' | 'manual_photo' | 'product_link';
+  skip_if?: LineSkipIf;
+  /** ★ 템플릿 단계 — 필수(건너뛰기 없음) · products = 낱말 탭 · 담을 개수 · suggest = 한 줄에서 찾은 값의 제안 칩(기본값 아님 · 눌러야 채워짐) */
+  required?: boolean;
+  suggest?: string;
+  terms?: Array<{ item: string; price?: number; url?: string }>;
+  min?: number;
+  max?: number;
 }
 export interface LineStepsCost { generate: number; complete: number; total: number }
 export interface LineStepsPlan {
@@ -55,7 +66,7 @@ export interface LineStepsPlan {
   cost: LineStepsCost | null;
 }
 
-const STEP_KEYS: readonly string[] = ['benefit', 'product', 'hero_photo', 'link', 'period'];
+const STEP_KEYS: readonly string[] = ['benefit', 'product', 'hero_photo', 'link', 'period', 'event_page', 'products'];
 /** 서버 plan 을 그대로 믿지 않고 모양만 걸러 받는다(모르는 키 = 버린다 · 화면은 닫힌 목록만 그린다) */
 function parseLinePlan(raw: any): LineStepsPlan | null {
   if (!raw || raw.v !== 1 || !['dm', 'email', 'inapp'].includes(raw.channel) || typeof raw.line_fp !== 'string') return null;
@@ -65,7 +76,12 @@ function parseLinePlan(raw: any): LineStepsPlan | null {
     ...(s.manual_ok === true ? { manual_ok: true } : {}),
     ...(Number.isFinite(s.price) ? { price: Number(s.price) } : {}),
     ...(typeof s.url === 'string' ? { url: s.url } : {}),
-    ...(['product_photo', 'manual_photo', 'product_link'].includes(s.skip_if) ? { skip_if: s.skip_if } : {}),
+    ...(['product_photo', 'manual_photo', 'product_link', 'page_banner'].includes(s.skip_if) ? { skip_if: s.skip_if } : {}),
+    ...(s.required === true ? { required: true } : {}),
+    ...(typeof s.suggest === 'string' && s.suggest.trim() ? { suggest: s.suggest.slice(0, 300) } : {}),
+    ...(Array.isArray(s.terms) ? { terms: s.terms.filter((t: any) => typeof t?.item === 'string').slice(0, 3).map((t: any) => ({ item: t.item, ...(Number.isFinite(t.price) ? { price: Number(t.price) } : {}), ...(typeof t.url === 'string' ? { url: t.url } : {}) })) } : {}),
+    ...(Number.isInteger(s.min) && s.min >= 0 ? { min: s.min } : {}),
+    ...(Number.isInteger(s.max) && s.max > 0 ? { max: Math.min(8, s.max) } : {}),
   } : null);
   const cost = raw.cost && [raw.cost.generate, raw.cost.complete, raw.cost.total].every(Number.isFinite)
     ? { generate: Number(raw.cost.generate), complete: Number(raw.cost.complete), total: Number(raw.cost.total) } : null;
@@ -111,6 +127,7 @@ export async function fetchOneLineGaps(line: string, reads?: readonly string[], 
       stepsEnabled: d.steps_enabled === true,
       stepsCost: Number.isFinite(d.steps_cost) ? Number(d.steps_cost) : null,
       plan: d.steps_enabled === true ? parseLinePlan(d.plan) : null,
+      ...parseLineTemplateOffer(d),
     };
   } catch {
     return null;
@@ -148,7 +165,7 @@ export function isLineMallProvider(provider: string): boolean {
  * 한 줄 검색어 → 몰 후보. 재조회 가능한 몰마다 · 낱말마다 **순서대로** 부른다(카페24 토큰 동시 재발급을 피한다) · 시간 상한 안에서만.
  * mallReady = 재조회 가능한 몰이 하나라도 연동돼 있는가(없으면 상품 칸을 그리지 않는다). 실패 · 시간 초과 = 지금까지 모은 것(없으면 빈 목록).
  */
-export async function fetchLineMallCandidates(terms: readonly string[], signal?: AbortSignal): Promise<{ mallReady: boolean; candidates: LineMallCandidate[] }> {
+export async function fetchLineMallCandidates(terms: readonly string[], signal?: AbortSignal, perTermMax: number = LINE_MALL_PER_TERM): Promise<{ mallReady: boolean; candidates: LineMallCandidate[] }> {
   const auth = { Authorization: `Bearer ${localStorage.getItem('token') || ''}` };
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), LINE_MALL_SEARCH_TIMEOUT_MS);
@@ -165,16 +182,16 @@ export async function fetchLineMallCandidates(terms: readonly string[], signal?:
     for (const term of terms) {
       let perTerm = 0;
       for (const provider of providers) {
-        if (perTerm >= LINE_MALL_PER_TERM || out.length >= LINE_MALL_CANDIDATES_MAX) break;
+        if (perTerm >= perTermMax || out.length >= LINE_MALL_CANDIDATES_MAX) break;
         // eslint-disable-next-line no-await-in-loop
-        const r = await fetch(`/api/mall-products/search?provider=${encodeURIComponent(provider)}&limit=${LINE_MALL_PER_TERM}&q=${encodeURIComponent(term)}`, { headers: auth, signal: ctrl.signal });
+        const r = await fetch(`/api/mall-products/search?provider=${encodeURIComponent(provider)}&limit=${perTermMax}&q=${encodeURIComponent(term)}`, { headers: auth, signal: ctrl.signal });
         // eslint-disable-next-line no-await-in-loop
         const d = await r.json().catch(() => ({}));
         if (!r.ok || d?.success === false || !Array.isArray(d?.products)) continue;
         for (const p of d.products) {
           const no = typeof p?.no === 'string' && /^\d+$/.test(p.no) ? p.no : '';
           const key = `${provider}:${no}`;
-          if (!no || seen.has(key) || perTerm >= LINE_MALL_PER_TERM || out.length >= LINE_MALL_CANDIDATES_MAX) continue;
+          if (!no || seen.has(key) || perTerm >= perTermMax || out.length >= LINE_MALL_CANDIDATES_MAX) continue;
           seen.add(key);
           perTerm += 1;
           out.push({ provider, no, name: String(p.name || ''), price: Number(p.price) || 0, salePrice: Number(p.salePrice) || 0, imageUrl: p.imageUrl ? String(p.imageUrl) : null, exact: p.exact === true });
@@ -275,7 +292,16 @@ export interface LineStepsAnswers {
   offersAdded: string[];
   /** 사진에서 읽은 숫자도 그대로 쓰기(H3 · 기본 꺼짐) */
   readLicensed?: boolean;
+  /** ★ 템플릿 상품 단계 — 담은 몰 상품(여러 개 · 넣은 순서) · 직접 넣은 상품(여러 개) */
+  picks?: LineMallCandidate[];
+  manualList?: LineManualAnswer[];
+  /** ★ 템플릿 이벤트 페이지 단계 — 읽은 결과(주소 · 표지 사진 · 카드) · 그대로 쓰기 켠 카드 지문 · null = 건너뜀 */
+  page?: LinePageAnswer | null;
+  /** ★ 고른 템플릿 · 배치(바꿔도 다른 답은 그대로) */
+  template?: { id: LineTemplateId; layout: LineLayout };
 }
+export interface LinePageCard { hash: string; title: string; text: string }
+export interface LinePageAnswer { url: string; host: string; banner: string | null; cards: LinePageCard[]; licensed: string[] }
 export const emptyLineStepsAnswers = (): LineStepsAnswers => ({ products: {}, offersAdded: [] });
 
 /** 단계 하나의 이름표(같은 키가 낱말마다 여럿) */
@@ -318,7 +344,9 @@ export function lineStepSkipped(step: LineStep, a: LineStepsAnswers, channel: Li
   const manual = lineStepsManual(a, termOrder);
   if (step.skip_if === 'product_photo') return picked || manual.some((m) => !!m.image);
   if (step.skip_if === 'manual_photo') return manual.some((m) => !!m.image);
-  return picked || manual.some((m) => !!m.url);
+  // ★ 템플릿 — 이벤트 페이지에서 표지 사진을 읽었으면 대표 사진을 묻지 않는다 · 읽은 페이지 · 담은 상품 링크가 있으면 버튼 주소를 묻지 않는다
+  if (step.skip_if === 'page_banner') return !!a.page?.banner;
+  return picked || manual.some((m) => !!m.url) || (a.picks || []).length > 0 || (a.manualList || []).some((m) => !!m.url) || !!a.page?.url;
 }
 
 /** 사람이 친 주소를 http(s) 주소로(스킴이 없으면 https) · 아니면 null */
@@ -436,7 +464,9 @@ export function loadLineStepsAnswers(key: string): { answers: LineStepsAnswers; 
     if (!raw) return null;
     const d = JSON.parse(raw);
     if (!d || typeof d !== 'object' || !d.answers || typeof d.answers.products !== 'object' || !Array.isArray(d.answers.offersAdded)) return null;
-    return { answers: d.answers as LineStepsAnswers, at: typeof d.at === 'string' ? d.at : '' };
+    // ★ 2026-10-17 템플릿 캠페인 — 다른 날 남긴 답은 버린다(어제 고른 마감일 · 다 지난 페이지 읽기를 오늘 다시 싣지 않게)
+    if (typeof d.at !== 'string' || new Date(d.at).toDateString() !== new Date().toDateString()) return null;
+    return { answers: d.answers as LineStepsAnswers, at: d.at };
   } catch {
     return null;
   }
@@ -446,6 +476,164 @@ export function saveLineStepsAnswers(key: string, answers: LineStepsAnswers, at:
 }
 export function clearLineStepsAnswers(key: string): void {
   try { sessionStorage.removeItem(key); } catch { /* 없음 */ }
+}
+
+// ─────────────── 템플릿 캠페인 (★ 2026-10-17 · 설계서 docs/2026-10-17-line-template-campaign-design.md) ───────────────
+
+export type LineTemplateId = 'big-sale' | 'new-launch' | 'special-event' | 'season';
+export type LineLayout = 'slides' | 'page';
+const LINE_TEMPLATE_IDS: readonly string[] = ['big-sale', 'new-launch', 'special-event', 'season'];
+/** 한 줄 추천(서버 규칙 · 걸린 낱말 = 이유 · 안 걸리면 recommended 없음) */
+export interface LineTemplateRank { id: LineTemplateId; reasons: string[]; recommended: boolean }
+/** 템플릿 목록 한 줄(서버 원장 · 화면은 문구만 그린다) */
+export interface LineTemplateInfo {
+  id: LineTemplateId;
+  label: string;
+  desc: string;
+  story: Array<{ role: string; text: string }>;
+  needs: { benefit: 'required' | 'optional' | 'none'; period: 'required' | 'none'; products: { min: number; max: Record<LineStepsChannel, number> }; hero: 'ask' | 'none' };
+  example: { company: string; industry: string; line: string };
+  design: { primary: string; accent: string };
+}
+
+/** 판정 응답의 템플릿 칸(모양만 걸러 받는다 · 모르는 템플릿 = 버린다) */
+function parseLineTemplateOffer(d: any): Pick<OneLineGapsResult, 'templatesEnabled' | 'templates' | 'templatePlans'> {
+  const on = d?.templates_enabled === true;
+  const templates = on && Array.isArray(d.templates)
+    ? d.templates.filter((t: any) => LINE_TEMPLATE_IDS.includes(t?.id)).map((t: any) => ({ id: t.id, reasons: Array.isArray(t.reasons) ? t.reasons.map(String).slice(0, 3) : [], recommended: t.recommended === true }))
+    : null;
+  let plans: Record<string, LineStepsPlan> | null = null;
+  if (on && d.template_plans && typeof d.template_plans === 'object') {
+    plans = {};
+    for (const id of LINE_TEMPLATE_IDS) { const p = parseLinePlan(d.template_plans[id]); if (p) plans[id] = p; }
+  }
+  return { templatesEnabled: on, templates: templates && templates.length > 0 ? templates : null, templatePlans: plans && Object.keys(plans).length > 0 ? plans : null };
+}
+
+const authHeader = () => ({ Authorization: `Bearer ${localStorage.getItem('token') || ''}` });
+
+/** 템플릿 목록(로그인 단위 메모리 캐시 · 실패 = null) */
+let templatesCache: { token: string; list: LineTemplateInfo[] } | null = null;
+export async function fetchLineTemplates(): Promise<LineTemplateInfo[] | null> {
+  const token = localStorage.getItem('token') || '';
+  if (templatesCache && templatesCache.token === token) return templatesCache.list;
+  try {
+    const res = await fetch('/api/line-templates', { headers: authHeader() });
+    const d = await res.json().catch(() => null);
+    if (!res.ok || !d?.success || !Array.isArray(d.templates)) return null;
+    const list = d.templates.filter((t: any) => LINE_TEMPLATE_IDS.includes(t?.id)) as LineTemplateInfo[];
+    templatesCache = { token, list };
+    return list;
+  } catch {
+    return null;
+  }
+}
+
+/** 예시(가상 업체 · 진짜 조립 + 렌더러) — DM · 이메일 = html · 인앱 = 메시지 · 키별 메모리 캐시(같은 화면에서 다시 부르지 않게) */
+export type LineTemplateExample = { html: string } | { message: Record<string, any> };
+const exampleCache = new Map<string, LineTemplateExample>();
+export async function fetchLineTemplateExample(id: LineTemplateId, channel: LineStepsChannel, layout: LineLayout, signal?: AbortSignal): Promise<LineTemplateExample | null> {
+  const key = `${new Date().toDateString()}:${id}:${channel}:${channel === 'dm' ? layout : 'page'}`;
+  const hit = exampleCache.get(key);
+  if (hit) return hit;
+  try {
+    const res = await fetch(`/api/line-templates/${encodeURIComponent(id)}/example?channel=${channel}&layout=${layout}`, { headers: authHeader(), signal });
+    const d = await res.json().catch(() => null);
+    if (!res.ok || !d?.success) return null;
+    const out: LineTemplateExample | null = typeof d.html === 'string' ? { html: d.html } : d.message && typeof d.message === 'object' ? { message: d.message } : null;
+    if (out) exampleCache.set(key, out);
+    return out;
+  } catch {
+    return null;
+  }
+}
+
+/** 이벤트 페이지 읽기(AI 0 · 0원 · 같은 주소 10분 캐시는 서버) — 실패 = 서버 문장 그대로 던진다 */
+export async function readLinePage(rawUrl: string): Promise<LinePageAnswer> {
+  const url = normalizeLineLink(rawUrl);
+  if (!url) throw new Error('http로 시작하는 주소를 넣어 주세요');
+  const res = await fetch('/api/event-campaigns/materials/read-url', {
+    method: 'POST', headers: { 'Content-Type': 'application/json', ...authHeader() }, body: JSON.stringify({ url }),
+  });
+  const d = await res.json().catch(() => ({}));
+  if (!res.ok || d?.success === false) throw new Error(d?.error || '페이지를 읽지 못했어요');
+  const cards: LinePageCard[] = (Array.isArray(d.cards) ? d.cards : [])
+    .filter((c: any) => typeof c?.hash === 'string' && /^[0-9a-f]{16}$/.test(c.hash))
+    .slice(0, 3)
+    .map((c: any) => ({ hash: c.hash, title: String(c.title || ''), text: String(c.text || '') }));
+  return { url, host: String(d.host || ''), banner: typeof d.line_banner === 'string' && d.line_banner ? d.line_banner : null, cards, licensed: [] };
+}
+
+/** 몰 상품 찾기(상품 단계 「찾기」 칸 · 재조회 가능한 몰만 · 최대 6 · 5초) */
+export async function searchLineMall(q: string, signal?: AbortSignal): Promise<{ mallReady: boolean; candidates: LineMallCandidate[] }> {
+  const term = String(q || '').trim().slice(0, 40);
+  if (!term) return { mallReady: true, candidates: [] };
+  return fetchLineMallCandidates([term], signal, LINE_MALL_CANDIDATES_MAX);
+}
+
+/** 템플릿 DM 표식(서버 `lineTemplateDmMarker` = 'line:<템플릿>') — 편집 화면이 카탈로그 보기 · 장 추가를 숨기고 배치 전환을 장 키로 다시 묶는다 */
+export const isLineTemplateDm = (templateId: string | null | undefined): boolean => typeof templateId === 'string' && templateId.startsWith('line:');
+
+/**
+ * (순수) 템플릿 DM 장 다시 묶기 — 섹션 `tpl_slot`('p{장}.{부분}')의 장 번호로 묶는다(서버 호출 0 · 0원).
+ * 키 없는 섹션(편집에서 더한 블록)은 바로 앞 섹션의 장에 붙는다 · 키가 하나도 없으면 null(호출부 = 범용 나누기).
+ */
+export function regroupLineTemplatePages<T extends { tpl_slot?: string }>(sections: readonly T[]): T[][] | null {
+  const pageOf = (s: T): number | null => { const m = /^p(\d+)\./.exec(String(s.tpl_slot || '')); return m ? Number(m[1]) : null; };
+  if (!sections.some((s) => pageOf(s) !== null)) return null;
+  const groups = new Map<number, T[]>();
+  let last = sections.map(pageOf).find((n) => n !== null) ?? 0;
+  for (const s of sections) {
+    const n = pageOf(s);
+    if (n !== null) last = n;
+    const g = groups.get(last) ?? [];
+    g.push(s);
+    groups.set(last, g);
+  }
+  return Array.from(groups.entries()).sort((a, b) => a[0] - b[0]).map(([, g]) => g);
+}
+
+/** 템플릿 상품 단계 — 지금 담은 상품 수(몰 + 직접) */
+export const lineTemplateCount = (a: LineStepsAnswers): number => (a.picks || []).length + (a.manualList || []).filter((m) => m.name.trim()).length;
+
+/**
+ * 템플릿 생성 요청 몸통(세 채널 공통) — 1017 몸통 칸 그대로 + template · page.
+ * 상품 = 담은 몰 상품(상품번호만) · 직접 넣은 상품(이름 · 가격 · 사진 · 링크) · 합쳐 템플릿 상한까지.
+ */
+export function buildLineTemplateBody(plan: LineStepsPlan, a: LineStepsAnswers, shown: readonly LineStep[], expectedCost: number, tpl: { id: LineTemplateId; layout: LineLayout }): Record<string, unknown> {
+  const has = (key: LineStepKey) => shown.some((s) => s.key === key);
+  const max = plan.steps.find((s) => s.key === 'products')?.max ?? 0;
+  const facts: Record<string, unknown> = {};
+  if (plan.steps.some((s) => s.key === 'benefit')) facts.benefit = typeof a.benefit === 'string' && a.benefit.trim() ? a.benefit.trim() : null;
+  if (has('period') && a.period) facts.period_end = a.period;
+  if (a.link) facts.link = a.link;
+  const picks = (a.picks || []).slice(0, max);
+  const manual = (a.manualList || []).filter((m) => m.name.trim()).slice(0, Math.max(0, max - picks.length)).map((m) => {
+    const price = lineManualPrice(m.price);
+    return { name: m.name.trim().slice(0, 60), ...(price ? { price } : {}), ...(m.image ? { image: m.image } : {}), ...(m.url ? { url: m.url } : {}) };
+  });
+  const answered: string[] = [];
+  const skipped: string[] = [];
+  for (const s of shown) {
+    const v = s.key === 'benefit' ? (typeof a.benefit === 'string' && a.benefit.trim() ? 1 : 0)
+      : s.key === 'products' ? (picks.length + manual.length > 0 ? 1 : 0)
+        : s.key === 'event_page' ? (a.page ? 1 : 0)
+          : s.key === 'hero_photo' ? (a.hero ? 1 : 0)
+            : s.key === 'link' ? (a.link ? 1 : 0)
+              : (a.period ? 1 : 0);
+    (v ? answered : skipped).push(s.key);
+  }
+  return {
+    steps: { v: 1 },
+    template: { id: tpl.id, layout: tpl.layout },
+    facts,
+    products: picks.map((p) => ({ provider: p.provider, no: p.no })),
+    manual_products: manual,
+    ...(has('hero_photo') && a.hero ? { hero_image: a.hero } : {}),
+    ...(has('event_page') && a.page ? { page: { url: a.page.url, licensed_hashes: a.page.licensed.filter((h) => a.page!.cards.some((c) => c.hash === h)).slice(0, 3) } } : {}),
+    expected_cost: expectedCost,
+    steps_meta: { shown: shown.map((s) => s.key), answered, skipped },
+  };
 }
 
 /** 스위치만 알고 싶을 때(로그인 단위 캐시 · 켜짐만 기억) */
