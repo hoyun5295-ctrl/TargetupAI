@@ -642,7 +642,7 @@ describe('소스 계약 — 초안은 발행하지 않고, 검사 문안 = 발�
   it('실행부는 각인된 문안에 실주소를 붙인 최종형을 재생성 없이 검사하고, 동반 DM은 같은 잠금에서 선점하며, 확정 실패는 표식을 걷는다', () => {
     const exec = readFileSync(path.join(__dirname, 'planner-executor.ts'), 'utf8');
     const composeIdx = exec.indexOf('const finalBody = appendDmLink(String(copy.text), link.url);');
-    const gateIdx = exec.indexOf('const passed = await spamCheckPlannerCopy({');
+    const gateIdx = exec.indexOf('const check = await spamCheckPlannerVerdict({'); // ★ 2026-10-18 판정 3분할(B6 · 설계서 2026-10-18 §3-2)
     const commitIdx = exec.indexOf('await createDirectSendCampaign(');
     expect(composeIdx).toBeGreaterThan(0);
     expect(composeIdx).toBeLessThan(gateIdx);
@@ -675,6 +675,7 @@ describe('소스 계약 — 초안은 발행하지 않고, 검사 문안 = 발�
     // 미승인 행사의 접점도 놓친 실행으로 닫는다(★ 2026-10-04 §6-8 · 옛: 승인된 행사만 봐서 조용히 남았다)
     const rec = readFileSync(path.join(__dirname, 'planner-reconcile.ts'), 'utf8');
     expect(rec).toContain("const MISSED_EVENT_STATUS = ['approved', 'producing', 'scheduled', 'done', 'briefed', 'draft', 're_brief'];");
-    expect(rec).toContain("missed_reason: approved ? 'missed' : 'not_approved'");
+    // ★ 2026-10-18 M3 — 쌍 재확인이 남은 접점은 「다시 확인되지 않아」(설계서 2026-10-18 §3-2-2)
+    expect(rec).toContain("missed_reason: approved ? 'missed' : recheck ? 'recheck_missed' : 'not_approved'");
   });
 });

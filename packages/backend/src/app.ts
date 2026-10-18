@@ -100,7 +100,9 @@ import { registerAllProviders } from './utils/register-providers';
 // ★ D180 (2026-05-19): Email 채널 (SendGrid Web API v3)
 import emailRoutes from './routes/email';
 import shortUrlRoutes from './routes/short-url';  // D183: 단축 URL redirect (/c/:hash) — 공개 endpoint
-import journeyPausePublicRouter from './routes/journey-pause-public';  // ★ D218+: 여정 즉시 정지 페이지 (/journey-pause/:token) — 공개 endpoint
+import journeyPausePublicRouter from './routes/journey-pause-public';  // ★ D218+ · 2026-10-18 여정 즉시 정지 링크 — 공개 endpoint (/api/journey-pause/*)
+import autosendStopPublicRouter from './routes/autosend-stop-public';  // ★ 2026-10-18 자동마케팅 예고 문자 멈춤 링크 — 공개 endpoint
+import plannerRecheckPublicRouter from './routes/planner-recheck-public';  // ★ 2026-10-18 플래너 당일 재확인 링크 — 공개 endpoint
 import { startAutoCampaignScheduler } from './utils/auto-campaign-worker';
 import { ensureMonthlyLogTables } from './utils/sms-queue';
 import { startSpamTestQueueWorker } from './utils/spam-test-queue';
@@ -330,6 +332,9 @@ const approveLimiterOpts = {
 } as const;
 app.use('/api/agency-approve', rateLimit({ ...approveLimiterOpts }));
 app.use('/api/charge-approve', rateLimit({ ...approveLimiterOpts }));
+app.use('/api/journey-pause', rateLimit({ ...approveLimiterOpts })); // ★ 2026-10-18 여정 정지 링크(무인증 · 버킷 따로)
+app.use('/api/planner-recheck', rateLimit({ ...approveLimiterOpts })); // ★ 2026-10-18 플래너 당일 재확인 링크(무인증 · 버킷 따로)
+app.use('/api/autosend-stop', rateLimit({ ...approveLimiterOpts })); // ★ 2026-10-18 자동마케팅 예고 문자 멈춤 링크(무인증 · 버킷 따로)
 const shortUrlLimiter = rateLimit({
   windowMs: 60 * 1000,
   max: 600,
@@ -423,8 +428,6 @@ app.use('/api/spam-filter', spamFilterRoutes);
 app.use('/api/send-checks', sendChecksRoutes);
 // D183 (2026-05-20): 단축 URL redirect — 공개 endpoint (/c/:hash) — SMS/카톡 수신자 클릭 트래킹
 app.use('/', shortUrlRoutes);
-// ★ D218+ (2026-05-26): 여정 즉시 정지 페이지 — 공개 endpoint (/journey-pause/:token) — 담당자 LMS 안 단축 URL
-app.use('/', journeyPausePublicRouter);
 // ★ 2026-07-08 SDK 서빙 (CORS, 공개) — 인앱 SDK를 몰 스토어프론트가 교차출처 로드.
 //   /api/cdp/sdk/ = 신규 수동 스니펫(메이크샵·고도몰·아임웹·자체) / /sdk/ = 레거시(nginx가 backend로 넘기면 팝폰 등 옛 스니펫 자동 복구).
 //   반드시 /api/cdp 라우터(아래) 앞에 등록 — 그래야 이 공개 SDK 라우트가 우선한다.
@@ -462,6 +465,9 @@ app.use('/api/help', helpRoutes); // ★ 2026-08-22 도움말 봇 · 기능 카�
 app.use('/api/agency-send', agencySendRoutes); // ★ 2026-08-22 대행발송 셀프 접수(docs/2026-08-22-agency-send-design.md)
 app.use('/api/agency-approve', agencyApproveRoutes); // ★ 2026-08-25 대행발송 담당자 링크 승인(무인증 · 토큰 = 문자 안 주소)
 app.use('/api/charge-approve', chargeApproveRoutes); // ★ 2026-08-28(3) 충전 승인 링크(무인증 · 토큰 = 문자 안 주소)
+app.use('/api/journey-pause', journeyPausePublicRouter); // ★ 2026-10-18 여정 정지 링크(무인증 · 토큰 = 헤더 · 옛 루트 마운트 /journey-pause/:token 폐기 = 화면 라우트와 겹침)
+app.use('/api/planner-recheck', plannerRecheckPublicRouter);
+app.use('/api/autosend-stop', autosendStopPublicRouter); // ★ 2026-10-18 자동마케팅 예고 문자 멈춤 링크(무인증 · 토큰 = 헤더 · 멈추는 일만) // ★ 2026-10-18 플래너 당일 재확인 링크(무인증 · 토큰 = 헤더 · 설계서 2026-10-18 §3-2-4)
 app.use('/api/sales-outreach', salesOutreachRoutes); // ★ 2026-08-24 AI 영업 아웃리치(슈퍼관리자 ceo 전용)
 app.use('/api/outreach/v', outreachPublicRoutes); // ★ 2026-08-24 아웃리치 공개 샘플 페이지(무인증)
 app.use('/api/outreach/u', outreachUnsubscribeRoutes); // ★ 2026-09-23 담당자 직접 발송 수신거부(무인증)

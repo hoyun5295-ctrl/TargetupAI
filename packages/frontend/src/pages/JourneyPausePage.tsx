@@ -1,330 +1,198 @@
 /**
- * JourneyPausePage.tsx — D218+ (2026-05-26) 신설 (Public, 인증 X)
+ * JourneyPausePage — 여정 발송 2시간 전 안내 문자 속 주소가 여는 정지 화면(로그인 없음)
+ * D218+ (2026-05-26) 신설 · ★ 2026-10-18 정지 링크 결함 정정(설계서 docs/2026-10-18-planner-v2-design.md §3-1)
  *
- * 본질: 발송 2시간 전 담당자 LMS 안 단축 URL 진입 페이지.
- *   - 경로: /journey-pause/:token
- *   - 인증 X (token 자체가 HMAC-SHA256 서명 영역 — 24h TTL)
- *   - GET /journey-pause/:token → 본문 미리보기 + 여정명 + step + 발송 예정시각
- *   - "이 발송 정지" 확인 1 클릭 → POST /journey-pause/:token body { paused_phone }
- *   - 정지 종결 후 Toast 안내 + journey_step_pause_logs 영구 기록 (CT-94 영역)
+ *   - 주소 = /journey-pause#t=토큰(새 문자) · /journey-pause/:token(이미 나간 24시간 링크 · 읽자마자 주소에서 지운다)
+ *   - API = /api/journey-pause/{info,pause,pause-journey} · 토큰은 헤더(X-Journey-Pause-Token)로만
+ *   - 버튼 2 = [이 발송 정지](그 단계 · 그날 대상 전부) · [여정 전체 일시정지] · 누르면 확인 창(Harold 1018 「클릭하면 모달로 다시 확인」)
+ *   - 결과는 서버가 센 사실대로(멈춘 수 · 이미 보내기 시작한 수) · 번호 입력칸 없음(토큰에 받은 번호가 실려 있다)
  *
- * 영구 룰 정합:
- *   - feedback_design_quality_minimum_journey_level (다크 톤 + violet 액센트 + Source caption + 모바일 반응형)
- *   - feedback_no_native_browser_dialog (useToast + 커스텀 확인 영역)
- *   - feedback_marketing_user_ux_priority (1-click 정지)
+ * ⛔ native dialog 0 · 줄표 0 · 내부 식별자 0(고객 화면).
  */
-
-import { useState, useEffect } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
-import {
-  CheckCircle2, AlertTriangle, Loader2, MessageSquare, Calendar,
-  PauseCircle, ShieldCheck, Phone, ArrowLeft,
-} from 'lucide-react';
-import { useToast } from '../components/ToastProvider';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { useParams } from 'react-router-dom';
+import { CheckCircle2, MessageSquare, PauseCircle } from 'lucide-react';
+import { useApproveToken } from '../hooks/useApproveToken';
+import { LinkShell, LinkLoading, LinkInvalid, LinkNotice, LinkRow } from '../components/link/LinkShell';
+import LinkConfirmSheet from '../components/link/LinkConfirmSheet';
 
 interface PauseInfo {
-  journey_name: string;
-  step_order: number;
+  journeyName: string;
+  journeyStatus: string;
+  stepOrder: number;
   channel: string;
-  scheduled_send_at: string | null;
-  message_body: string;
-  message_subject: string | null;
-  confidence_score: number | null;
+  messageSubject: string | null;
+  messageBody: string;
+  sendDate: string;
+  dueCount: number;
+  startedCount: number;
 }
 
-type Phase = 'loading' | 'ready' | 'confirming' | 'pausing' | 'paused' | 'invalid' | 'error';
+type Done =
+  | { kind: 'step'; paused: number; startedCount: number | null; sendDate: string }
+  | { kind: 'journey'; changed: boolean };
+
+const WEEK = ['일', '월', '화', '수', '목', '금', '토'];
+function dayLabel(d: string): string {
+  const [y, m, dd] = d.split('-').map(Number);
+  if (!y || !m || !dd) return d;
+  return `${m}월 ${dd}일(${WEEK[new Date(Date.UTC(y, m - 1, dd)).getUTCDay()]})`;
+}
+
+/** 옛 주소(/journey-pause/:token)의 토큰을 읽고 주소에서 지운다(브라우저 기록에 정지권을 남기지 않는다) */
+function usePathToken(): string {
+  const { token } = useParams<{ token?: string }>();
+  const ref = useRef<string>(token || '');
+  useEffect(() => {
+    if (token) window.history.replaceState(null, '', '/journey-pause');
+  }, [token]);
+  return ref.current;
+}
 
 export default function JourneyPausePage() {
-  const { token } = useParams<{ token: string }>();
-  const navigate = useNavigate();
-  const toast = useToast();
-  const [phase, setPhase] = useState<Phase>('loading');
+  const fragmentToken = useApproveToken();
+  const pathToken = usePathToken();
+  const token = fragmentToken || pathToken;
   const [info, setInfo] = useState<PauseInfo | null>(null);
-  const [errorMsg, setErrorMsg] = useState<string | null>(null);
-  const [pausedPhone, setPausedPhone] = useState('');
+  const [phase, setPhase] = useState<'loading' | 'ready' | 'invalid' | 'error'>('loading');
+  const [ask, setAsk] = useState<'step' | 'journey' | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [done, setDone] = useState<Done | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+  const headers = { 'X-Journey-Pause-Token': token };
 
-  useEffect(() => {
-    if (!token) {
-      setPhase('invalid');
-      return;
-    }
-    loadInfo();
-  }, [token]);
-
-  const loadInfo = async () => {
+  const load = useCallback(async () => {
+    if (!token) { setPhase('invalid'); return; }
     try {
-      const res = await fetch(`/journey-pause/${token}`);
-      if (res.status === 404) {
-        setPhase('invalid');
-        return;
-      }
-      const data = await res.json();
-      if (!res.ok) {
-        setErrorMsg(data?.error || '조회 사고');
-        setPhase('error');
-        return;
-      }
-      setInfo(data);
+      const res = await fetch('/api/journey-pause/info', { headers, referrerPolicy: 'no-referrer' });
+      const data = await res.json().catch(() => ({}));
+      if (res.status === 404) { setPhase('invalid'); return; }
+      if (!res.ok || !data?.success) { setPhase('error'); return; }
+      setInfo(data as PauseInfo);
       setPhase('ready');
-    } catch (e: any) {
-      setErrorMsg(e?.message || '호출 사고');
+    } catch {
       setPhase('error');
     }
-  };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [token]);
 
-  const confirmPause = async () => {
-    if (!token) return;
-    setPhase('pausing');
+  useEffect(() => { void load(); }, [load]);
+
+  const run = async () => {
+    if (!ask || busy) return;
+    setBusy(true);
+    setNotice(null);
     try {
-      const res = await fetch(`/journey-pause/${token}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ paused_phone: pausedPhone.trim() }),
+      const res = await fetch(ask === 'step' ? '/api/journey-pause/pause' : '/api/journey-pause/pause-journey', {
+        method: 'POST', headers, referrerPolicy: 'no-referrer',
       });
-      const data = await res.json();
-      if (res.ok && data.success) {
-        toast.success('발송 정지가 처리되었습니다');
-        setPhase('paused');
-      } else {
-        toast.error(data?.error || '정지 호출 사고');
-        setPhase('confirming');
-      }
-    } catch (e: any) {
-      toast.error(e?.message || '정지 호출 사고');
-      setPhase('confirming');
+      const data = await res.json().catch(() => ({}));
+      if (res.status === 404) { setAsk(null); setPhase('invalid'); return; }
+      if (!res.ok || !data?.success) { setNotice(data?.error || '처리하지 못했습니다. 잠시 후 다시 시도해 주세요.'); return; }
+      setDone(ask === 'step'
+        ? { kind: 'step', paused: Number(data.paused) || 0, startedCount: data.startedCount === null || data.startedCount === undefined ? null : Number(data.startedCount) || 0, sendDate: String(data.sendDate || info?.sendDate || '') }
+        : { kind: 'journey', changed: !!data.changed });
+      setAsk(null);
+    } catch {
+      setNotice('처리하지 못했습니다. 잠시 후 다시 시도해 주세요.');
+    } finally {
+      setBusy(false);
     }
   };
 
-  const dateStr = info?.scheduled_send_at
-    ? new Date(info.scheduled_send_at).toLocaleString('ko-KR', {
-        timeZone: 'Asia/Seoul',
-        year: 'numeric',
-        month: '2-digit',
-        day: '2-digit',
-        hour: '2-digit',
-        minute: '2-digit',
-      })
-    : '시각 미정';
+  const shell = (children: React.ReactNode) => (
+    <LinkShell title="여정 발송 정지" subtitle="곧 나갈 자동 발송을 여기서 멈출 수 있어요" icon={PauseCircle} tone="amber" service="한줄로 마케팅 여정">
+      {children}
+    </LinkShell>
+  );
 
+  if (phase === 'loading') return shell(<LinkLoading />);
+  if (phase === 'invalid') return shell(<LinkInvalid title="유효하지 않거나 만료된 주소입니다" body="정지 주소는 24시간 동안 열립니다. 가장 최근에 받으신 안내 문자의 주소로 다시 열어 주세요." />);
+  if (phase === 'error' || !info) {
+    return shell(
+      <div className="space-y-3">
+        <LinkInvalid title="내용을 불러오지 못했습니다" body="잠시 후 다시 열어 주세요." />
+        <button type="button" onClick={() => { setPhase('loading'); void load(); }}
+          className="w-full h-11 rounded-xl border border-slate-300 bg-white text-[14px] font-semibold text-slate-700">다시 불러오기</button>
+      </div>,
+    );
+  }
+
+  const journeyPaused = info.journeyStatus !== 'active';
   return (
-    <div className="min-h-screen bg-gradient-to-br from-violet-900 via-fuchsia-900 to-violet-900 text-white px-4 py-8 md:py-16">
-      <div className="max-w-2xl mx-auto">
-        {/* 헤더 */}
-        <div className="flex items-center gap-3 mb-6">
-          <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-violet-500 to-fuchsia-500 flex items-center justify-center shadow-lg shadow-violet-500/30">
-            <PauseCircle className="w-6 h-6 text-white" />
-          </div>
-          <div>
-            <h1 className="text-xl md:text-2xl font-bold text-white flex items-center gap-2">
-              발송 정지 페이지
-            </h1>
-            <p className="text-[11px] md:text-[12px] text-white/50 mt-0.5">
-              여정 자동 발송 2시간 전 안내: 담당자 1-click 정지 영역
-            </p>
-          </div>
-        </div>
+    <>
+      {shell(
+        <div className="space-y-4">
+          {notice && <LinkNotice tone="rose">{notice}</LinkNotice>}
+          {done?.kind === 'step' && (
+            <LinkNotice tone={done.paused > 0 ? 'emerald' : 'amber'} icon={CheckCircle2}>
+              <b>{dayLabel(done.sendDate)} 이 단계 발송 {done.paused.toLocaleString()}건을 멈췄습니다.</b>
+              {done.startedCount === null ? <> 이미 보내기 시작한 건수는 확인하지 못했습니다.</> : done.startedCount > 0 && <> 이미 보내기 시작한 {done.startedCount.toLocaleString()}건은 멈추지 못했습니다.</>}
+              {' '}지금 뒤로 새로 들어오는 고객은 이 정지로 막지 못합니다. 모두 막으려면 아래 [여정 전체 일시정지]를 눌러 주세요.
+            </LinkNotice>
+          )}
+          {done?.kind === 'journey' && (
+            <LinkNotice tone="emerald" icon={CheckCircle2}>
+              <b>{done.changed ? '여정 전체를 일시정지했습니다.' : '이 여정은 이미 멈춰 있습니다.'}</b> 다시 켜려면 한줄로 여정 화면에서 문안을 확인한 뒤 재개해 주세요.
+            </LinkNotice>
+          )}
 
-        {/* loading */}
-        {phase === 'loading' && (
-          <div className="bg-violet-900/40 border border-white/10 rounded-2xl shadow-2xl p-8 text-center">
-            <Loader2 className="w-8 h-8 text-violet-300 animate-spin mx-auto mb-3" />
-            <div className="text-[13px] text-white/60">발송 정보 조회 중</div>
-          </div>
-        )}
-
-        {/* invalid token */}
-        {phase === 'invalid' && (
-          <div className="bg-violet-900/40 border border-rose-400/30 rounded-2xl shadow-2xl p-8">
-            <div className="flex items-start gap-3">
-              <AlertTriangle className="w-6 h-6 text-rose-300 flex-shrink-0 mt-0.5" />
-              <div>
-                <h2 className="text-base font-semibold text-rose-100 mb-2">유효하지 않은 정지 링크</h2>
-                <div className="text-[13px] text-rose-100/80 leading-relaxed">
-                  본 정지 링크는 24시간 동안만 유효합니다. 만료되었거나 위조된 token입니다.
-                  최신 알림 LMS에서 정지 링크를 확인해주세요.
-                </div>
-              </div>
+          <div className="rounded-2xl border border-slate-200 bg-white overflow-hidden">
+            <div className="px-5 py-4 border-b border-slate-100">
+              <p className="text-[15px] font-bold tracking-[-0.01em] text-slate-900 break-words">{info.journeyName}</p>
+              <p className="mt-0.5 text-[12.5px] text-slate-500">{info.stepOrder}번째 단계 · {journeyPaused ? '여정이 멈춰 있어요' : '진행 중'}</p>
             </div>
-            <button
-              onClick={() => navigate('/')}
-              className="mt-5 inline-flex items-center gap-1.5 px-4 py-2 bg-white/5 hover:bg-white/10 text-white/80 rounded-lg text-sm font-medium transition-colors"
-            >
-              <ArrowLeft className="w-4 h-4" />
-              메인 페이지로
+            <div className="px-5 py-4 space-y-2">
+              <LinkRow label="보낼 날" value={dayLabel(info.sendDate)} />
+              <LinkRow label="지금 멈출 수 있는 발송" value={`${info.dueCount.toLocaleString()}건`} />
+              {info.startedCount > 0 && <LinkRow label="이미 보내기 시작함" value={`${info.startedCount.toLocaleString()}건`} />}
+            </div>
+            <div className="px-5 pb-5">
+              <div className="rounded-xl bg-slate-100 px-4 py-3.5 text-[13px] leading-relaxed text-slate-900">
+                <p className="flex items-center gap-1.5 text-[11.5px] text-slate-500 mb-1.5"><MessageSquare className="w-3.5 h-3.5" />나갈 문안</p>
+                {info.messageSubject && <p className="font-extrabold mb-1">{info.messageSubject}</p>}
+                <p className="whitespace-pre-wrap break-words">{info.messageBody}</p>
+              </div>
+              <p className="mt-2 text-[10px] text-slate-400 italic">Data source: 여정 발송 기록 · 지금 기준 실조회</p>
+            </div>
+          </div>
+
+          {!journeyPaused && !done && (
+            <div className="space-y-2">
+              <button type="button" onClick={() => setAsk('step')} disabled={info.dueCount === 0}
+                className="w-full h-12 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-900 text-[15px] font-bold inline-flex items-center justify-center gap-2 disabled:opacity-40">
+                <PauseCircle className="w-[17px] h-[17px]" />이 발송 정지 · {info.dueCount.toLocaleString()}건
+              </button>
+              <button type="button" onClick={() => setAsk('journey')}
+                className="w-full h-11 rounded-xl border border-slate-300 bg-white text-[14px] font-semibold text-slate-700">
+                여정 전체 일시정지
+              </button>
+            </div>
+          )}
+          {!journeyPaused && done?.kind === 'step' && (
+            <button type="button" onClick={() => setAsk('journey')}
+              className="w-full h-11 rounded-xl border border-slate-300 bg-white text-[14px] font-semibold text-slate-700">
+              여정 전체 일시정지
             </button>
-          </div>
-        )}
+          )}
+        </div>,
+      )}
 
-        {/* error */}
-        {phase === 'error' && (
-          <div className="bg-violet-900/40 border border-amber-400/30 rounded-2xl shadow-2xl p-8">
-            <div className="flex items-start gap-3">
-              <AlertTriangle className="w-6 h-6 text-amber-300 flex-shrink-0 mt-0.5" />
-              <div>
-                <h2 className="text-base font-semibold text-amber-100 mb-2">정지 정보 조회 사고</h2>
-                <div className="text-[13px] text-amber-100/80 leading-relaxed">
-                  {errorMsg || '알 수 없는 사고가 발생했습니다.'}
-                </div>
-              </div>
-            </div>
-            <button
-              onClick={loadInfo}
-              className="mt-5 px-4 py-2 bg-violet-500/30 hover:bg-violet-500/50 text-violet-100 rounded-lg text-sm font-semibold transition-colors"
-            >
-              다시 시도
-            </button>
-          </div>
-        )}
-
-        {/* ready — 발송 정보 + 정지 선택 */}
-        {(phase === 'ready' || phase === 'confirming') && info && (
-          <div className="space-y-4">
-            {/* 발송 정보 카드 */}
-            <div className="bg-violet-900/40 border border-white/10 rounded-2xl shadow-2xl overflow-hidden">
-              <div className="p-5 border-b border-white/10 bg-gradient-to-r from-violet-500/10 via-fuchsia-500/10 to-purple-500/10">
-                <div className="text-[11px] text-white/50 mb-1">여정명</div>
-                <div className="text-lg font-semibold text-white">{info.journey_name}</div>
-                <div className="flex flex-wrap items-center gap-2 mt-3 text-[12px] text-white/70">
-                  <span className="px-2 py-0.5 rounded-md bg-white/10 font-mono">
-                    step {info.step_order}
-                  </span>
-                  {info.channel && (
-                    <span className="px-2 py-0.5 rounded-md bg-violet-500/20 text-violet-200 font-mono uppercase">
-                      {info.channel}
-                    </span>
-                  )}
-                  {info.confidence_score != null && info.confidence_score > 0 && (
-                    <span className="px-2 py-0.5 rounded-md bg-emerald-500/20 text-emerald-200 flex items-center gap-1">
-                      <ShieldCheck className="w-3 h-3" />
-                      신뢰도 {info.confidence_score}/100
-                    </span>
-                  )}
-                </div>
-              </div>
-
-              <div className="p-5 space-y-4">
-                <div className="flex items-start gap-2">
-                  <Calendar className="w-4 h-4 text-violet-300 flex-shrink-0 mt-0.5" />
-                  <div>
-                    <div className="text-[11px] text-white/50 mb-0.5">발송 예정 시각</div>
-                    <div className="text-[14px] font-mono text-white">{dateStr}</div>
-                  </div>
-                </div>
-
-                {info.message_subject && (
-                  <div>
-                    <div className="text-[11px] text-white/50 mb-1">제목 (LMS/MMS)</div>
-                    <div className="text-[13px] text-white/90 p-2 bg-white/5 rounded-lg">
-                      {info.message_subject}
-                    </div>
-                  </div>
-                )}
-
-                <div>
-                  <div className="flex items-center gap-1.5 text-[11px] text-white/50 mb-1">
-                    <MessageSquare className="w-3 h-3" />
-                    본문 미리보기 (활성화 시점 snapshot)
-                  </div>
-                  <div className="text-[13px] text-white/90 p-3 bg-black/30 rounded-lg border border-white/5 whitespace-pre-wrap leading-relaxed">
-                    {info.message_body}
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            {/* 정지 확인 카드 */}
-            {phase === 'ready' && (
-              <div className="bg-violet-900/40 border border-amber-400/30 rounded-2xl shadow-2xl p-5">
-                <div className="flex items-start gap-2 mb-3">
-                  <AlertTriangle className="w-5 h-5 text-amber-300 flex-shrink-0 mt-0.5" />
-                  <div>
-                    <div className="text-[14px] font-semibold text-amber-100">이 발송을 정지하시겠습니까?</div>
-                    <div className="text-[12px] text-amber-100/80 mt-1 leading-relaxed">
-                      정지 시 본 step의 미발송 execution이 일제히 paused 상태로 전환되며,
-                      journey_step_pause_logs 테이블에 담당자 phone + 본문 snapshot + 시각이 영구 기록됩니다.
-                      여정 자체는 재활성화 의무 영역.
-                    </div>
-                  </div>
-                </div>
-                <button
-                  onClick={() => setPhase('confirming')}
-                  className="w-full px-4 py-3 bg-amber-500/20 hover:bg-amber-500/40 text-amber-100 rounded-lg text-sm font-semibold transition-colors flex items-center justify-center gap-2"
-                >
-                  <PauseCircle className="w-4 h-4" />
-                  이 발송 정지 진행
-                </button>
-              </div>
-            )}
-
-            {phase === 'confirming' && (
-              <div className="bg-violet-900/40 border border-rose-400/40 rounded-2xl shadow-2xl p-5">
-                <div className="text-[14px] font-semibold text-rose-100 mb-3">최종 확인: 정지 후 복구 의무</div>
-                <div className="mb-4">
-                  <label className="block text-[12px] text-white/60 mb-1.5 flex items-center gap-1.5">
-                    <Phone className="w-3 h-3" />
-                    담당자 phone (선택, 기록 보존)
-                  </label>
-                  <input
-                    type="tel"
-                    value={pausedPhone}
-                    onChange={(e) => setPausedPhone(e.target.value)}
-                    placeholder="010-1234-5678"
-                    className="w-full px-3 py-2 bg-violet-900/50 border border-white/10 rounded-lg text-sm text-white placeholder-white/20 focus:outline-none focus:border-rose-400/50"
-                  />
-                  <div className="text-[10px] text-white/40 mt-1">
-                    journey_step_pause_logs.paused_phone 영구 기록 영역
-                  </div>
-                </div>
-                <div className="flex gap-2">
-                  <button
-                    onClick={() => setPhase('ready')}
-                    className="flex-1 px-4 py-2.5 bg-white/5 hover:bg-white/10 text-white/80 rounded-lg text-sm font-medium transition-colors"
-                  >
-                    취소
-                  </button>
-                  <button
-                    onClick={confirmPause}
-                    className="flex-1 px-4 py-2.5 bg-rose-500/30 hover:bg-rose-500/50 text-rose-100 rounded-lg text-sm font-semibold transition-colors flex items-center justify-center gap-2"
-                  >
-                    <PauseCircle className="w-4 h-4" />
-                    정지 확정
-                  </button>
-                </div>
-              </div>
-            )}
-          </div>
-        )}
-
-        {/* pausing */}
-        {phase === 'pausing' && (
-          <div className="bg-violet-900/40 border border-white/10 rounded-2xl shadow-2xl p-8 text-center">
-            <Loader2 className="w-8 h-8 text-rose-300 animate-spin mx-auto mb-3" />
-            <div className="text-[13px] text-white/70">발송 정지 진행 중: DB 트랜잭션 + journey_step_pause_logs 영구 기록</div>
-          </div>
-        )}
-
-        {/* paused */}
-        {phase === 'paused' && (
-          <div className="bg-violet-900/40 border border-emerald-400/40 rounded-2xl shadow-2xl p-8">
-            <div className="flex items-start gap-3">
-              <CheckCircle2 className="w-7 h-7 text-emerald-300 flex-shrink-0 mt-0.5" />
-              <div>
-                <h2 className="text-lg font-semibold text-emerald-100 mb-2">발송 정지 종결</h2>
-                <div className="text-[13px] text-emerald-100/80 leading-relaxed space-y-2">
-                  <div>본 step의 미발송 execution이 paused 상태로 전환됐습니다.</div>
-                  <div>여정 admin 페이지의 "정지 이력" 영역에서 영구 기록을 확인할 수 있습니다.</div>
-                  <div>여정 재활성화는 admin 권한 영역.</div>
-                </div>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* Source caption */}
-        <div className="text-[10px] text-white/30 italic mt-6 text-center">
-          Data source: CT-94 journey-pause-handler (D218+ 신설) · token TTL 24h · HMAC-SHA256 서명 정합
-        </div>
-      </div>
-    </div>
+      <LinkConfirmSheet
+        open={ask !== null}
+        title={ask === 'journey' ? '여정 전체를 일시정지할까요?' : '이 발송을 멈출까요?'}
+        rows={ask === 'journey'
+          ? [{ label: '여정', value: info.journeyName }]
+          : [{ label: '보낼 날', value: dayLabel(info.sendDate) }, { label: '멈출 발송', value: `${info.dueCount.toLocaleString()}건(누르는 순간 다시 셉니다)` }]}
+        notes={ask === 'journey'
+          ? [{ tone: 'warn', text: '이 여정의 모든 단계 발송이 멈춥니다. 새 고객도 들어오지 않습니다.' }, { tone: 'info', text: '다시 켜기는 한줄로 여정 화면에서 합니다.' }]
+          : [{ tone: 'info', text: '이 단계의 그날 발송만 멈춥니다. 다른 단계와 다른 날은 그대로 갑니다.' }, { tone: 'warn', text: '이미 보내기 시작한 건은 멈추지 못합니다.' }]}
+        confirmLabel={ask === 'journey' ? '여정 일시정지' : '이 발송 정지'}
+        tone="amber"
+        busy={busy}
+        onConfirm={() => { void run(); }}
+        onCancel={() => setAsk(null)}
+      />
+    </>
   );
 }

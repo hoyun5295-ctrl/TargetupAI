@@ -18,9 +18,10 @@ import { campaignMayHaveSent, inspectAttemptCampaign } from './agency-send-campa
 import { logEvent } from './agency-send-intake';
 
 export type CancelTxResult =
-  /** pending=true = 취소 중(큐 정리가 안 끝났다 · 워커가 마무리한다). row = 현재 행 원본 */
-  | { ok: true; pending: boolean; row: any }
-  | { ok: false; status: number; error: string; code?: string; tooLate?: boolean };
+  /** pending=true = 취소 중(큐 정리가 안 끝났다 · 워커가 마무리한다). row = 현재 행 원본 ·
+   *  ★2026-10-18 finalizedElsewhere = 확정 UPDATE 를 이 호출이 하지 못했다(워커 F 가 먼저 확정 · 결과 통보도 그쪽 몫) */
+  | { ok: true; pending: boolean; row: any; finalizedElsewhere?: boolean }
+  | { ok: false; status: number; error: string; code?: string; tooLate?: boolean; current?: any };
 
 export async function cancelAgencyRequestTx(opts: {
   requestId: string;
@@ -29,9 +30,22 @@ export async function cancelAgencyRequestTx(opts: {
   reason: string;
   /** 소유자 술어 — 회사 일반 사용자 경로는 본인 id, 관리자·슈퍼관리자 경로는 null(회사 전체) */
   ownerUserId: string | null;
-  cancelledBy: string;
+  /** ★2026-10-18 축 1 — 담당자 링크 취소는 계정이 없다(null · cancelledByType 'agency_link') */
+  cancelledBy: string | null;
   cancelledByType?: string;
+  /** ★2026-10-18 축 1 — 화면 · 링크가 본 행 수정 번호(어긋나면 409 STATE_CHANGED + 지금 행) · 운영 취소 = 생략 */
+  revision?: number | null;
 }): Promise<CancelTxResult> {
+  if (opts.revision !== undefined && opts.revision !== null) {
+    const seen = await query(
+      `SELECT * FROM agency_send_requests WHERE id = $1::uuid AND company_id = $2::uuid AND ($3::uuid IS NULL OR created_by = $3::uuid)`,
+      [opts.requestId, opts.companyId, opts.ownerUserId],
+    );
+    if (seen.rows.length === 0) return { ok: false, status: 404, error: '접수를 찾을 수 없습니다.' };
+    if (!Number.isFinite(Number(opts.revision)) || Number(seen.rows[0].revision) !== Number(opts.revision)) {
+      return { ok: false, status: 409, code: 'STATE_CHANGED', error: '그 사이 내용이 바뀌었습니다. 바뀐 내용을 확인한 뒤 다시 눌러 주세요.', current: seen.rows[0] };
+    }
+  }
   // ⛔ 잡을 때 **옛 상태를 함께 받아 둔다**(`RETURNING`은 갱신 뒤 값이라 그것만으로는 되돌릴 수 없다).
   //   워커가 잡고 있는 행(`lock_token`)은 건드리지 않는다.
   const claimed = await query(
@@ -47,8 +61,10 @@ export async function cancelAgencyRequestTx(opts: {
       WHERE a.id = prev.id
         AND prev.status NOT IN (${NOT_CANCELABLE_SQL})
         AND a.lock_token IS NULL
+        AND ($5::int IS NULL OR prev.revision = $5::int)
      RETURNING prev.status AS prev_status, prev.revision AS prev_revision, a.*`,
-    [opts.requestId, opts.companyId, String(opts.reason || '담당자 취소').slice(0, 200), opts.ownerUserId],
+    [opts.requestId, opts.companyId, String(opts.reason || '담당자 취소').slice(0, 200), opts.ownerUserId,
+      opts.revision === undefined || opts.revision === null ? null : Number(opts.revision)],
   );
 
   if (claimed.rows.length === 0) {
@@ -90,7 +106,7 @@ export async function cancelAgencyRequestTx(opts: {
         //   이 옵션이 없으면 상태 게이트에 막혀 **예약이 잡힌 접수를 아무도 취소할 수 없다**(0828 확정).
         //   15분 게이트(`skipTimeCheck`)는 켜지 않는다 — 그건 사용자 정책이고 여기는 사용자 입구다.
         result = await cancelCampaign(campaignId, opts.companyId, {
-          cancelledBy: opts.cancelledBy,
+          cancelledBy: opts.cancelledBy || undefined,
           cancelledByType: opts.cancelledByType,
           queueOnly: true,
         });
@@ -175,7 +191,7 @@ export async function cancelAgencyRequestTx(opts: {
       `SELECT * FROM agency_send_requests WHERE id = $1::uuid AND company_id = $2::uuid`,
       [opts.requestId, opts.companyId],
     );
-    return { ok: true, pending: false, row: cur.rows[0] };
+    return { ok: true, pending: false, row: cur.rows[0], finalizedElsewhere: true };
   }
 
   await logEvent(opts.requestId, 'cancelled', {

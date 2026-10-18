@@ -133,22 +133,31 @@ describe('대행 ② 회신번호 종류 표시', { timeout: 30_000 }, () => {
   });
 });
 
+const changeCt = fs.readFileSync(path.join(__dirname, '../agency-send-change.ts'), 'utf8').replace(/\r\n/g, '\n');
+// ★2026-10-18 축 1 — 옛 라우트 본문 = CT 함수(문안 수정 = editAgencyContentTx · 시각 변경 = rescheduleAgencyRequestTx)
+const ctSegOf = (marker: string) => {
+  const fn = marker.includes('content') ? 'export async function editAgencyContentTx(' : 'export async function rescheduleAgencyRequestTx(';
+  const s = changeCt.indexOf(fn);
+  const e = changeCt.indexOf('\nexport ', s + fn.length);
+  return changeCt.slice(s, e < 0 ? undefined : e);
+};
+
 describe('대행 ③ 시각·문안 변경 때 회신번호 재검증', { timeout: 30_000 }, () => {
   for (const marker of ["router.post('/:id/content'", "router.post('/:id/reschedule'"]) {
     it(`${marker}: 두 벌 발송 판정 앞에서 같은 CT로 막는다`, () => {
-      const s = route.indexOf(marker);
-      const seg = route.slice(s, route.indexOf('router.', s + marker.length));
-      const at = seg.indexOf('await rejectUnregisteredCallbacks(req.params.id, r.rows[0], res)');
+      expect(route).toMatch(marker.includes('content') ? /await editAgencyContentTx\(/ : /await rescheduleAgencyRequestTx\(/);
+      const seg = ctSegOf(marker);
+      const at = seg.indexOf('await findUnregisteredRequestCallbacks({ id: input.requestId, company_id: row.company_id, created_by: row.created_by, callback_number: row.callback_number })');
       expect(at).toBeGreaterThan(0);
       expect(at).toBeLessThan(seg.indexOf('await attemptBlocksChange('));
-      expect(seg).toMatch(/SELECT [^`]*company_id, created_by, callback_number/);
+      expect(seg).toMatch(/SELECT \* FROM agency_send_requests/);
     });
   }
 
   it('발송 직전 재검증과 라우트가 같은 CT이고, 문장도 접수와 같은 CT다', () => {
     expect(worker).toMatch(/const \{ rowCallbacks, missing \} = await findUnregisteredRequestCallbacks\(row\);/);
     expect(worker).not.toMatch(/getRegisteredCallbackSet\(/);
-    expect(route).toMatch(/error: unregisteredCallbackError\(missing\)/);
+    expect(changeCt).toMatch(/fail\(400, unregisteredCallbackError\(missing\), 'CALLBACK_UNREGISTERED'\)/);
     expect(intake).toMatch(/return \{ ok: false, status: 400, error: unregisteredCallbackError\(unregisteredRows\) \};/);
   });
 

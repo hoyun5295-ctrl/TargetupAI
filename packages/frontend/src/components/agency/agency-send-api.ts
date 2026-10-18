@@ -49,6 +49,8 @@ export interface AgencySendRequest {
   requestedAt: string;
   recipientCount: number;
   fileName: string | null;
+  /** ★2026-10-18 축 4 승인 마감(ISO · 서버 approvalDeadline · 승인 대기 아니면 null) */
+  approveBy?: string | null;
   varMapping: Record<string, string>;
   testRound: number;
   lastTestAt: string | null;
@@ -283,10 +285,11 @@ export async function rescheduleAgencyRequest(
  * 취소는 원장과 발송 큐 두 곳을 건드리는 다단계 작업이라, 큐가 지워졌음을 확인하기 전에는 확정하지 않는다.
  */
 export async function cancelAgencyRequest(
-  id: string, reason?: string,
+  id: string, reason?: string, revision?: number,
 ): Promise<{ request: AgencySendRequest; pending: boolean }> {
+  // ★2026-10-18 축 1 — 화면이 본 수정 번호를 싣는다(그 사이 바뀌었으면 서버가 409 · 화면이 다시 읽는다)
   const res = await fetch(`/api/agency-send/${id}/cancel`, {
-    method: 'POST', headers: json(), body: JSON.stringify({ reason }),
+    method: 'POST', headers: json(), body: JSON.stringify({ reason, ...(revision !== undefined ? { revision } : {}) }),
   });
   const data = await unwrap(res);
   return { request: data.request, pending: !!data.pending };

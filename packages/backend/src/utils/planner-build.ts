@@ -15,14 +15,29 @@
  *   - 회사 단위 동시 생성 잠금은 만들기 화면과 같은 키(엔진 계약 · 같은 회사가 동시에 두 개를 만들지 않는다).
  *   - 완성본은 그 채널의 승인 전 접점(planned)에 붙인다. 승인 뒤에는 다시 만들 수 없다(읽기 전용 · F10).
  */
-import { generateFromBuildMaterials, quoteFromBuildMaterials } from './campaign-quick';
-import { buildInflightKey, aiAutoBuildEnabled, AI_AUTO_BUILD_CARD_IMAGES } from './ai-auto-build-materials';
+import { createHash } from 'crypto';
+import { generateFromBuildMaterials, quoteFromBuildMaterials, defaultBuildDeps, readableCustomerBrandKit, type BuildDeps } from './campaign-quick';
+import {
+  buildInflightKey, aiAutoBuildEnabled, AI_AUTO_BUILD_CARD_IMAGES, buildIdempotencyKey, mallProductNoOf, resolveBuildProducts,
+  type BuildMallLookup, type BuildMallProvider, type BuildProduct,
+} from './ai-auto-build-materials';
 import { tryAcquireInflight, releaseInflight } from './inflight-lock';
 import { query } from '../config/database';
 import {
   PlannerEventRow, PlannerMaterials, loadPlannerEvent, patchEventMeta, plannerBuildInputHash, isEventEditable,
 } from './planner-event';
 import { checkChannelReadiness } from './planner-channel-gate';
+import { InsufficientCreditError, isChargedByKey } from './ai-credit';
+import { getCreditCost } from './ai-credit-calc';
+import { runInCreditBundle } from './ai-credit-context';
+import { getLineTemplate, lineTemplatesEnabled, type LineTemplate } from './design-core/line-templates';
+import { oneLineStepsEnabled } from './one-line-steps';
+import { draftLineTemplate, buildLineTemplateDm, buildLineTemplateEmail, lineTemplateBrand, lineTemplateDmMarker } from './line-template-run';
+import { linePinnedPrimary, mergeLineBrandKit, lineEmailDesign, type LineMallCard } from './line-mall-cards';
+import { resolveLinePage, isLinePageError } from './line-template-page';
+import { lineStepsCollected } from './line-steps-context';
+import { getCompanyBrandKitRaw } from './dm/dm-brand-kit';
+import { pagesFromSectionGroups } from './dm/dm-builder';
 
 export class PlannerBuildError extends Error {
   constructor(public status: number, public code: string, message: string, public extra?: Record<string, unknown>) {
@@ -84,6 +99,173 @@ export function buildPlannerEngineMaterials(
   };
 }
 
+// ── ★ 2026-10-18 v2-1 템플릿 완성본(설계서 docs/2026-10-18-planner-v2-design.md §3-4) ─────────────────────
+// 조립 = 1017 함수 그대로(draftLineTemplate · buildLineTemplateDm/Email) · 저장 · 차감 · 회수 = 엔진 부품 그대로(BuildDeps · quick: 키) ·
+// 문구 = AI 1회(크레딧 묶음 · 원가 0) · AI 근거에서 혜택 · 기간 · 페이지 글을 뺀다(factsOnly) → 혜택 원문 · 마감 · 행사명은 코드가 놓는다.
+// 돈 = 기존 키(DM 5 · 메일 3) · 한 줄 완성 10 없음 · 새 키 0. 스위치 = 자동제작 + 한 줄 단계 + 템플릿(1017 스위치 그대로 · 밖이면 400).
+
+/** 이 회사에서 플래너 템플릿 완성본을 만들 수 있는가(1017 스위치 그대로 · 자동제작 엔진 개방 안에서) */
+export function plannerTemplatesEnabled(companyId: string): boolean {
+  return aiAutoBuildEnabled(companyId) && lineTemplatesEnabled(companyId, oneLineStepsEnabled(companyId));
+}
+
+/** (순수) 템플릿이 정한 필수 재료 — 버튼 주소(빈 주소 = 발행 때 막힌다) · 상품 최소 · 혜택 필수. 빈 배열 = 통과. */
+export function plannerTemplateMissing(t: LineTemplate, ev: Pick<PlannerEventRow, 'benefitText'>, m: PlannerMaterials): string[] {
+  const missing: string[] = [];
+  if (!m.link) missing.push('link');
+  if (m.products.length < t.needs.products.min) missing.push('products');
+  if (t.needs.benefit === 'required' && !String(ev.benefitText || '').trim()) missing.push('benefit');
+  return missing;
+}
+
+/** (순수) 템플릿 견적 — 엔진과 같은 키 · 같은 단가(판독 0) · 크레딧제 미적용 = 0 */
+export function plannerTemplateQuote(channel: 'dm' | 'email', creditEnabled: boolean): { total: number; parts: Array<{ key: string; label: string; cost: number }> } {
+  const key = channel === 'email' ? 'email-ai-generate' : 'dm-ai-generate';
+  const cost = creditEnabled ? getCreditCost(key) : 0;
+  return { total: cost, parts: [{ key, label: channel === 'email' ? '이메일 생성' : '모바일 DM 생성', cost }] };
+}
+
+/** (순수) 템플릿 과금 지문 — 생성 결과에 닿는 입력 전부(템플릿 · 배치 · 재료 지문 · 행사 사실 · 채널) · 같은 시도 같은 입력 = 같은 키 */
+export function plannerTemplateBillingHash(ev: Pick<PlannerEventRow, 'title' | 'startsOn' | 'endsOn' | 'benefitText'>, m: PlannerMaterials, channel: 'dm' | 'email'): string {
+  return createHash('sha256').update(JSON.stringify(['planner-template', channel, m.template?.id, m.template?.layout, plannerBuildInputHash(ev, m)])).digest('hex');
+}
+
+/**
+ * (순수) 재조회 결과 → 템플릿 상품. 사진 있는 상품 = 카드(엔진 병합 그대로 · 품절 제외) · 그 밖 = 글 상품(이름 · 가격 그대로).
+ * 카드가 된 몰 상품(상품번호)과 같은 이름의 카드는 글 상품으로 다시 싣지 않는다.
+ */
+export function plannerTemplateProducts(products: readonly BuildProduct[], lookups: Record<string, BuildMallLookup | undefined>): { cards: LineMallCard[]; textProducts: Array<{ name: string; price?: number }> } {
+  const resolved = resolveBuildProducts(products, lookups);
+  const cards: LineMallCard[] = resolved.cards.map((c) => ({
+    name: c.name, price: c.price ?? 0, ...(c.discount_price ? { discount_price: c.discount_price } : {}), image_url: c.image_url, ...(c.link_url ? { link_url: c.link_url } : {}),
+  }));
+  const excluded = new Set(resolved.excluded.map((e) => e.code));
+  const carded = new Set(resolved.cards.map((c) => (c.code ? `code:${c.code}` : `name:${c.name}`)));
+  const textProducts: Array<{ name: string; price?: number }> = [];
+  for (const p of products) {
+    const no = mallProductNoOf(p);
+    if (p.source === 'mall' && no && excluded.has(no)) continue;
+    if ((no && carded.has(`code:${no}`)) || carded.has(`name:${p.name}`)) continue;
+    if (textProducts.some((x) => x.name === p.name)) continue;
+    const price = p.salePrice ?? p.price;
+    textProducts.push(price ? { name: p.name, price } : { name: p.name });
+  }
+  return { cards, textProducts };
+}
+
+/**
+ * 템플릿 완성본 1채널 — 엔진과 같은 돈 순서: 재료 게이트 → 견적 결박(409) → 몰 재조회 → 잔액(402) → 문구 AI(묶음 안) → 조립 · 품질 관문 →
+ * 초안 행 → 차감(원장 호출이 던지면 행을 거둔다 · 낸 결말만 건넨다 · 그 밖은 행을 거두고 503).
+ */
+export async function buildPlannerTemplateChannel(input: {
+  ev: PlannerEventRow;
+  materials: PlannerMaterials;
+  channel: 'dm' | 'email';
+  token: string;
+  expectedTotal: number;
+  userId: string | null;
+}, deps: BuildDeps = defaultBuildDeps()): Promise<{ draftId: string; deductOutcome: string }> {
+  const { ev, materials, channel } = input;
+  const t = getLineTemplate(materials.template?.id);
+  if (!t || !materials.template) throw new PlannerBuildError(400, 'TEMPLATE_INVALID', '고른 템플릿을 찾지 못했어요. 템플릿을 다시 골라 주세요.');
+  const missing = plannerTemplateMissing(t, ev, materials);
+  if (missing.length > 0) {
+    throw new PlannerBuildError(400, 'MATERIAL_THIN', missing.includes('link') ? '버튼을 누르면 갈 행사 페이지 주소를 넣어 주세요.' : missing.includes('products') ? '이 템플릿은 상품이 1개 이상 있어야 해요.' : '이 템플릿은 혜택을 적어야 해요.', { missing });
+  }
+  let creditEnabled: boolean;
+  try { creditEnabled = await deps.creditEnabled(ev.companyId); } catch {
+    throw new PlannerBuildError(503, 'CREDIT_LOOKUP_UNAVAILABLE', '크레딧 잔액을 확인하지 못했어요. 잠시 후 다시 시도해 주세요.');
+  }
+  const quote = plannerTemplateQuote(channel, creditEnabled);
+  if (quote.total !== (Number(input.expectedTotal) || 0)) throw new PlannerBuildError(409, 'QUOTE_CHANGED', '견적이 바뀌었어요. 금액을 다시 확인하고 눌러 주세요.', { quote });
+  // 몰 재조회(엔진 부품) — 장애 = "가격 확인 못함"으로 접는다(생성 계속)
+  const products = materials.products as unknown as BuildProduct[];
+  const byProvider = new Map<BuildMallProvider, string[]>();
+  for (const p of products) {
+    const no = mallProductNoOf(p);
+    if (p.source !== 'mall' || !p.provider || !no) continue;
+    byProvider.set(p.provider as BuildMallProvider, [...(byProvider.get(p.provider as BuildMallProvider) || []), no]);
+  }
+  const lookups: Record<string, BuildMallLookup> = {};
+  for (const [provider, nos] of byProvider) {
+    lookups[provider] = await deps.lookupMall(ev.companyId, provider, Array.from(new Set(nos))).catch(() => ({ failed: true, byCode: {} }));
+  }
+  const goods = plannerTemplateProducts(products, lookups);
+  // ★ Codex B 1R — 재조회 뒤 실제로 실릴 상품 수로 필수 재료를 다시 본다(유일한 상품이 품절로 빠지면 상품 없는 완성본에 생성비가 나간다 · AI · 저장 · 차감 전에 막는다)
+  if (goods.cards.length + goods.textProducts.length < t.needs.products.min) {
+    throw new PlannerBuildError(400, 'MATERIAL_THIN', '고른 상품이 품절이거나 몰에서 확인되지 않아 이 템플릿을 만들 수 없어요. 상품을 다시 골라 주세요.', { missing: ['products'] });
+  }
+  // ★ Codex B 1R — 같은 시도가 이미 냈으면(차감 뒤 접점 연결 · 기록이 실패한 재시도) 잔액을 다시 보지 않는다 — 차감은 같은 키 = 중복 0 ·
+  //   옛: 잔액을 다 쓴 고객은 이미 낸 완성본을 행사에 되붙이지 못했다. 조회 실패 = 안 낸 것으로(잔액 검사를 한다 · 넓히지 않는다).
+  const idempotencyKey = buildIdempotencyKey(ev.companyId, channel, input.token, plannerTemplateBillingHash(ev, materials, channel));
+  const alreadyPaid = await isChargedByKey(ev.companyId, idempotencyKey).catch(() => false);
+  if (!alreadyPaid) {
+    try {
+      await deps.checkCredit(ev.companyId, quote.total);
+    } catch (err: any) {
+      if (err instanceof InsufficientCreditError) throw err;
+      throw new PlannerBuildError(503, 'CREDIT_LOOKUP_UNAVAILABLE', '크레딧 잔액을 확인하지 못했어요. 잠시 후 다시 시도해 주세요.');
+    }
+  }
+  // 표지 사진 = 올린 첫 사진 → 행사 페이지 표지(읽기 실패 = 사진 없이 · 막지 않는다 · AI 0 · 0원)
+  let hero: string | null = materials.images[0]?.url || null;
+  if (!hero && materials.link) {
+    const pg = await resolveLinePage(ev.companyId, { url: materials.link, licensedHashes: [] }).catch(() => null);
+    if (pg && !isLinePageError(pg)) hero = pg.banner;
+  }
+  const kitRaw = (await getCompanyBrandKitRaw(ev.companyId).catch(() => null)) as Record<string, unknown> | null;
+  const brand = await lineTemplateBrand(ev.companyId, kitRaw);
+  const pinned = linePinnedPrimary(kitRaw);
+  const genKey = channel === 'email' ? 'email-ai-generate' : 'dm-ai-generate';
+  const draft = await runInCreditBundle(() => draftLineTemplate({
+    template: t, channel, companyId: ev.companyId, line: ev.title, ...brand, brandName: brand.brandName,
+    pinnedPrimary: pinned, cards: goods.cards, textProducts: goods.textProducts, heroUpload: hero, page: null,
+    benefitAnswer: String(ev.benefitText || '').trim() || null, periodEnd: ev.endsOn, link: materials.link || null,
+  }, { userId: input.userId || undefined, source: genKey }, { factsOnly: true }));
+  // 행사명 = 코드가 표지 제목에(회의론자 4 · AI 문구 대신) · 기간 표시는 원문 종료일(lineTemplateMaterials 가 periodEnd 로 놓는다)
+  draft.materials.coverHeadline = ev.title;
+
+  let draftId = '';
+  if (channel === 'dm') {
+    const dmR = buildLineTemplateDm(draft, materials.template.layout);
+    const row = await deps.createDm(ev.companyId, input.userId || '', {
+      title: ev.title.slice(0, 200), sections: dmR.sections, pages: pagesFromSectionGroups(dmR.pages.map((pg) => pg.sections)),
+      layout_mode: dmR.layoutMode, brand_kit: mergeLineBrandKit(kitRaw, { ...dmR.brandKitPatch }, pinned),
+      ai_prompt: ev.title.slice(0, 2000), approval_status: 'draft', template_id: lineTemplateDmMarker(t.id),
+    });
+    draftId = String(row.id);
+  } else {
+    const em = buildLineTemplateEmail(draft);
+    const basic = await deps.basicInfo(ev.companyId).catch(() => null);
+    const design = lineEmailDesign({
+      pinned: draft.t.design.primary, companyArtDirection: kitRaw?.art_direction ?? null,
+      industry: String((basic as any)?.industry_code || '').trim() || null, preheader: em.preheader.slice(0, 90),
+    });
+    const brandKit = readableCustomerBrandKit(await deps.brandKit(ev.companyId));
+    const rendered = deps.renderEmail(em.sections, brandKit, design || undefined);
+    // 메일 제목 = 행사명(코드 · 템플릿 기본 제목의 시제가 예고 메일과 어긋나지 않게) · 광고 = 늘 켬(회의론자 4)
+    const campaign = await deps.createEmail({
+      companyId: ev.companyId, createdBy: input.userId || '', name: ev.title.slice(0, 60), subject: ev.title.slice(0, 60),
+      htmlBody: rendered.html, textBody: rendered.text, isAd: true, aiGenerated: true, sections: em.sections, ...(design ? { design } : {}),
+    } as any);
+    draftId = String(campaign.id);
+  }
+  let outcome: string;
+  try {
+    outcome = await deps.deductOutcome({ companyId: ev.companyId, cost: getCreditCost(genKey), source: genKey, createdBy: input.userId || null, idempotencyKey, throwOnInsufficient: true });
+  } catch (err) {
+    await (channel === 'dm' ? deps.deleteDm(draftId, ev.companyId) : deps.deleteEmail(ev.companyId, draftId)).catch(() => false);
+    throw err;
+  }
+  // 낸 결말(냄 · 같은 키 · 크레딧제 미적용 면제)만 건넨다(회의론자 3 · 1017 판정 재사용) · 그 밖 = 행을 거두고 다시 시도하게
+  if (!lineStepsCollected(outcome as any)) {
+    await (channel === 'dm' ? deps.deleteDm(draftId, ev.companyId) : deps.deleteEmail(ev.companyId, draftId)).catch(() => false);
+    console.log(`[CREDIT][MISS] planner-template company=${ev.companyId} channel=${channel} key=${idempotencyKey} draft=${draftId} outcome=${outcome}`);
+    throw new PlannerBuildError(503, 'CREDIT_STATE_UNKNOWN', '크레딧 기록을 확인하지 못해 만든 완성본을 거뒀어요. 잠시 후 다시 시도해 주세요.');
+  }
+  return { draftId, deductOutcome: outcome };
+}
+
 interface TouchpointLite { id: string; channel: string; status: string; asset_ref: string | null; exec_meta: Record<string, any> | null }
 
 async function loadEventTouchpointsLite(companyId: string, eventId: string): Promise<TouchpointLite[]> {
@@ -128,6 +310,8 @@ export async function quotePlannerBuild(input: { companyId: string; eventId: str
   const out: PlannerBuildQuote[] = [];
   for (const channel of Array.from(new Set(input.channels))) {
     await assertBuildable(ev, channel, tps);
+    // ★ 2026-10-18 템플릿을 고른 행사 = 템플릿 견적(같은 키 · 같은 단가) · 스위치 밖이면 400(옛 엔진으로 몰래 바꾸지 않는다)
+    if (materials.template) { out.push(await quotePlannerTemplate(ev, materials, channel)); continue; }
     // 견적은 토큰 값과 무관하다(엔진 계약) — 형식만 맞춘 값을 넣는다.
     const q = await quoteFromBuildMaterials({
       companyId: ev.companyId,
@@ -136,6 +320,20 @@ export async function quotePlannerBuild(input: { companyId: string; eventId: str
     out.push({ channel, total: q.quote.total, parts: q.quote.parts, gate: q.gate as any, creditEnabled: q.creditEnabled });
   }
   return out;
+}
+
+/** ★ 2026-10-18 템플릿 견적(저장 전 · 저장 뒤 공통) — 스위치 · 필수 재료 · 엔진과 같은 키의 금액 */
+async function quotePlannerTemplate(ev: Pick<PlannerEventRow, 'companyId' | 'benefitText'>, materials: PlannerMaterials, channel: 'dm' | 'email'): Promise<PlannerBuildQuote> {
+  if (!plannerTemplatesEnabled(ev.companyId)) throw new PlannerBuildError(400, 'TEMPLATE_DISABLED', '템플릿 완성본은 아직 이 회사에 열리지 않았어요. 템플릿 없이 담아 주세요.');
+  const t = getLineTemplate(materials.template?.id);
+  if (!t) throw new PlannerBuildError(400, 'TEMPLATE_INVALID', '고른 템플릿을 찾지 못했어요. 템플릿을 다시 골라 주세요.');
+  let creditEnabled: boolean;
+  try { creditEnabled = await defaultBuildDeps().creditEnabled(ev.companyId); } catch {
+    throw new PlannerBuildError(503, 'CREDIT_LOOKUP_UNAVAILABLE', '크레딧 잔액을 확인하지 못했어요. 잠시 후 다시 시도해 주세요.');
+  }
+  const q = plannerTemplateQuote(channel, creditEnabled);
+  const missing = plannerTemplateMissing(t, ev, materials);
+  return { channel, total: q.total, parts: q.parts, gate: missing.length === 0 ? { ok: true } : { ok: false, missing }, creditEnabled };
 }
 
 /** 견적 토큰(엔진 계약상 금액과 무관 · 형식만) */
@@ -160,6 +358,7 @@ export async function quotePlannerDraft(input: {
     if (!readiness.ok) {
       throw new PlannerBuildError(400, 'CHANNEL_LOCKED', readiness.reason || '지금은 이 채널을 만들 수 없습니다.', { settingsPath: readiness.settingsPath, channel });
     }
+    if (input.materials.template) { out.push(await quotePlannerTemplate({ companyId: input.companyId, benefitText: input.draft.benefitText }, input.materials, channel)); continue; }
     const q = await quoteFromBuildMaterials({
       companyId: input.companyId,
       materials: buildPlannerEngineMaterials(input.draft, input.materials, channel, QUOTE_TOKEN, 0),
@@ -231,12 +430,18 @@ export async function runPlannerBuild(input: {
     throw new PlannerBuildError(409, 'IN_FLIGHT', '지금 만드는 중이거나 행사 상태가 바뀌었어요. 화면을 새로고침해 주세요.');
   }
   try {
-    const r = await generateFromBuildMaterials({
-      companyId: ev.companyId,
-      userId: input.userId,
-      materials: buildPlannerEngineMaterials(ev, materials, input.channel, token, Number(input.expectedTotal) || 0),
-      channel: input.channel,
-    });
+    // ★ 2026-10-18 템플릿을 고른 행사 = 템플릿 완성본(1017 조립 · 엔진 부품) · 스위치 밖 = 400(옛 엔진으로 몰래 바꾸지 않는다)
+    if (materials.template && !plannerTemplatesEnabled(ev.companyId)) {
+      throw new PlannerBuildError(400, 'TEMPLATE_DISABLED', '템플릿 완성본은 아직 이 회사에 열리지 않았어요. 템플릿 없이 담아 주세요.');
+    }
+    const r = materials.template
+      ? await buildPlannerTemplateChannel({ ev, materials, channel: input.channel, token, expectedTotal: Number(input.expectedTotal) || 0, userId: input.userId })
+      : await generateFromBuildMaterials({
+        companyId: ev.companyId,
+        userId: input.userId,
+        materials: buildPlannerEngineMaterials(ev, materials, input.channel, token, Number(input.expectedTotal) || 0),
+        channel: input.channel,
+      });
     // 승인 전 접점(planned)에만 붙인다 — 그 사이 승인된 행은 건드리지 않는다(효과로 판정).
     const attached = await query(
       `UPDATE planner_touchpoints
@@ -253,10 +458,11 @@ export async function runPlannerBuild(input: {
     // materialsHash = 완성본 입력 지문(재료 + 행사 사실 · plannerBuildInputHash) — 행사 사실만 고쳐도 낡은 완성본으로 본다
     const record = { token, draftId: r.draftId, materialsHash: plannerBuildInputHash(ev, materials), builtAt: new Date().toISOString() };
     // 확인 대기 중 다시 만들었다면 문안·확인 링크도 새로 — 행사를 재료 단계(draft)로 되돌리고 리비전을 올린다.
+    // ★ 2026-10-18 채널 한 칸만 쓴다(회의론자 2 · 옛: build 통째 교체 = 앞서 만든 다른 채널 기록을 지울 수 있다)
     await patchEventMeta({
       companyId: ev.companyId,
       eventId: ev.id,
-      patch: { build: { ...(ev.meta.build || {}), [input.channel]: record } },
+      buildRecord: { channel: input.channel, record },
       nullKeys: ['preview'],
       bumpRevision: true,
       status: 'draft',

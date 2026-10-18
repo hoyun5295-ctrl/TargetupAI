@@ -78,7 +78,8 @@ export const SUB_MODULE_CARDS: SubModuleCard[] = [
   { icon: Brain,        gradient: 'from-indigo-400 to-violet-500',  label: '자동 마케팅',    description: '매일 AI 캠페인 자동 제안',       path: '/continuous-operator', id: 'auto-marketing',
     oneLine: { placeholder: '예: 매월 초에 90일 넘게 안 산 고객을 다시 불러와줘', verb: '제안 받기' } },   // ★ 2026-10-05 매주 + 상태 조건 = 반복이라 막는다(신뢰 설계 Q9) → 매월 예시
   // ★ 2026-09-20 NEW 만료 제거(출시 08-12 · 라벨 3단 정책의 4~6주 기한 경과). 이미지 스튜디오(07-19)도 같이 내렸다.
-  { icon: CalendarDays, gradient: 'from-violet-400 to-fuchsia-500', label: '마케팅 플래너',  description: '월간 행사 계획 → AI 대행',       path: '/marketing-planner', id: 'planner' },
+  { icon: CalendarDays, gradient: 'from-violet-400 to-fuchsia-500', label: '마케팅 플래너',  description: '월간 행사 계획 → AI 대행',       path: '/marketing-planner', id: 'planner',
+    oneLine: { placeholder: '예: 11월 1일~7일 크림 1+1 행사, 타겟은 크림 산 고객 모두', verb: '행사 담기' } },   // ★ 2026-10-18 D3 개정(자동화 7메뉴 + 플래너 · 회사 스위치 PLANNER_LINE_COMPANY_IDS 열린 회사만 한 줄형)
   // 2행 — 발송 채널
   { icon: Smartphone,   gradient: 'from-amber-400 to-yellow-500',   label: '모바일 DM',      description: '카드형 미디어 메시지 빌더',      path: '/dm-builder', id: 'dm',
     oneLine: { placeholder: '예: 가을 신상 니트 3종, 이번 주말까지 첫 구매 10%', verb: 'DM 만들기' } },

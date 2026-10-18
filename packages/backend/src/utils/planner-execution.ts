@@ -119,6 +119,9 @@ export function resolveAudienceMode(channel: PlannerChannel, rule: TimingRule | 
 
 /** (순수) 시점 라벨 — 통지·브리핑 문구에 쓰는 고객 언어. */
 export function describeTiming(rule: TimingRule | null | undefined): string {
+  // ★ 2026-10-18 미룬 날(TimingRule.on) — 「행사 기간 중 M/D」
+  const on = String((rule as any)?.on || '');
+  if (/^\d{4}-\d{2}-\d{2}$/.test(on)) return `행사 기간 중 ${Number(on.slice(5, 7))}/${Number(on.slice(8, 10))}`;
   const anchor = (rule as any)?.anchor;
   if (anchor === 'end') return '행사 종료일';
   if (anchor === 'before_start') return `행사 시작 ${Number((rule as any)?.offsetDays) || 0}일 전`;

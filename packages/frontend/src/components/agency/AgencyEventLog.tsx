@@ -72,6 +72,10 @@ const EVENT_LABEL: Record<string, string> = {
   dispatch_unapproved_version: '승인한 문안과 달라 다시 승인을 기다립니다',
   first_test_error: '검사 중 문제가 있어 다시 시도합니다',
   final_test_error: '발송 전 검사 중 문제가 있어 다시 시도합니다',
+  // ★2026-10-18 축 2 담당자 링크 조작(서버 routes/agency-approve.ts afterLinkAction 과 같은 커밋 · 누른 번호는 아래 문장이 붙인다)
+  link_cancel: '문자 속 주소에서 취소했습니다',
+  link_reschedule: '문자 속 주소에서 시각을 바꿨습니다',
+  link_spell: '문자 속 주소에서 맞춤법을 고쳤습니다',
 };
 
 /** 이벤트 한 줄을 사람 문장으로. 링크 승인·메일 접수는 "누가·어디서"까지 남긴다(부인 방지 기록) */
@@ -84,6 +88,12 @@ export function describeAgencyEvent(e: AgencySendEvent): string {
   if (e.kind === 'received' && e.payload?.via === 'email') {
     return `메일로 접수했습니다 (${e.payload?.fromEmail || '주소 미상'})`;
   }
+  // ★2026-10-18 축 2 링크 조작도 누른 번호까지(승인과 같은 부인 방지 기록)
+  if ((e.kind === 'link_cancel' || e.kind === 'link_reschedule' || e.kind === 'link_spell') && e.payload?.phone) {
+    return `${EVENT_LABEL[e.kind]} (담당자 ${e.payload.phone})`;
+  }
+  // ★2026-10-18 축 4 승인 요청 뒤 24시간이 닫은 만료는 사유를 다르게 적는다(보낼 시각이 지난 것이 아니다)
+  if (e.kind === 'expired' && e.payload?.reason === 'approval_timeout') return '승인 요청 뒤 24시간이 지나 발송을 닫았습니다';
   return EVENT_LABEL[e.kind] || '진행 상황을 기록했습니다';
 }
 

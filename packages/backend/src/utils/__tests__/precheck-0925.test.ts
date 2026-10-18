@@ -209,10 +209,12 @@ describe('4. 워커 A 순서 · 자동 교정 0 · 문안 수정이 결과를 �
     expect(spell).not.toMatch(/current_content\s*=/);
     expect(spell).toMatch(/WHERE id = \$2::uuid AND content_version = \$3/);
   });
+  // ★2026-10-18 축 1 — 문안 수정 본문이 CT(utils/agency-send-change.ts)로 옮겨 갔다(같은 계약 · 승인 요청 시각 지우기 조각이 이어 붙는다)
   it('문안 수정 UPDATE가 결과를 지운다(컬럼이 있을 때)', () => {
-    const route = read('routes/agency-send.ts');
-    expect(route).toContain("const clearSpell = (await hasAgencySpellColumn()) ? 'spell_check = NULL, ' : '';");
-    expect(route).toContain('SET ${clearSpell}original_content = $1');
+    const ct = read('utils/agency-send-change.ts');
+    expect(ct).toContain("const clearSpell = (await hasAgencySpellColumn()) ? 'spell_check = NULL, ' : '';");
+    expect(ct).toContain('SET ${clearSpell}${clearAsk}original_content = $1');
+    expect(read('routes/agency-send.ts')).toMatch(/await editAgencyContentTx\(/);
   });
   it('접수 화면 사전 검사 라우트가 상세(/:id)보다 먼저 선다', () => {
     const route = read('routes/agency-send.ts');

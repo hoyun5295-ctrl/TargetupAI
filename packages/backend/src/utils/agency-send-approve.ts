@@ -60,6 +60,8 @@ function approvalCheckOf(row: any, revision: number) {
       revision: Number(row.revision),
       requestedAt: new Date(row.requested_at),
       finalTestedAt: row.final_test_at ? new Date(row.final_test_at) : null,
+      // ★2026-10-18 축 4 — 승인 요청 뒤 24시간(컬럼 전 = undefined = 규칙 쉼)
+      approvalRequestedAt: row.approval_requested_at ? new Date(row.approval_requested_at) : null,
     },
     revision,
     new Date(),

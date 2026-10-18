@@ -37,6 +37,7 @@ import { insertProposalVariants, recommendVariantForProposal, recordVariantRewar
 // ★ D212+ 정책 (2026-05-23 Harold 명시): CT-64 영역 통합 — 검증 영역 + 담당자 학습
 // ★ D227+ 스팸 안전망 격상 — decideSpamOutcome(실제 테스트 결과 → 상태) + buildSpamRegeneratePrompt(AI 재작성)
 import { recordAdminStopLearning, decideSpamOutcome, buildSpamRegeneratePrompt, spamCheckPassedIndex, AUTO_SEND_SPAM_VERIFIED_SQL, PROPOSAL_SPAM_RETEST_LIMIT, resolveRetestCopy } from './continuous-operator-policy';
+import { buildAutosendStopUrl } from './autosend-stop-link';
 import { resolveAutoSendLeadMinutes, computeScheduledSendAt, decideSendOutcome, decideStuckSendingRecovery, decideBudgetGuard, decideBudgetAlert, isSendableHourKst, validateScheduleTimeSendable, buildAutoSendPrepInfoBody, buildPendingReviewNoticeBody, computeNextOccurrence, computeNextGenerationRun, normalizeSendTimeMode, SendTimeMode, normalizeCopyStyle, buildCopyStylePromptBlock, CopyStyle, wrapOperatorNoticeBody, normalizeTargetHint, TargetHint, applyBenefitToBody, hasUneditedBenefitPlaceholder, detectMissedOperatorRound , computeApprovalWindow, buildRenewalNoticeBody, countEmptyRounds, isWithinApprovalWindow, approvalSummarySince } from './autosend-policy';
 import { stableJson } from './agent-protocol';
 import { getOpt080Number, buildAdMessage } from './messageUtils';
@@ -3650,6 +3651,28 @@ export function startContinuousOperatorScheduler(): void {
  * 현재 = 문자(LMS). 알림톡 템플릿 등록 후 = 1순위 알림톡 → 2순위 문자 fallback으로 교체 예정(아래 TODO seam).
  */
 // ★ 2026-07-02 2차: 성과 회고(operator-daily-recap)와 공유 — export (담당자 안내 발송 단일 경로 유지)
+/**
+ * ★ 2026-10-18 담당자 통지 폴백 연락처 — **누가 받는가**를 한 함수가 정한다(회의론자 B8).
+ *   ① 등록 계정(users.phone) ② 회사 대표 관리자(DB 원시값 user_type='admin') · 활성 · 비시스템 · 번호가 유효한 첫 행.
+ * `notifyOperatorAdmins`(번호 없는 통지)와 플래너 재확인 링크(받은 계정 = 링크 권한의 주인)가 같은 함수를 쓴다 —
+ *   따로 조회하면 정렬·거름이 달라 문자를 받은 계정과 기록한 계정이 갈린다. 조회 실패는 던진다(호출부가 접는다).
+ */
+export async function pickOperatorFallbackContact(companyId: string, createdBy: string | null): Promise<{ userId: string; phone: string } | null> {
+  const fb = await query(
+    `SELECT id, phone FROM users
+      WHERE (($1::uuid IS NOT NULL AND id = $1::uuid)
+         OR (company_id = $2::uuid AND user_type = 'admin'))
+        AND is_active = true AND COALESCE(is_system, false) = false
+      ORDER BY (id = $1::uuid) DESC, id ASC`,
+    [createdBy || null, companyId],
+  );
+  for (const r of fb.rows as any[]) {
+    const phone = String(r.phone || '').replace(/\D/g, '');
+    if (/^01\d{8,9}$/.test(phone)) return { userId: String(r.id), phone };
+  }
+  return null;
+}
+
 export async function notifyOperatorAdmins(
   // ★ 2026-07-07: createdBy 옵셔널 — ContinuousOperator 전체를 넘기는 호출부는 자동 포함(구조 서브셋), 인라인 조립 호출부는 미지정 가능.
   operator: { adminPhoneNumbers: string[]; backupAdminPhone: string | null; companyId: string; createdBy?: string | null },
@@ -3675,18 +3698,8 @@ export async function notifyOperatorAdmins(
   //   기존 등록분(담당자 미입력)과 인라인 조립 호출부까지 CT 1곳에서 일괄 수혜. 조회 실패 = 기존 동작(무통지) 유지.
   if (unique.length === 0) {
     try {
-      const fb = await query(
-        `SELECT phone FROM users
-          WHERE (($1::uuid IS NOT NULL AND id = $1::uuid)
-             OR (company_id = $2::uuid AND user_type = 'admin'))
-            AND is_active = true AND COALESCE(is_system, false) = false
-          ORDER BY (id = $1::uuid) DESC, id ASC`,
-        [operator.createdBy || null, operator.companyId],
-      );
-      const fallback = fb.rows
-        .map((r: any) => String(r.phone || '').replace(/\D/g, ''))
-        .filter((p: string) => /^01\d{8,9}$/.test(p));
-      if (fallback.length > 0) unique = [fallback[0]];
+      const fallback = await pickOperatorFallbackContact(operator.companyId, operator.createdBy || null);
+      if (fallback) unique = [fallback.phone];
     } catch (e: any) {
       console.log('[ContinuousOperator] 담당자 폴백 연락처 조회 실패(통지 생략):', e?.message || e);
     }
@@ -3784,7 +3797,7 @@ async function clearZeroTargetNotice(operatorId: string): Promise<void> {
 
 /** 준비 시점 담당자 알림 — 실문안 1건 + 발송 정보(일시·타겟·비용)와 정지 안내 1건(무과금 인증 라인). admin_notified_at 기록. */
 async function sendAutoSendPrepNotice(
-  operator: { adminPhoneNumbers: string[]; backupAdminPhone: string | null; companyId: string; name: string },
+  operator: { id: string; adminPhoneNumbers: string[]; backupAdminPhone: string | null; companyId: string; name: string },
   proposalId: string,
   messageBody: string,
   scheduledSendAt: Date,
@@ -3797,10 +3810,12 @@ async function sendAutoSendPrepNotice(
   // 1. 실문안 (고객이 받을 본문 그대로)
   await notifyOperatorAdmins(operator, '[AI 자동마케팅] 발송 예정 문안', messageBody);
   // 2. 발송 정보 + 정지 안내 (순수 빌더 — autosend-policy.test.ts로 고정)
+  // ★2026-10-18 멈춤 링크([이번 회차 건너뛰기] · [일시정지] · 서명 실패 = 링크 없이 옛 문장 · 설계서 docs/2026-10-18-planner-v2-design.md §3-8)
+  const stopUrl = await buildAutosendStopUrl({ proposalId, operatorId: operator.id, companyId: operator.companyId, sendAt: scheduledSendAt }).catch(() => null);
   await notifyOperatorAdmins(
     operator,
     '[AI 자동마케팅] 발송 예정 안내',
-    buildAutoSendPrepInfoBody({ sendAtLabel: when, ...info }),
+    buildAutoSendPrepInfoBody({ sendAtLabel: when, ...info, stopUrl }),
   );
   await query(`UPDATE operator_proposals SET admin_notified_at = NOW() WHERE id = $1::uuid`, [proposalId]);
 }

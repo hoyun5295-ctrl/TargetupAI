@@ -13,6 +13,9 @@ import { pool, query } from '../config/database';
 import { isCompanyImageUrl, isBuildMallProvider, AI_AUTO_BUILD_CARD_IMAGES, AI_AUTO_BUILD_PRODUCTS_MAX } from './ai-auto-build-materials';
 import { computeTouchpointDate, estimateChannelCredits, PlannerChannel, PlannerEventInput, TimingRule } from './marketing-planner';
 import { timingKey } from './planner-execution';
+import { LINE_TEMPLATE_IDS, type LineTemplateId, type LineLayout } from './design-core/line-templates';
+import { sanitizeLineUrl } from './one-line-steps';
+import { MAX_PRODUCT_KEYS, type PurchaseDoor } from './journey-product';
 
 // ── 재료 ─────────────────────────────────────────────────────────────
 export interface PlannerMaterialImage { url: string; width: number | null; height: number | null }
@@ -33,6 +36,13 @@ export interface PlannerMaterials {
   text: string;
   licensed: boolean;
   products: PlannerMaterialProduct[];
+  /**
+   * ★ 2026-10-18 v2-1 템플릿 완성본(설계서 docs/2026-10-18-planner-v2-design.md §3-4) — 고른 템플릿 · 배치. 없으면 옛 자동제작 엔진 그대로.
+   * 재료 지문에 들어간다(바꾸면 만든 완성본은 낡은 것) · 키가 없으면 지문 바이트 그대로(옛 행사 무변경).
+   */
+  template?: { id: LineTemplateId; layout: LineLayout } | null;
+  /** ★ 2026-10-18 버튼 주소(행사 페이지 · 템플릿 완성본의 필수 재료 · 빈 버튼 주소 = 발행 때 막힌다) */
+  link?: string | null;
 }
 
 export const PLANNER_MATERIAL_TEXT_MAX = 2000;
@@ -83,7 +93,19 @@ export function normalizePlannerMaterials(raw: unknown, companyId: string): { ok
     });
   }
   if (products.length > AI_AUTO_BUILD_PRODUCTS_MAX) return { ok: false, error: `상품은 ${AI_AUTO_BUILD_PRODUCTS_MAX}개까지 담을 수 있습니다.` };
-  return { ok: true, value: { images, text, licensed: r.licensed === true && text.length > 0, products } };
+  // ★ 2026-10-18 템플릿 · 버튼 주소(있을 때만 키를 둔다 · 없으면 저장 모양 · 지문이 옛것과 같다)
+  const tplRaw = (r.template && typeof r.template === 'object') ? r.template as Record<string, unknown> : null;
+  const template = tplRaw && (LINE_TEMPLATE_IDS as readonly string[]).includes(String(tplRaw.id))
+    ? { id: String(tplRaw.id) as LineTemplateId, layout: (tplRaw.layout === 'page' ? 'page' : 'slides') as LineLayout }
+    : null;
+  if (r.link !== undefined && r.link !== null && String(r.link).trim() && !sanitizeLineUrl(String(r.link).trim())) {
+    return { ok: false, error: '버튼 주소는 http 또는 https 로 시작하는 주소만 넣을 수 있습니다.' };
+  }
+  const link = r.link ? sanitizeLineUrl(String(r.link).trim()) : null;
+  return {
+    ok: true,
+    value: { images, text, licensed: r.licensed === true && text.length > 0, products, ...(template ? { template } : {}), ...(link ? { link } : {}) },
+  };
 }
 
 /** (순수) 재료가 하나라도 있는가 — 비면 완성본을 만들 수 없다(재료 필요). */
@@ -98,6 +120,9 @@ export function plannerMaterialsHash(m: PlannerMaterials | null | undefined): st
     t: m.text,
     l: m.licensed,
     p: m.products.map((x) => [x.source, x.provider, x.code, x.name, x.price, x.salePrice, x.discountRate, x.url, x.imageUrl]),
+    // ★ 2026-10-18 템플릿 · 버튼 주소 — 있을 때만(없는 옛 재료의 지문 바이트 그대로)
+    ...(m.template ? { tp: [m.template.id, m.template.layout] } : {}),
+    ...(m.link ? { k: m.link } : {}),
   } : null;
   return createHash('sha256').update(JSON.stringify(canon)).digest('hex').slice(0, 32);
 }
@@ -116,6 +141,60 @@ export function plannerBuildInputHash(
     .digest('hex').slice(0, 32);
 }
 
+// ── 받는 사람(★ 2026-10-18 v2 입력 축 · 설계서 docs/2026-10-18-planner-v2-design.md §3-6) ──────────
+/**
+ * 행사 단위 받는 사람 — 전체 고객 · 상품을 산 고객(문자 · DM · 메일 같은 대상).
+ * 상품 구매자 = 그 회사의 **들어오는 곳 하나**(자사몰 주문 / 매장 원장)의 키 · 결제된 주문만 · `since` 이후(KST 날짜 · null = 기록 전체).
+ * meta.audience 가 없는 옛 행사 = 전체(호환). 저장 본문에는 늘 있어야 한다(라우트 400 · 칸이 빠졌다고 조용히 전체로 받지 않는다).
+ */
+export type PlannerAudience =
+  | { kind: 'all' }
+  | { kind: 'product_buyers'; door: PurchaseDoor; keys: string[]; names: string[]; since: string | null };
+
+/** (순수) 받는 사람 정규화 — 형식만(키가 관측 목록에 있는가 · 문이 지금 문인가는 `verifyPlannerAudience`) */
+export function normalizePlannerAudience(raw: unknown): { ok: true; value: PlannerAudience } | { ok: false; error: string } {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return { ok: false, error: '받는 사람을 골라 주세요.' };
+  const r = raw as Record<string, unknown>;
+  if (r.kind === 'all') return { ok: true, value: { kind: 'all' } };
+  if (r.kind !== 'product_buyers') return { ok: false, error: '받는 사람을 골라 주세요.' };
+  const door = r.door === 'mall' || r.door === 'ledger' ? r.door : null;
+  if (!door) return { ok: false, error: '상품을 어디서 산 구매로 볼지 정해지지 않았어요. 상품을 다시 골라 주세요.' };
+  const rawKeys: unknown[] = Array.isArray(r.keys) ? r.keys : [];
+  const rawNames: unknown[] = Array.isArray(r.names) ? r.names : [];
+  const keys: string[] = [];
+  const names: string[] = [];
+  rawKeys.forEach((k, i) => {
+    const key = typeof k === 'string' || typeof k === 'number' ? String(k).trim() : '';
+    if (!key || key.length > 200 || keys.includes(key)) return;
+    keys.push(key);
+    names.push(String(rawNames[i] ?? key).trim().slice(0, 100) || key);
+  });
+  if (keys.length === 0) return { ok: false, error: '대상 상품을 하나 이상 골라 주세요.' };
+  if (keys.length > MAX_PRODUCT_KEYS) return { ok: false, error: `대상 상품은 ${MAX_PRODUCT_KEYS}개까지 고를 수 있어요.` };
+  let since: string | null = null;
+  if (r.since !== null && r.since !== undefined) {
+    const s = String(r.since);
+    const d = /^\d{4}-\d{2}-\d{2}$/.test(s) ? new Date(`${s}T00:00:00Z`) : null;
+    if (!d || Number.isNaN(d.getTime()) || d.toISOString().slice(0, 10) !== s) return { ok: false, error: '언제부터 산 고객인지 다시 골라 주세요.' };
+    since = s;
+  }
+  return { ok: true, value: { kind: 'product_buyers', door, keys, names, since } };
+}
+
+/** (순수) 대상 지문 조각 — 전체 = null(지문 · 리비전 판정이 지금과 한 글자도 같다) · 상품 구매자 = 문 · 키(정렬) · 날짜 */
+export function plannerAudienceKey(a: PlannerAudience | null | undefined): string | null {
+  if (!a || a.kind !== 'product_buyers') return null;
+  return JSON.stringify([a.door, [...a.keys].sort(), a.since]);
+}
+
+/** 저장된 meta.audience 읽기 — 없음 = 전체(옛 행사) · 형식이 깨졌으면 null(호출부가 막는다 · 전체로 넓히지 않는다) */
+export function readStoredAudience(meta: { audience?: unknown } | null | undefined): PlannerAudience | null {
+  const raw = meta?.audience;
+  if (raw === undefined || raw === null) return { kind: 'all' };
+  const n = normalizePlannerAudience(raw);
+  return n.ok ? n.value : null;
+}
+
 // ── meta ─────────────────────────────────────────────────────────────
 export interface PlannerBuildRecord { token: string; draftId: string; materialsHash: string; builtAt: string }
 export interface PlannerPreviewRecord { tokenHash: string; revision: number; issuedAt: string; expiresAt: string; remindedAt?: string | null }
@@ -128,6 +207,8 @@ export interface PlannerEventMeta {
   revision?: number;
   preview?: PlannerPreviewRecord | null;
   approved?: { hash: string; at: string; by: string | null; revision: number } | null;
+  /** ★ 2026-10-18 받는 사람(없음 = 전체 · `readStoredAudience`) */
+  audience?: PlannerAudience;
   /** 1회 안내(결재 방식 전환) 등 그 밖의 표식 */
   [key: string]: unknown;
 }
@@ -209,10 +290,20 @@ export async function patchEventMeta(input: {
   fromStatuses?: string[];
   status?: string;
   bumpRevision?: boolean;
+  /**
+   * ★ 2026-10-18 완성본 기록을 **채널 한 칸만** 쓴다(회의론자 · 옛: patch.build 통째 교체 = 앞서 만든 다른 채널 기록을 지울 수 있다).
+   * 지금 행의 meta.build 위에 그 채널 키 하나만 얹는다(한 문장).
+   */
+  buildRecord?: { channel: 'dm' | 'email'; record: PlannerBuildRecord };
 }): Promise<PlannerEventRow | null> {
   const params: any[] = [input.eventId, input.companyId, JSON.stringify(input.patch || {}), input.nullKeys || []];
+  let metaExpr = `(COALESCE(meta, '{}'::jsonb) - $4::text[]) || $3::jsonb${input.bumpRevision ? ` || jsonb_build_object('revision', COALESCE((meta->>'revision')::int, 0) + 1)` : ''}`;
+  if (input.buildRecord) {
+    params.push(input.buildRecord.channel, JSON.stringify(input.buildRecord.record));
+    metaExpr = `jsonb_set(${metaExpr}, '{build}', COALESCE(meta->'build', '{}'::jsonb) || jsonb_build_object($${params.length - 1}::text, $${params.length}::jsonb), true)`;
+  }
   const sets = [
-    `meta = (COALESCE(meta, '{}'::jsonb) - $4::text[]) || $3::jsonb${input.bumpRevision ? ` || jsonb_build_object('revision', COALESCE((meta->>'revision')::int, 0) + 1)` : ''}`,
+    `meta = ${metaExpr}`,
     'updated_at = NOW()',
   ];
   if (input.status) {
@@ -285,7 +376,9 @@ export function computeDisplayState(ev: Pick<PlannerEventRow, 'status' | 'meta' 
   if (s === 'cancelled') return 'cancelled';
   if (s === 'done' || s === 'reported') return 'done';
   const held = tps.some((t) => t.status === 'hold_credit' || t.status === 'locked');
-  if (s === 'approved' || s === 'scheduled' || s === 'producing') return held ? 'hold' : 'approved';
+  // ★ 2026-10-18 쌍 재확인(planned + recheck) = 담당자가 정해야 진행된다 → 보류(할 일)로 보인다(설계서 2026-10-18 §3-2)
+  const recheck = tps.some((t) => t.status === 'planned' && !!t.execMeta?.recheck);
+  if (s === 'approved' || s === 'scheduled' || s === 'producing') return held || recheck ? 'hold' : 'approved';
   if (held) return 'hold';
   if (s === 'briefed') return 'review';
   // draft · re_brief(옛 값) — 소재가 없으면 재료 필요, 만드는 중이거나 소재가 다 있으면(문안 준비) 제작 중
@@ -341,6 +434,8 @@ export async function savePlannerEvent(input: {
   value: PlannerEventInput;
   planMonth: string;
   materials?: PlannerMaterials;
+  /** ★ 2026-10-18 받는 사람(라우트가 정규화 · 검증한 값 · undefined = 그대로) */
+  audience?: PlannerAudience;
   eventId?: string;
 }): Promise<{ id: string; changed: boolean }> {
   const client = await pool.connect();
@@ -388,9 +483,11 @@ export async function savePlannerEvent(input: {
         touchpoints: (tpCur.rows as any[]).map((t) => ({ channel: t.channel, timing: t.timing_rule, format: null })),
       });
       const materialsChanged = input.materials !== undefined && plannerMaterialsHash(input.materials) !== plannerMaterialsHash(meta.materials || null);
-      changed = before !== eventContentHash(v) || materialsChanged;
+      const audienceChanged = input.audience !== undefined && plannerAudienceKey(input.audience) !== plannerAudienceKey(readStoredAudience(meta));
+      changed = before !== eventContentHash(v) || materialsChanged || audienceChanged;
       const patch: Record<string, unknown> = {};
       if (input.materials !== undefined) patch.materials = input.materials;
+      if (input.audience !== undefined) patch.audience = input.audience;
       if (changed) patch.revision = (Number(meta.revision) || 0) + 1;
       await client.query(
         `UPDATE planner_events
@@ -402,8 +499,16 @@ export async function savePlannerEvent(input: {
         [eventId, input.companyId, v.title, v.startsOn, v.endsOn, v.benefitText, JSON.stringify(v.products), input.planMonth,
           changed ? ['preview'] : [], JSON.stringify(patch), changed],
       );
+      // ★ 2026-10-18 기간을 바꾸면 미룬 날(TimingRule.on)을 지운다 — 새 기간 밖의 날이 앵커보다 먼저 남지 않게(시점은 다시 앵커가 정한다)
+      if (v.startsOn !== ev.startsOn || v.endsOn !== ev.endsOn) {
+        await client.query(
+          `UPDATE planner_touchpoints SET timing_rule = timing_rule - 'on'
+            WHERE event_id = $1::uuid AND company_id = $2::uuid AND timing_rule ? 'on'`,
+          [eventId, input.companyId],
+        );
+      }
     } else {
-      meta = { materials: input.materials || null, revision: 1 };
+      meta = { materials: input.materials || null, revision: 1, ...(input.audience ? { audience: input.audience } : {}) };
       const ins = await client.query(
         `INSERT INTO planner_events (company_id, plan_month, title, starts_on, ends_on, benefit_text, products, status, created_by, meta)
          VALUES ($1, $2, $3, $4, $5, $6, $7, 'draft', $8, $9::jsonb)

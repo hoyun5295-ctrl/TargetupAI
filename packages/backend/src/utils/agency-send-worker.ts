@@ -22,17 +22,17 @@
  */
 import pool, { query } from '../config/database';
 // ★2026-09-12 수신자 회신번호 컬럼 존재 탐지 — 판정은 접수 코어와 같은 한 벌을 쓴다(인라인 재정의 금지)
-import { findUnregisteredRequestCallbacks, hasAgencyColumn } from './agency-send-intake';
+import { findUnregisteredRequestCallbacks, hasAgencyColumn, hasApprovalRequestedColumn } from './agency-send-intake';
 import { autoSpamTestWithRegenerate } from './spam-test-queue';
 import { refineForSpam } from './agency-send-refine';
 import {
-  buildApprovedExpiredNotify, buildExpiredNotify, buildFinalBlockedNotify, buildPassedNotify,
+  buildApprovedExpiredNotify, buildApprovalTimeoutNotify, buildExpiredNotify, buildFinalBlockedNotify, buildPassedNotify,
   buildQueueFailedNotify, buildReapprovalNotify, buildTestFailedNotify, buildTooTightNotify, formatWhen, shortLabel,
-  buildNoLinkApproverLine,
+  buildNoLinkApproverLine, buildLinkActionNotify,
 } from './agency-send-notify';
-import { agencyManagerPhones, buildShortAgencyApproveUrl, resolveLinkApprovers } from './agency-send-link';
+import { agencyManagerPhones, buildShortAgencyApproveUrl, resolveLinkApprovers, linkCancelTailOf } from './agency-send-link';
 import {
-  isApprovalCurrent, isApprovalExpired, isFinalTestDue, isLockStale, isQueueDue, isSameKstDay,
+  isApprovalCurrent, isApprovalExpired, isApprovalTimedOut, APPROVAL_WAIT_HOURS, isFinalTestDue, isLockStale, isQueueDue, isSameKstDay,
   isAttemptStuck, ATTEMPT_STUCK_AFTER_DUE_MINUTES,
   lockRecoveryStatus, LOCK_STALE_MINUTES, MAX_TEST_ROUNDS, QUEUE_MARGIN_MINUTES,
   DELIVERED_BY_TIME_SQL,
@@ -525,9 +525,11 @@ async function runFirstTest(onlyRequestId?: string): Promise<void> {
       //   비교와 저장에 **같은 한 시각**을 쓴다 — 따로 찍으면 자정 경계에서 둘이 갈린다.
       const passedAt = new Date();
       const sameDaySend = isSameKstDay(passedAt, new Date(row.requested_at));
+      // ★2026-10-18 축 4 — 승인 요청 시각 = 상태를 바꾸는 바로 그 UPDATE(24시간 승인 대기의 시작 · 컬럼 전 = 쉼)
+      const askStamp = (await hasApprovalRequestedColumn()) ? { approval_requested_at: passedAt } : {};
       if (!await setStatus(
         row.id, 'awaiting_approval',
-        sameDaySend ? { ...RELEASE, final_test_at: passedAt } : { ...RELEASE },
+        sameDaySend ? { ...RELEASE, ...askStamp, final_test_at: passedAt } : { ...RELEASE, ...askStamp },
         token,
       )) continue;
       await logEvent(row.id, 'awaiting_approval', { rounds, sameDaySend });
@@ -705,6 +707,7 @@ async function finalTestRow(row: any, now: Date): Promise<void> {
         approved_by: null,
         approval_version: null,
         reapproval_count: Number(target.reapproval_count || 0) + 1,
+        ...((await hasApprovalRequestedColumn()) ? { approval_requested_at: new Date() } : {}),   // ★2026-10-18 축 4
       }, token)) return;
       await logEvent(target.id, 'reapproval', { rounds, version });
 
@@ -961,10 +964,12 @@ async function revertAfterDispatchError(
  */
 export async function attemptBlocksChange(
   companyId: string, requestId: string, dispatchKey: string | null,
+  /** ★2026-10-18 트랜잭션 안에서 부를 때 그 연결(없으면 풀) */
+  q: (text: string, params?: any[]) => Promise<any> = query,
 ): Promise<'campaign' | 'in_flight' | null> {
   // ★2026-09-13(3) 막는 이유를 돌려준다(두 벌 발송 적대검토 1R): 캠페인이 있으면 새로 접수 안내, 진행 중이면 처리 중 안내.
   //   진행 중 시도는 실패 안내를 보내는 몇 초 동안에도 켜져 있어 "새로 접수하라"는 문구가 사실과 달랐다.
-  const found = await inspectAttemptCampaign(companyId, dispatchKey);
+  const found = await inspectAttemptCampaign(companyId, dispatchKey, q);
   if (found.id) return 'campaign';
   return isRequestInFlight(String(requestId)) ? 'in_flight' : null;
 }
@@ -1026,6 +1031,7 @@ async function dispatchAttempt(
     // ⛔ 상태가 실제로 바뀐 뒤에만 알린다 — 아니면 바뀌지도 않은 건에 재승인 요청 문자가 나간다.
     if (!await setStatus(row.id, 'reapproval', {
       ...RELEASE, approved_at: null, approved_by: null, approval_version: null,
+      ...((await hasApprovalRequestedColumn()) ? { approval_requested_at: new Date() } : {}),   // ★2026-10-18 축 4
     }, token)) return;
     await logEvent(row.id, 'dispatch_unapproved_version', {
       approvalVersion: row.approval_version, contentVersion: row.content_version,
@@ -1271,13 +1277,26 @@ async function runExpire(): Promise<void> {
   //
   // ⚠ [별도 과제 · 이번 축 아님] 후보를 "2시간 안" 전부로 담고 `LIMIT`을 먼저 건다. 당일 검사를 통과해
   //   아직 만료가 아닌 건이 스무 자리를 채우면 만료된 건이 밀린다(설계서 §14-6). 지금 볼륨에서는 도달하지 않는다.
-  const rows = await query(
+  const lead = await query(
     `SELECT * FROM agency_send_requests
       WHERE status IN ('awaiting_approval','reapproval','approved')
         AND requested_at < NOW() + INTERVAL '2 hours'
       ORDER BY requested_at
       LIMIT 20`,
   );
+  // ★2026-10-18 축 4 — 승인 요청 뒤 24시간이 지난 승인 대기는 **따로** 집는다(Codex D 1R · 한 줄에 섞으면 보낼 시각이 가까운
+  //   리드타임 후보 20건이 자리를 채워 24시간 만료가 밀린다) · 컬럼 전 = 이 조회 없음(옛 동작 그대로)
+  const timeout = (await hasApprovalRequestedColumn())
+    ? await query(
+      `SELECT * FROM agency_send_requests
+        WHERE status IN ('awaiting_approval','reapproval')
+          AND approval_requested_at <= NOW() - INTERVAL '${APPROVAL_WAIT_HOURS} hours'
+        ORDER BY approval_requested_at
+        LIMIT 20`,
+    )
+    : { rows: [] as any[] };
+  const seenIds = new Set<string>();
+  const rows = { rows: [...lead.rows, ...timeout.rows].filter((r: any) => (seenIds.has(String(r.id)) ? false : (seenIds.add(String(r.id)), true))) };
 
   const now = new Date();
   for (const row of rows.rows) {
@@ -1286,10 +1305,14 @@ async function runExpire(): Promise<void> {
       // ⛔ `final_test_at`을 함께 넘긴다(★2026-08-23(2)). 당일 검사가 끝난 건은 남은 일이 적재뿐이라
       //   승인 마감이 2시간이 아니다. 승인 라우트와 **같은 인자**를 쓰지 않으면 승인은 되는데
       //   다음 tick이 만료시키는 구간이 다시 생긴다(§12-2와 같은 형태).
+      const askedAt = row.approval_requested_at ? new Date(row.approval_requested_at) : null;
       if (!isApprovalExpired(
-        row.status, new Date(row.requested_at), now, row.final_test_at ? new Date(row.final_test_at) : null,
+        row.status, new Date(row.requested_at), now, row.final_test_at ? new Date(row.final_test_at) : null, askedAt,
       )) continue;
       const wasApproved = row.status === 'approved';
+      // 24시간이 닫은 건(보낼 시각까지는 아직 시간이 남았다) = 같은 시각으로 다시 진행할 수 있다 · 문장과 이력 사유가 다르다
+      const timedOut = isApprovalTimedOut(row.status, now, askedAt)
+        && !isApprovalExpired(row.status, new Date(row.requested_at), now, row.final_test_at ? new Date(row.final_test_at) : null, null);
 
       // ⛔ 관찰한 상태·수정 번호로 잡고, **워커가 잡고 있지 않은 행만** 만료시킨다(★2026-08-23 Codex 3R high).
       //   조건 없이 덮으면, 방금 예약을 만들기 시작한 건을 만료로 바꿔 놓고 그 핸들러는 계속 캠페인을 만든다
@@ -1303,14 +1326,28 @@ async function runExpire(): Promise<void> {
       );
       if (claimed.rows.length === 0) continue;
 
-      await logEvent(row.id, 'expired', { from: row.status });
+      await logEvent(row.id, 'expired', { from: row.status, ...(timedOut ? { reason: 'approval_timeout' } : {}) });
       const label = shortLabel(row.file_name || row.original_content);
-      await notifyManager({
-        companyId: row.company_id, requestId: row.id, phones: managerPhonesOf(row),
-        callback: row.callback_number, title: '[대행발송] 미발송 안내',
-        // 승인한 담당자에게 "승인이 없어서"라고 보내면 사실과 다르다. 사유대로 나눈다.
-        text: wasApproved ? buildApprovedExpiredNotify({ label }) : buildExpiredNotify({ label }),
-      });
+      if (timedOut) {
+        // ★2026-10-18 축 4 — 링크 받는 번호에만 다시 진행 주소(같은 승인 계정 판정 · 나머지는 로그인 안내)
+        const whenText = formatWhen(new Date(row.requested_at));
+        const linkRow = (await freshLinkFields(row.id)) || row;
+        await notifyManager({
+          companyId: row.company_id, requestId: row.id, phones: managerPhonesOf(linkRow),
+          callback: row.callback_number, title: '[대행발송] 미발송 안내',
+          text: buildApprovalTimeoutNotify({ label, whenText }),
+          perPhoneTexts: await buildApproveTexts(managerPhonesOf(linkRow), (approveUrl) =>
+            buildApprovalTimeoutNotify({ label, whenText, approveUrl }),
+            row.company_id, row.id, linkRow, row.created_by ?? null),
+        });
+      } else {
+        await notifyManager({
+          companyId: row.company_id, requestId: row.id, phones: managerPhonesOf(row),
+          callback: row.callback_number, title: '[대행발송] 미발송 안내',
+          // 승인한 담당자에게 "승인이 없어서"라고 보내면 사실과 다르다. 사유대로 나눈다.
+          text: wasApproved ? buildApprovedExpiredNotify({ label }) : buildExpiredNotify({ label }),
+        });
+      }
       console.log(`${LOG} 발송하지 않고 만료 request=${row.id} from=${row.status}`);
     } catch (err: any) {
       console.error(`${LOG} 만료 처리 실패 request=${row.id}:`, err?.message || err);
@@ -1475,9 +1512,32 @@ async function runReconcile(): Promise<void> {
  */
 const CANCEL_HANDOVER_MINUTES = 2;
 
+/**
+ * ★2026-10-18 축 2(Codex D 1R · 2R) — 링크 취소가 「처리 중」으로 끝난 건의 결과 문자. 화면 취소는 화면이 보여 주므로 보내지 않는다(옛 동작).
+ *   근거 = 이번 취소를 잡은 UPDATE 가 적은 cancel_reason(`linkCancelReason` · 표지 + 누른 번호 끝자리) · 실패해도 확정은 그대로(통보는 부가).
+ */
+async function notifyLinkCancelOutcome(requestId: string, cancelReason: unknown, alreadySent: boolean): Promise<void> {
+  const tail = linkCancelTailOf(cancelReason);
+  if (!tail) return;
+  try {
+    const r = await query(`SELECT * FROM agency_send_requests WHERE id = $1::uuid`, [requestId]);
+    const row = r.rows[0];
+    if (!row) return;
+    await notifyManager({
+      companyId: String(row.company_id), requestId, phones: agencyManagerPhones(row), callback: String(row.callback_number || ''),
+      title: alreadySent ? '[대행발송] 취소 실패 안내' : '[대행발송] 취소 안내',
+      text: buildLinkActionNotify({
+        label: String(row.file_name || row.current_content || ''), action: 'cancel', tail, alreadySent,
+      }),
+    });
+  } catch (err: any) {
+    console.warn(`${LOG} 링크 취소 결과 통보 실패(확정은 그대로) request=${requestId}:`, err?.message || err);
+  }
+}
+
 async function runCancelSweep(): Promise<void> {
   const rows = await query(
-    `SELECT id, company_id, revision, campaign_id, dispatch_key, lock_at, updated_at
+    `SELECT id, company_id, revision, campaign_id, dispatch_key, lock_at, updated_at, cancel_reason
        FROM agency_send_requests
       WHERE status = 'cancelling'
         AND COALESCE(lock_at, updated_at) < NOW() - ($1::int * INTERVAL '1 minute')
@@ -1514,7 +1574,10 @@ async function runCancelSweep(): Promise<void> {
               RETURNING id`,
             [row.id],
           );
-          if (back.rows.length > 0) await logEvent(row.id, 'cancel_already_sent', { campaignId: found.id });
+          if (back.rows.length > 0) {
+            await logEvent(row.id, 'cancel_already_sent', { campaignId: found.id });
+            await notifyLinkCancelOutcome(row.id, row.cancel_reason, true);
+          }
           console.warn(`${LOG} 이미 발송되어 취소하지 못함 request=${row.id}`);
           continue;
         }
@@ -1567,6 +1630,7 @@ async function runCancelSweep(): Promise<void> {
       );
       if (done.rows.length === 0) continue;
       await logEvent(row.id, 'cancel_swept', { campaignId: found.id });
+      await notifyLinkCancelOutcome(row.id, row.cancel_reason, false);
       console.warn(`${LOG} 남은 취소를 마무리 request=${row.id}`);
     } catch (err: any) {
       console.error(`${LOG} 취소 마무리 실패 request=${row.id}:`, err?.message || err);
@@ -1831,4 +1895,42 @@ export function triggerAgencySendFirstTest(requestId: string): void {
 export function startAgencySendWorker(): void {
   setInterval(() => { void runAgencySendWorker(); }, TICK_MS);
   console.log(`${LOG} 시작 (${TICK_MS / 60000}분 주기)`);
+}
+
+/**
+ * ★2026-10-18 축 4 — 시각 변경으로 승인 대기에 돌아온 건의 **승인 요청 안내만** 다시 보낸다(워커 A · B 의 승인 요청 + 촉박 분기 그대로 ·
+ * 테스트 문자 · 「예약취소」 원문 제외 · 최종 검증 4). 새 링크 = 새 보낼 시각 기준 만료 · 24시간은 시각 변경 UPDATE 가 다시 시작했다.
+ * ⛔ 던지지 않는다(조작은 이미 커밋됐다 · 안내 실패는 이력에만) · 상태가 승인 대기가 아니면 보내지 않는다(그 사이 바뀌었다).
+ */
+export async function sendAgencyApprovalRequest(requestId: string): Promise<void> {
+  try {
+    const r = await query(`SELECT * FROM agency_send_requests WHERE id = $1::uuid`, [requestId]);
+    const row = r.rows[0];
+    if (!row || row.status !== 'awaiting_approval') return;
+    const label = shortLabel(row.file_name || row.original_content);
+    const whenText = formatWhen(new Date(row.requested_at));
+    if (isApprovalExpired('awaiting_approval', new Date(row.requested_at), new Date(),
+      row.final_test_at ? new Date(row.final_test_at) : null, row.approval_requested_at ? new Date(row.approval_requested_at) : null)) {
+      await notifyManager({
+        companyId: row.company_id, requestId: row.id, phones: managerPhonesOf(row),
+        callback: row.callback_number, title: '[대행발송] 시각 확인 요청',
+        text: buildTooTightNotify({ label, whenText }),
+      });
+      return;
+    }
+    const linkRow = (await freshLinkFields(row.id)) || row;
+    const spellCount = await readAgencySpellCount(row.id);
+    const count = Number(row.recipient_count || 0);
+    await notifyManager({
+      companyId: row.company_id, requestId: row.id, phones: managerPhonesOf(linkRow),
+      callback: row.callback_number, title: '[대행발송] 승인 요청',
+      text: buildPassedNotify({ label, whenText, count, spellCount }),
+      perPhoneTexts: await buildApproveTexts(managerPhonesOf(linkRow), (approveUrl) =>
+        buildPassedNotify({ label, whenText, count, approveUrl, spellCount }),
+        row.company_id, row.id, linkRow, row.created_by ?? null),
+    });
+  } catch (err: any) {
+    console.error(`${LOG} 승인 요청 다시 보내기 실패 request=${requestId}:`, err?.message || err);
+    await logEvent(requestId, 'notify_failed', { error: String(err?.message || ''), kind: 'approval-request' }).catch(() => {});
+  }
 }

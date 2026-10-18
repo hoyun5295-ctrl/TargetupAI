@@ -10,9 +10,11 @@ import { getMonthHolidays } from './kr-holidays';
 import { PLANNER_CHANNEL_LABEL } from './marketing-planner';
 import {
   PlannerDisplayState, PlannerEventRow, computeDisplayState, firstSendDate, isBuilding, isEventEditable, listPlannerEvents, staleBuildChannels,
+  readStoredAudience, type PlannerAudience,
 } from './planner-event';
 import { PlannerTouchpointRow, loadTouchpointsForEvents } from './planner-touchpoint';
 import { PLANNER_APPROVAL_DEADLINE_HOUR } from './planner-confirm';
+import { plannerLineEnabled } from './planner-audience';
 
 /** 할 일(앰버) = 담당자가 손을 대야 진행되는 상태 */
 export const PLANNER_TODO_STATES: PlannerDisplayState[] = ['material', 'review', 'hold'];
@@ -29,6 +31,8 @@ export interface CalendarTouchpoint {
   /** [다시 시작] 가능 — 보류·잠금 · 승인 각인 있음 · 발송 여부를 모르는 행 아님 */
   resumable: boolean;
   sentCount: number | null;
+  /** ★ 2026-10-18 쌍 재확인 중(이 접점이 캐리어든 DM 이든 · 화면은 캐리어 id 로 재확인 창을 연다) */
+  recheck: { round: number; date: string } | null;
 }
 
 export interface CalendarEvent {
@@ -44,6 +48,8 @@ export interface CalendarEvent {
   todo: boolean;
   revision: number;
   materials: unknown;
+  /** ★ 2026-10-18 받는 사람(없음 = 전체 · 깨진 값 = null) */
+  audience: PlannerAudience | null;
   /** 완성본이 없거나 재료가 바뀌어 다시 만들어야 하는 채널 */
   staleChannels: Array<'dm' | 'email'>;
   building: boolean;
@@ -64,6 +70,8 @@ export interface PlannerCalendar {
   migratedTodo: number;
   holidays: unknown[];
   holidaysReady: boolean;
+  /** ★ 2026-10-18 이 회사에 한 줄 입력 · 상품 구매자 대상이 열렸는가(PLANNER_LINE_COMPANY_IDS) */
+  lineEnabled: boolean;
 }
 
 function toCalendarTouchpoint(t: PlannerTouchpointRow): CalendarTouchpoint {
@@ -79,6 +87,9 @@ function toCalendarTouchpoint(t: PlannerTouchpointRow): CalendarTouchpoint {
     approved,
     resumable: (t.status === 'hold_credit' || t.status === 'locked') && approved && !(t.execMeta?.send_started_at && !t.execRef),
     sentCount: t.status === 'sent' && Number.isFinite(Number(t.execMeta?.sent_count)) ? Number(t.execMeta.sent_count) : null,
+    recheck: t.status === 'planned' && t.execMeta?.recheck
+      ? { round: Number(t.execMeta.recheck.round) || 0, date: String(t.execMeta.recheck.date || t.scheduledOn) }
+      : null,
   };
 }
 
@@ -90,7 +101,7 @@ export function toCalendarEvent(ev: PlannerEventRow, tps: PlannerTouchpointRow[]
   const notice = displayState === 'material' || displayState === 'making'
     ? (tps.map((t) => t.execMeta?.copy_error?.reason).find(Boolean) as string | undefined) || null
     : displayState === 'hold'
-      ? tps.find((t) => t.status === 'hold_credit' || t.status === 'locked')?.lockReason || null
+      ? tps.find((t) => t.status === 'hold_credit' || t.status === 'locked' || (t.status === 'planned' && !!t.execMeta?.recheck))?.lockReason || null
       : null;
   return {
     id: ev.id,
@@ -105,6 +116,7 @@ export function toCalendarEvent(ev: PlannerEventRow, tps: PlannerTouchpointRow[]
     todo: PLANNER_TODO_STATES.includes(displayState),
     revision: Number(ev.meta.revision) || 0,
     materials: ev.meta.materials || null,
+    audience: readStoredAudience(ev.meta),
     staleChannels: staleBuildChannels(ev, tps),
     building: isBuilding(ev.meta, now),
     firstSend: first,
@@ -136,5 +148,6 @@ export async function buildPlannerCalendar(companyId: string, planMonth: string,
     migratedTodo: events.filter((e) => e.migrated && e.todo).length,
     holidays: h.holidays,
     holidaysReady: h.ready,
+    lineEnabled: plannerLineEnabled(companyId),
   };
 }

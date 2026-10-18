@@ -462,6 +462,8 @@ export interface PrepNoticeInput {
   costEstimate: number;     // 총 예상 비용(원)
   channelLabel: string;     // 'SMS' | 'LMS' | 'MMS'
   unitCost: number;         // 회사 단가(원/건)
+  /** ★2026-10-18 멈춤 링크(예고 문자 안 · 없으면 옛 문장 그대로 · utils/autosend-stop-link.ts) */
+  stopUrl?: string | null;
 }
 
 export function buildAutoSendPrepInfoBody(input: PrepNoticeInput): string {
@@ -477,7 +479,9 @@ export function buildAutoSendPrepInfoBody(input: PrepNoticeInput): string {
     // ★ 2026-08-03 A-1: 이 수는 화면·발송 추출과 같은 기준으로 지금 센 값이다. 남는 차이는 통지 이후의 변동뿐이라
     //   그 사실을 문구에 밝힌다(수를 확정처럼 말하면 담당자가 정지 판단을 잘못한다).
     `대상 수는 지금 기준 실측이며, 발송 직전 수신거부·발송 피로도 변동은 발송 시점에 다시 반영됩니다.`,
-    `예약 취소를 원하시면 발송 전에 한줄로에 접속해 자동마케팅 [정지]를 눌러주세요.`,
+    ...(input.stopUrl
+      ? ['보내지 않으려면 발송 전에 아래 주소에서 [이번 회차 건너뛰기]나 [자동마케팅 일시정지]를 눌러 주세요.', input.stopUrl]
+      : [`예약 취소를 원하시면 발송 전에 한줄로에 접속해 자동마케팅 [정지]를 눌러주세요.`]),
   ].join('\n');
 }
 

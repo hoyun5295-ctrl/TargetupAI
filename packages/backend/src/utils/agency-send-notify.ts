@@ -196,6 +196,41 @@ export function buildLinkApprovedNotify(ctx: AgencyNotifyContext & { approvedTai
   ]);
 }
 
+/**
+ * ★2026-10-18 축 4 — 승인 요청 뒤 24시간 안에 승인이 없어 닫았다. 링크 받는 번호는 그 주소에서 같은 시각으로 다시 진행 · 시각 변경.
+ */
+export function buildApprovalTimeoutNotify(ctx: AgencyNotifyContext): string {
+  return compose([
+    `${HEAD} 승인 요청 뒤 24시간 안에 승인이 없어 이번 발송을 닫았습니다.`,
+    `건: ${shortLabel(ctx.label)}`,
+    ctx.whenText ? `보낼 시각: ${ctx.whenText}` : '',
+    ctx.approveUrl ? '같은 시각으로 다시 진행하거나 시각을 바꾸려면 아래 주소를 열어 주세요.' : '다시 보내려면 로그인하여 보낼 시각을 정해 주세요.',
+    ctx.approveUrl || '',
+  ]);
+}
+
+/**
+ * ★2026-10-18 축 2 — 링크로 한 조작의 영수증(담당자 전원 · 링크가 새서 남이 눌렀다면 이 문자가 발각 경로다).
+ * 승인 영수증(`buildLinkApprovedNotify`)과 같은 꼴.
+ */
+export function buildLinkActionNotify(ctx: AgencyNotifyContext & { action: 'cancel' | 'reschedule' | 'spell'; tail: string; spellCount?: number; pending?: boolean; alreadySent?: boolean }): string {
+  // ★ Codex D 1R — 처리 중(큐 정리 미완) = 완료라고 말하지 않는다 · 확정은 워커 F 가 끝낸 뒤 따로 알린다(notifyLinkCancelOutcome)
+  const head = ctx.action === 'cancel'
+    ? (ctx.alreadySent ? '취소하지 못했습니다. 이미 발송이 시작되어 예약을 지우지 못했습니다. 한줄로 대행발송 화면에서 결과를 확인해 주세요.'
+      : ctx.pending ? '취소를 처리하고 있습니다. 예약을 지우는 일이 끝나면 결과를 다시 문자로 알려 드립니다.' : '발송이 취소되었습니다.')
+    : ctx.action === 'reschedule' ? `보낼 시각이 ${ctx.whenText || '새 시각'}로 바뀌었습니다.`
+      : `맞춤법 ${Number(ctx.spellCount || 0).toLocaleString()}곳을 고쳤습니다.`;
+  const next = ctx.action === 'reschedule' ? '새 승인 요청 문자를 이어서 보내 드립니다.'
+    : ctx.action === 'spell' ? '고친 문안으로 다시 검사한 뒤 새 테스트 문자와 승인 요청을 보내 드립니다.' : '';
+  return compose([
+    `${HEAD} ${head}`,
+    `건: ${shortLabel(ctx.label)}`,
+    next,
+    `끝자리 ${ctx.tail} 번호의 링크로 처리되었습니다.`,
+    '본인이나 동료가 한 일이 아니면 즉시 한줄로 담당자에게 알려 주세요.',
+  ]);
+}
+
 /** 요청 시각을 담당자가 읽는 형태로 (KST) */
 export function formatWhen(at: Date): string {
   const kst = new Date(at.getTime() + 9 * 60 * 60 * 1000);

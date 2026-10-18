@@ -219,3 +219,15 @@ export async function resolveLinkApprovers(
     companyId: String(row.company_id), staffCompanyIds,
   });
 }
+
+/**
+ * ★2026-10-18 축 2(Codex D 2R) — 링크 취소 표지. 취소를 잡는 UPDATE 가 `cancel_reason` 에 함께 적는다(한 문장 · 이력 기록 성패와 무관).
+ * 워커 F 는 이 값으로 「링크로 잡은 취소인가 · 누른 번호 끝자리」를 정한다. 화면 재취소는 자기 사유로 덮고, 이미 발송 되돌림은 NULL 로 지운다.
+ */
+export function linkCancelReason(phone: string): string {
+  return `담당자 링크 취소(끝자리 ${String(phone || '').replace(/\D/g, '').slice(-4)})`;
+}
+export function linkCancelTailOf(reason: unknown): string | null {
+  const m = /^담당자 링크 취소\(끝자리 (\d{4})\)$/.exec(String(reason ?? ''));
+  return m ? m[1] : null;
+}

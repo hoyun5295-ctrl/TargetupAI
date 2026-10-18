@@ -40,7 +40,8 @@ export const AGENCY_SEND_STATUSES: readonly AgencySendStatus[] = [
 const TRANSITIONS: Record<AgencySendStatus, readonly AgencySendStatus[]> = {
   received: ['testing', 'cancelling'],
   testing: ['awaiting_approval', 'test_failed', 'received'],             // received = lock 복구
-  awaiting_approval: ['approved', 'received', 'expired', 'cancelling'],  // received = 담당자가 문안 수정
+  // ★2026-10-16 축 1 전이표 정정 — awaiting_approval 자기 자신 = 승인 대기 중 시각 변경(같은 문안 · 새 승인 요청)
+  awaiting_approval: ['approved', 'received', 'expired', 'cancelling', 'awaiting_approval'],  // received = 담당자가 문안 수정
   test_failed: ['received', 'cancelling'],
   // expired = 승인은 받았는데 워커가 재검사·적재를 넣을 시간이 지났다(발송하지 않는다)
   approved: ['final_testing', 'queued', 'expired', 'cancelling'],
@@ -53,8 +54,10 @@ const TRANSITIONS: Record<AgencySendStatus, readonly AgencySendStatus[]> = {
   //   「예약 완료」로 남았고, 그래서 취소 버튼이 계속 보였다**(서수란 접수 `cmtcgacmr03o8jnothzxrtrf6`).
   queued: ['cancelling', 'sent'],                                        // 취소는 기존 캠페인 취소 CT를 함께 탄다
 
-  reapproval: ['approved', 'received', 'expired', 'cancelling'],
-  expired: ['received', 'cancelling'],                                   // received = 새 시각으로 다시 올린다
+  // ★2026-10-16 축 1 정정 — awaiting_approval = 재승인 대기에서 시각을 바꾸면 승인 대기로(시각 변경 라우트가 이미 그렇게 쓴다)
+  reapproval: ['approved', 'received', 'expired', 'cancelling', 'awaiting_approval'],
+  // ★2026-10-16 축 1 정정 — awaiting_approval = 새 시각 · 검사를 통과한 문안 그대로 승인 대기(시각 변경)
+  expired: ['received', 'awaiting_approval', 'cancelling'],                                   // received = 새 시각으로 다시 올린다
   /**
    * ⛔ **취소는 두 저장소를 건드리는 다단계 작업이라 중간 상태가 있어야 한다**(★2026-08-23 Codex 3R critical).
    *   원장을 먼저 `cancelled`로 확정하면, 그 뒤 큐 삭제가 실패하거나 프로세스가 죽는 순간
@@ -313,6 +316,36 @@ export interface ApprovalTarget {
    * 통과 분기에서만 찍히므로 "있다 = 남은 일이 적재뿐이다"가 성립한다.
    */
   finalTestedAt?: Date | null;
+  /**
+   * ★2026-10-16 축 4 — 승인 요청을 보낸 시각(`approval_requested_at`). 승인 대기는 이때부터 24시간까지다.
+   *   없으면(컬럼 전 · 옛 행) 24시간 규칙만 쉰다 = 지금 동작 그대로.
+   */
+  approvalRequestedAt?: Date | null;
+}
+
+/** ★2026-10-16 축 4 — 승인 요청 뒤 이 시간이 지나면 승인 대기를 닫는다(Harold 요청 ② · ⑥ · 주말 보정 없음) */
+export const APPROVAL_WAIT_HOURS = 24;
+
+/** (순수) 승인 요청 뒤 24시간이 지났는가 — 승인 대기 · 재승인 대기만(승인된 건은 해당 없음) */
+export function isApprovalTimedOut(status: AgencySendStatus, now: Date, approvalRequestedAt?: Date | null): boolean {
+  if (status !== 'awaiting_approval' && status !== 'reapproval') return false;
+  if (!approvalRequestedAt || Number.isNaN(approvalRequestedAt.getTime())) return false;
+  return now.getTime() >= approvalRequestedAt.getTime() + APPROVAL_WAIT_HOURS * 3_600_000;
+}
+
+/**
+ * (순수) 승인 마감 = min(승인 요청 + 24시간, 보낼 시각 - 남은 일에 필요한 리드타임). 화면 「승인 마감 토 18:30」 · 만료 · 승인 판정이 같은 값.
+ * 승인 대기가 아닌 상태 = null.
+ */
+export function approvalDeadline(
+  status: AgencySendStatus, requestedAt: Date, finalTestedAt?: Date | null, approvalRequestedAt?: Date | null,
+): Date | null {
+  if (status !== 'awaiting_approval' && status !== 'reapproval') return null;
+  const byLead = requestedAt.getTime() - requiredLeadMinutes(status, !!finalTestedAt) * 60_000;
+  const byWait = approvalRequestedAt && !Number.isNaN(approvalRequestedAt.getTime())
+    ? approvalRequestedAt.getTime() + APPROVAL_WAIT_HOURS * 3_600_000
+    : Number.POSITIVE_INFINITY;
+  return new Date(Math.min(byLead, byWait));
 }
 
 /**
@@ -357,6 +390,10 @@ export function checkApproval(target: ApprovalTarget, approvingRevision: number,
       error: '그 사이 내용이 바뀌었습니다. 화면을 새로 고쳐 문안과 시각을 확인한 뒤 승인해 주세요.',
       code: 'STALE_VIEW',
     };
+  }
+  // ★2026-10-16 축 4 — 승인 요청 뒤 24시간이 지났으면 승인하지 않는다(만료 판정과 같은 함수 · 같은 경계)
+  if (isApprovalTimedOut(target.status, now, target.approvalRequestedAt)) {
+    return { ok: false, error: `승인 요청 뒤 ${APPROVAL_WAIT_HOURS}시간이 지나 이 발송은 닫혔습니다. 보낼 시각을 다시 정해 주세요.`, code: 'APPROVAL_TIMEOUT' };
   }
   // ⛔ 경계는 만료 판정과 **같은 쪽으로** 닫는다(`<=`). 한쪽이 `<`면 딱 그 값일 때
   //   "승인은 됐는데 같은 tick에 만료되는" 건이 생긴다.
@@ -434,9 +471,11 @@ export function isQueueDue(
  *   한쪽만 알면 승인은 되는데 다음 tick이 만료시키는 구간이 다시 생긴다.
  */
 export function isApprovalExpired(
-  status: AgencySendStatus, requestedAt: Date, now: Date, finalTestedAt?: Date | null,
+  status: AgencySendStatus, requestedAt: Date, now: Date, finalTestedAt?: Date | null, approvalRequestedAt?: Date | null,
 ): boolean {
   if (status !== 'awaiting_approval' && status !== 'reapproval' && status !== 'approved') return false;
+  // ★2026-10-16 축 4 — 승인 요청 뒤 24시간(승인 판정 checkApproval 과 같은 함수)
+  if (isApprovalTimedOut(status, now, approvalRequestedAt)) return true;
   return (requestedAt.getTime() - now.getTime()) / 60000 <= requiredLeadMinutes(status, !!finalTestedAt);
 }
 
@@ -477,4 +516,21 @@ export const MAX_TEST_ROUNDS = 3;
 
 export function hasTestRoundsLeft(testRound: number): boolean {
   return Number(testRound || 0) < MAX_TEST_ROUNDS;
+}
+
+/**
+ * ★2026-10-18 축 4(Codex D 1R) — 만료 건을 다시 진행할 때 막는 집합 = 메일 접수 중복 집합(EMAIL_DUP_BLOCKING_SQL)에서
+ *   **끝난 발송(sent)만 뺀 것**(지난주에 끝난 같은 문안 · 명단이 이번 주 재진행을 막지 않게).
+ *   검사에서 막힘 · 취소 중은 다시 살아날 수 있어 그대로 막는다(넓게 막는 쪽이 두 벌 발송보다 싸다).
+ * ⛔ 아래 SQL 과 판정 함수는 같은 집합이어야 한다(짝 시험).
+ */
+export const RESUME_TWIN_DONE: readonly AgencySendStatus[] = ['expired', 'cancelled', 'sent'] as const;
+export function resumeTwinBlockingSql(alias: string): string {
+  return `(${alias}.status NOT IN (${RESUME_TWIN_DONE.map((s) => `'${s}'`).join(',')}) AND NOT (${alias}.status = 'queued' AND ${alias}.requested_at <= NOW()))`;
+}
+export function isResumeTwinBlocking(status: AgencySendStatus, requestedAt: Date | null | undefined, now: Date): boolean {
+  if ((RESUME_TWIN_DONE as readonly string[]).includes(status)) return false;
+  // SQL 짝: queued + 시각 없음 = NOT(NULL) = 제외
+  if (status === 'queued') return !!requestedAt && requestedAt.getTime() > now.getTime();
+  return true;
 }

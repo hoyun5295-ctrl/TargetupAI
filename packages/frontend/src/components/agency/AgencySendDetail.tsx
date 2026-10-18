@@ -16,6 +16,7 @@ import SmsCharsetNotice from '../SmsCharsetNotice';
 import { hasUnsupportedSmsChars, SMS_CHARSET_BLOCK_MESSAGE } from '../../utils/smsSafeChars';
 import { withMmsImageNames } from '../../utils/mmsImage';
 import SenderAuthModal from '../SenderAuthModal';
+import ConfirmModal, { type ConfirmState } from '../ConfirmModal';
 import { useSenderAuth } from '../../hooks/useSenderAuth';
 import {
   CUI_BTN_DANGER, CUI_BTN_GHOST, CUI_BTN_OUTLINE, CUI_BTN_PRIMARY, CUI_CELL_META, CUI_DANGER_BOX, CUI_DANGER_ICON,
@@ -44,6 +45,7 @@ export default function AgencySendDetail({ requestId, onClose, onChanged }: Prop
   const [events, setEvents] = useState<AgencySendEvent[]>([]);
   const [loading, setLoading] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [confirm, setConfirm] = useState<ConfirmState | null>(null);
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState('');
   const [newWhen, setNewWhen] = useState('');
@@ -180,7 +182,7 @@ export default function AgencySendDetail({ requestId, onClose, onChanged }: Prop
     if (!req || busy) return;
     setBusy(true);
     try {
-      const { request: next, pending } = await cancelAgencyRequest(req.id);
+      const { request: next, pending } = await cancelAgencyRequest(req.id, undefined, req.revision);
       apply(next);
       toast.success(pending ? '취소를 처리하고 있습니다. 잠시 후 상태가 바뀝니다.' : '취소했습니다.');
     } catch (e: any) {
@@ -366,7 +368,13 @@ export default function AgencySendDetail({ requestId, onClose, onChanged }: Prop
 
         <div className={CUI_MODAL_FOOT}>
           {req && isCancelable(req.status) ? (
-            <button type="button" onClick={doCancel} disabled={busy} className={CUI_BTN_DANGER}>취소하기</button>
+            <button type="button" disabled={busy} className={CUI_BTN_DANGER}
+              onClick={() => setConfirm({
+                mode: 'danger', title: '이 발송을 취소할까요?',
+                description: `${req.recipientCount.toLocaleString()}명에게 ${formatWhen(req.requestedAt)} 나갈 발송을 취소해요. 되돌릴 수 없고, 다시 보내려면 새로 접수해야 해요.`,
+                confirmLabel: '발송 취소', cancelLabel: '그대로 두기',
+                onConfirm: () => { setConfirm(null); void doCancel(); },
+              })}>취소하기</button>
           ) : <span />}
           {req && isApprovable(req.status) && !editing && (
             <button type="button" onClick={doApprove} disabled={busy} className={CUI_BTN_PRIMARY}>
@@ -391,6 +399,8 @@ export default function AgencySendDetail({ requestId, onClose, onChanged }: Prop
           onCancel={senderAuth.cancel}
         />
       )}
+      {/* ★2026-10-18 취소 확인 창(1016 설계 「상세 취소 확인창 없음」 결함 정정) */}
+      <ConfirmModal state={confirm} onClose={() => setConfirm(null)} />
 
       {/* ★2026-08-28(2) 받는 사람별 미리보기 — 별도 모달(portal). 부모 모달의 overflow-hidden에 잘리지 않는다 */}
       {req && (

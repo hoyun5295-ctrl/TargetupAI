@@ -186,20 +186,22 @@ describe('시도 키 잠금: 조회·적재·캠페인 생성은 잠금 안에�
  *   ③UPDATE 한 문장 안에서 시도 키 잠금을 시도한다(lock 복구와 같은 두 신호 · 같은 조립 함수).
  */
 describe('문안 수정·시각 변경은 시도 키 캠페인·진행 중 시도를 확인하고 시도 잠금과 직렬화한다(대행 ⓔ)', { timeout: 30_000 }, () => {
-  const route = fs.readFileSync(path.join(__dirname, '../../routes/agency-send.ts'), 'utf8');
+  // ★2026-10-18 축 1 — 본문은 CT(utils/agency-send-change.ts)로 원본 복사 이동 · 같은 계약을 CT 함수에서 본다
+  const changeCt = fs.readFileSync(path.join(__dirname, '../agency-send-change.ts'), 'utf8').replace(/\r\n/g, '\n');
   const segOf = (marker: string) => {
-    const s = route.indexOf(marker);
-    return route.slice(s, route.indexOf('router.', s + marker.length));
+    const fn = marker.includes('content') ? 'export async function editAgencyContentTx(' : 'export async function rescheduleAgencyRequestTx(';
+    const s = changeCt.indexOf(fn);
+    const e = changeCt.indexOf('\nexport ', s + fn.length);
+    return changeCt.slice(s, e < 0 ? undefined : e);
   };
 
   for (const [name, marker] of [['문안 수정', "router.post('/:id/content'"], ['시각 변경', "router.post('/:id/reschedule'"]] as const) {
     it(`${name}: 시도 키를 읽고, UPDATE 바로 앞에서 차단 판정을 하고, UPDATE에 시도 잠금 조건을 건다`, () => {
       const seg = segOf(marker);
       expect(seg.length).toBeGreaterThan(0);
-      expect(seg).toMatch(/SELECT [^`]*dispatch_key[^`]*FROM agency_send_requests/);
-      const call = 'await attemptBlocksChange(auth.companyId, req.params.id, r.rows[0].dispatch_key)';
-      const callAt = seg.indexOf(call);
-      const updAt = seg.indexOf('const updated = await query(');
+      expect(seg).toMatch(/SELECT \* FROM agency_send_requests/);
+      const callAt = seg.search(/await attemptBlocksChange\(input\.companyId, input\.requestId, row\.dispatch_key(?:, q)?\)/);
+      const updAt = seg.search(/const updated = await (?:query|q)\(/);
       expect(callAt).toBeGreaterThan(0);
       expect(callAt).toBeLessThan(updAt);
       // 판정과 UPDATE 사이에 다른 대기를 끼우지 않는다(끼우면 그 사이 생긴 캠페인·시도를 못 본다)

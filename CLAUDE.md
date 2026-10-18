@@ -205,6 +205,12 @@
       [상황↔스킬 매핑] `status/COLLAB.md` §2
     </RULE>
 
+    <RULE id="external_code_adoption_gate" priority="HIGHEST">
+      외부 스킬 · 플러그인 · MCP 서버 · 훅 · 저장소 코드를 접목(설치 · 복사 · 이식)하기 **전에** 「이 저장소 코드에 외부 전송이나 비밀값 접근이 있는가」를 코드로 확인하고 결과를 보고한다(★2026-10-18 Harold 지시 · 브레인스토밍 뒤 접목도 예외 없음).
+      1. 확인 = 네트워크 호출(fetch · http · curl · WebSocket · 원격 주소) · 비밀값 접근(.env · 토큰 · 키 · 자격 파일 · 환경변수 읽기) · 자동 실행(설치 스크립트 · postinstall · 훅) grep 결과를 증거로 첨부한다.
+      2. 있으면 = 어디로 무엇을 보내는지 · 어떤 비밀을 읽는지 표로 보고하고, Harold님 동의 전에는 접목하지 않는다. 없으면 = 「0건」과 grep 명령 · 결과.
+    </RULE>
+
     <RULE id="doc_routing" priority="HIGH">
       세션 상시 로드는 **CLAUDE.md + status/STATUS.md 둘뿐**이다. 그 외 문서는 STATUS.md 라우팅 표가 지시하는 상황에서 지시된 범위만 읽는다.
       문서 전체 로드 금지. 아카이브는 `status/archive/INDEX.md` grep 경유로만. 과거 문서와 현재 코드가 다르면 **현재 코드가 진실**이다.

@@ -20,9 +20,11 @@ import {
 } from './planner-touchpoint';
 import { PlannerEventRow, firstSendDate, mapEventRow, patchEventMeta, staleBuildChannels } from './planner-event';
 import { PLANNER_APPROVAL_DEADLINE_HOUR, buildPlannerConfirmLink, hashPreviewToken, issuePlannerPreviewToken, isPreviewValid } from './planner-confirm';
-import { carrierGroups, loadPlannerDefaultCallback, runPlannerCopyPass, spamCheckPlannerCopy } from './planner-copy';
+import { carrierGroups, loadPlannerDefaultCallback, runPlannerCopyPass, spamCheckPlannerVerdict } from './planner-copy';
 import { PLANNER_REASON } from './planner-reasons';
 import { tryAcquireInflight, releaseInflight } from './inflight-lock';
+import { computeTouchpointDate, TimingRule } from './marketing-planner';
+import { isPastApprovalDeadline } from './planner-approve';
 
 /** 확인 링크를 보내는 시점 — 남은 첫 발송이 이 날수 안으로 들어오면(설계서 Q5 · "이하" 판정이라 서버가 멈춘 날도 다음 주기가 집는다). */
 export const PLANNER_LINK_LEAD_DAYS = 3;
@@ -117,6 +119,12 @@ export async function revertEventToReview(input: {
                    AND NOT ((exec_meta ? 'send_started_at') AND exec_ref IS NULL)))`,
       [input.eventId, input.companyId, input.failedIds, input.reason, input.dropCopy, input.claimedIds],
     );
+    // ★ 2026-10-18 B4 — 행사 단위로 되돌리면 쌍 재확인 표식은 의미가 없다(같은 트랜잭션에서 지운다 · 그물이 그 쌍에 링크를 보내지 않게)
+    await client.query(
+      `UPDATE planner_touchpoints SET exec_meta = exec_meta - 'recheck'
+        WHERE event_id = $1::uuid AND company_id = $2::uuid AND (exec_meta ? 'recheck')`,
+      [input.eventId, input.companyId],
+    );
     await client.query(
       `UPDATE planner_events
           SET status = $3,
@@ -136,6 +144,113 @@ export async function revertEventToReview(input: {
   }
   console.log(`[planner-review] 확인 대기로 되돌림 company=${input.companyId} event=${input.eventId} 문안 버림=${input.dropCopy}`);
   return outcome;
+}
+
+// ── 쌍 재확인 진입 (★ 2026-10-18 · 설계서 docs/2026-10-18-planner-v2-design.md §3-2) ──────────
+export type PairRecheckOutcome = 'entered' | 'past_deadline' | 'lost' | 'cancelled';
+
+/**
+ * 스팸 차단(판정 blocked) 한 번이 행사 전체 승인을 풀지 않게 — **그 쌍(캐리어 문자 + 같은 날 DM)만** 재확인 대기로 둔다.
+ *   쌍 → planned + exec_meta.recheck(round + 1) · 승인 각인 · 승인 직후 검사 표식을 뗀다 · 문안(copy)은 지우지 않는다(사람 고친 글 보존).
+ *   행사 상태 · 다른 접점의 승인 각인은 그대로다(다른 날 발송은 계획대로 간다).
+ * 한 트랜잭션 · 잠금 순서 = 월 원장 → 행사 → 접점(승인 · 취소 · 실행 선점과 같다).
+ *   fromStatus = 실행부(당일) 'producing' + 선점 토큰 / 승인 직후 검사 'ready'(승인 각인 있음).
+ *   마감(그 날 20시) 뒤면 재확인을 열지 않고 그 쌍만 생략한다('past_deadline' · 통지는 호출부 · M2).
+ *   행사가 그 사이 취소·종료됐으면 선점한 쌍을 생략으로 닫는다('cancelled').
+ */
+export async function enterPairRecheck(input: {
+  companyId: string;
+  eventId: string;
+  carrierId: string;
+  dmId: string | null;
+  fromStatus: 'producing' | 'ready';
+  claimToken: string | null;
+  origin: 'send_day' | 'post_approval';
+  now?: Date;
+}): Promise<{ outcome: PairRecheckOutcome; round: number; date: string }> {
+  const now = input.now || new Date();
+  const ids = [input.carrierId, ...(input.dmId ? [input.dmId] : [])];
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const ev = await client.query(
+      `SELECT plan_month FROM planner_events WHERE id = $1::uuid AND company_id = $2::uuid`,
+      [input.eventId, input.companyId],
+    );
+    if (!ev.rows[0]) { await client.query('ROLLBACK'); return { outcome: 'lost', round: 0, date: '' }; }
+    await client.query(
+      `SELECT status FROM planner_monthly_approvals WHERE company_id = $1::uuid AND plan_month = $2 FOR UPDATE`,
+      [input.companyId, String(ev.rows[0].plan_month)],
+    );
+    const lockedEv = await client.query(
+      `SELECT status, starts_on::text AS starts_on, ends_on::text AS ends_on FROM planner_events WHERE id = $1::uuid AND company_id = $2::uuid FOR UPDATE`,
+      [input.eventId, input.companyId],
+    );
+    const evStatus = String(lockedEv.rows[0]?.status || '');
+    const rows = await client.query(
+      `SELECT id, status, timing_rule, exec_meta FROM planner_touchpoints
+        WHERE company_id = $1::uuid AND event_id = $2::uuid AND id = ANY($3::uuid[]) FOR UPDATE`,
+      [input.companyId, input.eventId, ids],
+    );
+    const owned = (rows.rows as any[]).filter((r) => String(r.status) === input.fromStatus
+      && (!input.claimToken || String(r.exec_meta?.claim_token || '') === input.claimToken)
+      && (input.fromStatus !== 'ready' || !!r.exec_meta?.approved));
+    if (owned.length !== ids.length) { await client.query('ROLLBACK'); return { outcome: 'lost', round: 0, date: '' }; }
+    const tokenGuard = input.claimToken ? ` AND exec_meta->>'claim_token' = $5` : '';
+    const guardParams = input.claimToken ? [input.claimToken] : [];
+    if (evStatus === 'cancelled' || evStatus === 'done' || evStatus === 'reported') {
+      await client.query(
+        `UPDATE planner_touchpoints SET status = 'skipped', lock_reason = $3
+          WHERE company_id = $1::uuid AND id = ANY($2::uuid[]) AND status = $4${tokenGuard}`,
+        [input.companyId, ids, PLANNER_REASON.cancelledEvent, input.fromStatus, ...guardParams],
+      );
+      await client.query('COMMIT');
+      return { outcome: 'cancelled', round: 0, date: '' };
+    }
+    if (!['approved', 'producing', 'scheduled'].includes(evStatus)) { await client.query('ROLLBACK'); return { outcome: 'lost', round: 0, date: '' }; }
+    const carrier = (rows.rows as any[]).find((r) => String(r.id) === input.carrierId);
+    const date = computeTouchpointDate((carrier?.timing_rule || {}) as TimingRule, String(lockedEv.rows[0].starts_on), String(lockedEv.rows[0].ends_on));
+    if (isPastApprovalDeadline(date, now)) {
+      const up = await client.query(
+        `UPDATE planner_touchpoints
+            SET status = 'skipped', lock_reason = $3,
+                exec_meta = (COALESCE(exec_meta, '{}'::jsonb) - 'recheck') || jsonb_build_object('recheck_past_deadline_at', to_jsonb(NOW()))
+          WHERE company_id = $1::uuid AND id = ANY($2::uuid[]) AND status = $4${tokenGuard}
+          RETURNING id`,
+        [input.companyId, ids, PLANNER_REASON.recheckPastDeadline, input.fromStatus, ...guardParams],
+      );
+      if (up.rows.length !== ids.length) throw new Error('쌍 생략이 일부만 적용됐습니다');
+      await client.query('COMMIT');
+      return { outcome: 'past_deadline', round: 0, date };
+    }
+    const round = (Number(carrier?.exec_meta?.recheck?.round) || 0) + 1;
+    const recheck = { round, date, origin: input.origin, at: now.toISOString() };
+    const up = await client.query(
+      `UPDATE planner_touchpoints
+          SET status = 'planned', lock_reason = $3,
+              exec_meta = (COALESCE(exec_meta, '{}'::jsonb) - 'approved' - 'post_approval_spam' - 'spam_error')
+                          || jsonb_build_object('recheck', $6::jsonb)
+        WHERE company_id = $1::uuid AND id = ANY($2::uuid[]) AND status = $4${input.claimToken ? ` AND exec_meta->>'claim_token' = $5` : ' AND $5::text IS NULL'}
+        RETURNING id`,
+      [input.companyId, ids, PLANNER_REASON.recheckSpam, input.fromStatus, input.claimToken, JSON.stringify(recheck)],
+    );
+    if (up.rows.length !== ids.length) throw new Error('쌍 재확인 진입이 일부만 적용됐습니다');
+    await client.query('COMMIT');
+    console.log(`[planner-review] 쌍 재확인 진입 company=${input.companyId} event=${input.eventId} carrier=${input.carrierId} round=${round} date=${date} (${input.origin})`);
+    return { outcome: 'entered', round, date };
+  } catch (err) {
+    await client.query('ROLLBACK').catch(() => { /* 원 오류 우선 */ });
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+
+/** (순수) 마감 뒤 생략 통지(M2 · 링크 없음) — 다음 발송 날짜가 있으면 「그대로 갑니다」. */
+export function recheckPastDeadlineNotice(title: string, date: string, nextDate: string | null): string {
+  return `'${title}' ${formatPlannerDay(date)} 문자가 마감(${PLANNER_APPROVAL_DEADLINE_HOUR}시) 뒤 스팸 검사에 막혀 이 날 발송은 보내지 않습니다.`
+    + (nextDate ? ` 다음 발송 ${formatPlannerDay(nextDate)}은 그대로 갑니다.` : ' 남은 발송은 없습니다.')
+    + ' 이 발송에는 문안비가 빠지지 않았습니다.';
 }
 
 /** 되돌린 뒤 바로 다음 단계를 당긴다(best-effort) — 문안 준비 → 링크 발급. 실패해도 대조 워커가 다음 주기에 집는다. */
@@ -298,23 +413,27 @@ async function checkCarrierAfterApproval(carrier: PlannerTouchpointRow): Promise
   const opt080 = await getOpt080Number(carrier.createdBy || null, carrier.companyId);
   if (!callback || !opt080) return 'skip'; // 준비 판정 실패는 발송 당일 실행부가 사유와 함께 잠근다
   const body = appendDmLink(String(copy.text), url);
-  const ok = await spamCheckPlannerCopy({
+  // ★ 2026-10-18 판정 3분할(B6) — 검사 장애(error)는 차단이 아니다: 표식을 남겨 다음 주기에 다시 본다(당일 실행부도 다시 검사한다)
+  const check = await spamCheckPlannerVerdict({
     tp: carrier, body, subject: String(copy.subject || ''), callback, rejectNumber: opt080, link: url, withDmLink: true, regenerate: false,
   });
-  if (ok) {
+  if (check.verdict === 'pass') {
     await clearExecMetaKeys(carrier.companyId, carrier.id, ['post_approval_spam'], { post_approval_spam_at: new Date().toISOString() });
     return 'pass';
   }
+  if (check.verdict === 'error') return 'skip';
+  // ★ 2026-10-18 차단 = 그 쌍만 재확인(행사 승인 · 다른 날 발송은 그대로 · 옛: 행사 전체를 재료 단계로 되돌렸다)
+  //   통지 · 새 문안 · 링크는 재확인 패스(planner-recheck · 실행 워커 10분 주기)가 한다.
   const siblings = (await loadEventTouchpoints(carrier.companyId, carrier.eventId));
   const pair = carrierGroups(siblings).find((g) => g.carrier.id === carrier.id);
-  const failedIds = [carrier.id, ...(pair?.dm ? [pair.dm.id] : [])];
-  const out = await revertEventToReview({
-    companyId: carrier.companyId, eventId: carrier.eventId, claimedIds: [], failedIds, reason: PLANNER_REASON.spamFailed, dropCopy: true,
+  const out = await enterPairRecheck({
+    companyId: carrier.companyId, eventId: carrier.eventId, carrierId: carrier.id, dmId: pair?.dm?.id || null,
+    fromStatus: 'ready', claimToken: null, origin: 'post_approval',
   });
-  if (out === 'reverted') {
-    await notifyPlanner(carrier.companyId, carrier.createdBy, '[마케팅 플래너] 다시 확인이 필요합니다',
-      `'${carrier.title}' 승인한 문자 문안이 실제 모바일 DM 주소를 붙인 검사에서 스팸으로 판정됐습니다. 새 문안을 만들어 확인 링크를 다시 보내 드립니다. 다시 승인해도 크레딧은 두 번 빠지지 않습니다.`);
-    kickPlannerReview(carrier.companyId, carrier.eventId);
+  if (out.outcome === 'past_deadline') {
+    const rest = siblings.filter((t) => t.id !== carrier.id && t.id !== pair?.dm?.id && !['sent', 'skipped'].includes(t.status));
+    await notifyPlanner(carrier.companyId, carrier.createdBy, '[마케팅 플래너] 발송 생략',
+      recheckPastDeadlineNotice(carrier.title, out.date, firstSendDate(carrier, rest)));
   }
   return 'fail';
 }

@@ -21,17 +21,18 @@ import { getCreditState, isCreditEnabledStrict } from './ai-credit';
 import { buildAdMessage, getOpt080Number } from './messageUtils';
 import { getDmDetail } from './dm/dm-builder';
 import { renderDmViewerHtml } from './dm/dm-viewer';
+import { getLineTemplate } from './design-core/line-templates';
 import { dmPublishFeeSourceOf, isDmPublishFeeCharged } from './dm/dm-publish-gate';
 import { isEmailCampaignCompleted } from './email/email-completion';
-import { countCustomerEmailRecipients, withEmailPreviewAdFooter, resolveEmailSender } from './email-channel';
+import { withEmailPreviewAdFooter, resolveEmailSender } from './email-channel';
 import { loadAgencyPaymentState, PLANNER_AGENCY_SOURCE } from './planner-approval';
 import { PLANNER_SEND_SOURCE, appendDmLink, describeTiming, kstDateString } from './planner-execution';
 import { PlannerTouchpointRow, loadEventTouchpoints } from './planner-touchpoint';
 import {
-  PlannerEventRow, computeDisplayState, isEventEditable, firstSendDate, mapEventRow, PlannerDisplayState,
+  PlannerEventRow, computeDisplayState, isEventEditable, firstSendDate, mapEventRow, PlannerDisplayState, plannerAudienceKey, readStoredAudience,
 } from './planner-event';
 import { carrierGroups } from './planner-copy';
-import { countEventSmsAudience, PlannerAudienceCount } from './planner-audience';
+import { countEventSmsAudience, countPlannerEmailRecipients, PlannerAudienceCount } from './planner-audience';
 
 /** 승인 마감 시각(첫 발송일 · KST) — 발송 창이 21시에 닫히므로 한 시간 앞에서 끊는다(설계서 Q5 · §6-4). */
 export const PLANNER_APPROVAL_DEADLINE_HOUR = 20;
@@ -100,7 +101,9 @@ export async function computeTouchpointFingerprints(companyId: string, tps: FpTo
 /** 행사 지문(화면이 본 것) — 행사 사실 + 리비전 + 접점 지문 전부. */
 export function eventFingerprint(ev: Pick<PlannerEventRow, 'id' | 'title' | 'startsOn' | 'endsOn' | 'benefitText' | 'meta'>, tpFps: Map<string, string>): string {
   const parts = Array.from(tpFps.entries()).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
-  return sha({ i: ev.id, t: ev.title, s: ev.startsOn, e: ev.endsOn, b: ev.benefitText || '', r: Number(ev.meta.revision) || 0, p: parts }).slice(0, 48);
+  // ★ 2026-10-18 받는 사람 — 상품 구매자일 때만 지문 칸이 생긴다(전체 = 이 줄 앞과 한 글자도 같다 · 이미 승인한 행사가 배포 순간 멈추지 않게)
+  const aud = plannerAudienceKey(readStoredAudience(ev.meta));
+  return sha({ i: ev.id, t: ev.title, s: ev.startsOn, e: ev.endsOn, b: ev.benefitText || '', r: Number(ev.meta.revision) || 0, p: parts, ...(aud ? { u: aud } : {}) }).slice(0, 48);
 }
 
 // ── 승인 견적 ─────────────────────────────────────────────────────────
@@ -243,10 +246,27 @@ export interface ConfirmSend {
   result: { sentAt: string | null; sentCount: number | null; successCount: number | null; openCount: number | null; clickCount: number | null } | null;
 }
 
+/** (순수) 받는 사람 한 줄 — 「크림 · 토너 외 1개 산 고객 · 2026-07-20 이후」 + 기준(들어오는 곳) */
+export function describePlannerAudience(a: ReturnType<typeof readStoredAudience>): ConfirmView['event']['audience'] {
+  if (!a) return { kind: 'invalid', label: '받는 사람 설정을 확인하지 못했어요', note: '행사를 고쳐 받는 사람을 다시 골라 주세요' };
+  if (a.kind === 'all') return { kind: 'all', label: '전체 고객', note: '수신거부를 뺀 오늘 기준' };
+  const shown = a.names.slice(0, 2).join(' · ');
+  const more = a.names.length > 2 ? ` 외 ${a.names.length - 2}개` : '';
+  return {
+    kind: 'product_buyers',
+    label: `${shown}${more} 산 고객 · ${a.since ? `${a.since} 이후` : '기록 전체'}`,
+    note: a.door === 'mall' ? '자사몰 결제 주문 기준 · 매장 구매는 들어가지 않아요' : '매장 구매 기록 기준 · 자사몰 주문은 들어가지 않아요',
+  };
+}
+
 export interface ConfirmView {
   event: {
     id: string; title: string; startsOn: string; endsOn: string; benefitText: string | null; status: string;
     displayState: PlannerDisplayState; editable: boolean; revision: number; companyName: string;
+    /** ★ 2026-10-18 v2-1 고른 템플릿(요약 「빅세일 · 3번 발송」 · 없으면 null) */
+    template: { id: string; label: string } | null;
+    /** ★ 2026-10-18 받는 사람 한 줄(승인 서류 첫 줄 · 상품 이름 · 기간 · 기준) */
+    audience: { kind: 'all' | 'product_buyers' | 'invalid'; label: string; note: string };
   };
   firstSend: string | null;
   sendHour: number;
@@ -297,7 +317,7 @@ export async function buildConfirmView(ev: PlannerEventRow, opts: { mode: 'publi
       ? countEventSmsAudience({ companyId: ev.companyId, createdBy: ev.createdBy, eventId: ev.id })
       : Promise.resolve({ state: 'known', count: 0 } as PlannerAudienceCount),
     tps.some((t) => t.channel === 'email' && t.status !== 'skipped')
-      ? countCustomerEmailRecipients(ev.companyId).then((n) => ({ state: 'known', count: n } as PlannerAudienceCount)).catch(() => ({ state: 'error', count: null } as PlannerAudienceCount))
+      ? countPlannerEmailRecipients({ companyId: ev.companyId, createdBy: ev.createdBy, plannerEventId: ev.id })
       : Promise.resolve({ state: 'known', count: 0 } as PlannerAudienceCount),
     ['briefed', 'draft'].includes(ev.status) ? quoteEventApproval(ev, tps).catch(() => null) : Promise.resolve(null),
     loadBuildPaid(ev).catch(() => 0),
@@ -403,6 +423,8 @@ export async function buildConfirmView(ev: PlannerEventRow, opts: { mode: 'publi
     event: {
       id: ev.id, title: ev.title, startsOn: ev.startsOn, endsOn: ev.endsOn, benefitText: ev.benefitText, status: ev.status,
       displayState: computeDisplayState(ev, tps), editable: isEventEditable(ev.status), revision: Number(ev.meta.revision) || 0, companyName,
+      template: (() => { const t = getLineTemplate(ev.meta.materials?.template?.id); return t ? { id: t.id, label: t.label } : null; })(),
+      audience: describePlannerAudience(readStoredAudience(ev.meta)),
     },
     firstSend: first,
     sendHour: SEND_HOURS.start,

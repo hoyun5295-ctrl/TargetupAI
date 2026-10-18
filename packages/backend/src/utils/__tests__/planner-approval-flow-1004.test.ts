@@ -161,7 +161,9 @@ describe('③ 확인 대기로 되돌림(planner-review)', () => {
     const spam = src.slice(src.indexOf('async function checkCarrierAfterApproval'));
     expect(spam).toContain('regenerate: false');
     expect(spam).toContain('const body = appendDmLink(String(copy.text), url);');
-    expect(spam).toContain('dropCopy: true');
+    // ★ 2026-10-18 차단 = 그 쌍만 재확인(행사 전체 되돌림 · 문안 버림 없음 · 설계서 2026-10-18 §3-2)
+    expect(spam).toContain('enterPairRecheck(');
+    expect(spam).not.toContain('dropCopy: true');
   });
 });
 

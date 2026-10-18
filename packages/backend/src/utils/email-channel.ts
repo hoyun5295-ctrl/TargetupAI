@@ -898,6 +898,33 @@ export async function countCustomerEmailRecipients(companyId: string): Promise<n
   return Number(r.rows[0]?.total) || 0;
 }
 
+/**
+ * ★ 2026-10-18 마케팅 플래너 v2(설계서 docs/2026-10-18-planner-v2-design.md §3-6 · I3) — 범위 · 대상 조각을 호출부가 정한 메일 받는 사람.
+ *   안전 필터 · 개인화 열 · 매핑은 위 발송 경로와 같은 단일 소스. 기존 함수(등급 · 필터 경로)는 그대로 둔다.
+ *   `params[0]` = 회사 id · `scopeWhere` · `extraWhere` = customers(알리아스 c) 기준 조각(번호는 params 순서 · planner-audience 가 만든다).
+ */
+export async function resolveCustomerRecipientsWhere(params: any[], scopeWhere: string, extraWhere: string): Promise<EmailRecipient[]> {
+  const result = await query(
+    `SELECT DISTINCT ON (lower(c.email)) c.email, ${RECIPIENT_PERSONALIZATION_COLS.map((col) => `c.${col}`).join(', ')}
+     FROM customers c
+     WHERE c.company_id = $1::uuid AND ${RECIPIENT_SAFETY_WHERE}${scopeWhere} ${extraWhere}
+     ORDER BY lower(c.email)`,
+    params,
+  );
+  return result.rows.map(mapEmailRecipientRow);
+}
+
+/** 위와 같은 WHERE 의 수(메일 주소 단위 · 발송 경로 DISTINCT ON(lower(email)) 과 같은 단위) */
+export async function countCustomerRecipientsWhere(params: any[], scopeWhere: string, extraWhere: string): Promise<number> {
+  const r = await query(
+    `SELECT COUNT(DISTINCT lower(c.email))::int AS total
+     FROM customers c
+     WHERE c.company_id = $1::uuid AND ${RECIPIENT_SAFETY_WHERE}${scopeWhere} ${extraWhere}`,
+    params,
+  );
+  return Number(r.rows[0]?.total) || 0;
+}
+
 /** 발송 전 미리보기 — 대상 인원 + 등급 분포 + 표본 (RecipientsModal 고객DB 탭). */
 export async function previewCustomerRecipients(
   companyId: string,

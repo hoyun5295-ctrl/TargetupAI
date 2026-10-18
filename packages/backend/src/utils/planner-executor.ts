@@ -32,7 +32,7 @@ import { getCreditCost } from './ai-credit-calc';
 import { createDirectSendCampaign } from './direct-send-core';
 import { DirectSendError } from './direct-send-spec';
 import { SPAM_BLOCKED_CODE } from './spam-block';
-import { sendEmailCampaign, resolveCustomerRecipients, getEmailCampaign } from './email-channel';
+import { sendEmailCampaign, getEmailCampaign } from './email-channel';
 import { isEmailCampaignCompleted } from './email/email-completion';
 import { emailContentBlocker } from './email/email-send-gate';
 import {
@@ -63,12 +63,14 @@ import {
   plannerSendKey,
   resolveAudienceMode,
 } from './planner-execution';
-import { cleanupPlannerStaging, loadPlannerStaging, resolvePlannerAudience } from './planner-audience';
+import { cleanupPlannerStaging, loadPlannerStaging, resolvePlannerAudience, resolvePlannerEmailRecipients } from './planner-audience';
 import { inspectDmForCarry, isDmCarryable } from './planner-dm-check';
 import { checkChannelReadiness } from './planner-channel-gate';
-import { PLANNER_APPROVAL_DEADLINE_HOUR, computeTouchpointFingerprints } from './planner-confirm';
-import { loadPlannerDefaultCallback, spamCheckPlannerCopy } from './planner-copy';
-import { kickPlannerReview, revertEventToReview, settleEventIfFinished } from './planner-review';
+import { computeTouchpointFingerprints } from './planner-confirm';
+import { loadPlannerDefaultCallback, spamCheckPlannerVerdict } from './planner-copy';
+import { enterPairRecheck, kickPlannerReview, recheckPastDeadlineNotice, revertEventToReview, settleEventIfFinished } from './planner-review';
+import { kickPlannerRecheck, runPlannerRecheckPass } from './planner-recheck';
+import { firstSendDate } from './planner-event';
 import { PLANNER_REASON, sendRejectReason } from './planner-reasons';
 
 export type ExecOutcome = 'sent' | 'skipped' | 'held' | 'locked' | 'review' | 'not_due';
@@ -240,6 +242,52 @@ async function backToReview(tp: PlannerTouchpointRow, link: CarryLink, claim: Cl
   return out === 'cancelled' ? 'skipped' : 'not_due';
 }
 
+/**
+ * ★ 2026-10-18 당일 스팸 차단 → 그 쌍만 재확인(planner-review.enterPairRecheck · 행사 승인 그대로).
+ * 통지 · 새 문안 · 링크는 재확인 패스가 한다(곧바로 당긴다 · 놓치면 10분 주기). 마감(20시) 뒤면 쌍만 생략 + 링크 없는 통지(M2).
+ */
+async function recheckPair(tp: PlannerTouchpointRow, link: CarryLink, claim: ClaimCtx): Promise<ExecOutcome> {
+  const out = await enterPairRecheck({
+    companyId: tp.companyId, eventId: tp.eventId, carrierId: tp.id, dmId: link.dm?.id || null,
+    fromStatus: 'producing', claimToken: claim.token, origin: 'send_day',
+  });
+  if (out.outcome === 'entered') {
+    kickPlannerRecheck(tp.companyId, tp.id);
+    return 'review';
+  }
+  if (out.outcome === 'past_deadline') {
+    const rest = (await loadEventTouchpoints(tp.companyId, tp.eventId).catch(() => [] as PlannerTouchpointRow[]))
+      .filter((t) => t.id !== tp.id && t.id !== link.dm?.id && !['sent', 'skipped'].includes(t.status));
+    await notifyPlanner(tp.companyId, tp.createdBy, '[마케팅 플래너] 발송 생략', recheckPastDeadlineNotice(tp.title, out.date, firstSendDate(tp, rest)));
+    return 'skipped';
+  }
+  return out.outcome === 'cancelled' ? 'skipped' : 'not_due';
+}
+
+/** 같은 날 검사 장애 상한 — 이 횟수에 닿으면 쌍을 함께 잠근다(B11 · [다시 시작]이 다시 검사한다). */
+export const PLANNER_SPAM_ERROR_LIMIT = 2;
+
+/**
+ * ★ 2026-10-18 검사 장애(error) — 차단이 아니다. 문안을 버리지 않고 선점을 놓아 다음 주기(10분)에 다시 검사한다.
+ * 같은 날 상한에 닿으면 캐리어와 DM 을 **한 문장으로** 잠근다(쌍 규칙 · 예외 경로처럼 DM 만 먼저 ready 로 돌아가지 않게 · B11).
+ */
+async function spamCheckDown(tp: PlannerTouchpointRow, link: CarryLink, claim: ClaimCtx, today: string): Promise<ExecOutcome> {
+  const prev = tp.execMeta?.spam_error;
+  const count = (prev && prev.date === today ? Number(prev.count) || 0 : 0) + 1;
+  const patch = { spam_error: { date: today, count, at: new Date().toISOString() } };
+  const ids = [tp, ...(link.dm ? [link.dm] : [])];
+  if (count >= PLANNER_SPAM_ERROR_LIMIT) {
+    const updated = await setTouchpointStates(tp.companyId, ids.map((r) => ({ id: r.id, status: 'locked', lockReason: PLANNER_REASON.spamCheckDown, execMetaPatch: patch })), ['producing'], claim.token);
+    if (!updated.includes(tp.id)) return 'not_due';
+    await notifyPlanner(tp.companyId, tp.createdBy, '[마케팅 플래너] 발송 보류', `'${tp.title}' ${PLANNER_REASON.spamCheckDown}`);
+    return 'locked';
+  }
+  await setTouchpointStates(tp.companyId, ids.map((r) => ({ id: r.id, status: 'ready', lockReason: null, execMetaPatch: patch })), ['producing'], claim.token)
+    .catch((e: any) => console.warn(`[planner-executor] 검사 장애 뒤 선점 놓기 실패 tp=${tp.id}(회수 워커가 정리):`, e?.message || e));
+  console.warn(`[planner-executor] 스팸 검사 장애(${count}/${PLANNER_SPAM_ERROR_LIMIT}) tp=${tp.id} — 다음 주기 재검사`);
+  return 'not_due';
+}
+
 /** 예외(throw) 뒤 동반 DM 정리 — 표식이 남아 있으면(커밋 미확정) 잠그고, 아니면 ready로 되돌린다(취소된 행사면 생략). */
 async function settleCompanionAfterError(dm: PlannerTouchpointRow, stampRemains: boolean, claimToken: string): Promise<void> {
   try {
@@ -352,21 +400,25 @@ async function executeMessagingCore(
   }
 
   // ④ 발송 당일 스팸 재검사 — 실주소가 붙은 최종 문안 · 재생성 0
+  // ★ 2026-10-18 판정 3분할(B6) · 쌍 재확인(설계서 docs/2026-10-18-planner-v2-design.md §3-2)
+  //   차단(blocked) = 그 쌍만 재확인(행사 승인 · 다른 날 발송 그대로 · 옛: 행사 전체를 재료 단계로 되돌려 남은 일정의 승인이 다 풀렸다)
+  //   검사 장애(error) = 차단이 아니다 → 선점을 놓고 다음 주기에 다시 · 같은 날 두 번째면 쌍을 함께 잠근다(B11)
   const claimIds = link.dm ? [tp.id, link.dm.id] : [tp.id];
   await touchClaim(tp.companyId, claimIds);
-  const passed = await spamCheckPlannerCopy({
+  const check = await spamCheckPlannerVerdict({
     tp, body: finalBody, subject, callback, rejectNumber: opt080, link: link.url, withDmLink: !!link.url, regenerate: false,
   });
   await touchClaim(tp.companyId, claimIds);
-  if (!passed) {
-    return review(PLANNER_REASON.spamFailed, true,
-      `'${tp.title}' 오늘 보낼 문자가 스팸 검사를 통과하지 못해 멈췄습니다. 새 문안을 만들어 확인 링크를 보내 드립니다. 오늘 ${PLANNER_APPROVAL_DEADLINE_HOUR}시 전에 승인하시면 오늘 나갑니다.`);
-  }
+  if (check.verdict === 'error') return spamCheckDown(tp, link, claim, today);
+  if (check.verdict === 'blocked') return recheckPair(tp, link, claim);
 
   // ⑤ 대상
   const mode = resolveAudienceMode(tp.channel, tp.timing);
   const audience = await resolvePlannerAudience({ companyId: tp.companyId, createdBy: tp.createdBy, mode, plannerEventId: tp.eventId });
-  if (audience.blocked) return end('locked', PLANNER_REASON.scopeBlocked, `'${tp.title}' ${label} 발송을 보류했습니다. ${PLANNER_REASON.scopeBlocked}`);
+  if (audience.blocked) {
+    const why = audience.blockedReason || PLANNER_REASON.scopeBlocked;
+    return end('locked', why, `'${tp.title}' ${label} 발송을 보류했습니다. ${why}`);
+  }
   const stagingId = randomUUID();
   let total = 0;
   try {
@@ -476,7 +528,10 @@ async function executeEmail(tp: PlannerTouchpointRow, claim: ClaimCtx): Promise<
     return backToReview(tp, noLink, claim, PLANNER_REASON.materialsMissing, false, `'${tp.title}' 메일이 보낼 수 있는 상태가 아니라 오늘 발송을 멈췄습니다. 메일을 확인한 뒤 다시 승인해 주세요.`);
   }
   await touchClaim(tp.companyId, tp.id);
-  const recipients = await resolveCustomerRecipients(tp.companyId);
+  // ★ 2026-10-18 메일도 문자와 같은 대상 문(행사를 만든 계정의 매장 범위 · 상품 구매자 · 막힘 = 잠금 + 사유 · 설계서 §3-6 I3)
+  const target = await resolvePlannerEmailRecipients({ companyId: tp.companyId, createdBy: tp.createdBy, plannerEventId: tp.eventId });
+  if (target.blocked) return lock(tp, target.reason, `'${tp.title}' 메일 발송을 보류했습니다. ${target.reason}`, ['producing'], claim.token);
+  const recipients = target.recipients;
   if (recipients.length === 0) return skip(tp, PLANNER_REASON.emailZero, `'${tp.title}' 메일을 받을 수 있는 고객이 0명이라 발송을 생략했습니다.`, ['producing'], claim.token);
   // ★ 2026-10-04 메일도 발송 전에 시도 표식(Codex 1R H4) — 중간에 끊긴 달의 대행료가 "발송 0건"으로 환불되지 않게.
   //   메일 발송 CT는 이미 받은 사람(delivered)을 건너뛰므로 [다시 시작]은 남은 사람에게만 간다(planner-touchpoint 선점 조건).
@@ -635,14 +690,27 @@ export async function resumePlannerTouchpoint(tp: PlannerTouchpointRow): Promise
     .filter((s) => s.id !== tp.id && (s.channel === 'sms' || s.channel === 'dm') && (tp.channel === 'sms' || tp.channel === 'dm')
       && carrierKey(s.scheduledOn, s.timing) === carrierKey(tp.scheduledOn, tp.timing)
       && (s.status === 'hold_credit' || s.status === 'locked') && !!s.execMeta?.approved && !(s.execMeta?.send_started_at && !s.execRef));
+  // ★ 2026-10-18 검사 장애 횟수(spam_error)를 비운다 — [다시 시작]은 새로 검사한다는 뜻이다(남겨 두면 다음 장애 한 번에 곧바로 다시 잠긴다)
   const updated = await setTouchpointStates(
     tp.companyId,
-    [tp, ...siblings].map((r) => ({ id: r.id, status: 'ready', lockReason: null, execMetaPatch: { resumed_at: new Date().toISOString() } })),
+    [tp, ...siblings].map((r) => ({ id: r.id, status: 'ready', lockReason: null, execMetaPatch: { resumed_at: new Date().toISOString(), spam_error: null } })),
     ['hold_credit', 'locked'],
   );
   return updated.includes(tp.id) ? 'ready' : 'unresumable';
 }
 const LIVE_RESUME_EVENT = ['approved', 'scheduled', 'producing'];
+
+/**
+ * ★ 2026-10-18 쌍 승인 직후 즉시 실행(B1) — **발송 시간대 안에서만**. 밖이면 아무것도 하지 않는다(08시 첫 주기가 집는다 ·
+ * 시간대 밖에서 커밋하면 야간 광고 제한으로 쌍이 잠기고 「보류」 통지가 간다). 결과 문장은 승인 CT 가 같은 판정으로 만든다.
+ */
+export function kickPlannerTouchpointNow(companyId: string, touchpointId: string): void {
+  if (!isSendableHourKst(new Date(), SEND_HOURS.start, SEND_HOURS.end)) return;
+  void (async () => {
+    const tp = await loadTouchpointById(companyId, touchpointId);
+    if (tp) await executeTouchpoint(tp);
+  })().catch((e: any) => console.warn(`[planner-executor] 즉시 실행 실패 tp=${touchpointId}(다음 주기가 집는다):`, e?.message || e));
+}
 
 // ── 워커 ─────────────────────────────────────────────────────────────
 /**
@@ -652,6 +720,9 @@ const LIVE_RESUME_EVENT = ['approved', 'scheduled', 'producing'];
 let passRunning = false;
 
 export async function runPlannerExecutionPass(): Promise<{ sent: number; skipped: number; held: number }> {
+  // ★ 2026-10-18 쌍 재확인 패스(통지 · 새 문안 · 고친 글 검사 · 마감) — 발송 패스 잠금 **밖**에서 10분마다(B7 · Codex A 1R:
+  //   안에 두면 순차 발송이 길어지는 날 재확인이 통째로 밀려 20시 마감을 넘긴다). 자기 잠금으로 따로 돈다 · 다루는 상태(planned + recheck)가 발송 패스(ready)와 겹치지 않는다.
+  void runPlannerRecheckPass().catch((e: any) => console.error('[planner-executor] 재확인 패스 실패:', e?.message || e));
   // ⛔ 주기가 겹치지 않게 한 번에 하나만 돈다(스팸 실검사·메일 발송이 분 단위).
   if (passRunning) return { sent: 0, skipped: 0, held: 0 };
   passRunning = true;

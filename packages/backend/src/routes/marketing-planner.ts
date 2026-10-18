@@ -22,14 +22,18 @@ import { parsePlannerEventInput, parsePlanMonth, isPlannerDay, PLANNER_CHANNEL_L
 import { getPlannerChannelAvailability, firstBlockedChannel } from '../utils/planner-channel-gate';
 import { cancelMonthlyApproval, resolveApprovalToken, PlannerApprovalError } from '../utils/planner-approval';
 import { loadTouchpointById, requirePlannerMeta } from '../utils/planner-touchpoint';
-import { loadPlannerEvent, normalizePlannerMaterials, savePlannerEvent, PlannerEventWriteError, PlannerMaterials } from '../utils/planner-event';
+import { loadPlannerEvent, normalizePlannerAudience, normalizePlannerMaterials, savePlannerEvent, PlannerEventWriteError, PlannerMaterials } from '../utils/planner-event';
+import { confirmLineAudienceForCompany, countPlannerAudience, countPlannerEmailRecipients, plannerLineEnabled, verifyPlannerAudience } from '../utils/planner-audience';
+import { readPlannerLine } from '../utils/planner-line-read';
+import { currentPurchaseDoor, listObservedProducts } from '../utils/journey-product';
 import { quotePlannerBuild, quotePlannerDraft, runPlannerBuild, PlannerBuildError } from '../utils/planner-build';
 import { editPlannerCopy, runPlannerCopyPass, PlannerCopyEditError } from '../utils/planner-copy';
 import { buildConfirmView, resolvePlannerPreviewToken } from '../utils/planner-confirm';
 import { approvePlannerEvent, unapprovePlannerEvent, cancelPlannerEvent, PlannerApproveError } from '../utils/planner-approve';
 import { buildPlannerCalendar } from '../utils/planner-calendar';
 import { kickPlannerReview, runPostApprovalSpamPass } from '../utils/planner-review';
-import { resumePlannerTouchpoint } from '../utils/planner-executor';
+import { kickPlannerTouchpointNow, resumePlannerTouchpoint } from '../utils/planner-executor';
+import { PlannerRecheckError, approvePlannerPairTx, buildRecheckView, deferPlannerPairTx, editPlannerPairCopyTx, kickPlannerRecheck, loadRecheckPair, skipPlannerPairTx } from '../utils/planner-recheck';
 import { loadMonthlyResult } from '../utils/planner-report';
 import { renderJoinLandingHtml, verifyJoinToken } from '../utils/planner-participation';
 
@@ -119,7 +123,7 @@ function requireCompany(req: Request, res: Response): string | null {
 
 /** CT 오류 → HTTP(코드가 화면 분기의 축). 처리했으면 true. */
 function sendPlannerError(err: any, res: Response, table: string, fallback: string): Response | void {
-  if (err instanceof PlannerApproveError || err instanceof PlannerBuildError || err instanceof PlannerEventWriteError || err instanceof PlannerCopyEditError) {
+  if (err instanceof PlannerApproveError || err instanceof PlannerBuildError || err instanceof PlannerEventWriteError || err instanceof PlannerCopyEditError || err instanceof PlannerRecheckError) {
     return res.status(err.status).json({ error: err.message, code: err.code, ...((err as any).extra || {}) });
   }
   if (err instanceof PlannerApprovalError) return res.status(err.status).json({ error: err.message, code: err.code });
@@ -173,8 +177,13 @@ async function saveEvent(req: Request, res: Response, eventId?: string) {
   if (!parsed.ok) return res.status(400).json({ error: parsed.error });
   const materials = readMaterials(req.body, companyId);
   if (!materials.ok) return res.status(400).json({ error: materials.error, code: 'MATERIALS_INVALID' });
+  // ★ 2026-10-18 받는 사람 = 저장 본문에 꼭 있어야 한다(칸이 빠졌다고 조용히 전체로 받지 않는다 · 설계서 §3-6)
+  const aud = normalizePlannerAudience(req.body?.audience);
+  if (!aud.ok) return res.status(400).json({ error: aud.error, code: 'AUDIENCE_REQUIRED' });
   try {
     await requirePlannerMeta();
+    const verified = await verifyPlannerAudience(companyId, aud.value);
+    if (!verified.ok) return res.status(verified.status).json({ error: verified.error, code: verified.code });
     // 잠긴 채널은 서버에서도 거른다 — 화면 체크박스 상태를 신뢰하지 않는다(재료 창 · 승인 · 발송 당일 같은 함수 · F2).
     const blocked = await firstBlockedChannel(parsed.value.touchpoints.map((t) => t.channel), {
       companyId, userId: req.user?.userId || null, phase: 'plan',
@@ -187,7 +196,7 @@ async function saveEvent(req: Request, res: Response, eventId?: string) {
     }
     const saved = await savePlannerEvent({
       companyId, userId: req.user?.userId || null, ownerId: resolveOwnerScope(req),
-      value: parsed.value, planMonth: parsed.planMonth, materials: materials.value, eventId,
+      value: parsed.value, planMonth: parsed.planMonth, materials: materials.value, audience: verified.value, eventId,
     });
     // 문자만 있는 행사는 곧바로 문안 준비에 들어간다(best-effort · 놓치면 대조 워커가 집는다).
     void runPlannerCopyPass({ companyId, eventId: saved.id }).catch(() => null);
@@ -196,6 +205,66 @@ async function saveEvent(req: Request, res: Response, eventId?: string) {
     return sendPlannerError(error, res, 'planner_events', '행사를 저장하지 못했습니다');
   }
 }
+
+// ── ★ 2026-10-18 v2 입력 축(설계서 docs/2026-10-18-planner-v2-design.md §3-6 · 회사 스위치 PLANNER_LINE_COMPANY_IDS) ──
+const LINE_CLOSED = { error: '이 기능은 아직 열리지 않았습니다.', code: 'FEATURE_DISABLED' };
+
+// POST /api/marketing-planner/line-read — 한 줄 → 행사명 · 기간 · 혜택 · 받는 사람 · 채널 제안(AI 0 · 0크레딧)
+//   ★ Codex B 3R · 4R — 구매자 제안은 그 회사 관측 상품명으로 확정(대상 CT · 못 읽음 · 시간 초과 = 사람이 고른다 · 나머지 제안은 그대로)
+router.post('/line-read', async (req: Request, res: Response) => {
+  const companyId = requireCompany(req, res);
+  if (!companyId) return;
+  if (!plannerLineEnabled(companyId)) return res.status(404).json(LINE_CLOSED);
+  const line = String(req.body?.line || '').trim();
+  if (!line) return res.status(400).json({ error: '한 줄을 입력해 주세요.' });
+  const read = readPlannerLine(line, Date.now());
+  read.audience = await confirmLineAudienceForCompany(companyId, read.audience);
+  return res.json(read);
+});
+
+// GET /api/marketing-planner/audience/products — 대상 상품 목록(그 회사 지금 문 · 최근 180일 관측 · 여정과 같은 함수)
+router.get('/audience/products', async (req: Request, res: Response) => {
+  const companyId = requireCompany(req, res);
+  if (!companyId) return;
+  if (!plannerLineEnabled(companyId)) return res.status(404).json(LINE_CLOSED);
+  try {
+    const door = await currentPurchaseDoor(companyId);
+    const list = await listObservedProducts(companyId, door);
+    return res.json({ door, ...list });
+  } catch (error: any) {
+    return sendPlannerError(error, res, 'planner_events', '상품 목록을 불러오지 못했습니다');
+  }
+});
+
+// POST /api/marketing-planner/audience/count — 담기 창 인원(문자 · 메일 · 실행과 같은 문 · 새 행사 = 요청 계정 · 기존 행사 = 만든 계정 범위)
+router.post('/audience/count', async (req: Request, res: Response) => {
+  const companyId = requireCompany(req, res);
+  if (!companyId) return;
+  const aud = normalizePlannerAudience(req.body?.audience);
+  if (!aud.ok) return res.status(400).json({ error: aud.error, code: 'AUDIENCE_REQUIRED' });
+  try {
+    await requirePlannerMeta();
+    const verified = await verifyPlannerAudience(companyId, aud.value);
+    if (!verified.ok) return res.status(verified.status).json({ error: verified.error, code: verified.code });
+    let createdBy: string | null = req.user?.userId || null;
+    let eventId = '';
+    if (req.body?.eventId) {
+      const ev = await loadPlannerEvent(companyId, String(req.body.eventId), resolveOwnerScope(req));
+      if (!ev) return res.status(404).json({ error: '행사를 찾을 수 없습니다.' });
+      createdBy = ev.createdBy;
+      eventId = ev.id;
+    }
+    const [sms, email] = await Promise.all([
+      countPlannerAudience({ companyId, createdBy, mode: 'all', plannerEventId: eventId, audience: verified.value })
+        .then((r) => (r.blocked ? { state: 'blocked', count: null, reason: r.reason } : { state: 'known', count: r.count }))
+        .catch(() => ({ state: 'error', count: null })),
+      countPlannerEmailRecipients({ companyId, createdBy, plannerEventId: eventId, audience: verified.value }),
+    ]);
+    return res.json({ sms, email });
+  } catch (error: any) {
+    return sendPlannerError(error, res, 'planner_events', '받는 사람 수를 세지 못했습니다');
+  }
+});
 
 // POST /api/marketing-planner/events — 행사 담기(재료 함께 가능)
 router.post('/events', (req, res) => { void saveEvent(req, res); });
@@ -384,6 +453,87 @@ router.post('/touchpoints/:id/resume', async (req: Request, res: Response) => {
     return res.json({ status: outcome });
   } catch (error: any) {
     return sendPlannerError(error, res, 'planner_touchpoints', '다시 시작하지 못했습니다');
+  }
+});
+
+// ── ★ 2026-10-18 쌍 재확인(PC 할 일 · 설계서 docs/2026-10-18-planner-v2-design.md §3-2) ─────────────
+// 링크 화면과 같은 본문 함수 · 같은 CT · 로그인 MFA 세션 안이라 인증번호는 걸지 않는다(M5). 확인 창은 화면이 띄운다(Harold 1018 ①).
+const recheckActor = (req: Request) => ({ userId: req.user?.userId || null, via: 'pc' as const, ownerScope: resolveOwnerScope(req) });
+
+// GET /api/marketing-planner/touchpoints/:id/recheck — 재확인 화면 본문(로그인판)
+router.get('/touchpoints/:id/recheck', async (req: Request, res: Response) => {
+  const companyId = requireCompany(req, res);
+  if (!companyId) return;
+  try {
+    await requirePlannerMeta();
+    const p = await loadRecheckPair(companyId, String(req.params.id));
+    const ownerId = resolveOwnerScope(req);
+    if (!p || (ownerId && p.ev.createdBy !== ownerId)) return res.status(404).json({ error: '다시 정할 발송을 찾을 수 없습니다. 이미 처리됐을 수 있어요.', code: 'NOT_FOUND' });
+    return res.json(await buildRecheckView(p, { mode: 'member' }));
+  } catch (error: any) {
+    return sendPlannerError(error, res, 'planner_touchpoints', '재확인 내용을 불러오지 못했습니다');
+  }
+});
+
+// POST /api/marketing-planner/touchpoints/:id/recheck/approve — [새 문안으로 보내기] · [고친 문안으로 보내기]
+router.post('/touchpoints/:id/recheck/approve', async (req: Request, res: Response) => {
+  const companyId = requireCompany(req, res);
+  if (!companyId) return;
+  try {
+    await requirePlannerMeta();
+    const r = await approvePlannerPairTx({
+      companyId, carrierId: String(req.params.id), round: Number(req.body?.round),
+      choice: req.body?.choice === 'current' ? 'current' : 'proposal', seenHash: String(req.body?.seenHash || ''), actor: recheckActor(req),
+    });
+    if (r.sendsAt === 'now') kickPlannerTouchpointNow(companyId, r.carrierId);
+    return res.json(r);
+  } catch (error: any) {
+    return sendPlannerError(error, res, 'planner_touchpoints', '보내기를 정하지 못했습니다');
+  }
+});
+
+// POST /api/marketing-planner/touchpoints/:id/recheck/edit — [직접 고치기](검사는 재확인 패스가)
+router.post('/touchpoints/:id/recheck/edit', async (req: Request, res: Response) => {
+  const companyId = requireCompany(req, res);
+  if (!companyId) return;
+  try {
+    await requirePlannerMeta();
+    const r = await editPlannerPairCopyTx({
+      companyId, carrierId: String(req.params.id), round: Number(req.body?.round), text: String(req.body?.text ?? ''),
+      subject: req.body?.subject === undefined ? undefined : String(req.body.subject ?? ''), actor: recheckActor(req),
+    });
+    kickPlannerRecheck(companyId, String(req.params.id));
+    return res.json(r);
+  } catch (error: any) {
+    return sendPlannerError(error, res, 'planner_touchpoints', '문안을 저장하지 못했습니다');
+  }
+});
+
+// POST /api/marketing-planner/touchpoints/:id/recheck/skip — [오늘만 건너뛰기]
+router.post('/touchpoints/:id/recheck/skip', async (req: Request, res: Response) => {
+  const companyId = requireCompany(req, res);
+  if (!companyId) return;
+  try {
+    await requirePlannerMeta();
+    return res.json(await skipPlannerPairTx({ companyId, carrierId: String(req.params.id), round: Number(req.body?.round), actor: recheckActor(req) }));
+  } catch (error: any) {
+    return sendPlannerError(error, res, 'planner_touchpoints', '건너뛰지 못했습니다');
+  }
+});
+
+// POST /api/marketing-planner/touchpoints/:id/recheck/defer — [미루기](행사 기간 안 · 그날 다른 문자 없는 날)
+router.post('/touchpoints/:id/recheck/defer', async (req: Request, res: Response) => {
+  const companyId = requireCompany(req, res);
+  if (!companyId) return;
+  try {
+    await requirePlannerMeta();
+    const r = await deferPlannerPairTx({
+      companyId, carrierId: String(req.params.id), round: Number(req.body?.round), toDate: String(req.body?.toDate || ''), actor: recheckActor(req),
+    });
+    kickPlannerRecheck(companyId, String(req.params.id));
+    return res.json(r);
+  } catch (error: any) {
+    return sendPlannerError(error, res, 'planner_touchpoints', '미루지 못했습니다');
   }
 });
 

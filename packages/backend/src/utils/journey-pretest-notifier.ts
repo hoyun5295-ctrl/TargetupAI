@@ -10,7 +10,7 @@
 
 import { isDemoCompany } from './demo-company';
 import { query } from '../config/database';
-import { generatePauseToken, pauseJourney } from './journey-pause-handler';
+import { buildJourneyPauseUrl, generatePauseToken, pauseJourney } from './journey-pause-handler';
 import { getAuthSmsTable, bulkInsertSmsQueue, getPlatformNoticeCallback } from './sms-queue';
 import { runStepSpamTest } from './journey-pretest-validator';
 import { regenerateStepAvoidingSpam } from './journey-ai-generator';
@@ -125,10 +125,18 @@ export async function scanAndPretest(): Promise<{
           channel: b.channel, isAd: b.isAd, callbackNumber: stepCallback, opt080,
         });
         if (r2.enqueueOk && r2.ok) {
-          // 재생성 통과 → 최신 snapshot 갱신(실발송이 고친 본문 사용) + 안내.
+          // ★ 2026-10-18 J2 — 사람이 본 적 없는 문안으로 바뀐다 · 단계 알림 설정과 상관없이 늘 알린다(설계서 2026-10-18 §0).
+          // ★ Codex C 1R — **먼저 알리고, 알린 뒤에만** 발송 본문을 바꾼다. 못 알리면(문자 큐 장애) 바꾸지 않고 여정을 멈춘다
+          //   (옛: 본문을 먼저 바꾸고 통지 실패를 삼킨 채 기록 → 담당자가 모르는 문안이 2시간 뒤 나간다).
+          if (!(await safeNotify(b, regenBody, 'pretest_autofixed'))) {
+            summary.paused++;
+            await pauseJourney(b.journeyId, '발송 2시간 전 스팸필터를 통과하도록 고친 문안을 담당자에게 알리지 못해 여정을 멈췄습니다. 문안을 확인한 뒤 재개해 주세요.');
+            await safeNotify(b, body, 'pretest_paused');
+            await recordSchedule(b, 'paused');
+            continue;
+          }
           await query(`UPDATE journey_step_snapshots SET message_body = $2 WHERE id = $1::uuid`, [snap.id, regenBody]);
           summary.passed++;
-          if (b.notifyManager) await safeNotify(b, regenBody, 'pretest_autofixed');
           await recordSchedule(b, 'notified');
           continue;
         }
@@ -157,32 +165,44 @@ async function recordSchedule(b: PretestBundle, status: string): Promise<void> {
   );
 }
 
-async function safeNotify(b: PretestBundle, preview: string, mode: PretestMode): Promise<void> {
+/** 반환 = 알림이 실패하지 않았는가(받을 담당자가 없거나 시연 회사 = 보낼 것이 없음 = true · 큐 적재 0건 · 오류 = false) */
+async function safeNotify(b: PretestBundle, preview: string, mode: PretestMode): Promise<boolean> {
   try {
-    await notifyManagerForStep(b, preview, mode);
+    const ok = await notifyManagerForStep(b, preview, mode);
+    if (!ok) console.log(`[journey-pretest-scan] 담당자 알림 큐 적재 0건 journey=${b.journeyId} mode=${mode}`);
+    return ok;
   } catch (e: any) {
     console.log(`[journey-pretest-scan] 담당자 알림 실패(skip) journey=${b.journeyId} — ${e?.message || e}`);
+    return false;
   }
 }
 
 // ── 담당자 LMS 알림 (2시간 전 안내 / 자동보정 / 정지) — 인증 라인 큐 ──
-async function notifyManagerForStep(b: PretestBundle, messagePreview: string, mode: PretestMode): Promise<void> {
-  if (await isDemoCompany(b.companyId)) return;   // ★ 2026-10-09 시연 회사 = 담당자 문자 0(설계서 docs/2026-10-09-demo-company-design.md §2)
+/** 반환 = 보낼 것이 없었거나(시연 회사 · 담당자 없음 · 번호 형식 아님) 큐에 실제로 한 건 들어갔다(★ Codex C 2R · 적재 0건 = false) */
+async function notifyManagerForStep(b: PretestBundle, messagePreview: string, mode: PretestMode): Promise<boolean> {
+  if (await isDemoCompany(b.companyId)) return true;   // ★ 2026-10-09 시연 회사 = 담당자 문자 0(설계서 docs/2026-10-09-demo-company-design.md §2)
   const managerRes = await query(
     `SELECT phone_number FROM kakao_alarm_users
       WHERE company_id = $1 AND COALESCE(active_yn, 'Y') = 'Y'
       ORDER BY created_at ASC LIMIT 1`,
     [b.companyId]
   );
-  if (managerRes.rows.length === 0) return;
+  if (managerRes.rows.length === 0) return true;
   const managerPhone = String(managerRes.rows[0].phone_number).replace(/\D/g, '');
-  if (!/^01\d{8,9}$/.test(managerPhone)) return;
+  if (!/^01\d{8,9}$/.test(managerPhone)) return true;
 
-  const pauseToken = await generatePauseToken({
-    stepId: b.stepId, executionId: b.executionId, companyId: b.companyId, journeyId: b.journeyId,
-  });
-  const baseUrl = process.env.SHORT_URL_BASE || 'https://hanjul.ai';
-  const pauseUrl = `${baseUrl}/journey-pause/${pauseToken}`;
+  // ★ 2026-10-18 정지 링크 — 받는 번호 · 발송 날짜를 토큰에 싣고 주소는 # 뒤(설계서 2026-10-18 §3-1).
+  //   서명 키가 없으면 발급이 던진다 → 링크 줄만 빼고 안내는 보낸다(B10 · pretest_paused 는 여정이 이미 멈췄다).
+  let pauseUrl: string | null = null;
+  try {
+    const pauseToken = await generatePauseToken({
+      stepId: b.stepId, executionId: b.executionId, companyId: b.companyId, journeyId: b.journeyId,
+      phone: managerPhone, sendDate: b.sendDateKst,
+    });
+    pauseUrl = buildJourneyPauseUrl(pauseToken);
+  } catch (e: any) {
+    console.warn(`[journey-pretest-scan] 정지 링크 발급 실패(링크 없이 안내) journey=${b.journeyId}:`, e?.message || e);
+  }
 
   const journeyRes = await query(
     `SELECT j.name AS journey_name, s.step_order
@@ -199,7 +219,7 @@ async function notifyManagerForStep(b: PretestBundle, messagePreview: string, mo
   });
 
   const authTable = await getAuthSmsTable();
-  await bulkInsertSmsQueue(
+  const inserted = await bulkInsertSmsQueue(
     [authTable],
     [[
       managerPhone,                // dest_no
@@ -214,6 +234,7 @@ async function notifyManagerForStep(b: PretestBundle, messagePreview: string, mo
     ]],
     true
   );
+  return inserted === 1;
 }
 
 function titleForMode(mode: PretestMode): string {
@@ -222,9 +243,9 @@ function titleForMode(mode: PretestMode): string {
   return '[발송 2시간 전 안내]';
 }
 
-function buildPretestLmsBody(params: {
+export function buildPretestLmsBody(params: {
   journeyName: string; stepOrder: number; scheduledSendAt: Date;
-  messagePreview: string; pauseUrl: string; mode: PretestMode;
+  messagePreview: string; pauseUrl: string | null; mode: PretestMode;
 }): string {
   const dateStr = new Date(params.scheduledSendAt).toLocaleString('ko-KR', {
     timeZone: 'Asia/Seoul', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit',
@@ -240,7 +261,9 @@ function buildPretestLmsBody(params: {
     `여정: ${params.journeyName}`,
     `step ${params.stepOrder}`,
     `발송 예정: ${dateStr}`,
-    '', '본문 미리보기:', params.messagePreview, '',
-    `즉시 정지: ${params.pauseUrl}`,
+    '', '본문 미리보기:', params.messagePreview,
+    ...(params.pauseUrl
+      ? ['', `${params.mode === 'pretest_paused' ? '확인·여정 일시정지' : '즉시 정지'}: ${params.pauseUrl}`]
+      : ['', '정지가 필요하면 한줄로 여정 화면에서 일시정지해 주세요.']),
   ].join('\n');
 }

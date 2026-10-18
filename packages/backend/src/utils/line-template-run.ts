@@ -115,9 +115,15 @@ export interface LineTemplateDraft {
   replaced: LineCopyKey[];
 }
 
-/** 문구 AI 1회(호출부가 `runInCreditBundle` 안에서 부른다 · 실패 = 던짐 · 차감 전) */
-export async function draftLineTemplate(input: LineTemplateRunInput, ai: { userId?: string; source: string }): Promise<LineTemplateDraft> {
-  const { t, materials, ground } = lineTemplateMaterials(input);
+/**
+ * 문구 AI 1회(호출부가 `runInCreditBundle` 안에서 부른다 · 실패 = 던짐 · 차감 전)
+ * ★ 2026-10-18 `opts.factsOnly`(플래너 v2-1 · 설계서 docs/2026-10-18-planner-v2-design.md §3-4) — AI 근거에서 혜택 · 기간 · 페이지 글을 뺀다.
+ *   AI 문구에는 숫자 · 혜택이 실릴 수 없고(근거에 없으면 검사가 기본 문구로 바꾼다), 혜택 원문 · 마감 · 행사명은 코드가 재료로 놓는다
+ *   (B-1018-1 혜택 교차 조합이 생기지 않는다). 생략 = 지금 그대로(1017 고객 경로 · AI 영업).
+ */
+export async function draftLineTemplate(input: LineTemplateRunInput, ai: { userId?: string; source: string }, opts?: { factsOnly?: boolean }): Promise<LineTemplateDraft> {
+  const { t, materials, ground: g0 } = lineTemplateMaterials(input);
+  const ground: LineCopyGround = opts?.factsOnly ? { ...g0, benefit: null, periodLabel: null, pageText: null } : g0;
   let filled: Awaited<ReturnType<typeof fillLineTemplateCopy>>;
   try {
     filled = await fillLineTemplateCopy(t, ground, { companyId: input.companyId, userId: ai.userId, source: ai.source });

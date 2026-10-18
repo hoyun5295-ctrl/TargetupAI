@@ -19,6 +19,7 @@
  */
 
 import bcrypt from 'bcryptjs';
+import { createHmac, timingSafeEqual } from 'crypto';
 import { query } from '../config/database';
 import { isEnforcedFrom, isPilotTarget } from './rollout-gate';
 import { ipPrefix, maskPhone, generateMfaCode, sendAuthCodeSms } from './mfa';
@@ -83,6 +84,9 @@ export interface SenderAuthSessionRow {
   ip_address?: string | null;
   user_agent?: string | null;
   age_seconds?: number | string | null;
+  /** ★ Codex A 1R — 엄격판(링크) 기기 증명용(인증 행 id · 확인 시각) */
+  id?: string | null;
+  verified_at?: Date | string | null;
 }
 
 /**
@@ -167,7 +171,7 @@ export type SenderAuthGate =
  */
 async function findVerifiedSession(userId: string, callbackKey: string): Promise<SenderAuthSessionRow | null> {
   const result = await query(
-    `SELECT ip_address, user_agent, EXTRACT(EPOCH FROM (NOW() - verified_at)) AS age_seconds
+    `SELECT id, verified_at, ip_address, user_agent, EXTRACT(EPOCH FROM (NOW() - verified_at)) AS age_seconds
        FROM sender_auth_challenges
       WHERE user_id = $1 AND callback_number = $2 AND verified_at IS NOT NULL
       ORDER BY verified_at DESC
@@ -302,8 +306,60 @@ export async function checkSenderAuthGate(params: SenderAuthGateParams): Promise
   }
 }
 
+/**
+ * ★ 2026-10-18 링크 행동 인증 — 엄격판(설계서 docs/2026-10-18-planner-v2-design.md §3-2-4 · 회의론자 B5).
+ *
+ * 무로그인 링크(플래너 당일 재확인)에서 **보내기 · 직접 고치기 · 행사 취소** 앞에 건다.
+ *   증명 = 기존 세션 판정 그대로(`findVerifiedSession` + `evaluateSenderAuthSession` = 같은 계정 · 8시간 · 같은 IP 대역 · 같은 브라우저).
+ *   그래서 번호 주인이 자기 폰에서 인증한 직후 링크를 전달받은 사람이 보내도 통과하지 않는다(기기가 다르다).
+ * ⛔ `checkSenderAuthGate` 와 달리 **통과로 접는 앞단이 없다** — 시행 스위치 · 시범 명단과 무관하게 늘 요구하고,
+ *   MFA 번호 없음 = 막음(`no_mfa`) · 조회 오류 = 던짐(라우트 503). 링크 자체가 넘겨줄 수 있는 bearer 라서다.
+ * 인증번호 발급 · 확인 · 기록은 같은 CT(`issueSenderAuthChallenge` · `verifySenderAuthChallenge`) — 새 표 0.
+ */
+export type StrictSenderAuthResult =
+  | { ok: true }
+  | { ok: false; blocked: 'no_mfa' }
+  | { ok: false; gate: Extract<SenderAuthGate, { ok: false }> };
+
+export async function checkStrictSenderAuth(params: {
+  req: { ip?: string; headers?: any };
+  userId: string;
+  companyId: string | null;
+  callback: any;
+}): Promise<StrictSenderAuthResult> {
+  const r = await query(`SELECT mfa_phone FROM users WHERE id = $1 AND is_active = true`, [params.userId]);
+  const user = r.rows[0];
+  if (!user?.mfa_phone) return { ok: false, blocked: 'no_mfa' };
+  const callbackKey = senderNumberKey(params.callback) || SENDER_AUTH_ANY_CALLBACK;
+  const row = await findVerifiedSession(params.userId, callbackKey);
+  const session = evaluateSenderAuthSession(row, params.req);
+  // ★ Codex A 1R — 엄격판 = 세션 판정(8시간 · IP 대역 · 브라우저) + **이 기기가 인증번호를 확인했다는 증명**(헤더)
+  if (session.alive && deviceProofMatches(row, params.req)) return { ok: true };
+  const issued = await issueSenderAuthChallenge({
+    userId: params.userId, companyId: params.companyId, callbackKey, phone: String(user.mfa_phone), req: params.req,
+  });
+  return {
+    ok: false,
+    gate: {
+      ok: false, reason: session.alive ? 'environment' : session.reason, challengeId: issued.challengeId, maskedPhone: issued.maskedPhone,
+      callback: String(params.callback || '') || '발신번호 확인', expiresInMinutes: SENDER_AUTH_CODE_TTL_MINUTES,
+    },
+  };
+}
+
+/** 화면 표시용 — 지금 이 기기의 세션이 살아 있는가(인증번호를 보내지 않는다 · 오류 = false). */
+export async function isStrictSenderAuthAlive(params: { req: { ip?: string; headers?: any }; userId: string; callback: any }): Promise<boolean> {
+  try {
+    const callbackKey = senderNumberKey(params.callback) || SENDER_AUTH_ANY_CALLBACK;
+    const row = await findVerifiedSession(params.userId, callbackKey);
+    return evaluateSenderAuthSession(row, params.req).alive && deviceProofMatches(row, params.req);
+  } catch {
+    return false;
+  }
+}
+
 export type SenderAuthVerdict =
-  | { status: 'ok'; callbackNumber: string }
+  | { status: 'ok'; callbackNumber: string; challengeId?: string; verifiedAt?: string }
   | { status: 'invalid'; remaining: number }
   | { status: 'expired' }
   | { status: 'locked' };
@@ -358,7 +414,7 @@ export async function verifySenderAuthChallenge(params: {
     `UPDATE sender_auth_challenges
         SET verified_at = NOW(), consumed_at = NOW(), ip_address = $3, user_agent = $4
       WHERE id = $1 AND consumed_at IS NULL AND expires_at > NOW() AND attempts < $2
-      RETURNING id`,
+      RETURNING id, verified_at`,
     [
       params.challengeId,
       SENDER_AUTH_MAX_ATTEMPTS,
@@ -376,7 +432,28 @@ export async function verifySenderAuthChallenge(params: {
     req: params.req,
   });
 
-  return { status: 'ok', callbackNumber: String(row.callback_number || '') };
+  const v = updated.rows[0]?.verified_at;
+  return { status: 'ok', callbackNumber: String(row.callback_number || ''), challengeId: String(params.challengeId), verifiedAt: v ? new Date(v).toISOString() : undefined };
+}
+
+/**
+ * ★ Codex A 1R — 엄격판(무로그인 링크) **기기 증명**. 인증번호를 확인한 응답에만 실어 그 기기가 들고 다닌다(헤더).
+ *   값 = HMAC(도메인 분리 키, 인증 행 id | 확인 시각) — 새 표 · 새 컬럼 0 · 인증 행 id 를 아는 것만으로는 만들 수 없다(쿨다운 안 재요청이
+ *   같은 id 를 돌려줘도 확인 시각 · 키를 모른다). IP 대역 · 브라우저 일치만으로는 통과하지 않는다(같은 망 · 같은 브라우저의 다른 기기).
+ *   키 없음(JWT_SECRET 미설정) = 던짐(엄격판 = 막음).
+ */
+export const SENDER_AUTH_DEVICE_HEADER = 'x-sender-auth-device';
+export function senderAuthDeviceProof(challengeId: string, verifiedAtIso: string): string {
+  const s = process.env.JWT_SECRET;
+  if (!s) throw new Error('JWT_SECRET 미설정: 기기 증명을 만들 수 없습니다.');
+  return createHmac('sha256', `sender-auth-device:${s}`).update(`${challengeId}|${verifiedAtIso}`).digest('hex');
+}
+function deviceProofMatches(row: SenderAuthSessionRow | null, req: { headers?: any }): boolean {
+  const given = String(req?.headers?.[SENDER_AUTH_DEVICE_HEADER] || '');
+  if (!row?.id || !row.verified_at || !/^[0-9a-f]{64}$/.test(given)) return false;
+  let want: string;
+  try { want = senderAuthDeviceProof(String(row.id), new Date(row.verified_at).toISOString()); } catch { return false; }
+  return timingSafeEqual(Buffer.from(want, 'hex'), Buffer.from(given, 'hex'));
 }
 
 /**

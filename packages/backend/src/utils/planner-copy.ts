@@ -120,6 +120,8 @@ export interface PlannerCopy {
   /** 담당자가 직접 고친 문안 — 문안 패스는 이 글을 다시 만들지 않는다(고객 문안을 조용히 바꾸지 않는다) */
   edited?: boolean;
   editedAt?: string;
+  /** ★ 2026-10-18 쌍 재확인 그 회차에 실주소 링크로 검사한 문안이면 그 회차 번호(planner-recheck · 다른 회차의 통과는 이 회차 승인 근거가 아니다) */
+  recheckRound?: number;
 }
 
 /** 고친 문안이 검사에서 걸렸을 때의 사유(고객 문장) */
@@ -189,12 +191,7 @@ export async function generatePlannerCopyText(
   };
 }
 
-/**
- * 스팸 검사(CT-09) — `regenerate` = 사람이 보기 전에만 true(이 파일의 사전 준비). 실행부는 false로 부른다(maxRetries 0).
- * 입력 `body`는 **링크까지 붙은 최종 형태**여야 한다. 재생성본도 같은 링크를 다시 붙인다(검사한 문안 = 나갈 문안).
- * 반환 = 통과본(링크 포함) 또는 null.
- */
-export async function spamCheckPlannerCopy(input: {
+export interface PlannerSpamInput {
   tp: Pick<PlannerTouchpointRow, 'companyId' | 'createdBy' | 'channelLabel' | 'timing' | 'title' | 'startsOn' | 'endsOn' | 'benefitText' | 'products'>;
   body: string;
   subject: string;
@@ -203,10 +200,13 @@ export async function spamCheckPlannerCopy(input: {
   link: string;
   withDmLink: boolean;
   regenerate: boolean;
-}): Promise<{ body: string; subject: string } | null> {
+}
+
+/** 검사 한 번(재생성 규칙 포함) — 두 해석(`spamCheckPlannerCopy` · `spamCheckPlannerVerdict`)이 같은 실행을 쓴다. 예외는 그대로 던진다. */
+async function runPlannerSpamTest(input: PlannerSpamInput) {
   const { tp } = input;
   const objective = buildPlannerCopyObjective(tp, tp.channelLabel, describeTiming(tp.timing), { withDmLink: input.withDmLink });
-  const res = await autoSpamTestWithRegenerate({
+  return autoSpamTestWithRegenerate({
     companyId: tp.companyId,
     userId: tp.createdBy || tp.companyId,
     callbackNumber: input.callback,
@@ -237,9 +237,53 @@ export async function spamCheckPlannerCopy(input: {
       }
     } : undefined,
   });
+}
+
+/**
+ * 스팸 검사(CT-09) — `regenerate` = 사람이 보기 전에만 true(이 파일의 사전 준비). 실행부는 false로 부른다(maxRetries 0).
+ * 입력 `body`는 **링크까지 붙은 최종 형태**여야 한다. 재생성본도 같은 링크를 다시 붙인다(검사한 문안 = 나갈 문안).
+ * 반환 = 통과본(링크 포함) 또는 null. 예외는 던진다(호출부가 다음 주기 재시도로 접는다).
+ */
+export async function spamCheckPlannerCopy(input: PlannerSpamInput): Promise<{ body: string; subject: string } | null> {
+  const res = await runPlannerSpamTest(input);
   const v = res.variants[0];
   if (!v || v.spamResult !== 'pass') return null;
   return { body: v.messageText || input.body, subject: v.subject || input.subject };
+}
+
+/**
+ * ★ 2026-10-18 검사 판정 3분할(회의론자 B6 · 설계서 docs/2026-10-18-planner-v2-design.md §3-2-1) — 순수.
+ *   pass    = 판정 통과 + 통신사 결과 1개 이상 + 그 결과에 시간 초과·실패 0 (시연 회사는 검사 0건 통과 = 그대로 통과)
+ *   blocked = 통신사가 막았다(진짜 스팸)
+ *   error   = 그 밖(큐 등록 실패 · 시간 초과 · 결과 0행 · 결과 NULL) — 검사 장비 문제다. 사람이 승인한 문안을 버리지 않는다.
+ * 검사가 completed 인데 결과 행이 비면 옛 판정은 pass 로 접혔다(`filter(Boolean)` 뒤 빈 배열) — 여기서는 error 다.
+ */
+export type PlannerSpamVerdict = 'pass' | 'blocked' | 'error';
+export function plannerSpamVerdict(res: { variants: Array<{ spamResult: string; carrierResults: Array<{ result: string }> }>; totalTestCount: number }): PlannerSpamVerdict {
+  const v = res?.variants?.[0];
+  if (!v) return 'error';
+  if (v.spamResult === 'blocked') return 'blocked';
+  if (v.spamResult !== 'pass') return 'error';
+  if (Number(res.totalTestCount) === 0) return 'pass'; // 시연 회사 — 검사 발송 0(spam-test-queue 절단점)
+  const results = Array.isArray(v.carrierResults) ? v.carrierResults : [];
+  if (results.length === 0) return 'error';
+  if (results.some((r) => r?.result === 'timeout' || r?.result === 'failed' || !r?.result)) return 'error';
+  return 'pass';
+}
+
+/**
+ * ★ 2026-10-18 판정을 돌려주는 검사(실행부 당일 · 승인 직후 · 재확인 패스) — `spamCheckPlannerCopy` 와 같은 입력 · 같은 재생성 규칙.
+ * 예외(큐 · DB)도 error 로 접는다(검사 장애 ≠ 차단). 다른 호출처(사전 준비 패스)는 옛 함수 그대로.
+ */
+export async function spamCheckPlannerVerdict(input: PlannerSpamInput): Promise<{ verdict: PlannerSpamVerdict; body: string; subject: string }> {
+  try {
+    const res = await runPlannerSpamTest(input);
+    const v = res.variants[0];
+    return { verdict: plannerSpamVerdict(res), body: v?.messageText || input.body, subject: v?.subject || input.subject };
+  } catch (e: any) {
+    console.warn('[planner-copy] 스팸 검사 오류(검사 장애로 본다):', e?.message || e);
+    return { verdict: 'error', body: input.body, subject: input.subject };
+  }
 }
 
 /** (순수) 링크를 뗀 본문 — 저장은 링크 없이(실주소는 승인 때 정해진다), 발송·검사 때 붙인다. */

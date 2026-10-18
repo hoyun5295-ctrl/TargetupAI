@@ -3,10 +3,12 @@
  *
  * 담당자 휴대폰 확인 화면(공개 · 로그인 없음)과 PC 행사 상세(로그인)가 **같은 부품**을 쓴다 — 두 화면이 갈리지 않게.
  * 본문은 서버가 조립한 그대로(utils/planner-confirm.ts buildConfirmView): 문자 = (광고)·무료거부까지 붙은 최종형 ·
- * 모바일 DM·메일 = 렌더러 출력 그대로. 미리보기는 sandbox iframe(스크립트 0 · 열람 비콘 0)으로 그린다.
+ * 모바일 DM·메일 = 렌더러 출력 그대로. 미리보기 = 공용 PreviewFrame(★ 2026-10-18 · 스크립트 허용 = 슬라이드가 넘어간다 ·
+ * 불투명 출처 + CSP connect-src 'none' = 열람 · 응답 기록 호출이 나가지 않는다 · 열람 수 0).
  * 승인 확인 창 본문(ApproveBody)도 폰 시트 · PC 창이 같은 부품이다.
  */
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
+import SharedPreviewFrame from '../make/PreviewFrame';
 import { AlarmClock, Check, ChevronDown, Info, Lock, Maximize2, Pencil, RotateCcw, ShieldCheck, TriangleAlert, X } from 'lucide-react';
 import { PLANNER_SEND_KIND, plannerDay } from '../../constants/planner-status';
 import type { AudienceCount, ConfirmSend, ConfirmView } from './planner-api';
@@ -45,8 +47,25 @@ export function SmsBubble({ text, linkPending, maxWidth = 300 }: { text: string;
   );
 }
 
-function PreviewFrame({ title, html, height }: { title: string; html: string; height: number }) {
-  return <iframe title={title} srcDoc={html} sandbox="" className="w-full bg-white block" style={{ height }} />;
+/** 칸 폭에 맞춘 공용 미리보기 — 문서 폭 = 칸 폭(최소 minViewport · 좁으면 줄여 그린다 · 넓혀 키우지 않는다) */
+function PreviewFrame({ title, html, height, minViewport = 375 }: { title: string; html: string; height: number; minViewport?: number }) {
+  const ref = useRef<HTMLDivElement | null>(null);
+  const [w, setW] = useState(0);
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const fit = () => setW(Math.floor(el.clientWidth));
+    fit();
+    if (typeof ResizeObserver === 'undefined') return;
+    const ro = new ResizeObserver(fit);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+  return (
+    <div ref={ref} className="w-full bg-white" style={{ height }}>
+      {w > 0 && <SharedPreviewFrame html={html} viewport={Math.max(minViewport, w)} displayWidth={w} displayHeight={height} title={title} />}
+    </div>
+  );
 }
 
 function BigPreview({ title, html, onClose }: { title: string; html: string; onClose: () => void }) {
@@ -57,10 +76,18 @@ function BigPreview({ title, html, onClose }: { title: string; html: string; onC
           <h3 className="text-[14px] font-bold">{title}</h3>
           <button type="button" onClick={onClose} className="ml-auto w-10 h-10 rounded-lg grid place-items-center text-slate-500 hover:bg-slate-100" aria-label="닫기"><X className="w-[18px] h-[18px]" /></button>
         </div>
-        <iframe title={title} srcDoc={html} sandbox="" className="flex-1 w-full bg-white" />
+        <div className="flex-1 min-h-0"><BigFrame title={title} html={html} /></div>
       </div>
     </div>
   );
+}
+
+/** 크게 보기 본문 — 남은 높이를 다 쓴다 */
+function BigFrame({ title, html }: { title: string; html: string }) {
+  const ref = useRef<HTMLDivElement | null>(null);
+  const [h, setH] = useState(0);
+  useEffect(() => { if (ref.current) setH(Math.floor(ref.current.clientHeight)); }, []);
+  return <div ref={ref} className="h-full">{h > 0 && <PreviewFrame title={title} html={html} height={h} />}</div>;
 }
 
 function SpamLine({ sms }: { sms: NonNullable<ConfirmSend['sms']> }) {
@@ -94,7 +121,7 @@ function EmailCard({ email, open: openInitially, height }: { email: NonNullable<
           <p className="text-[14px] font-semibold truncate">{email.subject}</p>
         </div>
       </div>
-      {open && email.html ? <PreviewFrame title="메일 미리보기" html={email.html} height={height} /> : null}
+      {open && email.html ? <PreviewFrame title="메일 미리보기" html={email.html} height={height} minViewport={600} /> : null}
       {!openInitially && email.html && (
         <button type="button" onClick={() => setOpen((v) => !v)} className="w-full h-11 border-t border-slate-100 text-[13px] font-semibold text-slate-700 inline-flex items-center justify-center gap-1.5 hover:bg-slate-50">
           <ChevronDown className={`w-4 h-4 transition-transform ${open ? 'rotate-180' : ''}`} />{open ? '메일 본문 접기' : '메일 본문 펼치기'}
@@ -130,7 +157,7 @@ export function ConfirmTimeline({ view, mode, onEditCopy, onEditDm, onEditEmail 
           const isNext = i === nextIdx;
           const held = s.status === 'hold_credit' || s.status === 'locked';
           return (
-            <li key={s.key} id={`send-${i + 1}`} className={`relative ${pc ? 'pl-12 pb-10' : 'pl-10 pb-8'} scroll-mt-24`}>
+            <li key={s.key} id={`send-${i + 1}`} className={`relative ${pc ? 'pl-12 pb-10 scroll-mt-24' : 'pl-10 pb-8 scroll-mt-28'}`}>
               {i < view.sends.length - 1 && <span className="absolute left-[13px] top-8 bottom-1 w-px bg-slate-300" aria-hidden="true" />}
               <span className="absolute left-0 top-0">
                 {sent
@@ -213,6 +240,10 @@ export function ConfirmSummary({ view }: { view: ConfirmView }) {
   const q = view.quote;
   return (
     <dl className="mt-4 rounded-2xl bg-white border border-neutral-200 divide-y divide-neutral-100 text-[13.5px]">
+      <div className="px-4 py-3 grid grid-cols-[72px_1fr] gap-2">
+        <dt className="text-neutral-600">행사</dt>
+        <dd className="font-semibold tabular-nums">{view.event.template ? `${view.event.template.label} · ` : ''}{view.sends.length}번 발송</dd>
+      </div>
       {view.event.benefitText && (
         <div className="px-4 py-3">
           <dt className="text-[12px] text-neutral-600 inline-flex items-center gap-1"><Lock className="w-[11px] h-[11px] text-violet-600" />혜택(적은 그대로)</dt>
@@ -229,9 +260,12 @@ export function ConfirmSummary({ view }: { view: ConfirmView }) {
       <div className="px-4 py-3 grid grid-cols-[72px_1fr] gap-2">
         <dt className="text-neutral-600">받는 사람</dt>
         <dd className="tabular-nums">
+          {view.event.audience && view.event.audience.kind !== 'all' && (
+            <span className={`block font-semibold ${view.event.audience.kind === 'invalid' ? 'text-amber-800' : 'text-neutral-900'}`}>{view.event.audience.label}</span>
+          )}
           {sms && <><b>문자 {recipientsText(sms.recipients)}</b>{email ? ' · ' : ''}</>}
           {email && <b>메일 {recipientsText(email.recipients)}</b>}
-          <span className="block text-[12.5px] text-neutral-600">수신거부를 뺀 오늘 기준</span>
+          <span className="block text-[12.5px] text-neutral-600">{view.event.audience && view.event.audience.kind !== 'all' ? `${view.event.audience.note} · 수신거부를 뺀 오늘 기준` : '수신거부를 뺀 오늘 기준'}</span>
         </dd>
       </div>
       <div className="px-4 py-3 grid grid-cols-[72px_1fr] gap-2">

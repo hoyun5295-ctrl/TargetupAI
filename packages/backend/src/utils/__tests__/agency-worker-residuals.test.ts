@@ -18,6 +18,14 @@ import path from 'path';
 const read = (p: string) => fs.readFileSync(path.join(__dirname, p), 'utf8').replace(/\r\n/g, '\n');
 const src = read('../agency-send-worker.ts');
 const route = read('../../routes/agency-send.ts');
+// ★2026-10-18 축 1 — 문안 수정 · 시각 변경 본문 = CT(원본 복사 이동)
+const changeCt = read('../agency-send-change.ts');
+const ctSegOf = (marker: string) => {
+  const fn = marker.includes('content') ? 'export async function editAgencyContentTx(' : 'export async function rescheduleAgencyRequestTx(';
+  const s = changeCt.indexOf(fn);
+  const e = changeCt.indexOf('\nexport ', s + fn.length);
+  return changeCt.slice(s, e < 0 ? undefined : e);
+};
 const cancelCt = read('../agency-send-cancel.ts');
 const campaignCt = read('../agency-send-campaign.ts');
 const eventLog = read('../../../../frontend/src/components/agency/AgencyEventLog.tsx');
@@ -202,8 +210,8 @@ describe('대조·취소 마무리·취소 CT', { timeout: 30_000 }, () => {
 
 describe('수정·재예약 라우트', () => {
   it('진행 중 시도는 400 "새로 접수"가 아니라 409 처리 중 안내다', () => {
-    expect(route).toMatch(/campaignId === 'in_flight'/);
-    expect(route).toMatch(/ATTEMPT_IN_PROGRESS/);
+    expect(changeCt).toMatch(/campaignId === 'in_flight'/);
+    expect(changeCt).toMatch(/ATTEMPT_IN_PROGRESS/);
     const fn = between(src, 'export async function attemptBlocksChange(', '\n}\n');
     expect(fn).toMatch(/return 'campaign'/);
     expect(fn).toMatch(/\? 'in_flight' : null/);
@@ -211,9 +219,9 @@ describe('수정·재예약 라우트', () => {
 
   for (const marker of ["router.post('/:id/content'", "router.post('/:id/reschedule'"]) {
     it(`${marker}: 캐시가 채워졌거나 시도 키 캠페인이 이미 커밋됐으면 0행이고, 잠금 조각 번호 = params 길이`, () => {
-      const s = route.indexOf(marker);
-      const seg = route.slice(s, route.indexOf('router.', s + marker.length));
-      const upd = seg.slice(seg.indexOf('const updated = await query('), seg.indexOf('if (updated.rows.length === 0)'));
+      expect(route).toContain(marker);
+      const seg = ctSegOf(marker);
+      const upd = seg.slice(seg.search(/const updated = await (?:query|q)\(/), seg.indexOf('if (updated.rows.length === 0)'));
       expect(upd).toMatch(/AND campaign_id IS NULL/);
       expect(upd).toMatch(/AND NOT EXISTS \(SELECT 1 FROM campaigns c WHERE c\.staging_id = agency_send_requests\.dispatch_key AND c\.company_id = agency_send_requests\.company_id\)/);
       const n = Number(upd.match(/attemptIdleSql\((\d+)\)/)?.[1]);

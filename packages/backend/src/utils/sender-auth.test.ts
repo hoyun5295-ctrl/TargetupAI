@@ -511,7 +511,7 @@ describe('인증번호 검증', () => {
   it('★코드가 맞으면 verified_at을 찍는다 — 이것이 유지 시간 세션의 근거다', async () => {
     wireRow(LIVE);
     const verdict = await verifySenderAuthChallenge({ challengeId: 'x', userId: USER, code: '123456', req: REQ });
-    expect(verdict).toEqual({ status: 'ok', callbackNumber: '0234678612' });
+    expect(verdict).toMatchObject({ status: 'ok', callbackNumber: '0234678612', challengeId: 'x' });
     const success = q.mock.calls.find(([sql]: any[]) =>
       /UPDATE sender_auth_challenges/i.test(String(sql)) && /verified_at\s*=\s*NOW\(\)/i.test(String(sql)));
     expect(success, '성공인데 verified_at을 찍지 않는다').toBeTruthy();

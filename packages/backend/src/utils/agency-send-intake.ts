@@ -874,3 +874,16 @@ export async function analyzeOneStep(
     messageType, maxSmsBytes, fileName: listName, errors,
   };
 }
+
+/**
+ * ★2026-10-18 축 4 — 승인 요청 시각 컬럼(`approval_requested_at` · DDL 1 · 배포 뒤). 탐지 실패 = 없는 것으로(24시간 규칙만 쉰다 · 흐름은 막지 않는다).
+ * 워커(찍기 · 만료)와 조작 CT(문안 수정 NULL · 시각 변경 NOW)가 같은 함수를 부른다.
+ */
+export async function hasApprovalRequestedColumn(): Promise<boolean> {
+  try {
+    return await hasAgencyColumn(pool, 'approval_requested_at');
+  } catch (err: any) {
+    console.warn('[agency-send] approval_requested_at 탐지 실패(24시간 규칙 쉼):', err?.message);
+    return false;
+  }
+}

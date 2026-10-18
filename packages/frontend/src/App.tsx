@@ -72,6 +72,8 @@ const PlannerBriefPage = lazyPage(() => import('./pages/PlannerBriefPage'));
 // ★ 2026-10-04 마케팅 플래너 보강 — 행사 상세(로그인판 확인 화면) · 휴대폰 확인 화면(공개 · 확인 요청 문자 링크 착지)
 const PlannerEventDetailPage = lazyPage(() => import('./pages/PlannerEventDetailPage'));
 const PlannerConfirmPage = lazyPage(() => import('./pages/PlannerConfirmPage'));
+const PlannerRecheckPage = lazyPage(() => import('./pages/PlannerRecheckPage')); // ★ 2026-10-18 플래너 당일 재확인 링크(로그인 없음)
+const AutosendStopPage = lazyPage(() => import('./pages/AutosendStopPage')); // ★ 2026-10-18 자동마케팅 예고 문자 멈춤 링크(로그인 없음)
 const ImageStudioPage = lazyPage(() => import('./pages/ImageStudioPage')); // ★ 2026-07-19 P4 AI 이미지 스튜디오
 // ★ D180 (2026-05-19): Email 채널 (SendGrid)
 const EmailCampaignsPage = lazyPage(() => import('./pages/EmailCampaignsPage'));
@@ -791,7 +793,8 @@ function App() {
         <Route path="/payment/result" element={<PaymentResultPage />} />
 
         {/* ★ D218+ (2026-05-26): 여정 발송 2시간 전 담당자 알림 안 단축 URL 진입 페이지 (인증 X) */}
-        <Route path="/journey-pause/:token" element={<JourneyPausePage />} />
+        <Route path="/journey-pause" element={<JourneyPausePage />} />
+        <Route path="/journey-pause/:token" element={<JourneyPausePage />} />  {/* ★ 2026-10-18 이미 나간 옛 주소(경로 토큰) · 화면이 읽고 주소에서 지운다 */}
 
         {/* ★ 2026-08-16 AI 마케팅 진단(퍼널 B — 잠재고객 · 인증 X) — ?src= 영업 링크 식별 */}
         <Route path="/diagnosis" element={<DiagnosisPage />} />
@@ -801,6 +804,8 @@ function App() {
         <Route path="/agency-approve" element={<AgencyApprovePage />} />
         <Route path="/charge-approve" element={<ChargeApprovePage />} />
         <Route path="/planner-confirm" element={<PlannerConfirmPage />} />
+        <Route path="/planner-recheck" element={<PlannerRecheckPage />} />
+        <Route path="/autosend-stop" element={<AutosendStopPage />} />
 
         {/* 404 */}
         <Route path="*" element={<Navigate to="/" replace />} />

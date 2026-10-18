@@ -71,11 +71,12 @@ describe('AI 존 표면 불변식', () => {
     expect(dupGrad, '그라데이션이 겹친다').toEqual([]);
   });
 
-  it('한 줄 입력 카드는 자동화 7메뉴 고정(Harold "한줄로 입력창은 자동화로 한정")', () => {
+  // ★ 2026-10-18 D3 개정 — 자동화 7메뉴 + 마케팅 플래너(행사 한 줄 · 규칙 읽기 · AI 0 · 설계서 docs/2026-10-18-planner-v2-design.md §3-6)
+  it('한 줄 입력 카드는 자동화 7메뉴 + 플래너 고정(Harold "한줄로 입력창은 자동화로 한정" · 1018 플래너 추가)', () => {
     const mod = read('constants/ai-operator-modules.ts');
     const block = mod.slice(mod.indexOf('export const SUB_MODULE_CARDS'), mod.indexOf('];', mod.indexOf('export const SUB_MODULE_CARDS')));
     const withLine = [...block.matchAll(/id:\s*'([a-z-]+)',\s*\n?\s*oneLine:/g)].map((m) => m[1]).sort();
-    expect(withLine).toEqual(['auto-marketing', 'dm', 'email', 'inapp', 'journeys', 'make', 'sns']);
+    expect(withLine).toEqual(['auto-marketing', 'dm', 'email', 'inapp', 'journeys', 'make', 'planner', 'sns']);
   });
 
   it('허브 행 이름표가 12장을 한 번씩 덮는다(빠지는 카드 0)', () => {

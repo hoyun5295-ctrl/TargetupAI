@@ -127,8 +127,8 @@ export default function PlannerEventDetailPage() {
         </div>
         {phone && smsSend?.sms?.editable && <button type="button" onClick={() => setEditing(smsSend)} className="h-12 px-3 rounded-[10px] border border-slate-300 text-[13px] font-semibold text-slate-700">문안 고치기</button>}
         <button type="button" disabled={working || view.sends.some((s) => s.sms && s.sms.spam !== 'pass')} onClick={() => setApproveOpen(true)}
-          className="h-12 sm:h-11 px-5 rounded-[10px] bg-indigo-600 hover:bg-indigo-700 text-white text-[14.5px] font-bold inline-flex items-center gap-1.5 whitespace-nowrap disabled:opacity-50">
-          <Check className="w-4 h-4" />승인하기<span className="font-semibold text-indigo-100 text-[13px]">· {won(total)}크레딧</span>
+          className="h-12 sm:h-11 px-5 rounded-[10px] bg-amber-500 hover:bg-amber-400 text-amber-950 text-[14.5px] font-bold inline-flex items-center gap-1.5 whitespace-nowrap disabled:opacity-50">
+          <Check className="w-4 h-4" />승인하기<span className="font-semibold text-amber-900 text-[13px]">· {won(total)}크레딧</span>
         </button>
       </>
     )
@@ -272,8 +272,8 @@ export default function PlannerEventDetailPage() {
             <ApproveBody view={view} />
             <div className="flex justify-end gap-2 mt-5">
               <button type="button" onClick={() => setApproveOpen(false)} disabled={working} className="h-12 md:h-11 px-5 rounded-[10px] border border-slate-200 bg-white hover:bg-slate-50 text-[13.5px] font-semibold text-slate-700">취소</button>
-              <button type="button" onClick={() => { void approve(); }} disabled={working} className="flex-1 md:flex-none h-12 md:h-11 px-5 rounded-[10px] bg-indigo-600 hover:bg-indigo-700 text-white text-[14px] font-bold inline-flex items-center justify-center gap-1.5 disabled:opacity-60">
-                <Check className="w-4 h-4" />{working ? '승인하는 중' : '승인하기'}<span className="font-semibold text-indigo-100 text-[13px]">· {won(total)}크레딧</span>
+              <button type="button" onClick={() => { void approve(); }} disabled={working} className="flex-1 md:flex-none h-12 md:h-11 px-5 rounded-[10px] bg-amber-500 hover:bg-amber-400 text-amber-950 text-[14px] font-bold inline-flex items-center justify-center gap-1.5 disabled:opacity-60">
+                <Check className="w-4 h-4" />{working ? '승인하는 중' : '승인하기'}<span className="font-semibold text-amber-900 text-[13px]">· {won(total)}크레딧</span>
               </button>
             </div>
           </div>

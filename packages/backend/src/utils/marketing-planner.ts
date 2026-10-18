@@ -42,13 +42,22 @@ export interface TimingRule {
    * ⛔ 컬럼을 새로 만들지 않는다 — timing_rule jsonb 안에 둔다. 결재 지문(plan_hash)에도 포함된다.
    */
   audience?: 'all' | 'participants';
+  /**
+   * ★ 2026-10-18 미루기(설계서 docs/2026-10-18-planner-v2-design.md §3-2-5) — 담당자가 고른 발송 날짜('YYYY-MM-DD').
+   * **서버만 쓴다**(입력 검증 `parsePlannerEventInput` 은 받지 않는다 · 쓰는 곳 = `deferPlannerPairTx` 하나).
+   * 있으면 앵커보다 먼저다 — 예정일 계산 한 곳이 보므로 실행 · 지문 · 화면 · 대조가 같은 날을 본다(저장 축 새로 없음).
+   */
+  on?: string;
 }
+
+const ON_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
 /**
  * (순수) 터치포인트 발송 예정일 — 'YYYY-MM-DD' 문자열 연산만 한다.
  * Date 타임존 변환을 섞으면 KST 자정 경계에서 하루가 밀린다(문자열 in → 문자열 out).
  */
 export function computeTouchpointDate(rule: TimingRule, startsOn: string, endsOn: string): string {
+  if (rule.on && ON_DATE_RE.test(rule.on)) return rule.on;
   if (rule.anchor === 'end') return endsOn;
   if (rule.anchor === 'before_start') {
     const d = new Date(`${startsOn}T00:00:00Z`);

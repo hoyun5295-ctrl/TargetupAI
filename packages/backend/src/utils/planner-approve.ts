@@ -28,12 +28,11 @@ import { stopDm } from './dm/dm-builder';
 import { PLANNER_AGENCY_SOURCE, getAgencyCredits } from './planner-approval';
 import { kstDateString } from './planner-execution';
 import { loadEventTouchpoints, notifyPlanner } from './planner-touchpoint';
-import { loadPlannerEvent, firstSendDate, isBuilding } from './planner-event';
+import { loadPlannerEvent, firstSendDate, isBuilding, readStoredAudience } from './planner-event';
 import { computeTouchpointFingerprints, eventFingerprint, quoteEventApproval, PLANNER_APPROVAL_DEADLINE_HOUR } from './planner-confirm';
 import { carrierGroups, copyInputHash, isCopyValid } from './planner-copy';
 import { firstBlockedChannel } from './planner-channel-gate';
-import { countEventSmsAudience } from './planner-audience';
-import { countCustomerEmailRecipients } from './email-channel';
+import { countEventSmsAudience, countPlannerEmailRecipients } from './planner-audience';
 import { PLANNER_REASON } from './planner-reasons';
 
 export class PlannerApproveError extends Error {
@@ -108,16 +107,19 @@ export async function approvePlannerEvent(input: {
     throw new PlannerApproveError(400, 'CHANNEL_LOCKED', blocked.readiness.reason || '지금은 보낼 수 없는 채널이 있습니다.', { settingsPath: blocked.readiness.settingsPath, channel: blocked.channel });
   }
   // 대상(F7) — 영구 차단과 일시 실패를 가른다
+  const buyers = readStoredAudience(ev.meta)?.kind === 'product_buyers';
   if (pending.some((t) => t.channel === 'sms' || t.channel === 'dm')) {
     const a = await countEventSmsAudience({ companyId: ev.companyId, createdBy: ev.createdBy, eventId: ev.id });
-    if (a.state === 'blocked') throw new PlannerApproveError(409, 'SCOPE_BLOCKED', PLANNER_REASON.scopeBlocked);
+    if (a.state === 'blocked') throw new PlannerApproveError(409, 'SCOPE_BLOCKED', a.reason || PLANNER_REASON.scopeBlocked);
     if (a.state === 'error') throw new PlannerApproveError(503, 'AUDIENCE_UNAVAILABLE', '받는 사람 수를 확인하지 못했습니다. 잠시 후 다시 시도해 주세요.');
-    if (a.count === 0) throw new PlannerApproveError(409, 'AUDIENCE_ZERO', '문자를 받을 고객이 0명이라 승인할 수 없습니다. 고객 수신 동의를 확인해 주세요.');
+    if (a.count === 0) throw new PlannerApproveError(409, 'AUDIENCE_ZERO', buyers ? '고른 상품을 산 고객 중 문자를 받을 수 있는 분이 0명이라 승인할 수 없습니다. 대상 상품이나 기간을 다시 골라 주세요.' : '문자를 받을 고객이 0명이라 승인할 수 없습니다. 고객 수신 동의를 확인해 주세요.');
   }
   if (pending.some((t) => t.channel === 'email')) {
-    const n = await countCustomerEmailRecipients(ev.companyId).catch(() => null);
-    if (n === null) throw new PlannerApproveError(503, 'AUDIENCE_UNAVAILABLE', '받는 사람 수를 확인하지 못했습니다. 잠시 후 다시 시도해 주세요.');
-    if (n === 0) throw new PlannerApproveError(409, 'AUDIENCE_ZERO', '메일을 받을 고객이 0명이라 승인할 수 없습니다. 고객 메일 수신 동의를 확인해 주세요.');
+    // ★ 2026-10-18 메일도 문자와 같은 대상 문(매장 범위 · 상품 구매자 · 막힘 ≠ 0명 · 설계서 §3-6 I3)
+    const m = await countPlannerEmailRecipients({ companyId: ev.companyId, createdBy: ev.createdBy, plannerEventId: ev.id });
+    if (m.state === 'blocked') throw new PlannerApproveError(409, 'SCOPE_BLOCKED', m.reason || PLANNER_REASON.scopeBlocked);
+    if (m.state === 'error') throw new PlannerApproveError(503, 'AUDIENCE_UNAVAILABLE', '받는 사람 수를 확인하지 못했습니다. 잠시 후 다시 시도해 주세요.');
+    if (m.count === 0) throw new PlannerApproveError(409, 'AUDIENCE_ZERO', buyers ? '고른 상품을 산 고객 중 메일을 받을 수 있는 분이 0명이라 승인할 수 없습니다. 대상 상품이나 기간을 다시 골라 주세요.' : '메일을 받을 고객이 0명이라 승인할 수 없습니다. 고객 메일 수신 동의를 확인해 주세요.');
   }
   // 견적 결박 — 화면이 본 금액보다 크면 다시 확인받는다
   const quote = await quoteEventApproval(ev, live);
@@ -201,13 +203,17 @@ export async function approvePlannerEvent(input: {
     const revision = Number(ev.meta.revision) || 0;
     const groups = carrierGroups(pending);
     const carriesDm = new Set(groups.filter((g) => g.dm || g.carrier.channel === 'dm').map((g) => g.carrier.id));
+    const today = kstDateString();
     for (const t of pending) {
       const patch: Record<string, unknown> = { approved: { hash: fps.get(t.id) || null, at, by: input.userId, revision } };
       if (dmUrl && (t.channel === 'dm' || carriesDm.has(t.id))) patch.dm_url = dmUrl;
-      if (dmUrl && carriesDm.has(t.id)) patch.post_approval_spam = 'pending';
+      // ★ 2026-10-18 M1 — 승인 직후 실주소 검사는 **오늘 뒤** 캐리어에만. 오늘 것은 실행부 당일 검사가 실주소로 본다
+      //   (둘이 겹치면 같은 날 검사 두 벌이 서로 다른 판정을 낼 수 있다 · 회의론자 M1).
+      if (dmUrl && carriesDm.has(t.id) && t.scheduledOn > today) patch.post_approval_spam = 'pending';
+      // ★ 2026-10-18 B4 — 남아 있던 쌍 재확인 표식은 행사 승인으로 지운다(새 승인 = 새 판단)
       const up = await client.query(
         `UPDATE planner_touchpoints
-            SET status = 'ready', lock_reason = NULL, exec_meta = COALESCE(exec_meta, '{}'::jsonb) || $3::jsonb
+            SET status = 'ready', lock_reason = NULL, exec_meta = (COALESCE(exec_meta, '{}'::jsonb) - 'recheck') || $3::jsonb
           WHERE id = $1::uuid AND company_id = $2::uuid AND status = 'planned'
           RETURNING id`,
         [t.id, ev.companyId, JSON.stringify(patch)],
@@ -302,6 +308,12 @@ export async function unapprovePlannerEvent(input: { companyId: string; ownerId:
         WHERE event_id = $1::uuid AND company_id = $2::uuid AND status IN ('ready', 'hold_credit', 'locked')`,
       [ev.id, ev.companyId],
     );
+    // ★ 2026-10-18 B4 — 쌍 재확인 표식도 같은 트랜잭션에서 지운다(행사가 확인 대기로 가면 그물이 그 쌍에 링크를 보내지 않게)
+    await client.query(
+      `UPDATE planner_touchpoints SET exec_meta = exec_meta - 'recheck'
+        WHERE event_id = $1::uuid AND company_id = $2::uuid AND (exec_meta ? 'recheck')`,
+      [ev.id, ev.companyId],
+    );
     await client.query(
       `UPDATE planner_events
           SET status = 'briefed',
@@ -326,7 +338,11 @@ export async function unapprovePlannerEvent(input: { companyId: string; ownerId:
  * 행사 취소(발송 전 또는 남은 발송) — 남은 접점을 생략으로 닫고 모바일 DM 발행을 멈춘다(§6-9).
  * 이미 낸 DM 발행비 · 메일 완성비는 돌려드리지 않는다(승인 창 고지 · D1). 진행 중(producing)이 있으면 그 발송이 끝난 뒤 다시.
  */
-export async function cancelPlannerEvent(input: { companyId: string; userId: string | null; ownerId: string | null; eventId: string }): Promise<{ status: 'cancelled'; skipped: number }> {
+export async function cancelPlannerEvent(input: {
+  companyId: string; userId: string | null; ownerId: string | null; eventId: string;
+  /** ★ Codex A 2R — 휴대폰 링크 취소 = 그 토큰이 지금 회차의 토큰일 때만(같은 트랜잭션 · 잠금 순서 그대로 · 아니면 410) */
+  linkGuard?: { touchpointId: string; tokenHash: string; round: number };
+}): Promise<{ status: 'cancelled'; skipped: number }> {
   const ev = await loadPlannerEvent(input.companyId, input.eventId, input.ownerId);
   if (!ev) throw new PlannerApproveError(404, 'NOT_FOUND', '행사를 찾을 수 없습니다.');
   if (ev.status === 'cancelled') return { status: 'cancelled', skipped: 0 };
@@ -340,13 +356,24 @@ export async function cancelPlannerEvent(input: { companyId: string; userId: str
       [ev.companyId, ev.planMonth],
     );
     await client.query(`SELECT status FROM planner_events WHERE id = $1::uuid AND company_id = $2::uuid FOR UPDATE`, [ev.id, ev.companyId]);
+    if (input.linkGuard) {
+      const g = await client.query(
+        `SELECT 1 FROM planner_touchpoints
+          WHERE id = $1::uuid AND company_id = $2::uuid AND event_id = $3::uuid AND status = 'planned'
+            AND exec_meta->'recheck'->>'tokenHash' = $4 AND (exec_meta->'recheck'->>'round')::int = $5
+          FOR UPDATE`,
+        [input.linkGuard.touchpointId, ev.companyId, ev.id, input.linkGuard.tokenHash, input.linkGuard.round],
+      );
+      if (g.rows.length === 0) throw new PlannerApproveError(410, 'LINK_EXPIRED', '이 주소는 마감됐거나 내용이 바뀌어 더 열 수 없습니다. 최신 내용은 한줄로 마케팅 플래너 캘린더에서 확인해 주세요.');
+    }
     const busy = await client.query(
       `SELECT 1 FROM planner_touchpoints WHERE event_id = $1::uuid AND company_id = $2::uuid AND status = 'producing' LIMIT 1`,
       [ev.id, ev.companyId],
     );
     if (busy.rows.length > 0) throw new PlannerApproveError(409, 'IN_PROGRESS', '지금 보내는 중인 발송이 있습니다. 끝난 뒤 다시 취소해 주세요.');
+    // ★ 2026-10-18 B4 — 쌍 재확인 표식도 함께 지운다(취소된 행사에 재확인 문자가 나가지 않게)
     const r = await client.query(
-      `UPDATE planner_touchpoints SET status = 'skipped', lock_reason = $3
+      `UPDATE planner_touchpoints SET status = 'skipped', lock_reason = $3, exec_meta = COALESCE(exec_meta, '{}'::jsonb) - 'recheck'
         WHERE event_id = $1::uuid AND company_id = $2::uuid AND status IN ('planned', 'ready', 'hold_credit', 'locked')
         RETURNING id`,
       [ev.id, ev.companyId, PLANNER_REASON.cancelledEvent],

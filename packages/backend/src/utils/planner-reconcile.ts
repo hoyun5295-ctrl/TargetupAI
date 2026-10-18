@@ -64,27 +64,30 @@ async function closeMissed(today: string, lookbackDate: string): Promise<number>
   }, { label: 'planner-reconcile closeMissed' });
   const missed = rows.filter((t) => classifyExecutionWindow(t.scheduledOn, today) === 'missed');
   let closed = 0;
-  const byEvent = new Map<string, { first: (typeof missed)[number]; approved: string[]; unapproved: string[] }>();
+  const byEvent = new Map<string, { first: (typeof missed)[number]; approved: string[]; unapproved: string[]; recheck: string[] }>();
   for (const tp of missed) {
     const approved = !!tp.execMeta?.approved;
+    // ★ 2026-10-18 M3 — 쌍 재확인 중이던 접점(승인 각인이 떼어진 채 그날이 지남)은 「다시 확인되지 않아」(「승인되지 않아」가 아니다)
+    const recheck = !approved && !!tp.execMeta?.recheck;
     const ok = await setTouchpointState({
       companyId: tp.companyId, touchpointId: tp.id,
       status: 'skipped',
       fromStatuses: ['planned', 'ready'],
-      lockReason: approved ? PLANNER_REASON.missed : PLANNER_REASON.notApproved,
-      execMetaPatch: { missed_at: new Date().toISOString(), missed_reason: approved ? 'missed' : 'not_approved' },
+      lockReason: approved ? PLANNER_REASON.missed : recheck ? PLANNER_REASON.recheckMissed : PLANNER_REASON.notApproved,
+      execMetaPatch: { missed_at: new Date().toISOString(), missed_reason: approved ? 'missed' : recheck ? 'recheck_missed' : 'not_approved' },
     });
     if (!ok) continue;
     closed++;
-    const g = byEvent.get(tp.eventId) || { first: tp, approved: [], unapproved: [] };
+    const g = byEvent.get(tp.eventId) || { first: tp, approved: [], unapproved: [], recheck: [] };
     const day = `${formatPlannerDay(tp.scheduledOn)} ${tp.channelLabel}`;
-    (approved ? g.approved : g.unapproved).push(day);
+    (approved ? g.approved : recheck ? g.recheck : g.unapproved).push(day);
     byEvent.set(tp.eventId, g);
   }
   for (const [eventId, g] of byEvent) {
     const tp = g.first;
     const lines: string[] = [];
     if (g.unapproved.length > 0) lines.push(`${Array.from(new Set(g.unapproved)).join(', ')} 발송은 승인되지 않아 보내지 않았습니다. 이 발송에는 크레딧이 빠지지 않았습니다.`);
+    if (g.recheck.length > 0) lines.push(`${Array.from(new Set(g.recheck)).join(', ')} 발송은 다시 확인되지 않아 보내지 않았습니다. 이 발송의 문자 문안비는 빠지지 않았습니다(승인 때 낸 비용은 그대로입니다).`);
     if (g.approved.length > 0) lines.push(`${Array.from(new Set(g.approved)).join(', ')} 발송은 예정일이 지나 보내지 않았습니다. 이번 발송의 문안비는 빠지지 않았습니다.`);
     await notifyPlanner(tp.companyId, tp.createdBy, '[마케팅 플래너] 발송 생략', `'${tp.title}' ${lines.join(' ')}`);
     await settleEventIfFinished(tp.companyId, eventId, g.approved.length > 0 ? 'missed' : 'not_approved').catch(() => null);

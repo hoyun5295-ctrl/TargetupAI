@@ -29,6 +29,42 @@
         ],
         "createdAt": "2026-10-17T04:25:43.353Z",
         "reason": "Claude: line 30 is a regex in a backend vitest file that extracts img src from rendered HTML, not markup"
+      },
+      {
+        "rule": "gray-on-color",
+        "value": "*",
+        "files": [
+          "src/components/link/LinkConfirmSheet.tsx"
+        ],
+        "createdAt": "2026-10-18T08:57:25.272Z",
+        "reason": "Claude: only hit = slate-900 on amber-500 button, the project's existing light confirm pair (ConfirmModal MODE_CONFIG_LIGHT.warning), near-black not gray"
+      },
+      {
+        "rule": "gray-on-color",
+        "value": "*",
+        "files": [
+          "src/pages/JourneyPausePage.tsx"
+        ],
+        "createdAt": "2026-10-18T08:58:11.192Z",
+        "reason": "Claude: only hit = slate-900 on amber-500 primary button, same light warning pair as ConfirmModal MODE_CONFIG_LIGHT.warning (near-black text)"
+      },
+      {
+        "rule": "gray-on-color",
+        "value": "*",
+        "files": [
+          "src/components/planner/PlannerRecheckPanel.tsx"
+        ],
+        "createdAt": "2026-10-18T09:28:22.880Z",
+        "reason": "Claude: only hit = slate-900 on amber-500 send button (H1 amber approve), same light pair as ConfirmModal MODE_CONFIG_LIGHT.warning, near-black text"
+      },
+      {
+        "rule": "gray-on-color",
+        "value": "*",
+        "files": [
+          "src/pages/AutosendStopPage.tsx"
+        ],
+        "createdAt": "2026-10-18T11:06:10.000Z",
+        "reason": "Claude: only hit = slate-900 on amber-500 button (same pair as JourneyPausePage · LinkConfirmSheet), near-black not gray"
       }
     ]
   }

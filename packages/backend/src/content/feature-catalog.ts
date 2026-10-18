@@ -1031,7 +1031,8 @@ export const NOT_DOCUMENTED_ROUTES: Record<string, string> = {
   '/privacy': '개인정보처리방침',
   '/payment/result': '결제 결과 리다이렉트',
   '/cafe24/launch': '카페24 앱 진입 리다이렉트',
-  '/journey-pause/:token': '고객이 받은 링크로 여는 일시중지 화면',
+  '/journey-pause': '여정 담당자가 안내 문자 속 주소로 여는 발송 정지 화면(로그인 없음)', // ★ 2026-10-18 토큰 = 주소 # 뒤
+  '/journey-pause/:token': '이미 나간 옛 정지 주소(경로 토큰 · 화면이 읽고 지운다)',
   '/agency-approve': '대행발송 담당자가 문자 속 주소로 여는 승인 화면(로그인 없음)', // ★2026-08-25 링크 승인
   '/charge-approve': '충전 승인 담당자가 문자 속 주소로 여는 승인 화면(로그인 없음 · 내부 운영용)', // ★2026-08-28(3) 충전 링크 승인
 
@@ -1054,6 +1055,8 @@ export const NOT_DOCUMENTED_ROUTES: Record<string, string> = {
   '/marketing-planner/brief/:month': '플래너 이달 결과(= marketing-planner · 캘린더 머리 [이달 결과])',
   '/marketing-planner/events/:id': '플래너 행사 상세 = 확인하고 승인(= marketing-planner · 캘린더 행사 줄 · 할 일 [확인하고 승인])', // ★ 2026-10-04 플래너 보강
   '/planner-confirm': '플래너 담당자가 확인 요청 문자 속 주소로 여는 확인 화면(로그인 없음 · 승인은 로그인 뒤)', // ★ 2026-10-04 플래너 보강
+  '/planner-recheck': '플래너 담당자가 발송 당일 재확인 문자 속 주소로 여는 화면(로그인 없음 · 보내기는 인증번호)', // ★ 2026-10-18 당일 재확인
+  '/autosend-stop': '자동마케팅 담당자가 발송 예고 문자 속 주소로 여는 멈춤 화면(로그인 없음 · 이번 회차 건너뛰기 · 일시정지)', // ★ 2026-10-18 예고 문자 멈춤 링크
   '/quick-campaign/result': '만들기 결과 화면(= quick-campaign · 만들기가 끝나면 여기로 온다)', // ★ 2026-09-27 만들기 개편
   '*': '404',
 };

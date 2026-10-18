@@ -23,10 +23,19 @@ import {
 } from './operator-audience';
 import { buildParticipantPredicate } from './planner-participation';
 import { PlannerAudienceMode } from './planner-execution';
+import { readStoredAudience, type PlannerAudience } from './planner-event';
+import { currentPurchaseDoor, ledgerProductKeySql, listObservedProducts, mallItemKeySql, mallItemsSql } from './journey-product';
+import { REVENUE_STATUSES } from './cdp-order-revenue';
+import { companyListAllows } from './sns-constants';
+import { countCustomerRecipientsWhere, resolveCustomerRecipientsWhere, type EmailRecipient } from './email-channel';
+import { PLANNER_REASON } from './planner-reasons';
+import { confirmLineAudience, type PlannerLineAudience } from './planner-line-read';
 
 export interface PlannerAudienceResolution {
   /** 대상을 정할 수 없다(매장 권한 미지정 등) — 발송하지 않는다. */
   blocked: boolean;
+  /** ★ 2026-10-18 막힌 까닭(사람이 읽는 문장 · PLANNER_REASON) — blocked 일 때만 */
+  blockedReason?: string;
   baseParams: any[];
   storeFilter: string;
   filterWhere: string;
@@ -44,15 +53,24 @@ export async function resolvePlannerAudience(input: {
   createdBy: string | null;
   mode: PlannerAudienceMode;
   plannerEventId: string;
+  /** ★ 2026-10-18 저장 전 미리보기(담기 창 인원) — 없으면 행사 meta 에서 읽는다(실행 · 승인 · 확인 화면 = 저장값 하나) */
+  audience?: PlannerAudience;
 }): Promise<PlannerAudienceResolution> {
   const scope = await resolveOperatorStoreScope(input.companyId, input.createdBy);
   const gates = await resolveOperatorAudienceGates(input.companyId, null, input.createdBy);
   if (scope.blocked) {
-    return { blocked: true, baseParams: scope.baseParams, storeFilter: '', filterWhere: '', filterParams: [], gates };
+    return { blocked: true, blockedReason: PLANNER_REASON.scopeBlocked, baseParams: scope.baseParams, storeFilter: '', filterWhere: '', filterParams: [], gates };
   }
+  const target = await plannerTargetOf(input.companyId, input.plannerEventId, input.audience);
+  if (!target.ok) {
+    return { blocked: true, blockedReason: target.reason, baseParams: scope.baseParams, storeFilter: '', filterWhere: '', filterParams: [], gates };
+  }
+  // ★ 2026-10-18 F0 — 플래너 기본 대상 = 「전체 고객」 축을 **명시**한다. 축 없이 부르면 빈 조건이라
+  //   1005 「빈 조건 = 전체 금지」(AudienceEmptyError)에 걸려 확인 화면 수 · 승인 · 당일 발송이 함께 막혔다.
   const compiled: CompiledAudience = await compileOperatorAudience({
     companyId: input.companyId,
     baseParams: scope.baseParams,
+    segmentKey: 'all',
   });
   let filterWhere = compiled.filterWhere;
   const filterParams = [...compiled.filterParams];
@@ -61,6 +79,12 @@ export async function resolvePlannerAudience(input: {
     // 술어를 filterWhere 안에 넣어야 번호가 어긋나지 않는다(buildAudienceWhere 계약).
     const scratch = [...scope.baseParams, ...filterParams];
     filterWhere = `${filterWhere} ${buildParticipantPredicate(scratch, input.plannerEventId)}`;
+    filterParams.push(...scratch.slice(scope.baseParams.length + filterParams.length));
+  }
+  if (target.audience.kind === 'product_buyers') {
+    // ★ 2026-10-18 상품 구매자 — 참여자 술어와 같은 자리 · 같은 번호 규칙(filterWhere 안 · baseParams + filterParams 다음)
+    const scratch = [...scope.baseParams, ...filterParams];
+    filterWhere = `${filterWhere} ${buildBuyerPredicate(scratch, target.audience)}`;
     filterParams.push(...scratch.slice(scope.baseParams.length + filterParams.length));
   }
   return {
@@ -79,9 +103,10 @@ export async function countPlannerAudience(input: {
   createdBy: string | null;
   mode: PlannerAudienceMode;
   plannerEventId: string;
-}): Promise<{ count: number; blocked: boolean }> {
+  audience?: PlannerAudience;
+}): Promise<{ count: number; blocked: boolean; reason?: string }> {
   const a = await resolvePlannerAudience(input);
-  if (a.blocked) return { count: 0, blocked: true };
+  if (a.blocked) return { count: 0, blocked: true, reason: a.blockedReason };
   const count = await countCompiledAudience({
     compiled: { filterWhere: a.filterWhere, filterParams: a.filterParams, segmentKey: null, basis: 'legacy_filters' },
     gates: a.gates,
@@ -123,13 +148,15 @@ export type PlannerAudienceState = 'known' | 'blocked' | 'error';
 export interface PlannerAudienceCount {
   state: PlannerAudienceState;
   count: number | null;
+  /** ★ 2026-10-18 blocked 까닭(사람이 읽는 문장) */
+  reason?: string;
 }
 
 /** 문자 대상(전체 축) — 결재·확인 화면과 발송이 같은 문(countPlannerAudience)으로 센다. */
 export async function countEventSmsAudience(input: { companyId: string; createdBy: string | null; eventId: string }): Promise<PlannerAudienceCount> {
   try {
     const r = await countPlannerAudience({ companyId: input.companyId, createdBy: input.createdBy, mode: 'all', plannerEventId: input.eventId });
-    if (r.blocked) return { state: 'blocked', count: null };
+    if (r.blocked) return { state: 'blocked', count: null, reason: r.reason };
     return { state: 'known', count: r.count };
   } catch (e: any) {
     console.warn('[planner-audience] 문자 대상 수 산출 실패:', e?.message || e);
@@ -143,4 +170,127 @@ export async function cleanupPlannerStaging(stagingId: string): Promise<void> {
   await query(`DELETE FROM campaign_send_staging WHERE staging_id = $1`, [stagingId]).catch((e: any) =>
     console.warn('[planner-audience] staging 정리 실패:', e?.message || e),
   );
+}
+
+// ── ★ 2026-10-18 v2 입력 축 · 받는 사람(전체 · 상품 구매자 · 설계서 docs/2026-10-18-planner-v2-design.md §3-6) ──────────
+
+/** 회사 스위치 — 플래너 한 줄 입력 · 상품 구매자 대상(쉼표 구분 id · 빈 값 = 닫힘 · 배포 기본값) */
+export function plannerLineEnabled(companyId: string | null | undefined, env: string | undefined = process.env.PLANNER_LINE_COMPANY_IDS): boolean {
+  return companyListAllows(companyId, String(env || ''));
+}
+
+/** 결제된 주문만(매출 판정 CT-86 과 같은 상태 목록 · 글자는 앞뒤 공백 · 대소문자를 걷어 비교) */
+const PAID_STATUSES: string[] = [...REVENUE_STATUSES];
+
+/**
+ * (순수) 상품 구매자 술어 — customers 알리아스 c 기준 · `$1` = 회사 id(baseParams 계약) · params 에 값을 push 하고 조각을 돌려준다.
+ * 자사몰 = 결제된 purchase 이벤트의 상품 키(journey-product 키 규칙 한 벌) · 원장 = purchases 상품 키 · since = 그 KST 날짜 0시 이후.
+ */
+export function buildBuyerPredicate(params: any[], a: Extract<PlannerAudience, { kind: 'product_buyers' }>): string {
+  params.push(a.keys);
+  const keysIdx = params.length;
+  let sinceIdx = 0;
+  if (a.since) { params.push(a.since); sinceIdx = params.length; }
+  if (a.door === 'mall') {
+    params.push(PAID_STATUSES);
+    const paidIdx = params.length;
+    return `AND EXISTS (
+            SELECT 1 FROM cdp_events pb, ${mallItemsSql('pb')} it
+             WHERE pb.company_id = $1
+               AND pb.customer_id = c.id
+               AND pb.event_name = 'purchase'
+               AND LOWER(TRIM(COALESCE(pb.properties->>'status', ''))) = ANY($${paidIdx}::text[])
+               ${sinceIdx ? `AND pb.occurred_at >= ($${sinceIdx}::date::timestamp AT TIME ZONE 'Asia/Seoul')` : ''}
+               AND ${mallItemKeySql('it')} = ANY($${keysIdx}::text[])
+          )`;
+  }
+  return `AND EXISTS (
+            SELECT 1 FROM purchases pb
+             WHERE pb.company_id = $1
+               AND pb.customer_id = c.id
+               ${sinceIdx ? `AND pb.purchase_date >= $${sinceIdx}::date` : ''}
+               AND ${ledgerProductKeySql('pb')} = ANY($${keysIdx}::text[])
+          )`;
+}
+
+/** 대상 확정 — 미리보기 값 또는 저장값 · 깨진 저장값 · 스위치 밖 · 문 바뀜 = 막음(전체로 넓히지 않는다) */
+async function plannerTargetOf(companyId: string, plannerEventId: string, preview?: PlannerAudience): Promise<{ ok: true; audience: PlannerAudience } | { ok: false; reason: string }> {
+  let audience: PlannerAudience | null = preview ?? null;
+  if (!audience) {
+    if (!plannerEventId) return { ok: true, audience: { kind: 'all' } };
+    const r = await query(`SELECT meta FROM planner_events WHERE id = $1::uuid AND company_id = $2::uuid`, [plannerEventId, companyId]);
+    if (!r.rows[0]) return { ok: false, reason: PLANNER_REASON.audienceInvalid };
+    audience = readStoredAudience(r.rows[0].meta || {});
+  }
+  if (!audience) return { ok: false, reason: PLANNER_REASON.audienceInvalid };
+  if (audience.kind === 'all') return { ok: true, audience };
+  if (!plannerLineEnabled(companyId)) return { ok: false, reason: PLANNER_REASON.audienceInvalid };
+  if ((await currentPurchaseDoor(companyId)) !== audience.door) return { ok: false, reason: PLANNER_REASON.purchaseDoorChanged };
+  return { ok: true, audience };
+}
+
+/**
+ * 저장 전 서버 재검증(라우트) — 스위치 · 지금 문 · 고른 키가 관측 목록 안인가(화면이 연 목록과 같은 기간 · 같은 함수).
+ * 통과하면 이름을 서버 목록 이름으로 바꿔 돌려준다(화면이 보낸 이름을 믿지 않는다).
+ */
+export async function verifyPlannerAudience(companyId: string, a: PlannerAudience): Promise<{ ok: true; value: PlannerAudience } | { ok: false; status: number; code: string; error: string }> {
+  if (a.kind === 'all') return { ok: true, value: a };
+  if (!plannerLineEnabled(companyId)) return { ok: false, status: 400, code: 'AUDIENCE_DISABLED', error: '상품을 산 고객 대상은 아직 이 회사에 열리지 않았어요. 전체 고객으로 담아 주세요.' };
+  const door = await currentPurchaseDoor(companyId);
+  if (door !== a.door) return { ok: false, status: 409, code: 'PURCHASE_DOOR_CHANGED', error: '구매 기록이 들어오는 곳이 바뀌었어요. 대상 상품을 다시 골라 주세요.' };
+  const list = await listObservedProducts(companyId, door);
+  const byKey = new Map(list.products.map((p) => [p.key, p.name]));
+  const missing = a.keys.filter((k) => !byKey.has(k));
+  if (missing.length > 0) return { ok: false, status: 400, code: 'AUDIENCE_KEYS_INVALID', error: '목록에 없는 상품이 있어요. 대상 상품을 다시 골라 주세요.' };
+  return { ok: true, value: { ...a, names: a.keys.map((k) => byKey.get(k) || k) } };
+}
+
+/** 메일 대상 조각 — 문자와 같은 매장 범위(행사를 만든 계정) · 같은 대상 술어 · 막힘은 0명과 다르다 */
+async function resolvePlannerEmailWhere(input: { companyId: string; createdBy: string | null; plannerEventId: string; audience?: PlannerAudience }): Promise<
+  { blocked: true; reason: string } | { blocked: false; params: any[]; scopeWhere: string; extraWhere: string }
+> {
+  const scope = await resolveOperatorStoreScope(input.companyId, input.createdBy);
+  if (scope.blocked) return { blocked: true, reason: PLANNER_REASON.scopeBlocked };
+  const target = await plannerTargetOf(input.companyId, input.plannerEventId, input.audience);
+  if (!target.ok) return { blocked: true, reason: target.reason };
+  const params = [...scope.baseParams];
+  const extraWhere = target.audience.kind === 'product_buyers' ? buildBuyerPredicate(params, target.audience) : '';
+  return { blocked: false, params, scopeWhere: scope.storeFilter, extraWhere };
+}
+
+/** 메일 받는 사람 수(확인 화면 · 승인 · 담기 창) — 실패 = error(조용한 0 금지) */
+export async function countPlannerEmailRecipients(input: { companyId: string; createdBy: string | null; plannerEventId: string; audience?: PlannerAudience }): Promise<PlannerAudienceCount> {
+  try {
+    const w = await resolvePlannerEmailWhere(input);
+    if (w.blocked) return { state: 'blocked', count: null, reason: w.reason };
+    return { state: 'known', count: await countCustomerRecipientsWhere(w.params, w.scopeWhere, w.extraWhere) };
+  } catch (e: any) {
+    console.warn('[planner-audience] 메일 대상 수 산출 실패:', e?.message || e);
+    return { state: 'error', count: null };
+  }
+}
+
+/** 메일 받는 사람(실행부) — 위 수와 같은 WHERE · 막힘 = blocked(실행부가 잠그고 사유 통지) */
+export async function resolvePlannerEmailRecipients(input: { companyId: string; createdBy: string | null; plannerEventId: string }): Promise<{ blocked: true; reason: string } | { blocked: false; recipients: EmailRecipient[] }> {
+  const w = await resolvePlannerEmailWhere(input);
+  if (w.blocked) return w;
+  return { blocked: false, recipients: await resolveCustomerRecipientsWhere(w.params, w.scopeWhere, w.extraWhere) };
+}
+
+/** ★ 2026-10-18 한 줄 읽기 구매자 확정의 시간 상한(넘으면 사람이 고른다 · 행사명 · 기간 · 채널 제안은 그대로 돌려준다 · Codex B 4R) */
+export const LINE_AUDIENCE_CONFIRM_MS = 2500;
+
+/**
+ * 한 줄 읽기의 구매자 제안 → 그 회사 관측 상품명(대상 상품 고르기와 같은 문 · 같은 함수)으로 확정. 조회 실패 · 시간 초과 = 목록 없음 = 사람이 고른다.
+ * ponytail: 시간 초과 뒤에도 조회 자체는 끝까지 돈다(취소 없음) — 담기 창이 곧바로 같은 목록을 부르는 것과 같은 부하.
+ */
+export async function confirmLineAudienceForCompany(companyId: string, aud: PlannerLineAudience | null): Promise<PlannerLineAudience | null> {
+  if (!aud || aud.kind !== 'product_buyers') return aud;
+  let timer: NodeJS.Timeout | undefined;
+  const names = await Promise.race([
+    currentPurchaseDoor(companyId).then((door) => listObservedProducts(companyId, door)).then((list) => list.products.map((p) => p.name)),
+    new Promise<null>((resolve) => { timer = setTimeout(() => resolve(null), LINE_AUDIENCE_CONFIRM_MS); }),
+  ]).catch((e: any) => { console.warn('[planner-audience] 한 줄 읽기 상품 목록 실패(사람이 고름):', e?.message || e); return null; })
+    .finally(() => { if (timer) clearTimeout(timer); });
+  return confirmLineAudience(aud, names);
 }

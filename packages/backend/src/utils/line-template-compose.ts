@@ -48,7 +48,18 @@ export interface LineMaterials {
   legal?: string | null;
   /** ★ 2026-10-18 AI 영업 — 혜택 조건 글(면허 행사 카드 본문 원문 · 예: 5만원 이상 구매 시) · 혜택 바로 아래에 싣는다(R5) */
   benefitNote?: string | null;
+  /**
+   * ★ 2026-10-18 플래너 v2-1 — 표지 제목을 코드가 놓는다(행사명 원문 · AI 문구 대신).
+   * 빅세일은 혜택이 짧을 때(≤ 30자)만 혜택이 제목이고, 길면 제목 = 이 값 · 혜택 = 마무리 장 띠(회의론자 6 · 긴 혜택이 표지에서 넘치지 않게).
+   * 없으면 지금 그대로(1017 고객 경로 · AI 영업).
+   */
+  coverHeadline?: string | null;
 }
+
+/** 빅세일 표지 제목으로 쓸 수 있는 혜택 길이(플래너 표지 규칙 · coverHeadline 이 있을 때만) */
+export const LINE_COVER_BENEFIT_MAX = 30;
+/** (순수) 혜택이 표지 제목이 되는가 — 플래너(coverHeadline 있음) = 짧은 혜택만 · 그 밖 = 혜택이 있으면 */
+const benefitOnCover = (m: LineMaterials) => !!m.benefit && (!m.coverHeadline || m.benefit.length <= LINE_COVER_BENEFIT_MAX);
 
 /** 행사 하나(원문 제목 · 표시용 기간 · 우리 사본 그림 · 상세 주소) */
 export interface LineEvent {
@@ -131,11 +142,14 @@ function capLineProducts(m: LineMaterials, max: number): LineMaterials {
 
 /** 표지 — 사진 · 상품 1개 · 글자 중 하나(재료로 고른다) */
 function coverParts(t: LineTemplate, m: LineMaterials, c: LineCopy): { parts: Part[]; productOnCover: boolean } {
+  // ★ 2026-10-18 표지 제목 = 코드가 놓은 값(플래너 행사명)이 있으면 그것 · 없으면 AI 문구(1017 · AI 영업 그대로)
+  const title = m.coverHeadline || c.cover_headline;
+  const onCover = benefitOnCover(m);
   // ★ 2026-10-18 글자 박힌 그림 = 덮지 않는다 — 그림 원본 비율(링크) + 그 아래 제목 · 부제(혜택 · 기간)
   if (m.hero?.asIs) {
-    const big = t.id === 'big-sale' && !!m.benefit;
-    const headline = big ? m.benefit! : c.cover_headline;
-    const sub = [big ? m.benefitNote : null, big ? c.cover_headline : c.cover_sub, t.id === 'big-sale' || t.id === 'special-event' ? m.periodLabel : null].filter(Boolean).join('\n');
+    const big = t.id === 'big-sale' && onCover;
+    const headline = big ? m.benefit! : title;
+    const sub = [big ? m.benefitNote : null, big ? title : c.cover_sub, t.id === 'big-sale' || t.id === 'special-event' ? m.periodLabel : null].filter(Boolean).join('\n');
     return {
       parts: [
         { type: 'gallery', props: { title: '', images: [{ url: m.hero.url, link_url: m.hero.linkUrl || m.link || '', caption: '' }], layout: 'list_1xN', full_bleed: true, enable_zoom: false, enable_fullscreen: false }, part: 'cover' },
@@ -145,24 +159,24 @@ function coverParts(t: LineTemplate, m: LineMaterials, c: LineCopy): { parts: Pa
     };
   }
   if (t.id === 'big-sale') {
-    const headline = m.benefit || c.cover_headline;
-    const sub = [m.benefit ? m.benefitNote : null, m.benefit ? c.cover_headline : c.cover_sub, m.periodLabel].filter(Boolean).join('\n');
+    const headline = onCover ? m.benefit! : title;
+    const sub = [onCover ? m.benefitNote : null, onCover ? title : c.cover_sub, m.periodLabel].filter(Boolean).join('\n');
     if (m.hero) return { parts: [{ type: 'hero', props: { image_url: m.hero.url, headline, sub_copy: sub, align: 'center', height: 'lg', overlay: 'strong' }, treatment: 'full_bleed', fit: true, part: 'cover' }], productOnCover: false };
     return { parts: [colorCover(t, headline, sub)], productOnCover: false };
   }
   if (m.hero) {
-    return { parts: [{ type: 'hero', props: { image_url: m.hero.url, headline: c.cover_headline, sub_copy: [c.cover_sub, t.id === 'special-event' ? m.periodLabel : null].filter(Boolean).join('\n'), align: 'center', height: 'lg', overlay: 'strong' }, treatment: 'full_bleed', fit: true, part: 'cover' }], productOnCover: false };
+    return { parts: [{ type: 'hero', props: { image_url: m.hero.url, headline: title, sub_copy: [c.cover_sub, t.id === 'special-event' ? m.periodLabel : null].filter(Boolean).join('\n'), align: 'center', height: 'lg', overlay: 'strong' }, treatment: 'full_bleed', fit: true, part: 'cover' }], productOnCover: false };
   }
   if (t.id === 'new-launch' && m.products.length === 1) {
     const p = m.products[0];
     const price = p.discount_price ?? p.price;
     return {
-      parts: [{ type: 'hero', props: { image_url: p.image_url, image_fit: 'contain', headline: c.cover_headline, sub_copy: [p.name, price ? won(Number(price)) : null].filter(Boolean).join('\n'), align: 'left', height: 'lg' }, treatment: 'split', fit: true, part: 'cover' }],
+      parts: [{ type: 'hero', props: { image_url: p.image_url, image_fit: 'contain', headline: title, sub_copy: [p.name, price ? won(Number(price)) : null].filter(Boolean).join('\n'), align: 'left', height: 'lg' }, treatment: 'split', fit: true, part: 'cover' }],
       productOnCover: true,
     };
   }
   const sub = [c.cover_sub, t.id === 'special-event' ? m.periodLabel : null].filter(Boolean).join('\n');
-  return { parts: [colorCover(t, c.cover_headline, sub)], productOnCover: false };
+  return { parts: [colorCover(t, title, sub)], productOnCover: false };
 }
 
 /** 사진이 없을 때의 표지 = 템플릿 색면(주색 → 강조색) 위 흰 글자(빈 사진 자리 0 · 렌더러의 무드 배경) */
@@ -270,7 +284,8 @@ export function lineTemplatePageParts(t: LineTemplate, m0: LineMaterials, c: Lin
   const events = eventParts(m, used, reach, channel);
   if (t.id === 'big-sale') {
     pages.push(...productParts(products, c.story_headline, channel));
-    pages.push(closingParts(m, c, [countdownPart(t, m), products.length === 0 ? storyPart(c) : null]));
+    // ★ 2026-10-18 표지에 못 올린 긴 혜택(플래너) = 마무리 장 띠 · 그 밖은 지금 그대로(혜택이 있으면 늘 표지)
+    pages.push(closingParts(m, c, [...(m.benefit && !benefitOnCover(m) ? benefitParts(t, m) : []), countdownPart(t, m), products.length === 0 ? storyPart(c) : null]));
   } else if (t.id === 'new-launch') {
     // 상품 장 첫 장이 큰 카드(2개 이하)면 소개 글을 그 장 위에 · 많으면 제목만 두고 소개 글은 마지막 장 인용으로(같은 제목 두 번 0)
     const roomy = (planProductPages(products.length, channel)[0] || []).reduce((a, b) => a + b, 0) <= 2;

@@ -18,7 +18,7 @@ import { useAuthStore } from '../stores/authStore';
 import { rememberLoginReturn } from '../utils/login-return';
 import { useToast } from '../components/ToastProvider';
 import { ApproveBody, ConfirmSummary, ConfirmTimeline, CopyEditDialog } from '../components/planner/PlannerConfirmView';
-import { plannerDay, plannerRange, plannerStateOf } from '../constants/planner-status';
+import { PLANNER_SEND_KIND, plannerDay, plannerRange, plannerStateOf } from '../constants/planner-status';
 import { plannerApi, plannerErrorText, won, type ConfirmSend, type ConfirmView } from '../components/planner/planner-api';
 
 const PUBLIC_NOTICE = '이 화면은 입력을 받지 않습니다. 로그인은 hanjul.ai 로그인 화면에서만 합니다.';
@@ -149,6 +149,18 @@ export default function PlannerConfirmPage() {
         )}
         <ConfirmSummary view={view} />
         <div className="mt-7 mb-4 flex items-baseline gap-2"><h3 className="text-[17px] font-bold">보낼 내용 {view.sends.length}번</h3><span className="text-[12.5px] text-neutral-600">나가는 순서대로</span></div>
+        {view.sends.length > 1 && (
+          // ★ 2026-10-18 발송 번호 띠(머리 아래 붙음 · 누르면 그 발송으로 · 주소 # 은 확인 토큰 자리라 쓰지 않는다)
+          <nav aria-label="발송 순서" className="sticky top-[61px] z-[5] -mx-4 px-4 py-2 mb-4 bg-neutral-50/95 backdrop-blur border-b border-neutral-200 flex gap-1.5 overflow-x-auto">
+            {view.sends.map((s, i) => (
+              <button key={s.key} type="button" onClick={() => document.getElementById(`send-${i + 1}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' })}
+                className="shrink-0 h-9 pl-1.5 pr-2.5 rounded-full border border-neutral-200 bg-white text-[12.5px] font-semibold text-neutral-700 inline-flex items-center gap-1.5 tabular-nums">
+                <span className={`w-6 h-6 rounded-full text-[11.5px] grid place-items-center ${s.status === 'sent' ? 'bg-emerald-600 text-white' : s.status === 'skipped' ? 'bg-neutral-300 text-white' : 'bg-neutral-900 text-white'}`}>{i + 1}</span>
+                {plannerDay(s.scheduledOn).replace(/\(.\)$/, '')} {PLANNER_SEND_KIND[s.kind].label}
+              </button>
+            ))}
+          </nav>
+        )}
         <ConfirmTimeline view={view} mode="phone" />
         <div className="space-y-1.5">
           <p className="text-[10px] text-neutral-500 italic">Data source: {view.dataSource}</p>
@@ -163,8 +175,8 @@ export default function PlannerConfirmPage() {
                 <p className="text-[13px] font-semibold text-neutral-900 text-center tabular-nums">{view.balance !== null ? `승인하면 보유 크레딧 ${won(view.balance)} → ${won(view.balance - total)}` : `승인하면 ${won(total)}크레딧이 빠져요`}</p>
                 <div className="flex gap-2 mt-2.5">
                   {smsSend && <button type="button" onClick={() => setEditing(smsSend)} className="h-12 px-4 rounded-[10px] border border-neutral-300 text-[13.5px] font-semibold text-neutral-700">문안 고치기</button>}
-                  <button type="button" disabled={!canApprove || working} onClick={() => setSheet(true)} className="flex-1 h-12 rounded-[10px] bg-indigo-600 text-white text-[15px] font-bold disabled:opacity-50">
-                    승인하기 <span className="font-semibold text-indigo-100 text-[13px]">· {won(total)}크레딧</span>
+                  <button type="button" disabled={!canApprove || working} onClick={() => setSheet(true)} className="flex-1 h-12 rounded-[10px] bg-amber-500 hover:bg-amber-400 text-amber-950 text-[15px] font-bold disabled:opacity-50">
+                    승인하기 <span className="font-semibold text-amber-900 text-[13px]">· {won(total)}크레딧</span>
                   </button>
                 </div>
               </>
@@ -187,8 +199,8 @@ export default function PlannerConfirmPage() {
             <div className="mt-4"><ApproveBody view={view} /></div>
             <div className="flex gap-2 mt-4">
               <button type="button" onClick={() => setSheet(false)} disabled={working} className="h-12 px-5 rounded-[10px] border border-neutral-300 text-[14px] font-semibold text-neutral-700">취소</button>
-              <button type="button" onClick={() => { void approve(view); }} disabled={working} className="flex-1 h-12 rounded-[10px] bg-indigo-600 text-white text-[15px] font-bold disabled:opacity-60">
-                {working ? '승인하는 중' : '승인하기'} <span className="font-semibold text-indigo-100 text-[13px]">· {won(total)}크레딧</span>
+              <button type="button" onClick={() => { void approve(view); }} disabled={working} className="flex-1 h-12 rounded-[10px] bg-amber-500 hover:bg-amber-400 text-amber-950 text-[15px] font-bold disabled:opacity-60">
+                {working ? '승인하는 중' : '승인하기'} <span className="font-semibold text-amber-900 text-[13px]">· {won(total)}크레딧</span>
               </button>
             </div>
           </div>

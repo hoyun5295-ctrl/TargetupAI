@@ -297,8 +297,9 @@ describe('배선 — 발급 · 링크 열기 · 승인 라우트', () => {
     const body = w.slice(w.indexOf('async function buildApproveTexts'), w.indexOf('async function sendManagerTest'));
     expect(body).toContain('resolveLinkApprovers(');
     expect(body).toContain('buildNoLinkApproverLine(');
-    // 세 분기가 접수 계정을 넘긴다
-    expect((w.match(/buildApproveTexts\(managerPhonesOf\(/g) || []).length).toBe(3);
+    // 세 분기 + ★2026-10-18 축 4 두 곳(24시간 만료 안내 · 시각 변경 뒤 승인 요청 다시 보내기)이 접수 계정을 넘긴다
+    expect((w.match(/buildApproveTexts\(managerPhonesOf\(/g) || []).length).toBe(5);
+    expect((w.match(/created_by \?\? null\),/g) || []).length).toBe(5);
   });
 
   it('링크 열기도 승인 계정을 판정한다(없으면 같은 404)', () => {

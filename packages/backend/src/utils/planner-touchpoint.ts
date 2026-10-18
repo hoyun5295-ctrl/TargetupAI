@@ -175,12 +175,16 @@ export async function loadLiveTouchpoints(input: {
   requireApproved?: boolean;
   /** exec_meta 표식 일치(예: 승인 직후 스팸 대기 = post_approval_spam 'pending') — LIMIT 앞에서 SQL로 거른다(F9). */
   execMetaFlag?: { key: string; value: string };
+  /** ★ 2026-10-18 exec_meta 에 이 키가 있는 접점만(예: 쌍 재확인 = 'recheck') — LIMIT 앞에서 SQL로 거른다. */
+  execMetaHas?: string;
   /** 이 행사만 */
   eventId?: string;
   companyId?: string;
   limit?: number;
   /** 페이지 순회용(전 행을 봐야 하는 패스). 정렬은 고정(starts_on·created_at·id)이라 offset으로 충분하다. */
   offset?: number;
+  /** ★ 2026-10-18 트랜잭션 안에서 부를 때 그 연결(잠금을 쥔 채 풀에서 또 꺼내지 않게 · 없으면 풀) */
+  db?: { query: (text: string, params?: any[]) => Promise<any> };
 }): Promise<PlannerTouchpointRow[]> {
   const params: any[] = [input.statuses, input.eventStatuses && input.eventStatuses.length > 0 ? input.eventStatuses : LIVE_EVENT_STATUS, input.scheduledFrom];
   let toClause = '';
@@ -204,6 +208,11 @@ export async function loadLiveTouchpoints(input: {
     params.push(input.execMetaFlag.key, input.execMetaFlag.value);
     flagClause = ` AND t.exec_meta->>$${params.length - 1} = $${params.length}`;
   }
+  let hasClause = '';
+  if (input.execMetaHas) {
+    params.push(input.execMetaHas);
+    hasClause = ` AND (t.exec_meta ? $${params.length}::text)`;
+  }
   let eventClause = '';
   if (input.eventId) {
     params.push(input.eventId);
@@ -212,7 +221,7 @@ export async function loadLiveTouchpoints(input: {
   params.push(Math.min(Math.max(1, input.limit || 500), 2000));
   const limitIdx = params.length;
   params.push(Math.max(0, Math.floor(input.offset || 0)));
-  const r = await query(
+  const r = await (input.db ? input.db.query.bind(input.db) : query)(
     `SELECT t.id, t.event_id, t.company_id, t.channel, t.timing_rule, t.status,
             t.asset_ref, t.exec_ref, t.exec_meta, t.lock_reason,
             e.plan_month, e.title, e.starts_on::text AS starts_on, e.ends_on::text AS ends_on, e.benefit_text, e.products,
@@ -221,7 +230,7 @@ export async function loadLiveTouchpoints(input: {
        JOIN planner_events e ON e.id = t.event_id AND e.company_id = t.company_id
       WHERE t.status = ANY($1)
         AND e.status = ANY($2)
-        AND e.ends_on >= $3::date${toClause}${companyClause}${channelClause}${approvedClause}${flagClause}${eventClause}
+        AND e.ends_on >= $3::date${toClause}${companyClause}${channelClause}${approvedClause}${flagClause}${hasClause}${eventClause}
       ORDER BY e.starts_on ASC, t.created_at ASC, t.id ASC
       LIMIT $${limitIdx} OFFSET $${params.length}`,
     params,

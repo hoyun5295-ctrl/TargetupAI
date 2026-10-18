@@ -15,7 +15,10 @@
  *   잠금 아래에서 한 번 더 한다.
  * ⛔ 이 경로가 노출하는 것은 문안·시각·건수·발신번호뿐이다. 수신자 명단·변수 매핑·회사 내부
  *   식별자는 내보내지 않는다(링크가 흘러도 새는 것은 마케팅 문안뿐).
- * ⛔ 승인 외의 일(문안 수정·시각 변경·취소)은 로그인 화면 소유 — 이 경로에 만들지 않는다.
+ * ★2026-10-18 축 2 — 링크 조작 = 승인 · 취소 · 시각 변경(승인 전 + 미발송 재개) · 맞춤법 제안 적용(설계서 docs/2026-10-16-agency-send-mobile-control-design.md §2).
+ *   허용 · 사유 = `agencyActions('link', row)` 한 벌(info 의 actions{} 와 각 POST 가드가 같은 함수) · 효과 = 로그인 화면과 같은 CT.
+ *   취소 · 시각 변경 · 고치기는 인증번호 없이 + 담당자 전원 통보 + 이력(via · 번호 · ip · ua) + 감사 원장(취소는 멈추는 쪽 · 시각 · 고치기는 다시 승인을 지난다).
+ * ⛔ 자유 문안 수정은 로그인 화면 소유 — 이 경로에 만들지 않는다.
  * ★2026-10-16 링크는 **승인 계정이 있는 번호**에서만 산다(토큰 번호 = 접수 계정 또는 관리자 한 명의 MFA 번호 · `resolveLinkApprovers`).
  *   승인은 그 계정으로 발신 인증(3.5) 인증번호를 받는다 — 확인은 `POST /sender-auth/verify`(토큰 헤더 · 로그인 경로와 같은 응답 CT).
  *   설계서 = docs/2026-10-16-agency-send-mobile-control-design.md §2 축 0.
@@ -24,15 +27,18 @@ import { Router, Request, Response } from 'express';
 import { query } from '../config/database';
 import { loadAgencyCallbackKinds } from '../utils/agency-send-intake';
 import {
-  AGENCY_APPROVE_TOKEN_HEADER, agencyManagerPhones, verifyAgencyApproveToken, resolveLinkApprovers,
+  AGENCY_APPROVE_TOKEN_HEADER, agencyManagerPhones, verifyAgencyApproveToken, resolveLinkApprovers, linkCancelReason,
 } from '../utils/agency-send-link';
 import {
   verifySenderAuthChallenge, senderAuthVerifyResponse, senderAuthRejection, isSenderAuthSchemaMissing,
 } from '../utils/sender-auth';
 import { approveAgencyRequestTx } from '../utils/agency-send-approve';
-import { checkApproval } from '../utils/agency-send-state';
-import { notifyManager } from '../utils/agency-send-worker';
-import { buildLinkApprovedNotify, formatWhen } from '../utils/agency-send-notify';
+import { notifyManager, sendAgencyApprovalRequest } from '../utils/agency-send-worker';
+import { buildLinkActionNotify, buildLinkApprovedNotify, formatWhen } from '../utils/agency-send-notify';
+import { agencyActions } from '../utils/agency-send-actions';
+import { editAgencyContentTx, rescheduleAgencyRequestTx } from '../utils/agency-send-change';
+import { cancelAgencyRequestTx } from '../utils/agency-send-cancel';
+import { logEvent } from '../utils/agency-send-intake';
 import { recordAuditLog } from '../utils/audit-log';
 import { readAgencySpell } from '../utils/agency-send-spell';
 
@@ -76,8 +82,10 @@ function toApprovalView(row: any) {
     imageCount: Array.isArray(row.mms_image_paths) ? row.mms_image_paths.length : 0,
     revision: Number(row.revision),
     approvedAt: row.approved_at,
-    // ★2026-09-25 맞춤법 확인 목록(읽기 전용 · 문안에서 나온 것뿐이라 노출 규칙 안 · 고치기는 로그인 화면 소유)
+    // ★2026-09-25 맞춤법 확인 목록(문안에서 나온 것뿐이라 노출 규칙 안) · ★2026-10-18 고르면 링크에서 고친다(축 3 · 잠긴 제안 = blocked)
     spellIssues: readAgencySpell(row),
+    // ★2026-10-18 이 링크로 할 수 있는 조작 · 승인 마감(서버 판정 한 벌)
+    actions: agencyActions('link', row),
   };
 }
 
@@ -96,21 +104,13 @@ router.get('/info', async (req: Request, res: Response) => {
     const resolved = await resolveToken(req);
     if (!resolved) return res.status(404).json({ success: false, error: '유효하지 않거나 만료된 주소입니다.' });
     const { row } = resolved;
-    const check = checkApproval(
-      {
-        status: row.status,
-        revision: Number(row.revision),
-        requestedAt: new Date(row.requested_at),
-        finalTestedAt: row.final_test_at ? new Date(row.final_test_at) : null,
-      },
-      Number(row.revision),
-      new Date(),
-    );
+    // ★2026-10-18 승인 가능 판정 = 조작 정책 한 벌(24시간 승인 대기 포함 · 승인 CT 와 같은 checkApproval)
+    const actions = agencyActions('link', row);
     return res.json({
       success: true,
       request: { ...toApprovalView(row), ...(await loadCallbackKinds(row)) },
-      approvable: check.ok,
-      blockReason: check.ok ? null : check.error,
+      approvable: actions.approve.ok,
+      blockReason: actions.approve.ok ? null : actions.approve.reason,
     });
   } catch (err: any) {
     if (isMissingRelation(err)) return res.status(503).json({ success: false, error: '잠시 후 다시 시도해 주세요.' });
@@ -175,6 +175,113 @@ router.post('/approve', async (req: Request, res: Response) => {
     if (isMissingRelation(err)) return res.status(503).json({ success: false, error: '잠시 후 다시 시도해 주세요.' });
     console.error('[agency-approve] 승인 실패:', err);
     return res.status(500).json({ success: false, error: '승인하지 못했습니다. 잠시 후 다시 시도해 주세요.' });
+  }
+});
+
+// ── ★2026-10-18 축 2 · 3 · 4 링크 조작(취소 · 시각 변경 · 맞춤법 적용) ─────────────────────────────
+
+/** 링크 조작 공통 뒤처리 — 이력(via · 번호 · ip · ua) · 감사 원장 · 담당자 전원 통보(fire-and-forget · 실패해도 조작은 유효) */
+function afterLinkAction(req: Request, resolved: { row: any; phone: string; contentVersion: number }, op: 'cancel' | 'reschedule' | 'spell', row: any, extra: Record<string, unknown> = {}): void {
+  const actor = { via: 'link', phone: resolved.phone, ip: String(req.ip || ''), ua: String(req.headers['user-agent'] || '').slice(0, 200) };
+  void logEvent(String(row.id), `link_${op}`, { ...actor, ...extra }).catch(() => {});
+  void recordAuditLog({
+    action: `agency_link_${op}`, targetType: 'agency_send_request', targetId: String(row.id),
+    details: { phone: resolved.phone, label: String(row.file_name || '').slice(0, 40), contentVersion: resolved.contentVersion, ...extra },
+    req,
+  });
+  // ★ Codex D 3R — 워커 F 가 먼저 확정한 취소는 결과 문자도 워커가 보냈다(cancel_reason 표지) · 여기서 또 보내지 않는다
+  if (extra.finalizedElsewhere === true) return;
+  void notifyManager({
+    companyId: String(row.company_id), requestId: String(row.id), phones: agencyManagerPhones(row), callback: String(row.callback_number || ''),
+    title: op === 'cancel' ? '[대행발송] 취소 안내' : op === 'reschedule' ? '[대행발송] 시각 변경 안내' : '[대행발송] 문안 고침 안내',
+    text: buildLinkActionNotify({
+      label: String(row.file_name || row.current_content || ''), action: op, tail: resolved.phone.slice(-4),
+      whenText: row.requested_at ? formatWhen(new Date(row.requested_at)) : undefined,
+      spellCount: Number(extra.spellCount || 0),
+      pending: extra.pending === true,
+    }),
+  }).catch(() => {});
+}
+
+const actorOf = (req: Request, phone: string) => ({ phone, ip: String(req.ip || ''), ua: String(req.headers['user-agent'] || '').slice(0, 200) });
+
+router.post('/cancel', async (req: Request, res: Response) => {
+  try {
+    const resolved = await resolveToken(req);
+    if (!resolved) return res.status(404).json({ success: false, error: '유효하지 않거나 만료된 주소입니다.' });
+    const allowed = agencyActions('link', resolved.row).cancel;
+    if (!allowed.ok) return res.status(409).json({ success: false, code: 'NOT_ALLOWED', error: allowed.reason });
+    const out = await cancelAgencyRequestTx({
+      requestId: resolved.row.id, companyId: String(resolved.row.company_id), reason: linkCancelReason(resolved.phone),
+      ownerUserId: null, cancelledBy: null, cancelledByType: 'agency_link', revision: Number(req.body?.revision),
+    });
+    if (!out.ok) {
+      return res.status(out.status).json({
+        success: false, error: out.error, ...(out.code ? { code: out.code } : {}), ...(out.tooLate ? { tooLate: true } : {}),
+        ...(out.current ? { request: { ...toApprovalView(out.current), ...(await loadCallbackKinds(out.current)) } } : {}),
+      });
+    }
+    afterLinkAction(req, resolved, 'cancel', out.row, { pending: out.pending, ...(out.finalizedElsewhere ? { finalizedElsewhere: true } : {}) });
+    // 워커가 먼저 확정했으면 화면도 「결과를 문자로 알려 드립니다」 쪽(이 요청이 문자를 보내지 않았다)
+    const pending = out.pending || !!out.finalizedElsewhere;
+    return res.status(pending ? 202 : 200).json({ success: true, pending, request: { ...toApprovalView(out.row), ...(await loadCallbackKinds(out.row)) } });
+  } catch (err: any) {
+    if (isMissingRelation(err)) return res.status(503).json({ success: false, error: '잠시 후 다시 시도해 주세요.' });
+    console.error('[agency-approve] 링크 취소 실패:', err?.message || err);
+    return res.status(500).json({ success: false, error: '취소하지 못했습니다. 잠시 후 다시 시도해 주세요.' });
+  }
+});
+
+router.post('/reschedule', async (req: Request, res: Response) => {
+  try {
+    const resolved = await resolveToken(req);
+    if (!resolved) return res.status(404).json({ success: false, error: '유효하지 않거나 만료된 주소입니다.' });
+    const allowed = agencyActions('link', resolved.row).reschedule;
+    if (!allowed.ok) return res.status(409).json({ success: false, code: 'NOT_ALLOWED', error: allowed.reason });
+    const out = await rescheduleAgencyRequestTx({
+      requestId: resolved.row.id, companyId: String(resolved.row.company_id), ownerUserId: null,
+      revision: req.body?.revision, requestedAt: req.body?.requestedAt, via: 'link', actor: actorOf(req, resolved.phone),
+    });
+    if (!out.ok) {
+      return res.status(out.status).json({
+        success: false, error: out.error, ...(out.code ? { code: out.code } : {}),
+        ...(out.current ? { request: { ...toApprovalView(out.current), ...(await loadCallbackKinds(out.current)) } } : {}),
+      });
+    }
+    afterLinkAction(req, resolved, 'reschedule', out.row, { status: out.backTo, timeShifted: !!out.timeShifted });
+    if (out.backTo === 'awaiting_approval') void sendAgencyApprovalRequest(String(out.row.id));
+    return res.json({ success: true, request: { ...toApprovalView(out.row), ...(await loadCallbackKinds(out.row)) }, ...(out.timeShifted ? { timeShifted: true } : {}) });
+  } catch (err: any) {
+    if (isMissingRelation(err)) return res.status(503).json({ success: false, error: '잠시 후 다시 시도해 주세요.' });
+    console.error('[agency-approve] 링크 시각 변경 실패:', err?.message || err);
+    return res.status(500).json({ success: false, error: '시각을 바꾸지 못했습니다. 잠시 후 다시 시도해 주세요.' });
+  }
+});
+
+router.post('/spell-fix', async (req: Request, res: Response) => {
+  try {
+    const resolved = await resolveToken(req);
+    if (!resolved) return res.status(404).json({ success: false, error: '유효하지 않거나 만료된 주소입니다.' });
+    const allowed = agencyActions('link', resolved.row).spellFix;
+    if (!allowed.ok) return res.status(409).json({ success: false, code: 'NOT_ALLOWED', error: allowed.reason });
+    const ids = (Array.isArray(req.body?.issueIds) ? req.body.issueIds : []).map(String).slice(0, 50);
+    const out = await editAgencyContentTx({
+      requestId: resolved.row.id, companyId: String(resolved.row.company_id), ownerUserId: null, revision: req.body?.revision,
+      change: { kind: 'spell', issueIds: ids }, via: 'link', actor: actorOf(req, resolved.phone),
+    });
+    if (!out.ok) {
+      return res.status(out.status).json({
+        success: false, error: out.error, ...(out.code ? { code: out.code } : {}),
+        ...(out.current ? { request: { ...toApprovalView(out.current), ...(await loadCallbackKinds(out.current)) } } : {}),
+      });
+    }
+    afterLinkAction(req, resolved, 'spell', out.row, { spellCount: ids.length });
+    // 문안 버전이 올라 이 링크는 닫힌다 — 다시 검사한 뒤 새 테스트 문자 · 새 승인 문자가 간다(화면은 「새 문자 대기」)
+    return res.json({ success: true, awaitingNewMessage: true });
+  } catch (err: any) {
+    if (isMissingRelation(err)) return res.status(503).json({ success: false, error: '잠시 후 다시 시도해 주세요.' });
+    console.error('[agency-approve] 링크 맞춤법 적용 실패:', err?.message || err);
+    return res.status(500).json({ success: false, error: '고치지 못했습니다. 잠시 후 다시 시도해 주세요.' });
   }
 });
 

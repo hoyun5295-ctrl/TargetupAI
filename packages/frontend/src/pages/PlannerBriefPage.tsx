@@ -100,25 +100,30 @@ export default function PlannerBriefPage() {
                   {ev.participants > 0 && <span className="text-[12px] text-emerald-800 tabular-nums">참여 신청 {won(ev.participants)}명</span>}
                   <ChevronRight className="ml-auto w-4 h-4 text-slate-400" />
                 </button>
-                <div className="divide-y divide-slate-100">
+                {/* ★ 2026-10-18 v2-1 발송마다 카드 한 장(여러 열 · 왼쪽 글 · 오른쪽 숫자 사이 빈 가운데 0 · 설계서 §3-5) */}
+                <div className="p-3 md:p-4 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
                   {ev.touchpoints.map((tp) => {
                     const st = PLANNER_TP_STATUS[tp.status];
                     return (
-                      <div key={tp.id} className="px-4 md:px-5 py-3 flex flex-wrap items-center gap-x-4 gap-y-1.5">
-                        <div className="min-w-[9rem]">
-                          <div className="text-[13.5px]">{tp.channelLabel}</div>
-                          <div className="text-[12px] text-slate-500 tabular-nums">{plannerDay(tp.scheduledOn)}</div>
+                      <div key={tp.id} className="rounded-xl border border-slate-200 px-3.5 py-3">
+                        <div className="flex items-start gap-2">
+                          <div className="min-w-0 flex-1">
+                            <div className="text-[13.5px] font-semibold">{tp.channelLabel}</div>
+                            <div className="text-[12px] text-slate-500 tabular-nums">{plannerDay(tp.scheduledOn)}</div>
+                          </div>
+                          {st && <span className={`text-[11.5px] font-semibold h-6 px-2 inline-flex items-center rounded-md border whitespace-nowrap ${st.cls}`}>{st.label}</span>}
                         </div>
-                        {st && <span className={`text-[11.5px] font-semibold h-6 px-2 inline-flex items-center rounded-md border ${st.cls}`}>{st.label}</span>}
-                        <div className="flex flex-wrap items-center gap-x-5 gap-y-1 ml-auto">
-                          {tp.metrics.map((m, i) => (
-                            <div key={i} className="text-right">
-                              <div className="text-[11px] text-slate-500">{m.label}</div>
-                              <div className="text-[14px] font-semibold tabular-nums">{m.value}</div>
-                            </div>
-                          ))}
-                        </div>
-                        {tp.lockReason && <div className="w-full text-[12px] text-amber-800">{tp.lockReason}</div>}
+                        {tp.metrics.length > 0 && (
+                          <div className="mt-2.5 grid grid-cols-2 gap-x-3 gap-y-2">
+                            {tp.metrics.map((m, i) => (
+                              <div key={i} className="min-w-fit">
+                                <div className="text-[11px] text-slate-500">{m.label}</div>
+                                <div className="text-[15px] font-semibold tabular-nums">{m.value}</div>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                        {tp.lockReason && <div className="mt-2 text-[12px] text-amber-800">{tp.lockReason}</div>}
                       </div>
                     );
                   })}

@@ -48,9 +48,11 @@ export async function inspectAttemptCampaign(
   companyId: string, dispatchKey: string | null,
   // ★2026-09-13(3) status·phase도 함께 돌려준다(이미 취소된 캠페인을 가려 취소가 갇히지 않게 · 한 통이라도 나갔을 수 있는지 가르게 ·
   //   기존 소비처는 id·kind만 읽는다)
+  // ★2026-10-18 트랜잭션 안에서 부를 때 그 연결(없으면 풀)
+  q: (text: string, params?: any[]) => Promise<any> = query,
 ): Promise<{ id: string | null; kind: CampaignKind; status: string | null; phase: string | null; sent: number | null }> {
   if (!dispatchKey) return classifyAttemptCampaign(undefined);
-  const r = await query(
+  const r = await q(
     `SELECT id, status, send_phase, sent_count FROM campaigns
       WHERE staging_id = $1::uuid AND company_id = $2::uuid
       ORDER BY created_at DESC LIMIT 1`,

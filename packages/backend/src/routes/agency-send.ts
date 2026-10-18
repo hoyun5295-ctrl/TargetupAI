@@ -18,25 +18,24 @@ import {
   describeMmsFitFailure, describeMmsFitNote, fitMmsImage, MMS_FIT_MAX_UPLOAD_BYTES, restoreUploadFileName,
 } from '../utils/mms-image-fit';
 import { getRegisteredCallbackSet } from '../utils/callback-filter';
-import {
-  isEditable, isSameKstDay, validateRequestedAt,
-  type AgencySendStatus,
-} from '../utils/agency-send-state';
-import { buildSlotPlan, extractAgencyVars } from '../utils/agency-send-vars';
+import { type AgencySendStatus } from '../utils/agency-send-state';
+import { extractAgencyVars } from '../utils/agency-send-vars';
 import { AGENCY_PREVIEW_LIMIT, buildRenderedSamples, measureAgencyMaxSmsBytes, AGENCY_SMS_BYTES_MAX_CANDIDATES } from '../utils/agency-send-preview';
 import { SMS_MAX_BYTES } from '../utils/message-byte';
 import { approveAgencyRequestTx } from '../utils/agency-send-approve';
 import { senderAuthRejection } from '../utils/sender-auth';
 import { cancelAgencyRequestTx } from '../utils/agency-send-cancel';
-import { ATTEMPT_LOCK_PREFIX, attemptBlocksChange, attemptIdleSql } from '../utils/agency-send-worker';
+import { editAgencyContentTx, rescheduleAgencyRequestTx } from '../utils/agency-send-change';
+import { approvalDeadline } from '../utils/agency-send-state';
+import { sendAgencyApprovalRequest } from '../utils/agency-send-worker';
 // ★2026-09-25 맞춤법 검사(설계 docs/2026-09-25-agency-spell-check-design.md · 자동 교정 0 · 결과는 문안 버전에 묶인다)
-import { checkAgencySpelling, hasAgencySpellColumn, readAgencySpell } from '../utils/agency-send-spell';
+import { checkAgencySpelling, readAgencySpell } from '../utils/agency-send-spell';
 import { takeSpellMinuteSlot } from '../utils/spell-check-quota';
 // ★2026-08-26 §18 승격 — 접수 코어·원스텝 분석은 CT(utils/agency-send-intake.ts)가 소유한다.
 //   입구 = 화면 접수 · 원스텝 · 이메일 접수 워커. 이 파일에 코어를 다시 정의하지 마라(두 벌 금지).
 import {
   analyzeOneStep, createRequestCore, hasAgencyColumn, kickFirstTest, loadSendWindow, logEvent, parseOneStepOverrides,
-  findUnregisteredRequestCallbacks, loadAgencyCallbackKinds, unregisteredCallbackError, type AgencyCallbackKinds,
+  loadAgencyCallbackKinds, type AgencyCallbackKinds,
   MAX_CONTENT, type OneStepAnalysis,
 } from '../utils/agency-send-intake';
 
@@ -66,46 +65,7 @@ function rejectSubjectVars(subject: any, res: Response): boolean {
   return true;
 }
 
-/**
- * **예약이 한 번이라도 만들어진 접수는 고쳐서 다시 보내지 않는다**(★2026-08-23 Codex 3R high).
- *
- * `campaign_id`가 붙었다는 것은 이 명단이 이미 발송 배관에 들어갔다는 뜻이다. 그 뒤 예약이 중간에
- * 끊겼더라도 **일부는 이미 나갔을 수 있다**(적재 도중 예외로 종결된 캠페인이 그렇다).
- * 그 상태에서 시각만 바꿔 다시 보내면 같은 사람에게 두 번 가고 요금도 두 번 나간다.
- * 다시 보내야 하면 결과를 확인한 뒤 **새 접수**로 간다.
- */
-/**
- * 접수의 회신번호 중 지금 등록되지 않은 번호가 있으면 400으로 돌려보낸다(★2026-09-13(3) · 대행 등재분 ③).
- * 판정은 발송 직전 재검증과 같은 CT(`findUnregisteredRequestCallbacks`) · 문장도 접수와 같은 CT다.
- */
-async function rejectUnregisteredCallbacks(
-  requestId: string, row: { company_id: string; created_by: string | null; callback_number: string | null }, res: Response,
-): Promise<boolean> {
-  const { missing } = await findUnregisteredRequestCallbacks({ id: requestId, ...row });
-  if (missing.length === 0) return false;
-  res.status(400).json({ success: false, code: 'CALLBACK_UNREGISTERED', error: unregisteredCallbackError(missing) });
-  return true;
-}
-
-function rejectAlreadyDispatched(campaignId: any, res: Response): boolean {
-  if (!campaignId) return false;
-  // ★2026-09-13(3) 진행 중 시도(attemptBlocksChange 'in_flight')는 캠페인이 없을 수 있다. "새로 접수하라"는 안내가 사실과 달라
-  //   처리 중 안내로 가른다(실패 안내를 보내는 몇 초 동안 켜져 있다 · 두 벌 발송 적대검토 1R).
-  if (campaignId === 'in_flight') {
-    res.status(409).json({
-      success: false,
-      code: 'ATTEMPT_IN_PROGRESS',
-      error: '예약을 처리하는 중입니다. 잠시 후 화면을 새로 고치고 다시 시도해 주세요.',
-    });
-    return true;
-  }
-  res.status(400).json({
-    success: false,
-    code: 'ALREADY_DISPATCHED',
-    error: '이미 발송 준비가 시작된 접수입니다. 발송 결과를 확인하신 뒤 새로 접수해 주세요.',
-  });
-  return true;
-}
+// ★2026-10-18 문안 수정 · 시각 변경의 판정(이미 시작된 시도 · 회신번호 등록)은 CT(utils/agency-send-change.ts)로 옮겼다.
 
 function migrationPending(res: Response) {
   return res.status(503).json({
@@ -181,6 +141,8 @@ function toPublic(row: any) {
     // ★2026-09-10 이미지 원본 파일명(경로와 같은 순서). DDL 전 행·옛 접수는 null — 화면이 저장 파일명으로 대신한다
     mmsImageNames: Array.isArray(row.mms_image_names) ? row.mms_image_names : null,
     requestedAt: row.requested_at,
+    // ★2026-10-18 축 4 승인 마감(목록 보조 줄 「승인 마감 토 18:30」 · 만료 · 승인 판정과 같은 함수 · 승인 대기 아니면 null)
+    approveBy: (() => { const d = approvalDeadline(row.status, new Date(row.requested_at), row.final_test_at ? new Date(row.final_test_at) : null, row.approval_requested_at ? new Date(row.approval_requested_at) : null); return d ? d.toISOString() : null; })(),
     recipientCount: row.recipient_count,
     fileName: row.file_name,
     varMapping: row.var_mapping || {},
@@ -715,83 +677,14 @@ router.post('/:id/content', async (req: Request, res: Response) => {
   const auth = await requireAgencySend(req, res);
   if (!auth) return;
   try {
-    const body = String(req.body?.content || '').trim();
-    if (!body) return res.status(400).json({ success: false, error: '문안을 입력해 주세요.' });
-    if (body.length > MAX_CONTENT) return res.status(400).json({ success: false, error: `문안은 ${MAX_CONTENT}자까지 넣을 수 있습니다.` });
-    if (req.body?.subject != null && rejectSubjectVars(req.body.subject, res)) return;
-
-    const r = await query(
-      `SELECT status, var_mapping, revision, campaign_id, dispatch_key, company_id, created_by, callback_number FROM agency_send_requests
-        WHERE id = $1::uuid AND company_id = $2::uuid AND ($3::uuid IS NULL OR created_by = $3::uuid)`,
-      [req.params.id, auth.companyId, ownerParam(auth)],
-    );
-    if (r.rows.length === 0) return res.status(404).json({ success: false, error: '접수를 찾을 수 없습니다.' });
-    if (!isEditable(r.rows[0].status)) {
-      return res.status(400).json({ success: false, error: '지금은 문안을 고칠 수 있는 상태가 아닙니다.' });
-    }
-    if (rejectAlreadyDispatched(r.rows[0].campaign_id, res)) return;
-    // ⛔ 화면이 보고 있던 행 수정 번호를 조건으로 쓴다. 그 사이 워커가 문안을 다듬었거나 상태가 바뀌었으면
-    //   덮지 않고 돌려보낸다(조건 없이 덮으면 워커가 잡고 있는 건의 lock이 깨진다).
-    const observedRevision = Number(req.body?.revision);
-    if (!Number.isFinite(observedRevision)) {
-      return res.status(400).json({ success: false, code: 'REVISION_REQUIRED', error: '화면을 새로 고친 뒤 다시 시도해 주세요.' });
-    }
-
-    const plan = buildSlotPlan(body);
-    if (!plan.ok) return res.status(400).json({ success: false, error: plan.error, code: 'TOO_MANY_VARS' });
-    // 명단은 접수 때 확정됐다. 그때 연결하지 않은 항목을 새로 넣으면 그 자리가 빈칸으로 나간다.
-    const known = Object.keys(r.rows[0].var_mapping || {});
-    const unknown = plan.order.filter((v) => !known.includes(v));
-    if (unknown.length > 0) {
-      return res.status(400).json({
-        success: false,
-        code: 'UNKNOWN_VARS',
-        error: `명단에 연결하지 않은 항목이 있습니다: ${unknown.map((v) => `%${v}%`).join(' ')}. 그 부분을 빼거나 새로 접수해 주세요.`,
-      });
-    }
-
-    // ★2026-09-13(3) 회신번호 등록을 고칠 때 다시 본다(대행 등재분 ③). 미등록 번호로 만료된 건을 고치면 검사·승인을 다 돈 뒤
-    //   발송 직전 재검증에서 또 멈췄다(오발송은 없지만 담당자가 같은 일을 두 번 한다). 판정은 발송 직전과 같은 CT 한 벌이다.
-    if (await rejectUnregisteredCallbacks(req.params.id, r.rows[0], res)) return;
-
-    // 원문도 함께 바꾼다 — 사용자가 새로 쓴 문장이 이번 접수의 원문이다(AI가 다듬을 때의 기준선).
-    // 승인 흔적을 지워 옛 승인이 남지 않게 한다(불변 7).
-    // ⛔ `final_test_at`도 지운다 — 바뀐 문안은 당일 검사를 통과한 적이 없다(그대로 두면 검사 없이 나간다).
-    // ⛔ `dispatch_key`·`campaign_id`도 지운다 — 문안이 바뀌면 앞선 시도와는 다른 발송이다(새 시도 키를 받는다).
-    // ⛔ **관찰한 상태·버전을 조건에 넣는다.** 조건 없이 덮으면 워커가 잡고 있는 건의 lock을 깨고,
-    //   그 워커가 뒤늦게 옛 문안으로 상태를 되돌려 **고친 적 없는 문장이 나가는** 경로가 생긴다.
-    // ★2026-09-13(3) 대행 ⓔ 두 벌 발송 차단: 위 `campaign_id`는 캐시다. 이 축의 진실인 시도 키로 캠페인을 직접 찾고,
-    //   같은 프로세스에서 그 시도가 돌고 있는지 본다. 캠페인이 있는데 캐시만 비어 있는 틈에 시도 키를 비우면
-    //   대조가 옛 캠페인을 못 찾아 새 시도와 두 벌로 나간다. ⛔ 이 판정과 아래 UPDATE 사이에 다른 대기를 두지 않는다.
-    //   다른 연결이 쥔 시도 키 잠금은 UPDATE 조건(`attemptIdleSql`)이 본다(쥐고 있으면 0행 → 상태 변경 안내).
-    // ★2026-09-25 문안이 바뀌면 옛 맞춤법 결과를 지운다(버전으로도 막히지만 저장값을 남기지 않는다 · 컬럼이 있을 때만).
-    //   ⛔ 컬럼 탐지는 차단 판정 **앞**에서 한다 — 판정과 UPDATE 사이에 다른 대기를 끼우지 않는다(위 ⛔ 대행 ⓔ).
-    const clearSpell = (await hasAgencySpellColumn()) ? 'spell_check = NULL, ' : '';
-    if (rejectAlreadyDispatched(await attemptBlocksChange(auth.companyId, req.params.id, r.rows[0].dispatch_key), res)) return;
-    const updated = await query(
-      `UPDATE agency_send_requests
-          SET ${clearSpell}original_content = $1, current_content = $1, content_version = content_version + 1,
-              status = 'received', test_round = 0, last_test_result = NULL, last_test_at = NULL,
-              approved_at = NULL, approved_by = NULL, approval_version = NULL, final_test_at = NULL,
-              dispatch_key = NULL, campaign_id = NULL,
-              subject = COALESCE($2, subject), expired_at = NULL,
-              lock_at = NULL, lock_token = NULL, revision = revision + 1, updated_at = NOW()
-        WHERE id = $3::uuid AND company_id = $4::uuid AND revision = $5
-          AND campaign_id IS NULL
-          AND NOT EXISTS (SELECT 1 FROM campaigns c WHERE c.staging_id = agency_send_requests.dispatch_key AND c.company_id = agency_send_requests.company_id)${attemptIdleSql(6)}
-        RETURNING *`,
-      [body, req.body?.subject ?? null, req.params.id, auth.companyId, observedRevision, ATTEMPT_LOCK_PREFIX],
-    );
-    if (updated.rows.length === 0) {
-      return res.status(409).json({
-        success: false,
-        code: 'STATE_CHANGED',
-        error: '그 사이 상태가 바뀌었습니다. 화면을 새로 고치고 다시 시도해 주세요.',
-      });
-    }
-
-    await logEvent(req.params.id, 'content_edited', { version: updated.rows[0]?.content_version });
-    return res.json({ success: true, request: await toPublicWithKinds(updated.rows[0]) });
+    // ★2026-10-18 축 1 — 본문은 CT(utils/agency-send-change.ts · 원본 복사 이동 · 담당자 링크 맞춤법 적용과 같은 함수) · 응답 계약 그대로
+    const out = await editAgencyContentTx({
+      requestId: req.params.id, companyId: auth.companyId, ownerUserId: ownerParam(auth), revision: req.body?.revision,
+      change: { kind: 'text', content: String(req.body?.content || ''), subject: req.body?.subject ?? null },
+      via: 'screen',
+    });
+    if (!out.ok) return res.status(out.status).json({ success: false, error: out.error, ...(out.code ? { code: out.code } : {}) });
+    return res.json({ success: true, request: await toPublicWithKinds(out.row) });
   } catch (err: any) {
     if (isMissingRelation(err)) return migrationPending(res);
     console.error('[agency-send] 문안 수정 실패:', err);
@@ -806,80 +699,18 @@ router.post('/:id/reschedule', async (req: Request, res: Response) => {
   const auth = await requireAgencySend(req, res);
   if (!auth) return;
   try {
-    const r = await query(
-      `SELECT status, revision, is_ad, campaign_id, final_test_at, dispatch_key, company_id, created_by, callback_number
-         FROM agency_send_requests
-        WHERE id = $1::uuid AND company_id = $2::uuid AND ($3::uuid IS NULL OR created_by = $3::uuid)`,
-      [req.params.id, auth.companyId, ownerParam(auth)],
-    );
-    if (r.rows.length === 0) return res.status(404).json({ success: false, error: '접수를 찾을 수 없습니다.' });
-    if (!isEditable(r.rows[0].status)) {
-      return res.status(400).json({ success: false, error: '지금은 시각을 고칠 수 있는 상태가 아닙니다.' });
-    }
-    if (rejectAlreadyDispatched(r.rows[0].campaign_id, res)) return;
-    const observedRevision = Number(req.body?.revision);
-    if (!Number.isFinite(observedRevision)) {
-      return res.status(400).json({ success: false, code: 'REVISION_REQUIRED', error: '화면을 새로 고친 뒤 다시 시도해 주세요.' });
-    }
-
-    const when = validateRequestedAt(
-      req.body?.requestedAt, new Date(), await loadSendWindow(auth.companyId, !!r.rows[0].is_ad),
-    );
-    if (!when.valid) return res.status(400).json({ success: false, error: when.error });
-
-    // 문안은 그대로다. 검사를 이미 통과한 건이면 승인 대기로 돌려보내고, 아니면 검사부터 다시 한다.
-    // ⛔ `dispatch_key`·`campaign_id`를 지운다 — 새 시각은 새 시도다. 그대로 두면 실패한 앞 시도의
-    //   캠페인을 계속 찾아 같은 자리에서 다시 닫힌다(★2026-08-23 Codex 적대 검토 high).
-    // ⛔ 관찰한 상태를 조건에 넣는다(문안 수정과 같은 이유).
-    const backTo: AgencySendStatus = r.rows[0].status === 'test_failed' ? 'received' : 'awaiting_approval';
-
-    // `final_test_at` = 이 문안이 **발송일 당일 검사를 통과한** 시각. 시각이 바뀌면 발송일이 바뀔 수 있어
-    // 원칙은 지우는 것이다(불변 2). 다만 **새 시각이 그 검사와 같은 날이면 그 검사가 여전히 당일 검사**라
-    // 남긴다(★2026-08-23(2) Harold 지시 — 같은 날 두 번 검사하지 않는다).
-    // ⛔ `received`로 돌아가는 건(문안을 다시 검사한다)은 조건 없이 지운다. 남기면 검사 없이 나간다.
-    const priorFinalTest = r.rows[0].final_test_at ? new Date(r.rows[0].final_test_at) : null;
-    const keepFinalTest = backTo === 'awaiting_approval'
-      && !!priorFinalTest
-      && !!when.at
-      && isSameKstDay(priorFinalTest, when.at);
-
-    // ★2026-09-13(3) 회신번호 등록을 시각을 고칠 때 다시 본다(대행 등재분 ③ · 문안 수정과 같은 이유 · 같은 CT).
-    if (await rejectUnregisteredCallbacks(req.params.id, r.rows[0], res)) return;
-
-    // ★2026-09-13(3) 대행 ⓔ 두 벌 발송 차단(문안 수정과 같은 이유 · 같은 판정 함수 · 같은 잠금 조건).
-    //   ⛔ 이 판정과 아래 UPDATE 사이에 다른 대기를 두지 않는다.
-    if (rejectAlreadyDispatched(await attemptBlocksChange(auth.companyId, req.params.id, r.rows[0].dispatch_key), res)) return;
-    const updated = await query(
-      `UPDATE agency_send_requests
-          SET requested_at = $1, status = $2, expired_at = NULL,
-              approved_at = NULL, approved_by = NULL, approval_version = NULL,
-              final_test_at = $6,
-              dispatch_key = NULL, campaign_id = NULL, lock_at = NULL, lock_token = NULL,
-              revision = revision + 1, updated_at = NOW()
-        WHERE id = $3::uuid AND company_id = $4::uuid AND revision = $5
-          AND campaign_id IS NULL
-          AND NOT EXISTS (SELECT 1 FROM campaigns c WHERE c.staging_id = agency_send_requests.dispatch_key AND c.company_id = agency_send_requests.company_id)${attemptIdleSql(7)}
-        RETURNING *`,
-      [when.at, backTo, req.params.id, auth.companyId, observedRevision, keepFinalTest ? priorFinalTest : null, ATTEMPT_LOCK_PREFIX],
-    );
-    if (updated.rows.length === 0) {
-      return res.status(409).json({
-        success: false,
-        code: 'STATE_CHANGED',
-        error: '그 사이 상태가 바뀌었습니다. 화면을 새로 고치고 다시 시도해 주세요.',
-      });
-    }
-
-    await logEvent(req.params.id, 'rescheduled', {
-      requestedAt: when.at?.toISOString(), status: backTo, keepFinalTest,
-      ...(when.shifted ? { timeShifted: true, originalAt: when.originalAt?.toISOString() } : {}),
+    // ★2026-10-18 축 1 · 4 — 본문은 CT(같은 함수를 담당자 링크가 지난다) · 승인 대기로 돌아가면 승인 요청 문자를 다시 보낸다
+    const out = await rescheduleAgencyRequestTx({
+      requestId: req.params.id, companyId: auth.companyId, ownerUserId: ownerParam(auth),
+      revision: req.body?.revision, requestedAt: req.body?.requestedAt, via: 'screen',
     });
-    // ★0826(6) 시각 변경도 촉박하면 자동 조정된다. **사용자가 화면 앞에서 고른 값이라 조용히 바꾸면 안 된다** —
-    //   응답에 사실을 실어 화면이 그 자리에서 알린다(접수 경로는 확인 화면이 미리 안내한다).
+    if (!out.ok) return res.status(out.status).json({ success: false, error: out.error, ...(out.code ? { code: out.code } : {}) });
+    if (out.backTo === 'awaiting_approval') void sendAgencyApprovalRequest(String(out.row.id));
+    // ★0826(6) 시각 변경도 촉박하면 자동 조정된다 — 응답에 사실을 실어 화면이 그 자리에서 알린다
     return res.json({
       success: true,
-      request: await toPublicWithKinds(updated.rows[0]),
-      ...(when.shifted ? { timeShifted: true } : {}),
+      request: await toPublicWithKinds(out.row),
+      ...(out.timeShifted ? { timeShifted: true } : {}),
     });
   } catch (err: any) {
     if (isMissingRelation(err)) return migrationPending(res);
@@ -904,6 +735,8 @@ router.post('/:id/cancel', async (req: Request, res: Response) => {
       ownerUserId: ownerParam(auth),
       cancelledBy: auth.userId,
       cancelledByType: req.user?.userType,
+      // ★2026-10-18 축 1 — 화면이 본 행 수정 번호(어긋나면 409 STATE_CHANGED · 옛 화면 = 생략 = 종전 그대로)
+      revision: req.body?.revision === undefined || req.body?.revision === null ? null : Number(req.body.revision),
     });
     if (!result.ok) {
       return res.status(result.status).json({

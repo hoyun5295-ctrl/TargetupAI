@@ -25,8 +25,9 @@ import AgencySendDetail from '../components/agency/AgencySendDetail';
 // ★2026-08-26(2) 진행 레일은 공용 컴포넌트로 승격 — 슈퍼관리자 대행발송 내역과 같은 그리기를 쓴다
 import AgencyProgressRail from '../components/agency/AgencyProgressRail';
 import TablePagination from '../components/common/TablePagination';
+import ConfirmModal, { type ConfirmState } from '../components/ConfirmModal';
 import {
-  agencyCallbackLabel, fetchAgencyRecipients, fetchAgencyRequests, formatWhenRelative, isApprovable, isRedoable,
+  agencyCallbackLabel, cancelAgencyRequest, fetchAgencyRecipients, fetchAgencyRequests, formatWhen, formatWhenRelative, isApprovable, isCancelable, isRedoable,
   SOURCE_LABEL, STATUS_LABEL, STATUS_TONE,
   type AgencySendRequest,
 } from '../components/agency/agency-send-api';
@@ -101,6 +102,8 @@ export default function AgencySendPage() {
   const [page, setPage] = useState(1);
   const [listLoading, setListLoading] = useState(false);
   const [redoLoadingId, setRedoLoadingId] = useState<string | null>(null);
+  const [confirm, setConfirm] = useState<ConfirmState | null>(null);
+  const [cancellingId, setCancellingId] = useState<string | null>(null);
 
   const loadList = useCallback(async () => {
     setListLoading(true);
@@ -179,6 +182,29 @@ export default function AgencySendPage() {
   };
 
   /** 같은 내용으로 다시 접수 — 명단을 받아 접수 창을 프리필로 연다. 새 접수는 기존 접수 API를 그대로 탄다 */
+  // ★2026-10-18 목록 [취소](요청 ① · 확인 창 · 화면이 본 수정 번호를 싣는다 · 어긋나면 서버 409 → 목록을 다시 읽는다)
+  const askCancel = (r: AgencySendRequest) => {
+    setConfirm({
+      mode: 'danger', title: '이 발송을 취소할까요?',
+      description: `${r.recipientCount.toLocaleString()}명에게 ${formatWhen(r.requestedAt)} 나갈 발송을 취소해요. 되돌릴 수 없고, 다시 보내려면 새로 접수해야 해요.`,
+      confirmLabel: '발송 취소', cancelLabel: '그대로 두기',
+      onConfirm: async () => {
+        setConfirm(null);
+        setCancellingId(r.id);
+        try {
+          const { request, pending } = await cancelAgencyRequest(r.id, undefined, r.revision);
+          upsert(request);
+          toast.success(pending ? '취소를 처리하고 있습니다. 잠시 후 상태가 바뀝니다.' : '취소했습니다.');
+        } catch (e: any) {
+          toast.error(e?.message || '취소하지 못했습니다.');
+          void loadList();
+        } finally {
+          setCancellingId(null);
+        }
+      },
+    });
+  };
+
   const redo = async (r: AgencySendRequest) => {
     if (redoLoadingId) return;
     setRedoLoadingId(r.id);
@@ -355,12 +381,20 @@ export default function AgencySendPage() {
                           <div className="text-left lg:text-right lg:w-[124px]">
                             <p className={`text-[13.5px] font-bold tracking-[-0.01em] ${terminal ? 'text-neutral-500' : 'text-neutral-900'}`}>{when.big}</p>
                             <p className="text-[12px] text-neutral-500">{when.sub}</p>
+                            {r.approveBy && isApprovable(r.status) && <p className="text-[11.5px] font-semibold text-amber-800 tabular-nums">승인 마감 {formatWhen(r.approveBy)}</p>}
                           </div>
-                          <div className="w-[150px] flex justify-end" onClick={(e) => e.stopPropagation()}>
+                          <div className="w-[150px] flex justify-end gap-1.5" onClick={(e) => e.stopPropagation()}>
                             {isApprovable(r.status) ? (
-                              <button type="button" onClick={() => setDetailId(r.id)} className={`${CUI_BTN_PRIMARY} h-8 px-3 text-[13px]`}>
-                                승인하기
-                              </button>
+                              <>
+                                <button type="button" onClick={() => setDetailId(r.id)} className={`${CUI_BTN_PRIMARY} h-8 px-3 text-[13px]`}>
+                                  승인하기
+                                </button>
+                                {isCancelable(r.status) && (
+                                  <button type="button" disabled={cancellingId !== null} onClick={() => askCancel(r)} className={`${CUI_BTN_OUTLINE} h-8 px-2.5 text-[13px]`}>
+                                    {cancellingId === r.id ? <Loader2 className="w-[14px] h-[14px] animate-spin" /> : null}취소
+                                  </button>
+                                )}
+                              </>
                             ) : isRedoable(r.status) ? (
                               <button
                                 type="button"
@@ -429,6 +463,7 @@ export default function AgencySendPage() {
         onClose={() => setDetailId(null)}
         onChanged={(r) => upsert(r)}
       />
+      <ConfirmModal state={confirm} onClose={() => setConfirm(null)} />
     </div>
   );
 }

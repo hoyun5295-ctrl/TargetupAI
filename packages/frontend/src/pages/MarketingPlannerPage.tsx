@@ -12,16 +12,19 @@
  */
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { AlarmClock, CalendarRange, ChartColumn, Check, ChevronDown, ChevronLeft, ChevronRight, ListChecks, Plus, Send } from 'lucide-react';
+import { AlarmClock, BadgePercent, CalendarRange, ChartColumn, Check, ChevronDown, ChevronLeft, ChevronRight, Leaf, ListChecks, PackagePlus, PartyPopper, Plus, Send, type LucideIcon } from 'lucide-react';
 import ZoneFrame from '../components/zone/ZoneFrame';
+import { zoneModule } from '../constants/ai-operator-modules';
 import { useToast } from '../components/ToastProvider';
 import { useMediaQuery } from '../hooks/useMediaQuery';
 import PlannerEventModal from '../components/planner/PlannerEventModal';
+import PlannerRecheckModal from '../components/planner/PlannerRecheckModal';
 import {
   PLANNER_LEGEND, PLANNER_SEND_KIND, PLANNER_STATE, kstToday, plannerDay, plannerDaysBetween, plannerRange, plannerStateOf,
   type PlannerSendKind,
 } from '../constants/planner-status';
-import { plannerApi, won, type Availability, type CalendarEvent, type Holiday, type PlannerCalendar } from '../components/planner/planner-api';
+import { plannerApi, plannerErrorText, won, type Availability, type CalendarEvent, type Holiday, type PlannerCalendar, type PlannerLineRead } from '../components/planner/planner-api';
+import { fetchLineTemplates, type LineTemplateId, type LineTemplateInfo } from '../utils/one-line';
 
 const todayMonth = () => kstToday().slice(0, 7);
 const DOW = ['일', '월', '화', '수', '목', '금', '토'];
@@ -48,7 +51,24 @@ function sendChipsOf(ev: CalendarEvent): SendChip[] {
   }
   return out;
 }
+/** ★ 2026-10-18 쌍 재확인 중인 발송(가장 이른 날 · 캐리어 = 문자 우선) — 할 일 카드가 [다시 정하기] 창을 연다 */
+function recheckOf(ev: CalendarEvent): { carrierId: string; date: string } | null {
+  const rs = ev.touchpoints.filter((t) => !!t.recheck && (t.channel === 'sms' || t.channel === 'dm'));
+  if (rs.length === 0) return null;
+  const date = rs.map((t) => t.recheck!.date).sort()[0];
+  const carrier = rs.find((t) => t.recheck!.date === date && t.channel === 'sms') || rs.find((t) => t.recheck!.date === date)!;
+  return { carrierId: carrier.id, date };
+}
 const nextSendOf = (ev: CalendarEvent, today: string) => sendChipsOf(ev).find((c) => !c.done && c.date >= today)?.date || ev.firstSend || ev.startsOn;
+/** 점 색(375 달력 · 이번 주 띠 공용) — 손 갈 일 = 앰버 · 만드는 중 = 보라 · 그 밖 = 초록 */
+const dotTone = (s: CalendarEvent['displayState']) => (s === 'review' || s === 'material' || s === 'hold' ? 'bg-amber-500' : s === 'making' ? 'bg-violet-500' : 'bg-emerald-500');
+/** ★ 2026-10-18 v2-1 시작 카드 = 템플릿 4종(이름 · 설명 = 서버 원장 · 아이콘 · 색만 화면) */
+const TEMPLATE_LOOK: Record<LineTemplateId, { icon: LucideIcon; tint: string }> = {
+  'big-sale': { icon: BadgePercent, tint: 'from-rose-400 to-orange-500' },
+  'new-launch': { icon: PackagePlus, tint: 'from-sky-400 to-indigo-500' },
+  'special-event': { icon: PartyPopper, tint: 'from-violet-400 to-fuchsia-500' },
+  season: { icon: Leaf, tint: 'from-emerald-400 to-teal-500' },
+};
 
 export default function MarketingPlannerPage() {
   const navigate = useNavigate();
@@ -61,7 +81,11 @@ export default function MarketingPlannerPage() {
   const [loadState, setLoadState] = useState<'loading' | 'ok' | 'fail' | 'pending'>('loading');
   const [loadedAt, setLoadedAt] = useState<string>('');
   const [availability, setAvailability] = useState<Availability[]>([]);
-  const [modal, setModal] = useState<{ editing: CalendarEvent | null; date?: string | null } | null>(null);
+  const [modal, setModal] = useState<{ editing: CalendarEvent | null; date?: string | null; template?: LineTemplateId | null; lineRead?: PlannerLineRead | null } | null>(null);
+  const [line, setLine] = useState('');
+  const [reading, setReading] = useState(false);
+  const [templates, setTemplates] = useState<LineTemplateInfo[] | null>(null);
+  const [recheck, setRecheck] = useState<{ carrierId: string; eventId: string } | null>(null);
   const [hovered, setHovered] = useState<string | null>(null);
   const [weekOpen, setWeekOpen] = useState(false);
 
@@ -89,6 +113,8 @@ export default function MarketingPlannerPage() {
 
   useEffect(() => { void load(month); }, [month, load]);
   useEffect(() => { void loadAvailability(); }, [loadAvailability]);
+  // 템플릿 목록(회사 스위치 밖 = null → 시작 카드 없음 · 행사 담기 창도 옛 흐름)
+  useEffect(() => { let alive = true; void fetchLineTemplates().then((l) => { if (alive) setTemplates(l && l.length > 0 ? l : null); }); return () => { alive = false; }; }, []);
   // 채널 상태를 못 받은 채면 창을 열 때 다시 묻는다(1회 실패로 "불러오는 중"에 갇히지 않게 · F6)
   useEffect(() => { if (modal && availability.length === 0) void loadAvailability(); }, [modal, availability.length, loadAvailability]);
   // 탭 복귀 때 조용히 다시 읽는다(휴대폰에서 승인하고 돌아온 PC 등 · 폴링 없음)
@@ -126,7 +152,23 @@ export default function MarketingPlannerPage() {
     .sort((a, b) => a.c.date.localeCompare(b.c.date))[0] || null, [events, today]);
 
   const openEvent = (ev: CalendarEvent) => navigate(`/marketing-planner/events/${ev.id}`);
-  const openCreate = (date?: string) => setModal({ editing: null, date: date || null });
+  const openCreate = (date?: string, template?: LineTemplateId) => setModal({ editing: null, date: date || null, template: template || null });
+  const lineEnabled = !!cal?.lineEnabled;
+  // ★ 2026-10-18 한 줄 → 규칙 읽기(AI 0 · 0크레딧) → 판1 「이렇게 알아들었어요」 · 빈 줄 = 빈 판1
+  const submitLine = async () => {
+    const t = line.trim();
+    if (!t) { openCreate(); return; }
+    if (reading) return;
+    setReading(true);
+    try {
+      const r = await plannerApi<PlannerLineRead>('/api/marketing-planner/line-read', { body: { line: t } });
+      if (!r.ok) { toast.error(plannerErrorText(r, '한 줄을 읽지 못했어요. 행사 담기 창에서 직접 적어 주세요.')); return; }
+      setModal({ editing: null, date: null, lineRead: r.data });
+    } finally {
+      setReading(false);
+    }
+  };
+  const templateLabel = (e: CalendarEvent) => (e.materials?.template ? templates?.find((t) => t.id === e.materials!.template!.id)?.label ?? null : null);
 
   // ── 달력 ────────────────────────────────────────────────────────
   const weeks = useMemo(() => {
@@ -190,12 +232,14 @@ export default function MarketingPlannerPage() {
         <div className="relative grid grid-cols-7 gap-y-1 mt-1.5 min-h-[22px]" style={{ gridAutoRows: 'minmax(22px,auto)' }}>{bars}</div>
         <div className="relative grid grid-cols-7 mt-1.5 pb-2 min-h-[30px]">
           {days.map((d) => (
-            <div key={d} className="px-1 flex flex-col items-start gap-1 min-w-0">
+            <div key={d} className={phone ? 'px-1 flex flex-wrap items-center gap-0.5 min-w-0' : 'px-1 flex flex-col items-start gap-1 min-w-0'}>
               {events.flatMap((e) => sendChipsOf(e).filter((c) => c.date === d).map((c) => {
                 const st = plannerStateOf(e.displayState);
                 if (!st) return null;
                 const K = PLANNER_SEND_KIND[c.kind];
                 const Icon = c.done ? Check : K.icon;
+                // 375 = 칸이 좁아 글자 칩 대신 점(같은 색 규칙 · 이번 주 띠와 같다)
+                if (phone) return <span key={`${e.id}-${c.kind}`} className={`w-1.5 h-1.5 rounded-full ${dotTone(e.displayState)}`} aria-label={`${e.title} ${K.label}`} />;
                 return (
                   <span key={`${e.id}-${c.kind}`} className={`inline-flex items-center gap-1 h-5 px-1.5 rounded border text-[11px] font-semibold whitespace-nowrap max-w-full transition-opacity ${st.chip} ${hovered && hovered !== e.id ? 'opacity-25' : ''}`}>
                     <Icon className="w-[11px] h-[11px] shrink-0" />{K.label}
@@ -209,11 +253,21 @@ export default function MarketingPlannerPage() {
     );
   };
 
+  // ★ 2026-10-18 I1 — 달 넘기기는 달력 카드 머리(PC) · 행사 목록 머리(375)로(명령 카드 = 한 줄 입력만)
+  const monthNav = (
+    <div className="flex items-center gap-1 rounded-xl border border-slate-200 bg-white p-[3px]">
+      <button type="button" onClick={() => setMonth((m) => shiftMonth(m, -1))} className={`${phone ? 'w-11 h-11' : 'w-8 h-8'} rounded-lg hover:bg-slate-100 grid place-items-center`} aria-label="이전 달"><ChevronLeft className="w-4 h-4" /></button>
+      <span className="px-2 text-[14px] font-semibold tabular-nums">{phone ? `${Number(month.slice(5))}월` : `${month.slice(0, 4)}년 ${Number(month.slice(5))}월`}</span>
+      <button type="button" onClick={() => setMonth((m) => shiftMonth(m, 1))} className={`${phone ? 'w-11 h-11' : 'w-8 h-8'} rounded-lg hover:bg-slate-100 grid place-items-center`} aria-label="다음 달"><ChevronRight className="w-4 h-4" /></button>
+      {month !== todayMonth() && <button type="button" onClick={() => setMonth(todayMonth())} className="h-8 px-2.5 rounded-lg text-[12.5px] font-semibold text-slate-600 hover:bg-slate-100">이번 달</button>}
+    </div>
+  );
   const calendarCard = (
     <div className="w-full rounded-2xl border border-slate-200 bg-white overflow-hidden flex flex-col">
-      <div className="flex items-center gap-2 px-4 h-12 border-b border-slate-200">
+      <div className="flex items-center gap-2 px-4 min-h-12 py-1.5 border-b border-slate-200">
+        {!phone && monthNav}
         <h2 className="text-[14px] font-semibold">{Number(month.slice(5))}월 달력</h2>
-        <span className="text-[12px] text-slate-500 hidden sm:inline">막대 = 행사 기간 · 아래 줄 = 그날 나가는 발송</span>
+        <span className="text-[12px] text-slate-500 hidden xl:inline">막대 = 행사 기간 · 아래 줄 = 그날 나가는 발송</span>
       </div>
       <div className="grid grid-cols-7 text-center text-[12px] font-semibold border-b border-slate-200">
         {DOW.map((d, i) => <div key={d} className={`py-2 ${i === 0 ? 'text-rose-700' : i === 6 ? 'text-sky-700' : 'text-slate-500'}`}>{d}</div>)}
@@ -239,19 +293,25 @@ export default function MarketingPlannerPage() {
     if (!st) return null;
     const Icon = st.icon;
     const chips = sendChipsOf(e).filter((c) => !c.done);
-    const desc = e.displayState === 'material'
+    const rc = recheckOf(e);
+    const desc = rc ? `${plannerDay(rc.date)} 문자가 스팸 검사에 막혀 멈춰 있어요 · 새 문안으로 보내기 · 고치기 · 미루기 · 건너뛰기 중에서 정해 주세요`
+      : e.displayState === 'material'
       ? (e.notice || `${e.staleChannels.map((c) => (c === 'dm' ? '모바일 DM' : '메일')).join('·')} 재료를 넣으면 완성본을 만들어요${e.firstSend ? ` · 첫 발송 ${plannerDay(e.firstSend)}` : ''}`)
       : e.displayState === 'review'
         ? `실물이 준비됐어요${chips[0] ? ` · ${plannerDay(chips[0].date)} ${PLANNER_SEND_KIND[chips[0].kind].label}부터 ${chips.length}번` : ''}`
         : (e.notice || '발송이 멈춰 있어요. 사유를 확인해 주세요.');
     const left = e.deadline ? plannerDaysBetween(today, e.deadline.date) : null;
-    const due = e.deadline
+    const due = rc
+      ? `마감 ${plannerDay(rc.date)} 20시${rc.date === today ? ' · 오늘' : ''}`
+      : e.deadline
       ? `승인 마감 ${plannerDay(e.deadline.date)} ${e.deadline.hour}시${left !== null ? ` · ${left > 0 ? `${left}일 남음` : left === 0 ? '오늘' : '지남'}` : ''}`
       : e.firstSend ? `첫 발송 ${plannerDay(e.firstSend)} 오전 8시 · 그 전에 승인해야 나가요` : '';
-    const btn = e.displayState === 'material'
+    const btn = rc
+      ? <button type="button" onClick={() => setRecheck({ carrierId: rc.carrierId, eventId: e.id })} className={`${phone ? 'w-full h-11' : 'w-full h-10'} px-4 rounded-[10px] border border-amber-300 bg-white hover:bg-amber-50 text-amber-900 text-[13.5px] font-bold inline-flex items-center justify-center gap-1.5`}>다시 정하기</button>
+      : e.displayState === 'material'
       ? <button type="button" onClick={() => setModal({ editing: e })} className={`${phone ? 'w-full h-11' : 'w-full h-10'} px-3.5 rounded-[10px] border border-slate-200 bg-white hover:bg-slate-50 hover:border-slate-300 text-[13px] font-semibold text-slate-700 inline-flex items-center justify-center gap-1.5`}>재료 넣기</button>
       : e.displayState === 'review'
-        ? <button type="button" onClick={() => openEvent(e)} className={`${phone ? 'w-full h-11' : 'w-full h-10'} px-4 rounded-[10px] bg-indigo-600 hover:bg-indigo-700 text-white text-[13.5px] font-bold inline-flex items-center justify-center gap-1.5`}>확인하고 승인</button>
+        ? <button type="button" onClick={() => openEvent(e)} className={`${phone ? 'w-full h-11' : 'w-full h-10'} px-4 rounded-[10px] border border-indigo-300 bg-white hover:bg-indigo-50 text-indigo-800 text-[13.5px] font-bold inline-flex items-center justify-center gap-1.5`}>확인하고 승인</button>
         : <button type="button" onClick={() => openEvent(e)} className={`${phone ? 'w-full h-11' : 'w-full h-10'} px-3.5 rounded-[10px] border border-slate-200 bg-white hover:bg-slate-50 text-[13px] font-semibold text-slate-700`}>사유 보기</button>;
     const badge = <span className={`inline-flex items-center gap-1 h-6 px-2 rounded-md border text-[12px] font-semibold whitespace-nowrap ${st.badge}`}><Icon className="w-[13px] h-[13px]" />{st.label}</span>;
     if (phone) {
@@ -279,7 +339,8 @@ export default function MarketingPlannerPage() {
     const Icon = st.icon;
     const sub = e.displayState === 'making' ? (e.building ? '완성본을 만드는 중이에요' : e.notice || '문자 문안을 준비하고 있어요 · 준비되면 확인 요청이 가요')
       : e.displayState === 'approved' ? '정해진 날 오전 8시에 그대로 나가요'
-        : e.displayState === 'cancelled' ? (e.closedReason === 'not_approved' ? '승인되지 않아 보내지 않았어요' : e.closedReason === 'missed' ? '예정일이 지나 보내지 않았어요' : '취소한 행사예요')
+        : e.displayState === 'cancelled' ? (e.closedReason === 'not_approved' ? '승인되지 않아 보내지 않았어요' : e.closedReason === 'missed' ? '예정일이 지나 보내지 않았어요'
+          : e.closedReason === 'skipped' ? '남은 발송을 건너뛰어 보내지 않았어요' : e.closedReason === 'recheck_missed' ? '다시 확인되지 않아 보내지 않았어요' : '취소한 행사예요')
           : '';
     const subTone = e.displayState === 'making' ? 'text-violet-800' : e.displayState === 'approved' ? 'text-emerald-800' : 'text-slate-500';
     return (
@@ -291,7 +352,11 @@ export default function MarketingPlannerPage() {
               <span className={`inline-flex items-center gap-1 h-6 px-1.5 rounded-md border text-[11.5px] font-semibold whitespace-nowrap ${st.badge}`}><Icon className="w-[13px] h-[13px]" />{st.label}</span>
               <span className={`text-[14px] font-semibold truncate ${e.displayState === 'done' || e.displayState === 'cancelled' ? 'text-slate-600' : ''}`}>{e.title}</span>
             </div>
-            <p className="text-[12px] text-slate-500 mt-1 tabular-nums truncate">{plannerRange(e.startsOn, e.endsOn)}{e.benefitText ? ` · ${e.benefitText}` : ''}</p>
+            <p className="text-[12px] text-slate-500 mt-1 tabular-nums truncate">
+              {templateLabel(e) && <b className="font-semibold text-violet-800">{templateLabel(e)} · </b>}
+              {sendChipsOf(e).length > 0 && <span className="text-slate-700">{sendChipsOf(e).length}번 발송 · </span>}
+              {plannerRange(e.startsOn, e.endsOn)}{e.benefitText ? ` · ${e.benefitText}` : ''}
+            </p>
             <div className="flex flex-wrap gap-1.5 mt-2">
               {sendChipsOf(e).map((c) => {
                 const K = PLANNER_SEND_KIND[c.kind];
@@ -337,7 +402,8 @@ export default function MarketingPlannerPage() {
 
   const listCard = (
     <div className="rounded-2xl border border-slate-200 bg-white flex flex-col overflow-hidden">
-      <div className="flex items-center gap-2 px-4 h-12 border-b border-slate-200">
+      <div className="flex items-center gap-2 px-4 min-h-12 py-1.5 border-b border-slate-200">
+        {phone && monthNav}
         <h2 className="text-[14px] font-semibold">행사 {loadState === 'ok' ? events.length : ''}</h2>
         {!empty && loadState === 'ok' && <span className="text-[12px] text-slate-500">다음 발송일 순 · 누르면 행사 상세</span>}
       </div>
@@ -381,7 +447,7 @@ export default function MarketingPlannerPage() {
             <div key={d} className={`h-14 rounded-xl flex flex-col items-center justify-center gap-0.5 ${isToday ? 'bg-indigo-600 text-white' : ''}`} aria-label={`${plannerDay(d)}${has.length ? ` 발송 ${has.length}` : ''}`}>
               <span className={`text-[11px] ${isToday ? 'text-white/80' : red ? 'text-rose-700' : dow === 6 ? 'text-sky-700' : 'text-slate-500'}`}>{DOW[dow]}</span>
               <span className={`text-[15px] font-semibold tabular-nums ${!isToday && red ? 'text-rose-700' : ''}`}>{Number(d.slice(8))}</span>
-              <span className="flex gap-0.5 h-1.5">{has.slice(0, 3).map((e, i) => <span key={i} className={`w-1.5 h-1.5 rounded-full ${e.displayState === 'review' || e.displayState === 'material' || e.displayState === 'hold' ? 'bg-amber-500' : e.displayState === 'making' ? 'bg-violet-500' : 'bg-emerald-500'}`} />)}</span>
+              <span className="flex gap-0.5 h-1.5">{has.slice(0, 3).map((e, i) => <span key={i} className={`w-1.5 h-1.5 rounded-full ${dotTone(e.displayState)}`} />)}</span>
             </div>
           );
         })}
@@ -406,15 +472,13 @@ export default function MarketingPlannerPage() {
         { label: '1년 설계 보기', icon: CalendarRange, onClick: () => navigate('/marketing-calendar') },
       ]}
       stamp={{ text: loadedAt || '다시 읽기', onRefresh: () => { void load(month); void loadAvailability(); }, loading: loadState === 'loading' }}
-      command={{
-        lead: (
-          <div className="flex items-center gap-1 rounded-xl border border-slate-200 bg-white p-[3px]">
-            <button type="button" onClick={() => setMonth((m) => shiftMonth(m, -1))} className={`${phone ? 'w-11 h-11' : 'w-8 h-8'} rounded-lg hover:bg-slate-100 grid place-items-center`} aria-label="이전 달"><ChevronLeft className="w-4 h-4" /></button>
-            <span className="px-2 text-[14px] font-semibold tabular-nums">{phone ? `${Number(month.slice(5))}월` : `${month.slice(0, 4)}년 ${Number(month.slice(5))}월`}</span>
-            <button type="button" onClick={() => setMonth((m) => shiftMonth(m, 1))} className={`${phone ? 'w-11 h-11' : 'w-8 h-8'} rounded-lg hover:bg-slate-100 grid place-items-center`} aria-label="다음 달"><ChevronRight className="w-4 h-4" /></button>
-            {month !== todayMonth() && <button type="button" onClick={() => setMonth(todayMonth())} className="h-8 px-2.5 rounded-lg text-[12.5px] font-semibold text-slate-600 hover:bg-slate-100">이번 달</button>}
-          </div>
-        ),
+      command={lineEnabled ? {
+        line: {
+          value: line, onChange: (v: string) => setLine(v.slice(0, 300)), onSubmit: () => { void submitLine(); },
+          placeholder: zoneModule('planner').oneLine!.placeholder, verb: zoneModule('planner').oneLine!.verb,
+          icon: Plus, busy: reading, allowEmpty: true, tone: 'indigo',
+        },
+      } : {
         note: phone ? undefined : '행사를 담고 모바일 DM·메일 재료를 넣으면 완성본을 만들어요. 발송 3일 전 휴대폰으로 실물 확인 요청이 가요',
         primary: { label: '행사 담기', icon: Plus, onClick: () => openCreate(), tone: 'indigo' },
       }}
@@ -423,6 +487,12 @@ export default function MarketingPlannerPage() {
         ...(loadState === 'pending' ? [{ text: '플래너 준비 작업이 진행 중이에요. 몇 분 뒤 다시 읽어 주세요.', actionLabel: '다시 읽기', onAction: () => { void load(month); } }] : []),
         ...(cal && cal.migratedTodo > 0 ? [{ text: `결재가 행사별 확인으로 바뀌었어요. 확인할 행사 ${cal.migratedTodo}건이 아래 할 일에 있어요.` }] : []),
       ]}
+      start={!phone && templates && loadState === 'ok' ? {
+        items: templates.map((t) => ({
+          icon: TEMPLATE_LOOK[t.id]?.icon || Plus, tint: TEMPLATE_LOOK[t.id]?.tint || 'from-slate-400 to-slate-500',
+          title: `${t.label}로 담기`, desc: t.desc, onClick: () => openCreate(undefined, t.id),
+        })),
+      } : null}
       emphasis={!phone ? todoCard : null}
     >
       {phone ? (
@@ -438,10 +508,21 @@ export default function MarketingPlannerPage() {
           <div className="lg:col-span-5 flex flex-col">{listCard}</div>
         </div>
       )}
+      {recheck && (
+        <PlannerRecheckModal
+          carrierId={recheck.carrierId}
+          eventId={recheck.eventId}
+          onClose={() => setRecheck(null)}
+          onChanged={() => { void load(month, true); }}
+        />
+      )}
       {modal && (
         <PlannerEventModal
           month={month}
           initialDate={modal.date}
+          initialTemplate={modal.template}
+          lineEnabled={lineEnabled}
+          lineRead={modal.lineRead || null}
           editing={modal.editing}
           availability={availability}
           balance={cal?.kpi.balance ?? null}

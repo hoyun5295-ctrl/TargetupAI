@@ -26,8 +26,9 @@ describe('① 판정 — 화면이 내보내는 명령 문장은 전부 만들�
   const opp = read('utils/journey-opportunities.ts');
   const ask = read('utils/one-line-ask.ts');
 
-  it('7메뉴 예시 문장(만들기 제외 6) = make', () => {
-    expect(placeholders.length).toBe(6);
+  // ★ 2026-10-18 D3 개정 — 플래너 한 줄 예시가 더해져 7(만들기 제외) · 플래너 한 줄도 명령 문장이라 make 여야 한다
+  it('한 줄 메뉴 예시 문장(만들기 제외 7 · 1018 플래너 포함) = make', () => {
+    expect(placeholders.length).toBe(7);
     for (const p of placeholders) {
       expect(oneLineIntent(p), p).toBe('make');
       expect(oneLineIntent(p, { contentChannel: true }), p).toBe('make');
