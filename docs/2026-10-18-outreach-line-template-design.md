@@ -1,6 +1,6 @@
 # AI 영업 템플릿 이식 설계서 (2026-10-18)
 
-> 상태 = 구현 완료(이식 + AI 추천 + 학습 베스트) · Codex 적대 9R approve(이식 R1~R7 · 학습 베스트 R8~R9) · 배포 대기 · 스위치 `OUTREACH_LINE_TEMPLATES`(배포 뒤 켬)
+> 상태 = 구현 완료(이식 + AI 추천 + 학습 베스트) · Codex 적대 9R approve(이식 R1~R7 · 학습 베스트 R8~R9) · 배포 완료 1018(`2c9d5b64` · 11:07 빌드 · reload · 새 조회문 운영 실측 0행 정상 · 스위치 켬 · 프로세스 값 1 확인) · 실측 대기(서수란 1019) · 스위치 `OUTREACH_LINE_TEMPLATES=1`
 > 선행 = [한 줄 → 템플릿 캠페인](2026-10-17-line-template-campaign-design.md)(템플릿 4종 · 조립 · 관문)
 
 ## §0 원래 안건 (Harold 원문 요약)
@@ -108,4 +108,16 @@
 
 - 시험 = 이 파일 45 · 백엔드 전체 9,013 통과 · 변이 10 전부 잡힘(캐시 비움 · 문턱 · 자격 · 쓸 수 있는 번호 · 0번 셈 · 읽는 순서 · 오류 캐시 · 결 단위 · 힌트 실림 · 잡별 중복 제거).
 - 실측(배포 뒤) = 템플릿 결과 1건을 「학습에 올리기」 → 같은 결의 새 건 1건 → 레시피 `lineTemplate.by` 와 pm2 로그(`템플릿 추천 불가 → best`가 나오면 규칙 대체가 탄 것) 확인. 실측 SQL = `SELECT industry_code, meta->'recipe'->'lineTemplate' FROM best_copy_assets WHERE kind='recipe' ORDER BY created_at DESC LIMIT 5;`
+
+## §13 배포 기록 (1018)
+
+| 단계 | 결과 |
+|---|---|
+| ① 푸시 | `2c9d5b64`(16 파일) |
+| ② ~ ④ 62 pull · 백엔드 build:safe · pm2 reload | 성공(프론트 변경 0 = 빌드 없음) |
+| ⑤ 새 조회문 운영 실측 | 오류 없이 `(0 rows)`(템플릿 기록 든 승격 0건 · 예상대로) |
+| ⑥ 스위치 | `packages/backend/.env` 에 `OUTREACH_LINE_TEMPLATES=1` · `pm2 restart targetup-backend --update-env` |
+| ⑦ 값 확인 | 프로세스 cwd dotenv = `OUTREACH_LINE_TEMPLATES=1` · dist 에 스위치 이름 2건 |
+| ⑧ 실측 | 서수란 팀장 지시(1019) — 뷰티 · 의류 · 요식업 새 건 3개 + 잘 나온 건 「학습에 올리기」 · 확인 SQL = §11-5 · §12 |
+| ⑨ 66 동기화 | 세션 마감 문서 푸시 뒤 |
 
