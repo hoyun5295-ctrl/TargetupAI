@@ -56,7 +56,7 @@
 ## 2) 활성 버그
 
 ### 🟡 B-1018-5 1018 AI 한줄로 구현 · Codex 에서 짚은 범위 밖 기존 결함(등재만 · 착수 판단 = Harold님) · 2026-10-19
-- ① 카드 상세 창 「직접 타겟 발송」 버튼이 스위치 꺼진 회사에서 아무것도 열지 않는다: `CardDetailModal` `goDirectSend` 가 `direct_send_prefill_card` · `/?openDirectSend=1` 을 남기지만 이 둘을 읽는 곳이 0곳(grep). 스위치 켠 회사는 이번에 `/ai-line` 으로 접었다.
+- ① (★1019 닫힘 · 버튼 삭제 = D106) 카드 상세 창 「직접 타겟 발송」 버튼이 스위치 꺼진 회사에서 아무것도 열지 않는다: `CardDetailModal` `goDirectSend` 가 `direct_send_prefill_card` · `/?openDirectSend=1` 을 남기지만 이 둘을 읽는 곳이 0곳(grep). 스위치 켠 회사는 이번에 `/ai-line` 으로 접었다.
 - ② 성과 추정(`utils/operator-performance-estimator.ts`)은 브랜드 조건 동의를 넘기지 않는다(추정만 · 발송 아님 · Codex 2R 기록).
 - 경위 = [설계서](../docs/2026-10-18-ai-line-design.md) §15.
 

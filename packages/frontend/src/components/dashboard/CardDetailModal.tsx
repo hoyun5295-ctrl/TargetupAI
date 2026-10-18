@@ -48,7 +48,6 @@ import {
 } from 'lucide-react';
 import DeltaBadge from './DeltaBadge';
 import BirthdayCustomerList from './BirthdayCustomerList';
-import { fetchAiOperatorFeatures } from '../../utils/ai-operator-access';   // ★ 2026-10-18 직접 타겟 접기 판정(서버 값)
 
 // ─── 타입 ───
 
@@ -392,13 +391,6 @@ export default function CardDetailModal({ card, onClose }: CardDetailModalProps)
     sessionStorage.setItem('ai_operator_prefill_objective', theme.oneClickObjective);
     navigate('/ai-line');   // ★ 2026-10-18 한 줄 입력은 AI 한줄로(같은 넘기기 키를 그 화면이 읽는다)
   };
-  const goDirectSend = async () => {
-    // ★ 2026-10-18 AI 한줄로 새 흐름 켠 회사 = 직접 타겟 발송을 접는다(설계서 §9) → 이 카드 주제로 AI 한줄로(대상을 한 줄에서 뽑는다)
-    if ((await fetchAiOperatorFeatures()).aiLine === true) { goAiOperator(); onClose(); return; }
-    sessionStorage.setItem('direct_send_prefill_card', card.cardId);
-    navigate('/?openDirectSend=1');
-    onClose();
-  };
   const goSegment = () => {
     sessionStorage.setItem('segment_prefill_card', card.cardId);
     navigate('/segments');
@@ -583,28 +575,13 @@ export default function CardDetailModal({ card, onClose }: CardDetailModalProps)
                 </div>
               )}
 
-              {/* 7. 1-click 액션 카드 3 영역 (rose 직접 발송 + emerald 세그먼트 + violet AI Operator) */}
+              {/* 7. 1-click 액션 카드 2 영역 (emerald 세그먼트 + violet AI 한줄로) — ★ 2026-10-19 직접 타겟 발송 삭제(Harold) */}
               <div>
                 <h4 className="text-sm font-semibold text-gray-800 mb-3 flex items-center gap-2">
                   <Sparkles className="w-4 h-4 text-violet-600" />
                   1-click 액션: 본 데이터로 즉시 캠페인
                 </h4>
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                  {/* 직접 발송 (rose) */}
-                  <button
-                    onClick={goDirectSend}
-                    className="group relative overflow-hidden rounded-2xl border border-rose-200 bg-gradient-to-br from-rose-50 to-pink-50 p-4 text-left transition-all hover:shadow-lg hover:shadow-rose-200/40 hover:-translate-y-0.5"
-                  >
-                    <div className="flex items-start justify-between mb-3">
-                      <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-rose-500 to-pink-600 flex items-center justify-center shadow-md shadow-rose-500/30">
-                        <Send className="w-5 h-5 text-white" />
-                      </div>
-                      <ArrowRight className="w-4 h-4 text-rose-400 group-hover:translate-x-1 transition-transform" />
-                    </div>
-                    <p className="text-sm font-bold text-rose-900 mb-1">직접 타겟 발송</p>
-                    <p className="text-xs text-rose-700/80 leading-relaxed">본 데이터를 필터 조건으로 즉시 발송 진입</p>
-                  </button>
-
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                   {/* 세그먼트 신설 (emerald) */}
                   <button
                     onClick={goSegment}
@@ -633,7 +610,7 @@ export default function CardDetailModal({ card, onClose }: CardDetailModalProps)
                         </div>
                         <ArrowRight className="w-4 h-4 text-white/80 group-hover:translate-x-1 transition-transform" />
                       </div>
-                      <p className="text-sm font-bold text-white mb-1">AI Operator로 진입</p>
+                      <p className="text-sm font-bold text-white mb-1">AI 한줄로로 보내기</p>
                       <p className="text-xs text-white/85 leading-relaxed">자연어 한 줄로 AI가 자동 설계</p>
                     </div>
                   </button>

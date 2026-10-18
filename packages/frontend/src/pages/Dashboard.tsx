@@ -82,7 +82,7 @@ import { diagnosisApi, type DiagnosisStateDto } from '../components/marketing-di
 // ★ 2026-08-17 AI 추천 유형은 그대로 차감 축이 되므로 CT가 좁혀 준 값만 쓴다(campaign-axis).
 import { normalizeAiMessageChannel, type AiMessageChannel } from '../utils/campaign-axis';
 import DashboardActionRow, { type DashboardAction } from '../components/dashboard/DashboardActionRow';   // ★ 2026-10-18 맨 위 버튼 줄
-import { fetchAiOperatorAccess, fetchAiOperatorFeatures } from '../utils/ai-operator-access';
+import { fetchAiOperatorAccess } from '../utils/ai-operator-access';
 import { AI_LINE_ALIMTALK_HANDOFF, type AiLineAlimtalkHandoff } from '../utils/ai-line';   // ★ 2026-10-18 알림톡 갈래 넘기기
 
 /** ★ 2026-10-18 DB 현황 전체 폭 = 한 쪽 카드 수만큼 열(빈 칸 없음 · Tailwind 가 읽는 고정 글자) */
@@ -409,20 +409,12 @@ export default function Dashboard() {
     else if (to === 'auto') navigate('/continuous-operator');
     else navigate('/ai-operator');
   };
-  // ★ 2026-10-18 AI 한줄로 새 흐름 켠 회사(서버 판정 · features.aiLine) — 직접 타겟 발송 버튼은 이 회사에서 접는다(설계서 §9)
-  const [aiLineOn, setAiLineOn] = useState(false);
-  useEffect(() => { void fetchAiOperatorFeatures().then((f) => setAiLineOn(f.aiLine === true)); }, []);
   // AI 한줄로 = 구독 잠김이면 잠김 창 · 요금제가 AI 를 못 쓰면 소개 창(영상 자리) · 그 밖 = 화면으로
+  // ★ 2026-10-19 직접 타겟 발송 입구 삭제(Harold) — 조건 고르기는 AI 한줄로 확인 창의 「직접 타겟 선택」
   const openAiLine = async () => {
     if (isSubscriptionLocked) { setShowSubscriptionLock(true); return; }
-    // 소개 창 = 그 회사가 쓰게 될 흐름의 안내(새 흐름 = 'ai-line' · 꺼진 회사 = 옛 제안 안내 'ai-operator') — 안내 문장은 약속이다
-    if ((await fetchAiOperatorAccess()) === false) { openPlanFeature(aiLineOn ? 'ai-line' : 'ai-operator'); return; }
+    if ((await fetchAiOperatorAccess()) === false) { openPlanFeature('ai-line'); return; }
     navigate('/ai-line');
-  };
-  const openDirectTargetChecked = () => {
-    if (isSubscriptionLocked) { setShowSubscriptionLock(true); return; }
-    if (isCustomerDbLocked) { openPlanFeature('send-target'); return; }
-    setShowDirectTargeting(true);
   };
   const openUploadChecked = () => {
     if (syncBlockActive) { setShowSyncActiveBlock(true); return; }
@@ -432,13 +424,11 @@ export default function Dashboard() {
   };
   const dashboardActions: DashboardAction[] = hideAi
     ? [
-      { key: 'target', label: '직접 타겟 발송', desc: '원하는 고객을 직접 필터링', icon: Send, tone: 'emerald', onClick: () => { setShowDirectTargeting(true); } },
       ...(!hideFileUpload ? [{ key: 'upload', label: '고객 DB 업로드', desc: '엑셀 · CSV 로 고객 추가', icon: UserPlus, tone: 'amber' as const, onClick: () => openFileUpload() }] : []),
     ]
     : [
       { key: 'line', label: 'AI 한줄로', desc: '한 줄 입력으로 완성하는 메시지 발송', icon: Sparkles, tone: 'violet', locked: isSubscriptionLocked, onClick: () => { void openAiLine(); } },
       { key: 'operator', label: 'AI 오퍼레이터', desc: '마케팅 기능 12개 바로 열기', icon: LayoutGrid, tone: 'emerald', locked: isSubscriptionLocked, badge: liveRunning > 0 ? `자동화 ${liveRunning}개 작동 중` : null, onClick: () => openLive('hub') },
-      ...(aiLineOn ? [] : [{ key: 'target', label: '직접 타겟 발송', desc: '원하는 고객을 직접 필터링', icon: Send, tone: 'sky' as const, locked: isSubscriptionLocked || isCustomerDbLocked, onClick: openDirectTargetChecked }]),
       { key: 'upload', label: '고객 DB 업로드', desc: '엑셀 · CSV 로 고객 추가', icon: UserPlus, tone: 'amber', locked: isSubscriptionLocked || isCustomerDbLocked, onClick: openUploadChecked },
     ];
   // 모달용 데이터
@@ -1350,11 +1340,9 @@ export default function Dashboard() {
     const openParam = searchParams.get('open');
     if (openParam) {
       if (openParam === 'direct-send') { setShowDirectSend(true); setDirectSendChannel('sms'); }
-      else if (openParam === 'target-send') {
-        // ★ 2026-10-18 새 흐름 켠 회사 = AI 한줄로(직접 타겟 접기 · 설계서 §9) · AI 숨김 사용자 · 꺼진 회사 = 지금 그대로
-        if (hideAi) setShowDirectTargeting(true);
-        else void fetchAiOperatorFeatures().then((f) => { if (f.aiLine === true) navigate('/ai-line'); else setShowDirectTargeting(true); });
-      }
+      // ★ 2026-10-19 직접 타겟 발송 삭제 — 옛 링크는 AI 한줄로(조건 고르기 = 확인 창의 「직접 타겟 선택」)
+      // ★ Codex B1 medium — 아래 쿼리 정리(setSearchParams)가 이동을 덮지 않게 이동하고 바로 끝낸다
+      else if (openParam === 'target-send') { if (!hideAi) { navigate('/ai-line', { replace: true }); return; } }
       else if (openParam === 'customer-db') openCustomerDb();
       else if (openParam === 'ai-line-alimtalk') void openAiLineAlimtalk();   // ★ 2026-10-18 AI 한줄로 알림톡 갈래
       else if (openParam === 'diagnosis') setShowDiagnosisWizard(true);

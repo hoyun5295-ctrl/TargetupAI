@@ -13,7 +13,7 @@ import { highlightVars } from '../../utils/highlightVars';
 import { AI_GENERATE_COSTS } from '../../constants/credit';
 import {
   type AiLineRun, type AiLineType, type AiLineChannel, type AiLineSpamChip, type AiLineColumn,
-  aiLineApi, spamFp,
+  aiLineApi, spamFp, audienceOf,
 } from '../../utils/ai-line';
 
 const POLL_MS = 3000;
@@ -82,7 +82,7 @@ export default function LineResultCards(p: LineResultCardsProps) {
     try {
       const out = await aiLineApi.spamStart({
         body: cur.bodyAt(t), subject: cur.subjectAt(t), channel: cur.channel, isAd: cur.isAd, callback: cur.callback,
-        sampleCustomerId: cur.run.intake?.top?.id ?? null,
+        sampleCustomerId: audienceOf(cur.run).top?.id ?? null,
       });
       cur.onSpamPatch(t, {
         state: out.state, testId: out.state === 'busy' ? prev?.testId : out.testId, fp, message: out.message,

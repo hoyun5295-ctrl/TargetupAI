@@ -10,21 +10,12 @@
  *   - 원장 키 = 회사 + 날짜/시도 + 입력 지문. 같은 날 같은 한 줄 = 기본 0 · 같은 시도 재요청 = 0.
  */
 import { createHash } from 'crypto';
-import { companyListAllows } from './sns-constants';
 import { oneLineGaps, hasPromotionIntent } from './one-line-facts';
 import { linePeriodMentioned, lineFingerprint } from './one-line-steps';
 import { kstDateTag, getCreditCost } from './ai-credit-calc';
 import { SENDABLE_RECIPIENTS_LIMIT } from './operator-recipients';
 
-// ─────────────── 스위치 (비면 꺼짐 · `*` = 전 회사) ───────────────
-
-/** 새 흐름(read · intake · compose)을 여는 회사 명단. 꺼진 회사의 /ai-line = 지금 제안 흐름 그대로. */
-export function aiLineEnabled(
-  companyId: string | null | undefined,
-  env: string | undefined = process.env.AI_LINE_V2_COMPANY_IDS,
-): boolean {
-  return companyListAllows(companyId, String(env || ''));
-}
+// ★ 2026-10-19 스위치 삭제(Harold 「스위치고 뭐고」) — 새 흐름 = 전 회사 · AI 한줄로의 유일한 흐름.
 
 // ─────────────── read (AI 0 · DB 0) ───────────────
 
@@ -55,6 +46,12 @@ export function readAiLine(line: string): AiLineRead {
     },
     adConflict: branch === 'alimtalk' && promo,
   };
+}
+
+/** (순수) 한 줄이 「전체 고객」을 말했는가(「전체 고객」 · 「모든 회원」 · 「고객 전체」) — 말했으면 「누구에게」를 다시 묻지 않는다 */
+export function lineMentionsAllCustomers(line: string): boolean {
+  const t = String(line || '').replace(/\s+/g, '');
+  return /(전체|모든|모두|전부)(고객|회원)|(고객|회원)(전체|모두|전부)/.test(t);
 }
 
 // ─────────────── 문안 종류 ───────────────

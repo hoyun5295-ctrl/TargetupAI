@@ -30,6 +30,7 @@ import { decorateOperatorMessages } from '../utils/operator-message-decorator';
 import {
   AI_LINE_SOURCE, AI_LINE_TYPE_BY_VARIANT, AI_LINE_TYPE_LABEL, AI_LINE_COLUMN_EXCLUDE, AI_LINE_FILL_LOCK, AI_LINE_MAX_AUDIENCE,
   aiLineBaseKey, aiLineBaseKeys, aiLineCopyKey, aiLineDecoKey, aiLineComposeCost, filterChipText, quoteInLine, styleToType, maskName,
+  lineMentionsAllCustomers, aiLineLineFp,
   type AiLineCopyType,
 } from '../utils/ai-line';
 
@@ -88,6 +89,17 @@ export async function countHubAudience(a: HubAudience): Promise<number> {
 function assertAudienceOpen(a: HubAudience): void {
   if (a.blocked) throw new AiLineError('SCOPE_BLOCKED', '담당 매장이 지정되지 않아 보낼 고객을 정할 수 없어요. 관리자에게 매장 배정을 요청해 주세요.');
   if (a.unresolved) throw new AiLineError('TARGET_FILTER_EMPTY', '조건이 모두 빠졌어요. 조건을 하나 이상 켜거나 「전체 고객에게 보내기」를 골라 주세요.');
+}
+
+/**
+ * ★ 2026-10-19 Codex B1 high — 보내는 조건의 칸마다 SQL 이 실제로 나와야 한다. 해석기가 버리는 칸이 있으면 대상이 넓어진다.
+ * 화면 상태(직접 고른 조건 · 다시 세기 실패)와 무관하게 돈 · 발송 입구(만들기 · 진행 · 알림톡 기본)에서 막는다.
+ */
+function assertFiltersTranslated(filters: unknown): void {
+  const bad = describeLineFilters('', isPlainObject(filters) ? filters : {}, undefined).untranslated;
+  if (bad.length > 0) {
+    throw new AiLineError('TARGET_FILTER_UNTRANSLATED', `「${bad.map((u) => u.text).join(' · ')}」 조건은 받는 사람 계산에 쓸 수 없어요. 그 조건을 빼고 다시 시도해 주세요.`);
+  }
 }
 
 function assertCountSendable(count: number): void {
@@ -199,6 +211,20 @@ async function settleBase(v: AiLineViewer, line: string, now: Date): Promise<voi
   });
 }
 
+/**
+ * ★ 2026-10-19 Codex B2 high — 기본 정산은 한 자리. 네 입구(대상 찾기 · 진행 · 만들기 · 알림톡 매칭)가 모두 여기로 온다.
+ * 같은 회사 · 같은 한 줄의 정산을 키 잠금으로 한 줄에 세우고, 잠금 안에서 **정산하는 순간의** 오늘 · 어제 키를 다시 본다
+ * (자정을 끼고 두 입구가 겹쳐도 한 번만 · 요청 시작 때 잡은 날짜로 걷지 않는다). 돌려줌 = 이번에 걷었는가.
+ */
+async function settleBaseOnce(v: AiLineViewer, line: string): Promise<boolean> {
+  return withKeyLock(`aio-base-settle:${v.companyId}:${aiLineLineFp(line)}`, async () => {
+    const at = new Date();
+    if (await aiLineBasePaid(v.companyId, line, at)) return false;
+    await settleBase(v, line, at);
+    return true;
+  });
+}
+
 // ─────────────── intake ───────────────
 
 export interface LineColumn { token: string; label: string; value: string | number | null; fill: number; locked: boolean; recommended: boolean }
@@ -223,6 +249,49 @@ export interface LineIntakeResult {
   suggestedName: string;
   rejectNumber: string | null;
   base: { paid: boolean; charged: boolean; cost: number };
+  /**
+   * ★ 2026-10-19 한 줄에서 받는 사람 조건을 하나도 못 읽었다(「전체 고객」이라고도 안 했다) — 화면이 「누구에게 보낼까요?」를 먼저 묻는다.
+   * 이때는 기본을 걷지 않는다(답한 뒤 만들기 · 진행에서 미납이면 걷는다 · 같은 키).
+   */
+  needAudience: boolean;
+}
+
+/** 대상 1위 고객(고객명 가림) · 칼럼 채움(이 대상 안) — 대상 찾기와 직접 고른 대상 다시 세기가 같은 계산을 쓴다 */
+async function audienceDetail(audience: HubAudience, count: number, recommendedVars: readonly string[]): Promise<{
+  top: LineIntakeResult['top']; sampleCustomer: LineIntakeResult['sampleCustomer']; columns: LineColumn[];
+}> {
+  if (count <= 0) return { top: null, sampleCustomer: null, columns: [] };
+  let top: LineIntakeResult['top'] = null;
+  let sampleCustomer: LineIntakeResult['sampleCustomer'] = null;
+  const tr = await query(
+    `SELECT c.id, ${SAMPLE_CUSTOMER_COLUMNS} FROM customers c WHERE ${audience.where}
+      ORDER BY COALESCE(c.ltv_score, 0) DESC, COALESCE(c.total_purchase_amount, 0) DESC, c.id ASC LIMIT 1`,
+    audience.params,
+  );
+  const row = tr.rows[0];
+  if (row) {
+    const mapped = mapSampleCustomerRow(row);
+    sampleCustomer = mapped.sampleCustomer;
+    const nameKey = getFieldByKey('name')?.displayName || '고객명';
+    if (sampleCustomer[nameKey] != null) sampleCustomer[nameKey] = maskName(sampleCustomer[nameKey]);
+    top = { id: String(row.id), name: String(sampleCustomer[nameKey] ?? '') };
+  }
+  const fill = await analyzeAudienceFieldFill(audience.where, audience.params);
+  const keyByColumn = new Map(getColumnFields().map((f) => [f.columnName, f.fieldKey]));
+  const recommended = new Set(recommendedVars.map((x) => String(x)));
+  const columns = fill.fields
+    .filter((f) => !AI_LINE_COLUMN_EXCLUDE.has(keyByColumn.get(f.field) || f.field) && f.fillRate > 0)
+    .sort((a, b) => b.fillRate - a.fillRate)
+    .slice(0, 10)
+    .map((f) => ({
+      token: f.percentVar,
+      label: f.label,
+      value: sampleCustomer ? sampleCustomer[f.label] ?? null : null,
+      fill: f.fillRate,
+      locked: f.fillRate < AI_LINE_FILL_LOCK,
+      recommended: recommended.has(f.percentVar) || recommended.has(f.label),
+    }));
+  return { top, sampleCustomer, columns };
 }
 
 export async function runLineIntake(v: AiLineViewer, line: string, now: Date = new Date()): Promise<LineIntakeResult> {
@@ -240,44 +309,15 @@ export async function runLineIntake(v: AiLineViewer, line: string, now: Date = n
   const count = await countHubAudience(audience);
   const zeroReason: LineIntakeResult['zeroReason'] = audience.blocked ? 'scope' : audience.unresolved ? 'unresolved' : count === 0 ? 'zero' : 'none';
 
-  let top: LineIntakeResult['top'] = null;
-  let sampleCustomer: LineIntakeResult['sampleCustomer'] = null;
-  let columns: LineColumn[] = [];
-  if (count > 0) {
-    const tr = await query(
-      `SELECT c.id, ${SAMPLE_CUSTOMER_COLUMNS} FROM customers c WHERE ${audience.where}
-        ORDER BY COALESCE(c.ltv_score, 0) DESC, COALESCE(c.total_purchase_amount, 0) DESC, c.id ASC LIMIT 1`,
-      audience.params,
-    );
-    const row = tr.rows[0];
-    if (row) {
-      const mapped = mapSampleCustomerRow(row);
-      sampleCustomer = mapped.sampleCustomer;
-      const nameKey = getFieldByKey('name')?.displayName || '고객명';
-      if (sampleCustomer[nameKey] != null) sampleCustomer[nameKey] = maskName(sampleCustomer[nameKey]);
-      top = { id: String(row.id), name: String(sampleCustomer[nameKey] ?? '') };
-    }
-    const fill = await analyzeAudienceFieldFill(audience.where, audience.params);
-    const keyByColumn = new Map(getColumnFields().map((f) => [f.columnName, f.fieldKey]));
-    const recommended = new Set((target.personalization_vars || []).map((x) => String(x)));
-    columns = fill.fields
-      .filter((f) => !AI_LINE_COLUMN_EXCLUDE.has(keyByColumn.get(f.field) || f.field) && f.fillRate > 0)
-      .sort((a, b) => b.fillRate - a.fillRate)
-      .slice(0, 10)
-      .map((f) => ({
-        token: f.percentVar,
-        label: f.label,
-        value: sampleCustomer ? sampleCustomer[f.label] ?? null : null,
-        fill: f.fillRate,
-        locked: f.fillRate < AI_LINE_FILL_LOCK,
-        recommended: recommended.has(f.percentVar) || recommended.has(f.label),
-      }));
-  }
+  const { top, sampleCustomer, columns } = await audienceDetail(audience, count, target.personalization_vars || []);
 
+  // ★ 2026-10-19 받는 사람을 한 줄에서 못 읽음 = 「누구에게」를 먼저 묻는다 · 그동안 기본을 걷지 않는다
+  const needAudience = !conditions.some((c) => c.origin === 'line') && !lineMentionsAllCustomers(line);
   let charged = false;
-  if (count > 0 && !basePaid) {
-    await settleBase(v, line, now);
-    charged = true;
+  let paidNow = basePaid;
+  if (count > 0 && !basePaid && !needAudience) {
+    charged = await settleBaseOnce(v, line);
+    paidNow = true;   // 이번에 걷었거나 · 겹친 다른 입구가 이미 걷었다
   }
   const rt = styleToType(target.recommended_style);
   const ch = String(target.recommended_channel || 'LMS').toUpperCase();
@@ -291,7 +331,8 @@ export async function runLineIntake(v: AiLineViewer, line: string, now: Date = n
     recommendedTime: String(target.recommended_time || ''),
     suggestedName: String(target.suggested_campaign_name || ''),
     rejectNumber: companyInfo?.reject_number ? String(companyInfo.reject_number) : null,
-    base: { paid: basePaid || charged, charged, cost: baseCost },
+    base: { paid: paidNow, charged, cost: baseCost },
+    needAudience,
   };
 }
 
@@ -302,17 +343,61 @@ export async function runLineRecount(v: AiLineViewer, filters: unknown, allCusto
   return { count: await countHubAudience(a), empty: a.empty, blocked: a.blocked, unresolved: a.unresolved };
 }
 
+/**
+ * ★ 2026-10-19 대상을 바꿨을 때(직접 타겟 선택 · 「전체 고객」 답) — 다시 세기 + 칩 · 1위 고객 · 칼럼(0크레딧).
+ * 칩 = 칸마다 SQL 이 실제로 나오는지 따로 본다(안 나오면 untranslated · 화면이 막는다 = 조건을 버려 대상이 넓어지는 일 없음).
+ */
+export async function runLineRetarget(v: AiLineViewer, filters: unknown, allCustomers: boolean): Promise<{
+  count: number; empty: boolean; blocked: boolean; unresolved: boolean;
+  conditions: Array<{ key: string; label: string; text: string }>;
+  untranslated: Array<{ key: string; text: string }>;
+  top: LineIntakeResult['top']; sampleCustomer: LineIntakeResult['sampleCustomer']; columns: LineColumn[];
+}> {
+  const safe = isPlainObject(filters) ? filters : {};
+  const d = describeLineFilters('', safe, undefined);
+  const a = await compileHubAudience(v, safe, allCustomers);
+  const count = await countHubAudience(a);
+  const detail = d.untranslated.length > 0 ? { top: null, sampleCustomer: null, columns: [] } : await audienceDetail(a, count, []);
+  return {
+    count, empty: a.empty, blocked: a.blocked, unresolved: a.unresolved,
+    conditions: d.conditions.map(({ key, label, text }) => ({ key, label, text })),
+    untranslated: d.untranslated.map(({ key, text }) => ({ key, text })),
+    ...detail,
+  };
+}
+
 // ─────────────── 진행(직접입력만 · 알림톡) — 기본만 ───────────────
 
 export async function runLineProceed(v: AiLineViewer, line: string, filters: unknown, allCustomers: boolean, now: Date = new Date()): Promise<{ count: number; charged: boolean }> {
+  assertFiltersTranslated(filters);
   const a = await compileHubAudience(v, filters, allCustomers);
   assertAudienceOpen(a);
   const count = await countHubAudience(a);
   assertCountSendable(count);
   if (await aiLineBasePaid(v.companyId, line, now)) return { count, charged: false };
   await assertCreditFor(v.companyId, getCreditCost(AI_LINE_SOURCE.intake), AI_LINE_SOURCE.intake);
-  await settleBase(v, line, now);
-  return { count, charged: true };
+  return { count, charged: await settleBaseOnce(v, line) };
+}
+
+/**
+ * ★ 2026-10-19 알림톡 템플릿 고르기(Codex B1 medium) — 「누구에게」를 물어 기본을 아직 안 낸 경우,
+ * 확정 대상(칸 확인 · 1명 이상 · 상한)과 잔액을 확인하고 → 매칭(묶음 = 안쪽 차감 0) → 성공 뒤 기본(같은 키 · 진행에서 다시 걷지 않음).
+ */
+export async function runLineAlimtalkMatch<T>(
+  v: AiLineViewer, line: string, filters: unknown, allCustomers: boolean, match: () => Promise<T>,
+  /** ★ Codex B2 high — 고를 수 있는 템플릿이 나왔는가(없음 · 실패 결과에는 걷지 않는다) */
+  usable: (r: T) => boolean,
+  now: Date = new Date(),
+): Promise<{ result: T; charged: boolean; paid: boolean }> {
+  if (await aiLineBasePaid(v.companyId, line, now)) return { result: await runInCreditBundle(match), charged: false, paid: true };
+  assertFiltersTranslated(filters);
+  const a = await compileHubAudience(v, filters, allCustomers);
+  assertAudienceOpen(a);
+  assertCountSendable(await countHubAudience(a));
+  await assertCreditFor(v.companyId, getCreditCost(AI_LINE_SOURCE.intake), AI_LINE_SOURCE.intake);
+  const result = await runInCreditBundle(match);
+  if (!usable(result)) return { result, charged: false, paid: false };
+  return { result, charged: await settleBaseOnce(v, line), paid: true };
 }
 
 // ─────────────── 만들기 ───────────────
@@ -339,6 +424,7 @@ export function aiLineVarTokens(): Set<string> {
 export async function runLineCompose(v: AiLineViewer, input: LineComposeInput, now: Date = new Date()): Promise<{
   cards: LineComposeCard[]; channel: 'SMS' | 'LMS' | 'MMS'; count: number; charged: { base: number; copies: number };
 }> {
+  assertFiltersTranslated(input.filters);
   const audience = await compileHubAudience(v, input.filters, input.allCustomers);
   assertAudienceOpen(audience);
   const count = await countHubAudience(audience);
@@ -426,10 +512,7 @@ export async function runLineCompose(v: AiLineViewer, input: LineComposeInput, n
 
   // 성공 뒤 차감 — 기본(아직이면) → 문안(나온 종류 수 · 한 행). 잔액 부족은 402(결과를 내주지 않는다).
   let baseCharged = 0;
-  if (!basePaid) {
-    await settleBase(v, input.line, now);
-    baseCharged = quote.base;
-  }
+  if (!basePaid && await settleBaseOnce(v, input.line)) baseCharged = quote.base;
   const unit = getCreditCost(AI_LINE_SOURCE.compose);
   const copyCost = cards.length * unit;
   await settleCreditAfterSuccess({

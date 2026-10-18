@@ -21,6 +21,8 @@
 export interface FilterBuildField {
   field_key: string;
   data_type?: string;
+  /** 커스텀 칸(custom_fields JSONB) — 활성 필드 응답의 is_custom */
+  is_custom?: boolean;
   [extra: string]: unknown;
 }
 
@@ -138,4 +140,35 @@ export function buildDynamicFiltersFromSelection(
   }
 
   return { dynamicFilters: filters, smsOptIn };
+}
+
+/**
+ * ★ 2026-10-19 직접 타겟 선택(조건 고르기 창) → AI 한줄로 대상 조건(허브 해석기 = 발송 명단과 같은 해석기의 mixed 형식).
+ * 같은 모양은 그대로 둔다. 모양이 다른 것만 옮긴다 = 나이 이상/이하/일치 → minAge · maxAge · 범위, 커스텀 칸 → `custom_fields.키`.
+ * 옮길 수 없는 모양은 `unsupported` 로 돌려준다(화면이 막는다 · 조건을 버려 대상이 넓어지면 안 된다).
+ * 서버도 칸마다 SQL 이 실제로 나오는지 다시 본다(/api/ai-line/retarget 의 untranslated).
+ */
+export function toLineAudienceFilters(
+  dynamicFilters: Record<string, any>,
+  enabledFields: FilterBuildField[],
+): { filters: Record<string, unknown>; unsupported: string[] } {
+  const custom = new Set(enabledFields.filter((f) => f.is_custom === true).map((f) => f.field_key));
+  const filters: Record<string, unknown> = {};
+  const unsupported: string[] = [];
+  for (const [key, cond] of Object.entries(dynamicFilters || {})) {
+    const op = cond?.operator;
+    const v = cond?.value;
+    if (key === 'age') {
+      if (op === 'between' && Array.isArray(v) && v.length === 2) filters.age = { operator: 'between', value: [Number(v[0]), Number(v[1])] };
+      else if (op === 'gte' && Number.isFinite(Number(v))) filters.minAge = Number(v);
+      else if (op === 'lte' && Number.isFinite(Number(v))) filters.maxAge = Number(v);
+      else if (op === 'eq' && Number.isFinite(Number(v))) filters.age = { operator: 'between', value: [Number(v), Number(v)] };
+      else unsupported.push(key);
+      continue;
+    }
+    // 성별 여러 개(in)는 해석기가 한 값만 받는다
+    if (key === 'gender' && op !== 'eq') { unsupported.push(key); continue; }
+    filters[custom.has(key) ? `custom_fields.${key}` : key] = cond;
+  }
+  return { filters, unsupported };
 }

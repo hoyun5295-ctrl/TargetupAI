@@ -26,9 +26,15 @@ interface DirectTargetFilterModalProps {
   // ★ D43-3c: fieldsMeta 추가
   // ★ 2026-09-29 R112 — 명단 전체 대신 서버 보관본(건수·앞 15명·가장 긴 값)을 넘긴다
   onExtracted: (extraction: TargetExtraction, fieldsMeta: FieldMeta[], selectedCallbackPhone?: string, phoneFields?: string[]) => void;
+  /**
+   * ★ 2026-10-19 고르기 모드(AI 한줄로 확인 창의 「직접 타겟 선택」) — 추출하지 않고 고른 조건만 돌려준다.
+   * 이때는 AI 자연어 탭을 숨기고(한 줄 자체가 AI 입력) 확인 창 위에 뜬다.
+   */
+  onPick?: (r: { dynamicFilters: Record<string, any>; enabledFields: any[] }) => void;
 }
 
-export default function DirectTargetFilterModal({ show, onClose, onExtracted }: DirectTargetFilterModalProps) {
+export default function DirectTargetFilterModal({ show, onClose, onExtracted, onPick }: DirectTargetFilterModalProps) {
+  const pickMode = typeof onPick === 'function';
   // 필드 데이터
   const [enabledFields, setEnabledFields] = useState<any[]>([]);
   const [extractedPhoneFields, setExtractedPhoneFields] = useState<string[]>([]);
@@ -645,8 +651,8 @@ export default function DirectTargetFilterModal({ show, onClose, onExtracted }: 
 
   return (
     <>
-    <div className={CUI_MODAL_SCRIM}>
-      <div className={`${CUI_MODAL} max-w-[760px]`} role="dialog" aria-modal="true" aria-label="직접 타겟 설정">
+    <div className={CUI_MODAL_SCRIM} style={pickMode ? { zIndex: 1600 } : undefined}>
+      <div className={`${CUI_MODAL} max-w-[760px]`} role="dialog" aria-modal="true" aria-label={pickMode ? '직접 타겟 선택' : '직접 타겟 설정'}>
         {/* 헤더 */}
         <div className={CUI_MODAL_HEAD}>
           <div className="flex items-center gap-3.5 min-w-0">
@@ -654,8 +660,8 @@ export default function DirectTargetFilterModal({ show, onClose, onExtracted }: 
               <Filter className="w-5 h-5 text-white" />
             </div>
             <div className="min-w-0">
-              <h3 className={CUI_MODAL_TITLE}>직접 타겟 설정</h3>
-              <p className={CUI_MODAL_DESC}>필터할 항목을 고르고 조건을 정하면 대상 인원을 바로 셉니다</p>
+              <h3 className={CUI_MODAL_TITLE}>{pickMode ? '직접 타겟 선택' : '직접 타겟 설정'}</h3>
+              <p className={CUI_MODAL_DESC}>{pickMode ? '항목을 고르고 조건을 정하면 이 조건으로 받는 사람을 바꿉니다' : '필터할 항목을 고르고 조건을 정하면 대상 인원을 바로 셉니다'}</p>
             </div>
           </div>
           <button type="button" onClick={handleClose} className={CUI_MODAL_CLOSE} aria-label="닫기">
@@ -663,7 +669,8 @@ export default function DirectTargetFilterModal({ show, onClose, onExtracted }: 
           </button>
         </div>
 
-        {/* 모드 전환: 직접 설정 / AI 자연어 */}
+        {/* 모드 전환: 직접 설정 / AI 자연어 — 고르기 모드는 직접 설정만 */}
+        {!pickMode && (
         <div className="shrink-0 px-6 pt-4">
           <div className="flex p-1 rounded-xl bg-neutral-100">
             <button type="button" onClick={() => setAiNlMode(false)} className={!aiNlMode ? SEG_ON : SEG_OFF}>
@@ -677,8 +684,9 @@ export default function DirectTargetFilterModal({ show, onClose, onExtracted }: 
             </button>
           </div>
         </div>
+        )}
 
-        {aiNlMode ? (
+        {aiNlMode && !pickMode ? (
           <div className={CUI_MODAL_BODY}>
             <div className={CUI_INFO}>
               <Sparkles className={`w-4 h-4 ${CUI_INFO_ICON}`} />
@@ -927,10 +935,20 @@ export default function DirectTargetFilterModal({ show, onClose, onExtracted }: 
           </div>
           <div className="flex items-center gap-2">
             <button type="button" onClick={handleClose} className={CUI_BTN_OUTLINE}>취소</button>
+            {pickMode ? (
+              <button type="button"
+                onClick={() => { const { dynamicFilters } = buildDynamicFiltersForAPI(); onPick!({ dynamicFilters, enabledFields }); resetAll(); }}
+                disabled={Object.keys(buildDynamicFiltersForAPI().dynamicFilters).length === 0}
+                className={`${CUI_BTN_PRIMARY} px-5`}>
+                <Users className="w-4 h-4" />
+                이 조건으로 받는 사람 바꾸기
+              </button>
+            ) : (
             <button type="button" onClick={handleExtract} disabled={targetCount === 0 || extracting} className={`${CUI_BTN_PRIMARY} px-5`}>
               {extracting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Users className="w-4 h-4" />}
               {extracting ? '추출 중' : '타겟 추출'}
             </button>
+            )}
           </div>
         </div>
         </>
@@ -940,7 +958,7 @@ export default function DirectTargetFilterModal({ show, onClose, onExtracted }: 
 
     {/* 알림 모달(커스텀, native dialog 아님) */}
     {alertModal.show && (
-      <div className={`${CUI_MODAL_SCRIM} z-[60]`}>
+      <div className={`${CUI_MODAL_SCRIM} z-[60]`} style={pickMode ? { zIndex: 1610 } : undefined}>
         <div className={`${CUI_MODAL} max-w-sm`} role="alertdialog" aria-modal="true" aria-label={alertModal.title}>
           <div className="px-6 pt-7 pb-5 text-center">
             <div className={`h-12 w-12 mx-auto mb-3 rounded-2xl grid place-items-center ${alertTone.ring}`}>

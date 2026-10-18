@@ -59,22 +59,24 @@ export default function DashboardActionRow({ actions, enterClass = '' }: { actio
               <Icon className="w-[18px] h-[18px] sm:w-5 sm:h-5 text-white" />
             </span>
             <span className="relative min-w-0 flex-1">
-              <span className="flex items-center gap-1.5 text-[13px] sm:text-[17px] font-bold leading-tight break-keep">
+              <span className="flex items-center gap-1.5 text-[13px] sm:text-[15px] lg:text-[17px] font-bold leading-tight whitespace-nowrap min-w-0">
                 {a.locked && <Lock className="w-3.5 h-3.5 shrink-0" aria-label="잠김" />}
-                {a.label}
+                <span className="truncate">{a.label}</span>
               </span>
-              <span className="hidden sm:block mt-0.5 text-[13px] text-white/80 truncate">{a.desc}</span>
-            </span>
-            {a.badge && (
-              <span className="relative hidden lg:inline-flex items-center gap-1.5 rounded-full bg-white/15 px-2.5 py-1 text-xs font-semibold ring-1 ring-white/25 shrink-0">
-                <span className="relative flex h-1.5 w-1.5">
-                  <span className="absolute inline-flex h-full w-full rounded-full bg-white opacity-75 motion-safe:animate-ping" />
-                  <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-white" />
+              {/* ★ 2026-10-19 배지는 설명 줄 자리에(제목 줄에 두면 좁은 폭에서 제목을 밀어내 두 줄로 깨졌다 · Harold 1019 실화면) */}
+              {a.badge ? (
+                <span className="hidden sm:flex items-center gap-1.5 mt-1 text-[12.5px] font-semibold text-white/90 min-w-0">
+                  <span className="relative flex h-1.5 w-1.5 shrink-0">
+                    <span className="absolute inline-flex h-full w-full rounded-full bg-white opacity-75 motion-safe:animate-ping" />
+                    <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-white" />
+                  </span>
+                  <span className="truncate">{a.badge}</span>
                 </span>
-                {a.badge}
-              </span>
-            )}
-            <span className="relative hidden sm:flex w-8 h-8 rounded-full bg-white/15 ring-1 ring-white/25 items-center justify-center shrink-0 group-hover:translate-x-0.5 transition-transform">
+              ) : (
+                <span className="hidden sm:block mt-0.5 text-[13px] text-white/80 truncate">{a.desc}</span>
+              )}
+            </span>
+            <span className="relative hidden md:flex w-8 h-8 rounded-full bg-white/15 ring-1 ring-white/25 items-center justify-center shrink-0 group-hover:translate-x-0.5 transition-transform">
               <ChevronRight className="w-[18px] h-[18px] text-white" />
             </span>
           </button>

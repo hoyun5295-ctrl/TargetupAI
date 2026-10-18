@@ -2,7 +2,8 @@
  * routes/ai-line.ts — AI 한줄로 (`/api/ai-line` · ★ 2026-10-18 · 설계서 docs/2026-10-18-ai-line-design.md §5 · §7 · §8)
  *
  * read(AI 0) → intake(대상 AI · 기본 2) → recount(0) → compose(문안 2 × 종류) / proceed(직접입력 · 알림톡 = 기본만) → decorate(1)
- * 게이트 = 로그인 · AI 오퍼레이터 요금제(isAiOperatorAllowed) · 새 흐름 스위치(AI_LINE_V2_COMPANY_IDS). read 는 스위치만 알려 준다.
+ * 게이트 = 로그인 · AI 오퍼레이터 요금제(isAiOperatorAllowed). ★ 2026-10-19 스위치 삭제(전 회사 · Harold).
+ * retarget(0) = 직접 타겟 선택 · 「전체 고객」 답 뒤 다시 세기 + 칩 · 1위 고객 · 칼럼.
  * 실패 응답 = { success:false, error, code } · 크레딧 부족 402 INSUFFICIENT_CREDIT · 원장 조회 실패 503.
  */
 import { Router, Request, Response } from 'express';
@@ -12,12 +13,11 @@ import { InsufficientCreditError } from '../utils/ai-credit';
 import { isValidAttemptToken } from '../utils/one-line-facts';
 import { isValidLinePeriodEnd } from '../utils/one-line-steps';
 import { validateAnswer } from '../utils/content-interview';
-import { runInCreditBundle } from '../utils/ai-credit-context';
 import { matchAlimtalkTemplate } from '../utils/alimtalk-ai-matcher';
-import { aiLineEnabled, readAiLine, sanitizeLineTypes } from '../utils/ai-line';
+import { readAiLine, sanitizeLineTypes } from '../utils/ai-line';
 import {
-  AiLineError, aiLineBasePaid, aiLineVarTokens,
-  runLineIntake, runLineRecount, runLineProceed, runLineCompose, runLineDecorate,
+  AiLineError, aiLineVarTokens,
+  runLineIntake, runLineRecount, runLineRetarget, runLineProceed, runLineCompose, runLineDecorate, runLineAlimtalkMatch,
   type AiLineViewer,
 } from '../services/ai-line';
 import { startLineSpamTest, readLineSpamTest } from '../services/ai-line-spam';
@@ -34,7 +34,7 @@ function viewerOf(req: Request): AiLineViewer | null {
   return { companyId, userId: req.user?.userId || null, userType: req.user?.userType || null };
 }
 
-/** 요금제 · 스위치 — 통과면 viewer, 아니면 응답을 보내고 null */
+/** 요금제 — 통과면 viewer, 아니면 응답을 보내고 null */
 async function gate(req: Request, res: Response): Promise<AiLineViewer | null> {
   const v = viewerOf(req);
   if (!v) { res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' }); return null; }
@@ -42,10 +42,6 @@ async function gate(req: Request, res: Response): Promise<AiLineViewer | null> {
   if (!plan) { res.status(404).json({ success: false, error: '회사 정보를 찾을 수 없습니다.' }); return null; }
   if (!isAiOperatorAllowed(plan, req.user)) {
     res.status(403).json({ success: false, error: '이 기능은 요금제 가입 후 이용할 수 있어요.', code: 'BETA_GATE' });
-    return null;
-  }
-  if (!aiLineEnabled(v.companyId)) {
-    res.status(400).json({ success: false, error: '이 기능은 아직 열리지 않았습니다. 화면을 새로 고친 뒤 다시 시도해 주세요.', code: 'FEATURE_DISABLED' });
     return null;
   }
   return v;
@@ -100,13 +96,12 @@ function fail(res: Response, err: any, where: string): Response {
   return res.status(500).json({ success: false, error: '처리 중 문제가 생겼어요. 잠시 뒤 다시 시도해 주세요.' });
 }
 
-// POST /read — AI 0 · DB 0 · 무과금(스위치 밖 = enabled:false · 화면은 지금 흐름)
+// POST /read — AI 0 · DB 0 · 무과금
 router.post('/read', async (req: Request, res: Response) => {
   const v = viewerOf(req);
   if (!v) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
-  const enabled = aiLineEnabled(v.companyId);
   const line = typeof req.body?.line === 'string' ? req.body.line.slice(0, LINE_MAX) : '';
-  return res.json({ success: true, enabled, ...(enabled ? readAiLine(line) : {}) });
+  return res.json({ success: true, ...readAiLine(line) });
 });
 
 // POST /intake — 대상 AI · 승인 발송과 같은 세기 · 1위 고객 · 칼럼 채움 · 기본 2(1명 이상)
@@ -133,6 +128,19 @@ router.post('/recount', async (req: Request, res: Response) => {
     return res.json({ success: true, ...out });
   } catch (err: any) {
     return fail(res, err, 'recount');
+  }
+});
+
+// POST /retarget — 0크레딧 · 직접 타겟 선택 · 「전체 고객」 답 뒤(칩 · 1위 고객 · 칼럼까지)
+router.post('/retarget', async (req: Request, res: Response) => {
+  try {
+    const v = await gate(req, res);
+    if (!v) return;
+    const filters = isPlainObject(req.body?.filters) ? req.body.filters : {};
+    const out = await runLineRetarget(v, filters, req.body?.allCustomers === true);
+    return res.json({ success: true, ...out });
+  } catch (err: any) {
+    return fail(res, err, 'retarget');
   }
 });
 
@@ -205,9 +213,11 @@ router.post('/alimtalk-match', async (req: Request, res: Response) => {
     if (!v) return;
     const line = readLine(req.body?.line);
     if (!line) return res.status(400).json({ success: false, error: '한 줄을 5자 이상 적어 주세요.', code: 'LINE_INVALID' });
-    const paid = await aiLineBasePaid(v.companyId, line, new Date());   // 원장 조회 실패 = 503(AiLineError)
-    if (!paid) return res.status(409).json({ success: false, error: '대상을 먼저 찾아 주세요.', code: 'BASE_REQUIRED' });
-    const m = await runInCreditBundle(() => matchAlimtalkTemplate({ companyId: v.companyId, campaignObjective: line }));
+    // ★ 2026-10-19 기본 미납(누구에게를 물은 경우) = 확정 대상 확인 → 매칭 → 성공 뒤 기본 · 이미 냈으면 매칭만(원장 조회 실패 = 503)
+    const filters = isPlainObject(req.body?.filters) ? req.body.filters : {};
+    const { result: m, charged, paid } = await runLineAlimtalkMatch(v, line, filters, req.body?.allCustomers === true,
+      () => matchAlimtalkTemplate({ companyId: v.companyId, campaignObjective: line }),
+      (r) => !!r.template || (r.alternativeTemplates?.length ?? 0) > 0);
     const list = [
       ...(m.template ? [{ template: m.template, matchScore: m.matchScore, matchReason: m.matchReason }] : []),
       ...m.alternativeTemplates,
@@ -221,7 +231,7 @@ router.post('/alimtalk-match', async (req: Request, res: Response) => {
       score: t.matchScore,
       reason: t.matchReason,
     }));
-    return res.json({ success: true, matched: m.matched, templates: list, mappings: m.variableMappings, suggestion: m.suggestion });
+    return res.json({ success: true, matched: m.matched, templates: list, mappings: m.variableMappings, suggestion: m.suggestion, charged, paid });
   } catch (err: any) {
     return fail(res, err, 'alimtalk-match');
   }

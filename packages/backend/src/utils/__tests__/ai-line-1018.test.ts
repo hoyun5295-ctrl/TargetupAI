@@ -3,6 +3,7 @@
  *
  * ① 순수 CT(utils/ai-line.ts) ② 서비스 돈 순서(services/ai-line.ts — DB · AI · 원장을 흉내 낸다)
  * ③ 소스 계약(라우트 게이트 · 단가표 백 · 프론트 일치 · 생성기 옵션 · 수동 검사 409 자동 제외)
+ * ★ 2026-10-19 스위치 삭제 · 「누구에게」(needAudience = 차감 전 묻기) · 직접 타겟 선택(조건 변환 · 서버 재확인) · 직접 타겟 발송 입구 삭제
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { readFileSync } from 'fs';
@@ -46,10 +47,12 @@ vi.mock('../mall-consent', () => ({ viewerConsentSql: async () => ({ isTrue: 'c.
 
 import {
   readAiLine, styleToType, sanitizeLineTypes, quoteInLine, filterChipText, aiLineBaseKeys, aiLineBaseKey, aiLineComposeCost,
-  aiLineCopyKey, maskName, AI_LINE_TYPE_BY_VARIANT,
+  aiLineCopyKey, maskName, AI_LINE_TYPE_BY_VARIANT, lineMentionsAllCustomers,
 } from '../ai-line';
+import { toLineAudienceFilters } from '../../../../frontend/src/utils/customerFilterBuild';
+import { allCustomersFlag as feAllCustomersFlag, activeFilters as feActiveFilters, newAiLineRun } from '../../../../frontend/src/utils/ai-line';
 import { InsufficientCreditError } from '../ai-credit-tx';
-import { runLineCompose, runLineIntake, runLineDecorate, AiLineError, describeLineFilters } from '../../services/ai-line';
+import { runLineCompose, runLineIntake, runLineDecorate, runLineRetarget, runLineProceed, runLineAlimtalkMatch, AiLineError, describeLineFilters } from '../../services/ai-line';
 
 const SRC = join(__dirname, '..', '..');
 const FE = join(__dirname, '..', '..', '..', '..', 'frontend', 'src');
@@ -110,6 +113,25 @@ describe('① 순수 CT', () => {
     expect(maskName('남궁민수')).toBe('남**수');
     expect(maskName('김민')).toBe('김*');
     expect(maskName('')).toBe('');
+  });
+  it('「전체 고객」을 말했는가(말했으면 누구에게를 다시 묻지 않는다)', () => {
+    expect(lineMentionsAllCustomers('전체 고객에게 30% 할인 안내')).toBe(true);
+    expect(lineMentionsAllCustomers('모든 회원 대상 쿠폰')).toBe(true);
+    expect(lineMentionsAllCustomers('고객 전체에게')).toBe(true);
+    expect(lineMentionsAllCustomers('알림톡을 활용해서 30% 할인쿠폰 만료안내를 보낼거야')).toBe(false);
+    expect(lineMentionsAllCustomers('전체 상품 20% 할인')).toBe(false);
+  });
+  it('직접 타겟 조건 → 한줄로 대상 조건(나이 이상/이하 · 커스텀 칸 · 성별 여러 개는 막음)', () => {
+    const fields = [{ field_key: 'age' }, { field_key: 'custom_3', is_custom: true }, { field_key: 'grade' }];
+    expect(toLineAudienceFilters({ age: { operator: 'gte', value: 60 } }, fields).filters).toEqual({ minAge: 60 });
+    expect(toLineAudienceFilters({ age: { operator: 'lte', value: 29 } }, fields).filters).toEqual({ maxAge: 29 });
+    expect(toLineAudienceFilters({ age: { operator: 'between', value: [30, 39] } }, fields).filters).toEqual({ age: { operator: 'between', value: [30, 39] } });
+    expect(toLineAudienceFilters({ custom_3: { operator: 'eq', value: 'A' } }, fields).filters).toEqual({ 'custom_fields.custom_3': { operator: 'eq', value: 'A' } });
+    expect(toLineAudienceFilters({ grade: { operator: 'in', value: ['VIP', 'VVIP'] } }, fields).filters).toEqual({ grade: { operator: 'in', value: ['VIP', 'VVIP'] } });
+    expect(toLineAudienceFilters({ gender: { operator: 'in', value: ['M', 'F'] } }, fields).unsupported).toEqual(['gender']);
+    // 옮긴 조건은 같은 해석기에서 SQL 이 실제로 나온다(버려져 대상이 넓어지지 않는다)
+    const conv = toLineAudienceFilters({ age: { operator: 'gte', value: 60 }, custom_3: { operator: 'eq', value: 'A' }, grade: { operator: 'eq', value: 'VIP' } }, fields).filters;
+    expect(describeLineFilters('', conv as any, undefined).untranslated).toEqual([]);
   });
   it('옮기지 못한 조건은 따로', () => {
     const d = describeLineFilters('VIP 에게', { grade: { operator: 'eq', value: 'VIP' }, foo: { operator: 'eq', value: '' } }, { grade: 'VIP' });
@@ -269,6 +291,23 @@ describe('② 대상 찾기 돈 순서', () => {
     expect(m.settle).toHaveBeenCalledTimes(1);
     expect(m.settle.mock.calls[0][0]).toMatchObject({ cost: 2, source: 'ai-line-intake' });
     expect(out.base).toEqual({ paid: true, charged: true, cost: 2 });
+    expect(out.needAudience).toBe(false);
+  });
+  it('받는 사람을 한 줄에서 못 읽음(AI 가 보탠 조건만) = 누구에게 · 차감 0', async () => {
+    countIs(4);
+    target({ grade: { operator: 'eq', value: 'VIP' } }, { filter_quotes: {} });
+    const out = await runLineIntake(V, '알림톡을 활용해서 30% 할인쿠폰 만료안내를 보낼거야');
+    expect(out.needAudience).toBe(true);
+    expect(out.count).toBe(4);
+    expect(m.settle).not.toHaveBeenCalled();
+    expect(out.base).toEqual({ paid: false, charged: false, cost: 2 });
+  });
+  it('「전체 고객」이라고 말함 = 묻지 않는다 · 기본 2', async () => {
+    countIs(5);
+    target({}, { all_customers: true, filter_quotes: {} });
+    const out = await runLineIntake(V, '전체 고객에게 30% 할인 안내 보내줘');
+    expect(out.needAudience).toBe(false);
+    expect(m.settle).toHaveBeenCalledTimes(1);
   });
   it('0명 = 차감 0 · 사유', async () => {
     countIs(0);
@@ -298,6 +337,81 @@ describe('② 대상 찾기 돈 순서', () => {
     m.isChargedByKey.mockRejectedValue(new Error('db down'));
     await expect(runLineIntake(V, '서울 30대 여성에게 기초 30% 할인')).rejects.toMatchObject({ code: 'CREDIT_LEDGER_UNAVAILABLE', status: 503 });
     expect(m.recommendTarget).not.toHaveBeenCalled();
+  });
+});
+
+describe('② 대상 바꾸기(직접 타겟 선택 · 0크레딧)', () => {
+  it('해석기가 버리는 조건 = untranslated · 1위 고객 · 칼럼을 만들지 않는다', async () => {
+    countIs(7);
+    const out = await runLineRetarget(V, { age: { operator: 'gte', value: 30 } }, false);
+    expect(out.untranslated.map((u) => u.key)).toEqual(['age']);
+    expect(out.top).toBeNull();
+    expect(m.settle).not.toHaveBeenCalled();
+    expect(m.recommendTarget).not.toHaveBeenCalled();
+  });
+  it('옮긴 조건 = 칩 · 수 · 1위 고객', async () => {
+    countIs(7);
+    const out = await runLineRetarget(V, { minAge: 30, grade: { operator: 'eq', value: 'VIP' } }, false);
+    expect(out.untranslated).toEqual([]);
+    expect(out.conditions.map((c) => c.text)).toEqual(['30세 이상', '고객등급 VIP']);
+    expect(out.count).toBe(7);
+    expect(out.top?.name).toBe('김*지');
+    expect(m.settle).not.toHaveBeenCalled();
+  });
+});
+
+describe('② Codex B1 — 보내는 조건 칸 확인 · 알림톡 기본 · 전체 판정', () => {
+  it('만들기 · 진행 = 해석기가 버리는 칸이 있으면 차감 · AI 전에 거절', async () => {
+    countIs(5);
+    await expect(runLineCompose(V, composeInput({ filters: { age: { operator: 'gte', value: 30 }, grade: { operator: 'eq', value: 'VIP' } } as any })))
+      .rejects.toMatchObject({ code: 'TARGET_FILTER_UNTRANSLATED' });
+    await expect(runLineProceed(V, '알림톡 쿠폰 만료 안내', { phone: { operator: 'contains', value: '010' } }, false))
+      .rejects.toMatchObject({ code: 'TARGET_FILTER_UNTRANSLATED' });
+    expect(m.generateMessages).not.toHaveBeenCalled();
+    expect(m.settle).not.toHaveBeenCalled();
+  });
+  it('알림톡 매칭 = 기본 미납이면 확정 대상(1명 이상) 확인 → 매칭 → 기본 한 번 · 냈으면 매칭만', async () => {
+    countIs(4);
+    const match = vi.fn(async () => 'ok');
+    const out = await runLineAlimtalkMatch(V, '알림톡 쿠폰 만료 안내', { grade: { operator: 'eq', value: 'VIP' } }, false, match, () => true);
+    expect(out).toEqual({ result: 'ok', charged: true, paid: true });
+    expect(m.settle).toHaveBeenCalledTimes(1);
+    expect(m.settle.mock.calls[0][0]).toMatchObject({ cost: 2, source: 'ai-line-intake' });
+    m.settle.mockClear();
+    m.isChargedByKey.mockResolvedValue(true);
+    expect(await runLineAlimtalkMatch(V, '알림톡 쿠폰 만료 안내', {}, false, match, () => true)).toEqual({ result: 'ok', charged: false, paid: true });
+    expect(m.settle).not.toHaveBeenCalled();
+  });
+  it('알림톡 매칭 = 미납 + 0명 · 빈 조건 = 매칭 전에 거절(차감 0)', async () => {
+    const match = vi.fn(async () => 'ok');
+    countIs(0);
+    await expect(runLineAlimtalkMatch(V, '알림톡 쿠폰 만료 안내', { grade: { operator: 'eq', value: 'VIP' } }, false, match, () => true)).rejects.toMatchObject({ code: 'TARGET_ZERO' });
+    await expect(runLineAlimtalkMatch(V, '알림톡 쿠폰 만료 안내', {}, false, match, () => true)).rejects.toMatchObject({ code: 'TARGET_FILTER_EMPTY' });
+    expect(match).not.toHaveBeenCalled();
+    expect(m.settle).not.toHaveBeenCalled();
+  });
+  it('알림톡 매칭 = 고를 템플릿이 없거나 실패 결과면 기본을 걷지 않는다(Codex B2)', async () => {
+    countIs(4);
+    const out = await runLineAlimtalkMatch(V, '알림톡 쿠폰 만료 안내', { grade: { operator: 'eq', value: 'VIP' } }, false, async () => ({ matched: false }), () => false);
+    expect(out).toMatchObject({ charged: false, paid: false });
+    expect(m.settle).not.toHaveBeenCalled();
+  });
+  it('기본 정산 = 정산하는 순간 오늘 · 어제 키를 다시 본다(겹친 입구 · 자정 경계 = 한 번만 · Codex B2)', async () => {
+    countIs(3);
+    // 진행 앞 확인(오늘 · 어제) = 미납 → 정산 직전 재확인 = 다른 입구가 이미 냄
+    m.isChargedByKey.mockResolvedValueOnce(false).mockResolvedValueOnce(false).mockResolvedValue(true);
+    const out = await runLineProceed(V, '알림톡 쿠폰 만료 안내', { grade: { operator: 'eq', value: 'VIP' } }, false);
+    expect(out.charged).toBe(false);
+    expect(m.settle).not.toHaveBeenCalled();
+  });
+  it('화면 전체 판정 = 「누구에게」를 물은 대상 찾기는 사람이 「전체 고객」을 골라야만 · AI 가 못 옮긴 칸은 보내지 않는다', () => {
+    const base = newAiLineRun('알림톡 쿠폰 만료 안내');
+    const intake: any = { filters: {}, allCustomers: true, needAudience: true, untranslated: [], conditions: [] };
+    expect(feAllCustomersFlag({ ...base, intake })).toBe(false);
+    expect(feAllCustomersFlag({ ...base, intake, allChecked: true })).toBe(true);
+    expect(feAllCustomersFlag({ ...base, intake: { ...intake, needAudience: false } })).toBe(true);
+    const withUntr: any = { filters: { grade: { operator: 'eq', value: 'VIP' }, weird: 1, linebad: 2 }, untranslated: [{ key: 'weird', text: 'x', origin: 'ai' }, { key: 'linebad', text: 'y', origin: 'line' }] };
+    expect(Object.keys(feActiveFilters({ ...base, intake: withUntr }))).toEqual(['grade', 'linebad']);
   });
 });
 
@@ -337,12 +451,33 @@ describe('③ 소스 계약', () => {
     expect(be).toContain("'ai-operator-propose': 5,");
     expect(be).toContain("'ai-operator-decorate': 3,");
   });
-  it('라우터 = 로그인 · 요금제 · 스위치 · /api/ai-line 등록', () => {
+  it('라우터 = 로그인 · 요금제 · /api/ai-line 등록 · 스위치 없음(1019 전 회사)', () => {
     const r = read('routes/ai-line.ts');
     expect(r).toContain('router.use(authenticate);');
     expect(r).toContain('isAiOperatorAllowed(plan, req.user)');
-    expect(r).toContain('aiLineEnabled(v.companyId)');
+    expect(r).not.toContain('aiLineEnabled');
+    expect(r).toContain("router.post('/retarget'");
     expect(read('app.ts')).toContain("app.use('/api/ai-line', aiLineRoutes);");
+    for (const f of ['utils/ai-line.ts', 'routes/ai.ts']) expect(read(f)).not.toMatch(/AI_LINE_V2_COMPANY_IDS|aiLineEnabled/);
+    const page = readFileSync(join(FE, 'pages', 'AiLinePage.tsx'), 'utf8');
+    expect(page).not.toContain('aiLineOn');
+    expect(page).toContain('if (!facts) { void startLine(); return; }');
+  });
+  it('직접 타겟 발송 입구 삭제(대시보드 버튼 · 옛 링크 · 카드 상세) · 조건 고르기 = 확인 창의 직접 타겟 선택', () => {
+    const dash = readFileSync(join(FE, 'pages', 'Dashboard.tsx'), 'utf8');
+    expect(dash).not.toContain("key: 'target', label: '직접 타겟 발송'");
+    expect(dash).toContain("else if (openParam === 'target-send') { if (!hideAi) { navigate('/ai-line', { replace: true }); return; } }");
+    const card = readFileSync(join(FE, 'components', 'dashboard', 'CardDetailModal.tsx'), 'utf8');
+    expect(card).not.toContain('goDirectSend');
+    const modal = readFileSync(join(FE, 'components', 'ai-line', 'LineIntakeModal.tsx'), 'utf8');
+    expect(modal).toContain('<DirectTargetFilterModal');
+    expect(modal).toContain('toLineAudienceFilters(dynamicFilters, enabledFields)');
+    expect(modal).toContain("asking ? '누구에게 보낼까요?'");
+  });
+  it('기본 차감 = 받는 사람을 읽었을 때만(누구에게를 묻는 중엔 0)', () => {
+    const svc = read('services/ai-line.ts');
+    expect(svc).toContain("const needAudience = !conditions.some((c) => c.origin === 'line') && !lineMentionsAllCustomers(line);");
+    expect(svc).toContain('if (count > 0 && !basePaid && !needAudience) {');
   });
   it('생성기 옵션 = 줄 때만(exactVars · lineIntake)', () => {
     const ai = read('services/ai.ts');

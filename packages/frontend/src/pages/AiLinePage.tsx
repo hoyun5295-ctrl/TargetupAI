@@ -42,7 +42,7 @@ import LineIntakeModal from '../components/ai-line/LineIntakeModal';
 import LineResultCards from '../components/ai-line/LineResultCards';
 import {
   type AiLineRun, type AiLineType, type AiLineChannel, aiLineApi, newAiLineRun, saveAiLineRun, loadAiLineRun,
-  activeFilters, allCustomersFlag, spamFp, AI_LINE_ALIMTALK_HANDOFF,
+  activeFilters, allCustomersFlag, audienceOf, spamFp, AI_LINE_ALIMTALK_HANDOFF,
 } from '../utils/ai-line';
 // ★ D210+ Phase 2-fix1 (Harold 명시 2026-05-23): 회사 데이터 활용 매트릭스 안내 카드 (3축 100% 보완).
 import AiProposalSummaryModal from '../components/AiProposalSummaryModal';
@@ -336,9 +336,8 @@ export default function AiLinePage() {
   // ★ 2026-10-07 기능 안내 원장 = 서버(로그인한 사람에게만) · 화면에 들어오면 미리 받아 둔다
   const featureIntros = usePlanFeatureIntros();
   const [searchParams, setSearchParams] = useSearchParams();
-  // ★ 2026-10-18 AI 한줄로 새 흐름(서버 판정 features.aiLine · 꺼진 회사 = 옛 제안 흐름 그대로)
+  // ★ 2026-10-18 AI 한줄로 새 흐름 · ★ 2026-10-19 스위치 삭제 = 전 회사 · 이 화면의 유일한 흐름(Harold)
   //   진행 상태 = run 하나(sessionStorage 보관 · 창을 닫아도 · 페이지를 떠나도 이어서 · 낸 결과 보존)
-  const [aiLineOn, setAiLineOn] = useState(false);
   const [lineRun, setLineRunState] = useState<AiLineRun | null>(() => loadAiLineRun());
   const [intakeOpen, setIntakeOpen] = useState(false);
   const [lineLoadError, setLineLoadError] = useState<string | null>(null);
@@ -356,7 +355,7 @@ export default function AiLinePage() {
   };
   useEffect(() => {
     let alive = true;
-    void fetchAiOperatorFeatures().then((f) => { if (alive) { setFeatureFlags(f); setAiLineOn(f.aiLine === true); } });
+    void fetchAiOperatorFeatures().then((f) => { if (alive) setFeatureFlags(f); });
     fetchAiOperatorAccess().then((allowed) => {
       if (!alive) return;
       const locked = allowed === false;
@@ -596,8 +595,8 @@ export default function AiLinePage() {
   //   본 영역 = 옛 useEffect 폐기 정합 (handleSubmit 안 fetch 정합).
 
   // ★ 2026-10-18 새 흐름 — 창을 바로 열고 read(AI 0) · intake(대상 AI · 기본 2) 를 함께 부른다. 같은 한 줄로 만들던 진행이 있으면 이어서.
-  const startLine = async () => {
-    const line = objective.trim();
+  const startLine = async (lineArg?: string) => {
+    const line = (lineArg ?? objective).trim();
     setError(null);
     setLineLoadError(null);
     if (lineRun && lineRun.line === line && lineRun.intake) {
@@ -624,9 +623,10 @@ export default function AiLinePage() {
   const applyLineResult = (r: AiLineRun) => {
     const it = r.intake;
     if (!it || r.cards.length === 0) return;
-    const count = r.liveCount ?? it.count;
+    const aud = audienceOf(r);   // ★ 2026-10-19 대상을 바꿨으면(직접 타겟 선택 · 전체 고객) 다시 센 값
+    const count = r.liveCount ?? aud.count;
     const unit = pricing ? (r.channel === 'MMS' ? pricing.mms : r.channel === 'LMS' ? pricing.lms : pricing.sms) : 0;
-    const conds = it.conditions.filter((c) => !r.offKeys.includes(c.key)).map((c) => c.text);
+    const conds = r.manual ? (r.audience?.conditions || []).map((c) => c.text) : it.conditions.filter((c) => !r.offKeys.includes(c.key)).map((c) => c.text);
     setProposal({
       success: true,
       target: {
@@ -661,7 +661,7 @@ export default function AiLinePage() {
     setAiRefinedIdx({});
     setProposalCVariant(null);
     setEditingBody(false);
-    setSampleCustomer(it.sampleCustomer);
+    setSampleCustomer(aud.sampleCustomer);
     setSampleCustomerFields(null);
     setMmsError(null);
     setMmsUploadedImages([]);
@@ -670,14 +670,14 @@ export default function AiLinePage() {
   };
 
   const handleSubmit = async (facts?: { benefit: string | null }) => {
-    if (planLocked) { setPlanFeatureId(aiLineOn ? 'ai-line' : 'ai-operator'); return; }
+    if (planLocked) { setPlanFeatureId('ai-line'); return; }
     if (customerGate.isEmpty) { setShowDataGate(true); return; }
     if (objective.trim().length < 5) {
       setError('마케팅 목표를 한 줄로 입력해주세요 (5자 이상).');
       return;
     }
-    // ★ 2026-10-18 새 흐름 켠 회사 = 확인 창(빠진 것만 · 확인 판) · 그 밖 = 옛 제안 흐름 그대로
-    if (aiLineOn && !facts) { void startLine(); return; }
+    // ★ 2026-10-19 모든 회사 = 확인 창(한 줄을 읽고 모자란 것만 묻는다 · 다 모인 뒤 만들기). 옛 제안 흐름은 여기서 돌지 않는다.
+    if (!facts) { void startLine(); return; }
     setLineResultActive(false);
     setError(null);
     setLoading(true);
@@ -1103,11 +1103,11 @@ export default function AiLinePage() {
   }, [lineResultActive, refinedOverrides, subjectOverrides, selectedVariantIdx]);
   // ★ 2026-10-18 다시 들어오면(새로 고침 · 뒤로) 만든 결과를 그대로 다시 그린다(낸 결과 보존)
   useEffect(() => {
-    if (!aiLineOn || !lineRun || lineRun.cards.length === 0 || proposal) return;
+    if (!lineRun || lineRun.cards.length === 0 || proposal) return;
     setObjective(lineRun.line);
     applyLineResult(lineRun);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [aiLineOn]);
+  }, []);
   const lineIdx = (t: AiLineType) => (lineRun ? lineRun.cards.findIndex((c) => c.type === t) : -1);
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -1149,7 +1149,7 @@ export default function AiLinePage() {
           run={lineRun}
           loadError={lineLoadError}
           creditTotal={aiCredit?.creditEnabled ? Number(aiCredit.total ?? 0) : null}
-          onRun={(next) => patchLineRun(next.runId, () => next)}
+          onRun={(next) => (typeof next === 'function' ? patchLineRun(lineRun.runId, next) : patchLineRun(next.runId, () => next))}
           onClose={() => setIntakeOpen(false)}
           onComposed={(next) => { setLineRun(next); setIntakeOpen(false); applyLineResult(next); }}
           onProceedDirect={(next) => { setLineRun(next); setIntakeOpen(false); applyLineResult(next); }}
@@ -1163,6 +1163,7 @@ export default function AiLinePage() {
             navigate('/dashboard?open=ai-line-alimtalk');
           }}
           onCharged={() => setCreditRefresh((x) => x + 1)}
+          onRetypeLine={(l) => { setObjective(l); void startLine(l); }}
         />
       )}
       {/* ★ 2026-09-15 요금제 공통 안내 창 — 못 쓰는 회사가 카드·[생성]·[이미지]를 눌렀을 때 */}
@@ -1282,7 +1283,7 @@ export default function AiLinePage() {
         </div>
 
         {customerGate.isEmpty && !proposal && <CustomerDataRequiredBanner className="mt-3" />}
-        {aiLineOn && lineRun && !intakeOpen && lineRun.cards.length === 0 && lineRun.line === objective.trim() && (
+        {lineRun && !intakeOpen && lineRun.cards.length === 0 && lineRun.line === objective.trim() && (
           <div className="mt-3 flex items-center gap-3 rounded-xl bg-white border border-violet-200 px-4 py-2.5 text-[13px]">
             <span className="text-slate-700 flex-1 min-w-0 truncate">만들던 확인 판이 있어요 · 「{lineRun.line}」</span>
             <button type="button" onClick={() => setIntakeOpen(true)} className="h-8 px-3 rounded-lg bg-violet-600 text-white font-semibold shrink-0">이어서 열기</button>
@@ -1475,7 +1476,7 @@ export default function AiLinePage() {
                 channel={effectiveChannel as AiLineChannel}
                 isAd={adEnabled}
                 callback={spamCallback}
-                columns={lineRun.intake?.columns || []}
+                columns={audienceOf(lineRun).columns}
                 onPick={(t) => { const i = lineIdx(t); if (i >= 0) setSelectedVariantIdx(i); }}
                 onEdit={(t) => { const i = lineIdx(t); if (i >= 0) { setSelectedVariantIdx(i); setEditingBody(true); } }}
                 onDecorate={async (t, vars) => {

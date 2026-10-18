@@ -20,7 +20,6 @@ import { filterByIndividualCallback } from '../utils/callback-filter';
 import { isValidCustomFieldKey } from '../utils/safe-field-name';
 import { getStoreScope, getOwnerCustomerScopeSql, getJourneyOwnerScopeSql, resolveHubStoreScope } from '../utils/store-scope';
 import { mapSampleCustomerRow, SAMPLE_CUSTOMER_COLUMNS } from '../utils/sample-customer';
-import { aiLineEnabled } from '../utils/ai-line';
 import { loadHubCompanyContext } from '../utils/hub-company-context';
 import { viewerConsentSql, viewerConsentJoin, ownerJourneyConsent, journeyOwnerConsent, viewerBrandConsent } from '../utils/mall-consent';
 import { buildFilterWhereClauseCompat } from '../utils/customer-filter';
@@ -1173,8 +1172,7 @@ router.get('/operator/access', async (req: Request, res: Response) => {
       legacyGrandfathered: planCtx.legacyGrandfathered,
       // ★ 2026-09-20 SNS 게시 개방 플래그(설계서 §3-11). **타일보다 먼저 배포한다** —
       //   화면은 ENV 를 다시 계산하지 않고 이 값 하나만 본다(플래그가 없으면 타일이 아예 안 뜬다).
-      // ★ 2026-10-18 AI 한줄로 새 흐름(AI_LINE_V2_COMPANY_IDS) — 대시보드 버튼 줄 · 직접 타겟 접기가 이 값만 본다
-      features: { sns: snsPublishEnabled(companyId), aiLine: aiLineEnabled(companyId) },
+      features: { sns: snsPublishEnabled(companyId) },
     });
   } catch (err: any) {
     console.error('[AI Operator /access] 오류:', err);

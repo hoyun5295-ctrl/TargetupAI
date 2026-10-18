@@ -22,7 +22,6 @@ export const AI_LINE_TYPE_META: Record<AiLineType, { label: string; desc: string
 export const AI_LINE_TYPE_ORDER: AiLineType[] = ['direct', 'emo', 'benefit', 'mz'];
 
 export interface AiLineReadResult {
-  enabled: boolean;
   branch?: AiLineBranch;
   gaps?: { benefit: boolean; period: boolean };
   adConflict?: boolean;
@@ -49,6 +48,18 @@ export interface AiLineIntake {
   suggestedName: string;
   rejectNumber: string | null;
   base: { paid: boolean; charged: boolean; cost: number };
+  /** ★ 2026-10-19 한 줄에서 받는 사람 조건을 못 읽었다 = 「누구에게 보낼까요?」를 먼저 묻는다(그동안 기본 0) */
+  needAudience: boolean;
+}
+
+/** ★ 2026-10-19 대상을 바꾼 뒤(직접 타겟 선택 · 「전체 고객」 답) 서버가 다시 센 값 */
+export interface AiLineAudience {
+  count: number;
+  conditions: Array<{ key: string; label: string; text: string }>;
+  untranslated: Array<{ key: string; text: string }>;
+  top: AiLineIntake['top'];
+  sampleCustomer: AiLineIntake['sampleCustomer'];
+  columns: AiLineColumn[];
 }
 
 export interface AiLineCard { type: AiLineType; label: string; body: string; subject: string; byteCount: number }
@@ -84,6 +95,12 @@ export interface AiLineRun {
   allChecked: boolean;
   /** 확인 판에서 다시 센 수(조건을 바꿨을 때) */
   liveCount: number | null;
+  /** ★ 2026-10-19 직접 타겟 선택으로 고른 조건(있으면 AI 대상 대신 이것) */
+  manual: { filters: Record<string, unknown> } | null;
+  /** ★ 2026-10-19 대상을 바꾼 뒤 다시 센 값(1위 고객 · 칼럼까지) — 없으면 intake 값 */
+  audience: AiLineAudience | null;
+  /** ★ 2026-10-19 「누구에게」에 답했는가 */
+  audienceSet: boolean;
   types: AiLineType[];
   vars: string[];
   cards: AiLineCard[];
@@ -106,7 +123,7 @@ function newToken(): string {
 export function newAiLineRun(line: string): AiLineRun {
   return {
     runId: newToken(), line, read: null, facts: null, branch: 'sms', intake: null,
-    offKeys: [], allChecked: false, liveCount: null, types: [], vars: [], cards: [], edits: {},
+    offKeys: [], allChecked: false, liveCount: null, manual: null, audience: null, audienceSet: false, types: [], vars: [], cards: [], edits: {},
     channel: 'LMS', attemptToken: newToken(), spam: {}, picked: null,
   };
 }
@@ -123,7 +140,8 @@ export function loadAiLineRun(): AiLineRun | null {
     const raw = sessionStorage.getItem(STORE_KEY);
     if (!raw) return null;
     const r = JSON.parse(raw) as AiLineRun;
-    return r && typeof r.runId === 'string' && typeof r.line === 'string' ? r : null;
+    // 1019 앞에 저장된 진행 = 새 칸을 기본값으로 채운다
+    return r && typeof r.runId === 'string' && typeof r.line === 'string' ? { ...r, manual: r.manual ?? null, audience: r.audience ?? null, audienceSet: r.audienceSet === true } : null;
   } catch {
     return null;
   }
@@ -149,10 +167,14 @@ export function setSubject(run: AiLineRun, type: AiLineType, subject: string): A
   return { ...run, edits: { ...run.edits, [type]: { ...run.edits[type], subject } } };
 }
 
-/** 확인 판의 최종 조건(꺼 둔 키 제외) */
+/** 확인 판의 최종 조건 = 직접 고른 조건이 있으면 그것 · 없으면 AI 대상(꺼 둔 키 제외) */
 export function activeFilters(run: AiLineRun): Record<string, unknown> {
+  if (run.manual) return run.manual.filters;
   const f = run.intake?.filters || {};
-  return Object.fromEntries(Object.entries(f).filter(([k]) => !run.offKeys.includes(k)));
+  // AI 가 보탰는데 옮기지 못한 칸 = 「받는 사람 계산에 들어가지 않아요」라고 알린 칸 · 보내지 않는다(서버가 만들기 · 진행에서 거절한다).
+  //   한 줄에서 온 못 옮긴 칸은 남긴다(화면이 잠그고 · 잠금이 새도 서버가 거절 = 조용히 넓어지지 않는다).
+  const aiUntranslated = new Set((run.intake?.untranslated || []).filter((u) => u.origin === 'ai').map((u) => u.key));
+  return Object.fromEntries(Object.entries(f).filter(([k]) => !run.offKeys.includes(k) && !aiUntranslated.has(k)));
 }
 /** 최종 조건이 비었는가 */
 export function filtersEmpty(run: AiLineRun): boolean {
@@ -161,7 +183,16 @@ export function filtersEmpty(run: AiLineRun): boolean {
 /** 서버에 보낼 「전체 고객」 신호 — 조건이 비었고 (AI 가 전체로 읽었거나 사람이 직접 켰을 때)만 */
 export function allCustomersFlag(run: AiLineRun): boolean {
   if (!filtersEmpty(run)) return false;
-  return run.allChecked || (run.intake?.allCustomers === true && run.offKeys.length === 0);
+  // ★ Codex B1 high — 「누구에게」를 물은 대상 찾기(needAudience)의 전체 판정만으로는 전체 발송을 열지 않는다(사람이 「전체 고객」을 고를 때만)
+  return run.allChecked || (!run.manual && run.intake?.allCustomers === true && run.intake?.needAudience !== true && run.offKeys.length === 0);
+}
+
+/** 지금 대상의 수 · 1위 고객 · 칼럼(대상을 바꿨으면 다시 센 값 · 아니면 대상 찾기 값) — 읽기는 이 함수 하나 */
+export function audienceOf(run: AiLineRun): { count: number; top: AiLineIntake['top']; sampleCustomer: AiLineIntake['sampleCustomer']; columns: AiLineColumn[] } {
+  const a = run.audience;
+  if (a) return { count: a.count, top: a.top, sampleCustomer: a.sampleCustomer, columns: a.columns };
+  const it = run.intake;
+  return { count: it?.count ?? 0, top: it?.top ?? null, sampleCustomer: it?.sampleCustomer ?? null, columns: it?.columns ?? [] };
 }
 
 /** 칩 지문 — 실제로 나갈 글 · 제목 · 채널 · 광고 · 발신번호(바뀌면 「다시 검사」) */
@@ -199,6 +230,8 @@ export const aiLineApi = {
   intake: (line: string) => call<AiLineIntake & { success: true }>('/intake', { line }),
   recount: (filters: Record<string, unknown>, allCustomers: boolean) =>
     call<{ count: number; empty: boolean; blocked: boolean; unresolved: boolean }>('/recount', { filters, allCustomers }),
+  retarget: (filters: Record<string, unknown>, allCustomers: boolean) =>
+    call<AiLineAudience & { empty: boolean; blocked: boolean; unresolved: boolean }>('/retarget', { filters, allCustomers }),
   proceed: (line: string, filters: Record<string, unknown>, allCustomers: boolean) =>
     call<{ count: number; charged: boolean }>('/proceed', { line, filters, allCustomers }),
   compose: (body: {
@@ -211,8 +244,8 @@ export const aiLineApi = {
     call<{ state: AiLineSpamState; testId?: string; reused?: boolean; message?: string }>('/spam-test', body),
   spamRead: (testId: string, channel: AiLineChannel) =>
     call<{ state: AiLineSpamState; carriers: AiLineSpamChip['carriers']; aheadCount: number; elapsedSec: number }>(`/spam-test/${encodeURIComponent(testId)}?type=${channel === 'SMS' ? 'SMS' : 'LMS'}`, undefined, 'GET'),
-  alimtalkMatch: (line: string) =>
-    call<{ matched: boolean; templates: Array<{ id: string; templateCode: string; name: string; profileId: string; profileName: string | null; content: string; score: number; reason: string }>; mappings: Array<{ templateVariable: string; customerFieldKey: string | null; customerFieldLabel: string | null; isExactMatch: boolean }>; suggestion: string | null }>('/alimtalk-match', { line }),
+  alimtalkMatch: (line: string, filters: Record<string, unknown>, allCustomers: boolean) =>
+    call<{ charged: boolean; paid: boolean; matched: boolean; templates: Array<{ id: string; templateCode: string; name: string; profileId: string; profileName: string | null; content: string; score: number; reason: string }>; mappings: Array<{ templateVariable: string; customerFieldKey: string | null; customerFieldLabel: string | null; isExactMatch: boolean }>; suggestion: string | null }>('/alimtalk-match', { line, filters, allCustomers }),
 };
 
 /** 알림톡 갈래 넘기기(대시보드 알림톡 발송 창이 받는다) */
