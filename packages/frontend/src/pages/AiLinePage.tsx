@@ -1,0 +1,2527 @@
+/**
+ * AiLinePage.tsx — AI 한줄로(`/ai-line` · ★ 2026-10-18 · 설계서 docs/2026-10-18-ai-line-design.md §4-3)
+ * 옛 AiOperatorPage 의 한 줄 입력 · 추천 띠 · 제안 · 결과 · 승인 발송을 원형 이동했다(기능 카드는 /ai-operator 로).
+ * 새 흐름 스위치(AI_LINE_V2_COMPANY_IDS)가 꺼진 회사 = 이 화면이 옛 제안 흐름 그대로다.
+ */
+import { useEffect, useRef, useState } from 'react';
+import { useNavigate, useSearchParams } from 'react-router-dom';
+import {
+  AlertTriangle,
+  ArrowLeft,
+  ArrowRight,
+  Check,
+  CheckCircle2,
+  Clock,
+  Copy,
+  DollarSign,
+  Image as ImageIcon,
+  LineChart,
+  Loader2,
+  Lock,
+  MessageSquare,
+  RefreshCw,
+  Send,
+  ShieldCheck,
+  Sparkles,
+  Star,
+  Target,
+  Wand2,
+  X,
+  Pencil,
+  Phone,
+} from 'lucide-react';
+import AiRefineModal from '../components/AiRefineModal';
+import { DateTimeField, isoToLocalInput, localInputToIso } from '../components/DateTimeField';
+import TargetRecipientsModal, { type TargetPageLoader, type TargetRecipient } from '../components/TargetRecipientsModal';
+import ImageToCopyButton from '../components/ImageToCopyButton';
+import SenderAuthModal from '../components/SenderAuthModal';
+import { useSenderAuth } from '../hooks/useSenderAuth';
+import AiHubBand, { type AiCreditSummary } from '../components/ai-line/AiHubBand';
+// ★ 2026-10-18 AI 한줄로 새 흐름(설계서 docs/2026-10-18-ai-line-design.md §5) — 확인 창 · 결과 카드 · 진행 상태 CT
+import LineIntakeModal from '../components/ai-line/LineIntakeModal';
+import LineResultCards from '../components/ai-line/LineResultCards';
+import {
+  type AiLineRun, type AiLineType, type AiLineChannel, aiLineApi, newAiLineRun, saveAiLineRun, loadAiLineRun,
+  activeFilters, allCustomersFlag, spamFp, AI_LINE_ALIMTALK_HANDOFF,
+} from '../utils/ai-line';
+// ★ D210+ Phase 2-fix1 (Harold 명시 2026-05-23): 회사 데이터 활용 매트릭스 안내 카드 (3축 100% 보완).
+import AiProposalSummaryModal from '../components/AiProposalSummaryModal';
+// ★ D210+ Phase 2-fix4 (Harold 명시 2026-05-23): 변수 하이라이트 + 머지 결과 미리보기 컨트롤타워.
+import { highlightVars, mergeAndHighlightVars } from '../utils/highlightVars';
+// ★ 2026-07-02 문안 전용 편집기 모달 — 변수·브랜드 링크·회사 표현·특수문자 커서 삽입 + 미리보기
+import MessageEditorModal from '../components/MessageEditorModal';
+import SmsCharsetNotice from '../components/SmsCharsetNotice';
+import { hasUnsupportedSmsChars, SMS_CHARSET_BLOCK_MESSAGE } from '../utils/smsSafeChars';
+import { useAuthStore } from '../stores/authStore';
+// ★ D210+ (Harold 명시 2026-05-23): SUB_MODULE_CARDS constants/ 모듈 추출 — Walkthrough STEP 6 공통 사용 정합.
+import { SUB_MODULE_CARDS, HUB_CARD_ROWS, isCardOpen } from '../constants/ai-operator-modules';
+import { SurfaceToneProvider } from '../components/zone/surface-tone';
+import PlanFeatureModal from '../components/PlanFeatureModal';
+import { usePlanFeatureIntros, loadPlanFeatureIntros, PLAN_FEATURE_MIN_PLAN } from '../constants/plan-feature-intros';
+import { fetchAiOperatorAccess, fetchAiOperatorFeatures } from '../utils/ai-operator-access';
+import ConfirmModal, { type ConfirmState } from '../components/ConfirmModal';
+import { LineFactsAskModal } from '../components/zone/LineFacts';   // ★ 2026-10-05 한줄로 시그니처 — 판정이 걸리면 생성 전에 한 번만 묻는다
+// 고객 데이터 없으면 AI 문안 생성 전 안내 (공용 게이트)
+import { useCustomerDataGate, CustomerDataRequiredBanner, CustomerDataRequiredModal } from '../components/CustomerDataGate';
+// 2026-07-09: MMS 이미지 첨부 — 공용 모달 + 업로드 훅 + 경로/검증 컨트롤타워
+import MmsUploadModal from '../components/MmsUploadModal';
+import { useMmsUpload } from '../hooks/useMmsUpload';
+import { toMmsImagePaths } from '../utils/mmsImage';
+import { validateMmsBeforeSend, LMS_SUBJECT_MAX_CHARS } from '../utils/formatDate';
+
+/** 회신번호 select 특수값 — 고객별 등록매장 번호(개별 회신) · DmSendAndTrackModal 과 같은 값 */
+const INDIVIDUAL_CB = '__individual__';
+
+// ============================================================
+// 타입 정의
+// ============================================================
+
+interface ProposalMessage {
+  variantId: string;
+  variantName: string;
+  concept: string;
+  body: string;             // ★ D165 fix: backend message_text 단일 필드 (channel은 별도 필드)
+  subject?: string;         // LMS/MMS 제목 (선택)
+  byteCount?: number;       // SMS 경고용
+  byteWarning?: boolean;
+  score: number;
+}
+
+// ★ D170: Multi-Agent Orchestrator 응답 — compliance + agentDurations 추가
+interface ComplianceBlock {
+  passed: boolean;
+  riskLevel: 'low' | 'medium' | 'high';
+  warnings: string[];
+  suggestions: string[];
+}
+
+export interface ProposalResponse {
+  success: boolean;
+  target: {
+    count: number;
+    totalCount: number;
+    criteria: string;
+    filters: Record<string, unknown>;
+    /** ★ 2026-10-15 B-1015-1 전체 고객 신호 — true 면 빈 filters 가 "전체 고객". 리스트·발송 요청에 그대로 넘긴다. */
+    allCustomers?: boolean;
+    suggestedName: string;
+  };
+  messages: ProposalMessage[];
+  recommendation: string;
+  recommendationReason: string;
+  channel: {
+    recommended: string;
+    reason: string;
+    isAd: boolean;
+    rejectNumber?: string | null;  // ★ Harold 명시: 광고 메시지 미리보기에 (광고)+무료거부 자동 합성
+  };
+  schedule: {
+    recommendedTime: string;
+  };
+  compliance?: ComplianceBlock;  // ★ D170: Compliance Sub-agent 응답
+  cost: {
+    estimated: number;
+    unitCost: number;
+    breakdown: string;
+  };
+  performance: {
+    expectedClicks: number;
+    expectedConversions: number;
+    expectedRevenue: number;
+    clickRate: number;
+    conversionRate: number;
+    basis?: {
+      level: string;
+      label: string;
+      confidence: string;
+      notes: string[];
+      eventWindowDays?: number;
+      gradeBreakdown?: Array<{ grade: string; count: number; conversionRate: number; expectedConversions: number; expectedRevenue: number; source: string }>;
+    };
+    insight?: {
+      diagnosis: string;
+      insights: string[];
+      strategy: string[];
+      risks: string[];
+      generated: boolean;
+    };
+  };
+  meta: {
+    usePersonalization: boolean;
+    personalizationVars: string[];
+    useIndividualCallback: boolean;
+    countVerified?: boolean;                    // ★ D168
+    agentDurations?: Record<string, number>;    // ★ D170
+    generatedAt: string;
+    aiSynthesis?: string;                        // AI 자율 결정 경로 최종 종합 분석(있을 때만)
+  };
+}
+
+// ============================================================
+// 정적 데이터
+// ============================================================
+
+// ★ 2026-08-21 제목 옆 ! 버튼이 여는 설명 — 히어로의 배지·영문 eyebrow·부제 2줄을 걷어내고 그 내용을 여기로 옮겼다.
+//   힌트 문구는 SUB_AGENT_STEPS의 것과 같다(같은 여섯 단계).
+const WHAT_AI_DECIDES: { k: string; v: string }[] = [
+  { k: '타겟팅', v: '고객군 자동 추출' },
+  { k: '메시지', v: 'A/B 문구 + 스팸 검수' },
+  { k: '채널', v: '최적 채널 판단' },
+  { k: '시점', v: '발송 시점 추천' },
+  { k: '비용', v: '회사별 단가 적용' },
+  { k: '성과', v: '클릭 · 전환 추정' },
+];
+
+// ★ 2026-09-30 명령 카드 [이미지] 버튼(잠김 안내 버튼과 같은 모양)
+const HUB_IMAGE_BTN = 'h-10 px-3.5 rounded-xl border border-slate-200 bg-white text-[14px] text-slate-700 font-semibold inline-flex items-center gap-2 hover:bg-slate-50 disabled:opacity-40 transition-colors shrink-0';
+
+const EXAMPLE_PROMPTS = [
+  '최근 30일 미구매 VIP에게 재구매 쿠폰 보내줘',
+  '장바구니 이탈 24시간 고객에게 10% 할인 알림',
+  '휴면 전환 위험 고객에게 복귀 메시지',
+  '신규 가입 후 7일 미구매 고객에게 첫 구매 혜택',
+];
+
+interface SubAgentStep {
+  icon: typeof Target;
+  label: string;
+  gradient: string;
+  hint: string;
+}
+
+const SUB_AGENT_STEPS: SubAgentStep[] = [
+  { icon: Target, label: 'Target Analysis', gradient: 'from-rose-400 to-pink-500', hint: '고객군 자동 추출 · SQL 생성' },
+  { icon: MessageSquare, label: 'Message Composition', gradient: 'from-amber-400 to-orange-500', hint: 'A/B 문구 + 스팸 검수' },
+  { icon: Send, label: 'Channel Decisioning', gradient: 'from-emerald-400 to-teal-500', hint: '최적 채널 판단' },
+  { icon: Clock, label: 'Schedule Optimization', gradient: 'from-cyan-400 to-blue-500', hint: '발송 시점 추천' },
+  { icon: DollarSign, label: 'Cost Calculation', gradient: 'from-violet-400 to-purple-500', hint: '회사별 단가 적용' },
+  { icon: LineChart, label: 'Performance Forecast', gradient: 'from-fuchsia-400 to-pink-500', hint: '클릭 · 전환 · 매출 추정' },
+];
+
+// ★ D209+ (Harold 명시 2026-05-22): EngineCard + ENGINE_CARDS 영역 영구 제거.
+//   Harold 명시 — "7 코어 엔진 아키텍처 + Enterprise Beta Program 영역 필요 없음".
+//   기능/라우트/페이지 모두 보존 + 사용자 진입 UI 영역만 제거 정합.
+
+// ★ D177-fix (2026-05-19): SESSION_MILESTONES + STATUS_CONFIG 영구 제거.
+//   Harold 명시 — "이미 작업완료한건 언제 적용? / 굳이 업그레이드 보여줄 필요 X / 직원들한테 방향성 잡음 명시 X".
+//   직원/외부 노출 시 미래 로드맵 = 영업/보안/사용자 혼란 위험. 진행률 카드 + 9 세션 로드맵 영역 함께 제거.
+
+// ★ D177-ux2 (2026-05-19): AI Operator 페이지 안 sub-module 배치 (Harold 명시 — 헤더 dropdown X / 페이지 안 메뉴 배치).
+// ★ D210+ (Harold 명시 2026-05-23): SubModuleCard interface + SUB_MODULE_CARDS = constants/ai-operator-modules.ts 모듈 추출.
+//   AiOperatorWalkthroughModal STEP 6 메뉴 매트릭스 공통 사용 — no_inline_duplication 룰 정합 (단일 source of truth).
+
+// 결과 카드 액센트
+interface AccentTokens {
+  iconBg: string;
+  border: string;
+  glow: string;
+  text: string;
+}
+
+const ACCENT_TOKENS: Record<string, AccentTokens> = {
+  rose:    { iconBg: 'from-rose-400 to-pink-500',       border: 'border-rose-200',    glow: 'hover:shadow-rose-500/20',    text: 'text-rose-800' },
+  amber:   { iconBg: 'from-amber-400 to-orange-500',    border: 'border-amber-200',   glow: 'hover:shadow-amber-500/20',   text: 'text-amber-800' },
+  emerald: { iconBg: 'from-emerald-400 to-teal-500',    border: 'border-emerald-200', glow: 'hover:shadow-emerald-500/20', text: 'text-emerald-800' },
+  cyan:    { iconBg: 'from-cyan-400 to-blue-500',       border: 'border-cyan-200',    glow: 'hover:shadow-cyan-500/20',    text: 'text-cyan-800' },
+  violet:  { iconBg: 'from-violet-400 to-purple-500',   border: 'border-violet-200',  glow: 'hover:shadow-violet-500/20',  text: 'text-violet-800' },
+  fuchsia: { iconBg: 'from-fuchsia-400 to-pink-500',    border: 'border-fuchsia-200', glow: 'hover:shadow-fuchsia-500/20', text: 'text-fuchsia-800' },
+};
+
+// ============================================================
+// 헬퍼
+// ============================================================
+
+function formatScheduleTime(iso: string): string {
+  if (!iso) return '추후 안내';
+  // recommended_time 형식: "YYYY-MM-DD HH:mm" 또는 ISO
+  const cleaned = iso.replace(' ', 'T');
+  const date = new Date(cleaned);
+  if (isNaN(date.getTime())) return iso;
+  const month = date.getMonth() + 1;
+  const day = date.getDate();
+  const dayNames = ['일', '월', '화', '수', '목', '금', '토'];
+  const dow = dayNames[date.getDay()];
+  const hh = String(date.getHours()).padStart(2, '0');
+  const mm = String(date.getMinutes()).padStart(2, '0');
+  return `${month}/${day}(${dow}) ${hh}:${mm}`;
+}
+
+// ============================================================
+// 결과 카드 sub-component
+// ============================================================
+
+interface ResultCardProps {
+  accent: keyof typeof ACCENT_TOKENS;
+  icon: typeof Target;
+  label: string;
+  headline: string;
+  subtitle: string;
+  description?: string;
+  index: number;
+  extra?: React.ReactNode;       // ★ D165: 카드 본문 하단 풍부 인터랙션 슬롯 (3안 토글 / 차트 / breakdown 등)
+  className?: string;            // ★ D165: 그리드 col-span 등 외부 제어
+  truncateHeadline?: boolean;    // ★ D165: 메시지 카드처럼 긴 텍스트 truncate 끄기
+  onClick?: () => void;          // 2026-07-09: 있으면 카드 클릭 가능 (추천 타겟 → 추출 리스트 모달)
+  actionHint?: string;           // onClick 시 하단 어포던스 문구
+}
+
+function ResultCard({ accent, icon: Icon, label, headline, subtitle, description, index, extra, className, truncateHeadline = true, onClick, actionHint }: ResultCardProps) {
+  const tokens = ACCENT_TOKENS[accent];
+  return (
+    <div
+      onClick={onClick}
+      role={onClick ? 'button' : undefined}
+      tabIndex={onClick ? 0 : undefined}
+      onKeyDown={onClick ? (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onClick(); } } : undefined}
+      className={`group relative p-6 rounded-2xl bg-white backdrop-blur-xl border ${tokens.border} hover:bg-slate-100 hover:scale-[1.01] transition-all duration-300 shadow-lg ${tokens.glow} animate-in fade-in slide-in-from-bottom-3 fill-mode-both ${onClick ? 'cursor-pointer' : ''} ${className || ''}`}
+      style={{ animationDelay: `${index * 60}ms`, animationDuration: '500ms' }}
+    >
+      <div className="flex items-start gap-4 mb-4">
+        <div className={`flex-shrink-0 w-11 h-11 rounded-xl bg-gradient-to-br ${tokens.iconBg} flex items-center justify-center shadow-lg`}>
+          <Icon className="w-5 h-5 text-white" />
+        </div>
+        <div className="flex-1 min-w-0">
+          <p className={`text-[10px] font-semibold tracking-[0.22em] uppercase mb-1 ${tokens.text}`}>{label}</p>
+          <p className={`text-2xl font-bold text-slate-900 ${truncateHeadline ? 'truncate' : ''}`} title={headline}>{headline}</p>
+          <p className="text-xs text-slate-500 mt-0.5">{subtitle}</p>
+        </div>
+      </div>
+      {description && (
+        <p className="text-sm text-slate-500 leading-relaxed line-clamp-3 mb-3">{description}</p>
+      )}
+      {extra && <div className="mt-1">{extra}</div>}
+      {onClick && actionHint && (
+        <div className={`mt-2 flex items-center gap-1 text-[11px] font-semibold ${tokens.text} opacity-80 group-hover:opacity-100 transition-opacity`}>
+          {actionHint} <ArrowRight className="w-3 h-3" />
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ============================================================
+// 메인 페이지
+// ============================================================
+
+export default function AiLinePage() {
+  const navigate = useNavigate();
+  const customerGate = useCustomerDataGate(localStorage.getItem('token'));
+  const [showDataGate, setShowDataGate] = useState(false);
+  const { user } = useAuthStore();
+  const companyName = (user as any)?.company?.name || '';
+  // 종량제: AI 크레딧 잔여 (헤더 칩 — creditEnabled일 때만 표시)
+  // ★ 2026-10-07 임은지 접수: 회신번호 고르기(등록 번호 · 고객별 매장번호). '' = 회사 기본 번호(종전 동작 그대로)
+  const [cbList, setCbList] = useState<Array<{ phone: string; isDefault: boolean }>>([]);
+  const [cbChoice, setCbChoice] = useState('');
+  useEffect(() => {
+    (async () => {
+      try {
+        const r = await fetch('/api/companies/callback-numbers', { headers: { Authorization: `Bearer ${localStorage.getItem('token')}` } });
+        const d = r.ok ? await r.json().catch(() => null) : null;
+        setCbList((Array.isArray(d?.numbers) ? d.numbers : []).filter((c: any) => c?.phone).map((c: any) => ({ phone: String(c.phone), isDefault: !!c.is_default })));
+      } catch { /* 목록 실패 = 기본 번호로 보낸다(종전 동작) */ }
+    })();
+  }, []);
+  // ★ 2026-10-18 크레딧 칩 · 이력 창 = 머리 띠(AiHubBand)가 소유(원형 이동) · 확인 판 잔액은 띠가 읽은 값을 받는다
+  const [aiCredit, setAiCredit] = useState<AiCreditSummary | null>(null);
+  const [creditRefresh, setCreditRefresh] = useState(0);
+  const [showWhat, setShowWhat] = useState(false); // ★ 2026-08-21 제목 옆 ! 버튼 — 호버(데스크톱)·탭(모바일)로 설명을 연다
+  // ★ 2026-09-15 AI Operator = 요금제와 상관없이 누구나 들어온다(Harold 지시). 기능을 쓸 수 있는지는 서버가 정한다
+  //   (`/api/ai/operator/access` = isAiOperatorAllowed · 유료 요금제·AI 오퍼레이션 체험·슈퍼관리자).
+  //   못 쓰는 회사가 카드나 [생성]을 누르면 이동·호출 대신 공통 안내 창을 연다. 판정 전·조회 실패는 잠그지 않는다(서버가 다시 막는다).
+  const [planLocked, setPlanLocked] = useState(false);
+  const [planFeatureId, setPlanFeatureId] = useState<string | null>(null);
+  // ★ 2026-09-20 기능별 개방 플래그 — 카드 필터 축(설계서 §3-11). 모르면 빈 객체 = 그 카드는 안 보인다.
+  const [featureFlags, setFeatureFlags] = useState<Record<string, boolean>>({});
+  // ★ 2026-10-07 기능 안내 원장 = 서버(로그인한 사람에게만) · 화면에 들어오면 미리 받아 둔다
+  const featureIntros = usePlanFeatureIntros();
+  const [searchParams, setSearchParams] = useSearchParams();
+  // ★ 2026-10-18 AI 한줄로 새 흐름(서버 판정 features.aiLine · 꺼진 회사 = 옛 제안 흐름 그대로)
+  //   진행 상태 = run 하나(sessionStorage 보관 · 창을 닫아도 · 페이지를 떠나도 이어서 · 낸 결과 보존)
+  const [aiLineOn, setAiLineOn] = useState(false);
+  const [lineRun, setLineRunState] = useState<AiLineRun | null>(() => loadAiLineRun());
+  const [intakeOpen, setIntakeOpen] = useState(false);
+  const [lineLoadError, setLineLoadError] = useState<string | null>(null);
+  /** 결과 화면이 새 흐름 결과를 보여 주는 중(옛 결과 화면 칸을 새 흐름용으로 바꾼다) */
+  const [lineResultActive, setLineResultActive] = useState(false);
+  const setLineRun = (r: AiLineRun | null) => { setLineRunState(r); saveAiLineRun(r); };
+  /** runId 가 같을 때만 고친다(늦게 온 옛 응답이 새 진행을 덮지 않게) */
+  const patchLineRun = (runId: string, fn: (r: AiLineRun) => AiLineRun) => {
+    setLineRunState((prev) => {
+      if (!prev || prev.runId !== runId) return prev;
+      const next = fn(prev);
+      saveAiLineRun(next);
+      return next;
+    });
+  };
+  useEffect(() => {
+    let alive = true;
+    void fetchAiOperatorFeatures().then((f) => { if (alive) { setFeatureFlags(f); setAiLineOn(f.aiLine === true); } });
+    fetchAiOperatorAccess().then((allowed) => {
+      if (!alive) return;
+      const locked = allowed === false;
+      setPlanLocked(locked);
+      // 기능 화면 주소로 직접 들어왔다가 입구(PlanGate)에서 돌아온 경우 = 그 기능의 안내를 바로 연다
+      const intro = searchParams.get('intro');
+      if (intro) {
+        if (locked) void loadPlanFeatureIntros().then((d) => { if (alive && d?.find(intro)) setPlanFeatureId(intro); });
+        const next = new URLSearchParams(searchParams);
+        next.delete('intro');
+        setSearchParams(next, { replace: true });
+      }
+    });
+    return () => { alive = false; };
+    // 진입 1회만 판정한다(쿼리 정리로 searchParams가 바뀌어도 다시 묻지 않는다)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  // ★ D174 (2026-05-19): PerformancePage가 sessionStorage에 저장한 prefill objective 자동 로드
+  // ★ 2026-07-08 행사 캠페인은 "원클릭 캠페인" 타일(/quick-campaign)로 이전 — 여기선 입력창 이미지 버튼만.
+  const [objective, setObjective] = useState(() => {
+    if (typeof window === 'undefined') return '';
+    const prefill = sessionStorage.getItem('ai_operator_prefill_objective');
+    if (prefill) {
+      sessionStorage.removeItem('ai_operator_prefill_objective');
+      return prefill;
+    }
+    return '';
+  });
+  const [loading, setLoading] = useState(false);
+  const [progressStep, setProgressStep] = useState(0);
+  const [proposal, setProposal] = useState<ProposalResponse | null>(null);
+  // ★ 2026-07-22 (Harold 명시) 광고표기 on/off 토글 (직접발송 미러·기본 ON) — 제안 로드 시 AI 판정(마케팅=ON)으로 초기화
+  const [adEnabled, setAdEnabled] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  // ★ D165: 메시지 3안 토글 + 다듬기 모달 + 다듬기 결과 오버라이드
+  const [selectedVariantIdx, setSelectedVariantIdx] = useState(0);
+  const [showRefineModal, setShowRefineModal] = useState(false);
+  const [refinedOverrides, setRefinedOverrides] = useState<Record<number, string>>({});
+  // ★ 2026-10-05 한줄로 시그니처 — 묻는 창 · 3안 선택 기록(AI 꾸미기를 거친 안 · C안 시험 종류)
+  const [askFactsOpen, setAskFactsOpen] = useState(false);
+  const [aiRefinedIdx, setAiRefinedIdx] = useState<Record<number, true>>({});
+  const [proposalCVariant, setProposalCVariant] = useState<'mz' | 'punchy' | null>(null);
+  // ★ 2026-07-10 (임은지 리포트): LMS/MMS 제목 확인·수정 — 변형별 제목 편집 오버라이드 (화면 표시 = 발송 값)
+  const [subjectOverrides, setSubjectOverrides] = useState<Record<number, string>>({});
+  const [editingBody, setEditingBody] = useState(false); // ★ 2026-06-19: 생성 문안 직접 편집(타이핑) 모드
+  const [copiedAt, setCopiedAt] = useState<number | null>(null);
+  // ★ D166: 승인 → 발송 흐름 (preview-recipients + /direct-send 2-step)
+  const [sending, setSending] = useState(false);
+  const [sendError, setSendError] = useState<string | null>(null);
+  // ★ 2026-09-12 발신 인증(전송자격인증 3.5) — 승인 발송도 같은 경로(/direct-send)를 쓴다
+  const senderAuth = useSenderAuth();
+  const [confirm, setConfirm] = useState<ConfirmState | null>(null);
+  const [sendResult, setSendResult] = useState<{
+    campaignId: string;
+    sentCount: number;
+    failCount: number;
+    unsubscribeCount?: number;
+    message: string;
+    suggestedName: string;
+    // ★ 2026-08-17 예약 여부·예정 시각을 결과에 실는다. 전에는 이 값이 없어서 예약이든 즉시든
+    //   화면이 똑같이 "발송 처리 완료 · 발송 성공 0건"을 띄웠고, 사용자는 **나갔는데 실패했다**고 읽었다
+    //   (실측: 기본 모드가 AI 추천 예약이라 승인만 하면 예약인데 그 사실이 화면 어디에도 없었다).
+    scheduledAt: string | null;
+  } | null>(null);
+  // ★ D170+ (Harold 명시 2026-05-19): 발송 시점 안전장치 구현
+  //   'aiRecommended' = AI 추천 시점 그대로 예약 발송 (미래 시점이면)
+  //   'immediate' = 지금 즉시 발송 (사용자 명시 선택)
+  //   'custom' = 사용자가 직접 시점 선택 (datetime-local input)
+  type SendMode = 'aiRecommended' | 'immediate' | 'custom';
+  const [sendMode, setSendMode] = useState<SendMode>('aiRecommended');
+  const [customScheduledAt, setCustomScheduledAt] = useState<string>(''); // YYYY-MM-DDTHH:mm 형식
+  // 2026-07-09: "직접 시점 선택" 클릭 시 모달 피커 바로 오픈 (DateTimeField 제어형 오픈)
+  const [customPickerOpen, setCustomPickerOpen] = useState(false);
+  // ★ 2026-07-10 [타겟확인] 오퍼레이터판: 추천 타겟 카드 클릭 → 조건 필드 동적 컬럼 + 상한 100 리스트 (Harold 지시 — 자동마케팅과 동일 계약).
+  //   옛 preview-recipients 전량(최대 10,000행) 브라우저 적재 폐기 → target-recipients(LIMIT 100 단일 쿼리) 1회 로드 + 클라 페이징.
+  //   발송(preview-recipients → /direct-send 2-step)은 무변경 — 이 로더는 열람 전용.
+  const [showTargetList, setShowTargetList] = useState(false);
+  const [targetListCols, setTargetListCols] = useState<{ key: string; label: string }[]>([]);
+  const targetAllRef = useRef<Promise<TargetRecipient[]> | null>(null);
+  const openTargetList = () => { targetAllRef.current = null; setTargetListCols([]); setShowTargetList(true); };
+  const targetFetchPage: TargetPageLoader = async (pageNo, size) => {
+    if (!proposal) return { recipients: [], total: 0 };
+    if (!targetAllRef.current) {
+      const token = localStorage.getItem('token');
+      targetAllRef.current = fetch('/api/ai/operator/target-recipients', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        // ★ 2026-10-15 B-1015-1: 전체 고객 제안은 allCustomers 로 연다(빈 filters 만 보내면 서버가 "조건 못 옮김" 으로 거절)
+        body: JSON.stringify({ filters: proposal.target.filters, allCustomers: proposal.target.allCustomers === true }),
+      })
+        .then((r) => r.json())
+        .then((d) => {
+          if (!d || d.success === false) throw new Error(d?.error || '추출 대상 조회에 실패했습니다.');
+          // ★ 2026-08-05: 매장 미배정이면 서버가 사유(blockedReason)와 함께 빈 목록을 준다. 종전엔 그 사유를
+          //   버리고 빈 배열만 넘겨 공용 모달이 "조건에 맞는 대상이 0명입니다 · 조건을 넓히거나"를 그렸다 —
+          //   원인이 조건이 아닌데 조건 완화를 유도한다. 공용 모달은 손대지 않고 호출부에서 사유를 그대로 올린다.
+          if (typeof d.blockedReason === 'string' && d.blockedReason.trim()) throw new Error(d.blockedReason.trim());
+          setTargetListCols(Array.isArray(d.conditionColumns) ? d.conditionColumns : []);
+          return (d.recipients || []) as TargetRecipient[];
+        })
+        .catch((e) => { targetAllRef.current = null; throw e; }); // 실패 시 캐시 비움 — 재시도 가능(모달이 에러 표시)
+    }
+    const all = await targetAllRef.current;
+    return { recipients: all.slice((pageNo - 1) * size, pageNo * size), total: all.length };
+  };
+  // ★ D210+ Phase 2-fix4 (Harold 명시 2026-05-23): 원본/적용 토글 + 상위 고객 샘플 데이터
+  //   - sampleCustomer = displayName 키 매트릭스 ({ "고객명": "...", "등급": "...", ... })
+  //   - showMergedPreview = false (변수 강조 원본 표시) / true (상위 고객 데이터 치환 적용 표시)
+  const [sampleCustomer, setSampleCustomer] = useState<Record<string, string | number | null> | null>(null);
+  // ★ D210+ Phase 2-fix9 (Harold 명시 2026-05-23): Liquid 렌더링 영역 (field 키 매트릭스) — renderLiquid 호출 시 customer.X 매칭.
+  const [sampleCustomerFields, setSampleCustomerFields] = useState<Record<string, any> | null>(null);
+  const [showMergedPreview, setShowMergedPreview] = useState(false);
+  // ★ 2026-06-29: AI 꾸미기 — 활용 가능 컬럼(data-profile 안전 변수) 다중 선택 + 재작성
+  const [dataProfileVars, setDataProfileVars] = useState<Array<{ token: string; label: string }>>([]);
+  const [selectedVars, setSelectedVars] = useState<Set<string>>(new Set());
+  const [decorating, setDecorating] = useState(false);
+  // ★ 2026-06-29: AI 제안 요약 모달 (장황한 분석 섹션 통합 — 탭 분리)
+  const [showSummary, setShowSummary] = useState(false);
+  // 2026-07-09: 추천 채널 유형 변경(SMS/LMS/MMS) — null이면 AI 추천 채널 사용
+  const [channelOverride, setChannelOverride] = useState<string | null>(null);
+  // 2026-07-09: MMS 이미지 첨부 모달 + 공용 업로드 훅 + 모달 내부 에러
+  const [showMmsModal, setShowMmsModal] = useState(false);
+  const [mmsError, setMmsError] = useState<string | null>(null);
+  const {
+    mmsUploadedImages,
+    setMmsUploadedImages,
+    mmsUploading,
+    handleMmsSlotUpload,
+    handleMmsMultiUpload,
+    handleMmsImageRemove,
+    handleMmsFromAsset,
+    handleMmsImageSwap,
+  } = useMmsUpload((msg) => setMmsError(msg));
+  // 채널 변경 시 예상 비용 재계산용 회사 실단가 (SMS/LMS/MMS) — 임의 상수 미사용
+  const [pricing, setPricing] = useState<{ sms: number; lms: number; mms: number } | null>(null);
+
+  // 실효 발송 채널 = 사용자 변경값 우선, 없으면 AI 추천
+  const effectiveChannel = (channelOverride || proposal?.channel?.recommended || 'SMS').toUpperCase();
+  // ★ 2026-07-10 (임은지 리포트): LMS/MMS 제목 단일 산출 — 제목 입력창 표시 값 = handleApprove 발송 값.
+  //   편집값 → AI 제목 → 캠페인명 → 회사명 fallback.
+  //   ★ 2026-10-15 B-1015-2: 상한 = 다른 발송 화면과 같은 LMS_SUBJECT_MAX_CHARS(40). 옛 17자는 AI 가 넣는 「[브랜드명] 」 까지 세어
+  //   「쿠폰 아직 못 받」처럼 제목을 중간에서 잘랐다(브랜드가 길수록 더 짧아졌다).
+  const resolveSubject = (idx: number): string => {
+    const ov = subjectOverrides[idx];
+    if (ov != null) return ov;
+    const v = proposal?.messages?.[idx];
+    return (v?.subject || proposal?.target?.suggestedName || `${companyName || ''} AI 캠페인`.trim() || 'AI Operator').slice(0, LMS_SUBJECT_MAX_CHARS);
+  };
+  // 실효 단가/예상비용 — 채널 변경 시 회사 실단가로 재계산 (미변경 시 백엔드 계산값=진실)
+  const effectiveUnitCost = (() => {
+    if (!proposal) return 0;
+    const baseUnit = proposal.cost?.unitCost || 0; // zero-target 등 cost 부재 방어
+    if (!channelOverride && baseUnit > 0) return baseUnit;   // ★ 2026-10-18 새 흐름 결과는 단가를 회사 단가표에서 읽는다(아래)
+    if (pricing) {
+      const key = effectiveChannel === 'MMS' ? 'mms' : effectiveChannel === 'LMS' ? 'lms' : 'sms';
+      const v = pricing[key];
+      if (v > 0) return v;
+    }
+    return baseUnit; // 단가 미확보 시 fallback — 실제 차감은 발송 시 백엔드 확정
+  })();
+  const effectiveEstimatedCost = proposal ? Math.round((proposal.target?.count || 0) * effectiveUnitCost) : 0;
+
+  // textarea 자동 높이 조절
+  useEffect(() => {
+    const ta = textareaRef.current;
+    if (!ta) return;
+    ta.style.height = 'auto';
+    ta.style.height = `${Math.min(ta.scrollHeight, 200)}px`;
+  }, [objective]);
+
+  // 로딩 시 sub-agent 단계 자동 진행
+  useEffect(() => {
+    if (!loading) return;
+    if (progressStep >= SUB_AGENT_STEPS.length) return;
+    const timer = setTimeout(() => {
+      setProgressStep((s) => Math.min(s + 1, SUB_AGENT_STEPS.length));
+    }, 1500);
+    return () => clearTimeout(timer);
+  }, [loading, progressStep]);
+
+  // ★ 2026-06-29: 활용 가능 컬럼 — data-profile 안전 변수 fetch (AI 꾸미기 다중 선택용)
+  useEffect(() => {
+    const token = localStorage.getItem('token');
+    if (!token) return;
+    fetch('/api/ai/operator/data-profile', { headers: { Authorization: `Bearer ${token}` } })
+      .then((r) => r.json())
+      .then((d) => {
+        if (d?.success && Array.isArray(d.safeFields)) {
+          setDataProfileVars(
+            d.safeFields.map((f: any) => ({
+              token: String(f.percentVar || f.label || '').trim(),
+              label: String(f.label || f.percentVar || '').trim(),
+            })).filter((v: { token: string }) => v.token),
+          );
+        }
+      })
+      .catch(() => {});
+  }, []);
+
+  // 2026-07-09: 회사 실단가 로드 — 채널 변경 시 예상 비용 재계산용 (임의 상수 미사용)
+  useEffect(() => {
+    const token = localStorage.getItem('token');
+    if (!token) return;
+    fetch('/api/companies/settings', { headers: { Authorization: `Bearer ${token}` } })
+      .then((r) => r.json())
+      .then((d) => {
+        if (!d) return;
+        const sms = Number(d.cost_per_sms);
+        const lms = Number(d.cost_per_lms);
+        const mms = Number(d.cost_per_mms);
+        if ([sms, lms, mms].some((v) => Number.isFinite(v) && v > 0)) {
+          setPricing({ sms: sms || 0, lms: lms || 0, mms: mms || 0 });
+        }
+      })
+      .catch(() => {});
+  }, []);
+
+  // ★ 2026-06-30 (A7 정정): 변형 클릭마다 그 변형이 실제 쓴 %변수%만 자동 체크 (변형마다 다른 컬럼 정확 반영)
+  useEffect(() => {
+    if (!proposal) return;
+    const variants = proposal.messages || [];
+    if (variants.length === 0) return;
+    const idx = Math.min(selectedVariantIdx, variants.length - 1);
+    const body = refinedOverrides[idx] || variants[idx]?.body || '';
+    const validTokens = new Set(dataProfileVars.map((v) => v.token));
+    const used = new Set<string>();
+    // 본문 %고객명% → 칩 토큰은 % 없는 bare('고객명')라 캡처그룹으로 비교
+    for (const mt of Array.from(String(body).matchAll(/%([^%]+)%/g))) {
+      if (validTokens.has(mt[1])) used.add(mt[1]);
+    }
+    setSelectedVars(used);
+  }, [selectedVariantIdx, proposal, dataProfileVars, refinedOverrides]);
+
+  // ★ D210+ Phase 2-fix5 (Harold 명시 2026-05-23): 옛 mount 시 fetch 제거.
+  //   사고 = 회사 전체 고객 안 1건 fetch (filter X). 정정 = handleSubmit 안 proposal.target.filters 매칭 영역 안 1건 fetch.
+  //   본 영역 = 옛 useEffect 폐기 정합 (handleSubmit 안 fetch 정합).
+
+  // ★ 2026-10-18 새 흐름 — 창을 바로 열고 read(AI 0) · intake(대상 AI · 기본 2) 를 함께 부른다. 같은 한 줄로 만들던 진행이 있으면 이어서.
+  const startLine = async () => {
+    const line = objective.trim();
+    setError(null);
+    setLineLoadError(null);
+    if (lineRun && lineRun.line === line && lineRun.intake) {
+      setIntakeOpen(true);
+      return;
+    }
+    const fresh = newAiLineRun(line);
+    setLineRun(fresh);
+    setIntakeOpen(true);
+    const id = fresh.runId;
+    void aiLineApi.read(line)
+      .then((r) => patchLineRun(id, (cur) => ({ ...cur, read: r, branch: r.branch || 'sms' })))
+      .catch(() => { /* 판정 실패 = 빠진 것을 묻지 않고 확인 판으로 */ });
+    try {
+      const it = await aiLineApi.intake(line);
+      patchLineRun(id, (cur) => ({ ...cur, intake: it, channel: it.channel }));
+      setCreditRefresh((x) => x + 1);
+    } catch (e) {
+      setLineLoadError(e instanceof Error ? e.message : '받을 고객을 찾지 못했어요. 잠시 뒤 다시 시도해 주세요.');
+    }
+  };
+
+  /** 새 흐름 결과 → 옛 결과 화면이 읽는 제안 형태(발송 시점 · 채널 · 회신번호 · 편집기 · 승인 발송을 그대로 쓴다) */
+  const applyLineResult = (r: AiLineRun) => {
+    const it = r.intake;
+    if (!it || r.cards.length === 0) return;
+    const count = r.liveCount ?? it.count;
+    const unit = pricing ? (r.channel === 'MMS' ? pricing.mms : r.channel === 'LMS' ? pricing.lms : pricing.sms) : 0;
+    const conds = it.conditions.filter((c) => !r.offKeys.includes(c.key)).map((c) => c.text);
+    setProposal({
+      success: true,
+      target: {
+        count, totalCount: count,
+        criteria: conds.length ? conds.join(' · ') : '전체 고객',
+        filters: activeFilters(r), allCustomers: allCustomersFlag(r), suggestedName: it.suggestedName,
+      },
+      messages: r.cards.map((c) => ({ variantId: c.type, variantName: c.label, concept: '', body: c.body, subject: c.subject, byteCount: c.byteCount, score: 0 })),
+      recommendation: it.recommend?.type || '',
+      recommendationReason: it.recommend?.reason || '',
+      channel: { recommended: r.channel, reason: '', isAd: it.isAd, rejectNumber: it.rejectNumber },
+      schedule: { recommendedTime: it.recommendedTime },
+      cost: { estimated: Math.round(count * unit), unitCost: unit, breakdown: '' },
+      performance: { expectedClicks: 0, expectedConversions: 0, expectedRevenue: 0, clickRate: 0, conversionRate: 0 },
+      meta: { usePersonalization: r.vars.length > 0, personalizationVars: r.vars, useIndividualCallback: false, generatedAt: new Date().toISOString() },
+    });
+    setLineResultActive(true);
+    setChannelOverride(null);
+    setAdEnabled(it.isAd);
+    const pickIdx = r.cards.findIndex((c) => c.type === (r.picked || r.cards[0].type));
+    setSelectedVariantIdx(Math.max(0, pickIdx));
+    // 다듬은 글 = 진행 상태에서(새로 고침 · 다시 열기 뒤에도 같은 글 · 보내는 값 = refinedOverrides 하나)
+    const ro: Record<number, string> = {};
+    const so: Record<number, string> = {};
+    r.cards.forEach((c, i) => {
+      const e = r.edits[c.type];
+      if (typeof e?.body === 'string') ro[i] = e.body;
+      if (typeof e?.subject === 'string') so[i] = e.subject;
+    });
+    setRefinedOverrides(ro);
+    setSubjectOverrides(so);
+    setAiRefinedIdx({});
+    setProposalCVariant(null);
+    setEditingBody(false);
+    setSampleCustomer(it.sampleCustomer);
+    setSampleCustomerFields(null);
+    setMmsError(null);
+    setMmsUploadedImages([]);
+    setSendResult(null);
+    setSendError(null);
+  };
+
+  const handleSubmit = async (facts?: { benefit: string | null }) => {
+    if (planLocked) { setPlanFeatureId(aiLineOn ? 'ai-line' : 'ai-operator'); return; }
+    if (customerGate.isEmpty) { setShowDataGate(true); return; }
+    if (objective.trim().length < 5) {
+      setError('마케팅 목표를 한 줄로 입력해주세요 (5자 이상).');
+      return;
+    }
+    // ★ 2026-10-18 새 흐름 켠 회사 = 확인 창(빠진 것만 · 확인 판) · 그 밖 = 옛 제안 흐름 그대로
+    if (aiLineOn && !facts) { void startLine(); return; }
+    setLineResultActive(false);
+    setError(null);
+    setLoading(true);
+    setProgressStep(0);
+    setProposal(null);
+    // 새 제안 = 새 추천 채널 → 유형 변경/첨부 이미지 초기화
+    setChannelOverride(null);
+    setMmsError(null);
+    setMmsUploadedImages([]);
+    // ★ 2026-07-10 Codex 지적: 재생성 시 이전 제안의 편집 본문/제목/선택 탭이 새 제안에 살아남던 문제 — 생성 시점 초기화
+    setRefinedOverrides({});
+    setSubjectOverrides({});
+    setSelectedVariantIdx(0);
+    setEditingBody(false);
+    setAiRefinedIdx({});
+    setProposalCVariant(null);
+
+    try {
+      const token = localStorage.getItem('token');
+      const res = await fetch('/api/ai/operator/propose', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        // ★ 2026-10-05 한줄로 시그니처 — 묻는 창에서 받은 답(null = 혜택 없음)을 함께 보낸다
+        body: JSON.stringify({ objective: objective.trim(), ...(facts ? { facts } : {}) }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        throw new Error(data.error || '제안서 생성에 실패했습니다.');
+      }
+      // ★ 2026-10-05 판정이 걸리면 서버가 만들지 않고(생성 0 · 차감 0) 먼저 묻는다 → 답을 받아 같은 한 줄로 다시 보낸다
+      if (data.needsFacts?.benefit) {
+        setLoading(false);
+        setProgressStep(0);
+        setAskFactsOpen(true);
+        return;
+      }
+      setProposalCVariant(data.copyCVariant === 'mz' || data.copyCVariant === 'punchy' ? data.copyCVariant : null);
+      // ★ D210+ Phase 2-fix7 (Harold 명시 2026-05-23): AI 응답 후 진행 시각 확보 영역.
+      //   옛 사고 = setTimeout 600ms 즉시 setLoading(false) → 진행 시각 효과 영역 X (즉시 사라짐).
+      //   정정 = 1500ms 후 마지막 단계 완료 표시 + 2200ms 후 화면 전환 (사용자 자연 시각 흐름).
+      setTimeout(() => {
+        setProgressStep(SUB_AGENT_STEPS.length);
+      }, 1500);
+      setTimeout(() => {
+        setProposal(data as ProposalResponse);
+        setAdEnabled(!!(data as ProposalResponse).channel?.isAd); // 새 제안마다 광고표기 = AI 판정으로 초기화(마케팅=ON)
+        setLoading(false);
+
+        // ★ D210+ Phase 2-fix5 (Harold 명시 2026-05-23): 추출 타겟 안 상위 1건 고객 fetch (filters body 영역).
+        //   본질 = proposal.target.filters 매칭 안 LTV/누적구매 상위 1건 → 원본/적용 토글 머지 정확.
+        const filters = (data as ProposalResponse).target?.filters || {};
+        fetch('/api/ai/operator/sample-customer', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify({ filters }),
+        })
+          .then((sr) => sr.json())
+          .then((sd) => {
+            if (sd?.success && sd.sampleCustomer) {
+              setSampleCustomer(sd.sampleCustomer);
+              setSampleCustomerFields(sd.sampleCustomerFields || null);
+            } else {
+              setSampleCustomer(null);
+              setSampleCustomerFields(null);
+            }
+          })
+          .catch(() => {
+            setSampleCustomer(null);
+            setSampleCustomerFields(null);
+          });
+      }, 3700);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '오류가 발생했습니다.');
+      setLoading(false);
+      setProgressStep(0);
+    }
+  };
+
+  const handleReset = () => {
+    setProposal(null);
+    // ★ 2026-10-18 새 흐름 진행 상태도 지운다(새 한 줄 = 새 진행)
+    setLineRun(null);
+    setLineResultActive(false);
+    setIntakeOpen(false);
+    setObjective('');
+    setError(null);
+    setProgressStep(0);
+    setSendResult(null);
+    setSendError(null);
+    setRefinedOverrides({});
+    setSubjectOverrides({});
+    setEditingBody(false);
+    setSelectedVariantIdx(0);
+    setAiRefinedIdx({});
+    setProposalCVariant(null);
+    // ★ D210+ Phase 2-fix5 (Harold 명시 2026-05-23): 새 입력 진입 시 옛 sample-customer 영역 초기화
+    setSampleCustomer(null);
+    setSampleCustomerFields(null);
+    setShowMergedPreview(false);
+    setSelectedVars(new Set());
+    // 유형 변경/MMS 첨부 초기화
+    setChannelOverride(null);
+    setShowMmsModal(false);
+    setMmsError(null);
+    setMmsUploadedImages([]);
+    textareaRef.current?.focus();
+  };
+
+  // ★ 2026-06-30 (A7): AI 꾸미기 — 체크된 컬럼(%변수%)을 생성된 변형 전부에 일괄 적용 → 본문 오버라이드
+  const handleDecorate = async () => {
+    if (!proposal) return;
+    if (selectedVars.size === 0) { setError('녹여 넣을 컬럼을 1개 이상 선택해주세요.'); return; }
+    const variants = proposal.messages || [];
+    if (variants.length === 0) return;
+    const bodies = variants.map((m, i) => refinedOverrides[i] || m.body || '');
+    const ch = effectiveChannel.toLowerCase();
+    const channel = ch.includes('mms') ? 'mms' : ch.includes('sms') ? 'sms' : 'lms';
+    setDecorating(true);
+    setError(null);
+    try {
+      const token = localStorage.getItem('token');
+      const res = await fetch('/api/ai/operator/decorate-message', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ messages: bodies, selectedVars: Array.from(selectedVars), channel, isAd: adEnabled }),
+      });
+      const data = await res.json();
+      if (data.success && Array.isArray(data.messages)) {
+        setRefinedOverrides((prev) => {
+          const next = { ...prev };
+          (data.messages as string[]).forEach((msg, i) => { if (typeof msg === 'string' && msg.trim()) next[i] = msg; });
+          return next;
+        });
+        setAiRefinedIdx((prev) => {
+          const next = { ...prev };
+          (data.messages as string[]).forEach((msg, i) => { if (typeof msg === 'string' && msg.trim()) next[i] = true; });
+          return next;
+        });
+      } else {
+        setError(data.error || 'AI 꾸미기에 실패했습니다. 다시 시도해주세요.');
+      }
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'AI 꾸미기 중 오류가 발생했습니다.');
+    } finally {
+      setDecorating(false);
+    }
+  };
+
+  // 실제 발송 실행 — /direct-send 호출 + 결과 반영 (검증/확인 통과 후 진입)
+  const performDirectSend = async (
+    sendBody: Record<string, unknown>,
+    suggestedName: string,
+  ) => {
+    setSending(true);
+    setSendError(null);
+    try {
+      const token = localStorage.getItem('token');
+      const sendRes = await fetch('/api/campaigns/direct-send', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify(sendBody),
+      });
+      const sendData = await sendRes.json();
+      // ★ 2026-09-12 발신 인증(전송자격인증 3.5) — 인증 뒤 이 발송을 그대로 다시 실행한다
+      if (senderAuth.handleResponse(sendData, () => performDirectSend(sendBody, suggestedName))) return;
+      // ★ 2026-10-07 개별 회신 — 회신번호 없는·미등록 고객 제외 확인(직접발송과 같은 응답)
+      // ★ 2026-10-12 남지현 접수: 이 발송을 부르는 확인 창 onConfirm 은 발송을 기다리지 않는다(void · 아래 두 곳 포함).
+      //   공용 확인 창은 onConfirm 이 끝나면 자기를 닫는데(onClose = setConfirm(null)), 기다리게 두면 여기서 연 이 창까지
+      //   함께 지워져 [예약하기]를 눌러도 창만 꺼지고 예약이 안 됐다(운영 로그 4건 모두 이 확인 반환 · 제외 확인 0건).
+      //   다른 발송 창(MakeSendModal · DmSendAndTrackModal)과 같은 형태다. 요청 중 표시는 아래 [발송 처리 중...] 버튼이 한다.
+      if (sendRes.ok && sendData.callbackConfirmRequired) {
+        setConfirm({
+          mode: 'warning',
+          title: '회신번호 없는 고객 제외',
+          description: String(sendData.message || ''),
+          confirmLabel: '제외하고 보내기',
+          onConfirm: () => { void performDirectSend({ ...sendBody, confirmCallbackExclusion: true }, suggestedName); },
+        });
+        return;
+      }
+      if (!sendRes.ok || !sendData.success) {
+        throw new Error(sendData.error || '발송 처리 실패');
+      }
+      setSendResult({
+        campaignId: sendData.campaignId,
+        sentCount: sendData.sentCount || 0,
+        failCount: sendData.failCount || 0,
+        unsubscribeCount: sendData.unsubscribeCount || 0,
+        message: sendData.message || '',
+        suggestedName,
+        // 예약 여부는 요청 본문이 이미 알고 있다 — 서버 응답을 기다릴 필요가 없다.
+        scheduledAt: sendBody.scheduled ? (sendBody.scheduledAt as string | null) ?? null : null,
+      });
+    } catch (err) {
+      setSendError(err instanceof Error ? err.message : '발송 오류가 발생했습니다.');
+    } finally {
+      setSending(false);
+    }
+  };
+
+  // ★ D166: 승인 발송 — 2-step (preview-recipients → /direct-send)
+  const handleApprove = async () => {
+    if (!proposal || sending) return;
+    setSending(true);
+    setSendError(null);
+    setSendResult(null);
+
+    try {
+      const token = localStorage.getItem('token');
+
+      // 1. recipients 조회
+      const previewRes = await fetch('/api/ai/operator/preview-recipients', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        // ★ 2026-10-15 B-1015-1: 전체 고객 제안은 allCustomers 로 연다(리스트 조회와 같은 신호)
+        body: JSON.stringify({ filters: proposal.target.filters, allCustomers: proposal.target.allCustomers === true }),
+      });
+      const previewData = await previewRes.json();
+      if (!previewRes.ok || !previewData.success) {
+        throw new Error(previewData.error || '수신자 조회 실패');
+      }
+      const recipients: Array<Record<string, unknown>> = previewData.recipients || [];
+      if (recipients.length === 0) {
+        throw new Error('발송 대상 고객이 없습니다. 타겟 조건을 조정해주세요.');
+      }
+      // ★ 2026-09-25 한줄로 전수점검 C-07: 조회는 1만 명까지만 싣는다. 실제 대상이 더 많으면 일부만 조용히 나가던 것을
+      //   막는다(누가 빠질지도 정해지지 않았다). 서버가 실제 대상 수(total)를 함께 준다.
+      const audienceTotal = Number(previewData.total) || recipients.length;
+      if (audienceTotal > recipients.length) {
+        throw new Error(`발송 대상이 ${audienceTotal.toLocaleString()}명이라 보내지 않았습니다. AI 운영자 승인 발송은 한 번에 ${recipients.length.toLocaleString()}명까지 보낼 수 있습니다. 조건을 좁혀 다시 제안받아 주세요.`);
+      }
+      const individualCb = cbChoice === INDIVIDUAL_CB;
+      const chosenCb = individualCb ? '' : (cbChoice || previewData.defaultCallback || '');
+      if (!individualCb && !chosenCb) {
+        throw new Error('기본 회신번호가 등록되지 않았습니다. 발신번호 관리에서 등록 후 다시 시도해주세요.');
+      }
+
+      // 2. 선택된 안 추출
+      const idx = Math.min(selectedVariantIdx, Math.max(0, proposal.messages.length - 1));
+      const variant = proposal.messages[idx];
+      if (!variant) throw new Error('선택된 메시지가 없습니다.');
+      const body = refinedOverrides[idx] || variant.body || '';
+      if (!body || body.length < 5) throw new Error('메시지 본문이 비어있습니다. 다시 생성해주세요.');
+
+      const channel = effectiveChannel; // 사용자 유형 변경(SMS/LMS/MMS) 반영
+      const isLmsOrMms = channel === 'LMS' || channel === 'MMS';
+      // ★ 2026-07-10: LMS/MMS subject = 화면 제목 입력창과 동일 산출(resolveSubject — 편집값 → AI 제목 → 캠페인명 fallback · 상한 = LMS_SUBJECT_MAX_CHARS)
+      const subject = isLmsOrMms ? resolveSubject(idx).slice(0, LMS_SUBJECT_MAX_CHARS) : '';
+      if (isLmsOrMms && !subject.trim()) {
+        throw new Error('제목이 비어있습니다. 본문 위 제목 입력창에 제목을 입력해주세요.');
+      }
+      // ★ 2026-09-10 문자로 보낼 수 없는 글자가 남아 있으면 발송하지 않는다(설계 D2 · 본문 아래 안내에서 바꾼다)
+      if (hasUnsupportedSmsChars(body, subject)) throw new Error(SMS_CHARSET_BLOCK_MESSAGE);
+
+      // 2026-07-09: MMS 이미지 필수 사전 차단 — 백엔드 도달 전 친절 안내 + 첨부 모달 오픈
+      const mmsImagePaths = channel === 'MMS' ? toMmsImagePaths(mmsUploadedImages) : [];
+      const mmsErr = validateMmsBeforeSend(channel, mmsImagePaths.length);
+      if (mmsErr) {
+        setMmsError(mmsErr);
+        setShowMmsModal(true);
+        throw new Error(mmsErr);
+      }
+      // SMS 90byte 초과 차단 — 광고 문구 잘림/컴플라이언스 손실 방지 (LMS 권장)
+      if (channel === 'SMS') {
+        let sb = 0;
+        for (let i = 0; i < body.length; i++) sb += body.charCodeAt(i) > 0x7F ? 2 : 1;
+        if (sb > 90) throw new Error('본문이 SMS(90byte)를 초과합니다. 채널을 LMS로 변경 후 발송해주세요.');
+      }
+
+      // ★ D170+ (Harold 명시): 발송 시점 안전장치 구현 — AI 추천/즉시/사용자 직접 분기
+      let scheduled = false;
+      let scheduledAt: string | null = null;
+      const now = Date.now();
+      const MIN_FUTURE_MS = 60 * 1000; // 1분 이상 미래여야 예약 발송으로 처리
+
+      if (sendMode === 'aiRecommended') {
+        // AI 추천 시점이 미래면 예약, 과거/현재면 즉시 발송
+        const recRaw = proposal.schedule.recommendedTime || '';
+        if (recRaw) {
+          const recDate = new Date(recRaw.replace(' ', 'T'));
+          if (!isNaN(recDate.getTime()) && recDate.getTime() > now + MIN_FUTURE_MS) {
+            scheduled = true;
+            scheduledAt = recDate.toISOString();
+          }
+        }
+      } else if (sendMode === 'immediate') {
+        // 즉시 발송 — 사용자 명시 선택
+        scheduled = false;
+      } else if (sendMode === 'custom') {
+        // 사용자가 직접 선택한 시점
+        if (!customScheduledAt) {
+          throw new Error('예약 발송 시점을 선택해주세요.');
+        }
+        const customDate = new Date(customScheduledAt);
+        if (isNaN(customDate.getTime())) {
+          throw new Error('예약 시점 형식이 올바르지 않습니다.');
+        }
+        if (customDate.getTime() <= now + MIN_FUTURE_MS) {
+          throw new Error('예약 시점은 현재로부터 1분 이상 미래여야 합니다.');
+        }
+        // 발송 허용 시간대 (08:00 ~ 21:00 KST) — 한줄로 SEND_HOURS 정합
+        const hour = customDate.getHours();
+        if (hour < 8 || hour >= 21) {
+          throw new Error('예약 시점은 08:00 ~ 21:00 사이여야 합니다.');
+        }
+        scheduled = true;
+        scheduledAt = customDate.toISOString();
+      }
+
+      // 3. 발송 페이로드 구성 (기존 /direct-send 재사용 — 검증된 흐름 + 라인그룹/중복제거/회신번호 가드 자동)
+      const suggestedName = proposal.target.suggestedName || 'AI Operator 캠페인';
+
+      const sendBody: Record<string, unknown> = {
+        msgType: channel,
+        subject,
+        message: body,
+        // ★ 2026-10-07 개별 회신 = 고객별 매장번호(store_phone) · 미보유·미등록 고객은 /direct-send CT-08이 제외 확인을 돌려준다
+        callback: individualCb ? undefined : chosenCb,
+        useIndividualCallback: individualCb,
+        recipients,
+        adEnabled, // ★ 2026-07-22 사용자 광고표기 토글(직접발송 미러·기본 ON) — /direct-send가 D143로 사용자 선택 존중
+        scheduled,
+        scheduledAt,
+        sendChannel: 'sms',
+        dedupEnabled: true,
+        unsubFilterEnabled: true,
+        mmsImagePaths, // MMS 선택 시 첨부 이미지 경로 (그 외 [])
+        // ★ 2026-08-18 출처를 밝힌다 (Harold 접수 "AI 오퍼레이터로 보냈는데 직접발송으로 뜬다").
+        //   이 화면은 직접발송과 같은 `/direct-send` 배관을 쓰는데, 그 라우트가 유형을 'direct'로 고정하고
+        //   캠페인명도 `직접발송 {일시}`로 덮어써서 행에 오퍼레이터 흔적이 하나도 안 남았다.
+        //   값의 정의는 백엔드 CT(`utils/send-type-axis.ts`)가 소유한다 — 여기서 새 값을 지어내지 않는다.
+        sendType: 'operator',
+        // ★ 2026-10-05 한줄로 시그니처 §6 — 3안 중 무엇을 골라 그대로 보냈는지(학습 로그 · 검증은 서버 적재기 안 · 발송과 무관)
+        aiVariants: {
+          messages: proposal.messages.map((m) => m.body || ''),
+          names: proposal.messages.map((m) => m.variantName || ''),
+          selectedIndex: idx,
+          recommendedIndex: (() => {
+            const r = proposal.recommendation || '';
+            const i = proposal.messages.findIndex((m) => r === m.variantId || (!!m.variantName && r.includes(m.variantName)));
+            return i >= 0 ? i : null;
+          })(),
+          edited: refinedOverrides[idx] != null && refinedOverrides[idx] !== (variant.body || ''),
+          aiRefined: !!aiRefinedIdx[idx],
+          cVariant: proposalCVariant,
+        },
+        // 오퍼레이터가 제안 때 붙인 이름을 그대로 쓴다. 없으면 필드를 비워 서버 기본명에 맡긴다.
+        ...(proposal.target.suggestedName?.trim() ? { campaignName: suggestedName } : {}),
+      };
+
+      // ★ 2026-10-18 새 흐름 = 고른 문안의 스팸 검사 상태 한 줄(발송은 막지 않는다 · 설계서 §7)
+      const spamNote = (() => {
+        if (!lineResultActive || !lineRun) return '';
+        const t = lineRun.cards[idx]?.type;
+        const chip = t ? lineRun.spam[t] : undefined;
+        const fpNow = spamFp(body, isLmsOrMms ? subject : '', channel as AiLineChannel, adEnabled, spamCallback);
+        if (!chip || chip.fp !== fpNow) return '이 글로는 스팸 검사를 하지 않았어요.\n';
+        if (chip.state === 'blocked') return `스팸 검사에서 막혔어요(${(chip.carriers || []).filter((c) => c.result === 'blocked').map((c) => c.carrier).join(' · ') || '통신사'}). 그대로 보내면 일부 고객에게 안 갈 수 있어요.\n`;
+        if (chip.state === 'queued' || chip.state === 'running' || chip.state === 'busy') return '스팸 검사가 아직 끝나지 않았어요.\n';
+        if (chip.state === 'warn') return '스팸 검사 결과를 받지 못했어요.\n';
+        return '';
+      })();
+
+      // ★ D170+ (Harold 명시 안전장치): 즉시 발송 시 사용자 확인 — 회수 불가 안내
+      if (!scheduled) {
+        const isAiPast = sendMode === 'aiRecommended';
+        const confirmMsg = isAiPast
+          ? `AI 추천 시점이 과거이거나 임박해서 ${recipients.length.toLocaleString()}명에게 지금 즉시 발송됩니다.\n발송 후 회수 불가합니다. 진행하시겠습니까?`
+          : `${recipients.length.toLocaleString()}명에게 지금 즉시 발송됩니다.\n발송 후 회수 불가합니다. 진행하시겠습니까?`;
+        setConfirm({
+          mode: 'warning',
+          title: '즉시 발송: 회수 불가',
+          description: spamNote + confirmMsg,
+          confirmLabel: '지금 발송',
+          onConfirm: () => { void performDirectSend(sendBody, suggestedName); },
+        });
+        return;
+      }
+
+      // ★ 2026-08-17 예약도 확인을 받는다. 기본 모드가 AI 추천 예약이라 **아무것도 안 고르고 승인하면 예약**인데,
+      //   그 사실이 승인 전에도 후에도 화면에 없어서 사용자는 지금 나간 줄 알았다(실측: 내일 오후 2시로 잡힘).
+      //   즉시 발송은 회수 불가라 경고이고, 예약은 회수 가능하므로 정보 안내다 — 모드를 달리한다.
+      const scheduledLabel = scheduledAt
+        ? new Date(scheduledAt).toLocaleString('ko-KR', {
+            year: 'numeric', month: 'long', day: 'numeric', weekday: 'short', hour: '2-digit', minute: '2-digit',
+          })
+        : '';
+      setConfirm({
+        mode: 'info',
+        title: '예약 발송: 지금 나가지 않습니다',
+        description: `${spamNote}${recipients.length.toLocaleString()}명에게 ${scheduledLabel}에 발송됩니다.\n지금은 나가지 않으며, 그전까지 예약내역에서 취소할 수 있습니다.`,
+        confirmLabel: '예약하기',
+        onConfirm: () => { void performDirectSend(sendBody, suggestedName); },
+      });
+    } catch (err) {
+      setSendError(err instanceof Error ? err.message : '발송 오류가 발생했습니다.');
+    } finally {
+      setSending(false);
+    }
+  };
+
+  // ★ 2026-10-18 자동 스팸 검사 발신번호 = 고른 등록 번호 · 개별 회신이면 회사 기본 번호
+  const spamCallback = (cbChoice && cbChoice !== INDIVIDUAL_CB ? cbChoice : (cbList.find((c) => c.isDefault)?.phone || '')).replace(/\D/g, '');
+  // ★ 2026-10-18 다듬은 글 · 고른 문안을 진행 상태에도 남긴다(보내는 값은 refinedOverrides · subjectOverrides 하나 · 이것은 사본 보관)
+  useEffect(() => {
+    if (!lineResultActive || !lineRun || lineRun.cards.length === 0) return;
+    const edits: AiLineRun['edits'] = {};
+    lineRun.cards.forEach((c, i) => {
+      const b = refinedOverrides[i];
+      const sj = subjectOverrides[i];
+      if (b != null || sj != null) edits[c.type] = { ...(b != null ? { body: b } : {}), ...(sj != null ? { subject: sj } : {}) };
+    });
+    const picked = lineRun.cards[selectedVariantIdx]?.type ?? lineRun.picked;
+    if (JSON.stringify(edits) === JSON.stringify(lineRun.edits) && picked === lineRun.picked) return;
+    patchLineRun(lineRun.runId, (cur) => ({ ...cur, edits, picked }));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [lineResultActive, refinedOverrides, subjectOverrides, selectedVariantIdx]);
+  // ★ 2026-10-18 다시 들어오면(새로 고침 · 뒤로) 만든 결과를 그대로 다시 그린다(낸 결과 보존)
+  useEffect(() => {
+    if (!aiLineOn || !lineRun || lineRun.cards.length === 0 || proposal) return;
+    setObjective(lineRun.line);
+    applyLineResult(lineRun);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [aiLineOn]);
+  const lineIdx = (t: AiLineType) => (lineRun ? lineRun.cards.findIndex((c) => c.type === t) : -1);
+
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
+      e.preventDefault();
+      void handleSubmit();
+    }
+  };
+
+  const showAbout = !loading && !proposal;
+
+  // ★ D216+ 추천 채우기 = 상위 setObjective 직접 호출(옛 sessionStorage·DOM 조작 사고의 정정 그대로) + 입력창으로 올려 초점
+  const applyRecommendation = (objectiveText: string) => {
+    setObjective(objectiveText);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+    setTimeout(() => textareaRef.current?.focus(), 200);
+  };
+
+  // ★ 2026-07-08 (Harold 명시): 문안 미생성(0건 매칭 등) → 빈 제안서 대신 조건 재입력 안내.
+  //   판정 = 문안 개수(백엔드 크레딧 차감 게이트와 동일 신호) — "차감 안 됨" 안내와 실제 차감 정합.
+  const isZeroTarget = !!proposal && (proposal.messages?.length ?? 0) === 0;
+
+  // ★ 2026-09-30 AI 존 대개편(Harold 확정 목업 1안) — 0821 "옛 보라 그라데이션 유지" 판정을 뒤집는다(설계서 D-결정 · DECISIONS).
+  //   남색 명령 띠 + 밝은 작업대 + 명령 카드. 메뉴 화면(ZoneFrame)과 같은 머리 좌표·같은 명령 카드 문법이라 허브 → 메뉴가 한 서비스로 읽힌다.
+  return (
+    <SurfaceToneProvider tone="light">
+    <div className="relative min-h-screen bg-slate-100 text-slate-900" data-zone-frame="hub">
+      <ConfirmModal state={confirm} onClose={() => setConfirm(null)} />
+      <LineFactsAskModal
+        open={askFactsOpen}
+        line={objective.trim()}
+        onCancel={() => setAskFactsOpen(false)}
+        onSubmit={(benefit) => { setAskFactsOpen(false); void handleSubmit({ benefit }); }}
+      />
+      {/* ★ 2026-10-18 AI 한줄로 확인 창(빠진 것만 · 확인 판) — 닫기 = 숨김(진행 상태 보관) */}
+      {lineRun && (
+        <LineIntakeModal
+          open={intakeOpen}
+          run={lineRun}
+          loadError={lineLoadError}
+          creditTotal={aiCredit?.creditEnabled ? Number(aiCredit.total ?? 0) : null}
+          onRun={(next) => patchLineRun(next.runId, () => next)}
+          onClose={() => setIntakeOpen(false)}
+          onComposed={(next) => { setLineRun(next); setIntakeOpen(false); applyLineResult(next); }}
+          onProceedDirect={(next) => { setLineRun(next); setIntakeOpen(false); applyLineResult(next); }}
+          onProceedAlimtalk={(next, templateId) => {
+            // 알림톡 = 지금 알림톡 발송 창(대시보드)으로 대상 조건 · 고른 템플릿을 넘긴다(대체 문자 · 예약 · 분할은 그 창)
+            try {
+              sessionStorage.setItem(AI_LINE_ALIMTALK_HANDOFF, JSON.stringify({ filters: activeFilters(next), allCustomers: allCustomersFlag(next), templateId, at: Date.now() }));
+            } catch { /* 넘기기 실패 = 대시보드 알림톡 창에서 직접 고른다 */ }
+            setIntakeOpen(false);
+            setLineRun(null);
+            navigate('/dashboard?open=ai-line-alimtalk');
+          }}
+          onCharged={() => setCreditRefresh((x) => x + 1)}
+        />
+      )}
+      {/* ★ 2026-09-15 요금제 공통 안내 창 — 못 쓰는 회사가 카드·[생성]·[이미지]를 눌렀을 때 */}
+      <PlanFeatureModal featureId={planFeatureId} onClose={() => setPlanFeatureId(null)} />
+
+      {/* ★ 2026-10-18 머리 띠 = AiHubBand(옛 띠 원형 이동 + 탭 2칸 · 설계서 §4-1) · 제목 · ! 설명 · 추천 띠는 그대로 */}
+      <AiHubBand
+        active="line"
+        compact={!!proposal}
+        refreshKey={creditRefresh}
+        onCredit={setAiCredit}
+        heading={(
+          <>
+            <div className="relative inline-flex items-start gap-2" onMouseEnter={() => setShowWhat(true)} onMouseLeave={() => setShowWhat(false)}>
+              <h1 className="text-[24px] md:text-[30px] font-bold leading-[1.25] tracking-[-0.025em]">
+                <span className="underline decoration-amber-400 decoration-[3px] underline-offset-[7px]">한 줄</span>이 실행 가능한 제안서가 됩니다
+              </h1>
+              <button
+                type="button"
+                aria-label="AI Operator가 하는 일"
+                aria-expanded={showWhat}
+                onClick={() => setShowWhat((v) => !v)}
+                className={`mt-0.5 md:mt-1.5 w-7 h-7 shrink-0 rounded-lg text-[13px] font-bold transition-colors ${showWhat ? 'bg-white text-slate-900' : 'bg-white/10 text-slate-200 hover:bg-white/20'}`}
+              >
+                !
+              </button>
+              <div
+                role="tooltip"
+                className={`absolute left-0 top-full mt-3 w-[min(720px,calc(100vw-32px))] text-left rounded-2xl border border-slate-200 bg-white text-slate-900 p-5 shadow-[0_24px_64px_-12px_rgba(15,23,42,0.45)] z-20 transition-all duration-200 ${
+                  showWhat ? 'opacity-100 translate-y-0 pointer-events-auto' : 'opacity-0 -translate-y-1 pointer-events-none'
+                }`}
+              >
+                <p className="text-[17px] font-bold tracking-[-0.02em] leading-snug">AI가 한 번에 정하는 여섯 가지</p>
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 mt-3">
+                  {WHAT_AI_DECIDES.map((s) => (
+                    <div key={s.k} className="rounded-lg bg-slate-50 border border-slate-200 px-4 py-3 text-center">
+                      <div className="text-[14px] font-semibold text-slate-900">{s.k}</div>
+                      <div className="text-[12.5px] text-slate-500 mt-0.5 leading-snug break-keep">{s.v}</div>
+                    </div>
+                  ))}
+                </div>
+                <div className="mt-3 pt-3 border-t border-slate-200 flex flex-wrap justify-between gap-x-3 gap-y-1 text-[12.5px] text-slate-500">
+                  <span>제안서를 보고 <b className="font-medium text-slate-700">발송 여부는 직접 결정</b>합니다</span>
+                  <span>수정 요청도 한 줄로</span>
+                </div>
+              </div>
+            </div>
+            <p className="mt-2.5 text-[14px] text-slate-300 max-w-2xl leading-relaxed">누구에게·무엇을·어디로·언제·얼마에·얼마나, 여섯 가지를 AI가 정합니다. 발송 여부는 직접 결정합니다.</p>
+          </>
+        )}
+        below={(
+          <>
+            {showAbout && (
+              <HubRecommendBand planLocked={planLocked} onLocked={() => setPlanFeatureId('ai-operator')} onApply={applyRecommendation} />
+            )}
+          </>
+        )}
+      />
+
+      {/* 고객 데이터 없음 — 생성 차단 안내 */}
+      <CustomerDataRequiredModal open={showDataGate} onClose={() => setShowDataGate(false)} />
+
+      {/* 메인 본문 */}
+      <main className="relative max-w-[1240px] mx-auto px-4 md:px-6 pb-16">
+        {/* 명령 카드 — 띠 아래 경계에 걸친다(결과 모드에서도 같은 자리) */}
+        <div className="-mt-8 relative z-10">
+          <div className="bg-white rounded-2xl shadow-[0_2px_4px_rgba(15,23,42,0.06),0_24px_48px_-16px_rgba(15,23,42,0.35)] px-4 py-3 md:px-5 md:py-3.5" data-zone="command">
+            <div className="flex flex-wrap md:flex-nowrap items-end gap-3 md:gap-4">
+              <img src="/brand/wordmark.png" alt="한줄로" className="h-5 md:h-6 mb-2 shrink-0 select-none" draggable={false} />
+              <label className="flex-1 min-w-[220px] border-b-2 border-slate-900 focus-within:border-indigo-600 pb-1 transition-colors">
+                <span className="sr-only">한 줄로 캠페인 맡기기</span>
+                <textarea
+                  ref={textareaRef}
+                  value={objective}
+                  onChange={(e) => setObjective(e.target.value)}
+                  onKeyDown={handleKeyDown}
+                  placeholder="예: 최근 30일 미구매 VIP에게 재구매 쿠폰 보내줘"
+                  disabled={loading}
+                  rows={1}
+                  className="block w-full bg-transparent text-[16px] font-medium text-slate-900 placeholder:text-slate-400 py-1 resize-none focus:outline-none leading-relaxed min-h-[36px] max-h-[200px] disabled:opacity-50"
+                  data-zone="line"
+                />
+              </label>
+              <div className="flex items-center gap-2 w-full md:w-auto">
+                {planLocked ? (
+                  // ★ 2026-09-15 이미지 글자 읽기도 크레딧 기능 — 못 쓰는 회사는 파일 선택 대신 안내 창
+                  <button type="button" onClick={() => setPlanFeatureId('ai-operator')} className={HUB_IMAGE_BTN}>
+                    <ImageIcon className="w-4 h-4" />
+                    이미지
+                  </button>
+                ) : (
+                  <ImageToCopyButton
+                    label="이미지"
+                    onExtracted={(t) => setObjective((prev) => (prev.trim() ? `${prev.trim()}\n${t}` : t))}
+                    disabled={loading}
+                    className={HUB_IMAGE_BTN}
+                  />
+                )}
+                <button
+                  type="button"
+                  onClick={() => { void handleSubmit(); }}
+                  disabled={loading || objective.trim().length < 5}
+                  className="flex-1 md:flex-none h-10 px-5 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-900 text-[14px] font-bold inline-flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                  aria-label="AI 제안서 생성"
+                  data-zone="primary"
+                >
+                  {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
+                  {loading ? '생성 중' : '생성'}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div className="mt-2.5 flex items-center justify-between gap-2 flex-wrap px-1 text-[12px] text-slate-500">
+          <span>Ctrl(⌘) + Enter로 바로 생성 · 이미지 버튼으로 이미지 속 문안 불러오기</span>
+          <span className="tabular-nums text-slate-400">{objective.length}자</span>
+        </div>
+
+        {customerGate.isEmpty && !proposal && <CustomerDataRequiredBanner className="mt-3" />}
+        {aiLineOn && lineRun && !intakeOpen && lineRun.cards.length === 0 && lineRun.line === objective.trim() && (
+          <div className="mt-3 flex items-center gap-3 rounded-xl bg-white border border-violet-200 px-4 py-2.5 text-[13px]">
+            <span className="text-slate-700 flex-1 min-w-0 truncate">만들던 확인 판이 있어요 · 「{lineRun.line}」</span>
+            <button type="button" onClick={() => setIntakeOpen(true)} className="h-8 px-3 rounded-lg bg-violet-600 text-white font-semibold shrink-0">이어서 열기</button>
+          </div>
+        )}
+        {error && (
+          <div className="mt-3 p-3 rounded-lg bg-rose-50 border border-rose-200 text-rose-800 text-sm">
+            {error}
+          </div>
+        )}
+
+        {/* 예시 칩 (입력 전만) */}
+        {!loading && !proposal && objective.length === 0 && (
+          <div className="mt-4 flex flex-wrap items-center gap-2">
+            <span className="text-[13px] font-semibold text-slate-600 mr-1">예시로 시작</span>
+            {EXAMPLE_PROMPTS.map((p) => (
+              <button
+                key={p}
+                type="button"
+                onClick={() => {
+                  setObjective(p);
+                  textareaRef.current?.focus();
+                }}
+                className="min-h-9 py-1.5 px-3.5 rounded-2xl text-left bg-white border border-slate-200 text-[13px] text-slate-700 hover:border-indigo-400 hover:text-indigo-800 transition-colors"
+              >
+                {p}
+              </button>
+            ))}
+          </div>
+        )}
+        <div className={proposal ? 'h-10' : 'h-8'} aria-hidden="true" />
+
+        {/* ============= Loading State — 6 sub-agent 시각화 ============= */}
+        {loading && (
+          <div className="mb-14 animate-in fade-in duration-300">
+            <div className="text-center mb-8">
+              <p className="text-[11px] font-semibold tracking-[0.28em] text-slate-400 uppercase mb-2">AI Operator · Multi-Agent Pipeline</p>
+              <p className="text-slate-600 text-sm">6개 sub-agent가 협업하여 제안서를 설계하고 있습니다</p>
+            </div>
+            {/* ★ D210+ Phase 2-fix8 (Harold 명시 2026-05-23): Stage 2 — 6단 모두 완료 후 둥근 스피너 + "마지막 다듬는 중" 안내 영역 */}
+            {progressStep >= SUB_AGENT_STEPS.length && (
+              <div className="mb-6 text-center animate-in fade-in duration-300">
+                <Loader2 className="w-10 h-10 animate-spin text-fuchsia-600 mx-auto mb-3" />
+                <p className="text-slate-700 text-sm font-medium">AI Operator가 마지막 다듬는 중입니다</p>
+                <p className="text-slate-500 text-xs mt-1">제안서 화면을 준비 중입니다. 잠시만 기다려주세요</p>
+              </div>
+            )}
+
+            <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+              {SUB_AGENT_STEPS.map((step, idx) => {
+                const Icon = step.icon;
+                const isDone = idx < progressStep;
+                const isActive = idx === progressStep;
+                const isPending = idx > progressStep;
+                return (
+                  <div
+                    key={step.label}
+                    className={`relative p-4 rounded-xl border backdrop-blur-xl transition-all duration-500 ${
+                      isDone ? 'bg-emerald-50 border-emerald-200' :
+                      isActive ? 'bg-slate-100 border-fuchsia-300 scale-[1.02] shadow-lg shadow-fuchsia-500/20' :
+                      'bg-white border-slate-100'
+                    }`}
+                  >
+                    <div className="flex items-center gap-3">
+                      <div className={`relative flex-shrink-0 w-10 h-10 rounded-lg flex items-center justify-center transition-all ${
+                        isDone ? 'bg-gradient-to-br from-emerald-400 to-teal-500' :
+                        isActive ? `bg-gradient-to-br ${step.gradient}` :
+                        'bg-white'
+                      }`}>
+                        {isDone ? (
+                          <Check className="w-5 h-5 text-slate-900" strokeWidth={3} />
+                        ) : isActive ? (
+                          <>
+                            <Icon className="w-5 h-5 text-slate-900 relative z-10" />
+                            <span className="absolute inset-0 rounded-lg bg-slate-200 animate-ping" />
+                          </>
+                        ) : (
+                          <Icon className={`w-5 h-5 ${isPending ? 'text-slate-300' : 'text-slate-900'}`} />
+                        )}
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <p className={`text-[10px] font-bold tracking-wider uppercase ${
+                          isDone ? 'text-emerald-700' :
+                          isActive ? 'text-slate-900' :
+                          'text-slate-400'
+                        }`}>
+                          {step.label}
+                        </p>
+                        <p className={`text-xs mt-0.5 truncate ${
+                          isDone || isActive ? 'text-slate-600' : 'text-slate-300'
+                        }`}>
+                          {isActive ? '진행 중...' : isDone ? '완료' : step.hint}
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
+        {/* ============= 결과 영역 — 6 카드 그리드 ============= */}
+        {proposal && !loading && (
+          <div className="mb-14">
+            <div className="flex items-center justify-between mb-5">
+              <div>
+                <p className="text-[11px] font-semibold tracking-[0.28em] text-slate-400 uppercase mb-1">AI Proposal · Generated</p>
+                <h2 className="text-xl font-bold text-slate-900">{proposal.target.suggestedName || 'AI 마케팅 제안서'}</h2>
+              </div>
+              <span className="text-xs text-slate-400">
+                {new Date(proposal.meta.generatedAt).toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' })} 생성
+              </span>
+            </div>
+
+            {/* ★ 2026-07-08 (Harold 명시): 타겟 0건 — 빈 제안서 대신 조건 재입력 안내 (크레딧 미차감). */}
+            {isZeroTarget && (
+              <div className="mb-5 p-6 rounded-2xl border border-amber-200 bg-amber-50 backdrop-blur-xl">
+                <div className="flex items-start gap-3">
+                  <div className="shrink-0 w-10 h-10 rounded-xl bg-gradient-to-br from-amber-50 to-orange-50 flex items-center justify-center">
+                    <AlertTriangle className="w-5 h-5 text-amber-700" />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <h3 className="text-base font-bold text-slate-900 mb-1">조건에 맞는 고객이 없습니다</h3>
+                    <p className="text-sm text-slate-600 leading-relaxed">
+                      {proposal.recommendationReason?.trim()
+                        || '입력하신 조건에 해당하는 고객이 DB에 없어 제안서를 만들지 못했습니다.'}
+                    </p>
+                    <p className="text-xs text-slate-400 mt-2">
+                      조건을 넓히거나 다른 등급·기간으로 바꿔 다시 생성해 보세요. 이 경우 크레딧은 차감되지 않습니다.
+                    </p>
+                    <button
+                      onClick={() => setProposal(null)}
+                      className="mt-4 inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 border border-slate-300 text-sm font-medium text-slate-900 transition-colors"
+                    >
+                      조건 다시 입력
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* ★ D170: Compliance Sub-agent 경고 표시 — high/medium만 노출, low는 ShieldCheck 작은 표시 */}
+            {!isZeroTarget && proposal.compliance && (
+              <>
+                {(proposal.compliance.riskLevel !== 'low' || !proposal.compliance.passed) && (
+                  <div className={`mb-5 p-4 rounded-xl border backdrop-blur-xl ${
+                    proposal.compliance.riskLevel === 'high'
+                      ? 'bg-rose-50 border-rose-300'
+                      : 'bg-amber-50 border-amber-300'
+                  }`}>
+                    <div className="flex items-center gap-2 mb-2.5">
+                      <AlertTriangle className={`w-4 h-4 ${proposal.compliance.riskLevel === 'high' ? 'text-rose-700' : 'text-amber-700'}`} />
+                      <p className={`text-sm font-semibold ${proposal.compliance.riskLevel === 'high' ? 'text-rose-900' : 'text-amber-900'}`}>
+                        Compliance Check · {proposal.compliance.riskLevel === 'high' ? '발송 차단 권장' : '검토 필요'}
+                      </p>
+                    </div>
+                    {proposal.compliance.warnings.length > 0 && (
+                      <ul className="text-xs text-slate-600 space-y-1 mb-2">
+                        {proposal.compliance.warnings.map((w, i) => (
+                          <li key={i} className="flex gap-1.5"><span className="opacity-60">·</span><span>{w}</span></li>
+                        ))}
+                      </ul>
+                    )}
+                    {proposal.compliance.suggestions.length > 0 && (
+                      <ul className="text-xs text-slate-500 space-y-1 mt-2 pt-2 border-t border-slate-200">
+                        {proposal.compliance.suggestions.map((s, i) => (
+                          <li key={i} className="flex gap-1.5"><span className="opacity-60">→</span><span>{s}</span></li>
+                        ))}
+                      </ul>
+                    )}
+                  </div>
+                )}
+                {proposal.compliance.riskLevel === 'low' && proposal.compliance.passed && (
+                  <div className="mb-5 flex items-center gap-2 px-3 py-2 rounded-lg bg-emerald-50 border border-emerald-200 text-xs">
+                    <ShieldCheck className="w-3.5 h-3.5 text-emerald-700" />
+                    <span className="text-emerald-800">Compliance Check 통과</span>
+                  </div>
+                )}
+              </>
+            )}
+
+            {/* ★ 2026-10-18 AI 한줄로 결과 카드(고른 종류만 · 스팸 칩 · 칼럼 더 넣기 1 · 직접 고치기 · 보낼 문안 고르기) */}
+            {lineResultActive && lineRun && !isZeroTarget && (
+              <LineResultCards
+                run={lineRun}
+                pickedType={lineRun.cards[selectedVariantIdx]?.type ?? null}
+                bodyAt={(t) => { const i = lineIdx(t); return i < 0 ? '' : (refinedOverrides[i] || lineRun.cards[i].body || ''); }}
+                subjectAt={(t) => { const i = lineIdx(t); return i < 0 || effectiveChannel === 'SMS' ? '' : resolveSubject(i); }}
+                channel={effectiveChannel as AiLineChannel}
+                isAd={adEnabled}
+                callback={spamCallback}
+                columns={lineRun.intake?.columns || []}
+                onPick={(t) => { const i = lineIdx(t); if (i >= 0) setSelectedVariantIdx(i); }}
+                onEdit={(t) => { const i = lineIdx(t); if (i >= 0) { setSelectedVariantIdx(i); setEditingBody(true); } }}
+                onDecorate={async (t, vars) => {
+                  const i = lineIdx(t);
+                  if (i < 0) return;
+                  const out = await aiLineApi.decorate({
+                    body: refinedOverrides[i] || lineRun.cards[i].body, vars,
+                    channel: effectiveChannel as AiLineChannel, isAd: adEnabled, attemptToken: lineRun.attemptToken,
+                  });
+                  if (out.changed) {
+                    setRefinedOverrides((prev) => ({ ...prev, [i]: out.body }));
+                    setAiRefinedIdx((prev) => ({ ...prev, [i]: true }));
+                  }
+                  setCreditRefresh((x) => x + 1);
+                }}
+                onSpamPatch={(t, chip) => patchLineRun(lineRun.runId, (cur) => ({ ...cur, spam: { ...cur.spam, [t]: chip } }))}
+              />
+            )}
+
+            {!isZeroTarget && (() => {
+              // ★ D165: 메시지 3안 토글 — 다듬기 결과가 있으면 오버라이드 사용
+              const variants = proposal.messages;
+              const safeIdx = Math.min(selectedVariantIdx, Math.max(0, variants.length - 1));
+              const activeVariant = variants[safeIdx];
+              const isRecommended = (proposal.recommendation || '').includes(activeVariant?.variantId || '__none__')
+                || (proposal.recommendation || '').includes(activeVariant?.variantName || '__none__');
+              const activeChannel = effectiveChannel; // 사용자 유형 변경 반영
+              const overrideText = refinedOverrides[safeIdx];
+              const baseBody = activeVariant?.body || '';
+              const rawActiveBody = overrideText || baseBody;
+              // ★ Harold 명시 (2026-05-19): 광고 메시지면 (광고) prefix + 무료거부 suffix 자동 합성 — 실제 발송 형태 미리보기
+              //   원본(rawActiveBody)은 다듬기/발송 시 그대로 사용. 표시(activeBody)만 합성 — 실 발송은 /direct-send가 adEnabled=true로 자동 처리.
+              const isAd = adEnabled; // ★ 2026-07-22 광고표기 토글 상태 — 본문·제목 (광고) 표시 + 발송 유형 단일 소스
+              const rawReject = proposal.channel.rejectNumber || '';
+              const formattedReject = rawReject
+                ? rawReject.replace(/[^0-9]/g, '').replace(/^(\d{3,4})(\d{3,4})(\d{4})$/, '$1-$2-$3')
+                : '';
+              const activeBody = (isAd && rawReject && rawActiveBody)
+                ? `(광고)\n${rawActiveBody}\n무료거부 ${formattedReject || rawReject}`
+                : rawActiveBody;
+              const bytesLen = (s: string) => {
+                let bytes = 0;
+                for (let i = 0; i < s.length; i++) {
+                  const code = s.charCodeAt(i);
+                  bytes += code > 0x7F ? 2 : 1;
+                }
+                return bytes;
+              };
+              const activeBytes = bytesLen(activeBody);
+
+              return (
+                // ★ D210+ Phase 2-fix3 (Harold 명시 2026-05-23): lg:grid-cols-5 매트릭스
+                //   메시지 = lg:col-span-2 (40% 좌측) / 4개 카드 wrapper = lg:col-span-3 (60% 우측 2×2)
+                //   CompanyDataProfileCard + 예상 성과 = lg:col-span-5 (전체 폭)
+                <div className="grid grid-cols-1 lg:grid-cols-5 gap-4 mb-6">
+                  {/* ============= 추천 메시지 (좌측 40% — lg:col-span-2) ============= */}
+                  <ResultCard
+                    index={0}
+                    accent="amber"
+                    icon={MessageSquare}
+                    label="추천 메시지"
+                    headline={activeVariant?.variantName || '문안'}
+                    subtitle={`${variants.length}개 안 생성 · ${activeChannel} · ${activeBytes} bytes${overrideText ? ' · 다듬어진 안' : ''}`}
+                    truncateHeadline={false}
+                    className="lg:col-span-2"
+                    extra={
+                      <div className="mt-3">
+                        {/* 3안 토글 탭 — ★ 2026-10-18 새 흐름은 위 결과 카드가 고르기를 맡는다 */}
+                        {!lineResultActive && (
+                        <div className="flex items-center gap-2 mb-3 flex-wrap">
+                          {variants.map((v, idx) => {
+                            const isActive = idx === safeIdx;
+                            const isAnswerRecommended = (proposal.recommendation || '').includes(v.variantId)
+                              || (proposal.recommendation || '').includes(v.variantName);
+                            return (
+                              <button
+                                key={v.variantId}
+                                type="button"
+                                onClick={() => setSelectedVariantIdx(idx)}
+                                className={`group/tab relative px-3.5 py-1.5 rounded-lg text-xs font-medium transition-all flex items-center gap-1.5 ${
+                                  isActive
+                                    ? 'bg-gradient-to-r from-amber-50 to-fuchsia-50 text-slate-900 border border-amber-300 shadow-md'
+                                    : 'bg-white text-slate-500 border border-slate-200 hover:bg-slate-100 hover:text-slate-700'
+                                }`}
+                              >
+                                {isAnswerRecommended && (
+                                  <Star className={`w-3 h-3 ${isActive ? 'text-amber-700 fill-amber-300' : 'text-amber-600 fill-amber-400/60'}`} />
+                                )}
+                                <span>{v.variantName || `${String.fromCharCode(65 + idx)}안`}</span>
+                                {v.score > 0 && (
+                                  <span className={`ml-0.5 text-[10px] tabular-nums ${isActive ? 'text-amber-800' : 'text-slate-400'}`}>
+                                    {v.score}
+                                  </span>
+                                )}
+                              </button>
+                            );
+                          })}
+                          {isRecommended && (
+                            <span className="ml-auto text-[10px] font-semibold tracking-[0.2em] uppercase text-amber-700">
+                              AI Recommended
+                            </span>
+                          )}
+                        </div>
+                        )}
+
+                        {/* 콘셉트 */}
+                        {activeVariant?.concept && (
+                          <p className="text-xs text-slate-400 mb-2">
+                            <span className="font-semibold text-slate-500">콘셉트:</span> {activeVariant.concept}
+                          </p>
+                        )}
+
+                        {/* ★ D210+ Phase 2-fix4 (Harold 명시 2026-05-23): 원본/적용 토글 — sampleCustomer 영역 있을 때만 표시 */}
+                        {sampleCustomer && (
+                          <div className="flex items-center gap-1 mb-2">
+                            <button
+                              type="button"
+                              onClick={() => setShowMergedPreview(false)}
+                              className={`flex-1 text-[11px] py-1.5 rounded-lg transition-all ${
+                                !showMergedPreview
+                                  ? 'bg-amber-100 text-amber-900 font-semibold ring-1 ring-amber-300'
+                                  : 'bg-white text-slate-400 hover:text-slate-500'
+                              }`}
+                              title="개인화 변수 위치 강조 (%고객명% 형태 그대로 표시)"
+                            >
+                              원본 (변수 강조)
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setShowMergedPreview(true)}
+                              className={`flex-1 text-[11px] py-1.5 rounded-lg transition-all ${
+                                showMergedPreview
+                                  ? 'bg-emerald-100 text-emerald-900 font-semibold ring-1 ring-emerald-300'
+                                  : 'bg-white text-slate-400 hover:text-slate-500'
+                              }`}
+                              title="상위 고객 데이터로 치환된 결과 미리보기"
+                            >
+                              적용 (상위 고객 머지)
+                            </button>
+                          </div>
+                        )}
+
+                        {/* ★ 2026-07-22 (Harold 명시): 광고표기 on/off 토글 — 직접발송 미러·기본 ON. 끄면 (광고)/무료거부 미부착 정보성 발송(백엔드 D143이 사용자 선택 존중). SMS도 본문 (광고)에 영향 → 채널 무관 노출 */}
+                        <label className={`flex items-center justify-between gap-3 mb-3 px-3 py-2.5 rounded-xl border cursor-pointer transition-all ${isAd ? 'bg-amber-100 border-amber-300' : 'bg-white border-slate-200 hover:bg-slate-100'}`}>
+                          <div className="min-w-0">
+                            <div className={`text-xs font-semibold ${isAd ? 'text-amber-900' : 'text-slate-600'}`}>광고표기 <span className="font-bold">(광고)</span></div>
+                            <div className="text-[10px] text-slate-400 mt-0.5">{isAd ? '제목·본문 맨 앞에 (광고)+무료거부 자동 부착' : '정보성 발송: (광고) 미부착 (광고성 문안은 법상 (광고) 표기 의무)'}</div>
+                          </div>
+                          <input type="checkbox" checked={isAd} onChange={(e) => setAdEnabled(e.target.checked)} className="w-4 h-4 accent-amber-400 flex-shrink-0" />
+                        </label>
+
+                        {/* ★ 2026-07-10 (임은지 리포트): LMS/MMS 제목 확인·수정 — 발송 전 확인 불가 문제 해소. 표시 값 = 발송 값(resolveSubject) */}
+                        {(activeChannel === 'LMS' || activeChannel === 'MMS') && (
+                          <div className="mb-3">
+                            <label className="block text-[11px] text-slate-500 mb-1">제목 (문자 상단에 표시)</label>
+                            {/* ★ 2026-07-22 (Harold 명시): 광고표기 ON이면 제목 입력칸 앞에 (광고) 고정 접두 오버레이(직접발송 미러). 입력값은 순수 제목 유지 → 백엔드 buildAdSubject가 부착·이중부착 없음 */}
+                            <div className="relative">
+                              {isAd && (
+                                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm font-semibold text-amber-700 pointer-events-none select-none">(광고)</span>
+                              )}
+                              <input
+                                type="text"
+                                value={resolveSubject(safeIdx)}
+                                onChange={(e) => setSubjectOverrides((prev) => ({ ...prev, [safeIdx]: e.target.value }))}
+                                maxLength={LMS_SUBJECT_MAX_CHARS}
+                                placeholder={`제목 입력 (최대 ${LMS_SUBJECT_MAX_CHARS}자)`}
+                                className={`w-full ${isAd ? 'pl-[54px]' : 'pl-3'} pr-3 py-2 rounded-xl bg-indigo-50 border border-slate-200 text-sm text-slate-900 placeholder-slate-400 focus:border-amber-300 focus:outline-none transition-colors`}
+                              />
+                            </div>
+                            {!resolveSubject(safeIdx).trim() && (
+                              <p className="text-[10px] text-rose-700 mt-1">제목을 입력해주세요. LMS/MMS는 제목이 필요합니다.</p>
+                            )}
+                          </div>
+                        )}
+
+                        {/* 본문 박스 — 보기(pre). 직접 편집 = 전용 편집기 모달(MessageEditorModal) */}
+                        <div className="relative p-4 rounded-xl bg-indigo-50 border border-slate-200 mb-3">
+                          <pre className="whitespace-pre-wrap break-words text-sm text-slate-700 leading-relaxed font-sans">
+                            {activeBody
+                              ? (showMergedPreview && sampleCustomer
+                                  ? mergeAndHighlightVars(activeBody, sampleCustomer, 'light', sampleCustomerFields || undefined)
+                                  : highlightVars(activeBody, 'light'))
+                              : '메시지 본문이 비어있습니다.'}
+                          </pre>
+                          {overrideText && !editingBody && (
+                            <button
+                              type="button"
+                              onClick={() => setRefinedOverrides((prev) => {
+                                const next = { ...prev };
+                                delete next[safeIdx];
+                                return next;
+                              })}
+                              className="absolute top-2 right-2 px-2 py-0.5 rounded-full text-[10px] font-medium bg-emerald-100 text-emerald-800 border border-emerald-200 hover:bg-emerald-100 transition-all"
+                              title="원본 안으로 되돌리기"
+                            >
+                              다듬어짐 · 되돌리기
+                            </button>
+                          )}
+                        </div>
+
+                        {/* ★ 2026-09-10 문자로 보낼 수 없는 글자 — 누르면 본문·제목을 대체표로 바꾼다(발송 값 = refinedOverrides·resolveSubject) */}
+                        {(activeChannel === 'SMS' || activeChannel === 'LMS' || activeChannel === 'MMS') && (() => {
+                          const longType = activeChannel === 'LMS' || activeChannel === 'MMS';
+                          const subject = longType ? resolveSubject(safeIdx) : '';
+                          return (
+                            <SmsCharsetNotice
+                              tone="dark"
+                              className="mb-3"
+                              texts={[rawActiveBody, subject]}
+                              onApply={(fix) => {
+                                const nextBody = fix(rawActiveBody);
+                                if (nextBody !== rawActiveBody) setRefinedOverrides((prev) => ({ ...prev, [safeIdx]: nextBody }));
+                                const nextSubject = fix(subject);
+                                if (longType && nextSubject !== subject) setSubjectOverrides((prev) => ({ ...prev, [safeIdx]: nextSubject }));
+                              }}
+                            />
+                          );
+                        })()}
+
+                        {/* 메시지 액션 */}
+                        <div className="flex gap-2 flex-wrap">
+                          <button
+                            type="button"
+                            onClick={() => setEditingBody(true)}
+                            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border bg-white text-slate-600 border-slate-200 hover:bg-slate-100 hover:text-slate-900 transition-all"
+                          >
+                            <Pencil className="w-3.5 h-3.5" />
+                            직접 편집
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setShowRefineModal(true)}
+                            disabled={!activeBody}
+                            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-gradient-to-r from-amber-50 to-fuchsia-50 text-amber-900 border border-amber-200 hover:from-amber-50 hover:to-fuchsia-50 hover:text-slate-900 disabled:opacity-30 disabled:cursor-not-allowed transition-all"
+                          >
+                            <Wand2 className="w-3.5 h-3.5" />
+                            AI로 다듬기
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              if (!activeBody) return;
+                              navigator.clipboard.writeText(activeBody).then(() => {
+                                setCopiedAt(Date.now());
+                                setTimeout(() => setCopiedAt(null), 1500);
+                              });
+                            }}
+                            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-white text-slate-600 border border-slate-200 hover:bg-slate-100 hover:text-slate-900 transition-all"
+                          >
+                            {copiedAt ? <Check className="w-3.5 h-3.5 text-emerald-700" /> : <Copy className="w-3.5 h-3.5" />}
+                            {copiedAt ? '복사 완료' : '본문 복사'}
+                          </button>
+                        </div>
+
+                        {/* ★ 2026-07-02 문안 전용 편집기 모달 — 큰 본문 + 우측 삽입 도구(변수·회사 표현·브랜드 링크·특수문자) */}
+                        <MessageEditorModal
+                          open={editingBody}
+                          initialText={rawActiveBody}
+                          originalText={baseBody}
+                          channel={activeChannel}
+                          isAd={isAd}
+                          rejectNumber={formattedReject || rawReject}
+                          variables={dataProfileVars}
+                          sampleCustomer={sampleCustomer}
+                          sampleCustomerFields={sampleCustomerFields}
+                          onApply={(text) => {
+                            setRefinedOverrides((prev) => ({ ...prev, [safeIdx]: text }));
+                            setEditingBody(false);
+                          }}
+                          onClose={() => setEditingBody(false)}
+                        />
+                      </div>
+                    }
+                  />
+
+                  {/* ============= ★ D210+ Phase 2-fix3 (Harold 명시 2026-05-23): 우측 60% wrapper — 4개 카드 (타겟/채널/시점/비용) 2×2 grid ============= */}
+                  <div className="lg:col-span-3 grid grid-cols-1 sm:grid-cols-2 gap-3 content-start">
+
+                  {/* ============= 추천 타겟 ============= */}
+                  <ResultCard
+                    index={1}
+                    accent="rose"
+                    icon={Target}
+                    label="추천 타겟"
+                    headline={`${proposal.target.count.toLocaleString()}명`}
+                    subtitle={`전체 ${proposal.target.totalCount.toLocaleString()}명 중 ${proposal.target.totalCount > 0 ? ((proposal.target.count / proposal.target.totalCount) * 100).toFixed(1) : 0}%`}
+                    description={proposal.target.criteria}
+                    onClick={openTargetList}
+                    actionHint="추출 대상 리스트 보기"
+                  />
+
+                  {/* ============= 추천 채널 — 2026-07-09: 유형 변경(SMS/LMS/MMS) + MMS 이미지 첨부 ============= */}
+                  <ResultCard
+                    index={2}
+                    accent="emerald"
+                    icon={Send}
+                    label="추천 채널"
+                    headline={effectiveChannel}
+                    subtitle={proposal.channel.isAd ? '광고 메시지 (Ad)' : '정보 메시지 (Info)'}
+                    description={channelOverride
+                      ? `AI 추천: ${(proposal.channel.recommended || '').toUpperCase()} · 발송 유형을 ${effectiveChannel}로 변경했습니다.`
+                      : proposal.channel.reason}
+                    truncateHeadline={false}
+                    extra={
+                      <div className="mt-3 space-y-2.5">
+                        {/* 유형 변경 세그먼트 */}
+                        <div className="flex items-center gap-1 p-1 rounded-xl bg-white border border-slate-200">
+                          {(['SMS', 'LMS', 'MMS'] as const).map((ch) => {
+                            const active = effectiveChannel === ch;
+                            const isAiRec = (proposal.channel.recommended || '').toUpperCase() === ch;
+                            return (
+                              <button
+                                key={ch}
+                                type="button"
+                                onClick={() => {
+                                  // AI 추천과 같은 채널이면 override 해제(null), 아니면 해당 채널로 변경
+                                  setChannelOverride(isAiRec ? null : ch);
+                                  setSendError(null);
+                                  if (ch === 'MMS') { setMmsError(null); setShowMmsModal(true); }
+                                }}
+                                className={`relative flex-1 px-2 py-1.5 rounded-lg text-xs font-semibold transition-all ${
+                                  active
+                                    ? 'bg-gradient-to-r from-emerald-50 to-teal-50 text-slate-900 border border-emerald-300 shadow'
+                                    : 'text-slate-500 hover:text-slate-700 hover:bg-white border border-transparent'
+                                }`}
+                              >
+                                {ch}
+                                {isAiRec && (
+                                  <span className="absolute -top-1.5 -right-1 text-[8px] leading-none px-1 py-0.5 rounded-full bg-violet-500 text-white font-bold tracking-tight">AI</span>
+                                )}
+                              </button>
+                            );
+                          })}
+                        </div>
+
+                        {/* MMS 이미지 첨부 상태/버튼 */}
+                        {effectiveChannel === 'MMS' && (
+                          <button
+                            type="button"
+                            onClick={() => { setMmsError(null); setShowMmsModal(true); }}
+                            className={`w-full flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg text-xs font-medium border transition-all ${
+                              mmsUploadedImages.length > 0
+                                ? 'bg-emerald-50 text-emerald-800 border-emerald-200 hover:bg-emerald-100'
+                                : 'bg-amber-50 text-amber-800 border-amber-300 hover:bg-amber-100'
+                            }`}
+                          >
+                            <ImageIcon className="w-3.5 h-3.5" />
+                            {mmsUploadedImages.length > 0 ? `이미지 ${mmsUploadedImages.length}장 첨부됨 · 변경` : '이미지 첨부 필요 · 클릭'}
+                          </button>
+                        )}
+
+                        {/* SMS 바이트 경고 */}
+                        {effectiveChannel === 'SMS' && activeBytes > 90 && (
+                          <p className="flex items-center gap-1 text-[11px] text-amber-700">
+                            <AlertTriangle className="w-3 h-3 shrink-0" />
+                            SMS 90byte 초과분은 잘립니다 · LMS 권장
+                          </p>
+                        )}
+                      </div>
+                    }
+                  />
+
+                  {/* ============= 발송 시점 — D170+ Harold 명시: 사용자 변경 가능 + 안전장치 (우측 wrapper 안 전체 폭) ============= */}
+                  <ResultCard
+                    index={3}
+                    accent="cyan"
+                    icon={Clock}
+                    label="발송 시점"
+                    headline={
+                      sendMode === 'immediate'
+                        ? '지금 즉시 발송'
+                        : sendMode === 'custom' && customScheduledAt
+                          ? formatScheduleTime(customScheduledAt)
+                          : formatScheduleTime(proposal.schedule.recommendedTime)
+                    }
+                    subtitle={
+                      sendMode === 'aiRecommended'
+                        ? 'AI 추천 · KST'
+                        : sendMode === 'immediate'
+                          ? '사용자 선택 · 즉시'
+                          : '사용자 선택 · 예약'
+                    }
+                    truncateHeadline={false}
+                    extra={
+                      <div className="mt-3 space-y-2">
+                        {/* AI 추천 시점 — radio */}
+                        <label className="flex items-start gap-2.5 p-2.5 rounded-lg bg-white border border-slate-200 hover:bg-slate-100 cursor-pointer transition-all">
+                          <input
+                            type="radio"
+                            name="sendMode"
+                            checked={sendMode === 'aiRecommended'}
+                            onChange={() => setSendMode('aiRecommended')}
+                            className="mt-0.5 accent-cyan-400"
+                          />
+                          <div className="flex-1 min-w-0">
+                            <p className="text-xs font-semibold text-slate-900">AI 추천 시점 사용</p>
+                            <p className="text-[11px] text-slate-500 mt-0.5">{formatScheduleTime(proposal.schedule.recommendedTime)} 자동 예약</p>
+                          </div>
+                        </label>
+
+                        {/* 즉시 발송 — radio */}
+                        <label className="flex items-start gap-2.5 p-2.5 rounded-lg bg-white border border-slate-200 hover:bg-slate-100 cursor-pointer transition-all">
+                          <input
+                            type="radio"
+                            name="sendMode"
+                            checked={sendMode === 'immediate'}
+                            onChange={() => setSendMode('immediate')}
+                            className="mt-0.5 accent-amber-400"
+                          />
+                          <div className="flex-1 min-w-0">
+                            <p className="text-xs font-semibold text-slate-900">지금 즉시 발송</p>
+                            <p className="text-[11px] text-slate-500 mt-0.5">승인 클릭 즉시 발송 큐 진입</p>
+                          </div>
+                        </label>
+
+                        {/* 사용자 직접 선택 — radio + 모달 피커 (클릭 시 모달 바로 오픈) */}
+                        <div
+                          className="flex items-start gap-2.5 p-2.5 rounded-lg bg-white border border-slate-200 hover:bg-slate-100 cursor-pointer transition-all"
+                          onClick={() => { setSendMode('custom'); setCustomPickerOpen(true); }}
+                        >
+                          <input
+                            type="radio"
+                            name="sendMode"
+                            checked={sendMode === 'custom'}
+                            onChange={() => setSendMode('custom')}
+                            className="mt-0.5 accent-fuchsia-400"
+                          />
+                          <div className="flex-1 min-w-0">
+                            <p className="text-xs font-semibold text-slate-900 mb-1.5">직접 시점 선택</p>
+                            <DateTimeField
+                              value={localInputToIso(customScheduledAt)}
+                              onChange={(iso) => {
+                                setCustomScheduledAt(isoToLocalInput(iso));
+                                if (iso) setSendMode('custom');
+                              }}
+                              open={customPickerOpen}
+                              onOpenChange={setCustomPickerOpen}
+                              tone="dark"
+                            />
+                            <p className="text-[10px] text-slate-400 mt-1">발송 허용 시간 · 08:00 ~ 21:00 KST</p>
+                          </div>
+                        </div>
+                      </div>
+                    }
+                  />
+
+                  {/* ============= 예상 비용 (breakdown 강화 — 우측 wrapper 안 전체 폭) ============= */}
+                  <ResultCard
+                    index={4}
+                    accent="violet"
+                    icon={DollarSign}
+                    label="예상 비용"
+                    headline={`${effectiveEstimatedCost.toLocaleString()}원`}
+                    subtitle={`${activeChannel} ${proposal.target.count.toLocaleString()}건`}
+                    truncateHeadline={false}
+                    extra={
+                      <div className="mt-2 space-y-1.5">
+                        <div className="flex items-center justify-between text-xs text-slate-500 px-2 py-1.5 rounded-md bg-white border border-slate-200">
+                          <span>건당 단가</span>
+                          <span className="font-mono font-semibold text-slate-900">{effectiveUnitCost.toLocaleString()}원</span>
+                        </div>
+                        <div className="flex items-center justify-between text-xs text-slate-500 px-2 py-1.5 rounded-md bg-white border border-slate-200">
+                          <span>발송 건수</span>
+                          <span className="font-mono font-semibold text-slate-900">{proposal.target.count.toLocaleString()}건</span>
+                        </div>
+                        <div className="flex items-center justify-between text-xs px-2 py-1.5 rounded-md bg-gradient-to-r from-violet-50 to-purple-50 border border-violet-200">
+                          <span className="font-semibold text-violet-800">총 예상 비용</span>
+                          <span className="font-mono font-bold text-slate-900">{effectiveEstimatedCost.toLocaleString()}원</span>
+                        </div>
+                        {channelOverride && (
+                          <p className="text-[10px] text-slate-400 italic pt-0.5">채널 변경 반영 · 실제 차감은 발송 시 {effectiveChannel} 단가로 확정</p>
+                        )}
+                      </div>
+                    }
+                  />
+
+                  {/* ★ 2026-10-07 회신번호(임은지 접수 · Harold: 활용 가능 컬럼 위 가로 카드) — 기본 = 회사 기본 번호(종전 동작) · 등록 번호 · 고객별 매장번호 */}
+                  <div className="sm:col-span-2 p-5 rounded-2xl bg-white border border-slate-200 shadow-lg">
+                    <div className="flex items-center gap-2 mb-3">
+                      <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-sky-400 to-indigo-500 flex items-center justify-center shrink-0">
+                        <Phone className="w-4 h-4 text-white" />
+                      </div>
+                      <div className="min-w-0">
+                        <p className="text-sm font-bold text-slate-900">회신번호</p>
+                        <p className="text-[10px] text-slate-400">고객이 답장하거나 전화할 번호예요 · 등록된 번호만 고를 수 있어요</p>
+                      </div>
+                    </div>
+                    <div className="flex flex-wrap gap-2" role="radiogroup" aria-label="회신번호">
+                      {[
+                        { value: '', label: '기본 번호', sub: cbList.find((c) => c.isDefault)?.phone || '회사 기본' },
+                        ...cbList.filter((c) => !c.isDefault).map((c) => ({ value: c.phone, label: c.phone, sub: '등록 번호' })),
+                        { value: INDIVIDUAL_CB, label: '고객별 매장번호', sub: '개별 회신' },
+                      ].map((o) => {
+                        const on = cbChoice === o.value;
+                        return (
+                          <button
+                            key={o.value || 'default'}
+                            type="button"
+                            role="radio"
+                            aria-checked={on}
+                            disabled={sending}
+                            onClick={() => setCbChoice(o.value)}
+                            className={`flex flex-col items-start px-3.5 py-2 rounded-xl border text-left transition-all disabled:opacity-50 ${on ? 'bg-indigo-50 border-indigo-400 ring-2 ring-indigo-100' : 'bg-white border-slate-200 hover:bg-slate-50 hover:border-slate-300'}`}
+                          >
+                            <span className={`text-[13px] font-semibold tabular-nums ${on ? 'text-indigo-900' : 'text-slate-800'}`}>{o.label}</span>
+                            <span className={`text-[10.5px] tabular-nums ${on ? 'text-indigo-600' : 'text-slate-400'}`}>{o.sub}</span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                    {cbChoice === INDIVIDUAL_CB && (
+                      <p className="text-[11px] text-slate-500 mt-2.5">고객마다 등록 매장 번호로 보내요. 매장번호가 없거나 등록 안 된 번호인 고객은 보내기 전에 확인하고 빼요.</p>
+                    )}
+                  </div>
+
+                  {/* ★ 2026-06-29: 활용 가능 컬럼 다중 선택 + AI 꾸미기 (우측 전체폭) — ★ 2026-10-18 새 흐름은 카드마다 「칼럼 더 넣기」(1) */}
+                  {!lineResultActive && (
+                  <div className="sm:col-span-2 p-5 rounded-2xl bg-white backdrop-blur-xl border border-violet-200 shadow-lg">
+                    <div className="flex items-center justify-between gap-2 mb-2 flex-wrap">
+                      <div className="flex items-center gap-2">
+                        <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-violet-400 to-fuchsia-500 flex items-center justify-center shrink-0">
+                          <Wand2 className="w-4 h-4 text-white" />
+                        </div>
+                        <div>
+                          <p className="text-sm font-bold text-slate-900">활용 가능 컬럼</p>
+                          <p className="text-[10px] text-slate-400">넣고 싶은 데이터를 골라 AI가 메시지에 자연스럽게 녹입니다{selectedVars.size > 0 ? ` · ${selectedVars.size}개 선택` : ''}</p>
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={handleDecorate}
+                        disabled={decorating || selectedVars.size === 0}
+                        className="px-3.5 py-1.5 rounded-lg text-xs font-semibold bg-indigo-600 hover:bg-indigo-700 text-white disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1.5 transition-all"
+                      >
+                        {decorating ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Sparkles className="w-3.5 h-3.5" />}
+                        AI 꾸미기
+                      </button>
+                    </div>
+                    {dataProfileVars.length === 0 ? (
+                      <p className="text-[11px] text-slate-400 mt-1">고객 데이터가 있어야 개인화 컬럼이 표시됩니다.</p>
+                    ) : (
+                      <div className="flex flex-wrap gap-1.5 mt-1">
+                        {dataProfileVars.map((v) => {
+                          const on = selectedVars.has(v.token);
+                          return (
+                            <button
+                              key={v.token}
+                              type="button"
+                              onClick={() => setSelectedVars((prev) => { const n = new Set(prev); if (n.has(v.token)) n.delete(v.token); else n.add(v.token); return n; })}
+                              className={`px-2.5 py-1 rounded-full text-[11px] font-medium border transition-all ${on ? 'bg-violet-100 text-violet-900 border-violet-300' : 'bg-white text-slate-500 border-slate-200 hover:bg-slate-100 hover:text-slate-700'}`}
+                            >
+                              %{v.label}%
+                            </button>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                  )}
+
+                  </div>
+                  {/* ★ 2026-06-29: 회사 데이터 프로필 + 예상 성과 + AI 진단 = AI 제안 요약 모달(탭)로 이동 — 메인 간소화 */}
+                </div>
+              );
+            })()}
+
+            {/* ★ D166: 승인 발송 활성화 — preview-recipients + /direct-send 2-step */}
+            {/* ★ 2026-07-08: 타겟 0건 = 발송/요약 버튼 숨김 (조건 재입력 안내 카드가 대체) */}
+            {!isZeroTarget && (
+            <div className="flex flex-col sm:flex-row gap-3">
+              <button
+                type="button"
+                onClick={handleApprove}
+                disabled={sending}
+                className="flex-1 px-6 py-3.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-semibold hover:brightness-110 hover:shadow-xl hover:shadow-fuchsia-500/40 disabled:opacity-50 disabled:cursor-wait transition-all flex items-center justify-center gap-2"
+              >
+                {sending ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
+                {sending ? '발송 처리 중...' : '승인 후 발송 시작'}
+              </button>
+              {!lineResultActive && (
+              <button
+                type="button"
+                onClick={() => setShowSummary(true)}
+                disabled={sending}
+                className="px-5 py-3.5 rounded-xl bg-slate-100 text-slate-900 font-medium border border-slate-300 hover:bg-slate-200 disabled:opacity-40 disabled:cursor-not-allowed transition-all flex items-center justify-center gap-2"
+              >
+                <Sparkles className="w-4 h-4 text-violet-700" />
+                AI 제안 요약
+              </button>
+              )}
+              <button
+                type="button"
+                onClick={handleReset}
+                disabled={sending}
+                className="px-6 py-3.5 rounded-xl bg-slate-100 text-slate-900 font-medium border border-slate-300 hover:bg-slate-200 disabled:opacity-40 disabled:cursor-not-allowed transition-all flex items-center justify-center gap-2"
+              >
+                <RefreshCw className="w-4 h-4" />
+                다시 생성
+              </button>
+            </div>
+            )}
+
+            {/* 발송 에러 */}
+            {sendError && (
+              <div className="mt-3 p-3 rounded-lg bg-rose-50 border border-rose-200 text-rose-800 text-sm">
+                <span className="font-semibold">발송 오류 · </span>{sendError}
+              </div>
+            )}
+
+            {/* ★ 2026-06-29: AI 종합 분석 + 추천 이유 = AI 제안 요약 모달(탭)로 이동 */}
+            {showSummary && proposal && (
+              <AiProposalSummaryModal proposal={proposal} onClose={() => setShowSummary(false)} />
+            )}
+
+            {/* 2026-07-09: 추천 타겟 카드 클릭 → 추출 대상 리스트 (실조회 · 15명/페이징) */}
+            {proposal && (
+              <>
+                <TargetRecipientsModal
+                  show={showTargetList}
+                  onClose={() => setShowTargetList(false)}
+                  title="추천 타겟 상세"
+                  objective={objective}
+                  criteria={proposal.target.criteria}
+                  totalCount={proposal.target.count}
+                  fetchPage={targetFetchPage}
+                  extraColumns={targetListCols}
+                  sourceLabel={`실제 발송 대상 조회와 동일 기준 · 전체 ${proposal.target.count.toLocaleString()}명 중 최대 100명 표시`}
+                />
+                {/* 2026-07-09: MMS 이미지 첨부 모달 (추천 채널 MMS 선택 시) */}
+                <MmsUploadModal
+                  show={showMmsModal}
+                  onClose={() => setShowMmsModal(false)}
+                  mmsUploadedImages={mmsUploadedImages}
+                  mmsUploading={mmsUploading}
+                  handleMmsSlotUpload={handleMmsSlotUpload}
+                  handleMmsMultiUpload={handleMmsMultiUpload}
+                  handleMmsImageRemove={handleMmsImageRemove}
+                  handleMmsFromAsset={handleMmsFromAsset}
+                  /* ★ 2026-09-29 한줄로 V2 차수 5 — 사진 순서 바꾸기(끌어 놓기 · ◀ ▶) · 발송은 목록 순서(toMmsImagePaths) */
+                  handleMmsImageSwap={handleMmsImageSwap}
+                  errorMessage={mmsError}
+                  onConfirm={(count) => {
+                    // 이미지 첨부 확정 시 발송 유형을 MMS로 고정 + 발송 에러 해제
+                    if (count > 0) { setChannelOverride('MMS'); setSendError(null); }
+                  }}
+                />
+              </>
+            )}
+          </div>
+        )}
+
+        {/* ★ 2026-10-18 기능 카드 = /ai-operator(AiOperatorPage) 로 옮겼다 */}
+      </main>
+
+      {/* ★ D166: 발송 결과 모달 — 발송 처리 완료 후 큰 체크 + 캠페인 정보 + dashboard 발송결과 진입 */}
+      {sendResult && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-md animate-in fade-in duration-200"
+        >
+          <div
+            className="relative w-full max-w-md rounded-3xl border border-slate-200 shadow-2xl bg-white animate-in fade-in zoom-in-95 duration-300"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="relative p-8">
+              {/* ★ 2026-10-12 남지현 접수: X = [새 캠페인]과 같다(제안을 지우고 첫 화면). 옛: 결과 창만 닫혀 보낸 제안·[승인 후 발송 시작]이
+                  그대로 남아 같은 대상에게 한 번 더 예약·발송할 수 있었다(/direct-send 는 부를 때마다 새 캠페인을 만든다). */}
+              <button
+                type="button"
+                onClick={handleReset}
+                className="absolute top-5 right-5 w-9 h-9 rounded-full flex items-center justify-center text-slate-500 hover:text-slate-900 hover:bg-slate-100 transition-all"
+                aria-label="닫기"
+              >
+                <X className="w-5 h-5" />
+              </button>
+
+              {/* 큰 체크 아이콘 */}
+              <div className="flex justify-center mb-5">
+                <div className="relative w-20 h-20 rounded-full bg-gradient-to-br from-emerald-400 to-teal-500 flex items-center justify-center shadow-2xl shadow-emerald-500/40">
+                  <CheckCircle2 className="w-12 h-12 text-white" strokeWidth={2.5} />
+                  <span className="absolute inset-0 rounded-full bg-emerald-100 animate-ping" />
+                </div>
+              </div>
+
+              {/* ★ 2026-08-17 예약과 즉시를 갈라서 말한다.
+                  예약인데 "발송 처리 완료 · 발송 성공 0건"을 띄우면 사용자는 나갔는데 실패한 것으로 읽는다.
+                  예약은 아직 안 나간 것이므로 성공·실패 지표 자체를 그리지 않고 **언제 나가는지**를 말한다. */}
+              <div className="text-center mb-6">
+                <p className="text-[10px] font-semibold tracking-[0.3em] uppercase text-emerald-700 mb-2">
+                  {sendResult.scheduledAt ? 'Campaign Scheduled' : 'Campaign Dispatched'}
+                </p>
+                <h3 className="text-2xl font-bold text-slate-900 mb-1.5">
+                  {sendResult.scheduledAt ? '예약 완료' : '발송 처리 완료'}
+                </h3>
+                <p className="text-sm text-slate-600 truncate" title={sendResult.suggestedName}>{sendResult.suggestedName}</p>
+              </div>
+
+              {sendResult.scheduledAt ? (
+                <div className="mb-6 p-4 rounded-xl bg-violet-50 border border-violet-200 text-center">
+                  <p className="text-[10px] font-semibold tracking-wider uppercase text-violet-700 mb-1.5">발송 예정</p>
+                  <p className="text-xl font-bold text-slate-900">
+                    {new Date(sendResult.scheduledAt).toLocaleString('ko-KR', {
+                      year: 'numeric', month: 'long', day: 'numeric', weekday: 'short', hour: '2-digit', minute: '2-digit',
+                    })}
+                  </p>
+                  <p className="text-[11px] text-slate-500 mt-1.5">지금은 나가지 않습니다 · 예약내역에서 확인·취소할 수 있습니다</p>
+                </div>
+              ) : (
+                /* 결과 숫자 — 즉시 발송일 때만 */
+                <div className="grid grid-cols-2 gap-3 mb-6">
+                  <div className="p-4 rounded-xl bg-white border border-slate-200 text-center">
+                    <p className="text-[10px] font-semibold tracking-wider uppercase text-emerald-700 mb-1.5">발송 성공</p>
+                    <p className="text-2xl font-bold text-slate-900 tabular-nums">{sendResult.sentCount.toLocaleString()}</p>
+                    <p className="text-[11px] text-slate-400 mt-0.5">건</p>
+                  </div>
+                  <div className="p-4 rounded-xl bg-white border border-slate-200 text-center">
+                    <p className="text-[10px] font-semibold tracking-wider uppercase text-slate-400 mb-1.5">발송 실패</p>
+                    <p className={`text-2xl font-bold tabular-nums ${sendResult.failCount > 0 ? 'text-rose-700' : 'text-slate-400'}`}>
+                      {sendResult.failCount.toLocaleString()}
+                    </p>
+                    <p className="text-[11px] text-slate-400 mt-0.5">건 {sendResult.failCount > 0 ? '· 자동 환불' : ''}</p>
+                  </div>
+                </div>
+              )}
+
+              {sendResult.message && (
+                <div className="mb-5 p-3 rounded-lg bg-white border border-slate-200">
+                  <p className="text-xs text-slate-500 leading-relaxed">{sendResult.message}</p>
+                </div>
+              )}
+
+              {/* CTA */}
+              <div className="flex flex-col sm:flex-row gap-2.5">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSendResult(null);
+                    navigate('/dashboard?results=1');
+                  }}
+                  className="text-white flex-1 px-5 py-3 rounded-xl bg-indigo-600 hover:bg-indigo-700 font-semibold hover:brightness-110 hover:shadow-lg hover:shadow-emerald-500/30 transition-all"
+                >
+                  발송 결과 보기
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSendResult(null);
+                    handleReset();
+                  }}
+                  className="px-5 py-3 rounded-xl bg-slate-100 text-slate-900 font-medium border border-slate-300 hover:bg-slate-200 transition-all"
+                >
+                  새 캠페인
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ★ D165: 메시지 다듬기 모달 — AiRefineModal 재사용 (D152 emerald 톤). 선택된 안 → AI 풍성화 → onApply로 오버라이드 적용 */}
+      <AiRefineModal
+        isOpen={showRefineModal}
+        originalMessage={(() => {
+          if (!proposal) return '';
+          const idx = Math.min(selectedVariantIdx, Math.max(0, proposal.messages.length - 1));
+          const v = proposal.messages[idx];
+          if (!v) return '';
+          return refinedOverrides[idx] || v.body || '';
+        })()}
+        companyName={companyName}
+        onClose={() => setShowRefineModal(false)}
+        onApply={(text) => {
+          setRefinedOverrides((prev) => ({ ...prev, [selectedVariantIdx]: text }));
+          setShowRefineModal(false);
+        }}
+      />
+
+      {/* ★ 2026-09-12 발신 인증(전송자격인증 3.5) — 통과하면 승인 발송이 그대로 이어진다 */}
+      {senderAuth.state && (
+        <SenderAuthModal
+          state={senderAuth.state}
+          code={senderAuth.code}
+          onCodeChange={senderAuth.setCode}
+          error={senderAuth.error}
+          busy={senderAuth.busy}
+          onVerify={senderAuth.verify}
+          onResend={senderAuth.resend}
+          onProceed={senderAuth.cancel}
+          onCancel={senderAuth.cancel}
+        />
+      )}
+    </div>
+    </SurfaceToneProvider>
+  );
+}
+
+// ════════════════════════════════════════════════════════════════════
+// ★ D205 (2026-05-22): AI 자율 진단 자동 추천 카드 컴포넌트
+//   회사 admin 진입 시 자동 호출 — 우선순위 1~3 추천 카드 표시
+//   원클릭 진행 시 자연어 한 줄 prefill + AI Operator 진입
+// ════════════════════════════════════════════════════════════════════
+
+interface AutoRecommendation {
+  id: string;
+  priority: 1 | 2 | 3;
+  type: string;
+  title: string;
+  reason: string;
+  targetCount: number;
+  expectedImpact: string;
+  oneClickObjective: string;
+}
+
+interface CompanyHealthDiagnosis {
+  overallScore: number;
+  topConcerns: string[];
+  recommendations: AutoRecommendation[];
+}
+
+// ★ 2026-07-02 1차 개편: 일일 브리핑(company_daily_briefs)이 있으면 그것이 추천의 단일 소스 —
+//   룰 기반 추천은 브리핑이 아직 없는 회사의 폴백. 자동마케팅 현황 요약 동반.
+interface DiagnosisBrief {
+  brief_date: string;
+  headline: string | null;
+  recommendations: Array<{
+    title: string;
+    objective: string;
+    reason: string;
+    targetCount: number | null;
+    opportunityType?: string | null;
+    recommendedChannel?: 'sms' | 'email' | 'dm' | null;
+  }>;
+}
+
+// ★ 2026-09-30 AI 존 대개편(목업 1안): 옛 좌측 "AI 자율 진단" 카드 → 남색 띠 안 추천 띠(4상태) + 추천 창(X·ESC만).
+//   조회·분기는 옛 카드 그대로다(같은 endpoint · 브리핑 우선 · 정착 제안 = 여정 · 채널 제안 = 그 채널 화면 · 기본 = 입력창 채우기).
+//   못 쓰는 회사 = 조회하지 않는다(서버가 막는 조회 · 옛 카드도 잠김이면 그리지 않았다) → 잠김 띠 + 안내 창.
+type BriefRec = DiagnosisBrief['recommendations'][number];
+type HubRec =
+  | { kind: 'brief'; rec: BriefRec }
+  | { kind: 'rule'; rec: AutoRecommendation };
+
+function hubRecLabel(r: HubRec): string {
+  if (r.kind === 'rule') return '입력창에 채우기';
+  if (r.rec.opportunityType === 'journey_promotion') return '여정으로 굳히기';
+  if (r.rec.recommendedChannel === 'email') return '이메일에서 진행';
+  if (r.rec.recommendedChannel === 'dm') return '모바일 DM에서 진행';
+  return '입력창에 채우기';
+}
+
+function HubRecommendBand({ planLocked, onLocked, onApply }: { planLocked: boolean; onLocked: () => void; onApply: (objective: string) => void }) {
+  const navigate = useNavigate();
+  const [diagnosis, setDiagnosis] = useState<CompanyHealthDiagnosis | null>(null);
+  const [brief, setBrief] = useState<DiagnosisBrief | null>(null);
+  const [autoMarketing, setAutoMarketing] = useState<{ active: number; pendingProposals: number }>({ active: 0, pendingProposals: 0 });
+  const [loading, setLoading] = useState(true);
+  const [open, setOpen] = useState(false);
+
+  useEffect(() => {
+    if (planLocked) return;
+    const load = async () => {
+      try {
+        const token = localStorage.getItem('token');
+        const r = await fetch('/api/ai/operator/self-diagnosis', {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        const d = await r.json();
+        if (d.success) {
+          setDiagnosis(d.diagnosis);
+          setBrief(d.brief || null);
+          if (d.autoMarketing) setAutoMarketing(d.autoMarketing);
+        }
+      } catch {
+        // skip - 추천 없으면 빈 자리
+      } finally {
+        setLoading(false);
+      }
+    };
+    load();
+  }, [planLocked]);
+
+  // 창은 X·ESC로만 닫는다(바깥 눌러 닫기 없음 — 전역 규칙)
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setOpen(false); };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [open]);
+
+  // ★ 5차: 브리핑 추천 분기 — 정착 제안 = 여정 승격다리 / 채널 제안 = 해당 채널 화면 / 기본 = 자연어 prefill
+  const handleBriefRec = (rec: BriefRec) => {
+    if (rec.opportunityType === 'journey_promotion') {
+      sessionStorage.setItem('journeyObjectivePrefill', JSON.stringify({ objective: rec.objective, message: '' }));
+      navigate('/ai-journeys');
+      return;
+    }
+    if (rec.recommendedChannel === 'email') { navigate('/email-campaigns'); return; }
+    if (rec.recommendedChannel === 'dm') { navigate('/dm-builder'); return; }
+    onApply(rec.objective);
+  };
+  const runRec = (r: HubRec) => {
+    setOpen(false);
+    if (r.kind === 'brief') handleBriefRec(r.rec);
+    else onApply(r.rec.oneClickObjective);
+  };
+
+  const row = 'mt-6 flex flex-wrap items-center gap-2 text-[13px]';
+  const mark = 'w-8 h-8 rounded-lg bg-white/10 flex items-center justify-center text-amber-300 shrink-0';
+  const textLink = 'text-white font-semibold underline underline-offset-4 decoration-white/40 hover:decoration-white';
+
+  if (planLocked) {
+    return (
+      <div className={`${row} gap-3 text-slate-200`} data-zone="hub-rec" data-state="locked">
+        <span className={mark}><Lock className="w-4 h-4" /></span>
+        <span>추천 캠페인은 AI Operator 요금제에서 열립니다</span>
+        <button type="button" onClick={onLocked} className={textLink}>어떤 기능인지 보기 →</button>
+      </div>
+    );
+  }
+  if (loading) return <div className="mt-6 h-10" aria-hidden="true" />;
+  if (!diagnosis) return null;
+
+  const briefRecs = Array.isArray(brief?.recommendations) ? brief!.recommendations : [];
+  const useBrief = briefRecs.length > 0;
+  const recs: HubRec[] = useBrief
+    ? briefRecs.map((rec) => ({ kind: 'brief' as const, rec }))
+    : diagnosis.recommendations.map((rec) => ({ kind: 'rule' as const, rec }));
+  const first = recs[0];
+  const firstCount = first ? first.rec.targetCount : null;
+  const pending = autoMarketing.pendingProposals;
+  const pendingLink = pending > 0 && (
+    <button type="button" onClick={() => navigate('/continuous-operator')} className="h-10 px-4 rounded-xl border border-white/15 inline-flex items-center gap-2 text-slate-200 hover:bg-white/[0.08] transition-colors">
+      <span className="w-2 h-2 rounded-full bg-amber-300" />승인 대기 {pending.toLocaleString()}건 →
+    </button>
+  );
+  const scoreTone = diagnosis.overallScore >= 70 ? 'text-emerald-700' : diagnosis.overallScore >= 40 ? 'text-amber-700' : 'text-rose-700';
+
+  return (
+    <>
+      {useBrief && first ? (
+        <div className={row} data-zone="hub-rec" data-state="today">
+          <button type="button" onClick={() => setOpen(true)} className="group inline-flex items-center gap-3 h-10 pl-1.5 pr-4 rounded-xl bg-white/[0.08] border border-white/15 hover:bg-white/[0.14] transition-colors max-w-full">
+            <span className="relative w-8 h-8 rounded-lg bg-amber-500 text-slate-900 flex items-center justify-center shrink-0">
+              <Sparkles className="w-4 h-4" />
+              <span className="absolute -top-1.5 -right-1.5 min-w-[18px] h-[18px] px-1 rounded-full bg-white text-slate-900 text-[11px] font-bold flex items-center justify-center">{recs.length}</span>
+            </span>
+            <span className="text-left leading-tight min-w-0">
+              <span className="block text-[12px] text-slate-300">오늘 분석 · 1순위</span>
+              <span className="block font-semibold truncate">
+                {first.rec.title}
+                {firstCount != null && firstCount > 0 && <span className="text-slate-300 font-normal"> {firstCount.toLocaleString()}명</span>}
+              </span>
+            </span>
+            <span className="text-slate-300 group-hover:text-white shrink-0">모두 보기 →</span>
+          </button>
+          <button type="button" onClick={() => runRec(first)} className="h-10 px-4 rounded-xl bg-amber-500 text-slate-900 font-semibold hover:bg-amber-400 transition-colors">1순위 {hubRecLabel(first)}</button>
+          {pendingLink}
+          <span className="h-10 px-2 inline-flex items-center text-slate-300">회사 점수 <b className="ml-1.5 text-white tabular-nums">{diagnosis.overallScore}</b></span>
+        </div>
+      ) : recs.length > 0 ? (
+        <div className={`${row} gap-3 text-slate-200`} data-zone="hub-rec" data-state="fallback">
+          <span className={mark}><Sparkles className="w-4 h-4" /></span>
+          <span>기본 추천 {recs.length}건 · 일일 분석이 쌓이기 전 추천입니다</span>
+          <button type="button" onClick={() => setOpen(true)} className={textLink}>모두 보기 →</button>
+          {pendingLink}
+        </div>
+      ) : (
+        <div className={`${row} gap-3 text-slate-200`} data-zone="hub-rec" data-state="empty">
+          <span className={mark}><CheckCircle2 className="w-4 h-4" /></span>
+          <span>오늘은 새 추천이 없습니다. 한 줄로 바로 시작하세요.</span>
+          {diagnosis.topConcerns.length > 0 && <button type="button" onClick={() => setOpen(true)} className={textLink}>진단 보기 →</button>}
+          {pendingLink}
+        </div>
+      )}
+
+      {open && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60" role="dialog" aria-modal="true" aria-labelledby="hub-rec-title">
+          <div className="relative w-full max-w-4xl max-h-[88vh] overflow-y-auto rounded-3xl p-6 md:p-8 bg-white text-slate-900 shadow-[0_24px_64px_-12px_rgba(15,23,42,0.45)]">
+            <button type="button" onClick={() => setOpen(false)} className="absolute top-5 right-5 w-9 h-9 rounded-full flex items-center justify-center text-slate-500 hover:bg-slate-100 hover:text-slate-900" aria-label="닫기">
+              <X className="w-[18px] h-[18px]" />
+            </button>
+            <div className="flex items-start justify-between gap-6 pr-12 mb-5">
+              <div className="min-w-0">
+                <h3 id="hub-rec-title" className="text-[19px] font-bold tracking-[-0.02em]">오늘의 추천 캠페인</h3>
+                <p className="text-[14px] mt-1 text-slate-600">
+                  {useBrief ? (brief?.headline || '매일 오전 분석 · 우리 고객 데이터에서 오늘 할 만한 캠페인을 골랐습니다.') : '일일 분석이 쌓이기 전 기본 추천입니다. 회사 실측 신호로 골랐습니다.'}
+                </p>
+              </div>
+              <div className="shrink-0 text-right">
+                <div className="text-[12px] text-slate-500">회사 건강 점수</div>
+                <div className={`text-[24px] font-bold tabular-nums ${scoreTone}`}>{diagnosis.overallScore}</div>
+              </div>
+            </div>
+
+            {diagnosis.topConcerns.length > 0 && (
+              <div className="mb-5 p-4 rounded-2xl bg-slate-50 border border-slate-200">
+                <div className="text-[13px] font-semibold mb-2 text-slate-600">AI 진단 우선 항목</div>
+                <ul className="space-y-1.5 text-[14px] text-slate-700">
+                  {diagnosis.topConcerns.map((c, i) => (
+                    <li key={i} className="flex gap-2"><span className="text-amber-600">•</span><span>{c}</span></li>
+                  ))}
+                </ul>
+              </div>
+            )}
+
+            {recs.length > 0 && (
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                {recs.map((r, i) => {
+                  const count = r.rec.targetCount;
+                  return (
+                    <div key={r.kind === 'rule' ? r.rec.id : `brief-${i}`} className="flex flex-col p-5 rounded-2xl bg-white border border-slate-200 shadow-[0_1px_2px_rgba(15,23,42,0.05),0_10px_24px_-14px_rgba(15,23,42,0.25)]">
+                      <div className="flex items-center gap-1.5 mb-2 flex-wrap">
+                        <span className={`text-[12px] font-bold px-2 py-0.5 rounded-full ${i === 0 ? 'bg-slate-900 text-white' : 'bg-indigo-50 text-indigo-800'}`}>{r.kind === 'rule' ? r.rec.priority : i + 1}순위</span>
+                        {count != null && count > 0 && <span className="text-[13px] text-slate-500">{count.toLocaleString()}명</span>}
+                        {r.kind === 'brief' && r.rec.opportunityType === 'journey_promotion' && <span className="text-[12px] font-semibold px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-800">성과 검증</span>}
+                        {r.kind === 'brief' && r.rec.recommendedChannel === 'email' && <span className="text-[12px] font-semibold px-2 py-0.5 rounded-full bg-sky-50 text-sky-800">이메일 추천</span>}
+                        {r.kind === 'brief' && r.rec.recommendedChannel === 'dm' && <span className="text-[12px] font-semibold px-2 py-0.5 rounded-full bg-sky-50 text-sky-800">모바일 DM 추천</span>}
+                      </div>
+                      <h4 className="text-[16px] font-bold mb-1.5">{r.rec.title}</h4>
+                      <p className="text-[13px] leading-relaxed mb-2 text-slate-700">{r.rec.reason}</p>
+                      {r.kind === 'rule' && r.rec.expectedImpact && <p className="text-[12px] text-slate-500 mb-2">{r.rec.expectedImpact}</p>}
+                      <div className="flex-1" />
+                      <button type="button" onClick={() => runRec(r)} className="mt-2 w-full h-10 rounded-xl text-[14px] font-semibold bg-amber-500 text-slate-900 hover:bg-amber-400 transition-colors">{hubRecLabel(r)}</button>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+
+            {/* ★ 2026-07-02 1차: 자동마케팅 현황 요약 — 승인 대기가 있으면 바로 가게 */}
+            <button
+              type="button"
+              onClick={() => { setOpen(false); navigate('/continuous-operator?tab=running'); }}
+              className="mt-4 w-full flex items-center justify-between gap-3 px-4 py-3 rounded-xl text-[14px] bg-slate-50 hover:bg-slate-100 border border-slate-200 text-slate-700 transition-colors"
+            >
+              <span>
+                실행 중인 자동 마케팅 <b>{autoMarketing.active}</b>개
+                {pending > 0 && <> · 승인 대기 <b>{pending.toLocaleString()}</b>건</>}
+              </span>
+              <span className="font-semibold text-indigo-700 shrink-0">자동 마케팅 관리 →</span>
+            </button>
+            <p className="mt-3 text-[12px] text-slate-500 italic">
+              Data source: {useBrief ? '매일 오전 일일 분석 (고객 DB 실측 신호 · 누적 학습)' : '회사 실측 신호 (일일 분석 누적 전 기본 추천)'}
+            </p>
+          </div>
+        </div>
+      )}
+    </>
+  );
+}

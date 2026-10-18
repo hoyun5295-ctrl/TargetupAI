@@ -190,8 +190,10 @@ describe('회의론자 최종 검증 조건(2026-10-10)', () => {
     expect(strip).not.toContain('setTimeout(() => { void load(); }, 3000)');
   });
 
-  it('⑤ 빈 띠도 자리표시와 같은 높이 · 숨었던 창이 다시 보이면 바로 읽는다', () => {
-    expect(strip).toContain('min-h-[86px]');
+  it('⑤ 빈 띠 = 한 줄(★ 2026-10-18 AI 한줄로 설계서 §3 · 옛 86px 빈 상자 폐기) · 숨었던 창이 다시 보이면 바로 읽는다', () => {
+    expect(strip).not.toContain('min-h-[86px]');
+    expect(strip).not.toContain('h-[86px]');
+    expect(strip).toContain('{asOf && chips.length > 0 ? (');
     expect(strip).toContain("document.addEventListener('visibilitychange', onVisible);");
     expect(strip).toContain("document.removeEventListener('visibilitychange', onVisible);");
   });

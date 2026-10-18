@@ -64,6 +64,8 @@ import { checkCredit, deductCreditSafe } from '../utils/ai-credit';
 import { applyBenefitToBody, buildTargetHintPromptBlock, normalizeTargetHint } from '../utils/autosend-policy';
 import { currentUserId } from '../utils/request-context';
 import { runInCreditBundle } from '../utils/ai-credit-context';
+// ★ 2026-10-18 허브 대상 수 = 승인 발송과 같은 매장 범위(옛: 회사 전체를 셌다)
+import { resolveHubStoreScope } from '../utils/store-scope';
 import { getCreditCost } from '../utils/ai-credit-calc';
 
 // 풀분석/자동마케팅 크레딧 = CREDIT_COST_MAP 단일 진실(getCreditCost(source)). orchestrate=300, continuous-operator=200.
@@ -80,6 +82,8 @@ const orchestratorAnthropic = new Anthropic({
 export interface AgentContext {
   companyId: string;
   userId: string | null;
+  /** ★ 2026-10-18 허브 대상 수 매장 범위(resolveHubStoreScope) — 요청 사용자 유형(JWT). 없으면 그 사람의 DB 유형으로 판정 */
+  userType?: string | null;
   objective: string;
   companyInfo: Record<string, any>;
   customerStats: Record<string, any>;
@@ -484,7 +488,10 @@ async function _orchestrateImpl(ctx: AgentContext): Promise<OrchestratorResult> 
       // ★ 2026-10-15 B-1015-1 허브 제안: 전체 선언(all_customers) 없는 빈 조건은 전원이 아니라 "못 옮김" 이다.
       //   옛: {} 를 countFilteredCustomers 가 전원으로 세어 카드는 1,501명인데 리스트·발송은 거절 — 세 경로가 같은 문장으로 멈춘다.
       if (isUnresolvedEmptyTarget(targetResult)) throw new HubTargetEmptyError();
-      const cnt = await countFilteredCustomers(ctx.companyId, targetResult.filters, ctx.userId || '');
+      // ★ 2026-10-18 승인 발송(preview-recipients)과 같은 매장 범위로 센다 · 미배정 담당자 = 대상 0 + 사유
+      const hubScope = await resolveHubStoreScope(ctx.companyId, ctx.userId, ctx.userType);
+      if (hubScope.blocked) throw new Error('담당 매장이 지정되지 않아 발송 대상을 정할 수 없습니다.');
+      const cnt = await countFilteredCustomers(ctx.companyId, targetResult.filters, ctx.userId || '', hubScope.storeFilter, hubScope.baseParams);
       actual = cnt.count;
     }
     if (actual !== estimatedCount) {
@@ -757,7 +764,7 @@ const ORCHESTRATOR_TOOLS: Anthropic.Tool[] = [
   },
 ];
 
-export async function orchestrateWithAI(ctx: AgentContext, creditOpts?: { source?: string; cost?: number }): Promise<OrchestratorResult> {
+export async function orchestrateWithAI(ctx: AgentContext, creditOpts?: { source?: string; cost?: number; chargeOnlyWithTarget?: boolean }): Promise<OrchestratorResult> {
   // ★ D227+ 종량제: 풀분석 묶음 (orchestrate와 동일 — 진입 1회 차감). fallback은 _orchestrateImpl 직접(이중차감 방지).
   const source = creditOpts?.source ?? 'orchestrate';
   const cost = creditOpts?.cost ?? getCreditCost(source);
@@ -766,7 +773,8 @@ export async function orchestrateWithAI(ctx: AgentContext, creditOpts?: { source
     const result = await _orchestrateWithAIImpl(ctx);
     // ★ 2026-07-08 (Harold 명시): 문안 미출력(0건 매칭 등) = 사용자 결과 없음 → 차감 skip.
     //   문안이 1개 이상 실제 생성된 경우에만 과금 (6원칙 ② 효과 검증 후 과금).
-    if ((result.messages?.length ?? 0) > 0) {
+    // ★ 2026-10-18 orchestrate 와 같은 옵션 — chargeOnlyWithTarget = 대상 0명이면 문안이 있어도 0(허브 제안 결함 0-1)
+    if ((result.messages?.length ?? 0) > 0 && (!creditOpts?.chargeOnlyWithTarget || (result.target?.count ?? 0) > 0)) {
       await deductCreditSafe({ companyId: ctx.companyId, cost, source, createdBy: ctx.userId || currentUserId() || null });
     }
     return result;
@@ -824,10 +832,12 @@ async function _orchestrateWithAIImpl(ctx: AgentContext): Promise<OrchestratorRe
           //   이 tool 흐름은 공용 제안(/operator/propose)도 쓰므로 범위 밖에는 종전 count를 유지한다.
           // ★ 2026-10-15 B-1015-1 허브: 전체 선언 없는 빈 조건은 세지 않는다(orchestrate 와 같은 판정 · 같은 문장).
           hubTargetEmpty = ctx.audienceScope !== 'operator' && isUnresolvedEmptyTarget(targetResult);
+          // ★ 2026-10-18 허브 갈래 = 승인 발송과 같은 매장 범위(미배정 담당자 = 0)
+          const hubScope = ctx.audienceScope === 'operator' || hubTargetEmpty ? null : await resolveHubStoreScope(ctx.companyId, ctx.userId, ctx.userType);
           const actual = ctx.audienceScope === 'operator'
             ? (await countOperatorAudienceFor({ companyId: ctx.companyId, legacyFilters: targetResult.filters, ownerUserId: ctx.userId || null })).count
-            : hubTargetEmpty ? 0
-            : (await countFilteredCustomers(ctx.companyId, targetResult.filters, ctx.userId || '')).count;
+            : hubTargetEmpty || hubScope?.blocked ? 0
+            : (await countFilteredCustomers(ctx.companyId, targetResult.filters, ctx.userId || '', hubScope!.storeFilter, hubScope!.baseParams)).count;
           estimatedCount = actual;
           countVerified = true;
           mark('verify', start);

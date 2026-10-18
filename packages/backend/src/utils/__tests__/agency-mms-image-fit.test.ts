@@ -241,7 +241,7 @@ describe('배선 계약: 두 입구가 같은 함수를 지나고, 다른 발송
   });
 
   it('직접발송·AI Operator는 옵션을 안 넘긴다(기존 규격 업로드 그대로)', () => {
-    for (const f of ['pages/Dashboard.tsx', 'pages/AiOperatorPage.tsx']) {
+    for (const f of ['pages/Dashboard.tsx', 'pages/AiLinePage.tsx']) {   // ★ 2026-10-18 한 줄 입력 · 제안 · 발송은 AiLinePage.tsx 로 원형 이동(AI 한줄로 설계서 §4)
       const src = read(`${FRONT}/${f}`);
       expect(src, f).toMatch(/useMmsUpload\(\(msg\) =>/);
       expect(src, f).not.toMatch(/autoFit/);

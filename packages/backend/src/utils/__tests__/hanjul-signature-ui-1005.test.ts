@@ -98,7 +98,7 @@ describe('4. 입구 배선', () => {
     expect(i).toContain("handleAIGenerate('', sc, 'web');");
   });
   it('허브: 묻는 응답을 제안 반영보다 먼저 처리한다 · 3안 선택 기록을 싣는다', () => {
-    const a = FRONT('pages', 'AiOperatorPage.tsx');
+    const a = FRONT('pages', 'AiLinePage.tsx');   // ★ 2026-10-18 한 줄 입력 · 제안 · 발송은 AiLinePage.tsx 로 원형 이동(AI 한줄로 설계서 §4)
     const ask = a.indexOf('if (data.needsFacts?.benefit) {');
     const set = a.indexOf('setProposal(data as ProposalResponse);');
     expect(ask).toBeGreaterThan(0);

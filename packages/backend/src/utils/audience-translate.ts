@@ -182,7 +182,7 @@ export function termUniquer(): (raw: string | null | undefined) => string {
  * 칸 조건 → 컴파일용 filters(buildFilterWhereClauseCompat 형식) — 조건 → SQL 의 유일한 다리(등록 검증 · 미리보기 · 회차 · 발송 공용).
  *   ⛔ 조건이 하나라도 사라지면 대상이 넓어진다(Codex 1R) — 사라지는 입력은 여기서 거절한다(AudienceConditionError).
  *     ① 같은 칸은 이상 + 이하 한 쌍(between)만 — 그 밖 겹침은 앞 조건이 덮인다.
- *     ② 조건마다 SQL 이 실제로 나와야 한다 — 컴파일러가 건너뛰는 칸(매장 코드) · 지원하지 않는 연산자는 빈 조각이 된다.
+ *     ② 조건마다 SQL 이 실제로 나와야 한다 — 지원하지 않는 연산자는 빈 조각이 된다(★ 2026-10-18 매장 코드는 이제 소속 표 조건으로 나온다 · customer-filter 0-3).
  */
 export function conditionsToFilters(
   conditions: Array<Pick<AudienceCondition, 'field' | 'operator' | 'value'> & { label?: string }>,

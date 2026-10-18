@@ -4,6 +4,7 @@ dotenv.config();
 
 import { startDemoDataWorker } from './utils/demo-data';   // ★ 2026-10-09 시연 회사 합성 데이터 워커
 import aiRoutes from './routes/ai';
+import aiLineRoutes from './routes/ai-line';   // ★ 2026-10-18 AI 한줄로(설계서 docs/2026-10-18-ai-line-design.md)
 import aiMemoryRoutes from './routes/ai-memory';
 import aiUsageRoutes from './routes/ai-usage';
 import express from 'express';
@@ -476,6 +477,7 @@ app.use('/api/plans', plansRoutes);
 app.use('/api/customers', customersRoutes);
 app.use('/api/campaigns', campaignsRoutes);
 app.use('/api/ai', aiRoutes);
+app.use('/api/ai-line', aiLineRoutes);
 app.use('/api/ai-memory', aiMemoryRoutes);
 app.use('/api/ai-usage', aiUsageRoutes);
 app.use('/api/analysis', analysisRoutes);

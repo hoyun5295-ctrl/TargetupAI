@@ -46,6 +46,14 @@ export function isAutoSpamSource(source: string | null | undefined): boolean {
 }
 
 /**
+ * ★ 2026-10-18 「자동 검사가 아니다」 SQL 조각(isAutoSpamSource 와 같은 목록) — 수동 검사 창의 「진행 중 1건」 · 창 복원이
+ *   AI 한줄로 자동 검사를 자기 검사로 집어 가지 않게(설계서 docs/2026-10-18-ai-line-design.md §7).
+ */
+export function notAutoSpamSourceSql(col = 'source'): string {
+  return `COALESCE(${col}, '') NOT IN ('auto_ai', '${SPAM_AUTO_FREE_SOURCE}')`;
+}
+
+/**
  * ★ 2026-09-29 한줄로 V2 차수 5(B-0928-1 ②) — 체험 한 칸을 쓴 검사인가(SQL 조각 · WHERE에 AND로 붙인다).
  * 결과 행이 있고 **전부 발송 실패**(failed = 게이트웨이 반려·통신사 실패)면 테스트폰에 한 통도 닿지 않았다 → 세지 않는다.
  * 옛: 결과와 무관하게 검사 1건 = 1회. 적재 전에 실패한 체험은 행을 지워 되돌리면서(라우트), 적재 뒤 반려된 체험은 그대로 셌다

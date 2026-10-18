@@ -699,7 +699,7 @@ describe('[소스 스캔] 화면 배선', () => {
   const FE = resolve(__dirname, '../../../frontend/src');
   const hook = readFileSync(resolve(FE, 'hooks/useSenderAuth.ts'), 'utf8');
   const dashboard = readFileSync(resolve(FE, 'pages/Dashboard.tsx'), 'utf8');
-  const operator = readFileSync(resolve(FE, 'pages/AiOperatorPage.tsx'), 'utf8');
+  const operator = readFileSync(resolve(FE, 'pages/AiLinePage.tsx'), 'utf8');   // ★ 2026-10-18 한 줄 입력 · 제안 · 발송은 AiLinePage.tsx 로 원형 이동(AI 한줄로 설계서 §4)
 
   it('인증 흐름은 훅 하나가 갖는다 — 화면마다 복제하지 않는다', () => {
     expect(hook).toMatch(/\/api\/auth\/sender-auth\/verify/);

@@ -54,6 +54,7 @@ const DmBuilderPage = lazyPage(() => import('./pages/DmBuilderPage')); // ★ �
 const AlimtalkSendersPage = lazyPage(() => import('./pages/AlimtalkSendersPage'));
 // ★ D163 (2026-05-19) Braze급 SaaS Step 0 — AI Operator placeholder (ENT/BUSINESS 대상 베타)
 const AiOperatorPage = lazyPage(() => import('./pages/AiOperatorPage'));
+const AiLinePage = lazyPage(() => import('./pages/AiLinePage'));   // ★ 2026-10-18 AI 한줄로(설계서 docs/2026-10-18-ai-line-design.md §4-3)
 // ★ D172 (2026-05-19): 한줄로 CDP — 자사몰 → 한줄로 sync 설정 페이지
 const CdpSettingsPage = lazyPage(() => import('./pages/CdpSettingsPage'));
 // ★ D174 (2026-05-19): Step 1 — 성과 리포트 + AI 다음 캠페인 추천
@@ -497,6 +498,15 @@ function App() {
           element={
             <PrivateRoute allowedTypes={['company_admin', 'company_user']}>
               <AiOperatorPage />
+            </PrivateRoute>
+          }
+        />
+        {/* ★ 2026-10-18 AI 한줄로 — 한 줄 입력 · 제안 · 발송(옛 허브 원형 이동) · 기능 12개는 /ai-operator */}
+        <Route
+          path="/ai-line"
+          element={
+            <PrivateRoute allowedTypes={['company_admin', 'company_user']}>
+              <AiLinePage />
             </PrivateRoute>
           }
         />

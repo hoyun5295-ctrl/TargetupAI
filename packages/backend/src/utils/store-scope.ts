@@ -158,6 +158,39 @@ export async function getStoreScope(companyId: string, userId: string): Promise<
   return { type: 'no_filter' };
 }
 
+/**
+ * ★ 2026-10-18 허브(AI 오퍼레이터 · AI 한줄로) 대상 범위 — 승인 발송(`/operator/preview-recipients`)의 인라인 판정을 원형 이동했다.
+ *   세기 · 1위 고객 · 발송 명단이 이 함수 하나로 같은 범위를 본다(옛: 허브 대상 수만 매장 범위 없이 회사 전체를 셌다).
+ *   - 담당자(`company_user`)만 getStoreScope · filtered = 소속 표 조건(`$2` = 코드 배열) · blocked = 대상 0
+ *   - userType 을 모르면(작업 중 호출 · 플래너 문안) 그 사람의 DB 유형으로 판정한다(DB 'user' = 담당자)
+ *   반환 baseParams 첫 값 = companyId(`$1`) — 조건 조각은 baseParams.length + 1 부터 번호를 매긴다.
+ */
+export async function resolveHubStoreScope(
+  companyId: string,
+  userId: string | null | undefined,
+  userType?: string | null,
+): Promise<{ storeFilter: string; baseParams: any[]; blocked: boolean }> {
+  let isStaff = false;
+  if (userType !== undefined && userType !== null) {
+    isStaff = userType === 'company_user';
+  } else if (userId) {
+    const u = await query('SELECT user_type FROM users WHERE id = $1', [userId]);
+    isStaff = u.rows[0]?.user_type === 'user';
+  }
+  if (isStaff && userId) {
+    const scope = await getStoreScope(companyId, userId);
+    if (scope.type === 'filtered') {
+      return {
+        storeFilter: ' AND id IN (SELECT customer_id FROM customer_stores WHERE company_id = $1 AND store_code = ANY($2::text[]))',
+        baseParams: [companyId, scope.storeCodes],
+        blocked: false,
+      };
+    }
+    if (scope.type === 'blocked') return { storeFilter: '', baseParams: [companyId], blocked: true };
+  }
+  return { storeFilter: '', baseParams: [companyId], blocked: false };
+}
+
 // ============================================================
 // 고객 범위 SQL 조각 — 주인(사용자 id) 기준 (★2026-09-27 한줄로 V2 S5-04 · R113)
 // ============================================================

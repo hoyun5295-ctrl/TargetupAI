@@ -136,6 +136,21 @@ export async function isChargedByKey(companyId: string, idempotencyKey: string):
 }
 
 /**
+ * ★ 2026-10-18 AI 한줄로(Codex 1R high) — 이 멱등키로 **얼마를** 냈는가(차감 행 금액 · 없으면 null).
+ *   같은 시도 재요청이 낸 것보다 많은 결과를 받지 않게(낸 종류 수까지만) 호출부가 이 값으로 자른다.
+ *   ⛔ 조회 실패는 던진다(호출부 503 · 모르는 납부를 0 으로 접지 않는다 · isChargedByKey 와 같은 원칙).
+ */
+export async function chargedAmountByKey(companyId: string, idempotencyKey: string): Promise<number | null> {
+  if (!companyId || !idempotencyKey) return null;
+  const r = await pool.query(
+    `SELECT amount FROM ai_credit_transactions
+      WHERE company_id = $1::uuid AND idempotency_key = $2 AND type = 'deduct' LIMIT 1`,
+    [companyId, idempotencyKey],
+  );
+  return r.rows.length > 0 ? Number(r.rows[0].amount) || 0 : null;
+}
+
+/**
  * ★ 2026-10-17 한 줄 완성(설계서 docs/2026-10-17-oneline-steps-modal-design.md §3-11) — 이 원천 · 이 키 접두로 이미 차감된 행이 있는가.
  *   「오늘 이 한 줄로 한 줄 완성을 냈는가」(다시 만들기 = 생성비만)를 **원장에 직접** 묻는다(사본 표식 0 · isChargedByKey 와 같은 원칙).
  *   ⛔ 조회 실패는 던진다(호출부 503) · 접두는 고정 형식(영숫자 · 하이픈 · 콜론)만 받는다(LIKE 와일드카드 주입 차단).

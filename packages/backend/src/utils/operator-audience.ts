@@ -18,7 +18,7 @@ import { getFatigueCap } from './fatigue-guard';
 import { getStoreScope } from './store-scope';
 import { buildFilterWhereClauseCompat } from './customer-filter';
 import { buildAudienceCountSql, AudienceGates } from './operator-recipients';
-import { ownerConsentSql } from './mall-consent';
+import { ownerConsentSql, ownerBrandConsent } from './mall-consent';
 import { hasUsableGradeOrder } from './customer-grade-rank';
 import {
   CompanySegmentFacts, SegmentAvailability, SegmentKey, RoundPeriod,
@@ -288,6 +288,8 @@ export async function compileOperatorAudience(input: {
   operatorId?: string | null;
   /** ★ 2026-10-05 회차 기간(생일 축 · 주기에서 정한다) — 없으면 이번 달(옛 동작) */
   period?: RoundPeriod | null;
+  /** ★ 2026-10-18 옛 조건의 브랜드 조건 동의 기준(주인 · 없으면 범위 없음 = 관리자 기준) */
+  ownerUserId?: string | null;
 }): Promise<CompiledAudience> {
   const baseParams = input.baseParams && input.baseParams.length > 0 ? input.baseParams : [input.companyId];
   const raw = typeof input.segmentKey === 'string' ? input.segmentKey.trim() : '';
@@ -301,7 +303,7 @@ export async function compileOperatorAudience(input: {
   }
 
   if (!key) {
-    const compiled = buildFilterWhereClauseCompat(input.legacyFilters || {}, baseParams.length + 1);
+    const compiled = buildFilterWhereClauseCompat(input.legacyFilters || {}, baseParams.length + 1, await ownerBrandConsent(input.companyId, input.ownerUserId ?? null));
     if (!compiled.sql.trim()) throw new AudienceEmptyError();   // ★ 2026-10-05 빈 조건 = 전체 금지
     return { filterWhere: compiled.sql, filterParams: compiled.params, segmentKey: null, basis: 'legacy_filters' };
   }
@@ -365,6 +367,7 @@ export async function countOperatorAudienceFor(input: {
     operatorId: input.operatorId ?? null,
     period: input.period ?? null,
     now: input.now,
+    ownerUserId: input.ownerUserId ?? null,
   });
   const gates = input.gates ?? (await resolveOperatorAudienceGates(input.companyId, null, input.ownerUserId ?? null));
   const count = await countCompiledAudience({ compiled, gates, storeFilter: input.storeFilter, baseParams });

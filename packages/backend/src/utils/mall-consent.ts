@@ -397,6 +397,19 @@ export function brandConsentOption(scope: ConsentScope): { storeConsent?: boolea
   return scope.admin ? { storeConsentMallCodes: scope.codes } : { storeConsent: true };
 }
 
+/** ★ 2026-10-18 허브 조건 해석기(buildFilterWhereClauseCompat)용 — 요청 사용자 기준 브랜드 동의 옵션(화면 · 승인 발송 · AI 한줄로) */
+export async function viewerBrandConsent(
+  companyId: string | null | undefined,
+  viewer: { userId?: string | null; userType?: string | null } | null | undefined,
+): Promise<{ storeConsent?: boolean; storeConsentMallCodes?: string[] }> {
+  return brandConsentOption(await resolveViewerConsentScope(companyId || '', { userId: viewer?.userId, userType: viewer?.userType }));
+}
+
+/** ★ 2026-10-18 같은 옵션의 주인(작성자) 기준 — 요청 사용자가 없는 세기 · 자동 마케팅 회차 */
+export async function ownerBrandConsent(companyId: string, ownerUserId?: string | null): Promise<{ storeConsent?: boolean; storeConsentMallCodes?: string[] }> {
+  return brandConsentOption(await resolveOwnerConsentScope(companyId, ownerUserId));
+}
+
 let warnedMissingColumn = false;
 /** 테스트 전용 — 경고 1회 제한을 되돌린다 */
 export function _resetMallConsentWarnForTest(): void { warnedMissingColumn = false; }

@@ -226,16 +226,20 @@ describe('4. 칸 조건 모양', () => {
     expect(describeConditions([{ label: '잔여멤버쉽', operator: 'gte', value: 1000 }, { label: '등급', operator: 'eq', value: 'VIP' }]))
       .toBe('잔여멤버쉽 1,000 이상 · 등급 VIP');
   });
-  it('조건이 사라지는 입력 = 거절(Codex 1R) — 같은 칸 겹침 · SQL 로 안 나오는 칸(매장 코드는 컴파일러가 건너뛴다)', () => {
+  it('조건이 사라지는 입력 = 거절(Codex 1R) — 같은 칸 겹침 · ★ 1018 매장 코드는 소속 표 조건으로 나온다(customer-filter 0-3)', () => {
     expect(() => conditionsToFilters([
       { field: 'address', operator: 'contains', value: '서울' }, { field: 'address', operator: 'contains', value: '중구' },
     ])).toThrow(AudienceConditionError);
     expect(() => conditionsToFilters([
       { field: 'custom_fields.custom_3', operator: 'gte', value: 1 }, { field: 'custom_fields.custom_3', operator: 'lte', value: 9 }, { field: 'custom_fields.custom_3', operator: 'gte', value: 5 },
     ])).toThrow(AudienceConditionError);
-    expect(() => conditionsToFilters([
+    // ★ 2026-10-18 허브 조건 해석기가 브랜드를 소속 표로 옮긴다(AI 한줄로 설계서 §2 0-3) → 매장 코드 칸은 더 이상 사라지지 않는다
+    expect(conditionsToFilters([
       { field: 'store_code', operator: 'eq', value: 'A', label: '매장' }, { field: 'grade', operator: 'eq', value: 'VIP' },
-    ])).toThrow('「매장」');
+    ])).toEqual({ store_code: { operator: 'eq', value: 'A' }, grade: { operator: 'eq', value: 'VIP' } });
+    expect(() => conditionsToFilters([
+      { field: 'grade', operator: 'eq', value: '', label: '등급' },
+    ])).toThrow('「등급」');
     expect(conditionsToFilters([{ field: 'grade', operator: 'eq', value: 'VIP' }])).toEqual({ grade: { operator: 'eq', value: 'VIP' } });
   });
 });

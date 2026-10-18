@@ -19,7 +19,7 @@ const read = (p: string) => readFileSync(resolve(ROOT, p), 'utf8').replace(/\r\n
 const svc = read('backend/src/services/ai.ts');
 const orch = read('backend/src/services/ai-orchestrator.ts');
 const routes = read('backend/src/routes/ai.ts');
-const page = read('frontend/src/pages/AiOperatorPage.tsx');
+const page = read('frontend/src/pages/AiLinePage.tsx');   // ★ 2026-10-18 한 줄 입력 · 제안 · 발송은 AiLinePage.tsx 로 원형 이동(AI 한줄로 설계서 §4)
 const autosend = read('frontend/src/components/AutoSendFormModal.tsx');
 const between = (s: string, from: string, to: string) => s.slice(s.indexOf(from), s.indexOf(to, s.indexOf(from)));
 
@@ -89,7 +89,7 @@ describe('세 경로가 빈 조건을 같은 판정으로 읽는다', () => {
   it('제안 카드(orchestrateWithAI 허브 분기): 같은 판정 · 같은 문장', () => {
     const ai = orch.slice(orch.indexOf('export async function orchestrateWithAI('));
     expect(ai).toContain("hubTargetEmpty = ctx.audienceScope !== 'operator' && isUnresolvedEmptyTarget(targetResult);");
-    expect(ai).toContain(': hubTargetEmpty ? 0');
+    expect(ai).toContain(': hubTargetEmpty || hubScope?.blocked ? 0');   // ★ 1018 매장 미배정 담당자도 0(승인 발송과 같은 범위)
     expect(ai).toContain('criteria: hubTargetEmpty ? HUB_TARGET_EMPTY_MESSAGE : (targetResult.reasoning || \'\'),');
     expect(ai).toContain("allCustomers: ctx.audienceScope !== 'operator' && targetResult.all_customers === true && Object.keys(targetResult.filters || {}).length === 0,");
   });

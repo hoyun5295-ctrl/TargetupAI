@@ -17,6 +17,7 @@ import { resolveOwnerScope } from '../utils/owner-scope';
 // ★2026-09-25 미가입 회사 무료 체험 3회(차감 0 · 청구 집계 제외) · 검사 판정 한 벌
 import {
   SPAM_TRIAL_LIMIT, SPAM_TRIAL_LOCK_SQL, SPAM_TRIAL_SOURCE, countSpamTrialsInTx, judgeSpamVerdict, readSpamTrialStatus, withExpectedSpamDevices,
+  notAutoSpamSourceSql,
 } from '../utils/spam-trial';
 
 import { spamAppTokenVerdict } from '../utils/spam-app-auth';
@@ -100,7 +101,7 @@ router.post('/test', authenticate, demoBlock, async (req: Request, res: Response
     // 2) 사용자별 active/pending 테스트 1건 제한
     const activeCheck = await query(
       `SELECT id FROM spam_filter_tests
-       WHERE user_id = $1 AND status IN ('pending', 'active')`,
+       WHERE user_id = $1 AND status IN ('pending', 'active') AND ${notAutoSpamSourceSql()}`,   // ★ 1018 AI 한줄로 자동 검사는 수동 검사를 막지 않는다
       [userId]
     );
     if (activeCheck.rows.length > 0) {
@@ -211,7 +212,7 @@ router.post('/test', authenticate, demoBlock, async (req: Request, res: Response
         // ★ 2026-09-26 한줄로 V2 m038 — 사용자 잠금 뒤 진행 중 검사를 다시 본다(위 확인은 잠금 없는 빠른 거절일 뿐)
         await client.query(SPAM_TEST_USER_LOCK_SQL, [userId]);
         const dupInTx = await client.query(
-          `SELECT id FROM spam_filter_tests WHERE user_id = $1 AND status IN ('pending', 'active') LIMIT 1`,
+          `SELECT id FROM spam_filter_tests WHERE user_id = $1 AND status IN ('pending', 'active') AND ${notAutoSpamSourceSql()} LIMIT 1`,
           [userId]
         );
         if (dupInTx.rows.length > 0) {
@@ -249,7 +250,7 @@ router.post('/test', authenticate, demoBlock, async (req: Request, res: Response
         await client.query('BEGIN');
         await client.query(SPAM_TEST_USER_LOCK_SQL, [userId]);
         const dupInTx = await client.query(
-          `SELECT id FROM spam_filter_tests WHERE user_id = $1 AND status IN ('pending', 'active') LIMIT 1`,
+          `SELECT id FROM spam_filter_tests WHERE user_id = $1 AND status IN ('pending', 'active') AND ${notAutoSpamSourceSql()} LIMIT 1`,
           [userId]
         );
         if (dupInTx.rows.length > 0) {
@@ -625,7 +626,7 @@ router.get('/active-test', authenticate, async (req: Request, res: Response) => 
       `SELECT t.id, t.callback_number, t.message_content_sms, t.message_content_lms,
               t.status, t.created_at
        FROM spam_filter_tests t
-       WHERE t.user_id = $1 AND t.status = 'active'
+       WHERE t.user_id = $1 AND t.status = 'active' AND ${notAutoSpamSourceSql('t.source')}   -- ★ 1018 수동 창이 자동 검사를 복원하지 않는다
        ORDER BY t.created_at DESC LIMIT 1`,
       [userId]
     );

@@ -18,8 +18,11 @@ import { STANDARD_FIELD_FALLBACKS } from '../utils/var-fallback';
 import { selectJourneyTargetCustomerIds } from '../utils/journey-target-extractor';
 import { filterByIndividualCallback } from '../utils/callback-filter';
 import { isValidCustomFieldKey } from '../utils/safe-field-name';
-import { getStoreScope, getOwnerCustomerScopeSql, getJourneyOwnerScopeSql } from '../utils/store-scope';
-import { viewerConsentSql, viewerConsentJoin, ownerJourneyConsent, journeyOwnerConsent } from '../utils/mall-consent';
+import { getStoreScope, getOwnerCustomerScopeSql, getJourneyOwnerScopeSql, resolveHubStoreScope } from '../utils/store-scope';
+import { mapSampleCustomerRow, SAMPLE_CUSTOMER_COLUMNS } from '../utils/sample-customer';
+import { aiLineEnabled } from '../utils/ai-line';
+import { loadHubCompanyContext } from '../utils/hub-company-context';
+import { viewerConsentSql, viewerConsentJoin, ownerJourneyConsent, journeyOwnerConsent, viewerBrandConsent } from '../utils/mall-consent';
 import { buildFilterWhereClauseCompat } from '../utils/customer-filter';
 import { buildSendableRecipientsSql, buildSendableRecipientsTopSql, buildAudienceCountSql, resolveConditionColumns, SENDABLE_RECIPIENTS_LIMIT } from '../utils/operator-recipients';
 // ★ 2026-07-10 [타겟확인]: 발송 피로도 cap — dispatchProposalSend 준비부와 동일 산출(원칙 2)
@@ -501,7 +504,7 @@ router.post('/recommend-target', async (req: Request, res: Response) => {
     // - sample_customer: displayName 키 (프론트 미리보기용 — %이름%, %등급% 등)
     // - sample_customer_raw: column 키 + custom_fields (백엔드 replaceVariables용)
     // 최신 필터 기준으로 WHERE 재생성 (자동완화 시 result.filters가 변경됨)
-    const { sql: sampleFilterWhere, params: sampleFilterParams } = buildFilterWhereClauseCompat(result.filters, baseParams.length + 1);
+    const { sql: sampleFilterWhere, params: sampleFilterParams } = buildFilterWhereClauseCompat(result.filters, baseParams.length + 1, await viewerBrandConsent(companyId, req.user));
     // ★ 2026-10-15 B-1015-1: 전체 선언 없는 빈 조건은 대상이 0 이다 — 샘플도 비운다(옛: {} 로 아무 고객이나 샘플로 나갔다)
     const sampleWhere = isUnresolvedEmptyTarget(result) ? ' AND FALSE' : sampleFilterWhere;
     const sampleUnsubIdx = baseParams.length + sampleFilterParams.length + 1;
@@ -787,7 +790,7 @@ router.post('/recount-target', async (req: Request, res: Response) => {
     }
 
     // buildFilterWhereClause 호출 (recommend-target과 동일한 조건)
-    const { sql: filterSql, params: filterParams } = buildFilterWhereClauseCompat(targetFilters, baseParams.length + 1);
+    const { sql: filterSql, params: filterParams } = buildFilterWhereClauseCompat(targetFilters, baseParams.length + 1, await viewerBrandConsent(companyId, req.user));
 
     // ★ B17-01: 수신거부 user_id 기준 통일
     const unsubIdxB = baseParams.length + filterParams.length + 1;
@@ -854,7 +857,7 @@ router.post('/target-recipients', async (req: Request, res: Response) => {
       }
     }
 
-    const { sql: filterSql, params: filterParams } = buildFilterWhereClauseCompat(safeFilters, baseParams.length + 1);
+    const { sql: filterSql, params: filterParams } = buildFilterWhereClauseCompat(safeFilters, baseParams.length + 1, await viewerBrandConsent(companyId, req.user));
     const unsubIdx = baseParams.length + filterParams.length + 1; // user_id
     const consentC = await viewerConsentSql(companyId, req.user, 'c');   // ★ 2026-10-02 수신동의 읽기 = CT(mall-consent)
     const whereCommon = `c.company_id = $1 AND c.is_active = true AND ${consentC.isTrue}${storeFilter} ${filterSql}
@@ -946,7 +949,7 @@ router.post('/parse-briefing', async (req: Request, res: Response) => {
 
     // targetFilters 기반 고객 수 산출
     const targetFilters = result.targetFilters || {};
-    const { sql: filterWhere, params: filterParams } = buildFilterWhereClauseCompat(targetFilters, baseParams.length + 1);
+    const { sql: filterWhere, params: filterParams } = buildFilterWhereClauseCompat(targetFilters, baseParams.length + 1, await viewerBrandConsent(companyId, req.user));
 
     // ★ B17-01: 수신거부 user_id 기준 통일
     const unsubIdxC = baseParams.length + filterParams.length + 1;
@@ -1170,7 +1173,8 @@ router.get('/operator/access', async (req: Request, res: Response) => {
       legacyGrandfathered: planCtx.legacyGrandfathered,
       // ★ 2026-09-20 SNS 게시 개방 플래그(설계서 §3-11). **타일보다 먼저 배포한다** —
       //   화면은 ENV 를 다시 계산하지 않고 이 값 하나만 본다(플래그가 없으면 타일이 아예 안 뜬다).
-      features: { sns: snsPublishEnabled(companyId) },
+      // ★ 2026-10-18 AI 한줄로 새 흐름(AI_LINE_V2_COMPANY_IDS) — 대시보드 버튼 줄 · 직접 타겟 접기가 이 값만 본다
+      features: { sns: snsPublishEnabled(companyId), aiLine: aiLineEnabled(companyId) },
     });
   } catch (err: any) {
     console.error('[AI Operator /access] 오류:', err);
@@ -1296,34 +1300,7 @@ router.get('/operator/data-profile', async (req: Request, res: Response) => {
 //   옛 fix4 사고 = 전체 customer 안 상위 1건 (filters X) → 정정 = proposal.target.filters 매칭 영역 안 상위.
 //   응답 = displayName 키 매트릭스 ({ "고객명": "김민수", "등급": "VIP", ... }) — mergeAndHighlightVars 영역 정합.
 // ============================================================
-// ★ 2026-06-29: sample-customer row → 표시명/Liquid 필드 매핑 (여정 trigger·AI Operator filters 두 경로 공용 — 인라인 중복 제거)
-function mapSampleCustomerRow(row: any): { sampleCustomer: Record<string, string | number | null>; sampleCustomerFields: Record<string, any> } {
-  // ★ 2026-07-09: 하드코딩 라벨/컬럼 테이블 폐기 — FIELD_MAP 단일 소스 파생.
-  //   sampleCustomer 키 = FIELD_MAP displayName(발송 사전 키와 동일) → 미리보기 매칭 = 실제 발송 매칭 100% 일치
-  //   (옛 하드코딩은 '등급'·'등록매장'·'최근구매액' 등이 발송 사전 displayName과 어긋나 미리보기만 매칭·발송 빈칸이던 근본 원인).
-  //   표시값 = renderFieldValue(발송 치환과 동일 포맷). Liquid 필드(sampleCustomerFields) = column 키 + 예측 점수 fallback.
-  const sampleCustomer: Record<string, string | number | null> = {};
-  const sampleCustomerFields: Record<string, any> = {};
-  for (const f of getColumnFields()) {
-    if (f.fieldKey === 'phone' || f.fieldKey === 'sms_opt_in') continue;
-    const raw = row[f.columnName];
-    const empty = raw === null || raw === undefined || raw === '';
-    sampleCustomer[f.displayName] = empty ? null : renderFieldValue(raw, f.fieldKey);
-    sampleCustomerFields[f.columnName] = empty ? null : (f.dataType === 'number' ? Number(raw) : raw);
-  }
-  // Predictive 점수 = 중립 0.5 fallback (Liquid customer.churn_risk 등 — 실제 발송 시 cdp_customer_predictions 정합)
-  sampleCustomerFields.churn_risk = 0.5;
-  sampleCustomerFields.purchase_likelihood = 0.5;
-  sampleCustomerFields.click_score = 0.5;
-  return { sampleCustomer, sampleCustomerFields };
-}
-
-// ★ 2026-07-09: 샘플 고객 SELECT 컬럼 = FIELD_MAP 컬럼 필드 단일 소스 (mapSampleCustomerRow와 동일 집합). phone/sms_opt_in 제외.
-//   컬럼명은 FIELD_MAP 컨트롤타워 값(주입 불가) — filterVarCatalogByData가 이미 운영 쿼리하는 검증된 컬럼 집합.
-const SAMPLE_CUSTOMER_COLUMNS = getColumnFields()
-  .filter((f) => f.fieldKey !== 'phone' && f.fieldKey !== 'sms_opt_in')
-  .map((f) => f.columnName)
-  .join(', ');
+// ★ 2026-10-18 1위 고객 매핑 · 열 목록 = utils/sample-customer.ts(원형 이동 · AI 한줄로 intake 와 같이 쓴다)
 
 router.post('/operator/sample-customer', async (req: Request, res: Response) => {
   try {
@@ -1339,19 +1316,13 @@ router.post('/operator/sample-customer', async (req: Request, res: Response) => 
     // ★ 2026-06-29 fix: AI Operator 제안 경로 — filters(고객 필드 조건)로 상위 고객 1명 추출 (triggerEvent 없을 때).
     //   기존 버그: AiOperatorPage가 { filters }를 보내는데 엔드포인트는 triggerEvent만 읽어 항상 sampleCustomer=null → 원본/적용 치환 토글이 한 번도 안 떴음.
     if ((!triggerEvent || typeof triggerEvent !== 'string') && filters && typeof filters === 'object' && !Array.isArray(filters)) {
-      let fStoreFilter = '';
-      const fBaseParams: any[] = [companyId];
-      if (userType === 'company_user' && userId) {
-        const scope = await getStoreScope(companyId, userId);
-        if (scope.type === 'filtered') {
-          fStoreFilter = ' AND id IN (SELECT customer_id FROM customer_stores WHERE company_id = $1 AND store_code = ANY($2::text[]))';
-          fBaseParams.push(scope.storeCodes);
-        } else if (scope.type === 'blocked') {
-          return res.json({ success: true, sampleCustomer: null });
-        }
-      }
+      // ★ 2026-10-18 허브 범위 CT(resolveHubStoreScope · 이 블록의 원형 이동)
+      const fScope = await resolveHubStoreScope(companyId, userId, userType);
+      if (fScope.blocked) return res.json({ success: true, sampleCustomer: null });
+      const fStoreFilter = fScope.storeFilter;
+      const fBaseParams: any[] = fScope.baseParams;
       // CT-01 customer-filter (unqualified 컬럼 · leading AND · companyId=$1 전제) — preview-recipients와 동일.
-      const { sql: filterWhere, params: filterParams } = buildFilterWhereClauseCompat(filters, fBaseParams.length + 1);
+      const { sql: filterWhere, params: filterParams } = buildFilterWhereClauseCompat(filters, fBaseParams.length + 1, await viewerBrandConsent(companyId, req.user));
       const fParams = [...fBaseParams, ...filterParams];
       const consentU = await viewerConsentSql(companyId, req.user, '', 'customers.id');   // ★ 2026-10-02 수신동의 읽기 = CT(mall-consent)
       const fSql = `
@@ -1468,42 +1439,8 @@ router.post('/operator/propose', async (req: Request, res: Response) => {
     // ★ 2026-10-05 C안 시험(COPY_C_TEST_COMPANY_IDS) — 제안마다 반반. 시험 밖 = undefined = 지금 그대로.
     const copyCVariant = pickCopyCVariant(companyId);
 
-    // 회사 정보 + 통계 조회 (Orchestrator에 전달)
-    const companyResult = await query(
-      `SELECT company_name, business_type, COALESCE(reject_number, opt_out_080_number) as reject_number,
-              brand_name, brand_slogan, brand_description, brand_tone, customer_schema,
-              cost_per_sms, cost_per_lms, cost_per_mms, cost_per_kakao, unit_price_basis
-       FROM companies WHERE id = $1::uuid`,
-      [companyId]
-    );
-    const companyInfo: any = companyResult.rows[0] || {};
-    companyInfo.name = companyInfo.company_name;
-
-    // ★ D102: getOpt080Number 컨트롤타워 사용
-    const userOpt080 = await getOpt080Number(userId || null, companyId);
-    if (userOpt080) companyInfo.reject_number = userOpt080;
-
-    // 카카오 프로필 여부 (recommendTarget 채널 추천 hint)
-    const kakaoProfileResult = await query(
-      'SELECT COUNT(*) FROM kakao_sender_profiles WHERE company_id = $1 AND is_active = true',
-      [companyId]
-    );
-    companyInfo.has_kakao_profile = parseInt(kakaoProfileResult.rows[0].count) > 0;
-
-    // 고객 통계
-    const consentU = await viewerConsentJoin(companyId, req.user, '', 'customers.id');   // ★ 2026-10-02 수신동의 읽기 = CT(mall-consent)
-    const statsResult = await query(
-      `SELECT
-         COUNT(*) as total,
-         COUNT(*) FILTER (WHERE ${consentU.isTrue}) as sms_opt_in_count,
-         COUNT(*) FILTER (WHERE gender = 'M') as male_count,
-         COUNT(*) FILTER (WHERE gender = 'F') as female_count,
-         AVG(purchase_count) as avg_purchase_count,
-         AVG(total_purchase_amount) as avg_total_spent
-       FROM customers${consentU.join} WHERE company_id = $1 AND is_active = true`,
-      [companyId]
-    );
-    const customerStats = statsResult.rows[0];
+    // 회사 정보 + 통계 조회 (Orchestrator에 전달) — ★ 2026-10-18 utils/hub-company-context.ts 원형 이동(AI 한줄로 문안 생성과 같은 값)
+    const { companyInfo, customerStats } = await loadHubCompanyContext(companyId, userId || null, req.user);
 
     // ★ D170: Multi-Agent Orchestrator 호출 — 6 Sub-agent (Target/Verify/Message/Compliance/Cost-ROI) 통합
     // ★ D171-D (2026-05-19): env flag AI_OPERATOR_USE_AI_DECISION=true 시 진정 Orchestrator AI (Opus 4.7 Tool Use) 진입
@@ -1522,13 +1459,14 @@ router.post('/operator/propose', async (req: Request, res: Response) => {
     const result = await orchestratorFn({
       companyId,
       userId: userId || null,
+      userType: req.user?.userType ?? null,   // ★ 2026-10-18 대상 수 = 승인 발송과 같은 매장 범위
       objective: objective.trim(),
       companyInfo,
       customerStats,
       // ★ 2026-10-05 한줄로 시그니처 — 스위치 켠 회사는 늘 원문 한정(답이 없어도 { benefit: null }) → 메모리 · 계절 · 대상 블록이 혜택 근거가 되지 않는다
       ...(lineOn ? { lineFacts: lineFacts ?? { benefit: null } } : {}),
       ...(copyCVariant ? { cVariant: copyCVariant } : {}),
-    }, { source: 'ai-operator-propose', cost: 5 });
+    }, { source: 'ai-operator-propose', cost: 5, chargeOnlyWithTarget: true });   // ★ 2026-10-18 대상 0명 = 문안이 나와도 0(결함 0-1)
 
     return res.json({ success: true, ...result, copyCVariant: copyCVariant ?? null });
   } catch (err: any) {
@@ -1563,21 +1501,16 @@ router.post('/operator/preview-recipients', async (req: Request, res: Response) 
       return res.status(400).json({ success: false, error: 'filters가 필요합니다.' });
     }
 
-    // ★ B16-01: 브랜드 격리 — store-scope 컨트롤타워 (ai.ts /recommend-target 미러)
-    let storeFilter = '';
-    const baseParams: any[] = [companyId];
-    if (userType === 'company_user' && userId) {
-      const scope = await getStoreScope(companyId, userId);
-      if (scope.type === 'filtered') {
-        storeFilter = ' AND id IN (SELECT customer_id FROM customer_stores WHERE company_id = $1 AND store_code = ANY($2::text[]))';
-        baseParams.push(scope.storeCodes);
-      } else if (scope.type === 'blocked') {
-        return res.json({ success: true, recipients: [], total: 0, defaultCallback: null });
-      }
+    // ★ B16-01: 브랜드 격리 — ★ 2026-10-18 허브 범위 CT(resolveHubStoreScope · 이 블록의 원형 이동 · 허브 대상 수와 같은 범위)
+    const hubScope = await resolveHubStoreScope(companyId, userId, userType);
+    if (hubScope.blocked) {
+      return res.json({ success: true, recipients: [], total: 0, defaultCallback: null });
     }
+    const storeFilter = hubScope.storeFilter;
+    const baseParams: any[] = hubScope.baseParams;
 
     // ★ CT-01 + 공통 안전필터(buildJourneySafetyFilter) — is_opt_out·is_invalid·수신거부(회사+전화) 통일.
-    const { sql: filterWhere, params: filterParams } = buildFilterWhereClauseCompat(filters, baseParams.length + 1);
+    const { sql: filterWhere, params: filterParams } = buildFilterWhereClauseCompat(filters, baseParams.length + 1, await viewerBrandConsent(companyId, req.user));
 
     // ★ 2026-08-18 조건이 하나도 안 만들어졌으면 **전원이 아니라 거절**이다 (Harold 접수:
     //   "유호윤 고객에게만 30% 할인" → AI가 이름 필터가 없어 못 만들겠다고 답했는데도 전체 6명이 잡혔다).
@@ -1751,6 +1684,7 @@ router.post('/operator/target-recipients', async (req: Request, res: Response) =
       segmentParams: segment_params,
       legacyFilters: filters || {},
       baseParams,
+      ownerUserId: scopeOwner,   // ★ 2026-10-18 브랜드 조건 동의 = 주인 기준(범위 판정과 같은 사람)
       // ★ 2026-08-04 변화 축 — 비교할 지난 회차의 주인(위 기준선 게이트를 지난 뒤라 항상 존재).
       operatorId: opIdForBaseline,
       // ★ 2026-10-05 생일 축 = 회차 기간(주기를 보내면 그 기간 · 없으면 이번 달)
@@ -3039,6 +2973,7 @@ router.post('/operator/proposals/:id/recipients', async (req: Request, res: Resp
         segmentParams: pj.target?.segmentParams || null,
         legacyFilters: filters,
         baseParams,
+        ownerUserId: prow.created_by || null,   // ★ 2026-10-18 브랜드 조건 동의 = 주인 기준
         // ★ 2026-08-04(R1): 변화 축은 이 제안의 오퍼레이터 스냅샷과 비교한다 — 발송 경로와 같은 축.
         operatorId: prow.operator_id || null,
         // ★ 2026-10-05 제안이 센 회차(기간 · 기준 시각) 그대로 — 발송 재추출과 같은 값(옛 제안 = 없음 = 옛 동작)

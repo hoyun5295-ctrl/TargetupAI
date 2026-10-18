@@ -37,6 +37,7 @@ const INTROS = stripComments(readLedger());
 const MODULES = read('constants/ai-operator-modules.ts');
 const DASH = stripComments(read('pages/Dashboard.tsx'));
 const HUB = stripComments(read('pages/AiOperatorPage.tsx'));
+const LINE = stripComments(read('pages/AiLinePage.tsx'));   // ★ 2026-10-18 한 줄 입력 · 제안 · 발송은 AiLinePage.tsx 로 원형 이동(AI 한줄로 설계서 §4)
 const DIRECT = stripComments(read('components/DirectSendPanel.tsx'));
 const BRAND = stripComments(read('components/BrandSendModal.tsx'));
 const MODAL = stripComments(read('components/PlanFeatureModal.tsx'));
@@ -144,8 +145,9 @@ describe('AI Operator 허브 — 서버 판정으로 막고 공통 안내 창을
   });
 
   it('[생성]은 잠겨 있으면 제안 요청을 보내지 않는다', () => {
-    const submit = HUB.slice(HUB.indexOf('const handleSubmit'), HUB.indexOf("fetch('/api/ai/operator/propose'"));
-    expect(submit).toMatch(/if \(planLocked\) \{ setPlanFeatureId\('ai-operator'\); return; \}/);
+    const submit = LINE.slice(LINE.indexOf('const handleSubmit'), LINE.indexOf("fetch('/api/ai/operator/propose'"));
+    expect(submit).toMatch(/if \(planLocked\) \{ setPlanFeatureId\(/);
+    expect(LINE).toMatch(/<PlanFeatureModal featureId=\{planFeatureId\}/);
     expect(HUB).toMatch(/<PlanFeatureModal featureId=\{planFeatureId\}/);
   });
 

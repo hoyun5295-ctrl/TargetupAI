@@ -6,7 +6,7 @@ import { currentUserId } from '../utils/request-context';
 import { AI_MODELS, AI_MAX_TOKENS, TIMEOUTS, claudeRequestShape, copyThinkingEnabled, gptRequestShape, resolveMaxTokens } from '../config/defaults';
 import { buildFilterWhereClauseCompat } from '../utils/customer-filter';
 import { buildJourneySafetyFilter } from '../utils/journey-safety-filter';
-import { ownerConsentTrue } from '../utils/mall-consent';
+import { ownerConsentTrue, ownerBrandConsent } from '../utils/mall-consent';
 import { isPlainAllCustomersRequest } from '../utils/all-customers-signal';   // ★ 2026-10-15 B-1015-1 전체 고객 신호
 import { cleanLeftoverVars } from '../utils/messageUtils';
 // ★ D210+ Phase 2 (Harold 명시 2026-05-23): CT-58 — 회사별 customer DB 실측 데이터 프로필.
@@ -363,6 +363,8 @@ interface AIRecommendResult {
   variants: MessageVariant[];
   recommendation: string;
   recommendation_reason: string;
+  /** ★ 2026-10-18 AI 호출 · 파싱이 실패해 기본 골격을 돌려줬다(AI 한줄로는 이 결과에 문안 요금을 걷지 않는다 · Codex 1R) */
+  fallback?: boolean;
 }
 
 export interface TargetInfo {
@@ -1173,6 +1175,12 @@ export async function generateMessages(
     licenseText?: string;
     /** ★ 2026-10-05 C안 시험 — 'punchy'면 C안 = 짧고 강한형. 없거나 'mz'면 지금 그대로. */
     cVariant?: CopyCVariant;
+    /**
+     * ★ 2026-10-18 AI 한줄로(설계서 docs/2026-10-18-ai-line-design.md §5-4) — 사람이 고른 칼럼만.
+     *   주면: 그 칼럼만 %변수%로 쓰고(목록 밖 변수는 지운다) · 빈 배열 = 개인화 끔 + 본문의 %변수% 전부 제거.
+     *   회사 프로필 자동 개인화 · 프로필 안내문은 쓰지 않는다(사람이 고른 것이 진실). 안 주면 지금과 같다.
+     */
+    exactVars?: string[];
     // ★ D170+ (2026-05-19) Harold 명시 — AI Operator 메시지 = Opus 4.7로 격상:
     //   기본 호출(/generate-message)은 model 미박힘 → default sonnet. AI Operator는 'opus' 전달.
     model?: 'sonnet' | 'opus';
@@ -1197,11 +1205,18 @@ export async function generateMessages(
   //   사고 영역 = 옛 매트릭스 = usePersonalization=false 영역 시 userMessage 안 "%변수% 사용 금지" 강제 → CT-58 안전 변수 100% 채워짐도 본문 안 변수 사용 X 사고 영역.
   //   본 fix = profile 안 안전 변수 percentVar 매트릭스 자동 활용 (옛 호출처 영향 X — extraContext 명시 영역 우선 정합).
   const safeFieldsFromProfile = extraContext?.companyDataProfile?.safeFields?.map(f => f.percentVar) || [];
-  const usePersonalization = extraContext?.usePersonalization
-    || safeFieldsFromProfile.length > 0;
-  const personalizationVars = (extraContext?.personalizationVars && extraContext.personalizationVars.length > 0)
-    ? extraContext.personalizationVars
-    : safeFieldsFromProfile;
+  // ★ 2026-10-18 exactVars(AI 한줄로) = 사람이 고른 칼럼이 진실 · 없으면 지금 규칙
+  const exactVars = Array.isArray(extraContext?.exactVars)
+    ? extraContext!.exactVars!.map((v) => String(v || '').replace(/%/g, '').trim()).filter(Boolean)
+    : null;
+  const usePersonalization = exactVars
+    ? exactVars.length > 0
+    : (extraContext?.usePersonalization || safeFieldsFromProfile.length > 0);
+  const personalizationVars = exactVars
+    ? exactVars
+    : (extraContext?.personalizationVars && extraContext.personalizationVars.length > 0)
+      ? extraContext.personalizationVars
+      : safeFieldsFromProfile;
   const defaultCatalog = buildVarCatalogFromFieldMap();
   const varCatalog = extraContext?.availableVarsCatalog || defaultCatalog.fieldMappings;
   const availableVars = extraContext?.availableVars || defaultCatalog.availableVars;
@@ -1236,7 +1251,7 @@ export async function generateMessages(
   // ★ 2026-07-06 variableStyle 'percent' — 이 생성물은 %변수% 세계(발송 편집기 노출·Liquid 렌더 대상 아님).
   //   기존 기본값('liquid' — 분기 변수 Liquid 패턴 의무 지시)이 그대로 주입돼 오퍼레이터 메인 문안에
   //   {% if customer.churn_risk > 0.7 %} 같은 템플릿 문법이 생성되던 결선 오류의 뿌리 정정 (psy5868 실측).
-  const companyProfilePrompt = extraContext?.companyDataProfile
+  const companyProfilePrompt = extraContext?.companyDataProfile && !exactVars
     ? formatProfileForAiPrompt(extraContext.companyDataProfile, { variableStyle: 'percent' })
     : '';
 
@@ -1472,6 +1487,10 @@ ${usePersonalization ? `- 사용할 개인화 변수: ${personalizationTags}
           }
           cleaned = cleaned.replace(/  +/g, ' ').replace(/\n /g, '\n').trim();
           (variant as any).message_text = cleaned;
+        }
+        // ★ 2026-10-18 exactVars = [] (칼럼 0개 = 변수 없이) — 목록 검증은 「개인화 아님」이면 전체 변수를 허용하므로 여기서 전부 지운다
+        if (exactVars && exactVars.length === 0) {
+          (variant as any).message_text = cleanLeftoverVars(String((variant as any).message_text || '')).replace(/  +/g, ' ').trim();
         }
 
         // ★ 2026-07-02 브랜드 링크 토큰 치환 — sanitize 마지막 단계 (URL이 변수 검증·기호 제거에 노출되지 않게 최후 적용).
@@ -1877,7 +1896,14 @@ export async function recommendTarget(
   //   기본 호출(/recommend-target route)은 model 미박힘 → default sonnet 사용 (한줄로 일반 AI 흐름 영향 0).
   // ★ 2026-07-07 targetDirective — 마케팅 캘린더 타겟 축(TARGET_HINTS) 고정 지시 블록.
   //   지정 시 "## 마케팅 목표" 바로 아래에 최우선 제약으로 주입 — 발송 당일 해석 흔들림 방지. 미지정 = 기존 자유 해석.
-  options?: { model?: 'sonnet' | 'opus'; targetDirective?: string }
+  options?: {
+    model?: 'sonnet' | 'opus'; targetDirective?: string;
+    /**
+     * ★ 2026-10-18 AI 한줄로 intake(설계서 §5-2) — 조건마다 근거 원문 조각 · 추천 문안 종류 · 이유를 더 받는다.
+     *   출처(한 줄에서 읽음 / AI 가 보탬)는 서버가 조각이 원문에 있는지로 판정한다(이 응답을 그대로 믿지 않는다). 옛 호출처 무변경.
+     */
+    lineIntake?: boolean;
+  }
 ): Promise<{
   filters: any;
   /**
@@ -1896,6 +1922,10 @@ export async function recommendTarget(
   use_individual_callback: boolean;
   use_personalization: boolean;
   personalization_vars: string[];
+  /** lineIntake 일 때만 — 필드명 → 그 조건의 근거라고 AI 가 적은 원문 조각(검증 전 값) */
+  filter_quotes?: Record<string, string>;
+  recommended_style?: string | null;
+  style_reason?: string | null;
 }> {
   if (!process.env.ANTHROPIC_API_KEY) {
     return {
@@ -2051,7 +2081,12 @@ ${varCatalogPrompt}
 연산자: eq(같음), gte(이상), lte(이하), between([최소,최대]), in([배열]), contains(부분일치, 주소/이름 등 자유텍스트 필드용), birth_month(생일 월 필터, birth_date 전용), date_gte(날짜 이상, 커스텀필드 전용), date_lte(날짜 이하, 커스텀필드 전용)
 ⚠️ address(주소) 필드는 반드시 contains 연산자 사용! eq 사용 시 글자 하나까지 정확히 일치해야 하므로 매칭 불가.
 ⚠️ 커스텀 필드에 날짜 데이터(생년월일, 가입일 등)가 저장된 경우: 반드시 date_gte/date_lte 사용! gte/lte는 숫자 전용입니다.
-⚠️ 나이 기반 필터링 시: birth_date 직접 컬럼의 birth_month 연산자 또는 age 직접 컬럼을 사용하세요. 커스텀 필드의 생년월일로 나이를 계산하지 마세요.`;
+⚠️ 나이 기반 필터링 시: birth_date 직접 컬럼의 birth_month 연산자 또는 age 직접 컬럼을 사용하세요. 커스텀 필드의 생년월일로 나이를 계산하지 마세요.${options?.lineIntake ? `
+
+## 추가 출력 (이 요청만 · 위 JSON 에 세 키를 더한다)
+- "filter_quotes": { "필드명": "그 조건의 근거가 된 마케팅 목표 원문 조각" }: filters 의 키마다 하나. 목표 문장에 **글자 그대로 있는 조각**만 적고, 목표에 없는데 판단으로 더한 조건이면 빈 문자열 "".
+- "recommended_style": "감성형" 또는 "혜택강조형" 또는 "MZ 감성형": 이 목표에 가장 맞는 문안 종류 하나.
+- "style_reason": 그 종류를 고른 이유 한 줄(25자 안쪽 · 마침표 없이).` : ''}`;
 
   try {
     const text = await callAIWithFallback({
@@ -2096,8 +2131,19 @@ ${varCatalogPrompt}
     const allCustomers = (rawFilters == null || (filtersIsObject && Object.keys(filtersOut).length === 0))
       && (result.all_customers === true || isPlainAllCustomersRequest(cleanObjective));
 
+    // ★ 2026-10-18 AI 한줄로 intake — 조각 · 추천 종류는 문자열만 받는다(형식이 틀리면 버린다 · 출처 판정은 서버 CT 가 한다)
+    const lineIntakeOut = options?.lineIntake ? {
+      filter_quotes: (result.filter_quotes && typeof result.filter_quotes === 'object' && !Array.isArray(result.filter_quotes))
+        ? Object.fromEntries(Object.entries(result.filter_quotes as Record<string, unknown>)
+          .filter(([, v]) => typeof v === 'string').map(([k, v]) => [k, String(v).slice(0, 80)]))
+        : {},
+      recommended_style: typeof result.recommended_style === 'string' ? result.recommended_style.slice(0, 20) : null,
+      style_reason: typeof result.style_reason === 'string' ? result.style_reason.slice(0, 60) : null,
+    } : {};
+
     // ★ D142+ B1(0429 PDF B2): [브랜드] placeholder → [실제브랜드명] 후처리
     return deepReplaceBrand({
+      ...lineIntakeOut,
       filters: filtersOut,
       all_customers: allCustomers,
       reasoning: result.reasoning,
@@ -2202,6 +2248,7 @@ function getFallbackVariants(extraContext?: any): AIRecommendResult {
     variants,
     recommendation: 'A',
     recommendation_reason: 'AI 호출 일시 오류로 기본 골격을 제공합니다. 혜택 내용을 직접 입력해주세요.',
+    fallback: true,
   };
 }
 
@@ -2832,7 +2879,8 @@ export async function countFilteredCustomers(
 ): Promise<FilterCountResult> {
   try {
     const effectiveBaseParams = baseParams.length > 0 ? baseParams : [companyId];
-    const { sql: filterWhere, params: filterParams } = buildFilterWhereClauseCompat(filters, effectiveBaseParams.length + 1);
+    // ★ 2026-10-18 브랜드 조건 동의 = 주인 기준(아래 수신동의 · 매장 범위와 같은 사람)
+    const { sql: filterWhere, params: filterParams } = buildFilterWhereClauseCompat(filters, effectiveBaseParams.length + 1, await ownerBrandConsent(companyId, userId || null));
     const allParams = [...effectiveBaseParams, ...filterParams];
 
     // ★ 공통 안전필터(CT)로 통일 — is_active·sms_opt_in·is_opt_out·is_invalid·수신거부(회사+전화 안티조인).

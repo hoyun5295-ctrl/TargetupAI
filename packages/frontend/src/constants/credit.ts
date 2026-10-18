@@ -89,6 +89,8 @@ export const COMMON_SERVICE_LINE = '스타터부터 AI 전 기능 · 전 채널 
 export const CREDIT_SOURCE_LABELS: Record<string, string> = {
   orchestrate: '풀분석', orchestrateWithAI: '풀분석',
   'ai-operator-propose': '문안·분석', 'ai-operator-decorate': '꾸미기',
+  // ★ 2026-10-18 AI 한줄로(백엔드 CREDIT_COST_MAP 와 1:1)
+  'ai-line-intake': 'AI 한줄로 대상 찾기', 'ai-line-compose': 'AI 한줄로 문안', 'ai-line-decorate': 'AI 한줄로 꾸미기',
   'ai-operator-explain': '근거 분석',   // ★ 2026-09-27 한줄로 V2 R082 — AI 근거 질의(고급 모델 분석 5)
   'journey-ai-generate': '여정 생성', 'journey-builder-custom': '여정 생성',
   'journey-activate': '여정 활성화', 'journey-operation': '여정 운영',
@@ -144,6 +146,10 @@ export const AI_GENERATE_COSTS: Record<string, number> = {
   'ai-operator-propose': 5,   // ★ 2026-10-05 자동 마케팅 [제안 받기] 미리보기 버튼 라벨(백엔드 CREDIT_COST_MAP 미러 · 허브 제안과 같은 키)
   'journey-ai-generate': 3,   // ★ 2026-10-10 한 줄 묻기 — 여정 답 카드 · 「이 문장 그대로 만들기」 라벨(백엔드 CREDIT_COST_MAP 미러)
   'inapp-ai-generator': 3,    // ★ 2026-10-10 한 줄 묻기 — 인앱 답 카드 라벨(백엔드 CREDIT_COST_MAP 'inapp-ai-generator' 미러)
+  // ★ 2026-10-18 AI 한줄로 — 확인 판 금액 줄 · 버튼 라벨(백엔드 CREDIT_COST_MAP 미러 · 실제 차감은 서버 원장)
+  'ai-line-intake': 2,
+  'ai-line-compose': 2,
+  'ai-line-decorate': 1,
 };
 
 export const CONFIRM_CREDIT_COSTS: Record<string, number> = {

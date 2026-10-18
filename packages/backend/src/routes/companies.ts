@@ -37,6 +37,7 @@ import { buildRcsTemplateSheet, templateExportFilename } from '../utils/template
 // ★ 2026-09-28 한줄로 V2 R106 — 대시보드 카드 집계 캐시(고객 통계와 같은 SWR 정책)
 import { swrCacheWithAt } from '../utils/swr-cache';
 import { CACHE_TTL } from '../config/defaults';
+import { computeMonthlyUsage } from '../utils/monthly-usage';   // ★ 2026-10-18 이번달 사용금액 카드 = 발송 현황과 같은 CT
 
 const router = Router();
 
@@ -1128,16 +1129,10 @@ async function aggregateDashboardCards(companyId: string, cardIds: string[], use
         break;
       }
       case 'monthly_spend': {
-        const spendCreatedByFilter = isCompanyUser ? ` AND created_by = $2` : '';
-        const spendParams: any[] = isCompanyUser ? [companyId, userId] : [companyId];
-        setPrefetch(cardId, query(
-          `SELECT COALESCE(SUM(amount), 0)::numeric as total
-           FROM balance_transactions
-           WHERE company_id = $1 AND type = 'deduct' AND created_at >= date_trunc('month', NOW())
-             AND reference_type IS DISTINCT FROM 'plan_term'${spendCreatedByFilter}`,
-          // ↑ ★ 2026-10-04 요금제 이용료(선불 이용 기간)는 뺀다 — 이 카드는 "이번 달 발송 사용 금액"이다(dashboard-card-pool.ts:51)
-          spendParams
-        ));
+        // ★ 2026-10-18 발송 현황 「총 사용금액」과 같은 CT(computeMonthlyUsage · 사용자 = 본인 발송 · 관리자 = 전체 · KST 월초).
+        //   옛: balance_transactions deduct 합 — 크레딧 충전(reference_type credit_recharge)이 섞이고 후불 회사는 0원 · 월초 = DB 시간대(AI 한줄로 설계서 §2 0-4).
+        setPrefetch(cardId, computeMonthlyUsage(companyId, { userId: userId || undefined, userType: userType || undefined })
+          .then((u) => ({ rows: [{ total: Math.round(u.monthlyCost) }] })));
         break;
       }
     }

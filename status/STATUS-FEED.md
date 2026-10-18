@@ -185,13 +185,21 @@
 > 검증 = FE · BE tsc 0 · vitest 595파일 8,371건 · 렌더 108곳 · Codex 적대 1R approve(gpt-6-astra · 지적 0 · 지정 파일 66개 + 분리 전 원본을 읽고 대조)
 > 다음 = 배포(백엔드 reload + 프론트 build:safe · AI 영업 C12 와 한 번에) → 실측(목록 숫자 카드 값 · 상세 창 저장 · 7일 부여 1회)
 
+<a id="c38"></a>
+
+### C38 · ★1018 AI 한줄로 · AI 오퍼레이터 분리 · 메인 대시보드 개편 — Codex 적대 3R approve · 코드 완료 · 배포 대기 · DDL 0
+> 호출어 **"AI 한줄로 / AI 오퍼레이터 개편 / 대시보드 개편"** → 설계서 = [AI 한줄로](../docs/2026-10-18-ai-line-design.md)(§0 결정 · §2 0단계 4건 · §13 실측 · §15 구현 기록 · Codex · 배포 순서) · 결정 = [D105](DECISIONS.md) · 범위 밖 = [B-1018-5](BUGS.md) · 메모리 [[project_2026_1018_ai_operator_oneline]]
+> 경로 = 브레인스토밍 2회 + 회의론자 최종 검증 → 브리핑 · 대시보드 목업 → Harold 「바로 진행 · 3안 = 8 수용 · 확인 창에 차감 금액 · 설계서 · 구현 · Codex 닫힐 때까지 · 배포 명령만」.
+> 검증 = BE · FE tsc 0 · backend vitest 630파일 9,198건 · 프론트 build:safe 로컬 통과 · 모델명 · native dialog · 줄표 0. 미검증 = 실제 화면(1440 · 390) · 실측 설계서 §13.
+> 남은 것 = 배포(설계서 §15-5 · 백엔드 먼저 · ENV 넣고 `--update-env`) → 사내 4곳 실측 §13 ①~⑥ → 영상 파일(Harold 제작) 붙이기.
+
 <a id="c37"></a>
 
-### C37 · ★1018 마케팅플래너 v2 — 코드 완료 · Codex 적대 A 3R · B 6R · C 3R · D 5R 전부 approve · 커밋 · 배포 대기 · DDL 1(배포 뒤)
+### C37 · ★1018 마케팅플래너 v2 — Codex 적대 A 3R · B 6R · C 3R · D 5R 전부 approve · 배포 완료 1018(`7c755f3f` · 22:02 재시작) · DDL 완료 · 한 줄 스위치 사내 4곳 켬 · 휴대폰 보내기 스위치 = 협회 답 뒤 · 실측 대기
 > 호출어 **"플래너 v2 / 마케팅플래너 v2 / 당일 재확인 / 대행 모바일 제어"** → 설계서 = [마케팅플래너 v2](../docs/2026-10-18-planner-v2-design.md)(§0 Harold 의견 3 · §3 묶음별 구현 기록 · §9 Codex · §10 배포 · 실측) · 결정 = [D104](DECISIONS.md) · 버그 = [B-1018-3 · B-1018-4](BUGS.md) · 메모리 [[project_2026_1018_planner_v2]]
 > 경로 = 비토 구조체크 → 「발동」 5역할 회의 세 번 → Harold 「추천하는 방식으로 전부 마무리 · 승인 = 확인 창 · 모바일 취소 · 미루기 · Codex 닫힐 때까지」. 묶음 = P0 F0 · J 여정 정지 · R 당일 재확인(쌍) · L 링크 공통 틀 · T 템플릿 완성본 · M 담기 창 · I 한 줄 입력 · A 대행 축 1~4 · O 자동마케팅 멈춤.
 > 검증 = BE · FE tsc 0 · backend vitest 628파일 9,149건 · Codex 라운드 = 설계서 §9(같은 부류 반복은 구조로: 부정 문장 → 허용 문형 · 관측 상품명 · 낱말 하나 · 경계 / 토큰 소비 장치 제거 → 취소 트랜잭션 안 대조 / 트랜잭션 안 같은 연결 / 링크 취소 결과 문자 = cancel_reason 표지).
-> 배포 = 프론트 build:safe 먼저(저장 API 가 대상 필수) → 재시작 → DDL → ENV 확인 · 스위치 `PLANNER_LINE_COMPANY_IDS` · `PLANNER_LINK_APPROVE_COMPANY_IDS` 빈 값 배포 → 사내 회사로 켬 · 실측 = 설계서 §10 ①~⑥.
+> 배포 기록(1018 Harold 실행) = pull `7c755f3f` → backend · frontend build:safe(21:57 · 21:58) → reload(21:58 · 부팅 오류 0) → DDL `approval_requested_at`(SET · ALTER TABLE · information_schema timestamptz · YES) → ENV(`JOURNEY_PAUSE_TOKEN_SECRET` 64자 · `JWT_SECRET` 36자 · `HANJUL_BASE_URL` 비어 있음 = 전 링크 hanjul.ai 폴백) → `PLANNER_LINE_COMPANY_IDS` = 템플릿 · 단계 스위치와 같은 사내 4곳 → reload 22:02. `PLANNER_LINK_APPROVE_COMPANY_IDS` 빈 값 유지(설계서 §3-2 협회 질의 답 뒤). 남은 것 = 실측 설계서 §10 ①~⑥.
 
 <a id="c36"></a>
 

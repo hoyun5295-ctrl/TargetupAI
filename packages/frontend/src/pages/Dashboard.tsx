@@ -1,4 +1,4 @@
-﻿import { AlertTriangle, Award, BarChart3, Bell, BellOff, Cake, Calendar, ChevronLeft, ChevronRight, Clock, CreditCard, DollarSign, HelpCircle, Lightbulb, Mail, MapPin, Percent, Rocket, Send, ShoppingCart, Sparkles, Store, TrendingDown, TrendingUp, User, UserPlus, Users, UserX } from 'lucide-react';
+﻿import { AlertTriangle, Award, BarChart3, LayoutGrid, Bell, BellOff, Cake, Calendar, ChevronLeft, ChevronRight, Clock, CreditCard, DollarSign, HelpCircle, Lightbulb, Mail, MapPin, Percent, Rocket, Send, ShoppingCart, Sparkles, Store, TrendingDown, TrendingUp, User, UserPlus, Users, UserX } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useNavigate, useSearchParams } from 'react-router-dom';
@@ -81,6 +81,14 @@ import DiagnosisHeroCard from '../components/marketing-diagnosis/DiagnosisHeroCa
 import { diagnosisApi, type DiagnosisStateDto } from '../components/marketing-diagnosis/diagnosisApi';
 // ★ 2026-08-17 AI 추천 유형은 그대로 차감 축이 되므로 CT가 좁혀 준 값만 쓴다(campaign-axis).
 import { normalizeAiMessageChannel, type AiMessageChannel } from '../utils/campaign-axis';
+import DashboardActionRow, { type DashboardAction } from '../components/dashboard/DashboardActionRow';   // ★ 2026-10-18 맨 위 버튼 줄
+import { fetchAiOperatorAccess, fetchAiOperatorFeatures } from '../utils/ai-operator-access';
+import { AI_LINE_ALIMTALK_HANDOFF, type AiLineAlimtalkHandoff } from '../utils/ai-line';   // ★ 2026-10-18 알림톡 갈래 넘기기
+
+/** ★ 2026-10-18 DB 현황 전체 폭 = 한 쪽 카드 수만큼 열(빈 칸 없음 · Tailwind 가 읽는 고정 글자) */
+const DB_CARD_LG_COLS: Record<number, string> = {
+  1: 'lg:grid-cols-1', 2: 'lg:grid-cols-2', 3: 'lg:grid-cols-3', 4: 'lg:grid-cols-4', 5: 'lg:grid-cols-5', 6: 'lg:grid-cols-6',
+};
 
 interface Stats {
   total: string;
@@ -401,6 +409,38 @@ export default function Dashboard() {
     else if (to === 'auto') navigate('/continuous-operator');
     else navigate('/ai-operator');
   };
+  // ★ 2026-10-18 AI 한줄로 새 흐름 켠 회사(서버 판정 · features.aiLine) — 직접 타겟 발송 버튼은 이 회사에서 접는다(설계서 §9)
+  const [aiLineOn, setAiLineOn] = useState(false);
+  useEffect(() => { void fetchAiOperatorFeatures().then((f) => setAiLineOn(f.aiLine === true)); }, []);
+  // AI 한줄로 = 구독 잠김이면 잠김 창 · 요금제가 AI 를 못 쓰면 소개 창(영상 자리) · 그 밖 = 화면으로
+  const openAiLine = async () => {
+    if (isSubscriptionLocked) { setShowSubscriptionLock(true); return; }
+    // 소개 창 = 그 회사가 쓰게 될 흐름의 안내(새 흐름 = 'ai-line' · 꺼진 회사 = 옛 제안 안내 'ai-operator') — 안내 문장은 약속이다
+    if ((await fetchAiOperatorAccess()) === false) { openPlanFeature(aiLineOn ? 'ai-line' : 'ai-operator'); return; }
+    navigate('/ai-line');
+  };
+  const openDirectTargetChecked = () => {
+    if (isSubscriptionLocked) { setShowSubscriptionLock(true); return; }
+    if (isCustomerDbLocked) { openPlanFeature('send-target'); return; }
+    setShowDirectTargeting(true);
+  };
+  const openUploadChecked = () => {
+    if (syncBlockActive) { setShowSyncActiveBlock(true); return; }
+    if (isSubscriptionLocked) { setShowSubscriptionLock(true); return; }
+    if (isCustomerDbLocked) { openPlanFeature('upload-customers'); return; }
+    setShowFileUpload(true);
+  };
+  const dashboardActions: DashboardAction[] = hideAi
+    ? [
+      { key: 'target', label: '직접 타겟 발송', desc: '원하는 고객을 직접 필터링', icon: Send, tone: 'emerald', onClick: () => { setShowDirectTargeting(true); } },
+      ...(!hideFileUpload ? [{ key: 'upload', label: '고객 DB 업로드', desc: '엑셀 · CSV 로 고객 추가', icon: UserPlus, tone: 'amber' as const, onClick: () => openFileUpload() }] : []),
+    ]
+    : [
+      { key: 'line', label: 'AI 한줄로', desc: '한 줄 입력으로 완성하는 메시지 발송', icon: Sparkles, tone: 'violet', locked: isSubscriptionLocked, onClick: () => { void openAiLine(); } },
+      { key: 'operator', label: 'AI 오퍼레이터', desc: '마케팅 기능 12개 바로 열기', icon: LayoutGrid, tone: 'emerald', locked: isSubscriptionLocked, badge: liveRunning > 0 ? `자동화 ${liveRunning}개 작동 중` : null, onClick: () => openLive('hub') },
+      ...(aiLineOn ? [] : [{ key: 'target', label: '직접 타겟 발송', desc: '원하는 고객을 직접 필터링', icon: Send, tone: 'sky' as const, locked: isSubscriptionLocked || isCustomerDbLocked, onClick: openDirectTargetChecked }]),
+      { key: 'upload', label: '고객 DB 업로드', desc: '엑셀 · CSV 로 고객 추가', icon: UserPlus, tone: 'amber', locked: isSubscriptionLocked || isCustomerDbLocked, onClick: openUploadChecked },
+    ];
   // 모달용 데이터
   const [recentCampaigns, setRecentCampaigns] = useState<any[]>([]);
   const [scheduledCampaigns, setScheduledCampaigns] = useState<any[]>([]);
@@ -538,6 +578,39 @@ export default function Dashboard() {
   const [alimtalkNextSubject, setAlimtalkNextSubject] = useState<string>('');
   const [alimtalkSenders, setAlimtalkSenders] = useState<any[]>([]);
   // 카카오 템플릿 + 발신프로필 로드 (D130)
+  // ★ 2026-10-18 AI 한줄로 알림톡 갈래(설계서 §8) — 넘겨받은 대상 조건으로 명단을 받아(승인 발송과 같은 조회 · 1만 명 상한)
+  //   지금 알림톡 발송 창을 연다. 템플릿 = 고른 승인 템플릿 · 변수 · 대체 문자 · 예약 · 분할은 그 창이 소유한다.
+  const [alimtalkInitialTemplateId, setAlimtalkInitialTemplateId] = useState<string | null>(null);
+  const openAiLineAlimtalk = async () => {
+    let h: AiLineAlimtalkHandoff | null = null;
+    try {
+      h = JSON.parse(sessionStorage.getItem(AI_LINE_ALIMTALK_HANDOFF) || 'null');
+      sessionStorage.removeItem(AI_LINE_ALIMTALK_HANDOFF);
+    } catch { h = null; }
+    if (!h || Date.now() - Number(h.at || 0) > 30 * 60 * 1000) {
+      setToast({ show: true, type: 'error', message: '넘겨받은 알림톡 대상이 없어요. AI 한줄로에서 다시 진행해 주세요.' });
+      return;
+    }
+    try {
+      const token = localStorage.getItem('token');
+      const res = await fetch('/api/ai/operator/preview-recipients', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ filters: h.filters, allCustomers: h.allCustomers === true }),
+      });
+      const d = await res.json();
+      if (!res.ok || !d?.success) throw new Error(d?.error || '받는 사람 명단을 불러오지 못했어요.');
+      const rows: any[] = Array.isArray(d.recipients) ? d.recipients : [];
+      if (Number(d.total) > rows.length) throw new Error(`받는 사람이 ${Number(d.total).toLocaleString()}명이라 한 번에 보낼 수 없어요. 조건을 좁혀 주세요.`);
+      if (rows.length === 0) throw new Error('조건에 맞는 고객이 없어요.');
+      await loadKakaoTemplates();
+      setAlimtalkInitialTemplateId(h.templateId || null);
+      setAlimtalkInitialRecipients(rows);
+      setShowAlimtalkSend(true);
+    } catch (e) {
+      setToast({ show: true, type: 'error', message: e instanceof Error ? e.message : '알림톡 창을 열지 못했어요.' });
+    }
+  };
   const loadKakaoTemplates = async () => {
     try {
       const token = localStorage.getItem('token');
@@ -1277,8 +1350,13 @@ export default function Dashboard() {
     const openParam = searchParams.get('open');
     if (openParam) {
       if (openParam === 'direct-send') { setShowDirectSend(true); setDirectSendChannel('sms'); }
-      else if (openParam === 'target-send') setShowDirectTargeting(true);
+      else if (openParam === 'target-send') {
+        // ★ 2026-10-18 새 흐름 켠 회사 = AI 한줄로(직접 타겟 접기 · 설계서 §9) · AI 숨김 사용자 · 꺼진 회사 = 지금 그대로
+        if (hideAi) setShowDirectTargeting(true);
+        else void fetchAiOperatorFeatures().then((f) => { if (f.aiLine === true) navigate('/ai-line'); else setShowDirectTargeting(true); });
+      }
       else if (openParam === 'customer-db') openCustomerDb();
+      else if (openParam === 'ai-line-alimtalk') void openAiLineAlimtalk();   // ★ 2026-10-18 AI 한줄로 알림톡 갈래
       else if (openParam === 'diagnosis') setShowDiagnosisWizard(true);
       searchParams.delete('open');
       setSearchParams(searchParams, { replace: true });
@@ -2344,6 +2422,14 @@ const campaignData = {
 
       {/* 메인 */}
       <main className="max-w-7xl mx-auto px-3 md:px-4 py-4 md:py-8">
+        {/* ★ 2026-10-18 맨 위 버튼 줄(Harold: 「버튼 3개를 위에 3열 그리드로 · 상단 메뉴는 그대로」) */}
+        <DashboardActionRow actions={dashboardActions} enterClass={ENTER} />
+
+        {/* ★ 2026-10-10 대시보드 B안 — 지금 돌고 있는 자동화(AI 기능을 숨긴 계정은 없음) */}
+        {!hideAi && (
+          <LiveAutomationStrip scheduled={scheduledCampaigns} onOpen={openLive} onRunningChange={setLiveRunning} intro={intro} refreshKey={liveRefresh} />
+        )}
+
         {/* ★ 2026-08-16 AI 마케팅 진단 히어로(설계서 §5-2) — dismiss 없음·판정은 서버 state */}
         {diagnosisHero === 'invite' && (
           <DiagnosisHeroCard
@@ -2363,15 +2449,10 @@ const campaignData = {
         {/* ★ D225+ Brand Voice 미등록 회사 강력 push 카드 — 진단 카드 노출 중에는 suppress(소견이 흡수) */}
         <BrandVoiceNudgeCard suppress={diagnosisHero === 'invite'} />
 
-        {/* ★ 2026-10-10 대시보드 B안 — 지금 돌고 있는 자동화(AI 기능을 숨긴 계정은 없음) */}
-        {!hideAi && (
-          <LiveAutomationStrip scheduled={scheduledCampaigns} onOpen={openLive} onRunningChange={setLiveRunning} intro={intro} refreshKey={liveRefresh} />
-        )}
 
-        {/* ===== 상단: 좌(60%) + 우(40%) 통합 — D186: 모바일 stacked + 데스크탑 좌우 ===== */}
-        <div className="flex flex-col lg:flex-row gap-4 mb-4">
-          {/* ===== 좌측 60%: 요금제/발송현황 + 동적카드 ===== */}
-          <div className="w-full lg:w-[60%] flex flex-col gap-4">
+        {/* ★ 2026-10-18 오른쪽 버튼 열을 맨 위 버튼 줄로 옮겨(설계서 §3) 요금제 · 발송 현황 · DB 현황이 전체 폭을 쓴다 */}
+        <div className="flex flex-col gap-4 mb-4">
+          <div className="w-full flex flex-col gap-4">
             {/* 1행: 요금제 + 발송현황 — 모바일 stacked + sm+ 좌우 */}
             <div className="flex flex-col sm:flex-row gap-4">
               {/* 요금제 현황 */}
@@ -2647,7 +2728,7 @@ const campaignData = {
 
                   return (
                     <div>
-                      <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+                      <div className={`grid grid-cols-2 md:grid-cols-3 gap-3 ${DB_CARD_LG_COLS[Math.min(6, Math.max(1, pageCards.length))]}`}>
                         {pageCards.map((card, ci) => {
                           const accent = CARD_ACCENT_MAP[card.cardId] || DEFAULT_ACCENT;
                           const IconComp = CARD_ICON_MAP[card.icon] || HelpCircle;
@@ -2811,147 +2892,6 @@ const campaignData = {
             </div>
           </div>
 
-          {/* ===== 우측 40%: 버튼 3개 세로 스택 ===== */}
-          {/* ★ 2026-07-07 (Harold 확정): 3색 풀 그라데이션 유지 + 프리미엄 상향 — 한 단계 옅은 보석톤 +
-              글래스 아이콘 칩 + ring/이중 그림자 + 은은한 광원·워터마크 + 원형 글래스 화살표(인앱 디자인 2.0 문법).
-              onClick·게이팅 로직 무변. (기원 D222+ Phase 1 → 0707 라이트 카드 실험 원복) */}
-          <div className="w-full lg:w-[40%] flex flex-col gap-4">
-            {hideAi ? (
-              <>
-                <button
-                  onClick={() => { setShowDirectTargeting(true); }}
-                  className={`group relative overflow-hidden p-5 bg-gradient-to-br from-emerald-600 to-teal-500 hover:from-emerald-500 hover:to-teal-400 rounded-xl ring-1 ring-white/20 transition-all shadow-lg shadow-emerald-500/25 hover:shadow-xl hover:shadow-emerald-500/40 text-right flex-1 flex flex-col justify-between ${ENTER}`}
-                  style={{ animationDelay: '120ms' }}
-                >
-                  <div className="absolute -top-16 -right-16 w-48 h-48 rounded-full bg-white/10 blur-3xl" />
-                  <Send className="absolute -bottom-4 -left-4 w-24 h-24 text-white/10" />
-                  <div className="relative flex items-start justify-between gap-3">
-                    <div className="w-10 h-10 rounded-xl bg-white/15 ring-1 ring-white/25 backdrop-blur-sm flex items-center justify-center flex-shrink-0">
-                      <Send className="w-5 h-5 text-white" />
-                    </div>
-                    <div className="min-w-0">
-                      <div className="text-xl font-bold text-white mb-1">직접 타겟 발송</div>
-                      <div className="text-sm text-white/75">원하는 고객을 직접 필터링</div>
-                    </div>
-                  </div>
-                  <div className="relative self-end w-9 h-9 rounded-full bg-white/15 ring-1 ring-white/25 flex items-center justify-center group-hover:translate-x-0.5 transition-transform">
-                    <ChevronRight className="w-5 h-5 text-white" />
-                  </div>
-                </button>
-                {!hideFileUpload && (
-                <button
-                  onClick={() => openFileUpload()}
-                  className={`group relative overflow-hidden p-5 bg-gradient-to-br from-amber-500 to-orange-500 hover:from-amber-400 hover:to-orange-400 rounded-xl ring-1 ring-white/20 transition-all shadow-lg shadow-amber-500/25 hover:shadow-xl hover:shadow-amber-500/40 text-right flex-1 flex flex-col justify-between ${ENTER}`}
-                  style={{ animationDelay: '180ms' }}
-                >
-                  <div className="absolute -top-16 -right-16 w-48 h-48 rounded-full bg-white/10 blur-3xl" />
-                  <UserPlus className="absolute -bottom-4 -left-4 w-24 h-24 text-white/10" />
-                  <div className="relative flex items-start justify-between gap-3">
-                    <div className="w-10 h-10 rounded-xl bg-white/15 ring-1 ring-white/25 backdrop-blur-sm flex items-center justify-center flex-shrink-0">
-                      <UserPlus className="w-5 h-5 text-white" />
-                    </div>
-                    <div className="min-w-0">
-                      <div className="text-xl font-bold text-white mb-1">고객 DB 업로드</div>
-                      <div className="text-sm text-white/75">엑셀/CSV로 고객 추가</div>
-                    </div>
-                  </div>
-                  <div className="relative self-end w-9 h-9 rounded-full bg-white/15 ring-1 ring-white/25 flex items-center justify-center group-hover:translate-x-0.5 transition-transform">
-                    <ChevronRight className="w-5 h-5 text-white" />
-                  </div>
-                </button>
-                )}
-              </>
-            ) : (
-              <>
-                {/* AI Operator — D222+ Phase 1 정정: 라벨 "AI Operator" + 보라 그라데이션 + navigate('/ai-operator') 직접 진입 */}
-                <button
-                  onClick={() => openLive('hub')}
-                  className={`group relative overflow-hidden p-5 bg-gradient-to-br from-violet-700 via-purple-700 to-fuchsia-600 hover:from-violet-600 hover:via-purple-600 hover:to-fuchsia-500 rounded-xl ring-1 ring-white/20 transition-all shadow-lg shadow-violet-500/25 hover:shadow-xl hover:shadow-violet-500/40 text-right flex-1 flex flex-col justify-between ${isSubscriptionLocked ? 'opacity-60' : ''} ${ENTER}`}
-                  style={{ animationDelay: '120ms' }}
-                >
-                  <div className="absolute -top-16 -right-16 w-48 h-48 rounded-full bg-white/10 blur-3xl" />
-                  <Sparkles className="absolute -bottom-4 -left-4 w-24 h-24 text-white/10" />
-                  <div className="relative flex items-start justify-between gap-3">
-                    <div className="w-10 h-10 rounded-xl bg-white/15 ring-1 ring-white/25 backdrop-blur-sm flex items-center justify-center flex-shrink-0">
-                      <Sparkles className="w-5 h-5 text-white" />
-                    </div>
-                    <div className="min-w-0">
-                      <div className="text-xl font-bold text-white mb-1">{isSubscriptionLocked ? '🔒 ' : ''}AI Operator</div>
-                      <div className="text-sm text-white/75">자연어 한 줄로 AI가 자동 설계</div>
-                    </div>
-                  </div>
-                  <div className="relative self-end flex items-center gap-2">
-                    {/* ★ 2026-10-10 대시보드 B안 — 켜진 여정 · 자동 마케팅이 있을 때만(서버 상태) */}
-                    {liveRunning > 0 && (
-                      <span className="inline-flex items-center gap-1.5 rounded-full bg-white/15 px-2.5 py-1 text-xs font-semibold text-white ring-1 ring-white/25">
-                        <span className="relative flex h-1.5 w-1.5">
-                          <span className="absolute inline-flex h-full w-full rounded-full bg-white opacity-75 motion-safe:animate-ping" />
-                          <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-white" />
-                        </span>
-                        자동화 {liveRunning}개 작동 중
-                      </span>
-                    )}
-                    <div className="w-9 h-9 rounded-full bg-white/15 ring-1 ring-white/25 flex items-center justify-center group-hover:translate-x-0.5 transition-transform">
-                      <ChevronRight className="w-5 h-5 text-white" />
-                    </div>
-                  </div>
-                </button>
-
-                {/* 직접 타겟 발송 — 2026-07-07: 프리미엄 그라데이션(에메랄드→틸, 글래스 칩+링+워터마크) */}
-                <button
-                  onClick={() => {
-                    if (isSubscriptionLocked) { setShowSubscriptionLock(true); return; }
-                    if (isCustomerDbLocked) { openPlanFeature('send-target'); return; }
-                    setShowDirectTargeting(true);
-                  }}
-                  className={`group relative overflow-hidden p-5 bg-gradient-to-br from-emerald-600 to-teal-500 hover:from-emerald-500 hover:to-teal-400 rounded-xl ring-1 ring-white/20 transition-all shadow-lg shadow-emerald-500/25 hover:shadow-xl hover:shadow-emerald-500/40 text-right flex-1 flex flex-col justify-between ${isSubscriptionLocked || isCustomerDbLocked ? 'opacity-60' : ''} ${ENTER}`}
-                  style={{ animationDelay: '180ms' }}
-                >
-                  <div className="absolute -top-16 -right-16 w-48 h-48 rounded-full bg-white/10 blur-3xl" />
-                  <Send className="absolute -bottom-4 -left-4 w-24 h-24 text-white/10" />
-                  <div className="relative flex items-start justify-between gap-3">
-                    <div className="w-10 h-10 rounded-xl bg-white/15 ring-1 ring-white/25 backdrop-blur-sm flex items-center justify-center flex-shrink-0">
-                      <Send className="w-5 h-5 text-white" />
-                    </div>
-                    <div className="min-w-0">
-                      <div className="text-xl font-bold text-white mb-1">{(isSubscriptionLocked || isCustomerDbLocked) ? '🔒 ' : ''}직접 타겟 발송</div>
-                      <div className="text-sm text-white/75">원하는 고객을 직접 필터링</div>
-                    </div>
-                  </div>
-                  <div className="relative self-end w-9 h-9 rounded-full bg-white/15 ring-1 ring-white/25 flex items-center justify-center group-hover:translate-x-0.5 transition-transform">
-                    <ChevronRight className="w-5 h-5 text-white" />
-                  </div>
-                </button>
-
-                {/* 고객 DB 업로드 — 2026-07-07: 프리미엄 그라데이션(앰버→오렌지, 글래스 칩+링+워터마크) */}
-                <button
-                  onClick={() => {
-                    if (syncBlockActive) { setShowSyncActiveBlock(true); return; }
-                    if (isSubscriptionLocked) { setShowSubscriptionLock(true); return; }
-                    if (isCustomerDbLocked) { openPlanFeature('upload-customers'); return; }
-                    setShowFileUpload(true);
-                  }}
-                  className={`group relative overflow-hidden p-5 bg-gradient-to-br from-amber-500 to-orange-500 hover:from-amber-400 hover:to-orange-400 rounded-xl ring-1 ring-white/20 transition-all shadow-lg shadow-amber-500/25 hover:shadow-xl hover:shadow-amber-500/40 text-right flex-1 flex flex-col justify-between ${isSubscriptionLocked || isCustomerDbLocked ? 'opacity-60' : ''} ${ENTER}`}
-                  style={{ animationDelay: '240ms' }}
-                >
-                  <div className="absolute -top-16 -right-16 w-48 h-48 rounded-full bg-white/10 blur-3xl" />
-                  <UserPlus className="absolute -bottom-4 -left-4 w-24 h-24 text-white/10" />
-                  <div className="relative flex items-start justify-between gap-3">
-                    <div className="w-10 h-10 rounded-xl bg-white/15 ring-1 ring-white/25 backdrop-blur-sm flex items-center justify-center flex-shrink-0">
-                      <UserPlus className="w-5 h-5 text-white" />
-                    </div>
-                    <div className="min-w-0">
-                      <div className="text-xl font-bold text-white mb-1">{(isSubscriptionLocked || isCustomerDbLocked) ? '🔒 ' : ''}고객 DB 업로드</div>
-                      <div className="text-sm text-white/75">엑셀/CSV로 고객 추가</div>
-                    </div>
-                  </div>
-                  <div className="relative self-end w-9 h-9 rounded-full bg-white/15 ring-1 ring-white/25 flex items-center justify-center group-hover:translate-x-0.5 transition-transform">
-                    <ChevronRight className="w-5 h-5 text-white" />
-                  </div>
-                </button>
-              </>
-            )}
-          </div>
         </div>
 
         {/* 탭 */}
@@ -3743,9 +3683,11 @@ const campaignData = {
         onClose={() => {
           setShowAlimtalkSend(false);
           setAlimtalkInitialRecipients([]);
+          setAlimtalkInitialTemplateId(null);   // ★ 2026-10-18 넘겨받은 템플릿은 그 한 번만
           setDirectSendChannel('sms');  // ★ #1 (2026-06-01): 알림톡 닫을 때 채널 복원 — 밑 직접발송 패널 알림톡 잔존 방지
         }}
         initialRecipients={alimtalkInitialRecipients}
+        initialTemplateId={alimtalkInitialTemplateId}
         resetSignal={alimtalkResetSignal}
         alimtalkSenders={alimtalkSenders}
         alimtalkTemplates={kakaoTemplates as any}

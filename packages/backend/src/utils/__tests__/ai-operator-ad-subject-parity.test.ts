@@ -19,8 +19,9 @@ function read(cands: string[]): string {
 }
 
 const operator = read([
-  path.resolve(process.cwd(), '../frontend/src/pages/AiOperatorPage.tsx'),
-  path.resolve(process.cwd(), 'packages/frontend/src/pages/AiOperatorPage.tsx'),
+  // ★ 2026-10-18 한 줄 입력 · 제안 · 발송은 AiLinePage.tsx 로 원형 이동(AI 한줄로 설계서 §4)
+  path.resolve(process.cwd(), '../frontend/src/pages/AiLinePage.tsx'),
+  path.resolve(process.cwd(), 'packages/frontend/src/pages/AiLinePage.tsx'),
 ]);
 
 describe('AI operator 광고표기 토글 + 제목 (광고) ↔ buildAdSubject 미러', () => {

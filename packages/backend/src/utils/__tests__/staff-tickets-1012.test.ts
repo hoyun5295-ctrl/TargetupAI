@@ -157,7 +157,7 @@ describe('접수 1 후속(Codex 1R medium) · 커스텀 칸 날짜 · 숫자 비
 });
 
 describe('접수 2·3 · AI 오퍼레이션 발송 결과 창 · 확인 창', () => {
-  const src = read('frontend/src/pages/AiOperatorPage.tsx');
+  const src = read('frontend/src/pages/AiLinePage.tsx');   // ★ 2026-10-18 한 줄 입력 · 제안 · 발송은 AiLinePage.tsx 로 원형 이동(AI 한줄로 설계서 §4)
 
   it('발송 확인 창 3곳(즉시 · 예약 · 제외 확인)은 발송을 기다리지 않는다', () => {
     expect(src).not.toMatch(/onConfirm: \(\) => performDirectSend\(/);

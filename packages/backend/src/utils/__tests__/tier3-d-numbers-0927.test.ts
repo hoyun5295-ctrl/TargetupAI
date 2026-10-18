@@ -168,12 +168,14 @@ describe('R129 일일 인사이트 어제 실적', () => {
 
 describe('R078 · R193 고객 평균 구매 = 표준 컬럼', () => {
   it('custom_fields 구매 칸 읽기 0곳', () => {
-    for (const f of [['..', 'routes', 'ai.ts'], ['citations.ts'], ['continuous-operator.ts'], ['crm-agency-proposal.ts']]) {
+    for (const f of [['..', 'routes', 'ai.ts'], ['hub-company-context.ts'], ['citations.ts'], ['continuous-operator.ts'], ['crm-agency-proposal.ts']]) {
       const s = src(...f);
       expect(s, f.join('/')).not.toContain("custom_fields->>'purchase_count'");
       expect(s, f.join('/')).not.toContain("custom_fields->>'total_spent'");
     }
-    expect((src('..', 'routes', 'ai.ts').match(/AVG\(purchase_count\)/g) || []).length).toBe(4);
+    // ★ 2026-10-18 허브 제안 통계는 hub-company-context.ts 로 원형 이동 → ai.ts 3곳 + 그 파일 1곳
+    expect((src('..', 'routes', 'ai.ts').match(/AVG\(purchase_count\)/g) || []).length).toBe(3);
+    expect((src('hub-company-context.ts').match(/AVG\(purchase_count\)/g) || []).length).toBe(1);
   });
 });
 

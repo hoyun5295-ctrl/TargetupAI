@@ -93,6 +93,12 @@ export const CREDIT_COST_MAP: Record<string, number> = {
   'ai-operator-explain': 5,
   // 꾸미기 3 — AI Operator 추천 메시지에 회사 데이터 컬럼(%변수%)을 녹여 재작성. 다듬기(1)보다 위(데이터 적용). operator-message-decorator 인라인 creditCost 제거 후 이 map이 진실.
   'ai-operator-decorate': 3,
+  // ★ 2026-10-18 AI 한줄로(설계서 docs/2026-10-18-ai-line-design.md §6 · Harold 확정 「3안 전부 8 수용 · 차감 금액 확인 창」).
+  //   대상 찾기 2(대상 1명 이상 · 같은 날 같은 한 줄 = 0) · 문안 1종당 2(나온 종류 수 · 한 행) · 꾸미기 1(고른 문안 1개 · 글이 바뀐 때만).
+  //   안쪽 AI(대상 · 문안 · 꾸미기 · 알림톡 매칭)는 묶음 0 · 원장 행 = 진입점에서만. propose 5 · 옛 꾸미기 3 은 그대로.
+  'ai-line-intake': 2,
+  'ai-line-compose': 2,
+  'ai-line-decorate': 1,
   // 여정 생성(돌려보기) 3 — 자연어→여정 패키지 생성. 호출(돌려보기)마다 3. 저장은 'journey-activate' 150 별도.
   'journey-ai-generate': 3,
   'journey-builder-custom': 3,

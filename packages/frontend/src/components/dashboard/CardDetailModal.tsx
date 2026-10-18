@@ -48,6 +48,7 @@ import {
 } from 'lucide-react';
 import DeltaBadge from './DeltaBadge';
 import BirthdayCustomerList from './BirthdayCustomerList';
+import { fetchAiOperatorFeatures } from '../../utils/ai-operator-access';   // ★ 2026-10-18 직접 타겟 접기 판정(서버 값)
 
 // ─── 타입 ───
 
@@ -389,9 +390,11 @@ export default function CardDetailModal({ card, onClose }: CardDetailModalProps)
   // 1-click 액션 핸들러
   const goAiOperator = () => {
     sessionStorage.setItem('ai_operator_prefill_objective', theme.oneClickObjective);
-    navigate('/ai-operator');
+    navigate('/ai-line');   // ★ 2026-10-18 한 줄 입력은 AI 한줄로(같은 넘기기 키를 그 화면이 읽는다)
   };
-  const goDirectSend = () => {
+  const goDirectSend = async () => {
+    // ★ 2026-10-18 AI 한줄로 새 흐름 켠 회사 = 직접 타겟 발송을 접는다(설계서 §9) → 이 카드 주제로 AI 한줄로(대상을 한 줄에서 뽑는다)
+    if ((await fetchAiOperatorFeatures()).aiLine === true) { goAiOperator(); onClose(); return; }
     sessionStorage.setItem('direct_send_prefill_card', card.cardId);
     navigate('/?openDirectSend=1');
     onClose();

@@ -10,7 +10,7 @@ import { resolve } from 'path';
 
 const ROOT = resolve(__dirname, '..', '..', '..', '..');
 const read = (p: string) => readFileSync(resolve(ROOT, p), 'utf8').replace(/\r\n/g, '\n');
-const page = read('frontend/src/pages/AiOperatorPage.tsx');
+const page = read('frontend/src/pages/AiLinePage.tsx');   // ★ 2026-10-18 한 줄 입력 · 제안 · 발송은 AiLinePage.tsx 로 원형 이동(AI 한줄로 설계서 §4)
 const fmt = read('frontend/src/utils/formatDate.ts');
 const svc = read('backend/src/services/ai.ts');
 

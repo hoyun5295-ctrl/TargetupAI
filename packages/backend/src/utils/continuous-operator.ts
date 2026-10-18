@@ -2729,6 +2729,7 @@ async function dispatchProposalSend(
         segmentParams: pj.target?.segmentParams || null,
         legacyFilters: filters,
         baseParams: sendBaseParams,
+        ownerUserId: op.created_by || null,   // ★ 2026-10-18 브랜드 조건 동의 = 주인 기준(범위 판정과 같은 사람)
         // ★ 2026-08-04: 발송 직전 재추출도 제안 생성 때와 **같은 지난 회차**와 비교한다.
         //   스냅샷 갱신을 발송 뒤로 미루는 이유가 여기 있다 — 제안 시점에 갈아 끼우면 이 재추출이
         //   방금 심은 자기 스냅샷과 비교해 변화 0이 되고, "보여준 수 = 나가는 수"가 깨진다.

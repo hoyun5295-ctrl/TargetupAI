@@ -59,7 +59,7 @@ describe('배선', () => {
     const dash = read('pages/Dashboard.tsx');
     const at = dash.indexOf('<MmsUploadModal');
     expect(dash.slice(at, dash.indexOf('/>', at))).toContain('handleMmsImageSwap={handleMmsImageSwap}');
-    const op = read('pages/AiOperatorPage.tsx');
+    const op = read('pages/AiLinePage.tsx');   // ★ 2026-10-18 한 줄 입력 · 제안 · 발송은 AiLinePage.tsx 로 원형 이동(AI 한줄로 설계서 §4)
     const opAt = op.indexOf('<MmsUploadModal');
     expect(op.slice(opAt, op.indexOf('/>', opAt))).toContain('handleMmsImageSwap={handleMmsImageSwap}');
     for (const p of ['components/agency/AgencyOneStepModal.tsx', 'components/agency/AgencySendComposer.tsx']) {

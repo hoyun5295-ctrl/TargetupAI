@@ -15,6 +15,7 @@ export const FRONT_SRC = resolve(__dirname, '../../../../frontend/src');
 /** 루트 페이지(개편 전후 같은 목록 · 새 AI 존 화면이 생기면 여기에 더한다) */
 export const ZONE_ROOTS = [
   'pages/AiOperatorPage.tsx',
+  'pages/AiLinePage.tsx',   // ★ 2026-10-18 허브의 한 줄 입력 · 제안 · 발송 원형 이동(AI 한줄로)
   'pages/AiMemoryPage.tsx',
   'pages/AiUsagePage.tsx',
   'pages/CdpSettingsPage.tsx',

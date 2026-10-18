@@ -295,20 +295,14 @@ export default function LiveAutomationStrip({ scheduled, onOpen, onRunningChange
         </div>
       </div>
 
-      {!asOf ? (
-        // 첫 읽기 전 = 칸 한 줄 높이를 정적으로 잡는다(아래 카드가 밀려 내려가지 않게 · 깜빡임 없음)
-        <div className="mt-3 grid grid-cols-1 gap-2.5 sm:grid-cols-2" aria-hidden>
-          <div className="h-[86px] rounded-xl border border-gray-100 bg-gray-50/70" />
-          <div className="hidden h-[86px] rounded-xl border border-gray-100 bg-gray-50/70 sm:block" />
-        </div>
-      ) : chips.length ? (
+      {/* ★ 2026-10-18 빈 상태 = 한 줄(설계서 §3 · 옛 86px 빈 상자 · 읽기 전 자리표시도 상자 없이) — 켜진 자동화가 있을 때만 칸을 그린다 */}
+      {asOf && chips.length > 0 ? (
         <div className={`mt-3 grid grid-cols-1 gap-2.5 ${cols}`}>{chips}</div>
-      ) : (
-        // 빈 띠도 자리표시와 같은 높이 — 읽기가 끝나는 순간 아래 카드가 위로 뛰지 않는다
-        <div className="mt-3 flex min-h-[86px] items-center rounded-xl border border-dashed border-gray-200 bg-gray-50/50 px-4 text-xs text-gray-500">
+      ) : asOf ? (
+        <p className="mt-1 text-xs text-gray-500">
           {shownPartial ? '잠시 뒤 다시 확인해요.' : '여정이나 자동 마케팅을 켜면 지금 무엇이 돌고 있는지 여기에 보여요.'}
-        </div>
-      )}
+        </p>
+      ) : null}
 
       <div className="mt-2.5 text-[10px] italic text-gray-400">Data source: 자동 마케팅 · 여정 · 발송 진행 · 예약 캠페인 · 1분마다 다시 확인</div>
     </section>

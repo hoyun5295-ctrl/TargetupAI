@@ -52,6 +52,22 @@ export interface PlanFeatureIntro {
 
 export const PLAN_FEATURE_INTROS: PlanFeatureIntro[] = [
   // ───────── AI Operator 허브 ─────────
+  // ★ 2026-10-18 AI 한줄로 새 흐름(설계서 docs/2026-10-18-ai-line-design.md §4-3) — 대시보드 「AI 한줄로」 버튼의 소개 창(새 흐름 켠 회사만 이 항목 · 꺼진 회사 = 'ai-operator').
+  //   영상 줄(video)은 Harold 님이 만든 파일이 올 때 붙인다(그 전에는 한 단 창 · 2026-10-06 영상 12편과 같은 방식).
+  {
+    id: 'ai-line', title: 'AI 한줄로', icon: 'Send', gradient: 'from-violet-500 to-fuchsia-500',
+    summary: '한 줄로 적으면 받을 고객을 뽑고, 빠진 것만 묻고, 고른 종류의 문안을 만들어 스팸 검사 결과까지 붙여 드려요.',
+    steps: [
+      { icon: 'Target', title: '한 줄 적기', text: '"서울 사는 30대 여성에게 기초 라인 할인"처럼 적습니다. 이미 적은 대상과 혜택은 다시 묻지 않습니다.' },
+      { icon: 'ListChecks', title: '받는 사람 · 종류 고르기', text: '발송 명단과 같은 계산으로 센 받는 사람 수를 보고 감성형 · 혜택강조형 · MZ 감성형 · 직접입력 중 원하는 종류와 문안에 넣을 칼럼을 고릅니다.' },
+      { icon: 'Send', title: '검사 결과 보고 발송', text: '만든 문안마다 스팸 검사 결과가 붙습니다. 고른 문안을 예약하거나 바로 보냅니다.' },
+    ],
+    costs: [
+      { label: '대상 찾기', source: 'ai-line-intake', credits: 2 },
+      { label: '문안 1종', source: 'ai-line-compose', credits: 2 },
+      { label: '칼럼 더 넣기', source: 'ai-line-decorate', credits: 1 },
+    ],
+  },
   {
     id: 'ai-operator', title: '한 줄로 캠페인 맡기기', icon: 'Sparkles', gradient: 'from-amber-400 to-fuchsia-500',
     summary: '목표를 한 줄 적으면 대상·문안·발송 시점을 AI가 정해 제안합니다.',

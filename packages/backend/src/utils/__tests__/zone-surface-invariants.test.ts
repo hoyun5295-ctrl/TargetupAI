@@ -27,7 +27,9 @@ const read = (rel: string) => readFileSync(resolve(FRONT, rel), 'utf8');
 const code = (rel: string) => read(rel).replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '').replace(/\{\s*\/\*[\s\S]*?\*\/\s*\}/g, '');
 
 const HUB = 'pages/AiOperatorPage.tsx';
-const ZONE_PAGES = ZONE_ROOTS.filter((r) => r !== HUB);
+// ★ 2026-10-18 허브 두 화면(AI 오퍼레이터 · AI 한줄로) = 공용 머리 띠(AiHubBand) · 존 틀(ZoneFrame) 대상이 아니다
+const HUB_PAGES = [HUB, 'pages/AiLinePage.tsx'];
+const ZONE_PAGES = ZONE_ROOTS.filter((r) => !HUB_PAGES.includes(r));
 
 /** 존 화면에 남아 있으면 안 되는 옛 머리·바닥 */
 const FORBIDDEN = [
@@ -52,12 +54,17 @@ describe('AI 존 표면 불변식', () => {
   });
 
   it('허브 = 남색 명령 띠 + 밝은 문맥 · 옛 보라 지면 0회', () => {
-    const src = code(HUB);
-    expect(src).toContain('<SurfaceToneProvider tone="light">');
-    expect(src).toMatch(/<section className="bg-slate-900 text-white" data-zone="hub-band">/);
-    expect(src).toContain('data-zone="command"');
-    expect(src).not.toMatch(/from-violet-900|via-fuchsia-900/);
-    expect(src).not.toMatch(/\bOUI_/);
+    // ★ 2026-10-18 허브가 둘로 나뉘었다(AI 오퍼레이터 = 기능 · AI 한줄로 = 명령 카드) · 남색 띠 = 공용 AiHubBand(원형 이동)
+    const band = code('components/ai-line/AiHubBand.tsx');
+    expect(band).toMatch(/<section className="bg-slate-900 text-white" data-zone="hub-band">/);
+    for (const rel of [HUB, 'pages/AiLinePage.tsx']) {
+      const src = code(rel);
+      expect(src, rel).toContain('<SurfaceToneProvider tone="light">');
+      expect(src, rel).toContain('<AiHubBand');
+      expect(src, rel).not.toMatch(/from-violet-900|via-fuchsia-900/);
+      expect(src, rel).not.toMatch(/\bOUI_/);
+    }
+    expect(code('pages/AiLinePage.tsx')).toContain('data-zone="command"');
   });
 
   it('타일 12장 = 아이콘·그라데이션이 서로 겹치지 않는다(D9)', () => {

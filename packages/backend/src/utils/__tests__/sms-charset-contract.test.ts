@@ -142,7 +142,7 @@ describe('작성 화면 배선 (P2)', () => {
     'components/ScheduledCampaignModal.tsx',
     'components/DmSendAndTrackModal.tsx',
     'components/MessageEditorModal.tsx',
-    'pages/AiOperatorPage.tsx',
+    'pages/AiLinePage.tsx',   // ★ 2026-10-18 한 줄 입력 · 제안 · 발송은 AiLinePage.tsx 로 원형 이동(AI 한줄로 설계서 §4)
     'components/agency/AgencySendComposer.tsx',
     'components/agency/AgencySendDetail.tsx',
     'components/automarketing/ProposalDecisionCard.tsx',

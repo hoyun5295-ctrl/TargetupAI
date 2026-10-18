@@ -316,6 +316,22 @@ export async function resolveSpamReportTest(o: {
 // ============================================================
 // [1] 큐에 스팸 테스트 등록
 // ============================================================
+/**
+ * 첫 수신자를 주지 않은 검사의 기본 고객(치환 · 해시 기준) — 등록 함수에서 원형 이동(★ 2026-10-18 · AI 한줄로 재사용 해시가 같은 고객을 보게).
+ * ★ 미리보기와 동일한 정렬 (name ASC) — recommend-target의 샘플 고객과 일치 보장
+ * ★ 2026-09-22 브랜드 격리: 테스트 주체가 분류코드 사용자면 자기 코드 고객에서만(CT-02 경유 · 빈 조각이면 종전 SQL 그대로)
+ */
+export async function loadDefaultSpamFirstRecipient(companyId: string, userId: string, fieldMappings: Record<string, any>): Promise<Record<string, any>> {
+  const mappingCols = Object.values(fieldMappings).filter((m: any) => m.storageType !== 'custom_fields').map((m: any) => m.column);
+  const selectCols = [...new Set(['phone', 'custom_fields', ...mappingCols])].join(', ');
+  const sampleScope = await getSampleCustomerScope(companyId, userId, { paramIndex: 2 });
+  const firstResult = await query(
+    `SELECT ${selectCols} FROM customers WHERE company_id = $1 AND is_active = true AND sms_opt_in = true${sampleScope.where} ORDER BY name ASC NULLS LAST LIMIT 1`,
+    [companyId, ...sampleScope.params]
+  );
+  return firstResult.rows[0] || {};
+}
+
 export async function enqueueSpamTest(params: SpamTestEnqueueParams): Promise<SpamTestEnqueueResult> {
   const {
     companyId, userId, callbackNumber,
@@ -336,16 +352,7 @@ export async function enqueueSpamTest(params: SpamTestEnqueueParams): Promise<Sp
     if (clientFirstRecipient && typeof clientFirstRecipient === 'object' && Object.keys(clientFirstRecipient).length > 0) {
       firstCustomer = clientFirstRecipient;
     } else {
-      const mappingCols = Object.values(fieldMappings).filter((m: any) => m.storageType !== 'custom_fields').map((m: any) => m.column);
-      const selectCols = [...new Set(['phone', 'custom_fields', ...mappingCols])].join(', ');
-      // ★ 미리보기와 동일한 정렬 (name ASC) — recommend-target의 샘플 고객과 일치 보장
-      // ★ 2026-09-22 브랜드 격리: 테스트 주체가 분류코드 사용자면 자기 코드 고객에서만(CT-02 경유 · 빈 조각이면 종전 SQL 그대로)
-      const sampleScope = await getSampleCustomerScope(companyId, userId, { paramIndex: 2 });
-      const firstResult = await query(
-        `SELECT ${selectCols} FROM customers WHERE company_id = $1 AND is_active = true AND sms_opt_in = true${sampleScope.where} ORDER BY name ASC NULLS LAST LIMIT 1`,
-        [companyId, ...sampleScope.params]
-      );
-      firstCustomer = firstResult.rows[0] || {};
+      firstCustomer = await loadDefaultSpamFirstRecipient(companyId, userId, fieldMappings);
     }
 
     // ★ D92: %회신번호% 치환 — callbackNumber를 addressBookFields로 전달하여 스팸테스트에서도 맵핑
@@ -543,6 +550,14 @@ let queueWorkerRunning = false;
  * 기록이 없는 active(수동 검사 = 등록 즉시 active라 두 시각이 같다 · 재기동 전 행 = 폴러가 이미 사라졌다)는 등록 시각으로 잰다.
  */
 const _activatedAt = new Map<string, number>();
+
+/**
+ * ★ 2026-10-18 AI 한줄로 자동 검사 칩(설계서 docs/2026-10-18-ai-line-design.md §7) — 큐 검사의 실행 시작 시각(없으면 null = 등록 시각으로 읽는다).
+ *   운영은 단일 프로세스(PM2 instances 1)라 API 와 워커가 같은 기록을 본다 → 시작 시각 칸(DDL) 없이 칩 · 정리 · 판정이 같은 시각을 쓴다.
+ */
+export function spamTestStartedAtMs(testId: string): number | null {
+  return _activatedAt.get(testId) ?? null;
+}
 
 /**
  * ★ 2026-09-26 F45·F46 — 멈춘 active 검사를 닫는다(결과 NULL → timeout · 검사 completed). 큐 워커·수동 검사 라우트 공용 CT.

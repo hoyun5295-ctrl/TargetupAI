@@ -162,6 +162,36 @@ export async function analyzeCompanyDataProfile(companyId: string): Promise<Comp
 }
 
 /**
+ * ★ 2026-10-18 AI 한줄로(설계서 docs/2026-10-18-ai-line-design.md §5-2) — **이 대상 안** 칼럼별 채움 비율.
+ *   회사 전체 프로필(analyzeCompanyDataProfile)과 같은 필드 · 같은 채움 판정 · WHERE 만 대상으로 바꾼다(판정 두 벌 금지).
+ * @param where  `customers c` 기준 WHERE(buildAudienceWhere 산출 · 별칭 c)
+ * @param params 그 WHERE 의 파라미터(그대로 쓴다)
+ */
+export async function analyzeAudienceFieldFill(
+  where: string,
+  params: any[],
+): Promise<{ total: number; fields: Array<{ field: string; label: string; percentVar: string; fillRate: number }> }> {
+  const countFilters = ANALYZED_FIELDS.map((f) => {
+    const col = `c.${f.field}`;
+    if (f.dataType === 'number') return `COUNT(*) FILTER (WHERE ${col} IS NOT NULL AND ${col} > 0) AS cnt_${f.field}`;
+    if (f.dataType === 'date' || f.dataType === 'boolean') return `COUNT(*) FILTER (WHERE ${col} IS NOT NULL) AS cnt_${f.field}`;
+    return `COUNT(*) FILTER (WHERE ${col} IS NOT NULL AND ${col} != '') AS cnt_${f.field}`;
+  });
+  const r = await query(`SELECT COUNT(*) AS total, ${countFilters.join(', ')} FROM customers c WHERE ${where}`, params);
+  const row = r.rows[0] || {};
+  const total = parseInt(row.total || '0');
+  return {
+    total,
+    fields: ANALYZED_FIELDS.map((f) => ({
+      field: f.field,
+      label: f.label,
+      percentVar: f.percentVar,
+      fillRate: total > 0 ? Math.round((parseInt(row[`cnt_${f.field}`] || '0') / total) * 100) : 0,
+    })),
+  };
+}
+
+/**
  * 캐시 통합 조회 (1시간 TTL — 자주 호출되는 영역 정합).
  */
 export async function getCompanyDataProfile(companyId: string): Promise<CompanyDataProfile> {

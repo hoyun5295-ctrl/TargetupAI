@@ -110,6 +110,9 @@ export interface AlimtalkSendModalProps {
   /** ★ #2 (2026-06-01): 발송 성공 시 증가하는 신호 — 수신자 리스트만 초기화(모달은 열린 채 유지). */
   resetSignal?: number;
 
+  /** ★ 2026-10-18 AI 한줄로 알림톡 갈래 — 열 때(초기화 뒤) 이 승인 템플릿을 고른 채로 시작한다. 주지 않으면 지금 그대로. */
+  initialTemplateId?: string | null;
+
   /**
    * ★ 2026-09-25 머리의 채널 전환(문자 발송 · 브랜드메시지) — 주면 버튼이 보인다.
    *   phones = 지금 명단의 번호 · rows = 지금 명단의 줄 그대로(문자 쪽은 줄의 정체로 되돌린다 · Codex 9R).
@@ -139,6 +142,7 @@ export default function AlimtalkSendModal({
   setToast,
   initialRecipients,
   resetSignal,
+  initialTemplateId,
   onSwitchChannel,
 }: AlimtalkSendModalProps) {
   // 수신자 영역 — 알림톡 전용 state (직접발송 directRecipients와 격리)
@@ -191,6 +195,14 @@ export default function AlimtalkSendModal({
       // ★ 2026-06-05: 직접발송 알림톡은 사용자가 올린 데이터(recipients keys)만 변수 매칭 옵션으로 사용.
       //   기존 고객 DB 표준 필드 fetch는 수신자 0건에도 DB 필드가 노출돼
       //   #{고객명}→name 자동 매핑·고정 발송을 유발해 제거(직원 신고).
+      // ★ 2026-10-18 AI 한줄로 알림톡 갈래 — 초기화 뒤 넘겨받은 승인 템플릿을 고른다(변수 맞추기 · 대체 문자는 이 창에서)
+      if (initialTemplateId) {
+        const tpl = alimtalkTemplates.find((t) => t.id === initialTemplateId) || null;
+        if (tpl) {
+          setKakaoSelectedTemplate(tpl);
+          setAlimtalkProfileId((tpl as any).profile_id || '');
+        }
+      }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [show]);

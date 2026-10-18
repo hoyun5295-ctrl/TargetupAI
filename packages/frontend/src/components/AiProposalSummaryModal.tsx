@@ -11,7 +11,7 @@ import { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { X, Sparkles, LineChart } from 'lucide-react';
 import CompanyDataProfileCard from './CompanyDataProfileCard';
-import type { ProposalResponse } from '../pages/AiOperatorPage';
+import type { ProposalResponse } from '../pages/AiLinePage';
 
 interface Props {
   proposal: ProposalResponse;

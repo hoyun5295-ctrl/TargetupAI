@@ -722,9 +722,16 @@ export function buildDynamicFilterCompat(
  * 기존 시그니처: buildFilterWhereClause(filters, startParamIndex) → {sql, params, nextIndex}
  * ★ ai.ts 원본은 gender를 사전 정규화(남→M, 여→F)한 후 buildGenderFilter에 넘김.
  *   campaigns.ts는 raw 그대로 넘기므로, 여기서 사전 정규화를 적용.
- * ★ store_code는 'skip' (ai.ts에서는 store_code 미사용).
+ * ★ 2026-10-18 store_code = 'subquery'(소속 표 · `$1` = companyId). 옛 'skip' 은 허브 대상 AI 가 만든 브랜드 조건을
+ *   SQL 에서 버려 회사 전체를 셌다(AI 한줄로 설계서 §2 0-3). 소비처 9곳 모두 `$1` = companyId · 단일 표 `customers c` 확인.
  */
-export function buildFilterWhereClauseCompat(filters: any, startParamIndex: number): FilterResult {
+export function buildFilterWhereClauseCompat(
+  filters: any,
+  startParamIndex: number,
+  // ★ 2026-10-18 브랜드 조건의 동의 = 그 브랜드 소속 행(Codex 1R high · 직접 타겟과 같은 mall-consent brandConsentOption 값).
+  //   SQL 을 실행하는 소비처는 viewerBrandConsent · ownerBrandConsent 로 넘긴다. 판정만 하는 자리(빈 조건 · 칸 조건)는 비워도 같다.
+  brand: { storeConsent?: boolean; storeConsentMallCodes?: readonly string[] } = {},
+): FilterResult {
   // ai.ts 원본의 gender 사전 정규화 적용
   if (filters?.gender) {
     const rawGender = typeof filters.gender === 'object' && filters.gender.value !== undefined
@@ -741,7 +748,10 @@ export function buildFilterWhereClauseCompat(filters: any, startParamIndex: numb
   return buildCustomerFilter(filters, {
     tableAlias: '',
     startParamIndex,
-    storeCodeMode: 'skip',
+    storeCodeMode: 'subquery',
+    companyIdParamRef: '$1',
+    storeConsent: brand.storeConsent === true,
+    storeConsentMallCodes: brand.storeConsentMallCodes,
     inputFormat: 'mixed',
   });
 }
