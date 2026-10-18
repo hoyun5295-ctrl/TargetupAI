@@ -1,0 +1,17 @@
+{
+  "detector": {
+    "ignoreRules": [],
+    "ignoreFiles": [],
+    "ignoreValues": [
+      {
+        "rule": "broken-image",
+        "value": "*",
+        "files": [
+          "src/utils/__tests__/outreach-line-template-1018.test.ts"
+        ],
+        "createdAt": "2026-10-18T01:56:29.244Z",
+        "reason": "Claude: L37 is a regex inside a vitest helper extracting img src from rendered HTML, not markup (same as earlier repo-root-path ignore)"
+      }
+    ]
+  }
+}

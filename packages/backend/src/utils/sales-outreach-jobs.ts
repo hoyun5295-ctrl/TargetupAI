@@ -38,6 +38,7 @@ import {
   // ★ 2026-10-09 R7 메일 첫 화면 휴대폰 틀
   storeFramedDmCapture,
 } from './sales-outreach-produce';
+import { outreachLineTemplateRecordOf, outreachLineTemplateRecipe, type OutreachLineTemplateRecord } from './line-template-outreach';
 // ★ 2026-09-15 아웃리치 카탈로그 DM(AI 0 · 크레딧 0) — 계획(순수) → 상품 카드 합성 → 발행 · 실패는 여기서 격리(DM 단계 실패 0)
 import { planOutreachCatalog, buildOutreachCatalog, type CatalogBuildResult } from './sales-outreach-catalog';
 // ★ 2026-09-05(3) 브레인스토밍 수렴안 C4 — 재료 재선택·섹션 숨김 override·품질 경고(순수 CT · 잠금 0)
@@ -1502,6 +1503,8 @@ async function mergeStageResultsOwned(jobId: string, lockToken: string, patch: R
 export function buildOutreachRecipe(input: {
   sections: readonly any[]; cards: readonly EngineEventCard[]; media: OutreachMedia | null; licensedQuote: string; look: unknown;
   colorSource: string | null; benefitStripped: number; heroFallback: boolean; eventList: unknown; bannerRead: boolean; vision: unknown; aiCost: OutreachAiCost | null;
+  /** ★ 2026-10-18 템플릿 조립 기록(있을 때만 레시피에 · 원문 0 = 템플릿 · 추천 주체 · 칸 번호 · 결) */
+  lineTemplate?: OutreachLineTemplateRecord | null; industry?: string | null;
 }): Record<string, unknown> {
   const cardBanners = new Set(input.cards.map((c) => c.bannerUrl).filter(Boolean));
   const productImgs = new Set((input.media?.products || []).map((p) => p.image_url));
@@ -1517,6 +1520,16 @@ export function buildOutreachRecipe(input: {
     else if (id === 'so-std-hero-banner') { src = 'slice'; reader = 'html'; ref = 'hero=banner'; }
     else if (id === 'so-std-hero-card') { src = 'card'; reader = 'html'; ref = 'hero=card'; }
     else if (/^so-std-(event|cta-event)\d+$/.test(id)) { src = 'card'; reader = 'html'; }
+    // ★ 2026-10-18 템플릿 조립 — 표지(종류 = id) · 상품 · 행사 · 상세 그림 · 혜택 · 마감 = 재료 · 문구 · 버튼 · 헤더 · 푸터 = code
+    else if (id.startsWith('so-tpl-cover-poster-')) { src = 'poster'; reader = 'vision'; }
+    else if (id.startsWith('so-tpl-cover-banner-')) { src = 'slice'; reader = 'html'; ref = 'hero=banner'; }
+    else if (id.startsWith('so-tpl-cover-card-')) { src = 'card'; reader = 'html'; ref = 'hero=card'; }
+    else if (id.startsWith('so-tpl-cover-none-') && p.image_url) { src = 'product'; reader = 'html'; ref = 'cover'; }
+    else if (id.startsWith('so-tpl-products-') || id.startsWith('so-tpl-more-')) { src = 'product'; reader = 'html'; ref = Array.isArray(p.products) ? `n=${p.products.length}` : null; }
+    else if (id.startsWith('so-tpl-slices-')) { src = 'slice'; reader = 'html'; ref = `n=${Array.isArray(p.images) ? p.images.length : 0}`; }
+    else if (id.startsWith('so-tpl-events-') || id.startsWith('so-tpl-benefit-')) { src = 'card'; reader = 'html'; }
+    else if (id.startsWith('so-tpl-deadline-')) { src = 'card'; reader = 'html'; ref = 'endDate'; }
+    else if (id.startsWith('so-tpl-')) { src = 'code'; reader = 'code'; }
     else if (id.startsWith('so-v3-poster')) { src = 'poster'; reader = 'vision'; }
     else if (id.startsWith('so-v3-event') || id.startsWith('so-v3-cta-event') || (type === 'hero' && cardBanners.has(p.image_url))) { src = 'card'; reader = input.bannerRead ? 'vision' : 'html'; ref = p.image_url ? 'banner' : 'title'; }
     else if (id.startsWith('so-v3-spot') || id.startsWith('so-v3-cta-spot') || type === 'product_carousel' || (type === 'text_card' && productImgs.has(p.image_url))) { src = 'product'; reader = 'html'; ref = type === 'product_carousel' ? `n=${Array.isArray(p.products) ? p.products.length : 0}` : null; }
@@ -1536,6 +1549,7 @@ export function buildOutreachRecipe(input: {
     look: { ...(input.look && typeof input.look === 'object' ? { treatments: (input.look as any).treatments, backgrounds: (input.look as any).backgrounds } : {}), colorSource: input.colorSource },
     vision: input.vision && typeof input.vision === 'object' ? { outcome: (input.vision as any).outcome, items: (input.vision as any).items } : null,
     cost: input.aiCost,
+    ...(input.lineTemplate ? { lineTemplate: outreachLineTemplateRecipe(input.lineTemplate, input.industry ?? null) } : {}),
   };
 }
 
@@ -1972,7 +1986,9 @@ async function runProductionMetered(jobId: string, lockToken: string, meter: Out
           stdHero: carry ? (carry.stdHero ?? null) : assembled.stdHero,
           stdProducts: carry ? (Number(carry.stdProducts) || 0) : assembled.stdProducts,
           stdEvents: carry ? (Number(carry.stdEvents) || 0) : assembled.stdEvents,
-          recipe: carry ? (carry.recipe ?? null) : buildOutreachRecipe({ sections: dm.sections, cards: dmCards, media: bp.media || null, licensedQuote, look: dm.look, colorSource: bp.brand?.colorSource || null, benefitStripped: dm.benefitStripped, heroFallback: dm.heroFallback, eventList: sr.event_list || null, bannerRead: bannerLines.length > 0, vision: dmVision, aiCost: null }),
+          // ★ 2026-10-18 템플릿 조립 기록(템플릿 · 고른 이유 · 문구) — 브랜드 이메일이 같은 문구로 · 표준 조립 = null
+          lineTemplate: carry ? (carry.lineTemplate ?? null) : assembled.lineTemplate,
+          recipe: carry ? (carry.recipe ?? null) : buildOutreachRecipe({ sections: dm.sections, cards: dmCards, media: bp.media || null, licensedQuote, look: dm.look, colorSource: bp.brand?.colorSource || null, benefitStripped: dm.benefitStripped, heroFallback: dm.heroFallback, eventList: sr.event_list || null, bannerRead: bannerLines.length > 0, vision: dmVision, aiCost: null, lineTemplate: assembled.lineTemplate, industry: job.industry_category }),
           regenCount: regenSeqOf(sr, 'dm'),
         }, 'producing_dm', lockToken, regenSeqOf(sr, 'dm')))) return;
         if (!(await advanceStage(jobId, lockToken, 'producing_dm', 'producing_email'))) return;
@@ -2040,6 +2056,8 @@ async function runProductionMetered(jobId: string, lockToken: string, meter: Out
             // ★ 2026-09-09 기획전 슬라이스 재료(DM 과 같은 자격 · 같은 구성) · ★ v4-3 홈 상단 배너
             eventSlices: bp.eventSlices || null,
             heroBanners: Array.isArray(bp.heroBanners) ? bp.heroBanners : null,
+            // ★ 2026-10-18 DM 이 템플릿이었으면 같은 템플릿 · 문구(불러온 DM · 표준 조립 = 없음)
+            lineTemplate: outreachLineTemplateRecordOf(dmAsset?.lineTemplate),
           });
           brandSectionsBase = brand.sections; brandSubject = brand.subject; brandStripped = brand.benefitStripped; exemplarCount = brand.exemplarCount; exemplarTotal = brand.exemplarTotal; brandLook = brand.look;
           brandSliceMode = brand.sliceMode; brandSliceCount = brand.sliceCount;

@@ -765,7 +765,8 @@ export function cardHeroOf(row: Row): { heroUrl: string | null; heroKind: 'poste
   const sections: Row[] = Array.isArray(row.brand_sections) ? row.brand_sections : [];
   const g = sections.find((s) => s?.type === 'gallery' && Array.isArray(s?.props?.images) && s.props.images[0]?.url);
   const id = String(g?.id || '');
-  const kindFromId = id.startsWith('so-std-hero-') ? id.slice('so-std-hero-'.length) : null;
+  // ★ 2026-10-18 템플릿 조립 표지 = so-tpl-cover-<종류>-n
+  const kindFromId = id.startsWith('so-std-hero-') ? id.slice('so-std-hero-'.length) : (/^so-tpl-cover-(poster|banner|card)-/.exec(id)?.[1] || null);
   const heroUrl: string | null = g ? String(g.props.images[0].url) : (row.poster_url ? String(row.poster_url) : null);
   const heroKind = kindFromId === 'poster' || kindFromId === 'banner' || kindFromId === 'card' ? kindFromId : (heroUrl && !g ? 'poster' : (heroUrl ? 'banner' : null));
   const posterShown = heroKind === 'poster' && !!row.poster_url;

@@ -55,6 +55,17 @@
 
 ## 2) 활성 버그
 
+### 🟡 B-1018-2 AI 영업 레시피 승격이 같은 잡을 동시에 두 번 저장할 수 있다(등재만 · 착수 판단 = Harold님) · 2026-10-18
+- AI 영업 템플릿 학습 베스트 Codex R8 에서 짚음. `promoteOutreachRecipe`(sales-outreach-jobs.ts)가 `findOutreachRecipeByJob` 조회 → `insertOutreachRecipe` 저장을 따로 해서, 두 창에서 동시에 「학습에 올리기」를 누르면 둘 다 중복 조회를 통과해 같은 잡 레시피가 두 행이 될 수 있다(유일 제약 없음 · 0906 실측 = PK 뿐).
+- 학습 베스트 조회는 출처 잡별 최신 1행으로 걸러 이 중복의 영향을 막았다(`listOutreachRecipeTemplates`). 저장 자체를 원자적으로 막으려면 유일 인덱스(DDL) 또는 승격 경로 잠금이 필요하다.
+- 경위 = [설계서](../docs/2026-10-18-outreach-line-template-design.md) §12.
+
+### 🟡 B-1018-1 한 줄 템플릿 캠페인(고객 경로) 문구 검사가 혜택 교차 조합을 통과시킨다(등재만 · 착수 판단 = Harold님) · 2026-10-18
+- AI 영업 템플릿 이식 Codex R1 high 에서 짚음. `sanitizeLineCopy` 기본 검사(`findInventedBenefits`)는 값 · 낱말이 근거에 있는지만 봐서, 확인한 혜택이 「10% 할인 · 5% 적립」이면 AI 문구 「5% 할인」이 통과한다.
+- AI 영업 경로는 사후 검사로 닫지 못했다(R2 율/률 · R3 한글 수사 · 「두 배」 — 표현은 끝이 없다). 그래서 문구 AI 를 빼고 **AI 는 검증된 업종 문구 묶음에서 번호만 고르는 구조**(값은 코드가 재료 원문으로)로 닫았다. 고객 경로(`line-template-copy.ts:94` `fillLineTemplateCopy` → 호출부 `line-template-run.ts:123`)는 지금 그대로 = 미적용.
+- 착수 시 원칙 = 품질을 깎지 않는다(Harold 1018 「퀄리티는 늘 베스트 · 한줄제작도 마찬가지」). 고정 문구로 바꾸는 식이 아니라, 사람이 확인한 답(혜택 · 기간)은 코드가 그대로 놓고 AI 문장에는 값을 싣지 않는 쪽을 먼저 검토.
+- 경위 = [설계서](../docs/2026-10-18-outreach-line-template-design.md) §11-4.
+
 ### 🟡 B-1017-1 1017 한 줄 단계 모달 구조체크·회의에서 짚은 범위 밖 기존 결함(등재만 · 착수 판단 = Harold님) · 2026-10-17
 - ① DM 한 줄 칸 「사진 속 글 읽기」(옛 「이미지로 불러오기」)의 즉시 조립(`DmBuilderPage` `onStructured` → `buildDmSectionsFromEvents`)이 사진에서 읽은 가격을 확인 없이 상품 카드로 만든다(10-10 H3 「사진 숫자 기본 안 씀」 밖의 옆문).
 - ② 금액 주석이 실제와 다르다: `routes/dm.ts:1153` 「DM 생성 3크레딧 · 발행 30」 · `ai-credit-calc.ts:131` 「발행 30」 · `:145` 「게시 15」(표 값 = 생성 5 · `dm-builder` 100 · `inapp-publish` 100). 코드 동작은 표가 정한다(주석만 틀림).

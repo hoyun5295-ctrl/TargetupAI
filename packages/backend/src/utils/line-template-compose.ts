@@ -26,8 +26,11 @@ export interface LineMaterials {
   brandName: string;
   logoUrl?: string | null;
   csPhone?: string | null;
-  /** 표지 사진(올린 사진 · 이벤트 페이지 배너) — 없으면 글자 표지 · 상품 1개면 상품 표지 */
-  hero: { url: string; src?: string } | null;
+  /**
+   * 표지 사진(올린 사진 · 이벤트 페이지 배너) — 없으면 글자 표지 · 상품 1개면 상품 표지.
+   * asIs = 글자가 이미 박힌 그림(AI 영업 포스터 · 홈 배너 · 행사 배너 · ★ 2026-10-18) → 덮어 쓰지 않고 원본 비율 그대로 + 아래 제목.
+   */
+  hero: { url: string; src?: string; asIs?: boolean; linkUrl?: string } | null;
   /** 사진 있는 상품(카드) */
   products: LineCard[];
   /** 사진 없는 상품(글로 소개) */
@@ -39,10 +42,31 @@ export interface LineMaterials {
   /** 표시용 기간 글('10월 20일(화)까지') */
   periodLabel: string | null;
   link: string | null;
+  /** ★ 2026-10-18 AI 영업 — 행사 목록(≤3 · 제목 · 기간 · 배너 · 상세 주소 · 그 행사 상세 그림) · 고객 경로 = 없음 */
+  events?: LineEvent[];
+  /** ★ 2026-10-18 AI 영업 — 법정 표기(푸터) */
+  legal?: string | null;
+  /** ★ 2026-10-18 AI 영업 — 혜택 조건 글(면허 행사 카드 본문 원문 · 예: 5만원 이상 구매 시) · 혜택 바로 아래에 싣는다(R5) */
+  benefitNote?: string | null;
+}
+
+/** 행사 하나(원문 제목 · 표시용 기간 · 우리 사본 그림 · 상세 주소) */
+export interface LineEvent {
+  title: string;
+  periodLabel?: string | null;
+  image_url?: string | null;
+  link_url: string;
+  /** 행사 본문(면허 카드만 · 구매 조건 같은 원문 · R5) */
+  text?: string | null;
+  /** 그림 없는 행사의 작은 링크 버튼 글자(표준 재료의 행사 버튼 글자) */
+  cta_label?: string | null;
+  /** 그 행사 상세 페이지 그림(우리 사본 · 원본 비율 그대로 이어 붙인다) */
+  slices?: Array<{ url: string }>;
 }
 
 export type LineCopy = Record<LineCopyKey, string>;
-export type NewId = () => string;
+/** 섹션 id 만들기 — part = 그 섹션의 부분 이름(표지 · 상품 · 행사 …) · AI 영업은 부분을 id 에 실어 출처 기록이 읽는다 */
+export type NewId = (part?: string) => string;
 
 export interface LineDmPage { id: string; name: string; sections: Section[] }
 export interface LineDmResult {
@@ -107,9 +131,22 @@ function capLineProducts(m: LineMaterials, max: number): LineMaterials {
 
 /** 표지 — 사진 · 상품 1개 · 글자 중 하나(재료로 고른다) */
 function coverParts(t: LineTemplate, m: LineMaterials, c: LineCopy): { parts: Part[]; productOnCover: boolean } {
+  // ★ 2026-10-18 글자 박힌 그림 = 덮지 않는다 — 그림 원본 비율(링크) + 그 아래 제목 · 부제(혜택 · 기간)
+  if (m.hero?.asIs) {
+    const big = t.id === 'big-sale' && !!m.benefit;
+    const headline = big ? m.benefit! : c.cover_headline;
+    const sub = [big ? m.benefitNote : null, big ? c.cover_headline : c.cover_sub, t.id === 'big-sale' || t.id === 'special-event' ? m.periodLabel : null].filter(Boolean).join('\n');
+    return {
+      parts: [
+        { type: 'gallery', props: { title: '', images: [{ url: m.hero.url, link_url: m.hero.linkUrl || m.link || '', caption: '' }], layout: 'list_1xN', full_bleed: true, enable_zoom: false, enable_fullscreen: false }, part: 'cover' },
+        { type: 'text_card', props: { headline, body: sub, align: 'center', image_position: 'top' }, treatment: 'classic', part: 'cover-copy' },
+      ],
+      productOnCover: false,
+    };
+  }
   if (t.id === 'big-sale') {
     const headline = m.benefit || c.cover_headline;
-    const sub = [m.benefit ? c.cover_headline : c.cover_sub, m.periodLabel].filter(Boolean).join('\n');
+    const sub = [m.benefit ? m.benefitNote : null, m.benefit ? c.cover_headline : c.cover_sub, m.periodLabel].filter(Boolean).join('\n');
     if (m.hero) return { parts: [{ type: 'hero', props: { image_url: m.hero.url, headline, sub_copy: sub, align: 'center', height: 'lg', overlay: 'strong' }, treatment: 'full_bleed', fit: true, part: 'cover' }], productOnCover: false };
     return { parts: [colorCover(t, headline, sub)], productOnCover: false };
   }
@@ -160,6 +197,36 @@ function productParts(products: LineCard[], title: string, channel: LineChannel,
   return out;
 }
 
+/**
+ * ★ 2026-10-18 행사 목록(AI 영업) — 배너가 있는 행사 = 그림(링크 · 아래 제목 · 본문 · 기간) · 없는 행사 = 글 카드 · 상세 그림은 그 행사 뒤에 원본 비율로.
+ *   주 버튼은 결과물 하나(마무리). 그림도 상세 그림도 없는 행사는 그 주소가 다른 곳(표지 · 상품 · 주 버튼)에 없을 때만 작은 테두리 링크 버튼을 단다(갈 길 0 방지).
+ *   표지 · 상품과 같은 그림은 다시 싣지 않는다.
+ *   이메일 = 그림 캡션이 대체 글(alt)로만 나가 안 보인다 → 배너 행사도 그림 아래 제목 · 본문(조건) · 기간 글 카드를 보이게 싣는다(Codex R6).
+ */
+function eventParts(m: LineMaterials, used: ReadonlySet<string>, reach: ReadonlySet<string>, channel: LineChannel): Part[] {
+  const out: Part[] = [];
+  const seen = new Set(used);
+  for (const e of (m.events || []).slice(0, 3)) {
+    const caption = [e.title, e.text, e.periodLabel].filter(Boolean).join(' · ');
+    if (e.image_url && !seen.has(e.image_url)) {
+      seen.add(e.image_url);
+      out.push({ type: 'gallery', props: { title: '', images: [{ url: e.image_url, link_url: e.link_url, caption }], layout: 'list_1xN', full_bleed: false, enable_zoom: false, enable_fullscreen: false }, part: 'events' });
+      if (channel === 'email') out.push({ type: 'text_card', props: { headline: e.title, body: [e.text, e.periodLabel].filter(Boolean).join('\n'), align: 'left', image_position: 'top' }, treatment: 'classic', part: 'events' });
+    } else {
+      out.push({ type: 'text_card', props: { tag: '이벤트', headline: e.title, body: [e.text, e.periodLabel].filter(Boolean).join('\n'), align: 'left', image_position: 'top' }, treatment: 'classic', part: 'events' });
+    }
+    const linked = out.some((p) => p.type === 'gallery' && (p.props.images as Array<{ link_url?: string }> | undefined)?.some((im) => im.link_url === e.link_url));
+    const slices = (e.slices || []).filter((s) => s && s.url && !seen.has(s.url)).slice(0, 3);
+    for (const s of slices) seen.add(s.url);
+    if (slices.length > 0) {
+      out.push({ type: 'gallery', props: { title: '', images: slices.map((s) => ({ url: s.url, link_url: e.link_url, caption: '' })), layout: 'list_1xN', full_bleed: true, enable_zoom: false, enable_fullscreen: false }, part: 'slices' });
+    } else if (!linked && e.link_url && !reach.has(e.link_url)) {
+      out.push({ type: 'cta', props: { buttons: [{ label: e.cta_label || '행사 보러 가기', url: e.link_url, style: 'outline' }], layout: 'stack' }, part: 'events-link' });
+    }
+  }
+  return out;
+}
+
 function storyPart(c: LineCopy, treatment = 'lead', withHeadline = true): Part {
   return { type: 'text_card', props: { ...(withHeadline ? { headline: c.story_headline } : {}), body: c.story_body, align: 'center', image_position: 'top' }, treatment, part: 'story' };
 }
@@ -167,6 +234,13 @@ function storyPart(c: LineCopy, treatment = 'lead', withHeadline = true): Part {
 // 혜택·마감 띠 = 템플릿 주색 바탕 흰 글자(렌더러 기본 검정 띠 + 강조색 글자는 강조색이 어두운 템플릿에서 글자가 사라진다)
 function benefitPart(t: LineTemplate, m: LineMaterials, treatment = 'spotlight'): Part | null {
   return m.benefit ? { type: 'coupon', props: { discount_label: m.benefit, card_bg_color: t.design.primary, label_color: '#ffffff' }, treatment, part: 'benefit' } : null;
+}
+
+/** 혜택 띠 + 조건 글(있을 때 · 띠 바로 아래 또렷한 글 카드 — 띠 안 조건 칸은 진한 바탕 위 회색 작은 글씨라 안 읽힌다) */
+function benefitParts(t: LineTemplate, m: LineMaterials, treatment = 'spotlight'): Part[] {
+  const band = benefitPart(t, m, treatment);
+  if (!band) return [];
+  return m.benefitNote ? [band, { type: 'text_card', props: { body: m.benefitNote, align: 'center', image_position: 'top' }, treatment: 'classic', part: 'benefit-note' }] : [band];
 }
 
 function countdownPart(t: LineTemplate, m: LineMaterials): Part | null {
@@ -189,6 +263,11 @@ export function lineTemplatePageParts(t: LineTemplate, m0: LineMaterials, c: Lin
   const cover = coverParts(t, m, c);
   const products = cover.productOnCover ? m.products.slice(1) : m.products;
   const pages: Part[][] = [cover.parts];
+  // ★ 2026-10-18 행사 목록(AI 영업)은 마무리 장 바로 앞 한 장 — 표지 · 상품 그림은 다시 싣지 않는다
+  const used = new Set<string>([...(m.hero ? [m.hero.url] : []), ...products.map((p) => p.image_url)]);
+  // 이미 갈 길이 있는 주소(표지 그림 · 상품 · 주 버튼) — 행사 링크 버튼은 이 밖의 주소에만
+  const reach = new Set<string>([m.link, m.hero?.linkUrl, ...products.map((p) => p.link_url)].filter((u): u is string => !!u));
+  const events = eventParts(m, used, reach, channel);
   if (t.id === 'big-sale') {
     pages.push(...productParts(products, c.story_headline, channel));
     pages.push(closingParts(m, c, [countdownPart(t, m), products.length === 0 ? storyPart(c) : null]));
@@ -197,26 +276,27 @@ export function lineTemplatePageParts(t: LineTemplate, m0: LineMaterials, c: Lin
     const roomy = (planProductPages(products.length, channel)[0] || []).reduce((a, b) => a + b, 0) <= 2;
     if (products.length > 0 && roomy) {
       pages.push(...productParts(products, '', channel, storyPart(c, 'lead')));
-      pages.push(closingParts(m, c, [benefitPart(t, m)]));
+      pages.push(closingParts(m, c, benefitParts(t, m)));
     } else {
       pages.push(...productParts(products, c.story_headline, channel));
-      pages.push(closingParts(m, c, [storyPart(c, 'quote', products.length === 0), benefitPart(t, m)]));
+      pages.push(closingParts(m, c, [storyPart(c, 'quote', products.length === 0), ...benefitParts(t, m)]));
     }
   } else if (t.id === 'season') {
     pages.push(...productParts(products, '', channel));
-    pages.push(closingParts(m, c, [storyPart(c, 'quote'), benefitPart(t, m)]));
+    pages.push(closingParts(m, c, [storyPart(c, 'quote'), ...benefitParts(t, m)]));
   } else {
-    const what = [storyPart(c, 'lead'), benefitPart(t, m)].filter((p): p is Part => !!p);
+    const what = [storyPart(c, 'lead'), ...benefitParts(t, m)];
     pages.push(what);
     pages.push(...productParts(products, '', channel));
     pages.push(closingParts(m, c, [countdownPart(t, m)]));
   }
+  if (events.length > 0) pages.splice(pages.length - 1, 0, events);
   return pages.filter((p) => p.length > 0);
 }
 
 function toSection(p: Part, pageIdx: number, newId: NewId, opts: { fit: boolean }): Section {
   return {
-    id: newId(),
+    id: newId(p.part),
     type: p.type,
     order: 0,
     visible: true,
@@ -230,7 +310,7 @@ function toSection(p: Part, pageIdx: number, newId: NewId, opts: { fit: boolean 
 
 function headerSection(m: LineMaterials, newId: NewId): Section {
   return {
-    id: newId(), type: 'header', order: 0, visible: true,
+    id: newId('header'), type: 'header', order: 0, visible: true,
     props: { variant: 'logo', brand_name: m.brandName, ...(m.logoUrl ? { logo_url: m.logoUrl } : {}), align: 'center', brand_size: 'sm' } as Section['props'],
     tpl_slot: 'p0.header',
   } as Section;
@@ -238,8 +318,8 @@ function headerSection(m: LineMaterials, newId: NewId): Section {
 
 function footerSection(m: LineMaterials, pageIdx: number, newId: NewId): Section {
   return {
-    id: newId(), type: 'footer', order: 0, visible: true,
-    props: { ...(m.csPhone ? { cs_phone: m.csPhone } : {}), show_unsubscribe_link: true } as Section['props'],
+    id: newId('footer'), type: 'footer', order: 0, visible: true,
+    props: { ...(m.legal ? { legal_text: m.legal } : {}), ...(m.csPhone ? { cs_phone: m.csPhone } : {}), show_unsubscribe_link: true } as Section['props'],
     tpl_slot: `p${pageIdx}.footer`,
   } as Section;
 }
@@ -355,7 +435,9 @@ export function lineTemplateGate(sections: readonly Section[]): string[] {
       if ((s.treatment === 'split' || s.treatment === 'editorial_overlap') && !p.image_url) out.push('사진 없는 사진 구도 표지');
       if (p.image_url) imgs.push(String(p.image_url));
     }
-    if (s.type === 'cta') ctas += Array.isArray(p.buttons) ? p.buttons.length : 0;
+    if (s.type === 'gallery') for (const im of p.images || []) if (im?.url) imgs.push(String(im.url));
+    // 주 버튼만 센다 — AI 영업 행사 링크(테두리 버튼)는 결과물 버튼 하나 규칙 밖(고객 경로 버튼은 전부 주 버튼 · ★ 2026-10-18)
+    if (s.type === 'cta') ctas += Array.isArray(p.buttons) ? p.buttons.filter((b: any) => b?.style !== 'outline').length : 0;
     if (s.type === 'cta' && s.treatment === 'sticky') out.push('슬라이드 sticky 버튼');
     const text = JSON.stringify(p);
     if (PH.test(text)) out.push(`자리표시 글자(${s.type})`);

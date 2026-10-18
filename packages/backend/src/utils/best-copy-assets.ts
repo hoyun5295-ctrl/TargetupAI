@@ -304,11 +304,55 @@ export async function insertOutreachRecipe(input: { industryCode: string; sectio
       `INSERT INTO best_copy_assets (id, kind, industry_code, channel, content, meta) VALUES ($1, $2, $3, $4, $5, $6::jsonb)`,
       [id, OUTREACH_RECIPE_KIND, input.industryCode, 'DM', input.sectionTypes.join(' → '), JSON.stringify(input.meta)],
     );
+    // ★ 2026-10-18 레시피가 늘었다 = 업종별 템플릿 베스트 캐시를 비운다(레시피 쓰기 길목은 여기 한 곳 · 삭제 길목 없음)
+    invalidateOutreachRecipeTemplateCache();
     return { ok: true, id };
   } catch (e: any) {
     if (isMissingTable(e)) return { ok: false, reason: 'table_missing' };
     console.warn('[best-copy] 레시피 저장 실패:', e?.message);
     return { ok: false, reason: 'db_error' };
+  }
+}
+
+// ===== ★ 2026-10-18 AI 영업 템플릿 업종별 베스트 — 승격 레시피의 템플릿 선택 요약(meta.recipe.lineTemplate · 원문 0)만 읽는다 =====
+//   설계 = docs/2026-10-18-outreach-line-template-design.md §12 · 집계(모양 검증 · 횟수)는 line-template-outreach.ts(outreachBestOf)가 한다.
+
+const OUTREACH_RECIPE_TEMPLATE_TTL_MS = 5 * 60 * 1000;
+const OUTREACH_RECIPE_TEMPLATE_LIMIT = 200;
+const outreachRecipeTemplateCache = new Map<string, { at: number; rows: unknown[] }>();
+
+export function invalidateOutreachRecipeTemplateCache(): void {
+  outreachRecipeTemplateCache.clear();
+}
+
+/**
+ * 승격 레시피의 템플릿 선택(최신순 · 상한 200) — 업종 코드 목록으로(문구 결 하나 = 업종 코드 여럿). 캐시 5분 · 승격 시 비움(다중 프로세스 = TTL 상한).
+ * 출처 잡(meta.source.jobId)마다 최신 1행만 — 같은 잡이 동시에 두 번 승격돼 두 행이 생겨도 한 건으로 센다(Codex R8 · 승격 저장 경합은 기존 경로 몫).
+ * 테이블 없음 = [] · 그 밖 오류 = null(호출부 = 학습 힌트 없이 지금 동작 · 로그).
+ */
+export async function listOutreachRecipeTemplates(industryCodes: readonly string[]): Promise<unknown[] | null> {
+  const codes = Array.from(new Set(industryCodes.map((c) => String(c || '').trim()).filter(Boolean))).sort();
+  if (codes.length === 0) return [];
+  const key = codes.join(',');
+  const hit = outreachRecipeTemplateCache.get(key);
+  if (hit && Date.now() - hit.at < OUTREACH_RECIPE_TEMPLATE_TTL_MS) return hit.rows;
+  try {
+    const r = await pool.query(
+      `SELECT lt FROM (
+         SELECT DISTINCT ON (COALESCE(meta->'source'->>'jobId', created_at::text)) meta->'recipe'->'lineTemplate' AS lt, created_at
+           FROM best_copy_assets
+          WHERE kind = $1 AND industry_code = ANY($2::varchar[]) AND jsonb_typeof(meta->'recipe'->'lineTemplate') = 'object'
+          ORDER BY COALESCE(meta->'source'->>'jobId', created_at::text), created_at DESC
+       ) d ORDER BY created_at DESC LIMIT $3`,
+      [OUTREACH_RECIPE_KIND, codes, OUTREACH_RECIPE_TEMPLATE_LIMIT],
+    );
+    const rows = (r.rows || []).map((x: { lt: unknown }) => x.lt);
+    outreachRecipeTemplateCache.set(key, { at: Date.now(), rows });
+    return rows;
+  } catch (e: any) {
+    if (isMissingTable(e)) return [];
+    console.warn('[best-copy] 레시피 템플릿 조회 실패(학습 힌트 없이):', e?.message);
+    return null;
   }
 }
 

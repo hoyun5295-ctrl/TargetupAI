@@ -1,0 +1,26 @@
+{
+  "detector": {
+    "ignoreRules": [],
+    "ignoreFiles": [],
+    "ignoreValues": [
+      {
+        "rule": "broken-image",
+        "value": "*",
+        "files": [
+          "packages/backend/src/utils/__tests__/outreach-line-template-1018.test.ts"
+        ],
+        "createdAt": "2026-10-17T23:57:43.333Z",
+        "reason": "Claude: L29 is a regex inside a vitest helper that extracts img src from rendered HTML, not markup"
+      },
+      {
+        "rule": "broken-image",
+        "value": "*",
+        "files": [
+          "packages/backend/src/utils/__tests__/line-template-campaign-1017.test.ts"
+        ],
+        "createdAt": "2026-10-17T23:59:48.637Z",
+        "reason": "Claude: L33 is a regex inside a vitest helper that extracts img src from rendered HTML, not markup"
+      }
+    ]
+  }
+}

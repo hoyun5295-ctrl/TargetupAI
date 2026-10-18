@@ -43,10 +43,10 @@ export function renderLineTemplateExample(t: LineTemplate, channel: LineChannel,
   const copy = lineExampleCopy(t);
   if (channel === 'inapp') return { message: composeLineInapp(t, m, copy) };
   if (channel === 'email') {
-    const r = composeLineEmail(t, m, copy, randomUUID);
+    const r = composeLineEmail(t, m, copy, () => randomUUID());
     return { html: renderEmailSections(r.sections, { brandKit: exampleKit(t), storeName: m.brandName }), layout: 'page' };
   }
-  const r = composeLineDm(t, layout, m, copy, randomUUID);
+  const r = composeLineDm(t, layout, m, copy, () => randomUUID());
   const dm = { title: `${m.brandName} 예시`, store_name: m.brandName, layout_mode: r.layoutMode, pages: r.pages, sections: r.sections, brand_kit: { ...exampleKit(t), ...r.brandKitPatch }, short_code: '' };
   return { html: renderDmViewerHtml(dm, ''), layout: r.layout };
 }

@@ -47,7 +47,7 @@ import { industryLabel, isIndustryCode, INDUSTRY_CODES, type IndustryCode } from
 import { kstMonth } from './automarketing-segment';   // ★ 2026-10-01 템플릿 자동 선택 = 한국 시간 달(순수 · import 0 파일)
 import type { EventCandidate } from './sales-outreach-jobs';
 // ★ 2026-09-03 참조 골격(설계서 §6-3) — 아웃리치 파일이 읽고 감산해 구성 힌트로 넘긴다(공용 CT는 아웃리치 사정을 모른다 · 불변 20)
-import { getStructureSkeleton } from './best-copy-assets';
+import { getStructureSkeleton, listOutreachRecipeTemplates } from './best-copy-assets';
 import { pickVariant, resolveStructure, seedDateKey, type Avail } from './dm/dm-structure-resolve';
 import { OUTREACH_SEED_SKELETON_ID, outreachSeedSkeleton } from './sales-outreach-skeleton-seed';
 import { pruneEmptyDmSections, rebuildDmPages } from './dm/dm-section-prune';
@@ -56,6 +56,12 @@ import { applyOutreachLook, buildOutreachBrandKit, outreachArtDirection, lookSta
 /** ★ 0905(5) 헤더 로고 실물 게이트 — 폭 60 이상 · 비율 0.5~8(정사각 아이콘 ~ 가로 워드마크) · 300KB 이하 · 흰 로고 제외 */
 const LOGO_MAX_BYTES = 300_000;
 import { splitSectionsIntoPages } from './dm/dm-page-split';
+// ★ 2026-10-18 템플릿 이식(스위치 OUTREACH_LINE_TEMPLATES · 설계서 docs/2026-10-18-outreach-line-template-design.md)
+import {
+  outreachLineTemplatesEnabled, outreachLineMaterials, outreachSignalOf, pickOutreachLineTemplate, composeOutreachTemplate, outreachBestOf,
+  OUTREACH_PICK_TIMEOUT_MS, type OutreachLineInput, type OutreachLineTemplateRecord, type OutreachBest,
+} from './line-template-outreach';
+import { outreachToneIndustries, outreachToneOf } from './line-template-outreach-bank';
 import { applyOutreachMediaSelection, applySectionOverrides, type OutreachMediaSelection, type SectionOverride } from './sales-outreach-review';
 import { kstDateTag } from './ai-credit-calc';
 import {
@@ -2899,6 +2905,55 @@ export interface ProduceDmInput {
   eventSlices?: EventSliceMaterial | null;
   /** ★ v4-3 홈 상단 배너(brand_profile.heroBanners · 원 URL) — 사본은 갤러리에서 srcUrl 로 되찾아 프로모션 슬라이스 앞자리에 둔다 */
   heroBanners?: HeroBanner[] | null;
+  /** ★ 2026-10-18 브랜드 이메일 = DM 단계가 고른 템플릿 · 문구 번호(이메일 단계 AI 0 · 없으면 표준 조립) */
+  lineTemplate?: OutreachLineTemplateRecord | null;
+}
+
+/** ★ 2026-10-18 템플릿 adapter 입력(재료 · 주색 = 표준 조립과 같은 규칙) */
+function outreachLineInputOf(input: Pick<ProduceDmInput, 'companyName' | 'siteTitle' | 'industry' | 'legal' | 'eventCards' | 'brandColor' | 'ctaLinks' | 'homepageUrl'>, media: OutreachMedia | null): OutreachLineInput {
+  return {
+    companyName: input.companyName, siteTitle: input.siteTitle, industry: input.industry,
+    logoUrl: media?.logo?.url || null, legal: input.legal,
+    // 조건 글(text)은 면허 카드만(표준 재료와 같은 규칙 · 원문 그대로)
+    eventCards: (input.eventCards || []).map((c) => ({ title: c.title, endDate: c.endDate, licensed: c.licensed, text: c.licensed ? c.text || null : null })),
+    primary: accessiblePrimaryOf(input.brandColor) || OUTREACH_NEUTRAL_PRIMARY,
+    shopUrl: galleryLinkOf({ ctaLinks: input.ctaLinks, homepageUrl: input.homepageUrl }),
+  };
+}
+
+/** ★ 2026-10-18 업종 결의 학습 베스트 = 승격 레시피의 템플릿 선택 집계(문구 결 단위 · 조회 실패 = null = 힌트 없이) */
+async function outreachBestOfIndustry(industry: string | null): Promise<OutreachBest | null> {
+  const rows = await listOutreachRecipeTemplates(outreachToneIndustries(outreachToneOf(industry)));
+  return rows ? outreachBestOf(rows) : null;
+}
+
+/**
+ * ★ 2026-10-18 템플릿 조립(스위치 켠 때 · 표준 재료가 있을 때) — DM 단계 = AI 추천(페이지 글 · 업종 → 템플릿 · 칸별 문구 번호 · 계측 호출기)
+ *   · 이메일 단계 = DM 기록 그대로(AI 0). 조립 + 관문. 고를 템플릿 없음 · 관문 실패 · 예외 = null → 호출부는 지금 표준 조립(산출물은 늘 나온다 · 사유는 로그).
+ */
+async function outreachTemplateOf(
+  input: Omit<ProduceDmInput, 'companyId' | 'userId' | 'sectionOverride' | 'presetSections'>, media: OutreachMedia | null,
+  std: NonNullable<ReturnType<typeof standardMaterialsOf>>, channel: 'DM' | 'EMAIL', record: OutreachLineTemplateRecord | null,
+): Promise<{ sections: Section[]; preheader: string; record: OutreachLineTemplateRecord } | null> {
+  try {
+    const lin = outreachLineInputOf(input, media);
+    const m = outreachLineMaterials(lin, std, Date.now());
+    const signal = outreachSignalOf(lin, std);
+    const rec = record || await pickOutreachLineTemplate(
+      { companyName: input.companyName, industry: input.industry, pageText: input.material || '', siteTitle: input.siteTitle }, m, signal, callOutreachAi,
+      OUTREACH_PICK_TIMEOUT_MS, () => outreachBestOfIndustry(input.industry),
+    );
+    if (!rec) return null;
+    const r = composeOutreachTemplate(rec, lin, m, signal, channel, std.hero?.kind ?? null);
+    if (!r.ok) {
+      console.log(`[sales-outreach] 템플릿 관문 실패 → 표준 조립 channel=${channel} company=${input.companyName} template=${rec.id} bad=${r.bad.join(',')}`);
+      return null;
+    }
+    return { sections: r.sections, preheader: r.preheader, record: rec };
+  } catch (err: any) {
+    console.log(`[sales-outreach] 템플릿 조립 예외 → 표준 조립 channel=${channel} company=${input.companyName} err=${err?.message}`);
+    return null;
+  }
 }
 
 /** ★ v4-3 슬라이스 모드에 쓸 슬라이스 = 판정 선별(문서 제외 · 프로모션은 홈 배너 앞자리) · DM·이메일 공용 */
@@ -3113,6 +3168,8 @@ export interface AssembledDm {
   /** ★ 2026-09-09 코드 조립(v5 표준 · AI 0 · 골격 0 · 자동 재조립 0)으로 조립했는가 · 실린 슬라이스 수 · 히어로 종류 · 상품·행사 수 */
   sliceMode: boolean;
   sliceCount: number;
+  /** ★ 2026-10-18 템플릿으로 조립했으면 그 기록(템플릿 · 이유 · 추천 주체 · 칸별 문구 번호) — 이메일 단계가 같은 것으로 이메일을 만든다 · 표준 조립 = null */
+  lineTemplate: OutreachLineTemplateRecord | null;
   stdHero: 'poster' | 'banner' | 'card' | null;
   stdProducts: number;
   stdEvents: number;
@@ -3142,9 +3199,13 @@ export async function assembleOutreachDm(input: ProduceDmInput): Promise<Assembl
   // ★ 2026-09-09 v5 표준 조립(직원 DM 공식 · Harold) — 아웃리치 입구는 재료(상품 또는 행사)가 있으면 AI 골격 대신 코드가 표준 순서로 짠다:
   //   스튜디오 히어로(행사 문구 포스터) → 상품 큐레이션(≤6) → 행사 나열(카드 + 슬라이스 ≤3 + 버튼) → 대표 버튼 → 푸터. preset 으로 엔진에 넘긴다(숨김 override · 페이지만).
   const std = input.entry === 'outreach' && !hasPreset ? standardMaterialsOf(input, media) : null;
-  const sliceSections = std
-    ? composeOutreachStandard({ companyName: input.companyName, logoUrl: media?.logo?.url || null, channel: 'DM', hero: std.hero, products: std.products, events: std.events, ctaLabel: std.ctaLabel, ctaUrl: std.ctaUrl, legal: input.legal })
-    : null;
+  // ★ 2026-10-18 템플릿 이식 — 스위치를 켜면 같은 자리(preset)에 템플릿 조립을 먼저 · 안 되면 표준 조립 그대로
+  const tpl = std && outreachLineTemplatesEnabled() ? await outreachTemplateOf(input, media, std, 'DM', null) : null;
+  const sliceSections = tpl
+    ? tpl.sections
+    : std
+      ? composeOutreachStandard({ companyName: input.companyName, logoUrl: media?.logo?.url || null, channel: 'DM', hero: std.hero, products: std.products, events: std.events, ctaLabel: std.ctaLabel, ctaUrl: std.ctaUrl, legal: input.legal })
+      : null;
 
   // 아웃리치 전용 = 참조 골격(베스트 구성 서빙 · seed) · 엔진에는 순서 힌트만 넘긴다
   let structureRef: OutreachStructureRef | null = null;
@@ -3191,7 +3252,8 @@ export async function assembleOutreachDm(input: ProduceDmInput): Promise<Assembl
     // ★ C1-3 brand_kit은 항상(art_direction 그릇) · 대비 미달이면 색만 뺀다 · logo_url은 어떤 경우에도 없다(불변 11)
     brandKit: buildOutreachBrandKit(primary, input.industry),
     sliceMode: !!sliceSections,
-    sliceCount: sliceSections ? sliceSections.filter((s) => String(s.id).startsWith('so-std-slices')).reduce((n, s) => n + (((s.props as unknown as { images?: unknown[] }).images || []).length), 0) : 0,
+    sliceCount: sliceSections ? sliceSections.filter((s) => String(s.id).startsWith('so-std-slices') || String(s.id).startsWith('so-tpl-slices')).reduce((n, s) => n + (((s.props as unknown as { images?: unknown[] }).images || []).length), 0) : 0,
+    lineTemplate: tpl ? tpl.record : null,
     stdHero: std?.hero?.kind || null,
     stdProducts: std ? std.products.length : 0,
     stdEvents: std ? std.events.length : 0,
@@ -3297,6 +3359,22 @@ export async function produceOutreachBrandEmail(input: Omit<ProduceDmInput, 'com
   const gallery: OutreachFillImage[] = (media?.gallery || []).map((g) => ({ url: g.url, width: g.width, height: g.height, ...(g.alt ? { alt: g.alt } : {}) }));
   // ★ 2026-09-09 v5 표준 조립 — DM 과 같은 재료·같은 순서(헤더 정렬만 다르다) · AI 0 · 룩 0 · 제목 = 첫 행사 제목(없으면 브랜드 소식)
   const std = input.entry === 'outreach' ? standardMaterialsOf(input, media) : null;
+  // ★ 2026-10-18 템플릿 이식 — DM 단계가 템플릿으로 만들었으면 같은 템플릿 · 같은 문구 번호로 이메일(AI 0) · 제목 = 표준 조립과 같은 규칙 · 관문 실패 = 표준 조립
+  const tpl = std && input.lineTemplate && outreachLineTemplatesEnabled() ? await outreachTemplateOf(input, media, std, 'EMAIL', input.lineTemplate) : null;
+  if (std && tpl) {
+    return {
+      sections: tpl.sections,
+      subject: (std.events[0]?.title || `${input.companyName} 소식`).slice(0, 40),
+      preheader: tpl.preheader.slice(0, 60),
+      benefitStripped: 0,
+      exemplarCount: 0,
+      exemplarTotal: 0,
+      look: lookStatsOf(tpl.sections),
+      sliceMode: true,
+      sliceCount: tpl.sections.filter((s) => String(s.id).startsWith('so-tpl-slices')).reduce((n, s) => n + (((s.props as unknown as { images?: unknown[] }).images || []).length), 0),
+      features: { applied: [], removed: [], skipped: [] },
+    };
+  }
   if (std) {
     const sections = composeOutreachStandard({ companyName: input.companyName, logoUrl: media?.logo?.url || null, channel: 'EMAIL', hero: std.hero, products: std.products, events: std.events, ctaLabel: std.ctaLabel, ctaUrl: std.ctaUrl, legal: input.legal });
     return {

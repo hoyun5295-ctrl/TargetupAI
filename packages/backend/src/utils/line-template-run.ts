@@ -129,7 +129,7 @@ export async function draftLineTemplate(input: LineTemplateRunInput, ai: { userI
 
 /** DM 조립 + 품질 관문(걸리면 던짐) */
 export function buildLineTemplateDm(d: LineTemplateDraft, layout: LineLayout): LineDmResult {
-  const r = composeLineDm(d.t, layout, d.materials, d.copy, randomUUID);
+  const r = composeLineDm(d.t, layout, d.materials, d.copy, () => randomUUID());
   const bad = lineTemplateGate(r.sections);
   if (bad.length > 0) throw new LineTemplateError(500, 'LINE_TEMPLATE_GATE', '완성본을 조립하지 못했어요. 크레딧은 쓰지 않았어요.', `${d.t.id}: ${bad.join(' · ')}`);
   return r;
@@ -137,7 +137,7 @@ export function buildLineTemplateDm(d: LineTemplateDraft, layout: LineLayout): L
 
 /** 이메일 조립 + 품질 관문 */
 export function buildLineTemplateEmail(d: LineTemplateDraft): { sections: Section[]; subject: string; preheader: string } {
-  const r = composeLineEmail(d.t, d.materials, d.copy, randomUUID);
+  const r = composeLineEmail(d.t, d.materials, d.copy, () => randomUUID());
   const bad = lineTemplateGate(r.sections);
   if (bad.length > 0) throw new LineTemplateError(500, 'LINE_TEMPLATE_GATE', '완성본을 조립하지 못했어요. 크레딧은 쓰지 않았어요.', `${d.t.id}: ${bad.join(' · ')}`);
   return r;
