@@ -50,7 +50,9 @@ import {
   aiLineCopyKey, maskName, AI_LINE_TYPE_BY_VARIANT, lineMentionsAllCustomers,
 } from '../ai-line';
 import { toLineAudienceFilters } from '../../../../frontend/src/utils/customerFilterBuild';
-import { allCustomersFlag as feAllCustomersFlag, activeFilters as feActiveFilters, newAiLineRun } from '../../../../frontend/src/utils/ai-line';
+import {
+  allCustomersFlag as feAllCustomersFlag, activeFilters as feActiveFilters, newAiLineRun, saveAiLineRun, loadAiLineRun, clearAiLineRuns,
+} from '../../../../frontend/src/utils/ai-line';
 import { InsufficientCreditError } from '../ai-credit-tx';
 import { runLineCompose, runLineIntake, runLineDecorate, runLineRetarget, runLineProceed, runLineAlimtalkMatch, AiLineError, describeLineFilters } from '../../services/ai-line';
 
@@ -412,6 +414,44 @@ describe('② Codex B1 — 보내는 조건 칸 확인 · 알림톡 기본 · �
     expect(feAllCustomersFlag({ ...base, intake: { ...intake, needAudience: false } })).toBe(true);
     const withUntr: any = { filters: { grade: { operator: 'eq', value: 'VIP' }, weird: 1, linebad: 2 }, untranslated: [{ key: 'weird', text: 'x', origin: 'ai' }, { key: 'linebad', text: 'y', origin: 'line' }] };
     expect(Object.keys(feActiveFilters({ ...base, intake: withUntr }))).toEqual(['grade', 'linebad']);
+  });
+});
+
+describe('④ 진행 저장 = 계정별 · 결과 카드 본문 없음(★1019 Harold 실화면)', () => {
+  const mem = () => {
+    const m = new Map<string, string>();
+    return {
+      getItem: (k: string) => m.get(k) ?? null, setItem: (k: string, v: string) => { m.set(k, String(v)); },
+      removeItem: (k: string) => { m.delete(k); }, key: (i: number) => [...m.keys()][i] ?? null, get length() { return m.size; },
+    };
+  };
+  it('계정을 바꾸면 앞 계정 진행이 안 보인다 · 다른 계정 진행은 저장하지 않는다 · 로그아웃 때 지운다', () => {
+    vi.stubGlobal('localStorage', mem());
+    vi.stubGlobal('sessionStorage', mem());
+    try {
+      localStorage.setItem('user', JSON.stringify({ id: 'U-hoyun', company: { id: 'C-A' } }));
+      const run = newAiLineRun('30% 할인행사를 진행할거야');
+      saveAiLineRun(run);
+      expect(loadAiLineRun()?.runId).toBe(run.runId);
+      localStorage.setItem('user', JSON.stringify({ id: 'U-demo', company: { id: 'C-DEMO' } }));
+      expect(loadAiLineRun()).toBeNull();
+      saveAiLineRun(run);
+      expect(loadAiLineRun()).toBeNull();
+      sessionStorage.setItem('ai_line_run_v1', JSON.stringify(run));   // 1019 앞 주인 없는 키
+      sessionStorage.setItem('ai_line_alimtalk_handoff', '{}');
+      clearAiLineRuns();
+      expect(sessionStorage.length).toBe(0);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+  it('로그아웃 · 401 이 진행을 지운다 · 알림톡 넘기기는 같은 계정만 · 카드는 본문을 그리지 않는다', () => {
+    expect(readFileSync(join(FE, 'stores', 'authStore.ts'), 'utf8')).toContain('clearAiLineRuns();');
+    expect(readFileSync(join(FE, 'api', 'client.ts'), 'utf8')).toContain('clearAiLineRuns();');
+    expect(readFileSync(join(FE, 'pages', 'Dashboard.tsx'), 'utf8')).toContain('h.owner !== aiLineOwner()');
+    const cards = readFileSync(join(FE, 'components', 'ai-line', 'LineResultCards.tsx'), 'utf8');
+    expect(cards).not.toContain('<pre');
+    expect(cards).not.toContain('highlightVars');
   });
 });
 

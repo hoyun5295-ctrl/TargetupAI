@@ -42,7 +42,7 @@ import LineIntakeModal from '../components/ai-line/LineIntakeModal';
 import LineResultCards from '../components/ai-line/LineResultCards';
 import {
   type AiLineRun, type AiLineType, type AiLineChannel, aiLineApi, newAiLineRun, saveAiLineRun, loadAiLineRun,
-  activeFilters, allCustomersFlag, audienceOf, spamFp, AI_LINE_ALIMTALK_HANDOFF,
+  activeFilters, allCustomersFlag, audienceOf, spamFp, aiLineOwner, AI_LINE_ALIMTALK_HANDOFF,
 } from '../utils/ai-line';
 // ★ D210+ Phase 2-fix1 (Harold 명시 2026-05-23): 회사 데이터 활용 매트릭스 안내 카드 (3축 100% 보완).
 import AiProposalSummaryModal from '../components/AiProposalSummaryModal';
@@ -1156,7 +1156,7 @@ export default function AiLinePage() {
           onProceedAlimtalk={(next, templateId) => {
             // 알림톡 = 지금 알림톡 발송 창(대시보드)으로 대상 조건 · 고른 템플릿을 넘긴다(대체 문자 · 예약 · 분할은 그 창)
             try {
-              sessionStorage.setItem(AI_LINE_ALIMTALK_HANDOFF, JSON.stringify({ filters: activeFilters(next), allCustomers: allCustomersFlag(next), templateId, at: Date.now() }));
+              sessionStorage.setItem(AI_LINE_ALIMTALK_HANDOFF, JSON.stringify({ filters: activeFilters(next), allCustomers: allCustomersFlag(next), templateId, at: Date.now(), owner: aiLineOwner() }));
             } catch { /* 넘기기 실패 = 대시보드 알림톡 창에서 직접 고른다 */ }
             setIntakeOpen(false);
             setLineRun(null);

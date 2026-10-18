@@ -83,6 +83,8 @@ export interface AiLineSpamChip {
 /** 진행 상태 하나(화면 전체가 이 객체만 본다) */
 export interface AiLineRun {
   runId: string;
+  /** ★ 2026-10-19 만든 계정(aiLineOwner) — 지금 계정과 다르면 읽지도 저장하지도 않는다 */
+  owner: string | null;
   line: string;
   read: AiLineReadResult | null;
   /** 1장(빠진 것) 답 — benefit: null = 혜택 없이 · period_end: null = 기간 없이 */
@@ -113,7 +115,25 @@ export interface AiLineRun {
   picked: AiLineType | null;
 }
 
-const STORE_KEY = 'ai_line_run_v1';
+const STORE_PREFIX = 'ai_line_run_v1';
+
+/**
+ * ★ 2026-10-19 진행 저장의 주인 = 로그인한 회사 · 사용자(Harold 1019 「hoyun 으로 만들고 hanjulai 로 바꿔 로그인했는데 남아 있다」).
+ * 키를 주인별로 나누고(SNS 쓰던 글 sns-draft 와 같은 방식) 로그아웃 · 401 때 clearAiLineRuns 로 지운다.
+ * 주인을 모르면(로그인 정보 없음) 저장 · 읽기를 하지 않는다.
+ */
+export function aiLineOwner(): string | null {
+  try {
+    const u = JSON.parse(localStorage.getItem('user') || 'null');
+    return u?.id ? `${u?.company?.id || '-'}:${u.id}` : null;
+  } catch {
+    return null;
+  }
+}
+function storeKey(): string | null {
+  const o = aiLineOwner();
+  return o ? `${STORE_PREFIX}:${o}` : null;
+}
 
 function newToken(): string {
   const c = (globalThis as { crypto?: Crypto }).crypto;
@@ -122,7 +142,7 @@ function newToken(): string {
 
 export function newAiLineRun(line: string): AiLineRun {
   return {
-    runId: newToken(), line, read: null, facts: null, branch: 'sms', intake: null,
+    runId: newToken(), owner: aiLineOwner(), line, read: null, facts: null, branch: 'sms', intake: null,
     offKeys: [], allChecked: false, liveCount: null, manual: null, audience: null, audienceSet: false, types: [], vars: [], cards: [], edits: {},
     channel: 'LMS', attemptToken: newToken(), spam: {}, picked: null,
   };
@@ -130,18 +150,37 @@ export function newAiLineRun(line: string): AiLineRun {
 
 export function saveAiLineRun(run: AiLineRun | null): void {
   try {
-    if (run) sessionStorage.setItem(STORE_KEY, JSON.stringify(run));
-    else sessionStorage.removeItem(STORE_KEY);
+    sessionStorage.removeItem(STORE_PREFIX);   // 1019 앞의 주인 없는 키(남아 있으면 다른 계정에 보였다)
+    const key = storeKey();
+    if (!key) return;
+    if (run && run.owner !== aiLineOwner()) return;   // 다른 계정의 진행(다른 탭 로그인 등)은 이 계정 키에 쓰지 않는다
+    if (run) sessionStorage.setItem(key, JSON.stringify(run));
+    else sessionStorage.removeItem(key);
   } catch { /* 저장 실패 = 이 탭에서만 이어진다 */ }
+}
+
+/** 로그아웃 · 401 — 이 탭의 AI 한줄로 진행 · 알림톡 넘기기를 전부 지운다(다음 계정에 남지 않게) */
+export function clearAiLineRuns(): void {
+  try {
+    const keys: string[] = [];
+    for (let i = 0; i < sessionStorage.length; i += 1) {
+      const k = sessionStorage.key(i);
+      if (k && (k.startsWith(STORE_PREFIX) || k === AI_LINE_ALIMTALK_HANDOFF)) keys.push(k);
+    }
+    for (const k of keys) sessionStorage.removeItem(k);
+  } catch { /* 무시 */ }
 }
 
 export function loadAiLineRun(): AiLineRun | null {
   try {
-    const raw = sessionStorage.getItem(STORE_KEY);
+    const key = storeKey();
+    if (!key) return null;
+    const raw = sessionStorage.getItem(key);
     if (!raw) return null;
     const r = JSON.parse(raw) as AiLineRun;
     // 1019 앞에 저장된 진행 = 새 칸을 기본값으로 채운다
-    return r && typeof r.runId === 'string' && typeof r.line === 'string' ? { ...r, manual: r.manual ?? null, audience: r.audience ?? null, audienceSet: r.audienceSet === true } : null;
+    if (!r || typeof r.runId !== 'string' || typeof r.line !== 'string' || r.owner !== aiLineOwner()) return null;
+    return { ...r, manual: r.manual ?? null, audience: r.audience ?? null, audienceSet: r.audienceSet === true };
   } catch {
     return null;
   }
@@ -250,4 +289,5 @@ export const aiLineApi = {
 
 /** 알림톡 갈래 넘기기(대시보드 알림톡 발송 창이 받는다) */
 export const AI_LINE_ALIMTALK_HANDOFF = 'ai_line_alimtalk_handoff';
-export interface AiLineAlimtalkHandoff { filters: Record<string, unknown>; allCustomers: boolean; templateId: string | null; at: number }
+/** owner = 넘긴 계정(aiLineOwner) — 받는 쪽이 지금 계정과 같을 때만 연다 */
+export interface AiLineAlimtalkHandoff { filters: Record<string, unknown>; allCustomers: boolean; templateId: string | null; at: number; owner: string | null }

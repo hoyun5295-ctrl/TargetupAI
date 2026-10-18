@@ -2,6 +2,7 @@
  * LineResultCards.tsx — AI 한줄로 결과 카드(★ 2026-10-18 · 설계서 docs/2026-10-18-ai-line-design.md §5-4 · §5-5 · §7)
  *
  * 고른 종류만 카드로 나란히 · 카드 머리 = 추천 배지 + 스팸 검사 칩 · 카드 아래 = 칼럼 더 넣기(1크레딧 · 이 문안 하나) · 직접 고치기 · 이 문안 고르기.
+ * ★ 2026-10-19 카드는 본문을 그리지 않는다(Harold 「문안이 위에도 밑에도 이중으로 있을 필요가 있나」) — 본문은 아래 편집기 한 곳 · 카드를 고르면 아래가 그 문안.
  * 자동 검사: 추천 카드 → 고른 카드 → 나머지 순서로 하나씩(사용자당 줄 1건 · 서버가 busy 면 잠시 뒤 다시) · 카드당 자동 2번(첫 + 고친 뒤 1).
  *   칩은 실제로 나갈 글 · 제목 · 채널 · 광고 · 발신번호 지문에 묶여, 글이 바뀌면 「다시 검사」로 바뀐다. 발송은 막지 않는다.
  * 본문 읽기는 호출부가 넘긴 bodyAt 하나(다듬은 글 우선) · 쓰기는 onEdit / onDecorate 로 호출부가 한다.
@@ -9,7 +10,6 @@
  */
 import { useEffect, useRef, useState } from 'react';
 import { Check, Loader2, PencilLine, ShieldCheck, ShieldAlert, Wand2, Clock3, RotateCw } from 'lucide-react';
-import { highlightVars } from '../../utils/highlightVars';
 import { AI_GENERATE_COSTS } from '../../constants/credit';
 import {
   type AiLineRun, type AiLineType, type AiLineChannel, type AiLineSpamChip, type AiLineColumn,
@@ -177,12 +177,10 @@ export default function LineResultCards(p: LineResultCardsProps) {
                   {view.text}
                 </button>
               </div>
-              {t === 'direct' && !body.trim() ? (
-                <button type="button" onClick={() => p.onEdit(t)} className="w-full h-24 rounded-xl border border-dashed border-slate-300 text-[13px] text-slate-500 hover:border-indigo-400 hover:text-indigo-700">
+              {t === 'direct' && !body.trim() && (
+                <button type="button" onClick={() => p.onEdit(t)} className="w-full h-11 rounded-xl border border-dashed border-slate-300 text-[13px] text-slate-500 hover:border-indigo-400 hover:text-indigo-700">
                   직접 쓰기 · 변수 · 특수문자 넣기
                 </button>
-              ) : (
-                <pre className="whitespace-pre-wrap break-words text-[13px] leading-6 text-slate-700 font-sans max-h-56 overflow-y-auto">{highlightVars(body, 'light')}</pre>
               )}
               <div className="flex flex-wrap gap-1.5 text-[12px]">
                 {t !== 'direct' && unusedCols.length > 0 && (
@@ -197,7 +195,7 @@ export default function LineResultCards(p: LineResultCardsProps) {
                 {picked ? (
                   <span className="h-8 px-2.5 rounded-lg bg-violet-50 text-violet-800 font-semibold inline-flex items-center gap-1 ml-auto"><Check className="w-3.5 h-3.5" />보낼 문안</span>
                 ) : (
-                  <button type="button" onClick={() => p.onPick(t)} className="h-8 px-2.5 rounded-lg border border-violet-300 text-violet-800 font-semibold ml-auto hover:bg-violet-50">이 문안으로 보내기</button>
+                  <button type="button" onClick={() => p.onPick(t)} className="h-8 px-2.5 rounded-lg border border-violet-300 text-violet-800 font-semibold ml-auto hover:bg-violet-50">이 문안 보기 · 보내기</button>
                 )}
               </div>
               {decoOpen === t && (
@@ -230,7 +228,7 @@ export default function LineResultCards(p: LineResultCardsProps) {
         })}
       </div>
       <p className="text-[11.5px] text-slate-500">
-        스팸 칩은 실제로 나가는 글(광고 표기 · 080 · 제목 포함)에 묶여 글이 바뀌면 「다시 검사」로 바뀝니다. 검사는 문자 요금(요금제 무료 문자 먼저) · 같은 글은 24시간 동안 다시 걷지 않아요.{p.channel === 'MMS' ? ' 사진 문자(MMS)는 글만 검사해요.' : ''}{!p.callback ? ' 등록된 회신번호가 있어야 검사해요.' : ''}
+        고른 문안은 아래에서 보고 고쳐요. 스팸 칩은 실제로 나가는 글(광고 표기 · 080 · 제목 포함)에 묶여 글이 바뀌면 「다시 검사」로 바뀝니다. 검사는 문자 요금(요금제 무료 문자 먼저) · 같은 글은 24시간 동안 다시 걷지 않아요.{p.channel === 'MMS' ? ' 사진 문자(MMS)는 글만 검사해요.' : ''}{!p.callback ? ' 등록된 회신번호가 있어야 검사해요.' : ''}
       </p>
     </div>
   );

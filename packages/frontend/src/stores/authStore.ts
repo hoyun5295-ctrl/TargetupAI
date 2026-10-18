@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import { clearSnsDrafts } from '../utils/sns-draft';
+import { clearAiLineRuns } from '../utils/ai-line';
 
 interface User {
   id: string;
@@ -61,6 +62,7 @@ export const useAuthStore = create<AuthState>((set) => ({
     localStorage.removeItem('user');
     // ★ 2026-09-24 SNS 쓰던 글도 지운다(같은 PC 다음 사용자에게 남지 않게 · sns-draft.ts).
     clearSnsDrafts();
+    clearAiLineRuns();   // ★ 2026-10-19 AI 한줄로 진행 · 알림톡 넘기기(같은 탭 다음 계정에 남지 않게 · ai-line.ts)
     set({ user: null, token: null, isAuthenticated: false });
   },
 

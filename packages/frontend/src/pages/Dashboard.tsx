@@ -83,7 +83,7 @@ import { diagnosisApi, type DiagnosisStateDto } from '../components/marketing-di
 import { normalizeAiMessageChannel, type AiMessageChannel } from '../utils/campaign-axis';
 import DashboardActionRow, { type DashboardAction } from '../components/dashboard/DashboardActionRow';   // ★ 2026-10-18 맨 위 버튼 줄
 import { fetchAiOperatorAccess } from '../utils/ai-operator-access';
-import { AI_LINE_ALIMTALK_HANDOFF, type AiLineAlimtalkHandoff } from '../utils/ai-line';   // ★ 2026-10-18 알림톡 갈래 넘기기
+import { AI_LINE_ALIMTALK_HANDOFF, aiLineOwner, type AiLineAlimtalkHandoff } from '../utils/ai-line';   // ★ 2026-10-18 알림톡 갈래 넘기기
 
 /** ★ 2026-10-18 DB 현황 전체 폭 = 한 쪽 카드 수만큼 열(빈 칸 없음 · Tailwind 가 읽는 고정 글자) */
 const DB_CARD_LG_COLS: Record<number, string> = {
@@ -577,7 +577,8 @@ export default function Dashboard() {
       h = JSON.parse(sessionStorage.getItem(AI_LINE_ALIMTALK_HANDOFF) || 'null');
       sessionStorage.removeItem(AI_LINE_ALIMTALK_HANDOFF);
     } catch { h = null; }
-    if (!h || Date.now() - Number(h.at || 0) > 30 * 60 * 1000) {
+    // ★ 2026-10-19 넘긴 계정 = 지금 계정일 때만(계정을 바꾸면 앞 계정 대상으로 열지 않는다)
+    if (!h || !h.owner || h.owner !== aiLineOwner() || Date.now() - Number(h.at || 0) > 30 * 60 * 1000) {
       setToast({ show: true, type: 'error', message: '넘겨받은 알림톡 대상이 없어요. AI 한줄로에서 다시 진행해 주세요.' });
       return;
     }

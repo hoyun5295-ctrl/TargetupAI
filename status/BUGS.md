@@ -58,6 +58,7 @@
 ### 🟡 B-1018-5 1018 AI 한줄로 구현 · Codex 에서 짚은 범위 밖 기존 결함(등재만 · 착수 판단 = Harold님) · 2026-10-19
 - ① (★1019 닫힘 · 버튼 삭제 = D106) 카드 상세 창 「직접 타겟 발송」 버튼이 스위치 꺼진 회사에서 아무것도 열지 않는다: `CardDetailModal` `goDirectSend` 가 `direct_send_prefill_card` · `/?openDirectSend=1` 을 남기지만 이 둘을 읽는 곳이 0곳(grep). 스위치 켠 회사는 이번에 `/ai-line` 으로 접었다.
 - ② 성과 추정(`utils/operator-performance-estimator.ts`)은 브랜드 조건 동의를 넘기지 않는다(추정만 · 발송 아님 · Codex 2R 기록).
+- ③ (1019 · 미검증 · 같은 부류 후보) 로그아웃 때 지우지 않는 세션 저장 키 = 이벤트 DM · 이메일 · 인앱 임시 글(`EventCampaignModal`) · AI 자동제작 결과(`utils/ai-build.ts`) · 인터뷰 임시 글(`journey/map/InterviewModal`) · 진단 마법사(`DiagnosisWizard`) · 넘기기 문장 5개(`journeyObjectivePrefill` 등). 계정별로 나뉘는지는 확인 안 함 · AI 한줄로만 1019 에 고침(§16-7).
 - 경위 = [설계서](../docs/2026-10-18-ai-line-design.md) §15.
 
 ### 🟡 B-1018-4 여정 발송 전 안내의 정지 링크 결함 5(대표 1건만 정지 · 서명 키 기본값 · 토큰이 주소 경로에 · 주소 바탕 변수 · 번호 직접 입력 / 못 멈춰도 성공) · 코드 완료 · 배포 대기 · 2026-10-18
