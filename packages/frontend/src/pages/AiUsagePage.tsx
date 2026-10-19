@@ -456,9 +456,6 @@ export default function AiUsagePage() {
               한도 도달 예측 <strong className="text-amber-700">약 {overview.predicted_days_to_limit}일 후</strong>
             </div>
           )}
-          <div className="text-[10px] text-slate-400 italic mt-3">
-            Data source: AI 호출 기록 + 요금제 월 한도 + 재사용 통계 + 지난달 같은 기간 대비 격차
-          </div>
         </ZoneEmphasis>
       }
     >
@@ -556,9 +553,6 @@ export default function AiUsagePage() {
                 <div className="text-sm text-slate-900 whitespace-pre-wrap leading-relaxed">{naturalResult.answer}</div>
               )}
             </div>
-            <div className="text-[10px] text-slate-400 italic">
-              Data source: AI 호출 기록 30일 + 재사용 통계 + 작업 종류 분포
-            </div>
           </div>
         )}
 
@@ -641,9 +635,6 @@ export default function AiUsagePage() {
             monthlyLimit={overview?.monthly_limit || null}
             loading={forecastLoading}
           />
-          <div className="text-[10px] text-slate-400 italic mt-3">
-            Data source: AI 호출 기록 직전 30일 일별 + 추세로 본 향후 30일 예측 + 일평균 한도 비교
-          </div>
         </div>
 
         {/* ───────── 6. 1-click 액션 3 카드 ───────── */}
@@ -757,7 +748,6 @@ export default function AiUsagePage() {
                         </div>
                       </div>
                     )}
-                    <div className="text-[10px] text-slate-400 italic mt-2">Data source: AI 호출 기록 · 작업 종류</div>
                   </div>
 
                   {/* b. source 상위 10 bar */}
@@ -784,7 +774,6 @@ export default function AiUsagePage() {
                         })()}
                       </div>
                     )}
-                    <div className="text-[10px] text-slate-400 italic mt-2">Data source: AI 호출 기록 · 기능별</div>
                   </div>
 
                   {/* c. 일별 비용 area */}
@@ -821,7 +810,6 @@ export default function AiUsagePage() {
                         <span>{dailyCosts.rows[dailyCosts.rows.length - 1]?.date.slice(5)}</span>
                       </div>
                     )}
-                    <div className="text-[10px] text-slate-400 italic mt-2">Data source: AI 호출 기록 · 일별 비용 합계</div>
                   </div>
                 </div>
               )}
@@ -830,11 +818,7 @@ export default function AiUsagePage() {
         </div>
 
         {/* ───────── 8. Source caption ───────── */}
-        <div className="text-center text-[10px] text-slate-400 italic pt-4">
-          Data source: AI 호출 기록(호출별 비용 · 기능) + 요금제 월 한도 + 재사용 통계 + 묶음 처리 기록
-          <br />
-          AI 모델은 호출 의도에 따라 자동 선택됩니다. 추상 명칭으로 표시 (고급/표준/보조 추론 모드)
-        </div>
+        <div className="text-center text-[10px] text-slate-400 italic pt-4">AI 모델은 호출 의도에 따라 자동 선택됩니다. 추상 명칭으로 표시 (고급/표준/보조 추론 모드)</div>
       </div>
 
       {/* ───────── 모달 ───────── */}

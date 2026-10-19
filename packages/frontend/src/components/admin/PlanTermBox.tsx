@@ -129,7 +129,6 @@ export default function PlanTermBox({ companyId }: { companyId: string }) {
         <div className="flex items-center gap-2 text-sm font-bold text-gray-800">
           <CalendarClock className="w-4 h-4 text-slate-500" />선불 이용 기간
         </div>
-        <span className="text-[10px] text-slate-400 italic">출처: 이용 기간 원장</span>
       </div>
 
       {!st.ready ? (

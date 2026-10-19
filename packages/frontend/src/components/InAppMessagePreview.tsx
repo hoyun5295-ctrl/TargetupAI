@@ -488,9 +488,7 @@ export function InAppMessagePreview(props: InAppMessagePreviewProps) {
       </div>
 
       {!props.captureMode && (
-      <div className="text-[10px] text-slate-400 italic mt-2.5 text-center">
-        Data source: 선택한 형태·내용 그대로 자사몰에 표시됩니다
-      </div>
+      <div className="text-[10px] text-slate-400 italic mt-2.5 text-center">선택한 형태·내용 그대로 자사몰에 표시됩니다</div>
       )}
     </div>
   );
@@ -702,9 +700,7 @@ export function AppInAppPreview({ template, title, body, imageUrl, badge, button
         </div>
       </div>
       {!captureMode && (
-      <div className="text-[10px] text-slate-400 italic mt-2.5 text-center">
-        Data source: 앱 실렌더와 동일 요소(이미지·배지·제목·본문·버튼·정렬) 표시 · 닫기/다시 보지 않기는 앱이 통합 계약을 구현한 빌드에서 동작
-      </div>
+      <div className="text-[10px] text-slate-400 italic mt-2.5 text-center">닫기/다시 보지 않기는 앱이 통합 계약을 구현한 빌드에서 동작</div>
       )}
     </div>
   );

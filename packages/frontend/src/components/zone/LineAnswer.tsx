@@ -114,9 +114,7 @@ export default function LineAnswer({ ask, onPick, onMakeAnyway, onClose, cardCos
               이 문장 그대로 만들기{makeCost ? ` · ${makeCost}` : ''}
             </button>
             {a && (
-              <span className="ml-auto text-[10px] italic text-slate-400">
-                Data source: {scopeText}{at && !Number.isNaN(at.getTime()) ? ` · ${formatKstClock(at)}` : ''}{a.basis.note ? ` · ${a.basis.note}` : ''}
-              </span>
+              <span className="ml-auto text-[10px] italic text-slate-400">{scopeText}{at && !Number.isNaN(at.getTime()) ? ` · ${formatKstClock(at)}` : ''}{a.basis.note ? ` · ${a.basis.note}` : ''}</span>
             )}
           </div>
         )}

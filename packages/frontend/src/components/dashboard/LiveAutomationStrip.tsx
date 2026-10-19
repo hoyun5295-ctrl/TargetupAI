@@ -303,8 +303,6 @@ export default function LiveAutomationStrip({ scheduled, onOpen, onRunningChange
           {shownPartial ? '잠시 뒤 다시 확인해요.' : '여정이나 자동 마케팅을 켜면 지금 무엇이 돌고 있는지 여기에 보여요.'}
         </p>
       ) : null}
-
-      <div className="mt-2.5 text-[10px] italic text-gray-400">Data source: 자동 마케팅 · 여정 · 발송 진행 · 예약 캠페인 · 1분마다 다시 확인</div>
     </section>
   );
 }

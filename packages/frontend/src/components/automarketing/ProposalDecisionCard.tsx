@@ -248,7 +248,7 @@ export default function ProposalDecisionCard({
           </div>
         ))}
       </div>
-      {sourceLabel && <div className="text-[10px] text-slate-400 italic mt-1.5">Data source: {sourceLabel}</div>}
+      {sourceLabel && <div className="text-[10px] text-slate-400 italic mt-1.5">{sourceLabel}</div>}
     </div>
   );
 
@@ -518,7 +518,7 @@ export default function ProposalDecisionCard({
       totalCount={displayTotal}
       fetchPage={targetPage}
       extraColumns={targetInfo?.conditionColumns || null}
-      sourceLabel={`${targetInfo?.basisLabel || '발송 추출과 동일 기준 실측'} · 전체 ${displayTotal.toLocaleString()}명 중 최대 100명 표시 (발송 추출과 동일 기준·순서)`}
+      note={[targetInfo?.basisLabel, `전체 ${displayTotal.toLocaleString()}명 중 최대 100명 표시`].filter(Boolean).join(' · ')}
     />
   );
 

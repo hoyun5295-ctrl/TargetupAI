@@ -172,7 +172,6 @@ export default function PlannerAudiencePicker({ value, onChange, terms, allTimeH
           )}
         </div>
       )}
-      <p className="text-[10px] text-slate-500 italic">Data source: 최근 180일 구매 기록(결제된 주문) · 인원은 발송과 같은 조건으로 센 실조회입니다.</p>
     </div>
   );
 }

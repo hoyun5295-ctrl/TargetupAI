@@ -1621,7 +1621,6 @@ export default function AutoSendFormModal({ campaign, aiPremiumEnabled, onClose,
         criteria={targetConditionSummary || targetDescription || undefined}
         totalCount={targetCount}
         fetchPage={targetListFetchPage}
-        sourceLabel="자동발송 추출 대상 (customer-filter)"
       />
     </>
   );

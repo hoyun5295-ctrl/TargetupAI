@@ -915,7 +915,7 @@ export default function EmailCampaignsPage() {
           onPickMany={startFromLibrary}
         />
         {customerGate.isEmpty && <CustomerDataRequiredBanner className="mb-4" />}
-        <div className="text-[10px] text-slate-400 italic -mt-1">Data source: 회사 Brand Voice 학습 결과 자동 반영 · 구체 혜택은 직접 입력</div>
+        <div className="text-[10px] text-slate-400 italic -mt-1">구체 혜택은 직접 입력</div>
 
         {/* ★ 2026-09-27 만들기 개편 — 내 이메일 = 요약 한 줄 + 상태 거름 칩 + 찾기·정렬 + 받은편지함 모양 카드칩(목업 마 ③) · 누르면 상세 창 · 초안 = 이어서 고치기 */}
         {(() => {
@@ -982,7 +982,6 @@ export default function EmailCampaignsPage() {
               {shown.length > listLimit && (
                 <div className="flex justify-center mt-5"><button type="button" onClick={() => setListLimit((v) => v + 24)} className="h-9 px-4 rounded-lg text-[12.5px] font-semibold text-slate-600 border border-slate-300 hover:bg-slate-100">더 보기 ({(shown.length - listLimit).toLocaleString()})</button></div>
               )}
-              <div className="text-[10px] text-slate-400 italic mt-4">Data source: 이메일 발송 · 오픈 · 클릭 누적 집계</div>
             </section>
           );
         })()}
@@ -1592,7 +1591,6 @@ function InsightModal({ campaign, authHeaders, onClose, onToast }: InsightModalP
                   )}
                 </>
               )}
-              <div className="text-[10px] text-slate-400 italic">Data source: 실측 오픈 · 클릭</div>
             </>
           )}
         </div>
@@ -1761,7 +1759,7 @@ function NonOpenerModal({ campaign, authHeaders, onClose, onToast, onGoSms, onRe
                 )}
               </div>
 
-              <div className="text-[10px] text-slate-400 italic">Data source: 전달된 뒤 열지 않은 받는 사람(수신거부·반송 제외) · 전화 매칭은 고객DB</div>
+              <div className="text-[10px] text-slate-400 italic">전달된 뒤 열지 않은 받는 사람(수신거부·반송 제외)</div>
             </>
           ) : result && phase === 'confirm' ? (
             <>

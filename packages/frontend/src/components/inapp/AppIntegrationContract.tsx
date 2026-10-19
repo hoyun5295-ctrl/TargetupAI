@@ -205,7 +205,6 @@ export function AppInAppContractModal({ open, onClose }: { open: boolean; onClos
               </div>
             </div>
           ))}
-          <div className="text-[10px] text-slate-400 italic">Data source: /api/cdp/inapp/active · /api/cdp/inapp/track (앱 채널 보장 계약)</div>
         </div>
         <div className="px-6 py-3 border-t border-slate-200 flex justify-end">
           <button onClick={onClose} className="px-4 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-sm font-semibold text-white">확인</button>

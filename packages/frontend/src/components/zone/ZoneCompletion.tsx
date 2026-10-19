@@ -80,7 +80,7 @@ export default function ZoneCompletion({ items, onItem, action, onDismiss, check
         <div className="px-3 md:px-4 pb-3 space-y-2">
           {shown.map((it, i) => <FixRow key={i} item={it} onClick={() => onItem(it)} />)}
           {hidden > 0 && <button type="button" onClick={() => setAll(true)} className="text-[12px] font-semibold text-slate-500 hover:text-slate-900">그 밖에 {hidden}</button>}
-          <p className="text-[10px] text-slate-400 italic">Data source: 보내기 전 관문과 같은 기준으로 셉니다 · 혜택 숫자는 적어 주신 것만 씁니다</p>
+          <p className="text-[10px] text-slate-400 italic">보내기 전 관문과 같은 기준으로 셉니다 · 혜택 숫자는 적어 주신 것만 씁니다</p>
         </div>
       )}
     </div>

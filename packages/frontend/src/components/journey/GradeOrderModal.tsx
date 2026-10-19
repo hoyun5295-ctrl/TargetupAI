@@ -263,7 +263,6 @@ export default function GradeOrderModal({ open, onClose, onSaved, token }: Props
                   </li>
                 ))}
               </ol>
-              <p className={light ? "text-[10px] italic text-slate-400" : "text-[10px] italic text-white/30"}>Data source: 회사 고객 데이터에 실제로 있는 등급 값과 인원수</p>
             </>
           )}
 

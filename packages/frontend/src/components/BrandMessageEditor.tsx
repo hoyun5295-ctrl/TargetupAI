@@ -34,7 +34,7 @@ import {
 } from 'lucide-react';
 import BrandMessagePreview from './BrandMessagePreview';
 import AssetLibraryPickerModal from './assets/AssetLibraryPickerModal';
-import { FIELD_CLASS, FIELD_CLASS_INDIGO, PANEL_CLASS, SourceCaption } from './shared/SendWorkspaceShell';
+import { FIELD_CLASS, FIELD_CLASS_INDIGO, PANEL_CLASS } from './shared/SendWorkspaceShell';
 import BrandPickMenu from './brand-send/BrandPickMenu';
 import BrandTypePickerModal, { BrandTypeThumb, brandTypeChips } from './brand-send/BrandTypePickerModal';
 import BrandTemplatePickerModal from './brand-send/BrandTemplatePickerModal';
@@ -1035,7 +1035,6 @@ export default function BrandMessageEditor({ profiles, onSend, sending, accent =
           ) : (
             <BrandMessagePreview {...previewData} />
           )}
-          <SourceCaption>카카오톡 실수신 화면 기준 · 입력값 실시간 반영</SourceCaption>
           {noticeActive && (
             <div className="mt-3 px-3 py-2.5 rounded-xl bg-white ring-1 ring-slate-900/5 shadow-sm text-[11.5px] text-slate-500 leading-relaxed">
               <span className="font-semibold text-violet-700">AI 생성 이미지 안내</span><br />

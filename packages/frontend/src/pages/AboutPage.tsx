@@ -219,7 +219,7 @@ export default function AboutPage() {
       </section>
 
       <footer>
-        <div className="wrap"><span className="src">Data source: 기능 설명 = 앱 안의 기능 안내 창과 같은 원장 · 영상 = 실제 화면 흐름(무음)</span></div>
+        <div className="wrap"><span className="src">영상 = 실제 화면 흐름(무음)</span></div>
       </footer>
 
       {opened?.video && (

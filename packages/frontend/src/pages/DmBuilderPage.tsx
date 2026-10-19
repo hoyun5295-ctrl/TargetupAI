@@ -1306,7 +1306,7 @@ export default function DmBuilderPage() {
               {shown.length > listLimit && (
                 <div className="flex justify-center mt-5"><button type="button" onClick={() => setListLimit((v) => v + 24)} className="h-9 px-4 rounded-lg text-[12.5px] font-semibold text-slate-600 border border-slate-300 hover:bg-slate-100">더 보기 ({(shown.length - listLimit).toLocaleString()})</button></div>
               )}
-              <p className="text-[10px] text-slate-400 italic mt-4">Data source: DM 목록 · 열람 = 공용·개인화 링크 누적 열람 수 · 요약 = 최근 30일</p>
+              <p className="text-[10px] text-slate-400 italic mt-4">열람 = 공용·개인화 링크 누적 열람 수 · 요약 = 최근 30일</p>
             </section>
           );
         })()}

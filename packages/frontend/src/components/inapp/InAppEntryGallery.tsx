@@ -188,7 +188,7 @@ export default function InAppEntryGallery({ channel, onChannel, onPick, onClose,
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">{small.map(card)}</div>
           </section>
         )}
-        <p className="text-[10px] text-slate-400 italic">Data source: 썸네일은 편집기 · 쇼핑몰과 같은 렌더 규칙으로 그린 실제 모양 · 표본 문안과 그림은 가상 브랜드</p>
+        <p className="text-[10px] text-slate-400 italic">표본 문안과 그림은 가상 브랜드</p>
       </div>
     </div>
   );

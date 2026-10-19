@@ -222,9 +222,6 @@ export default function GapFinderModal({ open, onClose, data, opportunities, onC
         </Group>
       </div>
 
-      <div className="px-5 py-3 border-t border-slate-200 text-[10px] text-slate-400 italic">
-        출처: 여정 · 여정 진행 기록 · 고객 데이터 · 구매 원장 집계(진단을 여는 데 AI 호출 없음)
-      </div>
     </JourneyModalShell>
   );
 }

@@ -11,9 +11,9 @@ import {
 } from 'lucide-react';
 import CountUp from './CountUp';
 import DeltaBadge from './DeltaBadge';
-import { ENTER_ONCE, topByCount } from '../../utils/dashboard-live';
+import { ENTER_ONCE, exactTitle, fmtKo, topByCount } from '../../utils/dashboard-live';
 import { formatKstClock } from '../../utils/formatDate';
-import { DASH_CARD, DashCardHead, DashHeadLink, DashSource } from './dash-card';
+import { DASH_CARD, DashCardHead, DashHeadLink } from './dash-card';
 
 export interface DashboardCardData {
   cardId: string;
@@ -62,10 +62,14 @@ const CARD_ACCENT_MAP: Record<string, { iconFrom: string; iconTo: string; iconTe
 const DEFAULT_ACCENT = { iconFrom: 'from-violet-100', iconTo: 'to-violet-50', iconText: 'text-violet-600', ring: 'ring-violet-100' };
 const CARDS_PER_PAGE = 6;
 
-/** 값 표기 = 옛 칸 그대로(rate = 소수 한 자리 · sum 1만 이상 = N만 · 그 밖 = 쉼표) */
+/** 값 표기 = 옛 칸 그대로(rate = 소수 한 자리 · sum 1만 이상 = N만 · 그 밖 = 쉼표)
+ *  ★ 2026-10-20 1억 이상 = 한국식 줄임(412.9억 · Harold 「숫자가 커지면 깨진다」 · 정확한 값 = title) */
+const VALUE_FROM = 100_000_000;
+const fmtBig = fmtKo(VALUE_FROM);
 const formatCardValue = (type: string, v: number) => (type === 'rate' ? v.toFixed(1)
-  : type === 'sum' && v >= 10000 ? `${Math.round(v / 10000).toLocaleString()}만`
-    : v.toLocaleString());
+  : Math.abs(v) >= VALUE_FROM ? fmtBig(v)
+    : type === 'sum' && v >= 10000 ? `${Math.round(v / 10000).toLocaleString()}만`
+      : v.toLocaleString());
 const cardSuffix = (card: DashboardCardData) => (card.type === 'rate' ? '%' : card.type === 'sum' ? '원' : card.cardId === 'active_campaigns' ? '건' : '명');
 
 const ROW = 'w-full flex items-center gap-2 rounded-lg px-1.5 py-1 text-left min-w-0';
@@ -118,14 +122,20 @@ export default function DbStatusCard({
           <span className="block text-[13px] text-gray-700 leading-snug break-keep">{card.label}</span>
           {isDist && top && <span className="block text-[11px] text-gray-400 leading-snug break-keep">1위 {top.label}</span>}
         </span>
-        {!isDist && card.hasTrend && card.delta !== null && card.delta !== undefined && (
-          <span className="shrink-0"><DeltaBadge compact delta={card.delta} deltaPercent={card.deltaPercent} baseline={card.deltaBaseline} suffix={cardSuffix(card)} /></span>
-        )}
-        <span className="shrink-0 text-[13px] font-bold text-gray-900 tabular-nums whitespace-nowrap">
-          {isDist
-            ? (top ? top.count.toLocaleString() : '-')
-            : <CountUp value={numVal} format={(v) => formatCardValue(card.type, v)} decimals={card.type === 'rate' ? 1 : 0} animate={animate} />}
-          {(!isDist || top) && <span className="ml-0.5 text-[10px] font-medium text-gray-400">{isDist ? '명' : cardSuffix(card)}</span>}
+        {/* 값 + 증감(숫자 아래 줄) — 증감이 이름 칸과 한 줄에서 폭을 다투면 큰 % 에 이름이 다섯 줄로 눌렸다(1020 실측) */}
+        <span className="shrink-0 flex flex-col items-end">
+          <span
+            className="text-[13px] font-bold text-gray-900 tabular-nums whitespace-nowrap"
+            title={isDist ? (top ? exactTitle(top.count, VALUE_FROM, '명') : undefined) : card.type === 'rate' ? undefined : exactTitle(numVal, VALUE_FROM, cardSuffix(card))}
+          >
+            {isDist
+              ? (top ? fmtBig(top.count) : '-')
+              : <CountUp value={numVal} format={(v) => formatCardValue(card.type, v)} decimals={card.type === 'rate' ? 1 : 0} animate={animate} />}
+            {(!isDist || top) && <span className="ml-0.5 text-[10px] font-medium text-gray-400">{isDist ? '명' : cardSuffix(card)}</span>}
+          </span>
+          {!isDist && card.hasTrend && card.delta !== null && card.delta !== undefined && (
+            <span className="mt-0.5"><DeltaBadge compact delta={card.delta} deltaPercent={card.deltaPercent} baseline={card.deltaBaseline} suffix={cardSuffix(card)} /></span>
+          )}
         </span>
       </button>
     );
@@ -217,10 +227,7 @@ export default function DbStatusCard({
         right={<DashHeadLink label="상세보기" onClick={onOpenCustomerDb} />}
       />
       {body()}
-      <div className="mt-auto">
-        {normal && totalPages > 1 && paging()}
-        <DashSource>고객 DB 집계{data?.configured ? ' · 관리자가 고른 카드' : ''}</DashSource>
-      </div>
+      {normal && totalPages > 1 && <div className="mt-auto">{paging()}</div>}
     </div>
   );
 }

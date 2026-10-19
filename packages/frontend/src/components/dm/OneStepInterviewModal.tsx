@@ -555,9 +555,7 @@ export default function OneStepInterviewModal({ open, onClose, onGenerated }: {
                 );
               })}
 
-              <p className="text-[10px] text-slate-400 italic pt-1">
-                Data source: 답변은 저장 즉시 서버에 남아 창을 닫아도 이어할 수 있습니다. 상품·매장 정보는 연동몰과 브랜드 설정에서 가져오며, 혜택과 후기는 적어주신 내용만 그대로 사용합니다.
-              </p>
+              <p className="text-[10px] text-slate-400 italic pt-1">답변은 저장 즉시 서버에 남아 창을 닫아도 이어할 수 있습니다. 상품·매장 정보는 연동몰과 브랜드 설정에서 가져오며, 혜택과 후기는 적어주신 내용만 그대로 사용합니다.</p>
             </>
           )}
         </div>

@@ -328,7 +328,7 @@ export default function JourneyMapPage() {
           onNewVersion={(j) => void newVersion(j)}
         />
         <div className={`${OUI_WRAP_FULL} pb-6 ${OUI_SRC}`}>
-          출처: 여정 · 여정 진행 기록(여정마다 최근 30~180일 들어온 고객 · 마지막 칸 시점에 맞춤) · {timeText(data.generatedAt)} 기준
+          {timeText(data.generatedAt)} 기준
           {data.judgedAt ? ` · 구매 확인 예정은 ${timeText(data.judgedAt)} 판정` : ''}
         </div>
       </div>

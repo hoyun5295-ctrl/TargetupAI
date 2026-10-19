@@ -354,7 +354,7 @@ export default function JourneyOptionsEditor({ journey, token, onSaved }: Props)
           )}
         </>
       )}
-      <div className="text-[10px] text-slate-400 italic">Data source: 여정 시작 조건 · 옵션. 고객 복합 조건 편집은 별도.</div>
+      <div className="text-[10px] text-slate-400 italic">고객 복합 조건 편집은 별도.</div>
     </div>
   );
 }

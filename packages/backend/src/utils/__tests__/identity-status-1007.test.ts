@@ -235,13 +235,13 @@ describe('6. 화면', () => {
     expect(dash).toContain("{activeTab === 'identityStatus' && identityStatusAllowed && <IdentityStatusTab />}");
   });
 
-  it('받은 값만 그린다(화면이 번호를 다시 다루지 않는다) · 줄표 · 모델명 · native dialog 0 · 출처 줄', () => {
+  it('받은 값만 그린다(화면이 번호를 다시 다루지 않는다) · 줄표 · 모델명 · native dialog 0 · 출처 줄 0(Harold 1020)', () => {
     expect(tab).toContain("fetch('/api/admin/identity-status'");
     expect(tab).not.toMatch(/replace\(|slice\(\d/);
     const code = tab.replace(/\/\*[\s\S]*?\*\/|\/\/[^\n]*/g, '');
     expect(code).not.toContain('—');
     expect(code).not.toMatch(/Opus|Sonnet|Haiku|GPT|Claude|Anthropic|claude-/);
     expect(code).not.toMatch(/\b(alert|confirm|prompt)\(/);
-    expect(tab).toContain('Data source: ');
+    expect(tab).not.toContain('Data source');
   });
 });

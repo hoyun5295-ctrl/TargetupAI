@@ -172,7 +172,7 @@ function SummaryTable({ summary }: { summary: Summary }) {
           </ul>
         )}
       </div>
-      <p className="mt-2 text-[10px] italic text-gray-400">Data source: 감사 기록 · {fmtMonth(summary.month)} · 집계 {fmtDateTime(summary.generatedAt)}</p>
+      <p className="mt-2 text-[10px] italic text-gray-400">{fmtMonth(summary.month)} · 집계 {fmtDateTime(summary.generatedAt)}</p>
     </div>
   );
 }

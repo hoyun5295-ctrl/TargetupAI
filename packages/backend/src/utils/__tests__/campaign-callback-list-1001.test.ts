@@ -83,7 +83,7 @@ describe('화면 — 두 창이 같은 칸 컴포넌트 · 한 쪽 = 가로 4 ×
     expect(field).toContain('}, [individual, campaignId, refreshKey]);');
     expect(sched).toContain("selectedScheduled.individual_callback === true");
   });
-  it('목록 창: 쪽당 4 × 5 · 검색 · 쪽 이동 · 커스텀 창(native dialog 0) · 데이터 출처 표기', () => {
+  it('목록 창: 쪽당 4 × 5 · 검색 · 쪽 이동 · 커스텀 창(native dialog 0) · 출처 줄 0(Harold 1020)', () => {
     const f = read(resolve(FE, 'components/shared/CampaignCallbackField.tsx'));
     expect(f).toContain('export const CALLBACK_LIST_COLUMNS = 4;');
     expect(f).toContain('export const CALLBACK_LIST_ROWS = 5;');
@@ -91,7 +91,7 @@ describe('화면 — 두 창이 같은 칸 컴포넌트 · 한 쪽 = 가로 4 ×
     expect(f).toContain('/api/v1/results/campaigns/${campaignId}/callbacks');
     expect(f).toMatch(/placeholder="번호 검색/);
     expect(f).toContain('aria-label="다음 쪽"');
-    expect(f).toContain('Data source:');
+    expect(f).not.toContain('Data source');
     expect(f).not.toMatch(/\balert\(|\bconfirm\(|\bprompt\(/);
   });
 });

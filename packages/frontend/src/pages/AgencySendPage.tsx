@@ -443,7 +443,6 @@ export default function AgencySendPage() {
                 )}
               </div>
             )}
-            <p className="mt-3 text-[10px] text-neutral-400 italic">Data source: 대행발송 접수 원장</p>
           </>
         )}
       </div>

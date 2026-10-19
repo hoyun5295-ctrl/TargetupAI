@@ -11,7 +11,7 @@ import {
   buildHubRecs, hubRecAction, hubRecLabel, loadSelfDiagnosis, stashAiLineObjective, stashJourneyObjective,
   type AutoRecommendation, type CompanyHealthDiagnosis, type DiagnosisBrief,
 } from '../../../../frontend/src/lib/hub-recommend';
-import { topByCount } from '../../../../frontend/src/utils/dashboard-live';
+import { exactTitle, fmtKo, topByCount } from '../../../../frontend/src/utils/dashboard-live';
 
 const FRONT = resolve(__dirname, '../../../../frontend/src');
 const read = (rel: string) => readFileSync(resolve(FRONT, rel), 'utf8');
@@ -130,7 +130,8 @@ describe('대시보드 아래 한 줄 4칸 화면 계약', () => {
       expect(src, name).not.toMatch(/\btruncate\b/);
     }
     // DB 값 · 추천 대상 수 = 한 줄
-    expect(db).toContain('shrink-0 text-[13px] font-bold text-gray-900 tabular-nums whitespace-nowrap');
+    expect(db).toContain('<span className="shrink-0 flex flex-col items-end">');
+    expect(db).toContain('className="text-[13px] font-bold text-gray-900 tabular-nums whitespace-nowrap"');
     expect(db).toContain('block text-[13px] text-gray-700 leading-snug break-keep');
     expect(rec).toContain('break-keep line-clamp-2');
   });
@@ -211,10 +212,37 @@ describe('대시보드 아래 한 줄 4칸 화면 계약', () => {
     expect(topByCount([])).toBeUndefined();
   });
 
+  it('큰 숫자 = 칸마다 정한 기준부터 한국식 줄임 · 정확한 값 = title · 돈은 줄이지 않음(Harold 1020)', () => {
+    expect(fmtKo(100_000_000)(1_842_060_000)).toBe('18.4억');
+    expect(fmtKo(100_000_000)(99_999_999)).toBe('99,999,999');
+    expect(fmtKo(10_000_000)(12_848_000)).toBe('1284.8만');
+    expect(exactTitle(1_842_060_000, 100_000_000, '건')).toBe('1,842,060,000건');
+    expect(exactTitle(12_000, 100_000_000, '건')).toBeUndefined();
+    const send = read('components/dashboard/SendStatusCard.tsx');
+    expect(send).toContain('const STAT_FROM = 100_000_000;');
+    expect(send).toContain('const CHANNEL_FROM = 10_000_000;');
+    expect(send).toContain("title={exactTitle(value, STAT_FROM, '건')}");
+    const plan = read('components/dashboard/PlanStatusCard.tsx');
+    expect(plan).toContain('format={fmtCredit}');
+    // 돈은 원 단위 그대로
+    expect(plan).toContain('<CountUp value={monthlyCost} format={fmtInt} animate={intro} />');
+    expect(plan).toContain('{fmtInt(Number(balance.balance) || 0)}');
+    // DB = 1억 이상 줄임 · 증감은 값 아래 줄(이름 칸과 폭 다툼 없음)
+    const db = read('components/dashboard/DbStatusCard.tsx');
+    expect(db).toContain('const VALUE_FROM = 100_000_000;');
+    const valueCol = db.slice(db.indexOf('<span className="shrink-0 flex flex-col items-end">'), db.indexOf('</button>', db.indexOf('<span className="shrink-0 flex flex-col items-end">')));
+    expect(valueCol).toContain('<DeltaBadge compact ');
+    expect(db.indexOf('<DeltaBadge compact ')).toBeGreaterThan(db.indexOf('<span className="shrink-0 flex flex-col items-end">'));
+    // 증감 % 100 이상 = 정수 · 쉼표 · 정확한 값 = title
+    const badge = read('components/dashboard/DeltaBadge.tsx');
+    expect(badge).toContain('Math.abs(deltaPercent) >= 100 ? `${isPositive');
+    expect(badge).toContain('{compact ? <span>{compactPercent ?? formattedDelta}</span> : <>');
+  });
+
   it('증감 배지 compact = 선택값 · 기본 표기 그대로 · 변화 없음 표시에 줄표 0', () => {
     const badge = read('components/dashboard/DeltaBadge.tsx');
     expect(badge).toContain("compact = false }: DeltaBadgeProps)");
-    expect(badge).toContain('{compact ? <span>{formattedPercent ?? formattedDelta}</span> : <>');
+    expect(badge).toContain('{compact ? <span>{compactPercent ?? formattedDelta}</span> : <>');
     expect(badge).toContain('<span>{formattedDelta}</span>');
     expect(badge).toContain("isNegative ? '↓' : '·'");
     expect(db).toContain('<DeltaBadge compact ');

@@ -593,7 +593,7 @@ export default function QuickCampaignPage() {
         )}
 
         <div className="flex items-center justify-between gap-2 flex-wrap pt-1">
-          <p className="text-[10px] text-slate-400 italic">Data source: 넣어 주신 재료 · 서버 견적 · 만든 초안은 {channel === 'email' ? '이메일' : '모바일 DM'} 목록에 저장돼요</p>
+          <p className="text-[10px] text-slate-400 italic">만든 초안은 {channel === 'email' ? '이메일' : '모바일 DM'} 목록에 저장돼요</p>
           <button type="button" onClick={resetAll} disabled={busy} className="inline-flex items-center gap-1 text-[11px] text-slate-400 hover:text-slate-700 disabled:opacity-50"><RotateCcw className="w-3 h-3" />새로 시작</button>
         </div>
         <EventCampaignResumeBar refreshKey={resumeRefresh} onResume={(id) => { setResumeDraftId(id); setSetOpen(true); }} />

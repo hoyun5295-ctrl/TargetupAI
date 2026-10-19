@@ -177,7 +177,7 @@ function CompanyDetailModal({ c, onClose }: { c: CompanyRow; onClose: () => void
         </div>
 
         <div className="px-5 py-3 border-t flex items-center justify-between gap-3 shrink-0">
-          <span className="text-[10px] text-gray-400 italic">Data source: 기능 안내 창 열람 기록(audit_logs) · 시간순 기록은 회사당 최근 30건</span>
+          <span className="text-[10px] text-gray-400 italic">시간순 기록은 회사당 최근 30건</span>
           <button type="button" onClick={onClose} className="px-3.5 py-1.5 border rounded-lg text-sm bg-white hover:bg-gray-50">닫기</button>
         </div>
       </div>
@@ -389,7 +389,7 @@ export default function FeatureInterestTab() {
       )}
       {detail && <CompanyDetailModal c={detail} onClose={() => setDetail(null)} />}
 
-      <p className="px-6 pb-4 text-[10px] italic text-gray-400">Data source: 기능 안내 창 열람 기록(audit_logs) · 요금제 = 지금 기준(고객 화면과 같은 판정) · 기록은 2026-10-06 배포부터</p>
+      <p className="px-6 pb-4 text-[10px] italic text-gray-400">요금제 = 지금 기준(고객 화면과 같은 판정) · 기록은 2026-10-06 배포부터</p>
     </div>
   );
 }

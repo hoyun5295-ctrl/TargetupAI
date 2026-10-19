@@ -419,7 +419,7 @@ export default function CardDetailModal({ card, onClose }: CardDetailModalProps)
                     AI 분석
                   </span>
                 </div>
-                <p className="text-xs text-gray-500 italic">Data source: 고객 DB · 최근 6개월 기준</p>
+                <p className="text-xs text-gray-500 italic">최근 6개월 기준</p>
               </div>
             </div>
             <button

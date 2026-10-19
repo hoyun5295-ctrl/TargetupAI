@@ -83,7 +83,6 @@ signature = hmac.new(WEBHOOK_SECRET.encode(), body.encode(), hashlib.sha256).hex
           </ul>
         </div>
       </div>
-      <div className="text-[10px] text-slate-400 italic mt-3">Data source: POST /api/cdp/webhook/custom 계약</div>
     </div>
   );
 }
@@ -129,7 +128,6 @@ export function CdpCustomDeliveries({ deliveries, loading, onLoad }: CdpCustomDe
           )}
         </div>
       )}
-      <div className="text-[10px] text-slate-400 italic mt-3">Data source: GET /api/cdp/custom/deliveries</div>
     </div>
   );
 }
@@ -178,7 +176,6 @@ val req = Request.Builder().url("https://app.hanjul.ai/api/cdp/ingest")
 client.newCall(req).execute()`}</pre>
         </div>
       </div>
-      <div className="text-[10px] text-slate-400 italic mt-3">Data source: /api/cdp/ingest · /api/cdp/inapp/active (공개키)</div>
     </div>
   );
 }

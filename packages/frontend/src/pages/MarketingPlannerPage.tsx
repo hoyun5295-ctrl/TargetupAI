@@ -416,7 +416,6 @@ export default function MarketingPlannerPage() {
         )}
       {loadState === 'ok' && (
         <div className="mt-auto px-4 py-3 border-t border-slate-100">
-          <p className="text-[10px] text-slate-500 italic">Data source: 행사·채널은 플래너 계획, 상태·마감은 서버 판정, 받는 사람 수는 수신거부를 뺀 고객 데이터 실조회, 발송 결과는 실제 발송 기록입니다. 공휴일은 관보 확정분입니다.</p>
         </div>
       )}
     </div>

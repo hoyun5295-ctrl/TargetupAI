@@ -65,13 +65,18 @@ export default function DeltaBadge({ delta, deltaPercent, baseline, suffix = '',
       ? 'px-2 py-0.5 text-xs gap-1'
       : 'px-1.5 py-0.5 text-[10px] gap-0.5';
 
+  // ★ 2026-10-20 좁은 줄(compact) — 100% 이상은 소수점 없이 쉼표(+28,557%) · 정확한 증감 · % 는 title
+  const compactPercent = deltaPercent === null || deltaPercent === undefined ? null
+    : Math.abs(deltaPercent) >= 100 ? `${isPositive ? '+' : ''}${Math.round(deltaPercent).toLocaleString()}%` : formattedPercent;
+  const title = compact ? `${baselineLabel} · ${formattedDelta}${formattedPercent ? ` (${formattedPercent})` : ''}` : baselineLabel;
+
   return (
     <span
-      title={baselineLabel}
+      title={title}
       className={`inline-flex items-center rounded-md border font-semibold whitespace-nowrap ${colorClass} ${sizeClass}`}
     >
       <span className="text-[9px] leading-none">{icon}</span>
-      {compact ? <span>{formattedPercent ?? formattedDelta}</span> : <>
+      {compact ? <span>{compactPercent ?? formattedDelta}</span> : <>
         <span>{formattedDelta}</span>
         {formattedPercent && <span className="opacity-80">({formattedPercent})</span>}
       </>}

@@ -1252,7 +1252,6 @@ export default function SalesOutreachModal({ onClose, variant = 'modal', initial
                     )}
                   </div>
                 )}
-                <p className="text-[10px] text-gray-400 italic">Data source: 등록된 업체별 자동 제작 진행 기록</p>
               </div>
             );
           })()}
@@ -1390,7 +1389,7 @@ export default function SalesOutreachModal({ onClose, variant = 'modal', initial
                   </label>
                 </div>
               </div>
-              <p className="text-[10px] text-gray-400 italic">Data source: 입력한 홈페이지를 읽고 AI가 분석합니다</p>
+              <p className="text-[10px] text-gray-400 italic">입력한 홈페이지를 읽고 AI가 분석합니다</p>
             </div>
           )}
 
@@ -1640,7 +1639,7 @@ export default function SalesOutreachModal({ onClose, variant = 'modal', initial
                 {!crawlUnavailable && !analyzeUnavailable && (
                   <button onClick={recrawl} disabled={busy} className={smallBtn}><RefreshCw className="w-3.5 h-3.5" /> 다시 읽기</button>
                 )}
-                <span className="text-[10px] text-gray-400 italic">Data source: 홈페이지 원문과 대조해 확인된 행사만 보입니다</span>
+                <span className="text-[10px] text-gray-400 italic">홈페이지 원문과 대조해 확인된 행사만 보입니다</span>
               </div>
             </div>
           )}

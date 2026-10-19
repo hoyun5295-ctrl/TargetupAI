@@ -106,11 +106,6 @@ export default function CreditGauge({
         </button>
       )}
 
-      {!compact && (
-        <p className={`mt-3 text-[10px] italic ${dark ? 'text-white/30' : 'text-slate-300'}`}>
-          Data source: AI 크레딧 잔액 + 크레딧 사용 내역(이번 달 차감 합)
-        </p>
-      )}
     </div>
   );
 }

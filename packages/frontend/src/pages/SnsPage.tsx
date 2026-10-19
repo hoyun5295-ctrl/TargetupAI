@@ -395,7 +395,6 @@ export default function SnsPage() {
         })}
       </div>
 
-      <p className={OUI_SRC}>Data source: 우리 기록과 채널에서 다시 확인한 결과</p>
 
       {!hasActive && (
         <div className={`${OUI_CARD} p-4`}>

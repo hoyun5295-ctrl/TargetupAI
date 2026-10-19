@@ -96,9 +96,6 @@ export default function HubRecommendModal({ diagnosis, brief, recs, useBrief, au
           </span>
           <span className="font-semibold text-indigo-700 shrink-0">자동 마케팅 관리 →</span>
         </button>
-        <p className="mt-3 text-[12px] text-slate-500 italic">
-          Data source: {useBrief ? '매일 오전 일일 분석 (고객 DB 실측 신호 · 누적 학습)' : '회사 실측 신호 (일일 분석 누적 전 기본 추천)'}
-        </p>
       </div>
     </div>,
     document.body,

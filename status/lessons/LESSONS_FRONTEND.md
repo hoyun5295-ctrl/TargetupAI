@@ -267,8 +267,10 @@
 - loading 영역 = `<Loader2 className="animate-spin" />` + "준비 중"
 - disabled 영역 = `disabled:opacity-30 disabled:cursor-not-allowed`
 
-### Source caption 의무 (모든 카드/차트)
-- `<div className="text-[10px] text-slate-400 italic mt-2">Data source: ...</div>` (★0930 밝은 작업대 · 옛 `text-white/30` 은 존 밖 짙은 화면에서만)
+### 출처(Data source) 줄 0 (★2026-10-20 Harold · 옛 「Source caption 의무」 폐지)
+- Harold 「출처를 왜 굳이 표기하냐 · 우리 한줄로 내에서 한줄로 DB 안에서 추출된 거로 보여주는 건데 · 출처 전부 없애」 → 프론트 195줄 삭제(1020).
+- 출처 줄 안에 섞여 있던 **출처가 아닌 안내**(요금 · (광고) 표기 · 데이터 보존 · 숫자의 뜻 · 개인정보 가림)는 지우지 않고 문장만 남긴다 — 1020 삭제 때 단가 안내가 함께 사라질 뻔했다(단축 URL 「발급 1건 = N크레딧」).
+- 기준 시각(「○시 기준」)은 출처가 아니라 숫자가 언제 것인지라 남긴다. 불변식 = `backend/src/utils/__tests__/ui-token-invariants.test.ts` 「화면에 출처 줄 0」.
 
 ---
 
@@ -301,7 +303,7 @@
 | 요약 5 metric + 이전 30일 대비 +/-% (TrendingUp/Down) | 통계 |
 | 자세히 분석 토글 (ChevronDown/Up + 6 차트) | 통계 |
 | AI 존 틀(`ZoneFrame` · 밝은 작업대 + 명령 카드 · 한 줄 입력은 자동화 7메뉴만) | AI 존 모든 페이지 |
-| Source caption (`text-[10px] text-slate-400 italic` + `Data source: …`) | 모든 차트/카드 |
+| 출처(Data source · 「출처:」) 줄 0 — ★1020 Harold(옛 Source caption 의무 폐지) | 모든 화면 |
 | 모바일 반응형 (flex-wrap + md:/lg: 분기 + grid-cols-2 md:grid-cols-4) | 모든 페이지 |
 | ConfirmModal + useToast (native dialog 0건) | 모든 페이지 |
 | 모달 = 흰 판(`MK_MODAL`) · 존 밖과 같이 쓰는 공용 창은 `useLightSurface()` 로 밝은 짝 | 모든 모달 |
@@ -328,6 +330,6 @@
 - [ ] 대량 처리 영역 (5초+) = 로딩 오버레이 + 같은 요청 중복 disabled · **닫기는 잠그지 말고 닫기 = 취소(세대)**(잠그면 응답이 안 올 때 영구히 갇힌다 · 0925) · ★1016 단 **돈 낸 결과가 따로 담기는 창은 닫기 = 숨김**(단계·처리 중·결과를 ModalBase 밖 창 부품 상태에 두고, 처음 상태로 여는 것은 「처음 열 때 · 성공 뒤」뿐 · 취소하면 2크레딧 낸 그림이 사라지고 다시 눌러 409 · 시간 제한은 서버 최악보다 긴 안전판만 · 이미지 스튜디오 DM 삽입 창 Codex 1R)
 - [ ] 레이아웃 CSS 변경 = 빌드 CSS 위에서 여러 폭으로 그려 잰다(수정 전 재현 → 수정 뒤 0건) · 아이콘 크기에 자손 `svg` 선택자 금지
 - [ ] CSS `pointer-events-none + select-none` wrapper 광범위 적용 시 자식 영역 차단 검토
-- [ ] Source caption 모든 카드/차트 명시
+- [ ] 출처(Data source · 「출처:」) 줄 0(★1020 · 안내 문장은 남김)
 - [ ] 박-단어 (박음/박힘/박는/박지/박을) 자가 grep = 0건 (사용자 노출 영역)
 - [ ] AI 임의 혜택 (%/원/쿠폰/무료) 0건 — `[직접 작성해주세요]` placeholder

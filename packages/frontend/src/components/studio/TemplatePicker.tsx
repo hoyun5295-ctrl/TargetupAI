@@ -217,8 +217,8 @@ export default function TemplatePicker({
           </div>
           <p className="text-[10px] text-slate-400 italic mt-3">
             {industryOn
-              ? 'Data source: 브랜드 기본 정보의 업종 기준으로 우리 업종 카테고리를 앞에 놓았어요. 생성 1회 2크레딧.'
-              : 'Data source: 카테고리를 고르면 템플릿 목록으로 이동합니다. 생성 1회 2크레딧.'}
+              ? '브랜드 기본 정보의 업종 기준으로 우리 업종 카테고리를 앞에 놓았어요. 생성 1회 2크레딧.'
+              : '카테고리를 고르면 템플릿 목록으로 이동합니다. 생성 1회 2크레딧.'}
           </p>
         </section>
       )}
@@ -317,7 +317,7 @@ export default function TemplatePicker({
               </button>
             </div>
           )}
-          <p className="text-[10px] text-slate-400 italic mt-3">Data source: 템플릿을 고르면 상품과 문구를 넣는 단계로 이동합니다. 돌아오면 보던 페이지{searchKey ? '와 검색 결과' : ''}가 유지됩니다.</p>
+          <p className="text-[10px] text-slate-400 italic mt-3">템플릿을 고르면 상품과 문구를 넣는 단계로 이동합니다. 돌아오면 보던 페이지{searchKey ? '와 검색 결과' : ''}가 유지됩니다.</p>
         </section>
       )}
     </div>

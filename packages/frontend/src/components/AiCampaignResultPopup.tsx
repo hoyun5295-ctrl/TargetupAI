@@ -263,9 +263,6 @@ export default function AiCampaignResultPopup({
                 </div>
               </div>
 
-              <div className="text-[10px] text-white/30 italic mt-3">
-                Data source: AI 추천 (자율 진단 + customer-filter)
-              </div>
             </div>
 
             {/* 광고성 toggle 라인 — amber 액센트 별도 분리 */}
@@ -423,9 +420,6 @@ export default function AiCampaignResultPopup({
                     <div className="text-xs text-white/70">{step.label}</div>
                   </div>
                 ))}
-              </div>
-              <div className="text-[10px] text-white/30 italic mt-2">
-                Data source: AI 6 sub-agent (자율 진단)
               </div>
             </div>
 
@@ -767,7 +761,6 @@ export default function AiCampaignResultPopup({
         criteria={targetDescription}
         channelLabel={selectedChannel}
         fetchPage={arrayPager(targetRecipients || [])}
-        sourceLabel="AI 캠페인 추출 대상 (customer-filter)"
       />
     </div>
   );

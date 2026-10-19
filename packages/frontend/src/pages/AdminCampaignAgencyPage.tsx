@@ -318,7 +318,6 @@ export default function AdminCampaignAgencyPage() {
             </div>
           )}
         </div>
-        <div className="text-[10px] text-gray-400 italic">Data source: campaign_agency_requests(실시간) · 분석은 선택 업체 단일 스코프</div>
       </div>
 
       {/* ══ 상세 모달 ══ */}
@@ -437,7 +436,6 @@ export default function AdminCampaignAgencyPage() {
                   )}
                 </div>
               )}
-              <div className="text-[10px] text-gray-400 italic">Data source: 접수 원문 + 업체 단일 스코프 분석(실시간)</div>
             </div>
 
             {/* 모달 푸터 */}

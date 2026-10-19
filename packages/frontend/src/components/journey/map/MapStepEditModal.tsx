@@ -265,7 +265,7 @@ export default function MapStepEditModal({ journey, step, generatedAt, onClose, 
                     <div className="mt-0.5 text-[18px] font-semibold tabular-nums text-slate-900">{mapSel.outOfWindow ? <span className="text-[13px] font-normal text-slate-500">측정 창 밖</span> : countText(mapSel.reached, '0')}</div>
                   </div>
                 </div>
-                <p className="mt-1.5 text-[10px] italic text-slate-400">Data source: 여정 진행 기록 · 최근 {journey.windowDays}일 들어온 고객 · {timeText(generatedAt)} 기준</p>
+                <p className="mt-1.5 text-[10px] italic text-slate-400">최근 {journey.windowDays}일 들어온 고객 · {timeText(generatedAt)} 기준</p>
               </div>
             )}
 

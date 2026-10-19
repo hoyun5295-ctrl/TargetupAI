@@ -1,7 +1,8 @@
 /**
  * dash-card.tsx — 대시보드 아래 4칸 공용 껍데기 (★ 2026-10-19 · docs/2026-10-19-dashboard-four-cards-design.md §1)
  *
- * 요금제 · 발송 현황 · DB 현황 · 오늘의 추천이 같은 모서리 · 여백 · 머리 · 출처 줄을 쓴다(칸마다 다시 짜지 않는다).
+ * 요금제 · 발송 현황 · DB 현황 · 오늘의 추천이 같은 모서리 · 여백 · 머리를 쓴다(칸마다 다시 짜지 않는다).
+ * ★ 2026-10-20 출처(Data source) 줄 없음 = Harold 지시(대시보드 다섯 곳 삭제 · 설계서 §8).
  * 칸 높이는 대시보드 격자가 같은 줄끼리 맞춘다 → 칸마다 마지막 묶음을 바닥에 붙인다(mt-auto · 남는 높이는 가운데로).
  */
 import type { ReactNode } from 'react';
@@ -30,9 +31,4 @@ export function DashHeadLink({ label, onClick }: { label: string; onClick?: () =
   const cls = 'shrink-0 text-[11px] font-medium text-gray-400 hover:text-green-700 transition-colors whitespace-nowrap';
   const body = <>{label} <span className="text-[10px]">→</span></>;
   return onClick ? <button type="button" onClick={onClick} className={cls}>{body}</button> : <span className={cls}>{body}</span>;
-}
-
-/** 출처 줄(LESSONS_FRONTEND Source caption 의무) */
-export function DashSource({ children }: { children: ReactNode }) {
-  return <div className="pt-2 text-[10px] italic text-gray-400 break-keep">Data source: {children}</div>;
 }

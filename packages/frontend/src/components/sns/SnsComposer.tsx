@@ -1256,11 +1256,6 @@ ${req.text}` : req.text);
             </ul>
           );
         })()}
-        {selected.length > 0 && (
-          <p className={`${OUI_SRC} mt-2.5`}>
-            Data source: 채널 규격은 각 채널이 알려준 값
-          </p>
-        )}
       </div>
 
       {/* 3. 글 · 태그 — 반반(좁은 화면은 글 → 태그) */}

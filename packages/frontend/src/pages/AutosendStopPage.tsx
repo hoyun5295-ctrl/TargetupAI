@@ -127,7 +127,6 @@ export default function AutosendStopPage() {
                   <p className="flex items-center gap-1.5 text-[11.5px] text-slate-500 mb-1.5"><MessageSquare className="w-3.5 h-3.5" />나갈 문안</p>
                   <p className="whitespace-pre-wrap break-words">{view.body}</p>
                 </div>
-                <p className="mt-2 text-[10px] text-slate-400 italic">Data source: 자동마케팅 회차 기록 · 지금 기준</p>
               </div>
             )}
           </div>

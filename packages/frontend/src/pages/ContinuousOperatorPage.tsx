@@ -692,7 +692,6 @@ export default function ContinuousOperatorPage() {
               <ZoneStatStrip
                 title="최근 30일 성과"
                 icon={TrendingUp}
-                source="발송 후 7일 구매 귀속 · 최근 30일 실측 · 회사별 누적 학습"
                 cells={[
                   { label: '발송 예약', value: `${scheduledCount}건` },
                   { label: '발송 캠페인', value: roi ? `${roi.campaigns.toLocaleString()}건` : '—' },

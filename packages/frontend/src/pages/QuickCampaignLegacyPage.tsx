@@ -328,7 +328,7 @@ export default function QuickCampaignLegacyPage() {
                     <RotateCcw className="w-4 h-4" /> 새로 시작
                   </button>
                 </div>
-                <p className={OUI_SRC}>Data source: 올린 행사 카드 · 서버가 조립한 초안(초안은 모바일 DM 목록에 저장됩니다)</p>
+                <p className={OUI_SRC}>초안은 모바일 DM 목록에 저장됩니다</p>
               </div>
             </div>
             <div className="bg-slate-100 rounded-2xl border border-slate-200 p-3 md:p-4 min-h-[560px]">

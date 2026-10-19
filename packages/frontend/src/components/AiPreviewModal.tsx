@@ -149,9 +149,6 @@ export default function AiPreviewModal(props: AiPreviewModalProps) {
             </div>
           )}
 
-          <div className="text-[10px] text-white/30 italic mt-3 text-center">
-            Data source: AI 미리보기 (sample customer 치환 + buildAdMessageFront)
-          </div>
         </div>
       </div>
     </div>

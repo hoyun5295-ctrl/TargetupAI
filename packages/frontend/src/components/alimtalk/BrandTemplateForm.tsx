@@ -889,9 +889,7 @@ export default function BrandTemplateForm({ mode, template, profiles, onClose, o
             <b className="text-[13px]">미리보기</b>
           </div>
           <Preview form={form} spec={spec} useIntro={useIntro} profileName={profileName} />
-          <div className="text-[10px] text-black/30 italic mt-2 text-right">
-            Data source: 입력값 실시간 반영 (실제 발송본과 서체는 다를 수 있습니다)
-          </div>
+          <div className="text-[10px] text-black/30 italic mt-2 text-right">입력값 실시간 반영 (실제 발송본과 서체는 다를 수 있습니다)</div>
         </div>
       </div>
 

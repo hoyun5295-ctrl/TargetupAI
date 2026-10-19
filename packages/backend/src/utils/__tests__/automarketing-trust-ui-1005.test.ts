@@ -76,9 +76,9 @@ describe('3. 승인 창 — 목업 그대로 · 시작은 서버 판정', () => 
     expect(modal).toContain("값 있는 고객 0명 · 고를 수 없어요");
     expect(modal).toContain('값 있는 고객 ${o.fillCount.toLocaleString()}명');
   });
-  it('0명인 날 = 「없음」 · 보내지 않고 차감 0 · Source caption', () => {
+  it('0명인 날 = 「없음」 · 보내지 않고 차감 0 · 출처 줄 0(Harold 1020)', () => {
     expect(modal).toContain('대상 고객이 없는 날은 보내지 않고, 크레딧도 차감되지 않아요.');
-    expect(modal).toContain('Data source: 고객 DB 실측');
+    expect(modal).not.toContain('Data source');
   });
   it('모델명 0 · native dialog 0', () => {
     for (const src of [modal, page, list]) {

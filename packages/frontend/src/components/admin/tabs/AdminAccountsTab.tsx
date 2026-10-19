@@ -48,7 +48,6 @@ export default function AdminAccountsTab(props: AdminAccountsTabProps) {
                   <div className="px-5 py-3 border-b border-gray-100 flex items-center justify-between gap-3">
                     <div>
                       <h3 className="text-base font-semibold text-gray-900">계정 목록</h3>
-                      <p className="text-[10px] text-gray-500 mt-0.5 italic">Data source: 관리자 계정 원장</p>
                     </div>
                     {/* ★ 2026-10-03 지원팀장은 조회만 — 계정 추가 · 등급 · 중지는 대표만(서버 canWrite) */}
                     {adminAccountsCanWrite ? (
@@ -125,7 +124,6 @@ export default function AdminAccountsTab(props: AdminAccountsTabProps) {
                 <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
                   <div className="px-5 py-3 border-b border-gray-100">
                     <h3 className="text-base font-semibold text-gray-900">권한분류표</h3>
-                    <p className="text-[10px] text-gray-500 mt-0.5 italic">Data source: 권한 판정 컨트롤타워 (화면이 표를 만들지 않는다)</p>
                   </div>
                   <div className="px-5 py-3 flex flex-wrap gap-3 border-b border-gray-100">
                     {adminRoleOptions.map((o) => (
@@ -175,7 +173,6 @@ export default function AdminAccountsTab(props: AdminAccountsTabProps) {
                 <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
                   <div className="px-5 py-3 border-b border-gray-100">
                     <h3 className="text-base font-semibold text-gray-900">접근권한 변경 이력 대장</h3>
-                    <p className="text-[10px] text-gray-500 mt-0.5 italic">Data source: 감사 로그 (admin_role_changed 외)</p>
                   </div>
                   <div className="overflow-x-auto">
                     <table className="w-full text-[13px]">

@@ -20,10 +20,9 @@ const COLS: Record<number, string> = {
 // 마지막 칸이 줄에 혼자 남으면 남는 폭을 채운다(빈 칸 금지)
 const LAST_SPAN: Record<number, string> = { 5: 'col-span-2 md:col-span-1', 7: 'col-span-2' };
 
-export default function ZoneStatStrip({ title, icon: Icon, source, cells, footnote }: {
+export default function ZoneStatStrip({ title, icon: Icon, cells, footnote }: {
   title: string;
   icon?: LucideIcon;
-  source?: string;
   cells: ZoneStatCell[];
   footnote?: ReactNode;
 }) {
@@ -32,7 +31,6 @@ export default function ZoneStatStrip({ title, icon: Icon, source, cells, footno
       <div className="flex flex-wrap items-center gap-x-2 gap-y-1 px-5 pt-3.5 text-[13px] font-semibold text-slate-600">
         {Icon && <span className="w-6 h-6 rounded-md bg-slate-100 text-slate-600 flex items-center justify-center"><Icon className="w-[14px] h-[14px]" /></span>}
         {title}
-        {source && <span className="ml-1 text-[11px] font-normal text-slate-400 italic">출처: {source}</span>}
       </div>
       <div className={`grid ${COLS[Math.min(Math.max(cells.length, 2), 8)]} gap-px bg-slate-100 border-y border-slate-100 mt-3`}>
         {cells.map((c, i) => (

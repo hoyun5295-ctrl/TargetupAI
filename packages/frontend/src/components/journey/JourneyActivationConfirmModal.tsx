@@ -318,9 +318,6 @@ export default function JourneyActivationConfirmModal({
                   );
                 })}
               </div>
-              <div className="text-[10px] text-slate-400 italic mt-3">
-                Data source: 여정 자동 검증 엔진
-              </div>
             </div>
           )}
 
@@ -424,9 +421,6 @@ export default function JourneyActivationConfirmModal({
                 </div>
               </div>
 
-              <div className="text-[10px] text-slate-400 italic">
-                Data source: 여정 자동 검증 엔진
-              </div>
             </div>
           )}
 
@@ -478,9 +472,6 @@ export default function JourneyActivationConfirmModal({
                     ))}
                   </div>
 
-                  <div className="text-[10px] text-slate-400 italic">
-                    Data source: 여정 자동 검증 엔진
-                  </div>
                 </>
               )}
             </div>
@@ -515,9 +506,6 @@ export default function JourneyActivationConfirmModal({
                   </div>
                 </div>
               )}
-              <div className="text-[10px] text-slate-400 italic">
-                Data source: 고객의 매장 번호 ↔ 등록 발신번호 대조
-              </div>
             </div>
           )}
         </div>

@@ -455,7 +455,6 @@ export default function JourneyStepStudio({
                   ))}
                 </div>
               )}
-              <p className="mt-1.5 text-[10px] italic text-slate-400">Data source: 회사 고객 데이터에 실제로 있는 컬럼만 표시됩니다.</p>
             </div>
           )}
 
@@ -498,7 +497,6 @@ export default function JourneyStepStudio({
                   );
                 })}
               </div>
-              <p className="mt-1.5 text-[10px] italic text-slate-400">Data source: 회사 고객 데이터에 실제로 있는 컬럼만 표시됩니다.</p>
               </>
             )}
           </div>
@@ -550,9 +548,7 @@ export default function JourneyStepStudio({
               <div className="whitespace-pre-wrap break-words text-[13px] leading-relaxed text-slate-700">
                 {sampleCustomer ? previewBody : highlightVars(previewBody)}
               </div>
-              <p className="mt-2 text-[10px] italic text-slate-400">
-                Data source: 저장된 스텝 본문{sampleCustomer ? ' + 추출된 타겟 최상위 고객 1명' : ''}. (광고) 표기와 무료수신거부는 발송할 때 자동으로 붙고, 위 미리보기·바이트에 이미 반영돼 있습니다.
-              </p>
+              <p className="mt-2 text-[10px] italic text-slate-400">(광고) 표기와 무료수신거부는 발송할 때 자동으로 붙고, 위 미리보기·바이트에 이미 반영돼 있습니다.</p>
             </div>
           )}
         </div>

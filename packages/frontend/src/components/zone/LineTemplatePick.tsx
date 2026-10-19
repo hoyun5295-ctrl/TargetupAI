@@ -200,7 +200,6 @@ export default function LineTemplatePick({ list, ranks, chosen, layout, channel,
           })}
         </div>
       </div>
-      <p className="text-[10px] text-slate-400 italic">Data source: 템플릿 원장 · 한 줄 추천 규칙(입력한 한 줄의 낱말) · 예시 = 가상 브랜드 재료</p>
       <LineTemplateZoom open={zoom} onClose={() => setZoom(false)} id={t.id} channel={channel} layout={layout} label={t.label} />
     </div>
   );

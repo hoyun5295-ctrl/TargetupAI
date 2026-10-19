@@ -256,7 +256,7 @@ export default function JourneyDiagnosisPanel({ open, onDrafted, onBusyChange }:
           {busy ? (progress || '만드는 중') : confirming ? '그대로 만들기' : '추천대로 초안 만들기'}
         </button>
       </div>
-      <p className="mt-2 text-[10px] italic text-slate-400">Data source: {diag.source} · {new Date(diag.computedAt).toLocaleString('ko-KR', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })} 계산</p>
+      <p className="mt-2 text-[10px] italic text-slate-400">{diag.rhythm ? `${diag.source} · ` : ''}{new Date(diag.computedAt).toLocaleString('ko-KR', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })} 계산</p>
     </section>
   );
 }

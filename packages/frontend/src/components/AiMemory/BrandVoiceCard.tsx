@@ -546,9 +546,7 @@ export default function BrandVoiceCard({ apiBase, token, onToast, onConfirm }: B
               </div>
 
               {guidelineUpdatedAt && (
-                <div className="mt-3 text-[10px] text-slate-400 italic">
-                  Data source: 회사 대표 문안 {messages.length}건 + AI 자동 추출 · 마지막 갱신: {new Date(guidelineUpdatedAt).toLocaleString('ko-KR')}
-                </div>
+                <div className="mt-3 text-[10px] text-slate-400 italic">마지막 갱신: {new Date(guidelineUpdatedAt).toLocaleString('ko-KR')}</div>
               )}
                     </div>
                     {/* ★ 2026-07-09 (Harold): 초기화 + 저장 footer. 초기화=가이드라인 삭제(대표 문안 유지→재추출 가능). 저장='직접 정정' 편집분 반영. */}

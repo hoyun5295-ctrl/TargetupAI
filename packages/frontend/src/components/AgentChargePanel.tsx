@@ -831,7 +831,6 @@ export default function AgentChargePanel({ onPendingOrdersChange }: AgentChargeP
             </button>
           </div>
         )}
-        <p className="mt-1.5 text-[10px] italic text-gray-300">Data source: 발송 게이트웨이 충전 원장 실시간 조회 (저장 없음)</p>
       </div>
     </div>
   );

@@ -229,7 +229,6 @@ export default function MarketingCalendarPage() {
               AI로 1년 설계하기
             </button>
             {error && <div className="mt-4 text-xs text-rose-700">{error}</div>}
-            <div className="mt-4 text-[10px] text-slate-400 italic">Data source: 회사 업종·브랜드·고객 규모 + 한국 시즌 달력</div>
           </div>
         )}
 

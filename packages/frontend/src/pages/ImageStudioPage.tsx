@@ -257,7 +257,7 @@ export default function ImageStudioPage() {
           </button>
         ))}
       </div>
-      <p className="text-[10px] text-slate-400 italic mt-2">Data source: 소재를 클릭하면 인앱·DM·이메일로 바로 만들거나 MMS로 변환할 수 있어요.</p>
+      <p className="text-[10px] text-slate-400 italic mt-2">소재를 클릭하면 인앱·DM·이메일로 바로 만들거나 MMS로 변환할 수 있어요.</p>
     </section>
   ) : null;
 
@@ -368,7 +368,7 @@ export default function ImageStudioPage() {
                 </div>
               ))}
             </div>
-            <p className="text-[10px] text-slate-400 italic">Data source: 생성 약 30초 · 저장하지 않은 결과는 이 화면을 떠나면 볼 수 없어요(7일 뒤 자동 삭제) · MMS는 발송 시 첨부 창에서 자동 변환</p>
+            <p className="text-[10px] text-slate-400 italic">생성 약 30초 · 저장하지 않은 결과는 이 화면을 떠나면 볼 수 없어요(7일 뒤 자동 삭제) · MMS는 발송 시 첨부 창에서 자동 변환</p>
           </section>
         )}
       </div>

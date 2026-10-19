@@ -432,9 +432,6 @@ export default function AiCampaignSendModal({
                 </div>
               </div>
 
-              <div className="text-[10px] text-white/30 italic">
-                Data source: AI 추천 (자율 진단 + 발송 흐름)
-              </div>
             </div>
           </div>
         </div>

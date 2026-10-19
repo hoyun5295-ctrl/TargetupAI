@@ -163,7 +163,7 @@ export default function PlannerConfirmPage() {
         )}
         <ConfirmTimeline view={view} mode="phone" />
         <div className="space-y-1.5">
-          <p className="text-[10px] text-neutral-500 italic">Data source: {view.dataSource}</p>
+          <p className="text-[10px] text-neutral-500 italic">{view.dataSource}</p>
           {!state.member && footer}
         </div>
       </div>

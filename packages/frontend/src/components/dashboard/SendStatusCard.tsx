@@ -5,7 +5,14 @@
  * 총 사용금액 · 잔액 현황 링크 · 에이전트 발송 잔액은 요금제 칸으로 옮겼다(돈은 한 칸 · Harold 1019).
  */
 import CountUp from './CountUp';
-import { DASH_CARD, DashCardHead, DashSource, fmtInt } from './dash-card';
+import { DASH_CARD, DashCardHead } from './dash-card';
+import { exactTitle, fmtKo } from '../../utils/dashboard-live';
+
+/** 줄이는 기준(1020 실측 · 300px 칸) — 2×2 숫자 칸 = 1억 · 채널 칸(이름 + 숫자 한 줄) = 1천만 */
+const STAT_FROM = 100_000_000;
+const CHANNEL_FROM = 10_000_000;
+const fmtStat = fmtKo(STAT_FROM);
+const fmtChannel = fmtKo(CHANNEL_FROM);
 
 export interface SendCardStats {
   monthly_total: number;
@@ -20,8 +27,8 @@ export interface SendCardStats {
 
 export default function SendStatusCard({ stats, intro, enterClass }: { stats: SendCardStats | null; intro: boolean; enterClass: string }) {
   const stat = (value: number, label: string, box: string, tone: string) => (
-    <div className={`text-center px-2 py-2.5 rounded-lg min-w-0 ${box}`}>
-      <div className={`text-base font-bold tabular-nums leading-tight whitespace-nowrap ${tone}`}><CountUp value={value} format={fmtInt} animate={intro} /></div>
+    <div className={`text-center px-2 py-2.5 rounded-lg min-w-0 ${box}`} title={exactTitle(value, STAT_FROM, '건')}>
+      <div className={`text-base font-bold tabular-nums leading-tight whitespace-nowrap ${tone}`}><CountUp value={value} format={fmtStat} animate={intro} /></div>
       <div className="text-[11px] text-gray-400 mt-0.5">{label}</div>
     </div>
   );
@@ -47,14 +54,11 @@ export default function SendStatusCard({ stats, intro, enterClass }: { stats: Se
           { label: 'MMS', value: stats?.mms_sent },
           { label: '카카오', value: stats?.kakao_sent },
         ].map((ch) => (
-          <div key={ch.label} className="flex items-center justify-between gap-1.5 px-2.5 py-2 bg-white border border-gray-100 rounded-lg min-w-0">
+          <div key={ch.label} className="flex items-center justify-between gap-1.5 px-2.5 py-2 bg-white border border-gray-100 rounded-lg min-w-0" title={exactTitle(ch.value || 0, CHANNEL_FROM, '건')}>
             <span className="text-[11px] font-medium text-gray-400 whitespace-nowrap">{ch.label}</span>
-            <span className="text-[13px] font-bold text-gray-700 tabular-nums whitespace-nowrap"><CountUp value={ch.value || 0} format={fmtInt} animate={intro} /></span>
+            <span className="text-[13px] font-bold text-gray-700 tabular-nums whitespace-nowrap"><CountUp value={ch.value || 0} format={fmtChannel} animate={intro} /></span>
           </div>
         ))}
-      </div>
-      <div className="mt-auto">
-        <DashSource>이번 달 발송 결과(전송 · 성공 · 실패 · 채널)</DashSource>
       </div>
     </div>
   );

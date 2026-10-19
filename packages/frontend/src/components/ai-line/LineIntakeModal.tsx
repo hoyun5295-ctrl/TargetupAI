@@ -685,7 +685,6 @@ export default function LineIntakeModal({ open, run, creditTotal, loadError, onR
                       <span className="tabular-nums">{alimtalk || directOnly ? baseCost : total}크레딧</span>
                     </div>
                   </div>
-                  <p className="text-[10px] text-slate-400 italic">Data source: 고객 DB(발송 명단과 같은 조건 · 수신동의 · 매장 범위) · 크레딧 단가표</p>
                 </div>
               </div>
             )}

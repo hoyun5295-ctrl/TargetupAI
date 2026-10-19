@@ -788,7 +788,7 @@ export default function PlannerEventModal({ month, initialDate, initialTemplate 
           </p>
         )}
       </div>
-      <p className="text-[10px] text-slate-500 italic">Data source: 템플릿 원장 · 상품 가격·링크는 만들 때 몰에서 다시 확인합니다. 금액은 서버 견적입니다.</p>
+      <p className="text-[10px] text-slate-500 italic">상품 가격·링크는 만들 때 몰에서 다시 확인합니다.</p>
     </div>
   );
 

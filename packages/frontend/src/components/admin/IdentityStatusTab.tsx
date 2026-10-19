@@ -249,7 +249,7 @@ export default function IdentityStatusTab() {
         </div>
       </div>
 
-      <p className="px-6 pb-4 text-[10px] italic text-gray-400">Data source: 본인인증 이력 · 실패는 감사 기록(최근 30일) · 시행 상태는 지금 서버 설정 · 이름과 번호는 가린 값</p>
+      <p className="px-6 pb-4 text-[10px] italic text-gray-400">실패는 최근 30일 · 이름과 번호는 가린 값</p>
     </div>
   );
 }

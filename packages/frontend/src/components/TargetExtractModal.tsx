@@ -354,9 +354,6 @@ export default function TargetExtractModal({ show, channel, onClose, onApply, al
                 </div>
               )}
 
-              <p className="text-[10px] text-slate-400 italic text-center">
-                Data source: {pickMode === 'direct' ? '화면에서 고른 조건' : 'AI 자연어 변환'} + 검증된 SQL 필터 + 채널 발송 자격
-              </p>
             </div>
           )}
         </div>
@@ -402,7 +399,6 @@ export default function TargetExtractModal({ show, channel, onClose, onApply, al
         channelLabel={CHANNEL_LABEL[channel]}
         totalCount={result.matchCount}
         fetchPage={listFetchPage}
-        sourceLabel="targets/recipients (채널 발송 자격 기준 실조회)"
       />
     )}
     </>

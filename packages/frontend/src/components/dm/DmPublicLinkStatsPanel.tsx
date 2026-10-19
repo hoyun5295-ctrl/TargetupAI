@@ -155,7 +155,7 @@ export default function DmPublicLinkStatsPanel({ dmId }: { dmId: string }) {
       )}
 
       <p className="text-[10.5px] text-slate-400 leading-relaxed">공용 링크는 전체 대상 발송·공유용이라 개인 단위 추적 없이 집계로 보여드려요. 누가 열었는지는 [개인화 발송] 탭(문자 개인화 링크)이 담당합니다.</p>
-      <div className="text-[10px] text-slate-400 italic">Data source: DM 익명 열람(개인화 링크 외 유입 전체) + 한글 주소 클릭 집계 · 링크별 행은 한글 주소 유입만 귀속</div>
+      <div className="text-[10px] text-slate-400 italic">링크별 행은 한글 주소 유입만 귀속</div>
     </div>
   );
 }

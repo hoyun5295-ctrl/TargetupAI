@@ -162,7 +162,7 @@ export default function PlannerRecheckPanel({
         {!view.actions.cancel.ok && reasonLine(view.actions.cancel.reason)}
       </div>
 
-      <p className="text-[10px] text-slate-400 italic">Data source: {view.dataSource}</p>
+      <p className="text-[10px] text-slate-400 italic">{view.dataSource}</p>
 
       <LinkConfirmSheet
         open={ask === 'approve'}

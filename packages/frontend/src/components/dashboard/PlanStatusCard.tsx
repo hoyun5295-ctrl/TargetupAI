@@ -11,7 +11,12 @@ import CountUp from './CountUp';
 import type { PrepaidTermView } from '../PrepaidTermCard';
 import { dailyDbAnalysisCredits } from '../../constants/credit';
 import { formatAgentIdLabel, formatAgentBalance } from '../../utils/agentLabel';
-import { DASH_CARD, DashCardHead, DashHeadLink, DashSource, fmtInt } from './dash-card';
+import { DASH_CARD, DashCardHead, DashHeadLink, fmtInt } from './dash-card';
+import { exactTitle, fmtKo } from '../../utils/dashboard-live';
+
+/** 크레딧 큰 숫자(24px) 줄이는 기준 — 1020 실측 */
+const CREDIT_FROM = 100_000_000;
+const fmtCredit = fmtKo(CREDIT_FROM);
 
 export interface PlanCardInfo {
   plan_name: string;
@@ -106,7 +111,7 @@ export default function PlanStatusCard({
             <span className="ml-auto text-[11px] text-violet-400 group-hover:text-violet-600 transition-colors whitespace-nowrap">사용 이력 →</span>
           </div>
           <div className="mt-1 flex items-end gap-1">
-            <span className="text-2xl font-bold tabular-nums text-violet-700"><CountUp value={Number(creditInfo.total || 0)} format={fmtInt} animate={intro} animateChanges /></span>
+            <span className="text-2xl font-bold tabular-nums text-violet-700" title={exactTitle(Number(creditInfo.total || 0), CREDIT_FROM, '크레딧')}><CountUp value={Number(creditInfo.total || 0)} format={fmtCredit} animate={intro} animateChanges /></span>
             <span className="mb-0.5 text-[11px] text-slate-400">크레딧</span>
           </div>
           {planInfo?.plan_code !== 'FREE' && (
@@ -162,8 +167,6 @@ export default function PlanStatusCard({
           </div>
         ))}
       </div>
-      {/* 출처는 한 줄로(칸마다 길이가 달라 줄 수가 늘면 그만큼 다른 칸이 빈다) */}
-      <DashSource>요금제 · AI 크레딧 · 이번 달 발송 · 잔액</DashSource>
     </div>
   );
 }

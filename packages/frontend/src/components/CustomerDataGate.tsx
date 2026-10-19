@@ -175,7 +175,7 @@ export function CustomerDataRequiredModal({ open, onClose }: { open: boolean; on
 
           <div className="flex items-center gap-1.5 pt-1 text-[11px] text-slate-400">
             <Users className="w-3.5 h-3.5" />
-            <span className="italic">Data source: 고객 DB (현재 등록 고객 0명)</span>
+            <span className="italic">현재 등록 고객 0명</span>
           </div>
         </div>
 

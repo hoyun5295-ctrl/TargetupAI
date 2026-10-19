@@ -348,9 +348,7 @@ export default function JourneyMessageEditModal({
 
         {/* Source caption */}
         <div className="px-4 pt-2 shrink-0">
-          <div className="text-[10px] text-slate-400 italic">
-            Data source: 여정 단계 문안(발송은 켠 시점의 문안 기준 · 미리보기 변수 치환은 샘플 고객)
-          </div>
+          <div className="text-[10px] text-slate-400 italic">발송은 켠 시점의 문안 기준 · 미리보기 변수 치환은 샘플 고객</div>
         </div>
 
         {/* 액션 */}

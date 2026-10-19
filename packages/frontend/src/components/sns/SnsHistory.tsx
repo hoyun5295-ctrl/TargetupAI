@@ -500,7 +500,6 @@ export default function SnsHistory({ specs, accounts, reloadKey, focusPostId, on
         )}
       </div>
 
-      <p className={OUI_SRC}>Data source: 우리 기록과 채널에서 다시 확인한 결과</p>
       <ConfirmModal state={confirmState} onClose={() => setConfirmState(null)} />
       {modalPost && (
         <SnsPostModal

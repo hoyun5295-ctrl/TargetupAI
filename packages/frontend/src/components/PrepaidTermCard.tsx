@@ -254,7 +254,7 @@ export default function PrepaidTermCard({ term, onChanged, onOpenCharge }: {
                 <p className="mt-3 text-[12.5px] text-slate-500">다시 열기는 회사 관리자만 할 수 있습니다.</p>
               )}
               <p className="mt-3 text-[11.5px] text-slate-500">충전한 뒤 1개월 연장을 누르면 바로 다시 열립니다. 충전만으로는 자동으로 열리지 않습니다.</p>
-              <p className="mt-1 text-[10px] text-slate-400 italic">출처: 한줄로 이용 기간 기록 · 금액은 부가세 포함</p>
+              <p className="mt-1 text-[10px] text-slate-400">금액은 부가세 포함</p>
             </div>
           </div>
         </div>
@@ -262,11 +262,10 @@ export default function PrepaidTermCard({ term, onChanged, onOpenCharge }: {
         <ZoneStatStrip
           title={`${term.plan_name} 요금제 이용 기간 · ${formatDate(term.expires_on)}까지`}
           icon={CalendarClock}
-          source="한줄로 이용 기간 기록 · 금액은 부가세 포함"
           cells={[
             { label: '끝나는 날', value: md(term.expires_on), tone: !term.auto_renew && term.days_left <= 7 ? 'amber' : undefined },
             { label: '남은 날', value: term.days_left <= 1 ? '오늘까지' : `${term.days_left}일` },
-            { label: '1개월 요금', value: won(term.price_total) },
+            { label: '1개월 요금(부가세 포함)', value: won(term.price_total) },
             { label: '다음 자동 결제', value: term.auto_renew && term.next_charge_date ? md(term.next_charge_date) : '꺼짐', tone: term.auto_renew ? undefined : 'amber' },
           ]}
           footnote={(
@@ -314,7 +313,6 @@ export default function PrepaidTermCard({ term, onChanged, onOpenCharge }: {
       <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden">
         <div className="px-5 pt-3.5 pb-2 flex items-center justify-between">
           <h3 className="text-[13px] font-semibold text-slate-600">이용 기간 기록</h3>
-          <span className="text-[10px] text-slate-400 italic">출처: 한줄로 이용 기간 기록</span>
         </div>
         {events.length === 0 ? (
           <p className="px-5 pb-4 text-[12.5px] text-slate-400">아직 기록이 없습니다.</p>

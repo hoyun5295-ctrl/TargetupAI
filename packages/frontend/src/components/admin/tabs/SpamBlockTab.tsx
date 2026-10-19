@@ -121,7 +121,6 @@ export default function SpamBlockTab(props: SpamBlockTabProps) {
                 <div className="mt-4 rounded-lg border border-rose-400/40 bg-rose-500/15 px-4 py-3">
                   <div className="text-[10px] font-semibold text-rose-300">차단 시 발송자에게 표시되는 안내</div>
                   <p className="mt-1 text-xs leading-relaxed text-rose-100">{spamBlockNotice}</p>
-                  <div className="mt-1 text-[10px] text-gray-500 italic">Data source: 서버 차단 응답 문구</div>
                 </div>
               )}
             </div>
@@ -254,7 +253,6 @@ export default function SpamBlockTab(props: SpamBlockTabProps) {
             <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
               <div className="px-5 py-3 border-b border-gray-100">
                 <h3 className="text-base font-semibold text-gray-900">탐지 · 차단 결과 로그</h3>
-                <p className="text-[10px] text-gray-500 mt-0.5 italic">Data source: 금칙어 탐지 · 차단 기록</p>
               </div>
               <div className="overflow-x-auto">
                 <table className="w-full text-[13px]">

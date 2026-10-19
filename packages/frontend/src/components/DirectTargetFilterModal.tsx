@@ -821,7 +821,6 @@ export default function DirectTargetFilterModal({ show, onClose, onExtracted, on
                   </button>
                 </div>
 
-                <p className="text-[10px] text-neutral-400 italic text-center">Data source: AI 자연어 변환 + 검증된 필터 빌더 (조건 밖 고객 0)</p>
               </div>
             )}
           </div>

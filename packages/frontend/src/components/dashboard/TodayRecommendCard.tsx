@@ -17,7 +17,7 @@ import {
   buildHubRecs, hubRecAction, hubRecLabel, loadSelfDiagnosis, stashAiLineObjective, stashJourneyObjective,
   type AutoMarketingSummary, type CompanyHealthDiagnosis, type DiagnosisBrief, type HubRec,
 } from '../../lib/hub-recommend';
-import { DASH_CARD, DashCardHead, DashHeadLink, DashSource } from './dash-card';
+import { DASH_CARD, DashCardHead, DashHeadLink } from './dash-card';
 
 export type RecLockReason = 'plan' | 'subscription';
 export type RecViewState = 'loading' | 'ready' | 'error' | 'locked';
@@ -41,12 +41,11 @@ function startLabel(r: HubRec): string {
 }
 
 export function TodayRecommendView({
-  state, lockReason, recs, useBrief, enterClass, onRun, onOpenAll, onLocked, onRetry, onStartLine,
+  state, lockReason, recs, enterClass, onRun, onOpenAll, onLocked, onRetry, onStartLine,
 }: {
   state: RecViewState;
   lockReason: RecLockReason;
   recs: HubRec[];
-  useBrief: boolean;
   enterClass: string;
   onRun: (r: HubRec) => void;
   onOpenAll: () => void;
@@ -136,9 +135,6 @@ export function TodayRecommendView({
         </>
       )}
 
-      <div className="mt-auto">
-        <DashSource>{useBrief ? '매일 오전 일일 분석(우리 고객 데이터)' : '회사 실측 신호(일일 분석이 쌓이기 전 기본 추천)'}</DashSource>
-      </div>
     </div>
   );
 }
@@ -195,7 +191,6 @@ export default function TodayRecommendCard({ ready, subscriptionLocked, revalida
         state={shown}
         lockReason={subscriptionLocked ? 'subscription' : 'plan'}
         recs={built.recs}
-        useBrief={built.useBrief}
         enterClass={enterClass}
         onRun={run}
         onOpenAll={() => setOpen(true)}

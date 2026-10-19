@@ -455,9 +455,7 @@ export default function BestLayoutPage() {
           ) : (
             <p className="mt-3 text-xs text-white/40">아직 참조 골격이 없습니다. [참조 골격 올리기]로 직원 실물을 올려주세요.</p>
           )}
-          <div className="text-[10px] text-white/30 italic mt-2">
-            Data source: 베스트 골격 · 골격은 섹션 순서·통계뿐이며 문구·이미지는 저장하지 않습니다. 켜기 전까지 자동 생성은 지금과 같습니다.
-          </div>
+          <div className="text-[10px] text-white/30 italic mt-2">골격은 섹션 순서·통계뿐이며 문구·이미지는 저장하지 않습니다. 켜기 전까지 자동 생성은 지금과 같습니다.</div>
         </div>
 
         {/* ★ 2026-09-05 실물 예시(AI 영업 학습) 패널 — 마스킹본(브랜드·상품·수치 0)만 그린다 */}
@@ -505,9 +503,7 @@ export default function BestLayoutPage() {
               ))}
             </div>
           )}
-          <div className="text-[10px] text-white/30 italic mt-2">
-            Data source: 베스트 예시 · 저장되는 것은 마스킹된 문구 구성뿐입니다. 이미지·링크·원문 브랜드명은 저장하지 않습니다.
-          </div>
+          <div className="text-[10px] text-white/30 italic mt-2">저장되는 것은 마스킹된 문구 구성뿐입니다. 이미지·링크·원문 브랜드명은 저장하지 않습니다.</div>
         </div>
       </div>
 

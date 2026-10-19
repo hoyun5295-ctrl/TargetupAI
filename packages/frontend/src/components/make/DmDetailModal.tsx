@@ -298,7 +298,7 @@ export default function DmDetailModal({ dm, onClose, onEdit, onClone, onStop, on
           </div>
 
           <div className="flex items-center justify-end gap-2 pt-4 mt-2 border-t border-slate-200 flex-wrap">
-            <span className="mr-auto text-[10px] text-slate-400 italic">Data source: 개인화 링크 열람·클릭 실측 · 구매 = 열람 뒤 7일 안 주문</span>
+            <span className="mr-auto text-[10px] text-slate-400 italic">구매 = 열람 뒤 7일 안 주문</span>
             {s && (track?.segments?.unviewed || 0) > 0 && (
               <button type="button" onClick={onResendUnviewed} className={MK_BTN_OUTLINE}><RefreshCw className="w-4 h-4" />안 본 사람에게 다시 보내기 · {(track!.segments!.unviewed || 0).toLocaleString()}명</button>
             )}

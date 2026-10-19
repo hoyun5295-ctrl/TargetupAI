@@ -456,9 +456,7 @@ export default function BestCopyPage() {
           </div>
         )}
 
-        <div className="text-[10px] text-white/30 italic">
-          Data source: 큐레이션 시드(승인분만). 브랜드보이스 미등록 업체의 문안 생성에만 참고 원문으로 활용됩니다.
-        </div>
+        <div className="text-[10px] text-white/30 italic">브랜드보이스 미등록 업체의 문안 생성에만 참고 원문으로 활용됩니다.</div>
       </div>
 
       {/* 입력/편집 모달 — 좌: 큰 액정(흰 화면·검은 글씨, 실제 문자 느낌) / 우: 기능(업종·채널·광고성·저장) */}

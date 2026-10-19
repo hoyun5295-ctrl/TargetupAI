@@ -364,7 +364,7 @@ export default function SalesOutreachWorkbench({ onClose, onOpenJob, variant = '
           })}
         </div>
       )}
-      <p className="mt-4 text-[10px] text-slate-400 italic">Data source: 업로드 묶음별 자동 제작·확인·발송 기록(서버 집계) · J/K 이동 · O 확인 · X 보류 · Enter 상세</p>
+      <p className="mt-4 text-[10px] text-slate-400 italic">J/K 이동 · O 확인 · X 보류 · Enter 상세</p>
     </div>
   );
 

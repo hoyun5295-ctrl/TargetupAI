@@ -188,7 +188,6 @@ export default function DmKoreanAliasModal({ open, dmId, dmTitle, onClose }: Pro
                 {saving ? (<><Loader2 className="w-4 h-4 animate-spin" /> 저장 중</>) : alias ? '주소 변경하고 복사' : '주소 만들고 복사'}
               </button>
 
-              <div className="text-[10px] text-slate-400 italic">Data source: 한글 주소 클릭 집계(실시간)</div>
             </>
           )}
         </div>

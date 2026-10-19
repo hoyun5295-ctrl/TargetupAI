@@ -535,7 +535,6 @@ export default function PredictiveDashboardPage() {
               ))}
             </div>
           )}
-          <div className="text-[10px] text-slate-400 italic mt-2">Data source: 고객 예측(매일 1회 자동 분석)</div>
         </div>
 
         {/* 블록4: 작은 요약 바 — 한 줄, 각 클릭 → 모달 */}
@@ -961,7 +960,6 @@ function PredictiveDetailModal({
                     );
                   })}
                 </div>
-                <div className="mt-2 text-[10px] text-slate-400 italic">Data source: {explanation.factors.map((f) => f.sourceField).filter((s, i, arr) => arr.indexOf(s) === i).slice(0, 3).join(' · ')}</div>
               </div>
               <div className="grid grid-cols-2 md:grid-cols-4 gap-2 pt-2 border-t border-slate-200">
                 <div className="p-2 bg-white rounded text-center"><div className="text-[9px] text-slate-400">LTV 90일</div><div className="text-xs font-mono text-amber-700">{fmtWon(explanation.predictions.ltv90d)}</div></div>
@@ -995,9 +993,6 @@ function Card({
         {icon}<span>{label}</span>
       </div>
       <div className="text-lg md:text-xl font-semibold font-mono">{value}</div>
-      {source && (
-        <div className="text-[10px] text-slate-400 mt-1 truncate" title={source}>Data source: {source}</div>
-      )}
     </div>
   );
 }

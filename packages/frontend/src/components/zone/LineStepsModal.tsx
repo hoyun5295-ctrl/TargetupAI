@@ -988,7 +988,6 @@ export default function LineStepsModal({ open, channel, state, onClose, onMake }
         </p>
         {short && <p className="text-[12.5px] font-semibold text-rose-600 mt-1.5">크레딧이 부족해요. 충전한 뒤 만들 수 있어요</p>}
       </div>
-      <p className="text-[10px] text-slate-400 italic">Data source: 입력한 한 줄 · 답한 내용 · 우리 몰 상품(만들 때 몰에서 다시 확인){tplMode ? ' · 이벤트 페이지(만들 때 다시 읽어 확인) · 템플릿 원장' : ''} · 회사 설정</p>
     </div>
   );
 

@@ -657,9 +657,6 @@ export default function AiMemoryPage() {
               )}
             </div>
           </div>
-          <div className="text-[10px] text-slate-400 italic mt-3 pl-15">
-            Data source: AI 메모리 5종 자동 누적 (성공 패턴·채널 성과 = 캠페인 클릭 실측 / 고객 인사이트 = 등급 집계 / 브랜드 톤 = 가이드라인 변경 / 컴플라이언스 = 차단·반려) + 회사 admin 직접 입력
-          </div>
         </div>
 
         {/* ───────── 3. 자연어 입력 + 빠른 시작 7 카드 ───────── */}
@@ -765,9 +762,6 @@ export default function AiMemoryPage() {
                 </div>
               </div>
             )}
-            <div className="text-[10px] text-slate-400 italic">
-              Data source: buildMemoryPromptContext (중요도 3 이상 최대 30건 + 시스템 프롬프트 포함)
-            </div>
           </div>
         )}
 
@@ -837,7 +831,6 @@ export default function AiMemoryPage() {
               </div>
             </div>
           )}
-          <div className="text-[10px] text-slate-400 italic mt-4">Data source: AI 메모리 5종 집계</div>
         </div>
 
         {/* ───────── 5. 영향도 top 10 카드 ───────── */}
@@ -870,7 +863,6 @@ export default function AiMemoryPage() {
               ))}
             </div>
           )}
-          <div className="text-[10px] text-slate-400 italic mt-4">Data source: AI 메모리 · 많이 쓴 순 · 중요도 순 10개</div>
         </div>
 
         {/* ───────── 6. 1-click 액션 3 카드 ───────── */}
@@ -967,7 +959,6 @@ export default function AiMemoryPage() {
                         ))}
                       </div>
                     </div>
-                    <div className="text-[10px] text-slate-400 italic mt-2">Data source: AI 메모리 출처별 집계</div>
                   </div>
 
                   {/* b. 월별 누적 line */}
@@ -996,7 +987,6 @@ export default function AiMemoryPage() {
                         })}
                       </div>
                     )}
-                    <div className="text-[10px] text-slate-400 italic mt-2">Data source: AI 메모리 월별 집계</div>
                   </div>
 
                   {/* c. 중요도 histogram */}
@@ -1022,7 +1012,6 @@ export default function AiMemoryPage() {
                         );
                       })}
                     </div>
-                    <div className="text-[10px] text-slate-400 italic mt-2">Data source: AI 메모리 중요도 1~10 분포</div>
                   </div>
 
                   {/* d. 최근 활용 timeline */}
@@ -1050,7 +1039,6 @@ export default function AiMemoryPage() {
                         );
                       })}
                     </div>
-                    <div className="text-[10px] text-slate-400 italic mt-2">Data source: AI 메모리 · 최근에 쓴 순</div>
                   </div>
                 </div>
               )}
@@ -1059,11 +1047,7 @@ export default function AiMemoryPage() {
         </div>
 
         {/* ───────── 8. Source caption ───────── */}
-        <div className="text-center text-[10px] text-slate-400 italic pt-4">
-          Data source: AI 메모리 자동 학습 (성공 패턴·채널 성과 = 캠페인 클릭 실측에서만 / 고객 인사이트 = 등급별 구매·LTV / 브랜드 톤 = 가이드라인 변경 / 컴플라이언스 = 광고 차단·반려) + 회사 admin 직접 입력
-          <br />
-          실측 데이터가 없으면 그 학습은 생성되지 않습니다. AI는 시스템 프롬프트에 중요도 3 이상 학습 최대 30건을 자동 포함합니다. 시간이 지날수록 추천 정확도가 향상됩니다
-        </div>
+        <div className="text-center text-[10px] text-slate-400 italic pt-4">실측 데이터가 없으면 그 학습은 생성되지 않습니다. AI는 시스템 프롬프트에 중요도 3 이상 학습 최대 30건을 자동 포함합니다. 시간이 지날수록 추천 정확도가 향상됩니다</div>
       </div>
 
       {/* ───────── 모달 ───────── */}

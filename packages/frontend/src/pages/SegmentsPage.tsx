@@ -392,12 +392,6 @@ export default function SegmentsPage() {
           </div>
         )}
 
-        {/* Source caption */}
-        {!loading && (
-          <p className="text-[10px] text-slate-400 italic text-center pt-2">
-            Data source: 저장한 세그먼트 + 발송 명단과 같은 조건 계산 + 말로 쓴 조건 변환
-          </p>
-        )}
       </div>
 
       {/* 신규 세그먼트 모달 */}

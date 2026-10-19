@@ -454,9 +454,7 @@ export default function OperatorPreviewModal({
                 </section>
               )}
 
-              <div className="text-[10px] text-slate-400 italic">
-                Data source: 고객 DB 실측(대상 수 · 날짜별 대상 · 칸별 값 있는 고객 수 · 값 예시) · 회사 발송 단가 · 회사 자율 발송 상한{d.copy.mode === 'ai' ? ' · 문안 3안은 AI 생성' : ' · 직접 입력 문안'}{mode === 'new' ? ' (등록 전 미리보기 · 발송 0건)' : ''}
-              </div>
+              <div className="text-[10px] text-slate-400 italic">{d.copy.mode === 'ai' ? '문안 3안은 AI 생성' : '직접 입력 문안'}{mode === 'new' ? ' (등록 전 미리보기 · 발송 0건)' : ''}</div>
             </div>
           )}
         </div>

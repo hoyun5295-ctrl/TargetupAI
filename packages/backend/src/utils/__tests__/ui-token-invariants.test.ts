@@ -8,7 +8,7 @@
  *
  * 이 파일이 잠그는 것 (전부 값 대조 — 오탐 0인 규칙만 둔다)
  *   1. 비활성 투명도는 앱 표준 집합 안의 값만 쓴다.
- *   2. Data source 캡션은 한 벌 클래스만 쓴다(카드·차트 공통 규약).
+ *   2. 화면에 출처(Data source · 「출처:」) 줄 0 — ★2026-10-20 Harold 「출처 전부 없애 · 한줄로 DB 안에서 뽑은 것」(옛 = 캡션 한 벌 클래스 규약).
  *   3. 라이트 페이지에 인라인으로 놓이는 진단 히어로는 배경 알파를 쓰지 않는다.
  *
  * ⛔ **넣지 않은 규칙** — "라이트 표면 컴포넌트에 다크 전제 색 금지"는 정적으로 판별할 수 없다.
@@ -26,9 +26,6 @@ const FRONT_SRC = resolve(__dirname, '../../../../frontend/src');
 /** 앱 표준 비활성 투명도(2026-08-17 실측 분포: 40=247 · 50=171 · 30=105 · 60=4). */
 const ALLOWED_DISABLED_OPACITY = new Set(['30', '40', '50', '60']);
 
-/** Data source 캡션 한 벌 — 전 카드·차트 공통(LESSONS_FRONTEND 톤앤매너 매트릭스). */
-const DATA_SOURCE_CAPTION_CLASS = 'text-[10px] italic text-white/30';
-
 describe('화면 토큰 불변식 (frontend 전수 스캔)', () => {
   it('비활성 투명도는 앱 표준 값만 쓴다 — 표준 밖은 "안 보이는 글씨"가 된다', () => {
     const offenders: string[] = [];
@@ -41,22 +38,17 @@ describe('화면 토큰 불변식 (frontend 전수 스캔)', () => {
   }, SCAN_TIMEOUT_MS);
 
   /**
-   * 값만 본다 — 클래스 순서는 파일마다 다르고 캡션이 prop·변수로 들어가는 형태도 있어
-   * "한 벌 문자열 일치"는 오탐 135건이 났다(실측). 라이트 화면의 회색 캡션(text-slate-400 등)도 정상이다.
-   * 그래서 **흰색 계열을 쓸 때의 명도와 크기**만 강제한다 — 실제로 어긋난 것만 걸린다.
+   * ★ 2026-10-20 Harold 「출처를 왜 굳이 표기하냐 · 한줄로 DB 안에서 추출된 거로 보여주는 건데 · 출처 전부 없애」.
+   * 화면 글(주석 밖)에 「Data source」 · 「출처:」가 다시 생기면 걸린다. 표 머리 「출처」 · 「출처별 분포」 같은 데이터 항목 이름은 콜론이 없어 걸리지 않는다.
    */
-  it('Data source 캡션은 흰색 계열일 때 표준 명도·크기를 지킨다', () => {
+  it('화면에 출처 줄(Data source · 출처:) 0', () => {
     const offenders: string[] = [];
     for (const { rel, src } of scanSources(FRONT_SRC)) {
-      for (const line of src.split('\n')) {
-        if (!line.includes('Data source')) continue;
-        for (const m of line.matchAll(/text-white\/(\d+)/g)) {
-          if (m[1] !== '30') offenders.push(`${rel} :: ${m[0]} (표준 text-white/30)`);
-        }
-        for (const m of line.matchAll(/text-\[([\d.]+)px\]/g)) {
-          if (m[1] !== '10') offenders.push(`${rel} :: ${m[0]} (표준 text-[10px])`);
-        }
-      }
+      const code = src.replace(/\/\*[\s\S]*?\*\//g, '');
+      code.split('\n').forEach((line, i) => {
+        if (/^\s*\/\//.test(line)) return;
+        if (/Data source/i.test(line) || /출처\s*:/.test(line)) offenders.push(`${rel}:${i + 1}`);
+      });
     }
     expect(offenders).toEqual([]);
   }, SCAN_TIMEOUT_MS);

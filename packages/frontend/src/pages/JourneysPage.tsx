@@ -1936,7 +1936,6 @@ export default function JourneysPage() {
                           나중에
                         </button>
                       </div>
-                      <div className="mt-2 text-[10px] italic text-slate-400">Data source: 방금 저장한 여정 · 활성 여정 목록</div>
                     </div>
                   </div>
                 </div>
@@ -2009,7 +2008,6 @@ export default function JourneysPage() {
                           >
                             <Sparkles className="w-3.5 h-3.5" /> 1클릭 생성
                           </button>
-                          <div className="text-[10px] text-slate-400 italic mt-2">Data source: 고객 · 여정 실시간 집계</div>
                         </div>
                       );
                     })}
@@ -2421,7 +2419,6 @@ export default function JourneysPage() {
                                 <div className="flex items-center gap-2 mb-1">
                                   <Activity className="w-4 h-4 text-violet-700" />
                                   <span className="text-sm font-semibold text-violet-900">칸별 흐름</span>
-                                  <span className="text-[11px] text-slate-400 ml-auto">출처: 칸별 발송 기록</span>
                                 </div>
                                 {statsMap[j.id].map((st) => (
                                   <div key={st.stepId} className="space-y-1">
@@ -2530,7 +2527,6 @@ export default function JourneysPage() {
                                   {samplesTotalMap[j.id] && (
                                     <span className="text-[10px] text-cyan-800">전체 {samplesTotalMap[j.id].total.toLocaleString()}명{samplesTotalMap[j.id].capped ? ' 이상' : ''} 중 {samplesMap[j.id].length}명</span>
                                   )}
-                                  <span className="text-[10px] text-slate-400 italic ml-auto">Data source: 고객 DB + 예측</span>
                                 </div>
                                 <div className="flex flex-wrap gap-1">
                                   {samplesMap[j.id].map((sample) => (
@@ -3793,7 +3789,7 @@ export default function JourneysPage() {
                     </button>
                     <button onClick={() => setRefining(null)} className="px-3 py-2 text-xs text-slate-400 hover:text-slate-600">그대로 두기</button>
                   </div>
-                  <p className="text-[10px] italic text-slate-400">Data source: 지금 스텝 본문과 AI가 다듬은 안. 바이트는 (광고) 표기 포함 기준입니다.</p>
+                  <p className="text-[10px] italic text-slate-400">바이트는 (광고) 표기 포함 기준입니다.</p>
                 </div>
               )}
             </div>
@@ -3932,7 +3928,7 @@ export default function JourneysPage() {
         totalCount={targetInfo?.displayTotal ?? null}
         fetchPage={targetModal ? journeyTargetPage : null}
         extraColumns={targetInfo?.conditionColumns || null}
-        sourceLabel={`${targetInfo?.basisLabel || '발송 추출과 동일 기준 실측'} · 전체 ${(targetInfo?.displayTotal ?? 0).toLocaleString()}${targetInfo?.capped ? '+' : ''}명 중 최대 100명 표시`}
+        note={[targetInfo?.basisLabel, `전체 ${(targetInfo?.displayTotal ?? 0).toLocaleString()}${targetInfo?.capped ? '+' : ''}명 중 최대 100명 표시`].filter(Boolean).join(' · ')}
       />
 
       {/* 정보 알림 — 버튼 클릭 모달화 (거래 통지 알림톡 빌더). 인라인 페이지 교체 폐기 → 닫으면 메인 그대로 */}

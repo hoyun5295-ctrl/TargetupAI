@@ -153,7 +153,6 @@ export default function JourneyPausePage() {
                 {info.messageSubject && <p className="font-extrabold mb-1">{info.messageSubject}</p>}
                 <p className="whitespace-pre-wrap break-words">{info.messageBody}</p>
               </div>
-              <p className="mt-2 text-[10px] text-slate-400 italic">Data source: 여정 발송 기록 · 지금 기준 실조회</p>
             </div>
           </div>
 

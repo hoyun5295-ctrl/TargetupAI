@@ -330,7 +330,7 @@ export default function AgencySendLedgerPanel() {
             unit="건"
             accent="indigo"
           />
-          <p className="mt-3 text-[10px] text-gray-400 italic">Data source: 대행발송 접수 원장 (최근 200건)</p>
+          <p className="mt-3 text-[10px] text-gray-400 italic">최근 200건</p>
         </div>
       )}
 

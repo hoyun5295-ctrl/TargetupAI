@@ -55,6 +55,12 @@
 
 ## 2) 활성 버그
 
+### 🔵 B-1020-1 1020 출처 삭제 · 큰 숫자에서 짚은 범위 밖(기록만 · 착수 판단 = Harold님) · 2026-10-20
+- `backend/src/utils/performance-explainer.ts` 시스템 문구는 「최근 30일」인데 쓰는 집계 `aggregateCampaignPerformance` 기본은 3개월(성과 AI 자율 진단).
+- 화면에 날것 식별자(출처 줄이 아니라 이번 범위 밖): `pages/PerformancePage.tsx` 매출 창 「recent_purchase_date 갱신」 · 퍼널 「(page_view)」 같은 이벤트 이름 · `components/journey/JourneyActionConfirmModal.tsx` 「journey_step_logs」.
+- `backend/src/utils/journey-opportunities.ts` 589 문구의 「최근 730일」은 상수 `PRODUCT_PERIOD_LOOKBACK_DAYS` 가 아니라 글자로 박혀 있다(값이 바뀌면 문구만 남는다).
+- 렌더하지 않는 `source` 속성 잔존(화면 표시 0): `components/cdp/CdpAnalyticsPanels.tsx` ChartCard · `pages/PredictiveDashboardPage.tsx` Card · HistogramCard.
+
 ### 🔵 B-1019-1 1019 버그 정리 Codex 라운드에서 짚은 범위 밖(기록만 · 착수 판단 = Harold님) · 2026-10-19
 - `frontend/src/stores/dmBuilderStore.ts` save() 저장 판 재시도 근처(Codex F2 [범위 밖] · 내용 미기재) · `backend/src/utils/line-template-copy.ts` `lineCopyGroundText`(Codex F2 [범위 밖] · 상품 이름이 근거 글에 그대로 들어간다 · 내용 미기재).
 - `backend/src/utils/dm/dm-interaction.ts` 선착순 총 수량 계산 줄(Codex G2 [범위 밖] · 내용 미기재) · 1019 확인 = `current_remaining` 은 쓰는 곳 0 · 정적 렌더의 「남은 수량」은 실제 참여 수가 아니라 총 수량을 보인다(서버는 수량을 지킨다 · 화면 표시만 정적).

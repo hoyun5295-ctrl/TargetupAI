@@ -129,7 +129,6 @@ export default function GeoAccessTab(props: GeoAccessTabProps) {
                 <div className="mt-1.5 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-[11px] leading-relaxed text-rose-800">
                   {geoStatus?.blockNotice || '차단 안내 문구를 불러오지 못했습니다'}
                 </div>
-                <div className="mt-1 text-[10px] text-gray-400 italic">Data source: 서버 차단 응답 문구</div>
               </div>
             </div>
 
@@ -249,7 +248,6 @@ export default function GeoAccessTab(props: GeoAccessTabProps) {
             <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
               <div className="px-5 py-3 border-b border-gray-100">
                 <h3 className="text-base font-semibold text-gray-900">국외 IP 탐지 · 차단 결과 로그</h3>
-                <p className="text-[10px] text-gray-500 mt-0.5 italic">Data source: 감사 로그 (foreign_access_detected · foreign_access_blocked)</p>
               </div>
               <div className="overflow-x-auto">
                 <table className="w-full text-[13px]">

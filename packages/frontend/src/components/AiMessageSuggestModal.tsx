@@ -246,9 +246,6 @@ export default function AiMessageSuggestModal({
                 </button>
               );
             })}
-            <div className="text-[10px] text-white/30 italic pt-1">
-              Data source: AI 문구 추천 (자율 진단 + 자연어 입력)
-            </div>
           </div>
         )}
 

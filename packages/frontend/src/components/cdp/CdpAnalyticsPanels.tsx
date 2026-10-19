@@ -37,7 +37,6 @@ function ChartCard({ title, source, icon, children }: { title: string; source?: 
       </div>
       <div className="p-4">
         {children}
-        {source && (<div className="text-[10px] text-slate-400 italic mt-2 truncate" title={source}>Data source: {source}</div>)}
       </div>
     </div>
   );

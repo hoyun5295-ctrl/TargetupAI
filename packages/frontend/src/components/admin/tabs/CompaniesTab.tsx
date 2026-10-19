@@ -388,7 +388,7 @@ export default function CompaniesTab(props: CompaniesTabProps) {
         unit="곳"
         accent="emerald"
       />
-      <AdminSource>Data source: companies · plans · customers(활성 고객 수) · 화면을 연 시점에 불러온 목록 기준</AdminSource>
+      <AdminSource>화면을 연 시점에 불러온 목록 기준</AdminSource>
     </AdminPanel>
   );
 }

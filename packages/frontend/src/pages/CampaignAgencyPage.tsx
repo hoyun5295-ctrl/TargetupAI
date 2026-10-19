@@ -250,7 +250,6 @@ export default function CampaignAgencyPage() {
               })}
             </div>
           )}
-          <div className="text-[10px] text-white/30 italic mt-3">Data source: 캠페인 대행 접수 이력(실시간)</div>
         </div>
       </div>
 
@@ -369,7 +368,7 @@ export default function CampaignAgencyPage() {
                   <div className="text-[13px] text-white/80 whitespace-pre-wrap">{detailParsed.note}</div>
                 </div>
               )}
-              <div className="text-[10px] text-white/30 italic">Data source: 접수 원문(실시간) · 상태는 운영팀 진행에 따라 갱신됩니다</div>
+              <div className="text-[10px] text-white/30 italic">상태는 운영팀 진행에 따라 갱신됩니다</div>
             </div>
           </div>
         </div>

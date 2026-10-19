@@ -243,9 +243,7 @@ export default function AgentChargeRequestTab() {
             );
           })}
         </div>
-        <p className="mt-3 text-[11px] italic text-slate-300">
-          Data source: 발송 게이트웨이 계정 원장 실시간 잔액 (저장 없음). 발송이 나가는 동안 값이 계속 바뀝니다.
-        </p>
+        <p className="mt-3 text-[11px] italic text-slate-300">발송이 나가는 동안 값이 계속 바뀝니다.</p>
       </div>
 
       {/* 요청 폼 — 선불 지정된 발송ID가 있을 때만 (충전 내역·요청 이력은 아래에 그대로 남는다) */}
@@ -423,9 +421,6 @@ export default function AgentChargeRequestTab() {
           </div>
         )}
 
-        <p className="px-5 pb-4 text-[11px] italic text-slate-300">
-          Data source: 발송 게이트웨이 충전 원장 실시간 조회 (저장 없음)
-        </p>
       </div>
 
       {/* 요청 이력 */}

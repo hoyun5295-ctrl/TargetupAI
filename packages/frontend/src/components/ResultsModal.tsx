@@ -866,7 +866,6 @@ export default function ResultsModal({ onClose, token, customerDbEnabled, onFeat
                     </button>
                   </div>
                 )}
-                <div className="px-4 py-2 text-[10px] text-neutral-400 italic border-t border-neutral-100">Data source: 캠페인 발송 집계</div>
               </div>
                 );
               })()}

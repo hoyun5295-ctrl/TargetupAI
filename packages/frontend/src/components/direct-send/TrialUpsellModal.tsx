@@ -130,7 +130,6 @@ export default function TrialUpsellModal({ kind, status, onClose }: Props) {
           <button type="button" className="ds-upsell__later" onClick={onClose}>다음에 할게요</button>
           <div className="ds-upsell__reassure">이번 문자는 검사 없이 그대로 보낼 수 있어요.</div>
         </div>
-        <p className="ds-upsell__src">Data source: 요금제 표 · 검사 기록</p>
       </div>
     </div>
   );

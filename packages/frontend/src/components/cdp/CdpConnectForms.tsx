@@ -564,7 +564,7 @@ export function CdpImwebConnectForm(p: CdpImwebConnectFormProps) {
             {p.connecting ? <><Loader2 className="w-4 h-4 animate-spin" /> 연결 준비 중...</> : <><Link2 className="w-4 h-4" /> 아임웹 연결</>}
           </button>
           {!p.isAdmin && NOT_ADMIN_NOTE}
-          <div className="text-[10px] text-slate-400 italic">Data source: 아임웹 Open API (openapi.imweb.me). 회원·주문·수신동의 읽기 전용.</div>
+          <div className="text-[10px] text-slate-400 italic">회원·주문·수신동의 읽기 전용.</div>
         </div>
       )}
 

@@ -860,7 +860,7 @@ export default function PerformancePage() {
                     <div className="text-lg font-bold text-emerald-700 mt-0.5">{amRoi.hasCdpData ? `₩${formatNum(amRoi.revenue7dKrw)}` : '연동 필요'}</div>
                   </div>
                 </div>
-                <div className="mt-2 text-[10px] text-slate-400 italic">Data source: {amRoi.source}</div>
+                <div className="mt-2 text-[10px] text-slate-400 italic">{amRoi.source}</div>
                 {!amRoi.hasCdpData && (
                   <button onClick={() => navigate('/cdp-settings')} className="mt-2 px-2.5 py-1 bg-slate-100 hover:bg-slate-200 rounded text-[11px] text-slate-700 font-medium transition-colors">
                     자사몰 연동하고 매출 귀속 보기 →
@@ -912,7 +912,6 @@ export default function PerformancePage() {
                     onClick={() => handleQuickAction('top_performer_replication')}
                   />
                 </div>
-                <div className="mt-2 text-[10px] text-slate-400 italic">Data source: performance quick-action (AI 자동 설계 · 사용자 검토 후 발송)</div>
               </div>
 
               <div className="bg-white border border-slate-200 rounded-2xl p-4">
@@ -934,7 +933,6 @@ export default function PerformancePage() {
                     ))}
                   </div>
                 )}
-                <div className="mt-2 text-[10px] text-slate-400 italic">Data source: 캠페인 + 통신사 발송 결과 직접 집계</div>
               </div>
             </div>
 
@@ -968,9 +966,6 @@ export default function PerformancePage() {
                         <p className="text-lg font-bold text-fuchsia-700 mt-0.5">{formatNum(dailyInsight.totalCustomers)}</p>
                       </div>
                     </div>
-                    <p className="mt-2 text-[10px] text-slate-400 italic">
-                      Data source: 매일 아침 성과 메일(어제 0~24시 발송 결과 + 활성 고객)
-                    </p>
                   </div>
                 )}
               </div>
@@ -989,7 +984,7 @@ export default function PerformancePage() {
       {snapshot && (
         <>
           {/* 매출 · 기여 모달 */}
-          <PerfModal open={activeModal === 'revenue'} onClose={closeModal} title="매출 · 발송 후 기여" icon={<TrendingUp className="w-4 h-4 text-violet-700" />} source={attribution?.source || 'cdp_events.purchase'} wide>
+          <PerfModal open={activeModal === 'revenue'} onClose={closeModal} title="매출 · 발송 후 기여" icon={<TrendingUp className="w-4 h-4 text-violet-700" />} note={attribution && attribution.totalCampaigns > 0 ? (attribution.hasCdpData ? '발송 후 기여 = 발송 뒤 그 시간 안에 생긴 회사 전체 구매(받은 고객만 세지 않음)' : '집계할 자사몰 이벤트가 없어 회사 전체 고객의 최근 구매일로 센 간접 추정') : undefined} wide>
             {hasCdp ? (
               <div className="space-y-4">
                 <div className="grid grid-cols-2 gap-3">
@@ -1046,7 +1041,6 @@ export default function PerformancePage() {
                           </div>
                         ))}
                       </div>
-                      <div className="text-[10px] text-slate-400 italic mt-1.5">Data source: {customerAxis.recipientAttribution.source}</div>
                     </>
                   ) : (
                     <div className="text-[11px] text-slate-400 py-1">여정·DM 발송이 쌓이면 "발송받은 그 고객의 구매"를 고객 단위로 매칭해 보여드립니다.</div>
@@ -1059,7 +1053,7 @@ export default function PerformancePage() {
           </PerfModal>
 
           {/* ★ 2026-07-03 고객 등급 성과 모달 (고객 축) */}
-          <PerfModal open={activeModal === 'grade'} onClose={closeModal} title="고객 등급 성과" icon={<Crown className="w-4 h-4 text-amber-700" />} source="journey_step_logs · dm_recipient_tokens/dm_views · email_events · campaigns.target_filter(근사) · cdp_events" wide>
+          <PerfModal open={activeModal === 'grade'} onClose={closeModal} title="고객 등급 성과" icon={<Crown className="w-4 h-4 text-amber-700" />} wide>
             {customerAxisLoading ? (
               <div className="flex items-center justify-center gap-2 text-xs text-slate-400 py-10"><Loader2 className="w-4 h-4 animate-spin" /> 등급별 고객 매칭 집계 중…</div>
             ) : customerAxis && customerAxis.gradePerformance.length > 0 ? (
@@ -1105,7 +1099,7 @@ export default function PerformancePage() {
           </PerfModal>
 
           {/* 채널 ROI 모달 */}
-          <PerfModal open={activeModal === 'channel'} onClose={closeModal} title="채널 ROI" icon={<Sparkles className="w-4 h-4 text-fuchsia-700" />} source="캠페인·발송 큐 직접 집계" wide>
+          <PerfModal open={activeModal === 'channel'} onClose={closeModal} title="채널 ROI" icon={<Sparkles className="w-4 h-4 text-fuchsia-700" />} wide>
             {snapshot.byChannelROI.length > 0 ? (
               <>
                 <ResponsiveContainer width="100%" height={240}>
@@ -1141,7 +1135,7 @@ export default function PerformancePage() {
           </PerfModal>
 
           {/* 시간대 모달 */}
-          <PerfModal open={activeModal === 'hour'} onClose={closeModal} title="시간대 × 요일" icon={<Clock className="w-4 h-4 text-cyan-700" />} source="campaigns.sent_at (KST)" wide>
+          <PerfModal open={activeModal === 'hour'} onClose={closeModal} title="시간대 × 요일" icon={<Clock className="w-4 h-4 text-cyan-700" />} note="발송 시각 기준 · 한국 시간" wide>
             {hourWeekdayMaxSent === 0 ? (
               <div className="text-center text-xs text-slate-400 py-8">발송 데이터 없음</div>
             ) : (
@@ -1180,7 +1174,7 @@ export default function PerformancePage() {
           </PerfModal>
 
           {/* 퍼널 모달 */}
-          <PerfModal open={activeModal === 'funnel'} onClose={closeModal} title="자사몰 퍼널" icon={<Activity className="w-4 h-4 text-emerald-700" />} source="cdp_events (page_view → cart_add → purchase)" wide>
+          <PerfModal open={activeModal === 'funnel'} onClose={closeModal} title="자사몰 퍼널" icon={<Activity className="w-4 h-4 text-emerald-700" />} wide>
             {snapshot.funnelStats && snapshot.funnelStats.viewCount > 0 ? (
               <>
                 <div className="space-y-2">
@@ -1210,7 +1204,7 @@ export default function PerformancePage() {
           </PerfModal>
 
           {/* 코호트 모달 */}
-          <PerfModal open={activeModal === 'cohort'} onClose={closeModal} title="가입월별 잔존" icon={<Users className="w-4 h-4 text-violet-700" />} source={cohort?.source || 'customers.created_at + recent_purchase_date'} wide>
+          <PerfModal open={activeModal === 'cohort'} onClose={closeModal} title="가입월별 잔존" icon={<Users className="w-4 h-4 text-violet-700" />} note={cohort && cohort.cohorts.length > 0 ? '잔존 = 마지막 구매일이 가입 뒤 그 기간 안인 고객 · 마지막 구매일 하나로 센 근사' : undefined} wide>
             {cohort && cohort.cohorts.length > 0 ? (
               <>
                 <ResponsiveContainer width="100%" height={240}>
@@ -1235,7 +1229,7 @@ export default function PerformancePage() {
           </PerfModal>
 
           {/* 추세 모달 */}
-          <PerfModal open={activeModal === 'trend'} onClose={closeModal} title={`${period} 일별 추세`} icon={<TrendingUp className="w-4 h-4 text-emerald-700" />} source="campaigns (KST 일별 그룹)" wide>
+          <PerfModal open={activeModal === 'trend'} onClose={closeModal} title={`${period} 일별 추세`} icon={<TrendingUp className="w-4 h-4 text-emerald-700" />} note="발송일 기준 · 한국 시간" wide>
             {trendData.length === 0 || trendData.every((d) => d.current === 0 && d.previous === 0) ? (
               <div className="text-center text-xs text-slate-400 py-8">발송 데이터 없음</div>
             ) : (
@@ -1260,7 +1254,7 @@ export default function PerformancePage() {
           </PerfModal>
 
           {/* AI 진단 모달 */}
-          <PerfModal open={activeModal === 'diagnosis'} onClose={closeModal} title="AI 자율 진단" icon={<Brain className="w-4 h-4 text-violet-700" />} source={explanation ? Array.from(new Set(explanation.factors.map((f) => f.sourceField))).slice(0, 3).join(' · ') : '최근 30일 campaigns · cdp_events'} wide>
+          <PerfModal open={activeModal === 'diagnosis'} onClose={closeModal} title="AI 자율 진단" icon={<Brain className="w-4 h-4 text-violet-700" />} wide>
             {explainLoading ? (
               <div className="flex flex-col items-center gap-2 py-10 text-slate-500">
                 <Loader2 className="w-6 h-6 animate-spin text-violet-700" />
@@ -1320,7 +1314,7 @@ export default function PerformancePage() {
           </PerfModal>
 
           {/* 캠페인 드릴다운 모달 */}
-          <PerfModal open={activeModal === 'campaigns'} onClose={closeModal} title="캠페인 드릴다운" icon={<Sparkles className="w-4 h-4 text-fuchsia-700" />} source="캠페인·발송 큐 직접 집계" wide>
+          <PerfModal open={activeModal === 'campaigns'} onClose={closeModal} title="캠페인 드릴다운" icon={<Sparkles className="w-4 h-4 text-fuchsia-700" />} wide>
             <div className="flex flex-col md:flex-row gap-2 mb-3">
               <form onSubmit={handleSearch} className="flex-1 flex gap-2">
                 <div className="relative flex-1">
@@ -1489,7 +1483,6 @@ function AiDiagnosisLine({
           {explanation ? '자세히 보기 →' : 'AI 진단 시작 →'}
         </button>
       )}
-      <p className="mt-2 text-[10px] text-slate-400 italic">Data source: 최근 30일 캠페인 · 고객 행동 기반 AI 진단</p>
     </div>
   );
 }
@@ -1548,9 +1541,10 @@ function QuickActionRow({
 }
 
 function PerfModal({
-  open, title, icon, source, onClose, children, wide,
+  open, title, icon, note, onClose, children, wide,
 }: {
-  open: boolean; title: string; icon: React.ReactNode; source?: string;
+  /** ★ 2026-10-20 출처 아닌 해석 조건만(집계 범위 · 기준 시각 · 근사) — 옛 source(테이블 이름) 대체 */
+  open: boolean; title: string; icon: React.ReactNode; note?: string;
   onClose: () => void; children: React.ReactNode; wide?: boolean;
 }) {
   useEffect(() => {
@@ -1573,7 +1567,7 @@ function PerfModal({
           <button onClick={onClose} aria-label="닫기" className="p-1.5 rounded-lg hover:bg-slate-100 text-slate-500"><X className="w-4 h-4" /></button>
         </div>
         <div className="p-5 overflow-y-auto flex-1">{children}</div>
-        {source && <div className="px-5 py-2.5 border-t border-slate-200 text-[10px] text-slate-400 italic flex-shrink-0">Data source: {source}</div>}
+        {note && <div className="px-5 py-2.5 border-t border-slate-200 text-[10px] text-slate-400 flex-shrink-0">{note}</div>}
       </div>
     </div>
   );

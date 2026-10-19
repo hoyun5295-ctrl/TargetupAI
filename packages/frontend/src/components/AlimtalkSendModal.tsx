@@ -846,7 +846,7 @@ export default function AlimtalkSendModal({
             ) : (
               <div className="ks-preview__empty">템플릿을 고르면 받는 사람 화면이 여기에 그대로 보여요</div>
             )}
-            <p className="ks-preview__cap">Data source: 카카오톡 실수신 화면 기준 · 치환은 첫 번째 받는 사람 값</p>
+            <p className="ks-preview__cap">치환은 첫 번째 받는 사람 값</p>
           </section>
 
           {/* ====== 수신자 ====== */}

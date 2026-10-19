@@ -202,7 +202,7 @@ export default function EmailDetailModal({ campaign, cover, authHeaders, onClose
           </div>
 
           <div className="flex items-center justify-end gap-2 pt-4 mt-2 border-t border-slate-200 flex-wrap">
-            <span className="mr-auto text-[10px] text-slate-400 italic">Data source: 메일 집계 · 링크·시간대 = 최근 500건 표본{sampleCapped ? '(상한 도달)' : ''} · 오픈 = 메일 이미지 로딩 기준</span>
+            <span className="mr-auto text-[10px] text-slate-400 italic">링크·시간대 = 최근 500건 표본{sampleCapped ? '(상한 도달)' : ''} · 오픈 = 메일 이미지 로딩 기준</span>
             {c.status === 'scheduled' && <button type="button" onClick={onCancelSchedule} className={MK_BTN_OUTLINE}>예약 취소</button>}
             {c.status === 'completed' && sent > 0 && (
               <>

@@ -305,9 +305,6 @@ export default function AiRefineModal({
             <span className={light ? "font-mono text-slate-600" : "font-mono text-white/70"}>%이름%</span> 등 변수 자리 보존 · (광고) 표기 자동 정합
           </span>
           <span className={light ? "text-amber-700 font-medium" : "text-amber-300 font-medium"}>AI 결과는 참고용 · 발송 전 반드시 미리보기로 확인하세요</span>
-          <div className={light ? "text-[10px] text-slate-400 italic mt-1" : "text-[10px] text-white/30 italic mt-1"}>
-            Data source: AI 문안 다듬기 (회사 30일 발송 패턴 학습 + 톤 자동 반영)
-          </div>
         </div>
       </div>
     </div>

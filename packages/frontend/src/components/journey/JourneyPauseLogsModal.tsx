@@ -313,9 +313,6 @@ export default function JourneyPauseLogsModal({ journeyId, journeyName, onClose,
 
         {/* 푸터 — Source caption */}
         <div className="px-5 py-3 border-t border-slate-200 bg-slate-100">
-          <div className="text-[10px] text-slate-400 italic">
-            Data source: 여정 정지 기록(영구 보관) · 정지 효과 + 정지 순간의 진행 상태
-          </div>
         </div>
       </div>
     </div>

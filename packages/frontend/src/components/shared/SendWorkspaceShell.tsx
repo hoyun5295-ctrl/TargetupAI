@@ -155,11 +155,6 @@ export function WorkspaceNotice({ children }: { children: ReactNode }) {
   );
 }
 
-/** 데이터 출처 표기 — 모든 카드·미리보기에 붙인다(디자인 최소 기준) */
-export function SourceCaption({ children }: { children: ReactNode }) {
-  return <div className="text-[10px] text-slate-400 italic mt-2">Data source: {children}</div>;
-}
-
 /**
  * 발송 계열 공용 폼 컨트롤 클래스.
  * 회색 테두리(`border`) 대신 얇은 링을 쓰고, 포커스에서만 강조색이 드러난다.

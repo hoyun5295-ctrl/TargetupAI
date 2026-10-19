@@ -124,7 +124,7 @@ export default function OutreachGrabPage() {
           )}
         </div>
         <div className="px-5 py-2.5 border-t border-gray-100">
-          <span className="text-[10px] text-gray-400 italic">Data source: 직원 브라우저에 떠 있던 스토어 화면의 기획·상품 정보 · 한줄로 서버는 네이버에 접속하지 않습니다</span>
+          <span className="text-[10px] text-gray-400 italic">한줄로 서버는 네이버에 접속하지 않습니다</span>
         </div>
       </div>
     </div>

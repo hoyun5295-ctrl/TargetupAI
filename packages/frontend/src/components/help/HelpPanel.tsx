@@ -147,7 +147,6 @@ export default function HelpPanel({ ctx, path, onClose }: Props) {
           </>
         )}
         {askError && <p className="text-[12px] text-rose-700">{askError}</p>}
-        <p className={HELP_SOURCE}>Data source: 기능 안내 원장</p>
       </div>
 
       <div className={HELP_FOOT}>

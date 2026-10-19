@@ -129,7 +129,6 @@ export default function Customer360Rail({ summary, loading, basicInfo, basicOpen
         </>
       )}
 
-      <p className={C360_SOURCE}>Data source: 발송 큐 · 고객 DB · 자사몰 이벤트</p>
     </aside>
   );
 }

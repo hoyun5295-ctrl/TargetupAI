@@ -120,7 +120,6 @@ export default function AiTrainingDataPage() {
                   <div className="h-full bg-gradient-to-r from-violet-400 to-fuchsia-400" style={{ width: `${Math.min(100, data.summary.progressPct)}%` }} />
                 </div>
               </div>
-              <div className="text-[10px] text-white/30 italic mt-3">Data source: 학습 기록 전수 집계(비식별 · 마스킹 후 저장)</div>
             </div>
 
             {/* 2. 채널 + 작성 유형 분포 */}
@@ -138,7 +137,6 @@ export default function AiTrainingDataPage() {
                     </div>
                   ))}
                 </div>
-                <div className="text-[10px] text-white/30 italic mt-3">Data source: 학습 기록 · 메시지 종류</div>
               </div>
               <div className="p-5 bg-white/5 border border-white/10 rounded-2xl">
                 <div className="flex items-center gap-2 mb-4"><FileJson className="w-4 h-4 text-violet-300" /><h3 className="text-sm font-semibold">작성 유형</h3></div>
@@ -153,7 +151,6 @@ export default function AiTrainingDataPage() {
                     </div>
                   ))}
                 </div>
-                <div className="text-[10px] text-white/30 italic mt-3">Data source: 학습 기록 · 최종 문안 출처(AI 생성 vs 직접 작성)</div>
               </div>
             </div>
 
@@ -173,7 +170,6 @@ export default function AiTrainingDataPage() {
                     <div className="text-[10px] text-white/50">거부</div>
                   </div>
                 </div>
-                <div className="text-[10px] text-white/30 italic mt-3">Data source: AI 제안 승인 · 반려(선호 학습 신호)</div>
               </div>
               <div className="p-5 bg-white/5 border border-white/10 rounded-2xl">
                 <div className="flex items-center gap-2 mb-4"><FileJson className="w-4 h-4 text-amber-300" /><h3 className="text-sm font-semibold">export 데이터셋 준비도</h3></div>
@@ -190,7 +186,6 @@ export default function AiTrainingDataPage() {
                     </div>
                   ))}
                 </div>
-                <div className="text-[10px] text-white/30 italic mt-3">Data source: export-training-data JSONL (발송 학습 + 스팸필터 판정 문안)</div>
               </div>
             </div>
 
@@ -226,7 +221,6 @@ export default function AiTrainingDataPage() {
               ) : (
                 <div className="text-center py-4 text-white/40 text-xs">차단된 문안이 아직 없습니다.</div>
               )}
-              <div className="text-[10px] text-white/30 italic mt-3">Data source: 스팸 검사에서 막힌 문안(통신사 스팸 판정 실측)</div>
             </div>
 
             {/* 5. 일별 적재 추이 */}
@@ -246,7 +240,6 @@ export default function AiTrainingDataPage() {
                   ))}
                 </div>
               )}
-              <div className="text-[10px] text-white/30 italic mt-3">Data source: 학습 기록 · 발송일별(KST) 집계</div>
             </div>
           </>
         )}

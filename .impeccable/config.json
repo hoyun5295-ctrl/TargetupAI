@@ -38,6 +38,15 @@
         ],
         "createdAt": "2026-10-19T15:10:00.000Z",
         "reason": "Claude 판정: L80 text-slate-900 on bg-amber-500 = 대비 충분 · AI 버튼 규격 MK_BTN_AI 와 같은 짝 · AiLinePage 원본 그대로 옮긴 줄 · 값 단위 무시 미지원"
+      },
+      {
+        "rule": "ai-color-palette",
+        "value": "*",
+        "files": [
+          "packages/frontend/src/components/dashboard/PlanStatusCard.tsx"
+        ],
+        "createdAt": "2026-10-20T00:00:00.000Z",
+        "reason": "Claude 판정: L99 · L102 · L109 = 옛 Dashboard.tsx 「AI 크레딧 잔여」 상자 원본 그대로 옮김(제품 AI 표시 색 · 맨 위 AI 한줄로 버튼 violet 그라데이션과 같은 짝 · Harold 승인 목업 1019 동일) · 값 단위 무시 미지원"
       }
     ]
   }

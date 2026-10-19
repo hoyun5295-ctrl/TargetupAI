@@ -289,7 +289,6 @@ export default function PlanFeatureModal({ featureId, onClose }: PlanFeatureModa
                   <ArrowRight className="w-4 h-4" />
                 </button>
               </div>
-              <p className={`mt-2 text-[10px] italic ${C.src}`}>Data source: AI 크레딧 단가표 · 기능 설정 화면</p>
             </div>
         </div>
       </div>
@@ -391,7 +390,6 @@ export default function PlanFeatureModal({ featureId, onClose }: PlanFeatureModa
             <ArrowRight className="w-4 h-4" />
           </button>
         </div>
-        <p className={light ? "px-6 pb-4 -mt-1.5 text-[10px] italic text-slate-400" : "px-6 pb-4 -mt-1.5 text-[10px] italic text-white/30"}>Data source: AI 크레딧 단가표</p>
       </div>
     </div>
   );

@@ -206,7 +206,7 @@ export default function PlannerEventDetailPage() {
           <div className="rounded-2xl bg-white border border-slate-200 px-4 pt-5 pb-1">
             <div className="flex items-baseline gap-2 mb-4"><h3 className="text-[17px] font-bold">보낼 내용 {view.sends.length}번</h3><span className="text-[12.5px] text-slate-600">나가는 순서대로</span></div>
             <ConfirmTimeline view={view} mode="phone" />
-            <p className="text-[10px] text-slate-500 italic pb-4">Data source: {view.dataSource}</p>
+            <p className="text-[10px] text-slate-500 italic pb-4">{view.dataSource}</p>
           </div>
         </div>
       ) : (
@@ -246,7 +246,6 @@ export default function PlannerEventDetailPage() {
               <section className="p-5">
                 <h3 className="text-[12.5px] font-semibold text-slate-600">이 행사 비용</h3>
                 <CostCard view={view} />
-                <p className="text-[10px] text-slate-500 italic mt-2">Data source: 금액은 서버 견적과 크레딧 차감 기록입니다.</p>
               </section>
             </div>
           </aside>
@@ -260,7 +259,7 @@ export default function PlannerEventDetailPage() {
                 onEditDm={ev.editable ? (dmId) => navigate(`/dm-builder?id=${encodeURIComponent(dmId)}&plannerEvent=${encodeURIComponent(ev.id)}`) : undefined}
                 onEditEmail={ev.editable ? (cid) => navigate(`/email-campaigns?edit=${encodeURIComponent(cid)}`) : undefined}
               />
-              <p className="text-[10px] text-slate-500 italic pb-5">Data source: {view.dataSource}</p>
+              <p className="text-[10px] text-slate-500 italic pb-5">{view.dataSource}</p>
             </div>
           </div>
         </div>

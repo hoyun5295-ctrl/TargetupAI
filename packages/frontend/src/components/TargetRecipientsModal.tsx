@@ -57,7 +57,8 @@ interface Props {
   /** 페이지 로더 (메모리 배열은 arrayPager로 감싸 전달) */
   fetchPage?: TargetPageLoader | null;
   /** Data source 캡션 (기본값 있음) */
-  sourceLabel?: string;
+  /** ★ 2026-10-20 출처 아닌 안내만(명단 설명 · 표시 상한 · 보류 사유) — 옛 sourceLabel(출처 섞임) 대체 */
+  note?: string;
   pageSize?: number;
   /** ★ 2026-07-10 자동마케팅 [타겟확인]: 추출 조건에 쓰인 필드 동적 컬럼 — 미전달 시 기존 렌더 불변 */
   extraColumns?: { key: string; label: string }[] | null;
@@ -89,7 +90,7 @@ const val = (v: any): string => {
 
 export default function TargetRecipientsModal({
   show, onClose, title = '추출 타겟 상세', objective, criteria, channelLabel,
-  totalCount, fetchPage, sourceLabel = '실제 발송 대상 조회 (customer-filter)', pageSize = PAGE_SIZE_DEFAULT,
+  totalCount, fetchPage, note, pageSize = PAGE_SIZE_DEFAULT,
   extraColumns,
 }: Props) {
   const light = useLightSurface(); // ★ 2026-09-30 AI 존(밝은 작업대)에서 열리면 밝은 짝 · 그 밖은 원래 짙은 값
@@ -292,7 +293,7 @@ export default function TargetRecipientsModal({
               </div>
             </div>
           )}
-          <div className={light ? "text-[10px] text-slate-400 italic" : "text-[10px] text-white/30 italic"}>Data source: {sourceLabel} · 연락처 중간자리 마스킹</div>
+          <div className={light ? "text-[10px] text-slate-400 italic" : "text-[10px] text-white/30 italic"}>{[note, '연락처 중간자리 마스킹'].filter(Boolean).join(' · ')}</div>
         </div>
       </div>
     </div>,

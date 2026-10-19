@@ -214,7 +214,6 @@ export default function BrandStudioCard({ apiBase, token, onToast }: BrandStudio
                 )}
               </div>
             )}
-            <div className="text-[10px] text-white/30 italic mt-2">Data source: 브랜드 킷 (DM·이메일·인앱 생성기 공용)</div>
           </div>
           <button
             onClick={openModal}

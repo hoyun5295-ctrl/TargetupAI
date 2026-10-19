@@ -89,7 +89,6 @@ export default function GuidePage() {
                   </div>
                 </div>
               )}
-              <p className={HELP_SOURCE}>Data source: 기능 안내 원장</p>
             </div>
           </div>
         ) : data ? (
@@ -125,7 +124,6 @@ export default function GuidePage() {
                 );
               })
             )}
-            <p className={`${HELP_SOURCE} mt-8`}>Data source: 기능 안내 원장</p>
           </>
         ) : null}
       </div>

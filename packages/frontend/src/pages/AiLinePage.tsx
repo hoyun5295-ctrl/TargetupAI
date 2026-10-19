@@ -2137,7 +2137,7 @@ export default function AiLinePage() {
                   totalCount={proposal.target.count}
                   fetchPage={targetFetchPage}
                   extraColumns={targetListCols}
-                  sourceLabel={`실제 발송 대상 조회와 동일 기준 · 전체 ${proposal.target.count.toLocaleString()}명 중 최대 100명 표시`}
+                  note={`전체 ${proposal.target.count.toLocaleString()}명 중 최대 100명 표시`}
                 />
                 {/* 2026-07-09: MMS 이미지 첨부 모달 (추천 채널 MMS 선택 시) */}
                 <MmsUploadModal

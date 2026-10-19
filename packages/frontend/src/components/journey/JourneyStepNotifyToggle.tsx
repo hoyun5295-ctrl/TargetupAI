@@ -113,9 +113,7 @@ export default function JourneyStepNotifyToggle({
           disabled={saving}
         />
       </div>
-      <div className="text-[10px] text-slate-400 italic">
-        Data source: 단계별 담당자 알림 설정 · 첫·마지막 단계 기본 켬 / 중간 기본 끔
-      </div>
+      <div className="text-[10px] text-slate-400 italic">첫·마지막 단계 기본 켬 / 중간 기본 끔</div>
     </div>
   );
 }

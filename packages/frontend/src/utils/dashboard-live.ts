@@ -147,3 +147,13 @@ export function topByCount<T extends { count: number }>(items: readonly T[]): T 
   for (const it of items) if (!best || Number(it.count) > Number(best.count)) best = it;
   return best;
 }
+
+/**
+ * ★ 2026-10-20 Harold 「숫자가 커지면 칸이 깨진다」 — 칸 폭을 넘길 만큼 큰 숫자는 한국식으로 줄인다(18.4억 · 1284.8만).
+ *   줄이는 기준(from)은 칸마다 실측한 폭으로 정한다 · 정확한 값은 마우스를 올리면(title) 보인다 · 글자를 자르지 않는다.
+ *   돈(사용금액 · 잔액)은 줄이지 않는다(원 단위 그대로 · 실측상 넘치지 않음).
+ */
+const KO_COMPACT = new Intl.NumberFormat('ko-KR', { notation: 'compact', maximumFractionDigits: 1 });
+export const fmtKo = (from: number) => (v: number) => (Math.abs(v) >= from ? KO_COMPACT.format(v) : v.toLocaleString());
+/** 줄였을 때만 정확한 값을 title 로(안 줄였으면 title 없음) */
+export const exactTitle = (v: number, from: number, unit = '') => (Math.abs(v) >= from ? `${v.toLocaleString()}${unit}` : undefined);

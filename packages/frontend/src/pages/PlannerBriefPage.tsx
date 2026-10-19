@@ -130,7 +130,6 @@ export default function PlannerBriefPage() {
                 </div>
               </section>
             ))}
-            <p className="text-[10px] text-slate-500 italic">Data source: 문자는 발송 결과 집계, 메일은 발송·열어봄·클릭 실측, 참여 신청은 안내 메일의 참여 버튼 클릭 실측입니다. 추정값은 쓰지 않습니다.</p>
           </div>
         )
       ) : null}
