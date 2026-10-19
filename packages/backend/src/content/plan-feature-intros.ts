@@ -204,7 +204,7 @@ export const PLAN_FEATURE_INTROS: PlanFeatureIntro[] = [
       { icon: 'Send', title: '보내고 보기', text: '받는 사람·문자 문안·보낼 때를 정해 보냅니다. 상세 창에서 성과와 받은 사람별 반응을 보고 다시 보낼 수 있습니다.' },
     ],
     options: [
-      { title: '만드는 방법', text: '재료(사진·글·홈페이지 주소)로 만들기·블록으로 직접·카탈로그 DM(쪽 사진을 슬라이드로)·한 줄 자동·질문 몇 개(오토설계 크레딧 별도)·저장한 소재' },
+      { title: '만드는 방법', text: '재료(사진·글·홈페이지 주소)로 만들기·블록으로 직접·카탈로그 DM(쪽 사진을 슬라이드로)·한 줄 자동·질문 몇 개(질문 완성 크레딧 별도)·저장한 소재' },
       { title: '블록 꾸미기', text: '블록마다 구도·배경·색·글자 크기' },
       { title: '전체 설정', text: '테마·브랜드 색·서체·보기 방식·버전 기록' },
       { title: '보내기', text: '받는 사람·문자 문안·바로 또는 예약. 「링크만 받기」로 주소만 받아 다른 곳에 쓸 수도 있습니다.' },
@@ -223,7 +223,7 @@ export const PLAN_FEATURE_INTROS: PlanFeatureIntro[] = [
     ],
     costs: [
       { label: '만들기', source: 'dm-ai-generate', credits: 5 },
-      { label: '질문 몇 개로 만들기(오토설계 · 한 번)', source: 'one-step-interview', credits: 50 },
+      { label: '질문 몇 개로 만들기(질문 완성 · 한 번)', source: 'one-step-interview', credits: 50 },
       { label: '카탈로그 DM 만들기', source: 'catalog-dm-build', credits: 10 },
       { label: '발행(처음 발행할 때 한 번 · 링크만 받기 포함)', source: 'dm-builder', credits: 100 },
       { label: '참여 칸이 있는 DM 발행', source: 'dm-interaction-publish', credits: 120 },

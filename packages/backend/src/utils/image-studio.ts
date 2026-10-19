@@ -643,6 +643,10 @@ export interface TempMeta {
   width?: number | null;
   height?: number | null;
   aspectRatio?: string | null;
+  /** ★ 2026-10-19 Codex E3 — 영구 위치로 옮겼는데 라이브러리 등재 여부를 확인하지 못한 그림(다음 저장이 확인 · 등재로 마무리한다) */
+  pendingAsset?: { url: string; filename: string; bytes: number; displayName: string; channelSpec: string | null } | null;
+  /** ★ 2026-10-19 Codex E8 범위 밖 — MMS 변환 저장으로 원본 임시 그림을 소비한 뒤의 저장 주소(같은 원본 id 재저장이 그 소재를 찾게) */
+  savedAs?: { url: string; bytes: number } | null;
   createdAt: string;
 }
 
@@ -705,6 +709,12 @@ export function writeTempMeta(companyId: string, tempId: string, meta: Omit<Temp
   fs.writeFileSync(path.join(dir, `${tempId}.json`), JSON.stringify(full));
 }
 
+/** ★ 2026-10-19 Codex E3 — 사이드카만 지운다(마무리 대기를 끝낸 뒤) */
+export function clearTempMeta(companyId: string, tempId: string): void {
+  if (!isValidTempId(tempId)) return;
+  try { fs.unlinkSync(path.join(companyTempDir(companyId), `${tempId}.json`)); } catch { /* noop */ }
+}
+
 export function readTempMeta(companyId: string, tempId: string): TempMeta | null {
   if (!isValidTempId(tempId)) return null;
   const p = path.join(companyTempDir(companyId), `${tempId}.json`);
@@ -745,6 +755,36 @@ export function moveTempToPermanent(companyId: string, tempId: string): { url: s
   try { fs.unlinkSync(path.join(companyTempDir(companyId), `${tempId}.json`)); } catch { /* noop */ }
   const bytes = fs.statSync(destPath).size;
   return { url: `/api/cdp/inapp/image/${companyId}/${filename}`, filename, bytes, ext: found.ext };
+}
+
+/**
+ * ★ 2026-10-19 Codex E7 — 그 임시 id 로 영구 위치에 옮긴 파일(moveTempToPermanent 와 같은 이름 · 주소 규칙). 없으면 null.
+ *   임시 파일이 없어진 뒤의 재저장이 「이미 저장됨」을 목록(최신 200건)이 아니라 이 주소의 소재 단건으로 판정하게 한다.
+ */
+export function findPermanentByTempId(companyId: string, tempId: string): { url: string; bytes: number } | null {
+  if (!isValidTempId(tempId)) return null;
+  for (const ext of ['png', 'jpeg', 'jpg', 'webp']) {
+    const p = path.join(INAPP_IMAGE_BASE, companyId, `${tempId}.${ext}`);
+    try {
+      const st = fs.statSync(p);
+      if (st.isFile()) return { url: `/api/cdp/inapp/image/${companyId}/${tempId}.${ext}`, bytes: st.size };
+    } catch { /* 없음 */ }
+  }
+  return null;
+}
+
+/**
+ * ★ 2026-10-19 B-1016-3③ — 영구 위치로 옮긴 뒤 라이브러리 등재가 실패하면 되돌린다(같은 임시 id 로 다시 저장할 수 있게).
+ *   파일을 임시 자리로 되돌리고 사이드카를 다시 쓴다. 되돌리기 실패 = 조용히 넘어간다(원래 오류를 그대로 돌려준다).
+ */
+export function restorePermanentToTemp(companyId: string, tempId: string, ext: string, meta: Omit<TempMeta, 'companyId' | 'createdAt'>): void {
+  try {
+    const destPath = path.join(INAPP_IMAGE_BASE, companyId, `${tempId}.${ext}`);
+    const dir = companyTempDir(companyId);
+    fs.mkdirSync(dir, { recursive: true });
+    fs.renameSync(destPath, path.join(dir, `${tempId}.${ext}`));
+    writeTempMeta(companyId, tempId, meta);
+  } catch { /* 원래 오류를 돌려준다 */ }
 }
 
 /** 7일 스윕 — mtime 기준(사이드카 문구로 사용자 고지). ext·json 모두 정리. 삭제 건수 반환. */

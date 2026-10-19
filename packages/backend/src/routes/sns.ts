@@ -51,6 +51,7 @@ import { snsMediaNeedsAiNotice, snsMediaAiNoticeMap } from '../utils/sns-ai-noti
 import { readSnsTagSet, replaceSnsTagSet, patchSnsTagSet, snsTagSeeds, SnsTagSetError } from '../utils/sns-tag-set';
 import { checkSnsSpelling } from '../utils/sns-spell-check';
 import { composeSnsPost, rescheduleSnsPost } from '../utils/sns-compose';
+import { restoreUploadFileName } from '../utils/mms-image-fit';
 
 const router = Router();
 export const snsPublicRouter = Router();
@@ -273,7 +274,7 @@ router.post('/media', snsUpload.single('file'), async (req: Request, res: Respon
   if (!file) return res.status(400).json({ success: false, error: '파일이 없습니다.' });
 
   try {
-    const stored = await storeSnsMedia({ companyId, buffer: file.buffer, originalName: file.originalname });
+    const stored = await storeSnsMedia({ companyId, buffer: file.buffer, originalName: restoreUploadFileName(file.originalname) });   // ★ 1019 B-1005-4③ 같은 원인
     const r = await query(
       `INSERT INTO sns_media (company_id, created_by, kind, path, format, bytes, width, height)
        VALUES ($1::uuid, $2::uuid, 'image', $3, $4, $5, $6, $7)

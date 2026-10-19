@@ -14,7 +14,7 @@ import DmBlockBuilder from '../components/dm/build/DmBlockBuilder';
 import axios from 'axios';
 import { attachCreditInterceptor } from '../lib/credit-interceptor';
 import { useDmBuilderStore, getEditSession, selectAllSectionsFlat } from '../stores/dmBuilderStore';
-import { createSection } from '../utils/dm-section-defaults';
+import { createSection, PARTICIPATION_TYPES } from '../utils/dm-section-defaults';
 import { formatDateTimeShort } from '../utils/formatDate';
 import { uploadOne } from '../components/dm/panels/FormControls';
 import { useDmKeyboardShortcuts } from '../hooks/useDmKeyboardShortcuts';
@@ -26,7 +26,7 @@ import ImageToCopyButton from '../components/ImageToCopyButton';
 // ★ 2026-09-06 S6 재료(이미지·행사 내용)로 초안 — 아웃리치 엔진 · 초안 id 로 이어서 편집
 import MaterialQuickPanel from '../components/MaterialQuickPanel';
 // ★ 2026-07-19: 기획전 스샷 구조화 판독 → DM 섹션 디터미니스틱 조립 (행사 N블록 = 70% 완성)
-import { buildDmSectionsFromEvents, deriveDmTitleFromEvents, summarizeEvents } from '../utils/dm-event-assembly';
+import { buildDmSectionsFromEvents, deriveDmTitleFromEvents, summarizeEvents, eventsHaveNumbers } from '../utils/dm-event-assembly';
 import CreditConfirmModal from '../components/credit/CreditConfirmModal';
 import DmShortLinkModal from '../components/dm/DmShortLinkModal';
 import DmKoreanAliasModal from '../components/dm/DmKoreanAliasModal';
@@ -1079,24 +1079,41 @@ export default function DmBuilderPage() {
           onExtracted={(t) => { setNaturalLanguage((prev) => appendToOneLine(prev, t)); addLineRead(t); }}
           onStructured={({ events, text }) => {
             // ★ 기획전 스샷 → 행사별 [히어로+상품 카드] 즉시 조립 (AI 생성 없이 코드 매핑 — 크레딧 추가 0)
-            try {
-              const sections = buildDmSectionsFromEvents(events);
-              if (sections.length === 0) {
+            const assemble = (keepNumbers: boolean) => {
+              try {
+                const sections = buildDmSectionsFromEvents(events, { keepNumbers });
+                if (sections.length === 0) {
+                  setNaturalLanguage((prev) => appendToOneLine(prev, text));
+                  addLineRead(text);
+                  return;
+                }
+                createNew({ title: deriveDmTitleFromEvents(events, { keepNumbers }) });
+                applyAiGenerated(sections, undefined, text || '이미지 행사 추출', { layoutMode: 'scroll' });
+                save({ silent: true }).catch(() => {});
+                setMode('edit');
+                const sum = summarizeEvents(events);
+                setToast({ type: 'success', message: keepNumbers
+                  ? `행사 ${sum.events}건·상품 ${sum.products}개로 DM 초안을 만들었어요. 사진에서 읽은 가격이 맞는지 꼭 확인해 주세요.`
+                  : `행사 ${sum.events}건으로 DM 초안을 만들었어요. 사진에서 읽은 숫자(가격 · 숫자가 든 문구 · 상품)는 비워 두었어요. 확인한 값으로 넣어 주세요.` });
+              } catch {
+                // 조립 실패 = 산문 폴백(기존 흐름 무손상)
                 setNaturalLanguage((prev) => appendToOneLine(prev, text));
                 addLineRead(text);
-                return;
               }
-              createNew({ title: deriveDmTitleFromEvents(events) });
-              applyAiGenerated(sections, undefined, text || '이미지 행사 추출', { layoutMode: 'scroll' });
-              save({ silent: true }).catch(() => {});
-              setMode('edit');
-              const sum = summarizeEvents(events);
-              setToast({ type: 'success', message: `행사 ${sum.events}건·상품 ${sum.products}개로 DM 초안을 만들었어요. 상품 이미지와 문구만 다듬어주세요.` });
-            } catch {
-              // 조립 실패 = 산문 폴백(기존 흐름 무손상)
-              setNaturalLanguage((prev) => appendToOneLine(prev, text));
-              addLineRead(text);
-            }
+            };
+            // ★ 2026-10-19 B-1017-1① — 사진에서 읽은 숫자는 기본으로 쓰지 않는다(10-10 H3 「사진 숫자 기본 안 씀」 · 옛: 이 즉시 조립만 확인 없이 가격 카드를 만들었다).
+            //   숫자가 있을 때만 한 번 묻는다(잘못 읽은 가격이 고객에게 나가면 결과가 크게 갈린다).
+            if (!eventsHaveNumbers(events)) { assemble(false); return; }
+            setConfirm({
+              mode: 'info',
+              title: '사진에서 읽은 숫자를 그대로 쓸까요?',
+              description: '가격 · 할인율 같은 숫자는 사진을 잘못 읽었을 수 있어요. 빼고 만들면 숫자가 든 칸과 상품을 비워 두고, 그대로 쓰면 보내기 전에 꼭 확인해 주세요.',
+              confirmLabel: '숫자 빼고 만들기',
+              altLabel: '숫자도 그대로 쓰기',
+              cancelLabel: '취소',
+              onConfirm: () => assemble(false),
+              onAlt: () => assemble(true),
+            });
           }}
           disabled={generating}
           className={MK_LINE_EXTRA_BTN}
@@ -1133,7 +1150,7 @@ export default function DmBuilderPage() {
           { icon: Package, title: '재료로 만들기', desc: '행사 주소·사진만 넣으면 완성', tint: 'from-amber-400 to-orange-500', featured: true, badge: '추천', onClick: () => navigate('/quick-campaign?channel=dm'), disabled: generating },
           { icon: Layers, title: '블록으로 직접', desc: '블록을 고르면 필요한 것만 물어봐요', tint: 'from-violet-400 to-fuchsia-500', onClick: handleStartBlockBuild, disabled: generating },
           { icon: BookOpen, title: '카탈로그 DM', desc: '쪽 이미지를 넘겨 보는 카탈로그', tint: 'from-sky-400 to-blue-500', onClick: () => navigate('/quick-campaign?channel=catalog'), disabled: generating },
-          { icon: Wand2, title: '질문 몇 개로', desc: '답하면 그 답으로 DM · 생성 5 + 오토설계 50', tint: 'from-emerald-400 to-teal-500', onClick: () => { if (!generating) setOneStepOpen(true); }, disabled: generating },
+          { icon: Wand2, title: '질문 몇 개로', desc: '답하면 그 답으로 DM · 생성 5 + 질문 완성 50', tint: 'from-emerald-400 to-teal-500', onClick: () => { if (!generating) setOneStepOpen(true); }, disabled: generating },
         ],
         more: [
           { label: '빈 화면에서', icon: FilePlus2, onClick: handleCreateNew },
@@ -1431,8 +1448,8 @@ function TopBarWithBack({ onBack, onPublishDone, hidden = false, sendSignal = 0 
   // ★ 2026-07-02 (Harold 명시 크레딧 모달 기준): 인터랙션 DM(추첨·룰렛·설문 등)은 발행 120 차감인데
   //   모달이 항상 dm-builder(100)로 떠 표시≠실차감이던 결함 수정 — 백엔드 isInteractionCampaign과 동일 기준.
   const pages = useDmBuilderStore((s) => s.pages);
-  const INTERACTION_TYPES = ['lucky_draw', 'roulette', 'poll', 'survey', 'email_capture', 'click_rewards'];
-  const hasInteraction = pages.some((p: any) => (p?.sections || []).some((sec: any) => sec && INTERACTION_TYPES.includes(sec.type)));
+  // ★ 2026-10-19 B-1014-3⑤ — 서버 판정과 같은 목록(참여 8종 · dm-section-defaults PARTICIPATION_TYPES 미러)
+  const hasInteraction = pages.some((p: any) => (p?.sections || []).some((sec: any) => sec && (PARTICIPATION_TYPES as readonly string[]).includes(sec.type)));
   const [confirmPublish, setConfirmPublish] = useState(false);
   // ★ 2026-07-28 검수 치명을 확인하고 넘긴 발행 (서수란 접수). 검수 모달이 스토어에 채워 넣으면
   //   여기서 크레딧 확인 모달을 열고, 발행 시 서버로 함께 보내 기록으로 남긴다.

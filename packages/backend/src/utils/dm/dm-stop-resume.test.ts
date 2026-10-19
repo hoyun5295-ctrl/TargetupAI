@@ -258,7 +258,8 @@ describe('DM 발행 중지 / 재개 (2026-08-06)', () => {
     };
     const dispatch = (insertRows: any[]) => {
       qmock.mockImplementation(async (sql: string) => {
-        if (sql.includes('FROM dm_pages')) return { rows: [{ id: 'dm1', company_id: 'c1' }] };
+        // ★ 2026-10-19 B-1014-3⑥ 블록 종류 = 서버가 가진 DM 의 그 블록 → 모의 DM 에 블록을 둔다
+        if (sql.includes('FROM dm_pages')) return { rows: [{ id: 'dm1', company_id: 'c1', sections: [{ id: 's1', type: 'lucky_draw', props: {} }, { id: 's2', type: 'survey', props: {} }] }] };
         if (sql.includes('INSERT INTO dm_event_responses')) return { rows: insertRows };
         return { rows: [] };
       });

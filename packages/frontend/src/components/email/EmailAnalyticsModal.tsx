@@ -150,7 +150,7 @@ export default function EmailAnalyticsModal({
                     );
                   })}
                 </div>
-                <div className="text-[10px] text-slate-400 italic mt-2">Data source: email_campaigns 발송 기준 최근 {days}일 vs 직전 동기간</div>
+                <div className="text-[10px] text-slate-400 italic mt-2">Data source: 이메일 발송 기준 최근 {days}일 vs 직전 동기간</div>
               </div>
 
               {/* 2. AI 종합 진단 */}
@@ -208,7 +208,7 @@ export default function EmailAnalyticsModal({
                       </div>
                     ))}
                   </div>
-                  <div className="text-[10px] text-slate-400 italic mt-2">Data source: email_events 오픈·클릭 일자 집계 (KST)</div>
+                  <div className="text-[10px] text-slate-400 italic mt-2">Data source: 이메일 오픈·클릭 일자 집계(KST)</div>
                 </div>
               )}
 

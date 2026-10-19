@@ -1154,7 +1154,7 @@ function renderPoll(p: any): string {
     <div class="dm-text-h2" style="color:var(--dm-neutral-900);margin-bottom:var(--dm-sp-4)">${escapeHtml(p.question || '[질문을 작성해주세요]')}</div>
     ${items}
     ${multi ? `<button data-dm-poll-submit class="dm-cta dm-cta-primary" style="width:100%;margin-top:var(--dm-sp-3)">투표하기</button>` : ''}
-    ${p.one_vote_per_user ? `<div style="font-size:var(--dm-fs-tiny);color:var(--dm-neutral-500);margin-top:var(--dm-sp-2)">1인 1회 투표${multi ? ' · 복수 선택 가능' : ''}</div>` : ''}
+    <div style="font-size:var(--dm-fs-tiny);color:var(--dm-neutral-500);margin-top:var(--dm-sp-2)">1인 1회 투표${multi ? ' · 복수 선택 가능' : ''}</div>
     <div data-dm-result style="display:none"></div>`;
   return `<div class="dm-section dm-poll" data-dm-poll${multi ? ' data-dm-poll-multi' : ''}>${dmEventCard({ accentVar: '--dm-primary', icon: 'poll', overline: 'POLL', body })}</div>`;
 }
@@ -1174,7 +1174,8 @@ function renderSurvey(p: any): string {
       control = `<div data-dm-rating data-dm-q="${qid}" style="display:flex;gap:6px">${[1, 2, 3, 4, 5].map((n) => `<span data-dm-rate="${n}" style="font-size:24px;color:var(--dm-neutral-300);cursor:pointer">★</span>`).join('')}</div>`;
     } else {
       const multi = q.type === 'multiple';
-      control = (Array.isArray(q.options) ? q.options : []).map((opt: any) =>
+      // ★ 2026-10-19 B-1014-3③ — 빈 선택지('' · 공백)는 그리지 않는다(AI 생성 · 옛 데이터의 빈 값 = 빈 라디오)
+      control = (Array.isArray(q.options) ? q.options : []).filter((opt: any) => String(opt ?? '').trim() !== '').map((opt: any) =>
         `<label style="display:flex;align-items:center;gap:8px;padding:8px 10px;background:var(--dm-bg);border:1px solid var(--dm-neutral-200);border-radius:var(--dm-radius-md);font-size:var(--dm-fs-small);margin-bottom:6px;cursor:pointer"><input type="${multi ? 'checkbox' : 'radio'}" name="dmq-${qid}" value="${escapeHtml(String(opt))}" data-dm-q="${qid}"/>${escapeHtml(String(opt))}</label>`,
       ).join('');
     }
@@ -1199,7 +1200,7 @@ function renderEmailCapture(p: any): string {
     <div style="font-size:var(--dm-fs-h3);font-weight:700;margin-bottom:var(--dm-sp-2)">${escapeHtml(p.headline || '[헤드라인을 작성해주세요]')}</div>
     ${p.description ? `<div style="font-size:var(--dm-fs-small);color:var(--dm-neutral-700);margin-bottom:var(--dm-sp-3);line-height:1.6">${escapeHtml(p.description)}</div>` : ''}
     <input type="email" data-field="email" placeholder="이메일 주소" style="width:100%;padding:12px;border:1px solid var(--dm-neutral-300);border-radius:var(--dm-radius-md);font-size:var(--dm-fs-small);margin-bottom:var(--dm-sp-2)"/>
-    <label style="display:flex;align-items:flex-start;gap:6px;font-size:var(--dm-fs-tiny);color:var(--dm-neutral-600);margin-bottom:var(--dm-sp-3)"><input type="checkbox" ${p.consent_required ? 'data-consent' : ''} style="margin-top:2px"/><span>${escapeHtml(p.consent_text || '')}</span></label>
+    <label style="display:flex;align-items:flex-start;gap:6px;font-size:var(--dm-fs-tiny);color:var(--dm-neutral-600);margin-bottom:var(--dm-sp-3)"><input type="checkbox" ${p.consent_required !== false ? 'data-consent' : ''} style="margin-top:2px"/><span>${escapeHtml(p.consent_text || '')}</span></label>
     <button data-dm-submit class="dm-cta dm-cta-primary" style="width:100%">${escapeHtml(p.reward_description ? `참여하고 ${p.reward_description}` : '참여하기')}</button>
     ${p.legal_notice ? `<div style="font-size:var(--dm-fs-tiny);color:var(--dm-neutral-500);margin-top:var(--dm-sp-2);line-height:1.5">${escapeHtml(p.legal_notice)}</div>` : ''}
     <div data-dm-result style="display:none"></div>`;
@@ -1214,7 +1215,7 @@ function renderClickRewards(p: any): string {
       <div style="color:var(--dm-accent)">${dmIcon(iconMap[p.reward_type] || 'star', 28)}</div>
       <div style="flex:1">
         <div style="font-size:var(--dm-fs-small);font-weight:600">${escapeHtml(p.reward_description || '')}</div>
-        ${p.show_progress ? `<div style="font-size:var(--dm-fs-tiny);color:var(--dm-neutral-500);margin-top:2px">목표 ${p.target_count || 0}회</div>` : ''}
+        ${p.show_progress ? `<div data-dm-progress style="font-size:var(--dm-fs-tiny);color:var(--dm-neutral-500);margin-top:2px">목표 ${p.target_count || 0}회</div>` : ''}
       </div>
     </div>
     <button data-dm-claim data-claim-success="참여가 완료되었습니다. 감사합니다!" class="dm-cta dm-cta-primary" style="width:100%;margin-top:var(--dm-sp-3)">참여하기</button>
@@ -1227,7 +1228,8 @@ function renderLuckyDraw(p: any): string {
   const inputs = fields.map((f: any) => {
     const t = f.name === 'phone' ? 'tel' : f.name === 'email' ? 'email' : 'text';
     const ph = f.name === 'name' ? '이름' : f.name === 'phone' ? '전화번호' : '이메일';
-    return `<input type="${t}" data-field="${escapeHtml(f.name)}" placeholder="${ph}" style="padding:12px;border:1px solid var(--dm-neutral-300);border-radius:var(--dm-radius-md);font-size:var(--dm-fs-small);background:var(--dm-bg);margin-bottom:var(--dm-sp-2);display:block;width:100%"/>`;
+    // ★ 2026-10-19 B-1014-3⑥ 필수 칸 = 표시 + 뷰어 검사(data-required) · 서버도 같은 칸을 본다
+    return `<input type="${t}" data-field="${escapeHtml(f.name)}"${f.required ? ' data-required="1"' : ''} placeholder="${ph}${f.required ? ' (필수)' : ''}" style="padding:12px;border:1px solid var(--dm-neutral-300);border-radius:var(--dm-radius-md);font-size:var(--dm-fs-small);background:var(--dm-bg);margin-bottom:var(--dm-sp-2);display:block;width:100%"/>`;
   }).join('');
   // ★ 2026-07-22 (임은지) 경품 등급(prizes)을 발행에 노출 — 편집기서 경품을 입력해도 DM 어디에도 안 보여 응모 유도가 안 되던 갭. 편집 캔버스도 미러.
   const prizes = Array.isArray(p?.prizes) ? p.prizes : [];
@@ -1258,7 +1260,7 @@ function renderRoulette(p: any): string {
     ${prizeChips}
     <div data-dm-wheel style="width:200px;height:200px;border-radius:var(--dm-radius-full);background:conic-gradient(var(--dm-primary) 0deg 45deg,var(--dm-primary-light) 45deg 90deg,var(--dm-accent) 90deg 135deg,var(--dm-neutral-100) 135deg 180deg,var(--dm-primary) 180deg 225deg,var(--dm-primary-light) 225deg 270deg,var(--dm-accent) 270deg 315deg,var(--dm-neutral-100) 315deg 360deg);margin:var(--dm-sp-3) auto;border:4px solid var(--dm-bg);box-shadow:var(--dm-shadow-md)"></div>
     <button data-dm-spin class="dm-cta dm-cta-primary">룰렛 돌리기</button>
-    ${p.one_spin_per_user ? `<div style="font-size:var(--dm-fs-tiny);color:var(--dm-neutral-500);margin-top:var(--dm-sp-2)">1인 1회 한정</div>` : ''}
+    <div style="font-size:var(--dm-fs-tiny);color:var(--dm-neutral-500);margin-top:var(--dm-sp-2)">1인 1회 한정</div>
     <div data-dm-result style="display:none"></div>`;
   return `<div class="dm-section dm-roulette" data-dm-roulette data-segments="${escapeHtml(JSON.stringify(segs))}">${dmEventCard({ accentVar: '--dm-primary', icon: 'wheel', overline: 'EVENT', body })}</div>`;
 }

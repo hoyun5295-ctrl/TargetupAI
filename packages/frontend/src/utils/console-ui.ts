@@ -63,7 +63,7 @@ export const CUI_TAB_COUNT_OFF = 'text-[12px] font-normal text-neutral-400 tabul
 /** 활성 탭 밑줄 — transform으로 미끄러진다 */
 export const CUI_TAB_INK =
   'absolute bottom-[-1px] left-0 h-0.5 rounded-full bg-indigo-600 ' +
-  'transition-[transform,width] duration-300 ease-[cubic-bezier(.22,1,.36,1)] motion-reduce:transition-none';
+  'transition-[transform,width] duration-300 [transition-timing-function:cubic-bezier(.22,1,.36,1)] motion-reduce:transition-none';
 
 // ────────────── 버튼 ──────────────
 

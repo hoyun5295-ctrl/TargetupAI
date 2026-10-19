@@ -15,7 +15,7 @@ import { eucKrByteLength } from './message-byte';
 import { findBenefitSpans } from './copy-benefit-detector';
 import { findSnsLinkSpans } from './sns-caption-rules';
 import {
-  applySpellIssue, protectedWordSpans, runSpellCheck,
+  applySpellIssue, protectedWordSpans, runSpellCheck, padLinkSpans,
   type SpellIssue, type SpellTextSpan,
 } from './spell-check';
 
@@ -38,14 +38,6 @@ function spansOf(text: string, re: RegExp): SpellTextSpan[] {
   return out;
 }
 
-/**
- * 링크는 앞뒤 한 칸씩 넓힌다 — 엔진은 구간 **안쪽** 끼워 넣기만 "건드림"으로 보므로, 링크 바로 끝(또는 앞)에
- * 글자를 붙이는 후보가 통과해 주소가 바뀐다(hanjul.ai/menu → hanjul.ai/menus). 주소는 한 글자도 바뀌면 안 된다.
- */
-function padLinkSpans(spans: SpellTextSpan[]): SpellTextSpan[] {
-  // ⛔ 문안 처음·끝에 붙은 링크도 막으려면 자르지 않는다(-1 · 길이+1). 엔진은 "구간 안쪽"만 보므로 자르면 끝 삽입이 통과한다.
-  return spans.map((s) => ({ ...s, start: s.start - 1, end: s.end + 1 }));
-}
 
 /**
  * 링크 불변(순수) — 고친 뒤 글의 링크 목록이 원문과 **글자까지 같을 때만** 남긴다(경계 판정과 별개인 두 번째 그물).

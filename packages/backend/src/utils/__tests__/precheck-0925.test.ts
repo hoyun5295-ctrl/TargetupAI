@@ -257,9 +257,9 @@ describe('5. 스팸 무료 체험 · 청구 제외', () => {
     expect(admin).toContain('billable: isSpamTestBillable(r.source)');
     const camp = read('routes/campaigns.ts');
     expect(camp).toContain('const isTrial = r.source === SPAM_TRIAL_SOURCE;');
-    // ★ 2026-09-26 F49: 비용은 청구 제외 판정 CT(체험 + 무료 자동 검사)를 따른다
-    // ★ 2026-09-29 차수 5: 발송 실패 행도 비용 0(청구 판정 CT isSpamResultBilled · v2-round5-0929 ③)
-    expect(camp).toContain('if (isSpamResultBilled(r.result) && isSpamTestBillable(r.source)) {');
+    // ★ 2026-10-19 B-0925-5 — 비용 = 기간 전체 청구 행 집계(최근 100줄 목록 합 폐지) · 같은 두 CT(청구 결과 · 청구 대상 검사)
+    expect(camp).toContain("SUM(CASE WHEN ${spamBilledResultSql('r')} AND ${spamBillableTestSql('t')} AND COALESCE(r.message_type, 'SMS') = 'SMS' THEN 1 ELSE 0 END) as billed_sms");
+    expect(camp).not.toContain('sfCostCalc +=');
   });
   it('Codex 1R — 최근 검사 조회는 실제로 보낸 종류의 결과가 있는 검사만 인정한다', () => {
     const rc = route.slice(route.indexOf("router.post('/recent-check'"), route.indexOf("router.get('/tests'"));

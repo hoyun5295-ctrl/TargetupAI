@@ -9,7 +9,7 @@
  */
 
 import {
-  judgeSpellCandidates, protectedWordSpans, runSpellCheck, spellTextHash,
+  judgeSpellCandidates, protectedWordSpans, runSpellCheck, spellTextHash, padLinkSpans,
   SPELL_MAX_CHANGE, SPELL_MAX_ISSUES,
   type SpellCandidate, type SpellIssue, type SpellKind,
 } from './spell-check';
@@ -33,7 +33,8 @@ export function snsBodyHash(body: string): string {
 /** 보호 구간 — 링크 · 혜택 덩어리(금액·%) · #태그 · @계정 · 회사명·브랜드명 · 자주 쓰는 태그 낱말. */
 export function snsSpellProtectedSpans(body: string, words: readonly string[]): SnsTextSpan[] {
   const spans: SnsTextSpan[] = [
-    ...findSnsLinkSpans(body),
+    // ★ 2026-10-19 B-0925-3 — 링크 앞뒤 한 칸까지 보호(끝에 글자를 붙이는 교정 = 주소 변경 · 문자 층 0925 와 같은 CT)
+    ...padLinkSpans(findSnsLinkSpans(body)),
     ...findBenefitSpans(body),
     ...findBodyHashtagSpans(body),
   ];

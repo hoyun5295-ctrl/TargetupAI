@@ -1088,7 +1088,7 @@ export default function InAppMessagesPage() {
                   </button>
                 ))}
               </div>
-              <div className="text-[10px] text-slate-400 italic mt-2">Data source: cdp_inapp_messages (회사 격리)</div>
+              <div className="text-[10px] text-slate-400 italic mt-2">Data source: 이 회사의 인앱 메시지</div>
             </div>
           )}
         </div>
@@ -3912,7 +3912,7 @@ function VariantReviewModal({ parentId, messageTitle, authHeaders, onToast, onCl
               </button>
             </div>
           ))}
-          <p className="text-[10px] text-slate-400 italic">Data source: cdp_inapp_messages 변형 · cdp_inapp_impressions 표시·클릭</p>
+          <p className="text-[10px] text-slate-400 italic">Data source: 인앱 메시지 변형 · 표시·클릭</p>
         </div>
       </div>
     </div>
@@ -4031,7 +4031,7 @@ function DrillDownModal({ loading, stats, explain, explainLoading, onRequestExpl
                   <div className="mt-2.5 text-[11px] text-slate-500">
                     익명 방문자 <strong className="text-slate-700">{viewers.anonymous.visitors.toLocaleString()}명</strong>: 표시 {viewers.anonymous.impressions.toLocaleString()} · 클릭 {viewers.anonymous.clicks.toLocaleString()} <span className="text-slate-400">(비로그인 방문은 개인 식별이 불가해 합산으로만 표시)</span>
                   </div>
-                  <div className="text-[10px] text-slate-400 italic mt-2">Data source: cdp_inapp_impressions × customers(식별분) + 익명 합산 · purchases 7일 실측</div>
+                  <div className="text-[10px] text-slate-400 italic mt-2">Data source: 인앱 표시 · 클릭(식별 고객 + 익명 합산) · 구매 7일 실측</div>
                 </div>
               )}
 
@@ -4054,7 +4054,7 @@ function DrillDownModal({ loading, stats, explain, explainLoading, onRequestExpl
                     <div key={h.hour} className="col-span-3">{h.hour}시</div>
                   ))}
                 </div>
-                <div className="text-[10px] text-slate-400 italic mt-2">Data source: cdp_inapp_impressions KST 시간대별 집계</div>
+                <div className="text-[10px] text-slate-400 italic mt-2">Data source: 인앱 표시 · 클릭 시간대별(KST) 집계</div>
               </div>
 
               {/* 디바이스 — ★ 2026-09-27 한줄로 V2 R252: 실측이 있을 때만(노출 기록에 기기 정보가 아직 없다 · 옛 70·30 나눔 표시 제거) */}
@@ -4070,7 +4070,7 @@ function DrillDownModal({ loading, stats, explain, explainLoading, onRequestExpl
                     </div>
                   ))}
                 </div>
-                <div className="text-[10px] text-slate-400 italic mt-2">Data source: cdp_inapp_impressions 기기 정보</div>
+                <div className="text-[10px] text-slate-400 italic mt-2">Data source: 인앱 표시 · 클릭 기기 정보</div>
               </div>
               )}
             </>

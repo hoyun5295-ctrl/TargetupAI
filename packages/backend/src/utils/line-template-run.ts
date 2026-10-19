@@ -16,6 +16,7 @@ import type { LinePageMaterial } from './line-template-page';
 import type { LineTemplate, LineLayout, LineChannel, LineCopyKey } from './design-core/line-templates';
 import { composeLineDm, composeLineEmail, composeLineInapp, lineTemplateGate, type LineMaterials, type LineCopy, type LineDmResult, type LineInAppMessage } from './line-template-compose';
 import { fillLineTemplateCopy, type LineCopyGround } from './line-template-copy';
+import { withoutBenefitSpans } from './copy-benefit-detector';
 import type { Section } from './dm/dm-section-registry';
 import type { LineStepsManualProduct } from './one-line-steps';
 
@@ -121,17 +122,29 @@ export interface LineTemplateDraft {
  *   AI 문구에는 숫자 · 혜택이 실릴 수 없고(근거에 없으면 검사가 기본 문구로 바꾼다), 혜택 원문 · 마감 · 행사명은 코드가 재료로 놓는다
  *   (B-1018-1 혜택 교차 조합이 생기지 않는다). 생략 = 지금 그대로(1017 고객 경로 · AI 영업).
  */
-export async function draftLineTemplate(input: LineTemplateRunInput, ai: { userId?: string; source: string }, opts?: { factsOnly?: boolean }): Promise<LineTemplateDraft> {
+// ★ 2026-10-19 B-1018-1 — 고객 경로(한 줄 템플릿 DM · 이메일 · 인앱)도 factsOnly 로 부른다(교차 조합 「5% 할인」 이 생길 자리가 없다 · 값 = 코드).
+//   subjectBenefit = 이메일 제목 앞에 사람이 확인한 혜택 원문을 코드가 붙인다(값이 빠진 제목으로 품질이 깎이지 않게 · 40자 안일 때만).
+export async function draftLineTemplate(input: LineTemplateRunInput, ai: { userId?: string; source: string }, opts?: { factsOnly?: boolean; subjectBenefit?: boolean }): Promise<LineTemplateDraft> {
   const { t, materials, ground: g0 } = lineTemplateMaterials(input);
-  const ground: LineCopyGround = opts?.factsOnly ? { ...g0, benefit: null, periodLabel: null, pageText: null } : g0;
+  // factsOnly = 한 줄 원문의 혜택 자리도 뺀다(F1b · 근거에 혜택이 하나도 없어야 교차 조합이 값 대조를 못 지난다)
+  const ground: LineCopyGround = opts?.factsOnly ? { ...g0, line: withoutBenefitSpans(g0.line), benefit: null, periodLabel: null, pageText: null } : g0;
   let filled: Awaited<ReturnType<typeof fillLineTemplateCopy>>;
   try {
     filled = await fillLineTemplateCopy(t, ground, { companyId: input.companyId, userId: ai.userId, source: ai.source });
   } catch (err: any) {
     throw new LineTemplateError(503, 'LINE_TEMPLATE_AI_FAILED', '문구를 만들지 못했어요. 크레딧은 쓰지 않았어요. 잠시 뒤 다시 만들어 주세요.', String(err?.message || ''));
   }
-  return { t, materials, copy: filled.copy, replaced: filled.replaced };
+  const copy = { ...filled.copy };
+  const benefit = String(materials.benefit || '').trim();
+  if (opts?.subjectBenefit && benefit) {
+    const withBenefit = `[${benefit}] ${copy.email_subject}`.trim();
+    if (withBenefit.length <= LINE_SUBJECT_MAX) copy.email_subject = withBenefit;
+  }
+  return { t, materials, copy, replaced: filled.replaced };
 }
+
+/** 이메일 제목 상한(템플릿 칸 상한과 같다) */
+const LINE_SUBJECT_MAX = 40;
 
 /** DM 조립 + 품질 관문(걸리면 던짐) */
 export function buildLineTemplateDm(d: LineTemplateDraft, layout: LineLayout): LineDmResult {

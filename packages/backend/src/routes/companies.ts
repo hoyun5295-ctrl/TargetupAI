@@ -35,7 +35,7 @@ import {
 import { buildXlsxBuffer, XLSX_CONTENT_TYPE, xlsxContentDisposition } from '../utils/xlsx-writer';
 import { buildRcsTemplateSheet, templateExportFilename } from '../utils/template-export';
 // ★ 2026-09-28 한줄로 V2 R106 — 대시보드 카드 집계 캐시(고객 통계와 같은 SWR 정책)
-import { swrCacheWithAt } from '../utils/swr-cache';
+import { swrCacheWithAt, dashboardCardsGenKey } from '../utils/swr-cache';
 import { CACHE_TTL } from '../config/defaults';
 import { computeMonthlyUsage } from '../utils/monthly-usage';   // ★ 2026-10-18 이번달 사용금액 카드 = 발송 현황과 같은 CT
 
@@ -1402,6 +1402,7 @@ router.get('/dashboard-cards', async (req: Request, res: Response) => {
       softTtlSec: CACHE_TTL.customerStats,
       hardTtlSec: 600,
       compute: () => aggregateDashboardCards(companyId, cardIds, userId, userType, cardConsentScope),
+      generationKey: dashboardCardsGenKey(companyId),   // ★ 1019 B-1010-10 업로드 · 삭제 · 싱크 무효화와 짝
     });
 
     res.json({

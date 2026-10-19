@@ -2,7 +2,7 @@ import { Request, Response, Router } from 'express';
 import { isDemoCompany } from '../utils/demo-company';   // ★ 2026-10-09 시연 회사 = 여정 활성화 비용 0
 import { query } from '../config/database';
 import { authenticate } from '../middlewares/auth';
-import { checkAPIStatus, extractVarCatalog, filterVarCatalogByData, generateCustomMessages, generateMessages, parseBriefing, recommendTarget, countFilteredCustomers, recommendNextCampaign, refineDirectMessage, callAIWithFallback } from '../services/ai';
+import { checkAPIStatus, extractVarCatalog, filterVarCatalogByData, generateMessages, recommendTarget, countFilteredCustomers, recommendNextCampaign, refineDirectMessage, callAIWithFallback } from '../services/ai';
 import {
   createOperatorInputFromBody, operatorSaveErrorResponse,
   runOperatorPreview, startOperatorFromPreview, updateOperatorPreview, previewOperatorApproval, approveOperatorFromScreen,
@@ -212,6 +212,7 @@ import { generateVariantsFromMessage } from '../utils/variant-generator';
 import { getJourneyLiveSnapshot } from '../utils/journey-stats';
 // ★ D211+ Predictive 강화 (2026-05-23 Harold 명시): CT-63 Explainability
 import { explainCustomerPrediction } from '../utils/predictive-explainer';
+import { singleFlight } from '../utils/inflight-lock';
 
 
 // ★ D79: 인라인 래퍼 제거 → CT-01 buildFilterWhereClauseCompat 직접 사용
@@ -901,165 +902,7 @@ router.post('/target-recipients', async (req: Request, res: Response) => {
   }
 });
 
-// POST /api/ai/parse-briefing - 프로모션 브리핑 → 구조화 파싱 + 타겟 고객 수 산출
-router.post('/parse-briefing', async (req: Request, res: Response) => {
-  try {
-    const companyId = req.user?.companyId;
-    const userId = req.user?.userId;
-    const userType = req.user?.userType;
-
-    if (!companyId) {
-      return res.status(403).json({ error: '회사 권한이 필요합니다' });
-    }
-
-    // ★ CT-17: 요금제 게이팅 — ai_messaging (BASIC+)
-    {
-      const ctx = await loadPlanContext(companyId);
-      if (!ctx) return res.status(404).json({ error: '회사 정보를 찾을 수 없습니다.' });
-      const check = canUseFeature(ctx, 'ai_messaging');
-      if (!check.allowed) {
-        return res.status(403).json({ error: check.errorMsg, code: check.errorCode });
-      }
-    }
-
-    const { briefing } = req.body;
-    if (!briefing || briefing.trim().length < 10) {
-      return res.status(400).json({ error: '브리핑 내용을 10자 이상 입력해주세요' });
-    }
-
-    // ★ D84: companyId 전달 → 동적 필드 프롬프트 생성 (커스텀 필드 + 전체 FIELD_MAP 지원)
-    const result = await parseBriefing(briefing.trim(), companyId);
-
-    // 사용자 매장 필터 (일반 사용자는 본인 store_codes만)
-    // ★ B16-01: store_codes 없는 company_user → 차단
-    let storeFilter = '';
-    const baseParams: any[] = [companyId];
-
-    // ★ B16-01: 브랜드 격리 — store-scope 컨트롤타워
-    if (userType === 'company_user' && userId) {
-      const scope = await getStoreScope(companyId, userId);
-      if (scope.type === 'filtered') {
-        storeFilter = ' AND id IN (SELECT customer_id FROM customer_stores WHERE company_id = $1 AND store_code = ANY($2::text[]))';
-        baseParams.push(scope.storeCodes);
-      } else if (scope.type === 'blocked') {
-        return res.status(403).json({ error: '소속 브랜드가 지정되지 않았습니다. 관리자에게 문의하세요.' });
-      }
-    }
-
-    // targetFilters 기반 고객 수 산출
-    const targetFilters = result.targetFilters || {};
-    const { sql: filterWhere, params: filterParams } = buildFilterWhereClauseCompat(targetFilters, baseParams.length + 1, await viewerBrandConsent(companyId, req.user));
-
-    // ★ B17-01: 수신거부 user_id 기준 통일
-    const unsubIdxC = baseParams.length + filterParams.length + 1;
-    const consentC = await viewerConsentSql(companyId, req.user, 'c');   // ★ 2026-10-02 수신동의 읽기 = CT(mall-consent)
-    const countResult = await query(
-      `SELECT COUNT(*) FROM customers c
-       WHERE c.company_id = $1 AND c.is_active = true AND ${consentC.isTrue}${storeFilter} ${filterWhere}
-       AND NOT EXISTS (SELECT 1 FROM unsubscribes u WHERE u.user_id = $${unsubIdxC} AND u.phone = c.phone)`,
-      [...baseParams, ...filterParams, userId]
-    );
-    const estimatedCount = parseInt(countResult.rows[0].count);
-
-    const unsubResult = await query(
-      `SELECT COUNT(*) FROM customers c
-       WHERE c.company_id = $1 AND c.is_active = true AND ${consentC.isTrue}${storeFilter} ${filterWhere}
-       AND EXISTS (SELECT 1 FROM unsubscribes u WHERE u.user_id = $${unsubIdxC} AND u.phone = c.phone)`,
-      [...baseParams, ...filterParams, userId]
-    );
-    const unsubscribeCount = parseInt(unsubResult.rows[0].count);
-
-    // ★ D88: 타겟 필터에 맞는 샘플 고객 1명 반환 — 미리보기용
-    // enabled-fields의 sample(타겟 무관)과 달리, 실제 타겟 고객에서 샘플링
-    let sampleCustomer: Record<string, any> = {};
-    try {
-      const sampleResult = await query(
-        `SELECT * FROM customers c
-         WHERE c.company_id = $1 AND c.is_active = true AND ${consentC.isTrue}${storeFilter} ${filterWhere}
-         AND NOT EXISTS (SELECT 1 FROM unsubscribes u WHERE u.user_id = $${unsubIdxC} AND u.phone = c.phone)
-         ORDER BY c.updated_at DESC NULLS LAST LIMIT 1`,
-        [...baseParams, ...filterParams, userId]
-      );
-      if (sampleResult.rows.length > 0) {
-        const row = sampleResult.rows[0];
-        sampleCustomer = { ...row };
-        // custom_fields JSONB flat 처리 — 프론트에서 field_key로 직접 접근 가능하게
-        // ★ D142 (2026-04-28): custom_* 값은 String() 강제 — 프론트 typeof 자동 추론 차단 (Harold님 원칙)
-        if (row.custom_fields && typeof row.custom_fields === 'object') {
-          for (const [k, v] of Object.entries(row.custom_fields)) {
-            if (sampleCustomer[k] === undefined) sampleCustomer[k] = v == null ? '' : String(v);
-          }
-        }
-      }
-    } catch (e) { console.warn('[parse-briefing] 샘플 고객 조회 실패:', e); }
-
-    return res.json({
-      ...result,
-      estimatedCount,
-      unsubscribeCount,
-      sampleCustomer,
-    });
-  } catch (error) {
-    console.error('브리핑 파싱 오류:', error);
-    return res.status(500).json({ error: '서버 오류가 발생했습니다.' });
-  }
-});
-
-// POST /api/ai/generate-custom - 개인화 맞춤 문안 생성
-router.post('/generate-custom', async (req: Request, res: Response) => {
-  try {
-    const companyId = req.user?.companyId;
-    const userId = req.user?.userId;
-    if (!companyId) {
-      return res.status(403).json({ error: '회사 권한이 필요합니다' });
-    }
-
-    // ★ CT-17: 요금제 게이팅 — ai_messaging (BASIC+)
-    {
-      const ctx = await loadPlanContext(companyId);
-      if (!ctx) return res.status(404).json({ error: '회사 정보를 찾을 수 없습니다.' });
-      const check = canUseFeature(ctx, 'ai_messaging');
-      if (!check.allowed) {
-        return res.status(403).json({ error: check.errorMsg, code: check.errorCode });
-      }
-    }
-
-    const { briefing, promotionCard, personalFields, fieldLabels, url, tone, brandName, channel, isAd } = req.body;
-
-    if (!promotionCard || !personalFields || personalFields.length === 0) {
-      return res.status(400).json({ error: '프로모션 카드와 개인화 필드를 입력해주세요' });
-    }
-
-    // 회사 정보 조회
-    const companyResult = await query(
-      'SELECT COALESCE(reject_number, opt_out_080_number) as reject_number, brand_name, brand_slogan, brand_description, brand_tone FROM companies WHERE id = $1',
-      [companyId]
-    );
-    const companyInfo = companyResult.rows[0] || {};
-    // ★ D102: getOpt080Number 컨트롤타워 사용 (인라인 조회 제거)
-    const userOpt080 = await getOpt080Number(userId || null, companyId);
-    if (userOpt080) companyInfo.reject_number = userOpt080;
-
-    const result = await generateCustomMessages({
-      briefing,
-      promotionCard,
-      personalFields,
-      fieldLabels,
-      url,
-      tone,
-      brandName: companyInfo.brand_name || brandName || '브랜드',
-      brandTone: companyInfo.brand_tone,
-      channel: channel || 'LMS',
-      isAd,
-      rejectNumber: companyInfo.reject_number,
-    });
-
-    return res.json(result);
-  } catch (error) {
-    console.error('맞춤 문안 생성 오류:', error);
-    return res.status(500).json({ error: '서버 오류가 발생했습니다.' });
-  }
-});
+// ★ 2026-10-19 B-1005-1④ — 맞춤한줄 백엔드(/parse-briefing · /generate-custom) 삭제 · 부르는 화면 0(열리지 않던 창을 지운 뒤) · 직접 부르면 크레딧만 빠지는 입구였다.
 
 // ============================================================
 // POST /api/ai/refine-message — AI 인라인 다듬기 (D152+ PDF 0511 funnel fix)
@@ -1550,7 +1393,7 @@ router.post('/operator/preview-recipients', async (req: Request, res: Response) 
 
     // 회사 default callback 조회 (frontend가 별 호출 X)
     const cbResult = await query(
-      `SELECT REPLACE(phone, '-', '') AS phone FROM callback_numbers WHERE company_id = $1 AND is_default = true LIMIT 1`,
+      `SELECT regexp_replace(phone, '[^0-9]', '', 'g') AS phone FROM callback_numbers WHERE company_id = $1 AND is_default = true LIMIT 1`,
       [companyId]
     );
     const defaultCallback = cbResult.rows[0]?.phone || null;
@@ -2164,7 +2007,7 @@ router.get('/operator/performance/data-availability', async (req: Request, res: 
 // ============================================================
 
 // Operator CRUD
-router.post('/operator/continuous', async (req: Request, res: Response) => {
+router.post('/operator/continuous', singleFlight('auto-marketing-create', async (req: Request, res: Response) => {
   try {
     const companyId = req.user?.companyId;
     const userId = req.user?.userId;
@@ -2240,7 +2083,7 @@ router.post('/operator/continuous', async (req: Request, res: Response) => {
     console.error('[Operator continuous POST] 오류:', err);
     return res.status(500).json({ success: false, error: err?.message || 'Continuous Operator 신설 실패' });
   }
-});
+}));
 
 // ★ 2026-10-05 자동 마케팅 [제안 받기] = 미리보기(설계서 docs/2026-10-05-automarketing-preview-design.md §2)
 //   등록 0 · 첫 회차와 같은 계산 · 5크레딧(대상 0명이면 0). 시작은 아래 from-preview 가 미리보기 id 하나로만 한다.
@@ -3546,7 +3389,7 @@ router.get('/operator/journeys/lifecycle-map', async (req: Request, res: Respons
     if (!isAiOperatorAllowed(planCtx, req.user)) {
       return res.status(403).json({ success: false, error: 'AI Operator 진입 권한이 없습니다.', code: 'AI_OPERATOR_GATED' });
     }
-    const map = await buildLifecycleMap(companyId);
+    const map = await buildLifecycleMap(companyId, req.user?.userId);   // ★ 1019 B-1010-13 숫자 = 보는 사람 범위
     return res.json({ success: true, map });
   } catch (err: any) {
     const msg = err?.message || '';
@@ -3583,7 +3426,7 @@ router.post('/operator/journeys-interview/parse', async (req: Request, res: Resp
   }
 });
 
-router.post('/operator/journeys-interview/design', async (req: Request, res: Response) => {
+router.post('/operator/journeys-interview/design', singleFlight('journey-generate', async (req: Request, res: Response) => {
   try {
     const companyId = req.user?.companyId;
     const userId = req.user?.userId;
@@ -3613,7 +3456,7 @@ router.post('/operator/journeys-interview/design', async (req: Request, res: Res
       return res.status(402).json({ success: false, error: '여정 초안을 만드는 데 필요한 크레딧이 부족합니다. 크레딧을 충전해 주세요.', code: 'INSUFFICIENT_CREDIT' });
     }
     if (err instanceof JourneyInputError) {
-      return res.status(400).json({ success: false, error: err.message, code: err.code });
+      return res.status(400).json({ success: false, error: err.message, code: err.code, ...(err.journeyId ? { journeyId: err.journeyId } : {}) });
     }
     if (err instanceof JourneyStepGateError) {
       return res.status(409).json({ success: false, error: err.message, code: err.code });
@@ -3625,7 +3468,7 @@ router.post('/operator/journeys-interview/design', async (req: Request, res: Res
     console.error('[Journeys interview design] 오류:', err);
     return res.status(500).json({ success: false, error: '여정을 설계하지 못했어요. 잠시 뒤 다시 시도해 주세요.' });
   }
-});
+}));
 
 // ★ 2026-09-30 여정 V2 3차 — 상품 재구매 여정(설계서 §6). 상품은 그 회사 현역 문에서 관측된 목록에서만 고른다.
 //   목록 · 사용 기간 제안 = DB 실측(AI 0 · 차감 0) · 만들기 = AI 설계 1회(여정 AI 생성 단가) + 서버 초안 저장.
@@ -3694,7 +3537,7 @@ router.post('/operator/journeys-product/create', async (req: Request, res: Respo
     if (err instanceof InsufficientCreditError) {
       return res.status(402).json({ success: false, error: '여정 초안을 만드는 데 필요한 크레딧이 부족합니다. 크레딧을 충전해 주세요.', code: 'INSUFFICIENT_CREDIT' });
     }
-    if (err instanceof JourneyInputError) return res.status(400).json({ success: false, error: err.message, code: err.code });
+    if (err instanceof JourneyInputError) return res.status(400).json({ success: false, error: err.message, code: err.code, ...(err.journeyId ? { journeyId: err.journeyId } : {}) });
     if (err instanceof JourneyMigrationPendingError) return res.status(503).json({ success: false, error: err.message, code: err.code });
     // CHECK 위반(23514) = 시작 사건 목록 DDL 전 — 500 대신 마이그레이션 안내(db_alter_safety_net)
     if (err?.code === '23514') {
@@ -3719,7 +3562,7 @@ router.post('/operator/journeys/:id/new-version', async (req: Request, res: Resp
     const out = await createNewVersion(companyId, req.params.id);
     return res.json({ success: true, ...out });
   } catch (err: any) {
-    if (err instanceof JourneyInputError) return res.status(400).json({ success: false, error: err.message, code: err.code });
+    if (err instanceof JourneyInputError) return res.status(400).json({ success: false, error: err.message, code: err.code, ...(err.journeyId ? { journeyId: err.journeyId } : {}) });
     const msg = err?.message || '';
     if (msg.includes('column') && msg.includes('does not exist')) {
       return res.status(503).json({ success: false, error: 'DB 마이그레이션 필요: 운영자에게 journeys lineage_id · entry_closed_at ALTER 실행 요청', code: 'DB_MIGRATION_PENDING' });
@@ -3876,7 +3719,7 @@ router.post('/operator/journeys-reco/design', async (req: Request, res: Response
       return res.status(402).json({ success: false, error: '여정 초안을 만드는 데 필요한 크레딧이 부족합니다. 크레딧을 충전해 주세요.', code: 'INSUFFICIENT_CREDIT' });
     }
     if (err instanceof JourneyInputError) {
-      return res.status(400).json({ success: false, error: err.message, code: err.code });
+      return res.status(400).json({ success: false, error: err.message, code: err.code, ...(err.journeyId ? { journeyId: err.journeyId } : {}) });
     }
     if (err instanceof JourneyStepGateError) {
       return res.status(409).json({ success: false, error: err.message, code: err.code });
@@ -3973,7 +3816,7 @@ router.post('/operator/journeys', async (req: Request, res: Response) => {
       return res.status(409).json({ success: false, error: err.message, code: err.code });
     }
     if (err instanceof JourneyInputError) {
-      return res.status(400).json({ success: false, error: err.message, code: err.code });
+      return res.status(400).json({ success: false, error: err.message, code: err.code, ...(err.journeyId ? { journeyId: err.journeyId } : {}) });
     }
     console.error('[Journeys create] 오류:', err);
     return res.status(500).json({ success: false, error: err?.message || '여정 생성 실패' });
@@ -4132,14 +3975,16 @@ router.post('/operator/journeys-activate-batch', async (req: Request, res: Respo
     if (!isAiOperatorAllowed(planCtx, req.user)) {
       return res.status(403).json({ success: false, error: 'AI Operator 진입 권한이 없습니다.', code: 'AI_OPERATOR_GATED' });
     }
-    const { journeyIds, confirmCallbackExclusionIds } = req.body || {};
+    const { journeyIds, confirmCallbackExclusionIds, acknowledgedOverlaps } = req.body || {};
     const uuidRe = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
     const ids: string[] = Array.isArray(journeyIds) ? journeyIds.map(String).filter((x: string) => uuidRe.test(x)) : [];
     if (ids.length === 0) return res.status(400).json({ success: false, error: '켤 여정을 골라 주세요.' });
     if (ids.length > MAX_BATCH_ACTIVATION) return res.status(400).json({ success: false, error: `한 번에 ${MAX_BATCH_ACTIVATION}개까지 켤 수 있어요.` });
     const out = await activateJourneysInOrder(companyId, userId, ids, {
       confirmCallbackExclusionIds: Array.isArray(confirmCallbackExclusionIds) ? confirmCallbackExclusionIds.map(String) : [],
+      acknowledgedOverlaps: Array.isArray(acknowledgedOverlaps) ? acknowledgedOverlaps.map(String) : [],
     });
+    if (!out.ok && out.code === 'OVERLAP_UNRESOLVED') return res.status(409).json({ success: false, error: out.message, code: out.code, pairs: out.pairs });   // ★ 1019 B-1009-5
     if (!out.ok) return res.status(402).json({ success: false, error: out.message, code: out.code, needed: out.needed });
     return res.json({ success: true, items: out.items });
   } catch (err: any) {
@@ -4205,7 +4050,7 @@ router.patch('/operator/journeys/:id/steps/:stepId', async (req: Request, res: R
       return res.status(409).json({ success: false, error: err.message, code: err.code });
     }
     if (err instanceof JourneyInputError) {
-      return res.status(400).json({ success: false, error: err.message, code: err.code });
+      return res.status(400).json({ success: false, error: err.message, code: err.code, ...(err.journeyId ? { journeyId: err.journeyId } : {}) });
     }
     console.error('[Journeys update step] 오류:', err);
     return res.status(500).json({ success: false, error: err?.message || 'step 수정 실패' });
@@ -4265,7 +4110,7 @@ router.post('/operator/journeys/:id/steps', async (req: Request, res: Response) 
       return res.status(409).json({ success: false, error: err.message, code: err.code });
     }
     if (err instanceof JourneyInputError) {
-      return res.status(400).json({ success: false, error: err.message, code: err.code });
+      return res.status(400).json({ success: false, error: err.message, code: err.code, ...(err.journeyId ? { journeyId: err.journeyId } : {}) });
     }
     const msg = String(err?.message || '');
     if (msg.includes('column') && msg.includes('does not exist')) {
@@ -4295,7 +4140,7 @@ router.delete('/operator/journeys/:id/steps/:stepId', async (req: Request, res: 
       return res.status(409).json({ success: false, error: err.message, code: err.code });
     }
     if (err instanceof JourneyInputError) {
-      return res.status(400).json({ success: false, error: err.message, code: err.code });
+      return res.status(400).json({ success: false, error: err.message, code: err.code, ...(err.journeyId ? { journeyId: err.journeyId } : {}) });
     }
     const msg = String(err?.message || '');
     if (msg.includes('column') && msg.includes('does not exist')) {
@@ -5008,7 +4853,7 @@ router.post('/operator/journeys/anchor-generate-plan', async (req: Request, res:
 
 // POST /api/ai/operator/journeys-ai-generate — One-shot 자연어 → 완전 여정 패키지
 //   D187-fix3 핵심: Opus 4.7 + 시즌 + 회사 메모리 + Multi-context → 완전 패키지
-router.post('/operator/journeys-ai-generate', async (req: Request, res: Response) => {
+router.post('/operator/journeys-ai-generate', singleFlight('journey-generate', async (req: Request, res: Response) => {
   try {
     const companyId = req.user?.companyId;
     const userId = req.user?.userId;
@@ -5039,12 +4884,12 @@ router.post('/operator/journeys-ai-generate', async (req: Request, res: Response
     return res.json({ success: true, package: pkg });
   } catch (err: any) {
     if (err instanceof JourneyInputError) {
-      return res.status(400).json({ success: false, error: err.message, code: err.code });
+      return res.status(400).json({ success: false, error: err.message, code: err.code, ...(err.journeyId ? { journeyId: err.journeyId } : {}) });
     }
     console.error('[Journeys AI generate] 오류:', err);
     return res.status(500).json({ success: false, error: err?.message || 'AI 생성 실패' });
   }
-});
+}));
 
 // POST /api/ai/operator/journeys-ai-edit — 대화형 여정 수정 (초안 패키지에 자연어 수정 반영)
 router.post('/operator/journeys-ai-edit', async (req: Request, res: Response) => {
@@ -5067,7 +4912,7 @@ router.post('/operator/journeys-ai-edit', async (req: Request, res: Response) =>
     return res.json({ success: true, package: pkg });
   } catch (err: any) {
     if (err instanceof JourneyInputError) {
-      return res.status(400).json({ success: false, error: err.message, code: err.code });
+      return res.status(400).json({ success: false, error: err.message, code: err.code, ...(err.journeyId ? { journeyId: err.journeyId } : {}) });
     }
     console.error('[Journeys AI edit] 오류:', err);
     return res.status(500).json({ success: false, error: err?.message || 'AI 수정 실패' });
@@ -5425,7 +5270,7 @@ router.get('/operator/self-diagnosis', async (req: Request, res: Response) => {
     if (!isAiOperatorAllowed(planCtx, req.user)) {
       return res.status(403).json({ success: false, error: 'AI Operator 진입 권한이 없습니다.', code: 'AI_OPERATOR_GATED' });
     }
-    const diagnosis = await diagnoseCompanyHealth(companyId);
+    const diagnosis = await diagnoseCompanyHealth(companyId, { userId: req.user?.userId, userType: req.user?.userType });   // ★ 1019 B-1010-13 보는 사람 범위
     // ★ 2026-07-02 1차(좌측 진단 패널 개편): 일일 브리핑 + 자동마케팅 현황을 같은 응답에 동봉 — 추가 fetch 0.
     //   브리핑이 있으면 화면이 룰 기반 추천 대신 브리핑(실데이터·학습 반영)을 단일 소스로 쓴다.
     let brief: any = null;
@@ -5470,7 +5315,7 @@ router.get('/operator/predictive/summary', async (req: Request, res: Response) =
     if (!isAiOperatorAllowed(planCtx, req.user)) {
       return res.status(403).json({ success: false, error: 'AI Operator 진입 권한이 없습니다.', code: 'AI_OPERATOR_GATED' });
     }
-    const summary = await getCompanyPredictionSummary(companyId);
+    const summary = await getCompanyPredictionSummary(companyId, await getOwnerCustomerScopeSql(companyId, req.user?.userId, 'sc'));   // ★ 1019 B-1010-13
     return res.json({ success: true, summary });
   } catch (err: any) {
     console.error('[Predictive summary] 오류:', err);

@@ -13,7 +13,7 @@ import { getSourceRef, logTrainingData, updateTrainingMetrics } from '../utils/t
 import { recordCustomerSends } from '../utils/customer-send-stats';
 import { replaceVariables, enrichWithCustomFields, getOpt080Number, buildAdMessage, prepareFieldMappings, prepareSendMessage, stripAdParts, composeSpamCheckText } from '../utils/messageUtils';
 import { checkSpamBlockBeforeCharge } from '../utils/spam-block';
-import { SUCCESS_CODES, PENDING_CODES, SUCCESS_CODES_SQL, PENDING_CODES_SQL, isSuccess, SPAM_RESULT, getSendTypeLabel, getDisplayContents, spamBilledResultSql, spamFailedResultSql, isSpamResultBilled, spamResultRowStatus } from '../utils/sms-result-map';
+import { SUCCESS_CODES, PENDING_CODES, SUCCESS_CODES_SQL, PENDING_CODES_SQL, isSuccess, SPAM_RESULT, getSendTypeLabel, getDisplayContents, spamBilledResultSql, spamFailedResultSql, spamResultRowStatus } from '../utils/sms-result-map';
 import { DEFAULT_COSTS, getCompanyCosts, redis, CACHE_TTL, BATCH_SIZES, SEND_HOURS } from '../config/defaults';
 import { isValidSmsTable } from '../utils/sms-table-validator';
 import { normalizePhone } from '../utils/normalize-phone';
@@ -66,7 +66,7 @@ import { cancelCampaign, syncCampaignResults, cleanupScheduledCampaigns, failCam
 import { buildFilterQueryCompat } from '../utils/customer-filter';
 import { findUnfilledAlimtalkVars, fillAlimtalkVarMap } from '../utils/alimtalk-vars';
 import { resolveAlimtalkFallback, validateAlimtalkFallback } from '../utils/alimtalk-fallback';
-import { filterByIndividualCallback, buildCallbackErrorResponse, buildCallbackConfirmResponse, resolveCustomerCallback, callbackAssignmentUserId } from '../utils/callback-filter';
+import { filterByIndividualCallback, buildCallbackErrorResponse, buildCallbackConfirmResponse, resolveCustomerCallback, callbackAssignmentUserId, isCallbackRegistered } from '../utils/callback-filter';
 // ★ 2026-07-05: 발송 피로도 보호 — 회사 opt-in "최근 N일 광고 M건" 게이트(차감 전 제외) + 광고 발송 카운터
 import { getFatigueCap, getFatigueBlockedSet, recordFatigueSends } from '../utils/fatigue-guard';
 import { deduplicateByPhone } from '../utils/deduplicate';
@@ -80,7 +80,7 @@ import { isDirectPipelineSendType } from '../utils/send-type-axis';
 // ★ 2026-09-12 발신 인증(전송자격인증 3.5) — 판정·응답 모두 CT가 소유한다
 import { checkSenderAuthGate, senderAuthRejection } from '../utils/sender-auth';
 // ★2026-09-25 무료 체험 스팸 검사 표시(비용 0)
-import { SPAM_TRIAL_SOURCE, isSpamTestBillable } from '../utils/spam-trial';
+import { SPAM_TRIAL_SOURCE, spamBillableTestSql } from '../utils/spam-trial';
 
 // ★ toKoreaTimeStr → utils/sms-queue.ts로 이동 (import 사용)
 
@@ -872,14 +872,8 @@ router.post('/:id/send', async (req: Request, res: Response) => {
         });
       }
 
-      const senderCheck = await query(
-        `SELECT phone FROM (
-          SELECT REPLACE(phone_number, '-', '') as phone FROM sender_numbers WHERE company_id = $1 AND is_active = true
-          UNION SELECT REPLACE(phone, '-', '') as phone FROM callback_numbers WHERE company_id = $1
-        ) t WHERE phone = $2 LIMIT 1`,
-        [companyId, senderCallback]
-      );
-      if (senderCheck.rows.length === 0) {
+      // ★ 2026-10-19 B-1005-5② — 등록 판정 = 개별 회신번호와 같은 CT(옛: 저장 번호에서 하이픈만 빼 괄호 · 점 · 공백 표기 번호가 미등록으로 거절됐다)
+      if (!(await isCallbackRegistered(companyId, senderCallback))) {
         return res.status(400).json({ error: '등록되지 않은 회신번호입니다. 발신번호 관리에서 번호를 등록해주세요.', code: 'INVALID_SENDER_NUMBER' });
       }
     }
@@ -1647,7 +1641,10 @@ router.get('/test-stats', async (req: Request, res: Response) => {
         -- ★ 2026-09-29 한줄로 V2 차수 5 — 성공 = 청구 판정 CT(통과·차단·시간 초과) · 발송 실패는 실패로 따로 센다(옛: 결과가 있으면 전부 성공)
         SUM(CASE WHEN ${spamBilledResultSql('r')} THEN 1 ELSE 0 END) as completed,
         SUM(CASE WHEN ${spamFailedResultSql('r')} THEN 1 ELSE 0 END) as failed,
-        SUM(CASE WHEN r.result IS NULL AND t.status IN ('active','pending') THEN 1 ELSE 0 END) as pending
+        SUM(CASE WHEN r.result IS NULL AND t.status IN ('active','pending') THEN 1 ELSE 0 END) as pending,
+        -- ★ 2026-10-19 B-0925-5 — 비용 = 기간 전체의 청구 행(최근 100줄 목록 합이 아니라 · 정산 집계와 같은 두 CT)
+        SUM(CASE WHEN ${spamBilledResultSql('r')} AND ${spamBillableTestSql('t')} AND COALESCE(r.message_type, 'SMS') = 'SMS' THEN 1 ELSE 0 END) as billed_sms,
+        SUM(CASE WHEN ${spamBilledResultSql('r')} AND ${spamBillableTestSql('t')} AND COALESCE(r.message_type, 'SMS') <> 'SMS' THEN 1 ELSE 0 END) as billed_lms
       FROM spam_filter_test_results r
       JOIN spam_filter_tests t ON r.test_id = t.id
       WHERE t.company_id = $1 ${spamDateWhere} ${spamUserWhere}
@@ -1661,8 +1658,8 @@ router.get('/test-stats', async (req: Request, res: Response) => {
     const sfSms = Number(sf.sms) || 0;
     const sfLms = Number(sf.lms) || 0;
     const sfCost = sfCompleted > 0 ? (sfSms > sfLms ? sfSms * costSms + sfLms * costLms : sfLms * costLms + sfSms * costSms) : 0;
-    // 정확한 비용: completed 건에 대해 SMS/LMS 구분하여 계산
-    let sfCostCalc = 0;
+    // 정확한 비용: 기간 전체의 청구 행(SMS/LMS 구분 · 위 집계)
+    const sfCostCalc = (Number(sf.billed_sms) || 0) * costSms + (Number(sf.billed_lms) || 0) * costLms;
 
     // 스팸필터 리스트 (최근 100건)
     const spamListResult = await query(`
@@ -1681,13 +1678,8 @@ router.get('/test-stats', async (req: Request, res: Response) => {
 
     const spamFilterList = spamListResult.rows.map((r: any) => {
       const msgType = r.message_type || 'SMS';
-      // ★2026-09-25 무료 체험 검사는 비용 0(청구하지 않는다 · spam-trial CT)
+      // ★2026-09-25 무료 체험 검사는 비용 0(청구하지 않는다 · spam-trial CT) · 비용 합계는 위 집계가 소유(1019)
       const isTrial = r.source === SPAM_TRIAL_SOURCE;
-      // ★ 2026-09-26 F49 — 비용은 청구 제외 판정 CT를 따른다(체험 + 무료 자동 검사 = 0원 · 정산 집계와 같은 집합)
-      // ★ 2026-09-29 한줄로 V2 차수 5 — 발송 실패 행은 비용 0(청구 판정 CT · 옛: 결과가 있으면 비용에 넣었다)
-      if (isSpamResultBilled(r.result) && isSpamTestBillable(r.source)) {
-        sfCostCalc += msgType === 'SMS' ? costSms : costLms;
-      }
       return {
         id: r.id,
         phone: r.phone,
@@ -1997,11 +1989,8 @@ router.post('/direct-send/commit', async (req: Request, res: Response) => {
       // ★1005 회신번호 규격(세칙) 검증(utils/callback-spec.ts)
       const ncSpec = checkCallbackSpec(callback);
       if (!ncSpec.ok) return res.status(400).json({ success: false, error: `유효하지 않은 회신번호입니다. ${ncSpec.message}`, code: 'INVALID_CALLBACK_FORMAT' });
-      const senderCheck = await query(
-        `SELECT phone FROM (SELECT REPLACE(phone_number, '-', '') AS phone FROM sender_numbers WHERE company_id = $1 AND is_active = true UNION SELECT REPLACE(phone, '-', '') AS phone FROM callback_numbers WHERE company_id = $1) t WHERE phone = $2 LIMIT 1`,
-        [companyId, nc]
-      );
-      if (senderCheck.rows.length === 0) return res.status(400).json({ success: false, error: '등록되지 않은 회신번호입니다. 발신번호 관리에서 번호를 등록해주세요.', code: 'INVALID_SENDER_NUMBER' });
+      // ★ 2026-10-19 B-1005-5② — 등록 판정 = 같은 CT
+      if (!(await isCallbackRegistered(companyId, nc))) return res.status(400).json({ success: false, error: '등록되지 않은 회신번호입니다. 발신번호 관리에서 번호를 등록해주세요.', code: 'INVALID_SENDER_NUMBER' });
     }
     let alimtalkEtcJson: string | null = null;
     let alimtalkTemplateUuid: string | null = null;  // ★ #4-a (2026-06-01): 결과 조회용 campaigns.kakao_template_id FK (results.ts:560 JOIN)
@@ -2475,14 +2464,8 @@ router.post('/direct-send', async (req: Request, res: Response) => {
         });
       }
 
-      const senderCheck = await query(
-        `SELECT phone FROM (
-          SELECT REPLACE(phone_number, '-', '') as phone FROM sender_numbers WHERE company_id = $1 AND is_active = true
-          UNION SELECT REPLACE(phone, '-', '') as phone FROM callback_numbers WHERE company_id = $1
-        ) t WHERE phone = $2 LIMIT 1`,
-        [companyId, normalizedCallback]
-      );
-      if (senderCheck.rows.length === 0) {
+      // ★ 2026-10-19 B-1005-5② — 등록 판정 = 같은 CT
+      if (!(await isCallbackRegistered(companyId, normalizedCallback))) {
         return res.status(400).json({ success: false, error: '등록되지 않은 회신번호입니다. 발신번호 관리에서 번호를 등록해주세요.', code: 'INVALID_SENDER_NUMBER' });
       }
     }

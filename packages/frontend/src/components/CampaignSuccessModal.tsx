@@ -1,4 +1,4 @@
-import { Bookmark, Check, X } from 'lucide-react';
+import { Bookmark, Check, X, MessageSquare, Smartphone, Users, UserX, Clock3, CalendarDays } from 'lucide-react';
 import { useState } from 'react';
 
 interface CampaignSuccessModalProps {
@@ -57,24 +57,24 @@ export default function CampaignSuccessModal({ show, onClose, onShowCalendar, se
         <div className="mx-6 mb-4 bg-green-50 rounded-xl p-4 text-left">
           <div className="text-sm text-gray-600 space-y-2">
             <div className="flex items-center gap-2">
-              <span>{selectedChannel === 'KAKAO' ? '💬' : '📱'}</span>
+              {selectedChannel === 'KAKAO' ? <MessageSquare className="w-4 h-4 text-gray-500" aria-hidden="true" /> : <Smartphone className="w-4 h-4 text-gray-500" aria-hidden="true" />}
               <span>채널:</span>
               <span className="font-semibold text-gray-800">{selectedChannel === 'KAKAO' ? '카카오' : selectedChannel}</span>
             </div>
             <div className="flex items-center gap-2">
-              <span>👥</span>
+              <Users className="w-4 h-4 text-gray-500" aria-hidden="true" />
               <span>대상:</span>
               <span className="font-semibold text-gray-800">{displayCount.toLocaleString()}명</span>
             </div>
             {displayUnsub > 0 && (
               <div className="flex items-center gap-2">
-                <span>🚫</span>
+                <UserX className="w-4 h-4 text-rose-400" aria-hidden="true" />
                 <span>수신거부 제외:</span>
                 <span className="font-semibold text-rose-500">{displayUnsub.toLocaleString()}명</span>
               </div>
             )}
             <div className="flex items-center gap-2">
-              <span>⏰</span>
+              <Clock3 className="w-4 h-4 text-gray-500" aria-hidden="true" />
               <span>발송:</span>
               <span className="font-semibold text-gray-800">{successSendInfo}</span>
             </div>
@@ -152,7 +152,7 @@ export default function CampaignSuccessModal({ show, onClose, onShowCalendar, se
             onClick={onShowCalendar}
             className="flex-1 py-3.5 text-gray-600 hover:bg-gray-50 font-medium transition-colors"
           >
-            📅 캘린더 확인
+            <span className="inline-flex items-center gap-1.5"><CalendarDays className="w-4 h-4" aria-hidden="true" />캘린더 확인</span>
           </button>
           <button
             onClick={onClose}

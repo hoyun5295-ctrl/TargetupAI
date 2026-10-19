@@ -19,6 +19,8 @@ vi.mock('../journey-anchor-scheduler', () => ({ dispatchOneShotJourney: vi.fn() 
 vi.mock('../journey-target-extractor', () => ({ selectJourneyTargetCustomerIds: vi.fn(), JOURNEY_COUNT_CAP: 100000 }));
 vi.mock('../store-scope', () => ({ getJourneyOwnerScopeSql: vi.fn() }));
 vi.mock('../callback-filter', () => ({ filterByIndividualCallback: vi.fn() }));
+// ★ 2026-10-19 B-1009-5 — 모두 켜기의 겹침 판정 = 지도(buildLifecycleMap) · 이 시험은 겹침 0 으로 둔다(겹침 거절은 아래 한 건)
+vi.mock('../journey-lifecycle-map', () => ({ buildLifecycleMap: vi.fn(async () => ({ overlaps: [] })) }));
 
 import { query } from '../../config/database';
 import { checkCredit, deductCreditSafe, InsufficientCreditError } from '../ai-credit';
@@ -28,6 +30,7 @@ import { selectJourneyTargetCustomerIds } from '../journey-target-extractor';
 import { filterByIndividualCallback } from '../callback-filter';
 import { getCreditCost } from '../ai-credit-calc';
 import { activateJourneyGuarded, activateJourneysInOrder, orderReceiversFirst } from '../journey-activation';
+import { buildLifecycleMap } from '../journey-lifecycle-map';
 
 const q = query as unknown as ReturnType<typeof vi.fn>;
 const credit = checkCredit as unknown as ReturnType<typeof vi.fn>;
@@ -169,5 +172,22 @@ describe('모두 켜기', () => {
     if (!r.ok) throw new Error('묶음 실패');
     expect(r.items.find((i) => i.journeyId === ID(2))!.result).toMatchObject({ code: 'PRETEST_REQUIRED' });
     expect(r.items.find((i) => i.journeyId === ID(1))!.result.ok).toBe(true);
+  });
+});
+
+// ★ 2026-10-19 B-1009-5 — 겹침 쌍 해소를 서버가 본다(고른 쌍 키 없으면 하나도 켜지 않는다 · 있으면 그대로 진행)
+describe('모두 켜기 — 겹침 해소 서버 확인', () => {
+  it('켤 여정이 낀 겹침 쌍을 고르지 않았으면 OVERLAP_UNRESOLVED · 고른 쌍이면 진행', async () => {
+    mockJourneys([
+      { id: ID(1), status: 'draft', trigger_event: 'purchase.first' },
+      { id: ID(2), status: 'draft', trigger_event: 'cdp.purchase' },
+    ]);
+    (buildLifecycleMap as any).mockResolvedValue({ overlaps: [{ a: ID(2), b: ID(1), concurrentActive: 0 }] });
+    const r = await activateJourneysInOrder('c', 'u', [ID(1), ID(2)]);
+    expect(r).toMatchObject({ ok: false, code: 'OVERLAP_UNRESOLVED', pairs: [[ID(1), ID(2)].sort().join('|')] });
+    expect(act).not.toHaveBeenCalled();
+    const ok = await activateJourneysInOrder('c', 'u', [ID(1), ID(2)], { acknowledgedOverlaps: [[ID(1), ID(2)].sort().join('|')] });
+    expect(ok.ok).toBe(true);
+    (buildLifecycleMap as any).mockResolvedValue({ overlaps: [] });
   });
 });

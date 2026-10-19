@@ -3,6 +3,7 @@
  * 27 섹션(기존 11 + D216+ 신규 16) 전부 우측 속성 패널 편집 가능.
  */
 import type { Section } from '../../../utils/dm-section-defaults';
+import { treatmentHiddenFieldsFor } from '../../../constants/dm-treatment-hidden-fields';
 import { PARTICIPATION_TYPES } from '../../../utils/dm-section-defaults';
 import { Field, TextArea } from './FormControls';
 import HeaderEditor from './editors/HeaderEditor';
@@ -52,18 +53,22 @@ export type EditorProps<P> = {
 };
 
 export default function SectionPropsEditor({
-  section, onUpdate, hiddenFields,
+  section, onUpdate, hiddenFields, surface,
 }: {
   section: Section;
   onUpdate: (patch: Record<string, any>) => void;
   /** ★ 2026-09-16 채널이 감추는 필드 목록. 원장 = 백엔드 `email-property-contract.EMAIL_HIDDEN_EDITOR_FIELDS`. */
   hiddenFields?: readonly string[];
+  /** ★ 2026-10-19 B-1014-3⑦ 어느 면의 편집기인가(구도가 안 읽는 값 표 선택) · 미지정 = 모바일 DM */
+  surface?: 'ssr' | 'email';
 }) {
   // 전 에디터 공통 인자 — 감춤 판정을 한 곳에서 만든다(에디터마다 배열을 다시 훑지 않도록).
+  //   채널이 감추는 필드 + 지금 구도가 안 읽는 필드(원장 = 백엔드 DM_TREATMENT_HIDDEN · 미러 constants/dm-treatment-hidden-fields).
+  const byTreatment = treatmentHiddenFieldsFor(surface || 'ssr', section.type, section.treatment);
   const common = {
     props: section.props as any,
     onUpdate,
-    hidden: (field: string) => !!hiddenFields && hiddenFields.includes(field),
+    hidden: (field: string) => (!!hiddenFields && hiddenFields.includes(field)) || byTreatment.includes(field),
   };
   const inner = (() => { switch (section.type) {
     case 'header':     return <HeaderEditor     {...common} />;

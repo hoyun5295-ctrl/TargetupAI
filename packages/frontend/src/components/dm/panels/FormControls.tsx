@@ -3,7 +3,7 @@
  * 디자인 토큰(var(--dm-*))을 참조.
  */
 import type { ChangeEvent, ReactNode } from 'react';
-import { useRef, useState } from 'react';
+import { createContext, useContext, useRef, useState } from 'react';
 import axios from 'axios';
 import { dmImageUrl } from '../../../utils/dm-image-url';
 import { linkReason } from '../../../utils/link-check';
@@ -331,12 +331,18 @@ async function resizeForUpload(file: File, maxDim = 1080, quality = 0.85): Promi
 
 const blobExt = (b: Blob): string => (b.type === 'image/png' ? 'png' : b.type === 'image/webp' ? 'webp' : 'jpg');
 
+/**
+ * ★ 2026-10-19 B-1017-1④ 업로드 입구(채널별 요금제 문) — 기본 = DM. 이메일 편집기는 Provider 로 이메일 입구를 준다
+ *   (옛: 이메일 편집기도 DM 입구라 이메일만 쓰는 요금제 회사가 편집기에서 사진을 못 올렸다).
+ */
+export const ImageUploadEndpointContext = createContext<string>('/dm/upload-image');
+
 /** 단일 파일 리사이즈 후 업로드 → url (DmBuilderPage 완성 이미지 업로드에서도 재사용) */
-export async function uploadOne(file: File): Promise<string> {
+export async function uploadOne(file: File, endpoint = '/dm/upload-image'): Promise<string> {
   const blob = await resizeForUpload(file);
   const fd = new FormData();
   fd.append('images', blob, `image.${blobExt(blob)}`);
-  const res = await api.post('/dm/upload-image', fd, { headers: { 'Content-Type': 'multipart/form-data' } });
+  const res = await api.post(endpoint, fd, { headers: { 'Content-Type': 'multipart/form-data' } });
   const url = res.data?.images?.[0]?.url;
   if (!url) throw new Error('업로드 실패 (응답 형식 오류)');
   return url;
@@ -352,6 +358,7 @@ export function ImageUploader({
   label?: string;
 }) {
   const ref = useRef<HTMLInputElement>(null);
+  const uploadEndpoint = useContext(ImageUploadEndpointContext);
   const [uploading, setUploading] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [libOpen, setLibOpen] = useState(false);
@@ -360,7 +367,7 @@ export function ImageUploader({
     setUploading(true);
     setErr(null);
     try {
-      onChange(await uploadOne(file));
+      onChange(await uploadOne(file, uploadEndpoint));
     } catch (e: any) {
       setErr(e?.response?.data?.error || e?.message || '업로드 실패');
     } finally {
@@ -445,6 +452,7 @@ export function MultiImageUploader({
   max?: number;
 }) {
   const ref = useRef<HTMLInputElement>(null);
+  const uploadEndpoint = useContext(ImageUploadEndpointContext);
   const [uploading, setUploading] = useState(false);
   const [progress, setProgress] = useState('');
   const [err, setErr] = useState<string | null>(null);
@@ -458,7 +466,7 @@ export function MultiImageUploader({
     try {
       for (let i = 0; i < arr.length; i++) {
         setProgress(`${i + 1}/${arr.length}장 업로드 중...`);
-        try { urls.push(await uploadOne(arr[i])); } catch { /* 개별 실패는 건너뜀 */ }
+        try { urls.push(await uploadOne(arr[i], uploadEndpoint)); } catch { /* 개별 실패는 건너뜀 */ }
       }
       if (urls.length > 0) onAdd(urls);
       if (urls.length < arr.length) setErr(`${arr.length - urls.length}장 업로드 실패`);

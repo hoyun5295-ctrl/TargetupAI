@@ -2,6 +2,8 @@ import axios from 'axios';
 import { attachCreditInterceptor } from '../lib/credit-interceptor';
 import { clearSnsDrafts } from '../utils/sns-draft';
 import { clearAiLineRuns } from '../utils/ai-line';
+import { resetDashboardIntro } from '../utils/dashboard-live';
+import { clearSessionCompanyData } from '../utils/session-data';
 
 const api = axios.create({
   baseURL: '/api',
@@ -31,6 +33,8 @@ api.interceptors.response.use(
       localStorage.removeItem('user');
       clearSnsDrafts();   // ★ 2026-09-24 SNS 쓰던 글(sns-draft.ts)
       clearAiLineRuns();  // ★ 2026-10-19 AI 한줄로 진행 · 알림톡 넘기기(ai-line.ts)
+      resetDashboardIntro();  // ★ 2026-10-19 B-1010-11
+      clearSessionCompanyData();  // ★ 2026-10-19 B-1018-5③
 
       // 강제 로그아웃 (다른 곳에서 로그인)
       if (data?.forceLogout) {

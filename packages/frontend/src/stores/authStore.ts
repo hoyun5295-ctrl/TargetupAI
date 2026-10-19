@@ -1,6 +1,8 @@
 import { create } from 'zustand';
 import { clearSnsDrafts } from '../utils/sns-draft';
 import { clearAiLineRuns } from '../utils/ai-line';
+import { resetDashboardIntro } from '../utils/dashboard-live';
+import { clearSessionCompanyData } from '../utils/session-data';
 
 interface User {
   id: string;
@@ -63,6 +65,8 @@ export const useAuthStore = create<AuthState>((set) => ({
     // ★ 2026-09-24 SNS 쓰던 글도 지운다(같은 PC 다음 사용자에게 남지 않게 · sns-draft.ts).
     clearSnsDrafts();
     clearAiLineRuns();   // ★ 2026-10-19 AI 한줄로 진행 · 알림톡 넘기기(같은 탭 다음 계정에 남지 않게 · ai-line.ts)
+    resetDashboardIntro();   // ★ 2026-10-19 B-1010-11 같은 탭 재로그인 = 대시보드 들어오기 다시 1회
+    clearSessionCompanyData();   // ★ 2026-10-19 B-1018-5③ 임시 글 · 넘기기 문장(다음 계정에 남지 않게 · session-data.ts)
     set({ user: null, token: null, isAuthenticated: false });
   },
 

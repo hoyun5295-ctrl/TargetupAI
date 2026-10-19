@@ -361,7 +361,8 @@ describe('sales-outreach invariants', () => {
     // 히어로 = 홈 첫 배너(문서 순서) · 포스터는 두 번째 비주얼 · 갤러리 수집은 면적 정렬 0 (고객 입구 채우기 · 옛 문자열 유지)
     expect(produce).toContain("const heroImage = galleryAll[0]?.url || media.posterUrl || media.products[0]?.image_url || '';");
     // ★ v3 아웃리치 채우기 — 히어로 = 카드1 배너(비율 통과) → 홈 첫 배너 → 포스터 → 상품 · gallery 0
-    expect(produce).toContain("const heroImage = card1Hero ? String(card1!.bannerUrl) : (galleryAll.find((g) => !cardBannerSet.has(g.url))?.url || media.posterUrl || media.products[0]?.image_url || '');");
+    // ★ 2026-10-19 B-1013-2② — 재료 0 아웃리치만 포스터 먼저 · 그 밖은 옛 순서 그대로
+    expect(produce).toContain("const heroImage = card1Hero ? String(card1!.bannerUrl) : zeroMaterials ? String(media.posterUrl) : (galleryAll.find((g) => !cardBannerSet.has(g.url))?.url || media.posterUrl || media.products[0]?.image_url || '');");
     // 카드 배너 사본은 전용 예산 · 카드 배너는 사람 재료 선택을 거친다 · 재료 게이트는 카드 상세 배너까지 같은 합집합
     expect(produce).toContain('cardBannerUrls?: string[];');
     expect(jobs).toContain('eventCardsOf(selectedList, applyOutreachMediaSelection(bp.media || null, bp.mediaSelection || null))');

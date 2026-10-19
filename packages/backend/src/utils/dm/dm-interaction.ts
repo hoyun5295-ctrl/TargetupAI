@@ -6,8 +6,9 @@
  * 라우트가 isDbMigrationPendingError로 503 변환(db_alter_safety_net).
  * 발송·돈 경로 무관(수집·추첨·조회만). 당첨 통보 발송은 F/G.
  */
-import { query, pool } from '../../config/database';
+import { query, pool, withTransaction } from '../../config/database';
 import { getDmByCode, extractFlatSectionsFromDm } from './dm-builder';
+import { PARTICIPATION_TYPES } from './dm-section-registry';
 import { lookupDmRecipientToken } from './dm-recipient-token';
 import {
   pickRouletteForParticipant,
@@ -55,7 +56,12 @@ export type SubmitResult = {
   status?: number;
   already?: boolean;
   result?: any;
+  /** ★ 2026-10-19 B-1014-3② 테스트 발송 링크(?p=test) — 기록 · 재고 · 1인 1회에 닿지 않았다 */
+  test?: boolean;
 };
+
+/** ★ 2026-10-19 B-1014-3② — 테스트 발송 링크 표식(routes/dm.ts test-send 가 ?p=test 로 만든다 · 열람 기록도 같은 표식으로 거른다) */
+export const DM_TEST_LINK_MARKER = 'test';
 
 /** 공개 제출 처리: 동의 검증 → 식별 → INSERT(1인1회) → 룰렛이면 즉시 추첨. */
 export async function submitEventResponse(input: SubmitInput): Promise<SubmitResult> {
@@ -66,12 +72,44 @@ export async function submitEventResponse(input: SubmitInput): Promise<SubmitRes
 
   const sections = extractFlatSectionsFromDm(dm);
   const section = sections.find((s: any) => s?.id === input.sectionId);
-  const props: any = section?.props || {};
+  // ★ 2026-10-19 B-1014-3⑥ — 블록 종류 = 서버가 가진 DM 의 그 블록(옛: 클라이언트가 보낸 section_type 을 믿고 기록 · 판정했다).
+  //   참여 8종이 아니거나 블록이 없으면 받지 않는다.
+  if (!section || !(PARTICIPATION_TYPES as readonly string[]).includes(String(section.type))) {
+    return { ok: false, error: '참여할 블록을 찾을 수 없어요. 화면을 새로 고친 뒤 다시 시도해 주세요.', status: 404 };
+  }
+  const sectionType = String(section.type);
+  const props: any = section.props || {};
 
-  // 동의 검증 — consent_required 명시 or lucky_draw(개인정보 수집)
-  const consentRequired = props.consent_required === true || input.sectionType === 'lucky_draw';
+  // 동의 검증 — 추첨(개인정보 수집)은 늘 · 이메일 수집은 명시 false 가 아니면(★ 1019 B-1014-3⑥ 미지정 = 강제 · 렌더가 같은 기준으로 data-consent 를 낸다) · 그 밖 = 명시 true
+  const consentRequired = sectionType === 'lucky_draw'
+    || (sectionType === 'email_capture' ? props.consent_required !== false : props.consent_required === true);
   if (consentRequired && input.data?.consent !== true) {
     return { ok: false, error: '개인정보 수집·이용 동의가 필요합니다.', status: 400 };
+  }
+  // ★ 2026-10-19 B-1014-3⑥ — 필수 = 서버도 본다(옛: 뷰어만 막았다)
+  if (sectionType === 'survey') {
+    const qs = Array.isArray(props.questions) ? props.questions : [];
+    const missing = qs.some((q: any, qi: number) => q && q.required && !String(input.data?.[`q_${q.id || qi}`] ?? '').trim());
+    if (missing) return { ok: false, error: '필수 질문에 답해주세요.', status: 400 };
+  }
+  if (sectionType === 'lucky_draw') {
+    const fields = Array.isArray(props.form_fields) ? props.form_fields : [];
+    const missing = fields.some((f: any) => f && f.required && f.name && !String(input.data?.[f.name] ?? '').trim());
+    if (missing) return { ok: false, error: '필수 칸을 채워 주세요.', status: 400 };
+  }
+  // ★ 2026-10-19 B-1014-3⑥ — 즉시쿠폰 만료 = 서버가 본다(옛: 화면 표시만 · 만료 뒤에도 발급됐다)
+  if (sectionType === 'instant_coupon' && props.expires_at) {
+    const until = Date.parse(String(props.expires_at));
+    if (Number.isFinite(until) && Date.now() > until) return { ok: false, error: '이미 끝난 쿠폰이에요.', status: 409 };
+  }
+  // ★ 2026-10-19 B-1014-3② — 테스트 발송 링크 = 판정만 하고 기록 · 재고 · 1인 1회에 닿지 않는다(옛: 직원 테스트가 실제 참여 · 재고를 썼다)
+  if (input.phone === DM_TEST_LINK_MARKER && !input.token) {
+    if (sectionType === 'roulette') {
+      const segs = Array.isArray(props.segments) ? props.segments : [];
+      const s = segs.length > 0 ? segs[Math.floor(Math.random() * segs.length)] : null;
+      return { ok: true, test: true, result: s ? { segment_id: String(s.id), label: String(s.label || ''), won: false, test: true } : null };
+    }
+    return { ok: true, test: true };
   }
 
   // 식별 — 토큰(발송 링크, 서버 권위) > phone > anonymous_id
@@ -97,14 +135,16 @@ export async function submitEventResponse(input: SubmitInput): Promise<SubmitRes
   if (input.data?.consent === true) responseData.consent_at = nowIso();
   if (input.phone) responseData.phone = String(input.phone).replace(/[^0-9]/g, '');
 
+  // ★ 2026-10-19 B-1014-3⑥ 선착순 = 총 수량을 서버가 지킨다(같은 블록 잠금 안에서 센 뒤 넣는다 · 옛: 화면 표시만 · 수량 넘게 참여됐다)
+  const totalQuantity = sectionType === 'limited_quantity' ? Math.max(0, Math.floor(Number(props.total_quantity) || 0)) : 0;
+
   // 1인1회 부분 UNIQUE 충돌 시 INSERT 무시 → 기존 결과 반환
   // ★ 2026-08-08 (0806 트랙 Codex 4R high) **추첨이 이미 실행된 lucky_draw는 응모를 받지 않는다 — 같은 문장 안에서.**
   //   stop·resume·A/B 시작·추첨 claim을 잇는 per-DM 잠금 공사 대신, 실제 피해("당첨될 수 없는 응모")가
   //   생기는 길목 하나를 막는다. 판정이 문장 밖이면 그 사이에 5분 워커가 claim해 같은 상태가 생긴다(TOCTOU).
   //   `draw_at`은 축이 아니다 — claim 전 응모는 추첨 모수에 들어가므로 막을 이유가 없다.
   //   가드 축은 별도 boolean 파라미터로 — 한 파라미터를 컬럼 대입과 비교 두 문맥에 쓰면 42P08 부류다.
-  const ins = await query(
-    `INSERT INTO dm_event_responses
+  const insertSql = `INSERT INTO dm_event_responses
        (company_id, campaign_id, section_id, section_type, customer_id, anonymous_id, response_data, ip_address, user_agent)
      SELECT $1, $2, $3, $4, $5, $6, $7, $8, $9
       WHERE $10::boolean = false
@@ -112,14 +152,22 @@ export async function submitEventResponse(input: SubmitInput): Promise<SubmitRes
      ON CONFLICT (campaign_id, section_id, COALESCE(customer_id::text, anonymous_id))
        WHERE COALESCE(customer_id::text, anonymous_id) IS NOT NULL
        DO NOTHING
-     RETURNING id`,
-    [
-      companyId, campaignId, input.sectionId, input.sectionType,
-      customerId, anonymousId, JSON.stringify(responseData),
-      input.ip, input.ua,
-      input.sectionType === 'lucky_draw',
-    ],
-  );
+     RETURNING id`;
+  const insertParams = [
+    companyId, campaignId, input.sectionId, sectionType,
+    customerId, anonymousId, JSON.stringify(responseData),
+    input.ip, input.ua,
+    sectionType === 'lucky_draw',
+  ];
+  let soldOut = false;
+  const ins = sectionType === 'limited_quantity'   // ★ G1 총 수량 0 = 마감(렌더 「남은 0개」와 같은 뜻 · 잘못된 값도 0)
+    ? await withTransaction(async (run) => {
+      await run(`SELECT pg_advisory_xact_lock(hashtext($1))`, [`dm-lq:${campaignId}:${input.sectionId}`]);
+      const cnt = await run(`SELECT COUNT(*)::int AS n FROM dm_event_responses WHERE campaign_id = $1 AND section_id = $2`, [campaignId, input.sectionId]);
+      if (Number(cnt.rows[0]?.n || 0) >= totalQuantity) { soldOut = true; return { rows: [] as any[] }; }
+      return run(insertSql, insertParams);
+    })
+    : await query(insertSql, insertParams);
 
   if (ins.rows.length === 0) {
     // 이미 참여 — 기존 응답
@@ -130,11 +178,12 @@ export async function submitEventResponse(input: SubmitInput): Promise<SubmitRes
       [campaignId, input.sectionId, dedupeKey],
     );
     if (ex.rows.length > 0) {
-      if (input.sectionType === 'roulette') {
+      if (sectionType === 'roulette') {
         return { ok: true, already: true, result: ex.rows[0]?.response_data?.spin_result || null };
       }
       return { ok: true, already: true };
     }
+    if (soldOut) return { ok: false, status: 409, error: '선착순이 마감됐어요.' };
     // 기존 응답도 없는데 0행 = 위 추첨 마감 가드가 걸렀다. 추첨은 1회뿐이라 이 응모는 당첨될 수 없다 —
     // 받은 척하지 않고 사실대로 알린다(바뀐 것이 없으면 성공이라 답하지 않는다).
     return { ok: false, status: 409, error: '이미 추첨이 끝난 이벤트예요. 다음 행사를 기다려 주세요.' };
@@ -142,9 +191,14 @@ export async function submitEventResponse(input: SubmitInput): Promise<SubmitRes
 
   const responseId: string = ins.rows[0].id;
 
-  if (input.sectionType === 'roulette') {
+  if (sectionType === 'roulette') {
     const result = await runRouletteDraw(companyId, campaignId, input.sectionId, responseId, props, customerId, input.phone, input.data, tokenVerified);
     return { ok: true, result };
+  }
+  // ★ 2026-10-19 B-1014-3⑥ 클릭 리워드 = 목표 대비 참여 수를 서버가 센다(진행률 표시가 켜진 화면이 받아 그린다 · 옛: 목표 숫자만 보였다)
+  if (sectionType === 'click_rewards' && Number(props.target_count) > 0) {
+    const cnt = await query(`SELECT COUNT(*)::int AS n FROM dm_event_responses WHERE campaign_id = $1 AND section_id = $2`, [campaignId, input.sectionId]);
+    return { ok: true, result: { progress: { joined: Number(cnt.rows[0]?.n || 0), target: Math.floor(Number(props.target_count)) } } };
   }
   return { ok: true };
 }
@@ -373,7 +427,8 @@ export async function replacePrizesForSection(companyId: string, dmId: string, s
   }
 }
 
-const INTERACTION_SECTION_TYPES = ['lucky_draw', 'roulette', 'poll', 'survey', 'email_capture', 'click_rewards'];
+// ★ 2026-10-19 B-1014-3⑤ — 참여형 발행비 판정 = 참여 8종(registry PARTICIPATION_TYPES 하나 · 옛 손 목록 6종은 즉시쿠폰 · 선착순을 뺐다)
+const INTERACTION_SECTION_TYPES: readonly string[] = PARTICIPATION_TYPES;
 
 /** DM이 인터랙션 캠페인(참여 수집/추첨 섹션 보유)인지 — F 발행 단가 분기용. */
 export async function isInteractionCampaign(companyId: string, dmId: string): Promise<boolean> {

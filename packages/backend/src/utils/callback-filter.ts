@@ -90,8 +90,9 @@ export async function filterByIndividualCallback(
   }
 
   // 2단계: callback 미보유 고객 제외
+  // ★ 2026-10-19 B-1005-5⑤ — 숫자가 하나도 없는 값(예: '없음')도 미보유다. 옛: 남은 값이 전부 그런 값이면 3단계(등록 검사)를 통째로 건너뛰어 그대로 적재됐다.
   const beforeMissing = filtered.length;
-  filtered = filtered.filter((c: any) => c.callback && c.callback.trim());
+  filtered = filtered.filter((c: any) => !!normalizePhone(String(c.callback || '')));
   callbackMissingCount = beforeMissing - filtered.length;
   if (callbackMissingCount > 0) {
     console.log(`[개별회신번호] callback+store_phone 없는 고객 ${callbackMissingCount}명 제외 (${filtered.length}명 남음)`);
@@ -155,9 +156,10 @@ export function callbackAssignmentUserId(role: string | null | undefined, userId
  */
 export async function getRegisteredCallbackSet(companyId: string, userId?: string): Promise<Set<string>> {
   // D91: userId가 있으면 assignment_scope 필터 적용 — 'all' 또는 본인 배정된 'assigned'만 허용
+  // ★ 2026-10-19 B-1005-5② — 저장 원문을 그대로 읽는다(옛: 하이픈만 빼서 괄호 · 점 · 공백 표기로 등록한 정상 번호가 입력 쪽 숫자와 안 맞아 미등록으로 거절됐다).
   let registeredSql = `
-    SELECT REPLACE(phone_number, '-', '') as phone FROM sender_numbers WHERE company_id = $1 AND is_active = true
-    UNION SELECT REPLACE(cn.phone, '-', '') as phone FROM callback_numbers cn WHERE cn.company_id = $1
+    SELECT phone_number as phone FROM sender_numbers WHERE company_id = $1 AND is_active = true
+    UNION SELECT cn.phone as phone FROM callback_numbers cn WHERE cn.company_id = $1
   `;
   const registeredParams: any[] = [companyId];
 
@@ -166,8 +168,8 @@ export async function getRegisteredCallbackSet(companyId: string, userId?: strin
     try {
       await query(`SELECT assignment_scope FROM callback_numbers LIMIT 0`);
       registeredSql = `
-        SELECT REPLACE(phone_number, '-', '') as phone FROM sender_numbers WHERE company_id = $1 AND is_active = true
-        UNION SELECT REPLACE(cn.phone, '-', '') as phone FROM callback_numbers cn
+        SELECT phone_number as phone FROM sender_numbers WHERE company_id = $1 AND is_active = true
+        UNION SELECT cn.phone as phone FROM callback_numbers cn
         WHERE cn.company_id = $1
           AND (
             cn.assignment_scope = 'all'
@@ -186,8 +188,25 @@ export async function getRegisteredCallbackSet(companyId: string, userId?: strin
 
   const registeredResult = await query(registeredSql, registeredParams);
   // ★1005 발신번호 규격(세칙) — 규격 이전에 등록된 위반 번호는 등록 번호로 치지 않는다(Codex 1R high · 개별 회신번호가 차감 · 적재까지 가던 구멍).
-  //   이 집합을 쓰는 길목(개별 회신번호 필터 · 단건 판정 · 대행 · 스팸 검사)이 전부 여기서 같이 막힌다. 집합 값의 표기는 종전 그대로다.
-  return new Set((registeredResult.rows as any[]).filter((r: any) => checkCallbackSpec(r.phone).ok).map((r: any) => r.phone));
+  //   이 집합을 쓰는 길목(개별 회신번호 필터 · 단건 판정 · 대행 · 스팸 검사)이 전부 여기서 같이 막힌다.
+  //   ★ 1019 B-1005-5② — 규격은 저장 원문으로 보고(허용 문자 밖 = 위반 · 종전과 같다) 집합 값은 숫자만(normalizePhone 과 같은 표기).
+  const out = new Set<string>();
+  for (const r of registeredResult.rows as any[]) {
+    const v = checkCallbackSpec(r.phone);
+    if (v.ok) out.add(v.digits);
+  }
+  return out;
+}
+
+/**
+ * ★ 2026-10-19 B-1005-5④ — 고정 회신번호 하나를 적재 직전에 다시 판정한다(규격 + 회사 등록).
+ *   접수 · 등록 때만 보던 번호를 발송 때도 본다(그 사이 등록이 지워졌거나 규격 이전 위반 번호면 적재 0 · 차감 전).
+ *   통과 = null · 아니면 회차 · 캠페인에 남길 사유. 배정 제한은 보지 않는다(동기 고정번호 검사와 같다).
+ */
+export async function fixedCallbackRejectReason(companyId: string, callback: string): Promise<string | null> {
+  const spec = checkCallbackSpec(callback);
+  if (!spec.ok) return `회신번호 규격 위반: ${spec.message}`;
+  return (await isCallbackRegistered(companyId, spec.digits)) ? null : '회신번호가 등록된 발신번호가 아닙니다(발신번호 관리에서 확인해 주세요)';
 }
 
 /**

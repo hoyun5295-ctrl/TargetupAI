@@ -135,6 +135,8 @@ export type DmBuilderState = {
   hoveredSectionId: string | null;
   isDirty: boolean;
   lastSavedAt: number | null;
+  /** ★ 2026-10-19 B-1014-3⑨ 서버 저장 판(상세 · 저장 응답 save_version) — 다음 저장의 base_version */
+  saveVersion: string | null;
   isSaving: boolean;
   loadError: string | null;
 
@@ -263,7 +265,7 @@ const INITIAL_STATE: Pick<
   DmBuilderState,
   | 'dmId' | 'title' | 'storeName' | 'pages' | 'currentPageIndex' | 'sections' | 'brandKit' | 'layoutMode' | 'catalogView' | 'pageEffect'
   | 'approvalStatus' | 'isPublished' | 'isStopped' | 'templateId' | 'aiPrompt'
-  | 'selectedSectionId' | 'hoveredSectionId' | 'isDirty' | 'lastSavedAt'
+  | 'selectedSectionId' | 'hoveredSectionId' | 'isDirty' | 'lastSavedAt' | 'saveVersion'
   | 'isSaving' | 'loadError' | 'aiGenerating' | 'validationResult'
   | 'validationRunning' | 'validationOverride' | 'openModal' | 'toast'
   | 'historyPast' | 'historyFuture'
@@ -287,6 +289,7 @@ const INITIAL_STATE: Pick<
   hoveredSectionId: null,
   isDirty: false,
   lastSavedAt: null,
+  saveVersion: null,
   isSaving: false,
   loadError: null,
   aiGenerating: false,
@@ -349,6 +352,8 @@ export const getEditSession = (): number => editSession;
 //   막힌 저장을 false 로 버리면(5R 이전 · 옛 isSaving 가드도 같았다) 새 세션의 자동 저장이 유실된다(6R) → 버리지 않고 기다린다.
 //   무응답 한 건이 뒤 세션 전부를 막지 못하게 저장 요청엔 timeout 을 둔다(axios 기본 0).
 let inflight: Promise<void> | null = null;
+/** ★ 2026-10-19 B-1014-3⑨ — 시간 초과된 저장의 DM · 편집 세션(그 DM · 그 세션의 409 만 자동 재시도 · 다른 DM · 다시 연 화면은 아니다 · F1b) */
+let timedOutSave: { dmId: string; session: number } | null = null;
 const SAVE_TIMEOUT_MS = 30_000;
 function markDirty<T extends Partial<DmBuilderState>>(patch: T): T & { isDirty: true } {
   editCounter++;
@@ -923,6 +928,7 @@ export const useDmBuilderStore = create<DmBuilderState>((set, get) => ({
         aiPrompt: dm.ai_prompt || '',
         isDirty: false,
         lastSavedAt: Date.now(),
+        saveVersion: typeof dm.save_version === 'string' ? dm.save_version : null,
         selectedSectionId: null,
         validationResult: dm.validation_result || null,
         loadError: null,
@@ -970,12 +976,35 @@ export const useDmBuilderStore = create<DmBuilderState>((set, get) => ({
         ai_prompt: s.aiPrompt,
       };
       if (s.dmId) {
-        await api.put(`/dm/${s.dmId}`, body, { timeout: SAVE_TIMEOUT_MS });
+        // ★ 2026-10-19 B-1014-3⑨ — 본 판을 함께 보낸다(판이 다르면 서버 409 STALE_SAVE).
+        //   다시 보내기는 「이 화면의 저장이 시간 초과된 적이 있고(그 늦은 저장이 먼저 썼을 수 있다) 같은 편집 세션일 때」만 한 번.
+        //   그 밖(버전 복원 · 다른 창 저장)은 덮지 않고 알린다 — 새로 불러온 뒤 고친다(옛 내용이 복원을 덮지 않게 · F1).
+        const dmId = s.dmId;
+        const put = async (base: string | null) => {
+          try { return await api.put(`/dm/${dmId}`, { ...body, ...(base ? { base_version: base } : {}) }, { timeout: SAVE_TIMEOUT_MS }); } catch (e: any) {
+            if (e?.code === 'ECONNABORTED') timedOutSave = { dmId, session: token };
+            throw e;
+          }
+        };
+        let res: any;
+        try { res = await put(s.saveVersion); } catch (e: any) {
+          const stale = e?.response?.status === 409 && e?.response?.data?.code === 'STALE_SAVE';
+          if (!stale) throw e;
+          const mine = timedOutSave?.dmId === dmId && timedOutSave?.session === token && token === editSession;
+          if (!mine) {
+            throw Object.assign(new Error('STALE'), { response: { data: { error: '다른 곳에서 더 새로 저장된 내용이 있어요(버전 되돌리기 · 다른 창). 화면을 새로 불러온 뒤 다시 고쳐 주세요.' } } });
+          }
+          res = await put(typeof e.response.data.current_version === 'string' ? e.response.data.current_version : null);
+        }
+        if (timedOutSave?.dmId === dmId && timedOutSave?.session === token) timedOutSave = null;
+        if (token !== editSession) return false;
+        if (typeof res?.data?.save_version === 'string') set({ saveVersion: res.data.save_version });
       } else {
         const res = await api.post('/dm', body, { timeout: SAVE_TIMEOUT_MS });
         const created = res.data as any;
         if (token !== editSession) return false;
-        set({ dmId: created.id || created.dmId });
+        // ★ 2026-10-19 B-1014-3⑨ 생성 응답의 판 — 첫 수정 저장부터 판을 싣는다(F1b · 옛: 판 없는 첫 PUT 은 늦게 닿아도 덮었다)
+        set({ dmId: created.id || created.dmId, saveVersion: typeof created.save_version === 'string' ? created.save_version : null });
       }
       // 세션이 바뀌었으면 결과를 적지 않는다(옛 세션 것) — 차례·표시 해제는 finally
       if (token !== editSession) return false;

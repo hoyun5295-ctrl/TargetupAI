@@ -8,7 +8,6 @@ import {
   Calendar,
   CheckCircle2,
   Download,
-  Lock,
   Mail,
   MessageSquare,
   MessagesSquare,
@@ -90,7 +89,7 @@ function MessageCell({ content, maxWidth, onShowDetail }: { content: string; max
   );
 }
 
-export default function ResultsModal({ onClose, token, customerDbEnabled, isSubscriptionLocked, onFeatureLocked, onSubscriptionLocked }: ResultsModalProps) {
+export default function ResultsModal({ onClose, token, customerDbEnabled, onFeatureLocked }: ResultsModalProps) {
   // ★ 2026-08-17 탭 3분할 — 전송결과 / 예약내역 / 테스트발송내역.
   //   전에는 예약분이 전송결과 목록에 섞여 있었고 그 목록은 **기간 필터**를 타서,
   //   기본 기간이 오늘까지인 탓에 내일 예약분이 안 보였다(사용자는 발송 실패로 읽었다 — 실측).
@@ -400,7 +399,7 @@ export default function ResultsModal({ onClose, token, customerDbEnabled, isSubs
             );
           })}
           <span
-            className="absolute bottom-[-1px] left-0 h-0.5 rounded-full bg-indigo-600 transition-transform duration-300 ease-[cubic-bezier(.22,1,.36,1)] motion-reduce:transition-none"
+            className="absolute bottom-[-1px] left-0 h-0.5 rounded-full bg-indigo-600 transition-transform duration-300 [transition-timing-function:cubic-bezier(.22,1,.36,1)] motion-reduce:transition-none"
             style={{
               width: `${100 / RESULT_TABS.length}%`,
               transform: `translateX(${RESULT_TABS.findIndex(t => t.key === activeTab) * 100}%)`,
@@ -412,22 +411,17 @@ export default function ResultsModal({ onClose, token, customerDbEnabled, isSubs
         <div className="flex-1 overflow-y-auto p-5 relative" style={{ overscrollBehavior: 'contain' }}>
           {/* ★ D120 P6 → 2026-07-09 (Harold 명시): 캘린더 = 요금제 미가입(FREE) 포함 전 요금제 개방.
               발송결과는 basic_send 축(FREE 허용)이고 캘린더 데이터(GET /api/campaigns)도 요금제 게이트가 없다.
-              구독 만료/정지 잠금만 유지(전 기능 차단 원칙). */}
+              ★ 2026-10-19 B-1004-2③ — 구독 만료 · 정지도 FREE 처럼(선불 이용 기간 D2 · 발송결과는 계속) = 잠금 없음. */}
           {activeTab === 'summary' && (
             <button
               onClick={() => {
-                if (isSubscriptionLocked) { onSubscriptionLocked?.(); return; }
                 setShowCalendar(true);
               }}
               className={`absolute top-4 right-5 z-10 h-9 px-3.5 inline-flex items-center gap-1.5 rounded-lg text-[13.5px] font-semibold transition ${
-                isSubscriptionLocked
-                  ? 'bg-neutral-100 text-neutral-400 cursor-not-allowed'
-                  : 'bg-white text-neutral-700 border border-neutral-200 hover:bg-neutral-50 hover:border-neutral-300 active:scale-[.98]'
+                'bg-white text-neutral-700 border border-neutral-200 hover:bg-neutral-50 hover:border-neutral-300 active:scale-[.98]'
               }`}
             >
-              {isSubscriptionLocked
-                ? <Lock className="w-[15px] h-[15px]" />
-                : <Calendar className="w-[15px] h-[15px]" />}
+              <Calendar className="w-[15px] h-[15px]" />
               캘린더
             </button>
           )}
@@ -872,7 +866,7 @@ export default function ResultsModal({ onClose, token, customerDbEnabled, isSubs
                     </button>
                   </div>
                 )}
-                <div className="px-4 py-2 text-[10px] text-neutral-400 italic border-t border-neutral-100">Data source: 캠페인 발송 집계(PG/MySQL)</div>
+                <div className="px-4 py-2 text-[10px] text-neutral-400 italic border-t border-neutral-100">Data source: 캠페인 발송 집계</div>
               </div>
                 );
               })()}

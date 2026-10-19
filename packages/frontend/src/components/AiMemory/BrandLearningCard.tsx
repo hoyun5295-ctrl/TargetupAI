@@ -53,7 +53,7 @@ export default function BrandLearningCard({ apiBase, token, onToast, onConfirm }
                 <span className="text-[11px] text-amber-800">아직 학습 전이에요. 3탭에 필요한 정보를 채워주세요.</span>
               )}
             </div>
-            <div className="text-[10px] text-slate-400 italic mt-2">Data source: companies + companies.brand_kit (DM·이메일·인앱·문안 생성 공용)</div>
+            <div className="text-[10px] text-slate-400 italic mt-2">Data source: 회사 정보 + 브랜드 킷 (DM·이메일·인앱·문안 생성 공용)</div>
           </div>
           <button
             onClick={() => setOpen(true)}

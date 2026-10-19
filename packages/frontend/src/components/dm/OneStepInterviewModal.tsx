@@ -25,7 +25,8 @@ import MallProductPickerModal, { type PickedMallProduct } from './MallProductPic
 type QKey = 'objective' | 'products' | 'benefit' | 'urgency' | 'proof' | 'imageSource' | 'storeInfo';
 
 interface Question { key: QKey; title: string; hint?: string; userOnly?: boolean }
-interface Product { name: string; price?: string; url?: string; origin: 'mall' | 'manual' }
+// ★ 2026-10-19 B-1010-4 — 몰 상품은 provider · 상품번호까지 싣는다(서버가 몰에서 다시 읽어 확정 카드로 놓는다)
+interface Product { name: string; price?: string; url?: string; origin: 'mall' | 'manual'; provider?: string; no?: string | null }
 interface Answers {
   objective?: string;
   products?: Product[];
@@ -251,7 +252,7 @@ export default function OneStepInterviewModal({ open, onClose, onGenerated }: {
     if (picked.length === 0) return;
     const merged: Product[] = [
       ...(answers.products || []),
-      ...picked.map((p) => ({ name: p.name, price: String(p.salePrice || p.price || ''), url: p.productUrl || undefined, origin: 'mall' as const })),
+      ...picked.map((p) => ({ name: p.name, price: String(p.salePrice || p.price || ''), url: p.productUrl || undefined, origin: 'mall' as const, provider: p.provider, no: p.no ?? null })),
     ];
     void saveAnswer('products', merged);
   }, [answers.products, saveAnswer]);

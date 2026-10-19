@@ -268,6 +268,7 @@ export function computeEstimate(input: ComputeInput): PerformanceEstimate {
 
 import { query } from '../config/database';
 import { buildFilterWhereClauseCompat } from './customer-filter';
+import { ownerBrandConsent } from './mall-consent';
 import { buildCampaignAttribution } from './campaign-response-attribution';
 import { fetchGradeConversionStats, GradeConversionStat } from './grade-conversion-stats';
 
@@ -293,10 +294,12 @@ export async function fetchTargetProfileByGrade(
   //   전체 활성 고객 기준으로 잡혀 "대상 수는 VIP 20명인데 기대 성과는 1만명 기준"이 된다.
   //   컴파일된 조건을 받으면 그것을 쓴다($1=companyId 전제로 이미 $2부터 매겨져 있어 배치가 같다).
   targetWhere?: { sql: string; params: any[] } | null,
+  /** ★ 2026-10-19 B-1018-5② — 브랜드 조건의 동의 기준(대상 수 · 발송과 같은 주인 기준 · 없음 = 관리자 기준) */
+  ownerUserId?: string | null,
 ): Promise<GradeProfileRow[]> {
   const compiled = targetWhere && typeof targetWhere.sql === 'string'
     ? { sql: targetWhere.sql, params: targetWhere.params || [] }
-    : buildFilterWhereClauseCompat(filters, 2);
+    : buildFilterWhereClauseCompat(filters, 2, await ownerBrandConsent(companyId, ownerUserId || null));
   const { sql: filterWhere, params: filterParams } = compiled;
   const r = await query(
     `SELECT
@@ -344,6 +347,8 @@ export interface EstimateInput {
    * 근거가 갈리지 않도록, 대상 판정에 실제로 쓰인 조건을 그대로 받는다(미전달 = filters 사용, 종전 동작).
    */
   targetWhere?: { sql: string; params: any[] } | null;
+  /** ★ 2026-10-19 B-1018-5② 브랜드 조건 동의 기준(대상 수와 같은 사람) */
+  ownerUserId?: string | null;
 }
 
 /**
@@ -357,7 +362,7 @@ export async function estimatePerformance(input: EstimateInput): Promise<Perform
   // 1) 등급별 타겟 프로필 (구매주기 + 객단가 + 활성도)
   let gradeProfiles: GradeProfileRow[] = [];
   try {
-    gradeProfiles = await fetchTargetProfileByGrade(companyId, filters, input.targetWhere);
+    gradeProfiles = await fetchTargetProfileByGrade(companyId, filters, input.targetWhere, input.ownerUserId);
   } catch (e: any) {
     console.log('[estimator] fetchTargetProfileByGrade skip:', e?.message || e);
   }

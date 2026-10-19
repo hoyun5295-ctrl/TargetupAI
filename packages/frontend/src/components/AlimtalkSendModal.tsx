@@ -112,6 +112,8 @@ export interface AlimtalkSendModalProps {
 
   /** ★ 2026-10-18 AI 한줄로 알림톡 갈래 — 열 때(초기화 뒤) 이 승인 템플릿을 고른 채로 시작한다. 주지 않으면 지금 그대로. */
   initialTemplateId?: string | null;
+  /** ★ 2026-10-19 Codex C1 — 초기 템플릿을 받아 갔다(호출부가 비운다 · 다음 열기에 섞이지 않게) */
+  onInitialTemplateConsumed?: () => void;
 
   /**
    * ★ 2026-09-25 머리의 채널 전환(문자 발송 · 브랜드메시지) — 주면 버튼이 보인다.
@@ -143,6 +145,7 @@ export default function AlimtalkSendModal({
   initialRecipients,
   resetSignal,
   initialTemplateId,
+  onInitialTemplateConsumed,
   onSwitchChannel,
 }: AlimtalkSendModalProps) {
   // 수신자 영역 — 알림톡 전용 state (직접발송 directRecipients와 격리)
@@ -165,6 +168,8 @@ export default function AlimtalkSendModal({
   const [splitCount, setSplitCount] = useState(1000);
   const [splitInterval, setSplitInterval] = useState(1);
 
+  /** ★ 2026-10-19 넘겨받은 템플릿(적용 전까지) — 아래 effect 가 프로필 자동 선택 뒤 고른다 */
+  const pendingTplRef = useRef<string | null>(null);
   // ★ D162-4 (2026-05-15) 5차: Harold님 명시 정합 — 알림톡 모달 진입 시 매핑/state 전체 reset.
   //   기존엔 Dashboard 전역 state(kakaoTemplateVars/kakaoSelectedTemplate/등)가 직접발송 ↔ 직접타겟발송 간 유출되어
   //   옛 매핑값이 새 모달에 그대로 노출되는 치명 사고 발생. show=true 진입 시 모든 알림톡 state 초기화 +
@@ -196,16 +201,24 @@ export default function AlimtalkSendModal({
       //   기존 고객 DB 표준 필드 fetch는 수신자 0건에도 DB 필드가 노출돼
       //   #{고객명}→name 자동 매핑·고정 발송을 유발해 제거(직원 신고).
       // ★ 2026-10-18 AI 한줄로 알림톡 갈래 — 초기화 뒤 넘겨받은 승인 템플릿을 고른다(변수 맞추기 · 대체 문자는 이 창에서)
-      if (initialTemplateId) {
-        const tpl = alimtalkTemplates.find((t) => t.id === initialTemplateId) || null;
-        if (tpl) {
-          setKakaoSelectedTemplate(tpl);
-          setAlimtalkProfileId((tpl as any).profile_id || '');
-        }
-      }
+      //   ★ Codex C1 — 실제 적용은 아래 effect(공용 채널 훅의 프로필 자동 선택이 끝난 뒤) · 받아 간 값은 호출부가 비운다
+      pendingTplRef.current = initialTemplateId || null;
+      if (initialTemplateId) onInitialTemplateConsumed?.();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [show]);
+  // 넘겨받은 템플릿 적용 — 「프로필 하나면 자동 선택」이 템플릿을 비운 뒤에도 다시 고른다 · 맞춰지면 끝(한 번만)
+  useEffect(() => {
+    const id = pendingTplRef.current;
+    if (!show || !id) return;
+    const tpl = alimtalkTemplates.find((t) => t.id === id);
+    if (!tpl) return;   // 템플릿 목록이 오기 전 = 기다린다
+    const pid = (tpl as any).profile_id || '';
+    if (kakaoSelectedTemplate?.id === id && alimtalkProfileId === pid) { pendingTplRef.current = null; return; }
+    setAlimtalkProfileId(pid);
+    setKakaoSelectedTemplate(tpl);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [show, alimtalkTemplates, kakaoSelectedTemplate, alimtalkProfileId]);
 
   // ★ D162-4 (2026-05-15) 8차: initialRecipients 변경 감지 — Harold님 명시 정합.
   //   직접타겟발송에서 추출된 수신자가 인계될 때 useEffect deps에 initialRecipients 누락되어 빈 배열로 남던 문제 차단.
@@ -437,7 +450,8 @@ export default function AlimtalkSendModal({
     const parsed = fileAllData
       .map((row) => {
         const phone = normalizePhoneKr(row[phoneColumn]);
-        if (!phone) return null;
+        // ★ 2026-10-19 B-0925-7 — 직접입력(checkAlimtalkPaste)과 같은 기준 = 10자리 이상만 수신자(「010-12-34」 → 7자리 거름)
+        if (!phone || phone.replace(/\D/g, '').length < 10) return null;
         return { ...row, phone };
       })
       .filter(Boolean) as any[];

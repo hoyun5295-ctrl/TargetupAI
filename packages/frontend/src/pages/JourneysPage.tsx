@@ -2009,7 +2009,7 @@ export default function JourneysPage() {
                           >
                             <Sparkles className="w-3.5 h-3.5" /> 1클릭 생성
                           </button>
-                          <div className="text-[10px] text-slate-400 italic mt-2">Data source: customers · journeys 실시간 집계</div>
+                          <div className="text-[10px] text-slate-400 italic mt-2">Data source: 고객 · 여정 실시간 집계</div>
                         </div>
                       );
                     })}
@@ -2530,7 +2530,7 @@ export default function JourneysPage() {
                                   {samplesTotalMap[j.id] && (
                                     <span className="text-[10px] text-cyan-800">전체 {samplesTotalMap[j.id].total.toLocaleString()}명{samplesTotalMap[j.id].capped ? ' 이상' : ''} 중 {samplesMap[j.id].length}명</span>
                                   )}
-                                  <span className="text-[10px] text-slate-400 italic ml-auto">Data source: customers + 예측</span>
+                                  <span className="text-[10px] text-slate-400 italic ml-auto">Data source: 고객 DB + 예측</span>
                                 </div>
                                 <div className="flex flex-wrap gap-1">
                                   {samplesMap[j.id].map((sample) => (

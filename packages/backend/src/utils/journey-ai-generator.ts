@@ -693,7 +693,7 @@ VIP 회원님만을 위해 마련한 이번 특별 안내,
   }
 
   const cbRes = await query(
-    `SELECT REPLACE(phone, '-', '') AS phone FROM callback_numbers
+    `SELECT regexp_replace(phone, '[^0-9]', '', 'g') AS phone FROM callback_numbers
      WHERE company_id = $1::uuid AND is_default = true
      LIMIT 1`,
     [input.companyId]

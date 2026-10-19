@@ -160,7 +160,8 @@ export default function GradeOrderModal({ open, onClose, onSaved, token }: Props
   };
 
   return (
-    <JourneyModalShell open={open} onClose={onClose} labelledBy="grade-order-modal-title" zIndexClassName="z-[75]">
+    // ★ 2026-10-19 B-0816-1④ — 입력 중 바깥 누름 · Esc 로 닫혀 쓰던 값이 사라지지 않게(닫기 = 창의 닫기 버튼)
+    <JourneyModalShell open={open} onClose={onClose} labelledBy="grade-order-modal-title" zIndexClassName="z-[75]" disableDismiss>
       <>
         <div className={light ? "flex items-start gap-3 border-b border-slate-200 px-5 py-4" : "flex items-start gap-3 border-b border-white/10 px-5 py-4"}>
           <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-amber-400 to-orange-500">

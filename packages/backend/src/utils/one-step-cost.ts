@@ -60,7 +60,7 @@ export function buildOneStepCharges(input: {
   if (!input.interviewPaid) {
     charges.push({
       source: ONE_STEP_INTERVIEW_SOURCE,
-      label: '오토설계 대행',
+      label: '질문 완성',
       cost: priced ? getCreditCost(ONE_STEP_INTERVIEW_SOURCE) : 0,
       idempotencyKey: oneStepInterviewKey(input.sessionId),
     });

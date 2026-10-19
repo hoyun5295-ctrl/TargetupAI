@@ -250,19 +250,30 @@ export class AiLineApiError extends Error {
   }
 }
 
-async function call<T>(path: string, body?: unknown, method: 'POST' | 'GET' = 'POST'): Promise<T> {
+async function call<T>(path: string, body?: unknown, method: 'POST' | 'GET' = 'POST', timeoutMs?: number): Promise<T> {
   const token = localStorage.getItem('token');
-  const res = await fetch(`/api/ai-line${path}`, {
-    method,
-    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-    ...(method === 'POST' ? { body: JSON.stringify(body ?? {}) } : {}),
-  });
-  const d = await res.json().catch(() => null);
-  if (!res.ok || !d || d.success === false) {
-    throw new AiLineApiError(String(d?.code || 'FAILED'), String(d?.error || '처리 중 문제가 생겼어요. 잠시 뒤 다시 시도해 주세요.'), res.status);
+  // ★ 2026-10-19 Codex C2 — 제한 시간을 준 호출은 그 시간이 지나면 끊는다(본문 수신까지 · 끝나지 않는 조회가 잠금을 붙들지 않게)
+  const ctrl = timeoutMs ? new AbortController() : null;
+  const timer = ctrl ? setTimeout(() => ctrl.abort(), timeoutMs) : null;
+  try {
+    const res = await fetch(`/api/ai-line${path}`, {
+      method,
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      ...(method === 'POST' ? { body: JSON.stringify(body ?? {}) } : {}),
+      ...(ctrl ? { signal: ctrl.signal } : {}),
+    });
+    const d = await res.json().catch(() => null);
+    if (!res.ok || !d || d.success === false) {
+      throw new AiLineApiError(String(d?.code || 'FAILED'), String(d?.error || '처리 중 문제가 생겼어요. 잠시 뒤 다시 시도해 주세요.'), res.status);
+    }
+    return d as T;
+  } finally {
+    if (timer) clearTimeout(timer);
   }
-  return d as T;
 }
+
+/** 스팸 칩 조회 제한 시간(3초마다 읽음 · 이보다 오래 걸리면 끊고 다음 읽기에서 다시) */
+const SPAM_READ_TIMEOUT_MS = 10000;
 
 export const aiLineApi = {
   read: (line: string) => call<AiLineReadResult>('/read', { line }),
@@ -282,7 +293,7 @@ export const aiLineApi = {
   spamStart: (body: { body: string; subject: string; channel: AiLineChannel; isAd: boolean; callback: string; sampleCustomerId: string | null }) =>
     call<{ state: AiLineSpamState; testId?: string; reused?: boolean; message?: string }>('/spam-test', body),
   spamRead: (testId: string, channel: AiLineChannel) =>
-    call<{ state: AiLineSpamState; carriers: AiLineSpamChip['carriers']; aheadCount: number; elapsedSec: number }>(`/spam-test/${encodeURIComponent(testId)}?type=${channel === 'SMS' ? 'SMS' : 'LMS'}`, undefined, 'GET'),
+    call<{ state: AiLineSpamState; carriers: AiLineSpamChip['carriers']; aheadCount: number; elapsedSec: number }>(`/spam-test/${encodeURIComponent(testId)}?type=${channel === 'SMS' ? 'SMS' : 'LMS'}`, undefined, 'GET', SPAM_READ_TIMEOUT_MS),
   alimtalkMatch: (line: string, filters: Record<string, unknown>, allCustomers: boolean) =>
     call<{ charged: boolean; paid: boolean; matched: boolean; templates: Array<{ id: string; templateCode: string; name: string; profileId: string; profileName: string | null; content: string; score: number; reason: string }>; mappings: Array<{ templateVariable: string; customerFieldKey: string | null; customerFieldLabel: string | null; isExactMatch: boolean }>; suggestion: string | null }>('/alimtalk-match', { line, filters, allCustomers }),
 };

@@ -78,7 +78,7 @@ export async function loadPlannerCompanyContext(companyId: string): Promise<Plan
 /** 기본 발신번호(준비 판정 CT와 같은 조건 = is_default). */
 export async function loadPlannerDefaultCallback(companyId: string): Promise<string | null> {
   const r = await query(
-    `SELECT REPLACE(phone, '-', '') AS phone FROM callback_numbers
+    `SELECT regexp_replace(phone, '[^0-9]', '', 'g') AS phone FROM callback_numbers
       WHERE company_id = $1 AND is_default = true LIMIT 1`,
     [companyId],
   );

@@ -55,7 +55,8 @@ export default function MarketingJourneyModal({
   quickStarts, availableCount, lockedCount, lockedHints,
 }: Props) {
   return (
-    <JourneyModalShell open={open} onClose={onClose} labelledBy="marketing-journey-modal-title">
+    // ★ 2026-10-19 B-0816-1④ — 입력 중 바깥 누름 · Esc 로 닫히지 않게(닫기 = 창의 닫기 버튼)
+    <JourneyModalShell open={open} onClose={onClose} labelledBy="marketing-journey-modal-title" disableDismiss>
       <>
         <div className="flex items-start gap-3 border-b border-slate-200 bg-gradient-to-r from-fuchsia-50 via-purple-50 to-indigo-50 px-5 py-4">
           <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-fuchsia-400 to-purple-500">

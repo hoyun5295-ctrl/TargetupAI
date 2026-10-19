@@ -12,6 +12,7 @@ import { getTestSmsTables, toQtmsgType, insertTestSmsQueue } from '../utils/sms-
 import { normalizeContent, computeMessageHash, cleanupStaleActiveTests, fetchSpamQtmsgRows, refundSpamSendFailures, resolveSpamReportTest, parseReportAgeMs, spamReportReceivedAt, spamBlockedDue } from '../utils/spam-test-queue';
 // ★ 2026-09-26 한줄로 V2 m040 — 검사 발신번호 = 등록 번호만(발송 경로와 같은 CT)
 import { getRegisteredCallbackSet } from '../utils/callback-filter';
+import { normalizePhone } from '../utils/normalize-phone';
 import { getSampleCustomerScope } from '../utils/store-scope';
 import { resolveOwnerScope } from '../utils/owner-scope';
 // ★2026-09-25 미가입 회사 무료 체험 3회(차감 0 · 청구 집계 제외) · 검사 판정 한 벌
@@ -68,7 +69,7 @@ router.post('/test', authenticate, demoBlock, async (req: Request, res: Response
     // ★ 2026-09-26 한줄로 V2 m040 — 등록되지 않은 발신번호는 통신사가 막아(발신번호 사전등록제) 유료 검사가 헛돈다.
     //   발송 경로와 같은 CT로 거른다(사용자 배정 범위 포함).
     const registeredCallbacks = await getRegisteredCallbackSet(companyId, userId);
-    if (!registeredCallbacks.has(String(callbackNumber).replace(/-/g, '').trim())) {
+    if (!registeredCallbacks.has(normalizePhone(String(callbackNumber || '')))) {   // ★ 1019 B-1005-5② 집합과 같은 표기(숫자만)
       return res.status(400).json({ error: '등록된 발신번호로만 스팸 검사를 할 수 있습니다. 발신번호 관리에서 확인해 주세요.', code: 'UNREGISTERED_CALLBACK' });
     }
 

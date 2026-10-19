@@ -63,7 +63,7 @@ describe('R127 · R241 이미지 스튜디오 저장', () => {
   it('원본 소비는 용량 한도 통과 뒤', () => {
     const r = src('..', 'routes', 'image-studio.ts');
     const b = between(r, "imageStudioRouter.post('/save'", '\nimageStudioRouter.');
-    expect(b.indexOf('consumeOriginal?.();')).toBeGreaterThan(b.indexOf('if (projected > usage.limitBytes) {'));
+    expect(b.indexOf('consumeOriginal?.(moved.url, moved.bytes);')).toBeGreaterThan(b.indexOf('if (projected > usage.limitBytes) {'));
     expect(b).not.toContain('try { fs.unlinkSync(found.absPath); } catch { /* noop */ }\n      try { fs.unlinkSync(path.join(dir, `${tempId}.json`)); } catch { /* noop */ }\n      effTempId');
   });
   it('내부 프롬프트는 소재 기록에 싣지 않고 목록 응답에서도 뺀다', () => {

@@ -1522,7 +1522,10 @@ async function produceOutreachImageExclusive(input: OutreachImageInput): Promise
       const img = await fetchImageGuarded(srcUrl);
       let isAlphaPng = false;
       if (!img) {
-        skippedReason = '선택한 이미지를 내려받지 못해 생성 이미지로만 제작했습니다.';
+        // ★ 2026-10-19 B-1013-2③ — 원천별 문구(옛: 대표 이미지 · 상품 사본 실패에도 「선택한 이미지」 고정)
+        skippedReason = srcUrl === input.selectedImageUrl
+          ? (input.strictPerson ? '대표 이미지를 내려받지 못해 생성 이미지로만 제작했습니다.' : '선택한 이미지를 내려받지 못해 생성 이미지로만 제작했습니다.')
+          : '상품 이미지를 내려받지 못해 생성 이미지로만 제작했습니다.';
         fail = 'download';
       } else {
         personJudge = await judgePersonInImage(img.buffer.toString('base64'), img.mime);
@@ -2241,6 +2244,8 @@ export function cutAtWord(s: string, n: number): string {
   const t = String(s || '').trim();
   if (t.length <= n) return t;
   const cut = t.slice(0, n);
+  // ★ 2026-10-19 B-0924-1 — n 번째 글자가 공백이면 낱말이 딱 n 에서 끝난 것 = 그 낱말까지 쓴다(종전엔 버려 「추석 맞이 톤28 윷놀이」가 「추석 맞이 톤28」로 짧아졌다)
+  if (/\s/.test(t[n] || '')) return cut.replace(/[\s~·\-–:,]+$/g, '').trim();
   const sp = cut.lastIndexOf(' ');
   return (sp >= Math.floor(n / 2) ? cut.slice(0, sp) : cut).replace(/[\s~·\-–:,]+$/g, '').trim();
 }
@@ -2410,7 +2415,10 @@ function fillOutreachDmMediaV3(sections: readonly Section[], media: OutreachFill
   const card1Hero = !!(card1 && card1.bannerUrl && heroEligible(card1.bannerUrl, dims));
   // 폴백 히어로는 카드가 이미 가진 배너를 피한다(같은 이미지가 히어로와 카드에 두 번 = 채점 no_duplicate_image false · 리뷰 #9)
   const cardBannerSet = new Set(cards.map((c) => c.bannerUrl).filter((u): u is string => !!u));
-  const heroImage = card1Hero ? String(card1!.bannerUrl) : (galleryAll.find((g) => !cardBannerSet.has(g.url))?.url || media.posterUrl || media.products[0]?.image_url || '');
+  // ★ 2026-10-19 B-1013-2② — 아웃리치 입구에 재료가 하나도 없으면(상품 0 · 행사 0 = 표준 조립을 건너뛴 골격) 숫자 검사를 지난 사다리 포스터를 첫 화면에.
+  //   옛: 이 경우 홈 첫 배너(숫자 검사 없음)가 첫 화면에 올랐다. 재료가 있으면 지금 그대로(실물 배너 우선 · 불변 26) · 고객 입구(행사 카드 묶음)도 그대로.
+  const zeroMaterials = !v3opts.groupGallery && cards.length === 0 && media.products.length === 0 && !!media.posterUrl;
+  const heroImage = card1Hero ? String(card1!.bannerUrl) : zeroMaterials ? String(media.posterUrl) : (galleryAll.find((g) => !cardBannerSet.has(g.url))?.url || media.posterUrl || media.products[0]?.image_url || '');
   const heroDims = heroImage ? dims[heroImage] : undefined;
   const heroRatio = heroDims && heroDims.width && heroDims.height ? heroDims.width / heroDims.height : null;
   const heroIsPoster = !!media.posterUrl && heroImage === media.posterUrl;
@@ -3607,6 +3615,8 @@ export function buildProposalEmailSections(guide: OutreachStyleGuide, input: Pro
   const brandHeadOf = (): Section[] => {
     const brandHead: Section[] = [];
     if (brandHeader) brandHead.push({ ...(brandHeader as any), id: `so-${order}-header`, order: order++ } as Section);
+    // ★ 2026-10-19 B-1013-2① — 휴대폰 틀 안 DM 첫 화면이 같은 히어로를 보여 준다 → 메일 히어로 칸 생략(옛: 같은 포스터가 두 번 · 서수란 접수 ②와 같은 인상)
+    if (input.dmFrameUrl) return brandHead;
     if (brandHero && (brandHero as any).type === 'hero') {
       brandHead.push({ ...(brandHero as any), id: `so-${order}-hero`, order: order++ } as Section);
     } else if (brandHero) {

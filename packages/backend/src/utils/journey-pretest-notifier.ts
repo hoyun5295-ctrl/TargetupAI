@@ -57,24 +57,29 @@ export async function scanAndPretest(): Promise<{
 
   for (const b of bundles) {
     try {
-      // dedup — 같은 (journey, step) + 같은 KST 날짜를 이미 처리했으면 skip.
-      const dup = await query(
-        `SELECT 1 FROM journey_pretest_schedules
-          WHERE journey_id = $1::uuid AND step_id = $2::uuid
-            AND (scheduled_send_at AT TIME ZONE 'Asia/Seoul')::date = $3::date
-          LIMIT 1`,
-        [b.journeyId, b.stepId, b.sendDateKst]
-      );
-      if (dup.rows.length > 0) continue;
-
       // 최신 snapshot 본문 (executor가 실제 발송하는 본문).
+      //   ★ 2026-10-19 B-1009-6 — 판을 먼저 본다: 재검사 전 판(confidence_score < 100 · 켜진 여정 수정본)은 그날 처리 기록과 상관없이 검사한다
+      //   (검사 중 수정이 들어오면 옛 판 검사 끝에 그날 기록이 다시 들어가 새 판이 건너뛰어졌다 · F4). 처리 기록은 통과한 판의 반복 안내만 막는다.
       const snapRes = await query(
-        `SELECT id, message_body, message_subject FROM journey_step_snapshots
+        `SELECT id, message_body, message_subject, confidence_score FROM journey_step_snapshots
           WHERE step_id = $1::uuid AND journey_id = $2::uuid
           ORDER BY created_at DESC LIMIT 1`,
         [b.stepId, b.journeyId]
       );
       const snap = snapRes.rows[0];
+      const unchecked = !!snap && snap.confidence_score != null && Number(snap.confidence_score) < 100;
+
+      // dedup — 같은 (journey, step) + 같은 KST 날짜를 이미 처리했으면 skip(재검사 전 판은 아님).
+      if (!unchecked) {
+        const dup = await query(
+          `SELECT 1 FROM journey_pretest_schedules
+            WHERE journey_id = $1::uuid AND step_id = $2::uuid
+              AND (scheduled_send_at AT TIME ZONE 'Asia/Seoul')::date = $3::date
+            LIMIT 1`,
+          [b.journeyId, b.stepId, b.sendDateKst]
+        );
+        if (dup.rows.length > 0) continue;
+      }
       const body = String(snap?.message_body || '').trim();
       if (!snap || !body) {
         await recordSchedule(b, 'cancelled');
@@ -83,7 +88,7 @@ export async function scanAndPretest(): Promise<{
 
       const opt080 = await getOpt080Number(b.createdBy, b.companyId);
       // ★ 2026-06-06: 2시간전 재검도 활성화 검증과 같은 회신번호로 테스트 — 빈 callback이면 테스트 발송이 실패해 오탐 정지 위험.
-      const cbRes = await query(`SELECT REPLACE(callback_number, '-', '') AS cb FROM journeys WHERE id = $1::uuid`, [b.journeyId]);
+      const cbRes = await query(`SELECT regexp_replace(callback_number, '[^0-9]', '', 'g') AS cb FROM journeys WHERE id = $1::uuid`, [b.journeyId]);   // ★ 1019 B-1005-5② 같은 뿌리(숫자만)
       const stepCallback = String(cbRes.rows[0]?.cb || '');
       summary.tested++;
       const r1 = await runStepSpamTest({
@@ -92,9 +97,10 @@ export async function scanAndPretest(): Promise<{
         channel: b.channel, isAd: b.isAd, callbackNumber: stepCallback, opt080,
       });
 
-      // 통과 → 담당자 안내(opt-in) + 기록.
+      // 통과 → 담당자 안내(opt-in) + 기록 + ★ 1019 B-1009-6 그 판 = 검사 통과(confidence_score 100 · 실행기 재검사 전 관문이 연다).
       if (r1.enqueueOk && r1.ok) {
         summary.passed++;
+        await markSnapshotChecked(snap.id);
         if (b.notifyManager) await safeNotify(b, body, 'pretest_pass');
         await recordSchedule(b, 'notified');
         continue;
@@ -135,7 +141,7 @@ export async function scanAndPretest(): Promise<{
             await recordSchedule(b, 'paused');
             continue;
           }
-          await query(`UPDATE journey_step_snapshots SET message_body = $2 WHERE id = $1::uuid`, [snap.id, regenBody]);
+          await query(`UPDATE journey_step_snapshots SET message_body = $2, confidence_score = 100 WHERE id = $1::uuid`, [snap.id, regenBody]);   // ★ 1019 B-1009-6 고친 문안 = 검사 통과
           summary.passed++;
           await recordSchedule(b, 'notified');
           continue;
@@ -154,6 +160,11 @@ export async function scanAndPretest(): Promise<{
 
   console.log(`[journey-pretest-scan] 완료 — scanned=${summary.scanned} bundles=${summary.bundles} tested=${summary.tested} passed=${summary.passed} regen=${summary.regenerated} paused=${summary.paused}`);
   return summary;
+}
+
+/** ★ 2026-10-19 B-1009-6 — 검사한 그 스냅샷(판) = 통과(실행기 재검사 전 관문 · journey-builder 수정 스냅샷 = 0). 판 id 로 올려 검사 중 새 수정본은 0 으로 남는다. */
+async function markSnapshotChecked(snapshotId: string): Promise<void> {
+  await query(`UPDATE journey_step_snapshots SET confidence_score = 100 WHERE id = $1::uuid AND confidence_score < 100`, [snapshotId]);
 }
 
 async function recordSchedule(b: PretestBundle, status: string): Promise<void> {

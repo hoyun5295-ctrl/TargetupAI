@@ -203,7 +203,8 @@ export async function buildJourneyOpportunities(companyId: string, ownerUserId?:
       suggestedObjective: '재구매 주기 도래 고객 리마인드: 재구매 유도',
     });
   }
-  if (num(a.wish_cnt) > 0) {
+  // ★ 2026-10-19 B-1010-14 — 찜 카드도 같은 시작 사건(장바구니 템플릿 = cdp.cart_abandon) 여정이 켜져 있으면 내지 않는다(다른 카드와 같은 대조)
+  if (!activeTriggers.has('cdp.cart_abandon') && num(a.wish_cnt) > 0) {
     out.push({
       type: 'wishlist', templateCode: 'cart', title: '찜만 하고 미구매',
       count: num(a.wish_cnt), valueAtStake: Math.round(num(a.wish_cnt) * aov), priority: 'medium',

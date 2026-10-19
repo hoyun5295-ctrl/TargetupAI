@@ -114,6 +114,8 @@ export default function EmailCampaignsPage() {
   const [smtpConfig, setSmtpConfig] = useState<SmtpConfig | null>(null);
   const [campaigns, setCampaigns] = useState<EmailCampaign[]>([]);
   const [error, setError] = useState<string | null>(null);
+  // ★ 2026-10-19 B-1016-3⑤ — 요금제 잠금(서버 403 PLAN_FEATURE_LOCKED) = 잠금 화면(DM 과 같은 방식 · 옛: 편집기 저장에서야 403)
+  const [planLocked, setPlanLocked] = useState<{ msg: string } | null>(null);
   const [confirmState, setConfirmState] = useState<ConfirmState | null>(null);
 
   // SMTP 설정 영역 — 창·입력·저장은 공용 SmtpConnectModal 소유(★2026-10-03 이관)
@@ -222,6 +224,10 @@ export default function EmailCampaignsPage() {
       ]);
 
       if (handle503(statusData) || handle503(configData) || handle503(listData)) return;
+      if (listRes.status === 403 && listData?.code === 'PLAN_FEATURE_LOCKED') {
+        setPlanLocked({ msg: listData.error || 'Email 캠페인은 유료 요금제 가입 후 이용 가능합니다.' });
+        return;
+      }
 
       if (statusData.success) {
         setSmtpConfigured(!!statusData.smtp_configured);
@@ -807,6 +813,24 @@ export default function EmailCampaignsPage() {
 
   const emailOneLine = zoneModule('email').oneLine!;
   const sentCampaignCount = campaigns.filter((c) => c.sentCount > 0).length;
+  if (planLocked) {
+    return (
+      <ZoneFrame moduleId="email">
+        <div className="max-w-md mx-auto mt-8 text-center rounded-2xl bg-white border border-slate-200 shadow-[0_1px_2px_rgba(15,23,42,0.06),0_12px_32px_-16px_rgba(15,23,42,0.25)] px-8 py-10">
+          <div className="w-16 h-16 rounded-2xl mx-auto mb-5 bg-gradient-to-br from-amber-400 to-yellow-500 flex items-center justify-center text-white"><Lock className="w-7 h-7" /></div>
+          <h2 className="text-[19px] font-bold text-slate-900 mb-2">유료 요금제 전용 기능</h2>
+          <p className="text-[14px] text-slate-600 leading-relaxed mb-6">
+            {planLocked.msg}<br />
+            가입하시면 AI 이메일 만들기, 회사 메일로 보내기, 열람·클릭 분석까지 바로 이용하실 수 있어요.
+          </p>
+          <div className="flex gap-2.5 justify-center">
+            <button onClick={() => navigate('/pricing')} className="h-11 px-6 rounded-[10px] bg-indigo-600 hover:bg-indigo-700 text-white text-[14px] font-bold transition-colors">요금제 안내 보기</button>
+            <button onClick={() => navigate('/ai-operator')} className="h-11 px-5 rounded-[10px] border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 text-[14px] font-semibold transition-colors">AI 오퍼레이터로</button>
+          </div>
+        </div>
+      </ZoneFrame>
+    );
+  }
   return (
     <ZoneFrame
       moduleId="email"
@@ -958,7 +982,7 @@ export default function EmailCampaignsPage() {
               {shown.length > listLimit && (
                 <div className="flex justify-center mt-5"><button type="button" onClick={() => setListLimit((v) => v + 24)} className="h-9 px-4 rounded-lg text-[12.5px] font-semibold text-slate-600 border border-slate-300 hover:bg-slate-100">더 보기 ({(shown.length - listLimit).toLocaleString()})</button></div>
               )}
-              <div className="text-[10px] text-slate-400 italic mt-4">Data source: email_campaigns + email_events 누적 집계</div>
+              <div className="text-[10px] text-slate-400 italic mt-4">Data source: 이메일 발송 · 오픈 · 클릭 누적 집계</div>
             </section>
           );
         })()}
@@ -1568,7 +1592,7 @@ function InsightModal({ campaign, authHeaders, onClose, onToast }: InsightModalP
                   )}
                 </>
               )}
-              <div className="text-[10px] text-slate-400 italic">Data source: 실측 오픈/클릭 이벤트 (email_events)</div>
+              <div className="text-[10px] text-slate-400 italic">Data source: 실측 오픈 · 클릭</div>
             </>
           )}
         </div>
@@ -1737,7 +1761,7 @@ function NonOpenerModal({ campaign, authHeaders, onClose, onToast, onGoSms, onRe
                 )}
               </div>
 
-              <div className="text-[10px] text-slate-400 italic">Data source: email_events delivered 후 미오픈(수신거부·반송 제외) · 전화 매칭은 고객DB</div>
+              <div className="text-[10px] text-slate-400 italic">Data source: 전달된 뒤 열지 않은 받는 사람(수신거부·반송 제외) · 전화 매칭은 고객DB</div>
             </>
           ) : result && phase === 'confirm' ? (
             <>

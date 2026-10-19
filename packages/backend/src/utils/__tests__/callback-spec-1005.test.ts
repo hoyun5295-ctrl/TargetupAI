@@ -73,12 +73,17 @@ describe('길목 배선 — 길이만 보던 인라인 검사가 남지 않는�
     const src = read('../callback-filter.ts');
     const start = src.indexOf('export async function getRegisteredCallbackSet(');
     const body = src.slice(start, src.indexOf('\nexport ', start + 1));
-    expect(body).toMatch(/\.filter\(\(r: any\) => checkCallbackSpec\(r\.phone\)\.ok\)/);
+    // ★ 2026-10-19 B-1005-5② — 규격은 저장 원문으로 보고 통과한 것의 숫자만 집합에 넣는다
+    expect(body).toContain('const v = checkCallbackSpec(r.phone);');
+    expect(body).toContain('if (v.ok) out.add(v.digits);');
   });
 
   it('발송 직전 회신번호 검사 3곳이 규격 함수를 부른다', () => {
     const src = read('../../routes/campaigns.ts');
     expect((src.match(/checkCallbackSpec\(/g) || []).length).toBe(3);
+    // ★ 2026-10-19 B-1005-5② — 등록 판정 = 개별 회신번호와 같은 CT(하이픈만 빼던 인라인 조회 0)
+    expect((src.match(/isCallbackRegistered\(companyId, /g) || []).length).toBe(3);
+    expect(src).not.toContain("REPLACE(phone, '-', '')");
     expect((src.match(/code: 'INVALID_CALLBACK_FORMAT'/g) || []).length).toBe(3);
   });
 });

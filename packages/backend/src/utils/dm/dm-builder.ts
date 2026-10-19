@@ -5,7 +5,7 @@
  * CRUD + 단축URL 발행 + 열람 추적 + 통계 집계.
  */
 import crypto from 'crypto';
-import { query } from '../../config/database';
+import { query, withTransaction } from '../../config/database';
 import { normalizeDmShortCode } from './dm-code';
 // ★ 2026-09-15 카탈로그 DM 판정(settings.catalog) — 목록 카드 뱃지 · 판정 한 곳(뷰어와 같은 함수)
 import { isCatalogEnabled } from './dm-viewer-catalog';
@@ -156,6 +156,14 @@ export function pagesFromSectionGroups(groups: readonly (readonly any[])[], newI
 
 // ────────────────── CRUD ──────────────────
 
+/**
+ * ★ 2026-10-19 B-1014-3⑨ 저장 판 = 편집 내용 칸의 지문(md5 · 화면이 다음 저장에 base_version 으로 돌려준다).
+ *   updated_at 이 아니다(F1b) — 검수 결과 · 승인 · 발행 · 중지도 updated_at 을 바꿔, 경쟁 저장이 없어도 다음 저장이 409 로 막혔다.
+ *   칸 = updateDm 이 쓰는 내용 칸(approval_status 제외 · 검수 축). 빠른 수정 · 버전 복원은 내용을 바꾸므로 판이 바뀐다(화면은 그 뒤 다시 불러온다).
+ *   ponytail: 내용이 정확히 옛 판으로 되돌아간 사이 늦은 저장(ABA)은 못 가른다 — 같은 내용이라 덮여도 잃는 것이 없다.
+ */
+export const DM_SAVE_VERSION_SQL = `md5(ROW(title, store_name, header_template, footer_template, header_data, footer_data, pages, settings, layout_mode, sections, brand_kit, template_id, ai_prompt)::text)`;
+
 export async function createDm(companyId: string, userId: string, data: DmPageInput) {
   const layoutMode = data.layout_mode || (Array.isArray(data.sections) && data.sections.length > 0 ? 'scroll' : 'slides');
   const result = await query(
@@ -166,7 +174,7 @@ export async function createDm(companyId: string, userId: string, data: DmPageIn
        layout_mode, sections, brand_kit, template_id, ai_prompt, approval_status
      )
      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
-     RETURNING *`,
+     RETURNING *, ${DM_SAVE_VERSION_SQL} AS save_version`,
     [
       companyId, userId, data.title, data.store_name || null,
       data.header_template || 'default', data.footer_template || 'default',
@@ -183,7 +191,12 @@ export async function createDm(companyId: string, userId: string, data: DmPageIn
   return result.rows[0];
 }
 
-export async function updateDm(id: string, companyId: string, data: Partial<DmPageInput>) {
+/** ★ 2026-10-19 B-1014-3⑨ — 화면이 본 판(base_version)과 지금 판이 다르다 = 늦게 닿은 옛 저장(또는 다른 창 저장) */
+export class DmStaleSaveError extends Error {
+  constructor(public currentVersion: string | null) { super('DM_STALE_SAVE'); }
+}
+
+export async function updateDm(id: string, companyId: string, data: Partial<DmPageInput>, opts: { baseVersion?: string } = {}) {
   const sets: string[] = [];
   const params: any[] = [];
   let idx = 1;
@@ -208,12 +221,20 @@ export async function updateDm(id: string, companyId: string, data: Partial<DmPa
 
   sets.push(`updated_at = NOW()`);
   params.push(id, companyId);
-
+  // ★ 2026-10-19 B-1014-3⑨ — 판이 오면 판이 같을 때만 쓴다(옛: 30초 timeout 으로 끊긴 저장이 늦게 닿아 그 뒤의 새 저장을 덮었다).
+  //   판이 다르면 DmStaleSaveError(지금 판) → 라우트 409 → 화면이 지금 판으로 한 번 다시 보낸다(화면의 마지막 내용이 이긴다 · 늦은 옛 저장만 진다).
+  const verIdx = idx + 2;   // id = idx · company = idx+1 · 판 = idx+2
+  if (opts.baseVersion) params.push(opts.baseVersion);
   const result = await query(
-    `UPDATE dm_pages SET ${sets.join(', ')} WHERE id = $${idx++} AND company_id = $${idx} RETURNING *`,
+    `UPDATE dm_pages SET ${sets.join(', ')} WHERE id = $${idx++} AND company_id = $${idx}${opts.baseVersion ? ` AND ${DM_SAVE_VERSION_SQL} = $${verIdx}` : ''} RETURNING *, ${DM_SAVE_VERSION_SQL} AS save_version`,
     params
   );
-  return result.rows[0] || null;
+  if (result.rows[0]) return result.rows[0];
+  if (opts.baseVersion) {
+    const cur = await query(`SELECT ${DM_SAVE_VERSION_SQL} AS save_version FROM dm_pages WHERE id = $1 AND company_id = $2`, [id, companyId]);
+    if (cur.rows[0]) throw new DmStaleSaveError(cur.rows[0].save_version || null);
+  }
+  return null;
 }
 
 // ────────────────── 버전 관리 (D125 §13) ──────────────────
@@ -318,21 +339,25 @@ export async function saveDmVersion(
   /** 화면 상태 전부(`buildDmSnapshot`). 없으면 옛 형태로 저장된다 */
   snapshot?: Record<string, any> | null,
 ): Promise<any> {
-  const res = await query(
-    `SELECT COALESCE(MAX(version_number), 0) + 1 AS next FROM dm_versions WHERE dm_id = $1`,
-    [dmId],
-  );
-  const versionNumber = res.rows[0]?.next || 1;
-  const ins = await query(
-    `INSERT INTO dm_versions (dm_id, version_label, version_number, sections, brand_kit, note, created_by, snapshot)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-     RETURNING *`,
-    [
-      dmId, label, versionNumber, JSON.stringify(sections), JSON.stringify(brandKit || {}), note, userId,
-      snapshot ? JSON.stringify(snapshot) : null,
-    ],
-  );
-  return ins.rows[0];
+  // ★ 2026-10-19 B-1014-3⑤ — 번호 매기기 = DM 행 잠금 안에서(옛: MAX+1 조회와 INSERT 가 따로라 겹친 두 저장이 같은 번호를 받았다 · 표 변경 0)
+  return withTransaction(async (run) => {
+    await run(`SELECT id FROM dm_pages WHERE id = $1 FOR UPDATE`, [dmId]);
+    const res = await run(
+      `SELECT COALESCE(MAX(version_number), 0) + 1 AS next FROM dm_versions WHERE dm_id = $1`,
+      [dmId],
+    );
+    const versionNumber = res.rows[0]?.next || 1;
+    const ins = await run(
+      `INSERT INTO dm_versions (dm_id, version_label, version_number, sections, brand_kit, note, created_by, snapshot)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+       RETURNING *`,
+      [
+        dmId, label, versionNumber, JSON.stringify(sections), JSON.stringify(brandKit || {}), note, userId,
+        snapshot ? JSON.stringify(snapshot) : null,
+      ],
+    );
+    return ins.rows[0];
+  });
 }
 
 export async function listDmVersions(dmId: string, companyId: string): Promise<any[]> {
@@ -389,7 +414,7 @@ export async function restoreDmVersion(
   params.push(dmId, companyId);
   const upd = await query(
     `UPDATE dm_pages SET ${sets.join(', ')}, updated_at = NOW()
-     WHERE id = $${idx++} AND company_id = $${idx} RETURNING *`,
+     WHERE id = $${idx++} AND company_id = $${idx} RETURNING *, ${DM_SAVE_VERSION_SQL} AS save_version`,
     params,
   );
   const dm = upd.rows[0] || null;
@@ -640,8 +665,9 @@ export async function cloneDm(id: string, companyId: string, userId: string) {
 }
 
 export async function getDmDetail(id: string, companyId: string) {
+  // ★ 2026-10-19 B-1014-3⑨ save_version = 저장 판(내용 지문 · DM_SAVE_VERSION_SQL)
   const result = await query(
-    `SELECT * FROM dm_pages WHERE id = $1 AND company_id = $2`,
+    `SELECT *, ${DM_SAVE_VERSION_SQL} AS save_version FROM dm_pages WHERE id = $1 AND company_id = $2`,
     [id, companyId]
   );
   return result.rows[0] || null;

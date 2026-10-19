@@ -207,7 +207,7 @@ export default function JourneyStatsPage() {
                 <div className="text-[10px] text-slate-400 mt-0.5">전환 판정 = 진입 이후 구매(이벤트·프로필)</div>
               </div>
             </div>
-            <div className="text-[10px] text-slate-400 italic mt-2">Data source: journey_executions(holdout) × cdp_events·customers 실측</div>
+            <div className="text-[10px] text-slate-400 italic mt-2">Data source: 여정 진행(비교군 포함) × 고객 행동 · 구매 실측</div>
           </div>
         )}
 

@@ -9,6 +9,7 @@
  * ⛔ 초안만 만든다. 켜기는 사전 검증(문안 · 스팸 · 제목 · 자리표시)과 켜기 게이트(journey-activation)를 지나야 한다.
  */
 import { query } from '../config/database';
+import { redis } from '../config/defaults';
 import { createJourneyFromTemplate, type JourneyTemplateCode } from './journey-builder';
 import type { JourneyAIPackage, GeneratedStep } from './journey-ai-generator';
 import { deductCreditOutcome, refundCredit } from './ai-credit';
@@ -25,11 +26,11 @@ export interface CallbackNumberRow {
 export async function listJourneyCallbackNumbers(companyId: string): Promise<CallbackNumberRow[]> {
   const r = await query(
     `SELECT DISTINCT phone, source, description, is_default FROM (
-       SELECT REPLACE(phone_number, '-', '') AS phone, 'sender' AS source, description, false AS is_default
+       SELECT regexp_replace(phone_number, '[^0-9]', '', 'g') AS phone, 'sender' AS source, description, false AS is_default
        FROM sender_numbers
        WHERE company_id = $1::uuid AND is_active = true AND is_verified = true
        UNION
-       SELECT REPLACE(phone, '-', '') AS phone, 'callback' AS source, label AS description, is_default
+       SELECT regexp_replace(phone, '[^0-9]', '', 'g') AS phone, 'callback' AS source, label AS description, is_default
        FROM callback_numbers
        WHERE company_id = $1::uuid
      ) src
@@ -99,6 +100,28 @@ export async function saveJourneyPackageAsDraft(
 export const DRAFT_ALREADY_MADE = '이 요청으로 만든 여정 초안이 이미 있어요. 여정 목록에서 이어서 고쳐 주세요.';
 
 /**
+ * ★ 2026-10-19 B-1010-12 — 요청 → 만든 초안 id 기억(Redis 30일). 「이미 만든 초안」 거절에 그 id 를 실어 화면이 바로 연다.
+ * 기억이 없거나(만료 · Redis 장애) 초안이 지워졌으면 id 없이 종전 문구만(거절 판정은 원장이 소유 · 이 기억은 길 안내뿐).
+ */
+const DRAFT_MADE_TTL_SEC = 30 * 24 * 60 * 60;
+const draftMadeKey = (requestKey: string) => `journey-draft-made:${requestKey}`;
+const requestKeyOf = (chargeKey: string) => chargeKey.replace(/#\d+$/, '');
+async function rememberedDraft(companyId: string, requestKey: string): Promise<string | undefined> {
+  try {
+    // 길 안내일 뿐이라 Redis 가 늦으면 기다리지 않는다(0.5초 · 거절 응답이 막히지 않게)
+    const id = await Promise.race([
+      redis.get(draftMadeKey(requestKey)),
+      new Promise<null>((resolve) => setTimeout(() => resolve(null), 500)),
+    ]);
+    if (!id) return undefined;
+    const r = await query(`SELECT id FROM journeys WHERE id = $1::uuid AND company_id = $2::uuid AND archived_at IS NULL`, [id, companyId]);
+    return r.rows[0] ? String(r.rows[0].id) : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
  * AI 를 부르기 전 — 이 요청의 다음 시도 키를 원장에서 정한다. 되돌리지 않은 차감이 있으면 DRAFT_ALREADY_MADE.
  * 조회 오류는 던진다(모르는 것을 "안 냈다"로 접지 않는다).
  */
@@ -112,7 +135,7 @@ export async function nextDraftChargeKey(companyId: string, requestKey: string):
     (r.rows as any[]).filter((x) => x.type === 'refund').map((x) => String(x.idempotency_key).replace(/:refund$/, '')),
   );
   const charged = (r.rows as any[]).filter((x) => x.type === 'deduct').map((x) => String(x.idempotency_key));
-  if (charged.some((k) => !refunded.has(k))) throw new JourneyInputError(DRAFT_ALREADY_MADE);
+  if (charged.some((k) => !refunded.has(k))) throw new JourneyInputError(DRAFT_ALREADY_MADE, await rememberedDraft(companyId, requestKey));
   return `${requestKey}#${charged.length + 1}`;
 }
 
@@ -138,10 +161,12 @@ export async function chargeThenSaveDraft(opts: {
     idempotencyKey: opts.chargeKey,
     throwOnInsufficient: true,
   });
-  if (outcome === 'duplicate') throw new JourneyInputError(DRAFT_ALREADY_MADE);
+  if (outcome === 'duplicate') throw new JourneyInputError(DRAFT_ALREADY_MADE, await rememberedDraft(opts.companyId, requestKeyOf(opts.chargeKey)));
   const charged = outcome === 'deducted' ? opts.cost : 0;
   try {
-    return { journeyId: await opts.save(), charged };
+    const journeyId = await opts.save();
+    redis.set(draftMadeKey(requestKeyOf(opts.chargeKey)), journeyId, 'EX', DRAFT_MADE_TTL_SEC).catch(() => { /* 길 안내만 · 거절은 원장 */ });
+    return { journeyId, charged };
   } catch (saveErr) {
     if (charged > 0) {
       try {

@@ -91,6 +91,7 @@ import { normalizeRepImageUrl, normalizeFocusHint } from './sales-outreach-bulk'
 // ★ 2026-09-06 v3 행사 카드(엔진 타입 · 엔진은 이 파일을 모른다) · 레시피 승격(best-copy CT · 쓰기는 그 CT 만)
 import type { EngineEventCard } from './campaign-engine';
 import { insertOutreachRecipe, findOutreachRecipeByJob } from './best-copy-assets';
+import { runSerial } from './inflight-lock';
 
 // ===== 타입 =====
 
@@ -2502,6 +2503,12 @@ export async function editOutreachReplyLine(jobId: string, text: string, operato
  */
 export async function promoteOutreachRecipe(jobId: string, operatorSuperAdminId: string | null | undefined): Promise<{ id: string }> {
   await assertOperator(operatorSuperAdminId);
+  // ★ 2026-10-19 B-1018-2 — 같은 잡의 승격을 줄 세운다(중복 조회 ~ 저장 사이에 두 창이 둘 다 통과해 두 행이 되던 구멍).
+  //   뒤 차례는 앞 저장을 보고 「이미 승격」으로 끝난다 · 프로세스 1개(pm2 fork) 전제 = 다른 잠금과 같다.
+  return runSerial(`outreach-recipe-promote:${jobId}`, () => promoteOutreachRecipeOnce(jobId, operatorSuperAdminId));
+}
+
+async function promoteOutreachRecipeOnce(jobId: string, operatorSuperAdminId: string | null | undefined): Promise<{ id: string }> {
   const cur = await query(`SELECT stage, company_name, industry_category, stage_results FROM sales_outreach_jobs WHERE id = $1`, [jobId]);
   if (cur.rows.length === 0) throw new OutreachError('NOT_FOUND', '대상 건을 찾을 수 없습니다.');
   if (cur.rows[0].stage !== 'ready' && cur.rows[0].stage !== 'sent') throw new OutreachError('CONFLICT', '제작이 끝난 건만 승격할 수 있습니다.');

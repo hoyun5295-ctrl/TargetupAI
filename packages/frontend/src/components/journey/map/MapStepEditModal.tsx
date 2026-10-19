@@ -184,7 +184,7 @@ export default function MapStepEditModal({ journey, step, generatedAt, onClose, 
       });
       const d = await res.json().catch(() => ({}));
       if (!res.ok || !d?.success) throw new Error(d?.error || '저장하지 못했어요.');
-      toast.success(isActive ? '문안을 바꿨어요. 발송 2시간 전에 다시 검사합니다.' : '저장했어요. 켜기 전 점검을 다시 받아야 해요.');
+      toast.success(isActive ? '문안을 바꿨어요. 발송 전에 다시 검사합니다.' : '저장했어요. 켜기 전 점검을 다시 받아야 해요.');
       setConfirmActive(false);
       await load(journey.id);
       onSaved();
@@ -202,7 +202,8 @@ export default function MapStepEditModal({ journey, step, generatedAt, onClose, 
   const stepTitle = (s: MapStep) => (s.kind === 'message' ? `${s.order}번째 문자 · ${stepChannelLabel(s.channel)}` : s.kind === 'condition' ? `${s.order}번째 · 조건` : s.kind === 'wait' ? `${s.order}번째 · 기다림` : `${s.order}번째 칸`);
 
   return (
-    <JourneyModalShell open={open} onClose={onClose} labelledBy="jmap-edit-title" panelClassName="w-full max-w-5xl md:h-[88vh]">
+    // ★ 2026-10-19 B-0816-1④ — 단계 편집 중 바깥 누름 · Esc 로 닫히지 않게(닫기 = 창의 닫기 버튼)
+    <JourneyModalShell open={open} onClose={onClose} labelledBy="jmap-edit-title" panelClassName="w-full max-w-5xl md:h-[88vh]" disableDismiss>
       <div className="flex min-h-0 flex-1 flex-col text-slate-900">
         <div className="flex items-start gap-3 px-5 pt-4 pb-3 border-b border-slate-200">
           <div className="flex-1 min-w-0">
@@ -322,7 +323,7 @@ export default function MapStepEditModal({ journey, step, generatedAt, onClose, 
           {confirmActive && (
             <div className="mb-2.5 flex items-start gap-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-[12px] leading-relaxed text-amber-900">
               <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0" />
-              <span>켜진 여정의 문안을 바꿉니다. 다음 발송부터 바뀐 문안이 나가고, 발송 2시간 전에 스팸 검사를 다시 합니다. 이미 이 칸 차례가 된 고객은 검사 전에 바뀐 문안을 받을 수 있어요. 검사에 걸리면 자동으로 고쳐 쓰고(1크레딧) 그래도 걸리면 여정이 자동으로 멈춥니다.</span>
+              <span>켜진 여정의 문안을 바꿉니다. 다음 발송부터 바뀐 문안이 나가고, 발송 전에 스팸 검사를 다시 합니다. 이미 이 칸 차례가 된 고객은 15분 뒤로 미뤄 검사를 먼저 마친 뒤 보내요. 검사에 걸리면 자동으로 고쳐 쓰고(1크레딧) 그래도 걸리면 여정이 자동으로 멈춥니다.</span>
             </div>
           )}
           {timingChanged && journey.status === 'paused' && journey.counts.inProgress > 0 && (

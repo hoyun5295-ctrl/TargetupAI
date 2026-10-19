@@ -35,6 +35,9 @@ import { buildDmStructure } from '../utils/dm/dm-interview-contract';
 import { estimateOneStep, sumOneStepCharges, oneStepInterviewKey } from '../utils/one-step-cost';
 import { oneShotGenerate } from '../utils/dm/dm-ai';
 import { attachMallImagesToProductCarousels } from '../utils/mall-product-match';
+import { resolveIntegrationActor } from '../utils/integration-scope';
+import { sanitizeLineProducts, LINE_PRODUCTS_MAX, type LineProductRef } from '../utils/one-line-facts';
+import { resolveLineMallCards } from '../utils/line-mall-cards';
 import { checkCredit, deductCreditOutcome, isChargedByKey, isCreditEnabledStrict } from '../utils/ai-credit';
 import { runInCreditBundle } from '../utils/ai-credit-context';
 
@@ -290,16 +293,31 @@ router.post('/sessions/:id/generate', async (req: Request, res: Response) => {
     const quote = estimateOneStep({ sessionId: s.id, attempt, interviewPaid, creditEnabled });
     await checkCredit(companyId, quote.total);
 
+    // ★ 2026-10-19 B-1010-4 — 사람이 고른 몰 상품 = 확정 카드(1010 계약 · 서버가 몰에서 다시 읽은 값만 · 가격은 AI 를 지나지 않는다).
+    //   옛: 상품번호를 싣지 않아 고른 상품이 생성에 들어가지 않고 상품 수만 캐러셀 유무를 정했다. 다시 못 읽은 상품은 빠진다(생성은 그대로).
+    const mallActor = await resolveIntegrationActor(req.user);
+    const mallRefs: LineProductRef[] = (claimed.answers.products || [])
+      .filter((p) => p.origin === 'mall')
+      .flatMap((p) => { const r = sanitizeLineProducts([{ provider: p.provider, no: p.no }]); return Array.isArray(r) ? r : []; });
+    const mallRefsUnique = sanitizeLineProducts(mallRefs.slice(0, LINE_PRODUCTS_MAX));
+    const confirmedCards = Array.isArray(mallRefsUnique) && mallRefsUnique.length > 0
+      ? (await resolveLineMallCards(companyId, mallActor, mallRefsUnique).catch(() => ({ cards: [] as never[] }))).cards
+      : [];
+
     // AI 생성만 먼저 한다 — 돈은 **소유권을 확정한 뒤에** 건드린다.
     const result = await runInCreditBundle(() => oneShotGenerate({
       prompt: '',              // ⛔ 비운다 — 프롬프트 요약 통로를 타지 않기 위한 조건이다(설계서 §0-5)
       eventText: brief.eventText,
       structure,
       companyId,
+      ...(confirmedCards.length > 0 ? { confirmedCards, mergeSourceProducts: true } : {}),   // ★ Codex E1 직접 적은 상품도 함께
     }));
 
     // 상품 이미지·정가·링크는 코드가 채운다(프롬프트로 지시하지 않는다 — 생성기 규칙과 싸우지 않게).
-    try { await attachMallImagesToProductCarousels(companyId, result.sections); } catch { /* best-effort */ }
+    // ★ 1019 — 몰 상품을 사람이 골랐으면 이름 자동 첨부를 하지 않는다(확정은 사람의 선택만 · 1010 불변 4).
+    if (mallRefs.length === 0) {
+      try { await attachMallImagesToProductCarousels(companyId, result.sections, mallActor); } catch { /* best-effort */ }
+    }
 
     // ⛔ **돈을 쓰기 전에 소유권을 재확인한다**(상태는 아직 `generating`으로 둔다).
     //   생성이 10분(lease)을 넘겼으면 다른 요청이 정당하게 재선점했을 수 있다 — 그 상태로 걷고 성공을

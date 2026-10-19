@@ -8,6 +8,16 @@ import { buildFeatureIntrosPayload, resolveSignedMedia } from '../utils/plan-fea
 
 const router = Router();
 
+/**
+ * ★ 2026-10-19 B-0816-1③ — 비로그인에도 열린 목록이라 화면이 읽는 칸만 내보낸다(내부 기능 플래그 · 한도 칸 비공개).
+ * 소비처 4곳(PricingPage · TrialUpsellModal · 슈퍼관리자 회사 등록 · 회사 상세 요금제 선택)이 읽는 칸 전부 = 아래 7개.
+ * 요금제 관리(전 칸)는 슈퍼관리자 전용 `/api/admin/plans` 가 따로 소유한다.
+ */
+export const PUBLIC_PLAN_FIELDS = ['id', 'plan_code', 'plan_name', 'max_customers', 'monthly_price', 'is_active', 'ai_credits_per_month'] as const;
+export function publicPlanRow(row: Record<string, unknown>): Record<string, unknown> {
+  return Object.fromEntries(PUBLIC_PLAN_FIELDS.filter((k) => k in row).map((k) => [k, row[k]]));
+}
+
 // GET /api/plans - 요금제 목록 (인증 불필요)
 //   ★ 2026-09-03 planQuotas 동반 — 비로그인 요금제 안내(/pricing 방문자 모드)가 "포함된 무료 메시지"를
 //     그리려면 로그인 전용 /companies/my-free-messaging 없이도 요금제별 수량이 필요하다.
@@ -26,7 +36,7 @@ router.get('/', async (req: Request, res: Response) => {
       console.error('요금제 무료 수량 조회 실패(목록은 계속):', err);
     }
 
-    return res.json({ plans: result.rows, planQuotas });
+    return res.json({ plans: result.rows.map(publicPlanRow), planQuotas });
   } catch (error) {
     console.error('요금제 목록 조회 에러:', error);
     return res.status(500).json({ error: '서버 오류가 발생했습니다.' });

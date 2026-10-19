@@ -76,7 +76,8 @@ export function buildIdempotencyKey(source: string, aiCallLogId?: string | null)
 
 /**
  * 작업 source → 크레딧 비용 (가치 기반 재설계 — 2026-06-01, 1크레딧 = 500원).
- *  - 풀분석 300 / 여정 생성 3·저장 150 / 자동마케팅 저장 200·발송 3 / DM 생성 5·발행 30 / 인앱 생성 3·게시 15 / 문안·분석 5 / 다듬기·질문·매핑 1.
+ *  - 풀분석 300 / 여정 생성 3·저장 150 / 자동마케팅 저장 200·발송 3 / DM 생성 5·발행 100 / 인앱 생성 3·게시 100 / 문안·분석 5 / 다듬기·질문·매핑 1.
+ *    (★ 2026-10-19 B-1017-1② 발행 · 게시 금액 주석을 표 값에 맞춤 · 진실은 아래 표)
  *  - orchestrate·continuous-operator는 진입점 1회만 차감, 내부 sub 호출은 호출측이 creditCost:0 명시(묶음 회피).
  *  - 미등록 source는 getCreditCost가 0 반환(차감 안 함) — 신규 작업 추가 시 여기 등록 의무.
  *  - ★ 기준점 (Harold 명시 2026-07-02): 사용자 버튼 트리거 + 20크레딧 이상 = frontend CONFIRM_CREDIT_COSTS
@@ -134,7 +135,7 @@ export const CREDIT_COST_MAP: Record<string, number> = {
   'one-step-interview': 50,
   // 예측 자동 분석 (3) — 연동 회사(싱크에이전트/SDK) 매일 1회 예측 점수 갱신. 회사+날짜 멱등.
   'predictive-daily': 3,
-  // 모바일 DM 생성(돌려보기) 5 — 자연어→sections + 슬라이드 분할 + 전 섹션 카피까지 생성(범위 넓음). 호출마다 5. 발행은 'dm-builder' 30 별도.
+  // 모바일 DM 생성(돌려보기) 5 — 자연어→sections + 슬라이드 분할 + 전 섹션 카피까지 생성(범위 넓음). 호출마다 5. 발행은 'dm-builder' 100 별도.
   'dm-ai-generate': 5,
   // ★ 2026-10-17 한 줄 완성 10 — Harold 2안 확정(설계서 docs/2026-10-17-oneline-steps-modal-design.md §3-11).
   //   한 줄 단계 모달(질문 · 재료 받기 · 몰 상품 확정 · 재료 배치)을 거친 만들기 = 그 채널 생성비 + 10(DM 15 · 이메일 13 · 인앱 13 · 원장 한 행).
@@ -144,11 +145,11 @@ export const CREDIT_COST_MAP: Record<string, number> = {
   // ★ 2026-09-15 카탈로그 DM 생성 10 — Harold 확정. AI 자동제작 카탈로그 채널(쪽 이미지 N장 · 수량 제한 없음 → 장당 1쪽 슬라이드 DM + settings.catalog).
   //   AI·판독 0(쪽을 그대로 싣는다) · 멱등키 quick:{company}:catalog:{attemptToken}:{과금 지문16}(duplicate 무료) · 발행은 'dm-builder' 별도.
   'catalog-dm-build': 10,
-  // 모바일 DM 발행(확정) 30 — 단축URL 발행 최초 1회만(멱등키=dm-publish:dmId). test-send 자동발행은 미과금.
+  // 모바일 DM 발행(확정) 100 — 단축URL 발행 최초 1회만(멱등키=dm-publish:dmId). test-send 자동발행은 미과금.
   'dm-builder': 100,
   // 인터랙션 캠페인 발행(룰렛/추첨/투표/설문/이메일수집 등) 50 — 일반 발행보다 높게(F 안1 정액). 발행 최초 1회만(멱등키=dm-publish:dmId). 당첨 통보 발송은 기존 발송 크레딧 별도(발송은 발송대로). 베타 동안 하향 조정 가능(config가 진실).
   'dm-interaction-publish': 120,
-  // 인앱 생성(돌려보기) 3 — 자연어→완성 메시지. 호출마다 3. 게시는 'inapp-publish' 15 별도.
+  // 인앱 생성(돌려보기) 3 — 자연어→완성 메시지. 호출마다 3. 게시는 'inapp-publish' 100 별도.
   'inapp-ai-generator': 3,
   // Email 생성(돌려보기) 3 — 자연어/시나리오→제목3안+본문 HTML. 호출마다 3. 캠페인 완성은 'email-campaign-complete' 50 별도.
   'email-ai-generate': 3,

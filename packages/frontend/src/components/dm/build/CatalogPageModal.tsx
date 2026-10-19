@@ -166,7 +166,16 @@ export default function CatalogPageModal({
         onClose={() => setStudioAt(null)}
         defaultTitle={texts.title || ''}
         defaultSubtitle={texts.desc || ''}
-        onInserted={(url) => { if (studioAt !== null) setPhotoAt(studioAt, url); setStudioAt(null); }}
+        onInserted={(url) => {
+          if (studioAt !== null) setPhotoAt(studioAt, url);
+          setStudioAt(null);
+          // ★ 2026-10-19 B-1016-3④ — 스튜디오 포스터에는 이 쪽의 제목 · 설명이 이미 새겨진다(위 defaultTitle · defaultSubtitle).
+          //   쪽 합성이 같은 글자를 한 번 더 새기지 않게 쪽 글자를 비운다(필요하면 다시 적을 수 있다).
+          if (def.texts.some((t) => t.k === 'title' || t.k === 'desc') && (texts.title || texts.desc)) {
+            setTexts((prev) => ({ ...prev, title: '', desc: '' }));
+            toast.success('포스터에 제목 · 설명이 들어가 있어 쪽 글자는 비웠어요.');
+          }
+        }}
       />
     </>
   );

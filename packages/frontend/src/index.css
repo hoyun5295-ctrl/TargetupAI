@@ -26,3 +26,17 @@ select optgroup {
   color: #1e293b !important;            /* slate-800 — 흰 드롭다운에서 항상 가독 */
   background-color: #ffffff !important;
 }
+
+/* ★ 2026-10-19 B-1010-6 — 창 들어오기 움직임 공용 정의. animate-[fadeIn_…] · animate-[zoomIn_…] · style animation 을 쓰는 창 15곳이
+   전역 정의 없이(남의 인라인 <style> 이 붙어 있을 때만) 움직였다 = 대부분 무효. 여기 한 번 정의하면 모두 산다. */
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+@keyframes zoomIn {
+  from { opacity: 0; transform: scale(0.95); }
+  to { opacity: 1; transform: scale(1); }
+}
+@media (prefers-reduced-motion: reduce) {
+  [class*="animate-[fadeIn"], [class*="animate-[zoomIn"] { animation: none !important; }
+}

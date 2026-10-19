@@ -30,6 +30,8 @@
  */
 
 import { query } from '../config/database';
+import { TIMEOUTS } from '../config/defaults';
+import { joinInflight } from './inflight-lock';
 // ★ 2026-09-26 한줄로 V2 R1-31 — 토큰 요청 실패 판정 CT(제공자 거절일 때만 연동 만료)
 import { tokenHttpError, reconnectRequiredError, isDefinitiveTokenRejection } from './integration-token-error';
 import { timingSafeEqual } from 'crypto';
@@ -126,6 +128,7 @@ export function buildImwebAuthorizeUrl(siteCode: string, state: string, scope: s
 export async function exchangeImwebCode(code: string): Promise<{ accessToken: string; refreshToken: string; scope: string }> {
   if (!envReady()) throw new Error('아임웹 OAuth 환경변수가 설정되지 않았습니다.');
   const res = await fetch(IMWEB_TOKEN_URL, {
+    signal: AbortSignal.timeout(TIMEOUTS.integrationApi),
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
@@ -146,6 +149,7 @@ export async function exchangeImwebCode(code: string): Promise<{ accessToken: st
 export async function refreshImwebToken(refreshToken: string): Promise<{ accessToken: string; refreshToken: string; scope: string }> {
   if (!envReady()) throw new Error('아임웹 OAuth 환경변수가 설정되지 않았습니다.');
   const res = await fetch(IMWEB_TOKEN_URL, {
+    signal: AbortSignal.timeout(TIMEOUTS.integrationApi),
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
@@ -241,6 +245,14 @@ export async function getImwebIntegrationsBySiteCode(siteCode: string): Promise<
 
 export async function ensureFreshImwebToken(integration: ImwebIntegration): Promise<ImwebIntegration> {
   if (integration.tokenExpiresAt.getTime() > Date.now() + TOKEN_REFRESH_MARGIN_MS) return integration;
+  // ★ 2026-10-19 B-1010-5 — 카페24 와 같다(같은 연동 갱신 한 번 · DB 새 값 재사용 · 옛 refresh_token 재사용 거절 → 「만료」 표시 방지)
+  return joinInflight(`imweb-token:${integration.id}`, () => refreshImwebOnce(integration));
+}
+
+async function refreshImwebOnce(held: ImwebIntegration): Promise<ImwebIntegration> {
+  const latest = await getImwebIntegration(held.companyId, held.siteCode).catch(() => null);
+  const integration = latest && latest.id === held.id ? latest : held;
+  if (integration.tokenExpiresAt.getTime() > Date.now() + TOKEN_REFRESH_MARGIN_MS) return integration;
   try {
     const refreshed = await refreshImwebToken(integration.refreshToken);
     await saveImwebIntegration(integration.companyId, integration.siteCode, refreshed);
@@ -279,7 +291,7 @@ export async function imwebApiCall<T = unknown>(
   if (options.body !== undefined) fetchOpts.body = JSON.stringify(options.body);
 
   for (let attempt = 0; attempt < 3; attempt++) {
-    const res = await fetch(url, fetchOpts);
+    const res = await fetch(url, { ...fetchOpts, signal: AbortSignal.timeout(TIMEOUTS.integrationApi) });
     if (res.ok) return (await res.json()) as T;
     // 429(rate limit) 또는 5xx 재시도
     if ((res.status === 429 || res.status >= 500) && attempt < 2) {

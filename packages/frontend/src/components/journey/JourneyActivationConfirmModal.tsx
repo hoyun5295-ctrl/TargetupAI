@@ -516,7 +516,7 @@ export default function JourneyActivationConfirmModal({
                 </div>
               )}
               <div className="text-[10px] text-slate-400 italic">
-                Data source: customers.store_phone ↔ 등록 발신번호(callback_numbers) 대조
+                Data source: 고객의 매장 번호 ↔ 등록 발신번호 대조
               </div>
             </div>
           )}

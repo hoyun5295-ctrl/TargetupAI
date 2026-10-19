@@ -2634,6 +2634,9 @@ router.put('/callback-numbers/:id', authenticate, requireSuperAdmin, async (req:
     if (phone !== undefined && phone !== null && String(phone).trim() === '') {
       return res.status(400).json({ error: '유효하지 않은 발신번호 형식입니다.' });
     }
+    // ★ 2026-10-19 B-1005-5① — 저장할 번호 = 숫자가 바뀌어 검사를 통과한 값만. 숫자가 같으면 저장 원문을 그대로 둔다
+    //   (옛: 숫자가 같으면 검사 없이 새 원문을 저장해 '010-1234-5678#' 같은 표기가 들어갔다 · 라벨만 고치는 저장은 그대로 된다).
+    let phoneToSave: string | null = null;
     if (phone != null) {
       const curRes = await query('SELECT company_id, phone FROM callback_numbers WHERE id = $1', [id]);
       if (curRes.rows.length === 0) {
@@ -2664,6 +2667,7 @@ router.put('/callback-numbers/:id', authenticate, requireSuperAdmin, async (req:
             return res.status(403).json({ error: lineVerdict.message, code: 'LINE_LIMIT_EXCEEDED', ...lineVerdict });
           }
         }
+        phoneToSave = String(phone);
       }
     }
 
@@ -2673,7 +2677,7 @@ router.put('/callback-numbers/:id', authenticate, requireSuperAdmin, async (req:
           label = COALESCE($2, label)
       WHERE id = $3
       RETURNING id, phone, label, is_default
-    `, [phone, label, id]);
+    `, [phoneToSave, label, id]);
     
     if (result.rows.length === 0) {
       return res.status(404).json({ error: '발신번호를 찾을 수 없습니다.' });
@@ -6203,13 +6207,13 @@ router.get('/kakao-templates', authenticate, requireSuperAdmin, async (req: Requ
 router.put('/kakao-templates/:id/approve', authenticate, requireSuperAdmin, async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
-    const adminId = (req as any).user?.id;
+    const adminId = req.user?.userId ?? null;   // ★ 1019 B-0924-5 토큰 키 = userId(super_admins.id)
     const { templateCode } = req.body;
 
     // ★ D143 (2026-04-30): kakao_templates_status_check CHECK 대문자 풀네임 8개로 교체됨.
     //   기존 소문자('approved'/'pending'/'rejected')는 위반 → 대문자 + 'REQUESTED'(옛 'pending') 매핑.
     //   ★ 2026-09-27 한줄로 V2 R284 정정 — 이 라우트군(승인·반려·수동 등록)은 AdminDashboard가 쓴다(옛 주석 "frontend 미사용"은 틀렸다).
-    //   reviewed_by는 user?.id(없는 키)라 늘 NULL — FK 대상 확인 뒤 정정(장부 M-46).
+    //   ★ 2026-10-19 B-0924-5 reviewed_by = 토큰 userId(super_admins.id · 옛 user?.id 는 없는 키라 늘 NULL · FK 없음 · uuid 실측).
     const result = await query(
       `UPDATE kakao_templates SET
         status = 'APPROVED',
@@ -6238,7 +6242,7 @@ router.put('/kakao-templates/:id/approve', authenticate, requireSuperAdmin, asyn
 router.put('/kakao-templates/:id/reject', authenticate, requireSuperAdmin, async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
-    const adminId = (req as any).user?.id;
+    const adminId = req.user?.userId ?? null;   // ★ 1019 B-0924-5 토큰 키 = userId(super_admins.id)
     const { rejectReason } = req.body;
 
     if (!rejectReason) {
@@ -6272,7 +6276,7 @@ router.put('/kakao-templates/:id/reject', authenticate, requireSuperAdmin, async
 // POST /api/admin/kakao-templates/manual — 기존 템플릿 수동 등록 (승인 상태로 직접 저장)
 router.post('/kakao-templates/manual', authenticate, requireSuperAdmin, async (req: Request, res: Response) => {
   try {
-    const adminId = (req as any).user?.id;
+    const adminId = req.user?.userId ?? null;   // ★ 1019 B-0924-5 토큰 키 = userId(super_admins.id)
     const {
       companyId, profileId, templateCode, templateName, category,
       messageType, emphasizeType, emphasizeTitle, content, imageUrl,

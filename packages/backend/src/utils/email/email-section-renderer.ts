@@ -605,8 +605,9 @@ function renderGallery(p: GalleryProps, b: EmailBrand, ctx: EmailRenderCtx): str
   // ★ 2026-09-09 full_bleed(세로 1열) — DM 렌더러(2026-07-15 · 패딩·테두리·라운드·간격 0)와 짝. 이메일만 무시하고 있어
   //   기획전 슬라이스(AI 영업 슬라이스 모드)가 셀 패딩·라운드 때문에 벌어지고 모서리가 깎였다. 미설정 = 옛 출력 그대로(회귀 0).
   //   세로 1열에서는 장수 상한도 DM 과 같이 20(슬라이스는 9장을 넘는다) · 격자는 현행 9.
-  const seamless = p.layout === 'list_1xN' && p.full_bleed === true;
-  const imgs = (p.images || []).filter((x) => x && x.url).slice(0, seamless ? 20 : 9);
+  // ★ 2026-10-19 B-1014-3⑦ 격자에서도 풀화면(DM 렌더 = 배치 무관 패딩 · 라운드 0) · 옛: 세로 1열에서만 읽어 격자의 토글이 눌러도 안 바뀌었다.
+  const seamless = p.full_bleed === true;
+  const imgs = (p.images || []).filter((x) => x && x.url).slice(0, seamless && p.layout === 'list_1xN' ? 20 : 9);
   if (imgs.length === 0) return '';
   const perRow = p.layout === 'grid_3x3' ? 3 : p.layout === 'list_1xN' ? 1 : 2;
   const w = Math.floor(100 / perRow);

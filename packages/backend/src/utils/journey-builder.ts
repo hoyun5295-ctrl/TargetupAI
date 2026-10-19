@@ -1232,7 +1232,7 @@ export async function updateJourneyStep(
   const r = (await withJourneyValidationReset(companyId, journeyId, async (run, journey) => {
     await assertStepEditAllowed(run, journey.status);   // 잠근 상태로 판정(5R)
     isActive = journey.status === 'active' && touchesCopy;
-    return run(
+    const upd = await run(
     `UPDATE journey_steps SET
        message_template = COALESCE($4, message_template),
        channel = COALESCE($5, channel),
@@ -1279,6 +1279,11 @@ export async function updateJourneyStep(
       patch.notifyManagerOnPretest !== undefined,
     ]
     );
+    // ★ 2026-10-19 B-1009-6 — 켜진 여정의 새 스냅샷은 문안 변경과 **한 트랜잭션**(새 문안이 보이는 순간 재검사 전 표식(confidence_score 0)도 보인다).
+    //   실행기가 발송 직전 「최신 스냅샷이 재검사 전」이면 문자 칸 발송을 미룬다(journey-executor · 새 진입 · 다음 칸 전진 · 이미 차례 모두 같은 자리)
+    //   → 재검사 스캐너(journey-pretest-notifier)가 그 판을 검사하고 통과면 100 으로 올린다. 실패 = 문안 저장도 되돌린다.
+    if (isActive && upd.rows.length > 0) await createStepSnapshot(companyId, journeyId, stepId, run);
+    return upd;
   })) ?? { rows: [] as any[] };
   // ★ Fix #4 (2026-06-05): step 편집 시 발송 전 검증 마커 무효화 — 편집 후 재검증해야 활성화 가능.
   //   무효화는 위 트랜잭션이 함께 커밋했다. 스텝을 못 찾은 요청도 무효화되지만 그건 안전한 방향이다
@@ -1289,8 +1294,7 @@ export async function updateJourneyStep(
   //   발송 2시간 전 자동 스팸 재검사(scanAndPretest)가 새 본문을 다시 검사하게 강제한다(기존 파이프라인 재사용).
   //   snapshot 실패 = throw(문안만 바뀌고 발송은 옛 본문인 어긋남을 사용자에게 즉시 알림).
   if (isActive && r.rows.length > 0) {
-    // ★ 2026-08-02 §13-1: snapshot 생성은 createStepSnapshot 단일 정의(추가 API와 공용).
-    await createStepSnapshot(companyId, journeyId, stepId);
+    // ★ 2026-08-02 §13-1: snapshot 생성은 createStepSnapshot 단일 정의(추가 API와 공용) · ★ 1019 위 트랜잭션 안에서 만든다.
     await query(
       `DELETE FROM journey_pretest_schedules WHERE journey_id = $1::uuid AND step_id = $2::uuid`,
       [journeyId, stepId]
@@ -1497,8 +1501,9 @@ async function insertJourneyStepRow(
  * 활성 여정의 발송 본문 스냅샷 1건 — 발송은 최신 snapshot을 우선 소비한다(D218).
  * 편집(updateJourneyStep)과 추가(addJourneyStep) 공용.
  */
-async function createStepSnapshot(companyId: string, journeyId: string, stepId: string): Promise<void> {
-  const s = await query(
+/** ★ 2026-10-19 B-1009-6 — 켜진 여정 문안 수정 스냅샷 = confidence_score 0(재검사 전 · 실행기가 문자 발송을 미룬다 · 스캐너 통과 = 100). 활성화 스냅샷은 100(활성화 검증 통과). */
+async function createStepSnapshot(companyId: string, journeyId: string, stepId: string, run: SqlRunner = query): Promise<void> {
+  const s = await run(
     `SELECT s.channel, s.is_ad, s.message_template, s.subject,
             s.alimtalk_variable_map, s.alimtalk_template_code, j.callback_number
        FROM journey_steps s JOIN journeys j ON j.id = s.journey_id
@@ -1507,11 +1512,11 @@ async function createStepSnapshot(companyId: string, journeyId: string, stepId: 
   );
   if (s.rows.length === 0) return;
   const row = s.rows[0];
-  await query(
+  await run(
     `INSERT INTO journey_step_snapshots
        (company_id, journey_id, step_id, variant_id, message_body, message_subject,
         variable_map, channel, is_ad, callback_number, alimtalk_template_code, confidence_score)
-     VALUES ($1, $2, $3, NULL, $4, $5, $6, $7, $8, $9, $10, 100)`,
+     VALUES ($1, $2, $3, NULL, $4, $5, $6, $7, $8, $9, $10, 0)`,
     [
       companyId, journeyId, stepId,
       row.message_template, row.subject,

@@ -241,7 +241,7 @@ export type TabCardsProps = { tabs: TabCardItem[]; default_tab_index?: number; t
 
 export type PollOption = { id: string; label: string; };
 // ★ 2026-10-14 success_text = 완료 문구(참여 8종 공용 칸 · 백엔드 미러)
-export type PollProps = { question: string; options: PollOption[]; allow_multiple?: boolean; one_vote_per_user: boolean; success_text?: string; };
+export type PollProps = { question: string; options: PollOption[]; allow_multiple?: boolean; success_text?: string; };
 
 export type SurveyQuestion = { id: string; type: 'single' | 'multiple' | 'text' | 'rating'; question: string; options?: string[]; required?: boolean; };
 export type SurveyProps = { title?: string; questions: SurveyQuestion[]; show_progress?: boolean; completion_reward_text?: string; success_text?: string; };
@@ -255,7 +255,7 @@ export type LuckyDrawPrize = { rank: number; name: string; count: number; };
 export type LuckyDrawProps = { title: string; description?: string; form_fields: LuckyDrawFormField[]; draw_at: string; result_announce_url?: string; consent_text: string; prizes?: LuckyDrawPrize[]; success_text?: string; };
 
 export type RouletteSegment = { id: string; label: string; probability: number; reward_description?: string; prize_count?: number; };
-export type RouletteProps = { segments: RouletteSegment[]; one_spin_per_user: boolean; spin_animation_ms?: number; success_text?: string; };
+export type RouletteProps = { segments: RouletteSegment[]; spin_animation_ms?: number; success_text?: string; };
 
 // ★ 2026-07-23 (임은지) button_bg_color/button_text_color = '쿠폰 받기' 버튼 배경/글씨색(미지정=primary/#fff·회귀 0). backend 미러.
 export type InstantCouponProps = { coupon_label: string; discount_description: string; expires_at?: string; conditions?: string; usage_instructions?: string; button_bg_color?: string; button_text_color?: string; success_text?: string; };
@@ -266,7 +266,7 @@ export type YoutubeEmbedProps = { video_url: string; auto_play?: boolean; thumbn
 
 export type InstagramEmbedProps = { post_url: string; };
 
-export type MapStore = { id: string; name: string; address: string; lat: number; lng: number; phone?: string; hours?: string; };
+export type MapStore = { id: string; name: string; address: string; phone?: string; hours?: string; };
 export type MapStoreLocatorProps = { stores: MapStore[]; default_zoom?: number; };
 
 export type ReviewItem = { rating: number; author: string; body: string; date?: string; };
@@ -402,12 +402,12 @@ export const SECTION_DEFAULTS: { [K in SectionType]: SectionPropsMap[K] } = {
   gallery: { images: [], layout: 'grid_2x2', enable_zoom: true, enable_fullscreen: false },
   slideshow: { slides: [], interval_ms: 4000, slide_ratio: '16:9', show_pause: true, show_indicator: true },
   tab_cards: { tabs: [{ label: '탭 1', content_type: 'text', content: '[직접 작성해주세요]' }], default_tab_index: 0 },
-  poll: { question: '[직접 작성해주세요]', options: [{ id: '1', label: '옵션 1' }, { id: '2', label: '옵션 2' }], one_vote_per_user: true, allow_multiple: false },
+  poll: { question: '[직접 작성해주세요]', options: [{ id: '1', label: '옵션 1' }, { id: '2', label: '옵션 2' }], allow_multiple: false },
   survey: { questions: [], show_progress: true },
   email_capture: { headline: '[직접 작성해주세요]', consent_text: '개인정보 수집 및 마케팅 정보 수신 동의', consent_required: true },
   click_rewards: { reward_type: 'like', target_count: 10, reward_description: '[직접 작성해주세요]', show_progress: true },
   lucky_draw: { title: '[직접 작성해주세요]', form_fields: [{ name: 'name', required: true }, { name: 'phone', required: true }], draw_at: '', consent_text: '개인정보 수집 및 마케팅 정보 수신 동의' },
-  roulette: { segments: Array.from({ length: 8 }, (_, i) => ({ id: String(i + 1), label: `옵션 ${i + 1}`, probability: 0.125 })), one_spin_per_user: true, spin_animation_ms: 3000 },
+  roulette: { segments: Array.from({ length: 8 }, (_, i) => ({ id: String(i + 1), label: `옵션 ${i + 1}`, probability: 0.125 })), spin_animation_ms: 3000 },
   instant_coupon: { coupon_label: '[직접 작성해주세요]', discount_description: '[직접 작성해주세요]' },
   limited_quantity: { title: '[직접 작성해주세요]', total_quantity: 100 },
   youtube_embed: { video_url: '', auto_play: false },

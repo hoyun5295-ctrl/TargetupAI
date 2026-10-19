@@ -96,7 +96,9 @@ describe('m089 · m088 자동발송 환불', () => {
     expect(w).not.toContain('const failCount = filteredCustomers.length - sentCount;');
   });
   it('m088 차감 뒤 예외 = 적재 0 의무 CT(재시도 워커가 축별 적재 재확인)', () => {
-    expect(w).toContain('deductedFor = { campaignId, count: customers.length, messageType: ac.message_type };');
+    // ★ 2026-10-19 B-1005-5③ — 차감 = 개별 회신번호로 거른 뒤 건수(거르기가 차감 앞으로)
+    expect(w).toContain('deductedFor = { campaignId, count: filteredCustomers.length, messageType: ac.message_type };');
+    expect(w.indexOf('filterByIndividualCallback(customers, ac.company_id)')).toBeLessThan(w.indexOf('const deduct = await prepaidDeduct('));
     const c = w.slice(w.indexOf("console.error(`${logPrefix} 실행 중 에러:`, err);"), w.indexOf('async function markFailed('));
     expect(c).toContain('await settleZeroLoadAsObligation(deductedFor.campaignId, [{ count: deductedFor.count, messageType: deductedFor.messageType, refundKey: REFUND_KEYS.NOT_LOADED }])');
   });

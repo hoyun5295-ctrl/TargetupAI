@@ -1585,7 +1585,7 @@ export default function CdpSettingsPage() {
             ) : (
               <div className="text-xs text-slate-400">등록된 도메인이 없습니다. 자사몰 도메인을 추가해주세요.</div>
             )}
-            <div className="text-[10px] text-slate-400 italic mt-2">Data source: companies.cdp_allowed_origins</div>
+            <div className="text-[10px] text-slate-400 italic mt-2">Data source: 회사 설정 · 허용 웹 주소</div>
           </div>
         )}
 
@@ -1629,7 +1629,7 @@ export default function CdpSettingsPage() {
             ) : (
               <div className="text-xs text-slate-400">등록된 앱이 없습니다. 앱 번들ID를 추가해주세요.</div>
             )}
-            <div className="text-[10px] text-slate-400 italic mt-2">Data source: companies.cdp_allowed_app_ids</div>
+            <div className="text-[10px] text-slate-400 italic mt-2">Data source: 회사 설정 · 허용 앱 ID</div>
           </div>
         )}
 

@@ -867,6 +867,11 @@ export async function oneShotGenerate(opts: {
    * 검산에서는 브리프 상품을 뺀다(한 줄의 「니트 3종」이 몰 상품명으로 바뀌어도 누락으로 세지 않게). 미지정 = 지금 그대로.
    */
   confirmedCards?: LineMallCard[];
+  /**
+   * ★ 2026-10-19 Codex E1 — 확정 카드와 원문 상품을 함께 놓는다(원스텝 인터뷰 = 몰 상품 + 직접 적은 상품).
+   * true 면 원문 상품 추출 · 검산을 그대로 하고, 첫 상품 슬라이드 = 확정 카드 뒤에 원문 검증 상품. 미지정 = 확정 카드만(한 줄 경로 그대로).
+   */
+  mergeSourceProducts?: boolean;
   /** ★ 2026-10-10 — 회사가 저장한 주색(읽히게 보정한 값). 오면 비주얼 디렉터 팔레트 주색을 이 값으로 고정한다. 미지정 = 지금 그대로. */
   pinPrimary?: string;
   /**
@@ -998,7 +1003,10 @@ export async function oneShotGenerate(opts: {
   const productSource = rawEvent || prompt;
   const carouselIdx = sections.findIndex((s) => s.type === 'product_carousel');
   const confirmed = Array.isArray(opts.confirmedCards) && opts.confirmedCards.length > 0 ? opts.confirmedCards : null;
-  if (!confirmed && carouselIdx >= 0 && productSource) {
+  const mergeSource = !!confirmed && opts.mergeSourceProducts === true;
+  let sourceItems: Array<Record<string, unknown>> = [];
+  // ★ Codex E2 — 합쳐 놓기는 상품 슬라이드가 없는 구성(브랜드 이야기 · 매장 방문)도 추출한다(확정 카드 배치가 슬라이드를 만든다)
+  if (((!confirmed && carouselIdx >= 0) || mergeSource) && productSource) {
     // ★ Codex 1R — 브리프 추출이 실패(폴백 브리프)하거나 상품 0이면 옛 전용 상품 추출기로 재시도
     //   (일시 JSON 실패가 상품 placeholder 캐러셀로 끝나던 회귀 차단)
     const extracted = (brief && brief.products.length > 0)
@@ -1008,7 +1016,7 @@ export async function oneShotGenerate(opts: {
       // ★ 2026-07-13 — 상품 URL 매핑(원문 실존 검증 통과분) + URL 페이지의 og:image로 상품 이미지 자동 채움.
       //   이미지 fetch 실패/사설 호스트/og 부재 = 빈 값 유지(생성 차단 X — 사용자가 직접 업로드).
       const ogImages = await fetchProductOgImages(extracted.map((p) => p.link_url));
-      (sections[carouselIdx].props as any).products = extracted.map((p, i) => ({
+      const items = extracted.map((p, i) => ({
         id: randomUUID(),
         image_url: ogImages[i] || '',
         name: p.name,
@@ -1017,6 +1025,8 @@ export async function oneShotGenerate(opts: {
         ...(p.discount_rate ? { discount_rate: p.discount_rate } : {}),
         ...(p.link_url ? { link_url: p.link_url } : {}),
       }));
+      if (mergeSource) sourceItems = items;
+      else (sections[carouselIdx].props as any).products = items;
     }
   }
 
@@ -1026,6 +1036,14 @@ export async function oneShotGenerate(opts: {
   let assembled: Section[] = confirmed
     ? placeLineMallCards(sections, confirmed, { newId: () => randomUUID(), makeCarousel: (order) => createSection('product_carousel', randomUUID(), order) })
     : sections;
+  // ★ Codex E1 — 합쳐 놓기: 확정 카드 뒤에 원문에서 검증한 상품(같은 첫 상품 슬라이드)
+  if (mergeSource && sourceItems.length > 0) {
+    const ci = assembled.findIndex((s) => s.type === 'product_carousel');
+    if (ci >= 0) {
+      const cur = Array.isArray((assembled[ci].props as any)?.products) ? (assembled[ci].props as any).products : [];
+      assembled = assembled.map((s, i) => (i === ci ? { ...s, props: { ...(s.props as Record<string, unknown>), products: [...cur, ...sourceItems] } as Section['props'] } : s));
+    }
+  }
   // ★ 2026-10-17 한 줄 단계 모달 — 대표 사진(히어로 · 없으면 머리 뒤에 하나) · 비주얼 디렉터가 사진 있는 히어로로 구도를 고른다
   if (opts.lineMaterials?.heroImageUrl) {
     assembled = placeLineHero(assembled, opts.lineMaterials.heroImageUrl, (order) => createSection('hero', randomUUID(), order));
@@ -1033,7 +1051,7 @@ export async function oneShotGenerate(opts: {
   let coverage: { missing: BriefCoverageItem[] } | undefined;
   if (brief) {
     // 확정 카드가 있으면 브리프 상품은 검산 대상이 아니다(한 줄의 상품 표현이 몰 상품명으로 바뀐다 · CTA 남은 링크 배정도 상품 링크를 빼지 않는다)
-    const factBrief: EventBrief = confirmed ? { ...brief, products: [] } : brief;
+    const factBrief: EventBrief = confirmed && !mergeSource ? { ...brief, products: [] } : brief;   // 합쳐 놓기 = 원문 상품은 검산 대상(Codex E1)
     assembled = applyBriefToSections(assembled, factBrief);
     const first = computeBriefCoverage(factBrief, sectionsFactText(assembled));
     if (first.missing.length > 0) assembled = repairBriefCoverage(assembled, factBrief, first.missing);

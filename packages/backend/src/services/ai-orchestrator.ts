@@ -562,7 +562,9 @@ async function _orchestrateImpl(ctx: AgentContext): Promise<OrchestratorResult> 
       model: 'sonnet',
       // ★ D225+ Brand Voice Learning — 회사별 가이드라인 자동 주입
       companyId: ctx.companyId,
-      ...(licenseText !== undefined ? { licenseText } : {}),
+      // ★ 2026-10-19 B-1005-1① — 혜택 근거 = 사용자 글자(목표 문장 · 답)만. 옛: 답이 없는 요청은 목표 문장에 붙인 회사 AI 메모리 ·
+      //   계절 힌트 · 대상 블록까지 근거와 혜택 감지에 들어가 지난 학습의 수치가 이번 혜택처럼 쓰일 수 있었다(문맥으로는 그대로 간다).
+      licenseText: licenseText ?? ctx.objective,
       ...(ctx.cVariant ? { cVariant: ctx.cVariant } : {}),
     }
   );
@@ -617,6 +619,7 @@ async function _orchestrateImpl(ctx: AgentContext): Promise<OrchestratorResult> 
     fallbackAvgRevenue: parseFloat(ctx.customerStats.avg_total_spent) || 0,
     // ⛔ 3R 정정: 계약 제안은 filters가 비어 있어 성과 프로파일이 전체 고객으로 잡혔다 — 같은 조건을 넘긴다.
     targetWhere: audienceWhere,
+    ownerUserId: ctx.userId || null,   // ★ 1019 B-1018-5②
   });
   mark('costRoi', costStart);
 
@@ -900,7 +903,7 @@ async function _orchestrateWithAIImpl(ctx: AgentContext): Promise<OrchestratorRe
             model: 'sonnet',
             // ★ D225+ Brand Voice Learning — 회사별 가이드라인 자동 주입
             companyId: ctx.companyId,
-            ...(licenseTextAI !== undefined ? { licenseText: licenseTextAI } : {}),
+            licenseText: licenseTextAI ?? ctx.objective,   // ★ 1019 B-1005-1① 근거 = 사용자 글자만(계절 힌트 제외)
             ...(ctx.cVariant ? { cVariant: ctx.cVariant } : {}),
           }
         );
@@ -1109,6 +1112,7 @@ ${memoryContext}
     channel: targetResult.recommended_channel || 'SMS',
     unitCost: unitCostAI,
     fallbackAvgRevenue: parseFloat(ctx.customerStats.avg_total_spent) || 0,
+    ownerUserId: ctx.userId || null,   // ★ 1019 B-1018-5② 브랜드 조건 동의 = 대상 수와 같은 사람
   });
   mark('costRoi', costStart);
 

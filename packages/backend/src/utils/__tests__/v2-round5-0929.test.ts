@@ -133,7 +133,9 @@ describe('③ 통계 화면 — 발송 실패 행은 성공·비용에서 빠진
       expect(s).toContain("SUM(CASE WHEN ${spamBilledResultSql('r')} THEN 1 ELSE 0 END) as completed");
       expect(s).toContain("SUM(CASE WHEN ${spamFailedResultSql('r')} THEN 1 ELSE 0 END) as failed");
     }
-    expect(campaigns).toContain('if (isSpamResultBilled(r.result) && isSpamTestBillable(r.source)) {');
+    // ★ 2026-10-19 B-0925-5 — 비용 = 기간 전체 청구 행 집계(최근 100줄 목록 합 폐지) · 같은 두 CT(청구 결과 · 청구 대상 검사)
+    expect(campaigns).toContain("SUM(CASE WHEN ${spamBilledResultSql('r')} AND ${spamBillableTestSql('t')} AND COALESCE(r.message_type, 'SMS') = 'SMS' THEN 1 ELSE 0 END) as billed_sms");
+    expect(campaigns).not.toContain('sfCostCalc +=');
     expect(campaigns).toContain('fail: sfFailed,');
     expect(stats).toContain('(testSummary.sms - testSummary.pending - sfSmsFailed) * cSms + (testSummary.lms - sfLmsFailed) * cLms');
   });

@@ -75,3 +75,14 @@ export async function saveStudioTemp(tempId: string, title?: string | null): Pro
   }
   return { ok: false, code: 'FAILED', error: data.error || '저장에 실패했어요.' };
 }
+
+/**
+ * ★ 2026-10-19 B-1016-3② 시도 표 — 생성 · 수정 한 번에 하나. **성공 결과를 받았을 때만 버린다**(Codex E2 구조 정정).
+ * 서버 시도 키 = 표 + 입력 지문이라, 남겨 둔 표로 같은 입력을 다시 보내면 이미 만든 결과를 받고(다시 걷지 않는다)
+ * 입력을 바꿔 보내면 새 시도가 된다. 그래서 거절 · 오류 · 끊김을 분류해 표를 버릴지 정할 필요가 없다(분류가 구멍이었다).
+ */
+export function newStudioAttempt(): string {
+  const c = (globalThis as { crypto?: Crypto }).crypto;
+  return c && typeof c.randomUUID === 'function' ? c.randomUUID() : `s-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 12)}`;
+}
+

@@ -433,11 +433,13 @@ export async function generateEmailSections(input: {
   // ★ 2026-07-08 행사 원문 상품 기계 검증 — 가격이 원문에 실존하는 상품만 통과(환각 가격 차단, DM과 동일 규칙)
   // ★ 2026-07-13 — link_url 보존(검증기 3중 검증 + 결정적 배정 통과분) + og:image 자동 채움 (DM one-shot 미러).
   //   옛 map이 name/price만 재조립해 link_url을 유실하던 결함 정정. og 실패/사설 호스트/부재 = 빈 값 유지(생성 차단 X).
-  if (input.eventText) {
+  // ★ 2026-10-19 B-1010-1 — 원문이 없으면 요청 글이 근거다(옛: 한 줄 이메일은 원문이 비어 대조가 돌지 않아, AI 가 쓴 가격이 뒤의 몰 자동 첨부 사진 · 링크와 함께 나갔다).
+  const productGround = input.eventText || input.prompt || '';
+  if (productGround) {
     for (const s of sections) {
       if (s.type !== 'product_carousel') continue;
       const p: any = s.props || {};
-      const validated = validateProductsAgainstEventText(p.products, input.eventText);
+      const validated = validateProductsAgainstEventText(p.products, productGround);
       let ogImages: Array<string | undefined> = [];
       try {
         ogImages = await fetchProductOgImages(validated.map((v) => v.link_url));

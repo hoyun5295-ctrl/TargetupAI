@@ -64,6 +64,8 @@ interface BrandTemplate {
   buttons?: any[] | null;
   attachment_json?: any;
   carousel_json?: any;
+  attachment?: any;
+  carousel?: any;
   coupon?: any;
   adult?: 'Y' | 'N' | null;
 }
@@ -185,8 +187,10 @@ const isEmptyTemplateCard = (c: CardState): boolean =>
 
 function initialFormState(template: BrandTemplate | null | undefined): FormState {
   const t = template || {};
-  const att = t.attachment_json || {};
-  const car = t.carousel_json || {};
+  // ★ 2026-10-19 B-0925-6 — 실제 칸 = attachment · carousel(jsonb · 목록 조회 b.*). 옛 _json 이름은 늘 비어 수정 폼이 빈 칸으로 열렸다
+  const parseJ = (v: unknown) => { if (typeof v === 'string') { try { return JSON.parse(v); } catch { return {}; } } return v || {}; };
+  const att = parseJ(t.attachment ?? t.attachment_json);
+  const car = parseJ(t.carousel ?? t.carousel_json);
   const com = att.commerce || {};
   const head = car.head || null;
   return {

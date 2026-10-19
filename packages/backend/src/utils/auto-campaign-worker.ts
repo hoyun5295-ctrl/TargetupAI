@@ -45,7 +45,8 @@ import {
 import { prepaidDeduct, prepaidRefund, REFUND_KEYS } from './prepaid';
 import { markRefundPending, settleZeroLoadAsObligation } from './refund-pending';
 import { normalizePhone } from './normalize-phone';
-import { resolveCustomerCallback } from './callback-filter';
+import { resolveCustomerCallback, filterByIndividualCallback, fixedCallbackRejectReason } from './callback-filter';
+import { autoCampaignLockReason } from './plan-guard';
 // ★ 2026-07-05: 발송 피로도 보호 — 차감 전 게이트 + 광고 발송 카운터
 import { getFatigueCap, getFatigueBlockedSet, recordFatigueSends } from './fatigue-guard';
 import { extractVarCatalog, filterVarCatalogByData, generateMessages } from '../services/ai';
@@ -203,6 +204,7 @@ async function runMessageGeneration(): Promise<void> {
 
 async function generateMessageForAutoCampaign(ac: any): Promise<void> {
   if (await isDemoCompany(ac.company_id)) { console.log(`[auto-worker] 시연 회사 — 자동발송 건너뜀 ${ac.id}`); return; }   // ★ 2026-10-09 시연 회사 = 발송 0
+  if (await autoCampaignLockReason(ac.company_id)) { console.log(`[auto-worker] 요금제 잠김 — 문안 생성 건너뜀 ${ac.id}`); return; }   // ★ 1019 B-1004-2①
   const logPrefix = `[auto-worker][gen][${ac.id}]`;
 
   try {
@@ -563,6 +565,7 @@ async function runPreNotification(): Promise<void> {
 
 async function sendPreNotification(ac: any): Promise<void> {
   if (await isDemoCompany(ac.company_id)) { console.log(`[auto-worker] 시연 회사 — 자동발송 건너뜀 ${ac.id}`); return; }   // ★ 2026-10-09 시연 회사 = 발송 0
+  if (await autoCampaignLockReason(ac.company_id)) { console.log(`[auto-worker] 요금제 잠김 — 담당자 알림 건너뜀 ${ac.id}`); return; }   // ★ 1019 B-1004-2①
   const logPrefix = `[auto-worker][notify][${ac.id}]`;
 
   try {
@@ -680,6 +683,11 @@ async function sendPreNotification(ac: any): Promise<void> {
 
 async function executeAutoCampaign(ac: any): Promise<void> {
   if (await isDemoCompany(ac.company_id)) { console.log(`[auto-worker] 시연 회사 — 자동발송 건너뜀 ${ac.id}`); return; }   // ★ 2026-10-09 시연 회사 = 발송 0
+  // ★ 2026-10-19 B-1004-2① — 요금제가 잠기면 본 발송을 하지 않는다(회차 실패로 남김 · 7일 5회면 자동 일시정지 = markFailed 규칙 그대로 · 차감 0)
+  {
+    const planLock = await autoCampaignLockReason(ac.company_id);
+    if (planLock) { console.warn(`[auto-worker][${ac.id}] 요금제 잠김 — 본 발송 건너뜀 (${planLock})`); await markFailed(ac, `요금제 잠김: ${planLock}`); return; }
+  }
   const logPrefix = `[auto-worker][${ac.id}][${ac.campaign_name}]`;
   // ★ 2026-09-27 한줄로 V2 m088 — 차감이 끝났는가(바깥 catch가 환불 의무를 남길 근거). 적재·정산 경로가 끝나면 비운다.
   let deductedFor: { campaignId: string; count: number; messageType: string } | null = null;
@@ -865,6 +873,16 @@ async function executeAutoCampaign(ac: any): Promise<void> {
       }
     }
 
+    // ★ 2026-10-19 B-1005-5④ — 고정 회신번호를 발송 때 다시 본다(등록 · 수정 때만 보던 번호 · 그 사이 등록이 지워졌거나 규격 위반이면 본 발송 중단 · 차감 전)
+    if (!ac.use_individual_callback && ac.callback_number) {
+      const cbReject = await fixedCallbackRejectReason(ac.company_id, String(ac.callback_number));
+      if (cbReject) {
+        console.warn(`${logPrefix} 고정 회신번호 재판정 실패 — 본 발송 중단 (${cbReject})`);
+        await markFailed(ac, cbReject);
+        return;
+      }
+    }
+
     // ★ campaign_runs에 run 기록
     const runNumberResult = await query(
       `SELECT COALESCE(MAX(run_number), 0) + 1 as next_run FROM auto_campaign_runs WHERE auto_campaign_id = $1`,
@@ -911,30 +929,10 @@ async function executeAutoCampaign(ac: any): Promise<void> {
     );
     const runId = runResult.rows[0].id;
 
-    // ★ 선불 차감 (prepaid.ts 재활용)
-    // ★ 2026-09-26 한줄로 V2 F01·F04 자동발송 알림톡은 캠페인 행에 send_channel이 없다 — 자동발송 설정(channel)으로 표시해
-    //   차감 행에 결과별 정산 단가를 싣는다(정산 스위퍼는 차감 행만 보고 판정한다).
-    const deduct = await prepaidDeduct(ac.company_id, customers.length, ac.message_type, campaignId, ac.user_id, 'campaign', null, { alimtalk: ac.channel === 'alimtalk' });
-    if (deduct.ok) deductedFor = { campaignId, count: customers.length, messageType: ac.message_type };
-    if (!deduct.ok) {
-      console.warn(`${logPrefix} 잔액 부족 — ${deduct.error}`);
-      await query(
-        `UPDATE auto_campaign_runs SET status = 'failed', completed_at = NOW(), cancel_reason = $2 WHERE id = $1`,
-        [runId, `잔액 부족: ${deduct.error}`]
-      );
-      await advanceNextRun(ac);
-      return;
-    }
-
-    // ★ MySQL 큐 INSERT
-    const sendTime = toKoreaTimeStr(new Date());
-    const msgTypeCode = toQtmsgType(ac.message_type);
-    const mmsImages: string[] = [];  // MMS 이미지는 추후 지원
-
     // ★ D93: 개별회신번호 사용 시 CT-08 필터링 적용
+    // ★ 2026-10-19 B-1005-5③ — 차감 **앞**에서 거른다(옛: 원본 건수로 차감한 뒤 거르고 환불 · 미등록 번호 몫도 일단 빠졌다).
     let filteredCustomers = customers;
     if (ac.use_individual_callback) {
-      const { filterByIndividualCallback } = await import('./callback-filter');
       const cbResult = await filterByIndividualCallback(customers, ac.company_id);
       filteredCustomers = cbResult.filtered;
       if (cbResult.callbackSkippedCount > 0) {
@@ -942,24 +940,9 @@ async function executeAutoCampaign(ac: any): Promise<void> {
       }
     }
 
-    // ★ D150-3 (2026-05-10) MED#3 fix: 개별회신번호 필터 후 발송 대상 0명 가드.
-    //   이전: filteredCustomers.length === 0이어도 빈 INSERT 진행 → sentCount=0 → 'failed' 회차 + 차감만 환불.
-    //   이후: 사전에 가드 + 차감 환불 + 'failed' 회차 + advanceNextRun.
+    // ★ D150-3 (2026-05-10) MED#3 fix: 개별회신번호 필터 후 발송 대상 0명 가드 — 1019 부터 차감 전이라 환불할 것이 없다.
     if (filteredCustomers.length === 0) {
-      console.warn(`${logPrefix} 개별회신번호 필터 후 발송 대상 0명 — 발송 스킵 (전체 환불)`);
-      try {
-        await prepaidRefund(
-          ac.company_id,
-          customers.length,
-          ac.message_type,
-          campaignId,
-          '개별회신번호 미보유로 전체 제외 (환불)',
-          'campaign',
-          { refundKey: REFUND_KEYS.NOT_LOADED },   // 큐에 한 건도 안 들어간 분 = 미적재 항아리
-        );
-      } catch (refundErr) {
-        console.error(`${logPrefix} 환불 실패:`, refundErr);
-      }
+      console.warn(`${logPrefix} 개별회신번호 필터 후 발송 대상 0명 — 발송 스킵 (차감 0)`);
       await query(
         `UPDATE auto_campaign_runs
          SET status = 'failed', completed_at = NOW(),
@@ -975,6 +958,27 @@ async function executeAutoCampaign(ac: any): Promise<void> {
       await advanceNextRun(ac);
       return;
     }
+
+    // ★ 선불 차감 (prepaid.ts 재활용)
+    // ★ 2026-09-26 한줄로 V2 F01·F04 자동발송 알림톡은 캠페인 행에 send_channel이 없다 — 자동발송 설정(channel)으로 표시해
+    //   차감 행에 결과별 정산 단가를 싣는다(정산 스위퍼는 차감 행만 보고 판정한다).
+    // ★ 1019 B-1005-5③ — 차감 = 거른 뒤 건수
+    const deduct = await prepaidDeduct(ac.company_id, filteredCustomers.length, ac.message_type, campaignId, ac.user_id, 'campaign', null, { alimtalk: ac.channel === 'alimtalk' });
+    if (deduct.ok) deductedFor = { campaignId, count: filteredCustomers.length, messageType: ac.message_type };
+    if (!deduct.ok) {
+      console.warn(`${logPrefix} 잔액 부족 — ${deduct.error}`);
+      await query(
+        `UPDATE auto_campaign_runs SET status = 'failed', completed_at = NOW(), cancel_reason = $2 WHERE id = $1`,
+        [runId, `잔액 부족: ${deduct.error}`]
+      );
+      await advanceNextRun(ac);
+      return;
+    }
+
+    // ★ MySQL 큐 INSERT
+    const sendTime = toKoreaTimeStr(new Date());
+    const msgTypeCode = toQtmsgType(ac.message_type);
+    const mmsImages: string[] = [];  // MMS 이미지는 추후 지원
 
     // ★ D130: 알림톡 분기 — channel='alimtalk'이면 insertAlimtalkQueue 사용 (SMS/LMS/MMS 경로 분리)
     let sentCount = 0;
@@ -1131,19 +1135,20 @@ async function executeAutoCampaign(ac: any): Promise<void> {
     }
 
     // ★ 부분 실패 시 환불
-    // ★ 2026-09-27 한줄로 V2 m089 — 미적재 = **차감한 건수(전체 대상)** − 적재. 옛: 개별 회신번호로 거른 뒤 대상으로 세어
-    //   거른 몫은 적재가 0이면 아무도 환불하지 않았다(1건 이상이면 스위퍼가 메웠다).
+    // ★ 2026-09-27 한줄로 V2 m089 — 미적재 = **차감한 건수** − 적재.
+    // ★ 1019 B-1005-5③ — 차감한 건수 = 개별 회신번호로 거른 뒤 건수(거른 몫은 처음부터 차감하지 않았다) · 회차 실패 수는 종전대로 대상 − 적재.
     const failCount = customers.length - sentCount;
-    if (failCount > 0) {
-      console.warn(`${logPrefix} 부분 실패 — 성공: ${sentCount}, 실패: ${failCount}`);
+    const unloadedCount = filteredCustomers.length - sentCount;
+    if (unloadedCount > 0) {
+      console.warn(`${logPrefix} 부분 실패 — 성공: ${sentCount}, 미적재: ${unloadedCount}`);
       try {
-        // 대상 − 큐 적재 성공 = 미적재(게이트웨이 실패가 아니다) — B-0727-2
+        // 차감 − 큐 적재 성공 = 미적재(게이트웨이 실패가 아니다) — B-0727-2
         // prepaidRefund는 실패해도 throw하지 않으므로 ok를 봐야 한다. 실패분은 durable 의무로 남겨 워커가 재시도.
-        const r = await prepaidRefund(ac.company_id, failCount, ac.message_type, campaignId, `자동발송 미적재 ${failCount}건 환불`, 'campaign', { refundKey: REFUND_KEYS.NOT_LOADED });
-        if (!r.ok) await markRefundPending(campaignId, failCount, ac.message_type);
+        const r = await prepaidRefund(ac.company_id, unloadedCount, ac.message_type, campaignId, `자동발송 미적재 ${unloadedCount}건 환불`, 'campaign', { refundKey: REFUND_KEYS.NOT_LOADED });
+        if (!r.ok) await markRefundPending(campaignId, unloadedCount, ac.message_type);
       } catch (refundErr) {
         console.error(`${logPrefix} 부분 실패 환불 오류:`, refundErr);
-        await markRefundPending(campaignId, failCount, ac.message_type);
+        await markRefundPending(campaignId, unloadedCount, ac.message_type);
       }
     }
 
@@ -1329,6 +1334,7 @@ async function runPreSendSpamTest(): Promise<void> {
 
 async function executePreSendSpamTest(ac: any): Promise<void> {
   if (await isDemoCompany(ac.company_id)) { console.log(`[auto-worker] 시연 회사 — 자동발송 건너뜀 ${ac.id}`); return; }   // ★ 2026-10-09 시연 회사 = 발송 0
+  if (await autoCampaignLockReason(ac.company_id)) { console.log(`[auto-worker] 요금제 잠김 — 스팸 검사 건너뜀 ${ac.id}`); return; }   // ★ 1019 B-1004-2①
   const logPrefix = `[auto-worker][spam][${ac.id}]`;
 
   try {

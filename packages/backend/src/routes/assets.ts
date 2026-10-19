@@ -13,6 +13,7 @@ import path from 'path';
 import { authenticate } from '../middlewares/auth';
 import { resolveOwnerScope } from '../utils/owner-scope';
 import { listAssets, deleteAsset, getStorageUsage, isAssetsTableMissing, storeAssetFile } from '../utils/assets';
+import { restoreUploadFileName } from '../utils/mms-image-fit';
 
 export const assetsRouter = Router();
 assetsRouter.use(authenticate);
@@ -90,7 +91,7 @@ assetsRouter.post('/upload', (req: any, res: Response) => {
         return res.status(500).json({ success: false, error: '저장 공간을 확인하지 못했습니다. 잠시 후 다시 시도해주세요.' });
       }
       const stored = await storeAssetFile({
-        companyId, userId, buffer: file.buffer, originalName: file.originalname, origin: 'brand',
+        companyId, userId, buffer: file.buffer, originalName: restoreUploadFileName(file.originalname), origin: 'brand',   // ★ 1019 B-1005-4③ 같은 원인
       });
       return res.json({ success: true, url: stored.url, filename: stored.filename, size: stored.bytes, assetId: stored.assetId });
     } catch (e: any) {

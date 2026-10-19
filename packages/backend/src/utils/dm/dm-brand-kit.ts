@@ -106,9 +106,14 @@ export async function updateCompanyBrandKit(companyId: string, patch: Partial<Dm
   //   의도적 클리어는 명시 null로만(프론트는 클리어 시 null 전송). undefined는 "미변경"으로 취급.
   const cleanPatch = Object.fromEntries(Object.entries(patch).filter(([, v]) => v !== undefined));
   const merged = { ...current, ...cleanPatch };
+  // ★ 2026-10-19 B-0924-3 — 바꾼 키만 DB 에서 병합(통째 덮기 금지). 읽기 실패로 current 가 기본값이어도 저장된 다른 키
+  //   (SNS 자주 쓰는 태그 sns_tag_set 등)를 지우지 않고, 같은 순간 다른 경로의 키 저장도 덮지 않는다.
+  //   저장값이 객체가 아니면(비어 있음 · 옛 문자열 저장) 종전처럼 합친 전체를 쓴다.
   await query(
-    `UPDATE companies SET brand_kit = $1 WHERE id = $2`,
-    [JSON.stringify(merged), companyId],
+    `UPDATE companies
+        SET brand_kit = CASE WHEN jsonb_typeof(brand_kit) = 'object' THEN brand_kit || $1::jsonb ELSE $2::jsonb END
+      WHERE id = $3`,
+    [JSON.stringify(cleanPatch), JSON.stringify(merged), companyId],
   );
   return merged;
 }

@@ -13,7 +13,7 @@ import type { CouponProps } from '../../../../utils/dm-section-defaults';
 import { Field, TextInput, TextArea, DateTimePicker, ColorOverride } from '../FormControls';
 import type { EditorProps } from '../SectionPropsEditor';
 
-export default function CouponEditor({ props, onUpdate }: EditorProps<CouponProps>) {
+export default function CouponEditor({ props, onUpdate, hidden }: EditorProps<CouponProps>) {
   return (
     <>
       <Field label="할인 라벨" hint="예: 20% 할인 / 5,000원 할인 / 무료 배송">
@@ -48,9 +48,12 @@ export default function CouponEditor({ props, onUpdate }: EditorProps<CouponProp
         <ColorOverride value={props.card_bg_color} onChange={(v) => onUpdate({ card_bg_color: v })} />
       </Field>
 
-      <Field label="쿠폰코드 버튼 색" hint="'쿠폰코드' 알약 배경 (미지정 = 기본 검정)">
-        <ColorOverride value={props.button_color} onChange={(v) => onUpdate({ button_color: v })} />
-      </Field>
+      {/* ★ 2026-10-19 B-1014-3⑦ 티켓 · 스포트라이트 구도는 알약이 없다(감춤 · 원장 DM_TREATMENT_HIDDEN) */}
+      {!hidden?.('button_color') && (
+        <Field label="쿠폰코드 버튼 색" hint="'쿠폰코드' 알약 배경 (미지정 = 기본 검정)">
+          <ColorOverride value={props.button_color} onChange={(v) => onUpdate({ button_color: v })} />
+        </Field>
+      )}
 
       <Field label="쿠폰코드 글씨색" hint="미지정 = 기본 흰색. (‘쿠폰 사용하기’ 연결 버튼 색은 ‘빠른 디자인 → 버튼 색’)">
         <ColorOverride value={props.code_text_color} onChange={(v) => onUpdate({ code_text_color: v })} />

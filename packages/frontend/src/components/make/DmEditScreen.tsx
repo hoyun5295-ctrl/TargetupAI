@@ -7,7 +7,7 @@
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Palette, Sparkles, BookOpen, Upload, Wand2, FolderOpen, ChevronDown, ChevronRight, History, FlaskConical, ShieldCheck, Plus, X, Loader2, Image as ImageIcon, Link2, Trash2 } from 'lucide-react';
-import { useDmBuilderStore, selectAllSectionsFlat, selectAutosaveBlocked, selectLiveGap } from '../../stores/dmBuilderStore';
+import { useDmBuilderStore, selectAllSectionsFlat, selectAutosaveBlocked, selectLiveGap, getEditSession } from '../../stores/dmBuilderStore';
 import SectionPropsEditor from '../dm/panels/SectionPropsEditor';
 import CatalogPageModal, { CATALOG_BLOCKS, type CatalogTemplateKey } from '../dm/build/CatalogPageModal';
 import StudioInsertModal from '../dm/build/StudioInsertModal';
@@ -28,6 +28,7 @@ import { SECTION_META, styleVariantLabel, type Section } from '../../utils/dm-se
 import { isLineTemplateDm } from '../../utils/one-line';   // ★ 2026-10-17 템플릿 DM 표식
 import { CONFIRM_CREDIT_COSTS } from '../../constants/credit';
 import { useToast } from '../ToastProvider';
+import { MK_HEAD_BTN } from '../../utils/make-ui';
 
 const authGet = () => ({ Authorization: `Bearer ${localStorage.getItem('token')}` });
 const authJson = () => ({ 'Content-Type': 'application/json', Authorization: `Bearer ${localStorage.getItem('token')}` });
@@ -54,6 +55,44 @@ export default function DmEditScreen({ onBack, onSend, pair, banner }: {
   const preview = useDmStorePreview(!!s.dmId);
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [confirm, setConfirm] = useState<ConfirmState | null>(null);
+  const toast = useToast();
+  const [testing, setTesting] = useState(false);
+
+  // ★ 2026-10-19 B-1014-3⑧ 테스트 받기 — 담당자 번호로 받는 사람 화면 링크(서버 test-send · 보낸 DM 만 · 테스트 링크 참여는 기록 안 됨)
+  //   옛: 새 만들기 흐름에는 입구가 없었다(옛 상단바는 숨김 고정). 고친 내용이 있으면 링크가 아직 옛 화면이라 한 번 묻는다.
+  const runTestSend = async () => {
+    const id = useDmBuilderStore.getState().dmId;
+    if (!id) return;
+    setTesting(true);
+    try {
+      const r = await fetch(`/api/dm/${id}/test-send`, { method: 'POST', headers: authJson(), body: JSON.stringify({ sample_key: 'vip' }) });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(d?.error || '테스트를 보내지 못했어요.');
+      toast.success('담당자 번호로 테스트를 보냈어요. 테스트 링크의 참여는 기록되지 않아요.');
+    } catch (e: any) { toast.error(e?.message || '테스트를 보내지 못했어요.'); } finally { setTesting(false); }
+  };
+  const onTestSend = () => {
+    if (!useDmBuilderStore.getState().isDirty) { void runTestSend(); return; }
+    setConfirm({
+      mode: 'info',
+      title: '고친 내용으로 테스트할까요?',
+      description: '테스트 링크는 받는 사람이 보는 화면 그대로예요. 반영하면 받는 사람 화면도 바로 바뀌어요.',
+      confirmLabel: '반영하고 테스트',
+      altLabel: '수정 전 화면으로 테스트',
+      cancelLabel: '취소',
+      onConfirm: async () => {
+        const session = getEditSession();
+        if (!(await useDmBuilderStore.getState().save())) return;   // 저장 실패 = 저장이 알린다 · 테스트 안 보냄
+        // 저장하는 사이 들어온 변경(올리던 사진 · 고친 글)은 아직 링크에 없다 — 보내지 않고 다시 반영하게 한다(실제 보내기와 같은 확인 · G1)
+        if (getEditSession() !== session || useDmBuilderStore.getState().isDirty) {
+          toast.error('저장하는 사이 바뀐 내용이 있어요. 한 번 더 반영한 뒤 테스트해 주세요.');
+          return;
+        }
+        await runTestSend();
+      },
+      onAlt: () => runTestSend(),
+    });
+  };
   const [, setTick] = useState(0);
   useEffect(() => { const t = setInterval(() => setTick((v) => v + 1), 30000); return () => clearInterval(t); }, []);
 
@@ -191,6 +230,11 @@ export default function DmEditScreen({ onBack, onSend, pair, banner }: {
         canRedo={s.canRedo()}
         onSend={onSend}
         banner={banner}
+        extraHeader={s.dmId && s.isPublished && !s.isStopped ? (
+          <button type="button" onClick={onTestSend} disabled={testing} className={MK_HEAD_BTN} title="담당자 번호로 받는 사람 화면을 받아 봅니다">
+            {testing ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <FlaskConical className="w-3.5 h-3.5" />}<span className="hidden sm:inline">테스트 받기</span>
+          </button>
+        ) : undefined}
         left={left}
         center={center}
         right={right}

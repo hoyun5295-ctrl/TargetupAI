@@ -126,6 +126,16 @@ function col(alias: string, column: string): string {
 }
 
 /**
+ * ★ 2026-10-19 B-1005-3 — 생일 월 식(구조 경로 · 고객 필터 경로 공용 · 2026-08-14 음력 생일 구제 폴백 포함).
+ *   월-일 칸은 숫자 모양일 때만 숫자로 바꾼다(옛: `split_part(...)::int` — 생년월일 없는 한 행의 '1월-03' 이 그 회사 생일 월 조회 전체를 형변환 오류로 멈췄다).
+ */
+function birthMonthExpr(columnRef: string): string {
+  if (!columnRef.endsWith('birth_date')) return `EXTRACT(MONTH FROM ${columnRef})`;
+  const md = columnRef.replace(/birth_date$/, 'birth_month_day');
+  return `COALESCE(EXTRACT(MONTH FROM ${columnRef})::int, CASE WHEN ${md} ~ '^[0-9]{1,2}-' THEN split_part(${md}, '-', 1)::int END)`;
+}
+
+/**
  * ★ D83: 날짜 필터값 안전 정규화 — normalize.ts 컨트롤타워 활용
  * 사용자가 "2025. 10. 19.", "3월" 등 비정상 형식을 입력해도 쿼리가 터지지 않도록 방어.
  * 정규화 성공 → YYYY-MM-DD 반환, 실패 → null 반환 (호출부에서 해당 필터 스킵)
@@ -318,9 +328,7 @@ export function buildCustomerFilter(filters: any, options: FilterOptions): Filte
               } else if (month >= 1 && month <= 12) {
                 // ★ 2026-08-14 (Codex 1R): 음력 생일 구제 행은 birth_date=null·birth_month_day만 있다 —
                 //   birth_date에서만 월을 뽑으면 그 고객이 생일 타겟에서 영구 누락된다. 월-일 폴백.
-                const monthExpr = columnRef.endsWith('birth_date')
-                  ? `COALESCE(EXTRACT(MONTH FROM ${columnRef})::int, NULLIF(split_part(${columnRef.replace(/birth_date$/, 'birth_month_day')}, '-', 1), '')::int)`
-                  : `EXTRACT(MONTH FROM ${columnRef})`;
+                const monthExpr = birthMonthExpr(columnRef);
                 sql += ` AND ${monthExpr} = $${paramIndex++}`; params.push(month);
               }
             } else if (operator === 'gte') {
@@ -536,9 +544,7 @@ export function buildCustomerFilter(filters: any, options: FilterOptions): Filte
         const month = /^\d{1,2}$/.test(String(value).trim()) ? parseInt(value) : NaN;
         if (!isNaN(month) && month >= 1 && month <= 12) {
           // ★ 2026-08-14 (Codex 1R): 음력 생일 구제 행 폴백 — 구조 경로와 동일
-          const monthExpr = columnRef.endsWith('birth_date')
-            ? `COALESCE(EXTRACT(MONTH FROM ${columnRef})::int, NULLIF(split_part(${columnRef.replace(/birth_date$/, 'birth_month_day')}, '-', 1), '')::int)`
-            : `EXTRACT(MONTH FROM ${columnRef})`;
+          const monthExpr = birthMonthExpr(columnRef);
           sql += ` AND ${monthExpr} = $${paramIndex++}`;
           params.push(month);
         } else if (value != null && value !== '') { sql += ' AND FALSE'; }

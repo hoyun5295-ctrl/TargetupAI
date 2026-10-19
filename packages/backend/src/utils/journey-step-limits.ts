@@ -47,9 +47,12 @@ export const MAX_WAIT_TIMEOUT_HOURS = 720;
 /** 사용자 입력 · AI 출력이 규약 밖일 때. 라우트는 400으로 돌려준다(500 아님). */
 export class JourneyInputError extends Error {
   readonly code = 'JOURNEY_INVALID_INPUT';
-  constructor(message: string) {
+  /** ★ 2026-10-19 B-1010-12 — 이 요청으로 이미 만든 초안(있으면 화면이 그 초안을 연다) */
+  readonly journeyId?: string;
+  constructor(message: string, journeyId?: string) {
     super(message);
     this.name = 'JourneyInputError';
+    if (journeyId) this.journeyId = journeyId;
   }
 }
 

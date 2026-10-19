@@ -228,3 +228,13 @@ export async function runSpellCheck(input: {
   const candidates = Array.isArray(parsed.issues) ? (parsed.issues as SpellCandidate[]) : [];
   return { textHash, issues: judgeSpellCandidates(text, candidates, input.protectedSpans), failed: false };
 }
+
+/** ★ 2026-10-19 문자 · SNS 맞춤법이 같이 쓴다(B-0925-3 · sms-spell-check 에서 이동) */
+/**
+ * 링크는 앞뒤 한 칸씩 넓힌다 — 엔진은 구간 **안쪽** 끼워 넣기만 "건드림"으로 보므로, 링크 바로 끝(또는 앞)에
+ * 글자를 붙이는 후보가 통과해 주소가 바뀐다(hanjul.ai/menu → hanjul.ai/menus). 주소는 한 글자도 바뀌면 안 된다.
+ */
+export function padLinkSpans<T extends { start: number; end: number }>(spans: T[]): T[] {
+  // ⛔ 문안 처음·끝에 붙은 링크도 막으려면 자르지 않는다(-1 · 길이+1). 엔진은 "구간 안쪽"만 보므로 자르면 끝 삽입이 통과한다.
+  return spans.map((s) => ({ ...s, start: s.start - 1, end: s.end + 1 }));
+}

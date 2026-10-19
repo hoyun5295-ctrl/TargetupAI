@@ -43,7 +43,7 @@ import { query } from '../config/database';
 import { redis } from '../config/defaults';
 import { FIELD_MAP, getColumnFields, getFieldByKey, CATEGORY_LABELS, FIELD_DISPLAY_MAP, reverseDisplayValue } from './standard-field-map';
 import { detectPhoneFields } from './callback-filter';
-import { swrPrimeCache } from './swr-cache';
+import { swrPrimeCache, invalidateSwrPrefix, dashboardCardsGenKey } from './swr-cache';
 import { customFieldRef } from './safe-field-name';
 
 // ─── 타입 정의 ───
@@ -164,6 +164,9 @@ export function clearEnabledFieldsCache(companyId?: string): void {
     if (keys.length > 0) redis.del(...keys).catch(() => { /* TTL 60초 상한 */ });
   });
   stream.on('error', () => { /* TTL 60초 상한 */ });
+  // ★ 2026-10-19 B-1010-10 — 고객 데이터가 바뀐 같은 길목(업로드 · 삭제 · 싱크)에서 대시보드 카드 숫자 캐시도 지운다
+  //   (종전 = 신선 60초 · 묵은 값 600초 동안 재업로드 전 숫자가 남았다)
+  if (companyId) invalidateSwrPrefix(`dashboard-cards:${companyId}:`, dashboardCardsGenKey(companyId));
   // ★ 2026-07-17(3) — 무효화 = 사전 워밍 예약(5초 디바운스). 데이터가 바뀐 직후 백그라운드로
   //   'all' 스코프 payload를 다시 계산해 공용 키를 데워 두므로, 사용자가 콜드 1초를 물지 않는다.
   if (companyId) scheduleEnabledFieldsWarm(companyId);

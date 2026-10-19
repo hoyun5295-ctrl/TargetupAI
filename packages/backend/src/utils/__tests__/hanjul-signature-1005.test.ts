@@ -68,8 +68,9 @@ describe('2. 혜택 근거 = 사용자 원문 한정', () => {
   it('오케스트레이터 두 경로가 넘기고, 자동발송 · 플래너는 넘기지 않는다 · 자동 마케팅은 핵심 혜택 한 칸만(★ 2026-10-05 신뢰 설계 Q19)', () => {
     const o = SRC('services', 'ai-orchestrator.ts');
     expect((o.match(/buildLineEventText\(ctx\.objective, ctx\.lineFacts\)/g) || []).length).toBe(2);
-    expect(o).toContain('...(licenseText !== undefined ? { licenseText } : {}),');
-    expect(o).toContain('...(licenseTextAI !== undefined ? { licenseText: licenseTextAI } : {}),');
+    // ★ 2026-10-19 B-1005-1① — 답이 없는 요청도 근거 = 목표 문장(회사 메모리 · 계절 힌트는 근거가 아니다)
+    expect(o).toContain('licenseText: licenseText ?? ctx.objective,');
+    expect(o).toContain('licenseText: licenseTextAI ?? ctx.objective,');
     for (const f of [['utils', 'auto-campaign-worker.ts'], ['utils', 'planner-copy.ts']]) {
       const src = SRC(...f);
       expect(src).not.toMatch(/lineFacts|licenseText|cVariant/);

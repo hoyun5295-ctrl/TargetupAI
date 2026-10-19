@@ -37,6 +37,9 @@ export interface InterviewProduct {
   price?: string;
   url?: string;
   origin: 'mall' | 'manual';
+  /** ★ 2026-10-19 B-1010-4 — 몰 상품의 출처 · 상품번호(화면 선택기가 싣는다 · 생성 때 몰에서 다시 읽어 확정 카드) */
+  provider?: string;
+  no?: string | null;
 }
 
 export interface InterviewAnswers {

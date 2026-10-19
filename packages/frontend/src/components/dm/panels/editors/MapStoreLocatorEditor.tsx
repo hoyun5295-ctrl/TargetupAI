@@ -16,7 +16,7 @@ export default function MapStoreLocatorEditor({ props, onUpdate }: EditorProps<M
         <RepeatableList
           items={stores}
           addLabel="+ 매장 추가"
-          onAdd={() => onUpdate({ stores: [...stores, { id: genId(), name: '', address: '', lat: 0, lng: 0 }] })}
+          onAdd={() => onUpdate({ stores: [...stores, { id: genId(), name: '', address: '' }] })}
           onRemove={(i) => onUpdate({ stores: stores.filter((_, idx) => idx !== i) })}
           onMove={move}
           renderItem={(s, i) => (
@@ -29,11 +29,7 @@ export default function MapStoreLocatorEditor({ props, onUpdate }: EditorProps<M
                 <TextInput value={s.phone} onChange={(v) => setStore(i, { phone: v })} placeholder="전화" />
                 <TextInput value={s.hours} onChange={(v) => setStore(i, { hours: v })} placeholder="영업시간" />
               </div>
-              <div style={{ height: 6 }} />
-              <div style={{ display: 'flex', gap: 6 }}>
-                <TextInput type="number" value={s.lat} onChange={(v) => setStore(i, { lat: v ? Number(v) : 0 })} placeholder="위도" />
-                <TextInput type="number" value={s.lng} onChange={(v) => setStore(i, { lng: v ? Number(v) : 0 })} placeholder="경도" />
-              </div>
+              {/* ★ 2026-10-19 B-1014-3⑦ 위도 · 경도 입력칸 제거 — 지도는 주소 글자만 그려 좌표를 어디도 안 읽었다(거리 정렬 도입 때 함께 재도입) */}
             </>
           )}
         />

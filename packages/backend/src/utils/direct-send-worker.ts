@@ -26,7 +26,7 @@ import { isLoadStopped, isLoadingSendPhase, NOT_LOAD_STOPPED_SQL, LOAD_CANCELLED
 // ★ 2026-09-26 (Codex 4차 5R) 취소 의무 쓰기 직렬화(취소 CT와 같은 잠금)
 import { withCancelObligationLock } from './keyed-lock';
 // ★ 2026-09-26 한줄로 V2 F19 — 개별 회신번호 등록 검사(동기 경로와 같은 CT)
-import { filterByIndividualCallback, callbackAssignmentUserId } from './callback-filter';
+import { filterByIndividualCallback, callbackAssignmentUserId, fixedCallbackRejectReason } from './callback-filter';
 // ★ 2026-09-26 한줄로 V2 F35(Codex 4차 1R A) — 취소 정산 공용 CT(취소 CT·재시도 워커·이 워커가 같은 산식)
 import { countCampaignRows, settleCancelledLoadRefund, settleCancelOutcome, campaignRefDates, CANCEL_SETTLE_MODE } from './cancel-settle';
 
@@ -474,6 +474,11 @@ async function processCampaign(campaignId: string, mode: 'normal' | 'recover' = 
   // ★ 2026-09-28 분할 = 저장 설정을 너그럽게 읽는 CT(옛 캠페인 = 간격 1분 · 판정은 옛 `splitEnabled && splitCount > 0`과 같다)
   const split = readStoredSplit(cfg);
   const useNow = !cfg.scheduled && !split;
+  // ★ 2026-10-19 B-1005-5④ — 고정 회신번호를 적재 직전에 다시 본다(접수 때 검사한 번호 · 예약 · 대기 사이 등록이 지워졌으면 적재 0).
+  //   통과 못 하면 적재 루프 첫 줄에서 멈추고 종결 블록이 전량 미적재 환불한다(야간 광고 멈춤과 같은 길).
+  const fixedCallbackBlock = !skipLoad && !cfg.useIndividualCallback && cfg.callback
+    ? await fixedCallbackRejectReason(companyId, String(cfg.callback))
+    : null;
 
   // ★2026-09-02(2) 브랜드 이미지 preflight — **청크 루프 밖에서 캠페인당 한 번**이다.
   //   Codex 2R high3: 청크마다 돌리면 같은 이미지를 청크 수만큼 올린다(processSendChunk는
@@ -541,6 +546,10 @@ async function processCampaign(campaignId: string, mode: 'normal' | 'recover' = 
   while (processed < total) {
     // ★ 2026-09-25 C-10·C-11: 끊긴 적재 정리 · 적재 전 취소는 적재하지 않고 곧장 종결 블록으로 간다
     if (skipLoad) break;
+    if (fixedCallbackBlock) {
+      failureReason = `${fixedCallbackBlock} · 적재하지 않고 전량 환불합니다`;
+      break;
+    }
     // ★ 2026-06-11: 적재 중 취소 감지 — 취소되면 적재를 멈춘다 (취소-적재 경합 차단).
     // ★ 2026-09-25 한줄로 전수점검 C-10: 옛 코드는 여기서 큐를 지우고 곧바로 return해 종결 블록의 미적재 환불을 타지 않았다.
     //   취소는 그 순간 큐 대기 행만 환불하므로 선차감된 미적재분과, 취소 뒤에 들어간 청크가 영구히 환불되지 않았다.
@@ -718,7 +727,8 @@ async function processCampaign(campaignId: string, mode: 'normal' | 'recover' = 
   // ★ 2026-06-11: status != 'cancelled' 가드 — 적재 완료 직전 취소된 캠페인을 'scheduled'로 되돌려
   //   취소 표시를 덮어쓰던 구멍 차단. 가드에 걸리면 적재분 큐 행도 삭제.
   // ★ 2026-06-11 (근원 C): 제외 사유 기록 — 첫 기록만 보존(재시작 시 정제 카운트 0이라 덮지 않음).
-  const finalStatus = cfg.scheduled ? 'scheduled' : (sent === 0 ? 'failed' : 'completed');
+  // ★ Codex E1 — 고정 회신번호 재판정 거절(적재 전 · 0건) = 예약이라도 실패로 마감(전량 환불했는데 예약 목록에 남았다)
+  const finalStatus = fixedCallbackBlock ? 'failed' : cfg.scheduled ? 'scheduled' : (sent === 0 ? 'failed' : 'completed');
   const exclusions = JSON.stringify({
     unsub: unsubRemoved, dup: dupRemoved, skipped: chunkSkipped, callbackExcluded, nightStopped,
     deducted: total, loaded: sent, recordedAt: new Date().toISOString(),

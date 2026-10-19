@@ -637,6 +637,8 @@ describe('제거된 죽은 컨트롤 — 되살리면 계약이 깨진다', () =
     coupon: '../frontend/src/components/dm/panels/editors/CouponEditor.tsx',
     // ★ 2026-10-14 원장(DM_PROP_EXEMPT kind=removed)에 0721 제거분 4건을 올리며 경로 등재
     poll: '../frontend/src/components/dm/panels/editors/PollEditor.tsx',
+    // ★ 2026-10-19 B-1014-3⑥ 1인 1회 토글 제거(룰렛)
+    roulette: '../frontend/src/components/dm/panels/editors/RouletteEditor.tsx',
     map_store_locator: '../frontend/src/components/dm/panels/editors/MapStoreLocatorEditor.tsx',
     product_carousel: '../frontend/src/components/dm/panels/editors/ProductCarouselEditor.tsx',
   };

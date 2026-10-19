@@ -11,6 +11,7 @@ import { type MallProduct, normalizeNameForMatch, extractMallProductNo } from '.
 // ★ 2026-09-14 W5 우커머스 — 몰별(woocommerce:{mall}) Store API 공개 조회 · provider 미지정 시 회사의 몰 전부 순회
 import { listWooIntegrations, getWooIntegration, fetchWooStoreProducts } from './woocommerce-client';
 import { normalizeWooMallId } from './woocommerce-core';
+import { canTouchIntegration, type IntegrationActor } from './integration-scope';
 
 const SUPPORTED_PROVIDERS = ['cafe24', 'naver'];
 
@@ -20,7 +21,9 @@ const SUPPORTED_PROVIDERS = ['cafe24', 'naver'];
  *   이름 검색 결과 중 링크 번호와 같은 상품이 있으면 이름 표기가 달라도 그 상품(ID 확정 — 오매칭 구조적 0).
  *   번호 일치가 없을 때만 기존 이름 정확 일치 폴백 (기존 소비처 동작 보존).
  */
-export async function matchMallProductByName(companyId: string, name: string, provider?: string, linkUrl?: string): Promise<MallProduct | null> {
+// ★ 2026-10-19 B-1010-2 — actor = 연동을 다루는 주체(관리자 = 회사 전체 몰 · 사용자 = 자기 분류코드 몰만 · /search 와 같은 판정).
+//   옛: 회사 전체 우커머스 몰을 돌아 담당자가 남의 매장 몰 상품을 붙였다. 카페24 · 네이버는 /search 와 같이 회사 단위다.
+export async function matchMallProductByName(companyId: string, name: string, provider: string | undefined, linkUrl: string | undefined, actor: IntegrationActor): Promise<MallProduct | null> {
   const target = normalizeNameForMatch(name);
   if (!companyId || target.length < 2) return null;
   const linkNo = extractMallProductNo(linkUrl);
@@ -42,7 +45,7 @@ export async function matchMallProductByName(companyId: string, name: string, pr
       } else if (prov.startsWith('woocommerce:')) {
         const mallId = normalizeWooMallId(prov.slice('woocommerce:'.length));
         const integ = mallId ? await getWooIntegration(companyId, mallId).catch(() => undefined) : undefined;
-        if (!integ) continue;
+        if (!integ || !canTouchIntegration(actor, integ.storeCode)) continue;
         products = await fetchWooStoreProducts(integ.siteUrl, { q: name, limit: 20 }, integ.mallId);
       }
       if (linkNo) {
@@ -62,7 +65,7 @@ export async function matchMallProductByName(companyId: string, name: string, pr
  * 생성된 섹션(DM·이메일 공용 — 동일 shape)의 product_carousel 항목명으로 몰 상품을 이름매칭
  * → 이미지·링크·정가·할인가를 자동 첨부. 이미 채워진 값은 덮지 않는다(빈 값만). 실패는 skip. 안전 상한(12건).
  */
-export async function attachMallImagesToProductCarousels(companyId: string, sections: any): Promise<void> {
+export async function attachMallImagesToProductCarousels(companyId: string, sections: any, actor: IntegrationActor): Promise<void> {
   if (!companyId || !Array.isArray(sections)) return;
   let matched = 0;
   for (const sec of sections) {
@@ -77,7 +80,7 @@ export async function attachMallImagesToProductCarousels(companyId: string, sect
       // ★ 2026-07-16 M3 — 행사문에 붙여넣은 상품 링크가 있으면 번호 축 ID 확정 매칭 (오매칭 구조적 0)
       const linkUrl = String(it?.link_url || '').trim() || undefined;
       // eslint-disable-next-line no-await-in-loop
-      const m = await matchMallProductByName(companyId, nm, undefined, linkUrl);
+      const m = await matchMallProductByName(companyId, nm, undefined, linkUrl, actor);
       if (!m) continue;
       matched++;
       if (m.imageUrl) it.image_url = m.imageUrl;

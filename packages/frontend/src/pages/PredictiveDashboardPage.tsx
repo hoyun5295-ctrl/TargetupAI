@@ -535,7 +535,7 @@ export default function PredictiveDashboardPage() {
               ))}
             </div>
           )}
-          <div className="text-[10px] text-slate-400 italic mt-2">Data source: cdp_customer_predictions (매일 1회 자동 분석)</div>
+          <div className="text-[10px] text-slate-400 italic mt-2">Data source: 고객 예측(매일 1회 자동 분석)</div>
         </div>
 
         {/* 블록4: 작은 요약 바 — 한 줄, 각 클릭 → 모달 */}

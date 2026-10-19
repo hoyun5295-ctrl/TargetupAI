@@ -311,7 +311,6 @@ export type PollProps = {
   question: string;
   options: PollOption[];
   allow_multiple?: boolean;
-  one_vote_per_user: boolean;
   /** ★ 2026-10-14 완료 문구 — 참여 8종(PARTICIPATION_TYPES) 공용 칸. 미지정 = 뷰어 기본 문구(출력 불변). */
   success_text?: string;
 };
@@ -385,7 +384,6 @@ export type RouletteSegment = {
 
 export type RouletteProps = {
   segments: RouletteSegment[];
-  one_spin_per_user: boolean;
   spin_animation_ms?: number;
   success_text?: string; // ★ 2026-10-14 당첨 시 안내 문구(공용 칸 · 당첨 분기 둘째 줄에만)
 };
@@ -427,8 +425,6 @@ export type MapStore = {
   id: string;
   name: string;
   address: string;
-  lat: number;
-  lng: number;
   phone?: string;
   hours?: string;
 };
@@ -616,7 +612,6 @@ export const SECTION_DEFAULTS: { [K in SectionType]: SectionPropsMap[K] } = {
       { id: '1', label: '옵션 1' },
       { id: '2', label: '옵션 2' },
     ],
-    one_vote_per_user: true,
     allow_multiple: false,
   },
   survey: {
@@ -649,7 +644,6 @@ export const SECTION_DEFAULTS: { [K in SectionType]: SectionPropsMap[K] } = {
       label: `옵션 ${i + 1}`,
       probability: 0.125,
     })),
-    one_spin_per_user: true,
     spin_animation_ms: 3000,
   },
   instant_coupon: {

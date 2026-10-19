@@ -6,9 +6,12 @@ import type { EditorProps } from '../SectionPropsEditor';
 export default function HeroEditor({ props, onUpdate, hidden }: EditorProps<HeroProps>) {
   return (
     <>
-      <Field label="배경 이미지">
-        <ImageUploader value={props.image_url} onChange={(url) => onUpdate({ image_url: url })} label="히어로 이미지" />
-      </Field>
+      {/* ★ 2026-10-19 B-1014-3⑦ 지금 구도가 안 읽는 칸은 감춘다(공용 패널 hidden · 원장 DM_TREATMENT_HIDDEN) */}
+      {!hidden?.('image_url') && (
+        <Field label="배경 이미지">
+          <ImageUploader value={props.image_url} onChange={(url) => onUpdate({ image_url: url })} label="히어로 이미지" />
+        </Field>
+      )}
 
       {/* ★ 2026-07-02 줄바꿈 지원 — 입력한 줄바꿈이 결과물에 그대로 반영 */}
       <Field label="메인 헤드라인" hint="줄바꿈 그대로 반영 · 한 줄 18자 이내 권장">
@@ -20,13 +23,15 @@ export default function HeroEditor({ props, onUpdate, hidden }: EditorProps<Hero
       </Field>
 
       {/* ★ 2026-07-02(2) 폰트 크기 직접 선택 — 미선택 = 기본(자동) */}
-      <Field label="헤드라인 크기">
-        <Select
-          value={props.headline_size ? String(props.headline_size) : ''}
-          onChange={(v) => onUpdate({ headline_size: v ? Number(v) : undefined })}
-          options={DM_FONT_SIZE_OPTIONS}
-        />
-      </Field>
+      {!hidden?.('headline_size') && (
+        <Field label="헤드라인 크기">
+          <Select
+            value={props.headline_size ? String(props.headline_size) : ''}
+            onChange={(v) => onUpdate({ headline_size: v ? Number(v) : undefined })}
+            options={DM_FONT_SIZE_OPTIONS}
+          />
+        </Field>
+      )}
 
       <Field label="서브 카피" hint="줄바꿈 그대로 반영">
         <TextArea value={props.sub_copy} onChange={(v) => onUpdate({ sub_copy: v })} placeholder="감성을 담은 한 줄 더" rows={2} />
@@ -44,61 +49,72 @@ export default function HeroEditor({ props, onUpdate, hidden }: EditorProps<Hero
         />
       </Field>
 
-      <Field label="높이">
-        <Select
-          value={props.height || 'md'}
-          onChange={(v) => onUpdate({ height: v as HeroProps['height'] })}
-          options={[
-            { value: 'sm', label: '작게 (200px)' },
-            { value: 'md', label: '보통 (320px)' },
-            { value: 'lg', label: '크게 (480px)' },
-            { value: 'full', label: '전체 화면' },
-          ]}
-        />
-      </Field>
+      {!hidden?.('height') && (
+        <Field label="높이">
+          <Select
+            value={props.height || 'md'}
+            onChange={(v) => onUpdate({ height: v as HeroProps['height'] })}
+            options={[
+              { value: 'sm', label: '작게 (200px)' },
+              { value: 'md', label: '보통 (320px)' },
+              { value: 'lg', label: '크게 (480px)' },
+              { value: 'full', label: '전체 화면' },
+            ]}
+          />
+        </Field>
+      )}
 
-      <Field label="하단 그라디언트 오버레이">
-        <Toggle value={props.overlay_gradient !== false} onChange={(v) => onUpdate({ overlay_gradient: v })} labelOn="사용" labelOff="미사용" />
-      </Field>
+      {!hidden?.('overlay_gradient') && (
+        <Field label="하단 그라디언트 오버레이">
+          <Toggle value={props.overlay_gradient !== false} onChange={(v) => onUpdate({ overlay_gradient: v })} labelOn="사용" labelOff="미사용" />
+        </Field>
+      )}
 
-      {/* ★ 2026-07-13 디자인 3.0 이미지 스튜디오 — 오버레이 프리셋(선택 시 위 토글보다 우선)·초점·헤드라인 강조 */}
-      <Field label="오버레이 프리셋" hint="선택 시 하단 그라디언트 설정보다 우선">
-        <Select
-          value={props.overlay || ''}
-          onChange={(v) => onUpdate({ overlay: (v || undefined) as HeroProps['overlay'] })}
-          options={[
-            { value: '', label: '기본 (위 토글 따름)' },
-            { value: 'none', label: '없음' },
-            { value: 'soft', label: '소프트' },
-            { value: 'strong', label: '강하게' },
-            { value: 'brand', label: '브랜드 틴트' },
-            { value: 'top', label: '상단 방향' },
-          ]}
-        />
-      </Field>
+      {/* ★ 2026-07-13 디자인 3.0 이미지 스튜디오 — 오버레이 프리셋·초점·헤드라인 강조
+          ★ 2026-10-19 프리셋은 전체 화면 구도만 읽는다(그 밖 구도 = 감춤) · 미지정 = 살짝 어둡게 */}
+      {!hidden?.('overlay') && (
+        <Field label="오버레이 프리셋" hint="이미지 위 색 덮개 · 글자가 잘 읽히게">
+          <Select
+            value={props.overlay || ''}
+            onChange={(v) => onUpdate({ overlay: (v || undefined) as HeroProps['overlay'] })}
+            options={[
+              { value: '', label: '기본 (살짝 어둡게)' },
+              { value: 'none', label: '없음' },
+              { value: 'soft', label: '소프트' },
+              { value: 'strong', label: '강하게' },
+              { value: 'brand', label: '브랜드 틴트' },
+              { value: 'top', label: '상단 방향' },
+            ]}
+          />
+        </Field>
+      )}
 
-      <Field label="이미지 맞춤" hint="문구가 들어간 완성 포스터는 '전체 보기'로 두면 잘리지 않아요">
-        <Select
-          value={props.image_fit || 'cover'}
-          onChange={(v) => onUpdate({ image_fit: v as HeroProps['image_fit'] })}
-          options={[
-            { value: 'cover', label: '채우기 (꽉 차게 · 잘릴 수 있음)' },
-            { value: 'contain', label: '전체 보기 (잘림 없음)' },
-          ]}
-        />
-      </Field>
+      {!hidden?.('image_fit') && (
+        <Field label="이미지 맞춤" hint="문구가 들어간 완성 포스터는 '전체 보기'로 두면 잘리지 않아요">
+          <Select
+            value={props.image_fit || 'cover'}
+            onChange={(v) => onUpdate({ image_fit: v as HeroProps['image_fit'] })}
+            options={[
+              { value: 'cover', label: '채우기 (꽉 차게 · 잘릴 수 있음)' },
+              { value: 'contain', label: '전체 보기 (잘림 없음)' },
+            ]}
+          />
+        </Field>
+      )}
 
-      <Field label="이미지 초점" hint="채우기일 때 세로로 긴 사진에서 보여줄 부분">
-        <Select
-          value={props.focus || 'center'}
-          onChange={(v) => onUpdate({ focus: v as HeroProps['focus'] })}
-          options={[
-            { value: 'center', label: '중앙' },
-            { value: 'top', label: '위쪽' },
-            { value: 'bottom', label: '아래쪽' },
-          ]}
-        />
-      </Field>
+      {!hidden?.('focus') && (
+        <Field label="이미지 초점" hint="채우기일 때 세로로 긴 사진에서 보여줄 부분">
+          <Select
+            value={props.focus || 'center'}
+            onChange={(v) => onUpdate({ focus: v as HeroProps['focus'] })}
+            options={[
+              { value: 'center', label: '중앙' },
+              { value: 'top', label: '위쪽' },
+              { value: 'bottom', label: '아래쪽' },
+            ]}
+          />
+        </Field>
+      )}
 
       {/* ★ 2026-09-16 이메일 편집기는 같은 값을 위쪽 "블록 스타일"에서 3버튼으로 내보내므로 여기서는 감춘다
           (감추지 않으면 한 화면에 헤드라인 강조가 위·아래 두 번 — 남지현 접수 cmu3n0fdj03x1jnlua7bfr9h2). */}

@@ -310,7 +310,7 @@ export function composeOutreachStandard(input: ComposeStandardInput): Section[] 
         price: p.price !== null && p.price > 0 ? p.price : 0,
         ...(p.discount_price !== null && p.discount_price > 0 ? { discount_price: p.discount_price } : {}),
       })),
-      layout: 'grid', show_indicator: true, auto_slide: false,
+      layout: 'grid', show_indicator: true,   // ★ 2026-10-19 B-1014-3① 제거된 auto_slide 를 싣지 않는다
     }));
   }
   const events = (input.events || []).filter((e) => e && String(e.title || '').trim() && e.linkUrl).slice(0, OUTREACH_STD_EVENTS_MAX);
@@ -436,7 +436,6 @@ export function composeSliceSections(input: ComposeSliceInput): Section[] {
       })),
       layout: 'grid',
       show_indicator: true,
-      auto_slide: false,
     })
     : null;
   const cta = mk('cta', 'so-slice-cta', productSection ? 3 : 2, {

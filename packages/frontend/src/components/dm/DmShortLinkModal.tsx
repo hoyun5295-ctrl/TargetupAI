@@ -285,7 +285,7 @@ export default function DmShortLinkModal({ open, onClose }: Props) {
           {/* 푸터 */}
           <div className="px-5 py-3 border-t border-slate-200 shrink-0">
             {/* ★ 2026-09-16 크레딧 수치는 원장(CONFIRM_CREDIT_COSTS)에서 읽는다 — 하드코딩은 값이 바뀌는 날 거짓말이 된다 */}
-            <div className="text-[10px] text-slate-400 italic">Data source: dm_custom_short_links 실시간 · 발급 1건 = {SHORT_LINK_CREDIT}크레딧 · 비활성 시 접속은 서비스 홈으로 이동</div>
+            <div className="text-[10px] text-slate-400 italic">Data source: 한글 주소 실시간 · 발급 1건 = {SHORT_LINK_CREDIT}크레딧 · 비활성 시 접속은 서비스 홈으로 이동</div>
           </div>
         </div>
       </div>

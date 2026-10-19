@@ -21,6 +21,7 @@ import { filterByIndividualCallback } from './callback-filter';
 import { activateJourney } from './journey-builder';
 import { dispatchOneShotJourney } from './journey-anchor-scheduler';
 import { nextTriggerEvents } from './journey-trigger-capability';
+import { buildLifecycleMap } from './journey-lifecycle-map';
 
 export type GuardedActivation =
   | { ok: true; firstActivation: boolean }
@@ -149,7 +150,8 @@ export interface BatchActivationItem {
 
 export type BatchActivation =
   | { ok: true; items: BatchActivationItem[] }
-  | { ok: false; code: 'INSUFFICIENT_CREDIT'; message: string; needed: number };
+  | { ok: false; code: 'INSUFFICIENT_CREDIT'; message: string; needed: number }
+  | { ok: false; code: 'OVERLAP_UNRESOLVED'; message: string; pairs: string[] };
 
 /**
  * 모두 켜기 — 받는 여정 먼저 · 시작 전 최초 활성화 합계 잔액 확인 · 여정마다 activateJourneyGuarded(게이트 전부).
@@ -159,7 +161,7 @@ export async function activateJourneysInOrder(
   companyId: string,
   userId: string,
   journeyIds: string[],
-  opts: { confirmCallbackExclusionIds?: string[] } = {},
+  opts: { confirmCallbackExclusionIds?: string[]; acknowledgedOverlaps?: string[] } = {},
 ): Promise<BatchActivation> {
   const ids = [...new Set(journeyIds.map(String))].slice(0, MAX_BATCH_ACTIVATION);
   const r = await query(
@@ -172,6 +174,22 @@ export async function activateJourneysInOrder(
   const items: BatchActivationItem[] = ids
     .filter((id) => !found.has(id))
     .map((id) => ({ journeyId: id, name: '', result: { ok: false, code: 'NOT_FOUND', message: '여정을 찾을 수 없습니다.' } }));
+
+  // ★ 2026-10-19 B-1009-5 — 겹침 해소 「필수」를 서버가 본다(옛: 모두 켜기 창만 강제 · API 직접 호출 · 시드는 해소 없이 켜졌다).
+  //   판정 = 지도와 같은 겹침 쌍(buildLifecycleMap) · 켤 여정이 낀 쌍마다 화면이 고른 쌍 키(정렬한 「a|b」)가 있어야 한다.
+  //   「첫 구매 고객 빼기」로 해소한 쌍은 지도에서 이미 빠진다. 켤 것이 하나도 없으면 보지 않는다.
+  const toActivate = new Set(rows.filter((x) => x.status === 'draft' || x.status === 'paused').map((x) => x.id));
+  if (toActivate.size > 0) {
+    const map = await buildLifecycleMap(companyId);
+    const ack = new Set((opts.acknowledgedOverlaps || []).map(String));
+    const pairs = map.overlaps
+      .filter((o) => toActivate.has(o.a) || toActivate.has(o.b))
+      .map((o) => [o.a, o.b].sort().join('|'))
+      .filter((k) => !ack.has(k));
+    if (pairs.length > 0) {
+      return { ok: false, code: 'OVERLAP_UNRESOLVED', message: `함께 시작되는 여정 ${pairs.length}쌍을 어떻게 할지 골라 주세요.`, pairs };
+    }
+  }
 
   const drafts = rows.filter((x) => x.status === 'draft').length;
   const needed = drafts * getCreditCost('journey-activate');

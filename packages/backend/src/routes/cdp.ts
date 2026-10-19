@@ -123,7 +123,8 @@ import { prepareLineStepsRequest, isLineStepsReqError, lineStepsKeyFor, settleLi
 import { placeInAppLineMaterials, type LineInAppMessage } from '../utils/line-materials';
 import { resolveLineMallCards, linePinnedPrimary, type LineMallCard } from '../utils/line-mall-cards';
 import { resolveIntegrationActor } from '../utils/integration-scope';
-import { tryAcquireInflight, releaseInflight } from '../utils/inflight-lock';
+import { tryAcquireInflight, releaseInflight, singleFlight } from '../utils/inflight-lock';
+import { restoreUploadFileName } from '../utils/mms-image-fit';
 import { runInCreditBundle } from '../utils/ai-credit-context';
 import { sendSystemAlert } from '../utils/system-alert';
 // ★ 2026-09-26 한줄로 V2 R1-03(Codex 7차 2R) — 같은 인앱 메시지의 게시 PUT 직렬화(공용 잠금 CT)
@@ -1601,7 +1602,7 @@ router.post('/inapp/ask', async (req: Request, res: Response) => {
 // ─────────────────────────────────────────────────────────────────────
 // 1. POST /api/cdp/inapp/ai-generate — 자연어 → 완전 메시지 자동 생성 (CT-77)
 // ─────────────────────────────────────────────────────────────────────
-router.post('/inapp/ai-generate', async (req: Request, res: Response) => {
+router.post('/inapp/ai-generate', singleFlight('inapp-generate', async (req: Request, res: Response) => {
   const auth = await ensureInAppAccess(req, res);
   if (!auth) return;
   try {
@@ -1686,7 +1687,7 @@ router.post('/inapp/ai-generate', async (req: Request, res: Response) => {
             pinnedPrimary: linePinnedPrimary(kitRaw), cards: [...mallCards, ...manualT.cards], textProducts: manualT.textProducts, heroUpload: steps.hero, page: tplPage,
             benefitAnswer: steps.body.facts.benefit, periodEnd: steps.body.facts.periodEnd ?? null,
             link: steps.body.facts.link ?? tplPage?.url ?? delivery.link ?? null,
-          }, { userId: auth.userId, source: 'inapp-ai-generator' }));
+          }, { userId: auth.userId, source: 'inapp-ai-generator' }, { factsOnly: true }));   // ★ 1019 B-1018-1 값 = 코드(인앱 혜택 블록)
           const msg = buildLineTemplateInapp(draft);
           pkg = {
             message: {
@@ -1749,7 +1750,7 @@ router.post('/inapp/ai-generate', async (req: Request, res: Response) => {
     if (handleDbMigrationError(err, res, 'cdp_inapp_messages')) return;
     return res.status(500).json({ success: false, error: err?.message || 'AI 생성 실패' });
   }
-});
+}));
 
 // ─────────────────────────────────────────────────────────────────────
 // 2. POST /api/cdp/inapp/explain — CTR 영향 요인 + 개선 추천 (CT-81)
@@ -2078,7 +2079,7 @@ router.post('/inapp/upload-image', (req: any, res: any) => {
         kind: 'uploaded',
         origin: 'inapp',
         url: publicUrl,
-        filename: file.originalname,
+        filename: restoreUploadFileName(file.originalname),   // ★ 1019 B-1005-4③ 같은 원인
         bytes: file.size,
         format: ext.replace('.', '') || null,
       }).catch(() => {});

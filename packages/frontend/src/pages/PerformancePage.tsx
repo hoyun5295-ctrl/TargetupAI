@@ -934,7 +934,7 @@ export default function PerformancePage() {
                     ))}
                   </div>
                 )}
-                <div className="mt-2 text-[10px] text-slate-400 italic">Data source: campaigns + MySQL 큐 직접 집계</div>
+                <div className="mt-2 text-[10px] text-slate-400 italic">Data source: 캠페인 + 통신사 발송 결과 직접 집계</div>
               </div>
             </div>
 
@@ -969,7 +969,7 @@ export default function PerformancePage() {
                       </div>
                     </div>
                     <p className="mt-2 text-[10px] text-slate-400 italic">
-                      Data source: CT-98 daily-insight-mailer (어제 0~24시 sms_send_results + customers is_active)
+                      Data source: 매일 아침 성과 메일(어제 0~24시 발송 결과 + 활성 고객)
                     </p>
                   </div>
                 )}
@@ -1489,7 +1489,7 @@ function AiDiagnosisLine({
           {explanation ? '자세히 보기 →' : 'AI 진단 시작 →'}
         </button>
       )}
-      <p className="mt-2 text-[10px] text-slate-400 italic">Data source: 최근 30일 campaigns · cdp_events 기반 AI 진단</p>
+      <p className="mt-2 text-[10px] text-slate-400 italic">Data source: 최근 30일 캠페인 · 고객 행동 기반 AI 진단</p>
     </div>
   );
 }

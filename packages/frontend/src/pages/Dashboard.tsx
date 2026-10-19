@@ -456,6 +456,9 @@ export default function Dashboard() {
   const [planLimitInfo, setPlanLimitInfo] = useState<any>(null);
   const [uploadProgress, setUploadProgress] = useState<any>({ status: 'unknown', total: 0, processed: 0, percent: 0, insertCount: 0, duplicateCount: 0, errorCount: 0, message: '' });
   const [showUploadProgressModal, setShowUploadProgressModal] = useState(false);
+  // ★ 2026-10-19 B-1010-11 — 진행 중 창을 닫았으면 끝날 때 화면 위 알림으로 알린다(폴링 콜백이 지금 창 상태를 읽는 자리)
+  const uploadModalOpenRef = useRef(false);
+  uploadModalOpenRef.current = showUploadProgressModal;
   const uploadProgressIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const [showDirectSend, setShowDirectSend] = useState(false);
   // ★ D224+ (2026-05-27) 영업팀장 박성용 신고 #2 fix: showDirectSend 변경 시 body.overflow='' reset 이중 안전망.
@@ -745,8 +748,7 @@ export default function Dashboard() {
       // ★ 2026-06-04 재배치: staging 적재·count는 모달 전(DirectSendPanel handleSend)에서 끝났다 → 여기선 그 stagingId로 commit만.
       const stagingId: string | undefined = (sendConfirm as any).stagingId;
       if (!stagingId) {
-        setToast({ show: true, type: 'error', message: '발송 준비 정보가 없습니다. 다시 시도해주세요.' });
-        setTimeout(() => setToast({ show: false, type: 'error', message: '' }), 4000);
+        setToast({ show: true, type: 'error', message: '발송 준비 정보가 없습니다. 다시 시도해주세요.', duration: 4000 });
         setDirectSending(false);
         return;
       }
@@ -830,8 +832,7 @@ export default function Dashboard() {
         return;
       }
       if (!data.success) {
-        setToast({show: true, type: 'error', message: data.error || '발송 접수에 실패했습니다.'});
-        setTimeout(() => setToast({show: false, type: 'error', message: ''}), 4000);
+        setToast({show: true, type: 'error', message: data.error || '발송 접수에 실패했습니다.', duration: 4000});
         setDirectSending(false);
         return;
       }
@@ -863,14 +864,16 @@ export default function Dashboard() {
           const pd = await pr.json();
           if (pd.success && (pd.phase === 'sent' || pd.phase === 'failed')) {
             clearInterval(poll);
+            // ★ 2026-10-19 B-1010-7 — 단계 'sent' 는 적재 끝(성공이 아니다) · 끝 상태는 status 로 가른다(대시보드 띠 「발송 접수를 마쳤어요」와 같은 판정)
+            const accepted = pd.phase === 'sent' && pd.status !== 'failed' && pd.status !== 'cancelled';
             setToast({
               show: true,
-              type: pd.phase === 'sent' ? 'success' : 'error',
-              message: pd.phase === 'sent'
-                ? `발송 완료: 성공 ${(pd.sentCount || 0).toLocaleString()}건${pd.failCount > 0 ? `, 실패 ${pd.failCount.toLocaleString()}건` : ''}`
-                : '발송 처리 중 오류가 발생했습니다.',
+              type: accepted ? 'success' : pd.status === 'cancelled' ? 'warning' : 'error',
+              message: accepted
+                ? `발송 접수를 마쳤어요: ${(pd.sentCount || 0).toLocaleString()}건${pd.failCount > 0 ? ` · 접수되지 못한 ${pd.failCount.toLocaleString()}건` : ''} · 결과는 발송결과에서 확인해 주세요`
+                : pd.status === 'cancelled' ? '발송이 취소됐어요.' : '발송 접수에 실패했어요. 발송결과에서 확인해 주세요.',
+              duration: 5000,
             });
-            setTimeout(() => setToast({ show: false, type: 'success', message: '' }), 5000);
             loadRecentCampaigns();
           }
         } catch { /* polling 일시 오류 무시 */ }
@@ -878,8 +881,7 @@ export default function Dashboard() {
     } catch (err: any) {
       const errMsg = err?.message || String(err) || '알 수 없는 오류';
       console.error('[direct-send] 실패:', err);
-      setToast({show: true, type: 'error', message: `발송 실패: ${errMsg.substring(0, 120)}`});
-      setTimeout(() => setToast({show: false, type: 'error', message: ''}), 6000);
+      setToast({show: true, type: 'error', message: `발송 실패: ${errMsg.substring(0, 120)}`, duration: 6000});
     } finally {
       setDirectSending(false);
     }
@@ -1051,8 +1053,7 @@ export default function Dashboard() {
       // ★ 2026-09-29 R112 — 23시간 넘은 보관본은 서버가 받지 않는다(staging-sweeper 기준) → 만료 안내 띠
       if (data.code === 'STAGING_EXPIRED') {
         setTargetExtractionExpired(true);
-        setToast({show: true, type: 'error', message: '발송 명단이 만료됐습니다. 같은 조건으로 다시 추출해 주세요.'});
-        setTimeout(() => setToast({show: false, type: 'error', message: ''}), 4000);
+        setToast({show: true, type: 'error', message: '발송 명단이 만료됐습니다. 같은 조건으로 다시 추출해 주세요.', duration: 4000});
       } else if (data.success) {
         setToast({show: true, type: 'success', message: data.message || `${(data.accepted || 0).toLocaleString()}건 발송이 접수됐습니다.`});
         setTimeout(() => setToast({show: false, type: 'success', message: ''}), 3000);
@@ -1276,8 +1277,9 @@ export default function Dashboard() {
   };
   // 직접발송 자체 토스트 → 공용 useToast(다크 톤) shim. 기존 setToast({show,type,message}) 호출 유지.
   const _toast = useToast();
-  const setToast = (t: { show: boolean; type: 'success' | 'error' | 'warning'; message: string }) => {
-    if (t.show && t.message) _toast[t.type](t.message);
+  // ★ 2026-10-19 B-1010-8 — 표시 시간을 넘긴다(옛 변환은 버려 4~6초 의도가 3초로 끝났다)
+  const setToast = (t: { show: boolean; type: 'success' | 'error' | 'warning'; message: string; duration?: number }) => {
+    if (t.show && t.message) _toast[t.type](t.message, t.duration);
   };
 
   const [optOutNumber, setOptOutNumber] = useState('');
@@ -1370,6 +1372,14 @@ export default function Dashboard() {
         if (pData.status === 'completed' || pData.status === 'failed') {
           if (uploadProgressIntervalRef.current) clearInterval(uploadProgressIntervalRef.current);
           uploadProgressIntervalRef.current = null;
+          if (!uploadModalOpenRef.current) {
+            if (pData.status === 'completed') {
+              setToast({ show: true, type: 'success', message: pData.message || '고객 데이터 업로드를 마쳤어요.', duration: 5000 });
+              void revealAfterUploadRef.current?.();
+            } else {
+              setToast({ show: true, type: 'error', message: pData.message || '고객 데이터를 올리지 못했어요.', duration: 6000 });
+            }
+          }
         }
       } catch (e) { /* ignore */ }
     }, 2000);
@@ -1545,10 +1555,13 @@ export default function Dashboard() {
   })).current;
   // ★ 2026-10-10 대시보드 모션 H — 첫 업로드(카드가 블러였던 회사)를 마치고 창을 닫으면 DB 카드가 한 번 들어오며 숫자를 채운다.
   //   이미 데이터가 있던 회사는 카드 캐시가 업로드로 무효화되지 않아 값이 그대로다 → 움직임 없음.
+  // 폴링 콜백(위)이 부르는 자리 — 함수는 렌더마다 새로 만들어지므로 ref 로 최신을 읽는다
+  const revealAfterUploadRef = useRef<(() => Promise<void>) | null>(null);
   const revealAfterUpload = async () => {
     if (dashboardCards?.hasCustomerData === false) { setDbPaged(false); setDbReveal(true); }
     await loadDashboardCards();
   };
+  revealAfterUploadRef.current = revealAfterUpload;
 
   // 최근 캠페인 로드
   const loadRecentCampaigns = async () => {
@@ -2084,6 +2097,8 @@ const campaignData = {
 
     // 캠페인 발송 API 호출 (예약/즉시 모두)
     const campaignId = response.data.campaign?.id;
+    // ★ 2026-10-19 B-1010-9 — 성공 창 「대상」 = 발송 응답의 실제 접수 건수(제안 단계 대상 수가 아니다 · 회신번호 · 피로도 제외 뒤)
+    let acceptedCount: number | null = null;
     if (campaignId) {
       let sendResult;
       try {
@@ -2112,6 +2127,7 @@ const campaignData = {
         setIsSending(false);
         return;
       }
+      if (typeof sendResult?.data?.sentCount === 'number') acceptedCount = sendResult.data.sentCount;
     }
 
     // 모달 닫기 + 상태 초기화
@@ -2124,12 +2140,12 @@ const campaignData = {
     setSelectedAiMsgIdx(0);
     setEditingAiMsg(null);
     // 성공 모달용 발송 정보 저장 (초기화 전에!)
-    const sendInfoText = _sendTimeOption === 'now' ? '즉시 발송 완료' : 
+    const sendInfoText = _sendTimeOption === 'now' ? '즉시 발송 접수 완료' : 
                          _sendTimeOption === 'ai' ? `예약 완료 (${aiResult?.recommendedTime || 'AI 추천'})` :
                          `예약 완료 (${_customSendTime ? new Date(_customSendTime).toLocaleString('ko-KR', { year: 'numeric', month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : ''})`;
     setSuccessSendInfo(sendInfoText);
     setSuccessChannel(selectedChannel);  // ★ #8 수정
-    setSuccessTargetCount(aiResult?.target?.count || 0);  // ★ #8 수정
+    setSuccessTargetCount(acceptedCount ?? aiResult?.target?.count ?? 0);  // ★ #8 수정 · ★ 1019 B-1010-9 실제 접수 건수
     setSuccessUnsubscribeCount(aiResult?.target?.unsubscribeCount || 0);  // ★ B8-08 수정
     // ★ D107: 저장 세그먼트용 — 한줄로 설정 캐시
     setLastSendConfig({ type: 'hanjullo', prompt: aiCampaignPrompt });
@@ -3677,6 +3693,7 @@ const campaignData = {
         }}
         initialRecipients={alimtalkInitialRecipients}
         initialTemplateId={alimtalkInitialTemplateId}
+        onInitialTemplateConsumed={() => setAlimtalkInitialTemplateId(null)}
         resetSignal={alimtalkResetSignal}
         alimtalkSenders={alimtalkSenders}
         alimtalkTemplates={kakaoTemplates as any}

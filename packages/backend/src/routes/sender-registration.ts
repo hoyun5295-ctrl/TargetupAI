@@ -5,6 +5,7 @@ import multer from 'multer';
 import path from 'path';
 import fs from 'fs';
 import { dropUploadedFiles } from '../utils/upload-cleanup';
+import { restoreUploadFileName } from '../utils/mms-image-fit';   // ★ 2026-10-19 B-1005-4③ 한글 첨부 이름
 import { isMissingSchemaError, migrationPendingBody } from '../utils/db-errors';
 import {
   // 담당자
@@ -101,7 +102,7 @@ router.post('/managers', authenticate, requireCompanyAdmin, demoBlock, docUpload
     }
 
     const authorizationDoc: ManagerDocInfo = {
-      originalName: file.originalname,
+      originalName: restoreUploadFileName(file.originalname),
       storedName: file.filename,
       filePath: `/uploads/sender-docs/${file.filename}`,
       fileSize: file.size,
@@ -170,7 +171,7 @@ router.post(
 
       const documents: DocumentInfo[] = files.map((file, idx) => ({
         type: (docTypes[idx] || 'telecom_cert') as DocumentInfo['type'],
-        originalName: file.originalname,
+        originalName: restoreUploadFileName(file.originalname),
         storedName: file.filename,
         filePath: `/uploads/sender-docs/${file.filename}`,
         fileSize: file.size,

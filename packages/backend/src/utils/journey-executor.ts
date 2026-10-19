@@ -78,6 +78,7 @@ import { getTriggerContract } from './journey-trigger-capability';
 import { PRODUCT_REPURCHASE_SINCE_ENTRY_SQL } from './journey-product';
 import { isSingleStepKind, normalizeStartKind } from './journey-start-kind';
 import { isDemoCompany } from './demo-company';   // ★ 2026-10-09 시연 회사 = 발송 엔진 앞 절단(설계서 docs/2026-10-09-demo-company-design.md §2)
+import { aiOperatorAllowedForWorker } from './plan-guard';
 
 // ════════════════════════════════════════════════════════════════════
 // 타입
@@ -171,6 +172,10 @@ const JOURNEY_TICK_BUDGET_MS = 4 * 60 * 1000;
 /** 한 묶음 크기(종전과 같다) · 묶음 안 회사당 상한(큰 회사가 묶음을 독차지하지 않게 — 다음 묶음에서 이어 받는다) */
 const JOURNEY_BATCH_SIZE = 100;
 const JOURNEY_PER_COMPANY_PER_BATCH = 25;
+
+/** ★ 2026-10-19 B-1009-6 — 재검사 전 수정 문안의 문자 발송을 다시 볼 간격(재검사 스캔 5분 주기 × 2) · 미루는 상한(스캐너 앞보기 창 2시간) */
+export const PRETEST_PENDING_RECHECK_MINUTES = 10;
+export const PRETEST_PENDING_MAX_HOURS = 2;
 
 export async function runJourneyExecutor(): Promise<{ processed: number; sent: number; skipped: number; waited: number; conditionPassed: number; conditionFailed: number; paused: number; failed: number; goalExited: number }> {
   if (workerRunning) {
@@ -390,12 +395,14 @@ async function processExecution(exec: ExecutionRow): Promise<StepOutcome> {
 
   const step = stepRes.rows[0] as StepRow;
 
+  let pendingSnapshotAt: string | Date | null = null;   // ★ 1019 B-1009-6 최신 스냅샷이 재검사 전(confidence_score < 100)이면 그 시각(아래 관문)
+  let snapshotReadFailed = false;                      // ★ 1019 B-1009-6 조회 실패 = 검사 여부를 모른다(문자 칸은 미룬다 · F4)
   // ★ D218+ (2026-05-26) snapshot 우선 조회 — 활성화 시점 본문 보존 안전망.
   //   회사 admin이 활성화 후 step 본문 편집해도 발송 시점 = 활성화 시점 본문 100% 동일 보장.
   //   variant 영역(activeVariantId)은 옛 영역에서 별도 덮어쓰기 정합.
   try {
     const snapRes = await query(
-      `SELECT message_body, message_subject
+      `SELECT message_body, message_subject, created_at, confidence_score
          FROM journey_step_snapshots
         WHERE step_id = $1::uuid AND journey_id = $2::uuid
         ORDER BY created_at DESC LIMIT 1`,
@@ -403,6 +410,7 @@ async function processExecution(exec: ExecutionRow): Promise<StepOutcome> {
     );
     if (snapRes.rows.length > 0) {
       const snap = snapRes.rows[0];
+      if (snap.confidence_score != null && Number(snap.confidence_score) < 100) pendingSnapshotAt = snap.created_at ?? null;
       if (snap.message_body) {
         step.message_template = snap.message_body;
       }
@@ -411,7 +419,8 @@ async function processExecution(exec: ExecutionRow): Promise<StepOutcome> {
       }
     }
   } catch (snapErr: any) {
-    // snapshot 조회 실패 = step 본 영역 fallback (안전망 — 발송 차단 X)
+    // snapshot 조회 실패 = step 본 영역 fallback (안전망 — 발송 차단 X) · ★ 1019 문자 칸은 아래 관문이 미룬다(검사 여부를 모른다)
+    snapshotReadFailed = true;
     console.warn(`[JourneyExecutor] snapshot 조회 실패 fallback:`, snapErr?.message);
   }
 
@@ -620,6 +629,37 @@ async function processExecution(exec: ExecutionRow): Promise<StepOutcome> {
     return 'skipped_already_sent';
   }
 
+  // ★ 2026-10-19 B-1009-6 — 켜진 여정 문안 수정 = 재검사 전 발송 금지(새 진입 · 다음 칸 전진 · 이미 차례가 된 고객 모두 이 자리).
+  //   판정 = 위에서 읽은 그 스냅샷의 검사 표식(confidence_score · 수정 = 0 · 활성화 · 재검사 통과 = 100) — 시간 짐작이 아니다(F3).
+  //   재검사 전이면 10분 뒤로 미룬다 → 미룬 실행은 「곧 나갈 발송」이라 재검사 스캐너(5분 주기)가 그 판을 검사하고 100 으로 올린다.
+  //   문자(SMS · LMS · MMS) 칸만(재검사 대상과 같다). 적재 중 표식 정리 · 이미 보냄 판정은 위에서 끝났다(그 둘은 막지 않는다).
+  //   ponytail: 스캐너가 2시간 안에 못 돌면(검사 큐 장애 · 스캐너 앞보기 창과 같은 2시간) 옛 동작대로 나간다 — [PRETEST-MISS] 경고로 남긴다.
+  const gate = await query(
+    `SELECT (next_run_at <= NOW()) AS due,
+            ($2::timestamptz IS NOT NULL AND $2::timestamptz > NOW() - INTERVAL '${PRETEST_PENDING_MAX_HOURS} hours') AS pending
+       FROM journey_executions WHERE id = $1::uuid`,
+    [exec.execution_id, pendingSnapshotAt],
+  );
+  if (!gate.rows[0]?.due) return 'waited';
+  if (snapshotReadFailed && ['sms', 'lms', 'mms'].includes(String(step.channel))) {
+    await query(
+      `UPDATE journey_executions SET next_run_at = NOW() + INTERVAL '${PRETEST_PENDING_RECHECK_MINUTES} minutes' WHERE id = $1::uuid AND status = 'active'`,
+      [exec.execution_id],
+    );
+    console.warn(`[JourneyExecutor] execution=${exec.execution_id} step=${step.step_order} 스냅샷 조회 실패 — 검사 여부를 몰라 문자 발송을 ${PRETEST_PENDING_RECHECK_MINUTES}분 미룬다`);
+    return 'waited';
+  }
+  if (pendingSnapshotAt && ['sms', 'lms', 'mms'].includes(String(step.channel))) {
+    if (gate.rows[0]?.pending) {
+      await query(
+        `UPDATE journey_executions SET next_run_at = NOW() + INTERVAL '${PRETEST_PENDING_RECHECK_MINUTES} minutes' WHERE id = $1::uuid AND status = 'active'`,
+        [exec.execution_id],
+      );
+      return 'waited';
+    }
+    console.warn(`[JourneyExecutor][PRETEST-MISS] execution=${exec.execution_id} step=${step.step_order} 수정 문안이 ${PRETEST_PENDING_MAX_HOURS}시간 넘게 재검사 전 — 검사 없이 보낸다(스캐너 · 검사 큐 확인)`);
+  }
+
   // ★ D188 Phase 2-B-3 (2026-05-21): variants 선택 — Bandit Thompson Sampling.
   //   step에 variants ≥ 1건 있으면 선택 후 step 변수 덮어쓰기. 발송 후 recordJourneyStepVariantReward 호출.
   let activeVariantId: string | null = null;
@@ -693,6 +733,12 @@ async function processExecution(exec: ExecutionRow): Promise<StepOutcome> {
 
   // 5. 라인그룹 검증 — ★ 2026-10-09 시연 회사는 라인그룹을 일부러 두지 않는다(2차 벽) · 발송은 아래 절단점에서 끝난다
   const demoCompany = await isDemoCompany(exec.company_id);
+  // ★ 2026-10-19 B-1004-2① — 요금제가 잠기면(FREE · 구독 만료) 여정을 멈춘다(켜는 입구와 같은 판정 · 재개 = 요금제를 다시 쓴 뒤 사람이 · 차감 0)
+  if (!demoCompany && !(await aiOperatorAllowedForWorker(exec.company_id, exec.created_by))) {
+    await pauseJourney(exec.journey_id, '요금제가 잠겨 발송을 멈췄습니다');
+    await logFailedStep(exec.execution_id, step.id, 'plan_locked');
+    return 'failed';
+  }
   if (!demoCompany && !(await hasCompanyLineGroup(exec.company_id))) {
     await pauseJourney(exec.journey_id, '발송 라인그룹 미설정');
     await logFailedStep(exec.execution_id, step.id, 'line_group_not_set');
@@ -1539,9 +1585,11 @@ async function jumpToStep(exec: ExecutionRow, targetOrder: number): Promise<bool
 async function isGoalConvertedSinceEntry(exec: ExecutionRow): Promise<boolean> {
   let goalKind = 'purchase';
   let productKeys: string[] = [];
+  let signupJourney = false;
   try {
     const gk = await query(`SELECT goal_kind, trigger_event, trigger_filters FROM journeys WHERE id = $1::uuid`, [exec.journey_id]);
     const v = String(gk.rows[0]?.goal_kind || '');
+    signupJourney = String(gk.rows[0]?.trigger_event || '') === 'customer.created';
     // ★ 2026-09-30 V2 3차 — 상품 재구매 여정(새 여정만 'product' 로 저장된다 · 기존 행 동작 무변경).
     if (v === 'product') {
       const tf = gk.rows[0]?.trigger_filters || {};
@@ -1609,7 +1657,8 @@ async function isGoalConvertedSinceEntry(exec: ExecutionRow): Promise<boolean> {
     }
 
     // purchase (기본 · 현행 동작 보존) — ★ 2026-09-30 V2 4차: 조건 "들어온 뒤 구매했나"와 같은 판정이라 함수로 옮겼다(SQL 동일).
-    return await hasPurchasedSinceEntry(exec.company_id, exec.customer_id, exec.entered_at);
+    // ★ 2026-10-19 B-1009-4 — 가입 여정은 가입 묶음으로 같이 들어온 구매도 목표로 본다(옛: 구매일이 진입보다 앞서 가입 문자 · 첫 구매 문자를 둘 다 받았다).
+    return await hasPurchasedSinceEntry(exec.company_id, exec.customer_id, exec.entered_at, { signupBatch: signupJourney });
   } catch (e: any) {
     console.log(`[JourneyExecutor] 목표 달성 판정 실패 — 통과(여정 계속):`, e?.message || e);
     return false;
@@ -1651,7 +1700,7 @@ async function completeAtEndStep(exec: ExecutionRow, endStepId: string, endStepO
  *   신호 1 = 프로필 최근 구매일 > 진입일(KST · 엄격) / 신호 2 = 자사몰 구매 사건 · 매장 원장 구매가 진입 시각 뒤(KST naive).
  *   ⛔ SQL 은 2026-07-10 ~ 0929 목표 판정 원문 그대로(0930 이동 · 동작 동일). 오류는 호출부가 받는다.
  */
-async function hasPurchasedSinceEntry(companyId: string, customerId: string, enteredAt: unknown): Promise<boolean> {
+async function hasPurchasedSinceEntry(companyId: string, customerId: string, enteredAt: unknown, opts: { signupBatch?: boolean } = {}): Promise<boolean> {
   const byProfile = await query(
     `SELECT 1 FROM customers
       WHERE id = $1::uuid AND company_id = $2::uuid
@@ -1678,7 +1727,19 @@ async function hasPurchasedSinceEntry(companyId: string, customerId: string, ent
       )`,
     [companyId, customerId, enteredAt]
   );
-  return byEvent.rows.length > 0;
+  if (byEvent.rows.length > 0) return true;
+  if (!opts.signupBatch) return false;
+  // ★ 2026-10-19 B-1009-4 — 가입 묶음 구매: 고객 행이 들어온 뒤(도착 축 · 둘 다 NOW() 적재 = 같은 시계) 들어온 구매.
+  //   싱크는 가입 고객과 그 구매(구매일 = 어제)를 한 묶음으로 보낸다 · 구매일 축으로는 진입 뒤가 아니라 놓쳤다.
+  const byBatch = await query(
+    `SELECT 1 FROM purchases p
+       JOIN customers c ON c.id = p.customer_id AND c.company_id = p.company_id
+      WHERE p.company_id = $1::uuid AND p.customer_id = $2::uuid
+        AND p.created_at >= c.created_at
+      LIMIT 1`,
+    [companyId, customerId]
+  );
+  return byBatch.rows.length > 0;
 }
 
 async function markExecutionCompleted(executionId: string, journeyId: string): Promise<void> {

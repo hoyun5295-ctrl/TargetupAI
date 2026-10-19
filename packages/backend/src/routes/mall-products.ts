@@ -191,7 +191,7 @@ mallProductsRouter.get('/match', async (req: any, res: Response) => {
     if (!name) return res.status(400).json({ success: false, error: '상품명이 필요합니다.' });
     const provider = req.query.provider ? String(req.query.provider).trim() : undefined;
     const linkUrl = req.query.link ? String(req.query.link).trim() : undefined;
-    const product = await matchMallProductByName(companyId, name, provider, linkUrl);
+    const product = await matchMallProductByName(companyId, name, provider, linkUrl, await resolveIntegrationActor(req.user));   // ★ 1019 B-1010-2 담당자 범위
     return res.json({ success: true, product: product || null });
   } catch (err: any) {
     console.error('[mall-products match] 오류:', err?.message);

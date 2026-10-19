@@ -21,10 +21,47 @@ export function isInflight(key: string): boolean {
   return !!key && held.has(key);
 }
 
+/**
+ * ★ 2026-10-19 B-1010-3 · B-1005-1② — 유료 생성 라우트의 「같은 사람 · 같은 생성」 동시 실행 = 409.
+ *   더블클릭 · 응답 전 재클릭이 생성 두 번 · 차감 두 번이 되던 구멍(멱등키가 요청마다 새로 만들어져 겹친 두 요청을 못 가렸다).
+ *   키 = 종류 + 회사 + 사용자(다른 직원의 생성은 막지 않는다) · **핸들러가 끝날 때** 놓는다
+ *   (Codex E1 — 연결 닫힘에 놓으면 화면을 떠난 뒤에도 도는 생성 · 차감과 재시도가 겹쳤다).
+ *   회사 · 사용자 없는 요청 = 잠금 없이 핸들러로(라우트가 403 으로 거른다).
+ */
+export function singleFlight(kind: string, handler: (req: any, res: any) => Promise<unknown>) {
+  return async (req: any, res: any): Promise<void> => {
+    const companyId = req.user?.companyId;
+    const userId = req.user?.userId;
+    if (!companyId || !userId) { await handler(req, res); return; }
+    const key = `paid-gen:${kind}:${companyId}:${userId}`;
+    if (!tryAcquireInflight(key)) {
+      res.status(409).json({ success: false, error: '지금 만드는 중이에요. 완성되면 이어서 진행해 주세요.', code: 'IN_FLIGHT' });
+      return;
+    }
+    try { await handler(req, res); } finally { releaseInflight(key); }
+  };
+}
+
 /** 테스트 전용 — 케이스 사이 잠금 초기화 */
 export function clearInflightForTest(): void {
   held.clear();
   tails.clear();
+  joined.clear();
+}
+
+/**
+ * ★ 2026-10-19 B-1010-5 — 같은 키의 동시 실행을 하나로 합친다(뒤 호출은 앞 실행의 결과 · 오류를 그대로 받는다).
+ *   거절(tryAcquireInflight) · 줄 세우기(runSerial)와 다르다 — 한 번 돌면 모두가 그 결과를 쓰는 일(연동 토큰 갱신).
+ *   같은 전제: 메모리라 프로세스 1개(pm2 fork). 빈 키는 합치지 않는다.
+ */
+const joined = new Map<string, Promise<unknown>>();
+export function joinInflight<T>(key: string, fn: () => Promise<T>): Promise<T> {
+  if (!key) return fn();
+  const running = joined.get(key);
+  if (running) return running as Promise<T>;
+  const p: Promise<T> = fn().finally(() => { if (joined.get(key) === p) joined.delete(key); });
+  joined.set(key, p);
+  return p;
 }
 
 // ── 한 줄로 세우기(★2026-10-01) ──

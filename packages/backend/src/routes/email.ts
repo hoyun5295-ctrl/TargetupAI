@@ -124,7 +124,8 @@ import { getCreditCost } from '../utils/ai-credit-calc';
 import { generateEmailFromMaterials, quickMaterialsEnabled, generateFromBuildMaterials, buildGenerateResponse } from '../utils/campaign-quick';
 // ★ 2026-09-14 T4 AI 자동제작 v1(materials.version === 1) — 신규 ENV 게이트 · 회사 단위 in-flight 잠금 · 오류 status 매핑
 import { isBuildMaterialsV1, aiAutoBuildEnabled, aiAutoBuildErrorResponse, buildInflightKey } from '../utils/ai-auto-build-materials';
-import { tryAcquireInflight, releaseInflight } from '../utils/inflight-lock';
+import { tryAcquireInflight, releaseInflight, singleFlight } from '../utils/inflight-lock';
+import { handleDmImageUpload } from '../utils/dm/dm-image-upload';
 
 const router = Router();
 
@@ -364,6 +365,13 @@ async function ensureEmailAccess(req: Request, res: Response): Promise<{ company
 // ─────────────────────────────────────────────────────────────────────
 // SMTP 설정 (회사 admin 본인 정보 등록 / 조회 / 삭제 / 테스트 발송)
 // ─────────────────────────────────────────────────────────────────────
+
+// ★ 2026-10-19 B-1017-1④ — 이메일 편집기 사진 업로드(이메일 요금제 문 · 처리기는 DM 과 공용 · 저장 · 주소 같다)
+router.post('/upload-image', async (req: Request, res: Response) => {
+  const auth = await ensureEmailAccess(req, res);
+  if (!auth) return;
+  handleDmImageUpload(req, res);
+});
 
 router.get('/status', async (req: Request, res: Response) => {
   try {
@@ -1081,7 +1089,7 @@ router.get('/ai/scenarios', async (_req: Request, res: Response) => {
   return res.json({ success: true, scenarios });
 });
 
-router.post('/ai/generate', async (req: Request, res: Response) => {
+router.post('/ai/generate', singleFlight('email-generate', async (req: Request, res: Response) => {
   const auth = await ensureEmailAccess(req, res);
   if (!auth) return;
   try {
@@ -1110,7 +1118,7 @@ router.post('/ai/generate', async (req: Request, res: Response) => {
     }
     return res.status(500).json({ success: false, error: err?.message || 'AI 생성 실패' });
   }
-});
+}));
 
 // 비주얼 빌더 — AI가 이메일 블록 Section[]을 생성(이미지·혜택은 빈 자리). 크레딧 3.
 // ★ 2026-10-10 한 줄 묻기(설계서 docs/2026-10-10-oneline-ask-design.md §3-2) — 이메일 한 줄 질문의 답(AI 0 · 차감 0). 문 = ensureEmailAccess.
@@ -1129,7 +1137,7 @@ router.post('/one-line/ask', async (req: Request, res: Response) => {
   }
 });
 
-router.post('/ai/generate-sections', async (req: Request, res: Response) => {
+router.post('/ai/generate-sections', singleFlight('email-generate', async (req: Request, res: Response) => {
   const auth = await ensureEmailAccess(req, res);
   if (!auth) return;
   try {
@@ -1294,7 +1302,7 @@ router.post('/ai/generate-sections', async (req: Request, res: Response) => {
           pinnedPrimary: linePinnedPrimary(kitRaw), cards: tplCards, textProducts: manualT.textProducts, heroUpload: steps.hero, page: tplPage,
           benefitAnswer: steps.body.facts.benefit, periodEnd: steps.body.facts.periodEnd ?? null,
           link: steps.body.facts.link ?? tplPage?.url ?? delivery.link ?? null,
-        }, { userId: auth.userId, source: 'email-ai-generate' }));
+        }, { userId: auth.userId, source: 'email-ai-generate' }, { factsOnly: true, subjectBenefit: true }));   // ★ 1019 B-1018-1 값 = 코드 · 제목 앞 혜택 원문
         const em = buildLineTemplateEmail(draft);
         const tplOutcome = await deductCreditOutcome({ companyId: auth.companyId, cost: tplCost, source: stepsCharge.source, createdBy: auth.userId, ...(idemKey ? { idempotencyKey: idemKey } : {}), throwOnInsufficient: true });
         if (!lineStepsCollected(tplOutcome)) {
@@ -1338,7 +1346,7 @@ router.post('/ai/generate-sections', async (req: Request, res: Response) => {
       if (lineProducts === undefined) {
         // ★ 2026-07-08 연동 몰 상품 자동 첨부 — 상품 슬라이드 항목명 이름매칭 → 이미지·링크·정가·할인가(빈 값만, 실패 skip). 발송 코어 무관(생성 결과 후처리).
         // ★ 2026-10-10 후보를 보여 준 한 줄 요청(products 칸이 옴)은 이름 자동 첨부를 하지 않는다(확정은 사람의 탭만).
-        try { await attachMallImagesToProductCarousels(auth.companyId, (result as any)?.sections); } catch { /* best-effort */ }
+        try { await attachMallImagesToProductCarousels(auth.companyId, (result as any)?.sections, await resolveIntegrationActor(req.user)); } catch { /* best-effort */ }
       } else if (allCards.length > 0 && Array.isArray((result as any)?.sections)) {
         // ★ 2026-10-10 확정 카드 = 첫 상품 슬라이드 통째 교체 · 다른 상품 슬라이드 제거(AI 가 쓴 상품 · 가격이 나가지 않게) · 없으면 히어로 뒤
         (result as any).sections = placeLineMallCards((result as any).sections, allCards, { newId: () => randomUUID(), makeCarousel: (order) => createSection('product_carousel', randomUUID(), order) });
@@ -1401,7 +1409,7 @@ router.post('/ai/generate-sections', async (req: Request, res: Response) => {
     }
     return res.status(500).json({ success: false, error: err?.message || 'AI 비주얼 생성 실패' });
   }
-});
+}));
 
 // 비주얼 에디터 실시간 미리보기 — sections → 이메일 HTML (크레딧·저장 없음).
 router.post('/render-preview', async (req: Request, res: Response) => {

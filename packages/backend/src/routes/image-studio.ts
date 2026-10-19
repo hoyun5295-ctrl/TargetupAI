@@ -2,7 +2,7 @@
  * routes/image-studio.ts — P4 AI 이미지 스튜디오 API (2026-07-19)
  *
  * 흐름: 상품 누끼(픽셀 보존) → AI 배경 생성 → 서버 합성(/compose) → 정제 타이포 → 저장(라이브러리).
- * 크레딧: checkCredit(사전 402) → Gemini 성공 → deductCreditSafe(멱등키 image-studio:{uuid}).
+ * 크레딧: checkCredit(사전 402) → Gemini 성공 → settleCreditAfterSuccess(멱등키 = 시도 키 · 없으면 image-studio:{uuid} · 동시 소진 = 402 · Codex E1).
  * 에러: Gemini/py 원문 미노출(StudioError 코드 매핑만) — 모델명 노출 차단(§5-1-11).
  *
  * endpoint:
@@ -27,20 +27,23 @@ import { resolveCompanyIndustry } from '../utils/copy-prompt-composer';
 import { authenticate } from '../middlewares/auth';
 import { resolveOwnerScope } from '../utils/owner-scope';
 import { LIMITS } from '../config/defaults';
-import { checkCredit, deductCreditSafe, InsufficientCreditError } from '../utils/ai-credit';
-import { registerAsset, getStorageUsage, isAssetsTableMissing, getAsset } from '../utils/assets';
+import { checkCredit, settleCreditAfterSuccess, InsufficientCreditError, isChargedByKey } from '../utils/ai-credit';
+import { runSerial } from '../utils/inflight-lock';
+import { studioAttemptKey, rememberStudioResult, recallStudioResult } from '../utils/image-studio-attempt';
+import { loadPlanContext, isAiOperatorAllowed } from '../utils/plan-guard';
+import { registerAsset, getStorageUsage, isAssetsTableMissing, getAsset, getAssetByUrl } from '../utils/assets';
 import {
   isStudioReady, StudioError, CREDIT_SOURCE,
   resolvePreset, buildPosterPrompt, hasBenefitPattern, buildAssetDisplayName,
   generatePoster, editOrUpscale, buildEditInstruction, studioImageEngine,
   removeBackground, composeImage,
-  writeTempBuffer, allocTempPath, writeTempMeta, readTempMeta, findTempFile, moveTempToPermanent,
+  writeTempBuffer, allocTempPath, writeTempMeta, readTempMeta, clearTempMeta, findTempFile, moveTempToPermanent, restorePermanentToTemp, findPermanentByTempId,
   companyTempUsageBytes, isValidTempId, newTempId,
   tryAcquireGenerateLock, releaseGenerateLock,
   findTemplateSample, writeTemplateSample,
   isStudioTempFull,
   STUDIO_TEMP_CAP_BYTES, STUDIO_TEMP_TTL_DAYS,
-  type ComposeTypography,
+  type ComposeTypography, type TempMeta,
 } from '../utils/image-studio';
 import { getTemplate, listTemplatesPublic, findUnfilledTemplateText } from '../utils/image-studio-templates';
 import { SUB_ORDER } from '../utils/image-studio-template-subs';
@@ -81,6 +84,17 @@ function respondStudioError(res: Response, err: any): Response {
   }
   console.error('[image-studio] 처리 오류:', err?.message || err);
   return res.status(502).json({ success: false, error: '이미지 생성에 실패했어요. 잠시 후 다시 시도해주세요.', code: 'GEN_FAILED' });
+}
+
+/**
+ * ★ 2026-10-19 B-1016-3① 서버 쪽 요금제 검사 — 화면 PlanGate(image-studio = AI 오퍼레이터 이용 가능)와 같은 판정.
+ *   크레딧을 쓰는 생성 · 수정에만 건다(라이브러리 그림 MMS 넣기 · 임시 그림 보기는 다른 발송 화면도 쓰므로 그대로).
+ */
+async function studioPlanBlocked(req: any, res: Response): Promise<boolean> {
+  const plan = await loadPlanContext(req.user?.companyId);
+  if (plan && isAiOperatorAllowed(plan, req.user)) return false;
+  res.status(403).json({ success: false, error: '이 기능은 요금제 가입 후 이용할 수 있어요.', code: 'PLAN_GATED' });
+  return true;
 }
 
 // ── GET /status ──────────────────────────────────────────────
@@ -175,7 +189,25 @@ imageStudioRouter.post('/generate', async (req: any, res: Response) => {
   if (!companyId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
   if (!isStudioReady()) return respondStudioError(res, new StudioError('STUDIO_NOT_READY', 503));
 
+  if (await studioPlanBlocked(req, res)) return;
   const { templateId, presetKey, userHint, texts, cutoutTempId, textPosition } = req.body || {};
+  // ★ 2026-10-19 B-1016-3② 시도 키(화면이 보낼 때만) — 같은 시도 = 기억한 결과 · 이미 걷혔으면 다시 걷지 않는다
+  const attemptKey = studioAttemptKey('gen', companyId, req.body?.attemptToken, { templateId, presetKey, userHint, texts, cutoutTempId, textPosition });
+  // 회사당 동시 생성 1건 (fork 단일 = in-memory)
+  // ★ Codex E2 — 같은 시도의 결과 돌려주기 · 납부 확인 = 이 잠금 안에서 · 새 작업 검사(입력 · 잔액 · 임시 용량)보다 먼저
+  //   (옛: 잠금 밖 · 잔액 확인 앞이라, 원요청이 막 걷은 뒤의 재요청이 402 · 409 를 받고 다시 걷힐 수 있었다)
+  if (!tryAcquireGenerateLock(companyId)) return respondStudioError(res, new StudioError('BUSY', 409));
+  try {
+  if (attemptKey) {
+    const hit = recallStudioResult<Record<string, unknown>>(attemptKey);
+    if (hit) return res.json(hit);
+  }
+  let alreadyPaid = false;
+  if (attemptKey) {
+    try { alreadyPaid = await isChargedByKey(companyId, attemptKey); } catch {
+      return res.status(503).json({ success: false, error: '크레딧 내역을 확인하지 못했어요. 잠시 뒤 다시 시도해주세요.', code: 'CREDIT_STATE_UNKNOWN' });
+    }
+  }
   const template = getTemplate(String(templateId || ''));
   if (!template) return res.status(400).json({ success: false, error: '템플릿을 선택해주세요.' });
   const preset = resolvePreset(presetKey);
@@ -197,13 +229,9 @@ imageStudioRouter.post('/generate', async (req: any, res: Response) => {
     return res.status(400).json({ success: false, error: '문구 칸에 예시 문구가 그대로 있습니다. 실제 문구로 바꾼 뒤 만들어 주세요.', code: 'PLACEHOLDER_TEXT', field: unfilledField });
   }
 
-  // 사전 차단(최대 2크레딧 기준)
-  try { await checkCredit(companyId, 2); } catch (err) { return respondStudioError(res, err); }
+  // 사전 차단(최대 2크레딧 기준) — 이미 낸 시도는 걷지 않으므로 보지 않는다
+  if (!alreadyPaid) { try { await checkCredit(companyId, 2); } catch (err) { return respondStudioError(res, err); } }
 
-  // 회사당 동시 생성 1건 (fork 단일 = in-memory)
-  if (!tryAcquireGenerateLock(companyId)) return respondStudioError(res, new StudioError('BUSY', 409));
-
-  try {
     // temp 상한 검사(200MB) — ★ 2026-09-27 R125 CT(모든 임시 쓰기 라우트가 같은 판정)
     if (isStudioTempFull(companyId)) return respondStudioError(res, new StudioError('TEMP_FULL', 409));
 
@@ -236,17 +264,21 @@ imageStudioRouter.post('/generate', async (req: any, res: Response) => {
 
     // 성공 후 차감 — 생성 1회 = 2크레딧 고정(★2026-07-30 Harold 확정: 1장 생성이어도 2). 멱등키 = 생성 요청 uuid.
     const cost = 2;
-    const genReqId = newTempId();
-    await deductCreditSafe({
-      companyId, cost, source: CREDIT_SOURCE.generate, createdBy: userId,
-      idempotencyKey: `image-studio:${genReqId}`,
-    });
+    if (!alreadyPaid) {
+      // ★ Codex E1 — 사전 확인 뒤 다른 기능이 잔액을 먼저 쓰면 여기서 402(무과금 결과를 내주지도 기억하지도 않는다)
+      await settleCreditAfterSuccess({
+        companyId, cost, source: CREDIT_SOURCE.generate, createdBy: userId,
+        idempotencyKey: attemptKey || `image-studio:${newTempId()}`,
+      });
+    }
 
-    return res.json({
+    const body = {
       success: true,
       images,
       benefitNotice: benefitInHint ? '혜택 문구는 문구 칸(라벨·헤드라인·부제)에 입력해주세요. 장면 힌트에는 장면 묘사만 들어가요.' : null,
-    });
+    };
+    if (attemptKey) rememberStudioResult(attemptKey, body);
+    return res.json(body);
   } catch (err) {
     return respondStudioError(res, err);
   } finally {
@@ -260,6 +292,7 @@ imageStudioRouter.post('/edit', async (req: any, res: Response) => {
   const userId = req.user?.userId;
   if (!companyId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
 
+  if (await studioPlanBlocked(req, res)) return;
   const { tempId, instruction, targetSize } = req.body || {};
   // ★ 2026-09-30 4K 격상 제거(Harold 확정) — 생성 모델이 "같은 그림 4K"를 새로 그려 다른 포스터가 나왔다(운영 실측 · 원장 docs/2026-09-30-ai-model-prompt-upgrade.md §2-4).
   //   캐시된 옛 화면이 보내면 차감 없이 안내만 돌려준다(검사 · 잠금 · 차감 전).
@@ -267,6 +300,21 @@ imageStudioRouter.post('/edit', async (req: any, res: Response) => {
     return res.status(410).json({ success: false, error: '4K 격상은 더 이상 제공하지 않아요. 만든 포스터를 그대로 저장해 쓰시면 됩니다.', code: 'UPSCALE_REMOVED' });
   }
   if (!isStudioReady()) return respondStudioError(res, new StudioError('STUDIO_NOT_READY', 503));
+
+  // ★ Codex E2 — /generate 와 같은 순서: 회사 잠금 → 같은 시도의 기억 결과 → 납부 확인 → 새 작업 검사(임시 용량 · 대상 · 잔액)
+  const attemptKey = studioAttemptKey('edit', companyId, req.body?.attemptToken, { tempId, instruction });
+  if (!tryAcquireGenerateLock(companyId)) return respondStudioError(res, new StudioError('BUSY', 409));
+  try {
+  if (attemptKey) {
+    const hit = recallStudioResult<Record<string, unknown>>(attemptKey);
+    if (hit) return res.json(hit);
+  }
+  let alreadyPaid = false;
+  if (attemptKey) {
+    try { alreadyPaid = await isChargedByKey(companyId, attemptKey); } catch {
+      return res.status(503).json({ success: false, error: '크레딧 내역을 확인하지 못했어요. 잠시 뒤 다시 시도해주세요.', code: 'CREDIT_STATE_UNKNOWN' });
+    }
+  }
   if (isStudioTempFull(companyId)) return respondStudioError(res, new StudioError('TEMP_FULL', 409));  // ★ 2026-09-27 R125
 
   if (!isValidTempId(tempId)) return res.status(400).json({ success: false, error: '대상 이미지를 찾을 수 없습니다.' });
@@ -282,10 +330,8 @@ imageStudioRouter.post('/edit', async (req: any, res: Response) => {
     return res.status(400).json({ success: false, error: '어떻게 바꿀지 알려주세요.' });
   }
 
-  try { await checkCredit(companyId, cost); } catch (err) { return respondStudioError(res, err); }
-  if (!tryAcquireGenerateLock(companyId)) return respondStudioError(res, new StudioError('BUSY', 409));
+  if (!alreadyPaid) { try { await checkCredit(companyId, cost); } catch (err) { return respondStudioError(res, err); } }
 
-  try {
     const base = fs.readFileSync(found.absPath).toString('base64');
     const result = await editOrUpscale({
       baseImageBase64: base, baseMime: found.mime,
@@ -304,10 +350,12 @@ imageStudioRouter.post('/edit', async (req: any, res: Response) => {
       aspectRatio: meta.aspectRatio, width: null, height: null,
     });
 
-    const editReqId = newTempId();
-    await deductCreditSafe({ companyId, cost, source, createdBy: userId, idempotencyKey: `image-studio:${editReqId}` });
-
-    return res.json({ success: true, image: { tempId: newTemp, url: `/api/image-studio/temp/${newTemp}` } });
+    if (!alreadyPaid) {
+      await settleCreditAfterSuccess({ companyId, cost, source, createdBy: userId, idempotencyKey: attemptKey || `image-studio:${newTempId()}` });   // ★ Codex E1 동시 소진 = 402
+    }
+    const body = { success: true, image: { tempId: newTemp, url: `/api/image-studio/temp/${newTemp}` } };
+    if (attemptKey) rememberStudioResult(attemptKey, body);
+    return res.json(body);
   } catch (err) {
     return respondStudioError(res, err);
   } finally {
@@ -447,10 +495,49 @@ imageStudioRouter.post('/save', async (req: any, res: Response) => {
 
   const { tempId, channelSpec, title } = req.body || {};
   if (!isValidTempId(tempId)) return res.status(400).json({ success: false, error: '저장할 이미지를 찾을 수 없습니다.' });
+  // ★ 2026-10-19 Codex E8 — 같은 임시 id 의 저장 전체를 줄 세운다(첫 저장이 옮긴 뒤 · 등재 커밋 전의 재저장이 0행을 보고 만료로 끝나던 경합).
+  //   줄 선 뒤 파일 · 사이드카를 읽으므로 뒤 차례는 앞 저장이 끝난 상태(소재 있음 · 마무리 대기 · 되돌림)를 본다. 프로세스 1개 전제 = 다른 잠금과 같다.
+  await runSerial(`studio-save:${companyId}:${tempId}`, async () => {
   let meta = readTempMeta(companyId, tempId);
   let found = findTempFile(companyId, tempId);
-  if (!meta || !found) {
-    // 사이드카/파일 없음 = 이미 저장됨(1회성 소비) 또는 만료 → 409(더블클릭 중복 등재 차단 M-2)
+  // ★ Codex E3 — 지난 저장이 등재 여부를 확인하지 못하고 남긴 그림 = 다시 확인해 마무리(있으면 그 소재 · 없으면 등재 · 또 모르면 503 그대로)
+  //   ★ Codex E4 · E8 — 겹친 재저장은 바깥 줄(같은 임시 id)이 막는다 · 여기서 사이드카를 다시 읽는다
+  if (meta && !found && meta.pendingAsset) {
+    const outcome = await (async (): Promise<{ id: string; pa: NonNullable<TempMeta['pendingAsset']> } | 'gone' | 'unknown'> => {
+      const cur = readTempMeta(companyId, tempId);
+      const pa = cur?.pendingAsset;
+      if (!pa) return 'gone';
+      try {
+        const existing = await getAssetByUrl(companyId, pa.url);
+        const id = existing?.id || await registerAsset({
+          companyId, createdBy: userId, kind: 'generated', origin: 'studio',
+          url: pa.url, filename: pa.displayName, bytes: pa.bytes, format: pa.filename.endsWith('.png') ? 'png' : 'jpg',
+          prompt: null, channelSpec: pa.channelSpec, width: cur?.width ?? null, height: cur?.height ?? null,
+        }) || (await getAssetByUrl(companyId, pa.url))?.id;
+        if (!id) return 'unknown';
+        clearTempMeta(companyId, tempId);
+        return { id, pa };
+      } catch { return 'unknown'; }
+    })();
+    if (outcome === 'unknown') return res.status(503).json({ success: false, error: '라이브러리에 올렸는지 확인하지 못했어요. 잠시 뒤 같은 그림으로 다시 저장해 주세요.', code: 'ASSET_REGISTER_UNKNOWN' });
+    if (outcome !== 'gone') return res.json({ success: true, asset: { id: outcome.id, url: outcome.pa.url, bytes: outcome.pa.bytes, channelSpec: outcome.pa.channelSpec } });
+    // gone = 앞 차례가 마무리했다 → 아래 「임시 파일 없음」 판정(영구 파일 + 소재 단건)으로
+  }
+  if (!found) {
+    // 임시 파일 없음 = 이미 옮겼다(저장됨 · 겹친 재저장 · 마무리됨) 또는 만료.
+    // ★ Codex E7 — 그 임시 id 의 영구 파일이 있으면 그 주소의 소재를 단건으로 찾아 돌려준다(옛: 409 → 화면이 최신 200건 목록에서 못 찾으면 만료로 오판).
+    //   조회 장애 = 503(모른다) · 영구 파일이 없거나 소재 0행이 확인될 때만 409(더블클릭 중복 등재 차단 M-2 는 그대로 = 새 행을 만들지 않는다).
+    const perm = findPermanentByTempId(companyId, tempId) || (meta?.savedAs ? { url: meta.savedAs.url, bytes: meta.savedAs.bytes } : null);
+    if (perm) {
+      let ex: Awaited<ReturnType<typeof getAssetByUrl>>;
+      try { ex = await getAssetByUrl(companyId, perm.url); } catch {
+        return res.status(503).json({ success: false, error: '라이브러리에 올렸는지 확인하지 못했어요. 잠시 뒤 같은 그림으로 다시 저장해 주세요.', code: 'ASSET_REGISTER_UNKNOWN' });
+      }
+      if (ex) return res.json({ success: true, asset: { id: ex.id, url: perm.url, bytes: perm.bytes, channelSpec: (ex as any).channel_spec ?? null } });
+    }
+    return res.status(409).json({ success: false, error: '이미 저장됐거나 만료된 이미지입니다.', code: 'ALREADY_SAVED' });
+  }
+  if (!meta) {
     return res.status(409).json({ success: false, error: '이미 저장됐거나 만료된 이미지입니다.', code: 'ALREADY_SAVED' });
   }
 
@@ -458,7 +545,7 @@ imageStudioRouter.post('/save', async (req: any, res: Response) => {
     const effectiveSpec = channelSpec || meta.channelSpec || null;
     let effTempId: string = tempId;
     // ★ 2026-09-27 한줄로 V2 R127 — 원본 임시 파일은 용량 한도를 통과한 뒤에 소비한다(옛: 먼저 지우고 한도 초과면 화면이 든 원본 id로 다시 저장할 수 없었다)
-    let consumeOriginal: (() => void) | null = null;
+    let consumeOriginal: ((savedUrl: string, savedBytes: number) => void) | null = null;
 
     // ★ MMS 트랙 = 서버가 저장 직전 1080px + JPEG ≤300KB 압축 보장(§4-4 — 사용자가 오버사이즈를 만들 수 없음)
     if (effectiveSpec === 'mms') {
@@ -475,9 +562,14 @@ imageStudioRouter.post('/save', async (req: any, res: Response) => {
       // 원본 temp 1회성 소비(중복 저장 차단) — 실행은 용량 한도 통과 뒤(R127)
       const origPath = found.absPath;
       const origDir = path.dirname(origPath);
-      consumeOriginal = () => {
+      // ★ 2026-10-19 Codex E8 범위 밖 — 원본 그림은 지우되 사이드카는 「저장 주소」로 남긴다(같은 원본 id 재저장 = 그 소재를 단건으로 찾는다 · 옛: 409 → 목록 200건에 없으면 만료 오판)
+      const origMeta = meta;
+      consumeOriginal = (savedUrl: string, savedBytes: number) => {
         try { fs.unlinkSync(origPath); } catch { /* noop */ }
-        try { fs.unlinkSync(path.join(origDir, `${tempId}.json`)); } catch { /* noop */ }
+        const { companyId: _c, createdAt: _t, ...rest } = origMeta as any;
+        try { writeTempMeta(companyId, tempId, { ...rest, pendingAsset: null, savedAs: { url: savedUrl, bytes: savedBytes } }); } catch {
+          try { fs.unlinkSync(path.join(origDir, `${tempId}.json`)); } catch { /* noop */ }
+        }
       };
       effTempId = alloc.tempId;
       meta = readTempMeta(companyId, effTempId);
@@ -497,30 +589,62 @@ imageStudioRouter.post('/save', async (req: any, res: Response) => {
       }
       return res.status(409).json({ success: false, error: '저장 용량 한도를 초과했습니다. 라이브러리에서 정리 후 다시 저장해주세요.', code: 'STORAGE_FULL' });
     }
-    consumeOriginal?.();
-
+    const metaForRestore = meta;
     const moved = moveTempToPermanent(companyId, effTempId);
     if (!moved) return res.status(409).json({ success: false, error: '이미 저장됐거나 만료된 이미지입니다.', code: 'ALREADY_SAVED' });
 
     const format = moved.ext === 'png' ? 'png' : 'jpg';
     // ★ 2026-07-21 표시명 = "헤드라인_채널.ext" (랜덤 UUID 대신 — 용도 체킹 동시). 실제 파일(moved.url)은 tempId 유지.
     const displayName = buildAssetDisplayName(title, effectiveSpec, moved.ext);
+    // registerAsset 은 던지지 않는다(실패 = null · Codex E1) — null 도 등재 실패로 본다.
     const assetId = await registerAsset({
       companyId, createdBy: userId, kind: 'generated', origin: 'studio',
       url: moved.url, filename: displayName, bytes: moved.bytes, format,
       // ★ 2026-09-27 한줄로 V2 R241 — 최종 프롬프트는 숨긴 템플릿 골격을 담고 있어 소재 기록에 싣지 않는다(목록 API로 나갔다)
       prompt: null,
       channelSpec: effectiveSpec,
-      width: meta.width ?? null, height: meta.height ?? null,
+      width: metaForRestore.width ?? null, height: metaForRestore.height ?? null,
     });
+    // ★ Codex E2 — null 은 「커밋됐는데 응답만 끊김」일 수 있다(storeAssetFile 과 같은 재확인). 있으면 성공 · 없음이 확인될 때만 되돌린다 ·
+    //   재확인마저 실패하면 영구 파일을 그대로 둔다(행이 있을 수 있는데 파일을 옮기면 깨진 소재가 된다).
+    let savedId: string | null = assetId;
+    let registered: 'yes' | 'no' | 'unknown' = assetId ? 'yes' : 'no';
+    if (!assetId) {
+      try {
+        const committed = await getAssetByUrl(companyId, moved.url);
+        if (committed) { savedId = committed.id; registered = 'yes'; }
+      } catch { registered = 'unknown'; }
+    }
+    if (registered === 'unknown') {
+      // ★ Codex E3 — 영구 파일은 그대로(행이 있을 수 있다) · 같은 임시 id 사이드카에 마무리 대기를 남겨 다음 저장이 확인 · 등재로 끝낸다(MMS 변환 경로 = 원본이 남아 다시 변환된다)
+      if (!consumeOriginal) {
+        const { companyId: _c, createdAt: _t, ...rest } = metaForRestore as any;
+        try { writeTempMeta(companyId, effTempId, { ...rest, pendingAsset: { url: moved.url, filename: moved.filename, bytes: moved.bytes, displayName, channelSpec: effectiveSpec } }); } catch { /* noop */ }
+      }
+      return res.status(503).json({ success: false, error: '라이브러리에 올렸는지 확인하지 못했어요. 잠시 뒤 같은 그림으로 다시 저장해 주세요.', code: 'ASSET_REGISTER_UNKNOWN' });
+    }
+    if (registered === 'no') {
+      // ★ 2026-10-19 B-1016-3③ — 등재 실패 = 되돌린다. MMS 변환본은 지우고 원본(아직 소비 전)을 남긴다 · 그 밖은 임시 자리로 되돌린다.
+      //   그래서 화면이 든 같은 임시 id 로 다시 저장할 수 있다(옛: 옮긴 뒤라 같은 그림으로 다시 저장도 라이브러리 복구도 못 했다).
+      if (consumeOriginal) {
+        try { fs.unlinkSync(path.join(INAPP_IMAGE_BASE, companyId, moved.filename)); } catch { /* noop */ }
+      } else {
+        const { companyId: _c, createdAt: _t, ...rest } = metaForRestore as any;
+        restorePermanentToTemp(companyId, effTempId, moved.ext, rest);
+      }
+      return res.status(503).json({ success: false, error: '라이브러리에 올리지 못했어요. 잠시 뒤 같은 그림으로 다시 저장해 주세요.', code: 'ASSET_REGISTER_FAILED' });
+    }
+    // 원본 임시 파일 소비 = 등재까지 성공한 뒤(MMS 변환 경로 · R127 · B-1016-3③)
+    consumeOriginal?.(moved.url, moved.bytes);
 
-    return res.json({ success: true, asset: { id: assetId, url: moved.url, bytes: moved.bytes, channelSpec: effectiveSpec } });
+    return res.json({ success: true, asset: { id: savedId, url: moved.url, bytes: moved.bytes, channelSpec: effectiveSpec } });
   } catch (err: any) {
     if (isAssetsTableMissing(err)) {
       return res.status(503).json({ success: false, error: '이미지 보관함을 준비 중입니다. 잠시 후 다시 시도해 주세요.', code: 'DB_MIGRATION_PENDING' });
     }
     return respondStudioError(res, err);
   }
+  });
 });
 
 // ── POST /mms-from-asset — 라이브러리 소재 → MMS 규격(≤300KB JPG) 변환 (무료) ──

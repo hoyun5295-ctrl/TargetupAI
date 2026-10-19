@@ -11,18 +11,20 @@ export default function GalleryEditor({ props, onUpdate, hidden }: EditorProps<G
   return (
     <>
       <Field label="제목 (선택)"><TextInput value={props.title} onChange={(v) => onUpdate({ title: v })} placeholder="갤러리 제목" /></Field>
-      <Field label="레이아웃">
-        <Select
-          value={props.layout || 'grid_2x2'}
-          onChange={(v) => onUpdate({ layout: v as GalleryProps['layout'] })}
-          options={[
-            { value: 'grid_2x2', label: '2×2 그리드' },
-            { value: 'grid_3x3', label: '3×3 그리드' },
-            { value: 'list_1xN', label: '세로 1열' },
-            { value: 'masonry', label: '벽돌형' },
-          ]}
-        />
-      </Field>
+      {/* ★ 2026-10-19 B-1014-3⑦ 모자이크 구도는 격자를 구도가 정한다(감춤 · 원장 DM_TREATMENT_HIDDEN) */}
+      {!hidden?.('layout') && (
+        <Field label="레이아웃">
+          <Select
+            value={!props.layout || props.layout === 'masonry' ? 'grid_2x2' : props.layout}   // ★ 1019 B-1014-3④ 벽돌형(렌더 안 함) = 2×2 로 그려진다
+            onChange={(v) => onUpdate({ layout: v as GalleryProps['layout'] })}
+            options={[
+              { value: 'grid_2x2', label: '2×2 그리드' },
+              { value: 'grid_3x3', label: '3×3 그리드' },
+              { value: 'list_1xN', label: '세로 1열' },
+            ]}
+          />
+        </Field>
+      )}
       <Field label="이미지">
         <MultiImageUploader label="갤러리 이미지" onAdd={(urls) => onUpdate({ images: [...images, ...urls.map((url) => ({ url }))] })} />
         <RepeatableList

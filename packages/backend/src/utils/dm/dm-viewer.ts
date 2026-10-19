@@ -815,6 +815,9 @@ ${catalog ? renderCatalogScript() : ''}${renderEffectScript(fx)}
       if (consentEl) data.consent = true;
       Array.prototype.forEach.call(box.querySelectorAll('[data-field]'), function (inp) { data[inp.getAttribute('data-field')] = inp.value; });
       if (info.type === 'lucky_draw' && (!data.phone || !String(data.phone).trim())) { showMsg(box, '전화번호를 입력해주세요.', false); return; }
+      var reqMiss = false;
+      Array.prototype.forEach.call(box.querySelectorAll('[data-field][data-required="1"]'), function (inp) { if (!String(inp.value || '').trim()) reqMiss = true; });
+      if (reqMiss) { showMsg(box, '필수 칸을 채워 주세요.', false); return; }
       if (info.type === 'email_capture' && (!data.email || !String(data.email).trim())) { showMsg(box, '이메일을 입력해주세요.', false); return; }
       btn.disabled = true; btn.style.opacity = '0.6';
       // ★ 2026-10-14 완료 문구 = 래퍼 마커(wrapInfo.done · 참여 8종 공통). 옛 0722 폼 속성 읽기는 지웠다.
@@ -1073,6 +1076,9 @@ ${catalog ? renderCatalogScript() : ''}${renderEffectScript(fx)}
       if (btn.disabled) return;
       btn.disabled = true; btn.style.opacity = '0.6';
       submitInteraction(info.id, info.type, {}).then(function (res) {
+        var pg = res && res.result && res.result.progress;
+        var pgEl = pg ? box.querySelector('[data-dm-progress]') : null;
+        if (pgEl) pgEl.textContent = '참여 ' + pg.joined + '회 · 목표 ' + pg.target + '회';
         if (res && res.success) showDone(box, info, res.already ? '이미 참여하셨습니다.' : (btn.getAttribute('data-claim-success') || '참여가 완료되었습니다!'), true, !!res.already);
         else { btn.disabled = false; btn.style.opacity = '1'; showMsg(box, (res && res.error) || '잠시 후 다시 시도해주세요.', false); }
       }).catch(function () { btn.disabled = false; btn.style.opacity = '1'; showMsg(box, '잠시 후 다시 시도해주세요.', false); });

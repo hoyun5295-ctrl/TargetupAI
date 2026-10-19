@@ -24,6 +24,8 @@
  */
 
 import { query } from '../config/database';
+import { TIMEOUTS } from '../config/defaults';
+import { joinInflight } from './inflight-lock';
 // ★ 2026-09-26 한줄로 V2 R1-31 — 토큰 요청 실패 판정 CT(제공자 거절일 때만 연동 만료)
 import { tokenHttpError, reconnectRequiredError, isDefinitiveTokenRejection } from './integration-token-error';
 import { createHmac, timingSafeEqual } from 'crypto';
@@ -139,6 +141,7 @@ export async function exchangeCafe24Code(
   });
 
   const res = await fetch(url, {
+    signal: AbortSignal.timeout(TIMEOUTS.integrationApi),
     method: 'POST',
     headers: {
       'Content-Type': 'application/x-www-form-urlencoded',
@@ -175,6 +178,7 @@ export async function refreshCafe24Token(
   });
 
   const res = await fetch(url, {
+    signal: AbortSignal.timeout(TIMEOUTS.integrationApi),
     method: 'POST',
     headers: {
       'Content-Type': 'application/x-www-form-urlencoded',
@@ -350,6 +354,16 @@ export async function ensureFreshCafe24Token(integration: Cafe24Integration, cre
   if (expiresAt > now + TOKEN_REFRESH_MARGIN_MS) {
     return integration;
   }
+  // ★ 2026-10-19 B-1010-5 — 같은 연동의 갱신은 한 번만(동시 호출은 같은 결과). refresh_token 은 쓰면 바뀐다 —
+  //   옛: 만료 5분 전 구간의 요청마다 같은 옛 토큰으로 재발급해 뒤 요청이 거절되고 연동이 「만료」로 표시될 수 있었다.
+  return joinInflight(`cafe24-token:${integration.id}`, () => refreshCafe24Once(integration, creds));
+}
+
+/** 갱신 한 번 — 앞 차례가 이미 바꿔 두었으면 DB 의 새 값을 쓴다(호출부가 든 행이 옛 값일 수 있다 · 옛 refresh_token 을 다시 쓰지 않는다) */
+async function refreshCafe24Once(held: Cafe24Integration, creds?: ProviderOAuthCredentials): Promise<Cafe24Integration> {
+  const latest = await getCafe24Integration(held.companyId, held.mallId).catch(() => null);
+  const integration = latest && latest.id === held.id ? latest : held;
+  if (integration.tokenExpiresAt.getTime() > Date.now() + TOKEN_REFRESH_MARGIN_MS) return integration;
 
   try {
     const refreshed = await refreshCafe24Token(integration.mallId, integration.refreshToken, creds);
@@ -421,7 +435,7 @@ export async function cafe24ApiCall<T = unknown>(
 
   let lastErr: Error | null = null;
   for (let attempt = 0; attempt < 2; attempt++) {
-    const res = await fetch(url, fetchOpts);
+    const res = await fetch(url, { ...fetchOpts, signal: AbortSignal.timeout(TIMEOUTS.integrationApi) });
     if (res.ok) {
       return (await res.json()) as T;
     }

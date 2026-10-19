@@ -113,7 +113,8 @@ describe('★ v3 재료 층 — 이벤트 목록 카드(순수 · AI 0)', () => 
     // ★ 0909(6) 면허 없는 수치("3+1")를 걷어낸 뒤 비어 버린 괄호는 찌꺼기 — 통째로 뺀다(톤28 실측 "오늘핫딜 < > 지성두피")
     expect(headlineFromCard({ title: '오늘핫딜 <3+1> 지성두피 다시마 샴푸바 (탈모 완화 기능 인증)' }, false).headline).toBe('오늘핫딜 지성두피 다시마 샴푸바');
     expect(headlineFromCard({ title: '[1+1] 글로우 크림 (50%) 기획팩' }, false).headline).toBe('글로우 크림 기획팩');
-    expect(productCtaLabel('[대용량] 블랙티 유스 인핸싱 앰플 / 미백 탄력케어')).toBe('블랙티 유스 인핸싱 보기');
+    // ★ 2026-10-19 B-0924-1 — 한도에 딱 맞게 끝나는 낱말(앰플)을 더 이상 버리지 않는다
+    expect(productCtaLabel('[대용량] 블랙티 유스 인핸싱 앰플 / 미백 탄력케어')).toBe('블랙티 유스 인핸싱 앰플 보기');
   });
   it('★ 토니모리 실물 목록 HTML(2026-09-06 캡처 · dm-7EHTaPI 정정) — 기간 없는 기획전은 목록과 같은 첫 경로 조각이면 카드 · 체험단 기간은 첫 범위까지(후기 작성일로 안 늘어남) · 아이콘 앵커 0 · 지난 체험단은 후보에서 제외', () => {
     const html = readFileSync(resolve(__dirname, 'fixtures', 'tonymoly-event-list.html'), 'utf-8');

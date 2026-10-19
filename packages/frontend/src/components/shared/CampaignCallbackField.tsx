@@ -163,7 +163,7 @@ function CallbackListModal({ title, items, onClose }: { title: string; items: Ca
         </div>
 
         <div className="px-5 md:px-6 py-4 flex flex-col sm:flex-row items-center justify-between gap-3">
-          <span className="text-[10px] text-slate-400 italic order-2 sm:order-1">Data source: 통신사 발송 큐·결과(MySQL) 회신번호</span>
+          <span className="text-[10px] text-slate-400 italic order-2 sm:order-1">Data source: 통신사 발송 결과의 회신번호</span>
           <div className="flex items-center gap-1 order-1 sm:order-2">
             <button type="button" disabled={current <= 1} onClick={() => setPage(current - 1)} aria-label="이전 쪽"
               className="w-8 h-8 grid place-items-center rounded-lg text-slate-500 hover:bg-slate-100 disabled:opacity-30 disabled:hover:bg-transparent">

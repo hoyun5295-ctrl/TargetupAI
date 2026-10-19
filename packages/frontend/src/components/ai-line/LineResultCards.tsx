@@ -72,6 +72,8 @@ export default function LineResultCards(p: LineResultCardsProps) {
   const latest = useRef(p);
   latest.current = p;
   const startingRef = useRef(false);
+  // ★ Codex C1 — 서버가 연달아 busy 면 칩 값이 그대로라 effect 가 다시 돌지 않았다(멈춤) → busy 마다 이 값을 올려 다음 재시도를 잡는다
+  const [busyTick, setBusyTick] = useState(0);
   const start = async (t: AiLineType, manual: boolean) => {
     const cur = latest.current;
     const body = cur.bodyAt(t).trim();
@@ -84,11 +86,14 @@ export default function LineResultCards(p: LineResultCardsProps) {
         body: cur.bodyAt(t), subject: cur.subjectAt(t), channel: cur.channel, isAd: cur.isAd, callback: cur.callback,
         sampleCustomerId: audienceOf(cur.run).top?.id ?? null,
       });
+      if (latest.current.run.runId !== cur.run.runId) return;   // 그 사이 다른 진행 = 버린다
+      if (out.state === 'busy') setBusyTick((x) => x + 1);
       cur.onSpamPatch(t, {
         state: out.state, testId: out.state === 'busy' ? prev?.testId : out.testId, fp, message: out.message,
         autoRuns: out.state === 'busy' ? (prev?.autoRuns || 0) : (prev?.autoRuns || 0) + (manual ? 0 : 1),
       });
     } catch (e) {
+      if (latest.current.run.runId !== cur.run.runId) return;
       cur.onSpamPatch(t, { state: 'warn', fp, message: e instanceof Error ? e.message : '검사를 시작하지 못했어요', autoRuns: (prev?.autoRuns || 0) + 1 });
     } finally {
       startingRef.current = false;
@@ -117,19 +122,28 @@ export default function LineResultCards(p: LineResultCardsProps) {
     });
     if (next) void start(next, false);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [spamKey, fpKey, p.callback]);
+  }, [spamKey, fpKey, p.callback, busyTick]);
 
-  // 진행 중 칩 읽기(3초)
+  // 진행 중 칩 읽기(3초) — ★ Codex C1: 카드마다 한 번에 하나만 읽고, 응답은 그때의 진행 · 검사가 지금과 같을 때만 · 지금 칩에 결과 칸만 합친다
+  // 카드마다 지금 읽는 요청의 표(자기 요청이 끝날 때만 지운다 · 늦게 끝난 옛 요청이 새 요청의 잠금을 풀지 않게)
+  const pollingRef = useRef<Map<string, object>>(new Map());
   useEffect(() => {
     const live = types.filter((t) => RUNNING.includes(run.spam[t]?.state as any) && run.spam[t]?.testId);
     if (live.length === 0) return;
     const timer = setInterval(() => {
       for (const t of live) {
         const chip = latest.current.run.spam[t];
-        if (!chip?.testId) continue;
-        void aiLineApi.spamRead(chip.testId, latest.current.channel).then((r) => {
-          latest.current.onSpamPatch(t, { ...chip, state: r.state, carriers: r.carriers, aheadCount: r.aheadCount, elapsedSec: r.elapsedSec });
-        }).catch(() => { /* 다음 읽기에서 다시 */ });
+        if (!chip?.testId || pollingRef.current.has(t)) continue;
+        const runId = latest.current.run.runId;
+        const testId = chip.testId;
+        const mark = {};
+        pollingRef.current.set(t, mark);
+        void aiLineApi.spamRead(testId, latest.current.channel).then((r) => {
+          const cur = latest.current;
+          const now = cur.run.spam[t];
+          if (cur.run.runId !== runId || !now || now.testId !== testId) return;
+          cur.onSpamPatch(t, { ...now, state: r.state, carriers: r.carriers, aheadCount: r.aheadCount, elapsedSec: r.elapsedSec });
+        }).catch(() => { /* 다음 읽기에서 다시(제한 시간 10초) */ }).finally(() => { if (pollingRef.current.get(t) === mark) pollingRef.current.delete(t); });
       }
     }, POLL_MS);
     return () => clearInterval(timer);
@@ -189,7 +203,7 @@ export default function LineResultCards(p: LineResultCardsProps) {
                     <Wand2 className="w-3.5 h-3.5" />칼럼 더 넣기 · {decoCost}크레딧
                   </button>
                 )}
-                <button type="button" onClick={() => p.onEdit(t)} className="h-8 px-2.5 rounded-lg border border-slate-200 inline-flex items-center gap-1 hover:bg-slate-50">
+                <button type="button" onClick={() => p.onEdit(t)} disabled={decoBusy && decoOpen === t} className="h-8 px-2.5 rounded-lg border border-slate-200 inline-flex items-center gap-1 hover:bg-slate-50 disabled:opacity-50">
                   <PencilLine className="w-3.5 h-3.5" />직접 고치기
                 </button>
                 {picked ? (

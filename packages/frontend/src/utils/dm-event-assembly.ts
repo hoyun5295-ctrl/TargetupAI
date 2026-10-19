@@ -26,18 +26,35 @@ export interface ExtractedEvent {
   products?: ExtractedEventProduct[];
 }
 
-/** events[] → DM 섹션 배열. 행사 = 히어로 + 상품 슬라이드(상품 있을 때). */
-export function buildDmSectionsFromEvents(eventsIn: Array<Record<string, any>>): Section[] {
+/** 숫자가 든 글인가 — 숫자 판정 · 빼기의 단일 규칙(확인 창 판정과 조립이 같은 규칙을 쓴다 · F1b) */
+const hasDigit = (v: unknown): boolean => /\p{Nd}/u.test(String(v ?? ''));   // 유니코드 숫자 전부(전각 ５ 포함 · F2)
+
+/** ★ 2026-10-19 B-1017-1① — 사진에서 읽은 숫자(가격 · 할인가 · 할인율 · 숫자가 든 제목 · 부제 · 혜택 · 브랜드 · 상품명)가 있는가(있으면 화면이 쓸지 묻는다) */
+export function eventsHaveNumbers(eventsIn: Array<Record<string, any>>): boolean {
+  return (eventsIn || []).filter(Boolean).some((ev: any) =>
+    [ev?.title, ev?.subtitle, ev?.benefit, ev?.brand].some(hasDigit)
+    || (Array.isArray(ev?.products) ? ev.products : []).some((p: any) => hasDigit(p?.name) || Number(p?.price) > 0 || Number(p?.sale_price) > 0 || Number(p?.discount_rate) > 0));
+}
+
+/**
+ * events[] → DM 섹션 배열. 행사 = 히어로 + 상품 슬라이드(상품 있을 때).
+ * ★ 2026-10-19 B-1017-1① keepNumbers = 사진에서 읽은 숫자도 그대로 쓴다(사람이 고른 때만 · 10-10 H3).
+ *   false(기본) = 가격 · 할인가 · 할인율을 비우고, 숫자가 든 글(제목 · 부제 · 혜택 · 브랜드)은 싣지 않고, 이름에 숫자가 든 상품은 뺀다
+ *   (사진을 잘못 읽은 숫자가 고객에게 나가지 않게 · eventsHaveNumbers 와 같은 hasDigit).
+ */
+export function buildDmSectionsFromEvents(eventsIn: Array<Record<string, any>>, opts: { keepNumbers?: boolean } = {}): Section[] {
+  const keepNumbers = opts.keepNumbers === true;
   const events = (eventsIn || []).filter(Boolean) as ExtractedEvent[];
   const sections: Section[] = [];
   let order = 0;
 
   for (const ev of events) {
-    const title = String(ev.title || '').trim();
-    const subtitle = String(ev.subtitle || '').trim();
-    const benefit = String(ev.benefit || '').trim();
-    const brand = String(ev.brand || '').trim();
-    const products = (Array.isArray(ev.products) ? ev.products : []).filter((p) => p && String(p.name || '').trim());
+    const text = (v: unknown) => { const t = String(v || '').trim(); return keepNumbers || !hasDigit(t) ? t : ''; };
+    const title = text(ev.title);
+    const subtitle = text(ev.subtitle);
+    const benefit = text(ev.benefit);
+    const brand = text(ev.brand);
+    const products = (Array.isArray(ev.products) ? ev.products : []).filter((p) => p && text(p.name));
 
     // 히어로 — 행사 제목·부제·혜택 verbatim (제목 없으면 브랜드명으로)
     if (title || subtitle || benefit || brand) {
@@ -58,9 +75,9 @@ export function buildDmSectionsFromEvents(eventsIn: Array<Record<string, any>>):
           id: `ev-${order}-${i}`,
           image_url: '',
           name: String(p.name).trim(),
-          price: Number(p.price) > 0 ? Number(p.price) : (Number(p.sale_price) > 0 ? Number(p.sale_price) : 0),
-          discount_price: Number(p.sale_price) > 0 && Number(p.price) > 0 ? Number(p.sale_price) : undefined,
-          discount_rate: Number(p.discount_rate) > 0 ? Number(p.discount_rate) : undefined,
+          price: !keepNumbers ? 0 : Number(p.price) > 0 ? Number(p.price) : (Number(p.sale_price) > 0 ? Number(p.sale_price) : 0),
+          discount_price: keepNumbers && Number(p.sale_price) > 0 && Number(p.price) > 0 ? Number(p.sale_price) : undefined,
+          discount_rate: keepNumbers && Number(p.discount_rate) > 0 ? Number(p.discount_rate) : undefined,
         })),
       }));
     }
@@ -68,10 +85,11 @@ export function buildDmSectionsFromEvents(eventsIn: Array<Record<string, any>>):
   return sections;
 }
 
-/** DM 제목 파생 — 첫 행사 제목(없으면 브랜드) 기준. */
-export function deriveDmTitleFromEvents(eventsIn: Array<Record<string, any>>): string {
-  const first = (eventsIn || []).find((e) => e && (e.title || e.brand)) as ExtractedEvent | undefined;
-  return String(first?.title || first?.brand || '행사 캠페인').trim().slice(0, 30) || '행사 캠페인';
+/** DM 제목 파생 — 첫 행사 제목(없으면 브랜드) 기준. keepNumbers 가 아니면 숫자가 든 글은 건너뛴다(조립과 같은 규칙). */
+export function deriveDmTitleFromEvents(eventsIn: Array<Record<string, any>>, opts: { keepNumbers?: boolean } = {}): string {
+  const ok = (v: unknown) => !!String(v || '').trim() && (opts.keepNumbers === true || !hasDigit(v));
+  const pick = (eventsIn || []).filter(Boolean).flatMap((e: any) => [e.title, e.brand]).find(ok);
+  return String(pick || '행사 캠페인').trim().slice(0, 30) || '행사 캠페인';
 }
 
 /** 요약(토스트용) — 행사 N건·상품 M개. */

@@ -329,20 +329,23 @@ export function SlideshowSection({ props }: { props: SlideshowProps }) {
             <div style={{ width: '100%', aspectRatio: ratio === 'original' ? '16/9' : ratio === '1:1' ? '1/1' : ratio === '3:4' ? '3/4' : '16/9', background: 'var(--dm-neutral-100)', borderRadius: 8 }} />
           )}
           {cur?.caption && <div style={{ fontSize: 13, color: 'var(--dm-neutral-700)', marginTop: 8 }}>{cur.caption}</div>}
-          <div style={{ display: 'flex', justifyContent: 'center', gap: 6, marginTop: 10 }}>
-            {slides.map((_, i) => (
-              <button
-                key={i}
-                onClick={() => setIdx(i)}
-                style={{
-                  width: 8, height: 8, borderRadius: '50%',
-                  background: i === idx ? 'var(--dm-primary)' : 'var(--dm-neutral-300)',
-                  border: 'none', cursor: 'pointer',
-                }}
-                aria-label={`슬라이드 ${i + 1}`}
-              />
-            ))}
-          </div>
+          {/* ★ 2026-10-19 B-1014-3⑦ 점 = 발행 renderSlideshow 와 같은 조건(show_indicator 켬 · 2장 이상) · 옛: 늘 그려 끈 값이 미리보기에 안 보였다 */}
+          {props.show_indicator !== false && slides.length > 1 && (
+            <div style={{ display: 'flex', justifyContent: 'center', gap: 6, marginTop: 10 }}>
+              {slides.map((_, i) => (
+                <button
+                  key={i}
+                  onClick={() => setIdx(i)}
+                  style={{
+                    width: 8, height: 8, borderRadius: '50%',
+                    background: i === idx ? 'var(--dm-primary)' : 'var(--dm-neutral-300)',
+                    border: 'none', cursor: 'pointer',
+                  }}
+                  aria-label={`슬라이드 ${i + 1}`}
+                />
+              ))}
+            </div>
+          )}
         </>
       )}
     </div>
@@ -456,9 +459,8 @@ export function PollSection({ props }: { props: PollProps }) {
         {props.allow_multiple && (
           <button className="dm-cta dm-cta-primary" style={{ width: '100%', marginTop: 'var(--dm-sp-3)' }}>투표하기</button>
         )}
-        {props.one_vote_per_user && (
-          <div style={{ fontSize: 11, color: 'var(--dm-neutral-500)', marginTop: 8 }}>1인 1회 투표{props.allow_multiple ? ' · 복수 선택 가능' : ''}</div>
-        )}
+        {/* ★ 2026-10-19 B-1014-3⑥ 1인 1회 = 서버가 늘 지킨다 → 안내도 늘(발행 renderPoll 미러) */}
+        <div style={{ fontSize: 11, color: 'var(--dm-neutral-500)', marginTop: 8 }}>1인 1회 투표{props.allow_multiple ? ' · 복수 선택 가능' : ''}</div>
       </DmEventCard>
     </div>
   );
@@ -641,9 +643,7 @@ export function RouletteSection({ props }: { props: RouletteProps }) {
           }}
         />
         <button style={DM_CTA_STYLE}>룰렛 돌리기</button>
-        {props.one_spin_per_user && (
-          <div style={{ fontSize: 'var(--dm-fs-tiny)', color: 'var(--dm-neutral-500)', marginTop: 'var(--dm-sp-2)' }}>1인 1회 한정</div>
-        )}
+        <div style={{ fontSize: 'var(--dm-fs-tiny)', color: 'var(--dm-neutral-500)', marginTop: 'var(--dm-sp-2)' }}>1인 1회 한정</div>
         {/* ★ 2026-07-22 (임은지) 당첨 경품(prize_count>0)만 발행 SSR과 동일 필터로 노출(전 세그먼트 나열 아님). 휠엔 라벨이 없어 경품 안내 역할. */}
         {segments.filter((s) => Number(s.prize_count) > 0).length > 0 && (
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, justifyContent: 'center', marginTop: 'var(--dm-sp-3)' }}>

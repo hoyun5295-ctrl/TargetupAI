@@ -131,9 +131,14 @@ export default function UploadProgressModal({
           )}
         </div>
 
-        {(done || failed) && (
+        {(done || failed) ? (
           <div className={CUI_MODAL_FOOT}>
             <button type="button" onClick={onClose} className={CUI_BTN_PRIMARY}>확인</button>
+          </div>
+        ) : (
+          // ★ 2026-10-19 B-1010-11 — 안내 문구대로 진행 중에도 닫을 수 있다(처리는 서버에서 계속 · 끝나면 화면 위 알림)
+          <div className={CUI_MODAL_FOOT}>
+            <button type="button" onClick={onClose} className={CUI_BTN_PRIMARY}>닫기 · 처리는 계속돼요</button>
           </div>
         )}
       </div>

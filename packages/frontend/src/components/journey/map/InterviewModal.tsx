@@ -160,7 +160,8 @@ export default function InterviewModal({ open, onClose, onFix, onFocusJourney, o
           body: JSON.stringify({ interviewId, plan: p, answers: planAnswers, callbackNumber: callbackPhone || undefined }),
         });
         const d = await res.json().catch(() => ({}));
-        if (res.ok && d?.success) {
+        // ★ 2026-10-19 B-1010-12 — 이미 만든 초안(같은 요청)이면 서버가 그 id 를 실어 준다 = 만든 것으로 보고 연다
+        if ((res.ok && d?.success) || (!res.ok && d?.journeyId)) {
           done.push(String(d.journeyId));
           setProgress((prev) => prev.map((x) => (x.planKey === p.key ? { ...x, status: 'ok', journeyId: String(d.journeyId), title: String(d.name || x.title) } : x)));
         } else {

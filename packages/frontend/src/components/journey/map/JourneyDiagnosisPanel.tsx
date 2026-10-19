@@ -119,6 +119,8 @@ export default function JourneyDiagnosisPanel({ open, onDrafted, onBusyChange }:
         setProgress(`${p.title} 초안을 만드는 중`);
         const r = await call('/api/ai/operator/journeys-reco/design', { triggerEvent: p.triggerEvent, shownDays: p.daysFromStart });
         if (r.ok && r.d.journeyId) { made.push(String(r.d.journeyId)); if (r.d.recalculated) changed = true; continue; }
+        // ★ 2026-10-19 B-1010-12 — 이미 만든 초안(같은 요청) = 그 초안을 연다(문구만 띄우고 길이 없던 것)
+        if (!r.ok && r.d?.journeyId) { made.push(String(r.d.journeyId)); continue; }
         failed.push(`${p.title}: ${r.lost ? '연결이 끊겨 결과를 확인하지 못했어요(다시 누르면 같은 요청으로 확인합니다)' : r.d?.error || '만들지 못했어요'}`);
         if (r.lost || r.d?.code === 'INSUFFICIENT_CREDIT') { stop = true; break; }
       }
@@ -126,6 +128,7 @@ export default function JourneyDiagnosisPanel({ open, onDrafted, onBusyChange }:
         setProgress(`${pr.name} 다시 채우기 초안을 만드는 중`);
         const r = await call('/api/ai/operator/journeys-product/create', { requestId: await productRequestId(pr.key, pr.medianDays), keys: [pr.key], periodDays: pr.medianDays });
         if (r.ok && r.d.journeyId) { made.push(String(r.d.journeyId)); continue; }
+        if (!r.ok && r.d?.journeyId) { made.push(String(r.d.journeyId)); continue; }   // ★ 1019 B-1010-12 이미 만든 초안
         failed.push(`${pr.name}: ${r.lost ? '연결이 끊겨 결과를 확인하지 못했어요(다시 누르면 같은 요청으로 확인합니다)' : r.d?.error || '만들지 못했어요'}`);
         if (r.lost || r.d?.code === 'INSUFFICIENT_CREDIT') break;
       }

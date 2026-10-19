@@ -27,6 +27,7 @@
 
 // ★ 2026-09-27 한줄로 V2 R197 — 운영자 일·월 예산 창 = KST(옛 CURRENT_DATE·date_trunc는 UTC 세션 기준)
 import { isDemoCompany } from './demo-company';   // ★ 2026-10-09 시연 회사 = 발송 엔진 앞 절단
+import { aiOperatorAllowedForWorker } from './plan-guard';
 import { KST_TODAY_START_SQL, KST_MONTH_START_SQL } from './stats-aggregation';
 import { query, pool } from '../config/database';
 import { orchestrate, type AgentContext } from '../services/ai-orchestrator';
@@ -1914,7 +1915,7 @@ async function runProposalSpamRetest(a: {
 /** 기본 발신번호(발송 dispatchProposalSend 와 같은 조건 = is_default) · 없으면 '' — 스팸 검사가 실제 발송 번호로 검사하게 */
 async function loadDefaultCallback(companyId: string): Promise<string> {
   const r = await query(
-    `SELECT REPLACE(phone, '-', '') AS phone FROM callback_numbers WHERE company_id = $1 AND is_default = true LIMIT 1`,
+    `SELECT regexp_replace(phone, '[^0-9]', '', 'g') AS phone FROM callback_numbers WHERE company_id = $1 AND is_default = true LIMIT 1`,
     [companyId],
   );
   return String(r.rows[0]?.phone || '');
@@ -2611,6 +2612,13 @@ async function dispatchProposalSend(
       );
       await notify('[AI 자동마케팅] 발송 보류', `'${op.name || ''}' 문안에 혜택이 입력되지 않아 발송을 보류했습니다. 한줄로 > 자동마케팅에서 혜택 입력 후 승인해 주세요.`);
       return { action: 'skipped', reason: '혜택 미입력. 발송 보류' };
+    }
+
+    // ★ 2026-10-19 B-1004-2① — 요금제가 잠기면(FREE · 구독 만료) 발송을 보류한다(켜는 입구와 같은 판정 · 옛: 실행 때 다시 보지 않아 계속 나갔다)
+    if (!demo && !(await aiOperatorAllowedForWorker(companyId, op.created_by || null))) {
+      await query(`UPDATE operator_proposals SET status = 'admin_review', scheduled_send_at = NULL, auto_execute_reason = '요금제 잠김. 발송 보류' WHERE id = $1::uuid`, [proposalId]);
+      await notify('[AI 자동마케팅] 발송 보류', `'${op.name || ''}' 요금제가 잠겨 발송을 보류했습니다. 요금제를 다시 이용하시면 승인해 진행할 수 있어요.`);
+      return { action: 'skipped', reason: '요금제 잠김' };
     }
 
     // 광고 가드 — 광고면 무료거부 번호(080) 해석 결과 필수(정보통신망법). 없으면 발송 보류(담당자 검토).

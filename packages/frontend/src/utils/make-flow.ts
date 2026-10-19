@@ -7,7 +7,7 @@
  * ⛔ 모델명 0 · 줄표 0 · 내부 코드명 0(사용자 노출 문구).
  */
 import { DM_BLOCKS, blockOfSection } from './dm-blocks';
-import { SECTION_META, type Section, type SectionType } from './dm-section-defaults';
+import { SECTION_META, PARTICIPATION_TYPES, type Section, type SectionType } from './dm-section-defaults';
 
 // ─────────────── 결과 화면 주소 ───────────────
 
@@ -81,7 +81,8 @@ export interface MakePaletteItem {
 }
 
 /** 참여형 = 발행 120(서버 isInteractionCampaign 과 같은 목록) */
-export const INTERACTION_SECTION_TYPES: readonly SectionType[] = ['lucky_draw', 'roulette', 'poll', 'survey', 'email_capture', 'click_rewards'];
+// ★ 2026-10-19 B-1014-3⑤ 참여형(발행비 · 팔레트 묶음 · 안내) = 참여 8종 하나(서버 dm-interaction 판정과 같은 목록 · 옛 손 목록 6종은 즉시쿠폰 · 선착순을 뺐다)
+export const INTERACTION_SECTION_TYPES: readonly SectionType[] = PARTICIPATION_TYPES;
 
 const blockItem = (key: string, label?: string): MakePaletteItem | null => {
   const b = DM_BLOCKS.find((x) => x.key === key);
@@ -119,6 +120,8 @@ export function emailPaletteItems(): MakePaletteItem[] {
 export interface ValidationLike {
   items?: Array<{ area: string; severity: 'fatal' | 'recommend' | 'improve'; section_id?: string; message: string; fix_suggestion?: string; overridable?: boolean }>;
   can_publish?: boolean;
+  /** ★ 2026-10-19 B-1005-1③ — 첫 발행 관문의 앞 두 칸(링크 결함 · 채울 자리 · 서버 /validate 가 싣는다) */
+  publish_static_block?: { code: string; error: string } | null;
 }
 
 export type FixKind = 'must' | 'suggest' | 'ok' | 'info';
@@ -170,6 +173,15 @@ export function fixItemsOf(v: ValidationLike | null, sections: ReadonlyArray<Pic
       continue;
     }
     must.push({ kind: 'must', title: it.message, sub: it.fix_suggestion, sectionId: it.section_id, action: '고치기' });
+  }
+  // ★ 2026-10-19 B-1005-1③ — 관문이 막는 것(링크 결함 · 채울 자리)을 「보내기 전에 N곳」에 같이 센다.
+  //   옛: 서버 검수만 세어 검수 0곳 · 관문 막힘이면 「보낼 수 있어요」인데 보내기가 거절됐다. 같은 갈래가 이미 세어졌으면 겹쳐 세지 않는다.
+  const gate = v?.publish_static_block;
+  if (gate && gate.error) {
+    const linkCounted = gate.code === 'LINK_DEFECT' && items.some((it) => it.severity === 'fatal' && it.overridable !== true && it.area === 'link');
+    if (!linkCounted && !must.some((m) => m.title === gate.error)) {
+      must.push({ kind: 'must', title: gate.error, sub: '[자세히 편집]에서 고친 뒤 보낼 수 있어요' });
+    }
   }
   const suggest: FixItem[] = items.filter((it) => it.severity === 'recommend').slice(0, 3)
     .map((it) => ({ kind: 'suggest' as const, title: it.message, sub: it.fix_suggestion, sectionId: it.section_id, action: it.section_id ? '고치기' : undefined }));

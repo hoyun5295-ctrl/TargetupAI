@@ -21,7 +21,7 @@ import { renderSection } from '../dm-section-renderer';
 import { TREATMENTS } from '../dm-art-direction';
 import {
   DM_PROP_EXEMPT, DM_SERVER_RULE_NAME, DM_SERVER_RULES_PENDING, DM_SERVER_RULES_PENDING_MAX,
-  DM_PROP_UNREVIEWED, DM_PROP_UNREVIEWED_MAX, DM_PROBE_CONTEXT,
+  DM_PROP_UNREVIEWED, DM_PROP_UNREVIEWED_MAX, DM_PROBE_CONTEXT, DM_TREATMENT_HIDDEN,
 } from '../dm-property-contract';
 import { renderEmailSections } from '../../email/email-section-renderer';
 import { EMAIL_BLOCK_WHITELIST, EMAIL_TREATMENTS } from '../../email/email-blocks';
@@ -86,14 +86,16 @@ for (const type of PARTICIPATION_TYPES) {
 }
 
 const TOTAL_KEYS = Object.values(KEYS).reduce((a, k) => a + countEditorKeys(k), 0);
-/** 첫 실측값(2026-10-14) = 206(편집기 27개 198 + 공용 완료 문구 칸 × 참여 8종). 줄면 추출기가 키를 흘리기 시작한 것 — 하한. */
-const TOTAL_KEYS_FLOOR = 206;
+/** 첫 실측값(2026-10-14) = 206(편집기 27개 198 + 공용 완료 문구 칸 × 참여 8종). 줄면 추출기가 키를 흘리기 시작한 것 — 하한.
+ *  ★ 2026-10-19 = 202 — 죽은 컨트롤 4개 제거(투표 · 룰렛 1인 1회 토글 · 지도 위도 · 경도 · 원장 kind=removed 행). 의도한 제거만 하한을 내린다. */
+const TOTAL_KEYS_FLOOR = 202;
 
 // ── 탐침 ──
 type Probe = { value: unknown; kind: 'bool' | 'num' | 'color' | 'url' | 'enum' | 'text' };
 function probesOf(type: string, prop: string, cur: unknown, editorDefault?: unknown): Probe[] | null {
   const e = DM_PROBE_CONTEXT.enums[`${type}.${prop}`];
-  if (e !== undefined) return [{ value: e, kind: 'enum' }];
+  // ★ 2026-10-19 추가 탐침 값(alts) — 열거 값 하나가 어떤 구도의 기본값과 겹쳐도 다른 값이 출력을 바꾸면 읽힘(G1)
+  if (e !== undefined) return [e, ...(DM_PROBE_CONTEXT.alts[`${type}.${prop}`] || [])].map((value) => ({ value, kind: 'enum' as const }));
   const leaf = prop.replace(/^.*\./, '');
   if (typeof cur === 'boolean') return [{ value: !cur, kind: 'bool' }];
   // 편집기가 `props.X ?? true/false`로 보여 주면 X는 boolean — 미지정이면 양쪽 다 시도
@@ -403,5 +405,34 @@ describe('DM 편집기 소스 게이트(접수 ①·⑧ 1단계)', () => {
     const mine = blocks.filter((b) => LABELS.some((l) => b.includes(`'${l}'`)));
     expect(mine.length, '발행본 확인창이 모자란다 — 라벨이 바뀌었으면 LABELS를 맞춘다').toBeGreaterThanOrEqual(LABELS.length);
     for (const b of mine) expect(/\bapi\.(post|put|patch|delete)\(|\bfetch\(/.test(b), `확인창 처리기에 저장 밖 쓰기: ${b.slice(0, 160)}`).toBe(false);
+  });
+});
+
+describe('DM 커버리지 — 구도가 안 읽는 값 = 편집기도 감춘다(B-1014-3⑦)', () => {
+  const surfaceTreatments = (surface: 'ssr' | 'email', type: string): readonly string[] =>
+    surface === 'email' ? (EMAIL_TREATMENTS[type] || ['classic']) : treatmentsOf(type);
+  it('화면 미러(constants/dm-treatment-hidden-fields.ts)가 원장 DM_TREATMENT_HIDDEN 과 값까지 같다(그 면의 구도 전부 · 빈 목록 포함)', () => {
+    const want: Record<string, Record<string, Record<string, string[]>>> = { ssr: {}, email: {} };
+    for (const g of DM_TREATMENT_HIDDEN) {
+      const byT = (want[g.surface][g.section] ||= Object.fromEntries(surfaceTreatments(g.surface, g.section).map((t) => [t, [] as string[]])));
+      expect(byT[g.treatment], `${g.surface}:${g.section}@${g.treatment} 은 그 면의 구도가 아니다`).toBeTruthy();
+      byT[g.treatment].push(...g.props);
+    }
+    const sortAll = (o: unknown) => JSON.parse(JSON.stringify(o), (_k, v) => (Array.isArray(v) ? [...v].sort() : v));
+    const src = read(resolve(FE_ROOT, 'constants/dm-treatment-hidden-fields.ts'));
+    const a = src.indexOf('/* JSON:BEGIN */');
+    const b = src.indexOf('/* JSON:END */');
+    expect(a > 0 && b > a, '미러에 JSON 표식이 없다').toBe(true);
+    expect(sortAll(JSON.parse(src.slice(a + '/* JSON:BEGIN */'.length, b)))).toEqual(sortAll(want));
+  });
+  it('편집기가 감출 필드마다 hidden 분기를 갖고 · 공용 패널이 표를 적용하고 · 이메일 입구가 면을 넘긴다', () => {
+    for (const g of DM_TREATMENT_HIDDEN) {
+      const src = read(resolve(EDITOR_DIR, EDITOR_FILE[g.section]));
+      for (const prop of g.props) expect(src, `${EDITOR_FILE[g.section]} 가 ${prop} 를 감추지 않는다`).toContain(`hidden?.('${prop}')`);
+    }
+    expect(propsEditorSrc).toContain("treatmentHiddenFieldsFor(surface || 'ssr', section.type, section.treatment)");
+    for (const f of ['components/email/EmailVisualEditor.tsx', 'components/make/EmailEditScreen.tsx']) {
+      expect(read(resolve(FE_ROOT, f)), `${f} 가 이메일 면을 넘기지 않는다`).toMatch(/<SectionPropsEditor[^>]*surface="email"/);
+    }
   });
 });

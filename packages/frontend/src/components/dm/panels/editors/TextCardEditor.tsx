@@ -53,19 +53,24 @@ export default function TextCardEditor({ props, onUpdate, hidden }: EditorProps<
         <ColorOverride value={props.body_color} onChange={(v) => onUpdate({ body_color: v })} />
       </Field>
 
-      <Field label="본문 크기">
-        <Select
-          value={props.body_size ? String(props.body_size) : ''}
-          onChange={(v) => onUpdate({ body_size: v ? Number(v) : undefined })}
-          options={DM_FONT_SIZE_OPTIONS}
-        />
-      </Field>
+      {/* ★ 2026-10-19 B-1014-3⑦ 지금 구도가 안 읽는 칸은 감춘다(공용 패널 hidden · 원장 DM_TREATMENT_HIDDEN) */}
+      {!hidden?.('body_size') && (
+        <Field label="본문 크기">
+          <Select
+            value={props.body_size ? String(props.body_size) : ''}
+            onChange={(v) => onUpdate({ body_size: v ? Number(v) : undefined })}
+            options={DM_FONT_SIZE_OPTIONS}
+          />
+        </Field>
+      )}
 
-      <Field label="이미지 (선택)">
-        <ImageUploader value={props.image_url} onChange={(url) => onUpdate({ image_url: url })} />
-      </Field>
+      {!hidden?.('image_url') && (
+        <Field label="이미지 (선택)">
+          <ImageUploader value={props.image_url} onChange={(url) => onUpdate({ image_url: url })} />
+        </Field>
+      )}
 
-      {props.image_url && (
+      {props.image_url && !hidden?.('image_position') && (
         <Field label="이미지 위치">
           <Select
             value={props.image_position || 'top'}

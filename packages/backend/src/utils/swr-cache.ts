@@ -174,3 +174,22 @@ function scheduleRefresh<T>(
     })
     .finally(() => inFlightRefresh.delete(key));
 }
+
+/**
+ * ★ 2026-10-19 B-1010-10 — 접두어로 시작하는 캐시를 지우고(SCAN · 블로킹 KEYS 금지) 세대를 올린다.
+ * 세대를 함께 올리면 지우는 순간 계산 중이던 값이 저장되지 않는다(swrCacheWithAt generationKey 가드 · 옛 값 부활 차단).
+ * 실패 = hard TTL 이 상한(fire-and-forget).
+ */
+export function invalidateSwrPrefix(prefix: string, generationKey?: string): void {
+  if (generationKey) redis.incr(generationKey).catch(() => { /* hard TTL 상한 */ });
+  const stream = redis.scanStream({ match: `${prefix}*`, count: 200 });
+  stream.on('data', (keys: string[]) => {
+    if (keys.length > 0) redis.del(...keys).catch(() => { /* hard TTL 상한 */ });
+  });
+  stream.on('error', () => { /* hard TTL 상한 */ });
+}
+
+/** 대시보드 카드 캐시 세대 키(회사별) */
+export function dashboardCardsGenKey(companyId: string): string {
+  return `dashboard-cards-gen:${companyId}`;
+}

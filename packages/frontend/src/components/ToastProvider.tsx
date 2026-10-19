@@ -17,7 +17,7 @@
  * ★ 옛 Toast.tsx 영역 = 단일 인스턴스 + 옛 호출처 영역 영향 0건 (legacy 호환)
  */
 
-import { createContext, useContext, useState, useCallback, useEffect, useMemo, ReactNode } from 'react';
+import { createContext, useContext, useState, useCallback, useEffect, useMemo, useRef, ReactNode } from 'react';
 import { CheckCircle2, AlertCircle, Info, AlertTriangle, X } from 'lucide-react';
 import { CONFIRM_CREDIT_COSTS, CREDIT_SOURCE_LABELS } from '../constants/credit';
 
@@ -99,11 +99,15 @@ function ToastBox({ item, onClose }: { item: ToastItem; onClose: () => void }) {
   const config = TYPE_CONFIG[item.type];
   const Icon = config.icon;
 
+  // ★ 2026-10-19 B-1010-8 — 닫기 함수는 렌더마다 새로 오므로 ref 로 읽고, 타이머는 토스트 하나당 한 번만 건다
+  //   (옛 의존성 onClose = 새 토스트가 붙을 때마다 기존 토스트 타이머가 처음부터 다시 돌았다)
+  const closeRef = useRef(onClose);
+  closeRef.current = onClose;
   useEffect(() => {
     if (item.duration <= 0) return;
-    const timer = setTimeout(onClose, item.duration);
+    const timer = setTimeout(() => closeRef.current(), item.duration);
     return () => clearTimeout(timer);
-  }, [item.duration, onClose]);
+  }, [item.id, item.duration]);
 
   return (
     // ★ 2026-10-10 대시보드 모션 F — 오른쪽에서 한 번 미끄러져 들어온다(나가기 없음). 움직임 줄이기 = 그냥 나타남

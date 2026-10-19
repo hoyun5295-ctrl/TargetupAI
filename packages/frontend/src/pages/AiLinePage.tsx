@@ -347,12 +347,23 @@ export default function AiLinePage() {
   /** runId 가 같을 때만 고친다(늦게 온 옛 응답이 새 진행을 덮지 않게) */
   const patchLineRun = (runId: string, fn: (r: AiLineRun) => AiLineRun) => {
     setLineRunState((prev) => {
-      if (!prev || prev.runId !== runId) return prev;
+      // ★ Codex C1 high — 늦게 온 응답은 같은 진행 · 같은 계정일 때만(계정이 바뀌었으면 버린다)
+      if (!prev || prev.runId !== runId || prev.owner !== aiLineOwner()) return prev;
       const next = fn(prev);
       saveAiLineRun(next);
       return next;
     });
   };
+  // ★ Codex C1 high — 다른 탭에서 계정이 바뀌면 이 탭을 새로 읽는다(앞 계정의 진행 · 문안 · 대상이 새 계정 요청으로 이어지지 않게)
+  useEffect(() => {
+    const owner0 = aiLineOwner();
+    const onStorage = (e: StorageEvent) => {
+      if (e.key !== null && e.key !== 'user' && e.key !== 'token') return;
+      if (aiLineOwner() !== owner0) window.location.reload();
+    };
+    window.addEventListener('storage', onStorage);
+    return () => window.removeEventListener('storage', onStorage);
+  }, []);
   useEffect(() => {
     let alive = true;
     void fetchAiOperatorFeatures().then((f) => { if (alive) setFeatureFlags(f); });
@@ -376,15 +387,14 @@ export default function AiLinePage() {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   // ★ D174 (2026-05-19): PerformancePage가 sessionStorage에 저장한 prefill objective 자동 로드
   // ★ 2026-07-08 행사 캠페인은 "원클릭 캠페인" 타일(/quick-campaign)로 이전 — 여기선 입력창 이미지 버튼만.
-  const [objective, setObjective] = useState(() => {
+  // ★ Codex C1 — 넘겨받은 목표가 있으면 새 작업이다(아래 복원 effect 가 이전 결과로 덮지 않게 같은 값을 본다)
+  const [initialPrefill] = useState(() => {
     if (typeof window === 'undefined') return '';
     const prefill = sessionStorage.getItem('ai_operator_prefill_objective');
-    if (prefill) {
-      sessionStorage.removeItem('ai_operator_prefill_objective');
-      return prefill;
-    }
-    return '';
+    if (prefill) sessionStorage.removeItem('ai_operator_prefill_objective');
+    return prefill || '';
   });
+  const [objective, setObjective] = useState(initialPrefill);
   const [loading, setLoading] = useState(false);
   const [progressStep, setProgressStep] = useState(0);
   const [proposal, setProposal] = useState<ProposalResponse | null>(null);
@@ -402,6 +412,8 @@ export default function AiLinePage() {
   // ★ 2026-07-10 (임은지 리포트): LMS/MMS 제목 확인·수정 — 변형별 제목 편집 오버라이드 (화면 표시 = 발송 값)
   const [subjectOverrides, setSubjectOverrides] = useState<Record<number, string>>({});
   const [editingBody, setEditingBody] = useState(false); // ★ 2026-06-19: 생성 문안 직접 편집(타이핑) 모드
+  /** ★ 2026-10-19 칼럼 더 넣기 중인 카드(그 사이 직접 편집 잠금) */
+  const [decoratingIdx, setDecoratingIdx] = useState<number | null>(null);
   const [copiedAt, setCopiedAt] = useState<number | null>(null);
   // ★ D166: 승인 → 발송 흐름 (preview-recipients + /direct-send 2-step)
   const [sending, setSending] = useState(false);
@@ -1103,12 +1115,18 @@ export default function AiLinePage() {
   }, [lineResultActive, refinedOverrides, subjectOverrides, selectedVariantIdx]);
   // ★ 2026-10-18 다시 들어오면(새로 고침 · 뒤로) 만든 결과를 그대로 다시 그린다(낸 결과 보존)
   useEffect(() => {
+    if (initialPrefill) { setLineRun(null); return; }   // 새 목표로 들어옴 = 이전 진행 버림
     if (!lineRun || lineRun.cards.length === 0 || proposal) return;
     setObjective(lineRun.line);
     applyLineResult(lineRun);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
   const lineIdx = (t: AiLineType) => (lineRun ? lineRun.cards.findIndex((c) => c.type === t) : -1);
+  // 늦은 응답이 「지금」과 대조할 값(칼럼 더 넣기)
+  const lineRunRef = useRef(lineRun);
+  lineRunRef.current = lineRun;
+  const refinedOverridesRef = useRef(refinedOverrides);
+  refinedOverridesRef.current = refinedOverrides;
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
@@ -1154,9 +1172,11 @@ export default function AiLinePage() {
           onComposed={(next) => { setLineRun(next); setIntakeOpen(false); applyLineResult(next); }}
           onProceedDirect={(next) => { setLineRun(next); setIntakeOpen(false); applyLineResult(next); }}
           onProceedAlimtalk={(next, templateId) => {
+            // 계정이 다른 응답 = 저장소는 건드리지 않고(지금 계정의 진행을 지우지 않게) 화면 상태만 비운다 · Codex C2
+            if (next.owner !== aiLineOwner()) { setIntakeOpen(false); setLineRunState(null); return; }
             // 알림톡 = 지금 알림톡 발송 창(대시보드)으로 대상 조건 · 고른 템플릿을 넘긴다(대체 문자 · 예약 · 분할은 그 창)
             try {
-              sessionStorage.setItem(AI_LINE_ALIMTALK_HANDOFF, JSON.stringify({ filters: activeFilters(next), allCustomers: allCustomersFlag(next), templateId, at: Date.now(), owner: aiLineOwner() }));
+              sessionStorage.setItem(AI_LINE_ALIMTALK_HANDOFF, JSON.stringify({ filters: activeFilters(next), allCustomers: allCustomersFlag(next), templateId, at: Date.now(), owner: next.owner }));
             } catch { /* 넘기기 실패 = 대시보드 알림톡 창에서 직접 고른다 */ }
             setIntakeOpen(false);
             setLineRun(null);
@@ -1478,19 +1498,30 @@ export default function AiLinePage() {
                 callback={spamCallback}
                 columns={audienceOf(lineRun).columns}
                 onPick={(t) => { const i = lineIdx(t); if (i >= 0) setSelectedVariantIdx(i); }}
-                onEdit={(t) => { const i = lineIdx(t); if (i >= 0) { setSelectedVariantIdx(i); setEditingBody(true); } }}
+                onEdit={(t) => { const i = lineIdx(t); if (i >= 0 && decoratingIdx !== i) { setSelectedVariantIdx(i); setEditingBody(true); } }}
                 onDecorate={async (t, vars) => {
                   const i = lineIdx(t);
                   if (i < 0) return;
-                  const out = await aiLineApi.decorate({
-                    body: refinedOverrides[i] || lineRun.cards[i].body, vars,
-                    channel: effectiveChannel as AiLineChannel, isAd: adEnabled, attemptToken: lineRun.attemptToken,
-                  });
-                  if (out.changed) {
-                    setRefinedOverrides((prev) => ({ ...prev, [i]: out.body }));
-                    setAiRefinedIdx((prev) => ({ ...prev, [i]: true }));
+                  // ★ Codex C1 — 요청 당시 진행 · 글을 잡아 두고, 응답 때 지금과 같을 때만 반영(늦은 응답이 고친 글을 덮지 않게)
+                  const runId = lineRun.runId;
+                  const reqBody = refinedOverrides[i] || lineRun.cards[i].body;
+                  setDecoratingIdx(i);
+                  try {
+                    const out = await aiLineApi.decorate({
+                      body: reqBody, vars,
+                      channel: effectiveChannel as AiLineChannel, isAd: adEnabled, attemptToken: lineRun.attemptToken,
+                    });
+                    setCreditRefresh((x) => x + 1);
+                    if (out.changed) {
+                      const cur = lineRunRef.current;
+                      const curBody = refinedOverridesRef.current[i] || cur?.cards[i]?.body || '';
+                      if (!cur || cur.runId !== runId || curBody !== reqBody) throw new Error('그 사이 문안이 바뀌어 칼럼 넣기 결과를 쓰지 않았어요. 다시 넣어 주세요.');
+                      setRefinedOverrides((prev) => ({ ...prev, [i]: out.body }));
+                      setAiRefinedIdx((prev) => ({ ...prev, [i]: true }));
+                    }
+                  } finally {
+                    setDecoratingIdx(null);
                   }
-                  setCreditRefresh((x) => x + 1);
                 }}
                 onSpamPatch={(t, chip) => patchLineRun(lineRun.runId, (cur) => ({ ...cur, spam: { ...cur.spam, [t]: chip } }))}
               />
@@ -1701,6 +1732,7 @@ export default function AiLinePage() {
                           <button
                             type="button"
                             onClick={() => setEditingBody(true)}
+                            disabled={decoratingIdx === safeIdx}
                             className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border bg-white text-slate-600 border-slate-200 hover:bg-slate-100 hover:text-slate-900 transition-all"
                           >
                             <Pencil className="w-3.5 h-3.5" />

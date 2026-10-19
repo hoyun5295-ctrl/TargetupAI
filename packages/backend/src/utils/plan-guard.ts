@@ -336,6 +336,8 @@ export function isAiOperatorAllowed(
 
   // 3. 종량제 전환(Phase 3): 전 유료 플랜 개방 (기존 ENTERPRISE 전용 게이팅 폐지).
   //    AI Operator 사용량 통제는 크레딧(checkCredit). FREE(미가입)만 아래 체험 분기로.
+  // ★ 2026-10-19 Codex E1 — 구독 만료 · 정지 = 미가입(FREE)처럼 잠김(선불 이용 기간 D2). 옛: 요금제 코드만 봐 유료 코드로 만료된 회사가 통과했다.
+  if (isSubscriptionBlocked(ctx).blocked) return false;
   if (!isUnsubscribed(ctx)) return true;
 
   // 4. AI 오퍼레이션 30일 무료체험 부여 + 미만료 = 진입 허용 (D219+ Part 2 신규)
@@ -359,9 +361,11 @@ export function isAiOperatorAllowed(
  *     구독 막힘만 없으면 허용.
  */
 export function canUseFeature(ctx: PlanContext, key: FeatureKey): FeatureCheckResult {
-  // 구독 만료/정지 → 전부 차단 (FREE/trial_expired 는 여기서 막지 않음)
+  // 구독 만료/정지 → 유료 기능 차단 (FREE/trial_expired 는 여기서 막지 않음)
+  // ★ 2026-10-19 B-1004-2③ — 잠김 = 미가입(FREE)처럼(선불 이용 기간 D2). 기본 발송(직접발송 · 수신거부 · 발송결과)과
+  //   고객 적재는 FREE 도 되므로 계속 연다(옛: 슈퍼관리자가 만료 · 정지를 고르면 기본 발송까지 막혔다). 계정 정지는 회사 상태(companies.status)가 로그인에서 막는다.
   const sub = isSubscriptionBlocked(ctx);
-  if (sub.blocked) {
+  if (sub.blocked && key !== 'basic_send' && key !== 'customer_db') {
     return { allowed: false, errorMsg: sub.reason, errorCode: 'SUBSCRIPTION_BLOCKED' };
   }
 
@@ -455,6 +459,23 @@ export function canUseFeature(ctx: PlanContext, key: FeatureKey): FeatureCheckRe
       return { allowed: false, errorMsg: `알 수 없는 기능 키: ${_exhaustive}`, errorCode: 'UNKNOWN_FEATURE' };
     }
   }
+}
+
+/**
+ * ★ 2026-10-19 B-1004-2① — 워커(사람 없는 실행) 때 다시 보는 요금제 판정. 켜 둔 자동발송 · 여정 · 자동 마케팅이
+ *   요금제가 잠긴(FREE · 구독 만료) 뒤에도 실행 때 요금제를 다시 보지 않아 계속 나갔다. 판정은 켜는 입구와 같은 함수다.
+ */
+export async function autoCampaignLockReason(companyId: string): Promise<string | null> {
+  const ctx = await loadPlanContext(companyId);
+  if (!ctx) return '회사 정보를 찾을 수 없습니다';
+  const c = canUseFeature(ctx, 'auto_campaign');
+  return c.allowed ? null : (c.errorMsg || '자동발송을 쓸 수 없는 요금제입니다');
+}
+
+/** 여정 · 자동 마케팅 = AI 오퍼레이터 입구와 같은 판정(만든 사람 기준 · 슈퍼관리자 진입은 사람 요청에서만) */
+export async function aiOperatorAllowedForWorker(companyId: string, createdBy?: string | null): Promise<boolean> {
+  const ctx = await loadPlanContext(companyId);
+  return !!ctx && isAiOperatorAllowed(ctx, createdBy ? { userId: createdBy } : null);
 }
 
 // ═══════════════════════════════════════════════════════════

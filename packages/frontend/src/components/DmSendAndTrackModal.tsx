@@ -926,7 +926,7 @@ export default function DmSendAndTrackModal({ dmId, dmTitle, show, onClose, init
                             <span key={h.hour} className="text-[10.5px] px-2 py-1 rounded-lg bg-violet-100 text-violet-800 border border-violet-200">{h.hour}시 <strong>{h.cnt}</strong>건</span>
                           ))}
                         </div>
-                        <p className="text-[10px] text-slate-400 mt-1.5">다음 발송은 {tracking.hourDistribution![0].hour}시 전후를 권장합니다 · Data source: dm_views 열람 시각(KST)</p>
+                        <p className="text-[10px] text-slate-400 mt-1.5">다음 발송은 {tracking.hourDistribution![0].hour}시 전후를 권장합니다 · Data source: DM 열람 시각(KST)</p>
                       </div>
                     )}
                     {(tracking.sectionExits?.length || 0) > 0 && (
@@ -940,13 +940,13 @@ export default function DmSendAndTrackModal({ dmId, dmTitle, show, onClose, init
                             </div>
                           ))}
                         </div>
-                        <p className="text-[10px] text-slate-400 mt-1.5">이 섹션 다음 내용을 다듬으면 완독률이 오릅니다 · Data source: section_interactions</p>
+                        <p className="text-[10px] text-slate-400 mt-1.5">이 섹션 다음 내용을 다듬으면 완독률이 오릅니다 · Data source: 섹션별 열람 · 클릭</p>
                       </div>
                     )}
                   </div>
                 )}
                 {/* ★ 2026-07-12 D-4: 구매 전환 소스 명시 — 자동마케팅 ROI(자사몰 cdp)와 소스가 달라 숫자가 다를 수 있음을 정직 표기 */}
-                <p className="text-[10px] text-slate-400 italic text-center">행을 클릭하면 섹션 여정·버튼 클릭·응답 상세가 열립니다 · Data source: dm_recipient_tokens × dm_views × dm_event_responses · 구매 전환 = 매장·ERP 구매내역(발송 후 7일 실측, 자사몰 기준 화면과 소스가 다를 수 있음)</p>
+                <p className="text-[10px] text-slate-400 italic text-center">행을 클릭하면 섹션 여정·버튼 클릭·응답 상세가 열립니다 · Data source: 받는 사람별 열람 · 응답 · 구매 전환 = 매장·ERP 구매내역(발송 후 7일 실측, 자사몰 기준 화면과 소스가 다를 수 있음)</p>
               </>
             ) : (
               <p className="text-xs text-slate-400 text-center py-8">추적 데이터를 불러오는 중입니다.</p>

@@ -23,6 +23,7 @@ import {
 export type CreateMode = 'preset' | 'product';
 const createModeOf = (triggerEvent: string): CreateMode => (isProductPickTrigger(triggerEvent) ? 'product' : 'preset');
 import { getCompanyJourneyFacts } from './company-data-profile';
+import { getOwnerCustomerScopeSql } from './store-scope';
 import { buildJourneyGraph, exitSlotOf, type JourneyGraph } from './journey-graph';
 import { describeJourneyTarget } from './journey-step-format';
 import { getCreditCost } from './ai-credit-calc';
@@ -274,19 +275,28 @@ const pendingCache = new Map<string, { at: number; value: Map<string, number> }>
  *   ⛔ 쓰기 없음 — 상태를 바꾸면 재진입 쿨다운 기준(completed_at)이 앞당겨져 기존 여정 동작이 바뀐다(설계서 §12).
  *   ★ 2026-10-09 — 칸별(`journeyId:current_step_order`)로 센다(지도 척추의 칸마다 "곧 마칠 예정").
  */
-async function loadPendingGoalExits(companyId: string, journeyIds: string[]): Promise<{ value: Map<string, number>; at: number } | null> {
+/**
+ * ★ 2026-10-19 B-1010-13 — 보는 사람 범위(담당자 = 자기 분류코드 고객만 · 관리자 · 없음 = 회사 전체 '').
+ *   getOwnerCustomerScopeSql(…, 'sc') 의 리터럴 조각을 실행 행 별칭에 붙인다(지도 숫자가 담당자에게 회사 전체로 보이던 것).
+ */
+function execScope(scopeSql: string, alias: string): string {
+  return scopeSql ? ` AND EXISTS (SELECT 1 FROM customers sc WHERE sc.id = ${alias}.customer_id${scopeSql})` : '';
+}
+
+async function loadPendingGoalExits(companyId: string, journeyIds: string[], scopeSql = ''): Promise<{ value: Map<string, number>; at: number } | null> {
   if (journeyIds.length === 0) return { value: new Map(), at: Date.now() };
-  const hit = pendingCache.get(companyId);
+  const cacheKey = `${companyId}|${scopeSql}`;
+  const hit = pendingCache.get(cacheKey);
   if (hit && Date.now() - hit.at < PENDING_TTL_MS) return hit;
   const total = await query(
-    `SELECT COUNT(*)::int AS n FROM journey_executions e WHERE e.journey_id = ANY($1::uuid[]) AND e.status = 'active'`,
+    `SELECT COUNT(*)::int AS n FROM journey_executions e WHERE e.journey_id = ANY($1::uuid[]) AND e.status = 'active'${execScope(scopeSql, 'e')}`,
     [journeyIds],
   );
   if (Number(total.rows[0]?.n || 0) > PENDING_MAX_ACTIVE) return null;
   const r = await query(
     `SELECT e.journey_id, e.current_step_order AS k, COUNT(*)::int AS pending
        FROM journey_executions e
-      WHERE e.journey_id = ANY($2::uuid[]) AND e.status = 'active'
+      WHERE e.journey_id = ANY($2::uuid[]) AND e.status = 'active'${execScope(scopeSql, 'e')}
         AND (
           EXISTS (SELECT 1 FROM customers c
                    WHERE c.id = e.customer_id AND c.company_id = $1::uuid
@@ -305,7 +315,7 @@ async function loadPendingGoalExits(companyId: string, journeyIds: string[]): Pr
   );
   const value = new Map<string, number>(r.rows.map((x: any) => [`${x.journey_id}:${Number(x.k || 0)}`, Number(x.pending || 0)]));
   const entry = { at: Date.now(), value };
-  pendingCache.set(companyId, entry);
+  pendingCache.set(cacheKey, entry);
   return entry;
 }
 
@@ -377,8 +387,10 @@ export function computeMapLines(marketing: LineJourneyInput[], capOf: (ev: strin
   return out;
 }
 
-export async function buildLifecycleMap(companyId: string): Promise<LifecycleMap> {
+export async function buildLifecycleMap(companyId: string, viewerUserId?: string | null): Promise<LifecycleMap> {
   const lineageReady = await lineageColumnsReady().catch(() => false);
+  // ★ 2026-10-19 B-1010-13 — 숫자(진행 중 · 대기 · 코호트 · 도달 · 이어받음 · 겹침)는 보는 사람 범위로 센다. 여정 · 선 상태 · 겹침 판정은 회사 그대로.
+  const scopeSql = await getOwnerCustomerScopeSql(companyId, viewerUserId, 'sc');
   const jr = await query(
     `SELECT id, name, status, trigger_event, trigger_filters, start_kind, goal_exit_enabled, goal_kind,
             allow_reentry, auto_reentry_enabled, threshold_recipients_per_step, updated_at${lineageReady ? ', lineage_id, entry_closed_at' : ''}
@@ -397,6 +409,8 @@ export async function buildLifecycleMap(companyId: string): Promise<LifecycleMap
   const exitsBySlot = new Map<string, number>();
   const reachedByStep = new Map<string, number>();
   const stateById = new Map<string, { activeNow: number; inProgress: number }>();
+  /** 편집 판정용 여정 전체 진행 수(보는 사람 범위와 무관 · 저장 경로와 같은 기준) */
+  const inProgressAll = new Map<string, number>();
   const cohortById = new Map<string, { entered: number; goalMet: number; completed: number }>();
 
   if (ids.length > 0) {
@@ -429,12 +443,22 @@ export async function buildLifecycleMap(companyId: string): Promise<LifecycleMap
               COUNT(*) FILTER (WHERE status = 'active')::int AS active_now,
               COUNT(*)::int AS in_progress
          FROM journey_executions
-        WHERE journey_id = ANY($1::uuid[]) AND status IN ('active', 'paused')
+        WHERE journey_id = ANY($1::uuid[]) AND status IN ('active', 'paused')${execScope(scopeSql, 'journey_executions')}
         GROUP BY journey_id, current_step_order`,
       [ids],
     );
+    // ★ Codex D1 — 편집 판정(stepEditPolicy)은 저장 경로와 같은 여정 전체 진행 수로(보는 사람 범위로 줄인 숫자를 쓰면 화면은 열리고 저장은 409)
+    if (scopeSql) {
+      const all = await query(
+        `SELECT journey_id, COUNT(*)::int AS in_progress FROM journey_executions
+          WHERE journey_id = ANY($1::uuid[]) AND status IN ('active', 'paused') GROUP BY journey_id`,
+        [ids],
+      );
+      for (const p of all.rows) inProgressAll.set(String(p.journey_id), Number(p.in_progress || 0));
+    }
     for (const p of st.rows) {
       const id = String(p.journey_id);
+      if (!scopeSql) inProgressAll.set(id, (inProgressAll.get(id) || 0) + Number(p.in_progress || 0));
       const cur = stateById.get(id) || { activeNow: 0, inProgress: 0 };
       cur.activeNow += Number(p.active_now || 0);
       cur.inProgress += Number(p.in_progress || 0);
@@ -447,7 +471,7 @@ export async function buildLifecycleMap(companyId: string): Promise<LifecycleMap
       `SELECT e.journey_id, e.status, e.current_step_order AS k, COUNT(*)::int AS n
          FROM journey_executions e
          JOIN unnest($1::uuid[], $2::int[]) AS w(jid, days) ON w.jid = e.journey_id
-        WHERE e.status <> 'holdout' AND e.entered_at > NOW() - make_interval(days => w.days)
+        WHERE e.status <> 'holdout' AND e.entered_at > NOW() - make_interval(days => w.days)${execScope(scopeSql, 'e')}
         GROUP BY e.journey_id, e.status, e.current_step_order`,
       [ids, windows],
     );
@@ -473,7 +497,7 @@ export async function buildLifecycleMap(companyId: string): Promise<LifecycleMap
          FROM journey_executions e
          JOIN unnest($1::uuid[], $2::int[]) AS w(jid, days) ON w.jid = e.journey_id
          JOIN journey_step_logs l ON l.execution_id = e.id AND l.status = 'sent'
-        WHERE e.status <> 'holdout' AND e.entered_at > NOW() - make_interval(days => w.days)
+        WHERE e.status <> 'holdout' AND e.entered_at > NOW() - make_interval(days => w.days)${execScope(scopeSql, 'e')}
         GROUP BY e.journey_id, l.step_id`,
       [ids, windows],
     );
@@ -492,7 +516,7 @@ export async function buildLifecycleMap(companyId: string): Promise<LifecycleMap
     .filter((r) => r.status === 'active' && r.goal_exit_enabled === true && ['purchase', '', null, undefined].includes(r.goal_kind)
       && getTriggerContract(String(r.trigger_event || ''))?.exit !== 'product_repurchase')
     .map((r) => String(r.id));
-  const pending = await loadPendingGoalExits(companyId, goalJourneyIds).catch(() => null);
+  const pending = await loadPendingGoalExits(companyId, goalJourneyIds, scopeSql).catch(() => null);
 
   const allJourneys: MapJourney[] = rows.map((r) => {
     const id = String(r.id);
@@ -557,7 +581,7 @@ export async function buildLifecycleMap(companyId: string): Promise<LifecycleMap
         };
       }),
       graph: { edges: graph.edges, exitSlots: graph.exitSlots, issues: graph.issues },
-      edit: stepEditPolicy(String(r.status || ''), state.inProgress),
+      edit: stepEditPolicy(String(r.status || ''), inProgressAll.get(id) || 0),
       capability: capOf(triggerEvent),
       updatedAt: r.updated_at ? new Date(r.updated_at).toISOString() : null,
       lineageId: r.lineage_id ? String(r.lineage_id) : null,
@@ -617,7 +641,7 @@ export async function buildLifecycleMap(companyId: string): Promise<LifecycleMap
           WHERE b.journey_id = $2::uuid AND b.entry_event_properties ? '__entry'
        ), total AS (
          SELECT COUNT(*)::int AS n FROM journey_executions b
-          WHERE b.journey_id = $2::uuid AND b.status <> 'holdout' AND b.entered_at > NOW() - make_interval(days => $3::int)
+          WHERE b.journey_id = $2::uuid AND b.status <> 'holdout' AND b.entered_at > NOW() - make_interval(days => $3::int)${execScope(scopeSql, 'b')}
        )
        SELECT (SELECT n FROM marked) AS marked,
               (SELECT n FROM total) AS receiver_entered,
@@ -625,7 +649,7 @@ export async function buildLifecycleMap(companyId: string): Promise<LifecycleMap
               COUNT(DISTINCT a.customer_id) FILTER (WHERE a.completed_at > NOW() - INTERVAL '7 days')::int AS handed_7d
          FROM journey_executions a
          JOIN journey_executions b ON b.customer_id = a.customer_id AND b.journey_id = $2::uuid
-        WHERE a.journey_id = $1::uuid
+        WHERE a.journey_id = $1::uuid${execScope(scopeSql, 'a')}
           AND a.status = 'goal_met' AND a.entered_at > NOW() - make_interval(days => $3::int)
           AND b.status <> 'holdout'
           AND b.entry_event_properties ? '__entry'
@@ -657,7 +681,7 @@ export async function buildLifecycleMap(companyId: string): Promise<LifecycleMap
           `SELECT COUNT(DISTINCT x.customer_id)::int AS n
              FROM journey_executions x
              JOIN journey_executions y ON y.customer_id = x.customer_id AND y.journey_id = $2::uuid AND y.status = 'active'
-            WHERE x.journey_id = $1::uuid AND x.status = 'active'`,
+            WHERE x.journey_id = $1::uuid AND x.status = 'active'${execScope(scopeSql, 'x')}`,
           [a.id, b.id],
         );
         overlaps.push({ a: a.id, b: b.id, concurrentActive: Number(r.rows[0]?.n || 0) });

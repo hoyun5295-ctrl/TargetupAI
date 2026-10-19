@@ -595,13 +595,18 @@ export interface CompanyPredictionSummary {
   discoveredSegments: DiscoveredSegment[];
 }
 
-export async function getCompanyPredictionSummary(companyId: string): Promise<CompanyPredictionSummary> {
+/**
+ * @param scopeSql ★ 2026-10-19 B-1010-13 — 보는 사람 범위 리터럴(getOwnerCustomerScopeSql(…, 'sc')). 비우면 회사 전체(종전 그대로).
+ */
+export async function getCompanyPredictionSummary(companyId: string, scopeSql = ''): Promise<CompanyPredictionSummary> {
+  const custScope = scopeSql ? ` AND EXISTS (SELECT 1 FROM customers sc WHERE sc.id = customers.id${scopeSql})` : '';
+  const predScope = scopeSql ? ` AND EXISTS (SELECT 1 FROM customers sc WHERE sc.id = cdp_customer_predictions.customer_id${scopeSql})` : '';
   try {
     // ★ D210+ Phase 3 (2026-05-23 Harold 명시): 회사 전체 customers + cdp_customer_predictions 영역 양쪽 카운트 정합 의무
     //   옛 매트릭스 = cdp_customer_predictions 카운트만 = 회사 admin 인지 사고 (29,997명 회사 영역 = 5,000명만 표시 사고)
     //   신규 매트릭스 = totalCustomersInCompany (customers 영역) + totalCustomersInPredictions (cdp_customer_predictions 영역) + coverage % 표시
     const companyRes = await query(
-      `SELECT COUNT(*)::int AS total FROM customers WHERE company_id = $1::uuid`,
+      `SELECT COUNT(*)::int AS total FROM customers WHERE company_id = $1::uuid${custScope}`,
       [companyId]
     );
     const totalInCompany = Number(companyRes.rows[0]?.total) || 0;
@@ -626,7 +631,7 @@ export async function getCompanyPredictionSummary(companyId: string): Promise<Co
          SUM(ltv_365d) AS total_ltv_365d,
          MAX(computed_at) AS last_computed
        FROM cdp_customer_predictions
-       WHERE company_id = $1::uuid`,
+       WHERE company_id = $1::uuid${predScope}`,
       [companyId]
     );
     const row = r.rows[0] || {};
@@ -652,7 +657,7 @@ export async function getCompanyPredictionSummary(companyId: string): Promise<Co
     const highLtvThreshold = avgLtv365d * 2;
     const highLtvRes = await query(
       `SELECT COUNT(*)::int AS cnt FROM cdp_customer_predictions
-       WHERE company_id = $1::uuid AND ltv_365d > $2::numeric`,
+       WHERE company_id = $1::uuid AND ltv_365d > $2::numeric${predScope}`,
       [companyId, highLtvThreshold]
     );
     const highLtvCount = Number(highLtvRes.rows[0]?.cnt) || 0;
@@ -673,7 +678,7 @@ export async function getCompanyPredictionSummary(companyId: string): Promise<Co
          AVG(CASE WHEN p.next_purchase_days BETWEEN 0 AND 14 THEN p.next_purchase_days END) AS repurchase_avg_days
        FROM cdp_customer_predictions p
        INNER JOIN customers c ON c.id = p.customer_id
-       WHERE p.company_id = $1::uuid`,
+       WHERE p.company_id = $1::uuid${scopeSql ? ` AND EXISTS (SELECT 1 FROM customers sc WHERE sc.id = p.customer_id${scopeSql})` : ''}`,
       [companyId, highLtvThreshold]
     );
     const segRow = segAuxRes.rows[0] || {};
@@ -701,7 +706,7 @@ export async function getCompanyPredictionSummary(companyId: string): Promise<Co
     const channelRes = await query(
       `SELECT channel_preference AS ch, COUNT(*)::int AS cnt
        FROM cdp_customer_predictions
-       WHERE company_id = $1::uuid AND channel_preference IS NOT NULL
+       WHERE company_id = $1::uuid AND channel_preference IS NOT NULL${predScope}
        GROUP BY channel_preference
        ORDER BY cnt DESC`,
       [companyId]
@@ -716,7 +721,7 @@ export async function getCompanyPredictionSummary(companyId: string): Promise<Co
     const hourRes = await query(
       `SELECT best_hour AS hr, COUNT(*)::int AS cnt
        FROM cdp_customer_predictions
-       WHERE company_id = $1::uuid AND best_hour IS NOT NULL
+       WHERE company_id = $1::uuid AND best_hour IS NOT NULL${predScope}
        GROUP BY best_hour
        ORDER BY cnt DESC
        LIMIT 5`,

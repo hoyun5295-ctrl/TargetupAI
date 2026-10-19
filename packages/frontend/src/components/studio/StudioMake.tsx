@@ -13,7 +13,7 @@ import { PenLine, ShoppingBag, Upload, Wand2, Check } from 'lucide-react';
 import { useToast } from '../ToastProvider';
 import MallProductPickerModal, { type PickedMallProduct } from '../dm/MallProductPickerModal';
 import { fetchAuthObjectUrl } from '../../lib/auth-download';
-import { studioFetch, studioPost } from '../../lib/studio-api';
+import { studioFetch, studioPost, newStudioAttempt } from '../../lib/studio-api';
 import { applyAutoTexts, autoStudioTexts, EMPTY_STUDIO_TEXTS, type StudioTexts } from '../../lib/studio-texts';
 import type { StudioTemplatePublic } from './TemplatePicker';
 
@@ -110,17 +110,22 @@ export function useStudioMake(template: StudioTemplatePublic | null, initialText
   };
 
   // ── 완성 포스터 생성 (템플릿 + 누끼 + 지정 문구, 2크레딧·1장 · 차감은 서버가 성공 뒤) ──
+  // ★ 2026-10-19 B-1016-3② 결과를 못 받은 시도는 같은 표로 다시(서버가 이미 만든 결과를 주고 다시 걷지 않는다)
+  const attemptRef = useRef<string | null>(null);
   const generate = async (): Promise<StudioMade | null> => {
     if (!template) { toast.error('템플릿을 먼저 골라주세요'); return null; }
     setBusyMsg('완성 포스터를 만드는 중... (약 20~30초)');
     try {
+      if (!attemptRef.current) attemptRef.current = newStudioAttempt();
       const { status, ok, data } = await studioPost('/api/image-studio/generate', {
         templateId: template.id, presetKey: 'poster',
         texts, userHint: hint || null, cutoutTempId,
         textPosition: isEvent(template) ? textPosition : null,
+        attemptToken: attemptRef.current,
       });
       if (status === 402) { toast.error('크레딧이 부족합니다. 충전 후 다시 시도해주세요'); return null; }
       if (!ok || !data.images?.[0]) { toast.error(data?.error || '생성에 실패했어요'); return null; }
+      attemptRef.current = null;   // 성공 결과를 받았을 때만 표를 버린다(Codex E2)
       if (data.benefitNotice) toast.success(data.benefitNotice);
       const im = data.images[0];
       let preview: string | null = null;

@@ -21,6 +21,7 @@
 
 import { query } from '../config/database';
 import { getCompanyPredictionSummary } from './predictive-suite';
+import { getOwnerCustomerScopeSql } from './store-scope';
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 // 외부 노출 인터페이스
@@ -59,8 +60,14 @@ export interface AutoRecommendation {
 // 1. diagnoseCompanyHealth — 회사 건강 종합 진단
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-export async function diagnoseCompanyHealth(companyId: string): Promise<CompanyHealthDiagnosis> {
+/**
+ * @param viewer ★ 2026-10-19 B-1010-13 — 보는 사람. 담당자 = 자기 분류코드 고객 · 자기 캠페인만 센다(관리자 · 없음 = 회사 전체).
+ */
+export async function diagnoseCompanyHealth(companyId: string, viewer?: { userId?: string | null; userType?: string | null }): Promise<CompanyHealthDiagnosis> {
   const signals: HealthSignal[] = [];
+  const scopeSql = await getOwnerCustomerScopeSql(companyId, viewer?.userId, 'sc');
+  const custScope = (col: string) => (scopeSql ? ` AND EXISTS (SELECT 1 FROM customers sc WHERE sc.id = ${col}${scopeSql})` : '');
+  const ownCampaigns = viewer?.userType === 'company_user' && viewer.userId;
 
   // 1) 옛 30일 매출 추이 (campaigns 영역 — total_cost 옛 영역 활용)
   try {
@@ -69,8 +76,8 @@ export async function diagnoseCompanyHealth(companyId: string): Promise<CompanyH
          COUNT(*) FILTER (WHERE created_at > NOW() - INTERVAL '30 days') AS recent_30,
          COUNT(*) FILTER (WHERE created_at > NOW() - INTERVAL '60 days' AND created_at <= NOW() - INTERVAL '30 days') AS prev_30
        FROM campaigns
-       WHERE company_id = $1::uuid AND status = 'completed'`,
-      [companyId]
+       WHERE company_id = $1::uuid AND status = 'completed'${ownCampaigns ? ' AND created_by = $2::uuid' : ''}`,
+      ownCampaigns ? [companyId, viewer!.userId] : [companyId]
     );
     const r = salesRes.rows[0] || {};
     const recent = Number(r.recent_30) || 0;
@@ -100,7 +107,7 @@ export async function diagnoseCompanyHealth(companyId: string): Promise<CompanyH
          COUNT(*) FILTER (WHERE recent_purchase_date > NOW() - INTERVAL '90 days') AS active_90d,
          COUNT(*) FILTER (WHERE recent_purchase_date < NOW() - INTERVAL '90 days' OR recent_purchase_date IS NULL) AS dormant
        FROM customers
-       WHERE company_id = $1::uuid`,
+       WHERE company_id = $1::uuid${custScope('customers.id')}`,
       [companyId]
     );
     const r = activeRes.rows[0] || {};
@@ -125,7 +132,7 @@ export async function diagnoseCompanyHealth(companyId: string): Promise<CompanyH
   // 3) Predictive 점수 통합 (옛 Phase B-2 정합)
   let predictiveSummary;
   try {
-    predictiveSummary = await getCompanyPredictionSummary(companyId);
+    predictiveSummary = await getCompanyPredictionSummary(companyId, scopeSql);
     if (predictiveSummary.totalCustomers > 0) {
       signals.push({
         category: 'churn',
@@ -160,7 +167,7 @@ export async function diagnoseCompanyHealth(companyId: string): Promise<CompanyH
          COUNT(*) FILTER (WHERE event_name = 'message_click' AND occurred_at > NOW() - INTERVAL '30 days') AS clicks_30,
          COUNT(*) FILTER (WHERE event_name = 'order' AND occurred_at > NOW() - INTERVAL '30 days') AS orders_30
        FROM cdp_events
-       WHERE company_id = $1::uuid`,
+       WHERE company_id = $1::uuid${custScope('cdp_events.customer_id')}`,
       [companyId]
     );
     const r = clickRes.rows[0] || {};

@@ -21,6 +21,7 @@
  */
 
 import { query } from '../config/database';
+import { TIMEOUTS } from '../config/defaults';
 // ★ 2026-09-26 한줄로 V2 R1-31 — 토큰 요청 실패 판정 CT(제공자 거절일 때만 연동 만료)
 import { tokenHttpError, reconnectRequiredError, isDefinitiveTokenRejection } from './integration-token-error';
 import { createHmac, timingSafeEqual } from 'crypto';
@@ -103,6 +104,7 @@ export async function issueNaverCommerceToken(creds: NaverCommerceCredentials): 
     type: 'SELF',
   });
   const res = await fetch(NAVER_TOKEN_URL, {
+    signal: AbortSignal.timeout(TIMEOUTS.integrationApi),
     method: 'POST',
     headers: { 'Content-Type': 'application/x-www-form-urlencoded', Accept: 'application/json' },
     body: body.toString(),
@@ -332,7 +334,7 @@ export async function naverCommerceApiCall<T = unknown>(
 
   let lastErr: Error | null = null;
   for (let attempt = 0; attempt < 2; attempt++) {
-    const res = await fetch(url, fetchOpts);
+    const res = await fetch(url, { ...fetchOpts, signal: AbortSignal.timeout(TIMEOUTS.integrationApi) });
     if (res.ok) return (await res.json()) as T;
     if (res.status >= 500 && attempt === 0) {
       lastErr = new Error(`네이버 커머스 API 5xx (${res.status}), retry`);

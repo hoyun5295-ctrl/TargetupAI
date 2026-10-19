@@ -186,7 +186,7 @@ describe('실행기 배선(원문)', () => {
   });
   it('목표 판정 · 들어온 뒤 구매 조건은 같은 판정 함수를 쓴다 · 새 조건 DB 오류 = 보류', () => {
     const goal = src.slice(src.indexOf('async function isGoalConvertedSinceEntry'), src.indexOf('async function completeAtEndStep'));
-    expect(goal).toContain('hasPurchasedSinceEntry(exec.company_id, exec.customer_id, exec.entered_at)');
+    expect(goal).toContain('hasPurchasedSinceEntry(exec.company_id, exec.customer_id, exec.entered_at, { signupBatch: signupJourney })');
     const cond = src.slice(src.indexOf('async function evaluateCondition'), src.indexOf('async function evaluateCdpEventExistsCondition'));
     expect(cond).toContain("type === 'purchase_since_entry'");
     expect(cond).toContain("type === 'step_link_clicked'");

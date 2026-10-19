@@ -19,6 +19,7 @@ import {
 } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import SectionPropsEditor from '../dm/panels/SectionPropsEditor';
+import { ImageUploadEndpointContext } from '../dm/panels/FormControls';
 // ★ 2026-09-16 공용 패널에서 이메일이 감출 필드(원장 = 백엔드 EMAIL_HIDDEN_EDITOR_FIELDS 사본)
 import { emailHiddenFieldsFor } from '../../constants/email-editor-hidden-fields';
 // ★ 2026-07-02 완성(50크레딧) 사전 고지 — 환불 없는 돈이라 확인 모달 의무
@@ -810,7 +811,7 @@ export default function EmailVisualEditor({
                   </div>
                 )}
                 <div className="text-slate-900" onFocus={trackFieldFocus}>
-                  <SectionPropsEditor section={selected} onUpdate={updateSelected} hiddenFields={emailHiddenFieldsFor(selected.type)} />
+                  <ImageUploadEndpointContext.Provider value="/email/upload-image"><SectionPropsEditor section={selected} onUpdate={updateSelected} hiddenFields={emailHiddenFieldsFor(selected.type)} surface="email" /></ImageUploadEndpointContext.Provider>
                   {/* ★ 2026-09-16 수신거부는 켜고 끄는 값이 아니라 발송 규칙이다(임은지 접수). 토글을 감춘 자리에
                       무엇이 붙는지 알려 준다 — 안 그러면 "칸이 사라졌다"로만 보인다. 미리보기 맨 끝이 실물이다. */}
                   {selected.type === 'footer' && (

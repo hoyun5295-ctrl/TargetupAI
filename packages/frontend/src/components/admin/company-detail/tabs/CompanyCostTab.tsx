@@ -3,6 +3,7 @@
  * 옮긴 방법 = 스크립트(원문 그대로 · 글자 대조). 상태(use*)는 본체에 남고 props 로 받는다 — 탭을 옮겨 다녀도 값이 그대로다(동작 변경 0).
  */
 import type { Dispatch, SetStateAction } from 'react';
+import { deductRefLabel } from '../../../../utils/balance-tx-label';
 import { formatDateTime } from '../../../../utils/formatDate';
 import PlanTermBox from '../../PlanTermBox';
 import { previewUnitPrice, fmtPrice, toSupplyInputs } from '../../../../utils/unitPrice';
@@ -207,8 +208,8 @@ export default function CompanyCostTab(props: CompanyCostTabProps) {
                                 <div key={tx.id} className="flex items-center justify-between text-[11px] py-1 px-2 bg-white rounded border">
                                   <div className="flex-1">
                                     <span className={`font-medium ${typeColors[tx.type] || 'text-gray-600'}`}>
-                                      {/* ★ 2026-10-04 요금제 이용료(선불 이용 기간)는 같은 차감 type이라 참조 유형으로 가른다 */}
-                                      {tx.type === 'deduct' && tx.reference_type === 'plan_term' ? '요금제 이용료' : (typeLabels[tx.type] || tx.type)}
+                                      {/* ★ 2026-10-04 요금제 이용료 · ★ 1019 AI 크레딧 충전 — 같은 차감 type이라 참조 유형으로 가른다(CT) */}
+                                      {deductRefLabel(tx.type, tx.reference_type) || typeLabels[tx.type] || tx.type}
                                     </span>
                                     <span className="text-gray-400 ml-2">{tx.description?.slice(0, 30) || ''}</span>
                                   </div>

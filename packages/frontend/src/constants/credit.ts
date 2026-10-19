@@ -96,7 +96,7 @@ export const CREDIT_SOURCE_LABELS: Record<string, string> = {
   'journey-activate': '여정 활성화', 'journey-operation': '여정 운영',
   'continuous-operator': '자동 마케팅', 'continuous-operator-send': '자동 마케팅 발송',
   'marketing-calendar': '마케팅 캘린더 설계', 'marketing-calendar-month': '마케팅 캘린더 한 달 재설계',
-  'one-step-interview': '원스텝 오토설계',
+  'one-step-interview': '질문으로 DM 완성',
   'planner-monthly-agency': '마케팅 플래너 월간 대행',
   'planner-touchpoint-send': '마케팅 플래너 발송 문안',
   'predictive-daily': '예측 분석',

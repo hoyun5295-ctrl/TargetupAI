@@ -114,6 +114,23 @@ export async function isMallPurchaseDoorActive(companyId: string): Promise<boole
 }
 
 /**
+ * ★ 2026-10-19 B-1009-3 — 여정 통계(지난 전환)의 출처 문. 지금 문(isMallPurchaseDoorActive · 최근 30일 · 진입 트리거용)과 다르다:
+ *   그 여정의 첫 진입 뒤로 자사몰 구매 이벤트가 한 건이라도 있었으면 자사몰(그 기간의 진실) · 없으면 원장.
+ *   옛(F1b): 지금 문으로 골라, 자사몰만 쓰는 회사가 한 달 주문이 없으면 지난 전환이 원장(빈 표)으로 바뀌어 0 이 됐다.
+ *   두 문을 더하지 않는다 — 자사몰 주문을 원장으로도 받는 회사에서 같은 구매가 두 번 셈해진다.
+ */
+export async function isMallPurchaseDoorForJourneyStats(companyId: string, journeyId: string): Promise<boolean> {
+  const r = await query(
+    `SELECT 1 FROM cdp_events ce
+      WHERE ce.company_id = $1::uuid AND ce.event_name = 'purchase'
+        AND ce.occurred_at >= COALESCE((SELECT MIN(e.entered_at) FROM journey_executions e WHERE e.journey_id = $2::uuid), NOW())
+      LIMIT 1`,
+    [companyId, journeyId],
+  );
+  return r.rows.length > 0;
+}
+
+/**
  * ★ 2026-08-02 §13-5 — 화면이 "매장 구매는 하루 모아 다음 날 오전에 나갑니다"를 말하려면
  *   **어느 문이 진실인지**와 **마지막으로 언제 도착했는지**를 알아야 한다. 그 판정은 이 CT가 소유한다.
  *   ⛔ 시각은 도착 축(created_at)이다 — 발생 축(occurred_at)으로 보여주면 "언제 동기화됐나"가 아니라

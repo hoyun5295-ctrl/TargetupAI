@@ -3,7 +3,7 @@ import { Field, TextInput, TextArea, Toggle, ColorOverride } from '../FormContro
 import { RepeatableList } from '../RepeatableList';
 import type { EditorProps } from '../SectionPropsEditor';
 
-export default function ReviewsEditor({ props, onUpdate }: EditorProps<ReviewsProps>) {
+export default function ReviewsEditor({ props, onUpdate, hidden }: EditorProps<ReviewsProps>) {
   const reviews = props.reviews || [];
   const setItem = (i: number, patch: Partial<ReviewItem>) =>
     onUpdate({ reviews: reviews.map((r, idx) => (idx === i ? { ...r, ...patch } : r)) });
@@ -26,15 +26,22 @@ export default function ReviewsEditor({ props, onUpdate }: EditorProps<ReviewsPr
               </div>
               <div style={{ height: 6 }} />
               <TextArea value={r.body} onChange={(v) => setItem(i, { body: v })} placeholder="리뷰 내용" rows={2} />
-              <div style={{ height: 6 }} />
-              <TextInput value={r.date} onChange={(v) => setItem(i, { date: v })} placeholder="날짜 (선택, 예: 2026.06)" />
+              {/* ★ 2026-10-19 B-1014-3⑦ 인용 구도는 날짜를 안 그린다(감춤 · 원장 DM_TREATMENT_HIDDEN) */}
+              {!hidden?.('reviews[].date') && (
+                <>
+                  <div style={{ height: 6 }} />
+                  <TextInput value={r.date} onChange={(v) => setItem(i, { date: v })} placeholder="날짜 (선택, 예: 2026.06)" />
+                </>
+              )}
             </>
           )}
         />
       </Field>
       {/* ★ 2026-09-15 임은지 접수(cmu2ao5qn02tjjnlu1spouqzy) · 별 색이 강조색에서만 와서 흰 강조색이면 안 보였고 고를 입구가 없었다 · DM·이메일 렌더러·캔버스가 함께 소비 */}
       <Field label="별점 색" hint="미지정 = 브랜드 강조색"><ColorOverride value={props.star_color} onChange={(v) => onUpdate({ star_color: v })} /></Field>
-      <Field label="평균 별점 표시"><Toggle value={props.show_average_rating ?? true} onChange={(v) => onUpdate({ show_average_rating: v })} /></Field>
+      {!hidden?.('show_average_rating') && (
+        <Field label="평균 별점 표시"><Toggle value={props.show_average_rating ?? true} onChange={(v) => onUpdate({ show_average_rating: v })} /></Field>
+      )}
     </>
   );
 }

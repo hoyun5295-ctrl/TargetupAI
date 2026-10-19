@@ -19,6 +19,7 @@
  */
 
 import { query } from '../config/database';
+import { TIMEOUTS } from '../config/defaults';
 // ★ 2026-09-26 한줄로 V2 R1-31 — 토큰 요청 실패 판정 CT(제공자 거절일 때만 연동 만료)
 import { tokenHttpError, reconnectRequiredError, isDefinitiveTokenRejection } from './integration-token-error';
 import {
@@ -72,6 +73,7 @@ function basicAuthHeader(creds: MakeshopCredentials): string {
 /** 액세스 토큰 발급 (client_credentials + Basic, 5분). refresh 없음 — 만료 임박 시 재호출. */
 export async function issueMakeshopToken(creds: MakeshopCredentials, shopUid: string): Promise<MakeshopTokenResponse> {
   const res = await fetch(MAKESHOP_TOKEN_URL, {
+    signal: AbortSignal.timeout(TIMEOUTS.integrationApi),
     method: 'POST',
     headers: { Authorization: basicAuthHeader(creds), 'Content-Type': 'application/x-www-form-urlencoded', Accept: 'application/json' },
     body: new URLSearchParams({ grant_type: 'client_credentials', shop_uid: shopUid }).toString(),
@@ -216,7 +218,7 @@ async function makeshopApiCall<T = unknown>(
   const fresh = await ensureFreshMakeshopToken(integration, creds);
   const qs = Object.entries(query_).filter(([, v]) => v !== undefined && v !== null && v !== '').map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(String(v))}`).join('&');
   const url = `${MAKESHOP_API_BASE}/${fresh.shopUid}${path}${qs ? `?${qs}` : ''}`;
-  const res = await fetch(url, { headers: { Authorization: `Bearer ${fresh.accessToken}`, Accept: 'application/json' } });
+  const res = await fetch(url, { signal: AbortSignal.timeout(TIMEOUTS.integrationApi), headers: { Authorization: `Bearer ${fresh.accessToken}`, Accept: 'application/json' } });
   if (!res.ok) {
     const errBody = await safeJsonText(res);
     throw new Error(`메이크샵 API 호출 실패 (${res.status}): ${errBody}`);

@@ -533,7 +533,8 @@ describe('③ 소스 계약', () => {
   it('★ Codex 1R — 브랜드 조건 동의 = 그 브랜드 소속 행(해석기 옵션 · 실행 소비처 9곳)', () => {
     const cf = read('utils/customer-filter.ts');
     expect(cf).toContain('storeConsent: brand.storeConsent === true,');
-    expect((read('routes/ai.ts').match(/viewerBrandConsent\(companyId, req\.user\)/g) || []).length).toBe(6);
+    // ★ 2026-10-19 B-1005-1④ — 부르는 화면이 없던 /generate-custom 삭제로 6 → 5
+    expect((read('routes/ai.ts').match(/viewerBrandConsent\(companyId, req\.user\)/g) || []).length).toBe(5);
     expect(read('services/ai.ts')).toContain('await ownerBrandConsent(companyId, userId || null)');
     expect(read('utils/operator-audience.ts')).toContain('await ownerBrandConsent(input.companyId, input.ownerUserId ?? null)');
     expect(read('services/ai-line.ts')).toContain('await viewerBrandConsent(v.companyId');

@@ -120,6 +120,31 @@ export type DmPropExempt = {
   treatment?: string;
 };
 
+/**
+ * ★ 2026-10-19 B-1014-3⑦ 구도가 안 읽는 값 — 그 구도에서 **편집기가 컨트롤을 감춘다**(눌러도 안 바뀌는 칸 0) · 면제 행(n/a)도 여기서 펼친다.
+ *   surface 'ssr' = 모바일 DM 편집기(공용 패널 기본) · 'email' = 이메일 편집기(surface="email"). 근거 = 탐침 실측(2026-10-14 첫 실측 · 아래 시험이 실패 실재를 밟는다).
+ *   화면 미러 = frontend `constants/dm-treatment-hidden-fields.ts`(손으로 고치지 않는다 · 파리티 = dm-editor-coverage.test.ts).
+ *   CTA 배치 · 버튼 모양은 CtaEditor 가 구도로 직접 감춘다(아래 개별 행 · ctaLayoutApplies 소유).
+ */
+export const DM_TREATMENT_HIDDEN: ReadonlyArray<{ surface: 'ssr' | 'email'; section: string; treatment: string; props: readonly string[]; why: string }> = [
+  { surface: 'ssr', section: 'hero', treatment: 'classic', props: ['overlay'], why: '기본 구도는 하단 그라데이션 켬/끔(overlay_gradient)만 읽는다 · 오버레이 프리셋은 전체 화면 구도에서만 그린다' },
+  { surface: 'ssr', section: 'hero', treatment: 'full_bleed', props: ['overlay_gradient'], why: '전체 화면 구도는 오버레이 프리셋(미지정 = 살짝 어둡게)이 그라데이션을 대신한다 · 켬/끔 값을 읽지 않는다' },
+  { surface: 'ssr', section: 'hero', treatment: 'split', props: ['overlay', 'overlay_gradient', 'focus', 'image_fit', 'height', 'headline_emphasis'], why: '분할 구도 렌더는 오버레이 · 그라데이션 · 초점 · 맞춤 · 높이 · 제목 강조를 읽지 않는다(2026-10-14 탐침 실측)' },
+  { surface: 'ssr', section: 'hero', treatment: 'editorial_overlap', props: ['overlay', 'overlay_gradient', 'focus', 'image_fit', 'height', 'headline_emphasis'], why: '겹침 구도 렌더는 오버레이 · 그라데이션 · 초점 · 맞춤 · 높이 · 제목 강조를 읽지 않는다(2026-10-14 탐침 실측)' },
+  { surface: 'ssr', section: 'hero', treatment: 'typographic', props: ['image_url', 'focus', 'image_fit', 'overlay', 'overlay_gradient', 'height', 'headline_emphasis'], why: '타이포그래픽 구도는 이미지 없는 글자 구도 · 이미지 · 초점 · 맞춤 · 오버레이 · 그라데이션 · 높이 · 제목 강조를 그리지 않는다' },
+  { surface: 'ssr', section: 'text_card', treatment: 'lead', props: ['image_url', 'image_position'], why: '리드 구도는 이미지 없는 글자 구도(첫 문단 강조) · 이미지와 그 위치가 뜻이 없다' },
+  { surface: 'ssr', section: 'text_card', treatment: 'quote', props: ['image_url', 'image_position'], why: '인용 구도는 이미지 없는 글자 구도(따옴표 인용) · 이미지와 그 위치가 뜻이 없다' },
+  { surface: 'ssr', section: 'text_card', treatment: 'framed', props: ['image_position'], why: '액자 구도 렌더는 이미지 자리를 고정한다 · 이미지 위치 값을 읽지 않는다(2026-10-14 탐침 실측)' },
+  { surface: 'ssr', section: 'reviews', treatment: 'quote', props: ['reviews[].date', 'show_average_rating'], why: '인용 구도 렌더는 후기 날짜와 평균 별점을 그리지 않는다(2026-10-14 탐침 실측)' },
+  { surface: 'ssr', section: 'coupon', treatment: 'ticket', props: ['button_color'], why: '티켓 코드는 알약 없는 평문이라 알약 배경색이 없다(0723 색 분리 결정 · 알약은 classic만)' },
+  { surface: 'ssr', section: 'coupon', treatment: 'spotlight', props: ['button_color'], why: '스포트라이트 코드는 알약 없는 평문이라 알약 배경색이 없다(0723 색 분리 결정 · 알약은 classic만)' },
+  { surface: 'ssr', section: 'gallery', treatment: 'mosaic', props: ['layout'], why: '모자이크 구도가 격자(2열)를 소유한다 · layout 값은 classic 구도에서만 읽는다' },
+  { surface: 'ssr', section: 'product_carousel', treatment: 'focus', props: ['show_indicator'], why: '점 인디케이터는 가로 스와이프(classic · 3개+)에만 있다 · focus 구도는 세로로 전량 펼친다' },
+  { surface: 'ssr', section: 'product_carousel', treatment: 'list', props: ['show_indicator'], why: '점 인디케이터는 가로 스와이프(classic · 3개+)에만 있다 · list 구도는 세로 행으로 전량 펼친다' },
+  { surface: 'email', section: 'hero', treatment: 'typographic', props: ['image_url', 'focus', 'image_fit', 'overlay', 'overlay_gradient', 'height'], why: '타이포그래픽 구도는 이미지 없는 글자 구도 · 이미지 · 초점 · 맞춤 · 오버레이 · 그라데이션 · 높이를 그리지 않는다' },
+  { surface: 'email', section: 'hero', treatment: 'split', props: ['overlay', 'overlay_gradient'], why: '이메일 분할 구도는 이미지 칸 · 글자 칸을 나눠 그려 오버레이 프리셋 · 그라데이션 켬/끔을 읽지 않는다(renderHero split 분기)' },
+];
+
 /** ★ 2026-10-14 DM 속성 예외 원장 — `dm-editor-coverage.test.ts`가 "편집기 속성 전수 × 발행 면"을 기계로 밟는다(이메일 0916 이식).
  *  값을 바꿔 렌더해도 출력이 안 달라지는 속성은 여기 **사유와 함께** 있어야 통과한다. 편집기에서 사라진 행은 실패(원장 부패 차단).
  *  등재된 것만 지키던 옛 표(위 DM_*_TABLE·MARKERS)는 그대로 두고, 이 원장은 "등재 안 된 전부"를 잡는다. */
@@ -131,7 +156,15 @@ export const DM_PROP_EXEMPT: DmPropExempt[] = [
   { section: 'product_carousel', prop: 'auto_slide', surface: 'ssr', kind: 'removed', why: '자동 전환 미도입(수신자 수동 스와이프) · 렌더·뷰어 어디도 안 읽음(2026-10-14 기본값·타입 제거)' },
   { section: 'product_carousel', prop: 'slide_interval_ms', surface: 'ssr', kind: 'removed', why: '자동 전환 미도입이라 간격도 뜻 없음 · 렌더·뷰어 어디도 안 읽음(2026-10-14 기본값·타입 제거)' },
   // ── 서버가 읽는 규칙(이름 걸림 통과 근거 = reader 본문) ──
-  { section: 'email_capture', prop: 'consent_required', surface: 'ssr', kind: 'server', reader: 'submitEventResponse', why: '제출 때 동의 체크를 서버가 강제한다(명시 true일 때 · 추첨은 늘)' },
+  { section: 'email_capture', prop: 'consent_required', surface: 'ssr', kind: 'server', reader: 'submitEventResponse', why: '제출 때 동의 체크를 서버가 강제한다(명시 false 가 아니면 · 추첨은 늘 · 1019 미지정 = 강제)' },
+  // ★ 2026-10-19 B-1014-3⑥ 서버 규칙 대기 7건 해소 — 5건 = 서버가 읽는다 · 2건 = 장식 토글 제거(서버는 늘 1인 1회)
+  { section: 'survey', prop: 'questions[].required', surface: 'ssr', kind: 'server', reader: 'submitEventResponse', why: '필수 문항의 빈 답은 서버가 400 으로 거른다(뷰어 data-required 검사와 같은 기준)' },
+  { section: 'lucky_draw', prop: 'form_fields[].required', surface: 'ssr', kind: 'server', reader: 'submitEventResponse', why: '필수 응모 칸의 빈 값은 서버가 400 으로 거른다(발행 폼 data-required · 뷰어 검사와 같은 칸)' },
+  { section: 'click_rewards', prop: 'target_count', surface: 'ssr', kind: 'server', reader: 'submitEventResponse', why: '참여 수를 서버가 세어 목표 대비 진행률로 돌려준다(진행률 표시가 켜진 화면이 그린다)' },
+  { section: 'instant_coupon', prop: 'expires_at', surface: 'ssr', kind: 'server', reader: 'submitEventResponse', why: '만료 시각이 지나면 서버가 발급을 409 로 막는다(화면 표시와 같은 값)' },
+  { section: 'limited_quantity', prop: 'total_quantity', surface: 'ssr', kind: 'server', reader: 'submitEventResponse', why: '같은 블록 잠금 안에서 참여 수를 센 뒤 총 수량을 넘으면 서버가 409 로 막는다' },
+  { section: 'poll', prop: 'one_vote_per_user', surface: 'ssr', kind: 'removed', why: '서버는 토글과 무관하게 늘 1인 1회(UNIQUE)라 끄는 칸이 장식이었다(2026-10-19 편집기 · 기본값 · 타입 제거 · 안내는 늘)' },
+  { section: 'roulette', prop: 'one_spin_per_user', surface: 'ssr', kind: 'removed', why: '서버는 토글과 무관하게 늘 1인 1회(UNIQUE)라 끄는 칸이 장식이었다(2026-10-19 편집기 · 기본값 · 타입 제거 · 안내는 늘)' },
   { section: 'roulette', prop: 'segments[].probability', surface: 'ssr', kind: 'server', reader: 'runRouletteDraw', why: '당첨 칸은 서버가 확률로 뽑는다(클라이언트는 결과만 받아 돌린다)' },
   { section: 'roulette', prop: 'segments[].prize_count', surface: 'ssr', kind: 'server', reader: 'syncPrizesFromSections', why: '발행 때 dm_prizes 재고로 동기화되고 당첨은 재고에서 차감된다' },
   // ── 구도가 소유하는 값(그 구도에서는 뜻이 없다 · 2026-10-14 첫 실측) ──
@@ -143,26 +176,6 @@ export const DM_PROP_EXEMPT: DmPropExempt[] = [
   { section: 'cta', prop: 'buttons[].style', surface: 'ssr', treatment: 'sticky', kind: 'n/a', why: '구도가 버튼 모양을 소유 · sticky=첫 버튼 하나를 고정 바로 그린다' },
   { section: 'cta', prop: 'buttons[].style', surface: 'email', treatment: 'bar', kind: 'n/a', why: '구도가 버튼 모양을 소유 · bar=첫 버튼 강조 바 + 나머지 목록이라 개별 style을 안 읽는다' },
   { section: 'cta', prop: 'buttons[].style', surface: 'email', treatment: 'ghost', kind: 'n/a', why: '구도가 버튼 모양을 소유 · ghost=버튼 전부를 고스트로 그린다' },
-  { section: 'coupon', prop: 'button_color', surface: 'ssr', treatment: 'ticket', kind: 'n/a', why: '티켓 코드는 알약 없는 평문이라 알약 배경색이 없다(0723 색 분리 결정 · 알약은 classic만)' },
-  { section: 'coupon', prop: 'button_color', surface: 'ssr', treatment: 'spotlight', kind: 'n/a', why: '스포트라이트 코드는 알약 없는 평문이라 알약 배경색이 없다(0723 색 분리 결정 · 알약은 classic만)' },
-  { section: 'gallery', prop: 'layout', surface: 'ssr', treatment: 'mosaic', kind: 'n/a', why: '모자이크 구도가 격자(2열)를 소유한다 · layout 값은 classic 구도에서만 읽는다' },
-  { section: 'product_carousel', prop: 'show_indicator', surface: 'ssr', treatment: 'focus', kind: 'n/a', why: '점 인디케이터는 가로 스와이프(classic · 3개+)에만 있다 · focus 구도는 세로로 전량 펼친다' },
-  { section: 'product_carousel', prop: 'show_indicator', surface: 'ssr', treatment: 'list', kind: 'n/a', why: '점 인디케이터는 가로 스와이프(classic · 3개+)에만 있다 · list 구도는 세로 행으로 전량 펼친다' },
-  { section: 'hero', prop: 'image_url', surface: 'ssr', treatment: 'typographic', kind: 'n/a', why: '타이포그래픽 구도는 이미지 없는 글자 구도 · 이미지·초점·맞춤·오버레이·높이 전부 뜻이 없다' },
-  { section: 'hero', prop: 'focus', surface: 'ssr', treatment: 'typographic', kind: 'n/a', why: '타이포그래픽 구도는 이미지 없는 글자 구도 · 이미지 초점이 뜻이 없다' },
-  { section: 'hero', prop: 'image_fit', surface: 'ssr', treatment: 'typographic', kind: 'n/a', why: '타이포그래픽 구도는 이미지 없는 글자 구도 · 이미지 맞춤이 뜻이 없다' },
-  { section: 'hero', prop: 'overlay', surface: 'ssr', treatment: 'typographic', kind: 'n/a', why: '타이포그래픽 구도는 이미지 없는 글자 구도 · 이미지 위 오버레이가 뜻이 없다' },
-  { section: 'hero', prop: 'overlay_gradient', surface: 'ssr', treatment: 'typographic', kind: 'n/a', why: '타이포그래픽 구도는 이미지 없는 글자 구도 · 이미지 위 그라데이션이 뜻이 없다' },
-  { section: 'hero', prop: 'height', surface: 'ssr', treatment: 'typographic', kind: 'n/a', why: '타이포그래픽 구도는 글자 분량이 높이를 정한다(이미지 영역 높이 값을 안 쓴다)' },
-  { section: 'hero', prop: 'image_url', surface: 'email', treatment: 'typographic', kind: 'n/a', why: '타이포그래픽 구도는 이미지 없는 글자 구도 · 이미지·초점·맞춤·오버레이·높이 전부 뜻이 없다' },
-  { section: 'hero', prop: 'focus', surface: 'email', treatment: 'typographic', kind: 'n/a', why: '타이포그래픽 구도는 이미지 없는 글자 구도 · 이미지 초점이 뜻이 없다' },
-  { section: 'hero', prop: 'image_fit', surface: 'email', treatment: 'typographic', kind: 'n/a', why: '타이포그래픽 구도는 이미지 없는 글자 구도 · 이미지 맞춤이 뜻이 없다' },
-  { section: 'hero', prop: 'overlay_gradient', surface: 'email', treatment: 'typographic', kind: 'n/a', why: '타이포그래픽 구도는 이미지 없는 글자 구도 · 이미지 위 그라데이션이 뜻이 없다' },
-  { section: 'hero', prop: 'height', surface: 'email', treatment: 'typographic', kind: 'n/a', why: '타이포그래픽 구도는 글자 분량이 높이를 정한다(이미지 영역 높이 값을 안 쓴다)' },
-  { section: 'text_card', prop: 'image_url', surface: 'ssr', treatment: 'lead', kind: 'n/a', why: '리드 구도는 이미지 없는 글자 구도(첫 문단 강조)' },
-  { section: 'text_card', prop: 'image_url', surface: 'ssr', treatment: 'quote', kind: 'n/a', why: '인용 구도는 이미지 없는 글자 구도(따옴표 인용)' },
-  { section: 'text_card', prop: 'image_position', surface: 'ssr', treatment: 'lead', kind: 'n/a', why: '리드 구도는 이미지 없는 글자 구도라 이미지 위치도 뜻이 없다' },
-  { section: 'text_card', prop: 'image_position', surface: 'ssr', treatment: 'quote', kind: 'n/a', why: '인용 구도는 이미지 없는 글자 구도라 이미지 위치도 뜻이 없다' },
   // ── 화면 글자가 아닌 값 ──
   { section: 'roulette', prop: 'segments[].probability', surface: 'ssr', kind: 'n/a', why: '확률은 서버 추첨값(runRouletteDraw) · 발행물·data-segments 에 싣지 않는 것이 정답(수신자에게 확률 노출 X)' },
   { section: 'survey', prop: 'questions[].id', surface: 'ssr', kind: 'n/a', why: '문항 식별자(응답 키 q_<id>) · 화면 글자가 아니다 · 뷰어가 data-dm-q로 읽는다' },
@@ -184,6 +197,12 @@ export const DM_PROP_EXEMPT: DmPropExempt[] = [
   { section: 'product_carousel', prop: 'title_color', surface: 'canvas', kind: 'n/a', why: '제목 스타일은 공용 도우미(productTitleStyle)가 만든다 · 함수 본문 이름 대조(근사)의 사각' },
   { section: 'product_carousel', prop: 'title_size', surface: 'canvas', kind: 'n/a', why: '제목 스타일은 공용 도우미(productTitleStyle)가 만든다 · 함수 본문 이름 대조(근사)의 사각' },
   { section: 'roulette', prop: 'segments[].probability', surface: 'canvas', kind: 'n/a', why: '확률은 서버 추첨값(runRouletteDraw) · 화면에 표시되지 않는다' },
+  // ★ 2026-10-19 B-1014-3⑦ 미검토 정리
+  { section: 'gallery', prop: 'images[].caption', surface: 'email', kind: 'n/a', why: '이메일 갤러리는 설명을 그림 대체 글(alt)로만 싣는다 · 한 줄 템플릿 메일이 그림 아래 글 카드를 따로 싣는 계약(line-template-compose eventParts)이라 보이게 그리면 같은 글이 두 번 나온다' },
+  { section: 'map_store_locator', prop: 'stores[].lat', surface: 'ssr', kind: 'removed', why: '지도는 주소 글자만 그리고 거리 정렬이 없어 좌표를 어디도 안 읽었다(2026-10-19 입력칸 · 타입 제거 · 0721 enable_user_location 과 같은 뿌리)' },
+  { section: 'map_store_locator', prop: 'stores[].lng', surface: 'ssr', kind: 'removed', why: '지도는 주소 글자만 그리고 거리 정렬이 없어 좌표를 어디도 안 읽었다(2026-10-19 입력칸 · 타입 제거 · 0721 enable_user_location 과 같은 뿌리)' },
+  // 구도가 안 읽는 값(위 DM_TREATMENT_HIDDEN 펼침 · 편집기도 감춘다)
+  ...DM_TREATMENT_HIDDEN.flatMap((g) => g.props.map((prop) => ({ section: g.section, prop, surface: g.surface, treatment: g.treatment, kind: 'n/a' as const, why: g.why }))),
 ];
 
 /** 제거된 죽은 컨트롤 = 위 원장의 kind=removed 행(파리티 테스트 "제거된 죽은 컨트롤" 절이 편집기·기본값 잔존 0을 밟는다). */
@@ -194,54 +213,15 @@ export const DM_REMOVED_DEAD_CONTROLS: Array<{ section: string; prop: string; re
  *  원장 kind=server + reader 실재로만 통과. 못 대면 아래 PENDING에 이름을 둔다(줄기만 하는 래칫 · 늘면 실패). */
 export const DM_SERVER_RULE_NAME = /^one_|^consent_required$|^(required|quantity|probability)$|^expires|_count$|_quantity$/;
 /** 2026-10-14 첫 실측 7건 — 이름은 규칙인데 서버가 안 읽는다(= R3 서버 뜻 축 · 설계서 §6 B2). 서버에 넣으면 kind=server로 올리고 여기서 뺀다. */
-export const DM_SERVER_RULES_PENDING: readonly string[] = [
-  'poll.one_vote_per_user',            // 1인 1회 토글 — 서버는 늘 UNIQUE(토글 무관) · 장식
-  'roulette.one_spin_per_user',        // 위와 같음
-  'survey.questions[].required',       // 필수 = 뷰어만 막는다(data-required) · 서버 미검증
-  'lucky_draw.form_fields[].required', // 위와 같음(뷰어 전화번호만 검증)
-  'click_rewards.target_count',        // 목표 횟수 = 화면 표시만 · 서버 집계 없음
-  'instant_coupon.expires_at',         // 만료 = 화면 표시만 · 서버가 만료 뒤 발급을 안 막는다
-  'limited_quantity.total_quantity',   // 총 수량 = 화면 표시만 · 서버 차감 없음
-];
-export const DM_SERVER_RULES_PENDING_MAX = 7;
+// ★ 2026-10-19 B-1014-3⑥ 7건 전부 해소(위 원장 server · removed 행) → 0
+export const DM_SERVER_RULES_PENDING: readonly string[] = [];
+export const DM_SERVER_RULES_PENDING_MAX = 0;
 
 /** ★ 2026-10-14 미검토 래칫 — 첫 실측에서 빨갛던 속성 이름 목록. 항목이 통과하게 되면 실패시켜 목록에서 빼게 한다(이름 바꿔치기 차단).
  *  길이는 MAX를 넘을 수 없고 MAX는 줄이기만 한다. kind 4종 밖의 새 분류를 만들지 않는다. */
-export const DM_PROP_UNREVIEWED: readonly string[] = [
-  // 2026-10-14 첫 실측 31건. 형식 = 면:섹션.속성[@구도]. 판단(렌더에 넣기 / 그 구도에서 컨트롤 감추기 / n/a 등재)은 Harold님 승인 항목.
-  'ssr:hero.overlay@classic',                 // 오버레이 프리셋은 full_bleed만 읽는다 · classic은 overlay_gradient(켬/끔)만
-  'ssr:hero.overlay@split',
-  'ssr:hero.overlay@editorial_overlap',
-  'ssr:hero.overlay_gradient@full_bleed',     // full_bleed는 overlay 프리셋이 그라데이션을 대신한다
-  'ssr:hero.overlay_gradient@split',
-  'ssr:hero.overlay_gradient@editorial_overlap',
-  'ssr:hero.focus@split',                     // 분할·겹침 구도는 이미지 초점·맞춤을 안 읽는다
-  'ssr:hero.focus@editorial_overlap',
-  'ssr:hero.image_fit@split',
-  'ssr:hero.image_fit@editorial_overlap',
-  'ssr:hero.height@split',                    // 분할·겹침 구도는 높이 값을 안 읽는다
-  'ssr:hero.height@editorial_overlap',
-  'ssr:hero.headline_emphasis@split',         // 제목 강조(마커·밑줄)가 classic·full_bleed에서만 산다
-  'ssr:hero.headline_emphasis@editorial_overlap',
-  'ssr:hero.headline_emphasis@typographic',
-  'ssr:text_card.image_position@framed',      // 액자 구도는 이미지 위치를 고정한다
-  'ssr:reviews.reviews[].date@quote',         // 인용 구도는 날짜·평균 별점을 안 그린다
-  'ssr:reviews.show_average_rating@quote',
-  'ssr:lucky_draw.form_fields[].required',    // 필수 표시가 발행 폼에 없다(뷰어도 전화번호만 검증) · R3
-  'ssr:map_store_locator.stores[].lat',       // 지도는 주소 글자만 그린다 · 좌표 입력칸이 죽어 있다(0721 enable_user_location과 같은 뿌리)
-  'ssr:map_store_locator.stores[].lng',
-  'canvas:map_store_locator.stores[].lat',
-  'canvas:map_store_locator.stores[].lng',
-  'canvas:slideshow.show_indicator',          // 캔버스 슬라이드쇼가 점 인디케이터를 안 그린다
-  'email:hero.overlay',                       // 이메일 히어로는 오버레이 프리셋을 안 읽는다
-  'email:hero.overlay_gradient@split',
-  'email:hero.headline_size@split',           // 이메일 분할 구도는 제목 크기 px를 안 읽는다
-  'email:text_card.body_size@lead',           // 이메일 리드·인용 구도는 본문 크기 px를 안 읽는다
-  'email:text_card.body_size@quote',
-  'email:gallery.full_bleed',                 // 이메일 갤러리는 풀화면 토글을 안 읽는다
-  'email:gallery.images[].caption',           // 이메일 갤러리는 설명을 alt에만 싣는다(보이지 않는다)
-];
-export const DM_PROP_UNREVIEWED_MAX = 31;
+// ★ 2026-10-19 B-1014-3⑦ 첫 실측 31건 전부 처리(구도 감춤 · 제거 · 렌더 맞춤 · 서버 규칙 · n/a) → 0. 새 미검토는 늘 수 없다.
+export const DM_PROP_UNREVIEWED: readonly string[] = [];
+export const DM_PROP_UNREVIEWED_MAX = 0;
 
 /** ★ 2026-10-14 탐침 문맥 — 탐침 값은 기본값의 타입에서 파생한다(boolean 반전 · number +7 · *_color · *url · 문자열 '탐침_'+prop).
  *  파생이 안 되는 것만 여기 적는다(빠지면 테스트가 그 이름으로 실패한다 · 손 등재 최소):
@@ -252,6 +232,8 @@ export const DM_PROBE_CONTEXT: {
   /** 그 속성을 탐침할 때만 얹는 전제(예: 헤더 행사명은 variant=countdown에서만 뜻이 있다). 키 = 'type.prop' */
   with: Record<string, Record<string, unknown>>;
   enums: Record<string, unknown>;
+  /** ★ 2026-10-19 같은 속성의 추가 탐침 값 — 열거 값 하나가 어떤 구도의 기본값과 겹치면 「안 읽힘」으로 잘못 잡혀(G1 · 이메일 분할 제목 28 · 리드 본문 18 · 기본 오버레이) 하나라도 출력이 바뀌면 읽힘으로 본다. */
+  alts: Record<string, readonly unknown[]>;
 } = {
   base: {
     header: { brand_name: '한줄로' },
@@ -270,7 +252,7 @@ export const DM_PROBE_CONTEXT: {
     lucky_draw: { prizes: [{ rank: 1, name: '경품', count: 1 }] },
     youtube_embed: { video_url: 'https://www.youtube.com/watch?v=abcdefghijk' },
     instagram_embed: { post_url: 'https://www.instagram.com/p/abc/' },
-    map_store_locator: { stores: [{ id: 's1', name: '매장', address: '주소', lat: 37.5, lng: 127.0 }] },
+    map_store_locator: { stores: [{ id: 's1', name: '매장', address: '주소' }] },
     reviews: { reviews: [{ rating: 5, author: '작성자', body: '후기' }] },
   },
   with: {
@@ -333,6 +315,11 @@ export const DM_PROBE_CONTEXT: {
     'slideshow.slide_ratio': '3:4',
     'tab_cards.tabs[].content_type': 'image',
     'survey.questions[].type': 'rating',
+  },
+  alts: {
+    'hero.headline_size': [40],
+    'text_card.body_size': [24],
+    'hero.overlay': ['top', 'brand'],
   },
 };
 

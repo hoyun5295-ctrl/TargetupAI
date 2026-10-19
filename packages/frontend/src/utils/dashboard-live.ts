@@ -95,6 +95,8 @@ export const ENTER_ONCE = 'animate-in fade-in slide-in-from-bottom-2 duration-30
 let dashboardIntroDone = false;
 export const dashboardIntroPending = (): boolean => !dashboardIntroDone;
 export const markDashboardIntroDone = (): void => { dashboardIntroDone = true; };
+/** ★ 2026-10-19 B-1010-11 — 로그아웃 · 401 에서 되돌린다(같은 탭 재로그인 때도 들어오기 1회) */
+export const resetDashboardIntro = (): void => { dashboardIntroDone = false; };
 
 /**
  * ★ 2026-10-10 Codex 1~4R — 대시보드 · 띠의 서버 읽기 규칙 한 곳.

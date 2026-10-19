@@ -3,6 +3,7 @@
  * 옮긴 방법 = 스크립트(원문 그대로 · 글자 대조). 상태(use*)는 본체에 남고 props 로 받는다 — 탭을 옮겨 다녀도 값이 그대로다(동작 변경 0).
  */
 import type { Dispatch, SetStateAction } from 'react';
+import { deductRefLabel } from '../../../utils/balance-tx-label';
 import { formatDateTime } from '../../../utils/formatDate';
 import AgentChargePanel from '../../AgentChargePanel';
 import SearchableSelect from '../../SearchableSelect';
@@ -226,9 +227,10 @@ export default function DepositsTab(props: DepositsTabProps) {
                           admin: { label: '관리자', color: 'bg-gray-100 text-gray-700' },
                           system: { label: '시스템', color: 'bg-orange-50 text-orange-700' },
                         };
-                        // ★ 2026-10-04 요금제 이용료(선불 이용 기간)는 같은 차감 type이라 참조 유형으로 가른다
-                        const tc = (tx.type === 'deduct' && (tx as any).reference_type === 'plan_term')
-                          ? { label: '요금제 이용료', color: 'bg-red-100 text-red-800', sign: '-' }
+                        // ★ 2026-10-04 요금제 이용료 · ★ 1019 AI 크레딧 충전 — 같은 차감 type이라 참조 유형으로 가른다(CT)
+                        const refLabel = deductRefLabel(tx.type, (tx as any).reference_type);
+                        const tc = refLabel
+                          ? { label: refLabel, color: 'bg-red-100 text-red-800', sign: '-' }
                           : (typeConfig[tx.type] || { label: tx.type, color: 'bg-gray-100 text-gray-600', sign: '' });
                         const mc = methodConfig[tx.payment_method] || { label: tx.payment_method || '-', color: 'bg-gray-50 text-gray-600' };
                         const isPlus = ['admin_charge', 'charge', 'deposit_charge', 'refund'].includes(tx.type);

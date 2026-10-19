@@ -165,6 +165,18 @@ export function findBenefitSpans(text: string): BenefitSpan[] {
 }
 
 /**
+ * ★ 2026-10-19 B-1018-1 — 글에서 혜택 자리(얼마 + 무엇 · findBenefitSpans)를 지운다(AI 근거용 · 값은 코드가 재료로 놓는 경로).
+ *   근거에 혜택 값 · 낱말이 하나도 없으니, AI 가 만든 혜택은 무엇이든 findInventedBenefits 에 걸린다(교차 조합 「5% 할인」 포함).
+ */
+export function withoutBenefitSpans(text: string): string {
+  // 검증(findInventedBenefits)과 같은 정규화 — 전각 · 「N퍼센트」 · 「N프로」 = %(F2 · 옛: 반각만 보아 「10퍼센트」가 근거에 남았다)
+  const src = normalizeGroundText(String(text || ''));
+  let out = src;
+  for (const sp of findBenefitSpans(src).sort((a, b) => b.start - a.start)) out = out.slice(0, sp.start) + ' ' + out.slice(sp.end);
+  return out.replace(/\s{2,}/g, ' ').trim();
+}
+
+/**
  * **AI가 지어낸 구체 혜택을 자리째 되돌린다.**
  *
  * 프롬프트는 경계가 아니다 — "구체 혜택을 쓰지 마라"는 지시를 어긴 응답은 그대로 저장·발송될 수 있다.

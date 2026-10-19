@@ -120,17 +120,19 @@ describe('R7 메일 첫 화면 — 휴대폰 틀 · 브랜드 히어로 대체 �
     brandSections: [sec('header', { brand_name: '헤라' }, 0), sec('gallery', { images: [{ url: 'https://hanjul.ai/hero.jpg', link_url: 'https://hera.com', caption: '' }, { url: 'https://hanjul.ai/2.jpg', caption: '' }] }, 1, 'so-std-hero-poster'), sec('product_carousel', { products: [] }, 2)],
     subject: 's', intro: '서두입니다.', now: new Date('2026-10-09T03:00:00Z'), dmFrameUrl: 'https://hanjul.ai/frame.jpg',
   };
-  it('순서 = 발신 머리 · 헤드라인 · 브랜드 머리 · 히어로 1장(대체 글자) · 휴대폰 틀(DM 링크) · [DM 열어보기] · 서두 · 상품 블록 0', () => {
+  // ★ 2026-10-19 B-1013-2① — 휴대폰 틀(DM 첫 화면 = 같은 히어로)이 있으면 메일 히어로 칸을 싣지 않는다(같은 그림 두 번 차단)
+  it('순서 = 발신 머리 · 헤드라인 · 브랜드 머리 · 휴대폰 틀(DM 링크) · [DM 열어보기] · 서두 · 상품 블록 0 · 틀이 있으면 히어로 생략', () => {
     const s = buildProposalEmailSections(guide, base) as any[];
-    expect(s.slice(0, 7).map((x) => x.type)).toEqual(['header', 'text_card', 'header', 'gallery', 'gallery', 'cta', 'text_card']);
-    expect(s[3].props.images).toEqual([{ url: 'https://hanjul.ai/hero.jpg', link_url: 'https://hera.com', caption: guide.emailCopy.alt.hero('헤라') }]);
-    expect(s[4].props.images[0]).toEqual({ url: 'https://hanjul.ai/frame.jpg', link_url: base.dmUrl, caption: guide.emailCopy.alt.dmFrame('헤라') });
+    expect(s.slice(0, 6).map((x) => x.type)).toEqual(['header', 'text_card', 'header', 'gallery', 'cta', 'text_card']);
+    expect(s[3].props.images[0]).toEqual({ url: 'https://hanjul.ai/frame.jpg', link_url: base.dmUrl, caption: guide.emailCopy.alt.dmFrame('헤라') });
+    expect(s.some((x) => x.type === 'gallery' && x.props.images?.[0]?.url === 'https://hanjul.ai/hero.jpg')).toBe(false);
     expect(s.some((x) => x.type === 'product_carousel')).toBe(false);
     expect(s.every((x, i) => x.order === i)).toBe(true);
   });
-  it('틀 사본이 없으면 그 칸만 생략', () => {
+  it('틀 사본이 없으면 그 칸 대신 브랜드 히어로 1장(대체 글자)', () => {
     const s = buildProposalEmailSections(guide, { ...base, dmFrameUrl: null }) as any[];
     expect(s.slice(0, 5).map((x) => x.type)).toEqual(['header', 'text_card', 'header', 'gallery', 'cta']);
+    expect(s[3].props.images).toEqual([{ url: 'https://hanjul.ai/hero.jpg', link_url: 'https://hera.com', caption: guide.emailCopy.alt.hero('헤라') }]);
   });
   it('framePhoneCapture — 600폭 JPEG · 높이 = 화면 + 테두리 + 위아래 여백', async () => {
     const cap = await sharp({ create: { width: 375, height: 900, channels: 3, background: '#ff0000' } }).jpeg().toBuffer();

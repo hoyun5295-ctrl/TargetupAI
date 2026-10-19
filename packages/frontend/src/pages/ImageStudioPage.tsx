@@ -28,7 +28,7 @@ import ConfirmModal, { type ConfirmState } from '../components/ConfirmModal';
 import TemplatePicker, { type StudioTemplatePublic } from '../components/studio/TemplatePicker';
 import { useStudioMake, StudioMakeFields, TemplateExampleCard } from '../components/studio/StudioMake';
 import StudioWatermark from '../components/studio/StudioWatermark';
-import { saveStudioTemp, studioPost, type SavedStudioAsset } from '../lib/studio-api';
+import { saveStudioTemp, studioPost, newStudioAttempt, type SavedStudioAsset } from '../lib/studio-api';
 
 const token = () => localStorage.getItem('token');
 const authFetch = (url: string, opts: RequestInit = {}) =>
@@ -111,7 +111,10 @@ export default function ImageStudioPage() {
   const objectUrls = useRef<string[]>([]);
   const loadBlob = useCallback(async (url: string): Promise<string> => {
     const r = await authFetch(url);
+    // ★ Codex E4 — 오류 응답 본문을 그림처럼 띄우지 않는다(띄우면 결과를 놓은 것으로 보고 시도 표를 버려 같은 수정이 다시 걷혔다)
+    if (!r.ok) throw new Error('결과 그림을 불러오지 못했어요. 같은 지시로 다시 눌러 주세요(다시 걷지 않아요).');
     const b = await r.blob();
+    if (!String(b.type || '').startsWith('image/')) throw new Error('결과 그림을 불러오지 못했어요. 같은 지시로 다시 눌러 주세요(다시 걷지 않아요).');
     const u = URL.createObjectURL(b);
     objectUrls.current.push(u);
     return u;
@@ -138,14 +141,19 @@ export default function ImageStudioPage() {
   // ── AI 수정 ──────────────────────────
   // ★ 2026-09-30 4K 격상 제거(Harold 확정) — 생성 모델이 "같은 그림 4K"를 새로 그려 원본과 다른 포스터가 나왔다(운영 실측 3584×4800 · 구도·색 변경).
   //   모든 채널이 2048px 원본으로 충분하다(MMS 는 저장 때 1080px). 원장 docs/2026-09-30-ai-model-prompt-upgrade.md §2-4
+  // ★ 2026-10-19 B-1016-3② 결과를 못 받은 수정은 같은 표로 다시(같은 그림 · 같은 지시일 때만 서버가 같은 시도로 본다)
+  const editAttemptRef = useRef<string | null>(null);
   const editPoster = async (c: Candidate, instruction: string) => {
     setBusyMsg('AI가 포스터를 수정하는 중...');
     try {
-      const { status, ok, data } = await studioPost('/api/image-studio/edit', { tempId: c.tempId, instruction });
+      if (!editAttemptRef.current) editAttemptRef.current = newStudioAttempt();
+      const { status, ok, data } = await studioPost('/api/image-studio/edit', { tempId: c.tempId, instruction, attemptToken: editAttemptRef.current });
       if (status === 402) { toast.error('크레딧이 부족합니다'); return; }
-      if (!ok) throw new Error(data?.error || '수정에 실패했어요');
+      if (!ok || !data.image?.tempId) throw new Error(data?.error || '수정에 실패했어요');
       const blob = await loadBlob(data.image.url);
       setCandidates((prev) => [{ tempId: data.image.tempId, url: data.image.url, blob, presetKey: c.presetKey, title: c.title }, ...prev]);
+      // 결과를 화면에 놓은 뒤에만 표를 버린다(Codex E3 — 미리보기를 못 받으면 표를 남겨 같은 지시 재시도가 기억 결과를 받는다 · 다시 걷지 않는다)
+      editAttemptRef.current = null;
       toast.success('수정 완료');
       setEditFor(null); setEditText('');
     } catch (e: any) {

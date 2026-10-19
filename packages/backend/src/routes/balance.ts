@@ -235,7 +235,19 @@ router.post('/deposit-request', demoBlock, async (req: Request, res: Response) =
       tradeName: companyResult.rows[0].name,
       ceoName: companyResult.rows[0].ceo_name,
     });
-    const heldReason = holderVerdict.result === 'mismatch' ? holderVerdict.holdReason || null : null;
+    let heldReason = holderVerdict.result === 'mismatch' ? holderVerdict.holdReason || null : null;
+    // ★ 2026-10-19 B-1005-4② — 같은 회사 · 같은 금액의 명의 확인 대기(보류) 요청이 있으면 이 요청도 보류로 받는다.
+    //   옛: 보류 건(A)을 둔 채 일치하는 입금자명으로 다시 신청(B)하면 B 승인은 B 의 보류만 봐서, 은행 내역 대조 없이 A 의 소명 없이 같은 입금이 충전될 수 있었다.
+    //   상태 축은 늘리지 않는다(보류 사유만 · 승인은 소명 확인 경로 · 링크 승인 불가 · 담당자 문자 없음 = 기존 보류 건과 같다).
+    if (!heldReason) {
+      const heldTwin = await query(
+        `SELECT 1 FROM deposit_requests
+          WHERE company_id = $1 AND amount = $2 AND status = 'pending' AND held_reason IS NOT NULL
+          LIMIT 1`,
+        [companyId, amount]
+      );
+      if (heldTwin.rows.length > 0) heldReason = '같은 금액의 입금자명 확인 대기 요청이 있습니다. 앞 요청의 소명과 은행 입금 내역을 확인한 뒤 승인해 주세요.';
+    }
 
     // deposit_requests에 저장
     const result = await query(

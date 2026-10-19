@@ -142,7 +142,8 @@ export default function BatchActivateModal({ open, onClose, data, preselect, onE
       }
       const res = await fetch('/api/ai/operator/journeys-activate-batch', {
         method: 'POST', headers: headers(),
-        body: JSON.stringify({ journeyIds: selectedList.map((c) => c.id), confirmCallbackExclusionIds: [...confirmCb] }),
+        // ★ 2026-10-19 B-1009-5 — 고른 겹침 해소(쌍 키)를 함께 보낸다(서버가 다시 확인한다)
+        body: JSON.stringify({ journeyIds: selectedList.map((c) => c.id), confirmCallbackExclusionIds: [...confirmCb], acknowledgedOverlaps: [...acks] }),
       });
       const d = await res.json().catch(() => ({}));
       if (!res.ok || !d?.success) { setError(d?.error || '켜지 못했어요.'); return; }
