@@ -71,7 +71,7 @@ import { filterByIndividualCallback, buildCallbackErrorResponse, buildCallbackCo
 import { getFatigueCap, getFatigueBlockedSet, recordFatigueSends } from '../utils/fatigue-guard';
 import { deduplicateByPhone } from '../utils/deduplicate';
 import { getUserTestContacts } from '../utils/test-contact-helper';
-import { validateScheduledAt } from '../utils/campaign-validation';
+import { validateScheduledAt, isInSendChangeLock, SEND_CHANGE_LOCK_MINUTES } from '../utils/campaign-validation';
 import { isWithinBrandSendWindow, parseSplitSetting, planSplitSchedule, splitSendTime, splitSpanError, resolveSplitFirstSend } from '../utils/send-time-util';
 import { countStagingFiltered, countStagingChecks, planIndividualCallbackExclusion, createDirectSendCampaign, effectiveUnsubFilter } from '../utils/direct-send-core';
 import { DirectSendError, loadedSendFailureMessage } from '../utils/direct-send-spec';
@@ -4016,16 +4016,13 @@ router.delete('/:id', async (req: Request, res: Response) => {
       });
     }
 
-    // 15분 이내 제한 — 예약 시간 15분 전부터 취소 불가
-    if (campaign.scheduled_at) {
-      const timeUntilSend = new Date(campaign.scheduled_at).getTime() - Date.now();
-      if (timeUntilSend < 15 * 60 * 1000) {
-        return res.status(400).json({
-          success: false,
-          error: '발송 15분 전부터는 취소할 수 없습니다.',
-          tooLate: true
-        });
-      }
+    // 15분 이내 제한 — 예약 시간 15분 전부터 취소 불가 · ★ 2026-10-19 판정 = 예약 시각 CT(위에서 지난 시각을 먼저 거른다 · 값 그대로)
+    if (isInSendChangeLock(campaign.scheduled_at)) {
+      return res.status(400).json({
+        success: false,
+        error: `발송 ${SEND_CHANGE_LOCK_MINUTES}분 전부터는 취소할 수 없습니다.`,
+        tooLate: true
+      });
     }
 
     // ★ 2026-09-26 (Codex 4차 2R high) — 가드부터 물리 삭제까지 **캠페인 발송 시작 잠금** 안에서 한다(발송 시작과 한 줄).

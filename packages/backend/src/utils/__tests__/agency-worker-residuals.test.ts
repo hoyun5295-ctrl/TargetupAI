@@ -221,14 +221,17 @@ describe('수정·재예약 라우트', () => {
     it(`${marker}: 캐시가 채워졌거나 시도 키 캠페인이 이미 커밋됐으면 0행이고, 잠금 조각 번호 = params 길이`, () => {
       expect(route).toContain(marker);
       const seg = ctSegOf(marker);
-      const upd = seg.slice(seg.search(/const updated = await (?:query|q)\(/), seg.indexOf('if (updated.rows.length === 0)'));
+      const upd = seg.slice(seg.search(/(?:const )?updated = await (?:query|q|client\.query)\(/), seg.indexOf('if (updated.rows.length === 0)'));
       expect(upd).toMatch(/AND campaign_id IS NULL/);
       expect(upd).toMatch(/AND NOT EXISTS \(SELECT 1 FROM campaigns c WHERE c\.staging_id = agency_send_requests\.dispatch_key AND c\.company_id = agency_send_requests\.company_id\)/);
       const n = Number(upd.match(/attemptIdleSql\((\d+)\)/)?.[1]);
       const arr = upd.slice(upd.lastIndexOf('['), upd.lastIndexOf(']') + 1);
       const items = arr.slice(1, -1).split(/,(?![^(]*\))/).map((x) => x.trim()).filter(Boolean);
-      expect(n).toBe(items.length);
-      expect(items[items.length - 1]).toBe('ATTEMPT_LOCK_PREFIX');
+      // 자리표시 번호 = 그 자리의 파라미터(★ 1019 보낼 시각 15분 전 잠금 조각이 마지막 자리에 붙었다)
+      expect(items[n - 1]).toBe('ATTEMPT_LOCK_PREFIX');
+      const m = Number(upd.match(/sendChangeLockFreeSql\('agency_send_requests\.requested_at', (\d+)\)/)?.[1]);
+      expect(items[m - 1]).toBe('SEND_CHANGE_LOCK_MINUTES');
+      expect(m).toBe(items.length);
     });
   }
 });

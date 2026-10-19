@@ -14,6 +14,7 @@
  * ⛔ 문구에 줄표 0. 톤 = 인디고 콘솔(`CUI_*`).
  */
 import { useCallback, useEffect, useState, type ReactNode } from 'react';
+import { useClockTick } from '../hooks/useClockTick';
 import { useNavigate } from 'react-router-dom';
 import { ArrowLeft, ArrowRight, FileSpreadsheet, Loader2, MessageSquare, Plus, RefreshCw, Send } from 'lucide-react';
 import { goBackOr } from '../lib/scroll-restoration';
@@ -27,7 +28,7 @@ import AgencyProgressRail from '../components/agency/AgencyProgressRail';
 import TablePagination from '../components/common/TablePagination';
 import ConfirmModal, { type ConfirmState } from '../components/ConfirmModal';
 import {
-  agencyCallbackLabel, cancelAgencyRequest, fetchAgencyRecipients, fetchAgencyRequests, formatWhen, formatWhenRelative, isApprovable, isCancelable, isRedoable,
+  agencyCallbackLabel, cancelAgencyRequest, fetchAgencyRecipients, fetchAgencyRequests, formatWhen, formatWhenRelative, isApprovable, isCancelable, isInSendChangeLock, isRedoable,
   SOURCE_LABEL, STATUS_LABEL, STATUS_TONE,
   type AgencySendRequest,
 } from '../components/agency/agency-send-api';
@@ -232,6 +233,9 @@ export default function AgencySendPage() {
   };
 
   const waitingList = requests.filter((r) => isApprovable(r.status));
+  const nowMs = useClockTick();   // ★ 1019 보낼 시각 15분 전 잠금을 시간 따라 다시 판정
+  // 확인 창 닫기 = 고정 함수(다시 그릴 때마다 새 함수를 넘기면 확인 창이 포커스를 위험 버튼으로 되돌린다 · Codex L2)
+  const closeConfirm = useCallback(() => setConfirm(null), []);
 
   // ★2026-09-02 페이징 — 접수가 쌓이면 한 화면에 전부 그려 스크롤이 끝없이 늘어나던 것을 10건씩 끊는다.
   //   목록 갱신은 최초 진입과 탭 복귀(visibilitychange)뿐이라 페이지를 자동으로 되돌리지 않는다
@@ -381,10 +385,12 @@ export default function AgencySendPage() {
                           <div className="text-left lg:text-right lg:w-[124px]">
                             <p className={`text-[13.5px] font-bold tracking-[-0.01em] ${terminal ? 'text-neutral-500' : 'text-neutral-900'}`}>{when.big}</p>
                             <p className="text-[12px] text-neutral-500">{when.sub}</p>
-                            {r.approveBy && isApprovable(r.status) && <p className="text-[11.5px] font-semibold text-amber-800 tabular-nums">승인 마감 {formatWhen(r.approveBy)}</p>}
+                            {r.approveBy && isApprovable(r.status) && !isInSendChangeLock(r.requestedAt, nowMs) && <p className="text-[11.5px] font-semibold text-amber-800 tabular-nums">승인 마감 {formatWhen(r.approveBy)}</p>}
+                            {/* ★ 2026-10-19 보낼 시각 15분 전 잠금 — 승인 · 취소 버튼 대신 사유(서버도 같은 판정으로 거절) */}
+                            {isInSendChangeLock(r.requestedAt, nowMs) && isCancelable(r.status) && <p className="text-[11.5px] font-semibold text-neutral-500">15분 전 · 바꿀 수 없어요</p>}
                           </div>
                           <div className="w-[150px] flex justify-end gap-1.5" onClick={(e) => e.stopPropagation()}>
-                            {isApprovable(r.status) ? (
+                            {isApprovable(r.status) && !isInSendChangeLock(r.requestedAt, nowMs) ? (
                               <>
                                 <button type="button" onClick={() => setDetailId(r.id)} className={`${CUI_BTN_PRIMARY} h-8 px-3 text-[13px]`}>
                                   승인하기
@@ -463,7 +469,7 @@ export default function AgencySendPage() {
         onClose={() => setDetailId(null)}
         onChanged={(r) => upsert(r)}
       />
-      <ConfirmModal state={confirm} onClose={() => setConfirm(null)} />
+      <ConfirmModal state={confirm} onClose={closeConfirm} />
     </div>
   );
 }

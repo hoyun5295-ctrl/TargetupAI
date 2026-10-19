@@ -192,7 +192,7 @@ describe('D 대행발송', () => {
   });
   it('만료 건 다시 진행 = 같은 연결 · 잠금 → 쌍둥이 확인 → 갱신 → 커밋', () => {
     const seg = fnBody(read('../agency-send-change.ts'), 'export async function rescheduleAgencyRequestTx(');
-    inOrder(seg, ["const resuming = row.status === 'expired';", "client.query('BEGIN')", 'pg_advisory_xact_lock(hashtext($1))', 'agency-twin:', 'findBlockingTwinRequest(input.companyId, input.requestId, String(row.original_content || \'\'), q)', 'const updated = await q(', "client.query('COMMIT'); committed = true;", "if (client && !committed) await client.query('ROLLBACK')", 'client?.release()', 'return afterReschedule(']);
+    inOrder(seg, ["const resuming = row.status === 'expired';", "client.query('BEGIN')", 'pg_advisory_xact_lock(hashtext($1))', 'agency-twin:', 'findBlockingTwinRequest(input.companyId, input.requestId, String(row.original_content || \'\'), q)', 'const updated = await q(', "client.query('COMMIT'); committed = true;", "if (!committed) await client.query('ROLLBACK')", 'client?.release()', 'return afterReschedule(']);   // ★ 1019 Codex L3 늘 한 트랜잭션
     // 쌍둥이 · 차단 갈래에 따로 적은 ROLLBACK 이 없다(되돌림 = finally 한 곳)
     expect(seg.match(/client\.query\('ROLLBACK'\)/g)?.length).toBe(1);
   });
@@ -228,7 +228,10 @@ describe('D 대행발송', () => {
   it('만료 재진행 = 차단 판정도 같은 연결 · 0행 응답의 지금 행은 연결을 돌려준 뒤', () => {
     const seg = fnBody(read('../agency-send-change.ts'), 'export async function rescheduleAgencyRequestTx(');
     expect(seg).toContain('await attemptBlocksChange(input.companyId, input.requestId, row.dispatch_key, q)');
-    inOrder(seg, ['stale = true;', 'client?.release()', "if (stale) return fail(409", 'await currentRow(']);
+    // ★ 1019 0행 응답 = staleFail(연결을 돌려준 뒤 일반 조회로 지금 행 · 잠금이면 잠금 사유)
+    inOrder(seg, ['stale = true;', 'client?.release()', 'if (stale) return staleFail(']);
+    const sf = fnBody(read('../agency-send-change.ts'), 'async function staleFail(');
+    expect(sf).toContain('await currentRow(requestId, companyId)');
     const tx = seg.slice(seg.indexOf("client.query('BEGIN')"), seg.indexOf('client?.release()'));
     expect(tx).not.toContain('currentRow(');
     expect(read('../agency-send-campaign.ts')).toMatch(/q: \(text: string, params\?: any\[\]\) => Promise<any> = query,\s*\): Promise<\{ id: string \| null; kind: CampaignKind/);

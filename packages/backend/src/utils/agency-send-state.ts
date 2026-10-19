@@ -13,6 +13,15 @@
 
 // ────────────── 상태 ──────────────
 
+import { isInSendChangeLock, SEND_CHANGE_LOCK_MINUTES } from './campaign-validation';
+
+/** ★ 2026-10-19 보낼 시각 15분 전 잠금 안내(화면 · 링크 · 서버 거절이 같은 문장 · 판정 = campaign-validation `isInSendChangeLock`) */
+export const AGENCY_SEND_LOCK_REASON = `보낼 시각 ${SEND_CHANGE_LOCK_MINUTES}분 전부터는 승인 · 취소 · 수정할 수 없어요.`;
+/** 이 접수가 보낼 시각 15분 전 잠금 안인가(승인 · 취소 · 시각 변경 · 문안 수정 · 맞춤법 고치기를 받지 않는다) */
+export function isAgencySendLocked(requestedAt: Date | string | null | undefined, now: Date = new Date()): boolean {
+  return isInSendChangeLock(requestedAt, now);
+}
+
 export type AgencySendStatus =
   | 'received'           // 접수됨, 1차 검사 대기
   | 'testing'            // 워커가 1차 검사 중(lock)
@@ -364,8 +373,10 @@ export function approvalDeadline(
  *   근거 없이 만료시킨다. 필요한 리드타임은 상태가 아니라 **남은 일**이 정한다.
  */
 export function requiredLeadMinutes(status: AgencySendStatus, finalTested = false): number {
-  if (finalTested) return QUEUE_MARGIN_MINUTES;
-  return status === 'awaiting_approval' ? FINAL_TEST_LEAD_MINUTES : QUEUE_MARGIN_MINUTES;
+  const base = finalTested ? QUEUE_MARGIN_MINUTES : status === 'awaiting_approval' ? FINAL_TEST_LEAD_MINUTES : QUEUE_MARGIN_MINUTES;
+  // ★ 2026-10-19 승인(승인 대기 · 재승인)은 보낼 시각 15분 전 잠금보다 짧을 수 없다(Harold 「승인까지 15분 이내는 전부 막는다」).
+  //   만료 판정(isApprovalExpired)도 이 함수라 같은 경계로 닫힌다(승인은 막혔는데 만료는 안 되는 틈 0). 승인된 건(approved)의 적재 여유는 그대로 10분.
+  return status === 'awaiting_approval' || status === 'reapproval' ? Math.max(base, SEND_CHANGE_LOCK_MINUTES) : base;
 }
 
 export interface ApprovalCheck {
@@ -405,7 +416,7 @@ export function checkApproval(target: ApprovalTarget, approvingRevision: number,
       // ⛔ 당일 검사가 끝난 건에 "재검사에 필요한 시간"이라고 쓰면 거짓이다. 남은 일이 다르면 문장도 다르다.
       error: target.status === 'awaiting_approval' && !finalTested
         ? '보낼 시각까지 2시간이 남지 않았습니다. 발송 직전 재검사에 필요한 시간이라 시각을 다시 정해 주세요.'
-        : '보낼 시각이 너무 가까워 예약을 넣지 못합니다. 시각을 다시 정해 주세요.',
+        : `보낼 시각 ${SEND_CHANGE_LOCK_MINUTES}분 전부터는 승인할 수 없습니다. 시각을 다시 정해 주세요.`,
       code: 'TOO_LATE',
     };
   }

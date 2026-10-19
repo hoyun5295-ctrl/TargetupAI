@@ -716,6 +716,7 @@ async function finalTestRow(row: any, now: Date): Promise<void> {
         callback: target.callback_number, title: '[대행발송] 예약 취소 안내',
         text: buildFinalBlockedNotify({ label }),
       });
+      if (await reapprovalWindowMissed(target, label)) return;   // ★ 1019 보낼 시각 15분 전 = 승인 못 하는 재승인 문자 0
       const sample = await buildSample({ ...target, current_content: finalContent });
       const images = Array.isArray(target.mms_image_paths) ? target.mms_image_paths : [];
       await sendManagerTest({
@@ -1036,6 +1037,7 @@ async function dispatchAttempt(
     await logEvent(row.id, 'dispatch_unapproved_version', {
       approvalVersion: row.approval_version, contentVersion: row.content_version,
     });
+    if (await reapprovalWindowMissed(row, label)) return;   // ★ 1019 보낼 시각 15분 전 = 승인 못 하는 재승인 문자 0
     // ★2026-08-25 이 재승인 분기도 담당자별 링크를 싣는다(Codex 적대 1R medium — 여기만 로그인 안내가 나갔다).
     //   그리고 링크를 주기 전에 **문안 실물부터** 보낸다(Codex 적대 2R high — 정상 재승인 경로와 같은 순서.
     //   실물 없이 승인 링크만 가면, 치환·광고 부착·이미지가 붙은 실제 문장을 못 본 채 승인하게 된다).
@@ -1267,6 +1269,29 @@ async function dispatchAttempt(
       await logEvent(row.id, 'dispatch_retry', { code, message: String(err?.message || '') });
     }
   }
+}
+
+/**
+ * ★ 2026-10-19 재승인으로 바꾼 직후 — 지금 승인이 통하지 않으면(보낼 시각 15분 전 잠금 · 승인 · 만료 판정과 같은 함수 isApprovalExpired)
+ *   실물 · 승인 링크를 보내지 않고 「시각 확인 요청」만 보낸다(첫 검사 통과 경로 · 승인 대기와 같은 순서 · 같은 문장). 접수는 만료 단계가 닫는다.
+ *   승인된 건(approved)의 적재 여유 10분은 그대로다(사람 조작 잠금이지 배관 잠금이 아니다).
+ */
+async function reapprovalWindowMissed(row: any, label: string): Promise<boolean> {
+  // 판정 직전 지금 행(★ Codex L2) — 앞 안내 문자를 기다리는 사이 로그인 화면 승인 · 취소 · 시각 변경으로 진행됐으면
+  //   재승인 실물 · 링크도 시각 확인 요청도 보내지 않는다(true = 호출부가 여기서 멈춘다 · 진행한 쪽이 자기 안내를 낸다).
+  const cur = (await query(
+    `SELECT status, requested_at, final_test_at FROM agency_send_requests WHERE id = $1::uuid`,
+    [row.id],
+  )).rows[0];
+  if (!cur || cur.status !== 'reapproval') return true;
+  if (!isApprovalExpired('reapproval', new Date(cur.requested_at), new Date(), cur.final_test_at ? new Date(cur.final_test_at) : null)) return false;
+  await logEvent(row.id, 'approval_window_missed', { status: 'reapproval', requestedAt: cur.requested_at });
+  await notifyManager({
+    companyId: row.company_id, requestId: row.id, phones: managerPhonesOf(row),
+    callback: row.callback_number, title: '[대행발송] 시각 확인 요청',
+    text: buildTooTightNotify({ label, whenText: formatWhen(new Date(cur.requested_at)) }),
+  });
+  return true;
 }
 
 // ────────────── C. 만료 ──────────────

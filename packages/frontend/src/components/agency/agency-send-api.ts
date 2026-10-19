@@ -446,6 +446,20 @@ export const STATUS_TONE: Record<AgencySendStatus, 'neutral' | 'amber' | 'blue' 
   sent: 'neutral',
 };
 
+/**
+ * ★ 2026-10-19 보낼 시각 15분 전 잠금 — 백엔드 utils/campaign-validation.ts `SEND_CHANGE_LOCK_MINUTES` 미러(값 대조 시험).
+ *   이 안에서는 승인 · 취소 · 시각 변경 · 문안 수정 버튼을 내지 않는다(서버도 같은 판정으로 거절한다 · 지난 시각은 잠그지 않는다).
+ */
+export const SEND_CHANGE_LOCK_MINUTES = 15;
+export const SEND_CHANGE_LOCK_REASON = `보낼 시각 ${SEND_CHANGE_LOCK_MINUTES}분 전부터는 승인 · 취소 · 수정할 수 없어요.`;
+export function isInSendChangeLock(requestedAt: string | null | undefined, now: number = Date.now()): boolean {
+  if (!requestedAt) return false;
+  const t = new Date(requestedAt).getTime();
+  if (Number.isNaN(t)) return false;
+  const minutesLeft = (t - now) / 60000;
+  return minutesLeft > 0 && minutesLeft < SEND_CHANGE_LOCK_MINUTES;
+}
+
 /** 담당자가 지금 승인할 수 있는 상태인가(서버가 최종 판정하고, 화면은 버튼을 켜고 끄는 데만 쓴다) */
 export function isApprovable(status: AgencySendStatus): boolean {
   return status === 'awaiting_approval' || status === 'reapproval';

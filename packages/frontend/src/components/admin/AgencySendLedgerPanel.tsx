@@ -7,13 +7,14 @@
  * 표시 판정(레일·상태·출처 라벨)은 고객 화면과 **같은 CT**(agency-send-api)를 읽는다 — 두 화면이 다르게 읽히면 안 된다.
  */
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useClockTick } from '../../hooks/useClockTick';
 import { AlertTriangle, Eye, Loader2, RefreshCw, Search, Send, X } from 'lucide-react';
 import AgencyProgressRail from '../agency/AgencyProgressRail';
 import AgencyPreviewModal from '../agency/AgencyPreviewModal';
 import AgencyEventLog from '../agency/AgencyEventLog';
 import TablePagination from '../common/TablePagination';
 import {
-  agencyCallbackLabel, formatWhenRelative, isCancelable, SOURCE_LABEL, STATUS_LABEL, STATUS_TONE,
+  agencyCallbackLabel, formatWhenRelative, isCancelable, isInSendChangeLock, SOURCE_LABEL, STATUS_LABEL, STATUS_TONE,
   type AgencyPreviewSample, type AgencySendEvent, type AgencySendStatus,
 } from '../agency/agency-send-api';
 import { CUI_PILL_BASE, CUI_PILL_TONE } from '../../utils/console-ui';
@@ -85,6 +86,7 @@ const SOURCE_FILTERS: Array<{ value: string; label: string }> = [
 ];
 
 export default function AgencySendLedgerPanel() {
+  const nowMs = useClockTick();   // ★ 1019 보낼 시각 15분 전 잠금을 시간 따라 다시 판정
   const [rows, setRows] = useState<AdminAgencyRow[]>([]);
   const [summary, setSummary] = useState<Summary[]>([]);
   const [loading, setLoading] = useState(true);
@@ -306,7 +308,7 @@ export default function AgencySendLedgerPanel() {
                       <span className="inline-flex items-center gap-1.5 text-[12.5px] font-semibold text-amber-600">
                         <Loader2 className="w-3.5 h-3.5 animate-spin" />취소 중
                       </span>
-                    ) : isCancelable(r.status) && r.status !== 'expired' ? (
+                    ) : isCancelable(r.status) && r.status !== 'expired' && !isInSendChangeLock(r.requested_at, nowMs) ? (   // ★ 1019 보낼 시각 15분 전 잠금(서버도 같은 판정)
                       <button
                         type="button"
                         onClick={() => openCancel(r)}

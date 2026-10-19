@@ -8,7 +8,7 @@
  * ⛔ 순수(DB 0) · 문장은 사람이 읽는 말 · 줄표 0.
  */
 import {
-  approvalDeadline, canCancel, checkApproval, isEditable, MIN_LEAD_MINUTES, type AgencySendStatus,
+  AGENCY_SEND_LOCK_REASON, approvalDeadline, canCancel, checkApproval, isAgencySendLocked, isEditable, MIN_LEAD_MINUTES, type AgencySendStatus,
 } from './agency-send-state';
 import { readAgencySpell } from './agency-send-spell';
 
@@ -49,13 +49,16 @@ export function agencyActions(actor: AgencyActor, row: any, now: Date = new Date
   const approvalRequestedAt = dateOf(row?.approval_requested_at);
   const revision = Number(row?.revision);
   const dispatched = !!row?.campaign_id;
+  // ★ 2026-10-19 보낼 시각 15분 전 잠금(직접발송 예약 취소와 같은 판정) — 승인은 checkApproval 리드타임이 같은 15분으로 막는다
+  const locked = isAgencySendLocked(row?.requested_at, now);
 
   const appr = checkApproval({ status, revision, requestedAt, finalTestedAt, approvalRequestedAt }, revision, now);
   const approve = actor === 'staff' ? no('운영 화면에서는 승인하지 않아요.') : appr.ok ? yes : no(appr.error || '지금은 승인할 수 있는 상태가 아니에요.');
-  const cancel = canCancel(status) ? yes : no(cancelReason(status));
+  const cancel = !canCancel(status) ? no(cancelReason(status)) : locked ? no(AGENCY_SEND_LOCK_REASON) : yes;
   const editable = isEditable(status) && !dispatched;
   const reschedule = actor === 'staff' ? no('운영 화면에서는 시각을 바꾸지 않아요.')
-    : editable ? yes : no(dispatched ? '이미 발송 준비가 시작된 건이에요.' : '지금은 시각을 바꿀 수 있는 상태가 아니에요.');
+    : !editable ? no(dispatched ? '이미 발송 준비가 시작된 건이에요.' : '지금은 시각을 바꿀 수 있는 상태가 아니에요.')
+      : locked ? no(AGENCY_SEND_LOCK_REASON) : yes;
   // 되살린 뒤 = 승인 대기 · 승인 요청 시각 = 지금(24시간 다시 시작)으로 승인이 통과하는가
   const revived = status === 'expired' && editable
     ? checkApproval({ status: 'awaiting_approval', revision, requestedAt, finalTestedAt: null, approvalRequestedAt: now }, revision, now)
@@ -67,9 +70,11 @@ export function agencyActions(actor: AgencyActor, row: any, now: Date = new Date
   const minutesLeft = (requestedAt.getTime() - now.getTime()) / 60000;
   const spellFix = actor === 'staff' ? no('운영 화면에서는 문안을 고치지 않아요.')
     : !editable ? no('지금은 문안을 고칠 수 있는 상태가 아니에요.')
+      : locked ? no(AGENCY_SEND_LOCK_REASON)
       : fixable === 0 ? no('고칠 수 있는 맞춤법 제안이 없어요.')
         : minutesLeft < MIN_LEAD_MINUTES ? no(`보낼 시각까지 ${MIN_LEAD_MINUTES}분이 남지 않아 고치면 다시 검사 · 승인할 시간이 없어요.`) : yes;
-  const editText = actor !== 'user' ? no('문안을 직접 고치는 일은 한줄로 화면에서 해요.') : editable ? yes : no('지금은 문안을 고칠 수 있는 상태가 아니에요.');
+  const editText = actor !== 'user' ? no('문안을 직접 고치는 일은 한줄로 화면에서 해요.')
+    : !editable ? no('지금은 문안을 고칠 수 있는 상태가 아니에요.') : locked ? no(AGENCY_SEND_LOCK_REASON) : yes;
   const by = approvalDeadline(status, requestedAt, finalTestedAt, approvalRequestedAt);
   return { approve, cancel, reschedule, resume, spellFix, editText, approveBy: by ? by.toISOString() : null };
 }

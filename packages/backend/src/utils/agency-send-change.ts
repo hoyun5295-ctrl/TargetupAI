@@ -10,10 +10,11 @@
  */
 import { createHash } from 'crypto';
 import pool, { query } from '../config/database';
-import { isEditable, isSameKstDay, validateRequestedAt, MIN_LEAD_MINUTES, resumeTwinBlockingSql, type AgencySendStatus } from './agency-send-state';
+import { AGENCY_SEND_LOCK_REASON, isAgencySendLocked, isEditable, isSameKstDay, validateRequestedAt, MIN_LEAD_MINUTES, resumeTwinBlockingSql, type AgencySendStatus } from './agency-send-state';
 import { buildSlotPlan, extractAgencyVars } from './agency-send-vars';
 import { hasAgencySpellColumn, readAgencySpell } from './agency-send-spell';
 import { ATTEMPT_LOCK_PREFIX, attemptBlocksChange, attemptIdleSql } from './agency-send-worker';
+import { SEND_CHANGE_LOCK_MINUTES, sendChangeLockFreeSql } from './campaign-validation';
 import {
   findUnregisteredRequestCallbacks, hasApprovalRequestedColumn, loadSendWindow, logEvent, unregisteredCallbackError, MAX_CONTENT,
 } from './agency-send-intake';
@@ -35,6 +36,13 @@ function alreadyDispatched(campaignId: any): AgencyChangeResult | null {
 async function currentRow(requestId: string, companyId: string): Promise<any> {
   const r = await query(`SELECT * FROM agency_send_requests WHERE id = $1::uuid AND company_id = $2::uuid`, [requestId, companyId]);
   return r.rows[0] || null;
+}
+
+/** 0행 응답 — 지금 행이 보낼 시각 15분 전 잠금 안이면 잠금 사유(판정한 뒤 저장 전에 경계를 넘은 경우 · ★ 1019 Codex L1) · 아니면 상태 바뀜 */
+async function staleFail(requestId: string, companyId: string): Promise<AgencyChangeResult> {
+  const cur = await currentRow(requestId, companyId);
+  if (cur && isAgencySendLocked(cur.requested_at)) return fail(409, AGENCY_SEND_LOCK_REASON, 'SEND_CHANGE_LOCKED', cur);
+  return fail(409, '그 사이 상태가 바뀌었습니다. 화면을 새로 고치고 다시 시도해 주세요.', 'STATE_CHANGED', cur);
 }
 
 /**
@@ -97,6 +105,8 @@ export async function editAgencyContentTx(input: {
   if (r.rows.length === 0) return fail(404, '접수를 찾을 수 없습니다.');
   const row = r.rows[0];
   if (!isEditable(row.status)) return fail(400, '지금은 문안을 고칠 수 있는 상태가 아닙니다.', undefined, row);
+  // ★ 2026-10-19 보낼 시각 15분 전 잠금(문안 수정 · 맞춤법 고치기 공통 · 아래 UPDATE 는 같은 수정 번호일 때만 = 읽은 보낼 시각 그대로)
+  if (isAgencySendLocked(row.requested_at, input.now ?? new Date())) return fail(409, AGENCY_SEND_LOCK_REASON, 'SEND_CHANGE_LOCKED', row);
   const dispatched = alreadyDispatched(row.campaign_id);
   if (dispatched) return dispatched;
   const observedRevision = Number(input.revision);
@@ -129,9 +139,19 @@ export async function editAgencyContentTx(input: {
   // ⛔ 컬럼 탐지는 차단 판정 **앞**에서 한다 — 판정과 UPDATE 사이에 다른 대기를 끼우지 않는다(옛 라우트 ⛔ 대행 ⓔ)
   const clearSpell = (await hasAgencySpellColumn()) ? 'spell_check = NULL, ' : '';
   const clearAsk = (await hasApprovalRequestedColumn()) ? 'approval_requested_at = NULL, ' : '';
-  const blocked = alreadyDispatched(await attemptBlocksChange(input.companyId, input.requestId, row.dispatch_key));
-  if (blocked) return blocked;
-  const updated = await query(
+  // ★ 2026-10-19 Codex L3 — 한 트랜잭션: 행 잠금(FOR UPDATE) → 차단 판정 → UPDATE(보낼 시각 잠금 = 행 잠금을 쥔 뒤 판정 · 시각 변경과 같은 순서).
+  //   잠금을 기다린 UPDATE 는 기다리기 전 조건을 다시 보지 않는다(READ COMMITTED) · 판정과 UPDATE 사이 다른 대기 0(대행 ⓔ)은 그대로.
+  const client = await pool.connect();
+  const q = (text: string, params?: any[]) => client.query(text, params);
+  let saved: any = null;
+  let committed = false;
+  let stale = false;
+  try {
+    await client.query('BEGIN');
+    await q(`SELECT 1 FROM agency_send_requests WHERE id = $1::uuid AND company_id = $2::uuid FOR UPDATE`, [input.requestId, input.companyId]);
+    const blocked = alreadyDispatched(await attemptBlocksChange(input.companyId, input.requestId, row.dispatch_key, q));
+    if (blocked) return blocked;
+    const updated = await q(
     `UPDATE agency_send_requests
         SET ${clearSpell}${clearAsk}original_content = $1, current_content = $1, content_version = content_version + 1,
             status = 'received', test_round = 0, last_test_result = NULL, last_test_at = NULL,
@@ -141,19 +161,26 @@ export async function editAgencyContentTx(input: {
             lock_at = NULL, lock_token = NULL, revision = revision + 1, updated_at = NOW()
       WHERE id = $3::uuid AND company_id = $4::uuid AND revision = $5
         AND campaign_id IS NULL
-        AND NOT EXISTS (SELECT 1 FROM campaigns c WHERE c.staging_id = agency_send_requests.dispatch_key AND c.company_id = agency_send_requests.company_id)${attemptIdleSql(6)}
+        AND NOT EXISTS (SELECT 1 FROM campaigns c WHERE c.staging_id = agency_send_requests.dispatch_key AND c.company_id = agency_send_requests.company_id)${attemptIdleSql(6)}${sendChangeLockFreeSql('agency_send_requests.requested_at', 7)}
       RETURNING *`,
-    [body, subject, input.requestId, input.companyId, observedRevision, ATTEMPT_LOCK_PREFIX],
-  );
-  if (updated.rows.length === 0) {
-    return fail(409, '그 사이 상태가 바뀌었습니다. 화면을 새로 고치고 다시 시도해 주세요.', 'STATE_CHANGED', await currentRow(input.requestId, input.companyId));
+    [body, subject, input.requestId, input.companyId, observedRevision, ATTEMPT_LOCK_PREFIX, SEND_CHANGE_LOCK_MINUTES],
+    );
+    if (updated.rows.length === 0) stale = true;
+    else saved = updated.rows[0];
+    await client.query('COMMIT'); committed = true;
+  } finally {
+    // 커밋 못 한 갈래(차단 · 오류) = 여기서 한 번 되돌린다(열린 트랜잭션을 풀에 돌려주지 않는다)
+    if (!committed) await client.query('ROLLBACK').catch(() => { /* 원 오류 우선 */ });
+    client.release();
   }
+  // 0행 응답의 지금 행은 연결을 돌려준 뒤 읽는다(시각 변경과 같은 규칙)
+  if (stale) return staleFail(input.requestId, input.companyId);
   await logEvent(input.requestId, 'content_edited', {
-    version: updated.rows[0]?.content_version, via: input.via,
+    version: saved?.content_version, via: input.via,
     ...(input.change.kind === 'spell' ? { spellFixed: input.change.issueIds.length } : {}),
     ...(input.actor || {}),
   });
-  return { ok: true, row: updated.rows[0] };
+  return { ok: true, row: saved };
 }
 
 /**
@@ -199,6 +226,8 @@ export async function rescheduleAgencyRequestTx(input: {
   if (r.rows.length === 0) return fail(404, '접수를 찾을 수 없습니다.');
   const row = r.rows[0];
   if (!isEditable(row.status)) return fail(400, '지금은 시각을 고칠 수 있는 상태가 아닙니다.', undefined, row);
+  // ★ 2026-10-19 보낼 시각 15분 전 잠금(지금 보낼 시각 기준 · 지난 시각은 잠그지 않는다 = 만료 건을 새 시각으로 살리는 길)
+  if (isAgencySendLocked(row.requested_at)) return fail(409, AGENCY_SEND_LOCK_REASON, 'SEND_CHANGE_LOCKED', row);
   const dispatched = alreadyDispatched(row.campaign_id);
   if (dispatched) return dispatched;
   const observedRevision = Number(input.revision);
@@ -220,19 +249,22 @@ export async function rescheduleAgencyRequestTx(input: {
   const askSet = askCol ? (backTo === 'awaiting_approval' ? 'approval_requested_at = NOW(), ' : 'approval_requested_at = NULL, ') : '';
   // ★ Codex D 1R — 만료 건 다시 진행은 (회사 · 문안) 잠금 아래 한 트랜잭션에서 쌍둥이 확인 → 갱신(동시에 두 쌍둥이를 되살리면 둘 다 통과하던 틈)
   const resuming = row.status === 'expired';
-  const client = resuming ? await pool.connect() : null;
-  const q = (text: string, params?: any[]) => (client ? client.query(text, params) : query(text, params));
+  // ★ 2026-10-19 Codex L3 — 늘 한 트랜잭션(옛 = 만료 재진행만): (재진행이면 쌍둥이 잠금 →) 행 잠금 → 차단 판정 → UPDATE.
+  //   보낼 시각 잠금은 행 잠금을 쥔 뒤의 UPDATE 가 판정한다. 잠금 순서 = 쌍둥이 → 행(시도 키 잠금은 기다리지 않는 시도형).
+  const client = await pool.connect();
+  const q = (text: string, params?: any[]) => client.query(text, params);
   let saved: any;
   let committed = false;
   let stale = false;
   try {
-    if (client) {
-      await client.query('BEGIN');
+    await client.query('BEGIN');
+    if (resuming) {
       const key = createHash('sha256').update(`${input.companyId}|${String(row.original_content || '')}`).digest('hex');
       await client.query(`SELECT pg_advisory_xact_lock(hashtext($1))`, [`agency-twin:${key}`]);
       const twin = await findBlockingTwinRequest(input.companyId, input.requestId, String(row.original_content || ''), q);
       if (twin) return fail(409, '같은 문안 · 같은 명단으로 진행 중인 다른 접수가 있어 다시 진행하지 않았어요. 그 접수를 확인해 주세요.', 'DUPLICATE_IN_PROGRESS', row);
     }
+    await q(`SELECT 1 FROM agency_send_requests WHERE id = $1::uuid AND company_id = $2::uuid FOR UPDATE`, [input.requestId, input.companyId]);
     const blocked = alreadyDispatched(await attemptBlocksChange(input.companyId, input.requestId, row.dispatch_key, q));
     if (blocked) return blocked;
     const updated = await q(
@@ -244,23 +276,23 @@ export async function rescheduleAgencyRequestTx(input: {
             revision = revision + 1, updated_at = NOW()
       WHERE id = $3::uuid AND company_id = $4::uuid AND revision = $5
         AND campaign_id IS NULL
-        AND NOT EXISTS (SELECT 1 FROM campaigns c WHERE c.staging_id = agency_send_requests.dispatch_key AND c.company_id = agency_send_requests.company_id)${attemptIdleSql(7)}
+        AND NOT EXISTS (SELECT 1 FROM campaigns c WHERE c.staging_id = agency_send_requests.dispatch_key AND c.company_id = agency_send_requests.company_id)${attemptIdleSql(7)}${sendChangeLockFreeSql('agency_send_requests.requested_at', 8)}
       RETURNING *`,
-      [when.at, backTo, input.requestId, input.companyId, observedRevision, keepFinalTest ? priorFinalTest : null, ATTEMPT_LOCK_PREFIX],
+      [when.at, backTo, input.requestId, input.companyId, observedRevision, keepFinalTest ? priorFinalTest : null, ATTEMPT_LOCK_PREFIX, SEND_CHANGE_LOCK_MINUTES],
     );
     if (updated.rows.length === 0) {
       stale = true;
     } else {
-      if (client) { await client.query('COMMIT'); committed = true; }
+      await client.query('COMMIT'); committed = true;
       saved = updated.rows[0];
     }
   } finally {
     // 커밋 못 한 갈래(쌍둥이 · 차단 · 0행 · 오류) = 여기서 한 번 되돌린다(열린 트랜잭션을 풀에 돌려주지 않는다)
-    if (client && !committed) await client.query('ROLLBACK').catch(() => { /* 원 오류 우선 */ });
+    if (!committed) await client.query('ROLLBACK').catch(() => { /* 원 오류 우선 */ });
     client?.release();
   }
   // 0행 응답의 지금 행은 연결을 돌려준 **뒤에** 읽는다(★ Codex D 2R · 쥔 채 풀에서 또 꺼내면 동시 재진행이 풀을 말린다)
-  if (stale) return fail(409, '그 사이 상태가 바뀌었습니다. 화면을 새로 고치고 다시 시도해 주세요.', 'STATE_CHANGED', await currentRow(input.requestId, input.companyId));
+  if (stale) return staleFail(input.requestId, input.companyId);
   // 커밋 뒤 = 이력만(실패해도 바뀐 시각은 그대로 · logEvent 는 오류를 삼킨다)
   return afterReschedule(input, saved, backTo, when, keepFinalTest);
 }

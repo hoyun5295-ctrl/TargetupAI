@@ -7,7 +7,8 @@
  * ⛔ 승인 버튼은 서버가 준 상태와 문안 버전으로만 켜진다. 화면이 자격을 다시 계산하지 않는다.
  * ⛔ 문구에 줄표 0. 톤 = 인디고 콘솔.
  */
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
+import { useClockTick } from '../../hooks/useClockTick';
 import { AlertTriangle, Check, Eye, Loader2, Send, SpellCheck, X } from 'lucide-react';
 import { useToast } from '../ToastProvider';
 import AgencyPreviewModal from './AgencyPreviewModal';
@@ -26,7 +27,7 @@ import {
 } from '../../utils/console-ui';
 import {
   agencyCallbackLabel, applyAgencySpellToDraft, approveAgencyRequest, cancelAgencyRequest, fetchAgencyPreview, fetchAgencyRequest, formatWhen,
-  isApprovable, isCancelable, isEditableStatus, rescheduleAgencyRequest, SOURCE_LABEL, STATUS_LABEL,
+  isApprovable, isCancelable, isEditableStatus, isInSendChangeLock, rescheduleAgencyRequest, SEND_CHANGE_LOCK_REASON, SOURCE_LABEL, STATUS_LABEL,
   STATUS_TONE, toLocalInput, updateAgencyContent, type AgencyPreviewSample, type AgencySendEvent,
   type AgencySendRequest,
 } from './agency-send-api';
@@ -191,12 +192,17 @@ export default function AgencySendDetail({ requestId, onClose, onChanged }: Prop
     } finally { setBusy(false); }
   };
 
+  const nowMs = useClockTick();   // ★ 1019 보낼 시각 15분 전 잠금을 시간 따라 다시 판정(훅 = 조건부 return 앞)
+  // 확인 창 닫기 = 고정 함수(다시 그릴 때마다 새 함수를 넘기면 확인 창이 포커스를 위험 버튼으로 되돌린다 · Codex L2)
+  const closeConfirm = useCallback(() => setConfirm(null), []);
   if (!requestId) return null;
 
   const refined = !!req && req.currentContent !== req.originalContent;
   // ★2026-09-13(3) 예약이 한 번이라도 만들어진 접수는 서버가 문안·시각 변경을 막는다(시도 키 보존 · 두 벌 발송 차단).
   //   누르고 거절당하지 않게 버튼을 처음부터 보이지 않는다. 판정 원본은 서버다(이 값이 비어 있어도 서버가 막는다).
-  const changeable = !!req && isEditableStatus(req.status) && !req.campaignId;
+  // ★ 2026-10-19 보낼 시각 15분 전 잠금 — 승인 · 취소 · 시각 변경 · 문안 수정 버튼을 내지 않는다(서버도 같은 판정)
+  const locked = !!req && isInSendChangeLock(req.requestedAt, nowMs);
+  const changeable = !!req && isEditableStatus(req.status) && !req.campaignId && !locked;
 
   return (
     <div className="fixed inset-0 z-[60] bg-neutral-900/45 flex items-center justify-center p-4">
@@ -230,7 +236,13 @@ export default function AgencySendDetail({ requestId, onClose, onChanged }: Prop
                 {req.reapprovalCount > 0 && <span className={CUI_CELL_META}>재승인 {req.reapprovalCount}회</span>}
               </div>
 
-              {isApprovable(req.status) && (
+              {locked && (isApprovable(req.status) || isCancelable(req.status)) && (
+                <div className={CUI_INFO}>
+                  <AlertTriangle className={CUI_INFO_ICON} size={16} strokeWidth={2} />
+                  <p className={CUI_INFO_TEXT}>{SEND_CHANGE_LOCK_REASON}</p>
+                </div>
+              )}
+              {isApprovable(req.status) && !locked && (
                 <div className={CUI_INFO}>
                   <Check className={CUI_INFO_ICON} size={16} strokeWidth={2} />
                   <p className={CUI_INFO_TEXT}>
@@ -367,7 +379,7 @@ export default function AgencySendDetail({ requestId, onClose, onChanged }: Prop
         </div>
 
         <div className={CUI_MODAL_FOOT}>
-          {req && isCancelable(req.status) ? (
+          {req && isCancelable(req.status) && !locked ? (
             <button type="button" disabled={busy} className={CUI_BTN_DANGER}
               onClick={() => setConfirm({
                 mode: 'danger', title: '이 발송을 취소할까요?',
@@ -376,7 +388,7 @@ export default function AgencySendDetail({ requestId, onClose, onChanged }: Prop
                 onConfirm: () => { setConfirm(null); void doCancel(); },
               })}>취소하기</button>
           ) : <span />}
-          {req && isApprovable(req.status) && !editing && (
+          {req && isApprovable(req.status) && !editing && !locked && (
             <button type="button" onClick={doApprove} disabled={busy} className={CUI_BTN_PRIMARY}>
               {busy ? <Loader2 className="w-[15px] h-[15px] animate-spin" /> : <Check className="w-[15px] h-[15px]" />}
               승인하고 예약하기
@@ -400,7 +412,7 @@ export default function AgencySendDetail({ requestId, onClose, onChanged }: Prop
         />
       )}
       {/* ★2026-10-18 취소 확인 창(1016 설계 「상세 취소 확인창 없음」 결함 정정) */}
-      <ConfirmModal state={confirm} onClose={() => setConfirm(null)} />
+      <ConfirmModal state={confirm} onClose={closeConfirm} />
 
       {/* ★2026-08-28(2) 받는 사람별 미리보기 — 별도 모달(portal). 부모 모달의 overflow-hidden에 잘리지 않는다 */}
       {req && (

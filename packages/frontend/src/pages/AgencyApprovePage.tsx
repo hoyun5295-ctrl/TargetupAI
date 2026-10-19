@@ -288,7 +288,8 @@ export default function AgencyApprovePage() {
                   })}
                 </ul>
                 <p className="mt-2 text-[11.5px] text-neutral-500 leading-relaxed">
-                  {a?.spellFix.ok ? '고칠 곳을 고르면 다시 검사한 뒤 새 테스트 문자와 승인 요청을 보내 드려요. 이대로 승인해도 됩니다.' : `${a?.spellFix.reason || '지금은 여기서 고칠 수 없어요.'} 이대로 승인해도 됩니다.`}
+                  {/* ★ 2026-10-19 「이대로 승인」 안내는 승인이 열려 있을 때만(보낼 시각 15분 전 잠금 · 그 밖 승인 불가 상태에서 어긋난 말 0) */}
+                  {a?.spellFix.ok ? `고칠 곳을 고르면 다시 검사한 뒤 새 테스트 문자와 승인 요청을 보내 드려요.${a?.approve.ok ? ' 이대로 승인해도 됩니다.' : ''}` : `${a?.spellFix.reason || '지금은 여기서 고칠 수 없어요.'}${a?.approve.ok ? ' 이대로 승인해도 됩니다.' : ''}`}
                 </p>
               </div>
             )}

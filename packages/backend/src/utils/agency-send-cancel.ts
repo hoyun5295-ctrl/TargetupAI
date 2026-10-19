@@ -13,7 +13,8 @@
  * ⛔ 큐 삭제는 자체 DELETE가 아니라 기존 캠페인 취소 CT(`campaign-lifecycle.cancelCampaign`)가 소유한다.
  */
 import { query } from '../config/database';
-import { canCancel, NOT_CANCELABLE_SQL } from './agency-send-state';
+import { AGENCY_SEND_LOCK_REASON, canCancel, isAgencySendLocked, NOT_CANCELABLE_SQL } from './agency-send-state';
+import { SEND_CHANGE_LOCK_MINUTES, sendChangeLockFreeSql } from './campaign-validation';
 import { campaignMayHaveSent, inspectAttemptCampaign } from './agency-send-campaign';
 import { logEvent } from './agency-send-intake';
 
@@ -50,7 +51,7 @@ export async function cancelAgencyRequestTx(opts: {
   //   워커가 잡고 있는 행(`lock_token`)은 건드리지 않는다.
   const claimed = await query(
     `WITH prev AS (
-       SELECT id, status, revision FROM agency_send_requests
+       SELECT id, status, revision, requested_at FROM agency_send_requests
         WHERE id = $1::uuid AND company_id = $2::uuid AND ($4::uuid IS NULL OR created_by = $4::uuid)
         FOR UPDATE
      )
@@ -62,15 +63,17 @@ export async function cancelAgencyRequestTx(opts: {
         AND prev.status NOT IN (${NOT_CANCELABLE_SQL})
         AND a.lock_token IS NULL
         AND ($5::int IS NULL OR prev.revision = $5::int)
+        -- ★ 2026-10-19 보낼 시각 15분 전 잠금(직접발송 예약 취소와 같은 판정 · 잠근 행의 값으로 · DB 시계)
+        ${sendChangeLockFreeSql('prev.requested_at', 6)}
      RETURNING prev.status AS prev_status, prev.revision AS prev_revision, a.*`,
     [opts.requestId, opts.companyId, String(opts.reason || '담당자 취소').slice(0, 200), opts.ownerUserId,
-      opts.revision === undefined || opts.revision === null ? null : Number(opts.revision)],
+      opts.revision === undefined || opts.revision === null ? null : Number(opts.revision), SEND_CHANGE_LOCK_MINUTES],
   );
 
   if (claimed.rows.length === 0) {
     // 소유자 술어를 여기도 건다 — 남의 접수는 상태("이미 취소됨" 등)조차 보이면 안 된다(404로 답한다)
     const nowRow = await query(
-      `SELECT status FROM agency_send_requests
+      `SELECT status, requested_at FROM agency_send_requests
         WHERE id = $1::uuid AND company_id = $2::uuid AND ($3::uuid IS NULL OR created_by = $3::uuid)`,
       [opts.requestId, opts.companyId, opts.ownerUserId],
     );
@@ -83,6 +86,9 @@ export async function cancelAgencyRequestTx(opts: {
     }
     if (!canCancel(nowRow.rows[0].status)) {
       return { ok: false, status: 400, error: '검사가 진행 중이라 지금은 취소할 수 없습니다. 잠시 후 다시 시도해 주세요.' };
+    }
+    if (isAgencySendLocked(nowRow.rows[0].requested_at)) {
+      return { ok: false, status: 409, code: 'SEND_CHANGE_LOCKED', tooLate: true, error: AGENCY_SEND_LOCK_REASON };
     }
     return { ok: false, status: 409, code: 'STATE_CHANGED', error: '처리 중이라 취소하지 못했습니다. 화면을 새로 고치고 다시 시도해 주세요.' };
   }

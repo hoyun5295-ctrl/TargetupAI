@@ -9,6 +9,7 @@
  *   ⑤ 워커가 잡은 채 죽어도 건이 영영 멈추지 않는다(lock 복구)
  */
 import { describe, it, expect } from 'vitest';
+import { SEND_CHANGE_LOCK_MINUTES } from '../campaign-validation';   // ★ 1019 승인 = 보낼 시각 15분 전 잠금
 import {
   AGENCY_SEND_STATUSES, canTransition, canCancel, isEditable, needsQueueCancel,
   validateRequestedAt, checkApproval, isFinalTestDue, isQueueDue, isApprovalExpired, isApprovalCurrent,
@@ -219,9 +220,9 @@ describe('승인 판정', () => {
   it('재승인은 2시간이 남지 않아도 승인된다 — 검사를 이미 통과한 문안이다', () => {
     const reapproval = { ...base, status: 'reapproval' as AgencySendStatus, requestedAt: minutesLater(100) };
     expect(checkApproval(reapproval, 7, NOW).ok).toBe(true);
-    expect(checkApproval({ ...reapproval, requestedAt: minutesLater(QUEUE_MARGIN_MINUTES + 1) }, 7, NOW).ok).toBe(true);
-    // 예약을 넣을 여유조차 없으면 거절하고 시각을 다시 받는다
-    const tooLate = checkApproval({ ...reapproval, requestedAt: minutesLater(QUEUE_MARGIN_MINUTES - 1) }, 7, NOW);
+    expect(checkApproval({ ...reapproval, requestedAt: minutesLater(SEND_CHANGE_LOCK_MINUTES + 1) }, 7, NOW).ok).toBe(true);
+    // ★ 1019 보낼 시각 15분 전부터는 승인하지 않는다(Harold 「승인까지 15분 이내 전부 막는다」 · 옛 = 적재 여유 10분까지)
+    const tooLate = checkApproval({ ...reapproval, requestedAt: minutesLater(SEND_CHANGE_LOCK_MINUTES - 1) }, 7, NOW);
     expect(tooLate.ok).toBe(false);
     expect(tooLate.code).toBe('TOO_LATE');
   });
@@ -240,8 +241,8 @@ describe('승인 판정', () => {
 
   it('필요한 리드타임은 상태가 정한다 — 승인·만료 판정이 같은 값을 쓴다', () => {
     expect(requiredLeadMinutes('awaiting_approval')).toBe(FINAL_TEST_LEAD_MINUTES);
-    expect(requiredLeadMinutes('reapproval')).toBe(QUEUE_MARGIN_MINUTES);
-    expect(requiredLeadMinutes('approved')).toBe(QUEUE_MARGIN_MINUTES);
+    expect(requiredLeadMinutes('reapproval')).toBe(SEND_CHANGE_LOCK_MINUTES);   // ★ 1019 승인 = 15분 전 잠금
+    expect(requiredLeadMinutes('approved')).toBe(QUEUE_MARGIN_MINUTES);   // 승인된 건의 적재 여유는 그대로
   });
 
   /**
@@ -250,17 +251,17 @@ describe('승인 판정', () => {
    * 그런 건에 2시간을 요구하면 **하지도 않을 검사를 이유로** 승인을 막고 근거 없이 만료시킨다.
    */
   it('당일 검사를 통과한 건은 승인 마감이 2시간이 아니다 — 남은 일이 적재뿐이다', () => {
-    expect(requiredLeadMinutes('awaiting_approval', true)).toBe(QUEUE_MARGIN_MINUTES);
+    expect(requiredLeadMinutes('awaiting_approval', true)).toBe(SEND_CHANGE_LOCK_MINUTES);   // ★ 1019 승인 = 15분 전 잠금
 
     const sameDay = { ...base, requestedAt: minutesLater(100), finalTestedAt: minutesLater(-30) };
     expect(checkApproval(sameDay, 7, NOW).ok).toBe(true);
-    expect(checkApproval({ ...sameDay, requestedAt: minutesLater(QUEUE_MARGIN_MINUTES + 1) }, 7, NOW).ok).toBe(true);
+    expect(checkApproval({ ...sameDay, requestedAt: minutesLater(SEND_CHANGE_LOCK_MINUTES + 1) }, 7, NOW).ok).toBe(true);
 
     // 검사를 안 지난 같은 시각의 건은 그대로 거절된다(다른 날 발송)
     expect(checkApproval({ ...base, requestedAt: minutesLater(100) }, 7, NOW).code).toBe('TOO_LATE');
 
     // 적재 여유조차 없으면 거절하되, **재검사를 이유로 들지 않는다**
-    const tooLate = checkApproval({ ...sameDay, requestedAt: minutesLater(QUEUE_MARGIN_MINUTES - 1) }, 7, NOW);
+    const tooLate = checkApproval({ ...sameDay, requestedAt: minutesLater(SEND_CHANGE_LOCK_MINUTES - 1) }, 7, NOW);
     expect(tooLate.code).toBe('TOO_LATE');
     expect(tooLate.error).not.toContain('재검사');
   });

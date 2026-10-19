@@ -5,6 +5,7 @@
 // sms-queue.ts + prepaid.ts를 import하여 사용.
 
 import { query } from '../config/database';
+import { isInSendChangeLock, SEND_CHANGE_LOCK_MINUTES } from './campaign-validation';
 import {
   getCompanySmsTablesWithLogs, getCampaignQueueTables, getCampaignSmsTablesWide, mergeLineTables,
   smsCountAll, smsExecAll, smsCampaignCountsSafe,
@@ -250,14 +251,9 @@ export async function cancelCampaign(
   const scheduledPassed = !!camp.scheduled_at && new Date(camp.scheduled_at).getTime() <= Date.now();
 
   // 2. 15분 이내 체크 (skipTimeCheck가 false이고, 미래 예약인 경우만)
-  if (!skipTimeCheck) {
-    const scheduledAt = new Date(camp.scheduled_at);
-    const now = new Date();
-    const diffMinutes = (scheduledAt.getTime() - now.getTime()) / (1000 * 60);
-    const isGhostSchedule = scheduledAt < now;
-    if (diffMinutes < 15 && diffMinutes > 0) {
-      return { success: false, error: '발송 15분 전에는 취소할 수 없습니다', tooLate: true, cancelledCount: 0, refundedAmount: 0 };
-    }
+  //   ★ 2026-10-19 판정 = 예약 시각 CT(campaign-validation `isInSendChangeLock` · 0분 초과 15분 미만 · 대행발송과 같은 함수 · 값 그대로)
+  if (!skipTimeCheck && isInSendChangeLock(camp.scheduled_at)) {
+    return { success: false, error: `발송 ${SEND_CHANGE_LOCK_MINUTES}분 전에는 취소할 수 없습니다`, tooLate: true, cancelledCount: 0, refundedAmount: 0 };
   }
 
   // ★ 2026-09-26 한줄로 V2 F10·F31·F32 — queueOnly는 상태를 안 바꾸므로 적재 워커가 취소를 모른다.
