@@ -7,6 +7,8 @@ import { readFileSync } from 'fs';
 import { resolve } from 'path';
 import { countdownText, countdownTickMs, serialRunner, summarizeLive } from '../../../../frontend/src/utils/dashboard-live';
 
+/** ★ 2026-10-19 프론트 원문 읽기(대시보드 아래 칸이 부품으로 옮겨 감) */
+const read = (rel: string) => readFileSync(resolve(__dirname, '../../../../frontend/src', rel), 'utf8');
 const NOW = Date.parse('2026-10-10T08:00:00Z');
 const iso = (ms: number) => new Date(ms).toISOString();
 
@@ -104,7 +106,9 @@ describe('대시보드 화면 계약', () => {
   it('늘 깜빡이던 REAL-TIME 표시는 없고 서버가 계산한 시각을 쓴다', () => {
     // 옛 표시 = JSX 안 한 줄짜리 글자(주석의 경위 설명은 남아 있어도 된다)
     expect(dash).not.toMatch(/^\s*REAL-TIME\s*$/m);
-    expect(dash).toContain('formatKstClock(dbAsOf)');
+    // ★ 2026-10-19 DB 칸 = 부품(components/dashboard/DbStatusCard.tsx) · 대시보드는 서버 시각(dbAsOf)을 넘긴다
+    expect(read('components/dashboard/DbStatusCard.tsx')).toContain('{formatKstClock(asOf)} 기준');
+    expect(dash).toContain('asOf={dbAsOf}');
     // 브라우저 시각(new Date())이 아니라 dashboard-cards 응답 asOf(캐시 엔벨로프 at)
     expect(dash).toContain("setDbAsOf(typeof cardsData?.asOf === 'number' ? new Date(cardsData.asOf) : null)");
     expect(dash).not.toContain('setDbAsOf(new Date())');
@@ -130,6 +134,9 @@ describe('대시보드 화면 계약', () => {
       'components/dashboard/LiveAutomationStrip.tsx', 'components/CampaignSuccessModal.tsx', 'components/ToastProvider.tsx',
       'components/UploadProgressModal.tsx', 'components/marketing-diagnosis/DiagnosisHeroCard.tsx', 'utils/dashboard-live.ts',
       'components/dashboard/CardDetailModal.tsx', 'components/AiOperatorLoginPromo.tsx', 'components/dashboard/CountUp.tsx',
+      // ★ 2026-10-19 아래 한 줄 4칸 부품
+      'components/dashboard/PlanStatusCard.tsx', 'components/dashboard/SendStatusCard.tsx', 'components/dashboard/DbStatusCard.tsx',
+      'components/dashboard/TodayRecommendCard.tsx', 'components/dashboard/dash-card.tsx', 'components/ai-line/HubRecommendModal.tsx',
     ];
     for (const f of files) {
       const src = readFileSync(resolve(FRONT, f), 'utf8');
@@ -149,7 +156,9 @@ describe('대시보드 화면 계약', () => {
   it('주의 점은 두 번 퍼지고 멈춘다(반복 횟수 = 단축 속성 한 줄)', () => {
     const tw = readFileSync(resolve(__dirname, '../../../../frontend/tailwind.config.js'), 'utf8');
     expect(tw).toContain("'ping-twice': 'ping 1s cubic-bezier(0, 0, 0.2, 1) 2',");
-    expect(dash.match(/motion-safe:animate-ping-twice/g)?.length).toBe(2);
+    // ★ 2026-10-19 요금제 칸 = 부품(components/dashboard/PlanStatusCard.tsx)
+    expect(read('components/dashboard/PlanStatusCard.tsx').match(/motion-safe:animate-ping-twice/g)?.length).toBe(2);
+    expect(dash).not.toContain('animate-ping-twice');
   });
 });
 
@@ -200,7 +209,8 @@ describe('회의론자 최종 검증 조건(2026-10-10)', () => {
 
   it('주의 점 · 크레딧 · 첫 업로드 공개 보완', () => {
     // 주의 점도 페이지를 새로 열 때만
-    expect(dash).toContain("${intro ? 'motion-safe:animate-ping-twice' : ''}");
+    expect(read('components/dashboard/PlanStatusCard.tsx')).toContain("${intro ? 'motion-safe:animate-ping-twice' : ''}");
+    expect(dash).toContain('intro={intro}');
     expect(dash).toContain('attention={intro}');
     // 잔여가 늘어난 이벤트 = 원장 다시 읽기 · 이력 창 열 때 다시 읽기
     expect(dash).toContain('if (b > cur) { void loadCredit(); return; }');

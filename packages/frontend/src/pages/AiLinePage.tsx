@@ -3,7 +3,7 @@
  * 옛 AiOperatorPage 의 한 줄 입력 · 추천 띠 · 제안 · 결과 · 승인 발송을 원형 이동했다(기능 카드는 /ai-operator 로).
  * 새 흐름 스위치(AI_LINE_V2_COMPANY_IDS)가 꺼진 회사 = 이 화면이 옛 제안 흐름 그대로다.
  */
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import {
   AlertTriangle,
@@ -68,6 +68,8 @@ import MmsUploadModal from '../components/MmsUploadModal';
 import { useMmsUpload } from '../hooks/useMmsUpload';
 import { toMmsImagePaths } from '../utils/mmsImage';
 import { validateMmsBeforeSend, LMS_SUBJECT_MAX_CHARS } from '../utils/formatDate';
+import HubRecommendModal from '../components/ai-line/HubRecommendModal';   // ★ 2026-10-19 추천 창 공용(대시보드 「오늘의 추천」과 같이)
+import { buildHubRecs, hubRecAction, hubRecLabel, loadSelfDiagnosis, stashJourneyObjective, type AutoMarketingSummary, type CompanyHealthDiagnosis, type DiagnosisBrief, type HubRec } from '../lib/hub-recommend';
 
 /** 회신번호 select 특수값 — 고객별 등록매장 번호(개별 회신) · DmSendAndTrackModal 과 같은 값 */
 const INDIVIDUAL_CB = '__individual__';
@@ -2308,111 +2310,41 @@ export default function AiLinePage() {
 // ★ D205 (2026-05-22): AI 자율 진단 자동 추천 카드 컴포넌트
 //   회사 admin 진입 시 자동 호출 — 우선순위 1~3 추천 카드 표시
 //   원클릭 진행 시 자연어 한 줄 prefill + AI Operator 진입
+// ★ 2026-10-19 타입 · 판정 · 읽기 = lib/hub-recommend.ts · 추천 창 = components/ai-line/HubRecommendModal.tsx 로 옮김
+//   (대시보드 「오늘의 추천」 칸이 같이 쓴다 · docs/2026-10-19-dashboard-four-cards-design.md §2-4 · 동작 그대로)
 // ════════════════════════════════════════════════════════════════════
-
-interface AutoRecommendation {
-  id: string;
-  priority: 1 | 2 | 3;
-  type: string;
-  title: string;
-  reason: string;
-  targetCount: number;
-  expectedImpact: string;
-  oneClickObjective: string;
-}
-
-interface CompanyHealthDiagnosis {
-  overallScore: number;
-  topConcerns: string[];
-  recommendations: AutoRecommendation[];
-}
-
-// ★ 2026-07-02 1차 개편: 일일 브리핑(company_daily_briefs)이 있으면 그것이 추천의 단일 소스 —
-//   룰 기반 추천은 브리핑이 아직 없는 회사의 폴백. 자동마케팅 현황 요약 동반.
-interface DiagnosisBrief {
-  brief_date: string;
-  headline: string | null;
-  recommendations: Array<{
-    title: string;
-    objective: string;
-    reason: string;
-    targetCount: number | null;
-    opportunityType?: string | null;
-    recommendedChannel?: 'sms' | 'email' | 'dm' | null;
-  }>;
-}
 
 // ★ 2026-09-30 AI 존 대개편(목업 1안): 옛 좌측 "AI 자율 진단" 카드 → 남색 띠 안 추천 띠(4상태) + 추천 창(X·ESC만).
 //   조회·분기는 옛 카드 그대로다(같은 endpoint · 브리핑 우선 · 정착 제안 = 여정 · 채널 제안 = 그 채널 화면 · 기본 = 입력창 채우기).
 //   못 쓰는 회사 = 조회하지 않는다(서버가 막는 조회 · 옛 카드도 잠김이면 그리지 않았다) → 잠김 띠 + 안내 창.
-type BriefRec = DiagnosisBrief['recommendations'][number];
-type HubRec =
-  | { kind: 'brief'; rec: BriefRec }
-  | { kind: 'rule'; rec: AutoRecommendation };
-
-function hubRecLabel(r: HubRec): string {
-  if (r.kind === 'rule') return '입력창에 채우기';
-  if (r.rec.opportunityType === 'journey_promotion') return '여정으로 굳히기';
-  if (r.rec.recommendedChannel === 'email') return '이메일에서 진행';
-  if (r.rec.recommendedChannel === 'dm') return '모바일 DM에서 진행';
-  return '입력창에 채우기';
-}
-
 function HubRecommendBand({ planLocked, onLocked, onApply }: { planLocked: boolean; onLocked: () => void; onApply: (objective: string) => void }) {
   const navigate = useNavigate();
   const [diagnosis, setDiagnosis] = useState<CompanyHealthDiagnosis | null>(null);
   const [brief, setBrief] = useState<DiagnosisBrief | null>(null);
-  const [autoMarketing, setAutoMarketing] = useState<{ active: number; pendingProposals: number }>({ active: 0, pendingProposals: 0 });
+  const [autoMarketing, setAutoMarketing] = useState<AutoMarketingSummary>({ active: 0, pendingProposals: 0 });
   const [loading, setLoading] = useState(true);
   const [open, setOpen] = useState(false);
 
   useEffect(() => {
     if (planLocked) return;
-    const load = async () => {
-      try {
-        const token = localStorage.getItem('token');
-        const r = await fetch('/api/ai/operator/self-diagnosis', {
-          headers: { Authorization: `Bearer ${token}` },
-        });
-        const d = await r.json();
-        if (d.success) {
-          setDiagnosis(d.diagnosis);
-          setBrief(d.brief || null);
-          if (d.autoMarketing) setAutoMarketing(d.autoMarketing);
-        }
-      } catch {
-        // skip - 추천 없으면 빈 자리
-      } finally {
-        setLoading(false);
+    void loadSelfDiagnosis().then((res) => {
+      if (res.ok) {
+        setDiagnosis(res.diagnosis);
+        setBrief(res.brief);
+        if (res.autoMarketing) setAutoMarketing(res.autoMarketing);
       }
-    };
-    load();
+    }).finally(() => setLoading(false));
   }, [planLocked]);
 
-  // 창은 X·ESC로만 닫는다(바깥 눌러 닫기 없음 — 전역 규칙)
-  useEffect(() => {
-    if (!open) return;
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setOpen(false); };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [open]);
-
-  // ★ 5차: 브리핑 추천 분기 — 정착 제안 = 여정 승격다리 / 채널 제안 = 해당 채널 화면 / 기본 = 자연어 prefill
-  const handleBriefRec = (rec: BriefRec) => {
-    if (rec.opportunityType === 'journey_promotion') {
-      sessionStorage.setItem('journeyObjectivePrefill', JSON.stringify({ objective: rec.objective, message: '' }));
-      navigate('/ai-journeys');
-      return;
-    }
-    if (rec.recommendedChannel === 'email') { navigate('/email-campaigns'); return; }
-    if (rec.recommendedChannel === 'dm') { navigate('/dm-builder'); return; }
-    onApply(rec.objective);
-  };
+  // ★ 5차: 브리핑 추천 분기 — 정착 제안 = 여정 승격다리 / 채널 제안 = 해당 채널 화면 / 기본 = 자연어 prefill(판정 = hubRecAction)
   const runRec = (r: HubRec) => {
     setOpen(false);
-    if (r.kind === 'brief') handleBriefRec(r.rec);
-    else onApply(r.rec.oneClickObjective);
+    const a = hubRecAction(r);
+    if (a.kind === 'journey') { stashJourneyObjective(a.objective); navigate('/ai-journeys'); return; }
+    if (a.kind === 'route') { navigate(a.path); return; }
+    onApply(a.objective);
   };
+  const closeModal = useCallback(() => setOpen(false), []);
 
   const row = 'mt-6 flex flex-wrap items-center gap-2 text-[13px]';
   const mark = 'w-8 h-8 rounded-lg bg-white/10 flex items-center justify-center text-amber-300 shrink-0';
@@ -2430,11 +2362,7 @@ function HubRecommendBand({ planLocked, onLocked, onApply }: { planLocked: boole
   if (loading) return <div className="mt-6 h-10" aria-hidden="true" />;
   if (!diagnosis) return null;
 
-  const briefRecs = Array.isArray(brief?.recommendations) ? brief!.recommendations : [];
-  const useBrief = briefRecs.length > 0;
-  const recs: HubRec[] = useBrief
-    ? briefRecs.map((rec) => ({ kind: 'brief' as const, rec }))
-    : diagnosis.recommendations.map((rec) => ({ kind: 'rule' as const, rec }));
+  const { recs, useBrief } = buildHubRecs(diagnosis, brief);
   const first = recs[0];
   const firstCount = first ? first.rec.targetCount : null;
   const pending = autoMarketing.pendingProposals;
@@ -2443,7 +2371,6 @@ function HubRecommendBand({ planLocked, onLocked, onApply }: { planLocked: boole
       <span className="w-2 h-2 rounded-full bg-amber-300" />승인 대기 {pending.toLocaleString()}건 →
     </button>
   );
-  const scoreTone = diagnosis.overallScore >= 70 ? 'text-emerald-700' : diagnosis.overallScore >= 40 ? 'text-amber-700' : 'text-rose-700';
 
   return (
     <>
@@ -2484,76 +2411,7 @@ function HubRecommendBand({ planLocked, onLocked, onApply }: { planLocked: boole
       )}
 
       {open && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60" role="dialog" aria-modal="true" aria-labelledby="hub-rec-title">
-          <div className="relative w-full max-w-4xl max-h-[88vh] overflow-y-auto rounded-3xl p-6 md:p-8 bg-white text-slate-900 shadow-[0_24px_64px_-12px_rgba(15,23,42,0.45)]">
-            <button type="button" onClick={() => setOpen(false)} className="absolute top-5 right-5 w-9 h-9 rounded-full flex items-center justify-center text-slate-500 hover:bg-slate-100 hover:text-slate-900" aria-label="닫기">
-              <X className="w-[18px] h-[18px]" />
-            </button>
-            <div className="flex items-start justify-between gap-6 pr-12 mb-5">
-              <div className="min-w-0">
-                <h3 id="hub-rec-title" className="text-[19px] font-bold tracking-[-0.02em]">오늘의 추천 캠페인</h3>
-                <p className="text-[14px] mt-1 text-slate-600">
-                  {useBrief ? (brief?.headline || '매일 오전 분석 · 우리 고객 데이터에서 오늘 할 만한 캠페인을 골랐습니다.') : '일일 분석이 쌓이기 전 기본 추천입니다. 회사 실측 신호로 골랐습니다.'}
-                </p>
-              </div>
-              <div className="shrink-0 text-right">
-                <div className="text-[12px] text-slate-500">회사 건강 점수</div>
-                <div className={`text-[24px] font-bold tabular-nums ${scoreTone}`}>{diagnosis.overallScore}</div>
-              </div>
-            </div>
-
-            {diagnosis.topConcerns.length > 0 && (
-              <div className="mb-5 p-4 rounded-2xl bg-slate-50 border border-slate-200">
-                <div className="text-[13px] font-semibold mb-2 text-slate-600">AI 진단 우선 항목</div>
-                <ul className="space-y-1.5 text-[14px] text-slate-700">
-                  {diagnosis.topConcerns.map((c, i) => (
-                    <li key={i} className="flex gap-2"><span className="text-amber-600">•</span><span>{c}</span></li>
-                  ))}
-                </ul>
-              </div>
-            )}
-
-            {recs.length > 0 && (
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                {recs.map((r, i) => {
-                  const count = r.rec.targetCount;
-                  return (
-                    <div key={r.kind === 'rule' ? r.rec.id : `brief-${i}`} className="flex flex-col p-5 rounded-2xl bg-white border border-slate-200 shadow-[0_1px_2px_rgba(15,23,42,0.05),0_10px_24px_-14px_rgba(15,23,42,0.25)]">
-                      <div className="flex items-center gap-1.5 mb-2 flex-wrap">
-                        <span className={`text-[12px] font-bold px-2 py-0.5 rounded-full ${i === 0 ? 'bg-slate-900 text-white' : 'bg-indigo-50 text-indigo-800'}`}>{r.kind === 'rule' ? r.rec.priority : i + 1}순위</span>
-                        {count != null && count > 0 && <span className="text-[13px] text-slate-500">{count.toLocaleString()}명</span>}
-                        {r.kind === 'brief' && r.rec.opportunityType === 'journey_promotion' && <span className="text-[12px] font-semibold px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-800">성과 검증</span>}
-                        {r.kind === 'brief' && r.rec.recommendedChannel === 'email' && <span className="text-[12px] font-semibold px-2 py-0.5 rounded-full bg-sky-50 text-sky-800">이메일 추천</span>}
-                        {r.kind === 'brief' && r.rec.recommendedChannel === 'dm' && <span className="text-[12px] font-semibold px-2 py-0.5 rounded-full bg-sky-50 text-sky-800">모바일 DM 추천</span>}
-                      </div>
-                      <h4 className="text-[16px] font-bold mb-1.5">{r.rec.title}</h4>
-                      <p className="text-[13px] leading-relaxed mb-2 text-slate-700">{r.rec.reason}</p>
-                      {r.kind === 'rule' && r.rec.expectedImpact && <p className="text-[12px] text-slate-500 mb-2">{r.rec.expectedImpact}</p>}
-                      <div className="flex-1" />
-                      <button type="button" onClick={() => runRec(r)} className="mt-2 w-full h-10 rounded-xl text-[14px] font-semibold bg-amber-500 text-slate-900 hover:bg-amber-400 transition-colors">{hubRecLabel(r)}</button>
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-
-            {/* ★ 2026-07-02 1차: 자동마케팅 현황 요약 — 승인 대기가 있으면 바로 가게 */}
-            <button
-              type="button"
-              onClick={() => { setOpen(false); navigate('/continuous-operator?tab=running'); }}
-              className="mt-4 w-full flex items-center justify-between gap-3 px-4 py-3 rounded-xl text-[14px] bg-slate-50 hover:bg-slate-100 border border-slate-200 text-slate-700 transition-colors"
-            >
-              <span>
-                실행 중인 자동 마케팅 <b>{autoMarketing.active}</b>개
-                {pending > 0 && <> · 승인 대기 <b>{pending.toLocaleString()}</b>건</>}
-              </span>
-              <span className="font-semibold text-indigo-700 shrink-0">자동 마케팅 관리 →</span>
-            </button>
-            <p className="mt-3 text-[12px] text-slate-500 italic">
-              Data source: {useBrief ? '매일 오전 일일 분석 (고객 DB 실측 신호 · 누적 학습)' : '회사 실측 신호 (일일 분석 누적 전 기본 추천)'}
-            </p>
-          </div>
-        </div>
+        <HubRecommendModal diagnosis={diagnosis} brief={brief} recs={recs} useBrief={useBrief} autoMarketing={autoMarketing} onClose={closeModal} onRun={runRec} />
       )}
     </>
   );

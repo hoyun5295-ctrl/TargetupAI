@@ -112,7 +112,12 @@ export default function DiagnosisModal({
         onCompleted();
         return;
       }
-      if (r.status === 409 && (await loadReport())) { onCompleted(); return; }
+      // ★ 2026-10-19 VERSION_CHANGED 는 위에서 걸렀다 → 남은 409 = 이미 제출(ALREADY_SUBMITTED) = 완료 사건.
+      //   완료 통지는 보고서 읽기 성공과 무관하게 한 번(대시보드 「오늘의 추천」 칸이 다시 읽는다 · Codex D4) · 보고서를 못 읽으면 아래 안내 그대로.
+      if (r.status === 409) {
+        onCompleted();
+        if (await loadReport()) return;
+      }
       setErrorMsg(r.data?.error || '제출 처리에 실패했습니다. 잠시 후 다시 시도해 주세요.');
       setPhase('error');
     } catch {

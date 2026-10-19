@@ -137,3 +137,13 @@ export function serialRunner(run: () => Promise<void>): () => Promise<void> {
 export function prefersReducedMotion(): boolean {
   return typeof window !== 'undefined' && !!window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
 }
+
+/**
+ * ★ 2026-10-19 대시보드 DB 현황 분포 줄의 「1위」 = 수가 가장 큰 항목(같으면 앞 항목).
+ *   서버 배열 순서는 순위가 아니다(연령 분포 = 연령순 · Codex D1). 원본 배열은 바꾸지 않는다.
+ */
+export function topByCount<T extends { count: number }>(items: readonly T[]): T | undefined {
+  let best: T | undefined;
+  for (const it of items) if (!best || Number(it.count) > Number(best.count)) best = it;
+  return best;
+}

@@ -21,6 +21,11 @@ import CalendarModal from '../components/CalendarModal';
 import DeltaBadge from '../components/dashboard/DeltaBadge';
 import CardDetailModal from '../components/dashboard/CardDetailModal';
 import CountUp from '../components/dashboard/CountUp'; // ★ 2026-10-10 대시보드 B안 — 숫자 한 번 채우기
+// ★ 2026-10-19 아래 한 줄 4칸 부품(docs/2026-10-19-dashboard-four-cards-design.md)
+import PlanStatusCard from '../components/dashboard/PlanStatusCard';
+import SendStatusCard from '../components/dashboard/SendStatusCard';
+import DbStatusCard, { type DashboardCardData, type DashboardCardsResponse } from '../components/dashboard/DbStatusCard';
+import TodayRecommendCard from '../components/dashboard/TodayRecommendCard';
 import LiveAutomationStrip, { type LiveTarget } from '../components/dashboard/LiveAutomationStrip'; // ★ 2026-10-10 지금 돌고 있는 자동화 띠
 import { ENTER_ONCE, dashboardIntroPending, markDashboardIntroDone, fetchJson, serialRunner } from '../utils/dashboard-live';
 import CampaignSuccessModal from '../components/CampaignSuccessModal';
@@ -85,10 +90,6 @@ import DashboardActionRow, { type DashboardAction } from '../components/dashboar
 import { fetchAiOperatorAccess } from '../utils/ai-operator-access';
 import { AI_LINE_ALIMTALK_HANDOFF, aiLineOwner, type AiLineAlimtalkHandoff } from '../utils/ai-line';   // ★ 2026-10-18 알림톡 갈래 넘기기
 
-/** ★ 2026-10-18 DB 현황 전체 폭 = 한 쪽 카드 수만큼 열(빈 칸 없음 · Tailwind 가 읽는 고정 글자) */
-const DB_CARD_LG_COLS: Record<number, string> = {
-  1: 'lg:grid-cols-1', 2: 'lg:grid-cols-2', 3: 'lg:grid-cols-3', 4: 'lg:grid-cols-4', 5: 'lg:grid-cols-5', 6: 'lg:grid-cols-6',
-};
 
 interface Stats {
   total: string;
@@ -146,10 +147,6 @@ interface PlanInfo {
   prepaid_term?: PrepaidTermView | null;
 }
 
-// D41 대시보드 동적 카드 아이콘 맵
-const CARD_ICON_MAP: Record<string, any> = {
-  Users, User, Cake, Calendar, BarChart3, Award, MapPin, Store, Mail, DollarSign, ShoppingCart, UserX, UserPlus, BellOff, Bell, Send, CreditCard, HelpCircle, Percent,
-};
 
 // D41 카드 아이콘 액센트 색상 (카드 자체는 white 통일)
 const CARD_COLORS = [
@@ -163,28 +160,6 @@ const CARD_COLORS = [
   { bg: 'bg-white', border: 'border-gray-100', text: 'text-gray-900', accent: 'text-teal-600', iconBg: 'bg-teal-50', barColor: 'bg-teal-500' },
 ];
 
-interface DashboardCardData {
-  cardId: string;
-  label: string;
-  type: string;
-  icon: string;
-  value: number | { label: string; count: number }[];
-  hasData: boolean;
-  // ★ D132 Phase A: 델타 뱃지
-  delta?: number | null;
-  deltaPercent?: number | null;
-  deltaBaseline?: string;
-  hasTrend?: boolean;
-}
-
-interface DashboardCardsResponse {
-  configured: boolean;
-  cardCount: number;
-  hasCustomerData?: boolean;
-  cards: DashboardCardData[];
-  /** ★ 2026-10-10 서버 계산 시각(epoch ms) — 캐시 값이면 그 값을 계산한 때 */
-  asOf?: number | null;
-}
 
 const fmtInt = (v: number) => v.toLocaleString();
 
@@ -409,6 +384,11 @@ export default function Dashboard() {
     else if (to === 'auto') navigate('/continuous-operator');
     else navigate('/ai-operator');
   };
+  // ★ 2026-10-19 「오늘의 추천」 칸 다시 읽기 열쇠 — 접근을 바꿀 수 있는 것이 생기면 칸이 다시 읽는다.
+  //   요금제 판정은 칸이 읽는 self-diagnosis 가 AI 한줄로 버튼(/operator/access)과 같은 isAiOperatorAllowed 로 403 을 준다 → 따로 묻지 않는다(Codex D1 · D2 같은 뿌리).
+  //   진단 완료(체험 지급)는 상태 추론이 아니라 사건 그 자체로 센다 — 뒤따르는 진단 상태 다시 읽기가 실패해도 칸은 다시 읽는다(Codex D3).
+  const [recNonce, setRecNonce] = useState(0);
+  const recRevalidateKey = `${planInfo?.plan_code ?? ''}|${planInfo?.subscription_status ?? ''}|${recNonce}`;
   // AI 한줄로 = 구독 잠김이면 잠김 창 · 요금제가 AI 를 못 쓰면 소개 창(영상 자리) · 그 밖 = 화면으로
   // ★ 2026-10-19 직접 타겟 발송 입구 삭제(Harold) — 조건 고르기는 AI 한줄로 확인 창의 「직접 타겟 선택」
   const openAiLine = async () => {
@@ -2455,449 +2435,52 @@ const campaignData = {
         <BrandVoiceNudgeCard suppress={diagnosisHero === 'invite'} />
 
 
-        {/* ★ 2026-10-18 오른쪽 버튼 열을 맨 위 버튼 줄로 옮겨(설계서 §3) 요금제 · 발송 현황 · DB 현황이 전체 폭을 쓴다 */}
-        <div className="flex flex-col gap-4 mb-4">
-          <div className="w-full flex flex-col gap-4">
-            {/* 1행: 요금제 + 발송현황 — 모바일 stacked + sm+ 좌우 */}
-            <div className="flex flex-col sm:flex-row gap-4">
-              {/* 요금제 현황 */}
-              <div
-                onClick={() => navigate('/pricing')}
-                className={`w-full sm:w-[40%] bg-white rounded-2xl p-5 cursor-pointer hover:shadow-md transition-all border border-gray-100 shadow-sm ${ENTER}`}
-                style={{ animationDelay: '60ms' }}
-              >
-                <div className="flex items-center justify-between mb-3">
-                  <div className="flex items-center gap-2">
-                    <div className="w-1 h-4 bg-green-600 rounded-full" />
-                    <span className="text-sm font-semibold text-gray-800">요금제 현황</span>
-                  </div>
-                  <span className="text-xs font-medium text-gray-400 hover:text-green-700 transition-colors">요금제 안내 <span className="text-[10px]">→</span></span>
-                </div>
-                {/* ★ CT-17: plan_name + D-N 뱃지 같은 줄 배치로 카드 높이 최소화 */}
-                <div className="flex items-center gap-2 mb-1 flex-wrap">
-                  <span className="text-lg font-bold text-gray-800">
-                    {planInfo?.prepaid_term?.state === 'blocked' ? planInfo.prepaid_term.plan_name : (planInfo?.plan_name || '로딩...')}
-                  </span>
-                  {/* ★ 2026-10-04 선불 요금제 이용 기간 — 잠김 / 남은 날(자동 연장이 꺼져 있고 7일 이하면 주황) */}
-                  {/* ★ 2026-10-10 대시보드 모션 I — 발송이 막혔거나(잠김) 곧 막히는(자동 연장 꺼짐 + 3일 이하) 때만 점이 두 번 퍼지고 멈춘다 */}
-                  {planInfo?.prepaid_term && (planInfo.prepaid_term.state === 'blocked' ? (
-                    <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-rose-100 text-rose-700 text-[11px] font-bold rounded-full whitespace-nowrap">
-                      <span className="relative flex h-1.5 w-1.5" aria-hidden>
-                        <span className={`absolute inline-flex h-full w-full rounded-full bg-rose-400 ${intro ? 'motion-safe:animate-ping-twice' : ''}`} />
-                        <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-rose-500" />
-                      </span>
-                      잠김
-                    </span>
-                  ) : (
-                    <span className={`inline-flex items-center gap-1 px-2 py-0.5 text-[11px] font-bold rounded-full whitespace-nowrap ${!planInfo.prepaid_term.auto_renew && planInfo.prepaid_term.days_left <= 7 ? 'bg-amber-100 text-amber-700' : 'bg-slate-100 text-slate-600'}`}>
-                      {!planInfo.prepaid_term.auto_renew && planInfo.prepaid_term.days_left <= 3 && (
-                        <span className="relative flex h-1.5 w-1.5" aria-hidden>
-                          <span className={`absolute inline-flex h-full w-full rounded-full bg-amber-400 ${intro ? 'motion-safe:animate-ping-twice' : ''}`} />
-                          <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-amber-500" />
-                        </span>
-                      )}
-                      {planInfo.prepaid_term.days_left <= 1 ? '오늘까지' : `${planInfo.prepaid_term.days_left}일 남음`}
-                    </span>
-                  ))}
-                  {/* 무료체험 중 → 요금제 만료 D-N 뱃지 (BASIC 체험 = plan=BASIC + status='trial') */}
-                  {planInfo?.subscription_status === 'trial' && planInfo?.trial_expires_at && (() => {
-                    const daysLeft = Math.max(0, Math.ceil((new Date(planInfo.trial_expires_at).getTime() - Date.now()) / 86400000));
-                    return (
-                      <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-violet-100 text-violet-700 rounded-full">
-                        <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
-                          <path strokeLinecap="round" strokeLinejoin="round" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
-                        </svg>
-                        <span className="text-[11px] font-bold whitespace-nowrap">요금제 만료 D-{daysLeft}</span>
-                      </span>
-                    );
-                  })()}
-                  {/* 체험 만료 후 FREE 강등 마커 */}
-                  {planInfo?.subscription_status === 'trial_expired' && (
-                    <span className="px-2 py-0.5 bg-red-100 text-red-600 text-[11px] font-bold rounded-full whitespace-nowrap">체험 만료</span>
-                  )}
-                </div>
-                {/* AI 크레딧 — 카드 중심(크게). 클릭 시 이력 모달 (카드 navigate와 분리). DB 사용량 바는 v2에서 폐지(상한 없음). */}
-                {creditInfo?.creditEnabled && (creditInfo.planCredits > 0 || creditInfo.purchased > 0) ? (
-                  <button
-                    onClick={(e) => { e.stopPropagation(); setShowCreditHistory(true); void loadCredit(); }}
-                    className="mt-3 w-full rounded-xl border border-violet-100 bg-gradient-to-br from-violet-50 to-fuchsia-50/40 p-3.5 text-left transition-all hover:border-violet-200 hover:shadow-sm group"
-                  >
-                    <div className="flex items-center gap-1.5">
-                      <span className="flex h-5 w-5 items-center justify-center rounded-md bg-gradient-to-br from-violet-500 to-fuchsia-500">
-                        <Sparkles className="h-3 w-3 text-white" />
-                      </span>
-                      <span className="text-xs font-medium text-violet-700">AI 크레딧 잔여</span>
-                      <span className="ml-auto text-[11px] text-violet-400 group-hover:text-violet-600 transition-colors">사용 이력 →</span>
-                    </div>
-                    <div className="mt-1.5 flex items-end gap-1">
-                      <span className="text-3xl font-bold tabular-nums text-violet-700"><CountUp value={Number(creditInfo.total || 0)} format={fmtInt} animate={intro} animateChanges /></span>
-                      <span className="mb-1 text-xs text-slate-400">크레딧</span>
-                    </div>
-                    {planInfo?.plan_code !== 'FREE' && (
-                      <div className="mt-2 flex items-center justify-between border-t border-violet-100/70 pt-2 text-[11px] text-slate-400">
-                        <span>고객 DB {Number(planInfo?.current_customers || 0).toLocaleString()}명</span>
-                        {dailyDbAnalysisCredits(Number(planInfo?.current_customers || 0)) > 0 && (
-                          <span>연동 시 매일 분석 <b className="text-violet-600">{dailyDbAnalysisCredits(Number(planInfo?.current_customers || 0))}크레딧</b></span>
-                        )}
-                      </div>
-                    )}
-                  </button>
-                ) : planInfo?.plan_code !== 'FREE' ? (
-                  <div className="mt-3 text-xs text-gray-400">정상 이용 중</div>
-                ) : null}
-              </div>
-              {showCreditHistory && (
-                <CreditHistoryModal
-                  creditInfo={creditInfo}
-                  onClose={() => setShowCreditHistory(false)}
-                  onGoPricing={() => { setShowCreditHistory(false); navigate('/pricing'); }}
-                />
-              )}
-
-              {/* 발송 현황 */}
-              <div className={`w-full sm:w-[60%] bg-white rounded-2xl p-5 border border-gray-100 shadow-sm ${ENTER}`} style={{ animationDelay: '120ms' }}>
-                <div className="flex items-center justify-between mb-3">
-                  <div className="flex items-center gap-2">
-                    <div className="w-1 h-4 bg-green-600 rounded-full" />
-                    <span className="text-sm font-semibold text-gray-800">발송 현황</span>
-                  </div>
-                  {balanceInfo?.billingType === 'prepaid' && (
-                    <button onClick={() => setShowBalanceModal(true)} className="text-xs font-medium text-gray-400 hover:text-green-700 transition-colors">잔액 현황 <span className="text-[10px]">→</span></button>
-                  )}
-                </div>
-                {/* 발송 실적 — 전송/성공/실패/성공률 */}
-                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-                  <div className="text-center p-2.5 bg-gray-50 rounded-lg">
-                    <div className="text-lg font-bold text-gray-800 tabular-nums"><CountUp value={stats?.monthly_total || 0} format={fmtInt} animate={intro} /></div>
-                    <div className="text-[11px] text-gray-400 mt-0.5">전송건수</div>
-                  </div>
-                  <div className="text-center p-2.5 bg-emerald-50/70 rounded-lg">
-                    <div className="text-lg font-bold text-emerald-600 tabular-nums"><CountUp value={stats?.monthly_sent || 0} format={fmtInt} animate={intro} /></div>
-                    <div className="text-[11px] text-gray-400 mt-0.5">성공건수</div>
-                  </div>
-                  <div className="text-center p-2.5 bg-rose-50/60 rounded-lg">
-                    <div className="text-lg font-bold text-rose-500 tabular-nums"><CountUp value={stats?.monthly_fail || 0} format={fmtInt} animate={intro} /></div>
-                    <div className="text-[11px] text-gray-400 mt-0.5">실패건수</div>
-                  </div>
-                  <div className="text-center p-2.5 bg-gray-50 rounded-lg">
-                    {/* 서버 값 = 소수 한 자리 글자(없으면 '0') — 끝난 뒤 그 글자 그대로 */}
-                    <div className="text-lg font-bold text-gray-800 tabular-nums"><CountUp value={Number(stats?.success_rate) || 0} decimals={1} animate={intro} format={(v) => (v === (Number(stats?.success_rate) || 0) ? String(stats?.success_rate || '0') : v.toFixed(1))} /><span className="text-xs font-normal text-gray-400">%</span></div>
-                    <div className="text-[11px] text-gray-400 mt-0.5">성공률</div>
-                  </div>
-                </div>
-                {/* 채널별 발송 수량 */}
-                <div className="grid grid-cols-4 gap-2 mt-2">
-                  {[
-                    { label: 'SMS', value: stats?.sms_sent },
-                    { label: 'LMS', value: stats?.lms_sent },
-                    { label: 'MMS', value: stats?.mms_sent },
-                    { label: '카카오', value: stats?.kakao_sent },
-                  ].map((ch) => (
-                    <div key={ch.label} className="flex flex-col items-center justify-center p-2 bg-white border border-gray-100 rounded-lg">
-                      <div className="text-[10px] font-medium text-gray-400">{ch.label}</div>
-                      <div className="text-sm font-bold text-gray-700 mt-0.5 tabular-nums"><CountUp value={ch.value || 0} format={fmtInt} animate={intro} /></div>
-                    </div>
-                  ))}
-                </div>
-                {/* 총 사용금액 */}
-                <div className="mt-2 flex items-center justify-between rounded-lg border border-gray-100 bg-gradient-to-r from-gray-50 to-gray-50/40 px-3.5 py-2.5">
-                  <span className="text-xs font-medium text-gray-500">총 사용금액</span>
-                  <span className="text-lg font-bold text-gray-800 tabular-nums"><CountUp value={stats?.monthly_cost || 0} format={fmtInt} animate={intro} /><span className="text-xs font-normal text-gray-400">원</span></span>
-                </div>
-                {/* ★ 2026-07-24 §5-2 에이전트 발송 잔액 — 선불 발송ID별 게이트웨이 실값 표시 (웹 잔액과 다른 지갑) */}
-                {agentBalances.length > 0 && (
-                  <div className="mt-2 rounded-lg border border-emerald-100/80 bg-gradient-to-r from-emerald-50/60 to-teal-50/30 px-3.5 py-2.5">
-                    <div className="mb-1.5 flex items-center justify-between">
-                      <span className="text-xs font-medium text-gray-500">에이전트 발송 잔액</span>
-                      <span className="text-[10px] italic text-gray-300">Data source: 발송 게이트웨이 계정 원장 실시간 잔액</span>
-                    </div>
-                    <div className="space-y-1">
-                      {agentBalances.map((b) => (
-                        <div key={b.agentSendId} className="flex items-center justify-between">
-                          <span className="text-xs tabular-nums text-gray-500">{formatAgentIdLabel(b.agentSendId, b.custName)}</span>
-                          {b.remAmt === null ? (
-                            <span className="text-[10px] text-gray-400">잔액 확인 불가</span>
-                          ) : (
-                            <span className="flex items-baseline gap-1.5">
-                              <span className={`text-sm font-bold tabular-nums ${b.remAmt < 10000 ? 'text-rose-500' : 'text-gray-800'}`}>
-                                {formatAgentBalance(b.remAmt)}<span className="text-[10px] font-normal text-gray-400">원</span>
-                              </span>
-                            </span>
-                          )}
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
-              </div>
-            </div>
-
-
-            {/* 2행: DB 현황 — 모던 본격 디자인 (D224+ Harold 명시 본격 재정정 — Linear/Stripe/Vercel 동급) */}
-            <div className={`relative bg-white rounded-3xl border border-gray-200/60 shadow-sm hover:shadow-md transition-all flex-1 overflow-hidden ${ENTER}`} style={{ animationDelay: '180ms' }}>
-              {/* 미세 dot 패턴 배경 (subtle) */}
-              <div
-                className="absolute inset-0 opacity-[0.018] pointer-events-none"
-                style={{ backgroundImage: 'radial-gradient(circle at 1px 1px, rgb(15 23 42) 1px, transparent 0)', backgroundSize: '20px 20px' }}
-              />
-
-              <div className="relative p-6">
-                {/* 헤더 */}
-                <div className="flex items-center justify-between mb-6">
-                  <div className="flex items-center gap-2.5">
-                    <div className="w-1.5 h-5 bg-gradient-to-b from-emerald-500 to-green-600 rounded-full" />
-                    <span className="text-base font-bold text-gray-900 tracking-tight">DB 현황</span>
-                    {/* ★ 2026-10-10 대시보드 B안 — 늘 깜빡이던 REAL-TIME 대신 불러온 시각(데이터와 상관없이 깜빡이면 거짓 신호) */}
-                    {dbAsOf && (
-                      <span className="inline-flex items-center gap-1.5 text-[11px] font-semibold px-2 py-0.5 rounded-full bg-gray-50 text-gray-500 border border-gray-200 tabular-nums">
-                        <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
-                        {formatKstClock(dbAsOf)} 기준
-                      </span>
-                    )}
-                  </div>
-                  {/* ★ 2026-08-22 요금제 게이트 — 고객 DB 조회는 STARTER+(`customer_db_enabled`).
-                      그전에는 구독 잠금만 봐서 FREE도 열렸다. 같은 카드의 "고객 DB 업로드"는 이미 이 기준을 쓰고 있었다(일관성 정정). */}
-                  <button onClick={() => openCustomerDb()} className="group inline-flex items-center gap-1 text-xs font-semibold text-gray-500 hover:text-emerald-700 transition-colors">
-                    상세보기
-                    <ChevronRight className="w-3.5 h-3.5 group-hover:translate-x-0.5 transition-transform" />
-                  </button>
-                </div>
-
-                {/* 카드 미설정 */}
-                {(!dashboardCards || !dashboardCards.configured) && (
-                  <div className="flex items-center justify-center py-14 text-gray-400">
-                    <div className="text-center">
-                      <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-gray-50 to-gray-100 flex items-center justify-center mx-auto mb-3 shadow-inner">
-                        <BarChart3 className="w-7 h-7 text-gray-300" />
-                      </div>
-                      <div className="text-sm text-gray-400">관리자가 대시보드 카드를 설정하면 표시됩니다</div>
-                    </div>
-                  </div>
-                )}
-
-                {/* 고객 DB 미업로드 — 전체 블러 + CTA */}
-                {dashboardCards?.configured && dashboardCards?.hasCustomerData === false && (
-                  <div className="relative">
-                    <div className="grid grid-cols-2 md:grid-cols-3 gap-3 filter blur-sm pointer-events-none select-none">
-                      {dashboardCards.cards.slice(0, 6).map((card) => (
-                        <div key={card.cardId} className="p-4 bg-gray-50/50 rounded-2xl">
-                          <div className="text-lg font-bold text-gray-200">0</div>
-                          <div className="text-[10px] text-gray-300 mt-1">{card.label}</div>
-                        </div>
-                      ))}
-                    </div>
-                    <div className="absolute inset-0 flex items-center justify-center bg-white/75 backdrop-blur-[3px] rounded-2xl">
-                      <div className="text-center">
-                        <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-emerald-50 to-green-100 flex items-center justify-center mx-auto mb-3 shadow-inner">
-                          <Users className="w-7 h-7 text-emerald-500" />
-                        </div>
-                        <div className="text-sm text-gray-700 font-semibold mb-3">고객 DB를 업로드하면 현황을 확인할 수 있습니다</div>
-                        <button
-                          onClick={() => { openFileUpload(); }}
-                          className="px-6 py-2.5 bg-gradient-to-r from-gray-900 to-gray-800 text-white text-xs font-bold rounded-2xl hover:shadow-lg hover:shadow-gray-900/30 transition-all shadow-md"
-                        >
-                          고객 DB 업로드
-                        </button>
-                      </div>
-                    </div>
-                  </div>
-                )}
-
-                {/* 정상 표시: 6개씩 페이징 카드 렌더링 (D224+ Harold 명시 본격 재정정 — 모던 SaaS 표준) */}
-                {dashboardCards?.configured && dashboardCards?.hasCustomerData && (() => {
-                  const CARDS_PER_PAGE = 6;
-                  const allCards = dashboardCards.cards;
-                  const totalPages = Math.ceil(allCards.length / CARDS_PER_PAGE);
-                  const safePage = Math.min(dbCardPage, totalPages - 1);
-                  const pageCards = allCards.slice(safePage * CARDS_PER_PAGE, (safePage + 1) * CARDS_PER_PAGE);
-
-                  // 카드별 그라데이션 매핑 (cardId 기반 — accent line + 아이콘 톤 통일)
-                  const CARD_ACCENT_MAP: Record<string, { line: string; iconFrom: string; iconTo: string; iconText: string; ring: string; glowHover: string }> = {
-                    total_customers:     { line: 'from-violet-500 to-fuchsia-500',  iconFrom: 'from-violet-100',  iconTo: 'to-violet-50',   iconText: 'text-violet-600',  ring: 'ring-violet-100',  glowHover: 'group-hover:shadow-violet-200/40' },
-                    gender_male:         { line: 'from-blue-500 to-indigo-500',     iconFrom: 'from-blue-100',    iconTo: 'to-blue-50',     iconText: 'text-blue-600',    ring: 'ring-blue-100',    glowHover: 'group-hover:shadow-blue-200/40' },
-                    gender_female:       { line: 'from-pink-500 to-rose-500',       iconFrom: 'from-pink-100',    iconTo: 'to-pink-50',     iconText: 'text-pink-600',    ring: 'ring-pink-100',    glowHover: 'group-hover:shadow-pink-200/40' },
-                    birthday_this_month: { line: 'from-amber-500 to-orange-500',    iconFrom: 'from-amber-100',   iconTo: 'to-amber-50',    iconText: 'text-amber-600',   ring: 'ring-amber-100',   glowHover: 'group-hover:shadow-amber-200/40' },
-                    opt_in_count:        { line: 'from-emerald-500 to-teal-500',    iconFrom: 'from-emerald-100', iconTo: 'to-emerald-50',  iconText: 'text-emerald-600', ring: 'ring-emerald-100', glowHover: 'group-hover:shadow-emerald-200/40' },
-                    new_this_month:      { line: 'from-cyan-500 to-blue-500',       iconFrom: 'from-cyan-100',    iconTo: 'to-cyan-50',     iconText: 'text-cyan-600',    ring: 'ring-cyan-100',    glowHover: 'group-hover:shadow-cyan-200/40' },
-                    recent_30d_purchase: { line: 'from-emerald-500 to-green-500',   iconFrom: 'from-emerald-100', iconTo: 'to-emerald-50',  iconText: 'text-emerald-600', ring: 'ring-emerald-100', glowHover: 'group-hover:shadow-emerald-200/40' },
-                    inactive_90d:        { line: 'from-rose-500 to-red-500',        iconFrom: 'from-rose-100',    iconTo: 'to-rose-50',     iconText: 'text-rose-600',    ring: 'ring-rose-100',    glowHover: 'group-hover:shadow-rose-200/40' },
-                    monthly_cost:        { line: 'from-violet-500 to-purple-500',   iconFrom: 'from-violet-100',  iconTo: 'to-violet-50',   iconText: 'text-violet-600',  ring: 'ring-violet-100',  glowHover: 'group-hover:shadow-violet-200/40' },
-                    age_distribution:    { line: 'from-violet-500 to-fuchsia-500',  iconFrom: 'from-violet-100',  iconTo: 'to-violet-50',   iconText: 'text-violet-600',  ring: 'ring-violet-100',  glowHover: 'group-hover:shadow-violet-200/40' },
-                    grade_distribution:  { line: 'from-amber-500 to-yellow-500',    iconFrom: 'from-amber-100',   iconTo: 'to-amber-50',    iconText: 'text-amber-600',   ring: 'ring-amber-100',   glowHover: 'group-hover:shadow-amber-200/40' },
-                    region_top:          { line: 'from-cyan-500 to-teal-500',       iconFrom: 'from-cyan-100',    iconTo: 'to-cyan-50',     iconText: 'text-cyan-600',    ring: 'ring-cyan-100',    glowHover: 'group-hover:shadow-cyan-200/40' },
-                    store_distribution:  { line: 'from-indigo-500 to-purple-500',   iconFrom: 'from-indigo-100',  iconTo: 'to-indigo-50',   iconText: 'text-indigo-600',  ring: 'ring-indigo-100',  glowHover: 'group-hover:shadow-indigo-200/40' },
-                  };
-                  const DEFAULT_ACCENT = { line: 'from-violet-500 to-fuchsia-500', iconFrom: 'from-violet-100', iconTo: 'to-violet-50', iconText: 'text-violet-600', ring: 'ring-violet-100', glowHover: 'group-hover:shadow-violet-200/40' };
-                  // ★ 2026-10-10 대시보드 B안 — 처음 열 때만 카드가 차례로 들어오고(0.06초 간격) 숫자 · 막대가 한 번 찬다
-                  const dbIntro = (intro || dbReveal) && !dbPaged;
-
-                  return (
-                    <div>
-                      <div className={`grid grid-cols-2 md:grid-cols-3 gap-3 ${DB_CARD_LG_COLS[Math.min(6, Math.max(1, pageCards.length))]}`}>
-                        {pageCards.map((card, ci) => {
-                          const accent = CARD_ACCENT_MAP[card.cardId] || DEFAULT_ACCENT;
-                          const IconComp = CARD_ICON_MAP[card.icon] || HelpCircle;
-                          const enter = dbIntro ? ENTER_ONCE : '';
-                          const enterDelay = dbIntro ? { animationDelay: `${240 + ci * 60}ms` } : undefined;
-
-                          // 데이터 없는 카드
-                          if (!card.hasData) {
-                            return (
-                              <div key={card.cardId} className={`relative p-5 rounded-2xl border border-gray-100 bg-gray-50/40 overflow-hidden ${enter}`} style={enterDelay}>
-                                <div className="text-xs text-gray-400 mb-2">{card.label}</div>
-                                <div className="text-2xl font-bold text-gray-200 tracking-tight">-</div>
-                                <span className="absolute top-3 right-3 text-[9px] text-gray-400 bg-white border border-gray-200 px-1.5 py-0.5 rounded-md font-medium tracking-wider">N/A</span>
-                              </div>
-                            );
-                          }
-
-                          // distribution 타입 — 본격 progress 시각 강화
-                          if (card.type === 'distribution' && Array.isArray(card.value)) {
-                            const items = card.value.slice(0, 3);
-                            const maxCount = Math.max(...items.map(it => it.count), 1);
-                            const totalCount = items.reduce((s, it) => s + it.count, 0);
-                            return (
-                              <div
-                                key={card.cardId}
-                                onClick={() => setDetailCard(card)}
-                                className={`group relative p-5 rounded-2xl border border-gray-100 bg-white hover:border-gray-200 hover:shadow-xl ${accent.glowHover} hover:-translate-y-1 motion-reduce:hover:translate-y-0 motion-reduce:transition-none cursor-pointer transition-all duration-300 overflow-hidden ${enter}`}
-                                style={enterDelay}
-                              >
-                                {/* 상단 accent line */}
-                                <div className={`absolute top-0 left-0 right-0 h-[3px] bg-gradient-to-r ${accent.line}`} />
-
-                                <div className="flex items-center justify-between mb-4">
-                                  <div className={`w-10 h-10 rounded-xl bg-gradient-to-br ${accent.iconFrom} ${accent.iconTo} ring-1 ${accent.ring} flex items-center justify-center group-hover:scale-110 group-hover:rotate-[-4deg] motion-reduce:group-hover:scale-100 motion-reduce:group-hover:rotate-0 transition-all duration-300`}>
-                                    <IconComp className={`w-5 h-5 ${accent.iconText}`} />
-                                  </div>
-                                  <span className="text-sm text-gray-700 font-semibold tracking-tight">{card.label}</span>
-                                </div>
-                                <div className="space-y-2.5">
-                                  {items.map((item, j) => {
-                                    const pct = totalCount > 0 ? (item.count / totalCount) * 100 : 0;
-                                    return (
-                                      <div key={j}>
-                                        <div className="flex items-baseline justify-between mb-1">
-                                          <span className="text-[11px] text-gray-600 truncate max-w-[55%] font-medium">{item.label}</span>
-                                          <span className="text-xs font-bold text-gray-900 tabular-nums">
-                                            {item.count.toLocaleString()}
-                                            <span className="text-[10px] text-gray-400 font-normal ml-1">({pct.toFixed(0)}%)</span>
-                                          </span>
-                                        </div>
-                                        <div className="h-1.5 bg-gray-100 rounded-full overflow-hidden">
-                                          {/* 처음 열 때만 왼쪽에서 차오른다(틀 밖은 잘려 보이지 않는다) */}
-                                          <div
-                                            className={`h-full bg-gradient-to-r ${accent.line} rounded-full transition-all duration-700 ${dbIntro ? 'animate-in slide-in-from-left-full duration-700 ease-out fill-mode-backwards motion-reduce:animate-none' : ''}`}
-                                            style={{ width: `${(item.count / maxCount) * 100}%`, ...(dbIntro ? { animationDelay: `${360 + ci * 60}ms` } : {}) }}
-                                          />
-                                        </div>
-                                      </div>
-                                    );
-                                  })}
-                                  {items.length === 0 && <div className="text-[11px] text-gray-300 text-center py-2">-</div>}
-                                </div>
-                              </div>
-                            );
-                          }
-
-                          // count / rate / sum 타입 — 본격 모던 숫자 카드
-                          const numVal = typeof card.value === 'number' ? card.value : 0;
-                          // ★ 2026-10-10 표기 규칙은 그대로 · 숫자 채우기가 도는 동안에도 같은 규칙으로 그린다
-                          const formatVal = (v: number) => card.type === 'rate' ? v.toFixed(1)
-                            : card.type === 'sum' && v >= 10000 ? `${Math.round(v / 10000).toLocaleString()}만`
-                            : v.toLocaleString();
-                          let suffix = '';
-                          if (card.type === 'rate') { suffix = '%'; }
-                          else if (card.type === 'sum') { suffix = '원'; }
-                          else if (card.cardId === 'active_campaigns') { suffix = '건'; }
-                          else { suffix = '명'; }
-
-                          return (
-                            <div
-                              key={card.cardId}
-                              onClick={() => setDetailCard(card)}
-                              className={`group relative p-5 rounded-2xl border border-gray-100 bg-white hover:border-gray-200 hover:shadow-xl ${accent.glowHover} hover:-translate-y-1 motion-reduce:hover:translate-y-0 motion-reduce:transition-none cursor-pointer transition-all duration-300 overflow-hidden ${enter}`}
-                              style={enterDelay}
-                            >
-                              {/* 상단 accent line */}
-                              <div className={`absolute top-0 left-0 right-0 h-[3px] bg-gradient-to-r ${accent.line}`} />
-
-                              {/* 호버 시 미세 radial 강조 */}
-                              <div
-                                className="absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity duration-500 pointer-events-none"
-                                style={{ background: 'radial-gradient(circle at 100% 0%, rgba(139, 92, 246, 0.05), transparent 50%)' }}
-                              />
-
-                              <div className="relative">
-                                {/* 아이콘 + 라벨 (헤더) */}
-                                <div className="flex items-center justify-between mb-4">
-                                  <div className={`w-10 h-10 rounded-xl bg-gradient-to-br ${accent.iconFrom} ${accent.iconTo} ring-1 ${accent.ring} flex items-center justify-center group-hover:scale-110 group-hover:rotate-[-4deg] motion-reduce:group-hover:scale-100 motion-reduce:group-hover:rotate-0 transition-all duration-300`}>
-                                    <IconComp className={`w-5 h-5 ${accent.iconText}`} />
-                                  </div>
-                                  <span className="text-sm text-gray-700 font-semibold tracking-tight">{card.label}</span>
-                                </div>
-
-                                {/* 본격 숫자 영역 — tabular + baseline + 단위 분리 */}
-                                <div className="flex items-baseline gap-1.5">
-                                  <span className="text-2xl font-bold text-gray-900 tracking-tight tabular-nums leading-none">
-                                    <CountUp value={numVal} format={formatVal} decimals={card.type === 'rate' ? 1 : 0} animate={dbIntro} />
-                                  </span>
-                                  <span className="text-xs font-medium text-gray-400 leading-none">{suffix}</span>
-                                </div>
-
-                                {/* delta badge — 본격 강화 */}
-                                {card.hasTrend && card.delta !== null && card.delta !== undefined && (
-                                  <div className="mt-3 flex items-center gap-1.5">
-                                    <DeltaBadge delta={card.delta} deltaPercent={card.deltaPercent} baseline={card.deltaBaseline} suffix={suffix} />
-                                    <span className="text-[10px] text-gray-400">지난달 대비</span>
-                                  </div>
-                                )}
-                              </div>
-                            </div>
-                          );
-                        })}
-                      </div>
-
-                      {/* 페이지 인디케이터 + 좌우 화살표 (본격 모던) */}
-                      {totalPages > 1 && (
-                        <div className="flex items-center justify-between mt-6">
-                          <button
-                            onClick={() => goDbPage(p => Math.max(0, p - 1))}
-                            disabled={safePage === 0}
-                            className="w-9 h-9 rounded-xl flex items-center justify-center text-gray-600 bg-white border border-gray-200 hover:border-gray-300 hover:bg-gray-50 disabled:opacity-30 disabled:hover:bg-white disabled:hover:border-gray-200 transition-all shadow-sm"
-                          >
-                            <ChevronLeft className="w-4 h-4" />
-                          </button>
-                          <div className="flex items-center gap-2">
-                            {Array.from({ length: totalPages }, (_, idx) => (
-                              <button
-                                key={idx}
-                                onClick={() => goDbPage(() => idx)}
-                                className={`h-2 rounded-full transition-all duration-500 ${
-                                  idx === safePage
-                                    ? 'bg-gradient-to-r from-violet-500 to-fuchsia-500 w-8 shadow-md shadow-violet-400/40'
-                                    : 'bg-gray-200 w-2 hover:bg-gray-300 hover:w-3'
-                                }`}
-                              />
-                            ))}
-                          </div>
-                          <button
-                            onClick={() => goDbPage(p => Math.min(totalPages - 1, p + 1))}
-                            disabled={safePage >= totalPages - 1}
-                            className="w-9 h-9 rounded-xl flex items-center justify-center text-gray-600 bg-white border border-gray-200 hover:border-gray-300 hover:bg-gray-50 disabled:opacity-30 disabled:hover:bg-white disabled:hover:border-gray-200 transition-all shadow-sm"
-                          >
-                            <ChevronRight className="w-4 h-4" />
-                          </button>
-                        </div>
-                      )}
-                    </div>
-                  );
-                })()}
-              </div>
-            </div>
-          </div>
-
+        {/* ★ 2026-10-19 아래 한 줄 4칸(Harold 「2안」 · docs/2026-10-19-dashboard-four-cards-design.md) — 요금제 · 발송 현황 · DB 현황 · 오늘의 추천.
+            1280 이상 한 줄 · 640~1279 2×2 · 640 미만 한 줄씩 · AI 숨김 계정 = 추천 칸 없이 3칸(자동화 띠와 같은 규칙).
+            돈(크레딧 · 이번 달 사용금액 · 충전 잔액 · 에이전트 잔액)은 요금제 칸 한 곳 · 상태 · 창은 여기 그대로 · 부품은 모양과 콜백만 */}
+        <div className={`grid grid-cols-1 gap-4 mb-4 ${hideAi ? 'lg:grid-cols-3' : 'sm:grid-cols-2 xl:grid-cols-4'}`} data-zone="dashboard-cards">
+          <PlanStatusCard
+            planInfo={planInfo}
+            creditInfo={creditInfo}
+            monthlyCost={stats?.monthly_cost || 0}
+            balance={balanceInfo}
+            agentBalances={agentBalances}
+            intro={intro}
+            enterClass={ENTER}
+            onOpenPricing={() => navigate('/pricing')}
+            onOpenCreditHistory={() => { setShowCreditHistory(true); void loadCredit(); }}
+            onOpenBalance={() => setShowBalanceModal(true)}
+          />
+          <SendStatusCard stats={stats} intro={intro} enterClass={ENTER} />
+          <DbStatusCard
+            data={dashboardCards}
+            asOf={dbAsOf}
+            page={dbCardPage}
+            onPage={goDbPage}
+            animate={(intro || dbReveal) && !dbPaged}
+            enterClass={ENTER}
+            onOpenDetail={(card) => setDetailCard(card)}
+            onOpenCustomerDb={() => openCustomerDb()}
+            onUpload={() => { openFileUpload(); }}
+          />
+          {!hideAi && (
+            <TodayRecommendCard
+              ready={!!planInfo}
+              subscriptionLocked={isSubscriptionLocked}
+              revalidateKey={recRevalidateKey}
+              enterClass={ENTER}
+              onLocked={(reason) => { if (reason === 'subscription') setShowSubscriptionLock(true); else openPlanFeature('ai-line'); }}
+              onStartLine={() => { void openAiLine(); }}
+            />
+          )}
         </div>
+        {showCreditHistory && (
+          <CreditHistoryModal
+            creditInfo={creditInfo}
+            onClose={() => setShowCreditHistory(false)}
+            onGoPricing={() => { setShowCreditHistory(false); navigate('/pricing'); }}
+          />
+        )}
 
         {/* 탭 */}
         <div className="bg-transparent rounded-lg mb-4">
@@ -3997,7 +3580,7 @@ const campaignData = {
         onClose={() => setShowDiagnosisWizard(false)}
         showTrialReward={diagnosisState?.grantable === 'available'}
         companyName={companyNameFromDB || user?.company?.name || null}
-        onCompleted={refreshDiagnosisState}
+        onCompleted={() => { setRecNonce((n) => n + 1); void refreshDiagnosisState(); }}
         onFirstSend={() => { setShowDirectSend(true); setDirectSendChannel('sms'); }}
         onSeePlans={() => navigate('/pricing')}
         toast={(msg, type = 'success') => {

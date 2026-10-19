@@ -29,6 +29,15 @@
         ],
         "createdAt": "2026-10-19T11:26:20.644Z",
         "reason": "Claude 판정: L235 text-slate-950(#020617 거의 검정) on bg-amber-500 = 대비 충분 · 프로젝트 AI 버튼 규격 MK_BTN_AI(bg-amber-500 + text-slate-900)와 같은 짝 · 값 단위 무시 미지원"
+      },
+      {
+        "rule": "gray-on-color",
+        "value": "*",
+        "files": [
+          "packages/frontend/src/components/ai-line/HubRecommendModal.tsx"
+        ],
+        "createdAt": "2026-10-19T15:10:00.000Z",
+        "reason": "Claude 판정: L80 text-slate-900 on bg-amber-500 = 대비 충분 · AI 버튼 규격 MK_BTN_AI 와 같은 짝 · AiLinePage 원본 그대로 옮긴 줄 · 값 단위 무시 미지원"
       }
     ]
   }

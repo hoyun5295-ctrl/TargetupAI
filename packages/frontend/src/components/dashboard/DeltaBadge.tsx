@@ -11,6 +11,7 @@
  *   baseline      — 비교 기준일 ISO (툴팁용, 생략 가능)
  *   suffix        — value 단위 ('명' | '원' | '%' 등, delta 표기에 사용)
  *   size          — 'sm' | 'md' (기본 sm)
+ *   compact       — ★ 2026-10-19 좁은 목록 줄(대시보드 DB 현황)용: 화살표 + %만(%가 없으면 증감 수) · 기본 false = 옛 표기 그대로
  */
 interface DeltaBadgeProps {
   delta: number | null;
@@ -18,9 +19,10 @@ interface DeltaBadgeProps {
   baseline?: string;
   suffix?: string;
   size?: 'sm' | 'md';
+  compact?: boolean;
 }
 
-export default function DeltaBadge({ delta, deltaPercent, baseline, suffix = '', size = 'sm' }: DeltaBadgeProps) {
+export default function DeltaBadge({ delta, deltaPercent, baseline, suffix = '', size = 'sm', compact = false }: DeltaBadgeProps) {
   if (delta === null || delta === undefined) return null;
 
   const isPositive = delta > 0;
@@ -33,7 +35,7 @@ export default function DeltaBadge({ delta, deltaPercent, baseline, suffix = '',
     ? 'bg-red-50 text-red-600 border-red-200'
     : 'bg-gray-100 text-gray-500 border-gray-200';
 
-  const icon = isPositive ? '↑' : isNegative ? '↓' : '—';
+  const icon = isPositive ? '↑' : isNegative ? '↓' : '·';   // ★ 2026-10-19 변화 없음 = 가운뎃점(화면 줄표 0 규칙)
   const sign = isPositive ? '+' : '';
   const absDelta = Math.abs(delta);
 
@@ -69,8 +71,10 @@ export default function DeltaBadge({ delta, deltaPercent, baseline, suffix = '',
       className={`inline-flex items-center rounded-md border font-semibold whitespace-nowrap ${colorClass} ${sizeClass}`}
     >
       <span className="text-[9px] leading-none">{icon}</span>
-      <span>{formattedDelta}</span>
-      {formattedPercent && <span className="opacity-80">({formattedPercent})</span>}
+      {compact ? <span>{formattedPercent ?? formattedDelta}</span> : <>
+        <span>{formattedDelta}</span>
+        {formattedPercent && <span className="opacity-80">({formattedPercent})</span>}
+      </>}
     </span>
   );
 }
