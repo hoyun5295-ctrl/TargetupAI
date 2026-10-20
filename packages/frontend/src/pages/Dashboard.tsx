@@ -46,6 +46,7 @@ import { useMmsUpload } from '../hooks/useMmsUpload';
 import PlanApprovalModal from '../components/PlanApprovalModal';
 import PlanLimitModal from '../components/PlanLimitModal';
 import PlanFeatureModal from '../components/PlanFeatureModal';
+import { SurfaceToneProvider } from '../components/zone/surface-tone';
 import RecentCampaignModal from '../components/RecentCampaignModal';
 import ResultsModal from '../components/ResultsModal';
 import ScheduledCampaignModal from '../components/ScheduledCampaignModal';
@@ -3561,7 +3562,10 @@ const campaignData = {
         msgType={targetMsgType}
       />
 
-      <PlanFeatureModal featureId={planFeatureId} onClose={() => setPlanFeatureId(null)} />
+      {/* ★ 2026-10-21 Harold 「원래는 다 하얀색 · 통일성」 — 대시보드에서 여는 요금제 안내 창도 AI 허브 · AI 한줄로처럼 흰 판 */}
+      <SurfaceToneProvider tone="light">
+        <PlanFeatureModal featureId={planFeatureId} onClose={() => setPlanFeatureId(null)} />
+      </SurfaceToneProvider>
 
       <LineGroupErrorModal show={showLineGroupError} onClose={() => setShowLineGroupError(false)} />
 

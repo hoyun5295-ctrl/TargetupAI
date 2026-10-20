@@ -34,6 +34,18 @@ export type UnitPriceBasis = 'vat_included' | 'vat_excluded';
 export const DEFAULT_UNIT_PRICE_BASIS: UnitPriceBasis = 'vat_included';
 
 /**
+ * ★ 2026-10-21 Harold 확정 — 새 회사 기본 단가(공급가 · VAT 별도). 회사 생성 CT(`company-create.ts`)가 칸에 써 넣는다.
+ *   알림톡 · 브랜드메시지를 안 쓰는 회사도 칸이 비면 선불 = 브랜드 발송 차단 · 알림톡 결과별 정산 생략,
+ *   후불 = 청구서 발행 차단(`WEB_UNIT_PRICE_UNSET`)이 된다. 회사마다 다른 값은 슈퍼관리자 단가 설정에서 고친다.
+ *   값 근거 = 운영 실측 최빈값(알림톡 6.00 = 47곳 · 브랜드 20 = 단가를 넣은 5곳 중 2곳).
+ *   기준(`unit_price_basis`)은 같은 INSERT 에서 함께 쓴다(값과 그 의미는 한 문장 · LESSONS_DB 34).
+ *   SMS · LMS · MMS 는 회사마다 계약이 달라 기본값을 두지 않는다(비면 지금처럼 막힌다).
+ */
+export const NEW_COMPANY_DEFAULT_PRICES: { readonly basis: UnitPriceBasis; readonly kakao: number; readonly brand: number } = {
+  basis: 'vat_excluded', kakao: 6, brand: 20,
+};
+
+/**
  * (순수) 단가 축의 정밀도 = 소수 둘째 자리.
  * `companies.cost_per_*`가 `numeric(6,2)`라 그보다 잘게 들고 있어도 저장에서 잘린다.
  */

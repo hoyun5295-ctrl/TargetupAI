@@ -18,6 +18,7 @@ import { hashSecret } from './secret-hash';
 import { recordPlanChange } from './plan-change-log';
 // ★ 2026-10-02 고객사 등록 · 계정 발급 기록(전송자격인증 4.1 ②) — 실패해도 생성에는 영향 없다
 import { recordAccountIssued, recordCompanyRegistered, AccountIssueChannel } from './account-issue';
+import { NEW_COMPANY_DEFAULT_PRICES } from './unit-price';
 
 /** 발급 기록에 남길 행위자 정보 — 없어도 기록은 남는다(행위자 · 접속 IP만 빈다) */
 export interface IssueAuditContext {
@@ -59,18 +60,20 @@ export async function createCompanyCore(p: CreateCompanyParams): Promise<any> {
   try {
     await client.query('BEGIN');
     result = await client.query(
+      // ★ 2026-10-21 기본 단가(알림톡 · 브랜드메시지)를 생성 때 칸에 써 넣는다 — 비워 두면 선불 브랜드 발송 차단 · 후불 발행 차단(unit-price.ts).
       `INSERT INTO companies (
         name, company_code, company_name, business_number, ceo_name,
         contact_name, contact_email, contact_phone, address,
         plan_id, data_input_method, api_key, api_secret_hash, db_name,
-        created_by, usage_type
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
+        created_by, usage_type, cost_per_kakao, cost_per_brand, unit_price_basis
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)
       RETURNING *`,
       [
         p.companyName, p.companyCode, p.companyName, p.businessNumber ?? null, p.ceoName ?? null,
         p.contactName ?? null, p.contactEmail ?? null, p.contactPhone ?? null, p.address ?? null,
         p.planId ?? null, p.dataInputMethod ?? 'file', apiKey, apiSecretHash, dbName,
         p.createdBy ?? null, p.usageType ?? 'web',
+        NEW_COMPANY_DEFAULT_PRICES.kakao, NEW_COMPANY_DEFAULT_PRICES.brand, NEW_COMPANY_DEFAULT_PRICES.basis,
       ],
     );
 
