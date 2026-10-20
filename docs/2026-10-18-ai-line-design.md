@@ -343,3 +343,4 @@
 2. 서버 DB 확인 1건(정보 스키마 · 1행 jsonb 이어야 함): `SELECT column_name, data_type FROM information_schema.columns WHERE table_name = 'customers' AND column_name = 'custom_fields';` (회사 칼럼 채움 · 1위 고객 값 SQL 이 쓴다 · 기존 발송 · 필터 코드도 쓰는 칼럼이지만 규칙대로 확인).
 3. 서버 `git pull` → 4. 백엔드 `npm run build:safe` → 5. `pm2 reload targetup-backend` → 6. 프론트 `npm run build:safe`.
 7. 실측 = §17-7 ①~③(시연 회사 · 브랜드 보이스는 AI 메모리에 보냈던 문자 올리기부터).
+- ★1021 Harold 「전부 배포완료」(다른 세션 작업과 tp-push 한 번에 · 서버 pull · 빌드 · 재기동 = Harold). ② 정보 스키마 확인 완료(custom_fields jsonb 1행 · Harold 1021). 남은 것 = ⑦ 실측.
