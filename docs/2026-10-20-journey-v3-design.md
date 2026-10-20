@@ -2,6 +2,7 @@
 
 > 호출어 **여정 V.3 / 여정 대개편 / 켜진 여정 수정 / 지도 보기 쉽게** · 기능 상설 = [FEATURE-JOURNEY.md](FEATURE-JOURNEY.md) · 앞 설계 = [V2 마스터](2026-09-29-journey-v2-master-design.md) · [고객 관계 지도](2026-10-09-journey-crm-map-design.md)
 > 상태 = **설계 승인(1020 Harold 「D1~D8 추천대로 승인. 여정 V.3 설계서 작성 시작해」 · D1 확정 「선불이든 후불이든 크레딧이 모자르면 둘 다 멈추는게 맞는거지 · 나머지는 추천안으로해」) · 코드 0 · DDL 0(D2 칸 1개 예정)**.
+> 최종 상태(1020 마감) = **묶음 1~7 배포 · DDL(entry_ends_on) 완료 · §18 기존 여정 뒤에 붙이기 배포 · DDL(시작 사건 CHECK 18값) 완료 · 서버 반영 확인(1611e581 · dist · pm2)** · 남은 것 = 실측(§14-2 · §18-8) · 66 동기화 · 범위 밖(§17-4 · §18-8 · BUGS B-1020-3).
 
 ## 0. 요약
 
@@ -482,7 +483,7 @@ journey-activation.ts:85 `firstActivation` 한 값을 세 곳이 쓴다(과금 :
 
 ## 17. 구현 기록
 
-### 17-1. 묶음별 결과 (1020 · 코드 완료)
+### 17-1. 묶음별 결과 (1020 · 코드 완료 → 배포 · DDL 완료 1020)
 
 | 묶음 | 결과 | 시험(새로 씀 · 모두 통과) |
 |---|---|---|
@@ -606,7 +607,7 @@ journey-activation.ts:85 `firstActivation` 한 값을 세 곳이 쓴다(과금 :
 - 지도: 붙은 여정 열 · 순서 · 선 상태(초안 · 멈춤 · 보내는 쪽 꺼짐 · 목표 끔 = 새는 선 · 이어짐).
 - 붙이기 · 떼기: 잠금 안 다시 점검 · attach_prev 왕복 · 켜진 여정 기준 시각 = 지금 · CHECK 전 = 503.
 
-### 18-7. 구현 기록 (1020 · 코드 완료 · Codex 적대 approve = 서버 4R · 화면 3R)
+### 18-7. 구현 기록 (1020 · 코드 완료 · Codex 적대 approve = 서버 4R · 화면 3R · 배포 · CHECK DDL 완료 1020)
 
 - 서버: 새 `journey-attach.ts`(점검 judgeAttach · 후보 · 붙이기 · 떼기 · 회사 붙이기 잠금) · `journey-after-config.ts`(설정 읽기 · 세대) · `journey-trigger-db.ts`(CHECK 판정 · 상품 여정과 공용) · 계약 `journey.after`(attachOnly) · 추출 `selectAfterJourneyCandidates` · 감시 after 갈래 · 켜기 검사 · 지도 붙인 선 · 주소 3(`attach-candidates` · `attach` · `detach`).
 - 화면: `JourneyAttachModal` · 지도 카드 ⋯ [뒤에 여정 붙이기] · [앞 여정에서 떼기] · 작업 화면 시작 카드 「넘겨받는 고객」 + [떼기] · 선 문구(「마치면 → 여정 이름」) · 「때」 문구(triggerWhen).
@@ -631,6 +632,7 @@ Codex 적대 리뷰(A 서버 · B 화면):
 
 ### 18-8. 배포 · DDL · 범위 밖
 - 배포 = 백엔드 · 프론트 빌드 · reload 뒤 **시작 사건 CHECK 교체**(18값 · 0930 상품 재구매와 같은 방식 · 행 수가 작아 한 트랜잭션 · lock_timeout 1s). 그 전 = 붙이기 503(고객 화면 = 「준비 중이라 아직 할 수 없어요」 · 기존 여정 동작 영향 0).
+  - **실행완료 1020(Harold)**: 배포 = 서버 HEAD `1611e581` · backend src · dist 의 붙이기 주소 3 · 프론트 `JourneyMapPage` 묶음에 붙이기 주소 · dist 21:08 / index 21:10 · pm2 online. CHECK = `pg_get_constraintdef` 18값(`journey.after` 포함 · 이름 그대로) · SCHEMA.md 등재.
   - 값: 'customer.created','purchase.first','cdp.purchase','purchase.product','customer.dormant','customer.dormant_return','customer.cycle_lapsed','customer.grade_changed','customer.birthday_approaching','customer.points_expiring','cdp.cart_abandon','custom_order_shipped','cdp.browse_no_purchase','cdp.reservation_created','reservation.visit_dn','reservation.visit_done','custom','journey.after'
 - 시험 데이터 · 실발송 실측(Harold): 사내 시험 회사에서 A(초안 · 칸 1) 뒤에 B 를 붙이고 둘 다 켠 뒤 도달 불가 번호 고객 1명이 A 를 마치면 5분 안에 B 에 들어오는지 · 같은 마침으로 두 번 들어오지 않는지 · 떼면 원래 시작으로 돌아가는지.
 - [범위 밖] `journey-executor.ts:1534`(마지막 칸 완료 문장 · Codex 4R 기록 · 내용 미기재) · 추가 과제 = 앞 여정 사건 값(주문 · 상품)을 뒤 여정에 이어 주기(지금은 그 값을 쓰는 여정을 막음).

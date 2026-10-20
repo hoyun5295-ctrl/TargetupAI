@@ -20,7 +20,12 @@ export type MkPreviewInbound =
   | { src: typeof MK_PREVIEW_SRC; type: 'tap'; id: string }
   | { src: typeof MK_PREVIEW_SRC; type: 'scroll'; y: number }
   /** 고른 블록이 화면 안 어디에 있는가(문서 좌표 아님 · iframe 보이는 영역 기준) — 휴대폰 위 도구줄 자리 */
-  | { src: typeof MK_PREVIEW_SRC; type: 'rect'; id: string | null; top: number; height: number };
+  | { src: typeof MK_PREVIEW_SRC; type: 'rect'; id: string | null; top: number; height: number }
+  /**
+   * ★2026-10-20 사람이 고른 뷰어 장(편집기가 따라간다) · id = 그 장의 data-page-id(펼친 장은 `원래id-s번호`) ·
+   * gen = 다리가 받은 마지막 편집기 선택 세대(지난 세대 보고 = 부모가 버린다 · Codex 3R)
+   */
+  | { src: typeof MK_PREVIEW_SRC; type: 'page'; id: string; gen: number };
 
 /** iframe 안에서 도는 다리(ES5 · 외부 의존 0). tap = 섹션 탭 알림을 켤지(편집 화면만). */
 function bridgeSource(tap: boolean): string {
@@ -46,7 +51,9 @@ function bridgeSource(tap: boolean): string {
     //   WANT = 돌아갈 자리. 맞출 때까지 scroll 보고를 하지 않는다 · 사람이 직접 움직이면(휠·터치·누름·키) 바로 내려놓는다 · 3초 뒤 포기.
     'var WANT=-1;function stopWant(){WANT=-1;}',
     'function apply(){if(WANT<0)return;window.scrollTo(0,WANT);if(Math.abs((window.scrollY||0)-WANT)<2)WANT=-1;}',
-    'var HUMAN=["wheel","touchstart","mousedown","keydown"];for(var hi=0;hi<HUMAN.length;hi++){window.addEventListener(HUMAN[hi],stopWant,{passive:true});}',
+    // ★ 2026-10-20 사람 입력 = 스크롤 복원을 내려놓고 · 「사람이 만졌다」를 남긴다(장 맞추기 HUM · 아래 · 듣는 함수 하나)
+    'function human(){stopWant();HUM=true;}',
+    'var HUMAN=["wheel","touchstart","mousedown","keydown"];for(var hi=0;hi<HUMAN.length;hi++){window.addEventListener(HUMAN[hi],human,{passive:true});}',
     'window.addEventListener("load",function(){apply();send({type:"loaded"});});',
     'document.addEventListener("load",function(){apply();},true);',
     'var q=false;window.addEventListener("scroll",function(){if(q)return;q=true;',
@@ -60,7 +67,34 @@ function bridgeSource(tap: boolean): string {
     //   (편집기 왼쪽에서 쪽을 골라도 미리보기가 1쪽에 멈춤 · 박성용 접수 cmunux3e4). 그 장의 점을 눌러 뷰어의 장 이동(goToPage → fxGo)을 탄다.
     'if(el&&document.body&&document.body.classList&&document.body.classList.contains("dm-fx")){var pg=el.closest?el.closest(".dm-page"):null;',
     'var pi=pg?parseInt(pg.getAttribute("data-page-idx")||"-1",10):-1;var ds=document.querySelectorAll(".dm-page-dots .dot");if(pi>=0&&ds[pi]&&ds[pi].click)ds[pi].click();setTimeout(report,700);}',
-    'else if(el&&el.scrollIntoView){el.scrollIntoView({block:"center"});setTimeout(report,60);}}}});',
+    'else if(el&&el.scrollIntoView){el.scrollIntoView({block:"center"});setTimeout(report,60);}}}',
+    'if(d.type==="page"&&typeof d.id==="string"&&d.id&&typeof d.gen==="number"){GEN=d.gen;DES=d.id;TRIES=0;HUM=false;reconcile();}});',
+    // ★ 2026-10-20 「지금 보는 장」 = 편집기 store 하나가 주인(서수란 접수 cmvew70kh1) · 부모 → page{id} 이 장이어야 한다 · 다리 → page{id} 사람이 고른 장.
+    //   번호가 아니라 장 id(data-page-id) — 슬라이드 모드는 사진 여러 장인 장을 `원래id-s번호` 여러 장으로 펼친다(서버 dm-slides-expand).
+    //   장 이동 = 뷰어의 점(goToPage 한 곳 · 효과 DM 은 fxGo)을 누른다 · 점이 없는 옛 문서만 그 장 요소로 스크롤.
+    //   ★ Codex 1R · 2R(같은 부류 두 번 = 구조 교체) 멈췄을 때 맞추기 — 다리가 드는 것은 「있어야 할 장」(DES) 하나 + 「그 뒤 사람이 만졌다」(HUM) 하나.
+    //   넘김이 멈출 때(점 바뀜 0.25초 뒤) · 민 뒤 0.7초에 맞춰 본다: 맞으면 끝 · 다르고 사람이 안 만졌으면 다시 민다(늦게 끝난 옛 스크롤 · 넘기는 중 버려진 누름) ·
+    //   다르고 사람이 만졌으면(또는 네 번 밀어도 못 가면) 지금 장을 새 기준으로 삼아 편집기에 알린다(편집기가 따라오고 같은 장을 다시 보낸다 = 멈춤).
+    //   ★ Codex 3R ① 예약은 번호표 하나(K) — 다시 밀기(0.7초)와 멈춤 확인(0.25초)이 서로의 옛 예약을 무효로 하고, 도착하면 남은 예약도 버린다 ·
+    //   미리보기 안 스크롤이 오는 동안 = 아직 움직이는 중(멈춤 확인을 미룬다 · 사람의 긴 스크롤 중간 장을 붙잡지 않는다) · clearTimeout 에 기대지 않는다.
+    //   ★ Codex 3R ② 보고에는 받은 마지막 세대(GEN = 편집기의 명시적 선택 세대)를 싣는다 — 부모가 지난 세대 보고를 버린다.
+    'function dots(){return document.querySelectorAll(".dm-page-dots .dot");}',
+    'function curPage(){var ds=dots();for(var i=0;i<ds.length;i++){if(ds[i].classList&&ds[i].classList.contains("active"))return i;}return -1;}',
+    'function curId(){var c=curPage();if(c<0)return null;var p=document.querySelector(".dm-page[data-page-idx=\\""+c+"\\"]");return p?p.getAttribute("data-page-id"):null;}',
+    'function belongs(v,id){return !!v&&!!id&&(v===id||(v.indexOf(id+"-s")===0&&/^\\d+$/.test(v.slice(id.length+2))));}',
+    'var DES=null,HUM=false,TRIES=0,GEN=0,K=0;',
+    'function sched(ms){var k=++K;setTimeout(function(){if(k===K)reconcile();},ms);}',
+    'function drive(){var ps=document.querySelectorAll(".dm-page[data-page-id]");for(var i=0;i<ps.length;i++){if(!belongs(ps[i].getAttribute("data-page-id"),DES))continue;',
+    'var pi=parseInt(ps[i].getAttribute("data-page-idx")||"-1",10);var ds=dots();TRIES++;',
+    // 다시 밀기 예약을 누르기 전에 건다 — 누름이 바로 장을 바꾸면(점 바뀜 → 멈춤 확인 예약) 그 예약이 이것을 무효로 한다
+    'if(pi>=0&&ds[pi]&&ds[pi].click){sched(700);ds[pi].click();}else if(ps[i].scrollIntoView){ps[i].scrollIntoView({block:"nearest",inline:"start"});}return;}',
+    'DES=null;}',
+    'function reconcile(){if(!DES)return;var c=curId();if(c&&belongs(c,DES)){K++;return;}',
+    'if(c&&(HUM||TRIES>=4)){HUM=false;TRIES=0;DES=c;K++;send({type:"page",id:c,gen:GEN});return;}',
+    'if(!c&&TRIES>0)return;drive();}',
+    'var MO=window.MutationObserver,dz=document.querySelector(".dm-page-dots");',
+    'if(MO&&dz){new MO(function(){if(DES)sched(250);}).observe(dz,{attributes:true,subtree:true,attributeFilter:["class"]});}',
+    'document.addEventListener("scroll",function(){if(DES)sched(250);},true);',
     'send({type:"ready"});',
     '})();',
   ].join('');
@@ -93,10 +127,35 @@ export function readPreviewMessage(e: MessageEvent, frame: HTMLIFrameElement | n
   if (d.type === 'tap' && typeof d.id === 'string' && d.id) return { src: MK_PREVIEW_SRC, type: 'tap', id: d.id };
   if (d.type === 'scroll' && typeof d.y === 'number' && Number.isFinite(d.y)) return { src: MK_PREVIEW_SRC, type: 'scroll', y: d.y };
   if (d.type === 'rect' && typeof d.top === 'number' && typeof d.height === 'number') return { src: MK_PREVIEW_SRC, type: 'rect', id: typeof d.id === 'string' ? d.id : null, top: d.top, height: d.height };
+  if (d.type === 'page' && typeof d.id === 'string' && d.id && typeof d.gen === 'number' && Number.isFinite(d.gen)) {
+    return { src: MK_PREVIEW_SRC, type: 'page', id: d.id, gen: d.gen };
+  }
   return null;
 }
 
 /** 부모 → iframe(불투명 출처라 대상 출처는 '*' · 받는 쪽이 부모 창인지 확인한다) */
-export function postToPreview(frame: HTMLIFrameElement | null, msg: { type: 'scrollTo'; y: number } | { type: 'select'; id: string | null; reveal?: boolean }): void {
+export function postToPreview(
+  frame: HTMLIFrameElement | null,
+  msg: { type: 'scrollTo'; y: number } | { type: 'select'; id: string | null; reveal?: boolean } | { type: 'page'; id: string; gen: number },
+): void {
   try { frame?.contentWindow?.postMessage({ ...msg, src: MK_PREVIEW_SRC }, '*'); } catch { /* 닫힌 창 = 무시 */ }
+}
+
+// ── ★ 2026-10-20 「지금 보는 장」 한 주인(서수란 접수 cmvew70kh1) ──────────────────────────────
+
+/**
+ * 뷰어 장 id(data-page-id)가 편집기 장 id 의 것인가 — 그대로 또는 펼친 장(`id-s번호`).
+ * 펼침 규칙 원본 = 서버 utils/dm/dm-slides-expand.ts(`${page.id}-s${i}`) · 계약 = make-preview-page-sync-1020.test.ts 가 서버 함수 결과로 대조.
+ * 다리 스크립트 belongs() 가 같은 판정을 문자열로 들고 있다(바꾸면 둘 다).
+ */
+export function viewerPageBelongsTo(viewerId: string | null | undefined, pageId: string | null | undefined): boolean {
+  if (!viewerId || !pageId) return false;
+  if (viewerId === pageId) return true;
+  return viewerId.startsWith(`${pageId}-s`) && /^\d+$/.test(viewerId.slice(pageId.length + 2));
+}
+
+/** 뷰어 장 id → 편집기 장 번호(없으면 -1 · 같은 id 가 있으면 그것이 먼저) */
+export function storePageIndexOf(pageIds: readonly string[], viewerId: string): number {
+  const exact = pageIds.indexOf(viewerId);
+  return exact >= 0 ? exact : pageIds.findIndex((id) => viewerPageBelongsTo(viewerId, id));
 }

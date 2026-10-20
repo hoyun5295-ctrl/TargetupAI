@@ -123,20 +123,6 @@ export default function JourneyPausePage() {
     <>
       {shell(
         <div className="space-y-4">
-          {notice && <LinkNotice tone="rose">{notice}</LinkNotice>}
-          {done?.kind === 'step' && (
-            <LinkNotice tone={done.paused > 0 ? 'emerald' : 'amber'} icon={CheckCircle2}>
-              <b>{dayLabel(done.sendDate)} 이 단계 발송 {done.paused.toLocaleString()}건을 멈췄습니다.</b>
-              {done.startedCount === null ? <> 이미 보내기 시작한 건수는 확인하지 못했습니다.</> : done.startedCount > 0 && <> 이미 보내기 시작한 {done.startedCount.toLocaleString()}건은 멈추지 못했습니다.</>}
-              {' '}지금 뒤로 새로 들어오는 고객은 이 정지로 막지 못합니다. 모두 막으려면 아래 [여정 전체 일시정지]를 눌러 주세요.
-            </LinkNotice>
-          )}
-          {done?.kind === 'journey' && (
-            <LinkNotice tone="emerald" icon={CheckCircle2}>
-              <b>{done.changed ? '여정 전체를 일시정지했습니다.' : '이 여정은 이미 멈춰 있습니다.'}</b> 다시 켜려면 한줄로 여정 화면에서 문안을 확인한 뒤 재개해 주세요.
-            </LinkNotice>
-          )}
-
           <div className="rounded-2xl border border-slate-200 bg-white overflow-hidden">
             <div className="px-5 py-4 border-b border-slate-100">
               <p className="text-[15px] font-bold tracking-[-0.01em] text-slate-900 break-words">{info.journeyName}</p>
@@ -155,6 +141,21 @@ export default function JourneyPausePage() {
               </div>
             </div>
           </div>
+
+          {/* ★ 2026-10-20 조작 결과 안내 = 누른 자리(버튼 바로 위) · 옛: 내용 카드 위라 긴 문안 아래에서 누르면 안 보였다(대행 링크 cmvgfv8r51 와 같은 모양) */}
+          {notice && <LinkNotice tone="rose">{notice}</LinkNotice>}
+          {done?.kind === 'step' && (
+            <LinkNotice tone={done.paused > 0 ? 'emerald' : 'amber'} icon={CheckCircle2}>
+              <b>{dayLabel(done.sendDate)} 이 단계 발송 {done.paused.toLocaleString()}건을 멈췄습니다.</b>
+              {done.startedCount === null ? <> 이미 보내기 시작한 건수는 확인하지 못했습니다.</> : done.startedCount > 0 && <> 이미 보내기 시작한 {done.startedCount.toLocaleString()}건은 멈추지 못했습니다.</>}
+              {' '}지금 뒤로 새로 들어오는 고객은 이 정지로 막지 못합니다. 모두 막으려면 아래 [여정 전체 일시정지]를 눌러 주세요.
+            </LinkNotice>
+          )}
+          {done?.kind === 'journey' && (
+            <LinkNotice tone="emerald" icon={CheckCircle2}>
+              <b>{done.changed ? '여정 전체를 일시정지했습니다.' : '이 여정은 이미 멈춰 있습니다.'}</b> 다시 켜려면 한줄로 여정 화면에서 문안을 확인한 뒤 재개해 주세요.
+            </LinkNotice>
+          )}
 
           {!journeyPaused && !done && (
             <div className="space-y-2">

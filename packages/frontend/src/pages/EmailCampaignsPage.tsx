@@ -3,7 +3,8 @@ import { zoneModule } from '../constants/ai-operator-modules';
 import { Package, FolderOpen as ZFolderOpen } from 'lucide-react';
 import { MK_LINE_EXTRA_BTN } from '../utils/make-ui';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { useNavigate, useSearchParams } from 'react-router-dom';
+import { useLocation, useNavigate, useSearchParams } from 'react-router-dom';
+import { readEmailEntry, readMakeEntryLine } from '../utils/make-entry';   // ★ 2026-10-20 만들기 「그 밖에」 진입 약속 한 곳
 // ★ 2026-09-14 T5·T6 AI 자동제작 — 상단 카드띠(입구) · ?edit={campaignId} 딥링크(완성본 착지) · 생성 금액 단일 출처
 import AiBuildEntryStrip from '../components/ai-build/AiBuildEntryStrip';
 import { useAiAutoBuildEnabled } from '../utils/ai-build';
@@ -98,6 +99,7 @@ interface SmtpConfig {
 export default function EmailCampaignsPage() {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
+  const location = useLocation();
   // ★ 2026-09-14 T5 딥링크(/email-campaigns?edit=<campaignId>) — AI 자동제작 완성본 착지. 마운트 때 한 번 읽고 URL 에서 지운다(새로고침이 되풀이하지 않게).
   const [editEntryId] = useState(() => String(searchParams.get('edit') || '').trim() || null);
   const editEntryHandled = useRef(false);
@@ -135,6 +137,7 @@ export default function EmailCampaignsPage() {
 
   // ★ 2026-06-13: AI 원샷 생성 영역
   const [aiPrompt, setAiPrompt] = useState('');
+  const [lineFocus, setLineFocus] = useState(0);   // ★ 2026-10-20 만들기 [한 줄로 자동 생성]으로 들어오면 한 줄 칸에 커서
   const lineQ = useLineAsk('email');   // ★ 2026-10-10 한 줄 묻기(이름 = lineQ · 아래 lineAsk 는 C24 확인 창 상태)
   // ★ 2026-10-10 한 줄 이메일 강화 — 판정 조회 중(두 번 눌러도 한 번) · 묻는 창(혜택 · 몰 상품) · 고른 후보 · 후보가 실제로 보였는가
   const [lineChecking, setLineChecking] = useState(false);
@@ -481,11 +484,29 @@ export default function EmailCampaignsPage() {
       setCloningId(null);
     }
   };
+  // ★ 2026-10-20 만들기 「그 밖에」 착지 = 종류마다 실제 동작(임은지 접수 cmvewqxm21) · 종류 = utils/make-entry 한 곳 · 빠진 종류 = never 에서 tsc 오류
+  //   옛: ?other=1 은 처리 0 이라 [한 줄로 자동 생성] · [이미지로 불러오기] 가 이메일 첫 화면에 멈췄다.
   const entryHandled = useRef(false);
   useEffect(() => {
     if (entryHandled.current || loading) return;
     entryHandled.current = true;
-    if (entryOther === 'blank') setVisualEditor({ sections: [], isAd: true, aiGenerated: false });
+    const kind = readEmailEntry(entryOther);
+    if (!kind) return;
+    // 진입 값은 한 번만 — 주소에서 지운다(새로 고침이 고르기 창 · 빈 편집기를 되풀이하지 않게)
+    const rest = new URLSearchParams(searchParams);
+    rest.delete('other');
+    setSearchParams(rest, { replace: true });
+    switch (kind) {
+      case 'line': {
+        const t = readMakeEntryLine(location.state);
+        if (t) setAiPrompt(t);
+        setLineFocus((v) => v + 1);
+        return;
+      }
+      case 'library': setStartLibOpen(true); return;
+      case 'blocks': setVisualEditor({ sections: [], isAd: true, aiGenerated: false }); return;
+      default: { const unhandled: never = kind; return unhandled; }
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [loading]);
 
@@ -844,6 +865,7 @@ export default function EmailCampaignsPage() {
           value: aiPrompt,
           onChange: setAiPrompt,
           onSubmit: () => { void submitEmailLine(); },
+          focusSignal: lineFocus,
           placeholder: emailOneLine.placeholder,
           verb: emailOneLine.verb,
           icon: Wand2,

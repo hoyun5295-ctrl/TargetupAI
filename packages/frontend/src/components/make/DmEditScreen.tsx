@@ -29,6 +29,7 @@ import { isLineTemplateDm } from '../../utils/one-line';   // ★ 2026-10-17 템
 import { CONFIRM_CREDIT_COSTS } from '../../constants/credit';
 import { useToast } from '../ToastProvider';
 import { MK_HEAD_BTN } from '../../utils/make-ui';
+import { storePageIndexOf } from '../../utils/make-preview';   // ★ 2026-10-20 미리보기에서 넘긴 장 → 편집기 장
 
 const authGet = () => ({ Authorization: `Bearer ${localStorage.getItem('token')}` });
 const authJson = () => ({ 'Content-Type': 'application/json', Authorization: `Bearer ${localStorage.getItem('token')}` });
@@ -101,14 +102,31 @@ export default function DmEditScreen({ onBack, onSend, pair, banner }: {
   const curSections = s.pages[s.currentPageIndex]?.sections || [];
   const selected = useMemo(() => flat.find((x) => x.id === s.selectedSectionId) || null, [flat, s.selectedSectionId]);
 
+  // ★ 2026-10-20 사람이 직접 고른 동작(장 칩 · 장 추가 · 쪽 목록 · 블록 선택 · 미리보기 탭)의 번호 — 같은 장을 다시 골라도 미리보기는 새 선택으로 받는다(Codex 4R).
+  //   ★ Codex 5R 번호는 고른 그 순간 공유 값(pickRef)에 올린다 — 미리보기 틀이 보고를 판정할 때 바로 읽는다(렌더 뒤 효과를 기다리는 틈에 옛 넘김 보고가 통과하지 않게).
+  //   pageRev(상태)는 같은 장 재선택에도 미리보기 틀 효과를 다시 돌리는 신호일 뿐이다.
+  const pickRef = useRef(0);
+  const [pageRev, setPageRev] = useState(0);
+  const bumpPageRev = useCallback(() => { pickRef.current += 1; setPageRev(pickRef.current); }, []);
+  // ★ Codex 6R 편집기에서 시작한 장 바뀜은 어디서 왔든(장 칩 · 쪽 목록 · 블록 · 장 추가 · 장 빼기 · 되돌리기 · 다시 하기) 그 순간 세대를 올린다.
+  //   store 의 지금 장 id 를 동기 구독으로 본다(장 바꾸는 자리를 하나씩 찾아 붙이지 않는다 · 새로 생기는 자리도 저절로).
+  //   예외 = 미리보기 보고를 따라간 바뀜(followingRef 를 켜고 바꾼다 · 세대 그대로).
+  const followingRef = useRef(false);
+  useEffect(() => useDmBuilderStore.subscribe((st, prev) => {
+    const cur = st.pages[st.currentPageIndex]?.id;
+    const was = prev.pages[prev.currentPageIndex]?.id;
+    if (cur !== was && !followingRef.current) pickRef.current += 1;
+  }), []);
+
   /** 섹션을 고르면 그 섹션이 있는 장으로 먼저 간다(스토어 조작 = 현재 장 기준) */
   const focus = useCallback((id: string | null) => {
     const st = useDmBuilderStore.getState();
+    bumpPageRev();
     if (!id) { st.selectSection(null); return; }
     const idx = st.pages.findIndex((p) => p.sections.some((x) => x.id === id));
     if (idx >= 0 && idx !== st.currentPageIndex) st.selectPage(idx);
     st.selectSection(id);
-  }, []);
+  }, [bumpPageRev]);
 
   // ★ 2026-10-14 (⑧ 1단계) 저장 안내는 "자동 저장이 막히는가"(발행 · 중지 포함)를, 문구의 뜻은 "받는 사람 화면과 다른가"(중지 아님)를 본다.
   const autosaveBlocked = selectAutosaveBlocked(s);
@@ -150,7 +168,7 @@ export default function DmEditScreen({ onBack, onSend, pair, banner }: {
   // ── 왼쪽 ──
   const listItems: BlockRowItem[] = curSections.map((x) => ({ id: x.id, type: x.type, label: blockLabel(x), summary: blockSummary(x), auto: isAutoBlock(x.type) }));
   const left = isCatalog ? (
-    <CatalogLeft onRemove={(i) => setConfirm(pageRemoveConfirm(i, true, s.pages.length))} />
+    <CatalogLeft onRemove={(i) => setConfirm(pageRemoveConfirm(i, true, s.pages.length))} onPicked={bumpPageRev} />
   ) : (
     <BlockList
       title="블록"
@@ -159,7 +177,7 @@ export default function DmEditScreen({ onBack, onSend, pair, banner }: {
       selectedId={s.selectedSectionId}
       onSelect={(id) => focus(id)}
       onReorder={(from, to) => s.reorderSections(from, to)}
-      top={isSlides ? <PageChips onRemove={(i) => setConfirm(pageRemoveConfirm(i, false, s.pages.length))} /> : undefined}
+      top={isSlides ? <PageChips onRemove={(i) => setConfirm(pageRemoveConfirm(i, false, s.pages.length))} onPicked={bumpPageRev} /> : undefined}
       footer={(
         <AddBlockButton open={paletteOpen} onToggle={() => setPaletteOpen((v) => !v)}>
           <PalettePopover
@@ -186,6 +204,20 @@ export default function DmEditScreen({ onBack, onSend, pair, banner }: {
       emptyText={!s.dmId ? '블록을 넣으면 여기에 받는 사람 화면이 보여요' : null}
       selectedId={s.selectedSectionId}
       onTap={(id) => focus(id)}
+      // ★ 2026-10-20 지금 보는 장 = store 하나(서수란 접수 cmvew70kh1) · 장 칩 · 쪽 목록 · 다른 장 블록 → 미리보기가 그 장으로 · 미리보기에서 넘기면 칩 · 목록이 따라온다
+      pageId={isSlides ? (s.pages[s.currentPageIndex]?.id ?? null) : null}
+      pageRev={pageRev}
+      pagePick={pickRef}
+      onPage={(vid) => {
+        const st = useDmBuilderStore.getState();
+        const idx = storePageIndexOf(st.pages.map((p) => p.id), vid);
+        if (idx >= 0 && idx !== st.currentPageIndex) {
+          followingRef.current = true;
+          try { st.selectPage(idx); } finally { followingRef.current = false; }
+          return true;
+        }
+        return false;
+      }}
       phoneTop={(isSlides || liveGap) ? (
         <div className="space-y-2">
           {/* ★ 2026-10-14 (⑧ 1단계) 발행본을 고치는 중 — 이 미리보기는 수정본이고 받는 사람은 아직 옛 화면 */}
@@ -273,7 +305,7 @@ function pageRemoveConfirm(idx: number, catalog: boolean, total: number): Confir
 
 // ─────────────────────────────── 장 고르기(옆으로 넘기기) ───────────────────────────────
 
-function PageChips({ onRemove }: { onRemove: (idx: number) => void }) {
+function PageChips({ onRemove, onPicked }: { onRemove: (idx: number) => void; onPicked: () => void }) {
   const pages = useDmBuilderStore((s) => s.pages);
   const cur = useDmBuilderStore((s) => s.currentPageIndex);
   const selectPage = useDmBuilderStore((s) => s.selectPage);
@@ -283,9 +315,9 @@ function PageChips({ onRemove }: { onRemove: (idx: number) => void }) {
   return (
     <div className="flex flex-wrap gap-1.5 mb-3">
       {pages.map((p, i) => (
-        <button key={p.id} type="button" onClick={() => selectPage(i)} className={`h-7 px-2.5 rounded-lg text-[12px] font-semibold ${i === cur ? 'bg-violet-600 text-white' : 'bg-white text-slate-500 hover:text-slate-900'}`}>{i + 1}장</button>
+        <button key={p.id} type="button" onClick={() => { selectPage(i); onPicked(); }} className={`h-7 px-2.5 rounded-lg text-[12px] font-semibold ${i === cur ? 'bg-violet-600 text-white' : 'bg-white text-slate-500 hover:text-slate-900'}`}>{i + 1}장</button>
       ))}
-      {!templateDm && <button type="button" onClick={() => addPage()} className="h-7 px-2.5 rounded-lg text-[12px] font-semibold border border-dashed border-slate-300 text-slate-500 hover:text-slate-900 inline-flex items-center gap-1"><Plus className="w-3.5 h-3.5" />장 추가</button>}
+      {!templateDm && <button type="button" onClick={() => { addPage(); onPicked(); }} className="h-7 px-2.5 rounded-lg text-[12px] font-semibold border border-dashed border-slate-300 text-slate-500 hover:text-slate-900 inline-flex items-center gap-1"><Plus className="w-3.5 h-3.5" />장 추가</button>}
       {pages.length > 1 && (
         <button type="button" onClick={() => onRemove(cur)} className="h-7 px-2.5 rounded-lg text-[12px] font-semibold text-slate-500 hover:text-rose-700 hover:bg-rose-50 inline-flex items-center gap-1" data-make="slides-remove-page"><Trash2 className="w-3.5 h-3.5" />{cur + 1}장 빼기</button>
       )}
@@ -553,7 +585,7 @@ function pageImage(p: { sections: Section[] }): string | null {
   return typeof url === 'string' ? url : null;
 }
 
-function CatalogLeft({ onRemove }: { onRemove: (idx: number) => void }) {
+function CatalogLeft({ onRemove, onPicked }: { onRemove: (idx: number) => void; onPicked: () => void }) {
   const toast = useToast();
   const pages = useDmBuilderStore((s) => s.pages);
   const selectedId = useDmBuilderStore((s) => s.selectedSectionId);
@@ -580,6 +612,7 @@ function CatalogLeft({ onRemove }: { onRemove: (idx: number) => void }) {
     if (idx !== st.currentPageIndex) st.selectPage(idx);
     const g = galleryOf(useDmBuilderStore.getState().pages[idx]);
     if (g) useDmBuilderStore.getState().selectSection(g.id);
+    onPicked();
   };
   const addPageWith = (url: string, chips: Array<{ label: string; price?: string; url?: string }>) => {
     const st = useDmBuilderStore.getState();

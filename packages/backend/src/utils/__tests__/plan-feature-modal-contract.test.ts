@@ -195,8 +195,10 @@ describe('남은 옛 문구', () => {
  */
 describe('예시 영상 + 상세 설명', () => {
   // ★ 2026-10-06 허브 카드 12개 전부(Harold 10-06 영상 12편 완성 · 끝 장면 잘라 720p 무음)
-  const VIDEO_IDS = ['auto-marketing', 'journeys', 'marketing-planner', 'image-studio',
+  const HUB_VIDEO_IDS = ['auto-marketing', 'journeys', 'marketing-planner', 'image-studio',
     'mobile-dm', 'email-campaign', 'inapp-message', 'quick-campaign', 'sns', 'connect-shop', 'performance', 'ai-memory'];
+  // ★ 2026-10-21 허브 카드 밖 영상 = AI 한줄로 소개 창(대시보드 「AI 한줄로」 미가입 클릭 · 릴스 14)
+  const VIDEO_IDS = [...HUB_VIDEO_IDS, 'ai-line'];
   // 항목 = 「\n  {\n」으로 시작하는 덩어리 하나(id 앞에 주석 줄이 있어도 같은 덩어리 · 주석은 빈 줄로 지워져 있다)
   const ENTRIES = INTROS.split('\n  {\n').map((chunk) => ({ id: chunk.match(/\bid: '([a-z-]+)'/)?.[1] || null, chunk }));
   const block = (id: string) => ENTRIES.find((e) => e.id === id)?.chunk || '';
@@ -214,11 +216,23 @@ describe('예시 영상 + 상세 설명', () => {
     }
   });
 
-  it('원장에서 영상을 가진 기능은 정확히 허브 카드 12개다(파일 없는 영상 주소 0)', () => {
+  it('원장에서 영상을 가진 기능은 정확히 허브 카드 12개 + AI 한줄로다(파일 없는 영상 주소 0)', () => {
     const withVideo = ENTRIES.filter((e) => e.id && e.chunk.includes('video: {')).map((e) => e.id as string);
     expect(withVideo.sort()).toEqual([...VIDEO_IDS].sort());
     // 허브 카드 12개와 같은 집합이다
-    expect([...VIDEO_IDS].sort()).toEqual(cardPaths.map((p) => introByPath.get(p)).sort());
+    expect([...HUB_VIDEO_IDS].sort()).toEqual(cardPaths.map((p) => introByPath.get(p)).sort());
+  });
+
+  it('AI 한줄로 소개 창: 조건이 있는 스팸 검사는 조건까지 적고 · 검사 요금은 크레딧 표 아래 한 줄', () => {
+    const b = block('ai-line');
+    expect(b).toContain('요금제에 스팸 검사가 있으면 만든 문안마다');
+    expect(b).not.toContain("text: '만든 문안마다 스팸 검사 결과가 붙습니다");
+    // ★ Codex 1R · 2R medium(같은 부류 두 번) — 재사용 조건은 부분 목록으로 적으면 빠진다(회신번호 · 유형 · 제목 · 고객 값 치환 · 080 표기가 모두
+    //   검사 글 해시 하나에 들어간다 · services/ai-line-spam.ts startLocked). → 「검사하는 문자 전체가 똑같을 때만」 원칙 문장 하나로 적는다.
+    expect(b).toContain('실제로 검사하는 문자 전체(발신번호 · 제목 · 고객 값으로 바꾼 글까지)가 24시간 안의 검사와 똑같을 때만 그 결과를 다시 쓰고, 조금이라도 다르면 새 검사가 되어 검사 문자 요금이 듭니다.');
+    expect(b).not.toContain('같은 글은 24시간 안의 결과를 다시 씁니다');
+    expect(b).not.toContain('글이 모두 같은 검사 결과가');
+    expect(b).toContain("costNote: '스팸 검사는 크레딧이 아니라 검사 문자 요금으로 빠집니다.'");
   });
 
   it('창: 영상이 있을 때만 두 단 · 무음 · 반복 · 화면 안 재생 · 움직임 줄이기면 자동재생 대신 재생 버튼', () => {

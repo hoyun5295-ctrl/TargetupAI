@@ -42,7 +42,7 @@ import LineIntakeModal from '../components/ai-line/LineIntakeModal';
 import LineResultCards from '../components/ai-line/LineResultCards';
 import {
   type AiLineRun, type AiLineType, type AiLineChannel, aiLineApi, newAiLineRun, saveAiLineRun, loadAiLineRun,
-  activeFilters, allCustomersFlag, audienceOf, spamFp, aiLineOwner, AI_LINE_ALIMTALK_HANDOFF,
+  activeFilters, allCustomersFlag, audienceOf, spamFp, aiLineOwner, AI_LINE_ALIMTALK_HANDOFF, isAdOf,
 } from '../utils/ai-line';
 // ★ D210+ Phase 2-fix1 (Harold 명시 2026-05-23): 회사 데이터 활용 매트릭스 안내 카드 (3축 100% 보완).
 import AiProposalSummaryModal from '../components/AiProposalSummaryModal';
@@ -651,7 +651,7 @@ export default function AiLinePage() {
       messages: r.cards.map((c) => ({ variantId: c.type, variantName: c.label, concept: '', body: c.body, subject: c.subject, byteCount: c.byteCount, score: 0 })),
       recommendation: it.recommend?.type || '',
       recommendationReason: it.recommend?.reason || '',
-      channel: { recommended: r.channel, reason: '', isAd: it.isAd, rejectNumber: it.rejectNumber },
+      channel: { recommended: r.channel, reason: '', isAd: isAdOf(r), rejectNumber: it.rejectNumber },
       schedule: { recommendedTime: it.recommendedTime },
       cost: { estimated: Math.round(count * unit), unitCost: unit, breakdown: '' },
       performance: { expectedClicks: 0, expectedConversions: 0, expectedRevenue: 0, clickRate: 0, conversionRate: 0 },
@@ -659,7 +659,7 @@ export default function AiLinePage() {
     });
     setLineResultActive(true);
     setChannelOverride(null);
-    setAdEnabled(it.isAd);
+    setAdEnabled(isAdOf(r));   // ★ 2026-10-20 확인 판에서 바꾼 문자 성격(광고 여부)을 그대로
     const pickIdx = r.cards.findIndex((c) => c.type === (r.picked || r.cards[0].type));
     setSelectedVariantIdx(Math.max(0, pickIdx));
     // 다듬은 글 = 진행 상태에서(새로 고침 · 다시 열기 뒤에도 같은 글 · 보내는 값 = refinedOverrides 하나)

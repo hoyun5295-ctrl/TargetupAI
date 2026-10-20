@@ -7,18 +7,22 @@
  *   - 확인 판 왼쪽 = 한 줄에서 읽은 대상(누르면 빼기) · AI 가 보탬(기본 켬 · 빼면 n명) · 받는 사람 수(발송 명단과 같은 계산) · 혜택 · 기간 · 채널 · 종류 타일
  *   - 오른쪽 = 이 대상 1위 고객 칼럼(기본 0개 · 채움 % · 30% 미만 잠금) · 금액 줄(잔액 전 → 후)
  *   - 알림톡 갈래 = 종류 칸 대신 승인 템플릿 · 칼럼 칸 대신 #{변수} 맞춤(대시보드 알림톡 발송 창으로 넘긴다)
+ * ★ 2026-10-20 Harold 「동적으로 한 줄을 보고 부족한 것을 물어라」 · 「문안 생성 전에 개인화할 칼럼을 묻는 단계」 · 「문자 성격별 브랜드 보이스」(설계서 §17)
+ *   단계 = 채널(카톡 모호) → 빠진 정보(서버 asks = AI 가 한 줄을 읽고 판단 + 규칙 안전망 · 비면 건너뜀) → 누구에게 → 확인 판(대상 · 종류 · 성격 · 금액)
+ *   → 개인화 칼럼(만들기 직전 · 1위 고객 실제 값 · 회사 칼럼 · 추천 미리 체크 · 만들기 버튼은 여기 한 곳).
  * 금액 · 대상 수 · 판정은 서버 값만 그린다. 닫기 = 숨김(진행 상태는 호출부 run 이 sessionStorage 에 보관).
  * ⛔ 바깥 눌러 닫힘 없음 · 모델명 0 · native dialog 0 · 줄표 0.
  */
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { X, Check, Lock, Loader2, Sparkles, Users, AlertTriangle, MessageSquare, CalendarDays, Gift, Send, Filter, Undo2 } from 'lucide-react';
+import { Link } from 'react-router-dom';
+import { X, Check, Lock, Loader2, Sparkles, Users, AlertTriangle, MessageSquare, CalendarDays, Gift, Send, Filter, Undo2, HelpCircle, ChevronLeft } from 'lucide-react';
 import JourneyModalShell from '../journey/JourneyModalShell';
 import DirectTargetFilterModal from '../DirectTargetFilterModal';
 import { toLineAudienceFilters } from '../../utils/customerFilterBuild';
 import { AI_GENERATE_COSTS } from '../../constants/credit';
 import {
   type AiLineRun, type AiLineType, type AiLineCopyType, type AiLineChannel,
-  AI_LINE_TYPE_META, AI_LINE_TYPE_ORDER, aiLineApi, activeFilters, filtersEmpty, allCustomersFlag, audienceOf,
+  AI_LINE_TYPE_META, AI_LINE_TYPE_ORDER, aiLineApi, activeFilters, filtersEmpty, allCustomersFlag, audienceOf, isAdOf, asksOf,
 } from '../../utils/ai-line';
 
 const MAX_AUDIENCE = 10000;
@@ -38,7 +42,9 @@ function periodLabel(v: string): string {
   return `${m}월 ${d}일(${WEEK[new Date(y, m - 1, d).getDay()]})까지`;
 }
 
-type Step = 'kakao' | 'gaps' | 'board';
+type Step = 'kakao' | 'asks' | 'board' | 'vars';
+/** 칼럼 단계에서 미리 체크하는 추천 칼럼 수 */
+const PRECHECK_MAX = 2;
 
 export interface LineIntakeModalProps {
   open: boolean;
@@ -65,29 +71,44 @@ export interface LineIntakeModalProps {
 export default function LineIntakeModal({ open, run, creditTotal, loadError, onRun, onClose, onComposed, onProceedDirect, onProceedAlimtalk, onCharged, onRetypeLine }: LineIntakeModalProps) {
   const read = run.read;
   const needKakao = run.branch === 'ask_kakao';
-  const needGaps = run.branch === 'sms' && !!read?.gaps && (read.gaps.benefit || read.gaps.period) && run.facts === null;
+  // ★ 2026-10-20 묻는 목록 = 서버 asks 한 자리(대상 찾기 응답 · AI 가 한 줄을 읽고 판단 + 규칙 안전망)
+  const asks = asksOf(run);
+  const askBenefit = asks.find((a) => a.kind === 'benefit') || null;
+  const askPeriod = asks.find((a) => a.kind === 'period') || null;
+  const askTexts = asks.filter((a) => a.kind === 'text');
   const [step, setStep] = useState<Step>('board');
   useEffect(() => {
     if (!open) return;
-    setStep(needKakao ? 'kakao' : needGaps ? 'gaps' : 'board');
-    // 창을 열 때 한 번만 단계를 정한다(답을 고르는 동안 단계가 바뀌지 않게)
+    // 창을 열 때 한 번만 단계를 정한다(답을 고르는 동안 단계가 바뀌지 않게) · 빠진 정보는 대상 찾기가 끝나야 알 수 있어 그 단계에서 기다린다
+    setStep(needKakao ? 'kakao' : run.branch === 'sms' && run.facts === null ? 'asks' : 'board');
+    // 갈래 판정(read · AI 0)이 대상 찾기보다 먼저 오므로 그때 한 번 더 정한다(빠진 정보 단계는 대상 찾기를 기다리는 중이라 답을 덮지 않는다)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, run.runId, !!read]);
+  // 대상 찾기가 끝났는데 물을 것이 없으면(다 갖춘 한 줄 · 알림톡) 바로 다음
+  useEffect(() => {
+    if (step === 'asks' && run.intake && (asks.length === 0 || run.branch !== 'sms')) setStep('board');
+  }, [step, run.intake, asks.length, run.branch]);
 
-  // ── 1장: 빠진 것 ──
+  // ── 1장: 빠진 정보 ──
   const [benefitDraft, setBenefitDraft] = useState('');
   const [benefitNone, setBenefitNone] = useState(false);
   const [periodPick, setPeriodPick] = useState<string | null>(null);
   const [periodNone, setPeriodNone] = useState(false);
+  /** 그 밖 질문 답(질문 id → 글) · 비우면 빼고 쓴다 */
+  const [textAns, setTextAns] = useState<Record<string, string>>({});
   const chips = useMemo(periodChips, []);
-  const gapsOk = (!read?.gaps?.benefit || benefitNone || benefitDraft.trim().length > 0)
-    && (!read?.gaps?.period || periodNone || !!periodPick);
-  const submitGaps = () => {
+  const asksOk = (!askBenefit || benefitNone || benefitDraft.trim().length > 0)
+    && (!askPeriod || periodNone || !!periodPick);
+  const submitAsks = () => {
+    const answers = askTexts
+      .map((a) => ({ q: a.text, a: (textAns[a.id] || '').trim().slice(0, 200) }))
+      .filter((x) => x.a.length > 0);
     onRun({
       ...run,
       facts: {
-        benefit: read?.gaps?.benefit && !benefitNone ? benefitDraft.trim().slice(0, 300) : null,
-        period_end: read?.gaps?.period && !periodNone ? periodPick : null,
+        benefit: askBenefit && !benefitNone ? benefitDraft.trim().slice(0, 300) : null,
+        period_end: askPeriod && !periodNone ? periodPick : null,
+        ...(answers.length > 0 ? { answers } : {}),
       },
     });
     setStep('board');
@@ -166,7 +187,11 @@ export default function LineIntakeModal({ open, run, creditTotal, loadError, onR
   };
   const [whoDraft, setWhoDraft] = useState('');
   // 한 줄이 바뀌면(새 진행) 앞 진행의 템플릿 · 적던 글을 비운다
-  useEffect(() => { setTemplates(null); setTplPick(null); setTplError(false); setWhoDraft(''); setBoardError(null); }, [run.runId]);
+  // ★ Codex 1020 R1 — 빠진 정보 칸도 진행에 묶는다(질문 id 가 매 진행 q1 부터라 앞 한 줄의 답이 새 질문의 답으로 남았다 · 혜택 · 기간 칸도 같은 뿌리)
+  useEffect(() => {
+    setTemplates(null); setTplPick(null); setTplError(false); setWhoDraft(''); setBoardError(null);
+    setBenefitDraft(''); setBenefitNone(false); setPeriodPick(null); setPeriodNone(false); setTextAns({});
+  }, [run.runId]);
   // ★ Codex B2 medium — 창을 다시 열면 템플릿 오류를 지우고 다시 불러온다(안내 문장 「닫았다가 다시 열어 주세요」와 맞춘다)
   useEffect(() => { if (open) setTplError(false); }, [open]);
 
@@ -272,7 +297,8 @@ export default function LineIntakeModal({ open, run, creditTotal, loadError, onR
   const lacking = creditTotal != null && !directOnly && !alimtalk && creditTotal < total;
 
   const [busy, setBusy] = useState(false);
-  const make = async () => {
+  /** varsArg = 칼럼 단계에서 고른 칼럼(「넣지 않고 만들기」 = []) */
+  const make = async (varsArg: string[] = usableVars) => {
     if (!intake || lock || busy) return;
     setBusy(true);
     setBoardError(null);
@@ -286,13 +312,13 @@ export default function LineIntakeModal({ open, run, creditTotal, loadError, onR
       }
       const out = await aiLineApi.compose({
         line: run.line, facts: run.facts, filters: activeFilters(run), allCustomers: allCustomersFlag(run),
-        types: copyTypes, vars: usableVars, channel: run.channel, isAd: intake.isAd, attemptToken: run.attemptToken,
+        types: copyTypes, vars: varsArg, channel: run.channel, isAd: isAdOf(run), attemptToken: run.attemptToken,
       });
       onCharged();
       const direct = run.types.includes('direct') ? [{ type: 'direct' as const, label: AI_LINE_TYPE_META.direct.label, body: '', subject: '', byteCount: 0 }] : [];
       const rec = intake.recommend?.type;
       const picked = out.cards.find((c) => c.type === rec)?.type ?? out.cards[0]?.type ?? 'direct';
-      onComposed({ ...run, vars: usableVars, cards: [...out.cards, ...direct], channel: out.channel, picked, liveCount: out.count });
+      onComposed({ ...run, vars: varsArg, cards: [...out.cards, ...direct], channel: out.channel, picked, liveCount: out.count });
     } catch (e) {
       setBoardError(e instanceof Error ? e.message : '만들지 못했어요. 잠시 뒤 다시 눌러 주세요.');
     } finally {
@@ -303,6 +329,43 @@ export default function LineIntakeModal({ open, run, creditTotal, loadError, onR
   const buttonLabel = alimtalk ? `알림톡으로 진행 · ${baseCost}크레딧`
     : directOnly ? `이 대상으로 진행 · ${baseCost}크레딧`
     : `만들기 · ${total}크레딧`;
+  /** 문자 갈래에서 문안을 만들 종류가 있으면 확인 판 다음 = 칼럼 단계(만들기 버튼은 그 단계 한 곳) */
+  const toVars = !alimtalk && !directOnly && copyTypes.length > 0;
+
+  // ── 칼럼 단계 ──
+  // 추천 = 대상 찾기 AI 가 이 한 줄에 맞게 고른 칼럼(대상을 바꾼 뒤에도 같은 표시) · 처음 들어올 때만 최대 2개 미리 체크
+  const recommendedTokens = useMemo(() => new Set((intake?.columns || []).filter((c) => c.recommended).map((c) => c.token)), [intake]);
+  const precheckedFor = useRef<string | null>(null);
+  const goVars = () => {
+    if (precheckedFor.current !== run.runId && run.vars.length === 0) {
+      const pre = aud.columns.filter((c) => !c.locked && (c.recommended || recommendedTokens.has(c.token))).slice(0, PRECHECK_MAX).map((c) => c.token);
+      if (pre.length > 0) onRun({ ...run, vars: pre });
+    }
+    precheckedFor.current = run.runId;
+    setBoardError(null);
+    setStep('vars');
+  };
+
+  // ── 금액 상자(확인 판 · 칼럼 단계 같이) ──
+  const amountBox = intake ? (
+    <div className="rounded-xl bg-white border border-slate-200 p-3 text-[12.5px] text-slate-600 space-y-1">
+      <div className="flex justify-between"><span>대상 찾기{intake.base.paid ? '(이미 냄)' : ''}</span><span className="tabular-nums">{baseCost}</span></div>
+      {!alimtalk && <div className="flex justify-between"><span>문안 {copyTypes.length}개 × {unit}</span><span className="tabular-nums">{copyTypes.length * unit}</span></div>}
+      {!alimtalk && <div className="flex justify-between"><span>스팸 검사 {run.types.length}건(문자 요금 · 요금제 무료 문자 먼저)</span><span>문자</span></div>}
+      <div className="flex justify-between font-semibold text-slate-900 pt-1 border-t border-slate-100">
+        <span>{creditTotal != null ? `잔액 ${creditTotal.toLocaleString()} → ${(creditTotal - (alimtalk || directOnly ? baseCost : total)).toLocaleString()}` : '크레딧'}</span>
+        <span className="tabular-nums">{alimtalk || directOnly ? baseCost : total}크레딧</span>
+      </div>
+    </div>
+  ) : null;
+
+  // ── 문자 성격 · 브랜드 말투 ──
+  const isAdNow = isAdOf(run);
+  const voice = intake?.voice ?? null;
+  const voiceNote: string | null = !voice ? null
+    : !voice.learned ? '브랜드 말투 학습본이 없어 기본 말투로 써요. AI 메모리에 보냈던 문자를 올리면 그 말투 · 특수문자로 맞춰져요'
+    : isAdNow ? (voice.marketing ? null : '마케팅 문자 학습본이 없어 학습된 말투로 써요. AI 메모리에 마케팅 문자를 올리면 맞춰져요')
+    : (voice.notice ? null : '안부 문자 학습본이 없어 마케팅 말투로 써요. AI 메모리에 안부 문자를 올리면 맞춰져요');
 
   return (
     <JourneyModalShell
@@ -320,7 +383,8 @@ export default function LineIntakeModal({ open, run, creditTotal, loadError, onR
         <div className="flex-1 min-w-0">
           <h2 id="ai-line-q" className="text-[17px] font-bold text-slate-900">
             {step === 'kakao' ? '어느 채널로 보낼까요?'
-              : step === 'gaps' ? (read?.gaps?.benefit && read?.gaps?.period ? '혜택과 기간을 알려 주세요' : read?.gaps?.benefit ? '혜택을 알려 주세요' : '행사 기간을 알려 주세요')
+              : step === 'asks' ? '문안에 넣을 내용을 확인할게요'
+              : step === 'vars' ? '문안에 어떤 고객 정보를 넣을까요?'
               : asking ? '누구에게 보낼까요?'
               : alimtalk ? '어느 알림톡 템플릿으로 보낼까요?'
               : '이렇게 만들어요'}
@@ -344,7 +408,7 @@ export default function LineIntakeModal({ open, run, creditTotal, loadError, onR
             <button type="button" onClick={() => {
               const next = { ...run, branch: 'sms' as const };
               onRun(next);
-              setStep(read?.gaps && (read.gaps.benefit || read.gaps.period) && run.facts === null ? 'gaps' : 'board');
+              setStep(run.facts === null ? 'asks' : 'board');
             }}
               className="rounded-xl border border-slate-200 p-4 text-left hover:border-violet-400 hover:bg-violet-50/50 transition-colors">
               <p className="text-[15px] font-bold text-slate-900">문자</p>
@@ -354,60 +418,105 @@ export default function LineIntakeModal({ open, run, creditTotal, loadError, onR
         </div>
       )}
 
-      {step === 'gaps' && (
+      {step === 'asks' && (
         <>
           <div className="flex-1 min-h-0 overflow-y-auto px-5 py-5 space-y-5">
-            {read?.gaps?.benefit && (
-              <div className="space-y-2">
-                <p className="text-[13px] font-semibold text-slate-700 inline-flex items-center gap-1.5"><Gift className="w-4 h-4 text-violet-600" />혜택</p>
-                <p className="text-[12.5px] text-slate-500">한 줄에 할인 · 쿠폰 같은 혜택 값이 없어요. 문안에 들어갈 혜택을 적어 주세요(없으면 지어내지 않아요).</p>
-                <input
-                  value={benefitDraft}
-                  onChange={(e) => { setBenefitDraft(e.target.value); if (e.target.value) setBenefitNone(false); }}
-                  maxLength={300}
-                  placeholder="예: 전 품목 20% 할인 · 3만원 이상 무료배송"
-                  className="w-full h-11 rounded-xl border border-slate-300 px-3 text-[16px] [@media(pointer:fine)]:text-[14px] outline-none focus:border-indigo-500 focus:ring-4 focus:ring-indigo-100"
-                />
-                <button type="button" onClick={() => { setBenefitNone((v) => !v); setBenefitDraft(''); }}
-                  className={`h-9 px-3 rounded-lg border text-[13px] ${benefitNone ? 'border-violet-600 bg-violet-50 text-violet-800 font-semibold' : 'border-dashed border-slate-300 text-slate-500'}`}>
-                  혜택 없이 보내기
-                </button>
+            {!intake ? (
+              <div className="h-56 flex flex-col items-center justify-center gap-3 text-slate-500 text-center">
+                {loadError ? (
+                  <>
+                    <AlertTriangle className="w-7 h-7 text-amber-600" />
+                    <p className="text-[13.5px] text-slate-700">{loadError}</p>
+                  </>
+                ) : (
+                  <>
+                    <Loader2 className="w-7 h-7 animate-spin text-violet-600" />
+                    <p className="text-[13.5px]">한 줄을 읽고 문안에 필요한데 빠진 것을 찾고 있어요</p>
+                  </>
+                )}
               </div>
-            )}
-            {read?.gaps?.period && (
-              <div className="space-y-2">
-                <p className="text-[13px] font-semibold text-slate-700 inline-flex items-center gap-1.5"><CalendarDays className="w-4 h-4 text-violet-600" />행사 기간</p>
-                <p className="text-[12.5px] text-slate-500">한 줄에 기간이 없어요. 문안에 「언제까지」가 들어가야 혜택이 분명해져요.</p>
-                <div className="flex flex-wrap gap-2 text-[13px]">
-                  {chips.map((c) => (
-                    <button key={c.value} type="button" onClick={() => { setPeriodPick(c.value); setPeriodNone(false); }}
-                      className={`h-9 px-3 rounded-lg border ${periodPick === c.value && !periodNone ? 'border-2 border-violet-600 bg-violet-50 text-violet-800 font-semibold' : 'border-slate-200 text-slate-700 hover:border-slate-300'}`}>
-                      {c.label}
+            ) : (
+              <>
+                {askBenefit && (
+                  <div className="space-y-2">
+                    <p className="text-[13px] font-semibold text-slate-700 inline-flex items-center gap-1.5"><Gift className="w-4 h-4 text-violet-600" />{askBenefit.text}</p>
+                    {askBenefit.why && <p className="text-[12.5px] text-slate-500">{askBenefit.why}</p>}
+                    <input
+                      value={benefitDraft}
+                      onChange={(e) => { setBenefitDraft(e.target.value); if (e.target.value) setBenefitNone(false); }}
+                      maxLength={300}
+                      placeholder="예: 전 품목 20% 할인 · 3만원 이상 무료배송"
+                      className="w-full h-11 rounded-xl border border-slate-300 px-3 text-[16px] [@media(pointer:fine)]:text-[14px] outline-none focus:border-indigo-500 focus:ring-4 focus:ring-indigo-100"
+                    />
+                    <button type="button" onClick={() => { setBenefitNone((v) => !v); setBenefitDraft(''); }}
+                      className={`h-9 px-3 rounded-lg border text-[13px] ${benefitNone ? 'border-violet-600 bg-violet-50 text-violet-800 font-semibold' : 'border-dashed border-slate-300 text-slate-500'}`}>
+                      혜택 없이 보내기
                     </button>
-                  ))}
-                  <label className="h-9 px-3 rounded-lg border border-slate-200 text-slate-700 inline-flex items-center gap-1.5 cursor-pointer">
-                    달력에서 고르기
-                    <input type="date" min={ymd(new Date())} className="text-[13px] outline-none bg-transparent"
-                      value={periodPick && !chips.some((c) => c.value === periodPick) ? periodPick : ''}
-                      onChange={(e) => { if (e.target.value) { setPeriodPick(e.target.value); setPeriodNone(false); } }} />
-                  </label>
-                  <button type="button" onClick={() => { setPeriodNone((v) => !v); setPeriodPick(null); }}
-                    className={`h-9 px-3 rounded-lg border text-[13px] ${periodNone ? 'border-violet-600 bg-violet-50 text-violet-800 font-semibold' : 'border-dashed border-slate-300 text-slate-500'}`}>
-                    기간 없이 보내기
-                  </button>
-                </div>
-                {periodPick && !periodNone && <p className="text-[12px] text-violet-700">{periodLabel(periodPick)}</p>}
-              </div>
+                  </div>
+                )}
+                {askPeriod && (
+                  <div className="space-y-2">
+                    <p className="text-[13px] font-semibold text-slate-700 inline-flex items-center gap-1.5"><CalendarDays className="w-4 h-4 text-violet-600" />{askPeriod.text}</p>
+                    {askPeriod.why && <p className="text-[12.5px] text-slate-500">{askPeriod.why}</p>}
+                    <div className="flex flex-wrap gap-2 text-[13px]">
+                      {chips.map((c) => (
+                        <button key={c.value} type="button" onClick={() => { setPeriodPick(c.value); setPeriodNone(false); }}
+                          className={`h-9 px-3 rounded-lg border ${periodPick === c.value && !periodNone ? 'border-2 border-violet-600 bg-violet-50 text-violet-800 font-semibold' : 'border-slate-200 text-slate-700 hover:border-slate-300'}`}>
+                          {c.label}
+                        </button>
+                      ))}
+                      <label className="h-9 px-3 rounded-lg border border-slate-200 text-slate-700 inline-flex items-center gap-1.5 cursor-pointer">
+                        달력에서 고르기
+                        <input type="date" min={ymd(new Date())} className="text-[13px] outline-none bg-transparent"
+                          value={periodPick && !chips.some((c) => c.value === periodPick) ? periodPick : ''}
+                          onChange={(e) => { if (e.target.value) { setPeriodPick(e.target.value); setPeriodNone(false); } }} />
+                      </label>
+                      <button type="button" onClick={() => { setPeriodNone((v) => !v); setPeriodPick(null); }}
+                        className={`h-9 px-3 rounded-lg border text-[13px] ${periodNone ? 'border-violet-600 bg-violet-50 text-violet-800 font-semibold' : 'border-dashed border-slate-300 text-slate-500'}`}>
+                        기간 없이 보내기
+                      </button>
+                    </div>
+                    {periodPick && !periodNone && <p className="text-[12px] text-violet-700">{periodLabel(periodPick)}</p>}
+                  </div>
+                )}
+                {askTexts.map((a) => {
+                  const val = textAns[a.id] || '';
+                  return (
+                    <div key={a.id} className="space-y-2">
+                      <p className="text-[13px] font-semibold text-slate-700 inline-flex items-center gap-1.5"><HelpCircle className="w-4 h-4 text-violet-600" />{a.text}</p>
+                      {a.why && <p className="text-[12.5px] text-slate-500">{a.why}</p>}
+                      {a.options.length > 0 && (
+                        <div className="flex flex-wrap gap-2 text-[13px]">
+                          {a.options.map((o) => (
+                            <button key={o} type="button" aria-pressed={val === o} onClick={() => setTextAns((cur) => ({ ...cur, [a.id]: cur[a.id] === o ? '' : o }))}
+                              className={`h-9 px-3 rounded-lg border ${val === o ? 'border-2 border-violet-600 bg-violet-50 text-violet-800 font-semibold' : 'border-slate-200 text-slate-700 hover:border-slate-300'}`}>
+                              {o}
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                      <input
+                        value={a.options.includes(val) ? '' : val}
+                        onChange={(e) => setTextAns((cur) => ({ ...cur, [a.id]: e.target.value }))}
+                        maxLength={200}
+                        placeholder={a.options.length > 0 ? '직접 적기' : '답을 적어 주세요'}
+                        className="w-full h-11 rounded-xl border border-slate-300 px-3 text-[16px] [@media(pointer:fine)]:text-[14px] outline-none focus:border-indigo-500 focus:ring-4 focus:ring-indigo-100"
+                      />
+                    </div>
+                  );
+                })}
+                <p className="text-[12px] text-slate-500">
+                  {intake.conditions.some((c) => c.origin === 'line')
+                    ? <>읽은 값 · 대상 「{intake.conditions.filter((c) => c.origin === 'line').map((c) => c.text).join(' · ')}」은 다시 묻지 않아요. </>
+                    : '한 줄에서 읽은 것은 다시 묻지 않아요. '}
+                  {askTexts.length > 0 ? '비워 둔 질문은 문안에 넣지 않아요(지어내지 않아요).' : ''}
+                </p>
+              </>
             )}
-            <p className="text-[12px] text-slate-500">
-              {intake && intake.conditions.length > 0
-                ? <>읽은 값 · 대상 「{intake.conditions.filter((c) => c.origin === 'line').map((c) => c.text).join(' · ') || '조건 없음'}」은 다시 묻지 않아요.</>
-                : '한 줄에서 읽은 대상 · 혜택은 다시 묻지 않아요.'}
-            </p>
           </div>
           <div className="px-5 py-3 bg-slate-50 border-t border-slate-100 flex justify-end gap-2 shrink-0">
             <button type="button" onClick={onClose} className="h-10 px-4 rounded-lg border border-slate-200 bg-white text-[13.5px] font-semibold text-slate-700">나중에</button>
-            <button type="button" onClick={submitGaps} disabled={!gapsOk} className="h-10 px-5 rounded-lg bg-slate-900 text-white text-[13.5px] font-semibold disabled:opacity-40">다음</button>
+            <button type="button" onClick={submitAsks} disabled={!intake || !asksOk} className="h-10 px-5 rounded-lg bg-slate-900 text-white text-[13.5px] font-semibold disabled:opacity-40">다음</button>
           </div>
         </>
       )}
@@ -482,7 +591,7 @@ export default function LineIntakeModal({ open, run, creditTotal, loadError, onR
                     <div className="rounded-xl bg-amber-50 border border-amber-200 px-3 py-2.5 text-[12.5px] text-amber-900 flex items-start gap-2">
                       <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0" />
                       <span className="flex-1">할인 같은 광고는 알림톡으로 보낼 수 없어요.</span>
-                      <button type="button" onClick={() => onRun({ ...run, branch: 'sms' })} className="font-semibold underline underline-offset-2 shrink-0">문자로 만들기</button>
+                      <button type="button" onClick={() => { onRun({ ...run, branch: 'sms' }); if (run.facts === null) setStep('asks'); }} className="font-semibold underline underline-offset-2 shrink-0">문자로 만들기</button>
                     </div>
                   )}
                   <div className="space-y-2">
@@ -575,8 +684,9 @@ export default function LineIntakeModal({ open, run, creditTotal, loadError, onR
                       </p>
                     )}
                     <div className="flex flex-wrap gap-x-4 gap-y-1 text-[12.5px] text-slate-600">
-                      <span>혜택 <b className="text-slate-900">{run.facts?.benefit || (read?.gaps?.benefit ? '없음' : '한 줄 그대로')}</b></span>
-                      {(run.facts?.period_end || read?.gaps?.period) && <span>기간 <b className="text-slate-900">{run.facts?.period_end ? periodLabel(run.facts.period_end) : '없음'}</b></span>}
+                      <span>혜택 <b className="text-slate-900">{run.facts?.benefit || (askBenefit ? '없음' : '한 줄 그대로')}</b></span>
+                      {(run.facts?.period_end || askPeriod) && <span>기간 <b className="text-slate-900">{run.facts?.period_end ? periodLabel(run.facts.period_end) : '없음'}</b></span>}
+                      {(run.facts?.answers?.length ?? 0) > 0 && <span>확인한 사실 <b className="text-slate-900">{run.facts?.answers?.length}개</b></span>}
                       {!alimtalk && (
                         <span className="inline-flex items-center gap-1.5">채널
                           {(['SMS', 'LMS', 'MMS'] as const).map((c) => (
@@ -615,7 +725,7 @@ export default function LineIntakeModal({ open, run, creditTotal, loadError, onR
                       ) : templates.templates.length === 0 ? (
                         <div className="rounded-xl bg-slate-50 border border-slate-200 p-3 text-[12.5px] text-slate-600 space-y-2">
                           <p>{templates.suggestion || '승인된 알림톡 템플릿이 없어요.'}</p>
-                          <button type="button" onClick={() => onRun({ ...run, branch: 'sms' })} className="font-semibold text-indigo-700 underline underline-offset-2">문자로 만들기</button>
+                          <button type="button" onClick={() => { onRun({ ...run, branch: 'sms' }); if (run.facts === null) setStep('asks'); }} className="font-semibold text-indigo-700 underline underline-offset-2">문자로 만들기</button>
                         </div>
                       ) : (
                         <div className="space-y-2">
@@ -636,29 +746,23 @@ export default function LineIntakeModal({ open, run, creditTotal, loadError, onR
                 <div className="p-5 space-y-3 bg-slate-50/60">
                   {!alimtalk ? (
                     <>
-                      <p className="text-[12.5px] font-semibold text-slate-500">문안에 쓸 칼럼 · 이 대상 1위 고객{aud.top?.name ? ` ${aud.top.name}` : ''}</p>
-                      {aud.columns.length === 0 ? (
-                        <p className="text-[12.5px] text-slate-400">고객 데이터가 있어야 칼럼이 보여요.</p>
-                      ) : (
-                        <div className="rounded-xl bg-white border border-slate-200 divide-y divide-slate-100 text-[13px]">
-                          {aud.columns.map((c) => {
-                            const on = usableVars.includes(c.token);
-                            return (
-                              <button key={c.token} type="button" disabled={c.locked} onClick={() => toggleVar(c.token)} aria-pressed={on}
-                                className={`w-full flex items-center gap-2 px-3 h-11 text-left ${c.locked ? 'text-slate-400 cursor-not-allowed' : 'hover:bg-slate-50'}`}>
-                                <span className={`w-4 h-4 rounded grid place-items-center shrink-0 ${c.locked ? 'border border-slate-200 bg-slate-100' : on ? 'bg-violet-600' : 'border border-slate-300'}`}>
-                                  {c.locked ? <Lock className="w-3 h-3" /> : on && <Check className="w-3 h-3 text-white" />}
-                                </span>
-                                <span className="w-[84px] text-slate-500 truncate">{c.label}</span>
-                                <b className={`flex-1 truncate ${c.locked ? 'font-medium' : ''}`}>{c.value ?? '빈칸'}</b>
-                                {c.recommended && !c.locked && <span className="text-[10.5px] font-bold text-violet-700">추천</span>}
-                                <span className="text-[11.5px] text-slate-500 tabular-nums shrink-0">{c.fill}%{c.locked ? ' · 빈칸 많음' : ''}</span>
-                              </button>
-                            );
-                          })}
+                      <p className="text-[12.5px] font-semibold text-slate-500">문자 성격</p>
+                      <div className="grid grid-cols-2 gap-2 text-[13px]">
+                        {([true, false] as const).map((ad) => (
+                          <button key={String(ad)} type="button" aria-pressed={isAdNow === ad} onClick={() => onRun({ ...run, isAd: ad })}
+                            className={`rounded-xl p-3 text-left transition-colors ${isAdNow === ad ? 'border-2 border-violet-600 bg-violet-50/60' : 'border border-slate-200 bg-white hover:border-slate-300'}`}>
+                            <p className="font-semibold text-slate-900">{ad ? '마케팅' : '안부 · 알림'}</p>
+                            <p className={`text-[12px] ${isAdNow === ad ? 'text-violet-900/80' : 'text-slate-500'}`}>{ad ? '(광고) 표기 · 무료거부 080' : '광고 표기 없이'}</p>
+                          </button>
+                        ))}
+                      </div>
+                      <p className="text-[11.5px] text-slate-500">한 줄을 읽고 {intake.isAd ? '마케팅' : '안부 · 알림'}으로 골랐어요. 이 성격의 브랜드 말투 · 대표 문안으로 써요. 할인 · 쿠폰처럼 구매를 권하면 마케팅으로 보내야 해요(광고 표기 의무).</p>
+                      {voiceNote && (
+                        <div className="rounded-xl bg-amber-50 border border-amber-200 px-3 py-2.5 text-[12.5px] text-amber-900 flex items-start gap-2">
+                          <Sparkles className="w-4 h-4 mt-0.5 shrink-0" />
+                          <span className="flex-1">{voiceNote} <Link to="/ai-memory" className="font-semibold underline underline-offset-2">AI 메모리 열기</Link></span>
                         </div>
                       )}
-                      <p className="text-[11.5px] text-slate-500">채움 % = 이 대상 안에서 값이 있는 비율 · 30% 미만은 잠금 · 0개면 변수 없이 써요{usableVars.length > 0 && run.channel === 'SMS' ? ' · 칼럼을 넣으면 장문(LMS)으로 보내요' : ''}</p>
                     </>
                   ) : (
                     <>
@@ -676,15 +780,7 @@ export default function LineIntakeModal({ open, run, creditTotal, loadError, onR
                       <p className="text-[11.5px] text-slate-500">알림톡 본문은 문자 스팸 검사 대상이 아니에요 · 대체 문자는 발송 창에서 정해요</p>
                     </>
                   )}
-                  <div className="rounded-xl bg-white border border-slate-200 p-3 text-[12.5px] text-slate-600 space-y-1">
-                    <div className="flex justify-between"><span>대상 찾기{intake.base.paid ? '(이미 냄)' : ''}</span><span className="tabular-nums">{baseCost}</span></div>
-                    {!alimtalk && <div className="flex justify-between"><span>문안 {copyTypes.length}개 × {unit}</span><span className="tabular-nums">{copyTypes.length * unit}</span></div>}
-                    {!alimtalk && <div className="flex justify-between"><span>스팸 검사 {run.types.length}건(문자 요금 · 요금제 무료 문자 먼저)</span><span>문자</span></div>}
-                    <div className="flex justify-between font-semibold text-slate-900 pt-1 border-t border-slate-100">
-                      <span>{creditTotal != null ? `잔액 ${creditTotal.toLocaleString()} → ${(creditTotal - (alimtalk || directOnly ? baseCost : total)).toLocaleString()}` : '크레딧'}</span>
-                      <span className="tabular-nums">{alimtalk || directOnly ? baseCost : total}크레딧</span>
-                    </div>
-                  </div>
+                  {amountBox}
                 </div>
               </div>
             )}
@@ -693,9 +789,77 @@ export default function LineIntakeModal({ open, run, creditTotal, loadError, onR
           <div className="px-5 py-3 border-t border-slate-100 flex flex-wrap items-center justify-end gap-2 shrink-0 sticky bottom-0 bg-white">
             {(lock || lacking) && <p className="mr-auto text-[12px] text-slate-500">{lock || '크레딧이 모자라요. 충전한 뒤 다시 눌러 주세요'}</p>}
             <button type="button" onClick={onClose} className="h-11 px-4 rounded-lg border border-slate-200 text-[13.5px] font-semibold text-slate-700">닫기(결과 보존)</button>
+            {toVars ? (
+              <button type="button" onClick={goVars} disabled={!!lock || lacking || busy}
+                className="h-11 px-5 rounded-lg bg-slate-900 hover:bg-slate-800 text-white text-[14px] font-bold inline-flex items-center gap-1.5 disabled:opacity-40 disabled:cursor-not-allowed">
+                <Users className="w-4 h-4" />다음 · 개인화 고르기
+              </button>
+            ) : (
+              <button type="button" onClick={() => { void make(); }} disabled={!!lock || lacking || busy}
+                className="h-11 px-5 rounded-lg bg-amber-500 hover:bg-amber-400 text-slate-950 text-[14px] font-bold inline-flex items-center gap-1.5 disabled:opacity-40 disabled:cursor-not-allowed">
+                {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : alimtalk ? <MessageSquare className="w-4 h-4" /> : directOnly ? <Send className="w-4 h-4" /> : <Sparkles className="w-4 h-4" />}
+                {buttonLabel}
+              </button>
+            )}
+          </div>
+        </>
+      )}
+
+      {step === 'vars' && intake && (
+        <>
+          <div className="flex-1 min-h-0 overflow-y-auto px-5 py-4 space-y-3">
+            <p className="text-[12.5px] text-slate-500">
+              받는 사람 <b className="text-slate-800 tabular-nums">{count.toLocaleString()}명</b> · {copyTypes.map((t) => AI_LINE_TYPE_META[t].label).join(' · ')} · {isAdNow ? '마케팅' : '안부 · 알림'}
+            </p>
+            <p className="text-[13px] text-slate-700">
+              {aud.top?.name ? <>이 대상 1위 고객 <b>{aud.top.name}</b>의 실제 값이에요. </> : null}
+              고른 칼럼만 문안에 넣고, 고르지 않은 칼럼은 넣지 않아요.
+            </p>
+            {aud.columns.length === 0 ? (
+              <p className="rounded-xl bg-slate-50 border border-slate-200 px-3 py-3 text-[12.5px] text-slate-600">이 대상은 문안에 넣을 고객 정보가 비어 있어요. 칼럼 없이 만들어요.</p>
+            ) : (
+              <div className="rounded-xl bg-white border border-slate-200 divide-y divide-slate-100 text-[13px]">
+                {aud.columns.map((c) => {
+                  const on = usableVars.includes(c.token);
+                  const rec = (c.recommended || recommendedTokens.has(c.token)) && !c.locked;
+                  return (
+                    <button key={c.token} type="button" disabled={c.locked} onClick={() => toggleVar(c.token)} aria-pressed={on}
+                      className={`w-full flex items-center gap-2 px-3 h-11 text-left ${c.locked ? 'text-slate-400 cursor-not-allowed' : 'hover:bg-slate-50'}`}>
+                      <span className={`w-4 h-4 rounded grid place-items-center shrink-0 ${c.locked ? 'border border-slate-200 bg-slate-100' : on ? 'bg-violet-600' : 'border border-slate-300'}`}>
+                        {c.locked ? <Lock className="w-3 h-3" /> : on && <Check className="w-3 h-3 text-white" />}
+                      </span>
+                      <span className="w-[92px] text-slate-500 truncate">{c.label}</span>
+                      <b className={`flex-1 min-w-0 truncate ${c.locked ? 'font-medium' : ''}`}>{c.value ?? '빈칸'}</b>
+                      {c.custom && <span className="shrink-0 rounded-full bg-slate-100 text-slate-700 text-[10.5px] font-semibold px-1.5 leading-[18px]">회사 칼럼</span>}
+                      {rec && <span className="shrink-0 rounded-full bg-violet-100 text-violet-800 text-[10.5px] font-bold px-1.5 leading-[18px]">추천</span>}
+                      <span className="text-[11.5px] text-slate-500 tabular-nums shrink-0">{c.fill}%{c.locked ? ' · 빈칸 많음' : ''}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+            {usableVars.length > 0 && (
+              <p className="text-[12px] text-violet-800">
+                넣으면 이렇게 바뀌어요 · {usableVars.map((t) => `%${t}% → ${aud.columns.find((x) => x.token === t)?.value ?? '빈칸'}`).join(' · ')}
+              </p>
+            )}
+            <p className="text-[11.5px] text-slate-500">%칼럼% 자리는 받는 사람마다 그 고객의 값으로 바뀌어요 · 채움 % = 이 대상 안에서 값이 있는 비율 · 30% 미만은 잠금{usableVars.length > 0 && run.channel === 'SMS' ? ' · 칼럼을 넣으면 장문(LMS)으로 보내요' : ''}</p>
+            {amountBox}
+            {boardError && <p className="rounded-lg bg-rose-50 border border-rose-200 px-3 py-2 text-[12.5px] text-rose-800">{boardError}</p>}
+          </div>
+          <div className="px-5 py-3 border-t border-slate-100 flex flex-wrap items-center justify-end gap-2 shrink-0 sticky bottom-0 bg-white">
+            {(lock || lacking) && <p className="w-full text-[12px] text-slate-500">{lock || '크레딧이 모자라요. 충전한 뒤 다시 눌러 주세요'}</p>}
+            <button type="button" onClick={() => { setBoardError(null); setStep('board'); }} disabled={busy}
+              className="mr-auto h-11 px-3 rounded-lg text-[13px] font-semibold text-slate-600 hover:bg-slate-100 inline-flex items-center gap-1 disabled:opacity-40">
+              <ChevronLeft className="w-4 h-4" />확인 판
+            </button>
+            <button type="button" onClick={() => { void make([]); }} disabled={!!lock || lacking || busy}
+              className="h-11 px-4 rounded-lg border border-slate-200 text-[13.5px] font-semibold text-slate-700 disabled:opacity-40">
+              넣지 않고 만들기
+            </button>
             <button type="button" onClick={() => { void make(); }} disabled={!!lock || lacking || busy}
               className="h-11 px-5 rounded-lg bg-amber-500 hover:bg-amber-400 text-slate-950 text-[14px] font-bold inline-flex items-center gap-1.5 disabled:opacity-40 disabled:cursor-not-allowed">
-              {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : alimtalk ? <MessageSquare className="w-4 h-4" /> : directOnly ? <Send className="w-4 h-4" /> : <Sparkles className="w-4 h-4" />}
+              {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
               {buttonLabel}
             </button>
           </div>

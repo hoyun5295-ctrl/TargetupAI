@@ -10,7 +10,7 @@
  *   - 원장 키 = 회사 + 날짜/시도 + 입력 지문. 같은 날 같은 한 줄 = 기본 0 · 같은 시도 재요청 = 0.
  */
 import { createHash } from 'crypto';
-import { oneLineGaps, hasPromotionIntent } from './one-line-facts';
+import { oneLineGaps, hasPromotionIntent, hasConcreteBenefit } from './one-line-facts';
 import { linePeriodMentioned, lineFingerprint } from './one-line-steps';
 import { kstDateTag, getCreditCost } from './ai-credit-calc';
 import { SENDABLE_RECIPIENTS_LIMIT } from './operator-recipients';
@@ -32,20 +32,140 @@ export interface AiLineRead {
   adConflict: boolean;
 }
 
+/** (순수) 한 줄 규칙 판정(갈래와 무관 · 카톡 갈래에서 문자를 고르면 같은 판정) — 행사인데 혜택 값이 없다 · 행사인데 기간 말이 없다 */
+export function lineRuleGaps(line: string): { benefit: boolean; period: boolean } {
+  const t = String(line || '').trim();
+  return { benefit: oneLineGaps(t).benefit, period: hasPromotionIntent(t) && !linePeriodMentioned(t) };
+}
+
 /** (순수) 한 줄 → 갈래 · 빠진 것. 알림톡 갈래는 문안을 만들지 않으므로 묻지 않는다. */
 export function readAiLine(line: string): AiLineRead {
   const t = String(line || '').trim();
   const branch: AiLineBranch = ALIMTALK_RE.test(t) ? 'alimtalk' : KAKAO_RE.test(t) ? 'ask_kakao' : 'sms';
-  const promo = hasPromotionIntent(t);
+  const g = lineRuleGaps(t);
   const sms = branch === 'sms';
   return {
     branch,
-    gaps: {
-      benefit: sms && oneLineGaps(t).benefit,
-      period: sms && promo && !linePeriodMentioned(t),
-    },
-    adConflict: branch === 'alimtalk' && promo,
+    gaps: { benefit: sms && g.benefit, period: sms && g.period },
+    adConflict: branch === 'alimtalk' && hasPromotionIntent(t),
   };
+}
+
+// ─────────────── 묻는 목록(★ 2026-10-20 설계서 §17 · AI 가 한 줄을 읽고 판단 · 규칙은 안전망) ───────────────
+
+export type AiLineAskKind = 'benefit' | 'period' | 'text';
+export interface AiLineAsk {
+  /** 'benefit' · 'period' · 'q1'… (화면 답 칸 키) */
+  id: string;
+  kind: AiLineAskKind;
+  text: string;
+  /** 왜 묻는지 한 줄(비면 '') */
+  why: string;
+  /** 고르기 칩(그 밖 질문만 · 혜택 값 · 숫자 없음) */
+  options: string[];
+  source: 'ai' | 'rule';
+}
+/** 형식 검사용 상한(개수를 정하는 값이 아니다 · 응답이 망가졌을 때 화면과 요청 크기를 지킨다) */
+export const AI_LINE_ASKS_MAX = 8;
+
+/** 줄표를 나열 점으로 · 공백 정리 · 길이 상한(AI 가 쓴 글을 화면에 그대로 싣지 않는다) */
+const tidyAsk = (s: unknown, max: number) => String(s ?? '').replace(/\u2014/g, ' · ').replace(/\s+/g, ' ').trim().slice(0, max);
+/** 칩에 혜택 값이 실리면 사람이 누르는 순간 지어낸 혜택이 사실이 된다 — 숫자 · 혜택 낱말이 든 칩은 버린다 */
+const ASK_OPTION_BAD_RE = /\d|%|원|무료|할인|쿠폰|적립|증정|사은품|포인트|세일|특가|반값|캐시백|페이백/;
+
+/**
+ * (순수) 질문 글에 한 줄에 없는 혜택 값이 있는가 — 한 줄에 없는 숫자 · 한 줄에 구체 혜택이 없는데 질문에 있는 구체 혜택.
+ * ★ Codex 1020 R1 high — 「10% 할인은 어디서 쓰나요?」처럼 AI 가 지어낸 혜택을 사람에게 사실처럼 보이지 않게 질문째 버린다.
+ */
+function askInventsBenefit(text: string, line: string): boolean {
+  const lineDigits = String(line || '').replace(/[,\s]/g, '');
+  const nums = text.replace(/,/g, '').match(/\d+(?:\.\d+)?/g) || [];
+  if (nums.some((n) => !lineDigits.includes(n))) return true;
+  return hasConcreteBenefit(text) && !hasConcreteBenefit(line);
+}
+
+/** (순수) 대상 찾기 AI 가 낸 질문 → 화면에 실을 질문(모양 검사 · 지어낸 혜택 질문 버림 · 칩 거르기 · 같은 종류 · 같은 글 하나만) */
+export function sanitizeAiAsks(raw: unknown, line: string): AiLineAsk[] {
+  if (!Array.isArray(raw)) return [];
+  const out: AiLineAsk[] = [];
+  let textN = 0;
+  for (const q of raw) {
+    if (!q || typeof q !== 'object' || Array.isArray(q)) continue;
+    const r = q as Record<string, unknown>;
+    const text = tidyAsk(r.question ?? r.text, 80);
+    if (text.length < 4) continue;
+    if (askInventsBenefit(text, line)) continue;
+    const k = String(r.kind || '').toLowerCase();
+    const kind: AiLineAskKind = k === 'benefit' ? 'benefit' : k === 'period' ? 'period' : 'text';
+    if (out.some((x) => x.text === text || (kind !== 'text' && x.kind === kind))) continue;
+    const options = kind === 'text' && Array.isArray(r.options)
+      ? [...new Set(r.options.map((o) => tidyAsk(o, 20)))].filter((o) => o.length >= 1 && !ASK_OPTION_BAD_RE.test(o) && !hasConcreteBenefit(o)).slice(0, 5)
+      : [];
+    const id = kind === 'text' ? `q${++textN}` : kind;
+    out.push({ id, kind, text, why: tidyAsk(r.why, 60), options, source: 'ai' });
+    if (out.length >= AI_LINE_ASKS_MAX) break;
+  }
+  return out;
+}
+
+/**
+ * (순수) 묻는 목록 한 자리 — AI 가 판단한 질문 + 규칙 안전망(AI 가 혜택 · 기간을 놓쳤을 때만 보탠다).
+ * 순서 = 혜택 → 기간 → 그 밖. 다 갖춘 한 줄이면 빈 목록(이 단계 없이 다음).
+ */
+export function mergeLineAsks(line: string, aiAsks: AiLineAsk[]): AiLineAsk[] {
+  const g = lineRuleGaps(line);
+  const all = [...aiAsks];
+  if (g.benefit && !all.some((a) => a.kind === 'benefit')) {
+    all.push({ id: 'benefit', kind: 'benefit', text: '문안에 들어갈 혜택을 알려 주세요', why: '한 줄에 할인 · 쿠폰 같은 혜택 값이 없어요. 없으면 지어내지 않아요', options: [], source: 'rule' });
+  }
+  if (g.period && !all.some((a) => a.kind === 'period')) {
+    all.push({ id: 'period', kind: 'period', text: '혜택은 언제까지인가요?', why: '문안에 「언제까지」가 들어가야 혜택이 분명해져요', options: [], source: 'rule' });
+  }
+  const order: AiLineAskKind[] = ['benefit', 'period', 'text'];
+  return order.flatMap((k) => all.filter((a) => a.kind === k)).slice(0, AI_LINE_ASKS_MAX);
+}
+
+export interface AiLineAnswer { q: string; a: string }
+/** (순수) 만들기 요청의 그 밖 질문 답(질문 · 답) — 모양이 틀리면 invalid · 빈 답은 버린다(묻고 답하지 않은 사실은 쓰지 않는다) */
+export function readLineAnswers(raw: unknown): AiLineAnswer[] | 'invalid' {
+  if (raw === undefined || raw === null) return [];
+  if (!Array.isArray(raw) || raw.length > AI_LINE_ASKS_MAX) return 'invalid';
+  const out: AiLineAnswer[] = [];
+  for (const x of raw) {
+    if (!x || typeof x !== 'object' || Array.isArray(x)) return 'invalid';
+    const q = tidyAsk((x as any).q, 80);
+    const a = tidyAsk((x as any).a, 200);
+    if (!q) return 'invalid';
+    if (a) out.push({ q, a });
+  }
+  return out;
+}
+/**
+ * (순수) 혜택 근거 글(licenseText)에 붙일 「확인한 사실」 = **사람이 적은 답만**(답이 없으면 빈 글).
+ * ★ Codex 1020 R1 high — 질문 글은 AI 가 썼다. 근거에 넣으면 질문 속 혜택이 「사람이 확인한 혜택」이 된다(혜택 날조 검사의 근거가 오염).
+ */
+export function lineAnswersLicense(answers: readonly AiLineAnswer[]): string {
+  return answers.length > 0 ? `\n[확인한 사실]\n${answers.map((x) => `- ${x.a}`).join('\n')}` : '';
+}
+/** (순수) 생성기 참고 글 = 질문과 답(어떤 질문의 답인지 알려 주는 글 · 혜택 근거가 아니다) */
+export function lineAnswersContext(answers: readonly AiLineAnswer[]): string {
+  return answers.length > 0
+    ? `[담당자에게 확인한 질문과 답: 답만 사실로 쓰고, 질문에만 있는 내용은 쓰지 않는다]\n${answers.map((x) => `- ${x.q} → ${x.a}`).join('\n')}`
+    : '';
+}
+
+// ─────────────── 고른 칼럼 · 문자 성격 ───────────────
+
+/** (순수) 고른 칼럼 중 본문에 %칼럼% 으로 들어가지 않은 것 */
+export function missingLineVars(body: string, vars: readonly string[]): string[] {
+  const b = String(body || '');
+  return vars.filter((v) => !b.includes(`%${v}%`));
+}
+
+export type AiLineVoiceKind = 'marketing' | 'notice';
+/** (순수) 문자 성격 = 광고 여부 하나(광고 표기 · 080 과 같은 값 · 새 판정 축을 만들지 않는다) */
+export function lineVoiceKind(isAd: boolean): AiLineVoiceKind {
+  return isAd ? 'marketing' : 'notice';
 }
 
 /** (순수) 한 줄이 「전체 고객」을 말했는가(「전체 고객」 · 「모든 회원」 · 「고객 전체」) — 말했으면 「누구에게」를 다시 묻지 않는다 */

@@ -1,0 +1,247 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>한줄로 AI 한줄로</title>
+<!-- 릴스 14 · AI 한줄로: 한 줄 적기 → 빠진 것만 묻기 → 받는 사람 · 종류 → 고객 정보 칼럼 → 스팸 검사 · 예약 (공용 = ../common)
+     화면 글은 실제 화면 코드 원문(입력 칸 예시 · 단계 제목 · 종류 설명 · 기간 칩 · 예약 문구) · 고객 값은 예시
+     기능 안내 창(PlanFeatureModal 'ai-line')은 10.9초에서 잘라 무음 반복으로 쓴다(창 안에서 약 300×533 → 글자를 크게) -->
+<link rel="stylesheet" href="../common/reel.css">
+<style>
+  .panel { word-break: keep-all; }
+  .t2 { font-size: 46px; font-weight: 800; letter-spacing: -0.03em; }
+  .t2row { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+  .lb2 { display: inline-block; padding: 10px 26px; border-radius: 999px; background: var(--soft); color: #3F3F46; font-size: 32px; font-weight: 800; }
+  .ln1 { margin-top: 12px; font-size: 30px; color: #52525B; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .ln1 b { color: var(--ac); font-weight: 800; margin-right: 10px; }
+  .ripple.dk { background: rgba(17,17,17,.12); }
+  .spin.dk { width: 30px; height: 30px; border: 4px solid rgba(17,17,17,.18); border-top-color: var(--ink); }
+
+  /* ① 한 줄 */
+  #ln { top: 700px; padding: 44px; }
+  .box { margin-top: 26px; min-height: 300px; padding: 34px 36px; border-radius: 30px; border: 3px solid var(--ink); font-size: 57px; font-weight: 800; line-height: 1.42; letter-spacing: -0.035em; }
+  .caret { display: inline-block; width: 5px; height: 56px; background: var(--ac); vertical-align: -9px; margin-left: 4px; }
+  .sendrow { margin-top: 28px; display: flex; justify-content: flex-end; }
+  .rbtn { position: relative; overflow: hidden; width: 140px; height: 140px; border-radius: 50%; background: var(--ink); color: #fff; display: flex; align-items: center; justify-content: center; font-size: 64px; }
+
+  /* ② 빠진 것만 */
+  #ak { top: 660px; padding: 44px; }
+  .q { margin-top: 42px; font-size: 42px; font-weight: 800; }
+  .inp { margin-top: 16px; height: 118px; border-radius: 24px; border: 3px solid var(--line); padding: 0 32px; display: flex; align-items: center; font-size: 46px; font-weight: 800; }
+  .inp.on { border-color: var(--ink); }
+  .pc { margin-top: 16px; display: flex; gap: 14px; flex-wrap: wrap; }
+  .pc span { position: relative; overflow: hidden; padding: 22px 30px; border-radius: 22px; border: 3px solid var(--line); background: #fff; font-size: 36px; font-weight: 800; color: #3F3F46; }
+  .pc span.on { border-color: var(--ink); background: var(--ink); color: #fff; }
+
+  /* ③ 받는 사람 · 종류 */
+  #bd { top: 660px; padding: 44px; }
+  .kind { padding: 12px 26px; border-radius: 999px; background: var(--ink); color: #fff; font-size: 32px; font-weight: 800; }
+  .sec { margin-top: 32px; font-size: 31px; font-weight: 800; color: #71717A; }
+  .cd { margin-top: 14px; display: flex; gap: 14px; }
+  .cd span { display: inline-flex; align-items: center; gap: 14px; padding: 18px 28px; border-radius: 20px; background: var(--ac-soft); color: #9A3412; font-size: 39px; font-weight: 800; }
+  .cd span i { width: 14px; height: 14px; border-radius: 50%; background: var(--ac); }
+  .cnt { margin-top: 26px; padding: 26px 30px; border-radius: 26px; background: var(--soft); display: flex; align-items: center; justify-content: space-between; gap: 20px; }
+  .cnt small { font-size: 30px; font-weight: 700; color: #52525B; line-height: 1.35; }
+  .cnt b { font-size: 78px; font-weight: 900; letter-spacing: -0.03em; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .tiles { margin-top: 26px; display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  .tl { position: relative; overflow: hidden; padding: 26px 28px; border-radius: 26px; border: 3px solid var(--line); background: #fff; }
+  .tl b { display: block; font-size: 44px; font-weight: 900; }
+  .tl p { margin-top: 8px; font-size: 30px; color: #52525B; font-weight: 600; }
+  .tl.on { border-color: var(--ink); box-shadow: inset 0 0 0 3px var(--ink); }
+  .tl .rec { position: absolute; right: 20px; top: 22px; padding: 5px 18px; border-radius: 999px; background: var(--ac); color: #fff; font-size: 28px; font-weight: 800; }
+  .tl .ck { position: absolute; right: 20px; bottom: 20px; width: 54px; height: 54px; border-radius: 50%; background: var(--ink); color: #fff; display: flex; align-items: center; justify-content: center; font-size: 31px; }
+
+  /* ④ 고객 정보 */
+  #vr { top: 660px; padding: 44px; }
+  .vsub { margin-top: 12px; font-size: 31px; color: #52525B; font-weight: 600; }
+  .vrows { margin-top: 28px; border: 3px solid var(--line); border-radius: 28px; overflow: hidden; }
+  .vrow { position: relative; overflow: hidden; display: flex; align-items: center; gap: 20px; padding: 32px 30px; font-size: 41px; }
+  .vrow + .vrow { border-top: 2px solid #F1F1F0; }
+  .vrow .bx { width: 50px; height: 50px; border-radius: 14px; border: 3px solid #D4D4D8; display: flex; align-items: center; justify-content: center; color: #fff; font-size: 30px; flex: none; }
+  .vrow.on .bx { background: var(--ink); border-color: var(--ink); }
+  .vrow .nm2 { width: 200px; color: #52525B; font-weight: 700; flex: none; font-size: 36px; }
+  .vrow b { flex: 1; font-weight: 900; }
+  .vrow .bd2 { padding: 6px 18px; border-radius: 999px; font-size: 27px; font-weight: 800; background: var(--ac); color: #fff; flex: none; }
+  .vrow .bd2.co { background: var(--soft); color: #3F3F46; }
+  .vrow .pct { width: 112px; text-align: right; font-size: 31px; color: #71717A; font-weight: 700; flex: none; }
+  .chg { margin-top: 26px; font-size: 33px; color: #3F3F46; font-weight: 700; }
+  .chg em { font-style: normal; color: var(--ac); font-weight: 800; }
+  #make, #rsv { margin-top: 32px; padding: 32px 44px; font-size: 44px; }
+
+  /* ⑤ 결과 */
+  #rs { top: 660px; padding: 44px; }
+  .rc { display: flex; align-items: center; gap: 18px; padding: 26px 0; }
+  .rc + .rc { border-top: 2px solid #F1F1F0; }
+  .rc .lb3 { padding: 14px 26px; border-radius: 999px; background: var(--soft); font-size: 37px; font-weight: 800; }
+  .sp { margin-left: auto; display: flex; align-items: center; gap: 12px; padding: 16px 26px; border-radius: 999px; font-size: 34px; font-weight: 800; background: var(--soft); color: #52525B; white-space: nowrap; }
+  .sp.ok2 { background: var(--ink); color: #fff; }
+  .sp.ok2 svg { color: var(--ac); }
+  .bub { margin-top: 18px; padding: 30px 32px; border-radius: 36px 36px 36px 12px; background: var(--soft); font-size: 40px; line-height: 1.55; font-weight: 600; color: #18181B; }
+  .bub u { text-decoration: none; font-weight: 800; background: linear-gradient(rgba(255,90,31,.32), rgba(255,90,31,.32)) no-repeat 0 85% / 0% 36%; }
+  #tst { top: 1470px; }
+</style>
+</head>
+<body>
+<div id="stage">
+  <div class="abs cap" id="c0" style="top:300px"><div class="k">보낼 문자를</div><div class="h">한 줄로 적으면</div></div>
+  <div class="abs cap" id="c1" style="top:300px"><div class="k">빠진 것만</div><div class="h">콕 집어 묻고</div></div>
+  <div class="abs cap" id="c2" style="top:300px"><div class="k">받는 사람 수 보고</div><div class="h">종류를 고르면</div></div>
+  <div class="abs cap" id="c3" style="top:300px"><div class="k">고객 정보까지</div><div class="h">넣어서 만들고</div></div>
+  <div class="abs cap" id="c4" style="top:300px"><div class="k">스팸 검사 결과까지</div><div class="h">붙여 드려요</div></div>
+
+  <!-- ① 한 줄 적기 (입력 칸 예시 = AiLinePage 원문) -->
+  <div class="abs panel" id="ln">
+    <span class="lb2">AI 한줄로</span>
+    <div class="box"><span id="tx"></span><span class="caret" id="caret"></span></div>
+    <div class="sendrow"><div class="rbtn" id="send"><span class="ripple" id="rpS"></span><svg class="i" viewBox="0 0 24 24"><path d="m5 12 7-7 7 7"/><path d="M12 19V5"/></svg></div></div>
+  </div>
+
+  <!-- ② 빠진 것만 묻기 (제목 · 질문 · 기간 칩 = LineIntakeModal · utils/ai-line 원문) -->
+  <div class="abs panel" id="ak">
+    <div class="t2">문안에 넣을 내용을 확인할게요</div>
+    <div class="ln1"><b>한 줄</b>최근 30일 미구매 VIP에게 재구매 쿠폰 보내줘</div>
+    <div class="q" id="q1">문안에 들어갈 혜택을 알려 주세요</div>
+    <div class="inp" id="i1"><span id="a1"></span></div>
+    <div class="q" id="q2">혜택은 언제까지인가요?</div>
+    <div class="pc" id="pcs"><span id="pc0"><span class="ripple dk" id="rpP"></span>이번 주 일요일까지</span><span>일주일 동안</span><span>이달 말까지</span></div>
+  </div>
+
+  <!-- ③ 받는 사람 · 종류 (확인 판 원문 · 종류 설명 = AI_LINE_TYPE_META) -->
+  <div class="abs panel" id="bd">
+    <div class="t2row"><div class="t2">이렇게 만들어요</div><span class="kind">마케팅</span></div>
+    <div class="sec">한 줄에서 읽은 대상</div>
+    <div class="cd" id="cds"><span id="cd0"><i></i>최근 30일 미구매</span><span id="cd1"><i></i>VIP</span></div>
+    <div class="cnt" id="cnt"><small>받는 사람<br>발송 명단과 같은 계산</small><b id="num">0명</b></div>
+    <div class="tiles">
+      <div class="tl" id="tE"><span class="ripple dk" id="rpE"></span><b>감성형</b><p>계절감 · 다정한 말투</p><span class="ck" id="kE">✓</span></div>
+      <div class="tl" id="tB"><span class="ripple dk" id="rpB"></span><span class="rec">추천</span><b>혜택강조형</b><p>혜택을 맨 앞에</p><span class="ck" id="kB">✓</span></div>
+      <div class="tl" id="tM"><b>MZ 감성형</b><p>짧고 가벼운 말투</p></div>
+      <div class="tl" id="tD"><b>직접입력</b><p>내가 씀</p></div>
+    </div>
+  </div>
+
+  <!-- ④ 고객 정보 칼럼 (제목 · 안내 = LineIntakeModal vars 단계 원문 · 값은 예시) -->
+  <div class="abs panel" id="vr">
+    <div class="t2">문안에 어떤 고객 정보를 넣을까요?</div>
+    <div class="vsub">이 대상 1위 고객 김서연의 실제 값이에요.</div>
+    <div class="vrows">
+      <div class="vrow on" id="r0"><span class="bx">✓</span><span class="nm2">이름</span><b>김서연</b><span class="bd2">추천</span><span class="pct">97%</span></div>
+      <div class="vrow on" id="r1"><span class="bx">✓</span><span class="nm2">등급</span><b>VIP</b><span class="bd2">추천</span><span class="pct">100%</span></div>
+      <div class="vrow" id="r2"><span class="ripple dk" id="rpC"></span><span class="bx" id="b2"></span><span class="nm2">단골 매장</span><b>강남점</b><span class="bd2 co">회사 칼럼</span><span class="pct">64%</span></div>
+    </div>
+    <div class="chg" id="chg">넣으면 이렇게 바뀌어요 · <em>%이름%</em> → 김서연</div>
+    <div class="btn" id="make"><span class="ripple" id="rpM"></span><span class="spin" id="spM" style="display:none"></span><span id="mT">만들기</span></div>
+  </div>
+
+  <!-- ⑤ 결과 · 스팸 검사 · 예약 (칩 · 예약 문구 = LineResultCards · AiLinePage 원문) -->
+  <div class="abs panel" id="rs">
+    <div class="rc" id="k0"><span class="lb3">감성형</span><span class="sp" id="s0"></span></div>
+    <div class="rc" id="k1"><span class="lb3">혜택강조형</span><span class="sp" id="s1"></span></div>
+    <div class="bub" id="bub">(광고) <u id="u0">김서연</u> 님, <u id="u1">VIP</u> 고객님께만 드리는 재구매 10% 할인 쿠폰이에요. <u id="u2">강남점</u>에서도 바로 쓰실 수 있어요. 이번 주 일요일까지예요.</div>
+    <div class="btn" id="rsv"><span class="ripple" id="rpR"></span>예약하기</div>
+  </div>
+  <div class="abs toast" id="tst"><svg class="i" viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5"/></svg>예약 완료</div>
+</div>
+
+<script src="../common/reel.js"></script>
+<script>
+R.setup({
+  name: 'AI 한줄로',
+  hook: ['한 줄 적으면', '대상 · 문안 · 검사', '[한 번에]'],
+  hookSize: 112,
+  markAt: 1.15,
+  chips: ['한 줄 입력', '빠진 것만 질문', '고객 정보', '스팸 검사'],
+  copy: ['적는 건 한 줄,', '나머지는 한줄로.'],
+});
+const { T, C, p, $, show, press, typed } = R;
+const LINE = '최근 30일 미구매 VIP에게 재구매 쿠폰 보내줘';
+const ANS = '10% 할인 쿠폰';
+const COUNT = 1284;
+const CHECK = '<svg class="i" viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5"/></svg>';
+const S = {
+  type: 2.05, send: 3.2,
+  q1: 3.95, ans: 4.15, q2: 4.55, per: 5.0, akOut: 5.4,
+  bdIn: 5.55, cd: [5.75, 5.9], cnt: [5.95, 6.5], tl: [6.05, 6.13, 6.21, 6.29], emo: 6.7, ben: 6.98,
+  rows: [7.75, 7.85, 7.95], cust: 8.2, chg: 8.4, make: 8.8,
+  cards: [9.45, 9.58], bub: 9.62, pass: [9.85, 10.05], rsv: 10.35, toast: 10.47,
+};
+
+window.seek = function (t) {
+  R.base(t);
+  // ① 한 줄 적기
+  show($('c0'), t, T.s1 + 0.05, T.s2 - 0.22, { dy: 50 });
+  show($('ln'), t, T.s1 - 0.05, T.s2 - 0.2, { dy: 140, sc: 0.06, dur: 0.45 });
+  $('tx').textContent = typed(LINE, t, S.type, 14, 0.065);
+  $('caret').style.opacity = t < S.send && Math.floor(t * 4) % 2 === 0 ? 1 : (t < S.type + 0.95 ? 1 : 0);
+  const prS = press($('send'), $('rpS'), t, S.send);
+
+  // ② 빠진 것만 묻기
+  show($('c1'), t, T.s2 + 0.1, S.akOut - 0.02);
+  show($('ak'), t, T.s2 - 0.05, S.akOut, { dy: 160, sc: 0.06, dur: 0.5 });
+  show($('q1'), t, S.q1, null, { dy: 0, dx: 60, blur: 6, dur: 0.28 });
+  show($('i1'), t, S.q1 + 0.08, null, { dy: 0, dx: 60, blur: 6, dur: 0.28 });
+  $('a1').textContent = typed(ANS, t, S.ans, 6, 0.06);
+  $('i1').classList.toggle('on', t >= S.ans);
+  show($('q2'), t, S.q2, null, { dy: 0, dx: 60, blur: 6, dur: 0.28 });
+  show($('pcs'), t, S.q2 + 0.08, null, { dy: 0, dx: 60, blur: 6, dur: 0.28 });
+  const prP = press($('pc0'), $('rpP'), t, S.per);
+  $('pc0').classList.toggle('on', t >= S.per + 0.05);
+
+  // ③ 받는 사람 · 종류
+  show($('c2'), t, S.bdIn + 0.1, T.s3 - 0.2);
+  show($('bd'), t, S.bdIn, T.s3 - 0.25, { dy: 160, sc: 0.06, dur: 0.5 });
+  [0, 1].forEach((k) => show($('cd' + k), t, S.cd[k], null, { dy: 30, blur: 0, sc: 0.3, ease: 'back', dur: 0.32 }));
+  $('num').textContent = Math.round(COUNT * p(t, S.cnt[0], S.cnt[1], 'out')).toLocaleString() + '명';
+  ['tE', 'tB', 'tM', 'tD'].forEach((id, k) => show($(id), t, S.tl[k], null, { dy: 40, blur: 6, sc: 0.05, ease: 'back', dur: 0.35 }));
+  const prE = press($('tE'), $('rpE'), t, S.emo);
+  const prB = press($('tB'), $('rpB'), t, S.ben);
+  $('tE').classList.toggle('on', t >= S.emo + 0.05);
+  $('tB').classList.toggle('on', t >= S.ben + 0.05);
+  show($('kE'), t, S.emo + 0.05, null, { dy: 0, blur: 0, sc: 0.6, ease: 'back', dur: 0.25 });
+  show($('kB'), t, S.ben + 0.05, null, { dy: 0, blur: 0, sc: 0.6, ease: 'back', dur: 0.25 });
+
+  // ④ 고객 정보 칼럼
+  show($('c3'), t, T.s3 + 0.05, T.s4 - 0.2);
+  show($('vr'), t, T.s3 - 0.05, T.s4 - 0.25, { dy: 160, sc: 0.06, dur: 0.45 });
+  [0, 1, 2].forEach((k) => show($('r' + k), t, S.rows[k], null, { dy: 0, dx: 60, blur: 6, dur: 0.28 }));
+  const prC = press($('r2'), $('rpC'), t, S.cust);
+  const custOn = t >= S.cust + 0.05;
+  $('r2').classList.toggle('on', custOn);
+  $('b2').textContent = custOn ? '✓' : '';
+  show($('chg'), t, S.chg, null, { dy: 20, blur: 4, dur: 0.3 });
+  const prM = press($('make'), $('rpM'), t, S.make);
+  const mk = t >= S.make + 0.12;
+  $('spM').style.display = mk ? 'block' : 'none';
+  $('spM').style.transform = `rotate(${t * 900}deg)`;
+  $('mT').textContent = mk ? '만드는 중' : '만들기';
+
+  // ⑤ 결과 · 스팸 검사 · 예약
+  show($('c4'), t, T.s4 + 0.05, T.outro - 0.3);
+  show($('rs'), t, T.s4 - 0.05, T.outro - 0.3, { dy: 160, sc: 0.06, dur: 0.45 });
+  [0, 1].forEach((k) => {
+    show($('k' + k), t, S.cards[k], null, { dy: 0, dx: 60, blur: 6, dur: 0.28 });
+    const ok = t >= S.pass[k];
+    const sp = $('s' + k);
+    sp.classList.toggle('ok2', ok);
+    sp.innerHTML = ok ? `${CHECK}스팸 통과 · 3사` : `<span class="spin dk" style="transform:rotate(${t * 900}deg)"></span>확인 중`;
+    if (ok) { const pop = 1 + 0.12 * (1 - p(t, S.pass[k], S.pass[k] + 0.25, 'out')); sp.style.transform = `scale(${pop})`; } else sp.style.transform = '';
+  });
+  show($('bub'), t, S.bub, null, { dy: 40, blur: 6, dur: 0.35 });
+  [0, 1, 2].forEach((k) => { $('u' + k).style.backgroundSize = `${p(t, S.bub + 0.25 + k * 0.12, S.bub + 0.55 + k * 0.12, 'io') * 100}% 36%`; });
+  const prR = press($('rsv'), $('rpR'), t, S.rsv);
+  show($('tst'), t, S.toast, T.outro - 0.3, { dy: 30, blur: 0, sc: 0.3, ease: 'back', dur: 0.3, x: 'translateX(-50%)' });
+
+  R.pointer(t, [
+    { el: $('send'), at: S.send, gone: T.s2 - 0.3, pr: prS },
+    { el: $('pc0'), at: S.per, gone: S.akOut - 0.1, pr: prP },
+    { el: $('tE'), at: S.emo, gone: S.emo + 0.1, pr: prE },
+    { el: $('tB'), at: S.ben, gone: T.s3 - 0.3, pr: prB },
+    { el: $('r2'), at: S.cust, gone: S.cust + 0.2, pr: prC },
+    { el: $('make'), at: S.make, gone: T.s4 - 0.3, pr: prM },
+    { el: $('rsv'), at: S.rsv, gone: T.outro - 0.35, pr: prR },
+  ]);
+};
+R.ready();
+</script>
+</body>
+</html>

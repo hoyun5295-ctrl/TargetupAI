@@ -65,6 +65,15 @@
         ],
         "createdAt": "2026-10-18T11:06:10.000Z",
         "reason": "Claude: only hit = slate-900 on amber-500 button (same pair as JourneyPausePage · LinkConfirmSheet), near-black not gray"
+      },
+      {
+        "rule": "gray-on-color",
+        "value": "*",
+        "files": [
+          "src/components/ai-line/LineIntakeModal.tsx"
+        ],
+        "createdAt": "2026-10-20T13:16:10.865Z",
+        "reason": "Claude: text-slate-950(거의 검정) on bg-amber-500 = 대비 높음 · 앱 전체 amber 버튼과 같은 기존 디자인 · 회색 글자가 아님"
       }
     ]
   }

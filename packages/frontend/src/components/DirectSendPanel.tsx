@@ -15,6 +15,7 @@
  */
 
 import { useState, useRef, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import {
   MessageSquare, Smartphone, Bell,
   SendHorizontal,
@@ -24,8 +25,12 @@ import {
   Eye, ShieldCheck, Lock,
   ChevronDown, Image as ImageIcon,
   Trash2, XCircle, RotateCcw, ChevronRight,
-  Plus, Sparkles, Megaphone,
+  Plus, Sparkles, Megaphone, Target,
 } from 'lucide-react';
+import { PLAN_FEATURE_MIN_PLAN } from '../constants/plan-feature-intros';
+import DirectTargetFilterModal, { type FieldMeta } from './DirectTargetFilterModal';
+import { fetchTargetExtractionRows, type TargetExtraction } from '../utils/target-extraction';
+import { extractionRowsToTable } from '../utils/customerFilterBuild';
 import {
   calculateSmsBytes,
   formatPreviewValue,
@@ -185,6 +190,12 @@ export interface DirectSendPanelProps {
    *  알림톡은 검수된 템플릿을 고르러 가는 진입이고, 브랜드는 발신프로필만 있으면
    *  이 수신자에게 바로 쓰는 진입이다(자유형은 템플릿 코드를 요구하지 않는다). */
   onBrandOpen?: () => void;
+  /** ★ 2026-10-20 「타겟추출」 칸 잠김(고객 DB 잠금과 같은 축 · 판정 = 대시보드 isCustomerDbLocked) */
+  targetExtractLocked: boolean;
+  /** 잠긴 「타겟추출」 칸을 눌렀다 — 구독 잠금 창 또는 기능 안내(대시보드가 고른다) */
+  onTargetExtractLocked: () => void;
+  /** AI 숨김 사용자 — 추출 창의 말로 고르기(AI) 줄을 숨긴다 */
+  hideAi?: boolean;
 }
 
 // ============================================================
@@ -231,6 +242,7 @@ export default function DirectSendPanel(props: DirectSendPanelProps) {
     onClose,
     onAlimtalkOpen,
     onBrandOpen,
+    targetExtractLocked, onTargetExtractLocked, hideAi = false,
   } = props;
 
   // ★ D120: 커서 위치 기반 변수 삽입용 ref
@@ -273,8 +285,15 @@ export default function DirectSendPanel(props: DirectSendPanelProps) {
   // 내부 state
   // ============================================================
   // ★ D137 UI: 초기엔 아무것도 선택되지 않은 상태 (파일등록이 디폴트처럼 보이는 현상 제거)
-  const [directInputMode, setDirectInputMode] = useState<'file' | 'direct' | 'address' | null>(null);
+  const [directInputMode, setDirectInputMode] = useState<'file' | 'direct' | 'address' | 'target' | null>(null);
   const [directDragActive, setDirectDragActive] = useState(false);
+  // ★ 2026-10-20 「타겟추출」 — 담은 고객을 이 창의 명단으로 들인다(옛 직접 타겟 발송 창으로 넘기지 않는다).
+  //   직접발송 치환값은 이름 · 회신번호 · 기타1~3 뿐이다(Harold 1020) → 보관본 전체 행을 받아 파일등록과 같은 칸 맞추기 창에서 고른다.
+  //   세대 = 아래 mappingSeqRef 하나(beginRecipientSource) — 마지막에 누른 불러오기 방식만 칸 맞추기 표 · 명단에 쓴다.
+  const [showTargetExtract, setShowTargetExtract] = useState(false);
+  const [targetLoading, setTargetLoading] = useState(false);
+  // ★ 2026-10-20 빈 목록 칸을 누르면 파일등록 칸의 파일 고르기를 연다(옛: 문서 전체에서 클래스로 찾음 → 알림톡 창의 같은 클래스를 잡을 수 있었다)
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const [directFileHeaders, setDirectFileHeaders] = useState<string[]>([]);
   const [directFilePreview, setDirectFilePreview] = useState<any[]>([]);
   const [directFileData, setDirectFileData] = useState<any[]>([]);
@@ -289,6 +308,15 @@ export default function DirectSendPanel(props: DirectSendPanelProps) {
     mappingSeqRef.current++;
     setDirectMappingLoading(false);
     setDirectShowMapping(false);
+  };
+  // ★ 2026-10-20 받는 사람 불러오기를 새로 시작(직접입력 · 파일등록 · 주소록 · 타겟추출) = 이 세대를 올린다.
+  //   칸 맞추기 표 · 창 · 등록이 한 세대만 보므로, 불러오던 파일 분석 · 타겟추출 명단 · 열린 칸 맞추기 · 진행 중 등록이 모두 늦은 결과가 된다
+  //   (Codex 2R 같은 부류 두 번 — 표를 채우는 세대와 등록 세대가 따로라 서로를 못 막았다 → 하나로).
+  const beginRecipientSource = () => {
+    closeMapping();
+    setDirectFileLoading(false);
+    setTargetLoading(false);
+    return mappingSeqRef.current;
   };
   const [directLoadingProgress, setDirectLoadingProgress] = useState(0);
   const [directShowMapping, setDirectShowMapping] = useState(false);
@@ -518,6 +546,7 @@ export default function DirectSendPanel(props: DirectSendPanelProps) {
 
   // 파일 업로드
   const handleFileUpload = async (file: File) => {
+    const seq = beginRecipientSource();   // ★ 2026-10-20 불러오던 타겟추출 명단 · 열린 칸 맞추기는 버린다(마지막에 누른 것만)
     setDirectFileLoading(true);
     const formData = new FormData();
     formData.append('file', file);
@@ -529,6 +558,7 @@ export default function DirectSendPanel(props: DirectSendPanelProps) {
         body: formData,
       });
       const data = await res.json();
+      if (seq !== mappingSeqRef.current) return;
       if (data.success) {
         setDirectFileHeaders(data.headers);
         setDirectFilePreview(data.preview);
@@ -540,9 +570,9 @@ export default function DirectSendPanel(props: DirectSendPanelProps) {
         setToast({ show: true, type: 'error', message: data.error || '파일 파싱 실패' });
       }
     } catch {
-      setToast({ show: true, type: 'error', message: '파일 업로드 중 오류가 발생했습니다.' });
+      if (seq === mappingSeqRef.current) setToast({ show: true, type: 'error', message: '파일 업로드 중 오류가 발생했습니다.' });
     } finally {
-      setDirectFileLoading(false);
+      if (seq === mappingSeqRef.current) setDirectFileLoading(false);
     }
   };
 
@@ -599,6 +629,33 @@ export default function DirectSendPanel(props: DirectSendPanelProps) {
     setDirectRecipients(mapped);
     setDirectMappingLoading(false);
     setDirectShowMapping(false);
+  };
+
+  // ★ 2026-10-20 「타겟추출」 담기 → 보관본 전체 행 → 칸 맞추기 창(번호 · 이름은 미리 맞춤 · 적용은 파일과 같은 handleMappingApply)
+  const handleTargetExtracted = async (extraction: TargetExtraction, meta: FieldMeta[]) => {
+    const seq = beginRecipientSource();   // 불러오던 파일 분석 결과 · 열린 칸 맞추기는 버린다(마지막에 누른 것만)
+    setShowTargetExtract(false);
+    setTargetLoading(true);
+    try {
+      const r = await fetchTargetExtractionRows(extraction);
+      if (seq !== mappingSeqRef.current) return;
+      if (!r.ok) {
+        setToast({ show: true, type: 'error', message: r.expired ? '담은 명단의 보관 시간이 지났습니다. 다시 추출해 주세요.' : (r.error || '명단을 불러오지 못했습니다.') });
+        return;
+      }
+      const t = extractionRowsToTable(r.data.recipients, meta);
+      setDirectFileHeaders(t.headers);
+      setDirectFilePreview(t.data.slice(0, 5));
+      setDirectFileData(t.data);
+      setDirectColumnMapping(t.mapping);
+      setDirectInputMode('target');
+      setDirectShowMapping(true);
+      if (extraction.skippedNoPhone > 0) {
+        setToast({ show: true, type: 'warning', message: `휴대폰 번호가 없는 ${extraction.skippedNoPhone.toLocaleString()}명은 뺐습니다` });
+      }
+    } finally {
+      if (seq === mappingSeqRef.current) setTargetLoading(false);
+    }
   };
 
   // ============================================================
@@ -925,82 +982,95 @@ export default function DirectSendPanel(props: DirectSendPanelProps) {
               />
             )}
 
-            {/* 입력 방식 탭 + 필터 */}
-            <div className="flex items-center justify-between gap-4 flex-wrap">
-              <div className="ds-rtab-group">
-                <button
-                  type="button"
-                  className={`ds-rtab ${directInputMode === 'direct' ? 'ds-rtab--on' : ''}`}
-                  onClick={() => { setDirectInputMode('direct'); setShowDirectInput(true); }}
-                >
-                  <PencilLine size={17} strokeWidth={1.75} />
-                  <span>직접입력</span>
-                </button>
+            {/* ★ 2026-10-20 받는 사람 불러오기 4칸(Harold 목업 승인) — 직접입력 · 파일등록 · 주소록 · 타겟추출.
+                옛 3칸 탭(ds-rtab)은 알림톡 · 브랜드메시지 창이 그대로 쓴다(이 칸 CSS = ds-src 따로). */}
+            <div className="ds-src-wrap">
+            <div className="ds-src-head">받는 사람 불러오기</div>
+            <div className="ds-src-grid">
+              <button
+                type="button"
+                className={`ds-src ${directInputMode === 'direct' ? 'ds-src--on' : ''}`}
+                onClick={() => { beginRecipientSource(); setDirectInputMode('direct'); setShowDirectInput(true); }}
+              >
+                <span className="ds-src-ic"><PencilLine size={18} strokeWidth={1.75} /></span>
+                <span className="ds-src-tx"><b>직접입력</b><small>번호 붙여넣기</small></span>
+              </button>
 
-                <label className={`ds-rtab ds-rtab--label ${directInputMode === 'file' ? 'ds-rtab--on' : ''} ${directFileLoading ? 'ds-rtab--loading' : ''}`}>
-                  <FolderOpen size={17} strokeWidth={1.75} />
-                  <span>{directFileLoading ? '파일 분석중...' : '파일등록'}</span>
-                  <input
-                    type="file"
-                    accept=".xlsx,.xls,.csv"
-                    className="hidden"
-                    onChange={(e) => {
-                      const file = e.target.files?.[0];
-                      if (file) handleFileUpload(file);
-                      e.target.value = '';
-                    }}
-                  />
-                </label>
-
-                <button
-                  type="button"
-                  className={`ds-rtab ${directInputMode === 'address' ? 'ds-rtab--on' : ''}`}
-                  onClick={async () => {
-                    setDirectInputMode('address');
-                    const token = localStorage.getItem('token');
-                    const res = await fetch('/api/address-books/groups', { headers: { Authorization: `Bearer ${token}` } });
-                    const data = await res.json();
-                    if (data.success) setAddressGroups(data.groups || []);
-                    setShowAddressBook(true);
+              <label className={`ds-src ${directInputMode === 'file' ? 'ds-src--on' : ''} ${directFileLoading ? 'ds-src--loading' : ''}`}>
+                <span className="ds-src-ic"><FolderOpen size={18} strokeWidth={1.75} /></span>
+                <span className="ds-src-tx"><b>{directFileLoading ? '파일 분석중...' : '파일등록'}</b><small>엑셀 · CSV</small></span>
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept=".xlsx,.xls,.csv"
+                  className="hidden"
+                  onChange={(e) => {
+                    const file = e.target.files?.[0];
+                    if (file) handleFileUpload(file);
+                    e.target.value = '';
                   }}
-                >
-                  <Contact size={17} strokeWidth={1.75} />
-                  <span>주소록</span>
-                </button>
-              </div>
+                />
+              </label>
 
-              <div className="ds-filter-row">
-                <label>
-                  <input
-                    type="checkbox"
-                    className="ds-chk"
-                    checked={dedupEnabled}
-                    onChange={e => setDedupEnabled(e.target.checked)}
-                  />
-                  <span>중복제거</span>
-                </label>
-                {/* ★ 2026-09-27 한줄로 V2 S5-05 — 광고는 수신거부 번호를 항상 뺀다(법) · 켠 채로 잠근다 */}
-                <label title={adTextEnabled ? '광고 문자는 수신거부 번호를 항상 뺍니다' : undefined}>
-                  <input
-                    type="checkbox"
-                    className="ds-chk"
-                    checked={unsubFilterEnabled || adTextEnabled}
-                    disabled={adTextEnabled}
-                    onChange={e => setUnsubFilterEnabled(e.target.checked)}
-                  />
-                  <span>수신거부제거{adTextEnabled ? ' (광고는 항상)' : ''}</span>
-                </label>
-              </div>
+              <button
+                type="button"
+                className={`ds-src ${directInputMode === 'address' ? 'ds-src--on' : ''}`}
+                onClick={async () => {
+                  const seq = beginRecipientSource();   // 불러오던 파일 · 타겟추출 결과는 버린다
+                  setDirectInputMode('address');
+                  const token = localStorage.getItem('token');
+                  const res = await fetch('/api/address-books/groups', { headers: { Authorization: `Bearer ${token}` } });
+                  const data = await res.json();
+                  if (seq !== mappingSeqRef.current) return;   // 그사이 다른 방식을 눌렀거나 창이 닫혔다 — 주소록 창을 열지 않는다(Codex 3R)
+                  if (data.success) setAddressGroups(data.groups || []);
+                  setShowAddressBook(true);
+                }}
+              >
+                <span className="ds-src-ic"><Contact size={18} strokeWidth={1.75} /></span>
+                <span className="ds-src-tx"><b>주소록</b><small>저장한 그룹</small></span>
+              </button>
+
+              {/* 잠겨도 숨기지 않는다 — 누르면 요금제 안내(기능 설명)가 열린다(잠김 판정 = 대시보드) */}
+              <button
+                type="button"
+                className={`ds-src ds-src--target ${targetExtractLocked ? 'ds-src--lock' : ''} ${directInputMode === 'target' ? 'ds-src--on' : ''} ${targetLoading ? 'ds-src--loading' : ''}`}
+                disabled={targetLoading}
+                onClick={() => { if (targetExtractLocked) { onTargetExtractLocked(); return; } beginRecipientSource(); setShowTargetExtract(true); }}
+              >
+                <span className="ds-src-ic"><Target size={18} strokeWidth={1.75} /></span>
+                <span className="ds-src-tx"><b>{targetLoading ? '불러오는 중...' : '타겟추출'}</b><small>{targetExtractLocked ? `${PLAN_FEATURE_MIN_PLAN}부터` : '고객 DB 조건'}</small></span>
+                {targetExtractLocked && <span className="ds-src-lockmark" aria-hidden="true"><Lock size={11} strokeWidth={2.2} /></span>}
+              </button>
             </div>
 
-            {/* 카운트 + 검색 */}
-            <div className="flex items-center justify-between">
+            {/* 카운트 · 중복제거 · 수신거부제거 · 검색 — 4칸이 한 줄을 다 쓰도록 두 선택을 건수 줄로 옮겼다 */}
+            <div className="ds-count-row">
               <div className="ds-count-wrap">
                 <span className="ds-count-label">총</span>
                 <span className="ds-count-num">{directRecipients.length.toLocaleString()}</span>
                 <span className="ds-count-label">건</span>
               </div>
-              <div className="ds-search-wrap">
+              <label className="ds-opt-chip">
+                <input
+                  type="checkbox"
+                  className="ds-chk"
+                  checked={dedupEnabled}
+                  onChange={e => setDedupEnabled(e.target.checked)}
+                />
+                <span>중복제거</span>
+              </label>
+              {/* ★ 2026-09-27 한줄로 V2 S5-05 — 광고는 수신거부 번호를 항상 뺀다(법) · 켠 채로 잠근다 */}
+              <label className="ds-opt-chip" title={adTextEnabled ? '광고 문자는 수신거부 번호를 항상 뺍니다' : undefined}>
+                <input
+                  type="checkbox"
+                  className="ds-chk"
+                  checked={unsubFilterEnabled || adTextEnabled}
+                  disabled={adTextEnabled}
+                  onChange={e => setUnsubFilterEnabled(e.target.checked)}
+                />
+                <span>수신거부제거{adTextEnabled ? ' · 광고는 항상' : ''}</span>
+              </label>
+              <div className="ds-search-wrap ds-count-search">
                 <Search size={15} strokeWidth={1.75} />
                 <input
                   type="text"
@@ -1010,6 +1080,7 @@ export default function DirectSendPanel(props: DirectSendPanelProps) {
                   onChange={(e) => { setDirectSearchQuery(e.target.value); setDirectPage(0); setSelectedRecipients(new Set()); }}
                 />
               </div>
+            </div>
             </div>
 
             {/* 리스트 프레임 */}
@@ -1065,8 +1136,7 @@ export default function DirectSendPanel(props: DirectSendPanelProps) {
                         <div
                           className={`ds-dropzone ds-t w-full ${directDragActive ? 'ds-dropzone--active' : ''}`}
                           onClick={() => {
-                            const input = document.querySelector<HTMLInputElement>('.ds-rtab--label input[type="file"]');
-                            input?.click();
+                            fileInputRef.current?.click();
                           }}
                           onDragEnter={(e) => { e.preventDefault(); e.stopPropagation(); setDirectDragActive(true); }}
                           onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); setDirectDragActive(true); }}
@@ -1225,6 +1295,17 @@ export default function DirectSendPanel(props: DirectSendPanelProps) {
           />
         )}
 
+        {/* ★ 2026-10-20 직접 타겟 추출 창 — 문서 맨 위로 띄운다(직접발송 창 z 50 위 · 창 안 transform 영향 없음) */}
+        {showTargetExtract && createPortal(
+          <DirectTargetFilterModal
+            show
+            onClose={() => setShowTargetExtract(false)}
+            onExtracted={(ext, meta) => { void handleTargetExtracted(ext, meta); }}
+            hideAi={hideAi}
+          />,
+          document.body,
+        )}
+
         {/* ============ 파일 매핑 모달 ============ */}
         {directShowMapping && (
           <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[60] p-4">
@@ -1232,10 +1313,14 @@ export default function DirectSendPanel(props: DirectSendPanelProps) {
               <div className="px-5 py-3 border-b bg-emerald-50 flex justify-between items-center">
                 <div>
                   <h3 className="font-semibold text-[14px] text-emerald-900 flex items-center gap-2">
-                    <FolderOpen size={14} strokeWidth={1.75} />
-                    컬럼 매핑
+                    {directInputMode === 'target' ? <Target size={14} strokeWidth={1.75} /> : <FolderOpen size={14} strokeWidth={1.75} />}
+                    {directInputMode === 'target' ? '고객 항목 맞추기' : '컬럼 매핑'}
                   </h3>
-                  <p className="text-[11.5px] text-emerald-700/80 mt-0.5">수신번호 필수, 나머지는 사용할 항목만 선택</p>
+                  <p className="text-[11.5px] text-emerald-700/80 mt-0.5">
+                    {directInputMode === 'target'
+                      ? '직접발송은 이름 · 회신번호 · 기타1~3으로 바꿔 넣습니다. 넣을 고객 항목만 고르세요'
+                      : '수신번호 필수, 나머지는 사용할 항목만 선택'}
+                  </p>
                 </div>
                 {/* ★ 2026-09-25 닫기 = 취소 — 처리 중에 닫으면 늦게 끝난 결과가 사람이 고친 명단을 덮지 않는다 */}
                 <button onClick={closeMapping} className="text-stone-500 hover:text-stone-700">

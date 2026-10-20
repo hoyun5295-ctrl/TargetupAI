@@ -52,20 +52,44 @@ export interface PlanFeatureIntro {
 
 export const PLAN_FEATURE_INTROS: PlanFeatureIntro[] = [
   // ───────── AI Operator 허브 ─────────
-  // ★ 2026-10-18 AI 한줄로 새 흐름(설계서 docs/2026-10-18-ai-line-design.md §4-3) — 대시보드 「AI 한줄로」 버튼의 소개 창(새 흐름 켠 회사만 이 항목 · 꺼진 회사 = 'ai-operator').
-  //   영상 줄(video)은 Harold 님이 만든 파일이 올 때 붙인다(그 전에는 한 단 창 · 2026-10-06 영상 12편과 같은 방식).
+  // ★ 2026-10-18 AI 한줄로 새 흐름(설계서 docs/2026-10-18-ai-line-design.md §4-3) — 대시보드 「AI 한줄로」 버튼 · 오늘의 추천 · /ai-line 직접 진입의 소개 창(미가입 회사).
+  // ★ 2026-10-21 예시 영상(릴스 14 · marketing/sns/14-ai-line · 10.9초 무음) + 오른쪽 설명(1020 개편 흐름 · 문장마다 코드 근거)
+  //   설계 = docs/2026-10-06-plan-feature-video-modal-design.md §12. 허브 카드가 아닌 영상 기능은 이것 하나(계약 테스트가 목록을 소유).
   {
     id: 'ai-line', title: 'AI 한줄로', icon: 'Send', gradient: 'from-violet-500 to-fuchsia-500',
-    summary: '한 줄로 적으면 받을 고객을 뽑고, 빠진 것만 묻고, 고른 종류의 문안을 만들어 스팸 검사 결과까지 붙여 드려요.',
+    summary: '한 줄로 적으면 빠진 것만 묻고, 받을 고객을 세어 고른 종류의 문안을 만들어 드려요. 스팸 검사가 있는 요금제는 검사 결과까지 붙습니다.',
+    video: { src: '/videos/plan-feature/ai-line.mp4', poster: '/videos/plan-feature/ai-line.jpg' },
     steps: [
-      { icon: 'Target', title: '한 줄 적기', text: '"서울 사는 30대 여성에게 기초 라인 할인"처럼 적습니다. 이미 적은 대상과 혜택은 다시 묻지 않습니다.' },
-      { icon: 'ListChecks', title: '받는 사람 · 종류 고르기', text: '발송 명단과 같은 계산으로 센 받는 사람 수를 보고 감성형 · 혜택강조형 · MZ 감성형 · 직접입력 중 원하는 종류와 문안에 넣을 칼럼을 고릅니다.' },
-      { icon: 'Send', title: '검사 결과 보고 발송', text: '만든 문안마다 스팸 검사 결과가 붙습니다. 고른 문안을 예약하거나 바로 보냅니다.' },
+      { icon: 'Target', title: '한 줄 적기', text: '"최근 30일 미구매 VIP에게 재구매 쿠폰"처럼 적습니다. 한 줄에 이미 적은 대상과 혜택은 다시 묻지 않습니다.' },
+      { icon: 'MessageSquare', title: '빠진 것만 답하기', text: 'AI가 한 줄을 읽고 문안에 꼭 필요한데 빠진 것만 묻습니다. 다 갖춘 한 줄이면 묻지 않고 넘어갑니다.' },
+      { icon: 'ListChecks', title: '받는 사람 · 종류 · 칼럼 고르기', text: '발송 명단과 같은 계산으로 센 받는 사람 수를 확인하고, 문안 종류와 문안에 넣을 고객 정보를 고릅니다.' },
+      { icon: 'Send', title: '검사 결과 보고 발송', text: '요금제에 스팸 검사가 있으면 만든 문안마다 검사 결과가 붙습니다. 고른 문안을 즉시 보내거나 예약합니다.' },
     ],
     costs: [
       { label: '대상 찾기', source: 'ai-line-intake', credits: 2 },
       { label: '문안 1종', source: 'ai-line-compose', credits: 2 },
       { label: '칼럼 더 넣기', source: 'ai-line-decorate', credits: 1 },
+    ],
+    costNote: '스팸 검사는 크레딧이 아니라 검사 문자 요금으로 빠집니다.',
+    // 화면에 실제로 있는 것만(근거 = LineIntakeModal.tsx 확인 판 · 칼럼 단계 · LineResultCards.tsx · AiLinePage.tsx 예약 검사)
+    options: [
+      { title: '받는 사람', wide: true, text: '한 줄에서 읽은 조건을 켜고 끄거나 「직접 타겟 선택」으로 새로 고릅니다. AI가 보탠 조건은 따로 표시되어 끌 수 있습니다. 한 줄에 받는 사람이 없으면 누구에게 보낼지 먼저 묻습니다.' },
+      { title: '문안 종류', text: '여러 종류를 함께 고를 수 있고, 고른 종류만 만듭니다.', chips: ['감성형', '혜택강조형', 'MZ 감성형', '직접입력'] },
+      { title: '고객 정보 칼럼', text: '이름 · 등급 같은 기본 칼럼과 우리 회사 칼럼 중에서 고릅니다. 이 대상 1위 고객의 실제 값으로 바뀐 모습을 미리 봅니다.' },
+      { title: '문자 성격', text: '마케팅과 안부 · 알림 중에서 고르면 AI 메모리에서 그 성격으로 배운 말투로 씁니다. 배운 문자가 없으면 화면에 알려 드립니다.' },
+      { title: '채널', text: '한 줄에 알림톡을 적으면 승인된 템플릿 중에서 고르고, 카카오나 카톡만 적으면 문자와 알림톡 중 무엇으로 보낼지 묻습니다. 문자에 고객 정보를 넣으면 장문(LMS)으로 보냅니다.' },
+      { title: '보내는 때', text: '즉시 보내거나 오전 8시부터 밤 9시 사이로 예약합니다.' },
+      { title: '문안 고치기', text: '결과 카드에서 직접 고치거나 칼럼을 더 넣어 다시 꾸밉니다. 글이 바뀌면 스팸 검사를 다시 할 수 있습니다.' },
+    ],
+    // 코드에 있는 안전장치만(근거 = utils/ai-line.ts 혜택 근거 · services/ai-line.ts 대상 몸통 · services/ai-line-spam.ts · routes/campaigns.ts /direct-send)
+    safeguards: [
+      { title: '혜택은 지어내지 않음', text: '할인이나 쿠폰 같은 혜택은 한 줄과 담당자가 답한 내용만 씁니다. 답이 없으면 혜택을 지어내지 않습니다.' },
+      { title: '발송과 같은 계산', text: '받는 사람 수는 실제 발송과 같은 조건으로 셉니다. 수신 동의한 고객만 세고, 광고는 수신 거부한 번호를 빼고 보냅니다.' },
+      { title: '없거나 너무 많으면 멈춤', text: '조건에 맞는 고객이 없으면 만들지 않고 대상 찾기 크레딧도 빠지지 않습니다. 받는 사람이 1만 명을 넘으면 조건을 좁히도록 안내합니다.' },
+      { title: '빠질 크레딧을 먼저 보여 줌', text: '만들기 버튼에 이번에 빠질 크레딧이 적혀 있습니다. 같은 날 같은 한 줄로 다시 시작하면 대상 찾기 크레딧을 다시 걷지 않습니다.' },
+      { title: '고른 칼럼 확인', text: '고른 고객 정보가 문안에서 빠지면 추가 크레딧 없이 한 번 더 넣고, 그래도 빠지면 카드에 알려 드립니다.' },
+      { title: '스팸 검사 자동', text: '요금제에 스팸 검사가 있으면 만든 문안마다 등록된 발신번호로 통신사 테스트폰 검사를 자동으로 합니다. 실제로 검사하는 문자 전체(발신번호 · 제목 · 고객 값으로 바꾼 글까지)가 24시간 안의 검사와 똑같을 때만 그 결과를 다시 쓰고, 조금이라도 다르면 새 검사가 되어 검사 문자 요금이 듭니다.' },
+      { title: '광고 규정 자동', text: '광고 문자는 (광고) 표기와 무료수신거부 번호를 붙이고, 밤 9시부터 다음 날 오전 8시까지는 보내지 않습니다. 할인 같은 광고는 알림톡 대신 문자로 만들도록 안내합니다.' },
     ],
   },
   {
@@ -463,15 +487,20 @@ export const PLAN_FEATURE_INTROS: PlanFeatureIntro[] = [
 
   // ───────── 대시보드·발송 화면 ─────────
   {
-    id: 'send-target', title: '직접 타겟 발송', icon: 'Send', gradient: 'from-emerald-500 to-teal-500',
-    summary: '조건으로 고객을 골라 그 사람들에게만 문자를 보냅니다.',
+    // ★ 2026-10-20 직접발송 「타겟추출」 칸의 안내(옛 'send-target' = 1019 에 없앤 직접 타겟 발송 입구 자리를 바꿔 씀)
+    id: 'target-extract', title: '직접 타겟 추출', icon: 'Target', gradient: 'from-emerald-500 to-teal-500',
+    summary: '고객 DB에서 조건으로 받을 사람을 골라 바로 보냅니다.',
     steps: [
-      { icon: 'Filter', title: '조건 고르기', text: '등급·지역·구매 이력 같은 조건을 조합합니다.' },
-      { icon: 'Users', title: '대상 미리 보기', text: '보내기 전에 인원과 대상자 일부를 확인합니다.' },
-      { icon: 'Send', title: '보내기', text: '문안을 넣고 바로 보내거나 예약합니다.' },
+      { icon: 'Filter', title: '조건 고르기', text: '연령·성별·등급·지역·최근 구매처럼 올린 고객 항목으로 조건을 겁니다. 말로 적어도 조건으로 바꿔 줍니다.' },
+      { icon: 'Users', title: '인원 바로 확인', text: '조건을 바꿀 때마다 대상 인원을 바로 셉니다.' },
+      { icon: 'Send', title: '담아서 보내기', text: '고른 고객에게 이름·등급 같은 항목을 넣은 문자를 바로 보내거나 예약합니다.' },
     ],
-    costs: [],
-    costNote: '크레딧은 들지 않고 문자 발송 요금만 나갑니다',
+    costs: [{ label: '말로 고르기', source: 'ai-segment-generator', credits: 1 }],
+    costNote: '조건 고르기와 담기는 크레딧이 들지 않고 문자 발송 요금만 나갑니다',
+    safeguards: [
+      { title: '수신거부', text: '광고 문자는 수신거부 번호를 항상 빼고 보냅니다.' },
+      { title: '번호 없는 고객', text: '휴대폰 번호가 없는 고객은 담을 때 뺍니다.' },
+    ],
   },
   {
     id: 'upload-customers', title: '고객 DB 업로드', icon: 'Upload', gradient: 'from-amber-500 to-orange-500',

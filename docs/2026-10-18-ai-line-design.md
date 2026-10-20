@@ -273,3 +273,73 @@
 - 「hoyun 으로 만들고 hanjulai 로 바꿔 로그인했는데 남아 있다」 = 진행 저장 키가 하나(`ai_line_run_v1`)였고 로그아웃 때 지우지 않았다. → 키 = 회사 · 사용자(`aiLineOwner` · SNS 쓰던 글과 같은 방식) · 진행에 owner 를 적어 다르면 읽지도 저장하지도 않음 · 로그아웃 · 401 에서 `clearAiLineRuns`(진행 · 알림톡 넘기기) · 알림톡 넘기기는 같은 계정만 연다.
 - 「문안이 위에도 밑에도 이중」 = 결과 카드가 본문을 그렸다. → 카드 = 종류 · 추천 · 스팸 칩 · 칼럼 더 넣기 · 직접 고치기 · 「이 문안 보기 · 보내기」만 · 본문은 아래 편집기 한 곳.
 - 검증 = FE · BE tsc 0 · backend vitest 630파일 9,214건(새 2 · 주인 확인 변이 검출) · build:safe 통과. Codex = 화면 저장 · 표시만 바뀜(돈 · 발송 대상 경로 무변) → 범위 규칙상 면제.
+
+## 17. 1020 개편 (Harold 실화면 지적 · 질문 · 칼럼 · 문자 성격별 브랜드 보이스)
+
+### 17-1. 접수(Harold 1020 · 시연 회사)
+- 「한 줄을 입력하면 부족한 정보를 묻고, 문안 생성 전에 어떤 칼럼을 개인화할지 묻는 단계를 넣으라 했는데 빠져 있다」 · 「동적으로 한 줄을 보고 부족한 것을 체크해서 물어야 한다」 · 「필요한 칼럼을 선택하게 해서 활용하게」 · 「고른 칼럼을 활용해서 문안을 만들어야 한다」.
+- 「AI 메모리에 보냈던 문자를 올리면 알림성인지 마케팅성인지 체크하고, AI 한줄로에서도 이 문자가 안부인지 마케팅인지 보고, 그 성격의 브랜드 보이스(형태 · 특문)를 그대로 입혀 생성」.
+
+### 17-2. 확인한 사실(코드 · 실측)
+- 판정 시험(scratchpad 7줄): 화면 예시 4개 중 3개가 묻는 것 0 · 「최근 30일」 · 「24시간」을 행사 기간으로 읽음(`one-line-steps.ts:62`) · 「첫 구매 혜택」을 행사로 안 봄(`one-line-facts.ts:48`). 질문 = 규칙 2개(혜택 · 기간)뿐.
+- 칼럼 = 확인 판 옆 칸 · 기본 0개 · 단계 아님 · 추천은 「개인화」 낱말이 있을 때만 · 후보 = 표준 칼럼만(회사 칼럼은 목록에도 없고 서버가 거절) · 고른 칼럼이 문안에 들어갔는지 검사 없음.
+- 생성기 변수 안내의 「금지 예시」에 지금 표준 칼럼 이름 %고객명% · %매장명%이 들어 있음(`services/ai.ts` buildVarCatalogPrompt) = 고른 칼럼을 넣으라는 말과 금지가 함께 간다.
+- 대표 문안 = 성격 판정 없음 · 가이드라인 회사당 1개(마케팅 기준) · 생성 때 한 줄 성격과 무관하게 같은 말투.
+- 실측(Harold 1020): 시연 회사(한줄 뷰티(시연) · is_demo) 가이드라인 · 대표 문안 0행 = 지금 시연 회사 문안에는 브랜드 말투가 전혀 붙지 않는다.
+
+### 17-3. Harold 결정(1020 「오케이 동의」)
+1. 모자란 사실은 **AI가 그 한 줄을 읽고 판단해 묻는다**(개수 고정 없음 · 다 갖추면 0개) · 규칙은 AI가 놓친 것만 보태는 안전망 · 대상 찾기 AI 호출 한 번에 같이(추가 AI · 크레딧 0).
+2. 개인화 칼럼 = **만들기 직전 단계** · 표준 + 회사 칼럼 · 1위 고객 실제 값 · AI 추천 미리 체크 · 만든 뒤 고른 칼럼이 문안마다 있는지 서버가 보고 빠지면 같은 묶음 안 꾸미기(추가 차감 0) · 그래도 빠지면 카드에 표시.
+3. 문자 성격(마케팅 · 안부/알림)별 브랜드 보이스 = 올릴 때 성격 판정(가이드라인 추출 호출 한 번 · 사람이 바꿀 수 있음) · 가이드라인 성격별 2행(`main` = 마케팅 · `notice` = 안부/알림 · 유일 조건 안 · DDL 0) · AI 한줄로는 광고 여부(대상 찾기 판정 · 확인 판에서 바꿈)로 성격을 정해 그 성격 말투 · 예시만 붙인다 · 학습본이 없으면 확인 판에 한 줄.
+
+### 17-4. 구조(묻는 목록 한 자리)
+- 지금 「무엇을 묻나」가 서버 규칙(`/read` gaps) · 대상 찾기(`needAudience`) · 화면 단계 코드 세 곳에 흩어져 있었다. → 대상 찾기 응답 `asks`(AI 판단 질문 + 규칙 안전망) 한 자리 · 순수 함수 `mergeLineAsks` · 화면은 그리기만.
+- 화면 단계 = `kakao`(있을 때만) → `asks`(있을 때만) → 누구에게(있을 때만) → `board`(대상 · 종류 · 성격 · 금액) → `vars`(문안 종류를 고르면 · 만들기 버튼은 여기 한 곳).
+
+### 17-5. 영향표
+| 바뀌는 것 | 소비처(grep) | 영향 |
+|---|---|---|
+| `recommendTarget` 한 줄 접수 옵션 프롬프트 · 출력(`copy_questions` · `copy_vars`) · 출력 한도 | 옵션 넘기는 곳 = `services/ai-line.ts` 1곳 · 옵션 없는 호출 4곳(`routes/ai.ts:480` · `ai-orchestrator.ts:408 · 811` · `crm-agency-proposal.ts:120`) | 4곳 무변(옵션일 때만 덧붙임) |
+| `buildVarCatalogPrompt` 금지 예시 = 실제 변수 이름 제외 | 이 함수를 쓰는 생성 경로 전부 | 실제 있는 변수를 「금지」라 부르던 모순만 없어짐 · 없는 변수 금지 예시는 그대로 |
+| `generateMessages` 새 옵션 `voiceKind` | AI 한줄로 만들기 1곳만 넘김 | 안 넘기면 지금 그대로 |
+| `buildSystemPromptWithBrandVoice` 새 옵션 `kind` · 가이드라인 읽기 = `memory_key` 지정 | 호출 14곳 · 성격을 넘기는 곳 = 생성기(voiceKind 있을 때) | 안 넘기면 글자 그대로(`main` + 전체 예시) |
+| 가이드라인 `LIMIT 1` 읽기 3곳 → `memory_key='main'` | `brand-voice-prompt.ts` · `brand-tone-evolution.ts` · `routes/ai-memory.ts` GET | `notice` 행이 생겨도 옛 소비처는 `main` 만 |
+| 대표 문안 값에 `kind` · `kind_source` | 저장 · 읽기 · 추출 · 생성 예시 | 없는 옛 행 = 마케팅으로 읽음(지금 가정과 같음) |
+| 추출 = 성격 판정 + 성격별 가이드라인 한 호출 | `routes/ai-memory.ts` extract | 차감 1 그대로 · `main` = 마케팅 문안 기준(마케팅 0건이면 안부) · `notice` 행 = 안부 문안이 있을 때만 |
+| 칼럼 후보 = 표준 + 회사 칼럼(`enrichWithCustomFields` = 발송 치환과 같은 출처) · 채움 % · 1위 값 | `audienceDetail`(대상 찾기 · 대상 바꾸기) | AI 한줄로만 |
+| 서버 칼럼 허용 목록 = 표준 + 이 회사 회사 칼럼 | `routes/ai-line.ts` 만들기 · 꾸미기 | 다른 회사 칼럼 이름은 거절 |
+| 만들기 입력 `facts.answers` · 근거 글 「확인한 사실」 · 만든 뒤 칼럼 검사 | `runLineCompose` | 답이 있을 때만 원장 키 지문에 넣음 · 단가 · 정산 순서 무변 |
+
+### 17-6. 시험
+- 예시 문장 시험: 화면 예시 4개 + 오늘 분석 1순위 + 1018 예시 = AI 응답 고정본 → `asks` 1개 이상 · 규칙 안전망(AI가 혜택 · 기간을 놓치면 보탬) · 칩의 혜택 값 · 숫자 제거 · 줄표 제거 · 다 갖춘 한 줄 0개.
+- 칼럼: 회사 칼럼 후보 · 허용 목록 · 빠진 칼럼 → 묶음 안 꾸미기 · 그래도 빠지면 표시 · 금지 예시에 실제 변수 없음.
+- 브랜드 보이스: 성격 없음 = 옛 글자 그대로 · 안부 = `notice` 가이드라인 + 안부 예시 · 안부 학습본 없음 = `main` · 가이드라인 읽기 3곳 `memory_key` 지정 · 추출 응답 성격별 분리 · 옛 모양 응답 = 전부 마케팅.
+- 화면 소스 계약: `vars` 단계 · 만들기 호출 1곳 · 확인 판 칼럼 목록 0 · 성격 칩 · 학습본 안내 · 모델명 0 · native dialog 0 · 줄표 0.
+- 전체: backend vitest 전체 · tsc(백 · 프론트) · 프론트 build:safe · Codex 적대 approve.
+
+### 17-7. 실측(배포 뒤 · 시연 회사)
+① 「최근 30일 미구매 VIP에게 재구매 쿠폰 보내줘」 → 질문(쿠폰 내용 · 기한 포함) → 확인 판 → 칼럼 단계(고객명 + 회사 칼럼 1) → 감성형 1개 → 원장 `ai-line-compose` 2 한 행 · 본문에 고른 두 칼럼 · 미리보기 1위 고객 값.
+② AI 메모리에 보냈던 문자(마케팅 · 안부 섞어서) 올리기 → 가이드라인 추출 → 문안마다 성격 칩 · 안부 가이드라인 행(`memory_key='notice'`).
+③ AI 한줄로 마케팅 한 줄 · 안부 한 줄 각각 → 성격별 말투 · 특문.
+
+### 17-8. 구현 기록(1020)
+- 백엔드 = `utils/ai-line.ts`(lineRuleGaps · sanitizeAiAsks · mergeLineAsks · readLineAnswers · lineAnswersBlock · missingLineVars · lineVoiceKind) · `services/ai-line.ts`(회사 칼럼 · 허용 목록 · asks · voice · 답 · voiceKind · 묶음 안 꾸미기) · `routes/ai-line.ts`(facts.answers · 회사별 칼럼 검사) · `services/ai.ts`(대상 AI 한 줄 접수 출력 · 금지 예시 · voiceKind) · `utils/brand-voice-prompt.ts`(성격별 가이드라인 · 예시 · getBrandVoiceFit · splitBrandVoiceExtraction) · `utils/brand-tone-evolution.ts` · `routes/ai-memory.ts`(성격 저장 · 성격별 추출 한 호출 · main/notice 한 트랜잭션).
+- 화면 = `utils/ai-line.ts`(asks · isAd · isAdOf · asksOf · missingVarsIn) · `LineIntakeModal.tsx`(asks · vars 단계 · 문자 성격 칩 · 말투 안내) · `LineResultCards.tsx`(빠진 칼럼 알림 · 지금 본문 기준) · `AiLinePage.tsx`(결과 화면 광고 여부 = 확인 판 성격) · `AiMemory/BrandVoiceCard.tsx`(성격 표시 · 고르기 · 안부 말투).
+- 설계에서 바뀐 것: 카드의 빠진 칼럼 표시는 서버 표시 대신 화면이 지금 본문으로 계산(직접 고친 뒤에도 맞게). 그 밖 질문은 비워 두면 빼고 쓴다(혜택 · 기간만 「없이 보내기」를 고르게 함).
+- 시험 = `utils/__tests__/ai-line-asks-1020.test.ts` 25건 · 전체 backend vitest 656파일 9,568건 · BE · FE tsc 0.
+
+### 17-9. Codex 적대(gpt-6-astra · 1020)
+| 라운드 | 지적 | 처리 |
+|---|---|---|
+| 1R | high 1(AI 질문 글이 혜택 근거로 = 질문 속 지어낸 혜택이 「확인한 사실」) · medium 3(앞 진행 답이 새 질문에 남음 · 한 성격 묶음만 와도 저장해 안부 학습 삭제 · 안부만 회사의 main · notice 복제 행을 정정이 한쪽만 고침) | 근거 = 사람이 적은 답만 · 질문은 참고 글 · 한 줄에 없는 혜택 값이 든 질문 버림 / 빠진 정보 칸 진행별 초기화 / 진실 하나(안부만 = main 하나 · 복제 행 없음) · 묶음이 빠지면 쓰기 0(`planBrandVoiceRows`) |
+| 2R | medium 1(빠진 성격 판정을 「마케팅」으로 메워 저장 검사 우회) | 같은 부류 두 번째 → 판정 모르면 null · null 하나라도 있으면 거절 |
+| 3R | medium 1(옛 모양 호환 분기를 AI 판정으로 충족) | 같은 부류 세 번째 → 호환 분기 삭제(묶음 = 성격 키 객체만) |
+| 4R | 지적 0 | approve |
+- 변이 검출 = 판정 기본값 메우기 · 질문 글 근거 포함(각 시험 빨간불 → 원본 복원 확인).
+- 최종 검증 = BE · FE tsc 0 · frontend build:safe 통과(lazy 청크 54) · backend vitest 전체 · 새 시험 29건.
+
+### 17-10. 배포 순서(1020 · Harold 「다른 세션 작업이 다 마무리되면 tp-push 로 한 번에」)
+1. 로컬 `tp-push`(다른 세션 작업이 다 닫힌 뒤 · 그 시점 backend vitest 전체 통과 확인).
+2. 서버 DB 확인 1건(정보 스키마 · 1행 jsonb 이어야 함): `SELECT column_name, data_type FROM information_schema.columns WHERE table_name = 'customers' AND column_name = 'custom_fields';` (회사 칼럼 채움 · 1위 고객 값 SQL 이 쓴다 · 기존 발송 · 필터 코드도 쓰는 칼럼이지만 규칙대로 확인).
+3. 서버 `git pull` → 4. 백엔드 `npm run build:safe` → 5. `pm2 reload targetup-backend` → 6. 프론트 `npm run build:safe`.
+7. 실측 = §17-7 ①~③(시연 회사 · 브랜드 보이스는 AI 메모리에 보냈던 문자 올리기부터).

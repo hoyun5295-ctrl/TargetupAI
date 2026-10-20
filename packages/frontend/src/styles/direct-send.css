@@ -555,6 +555,126 @@
 }
 
 /* ============================================================
+   ★ 2026-10-20 직접발송 받는 사람 불러오기 4칸 — 키워드: ds-src
+   (직접입력 · 파일등록 · 주소록 · 타겟추출 · Harold 목업 승인)
+   옛 3칸 탭(ds-rtab)은 알림톡 · 브랜드메시지 창이 그대로 쓴다 — 이 칸은 직접발송 전용 클래스다.
+   칸 폭은 창이 아니라 오른쪽 열 폭으로 가른다(ds-src-wrap = 컨테이너).
+   ============================================================ */
+.ds-src-wrap { container-type: inline-size; display: flex; flex-direction: column; gap: 10px; }
+.ds-src-head {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--ds-stone-500);
+}
+.ds-src-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+}
+.ds-src {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  min-height: 66px;
+  padding: 12px 14px;
+  border-radius: 14px;
+  background: #FFFFFF;
+  border: 1px solid var(--ds-stone-200);
+  text-align: left;
+  cursor: pointer;
+  transition: border-color .15s, box-shadow .15s;
+}
+.ds-src:hover { border-color: var(--ds-stone-300); box-shadow: 0 6px 16px -10px rgb(28 25 23 / .25); }
+.ds-src:focus-visible { outline: 2px solid var(--ds-emerald-500); outline-offset: 2px; }
+.ds-src-ic {
+  width: 38px;
+  height: 38px;
+  flex-shrink: 0;
+  border-radius: 11px;
+  display: grid;
+  place-items: center;
+  background: var(--ds-stone-100);
+  color: var(--ds-stone-600);
+  transition: background .15s, color .15s;
+}
+.ds-src-tx { min-width: 0; display: flex; flex-direction: column; }
+.ds-src-tx b {
+  font-size: 14.5px;
+  font-weight: 650;
+  color: var(--ds-stone-800);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.ds-src-tx small {
+  margin-top: 1px;
+  font-size: 12px;
+  color: var(--ds-stone-500);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.ds-src.ds-src--on { border-color: var(--ds-emerald-500); box-shadow: 0 0 0 3px var(--ds-emerald-100); }
+.ds-src.ds-src--on .ds-src-ic { background: var(--ds-emerald-600); color: #FFFFFF; }
+.ds-src.ds-src--on .ds-src-tx b { color: var(--ds-emerald-800); }
+.ds-src.ds-src--loading { opacity: .55; cursor: wait; }
+.ds-src--target .ds-src-ic { background: var(--ds-emerald-50); color: var(--ds-emerald-700); }
+.ds-src.ds-src--lock { background: var(--ds-stone-50); }
+.ds-src.ds-src--lock .ds-src-ic { background: var(--ds-stone-150); color: var(--ds-stone-400); }
+.ds-src.ds-src--lock .ds-src-tx b { color: var(--ds-stone-500); }
+.ds-src.ds-src--lock .ds-src-tx small { color: var(--ds-amber-700); font-weight: 600; }
+.ds-src-lockmark {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  width: 20px;
+  height: 20px;
+  border-radius: 999px;
+  display: grid;
+  place-items: center;
+  background: var(--ds-amber-100);
+  color: var(--ds-amber-700);
+}
+@container (max-width: 600px) {
+  .ds-src-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+}
+@container (max-width: 300px) {
+  .ds-src { padding: 10px; gap: 9px; }
+  .ds-src-ic { width: 32px; height: 32px; }
+  .ds-src-tx small { display: none; }
+}
+
+/* 건수 · 중복제거 · 수신거부제거 · 검색 한 줄(좁으면 검색이 아래 줄로) */
+.ds-count-row {
+  display: flex;
+  align-items: center;
+  gap: 8px 10px;
+  flex-wrap: wrap;
+}
+.ds-count-row .ds-count-wrap { margin-right: 4px; }
+.ds-opt-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  height: 32px;
+  padding: 0 11px 0 8px;
+  border-radius: 999px;
+  border: 1px solid var(--ds-stone-200);
+  background: #FFFFFF;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--ds-stone-700);
+  white-space: nowrap;
+  cursor: pointer;
+}
+.ds-opt-chip:has(input:disabled) { background: var(--ds-stone-50); color: var(--ds-stone-500); cursor: default; }
+.ds-count-row .ds-count-search { margin-left: auto; }
+@container (max-width: 600px) {
+  .ds-count-row .ds-count-search { width: 100%; margin-left: 0; }
+}
+
+/* ============================================================
    자동입력 칩 (이름/회신번호/기타1~3)
    ============================================================ */
 .ds-chip {

@@ -38,7 +38,7 @@
 
 | 층 | 파일 | 소유하는 것 |
 |---|---|---|
-| **계약** | `utils/journey-trigger-capability.ts` | 트리거 레지스트리(15종+상시) · 화면 개방 판정 · 상한 필수 판정 |
+| **계약** | `utils/journey-trigger-capability.ts` | 트리거 레지스트리(17종 + 붙이기 전용 `journey.after` · ★1020) · 화면 개방 판정 · 상한 필수 판정 · 만들기 길 판정(`isCreatableTriggerEvent`) |
 | **등급 서열** | `utils/customer-grade-rank.ts` · `components/journey/GradeOrderModal.tsx` | 회사별 등급 순서 — 값 목록 실측·저장·확인 판정. 상승 판정의 유일한 근거 |
 | **커서 규약** | `utils/journey-cdp-cursor.ts` | 도착 축 배치 계획 · 커서 전진 · 이벤트/원장 문 판정 |
 | **추출** | `utils/journey-target-extractor.ts` | 트리거별 후보 SQL 단일 진입점(발송·미리보기 공용) |
@@ -58,6 +58,12 @@
 | **칸 한도** (★0929 V2) | `utils/journey-step-limits.ts` | 칸 종류 화이트리스트 · 칸 수 · 대기 상한 단일 출처 · 넘치면 거부(자르지 않음) · 모르는 종류 거부 · `JourneyInputError`(400) |
 | **V2 설계 · 차수** | [여정 V2 마스터 설계서](2026-09-29-journey-v2-master-design.md) | 생애 지도 · 칸 서랍 · 문장으로 만들기 · 0~5차 · 구현 기록 §13 |
 | **고객 관계 지도(1009)** | [고객 관계 지도 설계서](2026-10-09-journey-crm-map-design.md) | 지도 흐름도 개편 · 칸 편집 창 · 편집 정책 stepEditPolicy · 숫자 한 벌 · AI 진단 · 시연 데이터 v2 |
+| **V.3 설계 · 구현(1020)** | [여정 V.3 설계서](2026-10-20-journey-v3-design.md) | 원칙 §3 · 충돌 표 §4 · 크레딧 §5 · 다시 켜기 §6 · 구현 기록 §17 · 기존 여정 뒤에 붙이기 §18 |
+| **작업 화면(1020 V.3)** | `frontend/components/journey/workspace/JourneyWorkspace.tsx` · `JourneyStartCard.tsx` · `useJourneyActions.tsx` · `frontend/components/journey/PhoneComposer.tsx` · `frontend/utils/journey-start-form.ts` | 목록 · 지도의 여정 = 작업 화면 하나(주소 `?journey=&step=`) · [시작] 카드 · 큰 휴대폰 · 칸별 초안 · 확정 바 · 저장 순서(옵션 → 칸 그 자리 → 새 모양) · 다시 읽기 sync(고친 키만) · 칸 넣기 = 화면이 만든 칸 id(서버 멱등) |
+| **수정 정책 · 새 모양(1020 V.3)** | `utils/journey-step-edit-policy.ts` · `utils/journey-reshape.ts` | 켜진 여정 그 자리 수정 범위 · 옵션 판정 한 곳 · 칸 모양 바꾸기 = 복제 → 적용 → 검사 → 켜기 한 흐름 |
+| **돈(1020 V.3)** | `utils/journey-activation-cost.ts` · `journey-executor.ts reserveJourneyOperationCredit` · `utils/journey-operation-release.ts` · `utils/journey-credit-forecast.ts` | 처음 켜기 200 계보당 1번 · 운영 10 = 보내기 전 그날 몫 잡기 · 그날 발송 0건이면 다음 날 되돌림 · 크레딧 모자라면 그 판 멈춤 · 예상 크레딧 |
+| **다시 켜기(1020 V.3)** | `utils/journey-resume.ts` · `utils/journey-pause-reason.ts` · `utils/journey-lineage.ts`(계보 잠금 · 커서 이어받기) | 밀린 문자 일 단위 밀기 · 멈춘 동안 사건 안 받기 · 굳은 고객 되살리기 · 멈춘 이유 사람 말 |
+| **뒤에 붙이기(1020 V.3 §18)** | `utils/journey-attach.ts` · `utils/journey-after-config.ts` · `utils/journey-trigger-db.ts` · `frontend/components/journey/map/JourneyAttachModal.tsx` | 붙기 전 점검(judgeAttach · 계보 단위 고리) · 붙이기 · 떼기(회사 붙이기 잠금 → 계보 잠금) · 시작 설정 세대 `start_gen` · 감시 쓰기 확인 조각(watcher `startSameSql`) · CHECK 판정 |
 
 **정합 가드** — `journey-trigger-catalog-parity.test.ts`가 카탈로그↔백엔드↔AI 추천 집합 일치를 고정한다. 어긋나면 화면엔 보이는데 0건이 된다.
 
@@ -67,6 +73,7 @@
 
 **마케팅 12종** — 신규가입 · 첫 구매 · 재구매 · 휴면 · 휴면 복귀 · 구매 주기 이탈 · **등급 상승** · 생일 · 포인트 소멸 · 장바구니 이탈 · 배송 · 조회 후 미구매
 **상시 1종** — 자유 세그먼트. 트리거가 없어 여정 정의에서 벗어나지만 남긴다(세그먼트 다단계 드립은 캠페인이 못 한다). **재진입이 구조적으로 안 되므로 화면이 "한 번만 나갑니다"를 명시해야 한다.**
+**붙이기 전용 1종(★1020 V.3 §18)** — 앞 여정을 마치면(`journey.after`). 만들기 · AI · 프리셋에서는 고를 수 없고 지도 카드 [뒤에 여정 붙이기]로만 생긴다. 넘기는 고객 = 목표를 이뤄 마친 · 끝까지 받은 · 둘 다. 마친 뒤 7일 안 · 기준 시각(켠 · 붙인 · 다시 켠 시각) 뒤 · 한 번 마침 = 한 번 진입 · 사건 값(주문번호 · 상품명 등)을 쓰는 알림톡 여정은 붙이지 않는다.
 **예약 3종은 여정에서 빠졌다** → 정보 알림 축([설계서 §3-3](2026-08-01-journey-redesign-design.md) · 설계 보존 = §12). 코드는 이미 잠김(`RESERVATION_REASON` · `implemented: false` 2종).
 
 **등급은 상승만 발화한다** (2026-08-02 구현 완료) — 하락 통지는 마케팅이 아니다. 판정은 `customer_grade_ranks`(회사가 한 번 확인한 서열)로 하고, **양쪽 중 하나라도 표에 없거나 순서 없음이면 제외**한다. 서열 확인 전에는 트리거가 잠긴다. 하락도 원장 state 갱신은 계속한다. 근거·결정 전문 = 설계서 §3-1·§14.
@@ -85,9 +92,10 @@
 
 | 대상 | 컬럼·제약 | 무엇을 위한 것 |
 |---|---|---|
-| `journeys` | `last_event_cursor`(+`_id`) | 자사몰 이벤트 도착 축 커서 |
+| `journeys` | `last_event_cursor`(+`_id`) | 자사몰 이벤트 도착 축 커서 · ★1020 붙인 여정에서는 앞 여정을 마친 고객을 받기 시작한 기준 시각(감시가 전진시키지 않음) |
+| `journeys` | `entry_ends_on date`(★1020 V.3 실행완료) | 새 고객을 받는 마지막 날(시작 카드) |
 | `journeys` | `last_purchase_cursor`(+`_id`) | 구매 원장 도착 축 커서 |
-| `journeys` | CHECK `journeys_trigger_event_registered` | 트리거 16값 화이트리스트(레지스트리와 1:1) |
+| `journeys` | CHECK `journeys_trigger_event_registered` | 시작 사건 화이트리스트(레지스트리와 1:1 · 16 → 17(0930) → **18(1020 `journey.after`)**) |
 | `journey_entry_ledger` | `state_value` | 이전 상태 기억(등급 변동 판정) |
 | `journey_anchor_dispatch` | PK(journey, step, customer, send_date) | 고객별 발송일 멱등 — §12 날짜축의 기반 |
 | `cdp_events` | `(company_id, event_name, created_at, id)` | 도착 축 커서 조회 |
@@ -102,7 +110,7 @@
 
 | 시점 | 무엇 | 문서 |
 |---|---|---|
-| 2026-10-20 | **V.3 대개편(배포 완료 1020) + §18 기존 여정 뒤에 붙이기(코드 완료 · Codex 적대 approve · 배포 대기)** — 켜진 여정 그 자리 수정 · 새 모양 한 흐름 · 200 계보당 1번 · 운영 10 계보당 하루 1번 · 크레딧이 모자라면 선불 · 후불 모두 멈춤 · 다시 켜기 구멍 4 · 작업 화면 + 큰 휴대폰 · 지도 한눈에 · 기존 고객 받기 | [설계서](2026-10-20-journey-v3-design.md) — 결정 §15 / 묶음 §13 / 구현 기록 §17 |
+| 2026-10-20 | **V.3 대개편(배포 · DDL 완료 1020) + §18 기존 여정 뒤에 붙이기(배포 · CHECK DDL 완료 1020 · 서버 반영 확인)** — 켜진 여정 그 자리 수정 · 새 모양 한 흐름 · 200 계보당 1번 · 운영 10 계보당 하루 1번 · 크레딧이 모자라면 선불 · 후불 모두 멈춤 · 다시 켜기 구멍 4 · 작업 화면 + 큰 휴대폰 · 지도 한눈에 · 기존 고객 받기 | [설계서](2026-10-20-journey-v3-design.md) — 결정 §15 / 묶음 §13 / 구현 기록 §17 |
 | 2026-08-08 | **꾸미기 컬럼 배선 정정 · 발송 시점 직접 입력**(Harold 접수) — `data-profile` 응답 키 어긋남으로 꾸미기 칩·변수 카드가 0630 이래 죽어 있던 것을 고치고, 초기 조회 5개의 응답 키를 테스트로 고정. 상세 = §6-1 08-08(6) 행 | 표시·배선만 · 발송 경로 무변경 |
 | 2026-08-08 | **AI 다듬기 = 비포/애프터**(Harold 접수) — 3톤 후보 나열을 폐기하고 원본↔결과 두 칸에 바뀐 부분만 강조. 하이라이트 CT 분리·후보 수 계약(`variants`). 상세 = §6-1 08-08(5) 행 | 표시·요청 계약만 · 발송 경로 무변경 |
 | 2026-08-08 | **링크 입력 · 꾸미기 컬럼 선택**(Harold 접수) — `[URL 입력]`도 혜택과 같이 값으로 받고, AI 꾸미기가 고른 컬럼만 녹인다(전체를 넘기던 것을 고침). 상세 = §6-1 08-08(4) 행 | 표시·치환·인자만 · 발송 경로 무변경 |
@@ -170,6 +178,8 @@
 | 08-02 | `journey_entry_ledger.state_value` | 이전 상태 기억 |
 | 08-02 | `journeys` CHECK `journeys_trigger_event_registered`(16값 · `NOT VALID` 후 `VALIDATE`) | 레지스트리와 DB가 같은 집합. 기존 행을 잠그지 않고 검사 |
 | 08-02 | `customer_grade_ranks` + 회사 인덱스 | 등급 서열 — 표가 비면 트리거 잠금 |
+| 10-20 | `journeys.entry_ends_on date` | V.3 마지막 날(코드는 칸 확인 뒤에만 읽음) |
+| 10-20 | CHECK `journeys_trigger_event_registered` 18값(`journey.after` · DROP → ADD 같은 이름 · 한 트랜잭션) | V.3 §18 기존 여정 뒤에 붙이기 |
 
 ⛔ **전부 배포 뒤에 실행했다.** 워커는 트래픽과 무관하게 돌아서, 코드보다 표가 먼저 생기면 옛 코드가 새 표를 보고 판단한다.
 
@@ -210,4 +220,6 @@
 - **스튜디오 6건 + 동작 변경 1건** — 이 문서 §6-1의 08-08(2)~(7) 행이 각 건의 근거를 소유
 - **화면 실측 8종** · **자동 종료 기본화**
 - **별건 5** — 이어달리기 설계서 §9-A 2건 + 기존 3건
+- **V.3 실측(1020 배포)** — [V.3 설계서](2026-10-20-journey-v3-design.md) §14-2(발송 · 돈 · 다시 켜기) · §18-8(뒤에 붙이기 1건: 붙여서 켜고 마친 고객이 5분 안에 들어오는지 · 같은 마침 두 번 0 · 떼기 되돌림)
+- **V.3 추가 과제** — 앞 여정 사건 값(주문 · 상품)을 뒤 여정에 이어 주기(지금은 그 값을 쓰는 여정을 붙이지 않음) · 켜진 여정 그 자리 시작 조건 저장 때 감시 세대 올리기(옵션 저장 경로 · [B-1020-3](../status/BUGS.md)) · 범위 밖 = B-1020-3
 - ⛔ 착수 전 필독은 §7 · 불변 원칙·판정 계약은 §2·§3이 소유한다(여기 재서술 금지)

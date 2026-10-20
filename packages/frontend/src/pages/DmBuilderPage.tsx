@@ -7,7 +7,8 @@
  * 레거시(slides 모드) DM은 편집 불가 안내 + 새 에디터로 전환 버튼(15단계 구현 후 활성).
  */
 import { useEffect, useState, useCallback, useRef, useMemo } from 'react';
-import { useNavigate, useSearchParams } from 'react-router-dom';
+import { useLocation, useNavigate, useSearchParams } from 'react-router-dom';
+import { readDmEntry, readMakeEntryLine, takeMakeImages } from '../utils/make-entry';   // ★ 2026-10-20 만들기 「그 밖에」 진입 약속 한 곳
 import { goBackOr } from '../lib/scroll-restoration';
 import { DmMiniCover } from '../components/dm/DmThumbnails';
 import DmBlockBuilder from '../components/dm/build/DmBlockBuilder';
@@ -134,12 +135,13 @@ export default function DmBuilderPage() {
   // ★ 2026-10-04 플래너 보강 — 옛 `from=planner`(담당자가 발행) 분기 삭제. 플래너 행사의 모바일 DM은 행사 승인 때 발행된다(설계서 §6-5).
   //   행사 상세 [모바일 DM 고치기]는 `plannerEvent=<행사 id>`를 싣고, 여기 [보내기]는 저장하고 그 행사 확인 화면으로 돌아간다.
   const [searchParams, setSearchParams] = useSearchParams();
+  const location = useLocation();
   const [entry] = useState(() => ({
     id: String(searchParams.get('id') || '').trim() || null,
     plannerReturn: /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(String(searchParams.get('plannerEvent') || ''))
       ? `/marketing-planner/events/${String(searchParams.get('plannerEvent'))}`
       : null,
-    // ★ 2026-09-27 만들기 개편 — ?other=1(다른 방법 펼침) · onestep(질문 몇 개) · blocks(블록 조립) / ?send=1(편집 진입 뒤 자세한 발송 창) / ?pair=(같은 재료 이메일)
+    // ★ 2026-09-27 만들기 개편 · ★ 2026-10-20 ?other= 종류 = utils/make-entry(line · onestep · images · library · blocks) / ?send=1(편집 진입 뒤 자세한 발송 창) / ?pair=(같은 재료이메일)
     other: String(searchParams.get('other') || '').trim() || null,
     send: searchParams.get('send') === '1',
     pair: String(searchParams.get('pair') || '').trim() || null,
@@ -254,6 +256,7 @@ export default function DmBuilderPage() {
     avg_ctr_30d: number;
   } | null>(null);
   const [naturalLanguage, setNaturalLanguage] = useState('');
+  const [lineFocus, setLineFocus] = useState(0);   // ★ 2026-10-20 만들기 [한 줄로 자동 생성]으로 들어오면 한 줄 칸에 커서
   const lineAsk = useLineAsk('dm');   // ★ 2026-10-10 한 줄 묻기(잠김 화면 return 보다 앞 · 훅 순서 고정)
   const [detailExpanded, setDetailExpanded] = useState(false);
   const [generating, setGenerating] = useState(false);
@@ -512,7 +515,7 @@ export default function DmBuilderPage() {
   }, []);
 
   // ★ 2026-06-19: 완성 이미지 업로드 → 슬라이드 DM 자동 생성 (외주 완성 시안 대응 — 신규 섹션 타입 불요, slideshow 재사용)
-  const handleCompletedImagesSelected = useCallback(async (files: FileList | null, mode: 'slides' | 'scroll' | 'catalog' = 'scroll') => {
+  const handleCompletedImagesSelected = useCallback(async (files: FileList | File[] | null, mode: 'slides' | 'scroll' | 'catalog' = 'scroll') => {
     if (!files || files.length === 0) return;
     if (uploadingImages || generating) return;
     setUploadingImages(true);
@@ -657,13 +660,38 @@ export default function DmBuilderPage() {
     setMode('edit');
   };
 
-  // ★ 2026-09-27 만들기 개편 — 만들기 화면 [다른 방법으로 만들기] 착지(한 번만)
+  // ★ 2026-09-27 만들기 개편 — 만들기 화면 「그 밖에」 착지(한 번만)
+  // ★ 2026-10-20 종류마다 실제 동작(임은지 접수 cmvewqxm21) · 옛: ?other=1 은 처리 0 이라 [한 줄로 자동 생성] · [이미지로 불러오기] 가 첫 화면에 멈췄다.
+  //   종류 = utils/make-entry 한 곳 · 빠진 종류 = never 에서 tsc 오류.
   const otherHandled = useRef(false);
   useEffect(() => {
     if (otherHandled.current || !entry.other || entry.id) return;
     otherHandled.current = true;
-    if (entry.other === 'onestep') setOneStepOpen(true);
-    else if (entry.other === 'blocks') handleStartBlockBuild();
+    // 진입 값은 한 번만 — 주소에서 지운다(새로 고침이 고르기 창 · 사진 받기를 되풀이하지 않게 · 위 딥링크와 같은 규칙)
+    const rest = new URLSearchParams(searchParams);
+    rest.delete('other');
+    setSearchParams(rest, { replace: true });
+    const kind = readDmEntry(entry.other);
+    if (!kind) return;
+    switch (kind) {
+      case 'line': {
+        const t = readMakeEntryLine(location.state);
+        if (t) setNaturalLanguage(t);
+        setLineFocus((v) => v + 1);
+        return;
+      }
+      case 'onestep': setOneStepOpen(true); return;
+      case 'images': {
+        // 만들기 화면에서 고른 완성 이미지 = 「완성 이미지로」 버튼과 같은 길(0크레딧 카탈로그 DM → 편집)
+        const files = takeMakeImages();
+        if (files) void handleCompletedImagesSelected(files, 'catalog');
+        else setToast({ type: 'info', message: '고른 사진을 불러오지 못했어요. 아래 [완성 이미지로]에서 다시 골라 주세요.' });
+        return;
+      }
+      case 'library': setLibPickerOpen(true); return;
+      case 'blocks': handleStartBlockBuild(); return;
+      default: { const unhandled: never = kind; return unhandled; }
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
   // 결과 화면 [자세히 설정] → 편집 진입 뒤 기존 발송 창
@@ -1069,6 +1097,7 @@ export default function DmBuilderPage() {
           value: naturalLanguage,
           onChange: setNaturalLanguage,
           onSubmit: () => { void startOneLine(); },
+          focusSignal: lineFocus,
           placeholder: dmOneLine.placeholder,
           verb: dmOneLine.verb,
           icon: Sparkles,

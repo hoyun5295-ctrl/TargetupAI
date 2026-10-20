@@ -27,11 +27,13 @@ import { buildMessageObjective } from '../utils/season-context';
 import { buildLineEventText } from '../utils/one-line-facts';
 import { formatLinePeriodEnd } from '../utils/one-line-steps';
 import { decorateOperatorMessages } from '../utils/operator-message-decorator';
+import { enrichWithCustomFields } from '../utils/messageUtils';
+import { getBrandVoiceFit } from '../utils/brand-voice-prompt';
 import {
   AI_LINE_SOURCE, AI_LINE_TYPE_BY_VARIANT, AI_LINE_TYPE_LABEL, AI_LINE_COLUMN_EXCLUDE, AI_LINE_FILL_LOCK, AI_LINE_MAX_AUDIENCE,
   aiLineBaseKey, aiLineBaseKeys, aiLineCopyKey, aiLineDecoKey, aiLineComposeCost, filterChipText, quoteInLine, styleToType, maskName,
-  lineMentionsAllCustomers, aiLineLineFp,
-  type AiLineCopyType,
+  lineMentionsAllCustomers, aiLineLineFp, sanitizeAiAsks, mergeLineAsks, lineAnswersLicense, lineAnswersContext, missingLineVars, lineVoiceKind,
+  type AiLineCopyType, type AiLineAsk, type AiLineAnswer,
 } from '../utils/ai-line';
 
 export interface AiLineViewer {
@@ -227,7 +229,31 @@ async function settleBaseOnce(v: AiLineViewer, line: string): Promise<boolean> {
 
 // ─────────────── intake ───────────────
 
-export interface LineColumn { token: string; label: string; value: string | number | null; fill: number; locked: boolean; recommended: boolean }
+/** ★ 2026-10-20 custom = 회사가 올린 칼럼(customer_field_definitions · 발송 치환과 같은 출처) */
+export interface LineColumn { token: string; label: string; value: string | number | null; fill: number; locked: boolean; recommended: boolean; custom: boolean }
+
+/** 한 대상 화면에 싣는 칼럼 상한(표준 · 회사 칼럼 각각 · 채움 높은 순) */
+const LINE_COLUMNS_MAX = 10;
+
+/**
+ * ★ 2026-10-20 회사 칼럼 = 발송 치환과 같은 출처(enrichWithCustomFields · 라벨 → custom_fields 키).
+ * 표준 칼럼 이름과 겹치는 라벨은 발송 때 표준이 이기므로 뺀다. 조회 실패 = 빈 목록(표준 칼럼만 · 발송 치환과 같은 판단).
+ */
+async function companyCustomColumns(companyId: string): Promise<Array<{ label: string; key: string }>> {
+  const map: Parameters<typeof enrichWithCustomFields>[0] = {};
+  await enrichWithCustomFields(map, companyId);
+  const standard = new Set(getColumnFields().map((f) => f.displayName));
+  return Object.entries(map)
+    .filter(([label, e]) => e.storageType === 'custom_fields' && !!e.column && !standard.has(label))
+    .map(([label, e]) => ({ label, key: e.column }));
+}
+
+/** 만들기 · 꾸미기에서 받을 수 있는 칼럼 이름 = 표준(제외 목록 밖) + 이 회사 회사 칼럼 */
+export async function aiLineVarTokensFor(companyId: string): Promise<Set<string>> {
+  const out = aiLineVarTokens();
+  for (const c of await companyCustomColumns(companyId)) out.add(c.label);
+  return out;
+}
 
 export interface LineIntakeResult {
   filters: Record<string, any>;
@@ -254,17 +280,22 @@ export interface LineIntakeResult {
    * 이때는 기본을 걷지 않는다(답한 뒤 만들기 · 진행에서 미납이면 걷는다 · 같은 키).
    */
   needAudience: boolean;
+  /** ★ 2026-10-20 묻는 목록 한 자리(AI 가 한 줄을 읽고 판단 + 규칙 안전망 · 설계서 §17) — 비면 묻지 않고 다음 */
+  asks: AiLineAsk[];
+  /** ★ 2026-10-20 브랜드 말투를 배웠는가(성격별) — 모르면 null(안내 줄을 그리지 않는다) */
+  voice: { learned: boolean; marketing: boolean; notice: boolean } | null;
 }
 
 /** 대상 1위 고객(고객명 가림) · 칼럼 채움(이 대상 안) — 대상 찾기와 직접 고른 대상 다시 세기가 같은 계산을 쓴다 */
-async function audienceDetail(audience: HubAudience, count: number, recommendedVars: readonly string[]): Promise<{
+async function audienceDetail(companyId: string, audience: HubAudience, count: number, recommendedVars: readonly string[]): Promise<{
   top: LineIntakeResult['top']; sampleCustomer: LineIntakeResult['sampleCustomer']; columns: LineColumn[];
 }> {
   if (count <= 0) return { top: null, sampleCustomer: null, columns: [] };
+  const customs = await companyCustomColumns(companyId);
   let top: LineIntakeResult['top'] = null;
   let sampleCustomer: LineIntakeResult['sampleCustomer'] = null;
   const tr = await query(
-    `SELECT c.id, ${SAMPLE_CUSTOMER_COLUMNS} FROM customers c WHERE ${audience.where}
+    `SELECT c.id, c.custom_fields, ${SAMPLE_CUSTOMER_COLUMNS} FROM customers c WHERE ${audience.where}
       ORDER BY COALESCE(c.ltv_score, 0) DESC, COALESCE(c.total_purchase_amount, 0) DESC, c.id ASC LIMIT 1`,
     audience.params,
   );
@@ -275,14 +306,20 @@ async function audienceDetail(audience: HubAudience, count: number, recommendedV
     const nameKey = getFieldByKey('name')?.displayName || '고객명';
     if (sampleCustomer[nameKey] != null) sampleCustomer[nameKey] = maskName(sampleCustomer[nameKey]);
     top = { id: String(row.id), name: String(sampleCustomer[nameKey] ?? '') };
+    // 회사 칼럼 값 = 미리보기 치환이 라벨로 찾는다(발송 치환과 같은 라벨)
+    const cf = row.custom_fields && typeof row.custom_fields === 'object' ? row.custom_fields as Record<string, unknown> : {};
+    for (const c of customs) {
+      const val = cf[c.key];
+      if (val !== undefined && val !== null && String(val).trim() !== '') sampleCustomer[c.label] = typeof val === 'number' ? val : String(val);
+    }
   }
   const fill = await analyzeAudienceFieldFill(audience.where, audience.params);
   const keyByColumn = new Map(getColumnFields().map((f) => [f.columnName, f.fieldKey]));
-  const recommended = new Set(recommendedVars.map((x) => String(x)));
-  const columns = fill.fields
+  const recommended = new Set(recommendedVars.map((x) => String(x).replace(/%/g, '').trim()));
+  const columns: LineColumn[] = fill.fields
     .filter((f) => !AI_LINE_COLUMN_EXCLUDE.has(keyByColumn.get(f.field) || f.field) && f.fillRate > 0)
     .sort((a, b) => b.fillRate - a.fillRate)
-    .slice(0, 10)
+    .slice(0, LINE_COLUMNS_MAX)
     .map((f) => ({
       token: f.percentVar,
       label: f.label,
@@ -290,8 +327,48 @@ async function audienceDetail(audience: HubAudience, count: number, recommendedV
       fill: f.fillRate,
       locked: f.fillRate < AI_LINE_FILL_LOCK,
       recommended: recommended.has(f.percentVar) || recommended.has(f.label),
+      custom: false,
     }));
+  // ★ 2026-10-20 회사 칼럼 채움(이 대상 안 · 같은 WHERE 한 번 · 키는 매개변수로)
+  if (customs.length > 0) {
+    const base = audience.params.length;
+    const counts = customs.map((_, i) => `COUNT(*) FILTER (WHERE COALESCE(c.custom_fields->>$${base + i + 1}, '') <> '') AS cnt_${i}`);
+    const cr = await query(
+      `SELECT COUNT(*)::int AS total_n, ${counts.join(', ')} FROM customers c WHERE ${audience.where}`,
+      [...audience.params, ...customs.map((c) => c.key)],
+    );
+    const cRow = cr.rows[0] || {};
+    const total = Number(cRow.total_n) || 0;
+    const customCols: LineColumn[] = customs
+      .map((c, i) => {
+        const fillRate = total > 0 ? Math.round(((Number(cRow[`cnt_${i}`]) || 0) / total) * 100) : 0;
+        return {
+          token: c.label,
+          label: c.label,
+          value: sampleCustomer ? sampleCustomer[c.label] ?? null : null,
+          fill: fillRate,
+          locked: fillRate < AI_LINE_FILL_LOCK,
+          recommended: recommended.has(c.label),
+          custom: true,
+        };
+      })
+      .filter((c) => c.fill > 0)
+      .sort((a, b) => b.fill - a.fill)
+      .slice(0, LINE_COLUMNS_MAX);
+    columns.push(...customCols);
+  }
   return { top, sampleCustomer, columns };
+}
+
+/** 성격별 브랜드 말투 학습 여부(확인 판 안내 줄) — 조회 실패 = null(안내를 그리지 않는다 · 생성은 그대로) */
+async function lineVoiceFit(companyId: string): Promise<LineIntakeResult['voice']> {
+  try {
+    const [m, n] = await Promise.all([getBrandVoiceFit(companyId, 'marketing'), getBrandVoiceFit(companyId, 'notice')]);
+    return { learned: m.learned, marketing: m.kindLearned, notice: n.kindLearned };
+  } catch (err: any) {
+    console.warn('[ai-line] 브랜드 말투 조회 실패:', err?.message);
+    return null;
+  }
 }
 
 export async function runLineIntake(v: AiLineViewer, line: string, now: Date = new Date()): Promise<LineIntakeResult> {
@@ -309,7 +386,11 @@ export async function runLineIntake(v: AiLineViewer, line: string, now: Date = n
   const count = await countHubAudience(audience);
   const zeroReason: LineIntakeResult['zeroReason'] = audience.blocked ? 'scope' : audience.unresolved ? 'unresolved' : count === 0 ? 'zero' : 'none';
 
-  const { top, sampleCustomer, columns } = await audienceDetail(audience, count, target.personalization_vars || []);
+  // ★ 2026-10-20 추천 칼럼 = 대상 AI 가 이 한 줄에 맞게 고른 것(copy_vars) · 「개인화」 낱말로 고른 것도 함께
+  const { top, sampleCustomer, columns } = await audienceDetail(v.companyId, audience, count, [...(target.copy_vars || []), ...(target.personalization_vars || [])]);
+  // ★ 2026-10-20 묻는 목록 = AI 가 한 줄을 읽고 판단한 질문 + 규칙 안전망(한 자리 · 설계서 §17)
+  const asks = mergeLineAsks(line, sanitizeAiAsks(target.copy_questions, line));
+  const voice = await lineVoiceFit(v.companyId);
 
   // ★ 2026-10-19 받는 사람을 한 줄에서 못 읽음 = 「누구에게」를 먼저 묻는다 · 그동안 기본을 걷지 않는다
   const needAudience = !conditions.some((c) => c.origin === 'line') && !lineMentionsAllCustomers(line);
@@ -333,6 +414,8 @@ export async function runLineIntake(v: AiLineViewer, line: string, now: Date = n
     rejectNumber: companyInfo?.reject_number ? String(companyInfo.reject_number) : null,
     base: { paid: paidNow, charged, cost: baseCost },
     needAudience,
+    asks,
+    voice,
   };
 }
 
@@ -357,7 +440,7 @@ export async function runLineRetarget(v: AiLineViewer, filters: unknown, allCust
   const d = describeLineFilters('', safe, undefined);
   const a = await compileHubAudience(v, safe, allCustomers);
   const count = await countHubAudience(a);
-  const detail = d.untranslated.length > 0 ? { top: null, sampleCustomer: null, columns: [] } : await audienceDetail(a, count, []);
+  const detail = d.untranslated.length > 0 ? { top: null, sampleCustomer: null, columns: [] } : await audienceDetail(v.companyId, a, count, []);
   return {
     count, empty: a.empty, blocked: a.blocked, unresolved: a.unresolved,
     conditions: d.conditions.map(({ key, label, text }) => ({ key, label, text })),
@@ -404,7 +487,8 @@ export async function runLineAlimtalkMatch<T>(
 
 export interface LineComposeInput {
   line: string;
-  facts: { benefit: string | null; periodEnd: string | null };
+  /** ★ 2026-10-20 answers = AI 가 물은 그 밖 질문의 답(있을 때만 · 없으면 옛 모양 = 원장 키 지문 무변) */
+  facts: { benefit: string | null; periodEnd: string | null; answers?: AiLineAnswer[] };
   filters: Record<string, any>;
   allCustomers: boolean;
   types: AiLineCopyType[];
@@ -450,16 +534,22 @@ export async function runLineCompose(v: AiLineViewer, input: LineComposeInput, n
   const { conditions } = describeLineFilters(input.line, input.filters, undefined);
   const audienceText = input.allCustomers && conditions.length === 0 ? '전체 고객' : conditions.map((c) => c.text).join(' · ');
   const periodLine = input.facts.periodEnd ? `\n[기간] ${formatLinePeriodEnd(input.facts.periodEnd)}까지` : '';
-  const licenseText = `${buildLineEventText(input.line, { benefit: input.facts.benefit })}${periodLine}`;
+  // ★ 2026-10-20 AI 가 물은 그 밖 질문의 답 = 근거 글의 「확인한 사실」(사람이 적은 답만 · 묻고 답하지 않은 것은 쓰지 않는다)
+  //   ★ Codex R1 high — 질문 글(AI 가 씀)은 근거 글에 넣지 않고 참고 글로만(질문 속 혜택이 근거가 되지 않게)
+  const answers = input.facts.answers || [];
+  const licenseText = `${buildLineEventText(input.line, { benefit: input.facts.benefit })}${periodLine}${lineAnswersLicense(answers)}`;
 
   const generated = await runInCreditBundle(async () => {
     const { companyInfo, customerStats } = await loadHubCompanyContext(v.companyId, v.userId, { userId: v.userId, userType: v.userType });
     const { fieldMappings: varCatalog, availableVars } = extractVarCatalog(companyInfo.customer_schema);
     await filterVarCatalogByData(varCatalog, availableVars, v.companyId);
+    // ★ 2026-10-20 고른 회사 칼럼 = 변수 표에 싣는다(표에 없으면 생성기가 「목록 밖 변수」로 피한다 · 발송 치환과 같은 출처)
+    await enrichWithCustomFields(varCatalog, v.companyId);
+    for (const t of input.vars) if (varCatalog[t] && !availableVars.includes(t)) availableVars.push(t);
     const memory = await buildCompanyMemoryPromptContext(v.companyId, 20).catch(() => '');
     const audienceBlock = `[실제 발송 대상: 이 대상에게 맞게 쓴다]\n${audienceText}\n목표 문장과 대상이 다르면 대상을 따른다. 다른 고객군을 지칭하지 않는다.`;
     return generateMessages(
-      buildMessageObjective(licenseText, [audienceBlock, memory].filter(Boolean).join('\n\n')),
+      buildMessageObjective(licenseText, [audienceBlock, lineAnswersContext(answers), memory].filter(Boolean).join('\n\n')),
       {
         total_count: count,
         avg_purchase_count: parseFloat(customerStats?.avg_purchase_count) || 0,
@@ -479,6 +569,8 @@ export async function runLineCompose(v: AiLineViewer, input: LineComposeInput, n
         companyId: v.companyId,
         licenseText,
         exactVars: input.vars,
+        // ★ 2026-10-20 문자 성격(광고 여부 하나) = 그 성격의 브랜드 보이스 가이드라인 · 대표 문안만
+        voiceKind: lineVoiceKind(input.isAd),
       },
     );
   });
@@ -500,6 +592,30 @@ export async function runLineCompose(v: AiLineViewer, input: LineComposeInput, n
     cards.push({ type: t, label: AI_LINE_TYPE_LABEL[t], body, subject: String(vv?.subject || '').trim(), byteCount: Number(vv?.byte_count) || 0 });
   }
   if (cards.length === 0) throw new AiLineError('COMPOSE_EMPTY', '문안을 만들지 못했어요. 잠시 뒤 다시 눌러 주세요. 크레딧은 빠지지 않았어요.', 502);
+
+  // ★ 2026-10-20 고른 칼럼은 문안마다 들어가야 한다(Harold 「고른 칼럼을 활용해서 문안을 만들어야」) — 빠진 문안만 같은 묶음 안에서
+  //   꾸미기(추가 차감 0)로 넣는다. 그래도 빠진 칼럼은 카드가 지금 본문으로 바로 알린다(직접 고친 뒤에도 맞게). 꾸미기 실패 = 원문 그대로.
+  if (input.vars.length > 0) {
+    const short = cards.filter((c) => missingLineVars(c.body, input.vars).length > 0 && c.body.length >= 5);
+    if (short.length > 0) {
+      try {
+        const fixed = await runInCreditBundle(() => decorateOperatorMessages({
+          companyId: v.companyId,
+          messages: short.map((c) => c.body),
+          selectedVars: input.vars,
+          channel: channel.toLowerCase() as 'sms' | 'lms' | 'mms',
+          isAd: input.isAd,
+          userId: v.userId || undefined,
+        }));
+        short.forEach((c, i) => {
+          const next = String(fixed?.[i] || '').trim();
+          if (next && missingLineVars(next, input.vars).length < missingLineVars(c.body, input.vars).length) c.body = next;
+        });
+      } catch (err: any) {
+        console.warn('[ai-line] 고른 칼럼 넣기 실패 · 원문 그대로:', err?.message);
+      }
+    }
+  }
 
   // 이미 낸 시도(기억이 사라진 뒤 재요청) = 낸 종류 수까지만 돌려주고 걷지 않는다
   if (paidCopies !== null) {

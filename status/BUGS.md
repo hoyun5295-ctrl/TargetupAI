@@ -55,6 +55,49 @@
 
 ## 2) 활성 버그
 
+### 🟠 B-1020-5 대행발송 담당자 링크 · 보낼 시각 15분 전에 [발송 취소]를 누르면 안내 없이 「승인되었습니다 · 발송 2시간 전에 예약」 화면으로 돌아간다 (★1020 수정 · 코드 완료 · Codex 적대 7R approve(세 건 묶음) · 배포 대기 · 프론트만 · 서버 변경 0 · DDL 0) · 2026-10-20 서수란 접수 `cmvgfv8r51vl4jnn4smkewff4`
+- **구조(비토 구조체크)**: 15분 잠금은 **시각에 달린 권한**인데 링크 화면(`AgencyApprovePage`)은 열 때 받은 서버 actions 를 계속 썼다(로그인 화면 `AgencySendDetail` 은 `useClockTick` 으로 다시 판정). 조작 결과는 화면 맨 위 띠 하나에만 그렸다(누른 자리에서 안 보임). 승인 카드 문장은 상태와 상관없이 「발송 2시간 전에 자동으로 예약」.
+- **원인(실측 · Harold SQL)**: 16:20 건을 16:05 전에 열어 둔 화면 → 16:10 취소 → 서버 409(잠금 · 취소 안 됨 · 이벤트 = received → awaiting_approval → spell_checked → approved 15:19:10 → queued 15:19:10 · 상태 `sent`) → 사유는 맨 위 띠 · 아래는 `!cancel.ok` 라서 승인 카드. 승인과 예약이 같은 초라 「2시간 전에 예약」 문장도 틀렸다.
+- **수정**: `agency-send-api.ts` `lockLinkActions`(서버 actions 에 지금 시각 15분 잠금을 덧씌움 · 더 막기만 · 서버와 같은 0~15분 범위) · `sendChangeLockStartsAt` + `useClockTick(주기, 경계)` = 잠금 시작 시각에 정확히 다시 그림(Harold 「15분 이내는 클릭 안 되게」 = 버튼을 그리지 않고 그 자리에 「○○:○○에 나갑니다 · 15분 전부터는 바꿀 수 없어요」) · `linkApprovedCard` = 상태대로(막 승인 approved · final_testing · queued / 다시 연 화면 취소 가능 · 불가 사유) · 결과 안내를 버튼 칸으로. **같은 모양 2곳 함께** = `AutosendStopPage` · `JourneyPausePage` 안내를 내용 카드 아래 · 버튼 위로. 계약 = `agency-link-lock-1020.test.ts`(18건).
+- **실측(배포 뒤)**: 대행 접수 1건을 보낼 시각 20분 뒤로 잡고 담당자 링크를 열어 둔 채 기다린다 → 15분 전이 되는 순간 취소 · 승인 버튼이 사라지고 「○○:○○에 나갑니다 · 보낼 시각 15분 전부터는…」 카드. 2시간 안 승인 건은 승인 직후 「예약을 잡았습니다」.
+
+### 🟡 B-1020-6 만들기 「그 밖에」 [한 줄로 자동 생성] · [이미지로 불러오기 · 저장 소재에서] = 제작이 아니라 모바일 DM 첫 화면에 멈춘다 (★1020 수정 · 코드 완료 · Codex 적대 7R approve(세 건 묶음) · 배포 대기 · 프론트만 · DDL 0) · 2026-10-19 임은지 접수 `cmvewqxm21ru9jnn4bliafjtb`
+- **구조**: 만들기 → 모바일 DM · 이메일 진입은 `?other=` 글자 하나인데 주인이 없었다(보내는 쪽 `QuickCampaignPage otherTo` · 받는 쪽 `DmBuilderPage` · `EmailCampaignsPage` 가 따로 정함 · 시험 0). 9/30 AI 존 개편이 받는 쪽 `1` 처리(접힌 패널 펼침)를 지웠고 10/17 개편이 도착 화면 버튼 이름을 「사진 속 글 읽기」로 바꿨다.
+- **원인**: 두 버튼 모두 `?other=1` → 받는 쪽 처리 0 → 첫 화면. 형제 = 이메일로 바꾼 뒤 [질문 몇 개로] → 모바일 DM 으로 감(이메일엔 그 입구 없음).
+- **수정**: `utils/make-entry.ts`(신규) = 버튼 목록 · 라벨 · 주소 · 읽기 한 곳 · 받는 쪽 종류마다 실제 동작(switch + never = 빠지면 tsc 오류) · 한 줄 = 만들기 칸 글을 라우터 state 로 옮겨 넣고 커서(`ZoneLine.focusSignal` · 자르지 않음) · 이미지 = [완성 이미지로](만들기에서 파일 고름 → 메모리로 한 번 넘김 → 모바일 DM 0크레딧 카탈로그 DM 편집 · 만들기 카탈로그 10크레딧 경로로 돌리지 않음) · [저장 소재에서](도착 즉시 고르기 창) · 이메일 = [저장 소재로 이미지 이메일] · 이메일 상태 [질문 몇 개로] 숨김 · 진입 값은 처리하며 주소에서 지움(새로 고침 되풀이 0). 계약 = `make-entry-1020.test.ts`(14건).
+- **실측(배포 뒤)**: 만들기 > 한줄로 칸에 글 → [한 줄로 자동 생성] → 모바일 DM 한 줄 칸에 그 글 · 커서. [완성 이미지로] → 사진 3장 → 카탈로그 DM 편집 화면. [저장 소재에서] → 고르기 창. 「바꾸기」 이메일 → 그 밖에 줄 = 한 줄 · 저장 소재로 이미지 이메일 · 블록.
+
+### 🟡 B-1020-7 모바일 DM 「옆으로 넘기기」 장 칩(1장~N장)을 눌러도 미리보기가 그 장으로 안 넘어간다(+ 미리보기에서 넘겨도 칩이 안 따라옴 · 고칠 때마다 1장으로) (★1020 수정 · 코드 완료 · Codex 적대 7R approve(세 건 묶음) · 배포 대기 · 프론트만 · 발행 DM 변경 0 · DDL 0) · 2026-10-19 서수란 접수 `cmvew70kh1rhrjnn4vpwjsryn`
+- **구조**: 「지금 보는 장」을 편집기 store(`currentPageIndex`)와 미리보기 뷰어(`currentIdx`)가 따로 들고, 미리보기 다리(`make-preview` 브리지)는 「블록 선택」만 날랐다. 「이 장으로 가기」가 블록 선택의 부수 효과라 카탈로그 쪽 목록은 사진 블록을 함께 골라 우회(10/1)했고 장 칩은 장만 바꿨다.
+- **원인**: 장 칩 = `selectPage`(선택 해제)만 → 다리로 갈 메시지 0. 형제 = 뷰어 → 편집기 보고 0 · 새 문서가 1장부터(스크롤 자리만 되돌림).
+- **수정**: 주인 = store 하나 · 다리에 장 메시지 한 쌍(부모 → page{id, gen} · 다리 → page{id, gen} 사람이 고른 장). 장 id 로 맞춘다(슬라이드 모드는 사진 여러 장인 장을 `원래id-s번호` 로 펼침 · `viewerPageBelongsTo` · `storePageIndexOf` · 서버 `dm-slides-expand` 결과로 계약). 다리 = 「멈췄을 때 맞추기」(있어야 할 장 · 사람이 만졌는가 둘만 · 번호표 하나로 예약 · 미리보기 안 스크롤 동안은 미룸 · 다르고 사람이 안 만졌으면 다시 밂 · 만졌으면 그 장을 새 기준으로 알림). 편집기 = 움직이는 중 상태 0 · 세대 = `DmEditScreen pickRef`(고른 순간 · store 지금 장 동기 구독으로 모든 편집기 장 바뀜 · 미리보기를 따라간 바뀜만 제외) · 지난 세대 보고는 버림 · 따라간 바뀜은 받는 중인 뒤 칸에만. **Codex 1R~6R 지적 11건 = 같은 부류(장 동기화 순서 경합) → 2R 에서 구조 교체 · 이후 세대의 진실을 고른 순간으로 옮겨 7R approve.** 계약 = `make-preview-page-sync-1020.test.ts`(17건 · 다리 스크립트를 실제로 실행).
+- **실측(배포 뒤)**: 모바일 DM > 자세히 편집 > 보기 방식 「옆으로 넘기기」(사진 6장 카탈로그) > 장 칩 6장 → 미리보기 6/6 · 미리보기 화살표로 3장 → 왼쪽 칩 3장 · 3장 블록 고치기 → 미리보기 3장 그대로 · 넘김 효과 「책장 넘김」에서도 같은지.
+
+### 🔵 B-1020-5 1020 직접발송 타겟추출 · 추출 창 개편에서 짚은 범위 밖(기록만 · 착수 판단 = Harold님) · 2026-10-20
+- `backend/src/routes/customers.ts` `/filter-count` · `/extract` 에 서버 요금제 게이트가 없다(이번 잠금은 화면만 · 미가입 회사도 API 로는 추출 가능).
+- 옛 직접 타겟 발송 창(`TargetSendModal`)과 대시보드의 추출 창 인스턴스 · `confirmTargetSend` · `executeTargetSend` = 1019 입구 삭제 뒤 들어갈 길이 없는 코드(Codex 1R: 그 비동기 추출 콜백은 닫은 뒤에도 늦게 발송 창을 연다 · `pages/Dashboard.tsx` handleTargetExtracted).
+- 알림톡 · 브랜드메시지 창의 받는 사람 칸은 옛 3칸(`ds-rtab`) 그대로 · 직접발송만 4칸.
+- 파일등록 · 타겟추출이 쓰는 칸 맞추기 창은 옛 단순 form(선택 상자) 모양 그대로.
+- 브랜드 · 알림톡 창에서 직접발송으로 명단을 넘기는 두 경로(`pages/Dashboard.tsx` `carryPhonesToDirectRecipients` 두 곳)는 직접발송의 불러오기 세대(`mappingSeqRef`)를 올리지 않는다(Codex 4R).
+- 파일등록 머리글이 명단 내부 키(phone · name · extra1~3 · callback)와 같으면 원본 값이 덮인다(타겟추출은 고유화 · 파일은 옛 그대로).
+- 직접발송 390 폭: 왼쪽 문안 열 최소 폭 493px → 창 안 가로 넘침(측정 하네스 기준 · 운영 화면 미확인).
+- `components/direct-send/useSendPrecheck.tsx` `checkStatus?.spell.limit` — 점검 응답에 spell 이 없으면 화면이 멈춘다(측정 하네스에서 재현 · 운영 응답이 늘 spell 을 주는지 미확인).
+
+### 🔵 B-1020-4 1020 AI 한줄로 질문 · 칼럼 · 성격별 브랜드 보이스에서 짚은 범위 밖(기록만 · 착수 판단 = Harold님) · 2026-10-20
+- `backend/src/utils/one-line-facts.ts:48` 행사 낱말 목록(INTENT_RE)에 「혜택」이 없어 「신규 가입 후 7일 미구매 고객에게 첫 구매 혜택」을 행사로 보지 않는다 → DM · 이메일 · 플래너 한 줄의 혜택 묻기도 건너뛴다(AI 한줄로는 1020 AI 질문이 메움 · 설계서 docs/2026-10-18-ai-line-design.md §17).
+- `backend/src/utils/one-line-steps.ts:62` `linePeriodMentioned` 가 「최근 30일 미구매」 · 「24시간 이탈」 같은 받는 사람 조건의 기간을 행사 기간으로 읽는다 → 같은 소비처(DM · 이메일 · 플래너 한 줄)에서 기간 묻기를 건너뛴다.
+- 두 성격(마케팅 · 안부)이 다 있는 회사의 안부 · 알림 가이드라인(`memory_key='notice'`)은 AI 메모리 화면에서 직접 정정할 수 없다(재추출로만 갱신 · 카드 머리에 한 줄 안내).
+- AI 한줄로 칼럼 단계의 회사 칼럼 값 = `custom_fields` 원문 그대로 보여 준다(발송 치환은 `field_type` 에 따라 숫자 모양을 바꿀 수 있어 미리보기 · 발송 표기가 다를 수 있음).
+
+### 🔵 B-1020-3 1020 여정 V.3 · 뒤에 붙이기에서 짚은 범위 밖(기록만 · 착수 판단 = Harold님) · 2026-10-20
+- `frontend/src/components/journey/JourneyActivationConfirmModal.tsx` 점검 실패 「다시 만들기」 = 토스트에 내부 이름(JourneysPage) 노출 + 듣는 곳 없는 이벤트(`journey:expand-step`). 작업 화면 그 칸으로 여는 것이 맞다.
+- `JourneyDetailPage` · `JourneyStatsPage` 가 상세 응답을 `detail.journey` 로 읽는다(실제 응답 = `journey` · `steps`) → 여정 이름이 비어 보일 수 있다.
+- `backend/src/utils/__tests__/ai-credit-calc.verify.ts` 「base-150 → 140」 줄이 0925 C-08 이후 갱신 안 됨(V.3 전부터 · 설계서 §17-4).
+- `POST /operator/journeys/:id/new-version` 화면 소비처 0(V.3 작업 화면이 새 모양 한 흐름으로 대체 · 지울지 판단).
+- 켜진 여정 시작 조건 그 자리 저장(PATCH options)은 감시 세대(`start_gen`)를 올리지 않는다 → 저장 직전 회차가 옛 조건으로 뽑은 후보가 저장 뒤에 들어갈 수 있다(V.3 전부터의 경합 · 붙이기 · 떼기는 세대로 닫음).
+- 작업 화면 위 공용 `ConfirmModal` 이 떠 있는 동안 배경이 inert 가 아니다(Tab 이 배경으로 나간다 · 떼기는 확인 순간 다시 보기로 닫음 · B-1019-1 의 같은 부품).
+- Codex 4R [범위 밖] `backend/src/utils/journey-executor.ts:1534`(마지막 칸 완료 문장 · 내용 미기재).
+
 ### 🔵 B-1020-2 1020 슈퍼관리자 표 개편에서 짚은 범위 밖(기록만 · 착수 판단 = Harold님) · 2026-10-20
 - 390폭(휴대폰) 화면 가로 넘침 — 표 밖 요소(실측): `components/admin/tabs/CallbacksTab.tsx` 하위 탭 줄(발신번호 관리 · 등록 신청 관리 · 등록현황 관리) · `components/admin/LoginBlocksManagement.tsx` 조회 입력 줄 · `components/AgentChargePanel.tsx` 충전 등록 줄 · 긴 회사명이 든 회사 선택 상자(`tabs/AllCampaignsTab` · `tabs/AuditLogsTab` · `tabs/ScheduledTab` · `tabs/UsersTab` · 회사명이 아주 길 때만).
 - Codex T3 [범위 밖] `frontend/src/components/SessionTimeoutModal.tsx:46`(내용 미기재).

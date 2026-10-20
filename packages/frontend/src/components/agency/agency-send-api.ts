@@ -460,6 +460,54 @@ export function isInSendChangeLock(requestedAt: string | null | undefined, now: 
   return minutesLeft > 0 && minutesLeft < SEND_CHANGE_LOCK_MINUTES;
 }
 
+/** 15분 잠금이 시작되는 시각(ms) · 시각이 없거나 잘못되면 null — 열어 둔 화면이 그 순간 다시 판정하게 useClockTick 경계로 넘긴다 */
+export function sendChangeLockStartsAt(requestedAt: string | null | undefined): number | null {
+  if (!requestedAt) return null;
+  const t = new Date(requestedAt).getTime();
+  return Number.isNaN(t) ? null : t - SEND_CHANGE_LOCK_MINUTES * 60_000;
+}
+
+/** 링크 화면 조작 한 칸 · 한 벌(서버 utils/agency-send-actions.ts `AgencyActions` 와 같은 모양) */
+export interface AgencyLinkActionState { ok: boolean; reason: string | null }
+export interface AgencyLinkActions {
+  approve: AgencyLinkActionState; cancel: AgencyLinkActionState; reschedule: AgencyLinkActionState;
+  resume: AgencyLinkActionState; spellFix: AgencyLinkActionState; editText: AgencyLinkActionState;
+  approveBy: string | null;
+}
+const LINK_ACTION_KEYS = ['approve', 'cancel', 'reschedule', 'resume', 'spellFix', 'editText'] as const;
+
+/**
+ * ★ 2026-10-20 링크 화면 조작 = 서버가 준 actions 에 「지금 시각」 15분 잠금을 덧씌운다(서수란 접수 cmvgfv8r51).
+ *   서버 actions 는 화면을 연 순간의 판정이라, 열어 둔 화면은 보낼 시각 15분 전이 지나도 버튼이 남았다(누르면 409).
+ *   ⛔ 더 막기만 한다 · 서버가 막은 조작은 서버 사유 그대로 · 잠금 범위 = 서버와 같은 isInSendChangeLock(지난 시각은 잠그지 않는다).
+ */
+export function lockLinkActions(a: AgencyLinkActions | undefined, requestedAt: string | null | undefined, now: number): AgencyLinkActions | undefined {
+  if (!a || !isInSendChangeLock(requestedAt, now)) return a;
+  const out: AgencyLinkActions = { ...a };
+  for (const k of LINK_ACTION_KEYS) if (a[k]?.ok) out[k] = { ok: false, reason: SEND_CHANGE_LOCK_REASON };
+  return out;
+}
+
+/**
+ * ★ 2026-10-20 승인된 건의 결과 카드 = 상태대로 쓴다(서수란 접수 cmvgfv8r51).
+ *   옛: 「발송 2시간 전에 자동으로 예약을 잡고」를 상태와 상관없이 썼다 — 보낼 시각 2시간 안에 승인하면 같은 초에 예약까지 잡히고
+ *   (실측 approved · queued 15:19:10), 15분 잠금으로 취소가 막힌 화면에도 이 문장이 떴다.
+ *   `when` = 화면이 쓰는 보낼 시각 글자(formatWhen) · 승인된 상태가 아니면 null.
+ */
+export function linkApprovedCard(input: {
+  justApproved: boolean; status: AgencySendStatus; when: string; cancel: AgencyLinkActionState | undefined;
+}): { title: string; body: string } | null {
+  const { justApproved, status, when, cancel } = input;
+  if (status !== 'approved' && status !== 'final_testing' && status !== 'queued') return null;
+  if (justApproved) {
+    if (status === 'approved') return { title: '승인되었습니다', body: '발송 2시간 전에 자동으로 예약을 잡고, 정해진 시각에 나갑니다. 이 창은 닫으셔도 됩니다.' };
+    if (status === 'final_testing') return { title: '승인되었습니다', body: `발송 전 마지막 검사를 하고 있어요. 통과하면 ${when}에 나갑니다. 이 창은 닫으셔도 됩니다.` };
+    return { title: '승인되었습니다', body: `예약을 잡았습니다. ${when}에 나갑니다. 이 창은 닫으셔도 됩니다.` };
+  }
+  if (cancel?.ok) return { title: '승인되었습니다', body: '정해진 시각에 나갑니다. 보내지 않으려면 아래에서 취소할 수 있어요.' };
+  return { title: '승인된 발송입니다', body: `${when}에 나갑니다. ${cancel?.reason || '지금은 취소할 수 없어요.'}` };
+}
+
 /** 담당자가 지금 승인할 수 있는 상태인가(서버가 최종 판정하고, 화면은 버튼을 켜고 끄는 데만 쓴다) */
 export function isApprovable(status: AgencySendStatus): boolean {
   return status === 'awaiting_approval' || status === 'reapproval';

@@ -28,7 +28,18 @@ export interface AiLineReadResult {
 }
 
 export interface AiLineCondition { key: string; label: string; text: string; origin: 'line' | 'ai' }
-export interface AiLineColumn { token: string; label: string; value: string | number | null; fill: number; locked: boolean; recommended: boolean }
+/** ★ 2026-10-20 custom = 회사가 올린 칼럼 */
+export interface AiLineColumn { token: string; label: string; value: string | number | null; fill: number; locked: boolean; recommended: boolean; custom?: boolean }
+
+/** ★ 2026-10-20 묻는 목록 한 줄(서버가 정한다 · AI 가 한 줄을 읽고 판단 + 규칙 안전망 · 설계서 §17) */
+export interface AiLineAsk {
+  id: string;
+  kind: 'benefit' | 'period' | 'text';
+  text: string;
+  why: string;
+  options: string[];
+  source: 'ai' | 'rule';
+}
 
 export interface AiLineIntake {
   filters: Record<string, unknown>;
@@ -50,6 +61,10 @@ export interface AiLineIntake {
   base: { paid: boolean; charged: boolean; cost: number };
   /** ★ 2026-10-19 한 줄에서 받는 사람 조건을 못 읽었다 = 「누구에게 보낼까요?」를 먼저 묻는다(그동안 기본 0) */
   needAudience: boolean;
+  /** ★ 2026-10-20 묻는 목록(비면 묻지 않고 다음 · 1020 앞에 저장된 진행 = 없음) */
+  asks?: AiLineAsk[];
+  /** ★ 2026-10-20 브랜드 말투 학습(성격별) · 모르면 null */
+  voice?: { learned: boolean; marketing: boolean; notice: boolean } | null;
 }
 
 /** ★ 2026-10-19 대상을 바꾼 뒤(직접 타겟 선택 · 「전체 고객」 답) 서버가 다시 센 값 */
@@ -87,8 +102,13 @@ export interface AiLineRun {
   owner: string | null;
   line: string;
   read: AiLineReadResult | null;
-  /** 1장(빠진 것) 답 — benefit: null = 혜택 없이 · period_end: null = 기간 없이 */
-  facts: { benefit: string | null; period_end: string | null } | null;
+  /**
+   * 1장(빠진 것) 답 — benefit: null = 혜택 없이 · period_end: null = 기간 없이
+   * ★ 2026-10-20 answers = AI 가 물은 그 밖 질문의 답(답한 것만)
+   */
+  facts: { benefit: string | null; period_end: string | null; answers?: Array<{ q: string; a: string }> } | null;
+  /** ★ 2026-10-20 문자 성격을 사람이 바꿨으면(true = 마케팅 · 광고 / false = 안부 · 알림) · null = 대상 찾기 판정 */
+  isAd: boolean | null;
   branch: AiLineBranch;
   intake: AiLineIntake | null;
   /** 꺼 둔 조건 키(기본 = 전부 켬) */
@@ -142,7 +162,7 @@ function newToken(): string {
 
 export function newAiLineRun(line: string): AiLineRun {
   return {
-    runId: newToken(), owner: aiLineOwner(), line, read: null, facts: null, branch: 'sms', intake: null,
+    runId: newToken(), owner: aiLineOwner(), line, read: null, facts: null, isAd: null, branch: 'sms', intake: null,
     offKeys: [], allChecked: false, liveCount: null, manual: null, audience: null, audienceSet: false, types: [], vars: [], cards: [], edits: {},
     channel: 'LMS', attemptToken: newToken(), spam: {}, picked: null,
   };
@@ -180,7 +200,7 @@ export function loadAiLineRun(): AiLineRun | null {
     const r = JSON.parse(raw) as AiLineRun;
     // 1019 앞에 저장된 진행 = 새 칸을 기본값으로 채운다
     if (!r || typeof r.runId !== 'string' || typeof r.line !== 'string' || r.owner !== aiLineOwner()) return null;
-    return { ...r, manual: r.manual ?? null, audience: r.audience ?? null, audienceSet: r.audienceSet === true };
+    return { ...r, manual: r.manual ?? null, audience: r.audience ?? null, audienceSet: r.audienceSet === true, isAd: typeof r.isAd === 'boolean' ? r.isAd : null };
   } catch {
     return null;
   }
@@ -234,6 +254,21 @@ export function audienceOf(run: AiLineRun): { count: number; top: AiLineIntake['
   return { count: it?.count ?? 0, top: it?.top ?? null, sampleCustomer: it?.sampleCustomer ?? null, columns: it?.columns ?? [] };
 }
 
+/** ★ 2026-10-20 문자 성격 = 광고 여부 하나(사람이 바꿨으면 그 값 · 아니면 대상 찾기 판정) — 읽기는 이 함수 하나 */
+export function isAdOf(run: AiLineRun): boolean {
+  return run.isAd ?? run.intake?.isAd ?? true;
+}
+
+/** ★ 2026-10-20 묻는 목록(서버 값 그대로) */
+export function asksOf(run: AiLineRun): AiLineAsk[] {
+  return run.intake?.asks ?? [];
+}
+
+/** ★ 2026-10-20 고른 칼럼 중 본문에 %칼럼% 으로 들어가지 않은 것(카드 알림 · 서버 missingLineVars 와 같은 규칙) */
+export function missingVarsIn(body: string, vars: readonly string[]): string[] {
+  return vars.filter((v) => !String(body || '').includes(`%${v}%`));
+}
+
 /** 칩 지문 — 실제로 나갈 글 · 제목 · 채널 · 광고 · 발신번호(바뀌면 「다시 검사」) */
 export function spamFp(body: string, subject: string, channel: AiLineChannel, isAd: boolean, callback: string): string {
   let h = 0;
@@ -285,7 +320,7 @@ export const aiLineApi = {
   proceed: (line: string, filters: Record<string, unknown>, allCustomers: boolean) =>
     call<{ count: number; charged: boolean }>('/proceed', { line, filters, allCustomers }),
   compose: (body: {
-    line: string; facts: { benefit: string | null; period_end: string | null } | null; filters: Record<string, unknown>; allCustomers: boolean;
+    line: string; facts: AiLineRun['facts']; filters: Record<string, unknown>; allCustomers: boolean;
     types: AiLineCopyType[]; vars: string[]; channel: AiLineChannel; isAd: boolean; attemptToken: string;
   }) => call<{ cards: AiLineCard[]; channel: AiLineChannel; count: number; charged: { base: number; copies: number } }>('/compose', body),
   decorate: (body: { body: string; vars: string[]; channel: AiLineChannel; isAd: boolean; attemptToken: string }) =>

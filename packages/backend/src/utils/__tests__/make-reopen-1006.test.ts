@@ -99,11 +99,12 @@ describe('② 장·쪽 빼기 — 옆으로 넘기기 · 책처럼 두 보기 �
     expect(chips).toContain('{pages.length > 1 && (');
     expect(chips).toContain('onClick={() => onRemove(cur)}');
     expect(chips).toContain('data-make="slides-remove-page"');
-    expect(edit).toContain('<PageChips onRemove={(i) => setConfirm(pageRemoveConfirm(i, false, s.pages.length))} />');
+    // ★ 2026-10-20 뒤에 onPicked(B-1020-7 장 고름 번호)가 붙어 끝 ` />` 는 대조하지 않는다 — 빼기 = 공용 확인 창 연결은 그대로
+    expect(edit).toContain('<PageChips onRemove={(i) => setConfirm(pageRemoveConfirm(i, false, s.pages.length))}');
   });
 
   it('책처럼: 쪽 목록 줄마다 빼기(사진 없는 쪽도) · 오른쪽 [이 쪽 빼기]도 같은 확인 창', () => {
-    expect(edit).toContain('<CatalogLeft onRemove={(i) => setConfirm(pageRemoveConfirm(i, true, s.pages.length))} />');
+    expect(edit).toContain('<CatalogLeft onRemove={(i) => setConfirm(pageRemoveConfirm(i, true, s.pages.length))}');
     expect(edit).toContain('onRemove={pages.length > 1 ? (id) => { const idx = pageIndexOf(id); if (idx >= 0) onRemove(idx); } : undefined}');
     expect(edit).toContain('onClick={() => setConfirm(pageRemoveConfirm(pageNo - 1, true, pages.length))}');
     expect(edit).toContain('{pages.length > 1 && pageNo > 0 && (');

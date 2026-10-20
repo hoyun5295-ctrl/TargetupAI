@@ -62,7 +62,7 @@ describe('워터마크 = 미가입 · 무료 체험 · 지정 계정만', () => 
     planCtx.value = { planCode: 'PRO', subscriptionStatus: 'paid', trialExpiresAt: null, isTrialActive: false };
     const p = await buildFeatureIntrosPayload(company);
     const withVideo = p.intros.filter((f) => f.video);
-    expect(withVideo.length).toBe(12);
+    expect(withVideo.length).toBe(13);   // 허브 카드 12 + AI 한줄로(★ 2026-10-21)
     for (const f of withVideo) expect(f.video!.src.startsWith('/api/plans/feature-media?f=')).toBe(true);
     expect(p.about).toBeNull();
     expect((await buildFeatureIntrosPayload({ ...company, loginId: 'hoyun' })).about?.groups.length).toBe(4);
@@ -75,7 +75,7 @@ describe('구멍 0 — 화면 코드 · 공개 폴더에 원장 · 영상이 없
     expect(fe).not.toMatch(/steps: \[|safeguards: \[|options: \[|summary: '/);
     expect(readFileSync(join(FRONT, 'src/constants/about-page.ts'), 'utf8')).not.toMatch(/ABOUT_GROUPS|ABOUT_GUARDS/);
     expect(existsSync(join(FRONT, 'public/videos/plan-feature'))).toBe(false);
-    expect(readdirSync(join(__dirname, '../../../assets/plan-feature')).filter((f) => f.endsWith('.mp4')).length).toBe(12);
+    expect(readdirSync(join(__dirname, '../../../assets/plan-feature')).filter((f) => f.endsWith('.mp4')).length).toBe(13);
   });
   it('원장은 로그인 경로로만 · 영상 경로는 서명 확인 뒤 파일', () => {
     const plans = readFileSync(join(__dirname, '../../routes/plans.ts'), 'utf8');

@@ -14,9 +14,9 @@ import { isValidAttemptToken } from '../utils/one-line-facts';
 import { isValidLinePeriodEnd } from '../utils/one-line-steps';
 import { validateAnswer } from '../utils/content-interview';
 import { matchAlimtalkTemplate } from '../utils/alimtalk-ai-matcher';
-import { readAiLine, sanitizeLineTypes } from '../utils/ai-line';
+import { readAiLine, sanitizeLineTypes, readLineAnswers, type AiLineAnswer } from '../utils/ai-line';
 import {
-  AiLineError, aiLineVarTokens,
+  AiLineError, aiLineVarTokensFor,
   runLineIntake, runLineRecount, runLineRetarget, runLineProceed, runLineCompose, runLineDecorate, runLineAlimtalkMatch,
   type AiLineViewer,
 } from '../services/ai-line';
@@ -55,15 +55,24 @@ function readLine(raw: unknown): string | null {
 
 const isPlainObject = (v: unknown): v is Record<string, any> => v !== null && typeof v === 'object' && !Array.isArray(v);
 
-/** facts = { benefit: string|null|undefined, period_end: 'YYYY-MM-DD'|null|undefined } · 틀리면 'invalid' */
-function readFacts(raw: unknown): { benefit: string | null; periodEnd: string | null } | 'invalid' {
+/**
+ * facts = { benefit: string|null|undefined, period_end: 'YYYY-MM-DD'|null|undefined, answers?: [{q, a}] } · 틀리면 'invalid'
+ * ★ 2026-10-20 answers = AI 가 물은 그 밖 질문의 답(설계서 §17) · 답이 있을 때만 싣는다(없으면 옛 모양 그대로 = 원장 키 지문 무변)
+ */
+function readFacts(raw: unknown): { benefit: string | null; periodEnd: string | null; answers?: AiLineAnswer[] } | 'invalid' {
   if (raw === undefined || raw === null) return { benefit: null, periodEnd: null };
   if (!isPlainObject(raw)) return 'invalid';
   const b = raw.benefit;
   if (b !== undefined && b !== null && !validateAnswer('benefit', b).ok) return 'invalid';
   const pe = raw.period_end;
   if (pe !== undefined && pe !== null && !isValidLinePeriodEnd(pe, Date.now())) return 'invalid';
-  return { benefit: typeof b === 'string' && b.trim() ? b.trim() : null, periodEnd: typeof pe === 'string' ? pe : null };
+  const answers = readLineAnswers(raw.answers);
+  if (answers === 'invalid') return 'invalid';
+  return {
+    benefit: typeof b === 'string' && b.trim() ? b.trim() : null,
+    periodEnd: typeof pe === 'string' ? pe : null,
+    ...(answers.length > 0 ? { answers } : {}),
+  };
 }
 
 function readChannel(raw: unknown): 'SMS' | 'LMS' | 'MMS' | null {
@@ -71,10 +80,10 @@ function readChannel(raw: unknown): 'SMS' | 'LMS' | 'MMS' | null {
   return c === 'SMS' || c === 'LMS' || c === 'MMS' ? c : null;
 }
 
-function readVars(raw: unknown): string[] | 'invalid' {
+/** 고른 칼럼 — allowed = 이 회사 칼럼 목록(표준 + 회사 칼럼 · aiLineVarTokensFor) */
+function readVars(raw: unknown, allowed: ReadonlySet<string>): string[] | 'invalid' {
   if (raw === undefined) return [];
   if (!Array.isArray(raw)) return 'invalid';
-  const allowed = aiLineVarTokens();
   const out: string[] = [];
   for (const x of raw) {
     const t = String(x || '').replace(/%/g, '').trim();
@@ -171,7 +180,7 @@ router.post('/compose', async (req: Request, res: Response) => {
     if (facts === 'invalid') return res.status(400).json({ success: false, error: '혜택 · 기간 답이 올바르지 않아요.', code: 'FACTS_INVALID' });
     const types = sanitizeLineTypes(b.types);
     if (types === 'invalid') return res.status(400).json({ success: false, error: '만들 문안 종류를 골라 주세요.', code: 'TYPES_INVALID' });
-    const vars = readVars(b.vars);
+    const vars = readVars(b.vars, await aiLineVarTokensFor(v.companyId));
     if (vars === 'invalid') return res.status(400).json({ success: false, error: '고른 칼럼을 쓸 수 없어요. 확인 판을 다시 열어 주세요.', code: 'VARS_INVALID' });
     const channel = readChannel(b.channel);
     if (!channel) return res.status(400).json({ success: false, error: '채널이 올바르지 않아요.', code: 'CHANNEL_INVALID' });
@@ -194,7 +203,7 @@ router.post('/decorate', async (req: Request, res: Response) => {
     const b = req.body || {};
     const body = typeof b.body === 'string' ? b.body.trim() : '';
     if (body.length < 5 || body.length > 2000) return res.status(400).json({ success: false, error: '꾸밀 문안이 너무 짧거나 길어요.', code: 'BODY_INVALID' });
-    const vars = readVars(b.vars);
+    const vars = readVars(b.vars, await aiLineVarTokensFor(v.companyId));
     if (vars === 'invalid' || vars.length === 0) return res.status(400).json({ success: false, error: '넣을 칼럼을 1개 이상 골라 주세요.', code: 'VARS_INVALID' });
     const channel = readChannel(b.channel);
     if (!channel) return res.status(400).json({ success: false, error: '채널이 올바르지 않아요.', code: 'CHANNEL_INVALID' });

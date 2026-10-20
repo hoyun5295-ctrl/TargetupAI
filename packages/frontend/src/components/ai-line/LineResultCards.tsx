@@ -13,7 +13,7 @@ import { Check, Loader2, PencilLine, ShieldCheck, ShieldAlert, Wand2, Clock3, Ro
 import { AI_GENERATE_COSTS } from '../../constants/credit';
 import {
   type AiLineRun, type AiLineType, type AiLineChannel, type AiLineSpamChip, type AiLineColumn,
-  aiLineApi, spamFp, audienceOf,
+  aiLineApi, spamFp, audienceOf, missingVarsIn,
 } from '../../utils/ai-line';
 
 const POLL_MS = 3000;
@@ -170,6 +170,8 @@ export default function LineResultCards(p: LineResultCardsProps) {
           const picked = p.pickedType === t;
           const isRec = rec === t;
           const unusedCols = p.columns.filter((c) => !c.locked && !body.includes(`%${c.token}%`));
+          // ★ 2026-10-20 고른 칼럼 중 지금 본문에 없는 것(만들 때 넣지 못했거나 고치다 지운 것 · 지금 글로 바로 계산)
+          const missingVars = t === 'direct' ? [] : missingVarsIn(body, run.vars);
           return (
             <div key={t} className={`rounded-2xl bg-white p-4 shadow-[0_1px_2px_rgba(15,23,42,0.06),0_12px_32px_-16px_rgba(15,23,42,0.25)] space-y-2.5 ${picked ? 'border-2 border-violet-500' : 'border border-slate-200'}`}>
               <div className="flex items-center justify-between gap-2">
@@ -195,6 +197,11 @@ export default function LineResultCards(p: LineResultCardsProps) {
                 <button type="button" onClick={() => p.onEdit(t)} className="w-full h-11 rounded-xl border border-dashed border-slate-300 text-[13px] text-slate-500 hover:border-indigo-400 hover:text-indigo-700">
                   직접 쓰기 · 변수 · 특수문자 넣기
                 </button>
+              )}
+              {missingVars.length > 0 && (
+                <p className="rounded-lg bg-amber-50 border border-amber-200 px-2.5 py-1.5 text-[12px] text-amber-900">
+                  이 문안에 안 들어간 고른 칼럼 · {missingVars.map((v) => `%${v}%`).join(' · ')}. 칼럼 더 넣기나 직접 고치기로 넣을 수 있어요
+                </p>
               )}
               <div className="flex flex-wrap gap-1.5 text-[12px]">
                 {t !== 'direct' && unusedCols.length > 0 && (

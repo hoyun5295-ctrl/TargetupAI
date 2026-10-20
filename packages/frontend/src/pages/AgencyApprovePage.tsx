@@ -13,8 +13,10 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { AlertTriangle, CalendarClock, Check, Loader2, RotateCcw, Send, SpellCheck2, X } from 'lucide-react';
 import {
-  agencyCallbackLabel, formatWhen, toLocalInput, STATUS_LABEL, STATUS_TONE, type AgencySendStatus,
+  agencyCallbackLabel, formatWhen, linkApprovedCard, lockLinkActions, sendChangeLockStartsAt, toLocalInput, STATUS_LABEL, STATUS_TONE,
+  type AgencyLinkActions, type AgencySendStatus,
 } from '../components/agency/agency-send-api';
+import { useClockTick } from '../hooks/useClockTick';
 import { CUI_BTN_PRIMARY, CUI_PILL_BASE, CUI_PILL_TONE } from '../utils/console-ui';
 import { buildAdSubjectFront } from '../utils/formatDate';
 import { useApproveToken } from '../hooks/useApproveToken';
@@ -23,11 +25,6 @@ import SenderAuthModal from '../components/SenderAuthModal';
 import LinkConfirmSheet from '../components/link/LinkConfirmSheet';
 import { verifyAgencyLinkSenderAuth } from '../components/agency/agency-send-api';
 
-interface ActionState { ok: boolean; reason: string | null }
-interface LinkActions {
-  approve: ActionState; cancel: ActionState; reschedule: ActionState; resume: ActionState; spellFix: ActionState; editText: ActionState;
-  approveBy: string | null;
-}
 interface SpellIssueView { id: string; before: string; after: string; kind: 'typo' | 'spacing'; reason: string; blocked?: 'sms_bytes' }
 
 interface ApprovalView {
@@ -49,8 +46,8 @@ interface ApprovalView {
   approvedAt: string | null;
   /** ★2026-09-25 맞춤법 확인 목록(문안 버전에 묶여 서버가 준다) */
   spellIssues?: SpellIssueView[] | null;
-  /** ★2026-10-18 이 링크로 할 수 있는 조작(서버 판정 한 벌) */
-  actions?: LinkActions;
+  /** ★2026-10-18 이 링크로 할 수 있는 조작(서버 판정 한 벌) · 화면은 lockLinkActions 로 지금 시각 잠금만 덧씌운다 */
+  actions?: AgencyLinkActions;
 }
 
 type Sheet = 'approve' | 'cancel' | 'reschedule' | 'resume' | 'spell' | null;
@@ -115,6 +112,8 @@ export default function AgencyApprovePage() {
   const [when, setWhen] = useState('');
   // ★2026-10-16 발신 인증 — 확인은 이 화면의 토큰으로(로그인 없음)
   const senderAuth = useSenderAuth({ verifyRequest: (challengeId, code) => verifyAgencyLinkSenderAuth(token, challengeId, code) });
+  // ★ 2026-10-20 열어 둔 화면이 보낼 시각 15분 전을 넘는 그 순간 버튼을 다시 판정한다(서수란 접수 cmvgfv8r51 · 훅 = 조건부 return 앞)
+  const nowMs = useClockTick(undefined, 'request' in state ? sendChangeLockStartsAt(state.request.requestedAt) : null);
 
   // ⛔ 토큰은 API에 **헤더로만** 보낸다 — URL에 실으면 서버 요청 로그에 승인권이 평문으로 남는다.
   const tokenHeader = { 'X-Agency-Approve-Token': token };
@@ -214,8 +213,10 @@ export default function AgencyApprovePage() {
   }
 
   const r = state.request;
-  const a = r.actions;
+  const a = lockLinkActions(r.actions, r.requestedAt, nowMs);
   const doneByStatus = r.status === 'approved' || r.status === 'final_testing' || r.status === 'queued';
+  // ★ 2026-10-20 승인된 건의 카드 = 상태대로(막 승인 · 승인과 함께 예약됨 · 15분 잠금으로 못 바꿈)
+  const card = linkApprovedCard({ justApproved: state.kind === 'done', status: r.status, when: formatWhen(r.requestedAt), cancel: a?.cancel });
   const fixable = (r.spellIssues || []).filter((i) => !i.blocked);
   const ready = state.kind === 'ready';
 
@@ -229,13 +230,6 @@ export default function AgencyApprovePage() {
   return (
     <>
       <Shell>
-        {ready && state.notice && (
-          <div className="mb-4 flex gap-2.5 p-3.5 rounded-lg border border-amber-200 bg-amber-50" role="status">
-            <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0 mt-px" strokeWidth={2} />
-            <p className="text-[13px] text-amber-900 leading-relaxed">{state.notice}</p>
-          </div>
-        )}
-
         <div className="rounded-2xl border border-neutral-200 bg-white overflow-hidden">
           <div className="px-5 py-4 border-b border-neutral-100 flex items-center justify-between gap-3">
             <p className="text-[14px] font-bold tracking-[-0.01em] truncate">{r.label}</p>
@@ -296,14 +290,21 @@ export default function AgencyApprovePage() {
           </div>
         </div>
 
-        <div className="mt-5 space-y-2.5">
+        <div className="mt-5 space-y-2.5" data-link="actions">
+          {/* ★ 2026-10-20 조작 결과 안내 = 누른 자리(버튼 칸) · 옛: 화면 맨 위 띠라 아래에서 누른 사람에게 안 보였다(서수란 접수 cmvgfv8r51) */}
+          {ready && state.notice && (
+            <div className="flex gap-2.5 p-3.5 rounded-lg border border-amber-200 bg-amber-50" role="status">
+              <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0 mt-px" strokeWidth={2} />
+              <p className="text-[13px] text-amber-900 leading-relaxed">{state.notice}</p>
+            </div>
+          )}
           {state.kind === 'done' || (doneByStatus && ready && !a?.cancel.ok) ? (
-            <ResultCard tone="ok" title="승인되었습니다" body="발송 2시간 전에 자동으로 예약을 잡고, 정해진 시각에 나갑니다. 이 창은 닫으셔도 됩니다." />
+            <ResultCard tone="ok" title={card?.title || '승인되었습니다'} body={card?.body || '정해진 시각에 나갑니다. 이 창은 닫으셔도 됩니다.'} />
           ) : state.kind === 'cancelled' ? (
             <ResultCard tone="muted" title={state.pending ? '취소를 처리하고 있습니다' : '발송을 취소했습니다'} body={state.pending ? '예약을 지우는 중이에요. 끝나면 담당자 모두에게 결과를 문자로 알려 드립니다.' : '담당자 모두에게 취소 문자를 보냈습니다. 다시 보내려면 새로 접수해 주세요.'} />
           ) : (
             <>
-              {doneByStatus && <ResultCard tone="ok" title="승인되었습니다" body="정해진 시각에 나갑니다. 보내지 않으려면 아래에서 취소할 수 있어요." />}
+              {doneByStatus && card && <ResultCard tone="ok" title={card.title} body={card.body} />}
               {picked.length > 0 ? (
                 <button type="button" onClick={() => setSheet('spell')} disabled={working} className={`${CUI_BTN_PRIMARY} w-full h-12 text-[15px] justify-center`}>
                   <SpellCheck2 className="w-[17px] h-[17px]" />고른 {picked.length}곳 고치고 다시 검사

@@ -48,7 +48,7 @@ function useBoxHeight(min: number, max: number) {
 }
 
 export default function PreviewPair({
-  kind, html, loading, error, selectedId, onTap, phoneTop, inboxHead, compact = false, blockTools, emptyText,
+  kind, html, loading, error, selectedId, onTap, phoneTop, inboxHead, compact = false, blockTools, emptyText, pageId, pageRev, pagePick, onPage,
 }: {
   kind: PreviewKind;
   html: string;
@@ -65,6 +65,13 @@ export default function PreviewPair({
   blockTools?: BlockTools | null;
   /** 그릴 것이 아직 없을 때(새 빈 DM 등) 휴대폰 안 안내 */
   emptyText?: string | null;
+  /** ★ 2026-10-20 지금 보는 장(편집기 장 id) · 미리보기에서 넘긴 장(뷰어 장 id) — 휴대폰 미리보기에만(PreviewFrame) */
+  pageId?: string | null;
+  /** 사람이 직접 고른 동작 번호(같은 장을 다시 골라도 새 선택 · 효과를 다시 돌리는 신호) */
+  pageRev?: number;
+  /** 같은 번호의 공유 값(고른 순간 올라간다 · 미리보기 틀이 보고 판정에 바로 읽는다) */
+  pagePick?: { readonly current: number };
+  onPage?: (viewerPageId: string) => boolean;
 }) {
   const [bigOpen, setBigOpen] = useState(false);
   const [rect, setRect] = useState<{ id: string | null; top: number; height: number } | null>(null);
@@ -102,7 +109,7 @@ export default function PreviewPair({
                 </div>
               )}
               {html ? (
-                <PreviewFrame html={html} viewport={PHONE_VIEWPORT} displayWidth={phoneW} displayHeight={screenH - headH} tap={!!onTap} selectedId={selectedId} onTap={onTap} onRect={setRect} title="휴대폰 미리보기" />
+                <PreviewFrame html={html} viewport={PHONE_VIEWPORT} displayWidth={phoneW} displayHeight={screenH - headH} tap={!!onTap} selectedId={selectedId} onTap={onTap} onRect={setRect} title="휴대폰 미리보기" pageId={pageId} pageRev={pageRev} pagePick={pagePick} onPage={onPage} />
               ) : (
                 <div className="flex items-center justify-center text-slate-500 text-[12px]" style={{ height: screenH - headH }} data-empty>
                   {error ? <span className="inline-flex items-center gap-1.5 text-rose-500"><AlertCircle className="w-4 h-4" />{error}</span> : emptyText ? <span className="px-6 text-center leading-relaxed">{emptyText}</span> : <Loader2 className="w-5 h-5 animate-spin" />}

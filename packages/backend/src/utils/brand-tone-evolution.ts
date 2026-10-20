@@ -13,8 +13,9 @@ import { diffGuideline, GuidelineSnapshot } from './ai-memory-text';
 /** 회사의 현재 brand_guideline(memory_key='main')을 GuidelineSnapshot으로 반환. 없으면 null. */
 export async function fetchBrandGuideline(companyId: string): Promise<GuidelineSnapshot | null> {
   const r = await query(
+    // ★ 2026-10-20 안부/알림 가이드라인(memory_key='notice') 행이 생겨 키를 지정한다(톤 진화 기록 = main 만)
     `SELECT memory_value FROM ai_company_memory
-      WHERE company_id = $1::uuid AND memory_type = 'brand_guideline'
+      WHERE company_id = $1::uuid AND memory_type = 'brand_guideline' AND memory_key = 'main'
       LIMIT 1`,
     [companyId],
   );

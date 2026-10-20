@@ -1293,6 +1293,15 @@ export default function Dashboard() {
     return true;
   };
 
+  /**
+   * ★ 2026-10-20 직접발송 「타겟추출」 칸이 잠겨 있을 때 — 잠김 판정은 고객 DB 조회와 같은 축(isCustomerDbLocked = customer_db_enabled · 구독 잠금).
+   *   구독 잠금 = 잠금 창 · 요금제 = 기능 안내(스타터부터). 잠기지 않았으면 직접발송 창이 제 추출 창을 연다.
+   */
+  const showTargetExtractLock = () => {
+    if (isSubscriptionLocked) { setShowSubscriptionLock(true); return; }
+    openPlanFeature('target-extract');
+  };
+
   // ★ 2026-06-25: ?upload=1 진입(게이트 "올리러 가기" 동선) 시 고객 DB 업로드 모달 자동 오픈 + 파라미터 제거(새로고침 재오픈 방지)
   // ★ 2026-07-10: ?results=1 진입(AI Operator "발송 결과 보기" 동선) 시 발송결과 자동 오픈 — 헤더 메뉴 클릭과 동일 동작
   useEffect(() => {
@@ -3206,6 +3215,9 @@ const campaignData = {
             setBrandEntry('direct');
             setShowBrandSend(true);
           }}
+          targetExtractLocked={isCustomerDbLocked}
+          onTargetExtractLocked={showTargetExtractLock}
+          hideAi={hideAi}
         />
       )}
 

@@ -8,7 +8,7 @@
  *
  * ⛔ className prop 없음.
  */
-import { useRef, type ReactNode } from 'react';
+import { useEffect, useRef, type ReactNode } from 'react';
 import { Loader2, type LucideIcon } from 'lucide-react';
 import type { ZoneAction } from './ZoneHeader';
 
@@ -36,6 +36,8 @@ export interface ZoneLine {
   /** 입력이 비어 있어도 버튼을 누를 수 있는가(예: 만들기 = 판의 재료로 진행) */
   allowEmpty?: boolean;
   tone?: 'amber' | 'indigo';
+  /** ★ 2026-10-20 값이 바뀌면 입력칸에 커서(만들기 [한 줄로 자동 생성]으로 들어온 화면 · 0 = 안 함) */
+  focusSignal?: number;
 }
 
 export interface ZoneCommandProps {
@@ -76,6 +78,10 @@ const FACT_TONE = { emerald: 'text-emerald-700', amber: 'text-amber-700', rose: 
 
 export default function ZoneCommand({ line, lead, facts = [], note, actions = [] as unknown as [ZoneAction], primary }: ZoneCommandProps) {
   const inputRef = useRef<HTMLInputElement>(null);
+  const focusSignal = line?.focusSignal || 0;
+  useEffect(() => {
+    if (focusSignal > 0) inputRef.current?.focus();
+  }, [focusSignal]);
   const acts = (actions || []) as ZoneAction[];
   return (
     <div className="bg-white rounded-2xl shadow-[0_2px_4px_rgba(15,23,42,0.06),0_18px_36px_-16px_rgba(15,23,42,0.30)]" data-zone="command">

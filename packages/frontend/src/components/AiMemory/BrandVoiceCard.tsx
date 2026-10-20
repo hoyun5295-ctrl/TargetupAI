@@ -29,7 +29,13 @@ interface RepresentativeMessage {
   subject: string;
   text: string;
   imageUrl: string | null;
+  /** ★ 2026-10-20 문자 성격(마케팅 · 안부/알림) · null = 아직 판정 전(가이드라인 추출 때 AI 가 정한다) */
+  kind?: 'marketing' | 'notice' | null;
+  /** admin = 사람이 고름(추출이 덮지 않는다) · ai = 추출이 판정 */
+  kindSource?: 'admin' | 'ai' | null;
 }
+
+const KIND_LABEL: Record<'marketing' | 'notice', string> = { marketing: '마케팅', notice: '안부 · 알림' };
 
 interface BrandGuideline {
   tone_signature: string;
@@ -65,6 +71,8 @@ interface BrandVoiceResponse {
   success: boolean;
   messages: RepresentativeMessage[];
   guideline: BrandGuideline | null;
+  /** ★ 2026-10-20 안부 · 알림 문안으로 따로 뽑은 가이드라인(있을 때만) */
+  notice_guideline?: BrandGuideline | null;
   guideline_updated_at: string | null;
   registered: boolean;
   guideline_extracted: boolean;
@@ -91,6 +99,7 @@ export default function BrandVoiceCard({ apiBase, token, onToast, onConfirm }: B
   // 대표 문안 편집 = 휴대폰 모달. index null = 신규, 숫자 = 저장본 수정.
   const [editor, setEditor] = useState<{ index: number | null; draft: RepresentativeMessage } | null>(null);
   const [guideline, setGuideline] = useState<BrandGuideline | null>(null);
+  const [noticeGuideline, setNoticeGuideline] = useState<BrandGuideline | null>(null);
   const [guidelineUpdatedAt, setGuidelineUpdatedAt] = useState<string | null>(null);
   const [registered, setRegistered] = useState(false);
   const [expanded, setExpanded] = useState(false);
@@ -119,6 +128,7 @@ export default function BrandVoiceCard({ apiBase, token, onToast, onConfirm }: B
           setMessages([emptyMessage(1)]);
         }
         setGuideline(data.guideline);
+        setNoticeGuideline(data.notice_guideline ?? null);
         setGuidelineUpdatedAt(data.guideline_updated_at);
         setRegistered(data.registered);
         if (data.registered || data.guideline_extracted) {
@@ -220,8 +230,12 @@ export default function BrandVoiceCard({ apiBase, token, onToast, onConfirm }: B
       const data = await res.json();
       if (!data.success) throw new Error(data.error || '가이드라인 추출 실패');
       setGuideline(data.guideline);
+      setNoticeGuideline(data.notice_guideline ?? null);
       setGuidelineUpdatedAt(new Date().toISOString());
-      onToast('회사 brand voice 가이드라인 추출 완료. 다음 발송부터 AI 문안에 자동 적용됩니다.', 'success');
+      onToast(data.notice_guideline
+        ? '마케팅 · 안부 문자 말투를 따로 학습했어요. 다음 발송부터 문자 성격에 맞게 자동 적용됩니다.'
+        : '회사 brand voice 가이드라인 추출 완료. 다음 발송부터 AI 문안에 자동 적용됩니다.', 'success');
+      await loadBrandVoice();   // ★ 2026-10-20 문안마다 판정된 성격을 다시 읽는다
     } catch (err: any) {
       onToast(err.message || '가이드라인 추출 실패', 'error');
     } finally {
@@ -344,7 +358,7 @@ export default function BrandVoiceCard({ apiBase, token, onToast, onConfirm }: B
             </div>
             <p className="text-xs text-violet-800 mt-0.5">
               {guideline
-                ? `${messages.length}건 학습 완료. AI 문안이 회사 톤으로 자동 적용 중`
+                ? `${messages.length}건 학습 완료. AI 문안이 회사 톤으로 자동 적용 중${noticeGuideline ? ' · 마케팅 · 안부 말투를 따로 학습함(직접 정정은 마케팅 말투 · 안부 말투는 안부 문안을 고친 뒤 재추출)' : ''}`
                 : registered
                   ? `${messages.length}건 저장 완료. 가이드라인 추출을 눌러야 회사 톤이 적용됩니다`
                   : 'LMS/MMS 대표 문안 1~10건 등록 시 = 다음 발송부터 회사 아이덴티티 적용'}
@@ -411,6 +425,9 @@ export default function BrandVoiceCard({ apiBase, token, onToast, onConfirm }: B
                     <div className="flex items-center gap-1.5 mb-1">
                       <span className="text-[10px] font-mono text-violet-700">#{m.priority}</span>
                       <span className="text-[10px] px-1.5 py-0.5 rounded bg-violet-100 text-violet-800 border border-violet-200">{m.channel}</span>
+                      <span className={`text-[10px] px-1.5 py-0.5 rounded border ${m.kind === 'notice' ? 'bg-emerald-50 text-emerald-800 border-emerald-200' : m.kind === 'marketing' ? 'bg-amber-50 text-amber-800 border-amber-200' : 'bg-white text-slate-600 border-slate-200'}`}>
+                        {m.kind ? KIND_LABEL[m.kind] : '성격 판정 전'}
+                      </span>
                       {m.imageUrl && <Image className="w-3 h-3 text-violet-700" />}
                     </div>
                     <div className="text-xs text-slate-700 leading-snug line-clamp-2">{m.text || '(본문 없음)'}</div>
@@ -615,6 +632,24 @@ export default function BrandVoiceCard({ apiBase, token, onToast, onConfirm }: B
                   <option value="LMS">LMS</option>
                   <option value="MMS">MMS (이미지 첨부)</option>
                 </select>
+              </div>
+              <div>
+                <label className="block text-[10px] text-slate-500 mb-1 uppercase tracking-wide">문자 성격</label>
+                <div className="grid grid-cols-3 gap-1.5 text-xs">
+                  {([['auto', '자동 판정'], ['marketing', '마케팅'], ['notice', '안부 · 알림']] as const).map(([k, label]) => {
+                    const on = k === 'auto' ? editor.draft.kindSource !== 'admin' : editor.draft.kindSource === 'admin' && editor.draft.kind === k;
+                    return (
+                      <button key={k} type="button" aria-pressed={on}
+                        onClick={() => updateDraft(k === 'auto' ? { kind: null, kindSource: null } : { kind: k, kindSource: 'admin' })}
+                        className={`h-8 rounded-lg border font-semibold ${on ? 'border-violet-500 bg-violet-50 text-violet-900' : 'border-slate-200 bg-white text-slate-600 hover:border-slate-300'}`}>
+                        {label}
+                      </button>
+                    );
+                  })}
+                </div>
+                <p className="text-[10.5px] text-slate-500 mt-1">
+                  자동 판정 = 가이드라인 추출 때 AI 가 마케팅(광고)인지 안부 · 알림인지 정해요{editor.draft.kindSource !== 'admin' && editor.draft.kind ? ` · 지금 판정: ${KIND_LABEL[editor.draft.kind]}` : ''}. 성격별로 말투를 따로 배워 AI 한줄로가 문자 성격에 맞게 써요.
+                </p>
               </div>
               <div>
                 <label className="block text-[10px] text-slate-500 mb-1 uppercase tracking-wide">제목 (옵션)</label>

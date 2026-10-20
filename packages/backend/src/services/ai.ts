@@ -606,7 +606,11 @@ function buildVarCatalogPrompt(
   }
 
   text += `\n⚠️ 위 목록에 없는 변수를 절대 만들지 마세요!\n`;
-  text += `금지 예시: %매장번호%, %매장명%, %고객명%, %적립금%, %담당매장%, %회원번호% 등\n`;
+  // ★ 2026-10-20 금지 예시는 「이 회사에 없는」 이름만 — 표준 칼럼 이름이 고객명 · 매장명으로 바뀐 뒤 이 줄이
+  //   실제 변수를 금지라고 불러, 사람이 고른 칼럼(%고객명%)을 넣으라는 말과 함께 갔다(설계서 docs/2026-10-18-ai-line-design.md §17-2).
+  const realVarNames = new Set([...Object.keys(catalog), ...availableVars]);
+  const forbiddenExamples = ['매장번호', '매장명', '고객명', '적립금', '담당매장', '회원번호'].filter((v) => !realVarNames.has(v));
+  if (forbiddenExamples.length > 0) text += `금지 예시: ${forbiddenExamples.map((v) => `%${v}%`).join(', ')} 등\n`;
   text += `존재하지 않는 변수는 고객에게 "%변수명%" 텍스트가 그대로 발송됩니다.\n`;
   text += `반드시 위 표의 변수명만 정확히 %변수명% 형태로 사용하세요.\n`;
   text += `변수를 사용할지 말지는 문맥에 맞게 자연스럽게 판단하세요.`;
@@ -1181,6 +1185,11 @@ export async function generateMessages(
      *   회사 프로필 자동 개인화 · 프로필 안내문은 쓰지 않는다(사람이 고른 것이 진실). 안 주면 지금과 같다.
      */
     exactVars?: string[];
+    /**
+     * ★ 2026-10-20 AI 한줄로(설계서 §17) — 문자 성격(마케팅 · 안부/알림). 주면 그 성격의 브랜드 보이스 가이드라인 · 대표 문안만 붙인다.
+     *   안 주면 지금과 같다(마케팅 가이드라인 + 대표 문안 전체).
+     */
+    voiceKind?: 'marketing' | 'notice';
     // ★ D170+ (2026-05-19) Harold 명시 — AI Operator 메시지 = Opus 4.7로 격상:
     //   기본 호출(/generate-message)은 model 미박힘 → default sonnet. AI Operator는 'opus' 전달.
     model?: 'sonnet' | 'opus';
@@ -1335,7 +1344,10 @@ ${usePersonalization ? `- 사용할 개인화 변수: ${personalizationTags}
 
   // ★ D225+ Brand Voice Learning — 회사별 가이드라인 자동 주입 (회사 등록 미존재 시 옛 BRAND_SYSTEM_PROMPT 그대로)
   // ★ 2026-07-02 brandLinks: true — 문자 생성 경로 한정 브랜드 링크 토큰 규칙 포함 (여정/이메일/DM 기본 OFF)
-  const baseEnriched = await buildSystemPromptWithBrandVoice(extraContext?.companyId, applyCopyCVariant(BRAND_SYSTEM_PROMPT, extraContext?.cVariant), { brandLinks: true });
+  const baseEnriched = await buildSystemPromptWithBrandVoice(extraContext?.companyId, applyCopyCVariant(BRAND_SYSTEM_PROMPT, extraContext?.cVariant), {
+    brandLinks: true,
+    ...(extraContext?.voiceKind ? { kind: extraContext.voiceKind } : {}),
+  });
   // 문안 두뇌: 캠페인 문자(SMS/LMS/MMS) 성과 RAG + 시의성 + 브랜드 키트 주입 (companyId 있을 때만)
   let enrichedSystemPrompt = baseEnriched;
   let bannedWords: string[] = [];
@@ -1926,6 +1938,10 @@ export async function recommendTarget(
   filter_quotes?: Record<string, string>;
   recommended_style?: string | null;
   style_reason?: string | null;
+  /** ★ 2026-10-20 lineIntake 일 때만 — 문안에 필요한데 목표에 없는 사실(검증 전 원본 · 화면에 싣기 전 utils/ai-line sanitizeAiAsks) */
+  copy_questions?: unknown[];
+  /** ★ 2026-10-20 lineIntake 일 때만 — 이 문안에 넣으면 좋은 개인화 변수(사용 가능 목록 안 것만 · 최대 2) */
+  copy_vars?: string[];
 }> {
   if (!process.env.ANTHROPIC_API_KEY) {
     return {
@@ -2083,16 +2099,24 @@ ${varCatalogPrompt}
 ⚠️ 커스텀 필드에 날짜 데이터(생년월일, 가입일 등)가 저장된 경우: 반드시 date_gte/date_lte 사용! gte/lte는 숫자 전용입니다.
 ⚠️ 나이 기반 필터링 시: birth_date 직접 컬럼의 birth_month 연산자 또는 age 직접 컬럼을 사용하세요. 커스텀 필드의 생년월일로 나이를 계산하지 마세요.${options?.lineIntake ? `
 
-## 추가 출력 (이 요청만 · 위 JSON 에 세 키를 더한다)
+## 추가 출력 (이 요청만 · 위 JSON 에 다섯 키를 더한다)
 - "filter_quotes": { "필드명": "그 조건의 근거가 된 마케팅 목표 원문 조각" }: filters 의 키마다 하나. 목표 문장에 **글자 그대로 있는 조각**만 적고, 목표에 없는데 판단으로 더한 조건이면 빈 문자열 "".
 - "recommended_style": "감성형" 또는 "혜택강조형" 또는 "MZ 감성형": 이 목표에 가장 맞는 문안 종류 하나.
-- "style_reason": 그 종류를 고른 이유 한 줄(25자 안쪽 · 마침표 없이).` : ''}`;
+- "style_reason": 그 종류를 고른 이유 한 줄(25자 안쪽 · 마침표 없이).
+- "copy_questions": [ { "kind": "benefit 또는 period 또는 text", "question": "질문", "why": "왜 묻는지 한 줄", "options": ["고르기"] } ]:
+  이 목표로 고객에게 보낼 문자 문안을 쓰려면 꼭 알아야 하는데 **목표 문장에 없는 사실**을 이 목표에 맞게 직접 판단해 묻는다. 정해진 항목을 채우는 것이 아니다.
+  · 목표 문장에 이미 있는 사실은 묻지 않는다. 받는 사람 · 채널 · 문안 개수 · 문안 종류는 묻지 않는다(따로 묻는다).
+  · kind: benefit = 혜택(할인 · 쿠폰 · 증정 등)이 무엇인지 목표에 없을 때 · period = 혜택이나 행사가 언제까지인지 목표에 없을 때(「최근 30일 미구매」 · 「24시간 이탈」 같은 받는 사람 조건의 기간은 행사 기간이 아니다) · text = 그 밖(어떤 상품인지 · 어디서 쓰는지 · 사용 조건 · 링크 등).
+  · options: text 질문의 답이 몇 가지로 나뉠 때만 짧은 고르기 2~4개. 혜택 값(% · 원 · 무료 · 증정 · 적립)이나 숫자는 절대 넣지 않는다(혜택은 사람이 적는다). 그 밖은 빈 배열.
+  · question 은 고객사 마케터에게 묻는 존댓말 한 문장, why 는 25자 안쪽. 필요한 만큼만 묻고, 다 갖춘 목표면 빈 배열 [].
+- "copy_vars": ["변수명"]: 이 문안에 넣으면 좋은 개인화 변수 0~2개(위 「사용 가능한 개인화 변수」 목록에 있는 이름만 · %없이). 이 목표에 어울리지 않으면 [].` : ''}`;
 
   try {
     const text = await callAIWithFallback({
       system: '당신은 CRM 마케팅 타겟팅 전문가입니다. 주어진 목표에 최적화된 고객 세그먼트와 최적의 발송 채널을 추천해주세요. recommended_time은 반드시 현재 시각 이후의 미래 시간이어야 합니다. JSON 형식으로만 응답하세요.',
       userMessage,
-      maxTokens: 1024,
+      // ★ 2026-10-20 한 줄 접수는 질문 · 추천 변수를 더 받는다(잘린 JSON = 파싱 실패를 막는 여유 · 옵션 없는 호출은 그대로)
+      maxTokens: options?.lineIntake ? 1800 : 1024,
       temperature: 0.3,
       model: options?.model, // ★ D170+ (Harold 명시): AI Operator 호출 시 'opus' 전달, 기본 호출(/recommend-target)은 default sonnet
       companyId,
@@ -2139,6 +2163,11 @@ ${varCatalogPrompt}
         : {},
       recommended_style: typeof result.recommended_style === 'string' ? result.recommended_style.slice(0, 20) : null,
       style_reason: typeof result.style_reason === 'string' ? result.style_reason.slice(0, 60) : null,
+      // ★ 2026-10-20 질문은 원본 그대로 넘기고 화면에 싣기 전 CT(sanitizeAiAsks)가 거른다 · 추천 변수는 이 회사 목록 안 것만
+      copy_questions: Array.isArray(result.copy_questions) ? result.copy_questions.slice(0, 12) : [],
+      copy_vars: Array.isArray(result.copy_vars)
+        ? [...new Set((result.copy_vars as unknown[]).map((v) => String(v || '').replace(/%/g, '').trim()).filter((v) => availableVars.includes(v)))].slice(0, 2)
+        : [],
     } : {};
 
     // ★ D142+ B1(0429 PDF B2): [브랜드] placeholder → [실제브랜드명] 후처리

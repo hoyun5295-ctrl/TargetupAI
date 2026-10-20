@@ -17,6 +17,7 @@ import { callAIWithFallback } from '../services/ai';
 import { buildMemoryPromptContext, listMemories, MemoryType, LEARNING_MEMORY_TYPES } from '../utils/company-memory';
 import { fetchBrandGuideline, recordToneEvolution } from '../utils/brand-tone-evolution';
 import { scanLinkHabit, type LinkHabit } from '../utils/brand-link-core';
+import { splitBrandVoiceExtraction, planBrandVoiceRows, type BrandVoiceKind } from '../utils/brand-voice-prompt';
 import { extractJsonFromAiText, plainTextFromAi } from '../utils/ai-json';
 
 const router = Router();
@@ -320,6 +321,10 @@ interface RepresentativeMessageValue {
   image_url?: string | null;
   manual_priority: number;
   created_by_admin: boolean;
+  /** ★ 2026-10-20 문자 성격(마케팅 · 안부/알림) · 없으면 가이드라인 추출 때 AI 가 판정 · 설계서 docs/2026-10-18-ai-line-design.md §17 */
+  kind?: BrandVoiceKind;
+  /** admin = 사람이 정함(추출이 덮지 않는다) · ai = 추출이 판정 */
+  kind_source?: 'admin' | 'ai';
 }
 
 interface BrandGuidelineValue {
@@ -350,6 +355,8 @@ interface BrandGuidelineValue {
   symbol_style?: string;
   length_range?: { min_chars: number; max_chars: number };
   link_habit?: LinkHabit;
+  /** ★ 2026-10-20 이 가이드라인을 뽑은 문안의 성격(main 행 · 없으면 마케팅) */
+  voice_kind?: BrandVoiceKind;
 }
 
 /** 입력/AI 응답에서 형태 명세 필드만 안전 정제 (extract·update 공용) */
@@ -400,11 +407,11 @@ router.get('/brand-voice', async (req: Request, res: Response) => {
       [companyId],
     );
 
+    // ★ 2026-10-20 가이드라인 행 = main(마케팅) · notice(안부/알림) — 키를 지정해 읽는다
     const guidelineRes = await query(
-      `SELECT memory_value, updated_at
+      `SELECT memory_key, memory_value, updated_at
        FROM ai_company_memory
-       WHERE company_id = $1::uuid AND memory_type = 'brand_guideline'
-       LIMIT 1`,
+       WHERE company_id = $1::uuid AND memory_type = 'brand_guideline' AND memory_key IN ('main', 'notice')`,
       [companyId],
     );
 
@@ -422,6 +429,8 @@ router.get('/brand-voice', async (req: Request, res: Response) => {
         subject: value?.message_subject || '',
         text: value?.message_text || '',
         imageUrl: value?.image_url || null,
+        kind: value?.kind === 'notice' || value?.kind === 'marketing' ? value.kind : null,
+        kindSource: value?.kind_source === 'admin' ? 'admin' : value?.kind ? 'ai' : null,
         createdAt: row.created_at,
         updatedAt: row.updated_at,
       };
@@ -429,13 +438,20 @@ router.get('/brand-voice', async (req: Request, res: Response) => {
 
     let guideline: BrandGuidelineValue | null = null;
     let guidelineUpdatedAt: string | null = null;
-    if (guidelineRes.rows[0]) {
+    let noticeGuideline: BrandGuidelineValue | null = null;
+    for (const row of guidelineRes.rows) {
+      let parsed: BrandGuidelineValue | null = null;
       try {
-        const raw = guidelineRes.rows[0].memory_value;
-        guideline = typeof raw === 'string' ? JSON.parse(raw) : raw;
-        guidelineUpdatedAt = guidelineRes.rows[0].updated_at;
+        const raw = row.memory_value;
+        parsed = typeof raw === 'string' ? JSON.parse(raw) : raw;
       } catch {
-        guideline = null;
+        parsed = null;
+      }
+      if (row.memory_key === 'notice') {
+        noticeGuideline = parsed;
+      } else {
+        guideline = parsed;
+        guidelineUpdatedAt = parsed ? row.updated_at : null;
       }
     }
 
@@ -443,6 +459,7 @@ router.get('/brand-voice', async (req: Request, res: Response) => {
       success: true,
       messages,
       guideline,
+      notice_guideline: noticeGuideline,
       guideline_updated_at: guidelineUpdatedAt,
       registered: messages.length >= 1,
       guideline_extracted: guideline !== null,
@@ -480,6 +497,9 @@ router.post('/brand-voice/save-messages', async (req: Request, res: Response) =>
       const subject = String(m.subject || '').trim();
       const imageUrl = m.imageUrl ? String(m.imageUrl).trim() : null;
       const priority = Number(m.priority) || i + 1;
+      // ★ 2026-10-20 문자 성격 — 화면이 받은 값을 돌려보낸다(사람이 고른 것 = admin · AI 판정 = ai · 없으면 다음 추출에서 판정)
+      const kind: BrandVoiceKind | undefined = m.kind === 'notice' || m.kind === 'marketing' ? m.kind : undefined;
+      const kindSource: 'admin' | 'ai' | undefined = kind ? (m.kindSource === 'admin' ? 'admin' : 'ai') : undefined;
 
       if (text.length < 10) {
         return res.status(400).json({
@@ -503,6 +523,7 @@ router.post('/brand-voice/save-messages', async (req: Request, res: Response) =>
           image_url: imageUrl,
           manual_priority: priority,
           created_by_admin: true,
+          ...(kind ? { kind, kind_source: kindSource } : {}),
         },
       });
     }
@@ -565,7 +586,7 @@ router.post('/brand-voice/extract-guideline', async (req: Request, res: Response
     }
 
     const messagesRes = await query(
-      `SELECT memory_value FROM ai_company_memory
+      `SELECT id, memory_value FROM ai_company_memory
        WHERE company_id = $1::uuid AND memory_type = 'representative_message'
        ORDER BY memory_key ASC`,
       [companyId],
@@ -577,17 +598,18 @@ router.post('/brand-voice/extract-guideline', async (req: Request, res: Response
       });
     }
 
-    const parsedMessages: RepresentativeMessageValue[] = [];
+    const parsedRows: Array<{ id: string; value: RepresentativeMessageValue }> = [];
     for (const row of messagesRes.rows) {
       try {
         const value = typeof row.memory_value === 'string' ? JSON.parse(row.memory_value) : row.memory_value;
         if (value && typeof value.message_text === 'string') {
-          parsedMessages.push(value);
+          parsedRows.push({ id: String(row.id), value });
         }
       } catch {
         // 잘못된 JSON 영역 = skip
       }
     }
+    const parsedMessages: RepresentativeMessageValue[] = parsedRows.map((r) => r.value);
     if (parsedMessages.length < 1) {
       return res.status(400).json({
         success: false,
@@ -595,15 +617,28 @@ router.post('/brand-voice/extract-guideline', async (req: Request, res: Response
       });
     }
 
+    // ★ 2026-10-20 문자 성격(설계서 docs/2026-10-18-ai-line-design.md §17) — 사람이 정한 성격은 AI 가 덮지 않는다
+    const adminKinds: Array<BrandVoiceKind | null> = parsedMessages.map((m) =>
+      m.kind_source === 'admin' && (m.kind === 'marketing' || m.kind === 'notice') ? m.kind : null);
+    const KIND_KR: Record<BrandVoiceKind, string> = { marketing: '마케팅', notice: '안부 · 알림' };
+
     const messagesText = parsedMessages.map((m, i) =>
-      `### 문안 ${i + 1} (채널: ${m.channel}${m.message_subject ? `, 제목: ${m.message_subject}` : ''})\n${m.message_text}`,
+      `### 문안 ${i + 1} (채널: ${m.channel}${m.message_subject ? `, 제목: ${m.message_subject}` : ''}${adminKinds[i] ? `, 성격: ${KIND_KR[adminKinds[i]!]}(사람이 정함)` : ''})\n${m.message_text}`,
     ).join('\n\n');
 
-    const systemPrompt = `당신은 회사 마케팅 메시지를 분석하여 회사별 brand voice 가이드라인을 JSON으로 자동 추출하는 전문가입니다.
+    const systemPrompt = `당신은 회사 문자 메시지를 분석하여 회사별 brand voice 가이드라인을 JSON으로 자동 추출하는 전문가입니다.
 
 분석 대상 = 동일 회사의 대표 LMS/MMS 문안 ${parsedMessages.length}건. 본 문안 = 회사 brand voice 자체.
 
-## 추출 의무 14 항목 (JSON 응답 형식)
+## 1단계: 문안마다 성격 판정
+
+- marketing = 할인 · 쿠폰 · 이벤트 · 신상품 · 구매를 권하는 광고성 문자 ("(광고)" 표기가 있으면 marketing).
+- notice = 안부 · 감사 인사 · 생일 축하 · 배송 · 예약 · 소멸 안내처럼 구매를 권하지 않는 알림성 문자.
+- "성격: … (사람이 정함)" 이 붙은 문안은 그 성격 그대로 둔다.
+
+## 2단계: 성격별로 아래 14 항목을 따로 추출
+
+marketing 문안끼리, notice 문안끼리 따로 분석한다. 문안이 0건인 성격은 null.
 
 \`\`\`json
 {
@@ -629,7 +664,7 @@ router.post('/brand-voice/extract-guideline', async (req: Request, res: Response
 ## 분석 원칙
 
 1. tone_signature: 5 분류 중 1 선택. 메시지 톤이 친근/격조 어느 영역인지 정확 판단.
-2. avg_length_chars + avg_length_bytes: ${parsedMessages.length}건 본문 평균 길이 (한글 2바이트 기준).
+2. avg_length_chars + avg_length_bytes: 그 성격 문안 본문 평균 길이 (한글 2바이트 기준).
 3. frequent_expressions: 2건 이상 출현한 표현 3~5건 추출. 빈도 높은 영역 우선.
 4. ad_prefix_position: "(광고)" 위치가 본문 앞이면 front, 뒤면 back.
 5. greeting_pattern: "[브랜드명] OOO님께" 등 자주 활용한 인사말 1건. 없으면 빈 문자열.
@@ -637,7 +672,7 @@ router.post('/brand-voice/extract-guideline', async (req: Request, res: Response
 7. signature: 회사 슬로건 또는 영문 시그니처. 없으면 빈 문자열.
 8. reject_position: "무료수신거부 080..." 위치가 본문 앞이면 front, 뒤면 back.
 9. emoji_whitelist: 실제 활용된 이모지/특수문자 배열 (★ ♥ ▶ 등). 활용 없으면 빈 배열.
-10. hook_types: (광고) 표기 다음 첫 문장의 후크 유형을 빈도순 1~2건: "질문형" / "선언형" / "영문 슬로건" / "혜택 직접형" 중 선택.
+10. hook_types: 첫 문장의 후크 유형을 빈도순 1~2건: "질문형" / "선언형" / "영문 슬로건" / "혜택 직접형" 중 선택.
 11. body_structure: 문안들의 공통 구조를 등장 순서대로 3~7개 블록으로 (예: "(광고)+브랜드", "후크", "본문", "혜택/조건", "기간", "CTA", "수신거부"). 실제 문안에 있는 블록만.
 12. sentence_ending_style: 본문 종결어미가 해요체(~요) / 합쇼체(~습니다) / 혼합 중 무엇인지 + sentence_ending_examples에 대표 어미 2~3건.
 13. customer_address: 고객 호칭 (예: "고객님", "회원님", "실버 등급 고객님"). 없으면 빈 문자열.
@@ -645,7 +680,8 @@ router.post('/brand-voice/extract-guideline', async (req: Request, res: Response
 
 ## 응답 형식
 
-JSON 단 1건만 출력. 다른 설명/주석/마크다운 코드블록 없음. 응답 시작 = "{" / 응답 끝 = "}".`;
+JSON 단 1건만 출력. 다른 설명/주석/마크다운 코드블록 없음. 응답 시작 = "{" / 응답 끝 = "}".
+{ "kinds": ["marketing 또는 notice", ... (문안 순서대로 ${parsedMessages.length}개)], "marketing": {14 항목} 또는 null, "notice": {14 항목} 또는 null }`;
 
     const { callAIWithFallback } = await import('../services/ai');
     let rawResponse: string;
@@ -653,7 +689,8 @@ JSON 단 1건만 출력. 다른 설명/주석/마크다운 코드블록 없음. 
       rawResponse = await callAIWithFallback({
         system: systemPrompt,
         userMessage: messagesText,
-        maxTokens: 1500,
+        // ★ 2026-10-20 성격별 두 묶음까지 받는다(잘린 JSON 방지) · 호출은 한 번(차감 1 그대로)
+        maxTokens: 3000,
         temperature: 0.2,
         model: 'sonnet',
         companyId,
@@ -666,78 +703,138 @@ JSON 단 1건만 출력. 다른 설명/주석/마크다운 코드블록 없음. 
       throw aiErr;
     }
 
-    let guideline: BrandGuidelineValue | null = null;
+    // 성격별 가이드라인(마케팅 · 안부) — 코드 결정 항목(길이 범위 · 링크 습관)은 그 성격 문안에서 직접 계산
+    const byKindGuideline: Partial<Record<BrandVoiceKind, BrandGuidelineValue>> = {};
+    // ★ Codex R2 — 처음엔 모두 「모름」(기본값으로 메우지 않는다 · 모르는 문안이 하나라도 있으면 저장 계획이 거절)
+    let kinds: Array<BrandVoiceKind | null> = parsedMessages.map(() => null);
     try {
       // ★ 2026-07-02 robust 파싱(CT ai-json) — AI 응답 raw 제어문자 대비 (0630 fallback 회귀 교훈)
-      const parsed: any = extractJsonFromAiText(rawResponse);
-      // ★ 코드 결정 항목 — AI 추정이 아니라 실제 대표 문안에서 직접 계산 (오탐 0)
-      const bodyTexts = parsedMessages.map((m) => m.message_text);
-      const lengths = bodyTexts.map((t) => t.length);
-      guideline = {
-        tone_signature: String(parsed.tone_signature || '정보/실용'),
-        avg_length_chars: Number(parsed.avg_length_chars) || 0,
-        avg_length_bytes: Number(parsed.avg_length_bytes) || 0,
-        frequent_expressions: Array.isArray(parsed.frequent_expressions)
-          ? parsed.frequent_expressions.map((s: any) => String(s)).slice(0, 5)
-          : [],
-        ad_prefix_position: parsed.ad_prefix_position === 'back' ? 'back' : 'front',
-        greeting_pattern: String(parsed.greeting_pattern || ''),
-        cta_patterns: Array.isArray(parsed.cta_patterns)
-          ? parsed.cta_patterns.map((s: any) => String(s)).slice(0, 5)
-          : [],
-        signature: String(parsed.signature || ''),
-        reject_position: parsed.reject_position === 'front' ? 'front' : 'back',
-        emoji_whitelist: Array.isArray(parsed.emoji_whitelist)
-          ? parsed.emoji_whitelist.map((s: any) => String(s)).slice(0, 20)
-          : [],
-        extracted_at: new Date().toISOString(),
-        admin_edited: false,
-        // ★ 2026-07-02 형태 명세 — AI 추출 6항목(sanitize) + 코드 계산 2항목(길이 범위·링크 습관)
-        ...sanitizeFormSpec(parsed),
-        length_range: lengths.length > 0
-          ? { min_chars: Math.min(...lengths), max_chars: Math.max(...lengths) }
-          : undefined,
-        link_habit: scanLinkHabit(bodyTexts),
-      };
+      const split = splitBrandVoiceExtraction(extractJsonFromAiText(rawResponse), adminKinds);
+      kinds = split.kinds;
+      for (const kind of ['marketing', 'notice'] as const) {
+        const parsed: any = split.byKind[kind];
+        const bodyTexts = parsedMessages.filter((_, i) => kinds[i] === kind).map((m) => m.message_text);
+        if (!parsed || bodyTexts.length === 0) continue;
+        const lengths = bodyTexts.map((t) => t.length);
+        byKindGuideline[kind] = {
+          tone_signature: String(parsed.tone_signature || '정보/실용'),
+          avg_length_chars: Number(parsed.avg_length_chars) || 0,
+          avg_length_bytes: Number(parsed.avg_length_bytes) || 0,
+          frequent_expressions: Array.isArray(parsed.frequent_expressions)
+            ? parsed.frequent_expressions.map((s: any) => String(s)).slice(0, 5)
+            : [],
+          ad_prefix_position: parsed.ad_prefix_position === 'back' ? 'back' : 'front',
+          greeting_pattern: String(parsed.greeting_pattern || ''),
+          cta_patterns: Array.isArray(parsed.cta_patterns)
+            ? parsed.cta_patterns.map((s: any) => String(s)).slice(0, 5)
+            : [],
+          signature: String(parsed.signature || ''),
+          reject_position: parsed.reject_position === 'front' ? 'front' : 'back',
+          emoji_whitelist: Array.isArray(parsed.emoji_whitelist)
+            ? parsed.emoji_whitelist.map((s: any) => String(s)).slice(0, 20)
+            : [],
+          extracted_at: new Date().toISOString(),
+          admin_edited: false,
+          // ★ 2026-07-02 형태 명세 — AI 추출 6항목(sanitize) + 코드 계산 2항목(길이 범위·링크 습관)
+          ...sanitizeFormSpec(parsed),
+          length_range: lengths.length > 0
+            ? { min_chars: Math.min(...lengths), max_chars: Math.max(...lengths) }
+            : undefined,
+          link_habit: scanLinkHabit(bodyTexts),
+          voice_kind: kind,
+        };
+      }
     } catch (parseErr) {
       console.error('[Brand Voice extract] JSON parse 실패:', parseErr, rawResponse.slice(0, 500));
     }
 
-    if (!guideline) {
+    // ★ Codex 1020 R1 — 저장할 행 = 진실 하나(planBrandVoiceRows): 마케팅 + 안부 = main · notice / 마케팅만 = main / 안부만 = main 하나가 안부 말투.
+    //   문안이 있는 성격의 묶음이 빠지면 아무것도 쓰지 않는다(불완전한 응답이 기존 학습을 지우거나 덮지 않게).
+    const plan = planBrandVoiceRows(kinds, byKindGuideline);
+    if (!plan.ok) {
       return res.status(500).json({
         success: false,
         error: 'AI 응답 JSON 형식 오류. 재시도해주세요.',
       });
     }
+    const guideline: BrandGuidelineValue = plan.main;
+    const finalKinds = kinds as BrandVoiceKind[];   // plan 통과 = 모든 문안의 성격이 정해졌다
+    const noticeGuideline: BrandGuidelineValue | null = plan.notice;
 
     const prevGuideline = await fetchBrandGuideline(companyId);
 
-    // ★ 브랜드 키트(admin 명시 자산)는 AI 재추출이 덮지 않음 — 기존 값 보존
-    if (prevGuideline && guideline) {
+    // ★ 브랜드 키트(admin 명시 자산)는 AI 재추출이 덮지 않음 — 기존 값 보존(성격별 두 행 모두)
+    if (prevGuideline) {
       // fetchBrandGuideline은 memory_value를 통째 파싱하므로 키트 값이 런타임에 포함됨(타입만 좁음)
       const prevKit = prevGuideline as unknown as Partial<BrandGuidelineValue>;
-      guideline.signature_locked = prevKit.signature_locked;
-      guideline.signature_mode = prevKit.signature_mode;
-      guideline.slogans = prevKit.slogans;
-      guideline.required_words = prevKit.required_words;
-      guideline.banned_words = prevKit.banned_words;
+      for (const g of [guideline, noticeGuideline]) {
+        if (!g) continue;
+        g.signature_locked = prevKit.signature_locked;
+        g.signature_mode = prevKit.signature_mode;
+        g.slogans = prevKit.slogans;
+        g.required_words = prevKit.required_words;
+        g.banned_words = prevKit.banned_words;
+      }
     }
 
-    await query(
-      `INSERT INTO ai_company_memory (
-        id, company_id, memory_type, memory_key, memory_value,
-        importance, source, metadata, last_accessed_at, created_at, updated_at
-      ) VALUES (
-        gen_random_uuid(), $1::uuid, 'brand_guideline', 'main', $2,
-        10, 'ai_auto', '{}'::jsonb, NOW(), NOW(), NOW()
-      )
-      ON CONFLICT (company_id, memory_type, memory_key) DO UPDATE SET
-        memory_value = EXCLUDED.memory_value,
-        importance = 10,
-        updated_at = NOW(),
-        last_accessed_at = NOW()`,
-      [companyId, JSON.stringify(guideline)],
-    );
+    // main · notice · 문안 성격을 한 번에(어긋난 상태로 남지 않게)
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      await client.query(
+        `INSERT INTO ai_company_memory (
+          id, company_id, memory_type, memory_key, memory_value,
+          importance, source, metadata, last_accessed_at, created_at, updated_at
+        ) VALUES (
+          gen_random_uuid(), $1::uuid, 'brand_guideline', 'main', $2,
+          10, 'ai_auto', '{}'::jsonb, NOW(), NOW(), NOW()
+        )
+        ON CONFLICT (company_id, memory_type, memory_key) DO UPDATE SET
+          memory_value = EXCLUDED.memory_value,
+          importance = 10,
+          updated_at = NOW(),
+          last_accessed_at = NOW()`,
+        [companyId, JSON.stringify(guideline)],
+      );
+      if (noticeGuideline) {
+        await client.query(
+          `INSERT INTO ai_company_memory (
+            id, company_id, memory_type, memory_key, memory_value,
+            importance, source, metadata, last_accessed_at, created_at, updated_at
+          ) VALUES (
+            gen_random_uuid(), $1::uuid, 'brand_guideline', 'notice', $2,
+            10, 'ai_auto', '{}'::jsonb, NOW(), NOW(), NOW()
+          )
+          ON CONFLICT (company_id, memory_type, memory_key) DO UPDATE SET
+            memory_value = EXCLUDED.memory_value,
+            importance = 10,
+            updated_at = NOW(),
+            last_accessed_at = NOW()`,
+          [companyId, JSON.stringify(noticeGuideline)],
+        );
+      } else {
+        await client.query(
+          `DELETE FROM ai_company_memory
+            WHERE company_id = $1::uuid AND memory_type = 'brand_guideline' AND memory_key = 'notice'`,
+          [companyId],
+        );
+      }
+      for (let i = 0; i < parsedRows.length; i++) {
+        if (adminKinds[i]) continue;   // 사람이 정한 성격은 그대로
+        const value: RepresentativeMessageValue = { ...parsedRows[i].value, kind: finalKinds[i], kind_source: 'ai' };
+        await client.query(
+          `UPDATE ai_company_memory SET memory_value = $3, updated_at = NOW()
+            WHERE id = $1::uuid AND company_id = $2::uuid AND memory_type = 'representative_message'`,
+          [parsedRows[i].id, companyId, JSON.stringify(value)],
+        );
+      }
+      await client.query('COMMIT');
+    } catch (txErr) {
+      await client.query('ROLLBACK');
+      throw txErr;
+    } finally {
+      client.release();
+    }
 
     await recordToneEvolution(companyId, prevGuideline, guideline).catch((e: any) =>
       console.log('[brand-tone-evolution] extract 기록 오류 —', e?.message || e),
@@ -746,7 +843,7 @@ JSON 단 1건만 출력. 다른 설명/주석/마크다운 코드블록 없음. 
     const { invalidateBrandVoiceCache } = await import('../utils/brand-voice-prompt');
     invalidateBrandVoiceCache(companyId);
 
-    return res.json({ success: true, guideline });
+    return res.json({ success: true, guideline, notice_guideline: noticeGuideline, kinds: finalKinds });
   } catch (err: any) {
     console.error('[Brand Voice extract-guideline] 오류:', err);
     return res.status(500).json({ success: false, error: err?.message || '가이드라인 추출 실패' });
@@ -887,6 +984,8 @@ router.post('/brand-voice/update-guideline', async (req: Request, res: Response)
     };
 
     const prevGuideline = await fetchBrandGuideline(companyId);
+    // ★ 2026-10-20 main 이 안부 문안으로 뽑힌 행이면(마케팅 문안 0건) 그 표시를 지킨다(직접 정정이 성격을 바꾸지 않게)
+    if ((prevGuideline as unknown as Partial<BrandGuidelineValue> | null)?.voice_kind === 'notice') guideline.voice_kind = 'notice';
 
     await query(
       `INSERT INTO ai_company_memory (

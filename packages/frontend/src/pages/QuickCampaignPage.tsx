@@ -12,7 +12,8 @@ import { goBackOr } from '../lib/scroll-restoration';
 import { ArrowLeft, Sparkles, Loader2, Lock, Check, Smartphone, Mail, BookOpen, RotateCcw, AlertTriangle, ChevronDown, Plus, Type, ShieldCheck, ShoppingBag } from 'lucide-react';
 import ZoneFrame from '../components/zone/ZoneFrame';
 import { zoneModule } from '../constants/ai-operator-modules';
-import { ScanText, MessageSquareText, HelpCircle, ImageDown, Blocks, Layers3 } from 'lucide-react';
+import { ScanText, MessageSquareText, HelpCircle, ImageDown, Blocks, Layers3, FolderOpen } from 'lucide-react';
+import { handOffMakeImages, makeEntryState, makeOtherHref, makeOtherItems, type MakeOtherKind } from '../utils/make-entry';
 import { BUILD_CARD_IMAGES_MAX, BUILD_CARDS_MAX } from '../components/ai-build/BuildCardsInput';
 import CatalogPagesInput from '../components/ai-build/CatalogPagesInput';
 import { AI_BUILD_PRODUCTS_MAX } from '../components/ai-build/ProductPickList';
@@ -50,6 +51,10 @@ const token = () => localStorage.getItem('token');
 const jsonHeaders = () => ({ 'Content-Type': 'application/json', Authorization: `Bearer ${token()}` });
 const emptyBoard = (): BuildCardValue => ({ id: BOARD_ID, title: '', text: '', link: '', licensed: true, images: [] });
 const CHANNEL_NOUN: Record<BuildChannel, string> = { dm: '모바일 DM', email: '이메일', catalog: '카탈로그 DM' };
+/** 「그 밖에」 버튼 아이콘(목록 · 라벨 = make-entry) */
+const OTHER_ICON: Record<MakeOtherKind, typeof MessageSquareText> = {
+  line: MessageSquareText, onestep: HelpCircle, images: ImageDown, library: FolderOpen, blocks: Blocks,
+};
 
 export default function QuickCampaignPage() {
   const navigate = useNavigate();
@@ -99,6 +104,7 @@ export default function QuickCampaignPage() {
   const [offSite, setOffSite] = useState<Set<string>>(() => new Set(restoredRead?.offSite));
   const [boardOpen, setBoardOpen] = useState(true);
   const [makeLine, setMakeLine] = useState('');
+  const otherImagesRef = useRef<HTMLInputElement>(null);
   const [uploading, setUploading] = useState(false);
   const [libraryFor, setLibraryFor] = useState<'board' | 'catalog' | null>(null);
   const [brand, setBrand] = useState<{ logo?: string | null; name?: string | null; color?: string | null } | null>(null);
@@ -387,9 +393,12 @@ export default function QuickCampaignPage() {
   const domainNotice = readUsed && read && !read.mallDomain;
 
   const makeOneLine = zoneModule('make').oneLine!;
-  const otherTo = (kind: 'auto' | 'image' | 'blocks') => (channel === 'email'
-    ? (kind === 'blocks' ? '/email-campaigns?other=blank' : '/email-campaigns?other=1')
-    : (kind === 'blocks' ? '/dm-builder?other=blocks' : '/dm-builder?other=1'));
+  // ★ 2026-10-20 「그 밖에」 = make-entry 한 곳(버튼 · 라벨 · 주소 · 임은지 접수 cmvewqxm21) · 옛 otherTo 는 두 버튼을 같은 ?other=1 로 보냈고
+  //   받는 쪽이 아무것도 하지 않아 모바일 DM 첫 화면에 멈췄다. 완성 이미지 = 여기서 파일을 고르고(클릭 없는 파일 창은 막힌다) 모바일 DM 화면이 받는다.
+  const goOther = (kind: MakeOtherKind) => {
+    if (kind === 'images') { otherImagesRef.current?.click(); return; }
+    navigate(makeOtherHref(channel, kind), kind === 'line' ? { state: makeEntryState(makeLine) } : undefined);
+  };
   // ★ 2026-09-30 AI 존 대개편: 한 줄 = 주소면 그 페이지를 읽고(기존 주소 읽기 · AI 0 · 차감 0), 글이면 행사 내용 칸에 담는다
   const submitMakeLine = () => {
     const v = makeLine.trim();
@@ -425,10 +434,7 @@ export default function QuickCampaignPage() {
       start={{
         items: [],
         more: [
-          { label: '한 줄로 자동 생성', icon: MessageSquareText, onClick: () => navigate(otherTo('auto')) },
-          { label: '질문 몇 개로 만들기', icon: HelpCircle, onClick: () => navigate('/dm-builder?other=onestep') },
-          { label: '이미지로 불러오기 · 저장 소재에서', icon: ImageDown, onClick: () => navigate(otherTo('image')) },
-          { label: '블록으로 직접 만들기', icon: Blocks, onClick: () => navigate(otherTo('blocks')) },
+          ...makeOtherItems(channel).map((it) => ({ label: it.label, icon: OTHER_ICON[it.kind], onClick: () => goOther(it.kind) })),
           { label: 'DM·이메일·인앱 세트 한 번에(옛 방식)', icon: Layers3, onClick: () => { setResumeDraftId(null); setSetOpen(true); } },
         ],
       }}
@@ -603,6 +609,9 @@ export default function QuickCampaignPage() {
 
       {/* 하단 바 — 서버 견적 한 줄 + [만들기] */}
       <AssetLibraryPickerModal open={!!libraryFor} onClose={() => setLibraryFor(null)} onPick={(a) => addLibrary([a])} multiSelect onPickMany={addLibrary} />
+      {/* ★ 2026-10-20 「그 밖에」 [완성 이미지로] = 여기서 고르고 모바일 DM 화면이 받아 0크레딧 카탈로그 DM 편집으로 */}
+      <input ref={otherImagesRef} type="file" accept="image/*" multiple className="hidden"
+        onChange={(e) => { const ok = handOffMakeImages(e.currentTarget.files); e.currentTarget.value = ''; if (ok) navigate(makeOtherHref(channel, 'images')); }} />
       <CreditConfirmModal
         open={confirmOpen}
         source={channel === 'email' ? 'email-ai-generate' : isCatalog ? 'catalog-dm-build' : 'dm-ai-generate'}

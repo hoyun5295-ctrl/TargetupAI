@@ -99,18 +99,6 @@ export default function AutosendStopPage() {
     <>
       {shell(
         <div className="space-y-4">
-          {notice && <LinkNotice tone="rose">{notice}</LinkNotice>}
-          {done === 'skip' && (
-            <LinkNotice tone="emerald" icon={CheckCircle2}>
-              <b>이번 회차 발송을 건너뛰었습니다.</b> 다음 회차는 그대로 진행합니다. 담당자 모두에게 문자로 알렸어요.
-            </LinkNotice>
-          )}
-          {done === 'pause' && (
-            <LinkNotice tone="emerald" icon={CheckCircle2}>
-              <b>자동마케팅을 일시정지했습니다.</b> 예약된 발송도 함께 취소했어요. 다시 켜려면 한줄로 자동마케팅 화면에서 켜 주세요.
-            </LinkNotice>
-          )}
-
           <div className="rounded-2xl border border-slate-200 bg-white overflow-hidden">
             <div className="px-5 py-4 border-b border-slate-100">
               <p className="text-[15px] font-bold tracking-[-0.01em] text-slate-900 break-words">{view.operatorName}</p>
@@ -130,6 +118,19 @@ export default function AutosendStopPage() {
               </div>
             )}
           </div>
+
+          {/* ★ 2026-10-20 조작 결과 안내 = 누른 자리(버튼 바로 위) · 옛: 내용 카드 위라 긴 문안 아래에서 누르면 안 보였다(대행 링크 cmvgfv8r51 와 같은 모양) */}
+          {notice && <LinkNotice tone="rose">{notice}</LinkNotice>}
+          {done === 'skip' && (
+            <LinkNotice tone="emerald" icon={CheckCircle2}>
+              <b>이번 회차 발송을 건너뛰었습니다.</b> 다음 회차는 그대로 진행합니다. 담당자 모두에게 문자로 알렸어요.
+            </LinkNotice>
+          )}
+          {done === 'pause' && (
+            <LinkNotice tone="emerald" icon={CheckCircle2}>
+              <b>자동마케팅을 일시정지했습니다.</b> 예약된 발송도 함께 취소했어요. 다시 켜려면 한줄로 자동마케팅 화면에서 켜 주세요.
+            </LinkNotice>
+          )}
 
           <div className="space-y-2">
             {view.canSkip && done !== 'skip' && (
