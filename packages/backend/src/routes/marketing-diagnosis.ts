@@ -27,7 +27,6 @@ import {
 import {
   judgeGrantEligibility,
   executeGrant,
-  hasTrialHistory,
   GrantConflictError,
   isDiagnosisRunner,
   judgeDiagnosisEligible,
@@ -97,7 +96,8 @@ router.get('/state', async (req: Request, res: Response) => {
     let grantable: 'available' | 'already_granted' | 'not_eligible' | 'not_applicable';
     if (!eligible) grantable = 'not_applicable';
     else if (grantRes.rows.length > 0) grantable = 'already_granted';
-    else grantable = (await hasTrialHistory({ query }, companyId, comp)) ? 'not_eligible' : 'available';
+    // ★ 2026-10-21 Harold 「기존 무료체험과는 별개로 진단은 딱 1회」 — 다른 체험 이력은 보지 않는다(지급 판정 judgeGrantEligibility 와 같은 규칙)
+    else grantable = 'available';
 
     return res.json({
       success: true,

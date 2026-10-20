@@ -75,29 +75,10 @@ export async function judgeGrantEligibility(
   // ★ 2026-10-04 선불 이용 기간이 잠긴 회사(FREE지만 미가입 아님)는 대상 아님 — 체험 코어 409로 진단 저장째 롤백되지 않게 여기서 먼저 거른다
   if (crow.plan_term_managed === true) return { outcome: 'not_applicable' };
 
-  // §4-1 ⓓ 체험 이력 4항 OR
-  if (await hasTrialHistory(client, companyId, crow)) return { outcome: 'not_eligible' };
-
+  // ★ 2026-10-21 Harold 「기존 무료체험과는 별개로 진단은 딱 1회만 지급」 — 옛 §4-1 ⓓ 체험 이력 4항 판정(hasTrialHistory)을 뺐다.
+  //   진단 지급의 1회 = 위 diagnosis_trial_grants 기지급 판정(UNIQUE)만이다. 옛 판정은 companies.subscription_status 의
+  //   DB 기본값 'trial' 을 체험 이력으로 읽어, 체험을 한 번도 안 받은 미가입 회사(실측 32곳 · 요금제 변경 이력 0)를 전부 막았다.
   return { outcome: 'granted' };
-}
-
-/**
- * 체험 이력 4항 OR(§4-1 — fail-closed). GET /state의 not_eligible 표시 판정도 이 한 벌을 쓴다.
- * ③(plan_code='TRIAL')은 호출 전 FREE 재검사가 이미 배제 — 여기 도달하면 FREE뿐이다.
- * ④(FREE인데 만료일 잔존 = 원장 밖 이력 흔적)이 grantFreeTrial의 GREATEST 초과 연장도 함께 차단한다.
- */
-export async function hasTrialHistory(
-  q: { query: (sql: string, params?: any[]) => Promise<any> },
-  companyId: string,
-  row: { subscription_status: string | null; trial_expires_at: Date | null },
-): Promise<boolean> {
-  if (row.subscription_status === 'trial' || row.subscription_status === 'trial_expired') return true;
-  if (row.trial_expires_at !== null) return true;
-  const r = await q.query(
-    `SELECT 1 FROM company_plan_changes WHERE company_id = $1 AND change_type = 'trial_start' LIMIT 1`,
-    [companyId],
-  );
-  return r.rows.length > 0;
 }
 
 /** grants UNIQUE 충돌 식별용 — 호출부는 이 코드를 잡아 ROLLBACK 후 already_granted로 응답한다. */
@@ -118,7 +99,8 @@ export async function executeGrant(
   opts: { days?: number; grantedBy?: string } = {},
 ): Promise<{ trialExpiresAt: Date | null }> {
   const days = opts.days ?? DIAGNOSIS_TRIAL_DAYS;
-  const granted = await grantFreeTrial(companyId, days, { client });
+  // ★ 2026-10-21 새로 지급 — 다른 체험이 남긴 만료일 위에 더하지 않고 오늘부터 days 일(Codex 1R · 진단 7일 회사당 1회)
+  const granted = await grantFreeTrial(companyId, days, { client, fresh: true });
   const trialExpiresAt = granted?.trial_expires_at ?? null;
   try {
     await client.query(

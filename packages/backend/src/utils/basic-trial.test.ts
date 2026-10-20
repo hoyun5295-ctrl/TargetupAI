@@ -123,7 +123,23 @@ describe('grantFreeTrial — 무주입(기존 호출부 2곳) 회귀', () => {
     expect(r.extended).toBe(true);
     expect(record).toHaveBeenCalledWith(expect.objectContaining({ reason: '무료체험 30일 추가 부여' }));
     const upd = calls.find((c) => /^UPDATE companies/.test(c.sql));
-    expect(upd?.params).toEqual([TRIAL_PLAN_ID, 30, 750, COMPANY_ID, true]);
+    expect(upd?.params).toEqual([TRIAL_PLAN_ID, 30, 750, COMPANY_ID, true, false]);
+  });
+
+  // ★ 2026-10-21 진단 7일(Codex 1R medium) — 체험 이력과 별개로 지급하므로 남은 만료일이 미래여도 그 위에 더하지 않는다(오늘부터 7일 · 크레딧 새로)
+  it('새로 지급(fresh): 잠근 행이 trial+미래 만료여도 연장 아님 · 만료일 = 오늘부터 · 크레딧 채움', async () => {
+    const { client, calls } = makeClient({
+      companyRow: { subscription_status: 'trial', trial_expires_at: FUTURE },
+    });
+    connect.mockResolvedValue(client);
+
+    const r = await grantFreeTrial(COMPANY_ID, 7, { fresh: true });
+
+    expect(r.extended).toBe(false);
+    expect(record).toHaveBeenCalledWith(expect.objectContaining({ reason: '무료체험 7일 부여' }));
+    const upd = calls.find((c) => /^UPDATE companies/.test(c.sql));
+    expect(upd?.params).toEqual([TRIAL_PLAN_ID, 7, 750, COMPANY_ID, false, true]);
+    expect(upd?.sql).toMatch(/trial_expires_at\s+= CASE WHEN \$6::boolean THEN NOW\(\) ELSE GREATEST\(COALESCE\(trial_expires_at, NOW\(\)\), NOW\(\)\) END/);
   });
 
   it('실패(UPDATE throw): ROLLBACK + 실패 알림 + rethrow', async () => {

@@ -291,6 +291,47 @@ Harold 지시("부족한 부분을 짚고, 실제 진단받는 느낌과 한줄�
    "직접 만드는데 재작업이 잦다·오래 걸린다"는 병목(level ≤1)이 아니라 **짚임(insights) 또는 고도화 제안** 자리다. 추천 = 그 답들을 짚임으로 옮긴다(seed level 변경 아님 — 판정이 바뀌면 축별 판정 표가 통째로 흔들린다).
 3. 이연 = 문항 단위 이탈 계측(DDL 필요 — v3 설계서 §9) · plans 실값 정정 시 한도 축 재도입(seed 파일만).
 
+## §13 1021 접수 — 진단 띠 혜택 노출 · 7일 베이직 무료체험 (★2026-10-21 Harold · 다음 날 착수)
+
+### 13-1. 접수(Harold 요지)
+- 대시보드 진단 띠(「우리 마케팅, 지금 진단받아 보세요」)가 떠 있어도 아무도 안 한다 → 혜택이 안 보여서라고 판단.
+- **과제 ①** 띠에 「설문을 완료하시면 자동으로 7일 무료체험이 부여됩니다」를 보이게 한다.
+- **과제 ②** 진단을 마치면 자동으로 7일 무료체험 = **베이직 요금제(월 35만원)**.
+
+### 13-2. 지금 코드(1021 확인 · 코드 읽기만 · 서버 실측 전)
+- 띠 = `frontend/src/components/marketing-diagnosis/DiagnosisHeroCard.tsx`(유도 변형) · 대시보드 3곳에서 `showTrialReward={diagnosisState?.grantable === 'available'}`.
+  보상 문구는 **이미 있다** — 「완료하면 7일 무료체험이 바로 시작돼요」(부제 아래 11px 칩) · `grantable === 'available'` 일 때만(§6-2 · 지급 안 되는 회사에 보이면 거짓 약속).
+- **1021 noplan(새로 만든 미가입 FREE 회사 · 관리자) 화면에 칩이 안 보인다**(Harold 캡처). available 이 아닌 이유는 미검증 — 판정 = `routes/marketing-diagnosis.ts` GET /state:
+  `eligible`(FREE · 고객사 관리자 · 선불 기간 잠김 아님) → 지급 기록 없음 → `hasTrialHistory`(`utils/marketing-diagnosis-grant.ts`: subscription_status trial · trial_expired / trial_expires_at 값 / company_plan_changes 의 trial_start) 가 하나라도 걸리면 not_eligible.
+  ⚠ 새 회사가 생성 기본값 때문에 여기 걸리는 것이면 **미가입 회사 대부분이 혜택 문구를 못 보고 있을 수 있다**(미검증 · 1번 SQL 로 가른다).
+- 지급 = **이미 있다**: 퍼널 A 제출과 한 트랜잭션 → `executeGrant` → `grantFreeTrial`(`utils/basic-trial.ts`) = plan **TRIAL**(무료체험 요금제 · 베이직과 같게 맞춘 요금제 = 그 파일 주석 기준 · DB 실값 미확인) + subscription_status 'trial' + trial_expires_at **+7일**(`DIAGNOSIS_TRIAL_DAYS`) + TRIAL 월 기본 크레딧 · 회사당 1회(diagnosis_trial_grants UNIQUE) · 만료 강등 = trial-downgrade-worker.
+  (★정정 1021: 처음 「plan BASIC」으로 적었으나 그 파일 머리 주석을 옮긴 것이고 실제 코드는 `plan_code = 'TRIAL'` 이다.)
+
+### 13-3. 다음 날 순서
+1. **칩이 숨는 이유 확정** — 서버 DB(noplan):
+   ```sql
+   SELECT c.id, c.subscription_status, c.trial_expires_at, p.plan_code,
+          (SELECT COUNT(*) FROM company_plan_changes x WHERE x.company_id = c.id AND x.change_type = 'trial_start') AS trial_start_rows,
+          (SELECT COUNT(*) FROM diagnosis_trial_grants g WHERE g.company_id = c.id) AS grant_rows
+     FROM companies c LEFT JOIN plans p ON p.id = c.plan_id
+    WHERE c.company_code = 'NOPLAN';
+   ```
+   결과로 걸린 조건을 정한다 → 생성 기본값 탓이면 미가입 회사 전체 규모를 센다(그 SQL 은 결과를 보고 만든다).
+2. **과제 ① 설계** — 혜택을 부제 아래 작은 칩이 아니라 띠의 주 문장으로(Harold 문구 그대로 · 「베이직」 · 「35만원」 표기 여부 = Harold 결정). 노출 조건은 §6-2 그대로 유지.
+3. **과제 ② = 새로 만들 것이 있는지부터** — 실측 1건: noplan 으로 진단 완주 → plan BASIC · subscription_status trial · 만료일 +7일 · 크레딧 확인.
+   ⚠ 회사당 1회라 noplan 으로 한 번 끝내면 지급이 소진된다 — 다시 시험할 방법(지급 기록 정리 등)을 함께 정한다.
+4. 문구에 쓸 가격 = plans 실값 확인: `SELECT * FROM plans WHERE plan_code = 'BASIC';`(요금 화면 표기와 다를 수 있음 · 미검증).
+
+### 13-4. 1021 밤 처리(코드 완료 · Codex 적대 approve · DDL 0 · 배포 대기)
+- **실측(운영 DB · Harold)**: noplan = subscription_status 'trial' · 만료일 없음 · FREE · trial_start 0 · 지급 0. `companies.subscription_status` 기본값 = `'trial'`.
+  같은 상태(FREE · trial · 만료일 없음) 미가입 회사 **32곳 · 요금제 변경 이력 0곳** = 체험을 받은 적 없는데 옛 체험 이력 판정이 전부 막아 보상 문구 · 지급이 없었다.
+- **결정(Harold)**: 진단 띠는 진단을 한 번도 안 한 미가입 회사에 모두 노출 · 진단으로 주는 7일 체험은 **기존 무료체험과 별개로 회사당 딱 1회**.
+- **처방**: ① 옛 §4-1 ⓓ 체험 이력 4항 판정(`hasTrialHistory`) 삭제 — 지급 판정 `judgeGrantEligibility` · GET /state 모두. 1회 = diagnosis_trial_grants UNIQUE(기지급 선판정)만.
+  ② 지급 코어 `grantFreeTrial` 에 새로 지급(`fresh`) — 진단 지급은 남은 만료일 위에 더하지 않고 오늘부터 7일(Codex 1R medium: 관리자가 체험 중 회사를 FREE 로 바꾸면 남은 만료일 + 7일이 되던 경로) · 관리자 두 경로는 종전 연장 그대로.
+  ③ 띠 = 목업 B안(쿠폰): `DiagnosisHeroCard` 유도 변형 · 지급 가능 회사에만 제목 「3분 진단하면 {요금제명} 7일이 무료예요」 · 부제 「설문을 완료하시면 자동으로 7일 무료체험이 부여됩니다」 · 쿠폰(요금제 7일 0원 · 지운 월 금액 · 진단 시작). 요금제명 · 월 금액 = `/api/plans` BASIC 행(CT `utils/plans-public.ts`) · 못 읽으면 금액 줄만 뺀다. 옛 「유도 띠 가격 단어 0」 규칙은 이 결정으로 바뀌었다. 목업 = `docs/mockups/2026-10-21-diagnosis-banner-trial-mockup.html`.
+- **검증**: backend tsc 0 · frontend tsc 0 · backend vitest 660파일 9,612건 · 시험 diagnosis-banner-trial-1021 · marketing-diagnosis-grant(새 규칙) · basic-trial(새로 지급) · 실물 렌더 1280 · 390 · Codex 적대(띠 approve · 판정 1R medium → 2R approve).
+- **남은 것**: 배포 뒤 noplan 대시보드에 쿠폰 띠가 보이는지 · 쿠폰 「베이직 · 월 금액」 표기가 TRIAL 요금제 실값과 맞는지(`SELECT * FROM plans WHERE plan_code IN ('TRIAL', 'BASIC');`) · 「not_eligible」 결과 값은 이제 나오지 않지만 응답 계약 · 화면 분기는 남겨 둠(별건).
+
 ## §10 관련 문서
 
 - 시점 설계서(DDL·seed v1·v2 원문·검증 13종·적대 취사) = [2026-08-16-marketing-diagnosis-design.md](2026-08-16-marketing-diagnosis-design.md)

@@ -100,16 +100,34 @@ describe('judgeGrantEligibility — 판정 순서·4항', () => {
     expect((await judgeGrantEligibility(makeClient(), COMPANY)).outcome).toBe('granted');
   });
 
-  it('FREE인데 만료일 잔존(4항 ④) = not_eligible — 원장 밖 이력 흔적', async () => {
+  // ★ 2026-10-21 Harold 「기존 무료체험과는 별개로 진단은 딱 1회만 지급」 — 다른 체험 이력은 진단 지급을 막지 않는다.
+  //   1회 = 진단 지급 기록(diagnosis_trial_grants UNIQUE)만이 막는다. 실측 1021: companies.subscription_status 기본값 'trial' 이라
+  //   FREE · 만료일 없음 · 요금제 변경 이력 0 인 미가입 회사 32곳이 「이미 체험」으로 막혀 혜택 문구도 지급도 없었다.
+  it('FREE + 상태 trial(DB 기본값) · 만료일 없음 = granted', async () => {
     const client = makeClient({
-      companyRow: { id: COMPANY, subscription_status: null, trial_expires_at: '2026-01-01', plan_code: 'FREE' },
+      companyRow: { id: COMPANY, subscription_status: 'trial', trial_expires_at: null, plan_code: 'FREE' },
     });
-    expect((await judgeGrantEligibility(client, COMPANY)).outcome).toBe('not_eligible');
+    expect((await judgeGrantEligibility(client, COMPANY)).outcome).toBe('granted');
   });
 
-  it('trial_start 원장 이력(4항 ①) = not_eligible', async () => {
-    const client = makeClient({ hasTrialStartHistory: true });
-    expect((await judgeGrantEligibility(client, COMPANY)).outcome).toBe('not_eligible');
+  it('다른 무료체험 이력(만료일 잔존 · trial_start 원장 · trial_expired)이 있어도 진단 지급 전이면 granted', async () => {
+    const leftover = makeClient({
+      companyRow: { id: COMPANY, subscription_status: null, trial_expires_at: '2026-01-01', plan_code: 'FREE' },
+    });
+    expect((await judgeGrantEligibility(leftover, COMPANY)).outcome).toBe('granted');
+    expect((await judgeGrantEligibility(makeClient({ hasTrialStartHistory: true }), COMPANY)).outcome).toBe('granted');
+    const expired = makeClient({
+      companyRow: { id: COMPANY, subscription_status: 'trial_expired', trial_expires_at: '2026-01-01', plan_code: 'FREE' },
+    });
+    expect((await judgeGrantEligibility(expired, COMPANY)).outcome).toBe('granted');
+  });
+
+  it('진단 지급을 한 번 받은 회사는 이력과 상관없이 already_granted(회사당 1회)', async () => {
+    const client = makeClient({
+      companyRow: { id: COMPANY, subscription_status: 'trial_expired', trial_expires_at: '2026-01-01', plan_code: 'FREE' },
+      hasGrant: true,
+    });
+    expect((await judgeGrantEligibility(client, COMPANY)).outcome).toBe('already_granted');
   });
 
   it('유료 plan(기지급 없음) = not_applicable / 회사 없음 = company_not_found', async () => {
@@ -124,7 +142,8 @@ describe('executeGrant — 지급 실행 계약', () => {
   it('grantFreeTrial(client 주입) 후 grants INSERT — 반환 = trial_expires_at, 행위자 기본값 자동', async () => {
     const client = makeClient();
     const r = await executeGrant(client, COMPANY, DX);
-    expect(grant).toHaveBeenCalledWith(COMPANY, 7, { client });
+    // ★ 2026-10-21 진단 지급 = 새로 지급(남은 만료일 위에 더하지 않고 오늘부터 7일 · Codex 1R)
+    expect(grant).toHaveBeenCalledWith(COMPANY, 7, { client, fresh: true });
     expect(r.trialExpiresAt).toBe('2026-08-23T00:00:00Z');
     const ins = client.query.mock.calls.find(([sql]: any[]) => /INSERT INTO diagnosis_trial_grants/.test(String(sql)));
     expect(ins?.[1]?.[4]).toBe('diagnosis-auto');

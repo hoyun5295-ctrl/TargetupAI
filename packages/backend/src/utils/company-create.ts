@@ -60,19 +60,21 @@ export async function createCompanyCore(p: CreateCompanyParams): Promise<any> {
   try {
     await client.query('BEGIN');
     result = await client.query(
-      // ★ 2026-10-21 기본 단가(알림톡 · 브랜드메시지)를 생성 때 칸에 써 넣는다 — 비워 두면 선불 브랜드 발송 차단 · 후불 발행 차단(unit-price.ts).
+      // ★ 2026-10-21 기본 단가(SMS · LMS · MMS · 알림톡 · 브랜드)를 생성 때 칸에 써 넣는다 — 비워 두면 선불 발송 차단 · 후불 발행 차단(unit-price.ts).
       `INSERT INTO companies (
         name, company_code, company_name, business_number, ceo_name,
         contact_name, contact_email, contact_phone, address,
         plan_id, data_input_method, api_key, api_secret_hash, db_name,
-        created_by, usage_type, cost_per_kakao, cost_per_brand, unit_price_basis
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)
+        created_by, usage_type,
+        cost_per_sms, cost_per_lms, cost_per_mms, cost_per_kakao, cost_per_brand, unit_price_basis
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22)
       RETURNING *`,
       [
         p.companyName, p.companyCode, p.companyName, p.businessNumber ?? null, p.ceoName ?? null,
         p.contactName ?? null, p.contactEmail ?? null, p.contactPhone ?? null, p.address ?? null,
         p.planId ?? null, p.dataInputMethod ?? 'file', apiKey, apiSecretHash, dbName,
         p.createdBy ?? null, p.usageType ?? 'web',
+        NEW_COMPANY_DEFAULT_PRICES.sms, NEW_COMPANY_DEFAULT_PRICES.lms, NEW_COMPANY_DEFAULT_PRICES.mms,
         NEW_COMPANY_DEFAULT_PRICES.kakao, NEW_COMPANY_DEFAULT_PRICES.brand, NEW_COMPANY_DEFAULT_PRICES.basis,
       ],
     );

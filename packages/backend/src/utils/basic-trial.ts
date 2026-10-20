@@ -55,14 +55,19 @@ export const ADMIN_WEEK_TRIAL = { days: 7, credits: 300 } as const;
 export async function grantFreeTrial(
   companyId: string,
   days = 30,
-  opts: { client?: PoolClient; credits?: number } = {},
+  /**
+   * fresh = 새로 지급(★ 2026-10-21 마케팅 진단 7일 — 다른 체험 이력과 별개로 회사당 1회).
+   *   남은 만료일이 미래여도 그 위에 더하지 않고 오늘부터 days 일 · 크레딧도 새로 채운다(연장 아님).
+   *   관리자 승인 · 슈퍼관리자 부여(fresh 없음)는 종전 그대로 연장한다.
+   */
+  opts: { client?: PoolClient; credits?: number; fresh?: boolean } = {},
 ): Promise<any> {
   // ★ 2026-08-16 client 주입 (마케팅 진단 §4-1 — 진단 저장과 체험 지급이 한 트랜잭션이어야 한다).
   //   client가 오면 호출부가 BEGIN/COMMIT/ROLLBACK/실패 알림을 소유한다 — 여기서는 아무것도 걸지 않는다.
   //   내부 SQL은 플랜 조회까지 **전부** 그 client를 탄다: 전역 query가 한 줄이라도 남으면
   //   호출부 트랜잭션이 풀 커넥션을 추가 요구해 풀 고갈 데드락이 된다(Codex high — 설계서 §4-1).
   if (opts.client) {
-    return grantFreeTrialWithClient(opts.client, companyId, days, opts.credits);
+    return grantFreeTrialWithClient(opts.client, companyId, days, opts.credits, opts.fresh === true);
   }
 
   // ★ 2026-07-25 플랜 변경과 이력 기록을 한 트랜잭션으로 묶는다(Codex 지적 C).
@@ -70,7 +75,7 @@ export async function grantFreeTrial(
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
-    const result = await grantFreeTrialWithClient(client, companyId, days, opts.credits);
+    const result = await grantFreeTrialWithClient(client, companyId, days, opts.credits, opts.fresh === true);
     await client.query('COMMIT');
     return result;
   } catch (err) {
@@ -95,6 +100,8 @@ async function grantFreeTrialWithClient(
   days: number,
   /** 신규 부여 때 줄 기본 크레딧 — 없으면 TRIAL 요금제 월 기본분(종전). 연장에서는 어느 경우든 쓰지 않는다 */
   creditsOverride?: number,
+  /** 새로 지급(위 grantFreeTrial opts.fresh) — 연장으로 치지 않고 오늘부터 */
+  fresh = false,
 ): Promise<any> {
   const trial = await client.query(
     `SELECT id, COALESCE(ai_credits_per_month, 0) AS credits
@@ -116,6 +123,7 @@ async function grantFreeTrialWithClient(
   if (cur.rows[0].plan_term_managed === true) throw planTermManagedError('무료체험을 줄 수 없습니다');
   const curExpiry = cur.rows[0].trial_expires_at ? new Date(cur.rows[0].trial_expires_at) : null;
   const extended =
+    !fresh &&
     cur.rows[0].subscription_status === 'trial' &&
     curExpiry !== null &&
     curExpiry.getTime() > Date.now();
@@ -124,8 +132,8 @@ async function grantFreeTrialWithClient(
     `UPDATE companies
         SET plan_id                   = $1,
             subscription_status       = 'trial',
-            -- 남은 기간이 미래면 그 위에 더한다(연장). 없거나 지났으면 오늘부터.
-            trial_expires_at          = GREATEST(COALESCE(trial_expires_at, NOW()), NOW())
+            -- 남은 기간이 미래면 그 위에 더한다(연장). 없거나 지났으면 오늘부터. 새로 지급($6)은 언제나 오늘부터.
+            trial_expires_at          = CASE WHEN $6::boolean THEN NOW() ELSE GREATEST(COALESCE(trial_expires_at, NOW()), NOW()) END
                                         + ($2::int || ' days')::interval,
             -- ⛔ 크레딧 불변식: 연장에서는 base를 그대로 둔다(재충전 금지). purchased는 어느 경우든 미포함 = 보존.
             ai_credits_base_remaining = CASE WHEN $5::boolean THEN ai_credits_base_remaining ELSE $3 END,
@@ -134,7 +142,7 @@ async function grantFreeTrialWithClient(
       WHERE id = $4
     RETURNING id, plan_id, subscription_status, trial_expires_at,
               (SELECT plan_code FROM plans WHERE id = $1) AS plan_code`,
-    [trialPlanId, days, trialCredits, companyId, extended],
+    [trialPlanId, days, trialCredits, companyId, extended, fresh],
   );
 
   if (updated.rows.length > 0) {

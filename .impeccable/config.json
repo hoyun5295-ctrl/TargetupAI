@@ -47,6 +47,24 @@
         ],
         "createdAt": "2026-10-20T00:00:00.000Z",
         "reason": "Claude 판정: L99 · L102 · L109 = 옛 Dashboard.tsx 「AI 크레딧 잔여」 상자 원본 그대로 옮김(제품 AI 표시 색 · 맨 위 AI 한줄로 버튼 violet 그라데이션과 같은 짝 · Harold 승인 목업 1019 동일) · 값 단위 무시 미지원"
+      },
+      {
+        "rule": "ai-color-palette",
+        "value": "*",
+        "files": [
+          "docs/mockups/2026-10-21-diagnosis-banner-trial-mockup.html"
+        ],
+        "createdAt": "2026-10-20T16:23:10.542Z",
+        "reason": "Claude 판단: 목업이 운영 진단 띠(DiagnosisHeroCard indigo→sky 그라데이션) 색을 그대로 재현"
+      },
+      {
+        "rule": "undersized-ui-text",
+        "value": "*",
+        "files": [
+          "docs/mockups/2026-10-21-diagnosis-banner-trial-mockup.html"
+        ],
+        "createdAt": "2026-10-20T16:23:10.898Z",
+        "reason": "Claude 판단: 10px 는 운영 띠의 NEW 뱃지(text-[10px]) 재현 · 버리는 목업"
       }
     ]
   }
