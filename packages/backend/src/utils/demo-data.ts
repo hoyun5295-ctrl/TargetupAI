@@ -55,6 +55,16 @@ export function demoPhone(index: number): string {
   return `0100${String(Math.max(0, Math.floor(index)) % 10_000_000).padStart(7, '0')}`;
 }
 
+/**
+ * ★ 2026-10-20 가짜(도달 불가) 번호 판정 — 010-0xxx · 010-1xxx 미할당 국번 11자리(설계서 §8 의 0100·0101).
+ *   시연이 아닌 테스트 회사의 고객을 지우기 전에 "전원 가짜 번호"인지 이것으로 본다. SQL 은 이 패턴 문자열을 그대로 쓴다(한 벌).
+ */
+export const SYNTHETIC_PHONE_PATTERN = '^010[01][0-9]{7}$';
+const SYNTHETIC_PHONE_RE = new RegExp(SYNTHETIC_PHONE_PATTERN);
+export function isSyntheticPhone(phone: string | null | undefined): boolean {
+  return typeof phone === 'string' && SYNTHETIC_PHONE_RE.test(phone);
+}
+
 const pad2 = (n: number) => String(n).padStart(2, '0');
 /** KST 날짜 문자열(YYYY-MM-DD) — d 의 KST 달력일 */
 export function kstDate(d: Date): string {
@@ -316,12 +326,45 @@ async function postSync(path: 'customers' | 'purchases', rows: unknown[], key: D
   return accepted;
 }
 
-/** 키가 가리키는 회사가 시연 회사인지 — 아니면 넣지 않는다(실회사에 합성 데이터 0) */
-async function demoCompanyIdOfKey(apiKey: string): Promise<string> {
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+type EnvLike = Record<string, string | undefined>;
+
+/**
+ * ★ 2026-10-20 시연이 아닌데 합성 데이터를 받아도 되는 회사(실발송을 시험하는 테스트 회사) — ENV SYNTHETIC_DATA_COMPANY_IDS(쉼표·공백).
+ *   실제 고객사가 실수로 받지 않게 **id 를 손으로 적은 곳만** 받는다. uuid 모양이 아닌 글자는 버린다.
+ */
+export function syntheticDataCompanyIds(env: EnvLike = process.env): Set<string> {
+  return new Set(String(env.SYNTHETIC_DATA_COMPANY_IDS || '').split(/[\s,;]+/).map((s) => s.trim().toLowerCase()).filter((s) => UUID_RE.test(s)));
+}
+
+/** 키가 가리키는 회사가 합성 데이터를 받아도 되는지 — 시연 회사이거나 허용 목록 회사. 아니면 넣지 않는다(실회사에 합성 데이터 0) */
+export async function syntheticTargetCompanyIdOfKey(apiKey: string, allow: ReadonlySet<string> = syntheticDataCompanyIds()): Promise<string> {
   const r = await query(`SELECT id FROM companies WHERE api_key = $1`, [apiKey]);
-  const id = r.rows[0]?.id ? String(r.rows[0].id) : '';
-  if (!id || !(await isDemoCompany(id))) throw new Error('합성 데이터 키가 시연 회사 것이 아닙니다. 넣지 않았습니다.');
+  const id = r.rows[0]?.id ? String(r.rows[0].id).toLowerCase() : '';
+  if (!id || !(allow.has(id) || (await isDemoCompany(id)))) throw new Error('합성 데이터 키가 시연 회사·허용 목록 회사 것이 아닙니다. 넣지 않았습니다.');
   return id;
+}
+
+/**
+ * ★ 2026-10-20 매일 워커가 돌 키 목록 — 기존 시연 키 한 쌍(DEMO_SYNC_API_KEY · DEMO_SYNC_SECRET) + SYNTHETIC_SYNC_KEYS(「키:시크릿」 쉼표).
+ *   같은 키는 처음 것만 · 키나 시크릿이 빈 것은 버린다(키 = tk_ + hex · 시크릿 = hex 라 콜론이 들어가지 않는다).
+ */
+export function parseSyntheticSyncKeys(env: EnvLike = process.env): DemoSyncKey[] {
+  const out: DemoSyncKey[] = [];
+  const seen = new Set<string>();
+  const add = (apiKey: string, apiSecret: string) => {
+    const k = apiKey.trim();
+    const s = apiSecret.trim();
+    if (!k || !s || seen.has(k)) return;
+    seen.add(k);
+    out.push({ apiKey: k, apiSecret: s });
+  };
+  add(String(env.DEMO_SYNC_API_KEY || ''), String(env.DEMO_SYNC_SECRET || ''));
+  for (const part of String(env.SYNTHETIC_SYNC_KEYS || '').split(',')) {
+    const i = part.indexOf(':');
+    if (i > 0) add(part.slice(0, i), part.slice(i + 1));
+  }
+  return out;
 }
 
 /** 시드 구매 건수(결정적 · 그날 기준 어제까지) — 시드 스크립트가 적재 완료를 이 수로 판정한다(Codex 2R). 같은 today 로 부른다. */
@@ -340,7 +383,7 @@ export async function isV1DemoCompany(companyId: string): Promise<boolean> {
 
 /** 시드 적재(시드 스크립트가 1회) */
 export async function pushDemoSeed(key: DemoSyncKey, now: Date = new Date()): Promise<{ customers: number; purchases: number }> {
-  const companyId = await demoCompanyIdOfKey(key.apiKey);
+  const companyId = await syntheticTargetCompanyIdOfKey(key.apiKey);
   if (await isV1DemoCompany(companyId)) throw new Error('옛 방식으로 만든 시연 회사입니다. 새 시연 회사(--rebuild)로 다시 만드세요.');
   const seed = buildSeedData(kstDate(now));
   const customers = await postSync('customers', seed.customers, key);
@@ -353,7 +396,7 @@ export async function pushDemoSeed(key: DemoSyncKey, now: Date = new Date()): Pr
  * 어느 단계에서 끊겨도 다음 tick 이 같은 값을 다시 보낸다(이중 가산 0).
  */
 export async function pushDemoDaily(key: DemoSyncKey, now: Date = new Date()): Promise<{ newCustomers: number; repeat: number; purchases: number; skipped?: string }> {
-  const companyId = await demoCompanyIdOfKey(key.apiKey);
+  const companyId = await syntheticTargetCompanyIdOfKey(key.apiKey);
   if (await isV1DemoCompany(companyId)) return { newCustomers: 0, repeat: 0, purchases: 0, skipped: '옛 방식 시연 회사라 넣지 않았어요(.env 키를 새 시연 회사로 바꾸면 이어집니다)' };
   const today = kstDate(now);
   const day = buildDailyBatch(today);
@@ -395,30 +438,43 @@ export async function pushDemoDaily(key: DemoSyncKey, now: Date = new Date()): P
 // ───── 매일 워커 ─────
 
 let timer: NodeJS.Timeout | null = null;
-let lastRunDay = '';
-/** ENV DEMO_SYNC_API_KEY · DEMO_SYNC_SECRET 이 있을 때만 · 07:00 KST 이후 하루 1회(재기동해도 같은 날은 결정적이라 중복 0) */
+/** 키마다 마지막으로 끝낸 날(★1020 여러 회사 · 한 회사가 실패해도 다른 회사는 그날 끝난다) */
+const lastRunDay = new Map<string, string>();
+/**
+ * 키(parseSyntheticSyncKeys)가 하나라도 있을 때만 · 07:00 KST 이후 키마다 하루 1회(재기동해도 같은 날은 결정적이라 중복 0).
+ * 받는 회사 판정 = 시연 회사 또는 허용 목록(SYNTHETIC_DATA_COMPANY_IDS) — 적재 함수 안에서 매번 다시 본다.
+ */
 export function startDemoDataWorker(): void {
-  const apiKey = (process.env.DEMO_SYNC_API_KEY || '').trim();
-  const apiSecret = (process.env.DEMO_SYNC_SECRET || '').trim();
-  if (!apiKey || !apiSecret) return;
+  const keys = parseSyntheticSyncKeys();
+  if (!keys.length) return;
   if (timer) return;
+  let running = false;
   const tick = async () => {
-    const now = new Date();
-    const today = kstDate(now);
-    const kstHour = new Date(now.getTime() + 9 * 3600_000).getUTCHours();
-    if (kstHour < 7 || lastRunDay === today) return;
-    lastRunDay = today;
+    if (running) return;
+    running = true;
     try {
-      const r = await pushDemoDaily({ apiKey, apiSecret }, now);
-      console.log(r.skipped
-        ? `[demo-data] ${today} ${r.skipped}`
-        : `[demo-data] ${today} 시연 합성 데이터 · 새 고객 ${r.newCustomers} · 재구매 ${r.repeat} · 구매 ${r.purchases}`);
-    } catch (err: any) {
-      lastRunDay = '';   // 다음 tick 에 다시
-      console.error('[demo-data] 시연 합성 데이터 적재 실패:', err?.message);
+      const now = new Date();
+      const today = kstDate(now);
+      const kstHour = new Date(now.getTime() + 9 * 3600_000).getUTCHours();
+      if (kstHour < 7) return;
+      for (const key of keys) {
+        if (lastRunDay.get(key.apiKey) === today) continue;
+        const tag = key.apiKey.slice(0, 10);
+        try {
+          const r = await pushDemoDaily(key, now);
+          lastRunDay.set(key.apiKey, today);
+          console.log(r.skipped
+            ? `[demo-data] ${today} ${tag} ${r.skipped}`
+            : `[demo-data] ${today} ${tag} 합성 데이터 · 새 고객 ${r.newCustomers} · 재구매 ${r.repeat} · 구매 ${r.purchases}`);
+        } catch (err: any) {
+          console.error(`[demo-data] ${tag} 합성 데이터 적재 실패(다음 tick 에 다시):`, err?.message);
+        }
+      }
+    } finally {
+      running = false;
     }
   };
   timer = setInterval(() => { void tick(); }, 10 * 60_000);
   setTimeout(() => { void tick(); }, 60_000);
-  console.log('[demo-data] 시연 합성 데이터 워커 시작(매일 07:00 KST 이후 1회)');
+  console.log(`[demo-data] 합성 데이터 워커 시작(매일 07:00 KST 이후 1회 · 키 ${keys.length}개)`);
 }
