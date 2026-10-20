@@ -27,6 +27,9 @@ import { getOwnerCustomerScopeSql } from './store-scope';
 import { buildJourneyGraph, exitSlotOf, type JourneyGraph } from './journey-graph';
 import { describeJourneyTarget } from './journey-step-format';
 import { getCreditCost } from './ai-credit-calc';
+import { activationCostOf } from './journey-activation-cost';
+import { pauseReasonView, type PauseReasonView } from './journey-pause-reason';
+import { operationCredits30dByRoot } from './journey-credit-forecast';
 // ★ 2026-09-30 V2 5차 — 새 판 · 계보(옛 판은 현재 판 카드 안에 접는다 · DDL 전이면 계보 없음)
 import { lineageColumnsReady } from './journey-lineage';
 // ★ 2026-10-09 고객 관계 지도 — 칸 편집 정책(PATCH 게이트와 같은 함수) · 구매 문(가입 안내문이 문마다 다르다)
@@ -154,6 +157,14 @@ export interface MapJourney {
   canNewVersion: boolean;
   /** 이 카드에 접힌 옛 판(진입 닫힘 · 진행 중 고객 마무리 중). */
   olderVersions: Array<{ id: string; name: string; status: string; activeNow: number }>;
+  /** ★ 2026-10-20 V.3 §5-1 — 이번에 켜면 내는 처음 켜기 크레딧(계보당 1번 · 새 판 초안 = 0 · 켜짐 · 멈춤 = 0). 화면은 이 값만 그린다. */
+  activationCost: number;
+  /** ★ V.3 §6-6 — 멈춘 이유 사람 말(멈춤일 때만 · 원문 노출 0). */
+  pause: PauseReasonView | null;
+  /** ★ V.3 §10-3 — 상태 한 줄(서버 판정). */
+  health: JourneyHealth;
+  /** ★ V.3 — 이 계보의 지난 30일 실제 운영 크레딧(원장) · 못 세면 null. */
+  operationCredits30d: number | null;
 }
 
 export interface MapLine {
@@ -179,7 +190,8 @@ export interface MapLine {
   fix: AttachFix | null;
 }
 
-export type AttachFixAction = 'goal_exit_on' | 'allow_reentry_on' | 'pause_and_allow_reentry' | 'activate' | 'create';
+// ★ 2026-10-20 V.3 — 재진입은 켜진 채 그 자리 수정이라 「일시정지하고 다시 받기 켜기」를 걷었다 · 겹침 해소 1클릭 2종을 더했다.
+export type AttachFixAction = 'goal_exit_on' | 'allow_reentry_on' | 'activate' | 'create' | 'exclude_first_purchase' | 'exclude_dormant_return';
 export interface AttachFix { action: AttachFixAction; label: string; journeyId?: string; triggerEvent?: string; activeCount?: number; createMode?: CreateMode }
 
 export interface MapGhost {
@@ -196,6 +208,28 @@ export interface MapOverlap {
   b: string;
   /** 지금 두 여정을 동시에 진행 중인 사람(목표를 이미 이뤘는데 다음 칸 전이라 남아 있는 사람 포함 · "약"). */
   concurrentActive: number;
+  /** ★ V.3 §10-2 — 결과 문장(「같은 구매에 문자 2통 · ○○」) · 서버가 짓는다. */
+  text: string;
+  /** ★ V.3 — 해소 1클릭(첫 구매 빼기 · 돌아온 고객은 환영만). 해소 길이 없는 쌍(상품 ↔ 주문 완료)은 null = 손볼 곳이 아니다(사실 줄만). */
+  fix: AttachFix | null;
+}
+
+/** ★ V.3 §10-3 — 여정마다 상태 한 줄(막힘 > 손볼 곳 > 조용 > 잘 됨 · 멈춤 · 초안 · 끝남). 화면은 이 문장과 행동만 그린다. */
+export interface JourneyHealth {
+  tone: 'blocked' | 'fix' | 'quiet' | 'good' | 'paused' | 'draft' | 'ended';
+  text: string;
+  fix: AttachFix | null;
+}
+
+/** ★ V.3 §10-2 — 지도 머리 요약 한 줄(합칠 수 있는 숫자만 · 누적 들어옴 · 구매는 여정마다 창이 달라 합치지 않는다). */
+export interface MapSummary {
+  activeJourneys: number;
+  /** 지금 여정 안에 있는 고객 수(고객 기준 · 두 여정에 같은 고객이 있어도 한 번) · 보는 사람 범위 */
+  inProgressCustomers: number;
+  /** 손볼 곳(health = 막힘 · 손볼 곳)인 여정 수 */
+  fixCount: number;
+  /** 지난 30일 실제 운영 크레딧(원장 · 회사 전체) · 못 세면 null */
+  operationCredits30d: number | null;
 }
 
 export interface LifecycleMap {
@@ -208,8 +242,10 @@ export interface LifecycleMap {
   overlaps: MapOverlap[];
   /** 이 회사 데이터로 아직 만들 수 없는 시작 사건(사유 = 무엇을 연동하면 열리는지). 빈 곳 찾기의 "데이터가 있어야 열리는 여정". */
   lockedTriggers: Array<{ triggerEvent: string; label: string; reason: string }>;
-  /** 크레딧 단가(단가표 = ai-credit-calc 한 곳) — 화면이 금액을 따로 적지 않게 싣는다. 초안 만들기 = AI 생성 1회 · 켜기 = 최초 활성화 1회. */
-  costs: { generate: number; activate: number };
+  /** 크레딧 단가(단가표 = ai-credit-calc 한 곳) — 화면이 금액을 따로 적지 않게 싣는다. 초안 만들기 = AI 생성 1회 · 켜기 = 최초 활성화 1회(계보당) · 운영 = 보낸 날 하루 1번(계보당). */
+  costs: { generate: number; activate: number; operation: number };
+  /** ★ V.3 §10-2 — 머리 요약 한 줄. */
+  summary: MapSummary;
 }
 
 /**
@@ -387,12 +423,82 @@ export function computeMapLines(marketing: LineJourneyInput[], capOf: (ev: strin
   return out;
 }
 
+/** ★ V.3 §10-2 — 겹침 해소 1클릭(순수). 주문 완료 여정에 옵션을 켠다 · 해소 길 없는 쌍 = null. */
+export function overlapFixFor(a: { id: string; triggerEvent: string }, b: { id: string; triggerEvent: string }): AttachFix | null {
+  const order = a.triggerEvent === 'cdp.purchase' ? a : b.triggerEvent === 'cdp.purchase' ? b : null;
+  if (!order) return null;
+  const other = order === a ? b : a;
+  if (other.triggerEvent === 'purchase.first') return { action: 'exclude_first_purchase', journeyId: order.id, label: '첫 구매 고객은 빼기(한 통만)' };
+  if (other.triggerEvent === 'customer.dormant_return') return { action: 'exclude_dormant_return', journeyId: order.id, label: '돌아온 고객은 환영만(한 통만)' };
+  return null;
+}
+
+/** 손볼 곳 선 상태(이 여정이 고칠 수 있는 것). 받는 쪽 문제(다시 받기 꺼짐)는 고치기 행동이 가리키는 여정에 붙인다. */
+const FIX_LINE_STATES = new Set(['leak', 'reentry_off', 'dormant_mismatch']);
+
+/**
+ * ★ V.3 §10-3 — 여정마다 상태 한 줄(순수). 순서 = 끝남 · 멈춤(시스템이면 막힘) · 초안 · 손볼 곳(선 · 해소 가능한 겹침 · 갈림 결함 · 전체 고객) · 조용 · 잘 됨.
+ */
+export function journeyHealth(
+  j: Pick<MapJourney, 'id' | 'status' | 'windowDays' | 'goalLabel' | 'counts' | 'graph' | 'broadAudience' | 'activationCost' | 'pause'>,
+  lines: Array<Pick<MapLine, 'fromJourneyId' | 'toJourneyId' | 'state' | 'reason' | 'fix'>>,
+  overlaps: Array<Pick<MapOverlap, 'a' | 'b' | 'text' | 'fix'>>,
+): JourneyHealth {
+  if (j.status === 'ended') return { tone: 'ended', text: '끝난 여정이에요.', fix: null };
+  if (j.status === 'paused') {
+    if (j.pause && j.pause.kind !== 'manual') return { tone: 'blocked', text: j.pause.text, fix: null };
+    return { tone: 'paused', text: '멈춰 둔 여정이에요.', fix: null };
+  }
+  if (j.status === 'draft') {
+    return {
+      tone: 'draft',
+      text: j.activationCost > 0 ? `아직 켜지 않았어요 · 처음 켜기 ${j.activationCost}크레딧` : '아직 켜지 않았어요 · 추가 크레딧 0',
+      fix: { action: 'activate', journeyId: j.id, label: '켜기' },
+    };
+  }
+  const line = lines.find((l) => FIX_LINE_STATES.has(l.state) && (l.fix?.journeyId ? l.fix.journeyId === j.id : l.fromJourneyId === j.id));
+  if (line) return { tone: 'fix', text: line.reason, fix: line.fix || null };
+  const ov = overlaps.find((o) => o.fix && o.fix.journeyId === j.id);
+  if (ov) return { tone: 'fix', text: ov.text, fix: ov.fix };
+  if ((j.graph?.issues || []).length > 0) return { tone: 'fix', text: j.graph.issues[0], fix: null };
+  if (j.broadAudience) return { tone: 'fix', text: '조건 없이 전체 고객에게 보내고 있어요.', fix: null };
+  if ((j.counts?.entered || 0) === 0) return { tone: 'quiet', text: `최근 ${j.windowDays}일 들어온 고객이 없어요.`, fix: null };
+  return { tone: 'good', text: `최근 ${j.windowDays}일 ${j.counts.entered.toLocaleString('ko-KR')}명 들어옴 · ${j.counts.goalMet.toLocaleString('ko-KR')}명 ${j.goalLabel}`, fix: null };
+}
+
+/**
+ * ★ 2026-10-20 여정 V.3 §6-4 · §8-2 — 겹침 쌍 판정(순수 · DB 0). 지도 · 모두 켜기 · 하나씩 켜기 · 옵션 저장이 같은 함수를 쓴다.
+ *   쌍 = 계약 겹침 사건(overlapEvents)으로 같은 구매 한 건에 함께 시작될 수 있는 두 여정.
+ *   해소 옵션(주문 완료 여정): 첫 구매 빼기 → 첫 구매와의 쌍 없음 · 돌아온 고객은 환영만 → 휴면 복귀와의 쌍 없음.
+ */
+export function computeOverlapPairs(journeys: Array<{ id: string; triggerEvent: string }>, filtersById: Map<string, Record<string, any>>): Array<{ a: string; b: string }> {
+  const excludes = (j: { id: string; triggerEvent: string }, key: 'exclude_first_purchase' | 'exclude_dormant_return') =>
+    j.triggerEvent === 'cdp.purchase' && filtersById.get(j.id)?.[key] === true;
+  const resolved = (x: { id: string; triggerEvent: string }, y: { id: string; triggerEvent: string }) =>
+    (excludes(x, 'exclude_first_purchase') && y.triggerEvent === 'purchase.first')
+    || (excludes(x, 'exclude_dormant_return') && y.triggerEvent === 'customer.dormant_return');
+  const out: Array<{ a: string; b: string }> = [];
+  const seenPair = new Set<string>();
+  for (const a of journeys) {
+    for (const ev of overlapTriggerEvents(a.triggerEvent)) {
+      for (const b of journeys.filter((x) => x.triggerEvent === ev && x.id !== a.id)) {
+        const key = [a.id, b.id].sort().join('|');
+        if (seenPair.has(key)) continue;
+        seenPair.add(key);
+        if (resolved(a, b) || resolved(b, a)) continue;
+        out.push({ a: a.id, b: b.id });
+      }
+    }
+  }
+  return out;
+}
+
 export async function buildLifecycleMap(companyId: string, viewerUserId?: string | null): Promise<LifecycleMap> {
   const lineageReady = await lineageColumnsReady().catch(() => false);
   // ★ 2026-10-19 B-1010-13 — 숫자(진행 중 · 대기 · 코호트 · 도달 · 이어받음 · 겹침)는 보는 사람 범위로 센다. 여정 · 선 상태 · 겹침 판정은 회사 그대로.
   const scopeSql = await getOwnerCustomerScopeSql(companyId, viewerUserId, 'sc');
   const jr = await query(
-    `SELECT id, name, status, trigger_event, trigger_filters, start_kind, goal_exit_enabled, goal_kind,
+    `SELECT id, name, status, trigger_event, trigger_filters, start_kind, goal_exit_enabled, goal_kind, pause_reason,
             allow_reentry, auto_reentry_enabled, threshold_recipients_per_step, updated_at${lineageReady ? ', lineage_id, entry_closed_at' : ''}
        FROM journeys
       WHERE company_id = $1::uuid AND archived_at IS NULL
@@ -581,12 +687,16 @@ export async function buildLifecycleMap(companyId: string, viewerUserId?: string
         };
       }),
       graph: { edges: graph.edges, exitSlots: graph.exitSlots, issues: graph.issues },
-      edit: stepEditPolicy(String(r.status || ''), inProgressAll.get(id) || 0),
+      edit: stepEditPolicy(String(r.status || ''), inProgressAll.get(id) || 0, startKind),
       capability: capOf(triggerEvent),
       updatedAt: r.updated_at ? new Date(r.updated_at).toISOString() : null,
       lineageId: r.lineage_id ? String(r.lineage_id) : null,
       canNewVersion: lineageReady && (r.status === 'active' || r.status === 'paused') && !r.entry_closed_at,
       olderVersions: [],
+      activationCost: activationCostOf({ id, status: String(r.status || ''), lineage_id: lineageReady ? (r.lineage_id ?? null) : undefined }),
+      pause: String(r.status || '') === 'paused' ? pauseReasonView(r.pause_reason) : null,
+      health: { tone: 'good', text: '', fix: null },   // 선 · 겹침이 정해진 뒤 아래에서 채운다(journeyHealth)
+      operationCredits30d: null,
     };
   });
 
@@ -665,29 +775,44 @@ export async function buildLifecycleMap(companyId: string, viewerUserId?: string
     ln.receiverEntered = Number(r.rows[0]?.receiver_entered || 0);
   }
 
-  // ── 겹침: 계약 겹침 쌍 중 두 여정이 모두 있는 것. 지금 동시에 진행 중인 사람(약).
-  //   ★ 2026-09-30 V2 3차 — 주문 완료 여정이 첫 구매 고객을 빼면(겹침 해소) 첫 구매 여정과는 겹치지 않는다.
-  const excludesFirst = (j: MapJourney) => j.triggerEvent === 'cdp.purchase' && filtersById.get(j.id)?.exclude_first_purchase === true;
+  // ── 겹침: 계약 겹침 쌍 중 두 여정이 모두 있는 것(판정 = computeOverlapPairs 한 곳). 지금 동시에 진행 중인 사람(약).
+  //   ★ 2026-09-30 V2 3차 · ★1020 V.3 — 주문 완료 여정의 해소 옵션(첫 구매 빼기 · 돌아온 고객은 환영만)이면 그 쌍은 겹치지 않는다.
   const overlaps: MapOverlap[] = [];
-  const seenPair = new Set<string>();
-  for (const a of marketing) {
-    for (const ev of overlapTriggerEvents(a.triggerEvent)) {
-      for (const b of marketing.filter((x) => x.triggerEvent === ev && x.id !== a.id)) {
-        const key = [a.id, b.id].sort().join('|');
-        if (seenPair.has(key)) continue;
-        seenPair.add(key);
-        if ((excludesFirst(a) && b.triggerEvent === 'purchase.first') || (excludesFirst(b) && a.triggerEvent === 'purchase.first')) continue;
-        const r = await query(
-          `SELECT COUNT(DISTINCT x.customer_id)::int AS n
-             FROM journey_executions x
-             JOIN journey_executions y ON y.customer_id = x.customer_id AND y.journey_id = $2::uuid AND y.status = 'active'
-            WHERE x.journey_id = $1::uuid AND x.status = 'active'${execScope(scopeSql, 'x')}`,
-          [a.id, b.id],
-        );
-        overlaps.push({ a: a.id, b: b.id, concurrentActive: Number(r.rows[0]?.n || 0) });
-      }
-    }
+  for (const { a, b } of computeOverlapPairs(marketing, filtersById)) {
+    const r = await query(
+      `SELECT COUNT(DISTINCT x.customer_id)::int AS n
+         FROM journey_executions x
+         JOIN journey_executions y ON y.customer_id = x.customer_id AND y.journey_id = $2::uuid AND y.status = 'active'
+        WHERE x.journey_id = $1::uuid AND x.status = 'active'${execScope(scopeSql, 'x')}`,
+      [a, b],
+    );
+    const ja = journeyById.get(a);
+    const jb = journeyById.get(b);
+    const fix = ja && jb ? overlapFixFor(ja, jb) : null;
+    overlaps.push({ a, b, concurrentActive: Number(r.rows[0]?.n || 0), text: `같은 구매에 문자 2통 · ${(ja && jb ? (ja.triggerEvent === 'cdp.purchase' ? jb : ja) : jb || ja)?.name || '여정'}`, fix });
   }
+
+  // ★ V.3 §10-3 — 여정마다 상태 한 줄 · 이 계보 지난 30일 운영 크레딧 · 머리 요약(원장 1번 · 진행 중 고객 1번).
+  const credits = await operationCredits30dByRoot(companyId).catch((e: any) => {
+    console.warn('[lifecycle-map] 운영 크레딧 집계 실패(숫자 없이 그린다):', e?.message || e);
+    return null;
+  });
+  for (const j of journeys) {
+    j.health = journeyHealth(j, lines, overlaps);
+    j.operationCredits30d = credits ? (credits.get(j.lineageId || j.id) || 0) : null;
+  }
+  const ipc = await query(
+    `SELECT COUNT(DISTINCT e.customer_id)::int AS n
+       FROM journey_executions e JOIN journeys jj ON jj.id = e.journey_id
+      WHERE jj.company_id = $1::uuid AND jj.archived_at IS NULL AND e.status = 'active'${execScope(scopeSql, 'e')}`,
+    [companyId],
+  ).catch(() => null);
+  const summary: MapSummary = {
+    activeJourneys: journeys.filter((j) => j.status === 'active').length,
+    inProgressCustomers: Number(ipc?.rows?.[0]?.n || 0),
+    fixCount: journeys.filter((j) => j.health.tone === 'fix' || j.health.tone === 'blocked').length,
+    operationCredits30d: credits ? [...credits.values()].reduce((s, v) => s + v, 0) : null,
+  };
 
   // ── 유령 카드: 윗띠 레인마다 여정이 하나도 없으면 그 레인의 첫 트리거 하나(데이터가 없으면 자물쇠 + 사유).
   const ghosts: MapGhost[] = [];
@@ -723,7 +848,8 @@ export async function buildLifecycleMap(companyId: string, viewerUserId?: string
     ghosts,
     overlaps,
     lockedTriggers,
-    costs: { generate: getCreditCost('journey-ai-generate'), activate: getCreditCost('journey-activate') },
+    costs: { generate: getCreditCost('journey-ai-generate'), activate: getCreditCost('journey-activate'), operation: getCreditCost('journey-operation') },
+    summary,
   };
 }
 
@@ -756,9 +882,8 @@ function fixForLine(ln: MapLine, byId: Map<string, MapJourney>): AttachCheckRow[
       return b && b.status === 'paused' ? { action: 'activate', journeyId: b.id, label: '받는 여정 다시 켜기' } : null;
     case 'reentry_off':
       if (!b) return null;
-      return b.status === 'active'
-        ? { action: 'pause_and_allow_reentry', journeyId: b.id, label: '일시정지하고 다시 받기 켜기' }
-        : { action: 'allow_reentry_on', journeyId: b.id, label: '다음 구매 때 다시 받기 켜기' };
+      // ★ V.3 §4-1 — 재진입은 켜진 채 그 자리(다음 진입부터)라 일시정지 없이 켠다.
+      return { action: 'allow_reentry_on', journeyId: b.id, label: '다음 구매 때 다시 받기 켜기' };
     default:
       return null;
   }
@@ -787,7 +912,7 @@ export function buildAttachCheck(map: LifecycleMap, journeyIds: string[]): Attac
     }
     for (const o of map.overlaps.filter((x) => x.a === id || x.b === id)) {
       const other = byId.get(o.a === id ? o.b : o.a);
-      push({ id: `overlap:${[o.a, o.b].sort().join('|')}`, journeyId: id, kind: 'overlap', tier: 'warn', text: `${j.name} · ${other?.name || '여정'}`, reason: '같은 구매 한 번에 두 여정이 함께 시작될 수 있어요. 켤 때 어떻게 할지 고릅니다.', fix: null });
+      push({ id: `overlap:${[o.a, o.b].sort().join('|')}`, journeyId: id, kind: 'overlap', tier: o.fix ? 'warn' : 'empty', text: `${j.name} · ${other?.name || '여정'}`, reason: o.fix ? '같은 구매 한 번에 두 여정이 함께 시작돼 문자가 2통 나가요.' : '같은 구매 한 번에 두 여정이 함께 시작될 수 있어요. 켤 때 어떻게 할지 고릅니다.', fix: o.fix });
     }
     if (j.status !== 'active' && j.status !== 'ended') {
       const dup = marketing.find((x) => x.id !== id && x.status === 'active' && x.triggerEvent === j.triggerEvent);

@@ -25,6 +25,7 @@ import { extractJsonFromAiText } from './ai-json';
 import { query } from '../config/database';
 import { callAIWithFallback } from '../services/ai';
 import { buildJourneyStats, JourneyFullStats, JourneyStepStat } from './journey-stats';
+import { JOURNEY_SUBJECT_MAX_CHARS } from './journey-step-limits';
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 // 외부 노출 인터페이스
@@ -377,7 +378,7 @@ ${stepsDescription || '(단계 영역 없음)'}
       delayHours: typeof s?.delayHours === 'number' ? Math.max(0, Math.min(720, s.delayHours)) : 24,
       channel: (['sms', 'lms', 'mms'].includes(s?.channel) ? s.channel : null) as 'sms' | 'lms' | 'mms' | null,
       messageTemplate: typeof s?.messageTemplate === 'string' ? s.messageTemplate.slice(0, 2000) : null,
-      subject: typeof s?.subject === 'string' ? s.subject.slice(0, 50) : null,
+      subject: typeof s?.subject === 'string' ? s.subject.slice(0, JOURNEY_SUBJECT_MAX_CHARS) : null,
       conditionType: typeof s?.conditionType === 'string' ? s.conditionType : null,
       reasoning: typeof s?.reasoning === 'string' ? s.reasoning : '',
       expectedImpact: typeof s?.expectedImpact === 'string' ? s.expectedImpact : '',

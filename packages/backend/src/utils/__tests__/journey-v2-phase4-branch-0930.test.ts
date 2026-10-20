@@ -112,7 +112,9 @@ describe('저장 경로', () => {
     const endInsert = inserts[1];
     const sql: string = endInsert.sql;
     const cols = sql.slice(sql.indexOf('(') + 1, sql.indexOf(') VALUES')).split(',').map((c: string) => c.trim());
-    const vals = sql.slice(sql.indexOf('VALUES (') + 8, sql.lastIndexOf(')')).split(',').map((v: string) => v.trim());
+    // 괄호 안 쉼표는 나누지 않는다(★1020 V.3 첫 값 = COALESCE($20::uuid, gen_random_uuid()) · 화면이 만든 칸 id)
+    const splitTop = (s: string) => { const out: string[] = []; let d = 0; let cur = ''; for (const ch of s) { if (ch === '(') d++; if (ch === ')') d--; if (ch === ',' && d === 0) { out.push(cur); cur = ''; } else cur += ch; } out.push(cur); return out; };
+    const vals = splitTop(sql.slice(sql.indexOf('VALUES (') + 8, sql.lastIndexOf(')'))).map((v: string) => v.trim());
     const m = vals[cols.indexOf('delay_hours')].match(/^\$(\d+)/);
     expect(endInsert.params[Number(m![1]) - 1]).toBe(0);
   });

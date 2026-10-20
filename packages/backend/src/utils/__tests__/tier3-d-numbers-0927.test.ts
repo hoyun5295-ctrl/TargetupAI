@@ -132,7 +132,7 @@ describe('R296 · R417 · R204 표시', () => {
     const a = src('journey-activation.ts');
     const b = between(a, 'export async function activateJourneyGuarded', '\nexport ');
     expect(b).toContain('row.trigger_filters || {}, JOURNEY_COUNT_CAP, undefined, undefined,');
-    expect(src('..', 'routes', 'ai.ts')).toContain('activateJourneyGuarded(companyId, req.params.id, userId');
+    expect(src('..', 'routes', 'ai.ts')).toContain('activateJourneyGuarded(companyId, journeyId, userId');   // ★ 1020 V.3 — 단건 주소가 겹침 확인을 위해 id 를 먼저 꺼낸다
   });
   it('식별 고객 수 = 전체', () => {
     const i = src('inapp-funnel-stats.ts');

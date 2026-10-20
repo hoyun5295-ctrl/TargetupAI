@@ -78,11 +78,12 @@ describe('JRN', () => {
     expect(b.indexOf('await markNotified(rows);')).toBeLessThan(b.indexOf('await bulkInsertSmsQueue('));
     expect(b).toContain('SET result_notified_at = NULL WHERE id = ANY($1::uuid[])');
   });
-  it('R298 자동 재진입 켜기 = 운영 중 금지 · 사전검사 무효화', () => {
+  it('R298 자동 재진입 = 옵션 규칙과 같은 판정(★1020 V.3 §4-1 · 켜진 채 그 자리 · 표식은 판정이 정함 · 읽은 상태를 쓰기 조건)', () => {
     const a = src('..', 'routes', 'ai.ts');
     const b = between(a, "router.patch('/operator/journeys/:id/auto-reentry'", '\nrouter.');
-    expect(b).toContain('last_pretest_passed_at = CASE WHEN $3 THEN NULL ELSE last_pretest_passed_at END');
-    expect(b).toContain("AND (NOT $3 OR status <> 'active')");
+    expect(b).toContain('journeyOptionEditVerdict(String(st.rows[0].status), { autoReentryEnabled: enabled })');
+    expect(b).toContain('last_pretest_passed_at = CASE WHEN $4 THEN last_pretest_passed_at ELSE NULL END');
+    expect(b).toContain('AND status = $5');
   });
   it('R424 진단 목표 = 실제 목표 칸 · 완주율 = 통계와 같은 값', () => {
     const d = src('journey-step-diagnosis.ts');

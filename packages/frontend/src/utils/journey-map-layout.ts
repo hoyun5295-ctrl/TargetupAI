@@ -9,6 +9,8 @@
  *    칸 배열을 보고 갈래를 다시 추론하지 않는다 · 좌표는 저장하지 않는다.
  * ⛔ 다른 열끼리의 높이는 시간을 뜻하지 않는다(문을 출구 높이에 맞추지 않는다) — 열마다 고정 계단 오프셋만.
  * 백엔드 vitest(journey-map-layout-invariants)가 이 파일을 불러 "끝점 누락 0 · 노드 겹침 0"을 단언한다.
+ * ★ 2026-10-20 여정 V.3 §10-2 — 기본 [한눈에](요약 카드 · 높이는 데이터로 정한다 · 카드가 같은 상수로 그린다) · [칸까지] = 옛 척추 그대로.
+ *   계단 0 · 열 간격 72(1440 가로 스크롤 0) · 상품 띠로 가는 선은 띠 머리 한 점으로 묶는다(이름표 없음 · 상품 카드가 이어받음을 말한다).
  */
 import type { JourneyLane, LifecycleMapData, MapJourney, MapLine, LineTier } from './journey-map';
 
@@ -23,10 +25,10 @@ export const PRODUCT_LANE: JourneyLane = 'product';
 export const L = {
   padX: 24,
   colW: 264,
-  gap: 96,
+  gap: 72,
   headH: 40,
   top: 16,
-  stair: 36,
+  stair: 0,
   doorH: 58,
   quietH: 40,
   intH: 26,
@@ -36,7 +38,7 @@ export const L = {
   waitH: 34,
   endH: 34,
   cardGap: 28,
-  ghostH: 132,
+  ghostH: 150,
   railOff: 14,
   bandGap: 56,
   bandHeadH: 30,
@@ -55,6 +57,32 @@ export interface LayoutOpts {
   showQuiet: ReadonlySet<string>;
   /** 미리보기 1줄(넓은 화면). */
   preview: boolean;
+  /** ★ V.3 — 한눈에(요약 카드) · 거짓 = 칸까지(척추). */
+  glance?: boolean;
+}
+
+/**
+ * ★ V.3 §10-2 — 요약 카드 행 높이(px). MapJourneyCard 가 같은 상수로 그린다(배치는 DOM 을 재지 않는다 · 두 벌 금지).
+ *   머리 · 한 문장 · 칸 띠 · 숫자 3칸 · (있을 때만) 손볼 곳 · 멈춘 이유 한 줄 · 겹침 줄(최대 2) · 바닥 버튼.
+ */
+export const S = { pad: 12, head: 20, gap: 8, line: 18, strip: 40, nums: 44, note: 20, overlap: 24, actions: 32 } as const;
+export const SUMMARY_OVERLAP_MAX = 2;
+
+/** 요약 카드에 줄로 나오는 손볼 곳 · 멈춘 이유(서버 health · pause) — 카드와 배치가 같은 판정을 쓴다. */
+export function summaryNote(j: MapJourney): { tone: 'fix' | 'quiet' | 'paused'; text: string } | null {
+  if (j.pause) return { tone: 'paused', text: j.pause.text };
+  // 겹침 해소(첫 구매 빼기 · 돌아온 고객은 환영만)가 손볼 곳이면 겹침 줄이 같은 사실과 [한 통만 보내기]를 이미 보여 준다.
+  if (j.health && (j.health.tone === 'fix' || j.health.tone === 'blocked') && !String(j.health.fix?.action || '').startsWith('exclude_')) return { tone: 'fix', text: j.health.text };
+  if (j.health && j.health.tone === 'quiet') return { tone: 'quiet', text: j.health.text };
+  return null;
+}
+
+export function summaryCardHeight(j: MapJourney, overlapCount: number): number {
+  const rows: number[] = [S.head, S.line, S.strip, S.nums];
+  if (summaryNote(j)) rows.push(S.note);
+  for (let i = 0; i < Math.min(overlapCount, SUMMARY_OVERLAP_MAX); i++) rows.push(S.overlap);
+  rows.push(S.actions);
+  return S.pad * 2 + rows.reduce((a, b) => a + b, 0) + S.gap * (rows.length - 1);
 }
 
 export interface Box { x: number; y: number; w: number; h: number }
@@ -79,7 +107,11 @@ export interface CardLayout extends Box {
 
 export interface GhostLayout extends Box { triggerEvent: string; lane: JourneyLane; inlet: { x: number; y: number; fromTop: boolean } }
 export interface QuietLayout extends Box { lane: string; ids: string[]; label: string }
-export interface LineLayout { line: MapLine; d: string; mx: number; my: number; tier: LineTier }
+export interface LineLayout {
+  line: MapLine; d: string; mx: number; my: number; tier: LineTier;
+  /** ★ V.3 — 상품 띠 머리 한 점으로 묶인 선(이름표를 그리지 않는다 · 같은 보내는 여정의 선은 한 줄로 겹친다). */
+  bundled?: boolean;
+}
 
 export interface MapLayout {
   width: number;
@@ -109,6 +141,16 @@ export function stepHeight(kind: string, preview: boolean): number {
   if (kind === 'condition') return L.condH;
   if (kind === 'wait') return L.waitH;
   return L.waitH;
+}
+
+/** 요약 카드 한 장(한눈에) — 칸 상자 · 출구 레일 없음 · 선은 카드 머리 높이에서 나가고 들어온다. */
+export function layoutSummaryCard(j: MapJourney, x: number, y: number, w: number, overlapCount: number): CardLayout {
+  const h = summaryCardHeight(j, overlapCount);
+  const midY = y + S.pad + S.head / 2;
+  return {
+    journeyId: j.id, open: false, x, y, w, h, door: { x, y, w, h }, steps: [], endY: null, exits: [], rail: null, diamond: null,
+    origin: { x: x + w, y: midY }, inlet: { x, y: midY, fromTop: false },
+  };
 }
 
 /** 여정 카드 한 장 배치(열린 척추 또는 문만). */
@@ -184,6 +226,11 @@ export function layoutMap(data: LifecycleMapData, opts: LayoutOpts): MapLayout {
   const visible = data.journeys.filter((j) => matchesFilter(j, opts.statusFilter, opts.search));
   const flow = visible.filter((j) => j.band === 'flow');
   const cardW = L.colW;
+  const overlapCount = new Map<string, number>();
+  for (const o of data.overlaps || []) for (const id of [o.a, o.b]) overlapCount.set(id, (overlapCount.get(id) || 0) + 1);
+  const place = (j: MapJourney, x: number, y: number, open: boolean) => (opts.glance
+    ? layoutSummaryCard(j, x, y, cardW, overlapCount.get(j.id) || 0)
+    : layoutCard(j, x, y, cardW, open, opts.preview));
 
   const placeLane = (laneKey: JourneyLane, list: MapJourney[], x: number, startY: number): number => {
     let y = startY;
@@ -194,14 +241,14 @@ export function layoutMap(data: LifecycleMapData, opts: LayoutOpts): MapLayout {
       const byDefault = (j.status === 'active' || j.status === 'paused') && spines < 2;
       const open = !opts.collapsed.has(j.id) && (byDefault || opts.expanded.has(j.id));
       if (open && byDefault) spines += 1;
-      const c = layoutCard(j, x, y, cardW, open, opts.preview);
+      const c = place(j, x, y, open);
       cards.push(c);
       y += c.h + L.cardGap;
     }
     if (sleepy.length > 0) {
       if (opts.showQuiet.has(laneKey)) {
         for (const j of sleepy) {
-          const c = layoutCard(j, x, y, cardW, opts.expanded.has(j.id), opts.preview);
+          const c = place(j, x, y, opts.expanded.has(j.id));
           cards.push(c);
           y += c.h + L.cardGap;
         }
@@ -256,9 +303,9 @@ export function layoutMap(data: LifecycleMapData, opts: LayoutOpts): MapLayout {
       const byDefault = (j.status === 'active' || j.status === 'paused') && spines < 3;
       const open = !opts.collapsed.has(j.id) && !isQuiet(j, opts.statusFilter) && (byDefault || opts.expanded.has(j.id));
       if (open && byDefault) spines += 1;
-      const probe = layoutCard(j, 0, 0, cardW, open, opts.preview);
+      const probe = place(j, 0, 0, open);
       const pos = placeInBand(probe.h);
-      const c = layoutCard(j, pos.x, pos.y, cardW, open, opts.preview);
+      const c = place(j, pos.x, pos.y, open);
       c.inlet = { x: pos.x + cardW / 2, y: pos.y, fromTop: true };
       cards.push(c);
     }
@@ -289,10 +336,12 @@ export function layoutMap(data: LifecycleMapData, opts: LayoutOpts): MapLayout {
       if (g) { inlet = g.inlet; toX = g.x; }
     }
     if (!inlet || toX == null) continue;
+    // ★ V.3 §10-2 — 상품 띠로 가는 선은 띠 머리 한 점으로(부채꼴 · 내려꽂는 곡선 0). 이어받음 숫자는 상품 카드가 말한다.
+    const bundled = inlet.fromTop && band != null;
     const sameColumn = !inlet.fromTop && Math.abs(toX - from.x) < 1;
-    const target = sameColumn ? { x: toX + cardW, y: inlet.y, fromTop: false } : inlet;
+    const target = bundled ? { x: band!.x + 28, y: band!.y + 2, fromTop: true } : sameColumn ? { x: toX + cardW, y: inlet.y, fromTop: false } : inlet;
     const geo = bezier(from.origin, target, sameColumn);
-    lines.push({ line: ln, d: geo.d, mx: geo.mx, my: geo.my, tier: ln.tier });
+    lines.push({ line: ln, d: geo.d, mx: geo.mx, my: geo.my, tier: ln.tier, ...(bundled ? { bundled: true } : {}) });
   }
 
   return {

@@ -30,6 +30,7 @@ import { query } from '../config/database';
 import { applyVariableDefaults, withJourneyValidationReset } from './journey-builder';
 // ★ Phase2 A (2026-06-26): α/β는 실측 count에서 도출(단일 진실) — bandit-arm 순수 모듈.
 import { deriveBanditArm } from './bandit-arm';
+import { JOURNEY_SUBJECT_MAX_CHARS } from './journey-step-limits';
 
 // ════════════════════════════════════════════════════════════════════
 // 타입
@@ -565,7 +566,7 @@ export async function createJourneyStepVariant(input: {
       input.stepId,
       input.variantId.slice(0, 8),
       input.messageTemplate != null ? applyVariableDefaults(input.messageTemplate.slice(0, 2000)) : null,
-      input.subject?.slice(0, 50) || null,
+      input.subject?.slice(0, JOURNEY_SUBJECT_MAX_CHARS) || null,
       input.channel || null,
       input.alimtalkTemplateCode || null,
       input.alimtalkVariableMap ? JSON.stringify(input.alimtalkVariableMap) : null,

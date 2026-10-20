@@ -65,6 +65,16 @@ training-logger(logTrainingData · logCampaignTraining) 맨 앞 · AI 메모리 
 - 행동: 시연 회사로 최후 방어 CT 호출 → throw · prepaidRefund → no-op · 판정 반전 변이에서 테스트 실패 확인.
 - 소스: 사람 입구 라우트 목록에 `assertNotDemoCompany` 가 있다 · 여정 실행기 절단점이 잔액 확인보다 앞이다.
 
+## 9-1. ★1020 시연이 아닌 테스트 회사에도 합성 데이터 (Harold 지시 · 인비토 회사 = suran · gwchae · sgbaek · mobile)
+
+- **목적** = 실발송은 그대로 두고(시연 표식 is_demo 를 켜지 않는다) 도달 불가 번호 고객 · 구매만 매일 쌓아 여정 · 자동마케팅을 실제 발송으로 시험한다.
+- **허용** = 시연 회사이거나 ENV `SYNTHETIC_DATA_COMPANY_IDS`(쉼표)에 id 를 적은 회사만(`demo-data.ts syntheticTargetCompanyIdOfKey`). 목록에 없는 실회사 키는 거절.
+- **매일 워커** = 키 여러 개(`DEMO_SYNC_API_KEY`·`DEMO_SYNC_SECRET` 한 쌍 + `SYNTHETIC_SYNC_KEYS` 「키:시크릿」 쉼표) · 키마다 하루 1회 · 한 회사 실패가 다른 회사를 막지 않는다.
+- **재설정** = `scripts/reset-synthetic-test-company.ts <회사 id>`(점검 → `--apply --expect`): 허용 목록 · 비시연 · 전원 가짜 번호(`SYNTHETIC_PHONE_PATTERN` = 010-0xxx · 010-1xxx) 확인 → 고객 · 구매 + 외래키 자식 백업(권한 600) 뒤 삭제 → 싱크 시크릿 재발급(파일 먼저) → 시드 3,000명. 여정 · 자동마케팅은 만들지 않는다 · 수신거부 보존.
+- **삭제 계획기** = `utils/fk-delete-plan.ts`(퇴역 시연 회사 삭제 스크립트와 공용 · DB 카탈로그가 정한다).
+- 외래키 없는 customer_id 표(customer_stores 등)는 건드리지 않는다(새 고객은 새 uuid).
+- 시험 = `utils/__tests__/synthetic-test-company-1020.test.ts`.
+
 ## 10. 범위 밖 (기록)
 
 - 이메일 발송 경로는 게이트를 두지 않았다(합성 고객에 이메일 0 · 사람이 누르는 이메일 테스트 발송은 남는다 · 필요하면 email-channel 공용 함수에 같은 가드).

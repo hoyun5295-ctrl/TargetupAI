@@ -100,6 +100,7 @@ import { sendTypeLabel } from '../utils/send-type-axis';
 // ★2026-09-25 무료 체험 스팸 검사는 비용 집계에서 뺀다(조건 한 벌 = spam-trial CT)
 import { spamBillableTestSql, isSpamTestBillable } from '../utils/spam-trial';
 import { swrCache } from '../utils/swr-cache';
+import { journeyCreditForecast } from '../utils/journey-credit-forecast';   // ★ 2026-10-20 여정 V.3 §5-5 요금제 신청 목록 숫자
 
 const router = Router();
 
@@ -2846,6 +2847,7 @@ router.get('/plan-requests', authenticate, requireSuperAdmin, async (req: Reques
         p_current.plan_name as current_plan_name,
         p_requested.plan_name as requested_plan_name,
         p_requested.monthly_price as requested_plan_price,
+        p_requested.ai_credits_per_month as requested_plan_credits,
         u.name as user_name, u.login_id as user_login_id,
         admin.name as processed_by_name
       FROM plan_requests pr
@@ -2858,8 +2860,18 @@ router.get('/plan-requests', authenticate, requireSuperAdmin, async (req: Reques
         CASE WHEN pr.status = 'pending' THEN 0 ELSE 1 END,
         pr.created_at DESC
     `);
-    
-    res.json({ requests: result.rows });
+
+    // ★ 2026-10-20 여정 V.3 §5-5 — 대기 신청마다 고객 신청 창과 같은 예상 숫자(승인은 막지 않는다 · 결정은 사람).
+    //   보여 주기만 하는 칸이라 못 세면 null(화면 = 「확인 못 함」) · 목록 전체를 실패시키지 않는다.
+    const requests = await Promise.all(result.rows.map(async (r: any) => {
+      if (r.status !== 'pending') return r;
+      const journeyForecast = await journeyCreditForecast(String(r.company_id)).catch((e: any) => {
+        console.warn('[plan-requests] 여정 예상 크레딧 조회 실패(목록은 그대로):', r.company_id, e?.message || e);
+        return null;
+      });
+      return { ...r, journey_forecast: journeyForecast };
+    }));
+    res.json({ requests });
   } catch (error) {
     console.error('플랜 신청 조회 실패:', error);
     res.status(500).json({ error: '플랜 신청 조회 실패' });

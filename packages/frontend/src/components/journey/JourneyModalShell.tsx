@@ -11,6 +11,10 @@
  *   - 바깥(배경) 클릭으로 닫기
  *
  * 모양(헤더·본문·푸터)은 각 모달이 그린다 — 껍데기는 동작만 가진다.
+ *
+ * ★ 2026-10-20 여정 V.3(Codex 적대 B 2R) — **화면 맨 위 창만 키를 받는다.** 껍데기마다 문서 잡기 단계에서 Esc · Tab 을 받아
+ *   창이 겹치면(여정 작업 화면 위 다시 켜기 · 미리 보기 · 켜기 확인 창) 아래 창이 먼저 받아 함께 닫히거나 초점을 끌어갔다.
+ *   맨 위 판정 = 화면 한가운데 점을 덮은 요소가 이 창 안인가(등록 순서 · 초점 위치와 무관 · 껍데기가 아닌 덮개 창도 가린다).
  */
 import { useLightSurface } from '../zone/surface-tone';
 import { useEffect, useRef } from 'react';
@@ -35,6 +39,8 @@ interface Props {
    * 기본 false = 기존 소비처 4곳 동작 불변.
    */
   disableDismiss?: boolean;
+  /** ★ 2026-10-20 V.3 §9-1 — 여정 작업 화면(전체 높이 창). 기본 false = 내용 높이 · 화면 92% 상한(기존 소비처 불변). */
+  fullHeight?: boolean;
 }
 
 export default function JourneyModalShell({
@@ -42,9 +48,11 @@ export default function JourneyModalShell({
   panelClassName = 'w-full max-w-2xl',
   zIndexClassName = 'z-[60]',
   disableDismiss = false,
+  fullHeight = false,
 }: Props) {
   const light = useLightSurface(); // ★ 2026-09-30 AI 존(밝은 작업대)에서 열리면 밝은 짝 · 그 밖은 원래 짙은 값
   const panelRef = useRef<HTMLDivElement | null>(null);
+  const rootRef = useRef<HTMLDivElement | null>(null);
   const restoreRef = useRef<HTMLElement | null>(null);
 
   // ★2026-09-02 아래 effect가 이 둘을 **의존성으로 갖지 않기 위해** ref로 최신 값만 읽는다.
@@ -74,7 +82,15 @@ export default function JourneyModalShell({
     };
     const raf = requestAnimationFrame(focusFirst);
 
+    // 화면 맨 위 창인가 — 한가운데 점을 덮은 요소가 이 창(배경 포함) 안이면 맨 위다. 판정할 수 없으면(측정 불가) 맨 위로 본다.
+    const isTop = () => {
+      const root = rootRef.current;
+      if (!root) return false;
+      const el = typeof document.elementFromPoint === 'function' ? document.elementFromPoint(window.innerWidth / 2, window.innerHeight / 2) : null;
+      return !el || root.contains(el);
+    };
     const onKeyDown = (e: KeyboardEvent) => {
+      if ((e.key === 'Escape' || e.key === 'Tab') && !isTop()) return;
       if (e.key === 'Escape') {
         e.stopPropagation();
         if (!disableDismissRef.current) onCloseRef.current();   // opt-out 시 Esc 무동작(전파만 막는다 — 배경 단축키 오발동 차단)
@@ -115,6 +131,7 @@ export default function JourneyModalShell({
 
   return createPortal(
     <div
+      ref={rootRef}
       className={`fixed inset-0 ${zIndexClassName} flex items-end justify-center bg-black/70 p-0 backdrop-blur-sm md:items-center md:p-6`}
       onMouseDown={(e) => { if (e.target === e.currentTarget && !disableDismiss) onClose(); }}
     >
@@ -124,7 +141,7 @@ export default function JourneyModalShell({
         aria-modal="true"
         aria-labelledby={labelledBy}
         tabIndex={-1}
-        className={light ? `flex max-h-[92vh] flex-col overflow-hidden rounded-t-2xl border border-slate-200 bg-white shadow-2xl outline-none md:rounded-2xl ${panelClassName}` : `flex max-h-[92vh] flex-col overflow-hidden rounded-t-2xl border border-white/10 bg-slate-900 shadow-2xl outline-none md:rounded-2xl ${panelClassName}`}
+        className={`flex ${fullHeight ? 'h-[100dvh] md:h-[96vh]' : 'max-h-[92vh]'} flex-col overflow-hidden rounded-t-2xl border shadow-2xl outline-none md:rounded-2xl ${light ? 'border-slate-200 bg-white' : 'border-white/10 bg-slate-900'} ${panelClassName}`}
       >
         {children}
       </div>

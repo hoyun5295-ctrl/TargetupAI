@@ -48,7 +48,7 @@ export default function JourneyStepNotifyToggle({
   const [saving, setSaving] = useState(false);
 
   const isFirstOrLast = stepOrder === 1 || stepOrder === totalSteps;
-  const defaultEffective = isFirstOrLast ? 'ON' : 'OFF';
+  const defaultEffective = isFirstOrLast ? '켬' : '끔';
 
   const onSelect = async (next: ToggleState) => {
     if (saving || next === state) return;
@@ -66,14 +66,14 @@ export default function JourneyStepNotifyToggle({
       });
       const data = await res.json();
       if (res.ok && data.success) {
-        toast.success(`담당자 알림 = ${next === 'on' ? '항상 ON' : next === 'off' ? '항상 OFF' : '기본 (첫/마지막 ON)'}`);
+        toast.success(`담당자 알림을 ${next === 'on' ? '늘 켰어요' : next === 'off' ? '늘 껐어요' : '기본(첫 · 마지막 칸만 켬)으로 바꿨어요'}.`);
         if (onChange) onChange(stateToValue(next));
       } else {
-        toast.error(data?.error || '저장 사고');
+        toast.error(data?.error || '저장하지 못했어요.');
         setState(oldState);
       }
     } catch (e: any) {
-      toast.error(e?.message || '저장 호출 사고');
+      toast.error(e?.message || '저장하지 못했어요.');
       setState(oldState);
     } finally {
       setSaving(false);
@@ -82,9 +82,9 @@ export default function JourneyStepNotifyToggle({
 
   return (
     <div className="flex flex-col gap-1.5">
-      <div className="flex items-center gap-1.5 text-[11px] text-slate-500">
+      <div className="flex items-center gap-1.5 text-[12px] text-slate-500">
         <BellRing className="w-3 h-3" />
-        담당자 알림 (발송 2시간 전 + 결과)
+        담당자 알림(보내기 2시간 전 · 보낸 결과)
         {saving && <Loader2 className="w-3 h-3 animate-spin text-violet-700" />}
       </div>
       <div className="inline-flex items-center bg-white border border-slate-200 rounded-lg p-0.5 gap-0.5">
@@ -92,7 +92,7 @@ export default function JourneyStepNotifyToggle({
           active={state === 'on'}
           onClick={() => onSelect('on')}
           icon={BellRing}
-          label="ON"
+          label="늘 켬"
           color="emerald"
           disabled={saving}
         />
@@ -100,7 +100,7 @@ export default function JourneyStepNotifyToggle({
           active={state === 'default'}
           onClick={() => onSelect('default')}
           icon={Sparkles}
-          label={`기본 (${defaultEffective})`}
+          label={`기본(${defaultEffective})`}
           color="violet"
           disabled={saving}
         />
@@ -108,12 +108,12 @@ export default function JourneyStepNotifyToggle({
           active={state === 'off'}
           onClick={() => onSelect('off')}
           icon={BellOff}
-          label="OFF"
+          label="늘 끔"
           color="rose"
           disabled={saving}
         />
       </div>
-      <div className="text-[10px] text-slate-400 italic">첫·마지막 단계 기본 켬 / 중간 기본 끔</div>
+      <div className="text-[12px] text-slate-400">기본은 첫 칸 · 마지막 칸만 켜요.</div>
     </div>
   );
 }
@@ -138,7 +138,7 @@ function ToggleBtn({
       type="button"
       onClick={onClick}
       disabled={disabled}
-      className={`px-2.5 py-1 rounded-md text-[11px] font-semibold flex items-center gap-1 border transition-all ${
+      className={`px-2.5 py-1 rounded-md text-[12px] font-semibold flex items-center gap-1 border transition-all ${
         active ? activeColor : 'border-transparent text-slate-500 hover:text-slate-700 hover:bg-white'
       } ${disabled ? 'opacity-50 cursor-not-allowed' : ''}`}
     >

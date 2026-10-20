@@ -14,6 +14,7 @@
 
 import crypto from 'crypto';
 import { query, pool } from '../config/database';
+import { pauseJourneyLineage } from './journey-lineage';
 
 export interface PauseTokenInput {
   stepId: string;
@@ -255,7 +256,8 @@ export async function pauseJourneyByToken(token: string): Promise<{ ok: true; ch
   const before = await query(`SELECT status FROM journeys WHERE id = $1::uuid AND company_id = $2::uuid`, [payload.journey_id, payload.company_id]);
   if (!before.rows[0]) return { ok: false, error: 'token_invalid_or_expired' };
   const wasActive = String(before.rows[0].status) === 'active';
-  await pauseJourney(payload.journey_id, '담당자가 안내 문자 링크에서 여정 전체를 일시정지했습니다.');
+  // ★ 2026-10-20 여정 V.3 §6-5 — 사람 멈춤 = 같은 계보의 켜진 판 전부(옛 판 마무리분 포함).
+  await pauseJourneyLineage(payload.company_id, payload.journey_id, '담당자가 안내 문자 링크에서 여정 전체를 일시정지했습니다.');
   // ★ Codex C 1R — 멈춤은 위 CT 가 끝냈다. 뒤 조회 · 기록이 실패해도 실패로 답하지 않는다(조회 실패 = 멈춘 CT 가 성공한 것으로 · 기록 실패 = 로그)
   const after = await query(`SELECT status FROM journeys WHERE id = $1::uuid`, [payload.journey_id]).catch(() => null);
   const changed = wasActive && (after ? String(after.rows[0]?.status) === 'paused' : true);

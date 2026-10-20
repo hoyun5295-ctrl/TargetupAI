@@ -252,7 +252,15 @@ async function processJourneyTrigger(j: ActiveJourney): Promise<{ matched: numbe
   // ★ Fix #2 (2026-06-05): 대량 차단기를 LIMIT 500이 무력화하던 문제 정정.
   //   상한 설정 시 cap+1까지 추출 → 진짜 급증(후보 > 상한)만 정지. 미설정(무제한)이면 500 스로틀로 회차 분산.
   const cap = j.threshold_recipients_per_step;
-  const extractLimit = cap != null ? Number(cap) + 1 : JOURNEY_COUNT_CAP;
+  let extractLimit = cap != null ? Number(cap) + 1 : JOURNEY_COUNT_CAP;
+  // ★ 2026-10-20 여정 V.3 §8-1 — 하루 몫(backfill_per_day · 상한과 다른 값): 기존 고객을 KST 하루 몫만큼 나눠 받는다.
+  //   오늘 이미 들어온 수를 빼고 남은 몫만 · 한 회차는 상한까지 · 하루 몫이 있으면 「상한 초과 = 여정 전체 멈춤」 대신 다음 회차 · 다음 날로 넘긴다.
+  const backfill = backfillPerDayOf(j);
+  if (backfill != null) {
+    const room = backfill - (await countEnteredTodayKst(j.id));
+    if (room <= 0) return { matched: 0, enqueued: 0, skipped: 0 };
+    extractLimit = Math.min(room, cap != null ? Number(cap) : room);
+  }
   // ★ §11-5 #7(Codex 2R) — 관측 적재를 추출보다 먼저: 새 고객의 현재 등급을 state로 기록(진입 없음).
   //   이 행이 없으면 그 고객의 이후 변동을 영영 못 잡는다. 42703(미마이그레이션)만 삼킨다.
   if (j.trigger_event === 'customer.grade_changed') {
@@ -267,7 +275,7 @@ async function processJourneyTrigger(j: ActiveJourney): Promise<{ matched: numbe
   if (ids.length === 0) {
     return { matched: 0, enqueued: 0, skipped: 0 };
   }
-  if (cap != null && ids.length > Number(cap)) {
+  if (backfill == null && cap != null && ids.length > Number(cap)) {
     await pauseJourneyForCompany(
       j.id,
       j.company_id,
@@ -344,7 +352,12 @@ async function qualifyPurchaseTransition(j: ActiveJourney, batch: CdpCursorBatch
   // ★ 2026-09-30 V2 3차 — 겹침 해소(담당자가 고른 것만): 주문 완료 여정에서 첫 구매 고객 빼기 = 이전 구매가 있는 고객만.
   //   키가 없는 기존 행은 그대로(아래 return). 첫 구매 여정과 같은 판정(양 문 합산 이전 구매)을 쓴다.
   const excludeFirst = j.trigger_event === 'cdp.purchase' && (j.trigger_filters || {}).exclude_first_purchase === true;
-  if (j.trigger_event !== 'purchase.first' && j.trigger_event !== 'customer.dormant_return' && !excludeFirst) return;
+  // ★ 2026-10-20 여정 V.3 §8-2 — 「돌아온 고객은 환영만」: 주문 완료 여정에서 휴면에서 돌아온 이번 구매를 뺀다(휴면 복귀 여정이 환영을 맡는다 ·
+  //   다음 구매부터는 직전 구매가 가까워 자연히 주문 완료가 받는다 = 이어짐). 기준 = 그 회사에 켜진 휴면 복귀 여정의 기준일(여럿이면 가장 짧은 값 ·
+  //   휴면 복귀 판정과 같은 클램프) · 켜진 휴면 복귀가 없으면 겹침도 없어 빼지 않는다.
+  const excludeDormant = j.trigger_event === 'cdp.purchase' && (j.trigger_filters || {}).exclude_dormant_return === true;
+  const excludeDormantDays = excludeDormant ? await loadDormantReturnDays(j.company_id) : null;
+  if (j.trigger_event !== 'purchase.first' && j.trigger_event !== 'customer.dormant_return' && !excludeFirst && excludeDormantDays == null) return;
   if (batch.ids.length === 0) return;
   // 도착 역순 배치(늦게 온 옛 구매가 앞에)에서 첫 등장 행이 최신 구매일 수 있다(Codex 지적) —
   // 자격 판정 기준은 그 고객 배치 행들 중 **가장 이른 발생 시각**으로 잡는다.
@@ -364,6 +377,16 @@ async function qualifyPurchaseTransition(j: ActiveJourney, batch: CdpCursorBatch
   }
   if (excludeFirst) {
     batch.ids = batch.ids.filter((id) => prior.has(id));
+    if (excludeDormantDays == null) return;
+  }
+  if (excludeDormantDays != null) {
+    batch.ids = batch.ids.filter((id) => {
+      const last = prior.get(id);
+      if (!last) return true;   // 이전 구매 없음 = 첫 구매(복귀 아님) · 첫 구매 빼기는 위 갈래가 정한다
+      const at = new Date(enteredAt.get(id) ?? Date.now()).getTime();
+      if (at - new Date(last).getTime() >= excludeDormantDays * 24 * 3600 * 1000) return false;
+      return true;
+    });
     return;
   }
   // 휴면 복귀 — 직전 구매가 휴면 기준일 이상 과거여야 "돌아온 것"이다. 이전 구매가 없으면 첫 구매지 복귀가 아니다.
@@ -375,6 +398,36 @@ async function qualifyPurchaseTransition(j: ActiveJourney, batch: CdpCursorBatch
     const at = new Date(enteredAt.get(id) ?? Date.now()).getTime();
     return at - new Date(last).getTime() >= ms;
   });
+}
+
+/** ★ V.3 §8-1 — 하루 몫(상시 · 휴면만 · 1 이상). 사건형(구매 등)은 사건마다 들어오므로 하루 몫이 없다. */
+export function backfillPerDayOf(j: { trigger_event: string; trigger_filters: any }): number | null {
+  if (j.trigger_event !== 'custom' && j.trigger_event !== 'customer.dormant') return null;
+  const n = Number((j.trigger_filters || {}).backfill_per_day);
+  return Number.isFinite(n) && n >= 1 ? Math.floor(n) : null;
+}
+
+/** ★ V.3 §8-1 — 오늘(KST) 이 여정에 들어온 실행 수(대조군 포함 · 진입이 곧 몫을 쓴다). */
+async function countEnteredTodayKst(journeyId: string): Promise<number> {
+  const r = await query(
+    `SELECT COUNT(*)::int AS n FROM journey_executions
+      WHERE journey_id = $1::uuid
+        AND entered_at >= ((NOW() AT TIME ZONE 'Asia/Seoul')::date::timestamp AT TIME ZONE 'Asia/Seoul')`,
+    [journeyId],
+  );
+  return Number(r.rows[0]?.n || 0);
+}
+
+/** ★ V.3 §8-2 — 회사에 켜진 휴면 복귀 여정의 기준일(가장 짧은 값 · 없으면 null). 휴면 복귀 자격 판정과 같은 클램프(기본 30 · 1~100000). */
+async function loadDormantReturnDays(companyId: string): Promise<number | null> {
+  const r = await query(
+    // ★ Codex 적대 A6 — 진입이 닫혔거나 마지막 날이 지난 판(진행 중 고객 마무리분)은 빼지 않는 기준이다(그 판은 새 고객을 안 받아 양쪽 다 놓친다).
+    `SELECT trigger_filters->>'dormant_days' AS days FROM journeys
+      WHERE company_id = $1::uuid AND trigger_event = 'customer.dormant_return' AND status = 'active' AND archived_at IS NULL${await entryOpenClause()}`,
+    [companyId],
+  );
+  if (r.rows.length === 0) return null;
+  return Math.min(...r.rows.map((x: any) => clampInt(x.days, 30, 1, 100000)));
 }
 
 /**

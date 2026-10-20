@@ -206,19 +206,22 @@ async function ok(name: string, fn: () => Promise<void>) {
   });
 
   console.log('[ai-credit-tx] v2 운영 source — 마이너스 허용(−1개월 grant 상한)');
-  await ok('journey-operation base0 plan300 cost10 → baseAfter=-10 (음수 허용)', async () => {
-    const client = makeMockClient({ row: { base: 0, purchased: 0, cap: null, reset_at: SAME_MONTH_RESET, plan_credits: 300, billing_type: 'prepaid', overage_limit: 0 } });
-    const r = await _deductWithClient(client, { companyId: 'c1', cost: 10, source: 'journey-operation', aiCallLogId: 'op1' }, NOW);
-    assert.strictEqual(r.deducted, true);
-    assert.strictEqual(r.baseAfter, -10);
+  // ★ 2026-10-20 여정 V.3 D1 — 여정 운영은 마이너스 0(선불 · 후불 같음 · 그달 크레딧 안에서만)
+  await ok('journey-operation base5 plan300 cost10 → throw (마이너스 0 · 선불)', async () => {
+    const client = makeMockClient({ row: { base: 5, purchased: 0, cap: null, reset_at: SAME_MONTH_RESET, plan_credits: 300, billing_type: 'prepaid', overage_limit: 0 } });
+    let threw: any = null;
+    try {
+      await _deductWithClient(client, { companyId: 'c1', cost: 10, source: 'journey-operation', aiCallLogId: 'op1' }, NOW);
+    } catch (e) { threw = e; }
+    assert.ok(threw instanceof InsufficientCreditError, '여정 운영 마이너스 0');
   });
-  await ok('journey-operation base-295 plan300 cost10 → -305 < -300 throw', async () => {
-    const client = makeMockClient({ row: { base: -295, purchased: 0, cap: null, reset_at: SAME_MONTH_RESET, plan_credits: 300, billing_type: 'prepaid', overage_limit: 0 } });
+  await ok('journey-operation base5 plan750 postpaid limit5000 cost10 → throw (후불도 같음)', async () => {
+    const client = makeMockClient({ row: { base: 5, purchased: 0, cap: null, reset_at: SAME_MONTH_RESET, plan_credits: 750, billing_type: 'postpaid', overage_limit: 5000 } });
     let threw: any = null;
     try {
       await _deductWithClient(client, { companyId: 'c1', cost: 10, source: 'journey-operation', aiCallLogId: 'op2' }, NOW);
     } catch (e) { threw = e; }
-    assert.ok(threw instanceof InsufficientCreditError, '−1개월 grant 상한 초과 throw');
+    assert.ok(threw instanceof InsufficientCreditError, '후불 여정 운영도 마이너스 0');
   });
   await ok('continuous-operator-send도 운영군 — base0 plan300 cost10 → -10', async () => {
     const client = makeMockClient({ row: { base: 0, purchased: 0, cap: null, reset_at: SAME_MONTH_RESET, plan_credits: 300, billing_type: 'prepaid', overage_limit: 0 } });

@@ -57,6 +57,8 @@ export interface ZoneStamp {
   text: string;
   onRefresh?: () => void;
   loading?: boolean;
+  /** ★ 2026-10-20 V.3 — 마우스를 올리면 보이는 한 줄(선택 · 없으면 종전 그대로). */
+  title?: string;
 }
 
 export interface ZoneHeaderProps {
@@ -235,7 +237,7 @@ export default function ZoneHeader({
         </button>
       ))}
       {stamp && (
-        <button type="button" onClick={stamp.onRefresh} disabled={!stamp.onRefresh || stamp.loading} className="inline-flex items-center gap-1 text-slate-400 hover:text-white disabled:cursor-default whitespace-nowrap" aria-label="다시 읽기">
+        <button type="button" onClick={stamp.onRefresh} disabled={!stamp.onRefresh || stamp.loading} title={stamp.title} className="inline-flex items-center gap-1 text-slate-400 hover:text-white disabled:cursor-default whitespace-nowrap" aria-label="다시 읽기">
           <RotateCw className={`w-3 h-3 ${stamp.loading ? 'animate-spin' : ''}`} />{stamp.text}
         </button>
       )}

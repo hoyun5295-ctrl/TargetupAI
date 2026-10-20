@@ -13,7 +13,8 @@
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
-vi.mock('../config/database', () => ({ query: vi.fn(), pool: { connect: vi.fn() } }));
+// ★ 1020 V.3(Codex 적대 A9) — 켜기는 계보 컬럼 유무와 무관하게 한 트랜잭션(pool.connect) · 그 연결의 문장도 같은 query 흉내로 센다.
+vi.mock('../config/database', () => { const query = vi.fn(); return { query, pool: { connect: vi.fn(async () => ({ query: (...a: any[]) => query(...a), release: () => undefined })) } }; });
 vi.mock('./company-data-profile', () => ({ getCompanyJourneyFacts: vi.fn() }));
 vi.mock('../services/ai', () => ({ callAIWithFallback: vi.fn() }));
 vi.mock('./company-memory', () => ({ buildMemoryPromptContext: vi.fn() }));

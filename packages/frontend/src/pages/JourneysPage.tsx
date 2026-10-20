@@ -6,7 +6,6 @@ import ZoneSection from '../components/zone/ZoneSection';
 import ZoneSegmented from '../components/zone/ZoneSegmented';
 import { JOURNEY_TABS } from '../components/zone/zone-tabs';
 import StatusPill from '../components/console/StatusPill';
-import { MK_MODAL, MK_MODAL_BACKDROP } from '../utils/make-ui';
 import { zoneModule } from '../constants/ai-operator-modules';
 import { journeyRowActionPlan, journeyRowActionLabel, JOURNEY_STATUS_LABEL, type JourneyRowActionId } from '../utils/journey-row-actions';
 import { useEffect, useMemo, useRef, useState } from 'react';
@@ -31,13 +30,11 @@ import {
   // ★ 2026-09-29 여정 V2 1차 — 생애 지도 입구
   Map as MapIcon,
 } from 'lucide-react';
-import JourneyVariantsEditor from '../components/journey/JourneyVariantsEditor';
 import JourneyMmsUploader from '../components/journey/JourneyMmsUploader';
 import LiquidPreviewModal from '../components/journey/LiquidPreviewModal';
 // ★ D211+ Phase 3-fix (2026-05-23 Harold 명시): native confirm/prompt 영구 폐기 — 커스텀 다크 톤 모달 정합
 import JourneyActionConfirmModal, { JourneyActionMode } from '../components/journey/JourneyActionConfirmModal';
 // ★ D211+ Phase A 4번 (2026-05-23 Harold 명시): 흐름 다이어그램 시각화
-import JourneyFlowDiagram from '../components/journey/JourneyFlowDiagram';
 // ★ D218+ (2026-05-26): 활성화 자동 검증 + 정지 이력 + 담당자 알림 토글 신규
 import JourneyActivationConfirmModal from '../components/journey/JourneyActivationConfirmModal';
 import JourneyPauseLogsModal from '../components/journey/JourneyPauseLogsModal';
@@ -47,7 +44,6 @@ import TargetRecipientsModal, { arrayPager } from '../components/TargetRecipient
 import JourneyMessageEditModal from '../components/journey/JourneyMessageEditModal';
 // 고객 데이터 없으면 AI 문안 생성 전 안내 (공용 게이트)
 import { useCustomerDataGate, CustomerDataRequiredBanner, CustomerDataRequiredModal } from '../components/CustomerDataGate';
-import JourneyStepNotifyToggle from '../components/journey/JourneyStepNotifyToggle';
 import AlimtalkChannelPanel, { validateAlimtalkChannelState, type AlimtalkSenderProfile, type AlimtalkTemplate, type AlimtalkChannelState } from '../components/alimtalk/AlimtalkChannelPanel';
 // ★ 2026-08-02 §13 화면 흐름 — 자연어 → 추천 모달 → 스텝별 전환 → 브리핑 모달
 import JourneyStepStudio from '../components/journey/JourneyStepStudio';
@@ -61,12 +57,11 @@ import InfoAlertJourneyBuilder, { type InfoAlertBuildResult } from '../component
 import DateAnchorJourneyBuilder, { type DateAnchorBuildResult } from '../components/journey/DateAnchorJourneyBuilder';
 import { TRIGGER_EVENTS } from '../utils/journey-trigger-catalog';
 // ★ 2026-09-29 여정 V2 0차 ⑤⑦ — 칸 종류 · 흐름 색 표기는 공용 유틸 한 곳.
-import { stepTypeLabel, funnelBarClass } from '../utils/journey-labels';
 // ★ 2026-08-08 — 문안 placeholder(혜택·링크) 판정·치환 단일 정의(스튜디오 카드와 같은 규약).
 import { fillBenefitPlaceholders, fillUrlPlaceholders, isSendableUrl } from '../utils/message-placeholders';
 // ★ 2026-08-08 — 다듬기 결과는 비포/애프터로 본다. 하이라이트는 직접발송 모달과 같은 CT.
 import { highlightAdditions } from '../utils/text-diff';
-import { calculateSmsBytes } from '../utils/formatDate';
+import { calculateSmsBytes, LMS_SUBJECT_MAX_CHARS } from '../utils/formatDate';
 // ★ 2026-09-26 한줄로 V2 m068 — 보낼 수 없는 글자 판정(게이트웨이 CP949 표)
 import { findUnsupportedSmsChars } from '../utils/smsSafeChars';
 import { buildAdMessageFront, buildAdSubjectFront } from '../utils/formatDate';
@@ -74,7 +69,10 @@ import { detectLiquidSyntax, renderLiquid, flattenCustomerForLiquid, SAMPLE_CUST
 // ★ D210+ Phase 2-fix6 (Harold 명시 2026-05-23): 변수 하이라이트 + 머지 미리보기 컨트롤타워.
 import { highlightVars, mergeAndHighlightVars, mergeVarsPlain } from '../utils/highlightVars';
 import ConfirmModal, { type ConfirmState } from '../components/ConfirmModal';
-import JourneyOptionsEditor from '../components/journey/JourneyOptionsEditor';
+import JourneyWorkspace from '../components/journey/workspace/JourneyWorkspace';
+import PhoneComposer from '../components/journey/PhoneComposer';
+import type { PauseReasonView } from '../utils/journey-map';
+import { useJourneyActions } from '../components/journey/workspace/useJourneyActions';
 import { useToast } from '../components/ToastProvider';
 // ★ 2026-10-10 한 줄 묻기 — 질문이면 회사 데이터로 답한다(설계서 docs/2026-10-10-oneline-ask-design.md)
 import { useLineAsk } from '../hooks/useLineAsk';
@@ -130,6 +128,11 @@ interface JourneyRow {
   holdout_count?: number;
   paused_at: string | null;
   pause_reason: string | null;
+  /** ★ V.3 §6-6 — 멈춘 이유 사람 말(서버 pauseReasonView · 원문 pause_reason 은 그리지 않는다). */
+  pause_view?: PauseReasonView | null;
+  threshold_recipients_per_step?: number | null;
+  /** ★ V.3 §5-1 — 이번에 켜면 내는 처음 켜기 크레딧(서버 판정). */
+  activation_cost?: number;
   created_at: string;
   // ★ D211+ Phase 3 (2026-05-23 Harold 명시): 보관함 영역 (soft delete)
   archived_at?: string | null;
@@ -612,21 +615,6 @@ export default function JourneysPage() {
   const [opt080Number, setOpt080Number] = useState('');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [expandedId, setExpandedId] = useState<string | null>(null);
-  // ★ 2026-10-11 여정 상세 창 — 상세 읽기 실패를 여정마다 기억한다(창이 도는 표시에 갇히지 않게 · 늦게 실패한 다른 여정이 지우지 않게 · Codex 1011 R1)
-  const [detailFailed, setDetailFailed] = useState<Record<string, true>>({});
-  const [detailsMap, setDetailsMap] = useState<Record<string, JourneyDetail>>({});
-  // ★ D210+ Phase 3 (2026-05-23 Harold 명시): step별 funnel 통계 영역 (JourneyStepStat 활용)
-  const [statsMap, setStatsMap] = useState<Record<string, JourneyStepStatFrontend[]>>({});
-  // ★ D210+ Phase 3 (2026-05-23 Harold 명시): 다중 미리보기 영역 (preview-samples endpoint 활용)
-  const [samplesMap, setSamplesMap] = useState<Record<string, PreviewSample[]>>({});
-  const [samplesTotalMap, setSamplesTotalMap] = useState<Record<string, { total: number; capped: boolean }>>({});
-  const [activeSampleLabel, setActiveSampleLabel] = useState<Record<string, string>>({});
-  // ★ D211+ Phase 2 (2026-05-23 Harold 명시): step 진단 + next step 추천 영역
-  const [diagnosisMap, setDiagnosisMap] = useState<Record<string, JourneyStepDiagnosis>>({});
-  const [diagnosisLoading, setDiagnosisLoading] = useState<Record<string, boolean>>({});
-  const [nextStepMap, setNextStepMap] = useState<Record<string, NextStepRecommendation>>({});
-  const [nextStepLoading, setNextStepLoading] = useState<Record<string, boolean>>({});
   // ★ D211+ Phase 3 (2026-05-23 Harold 명시): status 필터 토글 (보관함 영역 분리)
   const [statusFilter, setStatusFilter] = useState<JourneyStatusFilter>('all');
   /**
@@ -640,15 +628,6 @@ export default function JourneysPage() {
   // ★ D218+ (2026-05-26): 활성화 자동 검증 모달 + 정지 이력 모달
   const [activationModal, setActivationModal] = useState<{ journeyId: string; journeyName: string; journeyStatus: string } | null>(null);
   const [confirm, setConfirm] = useState<ConfirmState | null>(null);
-  // 상세 창: Esc 로 닫는다 · 목록에서 사라진 여정(보관 · 삭제 뒤 다시 읽기)은 창을 닫는다(다시 나타날 때 저절로 열리지 않게)
-  useEffect(() => {
-    if (!expandedId) return;
-    if (!loading && !journeys.some((x) => x.id === expandedId)) { setExpandedId(null); return; }
-    // 확인 창(자동 재진입 등)이 위에 떠 있으면 Esc 는 그 창 몫이다(둘이 함께 닫히지 않게)
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape' && !confirm) setExpandedId(null); };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [expandedId, journeys, loading, confirm]);
   const [pauseLogsModal, setPauseLogsModal] = useState<{ journeyId: string; journeyName: string } | null>(null);
   // ★ 2026-07-11 [타겟확인] — 여정별 1회 로드 캐시 + 클라 페이징 (0710 자동마케팅 패턴 미러)
   const [targetModal, setTargetModal] = useState<{ journeyId: string; journeyName: string } | null>(null);
@@ -679,10 +658,6 @@ export default function JourneysPage() {
   };
   // 문안 수정 모달 — 초안·일시정지 여정만 (활성은 일시정지 후)
   const [editMessageModal, setEditMessageModal] = useState<{ journeyId: string; journeyName: string; journeyStatus: string } | null>(null);
-  // ★ D211+ Phase A (2026-05-23 Harold 명시): 시뮬레이션 + 실시간 위치 영역
-  const [simulationMap, setSimulationMap] = useState<Record<string, any>>({});
-  const [simulationLoading, setSimulationLoading] = useState<Record<string, boolean>>({});
-  const [livePositionsMap, setLivePositionsMap] = useState<Record<string, any>>({});
 
   // One-shot AI 생성 흐름
   const [objective, setObjective] = useState('');
@@ -716,8 +691,6 @@ export default function JourneysPage() {
   const [reviewName, setReviewName] = useState('');
   const [reviewCallback, setReviewCallback] = useState('');
   const [reviewUseStorePhone, setReviewUseStorePhone] = useState(false);
-  // ★ D189 #1 (2026-05-22): JourneyVariantsEditor 토글 — main view step별 A/B 테스트 편집 영역
-  const [variantsExpandedStepIds, setVariantsExpandedStepIds] = useState<Set<string>>(new Set());
   // ★ D189 #2 (2026-05-22): 알림톡 채널 패널 데이터 — 회사 발신프로필 + 템플릿 + 활성 필드 (review view kakao step UI용)
   const [alimtalkSenders, setAlimtalkSenders] = useState<AlimtalkSenderProfile[]>([]);
   const [alimtalkTemplates, setAlimtalkTemplates] = useState<AlimtalkTemplate[]>([]);
@@ -776,6 +749,7 @@ export default function JourneysPage() {
       if (od?.success) setOpportunities(Array.isArray(od.opportunities) ? od.opportunities : []);
       if (jd.success) {
         setJourneys(jd.journeys || []);
+        if (Number.isFinite(Number(jd.costs?.operation))) setOperationCost(Number(jd.costs.operation));
         // 이 목록이 어느 필터의 성공 응답인지 함께 적는다(요청 시점 값 — 늦게 온 옛 응답이면 지금 필터와 어긋난다).
         setLoadedStatus(statusFilter);
       }
@@ -829,6 +803,15 @@ export default function JourneysPage() {
   // ★ 2026-09-29 여정 V2 1차 — 생애 지도 · 빈 곳 찾기의 [만들기]가 이 화면으로 온다(?preset=시작 사건&objective=문장).
   //   기존 "오늘의 여정 기회" 1클릭 생성과 같은 경로(handleAIGenerate)를 한 번만 부른다. 고객 수 게이트가 읽힌 뒤에 부른다.
   const [searchParams, setSearchParams] = useSearchParams();
+  // ★ 2026-10-20 여정 V.3 §9-1 — 작업 화면 = 주소 ?journey=ID&step=ID(지도와 같은 방식 · 뒤로 가기 · 새로 고침에도 같은 창 · 목록 스크롤 유지).
+  const wsJourney = searchParams.get('journey');
+  const wsStep = searchParams.get('step');
+  const openWorkspace = (id: string, step?: string | null) => setSearchParams((prev) => {
+    const n = new URLSearchParams(prev); n.set('journey', id); if (step) n.set('step', step); else n.delete('step'); return n;
+  }, { replace: searchParams.has('journey') });
+  const closeWorkspace = () => setSearchParams((prev) => { const n = new URLSearchParams(prev); n.delete('journey'); n.delete('step'); return n; }, { replace: true });
+  const [operationCost, setOperationCost] = useState(10);
+  const journeyActions = useJourneyActions({ onChanged: () => { void loadAll(); }, operationCost });
   const presetHandledRef = useRef(false);
   useEffect(() => {
     if (presetHandledRef.current || customerGate.loading) return;
@@ -968,196 +951,6 @@ export default function JourneysPage() {
     alimtalkNextContents: state.nextContents,
     alimtalkNextSubject: state.nextSubject,
   });
-
-  const loadDetail = async (journeyId: string, force = false) => {
-    if (!force && detailsMap[journeyId]) return;
-    try {
-      const res = await fetch(`/api/ai/operator/journeys/${journeyId}`, {
-        headers: { Authorization: `Bearer ${token()}` },
-      });
-      const data = await res.json();
-      if (data.success) {
-        setDetailsMap((prev) => ({ ...prev, [journeyId]: { journey: data.journey, steps: data.steps } }));
-        setDetailFailed((prev) => { if (!prev[journeyId]) return prev; const n = { ...prev }; delete n[journeyId]; return n; });
-      } else setDetailFailed((prev) => ({ ...prev, [journeyId]: true }));
-    } catch { setDetailFailed((prev) => ({ ...prev, [journeyId]: true })); }
-  };
-
-  // ★ D210+ Phase 3 (2026-05-23 Harold 명시): step별 funnel 통계 영역 fetch (buildJourneyStats 활용)
-  const loadStats = async (journeyId: string) => {
-    if (statsMap[journeyId]) return;
-    try {
-      const res = await fetch(`/api/ai/operator/journeys/${journeyId}/stats`, {
-        headers: { Authorization: `Bearer ${token()}` },
-      });
-      const data = await res.json();
-      // ★ 2026-09-27 한줄로 V2 R273 — 응답은 { success, stats }(stats.steps). 옛: 최상위 steps를 읽어 늘 거짓 → 스텝 통계가 안 나오고 펼칠 때마다 재조회.
-      const steps = data?.stats?.steps;
-      if (data.success && Array.isArray(steps)) {
-        setStatsMap((prev) => ({ ...prev, [journeyId]: steps }));
-      }
-    } catch {}
-  };
-
-  // ★ D210+ Phase 3 (2026-05-23 Harold 명시): 다중 미리보기 6 영역 fetch (preview-samples endpoint 활용)
-  const loadSamples = async (journeyId: string) => {
-    if (samplesMap[journeyId]) return;
-    try {
-      const res = await fetch(`/api/ai/operator/journeys/${journeyId}/preview-samples`, {
-        headers: { Authorization: `Bearer ${token()}` },
-      });
-      const data = await res.json();
-      if (data.success && Array.isArray(data.samples)) {
-        setSamplesMap((prev) => ({ ...prev, [journeyId]: data.samples }));
-        setSamplesTotalMap((prev) => ({ ...prev, [journeyId]: { total: Number(data.total) || 0, capped: !!data.capped } }));
-        if (data.samples.length > 0 && !activeSampleLabel[journeyId]) {
-          setActiveSampleLabel((prev) => ({ ...prev, [journeyId]: data.samples[0].label }));
-        }
-      }
-    } catch {}
-  };
-
-  // ★ D211+ Phase 2 (2026-05-23 Harold 명시): step별 진단 fetch (buildJourneyStats + 분류 영역 자동)
-  const loadDiagnosis = async (journeyId: string) => {
-    if (diagnosisMap[journeyId] || diagnosisLoading[journeyId]) return;
-    setDiagnosisLoading((prev) => ({ ...prev, [journeyId]: true }));
-    try {
-      const res = await fetch(`/api/ai/operator/journeys/${journeyId}/step-diagnosis`, {
-        headers: { Authorization: `Bearer ${token()}` },
-      });
-      const data = await res.json();
-      if (data.success && data.diagnosis) {
-        setDiagnosisMap((prev) => ({ ...prev, [journeyId]: data.diagnosis }));
-      }
-    } catch {}
-    finally {
-      setDiagnosisLoading((prev) => ({ ...prev, [journeyId]: false }));
-    }
-  };
-
-  // ★ D211+ Phase A 1번 (2026-05-23 Harold 명시): 시뮬레이션 영역 — 회사 admin 1-click 호출 의무 (AI 호출 X / 단순 SQL 영역)
-  const loadSimulation = async (journeyId: string) => {
-    if (simulationLoading[journeyId]) return;
-    setSimulationLoading((prev) => ({ ...prev, [journeyId]: true }));
-    try {
-      const res = await fetch(`/api/ai/operator/journeys/${journeyId}/simulate`, {
-        headers: { Authorization: `Bearer ${token()}` },
-      });
-      const data = await res.json();
-      if (data.success && data.simulation) {
-        setSimulationMap((prev) => ({ ...prev, [journeyId]: data.simulation }));
-      }
-    } catch {}
-    finally {
-      setSimulationLoading((prev) => ({ ...prev, [journeyId]: false }));
-    }
-  };
-
-  // ★ D211+ Phase A 2번 (2026-05-23 Harold 명시): 실시간 위치 영역 — expand 시 자동 fetch (단순 SQL)
-  const loadLivePositions = async (journeyId: string) => {
-    if (livePositionsMap[journeyId]) return;
-    try {
-      const res = await fetch(`/api/ai/operator/journeys/${journeyId}/live-positions`, {
-        headers: { Authorization: `Bearer ${token()}` },
-      });
-      const data = await res.json();
-      if (data.success && data.snapshot) {
-        setLivePositionsMap((prev) => ({ ...prev, [journeyId]: data.snapshot }));
-      }
-    } catch {}
-  };
-
-  // ★ D211+ Phase 2 (2026-05-23 Harold 명시): 다음 단계 추천 fetch (AI 호출 비용 영역 — 회사 admin 1-click 호출 의무)
-  const loadNextStep = async (journeyId: string) => {
-    if (nextStepLoading[journeyId]) return;
-    setNextStepLoading((prev) => ({ ...prev, [journeyId]: true }));
-    try {
-      const res = await fetch(`/api/ai/operator/journeys/${journeyId}/recommend-next-step`, {
-        headers: { Authorization: `Bearer ${token()}` },
-      });
-      const data = await res.json();
-      if (data.success && data.recommendation) {
-        setNextStepMap((prev) => ({ ...prev, [journeyId]: data.recommendation }));
-      }
-    } catch {}
-    finally {
-      setNextStepLoading((prev) => ({ ...prev, [journeyId]: false }));
-    }
-  };
-
-  /**
-   * ★ 2026-08-02 §13-1 — 저장된 여정에 스텝을 더한다(맨 뒤). AI 추천을 클릭 한 번으로 반영하는 자리.
-   *   ⛔ 운영 중 여정은 서버가 거부한다(사전 스팸검사를 건너뛴 문안이 나가기 때문) — 사유를 그대로 보여준다.
-   */
-  const [savedStepBusy, setSavedStepBusy] = useState<string | null>(null);
-  const addSavedStep = async (journeyId: string, step: Record<string, any>) => {
-    setSavedStepBusy(journeyId);
-    try {
-      const res = await fetch(`/api/ai/operator/journeys/${journeyId}/steps`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token()}` },
-        body: JSON.stringify(step),
-      });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok || !data?.success) {
-        toast.error(data?.error || '스텝 추가 실패');
-        return;
-      }
-      toast.success(`스텝 ${data.stepOrder}을(를) 추가했습니다. 활성화하면 스팸 사전검사를 다시 받습니다.`);
-      await loadDetail(journeyId, true);
-      await loadAll();
-    } catch (e: any) {
-      toast.error(e?.message || '스텝 추가 중 오류');
-    } finally {
-      setSavedStepBusy(null);
-    }
-  };
-
-  /** 저장된 여정의 스텝 삭제 — 서버가 재번호까지 한 트랜잭션에서 한다(순번 구멍 = 여정 사망). */
-  const deleteSavedStep = (journeyId: string, stepId: string, stepOrder: number) => {
-    setConfirm({
-      mode: 'danger',
-      title: '스텝 삭제',
-      description: `${stepOrder}번째 스텝을 지웁니다. 뒤 스텝의 순서가 하나씩 당겨집니다. 이미 발송된 스텝이거나 곧 받을 고객이 진행 중이면 지워지지 않습니다.`,
-      confirmLabel: '삭제',
-      onConfirm: async () => {
-        setSavedStepBusy(journeyId);
-        try {
-          const res = await fetch(`/api/ai/operator/journeys/${journeyId}/steps/${stepId}`, {
-            method: 'DELETE',
-            headers: { Authorization: `Bearer ${token()}` },
-          });
-          const data = await res.json().catch(() => ({}));
-          if (!res.ok || !data?.success) {
-            toast.error(data?.error || '스텝 삭제 실패');
-            return;
-          }
-          toast.success('스텝을 지우고 순서를 다시 매겼습니다.');
-          await loadDetail(journeyId, true);
-          await loadAll();
-        } catch (e: any) {
-          toast.error(e?.message || '스텝 삭제 중 오류');
-        } finally {
-          setSavedStepBusy(null);
-        }
-      },
-    });
-  };
-
-  const toggleExpand = (journeyId: string) => {
-    if (expandedId === journeyId) setExpandedId(null);
-    else {
-      setExpandedId(journeyId);
-      loadDetail(journeyId);
-      // ★ D210+ Phase 3 (2026-05-23 Harold 명시): expand 시 stats + samples 영역 함께 fetch
-      loadStats(journeyId);
-      loadSamples(journeyId);
-      // ★ D211+ Phase 2 (2026-05-23 Harold 명시): expand 시 step별 진단 자동 fetch (AI 호출 X — DB 영역 빠른 영역)
-      loadDiagnosis(journeyId);
-      // ★ D211+ Phase A 2번 (2026-05-23 Harold 명시): expand 시 실시간 위치 자동 fetch (DB 영역 빠른 영역)
-      loadLivePositions(journeyId);
-    }
-  };
 
   // ════════ One-shot AI 생성 ════════
   // ★ 2026-08-08 이어달리기 — 3번째 인자 preferTriggerEvent: 추천이 약속한 트리거를 서버가 고정한다.
@@ -1783,13 +1576,22 @@ export default function JourneysPage() {
     }
 
     // ★ D218+ (2026-05-26): activate = 자동 검증 모달 진입 (옛 native confirm 폐기 + ConfirmModal 정합)
+    // ★ 2026-10-20 V.3 §6-7 — 다시 켜기(멈춤) = 한 단계 한 줄 · 멈추기 = 1클릭(확인 창 0) · 공용 훅(지도 · 작업 화면과 한 벌).
+    if (action === 'activate' && journey?.status === 'paused') {
+      journeyActions.activate({ id: journeyId, name: journeyName, status: 'paused', goalExitEnabled: journey.goal_exit_enabled === true, thresholdRecipients: journey.threshold_recipients_per_step ?? null, activationCost: Number(journey.activation_cost || 0), pause: journey.pause_view || null });
+      return;
+    }
     if (action === 'activate') {
       setActivationModal({ journeyId, journeyName, journeyStatus: journey?.status || 'draft' });
       return;
     }
+    if (action === 'pause') {
+      void journeyActions.pause({ id: journeyId, name: journeyName, status: journey?.status || 'active' });
+      return;
+    }
 
-    // pause/end = 커스텀 모달(JourneyActionConfirmModal) 통합 — native confirm 폐기.
-    if (action === 'pause' || action === 'end') {
+    // end = 커스텀 모달(JourneyActionConfirmModal) — native confirm 폐기.
+    if (action === 'end') {
       setActionModal({ mode: action, journeyId, journeyName });
       return;
     }
@@ -1808,7 +1610,7 @@ export default function JourneysPage() {
       });
       const data = await res.json();
       if (data.success) {
-        if (mode === 'delete' && expandedId === journeyId) setExpandedId(null);
+        if ((mode === 'delete' || mode === 'archive') && wsJourney === journeyId) closeWorkspace();
         setActionModal(null);
         await loadAll();
       } else {
@@ -1816,47 +1618,6 @@ export default function JourneysPage() {
       }
     } catch (e: any) {
       toast.error(e?.message || '처리 중 오류');
-    }
-  };
-
-  // ★ D210+ Phase 3 (2026-05-23 Harold 명시): 자동 재진입 토글 (회사 admin 명시 활성 — feedback_no_target_auto_relax 정합)
-  //   activate 시 강력 안내 모달 의무 — 회사 admin 책임 영역 명시 + cooldown 영역 안내
-  const handleToggleAutoReentry = (journeyId: string, currentEnabled: boolean, cooldownDays: number | null) => {
-    const newEnabled = !currentEnabled;
-    const doToggle = async () => {
-      try {
-        const res = await fetch(`/api/ai/operator/journeys/${journeyId}/auto-reentry`, {
-          method: 'PATCH',
-          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token()}` },
-          body: JSON.stringify({ enabled: newEnabled }),
-        });
-        const data = await res.json();
-        if (data.success) await loadAll();
-        else toast.error(data.error || '자동 재진입 토글 실패');
-      } catch (e: any) {
-        toast.error(e?.message || '자동 재진입 토글 중 오류');
-      }
-    };
-    if (newEnabled) {
-      setConfirm({
-        mode: 'warning',
-        title: '자동 재진입 활성화',
-        description:
-          `여정을 완료한 고객이 cooldown(${cooldownDays ?? 0}일) 경과 후 자동으로 다시 진입합니다. 6시간 주기로 자동 진입합니다.\n\n` +
-          `· 활성 상태 + 광고 수신 동의 고객만 진입\n` +
-          `· 한 고객당 진행 중 1건만 (중복 진입 차단)\n` +
-          `· 비용·발송은 회사 담당자 책임이므로 직접 확인이 필요합니다.`,
-        confirmLabel: '활성화',
-        onConfirm: doToggle,
-      });
-    } else {
-      setConfirm({
-        mode: 'warning',
-        title: '자동 재진입 비활성화',
-        description: '자동 재진입을 비활성화하시겠습니까? 이미 진입해 진행 중인 건에는 영향이 없습니다.',
-        confirmLabel: '비활성화',
-        onConfirm: doToggle,
-      });
     }
   };
 
@@ -2170,7 +1931,7 @@ export default function JourneysPage() {
                   return (
                     <div
                       key={j.id}
-                      onClick={() => toggleExpand(j.id)}
+                      onClick={() => openWorkspace(j.id)}
                       className="flex flex-col min-w-0 bg-white border border-slate-200 rounded-2xl p-4 cursor-pointer shadow-[0_1px_2px_rgba(15,23,42,0.05)] hover:border-indigo-200 hover:shadow-[0_2px_4px_rgba(15,23,42,0.06),0_12px_28px_-14px_rgba(15,23,42,0.22)] transition-[border-color,box-shadow]"
                     >
                       <div className="flex items-start gap-3">
@@ -2179,7 +1940,7 @@ export default function JourneysPage() {
                         </div>
                         <div className="flex-1 min-w-0">
                           <h3 className="text-[14px] font-semibold text-slate-900 truncate" title={j.name}>
-                            <button type="button" onClick={(e) => { e.stopPropagation(); toggleExpand(j.id); }} className="max-w-full truncate text-left hover:text-indigo-700 focus:outline-none focus-visible:underline">{j.name}</button>
+                            <button type="button" onClick={(e) => { e.stopPropagation(); openWorkspace(j.id); }} className="max-w-full truncate text-left hover:text-indigo-700 focus:outline-none focus-visible:underline">{j.name}</button>
                           </h3>
                           <div className="mt-1 flex flex-wrap items-center gap-1.5">
                             <StatusPill label={badge.label} tone={badge.cls as 'neutral' | 'green' | 'amber'} />
@@ -2209,8 +1970,8 @@ export default function JourneysPage() {
                           )}
                         </div>
                       )}
-                      {j.pause_reason && j.status === 'paused' && (
-                        <div className="mt-2 text-[12.5px] text-amber-800 bg-amber-50 px-2 py-1 rounded break-keep">{j.pause_reason}</div>
+                      {j.pause_view && j.status === 'paused' && (
+                        <div className="mt-2 text-[12.5px] text-slate-600 bg-slate-50 px-2 py-1 rounded break-keep">{j.pause_view.text}</div>
                       )}
                       <div className="mt-auto pt-3">
                         <div className="flex items-center gap-2 border-t border-slate-100 pt-3">
@@ -2251,568 +2012,6 @@ export default function JourneysPage() {
                   );
                 })}
               </div>
-              {(() => {
-                // ★ 2026-10-11 여정 상세 창 — 옛 카드 아래 펼침을 창으로 옮겼다(내용 = 옛 펼침 그대로 · 여는 법 = 카드 누르기 · 닫기 = 바깥 · X · Esc)
-                const j = expandedId ? journeys.find((x) => x.id === expandedId) : undefined;
-                if (!j) return null;
-                const detail = detailsMap[j.id];
-                const visual = TEMPLATE_VISUAL[j.template_code] || TEMPLATE_VISUAL.custom;
-                const Icon = visual.icon;
-                const badge = STATUS_BADGE[j.status];
-                return createPortal(
-                  <div className={MK_MODAL_BACKDROP} onMouseDown={(e) => { if (e.target === e.currentTarget) setExpandedId(null); }}>
-                    <div className={`${MK_MODAL} w-full max-w-[1060px] max-h-[92vh] flex flex-col overflow-hidden`} role="dialog" aria-modal="true" aria-label={`${j.name} 상세`}>
-                      <div className="flex items-center gap-3 px-5 py-4 border-b border-slate-200">
-                        <div className={`shrink-0 w-9 h-9 rounded-lg bg-gradient-to-br ${visual.gradient} flex items-center justify-center`}>
-                          <Icon className="w-[18px] h-[18px] text-white" />
-                        </div>
-                        <div className="flex-1 min-w-0 flex flex-wrap items-center gap-2">
-                          <h2 className="text-[15px] font-semibold text-slate-900 truncate">{j.name}</h2>
-                          <StatusPill label={badge.label} tone={badge.cls as 'neutral' | 'green' | 'amber'} />
-                          {j.archived_at && <StatusPill label="보관" tone="neutral" />}
-                        </div>
-                        <button type="button" onClick={() => setExpandedId(null)} aria-label="상세 닫기" className="shrink-0 h-9 w-9 rounded-lg text-slate-400 hover:bg-slate-100 hover:text-slate-700 flex items-center justify-center">
-                          <X className="w-4 h-4" />
-                        </button>
-                      </div>
-                      <div className="flex-1 min-h-0 overflow-y-auto mk-scroll">
-                        {!detail ? (
-                          detailFailed[j.id] ? (
-                            <div className="flex flex-col items-center justify-center gap-3 py-16 text-[13px] text-slate-600">
-                              <span>상세를 읽지 못했어요.</span>
-                              <button type="button" onClick={() => { setDetailFailed((prev) => { const n = { ...prev }; delete n[j.id]; return n; }); void loadDetail(j.id, true); }} className="h-9 px-3 rounded-lg border border-slate-200 bg-white text-[13px] font-semibold text-slate-700 hover:border-indigo-200 hover:text-indigo-700">다시 읽기</button>
-                            </div>
-                          ) : (
-                            <div className="flex items-center justify-center py-16"><Loader2 className="w-6 h-6 animate-spin text-slate-400" /></div>
-                          )
-                        ) : (
-                          <div className="p-4 md:p-5 bg-slate-50 space-y-3">
-                            {/* ★ D211+ Phase A 4번 (2026-05-23 Harold 명시): 흐름 다이어그램 (step 흐름 + funnel + 실시간 위치 통합 시각화) */}
-                            <JourneyFlowDiagram
-                              steps={detail.steps}
-                              funnelStats={statsMap[j.id]?.map((s) => ({
-                                stepId: s.stepId,
-                                funnelPercentage: s.funnelPercentage,
-                                enteredCount: s.enteredCount,
-                                sentCount: s.sentCount,
-                                clickCount: s.clickCount,
-                              }))}
-                              livePositions={livePositionsMap[j.id]?.positions?.map((p: any) => ({
-                                stepId: p.stepId,
-                                activeCount: p.activeCount,
-                                avgDwellMinutes: p.avgDwellMinutes,
-                              }))}
-                            />
-
-                            {/* ★ D211+ Phase A 1번 (2026-05-23 Harold 명시): 시뮬레이션 카드 (draft/paused 영역 — 활성화 직전 안심 본질) */}
-                            {(j.status === 'draft' || j.status === 'paused') && (
-                              <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-lg space-y-2">
-                                <div className="flex items-center gap-2">
-                                  <TrendingUp className="w-4 h-4 text-emerald-700" />
-                                  <span className="text-sm font-semibold text-emerald-900">활성화 직전 시뮬레이션</span>
-                                </div>
-                                {!simulationMap[j.id] ? (
-                                  <div>
-                                    <p className="text-[11px] text-slate-500 leading-relaxed mb-2">
-                                      트리거 매칭 고객 + 예상 발송 건수 + 예상 비용을 활성화 전에 미리 확인합니다 (실제 발송 안 함).
-                                    </p>
-                                    <button
-                                      onClick={(e) => { e.stopPropagation(); loadSimulation(j.id); }}
-                                      disabled={simulationLoading[j.id]}
-                                      className="px-3 py-1.5 bg-emerald-100 hover:bg-emerald-100 disabled:opacity-50 text-emerald-900 rounded text-xs flex items-center gap-1.5"
-                                    >
-                                      {simulationLoading[j.id] ? (
-                                        <><Loader2 className="w-3 h-3 animate-spin" /> 분석 중</>
-                                      ) : (
-                                        <><TrendingUp className="w-3 h-3" /> 시뮬레이션 실행</>
-                                      )}
-                                    </button>
-                                  </div>
-                                ) : (
-                                  <div className="space-y-2">
-                                    {/* 매칭 customer + 등급 분포 */}
-                                    <div className="grid grid-cols-2 gap-2">
-                                      <div className="p-2 bg-white rounded">
-                                        <div className="text-[10px] text-slate-400">트리거 매칭</div>
-                                        <div className="text-base font-semibold text-emerald-800 font-mono">{simulationMap[j.id].matchedCustomers.toLocaleString()}명{simulationMap[j.id].capped ? ' 이상' : ''}</div>
-                                      </div>
-                                      <div className="p-2 bg-white rounded">
-                                        <div className="text-[10px] text-slate-400">총 예상 발송</div>
-                                        <div className="text-base font-semibold text-violet-800 font-mono">{simulationMap[j.id].totalEstimatedSends.toLocaleString()}건</div>
-                                      </div>
-                                      <div className="p-2 bg-white rounded">
-                                        <div className="text-[10px] text-slate-400">예상 비용</div>
-                                        <div className="text-base font-semibold text-amber-800 font-mono">{simulationMap[j.id].totalEstimatedCost.toLocaleString()}원</div>
-                                      </div>
-                                      <div className="p-2 bg-white rounded">
-                                        <div className="text-[10px] text-slate-400">예상 매출</div>
-                                        <div className="text-base font-semibold text-cyan-800 font-mono">{simulationMap[j.id].estimatedRevenue != null ? `${simulationMap[j.id].estimatedRevenue.toLocaleString()}원` : '데이터 부족'}</div>
-                                      </div>
-                                    </div>
-                                    {/* 등급 분포 */}
-                                    {simulationMap[j.id].customerSegments?.length > 0 && (
-                                      <div className="space-y-1">
-                                        <div className="text-[10px] text-slate-400">등급 분포</div>
-                                        {simulationMap[j.id].customerSegments.slice(0, 5).map((seg: any) => (
-                                          <div key={seg.segment} className="flex items-center gap-2">
-                                            <div className="text-[10px] text-slate-500 w-12">{seg.segment}</div>
-                                            <div className="flex-1 h-1.5 bg-slate-100 rounded-full overflow-hidden">
-                                              <div className="h-full bg-emerald-400" style={{ width: `${seg.pct * 100}%` }} />
-                                            </div>
-                                            <div className="text-[10px] text-slate-500 font-mono w-20 text-right">
-                                              {seg.count.toLocaleString()}명 ({(seg.pct * 100).toFixed(0)}%)
-                                            </div>
-                                          </div>
-                                        ))}
-                                      </div>
-                                    )}
-                                    {/* 예상 클릭률 + 전환율 */}
-                                    <div className="text-[11px] text-slate-600 leading-relaxed">
-                                      {simulationMap[j.id].reasoning}
-                                    </div>
-                                    <div className="flex items-center gap-3 text-[10px] text-slate-500">
-                                      <span><MousePointerClick className="w-2.5 h-2.5 inline text-cyan-700" /> 예상 클릭률 {simulationMap[j.id].estimatedClickRate != null ? `${(simulationMap[j.id].estimatedClickRate * 100).toFixed(1)}%` : '데이터 부족'}</span>
-                                      <span><TrendingUp className="w-2.5 h-2.5 inline text-emerald-700" /> 예상 전환율 {simulationMap[j.id].estimatedConversionRate != null ? `${(simulationMap[j.id].estimatedConversionRate * 100).toFixed(1)}%` : '데이터 부족'}</span>
-                                    </div>
-                                    {/* 경고 영역 */}
-                                    {simulationMap[j.id].warnings?.length > 0 && (
-                                      <div className="space-y-1">
-                                        {simulationMap[j.id].warnings.map((w: string, idx: number) => (
-                                          <div key={idx} className="flex items-start gap-1.5 text-[10px] text-amber-800">
-                                            <AlertTriangle className="w-2.5 h-2.5 flex-shrink-0 mt-0.5" />
-                                            <span>{w}</span>
-                                          </div>
-                                        ))}
-                                      </div>
-                                    )}
-                                  </div>
-                                )}
-                              </div>
-                            )}
-
-                            {/* Phase 9: 여정 옵션 편집 (트리거 타이밍·포인트·한도·예산·재진입) — 표시 전용 → 편집 가능 */}
-                            {detail.journey && (
-                              <JourneyOptionsEditor journey={detail.journey} token={token() || ''} onSaved={() => { loadAll(); loadDetail(j.id, true); }} />
-                            )}
-
-                            {/* ★ D211+ Phase A 2번 (2026-05-23 Harold 명시): 실시간 진행 위치 요약 (active 여정 영역만) */}
-                            {j.status === 'active' && livePositionsMap[j.id] && livePositionsMap[j.id].totalActive > 0 && (
-                              <div className="p-3 bg-cyan-50 border border-cyan-200 rounded-lg">
-                                <div className="flex items-center gap-2 mb-1">
-                                  <Users className="w-4 h-4 text-cyan-700" />
-                                  <span className="text-sm font-semibold text-cyan-900">실시간 진행 위치</span>
-                                  <span className="ml-auto text-[10px] text-slate-400">
-                                    현재 {livePositionsMap[j.id].totalActive.toLocaleString()}명 / 24h 완료 {livePositionsMap[j.id].totalCompleted24h.toLocaleString()}명
-                                  </span>
-                                </div>
-                                {livePositionsMap[j.id].nextRunAt && (
-                                  <div className="text-[11px] text-cyan-800">
-                                    다음 발송 예정: {new Date(livePositionsMap[j.id].nextRunAt).toLocaleString('ko-KR', { timeZone: 'Asia/Seoul' })}
-                                  </div>
-                                )}
-                              </div>
-                            )}
-
-                            {/* ★ D210+ Phase 3 (2026-05-23 Harold 명시): funnel 시각화 영역 (JourneyStepStat funnelPercentage + 이탈 사유 5 영역) */}
-                            {statsMap[j.id] && statsMap[j.id].length > 0 && statsMap[j.id].some((st) => st.enteredCount > 0) && (
-                              <div className="p-3 bg-violet-50 border border-violet-200 rounded-lg space-y-2">
-                                <div className="flex items-center gap-2 mb-1">
-                                  <Activity className="w-4 h-4 text-violet-700" />
-                                  <span className="text-sm font-semibold text-violet-900">칸별 흐름</span>
-                                </div>
-                                {statsMap[j.id].map((st) => (
-                                  <div key={st.stepId} className="space-y-1">
-                                    <div className="flex items-center gap-2 text-[11px]">
-                                      <span className="text-slate-500 w-14">{st.stepOrder}번째 칸</span>
-                                      <span className="text-slate-400">{stepTypeLabel(st.stepType)}{st.channel ? ` · ${st.channel.toUpperCase()}` : ''}</span>
-                                      <span className="ml-auto text-slate-600 font-mono">{st.enteredCount.toLocaleString()}명 ({st.funnelPercentage.toFixed(1)}%)</span>
-                                    </div>
-                                    <div className="h-2 bg-slate-100 rounded-full overflow-hidden">
-                                      <div
-                                        className={`h-full ${funnelBarClass(st.funnelPercentage)}`}
-                                        style={{ width: `${Math.min(100, Math.max(2, st.funnelPercentage))}%` }}
-                                      />
-                                    </div>
-                                    {(st.skippedHoursCount > 0 || st.skippedOptOutCount > 0 || st.skippedNoCustomerCount > 0 || st.conditionFailedCount > 0 || st.waitedCount > 0) && (
-                                      <div className="flex flex-wrap gap-x-3 gap-y-0.5 text-[10px] text-slate-400 pl-12">
-                                        {st.waitedCount > 0 && <span><Clock className="w-2.5 h-2.5 inline" /> 대기 {st.waitedCount}</span>}
-                                        {st.skippedHoursCount > 0 && <span><Clock className="w-2.5 h-2.5 inline text-amber-700" /> 시간대 {st.skippedHoursCount}</span>}
-                                        {st.skippedOptOutCount > 0 && <span><AlertTriangle className="w-2.5 h-2.5 inline text-rose-700" /> 수신 거부 {st.skippedOptOutCount}</span>}
-                                        {st.skippedNoCustomerCount > 0 && <span><Users className="w-2.5 h-2.5 inline text-rose-700" /> 고객 정보 없음 {st.skippedNoCustomerCount}</span>}
-                                        {st.conditionFailedCount > 0 && <span><FilterIcon className="w-2.5 h-2.5 inline text-rose-700" /> 조건 미충족 {st.conditionFailedCount}</span>}
-                                      </div>
-                                    )}
-                                    {st.sentCount > 0 && (
-                                      <div className="flex items-center gap-3 text-[10px] text-slate-500 pl-12">
-                                        <span><Send className="w-2.5 h-2.5 inline text-violet-700" /> 발송 {st.sentCount}</span>
-                                        <span><MousePointerClick className="w-2.5 h-2.5 inline text-cyan-700" /> 클릭 {st.clickCount} ({(st.clickRate * 100).toFixed(1)}%)</span>
-                                        <span><TrendingUp className="w-2.5 h-2.5 inline text-emerald-700" /> 전환 {st.conversionCount} ({(st.conversionRate * 100).toFixed(1)}%)</span>
-                                      </div>
-                                    )}
-                                  </div>
-                                ))}
-                              </div>
-                            )}
-
-                            {/* ★ D211+ Phase 2 (2026-05-23 Harold 명시): step별 AI 자동 진단 카드 — funnel 영역 직후 통합 */}
-                            {diagnosisMap[j.id] && diagnosisMap[j.id].steps.length > 0 && (
-                              <div className="p-3 bg-amber-50 border border-amber-200 rounded-lg space-y-2">
-                                <div className="flex items-center gap-2 mb-1">
-                                  <AlertTriangle className="w-4 h-4 text-amber-700" />
-                                  <span className="text-sm font-semibold text-amber-900">AI 자동 진단</span>
-                                  <span className="ml-auto text-[10px] text-slate-400 font-mono">
-                                    건강 점수 {diagnosisMap[j.id].overallScore}/100
-                                  </span>
-                                </div>
-                                {/* 우선 처리 영역 3건 */}
-                                {diagnosisMap[j.id].topConcerns.length > 0 && (
-                                  <div className="space-y-1 mb-2">
-                                    <div className="text-[10px] text-slate-400 font-semibold">우선 처리 영역</div>
-                                    {diagnosisMap[j.id].topConcerns.map((concern, idx) => (
-                                      <div key={idx} className="text-[11px] text-amber-800 pl-2 border-l-2 border-amber-200">
-                                        {concern}
-                                      </div>
-                                    ))}
-                                  </div>
-                                )}
-                                {/* step별 진단 + 1-click 액션 */}
-                                <div className="space-y-1.5">
-                                  {diagnosisMap[j.id].steps.filter((s) => s.severity !== 'good').map((step) => (
-                                    <div
-                                      key={step.stepId}
-                                      className={`p-2 rounded border ${
-                                        step.severity === 'critical' ? 'bg-rose-50 border-rose-200' :
-                                        'bg-amber-50 border-amber-200'
-                                      }`}
-                                    >
-                                      <div className="flex items-center gap-2 text-[11px]">
-                                        <span className="font-mono text-slate-500 w-12">Step {step.stepOrder}</span>
-                                        <span className={`text-[10px] px-1.5 py-0.5 rounded ${
-                                          step.severity === 'critical' ? 'bg-rose-100 text-rose-800' :
-                                          'bg-amber-100 text-amber-800'
-                                        }`}>
-                                          {step.severity === 'critical' ? '심각' : '주의'}
-                                        </span>
-                                        <span className="text-slate-500">{step.topExitReason}</span>
-                                        <span className="ml-auto text-slate-500 font-mono">이탈 {(step.dropoutRate * 100).toFixed(0)}%</span>
-                                      </div>
-                                      <div className="text-[11px] text-slate-600 mt-1 leading-relaxed">
-                                        {step.recommendation}
-                                      </div>
-                                      {step.oneClickAction && (
-                                        <div className="mt-1.5 text-[10px] text-amber-700 italic">
-                                          제안 액션: {step.oneClickAction.label} (회사 admin 명시 검토 후 적용)
-                                        </div>
-                                      )}
-                                    </div>
-                                  ))}
-                                  {diagnosisMap[j.id].steps.every((s) => s.severity === 'good') && (
-                                    <div className="text-[11px] text-emerald-700 leading-relaxed">
-                                      전체 단계 정상 흐름. 추가 정정 영역 없음. 다음 단계 신설 검토 가능.
-                                    </div>
-                                  )}
-                                </div>
-                                <div className="text-[10px] text-slate-400">
-                                  완료율 {(diagnosisMap[j.id].completionRate * 100).toFixed(1)}% · 진단 영역 = buildJourneyStats + 자동 분류
-                                </div>
-                              </div>
-                            )}
-
-                            {/* ★ D210+ Phase 3 (2026-05-23 Harold 명시): 다중 미리보기 영역 (6 영역 customer 자동 추출 — preview-samples endpoint) */}
-                            {samplesMap[j.id] && samplesMap[j.id].length > 0 && (
-                              <div className="p-3 bg-cyan-50 border border-cyan-200 rounded-lg space-y-2">
-                                <div className="flex items-center gap-2 mb-1">
-                                  <Eye className="w-4 h-4 text-cyan-700" />
-                                  <span className="text-sm font-semibold text-cyan-900">미리보기 샘플</span>
-                                  {samplesTotalMap[j.id] && (
-                                    <span className="text-[10px] text-cyan-800">전체 {samplesTotalMap[j.id].total.toLocaleString()}명{samplesTotalMap[j.id].capped ? ' 이상' : ''} 중 {samplesMap[j.id].length}명</span>
-                                  )}
-                                </div>
-                                <div className="flex flex-wrap gap-1">
-                                  {samplesMap[j.id].map((sample) => (
-                                    <button
-                                      key={sample.label}
-                                      onClick={() =>
-                                        setActiveSampleLabel((prev) => ({ ...prev, [j.id]: sample.label }))
-                                      }
-                                      className={`px-2 py-1 rounded text-[11px] font-medium transition-colors ${
-                                        (activeSampleLabel[j.id] || samplesMap[j.id][0].label) === sample.label
-                                          ? 'bg-cyan-100 text-cyan-900'
-                                          : 'bg-white text-slate-500 hover:bg-slate-100'
-                                      }`}
-                                    >
-                                      {sample.label}
-                                    </button>
-                                  ))}
-                                </div>
-                                {(() => {
-                                  const activeLabel = activeSampleLabel[j.id] || samplesMap[j.id][0].label;
-                                  const active = samplesMap[j.id].find((s) => s.label === activeLabel) || samplesMap[j.id][0];
-                                  return (
-                                    <div className="p-2 bg-slate-100 border border-slate-200 rounded text-[11px] space-y-1">
-                                      <div className="grid grid-cols-2 md:grid-cols-3 gap-x-3 gap-y-0.5">
-                                        <div><span className="text-slate-400">이름:</span> <span className="text-slate-700 font-mono">{active.sampleCustomer.이름 || '-'}</span></div>
-                                        <div><span className="text-slate-400">등급:</span> <span className="text-slate-700">{active.sampleCustomer.등급 || '-'}</span></div>
-                                        <div><span className="text-slate-400">지역:</span> <span className="text-slate-700">{active.sampleCustomer.지역 || '-'}</span></div>
-                                        <div><span className="text-slate-400">연락처:</span> <span className="text-slate-700 font-mono">{active.sampleCustomer.전화번호 || '-'}</span></div>
-                                        <div><span className="text-slate-400">최근 구매:</span> <span className="text-slate-700">{active.sampleCustomer.최근구매일 || '-'}</span></div>
-                                        <div><span className="text-slate-400">총 구매:</span> <span className="text-slate-700 font-mono">{active.sampleCustomer.총구매액 || '-'}</span></div>
-                                      </div>
-                                      <div className="grid grid-cols-3 gap-x-3 mt-1.5 pt-1.5 border-t border-slate-100">
-                                        <div><span className="text-cyan-700">클릭:</span> <span className="font-mono text-cyan-800">{(Number(active.sampleCustomerFields.click_score) * 100).toFixed(1)}%</span></div>
-                                        <div><span className="text-rose-700">이탈:</span> <span className="font-mono text-rose-800">{(Number(active.sampleCustomerFields.churn_risk) * 100).toFixed(1)}%</span></div>
-                                        <div><span className="text-emerald-700">구매 가능성:</span> <span className="font-mono text-emerald-800">{(Number(active.sampleCustomerFields.purchase_likelihood) * 100).toFixed(1)}%</span></div>
-                                      </div>
-                                      {active.modelVersion && (
-                                        <div className="text-[10px] text-slate-400 mt-1">
-                                          Predictive 모델: {active.modelVersion === 'v1.0-trained' ? (
-                                            <span className="text-emerald-700">trained (실 데이터 기반)</span>
-                                          ) : (
-                                            <span className="text-amber-700">cold start (등급/활동 추정치)</span>
-                                          )}
-                                        </div>
-                                      )}
-                                    </div>
-                                  );
-                                })()}
-                              </div>
-                            )}
-
-                            {/* ★ D210+ Phase 3 (2026-05-23 Harold 명시): 자동 재진입 토글 영역 (allow_reentry === true 영역만 표시) */}
-                            {detail.journey.allow_reentry && (
-                              <div className="p-3 bg-fuchsia-50 border border-fuchsia-200 rounded-lg flex items-start gap-3">
-                                <div className={`w-10 h-10 rounded-lg flex items-center justify-center flex-shrink-0 ${
-                                  detail.journey.auto_reentry_enabled ? 'bg-fuchsia-100' : 'bg-white'
-                                }`}>
-                                  <RotateCcw className={`w-5 h-5 ${detail.journey.auto_reentry_enabled ? 'text-fuchsia-800' : 'text-slate-400'}`} />
-                                </div>
-                                <div className="flex-1">
-                                  <div className="flex items-center justify-between mb-1">
-                                    <div className="text-sm font-semibold text-fuchsia-900">
-                                      자동 재진입 {detail.journey.auto_reentry_enabled ? '활성' : '비활성 (default)'}
-                                    </div>
-                                    <button
-                                      onClick={(e) => {
-                                        e.stopPropagation();
-                                        handleToggleAutoReentry(
-                                          j.id,
-                                          !!detail.journey.auto_reentry_enabled,
-                                          detail.journey.reentry_cooldown_days,
-                                        );
-                                      }}
-                                      className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
-                                        detail.journey.auto_reentry_enabled ? 'bg-fuchsia-500' : 'bg-slate-200'
-                                      }`}
-                                    >
-                                      <span className={`inline-block h-5 w-5 transform rounded-full bg-white transition-transform ${
-                                        detail.journey.auto_reentry_enabled ? 'translate-x-5' : 'translate-x-0.5'
-                                      }`} />
-                                    </button>
-                                  </div>
-                                  <div className="text-[11px] text-fuchsia-900 leading-relaxed">
-                                    cooldown {detail.journey.reentry_cooldown_days ?? 0}일 경과 후 자동 진입 (6시간 cron). 회사 admin 명시 활성 의무, AI 자동 진입 X 정합.
-                                  </div>
-                                </div>
-                              </div>
-                            )}
-
-                            {detail.steps.map((s) => {
-                              const variantsExpanded = variantsExpandedStepIds.has(s.id);
-                              const toggleVariants = () => {
-                                setVariantsExpandedStepIds((prev) => {
-                                  const next = new Set(prev);
-                                  if (next.has(s.id)) next.delete(s.id);
-                                  else next.add(s.id);
-                                  return next;
-                                });
-                              };
-                              // ★ D189 #1: A/B 테스트는 message step만 (wait/condition step은 메시지 발송 X)
-                              const supportsVariants = s.step_type === 'message';
-                              return (
-                                <div key={s.id} className="space-y-2">
-                                  <div className="flex items-start gap-3 p-2.5 bg-white rounded">
-                                    <div className="shrink-0 w-7 h-7 rounded-full bg-fuchsia-100 text-fuchsia-700 flex items-center justify-center text-xs font-semibold">{s.step_order}</div>
-                                    <div className="flex-1 min-w-0">
-                                      <div className="text-[10px] text-slate-500 mb-1 flex items-center gap-2 flex-wrap">
-                                        <span className="inline-flex items-center gap-1"><Clock className="w-3 h-3" /> {s.timingLabel || `${s.delay_hours}시간 뒤`}</span>
-                                        {s.channel && <span className="px-1.5 py-0.5 rounded bg-slate-100 text-slate-600">{s.channel.toUpperCase()}{s.is_ad ? ' · 광고' : ''}</span>}
-                                        {s.conditionLabel && <span className="px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-800">{s.conditionLabel}</span>}
-                                        {supportsVariants && (
-                                          <button
-                                            onClick={toggleVariants}
-                                            className={`flex items-center gap-1 px-2 py-0.5 rounded text-[10px] transition-colors ${
-                                              variantsExpanded
-                                                ? 'bg-violet-100 text-violet-800'
-                                                : 'bg-violet-50 hover:bg-violet-100 text-violet-700'
-                                            }`}
-                                            title="A/B 테스트 편집"
-                                          >
-                                            <Beaker className="w-3 h-3" />
-                                            A/B 테스트 {variantsExpanded ? '닫기' : '열기'}
-                                          </button>
-                                        )}
-                                        {/* ★ 2026-08-02 §13-1 — 스텝 삭제. 서버가 재번호까지 한 트랜잭션에서 한다.
-                                            운영 중·발송 이력·진행 중 고객은 서버 게이트가 막고 사유를 돌려준다. */}
-                                        {detail.steps.length > 1 && j.status !== 'active' && (
-                                          <button
-                                            onClick={(e) => { e.stopPropagation(); deleteSavedStep(j.id, s.id, s.step_order); }}
-                                            disabled={savedStepBusy === j.id}
-                                            className="flex items-center gap-1 px-2 py-0.5 rounded text-[10px] text-slate-400 hover:bg-rose-100 hover:text-rose-800 transition-colors disabled:opacity-40"
-                                            title="이 스텝 지우기"
-                                          >
-                                            <Trash2 className="w-3 h-3" /> 지우기
-                                          </button>
-                                        )}
-                                      </div>
-                                      {s.message_template && <div className="text-xs text-slate-700 whitespace-pre-wrap">{s.message_template}</div>}
-                                      {/* ★ D218+ (2026-05-26): message step 영역 = 담당자 알림 토글 (발송 2시간 전 + 발송 결과) */}
-                                      {s.step_type === 'message' && (
-                                        <div className="mt-3">
-                                          <JourneyStepNotifyToggle
-                                            journeyId={j.id}
-                                            stepId={s.id}
-                                            stepOrder={s.step_order}
-                                            totalSteps={detail.steps.filter((st) => st.step_type === 'message').length}
-                                            currentValue={s.notify_manager_on_pretest ?? null}
-                                            token={token() || ''}
-                                            onChange={() => loadAll()}
-                                          />
-                                        </div>
-                                      )}
-                                    </div>
-                                  </div>
-                                  {supportsVariants && variantsExpanded && (
-                                    <JourneyVariantsEditor
-                                      stepId={s.id}
-                                      journeyId={j.id}
-                                      journeyStatus={j.status === 'ended' ? 'paused' : (j.status as 'draft' | 'active' | 'paused')}
-                                      defaultChannel={(s.channel || 'sms') as 'sms' | 'lms' | 'mms' | 'kakao'}
-                                      defaultMessageTemplate={s.message_template || ''}
-                                      onClose={toggleVariants}
-                                    />
-                                  )}
-                                </div>
-                              );
-                            })}
-
-                            {/* ★ D211+ Phase 2 (2026-05-23 Harold 명시): 다음 단계 자동 추천 카드 — detail.steps 영역 다음 */}
-                            <div className="p-3 bg-cyan-50 border border-cyan-200 rounded-lg space-y-2">
-                              <div className="flex items-center gap-2">
-                                <Sparkles className="w-4 h-4 text-cyan-700" />
-                                <span className="text-sm font-semibold text-cyan-900">AI 다음 단계 추천</span>
-                                <span className="ml-auto text-[10px] text-slate-400">현재 {detail.steps.length}개 단계</span>
-                              </div>
-                              {!nextStepMap[j.id] ? (
-                                <div>
-                                  <p className="text-[11px] text-slate-500 leading-relaxed mb-2">
-                                    현재 흐름 분석 후 다음 단계 1개 + 대안 2개를 추천합니다 (구체 혜택은 회사 admin 직접 작성).
-                                  </p>
-                                  <button
-                                    onClick={(e) => { e.stopPropagation(); loadNextStep(j.id); }}
-                                    disabled={nextStepLoading[j.id]}
-                                    className="px-3 py-1.5 bg-cyan-100 hover:bg-cyan-100 disabled:opacity-50 text-cyan-900 rounded text-xs flex items-center gap-1.5"
-                                  >
-                                    {nextStepLoading[j.id] ? (
-                                      <>
-                                        <Loader2 className="w-3 h-3 animate-spin" /> 추천 영역 분석 중
-                                      </>
-                                    ) : (
-                                      <>
-                                        <Sparkles className="w-3 h-3" /> AI 추천 받기
-                                      </>
-                                    )}
-                                  </button>
-                                </div>
-                              ) : (
-                                <div className="space-y-2">
-                                  {/* 추천 1순위 */}
-                                  <div className="p-2.5 bg-cyan-50 border border-cyan-300 rounded">
-                                    <div className="flex items-center gap-2 mb-1">
-                                      <span className="text-[10px] px-1.5 py-0.5 rounded bg-cyan-100 text-cyan-900 font-semibold">추천 1순위</span>
-                                      <span className="text-[11px] text-slate-600 font-mono">
-                                        {nextStepMap[j.id].recommended.stepType}
-                                        {nextStepMap[j.id].recommended.delayHours > 0 && ` · ${nextStepMap[j.id].recommended.delayHours}h 후`}
-                                        {nextStepMap[j.id].recommended.channel && ` · ${nextStepMap[j.id].recommended.channel?.toUpperCase()}`}
-                                      </span>
-                                    </div>
-                                    {nextStepMap[j.id].recommended.messageTemplate && (
-                                      <div className="text-[11px] text-slate-700 whitespace-pre-wrap mb-1 leading-relaxed">
-                                        {nextStepMap[j.id].recommended.messageTemplate}
-                                      </div>
-                                    )}
-                                    <div className="text-[10px] text-cyan-800">{nextStepMap[j.id].recommended.reasoning}</div>
-                                    {nextStepMap[j.id].recommended.expectedImpact && (
-                                      <div className="text-[10px] text-emerald-700 mt-0.5">예상 영향: {nextStepMap[j.id].recommended.expectedImpact}</div>
-                                    )}
-                                  </div>
-                                  {/* 대안 2건 */}
-                                  {nextStepMap[j.id].alternatives.length > 0 && (
-                                    <div className="space-y-1">
-                                      <div className="text-[10px] text-slate-400 font-semibold">대안</div>
-                                      {nextStepMap[j.id].alternatives.map((alt, idx) => (
-                                        <div key={idx} className="p-2 bg-white border border-slate-200 rounded">
-                                          <div className="flex items-center gap-2 mb-0.5">
-                                            <span className="text-[10px] px-1.5 py-0.5 rounded bg-slate-100 text-slate-500">대안 {idx + 1}</span>
-                                            <span className="text-[10px] text-slate-500 font-mono">
-                                              {alt.stepType}
-                                              {alt.delayHours > 0 && ` · ${alt.delayHours}h`}
-                                              {alt.channel && ` · ${alt.channel.toUpperCase()}`}
-                                            </span>
-                                          </div>
-                                          {alt.messageTemplate && (
-                                            <div className="text-[10px] text-slate-600 whitespace-pre-wrap leading-relaxed">{alt.messageTemplate}</div>
-                                          )}
-                                          <div className="text-[10px] text-slate-400 mt-0.5">{alt.reasoning}</div>
-                                        </div>
-                                      ))}
-                                    </div>
-                                  )}
-                                  {nextStepMap[j.id].reasoning && (
-                                    <div className="text-[10px] text-slate-500 italic border-t border-slate-200 pt-1.5">
-                                      {nextStepMap[j.id].reasoning}
-                                    </div>
-                                  )}
-                                  {/* ★ 2026-08-02 §13-1 — 추천을 클릭 한 번으로 실제 스텝으로 만든다.
-                                      옛 화면은 추천만 보여주고 넣을 길이 없어 사용자가 처음부터 다시 만들어야 했다. */}
-                                  <div className="flex flex-wrap items-center gap-2">
-                                    <button
-                                      onClick={(e) => {
-                                        e.stopPropagation();
-                                        const rec = nextStepMap[j.id].recommended;
-                                        void addSavedStep(j.id, {
-                                          stepType: rec.stepType || 'message',
-                                          delayHours: Number(rec.delayHours) || 0,
-                                          channel: rec.channel || 'lms',
-                                          messageTemplate: rec.messageTemplate || '',
-                                          // LMS·MMS는 제목이 필수라 여정 이름을 초기값으로 둔다(추가 후 문안 수정에서 고친다).
-                                          subject: (j.name || '').slice(0, 50),
-                                          isAd: true,
-                                          stepIntent: rec.reasoning || 'AI 추천 단계',
-                                        });
-                                      }}
-                                      disabled={savedStepBusy === j.id || j.status === 'active'}
-                                      className="px-3 py-1.5 bg-cyan-100 hover:bg-cyan-200 disabled:opacity-40 text-cyan-900 rounded text-xs font-semibold flex items-center gap-1.5"
-                                    >
-                                      {savedStepBusy === j.id ? <Loader2 className="w-3 h-3 animate-spin" /> : <Plus className="w-3 h-3" />}
-                                      이 단계 추가
-                                    </button>
-                                    <span className="text-[10px] text-slate-400">
-                                      {j.status === 'active'
-                                        ? '운영 중에는 더할 수 없습니다. 일시정지 후 추가해 주세요.'
-                                        : '검토 후 직접 눌러야 추가됩니다 (AI 자동 추가 X). 문안은 추가 후 고칠 수 있습니다.'}
-                                    </span>
-                                  </div>
-                                </div>
-                              )}
-                            </div>
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  </div>,
-                  document.body,
-                );
-              })()}
             </div>
           </>
         )}
@@ -3532,24 +2731,21 @@ export default function JourneysPage() {
                     {/* ★ D188 Phase 2-B-1: message step UI — 기존 매트릭스 유지 (SMS/LMS/MMS) */}
                     {s.stepType === 'message' && s.channel !== 'kakao' && (
                       <>
-                        {(s.channel === 'lms' || s.channel === 'mms') && (
-                          <div>
-                            <label className="block text-[11px] text-slate-500 mb-1">제목 <span className="text-rose-600">*</span> <span className="text-slate-400">(LMS/MMS 필수, 최대 40자)</span></label>
-                            <div className="flex items-stretch gap-1">
-                              {s.isAd && (
-                                <span className="px-2.5 flex items-center shrink-0 bg-slate-100 border border-amber-200 rounded text-sm text-amber-700 select-none" title="발송 시 자동으로 앞에 붙습니다 (직접 입력하지 마세요)">(광고)</span>
-                              )}
-                              <input
-                                value={s.subject}
-                                onChange={(e) => updateStep(idx, { subject: e.target.value })}
-                                placeholder="한 줄 제목 (호기심 유발 / 본문 핵심 요약)"
-                                maxLength={40}
-                                className={`flex-1 min-w-0 px-3 py-2 bg-white border rounded text-sm focus:outline-none focus:border-fuchsia-400 ${(!s.subject || !s.subject.trim()) ? 'border-rose-300' : 'border-slate-200'}`}
-                              />
-                            </div>
-                            <div className="text-[10px] text-slate-400 mt-0.5">{getByteLength(s.subject)} bytes · 통신사 권장 ~ 40바이트 안</div>
-                          </div>
-                        )}
+                        {/* ★ 2026-10-20 V.3 §9-4 — 만들기 검토 칸도 큰 휴대폰 한 벌((광고) · 무료수신거부 합성 바이트 · 제목 40 · 보이는 모습 = 대상 고객 1명 치환).
+                            옛: 순수 본문 바이트만 세서 단문 90바이트 경계를 넘겨도 몰랐다. */}
+                        <PhoneComposer
+                          channel={(s.channel === 'sms' || s.channel === 'mms' ? s.channel : 'lms') as 'sms' | 'lms' | 'mms'}
+                          subject={s.subject || ''}
+                          body={s.messageTemplate || ''}
+                          isAd={s.isAd !== false}
+                          opt080Number={opt080Number}
+                          onSubject={(v) => updateStep(idx, { subject: v })}
+                          onBody={(v) => updateStep(idx, { messageTemplate: v })}
+                          sampleCustomer={sampleCustomer}
+                          sampleCustomerFields={sampleCustomerFields}
+                          imageCount={s.channel === 'mms' ? (s.mmsImagePaths?.length ?? 0) : 0}
+                          resetKey={idx}
+                        />
 
                         {/* ★ D189 #3 (2026-05-22): MMS 이미지 업로드 — channel === 'mms' 시 mount (최대 3장, JPG 300KB) */}
                         {s.channel === 'mms' && (
@@ -3559,53 +2755,7 @@ export default function JourneysPage() {
                           />
                         )}
 
-                        {/* 원본 편집 / 발송 미리보기 토글 — 미리보기는 추출된 타겟 최상위 고객 1명 치환 + 광고/무료거부 합성 */}
-                        <div className="flex items-center justify-between gap-2">
-                          <div className="flex rounded-lg bg-white border border-slate-200 p-0.5 text-[11px]">
-                            <button type="button" onClick={() => setPreviewSteps((p) => { const n = new Set(p); n.delete(idx); return n; })}
-                              className={`px-2.5 py-1 rounded-md font-medium transition-colors ${!isPreview ? 'bg-violet-100 text-violet-900' : 'text-slate-500 hover:text-slate-700'}`}>원본 편집</button>
-                            <button type="button" onClick={() => setPreviewSteps((p) => { const n = new Set(p); n.add(idx); return n; })}
-                              className={`px-2.5 py-1 rounded-md font-medium transition-colors ${isPreview ? 'bg-emerald-100 text-emerald-900' : 'text-slate-500 hover:text-slate-700'}`}>발송 미리보기</button>
-                          </div>
-                          {isPreview && sampleCustomer && (
-                            <span className="text-[10px] text-emerald-700">타겟 최상위 고객 기준 · 실제 발송 형태</span>
-                          )}
-                        </div>
-
-                        {isPreview ? (
-                          <div className="px-3 py-2 bg-slate-100 border border-slate-200 rounded text-sm whitespace-pre-wrap font-mono text-slate-800 min-h-[140px] leading-relaxed">
-                            {!sampleCustomer && (
-                              <div className="mb-2 text-amber-700 text-[11px] leading-relaxed">
-                                아직 이 조건의 타겟 고객이 없어 원본으로 표시됩니다. 여정을 켜면 조건을 충족하는 고객에게 자동 발송됩니다.
-                              </div>
-                            )}
-                            {(s.channel === 'lms' || s.channel === 'mms') && s.subject && (
-                              <div className="mb-2 pb-2 border-b border-slate-200 text-[12px]">
-                                <span className="text-slate-400">제목 </span>
-                                <span className="text-slate-700">{s.isAd ? (/^\s*[(（]\s*광고\s*[)）]/.test(s.subject) ? s.subject : `(광고) ${s.subject}`) : s.subject}</span>
-                              </div>
-                            )}
-                            {/* ★ 2026-06-26 라프레리 신고 fix: Liquid({{ }}) 미렌더로 원문 노출 → renderLiquid 먼저 적용 후 %변수% 머지 */}
-                            {sampleCustomer ? mergeVarsPlain(renderLiquid(preview, { customer: flattenCustomerForLiquid(sampleCustomerFields || {}) }).rendered, sampleCustomer, sampleCustomerFields || undefined) : preview}
-                          </div>
-                        ) : (
-                          <div className="space-y-1">
-                            {s.isAd && (
-                              <div className="px-3 py-1.5 bg-slate-100 border border-amber-200 rounded text-[11px] text-amber-700 select-none">
-                                {adPrefixFor(s.channel).trim()} <span className="text-slate-400">(발송 시 자동 추가, 본문에 직접 쓰지 마세요)</span>
-                              </div>
-                            )}
-                            <textarea value={s.messageTemplate} onChange={(e) => updateStep(idx, { messageTemplate: e.target.value })} rows={7} placeholder="본문을 입력하세요" className="w-full px-3 py-2 bg-white border border-fuchsia-300 rounded text-sm font-mono focus:outline-none resize-y leading-relaxed" />
-                            {s.isAd && (
-                              <div className="px-3 py-1.5 bg-slate-100 border border-amber-200 rounded text-[11px] text-amber-700 select-none whitespace-pre-wrap">
-                                {adRejectFor(s.channel, opt080Number)} <span className="text-slate-400">(발송 시 자동 추가)</span>
-                              </div>
-                            )}
-                          </div>
-                        )}
-
                         <div className="flex flex-wrap items-center gap-x-3 text-[11px] text-slate-400">
-                          <span className={bytes > maxBytes ? 'text-rose-600' : ''}>본문: {bytes} / {maxBytes} bytes</span>
                           {placeholderWarn && <span className="text-amber-700">[...] 영역 - 직접 수정 필요</span>}
                           {(() => {
                             const unsafe = detectUnsafe(s.messageTemplate + ' ' + s.subject);
@@ -3892,6 +3042,7 @@ export default function JourneysPage() {
           journeyStatus={activationModal.journeyStatus}
           goalExitEnabled={journeys.find((j) => j.id === activationModal.journeyId)?.goal_exit_enabled === true}
           thresholdRecipients={(journeys.find((j) => j.id === activationModal.journeyId) as any)?.threshold_recipients_per_step ?? null}
+          activationCost={Number((journeys.find((j) => j.id === activationModal.journeyId) as any)?.activation_cost ?? 0) || 0}
           token={token() || ''}
           onClose={() => setActivationModal(null)}
           onActivated={() => loadAll()}
@@ -4119,6 +3270,14 @@ export default function JourneysPage() {
           />
         );
       })()}
+      <JourneyWorkspace
+        journeyId={wsJourney}
+        stepId={wsStep}
+        onClose={closeWorkspace}
+        onChanged={() => { void loadAll(); }}
+        onNavigate={(id, step) => openWorkspace(id, step)}
+      />
+      {journeyActions.node}
     </ZoneFrame>
   );
 }

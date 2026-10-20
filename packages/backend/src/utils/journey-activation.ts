@@ -12,7 +12,7 @@
  *    그래도 중간 실패가 나면 이미 켜진 것은 그대로 두고 카드별 결과를 돌려준다(되돌리지 않는다 · 켜짐은 사용자가 확인한 동작).
  */
 import { query } from '../config/database';
-import { checkCredit, deductCreditSafe, InsufficientCreditError } from './ai-credit';
+import { checkCredit, deductCreditOutcome, InsufficientCreditError } from './ai-credit';
 import { getCreditCost } from './ai-credit-calc';
 import { selectJourneyTargetCustomerIds, JOURNEY_COUNT_CAP } from './journey-target-extractor';
 import { getJourneyOwnerScopeSql } from './store-scope';
@@ -22,9 +22,11 @@ import { activateJourney } from './journey-builder';
 import { dispatchOneShotJourney } from './journey-anchor-scheduler';
 import { nextTriggerEvents } from './journey-trigger-capability';
 import { buildLifecycleMap } from './journey-lifecycle-map';
+import { lineageColumnsReady, pausedClosedSiblings } from './journey-lineage';
+import { chargesFirstActivation } from './journey-activation-cost';   // ★ V.3 §5-1 처음 켜기 200 = 계보당 1번(판정 한 곳)
 
 export type GuardedActivation =
-  | { ok: true; firstActivation: boolean }
+  | { ok: true; firstActivation: boolean; charged: number }
   | { ok: false; code: 'NOT_FOUND' | 'DB_MIGRATION_PENDING' | 'PRETEST_REQUIRED' | 'INSUFFICIENT_CREDIT' | 'ACTIVATE_FAILED'; message: string }
   | { ok: false; code: 'CALLBACK_CONFIRM_REQUIRED'; message: string; callbackUnregisteredCount: number; unregisteredDetails: unknown };
 
@@ -37,12 +39,13 @@ export async function activateJourneyGuarded(
   companyId: string,
   journeyId: string,
   userId: string,
-  opts: { confirmCallbackExclusion?: boolean } = {},
+  opts: { confirmCallbackExclusion?: boolean; requireActiveSource?: string } = {},
 ): Promise<GuardedActivation> {
   let stRow;
   try {
+    const lineageReady = await lineageColumnsReady();
     stRow = await query(
-      `SELECT status, last_pretest_passed_at, start_kind, callback_mode, trigger_event, trigger_filters FROM journeys WHERE id = $1::uuid AND company_id = $2::uuid`,
+      `SELECT status, last_pretest_passed_at, start_kind, callback_mode, trigger_event, trigger_filters${lineageReady ? ', lineage_id' : ''} FROM journeys WHERE id = $1::uuid AND company_id = $2::uuid`,
       [journeyId, companyId]
     );
   } catch (colErr: any) {
@@ -82,8 +85,10 @@ export async function activateJourneyGuarded(
     }
   }
 
+  // 판의 첫 켜기(one_shot 첫 적재 · 응답) 와 과금(계보당 1번)은 다른 질문이다 — 한 값으로 겸하지 않는다(LESSONS_BACKEND:14).
   const firstActivation = row.status === 'draft';
-  if (firstActivation) {
+  const charge = chargesFirstActivation({ id: journeyId, status: String(row.status), lineage_id: row.lineage_id });
+  if (charge) {
     try {
       await checkCredit(companyId, getCreditCost('journey-activate'));
     } catch (e) {
@@ -94,7 +99,7 @@ export async function activateJourneyGuarded(
     }
   }
 
-  const result = await activateJourney(companyId, journeyId, userId);
+  const result = await activateJourney(companyId, journeyId, userId, { requireActiveSource: opts.requireActiveSource });
   if (!result.ok) return { ok: false, code: 'ACTIVATE_FAILED', message: result.reason || '활성화 실패' };
 
   if (firstActivation && String(row.start_kind) === 'one_shot') {
@@ -106,16 +111,75 @@ export async function activateJourneyGuarded(
     }
   }
 
-  if (firstActivation) {
-    await deductCreditSafe({
+  // ★ V.3 Codex 적대 A8 — charged = 실제로 받은 크레딧(차감 결말 그대로). 크레딧제 미적용 · 차감 실패면 0(화면이 받지 않은 금액을 말하지 않게).
+  let charged = 0;
+  if (charge) {
+    const outcome = await deductCreditOutcome({
       companyId,
       cost: getCreditCost('journey-activate'),
       source: 'journey-activate',
       createdBy: userId,
       idempotencyKey: `journey-activate:${journeyId}`,
     });
+    charged = outcome === 'deducted' || outcome === 'duplicate' ? getCreditCost('journey-activate') : 0;
   }
-  return { ok: true, firstActivation };
+  return { ok: true, firstActivation, charged };
+}
+
+/**
+ * ★ 2026-10-20 여정 V.3 §6-4 — 켤 여정이 낀 겹침 쌍 중 아직 고르지 않은 것(정렬한 「a|b」).
+ *   판정 = 지도와 같은 겹침(buildLifecycleMap · computeOverlapPairs) · 고른 쌍 = 여정에 저장된 것(trigger_filters.overlap_ack) + 이번 요청.
+ *   옛: 묶음 켜기만 확인하고 고른 쌍을 저장하지 않아 ①하나씩 켜기(지도 · 목록)는 겹침 확인 없이 켜졌고 ②다시 켤 때마다 또 물었다.
+ */
+export async function unresolvedOverlapPairs(companyId: string, journeyIds: string[], requestAcks: string[]): Promise<string[]> {
+  const ids = new Set(journeyIds.map(String));
+  if (ids.size === 0) return [];
+  const map = await buildLifecycleMap(companyId);
+  const stored = await query(
+    `SELECT id, trigger_filters->'overlap_ack' AS ack FROM journeys WHERE company_id = $1::uuid AND id = ANY($2::uuid[])`,
+    [companyId, [...ids]],
+  );
+  const ack = new Set<string>((requestAcks || []).map(String));
+  for (const r of stored.rows as any[]) if (Array.isArray(r.ack)) for (const k of r.ack) ack.add(String(k));
+  const out = new Set<string>();
+  for (const o of map.overlaps) {
+    if (!ids.has(o.a) && !ids.has(o.b)) continue;
+    const k = [o.a, o.b].sort().join('|');
+    if (!ack.has(k)) out.add(k);
+  }
+  return [...out];
+}
+
+/** ★ V.3 §6-4 — 켜기에 성공한 여정에 고른 쌍을 저장(그 여정이 낀 쌍만 · 기존과 합침 · 판 = updated_at 은 올리지 않는다 · 사전검사 판 유지). */
+export async function persistOverlapAcks(companyId: string, journeyIds: string[], acks: string[]): Promise<void> {
+  for (const id of journeyIds.map(String)) {
+    const mine = (acks || []).map(String).filter((k) => k.split('|').includes(id));
+    if (mine.length === 0) continue;
+    const cur = await query(`SELECT trigger_filters->'overlap_ack' AS ack FROM journeys WHERE id = $1::uuid AND company_id = $2::uuid`, [id, companyId]);
+    const before: string[] = Array.isArray(cur.rows[0]?.ack) ? cur.rows[0].ack.map(String) : [];
+    const merged = [...new Set([...before, ...mine])].sort().slice(0, 50);
+    await query(
+      `UPDATE journeys SET trigger_filters = COALESCE(trigger_filters, '{}'::jsonb) || jsonb_build_object('overlap_ack', $3::jsonb)
+        WHERE id = $1::uuid AND company_id = $2::uuid`,
+      [id, companyId, JSON.stringify(merged)],
+    );
+  }
+}
+
+/** ★ V.3 §6-5 — 지금 판을 다시 켜면 같은 계보의 멈춘 옛 판(진입 닫힘 · 진행 중 고객 마무리분)도 같은 관문으로 다시 켠다. */
+export async function resumeLineageSiblings(companyId: string, journeyId: string, userId: string): Promise<{ resumed: string[]; failed: Array<{ id: string; message: string }> }> {
+  const resumed: string[] = [];
+  const failed: Array<{ id: string; message: string }> = [];
+  for (const id of await pausedClosedSiblings(companyId, journeyId)) {
+    try {
+      const r = await activateJourneyGuarded(companyId, id, userId, { confirmCallbackExclusion: true });
+      if (r.ok) resumed.push(id);
+      else failed.push({ id, message: r.message });
+    } catch (e: any) {
+      failed.push({ id, message: e?.message || '다시 켜지 못했어요' });
+    }
+  }
+  return { resumed, failed };
 }
 
 /** 묶음 켜기 한 번에 받는 여정 수 상한(문장으로 만들기 = 최대 4 · 여유 포함). */
@@ -164,12 +228,13 @@ export async function activateJourneysInOrder(
   opts: { confirmCallbackExclusionIds?: string[]; acknowledgedOverlaps?: string[] } = {},
 ): Promise<BatchActivation> {
   const ids = [...new Set(journeyIds.map(String))].slice(0, MAX_BATCH_ACTIVATION);
+  const lineageReady = await lineageColumnsReady();
   const r = await query(
-    `SELECT id, name, status, trigger_event FROM journeys
+    `SELECT id, name, status, trigger_event${lineageReady ? ', lineage_id' : ''} FROM journeys
       WHERE company_id = $1::uuid AND id = ANY($2::uuid[]) AND archived_at IS NULL`,
     [companyId, ids],
   );
-  const rows = r.rows.map((x: any) => ({ id: String(x.id), name: String(x.name || ''), status: String(x.status), triggerEvent: String(x.trigger_event || '') }));
+  const rows = r.rows.map((x: any) => ({ id: String(x.id), name: String(x.name || ''), status: String(x.status), triggerEvent: String(x.trigger_event || ''), lineageId: x.lineage_id ? String(x.lineage_id) : null }));
   const found = new Set(rows.map((x) => x.id));
   const items: BatchActivationItem[] = ids
     .filter((id) => !found.has(id))
@@ -178,20 +243,17 @@ export async function activateJourneysInOrder(
   // ★ 2026-10-19 B-1009-5 — 겹침 해소 「필수」를 서버가 본다(옛: 모두 켜기 창만 강제 · API 직접 호출 · 시드는 해소 없이 켜졌다).
   //   판정 = 지도와 같은 겹침 쌍(buildLifecycleMap) · 켤 여정이 낀 쌍마다 화면이 고른 쌍 키(정렬한 「a|b」)가 있어야 한다.
   //   「첫 구매 고객 빼기」로 해소한 쌍은 지도에서 이미 빠진다. 켤 것이 하나도 없으면 보지 않는다.
+  //   ★ 2026-10-20 V.3 §6-4 — 판정 한 곳(unresolvedOverlapPairs · 저장된 고른 쌍 포함) · 켠 뒤 고른 쌍 저장.
   const toActivate = new Set(rows.filter((x) => x.status === 'draft' || x.status === 'paused').map((x) => x.id));
   if (toActivate.size > 0) {
-    const map = await buildLifecycleMap(companyId);
-    const ack = new Set((opts.acknowledgedOverlaps || []).map(String));
-    const pairs = map.overlaps
-      .filter((o) => toActivate.has(o.a) || toActivate.has(o.b))
-      .map((o) => [o.a, o.b].sort().join('|'))
-      .filter((k) => !ack.has(k));
+    const pairs = await unresolvedOverlapPairs(companyId, [...toActivate], opts.acknowledgedOverlaps || []);
     if (pairs.length > 0) {
       return { ok: false, code: 'OVERLAP_UNRESOLVED', message: `함께 시작되는 여정 ${pairs.length}쌍을 어떻게 할지 골라 주세요.`, pairs };
     }
   }
 
-  const drafts = rows.filter((x) => x.status === 'draft').length;
+  // ★ V.3 §5-1 — 합계도 단건과 같은 판정(새 판 초안 = 0).
+  const drafts = rows.filter((x) => chargesFirstActivation({ id: x.id, status: x.status, lineage_id: x.lineageId })).length;
   const needed = drafts * getCreditCost('journey-activate');
   if (needed > 0) {
     try {
@@ -213,6 +275,10 @@ export async function activateJourneysInOrder(
     try {
       const result = await activateJourneyGuarded(companyId, j.id, userId, { confirmCallbackExclusion: confirmSet.has(j.id) });
       items.push({ journeyId: j.id, name: j.name, result });
+      if (result.ok) {
+        await persistOverlapAcks(companyId, [j.id], opts.acknowledgedOverlaps || []).catch((e: any) => console.warn('[Journeys activate-batch] 고른 겹침 저장 실패(켜기는 유지):', j.id, e?.message));
+        if (j.status === 'paused') await resumeLineageSiblings(companyId, j.id, userId).catch((e: any) => console.warn('[Journeys activate-batch] 옛 판 다시 켜기 실패:', j.id, e?.message));
+      }
     } catch (err: any) {
       console.error('[Journeys activate-batch] 여정 켜기 오류:', j.id, err?.message);
       items.push({ journeyId: j.id, name: j.name, result: { ok: false, code: 'ACTIVATE_FAILED', message: '켜는 중 오류가 났어요. 잠시 뒤 다시 시도해 주세요.' } });

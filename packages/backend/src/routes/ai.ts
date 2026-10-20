@@ -1,6 +1,6 @@
 import { Request, Response, Router } from 'express';
 import { isDemoCompany } from '../utils/demo-company';   // ★ 2026-10-09 시연 회사 = 여정 활성화 비용 0
-import { query } from '../config/database';
+import { query, pool } from '../config/database';
 import { authenticate } from '../middlewares/auth';
 import { checkAPIStatus, extractVarCatalog, filterVarCatalogByData, generateMessages, recommendTarget, countFilteredCustomers, recommendNextCampaign, refineDirectMessage, callAIWithFallback } from '../services/ai';
 import {
@@ -15,7 +15,7 @@ import { buildGenderFilter, buildGradeFilter, buildRegionFilter, getGenderVarian
 import { FIELD_MAP, FIELD_DISPLAY_MAP, reverseDisplayValue, getColumnFields, renderFieldValue } from '../utils/standard-field-map';
 import { replaceVariables } from '../utils/messageUtils';
 import { STANDARD_FIELD_FALLBACKS } from '../utils/var-fallback';
-import { selectJourneyTargetCustomerIds } from '../utils/journey-target-extractor';
+import { selectJourneyTargetCustomerIds, findCustomerConditionIssues, describeCustomerConditionIssue } from '../utils/journey-target-extractor';
 import { filterByIndividualCallback } from '../utils/callback-filter';
 import { isValidCustomFieldKey } from '../utils/safe-field-name';
 import { getStoreScope, getOwnerCustomerScopeSql, getJourneyOwnerScopeSql, resolveHubStoreScope } from '../utils/store-scope';
@@ -147,6 +147,7 @@ import {
   // ★ 2026-09-29 여정 V2 0차 — 규약 밖 입력(모르는 칸 종류 · 칸 수 초과 · 모르는 대상 조건)은 400.
   JourneyInputError,
   updateJourneyCallback,
+  validateJourneyEntryConfig,
   JOURNEY_TEMPLATES,
   JourneyTemplateCode,
   JourneyStatus,
@@ -198,8 +199,11 @@ import { simulateJourney } from '../utils/journey-simulator';
 // ★ 2026-06-29: "오늘의 여정 기회" — 회사 실데이터로 여정 빈 지점 산출 (랜딩 1클릭 생성)
 import { buildJourneyOpportunities, buildJourneyDiagnosis, recoPlanFor, recoRequestId } from '../utils/journey-opportunities';
 // ★ 2026-09-29 여정 V2 1차 — 생애 지도 단일 조회(읽기 전용 · 화면은 그리기만).
-import { buildLifecycleMap } from '../utils/journey-lifecycle-map';
-import { activateJourneyGuarded, activateJourneysInOrder, MAX_BATCH_ACTIVATION } from '../utils/journey-activation';
+import { buildLifecycleMap, computeOverlapPairs } from '../utils/journey-lifecycle-map';
+import { activateJourneyGuarded, activateJourneysInOrder, MAX_BATCH_ACTIVATION, unresolvedOverlapPairs, persistOverlapAcks, resumeLineageSiblings } from '../utils/journey-activation';
+import { activationCostOf } from '../utils/journey-activation-cost';
+import { pauseReasonView } from '../utils/journey-pause-reason';
+import { reshapeJourney, ReshapeInputError } from '../utils/journey-reshape';
 import { buildAttachCheck } from '../utils/journey-lifecycle-map';
 import { isEndChipEnabled } from '../utils/journey-step-limits';
 import { createNewVersion } from '../utils/journey-lineage';
@@ -208,6 +212,7 @@ import { listJourneyCallbackNumbers } from '../utils/journey-draft-save';
 import { currentPurchaseDoor, listObservedProducts, suggestUsagePeriod, PRODUCT_TRIGGER_EVENT } from '../utils/journey-product';
 import { createProductJourneyDraft, dbAcceptsProductTrigger, JourneyMigrationPendingError, productJourneyLockReason } from '../utils/journey-product-create';
 import { normalizeJourneyOptions } from '../utils/journey-options-validator';
+import { journeyOptionEditVerdict, JOURNEY_ENTRY_KEYS, STANDING_COUNT_TRIGGERS } from '../utils/journey-step-edit-policy';
 import { generateVariantsFromMessage } from '../utils/variant-generator';
 import { getJourneyLiveSnapshot } from '../utils/journey-stats';
 // ★ D211+ Predictive 강화 (2026-05-23 Harold 명시): CT-63 Explainability
@@ -3357,7 +3362,11 @@ router.get('/operator/journeys', async (req: Request, res: Response) => {
     }
 
     const status = (req.query.status as JourneyStatus | 'all') || 'all';
-    const journeys = await listJourneys(companyId, status);
+    // ★ 2026-10-20 여정 V.3 §5-1 — 처음 켜기 크레딧은 서버가 정한다(화면이 상태로 200 을 매기지 않는다 · 새 판 초안 = 0).
+    // ★ V.3 §6-6 — 멈춘 이유는 사람 말(pause_view)로만 그린다(원문 pause_reason 은 화면에 내보내지 않는다 · 목록 카드가 원문을 그리던 자리).
+    const journeys = (await listJourneys(companyId, status)).map((j: any) => ({
+      ...j, activation_cost: activationCostOf(j), pause_view: j.status === 'paused' ? pauseReasonView(j.pause_reason) : null,
+    }));
 
     const templates = Object.values(JOURNEY_TEMPLATES).map((t) => ({
       templateCode: t.templateCode,
@@ -3370,7 +3379,8 @@ router.get('/operator/journeys', async (req: Request, res: Response) => {
       steps: t.steps,
     }));
 
-    return res.json({ success: true, journeys, templates });
+    // ★ V.3 §6-7 — 다시 켜기 한 줄의 운영 크레딧 숫자(단가표 한 곳 · 화면이 적지 않는다).
+    return res.json({ success: true, journeys, templates, costs: { operation: getCreditCost('journey-operation') } });
   } catch (err: any) {
     console.error('[Journeys list] 오류:', err);
     return res.status(500).json({ success: false, error: err?.message || '여정 조회 실패' });
@@ -3568,7 +3578,53 @@ router.post('/operator/journeys/:id/new-version', async (req: Request, res: Resp
       return res.status(503).json({ success: false, error: 'DB 마이그레이션 필요: 운영자에게 journeys lineage_id · entry_closed_at ALTER 실행 요청', code: 'DB_MIGRATION_PENDING' });
     }
     console.error('[Journeys new-version] 오류:', err);
-    return res.status(500).json({ success: false, error: '새 판을 만들지 못했어요. 잠시 뒤 다시 시도해 주세요.' });
+    return res.status(500).json({ success: false, error: '바뀐 모양을 만들지 못했어요. 잠시 뒤 다시 시도해 주세요.' });
+  }
+});
+
+// POST /api/ai/operator/journeys/:id/reshape — ★ 2026-10-20 여정 V.3 §4-2 「새 모양」 한 흐름(복제 → 바꾼 내용 → 사전검사 → 켜기 · 실패 = 복제본 삭제)
+//   켜진 여정의 칸 모양 · 목표 끄기 · 회신번호처럼 진행 중 고객에게 바로 닿는 변경을 새로 들어오는 고객부터 적용한다(진행 중 고객은 옛 모양으로 끝까지 · 0크레딧).
+//   사전검사(통신사 스팸 검사 포함)를 서버가 끝까지 기다리므로 수 초 걸린다 → 화면은 로딩 창을 띄운다.
+router.post('/operator/journeys/:id/reshape', async (req: Request, res: Response) => {
+  try {
+    const companyId = req.user?.companyId;
+    const userId = req.user?.userId;
+    if (!companyId || !userId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
+    const planCtx = await loadPlanContext(companyId);
+    if (!planCtx) return res.status(404).json({ success: false, error: '회사 정보를 찾을 수 없습니다.' });
+    if (!isAiOperatorAllowed(planCtx, req.user)) {
+      return res.status(403).json({ success: false, error: 'AI Operator 진입 권한이 없습니다.', code: 'AI_OPERATOR_GATED' });
+    }
+    const b = req.body || {};
+    const arr = (v: unknown) => (Array.isArray(v) ? v : []);
+    const r = await reshapeJourney(companyId, String(req.params.id), userId, {
+      stepPatches: arr(b.stepPatches).filter((x: any) => x && Number.isFinite(Number(x.order)) && x.patch && typeof x.patch === 'object')
+        .map((x: any) => ({ order: Number(x.order), patch: x.patch })),
+      deleteOrders: arr(b.deleteOrders).map(Number).filter((n: number) => Number.isFinite(n)),
+      addSteps: arr(b.addSteps).filter((x: any) => x && typeof x === 'object'),
+      options: b.options && typeof b.options === 'object' ? b.options : undefined,
+      confirmCallbackExclusion: b.confirmCallbackExclusion === true,
+    });
+    if (r.ok) return res.json({ success: true, journeyId: r.journeyId });
+    switch (r.code) {
+      case 'NOT_FOUND': return res.status(404).json({ success: false, error: r.message, code: r.code });
+      case 'NO_CHANGE': return res.status(400).json({ success: false, error: r.message, code: r.code });
+      case 'PRETEST_FAILED': return res.status(400).json({ success: false, error: r.message, code: r.code, result: r.result });
+      case 'CALLBACK_CONFIRM_REQUIRED':
+        return res.json({ success: false, callbackConfirmRequired: true, callbackUnregisteredCount: r.callbackUnregisteredCount, unregisteredDetails: r.unregisteredDetails, message: r.message });
+      case 'ACTIVATE_FAILED': return res.status(400).json({ success: false, error: r.message, code: r.code });
+      default: return res.status(409).json({ success: false, error: r.message, code: r.code, ...('draftId' in r && r.draftId ? { draftId: r.draftId } : {}) });
+    }
+  } catch (err: any) {
+    if (err instanceof ReshapeInputError || err instanceof JourneyInputError) return res.status(400).json({ success: false, error: err.message });
+    if (err instanceof JourneyStepGateError) return res.status(409).json({ success: false, error: err.message, code: err.code });
+    if (err instanceof InsufficientCreditError) return res.status(402).json({ success: false, error: err.message, code: 'INSUFFICIENT_CREDIT' });
+    const msg = err?.message || '';
+    if (msg.includes('column') && msg.includes('does not exist')) {
+      return res.status(503).json({ success: false, error: 'DB 마이그레이션 필요: 운영자에게 journeys lineage_id · entry_closed_at ALTER 실행 요청', code: 'DB_MIGRATION_PENDING' });
+    }
+    console.error('[Journeys reshape] 오류:', err);
+    return res.status(500).json({ success: false, error: '바뀐 모양으로 저장하지 못했어요. 잠시 뒤 다시 시도해 주세요.' });
   }
 });
 
@@ -3935,10 +3991,22 @@ router.post('/operator/journeys/:id/activate', async (req: Request, res: Respons
     // ★ 2026-09-30 여정 V2 2차 — 켜기 게이트(검증 마커 · 매장번호 확인 · 최초 활성화 크레딧 확인/차감 · 1회 발송 적재)를
     //   CT(journey-activation.ts activateJourneyGuarded)로 옮겼다. [모두 켜기]와 같은 게이트를 쓴다. 응답은 옛 그대로 매핑한다.
     //   (크레딧: 최초 활성화(draft→active)만 차감 · 멱등키 journey-activate:${journeyId} 고정 · paused→active 재개는 0)
-    const r = await activateJourneyGuarded(companyId, req.params.id, userId, {
+    // ★ 2026-10-20 여정 V.3 §6-4 — 하나씩 켜기에도 겹침 확인(묶음 켜기와 같은 판정 · 고른 쌍은 저장 · 다시 켤 때는 새 쌍만 묻는다).
+    const journeyId = String(req.params.id);
+    const requestAcks: string[] = Array.isArray((req.body as any)?.acknowledgedOverlaps) ? (req.body as any).acknowledgedOverlaps.map(String) : [];
+    const unresolved = await unresolvedOverlapPairs(companyId, [journeyId], requestAcks);
+    if (unresolved.length > 0) {
+      return res.status(409).json({ success: false, code: 'OVERLAP_UNRESOLVED', pairs: unresolved, error: `같은 구매로 함께 시작되는 여정 ${unresolved.length}쌍을 어떻게 할지 골라 주세요.` });
+    }
+    const r = await activateJourneyGuarded(companyId, journeyId, userId, {
       confirmCallbackExclusion: !!(req.body && (req.body as any).confirmCallbackExclusion),
     });
-    if (r.ok) return res.json({ success: true });
+    if (r.ok) {
+      await persistOverlapAcks(companyId, [journeyId], requestAcks).catch((e: any) => console.warn('[Journeys activate] 고른 겹침 저장 실패(켜기는 유지):', e?.message));
+      // ★ V.3 §6-5 — 같은 계보의 멈춘 옛 판(진행 중 고객 마무리분)도 다시 켠다(사람 멈춤이 계보 전체를 멈췄다).
+      const siblings = r.firstActivation ? { resumed: [], failed: [] } : await resumeLineageSiblings(companyId, journeyId, userId);
+      return res.json({ success: true, charged: r.charged, olderResumed: siblings.resumed.length, olderFailed: siblings.failed.length });
+    }
     switch (r.code) {
       case 'NOT_FOUND': return res.status(404).json({ success: false, error: r.message });
       case 'DB_MIGRATION_PENDING': return res.status(503).json({ success: false, error: r.message, code: 'DB_MIGRATION_PENDING' });
@@ -4078,7 +4146,7 @@ router.post('/operator/journeys/:id/steps', async (req: Request, res: Response) 
       alimtalkProfileId, alimtalkTemplateCode, alimtalkVariableMap,
       alimtalkNextType, alimtalkNextContents, alimtalkNextSubject,
       mmsImagePaths, delayMode, targetHourKst, anchorOffsetDays,
-      notMetGoto, waitEventName, waitTimeoutHours,
+      notMetGoto, waitEventName, waitTimeoutHours, clientStepId,
     } = req.body || {};
 
     const result = await addJourneyStep(companyId, req.params.id, {
@@ -4102,9 +4170,9 @@ router.post('/operator/journeys/:id/steps', async (req: Request, res: Response) 
       notMetGoto,
       waitEventName,
       waitTimeoutHours: waitTimeoutHours != null ? Number(waitTimeoutHours) : undefined,
-    });
+    }, { clientStepId: clientStepId != null ? String(clientStepId) : undefined });
     if (!result) return res.status(404).json({ success: false, error: '여정을 찾을 수 없거나 수정 권한이 없습니다.' });
-    return res.json({ success: true, stepId: result.stepId, stepOrder: result.stepOrder });
+    return res.json({ success: true, stepId: result.stepId, stepOrder: result.stepOrder, existed: result.existed === true });
   } catch (err: any) {
     if (err instanceof JourneyStepGateError) {
       return res.status(409).json({ success: false, error: err.message, code: err.code });
@@ -4469,23 +4537,23 @@ router.patch('/operator/journeys/:id/auto-reentry', async (req: Request, res: Re
       return res.status(403).json({ success: false, error: 'AI Operator 진입 권한이 없습니다.', code: 'AI_OPERATOR_GATED' });
     }
     const enabled = !!req.body?.enabled;
-    // ★ 2026-09-27 한줄로 V2 R298 — 켜기는 옵션 변경 규칙과 같게: 운영 중이면 막고(먼저 일시정지) 사전검사 통과를 무효로 한다.
-    //   끄기는 발송을 줄이는 방향이라 언제든 허용(목표 자동 종료 토글과 같은 예외). 옛: 상태·사전검사 없이 운영 중 여정의 재진입 구성을 바꿨다.
+    // ★ 2026-09-27 한줄로 V2 R298 — 켜기는 옵션 변경 규칙과 같게.
+    // ★ 2026-10-20 여정 V.3 §4-1 — 옵션 규칙이 바뀌었다: 재진입은 켜진 채 그 자리(다음 진입부터) · 사전검사 표식 유지(재진입은 문안 검사 입력이 아니다).
+    //   판정 = journeyOptionEditVerdict 한 곳(끝난 여정만 거절). 옛: 운영 중이면 켜기를 막고 표식을 비웠다.
+    const st = await query(`SELECT status FROM journeys WHERE id = $1::uuid AND company_id = $2::uuid`, [req.params.id, companyId]);
+    if (st.rows.length === 0) return res.status(404).json({ success: false, error: '여정을 찾을 수 없습니다.' });
+    const verdict = journeyOptionEditVerdict(String(st.rows[0].status), { autoReentryEnabled: enabled });
+    if (!verdict.ok) return res.status(400).json({ success: false, error: verdict.message, code: verdict.code });
     const r = await query(
       `UPDATE journeys SET auto_reentry_enabled = $3,
-              last_pretest_passed_at = CASE WHEN $3 THEN NULL ELSE last_pretest_passed_at END,
+              last_pretest_passed_at = CASE WHEN $4 THEN last_pretest_passed_at ELSE NULL END,
               updated_at = NOW()
-       WHERE id = $1::uuid AND company_id = $2::uuid
-         AND (NOT $3 OR status <> 'active')
+       WHERE id = $1::uuid AND company_id = $2::uuid AND status = $5
        RETURNING id, auto_reentry_enabled, allow_reentry, reentry_cooldown_days`,
-      [req.params.id, companyId, enabled]
+      [req.params.id, companyId, enabled, verdict.keepMarker, String(st.rows[0].status)]
     );
     if (r.rows.length === 0) {
-      const exists = await query(`SELECT 1 FROM journeys WHERE id = $1::uuid AND company_id = $2::uuid`, [req.params.id, companyId]);
-      if (exists.rows.length > 0) {
-        return res.status(400).json({ success: false, error: '운영 중인 여정은 자동 재진입을 켤 수 없습니다. 먼저 일시정지해 주세요.' });
-      }
-      return res.status(404).json({ success: false, error: '여정을 찾을 수 없습니다.' });
+      return res.status(409).json({ success: false, error: '여정 상태가 방금 바뀌었습니다. 새로고침 후 다시 시도해 주세요.', code: 'JOURNEY_STATE_CHANGED' });
     }
     return res.json({
       success: true,
@@ -4499,11 +4567,16 @@ router.patch('/operator/journeys/:id/auto-reentry', async (req: Request, res: Re
   }
 });
 
-// PATCH /api/ai/operator/journeys/:id/options — 여정별 운영 옵션 편집 (Phase 9)
-//   트리거 타이밍·포인트 + 임계·예산·재진입·회신을 한 번에. draft/paused만(운영 중 차단).
+// PATCH /api/ai/operator/journeys/:id/options — 여정별 운영 옵션 · 시작 조건 편집 (Phase 9 · ★2026-10-20 여정 V.3 설계서 §4 · §7)
 //   부분 갱신: req.body에 있는 키만 UPDATE(미전달 옵션을 기본값으로 덮어쓰지 않음).
 //   값은 normalizeJourneyOptions로 안전 범위 클램프. 컬럼명은 코드 고정(주입 무관, 전부 information_schema 확인).
+//   ★ V.3 — 켜진 여정도 시작 조건 · 한도 · 재진입 · 홀드아웃 · 예산 · 개인 발송 시각 · 목표 종료 켜기는 그 자리에서(다음 진입 · 다음 칸부터).
+//     목표 끄기 · 목표 종류 · 회신번호 · 회신 모드 = 새 모양(409 JOURNEY_NEEDS_NEW_SHAPE) · 판정 = journeyOptionEditVerdict 한 곳.
+//     켜진 여정 저장은 켜기 관문과 같은 검사(validateJourneyEntryConfig)를 잠금 안에서 본다 · dryRun = 같은 검사 · 같은 셈 · 저장 안 함.
 router.patch('/operator/journeys/:id/options', async (req: Request, res: Response) => {
+  let client: any = null;
+  let began = false;
+  const rollback = async () => { if (client && began) { began = false; await client.query('ROLLBACK').catch(() => {}); } };
   try {
     const companyId = req.user?.companyId;
     if (!companyId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
@@ -4512,41 +4585,124 @@ router.patch('/operator/journeys/:id/options', async (req: Request, res: Respons
     if (!isAiOperatorAllowed(planCtx, req.user)) {
       return res.status(403).json({ success: false, error: 'AI Operator 진입 권한이 없습니다.', code: 'AI_OPERATOR_GATED' });
     }
-
-    const cur = await query(
-      `SELECT status, trigger_filters, trigger_event FROM journeys WHERE id = $1::uuid AND company_id = $2::uuid`,
-      [req.params.id, companyId]
-    );
-    if (cur.rows.length === 0) return res.status(404).json({ success: false, error: '여정을 찾을 수 없습니다.' });
     const body = req.body || {};
+    const dryRun = body.dryRun === true;
+    const journeyId = String(req.params.id);
+
+    client = await pool.connect();
+    await client.query('BEGIN');
+    began = true;
+    // 잠근 상태로 읽고 판정한다(옛: 트랜잭션 밖에서 읽고 status 만 쓰기 조건 · 켜진 여정 그 자리 수정이 생겨 병합 결과를 검사해야 한다)
+    const curRes = await client.query(
+      `SELECT status, trigger_filters, trigger_event, allow_reentry, reentry_cooldown_days, threshold_recipients_per_step
+         FROM journeys WHERE id = $1::uuid AND company_id = $2::uuid FOR UPDATE`,
+      [journeyId, companyId],
+    );
+    if (curRes.rows.length === 0) { await rollback(); return res.status(404).json({ success: false, error: '여정을 찾을 수 없습니다.' }); }
+    const cur = curRes.rows[0];
+    const status = String(cur.status || '');
     // ★ 2026-09-30 여정 V2 3차 — "같은 상품 재구매" 목표는 상품 재구매 여정에서만 뜻이 있다(다른 여정은 상품이 없어 영영 안 끝난다).
-    if (body.goalKind === 'product' && cur.rows[0].trigger_event !== PRODUCT_TRIGGER_EVENT) {
+    if (body.goalKind === 'product' && cur.trigger_event !== PRODUCT_TRIGGER_EVENT) {
+      await rollback();
       return res.status(400).json({ success: false, error: '같은 상품 재구매 목표는 상품 재구매 여정에서만 쓸 수 있어요.' });
     }
-    if (cur.rows[0].status !== 'draft' && cur.rows[0].status !== 'paused') {
-      // ★ 2026-07-10 목표 달성 자동 종료 토글만 운영(active) 중에도 변경 허용 — 발송을 줄이는 안전 방향.
-      //   그 외 옵션(타이밍·한도·예산·재진입·회신)은 기존 규칙 유지(일시정지 후 편집).
-      const keys = Object.keys(body);
-      // ★ 2026-07-11: 목표 종류(goalKind)도 운영 중 변경 허용 — 목표 축 키 2종만이면 통과(그 외 옵션은 기존 규칙).
-      // ★ 2026-09-29 여정 V2 0차 ⑨ — 운영 중에는 **켜기만** 허용한다. 끄기 · 목표 종류 변경은 "발송을 줄이는 방향"이 아니다:
-      //   끄는 순간 이미 목표를 이룬 진행 중 고객이 남은 권유 문자를 받는다(더 보내는 쪽). 그래서 일시정지 뒤에만 바꾼다.
-      const onlyGoalToggle = cur.rows[0].status === 'active' && keys.length > 0 && keys.every((k) => k === 'goalExitEnabled' || k === 'goalKind');
-      if (!onlyGoalToggle) {
-        return res.status(400).json({ success: false, error: '운영 중인 여정은 옵션을 바꿀 수 없습니다. 먼저 일시정지해 주세요. (목표를 이루면 남은 문자 안 보냄 켜기는 운영 중에도 가능)' });
+    const verdict = journeyOptionEditVerdict(status, body);
+    if (!verdict.ok) {
+      await rollback();
+      return res.status(verdict.code === 'JOURNEY_NEEDS_NEW_SHAPE' ? 409 : 400).json({ success: false, error: verdict.message, code: verdict.code });
+    }
+
+    // 고객 조건 · 묶는 방식 — 원문 그대로 검사한다(모양이 틀린 값을 빈 조건으로 접으면 전 고객이 된다).
+    const curFilters: Record<string, any> = cur.trigger_filters || {};
+    if ('customer_conditions' in body || 'logic' in body) {
+      const issues = findCustomerConditionIssues(
+        'customer_conditions' in body ? body.customer_conditions : curFilters.customer_conditions,
+        'logic' in body ? body.logic : curFilters.logic,
+      );
+      if (issues.length > 0) {
+        await rollback();
+        return res.status(400).json({ success: false, error: describeCustomerConditionIssue(issues[0]), code: 'CUSTOMER_CONDITION_INVALID' });
       }
-      const turnsGoalExitOn = keys.length === 1 && keys[0] === 'goalExitEnabled' && (body.goalExitEnabled === true || body.goalExitEnabled === 'true');
-      if (!turnsGoalExitOn) {
-        return res.status(409).json({
+    }
+    const norm = normalizeJourneyOptions(body);
+    const mergedFilters: Record<string, any> = { ...curFilters, ...norm.triggerFilters };
+    // 고른 고객에게(상시)는 조건 0개 = 전체 고객 → 명시 신호(all_customers)가 있을 때만(D100 · 빈 조건 = 전체가 아니다).
+    // ★ Codex 적대 A4 — 조건만이 아니라 「전체 고객」 해제 요청도 같은 병합 결과로 본다(조건 0개에서 all_customers 만 끄면 통과하던 틈).
+    if (('customer_conditions' in body || 'all_customers' in body) && cur.trigger_event === 'custom'
+      && (!Array.isArray(mergedFilters.customer_conditions) || mergedFilters.customer_conditions.length === 0) && mergedFilters.all_customers !== true) {
+      await rollback();
+      return res.status(400).json({ success: false, error: '조건이 없으면 전체 고객에게 보내요. 전체 고객으로 보내려면 「전체 고객」을 골라 주세요.', code: 'ALL_CUSTOMERS_REQUIRED' });
+    }
+    const merged = {
+      trigger_event: String(cur.trigger_event || ''),
+      allow_reentry: 'allowReentry' in body ? norm.options.allowReentry : cur.allow_reentry === true,
+      reentry_cooldown_days: 'reentryCooldownDays' in body ? norm.options.reentryCooldownDays : cur.reentry_cooldown_days,
+      trigger_filters: mergedFilters,
+      threshold_recipients_per_step: 'thresholdRecipients' in body ? norm.options.thresholdRecipients : cur.threshold_recipients_per_step,
+    };
+    // 켜진 여정은 다음 켜기가 없다 → 켜기 관문과 같은 검사를 저장 때 본다(상한 비우기 · 쿨다운 · 조건 · 포인트 기준).
+    if (status === 'active') {
+      const issue = validateJourneyEntryConfig(merged);
+      if (issue) { await rollback(); return res.status(400).json({ success: false, error: issue, code: 'ENTRY_CONFIG_INVALID' }); }
+    }
+
+    // 지금 맞는 인원 — 실발송과 같은 추출 함수(selectJourneyTargetCustomerIds). 시작 조건을 건드렸거나 dryRun 일 때.
+    const touchesEntry = Object.keys(body).some((k) => JOURNEY_ENTRY_KEYS.has(k));
+    let matched: number | null = null;
+    const cap = merged.threshold_recipients_per_step;
+    if (dryRun || (status === 'active' && touchesEntry)) {
+      const ids = await selectJourneyTargetCustomerIds(
+        companyId, merged.trigger_event, mergedFilters,
+        cap != null ? Number(cap) + 1 : JOURNEY_COUNT_CAP,
+        journeyId,
+        { allowReentry: merged.allow_reentry, cooldownDays: Number(merged.reentry_cooldown_days || 0) },
+        await getJourneyOwnerScopeSql(companyId, journeyId), await journeyOwnerConsent(companyId, journeyId),
+      );
+      matched = ids.length;
+      // 켜진 상시 · 휴면 여정에서 넓힌 결과가 상한을 넘으면 저장하지 않는다(다음 회차에 여정 전체가 자동 멈춘다 · 진입 감시 대량 차단).
+      //   하루 몫(backfill_per_day)이 있으면 나눠 받으므로 막지 않는다.
+      if (!dryRun && status === 'active' && STANDING_COUNT_TRIGGERS.has(merged.trigger_event) && cap != null && matched > Number(cap)
+        && !(Number(mergedFilters.backfill_per_day) > 0)) {
+        await rollback();
+        return res.status(400).json({
           success: false,
-          code: 'JOURNEY_GOAL_CHANGE_NEEDS_PAUSE',
-          error: '운영 중에는 목표를 이루면 남은 문자 안 보냄을 켜는 것만 할 수 있어요. 끄거나 목표를 바꾸려면 먼저 일시정지해 주세요. 끄면 이미 목표를 이룬 고객도 남은 문자를 받습니다.',
+          code: 'ENTRY_OVER_CAP',
+          matched,
+          cap: Number(cap),
+          error: `지금 조건에 맞는 고객이 한 번에 보낼 최대 인원(${Number(cap).toLocaleString()}명)보다 많아요. 최대 인원을 늘리거나 조건을 좁혀 주세요.`,
         });
       }
     }
+    if (dryRun) {
+      await rollback();
+      return res.json({ success: true, dryRun: true, matched, cap: cap != null ? Number(cap) : null, approximate: !STANDING_COUNT_TRIGGERS.has(merged.trigger_event) });
+    }
 
-    const norm = normalizeJourneyOptions(body);
+    // 켜진 여정에서 겹침 해소 옵션을 끄면 같은 구매에 두 통이 다시 생길 수 있다 → 켜기와 같은 겹침 판정 · 고른 쌍만 통과(고른 쌍은 저장).
+    if (verdict.overlapCheck) {
+      const map = await buildLifecycleMap(companyId);
+      const fr = await query(`SELECT id, trigger_filters FROM journeys WHERE company_id = $1::uuid AND archived_at IS NULL`, [companyId]);
+      const filtersById = new Map<string, Record<string, any>>(fr.rows.map((r: any) => [String(r.id), (r.trigger_filters || {}) as Record<string, any>]));
+      filtersById.set(journeyId, mergedFilters);
+      const marketing = map.journeys.filter((j) => j.band === 'flow' || j.band === 'moment').map((j) => ({ id: j.id, triggerEvent: j.triggerEvent }));
+      const ack = new Set<string>([
+        ...(Array.isArray(mergedFilters.overlap_ack) ? mergedFilters.overlap_ack.map(String) : []),
+        ...(Array.isArray(body.acknowledgedOverlaps) ? body.acknowledgedOverlaps.map(String) : []),
+      ]);
+      const pairs = computeOverlapPairs(marketing, filtersById)
+        .filter((p) => p.a === journeyId || p.b === journeyId)
+        .map((p) => [p.a, p.b].sort().join('|'))
+        .filter((k) => !ack.has(k));
+      if (pairs.length > 0) {
+        await rollback();
+        return res.status(409).json({ success: false, code: 'OVERLAP_UNRESOLVED', pairs, error: `같은 구매로 함께 시작되는 여정 ${pairs.length}쌍을 어떻게 할지 골라 주세요.` });
+      }
+      if (Array.isArray(body.acknowledgedOverlaps) && body.acknowledgedOverlaps.length > 0) {
+        norm.triggerFilters.overlap_ack = [...ack].slice(0, 50);
+      }
+    }
 
-    const params: any[] = [req.params.id, companyId];
+    const params: any[] = [journeyId, companyId];
     const sets: string[] = [];
     const add = (col: string, val: any) => { params.push(val); sets.push(`${col} = $${params.length}`); };
 
@@ -4554,7 +4710,7 @@ router.patch('/operator/journeys/:id/options', async (req: Request, res: Respons
     // ⛔ 2026-08-02 Codex 5R — **DB 안에서 병합**하고, 필터 키가 온 요청에서만 건드린다.
     //   옛 코드는 트랜잭션 밖에서 읽은 JSON을 통째로 다시 썼다. 상한만 저장하는 요청과 다른 탭의
     //   휴면일수·포인트 임계 편집이 겹치면 둘 다 같은 옛 JSON을 읽고 **나중 요청이 앞 요청의 필터를 되돌린다**
-    //   (그 뒤 모달이 되돌아간 필터로 재검증·활성화해 의도보다 넓은 고객군에 나간다).
+    //   (그 뒤 모달이 되돌아간 필터로 재검증·활성화해 의도보다 넓은 고객군에 나간다). ★V.3 — 행 잠금 안이라 검사한 병합 결과가 곧 저장값이다.
     if (Object.keys(norm.triggerFilters || {}).length > 0) {
       params.push(JSON.stringify(norm.triggerFilters));
       sets.push(`trigger_filters = COALESCE(trigger_filters, '{}'::jsonb) || $${params.length}::jsonb`);
@@ -4575,38 +4731,39 @@ router.patch('/operator/journeys/:id/options', async (req: Request, res: Respons
     if ('goalKind' in body) add('goal_kind', norm.options.goalKind);
     if ('holdoutPct' in body) add('holdout_pct', norm.options.holdoutPct);
     if ('personalSendTime' in body) add('personal_send_time', norm.options.personalSendTime);
+    // ★ V.3 D2 — 새 고객 받는 마지막 날(칸 = DDL 뒤 · 없으면 UPDATE 가 42703 → 아래 catch 의 DB_MIGRATION_PENDING 503).
+    if ('entryEndsOn' in body) add('entry_ends_on', norm.options.entryEndsOn);
 
     // ⛔ 2026-08-02 Codex 3R — **검증 입력을 바꾸는 옵션 변경은 사전검사 통과를 무효로 만든다.**
-    //   회신번호·상한·재진입을 검증 통과 뒤에 바꾸면, 활성화는 마커가 남아 있어 그대로 켜진다 —
-    //   검사받지 않은 구성으로 발송이 시작된다. 목표 자동 종료 토글 2종만 예외다(운영 중에도 허용되는,
-    //   발송을 줄이는 방향의 값이라 문안 검증 결과를 바꾸지 않는다).
-    const bodyKeys = Object.keys(body || {});
-    const onlyGoalKeys = bodyKeys.length > 0 && bodyKeys.every((k) => k === 'goalExitEnabled' || k === 'goalKind');
-    if (!onlyGoalKeys) sets.push('last_pretest_passed_at = NULL');
-
+    //   ★ V.3 §4-4 — 「건드린 키가 전부 유지 목록(시작 조건 · 한도 · 재진입 · 대조군 · 예산 · 목표)」일 때만 표식을 지킨다(새 키 = 기본 비움 · 회신번호 = 비움).
+    if (!verdict.keepMarker) sets.push('last_pretest_passed_at = NULL');
     sets.push('updated_at = NOW()');
 
-    // ★ 2026-08-01 Codex 5R — 읽은 status를 쓰기 조건으로 건다(낙관적 동시성).
-    //   status를 읽고 검증한 뒤 조건 없이 쓰면, 그 사이 활성화가 성사됐을 때
-    //   **활성 여정의 수신자 상한을 비울 수 있다**. 그러면 워커가 상한 검사를 건너뛴다.
-    params.push(cur.rows[0].status);
-    const r = await query(
+    if (sets.length === 1) { await rollback(); return res.json({ success: true, matched }); }
+    params.push(status);
+    const r = await client.query(
       `UPDATE journeys SET ${sets.join(', ')}
         WHERE id = $1::uuid AND company_id = $2::uuid AND status = $${params.length}
         RETURNING id`,
       params
     );
     if (r.rows.length === 0) {
+      await rollback();
       return res.status(409).json({ success: false, error: '여정 상태가 방금 바뀌었습니다. 새로고침 후 다시 시도해 주세요.', code: 'JOURNEY_STATE_CHANGED' });
     }
-    return res.json({ success: true });
+    await client.query('COMMIT');
+    began = false;
+    return res.json({ success: true, matched });
   } catch (err: any) {
+    await rollback();
     const msg = err?.message || '';
     if (msg.includes('column') && msg.includes('does not exist')) {
       return res.status(503).json({ success: false, error: 'DB 마이그레이션이 필요합니다. 운영자에게 journeys 옵션 컬럼 확인을 요청해 주세요.', code: 'DB_MIGRATION_PENDING' });
     }
     console.error('[Journeys update options] 오류:', err);
     return res.status(500).json({ success: false, error: err?.message || '여정 옵션 수정 실패' });
+  } finally {
+    client?.release?.();
   }
 });
 

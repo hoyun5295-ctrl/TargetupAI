@@ -89,6 +89,9 @@ export async function loadCreditRow(client: any, companyId: string, forUpdate: b
  * 그 외(분석·생성·발행) = 후불(postpaid)이면 overage_limit까지, 선불은 0에서 차단(기존 동작).
  */
 export function creditOverageAllowance(row: any, source: string): number {
+  // ★ 2026-10-20 여정 V.3 D1(Harold 「선불이든 후불이든 크레딧이 모자르면 둘 다 멈추는게 맞는거지 · 다음달 크레딧에서 땡겨오냐」) —
+  //   여정 운영은 그달 크레딧(기본 + 구매) 안에서만 쓴다. 선불 다음 달 당겨쓰기 · 후불 초과 청구 0. 모자라면 실행기가 보내기 전에 멈춘다.
+  if (source === 'journey-operation') return 0;
   const planCredits = Number(row.plan_credits) || 0;
   return isOperationSource(source)
     ? planCredits

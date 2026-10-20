@@ -7,26 +7,28 @@
  *   - 60초마다 · 탭으로 돌아올 때 다시 읽는다(보이지 않을 때는 읽지 않는다).
  *   - 2차: [문장으로 만들기](인터뷰 → 초안 → 이어붙이기 점검) · [켜기 전 점검](모두 켜기) · 선 고치기 1클릭(행동은 서버가 정함) · 칸 창 [문안 고치기].
  *   - [만들기] = 목록 화면의 기존 1클릭 생성으로 보낸다(?preset=시작 사건).
+ *   ★ 2026-10-20 여정 V.3 §10 — 기본 [한눈에](요약 카드) · [칸까지] · 요약 한 줄(서버 summary) · 카드 · 칸 = 작업 화면(?journey=&step=) ·
+ *     멈추기 · 다시 켜기 = 공용 훅 · 「새 판」 버튼 없음(고치기 = 작업 화면이 새 모양을 서버 한 흐름으로) · 판 아래 기준 줄 삭제(머리 표지 툴팁).
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { ArrowLeft, List, Loader2, Map as MapIcon, MessageSquarePlus, Power, RefreshCw, Search, Sparkles } from 'lucide-react';
 import { JOURNEY_TABS } from '../components/zone/zone-tabs';
 import ZoneSegmented from '../components/zone/ZoneSegmented';
-import { OUI_BTN_GHOST, OUI_BTN_PRIMARY, OUI_SRC, OUI_WRAP_FULL } from '../utils/operator-ui';
+import { OUI_BTN_GHOST, OUI_BTN_PRIMARY, OUI_WRAP_FULL } from '../utils/operator-ui';
 import ZoneFrame from '../components/zone/ZoneFrame';
 import { zoneModule } from '../constants/ai-operator-modules';
 import { goBackOr } from '../lib/scroll-restoration';
 import LifecycleMapCanvas, { type MapStatusFilter } from '../components/journey/map/LifecycleMapCanvas';
 import GapFinderModal, { type GapOpportunity } from '../components/journey/map/GapFinderModal';
-import MapStepEditModal from '../components/journey/map/MapStepEditModal';
+import JourneyWorkspace from '../components/journey/workspace/JourneyWorkspace';
+import { useJourneyActions } from '../components/journey/workspace/useJourneyActions';
 import InterviewModal from '../components/journey/map/InterviewModal';
 import BatchActivateModal from '../components/journey/map/BatchActivateModal';
 import ProductJourneyModal from '../components/journey/map/ProductJourneyModal';
-import JourneyMessageEditModal from '../components/journey/JourneyMessageEditModal';
 import ConfirmModal, { type ConfirmState } from '../components/ConfirmModal';
 import { useToast } from '../components/ToastProvider';
-import { type AttachFix, type CreateMode, type LifecycleMapData, type MapJourney, type MapStep } from '../utils/journey-map';
+import { type AttachFix, type CreateMode, type LifecycleMapData, type MapJourney } from '../utils/journey-map';
 
 const REFRESH_MS = 60_000;
 
@@ -68,8 +70,12 @@ export default function JourneyMapPage() {
   const [interviewOpen, setInterviewOpen] = useState(false);
   const [productOpen, setProductOpen] = useState(false);
   const [batch, setBatch] = useState<{ open: boolean; preselect: string[] }>({ open: false, preselect: [] });
-  const [drawer, setDrawer] = useState<{ journey: MapJourney; step: MapStep } | null>(null);
-  const [editTarget, setEditTarget] = useState<{ journey: MapJourney; returnToBatch: string[] | null } | null>(null);
+  // ★ V.3 §9-1 — 작업 화면 = 주소(?journey=&step=) · 모두 켜기 창의 「문안 고치기」로 열었으면 닫을 때 그 창으로 돌아간다.
+  const wsJourney = searchParams.get('journey');
+  const wsStep = searchParams.get('step');
+  const [returnToBatch, setReturnToBatch] = useState<string[] | null>(null);
+  // ★ V.3 §10-2 D7 — 기본 = 한눈에(요약 카드) · 칸까지 = 옛 척추 그림.
+  const [glance, setGlance] = useState(true);
   const [confirm, setConfirm] = useState<ConfirmState | null>(null);
   const confirmResolve = useRef<(() => void) | null>(null);
   const focusId = searchParams.get('focus');
@@ -114,6 +120,14 @@ export default function JourneyMapPage() {
   const focusJourney = useCallback((id: string) => {
     setSearchParams((prev) => { const n = new URLSearchParams(prev); n.set('focus', id); return n; }, { replace: true });
   }, [setSearchParams]);
+  const openWorkspace = useCallback((id: string, step: string | null) => {
+    setSearchParams((prev) => { const n = new URLSearchParams(prev); n.set('journey', id); if (step) n.set('step', step); else n.delete('step'); return n; }, { replace: searchParams.has('journey') });
+  }, [setSearchParams, searchParams]);
+  const closeWorkspace = useCallback(() => {
+    setSearchParams((prev) => { const n = new URLSearchParams(prev); n.delete('journey'); n.delete('step'); return n; }, { replace: true });
+    if (returnToBatch) { setBatch({ open: true, preselect: returnToBatch }); setReturnToBatch(null); }
+  }, [setSearchParams, returnToBatch]);
+  const journeyActions = useJourneyActions({ onChanged: () => { void load(true); }, operationCost: data?.costs.operation ?? 10 });
 
   const create = useCallback((triggerEvent: string, objective?: string, mode?: CreateMode) => {
     // ★ 2026-09-30 V2 3차 — 상품을 골라야 하는 여정(상품 재구매)은 상품 고르기 창으로(1클릭 프리셋으로 만들 수 없다).
@@ -123,7 +137,7 @@ export default function JourneyMapPage() {
     navigate(`/ai-journeys?${qs.toString()}`);
   }, [navigate]);
 
-  const openJourney = useCallback((id: string) => navigate(`/ai-journeys/${id}`), [navigate]);
+  const openEntrants = useCallback((id: string) => navigate(`/ai-journeys/${id}`), [navigate]);
 
   /** 확인 창 하나로 묻고, 확인하면 run · 닫으면 아무것도 안 한다. 끝나면 풀린다(이어붙이기 점검이 다시 읽는 시점). */
   const ask = (state: Omit<ConfirmState, 'onConfirm'>, run: () => Promise<void>): Promise<void> => new Promise((resolve) => {
@@ -170,48 +184,28 @@ export default function JourneyMapPage() {
         return ask({
           mode: 'info',
           title: '다음 구매 때 다시 받기 켜기',
-          description: '같은 고객이 다시 사면 이 여정을 또 받아요. 설정을 바꾸면 켜기 전 점검을 다시 받아야 해요.',
+          description: '같은 고객이 다시 사면 이 여정을 또 받아요. 켜진 여정도 멈추지 않고 바로 바뀌어요.',
           confirmLabel: '켜기',
         }, async () => {
           await patchOptions(fix.journeyId!, { allowReentry: true });
           toast.success('다음 구매 때 다시 받도록 켰어요.');
         });
-      case 'pause_and_allow_reentry':
-        return ask({
-          mode: 'warning',
-          title: '일시정지하고 다시 받기 켜기',
-          description: `${j?.name || '받는 여정'}을 일시정지한 뒤 다음 구매 때 다시 받기를 켭니다. 일시정지 동안 새 고객은 들어오지 않아요. 다시 켜기는 켜기 전 점검에서 합니다.`,
-          confirmLabel: '일시정지하고 켜기',
-        }, async () => {
-          const res = await fetch(`/api/ai/operator/journeys/${fix.journeyId}/pause`, { method: 'POST', headers: jsonHeaders(), body: JSON.stringify({ reason: '여정 지도: 다시 받기 켜기' }) });
-          const d = await res.json().catch(() => ({}));
-          if (!res.ok || !d?.success) throw new Error(d?.error || '일시정지하지 못했어요.');
-          await patchOptions(fix.journeyId!, { allowReentry: true });
-          toast.success('일시정지하고 다시 받기를 켰어요. 켜기 전 점검에서 다시 켜 주세요.');
-        });
+      case 'exclude_first_purchase':
+      case 'exclude_dormant_return':
+        // 1클릭(덜 보내는 방향 · 켜진 채 그 자리 · 다음 진입부터) — 같은 구매에 문자 한 통만.
+        try {
+          await patchOptions(fix.journeyId!, { [fix.action]: true });
+          toast.success(fix.action === 'exclude_first_purchase' ? '첫 구매 고객은 첫 구매 여정만 받아요.' : '돌아온 고객은 휴면 복귀 여정만 받아요.');
+        } catch (e: any) {
+          toast.error(e?.message || '바꾸지 못했어요.');
+        } finally {
+          await load(true);
+        }
+        return;
       default:
         return;
     }
   }, [data, create]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  /**
-   * ★ 2026-09-30 V2 5차 — 새 판으로 고치기: 복제 초안을 만든다(옛 판은 그대로 돈다). 새 판을 켜는 순간 옛 판은 새 고객을 받지 않고
-   * 진행 중 고객만 마무리한다. 이미 만든 새 판 초안이 있으면 그것으로 간다.
-   */
-  const newVersion = (j: MapJourney) => ask({
-    mode: 'info',
-    title: '새 판으로 고치기',
-    description: `${j.name}을(를) 그대로 복사한 초안을 만들어요. 지금 여정은 계속 돌고, 새 판을 켜는 순간부터 새 고객은 새 판이 받습니다(옛 판은 진행 중인 고객만 마무리).`,
-    confirmLabel: '새 판 만들기',
-  }, async () => {
-    const res = await fetch(`/api/ai/operator/journeys/${j.id}/new-version`, { method: 'POST', headers: jsonHeaders() });
-    const d = await res.json().catch(() => ({}));
-    if (!res.ok || !d?.success) throw new Error(d?.error || '새 판을 만들지 못했어요.');
-    toast.success(d.existing
-      ? '이미 만든 새 판 초안이 있어 그리로 갑니다.'
-      : `새 판 초안을 만들었어요.${Number(d.variantsNotCopied) > 0 ? ` A/B 변형 ${d.variantsNotCopied}개는 옮기지 않았어요(판마다 반응을 따로 봅니다).` : ''}`);
-    focusJourney(String(d.journeyId));
-  });
 
   const counts = useMemo(() => {
     const js = data?.journeys || [];
@@ -224,13 +218,7 @@ export default function JourneyMapPage() {
   }, [data]);
 
   const [mapLine, setMapLine] = useState('');
-  const gapCount = useMemo(() => {
-    if (!data) return 0;
-    return data.ghosts.filter((g) => g.available).length
-      + data.lines.filter((l) => l.tier === 'warn').length
-      + data.overlaps.length
-      + data.journeys.filter((j) => j.broadAudience && j.status !== 'ended').length;
-  }, [data]);
+  const gapCount = data?.summary?.fixCount ?? 0;
 
   // ★ 2026-09-30 AI 존 대개편: 지도 = 여정 메뉴의 두 번째 탭(머리·명령 카드는 목록과 같은 틀)
   const mapTabs = JOURNEY_TABS;
@@ -282,10 +270,10 @@ export default function JourneyMapPage() {
           icon: Sparkles,
         },
       }}
-      stamp={{ text: `${timeText(data.generatedAt)} 기준 · 다시 읽기`, onRefresh: () => void load(true), loading: refreshing }}
+      stamp={{ text: `${timeText(data.generatedAt)} 기준 · 다시 읽기`, onRefresh: () => void load(true), loading: refreshing, title: data.judgedAt ? `구매 확인 예정 ${timeText(data.judgedAt)}` : undefined }}
       start={{
         items: [
-          { icon: Sparkles, title: 'AI 진단', desc: gapCount > 0 ? `고객 구매 리듬으로 여정을 추천하고 손볼 곳 ${gapCount}곳을 채워요` : '고객 구매 리듬을 재서 가입부터 재구매까지 여정을 추천해요', tint: 'from-fuchsia-400 to-purple-500', featured: true, badge: gapCount > 0 ? `${gapCount}곳` : undefined, onClick: () => setGapOpen(true) },
+          { icon: Sparkles, title: 'AI 진단', desc: gapCount > 0 ? `고객 구매 리듬으로 여정을 추천하고 손볼 곳 ${gapCount}곳을 알려 줘요` : '고객 구매 리듬을 재서 가입부터 재구매까지 여정을 추천해요', tint: 'from-fuchsia-400 to-purple-500', featured: true, badge: gapCount > 0 ? `${gapCount}곳` : undefined, onClick: () => setGapOpen(true) },
           { icon: MessageSquarePlus, title: '문장으로 만들기', desc: '하고 싶은 것을 문장으로 쓰면 지도에 놓아요', tint: 'from-sky-400 to-indigo-500', onClick: () => setInterviewOpen(true) },
         ],
       }}
@@ -300,6 +288,12 @@ export default function JourneyMapPage() {
             value={statusFilter}
             onChange={(id) => setStatusFilter(id)}
           />
+          <ZoneSegmented
+            ariaLabel="지도 보기"
+            items={[{ id: 'glance', label: '한눈에' }, { id: 'steps', label: '칸까지' }]}
+            value={glance ? 'glance' : 'steps'}
+            onChange={(id) => setGlance(id === 'glance')}
+          />
           <label className="relative flex-1 min-w-[180px] max-w-xs">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-[15px] h-[15px] text-slate-400" aria-hidden />
             <input
@@ -310,27 +304,37 @@ export default function JourneyMapPage() {
               className="w-full h-10 pl-9 pr-3 rounded-xl bg-white border border-slate-200 shadow-sm text-[13px] text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-100"
             />
           </label>
+          {data.summary && (
+            <p className="w-full text-[13px] text-slate-600 tabular-nums lg:ml-auto lg:w-auto">
+              켜진 여정 {data.summary.activeJourneys.toLocaleString('ko-KR')}개 · 지금 진행 중 {data.summary.inProgressCustomers.toLocaleString('ko-KR')}명
+              {data.summary.fixCount > 0 ? <> · <span className="font-semibold text-amber-800">손볼 곳 {data.summary.fixCount.toLocaleString('ko-KR')}곳</span></> : ' · 손볼 곳 없음'}
+              {data.summary.operationCredits30d != null ? ` · 지난 30일 운영 ${data.summary.operationCredits30d.toLocaleString('ko-KR')}크레딧` : ''}
+            </p>
+          )}
         </div>
       </div>
 
       {/* 캔버스: 데스크톱은 이 칸 안에서만 스크롤(레인 머리 고정) · 모바일은 페이지 스크롤 */}
-      <div className="rounded-2xl border border-slate-200 bg-white md:h-[calc(100vh-120px)] md:min-h-[560px] md:overflow-auto">
+      <div className="rounded-2xl border border-slate-200 bg-white md:max-h-[calc(100vh-120px)] md:overflow-auto">
         <LifecycleMapCanvas
           data={data}
           statusFilter={statusFilter}
           search={search}
           focusId={focusId}
+          glance={glance}
+          busyId={journeyActions.busyId}
           onFocusJourney={focusJourney}
-          onOpenStep={(journey, step) => setDrawer({ journey, step })}
-          onOpenJourney={openJourney}
+          onOpen={openWorkspace}
+          onEntrants={openEntrants}
+          onAction={(j) => {
+            const aj = { id: j.id, name: j.name, status: j.status, goalExitEnabled: j.goalExitEnabled, thresholdRecipients: j.thresholdRecipients, activationCost: j.activationCost, pause: j.pause };
+            if (j.status === 'active') void journeyActions.pause(aj);
+            else if (j.status === 'paused') journeyActions.activate(aj);
+            else if (j.status === 'draft') setBatch({ open: true, preselect: [j.id] });
+          }}
           onCreate={(t, mode) => create(t, undefined, mode)}
           onFix={(f) => void handleFix(f)}
-          onNewVersion={(j) => void newVersion(j)}
         />
-        <div className={`${OUI_WRAP_FULL} pb-6 ${OUI_SRC}`}>
-          {timeText(data.generatedAt)} 기준
-          {data.judgedAt ? ` · 구매 확인 예정은 ${timeText(data.judgedAt)} 판정` : ''}
-        </div>
       </div>
 
       {/* 초안이 있으면 켜기 전 점검 입구(자동으로 켜지 않는다) */}
@@ -377,33 +381,21 @@ export default function JourneyMapPage() {
         onEditMessages={(j) => {
           const keep = batch.preselect.length > 0 ? batch.preselect : [];
           setBatch({ open: false, preselect: [] });
-          setEditTarget({ journey: j, returnToBatch: keep.length > 0 ? keep : [j.id] });
+          setReturnToBatch(keep.length > 0 ? keep : [j.id]);
+          const first = j.steps.find((st) => st.kind === 'message');
+          openWorkspace(j.id, first ? first.stepId : null);
         }}
         onDone={() => void load(true)}
       />
-      <MapStepEditModal
-        journey={drawer ? (data.journeys.find((x) => x.id === drawer.journey.id) || drawer.journey) : null}
-        step={drawer?.step || null}
-        generatedAt={data.generatedAt}
-        onClose={() => setDrawer(null)}
-        onOpenJourney={openJourney}
-        onNewVersion={(j) => void newVersion(j)}
-        onSaved={() => void load(true)}
+      <JourneyWorkspace
+        journeyId={wsJourney}
+        stepId={wsStep}
+        map={data}
+        onClose={closeWorkspace}
+        onChanged={() => void load(true)}
+        onNavigate={openWorkspace}
       />
-      {editTarget && (
-        <JourneyMessageEditModal
-          journeyId={editTarget.journey.id}
-          journeyName={editTarget.journey.name}
-          journeyStatus={editTarget.journey.status}
-          token={localStorage.getItem('token') || ''}
-          onClose={() => {
-            const back = editTarget.returnToBatch;
-            setEditTarget(null);
-            if (back) setBatch({ open: true, preselect: back });
-          }}
-          onSaved={() => void load(true)}
-        />
-      )}
+      {journeyActions.node}
       <ConfirmModal
         state={confirm}
         onClose={() => {

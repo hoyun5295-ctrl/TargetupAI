@@ -67,7 +67,7 @@ describe('계약 파생 (⑪ ⑫ ③ · 저장 템플릿)', () => {
     expect(defaultGoalExitFor('cdp.purchase')).toBe(true);
     expect(defaultGoalExitFor('customer.dormant')).toBe(true);
     expect(defaultGoalExitFor('customer.points_expiring')).toBe(true);
-    expect(defaultGoalExitFor('customer.dormant_return')).toBe(false); // steps_done
+    expect(defaultGoalExitFor('customer.dormant_return')).toBe(true);  // ★ 2026-10-20 V.3 D5 — 끝 신호 = 다음 구매(환영 여정 중 다시 사면 끝나고 단골 재구매가 받는다)
     expect(defaultGoalExitFor('customer.birthday_approaching')).toBe(false);
     expect(defaultGoalExitFor('custom')).toBe(false);
     expect(defaultGoalExitFor('없는값')).toBe(false);
@@ -231,7 +231,9 @@ describe('활성화 게이트 (② 최종 문)', () => {
     });
     const r = await activateJourney(COMPANY, JOURNEY, USER);
     expect(r.ok).toBe(false);
-    expect(r.reason).toContain('새로 만들어야');
+    // ★ 2026-10-20 V.3 §7-2 — 이제 조건을 고칠 수 있어 「새로 만들어야」 대신 고쳐 달라고 말한다(검사 = validateJourneyEntryConfig 공용)
+    expect(r.reason).toContain('여정에서 쓸 수 없는 항목');
+    expect(r.reason).not.toContain('새로 만들어야');
   });
 });
 

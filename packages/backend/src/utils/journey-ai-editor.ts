@@ -20,7 +20,7 @@ import { resolveJourneyAdFlag } from './journey-ad-policy';
 // ★ 2026-08-08 이어달리기 — 고정된 트리거는 편집으로 풀리지 않는다(설계서 §6).
 import { isImplementedTriggerEvent, triggerTemplateCode, contractReentryPolicy, defaultGoalExitFor, storageTemplateCodeFor } from './journey-trigger-capability';
 // ★ 2026-09-29 여정 V2 0차 ⑧⑩ — 칸 종류 · 개수 · 대기 상한은 CT 한 곳. 넘치면 자르지 않고 거부 · 모르는 종류는 거부.
-import { resolveStepType, assertStepsWithinLimit, clampStepDelayHours, MAX_JOURNEY_STEPS, MAX_MESSAGE_STEPS, MAX_WAIT_TIMEOUT_HOURS, JourneyInputError } from './journey-step-limits';
+import { resolveStepType, assertStepsWithinLimit, clampStepDelayHours, MAX_JOURNEY_STEPS, MAX_MESSAGE_STEPS, MAX_WAIT_TIMEOUT_HOURS, JourneyInputError, JOURNEY_SUBJECT_MAX_CHARS } from './journey-step-limits';
 // ★ 2026-09-29 여정 V2 0차 ② — AI 가 낸 대상 조건 중 쓸 수 없는 것은 빼고 "반영 안 됨"으로 알린다.
 import { partitionCustomerConditions } from './journey-target-extractor';
 import { describeJourneyTrigger, describeJourneyTarget } from './journey-step-format';
@@ -95,7 +95,7 @@ function normalizeStep(s: any, idx: number): any {
   // message step
   base.channel = channel;
   const rawMessage = String(s?.messageTemplate || '').slice(0, 2000);
-  const rawSubject = channel === 'sms' ? '' : String(s?.subject || '').slice(0, 50);
+  const rawSubject = channel === 'sms' ? '' : String(s?.subject || '').slice(0, JOURNEY_SUBJECT_MAX_CHARS);
   // 순수 본문/제목만 보존 — (광고)/무료수신거부는 발송·미리보기 시 합성 (이중부착 방지)
   base.messageTemplate = stripAdParts(sanitizeForSms(rawMessage).sanitized);
   base.subject = stripAdParts(sanitizeForSms(rawSubject).sanitized);

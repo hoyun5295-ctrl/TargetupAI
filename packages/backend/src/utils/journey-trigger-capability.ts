@@ -237,7 +237,10 @@ export const TRIGGER_CONTRACTS: TriggerContract[] = [
   { event: 'purchase.product',              key: 'product',  label: '상품 구매', desc: '고른 상품을 사면', lane: 'product', cls: 'event',     implemented: true,  exit: 'product_repurchase', templateCode: 'repeat', productPick: true, purchaseStream: true, reentryRequired: true, overlapEvents: ['cdp.purchase', 'purchase.first', 'customer.dormant_return'] },
   //   휴면(exit=purchase, 휴면 중 구매 = 복귀) → 휴면 복귀
   { event: 'customer.dormant',              key: 'dormant',  label: '휴면 전환', desc: '한동안 구매가 없으면', lane: 'winback', cls: 'transition', implemented: true,  exit: 'purchase', templateCode: 'custom', nextEvents: ['customer.dormant_return'] },
-  { event: 'customer.dormant_return',       key: 'dormant_return', label: '휴면 복귀', desc: '오래 쉬었다가 다시 구매하면', lane: 'winback', cls: 'transition', implemented: true, exit: 'steps_done', templateCode: 'repeat', purchaseStream: true, reentryRequired: true, overlapEvents: ['cdp.purchase', 'purchase.product'], exclusiveEvents: ['purchase.first'] },   // #5 — 구매 스트림 분기(직전 구매가 휴면 기준일 이상 과거)
+  //   ★ 2026-10-20 V.3 D5 — 휴면 복귀 → 주문 완료(돌아온 고객 → 단골 재구매) 선. 환영 여정에서 다음 구매를 하면(목표 종료) 그 구매로 주문 완료가 받는다.
+  //   돌아온 그 구매 한 건은 주문 완료의 「돌아온 고객은 환영만」(exclude_dormant_return)이 빼서 같은 날 두 통이 나가지 않는다.
+  //   끝 신호 = 다음 구매(간선 출발은 전환 신호가 있어야 한다 · 옛 steps_done 이면 「전환했어요」 추천이 성립하지 않는다 · catalog-parity).
+  { event: 'customer.dormant_return',       key: 'dormant_return', label: '휴면 복귀', desc: '오래 쉬었다가 다시 구매하면', lane: 'winback', cls: 'transition', implemented: true, exit: 'next_purchase', templateCode: 'repeat', nextEvents: ['cdp.purchase'], purchaseStream: true, reentryRequired: true, overlapEvents: ['cdp.purchase', 'purchase.product'], exclusiveEvents: ['purchase.first'] },   // #5 — 구매 스트림 분기(직전 구매가 휴면 기준일 이상 과거)
   { event: 'customer.cycle_lapsed',         key: 'cycle_lapsed', label: '구매 주기 이탈', desc: '평소 구매 주기를 넘기면', lane: 'winback', cls: 'transition', implemented: true, exit: 'purchase', cooldownMinDays: 1, templateCode: 'custom' }, // #6
   // #7 — 원장 state와 **서열 비교**(상승만). 쿨다운은 오르내리락 왕복에서 축하가 연달아 나가는 것을 막는 바닥값이고,
   //   진짜 방어는 "상승만 + 같은 급 제외"다(2026-08-02).

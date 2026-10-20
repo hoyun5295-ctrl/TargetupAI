@@ -12,7 +12,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 vi.mock('../../config/database', () => ({ query: vi.fn(), pool: { connect: vi.fn() } }));
 vi.mock('../ai-credit', () => {
   class InsufficientCreditError extends Error {}
-  return { checkCredit: vi.fn(), deductCreditSafe: vi.fn(), InsufficientCreditError };
+  return { checkCredit: vi.fn(), deductCreditOutcome: vi.fn(), InsufficientCreditError };
 });
 vi.mock('../journey-builder', () => ({ activateJourney: vi.fn() }));
 vi.mock('../journey-anchor-scheduler', () => ({ dispatchOneShotJourney: vi.fn() }));
@@ -23,7 +23,7 @@ vi.mock('../callback-filter', () => ({ filterByIndividualCallback: vi.fn() }));
 vi.mock('../journey-lifecycle-map', () => ({ buildLifecycleMap: vi.fn(async () => ({ overlaps: [] })) }));
 
 import { query } from '../../config/database';
-import { checkCredit, deductCreditSafe, InsufficientCreditError } from '../ai-credit';
+import { checkCredit, deductCreditOutcome, InsufficientCreditError } from '../ai-credit';
 import { activateJourney } from '../journey-builder';
 import { dispatchOneShotJourney } from '../journey-anchor-scheduler';
 import { selectJourneyTargetCustomerIds } from '../journey-target-extractor';
@@ -34,7 +34,7 @@ import { buildLifecycleMap } from '../journey-lifecycle-map';
 
 const q = query as unknown as ReturnType<typeof vi.fn>;
 const credit = checkCredit as unknown as ReturnType<typeof vi.fn>;
-const deduct = deductCreditSafe as unknown as ReturnType<typeof vi.fn>;
+const deduct = deductCreditOutcome as unknown as ReturnType<typeof vi.fn>;
 const act = activateJourney as unknown as ReturnType<typeof vi.fn>;
 const oneShot = dispatchOneShotJourney as unknown as ReturnType<typeof vi.fn>;
 const ACT = getCreditCost('journey-activate');
@@ -59,7 +59,7 @@ function mockJourneys(rows: Row[]) {
 beforeEach(() => {
   q.mockReset(); credit.mockReset(); deduct.mockReset(); act.mockReset(); oneShot.mockReset();
   credit.mockResolvedValue(undefined);
-  deduct.mockResolvedValue(true);
+  deduct.mockResolvedValue('deducted');   // ★1020 V.3(Codex 적대 A8) — 차감 결말(실제로 받은 크레딧)
   act.mockResolvedValue({ ok: true });
   oneShot.mockResolvedValue({ enqueued: 0 });
 });
@@ -77,9 +77,9 @@ describe('단건 켜기 게이트', () => {
     const order: string[] = [];
     credit.mockImplementation(async () => { order.push('check'); });
     act.mockImplementation(async () => { order.push('activate'); return { ok: true }; });
-    deduct.mockImplementation(async () => { order.push('deduct'); return true; });
+    deduct.mockImplementation(async () => { order.push('deduct'); return 'deducted'; });
     const r = await activateJourneyGuarded('c', ID(1), 'u');
-    expect(r).toEqual({ ok: true, firstActivation: true });
+    expect(r).toEqual({ ok: true, firstActivation: true, charged: ACT });
     expect(order).toEqual(['check', 'activate', 'deduct']);
     expect(credit).toHaveBeenCalledWith('c', ACT);
     expect(deduct).toHaveBeenCalledWith(expect.objectContaining({ cost: ACT, source: 'journey-activate', idempotencyKey: `journey-activate:${ID(1)}` }));
@@ -95,7 +95,7 @@ describe('단건 켜기 게이트', () => {
   it('멈춤 → 켜기(재개)는 잔액 확인 · 차감 0', async () => {
     mockJourneys([{ id: ID(1), status: 'paused', trigger_event: 'customer.created' }]);
     const r = await activateJourneyGuarded('c', ID(1), 'u');
-    expect(r).toEqual({ ok: true, firstActivation: false });
+    expect(r).toEqual({ ok: true, firstActivation: false, charged: 0 });
     expect(credit).not.toHaveBeenCalled();
     expect(deduct).not.toHaveBeenCalled();
   });
@@ -159,7 +159,7 @@ describe('모두 켜기', () => {
     const by = Object.fromEntries(r.items.map((i) => [i.journeyId, i.result]));
     expect(by[ID(9)]).toMatchObject({ ok: false, code: 'NOT_FOUND' });
     expect(by[ID(3)]).toMatchObject({ ok: false, code: 'NOT_ALLOWED' });
-    expect(by[ID(1)]).toEqual({ ok: true, firstActivation: true });
+    expect(by[ID(1)]).toEqual({ ok: true, firstActivation: true, charged: ACT });
     expect(act.mock.calls.map((c) => c[1])).toEqual([ID(2), ID(1)]);
     expect(deduct).toHaveBeenCalledTimes(2);
   });

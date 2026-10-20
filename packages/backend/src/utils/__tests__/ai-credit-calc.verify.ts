@@ -113,7 +113,7 @@ ok('0명 = 0', () => assert.strictEqual(dailyDbAnalysisCredits(0), 0));
 ok('블록 경계 10만+1 = 5', () => assert.strictEqual(dailyDbAnalysisCredits(100001), 5));
 
 console.log('[ai-credit-calc] isOperationSource (마이너스 허용군)');
-ok('journey-operation = true', () => assert.strictEqual(isOperationSource('journey-operation'), true));
+ok('journey-operation = false (★1020 V.3 D1 · 여정 운영은 마이너스 0)', () => assert.strictEqual(isOperationSource('journey-operation'), false));
 ok('continuous-operator-send = true', () => assert.strictEqual(isOperationSource('continuous-operator-send'), true));
 ok('predictive-daily = false', () => assert.strictEqual(isOperationSource('predictive-daily'), false));
 ok('dm-builder = false', () => assert.strictEqual(isOperationSource('dm-builder'), false));

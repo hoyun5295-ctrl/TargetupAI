@@ -58,7 +58,7 @@ import { isCallbackRegistered } from './callback-filter';
 // ★ 2026-07-05: 발송 피로도 보호 — 광고 step 단건 게이트(차감 전 skip) + 발송 카운터
 import { getFatigueCap, isFatigueBlocked, recordFatigueSends } from './fatigue-guard';
 import { prepaidDeduct } from './prepaid';
-import { deductCreditSafe } from './ai-credit';
+import { deductCreditSafe, deductCreditOutcome, isChargedByKey, InsufficientCreditError } from './ai-credit';
 import { getCreditCost, kstDateTag } from './ai-credit-calc';
 import { logCampaignTraining } from './training-logger';
 import { normalizePhone } from './normalize-phone';
@@ -79,6 +79,7 @@ import { PRODUCT_REPURCHASE_SINCE_ENTRY_SQL } from './journey-product';
 import { isSingleStepKind, normalizeStartKind } from './journey-start-kind';
 import { isDemoCompany } from './demo-company';   // ★ 2026-10-09 시연 회사 = 발송 엔진 앞 절단(설계서 docs/2026-10-09-demo-company-design.md §2)
 import { aiOperatorAllowedForWorker } from './plan-guard';
+import { lineageColumnsReady } from './journey-lineage';
 
 // ════════════════════════════════════════════════════════════════════
 // 타입
@@ -109,6 +110,43 @@ interface ExecutionRow {
   start_kind: string | null;
   // ★ 2026-07-10 목표 달성 자동 종료 — 진입 이후 구매 확인 시 잔여 step 중단(옵션, 기본 false).
   goal_exit_enabled: boolean;
+  // ★ 2026-10-20 여정 V.3 §5-2 — 계보 뿌리(COALESCE(lineage_id, id) · 계보 컬럼이 없으면 여정 id). 운영 크레딧 키의 여정 자리.
+  lineage_root?: string | null;
+}
+
+/** ★ V.3 §5-2 — 운영 크레딧(하루 1번) 키의 여정 자리 = 계보 뿌리. 옛 판 마무리 · 새 판이 같은 날 보내도 한 번만 받는다. */
+export function operationCreditRoot(exec: { journey_id: string; lineage_root?: string | null }): string {
+  return exec.lineage_root ? String(exec.lineage_root) : String(exec.journey_id);
+}
+
+/** ★ V.3 D1 — 크레딧이 모자라 멈춘 사유(사람 말 변환 · journey-pause-reason 이 이 문자열을 안다). */
+export const JOURNEY_PAUSE_CREDIT_OUT = '이번 달 크레딧이 모자라 발송을 멈췄습니다';
+
+/**
+ * ★ V.3 D1(설계서 §5-6) — 이 계보의 오늘 운영 크레딧을 **보내기 전에 그 자리에서 잡아 둔다**(하루 1번 키 · 여정 운영 허용 0).
+ *   잡아 둔 날 한 통도 안 나가면(피로도 · 회신번호 · 적재 실패) 하루가 끝난 뒤 되돌린다(journey-operation-release · Codex 적대 A 2R).
+ *   옛(1R): 엄격 확인만 하고 차감은 적재 뒤에 했다 → 그 사이 다른 요청이 크레딧을 쓰면 확인은 통과 · 차감은 잔액 부족으로 삼켜져 무과금 발송이 확정됐다(Codex 적대 A1).
+ *   차감 자체가 판정이다(회사 행 잠금 안 · 원자 · 멱등). 거짓 = 잔액 부족 → 보내지 않고 멈춘다.
+ *   그날 이미 받았으면 차감 없이 참(조회만 · 발송마다 회사 행을 잠그지 않는다). 잔액 부족이 아닌 차감 실패(DB 오류 등)는 종전 원칙대로 발송을 막지 않고
+ *   [CREDIT][MISS] 로그를 남긴다(뒤 확정 경로 chargeJourneyOperationCredit 가 같은 키로 다시 받는다).
+ */
+export async function reserveJourneyOperationCredit(exec: { company_id: string; journey_id: string; lineage_root?: string | null; created_by?: string | null }, at: Date): Promise<boolean> {
+  const key = `journey-operation:${operationCreditRoot(exec)}:${kstDateTag(at)}`;
+  if (await isChargedByKey(exec.company_id, key)) return true;
+  try {
+    await deductCreditOutcome({
+      companyId: exec.company_id,
+      cost: getCreditCost('journey-operation'),
+      source: 'journey-operation',
+      idempotencyKey: key,
+      createdBy: exec.created_by || null,
+      throwOnInsufficient: true,
+    });
+    return true;
+  } catch (e) {
+    if (e instanceof InsufficientCreditError) return false;
+    throw e;
+  }
 }
 
 interface StepRow {
@@ -191,6 +229,8 @@ export async function runJourneyExecutor(): Promise<{ processed: number; sent: n
     const tickStartedAt = Date.now();
     const pickedThisTick: string[] = [];
     let batches = 0;
+    // ★ V.3 §5-2 — 계보 컬럼 확인 뒤에만 lineage_id 를 읽는다(없으면 여정 id · 42703 으로 발송 전체가 멈추지 않게).
+    const lineageRootSql = (await lineageColumnsReady()) ? 'COALESCE(j.lineage_id, j.id)' : 'j.id';
     while (Date.now() - tickStartedAt < JOURNEY_TICK_BUDGET_MS) {
     const dueRes = await query(
       `SELECT due.* FROM (
@@ -205,6 +245,7 @@ export async function runJourneyExecutor(): Promise<{ processed: number; sent: n
            j.callback_number AS journey_callback_number,
            j.callback_mode, j.start_kind,
            COALESCE(j.goal_exit_enabled, false) AS goal_exit_enabled,
+           ${lineageRootSql} AS lineage_root,
            ROW_NUMBER() OVER (PARTITION BY j.company_id ORDER BY e.next_run_at ASC) AS company_rank
          FROM journey_executions e
          JOIN journeys j ON e.journey_id = j.id
@@ -291,8 +332,9 @@ export const ORPHAN_CLAIM_MIN_AGE_MIN = 10;
  * 전진은 하지 않는다(활성 실행이 아니다 · 재개되면 가드가 'sent'·닫힘을 보고 전진한다).
  */
 async function resolveOrphanJourneyClaims(): Promise<void> {
+  const lineageRootSql = (await lineageColumnsReady()) ? 'COALESCE(j.lineage_id, j.id)' : 'j.id';
   const r = await query(
-    `SELECT l.id AS claim_id, l.execution_id, e.customer_id, e.journey_id, j.company_id, j.created_by
+    `SELECT l.id AS claim_id, l.execution_id, e.customer_id, e.journey_id, j.company_id, j.created_by, ${lineageRootSql} AS lineage_root
        FROM journey_step_logs l
        JOIN journey_executions e ON e.id = l.execution_id
        JOIN journeys j ON j.id = e.journey_id
@@ -306,7 +348,7 @@ async function resolveOrphanJourneyClaims(): Promise<void> {
   for (const row of r.rows) {
     try {
       const owner = { company_id: String(row.company_id), created_by: row.created_by || null, customer_id: String(row.customer_id) };
-      const creditOwner = { company_id: owner.company_id, journey_id: String(row.journey_id), created_by: owner.created_by } as ExecutionRow;
+      const creditOwner = { company_id: owner.company_id, journey_id: String(row.journey_id), created_by: owner.created_by, lineage_root: row.lineage_root ? String(row.lineage_root) : null } as ExecutionRow;
       // 크레딧은 확정 전에(멱등) · 비용 통계는 확정과 같은 문장에서 — 어디서 끊겨도 다음 주기가 표식('sending')을 다시 판정한다
       const resolved = await resolveJourneyClaim(owner, String(row.claim_id), {
         beforeConfirm: (at) => chargeJourneyOperationCredit(creditOwner, at),
@@ -744,6 +786,13 @@ async function processExecution(exec: ExecutionRow): Promise<StepOutcome> {
     await logFailedStep(exec.execution_id, step.id, 'line_group_not_set');
     return 'failed';
   }
+  // ★ 2026-10-20 여정 V.3 D1 — 그달 크레딧이 모자라면 선불 · 후불 모두 보내지 않고 멈춘다(재개 = 요금제 상향 · 충전 뒤 사람이 · 실행은 이 칸에 남는다).
+  //   확인이 아니라 그 자리 차감(reserveJourneyOperationCredit) — 확인과 차감 사이 경합으로 무과금 발송이 생기지 않게. 라인그룹 확인 뒤(멈출 여정에 받지 않게).
+  if (!demoCompany && !(await reserveJourneyOperationCredit(exec, new Date()))) {
+    await pauseJourney(exec.journey_id, JOURNEY_PAUSE_CREDIT_OUT);
+    await logFailedStep(exec.execution_id, step.id, 'operation_credit_out');
+    return 'failed';
+  }
 
   // 5-2. 회신번호 — callback_mode='store'면 고객 매장번호(store_phone) 우선, 없으면 고정번호/주소록 fallback.
   //   callback-filter CT의 store_phone 폴백 개념을 여정 단건/기존 호환에 맞춰 적용(기존 우선순위 보존).
@@ -1142,6 +1191,7 @@ async function processExecution(exec: ExecutionRow): Promise<StepOutcome> {
   // ★ 2026-09-26 한줄로 V2 m105 — 발송 표식(step_log 'sending') id. 적재 **앞**에 남기고 적재 뒤 'sent'로 확정한다.
   //   적재 오류에도 지우지 않는다(Codex 2R ③) — 판정은 큐 원행을 세는 CT(journey-send-claim)가 한다.
   let claimLogId: string | null = null;
+  let claimAt: Date | null = null;
   // ★ D188 Phase 2-B-2 (2026-05-21): 10. queue INSERT — channel별 분기 (SMS/LMS/MMS = bulkInsertSmsQueue / KAKAO = insertAlimtalkQueue).
   try {
     const tables = await getCompanySmsTables(exec.company_id, exec.created_by || undefined);
@@ -1175,10 +1225,11 @@ async function processExecution(exec: ExecutionRow): Promise<StepOutcome> {
         id, execution_id, step_id, campaign_id, sent_at, status, cost
       ) VALUES (
         gen_random_uuid(), $1::uuid, $2::uuid, $3::uuid, NOW(), 'sending', $4
-      ) RETURNING id`,
+      ) RETURNING id, sent_at`,
       [exec.execution_id, step.id, campaignId, sendCost]
     );
     claimLogId = claim.rows[0]?.id || null;
+    claimAt = claim.rows[0]?.sent_at ? new Date(claim.rows[0].sent_at) : null;
 
     if (isKakao && kakaoTemplateRow) {
       // 알림톡 영역 — insertAlimtalkQueue 사용. buttons → buttonJson 변환.
@@ -1325,7 +1376,9 @@ async function processExecution(exec: ExecutionRow): Promise<StepOutcome> {
   // ★ 2026-09-29 한줄로 V2 차수 5(Codex 1R high) — 크레딧을 확정 **전에** 받는다(멱등키 = 여정+날짜). 옛: 확정 뒤라 그 사이 끊기면
   //   다음 틱은 'sent'를 보고 크레딧 없이 전진했다. 앞에서 받으면 끊겨도 표식이 'sending'으로 남아 가드가 다시 받고(0원) 확정한다.
   //   차감 실패(false)는 확정을 막지 않는다 — 운영 크레딧은 발송을 막지 않는 정책(아래 chargeJourneyOperationCredit)이다(종전과 같다).
-  await chargeJourneyOperationCredit(exec, new Date());
+  // ★ 2026-10-20 V.3(본 AI 적대 검토) 날짜 = 표식 시각 — 복구 경로 · 되돌림(journey-operation-release 가 표식 sent_at 날짜로 판정)과 같은 날의 키.
+  //   옛 new Date() 는 자정을 넘기면 보내기 전에 잡아 둔 날(D)과 다른 날(D+1) 키로 한 번 더 받았다(한 발송에 두 번).
+  await chargeJourneyOperationCredit(exec, claimAt ?? new Date());
   if (claimLogId) {
     const confirmed = await confirmJourneyClaimSent(claimLogId);
     if (!confirmed) console.error(`[JourneyExecutor][CRITICAL] 발송 표식 확정 0행 execution=${exec.execution_id} 표식=${claimLogId} — 표식이 sending이 아니다`);
@@ -1423,7 +1476,7 @@ async function chargeJourneyOperationCredit(exec: ExecutionRow, sentAt: Date): P
     companyId: exec.company_id,
     cost: getCreditCost('journey-operation'),
     source: 'journey-operation',
-    idempotencyKey: `journey-operation:${exec.journey_id}:${kstDateTag(sentAt)}`,
+    idempotencyKey: `journey-operation:${operationCreditRoot(exec)}:${kstDateTag(sentAt)}`,
     createdBy: exec.created_by || null,
   });
 }

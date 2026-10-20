@@ -5,23 +5,51 @@
  * 날짜축/정보알림 빌더가 공유 — 중복 정의 금지(no_inline_duplication).
  */
 
-import { useState, type ReactNode } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { X, Plus, Users, ChevronRight } from 'lucide-react';
 
 export interface AudienceCondition { field: string; op: string; value: string; }
 
-// applyCustomerConditions 허용 필드(백엔드 정합). 포인트는 한 옵션일 뿐 — 한정 아님.
-export const COND_FIELDS = [
-  { key: 'grade', label: '등급' }, { key: 'region', label: '지역' },
-  { key: 'store_name', label: '매장명' }, { key: 'store_code', label: '매장코드' },
-  { key: 'age', label: '나이' }, { key: 'purchase_count', label: '구매횟수' },
-  { key: 'total_purchase_amount', label: '누적구매액' }, { key: 'points', label: '포인트' },
+/**
+ * applyCustomerConditions 허용 필드 = 서버 CUSTOMER_CONDITION_FIELDS 와 **같은 키 집합**(짝 시험 journey-v3-cond-fields-1020 이 고정).
+ * ★ 2026-10-20 V.3 §7-1 — 수신 동의 · 마지막 구매 N일 을 더했다(옛 8칸 · 서버는 10칸이라 저장된 조건이 화면에서 키 그대로 보였다).
+ *   kind = 값 입력 모양(목록 = 회사 실제 값에서 고름 · 숫자 · 예/아니오). 연산자는 모양마다 허용한 것만 보인다.
+ */
+export type CondKind = 'list' | 'text' | 'number' | 'bool' | 'days';
+export const COND_FIELDS: Array<{ key: string; label: string; kind: CondKind; unit?: string }> = [
+  { key: 'grade', label: '등급', kind: 'list' }, { key: 'region', label: '지역', kind: 'list' },
+  { key: 'store_name', label: '매장명', kind: 'text' }, { key: 'store_code', label: '매장코드', kind: 'list' },
+  { key: 'age', label: '나이', kind: 'number', unit: '세' }, { key: 'purchase_count', label: '구매횟수', kind: 'number', unit: '번' },
+  { key: 'total_purchase_amount', label: '누적구매액', kind: 'number', unit: '원' }, { key: 'points', label: '포인트', kind: 'number', unit: 'P' },
+  { key: 'sms_opt_in', label: '문자 수신 동의', kind: 'bool' },
+  { key: 'days_since_purchase', label: '마지막 구매 뒤 지난 날', kind: 'days', unit: '일' },
 ];
-export const condLabel = (k: string) => COND_FIELDS.find((f) => f.key === k)?.label || k;
+export const condLabel = (k: string) => COND_FIELDS.find((f) => f.key === k)?.label || '알 수 없는 조건';
 export const COND_OPS = [
   { key: '==', label: '같음' }, { key: '!=', label: '다름' }, { key: '>=', label: '이상' }, { key: '<=', label: '이하' }, { key: '>', label: '초과' }, { key: '<', label: '미만' },
 ];
+const OPS_BY_KIND: Record<CondKind, string[]> = {
+  list: ['==', '!='], text: ['==', '!='], bool: ['=='], number: ['>=', '<=', '>', '<', '==', '!='], days: ['>=', '<=', '>', '<'],
+};
+export const condOpsFor = (field: string) => {
+  const kind = COND_FIELDS.find((f) => f.key === field)?.kind || 'text';
+  return COND_OPS.filter((o) => OPS_BY_KIND[kind].includes(o.key));
+};
+
+/** 회사 실제 값 목록(등급 · 지역 · 매장코드) — /api/customers/filter-options(서버 DISTINCT · 보는 사람 범위). 실패 = 빈 목록(직접 고를 값이 없을 뿐 저장은 서버가 검사). */
+export function useConditionValueOptions(): Record<string, string[]> {
+  const [opts, setOpts] = useState<Record<string, string[]>>({});
+  useEffect(() => {
+    let alive = true;
+    fetch('/api/customers/filter-options', { headers: { Authorization: `Bearer ${localStorage.getItem('token')}` } })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => { if (alive && d) setOpts({ grade: d.grades || [], region: d.regions || [], store_code: d.store_codes || [] }); })
+      .catch(() => undefined);
+    return () => { alive = false; };
+  }, []);
+  return opts;
+}
 
 /** 자유 조건(field/op/value)에서 백엔드 customer_conditions 형태로. 빈 값 제외. */
 export function buildCustomerConditions(conditions: AudienceCondition[]): { customer_conditions: { field: string; op: string; value: string }[]; logic: 'AND' } | null {
@@ -74,9 +102,57 @@ export function SummaryButton({ icon, label, value, onClick, accent = 'indigo' }
   );
 }
 
+/** 조건 한 줄 편집(칸 · 연산자 · 값) — 값 입력은 칸 모양을 따른다(목록 = 회사 실제 값 · 숫자 · 예/아니오). AudienceModal · 작업 화면 시작 카드 공용. */
+export function ConditionRow({ c, onChange, onRemove, valueOptions }: {
+  c: AudienceCondition; onChange: (patch: Partial<AudienceCondition>) => void; onRemove: () => void; valueOptions: Record<string, string[]>;
+}) {
+  const meta = COND_FIELDS.find((f) => f.key === c.field);
+  const ops = condOpsFor(c.field);
+  const list = valueOptions[c.field] || [];
+  const cls = 'h-9 bg-white border border-slate-300 rounded-lg px-2 text-[13px] text-slate-900';
+  return (
+    <div className="flex flex-wrap items-center gap-1.5">
+      <select value={c.field} aria-label="조건 칸" onChange={(e) => {
+        const next = e.target.value;
+        const nextOps = condOpsFor(next).map((o) => o.key);
+        onChange({ field: next, op: nextOps.includes(c.op) ? c.op : nextOps[0], value: COND_FIELDS.find((f) => f.key === next)?.kind === 'bool' ? 'true' : '' });
+      }} className={cls}>
+        {!meta && <option value={c.field}>알 수 없는 조건</option>}
+        {COND_FIELDS.map((f) => <option key={f.key} value={f.key}>{f.label}</option>)}
+      </select>
+      {meta?.kind !== 'bool' && (
+        <select value={c.op} aria-label="비교" onChange={(e) => onChange({ op: e.target.value })} className={cls}>
+          {ops.map((o) => <option key={o.key} value={o.key}>{o.label}</option>)}
+        </select>
+      )}
+      {meta?.kind === 'bool' ? (
+        <select value={String(c.value) === 'false' ? 'false' : 'true'} aria-label="값" onChange={(e) => onChange({ op: '==', value: e.target.value })} className={`${cls} flex-1 min-w-[120px]`}>
+          <option value="true">동의한 고객</option>
+          <option value="false">동의하지 않은 고객</option>
+        </select>
+      ) : meta?.kind === 'list' && list.length > 0 ? (
+        <select value={c.value} aria-label="값" onChange={(e) => onChange({ value: e.target.value })} className={`${cls} flex-1 min-w-[120px]`}>
+          <option value="">고르기</option>
+          {!list.includes(c.value) && c.value && <option value={c.value}>{c.value}</option>}
+          {list.map((v) => <option key={v} value={v}>{v}</option>)}
+        </select>
+      ) : (
+        <span className="flex flex-1 min-w-[120px] items-center gap-1">
+          <input value={c.value} aria-label="값" inputMode={meta?.kind === 'number' || meta?.kind === 'days' ? 'numeric' : undefined}
+            onChange={(e) => onChange({ value: meta?.kind === 'number' || meta?.kind === 'days' ? e.target.value.replace(/[^0-9]/g, '') : e.target.value })}
+            placeholder={meta?.kind === 'days' ? '예: 90' : '값'} className={`${cls} min-w-0 flex-1`} />
+          {meta?.unit && <span className="shrink-0 text-[12px] text-slate-500">{meta.unit}</span>}
+        </span>
+      )}
+      <button type="button" onClick={onRemove} className="h-9 w-9 shrink-0 rounded-lg bg-white hover:bg-rose-50 border border-slate-200 flex items-center justify-center" aria-label="조건 삭제"><X className="w-3.5 h-3.5 text-slate-500" /></button>
+    </div>
+  );
+}
+
 // 대상 조건 모달 — 두 빌더 공용.
 export function AudienceModal({ initial, onSave, onClose }: { initial: AudienceCondition[]; onSave: (c: AudienceCondition[]) => void; onClose: () => void }) {
   const [conditions, setConditions] = useState<AudienceCondition[]>(initial);
+  const valueOptions = useConditionValueOptions();
   const add = () => setConditions((c) => [...c, { field: 'grade', op: '==', value: '' }]);
   const upd = (i: number, patch: Partial<AudienceCondition>) => setConditions((c) => c.map((x, idx) => (idx === i ? { ...x, ...patch } : x)));
   const rm = (i: number) => setConditions((c) => c.filter((_, idx) => idx !== i));
@@ -86,18 +162,9 @@ export function AudienceModal({ initial, onSave, onClose }: { initial: AudienceC
         <button onClick={onClose} className="px-4 py-2 rounded-lg bg-white hover:bg-slate-100 border border-slate-200 text-sm text-slate-600">닫기</button>
         <button onClick={() => onSave(conditions)} className="text-white px-4 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-sm font-medium">저장</button>
       </>}>
-      <p className="text-[11px] text-slate-500">등급·지역·매장·포인트 등 자유롭게 조합합니다. 조건이 없으면 전체 활성 고객이 대상입니다.</p>
+      <p className="text-[11px] text-slate-500">등급 · 지역 · 매장 · 포인트 · 마지막 구매 같은 조건을 묶어요. 조건이 없으면 전체 활성 고객이 대상입니다.</p>
       {conditions.map((c, i) => (
-        <div key={i} className="flex items-center gap-1.5">
-          <select value={c.field} onChange={(e) => upd(i, { field: e.target.value })} className="bg-white border border-slate-300 rounded px-2 py-1.5 text-xs text-slate-900">
-            {COND_FIELDS.map((f) => <option key={f.key} value={f.key}>{f.label}</option>)}
-          </select>
-          <select value={c.op} onChange={(e) => upd(i, { op: e.target.value })} className="bg-white border border-slate-300 rounded px-2 py-1.5 text-xs text-slate-900">
-            {COND_OPS.map((o) => <option key={o.key} value={o.key}>{o.label}</option>)}
-          </select>
-          <input value={c.value} onChange={(e) => upd(i, { value: e.target.value })} placeholder="값" className="flex-1 min-w-0 bg-white border border-slate-300 rounded px-2 py-1.5 text-xs text-slate-900" />
-          <button onClick={() => rm(i)} className="p-1.5 rounded bg-white hover:bg-rose-100 border border-slate-200" aria-label="조건 삭제"><X className="w-3.5 h-3.5 text-slate-500" /></button>
-        </div>
+        <ConditionRow key={i} c={c} valueOptions={valueOptions} onChange={(p) => upd(i, p)} onRemove={() => rm(i)} />
       ))}
       <button onClick={add} className="inline-flex items-center gap-1 text-xs text-indigo-700 hover:text-indigo-800"><Plus className="w-3.5 h-3.5" /> 조건 추가</button>
     </ModalShell>

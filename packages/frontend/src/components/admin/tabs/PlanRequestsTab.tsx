@@ -177,6 +177,21 @@ const handleApproveRequest = async (id: string) => {
                         <span className="font-medium text-blue-600">{detail.requested_plan_name}</span> · {Number(detail.requested_plan_price).toLocaleString()}원/월{isTrial(detail) ? ' · 무료체험' : ''}
                       </AdminDetailItem>
                       <AdminDetailItem label="메시지">{detail.message || '-'}</AdminDetailItem>
+                      {/* ★ 2026-10-20 여정 V.3 §5-5 — 고객 신청 창과 같은 숫자(켜 둔 여정 한 달 운영 크레딧 · 승인은 막지 않는다) */}
+                      {detail.status === 'pending' && (
+                        <AdminDetailItem label="켜 둔 여정 크레딧">
+                          {detail.journey_forecast == null
+                            ? '확인 못 함'
+                            : detail.journey_forecast.perLineage?.length
+                              ? <span className={detail.requested_plan_credits != null && Number(detail.journey_forecast.total) > Number(detail.requested_plan_credits) ? 'text-amber-700 font-semibold' : ''}>
+                                  여정 {detail.journey_forecast.perLineage.length}개 · 한 달 {Number(detail.journey_forecast.total).toLocaleString()}
+                                  {detail.journey_forecast.basis === 'measured' ? '(지난 30일 실제)' : '(새 여정은 최대로 셈)'}
+                                  {detail.requested_plan_credits != null ? ` · 신청 요금제 기본 ${Number(detail.requested_plan_credits).toLocaleString()}` : ''}
+                                  {detail.requested_plan_credits != null && Number(detail.journey_forecast.total) > Number(detail.requested_plan_credits) ? ' · 모자라면 여정이 멈춰요' : ''}
+                                </span>
+                              : '켜 둔 여정 없음'}
+                        </AdminDetailItem>
+                      )}
                       <AdminDetailItem label="상태">{statusLabel(detail.status)}</AdminDetailItem>
                       {detail.status !== 'pending' && (
                         <AdminDetailItem label="처리">{detail.processed_by_name || '-'}{detail.processed_at ? ` · ${formatDate(detail.processed_at)}` : ''}</AdminDetailItem>

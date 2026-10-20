@@ -19,6 +19,8 @@
  */
 
 import { useState, useEffect, useCallback } from 'react';
+// ★ 2026-10-20 V.3 §9-4 — 변형마다 같은 큰 휴대폰(실제 나가는 형태 · (광고) · 무료수신거부 합성 바이트 · 받는 모습 = 서버 미리보기).
+import PhoneComposer from './PhoneComposer';
 import { Beaker, Plus, Trash2, Save, Loader2, X, BarChart3, Info, Trophy, Activity, MousePointerClick, ShoppingCart, Sparkles, AlertTriangle } from 'lucide-react';
 
 type ChannelType = 'sms' | 'lms' | 'mms' | 'kakao';
@@ -73,6 +75,8 @@ interface Props {
   defaultMessageTemplate: string;
   defaultSubject?: string;
   onClose?: () => void;
+  /** ★ V.3 — 회사 080 수신거부 번호(바이트 · 보이는 모습 합성). 비카카오 여정 칸은 늘 광고다(resolveJourneyAdFlag). */
+  opt080Number?: string;
 }
 
 const VARIANT_IDS = ['A', 'B', 'C'];
@@ -98,6 +102,7 @@ export default function JourneyVariantsEditor({
   journeyStatus,
   defaultChannel,
   defaultMessageTemplate,
+  opt080Number = '',
   defaultSubject,
   onClose,
 }: Props) {
@@ -819,36 +824,18 @@ export default function JourneyVariantsEditor({
                   </div>
                 </>
               ) : (
-                <>
-                  {(channelOfActive === 'lms' || channelOfActive === 'mms') && (
-                    <div>
-                      <label className="block text-[11px] text-slate-500 mb-1">
-                        제목 <span className="text-rose-600">*</span>
-                        <span className="ml-1 text-slate-400">(LMS/MMS 필수, 최대 40자)</span>
-                      </label>
-                      <input
-                        type="text"
-                        value={activeVariant.subject || ''}
-                        onChange={(e) => handleUpdateVariant(activeVariant, { subject: e.target.value })}
-                        maxLength={40}
-                        placeholder="한 줄 제목"
-                        disabled={isReadOnly}
-                        className="w-full px-2 py-1.5 bg-white border border-slate-200 rounded text-xs disabled:opacity-50"
-                      />
-                    </div>
-                  )}
-                  <div>
-                    <label className="block text-[11px] text-slate-500 mb-1">메시지 본문</label>
-                    <textarea
-                      value={activeVariant.messageTemplate || ''}
-                      onChange={(e) => handleUpdateVariant(activeVariant, { messageTemplate: e.target.value })}
-                      rows={5}
-                      placeholder="회사 admin이 직접 작성 (AI 임의 혜택 X)"
-                      disabled={isReadOnly}
-                      className="w-full px-2 py-1.5 bg-white border border-slate-200 rounded text-xs font-mono resize-y disabled:opacity-50"
-                    />
-                  </div>
-                </>
+                <PhoneComposer
+                  channel={(channelOfActive === 'sms' || channelOfActive === 'mms' ? channelOfActive : 'lms') as 'sms' | 'lms' | 'mms'}
+                  subject={activeVariant.subject || ''}
+                  body={activeVariant.messageTemplate || ''}
+                  isAd
+                  opt080Number={opt080Number}
+                  onSubject={isReadOnly ? undefined : (v) => handleUpdateVariant(activeVariant, { subject: v })}
+                  onBody={isReadOnly ? undefined : (v) => handleUpdateVariant(activeVariant, { messageTemplate: v })}
+                  journeyId={journeyId}
+                  placeholder="이 변형으로 보낼 문안이에요. 혜택은 실제로 주는 것만 써요."
+                  resetKey={activeVariant.id || activeVariant.variantId}
+                />
               )}
 
               {/* 액션 */}

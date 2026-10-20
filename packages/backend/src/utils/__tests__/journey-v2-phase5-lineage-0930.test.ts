@@ -126,7 +126,7 @@ describe('새 판 만들기', () => {
     expect(r.stepsCopied).toBe(2);
     const ins = calls.find((c) => /INSERT INTO journeys SELECT/.test(c.text))!;
     const ov = JSON.parse(ins.params![1]);
-    expect(ov).toMatchObject({ status: 'draft', lineage_id: 'J', stats_total_entered: 0, last_event_cursor: null, last_purchase_cursor_id: null, approved_at: null, entry_baseline_at: null, name: '환영 (새 판)' });
+    expect(ov).toMatchObject({ status: 'draft', lineage_id: 'J', stats_total_entered: 0, last_event_cursor: null, last_purchase_cursor_id: null, approved_at: null, entry_baseline_at: null, name: '환영' });   // ★ 2026-10-20 V.3 §4-2 — 이름 그대로(「(새 판)」 꼬리 없음)
     expect(calls.some((c) => /UPDATE journeys SET lineage_id = id/.test(c.text))).toBe(true);
     const remap = calls.find((c) => /UPDATE journey_steps SET condition_jsonb/.test(c.text))!;
     expect(JSON.parse(remap.params![1]).step_id).toBe('N1');

@@ -17,6 +17,9 @@ import { buildAdMessageFront, calculateSmsBytes } from '../../../frontend/src/ut
 
 const STUDIO = resolve(process.cwd(), '../frontend/src/components/journey/JourneyStepStudio.tsx');
 const studioSrc = () => readFileSync(STUDIO, 'utf8');
+// ★ 2026-10-20 V.3 §9-4 — 쓰는 자리 · 보이는 모습 · 바이트는 큰 휴대폰(PhoneComposer) 한 벌로 옮겼다. 같은 보장을 휴대폰에 건다.
+const PHONE = resolve(process.cwd(), '../frontend/src/components/journey/PhoneComposer.tsx');
+const phoneSrc = () => readFileSync(PHONE, 'utf8');
 const OPT_080 = '0801234567';
 
 describe('광고 합성분은 바이트에 든다', () => {
@@ -42,27 +45,29 @@ describe('광고 합성분은 바이트에 든다', () => {
 
 describe('스튜디오가 그 축을 쓴다', () => {
   it('바이트는 광고 합성 결과로 잰다 (순수 본문 계산으로 되돌리면 실패)', () => {
-    const src = studioSrc();
-    expect(src).toMatch(/calculateSmsBytes\(adComposed\)/);
+    const src = phoneSrc();
+    expect(src).toMatch(/const composed = useMemo\(\(\) => buildAdMessageFront\(body \|\| '', msgType, isAd, opt080Number\)/);
+    expect(src).toMatch(/calculateSmsBytes\(composed\)/);
     expect(
       src,
       '순수 본문만 세던 옛 형태가 남아 있으면 안 된다',
-    ).not.toMatch(/calculateSmsBytes\(step\?\.messageTemplate/);
+    ).not.toMatch(/calculateSmsBytes\(body/);
+    expect(studioSrc(), '스튜디오는 휴대폰을 쓴다').toContain('<PhoneComposer');
   });
 
   it('보이는 모습은 치환 + 광고 합성을 거친다', () => {
-    const src = studioSrc();
+    const src = phoneSrc();
     expect(src).toMatch(/buildAdMessageFront\(/);
     expect(src).toMatch(/mergeVarsPlain\(/);
     expect(src).toMatch(/buildAdSubjectFront\(/);
     expect(
       src,
       '원문을 그대로 "보이는 모습"이라 부르던 형태로 되돌아가면 안 된다',
-    ).not.toMatch(/highlightVars\(step\.messageTemplate \|\| ''\)/);
+    ).not.toMatch(/highlightVars\(body/);
   });
 
   it('샘플 고객이 없으면 지어내지 않고 그 사실을 알린다', () => {
-    expect(studioSrc()).toMatch(/타겟 고객이 없어 원본으로 표시됩니다/);
+    expect(phoneSrc()).toMatch(/아직 이 조건의 고객이 없어 원문으로 보여요/);
   });
 });
 
@@ -100,6 +105,8 @@ describe('저장 본문은 순수 상태 그대로', () => {
   });
 
   it('본문 편집 textarea는 순수 본문을 그대로 보여 준다', () => {
-    expect(studioSrc()).toMatch(/value=\{step\.messageTemplate \|\| ''\}/);
+    expect(phoneSrc()).toMatch(/value=\{body \|\| ''\}/);
+    expect(phoneSrc()).toMatch(/onChange=\{\(e\) => onBody\?\.\(e\.target\.value\)\}/);
+    expect(studioSrc()).toMatch(/body=\{step\.messageTemplate \|\| ''\}/);
   });
 });

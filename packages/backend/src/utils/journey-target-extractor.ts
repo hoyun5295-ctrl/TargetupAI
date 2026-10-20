@@ -121,7 +121,16 @@ export async function selectJourneyTargetCustomerIds(
     // 3. 휴면 (customers.recent_purchase_date < NOW - N일)
     case 'customer.dormant': {
       const d = Number(filters.dormant_days || 30);
-      const params: any[] = [companyId, String(d), String(d + 7)];
+      // ★ 2026-10-20 여정 V.3 §8-1 — 「이미 쉬고 있는 고객도 받기」: 기준일 + 7일 창의 위쪽 끝을 없앤다(오래 쉰 기존 고객도 들어온다 · 최근에 쉰 순).
+      //   하루 몫(backfill_per_day · 진입 감시)이 나눠 받는다. 기본 꺼짐 = 옛 7일 창 그대로.
+      const includeExisting = filters.include_existing === true;
+      // ★ Codex 적대 A5 — 위쪽 끝(+7일)을 쓸 때만 그 값을 싣는다(쓰지 않는 $3 이 남으면 PG 가 형을 못 정해 추출 전체가 실패한다).
+      const params: any[] = [companyId, String(d)];
+      let upperBound = '';
+      if (!includeExisting) {
+        params.push(String(d + 7));
+        upperBound = `AND c.recent_purchase_date > (${KST_TODAY_DATE_SQL} - ($${params.length} || ' days')::interval)`;
+      }
       const antiJoin = journeyId && reentry ? buildReentryAntiJoin('c', params, journeyId, reentry.allowReentry, reentry.cooldownDays, reentry.lineageIds) : '';
       // 이관 유예 — 3년 전 최근구매일이 오늘 적재되면 그 사람은 즉시 휴면 대상이 된다.
       const grace = buildIntakeGraceClause('c', params, graceDays);
@@ -133,7 +142,7 @@ export async function selectJourneyTargetCustomerIds(
            AND ${buildJourneySafetyFilter('c', consent?.isTrue)}${scopeSql}
            AND c.recent_purchase_date IS NOT NULL
            AND c.recent_purchase_date < (${KST_TODAY_DATE_SQL} - ($2 || ' days')::interval)
-           AND c.recent_purchase_date > (${KST_TODAY_DATE_SQL} - ($3 || ' days')::interval)
+           ${upperBound}
            ${antiJoin}
            ${grace ? ` AND ${grace}` : ''}
            ${cond ? ` AND ${cond}` : ''}
@@ -927,14 +936,18 @@ export async function countJourneyTargetCustomers(
 //   customers.store_name varchar(100) / store_code varchar(50) (SCHEMA.md 검증).
 // ★ 2026-06-30 여정 일반화 — points 추가(날짜축/대상 조건에서 포인트를 일반 조건으로). customers.points numeric(SCHEMA 검증). 추가만 = 기존 경로 회귀 0.
 // ★ 2026-09-29 여정 V2 — 허용 목록을 밖으로 꺼내 저장 · 활성화 검증(findCustomerConditionIssues)과 같은 단일 출처로 쓴다.
-export const CUSTOMER_CONDITION_FIELDS = ['grade', 'region', 'age', 'purchase_count', 'total_purchase_amount', 'sms_opt_in', 'store_name', 'store_code', 'points'] as const;
+// ★ 2026-10-20 여정 V.3 §7-3 — 「마지막 구매 N일」(days_since_purchase) = KST 오늘 − 최근 구매일(customers.recent_purchase_date date · 휴면 추출과 같은 칸).
+//   가상 칸이라 숫자 비교(>= <= > <)만 받는다. 구매 이력이 없는 고객(NULL)은 비교에서 빠진다. 「가입 N일」(created_at)은 만들지 않는다(고객 DB 를 다시 올리면 전원이 신규).
+export const CUSTOMER_CONDITION_FIELDS = ['grade', 'region', 'age', 'purchase_count', 'total_purchase_amount', 'sms_opt_in', 'store_name', 'store_code', 'points', 'days_since_purchase'] as const;
 export const CUSTOMER_CONDITION_OPS = ['==', '!=', '>=', '<=', '>', '<', 'in', 'not_in', 'is_null', 'not_null'] as const;
+const DAYS_SINCE_PURCHASE_OPS = ['>=', '<=', '>', '<'];
+const DAYS_SINCE_PURCHASE_SQL = `(${KST_TODAY_DATE_SQL} - c.recent_purchase_date)`;
 
 export interface CustomerConditionIssue {
   index: number;
   field: string;
   op: string;
-  reason: 'unknown_field' | 'unknown_op' | 'empty_value' | 'bad_shape' | 'bad_logic';
+  reason: 'unknown_field' | 'unknown_op' | 'empty_value' | 'bad_shape' | 'bad_logic' | 'bad_number';
 }
 
 /**
@@ -967,6 +980,11 @@ export function findCustomerConditionIssues(conditions: unknown, logic?: unknown
     }
     if (!(CUSTOMER_CONDITION_OPS as readonly string[]).includes(op)) {
       issues.push({ index, field, op, reason: 'unknown_op' });
+      return;
+    }
+    if (field === 'days_since_purchase') {
+      if (!DAYS_SINCE_PURCHASE_OPS.includes(op)) issues.push({ index, field, op, reason: 'unknown_op' });
+      else if (raw.value === null || raw.value === '' || !Number.isFinite(Number(raw.value))) issues.push({ index, field, op, reason: 'bad_number' });
       return;
     }
     if (op === 'is_null' || op === 'not_null') return;
@@ -1013,7 +1031,8 @@ export function partitionCustomerConditions(filters: Record<string, any> | null 
 export function describeCustomerConditionIssue(issue: CustomerConditionIssue): string {
   const n = issue.index >= 0 ? `대상 조건 ${issue.index + 1}번째` : '대상 조건';
   switch (issue.reason) {
-    case 'unknown_field': return `${n}은 여정에서 쓸 수 없는 항목이라 저장하지 않았어요. 등급 · 지역 · 나이 · 구매 횟수 · 총 구매액 · 매장 · 포인트 · 수신 동의로 다시 골라 주세요.`;
+    case 'unknown_field': return `${n}은 여정에서 쓸 수 없는 항목이라 저장하지 않았어요. 등급 · 지역 · 나이 · 구매 횟수 · 총 구매액 · 마지막 구매 · 매장 · 포인트 · 수신 동의로 다시 골라 주세요.`;
+    case 'bad_number': return `${n}의 값은 숫자로 넣어 주세요.`;
     case 'unknown_op': return `${n}의 비교 방식을 알 수 없어요. 다시 골라 주세요.`;
     case 'empty_value': return `${n}의 값이 비어 있어요. 값을 넣어 주세요.`;
     case 'bad_logic': return '대상 조건을 묶는 방식(모두 만족 / 하나라도 만족)을 알 수 없어요. 다시 골라 주세요.';
@@ -1032,10 +1051,25 @@ export function applyCustomerConditions(
   const allowedFields: readonly string[] = CUSTOMER_CONDITION_FIELDS;
   const allowedOps: readonly string[] = CUSTOMER_CONDITION_OPS;
   const clauses: string[] = [];
+  // ★ Codex 적대 A7 — 값은 지역 배열에 모았다가 전부 옮길 수 있을 때만 호출자 배열에 붙인다(닫힘 FALSE 인데 앞 조건 값이 남으면 쓰지 않는 $n 으로 PG 오류).
+  const base = params.length;
+  const local: any[] = [];
+  const bind = (v: any) => { local.push(v); return `$${base + local.length}`; };
+  // ★ 2026-10-20 여정 V.3 §7-4 — 닫는 방향: 조건이 들어왔는데 하나라도 못 옮기면 전체를 0명(FALSE)으로.
+  //   옛: 모르는 칸 · 연산자 · 빈 in 목록을 건너뛰어 그만큼 대상이 넓어졌고, 전부 빠지면 null = 조건 없음 = 전 고객이었다("VIP만"이 "전 고객").
+  //   저장 · 켜기 관문(findCustomerConditionIssues)이 먼저 막지만 그 전 저장분 · 직접 UPDATE 가 남을 수 있어 추출이 마지막 문이다.
+  const FAIL_CLOSED = 'FALSE';
 
   for (const cond of conditions) {
-    if (!allowedFields.includes(cond.field)) continue;
-    if (!allowedOps.includes(cond.op)) continue;
+    if (!allowedFields.includes(cond.field)) return FAIL_CLOSED;
+    if (!allowedOps.includes(cond.op)) return FAIL_CLOSED;
+
+    if (cond.field === 'days_since_purchase') {
+      const n = Number(cond.value);
+      if (!DAYS_SINCE_PURCHASE_OPS.includes(cond.op) || cond.value === null || cond.value === '' || !Number.isFinite(n)) return FAIL_CLOSED;
+      clauses.push(`${DAYS_SINCE_PURCHASE_SQL} ${cond.op} ${bind(Math.floor(n))}::int`);
+      continue;
+    }
 
     const col = cond.field === 'sms_opt_in' && consent ? consent.value : `c.${cond.field}`;
     if (cond.op === 'is_null') {
@@ -1048,21 +1082,18 @@ export function applyCustomerConditions(
     }
     if (cond.op === 'in' || cond.op === 'not_in') {
       const values = Array.isArray(cond.value) ? cond.value : [cond.value];
-      if (values.length === 0) continue;
-      const placeholders = values.map((v) => {
-        params.push(v);
-        return `$${params.length}`;
-      });
+      if (values.length === 0) return FAIL_CLOSED;
+      const placeholders = values.map((v) => bind(v));
       clauses.push(`${col} ${cond.op === 'in' ? 'IN' : 'NOT IN'} (${placeholders.join(', ')})`);
       continue;
     }
     // 일반 비교 operator
     const sqlOp = cond.op === '==' ? '=' : cond.op;
-    params.push(cond.value);
-    clauses.push(`${col} ${sqlOp} $${params.length}`);
+    clauses.push(`${col} ${sqlOp} ${bind(cond.value)}`);
   }
 
-  if (clauses.length === 0) return null;
+  if (clauses.length === 0) return FAIL_CLOSED;
+  params.push(...local);
   const joiner = logic === 'OR' ? ' OR ' : ' AND ';
   return `(${clauses.join(joiner)})`;
 }

@@ -237,7 +237,7 @@ describe('addJourneyStep', () => {
 describe('withJourneyValidationReset — 변경과 무효화는 한 트랜잭션', () => {
   it('부모 여정을 FOR UPDATE로 잠그고, 변경 뒤 마커·판을 함께 지운 다음 커밋한다', async () => {
     const { texts } = mockClient([
-      { match: /SELECT id, status FROM journeys/, rows: [{ id: JOURNEY, status: 'draft' }] },
+      { match: /SELECT id, status, start_kind FROM journeys/, rows: [{ id: JOURNEY, status: 'draft' }] },
       { match: /UPDATE journey_steps SET foo/, rows: [{ id: STEP }] },
     ]);
     const r = await withJourneyValidationReset(COMPANY, JOURNEY, (run) =>
@@ -245,7 +245,7 @@ describe('withJourneyValidationReset — 변경과 무효화는 한 트랜잭션
     );
     expect(r?.rows?.[0]?.id).toBe(STEP);
 
-    const lock = at(texts, /SELECT id, status FROM journeys/);
+    const lock = at(texts, /SELECT id, status, start_kind FROM journeys/);
     const change = at(texts, /UPDATE journey_steps SET foo/);
     const reset = at(texts, /last_pretest_passed_at = NULL, updated_at = NOW\(\)/);
     const commit = texts.indexOf('COMMIT');
@@ -257,14 +257,14 @@ describe('withJourneyValidationReset — 변경과 무효화는 한 트랜잭션
   });
 
   it('마커와 판(updated_at)은 한 문장에서 함께 간다 — 하나만 가면 CAS나 활성화 게이트 중 하나가 새다', async () => {
-    const { calls } = mockClient([{ match: /SELECT id, status FROM journeys/, rows: [{ id: JOURNEY, status: 'draft' }] }]);
+    const { calls } = mockClient([{ match: /SELECT id, status, start_kind FROM journeys/, rows: [{ id: JOURNEY, status: 'draft' }] }]);
     await withJourneyValidationReset(COMPANY, JOURNEY, async () => null);
     const reset = calls.find((c) => /last_pretest_passed_at/.test(c.text));
     expect(reset?.text).toMatch(/updated_at = NOW\(\)/);
   });
 
   it('그 회사 여정이 아니면 아무것도 바꾸지 않고 null', async () => {
-    const { texts } = mockClient([{ match: /SELECT id, status FROM journeys/, rows: [] }]);
+    const { texts } = mockClient([{ match: /SELECT id, status, start_kind FROM journeys/, rows: [] }]);
     const spy = vi.fn();
     const r = await withJourneyValidationReset(COMPANY, JOURNEY, async () => { spy(); return 1; });
     expect(r).toBeNull();
@@ -274,7 +274,7 @@ describe('withJourneyValidationReset — 변경과 무효화는 한 트랜잭션
   });
 
   it('변경이 던지면 롤백하고 무효화도 커밋되지 않는다', async () => {
-    const { texts } = mockClient([{ match: /SELECT id, status FROM journeys/, rows: [{ id: JOURNEY, status: 'draft' }] }]);
+    const { texts } = mockClient([{ match: /SELECT id, status, start_kind FROM journeys/, rows: [{ id: JOURNEY, status: 'draft' }] }]);
     await expect(
       withJourneyValidationReset(COMPANY, JOURNEY, async () => { throw new Error('boom'); })
     ).rejects.toThrow('boom');

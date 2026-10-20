@@ -31,16 +31,17 @@ import { normalizeProductFilters } from './journey-product';
 // ★ 2026-09-30 여정 V2 4차 — 활성화는 그래프 CT 의 구조 결함(닿지 않는 칸 · 첫 칸이 끝 칸)을 막는다(그림과 같은 규칙).
 import { buildJourneyGraph } from './journey-graph';
 // ★ 2026-09-30 여정 V2 5차 — 새 판을 켜면 같은 트랜잭션에서 같은 계보의 옛 판 진입을 닫는다(진행 중 고객만 마무리).
-import { lineageColumnsReady, lockLineageEntry, CLOSE_OTHER_VERSIONS_ENTRY_SQL, INHERIT_ENTRY_CURSORS_SQL } from './journey-lineage';
+import { lineageColumnsReady, lockLineageEntry, CLOSE_OTHER_VERSIONS_ENTRY_SQL, INHERIT_ENTRY_CURSORS_SQL, pauseJourneyLineage, entryEndsColumnReady } from './journey-lineage';
+import { activationCostOf } from './journey-activation-cost';
+import { pauseReasonView } from './journey-pause-reason';
+import { applyResumeAdjustments } from './journey-resume';
 // ★ 2026-09-29 V2 (회의론자 0차 검증 2-나) — 생성 경로의 타이밍 필터도 옵션 PATCH 와 같은 정규화를 지난다(AI 가 지은 값 clamp).
 import { normalizeJourneyOptions } from './journey-options-validator';
-import { stepEditPolicy, blockedStepEditGroups, stepEditBlockedMessage } from './journey-step-edit-policy';
+import { isUuid } from './normalize';
+import { stepEditPolicy, blockedStepEditGroups, stepEditBlockedMessage, keepsPretestMarkerForStep } from './journey-step-edit-policy';
 import { getCompanyJourneyFacts } from './company-data-profile';
 // ★ 2026-09-29 여정 V2 0차 ⑧⑩ — 칸 종류 · 개수 · 대기 상한은 CT 한 곳(자르지 않고 거부 · 모르는 종류는 거부).
-import {
-  MAX_JOURNEY_STEPS, MAX_STEP_DELAY_HOURS, MAX_WAIT_TIMEOUT_HOURS, isKnownStepType, resolveStepType,
-  assertStepCountWithinLimit, assertStepsWithinLimit, MAX_MESSAGE_STEPS, JourneyInputError,
-} from './journey-step-limits';
+import { MAX_JOURNEY_STEPS, MAX_STEP_DELAY_HOURS, MAX_WAIT_TIMEOUT_HOURS, isKnownStepType, resolveStepType, assertStepCountWithinLimit, assertStepsWithinLimit, MAX_MESSAGE_STEPS, JourneyInputError, JOURNEY_SUBJECT_MAX_CHARS } from './journey-step-limits';
 // ★ 2026-09-29 여정 V2 0차 ② — 대상 조건 검증은 추출기와 같은 허용 목록(단일 출처).
 import { findCustomerConditionIssues, describeCustomerConditionIssue } from './journey-target-extractor';
 
@@ -319,7 +320,7 @@ export async function createJourneyFromTemplate(input: CreateJourneyInput): Prom
         delayHours: stepType === 'end' ? 0 : Math.max(0, Math.min(MAX_STEP_DELAY_HOURS, Number(s.delayHours) || 0)),
         channel,
         messageTemplate: (s.messageTemplate || '').slice(0, 2000),
-        subject: channel === 'sms' ? '' : (s.subject || '').slice(0, 50),
+        subject: channel === 'sms' ? '' : (s.subject || '').slice(0, JOURNEY_SUBJECT_MAX_CHARS),
         isAd: s.isAd !== undefined ? !!s.isAd : true,
         conditionJsonb: s.conditionJsonb,
         // ★ 2026-07-11 분기·이벤트 대기: 필드 보존(0605 교훈 — map 경로 누락=조용한 소실)
@@ -384,6 +385,10 @@ export async function createJourneyFromTemplate(input: CreateJourneyInput): Prom
     Object.assign(resolvedTriggerFilters, normalizeProductFilters(resolvedTriggerFilters as Record<string, any>), { entry_replace: true });
     allowReentry = true;
     reentryCooldownDays = 0;
+  }
+  // ★ 2026-10-20 여정 V.3 §8-2 — 새 주문 완료 여정은 「돌아온 고객은 환영만」 기본 켬(휴면 복귀 여정과 같은 구매에 두 통 0 · 끄면 같이 받는다).
+  if (resolvedTriggerEvent === 'cdp.purchase' && (resolvedTriggerFilters as any).exclude_dormant_return === undefined) {
+    (resolvedTriggerFilters as any).exclude_dormant_return = true;
   }
   const startKind: StartKind = normalizeStartKind(
     input.startKind || classifyStartKind(resolvedTriggerEvent, { expiryMode: (resolvedTriggerFilters as any)?.expiry_mode }),
@@ -629,7 +634,57 @@ JSON 형식만 응답:
 // 여정 상태 변경
 // ════════════════════════════════════════════════════════════════════
 
-export async function activateJourney(companyId: string, journeyId: string, userId: string): Promise<{ ok: boolean; reason?: string }> {
+/**
+ * ★ 2026-10-20 여정 V.3 §7-2 — 시작 조건 · 한도 · 재진입 검사(순수). 켜기 관문(activateJourney)과 켜진 여정 그 자리 저장이 같은 함수를 쓴다.
+ *   거절 문장(고객 언어) 또는 null. 순서와 문장은 옛 켜기 관문 그대로(조건 문장 끝의 「새로 만들어야」만 지움 · 이제 조건을 고칠 수 있다).
+ */
+export function validateJourneyEntryConfig(row: {
+  trigger_event: string;
+  allow_reentry: boolean;
+  reentry_cooldown_days: number | null;
+  trigger_filters: any;
+  threshold_recipients_per_step: number | null;
+}): string | null {
+  const triggerEvent = String(row.trigger_event || '');
+  // ★ §11-5(§9-N1 종결) — 재진입 허용 트리거의 최소 쿨다운을 레지스트리가 강제한다.
+  //   장바구니가 기원: 정보 알림 빌더가 쿨다운 0을 고정하면 추출 안티조인이 사라져
+  //   24시간 창 동안 5분마다 재발송·재차감됐다. 조건은 계약(TRIGGER_CONTRACTS)에만 산다.
+  const contract = getTriggerContract(triggerEvent);
+  if (contract?.cooldownMinDays != null && row.allow_reentry === true) {
+    const cd = Number(row.reentry_cooldown_days || 0);
+    if (cd < contract.cooldownMinDays) {
+      return `이 발송 조건은 같은 분께 다시 보내기까지 최소 ${contract.cooldownMinDays}일이 필요합니다. 재진입 간격을 지정해 주세요.`;
+    }
+  }
+  // ★ 2026-09-29 여정 V2 0차 ② — 대상 조건 최종 게이트. 저장이 먼저 막지만 옛 저장분 · 직접 UPDATE가 남을 수 있어
+  //   발송이 시작되는 유일한 길목(활성화)에서 한 번 더 본다. 추출기는 모르는 항목을 조용히 건너뛰어 대상을 넓힌다.
+  {
+    const tf: any = row.trigger_filters || {};
+    const issues = findCustomerConditionIssues(tf.customer_conditions, tf.logic);
+    if (issues.length > 0) return describeCustomerConditionIssue(issues[0]);
+  }
+  // ★ §11-5(§9-N6 종결) — 포인트 임계 양수 강제. 기본값 0은 사실상 전원이다.
+  if (triggerEvent === 'customer.points_expiring') {
+    const pm = Number((row.trigger_filters || {}).points_min);
+    if (!Number.isFinite(pm) || pm < 1) {
+      return '포인트 기준값을 1 이상으로 지정해 주세요. 0이면 포인트가 없는 분까지 전원 대상이 됩니다.';
+    }
+  }
+  // ★ 이관 배치가 유예 만료일에 통째로 들어오는 것은 유예가 못 막는다(단조 조건).
+  //   그것을 막는 것은 수신자 상한이라 **커서 경로가 아닌 트리거**는 상한을 필수로 받는다.
+  //   ⛔ 5R 정정 — 유예 대상과 상한 필수 대상은 다른 집합이다. 옛 코드가 둘을 묶어 생일이 빠졌었다.
+  //     생일은 유예가 필요 없지만(실제 날짜), 생년월일 대량 적재는 그날 코호트를 한꺼번에 만든다.
+  if (requiresRecipientCap(triggerEvent) && row.threshold_recipients_per_step == null) {
+    return '한 번에 보낼 최대 인원을 정해 주세요. 고객 정보를 한꺼번에 옮겨 올 때 예상보다 많은 분께 나가는 것을 막습니다.';
+  }
+  return null;
+}
+
+export async function activateJourney(
+  companyId: string, journeyId: string, userId: string,
+  /** ★ V.3 Codex 적대 A2 — 새 모양 복제본을 켤 때 원본 id. 같은 계보 잠금 안에서 원본이 아직 켜져 있을 때만 켠다(그사이 사람이 멈췄으면 그만둔다). */
+  opts: { requireActiveSource?: string } = {},
+): Promise<{ ok: boolean; reason?: string }> {
   // 활성화 전 검증 — placeholder 미편집 차단 + 회신번호 필수 + 본문 최소 길이
   // ★ D188 Phase 2-B-1 (2026-05-21): step_type별 다른 검증 분기 — message/wait/condition.
   // ★ D194 (2026-05-22): Liquid 문법 사전 검증 + subject 빈 영역 검증 추가 (직원 테스트 발송 사고 0건 영구 안전망)
@@ -691,46 +746,16 @@ export async function activateJourney(companyId: string, journeyId: string, user
     }
   }
 
-  // ★ §11-5(§9-N1 종결) — 재진입 허용 트리거의 최소 쿨다운을 레지스트리가 강제한다.
-  //   장바구니가 기원: 정보 알림 빌더가 쿨다운 0을 고정하면 추출 안티조인이 사라져
-  //   24시간 창 동안 5분마다 재발송·재차감됐다. 조건은 계약(TRIGGER_CONTRACTS)에만 산다.
-  const contract = getTriggerContract(triggerEvent);
-  if (contract?.cooldownMinDays != null && row.allow_reentry === true) {
-    const cd = Number(row.reentry_cooldown_days || 0);
-    if (cd < contract.cooldownMinDays) {
-      return {
-        ok: false,
-        reason: `이 발송 조건은 같은 분께 다시 보내기까지 최소 ${contract.cooldownMinDays}일이 필요합니다. 재진입 간격을 지정해 주세요.`,
-      };
-    }
-  }
-
-  // ★ 2026-09-29 여정 V2 0차 ② — 대상 조건 최종 게이트. 저장이 먼저 막지만 옛 저장분 · 직접 UPDATE가 남을 수 있어
-  //   발송이 시작되는 유일한 길목(활성화)에서 한 번 더 본다. 추출기는 모르는 항목을 조용히 건너뛰어 대상을 넓힌다.
+  // ★ 2026-10-20 여정 V.3 §7-2 — 시작 조건 · 한도 · 재진입 검사는 그 자리 저장(옵션 주소)과 같은 함수(검사 두 벌 0).
   {
-    const tf: any = row.trigger_filters || {};
-    const issues = findCustomerConditionIssues(tf.customer_conditions, tf.logic);
-    // (회의론자 0차 검증 2-다) 저장된 여정은 대상 조건을 고치는 화면이 없다 — "다시 골라 주세요"가 아니라 새로 만들라고 말한다.
-    if (issues.length > 0) return { ok: false, reason: `${describeCustomerConditionIssue(issues[0])} 저장된 여정은 대상 조건을 고칠 수 없어 여정을 새로 만들어야 해요.` };
-  }
-
-  // ★ §11-5(§9-N6 종결) — 포인트 임계 양수 강제. 기본값 0은 사실상 전원이다.
-  if (triggerEvent === 'customer.points_expiring') {
-    const pm = Number((row.trigger_filters || {}).points_min);
-    if (!Number.isFinite(pm) || pm < 1) {
-      return { ok: false, reason: '포인트 기준값을 1 이상으로 지정해 주세요. 0이면 포인트가 없는 분까지 전원 대상이 됩니다.' };
-    }
-  }
-
-  // ★ 이관 배치가 유예 만료일에 통째로 들어오는 것은 유예가 못 막는다(단조 조건).
-  //   그것을 막는 것은 수신자 상한이라 **커서 경로가 아닌 트리거**는 상한을 필수로 받는다.
-  //   ⛔ 5R 정정 — 유예 대상과 상한 필수 대상은 다른 집합이다. 옛 코드가 둘을 묶어 생일이 빠졌었다.
-  //     생일은 유예가 필요 없지만(실제 날짜), 생년월일 대량 적재는 그날 코호트를 한꺼번에 만든다.
-  if (requiresRecipientCap(triggerEvent) && row.threshold_recipients_per_step == null) {
-    return {
-      ok: false,
-      reason: '한 번에 보낼 최대 인원을 정해 주세요. 고객 정보를 한꺼번에 옮겨 올 때 예상보다 많은 분께 나가는 것을 막습니다.',
-    };
+    const entryIssue = validateJourneyEntryConfig({
+      trigger_event: triggerEvent,
+      allow_reentry: row.allow_reentry === true,
+      reentry_cooldown_days: row.reentry_cooldown_days,
+      trigger_filters: row.trigger_filters,
+      threshold_recipients_per_step: row.threshold_recipients_per_step,
+    });
+    if (entryIssue) return { ok: false, reason: entryIssue };
   }
 
   // ★ 2026-06-30 여정 일반화 — date_anchor/one_shot 시작 방식 검증.
@@ -969,16 +994,33 @@ export async function activateJourney(companyId: string, journeyId: string, user
     console.warn('[activateJourney] 계보 컬럼 확인 실패 — 활성화 중단:', e?.message);
     return { ok: false, reason: '여정 상태를 확인하지 못해 켜지 못했습니다. 잠시 후 다시 켜 주세요.' };
   }
-  // DDL 전(계보 컬럼 없음) = 옛 경로 그대로(단일 문장). 계보가 있을 때만 트랜잭션으로 묶는다.
-  const actClient: { query: (text: string, params?: any[]) => Promise<any>; release?: () => void } = closeOthers ? await pool.connect() : { query: (text: string, params?: any[]) => query(text, params) };
+  // ★ V.3 Codex 적대 A9 — 계보 컬럼 유무와 무관하게 켜기 · 다시 켜기 보정을 한 트랜잭션으로(옛: 컬럼 전 경로는 켜기가 먼저 커밋되고 보정이 뒤따라
+  //   그 사이 실행기가 밀린 문자를 보낼 수 있었다 · 보정 실패도 삼켰다). 옛 판 닫기 · 커서 이어받기만 계보 컬럼이 있을 때.
+  const actClient = await pool.connect();
   let r: { rows: any[] };
   let inheritConflict = false;
+  let sourceStopped = false;
   try {
-    if (closeOthers) {
-      await actClient.query('BEGIN');
-      // ★ 0930 Codex 3R — 진입 워커 · 재진입 워커와 같은 진입 잠금을 켜기 전에 잡는다(켜기 · 옛 판 닫기와 진입이 엇갈리지 않게).
-      await lockLineageEntry(actClient, journeyId);
+    await actClient.query('BEGIN');
+    // ★ 0930 Codex 3R — 진입 워커 · 재진입 워커와 같은 진입 잠금을 켜기 전에 잡는다(켜기 · 옛 판 닫기와 진입이 엇갈리지 않게 · ★V.3 사람 멈춤도 같은 잠금).
+    await lockLineageEntry(actClient, journeyId);
+    if (opts.requireActiveSource) {
+      const src = await actClient.query(
+        `SELECT status FROM journeys WHERE id = $1::uuid AND company_id = $2::uuid FOR UPDATE`,
+        [opts.requireActiveSource, companyId],
+      );
+      if (String(src.rows[0]?.status || '') !== 'active') sourceStopped = true;
     }
+    if (sourceStopped) {
+      await actClient.query('ROLLBACK');
+      return { ok: false, reason: '바꾸는 사이에 여정이 멈췄어요. 다시 켠 뒤 바꿔 주세요.' };
+    }
+    // ★ 2026-10-20 여정 V.3 §6 — 다시 켜기 보정(journey-resume)에 쓰는 옛 상태 · 멈춘 시각(원문)을 잠금 안에서 읽는다(UPDATE 가 paused_at 을 지우기 전).
+    const prevRes = await actClient.query(
+      `SELECT status, paused_at::text AS paused_raw, start_kind FROM journeys WHERE id = $1::uuid AND company_id = $2::uuid FOR UPDATE`,
+      [journeyId, companyId],
+    );
+    const prev = prevRes?.rows?.[0] || null;
     r = await actClient.query(
     `UPDATE journeys SET
       status = 'active',
@@ -1000,18 +1042,28 @@ export async function activateJourney(companyId: string, journeyId: string, user
     //   확인은 통과했는데 검사받지 않은 문안이 켜진다. 확인과 반영이 갈라져 있으면 그 틈이 곧 구멍이다.
     [journeyId, companyId, userId, CAP_EXEMPT_TRIGGERS]
     );
+    // ★ V.3 §6-1 ~ §6-3 — 멈춤 → 다시 켜기 보정(밀린 문자 일 단위 밀기 · 멈춘 동안 사건 안 받기 · 굳은 고객 되살리기). 첫 켜기는 손대지 않는다.
+    //   실패 = 트랜잭션 되돌림(안 켜지는 방향 · 계보 컬럼 유무와 무관).
+    if (r.rows.length > 0 && prev) {
+      const adj = await applyResumeAdjustments(
+        actClient, journeyId,
+        { status: String(prev.status || ''), pausedRaw: prev.paused_raw ?? null, startKind: prev.start_kind ?? null },
+        r.rows[0].approved_at,
+      );
+      if (adj.cursorReset) console.log(`[activateJourney] 다시 켜기 보정 journey=${journeyId} 되살림=${adj.revived} 밀림=${adj.shifted}`);
+    }
     if (r.rows.length > 0 && closeOthers) {
       // ★ 0930 Codex 3R · 4R — 닫기 전에 켜진 옛 판 커서 이어받기. 이어받을 판이 둘 이상(비정상)이면 켜지 않는다(누락 · 재처리 0).
       const inh = await actClient.query(INHERIT_ENTRY_CURSORS_SQL, [journeyId]);
       if (Number(inh.rows[0]?.sources || 0) > 1) inheritConflict = true;
       else await actClient.query(CLOSE_OTHER_VERSIONS_ENTRY_SQL, [journeyId]);
     }
-    if (closeOthers) await actClient.query(inheritConflict ? 'ROLLBACK' : 'COMMIT');
+    await actClient.query(inheritConflict ? 'ROLLBACK' : 'COMMIT');
   } catch (txErr) {
-    if (closeOthers) await actClient.query('ROLLBACK').catch(() => {});
+    await actClient.query('ROLLBACK').catch(() => {});
     throw txErr;
   } finally {
-    actClient.release?.();
+    actClient.release();
   }
   if (inheritConflict) {
     console.warn(`[activateJourney] 같은 계보에 새 고객을 받는 옛 판이 둘 이상 — 활성화 되돌림 journey=${journeyId}`);
@@ -1167,9 +1219,9 @@ export async function updateJourneyStep(
   //   여기서 미리 읽으면 그 직후 활성화가 먼저 잠금을 가져갔을 때, 운영 중 여정을 비활성인 줄 알고 고친다.
   // ★ 2026-10-09 고객 관계 지도 — 판정 = stepEditPolicy 한 곳(지도 응답과 같은 함수 · 설계서 §4).
   //   진행 중 수도 같은 잠금 안에서 센다. 거절 = JourneyStepGateError(409 · 옛: 일반 Error 500).
-  const assertStepEditAllowed = async (run: SqlRunner, status: string): Promise<void> => {
+  const assertStepEditAllowed = async (run: SqlRunner, status: string, startKind: string | null): Promise<void> => {
     const inProgress = status === 'paused' ? await countInProgressExecutions(run, journeyId) : 0;
-    const policy = stepEditPolicy(status, inProgress);
+    const policy = stepEditPolicy(status, inProgress, startKind);
     const blocked = blockedStepEditGroups(policy, patch as Record<string, unknown>, status);
     if (blocked.length > 0) throw new JourneyStepGateError(stepEditBlockedMessage(policy, blocked), 'STEP_EDIT_LOCKED');
   };
@@ -1229,8 +1281,10 @@ export async function updateJourneyStep(
   // ⛔ 2026-08-02 Codex 4R — 스텝 변경과 검증 무효화를 **한 트랜잭션**에서 커밋한다.
   //   따로 나가면 그 사이에 활성화가 끼어들어, 바뀐 문안을 옛 통과 마커로 켠다.
   let isActive = false;
+  // ★ 2026-10-20 V.3 §4-4 — 간격 · 담당자 알림만 고치면 사전검사 표식을 지킨다(판 = updated_at 은 늘 올림). 그 밖 키가 하나라도 있으면 지금처럼 비운다.
+  const keepMarker = keepsPretestMarkerForStep(patch as Record<string, unknown>);
   const r = (await withJourneyValidationReset(companyId, journeyId, async (run, journey) => {
-    await assertStepEditAllowed(run, journey.status);   // 잠근 상태로 판정(5R)
+    await assertStepEditAllowed(run, journey.status, journey.startKind);   // 잠근 상태로 판정(5R)
     isActive = journey.status === 'active' && touchesCopy;
     const upd = await run(
     `UPDATE journey_steps SET
@@ -1262,7 +1316,7 @@ export async function updateJourneyStep(
       patch.channel ?? null,
       patch.delayHours != null ? Math.max(0, Math.min(MAX_STEP_DELAY_HOURS, Number(patch.delayHours))) : null,
       patch.isAd !== undefined ? !!patch.isAd : null,
-      patch.subject !== undefined ? patch.subject.slice(0, 50) : null,
+      patch.subject !== undefined ? patch.subject.slice(0, JOURNEY_SUBJECT_MAX_CHARS) : null,
       patch.stepType ?? null,
       patch.conditionJsonb !== undefined ? JSON.stringify(patch.conditionJsonb) : null,
       patch.alimtalkProfileId ?? null,
@@ -1284,7 +1338,7 @@ export async function updateJourneyStep(
     //   → 재검사 스캐너(journey-pretest-notifier)가 그 판을 검사하고 통과면 100 으로 올린다. 실패 = 문안 저장도 되돌린다.
     if (isActive && upd.rows.length > 0) await createStepSnapshot(companyId, journeyId, stepId, run);
     return upd;
-  })) ?? { rows: [] as any[] };
+  }, { keepMarker })) ?? { rows: [] as any[] };
   // ★ Fix #4 (2026-06-05): step 편집 시 발송 전 검증 마커 무효화 — 편집 후 재검증해야 활성화 가능.
   //   무효화는 위 트랜잭션이 함께 커밋했다. 스텝을 못 찾은 요청도 무효화되지만 그건 안전한 방향이다
   //   (한 번 더 검증하게 할 뿐이고, 반대로 놓치면 미검증 문안이 켜진다).
@@ -1356,7 +1410,9 @@ type SqlRunner = (text: string, params?: any[]) => Promise<any>;
 export async function withJourneyValidationReset<T>(
   companyId: string | null,
   journeyId: string,
-  fn: (run: SqlRunner, journey: { status: string }) => Promise<T>,
+  fn: (run: SqlRunner, journey: { status: string; startKind: string | null }) => Promise<T>,
+  // ★ 2026-10-20 V.3 §4-4 — keepMarker = 표식은 지키고 판(updated_at)만 올린다. 호출부가 「건드린 키가 전부 유지 목록」일 때만 켠다.
+  opts: { keepMarker?: boolean } = {},
 ): Promise<T | null> {
   const client = await pool.connect();
   try {
@@ -1367,17 +1423,19 @@ export async function withJourneyValidationReset<T>(
     //   그 뒤에 들어온 변경이 "비활성인 줄 알고" 운영 중 여정을 고친다. 상태 판정도 잠금 안에서 한다.
     const lock = await run(
       companyId
-        ? `SELECT id, status FROM journeys WHERE id = $1::uuid AND company_id = $2::uuid FOR UPDATE`
-        : `SELECT id, status FROM journeys WHERE id = $1::uuid FOR UPDATE`,
+        ? `SELECT id, status, start_kind FROM journeys WHERE id = $1::uuid AND company_id = $2::uuid FOR UPDATE`
+        : `SELECT id, status, start_kind FROM journeys WHERE id = $1::uuid FOR UPDATE`,
       companyId ? [journeyId, companyId] : [journeyId],
     );
     if (lock.rows.length === 0) {
       await client.query('ROLLBACK');
       return null;
     }
-    const out = await fn(run, { status: String(lock.rows[0].status) });
+    const out = await fn(run, { status: String(lock.rows[0].status), startKind: lock.rows[0].start_kind ? String(lock.rows[0].start_kind) : null });
     await run(
-      `UPDATE journeys SET last_pretest_passed_at = NULL, updated_at = NOW() WHERE id = $1::uuid`,
+      opts.keepMarker
+        ? `UPDATE journeys SET updated_at = NOW() WHERE id = $1::uuid`
+        : `UPDATE journeys SET last_pretest_passed_at = NULL, updated_at = NOW() WHERE id = $1::uuid`,
       [journeyId],
     );
     await client.query('COMMIT');
@@ -1425,6 +1483,8 @@ async function insertJourneyStepRow(
   journeyId: string,
   step: JourneyStepDefinition,
   run: SqlRunner = query,
+  /** ★ 2026-10-20 V.3 — 화면이 미리 만든 칸 id(칸 넣기 멱등 · addJourneyStep 만 넘긴다). 없으면 서버가 만든다. */
+  id?: string,
 ): Promise<string> {
   // ⛔ 2026-08-02 Harold 지시 — **이미지 없는 MMS는 저장하지 않는다.**
   //   그대로 두면 LMS보다 비싼 단가로 글자만 나간다(고객사 돈이 새는 방향).
@@ -1440,7 +1500,7 @@ async function insertJourneyStepRow(
       alimtalk_next_type, alimtalk_next_contents, alimtalk_next_subject,
       mms_image_paths, delay_mode, target_hour_kst, anchor_offset_days, created_at
     ) VALUES (
-      gen_random_uuid(), $1::uuid, $2, $3, $4, $5, $6, $7, $8, $9::jsonb,
+      COALESCE($20::uuid, gen_random_uuid()), $1::uuid, $2, $3, $4, $5, $6, $7, $8, $9::jsonb,
       $10::uuid, $11, $12::jsonb,
       $13, $14, $15,
       $16::text[], $17, $18, $19, NOW()
@@ -1465,6 +1525,7 @@ async function insertJourneyStepRow(
       step.delayMode || 'relative',
       (step.delayMode === 'specific_hour' || step.delayMode === 'relative_at_hour') && typeof step.targetHourKst === 'number' ? step.targetHourKst : null,
       step.anchorOffsetDays != null ? step.anchorOffsetDays : null,
+      id || null,
     ]
   );
   const stepId = r.rows[0].id as string;
@@ -1543,7 +1604,15 @@ export async function addJourneyStep(
   companyId: string,
   journeyId: string,
   step: Omit<JourneyStepDefinition, 'stepOrder'>,
-): Promise<{ stepId: string; stepOrder: number } | null> {
+  /**
+   * ★ 2026-10-20 V.3(Codex 적대 B 3R · 같은 부류 세 번 → 구조) — clientStepId = 화면이 미리 만든 칸 id.
+   *   응답을 못 받은 넣기를 화면이 서버 상태(칸 수 · 내용 지문)로 추측하던 것을 없앤다: 같은 id 를 다시 보내면 만들지 않고 그 칸을 돌려준다.
+   */
+  opts: { clientStepId?: string } = {},
+): Promise<{ stepId: string; stepOrder: number; existed?: boolean } | null> {
+  if (opts.clientStepId != null && !isUuid(opts.clientStepId)) {
+    throw new JourneyInputError('칸 번호 형식이 맞지 않아요. 화면을 새로 열어 주세요.');
+  }
   // ★ D188 Phase 2-B-1과 같은 규칙 — condition step은 conditionJsonb가 있어야 판정이 성립한다.
   if (step.stepType === 'condition' && (!step.conditionJsonb || typeof step.conditionJsonb !== 'object')) {
     throw new JourneyStepGateError('조건 스텝은 조건 설정이 있어야 합니다.', 'CONDITION_REQUIRED');
@@ -1574,6 +1643,18 @@ export async function addJourneyStep(
     if (j.rows.length === 0) {
       await client.query('ROLLBACK');
       return null;
+    }
+    // 같은 칸 id 가 이미 있으면 = 앞서 보낸 넣기가 들어간 것 → 다시 만들지 않고 그 칸을 돌려준다(여정 행 잠금 뒤라 동시에 온 같은 요청도 한 칸).
+    //   상태 · 개수 검사보다 앞이다 — 이미 들어간 칸을 「못 넣었다」고 답하지 않게.
+    if (opts.clientStepId) {
+      const ex = await run(`SELECT journey_id, step_order FROM journey_steps WHERE id = $1::uuid`, [opts.clientStepId]);
+      if (ex.rows.length > 0) {
+        if (String(ex.rows[0].journey_id).toLowerCase() !== String(journeyId).toLowerCase()) {
+          throw new JourneyStepGateError('칸 번호가 다른 칸과 겹쳤어요. 화면을 새로 열어 주세요.', 'STEP_ID_CONFLICT');
+        }
+        await client.query('ROLLBACK');
+        return { stepId: opts.clientStepId, stepOrder: Number(ex.rows[0].step_order), existed: true };
+      }
     }
     if (String(j.rows[0].status) === 'active') {
       throw new JourneyStepGateError(
@@ -1612,7 +1693,8 @@ export async function addJourneyStep(
     const stepId = await insertJourneyStepRow(
       journeyId,
       { ...step, stepOrder, delayHours: Math.max(0, Math.min(MAX_STEP_DELAY_HOURS, Number(step.delayHours) || 0)) },
-      run
+      run,
+      opts.clientStepId,
     );
 
     // 편집과 같은 규칙 — 스텝 구성이 바뀌었으니 발송 전 검증을 다시 받아야 한다.
@@ -1645,7 +1727,7 @@ export async function countInProgressExecutions(run: SqlRunner, journeyId: strin
 
 async function assertNoInProgressForBranchEdit(run: SqlRunner, journeyId: string): Promise<void> {
   if ((await countInProgressExecutions(run, journeyId)) > 0) {
-    throw new JourneyStepGateError('갈림이 있는 여정은 진행 중인 고객이 있으면 칸을 넣거나 지울 수 없어요. 새 판으로 고쳐 주세요.', 'BRANCH_LOCKED');
+    throw new JourneyStepGateError('갈림이 있는 여정은 진행 중인 고객이 있으면 칸을 넣거나 뺄 수 없어요. 켠 채로 칸 모양을 바꾸면 새로 들어오는 고객부터 바뀐 모양으로 받아요.', 'BRANCH_LOCKED');
   }
 }
 
@@ -1795,16 +1877,9 @@ export async function updateJourneyCallback(companyId: string, journeyId: string
 }
 
 export async function pauseJourney(companyId: string, journeyId: string, reason?: string): Promise<boolean> {
-  const r = await query(
-    `UPDATE journeys SET
-      status = 'paused',
-      paused_at = NOW(),
-      pause_reason = $3,
-      updated_at = NOW()
-     WHERE id = $1::uuid AND company_id = $2::uuid AND status = 'active'
-     RETURNING id`,
-    [journeyId, companyId, reason || null]
-  );
+  // ★ 2026-10-20 여정 V.3 §6-5 — 사람 멈춤 = 같은 계보의 켜진 판 전부(옛 판 마무리분 포함 · journey-lineage pauseJourneyLineage 한 곳).
+  const paused = await pauseJourneyLineage(companyId, journeyId, reason || null);
+  const r = { rows: paused.includes(journeyId) ? [{ id: journeyId }] : [] };
   // ★ Fix #5 (2026-06-05): 기존 'pending'/'scheduled' 일괄 UPDATE는 execution에 존재하지 않는 상태값이라 0건(무효)이었다.
   //   개별 execution을 paused로 바꾸면 재개 시 balance/단축URL 정지분과 섞여 복구가 꼬인다 → 무효 UPDATE 제거.
   //   여정 정지 즉시 반영은 executor 발송 직전 status 재확인이 journey.status까지 보게 강화해 처리(레이스 차단).
@@ -1902,8 +1977,11 @@ export async function listJourneys(companyId: string, status?: JourneyStatus | '
 }
 
 export async function getJourneyDetail(companyId: string, journeyId: string) {
+  // ★ V.3 D2 — 「새 고객 받는 마지막 날」(date 칸)은 글자로 읽는다. 드라이버가 date 를 로컬 자정 Date 로 주고 JSON 이 UTC 로 바꾸면 KST 서버에서 하루 앞으로 밀린다
+  //   (send-usage-aggregation toDayKey 경위 · 1082 파서는 전역으로 바꾸지 않는다 · planner-date-contract). 칸이 없으면(DDL 전) 화면이 이 칸을 그리지 않는다.
+  const endsReady = await entryEndsColumnReady().catch(() => false);
   const j = await query(
-    `SELECT * FROM journeys WHERE id = $1::uuid AND company_id = $2::uuid`,
+    `SELECT *${endsReady ? ', entry_ends_on::text AS entry_ends_on_text' : ''} FROM journeys WHERE id = $1::uuid AND company_id = $2::uuid`,
     [journeyId, companyId]
   );
   if (j.rows.length === 0) return null;
@@ -1917,7 +1995,14 @@ export async function getJourneyDetail(companyId: string, journeyId: string) {
     timingLabel: formatStepTiming({ delayMode: s.delay_mode, delayHours: s.delay_hours, targetHourKst: s.target_hour_kst }, i === 0),
     conditionLabel: s.step_type === 'condition' ? formatConditionChip(s.condition_jsonb) : null,
   }));
-  return { journey: j.rows[0], steps: stepsWithLabels };
+  // ★ 2026-10-20 V.3 §5-1 — 처음 켜기 크레딧은 서버가 정한다(계보당 1번 · 새 판 초안 = 0).
+  // ★ V.3 §6-6 — 멈춘 이유 사람 말(원문은 화면에 내보내지 않는다).
+  const pauseView = j.rows[0].status === 'paused' ? pauseReasonView(j.rows[0].pause_reason) : null;
+  const { entry_ends_on_text: endsText, ...row } = j.rows[0];
+  return {
+    journey: { ...row, entry_ends_on: endsReady ? (endsText ?? null) : undefined, entry_ends_ready: endsReady, activation_cost: activationCostOf(row), pause_view: pauseView },
+    steps: stepsWithLabels,
+  };
 }
 
 export async function listExecutions(

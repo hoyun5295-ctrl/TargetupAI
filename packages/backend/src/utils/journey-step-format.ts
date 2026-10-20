@@ -149,7 +149,9 @@ export function describeJourneyTarget(triggerEvent: string | null | undefined, t
   const product = describeProductPick(f);
   if (product) return who ? `대상: ${product} · ${who}` : `대상: ${product}`;
   // ★ 2026-09-30 V2 3차 — 겹침 해소로 첫 구매 고객을 뺀 주문 완료 여정
-  if (f.exclude_first_purchase === true) return who ? `대상: 첫 구매 고객 제외 · ${who}` : '대상: 첫 구매 고객 제외 · 이 사건이 생긴 고객';
+  // ★ 2026-10-20 V.3 §8-2 — 돌아온 고객은 환영만(휴면에서 돌아온 이번 구매 제외)
+  const excluded = [f.exclude_first_purchase === true ? '첫 구매 고객 제외' : '', f.exclude_dormant_return === true ? '휴면에서 돌아온 고객 제외' : ''].filter(Boolean).join(' · ');
+  if (excluded) return who ? `대상: ${excluded} · ${who}` : `대상: ${excluded} · 이 사건이 생긴 고객`;
   if (who) return `대상: ${who}`;
   return String(triggerEvent || '') === 'custom' ? '대상: 조건 없음 · 전 고객' : '대상: 조건 없음 · 이 사건이 생긴 고객 전부';
 }

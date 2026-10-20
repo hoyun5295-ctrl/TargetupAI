@@ -1952,7 +1952,8 @@ export async function checkOperatorCallback(
   }
   const individual = input.useIndividualCallback === true;
   const cb = individual ? '' : String(input.callbackNumber || '').replace(/\D/g, '');
-  if (cb) {
+  // ★ 2026-10-20 시연 회사 = 등록 검사 건너뜀(발송 경로 `chosenCb && !demo` 와 같은 판정) — 시드 회신번호가 010-0 대역(callback-spec 규격 위반)이라 등록 집합에서 빠진다 · 발송 0 은 적재 최후 방어가 지킨다
+  if (cb && !(await isDemoCompany(companyId))) {
     const u = creatorId ? await query(`SELECT user_type FROM users WHERE id = $1::uuid`, [creatorId]) : { rows: [] as any[] };
     const registered = await getRegisteredCallbackSet(companyId, callbackAssignmentUserId(u.rows[0]?.user_type, creatorId) || undefined);
     if (!registered.has(cb)) throw new OperatorCallbackError('등록된 발신번호만 회신번호로 고를 수 있어요. 발신번호 관리에서 등록해 주세요.');

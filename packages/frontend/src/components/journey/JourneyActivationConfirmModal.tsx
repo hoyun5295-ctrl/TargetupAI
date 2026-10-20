@@ -16,6 +16,7 @@
  */
 
 import { useState, useEffect } from 'react';
+import JourneyModalShell from './JourneyModalShell';
 import {
   X, Sparkles, CheckCircle2, AlertTriangle, Loader2, Wallet, TrendingUp,
   ShieldCheck, MessageSquare, FileText, Hash, Calculator, Wand2,
@@ -31,6 +32,8 @@ interface Props {
   goalExitEnabled?: boolean;
   /** ★ 2026-08-02 §13-5 — 현재 저장된 "한 번에 보낼 최대 인원". 전 트리거 필수라 없으면 활성화가 거부된다. */
   thresholdRecipients?: number | null;
+  /** ★ 2026-10-20 V.3 §5-1 — 이번에 켜면 내는 처음 켜기 크레딧(서버 판정 · 계보당 1번 · 새 판 초안 · 다시 켜기 = 0). 0 이면 크레딧 확인 창을 띄우지 않는다. */
+  activationCost?: number;
   onClose: () => void;
   onActivated: () => void;
   token: string;
@@ -78,13 +81,15 @@ const SUB_AGENT_CARDS = [
 ];
 
 export default function JourneyActivationConfirmModal({
-  journeyId, journeyName, journeyStatus, goalExitEnabled, thresholdRecipients, onClose, onActivated, token,
+  journeyId, journeyName, journeyStatus, goalExitEnabled, thresholdRecipients, activationCost, onClose, onActivated, token,
 }: Props) {
   const toast = useToast();
   const [capInput, setCapInput] = useState(thresholdRecipients != null ? String(thresholdRecipients) : '');
   /** 서버에 저장된 값 — prop은 목록에서 오므로 저장 직후 갱신되지 않는다. 이걸 안 두면 저장·재검증이 반복된다. */
   const [savedCap, setSavedCap] = useState<number | null>(thresholdRecipients ?? null);
-  const [phase, setPhase] = useState<'validating' | 'failed' | 'ready' | 'activating' | 'migration_pending' | 'callback_confirm'>('validating');
+  const [phase, setPhase] = useState<'validating' | 'failed' | 'ready' | 'activating' | 'migration_pending' | 'callback_confirm' | 'overlap'>('validating');
+  // ★ 2026-10-20 V.3 §6-4 — 하나씩 켜기 겹침 확인(서버 409 OVERLAP_UNRESOLVED · 고른 쌍을 실어 다시 보낸다 · 서버가 저장해 다음에는 새 쌍만 묻는다).
+  const [overlapPairs, setOverlapPairs] = useState<string[] | null>(null);
   const [activeCardIndex, setActiveCardIndex] = useState(0);
   const [result, setResult] = useState<ValidationResult | null>(null);
   const [balance, setBalance] = useState<number | null>(null);
@@ -100,12 +105,8 @@ export default function JourneyActivationConfirmModal({
     return () => clearTimeout(t);
   }, [phase, activeCardIndex]);
 
-  // ESC 닫기
-  useEffect(() => {
-    const onEsc = (e: KeyboardEvent) => { if (e.key === 'Escape' && phase !== 'activating') onClose(); };
-    window.addEventListener('keydown', onEsc);
-    return () => window.removeEventListener('keydown', onEsc);
-  }, [onClose, phase]);
+  // ★ 2026-10-20 V.3(Codex 적대 B3 · B 2R) — 키 처리는 공용 껍데기(JourneyModalShell)가 맡는다: 초점 진입 · Tab 순환 · Esc · 닫은 뒤 초점 복귀 ·
+  //   화면 맨 위 창만(작업 화면 위에서 열려도 아래 창이 받지 않는다 · 크레딧 확인 창이 위에 있으면 그 창 몫). 켜는 중에는 닫히지 않는다.
 
   // 검증 + 잔액 fetch 동시 진행
   useEffect(() => {
@@ -159,7 +160,7 @@ export default function JourneyActivationConfirmModal({
     }
   };
 
-  const runActivate = async (confirmExclusion = false) => {
+  const runActivate = async (confirmExclusion = false, acks: string[] = overlapPairs || []) => {
     // ★ 2026-08-02 §13-5 — 상한을 먼저 저장하고 활성화한다. 순서를 바꾸면 활성화가 옛 값으로 판정된다.
     //   ⛔ 저장이 실패하면 활성화하지 않는다 — 상한 없이 켜지는 것이 이 입력을 만든 이유 자체를 없앤다.
     // ⛔ 2026-08-02 Codex 4R — 저장·비교·표시가 **같은 값**을 써야 한다.
@@ -199,9 +200,14 @@ export default function JourneyActivationConfirmModal({
       const res = await fetch(`/api/ai/operator/journeys/${journeyId}/activate`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ confirmCallbackExclusion: confirmExclusion }),
+        body: JSON.stringify({ confirmCallbackExclusion: confirmExclusion, acknowledgedOverlaps: acks }),
       });
       const data = await res.json();
+      if (data?.code === 'OVERLAP_UNRESOLVED' && Array.isArray(data.pairs)) {
+        setOverlapPairs(data.pairs.map(String));
+        setPhase('overlap');
+        return;
+      }
       if (res.ok && data.success) {
         toast.success('여정이 활성화되었습니다');
         onActivated();
@@ -243,13 +249,8 @@ export default function JourneyActivationConfirmModal({
         onConfirm={() => { setCreditConfirm(false); void runActivate(); }}
         onCancel={() => setCreditConfirm(false)}
       />
-      <div
-        className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-50 p-4"
-      >
-      <div
-        className="bg-white border border-slate-200 rounded-2xl shadow-2xl max-w-2xl w-full max-h-[90vh] overflow-hidden flex flex-col"
-        onClick={(e) => e.stopPropagation()}
-      >
+      <JourneyModalShell open onClose={onClose} labelledBy="jact-title" panelClassName="w-full max-w-2xl" zIndexClassName="z-[90]" disableDismiss={phase === 'activating'}>
+      <div className="flex min-h-0 flex-1 flex-col overflow-hidden text-slate-900">
         {/* 헤더 */}
         <div className="flex items-center justify-between p-5 border-b border-slate-200 bg-gradient-to-r from-violet-50 via-fuchsia-50 to-purple-50">
           <div className="flex items-center gap-3">
@@ -257,7 +258,7 @@ export default function JourneyActivationConfirmModal({
               <Sparkles className="w-5 h-5 text-white" />
             </div>
             <div>
-              <h3 className="text-base font-semibold text-slate-900">
+              <h3 id="jact-title" className="text-base font-semibold text-slate-900">
                 여정 활성화 자동 검증
               </h3>
               <p className="text-[11px] text-slate-500 mt-0.5">
@@ -476,6 +477,17 @@ export default function JourneyActivationConfirmModal({
               )}
             </div>
           )}
+          {phase === 'overlap' && overlapPairs && (
+            <div className="p-4 rounded-xl bg-amber-50 border border-amber-200">
+              <div className="flex items-start gap-2">
+                <AlertTriangle className="w-5 h-5 text-amber-700 flex-shrink-0 mt-0.5" />
+                <div className="text-[13px] text-amber-900 leading-relaxed">
+                  <div className="text-[14px] font-semibold">같은 구매로 함께 시작되는 여정이 {overlapPairs.length}쌍 있어요</div>
+                  <p className="mt-1">그대로 켜면 같은 구매에 문자가 두 통 갈 수 있어요. 한 통만 보내려면 여정 작업 화면 시작 카드에서 「첫 구매 고객 빼기」나 「돌아온 고객은 환영만」을 켜 주세요.</p>
+                </div>
+              </div>
+            </div>
+          )}
           {/* 매장번호 발송 — 미등록 회신번호 실패 예정 고지 */}
           {phase === 'callback_confirm' && callbackConfirm && (
             <div className="space-y-3">
@@ -521,7 +533,7 @@ export default function JourneyActivationConfirmModal({
                 취소
               </button>
               <button
-                onClick={journeyStatus === 'draft' ? () => setCreditConfirm(true) : () => runActivate()}
+                onClick={(activationCost ?? 0) > 0 ? () => setCreditConfirm(true) : () => runActivate()}
                 disabled={isInsufficientBalance}
                 className="flex-1 px-4 py-2 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-30 disabled:cursor-not-allowed text-white rounded-lg text-sm font-semibold transition-colors"
               >
@@ -543,6 +555,23 @@ export default function JourneyActivationConfirmModal({
                 className="flex-1 px-4 py-2 bg-violet-100 hover:bg-violet-200 text-violet-900 rounded-lg text-sm font-semibold transition-colors"
               >
                 다시 검증
+              </button>
+            </>
+          )}
+
+          {phase === 'overlap' && (
+            <>
+              <button
+                onClick={onClose}
+                className="flex-1 px-4 py-2 bg-white hover:bg-slate-100 text-slate-700 rounded-lg text-sm font-medium transition-colors"
+              >
+                취소
+              </button>
+              <button
+                onClick={() => runActivate(false, overlapPairs || [])}
+                className="flex-1 px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-sm font-semibold transition-colors"
+              >
+                그래도 켜기
               </button>
             </>
           )}
@@ -587,7 +616,7 @@ export default function JourneyActivationConfirmModal({
           )}
         </div>
       </div>
-      </div>
+      </JourneyModalShell>
     </>
   );
 }

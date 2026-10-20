@@ -22,7 +22,7 @@ describe('여정 발송 표식 순서', () => {
   const smsLoadAt = src.indexOf("await bulkInsertSmsQueue(tables, [row], true, { companyId: exec.company_id, source: 'journey' });");
   const catchAt = src.indexOf('} catch (sendErr: any) {');
   const confirmAt = src.indexOf('await confirmJourneyClaimSent(claimLogId)');
-  const creditAt = src.indexOf('await chargeJourneyOperationCredit(exec, new Date());', catchAt);
+  const creditAt = src.indexOf('await chargeJourneyOperationCredit(exec, claimAt ?? new Date());', catchAt);   // ★1020 V.3 날짜 = 표식 시각
 
   it('적재 중 표식은 차감 뒤 · 두 적재 앞이다', () => {
     expect(deductAt).toBeGreaterThan(0);
@@ -90,7 +90,7 @@ describe('여정 발송 표식 순서', () => {
     expect(src.split('await deductCreditSafe({').length - 1).toBe(1);
     const fn = src.slice(src.indexOf('async function chargeJourneyOperationCredit('), src.indexOf('async function chargeJourneyOperationCredit(') + 900);
     expect(fn).toContain('await deductCreditSafe({');
-    expect(fn).toContain('idempotencyKey: `journey-operation:${exec.journey_id}:${kstDateTag(sentAt)}`');
+    expect(fn).toContain('idempotencyKey: `journey-operation:${operationCreditRoot(exec)}:${kstDateTag(sentAt)}`');
     // ★ 2026-09-29 차수 5(Codex 1R high): 판정으로 확정하는 자리(가드·재시도 소진·활성 아닌 실행 정리)는 확정 **전에**
     //   resolveJourneyClaim beforeConfirm 으로 받는다 → 직접 await 는 정상 발송 1곳 · beforeConfirm 3곳(v2-round5-0929 ⑤⑥)
     expect(src.split('await chargeJourneyOperationCredit(').length - 1).toBe(1);

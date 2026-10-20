@@ -183,9 +183,9 @@ describe('이어붙이기 점검', () => {
     const rows = buildAttachCheck(MAP([J('A', { goalExitEnabled: false }), J('B', { triggerEvent: 'purchase.first', lane: 'first_purchase' })], [L('A', 'B', 'leak')]), ['A']);
     expect(rows[0].fix).toEqual({ action: 'goal_exit_on', journeyId: 'A', label: '목표를 이루면 멈춤 켜기', activeCount: 5 });
   });
-  it('재진입 막힘 = 켜진 받는 여정은 일시정지하고 고치기 · 초안은 바로 고치기', () => {
+  it('재진입 막힘 = 켜진 받는 여정도 바로 고치기(★1020 V.3 §4-1 · 재진입은 켜진 채 그 자리) · 초안도 바로 고치기', () => {
     const B = J('B', { triggerEvent: 'cdp.purchase', lane: 'repurchase', allowReentry: false });
-    expect(buildAttachCheck(MAP([J('A', {}), B], [L('A', 'B', 'reentry_off')]), ['A'])[0].fix!.action).toBe('pause_and_allow_reentry');
+    expect(buildAttachCheck(MAP([J('A', {}), B], [L('A', 'B', 'reentry_off')]), ['A'])[0].fix!.action).toBe('allow_reentry_on');
     const Bd = { ...B, status: 'draft' };
     expect(buildAttachCheck(MAP([J('A', {}), Bd], [L('A', 'B', 'reentry_off')]), ['A'])[0].fix!.action).toBe('allow_reentry_on');
   });

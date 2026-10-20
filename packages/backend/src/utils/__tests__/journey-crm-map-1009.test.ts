@@ -44,7 +44,8 @@ describe('칸 편집 정책 — 한 곳 · 묶음별', () => {
     expect(groups('draft', 5)).toEqual([true, true, true, true]);
     expect(groups('paused', 0)).toEqual([true, true, true, true]);
     expect(groups('paused', 3)).toEqual([true, true, false, true]);
-    expect(groups('active', 9)).toEqual([true, false, false, true]);
+    // ★ 2026-10-20 여정 V.3 §4-1 — 켜진 여정도 간격은 그 자리(이미 잡힌 다음 발송 시각은 그대로) · 칸 모양은 새 모양
+    expect(groups('active', 9)).toEqual([true, true, false, true]);
     expect(groups('ended', 0)).toEqual([false, false, false, false]);
   });
   it('막힌 묶음 — 켜진 여정 문안은 allowActiveMessageEdit 로만 · 이미지는 구조 · 담당자 알림은 운영', () => {
@@ -52,7 +53,7 @@ describe('칸 편집 정책 — 한 곳 · 묶음별', () => {
     expect(blockedStepEditGroups(active, { messageTemplate: 'x' }, 'active')).toEqual(['copy']);
     expect(blockedStepEditGroups(active, { messageTemplate: 'x', allowActiveMessageEdit: true }, 'active')).toEqual([]);
     expect(blockedStepEditGroups(active, { mmsImagePaths: ['a'], allowActiveMessageEdit: true }, 'active')).toEqual(['structure']);
-    expect(blockedStepEditGroups(active, { delayHours: 24 }, 'active')).toEqual(['timing']);
+    expect(blockedStepEditGroups(active, { delayHours: 24 }, 'active')).toEqual([]);   // ★ V.3 — 켜진 여정 간격 그 자리
     expect(blockedStepEditGroups(active, { notifyManagerOnPretest: true }, 'active')).toEqual([]);
     const pausedBusy = stepEditPolicy('paused', 2);
     expect(blockedStepEditGroups(pausedBusy, { stepType: 'condition', conditionJsonb: {} }, 'paused')).toEqual(['structure']);
@@ -62,7 +63,7 @@ describe('칸 편집 정책 — 한 곳 · 묶음별', () => {
     const b = src('journey-builder.ts');
     const body = b.slice(b.indexOf('export async function updateJourneyStep('), b.indexOf('// ★ 2026-08-02 §13-1 — 저장 후 스텝 추가·삭제'));
     expect(body).toContain('withJourneyValidationReset(companyId, journeyId, async (run, journey) => {');
-    expect(body).toContain('await assertStepEditAllowed(run, journey.status);');
+    expect(body).toContain('await assertStepEditAllowed(run, journey.status, journey.startKind);');
     expect(body).toContain("countInProgressExecutions(run, journeyId)");
     expect(body).toContain("new JourneyStepGateError(stepEditBlockedMessage(policy, blocked), 'STEP_EDIT_LOCKED')");
     expect(body).not.toContain('활성 상태 여정은 문안(본문·제목)만 수정할 수 있습니다');
@@ -371,11 +372,12 @@ describe('Codex 1R 정정', () => {
     expect(s).toContain("e.code !== COMPANY_CODE || Number(e.u) + Number(e.c) + Number(e.p) > 0");
     expect(s).toContain('k[1].trim() === apiKey');
   });
-  it('편집 창: 늦게 온 AI 응답은 요청한 칸이 지금 칸일 때만 · 요청 중 · 저장 중 · 고친 내용 있으면 칸 이동 막음', () => {
-    const m = fs.readFileSync(path.join(__dirname, '..', '..', '..', '..', 'frontend', 'src', 'components', 'journey', 'map', 'MapStepEditModal.tsx'), 'utf8');
-    expect(m).toContain('if (selectedRef.current !== forStep)');
-    expect(m).toContain("if (aiBusy || saving)");
-    expect(m).toContain('if (dirty)');
+  // ★ 1020 V.3 §9 — 지도 칸 편집 창(MapStepEditModal)은 작업 화면(JourneyWorkspace)으로 퇴역. 같은 보장을 작업 화면에 건다.
+  //   칸별 초안이라 고친 칸이 있어도 옮길 수 있다(설계서 §9-3 「칸 이동은 막지 않는다」) · AI 응답 중에는 옮기지 않는다.
+  it('편집 창: 늦게 온 AI 응답은 요청한 칸이 지금 칸일 때만 · AI 응답 중에는 칸 이동 막음 · 이동은 한 함수로', () => {
+    const m = fs.readFileSync(path.join(__dirname, '..', '..', '..', '..', 'frontend', 'src', 'components', 'journey', 'workspace', 'JourneyWorkspace.tsx'), 'utf8');
+    expect(m).toContain('if (selectedRef.current !== id)');
+    expect(m).toContain('if (aiBusy)');
     expect(m).not.toMatch(/onClick=\{\(\) => setSelected\(/);
   });
   it('진단 초안: 통신 예외를 칸마다 잡아 부분 성공을 넘기고 요청 키는 다시 열어도 유지', () => {

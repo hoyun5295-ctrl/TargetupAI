@@ -37,7 +37,7 @@ import { isImplementedTriggerEvent, triggerTemplateCode, aiSelectableTriggerEven
 // ★ 2026-09-30 여정 V2 3차 — 상품 재구매: 상품 필터 검증 · 저장 형태는 journey-product 한 곳.
 import { normalizeProductFilters, type PurchaseDoor } from './journey-product';
 // ★ 2026-09-29 여정 V2 0차 ⑧ — 칸 개수 · 대기 상한은 CT 한 곳(자르지 않고 거부).
-import { assertStepsWithinLimit, clampStepDelayHours, JourneyInputError } from './journey-step-limits';
+import { assertStepsWithinLimit, clampStepDelayHours, JourneyInputError, JOURNEY_SUBJECT_MAX_CHARS } from './journey-step-limits';
 // ★ 2026-09-29 여정 V2 0차 ② — AI 가 낸 대상 조건 중 쓸 수 없는 것은 빼고 "반영 안 됨"으로 알린다(조용히 넓히지 않는다).
 import { partitionCustomerConditions } from './journey-target-extractor';
 // 추천 문구의 단일 출처 — "이어서 만들기"와 기회 카드가 같은 목표 골격을 쓴다.
@@ -661,7 +661,7 @@ VIP 회원님만을 위해 마련한 이번 특별 안내,
     const channel = ['sms', 'lms', 'mms'].includes(s.channel) ? s.channel : 'lms';
     // ★ D187-fix5: AI 응답에 이모지/비표준 특수문자 포함 가능성 — sanitize 자동 적용
     const rawMessage = String(s.messageTemplate || '').slice(0, 2000);
-    const rawSubject = channel === 'sms' ? '' : String(s.subject || '').slice(0, 50);
+    const rawSubject = channel === 'sms' ? '' : String(s.subject || '').slice(0, JOURNEY_SUBJECT_MAX_CHARS);
     const messageSan = sanitizeForSms(rawMessage);
     const subjectSan = sanitizeForSms(rawSubject);
     if (messageSan.hadChanges) {

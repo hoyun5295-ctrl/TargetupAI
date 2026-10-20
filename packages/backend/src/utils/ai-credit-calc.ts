@@ -105,7 +105,8 @@ export const CREDIT_COST_MAP: Record<string, number> = {
   'journey-builder-custom': 3,
   // 여정 설계 저장(활성화) 200 — draft→active 최초 1회만 차감(멱등키=journeyId). paused→active 재개는 0. 자동마케팅 활성화(200)와 통일.
   'journey-activate': 200,
-  // 여정·자동마케팅 운영 과금 10 — 활성 여정이 발송하는 날 1회(멱등키=journey-operation:journeyId:YYYYMMDD). 동일 여정 하루 1회 상한. 음수 허용군(P4).
+  // 여정·자동마케팅 운영 과금 10 — 활성 여정이 발송하는 날 1회(멱등키=journey-operation:계보뿌리:YYYYMMDD · ★1020 V.3 계보당 하루 1번).
+  //   ★1020 V.3 D1 — 여정 운영은 음수 허용군에서 뺐다(그달 크레딧 안에서만 · 모자라면 실행기가 멈춤 · ai-credit-tx creditOverageAllowance).
   'journey-operation': 10,
   // 자동 마케팅 저장(활성화) 200 — operator 최초 생성·활성화 1회(멱등키 operatorId). 여정 activate(150) 대응. 매일 제안서 생성(orchestrate)은 0(묶음).
   'continuous-operator': 200,
@@ -234,7 +235,7 @@ export function dailyDbAnalysisCredits(customerCount: number): number {
 }
 
 /** 운영(반복) 발송 source — 마이너스 허용 대상(활성 여정·자동마케팅 실행). 그 외는 0에서 차단. (v2 2026-06-30) */
-const OPERATION_SOURCES = new Set(['journey-operation', 'continuous-operator-send']);
+const OPERATION_SOURCES = new Set(['continuous-operator-send']);
 export function isOperationSource(source: string | undefined | null): boolean {
   return !!source && OPERATION_SOURCES.has(source);
 }

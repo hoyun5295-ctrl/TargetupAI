@@ -164,7 +164,7 @@ describe('⑤⑥ 여정 운영 크레딧 = 확정 전에(Codex 1R high) · 활�
   const src = read('utils/journey-executor.ts');
   const claim = read('utils/journey-send-claim.ts');
   it('정상 발송: 크레딧 → 확정 순서', () => {
-    const at = src.indexOf('await chargeJourneyOperationCredit(exec, new Date());');
+    const at = src.indexOf('await chargeJourneyOperationCredit(exec, claimAt ?? new Date());');   // ★1020 V.3 날짜 = 표식 시각
     expect(at).toBeGreaterThan(0);
     expect(at).toBeLessThan(src.indexOf('const confirmed = await confirmJourneyClaimSent(claimLogId);'));
   });
@@ -198,7 +198,7 @@ describe('⑤⑥ 여정 운영 크레딧 = 확정 전에(Codex 1R high) · 활�
     expect(fn).not.toContain('UPDATE journey_executions');
   });
   it('크레딧 키는 여정+날짜(같은 날 두 번 불러도 한 번)', () => {
-    expect(src).toContain('idempotencyKey: `journey-operation:${exec.journey_id}:${kstDateTag(sentAt)}`');
+    expect(src).toContain('idempotencyKey: `journey-operation:${operationCreditRoot(exec)}:${kstDateTag(sentAt)}`');
   });
 });
 

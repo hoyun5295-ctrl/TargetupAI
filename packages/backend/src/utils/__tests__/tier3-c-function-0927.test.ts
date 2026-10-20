@@ -87,12 +87,14 @@ describe('R090 분석 캐시', () => {
 });
 
 describe('R273 여정 목록 스텝 통계', () => {
+  // ★ 1020 V.3 §9 — 목록의 옛 상세 창(칸별 흐름)은 작업 화면으로 바뀌었고, 칸별 흐름은 성과 화면이 맡는다. 통계 응답을 읽는 화면은 stats 를 읽는다.
   it('응답의 stats.steps를 읽는다', () => {
-    const j = readFileSync(join(__dirname, '..', '..', '..', '..', 'frontend', 'src', 'pages', 'JourneysPage.tsx'), 'utf8');
-    const b = between(j, 'const loadStats = async (journeyId: string) => {', '\n  };');
-    expect(b).toContain('const steps = data?.stats?.steps;');
-    expect(b).toContain('if (data.success && Array.isArray(steps)) {');
-    expect(b).not.toContain('data.steps');
+    const fe = (f: string) => readFileSync(join(__dirname, '..', '..', '..', '..', 'frontend', 'src', 'pages', f), 'utf8');
+    const j = fe('JourneysPage.tsx');
+    expect(j).not.toContain('/stats`, {');
+    const st = fe('JourneyStatsPage.tsx');
+    expect(st).toContain('setStats(statsData.stats)');
+    expect(st).not.toMatch(/statsData\.steps/);
   });
 });
 

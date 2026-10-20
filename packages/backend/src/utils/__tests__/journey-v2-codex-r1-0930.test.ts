@@ -152,7 +152,7 @@ describe('옛 판 · 새 판', () => {
       release: vi.fn(),
     };
     connect.mockResolvedValue(client);
-    await expect(createNewVersion('c', 'OLD')).rejects.toThrow('옛 판에서는 새 판을 만들 수 없어요');
+    await expect(createNewVersion('c', 'OLD')).rejects.toThrow('옛 모양으로 마무리 중인 여정은 바꿀 수 없어요');   // ★1020 V.3 §9-5 — 사용자 문장에 「새 판」 0
     expect(client.query.mock.calls.some((c: any[]) => /INSERT INTO journeys/.test(String(c[0])))).toBe(false);
   });
 });

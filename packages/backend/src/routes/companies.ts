@@ -37,7 +37,8 @@ import { buildRcsTemplateSheet, templateExportFilename } from '../utils/template
 // ★ 2026-09-28 한줄로 V2 R106 — 대시보드 카드 집계 캐시(고객 통계와 같은 SWR 정책)
 import { swrCacheWithAt, dashboardCardsGenKey } from '../utils/swr-cache';
 import { CACHE_TTL } from '../config/defaults';
-import { computeMonthlyUsage } from '../utils/monthly-usage';   // ★ 2026-10-18 이번달 사용금액 카드 = 발송 현황과 같은 CT
+import { computeMonthlyUsage } from '../utils/monthly-usage';
+import { journeyCreditForecast, journeyCreditOverPlan } from '../utils/journey-credit-forecast';   // ★ 2026-10-20 여정 V.3 §5-5 요금제 내림 경고   // ★ 2026-10-18 이번달 사용금액 카드 = 발송 현황과 같은 CT
 
 const router = Router();
 
@@ -571,7 +572,7 @@ router.post('/plan-request', demoBlock, async (req: Request, res: Response) => {
       return res.status(401).json({ error: '인증 필요' });
     }
 
-    const { requestedPlanId, message } = req.body;
+    const { requestedPlanId, message, acknowledgeJourneyCredit } = req.body;
 
     if (!requestedPlanId) {
       return res.status(400).json({ error: '요청할 플랜을 선택해주세요.' });
@@ -584,6 +585,23 @@ router.post('/plan-request', demoBlock, async (req: Request, res: Response) => {
     );
     if (pendingCheck.rows.length > 0) {
       return res.status(409).json({ error: '이미 처리 대기 중인 요금제 신청이 있습니다.', code: 'DUPLICATE_PENDING' });
+    }
+
+    // ★ 2026-10-20 여정 V.3 §5-5 — 켜 둔 여정의 예상 운영 크레딧이 바꿀 요금제의 월 기본보다 많으면 한 번 확인받는다(고객사가 정한다 · 막지 않음).
+    //   크레딧이 모자라면 여정이 멈춘다(D1) · 요금제는 우리가 올리지 않는다.
+    if (acknowledgeJourneyCredit !== true) {
+      const planRes = await query(`SELECT ai_credits_per_month FROM plans WHERE id = $1`, [requestedPlanId]);
+      const planCredits = planRes.rows[0]?.ai_credits_per_month;
+      const forecast = await journeyCreditForecast(companyId);
+      const planCreditsNum = planCredits == null ? null : Number(planCredits);
+      if (journeyCreditOverPlan(forecast, planCreditsNum)) {
+        return res.status(409).json({
+          error: '켜 둔 여정이 쓰는 크레딧이 바꿀 요금제의 한 달 기본 크레딧보다 많아요.',
+          code: 'JOURNEY_CREDIT_OVER_PLAN',
+          forecast,
+          planCredits: planCreditsNum,
+        });
+      }
     }
 
     // plan_requests 테이블에 저장

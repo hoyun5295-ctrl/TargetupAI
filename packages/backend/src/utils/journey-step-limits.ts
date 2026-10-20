@@ -35,6 +35,9 @@ export function isEndChipEnabled(): boolean {
  * 칸 수 상한 — ★ 2026-09-30 V2 4차: 문자 칸 7(0차 현행 의미 유지) + 전체 칸 12(갈림 두 갈래 · 대기 · 조건 · 끝 칸 여유).
  * 화면(JourneysPage 칸 추가)도 같은 두 값이어야 한다.
  */
+/** ★ 2026-10-20 여정 V.3 §9-4 — LMS · MMS 제목 글자 상한(직접발송 · DM · 자동 마케팅 입력칸과 같은 40 · 프론트 LMS_SUBJECT_MAX_CHARS · 큐 title_str 은 200). 옛 여정만 50. */
+export const JOURNEY_SUBJECT_MAX_CHARS = 40;
+
 export const MAX_MESSAGE_STEPS = 7;
 export const MAX_JOURNEY_STEPS = 12;
 

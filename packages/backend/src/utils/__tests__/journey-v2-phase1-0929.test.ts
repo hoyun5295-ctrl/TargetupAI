@@ -170,7 +170,8 @@ describe('생애 지도 — 선 상태', () => {
     const by = (id: string) => m.journeys.find((j) => j.id === id)!.edit;
     expect(by('A').structure).toBe(true);
     expect(by('B').structure).toBe(true);
-    expect([by('C').copy, by('C').timing, by('C').structure, by('C').ops]).toEqual([true, false, false, true]);
+    // ★ 2026-10-20 V.3 §4-1 — 켜진 여정은 간격도 그 자리(칸 모양만 새 모양)
+    expect([by('C').copy, by('C').timing, by('C').structure, by('C').ops]).toEqual([true, true, false, true]);
   });
 });
 

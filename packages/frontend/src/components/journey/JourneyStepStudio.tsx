@@ -16,9 +16,8 @@ import {
 } from 'lucide-react';
 // ★ 2026-08-08 — 미리보기·바이트는 **실제 나가는 형태**로 잰다. 합성 규칙은 기존 CT 하나가 소유한다
 //   (백엔드 buildAdMessage의 프론트 미러 — 직접발송 화면이 쓰는 것과 같은 함수).
-import { calculateSmsBytes, buildAdMessageFront, buildAdSubjectFront } from '../../utils/formatDate';
-import { highlightVars, mergeVarsPlain } from '../../utils/highlightVars';
-import { renderLiquid, flattenCustomerForLiquid } from '../../utils/liquid-templating';
+//   ★ 2026-10-20 V.3 §9-4 — 쓰는 자리 · 보이는 모습 · 바이트는 큰 휴대폰(PhoneComposer) 한 벌이 맡는다.
+import PhoneComposer from './PhoneComposer';
 // MMS는 이미지가 본체다 — 채널만 바꿔 두고 붙일 자리가 없으면 그 스텝은 만들다 만 것이 된다.
 import JourneyMmsUploader from './JourneyMmsUploader';
 // ★ 2026-08-08 — 혜택·링크 placeholder는 텍스트 수술이 아니라 값 입력으로 채운다(판정·치환 단일 정의).
@@ -73,6 +72,10 @@ interface Props {
   sampleCustomerFields?: Record<string, any> | null;
   /** 회사 080 수신거부 번호 — 무료수신거부 문구에 붙는다. */
   opt080Number?: string;
+  /** ★ V.3 — 저장된 여정이면 [받는 모습]을 서버 미리보기로(이 여정 대상 고객 1명 · 발송 치환 함수). */
+  journeyId?: string;
+  /** 휴대폰 머리 줄 보낸 사람(회신번호). */
+  senderLabel?: string;
   /** 화면에 넣을 수 있는 변수(회사 보유 컬럼에서 온다 — 우리가 지어내지 않는다). `%` 없는 이름. */
   variables?: string[];
   /**
@@ -128,7 +131,7 @@ const MAX_DELAY_HOURS = 8760;   // 365일
 export default function JourneyStepStudio({
   steps, index, onIndex, onPatch, onAdd, onDelete, onSave,
   onAi, onDecorate, onSpamTest, onFillBenefit, onFillUrl,
-  sampleCustomer = null, sampleCustomerFields = null, opt080Number = '',
+  sampleCustomer = null, sampleCustomerFields = null, opt080Number = '', journeyId, senderLabel,
   variables = [], decorateVars = [], triggerLabel, objective,
   aiBusy = false, saving = false, maxSteps,
   single = false, bare = false, stacked = false, lockChannel = false, lockTiming = false, lockNote,
@@ -169,37 +172,7 @@ export default function JourneyStepStudio({
   }, [index, decorateVars]);   // eslint-disable-line react-hooks/exhaustive-deps
 
   const channel = (step?.channel === 'sms' || step?.channel === 'mms' ? step.channel : 'lms') as StudioChannel;
-  const maxBytes = channel === 'sms' ? 90 : 2000;
-  const msgType = channel.toUpperCase();
   const isAdStep = step?.isAd !== false;
-
-  /**
-   * ★ 2026-08-08 (Harold 접수) — 세는 것도 보이는 것도 **실제 나가는 형태**여야 한다.
-   *   옛 검토 화면은 (광고)·무료수신거부를 합성해 보여 줬는데 스튜디오는 순수 본문만 보여 주고 재고 있었다.
-   *   `(광고)` + 개행 + `무료거부0801234567`이 약 27바이트라, SMS에서 "88 / 90"이 실제로는 초과다.
-   *   ⛔ 저장 본문(`messageTemplate`)은 순수 상태 그대로 둔다 — 합성은 표시·계산에서만(이중 부착 차단 규약).
-   */
-  const adComposed = useMemo(
-    () => buildAdMessageFront(step?.messageTemplate || '', msgType, isAdStep, opt080Number),
-    [step?.messageTemplate, msgType, isAdStep, opt080Number]
-  );
-  // 바이트는 **변수 치환 전** 원문 기준으로 잰다 — 치환값은 고객마다 달라 숫자가 흔들린다(토큰 길이가 통제 가능한 값).
-  const bytes = useMemo(() => calculateSmsBytes(adComposed), [adComposed]);
-  const over = bytes > maxBytes;
-
-  /** 보이는 모습 = 샘플 고객 치환 → 광고 합성. 샘플이 없으면 치환 없이 원문 그대로(지어내지 않는다). */
-  const previewBody = useMemo(() => {
-    const raw = step?.messageTemplate || '';
-    if (!raw) return '';
-    const merged = sampleCustomer
-      ? mergeVarsPlain(
-          renderLiquid(raw, { customer: flattenCustomerForLiquid(sampleCustomerFields || {}) }).rendered,
-          sampleCustomer,
-          sampleCustomerFields || undefined
-        )
-      : raw;
-    return buildAdMessageFront(merged, msgType, isAdStep, opt080Number);
-  }, [step?.messageTemplate, sampleCustomer, sampleCustomerFields, msgType, isAdStep, opt080Number]);
 
   /** 트리거로부터 누적 몇 시간인가 — AI 맥락과 화면 표기가 같은 값을 쓴다. */
   const hoursFromTrigger = useMemo(
@@ -250,10 +223,9 @@ export default function JourneyStepStudio({
         </div>
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2 text-sm font-semibold text-slate-900">
-            스텝 {step.stepOrder}
-            <span className="text-slate-400">/ {steps.length}</span>
+            {single ? `${step.stepOrder}번째 칸` : <>스텝 {step.stepOrder}<span className="text-slate-400">/ {steps.length}</span></>}
           </div>
-          <div className="truncate text-[11px] text-slate-400">
+          <div className="truncate text-[12px] text-slate-400">
             {triggerLabel ? `${triggerLabel} 발생 후` : '트리거 발생 후'} · {hoursFromTrigger === 0 ? '즉시' : hoursFromTrigger % 24 === 0 ? `${hoursFromTrigger / 24}일 뒤` : `${hoursFromTrigger}시간 뒤`}
           </div>
         </div>
@@ -291,66 +263,64 @@ export default function JourneyStepStudio({
         </div>}
       </div>
       {lockNote && (
-        <div className="mx-4 mt-3 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-[11px] leading-relaxed text-slate-500 md:mx-5">{lockNote}</div>
+        <div className="mx-4 mt-3 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-[12px] leading-relaxed text-slate-500 md:mx-5">{lockNote}</div>
       )}
 
-      <div className={`grid gap-4 p-4 md:p-5 ${stacked ? '' : 'md:grid-cols-5'}`}>
-        {/* 좌 — 문안 */}
-        <div className={`space-y-3 ${stacked ? '' : 'md:col-span-3'}`}>
-          <fieldset disabled={lockChannel} className="flex flex-wrap items-center gap-2 disabled:opacity-60">
+      <div className={`grid grid-cols-1 gap-5 p-4 md:p-5 ${stacked ? '' : 'lg:grid-cols-[minmax(0,400px)_minmax(0,1fr)]'}`}>
+        {/* 좌 — 큰 휴대폰(받은 문자 모양 그대로 쓴다) */}
+        <div className="min-w-0 space-y-3">
+          <fieldset disabled={lockChannel} className="flex flex-wrap items-center justify-center gap-1.5 disabled:opacity-60">
+            <legend className="sr-only">채널</legend>
             {(['sms', 'lms', 'mms'] as StudioChannel[]).map((c) => (
               <button
                 key={c}
                 type="button"
                 onClick={() => onPatch(index, { channel: c })}
-                className={`rounded-lg px-2.5 py-1 text-[11px] font-medium transition-colors ${
-                  channel === c ? 'bg-violet-100 text-violet-900 ring-1 ring-violet-300' : 'text-slate-400 hover:bg-white'
+                aria-pressed={channel === c}
+                className={`h-8 rounded-lg px-3 text-[12px] font-semibold transition-colors ${
+                  channel === c ? 'bg-violet-100 text-violet-900 ring-1 ring-violet-300' : 'text-slate-500 hover:bg-slate-100'
                 }`}
               >
-                {c.toUpperCase()}
+                {c === 'sms' ? '문자' : c === 'lms' ? '장문' : '사진'}
               </button>
             ))}
-            <span className={`ml-auto text-[11px] tabular-nums ${over ? 'text-rose-700' : 'text-slate-400'}`}>
-              {bytes} / {maxBytes} byte
-              {isAdStep && <span className="ml-1 font-sans text-[10px] text-slate-400">(광고 표기 포함)</span>}
-            </span>
           </fieldset>
-
-          {channel !== 'sms' && (
-            <input
-              value={step.subject || ''}
-              onChange={(e) => onPatch(index, { subject: e.target.value.slice(0, 50) })}
-              placeholder="제목 (LMS·MMS 필수)"
-              className="w-full rounded-xl border border-slate-200 bg-slate-100 px-3 py-2 text-sm text-slate-900 placeholder:text-slate-300 focus:border-violet-300 focus:outline-none"
-            />
-          )}
-
-          <textarea
-            ref={taRef}
-            value={step.messageTemplate || ''}
-            onChange={(e) => onPatch(index, { messageTemplate: e.target.value })}
-            rows={9}
-            placeholder="이 스텝에서 보낼 문안입니다. 비워 두고 [AI 문안생성]을 눌러도 됩니다."
-            className={`w-full resize-y rounded-xl border bg-slate-100 px-3 py-2.5 text-sm leading-relaxed text-slate-900 placeholder:text-slate-300 focus:outline-none ${
-              over ? 'border-rose-300' : 'border-slate-200 focus:border-violet-300'
-            }`}
+          <PhoneComposer
+            channel={channel}
+            subject={step.subject || ''}
+            body={step.messageTemplate || ''}
+            isAd={isAdStep}
+            opt080Number={opt080Number}
+            onSubject={(v) => onPatch(index, { subject: v })}
+            onBody={(v) => onPatch(index, { messageTemplate: v })}
+            textareaRef={taRef}
+            journeyId={journeyId}
+            sampleCustomer={sampleCustomer}
+            sampleCustomerFields={sampleCustomerFields}
+            senderLabel={senderLabel}
+            imageCount={channel === 'mms' ? (step.mmsImagePaths?.length ?? 0) : 0}
+            placeholder="이 칸에서 보낼 문안이에요. 비워 두고 AI 문안생성을 눌러도 돼요."
+            resetKey={`${index}:${step.stepOrder}`}
           />
+        </div>
 
+        {/* 우 — 도구 */}
+        <div className="min-w-0 space-y-3">
           {/* MMS 이미지 — 채널을 MMS로 바꾸면 바로 붙일 자리가 나온다.
               ⛔ 이미지가 없는 MMS는 만들다 만 스텝이다. 채널만 바꿔 두고 넘어가지 못하게 이 자리에서 알린다. */}
           {channel === 'mms' && (
             <div className="rounded-xl border border-slate-200 bg-slate-100 p-3">
               <div className="mb-2 flex items-center gap-2">
                 <ImageIcon className="h-3.5 w-3.5 text-violet-700" />
-                <span className="text-[11px] font-semibold text-slate-600">이미지 첨부</span>
-                <span className="text-[10px] text-slate-400">MMS는 이미지가 함께 나갑니다</span>
+                <span className="text-[12px] font-semibold text-slate-600">이미지 첨부</span>
+                <span className="text-[12px] text-slate-400">MMS는 이미지가 함께 나갑니다</span>
               </div>
               <JourneyMmsUploader
                 value={step.mmsImagePaths || []}
                 onChange={(paths) => onPatch(index, { mmsImagePaths: paths })}
               />
               {(step.mmsImagePaths?.length ?? 0) === 0 && (
-                <p className="mt-2 text-[11px] leading-relaxed text-amber-800">
+                <p className="mt-2 text-[12px] leading-relaxed text-amber-800">
                   아직 이미지가 없습니다. 이대로 두면 글자만 나가니, 이미지를 넣거나 채널을 LMS로 되돌려 주세요.
                 </p>
               )}
@@ -368,7 +338,7 @@ export default function JourneyStepStudio({
 
               {benefitSlots && onFillBenefit && (
                 <div>
-                  <p className="mb-1.5 text-[11px] leading-relaxed text-slate-500">
+                  <p className="mb-1.5 text-[12px] leading-relaxed text-slate-500">
                     문안의 혜택 자리에 들어갈 실제 혜택입니다. 입력하면 모든 스텝에 한 번에 채워 드려요.
                   </p>
                   <div className="flex gap-2">
@@ -399,7 +369,7 @@ export default function JourneyStepStudio({
 
               {urlSlots && onFillUrl && (
                 <div>
-                  <p className="mb-1.5 text-[11px] leading-relaxed text-slate-500">
+                  <p className="mb-1.5 text-[12px] leading-relaxed text-slate-500">
                     문안에 넣을 링크 주소입니다. 주소는 발송할 때 짧은 링크로 바뀝니다.
                   </p>
                   <div className="flex gap-2">
@@ -437,7 +407,7 @@ export default function JourneyStepStudio({
               <button
                 type="button"
                 onClick={() => setShowVars((v) => !v)}
-                className="text-[11px] font-medium text-slate-500 hover:text-slate-700"
+                className="text-[12px] font-medium text-slate-500 hover:text-slate-700"
               >
                 변수 넣기 {showVars ? '접기' : `(${variables.length})`}
               </button>
@@ -448,7 +418,7 @@ export default function JourneyStepStudio({
                       key={v}
                       type="button"
                       onClick={() => insertVar(v)}
-                      className="rounded-md bg-white px-2 py-1 text-[11px] text-violet-800 transition-colors hover:bg-violet-100"
+                      className="rounded-md bg-white px-2 py-1 text-[12px] text-violet-800 transition-colors hover:bg-violet-100"
                     >
                       %{v}%
                     </button>
@@ -470,12 +440,12 @@ export default function JourneyStepStudio({
               </span>
             </div>
             {decorateVars.length === 0 ? (
-              <p className="text-[11px] leading-relaxed text-amber-800">
+              <p className="text-[12px] leading-relaxed text-amber-800">
                 문안에 넣을 수 있는 고객 데이터 항목이 아직 없습니다. 고객 정보를 올리면 여기에 컬럼이 나타납니다.
               </p>
             ) : (
               <>
-              <p className="mb-2 text-[11px] leading-relaxed text-slate-500">넣고 싶은 데이터를 골라 주세요. AI가 문안에 자연스럽게 녹입니다.</p>
+              <p className="mb-2 text-[12px] leading-relaxed text-slate-500">넣고 싶은 데이터를 골라 주세요. AI가 문안에 자연스럽게 녹입니다.</p>
               <div className="flex flex-wrap gap-1.5">
                 {decorateVars.map((v) => {
                   const on = selectedVars.has(v.token);
@@ -488,7 +458,7 @@ export default function JourneyStepStudio({
                         if (n.has(v.token)) n.delete(v.token); else n.add(v.token);
                         return n;
                       })}
-                      className={`rounded-full border px-2.5 py-1 text-[11px] font-medium transition-all ${
+                      className={`rounded-full border px-2.5 py-1 text-[12px] font-medium transition-all ${
                         on ? 'border-violet-300 bg-violet-100 text-violet-900' : 'border-slate-200 bg-white text-slate-500 hover:bg-slate-100'
                       }`}
                     >
@@ -530,31 +500,7 @@ export default function JourneyStepStudio({
             </button>}
           </div>}
 
-          {(step.messageTemplate || '').trim() && (
-            <div className="rounded-xl border border-slate-200 bg-slate-100 p-3">
-              <div className="mb-1.5 flex flex-wrap items-center gap-2">
-                <span className="text-[11px] font-medium text-slate-400">보이는 모습</span>
-                {sampleCustomer
-                  ? <span className="text-[10px] text-emerald-700">타겟 최상위 고객 기준 · 실제 발송 형태</span>
-                  : <span className="text-[10px] text-amber-700">아직 이 조건의 타겟 고객이 없어 원본으로 표시됩니다</span>}
-              </div>
-              {/* 제목도 발송 형태로 — 광고 문자는 제목에 (광고)가 붙는다. */}
-              {channel !== 'sms' && step.subject && (
-                <div className="mb-2 border-b border-slate-200 pb-2 text-[12px]">
-                  <span className="text-slate-400">제목 </span>
-                  <span className="text-slate-700">{buildAdSubjectFront(step.subject, msgType, isAdStep)}</span>
-                </div>
-              )}
-              <div className="whitespace-pre-wrap break-words text-[13px] leading-relaxed text-slate-700">
-                {sampleCustomer ? previewBody : highlightVars(previewBody)}
-              </div>
-              <p className="mt-2 text-[10px] italic text-slate-400">(광고) 표기와 무료수신거부는 발송할 때 자동으로 붙고, 위 미리보기·바이트에 이미 반영돼 있습니다.</p>
-            </div>
-          )}
-        </div>
-
-        {/* 우 — 언제 보낼지 */}
-        <div className={`space-y-3 ${stacked ? '' : 'md:col-span-2'}`}>
+          {/* 언제 보낼지 */}
           <fieldset disabled={lockTiming} className="rounded-xl border border-slate-200 bg-slate-100 p-3 disabled:opacity-60">
             <div className="mb-2 flex items-center gap-1.5 text-xs font-semibold text-slate-600">
               <Clock className="h-3.5 w-3.5 text-violet-700" />
@@ -566,7 +512,7 @@ export default function JourneyStepStudio({
                   key={p.hours}
                   type="button"
                   onClick={() => { setCustomDelayOpen(false); onPatch(index, { delayHours: p.hours }); }}
-                  className={`rounded-lg px-2.5 py-1.5 text-[11px] font-medium transition-colors ${
+                  className={`rounded-lg px-2.5 py-1.5 text-[12px] font-medium transition-colors ${
                     !customDelay && Number(step.delayHours) === p.hours
                       ? 'bg-violet-100 text-violet-900 ring-1 ring-violet-300'
                       : 'bg-white text-slate-500 hover:bg-slate-100'
@@ -579,7 +525,7 @@ export default function JourneyStepStudio({
               <button
                 type="button"
                 onClick={() => setCustomDelayOpen(true)}
-                className={`rounded-lg px-2.5 py-1.5 text-[11px] font-medium transition-colors ${
+                className={`rounded-lg px-2.5 py-1.5 text-[12px] font-medium transition-colors ${
                   customDelay
                     ? 'bg-violet-100 text-violet-900 ring-1 ring-violet-300'
                     : 'bg-white text-slate-500 hover:bg-slate-100'
@@ -604,18 +550,18 @@ export default function JourneyStepStudio({
                     className="w-20 rounded-lg border border-slate-200 bg-slate-100 px-2.5 py-1.5 text-xs text-slate-900 focus:border-violet-300 focus:outline-none"
                   />
                   <span className="text-xs text-slate-600">일 뒤</span>
-                  <span className="text-[11px] text-slate-400">최대 365일</span>
+                  <span className="text-[12px] text-slate-400">최대 365일</span>
                 </div>
                 {delayHasOddHours && (
                   // 지금 값이 시간 단위라 일수로 딱 떨어지지 않는다 — 조용히 바꾸지 않고 사실을 알린다.
-                  <p className="mt-1.5 text-[11px] leading-relaxed text-amber-800">
+                  <p className="mt-1.5 text-[12px] leading-relaxed text-amber-800">
                     지금은 {delayHoursNow}시간 뒤로 설정돼 있습니다. 위 일수를 입력하면 그 값으로 바뀝니다.
                   </p>
                 )}
               </div>
             )}
 
-            <label className="mt-3 flex items-center gap-2 text-[11px] text-slate-500">
+            <label className="mt-3 flex items-center gap-2 text-[12px] text-slate-500">
               <input
                 type="checkbox"
                 checked={hourFixed}
@@ -645,7 +591,7 @@ export default function JourneyStepStudio({
           {/* 야간 안내 — 광고성은 21~08시 발송 금지 */}
           {step.isAd !== false && (
             <div
-              className={`flex gap-2 rounded-xl border p-3 text-[11px] leading-relaxed ${
+              className={`flex gap-2 rounded-xl border p-3 text-[12px] leading-relaxed ${
                 nightHit ? 'border-amber-200 bg-amber-50 text-amber-900' : 'border-slate-200 bg-slate-100 text-slate-500'
               }`}
             >
@@ -662,7 +608,7 @@ export default function JourneyStepStudio({
 
           {objective && (
             <div className="rounded-xl border border-slate-200 bg-slate-100 p-3">
-              <div className="mb-1 text-[11px] font-medium text-slate-400">이 여정의 목적</div>
+              <div className="mb-1 text-[12px] font-medium text-slate-400">이 여정의 목적</div>
               <p className="text-[12px] leading-relaxed text-slate-600">{objective}</p>
             </div>
           )}
@@ -690,7 +636,7 @@ export default function JourneyStepStudio({
               <button
                 type="button"
                 onClick={() => onDelete(index)}
-                className="flex w-full items-center justify-center gap-1.5 rounded-xl border border-slate-200 px-3 py-2 text-[11px] font-medium text-slate-400 transition-colors hover:border-rose-200 hover:text-rose-800"
+                className="flex w-full items-center justify-center gap-1.5 rounded-xl border border-slate-200 px-3 py-2 text-[12px] font-medium text-slate-400 transition-colors hover:border-rose-200 hover:text-rose-800"
               >
                 <Trash2 className="h-3.5 w-3.5" /> 이 스텝 지우기
               </button>

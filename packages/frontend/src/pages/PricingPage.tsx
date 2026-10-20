@@ -72,6 +72,8 @@ export default function PricingPage() {
   const [showRequestModal, setShowRequestModal] = useState(false);
   const [selectedPlan, setSelectedPlan] = useState<Plan | null>(null);
   const [requestMessage, setRequestMessage] = useState('');
+  /** ★ 2026-10-20 여정 V.3 §5-5 — 켜 둔 여정이 한 달에 쓰는 크레딧이 바꿀 요금제 기본보다 많을 때 서버가 돌려준 숫자(신청 창 안에서 한 번 확인). */
+  const [journeyCreditWarn, setJourneyCreditWarn] = useState<{ total: number; basis: string; lineages: number; planCredits: number } | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [showSuccessModal, setShowSuccessModal] = useState(false);
   const [successModalType, setSuccessModalType] = useState<'plan' | 'inquiry'>('plan');
@@ -170,6 +172,7 @@ export default function PricingPage() {
 
   const handleRequestPlan = (plan: Plan) => {
     setSelectedPlan(plan);
+    setJourneyCreditWarn(null);
     setRequestMessage(`${plan.plan_name} 플랜으로 변경 신청합니다.`);
     setShowRequestModal(true);
   };
@@ -224,7 +227,7 @@ export default function PricingPage() {
     }
   };
 
-  const handleSubmitRequest = async () => {
+  const handleSubmitRequest = async (acknowledgeJourneyCredit = false) => {
     if (!selectedPlan) return;
     setSubmitting(true);
     
@@ -239,6 +242,7 @@ export default function PricingPage() {
         body: JSON.stringify({
           requestedPlanId: selectedPlan.id,
           message: requestMessage,
+          acknowledgeJourneyCredit,
         }),
       });
       
@@ -253,6 +257,14 @@ export default function PricingPage() {
         if (data.code === 'DUPLICATE_PENDING') {
           setShowRequestModal(false);
           setHasPending(true);
+        } else if (data.code === 'JOURNEY_CREDIT_OVER_PLAN' && data.forecast) {
+          // 창을 닫지 않고 숫자를 보여 준 뒤 고객사가 정한다([그대로 신청] = 확인하고 다시 보냄)
+          setJourneyCreditWarn({
+            total: Number(data.forecast.total) || 0,
+            basis: String(data.forecast.basis || 'measured'),
+            lineages: Array.isArray(data.forecast.perLineage) ? data.forecast.perLineage.length : 0,
+            planCredits: Number(data.planCredits) || 0,
+          });
         } else {
           toast.error(data.error || '신청 실패');
         }
@@ -767,6 +779,20 @@ export default function PricingPage() {
                 />
               </div>
 
+              {journeyCreditWarn && (
+                <div className="rounded-lg bg-amber-50 ring-1 ring-amber-200 px-3 py-2.5 mb-4 text-xs text-amber-900 leading-relaxed">
+                  <p>
+                    켜 둔 여정 {journeyCreditWarn.lineages.toLocaleString()}개가 한 달에 {journeyCreditWarn.total.toLocaleString()}크레딧을 써요
+                    {journeyCreditWarn.basis === 'measured' ? '(지난 30일 실제)' : '(지난 30일 실제 · 켠 지 30일이 안 된 여정은 최대로 셈)'}.
+                    바꿀 요금제의 한 달 기본 크레딧은 {journeyCreditWarn.planCredits.toLocaleString()}이에요.
+                  </p>
+                  <p className="mt-1 font-semibold">크레딧이 모자라면 켜 둔 여정이 멈춰요.</p>
+                  <button type="button" onClick={() => navigate('/ai-journeys')} className="mt-2 h-8 px-3 rounded-lg bg-white ring-1 ring-amber-300 text-amber-900 font-semibold hover:bg-amber-100">
+                    켜 둔 여정 고르기
+                  </button>
+                </div>
+              )}
+
               <p className="text-xs text-gray-500 mb-4">
                 신청 후 영업일 기준 1~2일 내 담당자가 연락드립니다.
               </p>
@@ -780,11 +806,11 @@ export default function PricingPage() {
                 취소
               </button>
               <button
-                onClick={handleSubmitRequest}
+                onClick={() => void handleSubmitRequest(!!journeyCreditWarn)}
                 disabled={submitting}
                 className="flex-1 px-4 py-3 text-blue-600 font-medium hover:bg-blue-50 transition-colors disabled:opacity-50"
               >
-                {submitting ? '신청 중...' : '신청하기'}
+                {submitting ? '신청 중...' : journeyCreditWarn ? '그대로 신청' : '신청하기'}
               </button>
             </div>
           </div>

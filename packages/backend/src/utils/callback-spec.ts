@@ -41,6 +41,8 @@ export function checkCallbackSpec(raw: unknown): CallbackSpecVerdict {
   }
   if (!d.startsWith('0')) return violation('유선번호는 지역번호를 포함해 입력해야 합니다.');
   if (d.startsWith('010') && d.length !== 11) return violation('010 번호는 11자리여야 합니다.');
+  // ★2026-10-20 010 가운데 자리 0 = 세칙 위반(비토 게이트웨이 엔진 callback_spec.go hasZeroMiddle010 · 관리 API callback-spec.js 와 같은 판정)
+  if (d.startsWith('0100')) return violation('010 번호는 가운데 자리가 0으로 시작할 수 없습니다.');
 
   const area = d.startsWith('02') ? '02' : AREA_CODES_3.find((code) => d.startsWith(code));
   if (area && /^(0|1[568])/.test(d.slice(area.length))) {

@@ -45,7 +45,7 @@ beforeEach(() => vi.clearAllMocks());
 describe('createJourneyStepVariant — 소유 검증', () => {
   it('그 여정 소속이 아닌 step이면 INSERT가 나가지 않는다', async () => {
     const { texts } = mockClient([
-      { match: /SELECT id, status FROM journeys/, rows: [{ id: JOURNEY, status: 'draft' }] },
+      { match: /SELECT id, status, start_kind FROM journeys/, rows: [{ id: JOURNEY, status: 'draft' }] },
       { match: /SELECT 1 FROM journey_steps WHERE id = \$1::uuid AND journey_id = \$2::uuid/, rows: [] },
     ]);
     await expect(createJourneyStepVariant(input as any)).rejects.toThrow('그 여정의 step이 아닙니다.');
@@ -54,16 +54,16 @@ describe('createJourneyStepVariant — 소유 검증', () => {
   });
 
   it('여정이 그 회사 것이 아니면 잠금 단계에서 멈춘다', async () => {
-    const { texts, calls } = mockClient([{ match: /SELECT id, status FROM journeys/, rows: [] }]);
+    const { texts, calls } = mockClient([{ match: /SELECT id, status, start_kind FROM journeys/, rows: [] }]);
     await expect(createJourneyStepVariant(input as any)).rejects.toThrow('변이를 저장하지 못했습니다.');
-    const lock = calls.find((c) => /SELECT id, status FROM journeys/.test(c.text));
+    const lock = calls.find((c) => /SELECT id, status, start_kind FROM journeys/.test(c.text));
     expect(lock?.text).toMatch(/company_id = \$2::uuid/);   // 회사 격리가 잠금 조건에 있다
     expect(texts.some((t) => /INSERT INTO journey_step_variants/.test(t))).toBe(false);
   });
 
   it('소유가 맞고 비활성이면 저장된다', async () => {
     const { texts } = mockClient([
-      { match: /SELECT id, status FROM journeys/, rows: [{ id: JOURNEY, status: 'paused' }] },
+      { match: /SELECT id, status, start_kind FROM journeys/, rows: [{ id: JOURNEY, status: 'paused' }] },
       { match: /SELECT 1 FROM journey_steps WHERE id = \$1::uuid AND journey_id = \$2::uuid/, rows: [{ '?column?': 1 }] },
       { match: /INSERT INTO journey_step_variants/, rows: [{ id: 'new-variant' }] },
     ]);
@@ -73,7 +73,7 @@ describe('createJourneyStepVariant — 소유 검증', () => {
 
   it('운영 중 여정이면 소유가 맞아도 거부한다', async () => {
     const { texts } = mockClient([
-      { match: /SELECT id, status FROM journeys/, rows: [{ id: JOURNEY, status: 'active' }] },
+      { match: /SELECT id, status, start_kind FROM journeys/, rows: [{ id: JOURNEY, status: 'active' }] },
     ]);
     await expect(createJourneyStepVariant(input as any)).rejects.toThrow('운영 중인 여정');
     expect(texts.some((t) => /INSERT INTO journey_step_variants/.test(t))).toBe(false);

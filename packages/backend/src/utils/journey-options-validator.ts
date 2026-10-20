@@ -26,12 +26,22 @@ export interface NormalizedJourneyOptions {
     holdoutPct: number;
     /** ★ 2026-07-11 send-time 개인화 — 시각 지정 step 발송 시각을 고객 반응 최빈 시간대로 대체 */
     personalSendTime: boolean;
+    /** ★ 2026-10-20 V.3 D2 — 새 고객 받는 마지막 날(KST YYYY-MM-DD) · 비우면 null(계속 받음). */
+    entryEndsOn: string | null;
   };
 }
 
 // ★ 2026-09-29 여정 V2 0차 ⑫ — points_used(포인트 사용) 추가: 포인트 여정 옵션을 저장하면 목표가 '구매'로 떨어지던 자리.
 // ★ 2026-09-30 V2 3차 — 'product'(같은 상품 재구매)는 상품 재구매 여정에서만 유효하다(라우트가 트리거를 보고 거부).
 const GOAL_KINDS = ['purchase', 'click', 'visit', 'points_used', 'product'] as const;
+
+/** YYYY-MM-DD 이고 달력에 있는 날짜인가(2026-02-30 같은 날 거절). */
+function isValidYmd(v: unknown): boolean {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(v ?? ''));
+  if (!m) return false;
+  const d = new Date(Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3])));
+  return d.getUTCFullYear() === Number(m[1]) && d.getUTCMonth() === Number(m[2]) - 1 && d.getUTCDate() === Number(m[3]);
+}
 
 /** 0 이상 정수 또는 null(미설정/음수/비숫자). 한도·예산은 비우면 무제한(null). */
 function clampOrNull(val: any): number | null {
@@ -62,6 +72,17 @@ export function normalizeJourneyOptions(input: Record<string, any>): NormalizedJ
     const raw = String(src.expiry_month_day || '').trim();
     triggerFilters.expiry_month_day = isValidMmdd(raw) ? raw : '';
   }
+  // ★ 2026-10-20 여정 V.3(설계서 §7 · §8) — 겹침 해소 「돌아온 고객은 환영만」 · 기존 고객 받기 · 하루 몫(상한과 다른 값) · 시작 조건 직접 설정.
+  //   고객 조건 · 묶는 방식의 **검증**은 저장 주소가 findCustomerConditionIssues 로 먼저 한다(여기는 모양만 · 허용 밖 값은 거기서 거절).
+  if (has('exclude_dormant_return')) triggerFilters.exclude_dormant_return = src.exclude_dormant_return === true || src.exclude_dormant_return === 'true';
+  if (has('include_existing')) triggerFilters.include_existing = src.include_existing === true || src.include_existing === 'true';
+  if (has('backfill_per_day')) {
+    triggerFilters.backfill_per_day = src.backfill_per_day == null || src.backfill_per_day === '' ? null : clampInt(src.backfill_per_day, 500, 1, 100000);
+  }
+  //   ⛔ 모양이 틀린 값을 빈 목록 · 기본값으로 접지 않는다(빈 조건 = 전 고객 · 더 보내는 쪽으로 샌다) — 맞을 때만 옮기고 틀리면 원문이 남아 검증이 거절한다.
+  if (has('customer_conditions') && Array.isArray(src.customer_conditions)) triggerFilters.customer_conditions = src.customer_conditions;
+  if (has('logic') && (src.logic === 'AND' || src.logic === 'OR')) triggerFilters.logic = src.logic;
+  if (has('all_customers')) triggerFilters.all_customers = src.all_customers === true || src.all_customers === 'true';
 
   const riskLevels = ['low', 'medium', 'high'];
   const options: NormalizedJourneyOptions['options'] = {
@@ -78,6 +99,7 @@ export function normalizeJourneyOptions(input: Record<string, any>): NormalizedJ
     goalKind: (GOAL_KINDS as readonly string[]).includes(src.goalKind) ? src.goalKind : 'purchase',
     holdoutPct: clampInt(src.holdoutPct, 0, 0, 30),
     personalSendTime: src.personalSendTime === true || src.personalSendTime === 'true',
+    entryEndsOn: isValidYmd(src.entryEndsOn) ? String(src.entryEndsOn) : null,
   };
 
   return { triggerFilters, options };

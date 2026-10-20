@@ -103,6 +103,7 @@ export const TRIGGER_EVENTS: TriggerDef[] = [
     label: '휴면 복귀', desc: '오래 쉬었다가 다시 구매하면',
     eventFields: [{ key: 'product_name', label: '상품명' }, { key: 'total_amount', label: '결제금액' }, { key: 'store_name', label: '매장명' }],
     filters: { dormant_days: 30 },   // 복귀 판정 기준(직전 구매와의 간격) — 백엔드 기본값과 동일
+    nextKeys: ['purchase'],          // ★ 2026-10-20 V.3 D5 — 돌아온 고객의 다음 구매 = 단골 재구매(주문 완료)
     overlapKeys: ['purchase', 'product'],       // 같은 구매 한 번에 둘 다 발화한다
     exclusiveKeys: ['first_purchase'],
   },

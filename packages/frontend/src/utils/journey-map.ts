@@ -72,7 +72,21 @@ export interface MapJourney {
   lineageId: string | null;
   canNewVersion: boolean;
   olderVersions: Array<{ id: string; name: string; status: string; activeNow: number }>;
+  /** ★ V.3 §5-1 — 이번에 켜면 내는 처음 켜기 크레딧(서버 판정 · 화면이 상태로 매기지 않는다). */
+  activationCost: number;
+  /** ★ V.3 §6-6 — 멈춘 이유 사람 말(멈춤일 때만 · 원문 노출 0). */
+  pause: PauseReasonView | null;
+  /** ★ V.3 §10-3 — 상태 한 줄(서버 판정 · 화면은 문장과 행동만 그린다). */
+  health: JourneyHealth;
+  /** ★ V.3 — 이 계보의 지난 30일 실제 운영 크레딧(원장) · 못 세면 null. */
+  operationCredits30d: number | null;
 }
+
+export type PauseFixAction = 'plan_upgrade' | 'charge' | 'edit_callback' | 'edit_step' | 'edit_options' | 'resume' | 'contact';
+export interface PauseReasonView { kind: string; text: string; fix: { action: PauseFixAction; label: string } | null }
+export interface JourneyHealth { tone: 'blocked' | 'fix' | 'quiet' | 'good' | 'paused' | 'draft' | 'ended'; text: string; fix: AttachFix | null }
+export interface MapOverlap { a: string; b: string; concurrentActive: number; text: string; fix: AttachFix | null }
+export interface MapSummary { activeJourneys: number; inProgressCustomers: number; fixCount: number; operationCredits30d: number | null }
 
 export interface MapLine {
   id: string;
@@ -100,9 +114,12 @@ export interface LifecycleMapData {
   journeys: MapJourney[];
   lines: MapLine[];
   ghosts: Array<{ lane: JourneyLane; triggerEvent: string; label: string; available: boolean; reason: string; createMode: CreateMode }>;
-  overlaps: Array<{ a: string; b: string; concurrentActive: number }>;
+  overlaps: MapOverlap[];
   lockedTriggers: Array<{ triggerEvent: string; label: string; reason: string }>;
-  costs: { generate: number; activate: number };
+  /** 크레딧 단가(서버 단가표) · 운영 = 보낸 날 하루 1번(계보당). */
+  costs: { generate: number; activate: number; operation: number };
+  /** ★ V.3 §10-2 — 머리 요약 한 줄(서버 셈). */
+  summary: MapSummary;
 }
 
 /** 선 색 · 모양(시각 3종 · 선 모양이 2차 단서 = 색만으로 가르지 않는다). SVG 속성값. */
@@ -140,8 +157,9 @@ export const CHIP_STYLE: Record<string, { box: string; label: string }> = {
 
 export const STATUS_META: Record<string, { label: string; dot: string; rank: number }> = {
   active: { label: '켜짐', dot: 'bg-emerald-400', rank: 0 },
-  paused: { label: '멈춤', dot: 'bg-amber-400', rank: 1 },
-  draft: { label: '초안', dot: 'bg-slate-400', rank: 2 },
+  // ★ V.3 §10-2 — 멈춤 점은 회색(호박 = 손볼 곳 전용 · 1009 설계서 :37).
+  paused: { label: '멈춤', dot: 'bg-slate-400', rank: 1 },
+  draft: { label: '초안', dot: 'bg-white ring-1 ring-slate-400', rank: 2 },
   ended: { label: '끝남', dot: 'bg-slate-300', rank: 3 },
 };
 
@@ -158,7 +176,8 @@ export function countText(n: number | null | undefined, zero = '아직 없음'):
 
 // ★ 2026-09-30 여정 V2 2차 — 문장으로 만들기 · 이어붙이기 점검 · 모두 켜기(서버 응답 그대로)
 
-export type AttachFixAction = 'goal_exit_on' | 'allow_reentry_on' | 'pause_and_allow_reentry' | 'activate' | 'create';
+// ★ V.3 §10-3 — 재진입이 그 자리 수정이 되어 「일시정지하고 다시 받기」는 없어졌다 · 겹침 해소 2종(첫 구매 빼기 · 돌아온 고객은 환영만)이 더해졌다.
+export type AttachFixAction = 'goal_exit_on' | 'allow_reentry_on' | 'activate' | 'create' | 'exclude_first_purchase' | 'exclude_dormant_return';
 /** ★ 2026-09-30 V2 3차 — 만드는 길(서버가 정함): 1클릭 프리셋 / 상품 고르기 창. */
 export type CreateMode = 'preset' | 'product';
 export interface AttachFix { action: AttachFixAction; label: string; journeyId?: string; triggerEvent?: string; activeCount?: number; createMode?: CreateMode }
@@ -199,5 +218,6 @@ export type BatchResultCode = 'NOT_FOUND' | 'DB_MIGRATION_PENDING' | 'PRETEST_RE
 export interface BatchActivationItem {
   journeyId: string;
   name: string;
-  result: { ok: true; firstActivation: boolean } | { ok: false; code: BatchResultCode; message: string; callbackUnregisteredCount?: number };
+  /** ★ V.3 §5-1 — charged = 이번에 낸 처음 켜기 크레딧(계보당 1번 · 새 판 초안 · 다시 켜기 = 0). */
+  result: { ok: true; firstActivation: boolean; charged: number } | { ok: false; code: BatchResultCode; message: string; callbackUnregisteredCount?: number };
 }

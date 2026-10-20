@@ -111,8 +111,8 @@ export default function BatchActivateModal({ open, onClose, data, preselect, onE
   const pairKey = (o: { a: string; b: string }) => [o.a, o.b].sort().join('|');
 
   const selectedList = candidates.filter((c) => selected.has(c.id));
-  const drafts = selectedList.filter((c) => c.status === 'draft').length;
-  const credit = drafts * data.costs.activate;
+  // ★ V.3 §5-1 — 처음 켜기 크레딧은 서버가 여정마다 정한다(새 판 초안 = 0 · 화면이 상태로 매기지 않는다).
+  const credit = selectedList.reduce((s, c) => s + (Number(c.activationCost) || 0), 0);
   const capOk = (id: string) => { const n = Math.floor(Number(caps[id])); return !!caps[id]?.trim() && Number.isFinite(n) && n >= 1; };
   const allPass = selectedList.every((c) => checks[c.id]?.state === 'pass');
   const allCaps = selectedList.every((c) => capOk(c.id));
@@ -203,7 +203,7 @@ export default function BatchActivateModal({ open, onClose, data, preselect, onE
                 <div className="flex-1 min-w-0">
                   <div className="text-xs font-semibold text-slate-900">{it.name || nameOf(it.journeyId)}</div>
                   <p className="mt-0.5 text-[11px] text-slate-500">
-                    {it.result.ok ? (it.result.firstActivation ? `켰어요 · ${data.costs.activate} 크레딧` : '다시 켰어요') : it.result.message}
+                    {it.result.ok ? (it.result.charged > 0 ? `켰어요 · ${it.result.charged} 크레딧` : it.result.firstActivation ? '켰어요 · 추가 크레딧 0' : '다시 켰어요') : it.result.message}
                   </p>
                 </div>
                 {!it.result.ok && it.result.code === 'CALLBACK_CONFIRM_REQUIRED' && (
@@ -227,7 +227,7 @@ export default function BatchActivateModal({ open, onClose, data, preselect, onE
                       <input type="checkbox" checked={on} onChange={() => toggle(c.id)} disabled={running} className="w-4 h-4 accent-violet-500" aria-label={`${c.name} 켜기에 넣기`} />
                       <div className="flex-1 min-w-0">
                         <div className="text-xs font-semibold text-slate-900 truncate">{c.name}</div>
-                        <div className="text-[11px] text-slate-400">{c.status === 'draft' ? `초안 · 처음 켜기 ${data.costs.activate} 크레딧` : '멈춤 · 다시 켜기 0 크레딧'} · {c.triggerLabel}</div>
+                        <div className="text-[11px] text-slate-400">{c.status === 'draft' ? (c.activationCost > 0 ? `초안 · 처음 켜기 ${c.activationCost} 크레딧` : '초안 · 같은 여정이라 추가 크레딧 0') : '멈춤 · 다시 켜기 0 크레딧'} · {c.triggerLabel}</div>
                       </div>
                       {on && (
                         <span className="shrink-0 text-[11px] inline-flex items-center gap-1">
