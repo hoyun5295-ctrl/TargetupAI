@@ -165,6 +165,10 @@ export const INHERIT_ENTRY_CURSORS_SQL =
       WHERE n.id = $1::uuid AND n.lineage_id IS NOT NULL AND n.entry_closed_at IS NULL
         AND n.last_event_cursor IS NULL AND n.last_purchase_cursor IS NULL
         AND o.status = 'active' AND o.entry_closed_at IS NULL AND o.trigger_event = n.trigger_event
+        -- ★ 2026-10-20 V.3 §18(Codex 적대 A 2R) — 앞 여정을 마치면: 같은 앞 여정 · 결과일 때만 이어받는다(다른 앞 여정의 기준 시각으로 소급 진입 0 · 다르면 켠 시각부터).
+        AND (n.trigger_event <> 'journey.after'
+             OR (o.trigger_filters->>'after_root' IS NOT DISTINCT FROM n.trigger_filters->>'after_root'
+                 AND o.trigger_filters->>'after_outcome' IS NOT DISTINCT FROM n.trigger_filters->>'after_outcome'))
    ), upd AS (
      UPDATE journeys t SET last_event_cursor = s.last_event_cursor, last_event_cursor_id = s.last_event_cursor_id,
                            last_purchase_cursor = s.last_purchase_cursor, last_purchase_cursor_id = s.last_purchase_cursor_id

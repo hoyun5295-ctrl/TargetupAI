@@ -6,6 +6,7 @@
  *   ③AI 설계 1회(묶음 안 · 규약 밖 결과면 1회 재요청) → 첫 문자 = 담당자가 확정한 사용 기간 뒤
  *   ④서버 초안 저장(재진입 · 진입 교체 서버 고정) → ⑤1회 차감(여정 AI 생성 단가 · 멱등키).
  */
+import { dbAcceptsTriggerEvent, JourneyMigrationPendingError } from './journey-trigger-db';
 import { query } from '../config/database';
 import { runInCreditBundle } from './ai-credit-context';
 import { checkCredit } from './ai-credit';
@@ -27,25 +28,13 @@ export async function productJourneyLockReason(companyId: string): Promise<strin
   return null;
 }
 
-/** DB 가 아직 이 시작 사건을 받지 않는다(CHECK 교체 전) — 라우트가 503 DB_MIGRATION_PENDING 으로 돌려준다. */
-export class JourneyMigrationPendingError extends Error {
-  readonly code = 'DB_MIGRATION_PENDING';
-  constructor(message: string) { super(message); this.name = 'JourneyMigrationPendingError'; }
-}
+export { JourneyMigrationPendingError } from './journey-trigger-db';
 
-let dbAcceptsProductAt = 0;
 /**
- * journeys.trigger_event CHECK 가 상품 구매를 받는가. 제약이 없으면 받는다. 한 번 참이면 1시간 기억(거짓은 기억하지 않는다 · DDL 직후 바로 열린다).
+ * journeys.trigger_event CHECK 가 상품 구매를 받는가(판정 = journey-trigger-db 한 곳 · ★1020 V.3 §18 앞 여정을 마치면과 공용).
  */
 export async function dbAcceptsProductTrigger(): Promise<boolean> {
-  if (Date.now() - dbAcceptsProductAt < 60 * 60 * 1000) return true;
-  const r = await query(
-    `SELECT pg_get_constraintdef(c.oid) AS def FROM pg_constraint c
-      WHERE c.conrelid = 'journeys'::regclass AND c.contype = 'c' AND pg_get_constraintdef(c.oid) ILIKE '%trigger_event%'`,
-  );
-  const ok = r.rows.length === 0 || r.rows.every((x: any) => String(x.def || '').includes(`'${PRODUCT_TRIGGER_EVENT}'`));
-  if (ok) dbAcceptsProductAt = Date.now();
-  return ok;
+  return dbAcceptsTriggerEvent(PRODUCT_TRIGGER_EVENT);
 }
 
 export interface ProductDraftResult { journeyId: string; name: string; charged: number }

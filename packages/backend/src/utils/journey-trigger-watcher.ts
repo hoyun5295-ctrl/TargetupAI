@@ -29,7 +29,7 @@ import { query, pool } from '../config/database';
 // ★ 2026-09-27 한줄로 V2 S5-04 — 여정 작성자 분류코드 범위
 import { getJourneyOwnerScopeSql } from './store-scope';
 import { journeyOwnerConsent } from './mall-consent';
-import { selectJourneyTargetCustomerIds, selectCdpEventRowsForCursor, selectPurchaseLedgerRowsForCursor, selectCartAbandonProperties, selectLastPriorPurchase, JOURNEY_COUNT_CAP } from './journey-target-extractor';
+import { selectJourneyTargetCustomerIds, selectAfterJourneyCandidates, selectCdpEventRowsForCursor, selectPurchaseLedgerRowsForCursor, selectCartAbandonProperties, selectLastPriorPurchase, JOURNEY_COUNT_CAP } from './journey-target-extractor';
 import { planCdpCursorBatch, buildEntryPropsArray, resolveCdpCursorEventName, usesPurchaseLedger, type CdpCursorBatch, type CdpEventRow } from './journey-cdp-cursor';
 import { clampInt } from './journey-points-trigger';
 // ★ 2026-08-01 §11-4 — 싱크 구매는 원장(purchases)이 문이다. 어느 회사에서 그 문을 열지·창 길이 판정.
@@ -45,6 +45,7 @@ import { usesEntryReplacement, CLOSE_ACTIVE_FOR_REPLACEMENT_SQL } from './journe
 // ★ 2026-09-30 여정 V2 5차 — 새 판 · 계보: 진입이 닫힌 옛 판은 받지 않고, 재진입 판정은 계보 단위(DDL 전 = 옛 동작).
 import { entryOpenClause, lineageJourneyIds, endDrainedVersions, lockLineageEntry } from './journey-lineage';
 import { JourneyInputError } from './journey-step-limits';
+import { readAfterConfig, startGenOf } from './journey-after-config';
 
 // ════════════════════════════════════════════════════════════════════
 // 타입
@@ -98,12 +99,46 @@ const INSERT_EXECUTION_SQL =
  *   **쓰기 자체가 회사 일치를 강제하지 않으면** id가 어긋나는 순간 남의 회사 여정을 정지시킨다.
  *   같은 부류가 셋이라 개별로 고치지 않고 여기 하나로 모았다.
  */
-async function pauseJourneyForCompany(journeyId: string, companyId: string, reason: string): Promise<void> {
-  await query(
+async function pauseJourneyForCompany(journeyId: string, companyId: string, reason: string, expect: StartExpect): Promise<boolean> {
+  // ★ V.3 §18(Codex 적대 A 2R) — 감시가 읽은 시작 설정 그대로일 때만 멈춘다(그사이 붙이기 · 떼기 · 옮기기가 커밋되면 옛 판단으로 멈추지 않는다).
+  const params: any[] = [journeyId, companyId, String(reason).slice(0, 500)];
+  const r = await query(
     `UPDATE journeys SET status = 'paused', paused_at = NOW(), pause_reason = $3, updated_at = NOW()
-      WHERE id = $1::uuid AND company_id = $2::uuid AND status = 'active'`,
-    [journeyId, companyId, String(reason).slice(0, 500)],
+      WHERE id = $1::uuid AND company_id = $2::uuid AND status = 'active'${startSameSql(params, expect)}`,
+    params,
   );
+  return (r?.rowCount || 0) > 0;
+}
+
+/** ★ V.3 §18 — after 후보를 뽑을 때의 설정(쓰기가 같은 값인지 다시 본다). */
+interface AfterExpect { root: string; outcome: string; cursor: string }
+/**
+ * ★ V.3 §18(Codex 적대 A 1R · 2R · 3R) — 감시가 한 회차에서 읽은 시작 설정. 넣기 · 커서 전진 · 멈춤이 쓰기 직전에 같은지 본다(옛 판단으로 쓰지 않는다).
+ *   gen = 시작 설정 세대(붙이기 · 떼기마다 +1) — 이름 · 커서 같은 값 비교로는 붙였다 떼는 왕복을 못 가른다.
+ */
+interface StartExpect { triggerEvent: string; gen: number; after?: AfterExpect }
+/** 감시가 이 회차 처음 읽은 행 기준 시작 설정. */
+const startExpectOf = (j: ActiveJourney, after?: AfterExpect, filters?: any): StartExpect =>
+  ({ triggerEvent: j.trigger_event, gen: startGenOf(filters ?? j.trigger_filters), ...(after ? { after } : {}) });
+
+/** 시작 설정이 그대로인가 — journeys 행 조건 조각(별칭 없이 · params 에 값을 덧붙인다). */
+function startSameSql(params: any[], expect: StartExpect, alias = ''): string {
+  const a = alias ? `${alias}.` : '';
+  params.push(expect.triggerEvent, expect.gen);
+  let sql = ` AND ${a}trigger_event = $${params.length - 1} AND COALESCE((${a}trigger_filters->>'start_gen')::int, 0) = $${params.length}::int`;
+  if (expect.after) {
+    params.push(expect.after.root, expect.after.outcome, expect.after.cursor);
+    const n = params.length;
+    sql += ` AND ${a}trigger_filters->>'after_root' = $${n - 2} AND ${a}trigger_filters->>'after_outcome' = $${n - 1} AND ${a}last_event_cursor = $${n}::timestamptz`;
+  }
+  return sql;
+}
+
+/** 계보 잠금 안에서 — 지금도 켜져 있고 시작 설정이 그대로인가(붙이기 · 떼기도 같은 계보 잠금을 잡아 이 확인과 쓰기 사이에 바뀌지 않는다). */
+async function startStillSame(run: { query: (text: string, params?: any[]) => Promise<any> }, j: ActiveJourney, expect: StartExpect): Promise<boolean> {
+  const params: any[] = [j.id, j.company_id];
+  const r = await run.query(`SELECT 1 FROM journeys WHERE id = $1::uuid AND company_id = $2::uuid AND status = 'active'${startSameSql(params, expect)}`, params);
+  return r.rows.length > 0;
 }
 
 // ════════════════════════════════════════════════════════════════════
@@ -206,11 +241,11 @@ async function processJourneyTrigger(j: ActiveJourney): Promise<{ matched: numbe
       door = normalizeProductFilters(j.trigger_filters).door;
     } catch (e: any) {
       const why = e instanceof JourneyInputError ? e.message : '상품 설정을 읽지 못했어요.';
-      await pauseJourneyForCompany(j.id, j.company_id, `상품 재구매 설정 오류: ${why}`);
+      await pauseJourneyForCompany(j.id, j.company_id, `상품 재구매 설정 오류: ${why}`, startExpectOf(j));
       return { matched: 0, enqueued: 0, skipped: 0, paused: true };
     }
     if (door !== await currentPurchaseDoor(j.company_id)) {
-      await pauseJourneyForCompany(j.id, j.company_id, '구매가 들어오는 곳이 바뀌어(자사몰 · 매장) 고른 상품을 알아볼 수 없어요. 상품을 다시 골라 새로 만들어 주세요.');
+      await pauseJourneyForCompany(j.id, j.company_id, '구매가 들어오는 곳이 바뀌어(자사몰 · 매장) 고른 상품을 알아볼 수 없어요. 상품을 다시 골라 새로 만들어 주세요.', startExpectOf(j));
       console.log(`[JourneyTrigger] 상품 재구매 문 변경 → 정지 journey=${j.id}`);
       return { matched: 0, enqueued: 0, skipped: 0, paused: true };
     }
@@ -240,7 +275,7 @@ async function processJourneyTrigger(j: ActiveJourney): Promise<{ matched: numbe
   if (j.trigger_event === 'customer.created') {
     const judgement = resolveNewCustomerJudgement(await getCompanyIdentityCapability(j.company_id));
     if (!judgement.canJudge) {
-      await pauseJourneyForCompany(j.id, j.company_id, `신규 고객 판정 불가: ${judgement.reason}`);
+      await pauseJourneyForCompany(j.id, j.company_id, `신규 고객 판정 불가: ${judgement.reason}`, startExpectOf(j));
       console.log(`[JourneyTrigger] 신규 판정 근거 없음 → 정지 journey=${j.id} company=${j.company_id}`);
       return { matched: 0, enqueued: 0, skipped: 0 };
     }
@@ -271,24 +306,48 @@ async function processJourneyTrigger(j: ActiveJourney): Promise<{ matched: numbe
       console.warn(`[JourneyTrigger] 등급 state 관측 — 컬럼 미마이그레이션(§11-D-3 DDL 필요) journey=${j.id}`);
     }
   }
-  const ids = await selectJourneyTargetCustomerIds(j.company_id, j.trigger_event, j.trigger_filters || {}, extractLimit, j.id, reentry, await getJourneyOwnerScopeSql(j.company_id, j.id), await journeyOwnerConsent(j.company_id, j.id));
+  // ★ 2026-10-20 V.3 §18 — 앞 여정을 마치면: 후보마다 앞 실행 id 를 진입 표식으로 싣는다(한 번 마침 = 한 번 진입 · 상한 · 넣기는 아래 공용).
+  //   ★ Codex 적대 A 1R — 설정(앞 여정 · 결과 · 기준 시각)은 추출 직전에 다시 읽고, 넣기가 계보 잠금 안에서 같은 값인지 다시 확인한다
+  //     (그사이 떼기 · 옮기기 · 결과 바꾸기가 커밋되면 옛 설정의 후보는 넣지 않는다 · 같은 표식은 잠금 안에서 한 번만).
+  let afterProps: Record<string, Record<string, any>> | undefined;
+  let expect: StartExpect = startExpectOf(j);
+  let ids: string[];
+  if (j.trigger_event === 'journey.after') {
+    const cur = await query(
+      `SELECT trigger_filters, last_event_cursor::text AS cursor FROM journeys WHERE id = $1::uuid AND company_id = $2::uuid AND trigger_event = 'journey.after' AND status = 'active'`,
+      [j.id, j.company_id],
+    );
+    const tf = cur.rows[0]?.trigger_filters || null;
+    const cursor: string | null = cur.rows[0]?.cursor ?? null;
+    const cfg = tf ? readAfterConfig(tf) : null;
+    if (!cfg || !cursor) return { matched: 0, enqueued: 0, skipped: 0 };
+    expect = startExpectOf(j, { root: cfg.root, outcome: cfg.outcome, cursor }, tf);
+    const rows = await selectAfterJourneyCandidates(j.company_id, tf, extractLimit, j.id, reentry, await getJourneyOwnerScopeSql(j.company_id, j.id), await journeyOwnerConsent(j.company_id, j.id), cursor);
+    ids = rows.map((x) => x.customerId);
+    afterProps = Object.fromEntries(rows.map((x) => [x.customerId, { __entry: { src: 'after', key: x.afterExecId } }]));
+  } else {
+    ids = await selectJourneyTargetCustomerIds(j.company_id, j.trigger_event, j.trigger_filters || {}, extractLimit, j.id, reentry, await getJourneyOwnerScopeSql(j.company_id, j.id), await journeyOwnerConsent(j.company_id, j.id));
+  }
   if (ids.length === 0) {
     return { matched: 0, enqueued: 0, skipped: 0 };
   }
   if (backfill == null && cap != null && ids.length > Number(cap)) {
-    await pauseJourneyForCompany(
+    const paused = await pauseJourneyForCompany(
       j.id,
       j.company_id,
       `대량 진입 감지 (신규 후보 ${Number(cap)}건 초과). 자동 정지, 담당자 확인 필요`,
+      expect,
     );
+    if (!paused) return { matched: ids.length, enqueued: 0, skipped: ids.length };   // 그사이 시작 설정이 바뀜 = 옛 후보 · 다음 회차가 새 설정으로
     console.warn(`[JourneyTrigger] 대량 차단 — journey=${j.id} 신규 후보 > 상한 ${cap} → 정지`);
     return { matched: ids.length, enqueued: 0, skipped: ids.length, paused: true };
   }
+  if (afterProps) return enqueueCandidates(j, ids, afterProps, expect);
   // ★ 2026-06-22: 장바구니는 진입 시점 cart_add properties를 entry_event_properties로 실어 알림톡 #{상품명}을 채운다.
   if (j.trigger_event === 'cdp.cart_abandon') {
     const abandonHours = Number((j.trigger_filters || {}).abandon_hours || 24);
     const propsByCustomer = await selectCartAbandonProperties(j.company_id, ids, abandonHours);
-    return enqueueCandidates(j, ids, propsByCustomer);
+    return enqueueCandidates(j, ids, propsByCustomer, expect);
   }
   // ★ §11-5(§5-1) — 포인트 소멸 여정은 진입 시점 포인트를 스냅샷으로 동봉한다.
   //   종료 신호(points_used)는 "진입 때보다 포인트가 줄었다"로 판정하므로 기준값이 진입에 실려야 한다.
@@ -299,9 +358,9 @@ async function processJourneyTrigger(j: ActiveJourney): Promise<{ matched: numbe
     );
     const propsByCustomer: Record<string, Record<string, any>> = {};
     for (const row of pr.rows as any[]) propsByCustomer[row.id] = { points_at_entry: Number(row.points) || 0 };
-    return enqueueCandidates(j, ids, propsByCustomer);
+    return enqueueCandidates(j, ids, propsByCustomer, expect);
   }
-  return enqueueCandidates(j, ids);
+  return enqueueCandidates(j, ids, undefined, expect);
 }
 
 // ════════════════════════════════════════════════════════════════════
@@ -444,15 +503,21 @@ async function finishCursorBatch(
   sourceLabel: string,
 ): Promise<CursorRunResult> {
   const ids = batch.ids;
+  // ★ V.3 §18(Codex 적대 A 3R) — 이 회차가 읽은 시작 설정(세대 포함). 커서 전진도 같은 조건을 붙여, 그사이 붙이기 · 떼기가 있었으면 0행(커서 보존).
+  const expect = startExpectOf(j);
+  const guardedParams = [...cursorParams];
+  const guardedCursorSql = cursorSql + startSameSql(guardedParams, expect);
 
   // 대량 차단기 — 후보 과다 시 정지+사유(커서 전진 안 함 → 재활성화 시 재평가).
   const cap = j.threshold_recipients_per_step;
   if (cap != null && ids.length > Number(cap)) {
-    await pauseJourneyForCompany(
+    const paused = await pauseJourneyForCompany(
       j.id,
       j.company_id,
       `대량 진입 감지 (${ids.length}건 > 상한 ${cap}건). 자동 정지, 담당자 확인 필요`,
+      expect,
     );
+    if (!paused) return { matched: ids.length, enqueued: 0, skipped: ids.length };
     console.warn(`[JourneyTrigger] 대량 차단(${sourceLabel}) — journey=${j.id} 후보=${ids.length} 상한=${cap} → 정지`);
     return { matched: ids.length, enqueued: 0, skipped: ids.length, paused: true };
   }
@@ -463,7 +528,7 @@ async function finishCursorBatch(
   );
   // step 없거나 후보 0이어도 커서는 전진(이 창/chunk 처리 완료 표시 — 누락 방지).
   if (firstStepRes.rows.length === 0 || ids.length === 0) {
-    await query(cursorSql, cursorParams);
+    await query(guardedCursorSql, guardedParams);
     return { matched: ids.length, enqueued: 0, skipped: ids.length };
   }
   const firstStep = firstStepRes.rows[0] as FirstStepRow;
@@ -481,7 +546,7 @@ async function finishCursorBatch(
     // ★ 0930 Codex 2R · 3R — 재진입 워커 · 새 판 활성화와 한 줄로. 잠금 뒤 다시 읽은 진입 상태 · 계보로 판정한다
     //   (진입이 그사이 닫혔으면 넣지 않고 커서도 그대로 — 새 판이 그 커서를 이어받았다).
     const fresh = await lockLineageEntry(client, j.id);
-    if (!fresh.open) {
+    if (!fresh.open || !(await startStillSame(client, j, expect))) {
       await client.query('ROLLBACK');
       return { matched: ids.length, enqueued: 0, skipped: ids.length };
     }
@@ -505,7 +570,7 @@ async function finishCursorBatch(
       await client.query(INSERT_EXECUTION_SQL, [j.id, customerId, nextRunAt, JSON.stringify(entryProps), holdoutPct]);
       enqueued++;
     }
-    await client.query(cursorSql, cursorParams);
+    await client.query(guardedCursorSql, guardedParams);
     if (enqueued > 0) {
       await client.query(
         `UPDATE journeys SET stats_total_entered = stats_total_entered + $2, updated_at = NOW() WHERE id = $1::uuid`,
@@ -686,7 +751,7 @@ async function processCdpCursorJourney(j: ActiveJourney, eventName: string): Pro
 // enqueue 처리 (cooldown 검증 + journey_executions INSERT)
 // ════════════════════════════════════════════════════════════════════
 
-async function enqueueCandidates(j: ActiveJourney, customerIds: string[], propsByCustomer?: Record<string, Record<string, any>>): Promise<{ matched: number; enqueued: number; skipped: number }> {
+async function enqueueCandidates(j: ActiveJourney, customerIds: string[], propsByCustomer: Record<string, Record<string, any>> | undefined, expect: StartExpect): Promise<{ matched: number; enqueued: number; skipped: number }> {
   const matched = customerIds.length;
   if (matched === 0) return { matched: 0, enqueued: 0, skipped: 0 };
 
@@ -716,7 +781,8 @@ async function enqueueCandidates(j: ActiveJourney, customerIds: string[], propsB
     await client.query('BEGIN');
     // ★ 0930 Codex 2R · 3R — 재진입 워커 · 새 판 활성화와 한 줄로. 진입이 그사이 닫혔으면 넣지 않는다.
     const fresh = await lockLineageEntry(client, j.id);
-    if (!fresh.open) {
+    // ★ V.3 §18(Codex 적대 A 2R) — 모든 넣기 = 잠금 안에서 지금도 켜져 있고 시작 설정(시작 사건 · after 면 앞 여정 · 결과 · 기준 시각)이 그대로일 때만.
+    if (!fresh.open || !(await startStillSame(client, j, expect))) {
       await client.query('ROLLBACK');
       return { matched, enqueued: 0, skipped: matched };
     }
@@ -725,6 +791,18 @@ async function enqueueCandidates(j: ActiveJourney, customerIds: string[], propsB
     //   계보는 잠금 뒤 다시 읽은 목록(Codex 3R).
     const lineage = (j.lineageIds || [j.id]).length > 1 ? j.lineageIds! : null;
     const journeyMatch = lineage ? `je.journey_id = ANY($6::uuid[])` : `je.journey_id = $1::uuid`;
+    const insParams: any[] = lineage ? [j.id, customerIds, nextRunAt, entryProps, holdoutPct, lineage] : [j.id, customerIds, nextRunAt, entryProps, holdoutPct];
+    // ★ V.3 §18(Codex 적대 A 1R) — 앞 여정을 마치면: 같은 앞 실행 표식이 계보에 아직 없을 때만(잠금 안 · 넣기 문장이 직접 본다 · 두 프로세스가 같은 후보를 뽑아도 한 번).
+    let afterGuard = '';
+    if (expect.after) {
+      insParams.push(lineage || [j.id]);
+      const n = insParams.length;
+      afterGuard = `
+          AND NOT EXISTS (SELECT 1 FROM journey_executions jm
+                           WHERE jm.journey_id = ANY($${n}::uuid[])
+                             AND jm.entry_event_properties->'__entry'->>'src' = 'after'
+                             AND jm.entry_event_properties->'__entry'->>'key' = t.props->'__entry'->>'key')`;
+    }
     const insRes = await client.query(
       `INSERT INTO journey_executions (id, journey_id, customer_id, current_step_order, status, entered_at, next_run_at, created_at, entry_event_properties)
        SELECT gen_random_uuid(), $1::uuid, t.cid, 0,
@@ -740,9 +818,9 @@ async function enqueueCandidates(j: ActiveJourney, customerIds: string[], propsB
         WHERE NOT EXISTS (
           SELECT 1 FROM journey_executions je
            WHERE ${journeyMatch} AND je.customer_id = t.cid ${reentryGuard}
-        )
+        )${afterGuard}
        RETURNING customer_id`,
-      lineage ? [j.id, customerIds, nextRunAt, entryProps, holdoutPct, lineage] : [j.id, customerIds, nextRunAt, entryProps, holdoutPct]
+      insParams
     );
     enqueued = insRes.rows.length;
 

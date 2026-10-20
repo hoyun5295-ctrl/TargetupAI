@@ -80,7 +80,12 @@ export interface MapJourney {
   health: JourneyHealth;
   /** ★ V.3 — 이 계보의 지난 30일 실제 운영 크레딧(원장) · 못 세면 null. */
   operationCredits30d: number | null;
+  /** ★ V.3 §18 — 다른 여정 뒤에 붙은 여정이면 앞 여정(없어졌으면 journeyId null) · 넘기는 고객. 붙지 않았으면 null. */
+  attachedAfter: { journeyId: string | null; name: string; outcome: AfterOutcome; outcomeLabel: string } | null;
 }
+
+/** ★ V.3 §18 — 붙인 여정이 받는 고객(앞 여정의 끝난 결과). */
+export type AfterOutcome = 'goal_met' | 'completed' | 'any';
 
 export type PauseFixAction = 'plan_upgrade' | 'charge' | 'edit_callback' | 'edit_step' | 'edit_options' | 'resume' | 'contact';
 export interface PauseReasonView { kind: string; text: string; fix: { action: PauseFixAction; label: string } | null }
@@ -90,6 +95,8 @@ export interface MapSummary { activeJourneys: number; inProgressCustomers: numbe
 
 export interface MapLine {
   id: string;
+  /** ★ V.3 §18 — contract = 목표 → 다음 시작 사건(계약) · attach = 담당자가 붙인 선(앞 여정을 마치면). */
+  kind: 'contract' | 'attach';
   fromJourneyId: string;
   toJourneyId: string | null;
   fromTrigger: string;
@@ -121,6 +128,22 @@ export interface LifecycleMapData {
   /** ★ V.3 §10-2 — 머리 요약 한 줄(서버 셈). */
   summary: MapSummary;
 }
+
+/** ★ V.3 §18 — 선 문구 한 곳(계약 선 = 「구매하면 → ○○ 여정」 · 붙인 선 = 「마치면 → 여정 이름」). */
+export const lineTargetText = (ln: Pick<MapLine, 'kind' | 'toLabel'>): string => (ln.kind === 'attach' ? ln.toLabel : `${ln.toLabel} 여정`);
+export const lineLeadText = (ln: Pick<MapLine, 'kind'>): string => (ln.kind === 'attach' ? '마치면' : '구매하면');
+export const lineFinishLabel = (ln: Pick<MapLine, 'kind'>): string => (ln.kind === 'attach' ? '마친 고객' : '구매 확인');
+/**
+ * ★ V.3 §18(Codex 적대 B 1R) — 붙이기 · 떼기 주소의 실패 문장. DB 준비 전(503 DB_MIGRATION_PENDING)은 서버 원문(테이블 · 제약 이름)을 보이지 않고 고객 말로.
+ *   그 밖(409 막음 등)은 서버가 지은 고객 문장 그대로.
+ */
+export function journeyApiErrorText(d: { code?: string; error?: string } | null | undefined, fallback: string): string {
+  if (d?.code === 'DB_MIGRATION_PENDING') return '준비 중이라 아직 할 수 없어요. 잠시 뒤 다시 시도해 주세요.';
+  return d?.error || fallback;
+}
+
+/** 「언제」 한 마디 — 시작 사건 이름 + 「때」 · 붙인 여정(「「앞 여정」 마친 뒤」)은 그대로. */
+export const triggerWhen = (label: string, triggerEvent: string | null | undefined): string => (triggerEvent === 'journey.after' ? label : `${label} 때`);
 
 /** 선 색 · 모양(시각 3종 · 선 모양이 2차 단서 = 색만으로 가르지 않는다). SVG 속성값. */
 // ★ 2026-10-09 고객 관계 지도 — 밝은 판 기준으로 다시 맞춤. 옛 "비어 있음" = 흰색 35%라 흰 판에서 선이 보이지 않았다(칩만 떠 보인 원인).

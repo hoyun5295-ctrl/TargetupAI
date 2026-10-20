@@ -13,10 +13,10 @@
  * list 모양(모바일 · 아랫띠)은 줄 높이가 자유이고 「구매하면 → ○○ 여정」 줄이 선을 대신하며, 펼치면 칸 목록이 나온다.
  */
 import type { CSSProperties } from 'react';
-import { AlertCircle, ArrowRight, ChevronDown, ExternalLink, GitBranch, Hourglass, Layers, Loader2, Pause, Play, Power, Wrench } from 'lucide-react';
+import { AlertCircle, ArrowRight, ChevronDown, ExternalLink, GitBranch, Hourglass, Layers, Link2, Loader2, Pause, Play, Power, Unlink, Wrench } from 'lucide-react';
 import { ZoneMoreMenu } from '../../zone/ZoneHeader';
 import {
-  CHIP_STYLE, LINE_SHORT, LINE_STYLE, STATUS_META, countText,
+  CHIP_STYLE, LINE_SHORT, LINE_STYLE, STATUS_META, countText, lineLeadText, lineTargetText,
   type AttachFix, type MapJourney, type MapLine, type MapOverlap, type MapStep,
 } from '../../../utils/journey-map';
 import { S, SUMMARY_OVERLAP_MAX, summaryNote } from '../../../utils/journey-map-layout';
@@ -40,6 +40,9 @@ interface Props {
   onFix: (fix: AttachFix) => void;
   onFocusJourney: (id: string) => void;
   onEntrants: () => void;
+  /** ★ V.3 §18 — 이 여정 뒤에 다른 여정 붙이기 · 앞 여정에서 떼기(붙은 여정만). */
+  onAttach: () => void;
+  onDetach: () => void;
   onHover?: (on: boolean) => void;
 }
 
@@ -58,7 +61,7 @@ function conditionBranches(journey: MapJourney, order: number): string {
 
 export default function MapJourneyCard({
   journey: j, variant, overlaps, nameOf, incoming, outgoing = [], expanded = false, onToggle, focused, busy, style,
-  onOpen, onAction, onFix, onFocusJourney, onEntrants, onHover,
+  onOpen, onAction, onFix, onFocusJourney, onEntrants, onAttach, onDetach, onHover,
 }: Props) {
   const canvas = variant === 'canvas';
   const st = STATUS_META[j.status] || STATUS_META.ended;
@@ -91,12 +94,17 @@ export default function MapJourneyCard({
               <ChevronDown className={`h-4 w-4 transition-transform ${expanded ? 'rotate-180' : ''}`} />
             </button>
           )}
-          <ZoneMoreMenu tone="light" items={[{ label: '진입 고객 보기', icon: ExternalLink, onClick: onEntrants }, { label: '작업 화면 열기', icon: Wrench, onClick: () => onOpen(null) }]} />
+          <ZoneMoreMenu tone="light" items={[
+            { label: '진입 고객 보기', icon: ExternalLink, onClick: onEntrants },
+            { label: '작업 화면 열기', icon: Wrench, onClick: () => onOpen(null) },
+            ...(j.status !== 'ended' ? [{ label: '뒤에 여정 붙이기', icon: Link2, onClick: onAttach }] : []),
+            ...(j.attachedAfter && j.status !== 'ended' ? [{ label: '앞 여정에서 떼기', icon: Unlink, onClick: onDetach }] : []),
+          ]} />
         </div>
 
         {/* 2. 한 문장 */}
         <p className="truncate text-[12.5px] leading-[18px] text-slate-500" style={row(S.line)}>
-          {st.label} · {j.band === 'standing' ? '고른 고객에게' : `${j.triggerLabel} 때`} · 문자 {msgCount}통 · {j.entryReplace ? '다시 사면 처음부터' : j.endNote}
+          {st.label} · {j.attachedAfter ? j.triggerLabel : j.band === 'standing' ? '고른 고객에게' : `${j.triggerLabel} 때`} · 문자 {msgCount}통 · {j.entryReplace ? '다시 사면 처음부터' : j.endNote}
         </p>
 
         {/* 3. 칸 띠 */}
@@ -170,7 +178,7 @@ export default function MapJourneyCard({
           <div key={ln.id} className="flex items-center gap-1.5 text-[12px] text-slate-500">
             <span className="h-0 w-3 shrink-0 border-t-2" style={{ borderColor: LINE_STYLE[ln.tier].stroke, borderStyle: ln.tier === 'solid' ? 'solid' : 'dashed' }} aria-hidden />
             <ArrowRight className="h-3 w-3 shrink-0 text-slate-400" aria-hidden />
-            <span className="min-w-0 flex-1 truncate">구매하면 → {ln.toLabel} 여정 · <span className={ln.tier === 'warn' ? 'text-amber-800' : 'text-slate-500'}>{LINE_SHORT[ln.state]}</span></span>
+            <span className="min-w-0 flex-1 truncate">{lineLeadText(ln)} → {lineTargetText(ln)} · <span className={ln.tier === 'warn' ? 'text-amber-800' : 'text-slate-500'}>{LINE_SHORT[ln.state]}</span></span>
             {ln.tier === 'solid' && (ln.handedOver || 0) > 0 && <span className="shrink-0 tabular-nums">이어받음 {Number(ln.handedOver).toLocaleString('ko-KR')}명</span>}
           </div>
         ))}

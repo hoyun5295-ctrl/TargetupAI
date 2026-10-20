@@ -33,7 +33,7 @@ import { getCompanyDataProfile, formatProfileForAiPrompt } from './company-data-
 // ★ 2026-08-02 §13-3: 발송 시점 문구는 화면·브리핑과 같은 단일 출처를 쓴다(AI에게 다른 말로 설명하지 않는다).
 import { formatStepTiming, describeJourneyTrigger, describeJourneyTarget } from './journey-step-format';
 // ★ 2026-08-08 이어달리기 — 트리거는 계약이 정한다(AI 출력에 약속을 걸지 않는다). 설계서 §6.
-import { isImplementedTriggerEvent, triggerTemplateCode, aiSelectableTriggerEvents, formatTriggerMenuForAi, contractReentryPolicy, defaultGoalExitFor, storageTemplateCodeFor, isProductPickTrigger } from './journey-trigger-capability';
+import { isImplementedTriggerEvent, isCreatableTriggerEvent, triggerTemplateCode, aiSelectableTriggerEvents, formatTriggerMenuForAi, contractReentryPolicy, defaultGoalExitFor, storageTemplateCodeFor, isProductPickTrigger } from './journey-trigger-capability';
 // ★ 2026-09-30 여정 V2 3차 — 상품 재구매: 상품 필터 검증 · 저장 형태는 journey-product 한 곳.
 import { normalizeProductFilters, type PurchaseDoor } from './journey-product';
 // ★ 2026-09-29 여정 V2 0차 ⑧ — 칸 개수 · 대기 상한은 CT 한 곳(자르지 않고 거부).
@@ -251,7 +251,7 @@ export async function generateJourneyPackage(input: JourneyAIGenerateInput): Pro
   // ★ 2026-08-08 이어달리기 — 프리셋은 등록·구현된 트리거만 인정한다. 모르는 값이면 만들지 않는다(fail-closed).
   //   라우트가 앞에서 400으로 거르지만, 발송 대상을 정하는 축이라 생성기도 그냥 넘기지 않는다.
   const presetTrigger = input.preferTriggerEvent ? String(input.preferTriggerEvent) : null;
-  if (presetTrigger && !isImplementedTriggerEvent(presetTrigger)) {
+  if (presetTrigger && !isCreatableTriggerEvent(presetTrigger)) {
     throw new Error('지원하지 않는 발송 조건입니다. 트리거를 다시 선택해 주세요.');
   }
   // ★ 2026-09-30 V2 3차 — 상품을 골라야 하는 트리거는 상품 고르기 창(product 입력)에서만 만든다(상품 없이 만들면 영영 0건).

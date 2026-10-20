@@ -138,7 +138,7 @@ describe('화면 B1~B8', () => {
     expect(ws).toContain("await load(journeyId, false, 'sync');");
   });
   it('B5 저장하는 동안 화면을 막는다', () => {
-    expect(ws).toContain('const blocking = reshaping || saving;');
+    expect(ws).toContain('const blocking = reshaping || saving || detaching;');   // 1020 V.3 18: detach also locks
   });
   it('B6 고친 값은 최신 값 위에 · AI 응답은 요청 때 본문 그대로일 때만', () => {
     expect(ws).toContain('const base = d[id] || originalOf(id);');

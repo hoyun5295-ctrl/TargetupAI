@@ -7,7 +7,7 @@
  * ⛔ 고친 값 계산(optionsDiff)은 순수 함수 — 바뀐 키만 서버로(부분 저장 · 서버가 DB 안에서 병합).
  */
 import { useState } from 'react';
-import { CalendarClock, ChevronDown, ChevronUp, Loader2, Plus, Users } from 'lucide-react';
+import { CalendarClock, ChevronDown, ChevronUp, Loader2, Plus, Unlink, Users } from 'lucide-react';
 import { ConditionRow, COND_FIELDS, condLabel, useConditionValueOptions, type AudienceCondition } from '../JourneyBuilderUi';
 import { TIMING, STANDING_TRIGGERS, numOrNull, type OptionForm } from '../../../utils/journey-start-form';
 
@@ -25,6 +25,9 @@ interface Props {
   isActive: boolean;
   /** 진행 중 인원(「진행 중 N명은 원래 조건으로 끝까지」 한 줄). */
   inProgress: number;
+  /** ★ V.3 §18 — 다른 여정 뒤에 붙은 여정이면 넘기는 고객(지도 서버 값) · 떼기. */
+  attachedAfter?: { journeyId: string | null; name: string; outcomeLabel: string } | null;
+  onDetach?: () => void;
 }
 
 function Toggle({ on, onChange, label, desc, disabled }: { on: boolean; onChange: (v: boolean) => void; label: string; desc?: string; disabled?: boolean }) {
@@ -60,7 +63,7 @@ const GOAL_KINDS: Array<{ key: string; label: string; only?: string }> = [
   { key: 'points_used', label: '포인트 사용', only: 'customer.points_expiring' }, { key: 'product', label: '같은 상품 재구매', only: 'purchase.product' },
 ];
 
-export default function JourneyStartCard({ journey, triggerLabel, form, setField, count, onCount, locked, isActive, inProgress }: Props) {
+export default function JourneyStartCard({ journey, triggerLabel, form, setField, count, onCount, locked, isActive, inProgress, attachedAfter, onDetach }: Props) {
   const valueOptions = useConditionValueOptions();
   const [more, setMore] = useState(false);
   const te = String(journey?.trigger_event || '');
@@ -79,6 +82,16 @@ export default function JourneyStartCard({ journey, triggerLabel, form, setField
       <div className="mt-2">
         <div className="text-[12px] text-slate-500">언제</div>
         <div className="mt-0.5 text-[15px] font-semibold text-slate-900">{triggerLabel}</div>
+        {te === 'journey.after' && (
+          <div className="mt-2 flex flex-wrap items-center gap-2 text-[13px] text-slate-700">
+            <span>{attachedAfter?.journeyId ? `넘겨받는 고객: ${attachedAfter.outcomeLabel}` : '앞 여정이 없어져 넘어오는 고객이 없어요.'}</span>
+            {onDetach && !locked && (
+              <button type="button" onClick={onDetach} className="inline-flex h-8 items-center gap-1 rounded-lg border border-slate-200 bg-white px-2.5 text-[12.5px] font-semibold text-slate-700 hover:border-rose-200 hover:text-rose-700">
+                <Unlink className="h-3.5 w-3.5" aria-hidden />앞 여정에서 떼기
+              </button>
+            )}
+          </div>
+        )}
         {timing && (
           <div className="mt-2 flex flex-wrap items-center gap-1.5 text-[13px] text-slate-700">
             <span>{timing.before}</span>
@@ -108,7 +121,7 @@ export default function JourneyStartCard({ journey, triggerLabel, form, setField
       <div className={sec}>
         <div className="flex items-center gap-1.5 text-[12px] text-slate-500"><Users className="h-3.5 w-3.5" aria-hidden />누구에게</div>
         {conds.length === 0 ? (
-          <p className="mt-1 text-[13px] text-slate-700">{isCustom ? (form.all_customers ? '전체 고객' : '아직 조건이 없어요') : '이 사건이 생긴 모든 고객'}</p>
+          <p className="mt-1 text-[13px] text-slate-700">{isCustom ? (form.all_customers ? '전체 고객' : '아직 조건이 없어요') : te === 'journey.after' ? '앞 여정을 마친 모든 고객' : '이 사건이 생긴 모든 고객'}</p>
         ) : (
           <div className="mt-2 space-y-2">
             {conds.map((c, i) => (editableCond(c) ? (

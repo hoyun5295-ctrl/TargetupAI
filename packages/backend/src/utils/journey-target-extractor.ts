@@ -33,6 +33,9 @@ import { buildSegmentBreakdown, SegmentBreakdown } from './journey-simulator-cor
 import type { CdpEventRow } from './journey-cdp-cursor';
 // ★ 2026-09-30 여정 V2 3차 — 상품 재구매: 상품 키 규칙은 journey-product 한 곳(진입 · 목표 · 목록이 같은 규칙).
 import { normalizeProductFilters, mallItemKeySql, mallItemsSql, ledgerProductKeySql } from './journey-product';
+// ★ 2026-10-20 여정 V.3 §18 — 기존 여정 뒤에 붙이기(앞 여정을 마치면).
+import { readAfterConfig, outcomeStatuses, AFTER_JOURNEY_WINDOW_DAYS } from './journey-after-config';
+import { lineageColumnsReady } from './journey-lineage';
 
 export async function selectJourneyTargetCustomerIds(
   companyId: string,
@@ -404,6 +407,11 @@ export async function selectJourneyTargetCustomerIds(
       return r.rows.map((x: any) => x.customer_id);
     }
 
+    // ★ 2026-10-20 V.3 §18 — 앞 여정을 마치면(미리보기 · 인원 = 최근 7일 마친 고객 · 라이브 = 감시가 표식과 함께 selectAfterJourneyCandidates 직접).
+    //   뒤 여정 id 를 넘기지 않는다 — 넘기면 기준 시각(켠 시각)이 비어 있는 초안은 늘 0명으로 센다(인원 미리 세기 = 「약」 표시).
+    case 'journey.after':
+      return (await selectAfterJourneyCandidates(companyId, filters, limit, undefined, undefined, scopeSql, consent)).map((x) => x.customerId);
+
     // 7. 자유여정(custom) — audience(customer_conditions) + 안전필터 + 미진입(execution 안티조인) 고객만.
     //   조건 없으면 전체 활성 고객(브로드캐스트). 진입한 고객 제외 → 폴마다 미진입분만, 각 1회.
     case 'custom': {
@@ -438,6 +446,75 @@ export async function selectJourneyTargetCustomerIds(
     default:
       return [];
   }
+}
+
+/**
+ * ★ 2026-10-20 여정 V.3 §18 — 앞 여정을 마친 고객(뒤에 붙인 여정의 후보).
+ *   앞 여정 계보(after_root)에서 결과(after_outcome)로 끝난 실행 · 마친 뒤 7일 안 · 기준 시각 뒤(journeyId 가 있으면 뒤 여정의 last_event_cursor
+ *   = 켠 · 붙인 · 다시 켠 시각 · 비어 있으면 0건 = 소급 0 / 없으면 미리보기라 최근 7일).
+ *   한 번 마침 = 한 번 진입: 뒤 여정 계보에 그 실행 id 표식(__entry.src = 'after' · key)이 있으면 뺀다.
+ *   동의 · 범위 · 조건 · 재진입은 다른 시작 사건과 같은 조각. 고객마다 가장 먼저 마친 실행 하나(다음 회차가 다음 것을 본다).
+ */
+export async function selectAfterJourneyCandidates(
+  companyId: string,
+  triggerFilters: Record<string, any>,
+  limit: number,
+  journeyId?: string,
+  reentry?: { allowReentry: boolean; cooldownDays: number; lineageIds?: string[] },
+  scopeSql = '',
+  consent?: JourneyConsent,
+  /** 감시 = 뒤 여정 기준 시각(last_event_cursor::text · 넣기가 같은 값으로 다시 확인한다). journeyId 가 있는데 없으면 0건(소급 0). */
+  sinceCursor?: string | null,
+): Promise<Array<{ customerId: string; afterExecId: string }>> {
+  const filters = triggerFilters || {};
+  const cfg = readAfterConfig(filters);
+  if (!cfg) return [];
+  if (journeyId && !sinceCursor) return [];
+  const lineage = await lineageColumnsReady();
+  const params: any[] = [companyId, cfg.root, outcomeStatuses(cfg.outcome), String(AFTER_JOURNEY_WINDOW_DAYS)];
+  const rootMatch = lineage ? `(aj.id = $2::uuid OR aj.lineage_id = $2::uuid)` : `aj.id = $2::uuid`;
+  let since = '';
+  let dedup = '';
+  let reentryClause = '';
+  if (journeyId) {
+    params.push(String(sinceCursor));
+    since = `AND ae.completed_at >= $${params.length}::timestamptz`;
+    const bLineage = reentry?.lineageIds && reentry.lineageIds.length > 1 ? reentry.lineageIds : [journeyId];
+    params.push(bLineage);
+    // 표식 안티조인 + 지금 뒤 여정 계보에서 진행 중인 고객 제외(넣기에서 어차피 빠질 후보가 상한 판정을 채워 여정을 멈추지 않게 · Codex 적대 A 1R).
+    //   진행 중이라 빠진 고객의 마침은 표식이 안 남아, 그 실행이 끝난 뒤 7일 창 안에서 다시 후보가 된다.
+    dedup = `AND NOT EXISTS (SELECT 1 FROM journey_executions be
+                        WHERE be.journey_id = ANY($${params.length}::uuid[])
+                          AND be.entry_event_properties->'__entry'->>'src' = 'after'
+                          AND be.entry_event_properties->'__entry'->>'key' = ae.id::text)
+          AND NOT EXISTS (SELECT 1 FROM journey_executions ba
+                        WHERE ba.journey_id = ANY($${params.length}::uuid[]) AND ba.customer_id = c.id AND ba.status = 'active')`;
+    if (reentry) reentryClause = buildReentryAntiJoin('c', params, journeyId, reentry.allowReentry, reentry.cooldownDays, reentry.lineageIds);
+  }
+  const cond = applyCustomerConditions(filters.customer_conditions || [], filters.logic || 'AND', params, consent);
+  params.push(String(limit));
+  const r = await query(
+    `SELECT s.customer_id, s.after_exec_id FROM (
+       SELECT DISTINCT ON (c.id) c.id AS customer_id, ae.id AS after_exec_id, ae.completed_at
+         FROM journey_executions ae
+         JOIN journeys aj ON aj.id = ae.journey_id
+         JOIN customers c ON c.id = ae.customer_id
+        WHERE aj.company_id = $1::uuid AND ${rootMatch}
+          AND ae.status = ANY($3::text[])
+          AND ae.completed_at > NOW() - ($4 || ' days')::interval
+          ${since}
+          AND c.company_id = $1::uuid
+          AND ${buildJourneySafetyFilter('c', consent?.isTrue)}${scopeSql}
+          ${dedup}
+          ${reentryClause}
+          ${cond ? ` AND ${cond}` : ''}
+        ORDER BY c.id, ae.completed_at ASC
+     ) s
+     ORDER BY s.completed_at ASC
+     LIMIT $${params.length}::int`,
+    params,
+  );
+  return (r.rows as any[]).map((x) => ({ customerId: String(x.customer_id), afterExecId: String(x.after_exec_id) }));
 }
 
 /**

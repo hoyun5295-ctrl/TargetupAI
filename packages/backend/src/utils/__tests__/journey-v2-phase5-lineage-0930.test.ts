@@ -75,7 +75,7 @@ describe('워커 배선(원문)', () => {
     expect(cd).toContain("status = 'active' LIMIT 1");
     expect(w).toContain('je.journey_id = ANY($6::uuid[])');
     const ex = SRC('journey-target-extractor.ts');
-    expect((ex.match(/reentry\.lineageIds\)/g) || []).length).toBe(7);
+    expect((ex.match(/reentry\.lineageIds\)/g) || []).length).toBe(8);   // ★1020 V.3 §18 앞 여정을 마치면 +1
     expect(ex).toContain("reentry?.lineageIds && reentry.lineageIds.length > 1");
   });
 });

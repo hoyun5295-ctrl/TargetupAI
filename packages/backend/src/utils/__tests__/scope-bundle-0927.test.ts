@@ -289,15 +289,15 @@ describe('S5-04 소비처 배선', () => {
     expect(sw).toContain('return resolveCustomerRecipients(companyId, spec.grades, ownerUserId);');
     expect(sw).toContain('return resolveCustomerRecipientsByFilter(companyId, spec.filter, ownerUserId);');
   });
-  it('여정 추출 14곳 = 안전 필터 바로 뒤 범위 조각', () => {
+  it('여정 추출 15곳 = 안전 필터 바로 뒤 범위 조각(★1020 V.3 §18 앞 여정을 마치면 +1)', () => {
     const x = src('journey-target-extractor.ts');
     // ★ 0930 V2 3차 — 상품 재구매 미리보기 추출(selectRecentProductBuyers)이 같은 규약으로 하나 늘었다.
-    expect((x.match(/\$\{buildJourneySafetyFilter\('c', consent\?\.isTrue\)\}\$\{scopeSql\}/g) || []).length).toBe(14);
+    expect((x.match(/\$\{buildJourneySafetyFilter\('c', consent\?\.isTrue\)\}\$\{scopeSql\}/g) || []).length).toBe(15);
     expect((x.match(/\$\{buildJourneySafetyFilter\('c'\)\}(?!\$\{scopeSql\})/g) || []).length).toBe(0);
   });
-  it('여정 발송 입구(트리거 3 · 기념일 2)가 작성자 범위를 넘긴다', () => {
+  it('여정 발송 입구(트리거 4 · 기념일 2)가 작성자 범위를 넘긴다(★1020 V.3 §18 앞 여정을 마치면 +1)', () => {
     const w = src('journey-trigger-watcher.ts');
-    expect((w.match(/await getJourneyOwnerScopeSql\(j\.company_id, j\.id\)/g) || []).length).toBe(3);
+    expect((w.match(/await getJourneyOwnerScopeSql\(j\.company_id, j\.id\)/g) || []).length).toBe(4);
     const a = src('journey-anchor-scheduler.ts');
     expect((a.match(/await getJourneyOwnerScopeSql\(/g) || []).length).toBe(2);
   });

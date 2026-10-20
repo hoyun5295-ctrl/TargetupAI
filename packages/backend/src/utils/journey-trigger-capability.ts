@@ -220,6 +220,11 @@ export interface TriggerContract {
   exit: 'purchase' | 'second_purchase' | 'next_purchase' | 'steps_done' | 'points_used' | 'reservation_closed' | 'product_repurchase';
   /** 재진입 허용 시 최소 쿨다운 일수(§9-N1). 미달이면 활성화 거부. */
   cooldownMinDays?: number;
+  /**
+   * ★ 2026-10-20 여정 V.3 §18 — 붙이기로만 생기는 시작 사건(앞 여정을 마치면). 만들기 · AI 선택 목록 · 프리셋에서 고를 수 없다
+   *   (앞 여정 없이 만들면 영영 0건). 켜기 · 감시 · 지도는 받는다.
+   */
+  attachOnly?: boolean;
 }
 
 export const TRIGGER_CONTRACTS: TriggerContract[] = [
@@ -257,7 +262,12 @@ export const TRIGGER_CONTRACTS: TriggerContract[] = [
   { event: 'reservation.visit_done',        key: null,       label: '방문 뒤 안내', desc: '방문을 마치면', lane: 'moment', cls: 'reservation', implemented: false, exit: 'steps_done' },         // #15 — 착수 6번
   // 상시(자유 세그먼트) — §3-5: §5-4 게이트 뒤로
   { event: 'custom',                        key: null,       label: '고른 고객에게', desc: '고른 고객에게 한 번', lane: 'standing', cls: 'standing',   implemented: true,  exit: 'steps_done' },
+  // ★ 2026-10-20 여정 V.3 §18 — 기존 여정 뒤에 붙이기. 레인은 지도가 앞 여정에서 정한다(여기 lane = 앞 여정을 못 찾을 때의 자리).
+  { event: 'journey.after',                 key: null,       label: '앞 여정을 마치면', desc: '앞 여정을 마친 고객에게', lane: 'standing', cls: 'event', implemented: true, exit: 'steps_done', attachOnly: true },
 ];
+
+/** ★ V.3 §18 — 기존 여정 뒤에 붙인 여정의 시작 사건. */
+export const AFTER_JOURNEY_EVENT = 'journey.after';
 
 const CONTRACT_BY_EVENT = new Map(TRIGGER_CONTRACTS.map((c) => [c.event, c]));
 
@@ -269,6 +279,15 @@ export function isRegisteredTriggerEvent(triggerEvent: string): boolean {
 /** 저장·활성화가 받아주는 trigger_event인가 — 등록 + 구현 완료. */
 export function isImplementedTriggerEvent(triggerEvent: string): boolean {
   return CONTRACT_BY_EVENT.get(triggerEvent)?.implemented === true;
+}
+
+/**
+ * ★ V.3 §18 — 새로 만드는 길(초안 저장 · AI 생성 · 프리셋)이 받는 시작 사건 = 구현 완료 + 붙이기 전용 아님.
+ *   붙이기 전용(앞 여정을 마치면)은 붙이기 주소로만 생긴다. 켜기 · 감시는 isImplementedTriggerEvent 로 받는다.
+ */
+export function isCreatableTriggerEvent(triggerEvent: string): boolean {
+  const c = CONTRACT_BY_EVENT.get(triggerEvent);
+  return c?.implemented === true && c.attachOnly !== true;
 }
 
 /** 계약 조회 — 없으면 null(fail-closed는 호출부 몫). */
@@ -361,13 +380,13 @@ export function contractReentryPolicy(triggerEvent: string): { allowReentry: tru
  */
 export function aiSelectableTriggerEvents(): string[] {
   // ★ 2026-09-30 V2 3차 — 상품을 골라야 하는 트리거는 AI 가 고르지 않는다(상품은 담당자가 관측 목록에서 고른다).
-  return TRIGGER_CONTRACTS.filter((c) => c.implemented && c.cls !== 'reservation' && !c.productPick).map((c) => c.event);
+  return TRIGGER_CONTRACTS.filter((c) => c.implemented && c.cls !== 'reservation' && !c.productPick && !c.attachOnly).map((c) => c.event);
 }
 
 /** AI 프롬프트용 시작 사건 표 — "- 값: 이름 (언제)" 한 줄씩. */
 export function formatTriggerMenuForAi(): string {
   return TRIGGER_CONTRACTS
-    .filter((c) => c.implemented && c.cls !== 'reservation' && !c.productPick)
+    .filter((c) => c.implemented && c.cls !== 'reservation' && !c.productPick && !c.attachOnly)
     .map((c) => `   - ${c.event}: ${c.label} (${c.desc})`)
     .join('\n');
 }

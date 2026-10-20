@@ -38,7 +38,7 @@ import { useJourneyActions } from './useJourneyActions';
 import { CREDIT_EDIT_FREE } from '../../../utils/journey-credit-copy';
 import { stepChannelLabel, formatDelayAfter } from '../../../utils/journey-labels';
 import { buildAdMessageFront, buildAdSubjectFront, LMS_SUBJECT_MAX_CHARS } from '../../../utils/formatDate';
-import { STATUS_META, countText, type LifecycleMapData, type MapJourney, type StepEditPolicy } from '../../../utils/journey-map';
+import { STATUS_META, countText, triggerWhen, journeyApiErrorText, type LifecycleMapData, type MapJourney, type StepEditPolicy } from '../../../utils/journey-map';
 import { JOURNEY_STATUS_LABEL } from '../../../utils/journey-row-actions';
 import { TRIGGER_EVENTS } from '../../../utils/journey-trigger-catalog';
 
@@ -171,8 +171,10 @@ export default function JourneyWorkspace({ journeyId, stepId, map, onClose, onCh
   const [aiBusy, setAiBusy] = useState(false);
   const [saving, setSaving] = useState(false);
   const [reshaping, setReshaping] = useState(false);
+  // ★ V.3 §18(Codex 적대 B 1R) — 떼는 동안도 편집 · 닫기를 잠근다(뗀 뒤 시작 카드를 서버 값으로 다시 읽어 고친 값이 덮이지 않게).
+  const [detaching, setDetaching] = useState(false);
   const editLockRef = useRef(false);
-  editLockRef.current = saving || reshaping;
+  editLockRef.current = saving || reshaping || detaching;
   const [confirmShape, setConfirmShape] = useState(false);
   const [overlapAsk, setOverlapAsk] = useState<string[] | null>(null);
   const [variantsOpen, setVariantsOpen] = useState<string | null>(null);
@@ -306,6 +308,8 @@ export default function JourneyWorkspace({ journeyId, stepId, map, onClose, onCh
   const optDiff = useMemo(() => optionsDiff(initialForm, form), [initialForm, form]);
   const optDirty = Object.keys(optDiff).length > 0;
   const dirtyCount = dirtyIds.length + newSteps.length + deleteIds.size + (optDirty ? 1 : 0);
+  const dirtyCountRef = useRef(dirtyCount);
+  dirtyCountRef.current = dirtyCount;
 
   /** 켜진 여정에서 새 모양이 필요한 변경인가(서버 편집 정책 응답 · 옵션 판정과 같은 집합). */
   // 새 모양으로만 바뀌는 여정 옵션(서버 journeyOptionEditVerdict 와 같은 판정 · 짝 시험이 고정).
@@ -604,11 +608,38 @@ export default function JourneyWorkspace({ journeyId, stepId, map, onClose, onCh
 
   // ── 닫기 · 행동 ──
   const askClose = () => {
-    if (saving || reshaping) return;
+    if (saving || reshaping || detaching) return;
     if (dirtyCount === 0) { onClose(); return; }
     setConfirm({ mode: 'warning', title: '저장하지 않은 고친 곳이 있어요', description: `고친 곳 ${dirtyCount}개를 저장하지 않았어요. 닫으면 사라져요.`, confirmLabel: '버리고 닫기', onConfirm: () => { discardAll(); onClose(); } });
   };
   const actions = useJourneyActions({ onChanged: () => { if (journeyId) void load(journeyId, !map, 'sync'); onChanged(); }, operationCost });
+  // ★ V.3 §18 — 앞 여정에서 떼기(시작 사건이 바뀌어 시작 카드를 처음부터 다시 읽는다 · 고친 곳이 있으면 먼저 저장하거나 버린다).
+  const detachAfter = () => {
+    if (!journeyId || editLockRef.current) return;
+    const dirtyWarn = () => toast.warning('고친 곳을 먼저 저장하거나 버린 뒤 떼어 주세요.');
+    if (dirtyCount > 0) { dirtyWarn(); return; }
+    const jid = journeyId;
+    setConfirm({
+      mode: 'warning',
+      title: '앞 여정에서 떼기',
+      description: `원래 시작으로 돌아가요. 「${mj?.attachedAfter?.name || '앞 여정'}」을 마친 고객은 더 받지 않고, 진행 중 고객은 끝까지 받아요.`,
+      confirmLabel: '떼기',
+      onConfirm: async () => {
+        // 확인 창이 떠 있는 사이에 고친 곳이 생겼으면 떼지 않는다(확인할 때 다시 본다).
+        if (dirtyCountRef.current > 0 || editLockRef.current) { dirtyWarn(); return; }
+        setDetaching(true);
+        try {
+          const r = await sendJson(`/api/ai/operator/journeys/${jid}/detach`, 'POST').catch(() => null);
+          if (!r?.ok) { toast.error(journeyApiErrorText(r?.data, '떼지 못했어요.')); return; }
+          toast.success('앞 여정에서 뗐어요. 원래 시작으로 돌아갔어요.');
+          onChanged();
+          await load(jid, !map, 'open');
+        } finally {
+          setDetaching(false);
+        }
+      },
+    });
+  };
   const actionJourney = mj ? { id: mj.id, name: mj.name, status: mj.status, goalExitEnabled: mj.goalExitEnabled, thresholdRecipients: mj.thresholdRecipients, activationCost: mj.activationCost, pause: mj.pause }
     : journey ? { id: String(journey.id), name: String(journey.name), status: String(journey.status), activationCost: Number(journey.activation_cost || 0), pause: journey.pause_view || null } : null;
 
@@ -676,7 +707,7 @@ export default function JourneyWorkspace({ journeyId, stepId, map, onClose, onCh
     ...(!archived && status !== 'active' ? [{ label: '보관함으로', onClick: () => setActionMode('archive') }] : []),
   ];
 
-  const blocking = reshaping || saving;
+  const blocking = reshaping || saving || detaching;
   // React 18 은 inert 를 모르는 속성으로 그대로 넘긴다(문자열 값) · 막는 동안만 붙인다.
   const inertProps: Record<string, string> = blocking ? { inert: '' } : {};
 
@@ -691,7 +722,7 @@ export default function JourneyWorkspace({ journeyId, stepId, map, onClose, onCh
               <div className="min-w-0 flex-1">
                 <h2 id="jws-title" className="truncate text-[17px] font-semibold">{journey?.name || mj?.name || '여정'}</h2>
                 <p className="mt-0.5 truncate text-[12.5px] text-white/70">
-                  {JOURNEY_STATUS_LABEL[status] || ''}{archived ? ' · 보관' : ''} · {triggerLabel} 때 시작{mj?.endNote ? ` · ${mj.endNote}` : ''}
+                  {JOURNEY_STATUS_LABEL[status] || ''}{archived ? ' · 보관' : ''} · {triggerWhen(triggerLabel, journey?.trigger_event)} 시작{mj?.endNote ? ` · ${mj.endNote}` : ''}
                 </p>
               </div>
               {actionJourney && !archived && status === 'active' && (
@@ -751,7 +782,8 @@ export default function JourneyWorkspace({ journeyId, stepId, map, onClose, onCh
               {loadErr && (
                 <div className="space-y-2 px-4 py-6 text-center text-[13px] text-rose-700">
                   <p>{loadErr}</p>
-                  <button type="button" onClick={() => journeyId && void load(journeyId, !map)} className="h-9 rounded-lg border border-slate-200 bg-white px-3 text-[13px] font-semibold text-slate-700">다시 읽기</button>
+                  {/* ★ V.3 §18(Codex 적대 B 2R) — 이미 읽은 화면이 있으면 sync(고친 값을 새 서버 값 위에 · open 은 고친 값을 조용히 덮었다) */}
+                  <button type="button" onClick={() => journeyId && void load(journeyId, !map, detail ? 'sync' : 'open')} className="h-9 rounded-lg border border-slate-200 bg-white px-3 text-[13px] font-semibold text-slate-700">다시 읽기</button>
                 </div>
               )}
               {detail && (
@@ -763,7 +795,7 @@ export default function JourneyWorkspace({ journeyId, stepId, map, onClose, onCh
                         <Flag className="h-3.5 w-3.5 text-indigo-600" aria-hidden />시작
                         {optDirty && <span className="ml-auto h-2 w-2 rounded-full bg-indigo-500" aria-label="고침" />}
                       </div>
-                      <div className="mt-0.5 truncate text-[12px] text-slate-500">{triggerLabel} 때</div>
+                      <div className="mt-0.5 truncate text-[12px] text-slate-500">{triggerWhen(triggerLabel, journey?.trigger_event)}</div>
                       <div className="truncate text-[12px] text-slate-500">{(form.customer_conditions || []).length > 0 ? `조건 ${(form.customer_conditions || []).length}개` : '조건 없음'} · 최대 {form.thresholdRecipients != null ? `${Number(form.thresholdRecipients).toLocaleString('ko-KR')}명` : '정하지 않음'}</div>
                     </button>
                   </li>
@@ -857,6 +889,8 @@ export default function JourneyWorkspace({ journeyId, stepId, map, onClose, onCh
                     locked={locked}
                     isActive={isActive}
                     inProgress={mj?.counts.inProgress || 0}
+                    attachedAfter={mj?.attachedAfter || null}
+                    onDetach={detachAfter}
                   />
                 </div>
               )}
@@ -1007,7 +1041,7 @@ export default function JourneyWorkspace({ journeyId, stepId, map, onClose, onCh
           {blocking && (
             <div className="absolute inset-0 z-20 flex flex-col items-center justify-center gap-3 bg-white/85 backdrop-blur-sm" role="status" aria-live="polite">
               <Loader2 className="h-8 w-8 animate-spin text-indigo-600" aria-hidden />
-              <p className="text-[14px] font-semibold text-slate-800">{reshaping || needsShape ? '바뀐 모양으로 옮기는 중' : '저장하는 중'}</p>
+              <p className="text-[14px] font-semibold text-slate-800">{detaching ? '앞 여정에서 떼는 중' : reshaping || needsShape ? '바뀐 모양으로 옮기는 중' : '저장하는 중'}</p>
               {(reshaping || needsShape) && <p className="text-[12.5px] text-slate-500">점검하고 켜는 데 10초쯤 걸려요. 창을 닫지 말아 주세요.</p>}
             </div>
           )}

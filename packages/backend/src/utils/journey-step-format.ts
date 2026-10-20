@@ -91,6 +91,8 @@ const TRIGGER_KO: Record<string, string> = {
   'customer.dormant': '휴면 고객',
   'cdp.cart_abandon': '장바구니 이탈 고객',
   'customer.birthday_approaching': '생일 임박 고객',
+  // ★ 2026-10-20 V.3 §18 — 기존 여정 뒤에 붙인 여정(저장값이 화면 · 프롬프트에 나가지 않게)
+  'journey.after': '앞 여정을 마친 고객',
   'customer.points_expiring': '포인트 소멸 임박 고객',
   // ★ 2026-08-08 — §11-5(2026-08-02)로 늘어난 트리거 5종이 이 표에 없어 화면·프롬프트에
   //   `트리거: purchase.first` 같은 저장값이 그대로 나가고 있었다. 라벨 표는 여기 하나다.
@@ -153,6 +155,7 @@ export function describeJourneyTarget(triggerEvent: string | null | undefined, t
   const excluded = [f.exclude_first_purchase === true ? '첫 구매 고객 제외' : '', f.exclude_dormant_return === true ? '휴면에서 돌아온 고객 제외' : ''].filter(Boolean).join(' · ');
   if (excluded) return who ? `대상: ${excluded} · ${who}` : `대상: ${excluded} · 이 사건이 생긴 고객`;
   if (who) return `대상: ${who}`;
+  if (String(triggerEvent || '') === 'journey.after') return '대상: 앞 여정을 마친 고객 전부';
   return String(triggerEvent || '') === 'custom' ? '대상: 조건 없음 · 전 고객' : '대상: 조건 없음 · 이 사건이 생긴 고객 전부';
 }
 

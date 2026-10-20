@@ -12,7 +12,7 @@ import { useState } from 'react';
 import { AlertCircle, ArrowRight, Lock, Plus, Sparkles, Users, X } from 'lucide-react';
 import JourneyModalShell from '../JourneyModalShell';
 import JourneyDiagnosisPanel from './JourneyDiagnosisPanel';
-import { LINE_SHORT, type AttachFix, type CreateMode, type LifecycleMapData } from '../../../utils/journey-map';
+import { LINE_SHORT, lineTargetText, type AttachFix, type CreateMode, type LifecycleMapData } from '../../../utils/journey-map';
 
 export interface GapOpportunity {
   type: string;
@@ -151,7 +151,7 @@ export default function GapFinderModal({ open, onClose, data, opportunities, onC
           {warnLines.map((l) => (
             <div key={l.id} className={`${row} border-amber-200 bg-amber-50 flex items-center gap-3`}>
               <div className="flex-1 min-w-0">
-                <div className="text-xs font-semibold text-amber-900">{nameOf(l.fromJourneyId)} → {l.toLabel} 여정 · {LINE_SHORT[l.state]}</div>
+                <div className="text-xs font-semibold text-amber-900">{nameOf(l.fromJourneyId)} → {lineTargetText(l)} · {LINE_SHORT[l.state]}</div>
                 <p className="mt-0.5 text-[11px] leading-relaxed text-amber-900">{l.reason}</p>
               </div>
               {l.fix ? (

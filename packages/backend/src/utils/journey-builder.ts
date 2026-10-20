@@ -25,7 +25,8 @@ import { journeyListWhere, executionStatusFilter } from './journey-list-filter';
 import { StartKind, normalizeStartKind, classifyStartKind } from './journey-start-kind';
 import { validateAlimtalkFallback, AlimtalkFallbackError } from './alimtalk-fallback';
 // ★ 2026-08-01 여정 재설계 — 활성화가 발송이 시작되는 유일한 길목이라 게이트를 여기 둔다(Codex 4R).
-import { resolveTriggerAvailability, toAvailabilityMap, triggerKeyForEvent, requiresRecipientCap, CAP_EXEMPT_TRIGGERS, isImplementedTriggerEvent, getTriggerContract, goalKindForTrigger, defaultGoalExitFor, isProductPickTrigger } from './journey-trigger-capability';
+import { resolveTriggerAvailability, toAvailabilityMap, triggerKeyForEvent, requiresRecipientCap, CAP_EXEMPT_TRIGGERS, isImplementedTriggerEvent, isCreatableTriggerEvent, getTriggerContract, goalKindForTrigger, defaultGoalExitFor, isProductPickTrigger, AFTER_JOURNEY_EVENT } from './journey-trigger-capability';
+import { readAfterConfig } from './journey-after-config';
 // ★ 2026-09-30 여정 V2 3차 — 상품 재구매 필터 검증(상품 · 문) · 키 규칙은 journey-product 한 곳.
 import { normalizeProductFilters } from './journey-product';
 // ★ 2026-09-30 여정 V2 4차 — 활성화는 그래프 CT 의 구조 결함(닿지 않는 칸 · 첫 칸이 끝 칸)을 막는다(그림과 같은 규칙).
@@ -362,7 +363,8 @@ export async function createJourneyFromTemplate(input: CreateJourneyInput): Prom
   //   오타·AI 환각 한 번이면 "화면상 정상인데 영원히 0건"인 여정이 만들어졌다(§9-C2).
   //   활성화 게이트가 이미 막지만, 저장 단계에서 거부해야 사용자가 200크레딧 전에 안다.
   //   미구현 트리거(레지스트리 implemented=false)도 같은 이유로 거부 — 만들 수 없는 것은 만들어지지 않아야 한다.
-  if (!isImplementedTriggerEvent(resolvedTriggerEvent)) {
+  // ★ V.3 §18 — 붙이기 전용(앞 여정을 마치면)은 만들기에서 받지 않는다(지도 [뒤에 여정 붙이기]로만 생긴다).
+  if (!isCreatableTriggerEvent(resolvedTriggerEvent)) {
     throw new Error('지원하지 않는 발송 조건입니다. 트리거를 다시 선택해 주세요.');
   }
   const rawTriggerFilters = input.triggerFilters !== undefined ? input.triggerFilters : tmpl.triggerFilters;
@@ -656,6 +658,10 @@ export function validateJourneyEntryConfig(row: {
       return `이 발송 조건은 같은 분께 다시 보내기까지 최소 ${contract.cooldownMinDays}일이 필요합니다. 재진입 간격을 지정해 주세요.`;
     }
   }
+  // ★ 2026-10-20 V.3 §18 — 붙인 여정은 앞 여정 · 넘길 결과가 있어야 받는다(없으면 영영 0건).
+  if (triggerEvent === AFTER_JOURNEY_EVENT && !readAfterConfig(row.trigger_filters)) {
+    return '앞 여정 설정이 없어 켤 수 없어요. 지도에서 다시 붙여 주세요.';
+  }
   // ★ 2026-09-29 여정 V2 0차 ② — 대상 조건 최종 게이트. 저장이 먼저 막지만 옛 저장분 · 직접 UPDATE가 남을 수 있어
   //   발송이 시작되는 유일한 길목(활성화)에서 한 번 더 본다. 추출기는 모르는 항목을 조용히 건너뛰어 대상을 넓힌다.
   {
@@ -736,6 +742,19 @@ export async function activateJourney(
   //   DDL 이전에 저장된 여정·직접 UPDATE가 남아 있을 수 있어 여기가 최종 게이트다.
   if (!isImplementedTriggerEvent(triggerEvent)) {
     return { ok: false, reason: '지원하지 않는 발송 조건이라 켤 수 없습니다. 여정을 다시 만들어 주세요.' };
+  }
+  // ★ 2026-10-20 V.3 §18 — 붙인 여정: 앞 여정 계보가 이 회사에 남아 있어야 켠다(보관 · 끝남만 남았으면 넘어올 고객이 없다).
+  if (triggerEvent === AFTER_JOURNEY_EVENT) {
+    const cfg = readAfterConfig(row.trigger_filters);
+    const lineageOk = await lineageColumnsReady();
+    const alive = cfg ? await query(
+      `SELECT 1 FROM journeys WHERE company_id = $1::uuid AND archived_at IS NULL AND status <> 'ended'
+          AND ${lineageOk ? '(id = $2::uuid OR lineage_id = $2::uuid)' : 'id = $2::uuid'} LIMIT 1`,
+      [companyId, cfg.root],
+    ) : null;
+    if (!alive || alive.rows.length === 0) {
+      return { ok: false, reason: '앞 여정이 없거나 끝나서 켤 수 없어요. 떼거나 다른 여정 뒤에 붙여 주세요.' };
+    }
   }
   const trgKey = triggerKeyForEvent(triggerEvent);
   if (trgKey) {
@@ -1057,6 +1076,15 @@ export async function activateJourney(
       const inh = await actClient.query(INHERIT_ENTRY_CURSORS_SQL, [journeyId]);
       if (Number(inh.rows[0]?.sources || 0) > 1) inheritConflict = true;
       else await actClient.query(CLOSE_OTHER_VERSIONS_ENTRY_SQL, [journeyId]);
+    }
+    // ★ V.3 §18(Codex 적대 A 1R) — 앞 여정을 마치면: 기준 시각을 켜기와 같은 트랜잭션에서 켠 시각으로(커밋 뒤에 잡으면 그 사이 마친 고객이 영영 빠진다).
+    //   다시 켜기 보정 · 새 모양 커서 이어받기가 이미 채웠으면 그대로 둔다.
+    if (r.rows.length > 0) {
+      await actClient.query(
+        `UPDATE journeys SET last_event_cursor = $2::timestamptz, last_event_cursor_id = NULL
+          WHERE id = $1::uuid AND trigger_event = 'journey.after' AND last_event_cursor IS NULL`,
+        [journeyId, r.rows[0].approved_at],
+      );
     }
     await actClient.query(inheritConflict ? 'ROLLBACK' : 'COMMIT');
   } catch (txErr) {

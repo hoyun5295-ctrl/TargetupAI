@@ -508,11 +508,11 @@ describe('읽는 자리 전수 — 직접 읽기 잔존은 허용 목록뿐(소�
     expect(count('utils/journey-safety-filter.ts')).toBe(1);
     expect(count('utils/channel-eligibility.ts')).toBe(1);
   });
-  it('여정 추출기: 안전필터는 전부 조각을 받는다(14곳) · 조각 없는 호출이 없다', () => {
+  it('여정 추출기: 안전필터는 전부 조각을 받는다(15곳 · ★1020 V.3 §18 앞 여정을 마치면 +1) · 조각 없는 호출이 없다', () => {
     const s = readFileSync(join(SRC, 'utils/journey-target-extractor.ts'), 'utf8');
-    expect(s.match(/buildJourneySafetyFilter\('c', consent\?\.isTrue\)\}\$\{scopeSql\}/g)).toHaveLength(14);
-    // 고객 조건도 같은 조각을 받는다(조건의 수신동의 필드) — 14곳
-    expect(s.match(/applyCustomerConditions\((filters|f)\.customer_conditions \|\| \[\], (filters|f)\.logic \|\| 'AND', params, consent\);/g)).toHaveLength(14);
+    expect(s.match(/buildJourneySafetyFilter\('c', consent\?\.isTrue\)\}\$\{scopeSql\}/g)).toHaveLength(15);
+    // 고객 조건도 같은 조각을 받는다(조건의 수신동의 필드) — 15곳
+    expect(s.match(/applyCustomerConditions\((filters|f)\.customer_conditions \|\| \[\], (filters|f)\.logic \|\| 'AND', params, consent\);/g)).toHaveLength(15);
     expect(s).not.toMatch(/buildJourneySafetyFilter\('c'\)/);
   });
   it('안전필터를 조각 없이 부르는 자리가 없다(전 파일)', () => {

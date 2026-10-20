@@ -216,7 +216,8 @@ describe('Codex 2라운드', () => {
   });
   it('진입 워커 두 문 · 재진입 워커 = BEGIN 바로 뒤 잠금 → 닫혔으면 넣지 않음 → 다시 읽은 계보 · 재진입은 넣기와 합계가 한 트랜잭션', () => {
     const W = SRC('journey-trigger-watcher.ts');
-    const locks = W.match(/const fresh = await lockLineageEntry\(client, j\.id\);\r?\n\s+if \(!fresh\.open\) \{\r?\n\s+await client\.query\('ROLLBACK'\);/g) || [];
+    // ★1020 V.3 §18(Codex 적대 A 2R) — 잠금 뒤 판정에 「시작 설정 그대로」(startStillSame)가 더해졌다(닫혔거나 바뀌었으면 넣지 않음).
+    const locks = W.match(/const fresh = await lockLineageEntry\(client, j\.id\);\r?\n(\s+\/\/[^\n]*\r?\n)?\s+if \(!fresh\.open \|\| !\(await startStillSame\(client, j, expect\)\)\) \{\r?\n\s+await client\.query\('ROLLBACK'\);/g) || [];
     expect(locks.length).toBe(2);
     expect((W.match(/j\.lineageIds = fresh\.lineageIds;/g) || []).length).toBe(2);
     const enq = between(W, 'async function enqueueCandidates', '\n}\n');

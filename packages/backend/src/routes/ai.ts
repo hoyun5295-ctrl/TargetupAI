@@ -11,7 +11,7 @@ import {
 import { translateAudience } from '../utils/audience-translate';   // ★ 2026-10-05 대상 번역(신뢰 설계 §2-2)
 import { validateOperatorInput } from '../utils/continuous-operator';
 import { isAboutPageViewer } from '../utils/about-page-access';   // ★ 2026-10-07 소개 페이지 숨김(hoyun 전용)
-import { buildGenderFilter, buildGradeFilter, buildRegionFilter, getGenderVariants, getRegionVariants } from '../utils/normalize';
+import { buildGenderFilter, buildGradeFilter, buildRegionFilter, getGenderVariants, getRegionVariants, isUuid } from '../utils/normalize';
 import { FIELD_MAP, FIELD_DISPLAY_MAP, reverseDisplayValue, getColumnFields, renderFieldValue } from '../utils/standard-field-map';
 import { replaceVariables } from '../utils/messageUtils';
 import { STANDARD_FIELD_FALLBACKS } from '../utils/var-fallback';
@@ -177,7 +177,7 @@ import { normalizeStartKind } from '../utils/journey-start-kind';
 //   /operator/data-profile endpoint = 마케팅 담당자 검토 UI 안내 카드 data source.
 import { getCompanyDataProfile, getCompanyJourneyFacts } from '../utils/company-data-profile';
 // ★ 2026-08-01 여정 재설계 §2-3 — 회사가 준 데이터로 만들 수 있는 여정만 연다(못 여는 것은 사유와 함께 잠근다).
-import { resolveTriggerAvailability, toAvailabilityMap, hasAnyAvailableTrigger, isImplementedTriggerEvent } from '../utils/journey-trigger-capability';
+import { resolveTriggerAvailability, toAvailabilityMap, hasAnyAvailableTrigger, isImplementedTriggerEvent, isCreatableTriggerEvent } from '../utils/journey-trigger-capability';
 // ★ D192 (2026-05-22): CT-51 Journey 통계 통합 진입점 — 옛 단순 통계(getJourneyStats/listExecutions)를 완전 진화 — buildJourneyStats (overview + steps + segments + hourly + weekday + variants) + listJourneyEnteredCustomers (회사 격리 + 페이지네이션)
 import { buildJourneyStats, listJourneyEnteredCustomers } from '../utils/journey-stats';
 // ★ D197 (2026-05-22) Phase B-2: Predictive Suite — 회사 예측 점수 분포 + Top 위험/구매 가능성 + 모델 정확도
@@ -207,6 +207,7 @@ import { reshapeJourney, ReshapeInputError } from '../utils/journey-reshape';
 import { buildAttachCheck } from '../utils/journey-lifecycle-map';
 import { isEndChipEnabled } from '../utils/journey-step-limits';
 import { createNewVersion } from '../utils/journey-lineage';
+import { attachCandidates, attachJourney, detachJourney, AttachBlockedError, AFTER_OUTCOMES, type AfterOutcome } from '../utils/journey-attach';
 import { prepareInterview, designJourneyFromInterview, MAX_INTERVIEW_SENTENCE } from '../utils/journey-interview-ai';
 import { listJourneyCallbackNumbers } from '../utils/journey-draft-save';
 import { currentPurchaseDoor, listObservedProducts, suggestUsagePeriod, PRODUCT_TRIGGER_EVENT } from '../utils/journey-product';
@@ -4189,6 +4190,74 @@ router.post('/operator/journeys/:id/steps', async (req: Request, res: Response) 
   }
 });
 
+// ★ 2026-10-20 여정 V.3 §18 — 기존 여정 뒤에 붙이기 · 붙기 전 점검 · 떼기(점검 = journey-attach judgeAttach 한 함수).
+/** 붙이기 주소 공용 — 권한 확인(회사 · AI Operator). 통과하면 회사 id. */
+async function attachGate(req: Request, res: Response): Promise<string | null> {
+  const companyId = req.user?.companyId;
+  if (!companyId) { res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' }); return null; }
+  const planCtx = await loadPlanContext(companyId);
+  if (!planCtx) { res.status(404).json({ success: false, error: '회사 정보를 찾을 수 없습니다.' }); return null; }
+  if (!isAiOperatorAllowed(planCtx, req.user)) {
+    res.status(403).json({ success: false, error: 'AI Operator 진입 권한이 없습니다.', code: 'AI_OPERATOR_GATED' });
+    return null;
+  }
+  return companyId;
+}
+/** 붙이기 주소 공용 오류 — 막음 409 · DDL 전 503 · 그 밖 500(원문 노출 0). */
+function attachError(res: Response, err: any, label: string) {
+  if (err instanceof AttachBlockedError) return res.status(409).json({ success: false, error: err.message, code: err.code, blocks: err.blocks });
+  if (err instanceof JourneyMigrationPendingError) return res.status(503).json({ success: false, error: err.message, code: err.code });
+  if (err?.code === '23514') return res.status(503).json({ success: false, error: 'DB 마이그레이션 필요: 운영자에게 journeys 시작 사건 목록(CHECK) 갱신 요청', code: 'DB_MIGRATION_PENDING' });
+  const msg = String(err?.message || '');
+  if (msg.includes('column') && msg.includes('does not exist')) {
+    return res.status(503).json({ success: false, error: 'DB 마이그레이션 필요: journeys ALTER 실행 요청', code: 'DB_MIGRATION_PENDING' });
+  }
+  console.error(`[Journeys ${label}] 오류:`, err);
+  return res.status(500).json({ success: false, error: '처리하지 못했어요. 잠시 뒤 다시 시도해 주세요.' });
+}
+const parseOutcome = (v: unknown): AfterOutcome => (AFTER_OUTCOMES.includes(String(v) as AfterOutcome) ? (String(v) as AfterOutcome) : 'any');
+
+// GET /api/ai/operator/journeys/:id/attach-candidates?outcome= — 이 여정(앞) 뒤에 붙일 수 있는 여정 · 결과별 가능 여부
+router.get('/operator/journeys/:id/attach-candidates', async (req: Request, res: Response) => {
+  try {
+    const companyId = await attachGate(req, res);
+    if (!companyId) return;
+    const out = await attachCandidates(companyId, String(req.params.id), parseOutcome(req.query.outcome));
+    if (!out) return res.status(404).json({ success: false, error: '여정을 찾을 수 없습니다.' });
+    return res.json({ success: true, ...out });
+  } catch (err: any) {
+    return attachError(res, err, 'attach-candidates');
+  }
+});
+
+// POST /api/ai/operator/journeys/:id/attach { afterJourneyId, outcome } — 이 여정(뒤)을 앞 여정 뒤에 붙인다(잠금 안 다시 점검)
+router.post('/operator/journeys/:id/attach', async (req: Request, res: Response) => {
+  try {
+    const companyId = await attachGate(req, res);
+    if (!companyId) return;
+    const afterId = String(req.body?.afterJourneyId || '');
+    if (!isUuid(afterId)) return res.status(400).json({ success: false, error: '앞 여정을 골라 주세요.' });
+    const outcome = String(req.body?.outcome || '') as AfterOutcome;
+    if (!AFTER_OUTCOMES.includes(outcome)) return res.status(400).json({ success: false, error: '어떤 고객을 넘길지 골라 주세요.' });
+    const out = await attachJourney(companyId, String(req.params.id), afterId, outcome);
+    return res.json({ success: true, warns: out.warns });
+  } catch (err: any) {
+    return attachError(res, err, 'attach');
+  }
+});
+
+// POST /api/ai/operator/journeys/:id/detach — 앞 여정에서 떼고 붙이기 전 시작으로 되돌린다
+router.post('/operator/journeys/:id/detach', async (req: Request, res: Response) => {
+  try {
+    const companyId = await attachGate(req, res);
+    if (!companyId) return;
+    const out = await detachJourney(companyId, String(req.params.id));
+    return res.json({ success: true, triggerEvent: out.triggerEvent });
+  } catch (err: any) {
+    return attachError(res, err, 'detach');
+  }
+});
+
 // DELETE /api/ai/operator/journeys/:id/steps/:stepId — step 삭제 + 재번호
 router.delete('/operator/journeys/:id/steps/:stepId', async (req: Request, res: Response) => {
   try {
@@ -5027,7 +5096,7 @@ router.post('/operator/journeys-ai-generate', singleFlight('journey-generate', a
     }
     // ★ 2026-08-08 이어달리기 — 추천 카드가 약속한 트리거. 등록·구현된 값만 받는다(fail-closed).
     //   여기서 거르지 않으면 만들 수 없는 트리거로 초안이 만들어지고 저장·활성화에서야 막힌다.
-    if (preferTriggerEvent && !isImplementedTriggerEvent(String(preferTriggerEvent))) {
+    if (preferTriggerEvent && !isCreatableTriggerEvent(String(preferTriggerEvent))) {
       return res.status(400).json({ success: false, error: '지원하지 않는 발송 조건입니다. 트리거를 다시 선택해 주세요.' });
     }
     const pkg = await generateJourneyPackage({

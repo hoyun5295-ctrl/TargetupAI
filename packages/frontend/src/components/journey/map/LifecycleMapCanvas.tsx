@@ -14,7 +14,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { AlertCircle, ArrowRight, ChevronDown, ChevronUp, Flag, GitBranch, Hourglass, Lock, MessageSquare, Plus, RotateCcw, Wrench, X } from 'lucide-react';
 import MapJourneyCard from './MapJourneyCard';
 import {
-  EXIT_STROKE, LINE_SHORT, LINE_STYLE, STATUS_META, countText,
+  EXIT_STROKE, LINE_SHORT, LINE_STYLE, STATUS_META, countText, lineFinishLabel, lineTargetText, triggerWhen,
   type AttachFix, type CreateMode, type LifecycleMapData, type LineTier, type MapJourney, type MapLine, type MapOverlap,
 } from '../../../utils/journey-map';
 import { FLOW_COLUMNS, L, PRODUCT_LANE, layoutMap, matchesFilter, type CardLayout, type MapStatusFilter } from '../../../utils/journey-map-layout';
@@ -40,6 +40,9 @@ interface Props {
   onCreate: (triggerEvent: string, mode?: CreateMode) => void;
   /** 고치기(서버가 정한 행동) — 페이지가 요청을 소유한다. */
   onFix: (fix: AttachFix) => void;
+  /** ★ V.3 §18 — 뒤에 여정 붙이기 창 · 앞 여정에서 떼기(페이지가 창 · 확인을 소유한다). */
+  onAttach: (journey: MapJourney) => void;
+  onDetach: (journey: MapJourney) => void;
 }
 
 const TIERS: LineTier[] = ['solid', 'warn', 'empty'];
@@ -73,7 +76,7 @@ function lineLabel(ln: MapLine): string | null {
 }
 
 export default function LifecycleMapCanvas({
-  data, statusFilter, search, focusId, glance, busyId, onFocusJourney, onOpen, onEntrants, onAction, onCreate, onFix,
+  data, statusFilter, search, focusId, glance, busyId, onFocusJourney, onOpen, onEntrants, onAction, onCreate, onFix, onAttach, onDetach,
 }: Props) {
   const isDesktop = useMedia('(min-width: 768px)');
   const wide = useMedia('(min-width: 1280px)');
@@ -157,6 +160,8 @@ export default function LifecycleMapCanvas({
       onFix={onFix}
       onFocusJourney={onFocusJourney}
       onEntrants={() => onEntrants(j.id)}
+      onAttach={() => onAttach(j)}
+      onDetach={() => onDetach(j)}
       onHover={(on) => setHoverId(on ? j.id : null)}
       {...extra}
     />
@@ -321,7 +326,7 @@ export default function LifecycleMapCanvas({
                     <div className="mt-0.5 flex items-center gap-1.5 text-[12px] text-slate-500 min-w-0">
                       <span className="shrink-0">{st.label}</span>
                       <span aria-hidden>·</span>
-                      <span className="truncate">{j.triggerLabel} 때 시작</span>
+                      <span className="truncate">{triggerWhen(j.triggerLabel, j.triggerEvent)} 시작</span>
                       <span className="ml-auto shrink-0 tabular-nums text-slate-400" title={`최근 ${j.windowDays}일 들어온 고객`}>{j.windowDays}일 {j.counts.entered.toLocaleString('ko-KR')}명</span>
                     </div>
                     {ov.length > 0 && c.open && (
@@ -444,13 +449,13 @@ export default function LifecycleMapCanvas({
           return (
             <div role="dialog" aria-label="선 설명" className="absolute z-[4] rounded-xl border border-slate-200 bg-white p-3 shadow-xl" style={{ left, top: openLine.my + 16, width }}>
               <div className="flex items-start gap-2">
-                <div className="flex-1 min-w-0 text-[13px] font-semibold text-slate-900">{from?.name || '여정'} → {ln.toLabel} 여정</div>
+                <div className="flex-1 min-w-0 text-[13px] font-semibold text-slate-900">{from?.name || '여정'} → {lineTargetText(ln)}</div>
                 <button type="button" onClick={() => setOpenLineId(null)} className="p-0.5 rounded text-slate-500 hover:text-slate-900 hover:bg-slate-100" aria-label="닫기"><X className="w-3.5 h-3.5" /></button>
               </div>
               <p className={`mt-1.5 text-[12px] leading-relaxed ${ln.tier === 'warn' ? 'text-amber-800' : 'text-slate-500'}`}>{ln.reason}</p>
               <div className="mt-2 grid grid-cols-3 gap-1.5">
                 {[
-                  ['구매 확인', `${ln.goalMet.toLocaleString('ko-KR')}명`, 'text-emerald-700'],
+                  [lineFinishLabel(ln), `${ln.goalMet.toLocaleString('ko-KR')}명`, 'text-emerald-700'],
                   ['이어받음', ln.handedOver == null ? '측정 전' : `${ln.handedOver.toLocaleString('ko-KR')}명`, 'text-slate-800'],
                   ['받는 쪽 전체', ln.receiverEntered == null ? '없음' : `${ln.receiverEntered.toLocaleString('ko-KR')}명`, 'text-slate-800'],
                 ].map(([k, v, t]) => (
@@ -463,7 +468,9 @@ export default function LifecycleMapCanvas({
               <p className="mt-1.5 text-[12px] leading-relaxed text-slate-400">
                 최근 {ln.windowDays}일 들어온 고객 기준이에요. {ln.handedOver == null
                   ? '이어받은 고객은 이번 업데이트 뒤 들어온 고객부터 세요.'
-                  : '구매로 앞 여정을 마친 뒤 하루 안에 받는 여정이 자기 시작 사건으로 맞이한 수예요.'}
+                  : ln.kind === 'attach'
+                    ? '앞 여정을 마치고 이 여정으로 넘어온 고객 수예요.'
+                    : '구매로 앞 여정을 마친 뒤 하루 안에 받는 여정이 자기 시작 사건으로 맞이한 수예요.'}
               </p>
               {ln.fix && (
                 <button type="button" onClick={() => { setOpenLineId(null); onFix(ln.fix!); }} className="mt-2 w-full h-8 rounded-lg text-[12.5px] font-semibold text-white bg-slate-900 hover:bg-slate-800 transition-colors">

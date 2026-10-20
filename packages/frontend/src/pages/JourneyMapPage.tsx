@@ -26,9 +26,10 @@ import { useJourneyActions } from '../components/journey/workspace/useJourneyAct
 import InterviewModal from '../components/journey/map/InterviewModal';
 import BatchActivateModal from '../components/journey/map/BatchActivateModal';
 import ProductJourneyModal from '../components/journey/map/ProductJourneyModal';
+import JourneyAttachModal from '../components/journey/map/JourneyAttachModal';
 import ConfirmModal, { type ConfirmState } from '../components/ConfirmModal';
 import { useToast } from '../components/ToastProvider';
-import { type AttachFix, type CreateMode, type LifecycleMapData, type MapJourney } from '../utils/journey-map';
+import { journeyApiErrorText, type AttachFix, type CreateMode, type LifecycleMapData, type MapJourney } from '../utils/journey-map';
 
 const REFRESH_MS = 60_000;
 
@@ -77,6 +78,8 @@ export default function JourneyMapPage() {
   // ★ V.3 §10-2 D7 — 기본 = 한눈에(요약 카드) · 칸까지 = 옛 척추 그림.
   const [glance, setGlance] = useState(true);
   const [confirm, setConfirm] = useState<ConfirmState | null>(null);
+  // ★ V.3 §18 — 이 여정 뒤에 붙이기 창(앞 여정).
+  const [attachFor, setAttachFor] = useState<MapJourney | null>(null);
   const confirmResolve = useRef<(() => void) | null>(null);
   const focusId = searchParams.get('focus');
 
@@ -207,6 +210,19 @@ export default function JourneyMapPage() {
     }
   }, [data, create]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  /** ★ V.3 §18 — 앞 여정에서 떼기(확인 한 단계 · 원래 시작으로). */
+  const detach = (j: MapJourney): Promise<void> => ask({
+    mode: 'warning',
+    title: '앞 여정에서 떼기',
+    description: `「${j.name}」는 원래 시작으로 돌아가요. 「${j.attachedAfter?.name || '앞 여정'}」을 마친 고객은 더 받지 않고, 진행 중 고객은 끝까지 받아요.`,
+    confirmLabel: '떼기',
+  }, async () => {
+    const res = await fetch(`/api/ai/operator/journeys/${j.id}/detach`, { method: 'POST', headers: jsonHeaders() });
+    const d = await res.json().catch(() => ({}));
+    if (!res.ok || !d?.success) throw new Error(journeyApiErrorText(d, '떼지 못했어요.'));
+    toast.success(`「${j.name}」를 앞 여정에서 뗐어요.`);
+  });
+
   const counts = useMemo(() => {
     const js = data?.journeys || [];
     return {
@@ -334,6 +350,8 @@ export default function JourneyMapPage() {
           }}
           onCreate={(t, mode) => create(t, undefined, mode)}
           onFix={(f) => void handleFix(f)}
+          onAttach={(j) => setAttachFor(j)}
+          onDetach={(j) => void detach(j)}
         />
       </div>
 
@@ -367,6 +385,12 @@ export default function JourneyMapPage() {
         onFocusJourney={focusJourney}
         onActivateMany={(ids) => { void load(true).then(() => setBatch({ open: true, preselect: ids })); }}
         onCreated={() => void load(true)}
+      />
+      <JourneyAttachModal
+        open={!!attachFor}
+        after={attachFor}
+        onClose={() => setAttachFor(null)}
+        onAttached={(id) => { void load(true).then(() => focusJourney(id)); }}
       />
       <ProductJourneyModal
         open={productOpen}

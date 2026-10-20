@@ -35,6 +35,8 @@ import { lineageColumnsReady } from './journey-lineage';
 // ★ 2026-10-09 고객 관계 지도 — 칸 편집 정책(PATCH 게이트와 같은 함수) · 구매 문(가입 안내문이 문마다 다르다)
 import { stepEditPolicy, type StepEditPolicy } from './journey-step-edit-policy';
 import { isMallPurchaseDoorActive } from './journey-purchase-ledger';
+// ★ 2026-10-20 여정 V.3 §18 — 기존 여정 뒤에 붙이기(붙인 여정 = 앞 여정 열 · 바로 아래 · 선)
+import { readAfterConfig, AFTER_OUTCOME_LABEL, type AfterOutcome } from './journey-after-config';
 
 /** 지도 레인(윗띠 생애 흐름 → 아랫띠 순간 → 상시 레일). 계약에 트리거가 있는 레인만 나간다(없는 레인을 지어내지 않는다). */
 const LANE_META: Array<{ key: JourneyLane; label: string; band: 'flow' | 'moment' | 'standing' }> = [
@@ -165,10 +167,14 @@ export interface MapJourney {
   health: JourneyHealth;
   /** ★ V.3 — 이 계보의 지난 30일 실제 운영 크레딧(원장) · 못 세면 null. */
   operationCredits30d: number | null;
+  /** ★ V.3 §18 — 다른 여정 뒤에 붙은 여정이면 앞 여정(대표 판 · 없어졌으면 journeyId null) · 넘길 결과. 붙지 않았으면 null. */
+  attachedAfter: { journeyId: string | null; name: string; outcome: AfterOutcome; outcomeLabel: string } | null;
 }
 
 export interface MapLine {
   id: string;
+  /** ★ V.3 §18 — contract = 계약 간선(목표 → 다음 시작 사건) · attach = 담당자가 붙인 선(앞 여정을 마치면). */
+  kind: 'contract' | 'attach';
   fromJourneyId: string;
   toJourneyId: string | null;
   fromTrigger: string;
@@ -423,6 +429,88 @@ export function computeMapLines(marketing: LineJourneyInput[], capOf: (ev: strin
   return out;
 }
 
+/** ★ V.3 §18 — 붙인 선의 사유(계약 선과 다른 문장만 · 나머지는 LINE_REASON). */
+const ATTACH_LINE_REASON: Partial<Record<LineState, string>> = {
+  connected: '앞 여정을 마친 고객이 이 여정으로 바로 이어져요.',
+  leak: '앞 여정이 목표를 이뤄도 끝내지 않아 넘어오는 고객이 없어요. "목표 달성 시 자동 종료"를 켜면 이어집니다.',
+  sender_off: '앞 여정이 켜져 있지 않아 아직 넘어오는 고객이 없어요.',
+  receiver_draft: '이 여정이 초안이라 아직 못 받아요.',
+  receiver_off: '이 여정이 멈춰 있어 못 받아요.',
+};
+
+/** ★ V.3 §18 — 붙인 선 상태(순수). 받는 쪽 → 보내는 쪽 → 결과 순으로 판정(계약 선과 같은 순서). */
+export function attachLineState(a: { status: string; goalExitEnabled: boolean }, b: { status: string }, outcome: AfterOutcome): LineState {
+  if (b.status === 'draft') return 'receiver_draft';
+  if (b.status !== 'active') return 'receiver_off';
+  if (a.status !== 'active') return 'sender_off';
+  if (outcome === 'goal_met' && !a.goalExitEnabled) return 'leak';
+  return 'connected';
+}
+
+/**
+ * ★ V.3 §18 — 붙인 여정의 자리(제자리 수정 · 순수에 가깝다): 앞 여정 계보의 대표 판(이 목록 = 옛 판 접은 뒤)을 찾아
+ *   띠 · 열을 따르고 카드 문장을 「「앞 여정」 마친 뒤」로. 정보 알림인 뒤 여정은 정보 띠 그대로(광고 아닌 알림톡은 흐름에 넣지 않는다).
+ *   앞 여정을 못 찾으면 상시 띠 · 「앞 여정 없음」(상태 한 줄이 떼기를 안내).
+ */
+export function placeAttached(list: MapJourney[], filtersById: Map<string, Record<string, any>>, rootOf: (j: MapJourney) => string): void {
+  const repOf = new Map<string, MapJourney>();
+  for (const j of list) {
+    const root = rootOf(j);
+    const cur = repOf.get(root);
+    if (!cur || (RECEIVER_RANK[j.status] ?? 9) < (RECEIVER_RANK[cur.status] ?? 9)) repOf.set(root, j);
+  }
+  // ★ Codex 적대 A 1R — 사슬(A → B → C)은 부모부터 자리를 정한다(목록 순서대로 하면 C 가 아직 안 옮긴 B 의 자리를 베꼈다). 고리는 제자리.
+  const done = new Set<string>();
+  const visiting = new Set<string>();
+  const place = (b: MapJourney): void => {
+    if (done.has(b.id) || visiting.has(b.id) || b.triggerEvent !== 'journey.after') return;
+    const cfg = readAfterConfig(filtersById.get(b.id));
+    if (!cfg) { done.add(b.id); return; }
+    visiting.add(b.id);
+    const a = repOf.get(cfg.root);
+    if (a && a.id !== b.id) place(a);
+    visiting.delete(b.id);
+    done.add(b.id);
+    const outcomeLabel = AFTER_OUTCOME_LABEL[cfg.outcome];
+    if (!a || a.id === b.id) {
+      b.attachedAfter = { journeyId: null, name: '', outcome: cfg.outcome, outcomeLabel };
+      if (b.band !== 'info') { b.band = 'standing'; b.lane = 'standing'; }
+      b.triggerLabel = '앞 여정(없어짐) 마친 뒤';
+      return;
+    }
+    b.attachedAfter = { journeyId: a.id, name: a.name, outcome: cfg.outcome, outcomeLabel };
+    if (b.band !== 'info') { b.band = a.band === 'info' ? 'standing' : a.band; b.lane = a.band === 'info' ? 'standing' : a.lane; }
+    b.triggerLabel = `「${a.name}」 마친 뒤`;
+  };
+  for (const b of list) place(b);
+}
+
+/** ★ V.3 §18 — 붙인 여정을 앞 여정 바로 뒤에(같은 열에서 위아래로 이어지게 · 사슬은 깊이 순 · 고리 · 고아는 제자리). */
+export function orderAttached(list: MapJourney[]): MapJourney[] {
+  const children = new Map<string, MapJourney[]>();
+  for (const j of list) {
+    const pid = j.attachedAfter?.journeyId;
+    if (!pid || pid === j.id) continue;
+    if (!children.has(pid)) children.set(pid, []);
+    children.get(pid)!.push(j);
+  }
+  const out: MapJourney[] = [];
+  const seen = new Set<string>();
+  const visit = (j: MapJourney) => {
+    if (seen.has(j.id)) return;
+    seen.add(j.id);
+    out.push(j);
+    for (const c of children.get(j.id) || []) visit(c);
+  };
+  for (const j of list) {
+    const pid = j.attachedAfter?.journeyId;
+    if (pid && pid !== j.id && list.some((x) => x.id === pid)) continue;   // 앞 여정 뒤에서 방문한다
+    visit(j);
+  }
+  for (const j of list) visit(j);   // 고리(서로 붙은 여정)도 빠짐없이
+  return out;
+}
+
 /** ★ V.3 §10-2 — 겹침 해소 1클릭(순수). 주문 완료 여정에 옵션을 켠다 · 해소 길 없는 쌍 = null. */
 export function overlapFixFor(a: { id: string; triggerEvent: string }, b: { id: string; triggerEvent: string }): AttachFix | null {
   const order = a.triggerEvent === 'cdp.purchase' ? a : b.triggerEvent === 'cdp.purchase' ? b : null;
@@ -440,7 +528,7 @@ const FIX_LINE_STATES = new Set(['leak', 'reentry_off', 'dormant_mismatch']);
  * ★ V.3 §10-3 — 여정마다 상태 한 줄(순수). 순서 = 끝남 · 멈춤(시스템이면 막힘) · 초안 · 손볼 곳(선 · 해소 가능한 겹침 · 갈림 결함 · 전체 고객) · 조용 · 잘 됨.
  */
 export function journeyHealth(
-  j: Pick<MapJourney, 'id' | 'status' | 'windowDays' | 'goalLabel' | 'counts' | 'graph' | 'broadAudience' | 'activationCost' | 'pause'>,
+  j: Pick<MapJourney, 'id' | 'status' | 'windowDays' | 'goalLabel' | 'counts' | 'graph' | 'broadAudience' | 'activationCost' | 'pause'> & Partial<Pick<MapJourney, 'attachedAfter'>>,
   lines: Array<Pick<MapLine, 'fromJourneyId' | 'toJourneyId' | 'state' | 'reason' | 'fix'>>,
   overlaps: Array<Pick<MapOverlap, 'a' | 'b' | 'text' | 'fix'>>,
 ): JourneyHealth {
@@ -456,6 +544,7 @@ export function journeyHealth(
       fix: { action: 'activate', journeyId: j.id, label: '켜기' },
     };
   }
+  if (j.attachedAfter && !j.attachedAfter.journeyId) return { tone: 'fix', text: '앞 여정이 없어져 넘어오는 고객이 없어요. 떼거나 다른 여정 뒤에 붙여 주세요.', fix: null };
   const line = lines.find((l) => FIX_LINE_STATES.has(l.state) && (l.fix?.journeyId ? l.fix.journeyId === j.id : l.fromJourneyId === j.id));
   if (line) return { tone: 'fix', text: line.reason, fix: line.fix || null };
   const ov = overlaps.find((o) => o.fix && o.fix.journeyId === j.id);
@@ -697,6 +786,7 @@ export async function buildLifecycleMap(companyId: string, viewerUserId?: string
       pause: String(r.status || '') === 'paused' ? pauseReasonView(r.pause_reason) : null,
       health: { tone: 'good', text: '', fix: null },   // 선 · 겹침이 정해진 뒤 아래에서 채운다(journeyHealth)
       operationCredits30d: null,
+      attachedAfter: null,   // 계보 접기 뒤 대표 판을 보고 아래에서 채운다(placeAttached)
     };
   });
 
@@ -714,6 +804,11 @@ export async function buildLifecycleMap(companyId: string, viewerUserId?: string
   }
   // 레인 안 순서(서버가 정한다 · 회의론자 A4) — 켜짐 → 멈춤 → 초안 → 끝남, 같은 상태면 지금 진행 중 많은 순.
   journeys.sort((a, b) => ((RECEIVER_RANK[a.status] ?? 9) - (RECEIVER_RANK[b.status] ?? 9)) || (b.counts.activeNow - a.counts.activeNow));
+  // ★ V.3 §18 — 붙인 여정 = 앞 여정 자리(띠 · 열)로 · 앞 여정 바로 아래 순서.
+  const rootOf = (j: MapJourney) => String(j.lineageId || j.id).toLowerCase();
+  placeAttached(journeys, new Map(rows.map((r) => [String(r.id), (r.trigger_filters || {}) as Record<string, any>])), rootOf);
+  const ordered = orderAttached(journeys);
+  journeys.splice(0, journeys.length, ...ordered);
 
   // ── 선: 계약 간선에서만(computeMapLines · 순수). 정보 알림 · 상시는 선에 참여하지 않는다.
   const marketing = journeys.filter((j) => j.band === 'flow' || j.band === 'moment');
@@ -726,6 +821,7 @@ export async function buildLifecycleMap(companyId: string, viewerUserId?: string
     const a = journeyById.get(c.fromJourneyId)!;
     return {
       ...c,
+      kind: 'contract' as const,
       toLabel: triggerLabel(c.toTrigger),
       tier: LINE_TIER[c.state],
       goalMet: a.counts.goalMet,
@@ -737,14 +833,57 @@ export async function buildLifecycleMap(companyId: string, viewerUserId?: string
     };
   });
 
+  // ★ V.3 §18 — 붙인 선(앞 여정 → 뒤 여정 · 띠와 무관 · 계약 선과 같은 상태 이름 · 판정 = attachLineState 한 곳).
+  for (const b of journeys) {
+    const at = b.attachedAfter;
+    if (!at || !at.journeyId) continue;
+    const a = journeyById.get(at.journeyId);
+    if (!a) continue;
+    const state = attachLineState(a, b, at.outcome);
+    lines.push({
+      id: `${a.id}->${b.id}`,
+      kind: 'attach',
+      fromJourneyId: a.id,
+      toJourneyId: b.id,
+      fromTrigger: a.triggerEvent,
+      toTrigger: b.triggerEvent,
+      toLabel: b.name,
+      state,
+      tier: LINE_TIER[state],
+      reason: ATTACH_LINE_REASON[state] || LINE_REASON[state],
+      goalMet: at.outcome === 'goal_met' ? a.counts.goalMet : at.outcome === 'completed' ? a.counts.completed : a.counts.goalMet + a.counts.completed,
+      handedOver: null,
+      handedOver7d: null,
+      receiverEntered: null,
+      windowDays: a.windowDays,
+      fix: null,
+    });
+  }
+
   // 선마다 1클릭 고치기(이어붙이기 점검과 같은 규칙 · fixForLine 한 곳).
   for (const ln of lines) ln.fix = fixForLine(ln, journeyById);
+
+  // ★ V.3 §18 — 붙인 선 숫자: 뒤 여정이 앞 여정을 마친 고객으로 받은 수(진입 표식 src = after) · 같은 창(A 의 W일) · 전체 진입이 분모.
+  for (const ln of lines) {
+    if (ln.kind !== 'attach' || !ln.toJourneyId) continue;
+    const r = await query(
+      `SELECT COUNT(*) FILTER (WHERE b.entry_event_properties->'__entry'->>'src' = 'after')::int AS handed,
+              COUNT(*) FILTER (WHERE b.entry_event_properties->'__entry'->>'src' = 'after' AND b.entered_at > NOW() - INTERVAL '7 days')::int AS handed_7d,
+              COUNT(*)::int AS total
+         FROM journey_executions b
+        WHERE b.journey_id = $1::uuid AND b.status <> 'holdout' AND b.entered_at > NOW() - make_interval(days => $2::int)${execScope(scopeSql, 'b')}`,
+      [ln.toJourneyId, ln.windowDays],
+    );
+    ln.handedOver = Number(r.rows[0]?.handed || 0);
+    ln.handedOver7d = Number(r.rows[0]?.handed_7d || 0);
+    ln.receiverEntered = Number(r.rows[0]?.total || 0);
+  }
 
   // 선 숫자 — 같은 고객 · A 에 창 W(A 의 창) 안에 들어와 목표 달성 · B 는 트리거 사건으로 들어옴(__entry 표식) · A 진입 뒤 ~ A 종료 + 24시간 ·
   //   같은 사건(같은 key)으로 동시에 들어온 경우 제외 · holdout 제외. 표식이 있는 B 행이 하나도 없으면 null(측정 전).
   //   분모 = B 의 같은 창 전체 진입(holdout 제외) — "이어받음 M / 전체 X".
   for (const ln of lines) {
-    if (!ln.toJourneyId) continue;
+    if (!ln.toJourneyId || ln.kind === 'attach') continue;
     const r = await query(
       `WITH marked AS (
          SELECT COUNT(*)::int AS n FROM journey_executions b

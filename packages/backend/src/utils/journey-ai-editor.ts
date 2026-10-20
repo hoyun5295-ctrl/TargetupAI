@@ -18,7 +18,7 @@ import { sanitizeForSms } from './message-sanitizer';
 import { stripAdParts } from './messageUtils';
 import { resolveJourneyAdFlag } from './journey-ad-policy';
 // ★ 2026-08-08 이어달리기 — 고정된 트리거는 편집으로 풀리지 않는다(설계서 §6).
-import { isImplementedTriggerEvent, triggerTemplateCode, contractReentryPolicy, defaultGoalExitFor, storageTemplateCodeFor } from './journey-trigger-capability';
+import { isImplementedTriggerEvent, isCreatableTriggerEvent, triggerTemplateCode, contractReentryPolicy, defaultGoalExitFor, storageTemplateCodeFor } from './journey-trigger-capability';
 // ★ 2026-09-29 여정 V2 0차 ⑧⑩ — 칸 종류 · 개수 · 대기 상한은 CT 한 곳. 넘치면 자르지 않고 거부 · 모르는 종류는 거부.
 import { resolveStepType, assertStepsWithinLimit, clampStepDelayHours, MAX_JOURNEY_STEPS, MAX_MESSAGE_STEPS, MAX_WAIT_TIMEOUT_HOURS, JourneyInputError, JOURNEY_SUBJECT_MAX_CHARS } from './journey-step-limits';
 // ★ 2026-09-29 여정 V2 0차 ② — AI 가 낸 대상 조건 중 쓸 수 없는 것은 빼고 "반영 안 됨"으로 알린다.
@@ -131,7 +131,7 @@ export async function editJourneyPackage(input: EditJourneyInput): Promise<any> 
   // ★ 2026-08-08 이어달리기 — 고정된 시작 신호는 편집으로 풀리지 않는다.
   //   후처리로 트리거만 되돌리면 **문안은 다른 대상 기준으로 다시 쓰인 채** 남아 대상과 내용이 갈린다.
   //   그래서 AI에게 전제를 먼저 주고(아래 프롬프트), 결과는 계약값으로 다시 고정한다(아래 후처리).
-  const presetTrigger = typeof cur.presetTriggerEvent === 'string' && isImplementedTriggerEvent(cur.presetTriggerEvent)
+  const presetTrigger = typeof cur.presetTriggerEvent === 'string' && isCreatableTriggerEvent(cur.presetTriggerEvent)
     ? cur.presetTriggerEvent : null;
   // ★ 2026-09-29 V2 (회의론자 0차 검증 1 · 치명) — 정보 알림 · 날짜축 · 1회 발송(시작 방식이 정해진 패키지)은
   //   시작 방식 · 트리거 · 대상 · 날짜 설정을 받은 그대로 돌려준다(프리셋과 같은 규약).
@@ -245,8 +245,8 @@ triggerEvent·templateCode·triggerFilters는 받은 값을 그대로 돌려주�
   let triggerEvent = String(parsed?.triggerEvent || cur.triggerEvent || 'custom').slice(0, 50);
   // ★ 2026-09-29 V2 0차 ① — 모르는 트리거로 바뀐 응답은 받지 않는다(현재값 유지).
   //   (회의론자 0차 검증 1) 현재값도 모르는 값이면 'custom'(= 전 고객)으로 떨어뜨리지 않고 거부한다.
-  if (!isImplementedTriggerEvent(triggerEvent)) {
-    if (isImplementedTriggerEvent(String(cur.triggerEvent || ''))) triggerEvent = String(cur.triggerEvent);
+  if (!isCreatableTriggerEvent(triggerEvent)) {
+    if (isCreatableTriggerEvent(String(cur.triggerEvent || ''))) triggerEvent = String(cur.triggerEvent);
     else throw new JourneyInputError('수정 결과의 시작 사건을 알 수 없어요. 여정을 다시 만들어 주세요.');
   }
   let triggerFilters = (parsed?.triggerFilters && typeof parsed.triggerFilters === 'object') ? parsed.triggerFilters : (cur.triggerFilters || {});

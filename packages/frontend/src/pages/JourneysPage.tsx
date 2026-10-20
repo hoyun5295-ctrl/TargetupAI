@@ -448,6 +448,7 @@ function triggerLabelOf(triggerEvent?: string, templateCode?: TemplateCode): str
   const def = triggerEvent ? TRIGGER_EVENTS.find((t) => t.triggerEvent === triggerEvent) : undefined;
   if (def) return def.label;
   if (triggerEvent === 'custom') return '설정한 대상 조건';
+  if (triggerEvent === 'journey.after') return '앞 여정을 마치면';   // ★ V.3 §18 — 지도에서 붙인 여정
   return templateCode ? TEMPLATE_VISUAL[templateCode]?.label || '설정한 조건' : '설정한 조건';
 }
 
