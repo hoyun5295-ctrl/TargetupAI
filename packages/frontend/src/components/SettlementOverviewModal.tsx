@@ -13,6 +13,7 @@
 import { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Wallet, X, Loader2, AlertTriangle, TrendingDown, CheckCircle2, Receipt } from 'lucide-react';
+import { ADMIN_TABLE_ONELINE, AdminLongText } from './admin/ui/admin-ui'; // ★ 2026-10-20 표 칸 한 줄 · 긴 글 = 말줄임 + 전문
 
 interface OverviewRow {
   company_id: string;
@@ -154,7 +155,7 @@ export default function SettlementOverviewModal({ show, onClose }: Props) {
                 <div className="text-center py-12 text-white/40 text-sm">해당 기간에 발행된 정산이 없습니다.</div>
               ) : (
                 <div className="overflow-x-auto">
-                  <table className="w-full text-sm border-collapse">
+                  <table className={`w-full text-sm border-collapse ${ADMIN_TABLE_ONELINE}`}>
                     <thead>
                       <tr className="text-left text-[11px] text-white/45 border-b border-white/10">
                         <th className="py-2 pr-2 font-medium w-10">#</th>
@@ -170,7 +171,7 @@ export default function SettlementOverviewModal({ show, onClose }: Props) {
                       {rows.map((r, i) => (
                         <tr key={r.company_id} className="border-b border-white/5 hover:bg-white/[0.03]">
                           <td className="py-2 pr-2 text-white/40 tabular-nums">{i + 1}</td>
-                          <td className="py-2 px-2 text-white/90">{r.company_name}</td>
+                          <td className="py-2 px-2 text-white/90"><AdminLongText text={r.company_name} max={220} label="고객사" /></td>
                           <td className="py-2 px-2 text-white/70 text-right tabular-nums whitespace-nowrap">{won(r.total_amount)}</td>
                           <td className="py-2 px-2 text-emerald-300/80 text-right tabular-nums whitespace-nowrap">{won(r.paid_amount)}</td>
                           <td className={`py-2 px-2 text-right tabular-nums whitespace-nowrap font-semibold ${r.unpaid_amount > 0 ? 'text-rose-300' : 'text-white/30'}`}>

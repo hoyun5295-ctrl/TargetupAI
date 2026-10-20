@@ -20,6 +20,7 @@ import ImcProfileImportModal from './ImcProfileImportModal';
 import UnsubscribeSettingModal from './UnsubscribeSettingModal';
 import ConfirmModal, { type ConfirmState } from '../ConfirmModal';
 import TablePagination from '../common/TablePagination'; // ★ 2026-07-20 목록 공용 페이저
+import { ADMIN_TABLE_ONELINE, ADMIN_TR_OPEN, AdminDetailItem, AdminDetailModal, AdminLongText, adminRowOpen } from '../admin/ui/admin-ui'; // ★ 2026-10-20 표 칸 한 줄 · 행 = 상세 창
 
 type ApprovalStatus = 'PENDING_APPROVAL' | 'APPROVED' | 'REJECTED';
 
@@ -100,6 +101,8 @@ export default function AlimtalkSendersSection({ onChanged }: AlimtalkSendersSec
   const [toast, setToast] = useState<string | null>(null);
   const [tab, setTab] = useState<TabKey>('all');
   const [rejectTarget, setRejectTarget] = useState<Sender | null>(null);
+  // ★ 2026-10-20 행을 누르면 상세 창 · 승인 · 반려 · 재승인은 창 안에서(Harold 「클릭하면 모달 · 거기서 승인」) — 같은 처리 함수 · 같은 확인 창 · 같은 반려 창
+  const [detail, setDetail] = useState<Sender | null>(null);
   const [rejectReason, setRejectReason] = useState('');
   const [submittingAction, setSubmittingAction] = useState(false);
   const [confirm, setConfirm] = useState<ConfirmState | null>(null);
@@ -441,8 +444,8 @@ export default function AlimtalkSendersSection({ onChanged }: AlimtalkSendersSec
             )}
           </div>
         ) : (
-          <div className="border border-gray-200 rounded-xl overflow-hidden">
-            <table className="w-full text-sm">
+          <div className="border border-gray-200 rounded-xl overflow-x-auto">
+            <table className={`w-full text-sm ${ADMIN_TABLE_ONELINE}`}>
               <thead className="bg-gray-50 text-xs text-gray-500">
                 <tr>
                   <th className="text-left px-4 py-2">회사</th>
@@ -464,29 +467,26 @@ export default function AlimtalkSendersSection({ onChanged }: AlimtalkSendersSec
                   return (
                     <tr
                       key={s.id}
-                      className="border-t border-gray-100 hover:bg-gray-50 align-top"
+                      {...adminRowOpen(() => setDetail(s))}
+                      className={`border-t border-gray-100 align-top ${ADMIN_TR_OPEN}`}
                     >
                       <td className="px-4 py-2 text-xs text-gray-600">
-                        {s.company_name || s.company_id.slice(0, 8)}
+                        <AdminLongText text={s.company_name || s.company_id.slice(0, 8)} max={160} rowOpens />
                       </td>
                       <td className="px-4 py-2">
-                        <div className="font-medium text-gray-900">
-                          {s.profile_name}
-                        </div>
+                        <AdminLongText text={s.profile_name} max={200} rowOpens className="font-medium text-gray-900" />
                         <div className="text-[11px] text-gray-400 font-mono">
                           {s.profile_key?.slice(0, 20)}...
                         </div>
                         {approval === 'REJECTED' && s.reject_reason && (
-                          <div className="text-[11px] text-red-600 mt-0.5 max-w-xs truncate">
-                            반려: {s.reject_reason}
-                          </div>
+                          <AdminLongText text={`반려: ${s.reject_reason}`} max={200} rowOpens className="text-[11px] text-red-600 mt-0.5" />
                         )}
                       </td>
                       <td className="px-4 py-2 text-xs font-mono text-gray-600">
                         {s.yellow_id || '-'}
                       </td>
                       <td className="px-4 py-2 text-xs text-gray-600">
-                        {s.category_name_cache || s.category_code || '-'}
+                        <AdminLongText text={s.category_name_cache || s.category_code} max={140} rowOpens />
                       </td>
                       <td className="text-center px-4 py-2">
                         <span
@@ -514,38 +514,14 @@ export default function AlimtalkSendersSection({ onChanged }: AlimtalkSendersSec
                       <td className="text-center px-4 py-2 text-xs">
                         {s.brand_targeting_yn === 'Y' ? '✓' : '-'}
                       </td>
-                      <td className="text-right px-4 py-2 space-x-1 whitespace-nowrap">
-                        {approval === 'PENDING_APPROVAL' && (
-                          <>
-                            <button
-                              type="button"
-                              onClick={() => approveSender(s)}
-                              disabled={submittingAction}
-                              className="text-[11px] px-2 py-0.5 bg-green-600 hover:bg-green-700 text-white rounded disabled:opacity-50"
-                            >
-                              승인
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setRejectTarget(s);
-                                setRejectReason('');
-                              }}
-                              disabled={submittingAction}
-                              className="text-[11px] px-2 py-0.5 bg-red-500 hover:bg-red-600 text-white rounded disabled:opacity-50"
-                            >
-                              반려
-                            </button>
-                          </>
-                        )}
-                        {approval === 'REJECTED' && (
+                      <td className="text-right px-4 py-2 space-x-1 whitespace-nowrap" onClick={(e) => e.stopPropagation()}>
+                        {(approval === 'PENDING_APPROVAL' || approval === 'REJECTED') && (
                           <button
                             type="button"
-                            onClick={() => approveSender(s)}
-                            disabled={submittingAction}
-                            className="text-[11px] px-2 py-0.5 bg-green-600 hover:bg-green-700 text-white rounded disabled:opacity-50"
+                            onClick={() => setDetail(s)}
+                            className="text-[11px] px-2 py-0.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 rounded"
                           >
-                            재승인
+                            {approval === 'PENDING_APPROVAL' ? '승인 · 반려' : '재승인'}
                           </button>
                         )}
                         <button
@@ -625,6 +601,41 @@ export default function AlimtalkSendersSection({ onChanged }: AlimtalkSendersSec
           }}
         />
       )}
+
+      {/* ★ 2026-10-20 행 상세 창 — 승인 · 반려 · 재승인은 여기서(같은 확인 창 · 같은 반려 창으로 넘긴다) */}
+      {detail && (() => {
+        const ap = (detail.approval_status || 'PENDING_APPROVAL') as ApprovalStatus;
+        return (
+          <AdminDetailModal
+            title={`발신프로필 · ${detail.profile_name}`}
+            onClose={() => setDetail(null)}
+            footer={ap === 'PENDING_APPROVAL' ? (
+              <div className="flex gap-2">
+                <button type="button" disabled={submittingAction} onClick={() => { const s = detail; setDetail(null); setRejectTarget(s); setRejectReason(''); }}
+                  className="flex-1 h-9 rounded-lg border border-red-200 bg-white text-red-700 text-[13px] font-medium hover:bg-red-50 disabled:opacity-50">반려</button>
+                <button type="button" disabled={submittingAction} onClick={() => { const s = detail; setDetail(null); approveSender(s); }}
+                  className="flex-1 h-9 rounded-lg bg-green-600 text-white text-[13px] font-medium hover:bg-green-700 disabled:opacity-50">승인</button>
+              </div>
+            ) : ap === 'REJECTED' ? (
+              <button type="button" disabled={submittingAction} onClick={() => { const s = detail; setDetail(null); approveSender(s); }}
+                className="w-full h-9 rounded-lg bg-green-600 text-white text-[13px] font-medium hover:bg-green-700 disabled:opacity-50">재승인</button>
+            ) : undefined}
+          >
+            <dl>
+              <AdminDetailItem label="회사">{detail.company_name || detail.company_id.slice(0, 8)}</AdminDetailItem>
+              <AdminDetailItem label="프로필">{detail.profile_name}</AdminDetailItem>
+              <AdminDetailItem label="프로필 키"><span className="font-mono text-xs">{detail.profile_key || '-'}</span></AdminDetailItem>
+              <AdminDetailItem label="채널ID"><span className="font-mono">{detail.yellow_id || '-'}</span></AdminDetailItem>
+              <AdminDetailItem label="카테고리">{detail.category_name_cache || detail.category_code || '-'}</AdminDetailItem>
+              <AdminDetailItem label="승인"><span className={`inline-block text-[11px] px-2 py-0.5 rounded ${APPROVAL_BADGE[ap].cls}`}>{APPROVAL_BADGE[ap].label}</span></AdminDetailItem>
+              <AdminDetailItem label="상태">{detail.status}</AdminDetailItem>
+              <AdminDetailItem label="080">{detail.unsubscribe_phone || '미설정'}</AdminDetailItem>
+              <AdminDetailItem label="브랜드M/N">{detail.brand_targeting_yn === 'Y' ? '사용' : '-'}</AdminDetailItem>
+              {detail.reject_reason && <AdminDetailItem label="반려 사유"><span className="text-red-600">{detail.reject_reason}</span></AdminDetailItem>}
+            </dl>
+          </AdminDetailModal>
+        );
+      })()}
 
       {/* 반려 사유 입력 모달 */}
       {rejectTarget && (

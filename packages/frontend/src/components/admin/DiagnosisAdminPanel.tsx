@@ -7,6 +7,7 @@
  */
 import { useEffect, useState } from 'react';
 import { ChevronLeft, Loader2, RefreshCw } from 'lucide-react';
+import { ADMIN_TABLE_ONELINE, AdminLongText } from './ui/admin-ui'; // ★ 2026-10-20 표 칸 한 줄 · 긴 글 = 말줄임 + 전문
 
 const authHeaders = (): Record<string, string> => ({
   Authorization: `Bearer ${localStorage.getItem('token')}`,
@@ -381,7 +382,7 @@ export default function DiagnosisAdminPanel({ onBadgeRefresh, toast }: Props) {
         <div className="py-16 text-center text-sm text-gray-400">아직 접수된 진단이 없습니다.</div>
       ) : (
         <div className="overflow-x-auto">
-          <table className="w-full text-sm">
+          <table className={`w-full text-sm ${ADMIN_TABLE_ONELINE}`}>
             <thead>
               <tr className="border-b border-gray-100 text-left text-xs text-gray-400">
                 <th className="px-5 py-2.5 font-medium">접수일</th>
@@ -405,7 +406,7 @@ export default function DiagnosisAdminPanel({ onBadgeRefresh, toast }: Props) {
                       {r.funnel}
                     </span>
                   </td>
-                  <td className="px-3 py-3 font-medium text-gray-900">{displayName(r)}</td>
+                  <td className="px-3 py-3 font-medium text-gray-900"><AdminLongText text={displayName(r)} max={220} rowOpens /></td>
                   <td className="px-3 py-3 text-gray-500">
                     {r.funnel === 'B' ? (
                       <span>

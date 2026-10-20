@@ -2,17 +2,45 @@
  * TemplateDetailModal — 슈퍼관리자 AdminDashboard 에서 옮긴 화면(★ 2026-10-09 파일 분리 E · 설계서 docs/2026-10-03-admin-dashboard-split-design.md §5)
  * 옮긴 방법 = 스크립트(원문 그대로 · 글자 대조). 상태(use*)는 본체에 남고 props 로 받는다 — 탭을 옮겨 다녀도 값이 그대로다(동작 변경 0).
  */
-import type { Dispatch } from 'react';
+import { useState, type Dispatch, type SetStateAction } from 'react';
 import { getAlimtalkTemplateStatus } from '../../../utils/formatDate';
+import type { ModalState } from '../admin-types';
 
 export interface TemplateDetailModalProps {
   setTemplateDetail: Dispatch<any>;
   templateDetail: any;
+  // ★ 2026-10-20 승인 · 반려 = 이 창 안(표 안 처리 버튼 0) — 알림톡 목록에서 연 검수중 템플릿만. RCS 는 0817 결정대로 버튼 없음(검수 주체 = RCS Biz Center).
+  templateSubTab: 'alimtalk' | 'rcs';
+  loadAdminTemplates: () => Promise<void>;
+  loadAdminRcsTemplates: () => Promise<void>;
+  setModal: Dispatch<SetStateAction<ModalState>>;
+  setRejectModal: Dispatch<SetStateAction<{ show: boolean; id: string; reason: string; }>>;
 }
 
 export default function TemplateDetailModal(props: TemplateDetailModalProps) {
-  const { setTemplateDetail, templateDetail } = props;
+  const { setTemplateDetail, templateDetail, templateSubTab, loadAdminTemplates, loadAdminRcsTemplates, setModal, setRejectModal } = props;
+  const [busy, setBusy] = useState(false);
   if (!(templateDetail)) return null; // ★ 분리 E — 본체와 같은 조건(타입 좁히기 · 본체가 이미 같은 조건으로 그린다)
+  const reviewable = templateSubTab === 'alimtalk' && getAlimtalkTemplateStatus(templateDetail.status).label === '검수중';
+
+  // 옛 TemplatesTab 행 버튼과 같은 요청 · 같은 안내(옮겨 옴) — 성공하면 창을 닫는다
+  const handleTemplateApprove = async (id: string) => {
+    if (busy) return;
+    setBusy(true);
+    try {
+      const tk = localStorage.getItem('token');
+      const res = await fetch(`/api/admin/kakao-templates/${id}/approve`, { method: 'PUT', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${tk}` }, body: JSON.stringify({}) });
+      const data = await res.json();
+      if (data.success) { loadAdminTemplates(); loadAdminRcsTemplates(); setModal({ type: 'alert', title: '승인 완료', message: '템플릿이 승인되었습니다', variant: 'success' }); setTemplateDetail(null); }
+      else setModal({ type: 'alert', title: '승인 실패', message: data.error, variant: 'error' });
+    } catch { setModal({ type: 'alert', title: '오류', message: '서버 오류', variant: 'error' }); }
+    finally { setBusy(false); }
+  };
+  // 반려 = 사유 입력 창(TemplateRejectModal)으로 넘긴다 — 이 창은 닫는다(창 두 겹 0)
+  const handleTemplateReject = (id: string) => {
+    setTemplateDetail(null);
+    setRejectModal({ show: true, id, reason: '' });
+  };
   return (
     <>
     {(
@@ -154,7 +182,13 @@ export default function TemplateDetailModal(props: TemplateDetailModalProps) {
                 </div>
               )}
             </div>
-            <div className="px-6 py-3 border-t bg-gray-50 flex justify-end flex-shrink-0">
+            <div className="px-6 py-3 border-t bg-gray-50 flex justify-end gap-2 flex-shrink-0">
+              {reviewable && (
+                <>
+                  <button onClick={() => handleTemplateReject(templateDetail.id)} disabled={busy} className="whitespace-nowrap px-4 py-2 bg-white border border-red-200 text-red-700 hover:bg-red-50 rounded-lg text-[13px] font-medium disabled:opacity-50">반려</button>
+                  <button onClick={() => handleTemplateApprove(templateDetail.id)} disabled={busy} className="whitespace-nowrap px-4 py-2 bg-green-600 text-white hover:bg-green-700 rounded-lg text-[13px] font-medium disabled:opacity-50">승인</button>
+                </>
+              )}
               <button onClick={() => setTemplateDetail(null)} className="whitespace-nowrap px-4 py-2 bg-gray-100 hover:bg-gray-200 rounded-lg text-[13px] font-medium">닫기</button>
             </div>
           </div>

@@ -8,6 +8,7 @@ import { formatDateTime } from '../../../utils/formatDate';
 import AgentChargePanel from '../../AgentChargePanel';
 import SearchableSelect from '../../SearchableSelect';
 import type { Company } from '../admin-types';
+import { ADMIN_TABLE_ONELINE, AdminLongText } from '../ui/admin-ui'; // ★ 2026-10-20 표 칸 한 줄 · 긴 글 = 말줄임 + 전문
 
 export interface DepositsTabProps {
   chargeScope: 'web' | 'agent';
@@ -189,7 +190,7 @@ export default function DepositsTab(props: DepositsTabProps) {
               </div>
 
               <div className="overflow-x-auto">
-                <table className="w-full text-[13px]">
+                <table className={`w-full text-[13px] ${ADMIN_TABLE_ONELINE}`}>
                   <thead className="bg-gray-50">
                     <tr>
                       <th className="px-4 py-2 text-center text-xs font-medium text-gray-500 whitespace-nowrap">일시</th>
@@ -241,7 +242,7 @@ export default function DepositsTab(props: DepositsTabProps) {
                               {formatDateTime(tx.created_at)}
                             </td>
                             <td className="px-4 py-2 font-medium text-gray-900 whitespace-nowrap">
-                              {tx.company_name}
+                              <AdminLongText text={tx.company_name} max={180} label="고객사" />
                             </td>
                             <td className="px-4 py-2 text-center">
                               <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${tc.color}`}>{tc.label}</span>
@@ -255,10 +256,8 @@ export default function DepositsTab(props: DepositsTabProps) {
                             <td className="px-4 py-2 text-right text-gray-600 whitespace-nowrap">
                               {Number(tx.balance_after).toLocaleString()}원
                             </td>
-                            <td className="px-4 py-2 text-gray-600 max-w-[300px]">
-                              <div className="truncate" title={tx.description || ''}>
-                                {tx.description || '-'}
-                              </div>
+                            <td className="px-4 py-2 text-gray-600">
+                              <AdminLongText text={tx.description} max={300} label="설명" />
                               {tx.admin_name && (
                                 <div className="text-xs text-gray-400">처리: {tx.admin_name}</div>
                               )}

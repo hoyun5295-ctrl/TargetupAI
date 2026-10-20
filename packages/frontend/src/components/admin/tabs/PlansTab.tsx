@@ -3,6 +3,7 @@
  * 옮긴 방법 = 스크립트(원문 그대로 · 글자 대조). 상태(use*)는 본체에 남고 props 로 받는다 — 탭을 옮겨 다녀도 값이 그대로다(동작 변경 0).
  */
 import type { Dispatch, SetStateAction } from 'react';
+import { ADMIN_TABLE_ONELINE } from '../ui/admin-ui'; // ★ 2026-10-20 표 칸 한 줄
 
 export interface PlansTabProps {
   closeModal: () => void;
@@ -59,7 +60,7 @@ export default function PlansTab(props: PlansTabProps) {
             </div>
 
             <div className="overflow-x-auto">
-              <table className="w-full text-[13px]">
+              <table className={`w-full text-[13px] ${ADMIN_TABLE_ONELINE}`}>
                 <thead className="bg-gray-50">
                   <tr>
                     <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 whitespace-nowrap">코드</th>

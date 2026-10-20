@@ -3,6 +3,7 @@
  * 옮긴 방법 = 스크립트(원문 그대로 · 글자 대조). 상태(use*)는 본체에 남고 props 로 받는다 — 탭을 옮겨 다녀도 값이 그대로다(동작 변경 0).
  */
 import type { Dispatch } from 'react';
+import { ADMIN_TABLE_ONELINE, AdminLongText } from '../ui/admin-ui'; // ★ 2026-10-20 표 칸 한 줄 · 긴 글 = 말줄임 + 전문
 
 export interface LineGroupsTabProps {
   lineGroups: any[];
@@ -59,7 +60,7 @@ const handleDeleteLineGroup = (lg: any) => {
           </div>
 
           <div className="overflow-x-auto">
-            <table className="w-full min-w-[640px] text-[13px]">
+            <table className={`w-full min-w-[640px] text-[13px] ${ADMIN_TABLE_ONELINE}`}>
               <thead className="bg-gray-50">
                 <tr>
                   <th className="px-4 py-2 text-center text-xs font-medium text-gray-500 whitespace-nowrap">순서</th>
@@ -92,7 +93,7 @@ const handleDeleteLineGroup = (lg: any) => {
                         <td className="px-4 py-2.5 text-center">
                           <span className={`whitespace-nowrap px-2 py-0.5 rounded text-xs font-medium ${t.cls}`}>{t.label}</span>
                         </td>
-                        <td className="px-4 py-2.5 font-mono text-xs text-gray-600">{(lg.sms_tables || []).join(', ')}</td>
+                        <td className="px-4 py-2.5 font-mono text-xs text-gray-600"><AdminLongText text={(lg.sms_tables || []).join(', ')} max={260} label="발송 테이블" /></td>
                         <td className="px-4 py-2.5 text-center text-gray-700">{Number(lg.company_count || 0).toLocaleString()}</td>
                         <td className="px-4 py-2.5 text-center">
                           <span className={`px-2 py-0.5 rounded text-xs font-medium ${lg.is_active ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500'}`}>

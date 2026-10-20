@@ -6,6 +6,7 @@ import type { Dispatch, SetStateAction } from 'react';
 import { formatDateTime } from '../../../utils/formatDate';
 import { creditTxLabel } from '../../../constants/credit';
 import type { ModalState } from '../admin-types';
+import { ADMIN_TABLE_ONELINE, AdminLongText } from '../ui/admin-ui'; // ★ 2026-10-20 표 칸 한 줄 · 긴 글 = 말줄임 + 전문
 
 export interface CreditsTabProps {
   creditPanel: 'risk' | 'requests' | 'predictive' | null;
@@ -261,7 +262,7 @@ export default function CreditsTab(props: CreditsTabProps) {
                 </div>
               </div>
               <div className="overflow-x-auto">
-                <table className="w-full text-[13px]">
+                <table className={`w-full text-[13px] ${ADMIN_TABLE_ONELINE}`}>
                   <thead>
                     <tr className="text-left text-gray-500 border-b">
                       <th className="whitespace-nowrap px-4 py-2 font-medium">회사</th>
@@ -284,7 +285,7 @@ export default function CreditsTab(props: CreditsTabProps) {
                         const after = Number(tx.balance_base_after || 0) + Number(tx.balance_purchased_after || 0);
                         return (
                           <tr key={tx.id} className="border-b last:border-0 hover:bg-gray-50">
-                            <td className="px-4 py-2 text-gray-900">{tx.company_name || '-'}</td>
+                            <td className="px-4 py-2 text-gray-900"><AdminLongText text={tx.company_name} max={180} label="회사" /></td>
                             <td className="px-4 py-2 text-gray-700">{creditTxLabel(tx.type, tx.source)}</td>
                             <td className="px-4 py-2 text-gray-600">{tx.created_by_name || '자동'}</td>
                             <td className={`px-4 py-2 text-right font-semibold ${plus ? 'text-emerald-600' : 'text-rose-600'}`}>{plus ? '+' : '-'}{Number(tx.amount).toLocaleString()}</td>

@@ -8,6 +8,7 @@ import { formatDateTime } from '../../../utils/formatDate';
 import type { Company } from '../admin-types';
 import type { User } from '../admin-types';
 import type { ModalState } from '../admin-types';
+import { ADMIN_TABLE_ONELINE, AdminLongText } from '../ui/admin-ui'; // ★ 2026-10-20 표 칸 한 줄 · 긴 글 = 말줄임 + 전문
 
 export interface UsersTabProps {
   closeModal: () => void;
@@ -224,7 +225,8 @@ export default function UsersTab(props: UsersTabProps) {
                           </button>
                           
                           {isExpanded && (
-                            <table className="w-full text-[13px]">
+                            <div className="overflow-x-auto">
+                            <table className={`w-full text-[13px] ${ADMIN_TABLE_ONELINE}`}>
                               <thead className="bg-gray-50/50">
                                 <tr>
                                   <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 whitespace-nowrap">로그인ID</th>
@@ -244,7 +246,7 @@ export default function UsersTab(props: UsersTabProps) {
                                     <td className="px-4 py-2.5 text-center">{getUserTypeBadge(u.user_type)}</td>
                                     <td className="px-4 py-2.5 text-center text-gray-600">
                                       {(u as any).store_codes && (u as any).store_codes.length > 0 
-                                        ? (u as any).store_codes.join(', ') 
+                                        ? <AdminLongText text={(u as any).store_codes.join(', ')} max={200} label="담당 브랜드" className="mx-auto" />
                                         : <span className="text-gray-400">전체</span>}
                                     </td>
                                     <td className="px-4 py-2.5 text-center">{getStatusBadge(u.status)}</td>
@@ -275,6 +277,7 @@ export default function UsersTab(props: UsersTabProps) {
                                 ))}
                               </tbody>
                             </table>
+                            </div>
                           )}
                         </div>
                       );

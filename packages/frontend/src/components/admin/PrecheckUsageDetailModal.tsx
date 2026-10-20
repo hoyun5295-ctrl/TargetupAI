@@ -10,6 +10,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Loader2, ShieldCheck, SpellCheck, X } from 'lucide-react';
 import { calculateSmsBytes, formatDateTimeShort, formatPhoneNumber } from '../../utils/formatDate';
 import { carrierLabel, type SpellIssue } from '../../utils/send-checks';
+import { ADMIN_TABLE_ONELINE } from './ui/admin-ui'; // ★ 2026-10-20 표 칸 한 줄
 
 export interface PrecheckDetailTarget {
   createdAt: string;
@@ -129,7 +130,7 @@ function SpamBody({ d }: { d: SpamDetail }) {
           <p className="text-[12.5px] text-gray-400">통신사별 결과가 없습니다.</p>
         ) : (
           <div className="overflow-x-auto rounded-xl border border-gray-200">
-            <table className="w-full text-sm">
+            <table className={`w-full text-sm ${ADMIN_TABLE_ONELINE}`}>
               <thead className="bg-gray-50">
                 <tr className="text-left text-xs text-gray-500">
                   <th className="px-3 py-2 font-medium whitespace-nowrap">통신사</th>

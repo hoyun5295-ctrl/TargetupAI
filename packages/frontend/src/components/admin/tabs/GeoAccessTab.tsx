@@ -5,6 +5,7 @@
 import type { Dispatch, SetStateAction } from 'react';
 import { formatDateTime, kstTodayStr, formatDate } from '../../../utils/formatDate';
 import ListPager, { pageSlice } from '../../shared/ListPager';
+import { ADMIN_TABLE_ONELINE, AdminLongText } from '../ui/admin-ui'; // ★ 2026-10-20 표 칸 한 줄 · 긴 글 = 말줄임 + 전문
 
 export interface GeoAccessTabProps {
   geoBusy: boolean;
@@ -194,7 +195,7 @@ export default function GeoAccessTab(props: GeoAccessTabProps) {
               </div>
 
               <div className="mt-4 overflow-x-auto">
-                <table className="w-full text-[13px]">
+                <table className={`w-full text-[13px] ${ADMIN_TABLE_ONELINE}`}>
                   <thead className="bg-gray-50 text-xs text-gray-500">
                     <tr>
                       <th className="whitespace-nowrap px-3 py-2 text-left">범위</th>
@@ -216,9 +217,9 @@ export default function GeoAccessTab(props: GeoAccessTabProps) {
                         <td className="px-3 py-2 text-xs text-gray-700">
                           {x.scope === 'user' ? '계정' : x.scope === 'company_api' ? '회사 API' : x.scope === 'company_agent' ? '회사 에이전트' : '전역'}
                         </td>
-                        <td className="px-3 py-2 text-xs text-gray-900">{x.login_id || x.company_name || '-'}</td>
+                        <td className="px-3 py-2 text-xs text-gray-900"><AdminLongText text={x.login_id || x.company_name} max={180} label="대상" /></td>
                         <td className="px-3 py-2 font-mono text-xs text-gray-700">{x.cidr}</td>
-                        <td className="px-3 py-2 text-xs text-gray-600 max-w-xs truncate">{x.reason}</td>
+                        <td className="px-3 py-2 text-xs text-gray-600"><AdminLongText text={x.reason} max={260} label="사유" /></td>
                         <td className="px-3 py-2 text-xs text-gray-900 whitespace-nowrap">{x.approver_name || x.approver_login_id || '-'}</td>
                         <td className="px-3 py-2 text-[11px] text-gray-400 whitespace-nowrap">{formatDateTime(x.approved_at)}</td>
                         <td className="px-3 py-2 text-xs text-gray-700 whitespace-nowrap">
@@ -250,7 +251,7 @@ export default function GeoAccessTab(props: GeoAccessTabProps) {
                 <h3 className="text-base font-semibold text-gray-900">국외 IP 탐지 · 차단 결과 로그</h3>
               </div>
               <div className="overflow-x-auto">
-                <table className="w-full text-[13px]">
+                <table className={`w-full text-[13px] ${ADMIN_TABLE_ONELINE}`}>
                   <thead className="bg-gray-50 text-xs text-gray-500">
                     <tr>
                       <th className="whitespace-nowrap px-4 py-2 text-left">시각</th>
@@ -270,7 +271,7 @@ export default function GeoAccessTab(props: GeoAccessTabProps) {
                       <tr key={h.id}>
                         <td className="px-4 py-2 text-xs text-gray-500">{formatDateTime(h.created_at)}</td>
                         <td className="px-4 py-2 text-xs text-gray-900">{h.login_id || '-'}</td>
-                        <td className="px-4 py-2 text-xs text-gray-700">{h.company_name || '-'}</td>
+                        <td className="px-4 py-2 text-xs text-gray-700"><AdminLongText text={h.company_name} max={180} label="고객사" /></td>
                         <td className="px-4 py-2 font-mono text-xs text-gray-700">{h.ip_address || '-'}</td>
                         <td className="px-4 py-2">
                           {/* ★1005 전송자격인증 2.2 — 시행 뒤 예외 승인으로 통과한 감지(details.exempted)를 「기록만」으로 그리면 사실과 다르다 */}

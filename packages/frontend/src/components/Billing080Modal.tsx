@@ -14,7 +14,8 @@
  */
 import { useCallback, useEffect, useRef, useState } from 'react';
 // ★ 2026-07-31 업체 검색 + 청구 귀속(고객사 전체/사용자별) 공통 선택 — 부가서비스 입력 탭과 같은 컴포넌트.
-import CompanyScopePicker from './CompanyScopePicker';
+import CompanyScopePicker from './CompanyScopePicker';
+import { ADMIN_TABLE_ONELINE, AdminLongText } from './admin/ui/admin-ui'; // ★ 2026-10-20 표 칸 한 줄 · 긴 글 = 말줄임 + 전문
 
 interface CompanyOpt { id: string; company_name: string }
 
@@ -399,7 +400,7 @@ export default function Billing080Modal({ open, onClose, companies }: {
 
               {/* 목록 */}
               <div className="border rounded-lg overflow-x-auto">
-                <table className="w-full text-sm">
+                <table className={`w-full text-sm ${ADMIN_TABLE_ONELINE}`}>
                   <thead className="bg-gray-50 text-[11px] text-gray-500">
                     <tr>
                       <th className="px-3 py-2 text-left">번호</th>
@@ -421,7 +422,7 @@ export default function Billing080Modal({ open, onClose, companies }: {
                     ) : mappings.map((m) => (
                       <tr key={m.id} className={`border-t ${m.is_active ? '' : 'opacity-50'}`}>
                         <td className="px-3 py-2 font-mono">{m.display_number}</td>
-                        <td className="px-3 py-2">{m.company_name}</td>
+                        <td className="px-3 py-2"><AdminLongText text={m.company_name} max={180} label="회사" /></td>
                         <td className="px-3 py-2">
                           {m.user_id ? (
                             <span className="inline-flex items-center rounded bg-violet-50 border border-violet-200 px-1.5 py-0.5 text-[11px] text-violet-700">
@@ -431,7 +432,7 @@ export default function Billing080Modal({ open, onClose, companies }: {
                             <span className="text-[11px] text-gray-400">고객사 전체</span>
                           )}
                         </td>
-                        <td className="px-3 py-2 text-gray-500">{m.label || '-'}</td>
+                        <td className="px-3 py-2 text-gray-500"><AdminLongText text={m.label} max={160} label="라벨" /></td>
                         <td className="px-3 py-2 text-right">{won(m.monthly_fee_supply)}</td>
                         <td className="px-3 py-2 text-right">{won(m.kt_fee_supply)}</td>
                         <td className="px-3 py-2 text-center">{m.charge_call_fee ? 'O' : '-'}</td>
@@ -496,7 +497,7 @@ export default function Billing080Modal({ open, onClose, companies }: {
                   )}
 
                   <div className="border rounded-lg overflow-x-auto">
-                    <table className="w-full text-sm">
+                    <table className={`w-full text-sm ${ADMIN_TABLE_ONELINE}`}>
                       <thead className="bg-gray-50 text-[11px] text-gray-500">
                         <tr>
                           <th className="px-3 py-2 text-left">번호</th>
@@ -511,7 +512,7 @@ export default function Billing080Modal({ open, onClose, companies }: {
                         {parse.rows.map((r) => (
                           <tr key={r.number} className={`border-t ${r.mapped ? '' : 'bg-amber-50'}`}>
                             <td className="px-3 py-2 font-mono">{r.display_number}</td>
-                            <td className="px-3 py-2">{r.mapped ? `${r.company_name}${r.label ? ` (${r.label})` : ''}` : '-'}</td>
+                            <td className="px-3 py-2">{r.mapped ? <AdminLongText text={`${r.company_name}${r.label ? ` (${r.label})` : ''}`} max={200} label="귀속 회사" /> : '-'}</td>
                             <td className="px-3 py-2 text-right">
                               {won(r.call_fee)}
                               {r.call_lines && r.call_lines.length > 1 && (

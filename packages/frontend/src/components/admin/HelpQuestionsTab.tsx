@@ -6,6 +6,7 @@
  * 톤 = 부모 화면(슈퍼관리자 라이트) 그대로.
  */
 import { useCallback, useEffect, useState } from 'react';
+import { ADMIN_TABLE_ONELINE, AdminLongText } from './ui/admin-ui'; // ★ 2026-10-20 표 칸 한 줄 · 긴 글 = 말줄임 + 전문
 
 interface HelpQuestionRow {
   id: string;
@@ -108,7 +109,7 @@ export default function HelpQuestionsTab({ companies }: Props) {
       {error && <div className="px-6 py-4 text-sm text-rose-600">{error}</div>}
 
       <div className="overflow-x-auto">
-        <table className="w-full text-sm">
+        <table className={`w-full text-sm ${ADMIN_TABLE_ONELINE}`}>
           <thead className="bg-gray-50">
             <tr className="text-left text-xs text-gray-500">
               <th className="px-6 py-2 font-medium whitespace-nowrap">시각</th>
@@ -128,14 +129,14 @@ export default function HelpQuestionsTab({ companies }: Props) {
             ) : rows.map((r) => (
               <tr key={r.id} className="hover:bg-gray-50/60">
                 <td className="px-6 py-2.5 text-xs text-gray-500 whitespace-nowrap">{fmt(r.created_at)}</td>
-                <td className="px-4 py-2.5 whitespace-nowrap font-medium text-gray-800">{r.company_name}</td>
+                <td className="px-4 py-2.5 whitespace-nowrap font-medium text-gray-800"><AdminLongText text={r.company_name} max={160} label="고객사" /></td>
                 <td className="px-4 py-2.5 whitespace-nowrap text-gray-600">
-                  {r.user_name || '-'}{r.user_login ? <span className="text-gray-400 text-xs"> ({r.user_login})</span> : null}
+                  <AdminLongText text={`${r.user_name || '-'}${r.user_login ? ` (${r.user_login})` : ''}`} max={160} label="사용자" />
                 </td>
-                <td className="px-4 py-2.5 text-gray-800 max-w-[360px]"><span className="line-clamp-2">{r.question}</span></td>
-                <td className="px-4 py-2.5 text-xs text-gray-500 whitespace-nowrap">{r.path || '-'}</td>
-                <td className="px-4 py-2.5 text-xs text-gray-500 max-w-[200px] truncate">
-                  {Array.isArray(r.matched_ids) && r.matched_ids.length > 0 ? r.matched_ids.join(', ') : '-'}
+                <td className="px-4 py-2.5 text-gray-800"><AdminLongText text={r.question} max={260} label="질문" /></td>
+                <td className="px-4 py-2.5 text-xs text-gray-500 whitespace-nowrap"><AdminLongText text={r.path} max={150} label="물은 화면" /></td>
+                <td className="px-4 py-2.5 text-xs text-gray-500">
+                  <AdminLongText text={Array.isArray(r.matched_ids) ? r.matched_ids.join(', ') : ''} max={140} label="매칭 기능" />
                 </td>
                 <td className="px-4 py-2.5 whitespace-nowrap">
                   {r.kind === 'request'

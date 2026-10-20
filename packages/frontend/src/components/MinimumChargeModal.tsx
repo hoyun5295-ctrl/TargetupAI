@@ -12,6 +12,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 // ★ 2026-08-04 회사 선택을 타이핑 검색으로 (서수란 접수) — 141개사를 스크롤로 찾게 두면 매달 그 짓을 한다.
 //   080 매핑·부가서비스 입력 탭이 이미 쓰는 컴포넌트와 같은 것을 쓴다.
 import SearchableSelect from './SearchableSelect';
+import { ADMIN_TABLE_ONELINE, AdminLongText } from './admin/ui/admin-ui'; // ★ 2026-10-20 표 칸 한 줄 · 긴 글 = 말줄임 + 전문
 
 interface CompanyOpt { id: string; company_name: string }
 interface MinChargeRow { company_id: string; company_name: string; min_charge_supply: number; billed_id: string | null }
@@ -147,7 +148,7 @@ export default function MinimumChargeModal({ open, onClose, companies, onChanged
           </div>
 
           <div className="border rounded-lg overflow-x-auto">
-            <table className="w-full text-sm">
+            <table className={`w-full text-sm ${ADMIN_TABLE_ONELINE}`}>
               <thead className="bg-gray-50 text-[11px] text-gray-500">
                 <tr>
                   <th className="px-3 py-2 text-left">회사</th>
@@ -162,7 +163,7 @@ export default function MinimumChargeModal({ open, onClose, companies, onChanged
                   <tr><td colSpan={5} className="px-3 py-6 text-center text-gray-400">{loading ? '불러오는 중...' : '등록된 회사가 없습니다. 위에서 등록해주세요.'}</td></tr>
                 ) : (rows || []).map((r) => (
                   <tr key={r.company_id} className="border-t">
-                    <td className="px-3 py-2">{r.company_name}</td>
+                    <td className="px-3 py-2"><AdminLongText text={r.company_name} max={200} label="회사" /></td>
                     <td className="px-3 py-2 text-right">{won(Number(r.min_charge_supply))}</td>
                     <td className="px-3 py-2 text-right text-gray-500">{won(Math.round(Number(r.min_charge_supply) * 1.1))}</td>
                     <td className="px-3 py-2 text-center">

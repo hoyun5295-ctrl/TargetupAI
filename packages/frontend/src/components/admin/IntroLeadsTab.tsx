@@ -7,6 +7,7 @@
  */
 import { Fragment, useCallback, useEffect, useState } from 'react';
 import ListPager from '../shared/ListPager';
+import { ADMIN_TABLE_ONELINE, AdminLongText } from './ui/admin-ui'; // ★ 2026-10-20 표 칸 한 줄 · 긴 글 = 말줄임 + 전문
 
 type Kind = 'all' | 'request' | 'view';
 
@@ -101,7 +102,7 @@ export default function IntroLeadsTab() {
           <a href="/intro" target="_blank" rel="noreferrer" className="text-sm text-cyan-700 hover:underline">소개 페이지 열기</a>
         </div>
         <div className="overflow-x-auto">
-          <table className="w-full text-sm">
+          <table className={`w-full text-sm ${ADMIN_TABLE_ONELINE}`}>
             <thead className="bg-gray-50 text-gray-500">
               <tr>
                 <th className="px-4 py-2.5 text-left font-medium whitespace-nowrap">시각</th>
@@ -117,7 +118,7 @@ export default function IntroLeadsTab() {
                 <tr><td colSpan={6} className="px-4 py-10 text-center text-gray-400">불러오는 중...</td></tr>
               )}
               {error && (
-                <tr><td colSpan={6} className="px-4 py-10 text-center text-red-600">{error}</td></tr>
+                <tr><td colSpan={6} className="px-4 py-10 text-center text-red-600 !whitespace-normal break-words">{error}</td></tr>
               )}
               {data && data.rows.length === 0 && (
                 <tr><td colSpan={6} className="px-4 py-10 text-center text-gray-400">
@@ -134,7 +135,7 @@ export default function IntroLeadsTab() {
                       </span>
                     </td>
                     <td className="px-4 py-2.5 whitespace-nowrap text-gray-900">
-                      {r.request ? `${r.request.companyName} · ${r.request.contactName}` : <span className="text-gray-400">-</span>}
+                      {r.request ? <AdminLongText text={`${r.request.companyName} · ${r.request.contactName}`} max={220} rowOpens /> : <span className="text-gray-400">-</span>}
                     </td>
                     <td className="px-4 py-2.5 whitespace-nowrap tabular-nums text-gray-700">{r.ip || '-'}</td>
                     <td className="px-4 py-2.5 whitespace-nowrap">
@@ -147,11 +148,11 @@ export default function IntroLeadsTab() {
                         </span>
                       )}
                     </td>
-                    <td className="px-4 py-2.5 whitespace-nowrap text-gray-600">{uaShort(r.userAgent)}{r.from ? ` · ${r.from}` : ''}</td>
+                    <td className="px-4 py-2.5 whitespace-nowrap text-gray-600"><AdminLongText text={`${uaShort(r.userAgent)}${r.from ? ` · ${r.from}` : ''}`} max={240} rowOpens /></td>
                   </tr>
                   {open === r.id && (
                     <tr key={`${r.id}-d`} className="bg-gray-50/70">
-                      <td colSpan={6} className="px-4 py-3 text-sm text-gray-700 space-y-1.5">
+                      <td colSpan={6} className="px-4 py-3 text-sm text-gray-700 space-y-1.5 !whitespace-normal break-words">
                         {r.request && (
                           <>
                             <p>연락처 <span className="font-medium tabular-nums">{phoneFmt(r.request.phone)}</span> · 희망 {r.request.method === 'video' ? '화상 시연' : '방문 시연'}</p>

@@ -5,6 +5,7 @@
 import type { Dispatch, SetStateAction } from 'react';
 import SearchableSelect from '../../SearchableSelect';
 import type { Company } from '../admin-types';
+import { ADMIN_TABLE_ONELINE, AdminLongText } from '../ui/admin-ui'; // ★ 2026-10-20 표 칸 한 줄 · 긴 글 = 말줄임 + 전문
 
 export interface SendStatsTabProps {
   AGENT_STATS_PER_PAGE: 20;
@@ -148,7 +149,7 @@ export default function SendStatsTab(props: SendStatsTabProps) {
             {/* 테이블 */}
             <div className="bg-white rounded-xl border border-gray-200/80 shadow-sm">
               <div className="overflow-x-auto">
-                <table className="w-full text-[13px]">
+                <table className={`w-full text-[13px] ${ADMIN_TABLE_ONELINE}`}>
                   <thead className="bg-gray-50">
                   <tr>
                       <th className="whitespace-nowrap px-4 py-2 text-left text-gray-500 font-medium">{statsView === 'daily' ? '날짜' : '월'}</th>
@@ -180,7 +181,7 @@ export default function SendStatsTab(props: SendStatsTabProps) {
                       return (
                         <tr key={idx} className="hover:bg-gray-50">
                           <td className="px-4 py-2 font-medium text-gray-900 font-mono">{row.date || row.month || row.period}</td>
-                          <td className="px-4 py-2 text-gray-700">{row.company_name}</td>
+                          <td className="px-4 py-2 text-gray-700"><AdminLongText text={row.company_name} max={200} label="고객사" /></td>
                           {statsChannel === 'agent' && (
                             <td className="px-4 py-2 font-mono text-xs text-gray-600">
                               {row.agent_send_id || '-'}{row.cust_name ? <span className="text-gray-400"> / {row.cust_name}</span> : null}

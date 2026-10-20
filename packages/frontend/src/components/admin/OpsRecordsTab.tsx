@@ -14,6 +14,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { AUDIT_ACTION_LABEL } from '../../constants/audit-action-labels';
 import ListPager, { pageSlice } from '../shared/ListPager';
+import { ADMIN_TABLE_ONELINE, AdminLongText } from './ui/admin-ui'; // ★ 2026-10-20 표 칸 한 줄 · 긴 글 = 말줄임 + 전문
 
 type Kind = 'log_review' | 'firewall_change' | 'access_review';
 type System = 'hanjul' | 'gateway' | 'common';
@@ -456,7 +457,7 @@ export default function OpsRecordsTab() {
 
       <div className="overflow-hidden rounded-2xl border border-gray-200/70 bg-white shadow-sm">
         <div className="overflow-x-auto">
-          <table className="min-w-full text-sm">
+          <table className={`min-w-full text-sm ${ADMIN_TABLE_ONELINE}`}>
             <thead className="bg-gray-50 text-left text-xs font-semibold text-gray-500">
               <tr>
                 <th className="px-4 py-3">작성 시각</th>
@@ -688,7 +689,7 @@ function FragmentRow({ r, open, onToggle, canConfirm, onConfirm, canCorrect, onC
           {r.voidedAt && <span className="mr-1.5 rounded bg-rose-50 px-1.5 py-0.5 text-[11px] font-semibold text-rose-700">무효</span>}
           {r.anomaly && <span className="mr-1.5 rounded bg-amber-100 px-1.5 py-0.5 text-[11px] font-semibold text-amber-800">이상 있음</span>}
           {r.supersedes && <span className="mr-1.5 rounded bg-gray-100 px-1.5 py-0.5 text-[11px] font-semibold text-gray-600">정정</span>}
-          <span className={r.voidedAt ? 'line-through' : ''}>{r.title}</span>
+          <AdminLongText text={r.title} max={260} rowOpens className={`inline-block align-bottom ${r.voidedAt ? 'line-through' : ''}`} />
         </td>
         <td className="whitespace-nowrap px-4 py-3 text-gray-600">{r.recorder?.name || '-'}</td>
         <td className="whitespace-nowrap px-4 py-3" onClick={(e) => e.stopPropagation()}>
@@ -705,8 +706,10 @@ function FragmentRow({ r, open, onToggle, canConfirm, onConfirm, canCorrect, onC
       </tr>
       {open && (
         <tr className="bg-gray-50/60">
-          <td colSpan={7} className="px-6 py-4">
+          <td colSpan={7} className="px-6 py-4 !whitespace-normal">
             <dl className="grid gap-3 text-sm md:grid-cols-[120px_1fr]">
+              <dt className="text-xs font-semibold text-gray-500">요지</dt>
+              <dd className="whitespace-pre-wrap break-words text-gray-800">{r.title}</dd>
               <dt className="text-xs font-semibold text-gray-500">{r.kind === 'firewall_change' ? '변경 내용' : '점검 내용'}</dt>
               <dd className="whitespace-pre-wrap text-gray-800">{r.content}</dd>
               {r.reason && (<><dt className="text-xs font-semibold text-gray-500">변경 사유</dt><dd className="whitespace-pre-wrap text-gray-800">{r.reason}</dd></>)}

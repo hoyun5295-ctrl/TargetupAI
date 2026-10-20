@@ -10,6 +10,7 @@
  * native dialog 0 — 확인은 2단 클릭.
  */
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { ADMIN_TABLE_ONELINE, AdminLongText } from './admin/ui/admin-ui'; // ★ 2026-10-20 표 칸 한 줄 · 긴 글 = 말줄임 + 전문
 
 interface AdjLine {
   channel: string;
@@ -193,7 +194,7 @@ export default function QtyAdjustModal({ open, target, onClose, onReissued }: {
 
         <div className="p-6 overflow-y-auto space-y-4">
           <div className="border rounded-lg overflow-x-auto">
-            <table className="w-full text-sm">
+            <table className={`w-full text-sm ${ADMIN_TABLE_ONELINE}`}>
               <thead className="bg-gray-50 text-[11px] text-gray-500">
                 <tr>
                   <th className="px-3 py-2 text-left">항목</th>
@@ -216,9 +217,9 @@ export default function QtyAdjustModal({ open, target, onClose, onReissued }: {
                   return (
                     <tr key={k} className="border-t align-top">
                       <td className="px-3 py-2">
-                        {l.label}
+                        <AdminLongText text={l.label} max={200} label="항목" />
                         {l.delta !== 0 && (
-                          <span className="ml-2 text-[10px] px-1.5 py-0.5 rounded bg-violet-50 border border-violet-200 text-violet-700">
+                          <span className="mt-1 block w-fit text-[10px] px-1.5 py-0.5 rounded bg-violet-50 border border-violet-200 text-violet-700">
                             조정 {l.delta > 0 ? '+' : ''}{l.delta.toLocaleString()}건 적용 중
                           </span>
                         )}
@@ -242,7 +243,7 @@ export default function QtyAdjustModal({ open, target, onClose, onReissued }: {
                       </td>
                       <td className="px-3 py-2 text-right">
                         {l.adjustable === false && (
-                          <div className="text-[10px] text-amber-600 mb-1 max-w-[160px] ml-auto text-left">{l.not_adjustable_reason}</div>
+                          <div className="text-[10px] text-amber-600 mb-1 max-w-[160px] ml-auto text-left whitespace-normal break-words">{l.not_adjustable_reason}</div>
                         )}
                         <button onClick={() => saveOne(l)} disabled={saving === k || !dirty || l.adjustable === false}
                           className="px-3 py-1.5 bg-violet-600 text-white rounded-lg text-xs font-medium hover:bg-violet-700 disabled:opacity-40">

@@ -8,6 +8,7 @@ import { Fragment } from 'react';
 import { formatDateTimeShort } from '../../../utils/formatDate';
 import { resolveSendTypeChipClass, resolveSendTypeLabel, resolveChannelLabel } from '../../../utils/campaign-axis';
 import type { Company } from '../admin-types';
+import { ADMIN_TABLE_ONELINE, AdminLongText } from '../ui/admin-ui'; // ★ 2026-10-20 표 칸 한 줄 · 긴 글 = 말줄임 + 전문
 
 export interface AllCampaignsTabProps {
   allCampaigns: any[];
@@ -66,7 +67,7 @@ export default function AllCampaignsTab(props: AllCampaignsTabProps) {
             </div>
 
             <div className="overflow-x-auto">
-              <table className="w-full text-[13px]">
+              <table className={`w-full text-[13px] ${ADMIN_TABLE_ONELINE}`}>
                 <thead className="bg-gray-50">
                   <tr>
                     <th className="whitespace-nowrap px-3 py-2 text-left text-gray-500 font-medium">회사(계정)</th>
@@ -97,10 +98,10 @@ export default function AllCampaignsTab(props: AllCampaignsTabProps) {
                     <Fragment key={c.id}>
                     <tr className="hover:bg-gray-50">
                       <td className="px-3 py-2 text-gray-700">
-                        <div>{c.company_name || '-'}</div>
+                        <AdminLongText text={c.company_name} max={180} label="회사" />
                         {c.created_by_login && <div className="text-xs text-gray-400">{c.created_by_login}</div>}
                       </td>
-                      <td className="px-3 py-2 font-medium text-gray-900">{c.name}</td>
+                      <td className="px-3 py-2 font-medium text-gray-900"><AdminLongText text={c.name} max={240} label="캠페인명" /></td>
                       <td className="px-3 py-2 text-center text-gray-500 text-xs whitespace-nowrap">
                         {c.created_at ? formatDateTimeShort(c.created_at) : '-'}
                       </td>

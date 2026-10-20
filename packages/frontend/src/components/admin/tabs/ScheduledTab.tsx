@@ -5,6 +5,7 @@
 import type { Dispatch, SetStateAction } from 'react';
 import { formatDateTimeShort } from '../../../utils/formatDate';
 import type { Company } from '../admin-types';
+import { ADMIN_TABLE_ONELINE, AdminLongText } from '../ui/admin-ui'; // ★ 2026-10-20 표 칸 한 줄 · 긴 글 = 말줄임 + 전문
 
 export interface ScheduledTabProps {
   companies: Company[];
@@ -78,7 +79,7 @@ export default function ScheduledTab(props: ScheduledTabProps) {
 
             <div className="overflow-x-auto">
               {/* ★ D145 P0 (2026-05-07): 컴팩트 — text-xs base + py-2 + 짧은 일시 포맷 + 캠페인명 240px */}
-              <table className="w-full text-xs">
+              <table className={`w-full text-xs ${ADMIN_TABLE_ONELINE}`}>
               <thead className="bg-gray-50">
                   <tr>
                     <th className="px-3 py-2 text-left font-medium text-gray-500 whitespace-nowrap">고객사</th>
@@ -98,11 +99,10 @@ export default function ScheduledTab(props: ScheduledTabProps) {
                   ) : scheduledCampaigns.map((campaign) => (
                       <tr key={campaign.id} className="hover:bg-gray-50">
                         <td className="px-3 py-2 text-gray-900 whitespace-nowrap">
-                          {campaign.company_name}
-                          <span className="text-gray-400 ml-1">({campaign.company_code})</span>
+                          <div className="flex items-center gap-1"><AdminLongText text={campaign.company_name} max={160} label="고객사" /><span className="text-gray-400">({campaign.company_code})</span></div>
                         </td>
-                        <td className="px-3 py-2 text-gray-900" style={{ maxWidth: '240px' }}>
-                          <div className="truncate" title={campaign.campaign_name}>{campaign.campaign_name}</div>
+                        <td className="px-3 py-2 text-gray-900">
+                          <AdminLongText text={campaign.campaign_name} max={240} label="캠페인명" />
                         </td>
                         <td className="px-3 py-2 text-center text-gray-500 whitespace-nowrap">
                           {campaign.target_count?.toLocaleString() || 0}명

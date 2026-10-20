@@ -7,6 +7,7 @@
  */
 import { Fragment, useCallback, useEffect, useState } from 'react';
 import ListPager from '../shared/ListPager';
+import { ADMIN_TABLE_ONELINE, AdminLongText } from './ui/admin-ui'; // ★ 2026-10-20 표 칸 한 줄 · 긴 글 = 말줄임 + 전문
 
 interface IpRow {
   loginId: string; ip: string; owner: string; office: boolean;
@@ -62,7 +63,7 @@ export default function WatchLogTab() {
         </p>
       </div>
       <div className="overflow-x-auto">
-        <table className="w-full text-sm">
+        <table className={`w-full text-sm ${ADMIN_TABLE_ONELINE}`}>
           <thead className="bg-gray-50 text-gray-500">
             <tr>
               {['계정', 'IP', '주인', '로그인', '시간 외', '동시 접속', '처음', '마지막'].map((h) => (
@@ -71,7 +72,7 @@ export default function WatchLogTab() {
             </tr>
           </thead>
           <tbody>
-            {error && <tr><td colSpan={8} className="px-4 py-10 text-center text-red-600">{error}</td></tr>}
+            {error && <tr><td colSpan={8} className="px-4 py-10 text-center text-red-600 !whitespace-normal break-words">{error}</td></tr>}
             {!error && !data && <tr><td colSpan={8} className="px-4 py-10 text-center text-gray-400">불러오는 중...</td></tr>}
             {data && data.rows.length === 0 && <tr><td colSpan={8} className="px-4 py-10 text-center text-gray-400">아직 기록이 없습니다.</td></tr>}
             {data?.rows.map((r) => {
@@ -85,7 +86,7 @@ export default function WatchLogTab() {
                       {r.office && <span className="ml-1.5 px-1.5 py-0.5 rounded text-[11px] bg-gray-100 text-gray-600">사무실</span>}
                       {!r.office && r.logins <= 1 && <span className="ml-1.5 px-1.5 py-0.5 rounded text-[11px] bg-amber-50 text-amber-800">한 번</span>}
                     </td>
-                    <td className="px-4 py-2.5 text-gray-700 min-w-[220px]">{r.owner}</td>
+                    <td className="px-4 py-2.5 text-gray-700"><AdminLongText text={r.owner} max={280} rowOpens /></td>
                     <td className="px-4 py-2.5 whitespace-nowrap tabular-nums">{r.logins}</td>
                     <td className={`px-4 py-2.5 whitespace-nowrap tabular-nums ${r.offHoursLogins > 0 ? 'text-amber-700 font-medium' : 'text-gray-400'}`}>{r.offHoursLogins}</td>
                     <td className={`px-4 py-2.5 whitespace-nowrap tabular-nums ${r.concurrent > 0 ? 'text-rose-700 font-medium' : 'text-gray-400'}`}>{r.concurrent}</td>
@@ -94,7 +95,7 @@ export default function WatchLogTab() {
                   </tr>
                   {openKey === key && (
                     <tr className="bg-gray-50/70">
-                      <td colSpan={8} className="px-4 py-3">
+                      <td colSpan={8} className="px-4 py-3 !whitespace-normal break-words">
                         {!events ? <p className="text-sm text-gray-400">불러오는 중...</p> : events.length === 0 ? (
                           <p className="text-sm text-gray-500">이 IP 에서 남은 기록이 없습니다.</p>
                         ) : (

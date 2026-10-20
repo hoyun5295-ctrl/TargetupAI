@@ -8,6 +8,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Inbox, Loader2, RefreshCw } from 'lucide-react';
 import TablePagination from '../common/TablePagination';
+import { ADMIN_TABLE_ONELINE, AdminLongText } from './ui/admin-ui'; // ★ 2026-10-20 표 칸 한 줄 · 긴 글 = 말줄임 + 전문
 
 /** 반려·오류 목록 한 페이지 건수 — 슈퍼관리자 다른 목록과 같은 수로 맞춘다. */
 const MAIL_PER_PAGE = 10;
@@ -164,7 +165,7 @@ export default function AgencyMailIntakePanel() {
             ) : (
               <>
               <div className="mt-2 overflow-x-auto">
-                <table className="w-full text-[12.5px]">
+                <table className={`w-full text-[12.5px] ${ADMIN_TABLE_ONELINE}`}>
                   <thead>
                     <tr className="text-left text-gray-500 border-b">
                       <th className="py-2 pr-4 font-medium">받은 시각</th>
@@ -178,9 +179,9 @@ export default function AgencyMailIntakePanel() {
                     {pagedRejected.map((r) => (
                       <tr key={r.uidl} className="border-b border-gray-100">
                         <td className="py-2 pr-4 tabular-nums text-gray-600 whitespace-nowrap">{fmt(r.claimed_at)}</td>
-                        <td className="py-2 pr-4 text-gray-800 max-w-[220px] truncate">{r.from_email || '(주소 없음)'}</td>
-                        <td className="py-2 pr-4 text-gray-600 max-w-[140px] truncate">{r.company_name || ''}</td>
-                        <td className="py-2 pr-4 text-gray-800">{REASON_LABEL[r.reason || ''] || r.reason || STATUS_KO.rejected}</td>
+                        <td className="py-2 pr-4 text-gray-800"><AdminLongText text={r.from_email || '(주소 없음)'} max={220} label="보낸 주소" /></td>
+                        <td className="py-2 pr-4 text-gray-600"><AdminLongText text={r.company_name} max={160} label="회사" /></td>
+                        <td className="py-2 pr-4 text-gray-800"><AdminLongText text={REASON_LABEL[r.reason || ''] || r.reason || STATUS_KO.rejected} max={240} label="사유" /></td>
                         <td className="py-2 text-gray-600">{r.reply_status === 'sent' ? '보냄' : r.reply_status === 'skipped' ? '안 보냄' : r.reply_status || ''}</td>
                       </tr>
                     ))}

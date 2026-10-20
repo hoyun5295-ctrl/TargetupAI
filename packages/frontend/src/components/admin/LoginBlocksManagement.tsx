@@ -6,6 +6,7 @@ import { useEffect, useState } from 'react';
 import { useToast } from '../ToastProvider';
 import ConfirmModal, { type ConfirmState } from '../ConfirmModal';
 import ListPager, { pageSlice, LIST_PAGE_SIZE } from '../shared/ListPager';
+import { ADMIN_TABLE_ONELINE, AdminLongText } from './ui/admin-ui'; // ★ 2026-10-20 표 칸 한 줄 · 긴 글 = 말줄임 + 전문
 
 interface LoginBlock {
   id: string;
@@ -247,7 +248,7 @@ export default function LoginBlocksManagement() {
 
       {!loading && tab === 'active' && (
         <div className="overflow-x-auto">
-          <table className="w-full">
+          <table className={`w-full ${ADMIN_TABLE_ONELINE}`}>
             <thead className="bg-gray-50 border-b">
               <tr>
                 <th className="px-3 py-2 text-left text-xs font-semibold text-gray-600">IP</th>
@@ -272,7 +273,7 @@ export default function LoginBlocksManagement() {
                     <td className="px-3 py-2 text-sm">{formatDate(b.expires_at)}</td>
                     <td className="px-3 py-2 text-sm font-medium text-amber-600">{formatRemain(b.remaining_seconds)}</td>
                     <td className="px-3 py-2 text-sm text-center">{b.fail_count}</td>
-                    <td className="px-3 py-2 text-sm">{REASON_LABEL[b.reason] || b.reason}</td>
+                    <td className="px-3 py-2 text-sm"><AdminLongText text={REASON_LABEL[b.reason] || b.reason} max={200} label="사유" /></td>
                     <td className="px-3 py-2 text-center">
                       <button
                         onClick={() => handleUnblock(b.id)}
@@ -293,7 +294,7 @@ export default function LoginBlocksManagement() {
       {!loading && tab === 'history' && (
         <>
           <div className="overflow-x-auto">
-            <table className="w-full">
+            <table className={`w-full ${ADMIN_TABLE_ONELINE}`}>
               <thead className="bg-gray-50 border-b">
                 <tr>
                   <th className="px-3 py-2 text-left text-xs font-semibold text-gray-600">상태</th>
@@ -324,8 +325,8 @@ export default function LoginBlocksManagement() {
                       <td className="px-3 py-2 text-sm">{b.login_id}</td>
                       <td className="px-3 py-2 text-sm">{formatDate(b.blocked_at)}</td>
                       <td className="px-3 py-2 text-sm">{formatDate(b.unblocked_at || b.expires_at)}</td>
-                      <td className="px-3 py-2 text-sm">{REASON_LABEL[b.reason] || b.reason}</td>
-                      <td className="px-3 py-2 text-sm text-gray-500">{b.unblock_reason || '-'}</td>
+                      <td className="px-3 py-2 text-sm"><AdminLongText text={REASON_LABEL[b.reason] || b.reason} max={200} label="사유" /></td>
+                      <td className="px-3 py-2 text-sm text-gray-500"><AdminLongText text={b.unblock_reason} max={220} label="해제 사유" /></td>
                     </tr>
                   ))
                 )}

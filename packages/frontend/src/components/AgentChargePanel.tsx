@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import SearchableSelect from './SearchableSelect'; // ★ 2026-07-26 발송ID 검색(목록이 283개라 셀렉트만으론 못 찾는다)
 import { formatAgentIdLabel, formatAgentBalance, formatAgentChargeAmount } from '../utils/agentLabel'; // ★ 2026-07-27 발송ID 표시 규칙 단일 소스
+import { ADMIN_TABLE_ONELINE, AdminLongText } from './admin/ui/admin-ui'; // ★ 2026-10-20 표 칸 한 줄 · 긴 글 = 말줄임 + 전문
 
 /**
  * ★ 2026-07-24 §5-3 — 에이전트 충전 실행 패널 (슈퍼관리자 · 충전 관리 탭)
@@ -778,7 +779,7 @@ export default function AgentChargePanel({ onPendingOrdersChange }: AgentChargeP
           </div>
         </div>
         <div className="overflow-x-auto">
-          <table className="w-full text-sm">
+          <table className={`w-full text-sm ${ADMIN_TABLE_ONELINE}`}>
             <thead>
               <tr className="text-left text-xs text-gray-400 border-b">
                 <th className="py-1.5 pr-3">SeqNo</th>
@@ -793,8 +794,8 @@ export default function AgentChargePanel({ onPendingOrdersChange }: AgentChargeP
               {history.map((h) => (
                 <tr key={h.seqNo} className="border-b border-gray-50">
                   <td className="py-1.5 pr-3 tabular-nums text-gray-400">{h.seqNo}</td>
-                  <td className="py-1.5 pr-3 font-mono text-gray-700">{idLabel(h.agentSendId, h.custName)}</td>
-                  <td className="py-1.5 pr-3 text-gray-600">{h.companyName || <span className="text-amber-600">매핑 없음</span>}</td>
+                  <td className="py-1.5 pr-3 font-mono text-gray-700"><AdminLongText text={idLabel(h.agentSendId, h.custName)} max={240} label="발송ID" /></td>
+                  <td className="py-1.5 pr-3 text-gray-600">{h.companyName ? <AdminLongText text={h.companyName} max={180} label="회사" /> : <span className="text-amber-600">매핑 없음</span>}</td>
                   <td className={`py-1.5 pr-3 text-right tabular-nums font-medium ${h.amount < 0 ? 'text-rose-500' : 'text-gray-800'}`}>{formatAgentChargeAmount(h.amount)}</td>
                   <td className="py-1.5 pr-3 text-xs text-gray-400">{h.filledAt}</td>
                   <td className="py-1.5 text-xs">

@@ -2,10 +2,11 @@
  * CallbacksTab — 슈퍼관리자 AdminDashboard 에서 옮긴 화면(★ 2026-10-09 파일 분리 E · 설계서 docs/2026-10-03-admin-dashboard-split-design.md §5)
  * 옮긴 방법 = 스크립트(원문 그대로 · 글자 대조). 상태(use*)는 본체에 남고 props 로 받는다 — 탭을 옮겨 다녀도 값이 그대로다(동작 변경 0).
  */
-import type { Dispatch, SetStateAction } from 'react';
+import { useState, type Dispatch, type SetStateAction } from 'react';
 import { formatDate } from '../../../utils/formatDate';
 import TablePagination from '../../common/TablePagination';
 import type { ModalState } from '../admin-types';
+import { ADMIN_TABLE_ONELINE, ADMIN_TR_OPEN, AdminDetailItem, AdminDetailModal, AdminLongText, adminRowOpen } from '../ui/admin-ui'; // ★ 2026-10-20 표 칸 한 줄 · 행 = 상세 창
 
 export interface CallbacksTabProps {
   allManagers: any[];
@@ -71,7 +72,7 @@ export default function CallbacksTab(props: CallbacksTabProps) {
     }
   };
 
-  const handleApproveManager = async (id: string) => {
+  const handleApproveManager = async (id: string): Promise<boolean> => {
     try {
       const token = localStorage.getItem('token');
       const res = await fetch(`/api/sender-registration/admin/managers/${id}/approve`, {
@@ -83,19 +84,20 @@ export default function CallbacksTab(props: CallbacksTabProps) {
         setModal({ type: 'alert', title: '승인 완료', message: '담당자 위임장이 승인되었습니다.', variant: 'success' });
         loadAllManagers();
         loadSenderRegPendingCount();
-      } else {
-        setModal({ type: 'alert', title: '승인 실패', message: data.error || '승인 처리에 실패했습니다.', variant: 'error' });
+        return true;
       }
+      setModal({ type: 'alert', title: '승인 실패', message: data.error || '승인 처리에 실패했습니다.', variant: 'error' });
     } catch (error) {
       console.error('담당자 승인 실패:', error);
       setModal({ type: 'alert', title: '오류', message: '승인 처리 중 오류가 발생했습니다.', variant: 'error' });
     }
+    return false;
   };
 
-  const handleRejectManager = async (id: string, reason: string) => {
+  const handleRejectManager = async (id: string, reason: string): Promise<boolean> => {
     if (!reason.trim()) {
       setModal({ type: 'alert', title: '입력 필요', message: '반려 사유를 입력해주세요.', variant: 'warning' });
-      return;
+      return false;
     }
     try {
       const token = localStorage.getItem('token');
@@ -109,14 +111,32 @@ export default function CallbacksTab(props: CallbacksTabProps) {
         setModal({ type: 'alert', title: '반려 완료', message: '담당자 위임장이 반려되었습니다.', variant: 'success' });
         loadAllManagers();
         loadSenderRegPendingCount();
-      } else {
-        setModal({ type: 'alert', title: '반려 실패', message: data.error || '반려 처리에 실패했습니다.', variant: 'error' });
+        return true;
       }
+      setModal({ type: 'alert', title: '반려 실패', message: data.error || '반려 처리에 실패했습니다.', variant: 'error' });
     } catch (error) {
       console.error('담당자 반려 실패:', error);
       setModal({ type: 'alert', title: '오류', message: '반려 처리 중 오류가 발생했습니다.', variant: 'error' });
     }
+    return false;
   };
+
+  // ★ 2026-10-20 등록현황 관리 = 행을 누르면 상세 창 · 승인 · 반려는 창 안에서(Harold 「클릭하면 모달 · 거기서 승인」) · 같은 처리 함수 · 같은 사유 입력값(mgrRejectReason)
+  const [mgrDetail, setMgrDetail] = useState<any | null>(null);
+  const [mgrBusy, setMgrBusy] = useState(false);
+  const openMgrDetail = (mgr: any) => { setMgrDetail(mgr); setMgrRejectId(null); setMgrRejectReason(''); };
+  const closeMgrDetail = () => { if (!mgrBusy) { setMgrDetail(null); setMgrRejectReason(''); } };
+  const runMgrAction = async (fn: () => Promise<boolean>) => {
+    if (mgrBusy) return;
+    setMgrBusy(true);
+    try {
+      if (await fn()) { setMgrDetail(null); setMgrRejectReason(''); }
+    } finally {
+      setMgrBusy(false);
+    }
+  };
+  const mgrStatusLabel = (st: string) => (st === 'pending' ? '대기' : st === 'approved' ? '승인' : '반려');
+  const mgrStatusClass = (st: string) => (st === 'pending' ? 'bg-yellow-100 text-yellow-800' : st === 'approved' ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800');
 
   const handleDeleteCallback = (id: string, phone: string) => {
     showConfirm(
@@ -329,7 +349,8 @@ export default function CallbacksTab(props: CallbacksTabProps) {
                             }
                             return (
                               <>
-                                <table className="w-full text-[13px]">
+                                <div className="overflow-x-auto">
+                                <table className={`w-full text-[13px] ${ADMIN_TABLE_ONELINE}`}>
                                   <thead className="bg-gray-50/50">
                                     <tr>
                                       <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 whitespace-nowrap">발신번호</th>
@@ -343,7 +364,7 @@ export default function CallbacksTab(props: CallbacksTabProps) {
                                     {paged.map((cb: any) => (
                                       <tr key={cb.id} className="hover:bg-blue-50/30">
                                         <td className="px-4 py-2.5 font-medium text-gray-900">{cb.phone}</td>
-                                        <td className="px-4 py-2.5 text-gray-500">{cb.label || '-'}</td>
+                                        <td className="px-4 py-2.5 text-gray-500"><AdminLongText text={cb.label} max={200} label="별칭" /></td>
                                         <td className="px-4 py-2.5 text-center">
                                           {cb.is_default ? (
                                             <span className="px-2 py-1 rounded-full text-xs font-medium bg-green-100 text-green-800">대표</span>
@@ -360,6 +381,7 @@ export default function CallbacksTab(props: CallbacksTabProps) {
                                     ))}
                                   </tbody>
                                 </table>
+                                </div>
                                 {totalPages > 1 && (
                                   <div className="px-4 py-2.5 border-t bg-gray-50/30 flex items-center justify-between">
                                     <span className="text-xs text-gray-500">
@@ -459,7 +481,7 @@ export default function CallbacksTab(props: CallbacksTabProps) {
                   </div>
                 ) : (
                   <div className="overflow-x-auto">
-                    <table className="w-full text-[13px]">
+                    <table className={`w-full text-[13px] ${ADMIN_TABLE_ONELINE}`}>
                       <thead className="bg-gray-50">
                         <tr>
                           <th className="whitespace-nowrap px-4 py-2 text-left text-xs font-medium text-gray-500">고객사</th>
@@ -474,11 +496,11 @@ export default function CallbacksTab(props: CallbacksTabProps) {
                       </thead>
                       <tbody className="divide-y divide-gray-100">
                         {senderRegistrations.map((reg: any) => (
-                          <tr key={reg.id} className="hover:bg-gray-50">
-                            <td className="px-4 py-2 text-gray-900 font-medium">{reg.company_name || '-'}</td>
+                          <tr key={reg.id} {...adminRowOpen(() => loadSenderRegDetail(reg.id))} className={ADMIN_TR_OPEN}>
+                            <td className="px-4 py-2 text-gray-900 font-medium"><AdminLongText text={reg.company_name} max={180} rowOpens /></td>
                             <td className="px-4 py-2 text-gray-900 font-mono">{reg.phone}</td>
-                            <td className="px-4 py-2 text-gray-600">{reg.label || '-'}</td>
-                            <td className="px-4 py-2 text-gray-600">{reg.store_name || '-'}</td>
+                            <td className="px-4 py-2 text-gray-600"><AdminLongText text={reg.label} max={180} rowOpens /></td>
+                            <td className="px-4 py-2 text-gray-600"><AdminLongText text={reg.store_name} max={180} rowOpens /></td>
                             <td className="px-4 py-2 text-center">
                               <span className="text-blue-600">{(reg.documents || []).length}건</span>
                             </td>
@@ -494,7 +516,7 @@ export default function CallbacksTab(props: CallbacksTabProps) {
                             <td className="px-4 py-2 text-center text-gray-500">{formatDate(reg.created_at)}</td>
                             <td className="px-4 py-2 text-center">
                               <button
-                                onClick={() => loadSenderRegDetail(reg.id)}
+                                onClick={(e) => { e.stopPropagation(); loadSenderRegDetail(reg.id); }}
                                 className="whitespace-nowrap text-emerald-700 hover:text-emerald-800 text-[13px] font-medium"
                               >
                                 상세
@@ -557,7 +579,7 @@ export default function CallbacksTab(props: CallbacksTabProps) {
                     </div>
                   ) : (
                     <div className="overflow-x-auto">
-                      <table className="w-full text-[13px]">
+                      <table className={`w-full text-[13px] ${ADMIN_TABLE_ONELINE}`}>
                         <thead className="bg-gray-50">
                           <tr>
                             <th className="whitespace-nowrap px-4 py-2 text-left text-xs font-medium text-gray-500">고객사</th>
@@ -567,55 +589,34 @@ export default function CallbacksTab(props: CallbacksTabProps) {
                             <th className="whitespace-nowrap px-4 py-2 text-center text-xs font-medium text-gray-500">위임장</th>
                             <th className="whitespace-nowrap px-4 py-2 text-center text-xs font-medium text-gray-500">상태</th>
                             <th className="whitespace-nowrap px-4 py-2 text-left text-xs font-medium text-gray-500">반려사유</th>
-                            <th className="whitespace-nowrap px-4 py-2 text-center text-xs font-medium text-gray-500">관리</th>
+                            <th className="whitespace-nowrap px-4 py-2 text-center text-xs font-medium text-gray-500">처리</th>
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-gray-100">
                           {filteredMgrs.map((mgr: any) => (
-                            <tr key={mgr.id} className="hover:bg-gray-50">
-                              <td className="px-4 py-2 text-gray-900 font-medium">{mgr.company_name || '-'}</td>
+                            <tr key={mgr.id} {...adminRowOpen(() => openMgrDetail(mgr))} className={ADMIN_TR_OPEN}>
+                              <td className="px-4 py-2 text-gray-900 font-medium"><AdminLongText text={mgr.company_name} max={180} rowOpens /></td>
                               <td className="px-4 py-2 text-gray-900">{mgr.manager_name}</td>
                               <td className="px-4 py-2 text-gray-600 font-mono text-xs">{mgr.manager_phone}</td>
-                              <td className="px-4 py-2 text-gray-500 text-xs">{mgr.manager_email || '-'}</td>
+                              <td className="px-4 py-2 text-gray-500 text-xs"><AdminLongText text={mgr.manager_email} max={200} rowOpens /></td>
                               <td className="px-4 py-2 text-center">
                                 {mgr.authorization_doc ? (
-                                  <button onClick={() => downloadSenderDoc(mgr.authorization_doc.storedName, mgr.authorization_doc.originalName)}
+                                  <button onClick={(e) => { e.stopPropagation(); downloadSenderDoc(mgr.authorization_doc.storedName, mgr.authorization_doc.originalName); }}
                                     className="whitespace-nowrap text-emerald-700 hover:text-emerald-800 text-xs underline">다운로드</button>
                                 ) : (
                                   <span className="text-gray-300 text-xs">없음</span>
                                 )}
                               </td>
                               <td className="px-4 py-2 text-center">
-                                <span className={`px-2 py-1 rounded-full text-xs font-medium ${
-                                  mgr.status === 'pending' ? 'bg-yellow-100 text-yellow-800'
-                                  : mgr.status === 'approved' ? 'bg-green-100 text-green-800'
-                                  : 'bg-red-100 text-red-800'
-                                }`}>
-                                  {mgr.status === 'pending' ? '대기' : mgr.status === 'approved' ? '승인' : '반려'}
+                                <span className={`px-2 py-1 rounded-full text-xs font-medium ${mgrStatusClass(mgr.status)}`}>
+                                  {mgrStatusLabel(mgr.status)}
                                 </span>
                               </td>
-                              <td className="px-4 py-2 text-gray-500 text-xs">{mgr.reject_reason || '-'}</td>
+                              <td className="px-4 py-2 text-gray-500 text-xs"><AdminLongText text={mgr.reject_reason} max={200} rowOpens /></td>
                               <td className="px-4 py-2 text-center">
-                                {mgr.status === 'pending' && mgrRejectId !== mgr.id && (
-                                  <div className="flex gap-1 justify-center">
-                                    <button onClick={() => handleApproveManager(mgr.id)}
-                                      className="whitespace-nowrap px-2.5 py-1 bg-green-600 text-white rounded text-xs font-medium hover:bg-green-700">승인</button>
-                                    <button onClick={() => { setMgrRejectId(mgr.id); setMgrRejectReason(''); }}
-                                      className="whitespace-nowrap px-2.5 py-1 bg-red-600 text-white rounded text-xs font-medium hover:bg-red-700">반려</button>
-                                  </div>
-                                )}
-                                {mgr.status === 'pending' && mgrRejectId === mgr.id && (
-                                  <div className="flex items-center gap-1">
-                                    <input type="text" value={mgrRejectReason} onChange={(e) => setMgrRejectReason(e.target.value)}
-                                      placeholder="반려 사유" className="px-2 py-1 border border-gray-200 rounded text-xs w-32" />
-                                    <button onClick={() => { handleRejectManager(mgr.id, mgrRejectReason); setMgrRejectId(null); }}
-                                      disabled={!mgrRejectReason.trim()}
-                                      className="whitespace-nowrap px-2 py-1 bg-red-600 text-white rounded text-xs hover:bg-red-700 disabled:opacity-40">확인</button>
-                                    <button onClick={() => setMgrRejectId(null)}
-                                      className="whitespace-nowrap px-2 py-1 bg-gray-200 text-gray-700 rounded text-xs hover:bg-gray-300">취소</button>
-                                  </div>
-                                )}
-                                {mgr.status !== 'pending' && <span className="text-xs text-gray-300">-</span>}
+                                {mgr.status === 'pending'
+                                  ? <span className="inline-flex px-2.5 py-1 rounded bg-emerald-50 text-emerald-700 text-xs font-medium">승인 · 반려</span>
+                                  : <span className="text-xs text-gray-400">상세</span>}
                               </td>
                             </tr>
                           ))}
@@ -624,6 +625,43 @@ export default function CallbacksTab(props: CallbacksTabProps) {
                     </div>
                   );
                 })()}
+                {mgrDetail && (
+                  <AdminDetailModal
+                    title={`담당자 위임장 · ${mgrDetail.company_name || '-'}`}
+                    onClose={closeMgrDetail}
+                    footer={mgrDetail.status === 'pending' ? (
+                      <div className="space-y-2.5">
+                        <button type="button" disabled={mgrBusy} onClick={() => runMgrAction(() => handleApproveManager(mgrDetail.id))}
+                          className="w-full h-9 rounded-lg bg-green-600 text-white text-[13px] font-medium hover:bg-green-700 disabled:opacity-50">승인</button>
+                        <div className="flex gap-2">
+                          <input type="text" value={mgrRejectReason} onChange={(e) => setMgrRejectReason(e.target.value)} placeholder="반려 사유"
+                            className="flex-1 min-w-0 h-9 px-3 border border-gray-200 rounded-lg text-[13px] bg-white focus:outline-none focus:ring-2 focus:ring-red-200" />
+                          <button type="button" disabled={mgrBusy || !mgrRejectReason.trim()} onClick={() => runMgrAction(() => handleRejectManager(mgrDetail.id, mgrRejectReason))}
+                            className="shrink-0 h-9 px-4 rounded-lg bg-red-600 text-white text-[13px] font-medium hover:bg-red-700 disabled:opacity-40">반려</button>
+                        </div>
+                      </div>
+                    ) : undefined}
+                  >
+                    <dl>
+                      <AdminDetailItem label="고객사">{mgrDetail.company_name || '-'}</AdminDetailItem>
+                      <AdminDetailItem label="담당자">{mgrDetail.manager_name || '-'}</AdminDetailItem>
+                      <AdminDetailItem label="연락처"><span className="font-mono">{mgrDetail.manager_phone || '-'}</span></AdminDetailItem>
+                      <AdminDetailItem label="이메일">{mgrDetail.manager_email || '-'}</AdminDetailItem>
+                      <AdminDetailItem label="위임장">
+                        {mgrDetail.authorization_doc ? (
+                          <button type="button" onClick={() => downloadSenderDoc(mgrDetail.authorization_doc.storedName, mgrDetail.authorization_doc.originalName)}
+                            className="text-emerald-700 hover:text-emerald-800 underline">{mgrDetail.authorization_doc.originalName || '다운로드'}</button>
+                        ) : <span className="text-gray-400">없음</span>}
+                      </AdminDetailItem>
+                      <AdminDetailItem label="상태"><span className={`px-2 py-0.5 rounded-full text-xs font-medium ${mgrStatusClass(mgrDetail.status)}`}>{mgrStatusLabel(mgrDetail.status)}</span></AdminDetailItem>
+                      <AdminDetailItem label="신청일">{mgrDetail.created_at ? formatDate(mgrDetail.created_at) : '-'}</AdminDetailItem>
+                      {mgrDetail.status !== 'pending' && (
+                        <AdminDetailItem label="처리">{mgrDetail.reviewed_at ? formatDate(mgrDetail.reviewed_at) : '-'}{mgrDetail.reviewed_by_name ? ` · ${mgrDetail.reviewed_by_name}` : ''}</AdminDetailItem>
+                      )}
+                      {mgrDetail.reject_reason && <AdminDetailItem label="반려 사유"><span className="text-red-600">{mgrDetail.reject_reason}</span></AdminDetailItem>}
+                    </dl>
+                  </AdminDetailModal>
+                )}
               </>
             )}
             </div>

@@ -7,6 +7,7 @@ import AlimtalkSendersSection from '../../alimtalk/AlimtalkSendersSection';
 import { getAlimtalkTemplateStatus } from '../../../utils/formatDate';
 import TablePagination from '../../common/TablePagination';
 import type { ModalState } from '../admin-types';
+import { ADMIN_TABLE_ONELINE, ADMIN_TR_OPEN, AdminLongText, adminRowOpen } from '../ui/admin-ui'; // ★ 2026-10-20 표 칸 한 줄 · 행 = 상세 창
 
 export interface TemplatesTabProps {
   adminRcsTemplates: any[];
@@ -40,20 +41,7 @@ export default function TemplatesTab(props: TemplatesTabProps) {
 // ★ 2026-08-17 RCS 분기 제거 — 알림톡 전용으로 좁혔다.
 //   RCS 검수 주체는 외부(RCS Biz Center)라 우리 DB status를 손으로 바꾸는 것은 승인이 아니었다.
 //   그 상태로 "승인"이 보이면 발송 가능으로 읽히는데 실제로는 아니다(설계서 §2-2 fail-closed).
-const handleTemplateApprove = async (id: string) => {
-  try {
-    const tk = localStorage.getItem('token');
-    const res = await fetch(`/api/admin/kakao-templates/${id}/approve`, { method: 'PUT', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${tk}` }, body: JSON.stringify({}) });
-    const data = await res.json();
-    if (data.success) { loadAdminTemplates(); loadAdminRcsTemplates(); setModal({ type: 'alert', title: '승인 완료', message: '템플릿이 승인되었습니다', variant: 'success' }); }
-    else setModal({ type: 'alert', title: '승인 실패', message: data.error, variant: 'error' });
-  } catch { setModal({ type: 'alert', title: '오류', message: '서버 오류', variant: 'error' }); }
-};
-
-// ★ D96: prompt() → 커스텀 모달로 변경
-const handleTemplateReject = (id: string) => {
-  setRejectModal({ show: true, id, reason: '' });
-};
+// ★ 2026-10-20 승인 · 반려 = 템플릿 상세 창(TemplateDetailModal) 안으로 옮김 — 표 안 처리 버튼 0(Harold 「클릭하면 모달 · 거기서 승인」)
   return (
     <>
     {(
@@ -122,7 +110,7 @@ const handleTemplateReject = (id: string) => {
                   {adminTemplates.length === 0 ? '템플릿이 없습니다' : '검색 결과가 없습니다'}
                 </div>
               ) : (
-                <table className="w-full text-[13px]">
+                <table className={`w-full text-[13px] ${ADMIN_TABLE_ONELINE}`}>
                   <thead className="bg-gray-50 border-b">
                     <tr>
                       <th className="whitespace-nowrap px-4 py-2 text-left font-medium text-gray-500">고객사</th>
@@ -140,12 +128,12 @@ const handleTemplateReject = (id: string) => {
                     {filteredAlimtalkTemplates
                       .slice((templatePage - 1) * templatePerPage, templatePage * templatePerPage)
                       .map((t: any) => (
-                      <tr key={t.id} className="hover:bg-gray-50">
-                        <td className="px-4 py-2 text-gray-900 font-medium">{t.company_name || '-'}</td>
+                      <tr key={t.id} {...adminRowOpen(() => setTemplateDetail(t))} className={ADMIN_TR_OPEN}>
+                        <td className="px-4 py-2 text-gray-900 font-medium"><AdminLongText text={t.company_name} max={180} rowOpens /></td>
                         <td className="px-4 py-2">
                           {t.profile_name || t.yellow_id ? (
                             <>
-                              <div className="text-gray-700">{t.profile_name || '-'}</div>
+                              <AdminLongText text={t.profile_name} max={180} rowOpens className="text-gray-700" />
                               {t.yellow_id && <div className="text-xs text-gray-400">{t.yellow_id}</div>}
                             </>
                           ) : (
@@ -153,13 +141,13 @@ const handleTemplateReject = (id: string) => {
                           )}
                         </td>
                         <td className="px-4 py-2">
-                          <div className="text-gray-900">{t.template_name}</div>
+                          <AdminLongText text={t.template_name} max={240} rowOpens className="text-gray-900" />
                           {t.template_code && (
                             <div
                               className="text-xs text-gray-400 hover:text-blue-600 cursor-pointer inline-block"
                               style={{ userSelect: 'text' }}
                               title="클릭하면 복사"
-                              onClick={() => { navigator.clipboard.writeText(t.template_code); showAlert('복사 완료', '템플릿코드를 복사했습니다.', 'success'); }}
+                              onClick={(e) => { e.stopPropagation(); navigator.clipboard.writeText(t.template_code); showAlert('복사 완료', '템플릿코드를 복사했습니다.', 'success'); }}
                             >{t.template_code}</div>
                           )}
                           {/* ★ 2026-07-22(접수2): 고객사 지정 관리코드 표시 + 검색 대상 */}
@@ -185,16 +173,8 @@ const handleTemplateReject = (id: string) => {
                         <td className="px-4 py-2 text-gray-500 text-xs">{t.requested_at ? new Date(t.requested_at).toLocaleDateString('ko-KR') : '-'}</td>
                         <td className="px-4 py-2 text-center">
                           <div className="flex gap-1 justify-center items-center">
-                            <button onClick={() => setTemplateDetail(t)}
-                              className="whitespace-nowrap text-xs px-2 py-1 bg-emerald-50 text-emerald-700 rounded hover:bg-emerald-100">상세</button>
-                            {getAlimtalkTemplateStatus(t.status).label === '검수중' && (
-                              <>
-                                <button onClick={() => handleTemplateApprove(t.id)}
-                                  className="whitespace-nowrap text-xs px-2 py-1 bg-green-50 text-green-700 rounded hover:bg-green-100">승인</button>
-                                <button onClick={() => handleTemplateReject(t.id)}
-                                  className="whitespace-nowrap text-xs px-2 py-1 bg-red-50 text-red-700 rounded hover:bg-red-100">반려</button>
-                              </>
-                            )}
+                            <button onClick={(e) => { e.stopPropagation(); setTemplateDetail(t); }}
+                              className="whitespace-nowrap text-xs px-2 py-1 bg-emerald-50 text-emerald-700 rounded hover:bg-emerald-100">{getAlimtalkTemplateStatus(t.status).label === '검수중' ? '승인 · 반려' : '상세'}</button>
                           </div>
                         </td>
                       </tr>
@@ -222,7 +202,7 @@ const handleTemplateReject = (id: string) => {
                   {adminRcsTemplates.length === 0 ? 'RCS 템플릿이 없습니다' : '검색 결과가 없습니다'}
                 </div>
               ) : (
-                <table className="w-full text-[13px]">
+                <table className={`w-full text-[13px] ${ADMIN_TABLE_ONELINE}`}>
                   <thead className="bg-gray-50 border-b">
                     <tr>
                       <th className="whitespace-nowrap px-4 py-2 text-left font-medium text-gray-500">고객사</th>
@@ -236,9 +216,9 @@ const handleTemplateReject = (id: string) => {
                     {filteredRcsTemplates
                       .slice((templatePage - 1) * templatePerPage, templatePage * templatePerPage)
                       .map((t: any) => (
-                      <tr key={t.id} className="hover:bg-gray-50">
-                        <td className="px-4 py-2 text-gray-900 font-medium">{t.company_name || '-'}</td>
-                        <td className="px-4 py-2 text-gray-900">{t.template_name}</td>
+                      <tr key={t.id} {...adminRowOpen(() => setTemplateDetail(t))} className={ADMIN_TR_OPEN}>
+                        <td className="px-4 py-2 text-gray-900 font-medium"><AdminLongText text={t.company_name} max={180} rowOpens /></td>
+                        <td className="px-4 py-2 text-gray-900"><AdminLongText text={t.template_name} max={240} rowOpens /></td>
                         <td className="px-4 py-2 text-gray-600">{t.message_type}</td>
                         <td className="px-4 py-2 text-center">
                           <span className={`inline-block px-2 py-0.5 rounded-full text-xs font-medium ${getAlimtalkTemplateStatus(t.status).badgeClass}`}>
@@ -251,7 +231,7 @@ const handleTemplateReject = (id: string) => {
                               발송 가능으로 읽히지만 실제로는 그렇지 않다. 검수 상태는 연동 동기화로만 채운다
                               (설계 = docs/2026-08-17-rcs-integration-design.md §2-2). 상세 보기는 유지. */}
                           <div className="flex gap-1 justify-center items-center">
-                            <button onClick={() => setTemplateDetail(t)}
+                            <button onClick={(e) => { e.stopPropagation(); setTemplateDetail(t); }}
                               className="whitespace-nowrap text-xs px-2 py-1 bg-emerald-50 text-emerald-700 rounded hover:bg-emerald-100">상세</button>
                           </div>
                         </td>

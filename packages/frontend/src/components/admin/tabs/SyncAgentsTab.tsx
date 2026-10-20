@@ -4,6 +4,7 @@
  */
 import type { Dispatch, SetStateAction } from 'react';
 import type { JSX } from 'react/jsx-runtime';
+import { ADMIN_TABLE_ONELINE, AdminLongText } from '../ui/admin-ui'; // ★ 2026-10-20 표 칸 한 줄 · 긴 글 = 말줄임 + 전문
 
 export interface SyncAgentsTabProps {
   getSyncOnlineBadge: (onlineStatus: string, dbStatus?: string, hbMin?: number, syncMin?: number) => JSX.Element;
@@ -127,7 +128,7 @@ const openSyncMappingModal = async (agent: any) => {
             </div>
           ) : (
             <div className="overflow-x-auto">
-              <table className="w-full text-[13px]">
+              <table className={`w-full text-[13px] ${ADMIN_TABLE_ONELINE}`}>
                 <thead className="bg-gray-50 border-b">
                   <tr>
                     <th className="whitespace-nowrap px-4 py-2 text-left text-xs font-medium text-gray-500 ">고객사</th>
@@ -146,8 +147,8 @@ const openSyncMappingModal = async (agent: any) => {
                 <tbody className="divide-y">
                   {syncAgents.map((agent: any) => (
                     <tr key={agent.id} className="hover:bg-gray-50">
-                      <td className="px-4 py-2 font-medium text-gray-900">{agent.company_name || '-'}</td>
-                      <td className="px-4 py-2 text-gray-700">{agent.agent_name || '-'}</td>
+                      <td className="px-4 py-2 font-medium text-gray-900"><AdminLongText text={agent.company_name} max={180} label="고객사" /></td>
+                      <td className="px-4 py-2 text-gray-700"><AdminLongText text={agent.agent_name} max={180} label="Agent명" /></td>
                       <td className="px-4 py-2 text-gray-500">{agent.agent_version || '-'}</td>
                       <td className="px-4 py-2 text-gray-500">{agent.db_type || '-'}</td>
                       <td className="px-4 py-2 text-center">{getSyncOnlineBadge(agent.online_status, agent.status, agent.heartbeat_interval_min, agent.sync_interval_customers_min)}</td>

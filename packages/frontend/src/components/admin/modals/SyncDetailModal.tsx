@@ -6,6 +6,7 @@ import type { Dispatch, SetStateAction } from 'react';
 import type { JSX } from 'react/jsx-runtime';
 import { formatDateTimeShort } from '../../../utils/formatDate';
 import { Fragment } from 'react';
+import { ADMIN_TABLE_ONELINE } from '../ui/admin-ui'; // ★ 2026-10-20 표 칸 한 줄
 
 export interface SyncDetailModalProps {
   getSyncOnlineBadge: (onlineStatus: string, dbStatus?: string, hbMin?: number, syncMin?: number) => JSX.Element;
@@ -181,8 +182,8 @@ export default function SyncDetailModal(props: SyncDetailModalProps) {
 
                   {/* 동기화 이력 */}
                   <h4 className="text-sm font-semibold text-gray-700 mb-2">최근 동기화 이력</h4>
-                  <div className="border rounded-lg overflow-hidden">
-                    <table className="w-full text-xs">
+                  <div className="border rounded-lg overflow-x-auto">
+                    <table className={`w-full text-xs ${ADMIN_TABLE_ONELINE}`}>
                       <thead className="bg-gray-50">
                         <tr>
                           <th className="whitespace-nowrap px-3 py-2 text-left text-gray-500">시각</th>
@@ -215,7 +216,7 @@ export default function SyncDetailModal(props: SyncDetailModalProps) {
                           {/* ★ 2026-06-13: 실패 행 상세(failures jsonb) — 어떤 행이 왜 실패했는지 표시 (식별 불가 구멍 해소) */}
                           {Array.isArray(log.failures) && log.failures.length > 0 && (
                             <tr className="bg-red-50/60">
-                              <td colSpan={7} className="px-3 py-1.5 text-[11px] text-red-700">
+                              <td colSpan={7} className="px-3 py-1.5 text-[11px] text-red-700 !whitespace-normal break-words">
                                 실패 상세: {log.failures.slice(0, 5).map((f: any, i: number) => (
                                   <span key={i} className="mr-3 font-mono">{f.phone || '(번호 없음)'}: {f.reason || '원인 미기록'}</span>
                                 ))}

@@ -55,10 +55,16 @@
 
 ## 2) 활성 버그
 
+### 🔵 B-1020-2 1020 슈퍼관리자 표 개편에서 짚은 범위 밖(기록만 · 착수 판단 = Harold님) · 2026-10-20
+- 390폭(휴대폰) 화면 가로 넘침 — 표 밖 요소(실측): `components/admin/tabs/CallbacksTab.tsx` 하위 탭 줄(발신번호 관리 · 등록 신청 관리 · 등록현황 관리) · `components/admin/LoginBlocksManagement.tsx` 조회 입력 줄 · `components/AgentChargePanel.tsx` 충전 등록 줄 · 긴 회사명이 든 회사 선택 상자(`tabs/AllCampaignsTab` · `tabs/AuditLogsTab` · `tabs/ScheduledTab` · `tabs/UsersTab` · 회사명이 아주 길 때만).
+- Codex T3 [범위 밖] `frontend/src/components/SessionTimeoutModal.tsx:46`(내용 미기재).
+- 본체 안 정산 상세 표 2개(항목 · 수량 · 단가 · 금액)는 본체 전체를 띄워야 해서 실측 밖(칸 값이 짧음 · 한 줄 규칙은 적용).
+
 ### 🔵 B-1020-1 1020 출처 삭제 · 큰 숫자에서 짚은 범위 밖(기록만 · 착수 판단 = Harold님) · 2026-10-20
 - `backend/src/utils/performance-explainer.ts` 시스템 문구는 「최근 30일」인데 쓰는 집계 `aggregateCampaignPerformance` 기본은 3개월(성과 AI 자율 진단).
 - 화면에 날것 식별자(출처 줄이 아니라 이번 범위 밖): `pages/PerformancePage.tsx` 매출 창 「recent_purchase_date 갱신」 · 퍼널 「(page_view)」 같은 이벤트 이름 · `components/journey/JourneyActionConfirmModal.tsx` 「journey_step_logs」.
 - `backend/src/utils/journey-opportunities.ts` 589 문구의 「최근 730일」은 상수 `PRODUCT_PERIOD_LOOKBACK_DAYS` 가 아니라 글자로 박혀 있다(값이 바뀌면 문구만 남는다).
+- `status/OPS.md` §2-2 3번 「백엔드 build:safe(dist 갱신 필수)」는 실제 실행과 다르다 — 1020 `pm2 describe targetup-backend` = script path `/usr/bin/ts-node`(src 직접 실행 · 반영 = pull + reload).
 - 렌더하지 않는 `source` 속성 잔존(화면 표시 0): `components/cdp/CdpAnalyticsPanels.tsx` ChartCard · `pages/PredictiveDashboardPage.tsx` Card · HistogramCard.
 
 ### 🔵 B-1019-1 1019 버그 정리 Codex 라운드에서 짚은 범위 밖(기록만 · 착수 판단 = Harold님) · 2026-10-19

@@ -6,6 +6,7 @@ import type { Dispatch, SetStateAction } from 'react';
 import { AUDIT_ACTION_LABEL, formatAuditDetail, AUDIT_ACTION_COLOR } from '../../../constants/audit-action-labels';
 import { formatDateTime } from '../../../utils/formatDate';
 import type { Company } from '../admin-types';
+import { ADMIN_TABLE_ONELINE, AdminLongText } from '../ui/admin-ui'; // ★ 2026-10-20 표 칸 한 줄 · 긴 글 = 말줄임 + 전문
 
 export interface AuditLogsTabProps {
   auditActionFilter: string;
@@ -71,7 +72,7 @@ export default function AuditLogsTab(props: AuditLogsTabProps) {
 
           {/* 테이블 */}
           <div className="overflow-x-auto">
-            <table className="w-full text-[13px]">
+            <table className={`w-full text-[13px] ${ADMIN_TABLE_ONELINE}`}>
               <thead className="bg-gray-50">
                 <tr>
                   <th className="px-4 py-2 text-center text-xs font-medium text-gray-500 whitespace-nowrap">일시</th>
@@ -102,15 +103,15 @@ export default function AuditLogsTab(props: AuditLogsTabProps) {
                           <div className="text-[10px] text-gray-400">{log.login_id || ''}</div>
                         </td>
                         <td className="px-4 py-2 text-left text-xs text-gray-600">
-                          {log.company_name || '-'}
+                          <AdminLongText text={log.company_name} max={180} label="고객사" />
                         </td>
                         <td className="px-4 py-2 text-center">
                           <span className={`px-2 py-1 rounded-full text-[11px] font-medium ${AUDIT_ACTION_COLOR[log.action] || 'bg-gray-100 text-gray-600'}`}>
                             {AUDIT_ACTION_LABEL[log.action] || log.action}
                           </span>
                         </td>
-                        <td className="px-4 py-2 text-left text-xs text-gray-500 max-w-[300px] truncate" title={detailText}>
-                          {detailText || '-'}
+                        <td className="px-4 py-2 text-left text-xs text-gray-500">
+                          <AdminLongText text={detailText} max={320} label="상세" />
                         </td>
                         <td className="px-4 py-2 text-center text-xs text-gray-400 whitespace-nowrap">
                           {log.ip_address || '-'}

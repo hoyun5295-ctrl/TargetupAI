@@ -2,9 +2,10 @@
  * PlanRequestsTab — 슈퍼관리자 AdminDashboard 에서 옮긴 화면(★ 2026-10-09 파일 분리 E · 설계서 docs/2026-10-03-admin-dashboard-split-design.md §5)
  * 옮긴 방법 = 스크립트(원문 그대로 · 글자 대조). 상태(use*)는 본체에 남고 props 로 받는다 — 탭을 옮겨 다녀도 값이 그대로다(동작 변경 0).
  */
-import type { Dispatch, SetStateAction } from 'react';
+import { useState, type Dispatch, type SetStateAction } from 'react';
 import { formatDateTime, formatDate } from '../../../utils/formatDate';
 import type { ModalState } from '../admin-types';
+import { ADMIN_TABLE_ONELINE, ADMIN_TR_OPEN, AdminDetailItem, AdminDetailModal, AdminLongText, adminRowOpen } from '../ui/admin-ui'; // ★ 2026-10-20 표 칸 한 줄 · 행 = 상세 창
 
 export interface PlanRequestsTabProps {
   closeModal: () => void;
@@ -22,6 +23,10 @@ export interface PlanRequestsTabProps {
 export default function PlanRequestsTab(props: PlanRequestsTabProps) {
   const { closeModal, loadData, loadPlanRequests, planRequests, requestPage, setModal, setRejectReason, setRejectTarget, setRequestPage, setShowRejectModal } = props;
   const requestPerPage = 10;
+  // ★ 2026-10-20 행을 누르면 상세 창 · 승인 · 거절은 창 안에서(Harold 「클릭하면 모달 · 거기서 승인」) — 같은 처리 함수 · 같은 확인 창 · 같은 거절 창
+  const [detail, setDetail] = useState<any | null>(null);
+  const statusLabel = (st: string) => (st === 'pending' ? '대기' : st === 'approved' ? '승인' : st === 'rejected' ? '거절' : st);
+  const isTrial = (req: any) => typeof req?.message === 'string' && req.message.startsWith('[무료체험]');
 
 const handleApproveRequest = async (id: string) => {
   setModal({
@@ -69,7 +74,7 @@ const handleApproveRequest = async (id: string) => {
             </div>
 
             <div className="overflow-x-auto">
-              <table className="w-full text-[13px]">
+              <table className={`w-full text-[13px] ${ADMIN_TABLE_ONELINE}`}>
                 <thead className="bg-gray-50">
                   <tr>
                     <th className="px-4 py-2 text-center text-xs font-medium text-gray-500 whitespace-nowrap">신청일시</th>
@@ -93,31 +98,31 @@ const handleApproveRequest = async (id: string) => {
                     planRequests
                       .slice((requestPage - 1) * requestPerPage, requestPage * requestPerPage)
                       .map((req) => (
-                      <tr key={req.id} className={`hover:bg-gray-50 ${req.status === 'pending' ? 'bg-yellow-50' : ''}`}>
+                      <tr key={req.id} {...adminRowOpen(() => setDetail(req))} className={`${ADMIN_TR_OPEN} ${req.status === 'pending' ? 'bg-yellow-50' : ''}`}>
                         <td className="px-4 py-2 text-center text-gray-600 whitespace-nowrap">
                           {formatDateTime(req.created_at)}
                         </td>
                         <td className="px-4 py-2">
-                          <div className="font-medium text-gray-900">{req.company_name}</div>
+                          <AdminLongText text={req.company_name} max={180} rowOpens className="font-medium text-gray-900" />
                           <div className="text-xs text-gray-500">{req.company_code}</div>
                         </td>
                         <td className="px-4 py-2 text-gray-900">
-                          {req.user_name} ({req.user_login_id})
+                          <AdminLongText text={`${req.user_name || '-'}${req.user_login_id ? ` (${req.user_login_id})` : ''}`} max={180} rowOpens />
                         </td>
                         <td className="px-4 py-2 text-center text-gray-600 whitespace-nowrap">
                           {req.current_plan_name || '-'}
                         </td>
                         <td className="px-4 py-2 text-center">
                           <span className="font-medium text-blue-600">{req.requested_plan_name}</span>
-                          {typeof req.message === 'string' && req.message.startsWith('[무료체험]') && (
+                          {isTrial(req) && (
                             <span className="ml-1 inline-block px-1.5 py-0.5 rounded text-[10px] font-semibold bg-fuchsia-100 text-fuchsia-700 align-middle">무료체험</span>
                           )}
                           <div className="text-xs text-gray-500">
                             {Number(req.requested_plan_price).toLocaleString()}원/월
                           </div>
                         </td>
-                        <td className="px-4 py-2 text-gray-600 max-w-[200px] truncate" title={req.message}>
-                          {req.message || '-'}
+                        <td className="px-4 py-2 text-gray-600">
+                          <AdminLongText text={req.message} max={160} rowOpens />
                         </td>
                         <td className="px-4 py-2 text-center">
                           {req.status === 'pending' && (
@@ -132,24 +137,7 @@ const handleApproveRequest = async (id: string) => {
                         </td>
                         <td className="px-4 py-2 text-center">
                           {req.status === 'pending' ? (
-                            <div className="flex justify-center gap-2">
-                              <button
-                                onClick={() => handleApproveRequest(req.id)}
-                                className="whitespace-nowrap px-3 py-1 bg-green-600 text-white rounded text-[13px] hover:bg-green-700"
-                              >
-                                승인
-                              </button>
-                              <button
-                                onClick={() => {
-                                  setRejectTarget(req);
-                                  setRejectReason('');
-                                  setShowRejectModal(true);
-                                }}
-                                className="whitespace-nowrap px-3 py-1 bg-red-600 text-white rounded text-[13px] hover:bg-red-700"
-                              >
-                                거절
-                              </button>
-                            </div>
+                            <span className="inline-flex px-2.5 py-1 rounded bg-emerald-50 text-emerald-700 text-xs font-medium">승인 · 거절</span>
                           ) : (
                             <div className="text-xs text-gray-500">
                               <div>{req.processed_by_name || '-'}</div>
@@ -157,9 +145,7 @@ const handleApproveRequest = async (id: string) => {
                                 <div>{formatDate(req.processed_at)}</div>
                               )}
                               {req.admin_note && (
-                                <div className="text-red-600 mt-1" title={req.admin_note}>
-                                  {req.admin_note.length > 10 ? req.admin_note.slice(0, 10) + '...' : req.admin_note}
-                                </div>
+                                <AdminLongText text={req.admin_note} max={120} rowOpens className="text-red-600 mt-1" />
                               )}
                             </div>
                           )}
@@ -169,6 +155,36 @@ const handleApproveRequest = async (id: string) => {
                   )}
                 </tbody>
                 </table>
+                {detail && (
+                  <AdminDetailModal
+                    title={`플랜 변경 신청 · ${detail.company_name || '-'}`}
+                    onClose={() => setDetail(null)}
+                    footer={detail.status === 'pending' ? (
+                      <div className="flex gap-2">
+                        <button type="button" onClick={() => { const req = detail; setDetail(null); setRejectTarget(req); setRejectReason(''); setShowRejectModal(true); }}
+                          className="flex-1 h-9 rounded-lg border border-red-200 bg-white text-red-700 text-[13px] font-medium hover:bg-red-50">거절</button>
+                        <button type="button" onClick={() => { const id = detail.id; setDetail(null); handleApproveRequest(id); }}
+                          className="flex-1 h-9 rounded-lg bg-green-600 text-white text-[13px] font-medium hover:bg-green-700">승인</button>
+                      </div>
+                    ) : undefined}
+                  >
+                    <dl>
+                      <AdminDetailItem label="신청일시">{formatDateTime(detail.created_at)}</AdminDetailItem>
+                      <AdminDetailItem label="회사">{detail.company_name || '-'}{detail.company_code ? ` (${detail.company_code})` : ''}</AdminDetailItem>
+                      <AdminDetailItem label="신청자">{detail.user_name || '-'}{detail.user_login_id ? ` (${detail.user_login_id})` : ''}</AdminDetailItem>
+                      <AdminDetailItem label="현재 플랜">{detail.current_plan_name || '-'}</AdminDetailItem>
+                      <AdminDetailItem label="신청 플랜">
+                        <span className="font-medium text-blue-600">{detail.requested_plan_name}</span> · {Number(detail.requested_plan_price).toLocaleString()}원/월{isTrial(detail) ? ' · 무료체험' : ''}
+                      </AdminDetailItem>
+                      <AdminDetailItem label="메시지">{detail.message || '-'}</AdminDetailItem>
+                      <AdminDetailItem label="상태">{statusLabel(detail.status)}</AdminDetailItem>
+                      {detail.status !== 'pending' && (
+                        <AdminDetailItem label="처리">{detail.processed_by_name || '-'}{detail.processed_at ? ` · ${formatDate(detail.processed_at)}` : ''}</AdminDetailItem>
+                      )}
+                      {detail.admin_note && <AdminDetailItem label="관리자 메모"><span className="text-red-600">{detail.admin_note}</span></AdminDetailItem>}
+                    </dl>
+                  </AdminDetailModal>
+                )}
             </div>
             {planRequests.length > requestPerPage && (
               <div className="px-6 py-4 border-t flex items-center justify-between">

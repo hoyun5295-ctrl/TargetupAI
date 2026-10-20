@@ -9,6 +9,7 @@
  */
 import { useCallback, useEffect, useRef, useState } from 'react';
 import ListPager, { pageSlice } from '../shared/ListPager';
+import { ADMIN_TABLE_ONELINE, AdminLongText } from './ui/admin-ui'; // ★ 2026-10-20 표 칸 한 줄 · 긴 글 = 말줄임 + 전문
 
 type RowStatus = 'verified' | 'pending' | 'lapsed' | 'superseded';
 
@@ -139,7 +140,7 @@ export default function IdentityStatusTab() {
           <div className="rounded-xl border border-gray-200/70 overflow-hidden">
             <div className="px-4 py-3 text-sm font-semibold border-b">시범 명단 계정별 <span className="text-xs text-gray-400 font-normal">· 담당자 번호 = 그 계정의 연락처와 로그인 인증번호를 받는 번호</span></div>
             <div className="overflow-x-auto">
-              <table className="w-full text-sm">
+              <table className={`w-full text-sm ${ADMIN_TABLE_ONELINE}`}>
                 <thead className="bg-gray-50 text-xs text-gray-500">
                   <tr>
                     <th className={th}>아이디</th><th className={th}>고객사</th><th className={th}>계정 이름</th><th className={th}>본인인증</th>
@@ -154,7 +155,7 @@ export default function IdentityStatusTab() {
                         <td colSpan={6} className={`${td} text-amber-700 text-xs`}>이 아이디의 계정이 없습니다(명단 값 확인)</td>
                       ) : (
                         <>
-                          <td className={td}>{p.companyName || '-'}{!p.active && <span className="ml-1.5 text-[11px] px-1.5 py-0.5 rounded bg-gray-100 text-gray-500">사용 중지</span>}</td>
+                          <td className={td}><div className="flex items-center gap-1.5"><AdminLongText text={p.companyName} max={180} label="고객사" />{!p.active && <span className="text-[11px] px-1.5 py-0.5 rounded bg-gray-100 text-gray-500">사용 중지</span>}</div></td>
                           <td className={td}>{p.accountName || '-'}</td>
                           <td className={td}>
                             {p.verifiedAt
@@ -186,7 +187,7 @@ export default function IdentityStatusTab() {
             인증 이력 <span className="text-xs text-gray-400 font-normal">· 최근 {data ? data.history.length.toLocaleString() : '-'}건 / 전체 {data ? data.historyTotal.toLocaleString() : '-'}건 · 요청번호 = 한국모바일인증 관리 화면 인증내역의 요청번호</span>
           </div>
           <div className="overflow-x-auto">
-            <table className="w-full text-sm">
+            <table className={`w-full text-sm ${ADMIN_TABLE_ONELINE}`}>
               <thead className="bg-gray-50 text-xs text-gray-500">
                 <tr>
                   <th className={th}>시각</th><th className={th}>고객사</th><th className={th}>아이디</th><th className={th}>계정 이름</th><th className={th}>구분</th>
@@ -199,7 +200,7 @@ export default function IdentityStatusTab() {
                 {pageSlice(data?.history || [], historyPage).map((h) => (
                   <tr key={h.id} className="border-t border-gray-100">
                     <td className={`${td} tabular-nums`}>{fmt(h.at)}</td>
-                    <td className={td}>{h.companyName || '-'}</td>
+                    <td className={td}><AdminLongText text={h.companyName} max={180} label="고객사" /></td>
                     <td className={`${td} font-medium`}>{h.loginId || '-'}</td>
                     <td className={td}>{h.accountName || '-'}</td>
                     <td className={td}>{PURPOSE_LABEL[h.purpose] || h.purpose}</td>
@@ -221,7 +222,7 @@ export default function IdentityStatusTab() {
         <div className="rounded-xl border border-gray-200/70 overflow-hidden">
           <div className="px-4 py-3 text-sm font-semibold border-b">실패 기록 <span className="text-xs text-gray-400 font-normal">· 최근 30일 · 거절 코드 = 서버가 그 인증을 받지 않은 이유</span></div>
           <div className="overflow-x-auto">
-            <table className="w-full text-sm">
+            <table className={`w-full text-sm ${ADMIN_TABLE_ONELINE}`}>
               <thead className="bg-gray-50 text-xs text-gray-500">
                 <tr>
                   <th className={th}>시각</th><th className={th}>고객사</th><th className={th}>아이디</th><th className={th}>구분</th>
@@ -233,11 +234,11 @@ export default function IdentityStatusTab() {
                 {pageSlice(data?.failures || [], failPage).map((f, i) => (
                   <tr key={`${f.at}-${i}`} className="border-t border-gray-100">
                     <td className={`${td} tabular-nums`}>{fmt(f.at)}</td>
-                    <td className={td}>{f.companyName || '-'}</td>
+                    <td className={td}><AdminLongText text={f.companyName} max={180} label="고객사" /></td>
                     <td className={`${td} font-medium`}>{f.loginId || '-'}</td>
                     <td className={td}>{PURPOSE_LABEL[f.purpose] || f.purpose || '-'}</td>
                     <td className={`${td} text-rose-700`}>{failLabel(f.result, f.reason)}</td>
-                    <td className={`${td} font-mono text-[11px] text-gray-600`}>{f.detail || '-'}</td>
+                    <td className={`${td} font-mono text-[11px] text-gray-600`}><AdminLongText text={f.detail} max={160} label="거절 코드" /></td>
                     <td className={`${td} font-mono text-[11px] text-gray-600`}>{f.requestNo || '-'}</td>
                     <td className={`${td} tabular-nums text-gray-500`}>{f.ip || '-'}</td>
                   </tr>

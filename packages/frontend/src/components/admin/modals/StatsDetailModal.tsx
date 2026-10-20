@@ -5,6 +5,7 @@
 import type { Dispatch, SetStateAction } from 'react';
 import { resolveSendTypeChipClass, resolveSendTypeLabel, resolveChannelLabel } from '../../../utils/campaign-axis';
 import { formatCampaignMessageForDisplay } from '../../../utils/formatDate';
+import { ADMIN_TABLE_ONELINE, AdminLongText } from '../ui/admin-ui'; // ★ 2026-10-20 표 칸 한 줄 · 긴 글 = 말줄임 + 전문
 
 export interface StatsDetailModalProps {
   setMessageDetailContent: Dispatch<SetStateAction<{ name: string; content: string; } | null>>;
@@ -22,7 +23,7 @@ export default function StatsDetailModal(props: StatsDetailModalProps) {
     <>
     {(
         <div className="fixed inset-0 bg-gray-900/40 flex items-center justify-center p-4 z-[60]">
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-4xl max-h-[85vh] overflow-hidden">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-6xl max-h-[85vh] overflow-hidden">
             <div className="px-5 py-3.5 border-b border-gray-100 flex items-center justify-between">
               <div>
                 <h3 className="text-base font-semibold text-gray-900">발송 통계 상세</h3>
@@ -53,8 +54,8 @@ export default function StatsDetailModal(props: StatsDetailModalProps) {
                       </svg>
                       사용자별 발송 현황
                     </h4>
-                    <div className="bg-gray-50 rounded-lg overflow-hidden">
-                      <table className="w-full text-[13px]">
+                    <div className="bg-gray-50 rounded-lg overflow-x-auto">
+                      <table className={`w-full text-[13px] ${ADMIN_TABLE_ONELINE}`}>
                         <thead className="bg-gray-50">
                           <tr>
                             <th className="whitespace-nowrap px-4 py-2 text-left text-gray-500 font-medium">사용자</th>
@@ -81,7 +82,7 @@ export default function StatsDetailModal(props: StatsDetailModalProps) {
                                 <td className="px-4 py-2.5 font-medium text-gray-900">{u.user_name || '(알 수 없음)'}</td>
                                 <td className="px-4 py-2.5 text-gray-500 font-mono text-xs">{u.login_id || '-'}</td>
                                 <td className="px-4 py-2.5 text-center text-gray-500">{u.department || '-'}</td>
-                                <td className="px-4 py-2.5 text-center text-gray-500">{u.store_codes?.length > 0 ? u.store_codes.join(', ') : '-'}</td>
+                                <td className="px-4 py-2.5 text-center text-gray-500"><AdminLongText text={u.store_codes?.length > 0 ? u.store_codes.join(', ') : ''} max={180} label="담당 브랜드" className="mx-auto" /></td>
                                 <td className="px-4 py-2.5 text-center text-gray-700">{Number(u.runs)}</td>
                                 <td className="px-4 py-2.5 text-center text-blue-600 font-medium">{sent.toLocaleString()}</td>
                                 <td className="px-4 py-2.5 text-center text-green-600">{success.toLocaleString()}</td>
@@ -103,8 +104,8 @@ export default function StatsDetailModal(props: StatsDetailModalProps) {
                       </svg>
                       캠페인별 발송 내역
                     </h4>
-                    <div className="bg-gray-50 rounded-lg overflow-hidden">
-                      <table className="w-full text-[13px]">
+                    <div className="bg-gray-50 rounded-lg overflow-x-auto">
+                      <table className={`w-full text-[13px] ${ADMIN_TABLE_ONELINE}`}>
                         <thead className="bg-gray-50">
                           <tr>
                             <th className="whitespace-nowrap px-4 py-2 text-left text-gray-500 font-medium">캠페인명</th>
@@ -125,8 +126,8 @@ export default function StatsDetailModal(props: StatsDetailModalProps) {
                             <tr><td colSpan={11} className="px-4 py-8 text-center text-gray-400">데이터가 없습니다.</td></tr>
                           ) : statsDetail.campaigns?.map((c: any, idx: number) => (
                             <tr key={idx} className="hover:bg-white">
-                              <td className="px-4 py-2.5 font-medium text-gray-900 max-w-[200px] truncate" title={c.campaign_name}>
-                                {c.campaign_name}
+                              <td className="px-4 py-2.5 font-medium text-gray-900">
+                                <AdminLongText text={c.campaign_name} max={160} label="캠페인명" />
                               </td>
                               <td className="px-4 py-2.5 text-center">
                                 <span className={`inline-block px-2 py-0.5 rounded text-xs font-medium ${resolveSendTypeChipClass(c.send_type)}`}>
@@ -153,7 +154,7 @@ export default function StatsDetailModal(props: StatsDetailModalProps) {
                                     const fullMsg = formatCampaignMessageForDisplay(c);
                                     return (
                                       <div
-                                        className="truncate cursor-pointer hover:text-blue-600"
+                                        className="block max-w-[200px] truncate cursor-pointer hover:text-blue-600"
                                         title="클릭하여 전체 메시지 보기"
                                         onClick={() => setMessageDetailContent({ name: c.campaign_name, content: fullMsg })}
                                       >

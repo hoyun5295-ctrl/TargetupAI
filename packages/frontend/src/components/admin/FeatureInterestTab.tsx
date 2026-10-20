@@ -13,7 +13,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Building2, ChevronRight, X } from 'lucide-react';
 import { usePlanFeatureIntros } from '../../constants/plan-feature-intros'; // ★ 2026-10-07 원장 = 서버(로그인한 사람에게만)
-import ListPager, { pageSlice } from '../shared/ListPager';   // ★ 2026-10-07 업체 목록 쪽 넘김(20건)
+import ListPager, { pageSlice } from '../shared/ListPager';   // ★ 2026-10-07 업체 목록 쪽 넘김(20건)
+import { ADMIN_TABLE_ONELINE } from './ui/admin-ui'; // ★ 2026-10-20 표 칸 한 줄
 
 type Period = 'today' | '7d' | 'month' | 'all';
 type PlanFilter = 'all' | 'unsubscribed' | 'subscribed';
@@ -158,7 +159,7 @@ function CompanyDetailModal({ c, onClose }: { c: CompanyRow; onClose: () => void
               {totalEvents > c.events.length && <span className="text-xs text-gray-400 font-normal"> (전체 {totalEvents.toLocaleString()}건 중)</span>}
             </h4>
             <div className="overflow-x-auto">
-              <table className="w-full text-[13px]">
+              <table className={`w-full text-[13px] ${ADMIN_TABLE_ONELINE}`}>
                 <tbody>
                   {c.events.map((e, i) => (
                     <tr key={`${e.at}-${i}`} className="border-t border-dashed border-gray-200">
@@ -312,7 +313,7 @@ export default function FeatureInterestTab() {
         <div className="rounded-xl border border-gray-200/70 overflow-hidden">
           <div className="px-4 py-3 text-sm font-semibold border-b">업체별 · 마지막 본 순 <span className="text-xs text-gray-400 font-normal">· 줄을 누르면 상세</span></div>
           <div className="overflow-x-auto">
-            <table className="w-full text-sm">
+            <table className={`w-full text-sm ${ADMIN_TABLE_ONELINE}`}>
               <thead className="bg-gray-50 text-xs text-gray-500">
                 <tr>
                   <th className="text-left font-medium px-3 py-2 whitespace-nowrap">회사</th>

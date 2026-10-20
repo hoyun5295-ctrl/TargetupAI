@@ -12,7 +12,7 @@ import { toSupplyInputs } from '../../../utils/unitPrice';
 import { companyPlanState, trialDaysLeft, type CompanyPlanState } from '../../../utils/planLabel';
 import {
   AdminPanel, AdminFilterBar, AdminFilterLabel, AdminSegmented, AdminStatGrid, AdminStat, AdminPill, AdminTableEmpty, AdminSource,
-  ADMIN_TABLE, ADMIN_THEAD, ADMIN_TH, ADMIN_TH_FIRST, ADMIN_TBODY, ADMIN_TR, ADMIN_TD, ADMIN_TD_FIRST, ADMIN_NUM,
+  ADMIN_TABLE, AdminLongText, ADMIN_THEAD, ADMIN_TH, ADMIN_TH_FIRST, ADMIN_TBODY, ADMIN_TR, ADMIN_TD, ADMIN_TD_FIRST, ADMIN_NUM,
   ADMIN_BTN_PRIMARY, ADMIN_BTN_SM, ADMIN_BTN_SM_DANGER, ADMIN_INPUT,
 } from '../ui/admin-ui';
 
@@ -359,7 +359,7 @@ export default function CompaniesTab(props: CompaniesTabProps) {
                 .map((company) => (
                   <tr key={company.id} className={ADMIN_TR}>
                     <td className={`${ADMIN_TD_FIRST} font-semibold text-gray-900`}>{company.company_code}</td>
-                    <td className={`${ADMIN_TD} font-medium text-gray-900`}>{company.company_name}</td>
+                    <td className={`${ADMIN_TD} font-medium text-gray-900`}><AdminLongText text={company.company_name} max={200} label="회사명" /></td>
                     <td className={ADMIN_TD}>{company.contact_name || <span className="text-gray-300">-</span>}</td>
                     <td className={`${ADMIN_TD} text-center`}>{usageCell(company)}</td>
                     <td className={ADMIN_TD}>{planCell(company)}</td>

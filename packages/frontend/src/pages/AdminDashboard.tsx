@@ -91,7 +91,7 @@ import DepositApproveModal from '../components/admin/modals/DepositApproveModal'
 import DepositRejectModal from '../components/admin/modals/DepositRejectModal'; // ★ 2026-10-09 분리 E
 import AdminCustomerDeleteModal from '../components/admin/modals/AdminCustomerDeleteModal'; // ★ 2026-10-09 분리 E
 import CustomerDeleteAllModal from '../components/admin/modals/CustomerDeleteAllModal'; // ★ 2026-10-09 분리 E
-import { AdminPill, PILL } from '../components/admin/ui/admin-ui'; // ★ 2026-10-09 슈퍼관리자 다듬기(목업 v2)
+import { AdminPill, PILL, ADMIN_TABLE_ONELINE, AdminLongText } from '../components/admin/ui/admin-ui'; // ★ 2026-10-09 슈퍼관리자 다듬기(목업 v2)
 
 export default function AdminDashboard() {
   const navigate = useNavigate();
@@ -2923,7 +2923,7 @@ const loadStatsDetail = async (date: string, companyId: string, companyName: str
       {adminRoleEdit && <AdminRoleEditModal {...{ adminRoleBusy, adminRoleEdit, adminRoleOptions, loadAdminAccounts, setAdminRoleBusy, setAdminRoleEdit, showAlert }} />}
 
       {/* 템플릿 상세 모달 — 고객사 업로드 템플릿 정보 확인 (발송/승인 내용·반려 사유) */}
-      {templateDetail && <TemplateDetailModal {...{ setTemplateDetail, templateDetail }} />}
+      {templateDetail && <TemplateDetailModal {...{ setTemplateDetail, templateDetail, templateSubTab, loadAdminTemplates, loadAdminRcsTemplates, setModal, setRejectModal }} />}
 
       {/* ★ 2026-08-04 IMC에서 템플릿 가져오기 — 이미 연결된 발신프로필을 골라 그 프로필 템플릿만 들여온다 */}
       {showImcTemplateImport && (
@@ -4157,7 +4157,7 @@ const loadStatsDetail = async (date: string, companyId: string, companyName: str
               <div className="text-center py-8 text-gray-400">정산 데이터가 없습니다</div>
             ) : (
               <div className="overflow-x-auto">
-                <table className="w-full text-[13px]">
+                <table className={`w-full text-[13px] ${ADMIN_TABLE_ONELINE}`}>
                   <thead className="bg-gray-50">
                     <tr>
                       {/* ★ 2026-08-05 (서수란 접수) 전체 선택. ★2026-08-06 페이징이 생기면서 기준을 **이 페이지**로
@@ -4199,7 +4199,7 @@ const loadStatsDetail = async (date: string, companyId: string, companyName: str
                             onChange={() => setBillingSel((prev) => prev.includes(b.id) ? prev.filter((x) => x !== b.id) : [...prev, b.id])}
                             className="w-4 h-4 accent-indigo-600 cursor-pointer" />
                         </td>
-                        <td className="px-4 py-2.5 font-medium text-gray-900">{b.company_name}</td>
+                        <td className="px-4 py-2.5 font-medium text-gray-900"><AdminLongText text={b.company_name} max={200} rowOpens /></td>
                         {/* ★ 2026-07-26 '구분' — 계정별 발행은 한 회사·한 기간에 여러 행이 생긴다.
                             계정 이름만 보이면 공통 장(계정 없음)이 '전체'로 보여 합산 발행과 구분되지 않는다. */}
                         <td className="px-4 py-2.5 text-center text-gray-500">
@@ -4500,8 +4500,8 @@ const loadStatsDetail = async (date: string, companyId: string, companyName: str
                       )}
 
                       {detailLines.length > 0 && (
-                        <div className="border rounded-lg overflow-hidden mb-4">
-                          <table className="w-full text-[13px]">
+                        <div className="border rounded-lg overflow-x-auto mb-4">
+                          <table className={`w-full text-[13px] ${ADMIN_TABLE_ONELINE}`}>
                             <thead className="bg-gray-50">
                               <tr>
                                 <th className="whitespace-nowrap px-3 py-2 text-left text-gray-500 font-medium">항목</th>
@@ -4556,7 +4556,7 @@ const loadStatsDetail = async (date: string, companyId: string, companyName: str
                         <div className="text-center py-6 text-gray-400 text-sm">상세 데이터가 없습니다</div>
                       ) : (
                         <div className="overflow-x-auto border rounded-lg">
-                          <table className="w-full text-[13px]">
+                          <table className={`w-full text-[13px] ${ADMIN_TABLE_ONELINE}`}>
                             <thead className="bg-gray-50">
                               <tr>
                                 <th className="whitespace-nowrap px-3 py-2 text-left text-gray-500 font-medium">일자</th>

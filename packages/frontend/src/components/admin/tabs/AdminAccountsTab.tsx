@@ -5,6 +5,7 @@
 import type { Dispatch, SetStateAction } from 'react';
 import ListPager, { pageSlice } from '../../shared/ListPager';
 import { formatDateTime } from '../../../utils/formatDate';
+import { ADMIN_TABLE_ONELINE, AdminLongText } from '../ui/admin-ui'; // ★ 2026-10-20 표 칸 한 줄 · 긴 글 = 말줄임 + 전문
 
 export interface AdminAccountsTabProps {
   adminAccounts: any[];
@@ -62,7 +63,7 @@ export default function AdminAccountsTab(props: AdminAccountsTabProps) {
                     )}
                   </div>
                   <div className="overflow-x-auto">
-                    <table className="w-full text-[13px]">
+                    <table className={`w-full text-[13px] ${ADMIN_TABLE_ONELINE}`}>
                       <thead className="bg-gray-50 text-xs text-gray-500">
                         <tr>
                           <th className="whitespace-nowrap px-4 py-2 text-left">계정 ID</th>
@@ -134,7 +135,7 @@ export default function AdminAccountsTab(props: AdminAccountsTabProps) {
                     ))}
                   </div>
                   <div className="overflow-x-auto">
-                    <table className="w-full text-[13px]">
+                    <table className={`w-full text-[13px] ${ADMIN_TABLE_ONELINE}`}>
                       <thead className="bg-gray-50 text-xs text-gray-500">
                         <tr>
                           <th className="whitespace-nowrap px-4 py-2 text-left">영역</th>
@@ -148,7 +149,7 @@ export default function AdminAccountsTab(props: AdminAccountsTabProps) {
                         {adminMatrix.map((row) => (
                           <tr key={row.key}>
                             <td className="px-4 py-2 text-xs font-medium text-gray-900">{row.area}</td>
-                            <td className="px-4 py-2 text-[11px] text-gray-500">{row.screens}</td>
+                            <td className="px-4 py-2 text-[11px] text-gray-500"><AdminLongText text={row.screens} max={320} label={`${row.area} 해당 화면`} /></td>
                             {adminRoleOptions.map((o) => {
                               const lv = row.levels?.[o.value] || 'NONE';
                               return (
@@ -175,7 +176,7 @@ export default function AdminAccountsTab(props: AdminAccountsTabProps) {
                     <h3 className="text-base font-semibold text-gray-900">접근권한 변경 이력 대장</h3>
                   </div>
                   <div className="overflow-x-auto">
-                    <table className="w-full text-[13px]">
+                    <table className={`w-full text-[13px] ${ADMIN_TABLE_ONELINE}`}>
                       <thead className="bg-gray-50 text-xs text-gray-500">
                         <tr>
                           <th className="whitespace-nowrap px-4 py-2 text-left">일시</th>
@@ -215,7 +216,7 @@ export default function AdminAccountsTab(props: AdminAccountsTabProps) {
                               <td className="px-4 py-2 text-xs text-gray-900">{h.actor_name || h.actor_login_id || '-'}</td>
                               <td className="px-4 py-2 font-mono text-xs text-gray-700">{d.login_id || '-'}</td>
                               <td className="px-4 py-2 text-xs text-gray-700 whitespace-nowrap">{change}</td>
-                              <td className="px-4 py-2 text-xs text-gray-600 max-w-xs truncate">{d.reason || '-'}</td>
+                              <td className="px-4 py-2 text-xs text-gray-600"><AdminLongText text={d.reason} max={260} label="사유" /></td>
                               <td className="px-4 py-2 font-mono text-[11px] text-gray-500">{h.ip_address || '-'}</td>
                             </tr>
                           );

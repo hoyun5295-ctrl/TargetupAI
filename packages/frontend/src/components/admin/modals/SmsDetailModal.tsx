@@ -4,6 +4,7 @@
  */
 import type { Dispatch, SetStateAction } from 'react';
 import { resolveChannelLabel } from '../../../utils/campaign-axis';
+import { ADMIN_TABLE_ONELINE } from '../ui/admin-ui'; // ★ 2026-10-20 표 칸 한 줄
 
 export interface SmsDetailModalProps {
   loadSmsDetail: (campaignId: string, page?: number) => Promise<void>;
@@ -108,7 +109,7 @@ export default function SmsDetailModal(props: SmsDetailModalProps) {
                   조회 중...
                 </div>
               ) : (
-                <table className="w-full text-[13px]">
+                <table className={`w-full text-[13px] ${ADMIN_TABLE_ONELINE}`}>
                   <thead className="bg-gray-50 sticky top-0">
                     <tr>
                       <th className="px-3 py-2 text-center text-xs font-medium text-gray-500 whitespace-nowrap">No.</th>

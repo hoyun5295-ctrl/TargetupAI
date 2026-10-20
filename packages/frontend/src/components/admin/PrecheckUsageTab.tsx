@@ -10,6 +10,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { ChevronRight } from 'lucide-react';
 import { formatDateTimeShort } from '../../utils/formatDate';
 import PrecheckUsageDetailModal from './PrecheckUsageDetailModal';
+import { ADMIN_TABLE_ONELINE, AdminLongText } from './ui/admin-ui'; // ★ 2026-10-20 표 칸 한 줄 · 긴 글 = 말줄임 + 전문
 
 type Period = 'today' | '7d' | 'month';
 type Kind = 'all' | 'spam' | 'spell';
@@ -205,7 +206,7 @@ export default function PrecheckUsageTab({ companies }: Props) {
 
       <div className="px-6 pb-2 text-sm font-semibold text-gray-800">업체별</div>
       <div className="overflow-x-auto">
-        <table className="w-full text-sm">
+        <table className={`w-full text-sm ${ADMIN_TABLE_ONELINE}`}>
           <thead className="bg-gray-50">
             <tr className="text-left text-xs text-gray-500">
               <th className="px-6 py-2 font-medium whitespace-nowrap">고객사</th>
@@ -225,7 +226,7 @@ export default function PrecheckUsageTab({ companies }: Props) {
               <tr><td colSpan={8} className="px-6 py-10 text-center text-gray-400">이 기간에 사용한 업체가 없습니다</td></tr>
             ) : data.companies.map((c) => (
               <tr key={c.companyId} className="hover:bg-gray-50/60">
-                <td className="px-6 py-2.5 whitespace-nowrap font-medium text-gray-800">{c.companyName}</td>
+                <td className="px-6 py-2.5 whitespace-nowrap font-medium text-gray-800"><AdminLongText text={c.companyName} max={180} label="고객사" /></td>
                 <td className="px-4 py-2.5 whitespace-nowrap text-gray-600">{c.planName}</td>
                 <td className="px-4 py-2.5 whitespace-nowrap text-right tabular-nums text-gray-700">{c.spamPaid}</td>
                 <td className="px-4 py-2.5 whitespace-nowrap text-right tabular-nums text-gray-700">{c.spamAuto}</td>
@@ -254,7 +255,7 @@ export default function PrecheckUsageTab({ companies }: Props) {
         <span className="text-xs text-gray-500">총 {data ? data.total.toLocaleString() : 0}건 · 10건씩 · 줄을 누르면 문안과 결과</span>
       </div>
       <div className="overflow-x-auto">
-        <table className="w-full text-sm">
+        <table className={`w-full text-sm ${ADMIN_TABLE_ONELINE}`}>
           <thead className="bg-gray-50">
             <tr className="text-left text-xs text-gray-500">
               <th className="px-6 py-2 font-medium whitespace-nowrap">시각</th>
@@ -280,7 +281,7 @@ export default function PrecheckUsageTab({ companies }: Props) {
                 className="group cursor-pointer hover:bg-emerald-50/50 focus:outline-none focus-visible:bg-emerald-50/70"
               >
                 <td className="px-6 py-2.5 text-xs text-gray-500 whitespace-nowrap">{formatDateTimeShort(r.createdAt)}</td>
-                <td className="px-4 py-2.5 whitespace-nowrap font-medium text-gray-800">{r.companyName}</td>
+                <td className="px-4 py-2.5 whitespace-nowrap font-medium text-gray-800"><AdminLongText text={r.companyName} max={180} rowOpens /></td>
                 <td className="px-4 py-2.5 whitespace-nowrap text-gray-600">
                   {r.userName || '-'}{r.userLogin ? <span className="text-gray-400 text-xs"> ({r.userLogin})</span> : null}
                 </td>
