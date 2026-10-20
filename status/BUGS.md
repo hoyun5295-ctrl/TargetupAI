@@ -73,6 +73,14 @@
 - **수정**: 주인 = store 하나 · 다리에 장 메시지 한 쌍(부모 → page{id, gen} · 다리 → page{id, gen} 사람이 고른 장). 장 id 로 맞춘다(슬라이드 모드는 사진 여러 장인 장을 `원래id-s번호` 로 펼침 · `viewerPageBelongsTo` · `storePageIndexOf` · 서버 `dm-slides-expand` 결과로 계약). 다리 = 「멈췄을 때 맞추기」(있어야 할 장 · 사람이 만졌는가 둘만 · 번호표 하나로 예약 · 미리보기 안 스크롤 동안은 미룸 · 다르고 사람이 안 만졌으면 다시 밂 · 만졌으면 그 장을 새 기준으로 알림). 편집기 = 움직이는 중 상태 0 · 세대 = `DmEditScreen pickRef`(고른 순간 · store 지금 장 동기 구독으로 모든 편집기 장 바뀜 · 미리보기를 따라간 바뀜만 제외) · 지난 세대 보고는 버림 · 따라간 바뀜은 받는 중인 뒤 칸에만. **Codex 1R~6R 지적 11건 = 같은 부류(장 동기화 순서 경합) → 2R 에서 구조 교체 · 이후 세대의 진실을 고른 순간으로 옮겨 7R approve.** 계약 = `make-preview-page-sync-1020.test.ts`(17건 · 다리 스크립트를 실제로 실행).
 - **실측(배포 뒤)**: 모바일 DM > 자세히 편집 > 보기 방식 「옆으로 넘기기」(사진 6장 카탈로그) > 장 칩 6장 → 미리보기 6/6 · 미리보기 화살표로 3장 → 왼쪽 칩 3장 · 3장 블록 고치기 → 미리보기 3장 그대로 · 넘김 효과 「책장 넘김」에서도 같은지.
 
+### 🔵 B-1021-1 1021 진단 쿠폰 · 진단 7일 1회에서 짚은 범위 밖(기록만 · 착수 판단 = Harold님) · 2026-10-21
+- `companies.subscription_status` DB 기본값이 `'trial'` 이다(실측 1021) — 진단 판정은 고쳤지만, 다른 소비처가 새 미가입 회사를 「체험 중」으로 읽는지는 확인하지 않았다.
+- 진단 지급 결과 값 `not_eligible` 은 이제 나오지 않는다 — 응답 계약 · 화면 분기(`routes/marketing-diagnosis.ts` · 진단 화면)는 그대로 남겨 둠.
+- `utils/basic-trial.ts` 머리 주석은 「plan=BASIC」 인데 코드는 `plan_code = 'TRIAL'`(Codex 범위 밖).
+- 진단 쿠폰의 「베이직 · 월 금액」은 `/api/plans` BASIC 행 · 실제 지급은 TRIAL 요금제 — 두 요금제 실값이 같은지 미확인(`SELECT * FROM plans WHERE plan_code IN ('TRIAL', 'BASIC');`).
+- `TrialUpsellModal` · `PricingPage` 는 `/api/plans` 를 직접 부른다(새 CT `utils/plans-public.ts` 로 옮기기 별건).
+- noplan 으로 진단을 끝내면 회사당 1회 지급이 소진된다 — 다시 시험할 방법(지급 기록 정리)이 없다.
+
 ### 🔵 B-1020-5 1020 직접발송 타겟추출 · 추출 창 개편에서 짚은 범위 밖(기록만 · 착수 판단 = Harold님) · 2026-10-20
 - `backend/src/routes/customers.ts` `/filter-count` · `/extract` 에 서버 요금제 게이트가 없다(이번 잠금은 화면만 · 미가입 회사도 API 로는 추출 가능).
 - 옛 직접 타겟 발송 창(`TargetSendModal`)과 대시보드의 추출 창 인스턴스 · `confirmTargetSend` · `executeTargetSend` = 1019 입구 삭제 뒤 들어갈 길이 없는 코드(Codex 1R: 그 비동기 추출 콜백은 닫은 뒤에도 늦게 발송 창을 연다 · `pages/Dashboard.tsx` handleTargetExtracted).

@@ -322,7 +322,7 @@ Harold 지시("부족한 부분을 짚고, 실제 진단받는 느낌과 한줄�
    ⚠ 회사당 1회라 noplan 으로 한 번 끝내면 지급이 소진된다 — 다시 시험할 방법(지급 기록 정리 등)을 함께 정한다.
 4. 문구에 쓸 가격 = plans 실값 확인: `SELECT * FROM plans WHERE plan_code = 'BASIC';`(요금 화면 표기와 다를 수 있음 · 미검증).
 
-### 13-4. 1021 밤 처리(코드 완료 · Codex 적대 approve · DDL 0 · 배포 대기)
+### 13-4. 1021 밤 처리(Codex 적대 approve · DDL 0 · 배포 완료 1021 · 실측 대기)
 - **실측(운영 DB · Harold)**: noplan = subscription_status 'trial' · 만료일 없음 · FREE · trial_start 0 · 지급 0. `companies.subscription_status` 기본값 = `'trial'`.
   같은 상태(FREE · trial · 만료일 없음) 미가입 회사 **32곳 · 요금제 변경 이력 0곳** = 체험을 받은 적 없는데 옛 체험 이력 판정이 전부 막아 보상 문구 · 지급이 없었다.
 - **결정(Harold)**: 진단 띠는 진단을 한 번도 안 한 미가입 회사에 모두 노출 · 진단으로 주는 7일 체험은 **기존 무료체험과 별개로 회사당 딱 1회**.

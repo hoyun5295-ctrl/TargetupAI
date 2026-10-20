@@ -284,6 +284,8 @@ export interface LineIntakeResult {
   asks: AiLineAsk[];
   /** ★ 2026-10-20 브랜드 말투를 배웠는가(성격별) — 모르면 null(안내 줄을 그리지 않는다) */
   voice: { learned: boolean; marketing: boolean; notice: boolean } | null;
+  /** ★ 2026-10-21 추천 칼럼(대상 상세와 분리 · 처음 대상이 0명이어도 남는다 · 칩을 끈 뒤 칼럼 단계가 미리 체크에 쓴다) */
+  recommendedVars: string[];
 }
 
 /** 대상 1위 고객(고객명 가림) · 칼럼 채움(이 대상 안) — 대상 찾기와 직접 고른 대상 다시 세기가 같은 계산을 쓴다 */
@@ -387,7 +389,10 @@ export async function runLineIntake(v: AiLineViewer, line: string, now: Date = n
   const zeroReason: LineIntakeResult['zeroReason'] = audience.blocked ? 'scope' : audience.unresolved ? 'unresolved' : count === 0 ? 'zero' : 'none';
 
   // ★ 2026-10-20 추천 칼럼 = 대상 AI 가 이 한 줄에 맞게 고른 것(copy_vars) · 「개인화」 낱말로 고른 것도 함께
-  const { top, sampleCustomer, columns } = await audienceDetail(v.companyId, audience, count, [...(target.copy_vars || []), ...(target.personalization_vars || [])]);
+  //   ★ 2026-10-21 대상 상세(1위 고객 · 칼럼)와 떼어 응답 한 칸으로도 준다(대상이 0명이면 칼럼이 비어 추천이 사라졌다)
+  const recommendedVars = [...new Set([...(target.copy_vars || []), ...(target.personalization_vars || [])]
+    .map((x) => String(x || '').replace(/%/g, '').trim()).filter(Boolean))];
+  const { top, sampleCustomer, columns } = await audienceDetail(v.companyId, audience, count, recommendedVars);
   // ★ 2026-10-20 묻는 목록 = AI 가 한 줄을 읽고 판단한 질문 + 규칙 안전망(한 자리 · 설계서 §17)
   const asks = mergeLineAsks(line, sanitizeAiAsks(target.copy_questions, line));
   const voice = await lineVoiceFit(v.companyId);
@@ -416,6 +421,7 @@ export async function runLineIntake(v: AiLineViewer, line: string, now: Date = n
     needAudience,
     asks,
     voice,
+    recommendedVars,
   };
 }
 

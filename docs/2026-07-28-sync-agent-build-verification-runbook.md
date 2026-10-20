@@ -87,7 +87,7 @@ zip은 20개지만 **실제 바이너리는 5개**다 — 같은 티어의 4개 
 
 | 티어 | 검증 수단 | 상태 |
 |---|---|---|
-| `win-modern` | 이 PC(Windows 11) + 도커 DB. Server 2016 VM은 1.6.4 설치 검증 후 삭제(2026-08-03 Harold) — 재검증 필요 시 재구축 | mysql = 1.6.4 전체 통과. pg는 접속·조회까지 확인 |
+| `win-modern` | 이 PC(Windows 11) + 도커 DB · **★2026-10-15 Server 2016 VM 재구축** = VirtualBox `win2016-ko-x64`(Standard 평가판 14393 · 시스템 로캘 ko-KR · `chcp` 949 · NAT localhostReachable on → 게스트에서 `10.0.2.2` = 이 PC 127.0.0.1) | **1.7.2 oracle-11g · mysql = VM 사람 경로 전체 통과**(FEATURE §7 2026-10-15 밤~밤(4)) · 옛: mysql 1.6.4 전체 통과 · pg 접속·조회 |
 | `linux-modern` | 도커(ubuntu:24.04, glibc 2.39) | mysql·pg 접속·조회 확인 |
 | `linux-legacy` | 도커(centos:7, glibc 2.17 = 티어 바닥) | mysql·pg 접속·조회 확인 |
 | `win-2012`(win-mid) | **Server 2012 R2 VM 필요** | 미검증 |
@@ -151,3 +151,9 @@ node scripts/build-tiers.js --tiers win-modern   # 단일 티어 + manifest 병�
 - **"그 OS를 지원한다" ≠ "그 OS에서 우리 제품을 끝까지 쓸 수 있다".** 런타임 지원표는 exe가 뜨는지만 말해준다. 정적 리뷰로도 안 잡힌다 — "Server 2016 기본 브라우저가 IE11"은 코드에 없는 사실이다.
 - **0건을 안전의 근거로 쓰지 않는다.** 조회 0건은 "문제 없음"이 아니라 "표본이 없음"일 수 있다. `--test-db`가 테이블 0개를 실패로 처리하는 이유가 이것이다.
 - ⛔ **테스트 전화번호를 `010`+랜덤 8자리로 만들지 않는다.** 실가입 번호와 겹친다. 2026-07-27에 그렇게 만든 2만 건이 운영 PG에 유입됐다(삭제·잔존 0 확인). 형식만 지키고 값은 도달 불가한 대역으로, 건수는 최소로. `smoke-combos.sh`가 이 규칙을 코드로 강제한다(5행 고정·미할당 대역·`.invalid` 도메인).
+- **★2026-10-15 Server 2016 VM 실설치에서 걸린 것** (VM 재구축·재사용 때 그대로 밟는다)
+  - 평가판 ISO 를 VirtualBox 무인 설치에 넣으면 응답 파일의 빈 `ProductKey` 블록 때문에 「License Terms 를 찾을 수 없음」으로 멈춘다 → 템플릿 사본에서 그 블록만 빼고 `--script-template`
+  - `guestcontrol` 을 관리자 그룹 일반 계정으로 돌리면 UAC 필터 토큰이라 HKLM 쓰기(`Set-WinSystemLocale` 등)가 **오류 없이 무시**된다 → 관리 작업은 내장 Administrator 계정 · Git Bash 에서는 `MSYS_NO_PATHCONV=1`(`/c` 가 `C:\` 로 바뀐다)
+  - 고객과 같은 경로를 밟으려면 zip 에 다운로드 표시(Zone.Identifier ZoneId=3)를 붙여 푼다 → 실제로 「게시자를 확인할 수 없습니다」 경고 → UAC 순서로 뜬다(매뉴얼 1.7.2 §3.2)
+  - 예약 작업은 **부팅 2분 뒤 자동 시작**이고 시작 시점의 설정을 쥔다 → exe 교체·매핑 변경 전에 `schtasks /End` + 프로세스 종료, 바꾼 뒤 `schtasks /Run` · 매핑만 바꾸면 커서가 안 바뀌어 전량이 안 돈다(`data\sync_state.json` 삭제)
+  - 운영 hanjul.ai API Key·Secret 은 Harold 님이 VM 창에 직접 넣는다 · 시험 고객은 회사마다 도달 불가 대역을 겹치지 않게(오라클 `0100`+`0`… · MySQL `01009`…)

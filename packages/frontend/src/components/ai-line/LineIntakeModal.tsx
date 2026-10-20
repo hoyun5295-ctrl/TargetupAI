@@ -117,31 +117,18 @@ export default function LineIntakeModal({ open, run, creditTotal, loadError, onR
   // ── 확인 판: 조건 켜기/끄기 → 다시 세기(0크레딧) ──
   const intake = run.intake;
   const [boardError, setBoardError] = useState<string | null>(null);
-  // ★ Codex B2 — 대상 선택 버전 하나(recountSeq) · 진행 상태 하나(pending). 대상을 바꾸는 모든 동작이 버전을 올리고,
+  // ★ Codex B2 — 대상 선택 버전 하나(recountSeq) · 진행 상태 하나(retargeting). 대상을 바꾸는 모든 동작이 버전을 올리고,
   //   응답은 자기 버전이 최신일 때만 · 최신 진행에 대상 칸만 합친다. 대체된 요청의 진행 표시는 새 요청이 이어받는다(멈춤 없음).
+  // ★ 2026-10-21 「지금 대상」 주인 하나 — 칩 끄기/켜기 · 전체 고객 체크도 이 한 길(수 · 칩 · 1위 고객 · 칼럼을 한 응답으로).
+  //   수만 세던 길(recount)이 1위 고객 · 칼럼을 앞 대상 것으로 남겨, 처음 0명이던 대상에서 칩을 끄면 칼럼 단계가 비었다(Harold 1021 실측).
   const recountSeq = useRef(0);
-  const [pending, setPending] = useState<'recount' | 'retarget' | null>(null);
-  const recounting = pending === 'recount';
-  const retargeting = pending === 'retarget';
-  const bump = () => { recountSeq.current += 1; setPending(null); };
-  const recount = async (next: AiLineRun) => {
-    const seq = ++recountSeq.current;
-    setPending('recount');
-    try {
-      const r = await aiLineApi.recount(activeFilters(next), allCustomersFlag(next));
-      if (seq !== recountSeq.current) return;
-      onRun((cur) => ({ ...cur, liveCount: r.empty && !allCustomersFlag(next) ? 0 : r.count }));
-    } catch (e) {
-      if (seq === recountSeq.current) setBoardError(e instanceof Error ? e.message : '다시 세지 못했어요.');
-    } finally {
-      if (seq === recountSeq.current) setPending(null);
-    }
-  };
+  const [retargeting, setRetargeting] = useState(false);
+  const bump = () => { recountSeq.current += 1; setRetargeting(false); };
   // ★ 2026-10-19 대상 바꾸기 = 서버가 다시 센다(칩 · 1위 고객 · 칼럼까지 · 0크레딧)
   const [pickerOpen, setPickerOpen] = useState(false);
   const retarget = async (next: AiLineRun) => {
     const seq = ++recountSeq.current;
-    setPending('retarget');
+    setRetargeting(true);
     setBoardError(null);
     // ★ Codex B1 high — 새 대상은 서버가 다시 센 뒤에만 확정한다(실패 = 아무것도 바꾸지 않는다)
     try {
@@ -157,7 +144,7 @@ export default function LineIntakeModal({ open, run, creditTotal, loadError, onR
     } catch (e) {
       if (seq === recountSeq.current) setBoardError(e instanceof Error ? e.message : '받는 사람을 다시 세지 못했어요.');
     } finally {
-      if (seq === recountSeq.current) setPending(null);
+      if (seq === recountSeq.current) setRetargeting(false);
     }
   };
   const pickDirect = (dynamicFilters: Record<string, any>, enabledFields: any[]) => {
@@ -195,16 +182,28 @@ export default function LineIntakeModal({ open, run, creditTotal, loadError, onR
   // ★ Codex B2 medium — 창을 다시 열면 템플릿 오류를 지우고 다시 불러온다(안내 문장 「닫았다가 다시 열어 주세요」와 맞춘다)
   useEffect(() => { if (open) setTplError(false); }, [open]);
 
+  /**
+   * ★ Codex 1021 R1 · R2 — 「지금 대상」 불변식: 칩이 대상 찾기와 다르게 꺼져 있거나 전체 고객이 체크됐는데 다시 받은 상세가 없다
+   *   = 받는 사람 수 · 1위 고객 · 칼럼이 서로 다른 대상 값이다(1021 앞에 저장된 · 수만 세던 길의 진행).
+   *   이 상태면 창을 열 때 한 번 다시 받고(R1), 받기 전 · 실패 뒤에도 다음 단계 · 만들기 · 진행을 잠근다(R2 · 「다시 세기」로만 풀림 ·
+   *   한 줄 대상으로 돌아가면 칩이 처음으로 돌아가 풀린다).
+   */
+  const detailStale = !!run.intake && !run.manual && !run.audience && (run.offKeys.length > 0 || run.allChecked);
+  useEffect(() => {
+    if (!open || !detailStale || retargeting) return;
+    void retarget({ ...run });
+    // 실패해도 detailStale 이 그대로라 다시 부르지 않는다(반복 호출 0 · 잠금은 유지 · 「다시 세기」로 재시도)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, run.runId, detailStale]);
+
   const toggleCond = (key: string) => {
+    if (retargeting) return;   // 앞 요청이 확정되기 전 칩을 또 누르면 앞 변경이 사라진다
     const off = run.offKeys.includes(key) ? run.offKeys.filter((k) => k !== key) : [...run.offKeys, key];
-    const next = { ...run, offKeys: off, allChecked: false, liveCount: null };
-    onRun(next);
-    void recount(next);
+    void retarget({ ...run, offKeys: off, allChecked: false });
   };
   const toggleAll = () => {
-    const next = { ...run, allChecked: !run.allChecked, liveCount: null };
-    onRun(next);
-    void recount(next);
+    if (retargeting) return;
+    void retarget({ ...run, allChecked: !run.allChecked });
   };
   // AI 가 보탠 조건 = 빼면 몇 명인지 미리 센다(0크레딧 · 최대 3개)
   const [withoutCounts, setWithoutCounts] = useState<Record<string, number>>({});
@@ -283,9 +282,9 @@ export default function LineIntakeModal({ open, run, creditTotal, loadError, onR
     : lineUntranslated.length > 0 ? `한 줄의 「${lineUntranslated.map((u) => u.text).join(' · ')}」 조건을 옮기지 못했어요. 한 줄을 고쳐 다시 보내 주세요`
     : pickUntranslated.length > 0 ? `직접 고른 「${pickUntranslated.map((u) => u.text).join(' · ')}」 조건은 쓸 수 없어요. 그 조건을 빼고 다시 골라 주세요`
     : retargeting ? '받는 사람을 다시 세는 중이에요'
+    : detailStale ? '받는 사람을 다시 세지 못했어요. 「다시 세기」를 눌러 주세요'
     : run.manual && !run.audience ? '직접 고른 조건을 다시 골라 주세요(확인하지 못했어요)'
     : emptyNow && !allCustomersFlag(run) ? '조건이 모두 빠졌어요. 조건을 켜거나 「전체 고객에게 보내기」를 골라 주세요'
-    : recounting ? '받는 사람을 다시 세는 중이에요'
     : count === 0 ? '조건에 맞는 고객이 0명이에요'
     : count > MAX_AUDIENCE ? `받는 사람이 ${count.toLocaleString()}명이에요. 한 번에 ${MAX_AUDIENCE.toLocaleString()}명까지 보낼 수 있어요`
     // ★ Codex B1 medium — 템플릿을 못 불러왔거나 고르지 않았으면 진행하지 않는다(템플릿 없이 넘어가지 않게)
@@ -334,7 +333,7 @@ export default function LineIntakeModal({ open, run, creditTotal, loadError, onR
 
   // ── 칼럼 단계 ──
   // 추천 = 대상 찾기 AI 가 이 한 줄에 맞게 고른 칼럼(대상을 바꾼 뒤에도 같은 표시) · 처음 들어올 때만 최대 2개 미리 체크
-  const recommendedTokens = useMemo(() => new Set((intake?.columns || []).filter((c) => c.recommended).map((c) => c.token)), [intake]);
+  const recommendedTokens = useMemo(() => new Set(intake?.recommendedVars ?? (intake?.columns || []).filter((c) => c.recommended).map((c) => c.token)), [intake]);
   const precheckedFor = useRef<string | null>(null);
   const goVars = () => {
     if (precheckedFor.current !== run.runId && run.vars.length === 0) {
@@ -625,8 +624,8 @@ export default function LineIntakeModal({ open, run, creditTotal, loadError, onR
                       {intake.conditions.filter((c) => c.origin === 'line').map((c) => {
                         const on = !run.offKeys.includes(c.key);
                         return (
-                          <button key={c.key} type="button" onClick={() => toggleCond(c.key)} aria-pressed={on}
-                            className={`h-8 px-2.5 rounded-lg border inline-flex items-center gap-1.5 transition-colors ${on ? 'bg-violet-50 border-violet-200 text-violet-900' : 'bg-white border-slate-200 text-slate-400 line-through'}`}>
+                          <button key={c.key} type="button" onClick={() => toggleCond(c.key)} aria-pressed={on} disabled={retargeting}
+                            className={`h-8 px-2.5 rounded-lg border inline-flex items-center gap-1.5 transition-colors disabled:opacity-50 ${on ? 'bg-violet-50 border-violet-200 text-violet-900' : 'bg-white border-slate-200 text-slate-400 line-through'}`}>
                             <span className={`w-1.5 h-1.5 rounded-full ${on ? 'bg-violet-500' : 'bg-slate-300'}`} />{c.text}
                           </button>
                         );
@@ -640,8 +639,8 @@ export default function LineIntakeModal({ open, run, creditTotal, loadError, onR
                             const on = !run.offKeys.includes(c.key);
                             return (
                               <span key={c.key} className="inline-flex items-center gap-1.5">
-                                <button type="button" onClick={() => toggleCond(c.key)} aria-pressed={on}
-                                  className={`h-8 px-2.5 rounded-lg border inline-flex items-center gap-1.5 ${on ? 'bg-white border-slate-300 text-slate-800' : 'bg-white border-slate-200 text-slate-400'}`}>
+                                <button type="button" onClick={() => toggleCond(c.key)} aria-pressed={on} disabled={retargeting}
+                                  className={`h-8 px-2.5 rounded-lg border inline-flex items-center gap-1.5 disabled:opacity-50 ${on ? 'bg-white border-slate-300 text-slate-800' : 'bg-white border-slate-200 text-slate-400'}`}>
                                   <span className={`w-3.5 h-3.5 rounded grid place-items-center ${on ? 'bg-violet-600' : 'border border-slate-300'}`}>{on && <Check className="w-3 h-3 text-white" />}</span>
                                   {c.text}
                                 </button>
@@ -659,7 +658,7 @@ export default function LineIntakeModal({ open, run, creditTotal, loadError, onR
                     )}
                     {emptyNow && (
                       <label className="flex items-center gap-2 text-[13px] text-slate-700 cursor-pointer">
-                        <input type="checkbox" checked={allCustomersFlag(run)} onChange={toggleAll} className="w-4 h-4 accent-violet-600" />
+                        <input type="checkbox" checked={allCustomersFlag(run)} onChange={toggleAll} disabled={retargeting} className="w-4 h-4 accent-violet-600" />
                         조건 없이 전체 고객에게 보내기
                       </label>
                     )}
@@ -672,11 +671,19 @@ export default function LineIntakeModal({ open, run, creditTotal, loadError, onR
                     )}
                     <div className={`rounded-xl border px-3 py-2 flex items-center justify-between ${count > 0 && count <= MAX_AUDIENCE ? 'bg-emerald-50 border-emerald-100' : 'bg-rose-50 border-rose-100'}`}>
                       <span className={`text-[13px] inline-flex items-center gap-1.5 ${count > 0 ? 'text-emerald-900' : 'text-rose-900'}`}><Users className="w-4 h-4" />받는 사람(발송 명단과 같은 계산)</span>
-                      <b className={`text-[18px] tabular-nums ${count > 0 && count <= MAX_AUDIENCE ? 'text-emerald-800' : 'text-rose-700'}`}>
-                        {recounting || retargeting ? <Loader2 className="w-4 h-4 animate-spin inline" /> : `${count.toLocaleString()}명`}
-                      </b>
+                      <span className="inline-flex items-center gap-2">
+                        {detailStale && !retargeting && (
+                          <button type="button" onClick={() => { void retarget({ ...run }); }}
+                            className="h-8 px-2.5 rounded-lg border border-slate-300 bg-white text-[12.5px] font-semibold text-slate-700 hover:bg-slate-50">
+                            다시 세기
+                          </button>
+                        )}
+                        <b className={`text-[18px] tabular-nums ${count > 0 && count <= MAX_AUDIENCE ? 'text-emerald-800' : 'text-rose-700'}`}>
+                          {retargeting ? <Loader2 className="w-4 h-4 animate-spin inline" /> : `${count.toLocaleString()}명`}
+                        </b>
+                      </span>
                     </div>
-                    {count === 0 && !recounting && !retargeting && !run.manual && (
+                    {count === 0 && !retargeting && !run.manual && (
                       <p className="text-[12px] text-slate-500">
                         {intake.zeroReason === 'unresolved' ? (intake.reasoning || '한 줄의 조건을 옮기지 못했어요. 조건을 더 구체적으로 적어 주세요.')
                           : intake.zeroReason === 'scope' ? '담당 매장이 지정되지 않았어요. 관리자에게 매장 배정을 요청해 주세요.'

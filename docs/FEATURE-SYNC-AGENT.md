@@ -161,11 +161,11 @@
 | 1.6.5 | `--test-db` 신설(비대화형 DB 진단 — smoke 판정의 전제) | 미출고 |
 | 1.7.0 | **커서 재설계**(§4 전량) · `source_row_key` payload · 증분 잠금 판정 · 전량 씨앗. 설치·마법사 경로 무변경 | ~~아난티~~ → 1.7.1로 대체(설치 현장 결함) |
 | **1.7.1** | **아난티 설치 실측 정정 세대**(§7 최상단) — 마법사 콘솔 인코딩 자가 설정 · 뷰 목록 포함(MySQL·MSSQL·PG) · 0건 가드·사유 안내 · **뷰 지정 키 + 유일성 실쿼리 검사**(config `customerKeyColumns`/`purchaseKeyColumns` · 엔진 메타 PK 부재 시 소비) · 매뉴얼 원격 계정 예시·뷰 절 신설 | **아난티(세트 준비 완료 — zip 34.5MB + 매뉴얼 v1_7_1 docx·PDF)** |
-| **1.7.2** | **2026-10-04 전수점검 정정 세대**(§7 최상단) — 한 줄 직렬 · 로컬 큐 폐기 · 파일 원본 전체 동기화 · 시각·키 없음 잠금 · 배치 상한 5000 · MSSQL 구매일 · 모르는 동의 글자 보고 · 주기 맞춤 · 지정 구매 키 못 쓰면 잠금 · 키 없는 첫 전체 실패 보고 + **10-15 Oracle 뷰 소스(A·B·D) · Oracle zip IC·VC80 동봉 · 탈퇴·거부 표시 `is_opt_out` → 수신거부** | **등록 코드 완료(10-15 밤 · 배포 전)** `win-modern__oracle-11g__1.7.2`·`win-modern__mysql__1.7.2` · `CURRENT_AGENT_VERSION` 1.7.2 · 매뉴얼 `SyncAgent_설치매뉴얼_v1_7_2.docx`·`.pdf`(18쪽) · zip 업로드 = Harold · 이새 Oracle 조합은 질의서 회신 뒤 |
+| **1.7.2** | **2026-10-04 전수점검 정정 세대**(§7 최상단) — 한 줄 직렬 · 로컬 큐 폐기 · 파일 원본 전체 동기화 · 시각·키 없음 잠금 · 배치 상한 5000 · MSSQL 구매일 · 모르는 동의 글자 보고 · 주기 맞춤 · 지정 구매 키 못 쓰면 잠금 · 키 없는 첫 전체 실패 보고 + **10-15 Oracle 뷰 소스(A·B·D) · Oracle zip IC·VC80 동봉 · 탈퇴·거부 표시 `is_opt_out` → 수신거부** | **출고 1015** — 등재 `win-modern__oracle-11g__1.7.2`·`win-modern__mysql__1.7.2` · `CURRENT_AGENT_VERSION` 1.7.2 · B-1015-6 까지 넣은 재빌드(oracle `74787f21…` · mysql `9c12a95a…` · §7 밤(4))로 두 조합 VM 재검증 · push·배포·zip 업로드 = Harold 완료 · 매뉴얼 `SyncAgent_설치매뉴얼_v1_7_2.docx`·`.pdf` · 엠티 전용 안내서 생성기 `build-guide-mt.js` · 이새 Oracle 조합은 질의서 회신 뒤 |
 
 **DDL 이력** — 2026-08-03 실행완료: `purchases.source_row_key varchar(200)` + `CREATE UNIQUE INDEX ux_purchases_company_source_row_key ON purchases (company_id, source_row_key) WHERE source_row_key IS NOT NULL`. 부분 인덱스라 기존 185만 행(키 NULL)은 걸리지 않는다.
 
-**검증 등재 이력** — 1.7.2 두 조합은 B-1015-6 정정 뒤 22:46 재빌드본(oracle `74787f21…` · mysql `9c12a95a…`)으로 smoke·VM 재검증(§7 「밤(4)」) · **`win-modern__oracle-11g__1.7.2`**(2026-10-15 smoke PASS 3,276ms + Server 2016 한국어 로캘 VM 실설치 사람 경로 · 운영 PG 실측 · §7 「밤」·「밤(2)」) · **`win-modern__mysql__1.7.2`**(2026-10-15 smoke PASS 79ms + 같은 VM 뷰 전용 계정 마법사 전 구간 · 운영 PG 실측 · §7 「밤(3)」). 옛 세대 미승계: `win-modern__mysql__1.7.1`(2026-08-13 smoke PASS 68ms + 마법사 전 구간 자동 주행 — 1.7.2 로 폐쇄 · 같은 조합 1.7.2 재검증 통과) · `win-modern__mysql__1.7.0`(2026-08-03 PASS — 1.7.1로 폐쇄) · `win-2008r2__oracle-10g`(2026-06-24, 1.5.x) · `win-modern__mysql`(2026-07-27, 1.6.4).
+**검증 등재 이력** — 1.7.2 두 조합은 B-1015-6 정정 뒤 22:46 재빌드본(oracle `74787f21…` · mysql `9c12a95a…`)으로 smoke·VM 재검증(§7 「밤(4)」) · **`win-modern__oracle-11g__1.7.2`**(2026-10-15 smoke PASS 3,276ms + Server 2016 한국어 로캘 VM 실설치 사람 경로 · 운영 PG 실측 · §7 「밤」·「밤(2)」) · **`win-modern__mysql__1.7.2`**(2026-10-15 smoke PASS 79ms + 같은 VM 뷰 전용 계정 마법사 전 구간 · 운영 PG 실측 · §7 「밤(3)」). 출고본은 B-1015-6 을 넣은 22:46 재빌드이고 두 조합 모두 그 빌드로 VM 재검증했다(§7 「밤(4)」). 옛 세대 미승계: `win-modern__mysql__1.7.1`(2026-08-13 smoke PASS 68ms + 마법사 전 구간 자동 주행 — 1.7.2 로 폐쇄 · 같은 조합 1.7.2 재검증 통과) · `win-modern__mysql__1.7.0`(2026-08-03 PASS — 1.7.1로 폐쇄) · `win-2008r2__oracle-10g`(2026-06-24, 1.5.x) · `win-modern__mysql`(2026-07-27, 1.6.4).
 
 ## 8) 운영 절차 — 재싱크·출고
 
@@ -207,6 +207,15 @@
 - **★2026-10-04 PostgreSQL·MSSQL 전량 키셋 없음** — 두 어댑터는 `fetchAllKeyset`이 없어 전량이 OFFSET이다(PG는 `ORDER BY ctid` = 동기화 중 갱신된 행이 뒤로 옮겨 앞 행 하나를 건너뛸 수 있다 · 건수 가드는 건너뜀+중복을 못 잡는다). 지금은 두 조합 모두 `candidate`라 다운로드가 닫혀 있다. **그 조합을 열기 전에** MySQL과 같은 단일 정수 PK 키셋을 넣는다
 - **★2026-10-14 vcredist_x64.exe 스테이징 완료** — `C:/Users/ceo/oracle-client-11.2-stage/vcredist_x64.exe`(3,175,416B · Harold 가 Downloads 의 6/30 내려받은 파일을 복사). 실행 없이 확인한 내용: Microsoft 서명 유효(2020-12 재서명) · 내부 MSI 2011-04-16 「Microsoft Visual C++ 2005 Redistributable (x64)」 · CRT 8.0.50727.6195(SP1 보안 업데이트판) · 정책 항목에 oci.dll 이 요구하는 8.0.50727.762 포함(90건 · .762 요청이 .6195 로 연결). 재빌드 뒤 manifest blocker 해제(win-modern-oracle candidate · 150MB). **미검증** = VC80 없는 서버에서의 실제 로드 — 엠티 설치 때 diagnose.txt `VCREDIST_EXIT` + `sync-agent.exe --version` 으로 닫는다. 없으면 다시 blocker(fail-closed).
 - ~~**★2026-10-14 엠티콜렉션 2단계**~~ **완료 2026-10-15** — A·B·D 정정 + 로컬 11g 실측 → VM 실설치 시험 → 탈퇴 접기 · 커스텀 필드 정정 → 1.7.2 등재 · 전용 전달 묶음(§7 2026-10-15 행 · 밤 · 밤(2)~(4) · §7-2 엠티 행). 남은 것 = 설치 당일 확인(§7-2 엠티 행) · 뷰에 여러 회사가 섞여 있으면 고객사 뷰에 WHERE(에이전트 행 필터는 별도 축).
+- **★2026-10-15 VM 실설치 시험에서 기록만 한 것(착수 안 함 · 경위 = §7 2026-10-15 밤·밤(2)·밤(3))** — 2026-10-21 코드로 다시 확인해도 그대로다.
+  - MySQL 전량 키셋(`db/mysql.ts` `fetchAllKeyset`)이 엔진이 넘기는 지정 키를 받지 않는다 → 단일 정수 PK 없는 뷰는 정렬 없는 OFFSET. Oracle 은 10-15 결함 D 로 지정 키 순서. 큰 뷰 MySQL 고객 전에 같은 정정 검토(위 PG·MSSQL 항목과 같은 축)
+  - 커서 fingerprint(`sync/engine.ts` `cursorFingerprint`)에 매핑이 없다 → 설치 뒤 매핑을 바꾸면(예: 탈퇴 칸 추가) 자동 전량이 안 돈다 · 지금은 매뉴얼 Q6·Q13 의 수동 전량으로 막는다
+  - 마법사 고객 목록(`setup/cli.ts` `CUSTOMER_STANDARD_FIELDS`)·템플릿(`USE_YN`·`STATUS`)의 `is_active` 는 서버가 받지 않는 죽은 칸(`is_opt_out` 은 10-15 에 살림)
+  - 템플릿 패턴이 `YN_SMS` 를 못 알아본다(`SMS_YN` 등만) → AI 매핑을 못 쓰면 수신동의 미매핑
+  - 증분 기준 후보 정렬 키워드(`cli.ts` `askTimestampColumn` `dateKeywords`)에 `change` 없음 → 엠티 `DM_CHANGE` 가 목록 맨 아래
+  - 마법사 끝 「지금 바로 동기화 Y」 = 그 콘솔에서만 돌고 예약 작업은 다음 부팅(2분 지연)까지 대기 · 지금은 매뉴얼 Step 5 안내(N → `schtasks /Run`)로 막는다
+  - 서버가 고른 주기를 덮어도(5분 → 60/30분) 마법사·로그 외 안내 없음 · AI 매핑이 `store_code` 를 고객 `CD_COMPANY` / 구매 `CD_DEPART` 로 엇갈려 배정
+  - 콘솔 표시: 한글 프롬프트 옆 입력 글자가 잘려 보임(값은 정확) · API Secret·DB 비밀번호가 입력 때 화면에 보임 · 이모지 □□ · 머리 상자 테두리 어긋남 · `setup-ui/index.html` 대비 부족 경고 8건(기존 스타일)
 - **아난티 설치 재시도 회신 대기** — 서버 등재분 배포가 선행. 출고 게이트(사전 질의서)는 §8이 소유
 - **마법사 자동 주행 smoke 편입** — 1.7.1에서 주행은 실측했고 smoke 등재만 남았다
 - ~~**원격 릴리즈 버전 가드**~~ — ★2026-09-12 **이미 닫혀 있었다**(§6 · 서버 `/version`이 상위 버전만 내려준다). 착수 대상 아님

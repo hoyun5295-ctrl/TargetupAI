@@ -205,6 +205,19 @@ describe('② 대상 찾기 = 묻는 목록 · 회사 칼럼 · 추천 칼럼 ·
     expect(String(fillCall![0])).not.toContain('skin_type');
     expect(out.voice).toEqual({ learned: false, marketing: false, notice: false });
   });
+  it('★ 1021 실측 — 처음 대상이 0명이어도 추천 칼럼은 응답 한 칸으로 남는다(대상 상세와 분리)', async () => {
+    db(0);
+    m.recommendTarget.mockResolvedValue({
+      filters: { grade: { operator: 'eq', value: 'VIP' }, recent_purchase_date: { operator: 'date_lte', value: '2026-09-21' } },
+      all_customers: false, reasoning: '', recommended_channel: 'LMS', is_ad: true, recommended_time: '', suggested_campaign_name: '',
+      personalization_vars: ['고객명'], filter_quotes: { grade: 'VIP' }, recommended_style: '감성형', style_reason: '',
+      copy_questions: [], copy_vars: ['피부 타입', '%고객명%'],
+    });
+    const out = await runLineIntake(V, '최근 30일 미구매 VIP에게 재구매 쿠폰 보내줘');
+    expect(out.count).toBe(0);
+    expect(out.columns).toEqual([]);
+    expect(out.recommendedVars).toEqual(['피부 타입', '고객명']);
+  });
   it('서버 칼럼 허용 목록 = 표준 + 이 회사 회사 칼럼(다른 이름은 없음)', async () => {
     db(1);
     const allowed = await aiLineVarTokensFor('C1');
@@ -441,6 +454,24 @@ describe('④ 소스 계약', () => {
     expect((modal.match(/aiLineApi\.compose\(/g) || []).length).toBe(1);
     expect(modal).toContain("step === 'vars'");
     expect(modal).toContain("setBenefitDraft(''); setBenefitNone(false); setPeriodPick(null); setPeriodNone(false); setTextAns({});");
+    // ★ 1021 실측 — 「지금 대상」 주인 하나: 칩 끄기/켜기 · 전체 고객 체크도 수 · 칩 · 1위 고객 · 칼럼을 한 응답으로 받는 길(retarget)
+    expect(modal).toContain('void retarget({ ...run, offKeys: off, allChecked: false });');
+    expect(modal).toContain('void retarget({ ...run, allChecked: !run.allChecked });');
+    expect(modal).not.toContain('const recount = async');
+    expect(modal).not.toContain('recounting');
+    expect((modal.match(/aiLineApi\.recount\(/g) || []).length).toBe(1);   // 「AI 가 보탬 · 빼면 n명」 숫자 미리보기만
+    expect((modal.match(/onClick=\{\(\) => toggleCond\(c\.key\)\} aria-pressed=\{on\} disabled=\{retargeting\}/g) || []).length).toBe(2);
+    expect(modal).toContain('onChange={toggleAll} disabled={retargeting}');
+    expect(modal).toContain('new Set(intake?.recommendedVars ??');
+    // ★ Codex 1021 R1 — 1021 앞에 저장된 진행(칩을 끈 채 상세 없음)은 열 때 한 번 다시 받는다
+    const stale = 'const detailStale = !!run.intake && !run.manual && !run.audience && (run.offKeys.length > 0 || run.allChecked);';
+    expect(modal).toContain(stale);
+    expect(modal).toContain('if (!open || !detailStale || retargeting) return;');
+    expect(modal).toContain('}, [open, run.runId, detailStale]);');
+    // ★ Codex 1021 R2 — 다시 받기가 실패해도 잠금 유지(불변식 = 잠금 사유) · 「다시 세기」로만 재시도
+    expect(modal).toContain(": detailStale ? '받는 사람을 다시 세지 못했어요. 「다시 세기」를 눌러 주세요'");
+    expect(modal).toContain('{detailStale && !retargeting && (');
+    expect(modal.indexOf(stale)).toBeLessThan(modal.indexOf('const lock: string | null ='));
     expect(modal).toContain('문안에 어떤 고객 정보를 넣을까요?');
     expect(modal).toContain('브랜드 말투 학습본이 없어');
     expect(modal).toContain('문자 성격');

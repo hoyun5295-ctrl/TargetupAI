@@ -185,15 +185,25 @@
 > 검증 = FE · BE tsc 0 · vitest 595파일 8,371건 · 렌더 108곳 · Codex 적대 1R approve(gpt-6-astra · 지적 0 · 지정 파일 66개 + 분리 전 원본을 읽고 대조)
 > 다음 = 배포(백엔드 reload + 프론트 build:safe · AI 영업 C12 와 한 번에) → 실측(목록 숫자 카드 값 · 상세 창 저장 · 7일 부여 1회)
 
-<a id="c46"></a>
+<a id="c51"></a>
 
-### C46 · ★1020 직접발송 「타겟추출」 4칸 + 직접 타겟 추출 창 개편 · 코드 완료 · Codex 적대 4R approve · DDL 0 · 배포 대기
+### C51 · ★1021 진단 띠 쿠폰(B안) + 진단 7일 체험 회사당 1회 + 대시보드 요금제 안내 창 흰 판 + noplan 계정 · Codex 적대 approve · DDL 0 · 배포 완료 1021
+> 호출어 **"진단 쿠폰 / 진단 7일 체험 / 대시보드 안내 흰 판 / noplan"** → 원장 = [FEATURE-MARKETING-DIAGNOSIS §13](../docs/FEATURE-MARKETING-DIAGNOSIS.md) · 목업 = [docs/mockups/2026-10-21-diagnosis-banner-trial-mockup.html](../docs/mockups/2026-10-21-diagnosis-banner-trial-mockup.html)
+> ① 미가입 전용 테스트 계정 **noplan**(회사 「미가입 테스트(noplan)」 · 코드 NOPLAN · FREE · 관리자) = `packages/backend/scripts/create-noplan-account.ts`(기존 CT 재사용 · 비밀번호는 서버에서 화면에 안 보이게 입력) · 서버에서 만듦.
+> ② 대시보드에서 여는 요금제 안내 창(PlanFeatureModal)도 흰 판 — `Dashboard.tsx` 의 그 창만 밝은 문맥(SurfaceToneProvider) · 창 파일 · 공용 창 불변식 그대로.
+> ③ 진단 띠 = 목업 B안 쿠폰(지급 가능 회사에만 · 요금제명 · 월 금액 = `/api/plans` BASIC 행 · CT `utils/plans-public.ts`). 실측: `companies.subscription_status` 기본값 'trial' → 체험 받은 적 없는 미가입 32곳이 옛 체험 이력 판정에 막혀 문구 · 지급 0 → Harold 「기존 무료체험과 별개로 진단은 딱 1회」 = 체험 이력 판정 삭제 · 1회 = diagnosis_trial_grants UNIQUE · 진단 지급 = 새로 지급(오늘부터 7일 · 관리자 연장은 그대로).
+> 검증: backend tsc 0 · frontend tsc 0 · backend vitest 660파일 9,612건 · Codex 적대(안내 창 approve · 띠 approve · 판정 1R medium → 2R approve).
+> 남은 것 = 실측(noplan 쿠폰 띠 · 진단 완주 1건 → TRIAL 7일 · noplan 은 1회 소진 주의) · 쿠폰 「베이직 · 월 금액」 표기와 TRIAL 실값 대조 · 범위 밖 = [BUGS B-1021-1](BUGS.md).
+
+<a id="c50"></a>
+
+### C50 · ★1020 직접발송 「타겟추출」 4칸 + 직접 타겟 추출 창 개편 · Codex 적대 4R approve · DDL 0 · 배포 완료 1021
 > 호출어 **"직접발송 타겟추출 / 받는 사람 4칸 / 직접 타겟 추출 창 / 고객 항목 맞추기"** · 목업(Harold 승인) = [docs/mockups/2026-10-20-direct-send-target-extract-mockup.html](../docs/mockups/2026-10-20-direct-send-target-extract-mockup.html)
 > 접수(Harold 1020): 직접발송 수신자 입력 3칸 → 4칸(타겟추출 · 모던 · 심플) · 요금제 사용자만(스타터 이상) · 잠긴 칸을 누르면 스타터 이상 안내 + 기능 설명 · 추출 창 재디자인 · 목업 먼저. 기준 = 「직접발송 치환값은 이름 · 회신번호 · 기타1~3 뿐」(Harold 1020).
 > 동작: ① 4칸 카드(`ds-src` · 알림톡 · 브랜드 창의 3칸 `ds-rtab` 무변경) · 중복제거 · 수신거부제거 = 건수 줄 칩. ② 잠김 = `isCustomerDbLocked`(customer_db_enabled + 구독 잠금) · 구독 잠금 → 잠금 창 · 그 밖 → 안내 창 `target-extract`(옛 `send-target` 항목 자리). ③ 추출 창 = 체크 단계 없음(값이 있는 칸 = 조건 · CT `customerFilterBuild`) · 고를 때마다 자동 집계(400ms · 세대) · 고른 조건 칩 · 말로 고르기(AI · 1크레딧)는 위 한 줄 + 결과 카드(절대 날짜 범위라 칸을 채우지 않음) · AI 숨김 사용자 숨김 · AI 한줄로 「직접 타겟 선택」 고르기 계약 그대로. ④ 담기 → 보관본 전체 행(`/extractions/:id/rows`) → 파일등록과 같은 칸 맞추기 창(「고객 항목 맞추기」 · 번호 · 이름 미리 · 기타1~3 고름 · 머리글 고유화) → 직접발송 명단 → 발송 = 직접발송 그대로. 옛 직접 타겟 발송 창으로 넘기지 않는다. ⑤ 받는 사람 불러오기(직접입력 · 파일 · 주소록 · 타겟추출 · 칸 맞추기 등록) = 세대 하나(`beginRecipientSource` · 마지막에 누른 것만).
 > 목업과 다른 점: 담은 뒤 = 칸 맞추기 창 → 명단(목업 ⑤의 조건 띠 · 보낼 수 있는 시각 없음 · 1008 남지현 접수로 보관 마감 시각 줄은 뺀 상태) · 추출 창 요약의 「앞 5명」 없음(인원 집계 API 가 건수만 준다).
 > 검증: frontend tsc 0 · frontend build:safe 통과 · backend tsc 0 · backend vitest 657파일 9,597건 · 새 시험 direct-target-extract-1020 23건(변이 2 검출) · 실제 부품 측정(390 · 820 · 1100 · 1440 가로 넘침 0 · 글자 잘림 0 · 흐름 = 잠김 안내 · 담기 · 칸 맞추기 · 명단 3명) · Codex 적대 1R(high 3 · medium 2 → Harold 기준으로 구조 변경 · 넘기기 길 삭제) · 2R(high 1 · medium 1 · 입력원 경합 같은 부류 두 번 → 세대 하나로) · 3R(medium 1 · 주소록 응답 세대) · 4R approve.
-> 범위 밖 = [BUGS B-1020-5](BUGS.md). 다음 = 배포(프론트 build:safe + 백엔드 안내 원장 반영) → 실측(잠긴 회사 안내 · 스타터 회사 담기 → 기타1 넣어 1건 발송).
+> 범위 밖 = [BUGS B-1020-5](BUGS.md). 배포 완료 1021(Harold) · 남은 것 = 실측(noplan 으로 잠긴 칸 안내 · 스타터 회사 담기 → 기타1 넣어 1건 발송).
 
 <a id="c45"></a>
 
@@ -202,7 +212,9 @@
 > 접수(Harold 1020 · 시연 회사): 질문 단계 · 칼럼 단계가 빠짐 · 묻는 것이 부족 · 고른 칼럼으로 문안 · AI 메모리 문자 성격(알림 · 마케팅) 판정 + 그 성격의 브랜드 보이스(형태 · 특문)를 입혀 생성. 실측(Harold) = 시연 회사 가이드라인 · 대표 문안 0행.
 > 동작 변화: 확인 창 = 채널(카톡 모호) → 빠진 정보(AI 판단 · 비면 건너뜀) → 누구에게 → 확인 판(대상 · 종류 · 문자 성격 칩 · 말투 안내 · 금액) → 개인화 칼럼(1위 고객 실제 값 · 회사 칼럼 · 추천 미리 체크 · 만들기). 결과 카드 = 빠진 고른 칼럼 알림. AI 메모리 = 대표 문안 성격 칩 · 편집 창 성격 고르기 · 추출 한 번에 성격별 말투.
 > 검증: backend tsc 0 · frontend tsc 0 · frontend build:safe 통과 · backend vitest 전체 · 새 시험 ai-line-asks-1020 29건 · 변이 2 검출 · Codex 1R(high 1 · medium 3) · 2R(medium 1) · 3R(medium 1 · 같은 부류 세 번째 → 호환 분기 삭제) · 4R approve.
-> ★1021 Harold 「전부 배포완료」(다른 세션 작업과 tp-push 한 번에). customers.custom_fields 정보 스키마 확인 완료(jsonb 1행 · Harold 1021). 남은 것 = 설계서 §17-7 실측 ①~③.
+> ★1021 Harold 「전부 배포완료」(다른 세션 작업과 tp-push 한 번에). customers.custom_fields 정보 스키마 확인 완료(jsonb 1행 · Harold 1021).
+> ★1021 실측 ① 결함(Harold 테스트계정): 질문 · 답 반영은 정상 · 확인 판에서 칩을 끄면 칼럼 단계가 「고객 정보가 비어 있어요」 = 처음 대상 0명(그 고객 최근구매일 비어 있음 · SQL) + 칩 길이 수만 다시 셈. 처방 = 칩 · 전체 고객도 retarget 한 길 · 추천 칼럼 응답 한 칸(recommendedVars) · 옛 저장 진행 불변식(detailStale) = 다시 받기 + 잠금 · 설계서 §17-11 · Codex 적대 1R(medium 1) · 2R(medium 1 · 같은 뿌리 → 불변식 하나) · 3R approve · 배포 대기(프론트 + 서버 응답 한 칸 · DDL 0).
+> 남은 것 = 그 배포 → 설계서 §17-7 실측 ①(다시) ~ ③.
 > 배포 메모: 이 세션 마감 시점 작업 폴더에 다른 세션 미커밋 변경이 섞여 있었다(만들기 미리보기 · 직접 타겟 추출 · 대행 · 여정 문서 등). 그 시점 전체 시험 실패 3건은 다른 세션 파일(DirectTargetFilterModal.tsx 비활성 투명도 · make/DmEditScreen.tsx 장 빼기) · 이 작업 파일만으로는 656파일 전부 통과(22:19). tp-push 전에 그 세션들이 시험을 닫았는지 본다.
 
 <a id="c44"></a>

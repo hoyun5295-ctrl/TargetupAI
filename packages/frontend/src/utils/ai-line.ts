@@ -65,6 +65,8 @@ export interface AiLineIntake {
   asks?: AiLineAsk[];
   /** ★ 2026-10-20 브랜드 말투 학습(성격별) · 모르면 null */
   voice?: { learned: boolean; marketing: boolean; notice: boolean } | null;
+  /** ★ 2026-10-21 이 한 줄에 맞는 추천 칼럼(대상 상세와 분리 · 처음 대상이 0명이어도 남는다) */
+  recommendedVars?: string[];
 }
 
 /** ★ 2026-10-19 대상을 바꾼 뒤(직접 타겟 선택 · 「전체 고객」 답) 서버가 다시 센 값 */
