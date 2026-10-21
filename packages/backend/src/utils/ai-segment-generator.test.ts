@@ -12,6 +12,11 @@ vi.mock('../config/database', () => ({ query: vi.fn(async () => ({ rows: [] })) 
 vi.mock('../services/ai', () => ({ callAIWithFallback: vi.fn(async () => ({ content: '' })) }));
 // CT-01은 이 테스트의 관심이 아니다 — previewMatching의 열 구성만 고정한다.
 vi.mock('./customer-filter', () => ({ buildCustomerFilter: vi.fn(() => ({ sql: 'AND 1=1', params: ['VIP'] })) }));
+// ★1021 서수란 접수 — 사용자 범위는 CT(getOwnerCustomerScopeSql)가 판정한다. 여기서는 그 조각이 두 SQL에 붙는지만 본다.
+vi.mock('./store-scope', async (orig) => ({
+  ...(await orig<typeof import('./store-scope')>()),
+  getOwnerCustomerScopeSql: vi.fn(async (_c: string, owner?: string | null) => (owner === 'u-blocked' ? ' AND FALSE' : '')),
+}));
 
 import { query } from '../config/database';
 import { previewMatching } from './ai-segment-generator';
@@ -59,5 +64,31 @@ describe('previewMatching — filter 참조 필드를 샘플 열로 싣는다', 
     expect(r.sampleFields).toEqual([]);
     expect(norm(sampleSql)).not.toContain('days_since_last_purchase');
     expect(norm(sampleSql), '기본 열(region)이 추가 열로 중복되면 별칭이 충돌한다').not.toContain('AS "region"');
+  });
+});
+
+describe('previewMatching — ★1021 요청자 범위 · 날짜 열', () => {
+  beforeEach(() => {
+    qmock.mockReset();
+    qmock.mockImplementation(async (sql: string) => (sql.includes('COUNT(*)') ? { rows: [{ cnt: 0 }] } : { rows: [] }));
+  });
+  const sqls = () => qmock.mock.calls.map((c: any[]) => norm(String(c[0]))).filter((s) => s.includes('FROM customers c'));
+
+  it('범위가 막힌 사용자는 인원 · 미리 보기 두 SQL 모두에 범위 조각이 붙는다(권한 밖 고객 노출 금지)', async () => {
+    await previewMatching('company-1', { grade: { operator: 'equals', value: 'VIP' } } as any, undefined, 'u-blocked');
+    const s = sqls();
+    expect(s).toHaveLength(2);
+    for (const q of s) expect(q).toContain('AND FALSE');
+  });
+
+  it('관리자(범위 없음)는 조각이 비어 종전 SQL 그대로', async () => {
+    await previewMatching('company-1', { grade: { operator: 'equals', value: 'VIP' } } as any, undefined, 'u-admin');
+    for (const q of sqls()) expect(q).not.toContain('AND FALSE');
+  });
+
+  it('날짜형 필드는 YYYY-MM-DD 글자로 꺼낸다(Date 직렬화 = 하루 앞 UTC 시각)', async () => {
+    await previewMatching('company-1', { birth_date: { operator: 'birth_month', value: 10 } } as any);
+    const sample = sqls().find((q) => !q.includes('COUNT(*)'))!;
+    expect(sample).toContain(`to_char(c.birth_date, 'YYYY-MM-DD') AS "birth_date"`);
   });
 });

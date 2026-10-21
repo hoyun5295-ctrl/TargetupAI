@@ -28,6 +28,7 @@ import { extractJsonFromAiText } from './ai-json';
 import { callAIWithFallback } from '../services/ai';
 import { buildCustomerFilter } from './customer-filter';
 import { ownerConsentSql } from './mall-consent';
+import { getOwnerCustomerScopeSql } from './store-scope';
 import { getFieldByKey, StandardFieldMapping } from './standard-field-map';
 import { buildEnabledFieldsPayload } from './enabled-fields';
 import { isValidCustomFieldKey } from './safe-field-name';
@@ -380,6 +381,9 @@ export async function previewMatching(
 ): Promise<{ matchCount: number; samples: GenerateSegmentResult['samples']; sampleFields: GenerateSegmentResult['sampleFields'] }> {
   // ★ 2026-10-02 수신동의 읽기 = CT(mall-consent · 몰 동의 회사가 아니면 옛 글자)
   const consent = await ownerConsentSql(companyId, ownerUserId, 'c');
+  // ★ 2026-10-21 (서수란 접수 · 직접 타겟 추출) 요청자 범위 = CT. 없으면 분류코드 미배정 담당자에게 회사 전체 고객 수·이름·번호가 보였다
+  //   (같은 창의 인원 · 담기는 범위로 0명). 관리자 · 분류 체계 없는 회사는 빈 조각이라 종전과 같다.
+  const scopeSql = await getOwnerCustomerScopeSql(companyId, ownerUserId, 'c');
   // CT-01 호환 SQL 빌드 ($1 = companyId, $2~ = filter values)
   const { sql: filterSql, params } = buildCustomerFilter(filter, {
     tableAlias: 'c',
@@ -395,7 +399,7 @@ export async function previewMatching(
     AND c.is_active = true
     AND ${consent.isTrue}
     AND (c.is_opt_out = false OR c.is_opt_out IS NULL)
-    AND (c.is_invalid = false OR c.is_invalid IS NULL)
+    AND (c.is_invalid = false OR c.is_invalid IS NULL)${scopeSql}
     ${filterSql}
   `;
 
@@ -404,7 +408,10 @@ export async function previewMatching(
   const extraSelect = extraFields
     .map((f) => (f.storageType === 'custom_fields'
       ? `, c.custom_fields ->> '${f.columnName}' AS "${f.fieldKey}"`
-      : `, c.${f.columnName} AS "${f.fieldKey}"`))
+      // 날짜 컬럼(date)을 그대로 꺼내면 Date → JSON 이 UTC 시각이 되어 하루 앞으로 보였다(★1021) — 날짜 글자로 꺼낸다
+      : f.dataType === 'date'
+        ? `, to_char(c.${f.columnName}, 'YYYY-MM-DD') AS "${f.fieldKey}"`
+        : `, c.${f.columnName} AS "${f.fieldKey}"`))
     .join('');
 
   const countSql = `SELECT COUNT(*)::int AS cnt FROM customers c WHERE ${baseWhere}`;

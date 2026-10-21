@@ -185,6 +185,19 @@
 > 검증 = FE · BE tsc 0 · vitest 595파일 8,371건 · 렌더 108곳 · Codex 적대 1R approve(gpt-6-astra · 지적 0 · 지정 파일 66개 + 분리 전 원본을 읽고 대조)
 > 다음 = 배포(백엔드 reload + 프론트 build:safe · AI 영업 C12 와 한 번에) → 실측(목록 숫자 카드 값 · 상세 창 저장 · 7일 부여 1회)
 
+<a id="c52"></a>
+
+### C52 · ★1021 전송자격인증 현장 실사(1022) 준비 · 수정 묶음 S1~S5 · Codex 적대 3R approve · DDL 0 · 배포 완료 1021
+> 호출어 **"실사 / 현장 실사 / 실사 명령집"** → 원본(명령 · 질답 · 결함 대장) = `docs/transmission-cert/resubmit-1006/evidence/make_inspection_commands_xlsx.py` · 당일 = `docs/transmission-cert/resubmit-1006/실사_당일_명령표.md`(§1 찾기표 · 줄 포인터 157 · 생성본) · 설계 = [docs/2026-10-21-cert-onsite-fix-bundle-design.md](../docs/2026-10-21-cert-onsite-fix-bundle-design.md)
+> ① S1 변경 이력 = `utils/change-audit.ts`(발신번호 등록 · 수정 · 기본 · 삭제 · 배정 변경 · 계정 삭제 · 수신거부 삭제 · 주소록 삭제) · 배정 교체 전 값 = `replaceAssignments` 의 DELETE RETURNING · 수정 전 값 = `WITH old AS (… FOR UPDATE)` 한 문장.
+> ② S2 스크립트 발급 · 시험 회사 영구 삭제 기록(channel script · 스크립트 이름 · OS 계정 · company_purged 는 삭제와 같은 트랜잭션).
+> ③ S3 해지 한 길 = `utils/company-terminate.ts`(사유 3종 필수 · 상태 + 잠금 + 세션 + company_terminated 한 트랜잭션 · 커밋 뒤 관리자 안내 문자 → company_termination_notice) · 회사 수정 화면 해지 거부(TERMINATE_VIA_BUTTON) · 회사 목록 해지 창.
+> ④ S4 `utils/deposit-approve.ts` 소명 없는 보류 승인 = confirmBasis 10자 · 승인 창 입력칸. ⑤ S5 DB 로그 = 웹푸시 조회 status='active' · imc_template_status 실패 기반 6시간 기억.
+> 검증: backend tsc 0 · frontend tsc 0 · backend vitest 665파일 9,659건 · build:safe · Codex 적대 1R 3건 · 2R 1건 수용 → 3R approve.
+> 실측(Harold 실행 1021): 재기동 12:50:14 · is_active 오류 재기동 뒤 0 · 발신번호 등록 → 삭제 기록(13:15) · 테스트주식회사 해지 + 안내 문자 수신(13:39 · 회사는 해지 유지) · 이새 회사 API 옛 예외 회수(13:49) · 불법스팸 차단 전환(13:53) · testmart 잠금(13:59) · 연동 출발지 차단 켬(한줄로 .env ORIGIN_ALLOWLIST_ENFORCE_FROM=2026-10-21 · 14:24 재기동 / 게이트웨이 bito-admin-api drop-in zz-origin-allowlist.conf GW_API_ORIGIN_ALLOWLIST=enforce) · .env GEO_BLOCK_ENFORCE_FROM 중복 줄 삭제.
+> 서수란 전달 = 다운로드 `서수란_실사_질의응답_20261022.docx` · `.xlsx` · 안내 txt · 운영 기록 대장 입력안 2차(4건 등록 완료). 질답 92건 전부 말할 문장.
+> 남은 것 = 실사 아침 G-4b · H-11b 로 차단 켠 뒤 막힌 정상 연동 0 확인 · 결함 열린 5(D-01 · D-02 · D-17 · D-24 실측 기회 대기 · D-35 회수 창 사유 칸) · 추가 과제 = 웹푸시 구독 첫 행이 생길 때 채널 판정 확인 · 배정 추가 vs 교체 동시 같은 사용자 교착(Codex 3R 범위 밖).
+
 <a id="c51"></a>
 
 ### C51 · ★1021 진단 띠 쿠폰(B안) + 진단 7일 체험 회사당 1회 + 대시보드 요금제 안내 창 흰 판 + noplan 계정 · Codex 적대 approve · DDL 0 · 배포 완료 1021

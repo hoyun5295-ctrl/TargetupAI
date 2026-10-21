@@ -1,5 +1,7 @@
 # 전송자격인증 현장 실사 전 수정 묶음 설계안 (2026-10-21)
 
+> ★상태 1021 = 구현 · Codex 적대 3R approve · 배포 완료(12:50) · 실측 S1 · S3 · S5 완료 · D-16 두 스위치 켬 · 경위 = [STATUS-FEED C52](../status/STATUS-FEED.md#c52)
+
 > 근거 = 2026-10-21 모의 실사(15개 질의 · Harold 운영 실행 출력) · 결함 대장 = `docs/transmission-cert/resubmit-1006/evidence/make_inspection_commands_xlsx.py` `DEFECTS`.
 > 목표 = 2026-10-22 현장 실사 트집거리 0(Harold). 이 문서는 **코드 수정분**의 설계와 **운영 조치 목록**을 함께 적는다.
 > 상태 = **설계안 · Harold 동의 전(코드 변경 0)**.
