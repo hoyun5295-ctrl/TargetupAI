@@ -15,8 +15,11 @@
  */
 import pool from '../config/database';
 
+/** ★2026-10-21 S4 — 소명 없는 보류 건 승인의 「확인 근거」 최소 글자 수(화면 DepositApproveModal 과 같은 값) */
+export const HOLD_CONFIRM_BASIS_MIN = 10;
+
 export type DepositApproveOutcome =
-  | { ok: true; newBalance: number; depositReq: any }
+  | { ok: true; newBalance: number; depositReq: any; confirmBasis: string | null }
   | { ok: false; status: number; error: string; code?: string; heldReason?: string; explanationNote?: string | null };
 
 export async function approveDepositRequestTx(opts: {
@@ -26,6 +29,8 @@ export async function approveDepositRequestTx(opts: {
   adminNote?: string | null;
   /** 명의 확인 보류 건을 소명 확인 후 승인(관리 화면 전용). 링크 입구는 항상 미지정 */
   resolveHold?: boolean;
+  /** ★2026-10-21 S4 — 보류 건에 고객사 소명이 없을 때 관리자가 무엇으로 명의를 확인했는지(관리 화면 전용) */
+  confirmBasis?: string | null;
   via: 'admin' | 'link';
   /** via='link'일 때 승인한 담당자 번호(감사) */
   linkPhone?: string | null;
@@ -78,6 +83,23 @@ export async function approveDepositRequestTx(opts: {
       };
     }
 
+    // ★2026-10-21 실사 준비 S4(D-17) — 고객사 소명이 없는 보류 건은 「확인 근거」 없이 승인되지 않는다
+    //   (10-21 모의 실사: 소명 없이 승인된 건의 판단 근거가 어디에도 없었다). 소명이 있으면 그것이 근거라 지금과 같다.
+    //   근거는 관리자 메모(admin_note)와 감사 기록(deposit_hold_resolved)에 남는다.
+    const basisInput = typeof opts.confirmBasis === 'string' ? opts.confirmBasis.trim() : '';
+    const needsBasis = !!depositReq.held_reason && !String(depositReq.explanation_note || '').trim();
+    if (needsBasis && basisInput.length < HOLD_CONFIRM_BASIS_MIN) {
+      await depClient.query('ROLLBACK');
+      return {
+        ok: false, status: 400,
+        error: `고객사 소명이 없는 요청입니다. 입금자 명의를 무엇으로 확인했는지 ${HOLD_CONFIRM_BASIS_MIN}자 이상 적어주세요.`,
+        code: 'HOLD_CONFIRM_BASIS_REQUIRED',
+        heldReason: depositReq.held_reason,
+        explanationNote: null,
+      };
+    }
+    const confirmBasis = needsBasis ? basisInput : null;
+
     if (depositReq.billing_type !== 'prepaid') {
       await depClient.query('ROLLBACK');
       return { ok: false, status: 400, error: '선불 고객사가 아닙니다.' };
@@ -111,11 +133,11 @@ export async function approveDepositRequestTx(opts: {
     // 3. deposit_requests 상태 변경
     await depClient.query(
       `UPDATE deposit_requests SET status = 'confirmed', confirmed_by = $1, confirmed_at = NOW(), admin_note = $2 WHERE id = $3`,
-      [adminId, adminNote || null, id]
+      [adminId, [adminNote, confirmBasis && `[확인 근거] ${confirmBasis}`].filter(Boolean).join(' · ') || null, id]
     );
 
     await depClient.query('COMMIT');
-    return { ok: true, newBalance, depositReq };
+    return { ok: true, newBalance, depositReq, confirmBasis };
   } catch (txErr: any) {
     await depClient.query('ROLLBACK').catch(() => {});
     const msg = String(txErr?.message || '');

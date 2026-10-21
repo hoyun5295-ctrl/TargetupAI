@@ -18,6 +18,7 @@ import * as imc from './alimtalk-api';
 import { getAuthSmsTable, bulkInsertSmsQueue } from './sms-queue';
 // ★ 2026-06-13: 검수 진입 시 발급되는 IMC 템플릿코드를 상태 동기화 때 함께 반영 (반려 템플릿 코드 미반영 구멍 fix)
 import { syncSingleTemplateCode } from './kakao-template-sync';
+import { isImcStatusColumnKnownMissing, isImcStatusColumnMissingError, markImcStatusColumnMissing } from './kakao-template-guard';
 import { buildTemplateInspectionNotifyMessage } from './auto-notify-message';
 // ★ 2026-10-15 (박성용 접수 · 에스디몰 스마일패스): IMC 가 삭제(D)한 발신프로필은 「사용 중지」 CT 로 활성까지 내린다(같은 판정 · 같은 감사 기록)
 import { disableSenderProfile } from './kakao-sender-profile-admin';
@@ -325,35 +326,40 @@ async function pollInProgressTemplates(): Promise<void> {
       //   비교용 param을 분리 + 명시 캐스트 (0701 ensureSystemSyncUser와 동일 처방).
       const reviewedAtExprFor = (p: string) => `CASE WHEN ${p}::text IN ('APPROVED','REJECTED','KREJ','HREJ')
                                    THEN COALESCE(reviewed_at, now()) ELSE reviewed_at END`;
-      try {
-        await query(
-          `UPDATE kakao_templates
-              SET status              = $1,
-                  reject_reason       = $2,
-                  imc_template_status = $3,
-                  reviewed_at         = ${reviewedAtExprFor('$5')},
-                  last_synced_at      = now(),
-                  updated_at          = now()
-            WHERE id = $4`,
-          [latestStatus, rejectReason, imcTemplateStatus, row.id, latestStatus],
-        );
-      } catch (colErr: any) {
-        const msg = colErr?.message || '';
-        if (msg.includes('column') && msg.includes('does not exist')) {
-          // imc_template_status ALTER 전 — 기존 컬럼만 갱신 (기능 저하 없이 동작 유지)
+      // ★2026-10-21 S5 — 최근 실제 실패로 컬럼 부재를 알면 그 컬럼을 넣은 UPDATE 를 보내지 않는다(실패 기반 기억 · CT = kakao-template-guard).
+      let wroteImcStatus = false;
+      if (!isImcStatusColumnKnownMissing()) {
+        try {
           await query(
             `UPDATE kakao_templates
-                SET status          = $1,
-                    reject_reason   = $2,
-                    reviewed_at     = ${reviewedAtExprFor('$4')},
-                    last_synced_at  = now(),
-                    updated_at      = now()
-              WHERE id = $3`,
-            [latestStatus, rejectReason, row.id, latestStatus],
+                SET status              = $1,
+                    reject_reason       = $2,
+                    imc_template_status = $3,
+                    reviewed_at         = ${reviewedAtExprFor('$5')},
+                    last_synced_at      = now(),
+                    updated_at          = now()
+              WHERE id = $4`,
+            [latestStatus, rejectReason, imcTemplateStatus, row.id, latestStatus],
           );
-        } else {
-          throw colErr;
+          wroteImcStatus = true;
+        } catch (colErr: any) {
+          const msg = colErr?.message || '';
+          if (!(msg.includes('column') && msg.includes('does not exist'))) throw colErr;
+          if (isImcStatusColumnMissingError(colErr)) markImcStatusColumnMissing();
         }
+      }
+      if (!wroteImcStatus) {
+        // imc_template_status ALTER 전 — 기존 컬럼만 갱신 (기능 저하 없이 동작 유지)
+        await query(
+          `UPDATE kakao_templates
+              SET status          = $1,
+                  reject_reason   = $2,
+                  reviewed_at     = ${reviewedAtExprFor('$4')},
+                  last_synced_at  = now(),
+                  updated_at      = now()
+            WHERE id = $3`,
+          [latestStatus, rejectReason, row.id, latestStatus],
+        );
       }
       updated++;
 

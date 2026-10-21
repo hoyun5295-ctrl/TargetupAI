@@ -26,6 +26,38 @@ export type { KakaoTemplateSendableDecision } from './kakao-template-guard-core'
 let _columnMissingLogged = false;
 
 /**
+ * ★2026-10-21 전송자격인증 실사 준비 S5 — 「컬럼 없음」 기억(실패 기반)
+ *   컬럼이 없는 동안 이 컬럼을 넣은 SQL 이 몇 분마다 실패해 운영 DB 로그에 오류가 쌓였다.
+ *   **실제로 그 실패가 난 뒤에만** 기억하고, 기억하는 동안은 그 SQL 을 보내지 않고 곧바로 지금의 대체 경로로 간다.
+ *   ⛔ information_schema 사전 탐지로 갈래를 고르지 않는다(LESSONS_BACKEND 2026-09-12 「사전 탐지 캐시는 폴백을 구멍으로 바꾼다」).
+ *   기억이 풀리면 다시 한 번 시도한다 — ALTER 뒤에는 늦어도 그때부터 컬럼을 쓴다.
+ */
+export const IMC_STATUS_COLUMN_MISSING_TTL_MS = 6 * 60 * 60 * 1000;
+let _imcColumnMissingUntil = 0;
+
+/** 이 오류가 imc_template_status 컬럼 부재인가(다른 컬럼 부재와 가른다) */
+export function isImcStatusColumnMissingError(err: any): boolean {
+  const msg = String(err?.message || '');
+  return msg.includes('imc_template_status') && msg.includes('does not exist');
+}
+
+/** 실제 실패를 본 뒤에만 부른다 */
+export function markImcStatusColumnMissing(now: number = Date.now()): void {
+  _imcColumnMissingUntil = now + IMC_STATUS_COLUMN_MISSING_TTL_MS;
+}
+
+/** 최근 실패로 컬럼 부재를 알고 있는가 — true 면 그 컬럼을 넣은 SQL 을 보내지 않는다 */
+export function isImcStatusColumnKnownMissing(now: number = Date.now()): boolean {
+  return now < _imcColumnMissingUntil;
+}
+
+/** 시험 격리용 — 모듈 상태를 비운다 */
+export function resetImcStatusColumnMemory(): void {
+  _imcColumnMissingUntil = 0;
+  _columnMissingLogged = false;
+}
+
+/**
  * imc_template_status 안전 조회 — ALTER 전(컬럼 부재)에도 발송 경로가 깨지지 않게 null 반환.
  * (null = 미동기 취급 → 기존 검수상태 가드만 적용)
  */
@@ -33,6 +65,7 @@ export async function getImcTemplateStatusSafe(
   companyId: string,
   templateCode: string
 ): Promise<string | null> {
+  if (isImcStatusColumnKnownMissing()) return null;
   try {
     const r = await query(
       `SELECT imc_template_status FROM kakao_templates
@@ -47,6 +80,7 @@ export async function getImcTemplateStatusSafe(
 
 /** 템플릿 id 기준 안전 조회 (자동마케팅 등 id로 식별하는 경로용) */
 export async function getImcTemplateStatusByIdSafe(templateId: string): Promise<string | null> {
+  if (isImcStatusColumnKnownMissing()) return null;
   try {
     const r = await query(
       `SELECT imc_template_status FROM kakao_templates WHERE id = $1::uuid LIMIT 1`,
@@ -61,6 +95,7 @@ export async function getImcTemplateStatusByIdSafe(templateId: string): Promise<
 function handleStatusQueryError(err: any): null {
   const msg = err?.message || '';
   if (msg.includes('column') && msg.includes('does not exist')) {
+    if (isImcStatusColumnMissingError(err)) markImcStatusColumnMissing();
     if (!_columnMissingLogged) {
       _columnMissingLogged = true;
       console.log(

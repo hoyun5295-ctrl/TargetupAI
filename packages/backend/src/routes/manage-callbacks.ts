@@ -13,6 +13,7 @@ import {
 } from '../utils/sender-registration';
 import { normalizePhone } from '../utils/normalize-phone';
 import { checkCallbackSpec } from '../utils/callback-spec';
+import { recordCallbackNumberCreated, recordCallbackNumberUpdated, recordCallbackNumberDefaultChanged, recordCallbackNumberDeleted, recordCallbackAssignmentChanged } from '../utils/change-audit';
 
 const router = Router();
 
@@ -153,6 +154,12 @@ router.post('/', demoBlock, async (req: Request, res: Response) => {
     } finally {
       client.release();
     }
+    // ★2026-10-21 실사 준비 S1(D-03) — 발신번호 등록 이력
+    await recordCallbackNumberCreated({
+      actorUserId: (req as any).user?.userId || null, req, companyId: targetCompanyId, callbackId: result.rows[0].id,
+      phone: result.rows[0].phone, label: result.rows[0].label, isDefault: result.rows[0].is_default,
+      via: callerType === 'super_admin' ? 'admin' : 'company',
+    });
 
     res.json({
       message: '발신번호가 등록되었습니다.',
@@ -193,18 +200,28 @@ router.put('/:id', async (req: Request, res: Response) => {
       });
     }
 
+    // ★2026-10-21 실사 준비 S1(D-03) — 변경 전 이름은 같은 문장의 행 잠금 아래에서(동시 수정에도 실제 직전 값 · Codex 1R)
     const result = await pool.query(`
-      UPDATE callback_numbers 
-      SET label = COALESCE($1, label)
-      WHERE id = $2
-      RETURNING id, phone, label, is_default
+      WITH old AS (SELECT id, label FROM callback_numbers WHERE id = $2 FOR UPDATE)
+      UPDATE callback_numbers c
+      SET label = COALESCE($1, c.label)
+      FROM old
+      WHERE c.id = old.id
+      RETURNING c.id, c.phone, c.label, c.is_default, old.label AS before_label
     `, [label, id]);
 
     if (result.rows.length === 0) {
       return res.status(404).json({ error: '발신번호를 찾을 수 없습니다.' });
     }
+    const { before_label: beforeLabel, ...callbackNumber } = result.rows[0];
+    // ★2026-10-21 실사 준비 S1(D-03) — 발신번호 수정 이력(이 API 는 라벨만 바꾼다)
+    await recordCallbackNumberUpdated({
+      actorUserId: (req as any).user?.userId || null, req, companyId: current.rows[0].company_id, callbackId: callbackNumber.id,
+      phone: callbackNumber.phone, via: callerType === 'super_admin' ? 'admin' : 'company',
+      before: { label: beforeLabel ?? null }, after: { label: callbackNumber.label ?? null },
+    });
 
-    res.json({ message: '수정되었습니다.', callbackNumber: result.rows[0] });
+    res.json({ message: '수정되었습니다.', callbackNumber });
   } catch (error) {
     console.error('발신번호 수정 실패:', error);
     res.status(500).json({ error: '발신번호 수정 실패' });
@@ -230,11 +247,16 @@ router.delete('/:id', async (req: Request, res: Response) => {
       }
     }
 
-    const result = await pool.query('DELETE FROM callback_numbers WHERE id = $1 RETURNING phone', [id]);
+    const result = await pool.query('DELETE FROM callback_numbers WHERE id = $1 RETURNING phone, company_id', [id]);
 
     if (result.rows.length === 0) {
       return res.status(404).json({ error: '발신번호를 찾을 수 없습니다.' });
     }
+    // ★2026-10-21 실사 준비 S1(D-03) — 발신번호 삭제 이력
+    await recordCallbackNumberDeleted({
+      actorUserId: (req as any).user?.userId || null, req, companyId: result.rows[0].company_id, callbackId: id,
+      phone: result.rows[0].phone, via: callerType === 'super_admin' ? 'admin' : 'company',
+    });
 
     res.json({ message: '삭제되었습니다.' });
   } catch (error) {
@@ -249,7 +271,7 @@ router.put('/:id/default', async (req: Request, res: Response) => {
   const { userType: callerType, companyId: callerCompanyId } = (req as any).user!;
 
   try {
-    const check = await pool.query('SELECT company_id FROM callback_numbers WHERE id = $1', [id]);
+    const check = await pool.query('SELECT company_id, phone FROM callback_numbers WHERE id = $1', [id]);
     if (check.rows.length === 0) {
       return res.status(404).json({ error: '발신번호를 찾을 수 없습니다.' });
     }
@@ -263,6 +285,11 @@ router.put('/:id/default', async (req: Request, res: Response) => {
 
     await pool.query('UPDATE callback_numbers SET is_default = false WHERE company_id = $1', [targetCompanyId]);
     await pool.query('UPDATE callback_numbers SET is_default = true WHERE id = $1', [id]);
+    // ★2026-10-21 실사 준비 S1(D-03) — 대표번호 변경 이력
+    await recordCallbackNumberDefaultChanged({
+      actorUserId: (req as any).user?.userId || null, req, companyId: targetCompanyId, callbackId: id,
+      phone: check.rows[0].phone, via: callerType === 'super_admin' ? 'admin' : 'company',
+    });
 
     res.json({ message: '대표번호로 설정되었습니다.' });
   } catch (error) {
@@ -295,8 +322,8 @@ router.put('/:id/scope', async (req: Request, res: Response) => {
       return res.status(400).json({ error: 'DB 마이그레이션이 필요합니다. 관리자에게 문의하세요.' });
     }
 
-    // 해당 번호 소유 회사 확인
-    const check = await pool.query('SELECT company_id FROM callback_numbers WHERE id = $1', [id]);
+    // 해당 번호 소유 회사 확인(★2026-10-21 S1 — 이력의 번호도 함께 읽는다 · 변경 전 범위는 updateAssignmentScope 가 잠금 아래에서)
+    const check = await pool.query('SELECT company_id, phone FROM callback_numbers WHERE id = $1', [id]);
     if (check.rows.length === 0) return res.status(404).json({ error: '발신번호를 찾을 수 없습니다.' });
 
     const targetCompanyId = check.rows[0].company_id;
@@ -308,6 +335,12 @@ router.put('/:id/scope', async (req: Request, res: Response) => {
     if (!updated) {
       return res.status(404).json({ error: '발신번호를 찾을 수 없습니다.' });
     }
+    // ★2026-10-21 실사 준비 S1(D-03) — 배정 범위 변경 이력
+    await recordCallbackAssignmentChanged({
+      actorUserId: (req as any).user?.userId || null, req, companyId: targetCompanyId, callbackId: id,
+      phone: check.rows[0].phone, via: callerType === 'super_admin' ? 'admin' : 'company',
+      kind: 'scope', before: updated.before, after: scope,
+    });
 
     res.json({ success: true, message: scope === 'all' ? '전체 사용으로 변경되었습니다.' : '사용자 지정으로 변경되었습니다.' });
   } catch (error: any) {
@@ -357,7 +390,13 @@ router.put('/:id/assignments', async (req: Request, res: Response) => {
       return res.status(403).json({ error: '자사 발신번호만 수정할 수 있습니다.' });
     }
 
-    const assignments = await replaceAssignments(id, targetCompanyId, userIds, callerId);
+    // ★2026-10-21 실사 준비 S1(D-03) — 배정 교체 이력(교체 전 배정 = CT 가 잠금 아래에서 읽은 값)
+    const { assignments, beforeUserIds } = await replaceAssignments(id, targetCompanyId, userIds, callerId);
+    await recordCallbackAssignmentChanged({
+      actorUserId: callerId || null, req, companyId: targetCompanyId, callbackId: id,
+      phone: null, via: callerType === 'super_admin' ? 'admin' : 'company', kind: 'replace',
+      before: beforeUserIds, after: userIds,
+    });
     res.json({ success: true, assignments, message: '사용자 배정이 저장되었습니다.' });
   } catch (error: any) {
     console.error('배정 저장 실패:', error);
@@ -383,6 +422,11 @@ router.delete('/:id/assignments/:userId', async (req: Request, res: Response) =>
     if (!removed) {
       return res.status(404).json({ error: '해당 배정을 찾을 수 없습니다.' });
     }
+    // ★2026-10-21 실사 준비 S1(D-03) — 배정 해제 이력
+    await recordCallbackAssignmentChanged({
+      actorUserId: (req as any).user?.userId || null, req, companyId: targetCompanyId, callbackId: id,
+      phone: null, via: callerType === 'super_admin' ? 'admin' : 'company', kind: 'unassign', removedUserId: targetUserId,
+    });
 
     res.json({ success: true, message: '배정이 해제되었습니다.' });
   } catch (error: any) {

@@ -7,6 +7,7 @@ import { getCompanyScope } from '../utils/permission-helper';
 import { getAuthSmsTable, getTestSmsTables } from '../utils/sms-queue';
 // ★ 2026-10-02 계정 발급 축(전송자격인증 2.1 · 4.1 ②) — 발급 기록 · 고객사 관리자 추가 차단 안내
 import { ACCOUNT_ISSUE_NOTICE, recordAccountIssued } from '../utils/account-issue';
+import { recordUserAccountDeleted } from '../utils/change-audit';
 
 const router = Router();
 
@@ -240,11 +241,17 @@ router.delete('/:id', async (req: Request, res: Response) => {
       }
     }
 
-    const result = await pool.query('DELETE FROM users WHERE id = $1 RETURNING id, login_id', [id]);
+    const result = await pool.query('DELETE FROM users WHERE id = $1 RETURNING id, login_id, company_id', [id]);
 
     if (result.rows.length === 0) {
       return res.status(404).json({ error: '사용자를 찾을 수 없습니다.' });
     }
+    // ★2026-10-21 실사 준비 S1(D-24) — 계정 삭제 이력(2.1 「등록 · 변경 · 삭제 이력」)
+    await recordUserAccountDeleted({
+      actorUserId: (req as any).user?.userId || null, req,
+      userId: result.rows[0].id, loginId: result.rows[0].login_id, companyId: result.rows[0].company_id,
+      via: callerType === 'super_admin' ? 'admin' : 'company',
+    });
 
     res.json({ message: '삭제되었습니다.' });
   } catch (error) {

@@ -349,7 +349,8 @@ export default function CompanyBasicTab(props: CompanyBasicTabProps) {
                         <option value="trial">체험</option>
                         <option value="active">활성</option>
                         <option value="suspended">정지</option>
-                        <option value="terminated">해지</option>
+                        {/* ★ 2026-10-21 해지는 회사 목록의 해지 버튼 한 길(사유 · 계정 잠금 · 담당자 안내) — 이미 해지인 회사만 표시 */}
+                        {editCompany.status === 'terminated' && <option value="terminated">해지</option>}
                       </select>
                     </AdminField>
                     <AdminField label="구독 상태" required full hint="expired/suspended 시 전 기능 차단. trial_expired 는 FREE plan 자동 강등 후 마커.">

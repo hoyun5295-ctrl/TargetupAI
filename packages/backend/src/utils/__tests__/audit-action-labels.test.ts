@@ -45,6 +45,8 @@ const DIRECT_INSERT_ACTIONS = [
   'privacy_view', 'privacy_edit',
   // ★ 2026-10-03 운영 기록 대장(ops-records.ts 직접 INSERT — 실패를 삼키지 않으려고 recordAuditLog 를 쓰지 않는다)
   'ops_record_created', 'ops_record_confirmed', 'ops_record_voided',
+  // ★ 2026-10-21 시험 회사 영구 삭제(scripts/purge-retired-demo-company.ts 직접 INSERT — 삭제와 같은 트랜잭션 · scripts/ 는 위 추출 범위 밖)
+  'company_purged',
 ];
 
 describe('감사 로그 액션 한글 라벨 커버리지', () => {

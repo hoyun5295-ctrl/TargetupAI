@@ -43,6 +43,7 @@ import { kakaoTemplateSelectColumns, stripTemplateBinary } from '../utils/kakao-
 import { normalizeImcTemplateStatus } from '../utils/alimtalk-jobs';
 import { buildXlsxBuffer, XLSX_CONTENT_TYPE, xlsxContentDisposition } from '../utils/xlsx-writer';
 import { buildAlimtalkTemplateSheet, buildBrandTemplateSheet, templateExportFilename } from '../utils/template-export';
+import { isImcStatusColumnKnownMissing, isImcStatusColumnMissingError, markImcStatusColumnMissing } from '../utils/kakao-template-guard';
 import {
   syncCategoriesJob,
   syncPendingTemplatesJob,
@@ -1520,29 +1521,34 @@ router.get('/templates/:templateCode', async (req: Request, res: Response) => {
         const inspection = d.inspectionStatus ? normalizeImcTemplateStatus(String(d.inspectionStatus)) : null;
         const imcTemplateStatus = d.status ? String(d.status) : null;
         const rejectReason = d.rejectReason ?? null;
-        try {
-          await query(
-            `UPDATE kakao_templates
-                SET status = COALESCE($1, status),
-                    imc_template_status = $2,
-                    reject_reason = COALESCE($3, reject_reason),
-                    last_synced_at = now()
-              WHERE id = $4`,
-            [inspection, imcTemplateStatus, rejectReason, ctx.id],
-          );
-        } catch (colErr: any) {
-          const msg = colErr?.message || '';
-          if (msg.includes('column') && msg.includes('does not exist')) {
-            // imc_template_status ALTER 전 — 검수상태만 갱신
+        // ★2026-10-21 S5 — 최근 실제 실패로 컬럼 부재를 알면 그 컬럼을 넣은 UPDATE 를 보내지 않는다(실패 기반 기억 · CT = kakao-template-guard).
+        let wroteImcStatus = false;
+        if (!isImcStatusColumnKnownMissing()) {
+          try {
             await query(
               `UPDATE kakao_templates
-                  SET status = COALESCE($1, status), last_synced_at = now()
-                WHERE id = $2`,
-              [inspection, ctx.id],
+                  SET status = COALESCE($1, status),
+                      imc_template_status = $2,
+                      reject_reason = COALESCE($3, reject_reason),
+                      last_synced_at = now()
+                WHERE id = $4`,
+              [inspection, imcTemplateStatus, rejectReason, ctx.id],
             );
-          } else {
-            throw colErr;
+            wroteImcStatus = true;
+          } catch (colErr: any) {
+            const msg = colErr?.message || '';
+            if (!(msg.includes('column') && msg.includes('does not exist'))) throw colErr;
+            if (isImcStatusColumnMissingError(colErr)) markImcStatusColumnMissing();
           }
+        }
+        if (!wroteImcStatus) {
+          // imc_template_status ALTER 전 — 검수상태만 갱신
+          await query(
+            `UPDATE kakao_templates
+                SET status = COALESCE($1, status), last_synced_at = now()
+              WHERE id = $2`,
+            [inspection, ctx.id],
+          );
         }
 
         // ★ D217+ (2026-05-26 Harold 명시 진단 영역 정정):

@@ -2,7 +2,7 @@
  * DepositApproveModal — 슈퍼관리자 AdminDashboard 에서 옮긴 화면(★ 2026-10-09 파일 분리 E · 설계서 docs/2026-10-03-admin-dashboard-split-design.md §5)
  * 옮긴 방법 = 스크립트(원문 그대로 · 글자 대조). 상태(use*)는 본체에 남고 props 로 받는다 — 탭을 옮겨 다녀도 값이 그대로다(동작 변경 0).
  */
-import type { Dispatch, SetStateAction } from 'react';
+import { useState, type Dispatch, type SetStateAction } from 'react';
 import type { ModalState } from '../admin-types';
 import { Check } from 'lucide-react';
 
@@ -19,6 +19,10 @@ export interface DepositApproveModalProps {
 
 export default function DepositApproveModal(props: DepositApproveModalProps) {
   const { chargeTxPage, depositAdminNote, depositTarget, loadChargeManagement, setDepositAdminNote, setDepositTarget, setModal, setShowDepositApproveModal } = props;
+  // ★ 2026-10-21 실사 준비 S4 — 보류 건에 고객사 소명이 없으면 무엇으로 명의를 확인했는지 받는다(서버 HOLD_CONFIRM_BASIS_MIN 과 같은 10자)
+  const [confirmBasis, setConfirmBasis] = useState('');
+  const needsBasis = Boolean(depositTarget?.held_reason) && !String(depositTarget?.explanation_note || '').trim();
+  const basisShort = needsBasis && confirmBasis.trim().length < 10;
 
   const handleApproveDeposit = async () => {
     if (!depositTarget) return;
@@ -29,7 +33,11 @@ export default function DepositApproveModal(props: DepositApproveModalProps) {
         headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
         // ★ 2026-08-19 전송자격인증 2.3 — 명의 확인 건은 확인 표시 없이 서버가 거절한다.
         //   모달에서 사유와 소명을 보고 누른 것이므로 여기서 true를 실어 보낸다.
-        body: JSON.stringify({ adminNote: depositAdminNote || null, resolveHold: Boolean(depositTarget.held_reason) })
+        body: JSON.stringify({
+          adminNote: depositAdminNote || null,
+          resolveHold: Boolean(depositTarget.held_reason),
+          ...(needsBasis ? { confirmBasis: confirmBasis.trim() } : {}),
+        })
       });
       if (res.ok) {
         setModal({ type: 'alert', title: '승인 완료', message: `${Number(depositTarget.amount).toLocaleString()}원이 충전되었습니다.`, variant: 'success' });
@@ -91,6 +99,22 @@ export default function DepositApproveModal(props: DepositApproveModalProps) {
                     </div>
                   </div>
                 )}
+                {needsBasis && (
+                  <div className="pt-1">
+                    <label className="text-xs text-rose-700 font-semibold mb-1 block">확인 근거 (필수 · 10자 이상)</label>
+                    <p className="text-[11px] text-gray-500 mb-1.5">소명이 없어 무엇으로 입금자 명의를 확인했는지 승인 기록에 남깁니다.</p>
+                    <textarea
+                      value={confirmBasis}
+                      onChange={(e) => setConfirmBasis(e.target.value)}
+                      rows={2}
+                      placeholder="예: 담당자 통화로 대표자 개인 계좌 입금 확인"
+                      className="w-full px-3 py-1.5 border border-rose-200 rounded-lg text-[13px] focus:ring-2 focus:ring-rose-400 outline-none resize-none bg-white"
+                    />
+                    {basisShort && confirmBasis.trim().length > 0 && (
+                      <p className="text-[11px] text-rose-600 mt-1">{10 - confirmBasis.trim().length}자 더 적어주세요.</p>
+                    )}
+                  </div>
+                )}
                 <div className="flex justify-between text-sm border-t pt-2">
                   <span className="text-gray-400">현재 잔액</span>
                   <span className="font-medium">{Number(depositTarget.balance || 0).toLocaleString()}원</span>
@@ -120,7 +144,8 @@ export default function DepositApproveModal(props: DepositApproveModalProps) {
               </button>
               <button
                 onClick={handleApproveDeposit}
-                className="whitespace-nowrap flex-1 px-4 py-3 text-emerald-600 font-medium hover:bg-emerald-50 transition-colors"
+                disabled={basisShort}
+                className="whitespace-nowrap flex-1 px-4 py-3 text-emerald-600 font-medium hover:bg-emerald-50 transition-colors disabled:text-gray-300 disabled:hover:bg-transparent disabled:cursor-not-allowed"
               >
                 승인하기
               </button>

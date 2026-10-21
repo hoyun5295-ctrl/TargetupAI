@@ -482,19 +482,25 @@ export interface CallbackNumberAssignment {
 }
 
 /** 배정 범위 변경 (all / assigned) */
+/** ★2026-10-21 실사 준비 S1 — 변경 전 범위를 같은 문장의 행 잠금 아래에서 읽어 돌려준다(없으면 null = 번호 없음) */
 export async function updateAssignmentScope(
   callbackNumberId: string,
   companyId: string,
   scope: 'all' | 'assigned'
-): Promise<boolean> {
+): Promise<{ before: string | null } | null> {
   const result = await pool.query(
-    `UPDATE callback_numbers
+    `WITH old AS (
+       SELECT id, assignment_scope FROM callback_numbers WHERE id = $2 AND company_id = $3 FOR UPDATE
+     )
+     UPDATE callback_numbers c
      SET assignment_scope = $1
-     WHERE id = $2 AND company_id = $3
-     RETURNING id`,
+     FROM old
+     WHERE c.id = old.id
+     RETURNING c.id, old.assignment_scope AS before_scope`,
     [scope, callbackNumberId, companyId]
   );
-  return (result.rowCount ?? 0) > 0;
+  if (result.rows.length === 0) return null;
+  return { before: result.rows[0].before_scope ?? null };
 }
 
 /** 사용자 배정 추가 (여러 명 한 번에) */
@@ -594,36 +600,43 @@ export async function getAssignedCallbackIds(
   return result.rows.map((r: any) => r.callback_number_id);
 }
 
-/** 배정 전체 교체 (기존 삭제 → 새로 INSERT) */
+/**
+ * 배정 전체 교체 (기존 삭제 → 새로 INSERT)
+ * ★2026-10-21 실사 준비 S1 — 교체 전 배정(beforeUserIds)도 돌려준다(배정 변경 이력).
+ *   변경 전 = 이 교체가 **실제로 지운 행**(DELETE ... RETURNING). 따로 읽으면 그 사이 개별 해제가 끼어 이력이 틀린다(Codex 2R).
+ *   발신번호 행 잠금(FOR UPDATE)은 교체끼리 · 배정 추가(FK 가 부모 행을 공유 잠금)와 줄을 세운다 — 잠금 뒤 DELETE 가
+ *   앞선 교체가 넣은 행까지 보고 지운다(READ COMMITTED 문장 단위 스냅샷).
+ */
 export async function replaceAssignments(
   callbackNumberId: string,
   companyId: string,
   userIds: string[],
   assignedBy: string
-): Promise<CallbackNumberAssignment[]> {
+): Promise<{ assignments: CallbackNumberAssignment[]; beforeUserIds: string[] }> {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
 
-    // 해당 번호가 이 회사 소유인지 확인
+    // 해당 번호가 이 회사 소유인지 확인 — 행 잠금(동시 교체를 줄 세운다)
     const ownerCheck = await client.query(
-      `SELECT id FROM callback_numbers WHERE id = $1 AND company_id = $2`,
+      `SELECT id FROM callback_numbers WHERE id = $1 AND company_id = $2 FOR UPDATE`,
       [callbackNumberId, companyId]
     );
     if (ownerCheck.rows.length === 0) {
       throw new Error('해당 발신번호를 찾을 수 없습니다.');
     }
 
-    // 기존 배정 전체 삭제
-    await client.query(
-      `DELETE FROM callback_number_assignments WHERE callback_number_id = $1`,
+    // 기존 배정 전체 삭제 — 지운 행이 곧 교체 전 배정
+    const deleted = await client.query(
+      `DELETE FROM callback_number_assignments WHERE callback_number_id = $1 RETURNING user_id`,
       [callbackNumberId]
     );
+    const beforeUserIds: string[] = deleted.rows.map((r: any) => String(r.user_id));
 
     // 새 배정이 비어있으면 (전체 해제) 그대로 커밋
     if (userIds.length === 0) {
       await client.query('COMMIT');
-      return [];
+      return { assignments: [], beforeUserIds };
     }
 
     // 배정할 사용자들이 같은 회사인지 확인
@@ -649,7 +662,7 @@ export async function replaceAssignments(
     );
 
     await client.query('COMMIT');
-    return result.rows;
+    return { assignments: result.rows, beforeUserIds };
   } catch (err) {
     await client.query('ROLLBACK');
     throw err;

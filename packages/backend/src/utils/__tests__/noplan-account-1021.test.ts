@@ -46,8 +46,10 @@ describe('미가입 전용 계정 noplan 스크립트', () => {
     expect(SRC).not.toMatch(/process\.stdout\.write\([^;]*\b(pw1|pw2|buf|ch)\b/);
   });
 
-  it('④ 첫 로그인 비밀번호 변경 강제를 끈다 · 발급 기록 경로 = super_admin', () => {
+  // ★ 2026-10-21 실사 준비 S2 — 발급 기록 경로 = 서버 관리 스크립트(화면 발급이 아니다 · 스크립트 이름 · 서버 계정이 남는다)
+  it('④ 첫 로그인 비밀번호 변경 강제를 끈다 · 발급 기록 경로 = script', () => {
     expect(SRC).toMatch(/UPDATE users SET must_change_password = false WHERE id = \$1/);
-    expect(SRC).toMatch(/channel: 'super_admin'/);
+    expect(SRC).toMatch(/channel: 'script', script: 'create-noplan-account'/);
+    expect(SRC).not.toMatch(/channel: 'super_admin'/);
   });
 });

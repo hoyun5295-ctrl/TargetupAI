@@ -24,6 +24,7 @@ import * as imc from './alimtalk-api';
 import { sendSystemAlert } from './system-alert';
 // ★ 2026-09-12 검수상태 정규화는 5분 폴링과 **같은 함수**를 쓴다 — 두 경로가 다른 어휘를 쓰면 갈린다
 import { normalizeImcTemplateStatus } from './alimtalk-jobs';
+import { isImcStatusColumnKnownMissing, isImcStatusColumnMissingError, markImcStatusColumnMissing } from './kakao-template-guard';
 
 /** IMC 검수 진행 중 상태 — 이 상태의 행만 목록 안전망이 건드린다(종결 행 뒤집기 금지) */
 const IMC_IN_PROGRESS_STATUSES = new Set(['REQUESTED', 'REVIEWING', 'REG', 'REQ', 'REV', 'KREQ']);
@@ -291,19 +292,25 @@ export async function syncTemplateStatuses(loadImc?: () => Promise<Map<string, a
   //   동기화까지 함께 멎었다**. 로그는 "활성상태 동기화 skip"이라 적어 축소 보고했고,
   //   그래서 단건 조회가 4011로 죽은 6일 동안 이 안전망이 한 번도 돌지 않았다.
   //   이제 컬럼은 별도로 시도하고, 없으면 **활성상태 갱신만** 건너뛴다.
-  let pgRows;
-  let hasActiveCol = true;
-  try {
-    pgRows = await query(
-      `SELECT id, template_key, template_code, status, imc_template_status, reject_reason
-         FROM kakao_templates
-        WHERE template_key IS NOT NULL`
-    );
-  } catch (err: any) {
-    const msg = err?.message || '';
-    if (!(msg.includes('column') && msg.includes('does not exist'))) throw err;
-    hasActiveCol = false;
-    console.log('[kakao-template-sync] imc_template_status 컬럼 없음 — 활성상태만 빼고 검수상태 동기화는 계속한다');
+  //   ★2026-10-21 S5 — 최근 실제 실패로 컬럼 부재를 알면 그 컬럼을 넣은 SELECT 를 보내지 않는다(실패 기반 기억 · CT = kakao-template-guard).
+  let pgRows: any;
+  let hasActiveCol = !isImcStatusColumnKnownMissing();
+  if (hasActiveCol) {
+    try {
+      pgRows = await query(
+        `SELECT id, template_key, template_code, status, imc_template_status, reject_reason
+           FROM kakao_templates
+          WHERE template_key IS NOT NULL`
+      );
+    } catch (err: any) {
+      const msg = err?.message || '';
+      if (!(msg.includes('column') && msg.includes('does not exist'))) throw err;
+      if (isImcStatusColumnMissingError(err)) markImcStatusColumnMissing();
+      hasActiveCol = false;
+      console.log('[kakao-template-sync] imc_template_status 컬럼 없음 — 활성상태만 빼고 검수상태 동기화는 계속한다');
+    }
+  }
+  if (!hasActiveCol) {
     pgRows = await query(
       `SELECT id, template_key, template_code, status, reject_reason
          FROM kakao_templates

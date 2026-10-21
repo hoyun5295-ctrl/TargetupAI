@@ -23,6 +23,7 @@ import { resolve } from 'node:path';
 import { query } from '../config/database';
 import * as imc from './alimtalk-api';
 import { syncTemplateStatuses } from './kakao-template-sync';
+import { resetImcStatusColumnMemory } from './kakao-template-guard';
 
 const q = query as unknown as ReturnType<typeof vi.fn>;
 const list = imc.listAlimtalkTemplates as unknown as ReturnType<typeof vi.fn>;
@@ -36,6 +37,7 @@ const ROWS = [
 function wire(opts: { columnMissing?: boolean; items?: any[] } = {}) {
   q.mockReset();
   list.mockReset();
+  resetImcStatusColumnMemory(); // ★2026-10-21 S5 — 「컬럼 없음」 기억이 시험끼리 새지 않게
   q.mockImplementation(async (sql: string) => {
     const s = String(sql);
     if (/FROM kakao_templates/i.test(s)) {

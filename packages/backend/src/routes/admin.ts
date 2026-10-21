@@ -28,7 +28,8 @@ import { parseCodeList, resolveOutreachExampleCodes, promoteOutreachExamples, li
 import { distillIndustryFormula } from '../utils/industry-formula';
 // ★ 2026-06-25: 업로더별 고객 삭제 시 해당 회사 데이터 프로필 캐시 무효화(게이트 즉시 반영)
 import { clearCompanyDataProfileCache } from '../utils/company-data-profile';
-import { invalidateCompanySessions, invalidateUserSessions } from '../utils/session-manager';
+import { invalidateUserSessions } from '../utils/session-manager';
+import { terminateCompany } from '../utils/company-terminate';
 import { revokeTakeoverPasses, maskPhone, isMfaSchemaMissing } from '../utils/mfa';
 import { restrictAccount, isRestrictedStatus, RestrictionOutcome } from '../utils/account-action';
 import { DASHBOARD_CARD_POOL, validateCardIds, getRequiredFields, filterPoolByAvailableData, generateDynamicCards } from '../utils/dashboard-card-pool';
@@ -81,6 +82,7 @@ import { applyPlanRequestWithClient, PlanTermError, planTermManagedSql, planTerm
 // ★ 2026-06-11: 감사 로그 CT — 라인그룹 지정/해제 책임 추적 (에이치피오 예약취소 사고 후속)
 import { loadAgencyCallbackKinds } from '../utils/agency-send-intake';
 import { switchCompanyBillingType } from '../utils/billing-type-history';
+import { recordCallbackNumberCreated, recordCallbackNumberUpdated, recordCallbackNumberDefaultChanged, recordCallbackNumberDeleted, recordUserAccountDeleted, recordUnsubscribeDeleted } from '../utils/change-audit';
 import { recordAuditLog, isAuditLogViewer, isAiTrainingViewer, isGeoHitsViewer, isHelpQuestionViewer, isLineGroupAdmin, isSettlementOverviewViewer, isBestLayoutViewer, isPrecheckUsageViewer, isFeatureInterestViewer, isIdentityStatusViewer, isIntroLeadsViewer, isWatchLogViewer, hiddenAccessOwnerIds, diffFields } from '../utils/audit-log';
 import { loadWatchIps, loadWatchIpEvents } from '../utils/watch-alert'; // ★ 2026-10-07 감시 기록(ceo 전용)
 import { loadIntroLeads, parseIntroLeadsQuery } from '../utils/intro-leads'; // ★ 2026-10-07 소개 방문 · 시연 요청(ceo · suran)
@@ -381,6 +383,11 @@ router.delete('/users/:id/unsubscribes', authenticate, requireSuperAdmin, async 
     const { phones } = req.body || {};
 
     const deletedCount = await deleteUserUnsubscribes(id, phones);
+    // ★2026-10-21 실사 준비 S1(D-24) — 관리자 수신거부 일괄삭제 이력
+    await recordUnsubscribeDeleted({
+      actorUserId: (req as any).user?.userId || null, req, companyId: null, userId: id, count: deletedCount,
+      phones: Array.isArray(phones) ? phones : [], via: 'admin',
+    });
     res.json({ deletedCount, message: `${deletedCount}건 삭제되었습니다.` });
   } catch (error) {
     console.error('수신거부 삭제 실패:', error);
@@ -501,11 +508,16 @@ router.delete('/users/:id', authenticate, requireSuperAdmin, async (req: Request
   const { id } = req.params;
   
   try {
-    const result = await query('DELETE FROM users WHERE id = $1 RETURNING id, login_id', [id]);
+    const result = await query('DELETE FROM users WHERE id = $1 RETURNING id, login_id, company_id', [id]);
     
     if (result.rows.length === 0) {
       return res.status(404).json({ error: '사용자를 찾을 수 없습니다.' });
     }
+    // ★2026-10-21 실사 준비 S1(D-24) — 계정 삭제 이력(2.1 「등록 · 변경 · 삭제 이력」)
+    await recordUserAccountDeleted({
+      actorUserId: (req as any).user?.userId || null, req,
+      userId: result.rows[0].id, loginId: result.rows[0].login_id, companyId: result.rows[0].company_id, via: 'admin',
+    });
     
     res.json({ message: '삭제되었습니다.' });
   } catch (error) {
@@ -1653,10 +1665,16 @@ router.put('/companies/:id', authenticate, requireSuperAdmin, async (req: Reques
     try {
       await planClient.query('BEGIN');
       const beforePlan = await planClient.query(
-        `SELECT plan_id, ${planTermManagedSql('companies')} AS plan_term_managed FROM companies WHERE id = $1::uuid FOR UPDATE`, [id]);
+        `SELECT plan_id, status, ${planTermManagedSql('companies')} AS plan_term_managed FROM companies WHERE id = $1::uuid FOR UPDATE`, [id]);
       if (beforePlan.rows.length === 0) {
         await planClient.query('ROLLBACK');
         return res.status(404).json({ error: '회사를 찾을 수 없습니다.' });
+      }
+      // ★2026-10-21 실사 준비 S3(D-19) — 이 칸으로 해지하면 상태만 바뀐다(계정 잠금 · 세션 · 사유 · 고지 · 기록 없음).
+      //   해지는 해지 버튼(utils/company-terminate.ts) 한 길. 이미 해지인 회사의 저장(같은 값)은 그대로 받는다.
+      if (status === 'terminated' && beforePlan.rows[0].status !== 'terminated') {
+        await planClient.query('ROLLBACK');
+        return res.status(400).json({ error: '해지는 회사 목록의 해지 버튼으로 처리합니다(사유 선택 · 계정 잠금 · 담당자 안내가 함께 됩니다).', code: 'TERMINATE_VIA_BUTTON' });
       }
       // ★ 2026-07-28 잠근 행에서 읽은 직전 플랜으로만 "실제 변경"을 판정한다(이력 기록과 같은 기준).
       //   planChanged=false면 구독 상태·체험 만료일을 건드리지 않는다.
@@ -2150,60 +2168,28 @@ router.delete('/companies/:id/agency-send-emails/:senderId', authenticate, requi
   }
 });
 
-// 회사 비활성화 (soft delete)
+// 회사 해지 (soft delete)
+// ★2026-10-21 실사 준비 S3(D-19) — 해지는 CT 한 길(utils/company-terminate.ts): 사유 필수 · 상태 + 계정 잠금 한 트랜잭션 ·
+//   세션 끊기 · 고객사 관리자 사유 안내 문자 · 기록(사유 · 잠근 계정 · 끊은 세션 · 고지 결과)
 router.delete('/companies/:id', authenticate, requireSuperAdmin, async (req: Request, res: Response) => {
   const { id } = req.params;
-  
+
   try {
-    // 활성 캠페인이 있는지 확인
-    const activeCampaigns = await query(
-      "SELECT COUNT(*) FROM campaigns WHERE company_id = $1 AND status IN ('scheduled', 'sending')",
-      [id]
-    );
-    if (parseInt(activeCampaigns.rows[0].count) > 0) {
-      return res.status(400).json({ error: '진행 중이거나 예약된 캠페인이 있어 해지할 수 없습니다.' });
+    const outcome = await terminateCompany({
+      companyId: id, reason: req.body?.reason, note: req.body?.note,
+      actorUserId: (req as any).user?.userId || null, req,
+    });
+    if (!outcome.ok) {
+      return res.status(outcome.status).json({ error: outcome.error, ...(outcome.code ? { code: outcome.code } : {}) });
     }
-    
-    const result = await query(`
-      UPDATE companies 
-      SET status = 'terminated', updated_at = NOW()
-      WHERE id = $1
-      RETURNING id, company_name
-    `, [id]);
-    
-    if (result.rows.length === 0) {
-      return res.status(404).json({ error: '회사를 찾을 수 없습니다.' });
-    }
-    
-    // 해당 회사 사용자도 비활성화
-    const lockedUsers = await query(
-      "UPDATE users SET status = 'dormant', updated_at = NOW() WHERE company_id = $1",
-      [id]
-    );
-
-    // ★ 2026-08-18: 상태만 바꾸면 **이미 접속해 있는 사람은 그대로 남는다**(로그인 게이트는 새 로그인만 막는다).
-    //   해지 시점의 접속 중 세션을 끊는다. 컨트롤타워 = utils/session-manager.ts
-    const killedSessions = await invalidateCompanySessions(id);
-
-    // ★ 2026-08-18: 회수 이력 — 전송자격인증 3.3(권한 변경·말소의 일시·사유·처리자)의 증빙이 여기서 나온다.
-    //   companies에 해지 시각 컬럼이 없어(SCHEMA.md) 이 감사 로그가 유일한 시점 근거다.
-    await query(
-      `INSERT INTO audit_logs (id, user_id, action, target_type, target_id, details, ip_address, user_agent, created_at)
-       VALUES (gen_random_uuid(), $1, 'company_terminated', 'company', $2, $3, $4, $5, NOW())`,
-      [
-        (req as any).user?.userId || null,
-        id,
-        JSON.stringify({
-          companyName: result.rows[0].company_name,
-          lockedUsers: (lockedUsers as any).rowCount ?? 0,
-          killedSessions,
-        }),
-        req.ip,
-        req.headers['user-agent'] || '',
-      ]
-    );
-
-    res.json({ message: `${result.rows[0].company_name}이(가) 해지되었습니다.` });
+    const noticeLine = outcome.notified > 0
+      ? ` 고객사 관리자 ${outcome.notified}명에게 사유 안내 문자를 보냈습니다.`
+      : ' 안내 문자를 받을 관리자 번호가 없거나 발송에 실패했습니다(해지는 그대로 · 기록에 남았습니다).';
+    res.json({
+      message: `${outcome.companyName}이(가) 해지되었습니다.${noticeLine}`,
+      lockedUsers: outcome.lockedUsers, killedSessions: outcome.killedSessions,
+      notified: outcome.notified, notifyFailed: outcome.notifyFailed,
+    });
   } catch (error) {
     console.error('회사 해지 실패:', error);
     res.status(500).json({ error: '회사 해지 실패' });
@@ -2606,6 +2592,11 @@ router.post('/callback-numbers', authenticate, requireSuperAdmin, async (req: Re
     } finally {
       client.release();
     }
+    // ★2026-10-21 실사 준비 S1(D-03) — 발신번호 등록 이력
+    await recordCallbackNumberCreated({
+      actorUserId: (req as any).user?.userId || null, req, companyId, callbackId: result.rows[0].id,
+      phone: result.rows[0].phone, label: result.rows[0].label, isDefault: result.rows[0].is_default, via: 'admin',
+    });
 
     res.json({
       message: '발신번호가 등록되었습니다.',
@@ -2672,19 +2663,29 @@ router.put('/callback-numbers/:id', authenticate, requireSuperAdmin, async (req:
       }
     }
 
+    // ★2026-10-21 실사 준비 S1(D-03) — 수정 이력의 변경 전 값은 같은 문장의 행 잠금 아래에서(동시 수정에도 실제 직전 값 · Codex 1R)
     const result = await query(`
-      UPDATE callback_numbers 
-      SET phone = COALESCE($1, phone),
-          label = COALESCE($2, label)
-      WHERE id = $3
-      RETURNING id, phone, label, is_default
+      WITH old AS (SELECT id, company_id, phone, label FROM callback_numbers WHERE id = $3 FOR UPDATE)
+      UPDATE callback_numbers c
+      SET phone = COALESCE($1, c.phone),
+          label = COALESCE($2, c.label)
+      FROM old
+      WHERE c.id = old.id
+      RETURNING c.id, c.phone, c.label, c.is_default, old.company_id AS before_company_id, old.phone AS before_phone, old.label AS before_label
     `, [phoneToSave, label, id]);
-    
+
     if (result.rows.length === 0) {
       return res.status(404).json({ error: '발신번호를 찾을 수 없습니다.' });
     }
-    
-    res.json({ message: '수정되었습니다.', callbackNumber: result.rows[0] });
+    const { before_company_id: beforeCompanyId, before_phone: beforePhone, before_label: beforeLabel, ...callbackNumber } = result.rows[0];
+    await recordCallbackNumberUpdated({
+      actorUserId: (req as any).user?.userId || null, req, companyId: beforeCompanyId ?? null, callbackId: callbackNumber.id,
+      phone: callbackNumber.phone, via: 'admin',
+      before: { phone: beforePhone ?? null, label: beforeLabel ?? null },
+      after: { phone: callbackNumber.phone, label: callbackNumber.label },
+    });
+
+    res.json({ message: '수정되었습니다.', callbackNumber });
   } catch (error: any) {
     if (error?.code === '23505') {
       return res.status(409).json({
@@ -2702,11 +2703,16 @@ router.delete('/callback-numbers/:id', authenticate, requireSuperAdmin, async (r
   const { id } = req.params;
   
   try {
-    const result = await query('DELETE FROM callback_numbers WHERE id = $1 RETURNING phone', [id]);
+    const result = await query('DELETE FROM callback_numbers WHERE id = $1 RETURNING phone, company_id', [id]);
     
     if (result.rows.length === 0) {
       return res.status(404).json({ error: '발신번호를 찾을 수 없습니다.' });
     }
+    // ★2026-10-21 실사 준비 S1(D-03) — 발신번호 삭제 이력
+    await recordCallbackNumberDeleted({
+      actorUserId: (req as any).user?.userId || null, req, companyId: result.rows[0].company_id, callbackId: id,
+      phone: result.rows[0].phone, via: 'admin',
+    });
     
     res.json({ message: '삭제되었습니다.' });
   } catch (error) {
@@ -2720,7 +2726,7 @@ router.put('/callback-numbers/:id/default', authenticate, requireSuperAdmin, asy
   const { id } = req.params;
   
   try {
-    const check = await query('SELECT company_id FROM callback_numbers WHERE id = $1', [id]);
+    const check = await query('SELECT company_id, phone FROM callback_numbers WHERE id = $1', [id]);
     if (check.rows.length === 0) {
       return res.status(404).json({ error: '발신번호를 찾을 수 없습니다.' });
     }
@@ -2729,6 +2735,10 @@ router.put('/callback-numbers/:id/default', authenticate, requireSuperAdmin, asy
     
     await query('UPDATE callback_numbers SET is_default = false WHERE company_id = $1', [companyId]);
     await query('UPDATE callback_numbers SET is_default = true WHERE id = $1', [id]);
+    // ★2026-10-21 실사 준비 S1(D-03) — 대표번호 변경 이력
+    await recordCallbackNumberDefaultChanged({
+      actorUserId: (req as any).user?.userId || null, req, companyId, callbackId: id, phone: check.rows[0].phone, via: 'admin',
+    });
     
     res.json({ message: '대표번호로 설정되었습니다.' });
   } catch (error) {
@@ -4256,6 +4266,7 @@ router.put('/deposit-requests/:id/approve', authenticate, requireSuperAdmin, asy
     adminId: adminId || null,
     adminNote: adminNote || null,
     resolveHold: req.body?.resolveHold === true,
+    confirmBasis: req.body?.confirmBasis,
     via: 'admin',
   });
   if (!outcome.ok) {
@@ -4284,6 +4295,7 @@ router.put('/deposit-requests/:id/approve', authenticate, requireSuperAdmin, asy
           explanationNote: depositReq.explanation_note || null,
           resolution: 'approved',
           adminNote: adminNote || null,
+          confirmBasis: outcome.confirmBasis,
         },
         req,
       });

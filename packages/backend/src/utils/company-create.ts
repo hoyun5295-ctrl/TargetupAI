@@ -24,6 +24,8 @@ import { NEW_COMPANY_DEFAULT_PRICES } from './unit-price';
 export interface IssueAuditContext {
   actorUserId?: string | null;
   channel?: AccountIssueChannel;
+  /** ★2026-10-21 S2 — 서버 관리 스크립트 이름(channel = 'script') */
+  script?: string;
   req?: any;
 }
 
@@ -42,6 +44,8 @@ export interface CreateCompanyParams {
   createdBy?: string | null;
   /** 감사 기록의 접속 IP · 브라우저 정보용(Express req). 생성 동작에는 쓰이지 않는다 */
   auditReq?: any;
+  /** ★2026-10-21 S2 — 서버 관리 스크립트로 만들면 그 이름(등록 기록의 경로 = script) */
+  auditScript?: string;
 }
 
 export async function createCompanyCore(p: CreateCompanyParams): Promise<any> {
@@ -107,6 +111,7 @@ export async function createCompanyCore(p: CreateCompanyParams): Promise<any> {
     companyCode: p.companyCode,
     companyName: p.companyName,
     usageType: p.usageType ?? 'web',
+    script: p.auditScript,
     req: p.auditReq,
   });
 
@@ -160,6 +165,7 @@ export async function createCompanyAdminUser(
     userType: r.rows[0].user_type,
     companyId,
     channel: audit?.channel ?? 'bulk_gateway',
+    script: audit?.script,
     req: audit?.req,
   });
   return r.rows[0];

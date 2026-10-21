@@ -92,13 +92,15 @@ async function main(): Promise<void> {
       companyName: NOPLAN.companyName,
       planId: freePlanId,
       usageType: 'web',
+      auditScript: 'create-noplan-account',
     });
     companyId = String(company.id);
     console.log(`회사를 만들었습니다: ${NOPLAN.companyName} · 요금제 FREE(미가입) · ${companyId}`);
   }
 
   // ④ 계정 — 첫 로그인 비밀번호 변경 강제는 끈다
-  const user = await createCompanyAdminUser(companyId, NOPLAN.loginId, pw1, NOPLAN.userName, { channel: 'super_admin' });
+  // ★2026-10-21 실사 준비 S2(D-01) — 서버 관리 스크립트 발급으로 남긴다
+  const user = await createCompanyAdminUser(companyId, NOPLAN.loginId, pw1, NOPLAN.userName, { channel: 'script', script: 'create-noplan-account' });
   await query(`UPDATE users SET must_change_password = false WHERE id = $1`, [user.id]);
   console.log(`계정을 만들었습니다: 로그인 ID ${NOPLAN.loginId} · 관리자 · 방금 입력한 비밀번호로 로그인합니다.`);
 }

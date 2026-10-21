@@ -210,7 +210,7 @@ async function main(): Promise<void> {
       console.log(`이미 있는 시연 회사를 씁니다: ${companyId}`);
     }
   } else {
-    const company = await createCompanyCore({ companyCode: COMPANY_CODE, companyName: COMPANY_NAME, dataInputMethod: 'sync', usageType: 'web' });
+    const company = await createCompanyCore({ companyCode: COMPANY_CODE, companyName: COMPANY_NAME, dataInputMethod: 'sync', usageType: 'web', auditScript: 'setup-demo-company' });
     companyId = String(company.id);
     apiKey = String(company.api_key);
     // 시연 표식을 가장 먼저(이 사이에 끊겨도 위 "빈 회사 이어받기"가 받는다).
@@ -232,7 +232,8 @@ async function main(): Promise<void> {
   if (existingUser.rows.length) {
     userId = String(existingUser.rows[0].user_id);
   } else {
-    const user = await createCompanyAdminUser(companyId, LOGIN_ID, password, '시연 관리자', { channel: 'super_admin' });
+    // ★2026-10-21 실사 준비 S2(D-01) — 화면 발급이 아니라 서버 관리 스크립트 발급으로 남긴다(발급자 칸 대신 스크립트 · OS 계정)
+    const user = await createCompanyAdminUser(companyId, LOGIN_ID, password, '시연 관리자', { channel: 'script', script: 'setup-demo-company' });
     userId = String(user.id);
     console.log(`관리자 계정을 만들었습니다: ${LOGIN_ID}`);
   }

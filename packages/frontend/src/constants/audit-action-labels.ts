@@ -94,6 +94,17 @@ export const AUDIT_ACTION_LABEL: Record<string, string> = {
   // ★ 2026-10-02 계정 발급 · 고객사 등록 기록(전송자격인증 4.1 ②) — utils/account-issue.ts
   user_account_created: '고객 계정 발급',
   company_created: '고객사 등록',
+  // ★ 2026-10-21 등록 · 변경 · 삭제 이력(전송자격인증 2.1 · 4.2 · 실사 준비 S1 · S2) — 백엔드 utils/change-audit.ts
+  user_account_deleted: '고객 계정 삭제',
+  company_purged: '시험 회사 영구 삭제',
+  company_termination_notice: '해지 안내 문자',
+  callback_number_created: '발신번호 등록',
+  callback_number_updated: '발신번호 수정',
+  callback_number_default_changed: '기본 발신번호 변경',
+  callback_number_deleted: '발신번호 삭제',
+  callback_assignment_changed: '발신번호 배정 변경',
+  unsubscribe_deleted: '수신거부 삭제',
+  address_book_deleted: '주소록 삭제',
   // ★ 2026-08-27 직원 계정 등급(전송자격인증 3.2·3.3)
   admin_role_changed: '직원 등급 변경',
   admin_account_created: '직원 계정 생성',
@@ -158,6 +169,13 @@ export const AUDIT_ACTION_COLOR: Record<string, string> = {
   autosend_link_skip: 'bg-amber-100 text-amber-700',
   autosend_link_pause: 'bg-red-100 text-red-700',
   sync_key_regenerate: 'bg-blue-100 text-blue-700',
+  user_account_deleted: 'bg-orange-100 text-orange-700',
+  company_purged: 'bg-red-100 text-red-700',
+  callback_number_deleted: 'bg-orange-100 text-orange-700',
+  callback_assignment_changed: 'bg-blue-100 text-blue-700',
+  callback_number_default_changed: 'bg-blue-100 text-blue-700',
+  unsubscribe_deleted: 'bg-orange-100 text-orange-700',
+  address_book_deleted: 'bg-orange-100 text-orange-700',
 };
 
 const USER_TYPE_LABEL: Record<string, string> = {
@@ -175,7 +193,15 @@ const ISSUE_CHANNEL_LABEL: Record<string, string> = {
   bulk_gateway: '일괄 발급(발송 전용 고객사)',
   bulk_pay: '일괄 발급(결제 매핑)',
   system: '연동 전용 계정 자동 생성',
+  script: '서버 관리 스크립트',
 };
+/** ★ 2026-10-21 변경 이력의 경로 → 한글. 원본은 백엔드 `utils/change-audit.ts`의 `ChangeVia` */
+const CHANGE_VIA_LABEL: Record<string, string> = {
+  admin: '운영자 화면', company: '고객사 관리 화면', registration: '발신번호 신청 승인', sync: '동기화 자동 처리',
+};
+const viaName = (v: any) => (v ? CHANGE_VIA_LABEL[String(v)] || String(v) : '');
+/** 서버 스크립트로 한 일이면 「스크립트 이름 · 실행 계정」 */
+const scriptBy = (d: any) => (d.script ? `${d.script} (서버 계정 ${d.osUser || '-'})` : '');
 const ISSUED_USER_TYPE_LABEL: Record<string, string> = {
   admin: '고객사 관리자', user: '고객사 사용자', system: '연동 전용 계정',
 };
@@ -205,6 +231,10 @@ const REASON_LABEL: Record<string, string> = {
   invalid_totp: 'OTP 번호 불일치',
   machine_origin_blocked: '기계 접속 차단',
   foreign_access_blocked: '국외 접속 차단',
+  // ★ 2026-10-21 해지 · 계정 조치 사유(원본 = 백엔드 utils/account-action.ts 문구표 · company-terminate.ts TERMINATE_REASONS)
+  contract_end: '계약 종료',
+  spam_report: '불법스팸 신고',
+  admin_action: '관리자 조치',
 };
 
 /**
@@ -360,11 +390,84 @@ export function formatAuditDetail(action: string, details: any): string {
         d.userType && (ISSUED_USER_TYPE_LABEL[d.userType] || USER_TYPE_LABEL[d.userType] || d.userType),
         d.companyName,
         d.channel && (ISSUE_CHANNEL_LABEL[d.channel] || d.channel),
+        scriptBy(d),
       ].filter(Boolean).join(' · ');
     case 'company_created':
       return [
         `${d.companyName || ''}(${d.companyCode || ''}) 등록`,
         d.usageType && (USAGE_TYPE_LABEL[d.usageType] || d.usageType),
+        d.channel && (ISSUE_CHANNEL_LABEL[d.channel] || d.channel),
+        scriptBy(d),
+      ].filter(Boolean).join(' · ');
+    // ★ 2026-10-21 실사 준비 S3 — 해지 사유 · 잠근 계정 · 끊은 접속 · 안내 문자(옛 기록은 사유 · 고지 칸이 없다)
+    case 'company_terminated':
+      return [
+        `${d.companyName || ''} 해지`,
+        d.reason && `사유: ${REASON_LABEL[d.reason] || d.reason}`,
+        d.note && `메모: ${d.note}`,
+        typeof d.lockedUsers === 'number' && `잠근 계정 ${d.lockedUsers}개`,
+        typeof d.killedSessions === 'number' && `끊은 접속 ${d.killedSessions}건`,
+        typeof d.notified === 'number' && (d.notified > 0 ? `안내 문자 ${d.notified}명` : '안내 문자 못 보냄'),
+      ].filter(Boolean).join(' · ');
+    case 'company_termination_notice':
+      return [
+        d.companyName,
+        d.reason && `사유: ${REASON_LABEL[d.reason] || d.reason}`,
+        Number(d.notified) > 0 ? `${d.notified}명에게 보냄` : '보내지 못함',
+        Number(d.notifyFailed) > 0 && `실패 ${d.notifyFailed}명`,
+        Array.isArray(d.notifyErrors) && d.notifyErrors.includes('no_phone') && '관리자 번호 없음',
+      ].filter(Boolean).join(' · ');
+    // ★ 2026-10-21 등록 · 변경 · 삭제 이력(실사 준비 S1 · S2) — 무엇을 · 어떻게 · 어느 경로로
+    case 'user_account_deleted':
+      return [`${d.loginId || ''} 계정 삭제`, viaName(d.via)].filter(Boolean).join(' · ');
+    case 'company_purged':
+      return [
+        `${d.companyName || ''}(${d.companyCode || ''}) 영구 삭제`,
+        typeof d.totalRows === 'number' && `${d.totalRows.toLocaleString()}행`,
+        d.backupFile && `백업 ${d.backupFile}`,
+        scriptBy(d),
+      ].filter(Boolean).join(' · ');
+    case 'callback_number_created':
+      return [
+        `${d.phone || ''} 등록`, d.label, d.isDefault && '기본 번호', viaName(d.via),
+      ].filter(Boolean).join(' · ');
+    case 'callback_number_updated': {
+      const b = d.before || {}, a = d.after || {};
+      return [
+        d.phone,
+        b.phone !== undefined && b.phone !== a.phone && `번호 ${b.phone || '-'} → ${a.phone || '-'}`,
+        b.label !== undefined && b.label !== a.label && `이름 ${b.label || '-'} → ${a.label || '-'}`,
+        viaName(d.via),
+      ].filter(Boolean).join(' · ');
+    }
+    case 'callback_number_default_changed':
+      return [`${d.phone || ''} 기본 번호로 지정`, viaName(d.via)].filter(Boolean).join(' · ');
+    case 'callback_number_deleted':
+      return [`${d.phone || ''} 삭제`, viaName(d.via)].filter(Boolean).join(' · ');
+    case 'callback_assignment_changed': {
+      const scopeName = (v: any) => (v === 'all' ? '전체 사용' : v === 'assigned' ? '사용자 지정' : String(v ?? '-'));
+      const what = d.kind === 'scope' ? `사용 범위 ${scopeName(d.before)} → ${scopeName(d.after)}`
+        : d.kind === 'replace' ? `배정 사용자 ${Array.isArray(d.before) ? d.before.length : 0}명 → ${Array.isArray(d.after) ? d.after.length : 0}명`
+        : d.kind === 'unassign' ? '사용자 1명 배정 해제' : '';
+      return [d.phone, what, viaName(d.via)].filter(Boolean).join(' · ');
+    }
+    case 'unsubscribe_deleted':
+      return [
+        `${Number(d.count || 0).toLocaleString()}건 삭제`,
+        Array.isArray(d.phonesMasked) && d.phonesMasked.length > 0 && d.phonesMasked.join(', ') + (d.count > d.phonesMasked.length ? ' 외' : ''),
+        viaName(d.via),
+      ].filter(Boolean).join(' · ');
+    case 'address_book_deleted':
+      return [`주소록 「${d.groupName || ''}」`, `${Number(d.count || 0).toLocaleString()}건 삭제`].join(' · ');
+    // ★ 2026-10-21 실사 준비 S4 — 명의 확인 보류 건의 처리 결과 · 소명 · 확인 근거
+    case 'deposit_hold_resolved':
+      return [
+        d.depositorName && `입금자 ${d.depositorName}`,
+        d.resolution === 'approved' ? '승인' : d.resolution === 'rejected' ? '반려' : d.resolution,
+        d.heldReason && `보류 사유: ${d.heldReason}`,
+        d.explanationNote ? `소명: ${d.explanationNote}` : '소명 없음',
+        d.confirmBasis && `확인 근거: ${d.confirmBasis}`,
+        d.adminNote && `메모: ${d.adminNote}`,
       ].filter(Boolean).join(' · ');
     // ★ 2026-08-30 승인 링크 보안 보강
     case 'charge_link_approved':

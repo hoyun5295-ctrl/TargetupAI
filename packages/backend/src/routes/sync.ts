@@ -30,6 +30,7 @@ import { isAgentVersionGte, ACK_MIN_AGENT_VERSION, applyCommandAcks, markCommand
 import { updateCustomerPurchaseAggregates } from '../utils/customer-purchase-aggregates';
 // ★ 2026-07-03: 필드정의 변경 시 활성 필드 캐시 무효화 (고객DB 현황 성능 캐시)
 import { clearEnabledFieldsCache } from '../utils/enabled-fields';
+import { recordUnsubscribeDeleted } from '../utils/change-audit';
 // ★ 2026-08-03: 원본 행 키 기반 구매 멱등 적재 CT — 재싱크·재전송이 중복 행을 만들지 않게 한다.
 import {
   normalizeSourceRowKey,
@@ -373,6 +374,8 @@ async function reconcileSyncUnsubscribes(companyId: string, companyName: string 
     );
     if (reEnable.rowCount && reEnable.rowCount > 0) {
       console.log(`[Sync] 수신거부 자동해제(동의 전환): ${reEnable.rowCount}건 (company: ${companyName})`);
+      // ★2026-10-21 실사 준비 S1(D-24) — 동기화가 지운 수신거부도 감사 기록에(건수 · 경로만 · 0건이면 안 남김)
+      await recordUnsubscribeDeleted({ actorUserId: null, companyId, count: reEnable.rowCount, via: 'sync' });
     }
   } catch (unsubError) {
     console.error('[Sync] 수신거부 동기화 실패:', unsubError);

@@ -129,8 +129,10 @@ export async function getCompanyChannelCapabilities(companyId: string): Promise<
   let webPush = false;
   try {
     const pushResult = await query(
+      // ★2026-10-21 S5 — 이 표에는 is_active 가 없다(SCHEMA.md · 실제 열 = status · web-push.ts 와 같은 조건).
+      //   옛 조건은 매번 「컬럼 없음」으로 실패해 늘 false 였다 · 10-21 실측 활성 구독 0건 = 판정 결과 그대로.
       `SELECT 1 FROM cdp_push_subscriptions
-        WHERE company_id = $1::uuid AND is_active = true
+        WHERE company_id = $1::uuid AND status = 'active'
         LIMIT 1`,
       [companyId]
     );

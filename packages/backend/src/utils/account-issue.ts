@@ -18,6 +18,7 @@
  * 누락 방지 — `__tests__/account-issue.test.ts`가 `INSERT INTO users` · `INSERT INTO companies`가 있는
  *   파일에 이 CT 호출이 함께 있는지 소스로 대조한다. 발급 경로가 늘어도 기록을 빠뜨릴 수 없다.
  */
+import os from 'os';
 import { query } from '../config/database';
 import { recordAuditLog } from './audit-log';
 
@@ -31,7 +32,8 @@ export type AccountIssueChannel =
   | 'manage_page'   // 관리 화면 경로(슈퍼관리자 호출분만 — 고객사 관리자는 발급 불가)
   | 'bulk_gateway'  // 게이트웨이 청구 단위 일괄 생성
   | 'bulk_pay'      // 결제 매핑 일괄 생성
-  | 'system';       // 연동 전용 시스템 계정(사람이 로그인하지 않는다)
+  | 'system'        // 연동 전용 시스템 계정(사람이 로그인하지 않는다)
+  | 'script';       // ★2026-10-21 서버 관리 스크립트(시연 · 시험 회사 · 실사 준비 S2) — 화면 행위자가 없다
 
 export interface AccountIssuedInput {
   actorUserId?: string | null;
@@ -40,7 +42,14 @@ export interface AccountIssuedInput {
   userType: string;
   companyId?: string | null;
   channel: AccountIssueChannel;
+  /** ★2026-10-21 S2 — 서버 관리 스크립트 이름(channel = 'script' 일 때) */
+  script?: string;
   req?: any;
+}
+
+/** ★2026-10-21 S2 — 스크립트를 실행한 서버 OS 계정(행위자 칸이 비는 대신 남긴다) */
+export function scriptRunner(): string | null {
+  try { return os.userInfo().username || null; } catch { return process.env.USER || process.env.USERNAME || null; }
 }
 
 /** 계정 발급 기록 — 실패는 삼킨다 */
@@ -60,6 +69,7 @@ export async function recordAccountIssued(input: AccountIssuedInput): Promise<vo
         companyId: input.companyId || null,
         companyName,
         channel: input.channel,
+        ...(input.script ? { script: input.script, osUser: scriptRunner() } : {}),
       },
       req: input.req,
     });
@@ -74,6 +84,8 @@ export interface CompanyRegisteredInput {
   companyCode: string;
   companyName: string;
   usageType?: string | null;
+  /** ★2026-10-21 S2 — 서버 관리 스크립트로 만든 회사면 그 이름 */
+  script?: string;
   req?: any;
 }
 
@@ -87,6 +99,7 @@ export async function recordCompanyRegistered(input: CompanyRegisteredInput): Pr
         companyCode: input.companyCode,
         companyName: input.companyName,
         usageType: input.usageType || null,
+        ...(input.script ? { channel: 'script', script: input.script, osUser: scriptRunner() } : {}),
       },
       req: input.req,
     });

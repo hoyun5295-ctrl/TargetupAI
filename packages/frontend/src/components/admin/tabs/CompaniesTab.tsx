@@ -3,7 +3,7 @@
  * 옮긴 방법 = 스크립트(원문 그대로 · 글자 대조). 상태(use*)는 본체에 남고 props 로 받는다 — 탭을 옮겨 다녀도 값이 그대로다(동작 변경 0).
  * ★ 2026-10-09 다듬기(Harold 목업 v2 승인) — 요금 구분 · 사용 구분 거르기와 숫자 카드 4를 더했다. 수정 · 해지 · 검색 · 상태 동작은 그대로.
  */
-import type { Dispatch, SetStateAction } from 'react';
+import { useState, type Dispatch, type SetStateAction } from 'react';
 import type { JSX } from 'react/jsx-runtime';
 import { formatDate } from '../../../utils/formatDate';
 import TablePagination from '../../common/TablePagination';
@@ -13,8 +13,19 @@ import { companyPlanState, trialDaysLeft, type CompanyPlanState } from '../../..
 import {
   AdminPanel, AdminFilterBar, AdminFilterLabel, AdminSegmented, AdminStatGrid, AdminStat, AdminPill, AdminTableEmpty, AdminSource,
   ADMIN_TABLE, AdminLongText, ADMIN_THEAD, ADMIN_TH, ADMIN_TH_FIRST, ADMIN_TBODY, ADMIN_TR, ADMIN_TD, ADMIN_TD_FIRST, ADMIN_NUM,
-  ADMIN_BTN_PRIMARY, ADMIN_BTN_SM, ADMIN_BTN_SM_DANGER, ADMIN_INPUT,
+  ADMIN_BTN_PRIMARY, ADMIN_BTN_SM, ADMIN_BTN_SM_DANGER, ADMIN_INPUT, ADMIN_BTN, ADMIN_BTN_DANGER, AdminDetailModal,
 } from '../ui/admin-ui';
+
+/**
+ * ★ 2026-10-21 실사 준비 S3 — 해지 사유. ⛔ 원본은 백엔드 `utils/company-terminate.ts` `TERMINATE_REASONS`
+ *   (고객에게 가는 안내 문구는 `utils/account-action.ts` 문구표). 늘리면 두 곳을 함께 고친다.
+ */
+const TERMINATE_REASON_OPTIONS = [
+  { key: 'contract_end', label: '계약 종료', hint: '계약 기간이 끝났거나 고객사가 해지를 요청했습니다' },
+  { key: 'spam_report', label: '불법스팸 신고', hint: '불법스팸 신고를 확인해 이용을 끊습니다' },
+  { key: 'admin_action', label: '관리자 조치', hint: '그 밖의 운영 판단입니다(메모에 이유를 적어 두세요)' },
+] as const;
+type TerminateReason = typeof TERMINATE_REASON_OPTIONS[number]['key'];
 
 type PlanFilter = 'all' | CompanyPlanState;
 type UsageFilter = 'all' | 'web' | 'agent' | 'both';
@@ -55,35 +66,42 @@ export interface CompaniesTabProps {
 }
 
 export default function CompaniesTab(props: CompaniesTabProps) {
-  const { closeModal, companies, companyPage, companyPlanFilter, companySearch, companyStatusFilter, companyUsageFilter, getStatusBadge, industryOptions, loadAgentIds, loadData, loadUsers, setCompanyPage, setCompanyPlanFilter, setCompanySearch, setCompanyStatusFilter, setCompanyUsageFilter, setDashboardCardCount, setDashboardCardIds, setDashboardCardPool, setEditCompany, setEditCompanyTab, setFieldDataCheck, setIndustryOptions, setLinePolicy, setNewAgentMemo, setNewAgentSendId, setShowCompanyModal, setShowEditCompanyModal, setStandardFields, showAlert, showConfirm } = props;
+  const { companies, companyPage, companyPlanFilter, companySearch, companyStatusFilter, companyUsageFilter, getStatusBadge, industryOptions, loadAgentIds, loadData, loadUsers, setCompanyPage, setCompanyPlanFilter, setCompanySearch, setCompanyStatusFilter, setCompanyUsageFilter, setDashboardCardCount, setDashboardCardIds, setDashboardCardPool, setEditCompany, setEditCompanyTab, setFieldDataCheck, setIndustryOptions, setLinePolicy, setNewAgentMemo, setNewAgentSendId, setShowCompanyModal, setShowEditCompanyModal, setStandardFields, showAlert } = props;
   const companyPerPage = 10;
 
+  // ★ 2026-10-21 실사 준비 S3 — 해지는 사유를 고르는 창 한 단계(되돌리기 어려운 일 · 고객에게 안내 문자가 나간다)
+  const [terminateTarget, setTerminateTarget] = useState<Company | null>(null);
+  const [terminateReason, setTerminateReason] = useState<TerminateReason | ''>('');
+  const [terminateNote, setTerminateNote] = useState('');
+  const [terminating, setTerminating] = useState(false);
+
   const handleDeactivateCompany = (company: Company) => {
-    showConfirm(
-      '고객사 해지',
-      `${company.company_name}을(를) 해지하시겠습니까?\n해당 회사의 모든 사용자도 비활성화됩니다.`,
-      async () => {
-        closeModal();
-        try {
-          const token = localStorage.getItem('token');
-          const res = await fetch(`/api/admin/companies/${company.id}`, {
-            method: 'DELETE',
-            headers: { 'Authorization': `Bearer ${token}` }
-          });
-          
-          if (!res.ok) {
-            const data = await res.json();
-            throw new Error(data.error || '해지 실패');
-          }
-          
-          loadData();
-          loadUsers();
-          showAlert('성공', '고객사가 해지되었습니다.', 'success');
-        } catch (error: any) {
-          showAlert('오류', error.message || '해지 실패', 'error');
-        }
-      }
-    );
+    setTerminateReason('');
+    setTerminateNote('');
+    setTerminateTarget(company);
+  };
+
+  const submitTerminate = async () => {
+    if (!terminateTarget || !terminateReason || terminating) return;
+    setTerminating(true);
+    try {
+      const token = localStorage.getItem('token');
+      const res = await fetch(`/api/admin/companies/${terminateTarget.id}`, {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+        body: JSON.stringify({ reason: terminateReason, note: terminateNote.trim() || null }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || '해지 실패');
+      setTerminateTarget(null);
+      loadData();
+      loadUsers();
+      showAlert('해지 완료', data.message || '고객사가 해지되었습니다.', Number(data.notified) > 0 ? 'success' : 'warning');
+    } catch (error: any) {
+      showAlert('오류', error.message || '해지 실패', 'error');
+    } finally {
+      setTerminating(false);
+    }
   };
 
   const handleEditCompany = async (company: Company) => {
@@ -389,6 +407,40 @@ export default function CompaniesTab(props: CompaniesTabProps) {
         accent="emerald"
       />
       <AdminSource>화면을 연 시점에 불러온 목록 기준</AdminSource>
+      {terminateTarget && (
+        <AdminDetailModal
+          title={`고객사 해지 · ${terminateTarget.company_name}`}
+          onClose={() => { if (!terminating) setTerminateTarget(null); }}
+          footer={
+            <div className="flex justify-end gap-2">
+              <button type="button" className={ADMIN_BTN} disabled={terminating} onClick={() => setTerminateTarget(null)}>취소</button>
+              <button type="button" className={ADMIN_BTN_DANGER} disabled={!terminateReason || terminating} onClick={submitTerminate}>
+                {terminating ? '해지하는 중…' : '해지하기'}
+              </button>
+            </div>
+          }
+        >
+          <p className="text-[13px] text-gray-700 leading-relaxed mb-3">
+            해지하면 소속 계정이 모두 잠기고 접속 중인 사람도 끊깁니다. 고객사 관리자에게는 고른 사유가 담긴 안내 문자가 나갑니다.
+          </p>
+          <div role="radiogroup" aria-label="해지 사유" className="space-y-2 mb-3">
+            {TERMINATE_REASON_OPTIONS.map((o) => (
+              <label key={o.key}
+                className={`flex items-start gap-2.5 rounded-lg border px-3 py-2.5 cursor-pointer ${terminateReason === o.key ? 'border-rose-300 bg-rose-50' : 'border-gray-200 hover:bg-gray-50'}`}>
+                <input type="radio" name="terminate-reason" value={o.key} checked={terminateReason === o.key}
+                  onChange={() => setTerminateReason(o.key)} className="mt-0.5 accent-rose-600" />
+                <span className="min-w-0">
+                  <span className="block text-[13px] font-semibold text-gray-800">{o.label}</span>
+                  <span className="block text-xs text-gray-500">{o.hint}</span>
+                </span>
+              </label>
+            ))}
+          </div>
+          <label className="text-xs text-gray-500 font-medium mb-1 block">메모 (선택 · 기록에만 남고 고객에게는 보이지 않습니다)</label>
+          <input type="text" value={terminateNote} maxLength={200} onChange={(e) => setTerminateNote(e.target.value)}
+            placeholder="예: 계약 만료 · 재계약 안 함" className={`w-full ${ADMIN_INPUT}`} />
+        </AdminDetailModal>
+      )}
     </AdminPanel>
   );
 }

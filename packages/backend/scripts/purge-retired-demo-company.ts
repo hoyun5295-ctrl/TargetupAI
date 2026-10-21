@@ -25,6 +25,7 @@ import path from 'path';
 import pool from '../src/config/database';
 import { loadFkCatalog, planDeletion, printDeletePlan, backupThenDelete, qi, type DeleteRoot } from '../src/utils/fk-delete-plan';
 import { parseSyntheticSyncKeys } from '../src/utils/demo-data';
+import { scriptRunner } from '../src/utils/account-issue';
 
 const RETIRED_CODE_PREFIX = 'HJDEMO_';
 const DEMO_LOGIN_ID = 'hanjulai';
@@ -47,7 +48,7 @@ async function main(): Promise<void> {
       await client.query(`SELECT id FROM companies WHERE id = $1::uuid FOR UPDATE`, [companyId]);
     }
     // ── 대상 확인
-    const c = await client.query(`SELECT id, company_code, is_demo, api_key FROM companies WHERE id = $1::uuid`, [companyId]);
+    const c = await client.query(`SELECT id, company_code, company_name, is_demo, api_key FROM companies WHERE id = $1::uuid`, [companyId]);
     if (c.rows.length === 0) throw new Error('회사가 없습니다.');
     const co = c.rows[0];
     if (co.is_demo !== true) throw new Error('시연 회사가 아닙니다. 중단합니다.');
@@ -86,6 +87,16 @@ async function main(): Promise<void> {
       await client.query('ROLLBACK');
       throw new Error('회사 행이 남아 전부 되돌렸습니다.');
     }
+    // ★2026-10-21 실사 준비 S2(D-02) — 삭제와 같은 트랜잭션에 삭제 기록(지우고 기록 못 하는 일 · 기록만 남는 일 둘 다 없게)
+    //   감사 기록 표는 company_id 칸이 없어 위 삭제 집합에 들지 않는다(이 회사를 가리키던 옛 기록도 그대로 남는다).
+    await client.query(
+      `INSERT INTO audit_logs (user_id, action, target_type, target_id, details, ip_address, user_agent)
+       VALUES (NULL, 'company_purged', 'company', $1::uuid, $2, NULL, '')`,
+      [companyId, JSON.stringify({
+        companyCode: co.company_code, companyName: co.company_name ?? null, totalRows: p.total,
+        backupFile: path.basename(backupPath), channel: 'script', script: 'purge-retired-demo-company', osUser: scriptRunner(),
+      })]
+    );
     await client.query('COMMIT');
     console.log(`\n지웠습니다: 총 ${p.total}행 · 백업 파일 ${backupPath}(권한 600 · 확인 뒤 지우세요)`);
   } catch (e) {

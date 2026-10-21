@@ -30,6 +30,11 @@ const REASON_MESSAGE: Record<string, string> = {
   contract_end: '계약 종료로 서비스 이용이 종료되었습니다.',
 };
 
+/** ★2026-10-21 S3 — 사유 → 안내 문구(모르는 사유 = 관리자 조치). 해지 CT(company-terminate.ts)와 같은 문구표 */
+export function restrictionReasonMessage(reason: string): string {
+  return REASON_MESSAGE[reason] || REASON_MESSAGE.admin_action;
+}
+
 export interface RestrictionOutcome {
   status: RestrictedStatus;
   killedSessions: number;
@@ -70,7 +75,7 @@ export async function restrictAccount(params: {
   let notifyError: string | undefined;
   if (notifyPhone) {
     try {
-      await sendRestrictionNotice(notifyPhone, REASON_MESSAGE[reason] || REASON_MESSAGE.admin_action);
+      await sendRestrictionNotice(notifyPhone, restrictionReasonMessage(reason));
       notified = true;
     } catch (err: any) {
       notifyError = String(err?.message || err).slice(0, 200);
@@ -104,8 +109,8 @@ export async function restrictAccount(params: {
   return { status, killedSessions, notified, notifyError };
 }
 
-/** 조치 안내 문자 — 인증 라인(운영 발송 라인을 점유하지 않는다) */
-async function sendRestrictionNotice(phone: string, reasonText: string): Promise<void> {
+/** 조치 안내 문자 — 인증 라인(운영 발송 라인을 점유하지 않는다) · ★2026-10-21 해지 CT 도 쓴다 */
+export async function sendRestrictionNotice(phone: string, reasonText: string): Promise<void> {
   const table = await getAuthSmsTable();
   const callback = process.env.SYSTEM_SMS_CALLBACK;
   if (!callback) throw new Error('SYSTEM_SMS_CALLBACK 환경변수가 설정되지 않았습니다');

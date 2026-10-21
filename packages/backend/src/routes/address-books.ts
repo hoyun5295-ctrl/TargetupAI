@@ -1,5 +1,6 @@
 import { Router, Request, Response } from 'express';
 import { logPrivacyExport } from '../utils/privacy-audit';
+import { recordAddressBookDeleted } from '../utils/change-audit';
 import * as XLSX from 'xlsx';
 import { query } from '../config/database';
 import { authenticate } from '../middlewares/auth';
@@ -342,12 +343,15 @@ router.delete('/:groupName', async (req: Request, res: Response) => {
     // ★ 본인 주소록만 삭제 가능 (admin은 전체 삭제 가능)
     // ★ 2026-09-27 한줄로 V2 R061 — 한 그룹 = (주인, 이름). 옛: 관리자 삭제가 이름만으로 여러 사람의 같은 이름 그룹을 함께 지웠다.
     const params: any[] = [companyId, groupName];
-    const userFilter = ownerClause(resolveTargetOwner(req, req.query.owner), params);
+    const ownerUserId = resolveTargetOwner(req, req.query.owner);
+    const userFilter = ownerClause(ownerUserId, params);
 
-    await query(
+    const delResult = await query(
       `DELETE FROM address_books WHERE company_id = $1 AND group_name = $2${userFilter}`,
       params
     );
+    // ★2026-10-21 실사 준비 S1(D-24) — 주소록(개인정보) 삭제 이력 · 그룹 = (주인, 이름)이라 주인도 남긴다(Codex 1R)
+    await recordAddressBookDeleted({ actorUserId: userId || null, req, companyId, ownerUserId, groupName, count: delResult.rowCount ?? 0 });
 
     return res.json({ success: true, message: '삭제되었습니다.' });
   } catch (error) {

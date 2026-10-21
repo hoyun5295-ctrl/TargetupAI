@@ -6,6 +6,7 @@ import multer from 'multer';
 import * as XLSX from 'xlsx';
 import { query } from '../config/database';
 import { authenticate } from '../middlewares/auth';
+import { recordUnsubscribeDeleted } from '../utils/change-audit';
 import { process080Callback, getUserUnsubscribes, registerUnsubscribe, IsolationBlockedError, isUserIsolationEnabled, deleteIsolatedUnsubscribes, UNSUB_UPLOAD_CONCURRENCY } from '../utils/unsubscribe-helper';
 // ★ 2026-09-26 한줄로 V2 R1-17 — 파일 등록 동시 상한(입력 순서 보존 CT)
 import { mapWithConcurrency } from '../utils/concurrency';
@@ -568,6 +569,8 @@ router.delete('/:id', async (req: Request, res: Response) => {
       const isoDeleted = (await deleteIsolatedUnsubscribes(companyId, userId, [targetPhone])).length;
       const isoIp = req.headers['x-forwarded-for'] || req.ip || 'unknown';
       console.log(`[unsubscribe-audit][delete][isolated] ${new Date().toISOString()} ip=${isoIp} actor=${loginId || userId} company=${companyId} phone=${targetPhone} affected=${isoDeleted}`);
+      // ★2026-10-21 실사 준비 S1(D-24) — 수신거부 삭제를 감사 기록에도(PM2 로그만으로는 1년 보관 · 조회 화면이 없다)
+      await recordUnsubscribeDeleted({ actorUserId: userId, req, companyId, userId, count: isoDeleted, phones: [targetPhone], via: 'company' });
       return res.json({
         success: isoDeleted > 0,
         message: isoDeleted > 0 ? '삭제되었습니다.' : '삭제된 항목이 없습니다.',
@@ -585,6 +588,8 @@ router.delete('/:id', async (req: Request, res: Response) => {
     // ★ Audit 로그 (시간 + IP + 삭제 주체 + 영향 row 수) — PM2 로그 검색 가능
     const ip = req.headers['x-forwarded-for'] || req.ip || 'unknown';
     console.log(`[unsubscribe-audit][delete] ${new Date().toISOString()} ip=${ip} actor=${loginId || userId} company=${companyId} phone=${targetPhone} affected_rows=${deletedCount}`);
+    // ★2026-10-21 실사 준비 S1(D-24) — 수신거부 삭제를 감사 기록에도
+    await recordUnsubscribeDeleted({ actorUserId: userId, req, companyId, count: deletedCount, phones: [targetPhone], via: 'company' });
 
     // D43-4: customers.sms_opt_in = true 복원 (실제 삭제된 경우만)
     if (deletedCount > 0) {

@@ -7,6 +7,7 @@ import fs from 'fs';
 import { dropUploadedFiles } from '../utils/upload-cleanup';
 import { restoreUploadFileName } from '../utils/mms-image-fit';   // ★ 2026-10-19 B-1005-4③ 한글 첨부 이름
 import { isMissingSchemaError, migrationPendingBody } from '../utils/db-errors';
+import { recordCallbackNumberCreated } from '../utils/change-audit';
 import {
   // 담당자
   getManagers,
@@ -338,6 +339,13 @@ router.post('/admin/:id/approve', authenticate, requireSuperAdmin, async (req: R
   try {
     const adminId = (req as any).user!.adminId || (req as any).user!.userId;
     const result = await approveRegistration(req.params.id, adminId);
+    // ★2026-10-21 실사 준비 S1(D-03) — 신청 승인으로 생긴 발신번호도 같은 등록 이력에 남긴다(심사 기록은 신청 표에 따로 있다)
+    await recordCallbackNumberCreated({
+      actorUserId: adminId || null, req, companyId: result.registration?.company_id ?? null,
+      callbackId: result.callbackNumber?.id ?? null, phone: result.callbackNumber?.phone ?? null,
+      label: result.callbackNumber?.label ?? null, isDefault: !!result.callbackNumber?.is_default,
+      via: 'registration', registrationId: req.params.id,
+    });
     res.json({
       success: true,
       message: '발신번호가 승인되어 등록되었습니다.',

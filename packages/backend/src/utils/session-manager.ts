@@ -59,8 +59,12 @@ export async function invalidateAppSessions(userId: string, appSource: string): 
  *   (로그인 게이트는 새 로그인만 막는다). 해지 시점에 접속 중이던 사용자를 끊는 것이 이 함수의 몫이다.
  * app_source를 가리지 않는다 — 계약이 끝나면 어느 앱이든 끊는다.
  */
-export async function invalidateCompanySessions(companyId: string): Promise<number> {
-  const result = await query(
+export async function invalidateCompanySessions(
+  companyId: string,
+  /** ★2026-10-21 해지 CT 가 해지와 같은 트랜잭션에서 끊으려고 연결을 넘긴다(없으면 지금처럼 풀) */
+  db: { query: (sql: string, params?: any[]) => Promise<any> } = { query },
+): Promise<number> {
+  const result = await db.query(
     `UPDATE user_sessions
      SET is_active = false
      WHERE is_active = true
