@@ -15,8 +15,7 @@
 import { Router, Request, Response } from 'express';
 import multer from 'multer';
 import { authenticate } from '../middlewares/auth';
-import { lineTemplatesEnabled } from '../utils/design-core/line-templates';   // ★ 2026-10-17 템플릿 캠페인 이벤트 페이지 읽기
-import { oneLineStepsEnabled } from '../utils/one-line-steps';
+   // ★ 2026-10-17 템플릿 캠페인 이벤트 페이지 읽기
 import { lineBannerOf } from '../utils/line-template-page';
 import { resolveOwnerScope } from '../utils/owner-scope';
 import { query } from '../config/database';
@@ -32,7 +31,7 @@ import { isBuildMaterialsV1, aiAutoBuildEnabled, aiAutoBuildErrorResponse, AI_AU
 import { isCdpEnabledForPlan } from '../utils/cdp-auth';
 // ★ 2026-09-27 만들기 개편 S12 — 주소 하나 → 재료 프리필(AI 0 · 가드 크롤 · 렌더 대기 0 · 10분 캐시)
 import { readBrandPage, PageReadError } from '../utils/brand-page-reader';
-import { tryAcquireInflight, releaseInflight } from '../utils/inflight-lock';
+import { tryAcquireInflight, releaseInflight, takeDailyQuota } from '../utils/inflight-lock';
 
 export const eventCampaignRouter = Router();
 eventCampaignRouter.use(authenticate);
@@ -104,13 +103,15 @@ eventCampaignRouter.get('/materials/quote', async (req: any, res: Response) => {
 
 // ★ 2026-09-27 만들기 개편 S12 — POST /materials/read-url { url } → 재료 프리필(행사 카드 ≤3 · 사진 사본 ≤6 · 로고·색 · 홈페이지 상품 ≤4)
 //   차감 0 · AI 0 · 면허는 여기서 주지 않는다(생성 요청의 readId+readHash 를 서버가 대조) · 회사당 동시 1건(크롤은 무겁다).
+/** 회사당 하루 주소 읽기 상한(한 줄 창 · 만들기 화면 합계 · 사진 사본 ≤ 6장씩 영구 저장) */
+const READ_URL_DAILY_MAX = 40;
 eventCampaignRouter.post('/materials/read-url', async (req: any, res: Response) => {
   const companyId = req.user?.companyId;
   if (!companyId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
-  // ★ 2026-10-17 템플릿 캠페인 이벤트 페이지 단계도 같은 읽기를 쓴다(템플릿 스위치 켠 회사 · AI 0 · 0원)
-  if (!aiAutoBuildEnabled(companyId) && !lineTemplatesEnabled(companyId, oneLineStepsEnabled(companyId))) return res.status(403).json({ success: false, error: '이 기능은 아직 열리지 않았습니다.', code: 'FEATURE_DISABLED' });
+  // ★ 2026-10-17 템플릿 캠페인 이벤트 페이지 단계도 같은 읽기를 쓴다(AI 0 · 0원) · ★1021 전 회사 개방 = 하루 상한(사진 사본 누적 차단)
   const lockKey = `make-read-url:${companyId}`;
   if (!tryAcquireInflight(lockKey)) return res.status(409).json({ success: false, error: '지금 다른 주소를 읽는 중이에요. 잠시 뒤 다시 눌러 주세요.', code: 'IN_FLIGHT' });
+  if (!takeDailyQuota(`read-url:${companyId}`, READ_URL_DAILY_MAX)) { releaseInflight(lockKey); return res.status(429).json({ success: false, error: '오늘 읽을 수 있는 주소 수를 다 썼어요. 사진 · 글을 직접 넣거나 내일 다시 읽어 주세요.', code: 'READ_URL_DAILY_LIMIT' }); }
   try {
     const r = await readBrandPage(companyId, req.body?.url);
     // ★ 2026-10-17 템플릿 캠페인 — 표지로 쓸 사진(생성과 같은 고르기 함수 · 화면은 이 값만 본다 · 칸 추가만)

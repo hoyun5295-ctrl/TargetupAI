@@ -11,16 +11,16 @@
  *   - 원문 자리에는 사용자가 친 글자 · 칸에 적은 답만(원스텝 §0-6). 몰 값은 넣지 않는다.
  */
 import { createHash } from 'crypto';
-import { companyListAllows } from './sns-constants';
 import { validateAnswer } from './content-interview';
-import { oneLineFactsEnabled, oneLineGaps, hasPromotionIntent, lineProductTerms, lineMoneyAmounts, lineWithoutReads, lineSegments } from './one-line-facts';
+import { oneLineGaps, hasPromotionIntent, lineProductTerms, lineMoneyAmounts, lineWithoutReads, lineSegments } from './one-line-facts';
 import { getLineTemplate, type LineTemplateId, type LineLayout } from './design-core/line-templates';
 
 export type LineStepsChannel = 'dm' | 'email' | 'inapp';
 export const LINE_STEPS_CHANNELS: readonly LineStepsChannel[] = ['dm', 'email', 'inapp'];
 
 /** 단계 키 닫힌 목록(화면 부품표와 짝 테스트로 묶인다) · event_page · products = 템플릿 캠페인 단계(★ 2026-10-17 · line-template-plan.ts) */
-export const LINE_STEP_KEYS = ['benefit', 'product', 'hero_photo', 'link', 'period', 'event_page', 'products'] as const;
+// ★ 2026-10-21 proof = 고객 후기(④ 신뢰 · 어느 연동에도 없어 묻는다 · 설계서 docs/2026-10-21-oneline-content-design.md §3-2)
+export const LINE_STEP_KEYS = ['benefit', 'product', 'hero_photo', 'link', 'period', 'event_page', 'products', 'proof'] as const;
 export type LineStepKey = (typeof LINE_STEP_KEYS)[number];
 
 /** 질문 단계 상한(만들기 단계 제외 · Harold 결정 · 설계서 §3-3) */
@@ -28,18 +28,7 @@ export const LINE_STEPS_MAX = 4;
 
 // ─────────────── 스위치 ───────────────
 
-/**
- * 단계별 모달을 여는 회사 — `ONE_LINE_FACTS_COMPANY_IDS` 를 켠 회사 **안에서만**(좁히기만 · 기존 판정 무변경).
- * 두 명단 모두에 있어야 참이다(`*` = 전 회사).
- */
-export function oneLineStepsEnabled(
-  companyId: string | null | undefined,
-  env: string | undefined = process.env.ONE_LINE_STEPS_COMPANY_IDS,
-  factsEnv?: string,
-): boolean {
-  const facts = factsEnv === undefined ? oneLineFactsEnabled(companyId) : oneLineFactsEnabled(companyId, factsEnv);
-  return facts && companyListAllows(companyId, String(env || ''));
-}
+// ★ 2026-10-21 단계 모달 회사 명단 스위치 삭제 — 전 회사 같은 흐름(설계서 docs/2026-10-21-oneline-content-design.md §3-1)
 
 export function isLineStepsChannel(v: unknown): v is LineStepsChannel {
   return v === 'dm' || v === 'email' || v === 'inapp';
@@ -290,10 +279,16 @@ export function buildLineStepsPlan(input: LineStepsPlanInput): LineStepsPlan {
 // ─────────────── 생성 요청 검증 ───────────────
 
 export interface LineStepsManualProduct { name: string; price?: number; image?: string; url?: string }
+export interface LineProofReview { body: string; author: string; rating: number }
+export const LINE_PROOF_MAX = 3;
 export interface LineStepsBody {
   facts: { benefit?: string | null; periodEnd?: string | null; link?: string | null };
   manual: LineStepsManualProduct[];
   heroImage: string | null;
+  /** ★ 2026-10-21 대표 사진이 이미지 스튜디오 헤드라인(글자 박힌 포스터)인가 — 표지가 덮어 쓰지 않는다(asIs · 설계서 docs/2026-10-21-oneline-content-design.md §3-4) */
+  heroPoster: boolean;
+  /** ★ 2026-10-21 고객 후기(사람이 붙여 넣은 원문 · 별점은 사람이 고른 값 · 비면 후기 구역 없음) */
+  proof: LineProofReview[];
   expectedCost: number | null;
   meta: { shown: string[]; answered: string[]; skipped: string[] };
   /** ★ 템플릿 캠페인 — 고른 템플릿 · 배치(없으면 1017 단계 생성 그대로) */
@@ -417,6 +412,24 @@ export function sanitizeLineStepsBody(body: Record<string, unknown> | null | und
     if (typeof b.hero_image !== 'string' || b.hero_image.length > IMAGE_MAX) return 'invalid';
     heroImage = b.hero_image.trim();
   }
+  if (b.hero_poster !== undefined && typeof b.hero_poster !== 'boolean') return 'invalid';
+  const heroPoster = b.hero_poster === true && !!heroImage;
+
+  // ★ 2026-10-21 고객 후기 — 3건 · 본문 2~300자 · 작성자 20자(비면 「구매 고객」) · 별점 1~5 정수(사람이 고른 값)
+  const proof: LineProofReview[] = [];
+  if (b.proof !== undefined && b.proof !== null) {
+    if (!Array.isArray(b.proof) || b.proof.length > LINE_PROOF_MAX) return 'invalid';
+    for (const r of b.proof as unknown[]) {
+      const o = r && typeof r === 'object' ? r as Record<string, unknown> : null;
+      const body = typeof o?.body === 'string' ? o.body.replace(/\s+/g, ' ').trim() : '';
+      if (body.length < 2 || body.length > 300) return 'invalid';
+      if (o?.author !== undefined && typeof o.author !== 'string') return 'invalid';
+      const author = String(o?.author || '').trim().slice(0, 20) || '구매 고객';
+      const rating = Number(o?.rating);
+      if (!Number.isInteger(rating) || rating < 1 || rating > 5) return 'invalid';
+      proof.push({ body, author, rating });
+    }
+  }
 
   let expectedCost: number | null = null;
   if (b.expected_cost !== undefined && b.expected_cost !== null) {
@@ -427,7 +440,7 @@ export function sanitizeLineStepsBody(body: Record<string, unknown> | null | und
 
   const metaRaw = (b.steps_meta && typeof b.steps_meta === 'object' && !Array.isArray(b.steps_meta)) ? b.steps_meta as Record<string, unknown> : {};
   return {
-    facts, manual, heroImage, expectedCost,
+    facts, manual, heroImage, heroPoster, proof, expectedCost,
     meta: { shown: strList(metaRaw.shown), answered: strList(metaRaw.answered), skipped: strList(metaRaw.skipped) },
     template, page,
   };

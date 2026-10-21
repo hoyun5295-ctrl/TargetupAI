@@ -18,7 +18,8 @@ export type EmailEntryKind = Extract<MakeOtherKind, 'line' | 'library' | 'blocks
 
 export interface MakeOtherItem { kind: MakeOtherKind; label: string }
 
-const DM_ENTRY: readonly DmEntryKind[] = ['line', 'onestep', 'images', 'library', 'blocks'];
+// ★ 2026-10-21 「질문 몇 개로」 = 한 줄 창으로 흡수(입구 하나 · 설계서 docs/2026-10-21-oneline-content-design.md §3-1) · 옛 주소 onestep 은 읽을 때 line
+const DM_ENTRY: readonly DmEntryKind[] = ['line', 'images', 'library', 'blocks'];
 const EMAIL_ENTRY: readonly EmailEntryKind[] = ['line', 'library', 'blocks'];
 
 const LABEL: Record<MakeOtherKind, string> = {
@@ -45,6 +46,7 @@ export function makeOtherHref(channel: BuildChannel, kind: MakeOtherKind): strin
 
 /** 모바일 DM 화면 진입 값 읽기 · 옛 `1` · 모르는 값 = null(첫 화면 그대로) */
 export function readDmEntry(raw: string | null | undefined): DmEntryKind | null {
+  if (raw === 'onestep') return 'line';
   return DM_ENTRY.includes(raw as DmEntryKind) ? (raw as DmEntryKind) : null;
 }
 

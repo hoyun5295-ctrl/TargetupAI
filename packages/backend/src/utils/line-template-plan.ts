@@ -4,29 +4,19 @@
  * 1017 단계 판정(`buildLineStepsPlan`)과 같은 입력 · 같은 출력 모양 — 다른 것은 「무엇을 묻는가」의 기준이 **고른 템플릿의 재료 칸**이라는 것.
  * ⛔ 불변
  *   - AI 0 · DB 0. 회사 사실은 라우트가 넣는다(`loadLineStepsCompanyFacts` 그대로).
- *   - 순서 = 이벤트 페이지 → 혜택 → 상품(한 단계 · 여러 개) → 대표 사진 → 버튼 주소 → 기간 · 상한 4.
+ *   - 순서 = 이벤트 페이지 → 혜택 → 상품(한 단계 · 여러 개) → 버튼 주소 → 기간 → 첫 화면(헤드라인) · ★1021 상한 없음(Harold 「필요한 정보를 요구」 · 설계서 docs/2026-10-21-oneline-content-design.md §3-3).
  *   - **표지 · 띠에 크게 실리는 구조 값(혜택 · 마감일)은 사람이 확인한 답으로만** 싣는다(Codex 1R high · 부정 · 조건 누락 방지).
  *     한 줄에서 찾은 값은 제안 칩으로만 보인다(기본값 0 · 사람이 눌러야 채워짐 · 5R) · 생성은 답만 읽는다.
- *   - **필수 칸은 미루지 않는다** — 넘치면 선택 칸부터 뺀다(대표 사진 → 이벤트 페이지 → 선택 혜택 → 버튼 주소 → 선택 상품).
- *     템플릿마다 물을 수 있는 필수 칸 ≤ 3(등록 관문 `validateLineTemplate`) → 필수만으로 상한을 넘지 않는다.
+ *   - ★1021 첫 화면(hero_photo) = 모든 템플릿 · 맨 끝(혜택 · 상품을 받은 뒤 스튜디오 템플릿 헤드라인 3안 · 내 사진 · 색 표지 중 고른다).
  *   - 판정 규칙은 `one-line-facts.ts` · `one-line-steps.ts` 함수를 그대로 쓴다(같은 규칙 두 벌 금지).
  */
 import { hasConcreteBenefit, hasPromotionIntent, lineProductTerms, lineBenefitPrefill } from './one-line-facts';
-import { LINE_STEPS_MAX, lineTermFacts, lineUrls, lineEndDatePrefill, type LineStep, type LineStepsPlan, type LineStepsPlanInput } from './one-line-steps';
+import { lineTermFacts, lineUrls, lineEndDatePrefill, type LineStep, type LineStepsPlan, type LineStepsPlanInput } from './one-line-steps';
 import type { LineTemplate, LineTemplateId } from './design-core/line-templates';
 
 export interface LineTemplatePlan extends LineStepsPlan {
   template: LineTemplateId;
 }
-
-/** 넘칠 때 빼는 순서(먼저 뺀다) — 필수 단계는 목록에 없다 */
-const DROP_ORDER: Array<(s: LineStep) => boolean> = [
-  (s) => s.key === 'hero_photo',
-  (s) => s.key === 'event_page',
-  (s) => s.key === 'benefit' && !s.required,
-  (s) => s.key === 'link',
-  (s) => s.key === 'products' && !s.required,
-];
 
 /** (순수) 템플릿 + 한 줄 + 회사 사실 → 재료 단계(nowMs = 마감 날짜 미리 채움의 오늘) */
 export function buildLineTemplatePlan(t: LineTemplate, input: LineStepsPlanInput, nowMs: number = Date.now()): LineTemplatePlan {
@@ -56,8 +46,8 @@ export function buildLineTemplatePlan(t: LineTemplate, input: LineStepsPlanInput
   const terms = words.map((item) => ({ item, ...lineTermFacts(input.line, item, words.length) }));
   if (max > 0) steps.push({ key: 'products', terms, min: t.needs.products.min, max, ...(t.needs.products.min > 0 ? { required: true } : {}) });
 
-  // ④ 대표 사진 — 사진 표지 템플릿 · 올릴 수 있을 때만 · 이벤트 페이지에서 표지 사진을 읽었으면 건너뜀
-  if (t.needs.hero === 'ask' && input.upload) steps.push({ key: 'hero_photo', skip_if: 'page_banner' });
+  // ③-1 고객 후기(★1021 · DM · 이메일 · 선택 · 건너뛰면 후기 구역 없음)
+  if (input.channel !== 'inapp') steps.push({ key: 'proof' });
 
   // ⑤ 버튼 주소 — 한 줄 주소 · 홈페이지 · 몰 첫 화면이 있으면 단계 없이 그 값(1017 규칙 그대로) · 상품 링크 · 읽은 페이지가 있으면 화면이 건너뜀
   if (typedUrl) base.filled.link = typedUrl;
@@ -71,12 +61,8 @@ export function buildLineTemplatePlan(t: LineTemplate, input: LineStepsPlanInput
     steps.push({ key: 'period', required: true, ...(end ? { suggest: end } : {}) });
   }
 
-  const kept = [...steps];
-  const later: LineTemplatePlan['later'] = [];
-  for (const drop of DROP_ORDER) {
-    if (kept.length <= LINE_STEPS_MAX) break;
-    const i = kept.findIndex(drop);
-    if (i >= 0) later.push({ key: kept.splice(i, 1)[0].key });
-  }
-  return { ...base, steps: kept, later };
+  // ④ 첫 화면(★1021 모든 템플릿 · 맨 끝) — 스튜디오 템플릿 헤드라인 3안 · 내 사진(올릴 수 있을 때) · 건너뛰면 템플릿 표지
+  steps.push({ key: 'hero_photo' });
+
+  return { ...base, steps, later: [] };
 }

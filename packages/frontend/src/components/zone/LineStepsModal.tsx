@@ -15,15 +15,16 @@ import { X, ChevronLeft, Camera, Check, Loader2, Gift, Link2, CalendarDays, Imag
 import JourneyModalShell from '../journey/JourneyModalShell';
 import ZoneSegmented from './ZoneSegmented';
 import LineTemplatePick, { LineTemplateExampleView } from './LineTemplatePick';
+import LineHeadlineStep from './LineHeadlineStep';
 import { useBodyFlag } from '../../lib/surface-flags';
 import { useAuthStore } from '../../stores/authStore';
 import { LineReadToggle } from './LineFacts';
 import {
   type LineStepsPlan, type LineStep, type LineStepsAnswers, type LineManualAnswer, type LineCandidatesResult, type LineMallCandidate, type LineStepsChannel,
-  type LineTemplateRank, type LineTemplateInfo, type LineTemplateId, type LineLayout,
+  type LineTemplateRank, type LineTemplateInfo, type LineTemplateId, type LineLayout, type LineProofAnswer,
   emptyLineStepsAnswers, lineStepId, lineStepsProducts, lineStepsManual, lineStepSkipped, lineStepTerms, lineManualPrice, normalizeLineLink,
   buildLineStepsBody, fetchLineCandidates, uploadLineImage, lineStepsStoreKey, loadLineStepsAnswers, saveLineStepsAnswers, LINE_UPLOAD_MAX_MB,
-  fetchLineTemplates, readLinePage, searchLineMall, buildLineTemplateBody, lineTemplateCount,
+  fetchLineTemplates, readLinePage, searchLineMall, buildLineTemplateBody, lineTemplateCount, lineProofRows,
 } from '../../utils/one-line';
 
 export interface LineStepsOpen {
@@ -82,7 +83,8 @@ function stepName(s: LineStep | typeof MAKE): string {
   if (s.key === 'product') return s.item || '상품';
   if (s.key === 'products') return '상품';
   if (s.key === 'event_page') return '이벤트 페이지';
-  if (s.key === 'hero_photo') return '대표 사진';
+  if (s.key === 'hero_photo') return '첫 화면';
+  if (s.key === 'proof') return '고객 후기';
   if (s.key === 'link') return '버튼 주소';
   return '기간';
 }
@@ -100,15 +102,16 @@ function Why({ tone, children }: { tone: 'customer' | 'data'; children: ReactNod
  * 사진 칸(누르거나 끌어 놓기) — 올리는 중 · 실패 문장을 칸 안에서 보인다.
  * ★ 1017 실측 지적 — 작은 칸에 글자 버튼 둘(바꾸기 · 빼기)이 꺾였다 → 작은 칸 = 칸 전체가 바꾸기(카메라 배지) + 늘 보이는 28px 빼기 아이콘.
  */
-function PhotoDrop({ channel, value, onChange, size }: { channel: LineStepsChannel; value: string | null | undefined; onChange: (url: string | null) => void; size: 'hero' | 'tile' }) {
+function PhotoDrop({ channel, value, onChange, size, disabled = false, onBusy }: { channel: LineStepsChannel; value: string | null | undefined; onChange: (url: string | null) => void; size: 'hero' | 'tile'; disabled?: boolean; onBusy?: (busy: boolean) => void }) {
   const ref = useRef<HTMLInputElement | null>(null);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const take = async (file: File | undefined | null) => {
-    if (!file || busy) return;
+    if (!file || busy || disabled) return;
     setBusy(true);
+    onBusy?.(true);
     setErr(null);
-    try { onChange(await uploadLineImage(file, channel)); } catch (e: any) { setErr(e?.message || '사진을 올리지 못했어요'); } finally { setBusy(false); }
+    try { onChange(await uploadLineImage(file, channel)); } catch (e: any) { setErr(e?.message || '사진을 올리지 못했어요'); } finally { setBusy(false); onBusy?.(false); }
   };
   const box = size === 'hero' ? 'w-full aspect-[16/9] rounded-2xl' : 'w-[96px] h-[96px] rounded-xl shrink-0';
   return (
@@ -238,7 +241,8 @@ export default function LineStepsModal({ open, channel, state, onClose, onMake }
       : tplOffer.ranks?.find((r) => r.recommended && tplOffer.plans[r.id])?.id
         ?? TEMPLATE_ORDER.find((id) => tplOffer.plans[id]) ?? null)
     : null;
-  const layout: LineLayout = channel === 'dm' ? (answers.template?.layout ?? 'slides') : 'page';
+  // ★ 2026-10-21 형태 기본 = 세로 스크롤(직원 실물 27/28 · 슬라이드는 사람이 고를 때만 · 설계서 docs/2026-10-21-oneline-content-design.md §3-3)
+  const layout: LineLayout = channel === 'dm' ? (answers.template?.layout ?? 'page') : 'page';
   const plan: LineStepsPlan | null = tplOffer ? (chosenId ? tplOffer.plans[chosenId] ?? null : null) : (state?.plan ?? null);
   const tplInfo = tplList?.find((t) => t.id === chosenId) ?? null;
 
@@ -354,6 +358,23 @@ export default function LineStepsModal({ open, channel, state, onClose, onMake }
   }, [open, current, balance, tplMode, pane]);
 
   const setA = (patch: Partial<LineStepsAnswers>) => setAnswers((a) => ({ ...a, ...patch }));
+  // ★ 2026-10-21 첫 화면(스튜디오 헤드라인) — 만드는 중엔 다음 · 건너뛰기 · 만들기를 잠근다 · 결과는 시작 때의 보존 키로(다른 한 줄을 덮지 않는다 · Codex P2 R1)
+  const [headlineBusy, setHeadlineBusy] = useState(false);
+  // 내 사진을 올리는 중(헤드라인 만들기를 막는다 · 서로 잠금)
+  const [photoBusy, setPhotoBusy] = useState(false);
+  // 지금 보고 있는 한 줄(ref · 콜백이 만들어질 때의 값이 아니라 끝났을 때의 값 · Codex P2 R2)
+  const storeKeyRef = useRef(storeKey);
+  storeKeyRef.current = storeKey;
+  const onHeadlineMade = (url: string, key: string) => {
+    if (key === storeKeyRef.current) {
+      // 창이 닫혀 있어도(보존 효과가 안 도는 때) 낸 그림이 사라지지 않게 보존 답에도 바로 쓴다
+      setAnswers((a) => { const n = { ...a, hero: url, heroPoster: true }; saveLineStepsAnswers(key, n, new Date().toISOString()); return n; });
+    } else {
+      // 다른 한 줄로 바뀐 뒤 끝났다 = 그 한 줄의 보존 답에만(지금 화면 답은 건드리지 않는다)
+      const saved = loadLineStepsAnswers(key);
+      if (saved) saveLineStepsAnswers(key, { ...saved.answers, hero: url, heroPoster: true }, saved.at);
+    }
+  };
   const setProduct = (term: string, v: LineStepsAnswers['products'][string]) => setAnswers((a) => ({ ...a, products: { ...a.products, [term]: v } }));
   /** 이벤트 페이지 읽기(성공 = 답에 넣는다 · 실패 = 칸 아래 서버 문장) */
   /** 페이지 읽기 — 요청 번호가 그대로일 때만 답에 넣는다(읽는 사이 건너뛰거나 다시 읽으면 늦게 온 응답을 버린다 · Codex 7R) */
@@ -431,9 +452,10 @@ export default function LineStepsModal({ open, channel, state, onClose, onMake }
 
   const cost = state.costOverride ?? plan!.cost?.total ?? state.fallbackCost;
   const generateCost = plan!.cost?.generate ?? null;
-  const go = (id: string) => setCursor(id);
+  // 첫 화면 그림을 만드는 중엔 단계를 옮기지 않는다(그림 없는 본문이 먼저 나가지 않게 · 결과가 다른 단계에 떨어지지 않게)
+  const go = (id: string) => { if (!headlineBusy) setCursor(id); };
   const next = () => { const n = visible[idx + 1]; setCursor(n ? lineStepId(n) : MAKE); };
-  const prev = () => { const p = visible[idx - 1]; if (p) setCursor(lineStepId(p)); };
+  const prev = () => { if (headlineBusy) return; const p = visible[idx - 1]; if (p) setCursor(lineStepId(p)); };
 
   // ─── 지금 단계의 내용 · 다음 / 건너뛰기 동작 ───
   let eyebrow: ReactNode = null;
@@ -783,6 +805,58 @@ export default function LineStepsModal({ open, channel, state, onClose, onMake }
       onNext = () => { setProduct(term, { mode: 'skip' }); next(); };
       nextLabel = '넣지 않고 다음';
     }
+  } else if (current !== MAKE && current.key === 'proof') {
+    // ★ 2026-10-21 ④ 신뢰 — 실제 후기만(지어내지 않는다 · 어느 연동에도 후기가 없어 붙여 넣는다) · 건너뛰면 후기 구역 없음
+    const rows: LineProofAnswer[] = answers.proof && answers.proof.length > 0 ? answers.proof : [{ body: '', author: '', rating: 5 }];
+    const setRow = (i: number, patch: Partial<LineProofAnswer>) => setA({ proof: rows.map((r, j) => (j === i ? { ...r, ...patch } : r)) });
+    eyebrow = <Why tone="customer">믿을 만한 이유가 있으면 더 눌러요</Why>;
+    question = '고객이 남긴 후기가 있나요?';
+    reason = '상품 페이지 · 리뷰에서 실제 후기를 그대로 붙여 넣어 주세요. 별점과 함께 상품 아래에 보여요. 없으면 후기 칸 없이 만들어요';
+    body = (
+      <div className="space-y-3">
+        {rows.map((r, i) => (
+          <div key={i} className="rounded-2xl border border-slate-200 p-3 space-y-2">
+            <div className="flex items-center gap-1" role="radiogroup" aria-label={`후기 ${i + 1} 별점`}>
+              {[1, 2, 3, 4, 5].map((n) => (
+                <button key={n} type="button" role="radio" aria-checked={r.rating === n} onClick={() => setRow(i, { rating: n })}
+                  className={`w-8 h-8 rounded-lg text-[18px] leading-none ${n <= r.rating ? 'text-amber-500' : 'text-slate-300'} hover:bg-slate-50`}>★</button>
+              ))}
+              <span className="ml-1 text-[12px] text-slate-500">별점 {r.rating}</span>
+            </div>
+            <textarea value={r.body} maxLength={300} rows={2} onChange={(e) => setRow(i, { body: e.target.value })} placeholder="예: 끈적임 없이 촉촉해서 매일 써요"
+              className="w-full px-3 py-2 rounded-xl border border-slate-300 text-[14px] focus:border-violet-500 focus:outline-none resize-none" />
+            <input value={r.author} maxLength={20} onChange={(e) => setRow(i, { author: e.target.value })} placeholder="작성자(선택 · 예: 김**)"
+              className="w-full h-10 px-3 rounded-xl border border-slate-300 text-[13px] focus:border-violet-500 focus:outline-none" />
+          </div>
+        ))}
+        {rows.length < 3 && (
+          <button type="button" onClick={() => setA({ proof: [...rows, { body: '', author: '', rating: 5 }] })} className="inline-flex items-center gap-1.5 text-[13px] font-semibold text-violet-700 hover:text-violet-900"><Plus className="w-4 h-4" />후기 하나 더</button>
+        )}
+      </div>
+    );
+    onNext = next;
+    onSkip = () => { setA({ proof: null }); next(); };
+    nextLabel = lineProofRows(answers).length > 0 ? `후기 ${lineProofRows(answers).length}건으로 다음` : '후기 없이 다음';
+  } else if (current !== MAKE && current.key === 'hero_photo' && tplMode) {
+    // ★ 2026-10-21 첫 화면 = 이미지 스튜디오 템플릿 헤드라인(업체 · 한 줄에 맞는 3안) · 내 사진으로 바꿀 수 있다 · 건너뛰면 템플릿 표지
+    const pickImg = (answers.picks || []).find((p) => p.imageUrl)?.imageUrl || (answers.urlPicks || []).find((p) => p.imageUrl)?.imageUrl || (answers.manualList || []).find((m) => m.image)?.image || null;
+    const names = [...(answers.picks || []).map((p) => p.name), ...(answers.manualList || []).map((m) => m.name)].filter(Boolean).slice(0, 6);
+    eyebrow = <Why tone="customer">첫 화면이 결과를 좌우해요</Why>;
+    question = '맨 위에 크게 세울 그림을 골라 주세요';
+    reason = '우리 업종과 이 한 줄에 어울리는 이미지 스튜디오 템플릿으로 만들어요. 내 사진을 써도 돼요';
+    body = (
+      <div className="space-y-5">
+        <LineHeadlineStep storeKey={storeKey} lineFp={basePlan?.line_fp || ''} line={state.line} productImage={pickImg} productNames={names}
+          made={answers.heroPoster ? answers.hero ?? null : null} onMade={onHeadlineMade} onBusy={setHeadlineBusy} blocked={photoBusy} />
+        <div className={headlineBusy ? 'pointer-events-none opacity-40' : ''} aria-disabled={headlineBusy}>
+          <p className="text-[12.5px] font-semibold text-slate-600 mb-1.5">내 사진으로</p>
+          <PhotoDrop channel={channel} size="hero" disabled={headlineBusy} onBusy={setPhotoBusy} value={answers.heroPoster ? null : answers.hero} onChange={(url) => setA({ hero: url, heroPoster: false })} />
+        </div>
+      </div>
+    );
+    onNext = next;
+    onSkip = () => { setA({ hero: null, heroPoster: false }); next(); };
+    nextLabel = answers.hero ? '이 그림으로 다음' : '그림 없이 다음';
   } else if (current !== MAKE && current.key === 'hero_photo') {
     eyebrow = <Why tone="customer">한 줄에는 사진이 없어요</Why>;
     question = '맨 위에 크게 보일 사진이 있나요?';
@@ -894,7 +968,7 @@ export default function LineStepsModal({ open, channel, state, onClose, onMake }
     const pageStep = stepOf('event_page');
     return (
       <>
-        <Row label="템플릿" tone="customer" action={<button type="button" onClick={() => setPane('pick')} className="shrink-0 h-8 px-3 mr-2 rounded-lg border border-slate-200 text-[12.5px] font-semibold text-slate-600 hover:bg-slate-50 whitespace-nowrap">바꾸기</button>}>
+        <Row label="템플릿" tone="customer" action={<button type="button" disabled={headlineBusy} onClick={() => setPane('pick')} className="disabled:opacity-40 shrink-0 h-8 px-3 mr-2 rounded-lg border border-slate-200 text-[12.5px] font-semibold text-slate-600 hover:bg-slate-50 whitespace-nowrap">바꾸기</button>}>
           {tplInfo?.label ?? '템플릿'}{channel === 'dm' ? ` · ${layout === 'slides' ? '슬라이드형' : '한 페이지형'}` : ''}
         </Row>
         {(pageStep || later('event_page')) && (
@@ -1016,15 +1090,15 @@ export default function LineStepsModal({ open, channel, state, onClose, onMake }
       <div className="px-5 py-3.5 border-t border-slate-100 flex gap-2.5 shrink-0">
         {current === MAKE ? (
           <>
-            <button type="button" onClick={idx > 0 ? prev : tplMode ? () => setPane('pick') : onClose} className="h-11 px-4 rounded-xl border border-slate-200 bg-white text-[14px] font-semibold text-slate-700 hover:bg-slate-50 whitespace-nowrap">{idx > 0 ? '이전' : tplMode ? '템플릿' : '취소'}</button>
-            <button type="button" onClick={make} disabled={cost === null || !!short} className="flex-1 h-11 rounded-xl bg-amber-500 hover:bg-amber-400 text-[14px] font-bold text-slate-900 inline-flex items-center justify-center gap-2 disabled:opacity-40 whitespace-nowrap">
+            <button type="button" disabled={headlineBusy} onClick={idx > 0 ? prev : tplMode ? () => setPane('pick') : onClose} className="disabled:opacity-40 h-11 px-4 rounded-xl border border-slate-200 bg-white text-[14px] font-semibold text-slate-700 hover:bg-slate-50 whitespace-nowrap">{idx > 0 ? '이전' : tplMode ? '템플릿' : '취소'}</button>
+            <button type="button" onClick={make} disabled={cost === null || !!short || headlineBusy} className="flex-1 h-11 rounded-xl bg-amber-500 hover:bg-amber-400 text-[14px] font-bold text-slate-900 inline-flex items-center justify-center gap-2 disabled:opacity-40 whitespace-nowrap">
               <Gift className="w-4 h-4" />만들기{cost !== null ? ` · ${cost}크레딧` : ''}
             </button>
           </>
         ) : (
           <>
-            {onSkip ? <button type="button" onClick={onSkip} className="h-11 px-4 rounded-xl border border-slate-200 bg-white text-[14px] font-semibold text-slate-600 hover:bg-slate-50 whitespace-nowrap">건너뛰기</button> : null}
-            <button type="button" onClick={onNext} disabled={nextDisabled} className="flex-1 h-11 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-[14px] font-bold text-white disabled:opacity-40 whitespace-nowrap">{nextLabel}</button>
+            {onSkip ? <button type="button" onClick={onSkip} disabled={headlineBusy} className="disabled:opacity-40 h-11 px-4 rounded-xl border border-slate-200 bg-white text-[14px] font-semibold text-slate-600 hover:bg-slate-50 whitespace-nowrap">건너뛰기</button> : null}
+            <button type="button" onClick={onNext} disabled={nextDisabled || headlineBusy} className="flex-1 h-11 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-[14px] font-bold text-white disabled:opacity-40 whitespace-nowrap">{nextLabel}</button>
           </>
         )}
       </div>
@@ -1054,11 +1128,11 @@ export default function LineStepsModal({ open, channel, state, onClose, onMake }
               );
             })}
           </ol>
-          <button type="button" onClick={onClose} aria-label="닫기" className="-mr-2 w-9 h-9 rounded-lg flex items-center justify-center text-slate-400 hover:bg-slate-100 hover:text-slate-600 shrink-0"><X className="w-5 h-5" /></button>
+          <button type="button" onClick={onClose} disabled={headlineBusy} aria-label="닫기" className="disabled:opacity-40 -mr-2 w-9 h-9 rounded-lg flex items-center justify-center text-slate-400 hover:bg-slate-100 hover:text-slate-600 shrink-0"><X className="w-5 h-5" /></button>
         </div>
         <div className="mt-2.5 flex items-center gap-2 min-w-0">
           {tplMode && (
-            <button type="button" onClick={() => setPane('pick')} className="shrink-0 inline-flex items-center gap-1.5 h-7 px-2.5 rounded-lg bg-violet-50 text-violet-800 text-[12px] font-semibold hover:bg-violet-100 whitespace-nowrap">
+            <button type="button" disabled={headlineBusy} onClick={() => setPane('pick')} className="disabled:opacity-40 shrink-0 inline-flex items-center gap-1.5 h-7 px-2.5 rounded-lg bg-violet-50 text-violet-800 text-[12px] font-semibold hover:bg-violet-100 whitespace-nowrap">
               <LayoutTemplate className="w-3.5 h-3.5" />{tplInfo?.label ?? '템플릿'} · 바꾸기
             </button>
           )}

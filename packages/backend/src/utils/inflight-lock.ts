@@ -82,3 +82,19 @@ export function runSerial<T>(key: string, fn: () => Promise<T>): Promise<T> {
   void tail.then(() => { if (tails.get(key) === tail) tails.delete(key); });
   return run;
 }
+
+/**
+ * ★ 2026-10-21 하루 횟수 상한(회사 · 기능마다 · KST 날짜) — 누구나 부를 수 있게 연 무과금 무거운 경로(주소 읽기 = 사진 사본이 영구 저장된다)의
+ *   반복 호출로 저장소가 차지 않게(Codex P1 R1 · 설계서 docs/2026-10-21-oneline-content-design.md).
+ * ponytail: 프로세스 메모리(fork 1개 전제 · 재기동하면 0부터) — 여러 프로세스가 되면 DB 카운터로.
+ */
+const dailyCounts = new Map<string, number>();
+let dailyDay = '';
+export function takeDailyQuota(key: string, max: number, nowMs: number = Date.now()): boolean {
+  const day = new Date(nowMs + 9 * 3600_000).toISOString().slice(0, 10);
+  if (day !== dailyDay) { dailyCounts.clear(); dailyDay = day; }
+  const n = dailyCounts.get(key) || 0;
+  if (n >= max) return false;
+  dailyCounts.set(key, n + 1);
+  return true;
+}

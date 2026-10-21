@@ -125,7 +125,7 @@ describe('4. 라우트 게이트', () => {
   it('DM: 한 줄 입구 + 스위치일 때만 원문 전환 · 멱등은 토큰이 온 요청만 · 잠금은 finally', () => {
     const d = SRC('routes', 'dm.ts');
     expect(d).toContain("const oneLineReq = req.body?.one_line === true;");
-    expect(d).toContain('const lineOn = oneLineReq && oneLineFactsEnabled(companyId);');
+    expect(d).toContain('const lineOn = oneLineReq;');   // ★ 2026-10-21 스위치 삭제 · 한 줄 입구면 전 회사
     expect(d).toContain('if (lineOn && prompt && !eventText && !scenario) {');
     expect(d).toContain("const attemptToken = lineOn && isValidAttemptToken(req.body?.attempt_token) ? String(req.body.attempt_token) : null;");
     expect(d).toContain('...(idemKey ? { idempotencyKey: idemKey } : {})');
@@ -138,11 +138,11 @@ describe('4. 라우트 게이트', () => {
   });
   it('이메일: 원문 자리는 옮기지 않고 멱등만 · 인앱: 원문 없을 때만 한 줄을 원문으로', () => {
     const e = SRC('routes', 'email.ts');
-    expect(e).toContain("const lineOn = req.body?.one_line === true && oneLineFactsEnabled(auth.companyId);");
+    expect(e).toContain("const lineOn = req.body?.one_line === true;");
     expect(e).toContain('...(idemKey ? { idempotencyKey: idemKey } : {})');
     expect(e).toContain('if (lineLock) releaseInflight(lineLock);');
     const c = SRC('routes', 'cdp.ts');
-    expect(c).toContain("const lineOn = req.body?.one_line === true && oneLineFactsEnabled(auth.companyId);");
+    expect(c).toContain("const lineOn = req.body?.one_line === true;");
     expect(c).toContain('eventText: lineAsEvent ?? (typeof event_text');
   });
   it('검수 응답에 첫 발행 관문 앞 두 칸을 싣는다(같은 함수)', () => {

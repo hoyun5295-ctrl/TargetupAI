@@ -113,10 +113,10 @@ import {
 } from '../utils/inapp-quick-action';
 import { query } from '../config/database';
 import { checkCredit, deductCreditSafe, deductCreditOutcome, isChargedByKey, chargedKeysAmong, InsufficientCreditError } from '../utils/ai-credit';
-import { oneLineFactsEnabled, sanitizeLineProducts, lineProductsKey, sanitizeLineReads, applyLineReads } from '../utils/one-line-facts';   // ★ 2026-10-05 한줄로 시그니처
+import { sanitizeLineProducts, lineProductsKey, sanitizeLineReads, applyLineReads } from '../utils/one-line-facts';   // ★ 2026-10-05 한줄로 시그니처
 // ★ 2026-10-17 한 줄 단계 모달(설계서 docs/2026-10-17-oneline-steps-modal-design.md §3-12) — 인앱도 같은 돈 계약(시도 토큰 · 잠금 · 결과 뒤 1회 차감)
-import { oneLineStepsEnabled, buildLineStepsEventText } from '../utils/one-line-steps';
-import { getLineTemplate, lineTemplatesEnabled } from '../utils/design-core/line-templates';   // ★ 2026-10-17 템플릿 캠페인
+import { buildLineStepsEventText } from '../utils/one-line-steps';
+import { getLineTemplate } from '../utils/design-core/line-templates';   // ★ 2026-10-17 템플릿 캠페인
 import { resolveLinePage, isLinePageError, type LinePageMaterial } from '../utils/line-template-page';
 import { draftLineTemplate, buildLineTemplateInapp, lineTemplateBrand, lineTemplateManual, LineTemplateError } from '../utils/line-template-run';
 import { prepareLineStepsRequest, isLineStepsReqError, lineStepsKeyFor, settleLineStepsPrice, resolveLineStepsDelivery, lineStepsAttemptCharged, lineStepsLineLockKey, lineStepsCollected } from '../utils/line-steps-context';
@@ -1618,7 +1618,7 @@ router.post('/inapp/ai-generate', singleFlight('inapp-generate', async (req: Req
     if (req.body?.one_line === true && req.body?.steps !== undefined) {
       const stepsNow = Date.now();
       const rawLine = typeof objective === 'string' ? objective.trim().slice(0, 2000) : '';
-      const stepsOn = oneLineFactsEnabled(auth.companyId) && oneLineStepsEnabled(auth.companyId);
+      const stepsOn = true;
       // 사진 글 조각 = 한 줄 지문에서만 뺀다(판정 응답의 line_fp 와 같은 지문 · 원장 접두가 갈리지 않게) · 원문은 그대로 생성기에
       const stepsReads = sanitizeLineReads(req.body?.read_texts);
       const steps = prepareLineStepsRequest(req.body, auth.companyId, rawLine, stepsReads === 'invalid' ? undefined : stepsReads, stepsNow, stepsOn);
@@ -1627,13 +1627,12 @@ router.post('/inapp/ai-generate', singleFlight('inapp-generate', async (req: Req
       // ★ 2026-10-17 템플릿 캠페인 — 템플릿 칸이 온 단계 요청만(스위치 밖인데 오면 400)
       const tplSel = steps.body.template;
       const tplDef = tplSel ? getLineTemplate(tplSel.id) : null;
-      if (tplSel && !lineTemplatesEnabled(auth.companyId, stepsOn)) return res.status(400).json({ success: false, error: '이 기능은 아직 열리지 않았습니다. 화면을 새로 고친 뒤 다시 시도해 주세요.', code: 'FEATURE_DISABLED' });
       const lineProducts = sanitizeLineProducts(req.body?.products);
       if (lineProducts === 'invalid' || (lineProducts && lineProducts.length > 1)) return res.status(400).json({ success: false, error: '고른 상품을 다시 확인해 주세요.', code: 'LINE_PRODUCTS_INVALID' });
       // 생성 입력 전부를 지문에(직접 상품 전부 · 대표 사진 · 주소 답 · 혜택)
       const stepsPayload = {
         objective: rawLine, templateHint: templateHint || null, products: lineProductsKey(lineProducts || []),
-        benefit: steps.body.facts.benefit ?? null, manual: steps.body.manual, hero: steps.hero, link: steps.body.facts.link ?? null,
+        benefit: steps.body.facts.benefit ?? null, manual: steps.body.manual, hero: steps.hero, ...(steps.heroAsIs ? { heroAsIs: true } : {}), link: steps.body.facts.link ?? null,
         // ★ 템플릿 요청 = 템플릿 · 배치 · 페이지도 지문에(1017 요청 키는 그대로)
         ...(tplSel ? { template: tplSel, page: steps.body.page } : {}),
       };
@@ -1684,7 +1683,7 @@ router.post('/inapp/ai-generate', singleFlight('inapp-generate', async (req: Req
           const manualT = lineTemplateManual(steps.body.manual);
           const draft = await runInCreditBundle(() => draftLineTemplate({
             template: tplDef, channel: 'inapp', companyId: auth.companyId, line: groundLine, ...brand,
-            pinnedPrimary: linePinnedPrimary(kitRaw), cards: [...mallCards, ...manualT.cards], textProducts: manualT.textProducts, heroUpload: steps.hero, page: tplPage,
+            pinnedPrimary: linePinnedPrimary(kitRaw), cards: [...mallCards, ...manualT.cards], textProducts: manualT.textProducts, heroUpload: steps.hero, heroAsIs: steps.heroAsIs, proof: steps.body.proof, page: tplPage,
             benefitAnswer: steps.body.facts.benefit, periodEnd: steps.body.facts.periodEnd ?? null,
             link: steps.body.facts.link ?? tplPage?.url ?? delivery.link ?? null,
           }, { userId: auth.userId, source: 'inapp-ai-generator' }, { factsOnly: true }));   // ★ 1019 B-1018-1 값 = 코드(인앱 혜택 블록)
@@ -1725,7 +1724,7 @@ router.post('/inapp/ai-generate', singleFlight('inapp-generate', async (req: Req
     }
     // ★ 2026-10-05 한줄로 시그니처(설계서 §5) — 한 줄 입구(one_line:true) + 스위치 켠 회사 + 원문 없음일 때만 한 줄을 사용자 원문으로 쓴다.
     //   옛: 원문이 없으면 혜택 블록을 무조건 자리표시로 바꿔(inapp-ai-generator.ts:369-371) 사용자가 쓴 혜택도 사라지고 다시 물었다.
-    const lineOn = req.body?.one_line === true && oneLineFactsEnabled(auth.companyId);
+    const lineOn = req.body?.one_line === true;
     const lineAsEvent = lineOn && typeof objective === 'string' && objective.trim() && !(typeof event_text === 'string' && event_text.trim())
       ? objective.trim()
       : undefined;

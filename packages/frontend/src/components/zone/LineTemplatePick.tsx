@@ -152,9 +152,9 @@ export default function LineTemplatePick({ list, ranks, chosen, layout, channel,
           )}
           {channel === 'dm' ? (
             <div className="mt-4">
-              <ZoneSegmented<LineLayout> ariaLabel="배치" value={layout} onChange={onLayout}
-                items={[{ id: 'slides', label: '슬라이드형', icon: Layers }, { id: 'page', label: '한 페이지형', icon: Rows3 }]} />
-              <p className="mt-1.5 text-[12px] text-slate-500">{layout === 'slides' ? '넘겨 보는 장마다 화면을 꽉 채워요' : '한 장에 위에서 아래로 이어서 보여요'}</p>
+              <ZoneSegmented<LineLayout> ariaLabel="형태" value={layout} onChange={onLayout}
+                items={[{ id: 'page', label: '세로 스크롤', icon: Rows3 }, { id: 'slides', label: '넘기는 슬라이드', icon: Layers }]} />
+              <p className="mt-1.5 text-[12px] text-slate-500">{layout === 'slides' ? '옆으로 넘겨 보는 장마다 화면을 꽉 채워요' : '위에서 아래로 이어서 읽어요 · 브랜드 DM 대부분이 이 형태예요'}</p>
             </div>
           ) : (
             <p className="mt-4 text-[12.5px] text-slate-500">{channel === 'email' ? '이메일은 한 페이지로 만들어요' : '인앱은 팝업 한 장으로 만들어요'}</p>

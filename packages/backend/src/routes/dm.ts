@@ -45,12 +45,12 @@ import {
   type CampaignSpec, type ToneKey,
 } from '../utils/dm/dm-ai';
 import { checkCredit, deductCreditSafe, deductCreditOutcome, InsufficientCreditError, isCreditEnabledStrict, isChargedByKey } from '../utils/ai-credit';
-import { oneLineFactsEnabled, oneLineGaps, sanitizeLineFacts, buildLineEventText, isValidAttemptToken, buildOneLineIdempotencyKey, oneLineInflightKey, sanitizeLineProducts, lineProductsKey, sanitizeLineReads, applyLineReads } from '../utils/one-line-facts';   // ★ 2026-10-05 한줄로 시그니처 · ★1010 몰 상품 확정
+import { oneLineGaps, sanitizeLineFacts, buildLineEventText, isValidAttemptToken, buildOneLineIdempotencyKey, oneLineInflightKey, sanitizeLineProducts, lineProductsKey, sanitizeLineReads, applyLineReads } from '../utils/one-line-facts';   // ★ 2026-10-05 한줄로 시그니처 · ★1010 몰 상품 확정
 import { resolveLineMallCards, linePriceNotes, linePinnedPrimary, mergeLineBrandKit, type LineMallCard, type LineMallExcluded } from '../utils/line-mall-cards';   // ★ 2026-10-10 한 줄 DM 강화
 import { resolveIntegrationActor } from '../utils/integration-scope';
 // ★ 2026-10-17 한 줄 단계 모달(설계서 docs/2026-10-17-oneline-steps-modal-design.md §3 · §4-3) — 단계 답 · 직접 상품 · 대표 사진 · 버튼 주소 · 한 줄 완성 금액
-import { oneLineStepsEnabled, buildLineStepsEventText } from '../utils/one-line-steps';
-import { getLineTemplate, lineTemplatesEnabled } from '../utils/design-core/line-templates';   // ★ 2026-10-17 템플릿 캠페인
+import { buildLineStepsEventText } from '../utils/one-line-steps';
+import { getLineTemplate } from '../utils/design-core/line-templates';   // ★ 2026-10-17 템플릿 캠페인
 import { resolveLinePage, isLinePageError, type LinePageMaterial } from '../utils/line-template-page';
 import { draftLineTemplate, buildLineTemplateDm, lineTemplateBrand, lineTemplateDmMarker, lineTemplateManual, LineTemplateError } from '../utils/line-template-run';
 import { prepareLineStepsRequest, isLineStepsReqError, lineStepsKeyFor, settleLineStepsPrice, resolveLineStepsDelivery, lineStepsAttemptCharged, lineStepsLineLockKey, lineStepsCollected, lineStepsAttemptKeys } from '../utils/line-steps-context';
@@ -998,13 +998,13 @@ dmRouter.post('/ai/one-shot-generate', singleFlight('dm-generate', async (req: a
     //   스위치 켠 회사면 한 줄을 **사용자 원문(event_text)** 으로 옮긴다 — 출구 가드 근거가 parsePrompt 요약(자기 참조 · dm-ai.ts:480)이 아니라
     //   사용자 글자가 된다. 칸에 적은 답(facts)은 [혜택] 줄로 붙인다(원스텝 원문 직렬화와 같은 라벨). 스위치 밖인데 답이 오면 400(조용히 버리지 않는다).
     const oneLineReq = req.body?.one_line === true;
-    const lineOn = oneLineReq && oneLineFactsEnabled(companyId);
+    const lineOn = oneLineReq;
     // ★ 2026-10-17 한 줄 단계 모달 — `steps` 칸이 온 요청만(스위치 = 한 줄 보강 스위치 안에서만) · 답 칸 모양이 달라 혜택은 단계 답에서 읽는다
     const rawLine = prompt;
     const stepsNow = Date.now();
     const stepsReads = oneLineReq ? sanitizeLineReads(req.body?.read_texts) : undefined;
     const steps = oneLineReq
-      ? prepareLineStepsRequest(req.body, companyId, rawLine, stepsReads === 'invalid' ? undefined : stepsReads, stepsNow, lineOn && oneLineStepsEnabled(companyId))
+      ? prepareLineStepsRequest(req.body, companyId, rawLine, stepsReads === 'invalid' ? undefined : stepsReads, stepsNow, lineOn)
       : undefined;
     if (isLineStepsReqError(steps)) return res.status(steps.status).json({ success: false, error: steps.error, code: steps.code });
     // 단계 요청은 결과 화면 착지 경로만(서버 초안 → 차감 → 낸 것만 건넨다 · 미과금 결과 0 · 10-10 계약 그대로)
@@ -1012,7 +1012,6 @@ dmRouter.post('/ai/one-shot-generate', singleFlight('dm-generate', async (req: a
     // ★ 2026-10-17 템플릿 캠페인 — 템플릿 칸이 온 단계 요청만(스위치 = 한 줄 단계 스위치 안에서만 · 밖인데 오면 400 · 조용히 버리지 않는다)
     const tplSel = steps && steps.body.template ? steps.body.template : null;
     const tplDef = tplSel ? getLineTemplate(tplSel.id) : null;
-    if (tplSel && !lineTemplatesEnabled(companyId, true)) return res.status(400).json({ success: false, error: '이 기능은 아직 열리지 않았습니다. 화면을 새로 고친 뒤 다시 시도해 주세요.', code: 'FEATURE_DISABLED' });
     const lineFacts = oneLineReq
       ? (steps ? (steps.body.facts.benefit !== undefined ? { benefit: steps.body.facts.benefit } : undefined) : sanitizeLineFacts(req.body?.facts))
       : undefined;
@@ -1061,7 +1060,7 @@ dmRouter.post('/ai/one-shot-generate', singleFlight('dm-generate', async (req: a
     // ★ 2026-10-17 단계 요청 = 한 줄 완성 원장 키(회사 · 채널 · KST 날짜 · 한 줄 지문 · 시도 지문) · 생성 입력 전부를 지문에(직접 상품 전부 · 대표 사진 · 주소 답)
     // ★ 템플릿 요청 = 템플릿 · 배치 · 페이지(주소 + 그대로 쓰기 지문)도 지문에(바꾸면 새 시도 · 1017 요청 키는 그대로)
     const stepsPayload = steps
-      ? { prompt, eventText, scenario: scenario || null, products: lineProductsKey(lineProducts || []), manual: steps.body.manual, hero: steps.hero, link: steps.body.facts.link ?? null, ...(tplSel ? { template: tplSel, page: steps.body.page } : {}) }
+      ? { prompt, eventText, scenario: scenario || null, products: lineProductsKey(lineProducts || []), manual: steps.body.manual, hero: steps.hero, ...(steps.heroAsIs ? { heroAsIs: true } : {}), ...(steps.body.proof.length > 0 ? { proof: steps.body.proof } : {}), link: steps.body.facts.link ?? null, ...(tplSel ? { template: tplSel, page: steps.body.page } : {}) }
       : null;
     const idemKey = attemptToken
       ? (steps
@@ -1163,7 +1162,7 @@ dmRouter.post('/ai/one-shot-generate', singleFlight('dm-generate', async (req: a
       const generateTemplateDm = async (): Promise<Awaited<ReturnType<typeof oneShotGenerate>>> => {
         const draft = await draftLineTemplate({
           template: tplDef!, channel: 'dm', companyId, line: typedLine, ...tplBrand!, brandName: tplBrand!.brandName || brandName || '',
-          pinnedPrimary: pinPrimary, cards: [...lineCards, ...tplManual!.cards], textProducts: tplManual!.textProducts, heroUpload: steps!.hero, page: tplPage,
+          pinnedPrimary: pinPrimary, cards: [...lineCards, ...tplManual!.cards], textProducts: tplManual!.textProducts, heroUpload: steps!.hero, heroAsIs: steps!.heroAsIs, proof: steps!.body.proof, page: tplPage,
           benefitAnswer: steps!.body.facts.benefit, periodEnd: steps!.body.facts.periodEnd ?? null,
           link: steps!.body.facts.link ?? tplPage?.url ?? stepsDelivery?.link ?? null,
         }, { userId: req.user?.userId, source: 'dm-ai-generate' }, { factsOnly: true });   // ★ 1019 B-1018-1 값 = 코드

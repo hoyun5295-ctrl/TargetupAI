@@ -473,8 +473,8 @@ export interface BuildDeps {
   auditRead?(companyId: string, userId: string, readIds: string[]): Promise<void>;
 }
 
-/** 서빙 URL → 디스크 경로(파일명 문자 제한은 isCompanyImageUrl 이 이미 걸렀다) */
-function buildImageDiskPath(url: string, companyId: string): string | null {
+/** 서빙 URL → 디스크 경로(파일명 문자 제한은 isCompanyImageUrl 이 이미 걸렀다) · ★1021 한 줄 헤드라인도 쓴다(routes/image-studio line-headline) */
+export function buildImageDiskPath(url: string, companyId: string): string | null {
   const [dmPrefix, libPrefix] = companyImagePrefixes(companyId);
   if (url.startsWith(dmPrefix)) return path.join(DM_IMAGE_DIR, companyId, url.slice(dmPrefix.length));
   if (url.startsWith(libPrefix)) return path.join(INAPP_IMAGE_BASE, companyId, url.slice(libPrefix.length));

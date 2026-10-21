@@ -54,6 +54,8 @@ export interface LineMaterials {
    * 없으면 지금 그대로(1017 고객 경로 · AI 영업).
    */
   coverHeadline?: string | null;
+  /** ★ 2026-10-21 ④ 신뢰 — 고객 후기(사람이 붙여 넣은 원문 · 별점은 사람이 고른 값) · 비면 후기 구역 없음 */
+  proof?: Array<{ body: string; author: string; rating: number }> | null;
 }
 
 /** 빅세일 표지 제목으로 쓸 수 있는 혜택 길이(플래너 표지 규칙 · coverHeadline 이 있을 때만) */
@@ -306,6 +308,9 @@ export function lineTemplatePageParts(t: LineTemplate, m0: LineMaterials, c: Lin
     pages.push(closingParts(m, c, [countdownPart(t, m)]));
   }
   if (events.length > 0) pages.splice(pages.length - 1, 0, events);
+  // ★ 2026-10-21 ④ 신뢰 = 마무리 장 바로 앞 한 장(직원 실물 순서: 본품 → 후기 → 마감 · 혜택) · 후기가 없으면 구역 자체가 없다(빈칸 0)
+  const reviews = (m.proof || []).filter((r) => r && r.body).slice(0, 3);
+  if (reviews.length > 0) pages.splice(pages.length - 1, 0, [{ type: 'reviews', props: { title: '먼저 써 본 고객 후기', reviews: reviews.map((r) => ({ rating: r.rating, author: r.author, body: r.body })), show_average_rating: true }, part: 'proof' }]);
   return pages.filter((p) => p.length > 0);
 }
 
@@ -451,10 +456,12 @@ export function lineTemplateGate(sections: readonly Section[]): string[] {
       if (p.image_url) imgs.push(String(p.image_url));
     }
     if (s.type === 'gallery') for (const im of p.images || []) if (im?.url) imgs.push(String(im.url));
+    if (s.type === 'reviews' && (!Array.isArray(p.reviews) || !p.reviews.some((r: any) => r?.body))) out.push('빈 후기 섹션');
     // 주 버튼만 센다 — AI 영업 행사 링크(테두리 버튼)는 결과물 버튼 하나 규칙 밖(고객 경로 버튼은 전부 주 버튼 · ★ 2026-10-18)
     if (s.type === 'cta') ctas += Array.isArray(p.buttons) ? p.buttons.filter((b: any) => b?.style !== 'outline').length : 0;
     if (s.type === 'cta' && s.treatment === 'sticky') out.push('슬라이드 sticky 버튼');
-    const text = JSON.stringify(p);
+    // 후기 = 고객이 붙인 원문(「직접 입력해서 주문」 같은 말이 자리표시로 오인돼 생성이 막혔다 · Codex P3 R1) → 자리표시 검사 밖
+    const text = s.type === 'reviews' ? '' : JSON.stringify(p);
     if (PH.test(text)) out.push(`자리표시 글자(${s.type})`);
   }
   const dup = imgs.filter((u, i) => imgs.indexOf(u) !== i);

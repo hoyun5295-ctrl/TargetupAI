@@ -39,6 +39,20 @@
         "docs/mockups"
       ],
       "port": 8791
+    },
+    {
+      "name": "render-check",
+      "runtimeExecutable": "python",
+      "runtimeArgs": [
+        "-m",
+        "http.server",
+        "8793",
+        "--bind",
+        "127.0.0.1",
+        "--directory",
+        "C:/Users/ceo/AppData/Local/Temp/claude/C--Users-ceo-projects-targetup/fd234e85-58cb-4d5a-beea-c6ed4490aaff/scratchpad/render"
+      ],
+      "port": 8793
     }
   ]
 }

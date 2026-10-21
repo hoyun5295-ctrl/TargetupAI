@@ -8,19 +8,15 @@ import type { Section, SectionType } from './dm-section-registry';
 
 export type DmLayoutMode = 'scroll' | 'slides';
 
-/** 페이지를 별도 슬라이드로 쪼개면 좋은 시각 콘텐츠 섹션 — 하나라도 있으면 슬라이드 모드 권장 */
-const SLIDE_TRIGGER_TYPES: SectionType[] = ['product_carousel', 'gallery', 'slideshow'];
 /** 앞쪽 인트로로 한 장에 묶는 섹션 */
 const INTRO_TYPES: SectionType[] = ['header', 'hero'];
 
 /**
- * 섹션 구성으로 레이아웃 모드를 자동 결정.
- * 시각 카드형(상품 슬라이드·갤러리·슬라이드쇼)이 하나라도 있으면 slides, 아니면 scroll.
- * 시나리오·자연어 공통 — 내용 기반이라 하드 매핑보다 견고하다.
+ * ★ 2026-10-21 자동 생성 DM 의 형태 = 세로 스크롤(설계서 docs/2026-10-21-oneline-content-design.md §3-3).
+ * 옛 decideLayoutMode = 상품 슬라이드 · 갤러리 · 슬라이드쇼가 하나라도 있으면 묻지 않고 slides(Harold 「무조건 슬라이드 · 칸 안 맞고 빈 공간 투성이」).
+ * 직원 실물 28건 중 27건이 scroll(1021 실측) → 기계가 고르면 늘 scroll · 슬라이드는 사람이 고를 때만(한 줄 창 형태 칸 · 편집기 토글).
  */
-export function decideLayoutMode(sections: Section[]): DmLayoutMode {
-  return sections.some((s) => SLIDE_TRIGGER_TYPES.includes(s.type)) ? 'slides' : 'scroll';
-}
+export const DM_AUTO_LAYOUT: DmLayoutMode = 'scroll';
 
 // ★ 2026-07-16 M2 슬라이드 스토리보드 — 혼자서도 한 장을 꽉 채우는 "리치" 섹션
 //   (상품·이미지·영상·인터랙션 = 자체 콘텐츠 밀도 보유). 그 외 "얇은" 섹션은 단독 장 금지.

@@ -52,7 +52,14 @@ const SYSTEM = `당신은 한국 브랜드의 마케팅 카피라이터입니다
 - 긴 줄표 기호와 따옴표 장식을 쓰지 않습니다. 이모지를 쓰지 않습니다.`;
 
 /** AI 1회 — 실패(응답 없음 · JSON 아님)는 던진다(호출부 503 · 차감 0) */
-export async function fillLineTemplateCopy(t: LineTemplate, g: LineCopyGround, ctx: { companyId: string; userId?: string; source: string }): Promise<{ copy: LineCopy; replaced: LineCopyKey[] }> {
+/** ★ 2026-10-21 실물 예시 상한(문자 · 토큰 예산) */
+export const LINE_COPY_EXEMPLAR_MAX = 2400;
+
+/**
+ * ctx.exemplars = 같은 업종 직원 실물 문구(가린 글 · 설계서 docs/2026-10-21-oneline-content-design.md §3-5) — 리듬 · 길이 · 말투 참고만.
+ *   ⛔ 근거 글(ground)에 넣지 않는다 = 예시의 숫자 · 혜택이 값 검사 근거가 되지 않는다(지어낸 값은 그대로 기본 문구로 바뀐다).
+ */
+export async function fillLineTemplateCopy(t: LineTemplate, g: LineCopyGround, ctx: { companyId: string; userId?: string; source: string; exemplars?: string | null }): Promise<{ copy: LineCopy; replaced: LineCopyKey[] }> {
   const fields = t.copy.map((f) => `- ${f.key} (${f.max}자 이내): ${f.hint}`).join('\n');
   const user = [
     `[템플릿] ${t.label} · ${t.desc}`,
@@ -63,6 +70,7 @@ export async function fillLineTemplateCopy(t: LineTemplate, g: LineCopyGround, c
     g.periodLabel ? `[기간] ${g.periodLabel}` : '',
     g.productNames.length > 0 ? `[상품] ${g.productNames.slice(0, 8).join(', ')}` : '',
     g.pageText ? `[행사 페이지 문구 · 그대로 써도 되는 원문]\n${g.pageText.slice(0, 1200)}` : '',
+    ctx.exemplars ? `[같은 업종 브랜드가 실제로 보낸 문구 · 문장 리듬 · 길이 · 말투만 참고 · 예시의 숫자 · 혜택 · 상품명 · 브랜드명은 절대 쓰지 않는다]\n${ctx.exemplars.slice(0, LINE_COPY_EXEMPLAR_MAX)}` : '',
     `[채울 칸]\n${fields}`,
     'JSON 으로만 답하세요.',
   ].filter(Boolean).join('\n');

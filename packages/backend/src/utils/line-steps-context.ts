@@ -105,6 +105,8 @@ export interface LineStepsPrepared {
   textProducts: Array<{ name: string; price?: number }>;
   /** 사람이 올린 대표 사진(이 회사 경로 · 없으면 null) */
   hero: string | null;
+  /** ★ 2026-10-21 대표 사진 = 스튜디오 헤드라인 포스터(글자 박힘 · 덮지 않는다) */
+  heroAsIs: boolean;
   /** 모든 직접 상품의 사진 · 주소(카드가 되지 못한 것 포함 · 넣은 순서) — 대표 사진 · 버튼 주소 재료 */
   manualImages: string[];
   manualUrls: string[];
@@ -144,7 +146,7 @@ export function prepareLineStepsRequest(
   const hero = sanitizeLineCompanyImage(body.heroImage, isCo);
   if (split === 'invalid' || hero === 'invalid') return { status: 400, code: 'LINE_STEPS_IMAGE_INVALID', error: '사진은 이 화면에서 올린 사진만 쓸 수 있어요. 사진을 다시 올려 주세요.' };
   return {
-    body, manualCards: split.cards, textProducts: split.textProducts, hero, manualImages: split.images, manualUrls: split.urls,
+    body, manualCards: split.cards, textProducts: split.textProducts, hero, heroAsIs: !!hero && body.heroPoster, manualImages: split.images, manualUrls: split.urls,
     // KST 는 일광 절약 시간이 없다 → 24시간 전의 KST 날짜 = 어제
     fp: lineStepsFp(rawLine, reads), day: kstDayOf(nowMs), prevDay: kstDayOf(nowMs - 86_400_000), token, expectedCost: body.expectedCost,
   };

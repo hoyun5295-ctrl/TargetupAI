@@ -42,10 +42,10 @@ import { formatDateValue, getOpt080Number, buildAdMessage, buildAdSubject } from
 import { resolveJourneyAdFlag } from '../utils/journey-ad-policy';
 import { loadPlanContext, canUseFeature, requirePlanFeature, isBetaAccessAllowed, isAiOperatorAllowed } from '../utils/plan-guard';
 import { snsPublishEnabled } from '../utils/sns-constants';   // ★ 2026-09-20 허브 SNS 플래그(§3-11)
-import { oneLineFactsEnabled, oneLineGaps, sanitizeLineFacts, pickCopyCVariant, lineProductTerms, lineBenefitPercents, sanitizeLineReads, applyLineReads, oneLineAskEnabled, oneLineIntent, oneLineAskTopic, lineWithoutReads } from '../utils/one-line-facts';   // ★ 2026-10-05 한줄로 시그니처 · ★1010 몰 후보 검색어
+import { oneLineGaps, sanitizeLineFacts, pickCopyCVariant, lineProductTerms, lineBenefitPercents, sanitizeLineReads, applyLineReads, oneLineAskEnabled, oneLineIntent, oneLineAskTopic, lineWithoutReads } from '../utils/one-line-facts';   // ★ 2026-10-05 한줄로 시그니처 · ★1010 몰 후보 검색어
 // ★ 2026-10-17 한 줄 단계 모달(설계서 docs/2026-10-17-oneline-steps-modal-design.md §4-1) — 판정 응답에 단계 목록(plan) · 버튼 라벨 금액
-import { buildLineStepsPlan, oneLineStepsEnabled, isLineStepsChannel, lineStepsFp } from '../utils/one-line-steps';
-import { LINE_TEMPLATES, rankLineTemplates, lineTemplatesEnabled } from '../utils/design-core/line-templates';   // ★ 2026-10-17 템플릿 캠페인
+import { buildLineStepsPlan, isLineStepsChannel, lineStepsFp } from '../utils/one-line-steps';
+import { LINE_TEMPLATES, rankLineTemplates } from '../utils/design-core/line-templates';   // ★ 2026-10-17 템플릿 캠페인
 import { buildLineTemplatePlan, type LineTemplatePlan } from '../utils/line-template-plan';
 import { loadLineStepsCompanyFacts, lineStepsFullCost } from '../utils/line-steps-context';
 import { resolveIntegrationActor } from '../utils/integration-scope';
@@ -1035,7 +1035,7 @@ router.get('/operator/access', async (req: Request, res: Response) => {
 router.post('/one-line/gaps', async (req: Request, res: Response) => {
   const companyId = req.user?.companyId;
   const line = typeof req.body?.line === 'string' ? req.body.line.slice(0, 2000) : '';
-  const enabled = oneLineFactsEnabled(companyId);
+  const enabled = !!companyId;
   // ★ 2026-10-10 H3 — 혜택 판정은 사진에서 읽은 조각의 숫자를 지운 글로(사진에만 혜택이 있으면 묻는다) · 검색어는 원래 글로
   const reads = sanitizeLineReads(req.body?.read_texts);
   const judged = applyLineReads(line, reads === 'invalid' ? undefined : reads, false);
@@ -1054,10 +1054,10 @@ router.post('/one-line/gaps', async (req: Request, res: Response) => {
   let templatesEnabled = false;
   let templates: ReturnType<typeof rankLineTemplates> | null = null;
   let templatePlans: Record<string, LineTemplatePlan> | null = null;
-  if (companyId && isLineStepsChannel(menu) && oneLineStepsEnabled(companyId)) {
+  if (companyId && isLineStepsChannel(menu)) {
     stepsEnabled = true;
     stepsCost = lineStepsFullCost(menu).total;
-    templatesEnabled = lineTemplatesEnabled(companyId, true);
+    templatesEnabled = true;
     if (line.trim()) {
       try {
         const readList = reads === 'invalid' ? undefined : reads;
@@ -1272,7 +1272,7 @@ router.post('/operator/propose', async (req: Request, res: Response) => {
     // ★ 2026-10-05 한줄로 시그니처 §3-4 — 허브 문자는 확인 창이 없고 생성기가 혜택 자리를 남기지 않는다(시즌감으로 채운다).
     //   그래서 판정이 걸리면 **생성 전에 한 번만** 묻는다(생성 0 · 차감 0 응답). 답이 오면(null = 없음 포함) 묻지 않고 만든다.
     //   스위치 밖 회사 = 지금 그대로. 스위치 밖인데 답이 오면 조용히 버리지 않고 400(사용자가 적은 값이 사라지지 않게).
-    const lineOn = oneLineFactsEnabled(companyId);
+    const lineOn = !!companyId;
     const lineFacts = sanitizeLineFacts(req.body?.facts);
     if (lineFacts === 'invalid') {
       return res.status(400).json({ success: false, error: '혜택은 300자 이내로 적어 주세요.', code: 'LINE_FACTS_INVALID' });

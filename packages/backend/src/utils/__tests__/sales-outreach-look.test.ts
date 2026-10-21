@@ -13,7 +13,7 @@ import {
 import { TREATMENTS } from '../dm/dm-art-direction';
 import { EMAIL_TREATMENTS, EMAIL_BACKGROUNDS } from '../email/email-blocks';
 import { rebuildDmPages } from '../dm/dm-section-prune';
-import { splitSectionsIntoPages, decideLayoutMode } from '../dm/dm-page-split';
+import { splitSectionsIntoPages, DM_AUTO_LAYOUT } from '../dm/dm-page-split';
 import { renderDmViewerHtml } from '../dm/dm-viewer';
 import { renderEmailSections } from '../email/email-section-renderer';
 import type { Section } from '../dm/dm-section-registry';
@@ -135,8 +135,8 @@ describe('렌더 HTML 지표 — 룩이 실제로 실린다(JSON이 아니라 �
     const html = renderDmViewerHtml({ title: 't', store_name: 'b', sections: looked.sections, pages, layout_mode: OUTREACH_DM_LAYOUT_MODE, brand_kit: buildOutreachBrandKit(null, 'fashion') }, '/api/dm/v');
     expect(html).toContain('data-treatment="mosaic"');
     expect((html.match(/href="https:\/\/b\.com\/plan"/g) || []).length).toBe(3);
-    // 대조: 공용 판정은 slides를 고른다(갤러리 있음) — 그 경로를 아웃리치가 타지 않는다는 것이 이 테스트의 요지
-    expect(decideLayoutMode(looked.sections)).toBe('slides');
+    // ★ 2026-10-21 공용 자동 형태도 세로(옛 판정은 갤러리가 있으면 slides 였다 · 폐지)
+    expect(DM_AUTO_LAYOUT).toBe('scroll');
   });
   it('이메일: 룩 전 = 밴드 0 → 룩 후 = 밴드 양수 + split 히어로', () => {
     const base = fixture(IMG('port'));

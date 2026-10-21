@@ -247,7 +247,6 @@ export const PLAN_FEATURE_INTROS: PlanFeatureIntro[] = [
     ],
     costs: [
       { label: '만들기', source: 'dm-ai-generate', credits: 5 },
-      { label: '질문 몇 개로 만들기(질문 완성 · 한 번)', source: 'one-step-interview', credits: 50 },
       { label: '카탈로그 DM 만들기', source: 'catalog-dm-build', credits: 10 },
       { label: '발행(처음 발행할 때 한 번 · 링크만 받기 포함)', source: 'dm-builder', credits: 100 },
       { label: '참여 칸이 있는 DM 발행', source: 'dm-interaction-publish', credits: 120 },

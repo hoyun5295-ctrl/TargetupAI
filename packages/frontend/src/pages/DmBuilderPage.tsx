@@ -36,7 +36,6 @@ import DmTopBar from '../components/dm/DmTopBar';
 import DmLeftPanel from '../components/dm/DmLeftPanel';
 import DmCanvas from '../components/dm/DmCanvas';
 import DmRightPanel from '../components/dm/DmRightPanel';
-import AiPromptModal from '../components/dm/modals/AiPromptModal';
 // 고객 데이터 없으면 AI 문안 생성 전 안내 (공용 게이트)
 import { useCustomerDataGate, CustomerDataRequiredBanner, CustomerDataRequiredModal } from '../components/CustomerDataGate';
 import AiImproveModal from '../components/dm/modals/AiImproveModal';
@@ -48,7 +47,6 @@ import FontApplyModal from '../components/dm/modals/FontApplyModal';
 // ★ 2026-07-16 M4 — 정예 템플릿 진입 폐기 (Harold 명시 — 설계서 §1-2. EliteTemplateModal 미사용)
 import { Wand2 } from 'lucide-react';
 // ★ 2026-08-13 원스텝 AI 컨텐츠 생성 (설계서 = docs/2026-08-13-one-step-content-interview-design.md)
-import OneStepInterviewModal from '../components/dm/OneStepInterviewModal';
 import DmQuickBar from '../components/dm/DmQuickBar';
 // ★ 2026-09-14 T5·T6 AI 자동제작 — 목록 카드띠(입구) · 편집 캔버스 위 결과 바 · 노출 스위치(신규 ENV)
 import AiBuildEntryStrip from '../components/ai-build/AiBuildEntryStrip';
@@ -271,8 +269,6 @@ export default function DmBuilderPage() {
   const [currentPage, setCurrentPage] = useState(1);
   // 빠른시작·자연어 생성 전 5크레딧 차감 확인 (Harold 명시 — 즉시 차감 X)
   const [pendingGen, setPendingGen] = useState<{ prompt?: string; scenario?: string; desc: string; oneLine?: boolean; askBenefit?: boolean; terms?: string[]; percents?: number[]; reads?: string[] } | null>(null);
-  // ★ 2026-08-13 원스텝 — 질문에 답하면 그 답이 마스터프롬프트가 되어 생성으로 이어진다.
-  const [oneStepOpen, setOneStepOpen] = useState(false);
 
   // ★ D216+ 키보드 단축키 활성 (편집 모드 한정)
   useDmKeyboardShortcuts({ enabled: mode === 'edit' });
@@ -680,7 +676,7 @@ export default function DmBuilderPage() {
         setLineFocus((v) => v + 1);
         return;
       }
-      case 'onestep': setOneStepOpen(true); return;
+      case 'onestep': setLineFocus((v) => v + 1); return;   // ★ 2026-10-21 옛 주소 = 한 줄 창(readDmEntry 가 line 으로 읽는다 · 남은 갈래)
       case 'images': {
         // 만들기 화면에서 고른 완성 이미지 = 「완성 이미지로」 버튼과 같은 길(0크레딧 카탈로그 DM → 편집)
         const files = takeMakeImages();
@@ -839,9 +835,11 @@ export default function DmBuilderPage() {
     setMode('list');
   };
 
-  // ← 상단바 뒤로가기: 변경사항 있으면 경고 모달, 없으면 즉시 목록으로
-  const handleBackRequest = () => {
-    if (!isDirty) { handleBackToList(); return; }
+  // ← 상단바 뒤로가기: 변경사항 있으면 경고 모달, 없으면 즉시 목록으로 · after = 목록으로 나간 뒤 할 일(한 줄 창 열기)
+  const handleBackRequest = (after?: () => void) => {
+    // onBack 이 onClick 에 그대로 걸리면 첫 인자가 이벤트다 → 함수일 때만 부른다
+    const leave = () => { handleBackToList(); if (typeof after === 'function') after(); };
+    if (!isDirty) { leave(); return; }
     // ★ 2026-10-14 (⑧ 1단계) 나가기 창에 [저장하고 나가기] — 저장은 기존 save() 하나(새 쓰기 경로 0)
     const g = useDmBuilderStore.getState();
     setConfirm({
@@ -852,10 +850,19 @@ export default function DmBuilderPage() {
       confirmLabel: '버리고 나가기', cancelLabel: '계속 편집', altLabel: '저장하고 나가기',
       // 저장이 끝났을 때 아직 같은 편집 세션(getEditSession · id 가 아니라 토큰)일 때만 나간다 — 응답 지연 중 다른 DM 을 열거나 같은 DM 을 다시 열면 그 화면을 초기화하지 않고,
       //   신규 DM 의 첫 저장(id null → 발급)은 같은 세션으로 본다(Codex 1R·2R)
-      onAlt: async () => { const token = getEditSession(); const ok = await useDmBuilderStore.getState().save(); const st = useDmBuilderStore.getState(); if (ok && getEditSession() === token && !st.isDirty) handleBackToList(); },
-      onConfirm: () => { handleBackToList(); },
+      onAlt: async () => { const token = getEditSession(); const ok = await useDmBuilderStore.getState().save(); const st = useDmBuilderStore.getState(); if (ok && getEditSession() === token && !st.isDirty) leave(); },
+      onConfirm: () => { leave(); },
     });
   };
+
+  // ★ 2026-10-21 옛 AI 만들기 창(AiPromptModal) 폐지 — 편집기의 [AI로 다시 구성] · 캔버스 · 상단 · 단축키는 한 줄 창으로(입구 하나 · 설계서 §3-1)
+  const openModalNow = useDmBuilderStore((s) => s.openModal);
+  useEffect(() => {
+    if (openModalNow !== 'ai-prompt') return;
+    useDmBuilderStore.getState().setOpenModal(null);
+    handleBackRequest(() => setLineFocus((v) => v + 1));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [openModalNow]);
 
   // ── 편집 모드 ──
   if (mode === 'build') {
@@ -1179,7 +1186,6 @@ export default function DmBuilderPage() {
           { icon: Package, title: '재료로 만들기', desc: '행사 주소·사진만 넣으면 완성', tint: 'from-amber-400 to-orange-500', featured: true, badge: '추천', onClick: () => navigate('/quick-campaign?channel=dm'), disabled: generating },
           { icon: Layers, title: '블록으로 직접', desc: '블록을 고르면 필요한 것만 물어봐요', tint: 'from-violet-400 to-fuchsia-500', onClick: handleStartBlockBuild, disabled: generating },
           { icon: BookOpen, title: '카탈로그 DM', desc: '쪽 이미지를 넘겨 보는 카탈로그', tint: 'from-sky-400 to-blue-500', onClick: () => navigate('/quick-campaign?channel=catalog'), disabled: generating },
-          { icon: Wand2, title: '질문 몇 개로', desc: '답하면 그 답으로 DM · 생성 5 + 질문 완성 50', tint: 'from-emerald-400 to-teal-500', onClick: () => { if (!generating) setOneStepOpen(true); }, disabled: generating },
         ],
         more: [
           { label: '빈 화면에서', icon: FilePlus2, onClick: handleCreateNew },
@@ -1345,34 +1351,6 @@ export default function DmBuilderPage() {
 
       {/* 고객 데이터 없음 — 생성 차단 안내 */}
       <CustomerDataRequiredModal open={showDataGate} onClose={() => setShowDataGate(false)} />
-
-      {/* ★ 2026-08-13 원스텝 — 결과는 기존 적용 경로를 그대로 탄다(신규 DM에만 적용 · 사용자 콘텐츠 비파괴) */}
-      <OneStepInterviewModal
-        open={oneStepOpen}
-        onClose={() => setOneStepOpen(false)}
-        onGenerated={(payload, _sessionId, sessionDetached) => {
-          setOneStepOpen(false);
-          const sections = (payload.sections || []) as any[];
-          createNew({ title: '원스텝 생성 DM' });
-          applyAiGenerated(sections, payload.brand_kit as any, '원스텝 생성', {
-            pages: payload.pages as any,
-            layoutMode: payload.layout_mode as any,
-          });
-          void save({ silent: true }).catch(() => {});
-          setMode('edit');
-          const missing = payload.coverage?.missing?.length || 0;
-          setToast({
-            type: 'success',
-            // 결과물은 여기 그대로 들어왔다. 다만 질문 답이 저장된 자리와 끊겼으면 그 사실을 알린다 —
-            // 안 알리면 사용자가 "다시 열면 이어서 나오겠지"라고 믿고 되돌아갔다가 빈 화면을 본다.
-            message: sessionDetached
-              ? `${sections.length}개 섹션으로 만들었어요. 이 결과는 지금 화면에서 이어서 편집해 주세요(질문 답으로는 다시 불러올 수 없습니다)`
-              : missing > 0
-                ? `${sections.length}개 섹션으로 만들었어요. 반영되지 않은 항목 ${missing}건은 편집기에서 확인해 주세요`
-                : `${sections.length}개 섹션으로 만들었어요. 문구와 이미지만 다듬으면 됩니다`,
-          });
-        }}
-      />
 
       {/* ★ 2026-10-17 한 줄 단계 모달 — [만들기] = 모달을 닫고 지금 진행 표시로 만든다(결과 화면 착지) */}
       <LineStepsModal
@@ -1636,7 +1614,6 @@ function EditorModals() {
 
   return (
     <>
-      <AiPromptModal open={openModal === 'ai-prompt'} onClose={close} />
       <AiImproveModal open={openModal === 'ai-improve'} onClose={close} />
       {/* ★ 2026-07-28 넘길 수 있는 치명(required_info)만 남은 경우 확인 후 발행 — 크레딧 확인 모달을 그대로 거친다.
           넘긴 항목은 발행 시 서버가 validation_result에 기록한다. */}

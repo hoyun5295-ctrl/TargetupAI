@@ -13,7 +13,7 @@ import { readFileSync } from 'fs';
 import { join } from 'path';
 import {
   oneLineGaps, hasConcreteBenefit, hasPromotionIntent, sanitizeLineFacts, buildLineEventText,
-  buildOneLineIdempotencyKey, isValidAttemptToken, oneLineFactsEnabled, copyCTestEnabled, pickCopyCVariant,
+  buildOneLineIdempotencyKey, isValidAttemptToken, copyCTestEnabled, pickCopyCVariant,
 } from './one-line-facts';
 
 describe('혜택 판정 — 업종 고정 사례', () => {
@@ -111,12 +111,7 @@ describe('멱등 · 스위치', () => {
     expect(isValidAttemptToken('a:b:c:d:e:f:g:h')).toBe(false);
     expect(isValidAttemptToken(123)).toBe(false);
   });
-  it('스위치는 비면 꺼지고 * = 전 회사', () => {
-    expect(oneLineFactsEnabled(C, '')).toBe(false);
-    expect(oneLineFactsEnabled(C, undefined as unknown as string)).toBe(false);
-    expect(oneLineFactsEnabled(C, '*')).toBe(true);
-    expect(oneLineFactsEnabled(C, `x, ${C}`)).toBe(true);
-    expect(oneLineFactsEnabled(null, '*')).toBe(false);
+  it('C안 시험 스위치는 비면 꺼진다(★ 2026-10-21 한 줄 보강 스위치는 삭제 · 전 회사)', () => {
     expect(copyCTestEnabled(C, '')).toBe(false);
   });
   it('C안 시험: 꺼진 회사 = undefined(현행) · 켜진 회사 = 반반', () => {

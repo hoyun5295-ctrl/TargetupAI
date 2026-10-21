@@ -358,7 +358,7 @@ describe('7. 배선 계약', () => {
     const ai = BACK('utils', 'dm', 'dm-ai.ts');
     const fn = ai.slice(ai.indexOf('export async function oneShotGenerate('));
     expect(fn.indexOf('placeLineMallCards(')).toBeLessThan(fn.indexOf('computeBriefCoverage(factBrief'));
-    expect(fn.indexOf('placeLineMallCards(')).toBeLessThan(fn.indexOf('decideLayoutMode(seeded)'));
+    expect(fn.indexOf('placeLineMallCards(')).toBeLessThan(fn.indexOf('splitSectionsIntoPages(seeded, layoutMode)'));
     expect(fn.indexOf('opts.pinPrimary')).toBeLessThan(fn.indexOf('applyVisualDirection(assembled'));
     // ★ 2026-10-19 Codex E1 — 합쳐 놓기(원스텝 인터뷰)만 확정 카드가 있어도 원문 상품을 추출 · 검산한다 · 그 밖은 지금 그대로
     expect(fn).toContain('if (((!confirmed && carouselIdx >= 0) || mergeSource) && productSource)');

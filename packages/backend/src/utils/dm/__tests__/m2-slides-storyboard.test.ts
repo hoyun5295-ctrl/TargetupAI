@@ -9,7 +9,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { splitSectionsIntoPages, decideLayoutMode, isRichSolo } from '../dm-page-split';
+import { splitSectionsIntoPages, DM_AUTO_LAYOUT, isRichSolo } from '../dm-page-split';
 import { createSection, type Section, type SectionType } from '../dm-section-registry';
 
 function make(types: SectionType[], enrich?: (s: Section) => void): Section[] {
@@ -124,11 +124,8 @@ describe('밀도 규칙 — 헐렁한 장 구조적 차단', () => {
     expect(splitSectionsIntoPages(secs, 'scroll')).toHaveLength(1);
   });
 
-  it('decideLayoutMode — 시각 카드형 있으면 slides (기존 동작 보존)', () => {
-    const withCarousel = make(['header', 'product_carousel', 'footer']);
-    const plain = make(['header', 'text_card', 'footer']);
-    expect(decideLayoutMode(withCarousel)).toBe('slides');
-    expect(decideLayoutMode(plain)).toBe('scroll');
+  it('★ 2026-10-21 자동 형태 = 세로 스크롤(상품 슬라이드가 있어도 묻지 않고 slides 로 가지 않는다)', () => {
+    expect(DM_AUTO_LAYOUT).toBe('scroll');
   });
 
   it('전 섹션 순서·개수 보존 (분할은 재배치가 아니다)', () => {

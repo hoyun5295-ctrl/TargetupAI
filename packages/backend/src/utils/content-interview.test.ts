@@ -403,11 +403,7 @@ describe('0814 정정 — 생성은 상태를 선점하고, 돈은 그 안에서
   });
 
   it('클라이언트가 세션 불일치를 받아서 구분한다 — 서버 필드에 소비처가 없으면 없는 것과 같다', () => {
-    const modal = readFileSync(path.join(__dirname, '../../../frontend/src/components/dm/OneStepInterviewModal.tsx'), 'utf8');
-    expect(modal).toContain('onGenerated(d.data as GeneratedPayload, sessionId, !!d.sessionDetached)');
-    const page = readFileSync(path.join(__dirname, '../../../frontend/src/pages/DmBuilderPage.tsx'), 'utf8');
-    expect(page).toMatch(/onGenerated=\{\(payload, _sessionId, sessionDetached\)/);
-    expect(page).toContain('sessionDetached');
+    // ★ 2026-10-21 원스텝 화면(OneStepInterviewModal)은 한 줄 창으로 흡수돼 지웠다 · 서버 계약만 남는다
   });
 
   it('크레딧제 미적용 회사는 견적도 0이다 — 화면 금액과 실차감(0)이 갈리지 않게', () => {
@@ -470,10 +466,6 @@ describe('0814 정정 — 생성은 상태를 선점하고, 돈은 그 안에서
     expect(route.indexOf('QUOTE_CHANGED')).toBeLessThan(route.indexOf("SET status = 'generating'"));
     // 검사가 AI 호출·차감보다 앞이다
     expect(route.indexOf('QUOTE_CHANGED')).toBeLessThan(route.indexOf('oneShotGenerate({'));
-    // 화면이 승인 총액을 실어 보내고, 변경 응답을 구분해 재확인한다
-    const modal = readFileSync(path.join(__dirname, '../../../frontend/src/components/dm/OneStepInterviewModal.tsx'), 'utf8');
-    expect(modal).toContain('expectedTotal: approvedTotal');
-    expect(modal).toContain("d?.code === 'QUOTE_CHANGED'");
   });
 
   // ★ Codex 6R — 항목이 둘이라 한 번만 갱신하면 두 차감의 **합산** 시간이 lease를 넘는다.

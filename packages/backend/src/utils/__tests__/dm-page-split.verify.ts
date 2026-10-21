@@ -3,7 +3,7 @@
  * 실행: npx ts-node packages/backend/src/utils/__tests__/dm-page-split.verify.ts
  */
 import assert from 'node:assert';
-import { decideLayoutMode, splitSectionsIntoPages } from '../dm/dm-page-split';
+import { DM_AUTO_LAYOUT, splitSectionsIntoPages } from '../dm/dm-page-split';
 
 // 순수함수는 s.type과 배열 조작만 보므로 최소 객체로 충분 (DB·레지스트리 런타임 의존 0)
 const mk = (type: string, order = 0): any => ({ id: `${type}-${order}`, type, order, props: {}, visible: true });
@@ -16,21 +16,9 @@ const ok = (n: string, f: () => void) => {
   console.log(`  ok - ${n}`);
 };
 
-console.log('[decideLayoutMode]');
-ok('상품 슬라이드가 있으면 slides', () => {
-  assert.strictEqual(decideLayoutMode([mk('header'), mk('product_carousel'), mk('footer')]), 'slides');
-});
-ok('갤러리가 있으면 slides', () => {
-  assert.strictEqual(decideLayoutMode([mk('hero'), mk('gallery')]), 'slides');
-});
-ok('슬라이드쇼가 있으면 slides', () => {
-  assert.strictEqual(decideLayoutMode([mk('slideshow')]), 'slides');
-});
-ok('시각 카드(상품/갤러리/슬라이드쇼)가 없으면 scroll', () => {
-  assert.strictEqual(decideLayoutMode([mk('header'), mk('hero'), mk('coupon'), mk('cta'), mk('footer')]), 'scroll');
-});
-ok('빈 섹션 = scroll', () => {
-  assert.strictEqual(decideLayoutMode([]), 'scroll');
+console.log('[DM_AUTO_LAYOUT]');
+ok('★ 2026-10-21 자동 형태 = scroll', () => {
+  assert.strictEqual(DM_AUTO_LAYOUT, 'scroll');
 });
 
 console.log('[splitSectionsIntoPages]');

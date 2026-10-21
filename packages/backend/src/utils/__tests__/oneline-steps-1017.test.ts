@@ -6,7 +6,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { readFileSync } from 'fs';
 import { resolve } from 'path';
 import {
-  oneLineStepsEnabled, linePeriodMentioned, lineTermFacts, lineUrls, buildLineStepsPlan, sanitizeLineStepsBody,
+  linePeriodMentioned, lineTermFacts, lineUrls, buildLineStepsPlan, sanitizeLineStepsBody,
   buildLineStepsEventText, formatLinePeriodEnd, buildLineStepsIdempotencyKey, lineStepsKeyPrefix, lineStepsCharge,
   kstDayOf, lineStepsFp, isValidLinePeriodEnd, sanitizeLineUrl, LINE_STEP_KEYS, LINE_STEPS_MAX,
   type LineStepsPlanInput,
@@ -26,16 +26,6 @@ const plan = (over: Partial<LineStepsPlanInput>) => buildLineStepsPlan({
 });
 const forLine = (line: string, over: Partial<LineStepsPlanInput> = {}) => plan({ judged: line, line, typed: line, ...over });
 const keys = (p: ReturnType<typeof buildLineStepsPlan>) => p.steps.map((s) => (s.item ? `${s.key}:${s.item}` : s.key));
-
-describe('스위치 — 한 줄 보강 스위치 안에서만(좁히기만)', () => {
-  it('두 명단 모두에 있어야 켜진다', () => {
-    expect(oneLineStepsEnabled(C, '*', '*')).toBe(true);
-    expect(oneLineStepsEnabled(C, '*', '')).toBe(false);
-    expect(oneLineStepsEnabled(C, '', '*')).toBe(false);
-    expect(oneLineStepsEnabled(C, C, `x,${C}`)).toBe(true);
-    expect(oneLineStepsEnabled(null, '*', '*')).toBe(false);
-  });
-});
 
 describe('기간 감지 — 「있음」 쪽으로 넓게(하나라도 있으면 묻지 않는다)', () => {
   it.each([

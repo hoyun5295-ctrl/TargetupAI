@@ -117,7 +117,7 @@ export interface AgentContext {
    */
   audienceScope?: 'operator';
   /**
-   * ★ 2026-10-05 한줄로 시그니처(ONE_LINE_FACTS_COMPANY_IDS 회사의 허브 제안만) — 한 줄에 대한 사용자 답.
+   * ★ 2026-10-05 한줄로 시그니처(허브 제안 · ★1021 전 회사) — 한 줄에 대한 사용자 답.
    *   있으면 문안의 혜택 근거 = 목표 문장 + 이 답뿐이다. 목표 문장에 붙는 회사 메모리 · 계절 힌트 · 대상 블록은 근거가 아니다.
    *   자동 마케팅(continuous-operator)은 넘기지 않는다 → 지금 그대로.
    */

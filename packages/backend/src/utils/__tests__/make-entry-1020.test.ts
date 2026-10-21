@@ -17,10 +17,9 @@ const FE = path.resolve(__dirname, '../../../../frontend/src');
 const read = (rel: string) => fs.readFileSync(path.join(FE, rel), 'utf8');
 
 describe('① 버튼 목록 · 라벨 = 채널마다(없는 입구는 감춘다)', () => {
-  it('모바일 DM · 카탈로그 = 한 줄 · 질문 · 완성 이미지 · 저장 소재 · 블록', () => {
+  it('모바일 DM · 카탈로그 = 한 줄 · 완성 이미지 · 저장 소재 · 블록(★ 2026-10-21 질문 몇 개로 = 한 줄 창으로 흡수)', () => {
     const want = [
       { kind: 'line', label: '한 줄로 자동 생성' },
-      { kind: 'onestep', label: '질문 몇 개로 만들기' },
       { kind: 'images', label: '완성 이미지로' },
       { kind: 'library', label: '저장 소재에서' },
       { kind: 'blocks', label: '블록으로 직접 만들기' },
@@ -52,7 +51,8 @@ describe('② 주소 ↔ 읽기 = 같은 약속', () => {
     expect(makeOtherHref('email', 'blocks')).toBe('/email-campaigns?other=blank');
   });
   it('받는 쪽 읽기 = 낸 주소의 종류 그대로 · 옛 1 · 모르는 값 = 없음', () => {
-    for (const k of ['line', 'onestep', 'images', 'library', 'blocks']) expect(readDmEntry(k)).toBe(k);
+    for (const k of ['line', 'images', 'library', 'blocks']) expect(readDmEntry(k)).toBe(k);
+    expect(readDmEntry('onestep')).toBe('line');   // ★ 2026-10-21 옛 주소 = 한 줄 창
     expect(readDmEntry('1')).toBeNull();
     expect(readDmEntry(null)).toBeNull();
     expect(readEmailEntry('line')).toBe('line');

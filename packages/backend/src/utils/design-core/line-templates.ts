@@ -282,14 +282,7 @@ export function rankLineTemplates(typed: string): Array<{ id: LineTemplateId; re
   return hits.map((h) => ({ ...h, recommended: h.id === firstHit }));
 }
 
-/** 이 회사에 템플릿 캠페인이 열려 있는가 — 한 줄 단계 스위치 안에서만(좁히기 · 비면 꺼짐 · `*` = 전체) */
-export function lineTemplatesEnabled(companyId: string | null | undefined, stepsOn: boolean, env: string | undefined = process.env.LINE_TEMPLATES_COMPANY_IDS): boolean {
-  if (!companyId || !stepsOn) return false;
-  const raw = String(env || '').trim();
-  if (!raw) return false;
-  if (raw === '*') return true;
-  return raw.split(',').map((s) => s.trim().toLowerCase()).filter(Boolean).includes(String(companyId).toLowerCase());
-}
+// ★ 2026-10-21 템플릿 캠페인 회사 명단 스위치 삭제 — 전 회사 같은 흐름(설계서 docs/2026-10-21-oneline-content-design.md §3-1)
 
 /**
  * 등록 관문(테스트가 부른다) — 칸마다 기본 문구에 숫자 0 · 상한 안 · 물을 수 있는 필수 칸 3개 이하 · 예시 문구가 상한 안 · 추천 규칙 존재.

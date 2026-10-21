@@ -8,7 +8,7 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync, existsSync } from 'fs';
 import { resolve } from 'path';
-import { LINE_TEMPLATES, getLineTemplate, validateLineTemplate, rankLineTemplates, lineTemplatesEnabled, type LineTemplate, type LineChannel } from '../design-core/line-templates';
+import { LINE_TEMPLATES, getLineTemplate, validateLineTemplate, rankLineTemplates, type LineTemplate, type LineChannel } from '../design-core/line-templates';
 import { composeLineDm, composeLineEmail, composeLineInapp, lineTemplateGate, planProductPages, dedupeLinePhotos, type LineMaterials, type LineCard } from '../line-template-compose';
 import { sanitizeLineCopy, lineExampleCopy, lineCopyGroundText } from '../line-template-copy';
 import { lineExampleMaterials, renderLineTemplateExample } from '../line-template-example';
@@ -66,12 +66,6 @@ describe('템플릿 원장 — 등록 관문 · 추천 · 스위치', () => {
     expect(r.find((x) => x.id === 'big-sale')!.reasons).toEqual(expect.arrayContaining(['세일']));
     expect(rankLineTemplates('가을 메뉴 소개').find((x) => x.recommended)?.id).toBe('season');
     expect(rankLineTemplates('매장 안내').some((x) => x.recommended)).toBe(false);
-  });
-  it('스위치 = 한 줄 단계 스위치 안에서만 · 비면 꺼짐 · * = 전체', () => {
-    expect(lineTemplatesEnabled('A', true, 'a,b')).toBe(true);
-    expect(lineTemplatesEnabled('A', false, '*')).toBe(false);
-    expect(lineTemplatesEnabled('A', true, '')).toBe(false);
-    expect(lineTemplatesEnabled('z', true, '*')).toBe(true);
   });
 });
 
@@ -258,11 +252,11 @@ describe('재료 단계 판정 — 템플릿이 묻는 것만 · 필수는 미�
     website: null, mallHome: null, cost: { generate: 5, complete: 10, total: 15 }, lineFp: 'abcdefabcdef', ...over,
   });
   const keysOf = (t: string, line: string, over: Partial<LineStepsPlanInput> = {}) => buildLineTemplatePlan(getLineTemplate(t)!, input(line, over)).steps.map((s) => s.key);
-  it('빅세일 · 혜택 숫자 없음 = 혜택(필수) · 기간(필수)은 남고 넘치면 선택부터 뺀다', () => {
+  it('빅세일 · 혜택 숫자 없음 = 혜택(필수) · 기간(필수) · ★1021 상한 없음(미루는 단계 0) · 첫 화면 = 맨 끝', () => {
     const p = buildLineTemplatePlan(getLineTemplate('big-sale')!, input('니트 세일 해요'));
-    expect(p.steps.length).toBeLessThanOrEqual(LINE_STEPS_MAX);
     expect(p.steps.filter((s) => s.required).map((s) => s.key)).toEqual(expect.arrayContaining(['benefit', 'period']));
-    for (const l of p.later) expect(['hero_photo', 'event_page', 'link', 'products', 'benefit']).toContain(l.key);
+    expect(p.later).toEqual([]);
+    expect(p.steps[p.steps.length - 1].key).toBe('hero_photo');
   });
   it('혜택 · 마감(표지 · 띠에 크게 실리는 값) = 늘 확인 단계 · 한 줄 값은 미리 채움 · 한 줄 주소 = 이벤트 페이지 미리 채움 + 버튼 주소', () => {
     const q = buildLineTemplatePlan(getLineTemplate('big-sale')!, input('니트 30% 세일 10월 31일까지'), NOW);
@@ -283,9 +277,10 @@ describe('재료 단계 판정 — 템플릿이 묻는 것만 · 필수는 미�
     expect(buildLineTemplatePlan(getLineTemplate('new-launch')!, input('니트 출시', { channel: 'inapp' })).steps.find((x) => x.key === 'products')!.max).toBe(1);
     expect(keysOf('big-sale', '니트 세일', { channel: 'inapp' })).not.toContain('period');
   });
-  it('계절 = 혜택을 묻지 않는다 · 대표 사진 = 페이지 표지가 있으면 건너뜀 · 인앱 표시 불가 = 막음', () => {
+  it('계절 = 혜택을 묻지 않는다 · ★1021 첫 화면 = 모든 템플릿(페이지 표지가 있어도 헤드라인을 고른다) · 인앱 표시 불가 = 막음', () => {
     expect(keysOf('season', '가을 메뉴 소개')).not.toContain('benefit');
-    expect(buildLineTemplatePlan(getLineTemplate('season')!, input('가을 메뉴')).steps.find((s) => s.key === 'hero_photo')?.skip_if).toBe('page_banner');
+    for (const id of ['big-sale', 'new-launch', 'special-event', 'season']) expect(keysOf(id, '가을 메뉴')).toContain('hero_photo');
+    expect(buildLineTemplatePlan(getLineTemplate('season')!, input('가을 메뉴')).steps.find((s) => s.key === 'hero_photo')?.skip_if).toBeUndefined();
     expect(buildLineTemplatePlan(getLineTemplate('season')!, input('가을 메뉴', { channel: 'inapp', inappBlocked: true })).block).toBe('INAPP_DISPLAY_UNAVAILABLE');
   });
 });
@@ -339,9 +334,9 @@ describe('화면 ↔ 서버 짝 — 화면이 만든 템플릿 몸통을 서버�
 describe('라우트 소스 계약 — 템플릿 분기도 같은 돈 순서', () => {
   const read = (rel: string) => readFileSync(resolve(__dirname, rel), 'utf8');
   const at = (src: string, needle: string) => { const i = src.indexOf(needle); expect(i, needle).toBeGreaterThan(-1); return i; };
-  it('DM — 스위치 밖 = 400 · 금액 확정 → 페이지 다시 읽기 → 생성(템플릿 | 범용) → 초안 표식 → 차감', () => {
+  it('DM — 금액 확정 → 페이지 다시 읽기 → 생성(템플릿 | 범용) → 초안 표식 → 차감(★ 2026-10-21 스위치 삭제)', () => {
     const src = read('../../routes/dm.ts');
-    expect(src).toContain("if (tplSel && !lineTemplatesEnabled(companyId, true)) return res.status(400)");
+    expect(src).not.toContain('lineTemplatesEnabled');
     const settle = at(src, "await settleLineStepsPrice(steps, companyId, 'dm', stepsNow)");
     const page = at(src, 'const pg = await resolveLinePage(companyId, steps.body.page);');
     const gen = at(src, 'const r = tplDef ? await generateTemplateDm() : await oneShotGenerate({');
@@ -368,12 +363,12 @@ describe('라우트 소스 계약 — 템플릿 분기도 같은 돈 순서', ()
     const deduct = at(src, 'const outcome = await deductCreditOutcome({ companyId: auth.companyId, cost: price.cost, source: price.source');
     expect(page).toBeLessThan(gen);
     expect(gen).toBeLessThan(deduct);
-    expect(src).toContain("if (tplSel && !lineTemplatesEnabled(auth.companyId, stepsOn)) return res.status(400)");
+    expect(src).not.toContain('lineTemplatesEnabled');
   });
-  it('판정 · 목록 · 예시 · 페이지 읽기 = 템플릿 스위치 켠 회사만', () => {
-    expect(read('../../routes/ai.ts')).toContain('templatesEnabled = lineTemplatesEnabled(companyId, true);');
-    expect(read('../../routes/line-templates.ts')).toContain('lineTemplatesEnabled(companyId, oneLineStepsEnabled(companyId))');
-    expect(read('../../routes/event-campaigns.ts')).toContain('!aiAutoBuildEnabled(companyId) && !lineTemplatesEnabled(companyId, oneLineStepsEnabled(companyId))');
+  it('판정 · 목록 · 예시 · 페이지 읽기 = 전 회사(★ 2026-10-21 스위치 삭제)', () => {
+    expect(read('../../routes/ai.ts')).toContain('templatesEnabled = true;');
+    expect(read('../../routes/line-templates.ts')).toContain('const isOpen = (companyId: string | undefined) => !!companyId;');
+    expect(read('../../routes/event-campaigns.ts')).not.toContain('lineTemplatesEnabled');
     expect(read('../../app.ts')).toContain("app.use('/api/line-templates', lineTemplatesRouter);");
   });
 });

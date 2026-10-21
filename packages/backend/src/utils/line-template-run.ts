@@ -17,6 +17,8 @@ import type { LineTemplate, LineLayout, LineChannel, LineCopyKey } from './desig
 import { composeLineDm, composeLineEmail, composeLineInapp, lineTemplateGate, type LineMaterials, type LineCopy, type LineDmResult, type LineInAppMessage } from './line-template-compose';
 import { fillLineTemplateCopy, type LineCopyGround } from './line-template-copy';
 import { withoutBenefitSpans } from './copy-benefit-detector';
+import { pickOutreachExemplarsDetail } from './sales-outreach-exemplars';
+import { loadOutreachExemplarSource } from './sales-outreach-examples';
 import type { Section } from './dm/dm-section-registry';
 import type { LineStepsManualProduct } from './one-line-steps';
 
@@ -57,6 +59,10 @@ export interface LineTemplateRunInput {
   cards: readonly LineMallCard[];
   textProducts: ReadonlyArray<{ name: string; price?: number }>;
   heroUpload: string | null;
+  /** ★ 2026-10-21 올린 대표 사진 = 스튜디오 헤드라인 포스터(글자 박힘 → 표지가 덮지 않고 원본 비율 + 아래 제목) */
+  heroAsIs?: boolean;
+  /** ★ 2026-10-21 고객 후기(단계 답 · 없으면 빈 배열) */
+  proof?: ReadonlyArray<{ body: string; author: string; rating: number }>;
   page: LinePageMaterial | null;
   /** 혜택 단계 답(undefined = 묻지 않음 · null = 건너뜀) */
   benefitAnswer: string | null | undefined;
@@ -74,7 +80,7 @@ export function lineTemplateMaterials(input: LineTemplateRunInput): { t: LineTem
     brandName: input.brandName,
     ...(input.logoUrl ? { logoUrl: input.logoUrl } : {}),
     ...(input.csPhone ? { csPhone: input.csPhone } : {}),
-    hero: hero ? { url: hero } : null,
+    hero: hero ? { url: hero, ...(input.heroAsIs && hero === input.heroUpload ? { asIs: true } : {}) } : null,
     products: input.cards.map((c) => ({
       name: c.name, price: c.price > 0 ? c.price : null,
       ...(c.discount_price ? { discount_price: c.discount_price } : {}),
@@ -85,6 +91,7 @@ export function lineTemplateMaterials(input: LineTemplateRunInput): { t: LineTem
     periodEnd: input.periodEnd,
     periodLabel,
     link: input.link,
+    ...(input.proof && input.proof.length > 0 ? { proof: input.proof.map((r) => ({ ...r })) } : {}),
   };
   const ground: LineCopyGround = {
     line: input.line, benefit: materials.benefit, periodLabel, brandName: input.brandName,
@@ -130,7 +137,7 @@ export async function draftLineTemplate(input: LineTemplateRunInput, ai: { userI
   const ground: LineCopyGround = opts?.factsOnly ? { ...g0, line: withoutBenefitSpans(g0.line), benefit: null, periodLabel: null, pageText: null } : g0;
   let filled: Awaited<ReturnType<typeof fillLineTemplateCopy>>;
   try {
-    filled = await fillLineTemplateCopy(t, ground, { companyId: input.companyId, userId: ai.userId, source: ai.source });
+    filled = await fillLineTemplateCopy(t, ground, { companyId: input.companyId, userId: ai.userId, source: ai.source, exemplars: await lineCopyExemplars(input.companyId, input.channel) });
   } catch (err: any) {
     throw new LineTemplateError(503, 'LINE_TEMPLATE_AI_FAILED', '문구를 만들지 못했어요. 크레딧은 쓰지 않았어요. 잠시 뒤 다시 만들어 주세요.', String(err?.message || ''));
   }
@@ -141,6 +148,19 @@ export async function draftLineTemplate(input: LineTemplateRunInput, ai: { userI
     if (withBenefit.length <= LINE_SUBJECT_MAX) copy.email_subject = withBenefit;
   }
   return { t, materials, copy, replaced: filled.replaced };
+}
+
+/**
+ * ★ 2026-10-21 문구 AI 참고 예시 = 같은 업종 직원 실물(DB 실물 + seed · 가린 글) · 리듬 · 길이만(설계서 §3-5) · 실패 = 없음(생성은 막지 않는다).
+ *   인앱 = 이메일 예시(짧은 제목 · 본문 결이 가깝다).
+ */
+async function lineCopyExemplars(companyId: string, channel: LineChannel): Promise<string | null> {
+  try {
+    const basic = await getBrandBasicInfo(companyId).catch(() => null);
+    const source = await loadOutreachExemplarSource();
+    const r = pickOutreachExemplarsDetail(channel === 'dm' ? 'DM' : 'EMAIL', String(basic?.industry_code || '') || null, { source, max: 3, budget: 2400 });
+    return r.text || null;
+  } catch { return null; }
 }
 
 /** 이메일 제목 상한(템플릿 칸 상한과 같다) */

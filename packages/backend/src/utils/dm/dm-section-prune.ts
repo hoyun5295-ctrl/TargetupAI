@@ -8,7 +8,7 @@
  * ⛔ 데이터 규칙을 모르는 타입은 지우지 않는다(모름을 없음으로 접지 않는다).
  */
 import type { Section, SectionType } from './dm-section-registry';
-import { decideLayoutMode, splitSectionsIntoPages, type DmLayoutMode } from './dm-page-split';
+import { DM_AUTO_LAYOUT, splitSectionsIntoPages, type DmLayoutMode } from './dm-page-split';
 
 const nonEmpty = (v: unknown): boolean => String(v ?? '').trim() !== '';
 const isPlaceholder = (v: unknown): boolean => /\[[^\]]*(직접|추가|입력)[^\]]*\]/.test(String(v ?? ''));
@@ -59,7 +59,7 @@ export function pruneEmptyDmSections(sections: readonly Section[]): { sections: 
 /** order 재부여 + 레이아웃 모드·pages 재조립(편집기=발송 파리티: sections와 pages는 같은 배열에서 나온다). */
 export function rebuildDmPages(sections: readonly Section[]): { sections: Section[]; layoutMode: DmLayoutMode; pages: Section[][] } {
   const ordered = sections.map((s, i) => ({ ...s, order: i }));
-  const layoutMode = decideLayoutMode(ordered);
+  const layoutMode: DmLayoutMode = DM_AUTO_LAYOUT;   // ★ 2026-10-21 자동 판정 폐지(세로)
   const pages = splitSectionsIntoPages(ordered, layoutMode);
   return { sections: ordered, layoutMode, pages };
 }

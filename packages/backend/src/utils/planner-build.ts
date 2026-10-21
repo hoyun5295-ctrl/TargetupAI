@@ -30,8 +30,7 @@ import { checkChannelReadiness } from './planner-channel-gate';
 import { InsufficientCreditError, isChargedByKey } from './ai-credit';
 import { getCreditCost } from './ai-credit-calc';
 import { runInCreditBundle } from './ai-credit-context';
-import { getLineTemplate, lineTemplatesEnabled, type LineTemplate } from './design-core/line-templates';
-import { oneLineStepsEnabled } from './one-line-steps';
+import { getLineTemplate, type LineTemplate } from './design-core/line-templates';
 import { draftLineTemplate, buildLineTemplateDm, buildLineTemplateEmail, lineTemplateBrand, lineTemplateDmMarker } from './line-template-run';
 import { linePinnedPrimary, mergeLineBrandKit, lineEmailDesign, type LineMallCard } from './line-mall-cards';
 import { resolveLinePage, isLinePageError } from './line-template-page';
@@ -106,7 +105,7 @@ export function buildPlannerEngineMaterials(
 
 /** 이 회사에서 플래너 템플릿 완성본을 만들 수 있는가(1017 스위치 그대로 · 자동제작 엔진 개방 안에서) */
 export function plannerTemplatesEnabled(companyId: string): boolean {
-  return aiAutoBuildEnabled(companyId) && lineTemplatesEnabled(companyId, oneLineStepsEnabled(companyId));
+  return aiAutoBuildEnabled(companyId);
 }
 
 /** (순수) 템플릿이 정한 필수 재료 — 버튼 주소(빈 주소 = 발행 때 막힌다) · 상품 최소 · 혜택 필수. 빈 배열 = 통과. */

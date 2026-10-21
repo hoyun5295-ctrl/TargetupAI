@@ -1,0 +1,58 @@
+[
+  {
+    "name": "뷰티-신제품-사진있음",
+    "line": "진정 앰플 신제품 출시 기념 20% 할인 이번 달 말까지",
+    "template": "new-launch",
+    "layout": "page",
+    "benefit": "신제품 출시 기념 20% 할인",
+    "periodEnd": "2026-10-31",
+    "products": [
+      { "name": "온결 진정 앰플 30ml", "price": 38000, "discount_price": 30400, "image_url": "https://hanjul.ai/diagnosis-examples/assets/beauty-dm-hero.png" },
+      { "name": "온결 수분 크림 50ml", "price": 32000, "discount_price": 25600, "image_url": "https://hanjul.ai/diagnosis-examples/assets/ecommerce-p2.png" }
+    ],
+    "proof": [
+      { "body": "끈적임 없이 수분이 꽉 차요. 아침 화장이 잘 먹어요", "author": "김**", "rating": 5 },
+      { "body": "민감한 피부인데 자극 없이 진정돼서 재구매했어요", "author": "이**", "rating": 5 }
+    ],
+    "exemplar": "SLk8T3v"
+  },
+  {
+    "name": "뷰티-세일-사진없음(최악)",
+    "line": "가을맞이 전 품목 세일 주말까지",
+    "template": "big-sale",
+    "layout": "page",
+    "benefit": "가을맞이 전 품목 30% 세일",
+    "periodEnd": "2026-10-26",
+    "exemplar": "xBTG2zQ"
+  },
+  {
+    "name": "패션-빅세일-상품4",
+    "line": "가을 니트 시즌오프 최대 30%",
+    "template": "big-sale",
+    "layout": "page",
+    "benefit": "가을 시즌오프 최대 30%",
+    "periodEnd": "2026-10-26",
+    "products": [
+      { "name": "케이블 울 니트", "price": 59000, "discount_price": 41300, "image_url": "https://hanjul.ai/diagnosis-examples/assets/fashion-p1.png" },
+      { "name": "울 블렌드 재킷", "price": 129000, "discount_price": 90300, "image_url": "https://hanjul.ai/diagnosis-examples/assets/fashion-p2.png" },
+      { "name": "플리츠 롱 원피스", "price": 79000, "discount_price": 55300, "image_url": "https://hanjul.ai/diagnosis-examples/assets/fashion-p3.png" },
+      { "name": "레더 숄더백", "price": 99000, "discount_price": 69300, "image_url": "https://hanjul.ai/diagnosis-examples/assets/fashion-p4.png" }
+    ],
+    "exemplar": "SCYg0SA"
+  },
+  {
+    "name": "패션-신상-사진없음(최악)",
+    "line": "FW 신상 입고 소식 알려드려요",
+    "template": "new-launch",
+    "layout": "page",
+    "exemplar": "CKSUeUJ"
+  },
+  {
+    "name": "외식-계절메뉴",
+    "line": "겨울 한정 메뉴 출시 첫 주 무료배송",
+    "template": "season",
+    "layout": "page",
+    "benefit": "첫 주 무료배송",
+    "exemplar": "amQC9fm"
+  }
+]

@@ -35,7 +35,7 @@ import {
 import type { DmBrandKit } from './dm-tokens';
 // ★ 2026-07-21 브랜드 학습 통합 — one-shot 생성 시 회사 brand_kit.contact를 footer·store_info에 시드(페이지 분할 전)
 import { getCompanyBrandKit, getCompanyBrandKitRaw } from './dm-brand-kit';
-import { decideLayoutMode, splitSectionsIntoPages, type DmLayoutMode } from './dm-page-split';
+import { DM_AUTO_LAYOUT, splitSectionsIntoPages, type DmLayoutMode } from './dm-page-split';
 import { normalizeVisualConcept, applyVisualDirection, type VisualConcept } from './dm-visual-direction';
 import { normalizeSectionChain } from './dm-section-layout';
 import { mapWithConcurrency } from '../concurrency';
@@ -1095,8 +1095,8 @@ export async function oneShotGenerate(opts: {
   if (opts.companyId) {
     try { seeded = seedBrandContact(directed, await getCompanyBrandKit(opts.companyId)); } catch { /* 조회 실패 = 미시드(회귀 0) */ }
   }
-  // 섹션 구성으로 레이아웃 모드 자동 결정 + 모드별 페이지 분할 (slides면 여러 장, scroll이면 한 장)
-  const layoutMode = decideLayoutMode(seeded);
+  // ★ 2026-10-21 형태 = 세로 스크롤(자동 판정 폐지 · dm-page-split DM_AUTO_LAYOUT) · 슬라이드는 사람이 고를 때만
+  const layoutMode: DmLayoutMode = DM_AUTO_LAYOUT;
   const pages = splitSectionsIntoPages(seeded, layoutMode);
   return {
     spec, sections: seeded, brandKit: enrichedKit, scenario: opts.scenario, layoutMode, pages,

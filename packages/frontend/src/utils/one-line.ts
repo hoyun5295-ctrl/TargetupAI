@@ -33,7 +33,7 @@ export interface OneLineGapsResult {
 // ─────────────── 한 줄 단계 모달 (★ 2026-10-17 · 설계서 docs/2026-10-17-oneline-steps-modal-design.md §3 · §4) ───────────────
 
 export type LineStepsChannel = 'dm' | 'email' | 'inapp';
-export type LineStepKey = 'benefit' | 'product' | 'hero_photo' | 'link' | 'period' | 'event_page' | 'products';
+export type LineStepKey = 'benefit' | 'product' | 'hero_photo' | 'link' | 'period' | 'event_page' | 'products' | 'proof';
 type LineSkipIf = 'product_photo' | 'manual_photo' | 'product_link' | 'page_banner';
 /** 서버 단계 하나(키 닫힌 목록 · 문구는 화면이 소유 · skip_if 는 서버가 정한 조건 이름) */
 export interface LineStep {
@@ -66,7 +66,7 @@ export interface LineStepsPlan {
   cost: LineStepsCost | null;
 }
 
-const STEP_KEYS: readonly string[] = ['benefit', 'product', 'hero_photo', 'link', 'period', 'event_page', 'products'];
+const STEP_KEYS: readonly string[] = ['benefit', 'product', 'hero_photo', 'link', 'period', 'event_page', 'products', 'proof'];
 /** 서버 plan 을 그대로 믿지 않고 모양만 걸러 받는다(모르는 키 = 버린다 · 화면은 닫힌 목록만 그린다) */
 function parseLinePlan(raw: any): LineStepsPlan | null {
   if (!raw || raw.v !== 1 || !['dm', 'email', 'inapp'].includes(raw.channel) || typeof raw.line_fp !== 'string') return null;
@@ -275,6 +275,10 @@ export async function requestLineDm(req: LineDmRequest): Promise<LineDmResponse>
 
 /** 직접 넣은 상품(이름 = 한 줄 낱말을 미리 채움 · 가격 = 한 줄 금액을 미리 채움 · 사진 = 이 화면에서 올린 것만) */
 export interface LineManualAnswer { name: string; price: string; image: string | null; url?: string }
+/** ★ 2026-10-21 고객 후기 한 건 */
+export interface LineProofAnswer { body: string; author: string; rating: number }
+/** 보낼 후기(본문 2자 이상 · 3건) */
+export const lineProofRows = (a: LineStepsAnswers): LineProofAnswer[] => (a.proof || []).map((r) => ({ body: r.body.replace(/\s+/g, ' ').trim().slice(0, 300), author: r.author.trim().slice(0, 20), rating: Math.max(1, Math.min(5, Math.round(r.rating) || 5)) })).filter((r) => r.body.length >= 2).slice(0, 3);
 /** 상품 단계 답 — pick = 몰 후보 하나 · manual = 직접 넣음 · skip = 건너뜀 */
 export interface LineProductAnswer { mode: 'pick' | 'manual' | 'skip'; picked?: LineMallCandidate | null; manual?: LineManualAnswer }
 export interface LineStepsAnswers {
@@ -285,6 +289,10 @@ export interface LineStepsAnswers {
   /** 한 줄 속 우리 몰 주소로 찾은 상품(H5 · 미리 담음 · 빼기 가능) · undefined = 아직 받지 않음 */
   urlPicks?: LineMallCandidate[];
   hero?: string | null;
+  /** ★ 2026-10-21 대표 사진 = 이미지 스튜디오 헤드라인(글자 박힌 포스터 · 표지가 덮지 않는다) */
+  heroPoster?: boolean;
+  /** ★ 2026-10-21 고객 후기(붙여 넣은 원문 · 별점은 사람이 고른 값) · null = 건너뜀 */
+  proof?: LineProofAnswer[] | null;
   link?: string | null;
   /** 'YYYY-MM-DD' */
   period?: string | null;
@@ -620,16 +628,19 @@ export function buildLineTemplateBody(plan: LineStepsPlan, a: LineStepsAnswers, 
         : s.key === 'event_page' ? (a.page ? 1 : 0)
           : s.key === 'hero_photo' ? (a.hero ? 1 : 0)
             : s.key === 'link' ? (a.link ? 1 : 0)
-              : (a.period ? 1 : 0);
+              : s.key === 'proof' ? (lineProofRows(a).length > 0 ? 1 : 0)
+                : (a.period ? 1 : 0);
     (v ? answered : skipped).push(s.key);
   }
+  const proof = has('proof') ? lineProofRows(a) : [];
   return {
     steps: { v: 1 },
     template: { id: tpl.id, layout: tpl.layout },
+    ...(proof.length > 0 ? { proof } : {}),
     facts,
     products: picks.map((p) => ({ provider: p.provider, no: p.no })),
     manual_products: manual,
-    ...(has('hero_photo') && a.hero ? { hero_image: a.hero } : {}),
+    ...(has('hero_photo') && a.hero ? { hero_image: a.hero, ...(a.heroPoster ? { hero_poster: true } : {}) } : {}),
     ...(has('event_page') && a.page ? { page: { url: a.page.url, licensed_hashes: a.page.licensed.filter((h) => a.page!.cards.some((c) => c.hash === h)).slice(0, 3) } } : {}),
     expected_cost: expectedCost,
     steps_meta: { shown: shown.map((s) => s.key), answered, skipped },

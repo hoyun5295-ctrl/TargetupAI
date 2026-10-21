@@ -47,6 +47,9 @@ import {
 } from '../utils/image-studio';
 import { getTemplate, listTemplatesPublic, findUnfilledTemplateText } from '../utils/image-studio-templates';
 import { SUB_ORDER } from '../utils/image-studio-template-subs';
+import { createHash } from 'crypto';
+import { headlineTextSafe, LINE_HEADLINE_TITLE_MAX, LINE_HEADLINE_LABEL_MAX } from '../utils/line-headline';
+import { makeLineHeadlineImage, lineHeadlineImageSource, LineHeadlineInputError, resolveLineHeadlineLast, lineHeadlineCreditKey, readLineHeadlineByFp, markLineHeadlineRunning, markLineHeadlineDone, unmarkLineHeadlineDone, clearLineHeadlineRunning } from '../utils/line-headline-make';
 
 export const imageStudioRouter = Router();
 
@@ -368,6 +371,97 @@ imageStudioRouter.post('/edit', async (req: any, res: Response) => {
 //   https만 · 계정 정보 URL 거부 · 사설·예약 주소 차단 · **검증한 DNS 주소로 연결 고정**(재바인딩 창 제거) ·
 //   리다이렉트 거부 · image/* · 10MB · 시간 상한. 옛: 조회 뒤 fetch가 호스트를 다시 해석했고(재바인딩 창)
 //   라우트 안의 사설 판정이 CT보다 약했다(::ffff:169.254 등 누락).
+// ── POST /line-headline (★ 2026-10-21 한 줄 창 「첫 화면」 = 스튜디오 템플릿 헤드라인 한 번에) ─────────
+// 설계서 docs/2026-10-21-oneline-content-design.md §3-4 · Codex P2 R1 · R2 같은 뿌리(화면이 여러 단계 유료 작업을 이어 붙여 새로고침 · 창 전환마다 다시 걷혔다)
+//   → 서버 한 경로: 누끼 → 생성 → 영구 저장 → 차감. 멱등키 = 회사 + 입력 지문(템플릿 · 글 · 말머리 · 상품 사진 · 한 줄 지문) · 화면 기억 0.
+//   같은 입력 재요청 = 기억한 결과(6시간) · 기억이 없어도 원장에 낸 기록이 있으면 다시 만들되 걷지 않는다. 그림 안 글자 = 숫자 · 혜택 낱말 0(생성 직전 재검사).
+// 담당자 · 한 줄의 첫 화면 그림 상태(만드는 중 · 완료 주소 · 0원) — 화면이 단계를 열 때 먼저 묻고, 만드는 중이면 끝날 때까지 다시 묻는다(파일 원장 · Codex R4)
+imageStudioRouter.get('/line-headline/last', async (req: any, res: Response) => {
+  const companyId = req.user?.companyId;
+  if (!companyId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
+  const lineFp = typeof req.query?.lineFp === 'string' ? req.query.lineFp.slice(0, 64) : '';
+  const r = await resolveLineHeadlineLast(companyId, String(req.user?.userId || ''), lineFp, (key) => isChargedByKey(companyId, key));
+  return res.json({ success: true, ...r });
+});
+
+imageStudioRouter.post('/line-headline', async (req: any, res: Response) => {
+  const companyId = req.user?.companyId;
+  const userId = req.user?.userId;
+  if (!companyId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
+  if (!isStudioReady()) return respondStudioError(res, new StudioError('STUDIO_NOT_READY', 503));
+  if (await studioPlanBlocked(req, res)) return;
+  const template = getTemplate(String(req.body?.templateId || ''));
+  if (!template) return res.status(400).json({ success: false, error: '템플릿을 골라 주세요.' });
+  const title = typeof req.body?.title === 'string' ? req.body.title.replace(/\s+/g, ' ').trim() : '';
+  const label = typeof req.body?.label === 'string' ? req.body.label.replace(/\s+/g, ' ').trim() : '';
+  if (!title || title.length > LINE_HEADLINE_TITLE_MAX || label.length > LINE_HEADLINE_LABEL_MAX || !headlineTextSafe(title) || (label && !headlineTextSafe(label))) {
+    return res.status(400).json({ success: false, error: '그림 안 글자에는 숫자 · 할인 · 쿠폰 같은 혜택 말을 넣지 않아요(값은 상품 카드에 정확히 들어가요). 글을 고쳐 주세요.', code: 'HEADLINE_TEXT_INVALID' });
+  }
+  const texts = { title, ...(label ? { label } : {}) };
+  if (findUnfilledTemplateText(texts)) return res.status(400).json({ success: false, error: '예시 문구 그대로는 만들 수 없어요. 글을 바꿔 주세요.', code: 'PLACEHOLDER_TEXT' });
+  const isProduct = (template.kind ?? 'product') === 'product';
+  const rawImg = isProduct && typeof req.body?.productImage === 'string' ? req.body.productImage.trim() : '';
+  // 제품 템플릿 = 실사진 필수(사진 없는 제품 포스터 = 지어낸 상품 · 설계서 §3-4 · Codex R3) · 주소 판정 = 공용 함수
+  if (isProduct && !rawImg) return res.status(400).json({ success: false, error: '이 템플릿은 상품 사진이 있어야 만들 수 있어요. 행사 템플릿을 고르거나 상품을 먼저 담아 주세요.', code: 'HEADLINE_PRODUCT_REQUIRED' });
+  if (rawImg && lineHeadlineImageSource(rawImg, companyId) === 'invalid') return res.status(400).json({ success: false, error: '상품 사진 주소를 다시 확인해 주세요.', code: 'HEADLINE_IMAGE_INVALID' });
+  const lineFp = typeof req.body?.lineFp === 'string' ? req.body.lineFp.slice(0, 64) : '';
+  const fp = createHash('sha256').update(JSON.stringify([template.id, title, label, rawImg, lineFp])).digest('hex').slice(0, 24);
+  const key = lineHeadlineCreditKey(companyId, fp);
+
+  const uid = String(userId || '');
+  // 같은 입력으로 이미 만든 그림 = 그 주소(파일 원장 · 재기동 · 캐시 상한 무관 · 다시 걷지 않는다)
+  //   적중 = 원장을 건드리지 않는다(다른 탭에서 만드는 중인 기록을 덮지 않게 · Codex R5)
+  const made = readLineHeadlineByFp(companyId, fp);
+  if (made) return res.json({ success: true, url: made });
+
+  if (!tryAcquireGenerateLock(companyId)) return respondStudioError(res, new StudioError('BUSY', 409));
+  let running = false;
+  try {
+    let alreadyPaid = false;
+    try { alreadyPaid = await isChargedByKey(companyId, key); } catch {
+      return res.status(503).json({ success: false, error: '크레딧 내역을 확인하지 못했어요. 잠시 뒤 다시 시도해주세요.', code: 'CREDIT_STATE_UNKNOWN' });
+    }
+    if (!alreadyPaid) { try { await checkCredit(companyId, 2); } catch (err) { return respondStudioError(res, err); } }
+    if (isStudioTempFull(companyId)) return respondStudioError(res, new StudioError('TEMP_FULL', 409));
+
+    const ledgerDown = () => res.status(503).json({ success: false, error: '그림 기록을 남기지 못했어요. 잠시 뒤 다시 시도해주세요.', code: 'HEADLINE_LEDGER_UNAVAILABLE' });
+    if (!markLineHeadlineRunning(companyId, uid, lineFp)) return ledgerDown();
+    running = true;
+    let moved: { url: string; filename: string };
+    try {
+      moved = await makeLineHeadlineImage({ companyId, template, texts, productImage: rawImg || null });
+    } catch (err: any) {
+      if (err instanceof LineHeadlineInputError) return res.status(400).json({ success: false, error: err.message, code: err.code });
+      throw err;
+    }
+    const drop = () => {
+      unmarkLineHeadlineDone(companyId, uid, lineFp, fp, moved.url);
+      try { fs.unlinkSync(path.join(INAPP_IMAGE_BASE, companyId, moved.filename)); } catch { /* noop */ }
+    };
+    // 차감 전 = 「차감 중」 기록(차감된 그림은 늘 원장에 있다 · Codex R5) · 이 동안 같은 입력 · /last 는 주소를 못 받고 기다린다(차감 실패로 지워질 그림을 내보내지 않게 · Codex R6)
+    //   차감 뒤 = 완료(공개) · 응답 유실 뒤 GET /line-headline/last 가 0크레딧으로 되찾는다
+    if (!markLineHeadlineDone(companyId, uid, lineFp, fp, moved.url, 'settling')) { drop(); return ledgerDown(); }
+    running = false;
+    if (!alreadyPaid) {
+      try {
+        await settleCreditAfterSuccess({ companyId, cost: 2, source: CREDIT_SOURCE.generate, createdBy: userId, idempotencyKey: key });
+      } catch (err) {
+        // 동시 소진 = 결과를 건네지 않는다(미과금 결과 0)
+        drop();
+        return respondStudioError(res, err);
+      }
+    }
+    // 공개 기록 실패 = 그래도 이 응답으로 그림은 건넨다(이미 차감 · 기록은 5분 뒤 끊긴 것으로 보고 같은 입력은 무과금 재생성)
+    markLineHeadlineDone(companyId, uid, lineFp, fp, moved.url, 'done');
+    return res.json({ success: true, url: moved.url });
+  } catch (err) {
+    return respondStudioError(res, err);
+  } finally {
+    if (running) clearLineHeadlineRunning(companyId, uid, lineFp);
+    releaseGenerateLock(companyId);
+  }
+});
+
 imageStudioRouter.post('/ingest-product', async (req: any, res: Response) => {
   const companyId = req.user?.companyId;
   if (!companyId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });

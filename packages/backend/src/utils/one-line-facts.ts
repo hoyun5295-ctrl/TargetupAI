@@ -18,13 +18,7 @@ import { normalizeWooMallId } from './woocommerce-core';
 
 // ─────────────── 스위치 (비면 꺼짐 · `*` = 전 회사) ───────────────
 
-/** 한 줄 보강(판정 칸 · 원문 자리 · 완성도 줄 · 생성 멱등) 전부를 여는 회사 명단. */
-export function oneLineFactsEnabled(
-  companyId: string | null | undefined,
-  env: string | undefined = process.env.ONE_LINE_FACTS_COMPANY_IDS,
-): boolean {
-  return companyListAllows(companyId, String(env || ''));
-}
+// ★ 2026-10-21 한 줄 보강 회사 명단 스위치 삭제 — 전 회사 같은 흐름(설계서 docs/2026-10-21-oneline-content-design.md §3-1)
 
 /** 허브 문자 3안의 C안 반반 시험을 여는 회사 명단(설계서 §6). */
 export function copyCTestEnabled(

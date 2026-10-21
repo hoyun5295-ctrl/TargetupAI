@@ -105,12 +105,12 @@ import { attachMallImagesToProductCarousels } from '../utils/mall-product-match'
 import { industryLabel } from '../utils/industry-codes';
 import type { Section } from '../utils/dm/dm-section-registry';
 import { checkCredit, deductCreditSafe, deductCreditOutcome, InsufficientCreditError, isChargedByKey } from '../utils/ai-credit';
-import { oneLineFactsEnabled, oneLineGaps, isValidAttemptToken, buildOneLineIdempotencyKey, oneLineInflightKey, sanitizeLineFacts, buildLineEventText, sanitizeLineProducts, lineProductsKey, sanitizeLineReads, applyLineReads } from '../utils/one-line-facts';   // ★ 2026-10-05 한줄로 시그니처 · ★1010 혜택 답 · 몰 상품 확정
+import { oneLineGaps, isValidAttemptToken, buildOneLineIdempotencyKey, oneLineInflightKey, sanitizeLineFacts, buildLineEventText, sanitizeLineProducts, lineProductsKey, sanitizeLineReads, applyLineReads } from '../utils/one-line-facts';   // ★ 2026-10-05 한줄로 시그니처 · ★1010 혜택 답 · 몰 상품 확정
 import { resolveLineMallCards, placeLineMallCards, linePriceNotes, linePinnedPrimary, lineEmailDesign, type LineMallCard, type LineMallExcluded } from '../utils/line-mall-cards';   // ★ 2026-10-10 한 줄 이메일 강화
 import { resolveIntegrationActor } from '../utils/integration-scope';
 // ★ 2026-10-17 한 줄 단계 모달(설계서 docs/2026-10-17-oneline-steps-modal-design.md §3 · §4-3) — 단계 답 · 직접 상품 · 대표 사진 · 버튼 주소 · 한 줄 완성 금액
-import { oneLineStepsEnabled, buildLineStepsEventText } from '../utils/one-line-steps';
-import { getLineTemplate, lineTemplatesEnabled } from '../utils/design-core/line-templates';   // ★ 2026-10-17 템플릿 캠페인
+import { buildLineStepsEventText } from '../utils/one-line-steps';
+import { getLineTemplate } from '../utils/design-core/line-templates';   // ★ 2026-10-17 템플릿 캠페인
 import { resolveLinePage, isLinePageError, type LinePageMaterial } from '../utils/line-template-page';
 import { draftLineTemplate, buildLineTemplateEmail, lineTemplateBrand, lineTemplateManual, LineTemplateError } from '../utils/line-template-run';
 import { runInCreditBundle } from '../utils/ai-credit-context';
@@ -1190,7 +1190,7 @@ router.post('/ai/generate-sections', singleFlight('email-generate', async (req: 
     // ★ 2026-10-05 한줄로 시그니처(설계서 §3-7) — 한 줄 입구(one_line:true) + 스위치 켠 회사 + 시도 토큰이 온 요청만 멱등. 그 밖 요청 = 지금 동작 그대로.
     //   이메일은 요청 글이 이미 혜택 근거다(email-ai generateEmailSections 의 근거 = 요청 · 원문) → 원문 자리는 옮기지 않는다.
     //   빠진 혜택 · 기간은 생성기가 남긴 자리에서 화면이 0크레딧으로 채운다.
-    const lineOn = req.body?.one_line === true && oneLineFactsEnabled(auth.companyId);
+    const lineOn = req.body?.one_line === true;
     // ★ 2026-10-10 한 줄 이메일 강화(설계서 docs/2026-10-10-oneline-dm-email-design.md §3) — 생성 전 묻는 창의 답(혜택) · 사람이 고른 몰 상품(provider + 상품번호만).
     //   이메일은 요청 글이 혜택 근거라 혜택 답은 요청 글에 [혜택] 줄로 붙인다(원문 자리로 옮기지 않는다 · 시그니처 §5). 스위치 밖인데 오면 400.
     const oneLineReq = req.body?.one_line === true;
@@ -1198,13 +1198,12 @@ router.post('/ai/generate-sections', singleFlight('email-generate', async (req: 
     const stepsNow = Date.now();
     const stepsReads = oneLineReq ? sanitizeLineReads(req.body?.read_texts) : undefined;
     const steps = oneLineReq
-      ? prepareLineStepsRequest(req.body, auth.companyId, prompt, stepsReads === 'invalid' ? undefined : stepsReads, stepsNow, lineOn && oneLineStepsEnabled(auth.companyId))
+      ? prepareLineStepsRequest(req.body, auth.companyId, prompt, stepsReads === 'invalid' ? undefined : stepsReads, stepsNow, lineOn)
       : undefined;
     if (isLineStepsReqError(steps)) return res.status(steps.status).json({ success: false, error: steps.error, code: steps.code });
     // ★ 2026-10-17 템플릿 캠페인 — 템플릿 칸이 온 단계 요청만(스위치 밖인데 오면 400)
     const tplSel = steps && steps.body.template ? steps.body.template : null;
     const tplDef = tplSel ? getLineTemplate(tplSel.id) : null;
-    if (tplSel && !lineTemplatesEnabled(auth.companyId, true)) return res.status(400).json({ success: false, error: '이 기능은 아직 열리지 않았습니다. 화면을 새로 고친 뒤 다시 시도해 주세요.', code: 'FEATURE_DISABLED' });
     const lineFacts = oneLineReq
       ? (steps ? (steps.body.facts.benefit !== undefined ? { benefit: steps.body.facts.benefit } : undefined) : sanitizeLineFacts(req.body?.facts))
       : undefined;
@@ -1232,7 +1231,7 @@ router.post('/ai/generate-sections', singleFlight('email-generate', async (req: 
     // ★ 2026-10-17 단계 요청 = 한 줄 완성 원장 키 · 생성 입력 전부를 지문에(직접 상품 전부 · 대표 사진 · 주소 답)
     // ★ 템플릿 요청 = 템플릿 · 배치 · 페이지도 지문에(1017 요청 키는 그대로)
     const stepsPayload = steps
-      ? { prompt: genPrompt, scenario: scenario || null, isAd, eventText, products: lineProductsKey(lineProducts || []), manual: steps.body.manual, hero: steps.hero, link: steps.body.facts.link ?? null, ...(tplSel ? { template: tplSel, page: steps.body.page } : {}) }
+      ? { prompt: genPrompt, scenario: scenario || null, isAd, eventText, products: lineProductsKey(lineProducts || []), manual: steps.body.manual, hero: steps.hero, ...(steps.heroAsIs ? { heroAsIs: true } : {}), ...(steps.body.proof.length > 0 ? { proof: steps.body.proof } : {}), link: steps.body.facts.link ?? null, ...(tplSel ? { template: tplSel, page: steps.body.page } : {}) }
       : null;
     const idemKey = attemptToken
       ? (steps
@@ -1299,7 +1298,7 @@ router.post('/ai/generate-sections', singleFlight('email-generate', async (req: 
         const delivery = await resolveLineStepsDelivery(auth.companyId, lineActor, steps, { channel: 'email', line: linePrompt, cards: tplCards, companyKitRaw: kitRaw });
         const draft = await runInCreditBundle(() => draftLineTemplate({
           template: tplDef, channel: 'email', companyId: auth.companyId, line: linePrompt, ...brand,
-          pinnedPrimary: linePinnedPrimary(kitRaw), cards: tplCards, textProducts: manualT.textProducts, heroUpload: steps.hero, page: tplPage,
+          pinnedPrimary: linePinnedPrimary(kitRaw), cards: tplCards, textProducts: manualT.textProducts, heroUpload: steps.hero, heroAsIs: steps.heroAsIs, proof: steps.body.proof, page: tplPage,
           benefitAnswer: steps.body.facts.benefit, periodEnd: steps.body.facts.periodEnd ?? null,
           link: steps.body.facts.link ?? tplPage?.url ?? delivery.link ?? null,
         }, { userId: auth.userId, source: 'email-ai-generate' }, { factsOnly: true, subjectBenefit: true }));   // ★ 1019 B-1018-1 값 = 코드 · 제목 앞 혜택 원문
