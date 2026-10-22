@@ -403,6 +403,19 @@ export const OUTREACH_TEMPLATE_ANY_MONTH: readonly string[] = [
   'season-auto', 'event-season-beforeholiday', 'event-day-petday', 'event-day-payday', 'event-day-friendship', 'event-day-founding', 'event-day-weekend', 'event-day-monthend',
 ];
 
+/**
+ * ★ 2026-10-22 업종을 전제한 장면 = 그 업종 자동 선택에서 뺀다(한줄 CT 시연 · 업종 미지정 회사에서 앰플 · 파스타 접시가 택배 상자 위 · 커터칼).
+ *   「신상 입고」 = 택배 상자 · 창고 장면 · 업종을 모르면(etc) 상자로 받는 물건이라는 근거가 없다. 이미지 스튜디오 직접 선택은 그대로.
+ */
+export const OUTREACH_TEMPLATE_SKIP_INDUSTRIES: Readonly<Record<string, readonly IndustryCode[]>> = {
+  'sale-new-arrival': ['etc'],
+};
+
+/** 이 업종 자동 선택에 써도 되는 템플릿인가(표에 없으면 전 업종). */
+export function templateFitsIndustry(templateId: string, code: IndustryCode): boolean {
+  return !(OUTREACH_TEMPLATE_SKIP_INDUSTRIES[templateId] || []).includes(code);
+}
+
 /** 이 달에 써도 되는 템플릿인가(표에 없으면 연중). */
 export function templateFitsMonth(templateId: string, month: number): boolean {
   const months = OUTREACH_TEMPLATE_MONTHS[templateId];
@@ -571,7 +584,7 @@ export function outreachSceneAllowed(t: Pick<StudioTemplate, 'kind' | 'scaffold'
 }
 /** 아웃리치 후보 풀 하나(순수) — 업종 풀 → (행사면 장면 필터 · 비면 원래 풀) → 이번 달 맞는 것(비면 그대로). 판단 후보·해시·순위 재검이 전부 이 함수를 쓴다. */
 export function outreachTemplatePool(code: IndustryCode, kind: 'product' | 'event', now: Date = new Date()): StudioTemplate[] {
-  let pool: StudioTemplate[] = TEMPLATE_POOLS[code][kind];
+  let pool: StudioTemplate[] = TEMPLATE_POOLS[code][kind].filter((t) => templateFitsIndustry(t.id, code));
   if (kind === 'event') { const f = pool.filter(outreachSceneAllowed); if (f.length) pool = f; }
   const month = kstMonth(now);
   const fitting = pool.filter((t) => templateFitsMonth(t.id, month));

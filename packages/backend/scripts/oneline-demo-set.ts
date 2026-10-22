@@ -36,6 +36,8 @@ import { runLineJudge, draftLineCook, buildLineCookDm, getLineComposition } from
 import { compositionBlocking, type LineCompositionId } from '../src/utils/line-compositions';
 
 interface Scene {
+  /** 장면 업종(첫 화면 틀 후보 · 없으면 회사 업종) */
+  industry?: string;
   name: string; line: string; page?: string; brand?: string;
   prices?: Record<string, [number, number | null]>; categories?: Record<string, string>;
   benefit?: string; periodDays?: number; couponCode?: string;
@@ -110,7 +112,7 @@ async function main(): Promise<void> {
       if (s.poster !== false) {
         try {
           const picks = await pickLineHeadlines({
-            companyId, companyName: brandName || String(basic?.company_name || ''), industry: String(basic?.industry_code || '') || null,
+            companyId, companyName: brandName || String(basic?.company_name || ''), industry: s.industry || String(basic?.industry_code || '') || null,
             line: s.line, productNames: products.map((p) => p.name), hasPhoto: products.length > 0,
           });
           const tpl = getTemplate(picks.picks[0]?.id || '');

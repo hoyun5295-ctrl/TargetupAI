@@ -133,7 +133,7 @@ export const LINE_COMPOSITIONS: readonly LineComposition[] = [
       { key: 'benefit', ask: '세일 혜택(예: 최대 30%)', why: '세일 진열장은 혜택이 제목이에요', level: 'block', min: 1, max: 1, fill: ['text'] },
       { key: 'periodEnd', ask: '세일 마감일', why: '마감 띠가 서두르게 만들어요', level: 'block', min: 1, max: 1, fill: ['date'] },
       { key: 'products', ask: '세일 상품 4개 이상(종류가 있으면 종류도)', why: '인기 순위와 종류별 진열로 실려요', level: 'block', min: 4, max: 12, fill: ['mall', 'upload', 'url'] },
-      { key: 'couponCode', ask: '추가 할인 코드(있으면)', why: '한 번 더 할인되는 코드를 크게 보여 줘요', level: 'drop', min: 1, max: 1, fill: ['text'] },
+      { key: 'couponCode', ask: '할인 코드(있으면)', why: '결제할 때 넣는 코드를 크게 보여 줘요', level: 'drop', min: 1, max: 1, fill: ['text'] },
       PROOF_SLOT,
     ],
     copy: [...BASE_COPY({ headline: '시즌 세일을 시작해요', sub: '올해 가장 좋은 가격', productsTitle: '지금 가장 많이 담는 상품', moreTitle: '더 둘러보기', closingHeadline: '세일은 곧 끝나요', closingBody: '마감 전에 원하는 상품을 담아 두세요', ctaLabel: '세일 상품 보기' }),
@@ -359,7 +359,7 @@ const benefitNote = (m: LineRichMaterials): P | null => (m.benefit && m.benefitN
   : null);
 
 const promo = (m: LineRichMaterials): P | null => (m.couponCode
-  ? { type: 'promo_code', props: { code: m.couponCode, description: '결제할 때 넣으면 한 번 더 할인돼요', instructions: '주문서 할인 코드 칸에 입력' }, treatment: 'light', part: 'code' }
+  ? { type: 'promo_code', props: { code: m.couponCode, description: '결제할 때 이 코드를 넣어 주세요', instructions: '주문서 할인 코드 칸에 입력' }, treatment: 'light', part: 'code' }
   : null);
 
 const countdown = (m: LineRichMaterials, comp: LineComposition): P | null => (m.periodEnd
@@ -417,11 +417,11 @@ export function compositionParts(comp: LineComposition, m: LineRichMaterials, c:
       break;
     }
     case 'menu': {
-      const sig = useOnce(seen, m.mood[0]);
-      if (sig) out.push({ type: 'gallery', props: { title: '', images: [{ url: sig, link_url: m.link || '', caption: '' }], layout: 'list_1xN', full_bleed: true, enable_zoom: false, enable_fullscreen: false }, part: 'signature' });
+      // ★ 2026-10-22 대표 = 대표 메뉴 자기 카드(사진 · 이름 · 가격 · 링크 · 분위기 사진을 쓰면 「대표 메뉴 ○○」 아래 다른 음식이 나온다 · 시연 판정) · 첫 화면이 이미 썼으면 칸을 뺀다
+      if (lead && useOnce(seen, lead.image_url)) out.push({ type: 'product_carousel', props: { products: [card(lead)], image_fit: 'contain', caption_bg_color: comp.tint, background_color: '#ffffff' }, treatment: 'focus', part: 'signature' });
       if (m.points.length) out.push({ type: 'text_card', props: { tag: '대표 메뉴', headline: lead?.name || c.pointsTitle, body: m.points.slice(0, 3).map((p) => `# ${p.title}`).join('   '), align: 'left', image_position: 'top' }, treatment: 'classic', part: 'tags', tint: true });
       out.push(productGrid(m.products.slice(0, 6), c.productsTitle, 'menu', seen));
-      const more = m.mood.slice(1).map((u) => useOnce(seen, u)).filter((u): u is string => !!u).slice(0, 2);
+      const more = m.mood.map((u) => useOnce(seen, u)).filter((u): u is string => !!u).slice(0, 2);
       if (more.length) out.push({ type: 'gallery', props: { title: '', images: more.map((u) => ({ url: u, link_url: m.link || '', caption: '' })), layout: 'grid_2x2', full_bleed: false, enable_zoom: false, enable_fullscreen: false }, part: 'more-photos' });
       out.push(reviews(m, '다녀간 손님 후기', comp));
       if (m.store && Object.values(m.store).some(Boolean)) out.push({ type: 'store_info', props: { ...m.store }, treatment: 'card', part: 'store' });

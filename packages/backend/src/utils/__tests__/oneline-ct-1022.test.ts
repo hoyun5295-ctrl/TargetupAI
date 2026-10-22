@@ -352,3 +352,31 @@ describe('Codex CT R2 정정', () => {
     expect(readFileSync(resolve(__dirname, '../../../../frontend/src/components/zone/LineStepsModal.tsx'), 'utf8')).toContain('const g = lineCompositionGoods(answers, s.max ?? 12);');
   });
 });
+
+describe('1022 시연 판정 정정', () => {
+  it('메뉴판 대표 사진 = 대표 메뉴 자기 사진 · 분위기 사진은 아래 사진 묶음만', () => {
+    const comp = getLineComposition('menu')!;
+    const secs = composeRichDm(comp, rich(), compositionFallbackCopy(comp), newId).sections as any[];
+    const sig = secs.find((s) => s.tpl_slot?.endsWith('.signature'));
+    expect(JSON.stringify(sig.props.products[0])).toContain(img('p1'));
+    expect(sig.props.products[0]).toMatchObject({ name: '상품 1' });
+    // 강조 글(points)이 없어도 대표 메뉴 이름 · 가격은 남는다
+    const bare = composeRichDm(comp, rich({ points: [] }), compositionFallbackCopy(comp), newId).sections as any[];
+    expect(JSON.stringify(bare.find((s) => s.tpl_slot?.endsWith('.signature')).props.products[0])).toMatch(/상품 1[\s\S]*21000|21000[\s\S]*상품 1/);
+    const more = secs.find((s) => s.tpl_slot?.endsWith('.more-photos'));
+    expect(more.props.images.map((i: any) => i.url)).toEqual([img('m1'), img('m2')]);
+  });
+  it('할인 코드 문구 = 사실만(중복 할인 약속 없음)', () => {
+    for (const comp of LINE_COMPOSITIONS) {
+      const secs = composeRichDm(comp, rich(), compositionFallbackCopy(comp), newId).sections as any[];
+      for (const s of secs) expect(JSON.stringify(s.props)).not.toContain('한 번 더');
+      for (const slot of comp.slots) expect(`${slot.ask}${slot.why}`).not.toMatch(/추가 할인|한 번 더/);
+    }
+  });
+  it('「신상 입고」(택배 상자 장면) = 업종 미지정 자동 선택 풀에서 빠지고 디지털은 남는다', async () => {
+    const { outreachTemplatePool } = await import('../sales-outreach-produce');
+    const ids = (code: any) => outreachTemplatePool(code, 'product', new Date('2026-10-22T00:00:00+09:00')).map((t) => t.id);
+    expect(ids('etc')).not.toContain('sale-new-arrival');
+    expect(ids('digital')).toContain('sale-new-arrival');
+  });
+});

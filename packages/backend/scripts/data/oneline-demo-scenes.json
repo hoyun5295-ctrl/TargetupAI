@@ -1,6 +1,7 @@
 [
   {
     "name": "뷰티-신제품(주인공 상품)",
+    "industry": "beauty",
     "line": "온결 진정 앰플 신제품 출시 · 출시 기념 20% 할인 이번 달 말까지",
     "brand": "온결",
     "page": "https://hanjul.ai/demo-shop/beauty.html",
@@ -16,6 +17,7 @@
   },
   {
     "name": "패션-시즌오프(세일 진열장)",
+    "industry": "fashion",
     "line": "소목 가을 시즌오프 최대 30% · 니트 재킷 원피스 가방",
     "brand": "소목",
     "page": "https://hanjul.ai/demo-shop/fashion.html",
@@ -28,6 +30,7 @@
   },
   {
     "name": "패션-신상(룩북)",
+    "industry": "fashion",
     "line": "소목 FW 신상 입고 · 가을을 입는 새로운 결",
     "brand": "소목",
     "page": "https://hanjul.ai/demo-shop/fashion.html",
@@ -38,6 +41,7 @@
   },
   {
     "name": "외식-신메뉴(메뉴판)",
+    "industry": "food",
     "line": "한상 가을 신메뉴 파스타 샐러드 출시 · 첫 주 음료 무료",
     "brand": "한상",
     "page": "https://hanjul.ai/demo-shop/food.html",
@@ -49,6 +53,7 @@
   },
   {
     "name": "뷰티-회원의 날(이벤트)",
+    "industry": "beauty",
     "line": "온결 회원의 날 3일간 15% 쿠폰 · 가입만 해도 받아요",
     "brand": "온결",
     "page": "https://hanjul.ai/demo-shop/beauty.html",

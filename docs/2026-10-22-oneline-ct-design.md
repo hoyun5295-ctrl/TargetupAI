@@ -215,3 +215,4 @@ plateHint: 'sms' | 'dm' | 'email' | 'inapp' | 'journey' | 'auto' | null   // 들
 - 사내 시연 쇼핑몰: `frontend/public/demo-shop/`(뷰티 · 패션 · 요식) · 시연 명령 `scripts/oneline-demo-set.ts`.
 - Codex 적대 4R approve(R1 8 · R2 3 · R3 2 전부 수용). backend vitest 9,719 · tsc 0 · build:safe 양쪽 성공. DDL 0.
 - 남은 것: 배포 뒤 시연 PNG 판정(Harold) · 실과금 회사 1건 원장 행 확인.
+- 시연 판정 정정(1022 · Codex 적대 2R approve): 업종 미지정(etc) 자동 선택 풀에서 「신상 입고」(택배 상자 장면) 제외 · 시연 장면 업종으로 첫 화면 후보 · 메뉴판 대표 칸 = 대표 메뉴 카드(사진 · 이름 · 가격 · 링크) · 분위기 사진 = 아래 묶음 · 코드 문구 = 「결제할 때 이 코드를 넣어 주세요」(중복 할인 약속 제거).
