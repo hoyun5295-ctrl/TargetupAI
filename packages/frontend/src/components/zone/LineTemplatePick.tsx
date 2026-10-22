@@ -14,7 +14,7 @@ import { InAppMessagePreview } from '../InAppMessagePreview';
 import JourneyModalShell from '../journey/JourneyModalShell';
 import ZoneSegmented from './ZoneSegmented';
 import {
-  fetchLineTemplateExample, type LineTemplateInfo, type LineTemplateRank, type LineTemplateId, type LineLayout, type LineTemplateExample, type LineStepsChannel,
+  fetchLineTemplateExample, type LineTemplateInfo, type LineTemplateRank, type LineTemplateId, type LineLayout, type LineTemplateExample, type LineStepsChannel, type LineCompositionId,
 } from '../../utils/one-line';
 
 /** 휴대폰 문서 폭(예시 html 이 스스로 아는 폭) · 세로 비율 */
@@ -23,7 +23,7 @@ const PHONE_H = 760;
 
 /** 예시 한 장(휴대폰 크기로 줄여 그린다) — 받는 중 = 뼈대 · 실패 = 한 줄 */
 export function LineTemplateExampleView({ id, channel, layout, width, onZoom }: {
-  id: LineTemplateId;
+  id: LineTemplateId | LineCompositionId;
   channel: LineStepsChannel;
   layout: LineLayout;
   width: number;
@@ -72,7 +72,7 @@ export function LineTemplateExampleView({ id, channel, layout, width, onZoom }: 
 }
 
 /** 크게 보기 — 같은 예시를 화면 높이에 맞춰(휴대폰 실제 폭에 가깝게) */
-export function LineTemplateZoom({ open, onClose, id, channel, layout, label }: { open: boolean; onClose: () => void; id: LineTemplateId; channel: LineStepsChannel; layout: LineLayout; label: string }) {
+export function LineTemplateZoom({ open, onClose, id, channel, layout, label }: { open: boolean; onClose: () => void; id: LineTemplateId | LineCompositionId; channel: LineStepsChannel; layout: LineLayout; label: string }) {
   const [w, setW] = useState(360);
   useEffect(() => {
     if (!open) return;
@@ -187,7 +187,7 @@ export default function LineTemplatePick({ list, ranks, chosen, layout, channel,
             const on = x.id === t.id;
             const r = ranks?.find((y) => y.id === x.id);
             return (
-              <button key={x.id} type="button" aria-pressed={on} onClick={() => onChoose(x.id)}
+              <button key={x.id} type="button" aria-pressed={on} onClick={() => onChoose(x.id as LineTemplateId)}
                 className={`text-left rounded-xl p-3 border-2 transition-colors ${on ? 'border-violet-500 bg-violet-50/60' : 'border-slate-200 bg-white hover:border-slate-300'}`}>
                 <span className="flex items-center gap-2">
                   <span className="w-4 h-4 rounded-full shrink-0" style={{ background: `linear-gradient(135deg, ${x.design.primary}, ${x.design.accent})` }} />

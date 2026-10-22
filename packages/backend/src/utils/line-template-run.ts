@@ -27,7 +27,7 @@ import type { LineStepsManualProduct } from './one-line-steps';
  *   AI = 503(잠시 뒤 다시) · 관문 = 500(조립 결함 · 로그에 사유).
  */
 export class LineTemplateError extends Error {
-  constructor(public status: number, public code: 'LINE_TEMPLATE_AI_FAILED' | 'LINE_TEMPLATE_GATE', message: string, public detail = '') { super(message); }
+  constructor(public status: number, public code: 'LINE_TEMPLATE_AI_FAILED' | 'LINE_TEMPLATE_GATE' | 'LINE_COMPOSITION_MISSING', message: string, public detail = '') { super(message); }
 }
 
 /**
@@ -154,7 +154,7 @@ export async function draftLineTemplate(input: LineTemplateRunInput, ai: { userI
  * ★ 2026-10-21 문구 AI 참고 예시 = 같은 업종 직원 실물(DB 실물 + seed · 가린 글) · 리듬 · 길이만(설계서 §3-5) · 실패 = 없음(생성은 막지 않는다).
  *   인앱 = 이메일 예시(짧은 제목 · 본문 결이 가깝다).
  */
-async function lineCopyExemplars(companyId: string, channel: LineChannel): Promise<string | null> {
+export async function lineCopyExemplars(companyId: string, channel: LineChannel): Promise<string | null> {
   try {
     const basic = await getBrandBasicInfo(companyId).catch(() => null);
     const source = await loadOutreachExemplarSource();

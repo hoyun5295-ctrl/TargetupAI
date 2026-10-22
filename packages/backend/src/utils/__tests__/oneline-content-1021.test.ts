@@ -219,7 +219,7 @@ describe('P2 R1 · 헤드라인 돈 · 값 · 누출 정정(Codex)', () => {
   it('부모 = 만드는 중 잠금(다음 · 건너뛰기 · 만들기 · 단계 이동) · 결과는 시작 때 보존 키로', () => {
     const modal = readFileSync(join(FE, 'components/zone/LineStepsModal.tsx'), 'utf8');
     expect(modal).toContain('disabled={nextDisabled || headlineBusy}');
-    expect(modal).toContain("disabled={cost === null || !!short || headlineBusy}");
+    expect(modal).toContain("disabled={cost === null || !!short || headlineBusy || judging}");
     expect(modal).toContain('const go = (id: string) => { if (!headlineBusy) setCursor(id); };');
     expect(modal).toContain('if (key === storeKeyRef.current) {');
     expect(modal).toContain("disabled={headlineBusy} onClick={() => setPane('pick')}");
@@ -312,7 +312,7 @@ describe('P2 R3 · 공용 그림 핵심(라우트 · 시연 명령이 같은 함
   });
   it('시연 명령 = 차감 · DB 초안 쓰기 없이 같은 부품', () => {
     const cli = readFileSync(resolve(__dirname, '../../../scripts/oneline-demo-set.ts'), 'utf8');
-    for (const f of ['pickLineHeadlines(', 'makeLineHeadlineImage(', 'draftLineTemplate(', 'buildLineTemplateDm(', 'renderDmViewerHtml(']) expect(cli, f).toContain(f);
+    for (const f of ['pickLineHeadlines(', 'makeLineHeadlineImage(', 'runLineJudge(', 'readBrandPage(', 'draftLineCook(', 'buildLineCookDm(', 'renderDmViewerHtml(']) expect(cli, f).toContain(f);
     for (const f of ['deductCredit', 'settleCredit', 'createDm(']) expect(cli, f).not.toContain(f);
     // R4 — 실물 캡처 실패 · HTTP 오류 = 불합격 + 종료 코드 1
     expect(cli).toContain('if (!res || !res.ok()) throw');

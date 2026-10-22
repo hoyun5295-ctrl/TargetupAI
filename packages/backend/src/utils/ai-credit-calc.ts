@@ -142,7 +142,12 @@ export const CREDIT_COST_MAP: Record<string, number> = {
   //   한 줄 단계 모달(질문 · 재료 받기 · 몰 상품 확정 · 재료 배치)을 거친 만들기 = 그 채널 생성비 + 10(DM 15 · 이메일 13 · 인앱 13 · 원장 한 행).
   //   AI 원가가 아니라 완성 대행 가치다(묻기 · 몰 찾기 · 사진 올리기는 0 · 판정 AI 0). 같은 날 같은 한 줄로 다시 만들면 생성비만.
   //   ⛔ 발행 · 게시 · 이메일 완성은 각자 키로 따로(여기 포함하지 않는다 · 이중 과금 0).
-  'oneline-complete': 10,
+  //   ★ 2026-10-22 Harold 단가 확정(설계서 docs/2026-10-22-oneline-ct-design.md §11-3) — 입구 무관 한 줄 합계 15.
+  //     판단 2(oneline-judge · 키 = AI 한줄로 대상 찾기와 같은 aio-base) · 판단 뒤 첫 결과물 13 · 판단 없이 15(이 원천 · 금액은 호출부가 정한다)
+  //     · 같은 한 줄 그릇 추가 · 다시 만들기 3(oneline-recook). 표 값 = 판단 뒤 첫 결과물(13). dm-ai-generate 5 등 한 줄 밖 생성비는 그대로.
+  'oneline-complete': 13,
+  'oneline-recook': 3,
+  'oneline-judge': 2,
   // ★ 2026-09-15 카탈로그 DM 생성 10 — Harold 확정. AI 자동제작 카탈로그 채널(쪽 이미지 N장 · 수량 제한 없음 → 장당 1쪽 슬라이드 DM + settings.catalog).
   //   AI·판독 0(쪽을 그대로 싣는다) · 멱등키 quick:{company}:catalog:{attemptToken}:{과금 지문16}(duplicate 무료) · 발행은 'dm-builder' 별도.
   'catalog-dm-build': 10,

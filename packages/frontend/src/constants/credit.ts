@@ -103,6 +103,8 @@ export const CREDIT_SOURCE_LABELS: Record<string, string> = {
   'dm-ai-generate': '모바일 DM 생성', 'dm-builder': '모바일 DM 발행', 'dm-interaction-publish': '인터랙션 DM 발행',
   // ★ 2026-10-17 한 줄 완성(생성비 포함 한 행 · DM 15 · 이메일 13 · 인앱 13)
   'oneline-complete': '한 줄 완성',
+  // ★ 2026-10-22 한줄 CT 단가(판단 2 · 판단 뒤 첫 결과물 13 · 다시 만들기 3 · 입구 무관 합계 15)
+  'oneline-judge': '한 줄 판단', 'oneline-recook': '한 줄 다시 만들기',
   // ★ 2026-09-15 AI 자동제작 카탈로그 채널(쪽 이미지 → 카탈로그 DM · Harold 확정 10)
   'catalog-dm-build': '카탈로그 DM 생성',
   // ★ 2026-08-22: 백엔드 CREDIT_COST_MAP에만 있고 여기 라벨이 없어 사용 내역에 "AI 작업"으로 뜨던 유일한 키.

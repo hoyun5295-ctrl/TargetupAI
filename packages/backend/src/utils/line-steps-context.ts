@@ -9,41 +9,69 @@ import { listMallProviders } from './mall-providers';
 import { getCreditCost } from './ai-credit-calc';
 import { hasChargeWithKeyPrefix, chargedKeysAmong, type DeductOutcome } from './ai-credit';
 import {
-  lineStepsKeyPrefix, kstDayOf, lineStepsCharge, sanitizeLineUrl, LINE_COMPLETE_SOURCE, sanitizeLineStepsBody, lineStepsFp, lineUrls,
+  lineStepsKeyPrefix, lineStepsLegacyKeyPrefix, kstDayOf, lineStepsCharge, sanitizeLineUrl, LINE_COMPLETE_SOURCE, LINE_PRICE, sanitizeLineStepsBody, lineStepsFp, lineUrls, lineFpLockKey, LINE_STEPS_CHANNELS,
   buildLineStepsIdempotencyKey, type LineStepsChannel, type LineStepsBody,
 } from './one-line-steps';
+import { aiLineBaseKeysOfFp } from './ai-line';
 import { isValidAttemptToken } from './one-line-facts';
 import { splitLineManualProducts, sanitizeLineCompanyImage, resolveLineLink } from './line-materials';
 import { isCompanyImageUrl } from './ai-auto-build-materials';
 import type { LineMallCard } from './line-mall-cards';
 import type { IntegrationActor } from './integration-scope';
 
-/** 채널별 생성 원천(다시 만들기 = 이 원천 · 이 금액만) */
-export const LINE_STEPS_GEN_SOURCE: Record<LineStepsChannel, string> = {
-  dm: 'dm-ai-generate',
-  email: 'email-ai-generate',
-  inapp: 'inapp-ai-generator',
-};
+/**
+ * 금액 셋(화면 금액 줄 · 설계서 docs/2026-10-22-oneline-ct-design.md §11-3).
+ *   generate = 다시 만들기 값(3) · complete = 이번 첫 결과물에서 다시 만들기 값을 뺀 몫 · total = 이번에 낼 값 · judged = 판단 2 를 이미 냈는가.
+ */
+export interface LineStepsCost { generate: number; complete: number; total: number; judged?: boolean }
 
-export interface LineStepsCost { generate: number; complete: number; total: number }
+/** 한 줄 완성 전체 금액(버튼 라벨 · 한 줄 없이도 · 판단 전) — 입구 무관 15 */
+export function lineStepsFullCost(_channel: LineStepsChannel): LineStepsCost {
+  return { generate: LINE_PRICE.again, complete: LINE_PRICE.total - LINE_PRICE.again, total: LINE_PRICE.total, judged: false };
+}
 
-/** 한 줄 완성 전체 금액(버튼 라벨 · 한 줄 없이도) */
-export function lineStepsFullCost(channel: LineStepsChannel): LineStepsCost {
-  const generate = getCreditCost(LINE_STEPS_GEN_SOURCE[channel]);
-  const complete = getCreditCost(LINE_COMPLETE_SOURCE);
-  return { generate, complete, total: generate + complete };
+/**
+ * 이 한 줄로 오늘 · 어제 완성을 냈는가 — 새 접두(채널 없음) 오늘 · 어제 + 옛 접두(채널 포함) 세 채널 전부 오늘 · 어제(Codex CT R1 · 전환일에 DM 으로 낸 완성을
+ *   이메일 추가가 못 찾아 13 · 15 를 다시 걷던 구멍) · 조회 실패 = 던짐.
+ */
+async function completionPaidFor(companyId: string, _channel: LineStepsChannel, lineFp: string, nowMs: number): Promise<boolean> {
+  const days = [kstDayOf(nowMs), kstDayOf(nowMs - 86_400_000)];
+  const prefixes = [
+    ...days.map((d) => lineStepsKeyPrefix(companyId, 'dm', d, lineFp)),
+    ...days.flatMap((d) => LINE_STEPS_CHANNELS.map((ch) => lineStepsLegacyKeyPrefix(companyId, ch, d, lineFp))),
+  ];
+  for (const p of prefixes) if (await hasChargeWithKeyPrefix(companyId, LINE_COMPLETE_SOURCE, p)) return true;
+  return false;
+}
+
+/** 이 한 줄로 오늘 · 어제 판단(2)을 냈는가 — 키 = 문자 입구와 같은 aio-base(원천 무관 · 조회 실패 = 던짐) */
+export async function lineJudgePaid(companyId: string, lineFp: string, nowMs: number): Promise<boolean> {
+  return (await chargedKeysAmong(companyId, aiLineBaseKeysOfFp(companyId, lineFp, new Date(nowMs)))).size > 0;
+}
+
+/**
+ * ★ 2026-10-22 판단 몫을 이미 냈는가 — 판단(2)을 냈거나 · 그 한 줄로 오늘 · 어제 완성(첫 결과물 = 판단 몫 포함)을 냈으면 참(Codex CT R2 ·
+ *   판단 없이 15 를 먼저 낸 한 줄에 문자 입구 · 판단이 2 를 다시 걷어 17 이 되던 구멍). 판단 정산(콘텐츠 · 문자)은 반드시 이 함수로 본다 · 조회 실패 = 던짐.
+ */
+export async function lineJudgeCovered(companyId: string, lineFp: string, nowMs: number): Promise<boolean> {
+  return (await lineJudgePaid(companyId, lineFp, nowMs)) || (await lineCompletionPaid(companyId, lineFp, nowMs));
+}
+
+/** 이 한 줄로 오늘 · 어제 완성(판단 몫 포함)을 냈는가 — 채널 무관 · 옛 접두 포함 · 조회 실패 = 던짐(문자 입구 기본 납부 판정이 이것을 함께 본다) */
+export async function lineCompletionPaid(companyId: string, lineFp: string, nowMs: number): Promise<boolean> {
+  return completionPaidFor(companyId, 'dm', lineFp, nowMs);
 }
 
 /**
  * 이번 생성의 금액 · 원천 · 원장 접두. **조회 실패는 던진다**(호출부 503 · 확인 못 한 금액을 청구도 표시도 하지 않는다).
  */
 export async function resolveLineStepsCharge(companyId: string, channel: LineStepsChannel, lineFp: string, nowMs: number): Promise<{ cost: number; source: string; completionDue: boolean; day: string; prefix: string; breakdown: LineStepsCost }> {
-  const full = lineStepsFullCost(channel);
   const day = kstDayOf(nowMs);
   const prefix = lineStepsKeyPrefix(companyId, channel, day, lineFp);
-  const paid = await hasChargeWithKeyPrefix(companyId, LINE_COMPLETE_SOURCE, prefix);
-  const c = lineStepsCharge(full.generate, full.complete, paid, LINE_STEPS_GEN_SOURCE[channel]);
-  return { ...c, day, prefix, breakdown: { generate: full.generate, complete: c.completionDue ? full.complete : 0, total: c.cost } };
+  const paid = await completionPaidFor(companyId, channel, lineFp, nowMs);
+  const judged = paid ? false : await lineJudgePaid(companyId, lineFp, nowMs);
+  const c = lineStepsCharge(paid, judged);
+  return { ...c, day, prefix, breakdown: { generate: LINE_PRICE.again, complete: c.completionDue ? c.cost - LINE_PRICE.again : 0, total: c.cost, judged } };
 }
 
 export interface LineStepsCompanyFacts {
@@ -144,7 +172,10 @@ export function prepareLineStepsRequest(
   const isCo = (u: string) => isCompanyImageUrl(u, companyId);
   const split = splitLineManualProducts(body.manual, isCo);
   const hero = sanitizeLineCompanyImage(body.heroImage, isCo);
-  if (split === 'invalid' || hero === 'invalid') return { status: 400, code: 'LINE_STEPS_IMAGE_INVALID', error: '사진은 이 화면에서 올린 사진만 쓸 수 있어요. 사진을 다시 올려 주세요.' };
+  // ★ 2026-10-22 구성 재료 사진(특징 · 사용 단계 · 분위기)도 이 회사 업로드 경로만(같은 규칙 · H3)
+  const richImgs = [...body.rich.points, ...body.rich.usage].map((p) => p.image).filter((u): u is string => !!u).concat(body.rich.mood);
+  const richBad = richImgs.some((u) => sanitizeLineCompanyImage(u, isCo) === 'invalid');
+  if (split === 'invalid' || hero === 'invalid' || richBad) return { status: 400, code: 'LINE_STEPS_IMAGE_INVALID', error: '사진은 이 화면에서 올린 사진만 쓸 수 있어요. 사진을 다시 올려 주세요.' };
   return {
     body, manualCards: split.cards, textProducts: split.textProducts, hero, heroAsIs: !!hero && body.heroPoster, manualImages: split.images, manualUrls: split.urls,
     // KST 는 일광 절약 시간이 없다 → 24시간 전의 KST 날짜 = 어제
@@ -180,8 +211,9 @@ export function lineStepsAttemptKeys(p: LineStepsPrepared, companyId: string, ch
  *   다시 보내면 원장에 한 줄 완성이 있어 금액이 생성비로 바뀌고(PRICE_CHANGED) 사람이 확인한 뒤 만든다.
  *   메모리 잠금이라 프로세스 1개(pm2 fork · `inflight-lock.ts` 전제)에서만 유효하다.
  */
-export function lineStepsLineLockKey(p: LineStepsPrepared, companyId: string, channel: LineStepsChannel): string {
-  return `oneline-steps-line:${lineStepsKeyPrefix(companyId, channel, p.day, p.fp)}`;
+export function lineStepsLineLockKey(p: LineStepsPrepared, companyId: string, _channel: LineStepsChannel): string {
+  // ★ 2026-10-22 날짜 · 채널 없는 한 줄 키(판단 정산과 같은 키 · Codex CT R1)
+  return lineFpLockKey(companyId, p.fp);
 }
 
 /**

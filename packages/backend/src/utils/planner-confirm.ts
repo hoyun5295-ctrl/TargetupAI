@@ -22,6 +22,7 @@ import { buildAdMessage, getOpt080Number } from './messageUtils';
 import { getDmDetail } from './dm/dm-builder';
 import { renderDmViewerHtml } from './dm/dm-viewer';
 import { getLineTemplate } from './design-core/line-templates';
+import { getLineComposition } from './line-compositions';
 import { dmPublishFeeSourceOf, isDmPublishFeeCharged } from './dm/dm-publish-gate';
 import { isEmailCampaignCompleted } from './email/email-completion';
 import { withEmailPreviewAdFooter, resolveEmailSender } from './email-channel';
@@ -423,7 +424,7 @@ export async function buildConfirmView(ev: PlannerEventRow, opts: { mode: 'publi
     event: {
       id: ev.id, title: ev.title, startsOn: ev.startsOn, endsOn: ev.endsOn, benefitText: ev.benefitText, status: ev.status,
       displayState: computeDisplayState(ev, tps), editable: isEventEditable(ev.status), revision: Number(ev.meta.revision) || 0, companyName,
-      template: (() => { const t = getLineTemplate(ev.meta.materials?.template?.id); return t ? { id: t.id, label: t.label } : null; })(),
+      template: (() => { const t = getLineTemplate(ev.meta.materials?.template?.id) ?? getLineComposition(ev.meta.materials?.template?.id); return t ? { id: t.id, label: t.label } : null; })(),
       audience: describePlannerAudience(readStoredAudience(ev.meta)),
     },
     firstSend: first,

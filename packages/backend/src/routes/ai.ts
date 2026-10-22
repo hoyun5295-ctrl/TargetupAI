@@ -47,7 +47,9 @@ import { oneLineGaps, sanitizeLineFacts, pickCopyCVariant, lineProductTerms, lin
 import { buildLineStepsPlan, isLineStepsChannel, lineStepsFp } from '../utils/one-line-steps';
 import { LINE_TEMPLATES, rankLineTemplates } from '../utils/design-core/line-templates';   // ★ 2026-10-17 템플릿 캠페인
 import { buildLineTemplatePlan, type LineTemplatePlan } from '../utils/line-template-plan';
-import { loadLineStepsCompanyFacts, lineStepsFullCost } from '../utils/line-steps-context';
+import { loadLineStepsCompanyFacts, lineStepsFullCost, resolveLineStepsCharge } from '../utils/line-steps-context';
+import { buildCompositionPlans, compositionInfos, runLineJudge, LineJudgeBusyError, type LineCompositionPlan } from '../utils/one-line-ct';
+import { rankCompositions, type LineCompositionId } from '../utils/line-compositions';
 import { resolveIntegrationActor } from '../utils/integration-scope';
 import { getCompanyCosts } from '../config/defaults';
 // ★ D209+ (Harold 명시 2026-05-22) Phase D 비용 안전 매트릭스 — 회사별 월 한도 + cache 통계
@@ -1054,6 +1056,8 @@ router.post('/one-line/gaps', async (req: Request, res: Response) => {
   let templatesEnabled = false;
   let templates: ReturnType<typeof rankLineTemplates> | null = null;
   let templatePlans: Record<string, LineTemplatePlan> | null = null;
+  // ★ 2026-10-22 한줄 CT 구성 5종(설계서 docs/2026-10-22-oneline-ct-design.md §11) — 재료 판(구성마다 칸 · 규칙 · AI 0 · 0원) · 판단(AI · 2)은 /one-line/judge
+  let compositions: { infos: ReturnType<typeof compositionInfos>; ranks: ReturnType<typeof rankCompositions>; plans: Record<LineCompositionId, LineCompositionPlan> } | null = null;
   if (companyId && isLineStepsChannel(menu)) {
     stepsEnabled = true;
     stepsCost = lineStepsFullCost(menu).total;
@@ -1072,6 +1076,7 @@ router.post('/one-line/gaps', async (req: Request, res: Response) => {
         if (templatesEnabled) {
           templates = rankLineTemplates(typed);
           templatePlans = Object.fromEntries(LINE_TEMPLATES.map((t) => [t.id, buildLineTemplatePlan(t, planInput)]));
+          compositions = { infos: compositionInfos(), ranks: rankCompositions(typed, null), plans: buildCompositionPlans(planInput) };
         }
       } catch (err: any) {
         // 단계 판정이 실패해도 판정 응답 자체는 지킨다(plan 없음 = 화면은 지금 흐름) · 원인은 남긴다
@@ -1079,6 +1084,7 @@ router.post('/one-line/gaps', async (req: Request, res: Response) => {
         plan = null;
         templates = null;
         templatePlans = null;
+        compositions = null;
       }
     }
   }
@@ -1097,7 +1103,40 @@ router.post('/one-line/gaps', async (req: Request, res: Response) => {
     templates_enabled: templatesEnabled,
     templates,
     template_plans: templatePlans,
+    compositions,
   });
+});
+
+/**
+ * ★ 2026-10-22 한줄 CT ② 판단(설계서 docs/2026-10-22-oneline-ct-design.md §11-3 · §11-4) — 구성 고르기 + 구성별 초안(AI 1회 · 기본 모델).
+ *   2크레딧 = 한 줄당 오늘 · 어제 한 번(키 = AI 한줄로 대상 찾기와 같은 aio-base) · AI 성공 뒤에만 · 실패 · 하루 상한 · 잔액 부족 = 규칙 판단 0원.
+ *   응답 = 고른 구성 · 이유 · 초안 · 이번에 냈는가 · 이 한 줄 다음 결과물 금액(판단을 냈으면 13).
+ */
+router.post('/one-line/judge', async (req: Request, res: Response) => {
+  const companyId = req.user?.companyId;
+  if (!companyId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
+  const menu = typeof req.body?.menu === 'string' ? req.body.menu : '';
+  if (!isLineStepsChannel(menu)) return res.status(400).json({ success: false, error: '메뉴를 다시 확인해 주세요.', code: 'LINE_JUDGE_INVALID' });
+  const line = typeof req.body?.line === 'string' ? req.body.line.slice(0, 2000) : '';
+  const reads = sanitizeLineReads(req.body?.read_texts);
+  if (reads === 'invalid') return res.status(400).json({ success: false, error: '사진에서 읽은 글을 다시 확인해 주세요.', code: 'LINE_READS_INVALID' });
+  const typed = lineWithoutReads(line, reads).trim();
+  if (!typed) return res.status(400).json({ success: false, error: '한 줄을 적어 주세요.', code: 'LINE_JUDGE_INVALID' });
+  const names = Array.isArray(req.body?.product_names) ? (req.body.product_names as unknown[]).filter((x) => typeof x === 'string').slice(0, 8).map((x) => String(x).slice(0, 60)) : [];
+  const lineFp = lineStepsFp(line, reads);
+  const nowMs = Date.now();
+  try {
+    const r = await runLineJudge({ companyId, userId: req.user?.userId, line: typed, lineFp, productNames: names, nowMs });
+    let cost: Awaited<ReturnType<typeof resolveLineStepsCharge>>['breakdown'] | null = null;
+    try { cost = (await resolveLineStepsCharge(companyId, menu, lineFp, Date.now())).breakdown; } catch { cost = null; }
+    console.log(`[one-line judge] company=${companyId} menu=${menu} pick=${r.pick} source=${r.source} charged=${r.charged} note=${r.note || '-'}`);
+    return res.json({ success: true, ...r, cost });
+  } catch (err: any) {
+    if (err instanceof LineJudgeBusyError) return res.status(409).json({ success: false, error: '같은 한 줄을 지금 판단하는 중이에요. 잠시만 기다려 주세요.', code: 'IN_FLIGHT' });
+    if (err instanceof InsufficientCreditError) return res.status(402).json({ success: false, error: '크레딧이 부족해요. 충전한 뒤 다시 시도해 주세요.', code: 'INSUFFICIENT_CREDIT' });
+    console.error('[one-line judge] 실패:', err?.message);
+    return res.status(503).json({ success: false, error: '크레딧 내역을 확인하지 못했어요. 잠시 뒤 다시 시도해 주세요.', code: 'CREDIT_STATE_UNKNOWN' });
+  }
 });
 
 // ============================================================

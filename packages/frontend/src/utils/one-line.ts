@@ -28,12 +28,17 @@ export interface OneLineGapsResult {
   templatesEnabled: boolean;
   templates: LineTemplateRank[] | null;
   templatePlans: Record<string, LineStepsPlan> | null;
+  /** ★ 2026-10-22 한줄 CT 구성 5종 — 구성 정보 · 규칙 추천 · 구성마다 재료 판(AI 0) · 판단(AI · 2)은 `requestLineJudge` */
+  compositions: LineCompositionOffer | null;
 }
 
 // ─────────────── 한 줄 단계 모달 (★ 2026-10-17 · 설계서 docs/2026-10-17-oneline-steps-modal-design.md §3 · §4) ───────────────
 
 export type LineStepsChannel = 'dm' | 'email' | 'inapp';
-export type LineStepKey = 'benefit' | 'product' | 'hero_photo' | 'link' | 'period' | 'event_page' | 'products' | 'proof';
+export type LineStepKey = 'benefit' | 'product' | 'hero_photo' | 'link' | 'period' | 'event_page' | 'products' | 'proof' | 'points' | 'usage' | 'mood' | 'coupon_code' | 'store';
+/** ★ 2026-10-22 구성 칸 단계(막는 칸 · 권하는 칸 · 빠지는 칸) · 채우는 방법 */
+export type LineSlotLevel = 'block' | 'suggest' | 'drop';
+export type LineSlotFill = 'mall' | 'upload' | 'paste' | 'url' | 'studio' | 'text' | 'date' | 'draft';
 type LineSkipIf = 'product_photo' | 'manual_photo' | 'product_link' | 'page_banner';
 /** 서버 단계 하나(키 닫힌 목록 · 문구는 화면이 소유 · skip_if 는 서버가 정한 조건 이름) */
 export interface LineStep {
@@ -49,8 +54,13 @@ export interface LineStep {
   terms?: Array<{ item: string; price?: number; url?: string }>;
   min?: number;
   max?: number;
+  level?: LineSlotLevel;
+  ask?: string;
+  why?: string;
+  fill?: LineSlotFill[];
 }
-export interface LineStepsCost { generate: number; complete: number; total: number }
+/** generate = 다시 만들기 값 · total = 이번에 낼 값 · judged = 판단 2 를 이미 냈는가 */
+export interface LineStepsCost { generate: number; complete: number; total: number; judged?: boolean }
 export interface LineStepsPlan {
   v: 1;
   channel: LineStepsChannel;
@@ -66,7 +76,8 @@ export interface LineStepsPlan {
   cost: LineStepsCost | null;
 }
 
-const STEP_KEYS: readonly string[] = ['benefit', 'product', 'hero_photo', 'link', 'period', 'event_page', 'products', 'proof'];
+const STEP_KEYS: readonly string[] = ['benefit', 'product', 'hero_photo', 'link', 'period', 'event_page', 'products', 'proof', 'points', 'usage', 'mood', 'coupon_code', 'store'];
+const SLOT_FILLS: readonly string[] = ['mall', 'upload', 'paste', 'url', 'studio', 'text', 'date', 'draft'];
 /** 서버 plan 을 그대로 믿지 않고 모양만 걸러 받는다(모르는 키 = 버린다 · 화면은 닫힌 목록만 그린다) */
 function parseLinePlan(raw: any): LineStepsPlan | null {
   if (!raw || raw.v !== 1 || !['dm', 'email', 'inapp'].includes(raw.channel) || typeof raw.line_fp !== 'string') return null;
@@ -81,10 +92,13 @@ function parseLinePlan(raw: any): LineStepsPlan | null {
     ...(typeof s.suggest === 'string' && s.suggest.trim() ? { suggest: s.suggest.slice(0, 300) } : {}),
     ...(Array.isArray(s.terms) ? { terms: s.terms.filter((t: any) => typeof t?.item === 'string').slice(0, 3).map((t: any) => ({ item: t.item, ...(Number.isFinite(t.price) ? { price: Number(t.price) } : {}), ...(typeof t.url === 'string' ? { url: t.url } : {}) })) } : {}),
     ...(Number.isInteger(s.min) && s.min >= 0 ? { min: s.min } : {}),
-    ...(Number.isInteger(s.max) && s.max > 0 ? { max: Math.min(8, s.max) } : {}),
+    ...(Number.isInteger(s.max) && s.max > 0 ? { max: Math.min(12, s.max) } : {}),
+    ...(['block', 'suggest', 'drop'].includes(s.level) ? { level: s.level } : {}),
+    ...(typeof s.ask === 'string' ? { ask: s.ask.slice(0, 80) } : {}),
+    ...(typeof s.why === 'string' ? { why: s.why.slice(0, 80) } : {}),
+    ...(Array.isArray(s.fill) ? { fill: s.fill.filter((f: unknown) => typeof f === 'string' && SLOT_FILLS.includes(f)) } : {}),
   } : null);
-  const cost = raw.cost && [raw.cost.generate, raw.cost.complete, raw.cost.total].every(Number.isFinite)
-    ? { generate: Number(raw.cost.generate), complete: Number(raw.cost.complete), total: Number(raw.cost.total) } : null;
+  const cost = parseLineCost(raw.cost);
   return {
     v: 1, channel: raw.channel, line_fp: raw.line_fp, mall: raw.mall === true,
     block: raw.block === 'INAPP_DISPLAY_UNAVAILABLE' ? 'INAPP_DISPLAY_UNAVAILABLE' : null,
@@ -96,6 +110,94 @@ function parseLinePlan(raw: any): LineStepsPlan | null {
     link_default: raw.link_default && ['website', 'mall_home'].includes(raw.link_default.kind) && typeof raw.link_default.url === 'string' ? { kind: raw.link_default.kind, url: raw.link_default.url } : null,
     cost,
   };
+}
+
+/** 금액 셋 모양 거르기(판정 · 판단 응답 공용) */
+function parseLineCost(c: any): LineStepsCost | null {
+  return c && [c.generate, c.complete, c.total].every(Number.isFinite)
+    ? { generate: Number(c.generate), complete: Number(c.complete), total: Number(c.total), ...(c.judged === true ? { judged: true } : {}) } : null;
+}
+
+// ─────────────── 한줄 CT 구성 5종 (★ 2026-10-22 · 설계서 docs/2026-10-22-oneline-ct-design.md §11) ───────────────
+
+export type LineCompositionId = 'spotlight' | 'showcase' | 'lookbook' | 'menu' | 'event';
+export const LINE_COMPOSITION_IDS: readonly LineCompositionId[] = ['spotlight', 'showcase', 'lookbook', 'menu', 'event'];
+export const isLineCompositionId = (v: unknown): v is LineCompositionId => typeof v === 'string' && (LINE_COMPOSITION_IDS as readonly string[]).includes(v);
+export interface LineCompositionInfo { id: LineCompositionId; label: string; desc: string; primary: string }
+export interface LineCompositionOffer {
+  infos: LineCompositionInfo[];
+  ranks: Array<{ id: LineCompositionId; recommended: boolean }>;
+  plans: Partial<Record<LineCompositionId, LineStepsPlan>>;
+}
+function parseLineCompositionOffer(d: any): LineCompositionOffer | null {
+  const c = d?.compositions;
+  if (!c || typeof c !== 'object') return null;
+  const infos = (Array.isArray(c.infos) ? c.infos : []).filter((x: any) => isLineCompositionId(x?.id))
+    .map((x: any) => ({ id: x.id, label: String(x.label || ''), desc: String(x.desc || ''), primary: /^#[0-9a-f]{6}$/i.test(String(x.primary)) ? String(x.primary) : '#4338ca' }));
+  const ranks = (Array.isArray(c.ranks) ? c.ranks : []).filter((x: any) => isLineCompositionId(x?.id)).map((x: any) => ({ id: x.id, recommended: x.recommended === true }));
+  const plans: LineCompositionOffer['plans'] = {};
+  for (const id of LINE_COMPOSITION_IDS) { const p = parseLinePlan(c.plans?.[id]); if (p) plans[id] = p; }
+  return infos.length > 0 && Object.keys(plans).length > 0 ? { infos, ranks, plans } : null;
+}
+
+/** 판단 초안 한 칸 */
+export interface LineRichPointAnswer { title: string; body: string; image: string | null }
+export interface LineJudgeResponse {
+  pick: LineCompositionId;
+  reason: string;
+  source: 'ai' | 'rule';
+  drafts: Partial<Record<LineCompositionId, { points?: LineRichPointAnswer[]; steps?: LineRichPointAnswer[] }>>;
+  charged: boolean;
+  note: 'NO_CREDIT' | 'DAILY_LIMIT' | 'AI_FAILED' | null;
+  cost: LineStepsCost | null;
+}
+
+/**
+ * 판단(AI 1회 · 2크레딧 · 한 줄당 오늘 · 어제 한 번 · 실패 = 규칙 판단 0원). 같은 한 줄을 지금 판단 중이면(409) 한 번 더 기다렸다 묻는다.
+ * 실패 = null(화면은 규칙 추천으로 그대로 간다).
+ */
+export async function requestLineJudge(line: string, menu: LineStepsChannel, reads: readonly string[], productNames: string[]): Promise<LineJudgeResponse | null> {
+  for (let tryNo = 0; tryNo < 3; tryNo++) {
+    try {
+      const res = await fetch('/api/ai/one-line/judge', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${localStorage.getItem('token') || ''}` },
+        body: JSON.stringify({ line: String(line || '').slice(0, 2000), menu, ...(reads.length > 0 ? { read_texts: reads.slice(0, 5) } : {}), product_names: productNames.slice(0, 8) }),
+      });
+      const d = await res.json().catch(() => null);
+      if (res.status === 409) { await new Promise((r) => setTimeout(r, 1500)); continue; }
+      if (!res.ok || !d?.success || !isLineCompositionId(d.pick)) return null;
+      const pts = (v: any): LineRichPointAnswer[] => (Array.isArray(v) ? v : []).filter((p: any) => typeof p?.title === 'string' && p.title.trim()).slice(0, 3)
+        .map((p: any) => ({ title: String(p.title).slice(0, 20), body: String(p.body || '').slice(0, 80), image: null }));
+      const drafts: LineJudgeResponse['drafts'] = {};
+      for (const id of LINE_COMPOSITION_IDS) {
+        const x = d.drafts?.[id];
+        if (x) drafts[id] = { points: pts(x.points), steps: pts(x.steps) };
+      }
+      return {
+        pick: d.pick, reason: String(d.reason || '').slice(0, 60), source: d.source === 'ai' ? 'ai' : 'rule', drafts,
+        charged: d.charged === true, note: ['NO_CREDIT', 'DAILY_LIMIT', 'AI_FAILED'].includes(d.note) ? d.note : null, cost: parseLineCost(d.cost),
+      };
+    } catch {
+      return null;
+    }
+  }
+  return null;
+}
+
+/** 재료 판 미리보기(AI 0 · 0원 · 같은 조립 · 렌더러 · 빈 칸 = 점선 자리) — 실패 = null */
+export async function fetchCompositionPreview(composition: LineCompositionId, channel: LineStepsChannel, materials: Record<string, unknown>, signal?: AbortSignal): Promise<{ html?: string; message?: Record<string, any>; missing: number } | null> {
+  try {
+    const res = await fetch('/api/line-templates/composition-preview', {
+      method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${localStorage.getItem('token') || ''}` },
+      body: JSON.stringify({ composition, channel, materials }), signal,
+    });
+    const d = await res.json().catch(() => null);
+    if (!res.ok || !d?.success) return null;
+    return { ...(typeof d.html === 'string' ? { html: d.html } : {}), ...(d.message && typeof d.message === 'object' ? { message: d.message } : {}), missing: Number(d.missing) || 0 };
+  } catch {
+    return null;
+  }
 }
 
 /** ★ 2026-10-10 한 줄 묻기 — 한 줄 입력이 있는 메뉴(서버 판정 · 답 경로가 메뉴로 갈린다) */
@@ -128,6 +230,7 @@ export async function fetchOneLineGaps(line: string, reads?: readonly string[], 
       stepsCost: Number.isFinite(d.steps_cost) ? Number(d.steps_cost) : null,
       plan: d.steps_enabled === true ? parseLinePlan(d.plan) : null,
       ...parseLineTemplateOffer(d),
+      compositions: d.templates_enabled === true ? parseLineCompositionOffer(d) : null,
     };
   } catch {
     return null;
@@ -274,7 +377,7 @@ export async function requestLineDm(req: LineDmRequest): Promise<LineDmResponse>
 // ─────────────── 한 줄 단계 모달 · 답 (★ 2026-10-17) ───────────────
 
 /** 직접 넣은 상품(이름 = 한 줄 낱말을 미리 채움 · 가격 = 한 줄 금액을 미리 채움 · 사진 = 이 화면에서 올린 것만) */
-export interface LineManualAnswer { name: string; price: string; image: string | null; url?: string }
+export interface LineManualAnswer { name: string; price: string; image: string | null; url?: string; /** ★1022 구성 종류(진열 묶음 · 선택) */ category?: string }
 /** ★ 2026-10-21 고객 후기 한 건 */
 export interface LineProofAnswer { body: string; author: string; rating: number }
 /** 보낼 후기(본문 2자 이상 · 3건) */
@@ -305,11 +408,25 @@ export interface LineStepsAnswers {
   manualList?: LineManualAnswer[];
   /** ★ 템플릿 이벤트 페이지 단계 — 읽은 결과(주소 · 표지 사진 · 카드) · 그대로 쓰기 켠 카드 지문 · null = 건너뜀 */
   page?: LinePageAnswer | null;
-  /** ★ 고른 템플릿 · 배치(바꿔도 다른 답은 그대로) */
-  template?: { id: LineTemplateId; layout: LineLayout };
+  /** ★ 고른 템플릿 · 배치(바꿔도 다른 답은 그대로) · ★1022 구성 5종 id 도 이 칸 */
+  template?: { id: LineTemplateId | LineCompositionId; layout: LineLayout };
+  /** ★ 2026-10-22 구성 재료 — 특징 · 코디 · 꼬리표 · 참여 방법(points) · 사용 단계(usage) · 분위기 사진 · 할인 코드 · 매장 · 혜택 조건 */
+  points?: LineRichPointAnswer[];
+  usage?: LineRichPointAnswer[];
+  mood?: string[];
+  couponCode?: string | null;
+  store?: { address: string; business_hours: string; phone: string } | null;
+  benefitNote?: string | null;
+  /** 판단 결과(구성 · 이유 · 초안 · 원천) — 같은 한 줄로 다시 열면 다시 묻지 않는다 */
+  judge?: { pick: LineCompositionId; reason: string; source: 'ai' | 'rule'; drafts: LineJudgeResponse['drafts'] } | null;
 }
 export interface LinePageCard { hash: string; title: string; text: string }
-export interface LinePageAnswer { url: string; host: string; banner: string | null; cards: LinePageCard[]; licensed: string[] }
+export interface LinePageAnswer {
+  url: string; host: string; banner: string | null; cards: LinePageCard[]; licensed: string[];
+  /** ★ 2026-10-22 페이지에서 읽은 상품(이름 · 이 회사 사본 사진 · 링크 · 가격은 읽지 않는다) · 사진(이 회사 사본) */
+  products?: Array<{ name: string; image: string; url: string }>;
+  images?: string[];
+}
 export const emptyLineStepsAnswers = (): LineStepsAnswers => ({ products: {}, offersAdded: [] });
 
 /** 단계 하나의 이름표(같은 키가 낱말마다 여럿) */
@@ -495,7 +612,8 @@ const LINE_TEMPLATE_IDS: readonly string[] = ['big-sale', 'new-launch', 'special
 export interface LineTemplateRank { id: LineTemplateId; reasons: string[]; recommended: boolean }
 /** 템플릿 목록 한 줄(서버 원장 · 화면은 문구만 그린다) */
 export interface LineTemplateInfo {
-  id: LineTemplateId;
+  /** ★1022 구성 5종 목록(set=compositions)이면 구성 id */
+  id: LineTemplateId | LineCompositionId;
   label: string;
   desc: string;
   story: Array<{ role: string; text: string }>;
@@ -520,17 +638,23 @@ function parseLineTemplateOffer(d: any): Pick<OneLineGapsResult, 'templatesEnabl
 
 const authHeader = () => ({ Authorization: `Bearer ${localStorage.getItem('token') || ''}` });
 
-/** 템플릿 목록(로그인 단위 메모리 캐시 · 실패 = null) */
-let templatesCache: { token: string; list: LineTemplateInfo[] } | null = null;
-export async function fetchLineTemplates(): Promise<LineTemplateInfo[] | null> {
+/**
+ * 템플릿 목록(로그인 · 묶음 단위 메모리 캐시 · 실패 = null).
+ * ★ 2026-10-22 set='compositions' = 한줄 CT 구성 5종(마케팅플래너 · 같은 모양 · 같은 예시 경로).
+ */
+const templatesCache = new Map<string, LineTemplateInfo[]>();
+export async function fetchLineTemplates(set: 'templates' | 'compositions' = 'templates'): Promise<LineTemplateInfo[] | null> {
   const token = localStorage.getItem('token') || '';
-  if (templatesCache && templatesCache.token === token) return templatesCache.list;
+  const key = `${token}:${set}`;
+  const hit = templatesCache.get(key);
+  if (hit) return hit;
   try {
-    const res = await fetch('/api/line-templates', { headers: authHeader() });
+    const res = await fetch(set === 'compositions' ? '/api/line-templates?set=compositions' : '/api/line-templates', { headers: authHeader() });
     const d = await res.json().catch(() => null);
     if (!res.ok || !d?.success || !Array.isArray(d.templates)) return null;
-    const list = d.templates.filter((t: any) => LINE_TEMPLATE_IDS.includes(t?.id)) as LineTemplateInfo[];
-    templatesCache = { token, list };
+    const ok = (id: unknown) => (set === 'compositions' ? isLineCompositionId(id) : LINE_TEMPLATE_IDS.includes(String(id)));
+    const list = d.templates.filter((t: any) => ok(t?.id)) as LineTemplateInfo[];
+    templatesCache.set(key, list);
     return list;
   } catch {
     return null;
@@ -540,7 +664,7 @@ export async function fetchLineTemplates(): Promise<LineTemplateInfo[] | null> {
 /** 예시(가상 업체 · 진짜 조립 + 렌더러) — DM · 이메일 = html · 인앱 = 메시지 · 키별 메모리 캐시(같은 화면에서 다시 부르지 않게) */
 export type LineTemplateExample = { html: string } | { message: Record<string, any> };
 const exampleCache = new Map<string, LineTemplateExample>();
-export async function fetchLineTemplateExample(id: LineTemplateId, channel: LineStepsChannel, layout: LineLayout, signal?: AbortSignal): Promise<LineTemplateExample | null> {
+export async function fetchLineTemplateExample(id: LineTemplateId | LineCompositionId, channel: LineStepsChannel, layout: LineLayout, signal?: AbortSignal): Promise<LineTemplateExample | null> {
   const key = `${new Date().toDateString()}:${id}:${channel}:${channel === 'dm' ? layout : 'page'}`;
   const hit = exampleCache.get(key);
   if (hit) return hit;
@@ -569,7 +693,12 @@ export async function readLinePage(rawUrl: string): Promise<LinePageAnswer> {
     .filter((c: any) => typeof c?.hash === 'string' && /^[0-9a-f]{16}$/.test(c.hash))
     .slice(0, 3)
     .map((c: any) => ({ hash: c.hash, title: String(c.title || ''), text: String(c.text || '') }));
-  return { url, host: String(d.host || ''), banner: typeof d.line_banner === 'string' && d.line_banner ? d.line_banner : null, cards, licensed: [] };
+  const products = (Array.isArray(d.products) ? d.products : [])
+    .filter((p: any) => typeof p?.name === 'string' && p.name.trim() && typeof p?.imageUrl === 'string' && p.imageUrl.startsWith('/'))
+    .slice(0, 8).map((p: any) => ({ name: String(p.name).slice(0, 60), image: String(p.imageUrl), url: typeof p.url === 'string' ? String(p.url) : '' }));
+  const banner = typeof d.line_banner === 'string' && d.line_banner ? d.line_banner : null;
+  const images = (Array.isArray(d.images) ? d.images : []).map((im: any) => String(im?.url || '')).filter((u: string) => u.startsWith('/') && u !== banner).slice(0, 6);
+  return { url, host: String(d.host || ''), banner, cards, licensed: [], products, images };
 }
 
 /** 몰 상품 찾기(상품 단계 「찾기」 칸 · 재조회 가능한 몰만 · 최대 6 · 5초) */
@@ -601,6 +730,27 @@ export function regroupLineTemplatePages<T extends { tpl_slot?: string }>(sectio
   return Array.from(groups.entries()).sort((a, b) => a[0] - b[0]).map(([, g]) => g);
 }
 
+/** (순수) 구성 상품 = 사진 있는 몰 상품 먼저 · 사진 있는 직접 상품 · 합쳐 상한(재료 판 판정 · 요청 본문이 같은 목록 · 서버 조립도 사진 없는 상품은 뺀다) */
+export function lineCompositionGoods(a: LineStepsAnswers, max: number): { picks: LineMallCandidate[]; manual: LineManualAnswer[] } {
+  const picks = (a.picks || []).filter((p) => p.imageUrl).slice(0, max);
+  const manual = (a.manualList || []).filter((m) => m.name.trim() && m.image).slice(0, Math.max(0, max - picks.length));
+  return { picks, manual };
+}
+
+/** 보낼 구성 칸 글(제목이 있는 것만 · 3개 · 상한) */
+export const lineRichRows = (rows: LineRichPointAnswer[] | undefined): Array<{ title: string; body: string; image?: string }> => (rows || [])
+  .map((r) => ({ title: r.title.replace(/\s+/g, ' ').trim().slice(0, 20), body: r.body.replace(/\s+/g, ' ').trim().slice(0, 80), ...(r.image ? { image: r.image } : {}) }))
+  .filter((r) => r.title).slice(0, 3);
+/** 보낼 매장 칸(비면 null) */
+export const lineStoreOf = (a: LineStepsAnswers): { address?: string; business_hours?: string; phone?: string } | null => {
+  const s = a.store;
+  if (!s) return null;
+  const out = { ...(s.address.trim() ? { address: s.address.trim().slice(0, 80) } : {}), ...(s.business_hours.trim() ? { business_hours: s.business_hours.trim().slice(0, 80) } : {}), ...(s.phone.trim() ? { phone: s.phone.trim().slice(0, 80) } : {}) };
+  return Object.keys(out).length > 0 ? out : null;
+};
+/** 할인 코드 모양(서버와 같은 규칙 · 영숫자 · 하이픈 · 밑줄 2~24) */
+export const LINE_COUPON_CODE_RE = /^[A-Za-z0-9_-]{2,24}$/;
+
 /** 템플릿 상품 단계 — 지금 담은 상품 수(몰 + 직접) */
 export const lineTemplateCount = (a: LineStepsAnswers): number => (a.picks || []).length + (a.manualList || []).filter((m) => m.name.trim()).length;
 
@@ -608,17 +758,20 @@ export const lineTemplateCount = (a: LineStepsAnswers): number => (a.picks || []
  * 템플릿 생성 요청 몸통(세 채널 공통) — 1017 몸통 칸 그대로 + template · page.
  * 상품 = 담은 몰 상품(상품번호만) · 직접 넣은 상품(이름 · 가격 · 사진 · 링크) · 합쳐 템플릿 상한까지.
  */
-export function buildLineTemplateBody(plan: LineStepsPlan, a: LineStepsAnswers, shown: readonly LineStep[], expectedCost: number, tpl: { id: LineTemplateId; layout: LineLayout }): Record<string, unknown> {
+export function buildLineTemplateBody(plan: LineStepsPlan, a: LineStepsAnswers, shown: readonly LineStep[], expectedCost: number, tpl: { id: LineTemplateId | LineCompositionId; layout: LineLayout }): Record<string, unknown> {
   const has = (key: LineStepKey) => shown.some((s) => s.key === key);
   const max = plan.steps.find((s) => s.key === 'products')?.max ?? 0;
   const facts: Record<string, unknown> = {};
   if (plan.steps.some((s) => s.key === 'benefit')) facts.benefit = typeof a.benefit === 'string' && a.benefit.trim() ? a.benefit.trim() : null;
   if (has('period') && a.period) facts.period_end = a.period;
   if (a.link) facts.link = a.link;
-  const picks = (a.picks || []).slice(0, max);
-  const manual = (a.manualList || []).filter((m) => m.name.trim()).slice(0, Math.max(0, max - picks.length)).map((m) => {
+  const comp = isLineCompositionId(tpl.id);
+  // ★ 2026-10-22 구성 = 조립되는 상품만(사진 있는 직접 상품 · 몰 상품) 먼저 걸러 상한 · 재료 판 판정과 같은 목록(lineCompositionGoods · Codex CT R2)
+  const goods = comp ? lineCompositionGoods(a, max) : null;
+  const picks = goods ? goods.picks : (a.picks || []).slice(0, max);
+  const manual = (goods ? goods.manual : (a.manualList || []).filter((m) => m.name.trim()).slice(0, Math.max(0, max - picks.length))).map((m) => {
     const price = lineManualPrice(m.price);
-    return { name: m.name.trim().slice(0, 60), ...(price ? { price } : {}), ...(m.image ? { image: m.image } : {}), ...(m.url ? { url: m.url } : {}) };
+    return { name: m.name.trim().slice(0, 60), ...(price ? { price } : {}), ...(m.image ? { image: m.image } : {}), ...(m.url ? { url: m.url } : {}), ...(comp && m.category?.trim() ? { category: m.category.trim().slice(0, 20) } : {}) };
   });
   const answered: string[] = [];
   const skipped: string[] = [];
@@ -629,13 +782,28 @@ export function buildLineTemplateBody(plan: LineStepsPlan, a: LineStepsAnswers, 
           : s.key === 'hero_photo' ? (a.hero ? 1 : 0)
             : s.key === 'link' ? (a.link ? 1 : 0)
               : s.key === 'proof' ? (lineProofRows(a).length > 0 ? 1 : 0)
-                : (a.period ? 1 : 0);
+                : s.key === 'points' ? (lineRichRows(a.points).length > 0 ? 1 : 0)
+                  : s.key === 'usage' ? (lineRichRows(a.usage).length > 0 ? 1 : 0)
+                    : s.key === 'mood' ? ((a.mood || []).length > 0 ? 1 : 0)
+                      : s.key === 'coupon_code' ? (a.couponCode ? 1 : 0)
+                        : s.key === 'store' ? (lineStoreOf(a) ? 1 : 0)
+                          : (a.period ? 1 : 0);
     (v ? answered : skipped).push(s.key);
   }
   const proof = has('proof') ? lineProofRows(a) : [];
+  // ★ 2026-10-22 구성 재료 칸(보인 칸만 · 빈 값은 보내지 않는다)
+  const rich = comp ? {
+    ...(has('points') ? { points: lineRichRows(a.points) } : {}),
+    ...(has('usage') ? { usage: lineRichRows(a.usage) } : {}),
+    ...(has('mood') ? { mood: (a.mood || []).filter(Boolean).slice(0, 3) } : {}),
+    ...(has('coupon_code') && a.couponCode ? { coupon_code: a.couponCode } : {}),
+    ...(has('store') && lineStoreOf(a) ? { store: lineStoreOf(a) } : {}),
+    ...(has('benefit') && a.benefitNote?.trim() ? { benefit_note: a.benefitNote.trim().slice(0, 120) } : {}),
+  } : null;
   return {
     steps: { v: 1 },
     template: { id: tpl.id, layout: tpl.layout },
+    ...(rich ? { rich } : {}),
     ...(proof.length > 0 ? { proof } : {}),
     facts,
     products: picks.map((p) => ({ provider: p.provider, no: p.no })),

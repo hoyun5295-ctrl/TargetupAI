@@ -16,6 +16,7 @@ import JourneyModalShell from '../journey/JourneyModalShell';
 import ZoneSegmented from './ZoneSegmented';
 import LineTemplatePick, { LineTemplateExampleView } from './LineTemplatePick';
 import LineHeadlineStep from './LineHeadlineStep';
+import LineCompositionPreview, { LineCompositionPick } from './LineCompositionBoard';
 import { useBodyFlag } from '../../lib/surface-flags';
 import { useAuthStore } from '../../stores/authStore';
 import { LineReadToggle } from './LineFacts';
@@ -25,6 +26,7 @@ import {
   emptyLineStepsAnswers, lineStepId, lineStepsProducts, lineStepsManual, lineStepSkipped, lineStepTerms, lineManualPrice, normalizeLineLink,
   buildLineStepsBody, fetchLineCandidates, uploadLineImage, lineStepsStoreKey, loadLineStepsAnswers, saveLineStepsAnswers, LINE_UPLOAD_MAX_MB,
   fetchLineTemplates, readLinePage, searchLineMall, buildLineTemplateBody, lineTemplateCount, lineProofRows,
+  type LineCompositionOffer, type LineCompositionId, type LineRichPointAnswer, isLineCompositionId, requestLineJudge, lineRichRows, lineStoreOf, LINE_COUPON_CODE_RE, lineCompositionGoods,
 } from '../../utils/one-line';
 
 export interface LineStepsOpen {
@@ -42,6 +44,8 @@ export interface LineStepsOpen {
   dropPicks?: boolean;
   /** ★ 템플릿 캠페인(서버 판정 · 템플릿 스위치 켠 회사만) — 한 줄 추천 · 템플릿마다 재료 단계 */
   templates?: { ranks: LineTemplateRank[] | null; plans: Record<string, LineStepsPlan> } | null;
+  /** ★ 2026-10-22 한줄 CT 구성 5종(있으면 재료 판 · 판단 카드 · 미리보기 · 템플릿 대신) */
+  compositions?: LineCompositionOffer | null;
 }
 export interface LineStepsMade {
   body: Record<string, unknown>;
@@ -86,6 +90,11 @@ function stepName(s: LineStep | typeof MAKE): string {
   if (s.key === 'hero_photo') return '첫 화면';
   if (s.key === 'proof') return '고객 후기';
   if (s.key === 'link') return '버튼 주소';
+  if (s.key === 'points') return '특징';
+  if (s.key === 'usage') return '사용 단계';
+  if (s.key === 'mood') return '분위기 사진';
+  if (s.key === 'coupon_code') return '할인 코드';
+  if (s.key === 'store') return '매장 안내';
   return '기간';
 }
 
@@ -201,7 +210,12 @@ export default function LineStepsModal({ open, channel, state, onClose, onMake }
 }) {
   useBodyFlag('data-interrupt-open', open);
   const user = useAuthStore((s) => s.user);
-  const tplOffer = state?.templates ?? null;
+  // ★ 2026-10-22 구성 5종이 오면 그것이 판(템플릿 판과 같은 틀 · 시작 = 재료 판 · 칸을 닫으면 판으로 돌아온다)
+  const compOffer = state?.compositions ?? null;
+  const compMode = !!compOffer;
+  const tplOffer: { ranks: LineTemplateRank[] | null; plans: Record<string, LineStepsPlan> } | null = compOffer
+    ? { ranks: null, plans: compOffer.plans as Record<string, LineStepsPlan> }
+    : state?.templates ?? null;
   const tplMode = !!tplOffer;
   // 보존 키 · 몰 여부는 한 줄 기준(템플릿마다 단계는 달라도 한 줄 지문 · 회사 사실은 같다)
   const basePlan = state?.plan ?? (tplOffer ? Object.values(tplOffer.plans)[0] ?? null : null);
@@ -236,15 +250,24 @@ export default function LineStepsModal({ open, channel, state, onClose, onMake }
   const autoRead = useRef('');
 
   // 고른 템플릿 = 답 → 추천 → 목록 첫 것 · 그 템플릿의 단계 목록이 이 모달의 plan
-  const chosenId: LineTemplateId | null = tplOffer
+  const chosenId: string | null = tplOffer
     ? (answers.template?.id && tplOffer.plans[answers.template.id] ? answers.template.id
-      : tplOffer.ranks?.find((r) => r.recommended && tplOffer.plans[r.id])?.id
-        ?? TEMPLATE_ORDER.find((id) => tplOffer.plans[id]) ?? null)
+      : compOffer
+        ? (answers.judge?.pick && tplOffer.plans[answers.judge.pick] ? answers.judge.pick
+          : compOffer.ranks.find((r) => r.recommended && tplOffer.plans[r.id])?.id ?? Object.keys(tplOffer.plans)[0] ?? null)
+        : tplOffer.ranks?.find((r) => r.recommended && tplOffer.plans[r.id])?.id
+          ?? TEMPLATE_ORDER.find((id) => tplOffer.plans[id]) ?? null)
     : null;
+  const compInfo = compOffer?.infos.find((c) => c.id === chosenId) ?? null;
+  // 판단 중(AI · 2크레딧) · 판단 뒤 금액(이 한 줄 다음 결과물 값 · 판단을 냈으면 13)
+  const [judging, setJudging] = useState(false);
+  const [judgedCost, setJudgedCost] = useState<number | null>(null);
+  // 이 한 줄로 판단 2크레딧을 실제로 냈는가(서버 원장 기준 · 크레딧제 미적용 회사 = 거짓)
+  const [judgePaid, setJudgePaid] = useState(false);
   // ★ 2026-10-21 형태 기본 = 세로 스크롤(직원 실물 27/28 · 슬라이드는 사람이 고를 때만 · 설계서 docs/2026-10-21-oneline-content-design.md §3-3)
   const layout: LineLayout = channel === 'dm' ? (answers.template?.layout ?? 'page') : 'page';
   const plan: LineStepsPlan | null = tplOffer ? (chosenId ? tplOffer.plans[chosenId] ?? null : null) : (state?.plan ?? null);
-  const tplInfo = tplList?.find((t) => t.id === chosenId) ?? null;
+  const tplInfo = compMode ? null : tplList?.find((t) => t.id === chosenId) ?? null;
 
   // 열 때: 보존한 답 복원 → 시작 단계 → 몰 후보 한 번
   useEffect(() => {
@@ -266,10 +289,16 @@ export default function LineStepsModal({ open, channel, state, onClose, onMake }
     setManualEdit(null);
     autoRead.current = '';
     firstFocus.current = true;
-    if (tplOffer) {
+    setJudgedCost(null);
+    setJudgePaid(false);
+    if (compOffer) {
+      // 재료 판에서 시작(판단 카드 · 빈 칸만 · 칸을 누르면 그 칸)
+      setPane('steps');
+      setCursor(MAKE);
+    } else if (tplOffer) {
       setPane(state?.atMake ? 'steps' : 'pick');
       setCursor(MAKE);
-      void fetchLineTemplates().then((list) => setTplList(list ? [...list].sort((x, y) => TEMPLATE_ORDER.indexOf(x.id) - TEMPLATE_ORDER.indexOf(y.id)) : []));
+      void fetchLineTemplates().then((list) => setTplList(list ? [...list].sort((x, y) => TEMPLATE_ORDER.indexOf(x.id as LineTemplateId) - TEMPLATE_ORDER.indexOf(y.id as LineTemplateId)) : []));
     } else {
       const first = basePlan.steps.find((s) => !lineStepSkipped(s, a, channel, lineStepTerms(basePlan, a)));
       setCursor(state?.atMake || !first ? MAKE : lineStepId(first));
@@ -297,6 +326,39 @@ export default function LineStepsModal({ open, channel, state, onClose, onMake }
 
   // 답이 바뀌면 바로 남긴다
   useEffect(() => { if (open && basePlan && restored === storeKey) saveLineStepsAnswers(storeKey, answers, new Date().toISOString()); }, [answers, open, basePlan, storeKey, restored]);
+
+  // ★ 2026-10-22 판단(AI 1회 · 2크레딧 · 한 줄당 오늘 · 어제 한 번) — 열 때 한 번 · 이미 판단한 한 줄(보존 답)이면 다시 묻지 않는다(금액만 다시)
+  //   고른 구성 · 이유 · 구성별 초안을 답에 넣는다(사람이 고른 구성 · 이미 적은 칸은 덮지 않는다) · 실패 = 규칙 추천 그대로
+  useEffect(() => {
+    if (!open || !compOffer || !state || restored !== storeKey) return;
+    let alive = true;
+    const known = answers.judge;
+    setJudging(!known);
+    const names = [...(answers.picks || []).map((p) => p.name), ...(answers.manualList || []).map((m) => m.name)].filter(Boolean);
+    void requestLineJudge(state.line, channel, state.reads, names).then((r) => {
+      if (!alive) return;
+      setJudging(false);
+      if (!r) return;
+      if (r.cost) { setJudgedCost(r.cost.total); setJudgePaid(r.cost.judged === true); }
+      if (known) return;
+      setAnswers((a) => {
+        const d = r.drafts;
+        const pickPts = (id: LineCompositionId) => d[id]?.points ?? [];
+        // 초안 = 구성마다 다르다(특징 · 코디 · 꼬리표 · 참여 방법) → 고른 구성의 초안만 칸에 · 다른 구성으로 바꾸면 그 구성 초안으로
+        const draftPoints = pickPts(r.pick);
+        return {
+          ...a,
+          judge: { pick: r.pick, reason: r.reason, source: r.source, drafts: r.drafts },
+          ...(a.template ? {} : { template: { id: r.pick, layout } }),
+          ...(a.points && a.points.length > 0 ? {} : draftPoints.length > 0 ? { points: draftPoints } : {}),
+          ...(a.usage && a.usage.length > 0 ? {} : (d.spotlight?.steps ?? []).length > 0 ? { usage: d.spotlight!.steps! } : {}),
+        };
+      });
+    });
+    return () => { alive = false; };
+    // 여는 사건에만(보존 복원 뒤 한 번)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, storeKey, restored]);
 
   const termOrder = useMemo(() => (plan ? lineStepTerms(plan, answers) : []), [plan, answers]);
   const allSteps: LineStep[] = useMemo(() => {
@@ -414,11 +476,43 @@ export default function LineStepsModal({ open, channel, state, onClose, onMake }
   const confirmTemplate = () => {
     if (!chosenId || !tplOffer) return;
     const p = tplOffer.plans[chosenId];
-    setA({ template: { id: chosenId, layout } });
+    setA({ template: { id: chosenId as LineTemplateId, layout } });
     setPane('steps');
     const first = p?.steps.find((s) => !lineStepSkipped(s, answers, channel, lineStepTerms(p, answers)));
     setCursor(first ? lineStepId(first) : MAKE);
   };
+
+  if (compMode && pane === 'pick') {
+    return (
+      <JourneyModalShell open={open} onClose={onClose} labelledBy="line-comp-q" disableDismiss zIndexClassName="z-[1500]"
+        panelClassName="w-full md:w-[min(960px,calc(100vw-3rem))] md:max-w-none !max-h-[100dvh] md:!max-h-[min(820px,calc(100dvh-3rem))]">
+        <div className="px-5 pt-4 pb-3 border-b border-slate-100 shrink-0 flex items-start gap-3">
+          <div className="flex-1 min-w-0">
+            <h2 id="line-comp-q" className="text-[16px] font-bold text-slate-900">어떤 구성으로 만들까요?</h2>
+            <p className="mt-0.5 text-[12.5px] text-slate-500 truncate"><span className="font-semibold text-violet-700 mr-1.5">한 줄</span>{state.line}</p>
+          </div>
+          <button type="button" onClick={() => setPane('steps')} aria-label="닫기" className="-mr-2 w-9 h-9 rounded-lg flex items-center justify-center text-slate-400 hover:bg-slate-100 hover:text-slate-600 shrink-0"><X className="w-5 h-5" /></button>
+        </div>
+        <div className="flex-1 min-h-0 overflow-y-auto px-5 py-5">
+          <LineCompositionPick infos={compOffer!.infos.filter((c) => tplOffer!.plans[c.id])} chosen={chosenId as LineCompositionId | null}
+            recommended={answers.judge?.pick ?? compOffer!.ranks.find((r) => r.recommended)?.id ?? null} reason={answers.judge?.reason ?? null}
+            layout={layout} channel={channel}
+            onLayout={(l) => chosenId && setA({ template: { id: chosenId as LineCompositionId, layout: l } })}
+            onChoose={(id) => {
+              // 바꾸기 = 진단만 다시(AI 0 · 0원) · 손대지 않은 초안 칸은 그 구성의 초안으로
+              setAnswers((a) => {
+                const d = a.judge?.drafts?.[id]?.points ?? [];
+                const prevDraft = a.judge?.drafts?.[(a.template?.id as LineCompositionId) ?? a.judge?.pick ?? 'spotlight']?.points ?? [];
+                const untouched = !a.points || a.points.length === 0 || JSON.stringify(a.points) === JSON.stringify(prevDraft);
+                return { ...a, template: { id, layout }, ...(untouched ? { points: d } : {}) };
+              });
+              setPane('steps');
+              setCursor(MAKE);
+            }} />
+        </div>
+      </JourneyModalShell>
+    );
+  }
 
   if (tplMode && pane === 'pick') {
     return (
@@ -440,9 +534,9 @@ export default function LineStepsModal({ open, channel, state, onClose, onMake }
               <button type="button" onClick={onClose} className="h-10 px-4 rounded-xl border border-slate-200 text-[13px] font-semibold text-slate-700 hover:bg-slate-50">닫기</button>
             </div>
           ) : (
-            <LineTemplatePick list={tplList.filter((t) => tplOffer!.plans[t.id])} ranks={tplOffer!.ranks} chosen={chosenId} layout={layout} channel={channel}
+            <LineTemplatePick list={tplList.filter((t) => tplOffer!.plans[t.id])} ranks={tplOffer!.ranks} chosen={chosenId as LineTemplateId} layout={layout} channel={channel}
               onChoose={(id) => setA({ template: { id, layout } })}
-              onLayout={(l) => setA({ template: { id: chosenId, layout: l } })}
+              onLayout={(l) => setA({ template: { id: chosenId as LineTemplateId, layout: l } })}
               onConfirm={confirmTemplate} />
           )}
         </div>
@@ -450,11 +544,12 @@ export default function LineStepsModal({ open, channel, state, onClose, onMake }
     );
   }
 
-  const cost = state.costOverride ?? plan!.cost?.total ?? state.fallbackCost;
+  const cost = state.costOverride ?? (compMode ? judgedCost : null) ?? plan!.cost?.total ?? state.fallbackCost;
   const generateCost = plan!.cost?.generate ?? null;
   // 첫 화면 그림을 만드는 중엔 단계를 옮기지 않는다(그림 없는 본문이 먼저 나가지 않게 · 결과가 다른 단계에 떨어지지 않게)
   const go = (id: string) => { if (!headlineBusy) setCursor(id); };
-  const next = () => { const n = visible[idx + 1]; setCursor(n ? lineStepId(n) : MAKE); };
+  // 구성 판 = 칸 하나를 채우면 판으로 돌아온다(한 번에 하나씩 끌고 가지 않는다 · 설계서 §11-5)
+  const next = () => { if (compMode) { setCursor(MAKE); return; } const n = visible[idx + 1]; setCursor(n ? lineStepId(n) : MAKE); };
   const prev = () => { if (headlineBusy) return; const p = visible[idx - 1]; if (p) setCursor(lineStepId(p)); };
 
   // ─── 지금 단계의 내용 · 다음 / 건너뛰기 동작 ───
@@ -486,6 +581,13 @@ export default function LineStepsModal({ open, channel, state, onClose, onMake }
           aria-labelledby="line-steps-q" aria-describedby="line-steps-why" maxLength={300} placeholder="예: 전 상품 20% · 첫 구매 5천원 쿠폰" value={draft.text}
           onChange={(e) => setDraft({ ...draft, text: e.target.value })}
           onKeyDown={(e) => { if (e.key === 'Enter' && !isComposing(e) && (!required || draft.text.trim())) { e.preventDefault(); onNext(); } }} />
+        {compMode && (
+          <label className="block mt-3">
+            <span className="block text-[12px] font-semibold text-slate-600 mb-1">조건(선택)</span>
+            <input className={`${INPUT} ${INPUT_OK} px-4`} maxLength={120} placeholder="예: 3만원 이상 구매 시 · 첫 구매 고객만" value={answers.benefitNote ?? ''}
+              onChange={(e) => setA({ benefitNote: e.target.value })} />
+          </label>
+        )}
         {pageCards.length > 0 && (
           <div className="mt-3">
             <span className="block text-[12px] font-semibold text-slate-500 mb-1.5">페이지에서 읽은 문구로 채우기</span>
@@ -534,6 +636,29 @@ export default function LineStepsModal({ open, channel, state, onClose, onMake }
                 <span className="block text-[12px] text-slate-500">{pg.banner ? '이 사진을 표지로 써요' : '표지로 쓸 만큼 큰 사진은 없었어요'}</span>
               </div>
             </div>
+            {compMode && ((pg.products || []).length > 0 || (pg.images || []).length > 0) && (() => {
+              // ★ 2026-10-22 비연동 회사 = 주소 하나로 상품 칸 · 분위기 사진 칸을 채운다(이 회사 사본 사진 · 가격은 읽지 않는다 · 담은 뒤 고칠 수 있다)
+              const prodStep = plan!.steps.find((s) => s.key === 'products');
+              const moodStep = plan!.steps.find((s) => s.key === 'mood');
+              const have = new Set((answers.manualList || []).map((m) => m.image).filter(Boolean));
+              const newProducts = (pg.products || []).filter((p) => !have.has(p.image));
+              const room = Math.max(0, (prodStep?.max ?? 0) - lineTemplateCount(answers));
+              const moodRoom = Math.max(0, (moodStep?.max ?? 0) - (answers.mood || []).length);
+              const newMood = (pg.images || []).filter((u) => !(answers.mood || []).includes(u));
+              return (
+                <div className="mt-3 flex flex-wrap gap-2">
+                  {prodStep && newProducts.length > 0 && room > 0 && (
+                    <button type="button" onClick={() => setA({ manualList: [...(answers.manualList || []), ...newProducts.slice(0, room).map((p) => ({ name: p.name, price: '', image: p.image, ...(p.url ? { url: p.url } : {}) }))] })}
+                      className="h-9 px-3 rounded-lg bg-violet-600 text-white text-[12.5px] font-bold hover:bg-violet-700 inline-flex items-center gap-1.5"><ShoppingBag className="w-4 h-4" />읽은 상품 {Math.min(room, newProducts.length)}개 담기</button>
+                  )}
+                  {moodStep && newMood.length > 0 && moodRoom > 0 && (
+                    <button type="button" onClick={() => setA({ mood: [...(answers.mood || []), ...newMood.slice(0, moodRoom)] })}
+                      className="h-9 px-3 rounded-lg border border-violet-300 bg-white text-violet-800 text-[12.5px] font-bold hover:bg-violet-50 inline-flex items-center gap-1.5"><ImageIcon className="w-4 h-4" />사진 {Math.min(moodRoom, newMood.length)}장을 분위기 사진으로</button>
+                  )}
+                  <p className="w-full text-[11.5px] text-slate-500">가격은 페이지에서 읽지 않아요. 담은 뒤 상품 칸에서 적어 주세요</p>
+                </div>
+              );
+            })()}
             {pg.cards.length > 0 && (
               <ul className="mt-3 space-y-2">
                 {pg.cards.map((c) => {
@@ -662,6 +787,10 @@ export default function LineStepsModal({ open, channel, state, onClose, onMake }
                 </span>
                 <input aria-label="상품 링크" inputMode="url" className={`${INPUT} ${linkBad ? INPUT_BAD : INPUT_OK} px-3`} maxLength={500} placeholder="상품 링크(선택)" value={editing.m.url ?? ''}
                   onChange={(e) => setManualEdit({ ...editing, m: { ...editing.m, url: e.target.value } })} />
+                {compMode && (
+                  <input aria-label="상품 종류" className={`${INPUT} ${INPUT_OK} px-3`} maxLength={20} placeholder="종류(선택 · 예: 아우터 · 여성 · 음료)" value={editing.m.category ?? ''}
+                    onChange={(e) => setManualEdit({ ...editing, m: { ...editing.m, category: e.target.value } })} />
+                )}
                 {(priceBad || linkBad) && <p className="text-[12px] text-rose-600">{priceBad ? '가격은 1억 원 이하로 적어 주세요' : 'http로 시작하는 주소를 넣어 주세요'}</p>}
               </div>
             </div>
@@ -921,7 +1050,95 @@ export default function LineStepsModal({ open, channel, state, onClose, onMake }
     onNext = () => { setA({ period: draft.text || null }); next(); };
     onSkip = required ? null : () => { setA({ period: null }); next(); };
     nextLabel = draft.text || required ? '다음' : '기간 없이 다음';
+  } else if (current !== MAKE && (current.key === 'points' || current.key === 'usage')) {
+    // ★ 2026-10-22 특징 · 코디 · 꼬리표 · 참여 방법 · 사용 단계 — 두뇌 초안을 고치거나 새로 적는다(사진은 있으면 카드로)
+    const key = current.key;
+    const max = current.max ?? 3;
+    const base: LineRichPointAnswer[] = (key === 'points' ? answers.points : answers.usage) ?? [];
+    const rows: LineRichPointAnswer[] = base.length > 0 ? base : [{ title: '', body: '', image: null }];
+    const put = (list: LineRichPointAnswer[]) => setA(key === 'points' ? { points: list } : { usage: list });
+    const setRow = (i: number, patch: Partial<LineRichPointAnswer>) => put(rows.map((r, j) => (j === i ? { ...r, ...patch } : r)));
+    const tagOnly = compInfo?.id === 'menu' && key === 'points';
+    eyebrow = <Why tone="customer">{answers.judge?.source === 'ai' && base.length > 0 ? 'AI 가 초안을 써 뒀어요 · 고쳐서 쓰세요' : current.why || '넣으면 더 풍성해져요'}</Why>;
+    question = current.ask || (key === 'usage' ? '사용 순서를 알려 주세요' : '특징을 알려 주세요');
+    reason = tagOnly ? '짧은 꼬리표로 실려요(예: 겨울 한정 · 국내산)' : '제목과 한 줄로 실려요. 사진이 있으면 사진 카드로 보여 줘요';
+    body = (
+      <div className="space-y-3">
+        {rows.slice(0, max).map((r, i) => (
+          <div key={i} className="rounded-2xl border border-slate-200 p-3 flex gap-3 items-start">
+            {!tagOnly && <PhotoDrop channel={channel} size="tile" value={r.image} onChange={(url) => setRow(i, { image: url })} />}
+            <div className="flex-1 min-w-0 space-y-2">
+              <input aria-label={`${i + 1}번 제목`} className={`${INPUT} ${INPUT_OK} px-3`} maxLength={20} placeholder={tagOnly ? '예: 겨울 한정' : key === 'usage' ? `${i + 1}단계 이름` : '특징 이름'} value={r.title}
+                onChange={(e) => setRow(i, { title: e.target.value })} />
+              {!tagOnly && (
+                <input aria-label={`${i + 1}번 한 줄`} className={`${INPUT} ${INPUT_OK} px-3`} maxLength={80} placeholder="한 줄 설명" value={r.body}
+                  onChange={(e) => setRow(i, { body: e.target.value })} />
+              )}
+            </div>
+            <button type="button" onClick={() => put(rows.filter((_, j) => j !== i))} aria-label={`${i + 1}번 빼기`} className="w-8 h-8 rounded-lg text-slate-400 hover:bg-slate-100 hover:text-rose-600 flex items-center justify-center shrink-0"><X className="w-4 h-4" /></button>
+          </div>
+        ))}
+        {rows.length < max && (
+          <button type="button" onClick={() => put([...rows, { title: '', body: '', image: null }])} className="inline-flex items-center gap-1.5 text-[13px] font-semibold text-violet-700 hover:text-violet-900"><Plus className="w-4 h-4" />하나 더</button>
+        )}
+      </div>
+    );
+    onNext = next;
+    onSkip = () => { put([]); next(); };
+    nextLabel = lineRichRows(rows).length > 0 ? `${lineRichRows(rows).length}개로 완료` : '비워 두고 완료';
+  } else if (current !== MAKE && current.key === 'mood') {
+    const max = current.max ?? 3;
+    const list = answers.mood ?? [];
+    eyebrow = <Why tone="customer">{current.why || '사진이 첫인상이에요'}</Why>;
+    question = current.ask || '분위기 사진을 올려 주세요';
+    reason = '착용 · 매장 · 화보 · 대표 메뉴 사진이면 좋아요. 크게 실려요';
+    body = (
+      <div className="flex flex-wrap gap-3">
+        {Array.from({ length: Math.min(max, list.length + 1) }).map((_, i) => (
+          <PhotoDrop key={i} channel={channel} size="tile" value={list[i] ?? null}
+            onChange={(url) => { const n = [...list]; if (url) n[i] = url; else n.splice(i, 1); setA({ mood: n.filter(Boolean).slice(0, max) }); }} />
+        ))}
+      </div>
+    );
+    onNext = next;
+    onSkip = () => { setA({ mood: [] }); next(); };
+    nextLabel = list.length > 0 ? `${list.length}장으로 완료` : '비워 두고 완료';
+  } else if (current !== MAKE && current.key === 'coupon_code') {
+    const v = answers.couponCode ?? '';
+    const bad = !!v && !LINE_COUPON_CODE_RE.test(v);
+    eyebrow = <Why tone="customer">{current.why || '코드를 크게 보여 줘요'}</Why>;
+    question = current.ask || '할인 코드가 있나요?';
+    reason = '결제할 때 넣는 코드예요. 영문 · 숫자로 적어 주세요';
+    body = (
+      <div>
+        <input ref={inputRef} className={`${INPUT} ${bad ? INPUT_BAD : INPUT_OK} px-4 font-mono tracking-widest uppercase`} maxLength={24} placeholder="예: WELCOME10" value={v}
+          onChange={(e) => setA({ couponCode: e.target.value.replace(/\s/g, '').toUpperCase() || null })} />
+        {bad && <p className="mt-2 text-[12.5px] text-rose-600">영문 · 숫자 · 하이픈으로 2~24자 적어 주세요</p>}
+      </div>
+    );
+    onNext = next;
+    onSkip = () => { setA({ couponCode: null }); next(); };
+    nextDisabled = bad;
+    nextLabel = v ? '완료' : '코드 없이 완료';
+  } else if (current !== MAKE && current.key === 'store') {
+    const st = answers.store ?? { address: '', business_hours: '', phone: '' };
+    const setSt = (patch: Partial<typeof st>) => setA({ store: { ...st, ...patch } });
+    eyebrow = <Why tone="customer">{current.why || '찾아오는 길을 보여 줘요'}</Why>;
+    question = current.ask || '매장 정보를 알려 주세요';
+    reason = '한 번 적으면 다음에도 그대로 써요';
+    body = (
+      <div className="space-y-2.5">
+        <input ref={inputRef} aria-label="주소" className={`${INPUT} ${INPUT_OK} px-4`} maxLength={80} placeholder="주소" value={st.address} onChange={(e) => setSt({ address: e.target.value })} />
+        <input aria-label="영업시간" className={`${INPUT} ${INPUT_OK} px-4`} maxLength={80} placeholder="영업시간(예: 매일 11:00 ~ 22:00)" value={st.business_hours} onChange={(e) => setSt({ business_hours: e.target.value })} />
+        <input aria-label="전화" inputMode="tel" className={`${INPUT} ${INPUT_OK} px-4`} maxLength={80} placeholder="전화" value={st.phone} onChange={(e) => setSt({ phone: e.target.value })} />
+      </div>
+    );
+    onNext = next;
+    onSkip = () => { setA({ store: null }); next(); };
+    nextLabel = lineStoreOf(answers) ? '완료' : '비워 두고 완료';
   }
+  // 구성 판 = 「다음」이 아니라 「완료」(판으로 돌아온다)
+  if (compMode && current !== MAKE && nextLabel.endsWith('다음')) nextLabel = nextLabel.replace(/\s*다음$/, '').trim() ? `${nextLabel.replace(/\s*다음$/, '')} 완료` : '완료';
 
   // ─── 만들기 단계 ───
   const products = lineStepsProducts(answers, channel, termOrder);
@@ -930,18 +1147,36 @@ export default function LineStepsModal({ open, channel, state, onClose, onMake }
   const make = () => {
     if (cost === null || short || !plan) return;
     // 필수 단계가 비어 있으면 만들지 않고 그 단계로(어느 경로로 왔든 · 혜택 · 마감 · 상품 최소)
-    const missing = visible.find((s) => s.required && (
-      (s.key === 'benefit' && !(typeof answers.benefit === 'string' && answers.benefit.trim()))
-      || (s.key === 'period' && !answers.period)
-      || (s.key === 'products' && lineTemplateCount(answers) < (s.min ?? 0))));
+    const missing = visible.find((s) => s.required && !slotFilled(s));
     if (missing) { setCursor(lineStepId(missing)); return; }
     const b = tplMode && chosenId
-      ? buildLineTemplateBody(plan, answers, visible, cost, { id: chosenId, layout })
+      ? buildLineTemplateBody(plan, answers, visible, cost, { id: chosenId as LineTemplateId | LineCompositionId, layout })
       : buildLineStepsBody(plan, answers, visible, cost);
     onMake({ body: b, cost, storeKey, readLicensed: answers.readLicensed === true });
   };
 
   const stepOf = (key: string, item?: string) => visible.find((s) => s.key === key && (item === undefined || s.item === item));
+  /** 칸이 찼는가(막는 칸 판정 · 재료 판 점) — 개수 칸은 min 까지 */
+  function slotFilled(s: LineStep): boolean {
+    if (s.key === 'benefit') return typeof answers.benefit === 'string' && !!answers.benefit.trim();
+    if (s.key === 'period') return !!answers.period;
+    // 구성 = 실제로 조립되는 상품만(몰 상품 · 사진을 넣은 직접 상품) · 서버 필수 칸 판정과 같은 기준(Codex CT R1)
+    if (s.key === 'products') {
+      if (!compMode) return lineTemplateCount(answers) >= Math.max(1, s.min ?? 0);
+      const g = lineCompositionGoods(answers, s.max ?? 12);
+      return g.picks.length + g.manual.length >= Math.max(1, s.min ?? 0);
+    }
+    if (s.key === 'points') return lineRichRows(answers.points).length >= Math.max(1, s.min ?? 1);
+    if (s.key === 'usage') return lineRichRows(answers.usage).length >= Math.max(1, s.min ?? 1);
+    if (s.key === 'mood') return (answers.mood || []).length >= Math.max(1, s.min ?? 1);
+    if (s.key === 'proof') return lineProofRows(answers).length > 0;
+    if (s.key === 'coupon_code') return !!answers.couponCode;
+    if (s.key === 'store') return !!lineStoreOf(answers);
+    if (s.key === 'hero_photo') return !!answers.hero;
+    if (s.key === 'event_page') return !!answers.page;
+    if (s.key === 'link') return !!answers.link;
+    return false;
+  }
   const later = (key: string, item?: string) => plan!.later.some((l) => l.key === key && (item === undefined || l.item === item));
   const heroStep = allSteps.find((s) => s.key === 'hero_photo');
   const heroVisible = stepOf('hero_photo');
@@ -1000,12 +1235,52 @@ export default function LineStepsModal({ open, channel, state, onClose, onMake }
     );
   })() : null;
 
+  // ★ 2026-10-22 구성 재료 판 — 칸마다 한 줄(단계 칩 · 지금 값 · 누르면 그 칸) · 막는 칸이 비면 붉은 점
+  const LEVEL_CHIP: Record<string, { label: string; cls: string }> = {
+    block: { label: '꼭 필요', cls: 'bg-rose-50 text-rose-700 border-rose-200' },
+    suggest: { label: '넣으면 좋아요', cls: 'bg-violet-50 text-violet-700 border-violet-200' },
+    drop: { label: '있으면 생겨요', cls: 'bg-slate-50 text-slate-500 border-slate-200' },
+  };
+  const slotSummary = (s: LineStep): ReactNode => {
+    if (s.key === 'hero_photo') return answers.hero ? <span className="inline-flex items-center gap-2"><img src={answers.hero} alt="" className="w-10 h-7 rounded object-cover border border-slate-200" />{answers.heroPoster ? '첫 화면 그림' : '올린 사진'}</span> : answers.page?.banner ? '페이지 사진을 써요' : '비어 있어요 · 눌러서 그림을 고르세요';
+    if (s.key === 'event_page') return answers.page ? `${answers.page.host || answers.page.url}${answers.page.banner ? ' · 사진 읽음' : ''}` : '주소 하나면 사진과 문구를 읽어요';
+    if (s.key === 'benefit') return answers.benefit ? `${answers.benefit}${answers.benefitNote ? ` · ${answers.benefitNote}` : ''}` : s.suggest ? `한 줄에서 찾았어요: ${s.suggest}` : '비어 있어요';
+    if (s.key === 'period') return answers.period ? periodLabel(answers.period) : s.suggest ? `한 줄에서 찾았어요: ${periodLabel(s.suggest)}` : '비어 있어요';
+    if (s.key === 'products') {
+      const names = [...(answers.picks || []).map((c) => c.name), ...(answers.manualList || []).filter((m) => m.name.trim()).map((m) => m.name)];
+      return names.length > 0 ? `${names.length}개 · ${names.slice(0, 3).join(', ')}${names.length > 3 ? ' 외' : ''}` : `비어 있어요${(s.min ?? 0) > 0 ? ` · ${s.min}개 이상` : ''}`;
+    }
+    if (s.key === 'points' || s.key === 'usage') { const r = lineRichRows(s.key === 'points' ? answers.points : answers.usage); return r.length > 0 ? r.map((x) => x.title).join(' · ') : '비어 있어요'; }
+    if (s.key === 'mood') return (answers.mood || []).length > 0 ? <span className="inline-flex gap-1">{(answers.mood || []).map((u) => <img key={u} src={u} alt="" className="w-8 h-8 rounded object-cover border border-slate-200" />)}</span> : '비어 있어요';
+    if (s.key === 'proof') return lineProofRows(answers).length > 0 ? `후기 ${lineProofRows(answers).length}건` : '비어 있어요 · 붙여 넣기';
+    if (s.key === 'coupon_code') return answers.couponCode || '비어 있어요';
+    if (s.key === 'store') { const st = lineStoreOf(answers); return st ? [st.address, st.business_hours, st.phone].filter(Boolean).join(' · ') : '비어 있어요'; }
+    if (s.key === 'link') return answers.link || '비어 있어요';
+    return '';
+  };
+  const compRows = compMode ? (
+    <>
+      {visible.map((s) => {
+        const ok = slotFilled(s);
+        const chip = LEVEL_CHIP[s.level || 'suggest'];
+        return (
+          <Row key={lineStepId(s)} label={stepName(s)} tone={ok ? 'customer' : 'empty'} onClick={() => go(lineStepId(s))}
+            action={<span className={`shrink-0 mr-2 h-6 px-2 inline-flex items-center rounded-full border text-[11px] font-semibold whitespace-nowrap ${!ok && s.level === 'block' ? 'bg-rose-600 text-white border-rose-600' : chip.cls}`}>{chip.label}</span>}>
+            {slotSummary(s)}
+          </Row>
+        );
+      })}
+      {!visible.some((s) => s.key === 'link') && linkRow}
+    </>
+  ) : null;
+  const blockedLeft = compMode ? visible.filter((s) => s.required && !slotFilled(s)).length : 0;
+
   const makeBody = (
     <div className="space-y-4">
       {state.notice && <div className="rounded-xl border border-amber-200 bg-amber-50 px-3.5 py-2.5 text-[13px] text-amber-900" role="alert">{state.notice}</div>}
       <ul className="rounded-2xl border border-slate-200 divide-y divide-slate-100 py-1">
         <Row label="한 줄" tone="customer">{state.line}</Row>
-        {tplMode ? tplRows : (
+        {compMode ? compRows : tplMode ? tplRows : (
           <>
             {plan!.steps.some((s) => s.key === 'benefit') && (
               <Row label="혜택" tone={answers.benefit ? 'customer' : 'empty'} onClick={stepOf('benefit') ? () => go(lineStepId(stepOf('benefit')!)) : undefined}>{answers.benefit || '혜택 없이 만들어요'}</Row>
@@ -1058,9 +1333,13 @@ export default function LineStepsModal({ open, channel, state, onClose, onMake }
           {balance?.enabled && cost !== null && <span className="text-[13px] text-slate-600 tabular-nums">잔액 {balance.total.toLocaleString()} → <b className={short ? 'text-rose-600' : 'text-slate-900'}>{(balance.total - cost).toLocaleString()}</b></span>}
         </div>
         <p className="text-[12px] text-slate-500 mt-1 leading-relaxed">
-          {cost !== null && generateCost !== null && cost <= generateCost ? `오늘 같은 한 줄로 만든 적이 있어 생성비 ${cost}크레딧만 받아요` : cost !== null && generateCost !== null ? `생성 ${generateCost} + 한 줄 완성 ${cost - generateCost} · ${tplMode ? '템플릿 고르기 · 페이지 읽기 · ' : '묻기 · '}몰 찾기 · 사진 올리기는 무료` : '묻기 · 몰 찾기 · 사진 올리기는 무료예요'}
+          {compMode ? (cost !== null && generateCost !== null && cost <= generateCost
+            ? `오늘 같은 한 줄로 만든 적이 있어 다시 만들기 ${cost}크레딧만 받아요`
+            : `${judgePaid || plan!.cost?.judged ? '판단 2크레딧은 이미 냈어요 · ' : ''}칸 채우기 · 몰 찾기 · 사진 올리기 · 구성 바꾸기는 무료 · 같은 한 줄로 다시 만들면 ${generateCost ?? 3}크레딧`)
+            : cost !== null && generateCost !== null && cost <= generateCost ? `오늘 같은 한 줄로 만든 적이 있어 생성비 ${cost}크레딧만 받아요` : cost !== null && generateCost !== null ? `생성 ${generateCost} + 한 줄 완성 ${cost - generateCost} · ${tplMode ? '템플릿 고르기 · 페이지 읽기 · ' : '묻기 · '}몰 찾기 · 사진 올리기는 무료` : '묻기 · 몰 찾기 · 사진 올리기는 무료예요'}
         </p>
         {short && <p className="text-[12.5px] font-semibold text-rose-600 mt-1.5">크레딧이 부족해요. 충전한 뒤 만들 수 있어요</p>}
+        {blockedLeft > 0 && <p className="text-[12.5px] font-semibold text-rose-600 mt-1.5">꼭 필요한 칸 {blockedLeft}개를 채우면 만들 수 있어요</p>}
       </div>
     </div>
   );
@@ -1072,8 +1351,28 @@ export default function LineStepsModal({ open, channel, state, onClose, onMake }
       <div className="flex-1 min-h-0 overflow-y-auto px-5 py-5">
         {current === MAKE ? (
           <>
-            <h2 id="line-steps-q" ref={titleRef} tabIndex={-1} className="text-[17px] font-semibold text-slate-900 leading-snug outline-none">이렇게 만들어요</h2>
-            <p id="line-steps-why" className="text-[13px] text-slate-500 mt-1 mb-4 leading-relaxed">한 줄과 답으로 완성본을 만들어요. 줄을 누르면 고칠 수 있어요</p>
+            {compMode ? (
+              <div className="mb-4 rounded-2xl border border-violet-200 bg-violet-50/60 p-4">
+                <div className="flex items-start gap-3">
+                  <span className="w-9 h-9 rounded-xl flex items-center justify-center shrink-0 text-white" style={{ background: compInfo?.primary || '#4338ca' }}><LayoutTemplate className="w-4.5 h-4.5" /></span>
+                  <div className="flex-1 min-w-0">
+                    <h2 id="line-steps-q" ref={titleRef} tabIndex={-1} className="text-[16px] font-bold text-slate-900 leading-snug outline-none">
+                      {judging ? '한 줄을 읽고 구성을 고르는 중이에요' : `${compInfo?.label ?? '구성'}으로 만들게요`}
+                    </h2>
+                    <p id="line-steps-why" className="text-[12.5px] text-slate-600 mt-0.5 leading-relaxed">
+                      {judging ? '잠시만요. 업종과 한 줄에 맞는 구성과 초안을 준비해요' : (answers.judge?.reason || compInfo?.desc || '')}
+                    </p>
+                  </div>
+                  <button type="button" disabled={judging || headlineBusy} onClick={() => setPane('pick')} className="shrink-0 h-8 px-3 rounded-lg border border-violet-300 bg-white text-[12.5px] font-semibold text-violet-800 hover:bg-violet-50 disabled:opacity-40 whitespace-nowrap">바꾸기</button>
+                </div>
+                {judging && <div className="mt-3 h-1.5 rounded-full bg-violet-100 overflow-hidden"><div className="h-full w-1/3 bg-violet-500 animate-pulse rounded-full" /></div>}
+              </div>
+            ) : (
+              <>
+                <h2 id="line-steps-q" ref={titleRef} tabIndex={-1} className="text-[17px] font-semibold text-slate-900 leading-snug outline-none">이렇게 만들어요</h2>
+                <p id="line-steps-why" className="text-[13px] text-slate-500 mt-1 mb-4 leading-relaxed">한 줄과 답으로 완성본을 만들어요. 줄을 누르면 고칠 수 있어요</p>
+              </>
+            )}
             {makeBody}
           </>
         ) : (
@@ -1090,8 +1389,8 @@ export default function LineStepsModal({ open, channel, state, onClose, onMake }
       <div className="px-5 py-3.5 border-t border-slate-100 flex gap-2.5 shrink-0">
         {current === MAKE ? (
           <>
-            <button type="button" disabled={headlineBusy} onClick={idx > 0 ? prev : tplMode ? () => setPane('pick') : onClose} className="disabled:opacity-40 h-11 px-4 rounded-xl border border-slate-200 bg-white text-[14px] font-semibold text-slate-700 hover:bg-slate-50 whitespace-nowrap">{idx > 0 ? '이전' : tplMode ? '템플릿' : '취소'}</button>
-            <button type="button" onClick={make} disabled={cost === null || !!short || headlineBusy} className="flex-1 h-11 rounded-xl bg-amber-500 hover:bg-amber-400 text-[14px] font-bold text-slate-900 inline-flex items-center justify-center gap-2 disabled:opacity-40 whitespace-nowrap">
+            <button type="button" disabled={headlineBusy} onClick={compMode ? () => setPane('pick') : idx > 0 ? prev : tplMode ? () => setPane('pick') : onClose} className="disabled:opacity-40 h-11 px-4 rounded-xl border border-slate-200 bg-white text-[14px] font-semibold text-slate-700 hover:bg-slate-50 whitespace-nowrap">{compMode ? '구성' : idx > 0 ? '이전' : tplMode ? '템플릿' : '취소'}</button>
+            <button type="button" onClick={make} disabled={cost === null || !!short || headlineBusy || judging} className="flex-1 h-11 rounded-xl bg-amber-500 hover:bg-amber-400 text-[14px] font-bold text-slate-900 inline-flex items-center justify-center gap-2 disabled:opacity-40 whitespace-nowrap">
               <Gift className="w-4 h-4" />만들기{cost !== null ? ` · ${cost}크레딧` : ''}
             </button>
           </>
@@ -1113,9 +1412,14 @@ export default function LineStepsModal({ open, channel, state, onClose, onMake }
       {/* 머리 — 진행 막대(칸 = 단계 · 이름만 · 숫자 없음) · 한 줄 · 닫기 */}
       <div className="px-5 pt-4 pb-3 border-b border-slate-100 shrink-0">
         <div className="flex items-start gap-3">
-          {idx > 0 ? (
+          {compMode ? (
+            current !== MAKE ? (
+              <button type="button" disabled={headlineBusy} onClick={() => setCursor(MAKE)} aria-label="재료 판으로" className="-ml-2 h-9 pl-1 pr-2.5 rounded-lg flex items-center gap-1 text-[13px] font-semibold text-slate-600 hover:bg-slate-100 shrink-0 disabled:opacity-40"><ChevronLeft className="w-5 h-5" />재료 판</button>
+            ) : <span className="w-0" />
+          ) : idx > 0 ? (
             <button type="button" onClick={prev} aria-label="이전 단계" className="-ml-2 w-9 h-9 rounded-lg flex items-center justify-center text-slate-500 hover:bg-slate-100 shrink-0"><ChevronLeft className="w-5 h-5" /></button>
           ) : <span className="w-0" />}
+          {compMode ? <p className="flex-1 min-w-0 text-[15px] font-bold text-slate-900 truncate pt-1.5">{current === MAKE ? '재료 판' : stepName(current)}</p> : (
           <ol className="flex-1 min-w-0 flex gap-1.5" aria-label="진행">
             {names.map((s, i) => {
               const done = i < idx;
@@ -1128,17 +1432,18 @@ export default function LineStepsModal({ open, channel, state, onClose, onMake }
               );
             })}
           </ol>
+          )}
           <button type="button" onClick={onClose} disabled={headlineBusy} aria-label="닫기" className="disabled:opacity-40 -mr-2 w-9 h-9 rounded-lg flex items-center justify-center text-slate-400 hover:bg-slate-100 hover:text-slate-600 shrink-0"><X className="w-5 h-5" /></button>
         </div>
         <div className="mt-2.5 flex items-center gap-2 min-w-0">
           {tplMode && (
-            <button type="button" disabled={headlineBusy} onClick={() => setPane('pick')} className="disabled:opacity-40 shrink-0 inline-flex items-center gap-1.5 h-7 px-2.5 rounded-lg bg-violet-50 text-violet-800 text-[12px] font-semibold hover:bg-violet-100 whitespace-nowrap">
-              <LayoutTemplate className="w-3.5 h-3.5" />{tplInfo?.label ?? '템플릿'} · 바꾸기
+            <button type="button" disabled={headlineBusy || judging} onClick={() => setPane('pick')} className="disabled:opacity-40 shrink-0 inline-flex items-center gap-1.5 h-7 px-2.5 rounded-lg bg-violet-50 text-violet-800 text-[12px] font-semibold hover:bg-violet-100 whitespace-nowrap">
+              <LayoutTemplate className="w-3.5 h-3.5" />{compMode ? compInfo?.label ?? '구성' : tplInfo?.label ?? '템플릿'} · 바꾸기
             </button>
           )}
           {tplMode && (
             <button type="button" onClick={() => setShowExample((v) => !v)} className="md:hidden shrink-0 inline-flex items-center gap-1.5 h-7 px-2.5 rounded-lg bg-slate-100 text-slate-700 text-[12px] font-semibold whitespace-nowrap">
-              <Eye className="w-3.5 h-3.5" />{showExample ? '예시 접기' : '예시 보기'}
+              <Eye className="w-3.5 h-3.5" />{showExample ? (compMode ? '미리보기 접기' : '예시 접기') : (compMode ? '미리보기' : '예시 보기')}
             </button>
           )}
           <p className="min-w-0 text-[12.5px] text-slate-500 truncate"><span className="font-semibold text-violet-700 mr-1.5">한 줄</span>{state.line}</p>
@@ -1149,13 +1454,24 @@ export default function LineStepsModal({ open, channel, state, onClose, onMake }
         <div className="flex-1 min-h-0 flex flex-col md:flex-row">
           {showExample && (
             <div className="md:hidden flex justify-center py-4 bg-slate-50 border-b border-slate-100 shrink-0">
-              <LineTemplateExampleView id={chosenId} channel={channel} layout={layout} width={220} />
+              {compMode
+                ? <LineCompositionPreview composition={chosenId as LineCompositionId} channel={channel} answers={answers} paused={current !== MAKE} width={260} />
+                : <LineTemplateExampleView id={chosenId as LineTemplateId} channel={channel} layout={layout} width={220} />}
             </div>
           )}
           <div className="flex-1 min-w-0 min-h-0 flex flex-col md:max-w-[600px]">{stepsColumn}</div>
           <aside className="hidden md:flex flex-1 min-w-0 flex-col items-center justify-center gap-2.5 bg-slate-50 border-l border-slate-100 px-5 py-5">
-            <LineTemplateExampleView id={chosenId} channel={channel} layout={layout} width={260} />
-            <p className="text-[11.5px] text-slate-500 text-center">예시 · 가상 브랜드 · 우리 재료로 같은 배치를 채워요</p>
+            {compMode ? (
+              <>
+                <LineCompositionPreview composition={chosenId as LineCompositionId} channel={channel} answers={answers} paused={current !== MAKE} width={300} />
+                <p className="text-[11.5px] text-slate-500 text-center">우리 재료로 그린 미리보기 · 점선 칸은 채우면 생겨요 · 문구는 만들 때 AI 가 써요</p>
+              </>
+            ) : (
+              <>
+                <LineTemplateExampleView id={chosenId as LineTemplateId} channel={channel} layout={layout} width={260} />
+                <p className="text-[11.5px] text-slate-500 text-center">예시 · 가상 브랜드 · 우리 재료로 같은 배치를 채워요</p>
+              </>
+            )}
           </aside>
         </div>
       ) : stepsColumn}

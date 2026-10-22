@@ -607,7 +607,7 @@ export default function InAppMessagesPage() {
           if (g.plan.block) { setShowDisplayBlock(true); return; }
           // ★ 2026-10-17 템플릿 캠페인 — 웹(자사몰) 인앱만(center_modal 블록 = 웹 SDK 기준 · 앱 SDK 표시는 미검증이라 앱은 지금 단계 흐름 그대로)
           const inappCh = channelOverride || channel || 'web';
-          setInappSteps({ open: { line: t, reads, plan: g.plan, fallbackCost: g.stepsCost, ...(inappCh === 'web' && g.templatesEnabled && g.templatePlans ? { templates: { ranks: g.templates, plans: g.templatePlans } } : {}) }, channel: inappCh });
+          setInappSteps({ open: { line: t, reads, plan: g.plan, fallbackCost: g.stepsCost, ...(inappCh === 'web' && g.templatesEnabled && g.templatePlans ? { templates: { ranks: g.templates, plans: g.templatePlans } } : {}), ...(inappCh === 'web' && g.compositions ? { compositions: g.compositions } : {}) }, channel: inappCh });
           return;
         }
       } finally {

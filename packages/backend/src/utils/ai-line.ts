@@ -263,7 +263,22 @@ export function aiLineLineFp(line: string): string {
 
 /** 기본(대상 찾기) 키 — 회사 · KST 날짜 · 한 줄 지문(최대 9+36+1+8+1+12 = 67자) */
 export function aiLineBaseKey(companyId: string, line: string, at: Date): string {
-  return `aio-base:${companyId}:${kstDateTag(at)}:${aiLineLineFp(line)}`;
+  return aiLineBaseKeyOfFp(companyId, aiLineLineFp(line), at);
+}
+
+/**
+ * ★ 2026-10-22 한줄 CT 판단 키 = 지문으로 바로(설계서 docs/2026-10-22-oneline-ct-design.md §11-3).
+ *   모바일DM · 이메일 · 인앱의 판단(2)과 AI 한줄로 대상 찾기(2)가 같은 키 = 같은 한 줄은 입구가 달라도 판단 한 번.
+ */
+export function aiLineBaseKeyOfFp(companyId: string, fp: string, at: Date): string {
+  return `aio-base:${companyId}:${kstDateTag(at)}:${fp}`;
+}
+
+/** 지문 기준 오늘 · 어제 판단 키 */
+export function aiLineBaseKeysOfFp(companyId: string, fp: string, now: Date): string[] {
+  const today = aiLineBaseKeyOfFp(companyId, fp, now);
+  const yesterday = aiLineBaseKeyOfFp(companyId, fp, new Date(now.getTime() - 24 * 60 * 60 * 1000));
+  return today === yesterday ? [today] : [today, yesterday];
 }
 
 /** 기본을 이미 냈는지 볼 키 — 오늘 · 어제(자정 경계 · 23:59 대상 찾기 → 00:01 만들기 = 다시 걷지 않는다) */

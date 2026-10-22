@@ -5,7 +5,7 @@
  * 견적 = utils/planner-build.ts. 화면은 판정하지 않고 서버 값을 그린다.
  */
 import type { PlannerDisplayState, PlannerSendKind } from '../../constants/planner-status';
-import type { LineLayout, LineTemplateId } from '../../utils/one-line';
+import type { LineLayout, LineTemplateId, LineCompositionId } from '../../utils/one-line';
 
 export type PlannerChannelKey = 'sms' | 'dm' | 'email';
 export type Anchor = 'start' | 'end' | 'before_start';
@@ -52,7 +52,7 @@ export interface PlannerMaterialProduct {
 /** ★ 2026-10-18 v2-1 — template = 고른 템플릿(없으면 옛 엔진) · link = 버튼을 누르면 갈 행사 페이지(서버가 http(s)만 받는다) */
 export interface PlannerMaterials {
   images: PlannerMaterialImage[]; text: string; licensed: boolean; products: PlannerMaterialProduct[];
-  template?: { id: LineTemplateId; layout: LineLayout } | null; link?: string | null;
+  template?: { id: LineTemplateId | LineCompositionId; layout: LineLayout } | null; link?: string | null;
 }
 /** ★ 2026-10-18 받는 사람(서버 planner-event PlannerAudience 와 같은 모양 · 없음 = 전체) */
 export type PlannerAudience =

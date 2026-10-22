@@ -14,6 +14,7 @@ import { isCompanyImageUrl, isBuildMallProvider, AI_AUTO_BUILD_CARD_IMAGES, AI_A
 import { computeTouchpointDate, estimateChannelCredits, PlannerChannel, PlannerEventInput, TimingRule } from './marketing-planner';
 import { timingKey } from './planner-execution';
 import { LINE_TEMPLATE_IDS, type LineTemplateId, type LineLayout } from './design-core/line-templates';
+import { isLineCompositionId, type LineCompositionId } from './line-compositions';
 import { sanitizeLineUrl } from './one-line-steps';
 import { MAX_PRODUCT_KEYS, type PurchaseDoor } from './journey-product';
 
@@ -40,7 +41,7 @@ export interface PlannerMaterials {
    * ★ 2026-10-18 v2-1 템플릿 완성본(설계서 docs/2026-10-18-planner-v2-design.md §3-4) — 고른 템플릿 · 배치. 없으면 옛 자동제작 엔진 그대로.
    * 재료 지문에 들어간다(바꾸면 만든 완성본은 낡은 것) · 키가 없으면 지문 바이트 그대로(옛 행사 무변경).
    */
-  template?: { id: LineTemplateId; layout: LineLayout } | null;
+  template?: { id: LineTemplateId | LineCompositionId; layout: LineLayout } | null;
   /** ★ 2026-10-18 버튼 주소(행사 페이지 · 템플릿 완성본의 필수 재료 · 빈 버튼 주소 = 발행 때 막힌다) */
   link?: string | null;
 }
@@ -95,8 +96,9 @@ export function normalizePlannerMaterials(raw: unknown, companyId: string): { ok
   if (products.length > AI_AUTO_BUILD_PRODUCTS_MAX) return { ok: false, error: `상품은 ${AI_AUTO_BUILD_PRODUCTS_MAX}개까지 담을 수 있습니다.` };
   // ★ 2026-10-18 템플릿 · 버튼 주소(있을 때만 키를 둔다 · 없으면 저장 모양 · 지문이 옛것과 같다)
   const tplRaw = (r.template && typeof r.template === 'object') ? r.template as Record<string, unknown> : null;
-  const template = tplRaw && (LINE_TEMPLATE_IDS as readonly string[]).includes(String(tplRaw.id))
-    ? { id: String(tplRaw.id) as LineTemplateId, layout: (tplRaw.layout === 'page' ? 'page' : 'slides') as LineLayout }
+  // ★ 2026-10-22 한줄 CT 구성 5종 id 도 받는다(플래너 완성본 = 구성 조립)
+  const template = tplRaw && ((LINE_TEMPLATE_IDS as readonly string[]).includes(String(tplRaw.id)) || isLineCompositionId(tplRaw.id))
+    ? { id: String(tplRaw.id) as LineTemplateId | LineCompositionId, layout: (tplRaw.layout === 'page' ? 'page' : 'slides') as LineLayout }
     : null;
   if (r.link !== undefined && r.link !== null && String(r.link).trim() && !sanitizeLineUrl(String(r.link).trim())) {
     return { ok: false, error: '버튼 주소는 http 또는 https 로 시작하는 주소만 넣을 수 있습니다.' };

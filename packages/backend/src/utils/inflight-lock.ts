@@ -22,6 +22,19 @@ export function isInflight(key: string): boolean {
 }
 
 /**
+ * ★ 2026-10-22 한줄 CT — 같은 키를 놓을 때까지 기다렸다 잡는다(짧은 정산 구간 · 기다림 상한 = 넘으면 false).
+ *   409 를 돌려주는 입구(생성 · 판단)와 기다려도 되는 입구(문자 대상 찾기 정산)가 같은 키 하나를 공유하려고 둔다.
+ */
+export async function acquireInflightWait(key: string, timeoutMs = 30_000, stepMs = 150): Promise<boolean> {
+  const until = Date.now() + timeoutMs;
+  while (!tryAcquireInflight(key)) {
+    if (!key || Date.now() >= until) return false;
+    await new Promise((r) => setTimeout(r, stepMs));
+  }
+  return true;
+}
+
+/**
  * ★ 2026-10-19 B-1010-3 · B-1005-1② — 유료 생성 라우트의 「같은 사람 · 같은 생성」 동시 실행 = 409.
  *   더블클릭 · 응답 전 재클릭이 생성 두 번 · 차감 두 번이 되던 구멍(멱등키가 요청마다 새로 만들어져 겹친 두 요청을 못 가렸다).
  *   키 = 종류 + 회사 + 사용자(다른 직원의 생성은 막지 않는다) · **핸들러가 끝날 때** 놓는다

@@ -14,13 +14,16 @@ import { createHash } from 'crypto';
 import { validateAnswer } from './content-interview';
 import { oneLineGaps, hasPromotionIntent, lineProductTerms, lineMoneyAmounts, lineWithoutReads, lineSegments } from './one-line-facts';
 import { getLineTemplate, type LineTemplateId, type LineLayout } from './design-core/line-templates';
+import { isLineCompositionId, type LineCompositionId, type LineSlotLevel, type LineSlotFill } from './line-compositions';
 
 export type LineStepsChannel = 'dm' | 'email' | 'inapp';
 export const LINE_STEPS_CHANNELS: readonly LineStepsChannel[] = ['dm', 'email', 'inapp'];
 
 /** 단계 키 닫힌 목록(화면 부품표와 짝 테스트로 묶인다) · event_page · products = 템플릿 캠페인 단계(★ 2026-10-17 · line-template-plan.ts) */
 // ★ 2026-10-21 proof = 고객 후기(④ 신뢰 · 어느 연동에도 없어 묻는다 · 설계서 docs/2026-10-21-oneline-content-design.md §3-2)
-export const LINE_STEP_KEYS = ['benefit', 'product', 'hero_photo', 'link', 'period', 'event_page', 'products', 'proof'] as const;
+// ★ 2026-10-22 한줄 CT 구성 5종 칸(설계서 docs/2026-10-22-oneline-ct-design.md §11-2) — points = 특징 · 코디 · 꼬리표 · 참여 방법 · usage = 사용 단계
+//   · mood = 분위기 · 대표 사진 · coupon_code = 할인 코드 · store = 매장 안내
+export const LINE_STEP_KEYS = ['benefit', 'product', 'hero_photo', 'link', 'period', 'event_page', 'products', 'proof', 'points', 'usage', 'mood', 'coupon_code', 'store'] as const;
 export type LineStepKey = (typeof LINE_STEP_KEYS)[number];
 
 /** 질문 단계 상한(만들기 단계 제외 · Harold 결정 · 설계서 §3-3) */
@@ -170,6 +173,11 @@ export interface LineStep {
   terms?: Array<{ item: string; price?: number; url?: string }>;
   min?: number;
   max?: number;
+  /** ★ 2026-10-22 구성 칸 — 단계(막는 칸 · 권하는 칸 · 빠지는 칸) · 묻는 말 · 이유 · 채우는 방법(화면이 버튼을 고른다) */
+  level?: LineSlotLevel;
+  ask?: string;
+  why?: string;
+  fill?: LineSlotFill[];
 }
 
 export interface LineStepsPlanInput {
@@ -291,15 +299,33 @@ export interface LineStepsBody {
   proof: LineProofReview[];
   expectedCost: number | null;
   meta: { shown: string[]; answered: string[]; skipped: string[] };
-  /** ★ 템플릿 캠페인 — 고른 템플릿 · 배치(없으면 1017 단계 생성 그대로) */
-  template: { id: LineTemplateId; layout: LineLayout } | null;
+  /** ★ 템플릿 캠페인 — 고른 템플릿 · 배치(없으면 1017 단계 생성 그대로) · ★1022 구성 5종 id 도 이 칸 */
+  template: { id: LineTemplateId | LineCompositionId; layout: LineLayout } | null;
+  /** ★ 2026-10-22 구성 재료(특징 · 사용 단계 · 분위기 사진 · 코드 · 매장 · 혜택 조건) — 사진은 이 회사 경로만(요청 준비가 본다) */
+  rich: LineRichBody;
   /** ★ 템플릿 캠페인 — 읽은 이벤트 페이지 주소 + 「이 문구 그대로 쓰기」를 켠 카드 지문(서버가 다시 읽어 대조한다) */
   page: { url: string; licensedHashes: string[] } | null;
 }
 
+export interface LineRichPointBody { title: string; body: string; image: string | null }
+export interface LineRichBody {
+  points: LineRichPointBody[];
+  usage: LineRichPointBody[];
+  mood: string[];
+  couponCode: string | null;
+  store: { address?: string; business_hours?: string; phone?: string } | null;
+  benefitNote: string | null;
+  /** 직접 넣은 상품의 종류(같은 순서 · 비면 없음) */
+  categories: Array<string | null>;
+}
+export const LINE_RICH_POINTS_MAX = 3;
+export const LINE_RICH_MOOD_MAX = 3;
+
 export const LINE_STEPS_MANUAL_MAX = 3;
 /** 템플릿 캠페인 직접 상품 상한(템플릿 DM 상품 상한 8 · 몰 상품과 합쳐 템플릿 상한으로 자른다) */
 export const LINE_TEMPLATE_MANUAL_MAX = 8;
+/** ★ 2026-10-22 구성 5종 직접 상품 상한(구성 칸표 products.max 최대값과 같다) */
+export const LINE_COMPOSITION_MANUAL_MAX = 12;
 const PAGE_HASH_RE = /^[0-9a-f]{16}$/;
 const NAME_MAX = 60;
 const URL_MAX = 500;
@@ -367,8 +393,8 @@ export function sanitizeLineStepsBody(body: Record<string, unknown> | null | und
   let template: LineStepsBody['template'] = null;
   if (b.template !== undefined && b.template !== null) {
     const tr = b.template as Record<string, unknown>;
-    if (typeof tr !== 'object' || Array.isArray(tr) || !getLineTemplate(tr.id) || (tr.layout !== 'slides' && tr.layout !== 'page')) return 'invalid';
-    template = { id: tr.id as LineTemplateId, layout: tr.layout };
+    if (typeof tr !== 'object' || Array.isArray(tr) || !(getLineTemplate(tr.id) || isLineCompositionId(tr.id)) || (tr.layout !== 'slides' && tr.layout !== 'page')) return 'invalid';
+    template = { id: tr.id as LineTemplateId | LineCompositionId, layout: tr.layout };
   }
   let page: LineStepsBody['page'] = null;
   if (b.page !== undefined && b.page !== null) {
@@ -382,8 +408,11 @@ export function sanitizeLineStepsBody(body: Record<string, unknown> | null | und
   }
 
   const manualRaw = b.manual_products ?? [];
-  if (!Array.isArray(manualRaw) || manualRaw.length > (template ? LINE_TEMPLATE_MANUAL_MAX : LINE_STEPS_MANUAL_MAX)) return 'invalid';
+  // ★ 2026-10-22 구성 상품 상한 = 구성 칸표 최대(12 · 화면과 같은 값 · Codex CT R1) · 옛 템플릿 = 8 · 1017 = 3
+  const manualMax = template ? (isLineCompositionId(template.id) ? LINE_COMPOSITION_MANUAL_MAX : LINE_TEMPLATE_MANUAL_MAX) : LINE_STEPS_MANUAL_MAX;
+  if (!Array.isArray(manualRaw) || manualRaw.length > manualMax) return 'invalid';
   const manual: LineStepsManualProduct[] = [];
+  const categories: Array<string | null> = [];
   for (const item of manualRaw) {
     if (!item || typeof item !== 'object' || Array.isArray(item)) return 'invalid';
     const r = item as Record<string, unknown>;
@@ -405,6 +434,10 @@ export function sanitizeLineStepsBody(body: Record<string, unknown> | null | und
       row.url = u;
     }
     manual.push(row);
+    if (r.category !== undefined && r.category !== null && r.category !== '') {
+      if (typeof r.category !== 'string' || r.category.trim().length > 20) return 'invalid';
+      categories.push(r.category.trim());
+    } else categories.push(null);
   }
 
   let heroImage: string | null = null;
@@ -438,12 +471,83 @@ export function sanitizeLineStepsBody(body: Record<string, unknown> | null | und
     expectedCost = c;
   }
 
+  const rich = sanitizeLineRichBody(b.rich, categories);
+  if (rich === 'invalid') return 'invalid';
+  if (rich && !template) return 'invalid';
+
   const metaRaw = (b.steps_meta && typeof b.steps_meta === 'object' && !Array.isArray(b.steps_meta)) ? b.steps_meta as Record<string, unknown> : {};
   return {
     facts, manual, heroImage, heroPoster, proof, expectedCost,
     meta: { shown: strList(metaRaw.shown), answered: strList(metaRaw.answered), skipped: strList(metaRaw.skipped) },
     template, page,
+    rich: rich ?? { points: [], usage: [], mood: [], couponCode: null, store: null, benefitNote: null, categories },
   };
+}
+
+const RICH_TITLE_MAX = 20;
+const RICH_BODY_MAX = 80;
+const COUPON_CODE_RE = /^[A-Za-z0-9_-]{2,24}$/;
+
+/**
+ * (순수) 구성 재료 칸 검증 — 없으면 null · 틀리면 'invalid'(조용히 버리지 않는다).
+ *   글은 사람이 적은 그대로(공백 정리) · 코드 = 영숫자 · 하이픈 2~24 · 매장 칸 각 80자 · 사진 주소 = 길이만(회사 경로는 요청 준비가 본다).
+ */
+export function sanitizeLineRichBody(raw: unknown, categories: Array<string | null>): LineRichBody | null | 'invalid' {
+  if (raw === undefined || raw === null) return null;
+  if (typeof raw !== 'object' || Array.isArray(raw)) return 'invalid';
+  const r = raw as Record<string, unknown>;
+  const points = (key: string): LineRichPointBody[] | 'invalid' => {
+    const v = r[key];
+    if (v === undefined || v === null) return [];
+    if (!Array.isArray(v) || v.length > LINE_RICH_POINTS_MAX) return 'invalid';
+    const out: LineRichPointBody[] = [];
+    for (const it of v) {
+      const o = it && typeof it === 'object' && !Array.isArray(it) ? it as Record<string, unknown> : null;
+      if (!o) return 'invalid';
+      const title = typeof o.title === 'string' ? o.title.replace(/\s+/g, ' ').trim() : '';
+      const body = typeof o.body === 'string' ? o.body.replace(/\s+/g, ' ').trim() : '';
+      if (!title || title.length > RICH_TITLE_MAX || body.length > RICH_BODY_MAX) return 'invalid';
+      let image: string | null = null;
+      if (o.image !== undefined && o.image !== null && o.image !== '') {
+        if (typeof o.image !== 'string' || o.image.length > IMAGE_MAX) return 'invalid';
+        image = o.image.trim();
+      }
+      out.push({ title, body, image });
+    }
+    return out;
+  };
+  const pts = points('points');
+  const usage = points('usage');
+  if (pts === 'invalid' || usage === 'invalid') return 'invalid';
+  let mood: string[] = [];
+  if (r.mood !== undefined && r.mood !== null) {
+    if (!Array.isArray(r.mood) || r.mood.length > LINE_RICH_MOOD_MAX || !r.mood.every((u) => typeof u === 'string' && u.trim() && u.length <= IMAGE_MAX)) return 'invalid';
+    mood = (r.mood as string[]).map((u) => u.trim());
+  }
+  let couponCode: string | null = null;
+  if (r.coupon_code !== undefined && r.coupon_code !== null && r.coupon_code !== '') {
+    if (typeof r.coupon_code !== 'string' || !COUPON_CODE_RE.test(r.coupon_code.trim())) return 'invalid';
+    couponCode = r.coupon_code.trim();
+  }
+  let store: LineRichBody['store'] = null;
+  if (r.store !== undefined && r.store !== null) {
+    if (typeof r.store !== 'object' || Array.isArray(r.store)) return 'invalid';
+    const st = r.store as Record<string, unknown>;
+    const out: NonNullable<LineRichBody['store']> = {};
+    for (const k of ['address', 'business_hours', 'phone'] as const) {
+      const v = st[k];
+      if (v === undefined || v === null || v === '') continue;
+      if (typeof v !== 'string' || v.trim().length > 80) return 'invalid';
+      out[k] = v.trim();
+    }
+    store = Object.keys(out).length > 0 ? out : null;
+  }
+  let benefitNote: string | null = null;
+  if (r.benefit_note !== undefined && r.benefit_note !== null && r.benefit_note !== '') {
+    if (typeof r.benefit_note !== 'string' || r.benefit_note.trim().length > 120) return 'invalid';
+    benefitNote = r.benefit_note.replace(/\s+/g, ' ').trim();
+  }
+  return { points: pts, usage, mood, couponCode, store, benefitNote, categories };
 }
 
 // ─────────────── 원문 조립 ───────────────
@@ -486,8 +590,25 @@ export function kstDayOf(nowMs: number): string {
   return `${d.getUTCFullYear()}${String(d.getUTCMonth() + 1).padStart(2, '0')}${String(d.getUTCDate()).padStart(2, '0')}`;
 }
 
-/** 원장 접두 — 「오늘 이 한 줄로 한 줄 완성을 냈는가」를 원장에 묻는 열쇠(회사 · 채널 · 날짜 · 한 줄 지문) */
-export function lineStepsKeyPrefix(companyId: string, channel: LineStepsChannel, day: string, lineFp: string): string {
+/**
+ * 원장 접두 — 「오늘 이 한 줄로 한 줄 완성을 냈는가」를 원장에 묻는 열쇠(회사 · 날짜 · 한 줄 지문).
+ * ★ 2026-10-22 채널을 뺐다(설계서 docs/2026-10-22-oneline-ct-design.md §11-3 · 한 줄 = 완성 한 번 · 같은 한 줄로 DM 뒤 이메일 = 다시 만들기 값).
+ *   옛 접두(채널 포함 · 1017~1021)는 `lineStepsLegacyKeyPrefix` — 바꾼 날 오늘 낸 완성을 읽을 때만 쓴다.
+ */
+export function lineStepsKeyPrefix(companyId: string, _channel: LineStepsChannel, day: string, lineFp: string): string {
+  return `olc:${companyId}:${day}:${lineFp}:`;
+}
+
+/**
+ * ★ 2026-10-22 한 줄 잠금 키(회사 · 한 줄 지문 · 날짜 · 채널 없음) — 판단 정산(콘텐츠 · 문자 입구) · 결과물 금액 확정 ~ 차감이 같은 키 하나로 줄을 선다
+ *   (Codex CT R1 high · 판단과 첫 생성이 겹쳐 17 · 자정을 끼고 판단 2 가 두 번 나가던 경계). 메모리 잠금 = 프로세스 1개 전제(inflight-lock.ts).
+ */
+export function lineFpLockKey(companyId: string, lineFp: string): string {
+  return `oneline-line:${companyId}:${lineFp}`;
+}
+
+/** 옛 접두(채널 포함) — 읽기 전용(전환 날 이중 과금 0) */
+export function lineStepsLegacyKeyPrefix(companyId: string, channel: LineStepsChannel, day: string, lineFp: string): string {
   return `olc:${companyId}:${channel}:${day}:${lineFp}:`;
 }
 
@@ -502,12 +623,22 @@ export function buildLineStepsIdempotencyKey(companyId: string, channel: LineSte
 
 /** 한 줄 완성 원장 원천(credit source) */
 export const LINE_COMPLETE_SOURCE = 'oneline-complete';
+/** ★ 2026-10-22 같은 한 줄 그릇 추가 · 다시 만들기 원천 */
+export const LINE_RECOOK_SOURCE = 'oneline-recook';
+/** ★ 2026-10-22 판단(듣기 + 판단) 원천 · 키 = 문자 입구와 같은 aio-base */
+export const LINE_JUDGE_SOURCE = 'oneline-judge';
 
 /**
- * (순수) 이번 생성의 금액 · 원천. 오늘 이 한 줄로 한 줄 완성을 이미 냈으면(다시 만들기) 생성비만 · 그 채널 생성 원천.
+ * ★ 2026-10-22 Harold 확정 단가(설계서 §11-3) — 입구 무관.
+ *   판단 2 · 판단을 거친 첫 결과물 13(합계 15) · 판단 없이 첫 결과물 15 · 같은 한 줄 그릇 추가 · 다시 만들기 3.
  */
-export function lineStepsCharge(generate: number, complete: number, completionPaid: boolean, genSource: string): { cost: number; source: string; completionDue: boolean } {
-  return completionPaid
-    ? { cost: generate, source: genSource, completionDue: false }
-    : { cost: generate + complete, source: LINE_COMPLETE_SOURCE, completionDue: true };
+export const LINE_PRICE = { judge: 2, total: 15, again: 3 } as const;
+
+/**
+ * (순수) 이번 생성의 금액 · 원천.
+ *   오늘(또는 어제) 이 한 줄로 완성을 이미 냈으면 = 다시 만들기 3 · 아니면 첫 결과물 = 15 에서 이미 낸 판단 2 를 뺀 값.
+ */
+export function lineStepsCharge(completionPaid: boolean, judgePaid: boolean): { cost: number; source: string; completionDue: boolean } {
+  if (completionPaid) return { cost: LINE_PRICE.again, source: LINE_RECOOK_SOURCE, completionDue: false };
+  return { cost: LINE_PRICE.total - (judgePaid ? LINE_PRICE.judge : 0), source: LINE_COMPLETE_SOURCE, completionDue: true };
 }

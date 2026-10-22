@@ -119,6 +119,7 @@ import { buildLineStepsEventText } from '../utils/one-line-steps';
 import { getLineTemplate } from '../utils/design-core/line-templates';   // ★ 2026-10-17 템플릿 캠페인
 import { resolveLinePage, isLinePageError, type LinePageMaterial } from '../utils/line-template-page';
 import { draftLineTemplate, buildLineTemplateInapp, lineTemplateBrand, lineTemplateManual, LineTemplateError } from '../utils/line-template-run';
+import { getLineComposition, draftLineCook, buildLineCookInapp, lineCookManual } from '../utils/one-line-ct';   // ★ 2026-10-22 한줄 CT 구성 5종
 import { prepareLineStepsRequest, isLineStepsReqError, lineStepsKeyFor, settleLineStepsPrice, resolveLineStepsDelivery, lineStepsAttemptCharged, lineStepsLineLockKey, lineStepsCollected } from '../utils/line-steps-context';
 import { placeInAppLineMaterials, type LineInAppMessage } from '../utils/line-materials';
 import { resolveLineMallCards, linePinnedPrimary, type LineMallCard } from '../utils/line-mall-cards';
@@ -1627,6 +1628,8 @@ router.post('/inapp/ai-generate', singleFlight('inapp-generate', async (req: Req
       // ★ 2026-10-17 템플릿 캠페인 — 템플릿 칸이 온 단계 요청만(스위치 밖인데 오면 400)
       const tplSel = steps.body.template;
       const tplDef = tplSel ? getLineTemplate(tplSel.id) : null;
+      // ★ 2026-10-22 한줄 CT — 구성 5종 id 가 오면 구성 조립(같은 돈 순서 · 인앱 한 장)
+      const compDef = tplSel && !tplDef ? getLineComposition(tplSel.id) : null;
       const lineProducts = sanitizeLineProducts(req.body?.products);
       if (lineProducts === 'invalid' || (lineProducts && lineProducts.length > 1)) return res.status(400).json({ success: false, error: '고른 상품을 다시 확인해 주세요.', code: 'LINE_PRODUCTS_INVALID' });
       // 생성 입력 전부를 지문에(직접 상품 전부 · 대표 사진 · 주소 답 · 혜택)
@@ -1635,6 +1638,7 @@ router.post('/inapp/ai-generate', singleFlight('inapp-generate', async (req: Req
         benefit: steps.body.facts.benefit ?? null, manual: steps.body.manual, hero: steps.hero, ...(steps.heroAsIs ? { heroAsIs: true } : {}), link: steps.body.facts.link ?? null,
         // ★ 템플릿 요청 = 템플릿 · 배치 · 페이지도 지문에(1017 요청 키는 그대로)
         ...(tplSel ? { template: tplSel, page: steps.body.page } : {}),
+        ...(compDef ? { rich: steps.body.rich } : {}),
       };
       const idemKey = lineStepsKeyFor(steps, auth.companyId, 'inapp', stepsPayload);
       // 잠금 둘 — 같은 시도 토큰 · 같은 한 줄(금액 확정 ~ 차감 · 다른 시도가 한 줄 완성을 두 번 내지 않게 · Codex 1017 1R)
@@ -1666,7 +1670,7 @@ router.post('/inapp/ai-generate', singleFlight('inapp-generate', async (req: Req
         const eventText = buildLineStepsEventText(rawLine, { benefit: steps.body.facts.benefit ?? null, textProducts: steps.textProducts });
         // ★ 2026-10-17 템플릿 요청 = 읽은 이벤트 페이지를 서버가 다시 얻어 지문 대조(바뀌었으면 409 · AI · 차감 전 · 0원)
         let tplPage: LinePageMaterial | null = null;
-        if (tplDef && steps.body.page) {
+        if ((tplDef || compDef) && steps.body.page) {
           const pg = await resolveLinePage(auth.companyId, steps.body.page);
           if (isLinePageError(pg)) return res.status(pg.status).json({ success: false, error: pg.error, code: pg.code });
           tplPage = pg;
@@ -1674,20 +1678,31 @@ router.post('/inapp/ai-generate', singleFlight('inapp-generate', async (req: Req
         await checkCredit(auth.companyId, price.cost);
         const delivery = await resolveLineStepsDelivery(auth.companyId, actor, steps, { channel: 'inapp', line: rawLine, cards: allCards });
         let pkg: Awaited<ReturnType<typeof generateInAppMessagePackage>>;
-        if (tplDef) {
+        if (tplDef || compDef) {
           // ★ 템플릿 요청 = 문구 AI 1회(묶음 · 안쪽 차감 0) + center_modal 한 장 조립(상품 · 사진 · 주소 = 템플릿이 놓는다 · 1017 끼우기 안 함)
           //   근거 글 = 사진 조각은 그대로 쓰기를 켰을 때만 숫자를 살린다(DM · 이메일과 같은 규칙)
           const kitRaw = (await getCompanyBrandKitRaw(auth.companyId).catch(() => null)) as Record<string, unknown> | null;
           const brand = await lineTemplateBrand(auth.companyId, kitRaw);
           const groundLine = applyLineReads(rawLine, stepsReads === 'invalid' ? undefined : stepsReads, req.body?.read_licensed === true);
           const manualT = lineTemplateManual(steps.body.manual);
-          const draft = await runInCreditBundle(() => draftLineTemplate({
-            template: tplDef, channel: 'inapp', companyId: auth.companyId, line: groundLine, ...brand,
-            pinnedPrimary: linePinnedPrimary(kitRaw), cards: [...mallCards, ...manualT.cards], textProducts: manualT.textProducts, heroUpload: steps.hero, heroAsIs: steps.heroAsIs, proof: steps.body.proof, page: tplPage,
-            benefitAnswer: steps.body.facts.benefit, periodEnd: steps.body.facts.periodEnd ?? null,
-            link: steps.body.facts.link ?? tplPage?.url ?? delivery.link ?? null,
-          }, { userId: auth.userId, source: 'inapp-ai-generator' }, { factsOnly: true }));   // ★ 1019 B-1018-1 값 = 코드(인앱 혜택 블록)
-          const msg = buildLineTemplateInapp(draft);
+          const inLink = steps.body.facts.link ?? tplPage?.url ?? delivery.link ?? null;
+          const msg = compDef
+            ? await runInCreditBundle(async () => {
+              const cm = lineCookManual(steps.body.manual, steps.body.rich.categories);
+              const cook = await draftLineCook({
+                composition: compDef, channel: 'inapp', companyId: auth.companyId, line: groundLine, ...brand,
+                pinnedPrimary: linePinnedPrimary(kitRaw), cards: [...mallCards, ...cm.cards].slice(0, 1), cardCategories: [],
+                heroUpload: steps.hero, heroAsIs: steps.heroAsIs, proof: [], page: tplPage,
+                benefitAnswer: steps.body.facts.benefit, periodEnd: steps.body.facts.periodEnd ?? null, link: inLink, rich: steps.body.rich,
+              }, { userId: auth.userId, source: 'inapp-ai-generator' });
+              return buildLineCookInapp(cook);
+            })
+            : buildLineTemplateInapp(await runInCreditBundle(() => draftLineTemplate({
+              template: tplDef!, channel: 'inapp', companyId: auth.companyId, line: groundLine, ...brand,
+              pinnedPrimary: linePinnedPrimary(kitRaw), cards: [...mallCards, ...manualT.cards], textProducts: manualT.textProducts, heroUpload: steps.hero, heroAsIs: steps.heroAsIs, proof: steps.body.proof, page: tplPage,
+              benefitAnswer: steps.body.facts.benefit, periodEnd: steps.body.facts.periodEnd ?? null,
+              link: inLink,
+            }, { userId: auth.userId, source: 'inapp-ai-generator' }, { factsOnly: true })));   // ★ 1019 B-1018-1 값 = 코드(인앱 혜택 블록)
           pkg = {
             message: {
               ...msg,
@@ -1715,8 +1730,8 @@ router.post('/inapp/ai-generate', singleFlight('inapp-generate', async (req: Req
           console.log(`[CREDIT][MISS] one-line steps inapp 결과 안 건넴 company=${auth.companyId} key=${idemKey} cost=${price.cost} outcome=${outcome}`);
           return res.status(503).json({ success: false, error: '크레딧 기록을 확인하지 못해 결과를 건네지 않았어요. 잠시 후 다시 시도해 주세요.', code: 'CREDIT_STATE_UNKNOWN' });
         }
-        console.log(`[one-line steps] inapp company=${auth.companyId} cost=${price.cost} completion=${price.completionDue} shown=${steps.body.meta.shown.join(',')} answered=${steps.body.meta.answered.join(',')} skipped=${steps.body.meta.skipped.join(',')} manual_cards=${steps.manualCards.length} hero=${delivery.hero ? 1 : 0}${tplDef ? ` template=${tplDef.id} page=${steps.body.page ? 1 : 0}` : ''}`);
-        return res.json({ success: true, package: pkg, one_line: { enabled: true, steps: { cost: price.cost, completion: price.completionDue }, notes, ...(tplDef ? { template: { id: tplDef.id, layout: 'page' } } : {}) } });
+        console.log(`[one-line steps] inapp company=${auth.companyId} cost=${price.cost} completion=${price.completionDue} shown=${steps.body.meta.shown.join(',')} answered=${steps.body.meta.answered.join(',')} skipped=${steps.body.meta.skipped.join(',')} manual_cards=${steps.manualCards.length} hero=${delivery.hero ? 1 : 0}${tplDef || compDef ? ` template=${(tplDef || compDef)!.id} page=${steps.body.page ? 1 : 0}` : ''}`);
+        return res.json({ success: true, package: pkg, one_line: { enabled: true, steps: { cost: price.cost, completion: price.completionDue }, notes, ...(tplDef || compDef ? { template: { id: (tplDef || compDef)!.id, layout: 'page' } } : {}) } });
       } finally {
         if (lineLockHeld) releaseInflight(lineLock);
         releaseInflight(lock);

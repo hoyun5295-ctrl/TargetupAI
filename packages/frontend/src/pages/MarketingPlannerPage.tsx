@@ -24,7 +24,7 @@ import {
   type PlannerSendKind,
 } from '../constants/planner-status';
 import { plannerApi, plannerErrorText, won, type Availability, type CalendarEvent, type Holiday, type PlannerCalendar, type PlannerLineRead } from '../components/planner/planner-api';
-import { fetchLineTemplates, type LineTemplateId, type LineTemplateInfo } from '../utils/one-line';
+import { fetchLineTemplates, type LineTemplateId, type LineTemplateInfo, type LineCompositionId } from '../utils/one-line';
 
 const todayMonth = () => kstToday().slice(0, 7);
 const DOW = ['일', '월', '화', '수', '목', '금', '토'];
@@ -63,7 +63,13 @@ const nextSendOf = (ev: CalendarEvent, today: string) => sendChipsOf(ev).find((c
 /** 점 색(375 달력 · 이번 주 띠 공용) — 손 갈 일 = 앰버 · 만드는 중 = 보라 · 그 밖 = 초록 */
 const dotTone = (s: CalendarEvent['displayState']) => (s === 'review' || s === 'material' || s === 'hold' ? 'bg-amber-500' : s === 'making' ? 'bg-violet-500' : 'bg-emerald-500');
 /** ★ 2026-10-18 v2-1 시작 카드 = 템플릿 4종(이름 · 설명 = 서버 원장 · 아이콘 · 색만 화면) */
-const TEMPLATE_LOOK: Record<LineTemplateId, { icon: LucideIcon; tint: string }> = {
+const TEMPLATE_LOOK: Partial<Record<LineTemplateId | LineCompositionId, { icon: LucideIcon; tint: string }>> = {
+  // ★ 2026-10-22 시작 카드 = 한줄 CT 구성 5종
+  showcase: { icon: BadgePercent, tint: 'from-rose-400 to-orange-500' },
+  spotlight: { icon: PackagePlus, tint: 'from-pink-400 to-rose-500' },
+  lookbook: { icon: Leaf, tint: 'from-stone-400 to-amber-600' },
+  menu: { icon: Leaf, tint: 'from-orange-400 to-amber-600' },
+  event: { icon: PartyPopper, tint: 'from-violet-400 to-indigo-500' },
   'big-sale': { icon: BadgePercent, tint: 'from-rose-400 to-orange-500' },
   'new-launch': { icon: PackagePlus, tint: 'from-sky-400 to-indigo-500' },
   'special-event': { icon: PartyPopper, tint: 'from-violet-400 to-fuchsia-500' },
@@ -81,7 +87,7 @@ export default function MarketingPlannerPage() {
   const [loadState, setLoadState] = useState<'loading' | 'ok' | 'fail' | 'pending'>('loading');
   const [loadedAt, setLoadedAt] = useState<string>('');
   const [availability, setAvailability] = useState<Availability[]>([]);
-  const [modal, setModal] = useState<{ editing: CalendarEvent | null; date?: string | null; template?: LineTemplateId | null; lineRead?: PlannerLineRead | null } | null>(null);
+  const [modal, setModal] = useState<{ editing: CalendarEvent | null; date?: string | null; template?: LineTemplateId | LineCompositionId | null; lineRead?: PlannerLineRead | null } | null>(null);
   const [line, setLine] = useState('');
   const [reading, setReading] = useState(false);
   const [templates, setTemplates] = useState<LineTemplateInfo[] | null>(null);
@@ -114,7 +120,7 @@ export default function MarketingPlannerPage() {
   useEffect(() => { void load(month); }, [month, load]);
   useEffect(() => { void loadAvailability(); }, [loadAvailability]);
   // 템플릿 목록(회사 스위치 밖 = null → 시작 카드 없음 · 행사 담기 창도 옛 흐름)
-  useEffect(() => { let alive = true; void fetchLineTemplates().then((l) => { if (alive) setTemplates(l && l.length > 0 ? l : null); }); return () => { alive = false; }; }, []);
+  useEffect(() => { let alive = true; void fetchLineTemplates('compositions').then((l) => { if (alive) setTemplates(l && l.length > 0 ? l : null); }); return () => { alive = false; }; }, []);
   // 채널 상태를 못 받은 채면 창을 열 때 다시 묻는다(1회 실패로 "불러오는 중"에 갇히지 않게 · F6)
   useEffect(() => { if (modal && availability.length === 0) void loadAvailability(); }, [modal, availability.length, loadAvailability]);
   // 탭 복귀 때 조용히 다시 읽는다(휴대폰에서 승인하고 돌아온 PC 등 · 폴링 없음)
@@ -152,7 +158,7 @@ export default function MarketingPlannerPage() {
     .sort((a, b) => a.c.date.localeCompare(b.c.date))[0] || null, [events, today]);
 
   const openEvent = (ev: CalendarEvent) => navigate(`/marketing-planner/events/${ev.id}`);
-  const openCreate = (date?: string, template?: LineTemplateId) => setModal({ editing: null, date: date || null, template: template || null });
+  const openCreate = (date?: string, template?: LineTemplateId | LineCompositionId) => setModal({ editing: null, date: date || null, template: template || null });
   const lineEnabled = !!cal?.lineEnabled;
   // ★ 2026-10-18 한 줄 → 규칙 읽기(AI 0 · 0크레딧) → 판1 「이렇게 알아들었어요」 · 빈 줄 = 빈 판1
   const submitLine = async () => {

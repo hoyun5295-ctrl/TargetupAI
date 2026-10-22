@@ -38,6 +38,8 @@ vi.mock('../../services/ai', () => ({
   filterVarCatalogByData: async () => undefined,
 }));
 vi.mock('../operator-message-decorator', () => ({ decorateOperatorMessages: m.decorate }));
+// ★ 1022 문자 입구 기본 납부 판정이 콘텐츠 완성(lineCompletionPaid)도 본다 · 이 시험은 콘텐츠 원장 없음 = 안 냄
+vi.mock('../line-steps-context', () => ({ lineCompletionPaid: async () => false }));
 vi.mock('../hub-company-context', () => ({
   loadHubCompanyContext: async () => ({ companyInfo: { company_name: '테스트', reject_number: '0800000000', customer_schema: null }, customerStats: { total: 10 } }),
 }));

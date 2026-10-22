@@ -339,8 +339,8 @@ describe('라우트 소스 계약 — 템플릿 분기도 같은 돈 순서', ()
     expect(src).not.toContain('lineTemplatesEnabled');
     const settle = at(src, "await settleLineStepsPrice(steps, companyId, 'dm', stepsNow)");
     const page = at(src, 'const pg = await resolveLinePage(companyId, steps.body.page);');
-    const gen = at(src, 'const r = tplDef ? await generateTemplateDm() : await oneShotGenerate({');
-    const marker = at(src, '...(tplDef ? { template_id: lineTemplateDmMarker(tplDef.id) } : {}),');
+    const gen = at(src, 'const r = tplDef || compDef ? await generateTemplateDm() : await oneShotGenerate({');
+    const marker = at(src, '...(tplDef ? { template_id: lineTemplateDmMarker(tplDef.id) } : compDef ? { template_id: lineCompositionDmMarker(compDef.id) } : {}),');
     const deduct = at(src, 'outcome = await deductCreditOutcome({ companyId, cost: genCost, source: genSource');
     for (const [a, b] of [[settle, page], [page, gen], [gen, marker], [marker, deduct]]) expect(a).toBeLessThan(b);
     expect(src).toContain('...(tplSel ? { template: tplSel, page: steps.body.page } : {})');
@@ -348,9 +348,9 @@ describe('라우트 소스 계약 — 템플릿 분기도 같은 돈 순서', ()
   it('이메일 — 금액 확정 → 템플릿 한 벌(페이지 다시 읽기 → 생성(묶음 안) → 차감 → 낸 것만) → 그 뒤가 범용 경로(바이트 그대로)', () => {
     const src = read('../../routes/email.ts');
     const settle = at(src, "await settleLineStepsPrice(steps, auth.companyId, 'email', stepsNow)");
-    const branch = at(src, 'if (tplDef && steps && stepsCharge) {');
+    const branch = at(src, 'if ((tplDef || compDef) && steps && stepsCharge) {');
     const page = at(src, 'const pg = await resolveLinePage(auth.companyId, steps.body.page);');
-    const gen = at(src, 'const draft = await runInCreditBundle(() => draftLineTemplate({');
+    const gen = at(src, 'const built = compDef');
     const deduct = at(src, 'const tplOutcome = await deductCreditOutcome({ companyId: auth.companyId, cost: tplCost, source: stepsCharge.source');
     const collected = at(src, 'if (!lineStepsCollected(tplOutcome)) {');
     const generic = at(src, 'const result = await generateEmailSections({ companyId: auth.companyId, userId: auth.userId, prompt: genPrompt, scenario, isAd, eventText });');
@@ -359,7 +359,7 @@ describe('라우트 소스 계약 — 템플릿 분기도 같은 돈 순서', ()
   it('인앱 — 페이지 다시 읽기 → 템플릿 생성(묶음 안) · 1017 끼우기는 범용 쪽만 → 차감', () => {
     const src = read('../../routes/cdp.ts');
     const page = at(src, 'const pg = await resolveLinePage(auth.companyId, steps.body.page);');
-    const gen = at(src, "const draft = await runInCreditBundle(() => draftLineTemplate({");
+    const gen = at(src, "const msg = compDef");
     const deduct = at(src, 'const outcome = await deductCreditOutcome({ companyId: auth.companyId, cost: price.cost, source: price.source');
     expect(page).toBeLessThan(gen);
     expect(gen).toBeLessThan(deduct);

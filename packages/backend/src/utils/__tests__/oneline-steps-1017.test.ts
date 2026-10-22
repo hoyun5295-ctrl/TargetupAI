@@ -167,9 +167,11 @@ describe('돈 — 한 줄 완성 원장 키 · 금액', () => {
     expect(lineStepsFp('니트  세일', undefined)).toBe(lineStepsFp('니트 세일', undefined));
     expect(lineStepsFp('니트 세일 · 30% 할인 행사', ['30% 할인 행사'])).toBe(lineStepsFp('니트 세일', undefined));
   });
-  it('금액 = 생성비 + 10 · 오늘 낸 한 줄이면 생성비만', () => {
-    expect(lineStepsCharge(5, 10, false, 'dm-ai-generate')).toEqual({ cost: 15, source: 'oneline-complete', completionDue: true });
-    expect(lineStepsCharge(5, 10, true, 'dm-ai-generate')).toEqual({ cost: 5, source: 'dm-ai-generate', completionDue: false });
+  it('★1022 금액 = 입구 무관 합계 15 · 판단을 냈으면 13 · 오늘 · 어제 낸 한 줄이면 다시 만들기 3', () => {
+    expect(lineStepsCharge(false, false)).toEqual({ cost: 15, source: 'oneline-complete', completionDue: true });
+    expect(lineStepsCharge(false, true)).toEqual({ cost: 13, source: 'oneline-complete', completionDue: true });
+    expect(lineStepsCharge(true, true)).toEqual({ cost: 3, source: 'oneline-recook', completionDue: false });
+    expect(lineStepsCharge(true, false)).toEqual({ cost: 3, source: 'oneline-recook', completionDue: false });
   });
 });
 
@@ -285,7 +287,7 @@ describe('라우트 소스 계약 — 돈 순서', () => {
     expect(src).toContain('if (stepsLockHeld) releaseInflight(stepsLock);');
     const settle = at(src, "await settleLineStepsPrice(steps, companyId, 'dm', stepsNow)");
     const mall = at(src, 'await resolveLineMallCards(companyId, lineActor, lineProducts)');
-    const gen = at(src, 'const r = tplDef ? await generateTemplateDm() : await oneShotGenerate({');
+    const gen = at(src, 'const r = tplDef || compDef ? await generateTemplateDm() : await oneShotGenerate({');
     const deduct = at(src, 'outcome = await deductCreditOutcome({ companyId, cost: genCost, source: genSource');
     expect(charged).toBeLessThan(settle);
     expect(settle).toBeLessThan(mall);
@@ -379,7 +381,8 @@ describe('같은 시도 판정 · 한 줄 잠금 · 결말 (Codex 1R)', () => {
     expect(await ctx.lineStepsAttemptCharged(prep, C, 'email', { x: 1 })).toBe(true);
     expect(asked[0]).toEqual([ctx.lineStepsKeyFor(prep, C, 'email', { x: 1 }), buildLineStepsIdempotencyKey(C, 'email', '20261016', prep.fp, prep.token, { x: 1 })]);
     expect(ctx.lineStepsAttemptKeys(prep, C, 'email', { x: 1 })).toEqual(asked[0]);
-    expect(ctx.lineStepsLineLockKey(prep, C, 'email')).toBe(`oneline-steps-line:${lineStepsKeyPrefix(C, 'email', '20261017', prep.fp)}`);
+    // ★1022 잠금 키 = 회사 · 한 줄 지문(날짜 · 채널 없음 · 판단 정산과 같은 키 · 설계서 docs/2026-10-22-oneline-ct-design.md §11-3)
+    expect(ctx.lineStepsLineLockKey(prep, C, 'email')).toBe(`oneline-line:${C}:${prep.fp}`);
     expect(['deducted', 'duplicate', 'not_applicable'].every((o) => ctx.lineStepsCollected(o as any))).toBe(true);
     expect(ctx.lineStepsCollected('failed')).toBe(false);
     expect(ctx.lineStepsCollected('')).toBe(false);

@@ -15,6 +15,9 @@ import { tryAcquireInflight, releaseInflight, takeDailyQuota } from '../utils/in
 /** 회사당 하루 헤드라인 자동 추천 상한(한 줄 창을 열 때마다 1회 · 넘으면 갤러리에서 고른다) */
 const HEADLINE_PICKS_DAILY_MAX = 60;
 import { getBrandBasicInfo } from '../utils/brand-basic-info';
+import { getLineComposition } from '../utils/line-compositions';
+import { previewMaterials, renderCompositionPreview } from '../utils/one-line-ct/preview';
+import { compositionCatalog, renderCompositionExample } from '../utils/one-line-ct/catalog';
 
 export const lineTemplatesRouter = Router();
 lineTemplatesRouter.use(authenticate);
@@ -24,6 +27,8 @@ const isOpen = (companyId: string | undefined) => !!companyId;
 
 lineTemplatesRouter.get('/', (req: any, res: any) => {
   if (!isOpen(req.user?.companyId)) return res.status(404).json(NOT_OPEN);
+  // ★ 2026-10-22 한줄 CT 구성 5종(마케팅플래너 · 고르기 화면 · 옛 목록과 같은 모양)
+  if (req.query?.set === 'compositions') return res.json({ success: true, templates: compositionCatalog() });
   return res.json({
     success: true,
     templates: LINE_TEMPLATES.map((t) => ({
@@ -42,19 +47,20 @@ let exampleCacheDay = '';
 lineTemplatesRouter.get('/:id/example', (req: any, res: any) => {
   if (!isOpen(req.user?.companyId)) return res.status(404).json(NOT_OPEN);
   const t = getLineTemplate(req.params.id);
+  const comp = t ? null : getLineComposition(req.params.id);
   const channel = String(req.query.channel || 'dm') as LineChannel;
   const layout = String(req.query.layout || 'slides') as LineLayout;
-  if (!t || !['dm', 'email', 'inapp'].includes(channel) || !['slides', 'page'].includes(layout)) {
+  if ((!t && !comp) || !['dm', 'email', 'inapp'].includes(channel) || !['slides', 'page'].includes(layout)) {
     return res.status(400).json({ success: false, error: '요청 형식이 맞지 않아요.', code: 'INVALID' });
   }
   try {
     const now = Date.now();
     const day = kstDayOf(now);
     if (day !== exampleCacheDay) { exampleCache.clear(); exampleCacheDay = day; }
-    const key = `${t.id}:${channel}:${channel === 'dm' ? layout : 'page'}`;
+    const key = `${(t || comp)!.id}:${channel}:${channel === 'dm' ? layout : 'page'}`;
     let out = exampleCache.get(key);
     if (!out) {
-      out = renderLineTemplateExample(t, channel, layout, now);
+      out = t ? renderLineTemplateExample(t, channel, layout, now) : renderCompositionExample(comp!, channel, layout, now);
       exampleCache.set(key, out);
     }
     return res.json({ success: true, ...(out as object) });
@@ -96,5 +102,26 @@ lineTemplatesRouter.post('/headline-picks', async (req: any, res: any) => {
     return res.status(500).json({ success: false, error: '첫 화면 템플릿을 고르지 못했어요. 잠시 뒤 다시 열어 주세요.' });
   } finally {
     releaseInflight(lockKey);
+  }
+});
+
+/**
+ * ★ 2026-10-22 한줄 CT 재료 판 미리보기(설계서 docs/2026-10-22-oneline-ct-design.md §11-5) — 구성 + 지금 재료 · 기본 문구 · 빈 칸 = 점선 자리.
+ *   AI 0 · DB 0 · 0원 · 결과물과 같은 조립 · 렌더러. 회사 권한만 · 회사당 하루 600회(칸을 닫을 때마다 한 번).
+ */
+const PREVIEW_DAILY_MAX = 600;
+lineTemplatesRouter.post('/composition-preview', (req: any, res: any) => {
+  const companyId = req.user?.companyId;
+  if (!isOpen(companyId)) return res.status(404).json(NOT_OPEN);
+  const comp = getLineComposition(req.body?.composition);
+  const channel = String(req.body?.channel || 'dm');
+  if (!comp || !['dm', 'email', 'inapp'].includes(channel)) return res.status(400).json({ success: false, error: '요청 형식이 맞지 않아요.', code: 'INVALID' });
+  if (!takeDailyQuota(`composition-preview:${companyId}`, PREVIEW_DAILY_MAX)) return res.status(429).json({ success: false, error: '오늘 미리보기를 많이 썼어요. 내일 다시 볼 수 있어요.', code: 'PREVIEW_DAILY_LIMIT' });
+  try {
+    const m = previewMaterials(req.body?.materials, Date.now());
+    return res.json({ success: true, ...renderCompositionPreview(comp, channel as 'dm' | 'email' | 'inapp', m) });
+  } catch (err: any) {
+    console.error('[composition-preview] 실패:', err?.message);
+    return res.status(500).json({ success: false, error: '미리보기를 그리지 못했어요.', code: 'PREVIEW_FAILED' });
   }
 });

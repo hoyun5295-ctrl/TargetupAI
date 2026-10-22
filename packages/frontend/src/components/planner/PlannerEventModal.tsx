@@ -27,7 +27,7 @@ import { LineTemplateExampleView, LineTemplateZoom } from '../zone/LineTemplateP
 import { BUILD_CARD_IMAGES_MAX } from '../ai-build/BuildCardsInput';
 import { AI_BUILD_PRODUCTS_MAX } from '../ai-build/ProductPickList';
 import { newAttemptToken, type BuildImageRole, type BuildImageValue, type BuildProductValue } from '../../utils/ai-build';
-import { fetchLineTemplates, normalizeLineLink, type LineLayout, type LineTemplateId, type LineTemplateInfo } from '../../utils/one-line';
+import { fetchLineTemplates, normalizeLineLink, type LineLayout, type LineTemplateId, type LineTemplateInfo, type LineCompositionId } from '../../utils/one-line';
 import { useMediaQuery } from '../../hooks/useMediaQuery';
 import { useToast } from '../ToastProvider';
 import { PLANNER_CHANNEL, PLANNER_SEND_KIND, plannerDay, type PlannerSendKind } from '../../constants/planner-status';
@@ -43,12 +43,13 @@ const CREDIT_CONFIRM_MIN = 20;
 const BUILD_CHANNELS: Array<'dm' | 'email'> = ['dm', 'email'];
 const CHANNEL_ORDER: PlannerChannelKey[] = ['sms', 'dm', 'email'];
 /** 서버 관문(plannerTemplateMissing)의 빠진 재료 키 → 화면 말 */
-const MISSING_TEXT: Record<string, string> = { link: '행사 페이지 주소', products: '상품', benefit: '혜택 문구' };
+const MISSING_TEXT: Record<string, string> = { link: '행사 페이지 주소', products: '상품', benefit: '혜택 문구', product_photos: '사진 있는 몰 상품', photos: '사진(첫 화면 말고 더)' };
 
 interface Tp { channel: PlannerChannelKey; timing: TimingRule }
 type ChannelRun = 'wait' | 'busy' | 'done' | 'fail';
 type Phase = { kind: 'idle' } | { kind: 'saving' } | { kind: 'building'; runs: Partial<Record<'dm' | 'email', ChannelRun>>; error: string | null };
-type Tpl = { id: LineTemplateId; layout: LineLayout };
+/** ★ 2026-10-22 플래너 완성본 틀 = 한줄 CT 구성 5종(옛 4종 저장분도 그대로 읽는다) */
+type Tpl = { id: LineTemplateId | LineCompositionId; layout: LineLayout };
 
 const ANCHOR_LABEL: Record<Anchor, string> = { start: '행사 시작일', end: '마지막 날', before_start: '시작 전' };
 
@@ -128,7 +129,7 @@ export default function PlannerEventModal({ month, initialDate, initialTemplate 
   lineRead?: PlannerLineRead | null;
   initialDate?: string | null;
   /** 캘린더 시작 카드에서 연 템플릿(판1 에 골라진 채로 연다) */
-  initialTemplate?: LineTemplateId | null;
+  initialTemplate?: LineTemplateId | LineCompositionId | null;
   editing: CalendarEvent | null;
   availability: Availability[];
   balance: number | null;
@@ -197,7 +198,7 @@ export default function PlannerEventModal({ month, initialDate, initialTemplate 
   // 템플릿 목록(서버 원장 · 회사 스위치 밖 = null → 옛 흐름 그대로) · 새 행사는 첫 템플릿이 골라진 채로 연다
   useEffect(() => {
     let alive = true;
-    void fetchLineTemplates().then((list) => {
+    void fetchLineTemplates('compositions').then((list) => {
       if (!alive) return;
       setTemplates(list && list.length > 0 ? list : null);
       if (list && list.length > 0 && !choseTpl.current) setTpl({ id: list[0].id, layout: 'slides' });
@@ -262,7 +263,7 @@ export default function PlannerEventModal({ month, initialDate, initialTemplate 
     : [];
 
   // ── 템플릿 ───────────────────────────────────────────────────────
-  const chooseTpl = (id: LineTemplateId | null) => {
+  const chooseTpl = (id: LineTemplateId | LineCompositionId | null) => {
     if (busy) return;
     choseTpl.current = true;
     setTpl((cur) => (id ? { id, layout: cur?.layout || 'slides' } : null));

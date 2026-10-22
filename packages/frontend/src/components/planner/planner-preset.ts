@@ -5,15 +5,17 @@
  * 하루 행사는 같은 날 같은 채널을 접고, 지난 날(승인 마감이 지난 오늘 포함)은 뺀다 · 잠긴 채널은 뺀다.
  * ⛔ 순수 함수(React 0) · 판정은 화면 기본값일 뿐이다. 저장 때 서버가 시점을 다시 계산한다.
  */
-import type { LineTemplateId } from '../../utils/one-line';
+import type { LineTemplateId, LineCompositionId } from '../../utils/one-line';
 
 export type PresetChannel = 'sms' | 'dm' | 'email';
 export interface PresetTp { channel: PresetChannel; timing: { anchor: 'start' | 'end' } }
 
 const SALE: Array<[PresetChannel, 'start' | 'end']> = [['email', 'start'], ['sms', 'start'], ['dm', 'start'], ['sms', 'end'], ['dm', 'end']];
 const LAUNCH: Array<[PresetChannel, 'start' | 'end']> = [['sms', 'start'], ['dm', 'start'], ['email', 'start']];
-const PRESET: Record<LineTemplateId, Array<[PresetChannel, 'start' | 'end']>> = {
+// ★ 2026-10-22 구성 5종 — 세일 진열장 · 이벤트 = 마감 있는 행사 순서 · 주인공 상품 · 룩북 · 메뉴판 = 공개 순서
+const PRESET: Record<LineTemplateId | LineCompositionId, Array<[PresetChannel, 'start' | 'end']>> = {
   'big-sale': SALE, 'special-event': SALE, 'new-launch': LAUNCH, season: LAUNCH,
+  showcase: SALE, event: SALE, spotlight: LAUNCH, lookbook: LAUNCH, menu: LAUNCH,
 };
 
 /**
@@ -21,7 +23,7 @@ const PRESET: Record<LineTemplateId, Array<[PresetChannel, 'start' | 'end']>> = 
  * @param minDate 보낼 수 있는 가장 이른 날(KST 'YYYY-MM-DD' · 오늘 20시 승인 마감이 지났으면 내일)
  * @param open 채널을 쓸 수 있는가(잠긴 채널 = 뺀다)
  */
-export function plannerPreset(id: LineTemplateId, startsOn: string, endsOn: string, minDate: string, open: (ch: PresetChannel) => boolean): PresetTp[] {
+export function plannerPreset(id: LineTemplateId | LineCompositionId, startsOn: string, endsOn: string, minDate: string, open: (ch: PresetChannel) => boolean): PresetTp[] {
   const out: PresetTp[] = [];
   const dateOf = (a: 'start' | 'end') => (a === 'end' ? endsOn : startsOn);
   for (const [channel, anchor] of PRESET[id] || []) {

@@ -25,7 +25,9 @@ import { getCreditCost } from '../utils/ai-credit-calc';
 import { buildMemoryPromptContext as buildCompanyMemoryPromptContext } from '../utils/company-memory';
 import { buildMessageObjective } from '../utils/season-context';
 import { buildLineEventText } from '../utils/one-line-facts';
-import { formatLinePeriodEnd } from '../utils/one-line-steps';
+import { formatLinePeriodEnd, lineFpLockKey } from '../utils/one-line-steps';
+import { acquireInflightWait, releaseInflight } from '../utils/inflight-lock';
+import { lineCompletionPaid } from '../utils/line-steps-context';
 import { decorateOperatorMessages } from '../utils/operator-message-decorator';
 import { enrichWithCustomFields } from '../utils/messageUtils';
 import { getBrandVoiceFit } from '../utils/brand-voice-prompt';
@@ -137,13 +139,16 @@ export function describeLineFilters(line: string, filters: Record<string, any>, 
 
 // ─────────────── 원장(기본 납부) ───────────────
 
-/** 오늘 · 어제 키 중 하나라도 원장에 있으면 냈다. 조회 실패는 던진다(호출부 503 · 모르는 납부를 0으로 접지 않는다). */
+/**
+ * 오늘 · 어제 키 중 하나라도 원장에 있으면 냈다. 조회 실패는 던진다(호출부 503 · 모르는 납부를 0으로 접지 않는다).
+ * ★ 2026-10-22 같은 한 줄로 오늘 · 어제 콘텐츠 완성(판단 몫 포함 · 채널 무관)을 냈어도 냈다 — 잔액 확인 · 견적 · intake · 정산이 모두 이 판정 하나(Codex CT R2 · R3).
+ */
 export async function aiLineBasePaid(companyId: string, line: string, now: Date): Promise<boolean> {
   try {
     for (const key of aiLineBaseKeys(companyId, line, now)) {
       if (await isChargedByKey(companyId, key)) return true;
     }
-    return false;
+    return await lineCompletionPaid(companyId, aiLineLineFp(line), now.getTime());
   } catch (err: any) {
     console.error('[ai-line] 원장 조회 실패:', err?.message);
     throw new AiLineError('CREDIT_LEDGER_UNAVAILABLE', '크레딧 내역을 확인하지 못했어요. 잠시 뒤 다시 시도해 주세요.', 503);
@@ -220,10 +225,17 @@ async function settleBase(v: AiLineViewer, line: string, now: Date): Promise<voi
  */
 async function settleBaseOnce(v: AiLineViewer, line: string): Promise<boolean> {
   return withKeyLock(`aio-base-settle:${v.companyId}:${aiLineLineFp(line)}`, async () => {
-    const at = new Date();
-    if (await aiLineBasePaid(v.companyId, line, at)) return false;
-    await settleBase(v, line, at);
-    return true;
+    // ★ 2026-10-22 한줄 CT — 콘텐츠 입구 판단(2) · 결과물 생성과 같은 한 줄 잠금(날짜 · 채널 없음)을 기다렸다 잡는다(Codex CT R1 · 자정을 낀 이중 판단 과금)
+    const lock = lineFpLockKey(v.companyId, aiLineLineFp(line));
+    if (!(await acquireInflightWait(lock))) throw new AiLineError('IN_FLIGHT', '같은 한 줄을 지금 다른 화면에서 처리하는 중이에요. 잠시 뒤 다시 시도해 주세요.', 409);
+    try {
+      const at = new Date();
+      if (await aiLineBasePaid(v.companyId, line, at)) return false;
+      await settleBase(v, line, at);
+      return true;
+    } finally {
+      releaseInflight(lock);
+    }
   });
 }
 

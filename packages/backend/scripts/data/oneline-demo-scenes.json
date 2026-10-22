@@ -1,15 +1,13 @@
 [
   {
-    "name": "뷰티-신제품-사진있음",
-    "line": "진정 앰플 신제품 출시 기념 20% 할인 이번 달 말까지",
-    "template": "new-launch",
-    "layout": "page",
-    "benefit": "신제품 출시 기념 20% 할인",
-    "periodEnd": "2026-10-31",
-    "products": [
-      { "name": "온결 진정 앰플 30ml", "price": 38000, "discount_price": 30400, "image_url": "https://hanjul.ai/diagnosis-examples/assets/beauty-dm-hero.png" },
-      { "name": "온결 수분 크림 50ml", "price": 32000, "discount_price": 25600, "image_url": "https://hanjul.ai/diagnosis-examples/assets/ecommerce-p2.png" }
-    ],
+    "name": "뷰티-신제품(주인공 상품)",
+    "line": "온결 진정 앰플 신제품 출시 · 출시 기념 20% 할인 이번 달 말까지",
+    "brand": "온결",
+    "page": "https://hanjul.ai/demo-shop/beauty.html",
+    "prices": { "온결 진정 앰플 30ml": [38000, 30400], "온결 진정 라인 세트": [72000, 57600] },
+    "benefit": "출시 기념 20% 할인",
+    "periodDays": 9,
+    "couponCode": "ONGYEOL20",
     "proof": [
       { "body": "끈적임 없이 수분이 꽉 차요. 아침 화장이 잘 먹어요", "author": "김**", "rating": 5 },
       { "body": "민감한 피부인데 자극 없이 진정돼서 재구매했어요", "author": "이**", "rating": 5 }
@@ -17,42 +15,48 @@
     "exemplar": "SLk8T3v"
   },
   {
-    "name": "뷰티-세일-사진없음(최악)",
-    "line": "가을맞이 전 품목 세일 주말까지",
-    "template": "big-sale",
-    "layout": "page",
-    "benefit": "가을맞이 전 품목 30% 세일",
-    "periodEnd": "2026-10-26",
-    "exemplar": "xBTG2zQ"
-  },
-  {
-    "name": "패션-빅세일-상품4",
-    "line": "가을 니트 시즌오프 최대 30%",
-    "template": "big-sale",
-    "layout": "page",
+    "name": "패션-시즌오프(세일 진열장)",
+    "line": "소목 가을 시즌오프 최대 30% · 니트 재킷 원피스 가방",
+    "brand": "소목",
+    "page": "https://hanjul.ai/demo-shop/fashion.html",
+    "prices": { "케이블 울 니트": [59000, 41300], "울 블렌드 재킷": [129000, 90300], "플리츠 롱 원피스": [79000, 55300], "레더 숄더백": [99000, 69300], "클래식 스니커즈": [89000, 62300] },
+    "categories": { "레더 숄더백": "잡화", "클래식 스니커즈": "잡화" },
     "benefit": "가을 시즌오프 최대 30%",
-    "periodEnd": "2026-10-26",
-    "products": [
-      { "name": "케이블 울 니트", "price": 59000, "discount_price": 41300, "image_url": "https://hanjul.ai/diagnosis-examples/assets/fashion-p1.png" },
-      { "name": "울 블렌드 재킷", "price": 129000, "discount_price": 90300, "image_url": "https://hanjul.ai/diagnosis-examples/assets/fashion-p2.png" },
-      { "name": "플리츠 롱 원피스", "price": 79000, "discount_price": 55300, "image_url": "https://hanjul.ai/diagnosis-examples/assets/fashion-p3.png" },
-      { "name": "레더 숄더백", "price": 99000, "discount_price": 69300, "image_url": "https://hanjul.ai/diagnosis-examples/assets/fashion-p4.png" }
-    ],
+    "periodDays": 5,
+    "couponCode": "FALL10",
     "exemplar": "SCYg0SA"
   },
   {
-    "name": "패션-신상-사진없음(최악)",
-    "line": "FW 신상 입고 소식 알려드려요",
-    "template": "new-launch",
-    "layout": "page",
+    "name": "패션-신상(룩북)",
+    "line": "소목 FW 신상 입고 · 가을을 입는 새로운 결",
+    "brand": "소목",
+    "page": "https://hanjul.ai/demo-shop/fashion.html",
+    "composition": "lookbook",
+    "prices": { "케이블 울 니트": [59000, null], "울 블렌드 재킷": [129000, null], "플리츠 롱 원피스": [79000, null], "레더 숄더백": [99000, null], "클래식 스니커즈": [89000, null] },
+    "categories": { "케이블 울 니트": "여성", "플리츠 롱 원피스": "여성", "울 블렌드 재킷": "남성", "클래식 스니커즈": "남성" },
     "exemplar": "CKSUeUJ"
   },
   {
-    "name": "외식-계절메뉴",
-    "line": "겨울 한정 메뉴 출시 첫 주 무료배송",
-    "template": "season",
-    "layout": "page",
-    "benefit": "첫 주 무료배송",
+    "name": "외식-신메뉴(메뉴판)",
+    "line": "한상 가을 신메뉴 파스타 샐러드 출시 · 첫 주 음료 무료",
+    "brand": "한상",
+    "page": "https://hanjul.ai/demo-shop/food.html",
+    "prices": { "트러플 크림 파스타": [18000, null], "리코타 제철 샐러드": [14000, null], "딸기 생크림 케이크": [7500, null] },
+    "benefit": "첫 주 음료 무료",
+    "proof": [{ "body": "파스타 소스가 진하고 면이 쫄깃해요", "author": "윤**", "rating": 5 }],
+    "store": { "address": "서울 마포구 한줄로 12", "business_hours": "매일 11:00 ~ 22:00", "phone": "02-000-0000" },
     "exemplar": "amQC9fm"
+  },
+  {
+    "name": "뷰티-회원의 날(이벤트)",
+    "line": "온결 회원의 날 3일간 15% 쿠폰 · 가입만 해도 받아요",
+    "brand": "온결",
+    "page": "https://hanjul.ai/demo-shop/beauty.html",
+    "composition": "event",
+    "prices": { "온결 진정 앰플 30ml": [38000, 32300], "온결 진정 라인 세트": [72000, 61200] },
+    "benefit": "회원의 날 15% 쿠폰",
+    "periodDays": 3,
+    "couponCode": "MEMBER15",
+    "exemplar": "xBTG2zQ"
   }
 ]

@@ -113,6 +113,7 @@ import { buildLineStepsEventText } from '../utils/one-line-steps';
 import { getLineTemplate } from '../utils/design-core/line-templates';   // ★ 2026-10-17 템플릿 캠페인
 import { resolveLinePage, isLinePageError, type LinePageMaterial } from '../utils/line-template-page';
 import { draftLineTemplate, buildLineTemplateEmail, lineTemplateBrand, lineTemplateManual, LineTemplateError } from '../utils/line-template-run';
+import { getLineComposition, draftLineCook, buildLineCookEmail, lineCookManual } from '../utils/one-line-ct';   // ★ 2026-10-22 한줄 CT 구성 5종
 import { runInCreditBundle } from '../utils/ai-credit-context';
 import { prepareLineStepsRequest, isLineStepsReqError, lineStepsKeyFor, settleLineStepsPrice, resolveLineStepsDelivery, lineStepsAttemptCharged, lineStepsLineLockKey, lineStepsCollected } from '../utils/line-steps-context';
 import { placeLineHero, placeLineLink } from '../utils/line-materials';
@@ -1204,6 +1205,8 @@ router.post('/ai/generate-sections', singleFlight('email-generate', async (req: 
     // ★ 2026-10-17 템플릿 캠페인 — 템플릿 칸이 온 단계 요청만(스위치 밖인데 오면 400)
     const tplSel = steps && steps.body.template ? steps.body.template : null;
     const tplDef = tplSel ? getLineTemplate(tplSel.id) : null;
+    // ★ 2026-10-22 한줄 CT — 구성 5종 id 가 오면 구성 조립(같은 돈 순서)
+    const compDef = tplSel && !tplDef ? getLineComposition(tplSel.id) : null;
     const lineFacts = oneLineReq
       ? (steps ? (steps.body.facts.benefit !== undefined ? { benefit: steps.body.facts.benefit } : undefined) : sanitizeLineFacts(req.body?.facts))
       : undefined;
@@ -1231,7 +1234,7 @@ router.post('/ai/generate-sections', singleFlight('email-generate', async (req: 
     // ★ 2026-10-17 단계 요청 = 한 줄 완성 원장 키 · 생성 입력 전부를 지문에(직접 상품 전부 · 대표 사진 · 주소 답)
     // ★ 템플릿 요청 = 템플릿 · 배치 · 페이지도 지문에(1017 요청 키는 그대로)
     const stepsPayload = steps
-      ? { prompt: genPrompt, scenario: scenario || null, isAd, eventText, products: lineProductsKey(lineProducts || []), manual: steps.body.manual, hero: steps.hero, ...(steps.heroAsIs ? { heroAsIs: true } : {}), ...(steps.body.proof.length > 0 ? { proof: steps.body.proof } : {}), link: steps.body.facts.link ?? null, ...(tplSel ? { template: tplSel, page: steps.body.page } : {}) }
+      ? { prompt: genPrompt, scenario: scenario || null, isAd, eventText, products: lineProductsKey(lineProducts || []), manual: steps.body.manual, hero: steps.hero, ...(steps.heroAsIs ? { heroAsIs: true } : {}), ...(steps.body.proof.length > 0 ? { proof: steps.body.proof } : {}), link: steps.body.facts.link ?? null, ...(tplSel ? { template: tplSel, page: steps.body.page } : {}), ...(compDef ? { rich: steps.body.rich } : {}) }
       : null;
     const idemKey = attemptToken
       ? (steps
@@ -1282,7 +1285,7 @@ router.post('/ai/generate-sections', singleFlight('email-generate', async (req: 
       // ★ 2026-10-17 템플릿 요청 = 범용 생성 경로와 나란한 한 벌(같은 돈 순서 · 범용 경로는 바이트 그대로).
       //   페이지 다시 읽기(지문 대조 · 0원) → 잔액 확인 → 문구 AI 1회(묶음 · 안쪽 차감 0) + 조립 + 품질 관문 → 1회 차감 → 낸 것만 건넨다.
       //   상품 · 사진 · 주소는 템플릿 조립이 놓는다(1017 끼우기 · 몰 이름 첨부 0).
-      if (tplDef && steps && stepsCharge) {
+      if ((tplDef || compDef) && steps && stepsCharge) {
         let tplPage: LinePageMaterial | null = null;
         if (steps.body.page) {
           const pg = await resolveLinePage(auth.companyId, steps.body.page);
@@ -1294,24 +1297,44 @@ router.post('/ai/generate-sections', singleFlight('email-generate', async (req: 
         const kitRaw = (await getCompanyBrandKitRaw(auth.companyId).catch(() => null)) as Record<string, unknown> | null;
         const brand = await lineTemplateBrand(auth.companyId, kitRaw);
         const manualT = lineTemplateManual(steps.body.manual);
-        const tplCards: LineMallCard[] = [...lineCards, ...manualT.cards];
+        const compManual = compDef ? lineCookManual(steps.body.manual, steps.body.rich.categories) : null;
+        const tplCards: LineMallCard[] = [...lineCards, ...(compManual ? compManual.cards : manualT.cards)];
         const delivery = await resolveLineStepsDelivery(auth.companyId, lineActor, steps, { channel: 'email', line: linePrompt, cards: tplCards, companyKitRaw: kitRaw });
-        const draft = await runInCreditBundle(() => draftLineTemplate({
-          template: tplDef, channel: 'email', companyId: auth.companyId, line: linePrompt, ...brand,
-          pinnedPrimary: linePinnedPrimary(kitRaw), cards: tplCards, textProducts: manualT.textProducts, heroUpload: steps.hero, heroAsIs: steps.heroAsIs, proof: steps.body.proof, page: tplPage,
-          benefitAnswer: steps.body.facts.benefit, periodEnd: steps.body.facts.periodEnd ?? null,
-          link: steps.body.facts.link ?? tplPage?.url ?? delivery.link ?? null,
-        }, { userId: auth.userId, source: 'email-ai-generate' }, { factsOnly: true, subjectBenefit: true }));   // ★ 1019 B-1018-1 값 = 코드 · 제목 앞 혜택 원문
-        const em = buildLineTemplateEmail(draft);
+        const tplLink = steps.body.facts.link ?? tplPage?.url ?? delivery.link ?? null;
+        // ★ 2026-10-22 구성 = 한줄 CT 요리(문구 AI 1회 · 묶음 안 · 값 = 코드) · 템플릿 = 1017 그대로
+        const built = compDef
+          ? await runInCreditBundle(async () => {
+            const cook = await draftLineCook({
+              composition: compDef, channel: 'email', companyId: auth.companyId, line: linePrompt, ...brand,
+              pinnedPrimary: linePinnedPrimary(kitRaw), cards: tplCards, cardCategories: [...lineCards.map(() => null), ...compManual!.categories],
+              heroUpload: steps.hero, heroAsIs: steps.heroAsIs, proof: steps.body.proof, page: tplPage,
+              benefitAnswer: steps.body.facts.benefit, periodEnd: steps.body.facts.periodEnd ?? null, link: tplLink, rich: steps.body.rich,
+            }, { userId: auth.userId, source: 'email-ai-generate' });
+            const r = buildLineCookEmail(cook);
+            // 제목 앞에 사람이 확인한 혜택 원문(40자 안일 때만 · 템플릿과 같은 규칙)
+            const benefit = String(cook.materials.benefit || '').trim();
+            const withBenefit = benefit ? `[${benefit}] ${r.subject}`.trim() : r.subject;
+            return { em: { ...r, subject: withBenefit.length <= 40 ? withBenefit : r.subject }, primary: cook.comp.primary, label: compDef.label, id: compDef.id as string };
+          })
+          : await (async () => {
+            const draft = await runInCreditBundle(() => draftLineTemplate({
+              template: tplDef!, channel: 'email', companyId: auth.companyId, line: linePrompt, ...brand,
+              pinnedPrimary: linePinnedPrimary(kitRaw), cards: tplCards, textProducts: manualT.textProducts, heroUpload: steps.hero, heroAsIs: steps.heroAsIs, proof: steps.body.proof, page: tplPage,
+              benefitAnswer: steps.body.facts.benefit, periodEnd: steps.body.facts.periodEnd ?? null,
+              link: tplLink,
+            }, { userId: auth.userId, source: 'email-ai-generate' }, { factsOnly: true, subjectBenefit: true }));   // ★ 1019 B-1018-1 값 = 코드 · 제목 앞 혜택 원문
+            return { em: buildLineTemplateEmail(draft), primary: draft.t.design.primary, label: tplDef!.label, id: tplDef!.id as string };
+          })();
+        const em = built.em;
         const tplOutcome = await deductCreditOutcome({ companyId: auth.companyId, cost: tplCost, source: stepsCharge.source, createdBy: auth.userId, ...(idemKey ? { idempotencyKey: idemKey } : {}), throwOnInsufficient: true });
         if (!lineStepsCollected(tplOutcome)) {
           console.log(`[CREDIT][MISS] one-line template email 결과 안 건넴 company=${auth.companyId} key=${idemKey || 'none'} cost=${tplCost} outcome=${tplOutcome}`);
           return res.status(503).json({ success: false, error: '크레딧 기록을 확인하지 못해 결과를 건네지 않았어요. 잠시 후 다시 시도해 주세요.', code: 'CREDIT_STATE_UNKNOWN' });
         }
-        console.log(`[one-line steps] email company=${auth.companyId} cost=${tplCost} completion=${stepsCharge.completionDue} shown=${steps.body.meta.shown.join(',')} answered=${steps.body.meta.answered.join(',')} skipped=${steps.body.meta.skipped.join(',')} manual_cards=${manualT.cards.length} hero=${steps.hero ? 1 : 0} template=${tplDef.id} page=${steps.body.page ? 1 : 0}`);
+        console.log(`[one-line steps] email company=${auth.companyId} cost=${tplCost} completion=${stepsCharge.completionDue} shown=${steps.body.meta.shown.join(',')} answered=${steps.body.meta.answered.join(',')} skipped=${steps.body.meta.skipped.join(',')} manual_cards=${tplCards.length - lineCards.length} hero=${steps.hero ? 1 : 0} template=${built.id} page=${steps.body.page ? 1 : 0}`);
         const tplBasic = await getBrandBasicInfo(auth.companyId).catch(() => null);
         const tplDesign = lineEmailDesign({
-          pinned: draft.t.design.primary,
+          pinned: built.primary,
           companyArtDirection: kitRaw?.art_direction ?? null,
           industry: String((tplBasic as any)?.industry_code || '').trim() || null,
           preheader: em.preheader.slice(0, 90),
@@ -1320,14 +1343,14 @@ router.post('/ai/generate-sections', singleFlight('email-generate', async (req: 
           success: true,
           data: {
             sections: em.sections, subjects: [em.subject], preheader: em.preheader,
-            name: (brand.brandName ? `${brand.brandName} ${tplDef.label}` : tplDef.label).slice(0, 40),
+            name: (brand.brandName ? `${brand.brandName} ${built.label}` : built.label).slice(0, 40),
             ...(tplDesign ? { design: tplDesign } : {}),
             one_line: {
               enabled: true, gaps: oneLineGaps(linePrompt),
               notes: [...lineExcluded.map((e) => `상품${e.name ? ` "${e.name}"` : ''} 제외: ${e.reason}`), ...linePriceNotes(genPrompt, lineCards)],
               mall_cards: lineCards.length,
               steps: { cost: tplCost, completion: stepsCharge.completionDue },
-              template: { id: tplDef.id, layout: 'page' },
+              template: { id: built.id, layout: 'page' },
             },
           },
         });
