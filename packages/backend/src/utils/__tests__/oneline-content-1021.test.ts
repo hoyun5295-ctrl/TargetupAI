@@ -75,7 +75,11 @@ describe('P2 · 헤드라인 템플릿 3안', () => {
     expect(sanitizeLineHeadlineTitle('가을 피부 준비 완료', '가을 수분크림 행사')).toBe('가을 피부 준비 완료');
     expect(sanitizeLineHeadlineTitle('지금 30% 할인', '가을 수분크림 행사')).toBeNull();
     expect(sanitizeLineHeadlineTitle('무료배송 이벤트', '가을 수분크림 행사')).toBeNull();
-    expect(sanitizeLineHeadlineTitle('아주아주아주아주아주아주아주아주긴헤드라인', '가')!.length).toBeLessThanOrEqual(16);
+    // ★ 1022 길면 자르지 않고 버린다(글자 중간 자름 금지) · 대체 문구는 낱말 단위
+    expect(sanitizeLineHeadlineTitle('아주아주아주아주아주아주아주아주긴헤드라인', '가')).toBeNull();
+    expect(sanitizeLineHeadlineTitle('가을, 새로운 한 상이 차려집니다')).toBeNull();
+    expect(fallbackLineHeadlineTitle('가을 제철 재료로 정성껏 만든 새 메뉴 출시')).toBe('가을 제철 재료로 정성껏 만든');
+    expect(fallbackLineHeadlineTitle('아주아주아주아주아주아주아주아주긴말')).toBe('');
     expect(fallbackLineHeadlineTitle('가을 수분크림 행사합니다. 많이 오세요')).toBe('가을 수분크림 행사합니다');
   });
 

@@ -80,15 +80,27 @@ export function sanitizeLineHeadlineTitle(raw: unknown): string | null {
   let v = typeof raw === 'string' ? raw : '';
   v = v.replace(/[—–]/g, ' ').replace(/[“”"'「」]/g, '').replace(/\s+/g, ' ').trim();
   if (!v) return null;
-  if (v.length > LINE_HEADLINE_TITLE_MAX) v = v.slice(0, LINE_HEADLINE_TITLE_MAX).trim();
+  // ★ 2026-10-22 길면 자르지 않고 버린다(글자 중간 자름 = 그림에 「차려집」이 박힌다 · 시연 판정) → 호출부가 대체 문구
+  if (v.length > LINE_HEADLINE_TITLE_MAX) return null;
   return headlineTextSafe(v) ? v : null;
+}
+
+/** (순수) 낱말 단위로 상한까지만(글자 중간 자르지 않음 · 끝 쉼표 · 가운뎃점 제거 · 첫 낱말부터 넘치면 빈 글) */
+function fitHeadlineWords(v: string): string {
+  let out = '';
+  for (const w of v.split(' ').filter(Boolean)) {
+    const next = out ? `${out} ${w}` : w;
+    if (next.length > LINE_HEADLINE_TITLE_MAX) break;
+    out = next;
+  }
+  return out.replace(/[,·\s]+$/, '').trim();
 }
 
 /** (순수) AI 가 쓸 헤드라인이 없을 때 = 한 줄 앞부분에서 혜택 구간 · 숫자 · 혜택 낱말을 뺀 말(16자 · 비면 빈 글 = 화면이 적게 한다) */
 export function fallbackLineHeadlineTitle(line: string): string {
   const head = String(line || '').split(/[.!?\n·,]/)[0];
   const clean = withoutBenefitSpans(head).replace(/[0-9０-９]+/g, '').replace(HEADLINE_BENEFIT_RE, '').replace(/\s+/g, ' ').trim();
-  return clean.slice(0, LINE_HEADLINE_TITLE_MAX).trim();
+  return fitHeadlineWords(clean);
 }
 
 export interface LineHeadlineInput {

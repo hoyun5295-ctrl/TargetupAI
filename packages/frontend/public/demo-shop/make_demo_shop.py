@@ -10,7 +10,7 @@ A = '/diagnosis-examples/assets'
 SHOPS = {
     'beauty': {
         'brand': '온결', 'tag': '민감 피부를 위한 순한 스킨케어', 'color': '#be185d', 'tint': '#fdf2f8',
-        'title': '온결 진정 앰플 신제품 출시', 'banner': f'{A}/beauty-dm-hero.png',
+        'title': '온결 진정 앰플 신제품 출시', 'banner': '/demo-shop/beauty-hero.jpg',
         'event': ('신제품 출시 기념', '진정 앰플을 가장 먼저 만나 보세요', '출시 기념 20% 할인'),
         'products': [
             ('온결 진정 앰플 30ml', 38000, 30400, f'{A}/beauty-inapp.png', 'ampoule'),
@@ -21,7 +21,7 @@ SHOPS = {
     },
     'fashion': {
         'brand': '소목', 'tag': '오래 입는 가을 옷', 'color': '#b91c1c', 'tint': '#fef2f2',
-        'title': '소목 가을 시즌오프', 'banner': f'{A}/fashion-dm-hero.png',
+        'title': '소목 가을 시즌오프', 'banner': '/demo-shop/fashion-hero.jpg',
         'event': ('SEASON OFF', '올해 가장 좋은 가격으로 만나 보세요', '가을 시즌오프 최대 30%'),
         'products': [
             ('케이블 울 니트', 59000, 41300, f'{A}/fashion-p1.png', 'knit'),
@@ -36,7 +36,7 @@ SHOPS = {
     },
     'food': {
         'brand': '한상', 'tag': '매일 만드는 한 그릇', 'color': '#9a3412', 'tint': '#fff7ed',
-        'title': '한상 가을 신메뉴', 'banner': f'{A}/fnb-dm-hero.png',
+        'title': '한상 가을 신메뉴', 'banner': '/demo-shop/fnb-hero.jpg',
         'event': ('가을 신메뉴', '제철 재료로 만든 새 메뉴가 나왔어요', '첫 주 음료 무료'),
         'products': [
             ('트러플 크림 파스타', 18000, None, f'{A}/fnb-p1.png', 'pasta'),
@@ -92,7 +92,7 @@ footer{{border-top:1px solid var(--line);padding:20px;color:var(--mute);font-siz
 </style></head>
 <body>
 <header><b>{e(s['brand'])}</b><span>{e(s['tag'])}</span></header>
-<div class="hero"><img src="{s['banner']}" alt="{e(s['title'])}" width="1024" height="1024"></div>
+<div class="hero"><img src="{s['banner']}" alt="{e(s['title'])}" width="1200" height="1200"></div>
 <section class="event"><small>{e(eb)}</small><h1>{e(eh)}</h1><p>{e(s['title'])}</p><em>{e(ebenefit)}</em></section>
 <main>
 <h2>지금 만나는 상품</h2>
