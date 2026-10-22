@@ -172,3 +172,52 @@ describe('S13 생성 배선 — 주소 읽기 면허 = 화면 체크(서버 추�
     vi.restoreAllMocks();
   });
 });
+
+describe('★ 1022 상품 많은 쇼핑몰 = 분위기 사진을 먼저 읽는다(사진 6칸)', () => {
+  it('배너 1 · 상품 5 · 분위기 3 페이지 → 분위기 사진 3장이 images 에 들고 상품 사진은 상품 목록으로', async () => {
+    const { readFileSync } = await import('fs');
+    const { resolve } = await import('path');
+    const html = readFileSync(resolve(__dirname, '../../../../frontend/public/demo-shop/fashion.html'), 'utf8');
+    const base = 'https://hanjul.ai/demo-shop/fashion.html';
+    let n = 0;
+    const r = await readBrandPage(C, base, deps({
+      fetchHtml: async (url) => ({ html, baseUrl: url, finalUrl: url }),
+      fetchImage: async (u) => ({ buffer: png(1200, 1100), mime: 'image/png', ext: 'png', src: u } as any),
+      storeImage: () => () => { const id = `/api/cdp/inapp/image/${C}/img${++n}.png`; return id; },
+    }));
+    expect(r.products.length).toBe(4); // 상품 상한 4 · 5번째 상품 사진도 상품 표시(분위기 사진으로 새지 않는다)
+    const mood = r.images.filter((im) => !im.product);
+    expect(mood.length).toBeGreaterThanOrEqual(3);
+  });
+});
+
+describe('★ 1022 Codex — 상품 많은 페이지 · 표지 순서', () => {
+  const img = (n: string) => `https://shop.example.com/img/${n}.jpg`;
+  const prod = (i: number) => `<li class="item"><a href="https://shop.example.com/product/${i}"><img src="${img(`p${i}`)}" alt="상품 ${i}"><span class="name">상품 ${i}</span><span class="price">10,000원</span></a></li>`;
+  const page = (nProd: number, mood: string[]) => `<html><head><title>몰</title></head><body><ul class="grid">${Array.from({ length: nProd }, (_, i) => prod(i + 1)).join('')}</ul>${mood.map((m) => `<img src="${img(m)}" alt="">`).join('')}</body></html>`;
+  const run = async (html: string) => {
+    let n = 0;
+    const map = new Map<string, string>();
+    const r = await readBrandPage(C, 'https://shop.example.com/', deps({
+      fetchHtml: async (url) => ({ html, baseUrl: url, finalUrl: url }),
+      fetchImage: async () => ({ buffer: png(1200, 900), mime: 'image/png', ext: 'png' }),
+      storeImage: () => () => `/api/cdp/inapp/image/${C}/s${++n}.png`,
+    }));
+    return { r, map };
+  };
+  it('상품 13 · 분위기 3 = 분위기 사진 3장을 읽고 상품 사진에는 표시가 붙는다', async () => {
+    const { r } = await run(page(13, ['m1', 'm2', 'm3']));
+    expect(r.images.filter((im) => !im.product).length).toBe(3);
+  });
+  it('작은 상품 썸네일 24 → 상품 6 → 분위기 3 = 분위기 사진 3장 · 뒤 상품 6개도 상품 표시(판정 상한 없음)', async () => {
+    const small = Array.from({ length: 24 }, (_, i) => `<li class="item"><a href="https://shop.example.com/product/s${i}"><img src="${img(`s${i}`)}" width="100" height="100" alt="작은 ${i}"><span class="name">작은 상품 ${i}</span><span class="price">5,000원</span></a></li>`).join('');
+    const html = page(6, ['m1', 'm2', 'm3']).replace('<ul class="grid">', `<ul class="grid">${small}`);
+    const { r } = await run(html);
+    expect(r.images.filter((im) => !im.product).length).toBe(3);
+  });
+  it('상품 4 · 분위기 2 = 돌려주는 순서는 문서 순서(앞 사진 = 상품 · 표지 고르기 무변경)', async () => {
+    const { r } = await run(page(4, ['m1', 'm2']));
+    expect(r.images[0].product).toBe(true);
+    expect(r.images.filter((im) => !im.product).length).toBe(2);
+  });
+});

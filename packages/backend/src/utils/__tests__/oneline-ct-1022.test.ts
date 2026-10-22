@@ -409,6 +409,6 @@ describe('1022 3차 시연 판정 정정', () => {
     const fe = readFileSync(resolve(__dirname, '../../../../frontend/src/utils/one-line.ts'), 'utf8');
     expect(fe).toContain("filter((im: any) => im?.product !== true)");
     const be = readFileSync(resolve(__dirname, '../brand-page-reader.ts'), 'utf8');
-    expect(be).toContain('productSrc.has(im.srcUrl)');
+    expect(be).toContain('productImageSet.has(im.srcUrl)');
   });
 });

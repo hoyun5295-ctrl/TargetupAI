@@ -211,9 +211,16 @@ export async function readBrandPage(companyId: string, rawUrl: unknown, deps: Pa
 
   // ② 사진 사본 — 카드 배너 먼저 · 그다음 페이지 이미지(문서 순서) · 폭 ≥600 · 최대 6
   const store = deps.storeImage(companyId);
-  const cands = [...drafts.map((d) => d.imageSrc).filter((u): u is string => !!u), ...extractImageCandidates(html, base, 24)]
-    .filter((u, i, arr) => arr.indexOf(u) === i);
-  const pick = await pickStoredImagesDetail(cands, PAGE_READ_IMAGES_MAX, OUTREACH_GALLERY_MIN_WIDTH, deps.fetchImage, store, { deadlineMs: 20_000 });
+  // ★ 2026-10-22 상품 사진은 사본 순서만 뒤로(상품은 ⑤에서 따로 사본) — 앞에 두면 상품 많은 쇼핑몰에서 6칸을 다 써 분위기 사진을 하나도 못 읽는다(시연 룩북 판정).
+  //   판정 = 페이지의 상품 전부(개수 상한 없음 · 상품 목록 8 과 분리 · 상한이 있으면 작은 상품 사진이 앞을 채워 뒤 상품이 분위기로 샌다) · 돌려주는 순서 = 원래 문서 순서(표지 고르기 lineBannerOf 무변경 · Codex).
+  const PAGE_IMAGE_SCAN = 24;
+  const rawProducts: OutreachProduct[] = [...(rendered ? extractRenderedProductCards(html, base, 8) : []), ...extractProducts(html, base, 8)];
+  const productImageSet = new Set([...(rendered ? extractRenderedProductCards(html, base, Infinity) : []), ...extractProducts(html, base, Infinity)].map((p) => p.image_url).filter(Boolean));
+  const pageImages = extractImageCandidates(html, base, PAGE_IMAGE_SCAN);
+  const docOrder = [...drafts.map((d) => d.imageSrc).filter((u): u is string => !!u), ...pageImages].filter((u, i, arr) => arr.indexOf(u) === i);
+  const cands = [...docOrder.filter((u) => !productImageSet.has(u)), ...docOrder.filter((u) => productImageSet.has(u))];
+  const picked = await pickStoredImagesDetail(cands, PAGE_READ_IMAGES_MAX, OUTREACH_GALLERY_MIN_WIDTH, deps.fetchImage, store, { deadlineMs: 20_000 });
+  const pick = { ...picked, images: [...picked.images].sort((a, b) => docOrder.indexOf(a.srcUrl) - docOrder.indexOf(b.srcUrl)) };
   const bySrc = new Map(pick.images.map((im) => [im.srcUrl, im]));
 
   // ③ 로고 사본 — 크기·비율·흰 로고 거른 첫 장
@@ -236,10 +243,8 @@ export async function readBrandPage(companyId: string, rawUrl: unknown, deps: Pa
     try { brandColor = (await resolveBrandColorGuarded(html, base, deps.fetchImage)).color; } catch { brandColor = null; }
   }
 
-  // ⑤ 홈페이지 상품 — 사진 사본(폭 ≥400) · 가격 없음(가격은 몰 재조회만 · 불변 9) · 같은 호스트 링크만
-  const rawProducts: OutreachProduct[] = [...(rendered ? extractRenderedProductCards(html, base, 8) : []), ...extractProducts(html, base, 8)];
+  // ⑤ 홈페이지 상품 — 사진 사본(폭 ≥400) · 가격 없음(가격은 몰 재조회만 · 불변 9) · 같은 호스트 링크만(rawProducts = ② 위에서 추출)
   const products: PageReadProduct[] = [];
-  const productSrcUrls: string[] = [];
   const seenName = new Set<string>();
   for (const p of rawProducts) {
     if (products.length >= PAGE_READ_PRODUCTS_MAX) break;
@@ -250,7 +255,6 @@ export async function readBrandPage(companyId: string, rawUrl: unknown, deps: Pa
     const im = got.images[0];
     if (!im) continue;
     seenName.add(key);
-    productSrcUrls.push(p.image_url);
     products.push({ name: p.name.slice(0, 60), url: p.link_url, imageUrl: im.url, width: im.width, height: im.height });
   }
 
@@ -269,9 +273,8 @@ export async function readBrandPage(companyId: string, rawUrl: unknown, deps: Pa
     };
   });
   const cardImageUrls = new Set(cards.map((c) => c.imageUrl).filter(Boolean));
-  const productSrc = new Set(productSrcUrls);
   const images = pick.images.filter((im) => !cardImageUrls.has(im.url))
-    .map((im) => ({ url: im.url, width: im.width, height: im.height, ...(productSrc.has(im.srcUrl) ? { product: true as const } : {}) }));
+    .map((im) => ({ url: im.url, width: im.width, height: im.height, ...(productImageSet.has(im.srcUrl) ? { product: true as const } : {}) }));
 
   const mallHosts = await deps.mallHosts(companyId).catch(() => [] as string[]);
   const bare = host.replace(/^www\./, '');
