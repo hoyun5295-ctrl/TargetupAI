@@ -106,7 +106,7 @@ async function main(): Promise<void> {
         return { name: p.name, price: pr ? pr[0] : 0, ...(pr && pr[1] ? { discount_price: pr[1] } : {}), image_url: p.imageUrl, link_url: p.url };
       });
       const banner = page ? lineBannerOf(page) : null;
-      const moodFromPage = (page?.images || []).map((im) => im.url).filter((u) => u !== banner).slice(0, 3);
+      const moodFromPage = (page?.images || []).filter((im) => !im.product).map((im) => im.url).filter((u) => u !== banner).slice(0, 3);
       // 첫 화면 그림(스튜디오 헤드라인 · 실패 = 불합격)
       let hero: string | null = null;
       if (s.poster !== false) {

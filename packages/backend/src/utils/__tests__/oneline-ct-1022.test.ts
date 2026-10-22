@@ -189,7 +189,7 @@ describe('② 판단(AI 1회 · 2크레딧 · 실패 = 규칙 0원)', () => {
     vi.mocked(checkCredit).mockResolvedValue(undefined);
   });
   it('AI 성공 = 고른 구성 · 초안 · 판단 키로 2 정산(성공 뒤)', async () => {
-    vi.mocked(callAIWithFallback).mockResolvedValue(JSON.stringify({ pick: 'spotlight', reason: '신제품 출시라 상품을 크게 보여 줘요', drafts: { spotlight: { points: [{ title: '자극 없이', body: '순한 성분' }], steps: [{ title: '토너', body: '결 정돈' }] } } }));
+    vi.mocked(callAIWithFallback).mockResolvedValue(JSON.stringify({ pick: 'spotlight', reason: '신제품 출시라 상품을 크게 보여 줘요', drafts: { spotlight: { points: [{ title: '자극 없이', body: '순한 성분' }, { title: '가벼운 제형', body: '산뜻하게' }], steps: [{ title: '토너', body: '결 정돈' }] } } }));
     const r = await runLineJudge({ companyId: C, line: '진정 앰플 출시', lineFp: 'fp1', productNames: [] , nowMs: Date.parse('2026-10-22T03:00:00Z') });
     expect(r).toMatchObject({ pick: 'spotlight', source: 'ai', charged: true });
     expect(r.drafts.spotlight?.points?.[0].title).toBe('자극 없이');
@@ -220,7 +220,8 @@ describe('② 판단(AI 1회 · 2크레딧 · 실패 = 규칙 0원)', () => {
     const r = sanitizeLineJudge({ pick: 'magazine', reason: '50% 할인이 좋아요', drafts: { spotlight: { points: [{ title: '1위 상품', body: '무료 배송' }, { title: '촉촉함', body: '하루 종일' }] } } }, '앰플 출시');
     expect(r.pick).toBeNull();
     expect(r.reason).toBe('');
-    expect(r.drafts.spotlight?.points?.map((p) => p.title)).toEqual(['촉촉함']);
+    // ★ 1022 남은 특징이 2개 미만이면 비운다(재료 판이 묻는다)
+    expect(r.drafts.spotlight?.points).toEqual([]);
     expect(cleanLineCtText('새 시즌 — 신상', 20, '')).toBe('새 시즌 신상');
   });
 });
@@ -378,5 +379,36 @@ describe('1022 시연 판정 정정', () => {
     const ids = (code: any) => outreachTemplatePool(code, 'product', new Date('2026-10-22T00:00:00+09:00')).map((t) => t.id);
     expect(ids('etc')).not.toContain('sale-new-arrival');
     expect(ids('digital')).toContain('sale-new-arrival');
+  });
+});
+
+describe('1022 3차 시연 판정 정정', () => {
+  it('특징 초안 = 혜택 · 한 줄 되풀이는 버리고 2개 미만이면 비운다', () => {
+    const line = '온결 진정 앰플 신제품 출시 · 출시 기념 20% 할인 이번 달 말까지';
+    const ground = line;
+    const bad = sanitizeLineJudge({ pick: 'spotlight', reason: '신제품', drafts: { spotlight: { points: [
+      { title: '진정 앰플 신제품', body: '새롭게 출시되었습니다' }, { title: '출시 기념 할인', body: '이번 달 말까지' }, { title: '피부 진정 케어', body: '진정 케어를 위한 앰플' },
+    ] } } }, ground, line);
+    expect(bad.drafts.spotlight?.points).toEqual([]);
+  });
+  it('특징이 1개뿐이면 특징 칸을 만들지 않는다', () => {
+    const comp = getLineComposition('spotlight')!;
+    const secs = composeRichDm(comp, rich({ points: [{ title: '자극 없이 진정', body: '순한 성분' }] }), compositionFallbackCopy(comp), newId).sections as any[];
+    expect(secs.some((s) => s.tpl_slot?.endsWith('.points'))).toBe(false);
+  });
+  it('첫 화면 글 = 효능 · 변화 단정은 버린다', async () => {
+    const { sanitizeLineHeadlineTitle } = await import('../line-headline');
+    expect(sanitizeLineHeadlineTitle('가입만 해도 피부가 편안해져요')).toBeNull();
+    expect(sanitizeLineHeadlineTitle('진정의 결을 담다')).toBe('진정의 결을 담다');
+    // 몸 · 피부 말 없는 변화 말 = 통과(날씨 · 계절) · 고객 직접 입력 검사(headlineTextSafe)에는 효능 검사가 없다
+    expect(sanitizeLineHeadlineTitle('날씨가 따뜻해져요')).toBe('날씨가 따뜻해져요');
+    const { headlineTextSafe } = await import('../line-headline');
+    expect(headlineTextSafe('피부가 편안해져요')).toBe(true);
+  });
+  it('페이지 사진 중 상품 사진은 분위기 사진에서 빠진다(표시 product)', () => {
+    const fe = readFileSync(resolve(__dirname, '../../../../frontend/src/utils/one-line.ts'), 'utf8');
+    expect(fe).toContain("filter((im: any) => im?.product !== true)");
+    const be = readFileSync(resolve(__dirname, '../brand-page-reader.ts'), 'utf8');
+    expect(be).toContain('productSrc.has(im.srcUrl)');
   });
 });

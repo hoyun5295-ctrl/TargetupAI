@@ -384,7 +384,8 @@ export function compositionParts(comp: LineComposition, m: LineRichMaterials, c:
   switch (comp.id) {
     case 'spotlight': {
       if (lead && useOnce(seen, lead.image_url)) out.push({ type: 'product_carousel', props: { products: [card(lead)], image_fit: 'contain', caption_bg_color: comp.tint, background_color: '#ffffff' }, treatment: 'focus', part: 'lead' });
-      if (m.points.length) {
+      // ★ 2026-10-22 특징 = 2개 이상일 때만(한 장짜리 특징 칸 0 · 시연 판정)
+      if (m.points.length >= 2) {
         const withImg = m.points.some((p) => p.image_url);
         out.push(...(withImg ? [title(c.pointsTitle, 'points', true), ...pointCards(m.points.slice(0, 3), 'points', (i) => `POINT ${i + 1}`, seen, true)] : [numberedList(m.points.slice(0, 3), c.pointsTitle, 'points', true)]));
       }

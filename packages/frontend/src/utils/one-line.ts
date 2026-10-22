@@ -697,7 +697,8 @@ export async function readLinePage(rawUrl: string): Promise<LinePageAnswer> {
     .filter((p: any) => typeof p?.name === 'string' && p.name.trim() && typeof p?.imageUrl === 'string' && p.imageUrl.startsWith('/'))
     .slice(0, 8).map((p: any) => ({ name: String(p.name).slice(0, 60), image: String(p.imageUrl), url: typeof p.url === 'string' ? String(p.url) : '' }));
   const banner = typeof d.line_banner === 'string' && d.line_banner ? d.line_banner : null;
-  const images = (Array.isArray(d.images) ? d.images : []).map((im: any) => String(im?.url || '')).filter((u: string) => u.startsWith('/') && u !== banner).slice(0, 6);
+  // ★ 2026-10-22 상품 사진(서버 표시 product)은 분위기 사진에서 뺀다(같은 사진이 상품 칸 · 사진 묶음에 두 번)
+  const images = (Array.isArray(d.images) ? d.images : []).filter((im: any) => im?.product !== true).map((im: any) => String(im?.url || '')).filter((u: string) => u.startsWith('/') && u !== banner).slice(0, 6);
   return { url, host: String(d.host || ''), banner, cards, licensed: [], products, images };
 }
 

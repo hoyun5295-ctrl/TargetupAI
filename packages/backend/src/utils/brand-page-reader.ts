@@ -54,7 +54,8 @@ export interface PageReadResult {
   finalUrl: string;
   host: string;
   cards: PageReadCard[];
-  images: Array<{ url: string; width: number; height: number }>;
+  /** ★ 2026-10-22 product = 원본 주소가 읽은 상품 사진과 같은 사진(분위기 사진으로 쓰면 같은 사진이 두 번 나온다 · 목록에서는 빼지 않는다) */
+  images: Array<{ url: string; width: number; height: number; product?: true }>;
   logoUrl: string | null;
   brandColor: string | null;
   products: PageReadProduct[];
@@ -238,6 +239,7 @@ export async function readBrandPage(companyId: string, rawUrl: unknown, deps: Pa
   // ⑤ 홈페이지 상품 — 사진 사본(폭 ≥400) · 가격 없음(가격은 몰 재조회만 · 불변 9) · 같은 호스트 링크만
   const rawProducts: OutreachProduct[] = [...(rendered ? extractRenderedProductCards(html, base, 8) : []), ...extractProducts(html, base, 8)];
   const products: PageReadProduct[] = [];
+  const productSrcUrls: string[] = [];
   const seenName = new Set<string>();
   for (const p of rawProducts) {
     if (products.length >= PAGE_READ_PRODUCTS_MAX) break;
@@ -248,6 +250,7 @@ export async function readBrandPage(companyId: string, rawUrl: unknown, deps: Pa
     const im = got.images[0];
     if (!im) continue;
     seenName.add(key);
+    productSrcUrls.push(p.image_url);
     products.push({ name: p.name.slice(0, 60), url: p.link_url, imageUrl: im.url, width: im.width, height: im.height });
   }
 
@@ -266,7 +269,9 @@ export async function readBrandPage(companyId: string, rawUrl: unknown, deps: Pa
     };
   });
   const cardImageUrls = new Set(cards.map((c) => c.imageUrl).filter(Boolean));
-  const images = pick.images.filter((im) => !cardImageUrls.has(im.url)).map((im) => ({ url: im.url, width: im.width, height: im.height }));
+  const productSrc = new Set(productSrcUrls);
+  const images = pick.images.filter((im) => !cardImageUrls.has(im.url))
+    .map((im) => ({ url: im.url, width: im.width, height: im.height, ...(productSrc.has(im.srcUrl) ? { product: true as const } : {}) }));
 
   const mallHosts = await deps.mallHosts(companyId).catch(() => [] as string[]);
   const bare = host.replace(/^www\./, '');

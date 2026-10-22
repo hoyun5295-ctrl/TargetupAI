@@ -75,6 +75,16 @@ export function headlineTextSafe(v: string): boolean {
   return !/[0-9０-９]/.test(v) && !HEADLINE_BENEFIT_RE.test(v);
 }
 
+/**
+ * ★ 2026-10-22 AI 가 쓴 그림 글자만 = 몸 · 피부 말 + 변화 말이 함께 있으면 효능 단정(「가입만 해도 피부가 편안해져요」 · 시연 판정).
+ *   고객이 직접 쓴 글(이미지 스튜디오 입력 · 한 줄에서 뽑은 대체 문구)에는 걸지 않는다(headlineTextSafe 와 분리 · Codex 지적).
+ */
+const HEADLINE_BODY_RE = /(피부|모공|주름|각질|탄력|피지|여드름|트러블|두피|머릿결|모발|몸|체중|뱃살|혈색|안색|컨디션)/;
+const HEADLINE_CHANGE_RE = /(해져|해지|좋아져|달라져|살아나|되살아|개선|효과|회복|사라져|줄어)/;
+export function headlineClaimsEfficacy(v: string): boolean {
+  return /(효능|치료)/.test(v) || (HEADLINE_BODY_RE.test(v) && HEADLINE_CHANGE_RE.test(v));
+}
+
 /** (순수) 헤드라인 글 — 정리 · 16자 · 숫자나 혜택 낱말이 있으면 null(그림 안 값 0 · 한 줄을 근거로 쓰지 않는다) */
 export function sanitizeLineHeadlineTitle(raw: unknown): string | null {
   let v = typeof raw === 'string' ? raw : '';
@@ -82,7 +92,7 @@ export function sanitizeLineHeadlineTitle(raw: unknown): string | null {
   if (!v) return null;
   // ★ 2026-10-22 길면 자르지 않고 버린다(글자 중간 자름 = 그림에 「차려집」이 박힌다 · 시연 판정) → 호출부가 대체 문구
   if (v.length > LINE_HEADLINE_TITLE_MAX) return null;
-  return headlineTextSafe(v) ? v : null;
+  return headlineTextSafe(v) && !headlineClaimsEfficacy(v) ? v : null;
 }
 
 /** (순수) 낱말 단위로 상한까지만(글자 중간 자르지 않음 · 끝 쉼표 · 가운뎃점 제거 · 첫 낱말부터 넘치면 빈 글) */
@@ -131,7 +141,7 @@ export async function pickLineHeadlines(input: LineHeadlineInput): Promise<LineH
       jobId: 'line', companyName: input.companyName, industry: input.industry,
       eventTitles: [input.line], productNames: input.productNames, focusQuote: null, now,
     }, cands);
-    const system = `${p.system}\n추가: JSON 에 "title" 도 넣는다 = 포스터에 크게 들어갈 한국어 헤드라인 한 줄(${LINE_HEADLINE_TITLE_MAX}자 이내 · 숫자 · 할인율 · 금액 · 할인 · 쿠폰 · 무료 같은 혜택 말 금지(값은 그림 밖에 따로 들어간다) · 이 행사의 분위기 · 상품의 매력을 한 줄로 · 이모지 금지).${input.hasPhoto ? '' : ' 제품 사진이 없으므로 product 는 빈 배열로 둔다.'}`;
+    const system = `${p.system}\n추가: JSON 에 "title" 도 넣는다 = 포스터에 크게 들어갈 한국어 헤드라인 한 줄(${LINE_HEADLINE_TITLE_MAX}자 이내 · 숫자 · 할인율 · 금액 · 할인 · 쿠폰 · 무료 같은 혜택 말 금지(값은 그림 밖에 따로 들어간다) · 이 행사의 분위기 · 상품의 매력을 한 줄로 · 효능 · 효과 · 몸이나 피부가 달라진다는 말(~해져요 등) 금지 · 가입 · 구매를 효과로 엮지 않는다 · 이모지 금지).${input.hasPhoto ? '' : ' 제품 사진이 없으므로 product 는 빈 배열로 둔다.'}`;
     const raw = await runInCreditBundle(() => callAIWithFallback({
       system, userMessage: p.user, maxTokens: 300, temperature: 0,
       companyId: input.companyId, userId: input.userId, source: 'line-headline-pick', noCache: true,

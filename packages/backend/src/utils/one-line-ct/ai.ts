@@ -56,14 +56,32 @@ function cleanPoints(raw: unknown, n: number, ground: string): LineRichPoint[] {
   return out;
 }
 
+/** 혜택 · 숫자 말(띠 · 쿠폰 칸이 따로 보여 준다) */
+const DRAFT_BENEFIT_RE = /[0-9０-９%]|할인|쿠폰|적립|무료|증정|세일/;
+
+/**
+ * (순수) 특징 초안 거르기 — 혜택을 되풀이하거나 제목 낱말이 전부 한 줄에 있는 것(= 한 줄 되풀이)은 버리고 2개 미만이면 비운다
+ *   (★ 2026-10-22 시연 판정 「진정 앰플 신제품 · 새롭게 출시되었습니다」 · 비면 재료 판이 특징을 묻는다).
+ */
+function keepFeaturePoints(points: LineRichPoint[], line: string): LineRichPoint[] {
+  const words = (v: string) => v.split(/[\s·,]+/).map((w) => w.trim()).filter((w) => w.length >= 2);
+  const lineText = line.replace(/\s+/g, '');
+  const kept = points.filter((p) => {
+    if (DRAFT_BENEFIT_RE.test(p.title) || DRAFT_BENEFIT_RE.test(p.body)) return false;
+    const ws = words(p.title);
+    return !(ws.length > 0 && ws.every((w) => lineText.includes(w)));
+  });
+  return kept.length >= 2 ? kept : [];
+}
+
 /** (순수) 판단 응답 정리 — 고르기 = 목록 안만 · 초안 = 구성별 개수 · 이유 40자 */
-export function sanitizeLineJudge(raw: unknown, ground: string): { pick: LineCompositionId | null; reason: string; drafts: LineCtDrafts } {
+export function sanitizeLineJudge(raw: unknown, ground: string, line = ''): { pick: LineCompositionId | null; reason: string; drafts: LineCtDrafts } {
   const o = raw && typeof raw === 'object' && !Array.isArray(raw) ? raw as Record<string, unknown> : {};
   const pick = isLineCompositionId(o.pick) ? o.pick : null;
   const reason = cleanLineCtText(o.reason, 40, ground);
   const d = o.drafts && typeof o.drafts === 'object' && !Array.isArray(o.drafts) ? o.drafts as Record<string, any> : {};
   const drafts: LineCtDrafts = {
-    spotlight: { points: cleanPoints(d.spotlight?.points, 3, ground), steps: cleanPoints(d.spotlight?.steps, 3, ground) },
+    spotlight: { points: keepFeaturePoints(cleanPoints(d.spotlight?.points, 3, ground), line), steps: cleanPoints(d.spotlight?.steps, 3, ground) },
     lookbook: { points: cleanPoints(d.lookbook?.points, 2, ground) },
     menu: { points: cleanPoints(d.menu?.points, 3, ground).map((p) => ({ title: p.title, body: '' })) },
     event: { points: cleanPoints(d.event?.points, 3, ground) },
@@ -77,6 +95,7 @@ const JUDGE_SYSTEM = `당신은 한국 브랜드의 마케팅 기획자입니다
 - pick 은 spotlight · showcase · lookbook · menu · event 중 하나만 씁니다.
 - 원문에 없는 숫자 · 할인율 · 금액 · 날짜 · 기간 · 수량 · 혜택(무료 · 증정 · 쿠폰 등)을 절대 만들지 않습니다.
 - 상품의 효과 · 성분 · 품질을 단정하지 않습니다(최고 · 1위 · 완벽 같은 과장 금지). 짧고 또렷한 존댓말.
+- 특징 초안(spotlight.points)은 한 줄에 이미 쓴 말(상품 이름 · 출시 · 혜택 · 기간)을 되풀이하지 않습니다. 쓸 특징이 없으면 빈 배열로 둡니다.
 - 긴 줄표 기호 · 따옴표 장식 · 이모지를 쓰지 않습니다.`;
 
 /** 판단 AI 1회(구성 고르기 + 구성별 초안) — 실패는 던진다(호출부 = 규칙 판단 · 0원) */
@@ -98,7 +117,7 @@ export async function judgeLineWithAi(g: LineCtGround, ctx: { companyId: string;
   const text = await callAIWithFallback({ system: JUDGE_SYSTEM, userMessage: user, maxTokens: 1400, temperature: 0.4, companyId: ctx.companyId, userId: ctx.userId, source: ctx.source, noCache: true });
   const parsed = extractJsonFromAiText<Record<string, unknown>>(text);
   if (!parsed || typeof parsed !== 'object') throw new Error('LINE_JUDGE_EMPTY');
-  return sanitizeLineJudge(parsed, lineCtGroundText(g));
+  return sanitizeLineJudge(parsed, lineCtGroundText(g), g.line);
 }
 
 /** (순수) 문구 응답 정리 — 칸마다 상한 · 검사 · 실패 칸 = 기본 문구 */
