@@ -32,7 +32,7 @@ SHOPS = {
         ],
         'reviews': [('최**', '니트가 도톰하고 따뜻해요. 한 치수 크게 샀어요'), ('정**', '재킷 핏이 깔끔해서 출근할 때 매일 입어요')],
         'store': None,
-        'gallery': [f'{A}/fashion-email-hero.png', f'{A}/fashion-inapp.png'],
+        'gallery': [f'{A}/fashion-email-hero.png', f'{A}/fashion-inapp.png', f'{A}/ecommerce-email-hero.png'],
     },
     'food': {
         'brand': '한상', 'tag': '매일 만드는 한 그릇', 'color': '#9a3412', 'tint': '#fff7ed',
