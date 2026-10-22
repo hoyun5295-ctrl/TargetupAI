@@ -80,6 +80,7 @@ describe('P2 · 헤드라인 템플릿 3안', () => {
     expect(sanitizeLineHeadlineTitle('가을, 새로운 한 상이 차려집니다')).toBeNull();
     expect(fallbackLineHeadlineTitle('가을 제철 재료로 정성껏 만든 새 메뉴 출시')).toBe('가을 제철 재료로 정성껏 만든');
     expect(fallbackLineHeadlineTitle('아주아주아주아주아주아주아주아주긴말')).toBe('');
+    expect(fallbackLineHeadlineTitle('온결 회원의 날 3일간 15% 쿠폰 · 가입만 해도 받아요')).toBe('온결 회원의 날');
     expect(fallbackLineHeadlineTitle('가을 수분크림 행사합니다. 많이 오세요')).toBe('가을 수분크림 행사합니다');
   });
 

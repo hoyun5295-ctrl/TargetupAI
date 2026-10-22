@@ -129,8 +129,8 @@ export default function SpamBlockTab(props: SpamBlockTabProps) {
             <div className="bg-white rounded-xl border border-gray-200 p-5">
               <h3 className="text-base font-semibold text-gray-900">차단정보 등록</h3>
               <p className="text-xs text-gray-500 mt-1 leading-relaxed">
-                키워드 · URL · 전화번호를 <span className="font-medium">2~5개 조합</span>으로 만듭니다. 요소가 <span className="font-medium">전부 맞을 때만</span> 걸립니다.
-                단일 키워드는 정상 문자를 막기 때문에 등록되지 않습니다.
+                키워드 · URL · 전화번호를 <span className="font-medium">1~5개</span>로 만듭니다. 요소가 여러 개면 <span className="font-medium">전부 맞을 때만</span> 걸립니다.
+                요소 하나짜리(예: 대출)를 차단으로 두면 그 낱말이 든 정상 문자도 멈춥니다.
               </p>
               <p className="text-xs text-gray-500 mt-2 leading-relaxed">
                 새 규칙은 <span className="font-medium text-gray-700">탐지</span>로 시작합니다. <span className="font-medium text-gray-700">최근 발송 문안으로 오탐을 먼저 확인</span>한 뒤 목록에서 차단으로 전환하세요.
@@ -155,7 +155,7 @@ export default function SpamBlockTab(props: SpamBlockTabProps) {
                       onChange={(e) => setSpamElements(spamElements.map((x, xi) => xi === i ? { ...x, value: e.target.value } : x))}
                       placeholder={el.type === 'url' ? 'bit.ly' : el.type === 'phone' ? '010-0000-0000' : '무직자'}
                       className="flex-1 px-3 py-1.5 text-[13px] border border-gray-200 rounded-lg focus:ring-2 focus:ring-emerald-500/30 outline-none" />
-                    {spamElements.length > 2 && (
+                    {spamElements.length > 1 && (
                       <button type="button" onClick={() => setSpamElements(spamElements.filter((_, xi) => xi !== i))}
                         className="whitespace-nowrap px-3 py-2 text-xs text-gray-500 border border-gray-200 rounded-lg hover:bg-gray-50">삭제</button>
                     )}
@@ -167,11 +167,11 @@ export default function SpamBlockTab(props: SpamBlockTabProps) {
                     <button type="button" onClick={() => setSpamElements([...spamElements, { type: 'keyword', value: '' }])}
                       className="whitespace-nowrap px-3 py-2 text-xs border border-gray-200 rounded-lg hover:bg-gray-50">요소 추가</button>
                   )}
-                  <button type="button" onClick={handleSpamSimulate} disabled={spamBusy || spamElementsPayload().length < 2}
+                  <button type="button" onClick={handleSpamSimulate} disabled={spamBusy || spamElementsPayload().length < 1}
                     className="whitespace-nowrap px-4 py-2 text-xs font-medium border border-emerald-200 text-emerald-700 bg-emerald-50 rounded-lg hover:bg-emerald-100 disabled:opacity-50">
                     {spamBusy ? '확인 중…' : '최근 발송 문안으로 오탐 확인'}
                   </button>
-                  <button type="button" onClick={handleSpamCreate} disabled={spamBusy || spamElementsPayload().length < 2}
+                  <button type="button" onClick={handleSpamCreate} disabled={spamBusy || spamElementsPayload().length < 1}
                     className="whitespace-nowrap px-4 py-2 text-xs font-medium bg-emerald-600 hover:bg-emerald-700 disabled:bg-emerald-300 text-white rounded-lg">
                     차단정보 등록
                   </button>

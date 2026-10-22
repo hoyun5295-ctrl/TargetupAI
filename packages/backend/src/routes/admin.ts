@@ -798,7 +798,7 @@ router.put('/companies/:id/unit-prices', authenticate, requireSuperAdmin, async 
 // ============================================================
 // ============================================================
 // ★ 2026-08-18 금칙어 차단 체계 (전송자격인증 5.2)
-//   ⛔ 단일 키워드 규칙은 만들 수 없다(요소 2~5개 조합만). 정상 문자를 막지 않기 위한 하한이다.
+//   요소 1~5개(★1022 하한 2 → 1 · 기준 원문 그대로). 하나짜리를 차단으로 둘 때는 오탐 확인을 먼저 본다.
 //   ★1003 차단 승격 — 규칙마다 탐지(detect) · 차단(block)을 고른다. 새 규칙은 탐지로 시작하고,
 //      오탐 시뮬레이션을 본 뒤 모드 전환 라우트(PATCH …/mode)로만 차단으로 올린다(전환은 감사 기록).
 //      차단은 발송 경로마다 차감 앞에서 판정한다(근거 = utils/spam-block.ts 머리).
@@ -940,8 +940,7 @@ router.patch('/spam-block/rules/:id/mode', authenticate, requireSuperAdmin, requ
     if (raw !== 'detect' && raw !== 'block') {
       return res.status(400).json({ error: '모드는 탐지(detect) 또는 차단(block)이어야 합니다.' });
     }
-    // 차단으로 올릴 때는 지금 기준의 조합 검증을 다시 통과해야 한다 — 옛 기준으로 저장된 규칙이
-    //   차단으로 올라가 사실상 단일 키워드 차단이 되는 길을 막는다(규칙 로드도 같은 검증으로 거른다).
+    // 차단으로 올릴 때는 지금 기준의 요소 검증을 다시 통과해야 한다(규칙 로드도 같은 검증으로 거른다).
     if (raw === 'block') {
       const current = await query(`SELECT elements FROM spam_block_rules WHERE id = $1::uuid`, [id]);
       if (current.rows.length === 0) return res.status(404).json({ error: '규칙을 찾을 수 없습니다.' });

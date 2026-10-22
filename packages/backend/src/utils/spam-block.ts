@@ -6,9 +6,10 @@
  *   "외부기관(KISA 등)이 공유한 차단정보를 적용할 수 있을 것"
  *   "⇒ **다중 조합 필터링** — 문자 내용을 1개 이상(최대 5개)의 차단정보 조합으로 구성하여 탐지 및 차단"
  *
- * ⛔ 단일 키워드로 차단하지 않는다
- *   "대출" 하나로 막으면 금융 고객사가 발송을 못 한다. 기준이 말하는 것은 **조합**이다 —
- *   요소가 전부 맞을 때만 걸린다(`["무직자","당일","bit.ly"]`). 요소 1개짜리 규칙은 만들지 못하게 막는다.
+ * 요소는 1~5개(기준 원문 그대로 · ★1022 Harold 하한 2 → 1)
+ *   요소가 전부 맞을 때만 걸린다(`["무직자","당일","bit.ly"]`). 요소 하나짜리 규칙도 등록할 수 있다.
+ *   ⚠ "대출" 하나를 차단으로 두면 금융 고객사의 정상 문자가 멈춘다 — 새 규칙은 탐지로 시작하고
+ *   오탐 확인을 본 뒤에만 차단으로 올린다(아래 「규칙은 하나씩 승격한다」).
  *
  * ⛔ 필터가 고장 나면 차단이 아니라 통과다 (fail-open — 여기서는 이것이 정답이다)
  *   이 게이트는 **모든 발송이 지나는 길목**에 있다. 규칙 조회가 실패했다고 발송을 막으면
@@ -61,8 +62,8 @@ export function parseBlockMode(raw: unknown): BlockMode {
 /** 차단 시 발송 경로가 돌려주는 오류 코드 — 소비처(플래너 · 대행발송 등)가 이 값으로 갈래를 탄다 */
 export const SPAM_BLOCKED_CODE = 'SPAM_BLOCKED';
 
-/** 요소 개수 한계 — 기준 원문 "1개 이상(최대 5개)". 우리는 하한을 2로 올린다(단일 키워드 차단 금지) */
-export const MIN_ELEMENTS = 2;
+/** 요소 개수 한계 — 기준 원문 "1개 이상(최대 5개)" 그대로(★1022 하한 2 → 1) */
+export const MIN_ELEMENTS = 1;
 export const MAX_ELEMENTS = 5;
 
 /**
@@ -107,16 +108,13 @@ function isImpliedBy(a: BlockElement, b: BlockElement): boolean {
   return normalizeForMatch(b.value).includes(normalizeForMatch(a.value));
 }
 
-/** 저장 전 검증 — 단일 요소 규칙은 만들 수 없다 */
+/** 저장 전 검증 — 요소 1~5개 · 중복 · 포함 관계는 하나로 접는다 */
 export function validateElements(raw: any): { ok: true; elements: BlockElement[] } | { ok: false; error: string } {
   if (!Array.isArray(raw)) return { ok: false, error: '차단정보 요소가 배열이 아닙니다.' };
   const elements: BlockElement[] = [];
-  // ★ 0818 Codex F1 — 같은 값을 두 번 넣으면 조합 하한을 통과해 **사실상 단일 키워드 차단**이 된다
-  //   (`["대출","대출"]`은 한 곳에서 둘 다 맞는다). 중복은 하나로 접은 뒤 하한을 판정한다.
-  // ★1003 차단 승격 — 중복 기준을 유형 무관으로 넓혔다. keyword `bit.ly` + url `BIT.LY`,
+  // 중복 · 포함 관계는 하나로 접는다(★0818 · ★1003). keyword `bit.ly` + url `BIT.LY`,
   //   keyword `대출` + keyword `무직자대출`, phone `5678` + keyword `010-1234-5678` 은 전부 한 요소만 남는다
-  //   (다른 요소가 맞으면 반드시 같이 맞는 요소는 조합을 좁히지 않는다). 차단이 실제로 발송을 막게 되면서
-  //   이 우회가 곧 단일 키워드 차단이 된다.
+  //   (다른 요소가 맞으면 반드시 같이 맞는 요소는 조합을 좁히지 않는다). 화면에 보이는 요소 = 실제로 판정하는 요소.
   for (const item of raw) {
     const type = String(item?.type || '').trim();
     const value = String(item?.value || '').trim();
@@ -139,7 +137,7 @@ export function validateElements(raw: any): { ok: true; elements: BlockElement[]
   if (elements.length < MIN_ELEMENTS) {
     return {
       ok: false,
-      error: `차단정보는 요소 ${MIN_ELEMENTS}개 이상의 조합이어야 합니다. 단일 키워드 차단은 정상 문자를 막습니다.`,
+      error: `차단정보는 요소가 ${MIN_ELEMENTS}개 이상이어야 합니다.`,
     };
   }
   if (elements.length > MAX_ELEMENTS) {
@@ -183,7 +181,7 @@ function matchesElementPrepared(element: BlockElement, prep: PreparedContent): b
 }
 
 function matchesRulePrepared(rule: BlockRule, prep: PreparedContent): boolean {
-  if (!rule.elements || rule.elements.length < MIN_ELEMENTS) return false; // 방어: 단일 요소 규칙은 절대 적용하지 않는다
+  if (!rule.elements || rule.elements.length < MIN_ELEMENTS) return false; // 방어: 요소 없는 규칙은 적용하지 않는다
   return rule.elements.every((el) => matchesElementPrepared(el, prep));
 }
 
@@ -248,9 +246,8 @@ async function fetchActiveRules(gen: number): Promise<BlockRule[]> {
     );
     const rules: BlockRule[] = [];
     for (const row of result.rows) {
-      // 저장 검증과 **같은 함수**로 다시 본다(이중 방어). 옛 기준으로 저장된 규칙(`대출` + `무직자대출` 등)은
-      //   접으면 단일 요소라 적용하지 않는다 — 차단으로 올라가면 그대로 단일 키워드 차단이 되기 때문이다.
-      //   통과한 규칙은 접힌 요소로 쓴다(함의되는 요소를 뺀 것이라 걸리는 본문은 같다).
+      // 저장 검증과 **같은 함수**로 다시 본다(이중 방어). 통과한 규칙은 접힌 요소로 쓴다
+      //   (함의되는 요소를 뺀 것이라 걸리는 본문은 같다).
       const checked = validateElements(row.elements);
       if (!checked.ok) {
         console.warn(`[spam-block] 조합 하한을 채우지 못한 규칙은 적용하지 않는다 rule=${row.id}: ${checked.error}`);

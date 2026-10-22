@@ -47,12 +47,28 @@ function rule(over: Partial<BlockRule> = {}): BlockRule {
   };
 }
 
-describe('단일 키워드 차단은 만들 수 없다', () => {
-  it(`요소 ${MIN_ELEMENTS}개 미만은 거부한다`, () => {
+describe('요소 1~5개 (★1022 하한 2 → 1)', () => {
+  it('하한은 1이다', () => {
+    expect(MIN_ELEMENTS).toBe(1);
+  });
+
+  it('요소 하나짜리 규칙은 통과한다', () => {
     const r = validateElements([{ type: 'keyword', value: '대출' }]);
+    expect(r.ok).toBe(true);
+    if (!r.ok) throw new Error('거부되면 안 된다');
+    expect(r.elements).toEqual([{ type: 'keyword', value: '대출' }]);
+  });
+
+  it('요소 0개(빈 배열)는 거부한다', () => {
+    const r = validateElements([]);
     expect(r.ok).toBe(false);
     if (r.ok) throw new Error('통과하면 안 된다');
-    expect(r.error).toContain('단일 키워드 차단은 정상 문자를 막습니다');
+    expect(r.error).toContain('1개 이상');
+  });
+
+  it('요소 하나짜리 규칙은 그 낱말이 든 본문에 걸린다', () => {
+    expect(matchesRule(rule({ elements: [{ type: 'keyword', value: '대출' }] }), '오늘 대출 안내')).toBe(true);
+    expect(matchesRule(rule({ elements: [{ type: 'keyword', value: '대출' }] }), '오늘 할인 안내')).toBe(false);
   });
 
   it(`요소 ${MAX_ELEMENTS}개 초과는 거부한다`, () => {
@@ -101,9 +117,10 @@ describe('★ 조합은 전부 맞아야 걸린다 — 정상 문자 보호의 �
     expect(matchesRule(rule(), '무직자 지원 프로그램 안내')).toBe(false);
   });
 
-  it('★ 단일 요소 규칙이 DB에 있어도 적용하지 않는다 — 이중 방어', () => {
+  it('★1022 요소 하나짜리 규칙은 적용한다 · 요소 없는 규칙은 적용하지 않는다(방어)', () => {
     const single = rule({ elements: [{ type: 'keyword', value: '대출' }] });
-    expect(matchesRule(single, '대출 상담 안내')).toBe(false);
+    expect(matchesRule(single, '대출 상담 안내')).toBe(true);
+    expect(matchesRule(rule({ elements: [] }), '대출 상담 안내')).toBe(false);
   });
 });
 
@@ -160,17 +177,16 @@ describe('★ 규칙 조회 실패는 발송을 막지 않는다 (fail-open)', (
     await expect(loadActiveRules()).resolves.toEqual([]);
   });
 
-  it('로드 시 단일 요소 규칙을 걸러낸다', async () => {
+  it('로드 시 요소 없는 규칙을 걸러내고 요소 하나짜리는 쓴다', async () => {
     q.mockResolvedValue({
       rows: [
-        { id: 'a', name: '단일', elements: [{ type: 'keyword', value: '대출' }], mode: 'block', source: 'kisa', exempt_company_ids: [] },
+        { id: 'a', name: '빈 요소', elements: [], mode: 'block', source: 'kisa', exempt_company_ids: [] },
         { id: 'b', name: '조합', elements: [{ type: 'keyword', value: '무직자' }, { type: 'keyword', value: '당일' }], mode: 'block', source: 'kisa', exempt_company_ids: [] },
       ],
       rowCount: 2,
     });
     const rules = await loadActiveRules();
-    expect(rules).toHaveLength(1);
-    expect(rules[0].id).toBe('b');
+    expect(rules.map((r) => r.id)).toEqual(['b']);
   });
 
   it('★ mode 를 읽는다 — block 만 차단이고 그 밖의 값(옛 hold · 빈 값 · 오타)은 전부 탐지다', async () => {
@@ -302,15 +318,15 @@ describe('★ 탐지 로그는 규칙별 1행으로 접어 단일 INSERT (0818 C
   });
 });
 
-describe('★ 0818 Codex 정정 — 중복 요소로 하한을 우회할 수 없다', () => {
-  it('같은 값을 두 번 넣으면 하나로 접혀 하한 미달로 거부된다', () => {
+describe('★ 0818 Codex 정정 — 중복 · 포함 관계 요소는 하나로 접는다', () => {
+  it('같은 값을 두 번 넣으면 하나로 접힌다', () => {
     const r = validateElements([
       { type: 'keyword', value: '대출' },
       { type: 'keyword', value: '대출' },
     ]);
-    expect(r.ok).toBe(false);
-    if (r.ok) throw new Error('통과하면 안 된다');
-    expect(r.error).toContain('단일 키워드');
+    expect(r.ok).toBe(true);
+    if (!r.ok) throw new Error('거부되면 안 된다');
+    expect(r.elements).toHaveLength(1);
   });
 
   it('공백·대소문자만 다른 값도 중복으로 본다', () => {
@@ -318,7 +334,9 @@ describe('★ 0818 Codex 정정 — 중복 요소로 하한을 우회할 수 없
       { type: 'keyword', value: 'Bit.LY' },
       { type: 'keyword', value: 'bit. ly' },
     ]);
-    expect(r.ok).toBe(false);
+    expect(r.ok).toBe(true);
+    if (!r.ok) throw new Error('거부되면 안 된다');
+    expect(r.elements).toHaveLength(1);
   });
 
   it('서로 다른 값 2개는 그대로 통과한다', () => {
@@ -380,18 +398,26 @@ describe('★1003 기록 = 규칙 모드 + 그 자리에서 한 일(action_taken
 });
 
 describe('★1003 조합 하한 우회 차단 — 다른 요소가 맞으면 반드시 같이 맞는 요소는 하나로 접는다', () => {
-  it('keyword bit.ly + url BIT.LY = 같은 요소 → 하한 미달', () => {
-    expect(validateElements([{ type: 'keyword', value: 'bit.ly' }, { type: 'url', value: 'BIT.LY' }]).ok).toBe(false);
+  it('keyword bit.ly + url BIT.LY = 같은 요소 → 하나로 접힌다', () => {
+    const r = validateElements([{ type: 'keyword', value: 'bit.ly' }, { type: 'url', value: 'BIT.LY' }]);
+    if (!r.ok) throw new Error('거부되면 안 된다');
+    expect(r.elements).toHaveLength(1);
   });
 
-  it('포함 관계(대출 ⊂ 무직자대출)는 좁은 쪽 하나만 남는다 → 하한 미달', () => {
-    expect(validateElements([{ type: 'keyword', value: '대출' }, { type: 'keyword', value: '무직자 대출' }]).ok).toBe(false);
-    expect(validateElements([{ type: 'keyword', value: '무직자대출' }, { type: 'keyword', value: '대출' }]).ok).toBe(false);
+  it('포함 관계(대출 ⊂ 무직자대출)는 좁은 쪽 하나만 남는다', () => {
+    const a = validateElements([{ type: 'keyword', value: '대출' }, { type: 'keyword', value: '무직자 대출' }]);
+    const b = validateElements([{ type: 'keyword', value: '무직자대출' }, { type: 'keyword', value: '대출' }]);
+    if (!a.ok || !b.ok) throw new Error('거부되면 안 된다');
+    expect(a.elements.map((e) => e.value)).toEqual(['무직자 대출']);
+    expect(b.elements.map((e) => e.value)).toEqual(['무직자대출']);
   });
 
   it('번호 요소가 글자 요소 안의 숫자에 들어 있으면 접는다', () => {
-    expect(validateElements([{ type: 'phone', value: '1234-5678' }, { type: 'keyword', value: '문의 010-1234-5678' }]).ok).toBe(false);
-    expect(validateElements([{ type: 'phone', value: '010-1234-5678' }, { type: 'phone', value: '01012345678' }]).ok).toBe(false);
+    const a = validateElements([{ type: 'phone', value: '1234-5678' }, { type: 'keyword', value: '문의 010-1234-5678' }]);
+    const b = validateElements([{ type: 'phone', value: '010-1234-5678' }, { type: 'phone', value: '01012345678' }]);
+    if (!a.ok || !b.ok) throw new Error('거부되면 안 된다');
+    expect(a.elements).toEqual([{ type: 'keyword', value: '문의 010-1234-5678' }]);
+    expect(b.elements).toHaveLength(1);
   });
 
   it('접힌 뒤에도 서로 다른 요소가 2개 이상이면 통과하고, 남는 것은 좁은 쪽이다', () => {

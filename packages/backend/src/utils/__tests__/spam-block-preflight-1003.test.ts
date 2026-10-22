@@ -101,9 +101,10 @@ describe('checkSpamBlockBeforeCharge — 차감 앞 차단 판정', () => {
     expect(inserts()[0][1][6]).toBe(7);
   });
 
-  it('★ 옛 기준으로 저장된 규칙(대출 + 무직자대출 = 사실상 단일 키워드)은 차단 모드여도 적용하지 않는다', async () => {
+  it('★1022 포함 관계로 저장된 규칙(대출 + 무직자대출)은 좁은 쪽(무직자대출) 하나로 접어 적용한다', async () => {
     rulesAre([ruleRow({ elements: [{ type: 'keyword', value: '대출' }, { type: 'keyword', value: '무직자대출' }] })]);
-    expect(await checkSpamBlockBeforeCharge({ items: [{ text: '무직자대출 안내', recipients: 1 }], companyId: COMPANY })).toEqual({ blocked: false });
+    expect((await checkSpamBlockBeforeCharge({ items: [{ text: '무직자대출 안내', recipients: 1 }], companyId: COMPANY })).blocked).toBe(true);
+    expect(await checkSpamBlockBeforeCharge({ items: [{ text: '대출 안내', recipients: 1 }], companyId: COMPANY })).toEqual({ blocked: false });
   });
 
   it('규칙이 없으면 DB 기록 없이 통과', async () => {

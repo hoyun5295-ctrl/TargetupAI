@@ -109,7 +109,9 @@ function fitHeadlineWords(v: string): string {
 /** (순수) AI 가 쓸 헤드라인이 없을 때 = 한 줄 앞부분에서 혜택 구간 · 숫자 · 혜택 낱말을 뺀 말(16자 · 비면 빈 글 = 화면이 적게 한다) */
 export function fallbackLineHeadlineTitle(line: string): string {
   const head = String(line || '').split(/[.!?\n·,]/)[0];
-  const clean = withoutBenefitSpans(head).replace(/[0-9０-９]+/g, '').replace(HEADLINE_BENEFIT_RE, '').replace(/\s+/g, ' ').trim();
+  // ★ 2026-10-22 숫자가 든 낱말은 통째로 뺀다(숫자만 지우면 「3일간」 → 「일간」이 그림에 남는다 · 시연 판정)
+  const noNum = withoutBenefitSpans(head).split(/\s+/).filter((w) => !/[0-9０-９]/.test(w)).join(' ');
+  const clean = noNum.replace(HEADLINE_BENEFIT_RE, '').replace(/\s+/g, ' ').trim();
   return fitHeadlineWords(clean);
 }
 
