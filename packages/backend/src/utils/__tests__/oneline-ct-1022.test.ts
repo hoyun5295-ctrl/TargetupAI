@@ -190,10 +190,17 @@ describe('② 판단(AI 1회 · 2크레딧 · 실패 = 규칙 0원)', () => {
   });
   it('AI 성공 = 고른 구성 · 초안 · 판단 키로 2 정산(성공 뒤)', async () => {
     vi.mocked(callAIWithFallback).mockResolvedValue(JSON.stringify({ pick: 'spotlight', reason: '신제품 출시라 상품을 크게 보여 줘요', drafts: { spotlight: { points: [{ title: '자극 없이', body: '순한 성분' }, { title: '가벼운 제형', body: '산뜻하게' }], steps: [{ title: '토너', body: '결 정돈' }] } } }));
-    const r = await runLineJudge({ companyId: C, line: '진정 앰플 출시', lineFp: 'fp1', productNames: [] , nowMs: Date.parse('2026-10-22T03:00:00Z') });
-    expect(r).toMatchObject({ pick: 'spotlight', source: 'ai', charged: true });
-    expect(r.drafts.spotlight?.points?.[0].title).toBe('자극 없이');
-    expect(vi.mocked(deductCreditOutcome).mock.calls[0][0]).toMatchObject({ cost: 2, source: 'oneline-judge', throwOnInsufficient: true, idempotencyKey: aiLineBaseKeyOfFp(C, 'fp1', new Date('2026-10-22T03:00:00Z')) });
+    // 정산 키 날짜 = 정산하는 순간의 실제 시각(설계) → 시각을 고정해야 날짜가 바뀌어도 같은 결과(1023 pre-push 실패)
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2026-10-22T03:00:00Z'));
+    try {
+      const r = await runLineJudge({ companyId: C, line: '진정 앰플 출시', lineFp: 'fp1', productNames: [] , nowMs: Date.parse('2026-10-22T03:00:00Z') });
+      expect(r).toMatchObject({ pick: 'spotlight', source: 'ai', charged: true });
+      expect(r.drafts.spotlight?.points?.[0].title).toBe('자극 없이');
+      expect(vi.mocked(deductCreditOutcome).mock.calls[0][0]).toMatchObject({ cost: 2, source: 'oneline-judge', throwOnInsufficient: true, idempotencyKey: aiLineBaseKeyOfFp(C, 'fp1', new Date('2026-10-22T03:00:00Z')) });
+    } finally {
+      vi.useRealTimers();
+    }
   });
   it('AI 실패 = 규칙 판단 · 0원', async () => {
     vi.mocked(callAIWithFallback).mockRejectedValue(new Error('down'));
