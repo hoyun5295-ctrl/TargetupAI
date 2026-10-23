@@ -1810,6 +1810,8 @@ export default function JourneysPage() {
       } : null}
       blocks={[
         ...(error ? [{ text: error, tone: 'rose' as const }] : []),
+        // ★ 2026-10-23 한줄 CT 반복 발송 점검(여정은 계속 나간다 · 날짜 말 · 혜택) — 이 여정을 만든 한 줄의 판정일 때만(막지 않음 · C1)
+        ...(view === 'review' && lineAsk.recurring.line && lineAsk.recurring.line === genObjective.trim() ? lineAsk.recurring.notes.map((n) => ({ text: n.text })) : []),
         ...(callbackOptions.length === 0 && !loading && view === 'main' ? [{ text: '회사에 등록된 발신번호가 없어 여정을 켤 수 없습니다. 만들기는 지금도 됩니다.' }] : []),
       ]}
       links={view === 'main' ? [{ label: `만들 수 있는 여정 ${journeyScope.availableCount}/${scopeTotal}종 · ${showScopeNote ? '접기' : '자세히'}`, onClick: () => setShowScopeNote((v) => !v) }] : []}

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { fetchLineAnswer, fetchOneLineGaps, readPartOf, readsInLine, type LineAskAnswer, type LineAskMenu, type OneLineGapsResult } from '../utils/one-line';
+import { fetchLineAnswer, fetchOneLineGaps, readPartOf, readsInLine, type LineAskAnswer, type LineAskMenu, type OneLineGapsResult, type LineRecurringNote } from '../utils/one-line';
 import { askHelp, type HelpAskResult } from '../components/help/help-api';
 
 /**
@@ -41,6 +41,9 @@ export function useLineAsk(menu: LineAskMenu) {
     return () => { alive = false; };
   }, [menu]);
   const [judging, setJudging] = useState(false);
+  // ★ 2026-10-23 한 번 만들면 계속 나가는 입구(여정)의 한 줄 점검 문장(서버 판정 · 막지 않음 · 설계서 docs/2026-10-23-oneline-ct-complete-design.md C1)
+  //   line = 그 문장을 판정한 한 줄(화면은 실제로 만든 한 줄과 같을 때만 보인다)
+  const [recurring, setRecurring] = useState<{ line: string; notes: LineRecurringNote[] }>({ line: '', notes: [] });
   const busy = useRef(false);
   // 사진에서 읽은 글 조각(최대 5) — 판정에서 뺀다(사진 속 「어떤 스타일이 좋을까?」가 질문으로 잡히지 않게) · 자기 조각을 따로 들고 있는 화면(DM · 이메일)은 gaps 를 넘긴다
   const reads = useRef<string[]>([]);
@@ -59,6 +62,7 @@ export function useLineAsk(menu: LineAskMenu) {
     setAsk(null);
     try {
       const g = opts.gaps !== undefined ? opts.gaps : await fetchOneLineGaps(t, opts.reads ?? readsInLine(t, reads.current), menu);
+      setRecurring({ line: t, notes: g?.recurring ?? [] });
       if (!g || !g.askEnabled || g.intent !== 'ask') return false;
       setAsk({ line: t, loading: true, answer: null, help: null, error: null });
       if (g.askTopic === 'how') {
@@ -88,5 +92,5 @@ export function useLineAsk(menu: LineAskMenu) {
   const hasCards = !!ask?.answer && ask.answer.cards.length > 0;
   /** 이 한 줄에 그대로 남은 사진 글 조각(자기 조각을 따로 들지 않는 화면 · 인앱) */
   const readsFor = useCallback((line: string) => readsInLine(String(line || '').trim(), reads.current), []);
-  return { ask, judging, route, close, hasCards, noteRead, stepsCost, readsFor };
+  return { ask, judging, route, close, hasCards, noteRead, stepsCost, readsFor, recurring };
 }

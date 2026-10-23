@@ -24,13 +24,14 @@ export interface OneLineGapsResult {
   stepsEnabled: boolean;
   stepsCost: number | null;
   plan: LineStepsPlan | null;
-  /** ★ 2026-10-17 템플릿 캠페인 — 이 회사에 열려 있는가 · 한 줄 추천(걸린 낱말 = 이유) · 템플릿마다 재료 단계(서버 판정) */
+  /** ★ 2026-10-17 템플릿 캠페인 스위치(구성 5종 재료 판이 열려 있는가) · ★ 2026-10-23 옛 템플릿 4종 추천 · 재료 판은 서버가 더 보내지 않는다 */
   templatesEnabled: boolean;
-  templates: LineTemplateRank[] | null;
-  templatePlans: Record<string, LineStepsPlan> | null;
   /** ★ 2026-10-22 한줄 CT 구성 5종 — 구성 정보 · 규칙 추천 · 구성마다 재료 판(AI 0) · 판단(AI · 2)은 `requestLineJudge` */
   compositions: LineCompositionOffer | null;
+  /** ★ 2026-10-23 한 번 만들면 계속 나가는 입구(여정 · 자동발송)의 한 줄 점검 문장(막지 않음 · 서버 판정) */
+  recurring: LineRecurringNote[];
 }
+export interface LineRecurringNote { kind: 'passing_date' | 'benefit_missing' | 'benefit_fixed'; text: string }
 
 // ─────────────── 한 줄 단계 모달 (★ 2026-10-17 · 설계서 docs/2026-10-17-oneline-steps-modal-design.md §3 · §4) ───────────────
 
@@ -185,19 +186,43 @@ export async function requestLineJudge(line: string, menu: LineStepsChannel, rea
   return null;
 }
 
-/** 재료 판 미리보기(AI 0 · 0원 · 같은 조립 · 렌더러 · 빈 칸 = 점선 자리) — 실패 = null */
-export async function fetchCompositionPreview(composition: LineCompositionId, channel: LineStepsChannel, materials: Record<string, unknown>, signal?: AbortSignal): Promise<{ html?: string; message?: Record<string, any>; missing: number } | null> {
+/** 재료 판 미리보기 요청 = 만들기 본문 그대로 + 화면이 가진 몰 상품 사진 · 읽어 둔 페이지 표지(★ 2026-10-23 · 같은 검증 · 같은 재료 변환 · 같은 진단) */
+export interface LineCompositionPreviewRequest {
+  body: Record<string, unknown>;
+  cards: Array<{ name: string; price: number; discount_price?: number; image_url: string }>;
+  pageBanner: string | null;
+}
+/** 서버 진단 한 칸(재료 판 칩 · 만들기 막기 = 이 값 · 화면은 판정하지 않는다) */
+export interface LineSlotVerdict { step: string; level: LineSlotLevel; have: number; min: number; filled: boolean }
+
+/** 재료 판 미리보기(AI 0 · 0원 · 같은 조립 · 렌더러 · 빈 칸 = 점선 자리 · 칸 판정) — 실패 = null */
+export async function fetchCompositionPreview(composition: LineCompositionId, channel: LineStepsChannel, req: LineCompositionPreviewRequest, signal?: AbortSignal): Promise<{ html?: string; message?: Record<string, any>; missing: number; slots: LineSlotVerdict[] } | null> {
   try {
     const res = await fetch('/api/line-templates/composition-preview', {
       method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${localStorage.getItem('token') || ''}` },
-      body: JSON.stringify({ composition, channel, materials }), signal,
+      body: JSON.stringify({ composition, channel, body: req.body, preview: { cards: req.cards, page_banner: req.pageBanner } }), signal,
     });
     const d = await res.json().catch(() => null);
     if (!res.ok || !d?.success) return null;
-    return { ...(typeof d.html === 'string' ? { html: d.html } : {}), ...(d.message && typeof d.message === 'object' ? { message: d.message } : {}), missing: Number(d.missing) || 0 };
+    const slots: LineSlotVerdict[] = (Array.isArray(d.slots) ? d.slots : [])
+      .filter((x: any) => typeof x?.step === 'string' && ['block', 'suggest', 'drop'].includes(x?.level))
+      .map((x: any) => ({ step: x.step, level: x.level, have: Number(x.have) || 0, min: Number(x.min) || 0, filled: x.filled === true }));
+    return { ...(typeof d.html === 'string' ? { html: d.html } : {}), ...(d.message && typeof d.message === 'object' ? { message: d.message } : {}), missing: Number(d.missing) || 0, slots };
   } catch {
     return null;
   }
+}
+
+/** (순수) 미리보기 요청 — 만들기 본문(buildLineTemplateBody)과 같은 상품 목록의 사진 · 본문에 페이지가 있을 때만 표지 */
+export function lineCompositionPreviewRequest(body: Record<string, unknown>, a: LineStepsAnswers, max: number): LineCompositionPreviewRequest {
+  const goods = lineCompositionGoods(a, max);
+  return {
+    body,
+    cards: goods.picks.filter((c) => c.imageUrl).map((c) => ({
+      name: c.name, price: c.price || c.salePrice, ...(c.salePrice && c.price && c.salePrice < c.price ? { discount_price: c.salePrice } : {}), image_url: String(c.imageUrl),
+    })),
+    pageBanner: body.page && a.page?.banner ? a.page.banner : null,
+  };
 }
 
 /** ★ 2026-10-10 한 줄 묻기 — 한 줄 입력이 있는 메뉴(서버 판정 · 답 경로가 메뉴로 갈린다) */
@@ -207,7 +232,7 @@ export type LineAskMenu = 'journeys' | 'auto-marketing' | 'inapp' | 'dm' | 'emai
  * 한 줄 판정(AI 0 · 무과금). 조회 실패 = null → 호출부는 지금 화면 그대로 간다(모르면 묻지 않는다).
  * ★ 2026-10-10 reads = 한 줄 칸에 붙인 사진 글 조각(서버가 그 조각의 숫자를 지운 글로 혜택을 판정한다 · H3).
  */
-export async function fetchOneLineGaps(line: string, reads?: readonly string[], menu?: LineAskMenu): Promise<OneLineGapsResult | null> {
+export async function fetchOneLineGaps(line: string, reads?: readonly string[], menu?: LineAskMenu | 'auto-send'): Promise<OneLineGapsResult | null> {
   try {
     const res = await fetch('/api/ai/one-line/gaps', {
       method: 'POST',
@@ -229,8 +254,11 @@ export async function fetchOneLineGaps(line: string, reads?: readonly string[], 
       stepsEnabled: d.steps_enabled === true,
       stepsCost: Number.isFinite(d.steps_cost) ? Number(d.steps_cost) : null,
       plan: d.steps_enabled === true ? parseLinePlan(d.plan) : null,
-      ...parseLineTemplateOffer(d),
+      templatesEnabled: d.templates_enabled === true,
       compositions: d.templates_enabled === true ? parseLineCompositionOffer(d) : null,
+      recurring: (Array.isArray(d.recurring) ? d.recurring : [])
+        .filter((n: any) => ['passing_date', 'benefit_missing', 'benefit_fixed'].includes(n?.kind) && typeof n?.text === 'string')
+        .slice(0, 3).map((n: any) => ({ kind: n.kind, text: String(n.text).slice(0, 160) })),
     };
   } catch {
     return null;
@@ -329,6 +357,8 @@ export interface LineDmResponse {
   excluded: Array<{ name: string | null; reason: string }>;
   /** ★ 2026-10-17 PRICE_CHANGED 일 때 서버가 정한 새 금액 */
   cost?: number;
+  /** ★ 2026-10-23 서버 요리 관문이 막은 재료 판 칸(단계 키 · 다시 열 때 그 칸으로) */
+  missing?: string[];
 }
 
 /** 한 줄 DM 생성 응답 → 결과 화면 안내 문장(서버 문장 그대로 · 화면이 문구를 만들지 않는다) */
@@ -342,6 +372,11 @@ export function lineResultNotes(data: any): string[] {
   }
   if (ol.gaps?.benefit === true && !ol.benefit) out.push('혜택을 적지 않아 혜택 수치는 싣지 않았어요');
   return out;
+}
+
+/** (순수) 실패 응답 → 서버 요리 관문이 막은 칸(단계 키 · 모양만 거른다) */
+export function lineMissingSteps(d: any): string[] {
+  return (Array.isArray(d?.missing) ? d.missing : []).filter((k: unknown) => typeof k === 'string' && /^[a-z_]{2,20}$/.test(k)).slice(0, 5);
 }
 
 /** 한 줄 DM → 서버 초안(결과 화면 착지 · land:'result'). 시도 토큰은 부를 때마다 새로 만든다. */
@@ -368,6 +403,7 @@ export async function requestLineDm(req: LineDmRequest): Promise<LineDmResponse>
       data: d?.data || null,
       excluded: Array.isArray(d?.excluded) ? d.excluded : [],
       ...(Number.isFinite(d?.cost) ? { cost: Number(d.cost) } : {}),
+      missing: lineMissingSteps(d),
     };
   } catch (e: any) {
     return { ok: false, status: 0, code: 'NETWORK', error: e?.message || '연결이 끊겼어요.', data: null, excluded: [] };
@@ -620,20 +656,6 @@ export interface LineTemplateInfo {
   needs: { benefit: 'required' | 'optional' | 'none'; period: 'required' | 'none'; products: { min: number; max: Record<LineStepsChannel, number> }; hero: 'ask' | 'none' };
   example: { company: string; industry: string; line: string };
   design: { primary: string; accent: string };
-}
-
-/** 판정 응답의 템플릿 칸(모양만 걸러 받는다 · 모르는 템플릿 = 버린다) */
-function parseLineTemplateOffer(d: any): Pick<OneLineGapsResult, 'templatesEnabled' | 'templates' | 'templatePlans'> {
-  const on = d?.templates_enabled === true;
-  const templates = on && Array.isArray(d.templates)
-    ? d.templates.filter((t: any) => LINE_TEMPLATE_IDS.includes(t?.id)).map((t: any) => ({ id: t.id, reasons: Array.isArray(t.reasons) ? t.reasons.map(String).slice(0, 3) : [], recommended: t.recommended === true }))
-    : null;
-  let plans: Record<string, LineStepsPlan> | null = null;
-  if (on && d.template_plans && typeof d.template_plans === 'object') {
-    plans = {};
-    for (const id of LINE_TEMPLATE_IDS) { const p = parseLinePlan(d.template_plans[id]); if (p) plans[id] = p; }
-  }
-  return { templatesEnabled: on, templates: templates && templates.length > 0 ? templates : null, templatePlans: plans && Object.keys(plans).length > 0 ? plans : null };
 }
 
 const authHeader = () => ({ Authorization: `Bearer ${localStorage.getItem('token') || ''}` });

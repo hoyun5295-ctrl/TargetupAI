@@ -288,6 +288,9 @@ async function generateMessageForAutoCampaign(ac: any): Promise<void> {
       personalizationVars,
       // ★ D225+ Brand Voice Learning — 회사별 가이드라인 자동 주입
       companyId: ac.company_id,
+      // ★ 2026-10-23 혜택 근거 = 담당자가 적은 컨셉 글만(설계서 docs/2026-10-23-oneline-ct-complete-design.md C2 · 1005 한 줄 입구와 같은 원칙).
+      //   브랜드 소개 · 슬로건의 옛 행사 혜택은 근거가 아니다 → 컨셉에 없는 혜택은 자리표시가 되고 발송 길목이 그 회차를 멈춘다.
+      licenseText: ac.ai_prompt || ac.campaign_name,
     };
 
     const aiResult = await generateMessages(ac.ai_prompt || ac.campaign_name, targetInfo, extraContext);
@@ -1447,6 +1450,8 @@ async function executePreSendSpamTest(ac: any): Promise<void> {
               availableVars,
               usePersonalization: personalizationVars.length > 0,
               personalizationVars,
+              // ★ 2026-10-23 혜택 근거 = 컨셉 글만(위 1단계와 같은 값 · C2)
+              licenseText: ac.ai_prompt || ac.campaign_name,
             }
           );
           if (regenResult.variants?.length > 0) {

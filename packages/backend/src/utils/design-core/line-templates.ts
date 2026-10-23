@@ -270,17 +270,7 @@ export function getLineTemplate(id: unknown): LineTemplate | null {
   return LINE_TEMPLATES.find((t) => t.id === id) ?? null;
 }
 
-/** 한 줄 → 템플릿 추천(AI 0). 우선순위 = 배열 순서(빅세일 > 신상품 > 특별 이벤트 > 계절) · 걸린 글자를 이유로 · 안 걸리면 추천 없음 */
-export function rankLineTemplates(typed: string): Array<{ id: LineTemplateId; reasons: string[]; recommended: boolean }> {
-  const line = String(typed || '');
-  const hits = LINE_TEMPLATES.map((t) => {
-    const re = new RegExp(t.match.source, t.match.flags.includes('g') ? t.match.flags : `${t.match.flags}g`);
-    const words = Array.from(new Set(Array.from(line.matchAll(re)).map((m) => m[0].trim()).filter(Boolean))).slice(0, 3);
-    return { id: t.id, reasons: words };
-  });
-  const firstHit = hits.find((h) => h.reasons.length > 0)?.id ?? null;
-  return hits.map((h) => ({ ...h, recommended: h.id === firstHit }));
-}
+// ★ 2026-10-23 한 줄 → 옛 템플릿 추천(rankLineTemplates) 삭제 — 입구가 구성 5종만 쓴다(설계서 docs/2026-10-23-oneline-ct-complete-design.md A3)
 
 // ★ 2026-10-21 템플릿 캠페인 회사 명단 스위치 삭제 — 전 회사 같은 흐름(설계서 docs/2026-10-21-oneline-content-design.md §3-1)
 

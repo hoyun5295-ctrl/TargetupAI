@@ -21,16 +21,16 @@ import { deductCreditOutcome, chargedKeysAmong, checkCredit } from '../ai-credit
 import { lineStepsCharge, lineStepsKeyPrefix, lineStepsLegacyKeyPrefix, sanitizeLineRichBody, sanitizeLineStepsBody, LINE_PRICE } from '../one-line-steps';
 import {
   LINE_COMPOSITIONS, getLineComposition, composeRichDm, composeRichEmail, composeRichInapp, compositionGate, compositionFallbackCopy,
-  compositionMissing, compositionBlocking, compositionBlockingFor, rankCompositions, type LineRichMaterials,
+  diagnoseComposition, diagnosisBlocking, diagnosisMissing, rankCompositions, type LineRichMaterials,
 } from '../line-compositions';
-import { buildCompositionPlan, runLineJudge, _resetLineJudgeMemory, lineCookMaterials, lineCookManual, draftLineCook, LineJudgeBusyError } from '../one-line-ct';
+import { buildCompositionPlan, runLineJudge, _resetLineJudgeMemory, lineCookMaterials, lineCookManual, draftLineCook, LineJudgeBusyError, listenLine } from '../one-line-ct';
 import { resolveLineStepsCharge } from '../line-steps-context';
 import { hasChargeWithKeyPrefix } from '../ai-credit';
 import { lineFpLockKey } from '../one-line-steps';
 import { tryAcquireInflight, releaseInflight } from '../inflight-lock';
 import { plannerTemplateMissing, plannerTemplateDef } from '../planner-build';
 import { sanitizeLineJudge, cleanLineCtText } from '../one-line-ct/ai';
-import { renderCompositionPreview, previewMaterials } from '../one-line-ct/preview';
+import { renderCompositionPreview, previewMaterialsOf, previewCards } from '../one-line-ct/preview';
 import { aiLineBaseKeyOfFp, aiLineBaseKey } from '../ai-line';
 import { lineFingerprint } from '../one-line-steps';
 
@@ -131,17 +131,17 @@ describe('칸 세 종류 · 진단', () => {
   it('막는 칸만 만들기를 막는다(세일 = 혜택 · 마감 · 상품 4) · 후기는 빠지는 칸', () => {
     const comp = getLineComposition('showcase')!;
     const empty = rich({ benefit: null, periodEnd: null, products: [], proof: [] });
-    expect(compositionBlocking(comp, empty).map((s) => s.key).sort()).toEqual(['benefit', 'periodEnd', 'products']);
-    expect(compositionMissing(comp, empty).find((s) => s.key === 'proof')?.level).toBe('drop');
-    expect(compositionBlocking(comp, rich())).toEqual([]);
+    expect(diagnosisBlocking(diagnoseComposition(comp, empty, 'dm')).map((s) => s.key).sort()).toEqual(['benefit', 'periodEnd', 'products']);
+    expect(diagnosisMissing(diagnoseComposition(comp, empty, 'dm')).find((s) => s.key === 'proof')?.level).toBe('drop');
+    expect(diagnosisBlocking(diagnoseComposition(comp, rich(), 'dm'))).toEqual([]);
   });
   it('재료 판 = 첫 화면 → (비연동) 페이지 주소 → 구성 칸 → 버튼 주소 · 인앱 = 표지 · 상품 · 혜택만', () => {
     const input = { judged: '겨울 세일 30%', line: '겨울 세일 30%', typed: '겨울 세일 30%', channel: 'dm' as const, mall: false, inappBlocked: false, upload: true, website: null, mallHome: null, cost: null, lineFp: 'x' };
-    const dm = buildCompositionPlan(getLineComposition('showcase')!, input);
+    const dm = buildCompositionPlan(getLineComposition('showcase')!, input, listenLine(input.line));
     expect(dm.steps.map((s) => s.key)).toEqual(['hero_photo', 'event_page', 'benefit', 'period', 'products', 'coupon_code', 'proof', 'link']);
     expect(dm.steps.find((s) => s.key === 'products')).toMatchObject({ required: true, level: 'block', min: 4 });
     expect(dm.steps.find((s) => s.key === 'benefit')).toMatchObject({ required: true, level: 'block' });
-    const inapp = buildCompositionPlan(getLineComposition('spotlight')!, { ...input, channel: 'inapp', mall: true, website: 'https://a.co' });
+    const inapp = buildCompositionPlan(getLineComposition('spotlight')!, { ...input, channel: 'inapp', mall: true, website: 'https://a.co' }, listenLine(input.line));
     expect(inapp.steps.map((s) => s.key)).toEqual(['hero_photo', 'products', 'benefit']);
     expect(inapp.steps.find((s) => s.key === 'products')?.max).toBe(1);
   });
@@ -236,7 +236,11 @@ describe('② 판단(AI 1회 · 2크레딧 · 실패 = 규칙 0원)', () => {
 describe('미리보기(점선 자리 · AI 0)', () => {
   it('빈 칸 = 점선 자리(결과물 조립엔 없다) · 재료 칸 걸러 받기', () => {
     const comp = getLineComposition('showcase')!;
-    const m = previewMaterials({ products: [{ name: '니트', price: 59000, image_url: 'javascript:alert(1)' }], benefit: '30%' }, Date.now());
+    // ★ 2026-10-23 미리보기 = 만들기 본문 그대로 + 화면 사진 목록(틀린 사진 주소는 버린다)
+    expect(previewCards([{ name: '니트', price: 59000, image_url: 'javascript:alert(1)' }])).toEqual([]);
+    const body = sanitizeLineStepsBody({ steps: { v: 1 }, template: { id: 'showcase', layout: 'page' }, facts: { benefit: '30%' } }, Date.now());
+    if (!body || body === 'invalid') throw new Error('body');
+    const { materials: m } = previewMaterialsOf({ comp, channel: 'dm', body, mallCards: [], pageBanner: null, brand: { brandName: '', logoUrl: null, csPhone: null }, pinnedPrimary: null, companyId: C });
     expect(m.products).toEqual([]);
     const v = renderCompositionPreview(comp, 'dm', m);
     expect(v.html).toContain('세일 마감일');
@@ -248,24 +252,24 @@ describe('미리보기(점선 자리 · AI 0)', () => {
 
 describe('입구 배선(라우트 소스 계약)', () => {
   const read = (rel: string) => readFileSync(resolve(__dirname, rel), 'utf8');
-  it('DM · 이메일 · 인앱 = 구성 id 면 한줄 CT 요리(같은 돈 순서 안)', () => {
-    const dm = read('../../routes/dm.ts');
-    expect(dm).toContain('const compDef = tplSel && !tplDef ? getLineComposition(tplSel.id) : null;');
-    expect(dm.indexOf('const cook = await draftLineCook({')).toBeLessThan(dm.indexOf('outcome = await deductCreditOutcome({ companyId, cost: genCost, source: genSource'));
-    expect(dm).toContain('...(compDef ? { rich: steps.body.rich } : {})');
-    const em = read('../../routes/email.ts');
-    expect(em.indexOf('const cook = await draftLineCook({')).toBeLessThan(em.indexOf('const tplOutcome = await deductCreditOutcome('));
-    const cdp = read('../../routes/cdp.ts');
-    expect(cdp.indexOf('const cook = await draftLineCook({')).toBeLessThan(cdp.indexOf('const outcome = await deductCreditOutcome({ companyId: auth.companyId, cost: price.cost'));
+  it('DM · 이메일 · 인앱 = 구성 id 면 한줄 CT 요리(★ 2026-10-23 돈 순서 = 주문 하나 · cook 콜백 안)', () => {
+    for (const f of ['../../routes/dm.ts', '../../routes/email.ts', '../../routes/cdp.ts']) {
+      const src = read(f);
+      expect(src.indexOf('const order = await runLineCookOrder({'), f).toBeGreaterThan(-1);
+      expect(src.indexOf('const order = await runLineCookOrder({'), f).toBeLessThan(src.indexOf('const cook = await draftLineCook({'));
+      expect(src, f).toContain('...(compDef ? { rich: steps.body.rich } : {})');
+    }
+    expect(read('../../routes/dm.ts')).toContain('const compDef = tplSel && !tplDef ? getLineComposition(tplSel.id) : null;');
   });
-  it('판정 = 구성 재료 판(AI 0) · 판단 = 별도 경로 · 미리보기 = 0원 경로', () => {
+  it('판정 = 구성 재료 판(AI 0 · ① 듣기 한 곳 · 업종 반영 순위) · 판단 = 별도 경로 · 미리보기 = 0원 경로', () => {
     const ai = read('../../routes/ai.ts');
-    expect(ai).toContain("compositions = { infos: compositionInfos(), ranks: rankCompositions(typed, null), plans: buildCompositionPlans(planInput) };");
+    expect(ai).toContain("compositions = { infos: compositionInfos(), ranks: heard.rank, plans: buildCompositionPlans(planInput, heard) };");
+    expect(ai).toContain('const heard = listenLine(line, { reads: readList, industry, nowMs: Date.now() });');
     expect(ai).toContain("router.post('/one-line/judge'");
     expect(read('../../routes/line-templates.ts')).toContain("lineTemplatesRouter.post('/composition-preview'");
   });
   it('새 CT 코드의 AI 호출 = ai.ts 한 곳', () => {
-    for (const f of ['../one-line-ct/index.ts', '../one-line-ct/preview.ts', '../line-compositions.ts']) expect(read(f)).not.toContain('callAIWithFallback');
+    for (const f of ['../one-line-ct/index.ts', '../one-line-ct/preview.ts', '../one-line-ct/listen.ts', '../one-line-ct/order.ts', '../one-line-ct/recurring.ts', '../line-compositions.ts']) expect(read(f)).not.toContain('callAIWithFallback');
     expect(read('../one-line-ct/ai.ts')).toContain('callAIWithFallback');
   });
 });
@@ -343,21 +347,25 @@ describe('Codex CT R2 정정', () => {
     expect(deductCreditOutcome).not.toHaveBeenCalled();
     vi.mocked(hasChargeWithKeyPrefix).mockResolvedValue(false);
     const read = (rel: string) => readFileSync(resolve(__dirname, rel), 'utf8');
-    expect(read('../../services/ai-line.ts')).toContain('return await lineCompletionPaid(companyId, aiLineLineFp(line), now.getTime());');
+    expect(read('../../services/ai-line.ts')).toContain('return await lineJudgeCovered(companyId, aiLineLineFp(line), now.getTime());');
   });
   it('채널별 칸 = 인앱은 상품 1개 · 혜택만 막는다 · 이메일 상품 상한 6', () => {
     const comp = getLineComposition('showcase')!;
     const one = rich({ products: rich().products.slice(0, 1), periodEnd: null, mood: [] });
-    expect(compositionBlockingFor(comp, one, 'inapp')).toEqual([]);
-    expect(compositionBlockingFor(comp, one, 'dm').map((s) => s.key).sort()).toEqual(['periodEnd', 'products']);
+    expect(diagnosisBlocking(diagnoseComposition(comp, one, 'inapp'))).toEqual([]);
+    expect(diagnosisBlocking(diagnoseComposition(comp, one, 'dm')).map((s) => s.key).sort()).toEqual(['periodEnd', 'products']);
     const input = { judged: '세일', line: '세일', typed: '세일', channel: 'email' as const, mall: true, inappBlocked: false, upload: true, website: 'https://a.co', mallHome: null, cost: null, lineFp: 'x' };
-    expect(buildCompositionPlan(comp, input).steps.find((s) => s.key === 'products')?.max).toBe(6);
+    expect(buildCompositionPlan(comp, input, listenLine(input.line)).steps.find((s) => s.key === 'products')?.max).toBe(6);
   });
   it('화면 = 구성 상품 목록 하나(사진 있는 것 먼저 걸러 상한)로 판정과 요청 본문을 만든다', () => {
     const fe = readFileSync(resolve(__dirname, '../../../../frontend/src/utils/one-line.ts'), 'utf8');
     expect(fe).toContain('const goods = comp ? lineCompositionGoods(a, max) : null;');
     expect(fe).toContain('const picks = (a.picks || []).filter((p) => p.imageUrl).slice(0, max);');
-    expect(readFileSync(resolve(__dirname, '../../../../frontend/src/components/zone/LineStepsModal.tsx'), 'utf8')).toContain('const g = lineCompositionGoods(answers, s.max ?? 12);');
+    // ★ 2026-10-23 화면 칸 판정 = 서버 진단(미리보기 응답) · 미리보기 요청 = 만들기 본문과 같은 상품 목록
+    const modal = readFileSync(resolve(__dirname, '../../../../frontend/src/components/zone/LineStepsModal.tsx'), 'utf8');
+    expect(modal).toContain('const v = serverSlots && serverSlots.comp === chosenId ? serverSlots.filled[s.key] : undefined;');
+    expect(modal).toContain('lineCompositionPreviewRequest(buildLineTemplateBody(plan, answers, visible, cost ?? 0,');
+    expect(modal).not.toContain('lineCompositionGoods(answers');
   });
 });
 

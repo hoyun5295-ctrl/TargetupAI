@@ -150,12 +150,14 @@ describe('P3 · ④ 신뢰 = 고객 후기(붙여 넣은 원문 · 사람이 고
   const copy = Object.fromEntries(t.copy.map((f) => [f.key, f.fallback])) as any;
   const base = { template: t, channel: 'dm' as const, companyId: 'c', line: '앰플 출시', brandName: 'B', logoUrl: null, csPhone: null, pinnedPrimary: null, cards: [], textProducts: [{ name: '앰플' }], heroUpload: null, page: null, benefitAnswer: undefined, periodEnd: null, link: 'https://b.example/' };
   const id = () => Math.random().toString(36).slice(2);
-  it('후기 단계 = DM · 이메일 판정에 있고 인앱엔 없다', async () => {
-    const { buildLineTemplatePlan } = await import('../line-template-plan');
+  it('후기 칸 = DM · 이메일 재료 판에 있고 인앱엔 없다(★ 2026-10-23 옛 템플릿 재료 판 삭제 → 구성 재료 판으로)', async () => {
+    const { buildCompositionPlan, listenLine, getLineComposition } = await import('../one-line-ct');
+    const comp = getLineComposition('spotlight')!;
     const inp = (channel: 'dm' | 'email' | 'inapp') => ({ judged: '앰플 출시', line: '앰플 출시', typed: '앰플 출시', channel, mall: false, inappBlocked: false, upload: true, website: null, mallHome: null, cost: null, lineFp: 'abcdefabcdef' } as any);
-    expect(buildLineTemplatePlan(t, inp('dm')).steps.map((s) => s.key)).toContain('proof');
-    expect(buildLineTemplatePlan(t, inp('email')).steps.map((s) => s.key)).toContain('proof');
-    expect(buildLineTemplatePlan(t, inp('inapp')).steps.map((s) => s.key)).not.toContain('proof');
+    const keys = (ch: 'dm' | 'email' | 'inapp') => buildCompositionPlan(comp, inp(ch), listenLine('앰플 출시')).steps.map((s) => s.key);
+    expect(keys('dm')).toContain('proof');
+    expect(keys('email')).toContain('proof');
+    expect(keys('inapp')).not.toContain('proof');
   });
   it('몸통 검증 = 3건 · 본문 2~300자 · 별점 1~5 정수 · 작성자 비면 「구매 고객」', () => {
     const ok = sanitizeLineStepsBody({ steps: { v: 1 }, proof: [{ body: '촉촉해요', rating: 5 }, { body: '재구매해요', author: '김**', rating: 4 }] }, Date.now());
@@ -227,7 +229,7 @@ describe('P2 R1 · 헤드라인 돈 · 값 · 누출 정정(Codex)', () => {
     expect(modal).toContain("disabled={cost === null || !!short || headlineBusy || judging}");
     expect(modal).toContain('const go = (id: string) => { if (!headlineBusy) setCursor(id); };');
     expect(modal).toContain('if (key === storeKeyRef.current) {');
-    expect(modal).toContain("disabled={headlineBusy} onClick={() => setPane('pick')}");
+    expect(modal).toContain("disabled={judging || headlineBusy} onClick={() => setPane('pick')}");
   });
   it('추천 라우트 = 회사당 동시 1건 · 하루 상한을 AI 앞에서', () => {
     const src = readFileSync(join(SRC, 'routes/line-templates.ts'), 'utf8');

@@ -278,50 +278,15 @@ describe('몰 후보 — 낱말별 있음 · 없음 · 확인하지 못함', () 
 describe('라우트 소스 계약 — 돈 순서', () => {
   const read = (rel: string) => readFileSync(resolve(__dirname, rel), 'utf8');
   const at = (src: string, needle: string) => { const i = src.indexOf(needle); expect(i, needle).toBeGreaterThan(-1); return i; };
-  it('DM — 한 줄 잠금 → 재요청 판정(오늘 · 어제 키) → 금액 확정 → 몰 재조회 → 생성 → 차감(낸 것만 건넴) · 단계 요청은 착지 경로만', () => {
-    const src = read('../../routes/dm.ts');
-    const lock = at(src, 'if (!tryAcquireInflight(stepsLock))');
-    const charged = at(src, "charged = steps ? await lineStepsAttemptCharged(steps, companyId, 'dm', stepsPayload) : await isChargedByKey(companyId, idemKey)");
-    expect(lock).toBeLessThan(charged);
-    expect(src).toContain('if (lineStepsCollected(outcome)) {');
-    expect(src).toContain('if (stepsLockHeld) releaseInflight(stepsLock);');
-    const settle = at(src, "await settleLineStepsPrice(steps, companyId, 'dm', stepsNow)");
-    const mall = at(src, 'await resolveLineMallCards(companyId, lineActor, lineProducts)');
-    const gen = at(src, 'const r = tplDef || compDef ? await generateTemplateDm() : await oneShotGenerate({');
-    const deduct = at(src, 'outcome = await deductCreditOutcome({ companyId, cost: genCost, source: genSource');
-    expect(charged).toBeLessThan(settle);
-    expect(settle).toBeLessThan(mall);
-    expect(mall).toBeLessThan(gen);
-    expect(gen).toBeLessThan(deduct);
-    expect(src).toContain("if (steps && req.body?.land !== 'result')");
-  });
-  it('이메일 — 한 줄 잠금 → 재요청 판정(오늘 · 어제 키) → 금액 확정 → 생성 → 재료 놓기 → 차감 → 낸 것만 건넴(실패 = 503)', () => {
-    const src = read('../../routes/email.ts');
-    const lock = at(src, 'if (!tryAcquireInflight(stepsLock))');
-    const charged = at(src, "charged = steps ? await lineStepsAttemptCharged(steps, auth.companyId, 'email', stepsPayload) : await isChargedByKey(auth.companyId, idemKey)");
-    const settle = at(src, "await settleLineStepsPrice(steps, auth.companyId, 'email', stepsNow)");
-    const gen = at(src, 'const result = await generateEmailSections({');
-    const place = at(src, '(result as any).sections = placeLineLink(placeLineHero(');
-    const deduct = at(src, 'const outcome = await deductCreditOutcome({ companyId: auth.companyId, cost, source: stepsCharge.source, createdBy: auth.userId, ...(idemKey ? { idempotencyKey: idemKey } : {}), throwOnInsufficient: true });');
-    const collected = at(src, 'if (!lineStepsCollected(outcome)) {');
-    for (const [a, b] of [[lock, charged], [charged, settle], [settle, gen], [gen, place], [place, deduct], [deduct, collected]]) expect(a).toBeLessThan(b);
-    expect(src).toContain('if (stepsLockHeld) releaseInflight(stepsLock);');
-  });
-  it('인앱 — 생성기를 묶음 안에서 부르고(안쪽 차감 0) 재료를 놓은 뒤 1회 차감', () => {
-    const src = read('../../routes/cdp.ts');
-    const settle = at(src, "await settleLineStepsPrice(steps, auth.companyId, 'inapp', stepsNow)");
-    const gen = at(src, 'await runInCreditBundle(() => generateInAppMessagePackage(');
-    const place = at(src, 'pkg.message = placeInAppLineMaterials(');
-    const deduct = at(src, 'const outcome = await deductCreditOutcome({ companyId: auth.companyId, cost: price.cost, source: price.source, createdBy: auth.userId, idempotencyKey: idemKey, throwOnInsufficient: true })');
-    const lock = at(src, 'if (!tryAcquireInflight(lineLock))');
-    const charged = at(src, "charged = await lineStepsAttemptCharged(steps, auth.companyId, 'inapp', stepsPayload)");
-    expect(lock).toBeLessThan(charged);
-    expect(charged).toBeLessThan(settle);
-    expect(settle).toBeLessThan(gen);
-    expect(gen).toBeLessThan(place);
-    expect(place).toBeLessThan(deduct);
-    expect(deduct).toBeLessThan(at(src, 'if (!lineStepsCollected(outcome)) {'));
-    expect(src).toContain('if (lineLockHeld) releaseInflight(lineLock);');
+  // ★ 2026-10-23 돈 순서는 한줄 CT 주문 하나(one-line-ct/order.ts)가 소유한다 — 순서 자체는 그 interface 시험(oneline-ct-complete-1023)이 본다.
+  //   여기는 세 라우트의 단계 요청이 그 주문을 지나는지(돈 부품을 라우트에서 다시 엮지 않는지)만 본다.
+  it('DM · 이메일 · 인앱 단계 요청 = 한줄 CT 주문 하나(라우트에 금액 확정 · 같은 시도 판정 · 차감 결말 사본 0) · DM 단계 요청은 착지 경로만', () => {
+    for (const f of ['../../routes/dm.ts', '../../routes/email.ts', '../../routes/cdp.ts']) {
+      const src = read(f);
+      expect(src, f).toContain('const order = await runLineCookOrder({');
+      for (const banned of ['settleLineStepsPrice(', 'lineStepsAttemptCharged(', 'lineStepsLineLockKey(', 'lineStepsAttemptKeys(']) expect(src, `${f} ${banned}`).not.toContain(banned);
+    }
+    expect(read('../../routes/dm.ts')).toContain("if (steps && req.body?.land !== 'result')");
   });
   it('몰 목록 = 카페24 상태 active 만(휴면 · 해제 제외)', () => {
     expect(read('../mall-providers.ts')).toContain("cafe && cafe.status === 'active'");

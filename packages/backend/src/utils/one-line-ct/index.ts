@@ -17,19 +17,19 @@ import { runInCreditBundle } from '../ai-credit-context';
 import { aiLineBaseKeyOfFp } from '../ai-line';
 import { takeDailyQuota, tryAcquireInflight, releaseInflight } from '../inflight-lock';
 import { lineFpLockKey } from '../one-line-steps';
-import { hasConcreteBenefit, lineProductTerms, lineBenefitPrefill } from '../one-line-facts';
 import {
-  lineTermFacts, lineUrls, lineEndDatePrefill, formatLinePeriodEnd, LINE_JUDGE_SOURCE, LINE_PRICE,
+  lineTermFacts, formatLinePeriodEnd, LINE_JUDGE_SOURCE, LINE_PRICE,
   type LineStep, type LineStepsPlan, type LineStepsPlanInput, type LineRichBody,
 } from '../one-line-steps';
 import { lineJudgeCovered } from '../line-steps-context';
 import { withoutBenefitSpans } from '../copy-benefit-detector';
 import { lineCopyExemplars, LineTemplateError } from '../line-template-run';
 import {
-  LINE_COMPOSITIONS, getLineComposition, rankCompositions, composeRichDm, composeRichEmail, composeRichInapp, compositionGate, compositionFallbackCopy, compositionBlockingFor, compositionChannelSlots,
-  type LineComposition, type LineCompositionId, type LineCompositionSlot, type LineRichMaterials, type LineRichCopy, type LineRichProduct,
+  LINE_COMPOSITIONS, getLineComposition, composeRichDm, composeRichEmail, composeRichInapp, compositionGate, compositionFallbackCopy, compositionChannelSlots, diagnoseComposition, diagnosisBlocking,
+  type LineComposition, type LineCompositionId, type LineRichMaterials, type LineRichCopy, type LineRichProduct,
 } from '../line-compositions';
 import { judgeLineWithAi, writeLineRichCopy, type LineCtDrafts, type LineCtGround } from './ai';
+import { listenLine, type LineIntent } from './listen';
 import type { LineMallCard } from '../line-mall-cards';
 import type { LinePageMaterial } from '../line-template-page';
 import type { Section } from '../dm/dm-section-registry';
@@ -43,32 +43,30 @@ export interface LineCompositionPlan extends LineStepsPlan {
 
 
 /**
- * (순수) 구성 + 한 줄 + 회사 사실 → 재료 칸 목록(화면 재료 판 · 칸마다 단계 · 묻는 말 · 채우는 방법).
- *   순서 = 첫 화면 → (비연동) 상품 페이지 주소 → 구성 칸 순서 → 버튼 주소. 한 줄에서 찾은 값 = 제안 칩(기본값 0 · 1017 원칙).
+ * (순수) 구성 + 한 줄(① 의도) + 회사 사실 → 재료 칸 목록(화면 재료 판 · 칸마다 단계 · 묻는 말 · 채우는 방법).
+ *   순서 = 첫 화면 → (비연동) 상품 페이지 주소 → 구성 칸 순서(③ 진단과 같은 채널 칸표) → 버튼 주소. 한 줄에서 찾은 값 = 제안 칩(기본값 0 · 1017 원칙).
  */
-export function buildCompositionPlan(comp: LineComposition, input: LineStepsPlanInput, nowMs: number = Date.now()): LineCompositionPlan {
+export function buildCompositionPlan(comp: LineComposition, input: LineStepsPlanInput, intent: LineIntent): LineCompositionPlan {
   const base: LineCompositionPlan = {
     v: 1, composition: comp.id, channel: input.channel, line_fp: input.lineFp, mall: input.mall,
     block: null, upload: input.upload, steps: [], later: [], offers: [], filled: {}, link_default: null, cost: input.cost,
   };
   if (input.channel === 'inapp' && input.inappBlocked) return { ...base, block: 'INAPP_DISPLAY_UNAVAILABLE' };
   const steps: LineStep[] = [];
-  const typedUrl = lineUrls(input.typed)[0] ?? null;
+  const typedUrl = intent.urls[0] ?? null;
   steps.push({ key: 'hero_photo', level: 'suggest', ask: '맨 위에 크게 세울 그림', why: '첫 화면이 결과를 좌우해요', fill: ['studio', 'upload'] });
   // 비연동 회사의 첫 칸 = 상품 · 행사 페이지 주소 하나(읽어서 표지 사진 · 문구를 채운다) · 한 줄에 주소를 쳤으면 그 주소
   if (typedUrl || !input.mall) steps.push({ key: 'event_page', ...(typedUrl ? { url: typedUrl } : {}), level: 'suggest', ask: '상품 · 행사 페이지 주소', why: '주소 하나면 사진과 문구를 읽어 채워요', fill: ['url'] });
   for (const slot of compositionChannelSlots(comp, input.channel)) {
     const meta = { level: slot.level, ask: slot.ask, why: slot.why, fill: slot.fill, ...(slot.level === 'block' ? { required: true } : {}) };
     if (slot.key === 'products') {
-      const words = lineProductTerms(input.line);
+      const words = intent.productTerms;
       const terms = words.map((item) => ({ item, ...lineTermFacts(input.line, item, words.length) }));
       steps.push({ key: 'products', terms, min: slot.level === 'block' ? slot.min : 0, max: slot.max, ...meta });
     } else if (slot.key === 'benefit') {
-      const suggest = hasConcreteBenefit(input.judged) ? lineBenefitPrefill(input.typed) : null;
-      steps.push({ key: 'benefit', ...meta, ...(suggest ? { suggest } : {}) });
+      steps.push({ key: 'benefit', ...meta, ...(intent.benefit ? { suggest: intent.benefit } : {}) });
     } else if (slot.key === 'periodEnd') {
-      const end = lineEndDatePrefill(input.typed, nowMs);
-      steps.push({ key: 'period', ...meta, ...(end ? { suggest: end } : {}) });
+      steps.push({ key: 'period', ...meta, ...(intent.periodEnd ? { suggest: intent.periodEnd } : {}) });
     } else if (slot.key === 'points') steps.push({ key: 'points', min: slot.min, max: slot.max, ...meta });
     else if (slot.key === 'steps') steps.push({ key: 'usage', min: slot.min, max: slot.max, ...meta });
     else if (slot.key === 'mood') steps.push({ key: 'mood', min: slot.min, max: slot.max, ...meta });
@@ -84,8 +82,8 @@ export function buildCompositionPlan(comp: LineComposition, input: LineStepsPlan
 }
 
 /** 모든 구성의 재료 판(판단 카드 「바꾸기」 = 이 중 하나 · AI 0) */
-export function buildCompositionPlans(input: LineStepsPlanInput, nowMs: number = Date.now()): Record<LineCompositionId, LineCompositionPlan> {
-  return Object.fromEntries(LINE_COMPOSITIONS.map((c) => [c.id, buildCompositionPlan(c, input, nowMs)])) as Record<LineCompositionId, LineCompositionPlan>;
+export function buildCompositionPlans(input: LineStepsPlanInput, intent: LineIntent): Record<LineCompositionId, LineCompositionPlan> {
+  return Object.fromEntries(LINE_COMPOSITIONS.map((c) => [c.id, buildCompositionPlan(c, input, intent)])) as Record<LineCompositionId, LineCompositionPlan>;
 }
 
 /** 화면에 싣는 구성 정보(이름 · 설명 · 색) */
@@ -120,7 +118,8 @@ function rememberJudge(key: string, v: Omit<LineJudgeResult, 'charged'>): void {
 }
 
 function ruleJudge(line: string, industry: string | null, note: LineJudgeResult['note'], paid: boolean): LineJudgeResult {
-  const top = rankCompositions(line, industry)[0];
+  // 판정 화면(gaps)의 추천과 같은 순위(① 듣기 · 업종 반영)
+  const top = listenLine(line, { industry }).rank[0];
   const comp = getLineComposition(top.id)!;
   return { pick: top.id, reason: `${comp.label} 구성이 이 한 줄에 맞아요`, source: 'rule', drafts: {}, charged: false, paid, note };
 }
@@ -205,6 +204,8 @@ export interface LineCookInput {
   periodEnd: string | null;
   link: string | null;
   rich: LineRichBody;
+  /** ★ 2026-10-23 비어 있는 권하는 칸(특징 · 사용 단계 · 꼬리표 · 참여 방법)을 문구 AI 같은 호출이 초안으로 채운다 — 재료 판이 없는 입구(플래너)만 · B2 */
+  fillSuggestDrafts?: boolean;
 }
 
 export interface LineCookDraft {
@@ -265,12 +266,17 @@ export function lineCookMaterials(input: LineCookInput): { comp: LineComposition
 export async function draftLineCook(input: LineCookInput, ai: { userId?: string; source: string }): Promise<LineCookDraft> {
   const { comp, materials } = lineCookMaterials(input);
   // 필수 칸 = 실제로 조립되는 재료로 판정(사진 없는 상품 · 몰에서 빠진 상품은 세지 않는다 · 화면 판정과 같은 기준 · AI · 차감 전 · Codex CT R1)
-  const missing = compositionBlockingFor(comp, materials, input.channel);
-  if (missing.length > 0) throw new LineCookError(400, 'LINE_COMPOSITION_MISSING', `${missing.map((s) => s.ask).join(' · ')}이(가) 있어야 이 구성을 만들 수 있어요. 크레딧은 쓰지 않았어요.`, missing.map((s) => s.key).join(','));
+  const missing = diagnosisBlocking(diagnoseComposition(comp, materials, input.channel));
+  if (missing.length > 0) throw new LineCookError(400, 'LINE_COMPOSITION_MISSING', `${missing.map((s) => s.ask).join(' · ')}이(가) 있어야 이 구성을 만들 수 있어요. 크레딧은 쓰지 않았어요.`, missing.map((s) => s.key).join(','), missing.map((s) => s.step));
   const ground: LineCtGround = { line: withoutBenefitSpans(input.line), brandName: input.brandName, industry: null, productNames: materials.products.map((p) => p.name) };
   try {
-    const r = await writeLineRichCopy(comp, ground, { companyId: input.companyId, userId: ai.userId, source: ai.source, exemplars: await lineCopyExemplars(input.companyId, input.channel) });
-    return { comp, materials, copy: r.copy };
+    const wantDrafts = input.fillSuggestDrafts === true && (materials.points.length === 0 || materials.steps.length === 0);
+    const r = await writeLineRichCopy(comp, ground, { companyId: input.companyId, userId: ai.userId, source: ai.source, exemplars: await lineCopyExemplars(input.companyId, input.channel), drafts: wantDrafts });
+    // 비어 있던 칸만 초안으로(사람이 준 칸은 덮지 않는다)
+    const filled = r.drafts
+      ? { ...materials, points: materials.points.length > 0 ? materials.points : r.drafts.points, steps: materials.steps.length > 0 ? materials.steps : r.drafts.steps }
+      : materials;
+    return { comp, materials: filled, copy: r.copy };
   } catch (err: any) {
     throw new LineCookError(503, 'LINE_TEMPLATE_AI_FAILED', '문구를 만들지 못했어요. 크레딧은 쓰지 않았어요. 잠시 뒤 다시 만들어 주세요.', String(err?.message || ''));
   }
@@ -305,5 +311,6 @@ export function previewCopy(comp: LineComposition): LineRichCopy {
 
 export { getLineComposition, isLineCompositionId } from '../line-compositions';
 export type { LineCtDrafts } from './ai';
+export { listenLine, type LineIntent } from './listen';
 /** 시험 전용 — 판단 기억 비우기 */
 export function _resetLineJudgeMemory(): void { judged.clear(); }

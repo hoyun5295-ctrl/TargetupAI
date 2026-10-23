@@ -27,7 +27,7 @@ import { buildMessageObjective } from '../utils/season-context';
 import { buildLineEventText } from '../utils/one-line-facts';
 import { formatLinePeriodEnd, lineFpLockKey } from '../utils/one-line-steps';
 import { acquireInflightWait, releaseInflight } from '../utils/inflight-lock';
-import { lineCompletionPaid } from '../utils/line-steps-context';
+import { lineJudgeCovered } from '../utils/line-steps-context';
 import { decorateOperatorMessages } from '../utils/operator-message-decorator';
 import { enrichWithCustomFields } from '../utils/messageUtils';
 import { getBrandVoiceFit } from '../utils/brand-voice-prompt';
@@ -145,10 +145,8 @@ export function describeLineFilters(line: string, filters: Record<string, any>, 
  */
 export async function aiLineBasePaid(companyId: string, line: string, now: Date): Promise<boolean> {
   try {
-    for (const key of aiLineBaseKeys(companyId, line, now)) {
-      if (await isChargedByKey(companyId, key)) return true;
-    }
-    return await lineCompletionPaid(companyId, aiLineLineFp(line), now.getTime());
+    // ★ 2026-10-23 판단 몫 판정 한 벌(설계서 docs/2026-10-23-oneline-ct-complete-design.md A5) — 콘텐츠 입구 판단 정산과 같은 함수(같은 키 · 같은 완성 조회)
+    return await lineJudgeCovered(companyId, aiLineLineFp(line), now.getTime());
   } catch (err: any) {
     console.error('[ai-line] 원장 조회 실패:', err?.message);
     throw new AiLineError('CREDIT_LEDGER_UNAVAILABLE', '크레딧 내역을 확인하지 못했어요. 잠시 뒤 다시 시도해 주세요.', 503);

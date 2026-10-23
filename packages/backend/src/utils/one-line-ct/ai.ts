@@ -140,20 +140,48 @@ const COPY_SYSTEM = `당신은 한국 브랜드의 마케팅 카피라이터입�
 - 상품의 효과 · 성분 · 품질을 단정하지 않습니다(최고 · 1위 · 완벽 같은 과장 금지).
 - 긴 줄표 기호와 따옴표 장식을 쓰지 않습니다. 이모지를 쓰지 않습니다.`;
 
-/** 문구 AI 1회 — 실패는 던진다(호출부 503 · 차감 0) */
-export async function writeLineRichCopy(comp: LineComposition, g: LineCtGround, ctx: { companyId: string; userId?: string; source: string; exemplars?: string | null }): Promise<{ copy: LineRichCopy; replaced: LineRichCopyKey[] }> {
+/**
+ * 비어 있는 권하는 칸 초안의 모양(★ 2026-10-23 설계서 docs/2026-10-23-oneline-ct-complete-design.md B2) — 사람이 고칠 재료 판이 없는 입구(마케팅플래너)만 쓴다.
+ *   재료 판 입구는 판단 초안을 사람이 고친 뒤 보내므로 쓰지 않는다(사람이 비운 칸을 AI 가 다시 채우지 않는다).
+ */
+const DRAFT_SPEC: Partial<Record<LineCompositionId, { points?: { n: number; hint: string; tagsOnly?: boolean }; steps?: { n: number; hint: string } }>> = {
+  spotlight: { points: { n: 3, hint: '이 상품의 특징 3가지 · title 14자 · body 40자' }, steps: { n: 3, hint: '사용 순서 3단계 · title · body' } },
+  lookbook: { points: { n: 2, hint: '코디 제안 2가지 · title · body' } },
+  menu: { points: { n: 3, hint: '대표 메뉴의 맛 · 재료 꼬리표 3개 · title 8자 · body 는 빈 글', tagsOnly: true } },
+  event: { points: { n: 3, hint: '참여 방법 3단계 · title · body' } },
+};
+
+/** (순수) 초안 칸 정리 — 판단 초안과 같은 거름(숫자 · 혜택 · 효능 · 한 줄 되풀이) */
+export function sanitizeLineCtDrafts(comp: LineComposition, raw: Record<string, unknown>, ground: string, line: string): { points: LineRichPoint[]; steps: LineRichPoint[] } {
+  const spec = DRAFT_SPEC[comp.id] ?? {};
+  const pts = spec.points ? cleanPoints(raw.points, spec.points.n, ground) : [];
+  return {
+    points: comp.id === 'spotlight' ? keepFeaturePoints(pts, line) : spec.points?.tagsOnly ? pts.map((p) => ({ title: p.title, body: '' })) : pts,
+    steps: spec.steps ? cleanPoints(raw.steps, spec.steps.n, ground) : [],
+  };
+}
+
+/** 문구 AI 1회 — 실패는 던진다(호출부 503 · 차감 0) · drafts = 비어 있는 권하는 칸 초안도 같은 호출에서(B2 · 추가 호출 0) */
+export async function writeLineRichCopy(comp: LineComposition, g: LineCtGround, ctx: { companyId: string; userId?: string; source: string; exemplars?: string | null; drafts?: boolean }): Promise<{ copy: LineRichCopy; replaced: LineRichCopyKey[]; drafts: { points: LineRichPoint[]; steps: LineRichPoint[] } | null }> {
   const fields = comp.copy.map((f) => `- ${f.key} (${f.max}자 이내): ${f.hint}`).join('\n');
+  const spec = ctx.drafts ? DRAFT_SPEC[comp.id] : undefined;
+  const draftFields = spec ? [
+    spec.points ? `- points (배열 ${spec.points.n}개 · {"title","body"}): ${spec.points.hint}` : '',
+    spec.steps ? `- steps (배열 ${spec.steps.n}개 · {"title","body"}): ${spec.steps.hint}` : '',
+    '- 초안 칸은 한 줄에 이미 쓴 말(상품 이름 · 출시 · 혜택 · 기간)을 되풀이하지 않습니다. 쓸 것이 없으면 빈 배열로 둡니다.',
+  ].filter(Boolean).join('\n') : '';
   const user = [
     `[구성] ${comp.label} · ${comp.desc}`,
     `[브랜드] ${g.brandName || '(이름 없음)'}`,
     `[담당자가 쓴 한 줄] ${g.line}`,
     g.productNames.length > 0 ? `[상품] ${g.productNames.slice(0, 8).join(', ')}` : '',
     ctx.exemplars ? `[같은 업종 브랜드가 실제로 보낸 문구 · 문장 리듬 · 길이 · 말투만 참고 · 예시의 숫자 · 혜택 · 상품명 · 브랜드명은 절대 쓰지 않는다]\n${ctx.exemplars.slice(0, 2400)}` : '',
-    `[채울 칸]\n${fields}`,
+    `[채울 칸]\n${fields}${draftFields ? `\n${draftFields}` : ''}`,
     'JSON 으로만 답하세요.',
   ].filter(Boolean).join('\n');
-  const text = await callAIWithFallback({ system: COPY_SYSTEM, userMessage: user, maxTokens: 1200, temperature: 0.6, companyId: ctx.companyId, userId: ctx.userId, source: ctx.source, noCache: true });
+  const text = await callAIWithFallback({ system: COPY_SYSTEM, userMessage: user, maxTokens: spec ? 1800 : 1200, temperature: 0.6, companyId: ctx.companyId, userId: ctx.userId, source: ctx.source, noCache: true });
   const parsed = extractJsonFromAiText<Record<string, unknown>>(text);
   if (!parsed || typeof parsed !== 'object') throw new Error('LINE_COPY_EMPTY');
-  return sanitizeLineRichCopy(comp, parsed, lineCtGroundText(g));
+  const ground = lineCtGroundText(g);
+  return { ...sanitizeLineRichCopy(comp, parsed, ground), drafts: spec ? sanitizeLineCtDrafts(comp, parsed, ground, g.line) : null };
 }

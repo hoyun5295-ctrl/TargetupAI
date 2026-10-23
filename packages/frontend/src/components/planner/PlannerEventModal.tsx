@@ -43,7 +43,7 @@ const CREDIT_CONFIRM_MIN = 20;
 const BUILD_CHANNELS: Array<'dm' | 'email'> = ['dm', 'email'];
 const CHANNEL_ORDER: PlannerChannelKey[] = ['sms', 'dm', 'email'];
 /** 서버 관문(plannerTemplateMissing)의 빠진 재료 키 → 화면 말 */
-const MISSING_TEXT: Record<string, string> = { link: '행사 페이지 주소', products: '상품', benefit: '혜택 문구', product_photos: '사진 있는 몰 상품', photos: '사진(첫 화면 말고 더)' };
+const MISSING_TEXT: Record<string, string> = { link: '행사 페이지 주소', products: '상품', benefit: '혜택 문구', product_photos: '사진 있는 몰 상품', photos: '사진(첫 화면 말고 더)', period: '행사 마지막 날' };
 
 interface Tp { channel: PlannerChannelKey; timing: TimingRule }
 type ChannelRun = 'wait' | 'busy' | 'done' | 'fail';

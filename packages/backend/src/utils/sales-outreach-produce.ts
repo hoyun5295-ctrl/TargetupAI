@@ -1038,7 +1038,8 @@ export function buildPosterTypography(texts: OutreachPosterTexts, opts: { brandC
   const wh = top ? 1792 / 2400 : 16 / 9;
   const fit = (base: number, len: number) => Math.max(0.02, Math.min(base, (0.9 * wh) / Math.max(1, len)));
   const titleSize = fit(top ? (title.length > 14 ? 0.052 : title.length > 9 ? 0.062 : 0.072) : (title.length > 14 ? 0.09 : 0.12), title.length);
-  if (texts.label) out.push({ text: texts.label, fontPath: opts.fontPath, size: top ? 0.022 : 0.045, color: '#ffffff', align: 'center', x: 0.5, y: top ? 0.065 : 0.60, role: 'badge', badgeColor: opts.brandColor || '#111111', weight: 'bold' });
+  // ★2026-10-22 꼬리표 바탕 = 흰 글자 대비 보정 색(DM · 메일과 같은 CT) — 원본 브랜드색이 흰색이면 흰 바탕에 흰 글자였다(토니모리 · 서수란 접수)
+  if (texts.label) out.push({ text: texts.label, fontPath: opts.fontPath, size: top ? 0.022 : 0.045, color: '#ffffff', align: 'center', x: 0.5, y: top ? 0.065 : 0.60, role: 'badge', badgeColor: accessiblePrimaryOf(opts.brandColor) || OUTREACH_NEUTRAL_PRIMARY, weight: 'bold' });
   if (title) out.push({ text: title, fontPath: opts.fontPath, size: titleSize, color: titleColor, align: 'center', x: 0.5, y: top ? 0.115 : 0.69, weight: 'bold', ...effect });
   if (texts.subtitle) out.push({ text: texts.subtitle, fontPath: opts.fontPath, size: fit(top ? 0.03 : 0.055, texts.subtitle.length), color: subColor, align: 'center', x: 0.5, y: top ? (0.115 + titleSize + 0.035) : 0.86, weight: 'bold', ...effect });
   return out as ComposeTypography[];
@@ -2250,7 +2251,23 @@ const CARD_BENEFIT_TOKEN_RE = /~?\s*\d[\d,.]*\s*(?:%|원|만원|천원|퍼센트
  * 면허 없는 "최대 50% 기획전" 을 원문으로 실으면 차단기가 headline 을 prop 째 비워 업체명이 대체된다(HERO_FALLBACK 상시) — 그 자리를 막는다.
  */
 /** 연도 없는 날짜·기간 조각("9.1(화) ~ 9.6(일)" · "~ 9/30") — 제목·라벨에서 걷는다(이니스프리 첫 실측: 카드 첫 줄이 날짜라 헤드라인·버튼이 날짜가 됐다) */
-const CARD_DATE_TOKEN_RE = /(?:\d{1,2}\s*[./]\s*\d{1,2}|\d{1,2}월\s*\d{1,2}일)(?:\s*\([월화수목금토일]\))?(?:\s*[~\-–]\s*(?:\d{1,2}\s*[./]\s*\d{1,2}|\d{1,2}월\s*\d{1,2}일)(?:\s*\([월화수목금토일]\))?)?|\([월화수목금토일]\)/g;
+// ★2026-10-22 Codex 1R·2R — 금액·퍼센트 표기(범위 포함 「9.3~9.9%」 · 「129.5만원」 · 「1,299.9원」)는 날짜를 걷기 **전에** 통째로 보호하고 걷은 뒤 되돌린다.
+//   옛: 날짜 정규식이 숫자 안쪽(「129.5」의 「29.5」)과 범위의 앞 끝(「9.3~」)을 날짜로 걷어 면허 있는 제목에 틀린 가격이 실렸다.
+//   경계를 정규식에 덧대면(1R) 쉼표 뒤 진짜 날짜를 놓치고 범위가 깨졌다(2R) — 같은 뿌리라 보호 → 걷기 → 되돌리기로 나눈다.
+// 단위는 두 종류(Codex 3R·4R 같은 뿌리): 모호하지 않은 단위(% · 퍼센트 · 만원 · 천원) = 띄어 쓰든 뒤에 조사가 오든 늘 금액(「1.5 만원에」)
+//   · 모호한 맨 「원」 = 낱말 머리일 수 있다(「9.6 원피스」 「10/5 원데이」) → 숫자에 붙었거나(「2,026원」 「1천원에」는 앞 갈래) 띄어 썼으면 뒤에 글자가 없을 때만
+//   ⚠ 알려진 한계(Codex 5R · Harold 1022 「닫기」): 「9.1~9.6 천원의 행복」처럼 날짜 뒤 띄어 쓴 천원/만원으로 시작하는 행사명은 「1.5 만원에」(가격)와
+//     글자 모양이 같아 가격 쪽으로 본다 → 면허 있으면 날짜가 남고, 없으면 그 줄이 강등된다. 틀린 가격은 나가지 않는다(모호하면 가격을 지킨다).
+const CARD_QTY_RE = /\d[\d,.]*\s*(?:[~\-–]\s*\d[\d,.]*\s*)?(?:%|퍼센트|만원|천원)|\d[\d,.]*(?:\s*[~\-–]\s*\d[\d,.]*)?(?:원|\s+원(?![가-힣A-Za-z0-9]))/g;
+// 날짜 정규식은 종전 그대로 · 숫자에 붙은 자리(앞이 숫자 · 숫자+소수점/쉼표)만 날짜로 보지 않는다(문장 쉼표 뒤 「기획전,9.1~9.6」은 걷는다)
+const CARD_DATE_TOKEN_RE = /(?<!\d|\d[.,])(?:\d{1,2}\s*[./]\s*\d{1,2}|\d{1,2}월\s*\d{1,2}일)(?:\s*\([월화수목금토일]\))?(?:\s*[~\-–]\s*(?:\d{1,2}\s*[./]\s*\d{1,2}|\d{1,2}월\s*\d{1,2}일)(?:\s*\([월화수목금토일]\))?)?|\([월화수목금토일]\)/g;
+
+/** 제목에서 날짜 조각만 걷는다(순수) — 금액·퍼센트 표기는 보호했다가 되돌린다 */
+function stripCardDates(title: string): string {
+  const kept: string[] = [];
+  const masked = String(title || '').replace(CARD_QTY_RE, (m) => { kept.push(m); return `\u0000${kept.length - 1}\u0000`; });
+  return masked.replace(CARD_DATE_TOKEN_RE, ' ').replace(/\u0000(\d+)\u0000/g, (_m, i) => kept[Number(i)] ?? '');
+}
 
 /** 낱말 경계에서 자른다(n자 안에서 마지막 공백 · 공백이 앞 절반 안에 없으면 그냥 자른다) */
 export function cutAtWord(s: string, n: number): string {
@@ -2266,11 +2283,12 @@ export function cutAtWord(s: string, n: number): string {
 export function headlineFromCard(card: { title: string } | null | undefined, licensed: boolean, minLen = 6, maxLen = 18): { headline: string; demoted: boolean } {
   // 날짜 조각은 면허와 무관하게 제목이 아니다(기간은 sub_copy·body 가 따로 든다)
   // ★ 2026-09-24 품질 A — maxLen 인자(기본 18 = 포스터·제목·고객 입구 종전 · DM 행사 카드만 30)
-  const raw = String(card?.title || '').replace(CARD_DATE_TOKEN_RE, ' ').replace(/^[\s~·\-–:,]+|[\s~·\-–:,]+$/g, '').replace(/\s+/g, ' ').trim();
+  const raw = stripCardDates(String(card?.title || '')).replace(/^[\s~·\-–:,]+|[\s~·\-–:,]+$/g, '').replace(/\s+/g, ' ').trim();
   if (!raw || !/[가-힣A-Za-z]{2,}/.test(raw)) return { headline: '', demoted: true };
   if (licensed) return { headline: cutAtWord(raw, maxLen), demoted: false };
   // ★ 2026-09-09(6) 수치를 걷어낸 뒤 비어 버린 괄호("<3+1>" → "< >")는 찌꺼기다 → 통째로 뺀다(톤28 실측 "오늘핫딜 < > 지성두피")
-  const base = raw.replace(CARD_BENEFIT_TOKEN_RE, ' ').replace(/[<(\[［（【]\s*[>)\]］）】]/g, ' ').replace(/^[\s~·\-–:,]+|[\s~·\-–:,]+$/g, '').replace(/\s+/g, ' ').trim();
+  // ★2026-10-22 범위 금액(「9.3~9.9%」)은 통째로 먼저 걷는다 — 날짜 걷기가 범위 앞 끝을 더는 걷지 않으므로 「9.3」만 남지 않게
+  const base = raw.replace(CARD_QTY_RE, ' ').replace(CARD_BENEFIT_TOKEN_RE, ' ').replace(/[<(\[［（【]\s*[>)\]］）】]/g, ' ').replace(/^[\s~·\-–:,]+|[\s~·\-–:,]+$/g, '').replace(/\s+/g, ' ').trim();
   const head = cutAtWord(base, maxLen);
   if (head.length < minLen || !/[가-힣A-Za-z]{2,}/.test(head)) return { headline: '', demoted: true };
   return { headline: head, demoted: false };
@@ -3545,7 +3563,7 @@ export interface ProposalEmailInput {
   /** ★ 2026-09-23 담당자명(사람이 넣은 값 · 있으면 서두 첫 줄 호칭) */
   contactName?: string | null;
   /** ★ 2026-09-23 시안에 담은 확정 행사(제목 · 기간 원문 · 누른 순서 · ≤3) — 원문 인용 덤프 대신 요약 카드 */
-  confirmedEvents?: Array<{ title: string; periodRaw?: string | null }> | null;
+  confirmedEvents?: Array<{ title: string; periodRaw?: string | null; licensed?: boolean; benefit?: string | null }> | null;
   /**
    * ★ 2026-09-23 담당자 직접 발송 법정 footer(불변 47) — 있으면 조립 시점에 EMAIL_FOOTER_SLOT 에 buildEmailAdFooter 를 넣는다
    *   (전송자 명칭 · 발신 주소 · 수신거부 링크). 발송 html = 이 asset html 이다(발송 시점 변형은 제목 접두 1개뿐).
@@ -3586,13 +3604,21 @@ export function buildOutreachSubject(guide: OutreachStyleGuide, companyName: str
   return c.subjectGeneric(companyName);
 }
 
-/** 확정 행사 요약 줄(순수) — 제목(날짜·수치 걷음) + 기간 줄 · 없으면 빈 배열 */
-function confirmedEventLines(events: ProposalEmailInput['confirmedEvents']): string[] {
+/**
+ * 확정 행사 요약 줄(순수) — 제목 + (면허 있으면) 혜택 + 기간 줄 · 없으면 빈 배열.
+ * ★2026-10-22 면허를 따른다 — 면허 있음 = 제목 원문(30자 · DM 행사 카드와 같은 상한) + 혜택 조각 · 없음 = 종전(날짜·수치 걷은 제목).
+ *   옛: 면허를 받지 않아 늘 걷었다(제시뉴욕 「아울렛 시즌오프 30%+40%」 → 「아울렛 시즌오프」).
+ */
+export function confirmedEventLines(events: ProposalEmailInput['confirmedEvents']): string[] {
   return (Array.isArray(events) ? events : []).slice(0, 3).map((e) => {
-    const title = headlineFromCard({ title: String(e?.title || '') }, false).headline;
+    const licensed = e?.licensed === true;
+    const title = headlineFromCard({ title: String(e?.title || '') }, licensed, 6, licensed ? 30 : 18).headline;
     if (!title) return '';
+    const benefitRaw = licensed ? String(e?.benefit || '').replace(/\s+/g, ' ').trim() : '';
+    const benefit = benefitRaw && !title.includes(benefitRaw) ? cutAtWord(benefitRaw, 30) : '';
+    const head = benefit ? `${title} ${benefit}` : title;
     const period = e?.periodRaw ? periodLineOf(e.periodRaw) : '';
-    return period ? `${title} · ${period}` : title;
+    return period ? `${head} · ${period}` : head;
   }).filter(Boolean);
 }
 

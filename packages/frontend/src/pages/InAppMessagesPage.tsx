@@ -58,7 +58,7 @@ import EditShell, { type SaveTone } from '../components/make/EditShell';
 // ★ 2026-10-05 한줄로 시그니처(설계서 docs/2026-10-05-hanjul-signature-design.md §5) — 한 줄 원문 · 완성도 줄 · 혜택 자리 0크레딧 채우기
 import ZoneCompletion from '../components/zone/ZoneCompletion';
 import { LineFacts, LineFactsSheet, typedBenefit, type LineFactsValues } from '../components/zone/LineFacts';
-import { countSlots, fillSlots, fillSlotsDeep, stringsDeep, appendToOneLine, fetchOneLineGaps, newAttemptToken, clearLineStepsAnswers } from '../utils/one-line';
+import { countSlots, fillSlots, fillSlotsDeep, stringsDeep, appendToOneLine, fetchOneLineGaps, newAttemptToken, clearLineStepsAnswers, lineMissingSteps } from '../utils/one-line';
 import LineStepsModal, { lineStepsFailNotice, type LineStepsOpen } from '../components/zone/LineStepsModal';   // ★ 2026-10-17 한 줄 단계 모달
 import type { FixItem } from '../utils/make-flow';
 import InAppEntryGallery from '../components/inapp/InAppEntryGallery';
@@ -607,7 +607,7 @@ export default function InAppMessagesPage() {
           if (g.plan.block) { setShowDisplayBlock(true); return; }
           // ★ 2026-10-17 템플릿 캠페인 — 웹(자사몰) 인앱만(center_modal 블록 = 웹 SDK 기준 · 앱 SDK 표시는 미검증이라 앱은 지금 단계 흐름 그대로)
           const inappCh = channelOverride || channel || 'web';
-          setInappSteps({ open: { line: t, reads, plan: g.plan, fallbackCost: g.stepsCost, ...(inappCh === 'web' && g.templatesEnabled && g.templatePlans ? { templates: { ranks: g.templates, plans: g.templatePlans } } : {}), ...(inappCh === 'web' && g.compositions ? { compositions: g.compositions } : {}) }, channel: inappCh });
+          setInappSteps({ open: { line: t, reads, plan: g.plan, fallbackCost: g.stepsCost, ...(inappCh === 'web' && g.compositions ? { compositions: g.compositions } : {}) }, channel: inappCh });
           return;
         }
       } finally {
@@ -645,7 +645,7 @@ export default function InAppMessagesPage() {
         if (steps) {
           // ★ 2026-10-17 단계 모달 요청 실패 = 크레딧 없이 만들기 단계로 다시 연다(답 그대로 · 바뀐 금액 · 쓸 수 없는 몰 상품은 뺀다)
           setAiGenerating(false);
-          setInappSteps({ open: { ...steps.reopen, atMake: true, notice: lineStepsFailNotice(String(data.code || ''), String(data.error || ''), Array.isArray(data.excluded) ? data.excluded : []), dropPicks: data.code === 'MALL_PRODUCTS_UNAVAILABLE', costOverride: data.code === 'PRICE_CHANGED' && Number.isFinite(data.cost) ? Number(data.cost) : steps.reopen.costOverride }, channel: channelOverride || channel || 'web' });
+          setInappSteps({ open: { ...steps.reopen, atMake: true, focus: lineMissingSteps(data)[0] ?? null, notice: lineStepsFailNotice(String(data.code || ''), String(data.error || ''), Array.isArray(data.excluded) ? data.excluded : []), dropPicks: data.code === 'MALL_PRODUCTS_UNAVAILABLE', costOverride: data.code === 'PRICE_CHANGED' && Number.isFinite(data.cost) ? Number(data.cost) : steps.reopen.costOverride }, channel: channelOverride || channel || 'web' });
           return;
         }
         showToast(data.error || 'AI 생성 실패', { type: 'error' });

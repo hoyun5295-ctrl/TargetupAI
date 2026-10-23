@@ -381,7 +381,7 @@ export default function DmBuilderPage() {
           // ★ 2026-10-17 단계 모달 요청이 실패하면 크레딧 없이 만들기 단계로 다시 연다(답은 그대로 · 금액이 바뀌었으면 새 금액 · 쓸 수 없는 몰 상품은 뺀다)
           const st = opts.steps.reopen;
           clearInterval(stepTimer);
-          setLineSteps({ ...st, atMake: true, notice: lineStepsFailNotice(r.code, r.error, r.excluded), dropPicks: r.code === 'MALL_PRODUCTS_UNAVAILABLE', costOverride: r.code === 'PRICE_CHANGED' && r.cost !== undefined ? r.cost : st.costOverride });
+          setLineSteps({ ...st, atMake: true, focus: r.missing?.[0] ?? null, notice: lineStepsFailNotice(r.code, r.error, r.excluded), dropPicks: r.code === 'MALL_PRODUCTS_UNAVAILABLE', costOverride: r.code === 'PRICE_CHANGED' && r.cost !== undefined ? r.cost : st.costOverride });
           return;
         }
         if (!r.ok) {
@@ -1081,7 +1081,7 @@ export default function DmBuilderPage() {
       if (g?.stepsEnabled && g.plan) {
         if (customerGate.isEmpty) { setShowDataGate(true); return; }
         // ★ 2026-10-17 템플릿 캠페인(스위치 켠 회사) — 고르기 판부터(추천 · 템플릿마다 재료 단계는 서버 판정)
-        setLineSteps({ line: t, reads, plan: g.plan, fallbackCost: g.stepsCost, ...(g.templatesEnabled && g.templatePlans ? { templates: { ranks: g.templates, plans: g.templatePlans } } : {}), ...(g.compositions ? { compositions: g.compositions } : {}) });
+        setLineSteps({ line: t, reads, plan: g.plan, fallbackCost: g.stepsCost, ...(g.compositions ? { compositions: g.compositions } : {}) });
         return;
       }
       setLineValues({});

@@ -33,7 +33,7 @@ import { runInCreditBundle } from './ai-credit-context';
 import { getLineTemplate, type LineTemplate } from './design-core/line-templates';
 import { draftLineTemplate, buildLineTemplateDm, buildLineTemplateEmail, lineTemplateBrand, lineTemplateDmMarker } from './line-template-run';
 import { getLineComposition, draftLineCook, buildLineCookDm, buildLineCookEmail, lineCompositionDmMarker } from './one-line-ct';
-import type { LineComposition } from './line-compositions';
+import { diagnoseComposition, diagnosisBlocking, compositionChannelSlots, type LineComposition, type LineRichMaterials } from './line-compositions';
 import { linePinnedPrimary, mergeLineBrandKit, lineEmailDesign, type LineMallCard } from './line-mall-cards';
 import { resolveLinePage, isLinePageError } from './line-template-page';
 import { lineStepsCollected } from './line-steps-context';
@@ -118,11 +118,26 @@ export function plannerTemplateDef(id: unknown): PlannerTemplateDef | null {
   const comp = getLineComposition(id);
   return comp ? { kind: 'comp', comp } : null;
 }
-/** (순수) 틀이 정한 상품 최소 · 혜택 필수 · 분위기 사진 최소(구성 = 막는 칸만) */
-function plannerNeeds(d: PlannerTemplateDef): { productsMin: number; benefitRequired: boolean; moodMin: number } {
-  if (d.kind === 'tpl') return { productsMin: d.t.needs.products.min, benefitRequired: d.t.needs.benefit === 'required', moodMin: 0 };
-  const slot = (k: string) => d.comp.slots.find((s) => s.key === k && s.level === 'block');
-  return { productsMin: slot('products')?.min ?? 0, benefitRequired: !!slot('benefit'), moodMin: slot('mood')?.min ?? 0 };
+/** (순수) 옛 템플릿이 정한 상품 최소 · 혜택 필수(구성 5종 = ③ 진단 `diagnoseComposition` 한 곳) */
+function plannerNeeds(t: LineTemplate): { productsMin: number; benefitRequired: boolean } {
+  return { productsMin: t.needs.products.min, benefitRequired: t.needs.benefit === 'required' };
+}
+
+/** 구성 막는 칸 → 플래너 빠진 재료 키(화면 문구 표와 같은 이름) */
+const PLANNER_SLOT_KEY: Partial<Record<keyof LineRichMaterials, string>> = { products: 'product_photos', mood: 'photos', benefit: 'benefit', periodEnd: 'period' };
+
+/**
+ * (순수) 플래너 구성 재료(★ 2026-10-23 진단 한 곳 · A1) — 견적 · 생성 관문이 요리와 같은 진단을 쓴다.
+ *   상품 = 사진 있는 몰 상품(구성은 사진 없는 상품을 싣지 않는다) · 첫 사진 = 첫 화면 · 나머지 = 분위기 사진 · 마감 = 행사 마지막 날.
+ */
+export function plannerCompositionMaterials(ev: Pick<PlannerEventRow, 'benefitText' | 'endsOn'>, m: PlannerMaterials): LineRichMaterials {
+  const ph = plannerCompositionPhotos(m);
+  return {
+    brandName: '', poster: ph.hero ? { url: ph.hero } : null,
+    products: m.products.filter((p) => p.source === 'mall' && !!p.imageUrl).map((p) => ({ name: p.name, price: p.price ?? null, image_url: String(p.imageUrl) })),
+    points: [], steps: [], mood: ph.mood, proof: [],
+    benefit: String(ev.benefitText || '').trim() || null, periodEnd: ev.endsOn || null, periodLabel: null, link: m.link || null,
+  };
 }
 
 /**
@@ -139,18 +154,26 @@ export function plannerCompositionPhotos(m: PlannerMaterials): { hero: string | 
 }
 
 /** (순수) 템플릿이 정한 필수 재료 — 버튼 주소(빈 주소 = 발행 때 막힌다) · 상품 최소 · 혜택 필수 · (구성) 사진 있는 상품 · 분위기 사진. 빈 배열 = 통과. */
-export function plannerTemplateMissing(t: LineTemplate | PlannerTemplateDef, ev: Pick<PlannerEventRow, 'benefitText'>, m: PlannerMaterials): string[] {
+export function plannerTemplateMissing(t: LineTemplate | PlannerTemplateDef, ev: Pick<PlannerEventRow, 'benefitText'> & Partial<Pick<PlannerEventRow, 'endsOn'>>, m: PlannerMaterials, channel: 'dm' | 'email' = 'dm'): string[] {
   const d: PlannerTemplateDef = 'kind' in t ? t : { kind: 'tpl', t };
-  const need = plannerNeeds(d);
   const missing: string[] = [];
   if (!m.link) missing.push('link');
   if (d.kind === 'comp') {
-    const ph = plannerCompositionPhotos(m);
-    if (ph.productsWithPhoto < need.productsMin) missing.push('product_photos');
-    if (ph.mood.length < need.moodMin) missing.push('photos');
-  } else if (m.products.length < need.productsMin) missing.push('products');
+    for (const s of diagnosisBlocking(diagnoseComposition(d.comp, plannerCompositionMaterials({ benefitText: ev.benefitText, endsOn: ev.endsOn ?? '' }, m), channel))) {
+      const k = PLANNER_SLOT_KEY[s.key];
+      if (k && !missing.includes(k)) missing.push(k);
+    }
+    return missing;
+  }
+  const need = plannerNeeds(d.t);
+  if (m.products.length < need.productsMin) missing.push('products');
   if (need.benefitRequired && !String(ev.benefitText || '').trim()) missing.push('benefit');
   return missing;
+}
+
+/** (순수) 구성 막는 칸의 최소 개수(빠진 재료 문장 · 재조회 뒤 다시 보기) */
+function plannerSlotMin(comp: LineComposition, channel: 'dm' | 'email', key: keyof LineRichMaterials): number {
+  return compositionChannelSlots(comp, channel).find((s) => s.key === key && s.level === 'block')?.min ?? 0;
 }
 
 /** (순수) 템플릿 견적 — 엔진과 같은 키 · 같은 단가(판독 0) · 크레딧제 미적용 = 0 */
@@ -203,14 +226,15 @@ export async function buildPlannerTemplateChannel(input: {
   const { ev, materials, channel } = input;
   const def = plannerTemplateDef(materials.template?.id);
   if (!def || !materials.template) throw new PlannerBuildError(400, 'TEMPLATE_INVALID', '고른 템플릿을 찾지 못했어요. 템플릿을 다시 골라 주세요.');
-  const need = plannerNeeds(def);
-  const missing = plannerTemplateMissing(def, ev, materials);
+  const productsMin = def.kind === 'comp' ? plannerSlotMin(def.comp, channel, 'products') : plannerNeeds(def.t).productsMin;
+  const missing = plannerTemplateMissing(def, ev, materials, channel);
   if (missing.length > 0) {
     throw new PlannerBuildError(400, 'MATERIAL_THIN', missing.includes('link') ? '버튼을 누르면 갈 행사 페이지 주소를 넣어 주세요.'
-      : missing.includes('products') ? `이 템플릿은 상품이 ${Math.max(1, need.productsMin)}개 이상 있어야 해요.`
-        : missing.includes('product_photos') ? `이 구성은 사진 있는 몰 상품이 ${Math.max(1, need.productsMin)}개 이상 있어야 해요.`
-          : missing.includes('photos') ? `이 구성은 첫 화면 사진 말고도 사진이 ${need.moodMin}장 더 있어야 해요.`
-            : '이 템플릿은 혜택을 적어야 해요.', { missing });
+      : missing.includes('products') ? `이 템플릿은 상품이 ${Math.max(1, productsMin)}개 이상 있어야 해요.`
+        : missing.includes('product_photos') ? `이 구성은 사진 있는 몰 상품이 ${Math.max(1, productsMin)}개 이상 있어야 해요.`
+          : missing.includes('photos') && def.kind === 'comp' ? `이 구성은 첫 화면 사진 말고도 사진이 ${plannerSlotMin(def.comp, channel, 'mood')}장 더 있어야 해요.`
+            : missing.includes('period') ? '행사 마지막 날을 정해 주세요.'
+              : '이 템플릿은 혜택을 적어야 해요.', { missing });
   }
   let creditEnabled: boolean;
   try { creditEnabled = await deps.creditEnabled(ev.companyId); } catch {
@@ -232,7 +256,7 @@ export async function buildPlannerTemplateChannel(input: {
   }
   const goods = plannerTemplateProducts(products, lookups);
   // ★ Codex B 1R — 재조회 뒤 실제로 실릴 상품 수로 필수 재료를 다시 본다(유일한 상품이 품절로 빠지면 상품 없는 완성본에 생성비가 나간다 · AI · 저장 · 차감 전에 막는다)
-  if ((def.kind === 'comp' ? goods.cards.length : goods.cards.length + goods.textProducts.length) < need.productsMin) {
+  if ((def.kind === 'comp' ? goods.cards.length : goods.cards.length + goods.textProducts.length) < productsMin) {
     throw new PlannerBuildError(400, 'MATERIAL_THIN', '고른 상품이 품절이거나 몰에서 확인되지 않아 이 템플릿을 만들 수 없어요. 상품을 다시 골라 주세요.', { missing: ['products'] });
   }
   // ★ Codex B 1R — 같은 시도가 이미 냈으면(차감 뒤 접점 연결 · 기록이 실패한 재시도) 잔액을 다시 보지 않는다 — 차감은 같은 키 = 중복 0 ·
@@ -264,6 +288,8 @@ export async function buildPlannerTemplateChannel(input: {
       pinnedPrimary: pinned, cards: goods.cards, heroUpload: hero, heroAsIs: false, proof: [], page: null,
       benefitAnswer: String(ev.benefitText || '').trim() || null, periodEnd: ev.endsOn, link: materials.link || null,
       rich: { points: [], usage: [], mood: plannerCompositionPhotos(materials).mood, couponCode: null, store: null, benefitNote: null, categories: [] },
+      // ★ 2026-10-23 B2 — 플래너엔 고칠 재료 판이 없다 → 비어 있는 특징 · 사용 단계 · 꼬리표 · 참여 방법을 문구 AI 같은 호출이 초안으로(추가 호출 · 과금 0)
+      fillSuggestDrafts: true,
     }, { userId: input.userId || undefined, source: genKey }))
     : null;
   if (cook && ev.title.trim().length <= 20) cook.copy.headline = ev.title.trim();
@@ -375,7 +401,7 @@ export async function quotePlannerBuild(input: { companyId: string; eventId: str
 }
 
 /** ★ 2026-10-18 템플릿 견적(저장 전 · 저장 뒤 공통) — 스위치 · 필수 재료 · 엔진과 같은 키의 금액 */
-async function quotePlannerTemplate(ev: Pick<PlannerEventRow, 'companyId' | 'benefitText'>, materials: PlannerMaterials, channel: 'dm' | 'email'): Promise<PlannerBuildQuote> {
+async function quotePlannerTemplate(ev: Pick<PlannerEventRow, 'companyId' | 'benefitText'> & Partial<Pick<PlannerEventRow, 'endsOn'>>, materials: PlannerMaterials, channel: 'dm' | 'email'): Promise<PlannerBuildQuote> {
   if (!plannerTemplatesEnabled(ev.companyId)) throw new PlannerBuildError(400, 'TEMPLATE_DISABLED', '템플릿 완성본은 아직 이 회사에 열리지 않았어요. 템플릿 없이 담아 주세요.');
   const t = plannerTemplateDef(materials.template?.id);
   if (!t) throw new PlannerBuildError(400, 'TEMPLATE_INVALID', '고른 템플릿을 찾지 못했어요. 템플릿을 다시 골라 주세요.');
@@ -384,7 +410,7 @@ async function quotePlannerTemplate(ev: Pick<PlannerEventRow, 'companyId' | 'ben
     throw new PlannerBuildError(503, 'CREDIT_LOOKUP_UNAVAILABLE', '크레딧 잔액을 확인하지 못했어요. 잠시 후 다시 시도해 주세요.');
   }
   const q = plannerTemplateQuote(channel, creditEnabled);
-  const missing = plannerTemplateMissing(t, ev, materials);
+  const missing = plannerTemplateMissing(t, ev, materials, channel);
   return { channel, total: q.total, parts: q.parts, gate: missing.length === 0 ? { ok: true } : { ok: false, missing }, creditEnabled };
 }
 
@@ -410,7 +436,7 @@ export async function quotePlannerDraft(input: {
     if (!readiness.ok) {
       throw new PlannerBuildError(400, 'CHANNEL_LOCKED', readiness.reason || '지금은 이 채널을 만들 수 없습니다.', { settingsPath: readiness.settingsPath, channel });
     }
-    if (input.materials.template) { out.push(await quotePlannerTemplate({ companyId: input.companyId, benefitText: input.draft.benefitText }, input.materials, channel)); continue; }
+    if (input.materials.template) { out.push(await quotePlannerTemplate({ companyId: input.companyId, benefitText: input.draft.benefitText, endsOn: input.draft.endsOn }, input.materials, channel)); continue; }
     const q = await quoteFromBuildMaterials({
       companyId: input.companyId,
       materials: buildPlannerEngineMaterials(input.draft, input.materials, channel, QUOTE_TOKEN, 0),

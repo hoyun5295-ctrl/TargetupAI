@@ -19,7 +19,7 @@ import { isLineCompositionId, type LineCompositionId, type LineSlotLevel, type L
 export type LineStepsChannel = 'dm' | 'email' | 'inapp';
 export const LINE_STEPS_CHANNELS: readonly LineStepsChannel[] = ['dm', 'email', 'inapp'];
 
-/** 단계 키 닫힌 목록(화면 부품표와 짝 테스트로 묶인다) · event_page · products = 템플릿 캠페인 단계(★ 2026-10-17 · line-template-plan.ts) */
+/** 단계 키 닫힌 목록(화면 부품표와 짝 테스트로 묶인다) · event_page · products = 템플릿 캠페인 단계(★ 2026-10-17 · ★ 2026-10-23 구성 재료 판 = one-line-ct buildCompositionPlan) */
 // ★ 2026-10-21 proof = 고객 후기(④ 신뢰 · 어느 연동에도 없어 묻는다 · 설계서 docs/2026-10-21-oneline-content-design.md §3-2)
 // ★ 2026-10-22 한줄 CT 구성 5종 칸(설계서 docs/2026-10-22-oneline-ct-design.md §11-2) — points = 특징 · 코디 · 꼬리표 · 참여 방법 · usage = 사용 단계
 //   · mood = 분위기 · 대표 사진 · coupon_code = 할인 코드 · store = 매장 안내
@@ -93,6 +93,11 @@ export function lineEndDatePrefill(line: string, nowMs: number): string | null {
     if (taken.some(([s, e]) => at < e && at + m[0].length > s)) continue;   // 연도 있는 날짜의 일부 = 이미 읽었다(연도 보존)
     found.push({ at, end: at + m[0].length, y: null, m: Number(m[1]), d: Number(m[2]) });
   }
+  // ★ 2026-10-23 날짜 꼴이 하나도 없을 때만 상대 마감(「이번 달 말까지」 · 「이번 주말까지」 · 「오늘까지」)을 읽는다(설계서 docs/2026-10-23-oneline-ct-complete-design.md B4)
+  if (found.length === 0) {
+    const rel = lineRelativeEndDate(t, nowMs);
+    return rel && isValidLinePeriodEnd(rel, nowMs) ? rel : null;
+  }
   if (found.length !== 1) return null;
   // 읽은 날짜를 지운 나머지에 숫자 날짜 꼴이 남아 있으면(기간의 다른 끝 · 금액 소수) 모호 = 비운다
   let rest = t;
@@ -109,6 +114,35 @@ export function lineEndDatePrefill(line: string, nowMs: number): string | null {
   const nowMonth = Number(today.slice(4, 6));
   if (last.y === null && ymd.replace(/-/g, '') < kstDayOf(nowMs - 86_400_000) && nowMonth >= 10 && last.m <= 3) ymd = fmt(year + 1);
   return isValidLinePeriodEnd(ymd, nowMs) ? ymd : null;
+}
+
+/** 상대 마감 꼴(끝 표지 「까지」가 붙은 것만) — 종류마다 KST 날짜를 낸다 */
+const RELATIVE_END_RE: Array<{ re: RegExp; kind: 'month' | 'week' | 'today' | 'tomorrow' }> = [
+  { re: /(?:이번\s*달\s*(?:말|마지막\s*날)|월말)\s*까지/g, kind: 'month' },
+  { re: /이번\s*(?:주\s*(?:말|일요일)|주말)\s*까지/g, kind: 'week' },
+  { re: /오늘\s*까지/g, kind: 'today' },
+  { re: /내일\s*까지/g, kind: 'tomorrow' },
+];
+
+/**
+ * (순수) 상대 마감 → 'YYYY-MM-DD'(KST) · 꼴이 딱 한 종류일 때만(둘 이상 = 모호 = null).
+ *   이번 달 말 = 이번 달 마지막 날 · 이번 주말 = 이번 주 일요일(오늘이 일요일이면 오늘) · 「N일간」은 시작일이 없어 읽지 않는다.
+ */
+function lineRelativeEndDate(t: string, nowMs: number): string | null {
+  const kinds = new Set(RELATIVE_END_RE.filter((r) => { r.re.lastIndex = 0; return r.re.test(t); }).map((r) => r.kind));
+  if (kinds.size !== 1) return null;
+  const kind = [...kinds][0];
+  const kst = new Date(nowMs + 9 * 3_600_000);
+  const y = kst.getUTCFullYear();
+  const mo = kst.getUTCMonth();
+  const d = kst.getUTCDate();
+  // UTC 자정 + 9시간 = 그 날짜의 KST 오전 9시 → kstDayOf 가 같은 날짜를 낸다
+  const at = (days: number) => kstDayOf(Date.UTC(y, mo, d + days));
+  let ymd: string;
+  if (kind === 'month') ymd = at(new Date(Date.UTC(y, mo + 1, 0)).getUTCDate() - d);
+  else if (kind === 'week') ymd = at((7 - kst.getUTCDay()) % 7);
+  else ymd = at(kind === 'tomorrow' ? 1 : 0);
+  return `${ymd.slice(0, 4)}-${ymd.slice(4, 6)}-${ymd.slice(6, 8)}`;
 }
 
 /**

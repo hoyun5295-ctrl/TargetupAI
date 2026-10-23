@@ -271,6 +271,22 @@ export function isFutureDate(yyyymmdd: string | null | undefined, now: Date = ne
   return !Number.isNaN(d.getTime()) && d.getTime() >= now.getTime();
 }
 
+/**
+ * ★2026-10-22 혜택 면허 판정 하나(Harold 결정 「완화」 · 서수란 접수 = 제시뉴욕 30%+40% · 빽다방 2,026원이 빠졌다).
+ *   종료일이 미래 = 면허 · 종료일이 없으면 오늘 홈페이지에 실제로 걸려 있는 행사(onSiteNow)면 면허 · 종료일이 지났으면 면허 없음(후보에서 빠진다 = isEndedEvent).
+ *   옛: 카드 후보만 「종료일 없음 + 홈 게시 = 면허」(불변 42)였고 본문 인용 후보는 종료일이 미래일 때만이라, 같은 진행 중 행사가 길에 따라 수치가 빠졌다.
+ *   ⛔ 자동 발송 자격은 이 면허가 아니라 「종료일이 명시된 미래 면허」(sales-outreach-direct datedLicense)다 — 완화가 자동 발송을 넓히지 않는다.
+ */
+export function benefitLicenseOf(endDate: string | null | undefined, onSiteNow: boolean, now: Date = new Date()): boolean {
+  if (endDate) return isFutureDate(endDate, now);
+  return onSiteNow;
+}
+
+/** 종료일을 아는데 이미 지난 행사(빽다방 8/19~8/21 이 10/21 에 「진행 중 소식」으로 실렸다) — 후보가 아니다 */
+export function isEndedEvent(endDate: string | null | undefined, now: Date = new Date()): boolean {
+  return !!endDate && !isFutureDate(endDate, now);
+}
+
 /** 연·월·일이 전부 있는 날짜 표기만(YYYY-MM-DD · YYYY.MM.DD · YYYY/MM/DD · YYYY년 M월 D일 · 뒤에 시각이 붙어도 무시). 연도 없는 표기는 잡지 않는다(작년 행사 부활 차단). */
 const FULL_DATE_RE = /(20\d{2})\s*[.\-\/년]\s*(\d{1,2})\s*[.\-\/월]\s*(\d{1,2})(?!\d)/g;
 
@@ -525,6 +541,8 @@ export interface QuoteFilterMeta {
   shortDropped: number;
   mismatched: number;
   markerDropped: number;
+  /** ★2026-10-22 종료일이 지난 행사(후보에서 뺐다) */
+  endedDropped: number;
 }
 
 /** AI 인용 후보 → 재대조(원문별 · 출처 URL) + 계측(A-13). 합본이 아니라 원문 각각과 대조한다. */
@@ -534,7 +552,7 @@ export function filterQuoteCandidates(
   urls: { home: string; sub?: string | null },
   now: Date = new Date(),
 ): { candidates: EventCandidate[]; meta: QuoteFilterMeta } {
-  const meta: QuoteFilterMeta = { rawCandidates: 0, matched: 0, shortDropped: 0, mismatched: 0, markerDropped: 0 };
+  const meta: QuoteFilterMeta = { rawCandidates: 0, matched: 0, shortDropped: 0, mismatched: 0, markerDropped: 0, endedDropped: 0 };
   const candidates: EventCandidate[] = [];
   if (!Array.isArray(parsed)) return { candidates, meta };
   const normHome = norm(texts.home);
@@ -546,16 +564,20 @@ export function filterQuoteCandidates(
     const sourceUrl = normHome.includes(quote) ? urls.home : (normSub && normSub.includes(quote) && urls.sub) ? urls.sub : null;
     if (!sourceUrl) { meta.mismatched++; continue; } // 원문 재대조 실패 = 폐기(환각 차단)
     if (hasDisqualifyingMarker(quote)) { meta.markerDropped++; continue; }
-    meta.matched++;
-    // ★ 2026-09-06 S2 종료일 = AI 값 → 인용문 안 기간 표기 → 인용문 주변 "기간 :" 줄 순(전부 연·월·일 명시분만 · 면허 판정은 isFutureDate 하나)
+    // ★ 2026-09-06 S2 종료일 = AI 값 → 인용문 안 기간 표기 → 인용문 주변 "기간 :" 줄 순(전부 연·월·일 명시분만)
     const src = sourceUrl === urls.home ? normHome : normSub;
     const inQuote = parseLicensedEndDate(quote);
     const near = inQuote.end ? { start: null, end: null } : findPeriodNear(src, quote);
     const startDate = normalizeAiDate((c as any)?.start_date) || inQuote.start || near.start;
-    const endDate = normalizeAiDate((c as any)?.end_date) || inQuote.end || near.end;
+    const strongEnd = normalizeAiDate((c as any)?.end_date) || inQuote.end;
+    const endDate = strongEnd || near.end;
+    // ★2026-10-22 끝난 행사는 후보가 아니다(카드 후보와 같은 규칙) — 단 근거가 확실할 때만(AI 종료일 · 인용문 안 날짜).
+    //   주변에서 빌린 날짜(findPeriodNear · 앞 200자 폴백)는 앞 행사의 기간일 수 있어 빼지 않는다 → 지났으면 면허만 없다(종전).
+    if (isEndedEvent(strongEnd, now)) { meta.endedDropped++; continue; }
+    meta.matched++;
     // ★ 2026-09-24 품질 A — 제목·혜택·기간 조각(인용문 부분 문자열만)
     const parts = quotePartsOf(c, quote);
-    candidates.push({ quote, sourceUrl, startDate, endDate, benefitLicensed: isFutureDate(endDate, now), origin: 'crawl', ...(parts ? { parts } : {}) });
+    candidates.push({ quote, sourceUrl, startDate, endDate, benefitLicensed: benefitLicenseOf(endDate, true, now), origin: 'crawl', ...(parts ? { parts } : {}) });
   }
   return { candidates, meta };
 }
@@ -590,13 +612,13 @@ export function normalizeEventSelection(
  */
 export function eventCandidatesFromCards(cards: readonly OutreachEventCard[], sourceUrl: string, now: Date = new Date()): EventCandidate[] {
   // 종료일을 아는데 이미 지난 카드(토니모리 8월 체험단)는 후보가 아니다 · 종료일을 모르는 카드(기간 없는 기획전)는 면허 없이 남긴다
-  const list = (Array.isArray(cards) ? cards : []).filter((c) => c && String(c.title || '').trim() && !(c.endDate && !isFutureDate(c.endDate, now))).map((c): EventCandidate => ({
+  const list = (Array.isArray(cards) ? cards : []).filter((c) => c && String(c.title || '').trim() && !isEndedEvent(c.endDate, now)).map((c): EventCandidate => ({
     quote: norm(c.title),
     sourceUrl,
     startDate: c.startDate,
     endDate: c.endDate,
     // ★ 2026-09-09 v4(불변 42) 홈 게시 = 진행 중: 종료일이 없는 카드라도 오늘 홈에 링크돼 있었으면(homeLinked · 프로모션 페이지) 면허. 종료일이 있으면 그것이 이긴다(지난 것은 위 filter 가 뺀다)
-    benefitLicensed: isFutureDate(c.endDate, now) || (!c.endDate && c.homeLinked === true),
+    benefitLicensed: benefitLicenseOf(c.endDate, c.homeLinked === true, now),
     origin: 'card',
     title: String(c.title).trim(),
     periodRaw: c.periodRaw,
@@ -1206,7 +1228,7 @@ async function runCrawlAndAnalyzeMetered(jobId: string, meter: OutreachAiCost): 
   let analyzeOutcome: StageOutcome = 'no_event';
   let analyzeDetail: string | null = null;
   let candidates: EventCandidate[] = [];
-  let meta: Record<string, unknown> = { rawCandidates: 0, matched: 0, shortDropped: 0, mismatched: 0, markerDropped: 0, structuredBlocks: homeMaterial.structuredBlocks, materialChars: (eventTextFull || '').length };
+  let meta: Record<string, unknown> = { rawCandidates: 0, matched: 0, shortDropped: 0, mismatched: 0, markerDropped: 0, endedDropped: 0, structuredBlocks: homeMaterial.structuredBlocks, materialChars: (eventTextFull || '').length };
   if (eventTextFull) {
     try {
       const raw = await callOutreachAi({
@@ -2094,7 +2116,13 @@ async function runProductionMetered(jobId: string, lockToken: string, meter: Out
           replyLine: sr.reply_line?.text ? String(sr.reply_line.text) : null,
           // ★ 2026-09-23 재구성 — 담당자 호칭 · 시안에 담은 확정 행사 요약 · 직접 발송 법정 footer
           contactName: job.contact_name ? String(job.contact_name) : null,
-          confirmedEvents: selectedList.map((c) => ({ title: c.origin === 'card' ? String(c.title || c.quote) : String(c.parts?.title || c.quote), periodRaw: c.periodRaw || c.parts?.period || null })),
+          // ★2026-10-22 면허 · 혜택 조각도 넘긴다(옛: 제목 · 기간만 넘겨 이 줄만 면허 있는 행사의 수치까지 늘 걷었다)
+          confirmedEvents: selectedList.map((c) => ({
+            title: c.origin === 'card' ? String(c.title || c.quote) : String(c.parts?.title || c.quote),
+            periodRaw: c.periodRaw || c.parts?.period || null,
+            licensed: !!c.benefitLicensed,
+            benefit: c.benefitLicensed && c.parts?.benefit ? String(c.parts.benefit) : null,
+          })),
           adFooter,
           dmFrameUrl,
         });

@@ -93,10 +93,11 @@ describe('인용 판정', () => {
       { quote: '가을 감사제 종료 안내입니다 정말로', end_date: null },
     ];
     const r = filterQuoteCandidates(parsed, { home, sub }, { home: 'https://a.com/', sub: 'https://a.com/event' }, now);
-    expect(r.meta).toEqual({ rawCandidates: 3, matched: 2, shortDropped: 1, mismatched: 0, markerDropped: 0 }); // 최대 3개만 본다
+    expect(r.meta).toEqual({ rawCandidates: 3, matched: 2, shortDropped: 1, mismatched: 0, markerDropped: 0, endedDropped: 0 }); // 최대 3개만 본다
     expect(r.candidates).toHaveLength(2);
     expect(r.candidates[0]).toMatchObject({ sourceUrl: 'https://a.com/', benefitLicensed: true, origin: 'crawl' });
-    expect(r.candidates[1]).toMatchObject({ sourceUrl: 'https://a.com/event', benefitLicensed: false });
+    // ★2026-10-22 완화 — 종료일이 없어도 지금 읽은 원문에 실재 = 오늘 걸린 행사 = 면허
+    expect(r.candidates[1]).toMatchObject({ sourceUrl: 'https://a.com/event', benefitLicensed: true });
     const r2 = filterQuoteCandidates([parsed[3]], { home, sub }, { home: 'https://a.com/', sub: 'https://a.com/event' }, now);
     expect(r2.meta.mismatched).toBe(1);
     expect(r2.candidates).toEqual([]);

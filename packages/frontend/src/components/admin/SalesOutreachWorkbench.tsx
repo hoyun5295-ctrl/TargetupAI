@@ -390,6 +390,7 @@ export default function SalesOutreachWorkbench({ onClose, onOpenJob, variant = '
         moduleId={OUTREACH_ZONE}
         backTo="/admin"
         backLabel="관리자 화면으로"
+        onBack={onClose}
         width="full"
         tabs={WORKBENCH_GROUPS.map((g) => ({ id: g.id, label: g.label, count: data ? groupCount(g) : null, unit: '건', dot: g.id === 'check' && (data?.laneCounts.post_review || data?.laneCounts.failed) ? 'rose' as const : undefined }))}
         activeTab={group}

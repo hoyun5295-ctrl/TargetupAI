@@ -45,7 +45,7 @@ import RecipientsModal from '../components/email/EmailRecipientsModal';
 // ★ 2026-09-27 만들기 개편 — 첫 화면(만들기 카드 · 다른 방법 접힘 · 카드칩 · 상세 창) · 수정 화면(EmailEditScreen · DM 과 같은 칸) · 보내기 창
 import { Layers } from 'lucide-react';
 import EmailEditScreen from '../components/make/EmailEditScreen';
-import { newAttemptToken, appendToOneLine, fetchOneLineGaps, readPartOf, readsInLine, clearLineStepsAnswers, type LineMallCandidate, type LineProductRef } from '../utils/one-line';   // ★ 2026-10-05 한줄로 시그니처 · ★1010 묻는 창 · 몰 상품
+import { newAttemptToken, appendToOneLine, fetchOneLineGaps, readPartOf, readsInLine, clearLineStepsAnswers, lineMissingSteps, type LineMallCandidate, type LineProductRef } from '../utils/one-line';   // ★ 2026-10-05 한줄로 시그니처 · ★1010 묻는 창 · 몰 상품
 import { LineFactsAskModal } from '../components/zone/LineFacts';   // ★ 2026-10-10 한 줄 이메일 — 판정이 걸릴 때만 생성 전에 묻는다
 import LineStepsModal, { lineStepsFailNotice, type LineStepsOpen } from '../components/zone/LineStepsModal';   // ★ 2026-10-17 한 줄 단계 모달
 import EmailDetailModal from '../components/make/EmailDetailModal';
@@ -562,7 +562,7 @@ export default function EmailCampaignsPage() {
       if (opts.steps && !data?.success) {
         // ★ 2026-10-17 단계 모달 요청 실패 = 크레딧 없이 만들기 단계로 다시 연다(답 그대로 · 바뀐 금액 · 쓸 수 없는 몰 상품은 뺀다)
         const st = opts.steps.reopen;
-        setEmailSteps({ ...st, atMake: true, notice: lineStepsFailNotice(String(data?.code || ''), String(data?.error || ''), Array.isArray(data?.excluded) ? data.excluded : []), dropPicks: data?.code === 'MALL_PRODUCTS_UNAVAILABLE', costOverride: data?.code === 'PRICE_CHANGED' && Number.isFinite(data?.cost) ? Number(data.cost) : st.costOverride });
+        setEmailSteps({ ...st, atMake: true, focus: lineMissingSteps(data)[0] ?? null, notice: lineStepsFailNotice(String(data?.code || ''), String(data?.error || ''), Array.isArray(data?.excluded) ? data.excluded : []), dropPicks: data?.code === 'MALL_PRODUCTS_UNAVAILABLE', costOverride: data?.code === 'PRICE_CHANGED' && Number.isFinite(data?.cost) ? Number(data.cost) : st.costOverride });
         return;
       }
       if (data?.code === 'INSUFFICIENT_CREDIT') { showToast('크레딧이 부족합니다. 충전 후 이용해주세요.', 'warning'); return; }
@@ -630,7 +630,7 @@ export default function EmailCampaignsPage() {
       // ★ 2026-10-17 단계 모달(스위치 켠 회사) — 질문이 0 이어도 만들기 단계 한 장(금액 확인)
       if (g?.stepsEnabled && g.plan) {
         // ★ 2026-10-17 템플릿 캠페인(스위치 켠 회사) — 고르기 판부터(추천 · 템플릿마다 재료 단계는 서버 판정)
-        setEmailSteps({ line: t, reads, plan: g.plan, fallbackCost: g.stepsCost, ...(g.templatesEnabled && g.templatePlans ? { templates: { ranks: g.templates, plans: g.templatePlans } } : {}), ...(g.compositions ? { compositions: g.compositions } : {}) });
+        setEmailSteps({ line: t, reads, plan: g.plan, fallbackCost: g.stepsCost, ...(g.compositions ? { compositions: g.compositions } : {}) });
         return;
       }
       if (g?.enabled && (g.gaps.benefit || g.productTerms.length > 0 || reads.length > 0)) {

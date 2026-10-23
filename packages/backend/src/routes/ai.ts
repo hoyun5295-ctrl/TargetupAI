@@ -42,14 +42,14 @@ import { formatDateValue, getOpt080Number, buildAdMessage, buildAdSubject } from
 import { resolveJourneyAdFlag } from '../utils/journey-ad-policy';
 import { loadPlanContext, canUseFeature, requirePlanFeature, isBetaAccessAllowed, isAiOperatorAllowed } from '../utils/plan-guard';
 import { snsPublishEnabled } from '../utils/sns-constants';   // ★ 2026-09-20 허브 SNS 플래그(§3-11)
-import { oneLineGaps, sanitizeLineFacts, pickCopyCVariant, lineProductTerms, lineBenefitPercents, sanitizeLineReads, applyLineReads, oneLineAskEnabled, oneLineIntent, oneLineAskTopic, lineWithoutReads } from '../utils/one-line-facts';   // ★ 2026-10-05 한줄로 시그니처 · ★1010 몰 후보 검색어
+import { oneLineGaps, sanitizeLineFacts, pickCopyCVariant, lineBenefitPercents, sanitizeLineReads, oneLineAskEnabled, oneLineIntent, oneLineAskTopic, lineWithoutReads } from '../utils/one-line-facts';   // ★ 2026-10-05 한줄로 시그니처 · ★1010 몰 후보 검색어
 // ★ 2026-10-17 한 줄 단계 모달(설계서 docs/2026-10-17-oneline-steps-modal-design.md §4-1) — 판정 응답에 단계 목록(plan) · 버튼 라벨 금액
 import { buildLineStepsPlan, isLineStepsChannel, lineStepsFp } from '../utils/one-line-steps';
-import { LINE_TEMPLATES, rankLineTemplates } from '../utils/design-core/line-templates';   // ★ 2026-10-17 템플릿 캠페인
-import { buildLineTemplatePlan, type LineTemplatePlan } from '../utils/line-template-plan';
 import { loadLineStepsCompanyFacts, lineStepsFullCost, resolveLineStepsCharge } from '../utils/line-steps-context';
-import { buildCompositionPlans, compositionInfos, runLineJudge, LineJudgeBusyError, type LineCompositionPlan } from '../utils/one-line-ct';
-import { rankCompositions, type LineCompositionId } from '../utils/line-compositions';
+import { buildCompositionPlans, compositionInfos, runLineJudge, LineJudgeBusyError, listenLine, type LineCompositionPlan } from '../utils/one-line-ct';
+import { checkRecurringLine } from '../utils/one-line-ct/recurring';
+import type { LineCompositionId } from '../utils/line-compositions';
+import { getBrandBasicInfo } from '../utils/brand-basic-info';
 import { resolveIntegrationActor } from '../utils/integration-scope';
 import { getCompanyCosts } from '../config/defaults';
 // ★ D209+ (Harold 명시 2026-05-22) Phase D 비용 안전 매트릭스 — 회사별 월 한도 + cache 통계
@@ -1040,59 +1040,56 @@ router.post('/one-line/gaps', async (req: Request, res: Response) => {
   const enabled = !!companyId;
   // ★ 2026-10-10 H3 — 혜택 판정은 사진에서 읽은 조각의 숫자를 지운 글로(사진에만 혜택이 있으면 묻는다) · 검색어는 원래 글로
   const reads = sanitizeLineReads(req.body?.read_texts);
-  const judged = applyLineReads(line, reads === 'invalid' ? undefined : reads, false);
+  const readList = reads === 'invalid' ? undefined : reads;
+  const menu = typeof req.body?.menu === 'string' ? req.body.menu : '';
+  // ★ 2026-10-23 ① 듣기 한 곳(설계서 docs/2026-10-23-oneline-ct-complete-design.md A4) — 혜택 · 기간 · 상품 낱말 · 주소 · 구성 순위.
+  //   구성 순위 = 업종 반영(판단 대체와 같은 순위 · 업종 읽기 실패 = 업종 없이)
+  const compositionMenu = !!companyId && isLineStepsChannel(menu) && !!line.trim();
+  const industry = compositionMenu ? (String((await getBrandBasicInfo(companyId!).catch(() => null))?.industry_code || '') || null) : null;
+  const heard = listenLine(line, { reads: readList, industry, nowMs: Date.now() });
+  const typed = heard.typed;
   // ★ 2026-10-10 한 줄 묻기(설계서 docs/2026-10-10-oneline-ask-design.md §3-1) — 질문인가 만들기인가(AI 0 · DB 0 · 별도 스위치).
   //   사용자가 친 글만 본다(사진 조각 제외) · 내용 채널(DM · 이메일 · SNS)은 무엇을 보낼지 묻는 말이 있어야 질문 · 스위치 밖 = 늘 make.
   const askEnabled = oneLineAskEnabled(companyId);
-  const menu = typeof req.body?.menu === 'string' ? req.body.menu : '';
-  const typed = lineWithoutReads(line, reads === 'invalid' ? undefined : reads);
   const intent = askEnabled ? oneLineIntent(typed, { contentChannel: menu === 'dm' || menu === 'email' || menu === 'sns' }) : 'make';
-  // ★ 2026-10-17 한 줄 단계 모달 — menu ∈ dm · email · inapp + 스위치(한 줄 보강 스위치 안에서만) 켠 회사만 단계 목록을 계산한다.
-  //   판정 자체는 순수 CT(AI 0) · 회사 사실은 칸마다 따로 시도(실패 = 그 칸만 기본값) · 그 밖 메뉴 · 회사 = 칸이 없다(지금 그대로).
+  // ★ 2026-10-17 한 줄 단계 모달 — menu ∈ dm · email · inapp 이면 단계 목록을 계산한다.
+  //   판정 자체는 순수 CT(AI 0) · 회사 사실은 칸마다 따로 시도(실패 = 그 칸만 기본값) · 그 밖 메뉴 = 칸이 없다(지금 그대로).
   let stepsEnabled = false;
   let stepsCost: number | null = null;
   let plan: ReturnType<typeof buildLineStepsPlan> | null = null;
-  // ★ 2026-10-17 템플릿 캠페인 — 템플릿 스위치(한 줄 단계 스위치 안에서만) 켠 회사만 추천 · 템플릿마다 재료 단계(같은 회사 사실 · AI 0)
-  let templatesEnabled = false;
-  let templates: ReturnType<typeof rankLineTemplates> | null = null;
-  let templatePlans: Record<string, LineTemplatePlan> | null = null;
+  const templatesEnabled = !!companyId && isLineStepsChannel(menu);
   // ★ 2026-10-22 한줄 CT 구성 5종(설계서 docs/2026-10-22-oneline-ct-design.md §11) — 재료 판(구성마다 칸 · 규칙 · AI 0 · 0원) · 판단(AI · 2)은 /one-line/judge
-  let compositions: { infos: ReturnType<typeof compositionInfos>; ranks: ReturnType<typeof rankCompositions>; plans: Record<LineCompositionId, LineCompositionPlan> } | null = null;
+  //   ★ 2026-10-23 옛 템플릿 4종 추천 · 재료 판 계산 삭제(화면은 구성이 오면 구성만 탔다 · A3)
+  let compositions: { infos: ReturnType<typeof compositionInfos>; ranks: typeof heard.rank; plans: Record<LineCompositionId, LineCompositionPlan> } | null = null;
   if (companyId && isLineStepsChannel(menu)) {
     stepsEnabled = true;
     stepsCost = lineStepsFullCost(menu).total;
-    templatesEnabled = true;
     if (line.trim()) {
       try {
-        const readList = reads === 'invalid' ? undefined : reads;
         const lineFp = lineStepsFp(line, readList);
         const facts = await loadLineStepsCompanyFacts(companyId, await resolveIntegrationActor(req.user), menu, lineFp, Date.now());
         const planInput = {
-          judged, line, typed, channel: menu, lineFp,
+          judged: heard.judged, line, typed, channel: menu, lineFp,
           mall: facts.mall, inappBlocked: facts.inappBlocked, upload: facts.upload,
           website: facts.website, mallHome: facts.mallHome, cost: facts.cost,
         };
         plan = buildLineStepsPlan(planInput);
-        if (templatesEnabled) {
-          templates = rankLineTemplates(typed);
-          templatePlans = Object.fromEntries(LINE_TEMPLATES.map((t) => [t.id, buildLineTemplatePlan(t, planInput)]));
-          compositions = { infos: compositionInfos(), ranks: rankCompositions(typed, null), plans: buildCompositionPlans(planInput) };
-        }
+        compositions = { infos: compositionInfos(), ranks: heard.rank, plans: buildCompositionPlans(planInput, heard) };
       } catch (err: any) {
         // 단계 판정이 실패해도 판정 응답 자체는 지킨다(plan 없음 = 화면은 지금 흐름) · 원인은 남긴다
         console.log(`[one-line steps] plan 실패 company=${companyId} menu=${menu} err=${err?.message}`);
         plan = null;
-        templates = null;
-        templatePlans = null;
         compositions = null;
       }
     }
   }
+  // ★ 2026-10-23 한 번 만들면 계속 나가는 입구(여정 · 자동발송 설정 창) = 반복 발송 점검 문장(막지 않음 · C1)
+  const recurring = enabled && (menu === 'journeys' || menu === 'auto-send') ? checkRecurringLine(heard, menu) : [];
   // ★ 2026-10-10 한 줄 DM 강화 — 몰 후보 검색어 · 혜택 % 값(여전히 AI 0 · DB 0 · 판정이 아니라 찾기 입력). 스위치 밖 = 빈 값.
   return res.json({
     success: true, enabled,
-    gaps: enabled ? oneLineGaps(judged) : { benefit: false },
-    product_terms: enabled ? lineProductTerms(line) : [],
+    gaps: enabled ? heard.gaps : { benefit: false },
+    product_terms: enabled ? heard.productTerms : [],
     benefit_percents: enabled ? lineBenefitPercents(line) : [],
     ask_enabled: askEnabled,
     intent,
@@ -1101,9 +1098,8 @@ router.post('/one-line/gaps', async (req: Request, res: Response) => {
     steps_cost: stepsCost,
     plan,
     templates_enabled: templatesEnabled,
-    templates,
-    template_plans: templatePlans,
     compositions,
+    recurring,
   });
 });
 

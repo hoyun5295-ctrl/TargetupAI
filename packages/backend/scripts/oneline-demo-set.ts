@@ -32,8 +32,8 @@ import { readBrandPage } from '../src/utils/brand-page-reader';
 import { lineBannerOf } from '../src/utils/line-template-page';
 import { lineFingerprint } from '../src/utils/one-line-steps';
 import { kstDatePlus } from '../src/utils/line-template-example';
-import { runLineJudge, draftLineCook, buildLineCookDm, getLineComposition } from '../src/utils/one-line-ct';
-import { compositionBlocking, type LineCompositionId } from '../src/utils/line-compositions';
+import { runLineJudge, draftLineCook, buildLineCookDm, getLineComposition, listenLine, lineCookMaterials } from '../src/utils/one-line-ct';
+import { diagnoseComposition, diagnosisBlocking, type LineCompositionId } from '../src/utils/line-compositions';
 
 interface Scene {
   /** 장면 업종(첫 화면 틀 후보 · 없으면 회사 업종) */
@@ -123,7 +123,8 @@ async function main(): Promise<void> {
           } else fails.push('헤드라인 템플릿 · 글 없음');
         } catch (e: any) { fails.push(`헤드라인 ${e?.message}`); }
       }
-      const periodEnd = s.periodDays ? kstDatePlus(Date.now(), s.periodDays) : null;
+      // ★ 2026-10-23 마감 = 한 줄에서 읽은 제안(재료 판과 같은 ① 듣기) · 한 줄에 날짜가 없을 때만 장면의 periodDays(설계서 docs/2026-10-23-oneline-ct-complete-design.md B3)
+      const periodEnd = listenLine(s.line).periodEnd ?? (s.periodDays ? kstDatePlus(Date.now(), s.periodDays) : null);
       const drafts = judge?.drafts?.[compId];
       const rich = {
         points: (drafts?.points || []).map((p) => ({ title: p.title, body: p.body, image: null })),
@@ -137,11 +138,8 @@ async function main(): Promise<void> {
         heroUpload: hero || banner, heroAsIs: !!hero, proof: (s.proof || []).map((r) => ({ body: r.body, author: r.author || '구매 고객', rating: r.rating })),
         page: null, benefitAnswer: s.benefit ?? null, periodEnd, link: s.page || PUBLIC_BASE, rich,
       };
-      // 막는 칸이 비었으면(실제 화면이 만들기를 막는 경우) 불합격
-      const block = compositionBlocking(comp, {
-        brandName, poster: input.heroUpload ? { url: input.heroUpload } : null, products: products.map((p) => ({ ...p, price: p.price || null })),
-        points: rich.points, steps: rich.usage, mood: rich.mood, proof: input.proof, benefit: input.benefitAnswer, periodEnd, periodLabel: null, link: input.link, store: rich.store, couponCode: rich.couponCode,
-      });
+      // 막는 칸이 비었으면(실제 화면이 만들기를 막는 경우) 불합격 · 진단 = 재료 판 · 요리 관문과 같은 채널 진단
+      const block = diagnosisBlocking(diagnoseComposition(comp, lineCookMaterials(input).materials, 'dm'));
       if (block.length > 0) fails.push(`막는 칸 비어 있음 ${block.map((b) => b.key).join(',')}`);
       let dmHtml = '';
       try {

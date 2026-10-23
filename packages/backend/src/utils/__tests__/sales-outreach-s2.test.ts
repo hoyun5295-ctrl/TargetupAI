@@ -93,18 +93,19 @@ describe('면허 기간 파서 parseLicensedEndDate · findPeriodNear', () => {
       [{ quote: '추석선물세트 특별 기획전~50%', start_date: null, end_date: null }, { quote: '크림대전 2026.01.01 ~ 2026.01.31', start_date: null, end_date: null }],
       { home }, { home: 'https://www.isoi.co.kr/' }, now,
     );
-    expect(r.candidates.length).toBe(2);
+    // ★2026-10-22 두 번째는 인용 안 날짜가 과거 = 끝난 행사 → 후보에서 뺀다(카드 후보와 같은 규칙 · 빽다방 8/21 이 10/21 에 실린 접수)
+    expect(r.candidates.length).toBe(1);
     expect(r.candidates[0]).toMatchObject({ endDate: '2026-09-18', startDate: '2026-08-31', benefitLicensed: true });
-    // 두 번째는 인용 안 날짜가 과거 → 면허 없음(마커 판정은 인용문 기준이라 폐기되지 않는다)
-    expect(r.candidates[1]).toMatchObject({ endDate: '2026-01-31', benefitLicensed: false });
     expect(r.meta.markerDropped).toBe(0);
+    expect(r.meta.endedDropped).toBe(1);
   });
   it('AI 날짜 형식이 YYYY.MM.DD 여도 정규화된다 · 과거 종료일은 면허 없음', () => {
     const now = new Date('2026-09-06T00:00:00+09:00');
     const r = filterQuoteCandidates([{ quote: '가을 신상 오픈 이벤트', start_date: null, end_date: '2026.09.30' }], { home: '가을 신상 오픈 이벤트' }, { home: 'https://a.com' }, now);
     expect(r.candidates[0]).toMatchObject({ endDate: '2026-09-30', benefitLicensed: true });
     const past = filterQuoteCandidates([{ quote: '가을 신상 오픈 이벤트', start_date: null, end_date: '2025-09-30' }], { home: '가을 신상 오픈 이벤트' }, { home: 'https://a.com' }, now);
-    expect(past.candidates[0].benefitLicensed).toBe(false);
+    expect(past.candidates).toEqual([]);
+    expect(past.meta.endedDropped).toBe(1);
     expect(isFutureDate('2026-09-18', now)).toBe(true);
   });
 });

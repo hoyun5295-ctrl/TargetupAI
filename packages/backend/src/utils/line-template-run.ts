@@ -27,7 +27,8 @@ import type { LineStepsManualProduct } from './one-line-steps';
  *   AI = 503(잠시 뒤 다시) · 관문 = 500(조립 결함 · 로그에 사유).
  */
 export class LineTemplateError extends Error {
-  constructor(public status: number, public code: 'LINE_TEMPLATE_AI_FAILED' | 'LINE_TEMPLATE_GATE' | 'LINE_COMPOSITION_MISSING', message: string, public detail = '') { super(message); }
+  /** missing = 비어서 막은 재료 판 단계 키(★ 2026-10-23 화면이 그 칸으로 데려간다 · 응답에 싣는다) */
+  constructor(public status: number, public code: 'LINE_TEMPLATE_AI_FAILED' | 'LINE_TEMPLATE_GATE' | 'LINE_COMPOSITION_MISSING', message: string, public detail = '', public missing: string[] = []) { super(message); }
 }
 
 /**

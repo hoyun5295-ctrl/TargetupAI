@@ -4,7 +4,7 @@
  *   설계서 docs/2026-10-22-oneline-ct-design.md §4 · §11-2 · §11-6.
  *
  * ⛔ 불변
- *   - 구성(구역 · 순서 · 꾸밈)은 이 파일이 정한다. 재료 칸표(`slots`)가 곧 진단 기준이다(`compositionMissing`).
+ *   - 구성(구역 · 순서 · 꾸밈)은 이 파일이 정한다. 재료 칸표(`slots`)가 곧 진단 기준이다(`diagnoseComposition` 한 곳).
  *   - 칸 세 종류: block = 비면 만들기 막음 · suggest = 막지 않음(두뇌 초안을 고치게) · drop = 지어낼 수 없음(비면 구역이 빠진다).
  *   - 칸이 비면 그 구역을 뺀다(자리표시 0). 같은 사진은 한 결과물에 한 번. 주 버튼은 하나.
  *   - 가격 · 사진 · 링크 · 혜택 원문 · 날짜는 AI 를 지나지 않는다. AI 는 문구 칸(`LineRichCopy`)만.
@@ -209,15 +209,6 @@ const filledCount = (m: LineRichMaterials, key: keyof LineRichMaterials): number
   return typeof v === 'string' ? (v.trim() ? 1 : 0) : v ? 1 : 0;
 };
 
-/** (순수) 이 구성에서 아직 비어 있는 칸(모든 단계) */
-export function compositionMissing(c: LineComposition, m: LineRichMaterials): LineCompositionSlot[] {
-  return c.slots.filter((s) => filledCount(m, s.key) < s.min);
-}
-/** (순수) 만들기를 막는 빈 칸 */
-export function compositionBlocking(c: LineComposition, m: LineRichMaterials): LineCompositionSlot[] {
-  return compositionMissing(c, m).filter((s) => s.level === 'block');
-}
-
 /** 인앱 한 장에 실리는 칸(표지 · 혜택 · 대표 상품 · 버튼)만 */
 const INAPP_KEYS = new Set<keyof LineRichMaterials>(['products', 'benefit']);
 
@@ -238,10 +229,32 @@ export function compositionChannelSlots(c: LineComposition, channel: 'dm' | 'ema
   return out;
 }
 
-/** (순수) 채널 기준 막는 빈 칸(요리 관문) */
-export function compositionBlockingFor(c: LineComposition, m: LineRichMaterials, channel: 'dm' | 'email' | 'inapp'): LineCompositionSlot[] {
-  return compositionChannelSlots(c, channel).filter((s) => s.level === 'block' && filledCount(m, s.key) < s.min);
+/** 재료 칸 → 재료 판 단계 키(화면 · 요청 본문이 쓰는 이름) */
+const SLOT_STEP_KEY: Partial<Record<keyof LineRichMaterials, string>> = { periodEnd: 'period', steps: 'usage', couponCode: 'coupon_code' };
+export const slotStepKey = (key: keyof LineRichMaterials): string => SLOT_STEP_KEY[key] ?? String(key);
+
+export interface LineSlotDiagnosis extends LineCompositionSlot {
+  /** 재료 판 단계 키 */
+  step: string;
+  /** 지금 가진 수 */
+  have: number;
+  filled: boolean;
 }
+
+/**
+ * (순수) ③ 진단 한 곳 — 채널에 실리는 칸마다 가진 수 · 찼는가(★ 2026-10-23 설계서 docs/2026-10-23-oneline-ct-complete-design.md A1).
+ *   재료 판 · 미리보기(빈 칸 수 · 점선) · 요리 관문 · 플래너 관문 · 시연이 이것만 본다. 화면은 이 답을 그린다(판정하지 않는다).
+ */
+export function diagnoseComposition(c: LineComposition, m: LineRichMaterials, channel: 'dm' | 'email' | 'inapp'): LineSlotDiagnosis[] {
+  return compositionChannelSlots(c, channel).map((s) => {
+    const have = filledCount(m, s.key);
+    return { ...s, step: slotStepKey(s.key), have, filled: have >= s.min };
+  });
+}
+/** 만들기를 막는 빈 칸 */
+export const diagnosisBlocking = (d: readonly LineSlotDiagnosis[]): LineSlotDiagnosis[] => d.filter((s) => s.level === 'block' && !s.filled);
+/** 빈 칸 전부(미리보기 점선 · 빈 칸 수) */
+export const diagnosisMissing = (d: readonly LineSlotDiagnosis[]): LineSlotDiagnosis[] => d.filter((s) => !s.filled);
 
 interface P { type: Section['type']; props: Record<string, unknown>; treatment?: string; part: string; tint?: boolean }
 
@@ -273,6 +286,17 @@ function cover(m: LineRichMaterials, c: LineRichCopy, comp: LineComposition, see
     ];
   }
   return [{ type: 'hero', props: { headline: c.headline, sub_copy: [c.sub, m.periodLabel].filter(Boolean).join('\n'), align: 'center', height: 'lg', mood_background: `linear-gradient(160deg, ${comp.primary} 0%, ${comp.accent} 100%)`, mood_text: '#ffffff' }, treatment: 'classic', part: 'cover' }];
+}
+
+/**
+ * 사진 묶음 한 구역 — 장수마다 빈 칸 없는 배치(★ 2026-10-23 B1 · 렌더러는 2열이라 1장 · 2장(첫 장 크게)에서 옆 칸이 비었다).
+ *   1장 = 한 줄 크게(원본 비율) · 2장 = 2열 · 3장 = 첫 장 크게 + 2열.
+ */
+function photoGroup(urls: readonly string[], link: string | null, part: string, tint = false): P | null {
+  if (urls.length === 0) return null;
+  const images = urls.map((u) => ({ url: u, link_url: link || '', caption: '' }));
+  const layout = urls.length === 1 ? 'list_1xN' : 'grid_2x2';
+  return { type: 'gallery', props: { title: '', images, layout, full_bleed: false, enable_zoom: false, enable_fullscreen: false }, ...(urls.length === 3 ? { treatment: 'mosaic' } : {}), part, tint };
 }
 
 const title = (text: string, part: string, tint = false): P => ({ type: 'text_card', props: { headline: text, align: 'center', image_position: 'top' }, treatment: 'classic', part: `${part}-title`, tint });
@@ -409,8 +433,7 @@ export function compositionParts(comp: LineComposition, m: LineRichMaterials, c:
       break;
     }
     case 'lookbook': {
-      const mood = m.mood.map((u) => useOnce(seen, u)).filter((u): u is string => !!u).slice(0, 3);
-      if (mood.length) out.push({ type: 'gallery', props: { title: '', images: mood.map((u) => ({ url: u, link_url: m.link || '', caption: '' })), layout: 'grid_2x2', full_bleed: false, enable_zoom: false, enable_fullscreen: false }, treatment: 'mosaic', part: 'mood' });
+      out.push(photoGroup(m.mood.map((u) => useOnce(seen, u)).filter((u): u is string => !!u).slice(0, 3), m.link, 'mood'));
       const grids = categoryGrids(m.products, seen);
       out.push(...(grids.length ? grids : [productGrid(m.products.slice(0, 4), c.productsTitle, 'products', seen)]));
       if (m.points.length) out.push(title(c.pointsTitle, 'looks', true), ...pointCards(m.points.slice(0, 2), 'looks', (i) => `LOOK ${i + 1}`, seen, true));
@@ -422,8 +445,7 @@ export function compositionParts(comp: LineComposition, m: LineRichMaterials, c:
       if (lead && useOnce(seen, lead.image_url)) out.push({ type: 'product_carousel', props: { products: [card(lead)], image_fit: 'contain', caption_bg_color: comp.tint, background_color: '#ffffff' }, treatment: 'focus', part: 'signature' });
       if (m.points.length) out.push({ type: 'text_card', props: { tag: '대표 메뉴', headline: lead?.name || c.pointsTitle, body: m.points.slice(0, 3).map((p) => `# ${p.title}`).join('   '), align: 'left', image_position: 'top' }, treatment: 'classic', part: 'tags', tint: true });
       out.push(productGrid(m.products.slice(0, 6), c.productsTitle, 'menu', seen));
-      const more = m.mood.map((u) => useOnce(seen, u)).filter((u): u is string => !!u).slice(0, 2);
-      if (more.length) out.push({ type: 'gallery', props: { title: '', images: more.map((u) => ({ url: u, link_url: m.link || '', caption: '' })), layout: 'grid_2x2', full_bleed: false, enable_zoom: false, enable_fullscreen: false }, part: 'more-photos' });
+      out.push(photoGroup(m.mood.map((u) => useOnce(seen, u)).filter((u): u is string => !!u).slice(0, 2), m.link, 'more-photos'));
       out.push(reviews(m, '다녀간 손님 후기', comp));
       if (m.store && Object.values(m.store).some(Boolean)) out.push({ type: 'store_info', props: { ...m.store }, treatment: 'card', part: 'store' });
       out.push(coupon(m, comp), benefitNote(m));

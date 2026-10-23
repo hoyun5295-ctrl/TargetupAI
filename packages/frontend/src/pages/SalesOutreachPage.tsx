@@ -10,6 +10,7 @@ import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import SalesOutreachWorkbench from '../components/admin/SalesOutreachWorkbench';
 import SalesOutreachModal from '../components/admin/SalesOutreachModal';
 import ZoneFrame from '../components/zone/ZoneFrame';
+import { goUpTo } from '../lib/scroll-restoration';
 import { Megaphone } from 'lucide-react';
 import type { ZoneCustomModule } from '../components/zone/zone-color';
 
@@ -31,13 +32,16 @@ export default function SalesOutreachPage() {
     setDetailKey(jobId || 'new');
   }, [jobId]);
 
-  const toWorkbench = () => navigate('/admin/outreach');
+  // ★2026-10-22 서수란 접수(뒤로가기 왕복) — 위로 가는 이동은 전부 부모로 올라가기(바로 앞 칸이 부모면 그 칸 · 아니면 부모로).
+  //   옛: 작업대 ← = 앞 칸 · 상세 「작업대」 = 새 칸이라 「작업대 → 상세 → 작업대 …」가 쌓여 ← 마다 둘 사이를 왕복했다.
+  const toWorkbench = () => goUpTo(navigate, '/admin/outreach');
+  const toAdmin = () => goUpTo(navigate, '/admin');
 
   if (!jobId) {
     return (
       <SalesOutreachWorkbench
         variant="page"
-        onClose={() => navigate('/admin')}
+        onClose={toAdmin}
         onOpenNew={() => navigate('/admin/outreach/new')}
         onOpenJob={(id, ids) => navigate(`/admin/outreach/${id}`, { state: { navIds: ids } })}
       />
@@ -45,7 +49,7 @@ export default function SalesOutreachPage() {
   }
 
   return (
-    <ZoneFrame moduleId={DETAIL_ZONE} backTo="/admin/outreach" backLabel="작업대로" sub={jobId === 'new' ? '등록' : '상세'} width="desk">
+    <ZoneFrame moduleId={DETAIL_ZONE} backTo="/admin/outreach" backLabel="작업대로" onBack={toWorkbench} sub={jobId === 'new' ? '등록' : '상세'} width="desk">
       <SalesOutreachModal
         key={detailKey}
         variant="page"

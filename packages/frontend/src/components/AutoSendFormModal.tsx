@@ -14,6 +14,7 @@
 
 import { useEffect, useState, useMemo, useRef } from 'react';
 import { aiApi } from '../api/client';
+import { fetchOneLineGaps, type LineRecurringNote } from '../utils/one-line';   // ★ 2026-10-23 한줄 CT 반복 발송 점검
 import { calculateSmsBytes, buildAdMessageFront, buildAdSubjectFront, replaceMessageVars, formatPhoneNumber, getMaxByteMessage } from '../utils/formatDate';
 import MmsImagePreview from './shared/MmsImagePreview';
 import { insertAtCursorPos } from '../utils/textInsert';
@@ -123,6 +124,14 @@ export default function AutoSendFormModal({ campaign, aiPremiumEnabled, onClose,
   // ★ AI 문안 자동생성 모드 (기능 3)
   const [aiGenerateEnabled, setAiGenerateEnabled] = useState(campaign?.ai_generate_enabled ?? false);
   const [aiPrompt, setAiPrompt] = useState(campaign?.ai_prompt || '');
+  // ★ 2026-10-23 컨셉 칸 점검(한줄 CT ① 듣기 · ③ 반복 발송 진단 · AI 0 · 0원 · 막지 않음 · 설계서 docs/2026-10-23-oneline-ct-complete-design.md C1)
+  //   text = 판정한 글(칸 글이 바뀌면 옛 판정을 보이지 않는다)
+  const [conceptNotes, setConceptNotes] = useState<{ text: string; notes: LineRecurringNote[] }>({ text: '', notes: [] });
+  const checkConcept = (raw: string) => {
+    const t = raw.trim();
+    if (!t) { setConceptNotes({ text: '', notes: [] }); return; }
+    void fetchOneLineGaps(t, [], 'auto-send').then((g) => setConceptNotes({ text: t, notes: g?.recurring ?? [] }));
+  };
   const [aiTone, setAiTone] = useState(campaign?.ai_tone || 'friendly');
   const [fallbackMessageContent, setFallbackMessageContent] = useState(campaign?.fallback_message_content || '');
 
@@ -1117,9 +1126,17 @@ export default function AutoSendFormModal({ campaign, aiPremiumEnabled, onClose,
                       <textarea
                         value={aiPrompt}
                         onChange={e => setAiPrompt(e.target.value)}
+                        onBlur={e => checkConcept(e.target.value)}
                         placeholder="예: 봄 시즌 세일 안내. 20% 할인 쿠폰 강조. 고객 이름 넣어서 친근하게."
                         className="w-full border border-violet-300 rounded-lg px-3 py-2.5 text-sm resize-none h-[80px] focus:ring-2 focus:ring-violet-500 focus:border-violet-500 outline-none bg-white"
                       />
+                      {conceptNotes.text && conceptNotes.text === aiPrompt.trim() && conceptNotes.notes.length > 0 && (
+                        <ul className="mt-2 space-y-1.5">
+                          {conceptNotes.notes.map((n) => (
+                            <li key={n.kind} className={`rounded-lg px-3 py-2 text-[12.5px] leading-relaxed border ${n.kind === 'benefit_fixed' ? 'bg-violet-50 border-violet-200 text-violet-900' : 'bg-amber-50 border-amber-200 text-amber-900'}`}>{n.text}</li>
+                          ))}
+                        </ul>
+                      )}
                     </div>
                     <div>
                       <label className="block text-sm font-medium text-violet-700 mb-1">폴백 메시지 (AI 실패 시 사용) *</label>

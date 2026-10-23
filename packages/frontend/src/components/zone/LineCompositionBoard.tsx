@@ -3,6 +3,7 @@
  *
  *   - 미리보기 = 서버가 결과물과 같은 조립 함수 · 같은 렌더러로 지금 재료를 그린 것(빈 칸 = 점선 자리 · AI 0 · 0원).
  *     칸을 고치는 동안(paused)은 다시 그리지 않고, 재료 판으로 돌아올 때 한 번 그린다(요청은 하나씩 · 늦게 온 응답은 버린다).
+ *   - ★ 2026-10-23 요청 = 만들기 본문 그대로(서버가 같은 검증 · 같은 재료 변환 · 같은 진단) · 응답의 칸 판정을 onSlots 로 올린다(재료 판 칩 · 만들기 막기 = 이 값).
  *   - 구성 고르기 = 5종 카드 · AI 가 고른 구성에 이유 한 줄 · 바꾸기는 0원(진단만 다시).
  * ⛔ 모델명 0 · native dialog 0 · 줄표 0.
  */
@@ -12,59 +13,44 @@ import PreviewFrame from '../make/PreviewFrame';
 import { InAppMessagePreview } from '../InAppMessagePreview';
 import ZoneSegmented from './ZoneSegmented';
 import {
-  fetchCompositionPreview, lineManualPrice, lineProofRows, lineRichRows, lineStoreOf,
-  type LineCompositionId, type LineCompositionInfo, type LineStepsAnswers, type LineStepsChannel, type LineLayout,
+  fetchCompositionPreview,
+  type LineCompositionId, type LineCompositionInfo, type LineCompositionPreviewRequest, type LineSlotVerdict, type LineStepsChannel, type LineLayout,
 } from '../../utils/one-line';
 
 const PHONE_W = 390;
 const PHONE_H = 760;
 
-/** (순수) 지금 답 → 미리보기 재료(서버 미리보기 칸 이름) */
-export function previewMaterialsOf(a: LineStepsAnswers): Record<string, unknown> {
-  const products = [
-    ...(a.picks || []).filter((c) => c.imageUrl).map((c) => ({ name: c.name, price: c.price || c.salePrice, ...(c.salePrice && c.price && c.salePrice < c.price ? { discount_price: c.salePrice } : {}), image_url: c.imageUrl })),
-    ...(a.manualList || []).filter((m) => m.name.trim() && m.image).map((m) => ({ name: m.name.trim(), price: lineManualPrice(m.price) ?? 0, image_url: m.image, ...(m.category?.trim() ? { category: m.category.trim() } : {}) })),
-  ];
-  const poster = a.hero ? { url: a.hero, as_is: a.heroPoster === true } : a.page?.banner ? { url: a.page.banner } : null;
-  return {
-    products,
-    ...(poster ? { poster } : {}),
-    ...(typeof a.benefit === 'string' && a.benefit.trim() ? { benefit: a.benefit.trim() } : {}),
-    ...(a.period ? { period_end: a.period } : {}),
-    proof: lineProofRows(a),
-    rich: {
-      points: lineRichRows(a.points),
-      usage: lineRichRows(a.usage),
-      mood: (a.mood || []).filter(Boolean).slice(0, 3),
-      ...(a.couponCode ? { coupon_code: a.couponCode } : {}),
-      ...(lineStoreOf(a) ? { store: lineStoreOf(a) } : {}),
-      ...(a.benefitNote?.trim() ? { benefit_note: a.benefitNote.trim().slice(0, 120) } : {}),
-    },
-  };
-}
-
 /** 미리보기 휴대폰 한 장 */
-export default function LineCompositionPreview({ composition, channel, answers, paused, width }: {
+export default function LineCompositionPreview({ composition, channel, request, paused, width, onSlots }: {
   composition: LineCompositionId | null;
   channel: LineStepsChannel;
-  answers: LineStepsAnswers;
+  /** 만들기 본문 + 사진 목록(없으면 그리지 않는다) */
+  request: LineCompositionPreviewRequest | null;
   /** 칸을 고치는 중 = 다시 그리지 않는다(판으로 돌아오면 그린다) */
   paused: boolean;
   width: number;
+  /** 서버 칸 판정(새 요청을 시작하면 null · 응답이 오면 그 값 · 실패 = null) */
+  onSlots?: (slots: LineSlotVerdict[] | null, composition: LineCompositionId) => void;
 }) {
   const [view, setView] = useState<{ html?: string; message?: Record<string, any>; missing: number } | null | 'loading'>('loading');
   const ticket = useRef(0);
-  const key = composition ? JSON.stringify([composition, channel, previewMaterialsOf(answers)]) : '';
+  const key = composition && request ? JSON.stringify([composition, channel, request]) : '';
   const lastKey = useRef('');
   useEffect(() => {
-    if (!composition || paused || key === lastKey.current) return;
+    if (!composition || !request || paused || key === lastKey.current) return;
     lastKey.current = key;
     const n = ++ticket.current;
     const ctrl = new AbortController();
     setView((v) => (v && v !== 'loading' ? v : 'loading'));
+    // 옛 재료의 판정을 새 재료 위에 보이지 않게(응답이 올 때까지 모름)
+    onSlots?.(null, composition);
     // 너무 잦은 요청을 피한다(재료 판으로 돌아온 뒤 0.25초)
     const t = setTimeout(() => {
-      void fetchCompositionPreview(composition, channel, previewMaterialsOf(answers), ctrl.signal).then((r) => { if (n === ticket.current) setView(r); });
+      void fetchCompositionPreview(composition, channel, request, ctrl.signal).then((r) => {
+        if (n !== ticket.current) return;
+        setView(r);
+        onSlots?.(r ? r.slots : null, composition);
+      });
     }, 250);
     return () => { clearTimeout(t); ctrl.abort(); };
     // key 가 재료 전부를 담는다

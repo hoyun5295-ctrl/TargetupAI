@@ -104,18 +104,17 @@ import { normalizeEventText } from '../utils/event-brief';
 import { attachMallImagesToProductCarousels } from '../utils/mall-product-match';
 import { industryLabel } from '../utils/industry-codes';
 import type { Section } from '../utils/dm/dm-section-registry';
-import { checkCredit, deductCreditSafe, deductCreditOutcome, InsufficientCreditError, isChargedByKey } from '../utils/ai-credit';
+import { checkCredit, deductCreditSafe, InsufficientCreditError, isChargedByKey } from '../utils/ai-credit';
 import { oneLineGaps, isValidAttemptToken, buildOneLineIdempotencyKey, oneLineInflightKey, sanitizeLineFacts, buildLineEventText, sanitizeLineProducts, lineProductsKey, sanitizeLineReads, applyLineReads } from '../utils/one-line-facts';   // ★ 2026-10-05 한줄로 시그니처 · ★1010 혜택 답 · 몰 상품 확정
 import { resolveLineMallCards, placeLineMallCards, linePriceNotes, linePinnedPrimary, lineEmailDesign, type LineMallCard, type LineMallExcluded } from '../utils/line-mall-cards';   // ★ 2026-10-10 한 줄 이메일 강화
 import { resolveIntegrationActor } from '../utils/integration-scope';
 // ★ 2026-10-17 한 줄 단계 모달(설계서 docs/2026-10-17-oneline-steps-modal-design.md §3 · §4-3) — 단계 답 · 직접 상품 · 대표 사진 · 버튼 주소 · 한 줄 완성 금액
 import { buildLineStepsEventText } from '../utils/one-line-steps';
 import { getLineTemplate } from '../utils/design-core/line-templates';   // ★ 2026-10-17 템플릿 캠페인
-import { resolveLinePage, isLinePageError, type LinePageMaterial } from '../utils/line-template-page';
-import { draftLineTemplate, buildLineTemplateEmail, lineTemplateBrand, lineTemplateManual, LineTemplateError } from '../utils/line-template-run';
+import { lineTemplateBrand, LineTemplateError } from '../utils/line-template-run';
 import { getLineComposition, draftLineCook, buildLineCookEmail, lineCookManual } from '../utils/one-line-ct';   // ★ 2026-10-22 한줄 CT 구성 5종
-import { runInCreditBundle } from '../utils/ai-credit-context';
-import { prepareLineStepsRequest, isLineStepsReqError, lineStepsKeyFor, settleLineStepsPrice, resolveLineStepsDelivery, lineStepsAttemptCharged, lineStepsLineLockKey, lineStepsCollected } from '../utils/line-steps-context';
+import { runLineCookOrder } from '../utils/one-line-ct/order';   // ★ 2026-10-23 돈 순서 한 곳
+import { prepareLineStepsRequest, isLineStepsReqError, resolveLineStepsDelivery } from '../utils/line-steps-context';
 import { placeLineHero, placeLineLink } from '../utils/line-materials';
 import { getBrandBasicInfo } from '../utils/brand-basic-info';
 import { createSection } from '../utils/dm/dm-section-registry';
@@ -1236,39 +1235,116 @@ router.post('/ai/generate-sections', singleFlight('email-generate', async (req: 
     const stepsPayload = steps
       ? { prompt: genPrompt, scenario: scenario || null, isAd, eventText, products: lineProductsKey(lineProducts || []), manual: steps.body.manual, hero: steps.hero, ...(steps.heroAsIs ? { heroAsIs: true } : {}), ...(steps.body.proof.length > 0 ? { proof: steps.body.proof } : {}), link: steps.body.facts.link ?? null, ...(tplSel ? { template: tplSel, page: steps.body.page } : {}), ...(compDef ? { rich: steps.body.rich } : {}) }
       : null;
+
+    // ★ 2026-10-23 단계 요청 = 한줄 CT 요리 주문 하나(설계서 docs/2026-10-23-oneline-ct-complete-design.md A2 · A3).
+    //   돈 순서는 runLineCookOrder 가 소유한다 · 여기는 만들기 · 응답만 · 옛 템플릿 4종 id = 400(열린 옛 탭).
+    if (steps) {
+      if (!stepsPayload || !attemptToken) return res.status(400).json({ success: false, error: '단계에서 받은 답을 다시 확인해 주세요.', code: 'LINE_STEPS_INVALID' });
+      if (tplSel && !compDef) return res.status(400).json({ success: false, error: '고른 모양을 지금은 쓸 수 없어요. 화면을 새로 고친 뒤 구성을 다시 골라 주세요.', code: 'LINE_TEMPLATE_RETIRED' });
+      const lineActor = await resolveIntegrationActor(req.user);
+      const kitRaw = (await getCompanyBrandKitRaw(auth.companyId).catch(() => null)) as Record<string, unknown> | null;
+      const brand = compDef ? await lineTemplateBrand(auth.companyId, kitRaw) : null;
+      const compManual = compDef ? lineCookManual(steps.body.manual, steps.body.rich.categories) : null;
+      const order = await runLineCookOrder({
+        companyId: auth.companyId, userId: auth.userId, channel: 'email', steps, payload: stepsPayload,
+        attemptLockKey: oneLineInflightKey(auth.companyId, 'email', attemptToken),
+        products: lineProducts, actor: lineActor, pageCheck: !!compDef, nowMs: stepsNow,
+        cook: async ({ cards, page }) => {
+          if (compDef) {
+            // ★ 2026-10-22 구성 = 한줄 CT 요리(문구 AI 1회 · 묶음 안 · 값 = 코드) · 상품 · 사진 · 주소는 구성 조립이 놓는다(1017 끼우기 · 몰 이름 첨부 0)
+            const tplCards: LineMallCard[] = [...cards, ...compManual!.cards];
+            const delivery = await resolveLineStepsDelivery(auth.companyId, lineActor, steps, { channel: 'email', line: linePrompt, cards: tplCards, companyKitRaw: kitRaw });
+            const cook = await draftLineCook({
+              composition: compDef, channel: 'email', companyId: auth.companyId, line: linePrompt, ...brand!,
+              pinnedPrimary: linePinnedPrimary(kitRaw), cards: tplCards, cardCategories: [...cards.map(() => null), ...compManual!.categories],
+              heroUpload: steps.hero, heroAsIs: steps.heroAsIs, proof: steps.body.proof, page,
+              benefitAnswer: steps.body.facts.benefit, periodEnd: steps.body.facts.periodEnd ?? null, link: steps.body.facts.link ?? page?.url ?? delivery.link ?? null, rich: steps.body.rich,
+            }, { userId: auth.userId, source: 'email-ai-generate' });
+            const r = buildLineCookEmail(cook);
+            // 제목 앞에 사람이 확인한 혜택 원문(40자 안일 때만 · 템플릿과 같은 규칙)
+            const benefit = String(cook.materials.benefit || '').trim();
+            const withBenefit = benefit ? `[${benefit}] ${r.subject}`.trim() : r.subject;
+            return { kind: 'comp' as const, em: { ...r, subject: withBenefit.length <= 40 ? withBenefit : r.subject }, primary: cook.comp.primary, label: compDef.label, id: compDef.id as string };
+          }
+          const result = await generateEmailSections({ companyId: auth.companyId, userId: auth.userId, prompt: genPrompt, scenario, isAd, eventText });
+          // ★ 2026-10-17 확정 카드 = 몰 상품(재조회 ok) + 직접 넣은 상품(사진 + 가격)
+          const allCards: LineMallCard[] = [...cards, ...steps.manualCards];
+          if (lineProducts === undefined) {
+            // ★ 2026-07-08 연동 몰 상품 자동 첨부 — 상품 슬라이드 항목명 이름매칭 → 이미지·링크·정가·할인가(빈 값만, 실패 skip). 발송 코어 무관(생성 결과 후처리).
+            try { await attachMallImagesToProductCarousels(auth.companyId, (result as any)?.sections, lineActor); } catch { /* best-effort */ }
+          } else if (allCards.length > 0 && Array.isArray((result as any)?.sections)) {
+            // ★ 2026-10-10 확정 카드 = 첫 상품 슬라이드 통째 교체 · 다른 상품 슬라이드 제거(AI 가 쓴 상품 · 가격이 나가지 않게) · 없으면 히어로 뒤
+            (result as any).sections = placeLineMallCards((result as any).sections, allCards, { newId: () => randomUUID(), makeCarousel: (order) => createSection('product_carousel', randomUUID(), order) });
+          }
+          // ★ 2026-10-17 대표 사진(메일 맨 위 · 직접 올린 사진만 · 몰 사진은 외부 주소라 쓰지 않는다) · 버튼 주소(생성기가 늘 비운다 → 코드가 채운다)
+          let stepsHero = false;
+          if (Array.isArray((result as any)?.sections)) {
+            const delivery = await resolveLineStepsDelivery(auth.companyId, lineActor, steps, { channel: 'email', line: linePrompt, cards: allCards });
+            (result as any).sections = placeLineLink(placeLineHero((result as any).sections, delivery.hero, (order) => createSection('hero', randomUUID(), order)), delivery.link);
+            stepsHero = !!delivery.hero;
+          }
+          return { kind: 'generic' as const, result, stepsHero };
+        },
+        adapter: { kind: 'return' },
+      });
+      if (order.kind === 'refused') return res.status(order.status).json({ success: false, error: order.error, code: order.code, ...(order.extra || {}) });
+      if (order.kind !== 'made') return res.status(409).json({ success: false, error: '이 요청은 이미 처리됐어요. 다시 만들려면 [만들기]를 한 번 더 눌러 주세요.', code: 'ALREADY_DONE' });
+      const made = order.result;
+      const notes = [...order.excluded.map((e) => `상품${e.name ? ` "${e.name}"` : ''} 제외: ${e.reason}`), ...linePriceNotes(genPrompt, order.cards)];
+      const basic = await getBrandBasicInfo(auth.companyId).catch(() => null);
+      const industry = String((basic as any)?.industry_code || '').trim() || null;
+      if (made.kind === 'comp') {
+        console.log(`[one-line steps] email company=${auth.companyId} cost=${order.cost} completion=${order.completionDue} shown=${steps.body.meta.shown.join(',')} answered=${steps.body.meta.answered.join(',')} skipped=${steps.body.meta.skipped.join(',')} manual_cards=${compManual!.cards.length} hero=${steps.hero ? 1 : 0} template=${made.id} page=${steps.body.page ? 1 : 0}`);
+        const tplDesign = lineEmailDesign({ pinned: made.primary, companyArtDirection: kitRaw?.art_direction ?? null, industry, preheader: made.em.preheader.slice(0, 90) });
+        return res.json({
+          success: true,
+          data: {
+            sections: made.em.sections, subjects: [made.em.subject], preheader: made.em.preheader,
+            name: (brand!.brandName ? `${brand!.brandName} ${made.label}` : made.label).slice(0, 40),
+            ...(tplDesign ? { design: tplDesign } : {}),
+            one_line: {
+              enabled: true, gaps: oneLineGaps(linePrompt), notes, mall_cards: order.cards.length,
+              steps: { cost: order.cost, completion: order.completionDue },
+              template: { id: made.id, layout: 'page' },
+            },
+          },
+        });
+      }
+      console.log(`[one-line steps] email company=${auth.companyId} cost=${order.cost} completion=${order.completionDue} shown=${steps.body.meta.shown.join(',')} answered=${steps.body.meta.answered.join(',')} skipped=${steps.body.meta.skipped.join(',')} manual_cards=${steps.manualCards.length} hero=${made.stepsHero ? 1 : 0}`);
+      // ★ 2026-10-10 회사 디자인(저장 주색 · 회사 또는 업종 아트디렉션 · 프리헤더) · 결과 안내(뺀 상품 · 한 줄 값과 몰 값이 다를 때)
+      const design = lineEmailDesign({
+        pinned: linePinnedPrimary(kitRaw),
+        companyArtDirection: kitRaw?.art_direction ?? null,
+        industry,
+        preheader: typeof (made.result as any)?.preheader === 'string' ? String((made.result as any).preheader).slice(0, 90) : null,
+      });
+      return res.json({
+        success: true,
+        data: {
+          ...made.result,
+          ...(design ? { design } : {}),
+          one_line: { enabled: true, gaps: oneLineGaps(linePrompt), notes, mall_cards: order.cards.length, steps: { cost: order.cost, completion: order.completionDue } },
+        },
+      });
+    }
+
+    // ─── 아래 = 단계 없는 요청(1005 · 1010 시도 토큰 경로 · 일반 생성) — 지금 그대로 ───
     const idemKey = attemptToken
-      ? (steps
-        ? lineStepsKeyFor(steps, auth.companyId, 'email', stepsPayload)
-        : buildOneLineIdempotencyKey(auth.companyId, 'email', attemptToken, { prompt: genPrompt, scenario: scenario || null, isAd, eventText, ...(lineProducts !== undefined ? { products: lineProductsKey(lineProducts) } : {}) }))
+      ? buildOneLineIdempotencyKey(auth.companyId, 'email', attemptToken, { prompt: genPrompt, scenario: scenario || null, isAd, eventText, ...(lineProducts !== undefined ? { products: lineProductsKey(lineProducts) } : {}) })
       : undefined;
     const lineLock = attemptToken ? oneLineInflightKey(auth.companyId, 'email', attemptToken) : '';
     if (lineLock && !tryAcquireInflight(lineLock)) {
       return res.status(409).json({ success: false, error: '지금 만드는 중이에요. 완성되면 이어서 진행해 주세요.', code: 'IN_FLIGHT' });
     }
-    // ★ 2026-10-17 단계 요청 = 한 줄 단위 잠금(금액 확정 ~ 차감 · 다른 시도의 같은 한 줄이 한 줄 완성을 두 번 내지 않게)
-    const stepsLock = steps ? lineStepsLineLockKey(steps, auth.companyId, 'email') : '';
-    let stepsLockHeld = false;
     try {
-      if (stepsLock) {
-        if (!tryAcquireInflight(stepsLock)) return res.status(409).json({ success: false, error: '같은 한 줄로 지금 만드는 중이에요. 완성되면 다시 시도해 주세요.', code: 'IN_FLIGHT' });
-        stepsLockHeld = true;
-      }
       if (idemKey) {
         let charged: boolean;
-        // 단계 요청 = 오늘 · 어제(KST) 키 둘 다(자정을 넘긴 같은 시도의 재전송)
-        try { charged = steps ? await lineStepsAttemptCharged(steps, auth.companyId, 'email', stepsPayload) : await isChargedByKey(auth.companyId, idemKey); } catch {
+        try { charged = await isChargedByKey(auth.companyId, idemKey); } catch {
           return res.status(503).json({ success: false, error: '잠시 후 다시 시도해 주세요.', code: 'CREDIT_STATE_UNKNOWN' });
         }
         if (charged) {
           return res.status(409).json({ success: false, error: '이 요청은 이미 처리됐어요. 다시 만들려면 [만들기]를 한 번 더 눌러 주세요.', code: 'ALREADY_DONE' });
         }
-      }
-      // ★ 2026-10-17 단계 요청 = 금액 확정(오늘 이 한 줄로 한 줄 완성을 냈으면 생성비만) · 화면 금액과 다르면 409 · 원장 모름 = 503 — AI · 차감 · 몰 조회 전
-      let stepsCharge: { cost: number; source: string; completionDue: boolean } | null = null;
-      if (steps) {
-        const price = await settleLineStepsPrice(steps, auth.companyId, 'email', stepsNow);
-        if (isLineStepsReqError(price)) return res.status(price.status).json({ success: false, error: price.error, code: price.code, ...(price.cost !== undefined ? { cost: price.cost, breakdown: price.breakdown } : {}) });
-        stepsCharge = price;
       }
       // ★ 2026-10-10 고른 상품은 AI 호출 · 차감 앞에서 몰에서 다시 읽는다(재조회 ok 만 카드 · 전부 빠지면 409 · 돈 0).
       let lineCards: LineMallCard[] = [];
@@ -1282,112 +1358,17 @@ router.post('/ai/generate-sections', singleFlight('email-generate', async (req: 
           return res.status(409).json({ success: false, error: '고른 상품을 지금 쓸 수 없어요. 상품 없이 만들 수 있어요.', code: 'MALL_PRODUCTS_UNAVAILABLE', excluded: lineExcluded });
         }
       }
-      // ★ 2026-10-17 템플릿 요청 = 범용 생성 경로와 나란한 한 벌(같은 돈 순서 · 범용 경로는 바이트 그대로).
-      //   페이지 다시 읽기(지문 대조 · 0원) → 잔액 확인 → 문구 AI 1회(묶음 · 안쪽 차감 0) + 조립 + 품질 관문 → 1회 차감 → 낸 것만 건넨다.
-      //   상품 · 사진 · 주소는 템플릿 조립이 놓는다(1017 끼우기 · 몰 이름 첨부 0).
-      if ((tplDef || compDef) && steps && stepsCharge) {
-        let tplPage: LinePageMaterial | null = null;
-        if (steps.body.page) {
-          const pg = await resolveLinePage(auth.companyId, steps.body.page);
-          if (isLinePageError(pg)) return res.status(pg.status).json({ success: false, error: pg.error, code: pg.code });
-          tplPage = pg;
-        }
-        const tplCost = stepsCharge.cost;
-        await checkCredit(auth.companyId, tplCost);
-        const kitRaw = (await getCompanyBrandKitRaw(auth.companyId).catch(() => null)) as Record<string, unknown> | null;
-        const brand = await lineTemplateBrand(auth.companyId, kitRaw);
-        const manualT = lineTemplateManual(steps.body.manual);
-        const compManual = compDef ? lineCookManual(steps.body.manual, steps.body.rich.categories) : null;
-        const tplCards: LineMallCard[] = [...lineCards, ...(compManual ? compManual.cards : manualT.cards)];
-        const delivery = await resolveLineStepsDelivery(auth.companyId, lineActor, steps, { channel: 'email', line: linePrompt, cards: tplCards, companyKitRaw: kitRaw });
-        const tplLink = steps.body.facts.link ?? tplPage?.url ?? delivery.link ?? null;
-        // ★ 2026-10-22 구성 = 한줄 CT 요리(문구 AI 1회 · 묶음 안 · 값 = 코드) · 템플릿 = 1017 그대로
-        const built = compDef
-          ? await runInCreditBundle(async () => {
-            const cook = await draftLineCook({
-              composition: compDef, channel: 'email', companyId: auth.companyId, line: linePrompt, ...brand,
-              pinnedPrimary: linePinnedPrimary(kitRaw), cards: tplCards, cardCategories: [...lineCards.map(() => null), ...compManual!.categories],
-              heroUpload: steps.hero, heroAsIs: steps.heroAsIs, proof: steps.body.proof, page: tplPage,
-              benefitAnswer: steps.body.facts.benefit, periodEnd: steps.body.facts.periodEnd ?? null, link: tplLink, rich: steps.body.rich,
-            }, { userId: auth.userId, source: 'email-ai-generate' });
-            const r = buildLineCookEmail(cook);
-            // 제목 앞에 사람이 확인한 혜택 원문(40자 안일 때만 · 템플릿과 같은 규칙)
-            const benefit = String(cook.materials.benefit || '').trim();
-            const withBenefit = benefit ? `[${benefit}] ${r.subject}`.trim() : r.subject;
-            return { em: { ...r, subject: withBenefit.length <= 40 ? withBenefit : r.subject }, primary: cook.comp.primary, label: compDef.label, id: compDef.id as string };
-          })
-          : await (async () => {
-            const draft = await runInCreditBundle(() => draftLineTemplate({
-              template: tplDef!, channel: 'email', companyId: auth.companyId, line: linePrompt, ...brand,
-              pinnedPrimary: linePinnedPrimary(kitRaw), cards: tplCards, textProducts: manualT.textProducts, heroUpload: steps.hero, heroAsIs: steps.heroAsIs, proof: steps.body.proof, page: tplPage,
-              benefitAnswer: steps.body.facts.benefit, periodEnd: steps.body.facts.periodEnd ?? null,
-              link: tplLink,
-            }, { userId: auth.userId, source: 'email-ai-generate' }, { factsOnly: true, subjectBenefit: true }));   // ★ 1019 B-1018-1 값 = 코드 · 제목 앞 혜택 원문
-            return { em: buildLineTemplateEmail(draft), primary: draft.t.design.primary, label: tplDef!.label, id: tplDef!.id as string };
-          })();
-        const em = built.em;
-        const tplOutcome = await deductCreditOutcome({ companyId: auth.companyId, cost: tplCost, source: stepsCharge.source, createdBy: auth.userId, ...(idemKey ? { idempotencyKey: idemKey } : {}), throwOnInsufficient: true });
-        if (!lineStepsCollected(tplOutcome)) {
-          console.log(`[CREDIT][MISS] one-line template email 결과 안 건넴 company=${auth.companyId} key=${idemKey || 'none'} cost=${tplCost} outcome=${tplOutcome}`);
-          return res.status(503).json({ success: false, error: '크레딧 기록을 확인하지 못해 결과를 건네지 않았어요. 잠시 후 다시 시도해 주세요.', code: 'CREDIT_STATE_UNKNOWN' });
-        }
-        console.log(`[one-line steps] email company=${auth.companyId} cost=${tplCost} completion=${stepsCharge.completionDue} shown=${steps.body.meta.shown.join(',')} answered=${steps.body.meta.answered.join(',')} skipped=${steps.body.meta.skipped.join(',')} manual_cards=${tplCards.length - lineCards.length} hero=${steps.hero ? 1 : 0} template=${built.id} page=${steps.body.page ? 1 : 0}`);
-        const tplBasic = await getBrandBasicInfo(auth.companyId).catch(() => null);
-        const tplDesign = lineEmailDesign({
-          pinned: built.primary,
-          companyArtDirection: kitRaw?.art_direction ?? null,
-          industry: String((tplBasic as any)?.industry_code || '').trim() || null,
-          preheader: em.preheader.slice(0, 90),
-        });
-        return res.json({
-          success: true,
-          data: {
-            sections: em.sections, subjects: [em.subject], preheader: em.preheader,
-            name: (brand.brandName ? `${brand.brandName} ${built.label}` : built.label).slice(0, 40),
-            ...(tplDesign ? { design: tplDesign } : {}),
-            one_line: {
-              enabled: true, gaps: oneLineGaps(linePrompt),
-              notes: [...lineExcluded.map((e) => `상품${e.name ? ` "${e.name}"` : ''} 제외: ${e.reason}`), ...linePriceNotes(genPrompt, lineCards)],
-              mall_cards: lineCards.length,
-              steps: { cost: tplCost, completion: stepsCharge.completionDue },
-              template: { id: built.id, layout: 'page' },
-            },
-          },
-        });
-      }
-      // ★ 2026-10-17 단계 요청 = 한 줄 완성 금액(생성비 + 10 · 같은 날 같은 한 줄 다시 만들기 = 생성비만)
-      const cost = stepsCharge ? stepsCharge.cost : getCreditCost('email-ai-generate'); // 3
+      const cost = getCreditCost('email-ai-generate'); // 3
       await checkCredit(auth.companyId, cost);
       const result = await generateEmailSections({ companyId: auth.companyId, userId: auth.userId, prompt: genPrompt, scenario, isAd, eventText });
-      // 단계 요청의 차감은 재료까지 놓은 뒤(아래) — 그 밖 요청 = 지금 그대로
-      if (!stepsCharge) {
-        await deductCreditSafe({ companyId: auth.companyId, cost, source: 'email-ai-generate', createdBy: auth.userId, ...(idemKey ? { idempotencyKey: idemKey } : {}) });
-      }
-      // ★ 2026-10-17 확정 카드 = 몰 상품(재조회 ok) + 직접 넣은 상품(사진 + 가격)
-      const allCards: LineMallCard[] = [...lineCards, ...(steps ? steps.manualCards : [])];
+      await deductCreditSafe({ companyId: auth.companyId, cost, source: 'email-ai-generate', createdBy: auth.userId, ...(idemKey ? { idempotencyKey: idemKey } : {}) });
       if (lineProducts === undefined) {
         // ★ 2026-07-08 연동 몰 상품 자동 첨부 — 상품 슬라이드 항목명 이름매칭 → 이미지·링크·정가·할인가(빈 값만, 실패 skip). 발송 코어 무관(생성 결과 후처리).
         // ★ 2026-10-10 후보를 보여 준 한 줄 요청(products 칸이 옴)은 이름 자동 첨부를 하지 않는다(확정은 사람의 탭만).
         try { await attachMallImagesToProductCarousels(auth.companyId, (result as any)?.sections, await resolveIntegrationActor(req.user)); } catch { /* best-effort */ }
-      } else if (allCards.length > 0 && Array.isArray((result as any)?.sections)) {
+      } else if (lineCards.length > 0 && Array.isArray((result as any)?.sections)) {
         // ★ 2026-10-10 확정 카드 = 첫 상품 슬라이드 통째 교체 · 다른 상품 슬라이드 제거(AI 가 쓴 상품 · 가격이 나가지 않게) · 없으면 히어로 뒤
-        (result as any).sections = placeLineMallCards((result as any).sections, allCards, { newId: () => randomUUID(), makeCarousel: (order) => createSection('product_carousel', randomUUID(), order) });
-      }
-      // ★ 2026-10-17 대표 사진(메일 맨 위 · 직접 올린 사진만 · 몰 사진은 외부 주소라 쓰지 않는다) · 버튼 주소(생성기가 늘 비운다 → 코드가 채운다)
-      let stepsHero = false;
-      if (steps && Array.isArray((result as any)?.sections)) {
-        const delivery = await resolveLineStepsDelivery(auth.companyId, lineActor, steps, { channel: 'email', line: linePrompt, cards: allCards });
-        (result as any).sections = placeLineLink(placeLineHero((result as any).sections, delivery.hero, (order) => createSection('hero', randomUUID(), order)), delivery.link);
-        stepsHero = !!delivery.hero;
-      }
-      // ★ 2026-10-17 단계 요청 = 결과(재료까지 놓은 것)가 준비된 뒤 1회 차감 · 낸 것만 건넨다(잔액 부족 = 402 · 원장 쓰기 실패 = 503 · 결과 0)
-      if (steps && stepsCharge) {
-        const outcome = await deductCreditOutcome({ companyId: auth.companyId, cost, source: stepsCharge.source, createdBy: auth.userId, ...(idemKey ? { idempotencyKey: idemKey } : {}), throwOnInsufficient: true });
-        if (!lineStepsCollected(outcome)) {
-          console.log(`[CREDIT][MISS] one-line steps email 결과 안 건넴 company=${auth.companyId} key=${idemKey || 'none'} cost=${cost} outcome=${outcome}`);
-          return res.status(503).json({ success: false, error: '크레딧 기록을 확인하지 못해 결과를 건네지 않았어요. 잠시 후 다시 시도해 주세요.', code: 'CREDIT_STATE_UNKNOWN' });
-        }
-        console.log(`[one-line steps] email company=${auth.companyId} cost=${cost} completion=${stepsCharge.completionDue} shown=${steps.body.meta.shown.join(',')} answered=${steps.body.meta.answered.join(',')} skipped=${steps.body.meta.skipped.join(',')} manual_cards=${steps.manualCards.length} hero=${stepsHero ? 1 : 0}`);
+        (result as any).sections = placeLineMallCards((result as any).sections, lineCards, { newId: () => randomUUID(), makeCarousel: (order) => createSection('product_carousel', randomUUID(), order) });
       }
       if (!lineOn) return res.json({ success: true, data: result });
       // ★ 2026-10-05 한줄로 시그니처 — 화면이 완성도 줄 · 보강 시트를 그릴지(스위치 켠 회사의 한 줄 요청만)
@@ -1410,20 +1391,17 @@ router.post('/ai/generate-sections', singleFlight('email-generate', async (req: 
             // ★ Codex 1R medium — 비교 입력 = 한 줄 + 혜택 칸 답(genPrompt)
             notes: [...lineExcluded.map((e) => `상품${e.name ? ` "${e.name}"` : ''} 제외: ${e.reason}`), ...linePriceNotes(genPrompt, lineCards)],
             mall_cards: lineCards.length,
-            // ★ 2026-10-17 단계 요청 = 낸 금액 · 한 줄 완성이 붙었는가
-            ...(stepsCharge ? { steps: { cost, completion: stepsCharge.completionDue } } : {}),
           },
         },
       });
     } finally {
-      if (stepsLockHeld) releaseInflight(stepsLock);
       if (lineLock) releaseInflight(lineLock);
     }
   } catch (err: any) {
     // ★ 2026-10-17 템플릿 생성 실패 = 정해 둔 상태 · 문장(차감 전 · 영어 코드 노출 0)
     if (err instanceof LineTemplateError) {
       console.error(`[Email template] ${err.code} ${err.detail}`);
-      return res.status(err.status).json({ success: false, error: err.message, code: err.code });
+      return res.status(err.status).json({ success: false, error: err.message, code: err.code, ...(err.missing.length > 0 ? { missing: err.missing } : {}) });
     }
     console.error('[Email /ai/generate-sections] 오류:', err);
     if (err instanceof InsufficientCreditError) {

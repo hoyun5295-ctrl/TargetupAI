@@ -16,8 +16,12 @@ import { tryAcquireInflight, releaseInflight, takeDailyQuota } from '../utils/in
 const HEADLINE_PICKS_DAILY_MAX = 60;
 import { getBrandBasicInfo } from '../utils/brand-basic-info';
 import { getLineComposition } from '../utils/line-compositions';
-import { previewMaterials, renderCompositionPreview } from '../utils/one-line-ct/preview';
+import { previewCards, previewMaterialsOf, renderCompositionPreview } from '../utils/one-line-ct/preview';
 import { compositionCatalog, renderCompositionExample } from '../utils/one-line-ct/catalog';
+import { sanitizeLineStepsBody } from '../utils/one-line-steps';
+import { getCompanyBrandKitRaw } from '../utils/dm/dm-brand-kit';
+import { lineTemplateBrand } from '../utils/line-template-run';
+import { linePinnedPrimary } from '../utils/line-mall-cards';
 
 export const lineTemplatesRouter = Router();
 lineTemplatesRouter.use(authenticate);
@@ -107,19 +111,32 @@ lineTemplatesRouter.post('/headline-picks', async (req: any, res: any) => {
 
 /**
  * ★ 2026-10-22 한줄 CT 재료 판 미리보기(설계서 docs/2026-10-22-oneline-ct-design.md §11-5) — 구성 + 지금 재료 · 기본 문구 · 빈 칸 = 점선 자리.
- *   AI 0 · DB 0 · 0원 · 결과물과 같은 조립 · 렌더러. 회사 권한만 · 회사당 하루 600회(칸을 닫을 때마다 한 번).
+ *   AI 0 · 0원 · 결과물과 같은 조립 · 렌더러. 회사 권한만 · 회사당 하루 600회(칸을 닫을 때마다 한 번).
+ * ★ 2026-10-23 본문 = 만들기 요청 본문 그대로(같은 검증 · 같은 재료 변환 · 같은 진단 · 설계서 docs/2026-10-23-oneline-ct-complete-design.md A1-b)
+ *   + preview{ cards: 화면이 가진 몰 상품 사진 목록 · page_banner: 읽어 둔 페이지 표지 } · 응답 = 그림 + 칸 판정(slots · 화면은 이것을 그린다).
  */
 const PREVIEW_DAILY_MAX = 600;
-lineTemplatesRouter.post('/composition-preview', (req: any, res: any) => {
+lineTemplatesRouter.post('/composition-preview', async (req: any, res: any) => {
   const companyId = req.user?.companyId;
   if (!isOpen(companyId)) return res.status(404).json(NOT_OPEN);
   const comp = getLineComposition(req.body?.composition);
   const channel = String(req.body?.channel || 'dm');
   if (!comp || !['dm', 'email', 'inapp'].includes(channel)) return res.status(400).json({ success: false, error: '요청 형식이 맞지 않아요.', code: 'INVALID' });
+  const body = sanitizeLineStepsBody(req.body?.body, Date.now());
+  if (!body || body === 'invalid' || body.template?.id !== comp.id) return res.status(400).json({ success: false, error: '요청 형식이 맞지 않아요.', code: 'INVALID' });
   if (!takeDailyQuota(`composition-preview:${companyId}`, PREVIEW_DAILY_MAX)) return res.status(429).json({ success: false, error: '오늘 미리보기를 많이 썼어요. 내일 다시 볼 수 있어요.', code: 'PREVIEW_DAILY_LIMIT' });
   try {
-    const m = previewMaterials(req.body?.materials, Date.now());
-    return res.json({ success: true, ...renderCompositionPreview(comp, channel as 'dm' | 'email' | 'inapp', m) });
+    // 결과물과 같은 브랜드 재료(이름 · 로고 · 고객센터 · 회사 주색) · 읽기 실패 = 빈 값(미리보기는 막지 않는다)
+    const kitRaw = (await getCompanyBrandKitRaw(companyId).catch(() => null)) as Record<string, unknown> | null;
+    const brand = await lineTemplateBrand(companyId, kitRaw).catch(() => ({ brandName: '', logoUrl: null, csPhone: null }));
+    const pv = req.body?.preview && typeof req.body.preview === 'object' ? req.body.preview : {};
+    const ch = channel as 'dm' | 'email' | 'inapp';
+    const { comp: c2, materials } = previewMaterialsOf({
+      comp, channel: ch, body, mallCards: previewCards(pv.cards), pageBanner: typeof pv.page_banner === 'string' ? pv.page_banner : null,
+      brand, pinnedPrimary: linePinnedPrimary(kitRaw), companyId,
+    });
+    const r = renderCompositionPreview(c2, ch, materials);
+    return res.json({ success: true, ...r, slots: r.slots.map((s) => ({ step: s.step, level: s.level, have: s.have, min: s.min, filled: s.filled })) });
   } catch (err: any) {
     console.error('[composition-preview] 실패:', err?.message);
     return res.status(500).json({ success: false, error: '미리보기를 그리지 못했어요.', code: 'PREVIEW_FAILED' });

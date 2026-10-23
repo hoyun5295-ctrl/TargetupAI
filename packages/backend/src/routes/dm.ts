@@ -51,10 +51,10 @@ import { resolveIntegrationActor } from '../utils/integration-scope';
 // ★ 2026-10-17 한 줄 단계 모달(설계서 docs/2026-10-17-oneline-steps-modal-design.md §3 · §4-3) — 단계 답 · 직접 상품 · 대표 사진 · 버튼 주소 · 한 줄 완성 금액
 import { buildLineStepsEventText } from '../utils/one-line-steps';
 import { getLineTemplate } from '../utils/design-core/line-templates';   // ★ 2026-10-17 템플릿 캠페인
-import { resolveLinePage, isLinePageError, type LinePageMaterial } from '../utils/line-template-page';
-import { draftLineTemplate, buildLineTemplateDm, lineTemplateBrand, lineTemplateDmMarker, lineTemplateManual, LineTemplateError } from '../utils/line-template-run';
+import { lineTemplateBrand, LineTemplateError } from '../utils/line-template-run';
 import { getLineComposition, draftLineCook, buildLineCookDm, lineCompositionDmMarker, lineCookManual } from '../utils/one-line-ct';   // ★ 2026-10-22 한줄 CT 구성 5종
-import { prepareLineStepsRequest, isLineStepsReqError, lineStepsKeyFor, settleLineStepsPrice, resolveLineStepsDelivery, lineStepsAttemptCharged, lineStepsLineLockKey, lineStepsCollected, lineStepsAttemptKeys } from '../utils/line-steps-context';
+import { runLineCookOrder } from '../utils/one-line-ct/order';   // ★ 2026-10-23 돈 순서 한 곳
+import { prepareLineStepsRequest, isLineStepsReqError, resolveLineStepsDelivery, lineStepsCollected } from '../utils/line-steps-context';
 import { recallLineDraft, rememberLineDraft, forgetLineDraft, deleteLineDraftWithRetry } from '../utils/line-draft-memo';   // ★ 2026-10-10 Codex 1R
 // ★ 2026-09-27 만들기 개편 S6 — 첫 발행 잠금·발행비 판정은 CT 가 소유(두 발행 문이 같은 판정)
 import { dmPublishBlocker, dmPublishStaticBlock, resolveSendPublishFeeGate, quoteDmPublishFee } from '../utils/dm/dm-publish-gate';
@@ -1059,45 +1059,126 @@ dmRouter.post('/ai/one-shot-generate', singleFlight('dm-generate', async (req: a
     // ★ 2026-10-05 한줄로 시그니처 §3-7 — 시도 토큰이 온 한 줄 요청(스위치 켠 회사)만 멱등. 토큰 없는 요청 = 지금 동작 그대로.
     //   키 = 시도 토큰 + 생성 입력 지문(내용을 바꿔 보내면 새 차감) · 같은 토큰 동시 요청 = 409 · 이미 차감된 키 = 생성하지 않고 409 · 원장 조회 실패 = 503.
     const attemptToken = lineOn && isValidAttemptToken(req.body?.attempt_token) ? String(req.body.attempt_token) : null;
-    // ★ 2026-10-10 고른 상품을 지문에 넣는다(상품만 바꿔 같은 토큰으로 보내면 새 차감) · 상품 칸이 없는 요청은 키가 지금과 같다.
     // ★ 2026-10-17 단계 요청 = 한 줄 완성 원장 키(회사 · 채널 · KST 날짜 · 한 줄 지문 · 시도 지문) · 생성 입력 전부를 지문에(직접 상품 전부 · 대표 사진 · 주소 답)
     // ★ 템플릿 요청 = 템플릿 · 배치 · 페이지(주소 + 그대로 쓰기 지문)도 지문에(바꾸면 새 시도 · 1017 요청 키는 그대로)
     const stepsPayload = steps
       ? { prompt, eventText, scenario: scenario || null, products: lineProductsKey(lineProducts || []), manual: steps.body.manual, hero: steps.hero, ...(steps.heroAsIs ? { heroAsIs: true } : {}), ...(steps.body.proof.length > 0 ? { proof: steps.body.proof } : {}), link: steps.body.facts.link ?? null, ...(tplSel ? { template: tplSel, page: steps.body.page } : {}), ...(compDef ? { rich: steps.body.rich } : {}) }
       : null;
+
+    // ★ 2026-10-23 단계 요청 = 한줄 CT 요리 주문 하나(설계서 docs/2026-10-23-oneline-ct-complete-design.md A2 · A3).
+    //   돈 순서(잠금 → 같은 시도 → 금액 확정 → 몰 · 페이지 → 잔액 → 만들기 → 초안 저장 → 차감 → 결말)는 runLineCookOrder 가 소유한다 · 여기는 만들기 · 응답만.
+    //   옛 템플릿 4종 id 는 받지 않는다(화면은 구성 5종만 보낸다 · 열린 옛 탭 = 400).
+    if (steps) {
+      if (!stepsPayload || !attemptToken) return res.status(400).json({ success: false, error: '단계에서 받은 답을 다시 확인해 주세요.', code: 'LINE_STEPS_INVALID' });
+      if (tplSel && !compDef) return res.status(400).json({ success: false, error: '고른 모양을 지금은 쓸 수 없어요. 화면을 새로 고친 뒤 구성을 다시 골라 주세요.', code: 'LINE_TEMPLATE_RETIRED' });
+      const lineActor = await resolveIntegrationActor(req.user);
+      // ★ 2026-10-10 회사가 저장한 주색(읽히게 보정한 값만)을 생성기 팔레트에 고정하고, 결과 킷 = 회사 킷 + AI 아트디렉션(회사 저장값이 이긴다).
+      const companyKitRaw = (await getCompanyBrandKitRaw(companyId).catch(() => null)) as Record<string, unknown> | null;
+      const pinPrimary = linePinnedPrimary(companyKitRaw);
+      const tplBrand = compDef ? await lineTemplateBrand(companyId, companyKitRaw) : null;
+      // 구성 직접 상품 = 사진 있는 것만 카드 + 넣은 순서의 종류
+      const compManual = compDef ? lineCookManual(steps.body.manual, steps.body.rich.categories) : null;
+      const order = await runLineCookOrder({
+        companyId, userId: req.user?.userId, channel: 'dm', steps, payload: stepsPayload,
+        attemptLockKey: oneLineInflightKey(companyId, 'dm', attemptToken),
+        products: lineProducts, actor: lineActor, pageCheck: !!compDef, nowMs: stepsNow,
+        cook: async ({ cards, page }) => {
+          // ★ 2026-10-17 확정 카드 = 몰 상품(재조회 ok) + 직접 넣은 상품(사진 + 가격) · 대표 사진 · 버튼 주소는 서버가 정해 생성기가 놓는다
+          const allCards: LineMallCard[] = [...cards, ...steps.manualCards];
+          const delivery = await resolveLineStepsDelivery(companyId, lineActor, steps, { channel: 'dm', line: typedLine, cards: allCards, companyKitRaw });
+          if (compDef) {
+            const cook = await draftLineCook({
+              composition: compDef, channel: 'dm', companyId, line: typedLine, ...tplBrand!, brandName: tplBrand!.brandName || brandName || '',
+              pinnedPrimary: pinPrimary, cards: [...cards, ...compManual!.cards], cardCategories: [...cards.map(() => null), ...compManual!.categories],
+              heroUpload: steps.hero, heroAsIs: steps.heroAsIs, proof: steps.body.proof, page,
+              benefitAnswer: steps.body.facts.benefit, periodEnd: steps.body.facts.periodEnd ?? null,
+              link: steps.body.facts.link ?? page?.url ?? delivery.link ?? null, rich: steps.body.rich,
+            }, { userId: req.user?.userId, source: 'dm-ai-generate' });
+            const dmC = buildLineCookDm(cook);
+            // 슬라이드는 사람이 고를 때만 · 장이 3장 미만이면 한 페이지
+            const slides = tplSel!.layout === 'slides' && dmC.pages.length >= 3;
+            return {
+              sections: dmC.sections, pages: slides ? dmC.pages : [dmC.sections], layoutMode: slides ? 'slides' : 'scroll',
+              brandKit: mergeLineBrandKit(companyKitRaw, { ...dmC.brandKitPatch }, pinPrimary),
+              spec: null, scenario: null, brief: null, coverage: null, layout: slides ? 'slides' as const : 'page' as const,
+            } as unknown as Awaited<ReturnType<typeof oneShotGenerate>> & { layout: 'slides' | 'page' | null };
+          }
+          const r = await oneShotGenerate({
+            prompt: effectivePrompt, scenario, brandName, companyId, eventText,
+            ...(allCards.length > 0 ? { confirmedCards: allCards } : {}),
+            ...(pinPrimary ? { pinPrimary } : {}),
+            lineMaterials: { heroImageUrl: delivery.hero, linkUrl: delivery.link },
+          });
+          r.brandKit = mergeLineBrandKit(companyKitRaw, r.brandKit as Record<string, unknown>, pinPrimary) as typeof r.brandKit;
+          // 후보를 보여 주지 못한 요청(products 칸 없음)은 이름 첨부를 저장 **전에** 한다(제자리 변형 = 장 묶음에도 반영 · 저장본 = 응답)
+          if (lineProducts === undefined) {
+            try { await attachMallImagesToProductCarousels(companyId, r.sections, lineActor); } catch { /* best-effort */ }
+          }
+          return { ...r, layout: null } as Awaited<ReturnType<typeof oneShotGenerate>> & { layout: 'slides' | 'page' | null };
+        },
+        adapter: {
+          kind: 'draft', label: 'dm',
+          // ★ 2026-10-10 결과 화면 착지 = 서버가 초안 행을 먼저 만들고 차감한다(응답이 유실돼도 낸 돈의 결과가 남는다)
+          persist: async (r) => String((await createDm(companyId, req.user?.userId, {
+            title: (typedLine || '모바일 DM').slice(0, 30),
+            sections: r.sections,
+            pages: pagesFromSectionGroups(r.pages),
+            layout_mode: r.layoutMode,
+            brand_kit: r.brandKit,
+            ai_prompt: typedLine.slice(0, 2000),
+            approval_status: 'draft',
+            // 구성 DM 표식(편집 화면 = 장 키로 다시 묶기)
+            ...(compDef ? { template_id: lineCompositionDmMarker(compDef.id) } : {}),
+          } as any)).id),
+          discard: (id) => deleteDm(id, companyId),
+        },
+      });
+      if (order.kind === 'refused') return res.status(order.status).json({ success: false, error: order.error, code: order.code, ...(order.extra || {}) });
+      if (order.kind === 'reused') {
+        return res.json({
+          success: true,
+          data: { draft_id: order.draftId, reused: true, one_line: { enabled: true, gaps: oneLineGaps(typedLine), asked: lineFacts !== undefined, benefit: lineFacts ? lineFacts.benefit : null, notes: [], mall_cards: 0 } },
+        });
+      }
+      const made = order.result;
+      // ★ 2026-10-17 단계 요청 기록(판정에 쓰지 않는다 · 「규칙이 놓친 질문」 측정용 · stdout)
+      console.log(`[one-line steps] dm company=${companyId} cost=${order.cost} completion=${order.completionDue} shown=${steps.body.meta.shown.join(',')} answered=${steps.body.meta.answered.join(',')} skipped=${steps.body.meta.skipped.join(',')} manual_cards=${steps.manualCards.length} hero=${steps.hero ? 1 : 0}${tplSel ? ` template=${tplSel.id} layout=${made.layout} page=${steps.body.page ? 1 : 0}` : ''}`);
+      return res.json({
+        success: true,
+        data: {
+          sections: made.sections, pages: made.pages, layout_mode: made.layoutMode, brand_kit: made.brandKit,
+          spec: made.spec, scenario: made.scenario, brief: made.brief ?? null, coverage: made.coverage ?? null,
+          one_line: {
+            enabled: true, gaps: oneLineGaps(typedLine), asked: lineFacts !== undefined, benefit: lineFacts ? lineFacts.benefit : null,
+            notes: [...order.excluded.map((e) => `상품${e.name ? ` "${e.name}"` : ''} 제외: ${e.reason}`), ...linePriceNotes(buildLineEventText(typedLine, lineFacts), order.cards)],
+            mall_cards: order.cards.length,
+            steps: { cost: order.cost, completion: order.completionDue },
+            ...(tplSel ? { template: { id: tplSel.id, layout: made.layout } } : {}),
+          },
+          ...(order.draftId ? { draft_id: order.draftId } : {}),
+        },
+      });
+    }
+
+    // ─── 아래 = 단계 없는 요청(1005 · 1010 시도 토큰 경로 · 일반 생성) — 지금 그대로 ───
+    // ★ 2026-10-10 고른 상품을 지문에 넣는다(상품만 바꿔 같은 토큰으로 보내면 새 차감) · 상품 칸이 없는 요청은 키가 지금과 같다.
     const idemKey = attemptToken
-      ? (steps
-        ? lineStepsKeyFor(steps, companyId, 'dm', stepsPayload)
-        : buildOneLineIdempotencyKey(companyId, 'dm', attemptToken, { prompt, eventText, scenario: scenario || null, ...(lineProducts !== undefined ? { products: lineProductsKey(lineProducts) } : {}) }))
+      ? buildOneLineIdempotencyKey(companyId, 'dm', attemptToken, { prompt, eventText, scenario: scenario || null, ...(lineProducts !== undefined ? { products: lineProductsKey(lineProducts) } : {}) })
       : undefined;
     const lineLock = attemptToken ? oneLineInflightKey(companyId, 'dm', attemptToken) : '';
     if (lineLock && !tryAcquireInflight(lineLock)) {
       return res.status(409).json({ success: false, error: '지금 만드는 중이에요. 완성되면 이어서 진행해 주세요.', code: 'IN_FLIGHT' });
     }
-    // ★ 2026-10-17 단계 요청 = 한 줄 단위 잠금(금액 확정 ~ 차감 · 다른 시도의 같은 한 줄이 한 줄 완성을 두 번 내지 않게 · Codex 1017 1R)
-    const stepsLock = steps ? lineStepsLineLockKey(steps, companyId, 'dm') : '';
-    let stepsLockHeld = false;
     let result: Awaited<ReturnType<typeof oneShotGenerate>>;
     let lineCards: LineMallCard[] = [];
     let lineExcluded: LineMallExcluded[] = [];
     let lineDraftId = '';
     let lineChargeFailed = false;
-    /** ★ 2026-10-17 단계 요청의 금액 결과(응답 · 로그용) */
-    let stepsResult: { cost: number; completion: boolean } | null = null;
-    /** ★ 템플릿 요청이 실제로 낸 배치(슬라이드가 3장 미만이면 한 페이지) */
-    let tplLayout: 'slides' | 'page' | null = null;
     try {
-      if (stepsLock) {
-        if (!tryAcquireInflight(stepsLock)) return res.status(409).json({ success: false, error: '같은 한 줄로 지금 만드는 중이에요. 완성되면 다시 시도해 주세요.', code: 'IN_FLIGHT' });
-        stepsLockHeld = true;
-      }
       // ★ 2026-10-10 Codex 1R · 2R — 착지 경로는 **돈을 안 낸 초안을 건네지 않는다.** 같은 시도(같은 멱등키)의 재요청:
       //   paid = 낸 초안을 그대로 돌려준다(새 AI 호출 · 새 행 0) · orphan = 지난 시도가 거두지 못한 미과금 초안 → 다시 거둔다(못 거두면 503 · 새로 만들지 않는다).
-      // ★ 2026-10-17 단계 요청 = 오늘 · 어제(KST) 키 둘 다에서 찾는다(원장 판정과 같은 목록 · 자정 전 못 거둔 초안을 자정 뒤 재전송이 건너뛰지 않게)
-      const attemptKeys = steps && stepsPayload ? lineStepsAttemptKeys(steps, companyId, 'dm', stepsPayload) : (idemKey ? [idemKey] : []);
-      const priorKey = lineLand ? attemptKeys.find((k) => recallLineDraft(k) !== null) : undefined;
-      const prior = priorKey ? recallLineDraft(priorKey) : null;
-      if (prior && priorKey) {
+      const prior = lineLand && idemKey ? recallLineDraft(idemKey) : null;
+      if (prior && idemKey) {
         if (prior.state === 'paid') {
           return res.json({
             success: true,
@@ -1110,25 +1191,16 @@ dmRouter.post('/ai/one-shot-generate', singleFlight('dm-generate', async (req: a
         if (!(await deleteLineDraftWithRetry(() => deleteDm(prior.draftId, companyId), `dm=${prior.draftId} company=${companyId}`))) {
           return res.status(503).json({ success: false, error: '잠시 후 다시 시도해 주세요.', code: 'LINE_DRAFT_PENDING' });
         }
-        forgetLineDraft(priorKey);
+        forgetLineDraft(idemKey);
       }
       if (idemKey) {
         let charged: boolean;
-        // ★ 2026-10-17 단계 요청 = 오늘 · 어제(KST) 키 둘 다(자정을 넘긴 같은 시도의 재전송이 새 날짜 키로 다시 차감되지 않게)
-        try { charged = steps ? await lineStepsAttemptCharged(steps, companyId, 'dm', stepsPayload) : await isChargedByKey(companyId, idemKey); } catch {
+        try { charged = await isChargedByKey(companyId, idemKey); } catch {
           return res.status(503).json({ success: false, error: '잠시 후 다시 시도해 주세요.', code: 'CREDIT_STATE_UNKNOWN' });
         }
         if (charged) {
           return res.status(409).json({ success: false, error: '이 요청은 이미 처리됐어요. 다시 만들려면 [만들기]를 한 번 더 눌러 주세요.', code: 'ALREADY_DONE' });
         }
-      }
-      // ★ 2026-10-17 단계 요청 = 금액 확정(오늘 이 한 줄로 한 줄 완성을 냈으면 생성비만) · 화면 금액과 다르면 409 · 원장 모름 = 503 — AI · 차감 · 몰 조회 전
-      let stepsCharge: { cost: number; source: string; completionDue: boolean } | null = null;
-      if (steps) {
-        const price = await settleLineStepsPrice(steps, companyId, 'dm', stepsNow);
-        if (isLineStepsReqError(price)) return res.status(price.status).json({ success: false, error: price.error, code: price.code, ...(price.cost !== undefined ? { cost: price.cost, breakdown: price.breakdown } : {}) });
-        stepsCharge = price;
-        stepsResult = { cost: price.cost, completion: price.completionDue };
       }
       // ★ 2026-10-10 고른 상품은 AI 호출 · 차감 **앞에서** 몰에서 다시 읽는다(재조회 ok 만 카드 · 전부 빠지면 409 · 돈 0 · 범위 밖 몰 = 재조회 0).
       const lineActor = await resolveIntegrationActor(req.user);
@@ -1140,72 +1212,20 @@ dmRouter.post('/ai/one-shot-generate', singleFlight('dm-generate', async (req: a
           return res.status(409).json({ success: false, error: '고른 상품을 지금 쓸 수 없어요. 상품 없이 만들 수 있어요.', code: 'MALL_PRODUCTS_UNAVAILABLE', excluded: lineExcluded });
         }
       }
-      // ★ 2026-10-17 템플릿 요청 = 읽은 이벤트 페이지를 서버가 다시 얻어 지문 대조(바뀌었으면 409 · AI · 차감 전 · 0원)
-      let tplPage: LinePageMaterial | null = null;
-      if (tplSel && steps && steps.body.page) {
-        const pg = await resolveLinePage(companyId, steps.body.page);
-        if (isLinePageError(pg)) return res.status(pg.status).json({ success: false, error: pg.error, code: pg.code });
-        tplPage = pg;
-      }
       // ★ 2026-10-10 회사가 저장한 주색(읽히게 보정한 값만)을 생성기 팔레트에 고정하고, 결과 킷 = 회사 킷 + AI 아트디렉션(회사 저장값이 이긴다).
       const companyKitRaw = lineOn ? ((await getCompanyBrandKitRaw(companyId).catch(() => null)) as Record<string, unknown> | null) : null;
       const pinPrimary = lineOn ? linePinnedPrimary(companyKitRaw) : null;
       // ★ 종량제: DM 생성(돌려보기) = 3크레딧 묶음 (내부 parse/copy/tone은 집계만, 차감 0). 발행 시 30 별도.
-      // ★ 2026-10-17 단계 요청 = 한 줄 완성 금액(생성비 + 10 · 같은 날 같은 한 줄 다시 만들기 = 생성비만) · 원천 = 'oneline-complete' 또는 생성 원천
-      const genCost = stepsCharge ? stepsCharge.cost : getCreditCost('dm-ai-generate');
-      const genSource = stepsCharge ? stepsCharge.source : 'dm-ai-generate';
-      // ★ 2026-10-17 확정 카드 = 몰 상품(재조회 ok) + 직접 넣은 상품(사진 + 가격) · 대표 사진 · 버튼 주소는 서버가 정해 생성기가 놓는다
-      const allCards: LineMallCard[] = [...lineCards, ...(steps ? steps.manualCards : [])];
-      const stepsDelivery = steps ? await resolveLineStepsDelivery(companyId, lineActor, steps, { channel: 'dm', line: typedLine, cards: allCards, companyKitRaw }) : null;
-      // ★ 템플릿 요청 재료 — 대표 사진 = 올린 사진 → 페이지 표지 사진(상품 사진 대체 0) · 버튼 주소 = 답 → 읽은 페이지 → 1017 순서
-      const tplBrand = tplDef || compDef ? await lineTemplateBrand(companyId, companyKitRaw) : null;
-      // 템플릿 직접 상품 = 사진이 있으면 카드(가격 없어도) · 1017 나누기는 그대로
-      const tplManual = tplDef && steps ? lineTemplateManual(steps.body.manual) : null;
-      // 구성 직접 상품 = 사진 있는 것만 카드 + 넣은 순서의 종류
-      const compManual = compDef && steps ? lineCookManual(steps.body.manual, steps.body.rich.categories) : null;
-      // 템플릿 생성 = 문구 AI 1회 + 조립 + 품질 관문(바깥 묶음 안에서 불린다 · 안쪽 차감 0 · 실패 = 던짐 = 초안 · 차감 전)
-      const generateTemplateDm = async (): Promise<Awaited<ReturnType<typeof oneShotGenerate>>> => {
-        if (compDef) {
-          const cook = await draftLineCook({
-            composition: compDef, channel: 'dm', companyId, line: typedLine, ...tplBrand!, brandName: tplBrand!.brandName || brandName || '',
-            pinnedPrimary: pinPrimary, cards: [...lineCards, ...compManual!.cards], cardCategories: [...lineCards.map(() => null), ...compManual!.categories],
-            heroUpload: steps!.hero, heroAsIs: steps!.heroAsIs, proof: steps!.body.proof, page: tplPage,
-            benefitAnswer: steps!.body.facts.benefit, periodEnd: steps!.body.facts.periodEnd ?? null,
-            link: steps!.body.facts.link ?? tplPage?.url ?? stepsDelivery?.link ?? null, rich: steps!.body.rich,
-          }, { userId: req.user?.userId, source: 'dm-ai-generate' });
-          const dmC = buildLineCookDm(cook);
-          // 슬라이드는 사람이 고를 때만 · 장이 3장 미만이면 한 페이지(템플릿과 같은 규칙)
-          const slides = tplSel!.layout === 'slides' && dmC.pages.length >= 3;
-          tplLayout = slides ? 'slides' : 'page';
-          return {
-            sections: dmC.sections, pages: slides ? dmC.pages : [dmC.sections], layoutMode: slides ? 'slides' : 'scroll',
-            brandKit: mergeLineBrandKit(companyKitRaw, { ...dmC.brandKitPatch }, pinPrimary),
-            spec: null, scenario: null, brief: null, coverage: null,
-          } as unknown as Awaited<ReturnType<typeof oneShotGenerate>>;
-        }
-        const draft = await draftLineTemplate({
-          template: tplDef!, channel: 'dm', companyId, line: typedLine, ...tplBrand!, brandName: tplBrand!.brandName || brandName || '',
-          pinnedPrimary: pinPrimary, cards: [...lineCards, ...tplManual!.cards], textProducts: tplManual!.textProducts, heroUpload: steps!.hero, heroAsIs: steps!.heroAsIs, proof: steps!.body.proof, page: tplPage,
-          benefitAnswer: steps!.body.facts.benefit, periodEnd: steps!.body.facts.periodEnd ?? null,
-          link: steps!.body.facts.link ?? tplPage?.url ?? stepsDelivery?.link ?? null,
-        }, { userId: req.user?.userId, source: 'dm-ai-generate' }, { factsOnly: true });   // ★ 1019 B-1018-1 값 = 코드
-        const dmR = buildLineTemplateDm(draft, tplSel!.layout);
-        tplLayout = dmR.layout;
-        return {
-          sections: dmR.sections, pages: dmR.pages.map((pg) => pg.sections), layoutMode: dmR.layoutMode,
-          brandKit: mergeLineBrandKit(companyKitRaw, { ...dmR.brandKitPatch }, pinPrimary),
-          spec: null, scenario: null, brief: null, coverage: null,
-        } as unknown as Awaited<ReturnType<typeof oneShotGenerate>>;
-      };
+      const genCost = getCreditCost('dm-ai-generate');
+      const genSource = 'dm-ai-generate';
       await checkCredit(companyId, genCost);
       result = await runInCreditBundle(async () => {
-        const r = tplDef || compDef ? await generateTemplateDm() : await oneShotGenerate({
+        const r = await oneShotGenerate({
           prompt: effectivePrompt, scenario, brandName, companyId, eventText,
-          ...(allCards.length > 0 ? { confirmedCards: allCards } : {}),
+          ...(lineCards.length > 0 ? { confirmedCards: lineCards } : {}),
           ...(pinPrimary ? { pinPrimary } : {}),
-          ...(stepsDelivery ? { lineMaterials: { heroImageUrl: stepsDelivery.hero, linkUrl: stepsDelivery.link } } : {}),
         });
-        if (lineOn && !tplDef && !compDef) r.brandKit = mergeLineBrandKit(companyKitRaw, r.brandKit as Record<string, unknown>, pinPrimary) as typeof r.brandKit;
+        if (lineOn) r.brandKit = mergeLineBrandKit(companyKitRaw, r.brandKit as Record<string, unknown>, pinPrimary) as typeof r.brandKit;
         if (!lineLand) {
           await deductCreditSafe({ companyId, cost: genCost, source: genSource, createdBy: req.user?.userId, ...(idemKey ? { idempotencyKey: idemKey } : {}) });
           return r;
@@ -1224,8 +1244,6 @@ dmRouter.post('/ai/one-shot-generate', singleFlight('dm-generate', async (req: a
           brand_kit: r.brandKit,
           ai_prompt: typedLine.slice(0, 2000),
           approval_status: 'draft',
-          // ★ 템플릿 DM 표식(편집 화면 = 카탈로그 보기 · 장 추가 숨김 · 배치 전환 = 장 키로 다시 묶기)
-          ...(tplDef ? { template_id: lineTemplateDmMarker(tplDef.id) } : compDef ? { template_id: lineCompositionDmMarker(compDef.id) } : {}),
         } as any);
         lineDraftId = String(row.id);
         let thrown: unknown = null;
@@ -1252,7 +1270,6 @@ dmRouter.post('/ai/one-shot-generate', singleFlight('dm-generate', async (req: a
         return r;
       });
     } finally {
-      if (stepsLockHeld) releaseInflight(stepsLock);
       if (lineLock) releaseInflight(lineLock);
     }
     // ★ 2026-10-10 Codex 2R — 착지 초안의 차감 기록을 남기지 못했으면 초안을 거뒀다 → 다시 시도하게 한다(미과금 결과 0)
@@ -1265,10 +1282,6 @@ dmRouter.post('/ai/one-shot-generate', singleFlight('dm-generate', async (req: a
     //   착지 초안은 이미 저장됐으므로 첨부하지 않는다(저장본과 응답이 갈라지지 않게).
     if (lineProducts === undefined && !lineDraftId) {
       try { await attachMallImagesToProductCarousels(companyId, result.sections, await resolveIntegrationActor(req.user)); } catch { /* best-effort */ }
-    }
-    // ★ 2026-10-17 단계 요청 기록(판정에 쓰지 않는다 · 「규칙이 놓친 질문」 측정용 · stdout)
-    if (steps && stepsResult) {
-      console.log(`[one-line steps] dm company=${companyId} cost=${stepsResult.cost} completion=${stepsResult.completion} shown=${steps.body.meta.shown.join(',')} answered=${steps.body.meta.answered.join(',')} skipped=${steps.body.meta.skipped.join(',')} manual_cards=${steps.manualCards.length} hero=${steps.hero ? 1 : 0}${tplSel ? ` template=${tplSel.id} layout=${tplLayout} page=${steps.body.page ? 1 : 0}` : ''}`);
     }
     return res.json({
       success: true,
@@ -1289,10 +1302,6 @@ dmRouter.post('/ai/one-shot-generate', singleFlight('dm-generate', async (req: a
           // ★ Codex 1R medium — 비교 입력 = 사용자가 친 한 줄 + 혜택 칸 답(몰 텍스트 · 사진 판독본은 넣지 않는다)
           notes: [...lineExcluded.map((e) => `상품${e.name ? ` "${e.name}"` : ''} 제외: ${e.reason}`), ...linePriceNotes(buildLineEventText(typedLine, lineFacts), lineCards)],
           mall_cards: lineCards.length,
-          // ★ 2026-10-17 단계 요청 = 낸 금액 · 한 줄 완성이 붙었는가
-          ...(stepsResult ? { steps: stepsResult } : {}),
-          // ★ 템플릿 요청 = 고른 템플릿 · 실제로 낸 배치
-          ...(tplSel ? { template: { id: tplSel.id, layout: tplLayout } } : {}),
         } : null,
         // ★ 2026-10-10 결과 화면 착지 초안(land:'result' 요청만)
         ...(lineDraftId ? { draft_id: lineDraftId } : {}),
@@ -1304,7 +1313,7 @@ dmRouter.post('/ai/one-shot-generate', singleFlight('dm-generate', async (req: a
     // ★ 2026-10-17 템플릿 생성 실패 = 정해 둔 상태 · 문장(차감 전 · 초안 0)
     if (err instanceof LineTemplateError) {
       console.error(`[DM template] ${err.code} ${err.detail}`);
-      return res.status(err.status).json({ success: false, error: err.message, code: err.code });
+      return res.status(err.status).json({ success: false, error: err.message, code: err.code, ...(err.missing.length > 0 ? { missing: err.missing } : {}) });
     }
     console.error('[DM AI one-shot-generate] 오류:', err.message);
     return res.status(500).json({ success: false, error: err.message || 'AI 통합 생성 실패' });
