@@ -71,10 +71,11 @@ describe('2. 혜택 근거 = 사용자 원문 한정', () => {
     // ★ 2026-10-19 B-1005-1① — 답이 없는 요청도 근거 = 목표 문장(회사 메모리 · 계절 힌트는 근거가 아니다)
     expect(o).toContain('licenseText: licenseText ?? ctx.objective,');
     expect(o).toContain('licenseText: licenseTextAI ?? ctx.objective,');
-    for (const f of [['utils', 'auto-campaign-worker.ts'], ['utils', 'planner-copy.ts']]) {
-      const src = SRC(...f);
-      expect(src).not.toMatch(/lineFacts|licenseText|cVariant/);
-    }
+    // ★ 2026-10-23 자동발송 = 혜택 근거 = 컨셉 글(licenseText · 설계서 docs/2026-10-23-oneline-ct-complete-design.md C2) · cVariant · lineFacts 는 여전히 넘기지 않는다(C안 시험 오염 0)
+    const worker = SRC('utils', 'auto-campaign-worker.ts');
+    expect(worker).not.toMatch(/lineFacts|cVariant/);
+    expect((worker.match(/licenseText: ac\.ai_prompt \|\| ac\.campaign_name,/g) || []).length).toBe(2);
+    expect(SRC('utils', 'planner-copy.ts')).not.toMatch(/lineFacts|licenseText|cVariant/);
     const co = SRC('utils', 'continuous-operator.ts');
     expect(co).toContain('lineFacts: { benefit: op.benefitContent || null },');
     expect(co).not.toMatch(/cVariant|licenseText/);
@@ -133,8 +134,10 @@ describe('4. 라우트 게이트', () => {
     // 스위치 밖인데 답이 오면 조용히 버리지 않는다
     // ★ 2026-10-10 고른 몰 상품도 같은 규칙(스위치 밖 = 400)
     expect(d).toContain("if ((lineFacts !== undefined || lineProducts !== undefined || lineReads !== undefined) && !lineOn) {");
-    // 이미 낸 키는 생성 전에 막는다(생성 → 차감 순서보다 앞)
-    expect(d.indexOf('await isChargedByKey(companyId, idemKey)')).toBeLessThan(d.indexOf('prompt: effectivePrompt, scenario, brandName, companyId, eventText,'));
+    // 이미 낸 키는 생성 전에 막는다(생성 → 차감 순서보다 앞) · ★ 2026-10-23 단계 요청 = 한줄 CT 주문이 같은 시도를 먼저 본다 → 여기는 단계 없는 경로
+    const tail = d.slice(d.indexOf('// ─── 아래 = 단계 없는 요청'));
+    expect(tail.indexOf('await isChargedByKey(companyId, idemKey)')).toBeGreaterThan(0);
+    expect(tail.indexOf('await isChargedByKey(companyId, idemKey)')).toBeLessThan(tail.indexOf('prompt: effectivePrompt, scenario, brandName, companyId, eventText,'));
   });
   it('이메일: 원문 자리는 옮기지 않고 멱등만 · 인앱: 원문 없을 때만 한 줄을 원문으로', () => {
     const e = SRC('routes', 'email.ts');

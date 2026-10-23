@@ -25,6 +25,9 @@ vi.mock('../ai-credit', async () => {
   const tx = await vi.importActual<any>('../ai-credit-tx');
   return {
     isChargedByKey: m.isChargedByKey,
+    // ★ 2026-10-23 문자 입구 판단 몫 = lineJudgeCovered 한 벌(설계서 docs/2026-10-23-oneline-ct-complete-design.md A5) — 키마다 같은 원장 조회로 흉내 낸다 · 콘텐츠 완성 없음
+    chargedKeysAmong: async (companyId: string, keys: string[]) => { const s = new Set<string>(); for (const k of keys) if (await m.isChargedByKey(companyId, k)) s.add(k); return s; },
+    hasChargeWithKeyPrefix: async () => false,
     chargedAmountByKey: m.chargedAmountByKey,
     hasCreditForStrict: m.hasCreditForStrict,
     settleCreditAfterSuccess: m.settle,
@@ -39,7 +42,10 @@ vi.mock('../../services/ai', () => ({
 }));
 vi.mock('../operator-message-decorator', () => ({ decorateOperatorMessages: m.decorate }));
 // ★ 1022 문자 입구 기본 납부 판정이 콘텐츠 완성(lineCompletionPaid)도 본다 · 이 시험은 콘텐츠 원장 없음 = 안 냄
-vi.mock('../line-steps-context', () => ({ lineCompletionPaid: async () => false }));
+vi.mock('../line-steps-context', async () => {
+  const real = await vi.importActual<any>('../line-steps-context');
+  return { lineCompletionPaid: async () => false, lineJudgeCovered: real.lineJudgeCovered };
+});
 vi.mock('../hub-company-context', () => ({
   loadHubCompanyContext: async () => ({ companyInfo: { company_name: '테스트', reject_number: '0800000000', customer_schema: null }, customerStats: { total: 10 } }),
 }));

@@ -185,17 +185,38 @@
 > 검증 = FE · BE tsc 0 · vitest 595파일 8,371건 · 렌더 108곳 · Codex 적대 1R approve(gpt-6-astra · 지적 0 · 지정 파일 66개 + 분리 전 원본을 읽고 대조)
 > 다음 = 배포(백엔드 reload + 프론트 build:safe · AI 영업 C12 와 한 번에) → 실측(목록 숫자 카드 값 · 상세 창 저장 · 7일 부여 1회)
 
+<a id="c55"></a>
+
+### C55 · ★1022 오류접수 묶음(서수란 · 박성용) · 구조체크 → 뿌리 처방 · Codex 적대 approve · DDL 0 · 푸시 대기
+> 순서 = 비토 구조체크(소유 · 같은 모양) → 원인(실측) → 뿌리 처방(Harold 「디버깅은 구조체크 필수 먼저」).
+> ① 이메일 대행 승인 뒤 취소 = 발송결과 「직접발송(실패)」(서수란) — 실측: 예약 대행 캠페인은 예약 시각까지 scheduled · 대행 취소 = cancelCampaign queueOnly(큐만 지움 · 상태 유지) → 예약 시각 +10분 cleanupScheduledCampaigns 가 큐 0건을 failed 로 굳힘(10/19 · 10/20 담당자 링크 취소 2건). 처방 = 정산 CT `utils/cancel-settle.ts` confirmQueueOnlyCancel(scheduled + 대기를 떠난 행 0 = cancelled · 상태만 · 돈 무변경 · completed 불변) · 호출 = queueOnly 마무리(지운 대기 > 0 · 픽업 0 · 적재 중 아님). 시험 agency-scheduled-cancel-1022. Codex 3R approve.
+> ② 직접발송 주소록 개별 삭제(박성용) — `DELETE /api/address-books/:groupName/contacts`(id 1~100 · 회사 · 그룹 · 주인 CT 범위) · 감사 address_book_deleted partial · 화면 체크박스 · 보이는 줄 전체 선택 · 고른 번호 N개 삭제 · 「주소록 삭제」 이름 · 미리보기 100. Codex 1R · 2R(같은 뿌리 = 보이는 목록이 지금 세대가 아님) → 세대 불변식 · 3R approve.
+> ③ AI영업(서수란) — 뒤로가기 왕복 = 위로 가는 이동 goUpTo 통일(작업대 ← = /admin 한 번) · 혜택 면허 = `benefitLicenseOf` 하나(종료일 미래 · 종료일 없음 + 오늘 홈 게시 = 면허 · Harold 「완화」) · 확실히 끝난 행사(AI 종료일 · 인용 안 날짜) 후보 제외(endedDropped) · 제안 메일 「이번 시안에 담은 소식」 면허 · 혜택 반영 · 포스터 업종 꼬리표 = accessiblePrimaryOf. Codex 1R~4R = 날짜 걷기가 금액을 깸(129.5만원 · 9.3~9.9% · 1.5 만원) → 금액 보호(CARD_QTY_RE) → 날짜 걷기 → 되돌리기 · 단위 2종(모호하지 않은 % · 퍼센트 · 만원 · 천원 / 모호한 원) · 5R(「9.1~9.6 천원의 행복」 합성 반례)은 Harold 닫기(코드 주석 = 알려진 한계 · 모호하면 가격을 지킨다). 범위 밖 = 템플릿 · 누끼 장면 · 빈약한 홈페이지 · 「일반」 선택 반영(별도 설계 · 브레인스토밍 권고).
+> 검증: backend tsc 0 · frontend tsc 0 · 세 묶음 시험 542건 · 1022 12:14 전체 통과(669파일 9,760건) · 주소록 화면 실물 렌더 미확인(로그인 · 데이터 필요).
+> 남은 것 = ⓐ 푸시 = pre-push 차단(다른 세션 한줄 CT 의 routes/ai.ts · dm 라우트 변경과 옛 시험 불일치 · journey 시험 2건 hook timeout) → 그 세션 정리 뒤 tp-push 재실행 · --no-verify 금지 ⓑ 배포 뒤 옛 「직접발송(실패)」 줄 바로잡기(대행 원장 cancelled + 캠페인 failed + 적재 0 · 조회 먼저) ⓒ 실측 = 다음 예약 대행 취소 · 주소록 개별 삭제 화면.
+
+<a id="c54"></a>
+
+### C54 · ★1022 전송자격인증 현장 실사 통과 · 다음 = 방미통 심의위원회
+> 실사(Zoom · 대표 화면 공유 · 서수란 답변) — 한줄로 로그만 보고 게이트웨이는 보지 않음 · 「서면 제출과 실물 전부 일치」(Harold 1022). 다음 = 방미통 심의위원회.
+> 실사 전 확인 = 차단 켠 뒤 막힌 정상 연동 0(게이트웨이 14:26 ~ 10/22 13:27 denied 0 · 한줄로 10/15 뒤 미등록 0).
+> 실사 중 새 결함(결함 대장 = 생성기 `docs/transmission-cert/resubmit-1006/evidence/make_inspection_commands_xlsx.py`) — D-36 서버 방화벽(ufw) 정책 파일이 매일 백업에 없음(실측 ufw 0 · /etc 0 · 1차 브릿지 정책은 데이터센터 관리 화면) · D-37 슈퍼관리자 회사 수정(routes/admin.ts PUT /companies/:id)에서 회사명 · 담당자 · 연락처 변경 전후 감사 기록 없음. 둘 다 실사에서 「보완하겠습니다」 · 심의위원회 전에 닫는다.
+> 금칙어 차단정보 요소 하한 2 → 1(Harold · 기준 원문 1~5개) — `utils/spam-block.ts` MIN_ELEMENTS · 화면 SpamBlockTab · 시험 · Codex 적대 approve · 배포 1022(Harold).
+> 교훈 = .62 · .65 둘 다 호스트명 invito → 명령마다 프롬프트 계정으로 구분(.62 administrator · .65 invito).
+
 <a id="c53"></a>
 
-### C53 · ★1022 한줄 프롬프트 CT(두뇌) · 구성 5종 · 재료 판 · 전 채널 배선 · 시연 6회 정정 · Codex 적대 approve · DDL 0 · 배포 완료 1023
+### C53 · ★1022 한줄 프롬프트 CT(두뇌) · 구성 5종 · 재료 판 · 전 채널 배선 · 시연 6회 정정 · Codex 적대 approve · DDL 0 · 배포 완료 1023 · ★1023 완성 배포 대기
 > 호출어 **"한줄 CT / 한줄 두뇌 / 구성 5종 / 재료 판"** → 설계서 = `docs/2026-10-22-oneline-ct-design.md` §11(확정) · §12(구현 기록) · 브리핑 = https://claude.ai/artifact/VJ24x9RPDHNo3dAgVFNh7k
 > ① 단가 = 판단 2 · 판단 뒤 첫 결과물 13(합 15) · 판단 없이 15 · 채널 추가 · 다시 만들기 3 · 입구 무관. 판단 몫 판정 = `aiLineBasePaid`(문자) · `lineJudgeCovered`(콘텐츠) · 두 입구 한 줄 잠금 = `lineFpLockKey`.
 > ② 코드 = `utils/line-compositions.ts`(구성 5종 · 채널 칸 `compositionChannelSlots`) · `utils/one-line-ct/`(판단 · 요리 · 미리보기 · 목록) · `components/zone/LineCompositionBoard.tsx` · `LineStepsModal`(재료 판) · 플래너(`?set=compositions`).
 > ③ 시연 = `scripts/oneline-demo-set.ts` + `scripts/data/oneline-demo-scenes.json`(장면 업종) · 사내 시연 쇼핑몰 `frontend/public/demo-shop/`(생성기 `make_demo_shop.py`). 서버 명령 = `npx ts-node --transpile-only scripts/oneline-demo-set.ts "$CID" scripts/data/oneline-demo-scenes.json`.
 > ④ 시연 판정 정정 = 업종 미지정 첫 화면 택배 상자 틀 제외 · 메뉴판 대표 = 대표 메뉴 카드 · 쿠폰 코드 문구 사실만 · 첫 화면 문구 자르지 않음(길면 대체 · 숫자 든 낱말 제외) · AI 첫 화면 효능 단정 제외 · 특징 초안 되풀이 제외(2개 미만 = 칸 생략) · 페이지 읽기 사진 = 상품 아닌 사진 먼저 사본 · 반환은 문서 순서 · 상품 판정 상한 없음 · 상품 사진 product 표시.
 > ⑤ 손대지 않음 = 여정 · 자동마케팅(문자 산출 · 공용 gaps 규칙만 공유) · 플래너 단가(DM 5 · 이메일 3 그대로).
-> ⑥ 남은 = Harold 판정(시연 5장) · 실과금 회사 1건 원장(판단 2 + 완성 13) · 추가 과제 = 사진 묶음 1장일 때 반 칸 빔 · 시연 장면 periodDays 와 「이번 달 말」 어긋남 · 정확도 덜 중요한 자리 opus → sonnet 후보 검토 · Codex 범위 밖 `line-compositions.ts:414`.
+> ⑥ 남은 = Harold 판정(시연 5장) · 실과금 회사 1건 원장(판단 2 + 완성 13) · 추가 과제 = 정확도 덜 중요한 자리 opus → sonnet 후보 검토 · Codex 범위 밖 `line-compositions.ts:414`(사진 반 칸 · 시연 기간 어긋남 = ⑦ 에서 닫음).
 > 검증: backend vitest 667파일 9,733건 · tsc 0(양쪽) · build:safe 양쪽 · Codex 적대 CT 4R · 시연 정정 2R · 2R · 2R · 사진 순서 4R · 대체 문구 1R · 시험 날짜 1R approve.
+> ⑦ ★1023 CT 완성(Harold 「한 번에 완벽한 CT · 비어 있는 곳 배선까지」 · 승인 = 설계서 `docs/2026-10-23-oneline-ct-complete-design.md` · §10 구현 기록) · 새 CT = `one-line-ct/listen.ts`(듣기 한 곳) · `order.ts`(세 입구 돈 순서 한 곳 · 멱등 payload · 잠금 키 옛 값 그대로) · `recurring.ts`(여정 · 자동발송 반복 발송 점검) · 진단 한 곳 `diagnoseComposition` · 미리보기 = 만들기 본문 · 옛 템플릿 갈래 삭제(옛 id = 400 LINE_TEMPLATE_RETIRED) · 사진 묶음 반 칸 0(DM · 이메일) · 상대 마감 = 허용 목록 · 자동발송 혜택 근거 · 플래너 초안(B2)은 근거 없는 상품 특징이라 철회(추가 과제 = 몰 상품 설명 읽기).
+> 검증(1023): backend vitest 670파일 9,779건 · tsc 0(양쪽) · build:safe 양쪽 · 렌더 검사 20장(구성 5 × 풍부 · 최소 × DM · 이메일) · Codex 적대 6R approve(R1 3건 · R2 · R3 같은 부류 → 허용 목록 구조 처방 · R4 · R5 같은 뿌리 → 유니코드 경계) · DDL 0 · 배포 대기(백엔드 · 프론트 같은 배포) · R2 「다음 주문 줄 마감 살리기」 불수용(안전 쪽 비움 · 칩 한 번).
 
 <a id="c52"></a>
 

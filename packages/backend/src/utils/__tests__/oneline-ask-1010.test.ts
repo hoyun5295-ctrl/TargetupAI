@@ -189,7 +189,9 @@ describe('④ 문 · 입구 · 생성 경로 무변경 · 0단계', () => {
     const g = body(ai, "router.post('/one-line/gaps'");
     expect(g).toContain('ask_enabled: askEnabled,');
     expect(g).toContain("const intent = askEnabled ? oneLineIntent(typed, { contentChannel: menu === 'dm' || menu === 'email' || menu === 'sns' }) : 'make';");
-    expect(g).toContain('const typed = lineWithoutReads(');
+    // ★ 2026-10-23 친 글 = ① 듣기 한 곳(listenLine · 사진 조각 제외)
+    expect(g).toContain('const typed = heard.typed;');
+    expect(read('utils/one-line-ct/listen.ts')).toContain('const typed = lineWithoutReads(raw, opts.reads);');
   });
 
   it('답 경로 = 메뉴마다 그 메뉴의 문', () => {

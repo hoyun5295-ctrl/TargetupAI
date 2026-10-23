@@ -204,8 +204,6 @@ export interface LineCookInput {
   periodEnd: string | null;
   link: string | null;
   rich: LineRichBody;
-  /** ★ 2026-10-23 비어 있는 권하는 칸(특징 · 사용 단계 · 꼬리표 · 참여 방법)을 문구 AI 같은 호출이 초안으로 채운다 — 재료 판이 없는 입구(플래너)만 · B2 */
-  fillSuggestDrafts?: boolean;
 }
 
 export interface LineCookDraft {
@@ -270,13 +268,8 @@ export async function draftLineCook(input: LineCookInput, ai: { userId?: string;
   if (missing.length > 0) throw new LineCookError(400, 'LINE_COMPOSITION_MISSING', `${missing.map((s) => s.ask).join(' · ')}이(가) 있어야 이 구성을 만들 수 있어요. 크레딧은 쓰지 않았어요.`, missing.map((s) => s.key).join(','), missing.map((s) => s.step));
   const ground: LineCtGround = { line: withoutBenefitSpans(input.line), brandName: input.brandName, industry: null, productNames: materials.products.map((p) => p.name) };
   try {
-    const wantDrafts = input.fillSuggestDrafts === true && (materials.points.length === 0 || materials.steps.length === 0);
-    const r = await writeLineRichCopy(comp, ground, { companyId: input.companyId, userId: ai.userId, source: ai.source, exemplars: await lineCopyExemplars(input.companyId, input.channel), drafts: wantDrafts });
-    // 비어 있던 칸만 초안으로(사람이 준 칸은 덮지 않는다)
-    const filled = r.drafts
-      ? { ...materials, points: materials.points.length > 0 ? materials.points : r.drafts.points, steps: materials.steps.length > 0 ? materials.steps : r.drafts.steps }
-      : materials;
-    return { comp, materials: filled, copy: r.copy };
+    const r = await writeLineRichCopy(comp, ground, { companyId: input.companyId, userId: ai.userId, source: ai.source, exemplars: await lineCopyExemplars(input.companyId, input.channel) });
+    return { comp, materials, copy: r.copy };
   } catch (err: any) {
     throw new LineCookError(503, 'LINE_TEMPLATE_AI_FAILED', '문구를 만들지 못했어요. 크레딧은 쓰지 않았어요. 잠시 뒤 다시 만들어 주세요.', String(err?.message || ''));
   }

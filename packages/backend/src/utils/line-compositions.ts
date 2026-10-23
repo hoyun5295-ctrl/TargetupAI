@@ -516,15 +516,23 @@ export function composeRichDm(comp: LineComposition, m: LineRichMaterials, c: Li
  *   탭(STEP) = 펼친 번호 목록 · 색면 표지 = 흰 바탕 큰 제목(이메일 렌더러에 색면이 없다) · 쿠폰 = classic · 번갈이 바탕 0.
  */
 export function composeRichEmail(comp: LineComposition, m: LineRichMaterials, c: LineRichCopy, newId: NewId): { sections: Section[]; subject: string; preheader: string } {
-  const parts = compositionParts(comp, m, c).map((p): P => {
+  const parts = compositionParts(comp, m, c).flatMap((p): P[] => {
     if (p.type === 'tab_cards') {
       const steps = m.steps.slice(0, 3);
-      return { type: 'text_card', props: { body: steps.map((s, i) => `${i + 1}. ${s.title}${s.body ? ` · ${s.body}` : ''}`).join('\n'), align: 'left', image_position: 'top' }, treatment: 'classic', part: p.part };
+      return [{ type: 'text_card', props: { body: steps.map((s, i) => `${i + 1}. ${s.title}${s.body ? ` · ${s.body}` : ''}`).join('\n'), align: 'left', image_position: 'top' }, treatment: 'classic', part: p.part }];
     }
-    if (p.type === 'hero' && !p.props.image_url) { const { mood_background: _bg, mood_text: _tx, ...rest } = p.props; return { ...p, props: { ...rest, height: 'sm' } }; }
-    if (p.type === 'coupon') return { ...p, treatment: 'classic' };
-    if (p.type === 'text_card' && p.treatment === 'framed') return { ...p, treatment: 'classic' };
-    return p;
+    if (p.type === 'hero' && !p.props.image_url) { const { mood_background: _bg, mood_text: _tx, ...rest } = p.props; return [{ ...p, props: { ...rest, height: 'sm' } }]; }
+    if (p.type === 'coupon') return [{ ...p, treatment: 'classic' }];
+    if (p.type === 'text_card' && p.treatment === 'framed') return [{ ...p, treatment: 'classic' }];
+    // ★ 2026-10-23 B1 — 이메일 렌더러는 2열 표만 그린다(첫 장 크게 모름) → 사진 3장 = 첫 장 한 줄 크게 + 나머지 2열(반 칸 0)
+    if (p.type === 'gallery' && p.treatment === 'mosaic') {
+      const images = Array.isArray(p.props.images) ? p.props.images as unknown[] : [];
+      return [
+        { ...p, treatment: undefined, props: { ...p.props, images: images.slice(0, 1), layout: 'list_1xN' } },
+        { ...p, treatment: undefined, part: `${p.part}-more`, props: { ...p.props, images: images.slice(1), layout: 'grid_2x2' } },
+      ];
+    }
+    return [p];
   });
   const sections: Section[] = [];
   if (m.brandName || m.logoUrl) sections.push(header(m, newId));

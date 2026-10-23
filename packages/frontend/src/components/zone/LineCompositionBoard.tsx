@@ -45,14 +45,21 @@ export default function LineCompositionPreview({ composition, channel, request, 
     // 옛 재료의 판정을 새 재료 위에 보이지 않게(응답이 올 때까지 모름)
     onSlots?.(null, composition);
     // 너무 잦은 요청을 피한다(재료 판으로 돌아온 뒤 0.25초)
+    let done = false;
     const t = setTimeout(() => {
       void fetchCompositionPreview(composition, channel, request, ctrl.signal).then((r) => {
         if (n !== ticket.current) return;
+        done = true;
         setView(r);
         onSlots?.(r ? r.slots : null, composition);
       });
     }, 250);
-    return () => { clearTimeout(t); ctrl.abort(); };
+    // ★ 2026-10-23(Codex R1) 응답 전에 칸을 열어 취소되면 그 요청을 무효로(늦은 응답 무시) · 같은 재료로 돌아오면 다시 그린다
+    return () => {
+      clearTimeout(t);
+      ctrl.abort();
+      if (!done) { ticket.current++; lastKey.current = ''; }
+    };
     // key 가 재료 전부를 담는다
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [composition, channel, paused, key]);

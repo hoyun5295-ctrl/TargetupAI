@@ -25,6 +25,9 @@ vi.mock('../ai-credit', async () => {
   const tx = await vi.importActual<any>('../ai-credit-tx');
   return {
     isChargedByKey: m.isChargedByKey,
+    // ★ 2026-10-23 문자 입구 판단 몫 = lineJudgeCovered 한 벌(설계서 docs/2026-10-23-oneline-ct-complete-design.md A5) — 키마다 같은 원장 조회로 흉내 낸다 · 콘텐츠 완성 없음
+    chargedKeysAmong: async (companyId: string, keys: string[]) => { const s = new Set<string>(); for (const k of keys) if (await m.isChargedByKey(companyId, k)) s.add(k); return s; },
+    hasChargeWithKeyPrefix: async () => false,
     chargedAmountByKey: m.chargedAmountByKey,
     hasCreditForStrict: m.hasCreditForStrict,
     settleCreditAfterSuccess: m.settle,

@@ -55,6 +55,17 @@
 
 ## 2) 활성 버그
 
+### 🟠 B-1022-1 이메일 대행 승인 뒤 취소하면 고객 발송결과에 「직접발송(실패)」 (★1022 수정 · Codex 적대 3R approve · 푸시 대기(pre-push = 다른 세션 시험) · DDL 0) · 2026-10-22 서수란 접수 `cmvj5rfsh01ikjn4eh5d3wy4u`
+- 원인(실측) = 예약 대행 캠페인 scheduled → 대행 취소 queueOnly(상태 유지) → cleanupScheduledCampaigns 가 큐 0건을 failed 로. 처방 = `utils/cancel-settle.ts` confirmQueueOnlyCancel(막은 예약 = cancelled · 상태만). 남음 = 배포 뒤 옛 failed 줄 바로잡기 · 실측. 원문 = STATUS-FEED C55.
+
+### 🟡 B-1022-2 직접발송 주소록 개별 번호 삭제 없음(전체 삭제만) (★1022 수정 · Codex 적대 3R approve · 푸시 대기 · DDL 0) · 2026-10-22 박성용 접수 `cmvixhiho00twjn4eimshbty9`
+- `DELETE /api/address-books/:groupName/contacts` + 화면 체크 · 전체 선택 · 고른 번호 삭제 · 미리보기 100. 원문 = STATUS-FEED C55.
+
+### 🟠 B-1022-3 AI영업 상세 · 작업대 뒤로가기 무한 왕복 (★1022 수정 · goUpTo 통일 · Codex 적대 approve · 푸시 대기 · 프론트만) · 2026-10-19 서수란 접수 `cmvewh5051rt8jnn42fi162l5`
+
+### 🟠 B-1022-4 AI영업 테스트 결과 — 행사 혜택 수치 누락 · 토니모리 꼬리표 안 보임 (★1022 1-1 · 1-2 · 1-3 수정 · 면허 완화 = Harold 결정 · Codex 적대 5R(5R Harold 닫기) · 푸시 대기 · DDL 0) · 2026-10-21 서수란 접수 `cmvhrr4fh1z12jnn4bcl6uxd6`
+- 범위 밖(별도 설계) = 2(템플릿 · 누끼 장면 어울림 · 업종별 반복) · 빈약한 홈페이지 품질 · 문자 예시 줄바꿈 · 「일반」 선택인데 행사만 실림. 원문 = STATUS-FEED C55.
+
 ### 🟠 B-1021-2 직접 타겟 추출 · AI 말로 고르기 미리보기가 분류코드 미배정 담당자에게 회사 전체 고객 수 · 이름 · 번호를 보여 줬다(상단 「고객 0명」과 어긋남) · 생일 칸 하루 앞 UTC 시각 (★1021 수정 · Codex 적대 1R approve · 배포 완료 1021(Harold) · 실측 대기 · 백엔드만 · DDL 0) · 2026-10-21 서수란 접수 `cmvhhbcl31xx6jnn4ilbqwjtt`
 - **구조(비토 구조체크)**: 사용자 범위(브랜드 격리) 판정 CT = `store-scope` `getStoreScope` · `getOwnerCustomerScopeSql`. 같은 창의 인원(`/filter-count`) · 담기(`/extract`) · `routes/targets.ts` 는 걸고, AI 미리보기 `previewMatching` 만 안 걸었다(소비처 3 = 직접 타겟 추출 · 온보딩 · 저장 세그먼트).
 - **원인(실측 · Harold SQL)**: 주식회사 인비토 `suran` = user · 배정 없음 · 회사 소속 행 3,093 → blocked → 인원 · 담기 0 · 미리보기만 회사 전체 414 (VIP). 「고객 DB 삭제됨」으로 보인 것도 같은 범위(활성 고객 3,093 그대로). 화면을 찍은 계정이 suran 인지는 로그 미확인.

@@ -296,39 +296,46 @@ describe('7. 배선 계약', () => {
     expect(dmRoute.indexOf("'MALL_PRODUCTS_UNAVAILABLE'")).toBeLessThan(dmRoute.indexOf('await checkCredit(companyId, genCost)'));
   });
   it('DM 착지 = 초안 행 → 잔액 부족이면 던지는 차감 → 실패 시 행 회수', () => {
-    const c = dmRoute.indexOf('await createDm(');
-    const d = dmRoute.indexOf('outcome = await deductCreditOutcome(');
+    // ★ 2026-10-23 단계 요청 = 한줄 CT 주문(one-line-ct/order.ts draft adapter · 시험 oneline-ct-complete-1023) · 여기는 단계 없는 착지 경로
+    const tail = dmRoute.slice(dmRoute.indexOf('// ─── 아래 = 단계 없는 요청'));
+    const c = tail.indexOf('await createDm(');
+    const d = tail.indexOf('outcome = await deductCreditOutcome(');
     expect(c).toBeGreaterThan(0);
     expect(d).toBeGreaterThan(c);
-    expect(dmRoute.slice(d, d + 260)).toContain('throwOnInsufficient: true');
-    expect(dmRoute.indexOf('deleteDm(draftToRemove, companyId)')).toBeGreaterThan(d);
-    expect(dmRoute).toContain('pages: pagesFromSectionGroups(r.pages)');
+    expect(tail.slice(d, d + 260)).toContain('throwOnInsufficient: true');
+    expect(tail.indexOf('deleteDm(draftToRemove, companyId)')).toBeGreaterThan(d);
+    expect(tail).toContain('pages: pagesFromSectionGroups(r.pages)');
     // 후보를 못 보여 준 착지 요청은 지금처럼 이름 첨부를 저장 전에(회귀 0)
-    const landAttach = dmRoute.indexOf('try { await attachMallImagesToProductCarousels(companyId, r.sections, await resolveIntegrationActor(req.user)); }');
+    const landAttach = tail.indexOf('try { await attachMallImagesToProductCarousels(companyId, r.sections, await resolveIntegrationActor(req.user)); }');
     expect(landAttach).toBeGreaterThan(0);
     expect(landAttach).toBeLessThan(c);
   });
   it('Codex 1R · 2R — 미과금 초안은 건네지 않는다 · 같은 시도 재요청 = 낸 초안 재사용 · 못 거둔 초안은 다시 거둔다 · 가격 안내 = 한 줄 + 혜택 답', () => {
-    // ★ 2026-10-17 같은 시도의 키 목록(단계 요청 = 오늘 · 어제 KST · 그 밖 = 멱등키 하나)에서 초안을 찾는다
-    const prior = dmRoute.indexOf('const priorKey = lineLand ? attemptKeys.find((k) => recallLineDraft(k) !== null) : undefined;');
-    expect(dmRoute).toContain("const attemptKeys = steps && stepsPayload ? lineStepsAttemptKeys(steps, companyId, 'dm', stepsPayload) : (idemKey ? [idemKey] : []);");
-    expect(dmRoute).toContain('forgetLineDraft(priorKey);');
+    // ★ 2026-10-23 단계 요청(오늘 · 어제 키) = 한줄 CT 주문이 소유 · 여기는 단계 없는 착지 경로(멱등키 하나)에서 초안을 찾는다
+    const tail = dmRoute.slice(dmRoute.indexOf('// ─── 아래 = 단계 없는 요청'));
+    const prior = tail.indexOf('const prior = lineLand && idemKey ? recallLineDraft(idemKey) : null;');
+    expect(tail).toContain('forgetLineDraft(idemKey);');
     expect(prior).toBeGreaterThan(0);
-    expect(prior).toBeLessThan(dmRoute.indexOf('await oneShotGenerate({'));
-    expect(prior).toBeLessThan(dmRoute.indexOf('await checkCredit(companyId, genCost)'));
-    const priorBlock = between(dmRoute, 'const priorKey = lineLand', 'if (idemKey) {');
+    expect(prior).toBeLessThan(tail.indexOf('await oneShotGenerate({'));
+    expect(prior).toBeLessThan(tail.indexOf('await checkCredit(companyId, genCost)'));
+    const priorBlock = between(tail, 'const prior = lineLand', 'if (idemKey) {');
     expect(priorBlock).not.toContain('deductCreditOutcome(');
     expect(priorBlock).toContain("if (prior.state === 'paid') {");
     expect(priorBlock).toContain("code: 'LINE_DRAFT_PENDING'");
-    const ded = dmRoute.indexOf('outcome = await deductCreditOutcome(');
-    const paid = dmRoute.indexOf("if (idemKey) rememberLineDraft(idemKey, lineDraftId, 'paid');");
+    const ded = tail.indexOf('outcome = await deductCreditOutcome(');
+    const paid = tail.indexOf("if (idemKey) rememberLineDraft(idemKey, lineDraftId, 'paid');");
     expect(paid).toBeGreaterThan(ded);
     // ★ 2026-10-17 결말 판정 = 세 채널 한 규칙(line-steps-context lineStepsCollected · 같은 집합 = 냄 · 같은 키로 이미 냄 · 크레딧제 미적용)
-    expect(dmRoute.slice(ded, paid)).toContain('if (lineStepsCollected(outcome)) {');
+    expect(tail.slice(ded, paid)).toContain('if (lineStepsCollected(outcome)) {');
     expect(BACK('utils', 'line-steps-context.ts')).toContain("return outcome === 'deducted' || outcome === 'duplicate' || outcome === 'not_applicable';");
-    expect(dmRoute.indexOf("rememberLineDraft(idemKey, draftToRemove, 'orphan')")).toBeGreaterThan(paid);
-    expect(dmRoute).toContain('lineChargeFailed = true;');
-    expect(dmRoute.indexOf('if (lineChargeFailed) {')).toBeLessThan(dmRoute.indexOf('sections: result.sections,'));
+    expect(tail.indexOf("rememberLineDraft(idemKey, draftToRemove, 'orphan')")).toBeGreaterThan(paid);
+    expect(tail).toContain('lineChargeFailed = true;');
+    expect(tail.indexOf('if (lineChargeFailed) {')).toBeLessThan(tail.indexOf('sections: result.sections,'));
+    // 단계 요청의 DM 착지 = 주문의 draft adapter 가 같은 규칙(낸 초안 재사용 · 결말 판정 · orphan)
+    const order = BACK('utils', 'one-line-ct', 'order.ts');
+    expect(order).toContain("if (prior.state === 'paid') return { kind: 'reused', draftId: prior.draftId };");
+    expect(order).toContain('if (lineStepsCollected(outcome)) {');
+    expect(order).toContain("if (!removed) deps.draftMemo.remember(idemKey, id, 'orphan');");
     expect(dmRoute).toContain('linePriceNotes(buildLineEventText(typedLine, lineFacts), lineCards)');
     expect(BACK('routes', 'email.ts')).toContain('linePriceNotes(genPrompt, lineCards)');
   });
@@ -339,7 +346,11 @@ describe('7. 배선 계약', () => {
     expect(em).toContain("const linePrompt = lineOn ? applyLineReads(prompt, lineReads, req.body?.read_licensed === true) : prompt;");
     expect(em).toContain('gaps: oneLineGaps(linePrompt)');
     const ai = BACK('routes', 'ai.ts');
-    expect(ai).toContain('gaps: enabled ? oneLineGaps(judged) : { benefit: false }');
+    // ★ 2026-10-23 판정 = ① 듣기 한 곳(사진 조각 숫자를 지운 글로 혜택 판정)
+    expect(ai).toContain('gaps: enabled ? heard.gaps : { benefit: false }');
+    const listen = BACK('utils', 'one-line-ct', 'listen.ts');
+    expect(listen).toContain('const judged = applyLineReads(raw, opts.reads, false);');
+    expect(listen).toContain('gaps: oneLineGaps(judged),');
   });
   it('후보를 보여 준 요청은 이름 자동 첨부 0 · 스위치 밖 상품 = 400 · 지문에 상품', () => {
     expect(dmRoute).toContain('if (lineProducts === undefined && !lineDraftId) {');

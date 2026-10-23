@@ -20,7 +20,7 @@ import { mapSampleCustomerRow, SAMPLE_CUSTOMER_COLUMNS } from '../utils/sample-c
 import { loadHubCompanyContext } from '../utils/hub-company-context';
 import { getColumnFields, getFieldByKey } from '../utils/standard-field-map';
 import { runInCreditBundle } from '../utils/ai-credit-context';
-import { hasCreditForStrict, isChargedByKey, chargedAmountByKey, settleCreditAfterSuccess, InsufficientCreditError } from '../utils/ai-credit';
+import { hasCreditForStrict, chargedAmountByKey, settleCreditAfterSuccess, InsufficientCreditError } from '../utils/ai-credit';
 import { getCreditCost } from '../utils/ai-credit-calc';
 import { buildMemoryPromptContext as buildCompanyMemoryPromptContext } from '../utils/company-memory';
 import { buildMessageObjective } from '../utils/season-context';

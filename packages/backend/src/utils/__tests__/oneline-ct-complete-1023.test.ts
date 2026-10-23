@@ -24,9 +24,9 @@ import { listenLine, buildCompositionPlan, runLineJudge, _resetLineJudgeMemory, 
 import { runLineCookOrder, type LineOrderDeps } from '../one-line-ct/order';
 import { checkRecurringLine } from '../one-line-ct/recurring';
 import { previewMaterialsOf, renderCompositionPreview, previewCards } from '../one-line-ct/preview';
-import { sanitizeLineCtDrafts } from '../one-line-ct/ai';
+import { sanitizeLineJudge } from '../one-line-ct/ai';
 import {
-  LINE_COMPOSITIONS, diagnoseComposition, diagnosisMissing, diagnosisBlocking, composeRichDm, compositionFallbackCopy, compositionParts,
+  LINE_COMPOSITIONS, diagnoseComposition, diagnosisMissing, diagnosisBlocking, composeRichDm, composeRichEmail, compositionFallbackCopy, compositionParts,
   type LineRichMaterials,
 } from '../line-compositions';
 import { lineEndDatePrefill, sanitizeLineStepsBody } from '../one-line-steps';
@@ -58,6 +58,24 @@ describe('① 듣기 한 곳 — 상대 마감 · 지나가는 날짜 말 · 같
     expect(lineEndDatePrefill('회원의 날 3일간 15% 쿠폰', NOW)).toBeNull();
     expect(lineEndDatePrefill('오늘까지 신청 · 이번 달 말까지 사용', NOW)).toBeNull();
     expect(lineEndDatePrefill('이번 주말까지 배송돼요', NOW)).toBeNull();
+    // 이번이 아닌 때(다음 달 · 다음 주 · 내달) = 이번 달 · 이번 주로 잘못 읽지 않고 비운다
+    expect(lineEndDatePrefill('다음 달 월말까지 할인', NOW)).toBeNull();
+    expect(lineEndDatePrefill('내달 월말까지 세일', NOW)).toBeNull();
+    expect(lineEndDatePrefill('다음 주 일요일까지 쿠폰', NOW)).toBeNull();
+    expect(lineEndDatePrefill('다음달월말까지 세일', NOW)).toBeNull();
+    expect(lineEndDatePrefill('행사를 다음달로 연장해 월말까지 진행', NOW)).toBeNull();   // Codex R3
+    // ★ Codex R2 · R3 = 차단 목록 경계가 두 번 샜다 → 허용 목록: 상대 마감 꼴 하나 + 나머지에 다른 때 말 0 일 때만 · 그 밖 = 비운다(사람이 칩 한 번)
+    expect(lineEndDatePrefill('이번 달 말까지 구매 시 다음 주문 10% 할인', NOW)).toBeNull();
+    expect(lineEndDatePrefill('다음 주력 상품 공개 · 이번 주말까지 사전 알림', NOW)).toBeNull();
+    expect(lineEndDatePrefill('이번 주말까지 선착순 100명', NOW)).toBeNull();
+    expect(lineEndDatePrefill('이번 주말까지 니트 30% 세일', NOW)).toBe('2026-10-25');
+    // 더 큰 때 말의 일부(「11월말」의 월말)는 꼴로 잡지 않는다(Codex R4) · 낱말 경계의 「월말까지」는 그대로
+    expect(lineEndDatePrefill('11월말까지 할인', NOW)).toBeNull();
+    expect(lineEndDatePrefill('11월 말까지 할인', NOW)).toBeNull();
+    expect(lineEndDatePrefill('１１월말까지 할인', NOW)).toBeNull(); // 전각 숫자도 경계 안(Codex R5)
+    expect(lineEndDatePrefill('(오늘까지) 반값', NOW)).toBe('2026-10-23');
+    expect(lineEndDatePrefill('월말까지 할인', NOW)).toBe('2026-10-31');
+    expect(lineEndDatePrefill('가을 세일, 오늘까지', NOW)).toBe('2026-10-23');
     // 날짜 꼴이 있으면 지금 규칙 그대로(상대 말은 보지 않는다)
     expect(lineEndDatePrefill('10월 31일까지 10% 할인', NOW)).toBe('2026-10-31');
   });
@@ -134,6 +152,12 @@ describe('사진 묶음 — 반 칸 0(B1)', () => {
     expect(galleries('lookbook', [img('m1'), img('m2')])[0]).toMatchObject({ props: { layout: 'grid_2x2' } });
     expect(galleries('lookbook', [img('m1'), img('m2')])[0].treatment).toBeUndefined();
     expect(galleries('lookbook', [img('m1'), img('m2'), img('m3')])[0]).toMatchObject({ treatment: 'mosaic' });
+  });
+  it('이메일(2열 표만 그린다) = 3장이면 첫 장 한 줄 크게 + 나머지 2열로 나눠 싣는다', () => {
+    const comp = getLineComposition('lookbook')!;
+    const m = mat({ mood: [img('m1'), img('m2'), img('m3')], products: [1, 2, 3, 4].map((n) => ({ name: `신상 ${n}`, price: 1000, image_url: img(`p${n}`) })) });
+    const g = composeRichEmail(comp, m, compositionFallbackCopy(comp), newId).sections.filter((s) => s.type === 'gallery').map((s: any) => ({ layout: s.props.layout, n: s.props.images.length, mosaic: s.treatment === 'mosaic' }));
+    expect(g).toEqual([{ layout: 'list_1xN', n: 1, mosaic: false }, { layout: 'grid_2x2', n: 2, mosaic: false }]);
   });
 });
 
@@ -290,34 +314,25 @@ describe('자동마케팅 발송 때 혜택 근거 = 컨셉 글만(C2)', () => {
   });
 });
 
-describe('플래너 초안(B2 · 문구 AI 같은 호출 · 비어 있는 권하는 칸만)', () => {
-  const comp = getLineComposition('spotlight')!;
-  const base = {
-    composition: comp, channel: 'dm' as const, companyId: C, line: '앰플 출시', brandName: 'b', logoUrl: null, csPhone: null, pinnedPrimary: null,
-    cards: [{ name: '진정 앰플', price: 30000, image_url: img('p1') }], heroUpload: null, heroAsIs: false, proof: [], page: null, benefitAnswer: null, periodEnd: null, link: 'https://b.example',
-    rich: { points: [], usage: [], mood: [], couponCode: null, store: null, benefitNote: null, categories: [] },
-  };
-  const reply = { headline: '새로 나왔어요', points: [{ title: '순한 사용감', body: '자극 없이 편안하게' }, { title: '산뜻한 마무리', body: '끈적이지 않아요' }, { title: '가벼운 제형', body: '얇게 펴 발려요' }], steps: [{ title: '세안', body: '물기를 닦아요' }, { title: '바르기', body: '얇게 펴 발라요' }] };
-  beforeEach(() => { vi.mocked(callAIWithFallback).mockReset(); vi.mocked(callAIWithFallback).mockResolvedValue(JSON.stringify(reply)); });
-  it('fillSuggestDrafts = 특징 · 사용 단계 초안이 실린다(추가 호출 0) · 끄면 묻지도 싣지도 않는다', async () => {
-    const on = await draftLineCook({ ...base, fillSuggestDrafts: true }, { source: 't' });
-    expect(callAIWithFallback).toHaveBeenCalledTimes(1);
-    expect(on.materials.points.map((p) => p.title)).toEqual(['순한 사용감', '산뜻한 마무리', '가벼운 제형']);
-    expect(on.materials.steps).toHaveLength(2);
-    expect(composeRichDm(on.comp, on.materials, on.copy, newId).sections.some((s) => (s.props as any)?.headline === on.copy.pointsTitle)).toBe(true);
-    vi.mocked(callAIWithFallback).mockClear();
-    const off = await draftLineCook(base, { source: 't' });
+describe('AI 초안 — 근거 없는 상품 특징을 결과물에 바로 싣지 않는다(★ Codex 1023 R1 · B2 철회)', () => {
+  it('플래너 요리 = 비어 있는 특징 · 사용 단계 칸을 AI 가 채우지 않는다(상품 설명 근거 없음 · 사람이 고칠 판 없음)', async () => {
+    vi.mocked(callAIWithFallback).mockReset();
+    vi.mocked(callAIWithFallback).mockResolvedValue(JSON.stringify({ headline: '새로 나왔어요', points: [{ title: '순한 사용감', body: '자극 없이' }] }));
+    const comp = getLineComposition('spotlight')!;
+    const r = await draftLineCook({
+      composition: comp, channel: 'dm', companyId: C, line: '앰플 출시', brandName: 'b', logoUrl: null, csPhone: null, pinnedPrimary: null,
+      cards: [{ name: '진정 앰플', price: 30000, image_url: img('p1') }], heroUpload: null, heroAsIs: false, proof: [], page: null, benefitAnswer: null, periodEnd: null, link: 'https://b.example',
+      rich: { points: [], usage: [], mood: [], couponCode: null, store: null, benefitNote: null, categories: [] },
+    }, { source: 't' });
+    expect(r.materials.points).toEqual([]);
+    expect(r.materials.steps).toEqual([]);
     expect(String((vi.mocked(callAIWithFallback).mock.calls[0][0] as any).userMessage)).not.toContain('points (배열');
-    expect(off.materials.points).toEqual([]);
+    expect(read('../planner-build.ts')).not.toContain('fillSuggestDrafts');
   });
-  it('사람이 준 칸은 덮지 않는다 · 숫자 · 혜택 · 한 줄 되풀이 초안은 버린다 · 꼬리표는 제목만', async () => {
-    const given = await draftLineCook({ ...base, fillSuggestDrafts: true, rich: { ...base.rich, points: [{ title: '내 특징', body: '', image: null }, { title: '내 특징 2', body: '', image: null }] } }, { source: 't' });
-    expect(given.materials.points.map((p) => p.title)).toEqual(['내 특징', '내 특징 2']);
-    const d = sanitizeLineCtDrafts(comp, { points: [{ title: '앰플 출시', body: '' }, { title: '20% 할인', body: '' }, { title: '순한 사용감', body: '' }] }, '앰플 출시', '앰플 출시');
-    expect(d.points).toEqual([]);
-    const tags = sanitizeLineCtDrafts(getLineComposition('menu')!, { points: [{ title: '생면', body: '매일 뽑아요' }, { title: '제철', body: '가을 채소' }] }, '파스타', '파스타');
-    expect(tags.points).toEqual([{ title: '생면', body: '' }, { title: '제철', body: '' }]);
-    expect(read('../planner-build.ts')).toContain('fillSuggestDrafts: true,');
+  it('재료 판 판단 초안(사람이 고치는 초안) = 효능 단정은 버린다(첫 화면 글과 같은 판정)', () => {
+    const r = sanitizeLineJudge({ pick: 'spotlight', reason: '신제품', drafts: { spotlight: { points: [{ title: '피부가 좋아져요', body: '' }, { title: '순한 사용감', body: '' }, { title: '산뜻한 마무리', body: '' }], steps: [{ title: '바르기', body: '트러블 개선 효과' }] } } }, '앰플 출시', '앰플 출시');
+    expect(r.drafts.spotlight?.points?.map((p) => p.title)).toEqual(['순한 사용감', '산뜻한 마무리']);
+    expect(r.drafts.spotlight?.steps).toEqual([]);
   });
 });
 

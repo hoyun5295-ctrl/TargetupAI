@@ -127,10 +127,13 @@ export default function AutoSendFormModal({ campaign, aiPremiumEnabled, onClose,
   // ★ 2026-10-23 컨셉 칸 점검(한줄 CT ① 듣기 · ③ 반복 발송 진단 · AI 0 · 0원 · 막지 않음 · 설계서 docs/2026-10-23-oneline-ct-complete-design.md C1)
   //   text = 판정한 글(칸 글이 바뀌면 옛 판정을 보이지 않는다)
   const [conceptNotes, setConceptNotes] = useState<{ text: string; notes: LineRecurringNote[] }>({ text: '', notes: [] });
+  // 마지막 점검만 반영(★ Codex R1 · 늦게 온 옛 컨셉 응답이 새 안내를 덮지 않게)
+  const conceptReq = useRef(0);
   const checkConcept = (raw: string) => {
+    const n = ++conceptReq.current;
     const t = raw.trim();
     if (!t) { setConceptNotes({ text: '', notes: [] }); return; }
-    void fetchOneLineGaps(t, [], 'auto-send').then((g) => setConceptNotes({ text: t, notes: g?.recurring ?? [] }));
+    void fetchOneLineGaps(t, [], 'auto-send').then((g) => { if (n === conceptReq.current) setConceptNotes({ text: t, notes: g?.recurring ?? [] }); });
   };
   const [aiTone, setAiTone] = useState(campaign?.ai_tone || 'friendly');
   const [fallbackMessageContent, setFallbackMessageContent] = useState(campaign?.fallback_message_content || '');

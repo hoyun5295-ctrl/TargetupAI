@@ -116,22 +116,36 @@ export function lineEndDatePrefill(line: string, nowMs: number): string | null {
   return isValidLinePeriodEnd(ymd, nowMs) ? ymd : null;
 }
 
-/** 상대 마감 꼴(끝 표지 「까지」가 붙은 것만) — 종류마다 KST 날짜를 낸다 */
+/**
+ * 상대 마감 꼴(끝 표지 「까지」가 붙은 것만) — 종류마다 KST 날짜를 낸다.
+ *   낱말 경계에서 시작할 때만(앞 글자가 글자 · 숫자면 = 유니코드 범주 전체 · 전각 포함 · 더 큰 때 말의 일부 = 「11월말」 · 「１１월말」 · 「다음달월말」 · Codex 1023 R4 · R5).
+ */
 const RELATIVE_END_RE: Array<{ re: RegExp; kind: 'month' | 'week' | 'today' | 'tomorrow' }> = [
-  { re: /(?:이번\s*달\s*(?:말|마지막\s*날)|월말)\s*까지/g, kind: 'month' },
-  { re: /이번\s*(?:주\s*(?:말|일요일)|주말)\s*까지/g, kind: 'week' },
-  { re: /오늘\s*까지/g, kind: 'today' },
-  { re: /내일\s*까지/g, kind: 'tomorrow' },
+  { re: /(?<![\p{L}\p{N}])(?:이번\s*달\s*(?:말|마지막\s*날)|월말)\s*까지/gu, kind: 'month' },
+  { re: /(?<![\p{L}\p{N}])이번\s*(?:주\s*(?:말|일요일)|주말)\s*까지/gu, kind: 'week' },
+  { re: /(?<![\p{L}\p{N}])오늘\s*까지/gu, kind: 'today' },
+  { re: /(?<![\p{L}\p{N}])내일\s*까지/gu, kind: 'tomorrow' },
 ];
 
+/** 때를 옮기는 말(다음 · 지난 · 내달 · 담주 · 연장 · 이월 · 미룸) — 나머지 글에 있으면 상대 마감을 읽지 않는다 */
+const TIME_SHIFT_RE = /다음|지난|내달|담주|익월|연장|이월|미뤄|미룬|미루/;
+
 /**
- * (순수) 상대 마감 → 'YYYY-MM-DD'(KST) · 꼴이 딱 한 종류일 때만(둘 이상 = 모호 = null).
+ * (순수) 상대 마감 → 'YYYY-MM-DD'(KST) · **허용 목록**(★ Codex 1023 R2 · R3 = 차단 목록 경계가 두 번 샜다 → 뒤집음):
+ *   상대 마감 꼴이 한 줄에 딱 하나이고, 그 꼴을 뺀 나머지에 다른 때 말(기간 낱말 넓은 판정 · 때를 옮기는 말)이 하나도 없을 때만.
+ *   그 밖(「다음 달로 연장해 월말까지」 · 「이번 달 말까지 구매 시 다음 주문」 등) = 모호 = 비운다(사람이 칩 한 번 · 안전 쪽 실패 · 1017 날짜 읽기와 같은 원칙).
  *   이번 달 말 = 이번 달 마지막 날 · 이번 주말 = 이번 주 일요일(오늘이 일요일이면 오늘) · 「N일간」은 시작일이 없어 읽지 않는다.
  */
 function lineRelativeEndDate(t: string, nowMs: number): string | null {
-  const kinds = new Set(RELATIVE_END_RE.filter((r) => { r.re.lastIndex = 0; return r.re.test(t); }).map((r) => r.kind));
-  if (kinds.size !== 1) return null;
-  const kind = [...kinds][0];
+  const hits: Array<{ at: number; end: number; kind: (typeof RELATIVE_END_RE)[number]['kind'] }> = [];
+  for (const r of RELATIVE_END_RE) {
+    r.re.lastIndex = 0;
+    for (const m of t.matchAll(r.re)) hits.push({ at: m.index ?? 0, end: (m.index ?? 0) + m[0].length, kind: r.kind });
+  }
+  if (hits.length !== 1) return null;
+  const rest = `${t.slice(0, hits[0].at)} ${t.slice(hits[0].end)}`;
+  if (linePeriodMentioned(rest) || TIME_SHIFT_RE.test(rest)) return null;
+  const kind = hits[0].kind;
   const kst = new Date(nowMs + 9 * 3_600_000);
   const y = kst.getUTCFullYear();
   const mo = kst.getUTCMonth();

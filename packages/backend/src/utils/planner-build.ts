@@ -288,8 +288,6 @@ export async function buildPlannerTemplateChannel(input: {
       pinnedPrimary: pinned, cards: goods.cards, heroUpload: hero, heroAsIs: false, proof: [], page: null,
       benefitAnswer: String(ev.benefitText || '').trim() || null, periodEnd: ev.endsOn, link: materials.link || null,
       rich: { points: [], usage: [], mood: plannerCompositionPhotos(materials).mood, couponCode: null, store: null, benefitNote: null, categories: [] },
-      // ★ 2026-10-23 B2 — 플래너엔 고칠 재료 판이 없다 → 비어 있는 특징 · 사용 단계 · 꼬리표 · 참여 방법을 문구 AI 같은 호출이 초안으로(추가 호출 · 과금 0)
-      fillSuggestDrafts: true,
     }, { userId: input.userId || undefined, source: genKey }))
     : null;
   if (cook && ev.title.trim().length <= 20) cook.copy.headline = ev.title.trim();
