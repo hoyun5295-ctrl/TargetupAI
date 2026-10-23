@@ -108,7 +108,8 @@ export async function cancelAgencyRequestTx(opts: {
     } else {
       try {
         const { cancelCampaign } = await import('./campaign-lifecycle');
-        // ⛔ `queueOnly` — 대행발송 캠페인은 적재를 끝내면 `completed`가 된다(예약 시각은 큐 행이 든다).
+        // ⛔ `queueOnly` — 즉시 발송 대행 캠페인은 적재를 끝내면 `completed`가 된다(예약은 예약 시각까지 `scheduled` ·
+        //   한 통도 안 나간 예약을 막으면 취소 CT가 끝에서 취소로 확정한다 = ★1022 오류접수).
         //   이 옵션이 없으면 상태 게이트에 막혀 **예약이 잡힌 접수를 아무도 취소할 수 없다**(0828 확정).
         //   15분 게이트(`skipTimeCheck`)는 켜지 않는다 — 그건 사용자 정책이고 여기는 사용자 입구다.
         result = await cancelCampaign(campaignId, opts.companyId, {

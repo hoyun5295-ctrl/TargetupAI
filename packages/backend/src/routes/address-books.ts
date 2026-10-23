@@ -6,7 +6,7 @@ import { query } from '../config/database';
 import { authenticate } from '../middlewares/auth';
 // ★ 2026-09-27 한줄로 V2 R061 — 주소록 그룹 = (주인, 이름) · 주인 판정 CT
 import { resolveTargetOwner, ownerClause } from '../utils/owner-scope';
-import { cellToString } from '../utils/normalize';
+import { cellToString, isUuid } from '../utils/normalize';
 import { insertAddressBookContacts, type AddressBookRow } from '../utils/address-book-insert';
 // ★ 2026-09-14 박성용 접수(주소록 번호 앞 0 생략): 업로드 파서가 CSV·엑셀의 앞 0을 숫자로 떨어뜨린다.
 //   저장·추가·조회·다운로드 네 곳이 같은 복원 규칙(휴대폰 10자리만 0 붙임)을 쓴다. 옛 저장분은 DB를 고치지 않고 읽을 때 붙인다.
@@ -325,6 +325,47 @@ router.post('/:groupName/append', async (req: Request, res: Response) => {
     });
   } catch (error) {
     console.error('주소록 추가 에러:', error);
+    return res.status(500).json({ error: '서버 오류' });
+  }
+});
+
+// DELETE /api/address-books/:groupName/contacts - 그룹 안 번호 개별 삭제
+// ★2026-10-22 박성용 접수(직접발송 주소록 개별 삭제) — 옛: 그룹 통째 삭제만 있었다.
+//   지우는 범위 = (회사, 그룹 이름, 그룹 주인) 안의 고른 id 뿐이다. 다른 그룹 · 남의 그룹 id 는 조건에 걸리지 않아 지워지지 않는다.
+//   한 번에 100개까지(미리보기 상한과 같다). 삭제 이력 = 그룹 삭제와 같은 감사 기록에 「개별 삭제」 표시.
+const CONTACT_DELETE_LIMIT = 100;
+router.delete('/:groupName/contacts', async (req: Request, res: Response) => {
+  try {
+    const companyId = req.user?.companyId;
+    const userId = req.user?.userId;
+    if (!companyId) {
+      return res.status(403).json({ error: '권한이 필요합니다.' });
+    }
+
+    const { groupName } = req.params;
+    const rawIds: unknown[] = Array.isArray(req.body?.ids) ? req.body.ids : [];
+    const ids = [...new Set(rawIds.map((v) => String(v)))];
+    if (ids.length === 0 || ids.length > CONTACT_DELETE_LIMIT || !ids.every((v) => isUuid(v))) {
+      return res.status(400).json({ error: `지울 번호를 1~${CONTACT_DELETE_LIMIT}개 골라 주세요.` });
+    }
+
+    const params: any[] = [companyId, groupName];
+    const ownerUserId = resolveTargetOwner(req, req.query.owner);
+    const userFilter = ownerClause(ownerUserId, params);
+    params.push(ids);
+
+    const delResult = await query(
+      `DELETE FROM address_books WHERE company_id = $1 AND group_name = $2${userFilter} AND id = ANY($${params.length}::uuid[])`,
+      params
+    );
+    const deletedCount = delResult.rowCount ?? 0;
+    if (deletedCount > 0) {
+      await recordAddressBookDeleted({ actorUserId: userId || null, req, companyId, ownerUserId, groupName, count: deletedCount, partial: true });
+    }
+
+    return res.json({ success: true, deletedCount });
+  } catch (error) {
+    console.error('주소록 번호 삭제 에러:', error);
     return res.status(500).json({ error: '서버 오류' });
   }
 });

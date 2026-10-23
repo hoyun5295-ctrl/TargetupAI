@@ -23,7 +23,7 @@ import { SWEEPABLE_CAMPAIGN_STATUS_SQL } from './campaign-sweep-scope';
 import { DIRECT_PIPELINE_SEND_TYPES_SQL } from './send-type-axis';
 import { isLoadingSendPhase, isLoadStopped, LOAD_CANCEL_FLAG } from './load-cancel';
 // ★ 2026-09-26 한줄로 V2 F35(Codex 4차 1R A) — 취소 결말·정산 공용 CT(재시도 워커와 같은 판정)
-import { countCampaignStartedRows, settleCancelOutcome, campaignRefDates, CANCEL_SETTLE_MODE } from './cancel-settle';
+import { countCampaignStartedRows, settleCancelOutcome, confirmQueueOnlyCancel, campaignRefDates, CANCEL_SETTLE_MODE } from './cancel-settle';
 import { withCancelObligationLock } from './keyed-lock';
 
 // ===== 예약 캠페인 자동 정리 (D145 P0) =====
@@ -212,6 +212,9 @@ export async function cancelCampaign(
      * 왜 필요한가 — 대행발송은 캠페인 생성 **51밀리초 뒤** 적재를 끝내고 `completed`가 된다.
      *   예약 시각은 큐 행의 `sendTime`이 들고 있어 발송은 나중이다. 그런데 아래 1번 게이트가
      *   `scheduled`·`draft`만 통과시켜 **예약이 잡힌 대행발송은 취소할 방법이 없었다**(0828 확정).
+     *
+     * ★2026-10-22 정정 — 「적재 직후 completed」는 **즉시 발송**만이다. 예약 대행은 예약 시각까지 `scheduled`라,
+     *   한 통도 안 나간 예약을 막았으면 끝에서 `confirmQueueOnlyCancel`(cancel-settle)이 취소로 확정한다(상태만).
      *
      * 왜 상태를 안 바꾸는가 — 청구 선택기가 `status='completed'`를 요구한다
      *   (`send-usage-aggregation.ts`). `cancelled`로 바꾸면 **이미 나간 발송이 청구에서 사라진다.**
@@ -468,6 +471,16 @@ export async function cancelCampaign(
       //   건수가 같은 일반적인 경우엔 워커 첫 사이클에서 추가 0원 + 해제로 바로 끝난다.
       if (!smsOk || !brandOk) {
         console.warn(`[취소] campaign ${campaignId} 취소 환불 미완료 — 워커 재시도가 이어받는다`);
+      }
+    }
+
+    // ★2026-10-22 오류접수 — 예약 대행을 실제로 막았으면(지운 대기 > 0 · 픽업 0 · 적재 중 아님) 캠페인을 취소로 확정한다(상태만 · 근거 = CT 주석).
+    //   막을 것이 없던 취소(alreadySent)는 호출부가 접수를 되돌리므로 건드리지 않는다. 실패해도 취소 자체는 끝났다 — 종전처럼 예약 정리가 마무리한다.
+    if (!loadStopped && !stoppedEarlier && totalCancelCount > 0 && alreadyPickedUp === 0) {
+      try {
+        await confirmQueueOnlyCancel({ camp, liveTables: cancelTables, refDates, cancel: { cancelledBy, cancelledByType, reason } });
+      } catch (confirmErr: any) {
+        console.error(`[취소] campaign ${campaignId} 대행 예약 취소 확정 실패(큐·환불은 끝남):`, confirmErr?.message || confirmErr);
       }
     }
 

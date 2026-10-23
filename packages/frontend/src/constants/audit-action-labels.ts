@@ -458,7 +458,7 @@ export function formatAuditDetail(action: string, details: any): string {
         viaName(d.via),
       ].filter(Boolean).join(' · ');
     case 'address_book_deleted':
-      return [`주소록 「${d.groupName || ''}」`, `${Number(d.count || 0).toLocaleString()}건 삭제`].join(' · ');
+      return [`주소록 「${d.groupName || ''}」`, `${Number(d.count || 0).toLocaleString()}건 ${d.partial ? '개별 삭제' : '삭제'}`].join(' · ');
     // ★ 2026-10-21 실사 준비 S4 — 명의 확인 보류 건의 처리 결과 · 소명 · 확인 근거
     case 'deposit_hold_resolved':
       return [

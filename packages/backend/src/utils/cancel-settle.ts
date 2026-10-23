@@ -173,3 +173,39 @@ export async function settleCancelOutcome(p: {
   });
   return { outcome: 'cancelled', ok: r.ok, refunded: r.refunded };
 }
+
+/**
+ * ★2026-10-22 오류접수(이메일 대행 승인 뒤 취소 = 「직접발송(실패)」) — 큐만 지운 대행 취소(queueOnly)의 **예약 캠페인 = 취소 확정**.
+ *
+ * 예약 대행 캠페인은 적재가 끝나도 예약 시각 전까지 'scheduled'다(direct-send-worker 종결 상태). queueOnly 는 상태를 두므로
+ * 큐를 지운 캠페인이 'scheduled'로 남고, 예약 시각 +10분에 예약 정리(cleanupScheduledCampaigns)가 큐 0건을 「발송 실패」로 읽어
+ * 'failed'로 굳혔다(10/19 · 10/20 담당자 링크 취소 2건 실측). 고객 발송결과에는 「직접발송(실패)」로 보였다.
+ *
+ * **상태만** 바꾼다 — 돈은 queueOnly 의 건수 환불이 이미 끝냈다(건수 의무 재시도 워커는 상태를 보지 않는다).
+ * 'scheduled' · 'failed' · 'cancelled' 는 모두 청구(status='completed')에 들지 않아 청구도 그대로다.
+ * 대기를 떠난 행이 하나라도 있으면(발송 시작) 바꾸지 않는다 — 예약 정리가 'completed'로 넘겨 나간 몫이 청구에 남는다.
+ * 'completed'(즉시 발송 대행)는 건드리지 않는다 — queueOnly 를 만든 이유(청구 축)가 그대로 산다.
+ */
+export async function confirmQueueOnlyCancel(p: {
+  camp: CancelSettleCampaign;
+  liveTables: string[];
+  refDates: Date[];
+  cancel?: { cancelledBy?: string | null; cancelledByType?: string | null; reason?: string | null };
+}): Promise<boolean> {
+  const c = p.camp;
+  if (c.status !== 'scheduled') return false;
+  const started = await countCampaignStartedRows(c.company_id, c.created_by || '', c.id, p.liveTables, p.refDates);
+  if (started > 0) return false;
+  const moved = await query(
+    `UPDATE campaigns SET status = 'cancelled', cancelled_by = $1, cancelled_by_type = $2, cancel_reason = $3,
+            cancelled_at = NOW(), updated_at = NOW()
+      WHERE id = $4 AND status = 'scheduled'`,
+    [p.cancel?.cancelledBy || null, p.cancel?.cancelledByType || null, p.cancel?.reason || null, c.id],
+  );
+  if ((moved.rowCount ?? 0) === 0) return false;
+  await query(
+    `UPDATE campaign_runs SET status = 'cancelled' WHERE campaign_id = $1 AND status IN ('scheduled', 'sending')`,
+    [c.id],
+  );
+  return true;
+}

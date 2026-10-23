@@ -123,3 +123,62 @@ describe('주소록 조회·다운로드 — 옛 저장분도 0을 붙여 내보
     expect(rows.map((r) => String(r['번호']))).toEqual(['01000000006', '01000000007']);
   });
 });
+
+/**
+ * ★2026-10-22 박성용 접수(직접발송 주소록 개별 삭제) — 그룹 안 고른 번호만 지운다.
+ *   범위 = (회사, 그룹 이름, 그룹 주인) 안의 고른 id. 남의 그룹 · 다른 그룹 id 는 조건 밖이라 지워지지 않는다.
+ */
+describe('주소록 번호 개별 삭제', () => {
+  const ID1 = '11111111-1111-4111-8111-111111111111';
+  const ID2 = '22222222-2222-4222-8222-222222222222';
+  beforeEach(() => { q.mockReset(); mockDb(); });
+
+  async function del(path: string, body: any) {
+    const res = await fetch(`${base}${path}`, {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    return { status: res.status, data: await res.json() };
+  }
+  const deletes = () => q.mock.calls.filter(([sql]: any[]) => /DELETE FROM address_books/i.test(String(sql)));
+  const audits = () => q.mock.calls.filter(([sql]: any[]) => /INSERT INTO audit_logs/i.test(String(sql)));
+
+  it('고른 id 만 · 회사 + 그룹 이름 + 그룹 주인 조건으로 지우고 개수를 돌려준다', async () => {
+    const { status, data } = await del('/g/contacts', { ids: [ID1, ID2, ID1] });
+    expect(status).toBe(200);
+    expect(data).toEqual({ success: true, deletedCount: 1 });
+    const [[sql, params]] = deletes();
+    expect(String(sql)).toMatch(/WHERE company_id = \$1 AND group_name = \$2 AND user_id = \$3 AND id = ANY\(\$4::uuid\[\]\)/);
+    expect(params).toEqual(['c-1', 'g', 'u-1', [ID1, ID2]]);
+  });
+
+  it('지운 것이 있으면 개별 삭제 표시로 삭제 이력을 남긴다', async () => {
+    await del('/g/contacts', { ids: [ID1] });
+    const rows = audits();
+    expect(rows.length).toBe(1);
+    expect(rows[0][1][1]).toBe('address_book_deleted');
+    expect(JSON.parse(rows[0][1][4])).toMatchObject({ groupName: 'g', count: 1, partial: true });
+  });
+
+  it('지운 것이 없으면(남의 그룹 id 등) 이력을 남기지 않는다', async () => {
+    q.mockImplementation(async (sql: string) => (/DELETE FROM address_books/i.test(sql) ? { rows: [], rowCount: 0 } : { rows: [], rowCount: 1 }));
+    const { data } = await del('/g/contacts', { ids: [ID1] });
+    expect(data).toEqual({ success: true, deletedCount: 0 });
+    expect(audits().length).toBe(0);
+  });
+
+  it('빈 목록 · id 가 아닌 값 · 100개 초과는 400 이고 아무것도 지우지 않는다', async () => {
+    for (const ids of [[], ['1 OR 1=1'], Array.from({ length: 101 }, (_, i) => `00000000-0000-4000-8000-${String(i).padStart(12, '0')}`)]) {
+      const { status } = await del('/g/contacts', { ids });
+      expect(status).toBe(400);
+    }
+    expect(deletes().length).toBe(0);
+  });
+
+  it('그룹 통째 삭제 경로는 그대로다', async () => {
+    await del('/g', {});
+    const [[sql]] = deletes();
+    expect(String(sql)).not.toContain('ANY(');
+  });
+});

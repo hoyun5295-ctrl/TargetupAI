@@ -38,6 +38,25 @@ const ICON_BTN = `w-9 h-9 rounded-[10px] grid place-items-center text-stone-500 
 const SCROLL = '[&::-webkit-scrollbar]:w-2.5 [&::-webkit-scrollbar]:h-2.5 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-stone-200 [&::-webkit-scrollbar-thumb]:border-[3px] [&::-webkit-scrollbar-thumb]:border-solid [&::-webkit-scrollbar-thumb]:border-transparent [&::-webkit-scrollbar-thumb]:bg-clip-content';
 const INPUT = `h-[42px] px-[13px] rounded-[11px] border border-stone-200 bg-white text-[14px] text-stone-900 placeholder:text-stone-400 ${FOCUS}`;
 const TH = 'sticky top-0 z-[1] bg-stone-50 text-left text-[12px] font-bold text-stone-500 px-3.5 py-2.5 border-b border-stone-150 whitespace-nowrap';
+/** 미리보기로 받는 번호 수 = 서버 상한(routes/address-books previewLimit) · 개별 삭제 한 번의 상한(CONTACT_DELETE_LIMIT)과 같다 */
+const PREVIEW_LIMIT = 100;
+
+/** 고르기 칸 — 주소록 목록 · 미리보기 번호가 같은 모양을 쓴다 */
+function CheckBox({ checked, onClick, label, disabled }: { checked: boolean; onClick: () => void; label: string; disabled?: boolean }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      aria-pressed={checked}
+      aria-label={label}
+      className={`w-5 h-5 rounded-md border-[1.5px] grid place-items-center shrink-0 transition-colors disabled:opacity-40 ${FOCUS} ${checked ? 'bg-emerald-600 border-emerald-600' : 'bg-white border-stone-300 hover:border-stone-400'}`}
+    >
+      <Check className={`w-[13px] h-[13px] text-white ${checked ? 'opacity-100' : 'opacity-0'}`} strokeWidth={3.2} />
+    </button>
+  );
+}
+
 const FILE_FIELDS: Array<{ key: keyof Contact5; label: string; required?: boolean }> = [
   { key: 'phone', label: '수신번호', required: true },
   { key: 'name', label: '이름' },
@@ -81,14 +100,19 @@ export default function AddressBookModal({
   const [previewLoading, setPreviewLoading] = useState(false);
   const [previewError, setPreviewError] = useState<string | null>(null);
   const [previewTick, setPreviewTick] = useState(0);
+  // ★2026-10-22 미리보기에서 고른 번호(id) — 새 목록을 받거나 주소록을 바꾸면 비운다
+  const [checkedContactIds, setCheckedContactIds] = useState<Set<string>>(new Set());
   const addressViewTargetRef = React.useRef<AddressGroup | null>(null);
   const addressViewSeqRef = React.useRef(0);
   const loadAddressView = async (g: AddressGroup, q: string) => {
     const seq = ++addressViewSeqRef.current;
+    // ★2026-10-22 Codex 1R — 고른 번호는 그 미리보기 세대의 것이다. 새로 읽기 시작하면(검색 · 실패 포함) 비운다
+    setCheckedContactIds(new Set());
     setPreviewLoading(true);
     try {
       const token = localStorage.getItem('token');
-      const res = await fetch(`/api/address-books/${encodeURIComponent(g.group_name)}?${ownerParam(g)}&limit=10&q=${encodeURIComponent(q)}`, {
+      // ★2026-10-22 미리보기 10 → 100(서버 상한) — 개별 삭제로 고를 수 있는 양(박성용 접수)
+      const res = await fetch(`/api/address-books/${encodeURIComponent(g.group_name)}?${ownerParam(g)}&limit=${PREVIEW_LIMIT}&q=${encodeURIComponent(q)}`, {
         headers: { Authorization: `Bearer ${token}` }
       });
       const data = await res.json();
@@ -103,7 +127,12 @@ export default function AddressBookModal({
       setAddressViewContacts(data.contacts || []);
       setAddressViewTotal(Number(data.total) || 0);
     } catch {
-      if (seq === addressViewSeqRef.current) setPreviewError('명단을 읽지 못했어요. 주소록을 다시 골라 주세요.');
+      // ★2026-10-22 Codex 2R — 실패도 옛 목록을 남기지 않는다(보이는 목록 = 지금 세대의 결과 또는 빈 목록 · 옛 번호를 새 결과로 알고 지우는 길 차단)
+      if (seq === addressViewSeqRef.current) {
+        setAddressViewContacts([]);
+        setAddressViewTotal(0);
+        setPreviewError('명단을 읽지 못했어요. 주소록을 다시 골라 주세요.');
+      }
     } finally {
       if (seq === addressViewSeqRef.current) setPreviewLoading(false);
     }
@@ -122,6 +151,7 @@ export default function AddressBookModal({
     setAddressViewSearch('');
     setAddressViewContacts([]);
     setAddressViewTotal(0);
+    setCheckedContactIds(new Set());
     setPreviewError(null);
     setPreviewLoading(!!g);
     setAddressViewGroup(g ? groupKey(g) : null);
@@ -354,6 +384,56 @@ export default function AddressBookModal({
     },
   });
 
+  // ★2026-10-22 박성용 접수 — 미리보기에서 고른 번호만 지운다(그룹은 남는다 · 다 지우면 그룹도 사라진다)
+  const askDeleteContacts = (group: AddressGroup) => {
+    const ids = [...checkedContactIds];
+    if (ids.length === 0) return;
+    // 확인창이 열린 사이 미리보기를 다시 읽었으면(검색 · 주소록 전환) 고른 번호는 지금 목록의 것이 아니다 → 지우지 않는다
+    const seqAtPick = addressViewSeqRef.current;
+    setConfirm({
+      mode: 'danger',
+      title: '번호 삭제',
+      description: `"${group.group_name}"에서 고른 번호 ${ids.length.toLocaleString()}개를 삭제하시겠습니까?`,
+      confirmLabel: '삭제',
+      onConfirm: async () => {
+        if (seqAtPick !== addressViewSeqRef.current) { showError('명단이 바뀌었어요. 번호를 다시 골라 주세요.'); return; }
+        const token = localStorage.getItem('token');
+        try {
+          const res = await fetch(`/api/address-books/${encodeURIComponent(group.group_name)}/contacts?${ownerParam(group)}`, {
+            method: 'DELETE',
+            headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+            body: JSON.stringify({ ids }),
+          });
+          const data = await res.json();
+          if (!data.success) { showError(data.error || '번호를 삭제하지 못했어요.'); return; }
+          showSuccess(`${Number(data.deletedCount || 0).toLocaleString()}개 번호를 삭제했어요`);
+          // 인원 수를 다시 읽고, 그룹이 남아 있으면 찾는 글을 둔 채 미리보기만 다시 읽는다
+          const groupRes = await fetch('/api/address-books/groups', { headers: { Authorization: `Bearer ${token}` } });
+          const groupData = await groupRes.json();
+          if (!groupData.success) { setPreviewTick((t) => t + 1); return; }
+          const gs: AddressGroup[] = groupData.groups || [];
+          setAddressGroups(gs);
+          const still = gs.find((g) => groupKey(g) === groupKey(group));
+          if (still) {
+            addressViewTargetRef.current = still;
+            setPreviewTick((t) => t + 1);
+          } else {
+            setSelectedGroupNames(prev => { const next = new Set(prev); next.delete(groupKey(group)); return next; });
+            selectGroup(gs[0] || null);
+            setMobileDetail(false);
+          }
+        } catch {
+          showError('번호를 삭제하지 못했어요. 잠시 뒤 다시 해 주세요.');
+        }
+      },
+    });
+  };
+  const toggleContact = (id: string) => setCheckedContactIds((prev) => {
+    const next = new Set(prev);
+    if (next.has(id)) next.delete(id); else next.add(id);
+    return next;
+  });
+
   // 직접 입력 저장 · 기존 그룹에 번호 추가
   const saveDirectRows = async () => {
     const valid = directInputRows.filter(r => r.phone.trim().replace(/\D/g, '').length >= 10);
@@ -534,6 +614,7 @@ export default function AddressBookModal({
   const isForm = panel.kind !== 'view';
   const createTab = panel.kind === 'create' ? panel.tab : null;
   const searching = addressViewSearch.trim().length > 0;
+  const allContactsChecked = addressViewContacts.length > 0 && addressViewContacts.every((c) => checkedContactIds.has(String(c.id)));
   // 휴대폰 폭에서 오른쪽 칸을 보일 때: 고른 뒤 · 새로 만들 때 · 주소록이 하나도 없을 때(첫 주소록 만들기 안내가 오른쪽에 있다)
   const rightOnMobile = mobileDetail || (loaded && addressGroups.length === 0);
 
@@ -807,8 +888,13 @@ export default function AddressBookModal({
             <FileSpreadsheet className="w-4 h-4" />엑셀로 받기
           </button>
           <span className="flex-1" />
+          {checkedContactIds.size > 0 && (
+            <button type="button" className={BTN_GHOST_RO} onClick={() => askDeleteContacts(viewGroup)} disabled={isUploading || previewLoading || !!previewError}>
+              <Trash2 className="w-4 h-4" />고른 번호 {checkedContactIds.size.toLocaleString()}개 삭제
+            </button>
+          )}
           <button type="button" className={BTN_GHOST_RO} onClick={() => askDelete(viewGroup)} disabled={isUploading}>
-            <Trash2 className="w-4 h-4" />삭제
+            <Trash2 className="w-4 h-4" />주소록 삭제
           </button>
         </div>
         <div className="relative mx-4 md:mx-6 mb-2.5">
@@ -816,7 +902,7 @@ export default function AddressBookModal({
           <input
             type="search"
             value={addressViewSearch}
-            onChange={(e) => setAddressViewSearch(e.target.value)}
+            onChange={(e) => { setAddressViewSearch(e.target.value); setCheckedContactIds(new Set()); }}
             placeholder="번호, 이름, 기타 칸으로 찾기"
             aria-label="이 주소록에서 찾기"
             className={`w-full ${INPUT} pl-[38px] rounded-xl`}
@@ -825,11 +911,24 @@ export default function AddressBookModal({
         <div className={`relative mx-4 md:mx-6 border border-stone-150 rounded-[14px] overflow-auto flex-1 min-h-[160px] ${SCROLL}`}>
           <table className="w-full border-collapse text-[13.5px]">
             <thead>
-              <tr><th className={TH}>번호</th><th className={TH}>이름</th><th className={TH}>기타1</th><th className={TH}>기타2</th><th className={TH}>기타3</th></tr>
+              <tr>
+                <th className={`${TH} w-11`}>
+                  <CheckBox
+                    checked={allContactsChecked}
+                    onClick={() => setCheckedContactIds(allContactsChecked ? new Set() : new Set(addressViewContacts.map((c) => String(c.id))))}
+                    label="보이는 번호 모두 고르기"
+                    disabled={previewLoading || !!previewError || addressViewContacts.length === 0}
+                  />
+                </th>
+                <th className={TH}>번호</th><th className={TH}>이름</th><th className={TH}>기타1</th><th className={TH}>기타2</th><th className={TH}>기타3</th>
+              </tr>
             </thead>
             <tbody>
               {addressViewContacts.map((c, i) => (
-                <tr key={i} className="hover:bg-stone-50">
+                <tr key={c.id ?? i} className={checkedContactIds.has(String(c.id)) ? 'bg-emerald-50/60' : 'hover:bg-stone-50'}>
+                  <td className="px-3.5 py-[11px] border-b border-stone-100">
+                    <CheckBox checked={checkedContactIds.has(String(c.id))} onClick={() => toggleContact(String(c.id))} label={`${c.phone} 고르기`} disabled={previewLoading || !!previewError} />
+                  </td>
                   <td className="px-3.5 py-[11px] border-b border-stone-100 text-stone-800 whitespace-nowrap tabular-nums">{c.phone}</td>
                   {(['name', 'extra1', 'extra2', 'extra3'] as const).map((k) => {
                     const v = cellToString(c[k]);
@@ -943,15 +1042,7 @@ export default function AddressBookModal({
                     className={`flex items-center gap-3 px-3 py-[11px] rounded-xl border transition-colors ${on ? 'bg-white border-stone-200 shadow-[0_1px_2px_rgb(0_0_0/.04),0_4px_12px_rgb(0_0_0/.05)]' : 'border-transparent hover:bg-white hover:border-stone-150'}`}
                   >
                     {/* ★ D144 P3-(b): 다중 선택 */}
-                    <button
-                      type="button"
-                      onClick={() => toggleGroupSelection(key)}
-                      aria-pressed={checked}
-                      aria-label={`${group.group_name} 고르기`}
-                      className={`w-5 h-5 rounded-md border-[1.5px] grid place-items-center shrink-0 transition-colors ${FOCUS} ${checked ? 'bg-emerald-600 border-emerald-600' : 'bg-white border-stone-300 hover:border-stone-400'}`}
-                    >
-                      <Check className={`w-[13px] h-[13px] text-white ${checked ? 'opacity-100' : 'opacity-0'}`} strokeWidth={3.2} />
-                    </button>
+                    <CheckBox checked={checked} onClick={() => toggleGroupSelection(key)} label={`${group.group_name} 고르기`} />
                     <button
                       type="button"
                       onClick={() => { if (isForm) backToView(); if (!on) selectGroup(group); setMobileDetail(true); }}

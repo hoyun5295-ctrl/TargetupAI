@@ -111,11 +111,11 @@ export async function recordUnsubscribeDeleted(p: Base & {
   });
 }
 
-/** 주소록 그룹 삭제 — 그룹 = (주인, 이름) · ownerUserId null = 작성자 없는 옛 그룹 */
-export function recordAddressBookDeleted(p: Base & { companyId: string | null; ownerUserId: string | null; groupName: string; count: number }): Promise<void> {
+/** 주소록 삭제 — 그룹 = (주인, 이름) · ownerUserId null = 작성자 없는 옛 그룹 · partial = 그룹 안 번호 개별 삭제(★1022) */
+export function recordAddressBookDeleted(p: Base & { companyId: string | null; ownerUserId: string | null; groupName: string; count: number; partial?: boolean }): Promise<void> {
   return recordAuditLog({
     actorUserId: p.actorUserId, action: 'address_book_deleted', targetType: 'address_book', targetId: null,
-    details: { companyId: p.companyId, ownerUserId: p.ownerUserId, groupName: String(p.groupName).slice(0, 100), count: p.count },
+    details: { companyId: p.companyId, ownerUserId: p.ownerUserId, groupName: String(p.groupName).slice(0, 100), count: p.count, ...(p.partial ? { partial: true } : {}) },
     req: p.req,
   });
 }

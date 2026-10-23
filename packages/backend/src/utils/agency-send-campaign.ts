@@ -111,7 +111,8 @@ export async function neutralizeCampaign(
     if (current.rows[0]?.status === 'cancelled') return { ok: true, error: '', alreadySent: false };
     const { cancelCampaign } = await import('./campaign-lifecycle');
     // ⛔ `skipTimeCheck` — 15분 게이트는 사용자 정책이지 안전장치가 아니다. 여기서 멈추면 나가면 안 되는 발송이 나간다.
-    // ⛔ `queueOnly` — 대행발송은 캠페인 생성 직후 적재를 끝내고 `completed`가 된다(예약 시각은 큐 행이 든다).
+    // ⛔ `queueOnly` — 즉시 발송 대행은 캠페인 생성 직후 적재를 끝내고 `completed`가 된다(예약은 예약 시각까지 `scheduled` ·
+    //   한 통도 안 나간 예약을 막으면 취소 CT가 끝에서 취소로 확정한다 = ★1022 오류접수).
     //   상태 게이트(`scheduled`·`draft`)를 그대로 두면 **예약이 잡힌 건을 영영 못 막는다**(0828 확정).
     //   상태를 바꾸지 않는 이유는 청구 축이다 — `cancelCampaign`의 옵션 주석이 소유한다.
     const undone = await cancelCampaign(campaignId, companyId, {

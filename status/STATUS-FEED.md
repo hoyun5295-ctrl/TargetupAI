@@ -185,6 +185,18 @@
 > 검증 = FE · BE tsc 0 · vitest 595파일 8,371건 · 렌더 108곳 · Codex 적대 1R approve(gpt-6-astra · 지적 0 · 지정 파일 66개 + 분리 전 원본을 읽고 대조)
 > 다음 = 배포(백엔드 reload + 프론트 build:safe · AI 영업 C12 와 한 번에) → 실측(목록 숫자 카드 값 · 상세 창 저장 · 7일 부여 1회)
 
+<a id="c53"></a>
+
+### C53 · ★1022 한줄 프롬프트 CT(두뇌) · 구성 5종 · 재료 판 · 전 채널 배선 · 시연 6회 정정 · Codex 적대 approve · DDL 0 · 배포 완료 1023
+> 호출어 **"한줄 CT / 한줄 두뇌 / 구성 5종 / 재료 판"** → 설계서 = `docs/2026-10-22-oneline-ct-design.md` §11(확정) · §12(구현 기록) · 브리핑 = https://claude.ai/artifact/VJ24x9RPDHNo3dAgVFNh7k
+> ① 단가 = 판단 2 · 판단 뒤 첫 결과물 13(합 15) · 판단 없이 15 · 채널 추가 · 다시 만들기 3 · 입구 무관. 판단 몫 판정 = `aiLineBasePaid`(문자) · `lineJudgeCovered`(콘텐츠) · 두 입구 한 줄 잠금 = `lineFpLockKey`.
+> ② 코드 = `utils/line-compositions.ts`(구성 5종 · 채널 칸 `compositionChannelSlots`) · `utils/one-line-ct/`(판단 · 요리 · 미리보기 · 목록) · `components/zone/LineCompositionBoard.tsx` · `LineStepsModal`(재료 판) · 플래너(`?set=compositions`).
+> ③ 시연 = `scripts/oneline-demo-set.ts` + `scripts/data/oneline-demo-scenes.json`(장면 업종) · 사내 시연 쇼핑몰 `frontend/public/demo-shop/`(생성기 `make_demo_shop.py`). 서버 명령 = `npx ts-node --transpile-only scripts/oneline-demo-set.ts "$CID" scripts/data/oneline-demo-scenes.json`.
+> ④ 시연 판정 정정 = 업종 미지정 첫 화면 택배 상자 틀 제외 · 메뉴판 대표 = 대표 메뉴 카드 · 쿠폰 코드 문구 사실만 · 첫 화면 문구 자르지 않음(길면 대체 · 숫자 든 낱말 제외) · AI 첫 화면 효능 단정 제외 · 특징 초안 되풀이 제외(2개 미만 = 칸 생략) · 페이지 읽기 사진 = 상품 아닌 사진 먼저 사본 · 반환은 문서 순서 · 상품 판정 상한 없음 · 상품 사진 product 표시.
+> ⑤ 손대지 않음 = 여정 · 자동마케팅(문자 산출 · 공용 gaps 규칙만 공유) · 플래너 단가(DM 5 · 이메일 3 그대로).
+> ⑥ 남은 = Harold 판정(시연 5장) · 실과금 회사 1건 원장(판단 2 + 완성 13) · 추가 과제 = 사진 묶음 1장일 때 반 칸 빔 · 시연 장면 periodDays 와 「이번 달 말」 어긋남 · 정확도 덜 중요한 자리 opus → sonnet 후보 검토 · Codex 범위 밖 `line-compositions.ts:414`.
+> 검증: backend vitest 667파일 9,733건 · tsc 0(양쪽) · build:safe 양쪽 · Codex 적대 CT 4R · 시연 정정 2R · 2R · 2R · 사진 순서 4R · 대체 문구 1R · 시험 날짜 1R approve.
+
 <a id="c52"></a>
 
 ### C52 · ★1021 전송자격인증 현장 실사(1022) 준비 · 수정 묶음 S1~S5 · Codex 적대 3R approve · DDL 0 · 배포 완료 1021
