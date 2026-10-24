@@ -89,7 +89,7 @@ export async function publishDmCore(input: {
     chargeNow = creditOn;
   }
   if (chargeNow) await checkCredit(companyId, pubCost);
-  const result = await publishDm(dmId, companyId);
+  const result = await publishDmWithPrizes(dmId, companyId);
   if (!result) return { ok: false, status: 404, code: null, error: 'DM을 찾을 수 없습니다.' };
 
   // ★ 2026-07-28 검수 치명 무시 발행 기록 — 무시 가능한 치명(required_info)만 프론트가 넘길 수 있고 "누가 언제 무엇을 넘겼는지"를 남긴다.
@@ -119,9 +119,6 @@ export async function publishDmCore(input: {
       console.error('[DM발행] 검수 무시 기록 실패:', e?.message);
     }
   }
-  // ★ B 연계: lucky_draw/roulette 경품 설정 → dm_prizes 동기화 (실패해도 발행은 유지)
-  try { await syncPrizesFromSections(companyId, dmId); }
-  catch (e: any) { console.error('[DM발행] 경품 동기화 오류:', e?.message); }
   if (chargeNow) {
     await deductCreditSafe({
       companyId, cost: pubCost, source: costSource, createdBy: input.userId,
@@ -129,4 +126,16 @@ export async function publishDmCore(input: {
     });
   }
   return { ok: true, shortCode: result.short_code, shortUrl: dmShortUrlOf(result.short_code), charged: chargeNow, cost: chargeNow ? pubCost : 0, source: costSource };
+}
+
+/**
+ * ★ 2026-10-24 세 채널 구조체크 ⑭ — 발행 주소 확정 + 경품 동기화 = 한 함수. 발행의 모든 문(편집기 · 플래너 승인 · [보내기] · AI 영업)이 이것만 부른다.
+ *   옛: 동기화가 publishDmCore 안에만 있어 [보내기](send-to-target) 첫 발행은 dm_prizes 0행 → 추첨 당첨 0 · 룰렛 늘 꽝.
+ *   경품을 **먼저** 맞추고 주소를 확정한다 — 동기화가 실패하면 던진다(주소 · 발행비 · 발송 0 · 옛: 실패를 삼키고 경품 없는 행사 링크를 냈다 · Codex 1R).
+ *   이미 발행된 DM 도 부를 때마다 동기화한다([발행 주소 복사]와 같다 · 당첨자가 생긴 DM 은 syncPrizesFromSections 가 건드리지 않는다).
+ *   발행비 · 차단 판정은 부르는 쪽 몫이다(발행비는 이 함수가 성공한 뒤에 걷는다).
+ */
+export async function publishDmWithPrizes(dmId: string, companyId: string): Promise<{ short_code: string } | null> {
+  await syncPrizesFromSections(companyId, dmId);
+  return publishDm(dmId, companyId);
 }

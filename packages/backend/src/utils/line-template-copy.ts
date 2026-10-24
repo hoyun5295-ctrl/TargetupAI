@@ -9,7 +9,7 @@
  */
 import { callAIWithFallback } from '../services/ai';
 import { extractJsonFromAiText } from './ai-json';
-import { findNewNumbers, findInventedBenefits } from './copy-benefit-detector';
+import { rewriteAddsFacts, EFFICACY_PROMPT_RULES } from './copy-benefit-detector';
 import type { LineTemplate, LineCopyKey } from './design-core/line-templates';
 import type { LineCopy } from './line-template-compose';
 
@@ -37,7 +37,8 @@ export function sanitizeLineCopy(t: LineTemplate, raw: unknown, groundText: stri
     let v = typeof obj[f.key] === 'string' ? String(obj[f.key]) : '';
     v = v.replace(/[—–]/g, ' ').replace(/[“”"']/g, '').replace(/\s*\n\s*/g, ' ').replace(/\s{2,}/g, ' ').trim();
     if (v.length > f.max) v = v.slice(0, f.max).trim();
-    const bad = !v || findNewNumbers(v, groundText).length > 0 || findInventedBenefits(v, groundText).length > 0;
+    // ★ 2026-10-24 ② 판정 = rewriteAddsFacts(숫자 ∥ 혜택 ∥ 효능 · 같은 근거)
+    const bad = !v || rewriteAddsFacts(v, groundText);
     if (bad) { copy[f.key] = f.fallback; replaced.push(f.key); } else copy[f.key] = v;
   }
   return { copy, replaced };
@@ -49,6 +50,7 @@ const SYSTEM = `당신은 한국 브랜드의 마케팅 카피라이터입니다
 - 각 칸의 글자 수 상한을 지킵니다(공백 포함). 짧고 또렷하게, 존댓말로 씁니다.
 - 원문에 없는 숫자 · 할인율 · 금액 · 날짜 · 기간 · 수량 · 혜택(무료 · 증정 · 쿠폰 등)을 절대 만들지 않습니다. 원문에 있는 것만 그대로 씁니다.
 - 상품의 효과 · 성분 · 품질을 단정하지 않습니다(최고 · 1위 · 완벽 같은 과장 금지).
+${EFFICACY_PROMPT_RULES}
 - 긴 줄표 기호와 따옴표 장식을 쓰지 않습니다. 이모지를 쓰지 않습니다.`;
 
 /** AI 1회 — 실패(응답 없음 · JSON 아님)는 던진다(호출부 503 · 차감 0) */

@@ -964,6 +964,30 @@ async function waitForTestCompletion(testId: string, timeoutMs: number = TIMEOUT
 
 type AutoSpamVerdict = 'pass' | 'blocked' | 'failed' | 'timeout';
 
+/** 검사 판정 3분할(통과 · 차단 · 검사 장애) */
+export type SpamVerdict = 'pass' | 'blocked' | 'error';
+
+/**
+ * ★ 2026-10-24 검사 판정 한 곳(뿌리 대장 R7 · 1018 플래너 B6 판정을 공용으로 · docs/ROOT-LEDGER.md) — 순수.
+ *   pass    = 판정 통과 + 통신사 결과 1개 이상 + 그 결과에 시간 초과 · 실패 · 빈 값 0(시연 회사 = 검사 0건 통과 = 그대로 통과)
+ *   blocked = 통신사가 막았다(진짜 스팸)
+ *   error   = 그 밖(큐 등록 실패 · 시간 초과 · 결과 0행 · 결과 NULL) — 검사 장비 문제다. **통과도 차단도 아니다.**
+ * 옛: 대행발송 · 옛 자동발송이 「차단이 아니면 통과」로 읽어, 검사가 못 돈 문안이 나갔다(B-0823-1 가).
+ */
+export function spamVerdictOf(
+  v: { spamResult?: string | null; carrierResults?: Array<{ result?: string | null }> | null } | null | undefined,
+  totalTestCount: number,
+): SpamVerdict {
+  if (!v) return 'error';
+  if (v.spamResult === 'blocked') return 'blocked';
+  if (v.spamResult !== 'pass') return 'error';
+  if (Number(totalTestCount) === 0) return 'pass';   // 시연 회사 — 검사 발송 0(아래 절단점)
+  const results = Array.isArray(v.carrierResults) ? v.carrierResults : [];
+  if (results.length === 0) return 'error';
+  if (results.some((r) => r?.result === 'timeout' || r?.result === 'failed' || !r?.result)) return 'error';
+  return 'pass';
+}
+
 /**
  * ★ 2026-10-03 안을 차례로 검사하고 첫 통과에서 멈춘다(순수 · 검사·재생성은 주입) — 임은지 접수
  * 「1안이 스팸에 걸리면 2안·3안을 자동으로 검사해 통과한 문안으로 승인 문자」.
@@ -1109,14 +1133,18 @@ export async function autoSpamTestWithRegenerate(params: {
        WHERE test_id = $1 ORDER BY carrier, message_type`,
       [enqueueResult.testId]
     );
+    const carrierResults = results.rows.map((r: any) => ({
+      carrier: r.carrier,
+      messageType: r.message_type,
+      result: r.result || 'timeout',
+    }));
+    // ★ 2026-10-24 R7 — 통신사 결과가 비거나 시간 초과 · 실패가 섞인 「완료」는 통과가 아니다(검사 장애 = failed · 판정 자리 한 곳).
+    //   옛: 그대로 pass 로 넘겨, 결과를 「차단이 아니면 통과」로 읽는 호출처(대행발송 · 옛 자동발송)와 통과 안 번호(자동마케팅)가 검사 못 한 문안을 통과로 봤다.
+    const settled = spamVerdictOf({ spamResult: verdict, carrierResults }, 1);
     return {
       enqueued: true,
-      spamResult: verdict,
-      carrierResults: results.rows.map((r: any) => ({
-        carrier: r.carrier,
-        messageType: r.message_type,
-        result: r.result || 'timeout',
-      })),
+      spamResult: verdict === 'pass' && settled === 'error' ? 'failed' : verdict,
+      carrierResults,
     };
   };
 

@@ -2701,6 +2701,8 @@ export class HanjulloInAppModule {
           message_id: messageId,
           event_type: eventType,
           external_id: input.externalId,
+          // ★ 2026-10-24 서버는 회원 토큰이 맞을 때만 이 기록을 회원에 잇는다(없으면 기기 id 로만 남는다)
+          member_token: input.memberToken || undefined,
           anonymous_id: input.anonymousId,
           button_id: buttonId || undefined,
           dwell_seconds: dwellSeconds,

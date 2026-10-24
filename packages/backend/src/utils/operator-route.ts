@@ -11,7 +11,7 @@
  */
 import type { Request, Response } from 'express';
 import { query } from '../config/database';
-import { loadPlanContext, isAiOperatorAllowed } from './plan-guard';
+import { aiZonePlanBlocked } from './plan-guard';
 import { journeyViewerOf, type JourneyViewer } from './journey-access';
 import { InsufficientCreditError } from './ai-credit';
 import { isUuid } from './normalize';
@@ -46,14 +46,8 @@ export async function canAccessOperatorResource(viewer: OperatorViewer, kind: 'o
 export async function operatorGate(req: Request, res: Response, opts: { plan: boolean }): Promise<(OperatorViewer & { userId: string }) | null> {
   const viewer = journeyViewerOf(req);
   if (!viewer || !viewer.userId) { res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' }); return null; }
-  if (opts.plan) {
-    const planCtx = await loadPlanContext(viewer.companyId);
-    if (!planCtx) { res.status(404).json({ success: false, error: '회사 정보를 찾을 수 없습니다.' }); return null; }
-    if (!isAiOperatorAllowed(planCtx, req.user)) {
-      res.status(403).json({ success: false, error: '본 기능은 요금제 가입 후 이용 가능합니다.', code: 'BETA_GATE' });
-      return null;
-    }
-  }
+  // ★ 2026-10-24 요금제 = AI 존 서버 문 한 곳(뿌리 대장 R2 · 화면 PlanGate 와 같은 판정 · 거절 코드 한 벌)
+  if (opts.plan && (await aiZonePlanBlocked(req, res))) return null;
   const rid = req.params?.id;
   if (rid !== undefined) {
     const kind = String(req.route?.path || '').startsWith('/operator/proposals') ? 'proposal' : 'operator';

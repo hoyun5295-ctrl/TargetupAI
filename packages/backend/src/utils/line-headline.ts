@@ -15,7 +15,7 @@ import { runInCreditBundle } from './ai-credit-context';
 import { templatePickCandidates, buildTemplateJudgePrompt, parseTemplatePick } from './sales-outreach-produce';
 import { SUB_BY_ID } from './image-studio-template-subs';
 import type { StudioTemplate } from './image-studio-templates';
-import { withoutBenefitSpans } from './copy-benefit-detector';
+import { withoutBenefitSpans, claimsEfficacy } from './copy-benefit-detector';
 import { extractJsonFromAiText } from './ai-json';
 
 export const LINE_HEADLINE_PICKS = 3;
@@ -78,12 +78,9 @@ export function headlineTextSafe(v: string): boolean {
 /**
  * ★ 2026-10-22 AI 가 쓴 그림 글자만 = 몸 · 피부 말 + 변화 말이 함께 있으면 효능 단정(「가입만 해도 피부가 편안해져요」 · 시연 판정).
  *   고객이 직접 쓴 글(이미지 스튜디오 입력 · 한 줄에서 뽑은 대체 문구)에는 걸지 않는다(headlineTextSafe 와 분리 · Codex 지적).
+ *   ★ 2026-10-24 판정 = copy-benefit-detector 한 곳(한 줄 CT 글 · 문자 문안과 같은 낱말 · 그림 글은 근거를 쓰지 않는다)
  */
-const HEADLINE_BODY_RE = /(피부|모공|주름|각질|탄력|피지|여드름|트러블|두피|머릿결|모발|몸|체중|뱃살|혈색|안색|컨디션)/;
-const HEADLINE_CHANGE_RE = /(해져|해지|좋아져|달라져|살아나|되살아|개선|효과|회복|사라져|줄어)/;
-export function headlineClaimsEfficacy(v: string): boolean {
-  return /(효능|치료)/.test(v) || (HEADLINE_BODY_RE.test(v) && HEADLINE_CHANGE_RE.test(v));
-}
+export const headlineClaimsEfficacy = claimsEfficacy;
 
 /** (순수) 헤드라인 글 — 정리 · 16자 · 숫자나 혜택 낱말이 있으면 null(그림 안 값 0 · 한 줄을 근거로 쓰지 않는다) */
 export function sanitizeLineHeadlineTitle(raw: unknown): string | null {

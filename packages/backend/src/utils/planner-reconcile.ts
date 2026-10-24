@@ -40,6 +40,7 @@ import { runPlannerAlimtalkPass } from './planner-alimtalk';
 import { runPlannerCopyPass } from './planner-copy';
 import { formatPlannerDay, runPlannerReviewLinkPass, runPostApprovalSpamPass, settleEventIfFinished } from './planner-review';
 import { PLANNER_PHASE1_CHANNELS } from './planner-channel-gate';
+import { releaseUnsentPlannerSendCharges } from './planner-executor';
 import { PLANNER_REASON } from './planner-reasons';
 
 /** 지난 달까지 되돌아본다 — 그 이전은 브리핑·정산이 이미 닫힌 구간이다. */
@@ -59,20 +60,23 @@ const MISSED_EVENT_STATUS = ['approved', 'producing', 'scheduled', 'done', 'brie
  */
 async function closeMissed(today: string, lookbackDate: string): Promise<number> {
   // 후보 전수(★ Codex 1R H7 · 한 페이지만 보면 앞 행이 지난 행을 가린다)
+  // ★ 2026-10-24 R6 — 지난 날의 보류(크레딧) · 잠금도 닫는다(옛: planned · ready 만 봐 [다시 시작]도 막힌 지난 보류가 영원히 남아 행사가 안 닫혔다).
+  //   보냈는지 모르는 행(시도 표식 · 참조 없음)은 사람 판정이라 그대로 둔다.
   const rows = await loadAllLiveTouchpoints({
-    statuses: ['planned', 'ready'], eventStatuses: MISSED_EVENT_STATUS, scheduledFrom: lookbackDate, scheduledTo: today,
+    statuses: ['planned', 'ready', 'hold_credit', 'locked'], eventStatuses: MISSED_EVENT_STATUS, scheduledFrom: lookbackDate, scheduledTo: today,
   }, { label: 'planner-reconcile closeMissed' });
   const missed = rows.filter((t) => classifyExecutionWindow(t.scheduledOn, today) === 'missed');
   let closed = 0;
   const byEvent = new Map<string, { first: (typeof missed)[number]; approved: string[]; unapproved: string[]; recheck: string[] }>();
   for (const tp of missed) {
+    if (tp.execMeta?.send_started_at && !tp.execRef) continue;
     const approved = !!tp.execMeta?.approved;
     // ★ 2026-10-18 M3 — 쌍 재확인 중이던 접점(승인 각인이 떼어진 채 그날이 지남)은 「다시 확인되지 않아」(「승인되지 않아」가 아니다)
     const recheck = !approved && !!tp.execMeta?.recheck;
     const ok = await setTouchpointState({
       companyId: tp.companyId, touchpointId: tp.id,
       status: 'skipped',
-      fromStatuses: ['planned', 'ready'],
+      fromStatuses: ['planned', 'ready', 'hold_credit', 'locked'],
       lockReason: approved ? PLANNER_REASON.missed : recheck ? PLANNER_REASON.recheckMissed : PLANNER_REASON.notApproved,
       execMetaPatch: { missed_at: new Date().toISOString(), missed_reason: approved ? 'missed' : recheck ? 'recheck_missed' : 'not_approved' },
     });
@@ -333,6 +337,8 @@ async function reconcilePass(): Promise<{ missed: number; recovered: number; lef
   const joins = await sweepJoinClicks(monthFrom).catch((e: any) => {
     console.error('[planner-reconcile] 참여 수집 실패:', e?.message || e); return 0;
   });
+  // ★ 2026-10-24 R4 — 보내기 전에 잡아 둔 문안비 중 보내지 못한 시도 되돌림(30분 뒤)
+  await releaseUnsentPlannerSendCharges().catch((e: any) => console.error('[planner-reconcile] 문안비 되돌림 실패:', e?.message || e));
   // ★ 2026-10-04 행사별 확인 흐름 — 반드시 closeMissed **뒤**(지난 접점을 먼저 닫아야 지나간 행사에 문안·링크를 만들지 않는다).
   //   문안 준비(원가 0 · AI 상한 20) → 확인 링크·리마인드·준비 실패 통지 → 승인 직후 실주소 스팸.
   await runPlannerCopyPass().catch((e: any) => console.error('[planner-reconcile] 문안 준비 실패:', e?.message || e));

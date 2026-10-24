@@ -19,7 +19,7 @@ import { applyBrandLinkTokens, type BrandLink } from '../utils/brand-link-core';
 import { validateBrandVoiceCompliance, buildRetryHintFromIssues } from '../utils/brand-voice-validator';
 import { composeCopyBrain } from '../utils/copy-prompt-composer';
 import { scoreSpamRisk, SPAM_FAIL_THRESHOLD } from '../utils/copy-spam-risk';
-import { detectBenefits, buildBenefitEmphasis, findInventedBenefits, replaceInventedBenefits, findNewNumbers } from '../utils/copy-benefit-detector';
+import { detectBenefits, buildBenefitEmphasis, findInventedBenefits, replaceInventedBenefits, findNewNumbers, dropInventedEfficacy, rewriteAddsFacts, EFFICACY_PROMPT_RULES, EFFICACY_RETRY_HINT } from '../utils/copy-benefit-detector';
 import { findBannedWords } from '../utils/copy-similarity-guard';
 // ★ D227+ AI 응답 JSON 안전 추출 (코드펜스 없이 설명문 혼입 방어 — 본문 0 bytes 사고 정정)
 import { extractJsonFromAiText } from '../utils/ai-json';
@@ -840,6 +840,9 @@ const BRAND_SYSTEM_PROMPT = `당신은 대한민국 최고의 마케팅 문자 �
 - 상대적 날짜("내일", "모레")는 반드시 구체적 날짜로 변환
 - 날짜 표기: "M/D(요일)" 형식 (예: 4/15(화))
 
+### 4. 효능 단정 금지
+${EFFICACY_PROMPT_RULES}
+
 ## 특수문자 규칙
 SMS/LMS/MMS: 이모지 절대 금지! 아래 특수문자만 사용:
 ★☆●○◎◇◆□■△▲▽▼→←↑↓♠♣♥♡♦※☎▶◀【】「」『』
@@ -902,7 +905,7 @@ SMS/LMS/MMS: 이모지 절대 금지! 아래 특수문자만 사용:
 - **브랜드 톤앤매너가 모든 심리 기법보다 우선합니다**
 - 고급 브랜드 → 절제된 우아함. 할인도 과장 없이 담백하게(예: "이번 시즌 가격으로 만나 보세요")
 - 친근한 브랜드 → 따뜻한 이웃 느낌. 과하지 않은 친밀감
-- 전문 브랜드 → 신뢰와 전문성. 성분/효과 기반 설득
+- 전문 브랜드 → 신뢰와 전문성. 성분 · 쓰는 법 같은 사실로 설득(효과 · 변화는 단정하지 않는다)
 - ⚠️ 느낌표(!)는 문안 전체에서 최대 2~3개. 느낌표 폭탄은 싸구려 광고
 - ⚠️ 과장 형용사("초특가", "역대급", "미친", "대박") 절대 금지
 - ⚠️ 있는 사실만 매력적으로 포장. 없는 걸 만들어내는 건 허풍
@@ -930,8 +933,8 @@ SMS/LMS/MMS: 이모지 절대 금지! 아래 특수문자만 사용:
 - 화장품: "퇴근 후 세안하고, 한 방울이면 아침까지 촉촉" → 사용 장면이 그려짐
 - 식품: "주말 저녁, 가족과 함께 바로 즐기는 프리미엄 한우" → 식탁 장면
 - 패션: "출근길 거울 앞에서 '오늘 좀 멋진데?' 하게 될 재킷" → 착용 순간
-- 건강: "아침 공복에 한 포, 하루가 가벼워지는 루틴" → 일상 속 루틴
-- 뷰티: "자기 전 5분, 내일 아침 피부가 달라지는 마스크팩" → before/after 기대감
+- 건강: "아침 공복에 한 포, 챙기기 쉬운 하루 루틴" → 일상 속 루틴
+- 뷰티: "자기 전 5분, 하루를 마무리하는 마스크팩 시간" → 쓰는 순간의 여유(피부 변화는 단정하지 않는다)
 
 ⚠️ 제품명이 주어지면 반드시 1줄 이상 사용 시나리오를 포함하세요!
 시나리오가 없으면 읽는 사람이 "나한테 왜 필요한지" 모릅니다.
@@ -942,7 +945,7 @@ SMS/LMS/MMS: 이모지 절대 금지! 아래 특수문자만 사용:
 - "맛있는 고기" → "입안에서 살살 녹는 마블링"
 - "좋은 향기" → "케이스를 여는 순간 퍼지는 은은한 플로럴"
 - "편안한 옷" → "입는 순간 느껴지는, 구름 같은 부드러움"
-- "건강에 좋은" → "매일 한 잔, 몸이 가벼워지는 걸 느끼세요"
+- "건강에 좋은" → "매일 아침, 따뜻하게 시작하는 한 잔"
 
 감각 표현은 구매 전환율을 2~3배 높입니다. 모든 제품 어필에 최소 1개 감각 표현을 넣으세요.
 
@@ -993,10 +996,10 @@ SMS/LMS/MMS: 이모지 절대 금지! 아래 특수문자만 사용:
 
 ### 10. 업종별 킬 포인트
 브랜드 설명에서 업종을 파악하여 아래 포인트를 활용하세요:
-- **뷰티/화장품:** 성분 효능 + 사용감(텍스처) + before/after 기대감 + 피부 고민 공감
+- **뷰티/화장품:** 사용감(텍스처 · 향) + 쓰는 장면 + 피부 고민 공감 + 성분 소개(효능 · 피부 변화는 단정하지 않는다)
 - **패션/의류:** 착용 장면 + 스타일링 팁 + 트렌드 연결 + 체형 고민 해결
-- **식품/음료:** 맛 묘사(감각 언어!) + 식탁/모임 장면 + 재료 원산지 + 건강 이점
-- **건강/헬스:** 일상 루틴 삽입 + 체감 변화 + 성분 신뢰감 + 꾸준함의 가치
+- **식품/음료:** 맛 묘사(감각 언어!) + 식탁/모임 장면 + 재료 원산지 + 제철 · 신선함(건강 효과는 단정하지 않는다)
+- **건강/헬스:** 일상 루틴 삽입 + 챙기기 쉬운 방법 + 성분 소개 + 꾸준함의 가치(몸의 변화 · 효과는 단정하지 않는다)
 - **생활/가전:** 불편 해소 장면 + 시간 절약 + 가족/공간 연결 + 실용적 가치
 - **키즈/교육:** 부모 마음 공감 + 아이 성장 장면 + 안전/성분 신뢰 + 다른 부모 후기
 
@@ -1394,10 +1397,13 @@ ${usePersonalization ? `- 사용할 개인화 변수: ${personalizationTags}
     let liquidDetectedLastRun = false;
     // ★ 2026-09-30 WP2 — 직전 실행에서 근거 없는 혜택 값 · 낱말이 나왔는지(재생성 힌트 트리거)
     let inventedBenefitsLastRun: string[] = [];
+    // ★ 2026-10-24 — 직전 실행에서 근거 없는 효능 단정 문장을 뺐는지(재생성 힌트 트리거 · 한 줄 CT 와 같은 판정)
+    let efficacyDroppedLastRun: string[] = [];
     // ★ 2026-07-02 생성 1회 실행 — CT-100 검증 미달 시 재생성에서 재사용 (재생성 = creditCost 0, 추가 차감 없음)
     const runGenerateOnce = async (retryHint: string): Promise<AIRecommendResult> => {
     liquidDetectedLastRun = false;
     inventedBenefitsLastRun = [];
+    efficacyDroppedLastRun = [];
     const text = await callAIWithFallback({
       system: enrichedSystemPrompt,
       userMessage: retryHint ? `${userMessage}${retryHint}` : userMessage,
@@ -1444,6 +1450,16 @@ ${usePersonalization ? `- 사용할 개인화 변수: ${personalizationTags}
           msgField = flattenLiquidToPlainText(msgField);
           console.warn(`[copy-guard] 템플릿 문법(Liquid) 검출 → 평문화: variant ${(variant as any).variant_id || ''}`);
         }
+        // ★ ② 출력 금지어 가드 (2026-06-30) — 브랜드 키트 banned_words 제거
+        //   ★ 2026-10-24 자리표시(혜택 · 효능)를 넣기 **전**에 지운다 — 뒤에서 지우면 금지어가 자리표시 글자(「직접」 등)를 깎아 발송 길목을 지나간다(Codex 3R)
+        if (bannedWords.length > 0) {
+          const hit = findBannedWords(msgField, bannedWords);
+          if (hit.length > 0) {
+            for (const w of hit) msgField = msgField.split(w).join('');
+            msgField = msgField.replace(/  +/g, ' ');
+            console.log(`[copy-guard] 금지어 제거: ${hit.join(', ')}`);
+          }
+        }
         // ★ 2026-09-30 WP2 혜택 서버 차단 — 프롬프트 금지는 확률적이다. 근거에 없는 혜택 값 · 낱말은 자리표시로 바꾸고
         //   재생성 1회를 유도한다. 남은 자리표시는 발송 길목(send-placeholder-gate)이 막는다(사람이 채우거나 지운 뒤에만 발송).
         const inventedHere = findInventedBenefits(msgField, benefitGround);
@@ -1452,19 +1468,16 @@ ${usePersonalization ? `- 사용할 개인화 변수: ${personalizationTags}
           msgField = replaceInventedBenefits(msgField, benefitGround);
           console.warn(`[copy-guard] 근거 없는 혜택 → 자리표시: variant ${(variant as any).variant_id || ''} (${inventedHere.join(', ')})`);
         }
+        // ★ 2026-10-24 효능 단정 거름(한 줄 CT · 그림 글과 같은 판정 · copy-benefit-detector) — 근거 글에 없는 단정 문장은 빼고 재생성 1회
+        //   다 빠지면 직접 채울 자리(EFFICACY_PLACEHOLDER)가 남아 발송 길목이 막는다 — 본문이 비지 않으므로 실패 대체 문안으로 가지 않는다(★ Codex 2R · 이미 낸 생성 요금)
+        const effHere = dropInventedEfficacy(msgField, benefitGround);
+        if (effHere.dropped.length > 0) {
+          efficacyDroppedLastRun.push(...effHere.dropped);
+          msgField = effHere.text;
+          console.warn(`[copy-guard] 근거 없는 효능 단정 → 문장 뺌: variant ${(variant as any).variant_id || ''} (${effHere.dropped.length}문장)`);
+        }
         msgField = msgField.trim();
         (variant as any).message_text = msgField;
-        
-        // ★ ② 출력 금지어 가드 (2026-06-30) — 브랜드 키트 banned_words 제거
-        if (bannedWords.length > 0) {
-          const hit = findBannedWords(msgField, bannedWords);
-          if (hit.length > 0) {
-            for (const w of hit) msgField = msgField.split(w).join('');
-            msgField = msgField.replace(/  +/g, ' ').trim();
-            (variant as any).message_text = msgField;
-            console.log(`[copy-guard] 금지어 제거: ${hit.join(', ')}`);
-          }
-        }
 
         // ★ D28: 제목에서 %변수% 강제 제거 (AI가 프롬프트 무시 시 안전장치)
         // ★ 2026-07-06: 제목도 템플릿 문법 평문화 동반 (본문과 동일 보장)
@@ -1479,6 +1492,11 @@ ${usePersonalization ? `- 사용할 개인화 변수: ${personalizationTags}
           if (subjInvented.length > 0) {
             inventedBenefitsLastRun.push(...subjInvented);
             subj = replaceInventedBenefits(subj, benefitGround);
+          }
+          const subjEff = dropInventedEfficacy(subj, benefitGround);
+          if (subjEff.dropped.length > 0) {
+            efficacyDroppedLastRun.push(...subjEff.dropped);
+            subj = subjEff.text;
           }
           (variant as any).subject = cleanLeftoverVars(subj).replace(/  +/g, ' ').trim();
         }
@@ -1570,6 +1588,10 @@ ${usePersonalization ? `- 사용할 개인화 변수: ${personalizationTags}
         // ★ 2026-09-30 WP2 — 근거 없는 혜택이 나왔으면 재생성 1회(자리표시는 이미 들어갔다 · 다시 쓰면 자리표시 없는 문안이 된다)
         if (inventedBenefitsLastRun.length > 0) {
           allIssues.add(`요청에 없는 혜택(${Array.from(new Set(inventedBenefitsLastRun)).join(', ')})을 쓰지 않기. 요청에 적힌 혜택만 쓰고, 없으면 계절감 · 상품 매력으로 채우기`);
+        }
+        // ★ 2026-10-24 — 근거 없는 효능 단정 문장을 뺐으면 재생성 1회(뺀 자리 없이 다시 쓴 문안이 된다)
+        if (efficacyDroppedLastRun.length > 0) {
+          allIssues.add(EFFICACY_RETRY_HINT);
         }
 
         if (allIssues.size > 0) {
@@ -2709,6 +2731,7 @@ ${channel} 채널에 최적화된 3가지 맞춤 문안(A/B/C)을 생성해주�
 5. 이모지 사용 금지 (SMS/LMS)
 6. 구분선(━━━, ───, ═══, ___, ＿＿＿) 사용 절대 금지! 빈 줄로 구분
 7. 한 줄이 한글 17자를 넘지 않도록 반드시 줄바꿈
+8. 상품이 피부 · 몸을 바꾼다고 단정 금지(효능 · 개선 · 좋아진다 · 달라진다). 프로모션 카드에 고객이 적은 기능 문구만 그 글자 그대로
 
 ## 출력 형식
 반드시 아래 JSON 형식으로만 응답 (다른 텍스트 없이):
@@ -2801,12 +2824,18 @@ ${channel} 채널에 최적화된 3가지 맞춤 문안(A/B/C)을 생성해주�
           msg = replaceInventedBenefits(msg, customBenefitGround);
           console.warn(`[copy-guard] 맞춤 문안 근거 없는 혜택 → 자리표시: ${variant.variant_id || ''} (${customInvented.join(', ')})`);
         }
+        // ★ 2026-10-24 효능 단정 거름(같은 판정 · 같은 근거 글)
+        const customEff = dropInventedEfficacy(msg, customBenefitGround);
+        if (customEff.dropped.length > 0) {
+          msg = customEff.text;
+          console.warn(`[copy-guard] 맞춤 문안 근거 없는 효능 단정 → 문장 뺌: ${variant.variant_id || ''} (${customEff.dropped.length}문장)`);
+        }
         msg = msg.trim();
         variant.message_text = msg;
 
         // ★ D28: 제목에서 %변수% 강제 제거 (AI가 프롬프트 무시 시 안전장치)
         if (variant.subject) {
-          variant.subject = cleanLeftoverVars(replaceInventedBenefits(String(variant.subject), customBenefitGround)).replace(/  +/g, ' ').trim();
+          variant.subject = cleanLeftoverVars(dropInventedEfficacy(replaceInventedBenefits(String(variant.subject), customBenefitGround), customBenefitGround).text).replace(/  +/g, ' ').trim();
         }
 
         // ★ 버그 #1: 미선택 변수 엄격 제거
@@ -3408,7 +3437,8 @@ function validateAndNormalizeRefinedCandidates(
     //   근거 없는 혜택 값 · 낱말이 생긴 후보는 뺀다(프롬프트 금지는 확률적 · 예시 창작 사고 D152 부류). 지금 달 표현은 허용.
     //   시스템이 (a-3)에서 다시 붙인 수신거부 문구(회사 번호)는 AI 가 지어낸 것이 아니다 → 대조 원문에 포함(Codex 0930 1R).
     const factSource = `${originalMessage}\n${rejectFooterToRestore}`;
-    if (findNewNumbers(text, factSource).length > 0 || findInventedBenefits(text, factSource).length > 0) {
+    // ★ 2026-10-24 세 채널 구조체크 ② — 다시 쓰기 판정 하나(새 숫자 ∥ 지어낸 혜택 ∥ 근거 없는 효능 · rewriteAddsFacts)
+    if (rewriteAddsFacts(text, factSource)) {
       dropCounts.fabricated += 1;
       continue;
     }

@@ -24,6 +24,7 @@ import { aiLimitCountedSql, getMonthlyUsage, getDailyUsage, getModelBreakdown } 
 import { getCacheStats } from '../utils/ai-cache';
 import { kstDateString } from '../utils/planner-execution';
 
+import { publicErrorText } from '../utils/http-error';
 /** ★ 2026-09-27 한줄로 V2 R074 — 사용량 일평균·예측의 창(일). 일평균 = 이 창의 합 ÷ 이 일수(호출 없는 날도 0으로 센다). */
 const USAGE_WINDOW_DAYS = 30;
 
@@ -183,7 +184,7 @@ router.get('/overview', async (req: Request, res: Response) => {
         code: 'DB_MIGRATION_PENDING',
       });
     }
-    return res.status(500).json({ success: false, error: err?.message || '조회 실패' });
+    return res.status(500).json({ success: false, error: publicErrorText(err, '조회 실패') });
   }
 });
 
@@ -274,7 +275,7 @@ router.get('/forecast', async (req: Request, res: Response) => {
     });
   } catch (err: any) {
     console.error('[AI Usage forecast] 오류:', err);
-    return res.status(500).json({ success: false, error: err?.message || '예측 실패' });
+    return res.status(500).json({ success: false, error: publicErrorText(err, '예측 실패') });
   }
 });
 
@@ -370,7 +371,7 @@ ${topSources || '(데이터 없음)'}
     if (err?.name === 'AiRateLimitExceeded') {
       return res.status(429).json({ success: false, error: err.message, code: 'AI_RATE_LIMIT' });
     }
-    return res.status(500).json({ success: false, error: err?.message || '검색 실패' });
+    return res.status(500).json({ success: false, error: publicErrorText(err, '검색 실패') });
   }
 });
 
@@ -435,7 +436,7 @@ router.post('/threshold-alert', async (req: Request, res: Response) => {
         code: 'DB_MIGRATION_PENDING',
       });
     }
-    return res.status(500).json({ success: false, error: err?.message || '설정 저장 실패' });
+    return res.status(500).json({ success: false, error: publicErrorText(err, '설정 저장 실패') });
   }
 });
 

@@ -45,6 +45,21 @@ export function issueCdpMemberToken(
   return { token: `v1.${payload}.${sig}`, expiresAt };
 }
 
+/**
+ * ★ 2026-10-24 세 채널 구조체크 ⑨ — 이 요청이 그 회원임을 증명했는가. 회원을 잇는 공개 주소 셋(구독 · 표시 개인화 · 추적)이 이 판정 하나를 쓴다.
+ *   비밀키 서버 호출 = 미들웨어(requireCdpKeyOrBrowserOrigin → requireCdpApiKey)가 이미 검증 · 브라우저 · 앱 = 우리가 서명한 회원 토큰.
+ */
+export function isCdpMemberConfirmed(
+  headers: Record<string, unknown>,
+  companyId: string,
+  externalId: unknown,
+  memberToken: unknown,
+): boolean {
+  if (!externalId) return false;
+  if (headers['x-hanjullo-secret']) return true;
+  return verifyCdpMemberToken(memberToken ? String(memberToken) : '', companyId, String(externalId));
+}
+
 export function verifyCdpMemberToken(
   token: unknown,
   companyId: string,

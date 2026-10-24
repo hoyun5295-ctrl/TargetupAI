@@ -75,7 +75,7 @@ describe('② 승인 트랜잭션(C1 · C2 · C3)', () => {
     const order = [
       "pending.some((t) => t.status !== 'planned')",
       'isPastApprovalDeadline(first)',
-      'eventFingerprint(ev, fps) !== String(input.seenHash',
+      'eventFingerprint(ev, fps, numbers) !== String(input.seenHash',
       'isCopyValid(carrier.execMeta, copyInputHash(ev',
       'await firstBlockedChannel(pending.map',
       'await countEventSmsAudience(',
@@ -325,8 +325,10 @@ describe('⑧ Codex 1R 구조 정정(돈 원자성 · 실행 소유권 · 행사
     expect(evSrc).toContain("if (isBuilding(ev.meta)) throw new PlannerEventWriteError(409, 'BUILDING'");
     expect(evSrc).toContain("throw new PlannerEventWriteError(409, 'MONTH_LOCKED'");
     expect(evSrc).toContain('const materialsHash = plannerBuildInputHash(ev, ev.meta.materials || null);');
+    // ★ 1024 R1 — 지우기 판정 · 쓰기 = CT 한 곳(라우트는 부르기만)
     const route = read('../routes/marketing-planner.ts');
-    const del = route.slice(route.indexOf("router.delete('/events/:id'"));
+    expect(route.slice(route.indexOf("router.delete('/events/:id'"))).toContain('deletePlannerEvent(companyId, String(req.params.id), resolveOwnerScope(req))');
+    const del = evSrc.slice(evSrc.indexOf('export async function deletePlannerEvent('));
     expect(del).toContain("e.meta->'building' IS NULL");
     const copy = read('planner-copy.ts');
     expect(copy).not.toContain('setTouchpointState(');

@@ -38,6 +38,7 @@ import {
 import { ensureCafe24ScriptTag, removeCafe24ScriptTag } from '../utils/cafe24-scripttag';
 import { signCafe24InstallState, verifyCafe24InstallState } from '../utils/cafe24-install-state';
 
+import { publicErrorText } from '../utils/http-error';
 const router = Router();
 
 // ════════════════════════════════════════════════════════════════════
@@ -121,7 +122,7 @@ router.post('/webhook', json({ limit: '1mb', verify: (req: any, _res, buf) => { 
     return res.json({ success: true });
   } catch (err: any) {
     console.error('[Cafe24 Webhook] 오류:', err);
-    return res.status(500).json({ success: false, error: err?.message || 'webhook 처리 실패' });
+    return res.status(500).json({ success: false, error: publicErrorText(err, 'webhook 처리 실패') });
   }
 });
 
@@ -182,7 +183,7 @@ router.get('/oauth/authorize', async (req: Request, res: Response) => {
     return res.json({ success: true, authorize_url: authorizeUrl });
   } catch (err: any) {
     console.error('[Cafe24 /oauth/authorize] 오류:', err);
-    return res.status(500).json({ success: false, error: err?.message || 'authorize URL 생성 실패' });
+    return res.status(500).json({ success: false, error: publicErrorText(err, 'authorize URL 생성 실패') });
   }
 });
 
@@ -225,7 +226,7 @@ router.post('/byo-credentials', async (req: Request, res: Response) => {
     return res.json({ success: true });
   } catch (err: any) {
     console.error('[Cafe24 /byo-credentials] 오류:', err);
-    return res.status(500).json({ success: false, error: err?.message || 'self-app 자격 저장 실패' });
+    return res.status(500).json({ success: false, error: publicErrorText(err, 'self-app 자격 저장 실패') });
   }
 });
 
@@ -258,7 +259,7 @@ router.get('/status', async (req: Request, res: Response) => {
     });
   } catch (err: any) {
     console.error('[Cafe24 /status] 오류:', err);
-    return res.status(500).json({ success: false, error: err?.message || '조회 실패' });
+    return res.status(500).json({ success: false, error: publicErrorText(err, '조회 실패') });
   }
 });
 
@@ -288,7 +289,7 @@ router.delete('/disconnect', async (req: Request, res: Response) => {
     return res.json({ success: true });
   } catch (err: any) {
     console.error('[Cafe24 /disconnect] 오류:', err);
-    return res.status(500).json({ success: false, error: err?.message || '연동 해제 실패' });
+    return res.status(500).json({ success: false, error: publicErrorText(err, '연동 해제 실패') });
   }
 });
 
@@ -318,7 +319,7 @@ cafe24CallbackRouter.get('/oauth/install-start', (req: Request, res: Response) =
     return res.redirect(302, authorizeUrl);
   } catch (err: any) {
     console.error('[Cafe24 /oauth/install-start] 오류:', err);
-    return res.status(500).send(renderCafe24CallbackHtml('error', err?.message || '카페24 연동 시작에 실패했습니다.'));
+    return res.status(500).send(renderCafe24CallbackHtml('error', publicErrorText(err, '카페24 연동 시작에 실패했습니다.')));
   }
 });
 
@@ -396,7 +397,7 @@ cafe24CallbackRouter.get('/oauth/callback', async (req: Request, res: Response) 
     return res.send(renderCafe24CallbackHtml('ok', `${mallId} 카페24 연동이 완료되었습니다. 본 창을 닫고 한줄로AI로 돌아가주세요.`));
   } catch (err: any) {
     console.error('[Cafe24 callback] 오류:', err);
-    return res.status(500).send(renderCafe24CallbackHtml('error', err?.message || '카페24 연동 처리 중 오류가 발생했습니다.'));
+    return res.status(500).send(renderCafe24CallbackHtml('error', publicErrorText(err, '카페24 연동 처리 중 오류가 발생했습니다.')));
   }
 });
 

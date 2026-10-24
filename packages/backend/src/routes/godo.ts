@@ -24,6 +24,7 @@ import {
   GodoApiError,
 } from '../utils/godo-client';
 
+import { publicErrorText } from '../utils/http-error';
 const router = Router();
 router.use(authenticate);
 
@@ -47,11 +48,10 @@ function sendGodoError(res: Response, err: unknown): void {
   if (err instanceof GodoApiError) {
     // 996(IP 미허용)·partner_key 미설정 = 운영자 조치 필요 → 503, 그 외 = 400
     const opsCode = err.code === '996' || err.code === 'partner_key';
-    res.status(opsCode ? 503 : 400).json({ success: false, error: err.message, code: `GODO_${err.code}` });
+    res.status(opsCode ? 503 : 400).json({ success: false, error: publicErrorText(err, '고도몰 연동 중 문제가 생겼어요. 잠시 후 다시 시도해 주세요.'), code: `GODO_${err.code}` });
     return;
   }
-  const msg = (err as any)?.message || '';
-  res.status(500).json({ success: false, error: msg || '고도몰 처리 중 오류가 발생했습니다.' });
+  res.status(500).json({ success: false, error: publicErrorText(err, '고도몰 처리 중 오류가 발생했습니다.') });
 }
 
 /**
@@ -73,7 +73,7 @@ router.post('/credentials', async (req: Request, res: Response) => {
     return res.json({ success: true });
   } catch (err: any) {
     console.error('[Godo /credentials] 오류:', err);
-    return res.status(500).json({ success: false, error: err?.message || '인증키 저장 실패' });
+    return res.status(500).json({ success: false, error: publicErrorText(err, '인증키 저장 실패') });
   }
 });
 
@@ -118,7 +118,7 @@ router.get('/status', async (req: Request, res: Response) => {
     return res.json({ success: true, ...status });
   } catch (err: any) {
     console.error('[Godo /status] 오류:', err);
-    return res.status(500).json({ success: false, error: err?.message || '상태 조회 실패' });
+    return res.status(500).json({ success: false, error: publicErrorText(err, '상태 조회 실패') });
   }
 });
 
@@ -134,7 +134,7 @@ router.delete('/disconnect', async (req: Request, res: Response) => {
     return res.json({ success: true });
   } catch (err: any) {
     console.error('[Godo /disconnect] 오류:', err);
-    return res.status(500).json({ success: false, error: err?.message || '연동 해제 실패' });
+    return res.status(500).json({ success: false, error: publicErrorText(err, '연동 해제 실패') });
   }
 });
 

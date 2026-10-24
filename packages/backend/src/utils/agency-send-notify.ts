@@ -125,6 +125,15 @@ export function buildReapprovalNotify(ctx: AgencyNotifyContext): string {
   ]);
 }
 
+/** ④-2 ★ 2026-10-24 검사 장비 문제로 세 차례 검사를 마치지 못했다(문안 문제가 아니다 · B-0823-1) */
+export function buildTestErrorNotify(ctx: AgencyNotifyContext): string {
+  return compose([
+    `${HEAD} 스팸 검사 장비 문제로 문안 검사를 마치지 못해 진행을 멈췄습니다.`,
+    `건: ${shortLabel(ctx.label)}`,
+    '문안 문제는 아닙니다. 운영팀이 확인하고 있으며, 로그인하여 다시 진행하시면 검사를 다시 시작합니다.',
+  ]);
+}
+
 /** ④ 세 차례 모두 차단. 사람이 문안을 고쳐야 한다 */
 export function buildTestFailedNotify(ctx: AgencyNotifyContext): string {
   return compose([

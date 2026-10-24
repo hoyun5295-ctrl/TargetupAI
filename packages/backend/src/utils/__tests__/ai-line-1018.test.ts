@@ -502,7 +502,8 @@ describe('③ 소스 계약', () => {
   it('라우터 = 로그인 · 요금제 · /api/ai-line 등록 · 스위치 없음(1019 전 회사)', () => {
     const r = read('routes/ai-line.ts');
     expect(r).toContain('router.use(authenticate);');
-    expect(r).toContain('isAiOperatorAllowed(plan, req.user)');
+    // ★ 1024 R2 — 요금제 = AI 존 서버 문 한 곳(화면 PlanGate 와 같은 판정)
+    expect(r).toContain('if (await aiZonePlanBlocked(req, res)) return null;');
     expect(r).not.toContain('aiLineEnabled');
     expect(r).toContain("router.post('/retarget'");
     expect(read('app.ts')).toContain("app.use('/api/ai-line', aiLineRoutes);");

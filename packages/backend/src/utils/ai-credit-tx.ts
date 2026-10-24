@@ -15,6 +15,7 @@ import {
   buildIdempotencyKey,
   kstMonthTag,
   isOperationSource,
+  SEND_CREDIT_SOURCES,
 } from './ai-credit-calc';
 
 export class InsufficientCreditError extends Error {
@@ -93,7 +94,8 @@ export function creditOverageAllowance(row: any, source: string): number {
   //   여정 운영은 그달 크레딧(기본 + 구매) 안에서만 쓴다. 선불 다음 달 당겨쓰기 · 후불 초과 청구 0. 모자라면 실행기가 보내기 전에 멈춘다.
   // ★ 2026-10-24 X1(자동 마케팅 · 설계서 docs/2026-10-24-automarketing-oneline-design.md §5) — 회차 발송 크레딧도 같다(선불 · 후불 모두 마이너스 0).
   //   보내기 직전에 걷고, 모자라면 그 회차를 보내지 않고 멈춘다(continuous-operator dispatchProposalSend).
-  if (source === 'journey-operation' || source === 'continuous-operator-send') return 0;
+  // ★ 2026-10-24 발송 크레딧 전부(목록 = SEND_CREDIT_SOURCES · 플래너 문안비 포함 · 뿌리 대장 R4) — 규칙이 생긴 기능에서만 고쳐 플래너가 빠져 있었다
+  if (SEND_CREDIT_SOURCES.has(source)) return 0;
   const planCredits = Number(row.plan_credits) || 0;
   return isOperationSource(source)
     ? planCredits

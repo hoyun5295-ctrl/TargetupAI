@@ -22,9 +22,8 @@ function routeBlock(src: string, marker: string): string {
 describe('C-06 DM 소유 가드', () => {
   const dm = read('routes/dm.ts');
   for (const [marker, ctCall] of [
-    ["dmRouter.post('/:id/self-diagnose'", 'selfDiagnoseDm('],
+    // ★ 2026-10-24 세 채널 구조체크 ⑪ — self-diagnose · section-suggest 는 화면이 부르지 않아 지웠다
     ["dmRouter.post('/:id/quick-action'", 'applyQuickAction('],
-    ["dmRouter.get('/:id/section-suggest'", 'suggestNextSection('],
   ] as const) {
     it(`${marker} — CT 호출 전에 canAccessDm`, () => {
       const block = routeBlock(dm, marker);

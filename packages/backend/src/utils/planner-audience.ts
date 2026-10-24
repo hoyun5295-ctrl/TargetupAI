@@ -29,7 +29,9 @@ import { REVENUE_STATUSES } from './cdp-order-revenue';
 import { companyListAllows } from './sns-constants';
 import { countCustomerRecipientsWhere, resolveCustomerRecipientsWhere, type EmailRecipient } from './email-channel';
 import { PLANNER_REASON } from './planner-reasons';
-import { confirmLineAudience, type PlannerLineAudience } from './planner-line-read';
+import type { PlannerLineAskContext } from './planner-line-read';
+import { getPlannerChannelAvailability } from './planner-channel-gate';
+import { PLANNER_CHANNEL_LABEL } from './marketing-planner';
 
 export interface PlannerAudienceResolution {
   /** 대상을 정할 수 없다(매장 권한 미지정 등) — 발송하지 않는다. */
@@ -277,20 +279,32 @@ export async function resolvePlannerEmailRecipients(input: { companyId: string; 
   return { blocked: false, recipients: await resolveCustomerRecipientsWhere(w.params, w.scopeWhere, w.extraWhere) };
 }
 
-/** ★ 2026-10-18 한 줄 읽기 구매자 확정의 시간 상한(넘으면 사람이 고른다 · 행사명 · 기간 · 채널 제안은 그대로 돌려준다 · Codex B 4R) */
+/** ★ 2026-10-18 한 줄 읽기 상품 목록의 시간 상한(넘으면 사람이 고른다 · 행사명 · 기간 · 채널 제안은 그대로 돌려준다 · Codex B 4R) */
 export const LINE_AUDIENCE_CONFIRM_MS = 2500;
 
 /**
- * 한 줄 읽기의 구매자 제안 → 그 회사 관측 상품명(대상 상품 고르기와 같은 문 · 같은 함수)으로 확정. 조회 실패 · 시간 초과 = 목록 없음 = 사람이 고른다.
+ * ★ 2026-10-24 한 줄 질문표의 회사 사정(뿌리 대장 R9) — 채널 준비(담기 창 · 저장과 같은 함수) · 관측 상품(대상 상품 고르기와 같은 문 · 같은 함수).
+ * 상품 조회 실패 · 시간 초과 = null = 구매자 제안은 사람이 고르고 상품 보기 없이 묻는다(넓히지 않는다).
  * ponytail: 시간 초과 뒤에도 조회 자체는 끝까지 돈다(취소 없음) — 담기 창이 곧바로 같은 목록을 부르는 것과 같은 부하.
  */
-export async function confirmLineAudienceForCompany(companyId: string, aud: PlannerLineAudience | null): Promise<PlannerLineAudience | null> {
-  if (!aud || aud.kind !== 'product_buyers') return aud;
+export async function loadPlannerLineAskContext(companyId: string, userId: string | null): Promise<PlannerLineAskContext> {
   let timer: NodeJS.Timeout | undefined;
-  const names = await Promise.race([
-    currentPurchaseDoor(companyId).then((door) => listObservedProducts(companyId, door)).then((list) => list.products.map((p) => p.name)),
-    new Promise<null>((resolve) => { timer = setTimeout(() => resolve(null), LINE_AUDIENCE_CONFIRM_MS); }),
-  ]).catch((e: any) => { console.warn('[planner-audience] 한 줄 읽기 상품 목록 실패(사람이 고름):', e?.message || e); return null; })
-    .finally(() => { if (timer) clearTimeout(timer); });
-  return confirmLineAudience(aud, names);
+  const [channels, products] = await Promise.all([
+    getPlannerChannelAvailability(companyId, userId),
+    Promise.race([
+      currentPurchaseDoor(companyId).then(async (door) => ({
+        door,
+        list: (await listObservedProducts(companyId, door)).products.map((p) => ({ key: p.key, name: p.name, buyers: p.buyers })),
+      })),
+      new Promise<null>((resolve) => { timer = setTimeout(() => resolve(null), LINE_AUDIENCE_CONFIRM_MS); }),
+    ]).catch((e: any) => { console.warn('[planner-audience] 한 줄 읽기 상품 목록 실패(사람이 고름):', e?.message || e); return null; })
+      .finally(() => { if (timer) clearTimeout(timer); }),
+  ]);
+  const ch: PlannerLineAskContext['channels'] = [];
+  for (const c of channels) {
+    if (c.channel === 'sms' || c.channel === 'dm' || c.channel === 'email') {
+      ch.push({ channel: c.channel, label: PLANNER_CHANNEL_LABEL[c.channel], available: c.available, reason: c.reason });
+    }
+  }
+  return { channels: ch, products };
 }

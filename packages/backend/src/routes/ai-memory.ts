@@ -13,6 +13,7 @@
 import { Request, Response, Router } from 'express';
 import { query, pool } from '../config/database';
 import { authenticate } from '../middlewares/auth';
+import { aiZonePlanBlocked } from '../utils/plan-guard';
 import { callAIWithFallback } from '../services/ai';
 import { buildMemoryPromptContext, listMemories, MemoryType, LEARNING_MEMORY_TYPES } from '../utils/company-memory';
 import { fetchBrandGuideline, recordToneEvolution } from '../utils/brand-tone-evolution';
@@ -20,6 +21,7 @@ import { scanLinkHabit, type LinkHabit } from '../utils/brand-link-core';
 import { splitBrandVoiceExtraction, planBrandVoiceRows, type BrandVoiceKind } from '../utils/brand-voice-prompt';
 import { extractJsonFromAiText, plainTextFromAi } from '../utils/ai-json';
 
+import { publicErrorText } from '../utils/http-error';
 const router = Router();
 router.use(authenticate);
 
@@ -145,7 +147,7 @@ router.get('/overview', async (req: Request, res: Response) => {
         code: 'DB_MIGRATION_PENDING',
       });
     }
-    return res.status(500).json({ success: false, error: err?.message || '조회 실패' });
+    return res.status(500).json({ success: false, error: publicErrorText(err, '조회 실패') });
   }
 });
 
@@ -159,6 +161,7 @@ router.post('/search-natural', async (req: Request, res: Response) => {
     if (!companyId) {
       return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
     }
+    if (await aiZonePlanBlocked(req, res)) return;   // ★ 2026-10-24 R2 — AI 를 쓰는 주소 = 서버 요금제 문
     const q = String(req.body?.query || '').trim();
     if (q.length < 2) {
       return res.status(400).json({ success: false, error: '질문은 2자 이상 입력해주세요.' });
@@ -244,7 +247,7 @@ ${memoryContext}
     if (err?.name === 'AiRateLimitExceeded') {
       return res.status(429).json({ success: false, error: err.message, code: 'AI_RATE_LIMIT' });
     }
-    return res.status(500).json({ success: false, error: err?.message || '검색 실패' });
+    return res.status(500).json({ success: false, error: publicErrorText(err, '검색 실패') });
   }
 });
 
@@ -298,7 +301,7 @@ router.get('/top-impact', async (req: Request, res: Response) => {
         code: 'DB_MIGRATION_PENDING',
       });
     }
-    return res.status(500).json({ success: false, error: err?.message || '조회 실패' });
+    return res.status(500).json({ success: false, error: publicErrorText(err, '조회 실패') });
   }
 });
 
@@ -466,7 +469,7 @@ router.get('/brand-voice', async (req: Request, res: Response) => {
     });
   } catch (err: any) {
     console.error('[Brand Voice GET] 오류:', err);
-    return res.status(500).json({ success: false, error: err?.message || '조회 실패' });
+    return res.status(500).json({ success: false, error: publicErrorText(err, '조회 실패') });
   }
 });
 
@@ -567,7 +570,7 @@ router.post('/brand-voice/save-messages', async (req: Request, res: Response) =>
     return res.json({ success: true, saved_count: normalized.length });
   } catch (err: any) {
     console.error('[Brand Voice save-messages] 오류:', err);
-    return res.status(500).json({ success: false, error: err?.message || '저장 실패' });
+    return res.status(500).json({ success: false, error: publicErrorText(err, '저장 실패') });
   }
 });
 
@@ -581,6 +584,7 @@ router.post('/brand-voice/extract-guideline', async (req: Request, res: Response
     if (!companyId) {
       return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
     }
+    if (await aiZonePlanBlocked(req, res)) return;   // ★ 2026-10-24 R2 — AI 를 쓰는 주소 = 서버 요금제 문
     if (userType !== 'company_admin') {
       return res.status(403).json({ success: false, error: '가이드라인 추출은 회사 관리자만 가능합니다.' });
     }
@@ -846,7 +850,7 @@ JSON 단 1건만 출력. 다른 설명/주석/마크다운 코드블록 없음. 
     return res.json({ success: true, guideline, notice_guideline: noticeGuideline, kinds: finalKinds });
   } catch (err: any) {
     console.error('[Brand Voice extract-guideline] 오류:', err);
-    return res.status(500).json({ success: false, error: err?.message || '가이드라인 추출 실패' });
+    return res.status(500).json({ success: false, error: publicErrorText(err, '가이드라인 추출 실패') });
   }
 });
 
@@ -886,7 +890,7 @@ router.delete('/brand-voice/message/:id', async (req: Request, res: Response) =>
     return res.json({ success: true });
   } catch (err: any) {
     console.error('[Brand Voice delete-message] 오류:', err);
-    return res.status(500).json({ success: false, error: err?.message || '삭제 실패' });
+    return res.status(500).json({ success: false, error: publicErrorText(err, '삭제 실패') });
   }
 });
 
@@ -926,7 +930,7 @@ router.delete('/brand-voice/guideline', async (req: Request, res: Response) => {
     return res.json({ success: true });
   } catch (err: any) {
     console.error('[Brand Voice reset-guideline] 오류:', err);
-    return res.status(500).json({ success: false, error: err?.message || '초기화 실패' });
+    return res.status(500).json({ success: false, error: publicErrorText(err, '초기화 실패') });
   }
 });
 
@@ -1013,7 +1017,7 @@ router.post('/brand-voice/update-guideline', async (req: Request, res: Response)
     return res.json({ success: true, guideline });
   } catch (err: any) {
     console.error('[Brand Voice update-guideline] 오류:', err);
-    return res.status(500).json({ success: false, error: err?.message || '정정 실패' });
+    return res.status(500).json({ success: false, error: publicErrorText(err, '정정 실패') });
   }
 });
 
@@ -1076,7 +1080,7 @@ router.get('/brand-links', async (req: Request, res: Response) => {
     return res.json({ success: true, links });
   } catch (err: any) {
     console.error('[Brand Links GET] 오류:', err);
-    return res.status(500).json({ success: false, error: err?.message || '조회 실패' });
+    return res.status(500).json({ success: false, error: publicErrorText(err, '조회 실패') });
   }
 });
 
@@ -1163,7 +1167,7 @@ router.post('/brand-links', async (req: Request, res: Response) => {
     return res.json({ success: true, id: inserted.rows[0]?.id, label, url, updated: sameLabelSameUrl });
   } catch (err: any) {
     console.error('[Brand Links POST] 오류:', err);
-    return res.status(500).json({ success: false, error: err?.message || '저장 실패' });
+    return res.status(500).json({ success: false, error: publicErrorText(err, '저장 실패') });
   }
 });
 
@@ -1194,7 +1198,7 @@ router.delete('/brand-links/:id', async (req: Request, res: Response) => {
     return res.json({ success: true });
   } catch (err: any) {
     console.error('[Brand Links DELETE] 오류:', err);
-    return res.status(500).json({ success: false, error: err?.message || '삭제 실패' });
+    return res.status(500).json({ success: false, error: publicErrorText(err, '삭제 실패') });
   }
 });
 

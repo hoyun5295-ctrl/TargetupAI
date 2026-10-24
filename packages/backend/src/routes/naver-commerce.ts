@@ -33,6 +33,7 @@ import { isCdpEnabledForPlan } from '../utils/cdp-auth';
 // ★ 2026-08-10: 스키마 실측 로그는 값이 아니라 구조로 남긴다(개인정보 미기록)
 import { describeJsonShape } from '../utils/json-shape';
 
+import { publicErrorText } from '../utils/http-error';
 const router = Router();
 
 // ════════════════════════════════════════════════════════════════════
@@ -83,7 +84,7 @@ router.post(
       return res.json({ success: true });
     } catch (err: any) {
       console.error('[NaverCommerce Webhook] 오류:', err);
-      return res.status(500).json({ success: false, error: err?.message || 'webhook 처리 실패' });
+      return res.status(500).json({ success: false, error: publicErrorText(err, 'webhook 처리 실패') });
     }
   }
 );
@@ -148,7 +149,7 @@ router.post('/connect', async (req: Request, res: Response) => {
     // ★ 보안: 서버 IP는 응답에 노출하지 않는다 — 담당자 개별 안내.
     return res.status(502).json({
       success: false,
-      error: err?.message || '네이버 커머스 연동 검증에 실패했습니다.',
+      error: publicErrorText(err, '네이버 커머스 연동 검증에 실패했습니다.'),
       hint: '커머스 API센터 앱의 "API 호출 IP"에 한줄로 서버 IP가 등록되어 있는지(등록 IP는 SDK 연동 담당자에게 문의), 애플리케이션 ID/시크릿이 정확한지 확인해주세요.',
     });
   }
@@ -169,7 +170,7 @@ router.get('/status', async (req: Request, res: Response) => {
     });
   } catch (err: any) {
     console.error('[NaverCommerce /status] 오류:', err);
-    return res.status(500).json({ success: false, error: err?.message || '조회 실패' });
+    return res.status(500).json({ success: false, error: publicErrorText(err, '조회 실패') });
   }
 });
 
@@ -197,7 +198,7 @@ router.get('/orders/preview', async (req: Request, res: Response) => {
     return res.json({ success: true, ...preview });
   } catch (err: any) {
     console.error('[NaverCommerce /orders/preview] 오류:', err?.message || err);
-    return res.status(502).json({ success: false, error: err?.message || '주문 미리보기 조회 실패' });
+    return res.status(502).json({ success: false, error: publicErrorText(err, '주문 미리보기 조회 실패') });
   }
 });
 
@@ -218,7 +219,7 @@ router.delete('/disconnect', async (req: Request, res: Response) => {
     return res.json({ success: true });
   } catch (err: any) {
     console.error('[NaverCommerce /disconnect] 오류:', err);
-    return res.status(500).json({ success: false, error: err?.message || '연동 해제 실패' });
+    return res.status(500).json({ success: false, error: publicErrorText(err, '연동 해제 실패') });
   }
 });
 

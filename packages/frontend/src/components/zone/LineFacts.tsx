@@ -13,11 +13,13 @@ import { X, Sparkles, Check, Loader2, ShoppingBag } from 'lucide-react';
 import { MK_INPUT, MK_BTN_OUTLINE, MK_BTN_AI, MK_BTN_PRIMARY, MK_MODAL } from '../../utils/make-ui';
 import { fetchLineMallCandidates, type LineMallCandidate } from '../../utils/one-line';
 
-export type LineFactsField = 'benefit' | 'period';
+export type LineFactsField = 'benefit' | 'period' | 'product';
 export interface LineFactsValues {
   /** undefined = 아직 안 건드림 · null = [없음] · 문자열 = 사용자가 적은 값 */
   benefit?: string | null;
   period?: string | null;
+  /** ★ 2026-10-24 ② 효능 말을 뺀 상품 소개 자리 1곳(이메일 채우기 시트) */
+  product?: string | null;
 }
 
 export const LINE_FACTS_REASON = '혜택 숫자는 AI가 지어내지 않아요. 적어 주시면 그대로 쓰고, 비워도 만들어요';
@@ -25,6 +27,7 @@ export const LINE_FACTS_REASON = '혜택 숫자는 AI가 지어내지 않아요.
 const FIELD_META: Record<LineFactsField, { label: string; placeholder: string; gain: string }> = {
   benefit: { label: '혜택', placeholder: '예: 전 상품 20% · 첫 구매 5천원 쿠폰', gain: '주시면 첫 줄이 혜택으로 시작해요' },
   period: { label: '기간', placeholder: '예: 10월 11일(토)까지', gain: '주시면 마감이 함께 실려요' },
+  product: { label: '상품 소개', placeholder: '예: 가볍게 스며드는 수분 세럼이에요', gain: '효능 말 대신 사용감이나 쓰는 장면으로 적어 주세요' },
 };
 
 const stopEnter = (e: React.KeyboardEvent) => { if (e.key === 'Enter') e.preventDefault(); };
@@ -176,23 +179,6 @@ export function LineReadToggle({ read }: { read: LineReadCheck }) {
         <span className="block text-[12px] text-slate-500 mt-0.5 leading-relaxed">사진 글자는 잘못 읽힐 수 있어 기본은 꺼 둬요. 끄면 사진 속 할인 · 가격 숫자는 싣지 않아요</span>
       </span>
     </label>
-  );
-}
-
-/**
- * 생성 전 확인 창 안에 넣는 블록(크레딧 확인 창 extraContent).
- * ★ 2026-10-10 mall(몰 상품 칸) · askBenefit(혜택 칸 · 기본 true) 선택 prop — 미지정 = 지금 그대로(혜택 칸만).
- */
-export function LineFactsInline({ values, onChange, askBenefit = true, mall, readCheck }: { values: LineFactsValues; onChange: (v: LineFactsValues) => void; askBenefit?: boolean; mall?: LineMallState; readCheck?: LineReadCheck }) {
-  return (
-    <div className="rounded-xl border border-violet-200 bg-violet-50/40 px-3.5 py-3">
-      <div className="flex items-center gap-1.5 text-[13px] font-bold text-slate-900 mb-1"><Sparkles className="w-3.5 h-3.5 text-violet-700" />{lineAskTitle(askBenefit, !!mall, !!readCheck)}</div>
-      {askBenefit && <p className="text-[12px] text-slate-500 mb-3 leading-relaxed">{LINE_FACTS_REASON}</p>}
-      {askBenefit && <LineFacts fields={['benefit']} values={values} onChange={onChange} />}
-      {mall && <div className={askBenefit ? 'mt-4' : 'mt-2'}><LineMallPick mall={mall} /></div>}
-      {readCheck && <div className={askBenefit || mall ? 'mt-4' : 'mt-2'}><LineReadToggle read={readCheck} /></div>}
-      {(mall || readCheck) && <p className="text-[11.5px] text-slate-400 mt-3">비워 두셔도 만들어요</p>}
-    </div>
   );
 }
 

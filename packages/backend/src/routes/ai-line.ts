@@ -8,7 +8,7 @@
  */
 import { Router, Request, Response } from 'express';
 import { authenticate } from '../middlewares/auth';
-import { loadPlanContext, isAiOperatorAllowed } from '../utils/plan-guard';
+import { aiZonePlanBlocked } from '../utils/plan-guard';
 import { InsufficientCreditError } from '../utils/ai-credit';
 import { isValidAttemptToken } from '../utils/one-line-facts';
 import { isValidLinePeriodEnd } from '../utils/one-line-steps';
@@ -38,12 +38,8 @@ function viewerOf(req: Request): AiLineViewer | null {
 async function gate(req: Request, res: Response): Promise<AiLineViewer | null> {
   const v = viewerOf(req);
   if (!v) { res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' }); return null; }
-  const plan = await loadPlanContext(v.companyId);
-  if (!plan) { res.status(404).json({ success: false, error: '회사 정보를 찾을 수 없습니다.' }); return null; }
-  if (!isAiOperatorAllowed(plan, req.user)) {
-    res.status(403).json({ success: false, error: '이 기능은 요금제 가입 후 이용할 수 있어요.', code: 'BETA_GATE' });
-    return null;
-  }
+  // ★ 2026-10-24 요금제 = AI 존 서버 문 한 곳(뿌리 대장 R2)
+  if (await aiZonePlanBlocked(req, res)) return null;
   return v;
 }
 

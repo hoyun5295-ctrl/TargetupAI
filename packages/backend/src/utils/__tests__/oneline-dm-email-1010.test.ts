@@ -290,61 +290,42 @@ const between = (src: string, a: string, b: string) => { const i = src.indexOf(a
 
 describe('7. 배선 계약', () => {
   const dmRoute = between(BACK('routes', 'dm.ts'), "dmRouter.post('/ai/one-shot-generate'", "dmRouter.post('/products/image-candidates'");
-  it('DM 한 줄 = 재조회 · 상품 없음 409 가 잔액 확인 앞', () => {
-    expect(dmRoute.indexOf('resolveLineMallCards(')).toBeGreaterThan(0);
-    expect(dmRoute.indexOf('resolveLineMallCards(')).toBeLessThan(dmRoute.indexOf('await checkCredit(companyId, genCost)'));
-    expect(dmRoute.indexOf("'MALL_PRODUCTS_UNAVAILABLE'")).toBeLessThan(dmRoute.indexOf('await checkCredit(companyId, genCost)'));
+  // ★ 2026-10-24 세 채널 구조체크 ⑧ — 단계 없는 한 줄 갈래(재조회 · 착지 초안 · 시도 토큰)를 지웠다. 그 순서는 한줄 CT 요리 주문(order.ts)이 소유한다.
+  it('DM 한 줄 = 단계만 · 몰 상품 재조회는 요리 주문(라우트에 옛 재조회 0) · 단계 없는 한 줄 400 이 잔액 확인 앞', () => {
+    expect(dmRoute).not.toContain('resolveLineMallCards(');
+    expect(dmRoute.indexOf("code: 'LINE_STEPS_REQUIRED'")).toBeLessThan(dmRoute.indexOf('await checkCredit(companyId, genCost)'));
+    expect(BACK('utils', 'one-line-ct', 'order.ts')).toContain('resolveLineMallCards');
   });
-  it('DM 착지 = 초안 행 → 잔액 부족이면 던지는 차감 → 실패 시 행 회수', () => {
-    // ★ 2026-10-23 단계 요청 = 한줄 CT 주문(one-line-ct/order.ts draft adapter · 시험 oneline-ct-complete-1023) · 여기는 단계 없는 착지 경로
-    const tail = dmRoute.slice(dmRoute.indexOf('// ─── 아래 = 단계 없는 요청'));
-    const c = tail.indexOf('await createDm(');
-    const d = tail.indexOf('outcome = await deductCreditOutcome(');
-    expect(c).toBeGreaterThan(0);
-    expect(d).toBeGreaterThan(c);
-    expect(tail.slice(d, d + 260)).toContain('throwOnInsufficient: true');
-    expect(tail.indexOf('deleteDm(draftToRemove, companyId)')).toBeGreaterThan(d);
-    expect(tail).toContain('pages: pagesFromSectionGroups(r.pages)');
-    // 후보를 못 보여 준 착지 요청은 지금처럼 이름 첨부를 저장 전에(회귀 0)
-    const landAttach = tail.indexOf('try { await attachMallImagesToProductCarousels(companyId, r.sections, await resolveIntegrationActor(req.user)); }');
-    expect(landAttach).toBeGreaterThan(0);
-    expect(landAttach).toBeLessThan(c);
+  it('DM 착지 = 요리 주문의 초안 adapter(초안 행 → 차감 → 실패 시 회수) · 단계 없는 꼬리 = 착지 없음(일반 생성)', () => {
+    expect(dmRoute).toContain("kind: 'draft', label: 'dm',");
+    expect(dmRoute).toContain('pages: pagesFromSectionGroups(r.pages),');
+    expect(dmRoute).toContain('discard: (id) => deleteDm(id, companyId),');
+    const tail = dmRoute.slice(dmRoute.indexOf('// ─── 아래 = 한 줄이 아닌 일반 생성'));
+    expect(tail).not.toContain('await createDm(');
+    expect(tail).not.toContain('deductCreditOutcome(');
+    expect(tail).toContain('try { await attachMallImagesToProductCarousels(companyId, result.sections, await resolveIntegrationActor(req.user)); }');
   });
   it('Codex 1R · 2R — 미과금 초안은 건네지 않는다 · 같은 시도 재요청 = 낸 초안 재사용 · 못 거둔 초안은 다시 거둔다 · 가격 안내 = 한 줄 + 혜택 답', () => {
-    // ★ 2026-10-23 단계 요청(오늘 · 어제 키) = 한줄 CT 주문이 소유 · 여기는 단계 없는 착지 경로(멱등키 하나)에서 초안을 찾는다
-    const tail = dmRoute.slice(dmRoute.indexOf('// ─── 아래 = 단계 없는 요청'));
-    const prior = tail.indexOf('const prior = lineLand && idemKey ? recallLineDraft(idemKey) : null;');
-    expect(tail).toContain('forgetLineDraft(idemKey);');
-    expect(prior).toBeGreaterThan(0);
-    expect(prior).toBeLessThan(tail.indexOf('await oneShotGenerate({'));
-    expect(prior).toBeLessThan(tail.indexOf('await checkCredit(companyId, genCost)'));
-    const priorBlock = between(tail, 'const prior = lineLand', 'if (idemKey) {');
-    expect(priorBlock).not.toContain('deductCreditOutcome(');
-    expect(priorBlock).toContain("if (prior.state === 'paid') {");
-    expect(priorBlock).toContain("code: 'LINE_DRAFT_PENDING'");
-    const ded = tail.indexOf('outcome = await deductCreditOutcome(');
-    const paid = tail.indexOf("if (idemKey) rememberLineDraft(idemKey, lineDraftId, 'paid');");
-    expect(paid).toBeGreaterThan(ded);
+    // ★ 2026-10-24 ⑧ — 단계 없는 착지 갈래는 지웠다 · 같은 시도 재요청 · 결말 판정 · orphan 은 요리 주문 하나가 소유한다
+    const tail = dmRoute.slice(dmRoute.indexOf('// ─── 아래 = 한 줄이 아닌 일반 생성'));
+    expect(tail).not.toMatch(/recallLineDraft|rememberLineDraft|forgetLineDraft|lineChargeFailed/);
     // ★ 2026-10-17 결말 판정 = 세 채널 한 규칙(line-steps-context lineStepsCollected · 같은 집합 = 냄 · 같은 키로 이미 냄 · 크레딧제 미적용)
-    expect(tail.slice(ded, paid)).toContain('if (lineStepsCollected(outcome)) {');
     expect(BACK('utils', 'line-steps-context.ts')).toContain("return outcome === 'deducted' || outcome === 'duplicate' || outcome === 'not_applicable';");
-    expect(tail.indexOf("rememberLineDraft(idemKey, draftToRemove, 'orphan')")).toBeGreaterThan(paid);
-    expect(tail).toContain('lineChargeFailed = true;');
-    expect(tail.indexOf('if (lineChargeFailed) {')).toBeLessThan(tail.indexOf('sections: result.sections,'));
     // 단계 요청의 DM 착지 = 주문의 draft adapter 가 같은 규칙(낸 초안 재사용 · 결말 판정 · orphan)
     const order = BACK('utils', 'one-line-ct', 'order.ts');
     expect(order).toContain("if (prior.state === 'paid') return { kind: 'reused', draftId: prior.draftId };");
     expect(order).toContain('if (lineStepsCollected(outcome)) {');
     expect(order).toContain("if (!removed) deps.draftMemo.remember(idemKey, id, 'orphan');");
-    expect(dmRoute).toContain('linePriceNotes(buildLineEventText(typedLine, lineFacts), lineCards)');
-    expect(BACK('routes', 'email.ts')).toContain('linePriceNotes(genPrompt, lineCards)');
+    expect(dmRoute).toContain('linePriceNotes(buildLineEventText(typedLine, lineFacts), order.cards)');
+    expect(BACK('routes', 'email.ts')).toContain('linePriceNotes(genPrompt, order.cards)');
   });
   it('H3 — 사진에서 읽은 글: 두 라우트 · 판정 모두 숫자를 지운 글로', () => {
     expect(dmRoute).toContain("if (lineOn) prompt = applyLineReads(prompt, lineReads, req.body?.read_licensed === true);");
     expect(dmRoute.indexOf('applyLineReads(')).toBeLessThan(dmRoute.indexOf('const typedLine = prompt;'));
     const em = BACK('routes', 'email.ts');
     expect(em).toContain("const linePrompt = lineOn ? applyLineReads(prompt, lineReads, req.body?.read_licensed === true) : prompt;");
-    expect(em).toContain('gaps: oneLineGaps(linePrompt)');
+    // ★ 1024 응답 안내 판정도 듣기 CT 하나(listenLine · 한 줄 CT 구조체크 ⑥)
+    expect(em).toContain('gaps: listenLine(linePrompt).gaps');
     const ai = BACK('routes', 'ai.ts');
     // ★ 2026-10-23 판정 = ① 듣기 한 곳(사진 조각 숫자를 지운 글로 혜택 판정)
     expect(ai).toContain('gaps: enabled ? heard.gaps : { benefit: false }');
@@ -352,14 +333,17 @@ describe('7. 배선 계약', () => {
     expect(listen).toContain('const judged = applyLineReads(raw, opts.reads, false);');
     expect(listen).toContain('gaps: oneLineGaps(judged),');
   });
-  it('후보를 보여 준 요청은 이름 자동 첨부 0 · 스위치 밖 상품 = 400 · 지문에 상품', () => {
-    expect(dmRoute).toContain('if (lineProducts === undefined && !lineDraftId) {');
+  it('스위치 밖 상품 = 400 · 단계 지문에 상품 · 이름 자동 첨부는 한 줄이 아닌 일반 생성에만', () => {
+    // ★ 2026-10-24 ⑧ — 후보를 보여 준 한 줄 요청은 이제 늘 단계(요리 주문이 확정 카드를 놓는다) → 라우트의 「보여 줬는가」 갈래 0
+    expect(dmRoute).not.toContain('if (lineProducts === undefined && !lineDraftId) {');
     expect(dmRoute).toContain('(lineFacts !== undefined || lineProducts !== undefined || lineReads !== undefined) && !lineOn');
-    expect(dmRoute).toContain('products: lineProductsKey(lineProducts)');
+    expect(dmRoute).toContain('products: lineProductsKey(lineProducts || [])');
   });
   it('이메일 한 줄 = 같은 순서 · 이름 첨부 조건 · 회사 design', () => {
     const em = between(BACK('routes', 'email.ts'), "router.post('/ai/generate-sections'", "router.post('/render-preview'");
-    expect(em.indexOf('resolveLineMallCards(')).toBeLessThan(em.indexOf('await checkCredit(auth.companyId, cost)'));
+    // ★ 2026-10-24 ⑧ — 몰 상품 재조회는 요리 주문(라우트 0) · 단계 없는 한 줄 400 이 잔액 확인 앞
+    expect(em).not.toContain('resolveLineMallCards(');
+    expect(em.indexOf("code: 'LINE_STEPS_REQUIRED'")).toBeLessThan(em.indexOf('await checkCredit(auth.companyId, cost)'));
     expect(em).toContain('if (lineProducts === undefined) {');
     expect(em).toContain('placeLineMallCards(');
     expect(em).toContain('lineEmailDesign(');

@@ -399,6 +399,25 @@ export function firstSendDate(ev: Pick<PlannerEventRow, 'startsOn' | 'endsOn'>, 
   return dates[0] || null;
 }
 
+/**
+ * ★ 2026-10-24 행사 지우기 판정 · 쓰기 한 곳(뿌리 대장 R1 · 옛: 라우트 인라인 SQL) — 승인 전(draft · briefed) · 완성본을 만드는 중 아님 ·
+ *   발송 이력(보냄 · 보내는 중 · 실행 참조) 0 일 때만 한 문장으로 지운다. 작성자 범위(ownerId) = 담당자는 자기 행사만. 지웠으면 true.
+ */
+export async function deletePlannerEvent(companyId: string, eventId: string, ownerId: string | null): Promise<boolean> {
+  const del = await query(
+    `DELETE FROM planner_events e
+      WHERE e.id = $1::uuid AND e.company_id = $2::uuid AND e.status IN ('draft', 'briefed')
+        AND ($3::text IS NULL OR e.created_by::text = $3::text)
+        AND (e.meta->'building' IS NULL OR jsonb_typeof(e.meta->'building') <> 'object'
+             OR (e.meta->'building'->>'at')::timestamptz < NOW() - interval '10 minutes')
+        AND NOT EXISTS (SELECT 1 FROM planner_touchpoints t WHERE t.event_id = e.id AND t.company_id = e.company_id
+                         AND (t.status IN ('sent', 'producing') OR t.exec_ref IS NOT NULL))
+      RETURNING e.id`,
+    [eventId, companyId, ownerId],
+  );
+  return del.rows.length > 0;
+}
+
 // ── 저장(행사 + 접점 upsert) ─────────────────────────────────────────
 export class PlannerEventWriteError extends Error {
   constructor(public status: number, public code: string, message: string) {

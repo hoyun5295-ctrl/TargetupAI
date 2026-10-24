@@ -525,6 +525,13 @@ export function isAttemptStuck(requestedAt: Date, now: Date): boolean {
 /** 원문 1회 + 다듬기 1회 + 표현만 최소 수정 1회 = 3회까지 본다(설계서 §4-4 A) */
 export const MAX_TEST_ROUNDS = 3;
 
+/**
+ * ★ 2026-10-24 스팸 검사 장애(판정 못 함 · 뿌리 대장 R7 · B-0823-1 가 · 나) — 같은 문안 버전에서 이 횟수가 되면 사람 판단으로 넘긴다.
+ *   장애는 통과도 반려도 아니다. 그 사이 다시 집기까지 기다리는 분(실패 건이 매 tick 앞자리를 차지하지 않게 · B-0823-1 착수 주의).
+ */
+export const SPAM_CHECK_ERROR_LIMIT = 3;
+export const SPAM_CHECK_ERROR_BACKOFF_MINUTES = 15;
+
 export function hasTestRoundsLeft(testRound: number): boolean {
   return Number(testRound || 0) < MAX_TEST_ROUNDS;
 }

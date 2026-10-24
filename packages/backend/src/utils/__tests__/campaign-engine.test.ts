@@ -334,7 +334,8 @@ describe('소스 계약 — 엔진 격리 · 라우트 분기', () => {
     // 무후퇴 — 옛 경로 문자열이 그대로 남아 있다
     // ★ 2026-10-10 한 줄 이메일 — 혜택 답이 있을 때만 요청 글에 [혜택] 줄(genPrompt = prompt · 답 없으면 같은 글)
     expect(email).toContain('const result = await generateEmailSections({ companyId: auth.companyId, userId: auth.userId, prompt: genPrompt, scenario, isAd, eventText });');
-    // ★ 2026-10-17 단계 모달 요청이 아니면 옛 조립 그대로(단계 요청 = buildLineStepsEventText)
-    expect(email).toContain('(lineOn && lineFacts ? buildLineEventText(linePrompt, lineFacts) : linePrompt);');
+    // ★ 2026-10-24 세 채널 구조체크 ⑧ — 단계 없는 한 줄 갈래를 지웠다: 한 줄 요청은 단계(LINE_STEPS_REQUIRED 400) · 그 밖은 옛 일반 조립 그대로(genPrompt = linePrompt)
+    expect(email).toContain("code: 'LINE_STEPS_REQUIRED'");
+    expect(email).toMatch(/textProducts: steps\.textProducts \}\)\n\s+: linePrompt;/);
   });
 });

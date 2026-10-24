@@ -20,7 +20,7 @@ import { getCompanyCosts } from '../config/defaults';
 import { orchestrate } from '../services/ai-orchestrator';
 import { generateMessages } from '../services/ai';
 import { buildSpamRegeneratePrompt } from './continuous-operator-policy';
-import { autoSpamTestWithRegenerate } from './spam-test-queue';
+import { autoSpamTestWithRegenerate, spamVerdictOf, type SpamVerdict } from './spam-test-queue';
 import { applyBenefitToBody, hasUneditedBenefitPlaceholder } from './autosend-policy';
 import { getOpt080Number } from './messageUtils';
 import { runInCreditBundle } from './ai-credit-context';
@@ -126,6 +126,13 @@ export interface PlannerCopy {
 
 /** 고친 문안이 검사에서 걸렸을 때의 사유(고객 문장) */
 export const EDITED_COPY_SPAM_FAILED = '고치신 문안이 스팸 검사를 통과하지 못했습니다. 문구를 바꿔 다시 고쳐 주세요.';
+/**
+ * ★ 2026-10-24 R8 — 같은 리비전에서 문안 자동 생성 · 사전 검사가 이 횟수만큼 실패하면 문안 패스가 더 집지 않는다(뿌리 대장 R8).
+ *   옛: 매시 AI 생성 + 스팸 실검사(최대 3회)를 행사 끝날 때까지 다시 돌렸고, 앞쪽 실패 20건이 뒤 행사 준비를 밀어냈다.
+ *   행사를 고치면(리비전 + 1) 다시 센다 · 사유는 링크 패스의 준비 통지가 리비전당 1회 알린다.
+ */
+export const PLANNER_COPY_RETRY_LIMIT = 3;
+
 /** 문자 문안 최대 길이(LMS 본문 · 광고 표기·무료거부 줄은 발송 때 붙는다) */
 export const PLANNER_COPY_MAX = 1000;
 
@@ -247,39 +254,20 @@ async function runPlannerSpamTest(input: PlannerSpamInput) {
 export async function spamCheckPlannerCopy(input: PlannerSpamInput): Promise<{ body: string; subject: string } | null> {
   const res = await runPlannerSpamTest(input);
   const v = res.variants[0];
-  if (!v || v.spamResult !== 'pass') return null;
+  // 판정 = 공용 3분할(spam-test-queue · 뿌리 대장 R7) — 통과만 통과다
+  if (spamVerdictOf(v, res.totalTestCount) !== 'pass') return null;
   return { body: v.messageText || input.body, subject: v.subject || input.subject };
-}
-
-/**
- * ★ 2026-10-18 검사 판정 3분할(회의론자 B6 · 설계서 docs/2026-10-18-planner-v2-design.md §3-2-1) — 순수.
- *   pass    = 판정 통과 + 통신사 결과 1개 이상 + 그 결과에 시간 초과·실패 0 (시연 회사는 검사 0건 통과 = 그대로 통과)
- *   blocked = 통신사가 막았다(진짜 스팸)
- *   error   = 그 밖(큐 등록 실패 · 시간 초과 · 결과 0행 · 결과 NULL) — 검사 장비 문제다. 사람이 승인한 문안을 버리지 않는다.
- * 검사가 completed 인데 결과 행이 비면 옛 판정은 pass 로 접혔다(`filter(Boolean)` 뒤 빈 배열) — 여기서는 error 다.
- */
-export type PlannerSpamVerdict = 'pass' | 'blocked' | 'error';
-export function plannerSpamVerdict(res: { variants: Array<{ spamResult: string; carrierResults: Array<{ result: string }> }>; totalTestCount: number }): PlannerSpamVerdict {
-  const v = res?.variants?.[0];
-  if (!v) return 'error';
-  if (v.spamResult === 'blocked') return 'blocked';
-  if (v.spamResult !== 'pass') return 'error';
-  if (Number(res.totalTestCount) === 0) return 'pass'; // 시연 회사 — 검사 발송 0(spam-test-queue 절단점)
-  const results = Array.isArray(v.carrierResults) ? v.carrierResults : [];
-  if (results.length === 0) return 'error';
-  if (results.some((r) => r?.result === 'timeout' || r?.result === 'failed' || !r?.result)) return 'error';
-  return 'pass';
 }
 
 /**
  * ★ 2026-10-18 판정을 돌려주는 검사(실행부 당일 · 승인 직후 · 재확인 패스) — `spamCheckPlannerCopy` 와 같은 입력 · 같은 재생성 규칙.
  * 예외(큐 · DB)도 error 로 접는다(검사 장애 ≠ 차단). 다른 호출처(사전 준비 패스)는 옛 함수 그대로.
  */
-export async function spamCheckPlannerVerdict(input: PlannerSpamInput): Promise<{ verdict: PlannerSpamVerdict; body: string; subject: string }> {
+export async function spamCheckPlannerVerdict(input: PlannerSpamInput): Promise<{ verdict: SpamVerdict; body: string; subject: string }> {
   try {
     const res = await runPlannerSpamTest(input);
     const v = res.variants[0];
-    return { verdict: plannerSpamVerdict(res), body: v?.messageText || input.body, subject: v?.subject || input.subject };
+    return { verdict: spamVerdictOf(v, res.totalTestCount), body: v?.messageText || input.body, subject: v?.subject || input.subject };
   } catch (e: any) {
     console.warn('[planner-copy] 스팸 검사 오류(검사 장애로 본다):', e?.message || e);
     return { verdict: 'error', body: input.body, subject: input.subject };
@@ -313,6 +301,7 @@ export async function preparePlannerEventCopy(companyId: string, eventId: string
 
     const groups = carrierGroups(tps);
     let allReady = true;
+    let generationFailed = false;   // 이번에 AI 생성 · 사전 검사가 실패했는가(상한 셈 · 사람이 고친 글의 검사 대기는 세지 않는다)
     let ctx: PlannerCompanyContext | null = null;
     for (const { carrier, dm } of groups) {
       const withDmLink = !!dm || carrier.channel === 'dm';
@@ -356,6 +345,7 @@ export async function preparePlannerEventCopy(companyId: string, eventId: string
         return null;
       });
       if (!draft || !draft.body.trim() || hasUneditedBenefitPlaceholder(draft.body) || hasUneditedBenefitPlaceholder(draft.subject)) {
+        generationFailed = true;
         await setTouchpointMetaIfCopyIs(companyId, carrier.id, before,
           { copy_error: { reason: PLANNER_REASON.copyFailed, at: new Date().toISOString() } }).catch(() => false);
         continue;
@@ -369,6 +359,7 @@ export async function preparePlannerEventCopy(companyId: string, eventId: string
         return null;
       });
       if (!passed) {
+        generationFailed = true;
         await setTouchpointMetaIfCopyIs(companyId, carrier.id, before,
           { copy_error: { reason: PLANNER_REASON.spamFailed, at: new Date().toISOString() } }).catch(() => false);
         continue;
@@ -389,7 +380,21 @@ export async function preparePlannerEventCopy(companyId: string, eventId: string
       const ok = carrierGroups(fresh).every(({ carrier, dm }) => isCopyValid(carrier.execMeta, copyInputHash(ev, {
         timing: carrier.timing, scheduledOn: carrier.scheduledOn, withDmLink: !!dm || carrier.channel === 'dm',
       })));
-      if (!ok) return 'failed';
+      if (!ok) {
+        if (generationFailed) {
+          // 같은 리비전 실패 수 + 1(리비전이 바뀌었으면 1부터 · 조건부 한 문장 · 상한 = 문안 패스 후보 SQL)
+          await query(
+            `UPDATE planner_events
+                SET meta = COALESCE(meta, '{}'::jsonb) || jsonb_build_object('copyFailures', jsonb_build_object(
+                      'revision', $3::int,
+                      'count', CASE WHEN COALESCE((meta->'copyFailures'->>'revision')::int, -1) = $3 THEN COALESCE((meta->'copyFailures'->>'count')::int, 0) + 1 ELSE 1 END,
+                      'at', to_jsonb(NOW())))
+              WHERE id = $1::uuid AND company_id = $2::uuid AND COALESCE((meta->>'revision')::int, 0) = $3`,
+            [eventId, companyId, revision],
+          ).catch((e: any) => console.warn(`[planner-copy] 실패 수 기록 경고 event=${eventId}:`, e?.message || e));
+        }
+        return 'failed';
+      }
     }
     const up = await query(
       `UPDATE planner_events SET status = 'briefed', updated_at = NOW()
@@ -492,7 +497,11 @@ export async function editPlannerCopy(input: {
 export async function runPlannerCopyPass(opts?: { companyId?: string; eventId?: string; limit?: number }): Promise<{ ready: number; failed: number }> {
   if (!(await guardPlannerMetaOrSkip('planner-copy'))) return { ready: 0, failed: 0 };
   const params: any[] = [kstDateString()];
-  let where = `status = 'draft' AND ends_on >= $1::date`;
+  // ★ 2026-10-24 R8 — 같은 리비전에서 상한만큼 실패한 행사는 LIMIT 앞에서 뺀다(실패 행이 앞자리를 차지하지 않게)
+  params.push(PLANNER_COPY_RETRY_LIMIT);
+  let where = `status = 'draft' AND ends_on >= $1::date
+      AND (COALESCE((meta->'copyFailures'->>'revision')::int, -1) <> COALESCE((meta->>'revision')::int, 0)
+           OR COALESCE((meta->'copyFailures'->>'count')::int, 0) < $${params.length})`;
   if (opts?.companyId) { params.push(opts.companyId); where += ` AND company_id = $${params.length}::uuid`; }
   if (opts?.eventId) { params.push(opts.eventId); where += ` AND id = $${params.length}::uuid`; }
   params.push(Math.min(Math.max(1, opts?.limit || 20), 100));

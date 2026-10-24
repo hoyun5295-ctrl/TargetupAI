@@ -4,6 +4,7 @@
  * 타입은 서버 CT의 응답과 거울이다(서버가 진실): 캘린더 = utils/planner-calendar.ts · 확인 본문 = utils/planner-confirm.ts ·
  * 견적 = utils/planner-build.ts. 화면은 판정하지 않고 서버 값을 그린다.
  */
+import type { ZoneQuestionModel } from '../zone/ZoneQuestion';
 import type { PlannerDisplayState, PlannerSendKind } from '../../constants/planner-status';
 import type { LineLayout, LineTemplateId, LineCompositionId } from '../../utils/one-line';
 
@@ -36,7 +37,6 @@ export interface RecheckView {
   remaining: Array<{ date: string; label: string }>;
   actions: { approve: RecheckActionState; edit: RecheckActionState; skip: RecheckActionState; defer: RecheckActionState; cancel: RecheckActionState };
   auth: { required: boolean; alive: boolean; maskedPhone: string | null } | null;
-  dataSource: string;
 }
 export type RecheckAction =
   | { kind: 'approve'; choice: 'proposal' | 'current' }
@@ -58,7 +58,7 @@ export interface PlannerMaterials {
 export type PlannerAudience =
   | { kind: 'all' }
   | { kind: 'product_buyers'; door: 'mall' | 'ledger'; keys: string[]; names: string[]; since: string | null };
-/** ★ 2026-10-18 한 줄 읽기 결과(서버 planner-line-read · 전부 제안 · 사람이 확인해야 칸이 채워진다) */
+/** ★ 2026-10-18 한 줄 읽기 결과(서버 planner-line-read) · ★ 1024 R9 = 못 읽은 칸만 질문표(공용 ZoneQuestion 모양) */
 export interface PlannerLineRead {
   title: string | null;
   period: { startsOn: string; endsOn: string } | null;
@@ -68,6 +68,14 @@ export interface PlannerLineRead {
   audience: { kind: 'all' } | { kind: 'product_buyers'; terms: string[]; allTime: boolean } | { kind: 'unread'; raw: string } | null;
   channels: Array<'sms' | 'dm' | 'email'>;
   unsupported: string[];
+  /** 못 읽은 칸만(서버가 만든다 · 답 검증도 서버) */
+  questions: Array<ZoneQuestionModel & { required: boolean }>;
+  /** 구매자 제안이 맞은 관측 상품 이름(「「기초」가 든 상품 N개」 줄) */
+  buyerNames: string[];
+  /** 읽은 채널 중 지금 열린 것 = 실제로 담을 채널(닫힌 것은 빼고 담는다) */
+  sendChannels: Array<'sms' | 'dm' | 'email'>;
+  /** 이 질문 창의 지문(담기 때 서버가 다시 만든 창과 같아야 저장 · 다르면 409 LINE_CHANGED + 새 창) */
+  askKey: string;
 }
 export interface ObservedProduct { key: string; name: string; buyers: number; orders: number; lastAt: string | null }
 export interface AudienceCountState { state: 'known' | 'blocked' | 'error'; count: number | null; reason?: string }
@@ -106,7 +114,7 @@ export interface ConfirmView {
   firstSend: string | null; sendHour: number; deadline: { date: string; hour: number; daysLeft: number } | null;
   sends: ConfirmSend[]; quote: ApprovalQuote | null; copyCostPerSend: number; carrierCount: number; buildPaid: number;
   balance: number | null; fingerprint: string; approved: { at: string; by: string | null } | null;
-  preview: { issuedAt: string; expiresAt: string } | null; dataSource: string;
+  preview: { issuedAt: string; expiresAt: string } | null;
 }
 export interface BuildQuote { channel: 'dm' | 'email'; total: number; parts: Array<{ key: string; label: string; cost: number }>; gate: { ok: boolean; missing?: string[] }; creditEnabled: boolean }
 export interface Availability { channel: PlannerChannelKey; label: string; available: boolean; reason: string | null; code?: string | null; settingsPath?: string | null; estCredits: number | null }

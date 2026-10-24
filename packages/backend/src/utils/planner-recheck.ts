@@ -33,7 +33,7 @@ import {
 } from './planner-touchpoint';
 import { PLANNER_NOTICE_HEADER, PLANNER_SEND_SOURCE, addDays, appendDmLink, kstDateString, resolveAudienceMode } from './planner-execution';
 import { PlannerEventRow, loadPlannerEvent, firstSendDate } from './planner-event';
-import { PLANNER_APPROVAL_DEADLINE_HOUR, computeTouchpointFingerprints } from './planner-confirm';
+import { PLANNER_APPROVAL_DEADLINE_HOUR, computeTouchpointFingerprints, plannerNumbersOf, plannerSendNumberTexts, plannerSendNumbers, type PlannerSendNumbers } from './planner-confirm';
 import {
   PlannerCopy, PLANNER_COPY_MAX, EDITED_COPY_SPAM_FAILED, carrierGroups, copyInputHash, generatePlannerCopyText,
   loadPlannerCompanyContext, loadPlannerDefaultCallback, spamCheckPlannerVerdict, stripDmLink,
@@ -135,13 +135,13 @@ function chosenCopy(p: RecheckPair, choice: 'proposal' | 'current'): PlannerCopy
   return c;
 }
 
-/** 고른 문안으로 다시 낸 쌍 지문 — 승인 각인 · 화면이 본 값(seen)이 같은 함수(planner-confirm 지문 한 벌). */
-async function pairHashFor(p: RecheckPair, copy: PlannerCopy): Promise<{ carrier: string; dm: string | null; seen: string }> {
+/** 고른 문안으로 다시 낸 쌍 지문 — 승인 각인 · 화면이 본 값(seen)이 같은 함수(planner-confirm 지문 한 벌) · seen 에 번호(발신 · 080)도 든다(★ 1024 R5). */
+async function pairHashFor(p: RecheckPair, copy: PlannerCopy, numbers: PlannerSendNumbers): Promise<{ carrier: string; dm: string | null; seen: string }> {
   const rows = p.all.map((t) => (t.id === p.carrier.id ? { ...t, execMeta: { ...t.execMeta, copy } } : t));
   const fps = await computeTouchpointFingerprints(p.ev.companyId, rows);
   const c = fps.get(p.carrier.id) || '';
   const d = p.dm ? fps.get(p.dm.id) || '' : null;
-  return { carrier: c, dm: d, seen: `${c}:${d || ''}:${p.recheck.round}` };
+  return { carrier: c, dm: d, seen: `${c}:${d || ''}:${p.recheck.round}:${numbers.cb}:${numbers.o80}` };
 }
 
 /**
@@ -285,7 +285,9 @@ export async function approvePlannerPairTx(input: {
   const p = await loadOpenPair(input.companyId, input.carrierId, input.actor, input.round, now);
   const copy = chosenCopy(p, input.choice);
   if (!copy) throw new PlannerRecheckError(409, 'COPY_NOT_READY', input.choice === 'proposal' ? '새 문안이 아직 준비되지 않았습니다.' : '고친 문안의 스팸 검사가 끝나지 않았거나 통과하지 못했습니다.');
-  const h = await pairHashFor(p, copy);
+  // ★ 2026-10-24 R5 — 번호를 한 번 읽어 화면 지문 대조와 각인에 같은 값을 쓴다(본 번호 = 각인 번호)
+  const numbers = await plannerSendNumbers(p.ev.companyId, p.ev.createdBy);
+  const h = await pairHashFor(p, copy, numbers);
   if (h.seen !== String(input.seenHash || '')) throw new PlannerRecheckError(409, 'CHANGED', '보신 뒤 내용이 바뀌었습니다. 바뀐 내용을 확인한 뒤 다시 눌러 주세요.');
   const blocked = await firstBlockedChannel(p.dm ? ['sms', 'dm'] : [p.carrier.channel], { companyId: p.ev.companyId, userId: p.ev.createdBy, phase: 'send' });
   if (blocked) throw new PlannerRecheckError(400, 'CHANNEL_LOCKED', blocked.readiness.reason || '지금은 보낼 수 없는 채널이 있습니다.', { settingsPath: blocked.readiness.settingsPath });
@@ -295,7 +297,8 @@ export async function approvePlannerPairTx(input: {
   if (!a.count) throw new PlannerRecheckError(409, 'AUDIENCE_ZERO', '문자를 받을 고객이 0명이라 보낼 수 없습니다.');
   const at = now.toISOString();
   const closed = { outcome: 'approved', at, round: Number(p.recheck.round), tokenHash: p.recheck.tokenHash || null, by: input.actor.userId, via: input.actor.via };
-  const approved = (hash: string | null) => ({ hash, at, by: input.actor.userId, revision: Number(p.ev.meta.revision) || 0, pair: true, via: input.actor.via });
+  // ★ 2026-10-24 R5 — 쌍 재승인도 번호를 각인한다(위에서 화면 지문과 대조한 그 값 · 실행부가 대조)
+  const approved = (hash: string | null) => ({ hash, at, by: input.actor.userId, revision: Number(p.ev.meta.revision) || 0, pair: true, via: input.actor.via, numbers });
   await inTx(async (client) => {
     await lockPairUnchanged(client, p);
     assertBeforeDeadline(p, input.now || new Date());
@@ -769,7 +772,6 @@ export interface RecheckView {
   actions: { approve: ActionState; edit: ActionState; skip: ActionState; defer: ActionState; cancel: ActionState };
   /** 링크 화면만 — 인증 상태(보내기 · 고치기 · 취소 앞) */
   auth: { required: boolean; alive: boolean; maskedPhone: string | null } | null;
-  dataSource: string;
 }
 
 async function loadCompanyName(companyId: string): Promise<string> {
@@ -781,16 +783,19 @@ export async function buildRecheckView(p: RecheckPair, opts: { mode: 'public' | 
   const now = opts.now || new Date();
   const today = kstDateString(now);
   const url = dmUrlOf(p);
-  const opt080 = await getOpt080Number(p.ev.createdBy || null, p.ev.companyId).catch(() => '');
+  // ★ 1024 R5 — 번호를 한 번 읽어 그리기(080) · 지문에 같은 값(Codex 1024 2R)
+  const sendNo = await plannerSendNumberTexts(p.ev.companyId, p.ev.createdBy);
+  const opt080 = sendNo.opt080;
   const render = (text: string) => buildAdMessage(appendDmLink(String(text || ''), url), 'LMS', true, opt080 || '');
   const round = Number(p.recheck.round);
   const cur = p.carrier.execMeta?.copy as PlannerCopy | undefined;
   const inputHash = currentInputHash(p);
   const curChoice = chosenCopy(p, 'current');
   const prChoice = chosenCopy(p, 'proposal');
+  const numbers = plannerNumbersOf(sendNo);
   const [curHash, prHash, recipients, deferDates, companyName] = await Promise.all([
-    curChoice ? pairHashFor(p, curChoice).then((h) => h.seen) : Promise.resolve(null),
-    prChoice ? pairHashFor(p, prChoice).then((h) => h.seen) : Promise.resolve(null),
+    curChoice ? pairHashFor(p, curChoice, numbers).then((h) => h.seen) : Promise.resolve(null),
+    prChoice ? pairHashFor(p, prChoice, numbers).then((h) => h.seen) : Promise.resolve(null),
     countPairAudience(p),
     listDeferDates(p, now).catch(() => [] as string[]),
     loadCompanyName(p.ev.companyId),
@@ -820,7 +825,7 @@ export async function buildRecheckView(p: RecheckPair, opts: { mode: 'public' | 
   const busy = p.all.some((t) => t.status === 'producing');
   const remaining = p.all.filter((t) => t.status !== 'sent' && t.status !== 'skipped')
     .map((t) => ({ date: t.scheduledOn, label: t.channelLabel })).sort((a, b) => a.date.localeCompare(b.date));
-  const callback = opts.mode === 'public' && linkActor?.userId ? await loadPlannerDefaultCallback(p.ev.companyId).catch(() => null) : null;
+  const callback = opts.mode === 'public' && linkActor?.userId ? (sendNo.callback || null) : null;   // 위에서 한 번 읽은 발신번호(같은 함수)
   return {
     event: { id: p.ev.id, title: p.ev.title, startsOn: p.ev.startsOn, endsOn: p.ev.endsOn, status: p.ev.status, companyName },
     pair: { carrierId: p.carrier.id, dmId: p.dm?.id || null, round, date: p.recheck.date, origin: p.recheck.origin, deferredFrom: p.recheck.deferredFrom || null },
@@ -851,6 +856,5 @@ export async function buildRecheckView(p: RecheckPair, opts: { mode: 'public' | 
         maskedPhone: linkActor?.maskedPhone || null,
       }
       : null,
-    dataSource: '받는 사람 수는 수신거부 · 발송 조건을 적용한 지금 기준 실조회, 문안은 실제 모바일 DM 주소를 붙여 나갈 모양 그대로입니다.',
   };
 }

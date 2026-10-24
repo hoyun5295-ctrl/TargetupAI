@@ -46,7 +46,7 @@ import { objectiveForRounds } from './automarketing-interview';
 import { buildLineEventText } from './one-line-facts';
 import { getOpt080Number, buildAdMessage } from './messageUtils';
 // ★ D227+ 검증된 스팸 자산 재사용 (auto-campaign-worker와 동일 패턴) — 실제 테스트폰 발송 + AI 재생성 + 재테스트
-import { autoSpamTestWithRegenerate } from './spam-test-queue';
+import { autoSpamTestWithRegenerate, spamVerdictOf } from './spam-test-queue';
 import { generateMessages, stripIncompatibleEmojis } from '../services/ai';
 // ★ D227+ 종량제: AI 사이클 크레딧 부족 감지 + 담당자 무과금 알림(인증 라인 재사용)
 import { InsufficientCreditError, deductCreditSafe, deductCreditOutcome, hasCreditForStrict, refundCredit } from './ai-credit';
@@ -98,6 +98,16 @@ export type OperatorSchedule = 'daily' | 'weekly' | 'monthly' | 'yearly';
 export type OperatorStatus = 'active' | 'paused' | 'paused_no_credit' | 'archived';
 /** ★ 2026-09-27 한줄로 V2 R080 — 저장할 수 있는 상태값(라우트가 이 목록 밖 값을 무시한다 · 옛: 타입 선언만이라 아무 문자열이나 저장됐다) */
 export const OPERATOR_STATUSES: readonly OperatorStatus[] = ['active', 'paused', 'paused_no_credit', 'archived'];
+
+/**
+ * ★ 2026-10-24 (DB) 이 고치기 요청이 꺼진 자동 마케팅을 다시 켜는가 — 저장된 상태가 active 가 아니고 요청 상태가 active(뿌리 대장 R2 · Codex 1R).
+ *   다시 켜기만 요금제 문을 지난다(끄기 · 이미 켜진 것의 이름 · 일정 고치기는 만료 뒤에도 연다). 행이 없으면 거짓(주소 문이 404 를 낸다).
+ */
+export async function isOperatorReactivation(companyId: string, operatorId: string, requestedStatus: unknown): Promise<boolean> {
+  if (requestedStatus !== 'active') return false;
+  const r = await query(`SELECT status FROM continuous_operators WHERE id = $1::uuid AND company_id = $2::uuid`, [operatorId, companyId]);
+  return r.rows.length > 0 && String(r.rows[0].status) !== 'active';
+}
 export type ProposalStatus = 'pending' | 'approved' | 'rejected' | 'auto_executed' | 'expired' | 'admin_review' | 'admin_stopped' | 'scheduled' | 'sending' | 'sent' | 'skipped';
 
 export interface CreateOperatorInput {
@@ -649,6 +659,8 @@ export async function updateOperator(
     mmsImagePaths?: string[] | null;
     // ★ 2026-10-07 회신번호 — 검사된 값(checkOperatorCallback) · undefined = 유지
     callback?: { callbackNumber: string | null; useIndividualCallback: boolean };
+    // ★ 2026-10-24 꺼진 것을 다시 켜도 되는가(요금제 문을 지난 요청만 true) — 아니면 status 'active' 요청이 와도 꺼진 행은 그대로 둔다(★ Codex 2R)
+    allowReactivate?: boolean;
   }
 ): Promise<ContinuousOperator | null> {
   // ★ 2026-07-12 C-1: 야간 광고 발송 제한 — 발송 희망 시각 변경도 발송 가능 창 안만 허용.
@@ -743,7 +755,10 @@ export async function updateOperator(
       objective = COALESCE($4, objective),
       schedule = COALESCE($5, schedule),
       schedule_time = COALESCE($6, schedule_time),
-      status = COALESCE($7, status),
+      ${patch.allowReactivate
+        ? 'status = COALESCE($7, status),'
+        // 판정(isOperatorReactivation)과 저장 사이에 정지가 끼어도 이 한 문장이 다시 켜지 않는다 — 정지가 이긴다
+        : "status = CASE WHEN status <> 'active' AND $7::text = 'active' THEN status ELSE COALESCE($7::text, status) END,"}
       next_run_at = COALESCE($8, next_run_at),
       budget_monthly = $9,
       budget_daily = $10,
@@ -1573,7 +1588,7 @@ export async function generateProposalForOperator(operatorId: string, opts?: { p
       const regenRaw = new Map<string, string>();
       const noRegen = isFixedCopy || chosenFirst != null;
       const spamResult = cachedPass
-        ? ({ passedVariantId: 'A', variants: [{ variantId: 'A', messageText: bestMessage, subject: bestSubject || undefined, spamResult: 'pass', regenerateCount: 0, regenerated: false }] } as any)
+        ? ({ passedVariantId: 'A', totalTestCount: 0, variants: [{ variantId: 'A', messageText: bestMessage, subject: bestSubject || undefined, spamResult: 'pass', carrierResults: [], regenerateCount: 0, regenerated: false }] } as any)
         : await autoSpamTestWithRegenerate({
         companyId: operator.companyId,
         userId: operator.createdBy || operator.companyId,
@@ -1615,12 +1630,15 @@ export async function generateProposalForOperator(operatorId: string, opts?: { p
 
       const tested: Array<{ variantId: string; spamResult: string; regenerateCount?: number; regenerated?: boolean; messageText?: string; subject?: string }> = spamResult.variants || [];
       const letterIndex = (id: string) => String(id || 'A').charCodeAt(0) - 65;
-      const passedIndex = spamResult.passedVariantId ? letterIndex(spamResult.passedVariantId) : null;
+      // ★ 2026-10-24 통과 안 = 공용 판정이 통과인 안만(뿌리 대장 R7 · 검사 장애는 통과도 차단도 아니다)
+      const passedTestedRaw = spamResult.passedVariantId ? tested.find((v) => v.variantId === spamResult.passedVariantId) : undefined;
+      const passedIndex = passedTestedRaw && spamVerdictOf(passedTestedRaw as any, Number(spamResult.totalTestCount ?? 1)) === 'pass' ? letterIndex(spamResult.passedVariantId) : null;
       const firstTested = tested[0];
       // 최종 판정 = 통과 안이 있으면 통과 · 없으면 차단이 하나라도 있으면 차단 · 그 밖은 1안의 판정
       const finalResult = (passedIndex != null ? 'pass'
-        : tested.some((v) => v.spamResult === 'blocked') ? 'blocked'
-          : (firstTested?.spamResult || 'failed')) as 'pass' | 'blocked' | 'failed' | 'timeout';
+        : tested.some((v) => spamVerdictOf(v as any, Number(spamResult.totalTestCount ?? 1)) === 'blocked') ? 'blocked'
+          // 판정이 통과가 아닌데 원값이 pass 면(검사 장애) 통과로 접지 않는다
+          : (firstTested?.spamResult && firstTested.spamResult !== 'pass' ? firstTested.spamResult : 'failed')) as 'pass' | 'blocked' | 'failed' | 'timeout';
       const regenCount = firstTested?.regenerateCount || 0;
       if (isFixedCopy && !cachedPass) {
         await recordFixedCopySpam(operator.id, fixedHash, finalResult)

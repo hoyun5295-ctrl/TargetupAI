@@ -28,6 +28,7 @@ import { blockIfSyncActive } from '../middlewares/sync-active-check';
 import { requirePlanFeature } from '../utils/plan-guard';
 import { mapColumnsWithAi, ColumnMappingError } from '../utils/ai-column-mapper';
 
+import { publicErrorText } from '../utils/http-error';
 const router = Router();
 
 // ★ 2026-07-06 raw fetch 폐기 — SDK 클라이언트 (7/1 Sonnet 5 게이팅 sweep이 raw fetch만 놓쳐
@@ -170,7 +171,7 @@ router.post('/parse', authenticate, upload.single('file'), async (req: Request, 
 
   } catch (error: any) {
     console.error('파일 파싱 에러:', error);
-    return res.status(500).json({ error: error.message || '파일 처리 중 오류가 발생했습니다.' });
+    return res.status(500).json({ error: publicErrorText(error, '파일 처리 중 오류가 발생했습니다.') });
   }
 });
 
@@ -317,7 +318,7 @@ JSON 형식으로만 응답해줘 (다른 설명 없이):
 
   } catch (error: any) {
     console.error('매핑 에러:', error);
-    return res.status(500).json({ error: error.message || '매핑 중 오류가 발생했습니다.' });
+    return res.status(500).json({ error: publicErrorText(error, '매핑 중 오류가 발생했습니다.') });
   }
 });
 
@@ -386,7 +387,7 @@ router.post('/validate-mapping', authenticate, async (req: Request, res: Respons
     return res.json({ success: true, ...result });
   } catch (error: any) {
     console.error('매핑 검증 에러:', error);
-    return res.status(500).json({ error: error.message || '매핑 검증 중 오류가 발생했습니다.' });
+    return res.status(500).json({ error: publicErrorText(error, '매핑 검증 중 오류가 발생했습니다.') });
   }
 });
 
@@ -464,7 +465,7 @@ router.post('/save', authenticate, blockIfSyncActive, async (req: Request, res: 
 
   } catch (error: any) {
     console.error('저장 요청 에러:', error);
-    return res.status(500).json({ error: error.message || '저장 중 오류가 발생했습니다.' });
+    return res.status(500).json({ error: publicErrorText(error, '저장 중 오류가 발생했습니다.') });
   }
 });
 

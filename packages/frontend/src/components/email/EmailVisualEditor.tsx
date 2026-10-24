@@ -372,11 +372,13 @@ export default function EmailVisualEditor({
         // ★ 2026-07-13 — AI 프리헤더 회생(옛 흐름은 버렸음). 테마 등 기존 design은 보존.
         if (g.preheader) setDesign((d) => ({ ...(d || {}), preheader: String(g.preheader).slice(0, 90) }));
         setAiPrompt('');
+        // ★ 2026-10-24 ② 서버 안내 문장(근거 없는 효능을 뺀 수)이 오면 덧붙인다
+        const notes: string[] = Array.isArray(g.notes) ? g.notes.map(String).filter(Boolean) : [];
         onToast(
-          aiEventText.trim()
+          (aiEventText.trim()
             ? `AI가 행사·상품 정보로 이메일을 만들었어요. 상품 카드·가격·링크는 넣어주신 원문 기준입니다. (${AI_GENERATE_COSTS['email-ai-generate']} 크레딧)`
-            : `AI가 비주얼 이메일을 만들었어요. 이미지를 채우고 다듬어주세요. (${AI_GENERATE_COSTS['email-ai-generate']} 크레딧)`,
-          'success',
+            : `AI가 비주얼 이메일을 만들었어요. 이미지를 채우고 다듬어주세요. (${AI_GENERATE_COSTS['email-ai-generate']} 크레딧)`) + (notes.length > 0 ? ` ${notes[0]}` : ''),
+          notes.length > 0 ? 'info' : 'success',
         );
       } else {
         onToast(data.error || 'AI 생성 실패', 'error');
@@ -401,7 +403,8 @@ export default function EmailVisualEditor({
       if (data?.code === 'INSUFFICIENT_CREDIT') { onToast('크레딧이 부족합니다. 충전 후 이용해주세요.', 'warning'); return; }
       if (data.success && Array.isArray(data.data?.sections)) {
         setSections(normalizeOrder(data.data.sections));
-        onToast(data.changed === false ? '다듬을 텍스트가 없어요.' : 'AI가 카피를 다듬었어요. (1 크레딧)', data.changed === false ? 'info' : 'success');
+        const note = Array.isArray(data.notes) && data.notes[0] ? ` ${String(data.notes[0])}` : '';
+        onToast(data.changed === false ? `다듬을 텍스트가 없어요.${note}` : `AI가 카피를 다듬었어요. (1 크레딧)${note}`, data.changed === false || note ? 'info' : 'success');
       } else {
         onToast(data.error || 'AI 개선 실패', 'error');
       }

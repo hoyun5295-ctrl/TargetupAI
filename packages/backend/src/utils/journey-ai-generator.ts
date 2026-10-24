@@ -45,7 +45,7 @@ import { formatConditionMenuForAi } from './journey-condition-fields';
 // 추천 문구의 단일 출처 — "이어서 만들기"와 기회 카드가 같은 목표 골격을 쓴다.
 import { presetObjectiveFor } from './journey-opportunities';
 // ★ 2026-08-02 (Codex 1R): AI가 지어낸 혜택 기계 차단 — 프롬프트는 경계가 아니다.
-import { findNewNumbers, stripUnauthorizedBenefits } from './copy-benefit-detector';
+import { findNewNumbers, stripUnauthorizedBenefits, claimsInventedEfficacy, dropInventedEfficacyTitledBody, efficacyNote, EFFICACY_PROMPT_RULES, EFFICACY_REWRITE_RULE } from './copy-benefit-detector';
 // ★ 2026-09-27 한줄로 V2 R260 — 여정 자동 생성은 사전 확인 → 묶음 생성 → 1회 차감
 import { checkCredit, deductCreditOutcome, isChargedByKey } from './ai-credit';
 import { joinInflight } from './inflight-lock';
@@ -294,6 +294,10 @@ export async function generateJourneyPackage(input: JourneyAIGenerateInput): Pro
   // 목표에 "20% 쿠폰 행사"라 쓰고 혜택 칸에 "10% 쿠폰"을 쓴 모순 입력에서 20%도 살아남아
   // 프롬프트의 "이것 하나뿐"이 경계가 아니게 된다. 전용 입력이 비었을 때만 목표문이 하위호환 근거다.
   const benefitBasis = benefitText || (input.benefitText === null ? '' : objectiveText);
+  // ★ 2026-10-24 세 채널 구조체크 ② — 효능 근거 = 사람이 준 글 전부(목표 + 혜택 칸). 혜택 근거가 혜택 칸 하나로 좁은 것은
+  //   모순 혜택(목표 20% · 칸 10%) 때문이다(Codex 0808 1R) · 효능엔 그 모순이 없고 목표에 적은 기능 문구(주름 개선 기능성)는 사람 글이다(설계서 §3 예외 한 줄).
+  const efficacyBasis = [objectiveText, benefitText].filter(Boolean).join('\n');
+  let effDroppedPkg = 0;
   const audienceLine = String(input.audienceLine || '').trim().slice(0, 300);
 
   const ctx = await loadCompanyContext(input.companyId);
@@ -304,6 +308,7 @@ export async function generateJourneyPackage(input: JourneyAIGenerateInput): Pro
   const dataProfilePrompt = dataProfile ? formatProfileForAiPrompt(dataProfile) : '';
 
   let system = `당신은 한국 마케팅 자동화 여정 설계 전문가입니다.
+${EFFICACY_PROMPT_RULES}
 회사 admin이 입력한 자연어 목표 또는 표준 템플릿 진입을 받아 완전한 여정 패키지를 JSON으로 응답합니다.
 
 [회사 컨텍스트]
@@ -705,8 +710,12 @@ VIP 회원님께 먼저 전하는 이번 안내,
       // ★ 2026-08-08 — 지어낸 혜택은 기계로 되돌린다. 프롬프트는 경계가 아니다(0802 다듬기와 같은 규약인데
       //   **생성 경로에는 빠져 있었다**). 근거로 인정하는 것은 사용자가 준 목표 하나뿐 —
       //   프리셋 1클릭 경로는 목표에 혜택이 없으므로 숫자가 나오면 전부 창작이다.
-      messageTemplate: stripUnauthorizedBenefits(stripAdParts(messageSan.sanitized), benefitBasis),
-      subject: stripUnauthorizedBenefits(stripAdParts(subjectSan.sanitized), benefitBasis),
+      // ★ 2026-10-24 ② 혜택 → 효능(제목 + 본문 = 이어 읽는 단위 · 본문 = 문장 빼기 · 다 빠지면 직접 채울 자리 · 제목 = 비워도 되는 칸)
+      ...((g) => { effDroppedPkg += g.dropped; return { messageTemplate: g.body, subject: g.subject }; })(dropInventedEfficacyTitledBody(
+        stripUnauthorizedBenefits(stripAdParts(subjectSan.sanitized), benefitBasis),
+        stripUnauthorizedBenefits(stripAdParts(messageSan.sanitized), benefitBasis),
+        efficacyBasis,
+      )),
       isAd: resolveJourneyAdFlag(channel, s.isAd),
       stepIntent: String(s.stepIntent || '').slice(0, 100),
     };
@@ -792,7 +801,8 @@ VIP 회원님께 먼저 전하는 이번 안내,
     reasoning: String(parsed.reasoning || '').slice(0, 500),
     goalExitDefault: defaultGoalExitFor(triggerEvent),
     // ★ 2026-10-23 AI 가 칸으로 못 담은 조건도 알린다(옛: AI 가 그 조건을 아예 안 내면 「반영 안 됨」도 없이 더 넓게 나갔다)
-    droppedConditionNotices: [...cond.droppedNotices, ...unsupportedConditionNotices(parsed.unsupportedConditions)],
+    // ★ 2026-10-24 ② 뺀 효능 수 = 서버 문장(패키지 안내 목록 · 인터뷰 창이 그대로 그린다)
+    droppedConditionNotices: [...cond.droppedNotices, ...unsupportedConditionNotices(parsed.unsupportedConditions), ...(efficacyNote('generate', effDroppedPkg) ? [efficacyNote('generate', effDroppedPkg)!] : [])],
     targetSummary: describeJourneyTarget(triggerEvent, triggerFilters),
   };
 }
@@ -855,6 +865,8 @@ export async function refineStepMessage(input: StepRefineInput): Promise<{ candi
   const single = wantCount === 1;
 
   let system = `당신은 한국 마케팅 메시지 다듬기 전문가입니다.
+${EFFICACY_PROMPT_RULES}
+${EFFICACY_REWRITE_RULE}
 회사 admin이 작성한 step 메시지를 받아 ${single ? '가장 알맞은 안 하나로' : '3가지 톤의 후보로'} 다듬어 JSON으로 응답합니다.
 
 [회사 컨텍스트]
@@ -955,7 +967,9 @@ ${single
     // ★ 2026-09-30 WP2 — 다듬기(본문 있음)는 원문에 없던 숫자("90분 안에" · "3일 한정")가 생긴 안을 버린다.
     //   혜택 낱말 없이도 고객에게는 약속이다. 다 버려지면 빈 목록 = 화면 "다듬은 결과가 없습니다. 다시 시도해 주세요."
     //   생성 모드(본문 없음)는 대조할 원문이 없어 이 검사를 하지 않는다(혜택은 위 CT가 자리표시로 바꾼다).
-    .filter((c) => !hasBody || findNewNumbers(c.message, input.currentMessage || '').length === 0);
+    .filter((c) => !hasBody || findNewNumbers(c.message, input.currentMessage || '').length === 0)
+    // ★ 2026-10-24 ② 근거(currentMessage · 혜택과 같은 근거) 없는 효능 단정이 든 안은 버린다(생성 모드 = 근거 0 · 혜택과 같은 엄격함)
+    .filter((c) => !claimsInventedEfficacy(c.message, input.currentMessage || ''));
 
   return { candidates };
 }
@@ -977,6 +991,7 @@ export async function generateAnchorStepMessage(input: {
   const timing = offset === 0 ? '기준일 당일(D-0, 마지막 안내)' : `기준일 ${offset}일 전(D-${offset})`;
 
   let system = `당신은 한국 마케팅 LMS 문안 작성 전문가입니다.
+${EFFICACY_PROMPT_RULES}
 회사가 지정한 기준 날짜(예: 포인트 소멸일·만료일·행사일)를 기준으로 ${timing}에 발송할 LMS 문안 1건(제목+본문)을 작성합니다.
 
 [회사 컨텍스트]
@@ -1028,8 +1043,14 @@ ${memoryContext}
   // ★ 2026-09-26 한줄로 V2 R259 — 다른 여정 생성 경로(636·836행)와 같은 혜택 차단 CT. 근거 = 회사가 준 목표문.
   //   혜택을 만들지 말라는 건 프롬프트 지시뿐이었다(지시는 경계가 아니다 · AI 임의 혜택 금지).
   const benefitBasis = String(input.objective || '');
-  const subj = stripUnauthorizedBenefits(stripAdParts(sanitizeForSms(String(parsed.subject || '').slice(0, 80)).sanitized), benefitBasis).slice(0, 40);
-  const msg = stripUnauthorizedBenefits(stripAdParts(sanitizeForSms(String(parsed.message || '').slice(0, 4000)).sanitized), benefitBasis);
+  // ★ 2026-10-24 ② 혜택 → 효능(같은 근거 · 제목 + 본문 = 이어 읽는 단위 · 본문 = 문장 빼기 · 제목 = 비워도 되는 칸)
+  const g = dropInventedEfficacyTitledBody(
+    stripUnauthorizedBenefits(stripAdParts(sanitizeForSms(String(parsed.subject || '').slice(0, 80)).sanitized), benefitBasis).slice(0, 40),
+    stripUnauthorizedBenefits(stripAdParts(sanitizeForSms(String(parsed.message || '').slice(0, 4000)).sanitized), benefitBasis),
+    benefitBasis,
+  );
+  const subj = g.subject;
+  const msg = g.body;
   return { subject: subj, message: msg };
 }
 
@@ -1127,6 +1148,7 @@ export async function regenerateStepAvoidingSpam(input: StepSpamRegenInput): Pro
   const avoid = (input.matchedStopWords || []).filter(Boolean).slice(0, 30);
 
   let system = `당신은 한국 마케팅 문안을 통신사 스팸필터에 걸리지 않게 재작성하는 전문가입니다.
+${EFFICACY_REWRITE_RULE}
 회사 admin이 작성한 문안이 스팸필터에 걸렸습니다. 같은 의미·같은 정보를 유지하되, 걸린 표현만 자연스럽게 바꿔 1개 문안으로 재작성하세요.
 
 [회사]
@@ -1168,6 +1190,11 @@ export async function regenerateStepAvoidingSpam(input: StepSpamRegenInput): Pro
   // ★ 2026-09-30 WP2 — 원문에 없던 숫자(기한 · 수량 · 시간)도 같은 이유로 버린다(사람 검토 없이 실발송 스냅샷을 바꾼다)
   if (out && findNewNumbers(out, input.currentMessage).length > 0) {
     console.log(`[journey-ai-refine] 원본에 없던 숫자가 생겨 재작성을 버림 company=${input.companyId}`);
+    return null;
+  }
+  // ★ 2026-10-24 ② 원본에 없던 효능 단정도 같은 이유로 버린다
+  if (out && claimsInventedEfficacy(out, input.currentMessage)) {
+    console.log(`[journey-ai-refine] 원본에 없던 효능 말이 생겨 재작성을 버림 company=${input.companyId}`);
     return null;
   }
   return out;

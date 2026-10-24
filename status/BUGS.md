@@ -55,6 +55,39 @@
 
 ## 2) 활성 버그
 
+### 🔵 B-1024-5 1024 효능 거름 전 생산자 배선(C60)에서 알고 둔 한계 · 범위 밖(기록만 · 착수 판단 = Harold님) · 2026-10-24
+- **혜택 판정이 네 벌** — `copyFactsExistInText`(event-brief) · `replaceInventedBenefits*` · `stripUnauthorizedBenefits`(copy-benefit-detector) + 대행 제안서 자체 판정 `guardDraftCopyBenefits`(`utils/crm-agency-proposal-core.ts:80` · CT 밖 인라인). 통합하면 혜택 동작 약 15곳이 바뀐다(R1 빚 · 설계서 §1-1).
+- DM 생성 혜택 근거 = 행사 원문이 없으면 캠페인 스펙 요약(AI 파생 · `utils/dm/dm-ai.ts` generateCopy factGround) — 효능은 사람 글로 바로잡았고 혜택 쪽은 DM 에 1클릭 혜택 채우기가 없어 그대로(설계서 §3).
+- 사진에서 읽은 글(H3 규칙)이 효능 근거가 된다 — 고객이 찍은 제품 사진의 제조사 효능 문구는 근거로 인정된다(회의에서 3 대 1 로 갈림 · 한 줄 CT 와 같은 규칙을 택함).
+- 인앱 한 줄 단계의 구성 없는 갈래(`routes/cdp.ts` · generateInAppMessagePackage 호출)는 사진 글(read_texts)을 생성기에 넘기지 않는다(구성 갈래만 applyLineReads · 근거도 생성기가 본 글과 같음).
+- 화면 사본 인앱 게시 판정(`frontend/src/components/inapp/inappSlides.ts` publishDefectOf)은 「직접」이 없는 채울 자리(예: `[헤드라인을 작성해주세요]`)를 못 본다 → 서버 게시 관문이 400 으로 막지만 화면이 그 장으로 데려가지 못한다(1024 ⑮ 서버만 넓힘).
+- DM 첫 발행 · 보내기 관문은 자리 글자를 인용하지만 그 블록으로 데려가지 않는다(모든 자리표시 공통).
+- 인앱 생성 목록(bullets) 블록 한 줄이 효능으로 다 빠지면 `[상품 소개: 직접 작성해주세요]`(머리글 = 비움 · 제목 = 헤드라인 자리 · 본문 = 상품 소개 자리는 블록 종류별 · 목록만 칸 키 `items` 기준 · 게시 관문이 막는다).
+- 여정 편집(대화형 수정)은 효능 말이 생기면 수정 전체를 적용하지 않는다 — 단계에 id 가 없어 걸린 단계만 되돌리지 못한다(다시 누르면 된다 · 편집 AI 무과금).
+- 다시 쓰기 판정은 근거를 글자 그대로만 인정한다 — 원문 기능 문구를 바꿔 쓴 다듬기는 버려진다(프롬프트 `EFFICACY_REWRITE_RULE` 한 줄이 첫 방어선).
+- 혜택 판정은 할인 낱말이 옆 칸에 있는 「최대 30프로」를 그 칸 하나로는 뒷받침하지 못한다 — 그 칸을 바꾼 다듬기 조각은 버려진다(0930 조각 근거 계약 그대로 · 섹션째 근거로 넓히면 다른 상품의 할인을 옮겨 온다 · Codex 1024 4R).
+- DM 머리글 brand_name 이 편집 칸 표(`DM_EDITABLE_TEXT_KEYS` · `utils/dm/dm-ai.ts`)에 없어 개선 판정이 제목 + 브랜드명 조합을 보지 않는다 · DM 이어 읽기 판정은 표시 순서를 확인한 히어로 · 텍스트 카드만(머리글 · 쿠폰 등은 칸 하나씩 · Codex 1024 4R 범위 밖).
+
+### 🔵 B-1024-4 1024 세 채널 구조체크에서 짚은 범위 밖 · 알고 둔 한계(기록만 · 착수 판단 = Harold님) · 2026-10-24
+- ~~**② 효능 단정 거름**~~ ★1024 닫음 = STATUS C60(회의 → 설계서 `docs/2026-10-24-efficacy-guard-design.md` → 전 생산자 배선 · 뿌리 대장 R13). 남은 한계 = B-1024-5.
+- 회원 토큰을 쓰지 않는 몰의 식별 회원 — 인앱 노출 횟수(once_per_day · max_displays)가 기기 단위로 센다(여러 기기 합산 빠짐 · 한 기기는 옛과 같음). 팝폰 앱(`poppon-workspace` · 별도 저장소)도 추적에 회원 토큰을 싣지 않는다.
+- once_per_day 판정의 회원 조회가 출처(source)를 안 본다(opt_out 은 본다 · `inapp-message.ts` evaluateInAppCandidates).
+- 지운 DM 주소만 쓰던 함수가 호출 0 으로 남았다 — selfDiagnoseDm · suggestNextSection · recommendLayout · transformTone · instantiateTemplate · setApprovalStatus · fetchEventTextFromUrl · 옛 V1 getActiveMessagesForCustomer(import 만). `routes/dm.ts` 원래부터 안 쓰이던 import 5(extractPagesFromDm · isCreditEnabledStrict · isSlugAvailable · findLinkDefectDeep · getAbTest).
+- DM approval_status 는 PUT 본문으로 바뀐다(승인 · 반려 주소를 지웠고 그 값을 판정에 쓰는 곳 0).
+- 겹친 발송 잠금 키 = 종류 + 회사 + 사람 — 같은 사람이 서로 다른 DM 두 개를 동시에 보내도 둘째가 409.
+- 문자 AI 라인(`AiLinePage`)은 옛 묻는 창(LineFactsAskModal)을 그대로 쓴다(세 채널 밖).
+- 인앱 표시는 요청마다 켜진 후보 id 전체를 한 번 읽는다(회사 · 트리거 · 채널 단위 · 커지면 측정 후 상한).
+
+### 🔵 B-1024-3 1024 한 줄 CT 재점검에서 알고 둔 한계 · 범위 밖(기록만 · 착수 판단 = Harold님) · 2026-10-24
+- 효능 판정(`utils/copy-benefit-detector.ts` 효능 절)은 낱말 목록 판정이다 — 목록 밖 효능 말(예: 「해결」 · 「고민 끝」)은 프롬프트(문자 ### 4 · 맞춤 8번 · 한 줄 CT 규칙)가 첫 방어선. 근거 절 끝을 쉼표로 쳐서 「A, B 효과는 없습니다」의 A 는 근거로 인정한다(쉼표 뒤 다른 말의 부정 「주름 개선 기능성 크림, 자극 없는 제형」이 흔해서) · 앞 대상이 바로 붙은 꼴의 뒤 명사(「피부가 좋아지는 모공 케어」의 모공)는 대조하지 않는다. 안전 쪽으로 넓게 잡은 것 = 쉼표 없이 이어 쓴 부정 · 두 문장에 걸친 주장(근거 문장까지 함께 뺌).
+- ~~플래너 사유 문구 `BENEFIT_PLACEHOLDER_UNEDITED`가 효능 자리에도 「혜택 자리」~~ ★1024 C60 닫음 = 관문 문장이 인용한 자리 글자로 말한다(`sendRejectReason(code, message)`).
+- R2 요금제 문 면제 5(계약 시험 `MONEY_ROUTE_EXEMPT` · 줄마다 이유) = 플래너 견적 2 · 플래너 행사 문안 고치기 · 재확인 고치기(우리 부담 AI) · 재확인 미루기.
+
+### 🔵 B-1024-2 1024 뿌리 대장 · 계약 시험에서 짚은 범위 밖(기록만 · 착수 판단 = Harold님) · 2026-10-24
+- **만료 · 정지 뒤 돌던 자동화** — (★1024 세 채널 ③ = DM · SNS 머리 요금제 문에도 끄기를 열었다 · 서버만 · 화면 입구는 같은 처지) 화면 PlanGate(1019 E1)가 만료 회사를 AI 존 화면 밖으로 보내고, 여정 · 자동 마케팅 · 예약 메일 · 플래너 발송 워커는 이용 기간을 따로 보지 않는다. 서버 끄기 · 취소 주소는 1024 에 문을 열었지만(뿌리 대장 R2) 화면에서 그 단추에 닿을 길이 없다. 정할 것 = 만료 뒤 돌던 자동화를 멈출지 · 화면에서 끄기만 열지(정책). **Harold 1024 = 「자동발송 쓰던 회사 없어 · 애들이 테스트하던 것만 있을 것(아마)」 → 급하지 않음 · 10-25 서버에서 켜진 자동화 회사별 건수 SQL 로 확인(auto_campaigns · continuous_operators · journeys status active).**
+- 플래너 문안비 되돌림 워커는 7일 안 시도만 본다 — 보낸 여부 모름을 사람이 7일 넘겨 판정하면 자동으로 되돌리지 않는다(`planner-executor.ts` releaseUnsentPlannerSendCharges · Codex 1024 2R 범위 밖).
+- 메일 백그라운드 실패 복구 UPDATE 두 곳에 회사 조건(company_id)이 없다(`routes/email.ts` 803 · 1897 줄 근처 · Codex 1024 3R 범위 밖 · id 는 uuid 라 실제 남의 행을 건드릴 길은 미검증).
+
 ### 🔵 B-1024-1 1024 자동 마케팅 한 줄 · 결함 닫기에서 짚은 범위 밖(기록만 · 착수 판단 = Harold님) · 2026-10-24
 - N7 공용 창 껍데기 `JourneyModalShell` 배경 클릭 닫힘 — disableDismiss 를 안 넘기는 소비처 13곳(늘 열림 5: 진단 초대 · 다시 켜기 · 모의 실행 · 플래너 행사 · 템플릿 크게 보기 / 바쁠 때만 막음 8: 켜기 확인 · 빈칸 찾기 · 일괄 켜기 · 붙이기 · 문장으로 만들기 · 작업 화면 · 진단 · 상품 여정). 예외 계약 둘 = 진단 초대(설계서 §5-2 「백드롭/Esc 허용」) · 템플릿 크게 보기(LESSONS_FRONTEND 「라이트박스 제외」). 1024 는 자동 마케팅 창만 disableDismiss(회의론자 §9-1 · 여정 C56 과 같은 날 배포라 13곳 회귀를 떠안지 않는다).
 - `StatusBadge` 글자 10px(렌더 검사 11px 미만 · 공용 부품 · 제안 카드 · 목록 전부).
@@ -1978,6 +2011,7 @@
 - **처방(미착수)**: 아웃리치 축과 같은 정정 — IPv4-mapped를 IPv4로 환원해 같은 판정기를 태운다([sales-outreach-produce.ts](../packages/backend/src/utils/sales-outreach-produce.ts) `isPrivateIp` 정정판이 참조 구현). 고객 축 라우트라 별도 과제로 분리.
 
 ### 🟠 B-0823-1 대행발송 워커가 **의존 장애를 판정으로 읽는다** — 검사가 못 돌아도 통과, 다듬기 AI가 죽으면 문안 반려 (🔵 Open · 기존 부채) — 2026-08-23 (당일 재검사 폐지 Codex 적대 검토가 범위 인접에서 발견)
+> **★ 2026-10-24 (가) · (나) 닫힘(코드 · 배포 대기)** = 뿌리 대장 R7 — 검사 결과는 공용 판정 `spamVerdictOf`(통과 · 차단 · 검사 장애) · 다듬기 AI 장애와 검사 단계 예외도 검사 장애 · 장애마다 `spam_check_error` 사건 + 15분 물러남(고르기 SQL 의 LIMIT 앞) · 같은 문안 버전 3번이면 test_failed + 장비 문제 안내(착수 주의의 「실패 다섯 건 독점」 = 물러남 조건으로 닫음). (다) · (라)는 남음. 기록 = STATUS C58.
 > **한 줄**: 뿌리는 하나다 — **"시스템이 판정하지 못했다"를 "시스템이 반대로 판정했다"로 읽는다.** 같은 형태가 워커 안에서 네 자리에 있다. 전부 0823(2) 당일 재검사 폐지와 **인과 없음**(그 전부터 있던 코드).
 > **(가) 통과 판정이 느슨하다** — [agency-send-worker.ts](../packages/backend/src/utils/agency-send-worker.ts) `runSpamRound`가 `spamResult !== 'blocked'`면 통과로 읽는다. 상류 계약은 `pass | blocked | failed | timeout`([spam-test-queue.ts:89](../packages/backend/src/utils/spam-test-queue.ts:89))이고 큐 적재 실패는 `failed`, 대기 만료는 `timeout`, 응답이 비면 `undefined`다. **워커 A·B 양쪽**에 있어, 오늘 운영에서도 T-2h 재검사가 타임아웃이면 통과로 읽고 `final_test_at`을 찍은 뒤 발송한다(불변 2 위반 경로).
 > **(나) 다듬기 장애를 내용 반려로 읽는다** — `refineForSpam`은 API 장애도 `{ok:false, reason:'model-error:...'}`로 돌려주는데([agency-send-refine.ts:163](../packages/backend/src/utils/agency-send-refine.ts:163)) 워커가 `anchor-lost`·`benefit-invented` 같은 **내용 반려**와 같이 취급한다. AI가 잠깐 죽으면 한 번 차단된 것만으로 `test_failed`가 되고, 승인된 건에는 **예약 취소 통지**가 나간다.

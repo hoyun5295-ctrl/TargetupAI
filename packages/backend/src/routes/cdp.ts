@@ -17,6 +17,7 @@
  *   POST /api/cdp/issue-key      — public/secret key 발급 또는 재발급 (raw 1회 노출)
  */
 
+import { aiZonePlanBlocked } from '../utils/plan-guard';
 import { Router, Request, Response, json } from 'express';
 import { findLinkDefectDeep, findLinkDefectInText, webLinkReason, isUuid } from '../utils/normalize';
 import multer from 'multer';
@@ -90,6 +91,7 @@ import {
 import { registerAsset, getStorageUsage, isAssetsTableMissing } from '../utils/assets';
 // ★ D215+ (2026-05-25) 인앱 메시지 압도적 강화 CT-77~84
 import { generateInAppMessagePackage, listQuickStartCards } from '../utils/inapp-ai-generator';
+import { efficacyNote } from '../utils/copy-benefit-detector';
 // ★ 2026-07-06 인앱 표시 가능성 게이트 — 표시할 곳 없는 고객의 크레딧 낭비 차단 (네이버 단독 등)
 import { getInAppDisplayEligibility } from '../utils/inapp-display-eligibility';
 import { countSegment, describeSegment } from '../utils/inapp-segment-matcher';
@@ -113,7 +115,7 @@ import {
 } from '../utils/inapp-quick-action';
 import { query } from '../config/database';
 import { checkCredit, deductCreditSafe, deductCreditOutcome, isChargedByKey, chargedKeysAmong, InsufficientCreditError } from '../utils/ai-credit';
-import { sanitizeLineProducts, lineProductsKey, sanitizeLineReads, applyLineReads } from '../utils/one-line-facts';   // ★ 2026-10-05 한줄로 시그니처
+import { sanitizeLineProducts, lineProductsKey, sanitizeLineReads, applyLineReads, oneLineInflightKey } from '../utils/one-line-facts';   // ★ 2026-10-05 한줄로 시그니처
 // ★ 2026-10-17 한 줄 단계 모달(설계서 docs/2026-10-17-oneline-steps-modal-design.md §3-12) — 인앱도 같은 돈 계약(시도 토큰 · 잠금 · 결과 뒤 1회 차감)
 import { buildLineStepsEventText } from '../utils/one-line-steps';
 import { getLineTemplate } from '../utils/design-core/line-templates';   // ★ 2026-10-17 템플릿 캠페인
@@ -132,10 +134,11 @@ import { withKeyedLock, uuidLockKey } from '../utils/keyed-lock';
 // ★ 2026-09-26 한줄로 V2 R1-30 — 키 재발급 뒤 카페24 스크립트태그 재맞춤
 import { resyncCafe24ScriptTagsForCompany } from '../utils/cafe24-scripttag';
 // ★ 2026-09-26 한줄로 V2 R1-49 — 인앱 개인화는 확인된 회원만(회원 토큰 발급·검증 CT)
-import { issueCdpMemberToken, verifyCdpMemberToken } from '../utils/cdp-member-token';
+import { issueCdpMemberToken, isCdpMemberConfirmed } from '../utils/cdp-member-token';
 import { getCreditCost } from '../utils/ai-credit-calc';
 import { getServePath, parseFitOption } from '../utils/image-serve';
 
+import { publicErrorText } from '../utils/http-error';
 const router = Router();
 
 // ★ 2026-06-25 (gap 6): CDP write 버스트 한도 — 회사당 50req/10초(보수적). bulk-import는 제외(월 한도+1000건 캡).
@@ -305,7 +308,7 @@ router.post('/identify', requireCdpApiKey, cdpWriteBurst, async (req: Request, r
   } catch (err: any) {
     console.error('[CDP /identify] 오류:', err);
     await recordCdpApiCall(cdpAuth.companyId, 'identify', 500);
-    return res.status(500).json({ success: false, error: err?.message || 'identify 처리 실패' });
+    return res.status(500).json({ success: false, error: publicErrorText(err, 'identify 처리 실패') });
   }
 });
 
@@ -339,7 +342,7 @@ router.post('/event', requireCdpApiKey, cdpWriteBurst, async (req: Request, res:
     console.error('[CDP /event] 오류:', err);
     const status = err?.message?.includes('필수') || err?.message?.includes('허용') || err?.message?.includes('초과') ? 400 : 500;
     await recordCdpApiCall(cdpAuth.companyId, 'event', status);
-    return res.status(status).json({ success: false, error: err?.message || 'event 처리 실패' });
+    return res.status(status).json({ success: false, error: publicErrorText(err, 'event 처리 실패') });
   }
 });
 
@@ -383,7 +386,7 @@ router.post('/order', requireCdpApiKey, cdpWriteBurst, async (req: Request, res:
     console.error('[CDP /order] 오류:', err);
     const status = err?.message?.includes('필수') || err?.message?.includes('올바르지') ? 400 : 500;
     await recordCdpApiCall(cdpAuth.companyId, 'order', status);
-    return res.status(status).json({ success: false, error: err?.message || 'order 처리 실패' });
+    return res.status(status).json({ success: false, error: publicErrorText(err, 'order 처리 실패') });
   }
 });
 
@@ -431,7 +434,7 @@ router.post('/journey-variants/:variantId/track', requireCdpKeyOrBrowserOrigin, 
   } catch (err: any) {
     console.error('[CDP /journey-variants/track] 오류:', err);
     await recordCdpApiCall(cdpAuth.companyId, 'event', 500);
-    return res.status(500).json({ success: false, error: err?.message || 'track 처리 실패' });
+    return res.status(500).json({ success: false, error: publicErrorText(err, 'track 처리 실패') });
   }
 });
 
@@ -530,7 +533,7 @@ router.post(
       }
     } catch (err: any) {
       console.error('[Custom Webhook] 오류:', err);
-      return res.status(500).json({ success: false, error: err?.message || 'webhook 처리 실패' });
+      return res.status(500).json({ success: false, error: publicErrorText(err, 'webhook 처리 실패') });
     }
   }
 );
@@ -560,10 +563,7 @@ router.post('/push/subscribe', requireCdpKeyOrBrowserOrigin, async (req: Request
     // ★ 2026-10-04 브라우저 호출은 회원 토큰이 이 회원과 맞을 때만 그 고객에 구독을 잇는다(전수점검 C1 같은 뿌리).
     //   옛: 공개키 + Origin 만으로 남의 회원 id 에 내 브라우저 구독을 붙여 그 고객에게 가는 푸시를 받아 볼 수 있었다.
     //   비밀키 서버 호출(미들웨어가 이미 검증)은 그대로. 토큰이 없으면 익명 구독으로 저장한다(구독 자체는 막지 않는다).
-    const viaSecret = !!(req.headers['x-hanjullo-secret'] || req.headers['X-Hanjullo-Secret' as any]);
-    const identityAllowed = !!external_id && (viaSecret || verifyCdpMemberToken(
-      req.body?.member_token ? String(req.body.member_token) : '', cdpAuth.companyId, String(external_id),
-    ));
+    const identityAllowed = isCdpMemberConfirmed(req.headers, cdpAuth.companyId, external_id, req.body?.member_token);
     let customerId: string | null = null;
     let identityLinkId: string | null = null;
     if (identityAllowed) {
@@ -590,7 +590,7 @@ router.post('/push/subscribe', requireCdpKeyOrBrowserOrigin, async (req: Request
   } catch (err: any) {
     console.error('[CDP /push/subscribe] 오류:', err);
     await recordCdpApiCall(cdpAuth.companyId, 'event', 500);
-    return res.status(500).json({ success: false, error: err?.message || 'subscribe 처리 실패' });
+    return res.status(500).json({ success: false, error: publicErrorText(err, 'subscribe 처리 실패') });
   }
 });
 
@@ -609,7 +609,7 @@ router.post('/push/unsubscribe', requireCdpKeyOrBrowserOrigin, async (req: Reque
   } catch (err: any) {
     console.error('[CDP /push/unsubscribe] 오류:', err);
     await recordCdpApiCall(cdpAuth.companyId, 'event', 500);
-    return res.status(500).json({ success: false, error: err?.message || 'unsubscribe 처리 실패' });
+    return res.status(500).json({ success: false, error: publicErrorText(err, 'unsubscribe 처리 실패') });
   }
 });
 
@@ -699,12 +699,9 @@ router.get('/inapp/active', requireCdpKeyOrBrowserOrigin, async (req: Request, r
     // ★ 2026-09-26 한줄로 V2 R1-49 — 개인화 값은 **확인된 회원**만: 서버 간 호출(비밀키 헤더 = 미들웨어가 이미 검증) 또는
     //   우리 서버가 서명한 회원 토큰(member_token)이 이 회사·이 회원과 맞을 때. 그 밖은 비개인화(아래 사전 치환 = "고객").
     //   옛: 공개키만 있으면 임의 external_id로 이름·등급·포인트·구매액을 받아 볼 수 있었다. 노출 대상 판정은 그대로다.
-    const viaSecret = !!(req.headers['x-hanjullo-secret'] || req.headers['X-Hanjullo-Secret' as any]);
-    const personalizationAllowed = !!externalId && (viaSecret || verifyCdpMemberToken(
-      req.query.member_token ? String(req.query.member_token) : '', cdpAuth.companyId, String(externalId),
-    ));
+    const personalizationAllowed = isCdpMemberConfirmed(req.headers, cdpAuth.companyId, externalId, req.query.member_token);
     let customer: Record<string, any> | null = null;
-    if (personalizationAllowed && messages.length > 0) {
+    if (personalizationAllowed && externalId && messages.length > 0) {
       const usedVars = extractUsedInAppVariables(messages);
       if (usedVars.length > 0) {
         customer = await getInAppCustomerForBrowser(cdpAuth.companyId, externalId, usedVars).catch(() => null);
@@ -763,7 +760,7 @@ router.get('/inapp/active', requireCdpKeyOrBrowserOrigin, async (req: Request, r
       });
     }
     await recordCdpApiCall(cdpAuth.companyId, 'event', 500);
-    return res.status(500).json({ success: false, error: err?.message || '조회 실패' });
+    return res.status(500).json({ success: false, error: publicErrorText(err, '조회 실패') });
   }
 });
 
@@ -780,7 +777,10 @@ router.post('/inapp/track', requireCdpKeyOrBrowserOrigin, async (req: Request, r
     }
     let identityLinkId: string | null = null;
     let customerId: string | null = null;
-    if (external_id) {
+    // ★ 2026-10-24 세 채널 구조체크 ⑨ — 회원에 잇는 것은 회원임을 증명한 요청만(구독 · 표시와 같은 판정). 옛: 공개 키만으로 남의 회원 id 에
+    //   노출 · 클릭 · 「다시 보지 않기」를 적어 그 고객의 메시지를 끄거나 통계를 흔들 수 있었다. 증명 없는 요청은 기기 id(anonymous_id)로만 남고,
+    //   노출 판정(getActiveMessagesForCustomerV2)이 기기 id 기록도 함께 세서 한 기기에서는 옛 동작 그대로다.
+    if (isCdpMemberConfirmed(req.headers, cdpAuth.companyId, external_id, req.body?.member_token)) {
       const linkRow = await query(
         `SELECT id, customer_id FROM cdp_identity_links
          WHERE company_id = $1::uuid AND source = $2 AND external_id = $3 LIMIT 1`,
@@ -820,7 +820,7 @@ router.post('/inapp/track', requireCdpKeyOrBrowserOrigin, async (req: Request, r
       });
     }
     await recordCdpApiCall(cdpAuth.companyId, 'event', 500);
-    return res.status(500).json({ success: false, error: err?.message || 'track 처리 실패' });
+    return res.status(500).json({ success: false, error: publicErrorText(err, 'track 처리 실패') });
   }
 });
 
@@ -871,7 +871,7 @@ router.post('/bulk-import', requireCdpApiKey, async (req: Request, res: Response
   } catch (err: any) {
     console.error('[CDP /bulk-import] 오류:', err);
     await recordCdpApiCall(cdpAuth.companyId, 'bulk-import', 500);
-    return res.status(500).json({ success: false, error: err?.message || 'bulk-import 처리 실패' });
+    return res.status(500).json({ success: false, error: publicErrorText(err, 'bulk-import 처리 실패') });
   }
 });
 
@@ -893,7 +893,7 @@ router.get('/recent-events', async (req: Request, res: Response) => {
     return res.json({ success: true, ...result });
   } catch (err: any) {
     console.error('[CDP /recent-events] 오류:', err);
-    return res.status(500).json({ success: false, error: err?.message || '조회 실패' });
+    return res.status(500).json({ success: false, error: publicErrorText(err, '조회 실패') });
   }
 });
 
@@ -941,7 +941,7 @@ router.get('/usage', async (req: Request, res: Response) => {
     });
   } catch (err: any) {
     console.error('[CDP /usage] 오류:', err);
-    return res.status(500).json({ success: false, error: err?.message || '조회 실패' });
+    return res.status(500).json({ success: false, error: publicErrorText(err, '조회 실패') });
   }
 });
 
@@ -1204,7 +1204,7 @@ router.get('/push/stats', async (req: Request, res: Response) => {
     return res.json({ success: true, stats, campaigns });
   } catch (err: any) {
     console.error('[CDP /push/stats] 오류:', err);
-    return res.status(500).json({ success: false, error: err?.message || '조회 실패' });
+    return res.status(500).json({ success: false, error: publicErrorText(err, '조회 실패') });
   }
 });
 
@@ -1213,11 +1213,12 @@ router.post('/push/send', async (req: Request, res: Response) => {
   try {
     const companyId = req.user?.companyId;
     const userId = req.user?.userId;
-    const userType = req.user?.userType;
     if (!companyId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
-    if (userType !== 'company_admin') {
+    // ★ 2026-10-24 세 채널 구조체크 ⑦ — 관리자 판정 = 인앱과 같은 CT(슈퍼관리자 포함) · 발송 = 서버 요금제 문(구독 만료 · 정지 포함 · 옛: 요금제 코드만 봤다)
+    if (resolveOwnerScope(req)) {
       return res.status(403).json({ success: false, error: 'Web Push 발송은 회사 관리자만 가능합니다.' });
     }
+    if (await aiZonePlanBlocked(req, res)) return;
     const cdpEnabled = await isCdpEnabledForPlan(companyId);
     if (!cdpEnabled) {
       return res.status(403).json({ success: false, error: 'Web Push는 유료 요금제 가입 후 이용 가능합니다.', code: 'PLAN_FEATURE_LOCKED' });
@@ -1241,7 +1242,7 @@ router.post('/push/send', async (req: Request, res: Response) => {
     if (err instanceof PushDuplicateError) return res.status(409).json({ success: false, error: err.message, code: 'PUSH_DUPLICATE' });
     console.error('[CDP /push/send] 오류:', err);
     const status = err?.message?.includes('0건') ? 400 : 500;
-    return res.status(status).json({ success: false, error: err?.message || 'Push 발송 실패' });
+    return res.status(status).json({ success: false, error: publicErrorText(err, 'Push 발송 실패') });
   }
 });
 
@@ -1270,7 +1271,7 @@ router.get('/inapp', async (req: Request, res: Response) => {
     return res.json({ success: true, messages: withStats });
   } catch (err: any) {
     console.error('[CDP /inapp GET] 오류:', err);
-    return res.status(500).json({ success: false, error: err?.message || '조회 실패' });
+    return res.status(500).json({ success: false, error: publicErrorText(err, '조회 실패') });
   }
 });
 
@@ -1287,7 +1288,7 @@ router.get('/inapp/stats', async (req: Request, res: Response) => {
     return res.json({ success: true, stats });
   } catch (err: any) {
     console.error('[CDP /inapp/stats] 오류:', err);
-    return res.status(500).json({ success: false, error: err?.message || '통계 조회 실패' });
+    return res.status(500).json({ success: false, error: publicErrorText(err, '통계 조회 실패') });
   }
 });
 
@@ -1301,7 +1302,7 @@ router.get('/inapp/display-eligibility', async (req: Request, res: Response) => 
     return res.json({ success: true, eligibility });
   } catch (err: any) {
     console.error('[CDP /inapp/display-eligibility] 오류:', err);
-    return res.status(500).json({ success: false, error: err?.message || '조회 실패' });
+    return res.status(500).json({ success: false, error: publicErrorText(err, '조회 실패') });
   }
 });
 
@@ -1311,6 +1312,7 @@ router.post('/inapp', async (req: Request, res: Response) => {
     const userId = req.user?.userId;
     if (!companyId || !userId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
     if (resolveOwnerScope(req)) return res.status(403).json({ success: false, error: '인앱 메시지는 회사 관리자만 이용할 수 있습니다.' });
+    if (await aiZonePlanBlocked(req, res)) return;   // ★ 2026-10-24 R2 — 게시비를 쓰는 주소 = 서버 요금제 문(구독 만료 · 정지 포함)
     const cdpEnabled = await isCdpEnabledForPlan(companyId);
     if (!cdpEnabled) {
       return res.status(403).json({ success: false, error: 'In-app 메시지는 유료 요금제 가입 후 이용 가능합니다.', code: 'PLAN_FEATURE_LOCKED' });
@@ -1359,7 +1361,7 @@ router.post('/inapp', async (req: Request, res: Response) => {
       return res.status(503).json({ success: false, error: 'DB 마이그레이션 필요: 운영자에게 cdp_inapp_messages ALTER(badge_text) 실행 요청', code: 'DB_MIGRATION_PENDING' });
     }
     console.error('[CDP /inapp POST] 오류:', err);
-    return res.status(500).json({ success: false, error: err?.message || '생성 실패' });
+    return res.status(500).json({ success: false, error: publicErrorText(err, '생성 실패') });
   }
 });
 
@@ -1369,6 +1371,8 @@ router.put('/inapp/:id', async (req: Request, res: Response) => {
     if (!companyId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
     const ownerId = resolveOwnerScope(req);
     if (ownerId) return res.status(403).json({ success: false, error: '인앱 메시지는 회사 관리자만 이용할 수 있습니다.' });
+    // ★ 2026-10-24 R2 — 게시(active · 게시비)로 바꿀 때만 서버 요금제 문 · 멈춤 · 보관 · 내용 고치기는 만료 뒤에도 열어 둔다
+    if (req.body?.status === 'active' && (await aiZonePlanBlocked(req, res))) return;
     if (!(await isInAppMessageOwned(companyId, req.params.id, ownerId))) {
       return res.status(404).json({ success: false, error: '메시지를 찾을 수 없습니다.' });
     }
@@ -1471,7 +1475,7 @@ router.put('/inapp/:id', async (req: Request, res: Response) => {
       return res.status(503).json({ success: false, error: 'DB 마이그레이션 필요: 운영자에게 cdp_inapp_messages ALTER(badge_text) 실행 요청', code: 'DB_MIGRATION_PENDING' });
     }
     console.error('[CDP /inapp PUT] 오류:', err);
-    return res.status(500).json({ success: false, error: err?.message || '수정 실패' });
+    return res.status(500).json({ success: false, error: publicErrorText(err, '수정 실패') });
   }
 });
 
@@ -1493,7 +1497,7 @@ router.put('/inapp/:id/audience-filter', async (req: Request, res: Response) => 
       return res.status(503).json({ success: false, error: 'DB 마이그레이션 필요: 운영자에게 cdp_inapp_messages ALTER(audience_filter) 실행 요청', code: 'DB_MIGRATION_PENDING' });
     }
     console.error('[CDP /inapp audience-filter] 오류:', err);
-    return res.status(500).json({ success: false, error: err?.message || '저장 실패' });
+    return res.status(500).json({ success: false, error: publicErrorText(err, '저장 실패') });
   }
 });
 
@@ -1508,7 +1512,7 @@ router.delete('/inapp/:id', async (req: Request, res: Response) => {
     return res.json({ success: true });
   } catch (err: any) {
     console.error('[CDP /inapp DELETE] 오류:', err);
-    return res.status(500).json({ success: false, error: err?.message || '삭제 실패' });
+    return res.status(500).json({ success: false, error: publicErrorText(err, '삭제 실패') });
   }
 });
 
@@ -1605,6 +1609,8 @@ router.post('/inapp/ask', async (req: Request, res: Response) => {
 router.post('/inapp/ai-generate', singleFlight('inapp-generate', async (req: Request, res: Response) => {
   const auth = await ensureInAppAccess(req, res);
   if (!auth) return;
+  // ★ 2026-10-24 R2 — 크레딧을 쓰는 주소 = 서버 요금제 문(구독 만료 · 정지 포함 · 한 줄 CT 구조체크 ②)
+  if (await aiZonePlanBlocked(req, res)) return;
   try {
     // ★ 2026-07-06 표시 가능성 게이트 — AI 생성도 크레딧 소모라, 표시할 곳이 전혀 없으면(SDK 신호 0 + 표시 지원 연동 0) 차단.
     //   앱 SDK·자체몰 설치 회사는 SDK 신호로 통과. 판정 오류는 격리(생성을 막지 않음).
@@ -1648,7 +1654,7 @@ router.post('/inapp/ai-generate', singleFlight('inapp-generate', async (req: Req
       let heroPlaced = false;
       const order = await runLineCookOrder({
         companyId: auth.companyId, userId: auth.userId, channel: 'inapp', steps, payload: stepsPayload,
-        attemptLockKey: `oneline-steps:${auth.companyId}:inapp:${steps.token}`,
+        attemptLockKey: oneLineInflightKey(auth.companyId, 'inapp', steps.token),   // ★ 1024 세 채널 한 함수(옛: 라우트 안 글자)
         products: lineProducts, actor, pageCheck: !!compDef, nowMs: stepsNow,
         cook: async ({ cards, page }) => {
           const allCards: LineMallCard[] = [...cards, ...steps.manualCards];
@@ -1693,25 +1699,28 @@ router.post('/inapp/ai-generate', singleFlight('inapp-generate', async (req: Req
       });
       if (order.kind === 'refused') return res.status(order.status).json({ success: false, error: order.error, code: order.code, ...(order.extra || {}) });
       if (order.kind !== 'made') return res.status(409).json({ success: false, error: '이 요청은 이미 처리됐어요. 다시 만들려면 [만들기]를 한 번 더 눌러 주세요.', code: 'ALREADY_DONE' });
-      const notes = order.excluded.map((e) => `상품${e.name ? ` "${e.name}"` : ''} 제외: ${e.reason}`);
+      // ★ 2026-10-24 ② 결과 안내 = 뺀 상품 · 뺀 효능(서버 문장) · 효능 수는 응답 꾸러미에 싣지 않는다
+      const { efficacyDropped: lineEffDropped, ...linePkg } = order.result;
+      const lineEffNote = efficacyNote('generate', lineEffDropped || 0);
+      const notes = [...order.excluded.map((e) => `상품${e.name ? ` "${e.name}"` : ''} 제외: ${e.reason}`), ...(lineEffNote ? [lineEffNote] : [])];
       console.log(`[one-line steps] inapp company=${auth.companyId} cost=${order.cost} completion=${order.completionDue} shown=${steps.body.meta.shown.join(',')} answered=${steps.body.meta.answered.join(',')} skipped=${steps.body.meta.skipped.join(',')} manual_cards=${steps.manualCards.length} hero=${heroPlaced ? 1 : 0}${compDef ? ` template=${compDef.id} page=${steps.body.page ? 1 : 0}` : ''}`);
-      return res.json({ success: true, package: order.result, one_line: { enabled: true, steps: { cost: order.cost, completion: order.completionDue }, notes, ...(compDef ? { template: { id: compDef.id, layout: 'page' } } : {}) } });
+      return res.json({ success: true, package: linePkg, one_line: { enabled: true, steps: { cost: order.cost, completion: order.completionDue }, notes, ...(compDef ? { template: { id: compDef.id, layout: 'page' } } : {}) } });
     }
-    // ★ 2026-10-05 한줄로 시그니처(설계서 §5) — 한 줄 입구(one_line:true) + 스위치 켠 회사 + 원문 없음일 때만 한 줄을 사용자 원문으로 쓴다.
-    //   옛: 원문이 없으면 혜택 블록을 무조건 자리표시로 바꿔(inapp-ai-generator.ts:369-371) 사용자가 쓴 혜택도 사라지고 다시 물었다.
-    const lineOn = req.body?.one_line === true;
-    const lineAsEvent = lineOn && typeof objective === 'string' && objective.trim() && !(typeof event_text === 'string' && event_text.trim())
-      ? objective.trim()
-      : undefined;
+    // ★ 2026-10-24 세 채널 구조체크 ⑧ — 한 줄 요청은 단계(한줄 CT 요리 주문) 한 길이다. 옛 1005 갈래(한 줄을 원문으로 옮겨 바로 만들기)는 지웠다
+    //   (그 결과는 구성 · 재료 판 · 질문표 · 효능 판정을 안 지났다). 열린 옛 화면 = 400 · 새로 고치면 단계로 간다.
+    if (req.body?.one_line === true) return res.status(400).json({ success: false, error: '화면을 새로 고친 뒤 한 줄을 다시 넣어 주세요.', code: 'LINE_STEPS_REQUIRED' });
     const pkg = await generateInAppMessagePackage({
       companyId: auth.companyId,
       createdBy: auth.userId,
       objective,
       templateHint,
       // ★ 2026-07-07(4) 행사 캠페인 — 행사 원문 기반 생성 (기재 혜택만 원문 그대로 통과)
-      eventText: lineAsEvent ?? (typeof event_text === 'string' ? event_text : undefined),
+      eventText: typeof event_text === 'string' ? event_text : undefined,
     });
-    return res.json({ success: true, package: pkg, ...(lineOn ? { one_line: { enabled: true } } : {}) });
+    // ★ 2026-10-24 ② 결과 안내(서버 문장 · 근거 없는 효능을 뺀 수)
+    const { efficacyDropped, ...pkgOut } = pkg;
+    const effNote = efficacyNote('generate', efficacyDropped || 0);
+    return res.json({ success: true, package: { ...pkgOut, ...(effNote ? { notes: [effNote] } : {}) } });
   } catch (err: any) {
     // ★ 2026-09-27 한줄로 V2 R246 — 크레딧 부족은 402(충전 안내 · 사전 확인과 성공 뒤 차감 확정 둘 다 여기로 온다)
     if (err instanceof InsufficientCreditError) return res.status(402).json({ success: false, error: err.message, code: 'INSUFFICIENT_CREDIT' });
@@ -1722,7 +1731,7 @@ router.post('/inapp/ai-generate', singleFlight('inapp-generate', async (req: Req
     }
     console.error('[CDP /inapp/ai-generate] 오류:', err);
     if (handleDbMigrationError(err, res, 'cdp_inapp_messages')) return;
-    return res.status(500).json({ success: false, error: err?.message || 'AI 생성 실패' });
+    return res.status(500).json({ success: false, error: publicErrorText(err, 'AI 생성 실패') });
   }
 }));
 
@@ -1732,6 +1741,8 @@ router.post('/inapp/ai-generate', singleFlight('inapp-generate', async (req: Req
 router.post('/inapp/explain', async (req: Request, res: Response) => {
   const auth = await ensureInAppAccess(req, res);
   if (!auth) return;
+  // ★ 2026-10-24 R2 — 크레딧을 쓰는 주소 = 서버 요금제 문(구독 만료 · 정지 포함 · 한 줄 CT 구조체크 ②)
+  if (await aiZonePlanBlocked(req, res)) return;
   try {
     const { message_id } = req.body;
     if (!message_id) return res.status(400).json({ success: false, error: 'message_id 필수' });
@@ -1743,7 +1754,7 @@ router.post('/inapp/explain', async (req: Request, res: Response) => {
   } catch (err: any) {
     console.error('[CDP /inapp/explain] 오류:', err);
     if (handleDbMigrationError(err, res, 'cdp_inapp_messages')) return;
-    return res.status(500).json({ success: false, error: err?.message || 'Explain 실패' });
+    return res.status(500).json({ success: false, error: publicErrorText(err, 'Explain 실패') });
   }
 });
 
@@ -1753,6 +1764,8 @@ router.post('/inapp/explain', async (req: Request, res: Response) => {
 router.post('/inapp/quick-action', async (req: Request, res: Response) => {
   const auth = await ensureInAppAccess(req, res);
   if (!auth) return;
+  // ★ 2026-10-24 R2 — 크레딧을 쓰는 주소 = 서버 요금제 문(구독 만료 · 정지 포함 · 한 줄 CT 구조체크 ②)
+  if (await aiZonePlanBlocked(req, res)) return;
   try {
     const { message_id, action_type } = req.body;
     if (!message_id || !action_type) {
@@ -1777,7 +1790,7 @@ router.post('/inapp/quick-action', async (req: Request, res: Response) => {
     if (err instanceof VariantOfVariantError) return res.status(400).json({ success: false, error: err.message, code: 'VARIANT_OF_VARIANT' });
     console.error('[CDP /inapp/quick-action] 오류:', err);
     if (handleDbMigrationError(err, res, 'cdp_inapp_messages')) return;
-    return res.status(500).json({ success: false, error: err?.message || 'Quick action 실패' });
+    return res.status(500).json({ success: false, error: publicErrorText(err, 'Quick action 실패') });
   }
 });
 
@@ -1848,7 +1861,7 @@ router.get('/inapp/preview/:id', async (req: Request, res: Response) => {
   } catch (err: any) {
     console.error('[CDP /inapp/preview] 오류:', err);
     if (handleDbMigrationError(err, res, 'cdp_inapp_messages')) return;
-    return res.status(500).json({ success: false, error: err?.message || '미리보기 실패' });
+    return res.status(500).json({ success: false, error: publicErrorText(err, '미리보기 실패') });
   }
 });
 
@@ -1879,7 +1892,7 @@ router.get('/inapp/funnel-stats/:id', async (req: Request, res: Response) => {
   } catch (err: any) {
     console.error('[CDP /inapp/funnel-stats] 오류:', err);
     if (handleDbMigrationError(err, res, 'cdp_inapp_impressions')) return;
-    return res.status(500).json({ success: false, error: err?.message || 'Funnel 통계 실패' });
+    return res.status(500).json({ success: false, error: publicErrorText(err, 'Funnel 통계 실패') });
   }
 });
 
@@ -1899,7 +1912,7 @@ router.get('/inapp/viewers/:id', async (req: Request, res: Response) => {
   } catch (err: any) {
     console.error('[CDP /inapp/viewers] 오류:', err);
     if (handleDbMigrationError(err, res, 'cdp_inapp_impressions')) return;
-    return res.status(500).json({ success: false, error: err?.message || '열람 고객 조회 실패' });
+    return res.status(500).json({ success: false, error: publicErrorText(err, '열람 고객 조회 실패') });
   }
 });
 
@@ -1920,7 +1933,7 @@ router.post('/inapp/segment-preview', async (req: Request, res: Response) => {
   } catch (err: any) {
     console.error('[CDP /inapp/segment-preview] 오류:', err);
     if (handleDbMigrationError(err, res, 'customers')) return;
-    return res.status(500).json({ success: false, error: err?.message || '세그먼트 카운트 실패' });
+    return res.status(500).json({ success: false, error: publicErrorText(err, '세그먼트 카운트 실패') });
   }
 });
 
@@ -1944,7 +1957,7 @@ router.post('/inapp/preview-customers', async (req: Request, res: Response) => {
   } catch (err: any) {
     console.error('[CDP /inapp/preview-customers] 오류:', err);
     if (handleDbMigrationError(err, res, 'customers')) return;
-    return res.status(500).json({ success: false, error: err?.message || '미리보기 샘플 조회 실패' });
+    return res.status(500).json({ success: false, error: publicErrorText(err, '미리보기 샘플 조회 실패') });
   }
 });
 
@@ -1956,6 +1969,8 @@ router.post('/inapp/variant', async (req: Request, res: Response) => {
   if (!auth) return;
   try {
     const { action, parent_message_id, ...variantData } = req.body;
+    // ★ 2026-10-24 세 채널 구조체크 ⑦ — 변형 만들기(켜진 채로 생긴다) · 켜기 = 새로 켜기 → 서버 요금제 문. 목록 · 끄기 · 승자 판정은 만료 뒤에도 연다.
+    if ((action === 'create' || (action === 'set_status' && req.body?.status === 'active')) && (await aiZonePlanBlocked(req, res))) return;
     if (parent_message_id && !(await isInAppMessageOwned(auth.companyId, String(parent_message_id), auth.ownerId))) {
       return res.status(404).json({ success: false, error: '메시지를 찾을 수 없습니다.' });
     }
@@ -2004,7 +2019,7 @@ router.post('/inapp/variant', async (req: Request, res: Response) => {
     }
     console.error('[CDP /inapp/variant] 오류:', err);
     if (handleDbMigrationError(err, res, 'cdp_inapp_messages')) return;
-    return res.status(500).json({ success: false, error: err?.message || 'Variant 처리 실패' });
+    return res.status(500).json({ success: false, error: publicErrorText(err, 'Variant 처리 실패') });
   }
 });
 
@@ -2060,7 +2075,7 @@ router.post('/inapp/upload-image', (req: any, res: any) => {
       return res.json({ success: true, url: publicUrl, filename, size: file.size });
     } catch (e: any) {
       console.error('[CDP /inapp/upload-image] 오류:', e);
-      return res.status(500).json({ success: false, error: e?.message || '이미지 저장 실패' });
+      return res.status(500).json({ success: false, error: publicErrorText(e, '이미지 저장 실패') });
     }
   });
 });
@@ -2076,7 +2091,7 @@ router.get('/inapp/quick-start-cards', async (req: Request, res: Response) => {
     return res.json({ success: true, cards });
   } catch (err: any) {
     console.error('[CDP /inapp/quick-start-cards] 오류:', err);
-    return res.status(500).json({ success: false, error: err?.message || '빠른 시작 카드 조회 실패' });
+    return res.status(500).json({ success: false, error: publicErrorText(err, '빠른 시작 카드 조회 실패') });
   }
 });
 
@@ -2092,7 +2107,7 @@ router.get('/inapp/available-variables', async (req: Request, res: Response) => 
     return res.json({ success: true, variables });
   } catch (err: any) {
     console.error('[CDP /inapp/available-variables] 오류:', err);
-    return res.status(500).json({ success: false, error: err?.message || '변수 목록 조회 실패' });
+    return res.status(500).json({ success: false, error: publicErrorText(err, '변수 목록 조회 실패') });
   }
 });
 
@@ -2111,7 +2126,7 @@ router.get('/inapp/overview', async (req: Request, res: Response) => {
   } catch (err: any) {
     console.error('[CDP /inapp/overview] 오류:', err);
     if (handleDbMigrationError(err, res, 'cdp_inapp_messages')) return;
-    return res.status(500).json({ success: false, error: err?.message || 'Overview 조회 실패' });
+    return res.status(500).json({ success: false, error: publicErrorText(err, 'Overview 조회 실패') });
   }
 });
 
@@ -2131,7 +2146,7 @@ router.get('/inapp/top-messages', async (req: Request, res: Response) => {
   } catch (err: any) {
     console.error('[CDP /inapp/top-messages] 오류:', err);
     if (handleDbMigrationError(err, res, 'cdp_inapp_messages')) return;
-    return res.status(500).json({ success: false, error: err?.message || 'Top 메시지 조회 실패' });
+    return res.status(500).json({ success: false, error: publicErrorText(err, 'Top 메시지 조회 실패') });
   }
 });
 
@@ -2142,7 +2157,7 @@ router.get('/providers', async (_req: Request, res: Response) => {
     return res.json({ success: true, providers });
   } catch (err: any) {
     console.error('[CDP /providers] 오류:', err);
-    return res.status(500).json({ success: false, error: err?.message || '조회 실패' });
+    return res.status(500).json({ success: false, error: publicErrorText(err, '조회 실패') });
   }
 });
 
@@ -2159,7 +2174,7 @@ router.get('/custom/info', async (req: Request, res: Response) => {
     return res.json({ success: true, ...info, companyId });
   } catch (err: any) {
     console.error('[CDP /custom/info] 오류:', err);
-    return res.status(500).json({ success: false, error: err?.message || '조회 실패' });
+    return res.status(500).json({ success: false, error: publicErrorText(err, '조회 실패') });
   }
 });
 
@@ -2191,7 +2206,7 @@ router.post('/custom/issue-secret', async (req: Request, res: Response) => {
     });
   } catch (err: any) {
     console.error('[CDP /custom/issue-secret] 오류:', err);
-    return res.status(500).json({ success: false, error: err?.message || 'webhook_secret 발급 실패' });
+    return res.status(500).json({ success: false, error: publicErrorText(err, 'webhook_secret 발급 실패') });
   }
 });
 
@@ -2208,7 +2223,7 @@ router.delete('/custom/revoke', async (req: Request, res: Response) => {
     return res.json({ success: ok });
   } catch (err: any) {
     console.error('[CDP /custom/revoke] 오류:', err);
-    return res.status(500).json({ success: false, error: err?.message || '연동 해제 실패' });
+    return res.status(500).json({ success: false, error: publicErrorText(err, '연동 해제 실패') });
   }
 });
 
@@ -2236,7 +2251,7 @@ router.get('/custom/deliveries', async (req: Request, res: Response) => {
     return res.json({ success: true, deliveries, total: deliveries.length });
   } catch (err: any) {
     console.error('[CDP /custom/deliveries] 오류:', err);
-    return res.status(500).json({ success: false, error: err?.message || '수신 로그 조회 실패' });
+    return res.status(500).json({ success: false, error: publicErrorText(err, '수신 로그 조회 실패') });
   }
 });
 
@@ -2273,7 +2288,7 @@ router.post('/issue-key', async (req: Request, res: Response) => {
     });
   } catch (err: any) {
     console.error('[CDP /issue-key] 오류:', err);
-    return res.status(500).json({ success: false, error: err?.message || '키 발급 실패' });
+    return res.status(500).json({ success: false, error: publicErrorText(err, '키 발급 실패') });
   }
 });
 
@@ -2301,7 +2316,7 @@ router.get('/diagnostics', async (req: Request, res: Response) => {
       return res.status(503).json({ success: false, error: 'DB 마이그레이션 필요: 운영자에게 customers ALTER 10건 (active_sources / preferred_channel / last_cart_add_at 등) 실행 요청 의무', code: 'DB_MIGRATION_PENDING' });
     }
     console.error('[CDP /diagnostics] 오류:', err);
-    return res.status(500).json({ success: false, error: msg || '진단 조회 실패' });
+    return res.status(500).json({ success: false, error: publicErrorText(err, '진단 조회 실패') });
   }
 });
 
@@ -2319,7 +2334,7 @@ router.get('/funnel', async (req: Request, res: Response) => {
       return res.status(503).json({ success: false, error: 'DB 마이그레이션 필요: customers ALTER 10건 실행 요청 의무', code: 'DB_MIGRATION_PENDING' });
     }
     console.error('[CDP /funnel] 오류:', err);
-    return res.status(500).json({ success: false, error: msg || 'funnel 조회 실패' });
+    return res.status(500).json({ success: false, error: publicErrorText(err, 'funnel 조회 실패') });
   }
 });
 
@@ -2336,7 +2351,7 @@ router.get('/timeline', async (req: Request, res: Response) => {
       return res.status(503).json({ success: false, error: 'DB 마이그레이션 필요: customers ALTER 10건 실행 요청 의무', code: 'DB_MIGRATION_PENDING' });
     }
     console.error('[CDP /timeline] 오류:', err);
-    return res.status(500).json({ success: false, error: msg || 'timeline 조회 실패' });
+    return res.status(500).json({ success: false, error: publicErrorText(err, 'timeline 조회 실패') });
   }
 });
 
@@ -2363,7 +2378,7 @@ router.get('/active-customers', async (req: Request, res: Response) => {
       return res.status(503).json({ success: false, error: 'DB 마이그레이션 필요: customers ALTER 10건 실행 요청 의무', code: 'DB_MIGRATION_PENDING' });
     }
     console.error('[CDP /active-customers] 오류:', err);
-    return res.status(500).json({ success: false, error: msg || '활성 customer 조회 실패' });
+    return res.status(500).json({ success: false, error: publicErrorText(err, '활성 customer 조회 실패') });
   }
 });
 
@@ -2383,7 +2398,7 @@ router.get('/channel-distribution', async (req: Request, res: Response) => {
       return res.status(503).json({ success: false, error: 'DB 마이그레이션 필요: customers ALTER 10건 실행 요청 의무', code: 'DB_MIGRATION_PENDING' });
     }
     console.error('[CDP /channel-distribution] 오류:', err);
-    return res.status(500).json({ success: false, error: msg || 'channel distribution 조회 실패' });
+    return res.status(500).json({ success: false, error: publicErrorText(err, 'channel distribution 조회 실패') });
   }
 });
 
@@ -2413,7 +2428,7 @@ router.post('/explain', async (req: Request, res: Response) => {
       return res.status(503).json({ success: false, error: 'DB 마이그레이션 필요: customers ALTER 10건 실행 요청 의무', code: 'DB_MIGRATION_PENDING' });
     }
     console.error('[CDP /explain] 오류:', err);
-    return res.status(500).json({ success: false, error: msg || 'AI 진단 실패' });
+    return res.status(500).json({ success: false, error: publicErrorText(err, 'AI 진단 실패') });
   }
 });
 
@@ -2435,7 +2450,7 @@ router.post('/recompute-profile', async (req: Request, res: Response) => {
       return res.status(503).json({ success: false, error: 'DB 마이그레이션 필요: customers ALTER 10건 실행 요청 의무', code: 'DB_MIGRATION_PENDING' });
     }
     console.error('[CDP /recompute-profile] 오류:', err);
-    return res.status(500).json({ success: false, error: msg || '재계산 실패' });
+    return res.status(500).json({ success: false, error: publicErrorText(err, '재계산 실패') });
   }
 });
 

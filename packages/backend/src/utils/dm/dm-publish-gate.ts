@@ -14,11 +14,13 @@
  */
 import { query } from '../../config/database';
 import { findLinkDefectDeep } from '../normalize';
-import { hasUneditedPlaceholder } from '../email-ai';
+import { PLACEHOLDER_PATTERN } from '../email-ai';
 import { isCreditEnabledStrict } from '../ai-credit';
 import { getCreditCost } from '../ai-credit-calc';
 import { validateDm, type ValidationItem } from './dm-validate';
 import { extractFlatSectionsFromDm } from './dm-builder';
+import { renderDmViewerHtml } from './dm-viewer';
+import { findDmPlaceholderResidue, describeDmResidue } from './dm-placeholder-residue';
 import { isInteractionCampaign } from './dm-interaction';
 
 export type DmPublishBlock = {
@@ -66,12 +68,29 @@ export function dmPublishStaticBlock(dm: DmBodyRow): DmPublishBlock | null {
   const link = findLinkDefectDeep(body, '링크는');
   if (link) return { status: 400, code: 'LINK_DEFECT', error: link };
 
-  const texts = stringsOf(body);
-  if (hasUneditedPlaceholder(...texts)) {
+  // ★ 2026-10-24 세 채널 구조체크 ② — 찾은 자리 글자를 그대로 인용한다(인앱 · 이메일 관문과 같은 꼴 · 효능을 뺀 「[상품 소개: …]」도 무엇인지 보인다)
+  const found = stringsOf(body).map((t) => (t ? t.match(PLACEHOLDER_PATTERN)?.[0] : undefined)).find(Boolean);
+  if (found) {
     return {
       status: 400,
       code: 'UNEDITED_PLACEHOLDER',
-      error: '직접 입력이 필요한 자리가 남아 있어요. 그 자리를 채운 뒤 보내 주세요.',
+      error: `직접 채울 자리 "${found}"가 남아 있어요. 그 자리를 채운 뒤 보내 주세요.`,
+    };
+  }
+  // ★ 2026-10-24 세 채널 구조체크 ⑮ — 고객 화면 글자도 본다. 렌더러는 빈 사진 · 빈 질문 자리에 안내 글자를 찍는데 그 글자는 저장값에 없다.
+  //   그리지 못하면 고객 화면도 확인하지 못한 것이라 막는다(fail-closed · 플래너 점검과 같은 원칙).
+  let residue;
+  try {
+    residue = findDmPlaceholderResidue(renderDmViewerHtml({ ...dm, ...body } as any, '/api/dm/v'));
+  } catch (e: any) {
+    console.error('[dm-publish-gate] 고객 화면 확인 실패:', e?.message || e);
+    return { status: 400, code: 'UNEDITED_PLACEHOLDER', error: '고객이 볼 화면을 확인하지 못했어요. 잠시 후 다시 시도해 주세요.' };
+  }
+  if (residue.length > 0) {
+    return {
+      status: 400,
+      code: 'UNEDITED_PLACEHOLDER',
+      error: `고객 화면에 채우지 않은 자리가 보여요(${describeDmResidue(residue)}). 그 자리를 채운 뒤 보내 주세요.`,
     };
   }
   return null;

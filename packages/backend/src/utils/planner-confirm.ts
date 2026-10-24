@@ -32,7 +32,7 @@ import { PlannerTouchpointRow, loadEventTouchpoints } from './planner-touchpoint
 import {
   PlannerEventRow, computeDisplayState, isEventEditable, firstSendDate, mapEventRow, PlannerDisplayState, plannerAudienceKey, readStoredAudience,
 } from './planner-event';
-import { carrierGroups } from './planner-copy';
+import { carrierGroups, loadPlannerDefaultCallback } from './planner-copy';
 import { countEventSmsAudience, countPlannerEmailRecipients, PlannerAudienceCount } from './planner-audience';
 
 /** 승인 마감 시각(첫 발송일 · KST) — 발송 창이 21시에 닫히므로 한 시간 앞에서 끊는다(설계서 Q5 · §6-4). */
@@ -99,12 +99,45 @@ export async function computeTouchpointFingerprints(companyId: string, tps: FpTo
   return out;
 }
 
+/** 문자가 나갈 때 쓰는 번호(발신번호 · 무료거부) — 숫자만 */
+export interface PlannerSendNumbers { cb: string; o80: string }
+
+/**
+ * ★ 2026-10-24 승인 지문의 번호 칸(뿌리 대장 R5) — 실행부가 보낼 때 쓰는 **같은 함수**(기본 발신번호 · getOpt080Number)로 읽는다.
+ *   옛: 지문이 문안 · DM · 날짜만 덮어, 승인 뒤 080 · 발신번호가 바뀌면 확인 화면에서 본 문자와 나가는 문자가 달라도 대조를 통과했다.
+ */
+export async function plannerSendNumbers(companyId: string, createdBy: string | null): Promise<PlannerSendNumbers> {
+  return plannerNumbersOf(await plannerSendNumberTexts(companyId, createdBy));
+}
+
+/**
+ * 보낼 번호 원문(발신 · 080) — 확인 화면 · 쌍 확인 화면 · 실행부가 **한 번** 읽어 그리기(문자 끝 080) · 지문 · 대조 · 발송에 같은 값을 쓴다
+ *   (★ Codex 1024 2R — 화면이 그린 080 과 지문의 080 을 따로 읽으면 그 사이 바뀐 번호로 승인될 수 있었다).
+ */
+export async function plannerSendNumberTexts(companyId: string, createdBy: string | null): Promise<{ callback: string; opt080: string }> {
+  const [cb, o80] = await Promise.all([loadPlannerDefaultCallback(companyId), getOpt080Number(createdBy || null, companyId)]);
+  return { callback: String(cb || ''), opt080: String(o80 || '') };
+}
+
+/** (순수) 번호 원문 → 지문 · 각인 꼴(숫자만) */
+export function plannerNumbersOf(t: { callback: string; opt080: string }): PlannerSendNumbers {
+  return { cb: t.callback.replace(/\D/g, ''), o80: t.opt080.replace(/\D/g, '') };
+}
+
+/** (순수) 각인한 번호 = 지금 번호 · 번호 칸이 없는 옛 승인 = 통과(배포 순간 이미 승인한 행사가 멈추지 않게) */
+export function plannerNumbersMatch(stamped: unknown, now: PlannerSendNumbers): boolean {
+  if (!stamped || typeof stamped !== 'object') return true;
+  const s = stamped as Partial<PlannerSendNumbers>;
+  return String(s.cb ?? '') === now.cb && String(s.o80 ?? '') === now.o80;
+}
+
 /** 행사 지문(화면이 본 것) — 행사 사실 + 리비전 + 접점 지문 전부. */
-export function eventFingerprint(ev: Pick<PlannerEventRow, 'id' | 'title' | 'startsOn' | 'endsOn' | 'benefitText' | 'meta'>, tpFps: Map<string, string>): string {
+export function eventFingerprint(ev: Pick<PlannerEventRow, 'id' | 'title' | 'startsOn' | 'endsOn' | 'benefitText' | 'meta'>, tpFps: Map<string, string>, numbers?: PlannerSendNumbers | null): string {
   const parts = Array.from(tpFps.entries()).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
   // ★ 2026-10-18 받는 사람 — 상품 구매자일 때만 지문 칸이 생긴다(전체 = 이 줄 앞과 한 글자도 같다 · 이미 승인한 행사가 배포 순간 멈추지 않게)
   const aud = plannerAudienceKey(readStoredAudience(ev.meta));
-  return sha({ i: ev.id, t: ev.title, s: ev.startsOn, e: ev.endsOn, b: ev.benefitText || '', r: Number(ev.meta.revision) || 0, p: parts, ...(aud ? { u: aud } : {}) }).slice(0, 48);
+  // ★ 2026-10-24 R5 — 화면이 본 번호(발신 · 080)도 지문에 든다(확인 화면 · 승인이 같은 값을 넘긴다 · 본 번호 = 각인 번호 · Codex 1024 1R)
+  return sha({ i: ev.id, t: ev.title, s: ev.startsOn, e: ev.endsOn, b: ev.benefitText || '', r: Number(ev.meta.revision) || 0, p: parts, ...(aud ? { u: aud } : {}), ...(numbers ? { n: [numbers.cb, numbers.o80] } : {}) }).slice(0, 48);
 }
 
 // ── 승인 견적 ─────────────────────────────────────────────────────────
@@ -281,7 +314,6 @@ export interface ConfirmView {
   fingerprint: string;
   approved: { at: string; by: string | null } | null;
   preview: { issuedAt: string; expiresAt: string } | null;
-  dataSource: string;
 }
 
 async function loadCompanyName(companyId: string): Promise<string> {
@@ -309,11 +341,12 @@ async function loadBuildPaid(ev: PlannerEventRow): Promise<number> {
 export async function buildConfirmView(ev: PlannerEventRow, opts: { mode: 'public' | 'member' }): Promise<ConfirmView> {
   const tps = await loadEventTouchpoints(ev.companyId, ev.id);
   const fps = await computeTouchpointFingerprints(ev.companyId, tps);
-  const fingerprint = eventFingerprint(ev, fps);
+  const sendNo = await plannerSendNumberTexts(ev.companyId, ev.createdBy);
+  const fingerprint = eventFingerprint(ev, fps, plannerNumbersOf(sendNo));
   const first = firstSendDate(ev, tps);
   const [companyName, opt080, smsAudience, emailCount, quote, buildPaid, balance] = await Promise.all([
     loadCompanyName(ev.companyId),
-    getOpt080Number(ev.createdBy || null, ev.companyId).catch(() => ''),
+    Promise.resolve(sendNo.opt080),   // 지문에 넣은 그 080 으로 그린다
     tps.some((t) => (t.channel === 'sms' || t.channel === 'dm') && t.status !== 'skipped')
       ? countEventSmsAudience({ companyId: ev.companyId, createdBy: ev.createdBy, eventId: ev.id })
       : Promise.resolve({ state: 'known', count: 0 } as PlannerAudienceCount),
@@ -439,6 +472,5 @@ export async function buildConfirmView(ev: PlannerEventRow, opts: { mode: 'publi
     fingerprint,
     approved,
     preview,
-    dataSource: '받는 사람 수는 수신거부·발송 조건을 적용한 오늘 기준 실조회, 문안·모바일 DM·메일은 실제로 나갈 내용 그대로, 비용은 서버 견적, 결과는 실제 발송 기록입니다.',
   };
 }

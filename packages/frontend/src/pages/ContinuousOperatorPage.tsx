@@ -138,7 +138,7 @@ export default function ContinuousOperatorPage() {
       if (briefData.success) setDailyBrief(briefData.brief || null);
       // ROI는 부가 정보 — 오류 시 조용히 숨김
       if (roiData.success) setRoi(roiData.roi || null);
-      if (!opRes.ok && opData.code === 'BETA_GATE') setError('본 기능은 요금제 가입 후 이용 가능합니다.');
+      if (!opRes.ok && opData.code === 'AI_OPERATOR_GATED') setError('본 기능은 요금제 가입 후 이용 가능합니다.');
       setLoadedAt(new Date());
     } catch (e: any) {
       setError(e?.message || '조회 중 오류');

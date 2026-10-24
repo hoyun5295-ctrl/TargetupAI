@@ -45,8 +45,9 @@ describe('배선', () => {
   const cdp = readFileSync(join(__dirname, '..', '..', 'routes', 'cdp.ts'), 'utf8');
   const active = cdp.slice(cdp.indexOf("router.get('/inapp/active'"), cdp.indexOf("router.get('/inapp/active'") + 6000);
   it('개인화 값은 비밀키 호출 또는 회원 토큰 확인 때만', () => {
-    expect(active).toContain('const personalizationAllowed = !!externalId && (viaSecret || verifyCdpMemberToken(');
-    expect(active).toContain('if (personalizationAllowed && messages.length > 0) {');
+    // ★ 2026-10-24 세 채널 구조체크 ⑨ — 판정 = 회원 확인 CT 하나(isCdpMemberConfirmed · 구독 · 표시 · 추적 공용 · 동작 그대로)
+    expect(active).toContain('const personalizationAllowed = isCdpMemberConfirmed(req.headers, cdpAuth.companyId, externalId, req.query.member_token);');
+    expect(active).toContain('if (personalizationAllowed && externalId && messages.length > 0) {');
   });
   it('회원 토큰 발급 = 비밀키 인증 서버 간 호출 · 관리자 로그인 인증 앞', () => {
     const iRoute = cdp.indexOf("router.post('/member-token', requireCdpApiKey,");

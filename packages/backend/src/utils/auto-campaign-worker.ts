@@ -50,7 +50,7 @@ import { autoCampaignLockReason } from './plan-guard';
 // ★ 2026-07-05: 발송 피로도 보호 — 차감 전 게이트 + 광고 발송 카운터
 import { getFatigueCap, getFatigueBlockedSet, recordFatigueSends } from './fatigue-guard';
 import { extractVarCatalog, filterVarCatalogByData, generateMessages } from '../services/ai';
-import { autoSpamTestWithRegenerate } from './spam-test-queue';
+import { autoSpamTestWithRegenerate, spamVerdictOf } from './spam-test-queue';
 import { buildUnsubscribeFilter } from './unsubscribe-helper';
 // ★ D114 P7: personalFields → displayName 변환용
 import { getFieldByKey } from './standard-field-map';
@@ -724,14 +724,24 @@ async function executeAutoCampaign(ac: any): Promise<void> {
         [ac.id, ac.next_run_at]
       );
       const spamRow = spamCheck.rows[0];
-      if (spamRow?.spam_test_result?.isBlocked === true) {
+      // ★ 2026-10-24 R7 — 판정이 통과가 아니면 보내지 않는다(검사 장애 포함). 판정 칸이 없는 옛 기록 = 옛 뜻(차단만 멈춤)
+      const recorded = spamRow?.spam_test_result;
+      const recordedVerdict = recorded ? (recorded.verdict ?? (recorded.isBlocked === true ? 'blocked' : 'pass')) : null;
+      if (recordedVerdict === 'blocked') {
         console.warn(`${logPrefix} 스팸필터 차단된 문안 — 본 발송 중단 (담당자 확인 필요)`);
         await markFailed(ac, '스팸필터 차단으로 발송 중단. 문안 수정 후 재시도');
         return;
       }
+      if (recordedVerdict === 'error') {
+        console.warn(`${logPrefix} 스팸 검사를 하지 못한 문안 — 본 발송 중단 (담당자 확인 필요)`);
+        await markFailed(ac, '스팸 검사를 하지 못해 발송을 멈췄습니다. 다음 회차에 다시 검사합니다');
+        return;
+      }
     } catch (spamGuardErr) {
-      // 가드 자체 실패는 무시 (발송 진행) — 가드 실패가 발송 차단 사유는 아님
-      console.error(`${logPrefix} 스팸 차단 가드 조회 실패 (발송 진행):`, spamGuardErr);
+      // ★ 2026-10-24 R7 — 가드 조회 실패 = 판정 못 함 → 보내지 않는다(옛: 무시하고 발송 진행)
+      console.error(`${logPrefix} 스팸 차단 가드 조회 실패 (발송 중단):`, spamGuardErr);
+      await markFailed(ac, '스팸 검사 결과를 확인하지 못해 발송을 멈췄습니다. 다음 회차에 다시 확인합니다');
+      return;
     }
 
     // ★ 라인그룹 미설정 체크
@@ -1482,11 +1492,12 @@ async function executePreSendSpamTest(ac: any): Promise<void> {
       console.log(`${logPrefix} 재생성된 문안으로 generated_message_content 갱신`);
     }
 
-    // 결과 판정
+    // 결과 판정 — ★ 2026-10-24 공용 3분할(뿌리 대장 R7 · 옛: 「차단이 아니면 통과」라 검사가 못 돈 문안이 본 발송으로 나갔다)
     const finalVariant = spamResult.variants[0];
-    const isBlocked = finalVariant?.spamResult === 'blocked';
+    const verdict = spamVerdictOf(finalVariant, spamResult.totalTestCount);
+    const isBlocked = verdict === 'blocked';
     // ★ D111 P6: 순수 '통과'/'차단' 문자열로 단순화. 이전 '통과 ✓' → 빌더 내부 replace(✓→'통과')와 겹쳐 '통과 통과' 중복 발생
-    const resultLabel = isBlocked ? '차단' : '통과';
+    const resultLabel = verdict === 'pass' ? '통과' : isBlocked ? '차단' : '검사 못 함';
 
     console.log(`${logPrefix} 스팸테스트 완료 — ${resultLabel}`);
 
@@ -1503,7 +1514,7 @@ async function executePreSendSpamTest(ac: any): Promise<void> {
       ) VALUES ($1, $2, 'spam_tested', $3, NOW(), $4, $5, 3, 3, 3)`,
       [
         ac.id, runNumberResult.rows[0].next_run, ac.next_run_at,
-        JSON.stringify({ batchId: spamResult.batchId, isBlocked, result: resultLabel, variants: spamResult.variants }),
+        JSON.stringify({ batchId: spamResult.batchId, isBlocked, verdict, result: resultLabel, variants: spamResult.variants }),
         ac.ai_generate_enabled ? (ac.generated_message_content ? 'ai_generated' : 'ai_fallback') : 'fixed',
       ]
     );
@@ -1526,7 +1537,7 @@ async function executePreSendSpamTest(ac: any): Promise<void> {
         campaignName: ac.campaign_name,
         scheduledTimeStr,
         spamResultLabel: resultLabel,
-        spamBlocked: isBlocked,
+        spamBlocked: verdict !== 'pass',
         messageType: ac.message_type,
         messageContent,
         isAd: ac.is_ad ?? false,

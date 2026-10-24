@@ -25,6 +25,7 @@
  *   - DB ALTER 503 분기 (db_alter_safety_net 룰)
  */
 
+import { aiZonePlanBlocked } from '../utils/plan-guard';
 import { Router, Request, Response, json } from 'express';
 // ★ 2026-09-27 한줄로 V2 R123 — 미오픈 재발송 원본 단위 잠금
 import { withKeyedLock } from '../utils/keyed-lock';
@@ -58,6 +59,7 @@ import {
   createResendChildCampaign,
   listEmailPersonalizationVars,
   excludeOptedOutEmails,
+  filterEmailSuppressed,
   // ★ 2026-09-16 편집 미리보기에 실제 법정 footer 표시(임은지 접수 — 수신거부 토글)
   withEmailPreviewAdFooter,
   type EmailRecipient,
@@ -75,8 +77,8 @@ import {
   verifyTrackingToken,
   TRACKING_PIXEL_GIF,
 } from '../utils/email-tracking';
+import { efficacyNote } from '../utils/copy-benefit-detector';
 import {
-  generateEmailOneShot,
   generateEmailSections,
   refineEmail,
   refineEmailSections,
@@ -86,7 +88,6 @@ import {
   buildEmailAccountInsight,
   recommendSendTime,
   binOpenHours,
-  findUneditedPlaceholder,
   SEND_TIME_MIN_SAMPLE,
   EMAIL_SCENARIO_PRESETS,
   type EmailScenarioKey,
@@ -104,15 +105,15 @@ import { normalizeEventText } from '../utils/event-brief';
 import { attachMallImagesToProductCarousels } from '../utils/mall-product-match';
 import { industryLabel } from '../utils/industry-codes';
 import type { Section } from '../utils/dm/dm-section-registry';
-import { checkCredit, deductCreditSafe, InsufficientCreditError, isChargedByKey } from '../utils/ai-credit';
-import { oneLineGaps, isValidAttemptToken, buildOneLineIdempotencyKey, oneLineInflightKey, sanitizeLineFacts, buildLineEventText, sanitizeLineProducts, lineProductsKey, sanitizeLineReads, applyLineReads } from '../utils/one-line-facts';   // ★ 2026-10-05 한줄로 시그니처 · ★1010 혜택 답 · 몰 상품 확정
-import { resolveLineMallCards, placeLineMallCards, linePriceNotes, linePinnedPrimary, lineEmailDesign, type LineMallCard, type LineMallExcluded } from '../utils/line-mall-cards';   // ★ 2026-10-10 한 줄 이메일 강화
+import { checkCredit, deductCreditSafe, InsufficientCreditError } from '../utils/ai-credit';
+import { isValidAttemptToken, oneLineInflightKey, sanitizeLineProducts, lineProductsKey, sanitizeLineReads, applyLineReads } from '../utils/one-line-facts';   // ★ 2026-10-05 한줄로 시그니처 · ★1010 혜택 답 · 몰 상품 확정
+import { placeLineMallCards, linePriceNotes, linePinnedPrimary, lineEmailDesign, type LineMallCard } from '../utils/line-mall-cards';   // ★ 2026-10-10 한 줄 이메일 강화
 import { resolveIntegrationActor } from '../utils/integration-scope';
 // ★ 2026-10-17 한 줄 단계 모달(설계서 docs/2026-10-17-oneline-steps-modal-design.md §3 · §4-3) — 단계 답 · 직접 상품 · 대표 사진 · 버튼 주소 · 한 줄 완성 금액
 import { buildLineStepsEventText } from '../utils/one-line-steps';
 import { getLineTemplate } from '../utils/design-core/line-templates';   // ★ 2026-10-17 템플릿 캠페인
 import { lineTemplateBrand, LineTemplateError } from '../utils/line-template-run';
-import { getLineComposition, draftLineCook, buildLineCookEmail, lineCookManual } from '../utils/one-line-ct';   // ★ 2026-10-22 한줄 CT 구성 5종
+import { getLineComposition, draftLineCook, buildLineCookEmail, lineCookManual, listenLine } from '../utils/one-line-ct';   // ★ 2026-10-22 한줄 CT 구성 5종
 import { runLineCookOrder } from '../utils/one-line-ct/order';   // ★ 2026-10-23 돈 순서 한 곳
 import { prepareLineStepsRequest, isLineStepsReqError, resolveLineStepsDelivery } from '../utils/line-steps-context';
 import { placeLineHero, placeLineLink } from '../utils/line-materials';
@@ -127,6 +128,7 @@ import { isBuildMaterialsV1, aiAutoBuildEnabled, aiAutoBuildErrorResponse, build
 import { tryAcquireInflight, releaseInflight, singleFlight } from '../utils/inflight-lock';
 import { handleDmImageUpload } from '../utils/dm/dm-image-upload';
 
+import { publicErrorText } from '../utils/http-error';
 const router = Router();
 
 // ════════════════════════════════════════════════════════════════════
@@ -308,7 +310,7 @@ router.use(authenticate);
 // 공통 헬퍼 — 회사 admin 권한 + BUSINESS+ 게이팅
 // ─────────────────────────────────────────────────────────────────────
 
-async function ensureEmailAdmin(req: Request, res: Response): Promise<{ companyId: string; userId: string } | null> {
+async function ensureEmailAdmin(req: Request, res: Response, opts: { plan: boolean } = { plan: true }): Promise<{ companyId: string; userId: string } | null> {
   const companyId = req.user?.companyId;
   const userId = req.user?.userId;
   const userType = req.user?.userType;
@@ -320,24 +322,29 @@ async function ensureEmailAdmin(req: Request, res: Response): Promise<{ companyI
     res.status(403).json({ success: false, error: '회사 관리자 권한이 필요합니다.' });
     return null;
   }
-  // ★ 2026-09-26 한줄로 V2 R285(같은 뿌리) — Express 4는 async 핸들러의 거절을 받지 않는다. 이 조회가 던지면 응답 없이 매달렸다 → JSON 500.
-  let cdpEnabled = false;
-  try {
-    cdpEnabled = await isCdpEnabledForPlan(companyId);
-  } catch (err: any) {
-    console.error('[email] 자격 확인 조회 실패:', err?.message || err);
-    res.status(500).json({ success: false, error: '잠시 후 다시 시도해 주세요.' });
-    return null;
+  // ★ 2026-10-24 R2 — 요금제 판정(유료 요금제 · 이용 기간)은 plan 표시일 때만. 예약 취소 · 지우기는 미가입 · 만료 뒤에도 연다(Codex 1024 2R) · 회사 · 관리자 · 소유자 검사는 늘
+  if (opts.plan) {
+    // ★ 2026-09-26 한줄로 V2 R285(같은 뿌리) — Express 4는 async 핸들러의 거절을 받지 않는다. 이 조회가 던지면 응답 없이 매달렸다 → JSON 500.
+    let cdpEnabled = false;
+    try {
+      cdpEnabled = await isCdpEnabledForPlan(companyId);
+    } catch (err: any) {
+      console.error('[email] 자격 확인 조회 실패:', err?.message || err);
+      res.status(500).json({ success: false, error: '잠시 후 다시 시도해 주세요.' });
+      return null;
+    }
+    if (!cdpEnabled) {
+      res.status(403).json({ success: false, error: 'Email 캠페인은 유료 요금제 가입 후 이용 가능합니다.', code: 'PLAN_FEATURE_LOCKED' });
+      return null;
+    }
   }
-  if (!cdpEnabled) {
-    res.status(403).json({ success: false, error: 'Email 캠페인은 유료 요금제 가입 후 이용 가능합니다.', code: 'PLAN_FEATURE_LOCKED' });
-    return null;
-  }
+  // ★ 2026-10-24 R2 — 화면 PlanGate 와 같은 서버 문(구독 만료 · 정지 = 잠김 · 옛: 요금제 코드 FREE 만 봤다)
+  if (opts.plan && (await aiZonePlanBlocked(req, res))) return null;
   return { companyId, userId };
 }
 
 // 캠페인 기능 접근 — 회사 구성원(담당자 포함) + 유료 플랜. ownerId = 담당자면 본인 id(격리), 관리자·슈퍼면 null(전체).
-async function ensureEmailAccess(req: Request, res: Response): Promise<{ companyId: string; userId: string; ownerId: string | null } | null> {
+async function ensureEmailAccess(req: Request, res: Response, opts: { plan: boolean } = { plan: true }): Promise<{ companyId: string; userId: string; ownerId: string | null } | null> {
   const companyId = req.user?.companyId;
   const userId = req.user?.userId;
   const userType = req.user?.userType;
@@ -345,19 +352,23 @@ async function ensureEmailAccess(req: Request, res: Response): Promise<{ company
     res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
     return null;
   }
-  // ★ 2026-09-26 한줄로 V2 R285(같은 뿌리) — Express 4는 async 핸들러의 거절을 받지 않는다. 이 조회가 던지면 응답 없이 매달렸다 → JSON 500.
-  let cdpEnabled = false;
-  try {
-    cdpEnabled = await isCdpEnabledForPlan(companyId);
-  } catch (err: any) {
-    console.error('[email] 자격 확인 조회 실패:', err?.message || err);
-    res.status(500).json({ success: false, error: '잠시 후 다시 시도해 주세요.' });
-    return null;
+  // ★ 2026-10-24 R2 — 요금제 판정(유료 요금제 · 이용 기간)은 plan 표시일 때만. 예약 취소 · 지우기는 미가입 · 만료 뒤에도 연다(Codex 1024 2R) · 회사 · 관리자 · 소유자 검사는 늘
+  if (opts.plan) {
+    // ★ 2026-09-26 한줄로 V2 R285(같은 뿌리) — Express 4는 async 핸들러의 거절을 받지 않는다. 이 조회가 던지면 응답 없이 매달렸다 → JSON 500.
+    let cdpEnabled = false;
+    try {
+      cdpEnabled = await isCdpEnabledForPlan(companyId);
+    } catch (err: any) {
+      console.error('[email] 자격 확인 조회 실패:', err?.message || err);
+      res.status(500).json({ success: false, error: '잠시 후 다시 시도해 주세요.' });
+      return null;
+    }
+    if (!cdpEnabled) {
+      res.status(403).json({ success: false, error: 'Email 캠페인은 유료 요금제 가입 후 이용 가능합니다.', code: 'PLAN_FEATURE_LOCKED' });
+      return null;
+    }
   }
-  if (!cdpEnabled) {
-    res.status(403).json({ success: false, error: 'Email 캠페인은 유료 요금제 가입 후 이용 가능합니다.', code: 'PLAN_FEATURE_LOCKED' });
-    return null;
-  }
+  if (opts.plan && (await aiZonePlanBlocked(req, res))) return null;   // ★ 2026-10-24 R2 — 위와 같은 서버 문
   const isAdmin = userType === 'company_admin' || userType === 'super_admin';
   return { companyId, userId, ownerId: isAdmin ? null : userId };
 }
@@ -392,7 +403,7 @@ router.get('/status', async (req: Request, res: Response) => {
   } catch (err: any) {
     console.error('[Email /status] 오류:', err);
     if (handleDbMigrationError(err, res, 'companies')) return;
-    return res.status(500).json({ success: false, error: err?.message || '조회 실패' });
+    return res.status(500).json({ success: false, error: publicErrorText(err, '조회 실패') });
   }
 });
 
@@ -405,7 +416,7 @@ router.get('/smtp-config', async (req: Request, res: Response) => {
   } catch (err: any) {
     console.error('[Email /smtp-config GET] 오류:', err);
     if (handleDbMigrationError(err, res, 'companies')) return;
-    return res.status(500).json({ success: false, error: err?.message || '조회 실패' });
+    return res.status(500).json({ success: false, error: publicErrorText(err, '조회 실패') });
   }
 });
 
@@ -431,12 +442,12 @@ router.put('/smtp-config', async (req: Request, res: Response) => {
     console.error('[Email /smtp-config PUT] 오류:', err);
     if (handleDbMigrationError(err, res, 'companies')) return;
     if (handleEncryptionKeyError(err, res)) return;
-    return res.status(500).json({ success: false, error: err?.message || 'SMTP 설정 저장 실패' });
+    return res.status(500).json({ success: false, error: publicErrorText(err, 'SMTP 설정 저장 실패') });
   }
 });
 
 router.delete('/smtp-config', async (req: Request, res: Response) => {
-  const auth = await ensureEmailAdmin(req, res);
+  const auth = await ensureEmailAdmin(req, res, { plan: false });
   if (!auth) return;
   try {
     await clearSmtpConfig(auth.companyId);
@@ -444,7 +455,7 @@ router.delete('/smtp-config', async (req: Request, res: Response) => {
   } catch (err: any) {
     console.error('[Email /smtp-config DELETE] 오류:', err);
     if (handleDbMigrationError(err, res, 'companies')) return;
-    return res.status(500).json({ success: false, error: err?.message || 'SMTP 설정 삭제 실패' });
+    return res.status(500).json({ success: false, error: publicErrorText(err, 'SMTP 설정 삭제 실패') });
   }
 });
 
@@ -462,7 +473,7 @@ router.post('/smtp-test', async (req: Request, res: Response) => {
     console.error('[Email /smtp-test] 오류:', err);
     if (handleDbMigrationError(err, res, 'companies')) return;
     if (handleEncryptionKeyError(err, res)) return;
-    return res.status(500).json({ success: false, error: err?.message || '테스트 발송 실패' });
+    return res.status(500).json({ success: false, error: publicErrorText(err, '테스트 발송 실패') });
   }
 });
 
@@ -482,7 +493,7 @@ router.get('/personalization-vars', async (req: Request, res: Response) => {
     return res.json({ success: true, vars });
   } catch (err: any) {
     console.error('[Email personalization-vars] 오류:', err);
-    return res.status(500).json({ success: false, error: err?.message || '조회 실패' });
+    return res.status(500).json({ success: false, error: publicErrorText(err, '조회 실패') });
   }
 });
 
@@ -506,7 +517,7 @@ router.get('/campaigns', async (req: Request, res: Response) => {
   } catch (err: any) {
     console.error('[Email /campaigns GET] 오류:', err);
     if (handleDbMigrationError(err, res, 'email_campaigns')) return;
-    return res.status(500).json({ success: false, error: err?.message || '조회 실패' });
+    return res.status(500).json({ success: false, error: publicErrorText(err, '조회 실패') });
   }
 });
 
@@ -520,7 +531,7 @@ router.get('/campaigns/:id', async (req: Request, res: Response) => {
   } catch (err: any) {
     console.error('[Email /campaigns/:id] 오류:', err);
     if (handleDbMigrationError(err, res, 'email_campaigns')) return;
-    return res.status(500).json({ success: false, error: err?.message || '조회 실패' });
+    return res.status(500).json({ success: false, error: publicErrorText(err, '조회 실패') });
   }
 });
 
@@ -545,7 +556,7 @@ router.post('/campaigns/:id/complete', async (req: Request, res: Response) => {
       return res.status(402).json({ success: false, error: err.message, code: 'INSUFFICIENT_CREDIT' });
     }
     if (handleDbMigrationError(err, res, 'email_campaigns')) return;
-    return res.status(500).json({ success: false, error: err?.message || '완성 처리 실패' });
+    return res.status(500).json({ success: false, error: publicErrorText(err, '완성 처리 실패') });
   }
 });
 
@@ -591,7 +602,7 @@ router.post('/campaigns', async (req: Request, res: Response) => {
   } catch (err: any) {
     console.error('[Email /campaigns POST] 오류:', err);
     if (handleDbMigrationError(err, res, 'email_campaigns')) return;
-    return res.status(500).json({ success: false, error: err?.message || '캠페인 신설 실패' });
+    return res.status(500).json({ success: false, error: publicErrorText(err, '캠페인 신설 실패') });
   }
 });
 
@@ -622,7 +633,7 @@ router.post('/campaigns/:id/clone', async (req: Request, res: Response) => {
   } catch (err: any) {
     console.error('[Email /campaigns/:id/clone] 오류:', err);
     if (handleDbMigrationError(err, res, 'email_campaigns')) return;
-    return res.status(500).json({ success: false, error: err?.message || '복제 실패' });
+    return res.status(500).json({ success: false, error: publicErrorText(err, '복제 실패') });
   }
 });
 
@@ -663,12 +674,12 @@ router.patch('/campaigns/:id', async (req: Request, res: Response) => {
   } catch (err: any) {
     console.error('[Email /campaigns PATCH] 오류:', err);
     if (handleDbMigrationError(err, res, 'email_campaigns')) return;
-    return res.status(500).json({ success: false, error: err?.message || '캠페인 수정 실패' });
+    return res.status(500).json({ success: false, error: publicErrorText(err, '캠페인 수정 실패') });
   }
 });
 
 router.delete('/campaigns/:id', async (req: Request, res: Response) => {
-  const auth = await ensureEmailAccess(req, res);
+  const auth = await ensureEmailAccess(req, res, { plan: false });
   if (!auth) return;
   try {
     const ok = await deleteEmailCampaign(auth.companyId, req.params.id, auth.ownerId);
@@ -677,7 +688,7 @@ router.delete('/campaigns/:id', async (req: Request, res: Response) => {
   } catch (err: any) {
     console.error('[Email /campaigns DELETE] 오류:', err);
     if (handleDbMigrationError(err, res, 'email_campaigns')) return;
-    return res.status(500).json({ success: false, error: err?.message || '캠페인 삭제 실패' });
+    return res.status(500).json({ success: false, error: publicErrorText(err, '캠페인 삭제 실패') });
   }
 });
 
@@ -739,6 +750,10 @@ router.post('/campaigns/:id/send', async (req: Request, res: Response) => {
     } else {
       return res.status(400).json({ success: false, error: '발송 대상을 지정해주세요 (recipients 또는 target).' });
     }
+    // ★ 2026-10-24 세 채널 구조체크 ① — 거부 신호 주소 제외(엔진과 같은 판정 · 화면에 보일 수와 실제 발송 수가 같게)
+    const suppressed = await filterEmailSuppressed(auth.companyId, resolved);
+    resolved = suppressed.recipients;
+    excludedOptOut += suppressed.excludedCount;
 
     // Zero-Count 영구 원칙
     if (resolved.length === 0) {
@@ -804,7 +819,7 @@ router.post('/campaigns/:id/send', async (req: Request, res: Response) => {
     if (handleDbMigrationError(err, res, 'email_campaigns')) return;
     if (handleEncryptionKeyError(err, res)) return;
     const status = err?.message?.includes('0건') || err?.message?.includes('필수') || err?.message?.includes('미완료') ? 400 : 500;
-    return res.status(status).json({ success: false, error: err?.message || '발송 실패' });
+    return res.status(status).json({ success: false, error: publicErrorText(err, '발송 실패') });
   }
 });
 
@@ -877,7 +892,7 @@ router.post('/campaigns/:id/test-send', async (req: Request, res: Response) => {
     console.error('[Email /campaigns/:id/test-send] 오류:', err);
     if (handleDbMigrationError(err, res, 'email_campaigns')) return;
     if (handleEncryptionKeyError(err, res)) return;
-    return res.status(500).json({ success: false, error: err?.message || '테스트발송 실패' });
+    return res.status(500).json({ success: false, error: publicErrorText(err, '테스트발송 실패') });
   }
 });
 
@@ -916,7 +931,7 @@ router.get('/campaigns/:id/export-html', async (req: Request, res: Response) => 
   } catch (err: any) {
     console.error('[Email /campaigns/:id/export-html] 오류:', err);
     if (handleDbMigrationError(err, res, 'email_campaigns')) return;
-    return res.status(500).json({ success: false, error: err?.message || 'HTML 내보내기 실패' });
+    return res.status(500).json({ success: false, error: publicErrorText(err, 'HTML 내보내기 실패') });
   }
 });
 
@@ -924,7 +939,7 @@ router.get('/campaigns/:id/export-html', async (req: Request, res: Response) => 
 //   WHERE status='scheduled' 원자 조건이라 sweeper의 sending 선점과 경합해도 한쪽만 성립(이중 처리 0).
 //   완성(50크레딧)은 캠페인에 남아 있으므로 취소 후 재발송·재예약 자유.
 router.post('/campaigns/:id/cancel-schedule', async (req: Request, res: Response) => {
-  const auth = await ensureEmailAccess(req, res);
+  const auth = await ensureEmailAccess(req, res, { plan: false });
   if (!auth) return;
   try {
     const ownerClause = auth.ownerId ? ' AND created_by = $3::uuid' : '';
@@ -944,7 +959,7 @@ router.post('/campaigns/:id/cancel-schedule', async (req: Request, res: Response
   } catch (err: any) {
     console.error('[Email /campaigns/:id/cancel-schedule] 오류:', err);
     if (handleDbMigrationError(err, res, 'email_campaigns')) return;
-    return res.status(500).json({ success: false, error: err?.message || '예약 취소 실패' });
+    return res.status(500).json({ success: false, error: publicErrorText(err, '예약 취소 실패') });
   }
 });
 
@@ -1046,7 +1061,7 @@ router.get('/campaigns/:id/events', async (req: Request, res: Response) => {
   } catch (err: any) {
     console.error('[Email /campaigns/:id/events] 오류:', err);
     if (handleDbMigrationError(err, res, 'email_events')) return;
-    return res.status(500).json({ success: false, error: err?.message || '이력 조회 실패' });
+    return res.status(500).json({ success: false, error: publicErrorText(err, '이력 조회 실패') });
   }
 });
 
@@ -1058,11 +1073,11 @@ router.get('/recipients/grades', async (req: Request, res: Response) => {
   try {
     const companyId = req.user?.companyId;
     if (!companyId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
-    const grades = await listCustomerGrades(companyId);
+    const grades = await listCustomerGrades(companyId, resolveOwnerScope(req));
     return res.json({ success: true, grades });
   } catch (err: any) {
     console.error('[Email /recipients/grades] 오류:', err);
-    return res.status(500).json({ success: false, error: err?.message || '등급 조회 실패' });
+    return res.status(500).json({ success: false, error: publicErrorText(err, '등급 조회 실패') });
   }
 });
 
@@ -1071,11 +1086,11 @@ router.post('/recipients/preview', async (req: Request, res: Response) => {
     const companyId = req.user?.companyId;
     if (!companyId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
     const grades = Array.isArray(req.body?.grades) ? req.body.grades.map((g: any) => String(g)) : undefined;
-    const preview = await previewCustomerRecipients(companyId, grades);
+    const preview = await previewCustomerRecipients(companyId, grades, resolveOwnerScope(req));
     return res.json({ success: true, ...preview });
   } catch (err: any) {
     console.error('[Email /recipients/preview] 오류:', err);
-    return res.status(500).json({ success: false, error: err?.message || '대상 미리보기 실패' });
+    return res.status(500).json({ success: false, error: publicErrorText(err, '대상 미리보기 실패') });
   }
 });
 
@@ -1088,37 +1103,6 @@ router.get('/ai/scenarios', async (_req: Request, res: Response) => {
   const scenarios = Object.entries(EMAIL_SCENARIO_PRESETS).map(([key, v]) => ({ key, label: v.label }));
   return res.json({ success: true, scenarios });
 });
-
-router.post('/ai/generate', singleFlight('email-generate', async (req: Request, res: Response) => {
-  const auth = await ensureEmailAccess(req, res);
-  if (!auth) return;
-  try {
-    const prompt = req.body?.prompt ? String(req.body.prompt).trim() : '';
-    const scenario = req.body?.scenario ? String(req.body.scenario) as EmailScenarioKey : undefined;
-    const isAd = !!req.body?.is_ad;
-    if (!prompt && !scenario) {
-      return res.status(400).json({ success: false, error: '요청 내용 또는 시나리오를 입력해주세요.' });
-    }
-    if (prompt.length > 2000) {
-      return res.status(400).json({ success: false, error: '요청은 2000자 이내로 입력해주세요.' });
-    }
-    if (scenario && !EMAIL_SCENARIO_PRESETS[scenario]) {
-      return res.status(400).json({ success: false, error: '알 수 없는 시나리오입니다.' });
-    }
-
-    const cost = getCreditCost('email-ai-generate'); // 3
-    await checkCredit(auth.companyId, cost);
-    const result = await generateEmailOneShot({ companyId: auth.companyId, userId: auth.userId, prompt, scenario, isAd });
-    await deductCreditSafe({ companyId: auth.companyId, cost, source: 'email-ai-generate', createdBy: auth.userId });
-    return res.json({ success: true, data: result });
-  } catch (err: any) {
-    console.error('[Email /ai/generate] 오류:', err);
-    if (err instanceof InsufficientCreditError) {
-      return res.status(402).json({ success: false, error: err.message, code: 'INSUFFICIENT_CREDIT' });
-    }
-    return res.status(500).json({ success: false, error: err?.message || 'AI 생성 실패' });
-  }
-}));
 
 // 비주얼 빌더 — AI가 이메일 블록 Section[]을 생성(이미지·혜택은 빈 자리). 크레딧 3.
 // ★ 2026-10-10 한 줄 묻기(설계서 docs/2026-10-10-oneline-ask-design.md §3-2) — 이메일 한 줄 질문의 답(AI 0 · 차감 0). 문 = ensureEmailAccess.
@@ -1201,17 +1185,15 @@ router.post('/ai/generate-sections', singleFlight('email-generate', async (req: 
       ? prepareLineStepsRequest(req.body, auth.companyId, prompt, stepsReads === 'invalid' ? undefined : stepsReads, stepsNow, lineOn)
       : undefined;
     if (isLineStepsReqError(steps)) return res.status(steps.status).json({ success: false, error: steps.error, code: steps.code });
+    // ★ 2026-10-24 세 채널 구조체크 ⑧ — 한 줄 요청은 단계(한줄 CT 요리 주문 runLineCookOrder) 한 길이다. 옛 1005 · 1010 갈래(묻는 창 · 시도 토큰 돈 순서)는 지웠다
+    //   (그 갈래 결과는 구성 · 재료 판 · 질문표 · 효능 판정을 안 지났다). 열린 옛 화면 = 400 · 새로 고치면 단계로 간다.
+    if (oneLineReq && !steps) return res.status(400).json({ success: false, error: '화면을 새로 고친 뒤 한 줄을 다시 넣어 주세요.', code: 'LINE_STEPS_REQUIRED' });
     // ★ 2026-10-17 템플릿 캠페인 — 템플릿 칸이 온 단계 요청만(스위치 밖인데 오면 400)
     const tplSel = steps && steps.body.template ? steps.body.template : null;
     const tplDef = tplSel ? getLineTemplate(tplSel.id) : null;
     // ★ 2026-10-22 한줄 CT — 구성 5종 id 가 오면 구성 조립(같은 돈 순서)
     const compDef = tplSel && !tplDef ? getLineComposition(tplSel.id) : null;
-    const lineFacts = oneLineReq
-      ? (steps ? (steps.body.facts.benefit !== undefined ? { benefit: steps.body.facts.benefit } : undefined) : sanitizeLineFacts(req.body?.facts))
-      : undefined;
-    if (lineFacts === 'invalid') {
-      return res.status(400).json({ success: false, error: '혜택은 300자 이내로 적어 주세요.', code: 'LINE_FACTS_INVALID' });
-    }
+    const lineFacts = steps && steps.body.facts.benefit !== undefined ? { benefit: steps.body.facts.benefit } : undefined;
     const lineProducts = oneLineReq ? sanitizeLineProducts(req.body?.products) : undefined;
     if (lineProducts === 'invalid') {
       return res.status(400).json({ success: false, error: '고른 상품을 다시 확인해 주세요.', code: 'LINE_PRODUCTS_INVALID' });
@@ -1228,7 +1210,7 @@ router.post('/ai/generate-sections', singleFlight('email-generate', async (req: 
     // ★ 2026-10-17 단계 답 = [혜택] · [기간](날짜를 친 것과 같게) · [상품](글로만 소개할 직접 상품) 줄
     const genPrompt = steps
       ? buildLineStepsEventText(linePrompt, { benefit: lineFacts ? lineFacts.benefit : null, periodEnd: steps.body.facts.periodEnd ?? null, textProducts: steps.textProducts })
-      : (lineOn && lineFacts ? buildLineEventText(linePrompt, lineFacts) : linePrompt);
+      : linePrompt;
     const attemptToken = lineOn && isValidAttemptToken(req.body?.attempt_token) ? String(req.body.attempt_token) : null;
     // ★ 2026-10-17 단계 요청 = 한 줄 완성 원장 키 · 생성 입력 전부를 지문에(직접 상품 전부 · 대표 사진 · 주소 답)
     // ★ 템플릿 요청 = 템플릿 · 배치 · 페이지도 지문에(1017 요청 키는 그대로)
@@ -1290,7 +1272,9 @@ router.post('/ai/generate-sections', singleFlight('email-generate', async (req: 
       if (order.kind === 'refused') return res.status(order.status).json({ success: false, error: order.error, code: order.code, ...(order.extra || {}) });
       if (order.kind !== 'made') return res.status(409).json({ success: false, error: '이 요청은 이미 처리됐어요. 다시 만들려면 [만들기]를 한 번 더 눌러 주세요.', code: 'ALREADY_DONE' });
       const made = order.result;
-      const notes = [...order.excluded.map((e) => `상품${e.name ? ` "${e.name}"` : ''} 제외: ${e.reason}`), ...linePriceNotes(genPrompt, order.cards)];
+      // ★ 2026-10-24 ② 결과 안내 = 뺀 상품 · 값 차이 · 뺀 효능(서버 문장)
+      const effNote = made.kind === 'generic' ? efficacyNote('generate', made.result.efficacyDropped) : null;
+      const notes = [...order.excluded.map((e) => `상품${e.name ? ` "${e.name}"` : ''} 제외: ${e.reason}`), ...linePriceNotes(genPrompt, order.cards), ...(effNote ? [effNote] : [])];
       const basic = await getBrandBasicInfo(auth.companyId).catch(() => null);
       const industry = String((basic as any)?.industry_code || '').trim() || null;
       if (made.kind === 'comp') {
@@ -1303,7 +1287,7 @@ router.post('/ai/generate-sections', singleFlight('email-generate', async (req: 
             name: (brand!.brandName ? `${brand!.brandName} ${made.label}` : made.label).slice(0, 40),
             ...(tplDesign ? { design: tplDesign } : {}),
             one_line: {
-              enabled: true, gaps: oneLineGaps(linePrompt), notes, mall_cards: order.cards.length,
+              enabled: true, gaps: listenLine(linePrompt).gaps, notes, mall_cards: order.cards.length,
               steps: { cost: order.cost, completion: order.completionDue },
               template: { id: made.id, layout: 'page' },
             },
@@ -1318,85 +1302,30 @@ router.post('/ai/generate-sections', singleFlight('email-generate', async (req: 
         industry,
         preheader: typeof (made.result as any)?.preheader === 'string' ? String((made.result as any).preheader).slice(0, 90) : null,
       });
+      const { efficacyDropped: _effDropped, ...madeEmail } = made.result;
       return res.json({
         success: true,
         data: {
-          ...made.result,
+          ...madeEmail,
           ...(design ? { design } : {}),
-          one_line: { enabled: true, gaps: oneLineGaps(linePrompt), notes, mall_cards: order.cards.length, steps: { cost: order.cost, completion: order.completionDue } },
+          one_line: { enabled: true, gaps: listenLine(linePrompt).gaps, notes, mall_cards: order.cards.length, steps: { cost: order.cost, completion: order.completionDue } },
         },
       });
     }
 
-    // ─── 아래 = 단계 없는 요청(1005 · 1010 시도 토큰 경로 · 일반 생성) — 지금 그대로 ───
-    const idemKey = attemptToken
-      ? buildOneLineIdempotencyKey(auth.companyId, 'email', attemptToken, { prompt: genPrompt, scenario: scenario || null, isAd, eventText, ...(lineProducts !== undefined ? { products: lineProductsKey(lineProducts) } : {}) })
-      : undefined;
-    const lineLock = attemptToken ? oneLineInflightKey(auth.companyId, 'email', attemptToken) : '';
-    if (lineLock && !tryAcquireInflight(lineLock)) {
-      return res.status(409).json({ success: false, error: '지금 만드는 중이에요. 완성되면 이어서 진행해 주세요.', code: 'IN_FLIGHT' });
-    }
-    try {
-      if (idemKey) {
-        let charged: boolean;
-        try { charged = await isChargedByKey(auth.companyId, idemKey); } catch {
-          return res.status(503).json({ success: false, error: '잠시 후 다시 시도해 주세요.', code: 'CREDIT_STATE_UNKNOWN' });
-        }
-        if (charged) {
-          return res.status(409).json({ success: false, error: '이 요청은 이미 처리됐어요. 다시 만들려면 [만들기]를 한 번 더 눌러 주세요.', code: 'ALREADY_DONE' });
-        }
-      }
-      // ★ 2026-10-10 고른 상품은 AI 호출 · 차감 앞에서 몰에서 다시 읽는다(재조회 ok 만 카드 · 전부 빠지면 409 · 돈 0).
-      let lineCards: LineMallCard[] = [];
-      let lineExcluded: LineMallExcluded[] = [];
-      const lineActor = await resolveIntegrationActor(req.user);
-      if (lineProducts && lineProducts.length > 0) {
-        const r = await resolveLineMallCards(auth.companyId, lineActor, lineProducts);
-        lineCards = r.cards;
-        lineExcluded = r.excluded;
-        if (lineCards.length === 0) {
-          return res.status(409).json({ success: false, error: '고른 상품을 지금 쓸 수 없어요. 상품 없이 만들 수 있어요.', code: 'MALL_PRODUCTS_UNAVAILABLE', excluded: lineExcluded });
-        }
-      }
-      const cost = getCreditCost('email-ai-generate'); // 3
-      await checkCredit(auth.companyId, cost);
-      const result = await generateEmailSections({ companyId: auth.companyId, userId: auth.userId, prompt: genPrompt, scenario, isAd, eventText });
-      await deductCreditSafe({ companyId: auth.companyId, cost, source: 'email-ai-generate', createdBy: auth.userId, ...(idemKey ? { idempotencyKey: idemKey } : {}) });
-      if (lineProducts === undefined) {
-        // ★ 2026-07-08 연동 몰 상품 자동 첨부 — 상품 슬라이드 항목명 이름매칭 → 이미지·링크·정가·할인가(빈 값만, 실패 skip). 발송 코어 무관(생성 결과 후처리).
-        // ★ 2026-10-10 후보를 보여 준 한 줄 요청(products 칸이 옴)은 이름 자동 첨부를 하지 않는다(확정은 사람의 탭만).
-        try { await attachMallImagesToProductCarousels(auth.companyId, (result as any)?.sections, await resolveIntegrationActor(req.user)); } catch { /* best-effort */ }
-      } else if (lineCards.length > 0 && Array.isArray((result as any)?.sections)) {
-        // ★ 2026-10-10 확정 카드 = 첫 상품 슬라이드 통째 교체 · 다른 상품 슬라이드 제거(AI 가 쓴 상품 · 가격이 나가지 않게) · 없으면 히어로 뒤
-        (result as any).sections = placeLineMallCards((result as any).sections, lineCards, { newId: () => randomUUID(), makeCarousel: (order) => createSection('product_carousel', randomUUID(), order) });
-      }
-      if (!lineOn) return res.json({ success: true, data: result });
-      // ★ 2026-10-05 한줄로 시그니처 — 화면이 완성도 줄 · 보강 시트를 그릴지(스위치 켠 회사의 한 줄 요청만)
-      // ★ 2026-10-10 회사 디자인(저장 주색 · 회사 또는 업종 아트디렉션 · 프리헤더) · 결과 안내(뺀 상품 · 한 줄 값과 몰 값이 다를 때)
-      const companyKitRaw = (await getCompanyBrandKitRaw(auth.companyId).catch(() => null)) as Record<string, unknown> | null;
-      const basic = await getBrandBasicInfo(auth.companyId).catch(() => null);
-      const design = lineEmailDesign({
-        pinned: linePinnedPrimary(companyKitRaw),
-        companyArtDirection: companyKitRaw?.art_direction ?? null,
-        industry: String((basic as any)?.industry_code || '').trim() || null,
-        preheader: typeof (result as any)?.preheader === 'string' ? String((result as any).preheader).slice(0, 90) : null,
-      });
-      return res.json({
-        success: true,
-        data: {
-          ...result,
-          ...(design ? { design } : {}),
-          one_line: {
-            enabled: true, gaps: oneLineGaps(linePrompt),
-            // ★ Codex 1R medium — 비교 입력 = 한 줄 + 혜택 칸 답(genPrompt)
-            notes: [...lineExcluded.map((e) => `상품${e.name ? ` "${e.name}"` : ''} 제외: ${e.reason}`), ...linePriceNotes(genPrompt, lineCards)],
-            mall_cards: lineCards.length,
-          },
-        },
-      });
-    } finally {
-      if (lineLock) releaseInflight(lineLock);
-    }
+    // ─── 아래 = 한 줄이 아닌 일반 생성(빠른 시작 · 행사 원문 · 편집기 요청) ───
+    // ★ 2026-10-24 ⑧ — 옛 한 줄 갈래(시도 토큰 멱등 · 고른 몰 상품 재조회 · 한 줄 디자인)는 위에서 400 으로 닫혀 여기 오지 않는다 → 그 코드를 지웠다.
+    //   돈 순서는 지금 그대로(잔액 확인 → 만들기 → 차감).
+    const cost = getCreditCost('email-ai-generate'); // 3
+    await checkCredit(auth.companyId, cost);
+    const result = await generateEmailSections({ companyId: auth.companyId, userId: auth.userId, prompt: genPrompt, scenario, isAd, eventText });
+    await deductCreditSafe({ companyId: auth.companyId, cost, source: 'email-ai-generate', createdBy: auth.userId });
+    // ★ 2026-07-08 연동 몰 상품 자동 첨부 — 상품 슬라이드 항목명 이름매칭 → 이미지·링크·정가·할인가(빈 값만, 실패 skip). 발송 코어 무관(생성 결과 후처리).
+    try { await attachMallImagesToProductCarousels(auth.companyId, (result as any)?.sections, await resolveIntegrationActor(req.user)); } catch { /* best-effort */ }
+    // ★ 2026-10-24 ② 결과 안내(서버 문장 · 근거 없는 효능을 뺀 수)
+    const { efficacyDropped, ...emailOut } = result;
+    const effNote = efficacyNote('generate', efficacyDropped);
+    return res.json({ success: true, data: { ...emailOut, ...(effNote ? { notes: [effNote] } : {}) } });
   } catch (err: any) {
     // ★ 2026-10-17 템플릿 생성 실패 = 정해 둔 상태 · 문장(차감 전 · 영어 코드 노출 0)
     if (err instanceof LineTemplateError) {
@@ -1407,7 +1336,7 @@ router.post('/ai/generate-sections', singleFlight('email-generate', async (req: 
     if (err instanceof InsufficientCreditError) {
       return res.status(402).json({ success: false, error: err.message, code: 'INSUFFICIENT_CREDIT' });
     }
-    return res.status(500).json({ success: false, error: err?.message || 'AI 비주얼 생성 실패' });
+    return res.status(500).json({ success: false, error: publicErrorText(err, 'AI 비주얼 생성 실패') });
   }
 }));
 
@@ -1444,7 +1373,7 @@ router.post('/render-preview', async (req: Request, res: Response) => {
     return res.json({ success: true, html: previewHtml });
   } catch (err: any) {
     console.error('[Email /render-preview] 오류:', err);
-    return res.status(500).json({ success: false, error: err?.message || '미리보기 렌더 실패' });
+    return res.status(500).json({ success: false, error: publicErrorText(err, '미리보기 렌더 실패') });
   }
 });
 
@@ -1453,11 +1382,11 @@ router.get('/preview-customers', async (req: Request, res: Response) => {
   const auth = await ensureEmailAccess(req, res);
   if (!auth) return;
   try {
-    const customers = await buildPreviewCustomers(auth.companyId);
+    const customers = await buildPreviewCustomers(auth.companyId, auth.ownerId);
     return res.json({ success: true, customers });
   } catch (err: any) {
     console.error('[Email /preview-customers] 오류:', err);
-    return res.status(500).json({ success: false, error: err?.message || '샘플 고객 조회 실패' });
+    return res.status(500).json({ success: false, error: publicErrorText(err, '샘플 고객 조회 실패') });
   }
 });
 
@@ -1566,7 +1495,7 @@ router.get('/analytics', async (req: Request, res: Response) => {
   } catch (err: any) {
     console.error('[Email /analytics] 오류:', err);
     if (handleDbMigrationError(err, res, 'email_campaigns')) return;
-    return res.status(500).json({ success: false, error: err?.message || '분석 조회 실패' });
+    return res.status(500).json({ success: false, error: publicErrorText(err, '분석 조회 실패') });
   }
 });
 
@@ -1638,7 +1567,7 @@ router.post('/ai/account-insight', async (req: Request, res: Response) => {
       return res.status(402).json({ success: false, error: err.message, code: 'INSUFFICIENT_CREDIT' });
     }
     if (handleDbMigrationError(err, res, 'email_campaigns')) return;
-    return res.status(500).json({ success: false, error: err?.message || 'AI 진단 실패' });
+    return res.status(500).json({ success: false, error: publicErrorText(err, 'AI 진단 실패') });
   }
 });
 
@@ -1662,7 +1591,7 @@ router.post('/ai/refine', async (req: Request, res: Response) => {
     if (err instanceof InsufficientCreditError) {
       return res.status(402).json({ success: false, error: err.message, code: 'INSUFFICIENT_CREDIT' });
     }
-    return res.status(500).json({ success: false, error: err?.message || 'AI 다듬기 실패' });
+    return res.status(500).json({ success: false, error: publicErrorText(err, 'AI 다듬기 실패') });
   }
 });
 
@@ -1682,13 +1611,15 @@ router.post('/ai/refine-sections', async (req: Request, res: Response) => {
     if (result.changed) {
       await deductCreditSafe({ companyId: auth.companyId, cost, source: 'email-refine', createdBy: auth.userId });
     }
-    return res.json({ success: true, data: { sections: result.sections }, changed: result.changed });
+    // ★ 2026-10-24 ② 원래 글로 둔 조각 수 = 서버 문장(화면은 그대로 그린다)
+    const note = efficacyNote('rewrite', result.rejected);
+    return res.json({ success: true, data: { sections: result.sections }, changed: result.changed, ...(note ? { notes: [note] } : {}) });
   } catch (err: any) {
     console.error('[Email /ai/refine-sections] 오류:', err);
     if (err instanceof InsufficientCreditError) {
       return res.status(402).json({ success: false, error: err.message, code: 'INSUFFICIENT_CREDIT' });
     }
-    return res.status(500).json({ success: false, error: err?.message || 'AI 개선 실패' });
+    return res.status(500).json({ success: false, error: publicErrorText(err, 'AI 개선 실패') });
   }
 });
 
@@ -1722,7 +1653,7 @@ router.post('/ai/precheck', async (req: Request, res: Response) => {
       return res.status(402).json({ success: false, error: err.message, code: 'INSUFFICIENT_CREDIT' });
     }
     if (handleDbMigrationError(err, res, 'email_campaigns')) return;
-    return res.status(500).json({ success: false, error: err?.message || '발송 전 진단 실패' });
+    return res.status(500).json({ success: false, error: publicErrorText(err, '발송 전 진단 실패') });
   }
 });
 
@@ -1762,7 +1693,7 @@ router.post('/ai/insight', async (req: Request, res: Response) => {
       return res.status(402).json({ success: false, error: err.message, code: 'INSUFFICIENT_CREDIT' });
     }
     if (handleDbMigrationError(err, res, 'email_campaigns')) return;
-    return res.status(500).json({ success: false, error: err?.message || '성과 진단 실패' });
+    return res.status(500).json({ success: false, error: publicErrorText(err, '성과 진단 실패') });
   }
 });
 
@@ -1793,7 +1724,7 @@ router.post('/ai/send-time', async (req: Request, res: Response) => {
     if (err instanceof InsufficientCreditError) {
       return res.status(402).json({ success: false, error: err.message, code: 'INSUFFICIENT_CREDIT' });
     }
-    return res.status(500).json({ success: false, error: err?.message || '발송 시간 추천 실패' });
+    return res.status(500).json({ success: false, error: publicErrorText(err, '발송 시간 추천 실패') });
   }
 });
 
@@ -1830,7 +1761,7 @@ router.get('/campaigns/:id/non-openers', async (req: Request, res: Response) => 
   } catch (err: any) {
     console.error('[Email /campaigns/:id/non-openers] 오류:', err);
     if (handleDbMigrationError(err, res, 'email_campaigns')) return;
-    return res.status(500).json({ success: false, error: err?.message || '미오픈자 조회 실패' });
+    return res.status(500).json({ success: false, error: publicErrorText(err, '미오픈자 조회 실패') });
   }
 });
 
@@ -1859,9 +1790,13 @@ router.post('/campaigns/:id/resend-non-openers', async (req: Request, res: Respo
     }
     const subjectOverride = typeof req.body?.subject === 'string' ? req.body.subject : undefined;
     // ★ 2026-07-12 재발송 제목에 미입력 자리 유입 차단 — 엔진 가드(sendEmailCampaign)가 최종 방어선이나 즉시 안내가 낫다
-    if (subjectOverride && findUneditedPlaceholder(subjectOverride, null, null)) {
-      return res.status(400).json({ success: false, error: '재발송 제목에 직접 입력이 필요한 자리가 남아 있습니다. 채운 뒤 다시 시도해주세요.', code: 'UNEDITED_PLACEHOLDER' });
-    }
+    // ★ 2026-10-24 세 채널 구조체크 ⑥ · Codex 1R — 보낼 모습(최종 제목 + 원본 본문)을 엔진과 같은 잠금(채울 자리 + 링크 결함)으로 자식 생성 **앞**에서 본다.
+    //   옛: 제목만 봐서 원본 본문(완료 뒤 PATCH)의 깨진 링크는 자식을 만든 뒤 엔진에서 실패했고, 실패한 자식이 재발송 1회 한도를 써 버렸다.
+    const resendBlock = emailContentBlocker({
+      subject: subjectOverride && subjectOverride.trim() ? subjectOverride.trim() : parent.subject,
+      htmlBody: parent.htmlBody, textBody: parent.textBody,
+    });
+    if (resendBlock) return res.status(resendBlock.status).json({ success: false, error: resendBlock.error, code: resendBlock.code });
     // 자식 캠페인 생성(콘텐츠 재사용 = 무료, 완성 게이트 우회하도록 sendEmailCampaign 직접 호출)
     // ★ 2026-09-27 한줄로 V2 R123 — 원본당 1회 검사와 자식 생성을 **원본 단위 잠금** 안에서 한다. 옛: 동시 요청 둘이 함께 0건을 보고
     //   자식을 둘 만들어 미오픈자에게 같은 메일이 두 번 나갔다(단일 프로세스 기동 · keyed-lock CT).
@@ -1894,7 +1829,7 @@ router.post('/campaigns/:id/resend-non-openers', async (req: Request, res: Respo
     console.error('[Email /campaigns/:id/resend-non-openers] 오류:', err);
     if (handleDbMigrationError(err, res, 'email_campaigns')) return;
     if (handleEncryptionKeyError(err, res)) return;
-    return res.status(500).json({ success: false, error: err?.message || '재발송 실패' });
+    return res.status(500).json({ success: false, error: publicErrorText(err, '재발송 실패') });
   }
 });
 

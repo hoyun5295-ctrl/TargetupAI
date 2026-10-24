@@ -21,7 +21,7 @@ import { query } from '../config/database';
 // ★ v3 AI 호출은 아웃리치 계수기 진입점(callOutreachAi · produce.ts)만 — 공용 호출기 직접 호출 0
 import { fetchHtmlGuarded } from './dm/dm-brand-extractor';
 import { buildOutreachEventMaterial } from './sales-outreach-extract';
-import { stripUnauthorizedBenefits, BENEFIT_PLACEHOLDER } from './copy-benefit-detector';
+import { stripUnauthorizedBenefits, BENEFIT_PLACEHOLDER, dropInventedEfficacy, EFFICACY_PLACEHOLDER, EFFICACY_PROMPT_RULES } from './copy-benefit-detector';
 import { getActiveStyleGuide, type OutreachStyleGuide } from './sales-outreach-style';
 import { isSalesOutreachOperator } from './audit-log';
 import { isIndustryCode, industryLabel } from './industry-codes';
@@ -381,6 +381,7 @@ export function buildCopyPrompt(guide: OutreachStyleGuide, input: CopyPromptInpu
     '모바일 DM 링크 자리는 {{DM_LINK}} 토큰 그대로 둔다(마지막 줄).',
     '혜택 수치(퍼센트·금액·쿠폰)는 [홈페이지에서 읽은 내용]에 글자 그대로 있는 것만 쓴다. 없으면 수치 없이 쓴다.',
     '상품명·행사명은 [홈페이지에서 읽은 내용]에 있는 것만 쓴다. 지어내지 마라. 이모지 0 · 줄표 0.',
+    EFFICACY_PROMPT_RULES,
     ...guide.prohibitions.map((p) => `금지: ${p}`),
   ].join('\n');
   const user = [
@@ -1664,6 +1665,10 @@ async function runProductionMetered(jobId: string, lockToken: string, meter: Out
         const lines = aiText.replace(/^\[Web발신\]\s*/i, '').trim().split('\n')
           .map((l) => (productNames.some((n) => l.includes(n)) ? l : stripUnauthorizedBenefits(l, quoteBasis)));
         let body = lines.join('\n').trim();
+        // ★ 2026-10-24 세 채널 구조체크 ② — 같은 근거(면허 인용)로 근거 없는 효능 문장을 뺀다(상품명 줄도 대상 · 효능 판정은 상품명 숫자에 걸리지 않는다) · 다 빠지면 빈 문안 = 아래 오류
+        const eff = dropInventedEfficacy(body, quoteBasis);
+        if (eff.dropped.length > 0) console.warn(`[sales-outreach] 문안 근거 없는 효능 ${eff.dropped.length}문장 뺌 job=${jobId}`);
+        body = eff.text === EFFICACY_PLACEHOLDER ? '' : eff.text;
         if (!body) throw new Error('AI가 빈 문안을 반환했습니다');
         if (!/^\(광고\)/.test(body)) body = `(광고) ${body}`;
         const placeholders = countBenefitPlaceholders(body);

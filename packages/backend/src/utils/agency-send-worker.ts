@@ -23,18 +23,18 @@
 import pool, { query } from '../config/database';
 // ★2026-09-12 수신자 회신번호 컬럼 존재 탐지 — 판정은 접수 코어와 같은 한 벌을 쓴다(인라인 재정의 금지)
 import { findUnregisteredRequestCallbacks, hasAgencyColumn, hasApprovalRequestedColumn } from './agency-send-intake';
-import { autoSpamTestWithRegenerate } from './spam-test-queue';
+import { autoSpamTestWithRegenerate, spamVerdictOf, type SpamVerdict } from './spam-test-queue';
 import { refineForSpam } from './agency-send-refine';
 import {
   buildApprovedExpiredNotify, buildApprovalTimeoutNotify, buildExpiredNotify, buildFinalBlockedNotify, buildPassedNotify,
-  buildQueueFailedNotify, buildReapprovalNotify, buildTestFailedNotify, buildTooTightNotify, formatWhen, shortLabel,
+  buildQueueFailedNotify, buildReapprovalNotify, buildTestErrorNotify, buildTestFailedNotify, buildTooTightNotify, formatWhen, shortLabel,
   buildNoLinkApproverLine, buildLinkActionNotify,
 } from './agency-send-notify';
 import { agencyManagerPhones, buildShortAgencyApproveUrl, resolveLinkApprovers, linkCancelTailOf } from './agency-send-link';
 import {
   isApprovalCurrent, isApprovalExpired, isApprovalTimedOut, APPROVAL_WAIT_HOURS, isFinalTestDue, isLockStale, isQueueDue, isSameKstDay,
   isAttemptStuck, ATTEMPT_STUCK_AFTER_DUE_MINUTES,
-  lockRecoveryStatus, LOCK_STALE_MINUTES, MAX_TEST_ROUNDS, QUEUE_MARGIN_MINUTES,
+  lockRecoveryStatus, LOCK_STALE_MINUTES, MAX_TEST_ROUNDS, QUEUE_MARGIN_MINUTES, SPAM_CHECK_ERROR_BACKOFF_MINUTES, SPAM_CHECK_ERROR_LIMIT,
   DELIVERED_BY_TIME_SQL,
   type AgencySendStatus,
 } from './agency-send-state';
@@ -374,60 +374,108 @@ async function sendManagerTest(opts: {
  *   의존 장애로 다루는 재시도·백오프 설계가 함께 필요해 별도 과제로 뺐다(설계서 §14-6).
  */
 async function runSpamRound(row: any, startRound: number): Promise<{
+  /** ★ 2026-10-24 판정 3분할(뿌리 대장 R7) — error = 검사 장애(통과도 반려도 아니다 · 다듬은 문장은 검사받지 못해 버린다) */
+  verdict: SpamVerdict;
   passed: boolean;
   finalContent: string;   // 치환 전 원문 기준(원장에 저장할 값)
   rounds: number;
   detail: any;
 }> {
-  let content = String(row.current_content || '');
+  const original = String(row.current_content || '');
+  let content = original;
   let rounds = startRound;
   let detail: any = null;
 
-  while (rounds < MAX_TEST_ROUNDS) {
-    rounds += 1;
-    const sample = await buildSample({ ...row, current_content: content });
-    const rejectNumber = row.is_ad ? await getOpt080Number(row.created_by || null, row.company_id) : '';
+  // ★ 2026-10-24 검사 단계(표본 · 실검사 · 다듬기)가 던진 예외도 검사 장애다(Codex 1024 1R) — 호출부의 catch 로 새면
+  //   spam_check_error 를 남기지 않아 대기 · 3회 상한을 우회하고 매 주기 실검사를 다시 일으켰다. 발송 배관 예외는 이 함수 밖이라 섞이지 않는다.
+  try {
+    while (rounds < MAX_TEST_ROUNDS) {
+      rounds += 1;
+      const sample = await buildSample({ ...row, current_content: content });
+      const rejectNumber = row.is_ad ? await getOpt080Number(row.created_by || null, row.company_id) : '';
 
-    // 재생성은 우리가 직접 돌린다(다듬기 규칙이 캠페인 문안과 다르다) → maxRetries 0
-    const result = await autoSpamTestWithRegenerate({
-      companyId: row.company_id,
-      userId: row.created_by || row.company_id,
-      callbackNumber: row.callback_number,
-      messageType: (row.message_type === 'MMS' ? 'MMS' : row.message_type === 'LMS' ? 'LMS' : 'SMS'),
-      subject: sample.subject,
-      variants: [{ variantId: 'agency', messageText: sample.text, subject: sample.subject }],
-      isAd: !!row.is_ad,
-      rejectNumber,
-      maxRetries: 0,
-    });
-    detail = { batchId: result.batchId, round: rounds, variants: result.variants };
+      // 재생성은 우리가 직접 돌린다(다듬기 규칙이 캠페인 문안과 다르다) → maxRetries 0
+      const result = await autoSpamTestWithRegenerate({
+        companyId: row.company_id,
+        userId: row.created_by || row.company_id,
+        callbackNumber: row.callback_number,
+        messageType: (row.message_type === 'MMS' ? 'MMS' : row.message_type === 'LMS' ? 'LMS' : 'SMS'),
+        subject: sample.subject,
+        variants: [{ variantId: 'agency', messageText: sample.text, subject: sample.subject }],
+        isAd: !!row.is_ad,
+        rejectNumber,
+        maxRetries: 0,
+      });
+      detail = { batchId: result.batchId, round: rounds, variants: result.variants };
 
-    const v = result.variants[0];
-    if (v?.spamResult !== 'blocked') {
-      return { passed: true, finalContent: content, rounds, detail };
+      const v = result.variants[0];
+      // ★ 2026-10-24 공용 판정(B-0823-1 가) — 옛: 「차단이 아니면 통과」라 큐 등록 실패 · 시간 초과 · 결과 없음도 통과로 승인 요청 · 발송됐다
+      const verdict = spamVerdictOf(v, result.totalTestCount);
+      if (verdict === 'error') return { verdict, passed: false, finalContent: original, rounds, detail };
+      if (verdict === 'pass') return { verdict, passed: true, finalContent: content, rounds, detail };
+
+      await logEvent(row.id, 'spam_blocked', { round: rounds, carriers: v.carrierResults });
+      if (rounds >= MAX_TEST_ROUNDS) break;
+
+      const refined = await refineForSpam({ companyId: row.company_id, original: content, round: rounds });
+      if (!refined.ok || !refined.content) {
+        await logEvent(row.id, 'refine_failed', { round: rounds, reason: refined.reason });
+        // ★ 2026-10-24 다듬기 AI 장애는 내용 반려가 아니다(B-0823-1 나) — 검사 장애와 같은 갈래(원문 그대로 · 다시 시도)
+        if (String(refined.reason || '').startsWith('model-error')) return { verdict: 'error', passed: false, finalContent: original, rounds, detail };
+        break; // 다듬지 못하면 더 돌려도 같은 문안이다
+      }
+      // ★2026-08-31 **실제로 바뀌었을 때만** '다듬었다'로 남긴다.
+      //   `checkRefined`는 빈 값·길이·앵커 손실·없던 혜택만 거르고 "원문과 똑같은 결과"는 통과시킨다.
+      //   짧은 문안은 다듬을 곳이 없어 모델이 원문을 그대로 돌려주는데, 전에는 그 회차도 `refined`로 찍혔다.
+      //   그런데 담당자 통보는 문안이 **달라졌을 때만** 나간다(워커 B 통과 분기). 기록은 "다듬었다"인데
+      //   문자는 안 나가 "다듬었다면서 왜 안내가 없나"가 된다(0831 Harold 지적).
+      // ⛔ 비교는 통보 분기와 **같은 기준**(글자 그대로)이어야 한다. 여기서 공백을 정규화하면 그 순간
+      //   기록과 통보가 다시 갈린다.
+      const refineChanged = refined.content !== content;
+      content = refined.content;
+      await logEvent(row.id, refineChanged ? 'refined' : 'refine_nochange', { round: rounds });
     }
-
-    await logEvent(row.id, 'spam_blocked', { round: rounds, carriers: v.carrierResults });
-    if (rounds >= MAX_TEST_ROUNDS) break;
-
-    const refined = await refineForSpam({ companyId: row.company_id, original: content, round: rounds });
-    if (!refined.ok || !refined.content) {
-      await logEvent(row.id, 'refine_failed', { round: rounds, reason: refined.reason });
-      break; // 다듬지 못하면 더 돌려도 같은 문안이다
-    }
-    // ★2026-08-31 **실제로 바뀌었을 때만** '다듬었다'로 남긴다.
-    //   `checkRefined`는 빈 값·길이·앵커 손실·없던 혜택만 거르고 "원문과 똑같은 결과"는 통과시킨다.
-    //   짧은 문안은 다듬을 곳이 없어 모델이 원문을 그대로 돌려주는데, 전에는 그 회차도 `refined`로 찍혔다.
-    //   그런데 담당자 통보는 문안이 **달라졌을 때만** 나간다(워커 B 통과 분기). 기록은 "다듬었다"인데
-    //   문자는 안 나가 "다듬었다면서 왜 안내가 없나"가 된다(0831 Harold 지적).
-    // ⛔ 비교는 통보 분기와 **같은 기준**(글자 그대로)이어야 한다. 여기서 공백을 정규화하면 그 순간
-    //   기록과 통보가 다시 갈린다.
-    const refineChanged = refined.content !== content;
-    content = refined.content;
-    await logEvent(row.id, refineChanged ? 'refined' : 'refine_nochange', { round: rounds });
+  } catch (err: any) {
+    console.error(`${LOG} 스팸 검사 단계 예외 request=${row.id}:`, err?.message || err);
+    return { verdict: 'error', passed: false, finalContent: original, rounds, detail };
   }
 
-  return { passed: false, finalContent: content, rounds, detail };
+  return { verdict: 'blocked', passed: false, finalContent: content, rounds, detail };
+}
+
+/**
+ * ★ 2026-10-24 검사 장애 마감(B-0823-1 가 · 나 · 뿌리 대장 R7) — 장애는 통과도 반려도 아니다.
+ *   사건(spam_check_error · 문안 버전)을 남기고, 같은 버전에서 SPAM_CHECK_ERROR_LIMIT 번째면 사람 판단(test_failed + 장비 문제 안내),
+ *   아니면 잡기 전 상태로 돌려놓는다(다시 집기는 고르기 SQL 이 SPAM_CHECK_ERROR_BACKOFF_MINUTES 뒤에만 · 실패 건이 앞자리를 차지하지 않게).
+ */
+async function settleSpamCheckError(row: any, token: string, backTo: 'received' | 'approved', phase: 'first' | 'final', detail: any): Promise<void> {
+  const version = Number(row.content_version || 0);
+  await logEvent(row.id, 'spam_check_error', { phase, version, batchId: detail?.batchId ?? null });
+  const r = await query(
+    `SELECT COUNT(*)::int AS n FROM agency_send_events
+      WHERE request_id = $1::uuid AND kind = 'spam_check_error' AND COALESCE(payload->>'version', '') = $2`,
+    [row.id, String(version)],
+  ).catch(() => ({ rows: [{ n: 0 }] }));
+  const n = Number(r.rows[0]?.n) || 0;
+  if (n >= SPAM_CHECK_ERROR_LIMIT) {
+    if (!await setStatus(row.id, 'test_failed', { ...RELEASE }, token)) return;
+    await logEvent(row.id, 'test_failed', { reason: 'spam_check_error', count: n, phase });
+    await notifyManager({
+      companyId: row.company_id, requestId: row.id, phones: managerPhonesOf(row),
+      callback: row.callback_number, title: phase === 'final' ? '[대행발송] 예약 취소 안내' : '[대행발송] 검사 확인 필요',
+      text: buildTestErrorNotify({ label: shortLabel(row.file_name || row.original_content) }),
+    });
+    return;
+  }
+  // 상태 변경 결과를 본 뒤에만 기록한다(소유권을 잃었으면 가져간 쪽이 자기 기록을 남긴다 · ⓕ)
+  const back = await setStatus(row.id, backTo, { ...RELEASE }, token).catch(() => false);
+  if (back) console.warn(`${LOG} 스팸 검사 장애(${n}/${SPAM_CHECK_ERROR_LIMIT}) request=${row.id} phase=${phase} — ${SPAM_CHECK_ERROR_BACKOFF_MINUTES}분 뒤 다시 검사`);
+}
+
+/** 고르기 SQL 조각 — 방금(대기 시간 안) 검사 장애가 난 건은 다시 집지 않는다(LIMIT 앞 · B-0823-1 착수 주의) */
+function spamErrorBackoffSql(param: number): string {
+  return `NOT EXISTS (SELECT 1 FROM agency_send_events se WHERE se.request_id = agency_send_requests.id AND se.kind = 'spam_check_error'
+                 AND se.created_at > NOW() - ($${param}::int * INTERVAL '1 minute'))`;
 }
 
 /**
@@ -466,7 +514,7 @@ async function runFirstTest(onlyRequestId?: string): Promise<void> {
   // ★0826(6) `onlyRequestId` = 접수 직후 즉시 진입(triggerAgencySendFirstTest). 리드타임 하한을 40분으로
   //   내린 뒤로는 **워커 주기 5분을 기다리는 것 자체가 승인 시간을 깎는다.** 선점은 그대로 CAS라
   //   정기 tick과 겹쳐도 한쪽만 잡는다(FOR UPDATE SKIP LOCKED + lock_token).
-  const params: any[] = [];
+  const params: any[] = [SPAM_CHECK_ERROR_BACKOFF_MINUTES];
   let idFilter = '';
   if (onlyRequestId) {
     params.push(onlyRequestId);
@@ -479,6 +527,7 @@ async function runFirstTest(onlyRequestId?: string): Promise<void> {
       WHERE id IN (
         SELECT id FROM agency_send_requests
          WHERE status = 'received'${idFilter}
+           AND ${spamErrorBackoffSql(1)}
          ORDER BY created_at
          LIMIT ${BATCH}
          FOR UPDATE SKIP LOCKED
@@ -493,7 +542,9 @@ async function runFirstTest(onlyRequestId?: string): Promise<void> {
     try {
       // ★ 2026-09-27 m025 — 이 행을 시작하는 지금 선점 시각을 새로 찍는다(잃었으면 건너뛴다)
       if (!(await touchTestingLock(row.id, token))) continue;
-      const { passed, finalContent, rounds, detail } = await runSpamRound(row, 0);
+      const { verdict, passed, finalContent, rounds, detail } = await runSpamRound(row, 0);
+      // ★ 2026-10-24 검사 장애 = 반려가 아니다(B-0823-1 가) — 접수 상태로 돌리고 대기 뒤 다시(같은 버전 3번째 = 사람 판단)
+      if (verdict === 'error') { await settleSpamCheckError(row, token, 'received', 'first', detail); continue; }
       // ⛔ 검사 결과부터 소유권을 확인하며 쓴다. 여기서 잃었으면 알림도 보내지 않는다 —
       //   담당자가 이미 문안을 고쳤는데 옛 문안으로 "승인해 주세요"를 보내면 그 문자가 거짓이 된다.
       const savedVersion = await saveTestResult(row, finalContent, rounds, detail, token);
@@ -600,7 +651,7 @@ async function runFirstTest(onlyRequestId?: string): Promise<void> {
 async function runFinalTest(onlyRequestId?: string): Promise<void> {
   // ⛔ 하한을 SQL에 넣는다(★2026-08-23 Codex high). 만료 대상(남은 시간 <= 여유)까지 후보에 담고
   //   LIMIT을 먼저 적용하면, 그런 행 다섯 개가 방금 재승인된 건을 가려 그 tick을 통째로 건너뛴다.
-  const params: any[] = [QUEUE_MARGIN_MINUTES, DISPATCH_RETRY_BACKOFF_MINUTES];
+  const params: any[] = [QUEUE_MARGIN_MINUTES, DISPATCH_RETRY_BACKOFF_MINUTES, SPAM_CHECK_ERROR_BACKOFF_MINUTES];
   let idFilter = '';
   if (onlyRequestId) {
     params.push(onlyRequestId);
@@ -614,6 +665,7 @@ async function runFinalTest(onlyRequestId?: string): Promise<void> {
         AND requested_at > NOW() + ($1::int * INTERVAL '1 minute')
         AND requested_at <= NOW() + INTERVAL '2 hours'${idFilter}
         AND NOT EXISTS (SELECT 1 FROM agency_send_events e WHERE e.request_id = agency_send_requests.id AND e.kind = 'dispatch_retry' AND e.created_at > NOW() - ($2::int * INTERVAL '1 minute'))
+        AND ${spamErrorBackoffSql(3)}
       ORDER BY requested_at
       LIMIT ${BATCH}`,
     params,
@@ -679,7 +731,9 @@ async function finalTestRow(row: any, now: Date): Promise<void> {
   const label = shortLabel(target.file_name || target.original_content);
 
   try {
-    const { passed, finalContent, rounds, detail } = await runSpamRound(target, 0);
+    const { verdict, passed, finalContent, rounds, detail } = await runSpamRound(target, 0);
+    // ★ 2026-10-24 검사 장애 = 반려가 아니다(B-0823-1 가) — 승인 상태로 돌리고 대기 뒤 다시(시각이 지나면 만료 단계가 맡는다 · 같은 버전 3번째 = 사람 판단)
+    if (verdict === 'error') { await settleSpamCheckError(target, token, 'approved', 'final', detail); return; }
     const version = await saveTestResult(target, finalContent, rounds, detail, token);
     if (version === null) return; // 소유권을 잃었다. 알림도 보내지 않는다
     // 통과한 문안에는 "오늘 검사를 지났다"는 표시를 남긴다. 재승인 뒤 재검사를 건너뛰는 근거이자,

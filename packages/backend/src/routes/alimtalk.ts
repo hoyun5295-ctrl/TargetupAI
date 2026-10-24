@@ -50,6 +50,7 @@ import {
   syncSenderStatusJob,
 } from '../utils/alimtalk-jobs';
 
+import { publicErrorText } from '../utils/http-error';
 const router = Router();
 
 // 메모리 스토리지 multer — 파일은 IMC로 즉시 스트림
@@ -82,17 +83,20 @@ function handleImcError(res: Response, err: any): Response {
     } catch {
       console.error(`[alimtalk][IMC ${err.code}] ${err.message} http=${err.httpStatus}`);
     }
+    // 게이트웨이 원문 = 감싼 이름 벗기기 → 허용 꼴(우리 한국어 문장)만 화면에(뿌리 대장 R10)
+    const userText = mapped.userMessage
+      || publicErrorText(sanitizeImcMessageForUser(err.message, err.code), '알림톡 요청을 처리하지 못했어요. 잠시 후 다시 시도해 주세요.');
     return res.status(statusHttp).json({
       success: false,
       code: err.code,
-      error: mapped.userMessage || sanitizeImcMessageForUser(err.message, err.code),
+      error: userText,
       kind: mapped.kind,
     });
   }
   console.error('[alimtalk] 처리 실패', err);
   return res.status(500).json({
     success: false,
-    error: sanitizeImcMessageForUser(err?.message, undefined, '알 수 없는 오류'),
+    error: publicErrorText(err, '알 수 없는 오류'),
   });
 }
 
@@ -823,7 +827,8 @@ router.post(
         } catch (insErr: any) {
           failures.push({
             templateCode: String(it.templateCode || it.templateKey),
-            error: insErr?.message || String(insErr),
+            // ★ 2026-10-24 R10 같은 뿌리(세 채널 구조체크 ⑩ 시험이 잡음) — 실패 사유도 고객 글로(DB 원문은 로그)
+            error: publicErrorText(insErr, '템플릿을 저장하지 못했어요', '알림톡 템플릿 가져오기'),
           });
         }
       }
@@ -958,7 +963,7 @@ router.post(
       return res.json({ success: true, dryRun: false, seedCodes: codes.length, matched, changed, remainingDiff: Number(remain.rows[0]?.cnt || 0) });
     } catch (err: any) {
       console.error('[alimtalk restore-legacy-names] 오류:', err);
-      return res.status(500).json({ success: false, error: err?.message || '복원 실패' });
+      return res.status(500).json({ success: false, error: publicErrorText(err, '복원 실패') });
     }
   },
 );
@@ -1400,18 +1405,24 @@ router.post(
         console.error(
           `[alimtalk][DB INSERT 실패] templateCode=${templateCode} templateKey=${templateKey} → IMC 롤백 시도. detail=${errDetail}`,
         );
+        let rolledBack = false;
         try {
-          await imc.deleteAlimtalkTemplate(senderKey, templateCode);
-          console.log(`[alimtalk][롤백] IMC 템플릿 삭제 완료: ${templateCode}`);
+          // 성공 판정 = 일반 삭제 경로와 같다(code 0000 만 · 실패 코드를 정상 반환해도 되돌린 것이 아니다 · Codex 1024 3R)
+          const del = await imc.deleteAlimtalkTemplate(senderKey, templateCode);
+          rolledBack = del?.code === '0000';
+          if (rolledBack) console.log(`[alimtalk][롤백] IMC 템플릿 삭제 완료: ${templateCode}`);
+          else console.error(`[alimtalk][롤백 실패] ${templateCode}: code=${del?.code} ${del?.message || ''}`);
         } catch (rollbackErr: any) {
           console.error(
             `[alimtalk][롤백 실패] ${templateCode}: ${rollbackErr?.message || rollbackErr}`,
           );
         }
+        // 원문(errDetail)은 위 로그에만 — 화면에는 우리 문장만(뿌리 대장 R10 · 중계사 이름도 내보내지 않는다) · 되돌리기 결과대로 안내(Codex 1024 2R)
         return res.status(500).json({
           success: false,
-          error: `DB 저장에 실패했습니다 (${errDetail}). IMC 등록은 자동 롤백되었습니다. 다시 시도해주세요.`,
-          dbError: errDetail,
+          error: rolledBack
+            ? '템플릿을 저장하지 못했어요. 카카오 쪽 등록은 자동으로 되돌렸어요. 다시 시도해 주세요.'
+            : '템플릿을 저장하지 못했고 카카오 쪽 등록도 되돌리지 못했어요. 같은 템플릿이 카카오에 남아 있을 수 있어 바로 다시 등록하지 말고 고객센터로 알려 주세요.',
         });
       }
 

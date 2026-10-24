@@ -24,6 +24,7 @@ import { normalizeWooMallId } from '../utils/woocommerce-core';
 // ★ 2026-09-18 몰별 사용자 범위 — 관리자는 회사 전체 몰 · 사용자는 자기 분류코드 몰만(설계서 docs/2026-09-18-mall-integration-user-scope-design.md §3-5)
 import { resolveIntegrationActor, canTouchIntegration, type IntegrationActor } from '../utils/integration-scope';
 
+import { publicErrorText } from '../utils/http-error';
 const WOO_PREFIX = 'woocommerce:';
 
 /**
@@ -59,7 +60,7 @@ mallProductsRouter.get('/providers', async (req: any, res: Response) => {
     return res.json({ success: true, providers: list.map((p) => ({ provider: p.provider, label: p.label, relookup: p.relookup })), ...(failed ? { partial: true } : {}) });
   } catch (err: any) {
     console.error('[mall-products providers] 오류:', err?.message);
-    return res.status(500).json({ success: false, error: err?.message || '연동 몰 조회 실패' });
+    return res.status(500).json({ success: false, error: publicErrorText(err, '연동 몰 조회 실패') });
   }
 });
 
@@ -101,7 +102,7 @@ mallProductsRouter.get('/preview', async (req: any, res: Response) => {
   } catch (err: any) {
     // 실측 라우트 — 몰 API 에러(스코프 미동의·필수 body 누락 등)를 그대로 노출해 매핑 확정에 쓴다.
     console.error('[mall-products preview] 오류:', err?.message);
-    return res.status(502).json({ success: false, error: err?.message || '상품 조회 실패' });
+    return res.status(502).json({ success: false, error: publicErrorText(err, '상품 조회 실패') });
   }
 });
 
@@ -145,7 +146,7 @@ mallProductsRouter.get('/search', async (req: any, res: Response) => {
     });
   } catch (err: any) {
     console.error('[mall-products search] 오류:', err?.message);
-    return res.status(502).json({ success: false, error: err?.message || '상품 조회 실패' });
+    return res.status(502).json({ success: false, error: publicErrorText(err, '상품 조회 실패') });
   }
 });
 
@@ -195,6 +196,6 @@ mallProductsRouter.get('/match', async (req: any, res: Response) => {
     return res.json({ success: true, product: product || null });
   } catch (err: any) {
     console.error('[mall-products match] 오류:', err?.message);
-    return res.status(502).json({ success: false, error: err?.message || '상품 매칭 실패' });
+    return res.status(502).json({ success: false, error: publicErrorText(err, '상품 매칭 실패') });
   }
 });

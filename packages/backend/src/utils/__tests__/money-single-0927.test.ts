@@ -62,7 +62,7 @@ describe('R327 DM 대상 발송 = 차감·발행은 싼 검사 뒤', () => {
     const dm = dmAll.slice(dmAll.indexOf("dmRouter.post('/:id/send-to-target'"));
     const iZero = dm.indexOf("code: 'ZERO_MATCH'");
     const iDeduct = dm.indexOf('idempotencyKey: `dm-publish:${req.params.id}`,\n      });');
-    const iPublish = dm.indexOf('const pub = await publishDm(req.params.id, companyId);');
+    const iPublish = dm.indexOf('const pub = await publishDmWithPrizes(req.params.id, companyId);');   // ★ 1024 ⑭ 발행 = 경품 동기화 함께
     const iTokens = dm.indexOf('tokenPairs = await issueDmRecipientTokensBulk(');
     expect(iDeduct).toBeGreaterThan(iZero);
     expect(iPublish).toBeGreaterThan(iZero);

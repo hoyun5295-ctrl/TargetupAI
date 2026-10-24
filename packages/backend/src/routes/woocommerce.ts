@@ -59,6 +59,7 @@ import {
   type IntegrationActor,
 } from '../utils/integration-scope';
 
+import { publicErrorText } from '../utils/http-error';
 const router = Router();
 
 // ════════════════════════════════════════════════════════════════════
@@ -151,7 +152,7 @@ router.post(['/webhook/:mallId', '/webhook'], json({ limit: '1mb', verify: (req:
     }
   } catch (err: any) {
     console.error('[WooCommerce Webhook] 오류:', err);
-    return res.status(500).json({ success: false, error: err?.message || 'webhook 처리 실패' });
+    return res.status(500).json({ success: false, error: publicErrorText(err, 'webhook 처리 실패') });
   }
 });
 
@@ -209,7 +210,7 @@ router.post('/auth-callback', async (req: Request, res: Response) => {
     return;
   } catch (err: any) {
     console.error('[WooCommerce auth-callback] 오류:', err);
-    if (!res.headersSent) return res.status(500).json({ success: false, error: err?.message || '콜백 처리 실패' });
+    if (!res.headersSent) return res.status(500).json({ success: false, error: publicErrorText(err, '콜백 처리 실패') });
     return;
   }
 });
@@ -344,10 +345,10 @@ function sendWooError(res: Response, err: unknown): void {
   }
   if (err instanceof WooApiError) {
     const upstream = err.code === 'network' || err.code === 'rate_limited' || err.code === 'http' || err.code === 'header_overflow';
-    res.status(upstream ? 502 : err.code === 'busy' ? 409 : 400).json({ success: false, error: err.message, code: `WOO_${err.code}` });
+    res.status(upstream ? 502 : err.code === 'busy' ? 409 : 400).json({ success: false, error: publicErrorText(err, '우커머스 연동 중 문제가 생겼어요. 잠시 후 다시 시도해 주세요.'), code: `WOO_${err.code}` });
     return;
   }
-  res.status(500).json({ success: false, error: (err as any)?.message || '우커머스 처리 중 오류가 발생했습니다.' });
+  res.status(500).json({ success: false, error: publicErrorText(err, '우커머스 처리 중 오류가 발생했습니다.') });
 }
 
 const PLAN_LOCKED = { success: false, error: '우커머스 연동은 유료 요금제 가입 후 이용 가능합니다.', code: 'PLAN_FEATURE_LOCKED' };
@@ -515,7 +516,7 @@ router.get('/status', async (req: Request, res: Response) => {
     });
   } catch (err: any) {
     console.error('[WooCommerce /status] 오류:', err);
-    return res.status(500).json({ success: false, error: err?.message || '상태 조회 실패' });
+    return res.status(500).json({ success: false, error: publicErrorText(err, '상태 조회 실패') });
   }
 });
 
@@ -543,7 +544,7 @@ router.delete('/disconnect', async (req: Request, res: Response) => {
   } catch (err: any) {
     if (err instanceof WooSaveRejected) return sendWooError(res, err);
     console.error('[WooCommerce /disconnect] 오류:', err);
-    return res.status(500).json({ success: false, error: err?.message || '연동 해제 실패' });
+    return res.status(500).json({ success: false, error: publicErrorText(err, '연동 해제 실패') });
   }
 });
 

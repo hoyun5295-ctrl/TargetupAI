@@ -6,6 +6,7 @@
 // ★ 출구 가드 원칙 (Harold 2026-07-06): AI 지시는 확률적으로 뚫린다 — 보장은 코드가 한다.
 import { detectLiquidSyntax, flattenLiquidToPlainText } from './liquid-templating';
 import type { AgencyRequestParsed } from './crm-agency-request';
+import { dropInventedEfficacy, EFFICACY_PROMPT_RULES } from './copy-benefit-detector';
 
 export type AgencyChannel = 'sms' | 'lms' | 'mms' | 'alimtalk' | 'dm' | 'email' | 'inapp' | 'journey';
 
@@ -130,6 +131,11 @@ export function normalizeProposal(
     if (guarded.removed) {
       risks.push(`'${String(p?.title ?? '플랜')}' 문안에서 요청서에 없는 혜택 표현을 제거했습니다. 발송 전 혜택 확인 필요.`);
     }
+    // ★ 2026-10-24 세 채널 구조체크 ② — 같은 근거(요청 혜택 · 설명 · 이미지 판독)로 근거 없는 효능 문장도 뺀다(R13)
+    const eff = dropInventedEfficacy(guarded.copy, collectAllowedBenefitText(request, extraAllowedText));
+    if (eff.dropped.length > 0) {
+      risks.push(`'${String(p?.title ?? '플랜')}' 문안에서 요청서에 없는 효능 문장 ${eff.dropped.length}곳을 뺐습니다. 인증받은 기능 문구가 있으면 요청서에 그대로 적어 주세요.`);
+    }
     return {
       title: String(p?.title ?? '').trim() || '캠페인 플랜',
       objective: String(p?.objective ?? '').trim(),
@@ -138,7 +144,7 @@ export function normalizeProposal(
       targetFilters: null,
       targetCount: null,
       timing: String(p?.timing ?? '').trim(),
-      draftCopy: guarded.copy,
+      draftCopy: eff.text,
       estimatedCost: null,
       expectedNote: String(p?.expectedNote ?? '').trim(),
     };
@@ -195,6 +201,8 @@ export function buildAgencySystemPrompt(): string {
 5. 플랜 수: 2~4개. 서로 타겟 또는 채널이 달라야 합니다.
 6. 대상 인원수를 직접 추정하지 마세요(시스템이 DB에서 실측합니다).
 7. 데이터에 근거 없는 주장 금지. 근거 부족하면 그 축은 언급하지 마세요.
+8. 효능(draftCopy):
+${EFFICACY_PROMPT_RULES}
 
 [출력: JSON만, 다른 텍스트 금지]
 {

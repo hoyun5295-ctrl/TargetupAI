@@ -19,6 +19,7 @@
 
 import { renderLiquid, flattenCustomerForLiquid, detectLiquidSyntax } from './liquid-templating';
 import { query } from '../config/database';
+import { getOwnerCustomerScopeSql } from './store-scope';
 import { getColumnFields } from './standard-field-map';
 import type { GeneratedInAppMessage, SegmentConditions } from './inapp-ai-generator';
 import { matchCustomersBySegment, isEmptySegment } from './inapp-segment-matcher';
@@ -206,17 +207,19 @@ export function renderInAppMessage(
  * 회사별 미리보기 샘플 customer 3건 (등급별).
  * 실제 customers 테이블에서 등급별 1건씩 SELECT — 없으면 가상 샘플 fallback.
  */
-export async function buildPreviewCustomers(companyId: string): Promise<PreviewCustomer[]> {
+export async function buildPreviewCustomers(companyId: string, ownerUserId?: string | null): Promise<PreviewCustomer[]> {
   if (!companyId) return buildFallbackPreviewCustomers();
 
   const samples: PreviewCustomer[] = [];
+  // ★ 2026-10-24 세 채널 구조체크 ④ — 담당자(이메일)는 자기 분류 고객만 샘플로 본다(발송과 같은 범위 CT · 관리자 · 인앱 = 빈 조각 · 못 읽으면 가상 샘플)
+  const scope = await getOwnerCustomerScopeSql(companyId, ownerUserId, '').catch(() => ' AND FALSE');
 
   // VIP 등급 샘플
   const vipResult = await query(
     `SELECT id, name, grade, phone, points, region, recent_purchase_store, recent_purchase_date,
             total_purchase_amount, purchase_count, last_activity_at, cart_add_count_30d
      FROM customers
-     WHERE company_id = $1::uuid AND grade ILIKE 'VIP%' AND is_active = true
+     WHERE company_id = $1::uuid AND grade ILIKE 'VIP%' AND is_active = true${scope}
      ORDER BY last_activity_at DESC NULLS LAST LIMIT 1`,
     [companyId]
   ).catch(() => ({ rows: [] }));
@@ -234,7 +237,7 @@ export async function buildPreviewCustomers(companyId: string): Promise<PreviewC
     `SELECT id, name, grade, phone, points, region, recent_purchase_store, recent_purchase_date,
             total_purchase_amount, purchase_count, last_activity_at, cart_add_count_30d
      FROM customers
-     WHERE company_id = $1::uuid AND (grade IS NULL OR grade NOT ILIKE 'VIP%') AND is_active = true
+     WHERE company_id = $1::uuid AND (grade IS NULL OR grade NOT ILIKE 'VIP%') AND is_active = true${scope}
      ORDER BY purchase_count DESC NULLS LAST LIMIT 1`,
     [companyId]
   ).catch(() => ({ rows: [] }));
@@ -253,7 +256,7 @@ export async function buildPreviewCustomers(companyId: string): Promise<PreviewC
             total_purchase_amount, purchase_count, last_activity_at, cart_add_count_30d
      FROM customers
      WHERE company_id = $1::uuid AND is_active = true
-       AND created_at >= NOW() - INTERVAL '30 days'
+       AND created_at >= NOW() - INTERVAL '30 days'${scope}
      ORDER BY created_at DESC LIMIT 1`,
     [companyId]
   ).catch(() => ({ rows: [] }));

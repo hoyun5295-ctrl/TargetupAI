@@ -545,6 +545,6 @@ export function buildOneLineIdempotencyKey(companyId: string, channel: 'dm' | 'e
 }
 
 /** 같은 시도 토큰의 동시 요청 잠금 키(다른 담당자 · 다른 시도는 막지 않는다). */
-export function oneLineInflightKey(companyId: string, channel: 'dm' | 'email', attemptToken: string): string {
+export function oneLineInflightKey(companyId: string, channel: 'dm' | 'email' | 'inapp', attemptToken: string): string {
   return `oneline:${companyId}:${channel}:${attemptToken}`;
 }

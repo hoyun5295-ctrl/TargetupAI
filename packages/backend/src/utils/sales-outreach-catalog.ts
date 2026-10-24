@@ -15,7 +15,8 @@ import sharp from 'sharp';
 import {
   composeImage, writeTempBuffer, findTempFile, allocTempPath, writeTempMeta, moveTempToPermanent, inappImageLocalPath, type ComposeTypography,
 } from './image-studio';
-import { createDm, publishDm } from './dm/dm-builder';
+import { createDm } from './dm/dm-builder';
+import { publishDmWithPrizes } from './dm/dm-publish-core';
 import { catalogPagesOf, type CatalogPageImage } from './dm/dm-catalog-pages';
 import { selectEventSlices, OUTREACH_STD_EVENT_SLICES_MAX, type EventSliceMaterial } from './sales-outreach-slices';
 import {
@@ -209,7 +210,7 @@ export async function publishOutreachCatalogDm(images: readonly CatalogPageImage
     ai_prompt: '',
     approval_status: 'draft',
   } as any);
-  const published = await publishDm(String(dm.id), input.companyId);
+  const published = await publishDmWithPrizes(String(dm.id), input.companyId);
   if (!published?.short_code) throw new Error('카탈로그 DM 발행 주소를 만들지 못했습니다.');
   return { dmId: String(dm.id), ...outreachDmUrlsOf(published.short_code) };
 }

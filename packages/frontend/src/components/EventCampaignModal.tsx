@@ -462,6 +462,8 @@ export default function EventCampaignModal({ open, onClose, initialText, resumeD
                           : <span className="text-slate-500">예상 {CH_COSTS[c.key]} 크레딧</span>}
                     </p>
                     {err && <p className="text-[10px] text-rose-700 mt-1">{err}</p>}
+                    {/* ★ 2026-10-24 ② 서버 안내 문장(근거 없는 효능을 뺀 수 · 세 채널 같은 자리 payload.notes) */}
+                    {done && Array.isArray((results[c.key] as any)?.notes) && (results[c.key] as any).notes[0] && <p className="text-[10px] text-amber-800 mt-1">{String((results[c.key] as any).notes[0])}</p>}
                   </button>
                   {isRunning && (
                     <div className="mt-2 flex items-center gap-1.5 text-[10px] text-fuchsia-800"><Loader2 className="w-3 h-3 animate-spin" /> 생성 중...</div>

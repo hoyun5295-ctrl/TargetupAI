@@ -31,6 +31,7 @@ import { mapColumnsWithAi, ColumnMappingError } from '../utils/ai-column-mapper'
 // ★ D219+ Part 2 후속 (2026-05-27) Task 7: isAiOperatorTrialActive duplicate 폐기 — plan-guard 단일 진입점 통합
 import { loadPlanContext } from '../utils/plan-guard';
 
+import { publicErrorText } from '../utils/http-error';
 const router = Router();
 router.use(authenticate);
 
@@ -219,7 +220,7 @@ router.post('/segment-preview', requireAiOperatorTrialActive, async (req: Reques
     return res.json({ success: true, ...result });
   } catch (err: any) {
     console.error('[onboarding/segment-preview] 실패:', err);
-    return res.status(500).json({ success: false, code: 'PREVIEW_FAILED', error: err?.message || '미리보기 실패' });
+    return res.status(500).json({ success: false, code: 'PREVIEW_FAILED', error: publicErrorText(err, '미리보기 실패') });
   }
 });
 

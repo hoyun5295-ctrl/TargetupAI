@@ -33,6 +33,7 @@ import { buildCustomerFilter } from './customer-filter';
 // ★ 2026-09-27 한줄로 V2 S5-04 — 발송 주인 분류코드 범위
 import { getOwnerCustomerScopeSql } from './store-scope';
 import { hasUneditedPlaceholder } from './email-ai';
+import { emailContentBlocker } from './email/email-send-gate';
 // ★ 2026-07-02 개인화 변수 동적화 — CT-58 회사 실측 프로필(채워진 필드만 노출)
 import { getCompanyDataProfile } from './company-data-profile';
 import type { Section } from './dm/dm-section-registry';
@@ -414,17 +415,29 @@ export async function sendEmailCampaign(input: SendCampaignInput): Promise<{ mes
   // ★ 2026-07-12 발송 엔진 단일 길목 placeholder 가드 (Codex HIGH 정정) —
   //   라우트/스위퍼 개별 검사만으론 엔진 직접 호출 경로(재발송 자식·subjectOverride)가 빠진다.
   //   미입력 자리 잔존 = 어떤 경로로도 발송 불가(AI 임의 혜택 영구 룰의 마지막 방어선).
-  if (hasUneditedPlaceholder(campaign.subject, campaign.htmlBody, campaign.textBody)) {
+  // ★ 2026-10-24 세 채널 구조체크 ⑥ — 판정 = 즉시 발송 · 완성과 같은 CT(채울 자리 + 링크 결함). 옛: 채울 자리만 봐서
+  //   예약 뒤 고친(PATCH) 본문의 깨진 링크가 예약 · 재발송 · 플래너 길로 그대로 나갔다.
+  const contentBlock = emailContentBlocker(campaign);
+  if (contentBlock) {
     await query(
       `UPDATE email_campaigns SET status = 'failed', updated_at = NOW() WHERE id = $1::uuid`,
       [campaign.id],
     );
-    throw new Error('직접 입력이 필요한 자리가 남아 있어 발송할 수 없습니다. 편집에서 채운 뒤 다시 발송해주세요.');
+    throw new Error(contentBlock.error);
   }
 
   // Zero-Count 영구 원칙
   if (input.recipients.length === 0) {
     throw new Error('수신자 0건. Zero-Count 영구 원칙 발송 차단.');
+  }
+  // ★ 2026-10-24 세 채널 구조체크 ① — 거부 신호를 남긴 주소는 어떤 경로로 와도 보내지 않는다(이 엔진이 단일 길목 · 조회 실패 = 던진다 = 발송 안 함)
+  const allowed = await filterEmailSuppressed(campaign.companyId, input.recipients);
+  if (allowed.excludedCount > 0) {
+    console.log(`[Email] 거부 신호 주소 ${allowed.excludedCount}건 제외 (campaign ${campaign.id})`);
+  }
+  // 거른 뒤 0건도 Zero-Count(0명 「발송 완료」를 만들지 않는다 · 호출부 = 예약 워커 · 재발송 · 플래너가 실패로 처리)
+  if (allowed.recipients.length === 0) {
+    throw new Error('보낼 수 있는 주소가 0건입니다(수신거부 · 반송 · 스팸 신고 주소 제외).');
   }
 
   // ★ 2026-07-12 재시도 멱등 (Codex MEDIUM 정정) — 부분 실패 후 같은 캠페인을 다시 발송할 때
@@ -439,10 +452,10 @@ export async function sendEmailCampaign(input: SendCampaignInput): Promise<{ mes
     alreadyDelivered = new Set<string>(dRes.rows.map((r: any) => String(r.email)));
   } catch { /* 조회 실패 = 스킵 없이 기존 동작(발송 우선) */ }
   const sendTargets = alreadyDelivered.size > 0
-    ? input.recipients.filter((r) => !alreadyDelivered.has(r.email.toLowerCase()))
-    : input.recipients;
+    ? allowed.recipients.filter((r) => !alreadyDelivered.has(r.email.toLowerCase()))
+    : allowed.recipients;
   if (alreadyDelivered.size > 0) {
-    console.log(`[Email] 재시도 멱등 — 기발송(delivered) ${input.recipients.length - sendTargets.length}건 스킵 (campaign ${campaign.id})`);
+    console.log(`[Email] 재시도 멱등 — 기발송(delivered) ${allowed.recipients.length - sendTargets.length}건 스킵 (campaign ${campaign.id})`);
   }
 
   // 발송 직전 status 갱신
@@ -722,7 +735,7 @@ export async function recordEmailEvent(input: EmailEventInput): Promise<void> {
   // ★ D210+ Phase 3 B-5 (Harold 명시 2026-05-23): bounce / spam / unsubscribe 자동 처리
   //   bounce / spam_report / unsubscribe 이벤트 수신 시 customers 자동 unsubscribe.
   //   email_opt_in = false 갱신 + email_events.auto_processed = true
-  if (eventType === 'bounce' || eventType === 'spam_report' || eventType === 'unsubscribe') {
+  if ((EMAIL_SUPPRESS_EVENTS as readonly string[]).includes(eventType)) {
     try {
       // 회사 ID = email_campaigns → company_id 매핑
       const cmp = await query(
@@ -734,13 +747,15 @@ export async function recordEmailEvent(input: EmailEventInput): Promise<void> {
         // customers 자동 처리 — email 매칭 + email_opt_in false
         // ★ 2026-09-26 한줄로 V2 R1-40 — 대소문자만 다른 같은 주소 행까지(옛: 정확히 같은 행만 → 다른 표기 행은 계속 받았다).
         //   읽기(직접 명단 excludeOptedOutEmails)와 같은 판정 = lower 비교.
+        // ★ 2026-10-24 세 채널 구조체크 ① — 값이 빈(NULL) 행도 거부로 바꾼다(읽기 RECIPIENT_SAFETY_WHERE 는 NULL 을 「받음」으로 본다 · 옛 `= true` 는
+        //   업로드 · 싱크가 true 를 쓰지 않아 거의 0행을 바꿨다). 갱신이 빠진 옛 행 · 고객 DB 밖 주소는 발송 엔진이 filterEmailSuppressed 로 막는다.
         await query(
           `UPDATE customers SET
              email_opt_in = false,
              updated_at = NOW()
            WHERE company_id = $1::uuid
              AND lower(email) = lower($2)
-             AND email_opt_in = true`,
+             AND email_opt_in IS DISTINCT FROM false`,
           [companyId, email]
         );
         // email_events.auto_processed = true 갱신
@@ -929,7 +944,10 @@ export async function countCustomerRecipientsWhere(params: any[], scopeWhere: st
 export async function previewCustomerRecipients(
   companyId: string,
   grades?: string[],
+  ownerUserId?: string | null,
 ): Promise<{ total: number; gradeBreakdown: Array<{ grade: string; count: number }>; sample: string[] }> {
+  // ★ 2026-10-24 세 채널 구조체크 ④ — 발송(resolveCustomerRecipients)과 같은 담당자 범위(옛: 회사 전체를 세 「보인 수 ≠ 나간 수」 · 남의 주소 표본 노출)
+  const scopeSql = await getOwnerCustomerScopeSql(companyId, ownerUserId, '');
   const params: any[] = [companyId];
   let gradeClause = '';
   if (grades && grades.length > 0) {
@@ -938,18 +956,18 @@ export async function previewCustomerRecipients(
   }
   const totalRes = await query(
     `SELECT COUNT(DISTINCT lower(email))::int AS total
-     FROM customers WHERE company_id = $1::uuid AND ${RECIPIENT_SAFETY_WHERE}${gradeClause}`,
+     FROM customers WHERE company_id = $1::uuid AND ${RECIPIENT_SAFETY_WHERE}${gradeClause}${scopeSql}`,
     params,
   );
   const breakdownRes = await query(
     `SELECT COALESCE(NULLIF(grade, ''), '미지정') AS grade, COUNT(DISTINCT lower(email))::int AS count
-     FROM customers WHERE company_id = $1::uuid AND ${RECIPIENT_SAFETY_WHERE}${gradeClause}
+     FROM customers WHERE company_id = $1::uuid AND ${RECIPIENT_SAFETY_WHERE}${gradeClause}${scopeSql}
      GROUP BY COALESCE(NULLIF(grade, ''), '미지정') ORDER BY count DESC`,
     params,
   );
   const sampleRes = await query(
     `SELECT DISTINCT ON (lower(email)) email
-     FROM customers WHERE company_id = $1::uuid AND ${RECIPIENT_SAFETY_WHERE}${gradeClause}
+     FROM customers WHERE company_id = $1::uuid AND ${RECIPIENT_SAFETY_WHERE}${gradeClause}${scopeSql}
      ORDER BY lower(email) LIMIT 5`,
     params,
   );
@@ -958,6 +976,35 @@ export async function previewCustomerRecipients(
     gradeBreakdown: breakdownRes.rows.map((r: any) => ({ grade: r.grade, count: Number(r.count) || 0 })),
     sample: sampleRes.rows.map((r: any) => String(r.email)),
   };
+}
+
+/** ★ 2026-10-24 이메일 거부 신호 = 이 이벤트 셋(수신거부 · 영구 반송 · 스팸 신고) — 고객 표 갱신(recordEmailEvent)과 발송 거름이 같은 셋을 본다 */
+export const EMAIL_SUPPRESS_EVENTS = ['unsubscribe', 'bounce', 'spam_report'] as const;
+
+/**
+ * ★ 2026-10-24 (DB) 이 회사의 메일에 거부 신호를 남긴 주소는 뺀다(대소문자 무시) — 세 채널 구조체크 ①.
+ *   고객 표 갱신이 빠진 옛 행(값이 빈 고객) · 고객 DB 에 없는 직접 입력 주소까지 막는 판정 하나다.
+ *   소비처 = 발송 엔진 sendEmailCampaign(즉시 · 예약 워커 · 미오픈 재발송 · 플래너 실행이 모두 지나는 단일 길목) · 즉시 발송 라우트(화면에 보일 수).
+ */
+export async function filterEmailSuppressed<T extends { email: string }>(
+  companyId: string,
+  recipients: T[],
+): Promise<{ recipients: T[]; excludedCount: number }> {
+  if (recipients.length === 0) return { recipients, excludedCount: 0 };
+  const emails = [...new Set(recipients.map((r) => String(r.email || '').toLowerCase()))];
+  const res = await query(
+    `SELECT DISTINCT lower(e.email) AS email
+       FROM email_events e
+       JOIN email_campaigns c ON c.id = e.campaign_id
+      WHERE c.company_id = $1::uuid
+        AND e.event_type = ANY($2::text[])
+        AND lower(e.email) = ANY($3::text[])`,
+    [companyId, [...EMAIL_SUPPRESS_EVENTS], emails],
+  );
+  const blocked = new Set<string>(res.rows.map((r: any) => String(r.email)));
+  if (blocked.size === 0) return { recipients, excludedCount: 0 };
+  const kept = recipients.filter((r) => !blocked.has(String(r.email || '').toLowerCase()));
+  return { recipients: kept, excludedCount: recipients.length - kept.length };
 }
 
 /**
@@ -984,11 +1031,12 @@ export async function excludeOptedOutEmails(
   return { recipients: kept, excludedCount: recipients.length - kept.length };
 }
 
-/** 회사 전체 등급 목록 (고객DB 탭 등급 선택지) */
-export async function listCustomerGrades(companyId: string): Promise<Array<{ grade: string; count: number }>> {
+/** 등급 목록 (고객DB 탭 등급 선택지) · ★ 2026-10-24 ④ 담당자 = 자기 분류 고객만(발송과 같은 범위) */
+export async function listCustomerGrades(companyId: string, ownerUserId?: string | null): Promise<Array<{ grade: string; count: number }>> {
+  const scopeSql = await getOwnerCustomerScopeSql(companyId, ownerUserId, '');
   const result = await query(
     `SELECT COALESCE(NULLIF(grade, ''), '미지정') AS grade, COUNT(*)::int AS count
-     FROM customers WHERE company_id = $1::uuid AND ${RECIPIENT_SAFETY_WHERE}
+     FROM customers WHERE company_id = $1::uuid AND ${RECIPIENT_SAFETY_WHERE}${scopeSql}
      GROUP BY COALESCE(NULLIF(grade, ''), '미지정') ORDER BY count DESC`,
     [companyId],
   );

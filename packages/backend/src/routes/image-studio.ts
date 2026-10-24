@@ -30,7 +30,8 @@ import { LIMITS } from '../config/defaults';
 import { checkCredit, settleCreditAfterSuccess, InsufficientCreditError, isChargedByKey } from '../utils/ai-credit';
 import { runSerial } from '../utils/inflight-lock';
 import { studioAttemptKey, rememberStudioResult, recallStudioResult } from '../utils/image-studio-attempt';
-import { loadPlanContext, isAiOperatorAllowed } from '../utils/plan-guard';
+// ★ 2026-10-24 요금제 = AI 존 서버 문 한 곳(뿌리 대장 R2 · 옛 studioPlanBlocked 1019 = 같은 판정의 사본) · 크레딧을 쓰는 생성 · 수정에만
+import { aiZonePlanBlocked } from '../utils/plan-guard';
 import { registerAsset, getStorageUsage, isAssetsTableMissing, getAsset, getAssetByUrl } from '../utils/assets';
 import {
   isStudioReady, StudioError, CREDIT_SOURCE,
@@ -89,16 +90,6 @@ function respondStudioError(res: Response, err: any): Response {
   return res.status(502).json({ success: false, error: '이미지 생성에 실패했어요. 잠시 후 다시 시도해주세요.', code: 'GEN_FAILED' });
 }
 
-/**
- * ★ 2026-10-19 B-1016-3① 서버 쪽 요금제 검사 — 화면 PlanGate(image-studio = AI 오퍼레이터 이용 가능)와 같은 판정.
- *   크레딧을 쓰는 생성 · 수정에만 건다(라이브러리 그림 MMS 넣기 · 임시 그림 보기는 다른 발송 화면도 쓰므로 그대로).
- */
-async function studioPlanBlocked(req: any, res: Response): Promise<boolean> {
-  const plan = await loadPlanContext(req.user?.companyId);
-  if (plan && isAiOperatorAllowed(plan, req.user)) return false;
-  res.status(403).json({ success: false, error: '이 기능은 요금제 가입 후 이용할 수 있어요.', code: 'PLAN_GATED' });
-  return true;
-}
 
 // ── GET /status ──────────────────────────────────────────────
 imageStudioRouter.get('/status', (req: any, res: Response) => {
@@ -192,7 +183,7 @@ imageStudioRouter.post('/generate', async (req: any, res: Response) => {
   if (!companyId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
   if (!isStudioReady()) return respondStudioError(res, new StudioError('STUDIO_NOT_READY', 503));
 
-  if (await studioPlanBlocked(req, res)) return;
+  if (await aiZonePlanBlocked(req, res)) return;
   const { templateId, presetKey, userHint, texts, cutoutTempId, textPosition } = req.body || {};
   // ★ 2026-10-19 B-1016-3② 시도 키(화면이 보낼 때만) — 같은 시도 = 기억한 결과 · 이미 걷혔으면 다시 걷지 않는다
   const attemptKey = studioAttemptKey('gen', companyId, req.body?.attemptToken, { templateId, presetKey, userHint, texts, cutoutTempId, textPosition });
@@ -295,7 +286,7 @@ imageStudioRouter.post('/edit', async (req: any, res: Response) => {
   const userId = req.user?.userId;
   if (!companyId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
 
-  if (await studioPlanBlocked(req, res)) return;
+  if (await aiZonePlanBlocked(req, res)) return;
   const { tempId, instruction, targetSize } = req.body || {};
   // ★ 2026-09-30 4K 격상 제거(Harold 확정) — 생성 모델이 "같은 그림 4K"를 새로 그려 다른 포스터가 나왔다(운영 실측 · 원장 docs/2026-09-30-ai-model-prompt-upgrade.md §2-4).
   //   캐시된 옛 화면이 보내면 차감 없이 안내만 돌려준다(검사 · 잠금 · 차감 전).
@@ -389,7 +380,7 @@ imageStudioRouter.post('/line-headline', async (req: any, res: Response) => {
   const userId = req.user?.userId;
   if (!companyId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
   if (!isStudioReady()) return respondStudioError(res, new StudioError('STUDIO_NOT_READY', 503));
-  if (await studioPlanBlocked(req, res)) return;
+  if (await aiZonePlanBlocked(req, res)) return;
   const template = getTemplate(String(req.body?.templateId || ''));
   if (!template) return res.status(400).json({ success: false, error: '템플릿을 골라 주세요.' });
   const title = typeof req.body?.title === 'string' ? req.body.title.replace(/\s+/g, ' ').trim() : '';

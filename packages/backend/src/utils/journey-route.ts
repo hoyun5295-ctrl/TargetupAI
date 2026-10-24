@@ -11,7 +11,7 @@
  */
 import type { Request, Response } from 'express';
 import { query } from '../config/database';
-import { loadPlanContext, isAiOperatorAllowed } from './plan-guard';
+import { aiZonePlanBlocked } from './plan-guard';
 import { InsufficientCreditError } from './ai-credit';
 import { JourneyInputError } from './journey-step-limits';
 import { JourneyStepGateError } from './journey-builder';
@@ -50,15 +50,19 @@ async function journeyIdOfParams(req: Request, companyId: string): Promise<strin
  * 여정 주소 문 — 회사 · 요금제 · 운영 권한 · (자원 주소면) 주인. 막히면 응답을 보내고 null.
  * 자원 주소에서 남의 여정 = 404(있는지도 알리지 않는다 · 캠페인과 같다).
  */
-export async function journeyGate(req: Request, res: Response): Promise<(JourneyViewer & { userId: string | null }) | null> {
+/** (순수) 여정 옵션 요청이 「자동 재진입 끄기」만 담았는가(dryRun 은 제외) — 끄기만이면 요금제 문을 열어 둔다 */
+export function journeyOptionsOffOnly(body: unknown): boolean {
+  if (!body || typeof body !== 'object' || Array.isArray(body)) return false;
+  const keys = Object.keys(body as Record<string, unknown>).filter((k) => k !== 'dryRun');
+  return keys.length > 0 && keys.every((k) => k === 'autoReentryEnabled' && (body as any)[k] === false);
+}
+
+export async function journeyGate(req: Request, res: Response, opts: { plan: boolean } = { plan: true }): Promise<(JourneyViewer & { userId: string | null }) | null> {
   const viewer = journeyViewerOf(req);
   if (!viewer) { res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' }); return null; }
-  const planCtx = await loadPlanContext(viewer.companyId);
-  if (!planCtx) { res.status(404).json({ success: false, error: '회사 정보를 찾을 수 없습니다.' }); return null; }
-  if (!isAiOperatorAllowed(planCtx, req.user)) {
-    res.status(403).json({ success: false, error: 'AI Operator 진입 권한이 없습니다.', code: 'AI_OPERATOR_GATED' });
-    return null;
-  }
+  // ★ 2026-10-24 요금제 = AI 존 서버 문 한 곳(뿌리 대장 R2 · 화면 PlanGate 와 같은 판정)
+  //   멈추기 · 끝내기 · 보관 · 지우기 · 떼기 = plan false(만료 뒤에도 끌 수 있게 · operatorGate 와 같은 규칙)
+  if (opts.plan && (await aiZonePlanBlocked(req, res))) return null;
   const jid = await journeyIdOfParams(req, viewer.companyId);
   if (jid === null || (jid !== undefined && !(await canAccessJourney(viewer, jid)))) {
     res.status(404).json({ success: false, error: '여정을 찾을 수 없습니다.' });

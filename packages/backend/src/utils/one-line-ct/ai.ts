@@ -10,8 +10,7 @@
  */
 import { callAIWithFallback } from '../../services/ai';
 import { extractJsonFromAiText } from '../ai-json';
-import { findNewNumbers, findInventedBenefits } from '../copy-benefit-detector';
-import { headlineClaimsEfficacy } from '../line-headline';
+import { findNewNumbers, findInventedBenefits, claimsInventedEfficacy, pairClaimsInventedEfficacy } from '../copy-benefit-detector';
 import {
   LINE_COMPOSITIONS, isLineCompositionId, type LineComposition, type LineCompositionId, type LineRichCopy, type LineRichCopyKey, type LineRichPoint,
 } from '../line-compositions';
@@ -31,13 +30,13 @@ export function lineCtGroundText(g: LineCtGround): string {
   return [g.line, g.brandName, ...g.productNames].filter(Boolean).join('\n');
 }
 
-/** (순수) 한 칸 정리 — 장식 제거 · 상한 · 숫자 · 혜택 검사(걸리면 빈 값) */
+/** (순수) 한 칸 정리 — 장식 제거 · 상한 · 숫자 · 혜택 · 효능 단정 검사(걸리면 빈 값 · ★ 1024 효능 = 근거에 없는 단정만 · 문자 문안과 같은 판정) */
 export function cleanLineCtText(raw: unknown, max: number, ground: string): string {
   let v = typeof raw === 'string' ? raw : '';
   v = v.replace(/[—–]/g, ' ').replace(/[“”"'`]/g, '').replace(/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}]/gu, '').replace(/\s*\n\s*/g, ' ').replace(/\s{2,}/g, ' ').trim();
   if (v.length > max) v = v.slice(0, max).trim();
   if (!v) return '';
-  if (findNewNumbers(v, ground).length > 0 || findInventedBenefits(v, ground).length > 0) return '';
+  if (findNewNumbers(v, ground).length > 0 || findInventedBenefits(v, ground).length > 0 || claimsInventedEfficacy(v, ground)) return '';
   return v;
 }
 
@@ -50,10 +49,12 @@ function cleanPoints(raw: unknown, n: number, ground: string): LineRichPoint[] {
   const out: LineRichPoint[] = [];
   for (const r of raw.slice(0, n)) {
     const o = r && typeof r === 'object' ? r as Record<string, unknown> : {};
+    // ★ 2026-10-23 AI 초안 = 효능 단정이면 그 칸 전체를 버린다(제목 + 한 줄을 붙여 읽는다 · 한쪽만 지워 빈 단계가 남지 않게) · ★ 1024 판정 = 근거에 없는 단정(copy-benefit-detector)
+    // ★ 2026-10-24 ② 두 칸 이어 읽기 = 문장 경계(pairClaimsInventedEfficacy · 세 채널 생산자와 같은 판정)
+    if (pairClaimsInventedEfficacy(typeof o.title === 'string' ? o.title : '', typeof o.body === 'string' ? o.body : '', ground)) continue;
     const title = cleanLineCtText(o.title, LINE_CT_DRAFT_TITLE_MAX, ground);
     const body = cleanLineCtText(o.body, LINE_CT_DRAFT_BODY_MAX, ground);
-    // ★ 2026-10-23 AI 초안 = 효능 단정(몸 · 피부 말 + 변화 말 · 효능 · 치료) 버린다 — 첫 화면 글과 같은 판정(line-headline headlineClaimsEfficacy · 플래너 초안은 사람이 고칠 판이 없다)
-    if (title && !headlineClaimsEfficacy(`${title} ${body}`)) out.push({ title, body });
+    if (title) out.push({ title, body });
   }
   return out;
 }
@@ -122,14 +123,25 @@ export async function judgeLineWithAi(g: LineCtGround, ctx: { companyId: string;
   return sanitizeLineJudge(parsed, lineCtGroundText(g), g.line);
 }
 
-/** (순수) 문구 응답 정리 — 칸마다 상한 · 검사 · 실패 칸 = 기본 문구 */
+/** 붙어서 읽히는 칸(큰 제목 + 받침 · 마무리 제목 + 본문 · 팝업 제목 + 본문 · 메일 제목 + 미리보기) — 둘을 이어 읽어야 단정이 되는 말을 잡는다 */
+const COPY_PAIRS: ReadonlyArray<[LineRichCopyKey, LineRichCopyKey]> = [['headline', 'sub'], ['closingHeadline', 'closingBody'], ['inapp_title', 'inapp_body'], ['email_subject', 'email_preheader']];
+
+/** (순수) 문구 응답 정리 — 칸마다 상한 · 검사 · 실패 칸 = 기본 문구 · ★ 1024 붙어서 읽히는 두 칸이 함께 효능 단정이면 둘 다 기본 문구 */
 export function sanitizeLineRichCopy(comp: LineComposition, raw: unknown, ground: string): { copy: LineRichCopy; replaced: LineRichCopyKey[] } {
   const o = raw && typeof raw === 'object' && !Array.isArray(raw) ? raw as Record<string, unknown> : {};
   const copy = {} as LineRichCopy;
   const replaced: LineRichCopyKey[] = [];
+  const fallbackOf = new Map(comp.copy.map((f) => [f.key, f.fallback]));
   for (const f of comp.copy) {
     const v = cleanLineCtText(o[f.key], f.max, ground);
     if (v) copy[f.key] = v; else { copy[f.key] = f.fallback; replaced.push(f.key); }
+  }
+  for (const [a, b] of COPY_PAIRS) {
+    if (!fallbackOf.has(a) || !fallbackOf.has(b)) continue;
+    if (!pairClaimsInventedEfficacy(copy[a], copy[b], ground)) continue;   // ★ 2026-10-24 ② 문장 경계로 이어 읽기(공백 이음 = 제 주어 있는 뒤 칸 오탐)
+    for (const k of [a, b]) {
+      if (copy[k] !== fallbackOf.get(k)) { copy[k] = fallbackOf.get(k)!; if (!replaced.includes(k)) replaced.push(k); }
+    }
   }
   return { copy, replaced };
 }

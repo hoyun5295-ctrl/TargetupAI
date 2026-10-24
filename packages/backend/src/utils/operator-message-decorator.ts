@@ -15,12 +15,9 @@
 import { callAIWithFallback } from '../services/ai';
 import { sanitizeForSms } from './message-sanitizer';
 import { extractJsonFromAiText } from './ai-json';
-import { findInventedBenefits, findNewNumbers } from './copy-benefit-detector';
-
-/** ★ 2026-09-30 WP2 — 꾸미기는 변수만 녹인다. 원문에 없던 숫자 · 혜택 값이 생겼는가(지시는 확률적 · 서버가 다시 본다). */
-function decoratedAddsFacts(decorated: string, original: string): boolean {
-  return findNewNumbers(decorated, original).length > 0 || findInventedBenefits(decorated, original).length > 0;
-}
+// ★ 2026-09-30 WP2 — 꾸미기는 변수만 녹인다. 원문에 없던 사실이 생겼는가(지시는 확률적 · 서버가 다시 본다).
+// ★ 2026-10-24 세 채널 구조체크 ② — 판정 = CT rewriteAddsFacts(숫자 ∥ 혜택 ∥ 효능 · 옛 손 판정 decoratedAddsFacts 삭제)
+import { rewriteAddsFacts, EFFICACY_REWRITE_RULE } from './copy-benefit-detector';
 
 export interface DecorateMessageInput {
   companyId: string;
@@ -49,6 +46,7 @@ export async function decorateOperatorMessage(input: DecorateMessageInput): Prom
     '당신은 한줄로의 메시지 개인화 편집기입니다. 주어진 마케팅 문구를 자연스럽게 다시 써서, 지정된 개인화 변수를 문맥에 녹여 넣습니다.',
     '',
     '규칙:',
+    EFFICACY_REWRITE_RULE,
     '- 반드시 다음 변수만 사용한다(다른 변수를 새로 만들지 말 것): ' + varTokens,
     '- 변수는 ' + '"%변수%"' + ' 형태 그대로 쓴다. 위 변수는 모두 본문에 반드시 포함하고(누락 금지, 자연스러운 위치에 녹임), 목록에 없는 %변수%는 본문에서 제거한다.',
     '- 원문의 의도·톤·핵심 메시지는 유지한다. 원문에 없는 사실/정보를 새로 만들지 않는다.',
@@ -81,7 +79,7 @@ export async function decorateOperatorMessage(input: DecorateMessageInput): Prom
 
   const cleaned = String(text || '').trim();
   if (!cleaned) throw new Error('AI 꾸미기 결과가 비어 있습니다. 다시 시도해주세요.');
-  if (decoratedAddsFacts(cleaned, message)) throw new Error('원문에 없는 숫자나 혜택이 생겨 적용하지 않았어요. 다시 눌러 주세요.');
+  if (rewriteAddsFacts(cleaned, message)) throw new Error('원문에 없는 숫자 · 혜택 · 효능 말이 생겨 적용하지 않았어요. 다시 눌러 주세요.');
   return sanitizeForSms(cleaned.slice(0, 2000)).sanitized;
 }
 
@@ -110,6 +108,7 @@ export async function decorateOperatorMessages(
     '당신은 한줄로의 메시지 개인화 편집기입니다. 여러 마케팅 문구 각각을 자연스럽게 다시 써서, 지정된 개인화 변수를 문맥에 녹여 넣습니다.',
     '',
     '규칙:',
+    EFFICACY_REWRITE_RULE,
     '- 반드시 다음 변수만 사용한다(다른 변수를 새로 만들지 말 것): ' + varTokens,
     '- 위 변수는 각 문안에 모두 반드시 포함한다(누락 금지, 자연스러운 위치에 녹임). 목록에 없는 %변수%는 본문에서 제거한다.',
     '- 변수는 ' + '"%변수%"' + ' 형태 그대로 쓴다.',
@@ -147,7 +146,7 @@ export async function decorateOperatorMessages(
   return msgs.map((orig, i) => {
     const cand = Array.isArray(arr) ? arr[i] : undefined;
     // ★ 2026-09-30 WP2 — 원문에 없던 숫자 · 혜택 값이 생긴 문안은 원문 유지(파싱 실패와 같은 처리 · 발송 영향 0)
-    const ok = typeof cand === 'string' && cand.trim().length >= 5 && !decoratedAddsFacts(cand.trim(), orig);
+    const ok = typeof cand === 'string' && cand.trim().length >= 5 && !rewriteAddsFacts(cand.trim(), orig);
     const decorated = ok ? (cand as string).trim() : orig;
     return sanitizeForSms(decorated.slice(0, 2000)).sanitized;
   });

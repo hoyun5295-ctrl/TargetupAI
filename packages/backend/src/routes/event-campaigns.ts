@@ -33,6 +33,7 @@ import { isCdpEnabledForPlan } from '../utils/cdp-auth';
 import { readBrandPage, PageReadError } from '../utils/brand-page-reader';
 import { tryAcquireInflight, releaseInflight, takeDailyQuota } from '../utils/inflight-lock';
 
+import { publicErrorText } from '../utils/http-error';
 export const eventCampaignRouter = Router();
 eventCampaignRouter.use(authenticate);
 
@@ -76,7 +77,7 @@ eventCampaignRouter.post('/extract-image', (req: any, res: Response) => {
         return res.status(429).json({ success: false, error: err.message });
       }
       console.error('[event-campaigns extract-image] 오류:', err?.message);
-      return res.status(500).json({ success: false, error: err?.message || '이미지 판독 실패' });
+      return res.status(500).json({ success: false, error: publicErrorText(err, '이미지 판독 실패') });
     }
   });
 });
@@ -223,7 +224,7 @@ eventCampaignRouter.post('/drafts', async (req: any, res: Response) => {
   } catch (err: any) {
     if (handleDbMigrationError(err, res, 'event_campaign_drafts')) return;
     console.error('[event-campaigns POST /drafts] 오류:', err?.message);
-    return res.status(500).json({ success: false, error: err?.message || '초안 보관 실패' });
+    return res.status(500).json({ success: false, error: publicErrorText(err, '초안 보관 실패') });
   }
 });
 
@@ -267,7 +268,7 @@ eventCampaignRouter.patch('/drafts/:id', async (req: any, res: Response) => {
   } catch (err: any) {
     if (handleDbMigrationError(err, res, 'event_campaign_drafts')) return;
     console.error('[event-campaigns PATCH /drafts] 오류:', err?.message);
-    return res.status(500).json({ success: false, error: err?.message || '초안 갱신 실패' });
+    return res.status(500).json({ success: false, error: publicErrorText(err, '초안 갱신 실패') });
   }
 });
 
@@ -293,7 +294,7 @@ eventCampaignRouter.get('/drafts', async (req: any, res: Response) => {
   } catch (err: any) {
     if (handleDbMigrationError(err, res, 'event_campaign_drafts')) return;
     console.error('[event-campaigns GET /drafts] 오류:', err?.message);
-    return res.status(500).json({ success: false, error: err?.message || '초안 목록 조회 실패' });
+    return res.status(500).json({ success: false, error: publicErrorText(err, '초안 목록 조회 실패') });
   }
 });
 
@@ -317,7 +318,7 @@ eventCampaignRouter.get('/drafts/:id', async (req: any, res: Response) => {
   } catch (err: any) {
     if (handleDbMigrationError(err, res, 'event_campaign_drafts')) return;
     console.error('[event-campaigns GET /drafts/:id] 오류:', err?.message);
-    return res.status(500).json({ success: false, error: err?.message || '초안 조회 실패' });
+    return res.status(500).json({ success: false, error: publicErrorText(err, '초안 조회 실패') });
   }
 });
 
@@ -341,6 +342,6 @@ eventCampaignRouter.post('/drafts/:id/archive', async (req: any, res: Response) 
   } catch (err: any) {
     if (handleDbMigrationError(err, res, 'event_campaign_drafts')) return;
     console.error('[event-campaigns POST /drafts/:id/archive] 오류:', err?.message);
-    return res.status(500).json({ success: false, error: err?.message || '보관 종료 실패' });
+    return res.status(500).json({ success: false, error: publicErrorText(err, '보관 종료 실패') });
   }
 });

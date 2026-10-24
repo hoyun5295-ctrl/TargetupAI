@@ -217,15 +217,15 @@ export async function recordCustomShortLinkClick(id: string): Promise<void> {
   );
 }
 
-/** 회사 목록 (최근 100건) */
-export async function listCustomShortLinks(companyId: string): Promise<CustomShortLink[]> {
+/** 회사 목록 (최근 100건) · ★ 2026-10-24 ⑫ ownerId = 담당자(본인이 만든 것만) · null = 관리자(회사 전체) */
+export async function listCustomShortLinks(companyId: string, ownerId: string | null = null): Promise<CustomShortLink[]> {
   const r = await query(
     `SELECT id, code, target_url, title, is_active, click_count, last_clicked_at, created_at
        FROM dm_custom_short_links
-      WHERE company_id = $1::uuid
+      WHERE company_id = $1::uuid AND ($2::uuid IS NULL OR created_by = $2::uuid)
       ORDER BY created_at DESC
       LIMIT 100`,
-    [companyId],
+    [companyId, ownerId],
   );
   return r.rows.map(mapRow);
 }
@@ -235,13 +235,14 @@ export async function setCustomShortLinkActive(
   companyId: string,
   linkId: string,
   isActive: boolean,
+  ownerId: string | null = null,
 ): Promise<CustomShortLink | null> {
   const r = await query(
     `UPDATE dm_custom_short_links
         SET is_active = $3
-      WHERE id = $1::uuid AND company_id = $2::uuid
+      WHERE id = $1::uuid AND company_id = $2::uuid AND ($4::uuid IS NULL OR created_by = $4::uuid)
       RETURNING id, code, target_url, title, is_active, click_count, last_clicked_at, created_at`,
-    [linkId, companyId, isActive],
+    [linkId, companyId, isActive, ownerId],
   );
   if (r.rows.length === 0) return null;
   return mapRow(r.rows[0]);

@@ -610,6 +610,10 @@ export default function InAppMessagesPage() {
           setInappSteps({ open: { line: t, reads, plan: g.plan, fallbackCost: g.stepsCost, ...(inappCh === 'web' && g.compositions ? { compositions: g.compositions } : {}) }, channel: inappCh });
           return;
         }
+        // ★ 2026-10-24 세 채널 구조체크 ⑧ — 한 줄은 단계 창 한 길이다. 판정을 받지 못하면(조회 실패 · 단계 판정 실패) 만들지 않는다
+        //   (옛: 한 줄을 원문으로 바로 만드는 옛 갈래를 탔다 — 구성 · 재료 판 · 질문표 · 효능 판정을 안 지났다) · 크레딧 0
+        showToast('한 줄을 지금 읽지 못했어요. 잠시 후 다시 눌러 주세요. 크레딧은 쓰지 않았어요.', { type: 'error' });
+        return;
       } finally {
         inappStepsCheckingRef.current = false;
       }
@@ -691,7 +695,10 @@ export default function InAppMessagesPage() {
       setTimeout(() => {
         setAiGenerating(false);
         setAiObjective('');
-        showToast(steps ? `인앱 메시지를 만들었어요(${steps.cost}크레딧). 확인한 뒤 저장해 주세요` : 'AI 메시지 생성 완료. 혜택 부분 직접 작성 후 저장해주세요.', { type: 'success' });
+        // ★ 2026-10-24 ② 서버 안내 문장(뺀 상품 · 뺀 효능)이 오면 그대로 덧붙인다(화면이 문구를 짓지 않는다)
+        const notes: string[] = [...(Array.isArray(data.one_line?.notes) ? data.one_line.notes : []), ...(Array.isArray(pkg.notes) ? pkg.notes : [])].map(String).filter(Boolean);
+        const made = steps ? `인앱 메시지를 만들었어요(${steps.cost}크레딧). 확인한 뒤 저장해 주세요` : 'AI 메시지 생성 완료. 혜택 부분 직접 작성 후 저장해주세요.';
+        showToast(notes.length > 0 ? `${made} ${notes[0]}` : made, { type: notes.length > 0 ? 'info' : 'success' });
       }, 400);
     } catch (e: any) {
       clearInterval(stepInterval);

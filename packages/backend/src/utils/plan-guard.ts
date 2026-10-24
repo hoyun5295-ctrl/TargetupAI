@@ -33,6 +33,7 @@
  */
 
 import { query } from '../config/database';
+import { handleDbMigrationError } from './db-migration-error';
 
 // ═══════════════════════════════════════════════════════════
 // 타입
@@ -346,6 +347,35 @@ export function isAiOperatorAllowed(
   return false;
 }
 
+/** AI 존 서버 문의 거절 코드(화면 = 요금제 안내 · 한 코드) */
+export const AI_ZONE_GATED_CODE = 'AI_OPERATOR_GATED';
+
+/**
+ * ★ 2026-10-24 AI 존 서버 요금제 문 한 곳(뿌리 대장 R2 · docs/ROOT-LEDGER.md) — 화면 PlanGate(fetchAiOperatorAccess)와 **같은 판정**(isAiOperatorAllowed).
+ *   옛: 같은 판정 10줄이 여정 · 자동마케팅 · 이미지 스튜디오 · AI 한줄로 · ai.ts 32곳에 따로 있었고, 이메일 · 인앱은 요금제 코드(FREE)만 봐
+ *   1019 구독 만료 · 정지 잠김이 퍼지지 않았다. 막히면 응답을 보내고 true. ctx 를 이미 읽었으면 넘긴다(다시 읽지 않는다).
+ *   요금제 조회 실패도 여기서 응답한다(호출부가 try 밖에서 불러도 요청이 매달리지 않게 · 표 · 컬럼 없음 = DB_MIGRATION_PENDING).
+ *   ⛔ 문은 **돈 · 발송 · 새로 켜기**에만 건다. 예약 취소 · 게시 중단 · 지우기 · 읽기는 만료 뒤에도 열어 둔다(뿌리 대장 R2 · Codex 1024 1R).
+ */
+export async function aiZonePlanBlocked(req: Request, res: Response, ctx?: PlanContext | null): Promise<boolean> {
+  const companyId = (req as any).user?.companyId;
+  if (!companyId) { res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' }); return true; }
+  let plan: PlanContext | null;
+  try {
+    plan = ctx === undefined ? await loadPlanContext(companyId) : ctx;
+  } catch (err: any) {
+    console.error('[plan-guard] 요금제 조회 실패:', err?.message || err);
+    if (!handleDbMigrationError(err, res, 'companies · plans')) {
+      res.status(503).json({ success: false, error: '요금제를 확인하지 못했어요. 잠시 후 다시 시도해 주세요.' });
+    }
+    return true;
+  }
+  if (!plan) { res.status(404).json({ success: false, error: '회사 정보를 찾을 수 없습니다.' }); return true; }
+  if (isAiOperatorAllowed(plan, (req as any).user)) return false;
+  res.status(403).json({ success: false, error: '이 기능은 요금제 가입 후 이용할 수 있어요.', code: AI_ZONE_GATED_CODE });
+  return true;
+}
+
 // ═══════════════════════════════════════════════════════════
 // 기능별 체크 — canUseFeature
 // ═══════════════════════════════════════════════════════════
@@ -523,11 +553,23 @@ export function checkDirectRecipientLimit(ctx: PlanContext, recipientCount: numb
 import type { Request, Response, NextFunction } from 'express';
 
 /**
+ * ★ 2026-10-24 끄기 · 멈추기 · 취소 · 끊기 · 지우기 주소 = 요금제 문 밖(만료 · 정지 뒤에도 내보낸 것을 멈출 수 있게 · 뿌리 대장 R2).
+ *   계약 시험(root-ledger R2)이 이 식을 그대로 읽어 쓴다 — 시험과 문이 다른 목록을 갖지 않게.
+ */
+export const PLAN_CONTROL_PATH = /\/(?:pause|end|stop|cancel|cancel-schedule|archive|reject|detach|disconnect|unapprove|admin-stop|skip)(?:\/|$)/;
+export function isPlanControlRequest(req: { method: string; path: string }): boolean {
+  return req.method === 'DELETE' || PLAN_CONTROL_PATH.test(req.path);
+}
+
+/**
  * 특정 기능 요금제 게이팅 미들웨어.
  * 요청 회사 컨텍스트에 companyId가 세팅되어 있다고 가정.
+ * ★ 2026-10-24 세 채널 구조체크 ③ — 라우터 머리에 거는 문은 except(끄기 판정)를 받는다. 옛: DM · SNS 머리 문이 중지 · 삭제 · 예약 취소까지 막아
+ *   만료 회사가 발행한 행사를 멈출 수 없었다(공개 주소는 이용 기간을 보지 않아 계속 열린다).
  */
-export function requirePlanFeature(key: FeatureKey) {
+export function requirePlanFeature(key: FeatureKey, opts?: { except?: (req: Request) => boolean }) {
   return async (req: Request, res: Response, next: NextFunction) => {
+    if (opts?.except?.(req)) return next();
     const companyId = (req as any).user?.companyId;
     if (!companyId) {
       return res.status(401).json({ success: false, error: '인증 필요' });

@@ -150,6 +150,8 @@ export function messagePatchFromSlides(slides: WsSlide[], layout: PosterLayout, 
 }
 
 const PH = (t: any) => { const s = String(t || ''); return s.includes('[혜택') || s.includes('[직접 작성') || s.includes('직접 작성해주세요'); };
+/** ★ 2026-10-24 ② 혜택 자리가 아닌 채울 자리 글자(처음 찾은 것) — 있으면 그 글자를 인용한다(서버 inAppPublishDefect 와 같은 순서) */
+const fillOf = (v: any): string | null => (JSON.stringify(v ?? '').match(/\[[^[\]\n]{0,60}\]/g) || []).find((x) => PH(x) && !x.startsWith('[혜택')) ?? null;
 
 export interface PublishDefect { message: string; slide?: number; field?: 'title' | 'body' | 'placeholder' | 'image' | 'slide_image' }
 
@@ -165,10 +167,14 @@ export function publishDefectOf(m: Record<string, any>): PublishDefect | null {
   const posterWithSlides = m.template === 'full_image' && slides.length > 0;
   if (!posterWithSlides && !String(m.body || '').trim()) return { message: '본문을 입력해 주세요.', field: 'body' };
   const slidePh = slides.findIndex((s) => s && (PH(s.title) || PH(s.body) || PH(s.eyebrow) || PH(s.subtitle) || PH(s.cta?.label)));
-  if (slidePh >= 0) return { message: `${slidePh + 1}번째 장의 혜택 안내를 직접 작성해 주세요.`, field: 'placeholder', slide: slidePh };
+  if (slidePh >= 0) {
+    const f = fillOf(slides[slidePh]);
+    return { message: f ? `${slidePh + 1}번째 장에 직접 채울 자리 "${f}"가 남아 있어요. 그 자리를 채워 주세요.` : `${slidePh + 1}번째 장의 혜택 안내를 직접 작성해 주세요.`, field: 'placeholder', slide: slidePh };
+  }
   if (PH(m.title) || PH(m.body) || PH(m.badge_text) || buttons.some((b) => PH(b?.label))
     || blocks.some((b) => b && ((b.type === 'benefit' && (!String(b.text || '').trim() || PH(b.text))) || (['headline', 'body', 'eyebrow', 'footer'].includes(b.type) && PH(b.text)) || (b.type === 'bullets' && Array.isArray(b.items) && b.items.some((it: any) => PH(it?.text)))))) {
-    return { message: '혜택 안내를 회사 정책에 맞게 직접 작성해 주세요.', field: 'placeholder' };
+    const f = fillOf([m.title, m.body, m.badge_text, buttons, blocks]);
+    return { message: f ? `직접 채울 자리 "${f}"가 남아 있어요. 그 자리를 채워 주세요.` : '혜택 안내를 회사 정책에 맞게 직접 작성해 주세요.', field: 'placeholder' };
   }
   if (m.template === 'full_image') {
     const idx = slides.findIndex((s) => !s || !String(s.image_url || '').trim());

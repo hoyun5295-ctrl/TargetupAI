@@ -22,7 +22,10 @@
  *   - 0건 자동 완화 X (segment 0건이면 안내만)
  */
 
-import { replaceInventedBenefits, replaceInventedBenefitsDeep } from './copy-benefit-detector';
+import { replaceInventedBenefits, replaceInventedBenefitsDeep, dropInventedEfficacyDeep, guardReadingSequence, EFFICACY_PLACEHOLDER, HEADLINE_PLACEHOLDER, EFFICACY_PROMPT_RULES, EFFICACY_RETRY_HINT } from './copy-benefit-detector';
+
+/** ★ 1024 ② Codex 1R — 읽는 순서로 이어 읽히는 블록(머리글 → 제목 → 본문) · 다 빠지면 블록 종류마다 대체값(머리글 = 비움) */
+const READING_BLOCK_FALLBACK: Record<string, string> = { eyebrow: '', headline: HEADLINE_PLACEHOLDER, body: EFFICACY_PLACEHOLDER };
 import { extractJsonFromAiText } from './ai-json';
 import { callAIWithFallback } from '../services/ai';
 import { randomUUID } from 'crypto';
@@ -143,6 +146,8 @@ export interface InAppAIPackage {
   message: GeneratedInAppMessage;
   reasoning: string;
   progress_steps: SubAgentStep[];
+  /** ★ 2026-10-24 ② 근거 없는 효능을 뺀 수(라우트가 notes 서버 문장으로 바꾼다) */
+  efficacyDropped?: number;
 }
 
 export interface InAppAIGenerateInput {
@@ -476,6 +481,9 @@ ${eventText ? `${buildEventPromptBlock(eventText)}\n${(() => { const h = buildEv
    ✗ "단골" / "사장님이 직접" / "초특가" / "역대급" / "미친" / "대박" 단어 사용 X
    ✓ "오랜 시간 함께해주신" / "꾸준한 관심을 보내주신" / "소중한 고객님" 등 격조 표현
 
+4. 효능 단정 금지:
+${EFFICACY_PROMPT_RULES}
+
 [8 templates 선택 가이드]
 
 | Template | 시나리오 |
@@ -684,52 +692,82 @@ ${brandAccent
   //   파싱·조립이 끝난 뒤 1회 차감(R260과 같은 방식). 바깥이 이미 묶음 차감을 소유하면(플래너 등) 여기서는 빼지 않는다.
   const inappCost = isInCreditBundle() ? 0 : getCreditCost('inapp-ai-generator');
   if (inappCost > 0) await checkCredit(input.companyId, inappCost);
-  const aiResult = await runInCreditBundle(() => callAIWithFallback({
-    system: systemWithVoice,
-    userMessage,
-    model: 'opus',
-    maxTokens: 4096,
-    temperature: 0.7,
-    companyId: input.companyId,
-    source: 'inapp-ai-generator', // ★ D227+ 종량제: 인앱 생성 3크레딧(차감은 아래 성공 뒤 1회)
-    noCache: true,
-  }));
-
-  let parsed: any;
-  try {
-    parsed = extractJsonFromAiText(aiResult || '');   // ★ 2026-09-30 WP4 — JSON 추출은 CT 하나(ai-json · 코드펜스 · 머리말 · 문자열 안 줄바꿈 제어문자 복구 · 0630 사고 부류). 인라인 추출 정의 금지.
-  } catch (e: any) {
-    throw new Error(`AI 응답 JSON 파싱 실패: ${e.message}\n응답 앞 300자: ${String(aiResult || '').slice(0, 300)}`);
-  }
+  // ★ 2026-10-24 ② 1회 생성 = AI 호출 + 파싱(재생성도 같은 함수 · 같은 묶음 = 안쪽 차감 0)
+  const generateOnce = async (retryHint?: string): Promise<any> => {
+    const aiResult = await runInCreditBundle(() => callAIWithFallback({
+      system: systemWithVoice,
+      userMessage: retryHint ? `${userMessage}\n\n[다시 쓰기] ${retryHint}` : userMessage,
+      model: 'opus',
+      maxTokens: 4096,
+      temperature: 0.7,
+      companyId: input.companyId,
+      source: 'inapp-ai-generator', // ★ D227+ 종량제: 인앱 생성 3크레딧(차감은 아래 성공 뒤 1회)
+      noCache: true,
+    }));
+    try {
+      return extractJsonFromAiText(aiResult || '');   // ★ 2026-09-30 WP4 — JSON 추출은 CT 하나(ai-json · 코드펜스 · 머리말 · 문자열 안 줄바꿈 제어문자 복구 · 0630 사고 부류). 인라인 추출 정의 금지.
+    } catch (e: any) {
+      throw new Error(`AI 응답 JSON 파싱 실패: ${e.message}\n응답 앞 300자: ${String(aiResult || '').slice(0, 300)}`);
+    }
+  };
 
   // 응답 검증 + 안전 default
   const scenarioStyle = input.templateHint ? SCENARIO_STYLE[input.templateHint] : null;
   // ★ 2026-09-30 WP2 혜택 서버 차단 — 근거 = 요청 목적 · 행사 원문. 제목 · 본문 · 머리글 · 버튼의 없는 혜택 값 · 낱말은 자리표시
   //   (혜택 블록은 아래 forceBlockSafety 가 원문 실존분만 통과시킨다 · 자리표시는 인앱 게시 가드가 "[혜택"으로 막는다).
+  // ★ 2026-10-24 세 채널 구조체크 ② — 같은 근거로 효능도 거른다(혜택 → 효능 · 제목 · 본문 짝은 이어 읽는다).
+  //   제목 · 본문이 효능으로 다 빠지면 재생성 1회 → 그래도면 채울 자리(제목 = 헤드라인 자리 · 본문 = EFFICACY_PLACEHOLDER · 게시 관문이 막는다).
   const inappGround = [input.objective, eventText].filter(Boolean).join('\n');
-  const title = replaceInventedBenefits(String(parsed.title || ''), inappGround).slice(0, 100);
-  const body = replaceInventedBenefits(String(parsed.body || ''), inappGround);
-  const badge_text = (replaceInventedBenefits(String(parsed.badge_text || ''), inappGround).slice(0, 20) || scenarioStyle?.badge || null);
-  const buttons = Array.isArray(parsed.buttons) ? parsed.buttons.slice(0, 3).map((b: any, idx: number) => ({
-    id: String(b.id || `btn_${idx}`),
-    label: replaceInventedBenefits(String(b.label || ''), inappGround).slice(0, 30),
-    action_url: b.action_url || null,
-    style: (['primary', 'secondary', 'tertiary', 'ghost'].includes(b.style) ? b.style : 'primary') as InAppButton['style'],
-    background_color: String(b.background_color || '#4f46e5'),
-    text_color: String(b.text_color || '#ffffff'),
-  })) : [];
-
-  // ★ D230+ 블록 — AI 블록 우선(안전 처리: benefit은 행사 원문 실존분만 통과, 그 외 placeholder 강제 + image url 제거), 없으면 평면에서 합성
-  let content_blocks = sanitizeContentBlocks(parsed.content_blocks).map((b) => forceBlockSafety(b, eventText));
-  if (content_blocks.length === 0) {
-    content_blocks = synthesizeBlocks({ badge: badge_text, title, body, buttons });
+  //   ★ Codex 1R — 블록도 같은 「1회 생성」 거름 안에서 본다(화면은 저장 때 블록으로 제목 · 본문을 덮는다 · 제목 블록 + 본문 블록을 이어 읽는다).
+  const guardMessage = (p: any) => {
+    const dropped: string[] = [];
+    const flat = dropInventedEfficacyDeep({
+      title: replaceInventedBenefits(String(p.title || ''), inappGround).slice(0, 100),
+      body: replaceInventedBenefits(String(p.body || ''), inappGround),
+      badge_text: replaceInventedBenefits(String(p.badge_text || ''), inappGround).slice(0, 20),
+      buttons: Array.isArray(p.buttons) ? p.buttons.slice(0, 3).map((b: any) => ({ label: replaceInventedBenefits(String(b?.label || ''), inappGround).slice(0, 30) })) : [],
+    }, inappGround, dropped);
+    const badge = flat.badge_text || scenarioStyle?.badge || null;
+    const buttons = Array.isArray(p.buttons) ? p.buttons.slice(0, 3).map((b: any, idx: number) => ({
+      id: String(b.id || `btn_${idx}`),
+      label: flat.buttons[idx]?.label ?? '',
+      action_url: b.action_url || null,
+      style: (['primary', 'secondary', 'tertiary', 'ghost'].includes(b.style) ? b.style : 'primary') as InAppButton['style'],
+      background_color: String(b.background_color || '#4f46e5'),
+      text_color: String(b.text_color || '#ffffff'),
+    })) : [];
+    // ★ Codex 2R — AI 블록이 없으면 **여기서** 평면 값으로 합성한다(합성 블록도 같은 읽는 순서 판정 · 재생성 판단을 지난다)
+    const fromAi: any[] = dropInventedEfficacyDeep(replaceInventedBenefitsDeep(sanitizeContentBlocks(p.content_blocks).map((b) => forceBlockSafety(b, eventText)), inappGround), inappGround, dropped)
+      .map((b: any) => (b && b.type in READING_BLOCK_FALLBACK && b.text === EFFICACY_PLACEHOLDER ? { ...b, text: READING_BLOCK_FALLBACK[b.type] } : b));
+    const blocks: any[] = fromAi.length > 0 ? fromAi : synthesizeBlocks({ badge, title: flat.title, body: flat.body, buttons });
+    const seq = blocks.map((b, i) => ({ b, i })).filter(({ b }) => b && b.type in READING_BLOCK_FALLBACK && typeof b.text === 'string');
+    const texts = guardReadingSequence(seq.map(({ b }) => ({ text: b.text, fallback: READING_BLOCK_FALLBACK[b.type], optional: b.type === 'eyebrow' })), inappGround, dropped);
+    seq.forEach(({ i }, k) => { blocks[i] = { ...blocks[i], text: texts[k] }; });
+    const core = [flat.title, flat.body, ...seq.filter(({ b }) => b.type !== 'eyebrow').map(({ i }) => String(blocks[i].text))];
+    const lost = dropped.length > 0 && core.some((t) => t === HEADLINE_PLACEHOLDER || t === EFFICACY_PLACEHOLDER);
+    return { flat, badge, buttons, blocks, dropped, lost };
+  };
+  let parsed = await generateOnce();
+  let guarded = guardMessage(parsed);
+  if (guarded.lost) {
+    parsed = await generateOnce(EFFICACY_RETRY_HINT);
+    const again = guardMessage(parsed);
+    guarded = { ...again, dropped: [...guarded.dropped, ...again.dropped] };
   }
+  const effDropped = guarded.dropped;
+  const { title, body } = guarded.flat;
+  const badge_text = guarded.badge;
+  const buttons = guarded.buttons;
+
+  // ★ D230+ 블록 — AI 블록 우선(안전 처리: benefit은 행사 원문 실존분만 통과, 그 외 placeholder 강제 + image url 제거), 없으면 평면에서 합성(★ Codex 2R = 거름 안 guardMessage 에서)
+  let content_blocks: any[] = guarded.blocks;
   // ★ 2026-07-14 디자인 3.0 — 행사 원문 상품 자동 매핑 (가격·URL 원문 실존 검증 + og:image 채움. 실패 = 원본 유지)
   if (eventText) {
     try { content_blocks = await enrichProductBlocksFromEventText(content_blocks, eventText); } catch { /* 원본 유지 */ }
   }
   // ★ 2026-09-30 WP2 — 블록의 글 필드 전체(머리글 · 제목 · 본문 · 목록 · 버튼)도 같은 근거로 대조(링크 · 이미지 · 가격 숫자는 건너뜀).
-  content_blocks = replaceInventedBenefitsDeep(content_blocks, inappGround);
+  content_blocks = dropInventedEfficacyDeep(replaceInventedBenefitsDeep(content_blocks, inappGround), inappGround, effDropped);
+  if (effDropped.length > 0) console.warn(`[copy-guard] 인앱 근거 없는 효능 ${effDropped.length}곳 뺌`);
   const theme = normalizeTheme(parsed.theme);
   const scenarioAccent = input.templateHint ? SCENARIO_ACCENT[input.templateHint] : null;
   // 브랜드 킷 설정 회사 = 그 색으로 강제 (AI 출력 무시 — 임의 hex 차단). 미설정 = AI 제안 → 시나리오 팔레트 순.
@@ -804,5 +842,6 @@ ${brandAccent
     message,
     reasoning: String(parsed.reasoning || ''),
     progress_steps: progressSteps,
+    efficacyDropped: effDropped.length,
   };
 }

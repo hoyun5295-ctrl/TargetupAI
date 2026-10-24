@@ -141,10 +141,12 @@ describe('B 2R 받는 사람 문형(허용 목록)', () => {
     expect(confirmLineAudience({ kind: 'all' }, null)).toEqual({ kind: 'all' });
     expect(confirmLineAudience(null, names)).toBeNull();
     const route = read('../../routes/marketing-planner.ts');
-    inOrder(route, ["router.post('/line-read', async", 'readPlannerLine(line, Date.now())', 'read.audience = await confirmLineAudienceForCompany(companyId, read.audience);', 'return res.json(read);']);
-    // ★ B 4R — 확정 체인 = 대상 CT 한 곳 · 시간 상한 안 · 실패 · 초과 = null(사람이 고름)
-    const ct = fnBody(read('../planner-audience.ts'), 'export async function confirmLineAudienceForCompany(');
-    inOrder(ct, ["aud.kind !== 'product_buyers'", 'Promise.race([', 'listObservedProducts(companyId, door)', 'setTimeout(() => resolve(null), LINE_AUDIENCE_CONFIRM_MS)', '.catch(', 'clearTimeout(timer)', 'return confirmLineAudience(aud, names);']);
+    // ★ 1024 R9 — 읽기 · 담기가 같은 함수(readLineForCompany)로 확정한다
+    inOrder(route, ['async function readLineForCompany(', 'readPlannerLine(line, nowMs)', 'loadPlannerLineAskContext(companyId', 'read.audience = confirmLineAudience(read.audience, ctx.products ? ctx.products.list.map((p) => p.name) : null);']);
+    inOrder(route, ["router.post('/line-read', async", 'readLineForCompany(req, companyId, line, Date.now())', 'plannerLineAsk(read, ctx)']);
+    // ★ B 4R — 상품 목록 = 대상 CT 한 곳 · 시간 상한 안 · 실패 · 초과 = null(사람이 고름)
+    const ct = fnBody(read('../planner-audience.ts'), 'export async function loadPlannerLineAskContext(');
+    inOrder(ct, ['Promise.race([', 'listObservedProducts(companyId, door)', 'setTimeout(() => resolve(null), LINE_AUDIENCE_CONFIRM_MS)', '.catch(', 'clearTimeout(timer)']);
   });
 });
 

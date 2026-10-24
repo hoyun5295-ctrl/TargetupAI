@@ -7,6 +7,7 @@
  *
  * ⛔ 내부 코드명·테이블명·영문 예외 문구·모델명·줄표 금지(사용자 노출 문구). 순수 모듈(DB·AI import 0).
  */
+import { findAiFillPlaceholder } from './copy-benefit-detector';
 
 /** 채널 준비 판정 코드 → 고객 문장 · 설정으로 가는 길 */
 export const READINESS_REASON = {
@@ -35,8 +36,14 @@ const SEND_REJECT_REASON: Record<string, string> = {
   SPAM_BLOCKED: '문안에 발송이 제한된 표현이 있어 접수되지 않았습니다.',
 };
 
-export function sendRejectReason(code: string | null | undefined): string {
+export function sendRejectReason(code: string | null | undefined, message?: string | null): string {
   const c = String(code || '');
+  // ★ 2026-10-24 세 채널 구조체크 ② — 이 코드는 혜택 자리만이 아니라 AI 가 남긴 채울 자리 전부다(효능을 뺀 「[상품 소개: …]」 등).
+  //   관문 문장(fillPlaceholderError)이 인용한 자리 글자가 혜택 자리가 아니면 그 글자로 말한다.
+  if (c === 'BENEFIT_PLACEHOLDER_UNEDITED') {
+    const found = findAiFillPlaceholder(String(message || ''));
+    if (found && !found.startsWith('[혜택')) return `문안에 직접 채울 자리(${found})가 남아 있습니다.`;
+  }
   return SEND_REJECT_REASON[c] || '발송 접수가 거부되었습니다. 발송 설정을 확인한 뒤 [다시 시작]을 눌러 주세요.';
 }
 

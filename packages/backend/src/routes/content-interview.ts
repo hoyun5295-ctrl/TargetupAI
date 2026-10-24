@@ -14,6 +14,7 @@
  *   - **발행분은 여기서 걷지 않는다** — 발행 라우트가 자기 키로 걷는다(같은 제작물 이중 과금 차단).
  *   - `one_step_sessions`는 배포 후 DDL이다 — 그 전에는 503(`DB_MIGRATION_PENDING`)으로 답한다.
  */
+import { aiZonePlanBlocked } from '../utils/plan-guard';
 import { Router, Request, Response } from 'express';
 import { query } from '../config/database';
 import { authenticate } from '../middlewares/auth';
@@ -227,6 +228,7 @@ router.get('/sessions/:id/estimate', async (req: Request, res: Response) => {
 router.post('/sessions/:id/generate', async (req: Request, res: Response) => {
   const companyId = requireCompany(req, res);
   if (!companyId) return;
+  if (await aiZonePlanBlocked(req, res)) return;   // ★ 2026-10-24 R2 — 생성비를 쓰는 주소 = 서버 요금제 문
   // 선점 토큰 = 선점이 돌려준 회차. **이후의 모든 쓰기는 이 회차일 때만 성공한다.**
   //   우리 생성이 10분(lease)을 넘기면 다른 요청이 정당하게 재선점한다 — 그때 우리가 회차를 안 걸고
   //   완료·해제를 쓰면 **남의 선점을 덮거나 풀어** 둘이 동시에 돌고 이중 과금이 된다.

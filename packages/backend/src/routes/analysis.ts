@@ -14,6 +14,7 @@ import { withCopyRules } from '../services/ai';
 import { kstFromNaiveUtc, kstDayStartNaiveUtc } from '../utils/stats-aggregation';
 import { buildRecipientRunConversions } from '../utils/recipient-conversion';
 
+import { publicErrorText } from '../utils/http-error';
 const router = Router();
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY || '' });
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY || '' });
@@ -882,7 +883,7 @@ router.post('/run', async (req: Request, res: Response) => {
 
   } catch (error: any) {
     console.error('AI 분석 실행 실패:', error);
-    res.status(500).json({ error: 'AI 분석 실행 실패', message: error.message });
+    res.status(500).json({ error: 'AI 분석 실행 실패', message: publicErrorText(error, 'AI 분석 실행 실패') });
   }
 });
 
@@ -1169,7 +1170,7 @@ router.get('/pdf', async (req: Request, res: Response) => {
 
   } catch (error: any) {
     console.error('PDF 생성 실패:', error);
-    res.status(500).json({ error: 'PDF 생성 실패', message: error.message });
+    res.status(500).json({ error: 'PDF 생성 실패', message: publicErrorText(error, 'PDF 생성 실패') });
   }
 });
 

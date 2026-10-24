@@ -20,7 +20,7 @@ import { normalizePhone } from '../utils/normalize-phone';
 import { checkCallbackSpec } from '../utils/callback-spec';
 import { isValidCustomFieldKey } from '../utils/safe-field-name';
 import { fieldKeyToColumn, getFieldByKey } from '../utils/standard-field-map';
-import { tryAcquireInflight, releaseInflight } from '../utils/inflight-lock';
+import { tryAcquireInflight, releaseInflight, singleFlight, SEND_IN_FLIGHT_MESSAGE } from '../utils/inflight-lock';
 import { nightAdRestrictionMessage } from '../utils/autosend-policy';
 import { resolveStagingCommitState, withStagingLock, parkStagingRows, restoreParkedStagingRows, dropParkedStagingRows } from '../utils/staging-sweeper';
 import { isLoadingSendPhase } from '../utils/load-cancel';
@@ -1897,7 +1897,9 @@ router.post('/direct-send/count', async (req: Request, res: Response) => {
 // ★ 대량 발송 파이프라인 (2026-05-30) — Task 4: 발송 커밋
 //   staging 전체 정제(수신거부 DELETE → 중복제거 DELETE) → 정제 후 건수로 차감 → 즉시 202 접수.
 //   실제 청크 발송은 direct-send-worker가 백그라운드 처리(진행률은 send-progress 조회).
-router.post('/direct-send/commit', async (req: Request, res: Response) => {
+// ★ 2026-10-24 세 채널 구조체크 ⑬ — 같은 사람이 같은 발송을 겹쳐 누르면(더블클릭 · 응답 전 재클릭) 둘째는 409(잠금 CT singleFlight · 핸들러가 끝날 때 놓는다).
+//   옛: 요청마다 새 적재분 · 새 캠페인이라 겹친 두 요청이 같은 대상에게 두 번 나갔다.
+router.post('/direct-send/commit', singleFlight('direct-send-commit', async (req: Request, res: Response) => {
   try {
     const companyId = (req as any).user?.companyId;
     const userId = (req as any).user?.userId;
@@ -2124,7 +2126,7 @@ router.post('/direct-send/commit', async (req: Request, res: Response) => {
     console.error('[direct-send/commit] 오류:', err);
     return res.status(500).json({ success: false, error: '발송 접수 중 오류가 발생했습니다.' });
   }
-});
+}, SEND_IN_FLIGHT_MESSAGE));
 
 // ★ 대량 발송 파이프라인 (2026-05-30) — Task 6: 발송 진행률 조회 (적재 → 처리 → 완료)
 router.get('/:id/send-progress', async (req: Request, res: Response) => {
@@ -2157,7 +2159,9 @@ router.get('/:id/send-progress', async (req: Request, res: Response) => {
   }
 });
 
-router.post('/direct-send', async (req: Request, res: Response) => {
+// ★ 2026-10-24 세 채널 구조체크 ⑬ — 같은 사람이 같은 발송을 겹쳐 누르면(더블클릭 · 응답 전 재클릭) 둘째는 409(잠금 CT singleFlight · 핸들러가 끝날 때 놓는다).
+//   옛: 요청마다 새 적재분 · 새 캠페인이라 겹친 두 요청이 같은 대상에게 두 번 나갔다.
+router.post('/direct-send', singleFlight('direct-send', async (req: Request, res: Response) => {
   try {
     const companyId = (req as any).user?.companyId;
     const userId = (req as any).user?.userId;
@@ -3273,7 +3277,7 @@ router.post('/direct-send', async (req: Request, res: Response) => {
     console.error('직접발송 실패:', error);
     res.status(500).json({ success: false, error: '발송 실패' });
   }
-});
+}, SEND_IN_FLIGHT_MESSAGE));
 
 // 예약 취소 — ★ utils/campaign-lifecycle.ts 컨트롤타워 사용
 router.post('/:id/cancel', async (req: Request, res: Response) => {

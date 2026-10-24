@@ -78,16 +78,17 @@ describe('3. 이메일 완성도 줄 = 발송 관문 정규식', () => {
 describe('4. 입구 배선', () => {
   it('DM: 한 줄 입구만 one_line · 판정은 서버 · 실패해도 한 줄 유지', () => {
     const d = FRONT('pages', 'DmBuilderPage.tsx');
-    // ★ 2026-10-10 한 줄 요청은 화면 CT 한 곳(requestLineDm)이 보낸다 · 한 줄 입구(opts.oneLine)에서만 부른다
-    expect(d).toContain('if (opts.oneLine) {');
-    // ★ 2026-10-17 단계 모달 요청이면 단계 몸통을 함께 싣는다(그 밖 = 지금 그대로)
-    expect(d).toContain("const r = await requestLineDm({ line: opts.prompt || '', facts: opts.facts, products: opts.products, reads: opts.reads, readLicensed: opts.readLicensed, ...(opts.steps ? { steps: opts.steps.body } : {}) });");
+    // ★ 2026-10-10 한 줄 요청은 화면 CT 한 곳(requestLineDm)이 보낸다 · ★ 2026-10-24 ⑧ 단계 창이 만든 요청만(단계 몸통 필수)
+    expect(d).toContain('if (opts.oneLine && opts.steps) {');
+    expect(d).toContain("const r = await requestLineDm({ line: opts.prompt || '', reads: opts.reads, readLicensed: opts.readLicensed, steps: opts.steps.body });");
     expect(FRONT('utils', 'one-line.ts')).toContain("prompt: req.line, one_line: true, attempt_token: newAttemptToken(), land: 'result',");
     expect(d).toContain("const res = await api.post('/dm/ai/one-shot-generate', { prompt: opts.prompt || '', scenario: opts.scenario });");
     expect(d).toContain("const g = await fetchOneLineGaps(t, reads, 'dm');");   // ★ 2026-10-10 H3 사진 글 조각을 함께(판정은 여전히 서버) · ★ 같은 날 한 줄 묻기 = 메뉴를 함께(질문 판정)
     const fin = d.slice(d.indexOf('    } finally {\n      clearInterval(stepTimer);'), d.indexOf('  }, [generating, createNew, applyAiGenerated'));
     expect(fin).not.toContain("setNaturalLanguage('')");
-    expect(d).toContain('extraContent={pendingGen && (pendingGen.askBenefit || (pendingGen.terms?.length ?? 0) > 0 || (pendingGen.reads?.length ?? 0) > 0) ? (');
+    // ★ 2026-10-24 ⑧ — 옛 확인 창(혜택 · 몰 상품 칸)은 지웠다 · 판정을 못 받으면 만들지 않는다(크레딧 0)
+    expect(d).not.toContain('pendingGen');
+    expect(d).toContain("setToast({ type: 'error', message: '한 줄을 지금 읽지 못했어요. 잠시 후 다시 눌러 주세요. 크레딧은 쓰지 않았어요.' });");
   });
   it('이메일 · 인앱: 한 줄 입구가 one_line 을 보낸다(빠른 시작은 보내지 않는다)', () => {
     const e = FRONT('pages', 'EmailCampaignsPage.tsx');

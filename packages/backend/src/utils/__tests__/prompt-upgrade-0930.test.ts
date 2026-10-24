@@ -41,7 +41,7 @@ describe('WP1 발송 길목 자리표시 가드', () => {
     expect(c).toContain('findUneditedSendPlaceholder(messageContent, subject)');
     expect(c).toContain('findUneditedSendPlaceholder(message, subject)');
     // 옛 동기 /direct-send — 차감 앞(링크 결함 검사 바로 뒤)에서 막는다
-    const syncStart = c.indexOf("router.post('/direct-send', async");
+    const syncStart = c.indexOf("router.post('/direct-send', singleFlight('direct-send', async");
     const syncGate = c.indexOf('findUneditedSendPlaceholder(...textsToCheck, alimtalkNextContents, alimtalkNextSubject)');
     const syncDeduct = c.indexOf('const directDeduct = await prepaidDeduct(');
     expect(syncStart).toBeGreaterThan(0);
@@ -115,18 +115,21 @@ describe('WP2 새로 쓰는 문안 = 값 기준 혜택 대조', () => {
 describe('WP2 배선 — 문안을 새로 쓰거나 다시 쓰는 AI 출구마다 서버 대조가 붙어 있다(지시는 경계가 아니다)', () => {
   const has = (src: string, ...calls: string[]) => calls.every((c) => src.includes(c));
   it('새로 쓰는 문안(기본 · 맞춤 · DM · 이메일 · 인앱)', () => {
-    expect(has(SRC('services', 'ai.ts'), 'findInventedBenefits(', 'replaceInventedBenefits(', 'findNewNumbers(')).toBe(true);
-    expect(has(SRC('routes', 'dm.ts'), 'findInventedBenefits(', 'replaceInventedBenefits(')).toBe(true);
-    expect(has(SRC('utils', 'dm', 'dm-ai.ts'), 'findInventedBenefits(', 'findNewNumbers(')).toBe(true);
-    expect(has(SRC('utils', 'email-ai.ts'), 'replaceInventedBenefitsInHtml(', 'replaceInventedBenefitsDeep(', 'findNewNumbers(')).toBe(true);
+    expect(has(SRC('services', 'ai.ts'), 'findInventedBenefits(', 'replaceInventedBenefits(', 'rewriteAddsFacts(')).toBe(true);   // ★ 1024 ② 다듬기 후보 = rewriteAddsFacts
+    // ★ 2026-10-24 ② DM 알림 문자 = CT(dm-alert-copy · 옛 routes/dm.ts 인라인) · 다시 쓰기 판정 = rewriteAddsFacts(숫자 ∥ 혜택 ∥ 효능) · 원샷 HTML 이메일 삭제
+    expect(has(SRC('utils', 'dm', 'dm-alert-copy.ts'), 'findInventedBenefits(', 'replaceInventedBenefits(')).toBe(true);
+    expect(has(SRC('utils', 'dm', 'dm-ai.ts'), 'copyFactsExistInText(', 'rewriteAddsFacts(')).toBe(true);
+    expect(has(SRC('utils', 'email-ai.ts'), 'replaceInventedBenefitsDeep(', 'rewriteAddsFacts(')).toBe(true);
+    expect(SRC('utils', 'copy-benefit-detector.ts')).toContain('return findNewNumbers(a, b).length > 0 || findInventedBenefits(a, b).length > 0 || claimsInventedEfficacy(a, b);');
     expect(has(SRC('utils', 'inapp-ai-generator.ts'), 'replaceInventedBenefits(', 'replaceInventedBenefitsDeep(')).toBe(true);
   });
   it('다시 쓰는 문안(변형 · 꾸미기 · DM 다듬기 · 대행 다듬기 · 인앱 톤 변형 · 여정 다듬기 · SNS 다듬기) = 원문에 없던 숫자도 본다', () => {
-    expect(has(SRC('utils', 'variant-generator.ts'), 'findInventedBenefits(', 'findNewNumbers(')).toBe(true);
-    expect(has(SRC('utils', 'operator-message-decorator.ts'), 'findInventedBenefits(', 'findNewNumbers(')).toBe(true);
-    expect(has(SRC('utils', 'dm', 'dm-quick-action.ts'), 'findInventedBenefits(', 'findNewNumbers(')).toBe(true);
-    expect(has(SRC('utils', 'agency-send-refine.ts'), 'stripUnauthorizedBenefits(', 'findNewNumbers(')).toBe(true);
-    expect(has(SRC('utils', 'inapp-quick-action.ts'), 'stripUnauthorizedBenefits(', 'findNewNumbers(')).toBe(true);
+    // ★ 2026-10-24 ② rewriteAddsFacts = 새 숫자 ∥ 지어낸 혜택 ∥ 근거 없는 효능(위 시험이 그 몸통을 본다)
+    expect(has(SRC('utils', 'variant-generator.ts'), 'rewriteAddsFacts(')).toBe(true);
+    expect(has(SRC('utils', 'operator-message-decorator.ts'), 'rewriteAddsFacts(')).toBe(true);
+    expect(has(SRC('utils', 'dm', 'dm-quick-action.ts'), 'rewriteAddsFacts(')).toBe(true);
+    expect(has(SRC('utils', 'agency-send-refine.ts'), 'stripUnauthorizedBenefits(', 'findNewNumbers(', 'claimsInventedEfficacy(')).toBe(true);
+    expect(has(SRC('utils', 'inapp-quick-action.ts'), 'stripUnauthorizedBenefits(', 'rewriteAddsFacts(')).toBe(true);
     const j = SRC('utils', 'journey-ai-generator.ts');
     expect((j.match(/findNewNumbers\(/g) || []).length).toBe(2);   // 다듬기 후보 + 자동 재작성
     expect(has(SRC('utils', 'sns-caption-ai.ts'), 'stripUnauthorizedBenefits(', 'findNewNumbers(')).toBe(true);
@@ -198,7 +201,7 @@ describe('Codex 0930 1R — 대조 · 길목 틈', () => {
   it('[medium] 다듬기 = 시스템이 다시 붙인 수신거부 문구는 대조 원문에 포함한다', () => {
     const ai = SRC('services', 'ai.ts');
     expect(ai).toContain('const factSource = `${originalMessage}\\n${rejectFooterToRestore}`;');
-    expect(ai).toContain('findNewNumbers(text, factSource)');
+    expect(ai).toContain('rewriteAddsFacts(text, factSource)');   // ★ 2026-10-24 ② 숫자 ∥ 혜택 ∥ 효능
   });
 });
 
@@ -207,8 +210,10 @@ describe('Codex 0930 2R — 위치 맞춤을 없앤 구조 · 한글 단위 문�
     expect(htmlVisibleText('<table width="100%"><tr><td>신상품 안내</td></tr></table>')).not.toContain('100');
     expect(htmlVisibleText('<p>30&#37; 할인</p>')).toBe('\n30% 할인\n');
     const e = SRC('utils', 'email-ai.ts');
+    // ★ 2026-10-24 ② 숫자 · 혜택 = 0930 근거 그대로 · 효능은 이어 읽는 단위도(readingAddsEfficacy · Codex 4R)
     expect(e).toContain('const refineGround = `${input.subject}\\n${htmlVisibleText(input.htmlBody)}\\n${input.instruction}`;');
-    expect(e).toContain("throw new Error('원문에 없는 숫자나 혜택이 생겨 적용하지 않았어요. 다시 눌러 주세요.');");
+    expect(e).toContain('if (rewriteAddsFacts(refinedVisible, refineGround) || readingAddsEfficacy([subject, ...visibleLines(htmlBody)], [input.subject, ...visibleLines(input.htmlBody)], input.instruction)) {');
+    expect(e).toContain("throw new Error('원문에 없는 숫자 · 혜택 · 효능 말이 생겨 적용하지 않았어요. 다시 눌러 주세요.');");
   });
   it('[high] 이모지 엔티티 뒤의 값도 조각 안에서 바뀐다(엔티티는 그대로)', () => {
     const [h] = replaceInventedBenefitsInHtml('<p>&#x1F389;&#x1F381;30% 할인</p>', '');

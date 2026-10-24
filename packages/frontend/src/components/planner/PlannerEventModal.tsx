@@ -10,7 +10,7 @@
  * 돈: 버튼 금액 = 서버 견적(`/build-quote`) · 템플릿의 빠진 재료도 그 견적의 관문(gate)이 정한다 ·
  * 저장 뒤 행사 견적이 그 금액과 다르거나 20크레딧 이상이면 금액 확인 창 1회(CreditConfirmModal) · 생성은 채널마다 1요청(같은 시도 토큰 재시도 = 재차감 0).
  * 행사명 · 기간 · 혜택은 서버가 행사 행 원본으로 싣는다(AI 가 바꾸지 않는다).
- * ★ 2026-10-18 입력 축(§3-6) — 한 줄을 읽은 값은 판1 「이렇게 알아들었어요」 줄마다 사람이 [맞아요]를 눌러야 칸에 들어간다(기본값 아님) ·
+ * ★ 2026-10-18 입력 축(§3-6) · ★ 1024 R9 — 한 줄은 이 창이 아니라 질문 창(PlannerLineAsk · 못 읽은 칸만 묻기)이 받는다 · 이 창 = 직접 적기 · 고치기 ·
  *   받는 사람 = [상품을 산 고객][전체 고객] 미리 고르지 않음(스위치 열린 회사) · 판2 대상 상품 + 「언제 산」(PlannerAudiencePicker).
  * ⛔ native dialog 0 · 모델명 0 · 줄표 0.
  */
@@ -35,7 +35,7 @@ import { plannerMinSendDate, plannerPreset } from './planner-preset';
 import PlannerAudiencePicker, { buyerAudienceOf, type BuyerDraft } from './PlannerAudiencePicker';
 import {
   plannerApi, plannerErrorText, won,
-  type Anchor, type Availability, type BuildQuote, type CalendarEvent, type PlannerAudience, type PlannerChannelKey, type PlannerLineRead, type PlannerMaterials, type TimingRule,
+  type Anchor, type Availability, type BuildQuote, type CalendarEvent, type PlannerAudience, type PlannerChannelKey, type PlannerMaterials, type TimingRule,
 } from './planner-api';
 
 /** 금액 확인 창 기준(크레딧 확인 모달 상시 기준 20 · 그 밑은 버튼 금액으로 갈음) */
@@ -119,14 +119,11 @@ const NeedBadge = ({ must }: { must: boolean }) => (
   <span className={`text-[11px] font-semibold rounded-md px-1.5 py-px border ${must ? 'text-amber-800 border-amber-200 bg-amber-50' : 'text-slate-400 border-slate-200'}`}>{must ? '꼭' : '있으면'}</span>
 );
 
-type ReadRow = 'title' | 'period' | 'benefit' | 'audience' | 'channels';
 
-export default function PlannerEventModal({ month, initialDate, initialTemplate = null, lineEnabled = false, lineRead = null, editing, availability, balance, onClose, onSaved }: {
+export default function PlannerEventModal({ month, initialDate, initialTemplate = null, lineEnabled = false, editing, availability, balance, onClose, onSaved }: {
   month: string;
   /** ★ 2026-10-18 한 줄 입력 · 상품 구매자 대상이 열린 회사(서버 캘린더 lineEnabled) */
   lineEnabled?: boolean;
-  /** ★ 2026-10-18 명령 카드 한 줄을 읽은 값(전부 제안 · 줄마다 확인) */
-  lineRead?: PlannerLineRead | null;
   initialDate?: string | null;
   /** 캘린더 시작 카드에서 연 템플릿(판1 에 골라진 채로 연다) */
   initialTemplate?: LineTemplateId | LineCompositionId | null;
@@ -182,17 +179,6 @@ export default function PlannerEventModal({ month, initialDate, initialTemplate 
   const [buyer, setBuyer] = useState<BuyerDraft>(() => (a0 && a0.kind === 'product_buyers'
     ? { door: a0.door, keys: a0.keys, names: a0.names, sinceDays: null, kept: { since: a0.since } }
     : { door: null, keys: [], names: [], sinceDays: null }));
-  const readAud = lineRead?.audience ?? null;
-  const buyerTerms = readAud && readAud.kind === 'product_buyers' ? readAud.terms : [];
-  const readRows: ReadRow[] = lineRead ? ([
-    lineRead.title ? 'title' : null,
-    lineRead.period || lineRead.periodNote ? 'period' : null,
-    lineRead.benefit ? 'benefit' : null,
-    readAud ? 'audience' : null,
-    lineRead.channels.length > 0 ? 'channels' : null,
-  ].filter(Boolean) as ReadRow[]) : [];
-  const [readDone, setReadDone] = useState<Partial<Record<ReadRow, 'ok' | 'edit'>>>({});
-  const readPending = readRows.filter((r) => !readDone[r]);
   const audience: PlannerAudience | null = audKind === 'all' ? { kind: 'all' } : audKind === 'product_buyers' ? buyerAudienceOf(buyer) : null;
 
   // 템플릿 목록(서버 원장 · 회사 스위치 밖 = null → 옛 흐름 그대로) · 새 행사는 첫 템플릿이 골라진 채로 연다
@@ -353,7 +339,6 @@ export default function PlannerEventModal({ month, initialDate, initialTemplate 
 
   // ── 저장 · 생성 ─────────────────────────────────────────────────
   const validateEvent = (): string | null => {
-    if (readPending.length > 0) return '알아들은 내용을 줄마다 확인해 주세요.';
     if (!audKind) return '받는 사람을 골라 주세요.';
     if (!title.trim()) return '행사 이름을 입력해 주세요.';
     if (!startsOn || !endsOn) return '행사 기간을 골라 주세요.';
@@ -540,61 +525,6 @@ export default function PlannerEventModal({ month, initialDate, initialTemplate 
     </ol>
   ) : null;
 
-  const markRead = (row: ReadRow, how: 'ok' | 'edit') => {
-    setReadDone((cur) => ({ ...cur, [row]: how }));
-    if (how !== 'ok' || !lineRead) return;
-    if (row === 'title' && lineRead.title) setTitle(lineRead.title);
-    if (row === 'period' && lineRead.period) { setStartsOn(lineRead.period.startsOn); setEndsOn(lineRead.period.endsOn); }
-    if (row === 'benefit' && lineRead.benefit) setBenefit(lineRead.benefit);
-    if (row === 'audience' && readAud && readAud.kind !== 'unread') setAudKind(readAud.kind === 'all' ? 'all' : 'product_buyers');
-    if (row === 'channels') {
-      touched.current = true;
-      const open = (ch: PlannerChannelKey) => { const a = avail(ch); return !a || a.available; };
-      setTps(lineRead.channels.filter(open).map((ch) => ({ channel: ch, timing: { anchor: 'start' } })));
-    }
-  };
-  const readValue = (row: ReadRow): { text: string; canOk: boolean } => {
-    if (!lineRead) return { text: '', canOk: false };
-    if (row === 'title') return { text: lineRead.title || '', canOk: true };
-    if (row === 'period') return lineRead.period
-      ? { text: `${plannerDay(lineRead.period.startsOn)} ~ ${plannerDay(lineRead.period.endsOn)}`, canOk: true }
-      : { text: lineRead.periodNote || '', canOk: false };
-    if (row === 'benefit') return { text: lineRead.benefit || '', canOk: true };
-    if (row === 'audience') {
-      if (!readAud) return { text: '', canOk: false };
-      if (readAud.kind === 'all') return { text: '전체 고객', canOk: true };
-      if (readAud.kind === 'product_buyers') return { text: `${readAud.terms.length > 0 ? readAud.terms.map((t) => `「${t}」`).join(' ') : '어떤 상품'}을 산 고객 · 상품은 다음 판에서 골라요`, canOk: lineEnabled };
-      return { text: `「${readAud.raw}」은 아직 못 골라요. 아래에서 받는 사람을 골라 주세요`, canOk: false };
-    }
-    return { text: lineRead.channels.map((c) => PLANNER_CHANNEL[c].label).join(' · '), canOk: true };
-  };
-  const READ_LABEL: Record<ReadRow, string> = { title: '행사 이름', period: '기간', benefit: '혜택', audience: '받는 사람', channels: '채널' };
-  const readBlock = lineRead && (readRows.length > 0 || lineRead.unsupported.length > 0) ? (
-    <section className="rounded-xl border border-violet-200 bg-violet-50/50 px-3.5 py-3">
-      <p className="text-[13px] font-semibold text-violet-900">이렇게 알아들었어요<span className="ml-1.5 font-normal text-violet-800">줄마다 확인해 주세요</span></p>
-      <ul className="mt-2 space-y-2">
-        {readRows.map((row) => {
-          const v = readValue(row);
-          const done = readDone[row];
-          return (
-            <li key={row} className="flex items-start gap-2 text-[13px]">
-              <span className="w-[64px] shrink-0 text-slate-500">{READ_LABEL[row]}</span>
-              <span className={`min-w-0 flex-1 ${v.canOk ? 'font-semibold text-violet-950' : 'text-slate-600'}`}>{v.text}</span>
-              {done ? (
-                <span className="shrink-0 text-[12px] font-semibold text-emerald-700 inline-flex items-center gap-1"><Check className="w-3.5 h-3.5" />{done === 'ok' ? '넣었어요' : '직접 고쳐요'}</span>
-              ) : (
-                <span className="shrink-0 flex gap-1">
-                  {v.canOk && <button type="button" onClick={() => markRead(row, 'ok')} className="h-8 px-2.5 rounded-lg bg-violet-600 hover:bg-violet-700 text-white text-[12px] font-semibold">맞아요</button>}
-                  <button type="button" onClick={() => markRead(row, 'edit')} className="h-8 px-2.5 rounded-lg border border-violet-300 bg-white text-violet-900 text-[12px] font-semibold">{v.canOk ? '고치기' : '확인'}</button>
-                </span>
-              )}
-            </li>
-          );
-        })}
-      </ul>
-      {lineRead.unsupported.length > 0 && <p className="mt-2 text-[12px] text-slate-600">{lineRead.unsupported.join(' · ')}은 아직 플래너에서 보내지 못해요</p>}
-    </section>
-  ) : null;
   const audienceKindBlock = lineEnabled ? (
     <div>
       <p className="text-[12.5px] font-semibold text-slate-700 mb-1.5">받는 사람</p>
@@ -615,7 +545,6 @@ export default function PlannerEventModal({ month, initialDate, initialTemplate 
 
   const eventBoard = (
     <div className={`space-y-4 ${busy ? 'opacity-60 pointer-events-none' : ''}`}>
-      {readBlock}
       <label className="block">
         <span className="text-[12.5px] font-semibold text-slate-700">행사 이름</span>
         <input value={title} onChange={(e) => setTitle(e.target.value.slice(0, 120))} placeholder="예: 가을 신상 위크"
@@ -750,7 +679,7 @@ export default function PlannerEventModal({ month, initialDate, initialTemplate 
   const materialsBoard = (
     <div className={`space-y-4 ${busy ? 'opacity-60 pointer-events-none' : ''}`}>
       {audKind === 'product_buyers' && (
-        <PlannerAudiencePicker value={buyer} onChange={setBuyer} terms={buyerTerms} allTimeHint={!!(readAud && readAud.kind === 'product_buyers' && readAud.allTime)} eventId={savedId} disabled={busy} />
+        <PlannerAudiencePicker value={buyer} onChange={setBuyer} eventId={savedId} disabled={busy} />
       )}
       <div>
         <label className="block"><span className="flex items-center gap-2 text-[12.5px] font-semibold text-slate-700">혜택 문구{tplInfo && tplInfo.needs.benefit !== 'none' && <NeedBadge must={tplInfo.needs.benefit === 'required'} />}</span>

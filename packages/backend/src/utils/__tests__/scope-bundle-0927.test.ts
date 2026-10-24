@@ -176,9 +176,10 @@ describe('R117 DM 소유 가드 = CT 미들웨어', () => {
     const d = src('..', 'routes', 'dm.ts');
     const paths = [
       "'/:id/publish'", "'/:id/stats'", "'/:id/send-to-target'", "'/:id/recipients-tracking'", "'/:id/recipient-detail'",
-      "'/:id/generate-copy'", "'/:id/render-sample'", "'/:id/convert-to-scroll'", "'/:id/test-send'", "'/:id/request-approval'",
-      "'/:id/approve'", "'/:id/reject'", "'/:id/validate'", "'/:id/responses'", "'/:id/winners'", "'/:id/event-stats'",
-      "'/:id/event-insight'", "'/:id/responses/export'", "'/:id/winners/import'", "'/:id/prizes'",
+      "'/:id/generate-copy'", "'/:id/render-sample'", "'/:id/convert-to-scroll'", "'/:id/test-send'",
+      "'/:id/validate'", "'/:id/responses'", "'/:id/winners'", "'/:id/event-stats'",
+      "'/:id/event-insight'", "'/:id/responses/export'", "'/:id/winners/import'",
+      // ★ 2026-10-24 세 채널 구조체크 ⑪ — request-approval · approve · reject · prizes 는 화면이 부르지 않아 지웠다(소유 가드 대상도 없어졌다)
     ];
     for (const p of paths) expect(d, p).toMatch(new RegExp(`dmRouter\\.(get|post|put)\\(${p.replace(/[/:]/g, (m) => '\\' + m)}, requireDmAccess,`));
     // 옛 가드 함수는 CT로 옮겼다(라우트 인라인 정의 0)

@@ -29,7 +29,7 @@ import { PLANNER_AGENCY_SOURCE, getAgencyCredits } from './planner-approval';
 import { kstDateString } from './planner-execution';
 import { loadEventTouchpoints, notifyPlanner } from './planner-touchpoint';
 import { loadPlannerEvent, firstSendDate, isBuilding, readStoredAudience } from './planner-event';
-import { computeTouchpointFingerprints, eventFingerprint, quoteEventApproval, PLANNER_APPROVAL_DEADLINE_HOUR } from './planner-confirm';
+import { computeTouchpointFingerprints, eventFingerprint, quoteEventApproval, plannerSendNumbers, PLANNER_APPROVAL_DEADLINE_HOUR } from './planner-confirm';
 import { carrierGroups, copyInputHash, isCopyValid } from './planner-copy';
 import { firstBlockedChannel } from './planner-channel-gate';
 import { countEventSmsAudience, countPlannerEmailRecipients } from './planner-audience';
@@ -90,9 +90,10 @@ export async function approvePlannerEvent(input: {
   if (isPastApprovalDeadline(first)) {
     throw new PlannerApproveError(409, 'DEADLINE_PASSED', '승인 마감이 지났습니다. 날짜를 고쳐 다시 담아 주세요.');
   }
-  // C2 — 지문은 언제나 다시 맞춘다
+  // C2 — 지문은 언제나 다시 맞춘다 · ★ 1024 R5 번호도 지문에 든다(한 번 읽어 대조 · 각인에 같은 값)
   const fps = await computeTouchpointFingerprints(ev.companyId, live);
-  if (eventFingerprint(ev, fps) !== String(input.seenHash || '')) {
+  const numbers = await plannerSendNumbers(ev.companyId, ev.createdBy);
+  if (eventFingerprint(ev, fps, numbers) !== String(input.seenHash || '')) {
     throw new PlannerApproveError(409, 'CHANGED', '보신 뒤 내용이 바뀌었습니다. 바뀐 내용을 다시 확인한 뒤 승인해 주세요.');
   }
   // 문안이 다 준비됐는가(확인 대기 진입 뒤 고친 행사는 draft로 돌아가므로 여기까지 오면 준비돼 있어야 한다 · 그래도 다시 본다)
@@ -127,6 +128,8 @@ export async function approvePlannerEvent(input: {
     throw new PlannerApproveError(409, 'QUOTE_CHANGED', '승인 비용이 바뀌었습니다. 금액을 다시 확인한 뒤 승인해 주세요.', { quote });
   }
   if (quote.total > 0) await checkCredit(ev.companyId, quote.total); // 부족 = InsufficientCreditError(라우트 402)
+  // ★ 2026-10-24 R5 — 승인 지문에 나갈 번호(발신 · 080)를 함께 각인한다(화면이 본 지문과 대조한 그 값 · 실행부가 같은 함수로 대조)
+  const stampNumbers = { numbers };
 
   const charged = { agency: 0, dm: 0, email: 0 };
   let dmUrl: string | null = null;
@@ -205,7 +208,7 @@ export async function approvePlannerEvent(input: {
     const carriesDm = new Set(groups.filter((g) => g.dm || g.carrier.channel === 'dm').map((g) => g.carrier.id));
     const today = kstDateString();
     for (const t of pending) {
-      const patch: Record<string, unknown> = { approved: { hash: fps.get(t.id) || null, at, by: input.userId, revision } };
+      const patch: Record<string, unknown> = { approved: { hash: fps.get(t.id) || null, at, by: input.userId, revision, ...(t.channel === 'email' ? {} : stampNumbers) } };
       if (dmUrl && (t.channel === 'dm' || carriesDm.has(t.id))) patch.dm_url = dmUrl;
       // ★ 2026-10-18 M1 — 승인 직후 실주소 검사는 **오늘 뒤** 캐리어에만. 오늘 것은 실행부 당일 검사가 실주소로 본다
       //   (둘이 겹치면 같은 날 검사 두 벌이 서로 다른 판정을 낼 수 있다 · 회의론자 M1).
@@ -226,7 +229,7 @@ export async function approvePlannerEvent(input: {
               meta = (COALESCE(meta, '{}'::jsonb) - 'preview') || jsonb_build_object('approved', $3::jsonb),
               updated_at = NOW()
         WHERE id = $1::uuid AND company_id = $2::uuid AND status = 'briefed'`,
-      [ev.id, ev.companyId, JSON.stringify({ hash: eventFingerprint(ev, fps), at, by: input.userId, revision })],
+      [ev.id, ev.companyId, JSON.stringify({ hash: eventFingerprint(ev, fps, numbers), at, by: input.userId, revision })],
     );
     // ⑧ 대행료 — **이 트랜잭션 안에서** 차감한다(Codex 1R H1 · 승인이 롤백되면 대행료도 없다 · 차감만 남은 달이 생기지 않는다).
     //   그 달 그 회차 첫 승인만(이미 냈으면 견적 0 · 같은 키 = duplicate). 잔액 부족 = 던진다 → 전체 롤백(라우트 402).

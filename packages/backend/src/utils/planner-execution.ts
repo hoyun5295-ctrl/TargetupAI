@@ -36,9 +36,12 @@ export const PLANNER_SEND_SOURCE = 'planner-touchpoint-send';
 export function plannerProduceGenKey(touchpointId: string): string {
   return `planner-produce-gen:${touchpointId}`;
 }
-/** 당일 문안 생성 멱등키 — 터치포인트 고정(같은 날 재시도가 두 번 과금되지 않는다). */
-export function plannerSendKey(touchpointId: string): string {
-  return `planner-send:${touchpointId}`;
+/**
+ * 문안비 멱등키 — 캐리어 접점 + **이번 시도의 적재 묶음**(★ 2026-10-24 R4 · 보내기 전에 잡고, 확실히 안 나간 시도는 되돌린다).
+ *   시도마다 키가 달라야 되돌린 시도의 키가 다음 시도를 「이미 냄」으로 읽히지 않는다(자동마케팅 X2 와 같은 꼴).
+ */
+export function plannerSendKey(touchpointId: string, stagingId: string): string {
+  return `planner-send:${touchpointId}:${stagingId}`;
 }
 /**
  * 대행 환불 멱등키 — 회사·월·**결제 회차** 고정(차감 키와 짝).
@@ -293,52 +296,10 @@ export function decideMessagingDispatch(
   return { action: 'send', attach: null };
 }
 
-/**
- * (순수) 발행된 DM 화면에 남은 빈 자리 — **고객이 보는 렌더 결과**에서 찾는다.
- * 여기 문구는 DM 렌더러가 빈 값 자리에 실제로 찍는 문자열이다(dm-section-renderer · 섹션 기본값 · 혜택 placeholder).
- * ⛔ "입력해주세요" 같은 일반 낱말로 잡지 않는다 — 설문 답변칸 안내처럼 정상 문구가 걸린다. 렌더러 리터럴만 본다.
- */
-const DM_PLACEHOLDER_LITERALS: Array<{ text: string; label: string }> = [
-  { text: '[직접 작성해주세요]', label: '직접 작성 문구' },
-  { text: '[혜택 직접 작성해주세요]', label: '혜택 문구' },
-  { text: '이미지를 추가해주세요', label: '이미지' },
-  { text: '[상품을 추가해주세요]', label: '상품' },
-  { text: '[슬라이드를 추가해주세요]', label: '슬라이드' },
-  { text: '[질문을 작성해주세요]', label: '설문 질문' },
-  { text: '[설문 질문을 추가해주세요]', label: '설문 질문' },
-  { text: '[헤드라인을 작성해주세요]', label: '헤드라인' },
-  { text: '[YouTube URL을 입력해주세요]', label: '영상 주소' },
-  { text: '[Instagram URL을 입력해주세요]', label: 'SNS 주소' },
-  { text: '[매장 정보를 추가해주세요]', label: '매장 정보' },
-  { text: '[리뷰를 추가해주세요]', label: '리뷰' },
-];
-
-export interface DmPlaceholderResidue {
-  label: string;
-  count: number;
-}
-
-/** (순수) 렌더된 HTML에서 빈 자리 문구를 센다. 결과가 비면 완성이다. */
-export function findDmPlaceholderResidue(renderedHtml: string): DmPlaceholderResidue[] {
-  // 태그 제거 — 속성값(placeholder="답변을 입력해주세요")은 보지 않고 사람이 읽는 텍스트만 본다.
-  const text = String(renderedHtml || '').replace(/<script[\s\S]*?<\/script>/gi, '').replace(/<[^>]+>/g, ' ');
-  const byLabel = new Map<string, number>();
-  for (const { text: needle, label } of DM_PLACEHOLDER_LITERALS) {
-    let idx = text.indexOf(needle);
-    let count = 0;
-    while (idx >= 0) {
-      count++;
-      idx = text.indexOf(needle, idx + needle.length);
-    }
-    if (count > 0) byLabel.set(label, (byLabel.get(label) || 0) + count);
-  }
-  return Array.from(byLabel.entries()).map(([label, count]) => ({ label, count }));
-}
-
-/** (순수) 빈 자리 요약 문구 — 통지·화면 공용. 예: "이미지 2곳 · 직접 작성 문구 3곳". */
-export function describeDmResidue(residue: DmPlaceholderResidue[]): string {
-  return residue.map((r) => `${r.label} ${r.count}곳`).join(' · ');
-}
+// ★ 2026-10-24 세 채널 구조체크 ⑮ — 렌더 결과의 빈 자리 판정은 DM CT(dm/dm-placeholder-residue)로 옮겼다(발행 관문 · 보내기 · 플래너가 한 판정).
+//   이 파일의 옛 이름은 그대로 내보낸다(플래너 점검 · 시험이 이 경로로 읽는다).
+export { findDmPlaceholderResidue, describeDmResidue, type DmPlaceholderResidue } from './dm/dm-placeholder-residue';
+import type { DmPlaceholderResidue } from './dm/dm-placeholder-residue';
 
 /** 섹션이 하나도 없는 발행물 — 빈 페이지 주소를 문자에 실을 수는 없다. */
 export const DM_RESIDUE_NO_CONTENT = '내용 없음';

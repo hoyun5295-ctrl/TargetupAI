@@ -2,8 +2,8 @@
  * PlannerAudiencePicker — 판2 「대상 상품 · 언제 산 고객」(★ 2026-10-18 v2 입력 축 · 설계서 docs/2026-10-18-planner-v2-design.md §3-6)
  *
  * 목록 = 그 회사 지금 들어오는 곳(자사몰 결제 주문 / 매장 원장)의 최근 180일 관측 상품(서버 · 여정과 같은 함수) · 직접 입력 없음.
- * 한 줄에서 읽은 낱말(「기초」)이 이름에 든 상품을 위로 올리기만 한다 · **미리 체크 0** · 최대 30개(넘으면 거절 · 잘라내지 않음).
- * 「언제 산」 = [최근 90일][6개월][1년][기록 전체] 필수 · 기본값 없음(한 줄의 「모두」는 [기록 전체]에 표시만).
+ * **미리 체크 0** · 최대 30개(넘으면 거절 · 잘라내지 않음) · ★ 1024 한 줄 = 질문 창(PlannerLineAsk)이 따로 묻는다(여기는 직접 고르기만).
+ * 「언제 산」 = [최근 90일][6개월][1년][기록 전체] 필수 · 기본값 없음.
  * 인원 = 실행과 같은 문(서버 /audience/count · 문자 · 메일 · 받을 수 있는 분만).
  * ⛔ 숫자는 서버가 센 값만 · 모델명 0 · native dialog 0 · 줄표 0.
  */
@@ -35,13 +35,9 @@ export function buyerAudienceOf(d: BuyerDraft, now: Date = new Date()): PlannerA
   return { kind: 'product_buyers', door: d.door, keys: d.keys, names: d.names, since: d.sinceDays !== null ? sinceDateOf(d.sinceDays, now) : d.kept!.since };
 }
 
-export default function PlannerAudiencePicker({ value, onChange, terms, allTimeHint, eventId, disabled }: {
+export default function PlannerAudiencePicker({ value, onChange, eventId, disabled }: {
   value: BuyerDraft;
   onChange: (v: BuyerDraft) => void;
-  /** 한 줄에서 읽은 상품 낱말(위로 올리기만) */
-  terms: string[];
-  /** 한 줄에 「모두」라고 적었다 → [기록 전체]에 표시만 */
-  allTimeHint: boolean;
   eventId: string | null;
   disabled?: boolean;
 }) {
@@ -68,13 +64,8 @@ export default function PlannerAudiencePicker({ value, onChange, terms, allTimeH
   const shown = useMemo(() => {
     if (!list) return [];
     const needle = q.trim().toLowerCase();
-    const hit = (p: ObservedProduct) => terms.some((t) => t && p.name.toLowerCase().includes(t.toLowerCase()));
-    return list.products
-      .filter((p) => !needle || p.name.toLowerCase().includes(needle))
-      .map((p) => ({ p, hit: hit(p) }))
-      .sort((a, b) => Number(b.hit) - Number(a.hit));
-  }, [list, q, terms]);
-  const termHits = shown.filter((x) => x.hit).length;
+    return list.products.filter((p) => !needle || p.name.toLowerCase().includes(needle));
+  }, [list, q]);
 
   // 인원 — 다 고르면 서버가 센다(실행과 같은 문)
   const audience = buyerAudienceOf(value);
@@ -118,18 +109,15 @@ export default function PlannerAudiencePicker({ value, onChange, terms, allTimeH
               <input value={q} onChange={(e) => setQ(e.target.value.slice(0, 40))} placeholder="상품 이름으로 찾기" aria-label="상품 이름으로 찾기"
                 className="w-full h-10 pl-9 pr-3 rounded-xl bg-white border border-slate-300 text-[13.5px] outline-none focus:ring-2 focus:ring-indigo-500" />
             </div>
-            {terms.length > 0 && (
-              <p className="mt-1.5 text-[12px] text-slate-500">{termHits > 0 ? `이름에 ${terms.map((t) => `「${t}」`).join(' ')}가 든 상품 ${termHits}개를 위에 두었어요` : `이름에 ${terms.map((t) => `「${t}」`).join(' ')}가 든 상품이 없어요. 아래에서 골라 주세요`}</p>
-            )}
             <ul className="mt-1.5 max-h-60 overflow-y-auto rounded-xl border border-slate-200 bg-white divide-y divide-slate-100">
-              {shown.slice(0, 120).map(({ p, hit }) => {
+              {shown.slice(0, 120).map((p) => {
                 const on = value.keys.includes(p.key);
                 return (
                   <li key={p.key}>
                     <button type="button" role="checkbox" aria-checked={on} onClick={() => toggle(p)}
                       className={`w-full px-3 py-2.5 flex items-center gap-2.5 text-left hover:bg-slate-50 ${on ? 'bg-indigo-50/60' : ''}`}>
                       <span className={`w-5 h-5 rounded-[6px] grid place-items-center shrink-0 ${on ? 'bg-indigo-600 text-white' : 'border border-slate-300 bg-white'}`}>{on && <Check className="w-[13px] h-[13px]" />}</span>
-                      <span className={`min-w-0 flex-1 text-[13.5px] truncate ${hit ? 'font-semibold text-slate-900' : 'text-slate-700'}`}>{p.name}</span>
+                      <span className={`min-w-0 flex-1 text-[13.5px] truncate text-slate-700`}>{p.name}</span>
                       <span className="text-[12px] text-slate-500 tabular-nums whitespace-nowrap">{won(p.buyers)}명 구매</span>
                     </button>
                   </li>
@@ -150,7 +138,6 @@ export default function PlannerAudiencePicker({ value, onChange, terms, allTimeH
               <button key={c.days} type="button" role="radio" aria-checked={on} onClick={() => onChange({ ...value, sinceDays: c.days })}
                 className={`h-9 px-3 rounded-lg border text-[12.5px] font-semibold inline-flex items-center gap-1 ${on ? 'border-indigo-300 bg-indigo-50 text-indigo-900' : 'border-slate-200 bg-white text-slate-600 hover:border-slate-300'}`}>
                 {on && <Check className="w-[13px] h-[13px]" />}{c.label}
-                {c.days === 0 && allTimeHint && !on && <span className="text-[11px] font-normal text-violet-700">· 한 줄에 「모두」</span>}
               </button>
             );
           })}

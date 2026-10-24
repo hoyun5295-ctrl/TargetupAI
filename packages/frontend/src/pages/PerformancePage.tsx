@@ -422,7 +422,7 @@ export default function PerformancePage() {
         setDailyInsight(null);
       }
       if (!snapRes.ok) {
-        if (snapData.code === 'BETA_GATE') {
+        if (snapData.code === 'AI_OPERATOR_GATED') {
           setError('본 기능은 요금제 가입 후 이용 가능합니다.');
         } else {
           setError(snapData.error || '성과 데이터 조회 실패');

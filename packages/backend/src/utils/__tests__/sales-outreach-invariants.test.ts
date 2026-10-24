@@ -160,8 +160,8 @@ describe('sales-outreach invariants', () => {
     const mediaSrc = readCode('utils/sales-outreach-media.ts');
     for (const c of mediaSrc.match(/fetchHtmlGuarded\([^)]*\)/g) || []) expect(c, c).toContain('OUTREACH_FETCH_OPTS');
     expect(mediaSrc).toMatch(/OUTREACH_FETCH_OPTS = \{ maxBytes: [3-9]\d{2}_000/);
-    const dm = read('routes/dm.ts');
-    expect(dm, 'DM 축은 이 함수를 계속 쓴다(공허 통과 방지)').toContain('fetchEventTextFromUrl(');
+    // ★ 2026-10-24 세 채널 구조체크 ⑪ — DM 행사 주소 읽기 주소(화면 호출 0)를 지웠다 · 함수는 DM 축 CT 에 남아 있다(공허 통과 방지 = 함수가 있는데 영업 잡은 안 쓴다)
+    expect(readCode('utils/dm/dm-brand-extractor.ts'), 'DM 축 CT 에 함수가 있다(공허 통과 방지)').toContain('export async function fetchEventTextFromUrl(');
     const ex = readCode('utils/sales-outreach-extract.ts');
     expect(ex).toContain('extractEventTextFromHtml');
     expect(ex).not.toMatch(/fetchHtmlGuarded\(|fetchEventTextFromUrl\(|https?\.request\(|[^a-zA-Z.]fetch\(/);
@@ -382,12 +382,13 @@ describe('sales-outreach invariants', () => {
     // 채우기 4번째 인자(기본 customer) · 아웃리치는 v3 채우기
     expect(produce).toContain("entry: EngineEntry = 'customer',");
     expect(produce).toContain("if (entry === 'outreach') return fillOutreachDmMediaV3(sections, media, channel);");
-    // 조립/발행 분리 · 자동 재조립은 같은 dmId 갱신(createDm·publishDm 재호출 0)
+    // 조립/발행 분리 · 자동 재조립은 같은 dmId 갱신(createDm·publishDm 재호출 0) · ★ 1024 ⑭ 발행 = 발행 코어의 경품 동기화 함수(publishDmWithPrizes)
     expect(produce).toContain('export async function assembleOutreachDm(');
     expect(produce).toContain('export async function publishOutreachDm(');
     expect(produce).toContain('export async function updateOutreachDm(');
     expect(count(produce, 'await createDm(')).toBe(1);
-    expect(count(produce, 'await publishDm(')).toBe(1);
+    expect(count(produce, 'await publishDmWithPrizes(')).toBe(1);
+    expect(count(produce, 'await publishDm(')).toBe(0);
     expect(jobs).toContain('await updateOutreachDm(pub.dmId, second, dmInput)');
     expect(jobs).toContain('autoSeqDm < 1 && Date.now() - dmT0 < 60_000');
     expect(jobs).not.toContain('await produceOutreachDm(');

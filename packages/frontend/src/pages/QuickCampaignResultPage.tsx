@@ -119,7 +119,8 @@ export default function QuickCampaignResultPage() {
   const draft = useMemo(() => loadBuildDraft(), []);
   // ★ 2026-10-10 재료 초안은 이 결과(또는 짝)로 결박된 것만 쓴다(어제 남은 재료로 차감 · 엉뚱한 링크 · 안내 0) · 한 줄 결과는 재료 초안이 없다
   const draftOwned = draftBelongsTo(draft, draftId, pairId);
-  const lineOrigin = handoff?.origin?.kind === 'line' ? handoff.origin : null;
+  // ★ 2026-10-24 세 채널 구조체크 ⑧ — 다시 만들기 = 단계 답으로만(옛 한 줄 갈래는 서버가 닫았다 · 단계 답이 없는 옛 결과는 버튼 없음)
+  const lineOrigin = handoff?.origin?.kind === 'line' && handoff.origin.steps ? handoff.origin : null;
   const extraInfo = useMemo(() => {
     const out = handoff ? unappliedItemsOf(handoff) : [];
     // 직접 적은 상품(몰 미연동)은 카드가 아니라 글로 실린다(재료 계약 · 서버 resolveBuildProducts)
@@ -205,13 +206,15 @@ export default function QuickCampaignResultPage() {
   const runLineRegen = useCallback(async (expected?: number) => {
     if (!lineOrigin || regenLine) return;
     setRegenLine(true);
-    const stepsCost = lineOrigin.steps ? (expected ?? lineOrigin.steps.generate ?? AI_GENERATE_COSTS['dm-ai-generate']) : null;
+    const steps = lineOrigin.steps;
+    if (!steps) return;
+    const stepsCost = expected ?? steps.generate ?? AI_GENERATE_COSTS['dm-ai-generate'];
     try {
       const r = await requestLineDm({
-        line: lineOrigin.line, facts: lineOrigin.facts, products: lineOrigin.products, reads: lineOrigin.reads, readLicensed: lineOrigin.readLicensed,
-        ...(lineOrigin.steps && stepsCost !== null ? { steps: { ...lineOrigin.steps.body, expected_cost: stepsCost } } : {}),
+        line: lineOrigin.line, reads: lineOrigin.reads, readLicensed: lineOrigin.readLicensed,
+        steps: { ...steps.body, expected_cost: stepsCost },
       });
-      if (!r.ok && r.code === 'PRICE_CHANGED' && r.cost !== undefined && lineOrigin.steps) {
+      if (!r.ok && r.code === 'PRICE_CHANGED' && r.cost !== undefined) {
         const c = r.cost;
         setConfirm({
           mode: 'warning', title: '금액이 바뀌었어요',
@@ -222,10 +225,9 @@ export default function QuickCampaignResultPage() {
       }
       const newId = String(r.data?.draft_id || '');
       if (!r.ok || !newId) {
-        if (r.code === 'MALL_PRODUCTS_UNAVAILABLE') throw new Error('고른 상품을 지금 쓸 수 없어요. 첫 화면에서 한 줄로 다시 만들어 주세요.');
         throw new Error(buildErrorMessage(r.code, r.error, '다시 만들지 못했어요. 잠시 후 다시 시도해 주세요.'));
       }
-      saveBuildResult({ channel: 'dm', draftId: newId, materials: { notes: lineResultNotes(r.data) }, quoteTotal: stepsCost ?? AI_GENERATE_COSTS['dm-ai-generate'], heroFallback: false, benefitStripped: 0, createdAt: Date.now(), origin: lineOrigin });
+      saveBuildResult({ channel: 'dm', draftId: newId, materials: { notes: lineResultNotes(r.data) }, quoteTotal: stepsCost, heroFallback: false, benefitStripped: 0, createdAt: Date.now(), origin: lineOrigin });
       toast.success('같은 한 줄로 새 초안을 만들었어요.');
       navigate(makeResultPath('dm', newId));
     } catch (e: any) {

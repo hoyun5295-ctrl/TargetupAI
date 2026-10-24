@@ -16,7 +16,7 @@
  * 호출 영역: routes/dm.ts POST /:id/quick-action
  */
 
-import { findInventedBenefits, findNewNumbers } from '../copy-benefit-detector';
+import { rewriteAddsFacts, readingAddsEfficacy, efficacyNote, EFFICACY_PROMPT_RULES, EFFICACY_REWRITE_RULE } from '../copy-benefit-detector';
 import { query } from '../../config/database';
 // ★ 2026-09-26 한줄로 V2 R1-26 — 섹션 읽기·되쓰기 CT(pages 우선)
 import { extractFlatSectionsFromDm, mapDmSections } from './dm-builder';
@@ -41,6 +41,8 @@ export interface QuickActionResult {
   campaign_id: string;
   changes: QuickActionChange[];
   applied_at: string;
+  /** ★ 2026-10-24 ② 결과 안내 서버 문장(원문에 없는 효능 · 숫자 · 혜택이 생겨 버린 다듬기 수) */
+  notes?: string[];
 }
 
 // ────────────── 헬퍼 ──────────────
@@ -109,6 +111,8 @@ const REFINE_SYSTEM = `당신은 모바일 DM 카피라이터입니다. 원본 �
 - 구체 혜택 (%/원/쿠폰/무료/사은품/적립/무료배송/할인) 임의 생성 금지. 회사 admin 직접 작성 영역
 - 유니코드 이모지 추가 금지. SMS 호환 특수문자만 사용
 - 변수 (% 감싸기) 형식 보존 의무
+${EFFICACY_PROMPT_RULES}
+${EFFICACY_REWRITE_RULE}
 
 **허용:**
 - 길이 80~150% 변동
@@ -125,6 +129,7 @@ async function refineAllCopy(companyId: string, campaignId: string): Promise<Qui
   const sections: any[] = extractFlatSectionsFromDm(result.rows[0]);
 
   const changes: QuickActionChange[] = [];
+  let rejected = 0;
 
   for (const sec of sections) {
     const text = extractEditableText(sec);
@@ -144,11 +149,22 @@ async function refineAllCopy(companyId: string, campaignId: string): Promise<Qui
       const parsed = extractJson<{ refined?: string }>(aiText);
       const refined = (parsed?.refined || '').trim();
       // ★ 2026-09-30 WP2 — 다듬기는 표현만. 원문에 없던 숫자 · 혜택 값이 생긴 다듬기는 버린다(원문 유지).
-      const fabricated = !!refined && (findNewNumbers(refined, text).length > 0 || findInventedBenefits(refined, text).length > 0);
-      if (fabricated) console.warn(`[dm-quick-action] 원문에 없는 숫자 · 혜택이 생겨 다듬기를 버림 section_id=${sec?.id}`);
+      // ★ 2026-10-24 세 채널 구조체크 ② — 판정 = rewriteAddsFacts(숫자 ∥ 혜택 ∥ 효능) · 근거 = 그 칸의 실제 글(사람 검토 없이 바로 저장되는 출구라 1순위)
+      //   ★ Codex 1R — 판정 대상 = **실제로 저장할 섹션의 글**(applyRefinedText 가 남긴 옛 부제 · 본문과 새 헤드라인을 고객이 이어 읽는다)
+      // ★ Codex 5R · 6R — applyRefinedText 는 AI 응답이 두 줄 미만이고 원래 부제 · 본문이 있으면 그 옛 칸을 남겨 새 줄과 잇는다(「무료」 + 「배송은…」 = 새 혜택).
+      //   그 조건(= 옛 칸이 실제로 남는 경우)이면 적용하지 않는다(고객 글 그대로 · 사실 판정 문제가 아니라 버린 수에 넣지 않음) · 두 줄 이상이면 칸 전부가 바뀌어 아래 판정이 본다.
+      const keptSecond = sec?.type === 'hero' ? sec?.props?.sub_copy : sec?.type === 'text_card' ? sec?.props?.body : '';
+      if (refined && String(keptSecond || '').trim() && refined.split('\n').filter((l) => l.trim()).length < 2) {
+        console.warn(`[dm-quick-action] 다듬은 줄이 원래 칸보다 적어 적용하지 않음 section_id=${sec?.id}`);
+        continue;
+      }
+      const newProps = refined ? applyRefinedText(sec, refined) : null;
+      const appliedText = newProps ? extractEditableText({ ...sec, props: newProps }) : '';
+      //   숫자 · 혜택 = AI 가 고친 글 vs 원래 글(0930 계약 그대로) · 효능 = 적용 결과를 이어 읽는 단위(readingAddsEfficacy · 칸 = 줄)
+      const fabricated = !!newProps && appliedText !== text && (rewriteAddsFacts(refined, text) || readingAddsEfficacy(appliedText.split('\n'), text.split('\n')));
+      if (fabricated) { rejected += 1; console.warn(`[dm-quick-action] 원문에 없는 숫자 · 혜택 · 효능이 생겨 다듬기를 버림 section_id=${sec?.id}`); }
 
-      if (refined && refined !== text && !fabricated) {
-        const newProps = applyRefinedText(sec, refined);
+      if (newProps && refined !== text && appliedText !== text && !fabricated) {
         changes.push({
           section_id: sec.id,
           section_type: sec.type,
@@ -162,11 +178,13 @@ async function refineAllCopy(companyId: string, campaignId: string): Promise<Qui
     }
   }
 
+  const note = efficacyNote('rewrite', rejected);
   return {
     action: 'ai_refine',
     campaign_id: campaignId,
     changes,
     applied_at: new Date().toISOString(),
+    ...(note ? { notes: [note] } : {}),
   };
 }
 

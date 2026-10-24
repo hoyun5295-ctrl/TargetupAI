@@ -23,7 +23,7 @@ vi.mock('../../config/database', () => ({
 import { applyCopyCVariant, brandSystemPromptForTest, COPY_C_NAMES } from '../../services/ai';
 import { parseHubVariantsRecord, logTrainingData } from '../training-logger';
 
-const SRC = (...p: string[]) => readFileSync(resolve(process.cwd(), 'src', ...p), 'utf8');
+const SRC = (...p: string[]) => readFileSync(resolve(process.cwd(), 'src', ...p), 'utf8').replace(/\r\n/g, '\n');
 
 describe('1. C안 교체', () => {
   const base = brandSystemPromptForTest();
@@ -125,30 +125,28 @@ describe('3. 허브 3안 선택 기록', () => {
 });
 
 describe('4. 라우트 게이트', () => {
-  it('DM: 한 줄 입구 + 스위치일 때만 원문 전환 · 멱등은 토큰이 온 요청만 · 잠금은 finally', () => {
+  // ★ 2026-10-24 세 채널 구조체크 ⑧ — 한 줄 요청 = 단계(한줄 CT 요리 주문) 한 길 · 옛 1005 · 1010 갈래(원문 전환 · 시도 토큰 멱등 · 잠금)는 지웠다.
+  //   단계 요청의 멱등 · 잠금 · 결말 = runLineCookOrder(시험 oneline-ct-complete-1023) · 여기는 옛 갈래가 닫혔는가를 본다.
+  it('DM: 한 줄 입구 = 단계만(단계 없으면 400) · 원문 전환은 단계 답 줄 · 단계 없는 꼬리 = 일반 생성(멱등키 · 잠금 0)', () => {
     const d = SRC('routes', 'dm.ts');
     expect(d).toContain("const oneLineReq = req.body?.one_line === true;");
-    expect(d).toContain('const lineOn = oneLineReq;');   // ★ 2026-10-21 스위치 삭제 · 한 줄 입구면 전 회사
-    expect(d).toContain('if (lineOn && prompt && !eventText && !scenario) {');
+    expect(d).toContain("if (oneLineReq && !steps) return res.status(400).json({ success: false, error: '화면을 새로 고친 뒤 한 줄을 다시 넣어 주세요.', code: 'LINE_STEPS_REQUIRED' });");
+    expect(d).toContain('if (steps && prompt && !eventText && !scenario) {');
     expect(d).toContain("const attemptToken = lineOn && isValidAttemptToken(req.body?.attempt_token) ? String(req.body.attempt_token) : null;");
-    expect(d).toContain('...(idemKey ? { idempotencyKey: idemKey } : {})');
-    expect(d).toContain('if (lineLock) releaseInflight(lineLock);');
-    // 스위치 밖인데 답이 오면 조용히 버리지 않는다
-    // ★ 2026-10-10 고른 몰 상품도 같은 규칙(스위치 밖 = 400)
+    // 스위치 밖인데 답이 오면 조용히 버리지 않는다(한 줄이 아닌 요청이 답 · 상품 · 사진 글을 실으면 400)
     expect(d).toContain("if ((lineFacts !== undefined || lineProducts !== undefined || lineReads !== undefined) && !lineOn) {");
-    // 이미 낸 키는 생성 전에 막는다(생성 → 차감 순서보다 앞) · ★ 2026-10-23 단계 요청 = 한줄 CT 주문이 같은 시도를 먼저 본다 → 여기는 단계 없는 경로
-    const tail = d.slice(d.indexOf('// ─── 아래 = 단계 없는 요청'));
-    expect(tail.indexOf('await isChargedByKey(companyId, idemKey)')).toBeGreaterThan(0);
-    expect(tail.indexOf('await isChargedByKey(companyId, idemKey)')).toBeLessThan(tail.indexOf('prompt: effectivePrompt, scenario, brandName, companyId, eventText,'));
+    const tail = d.slice(d.indexOf('// ─── 아래 = 한 줄이 아닌 일반 생성'));
+    expect(tail.indexOf('await checkCredit(companyId, genCost)')).toBeGreaterThan(0);
+    expect(tail.slice(0, tail.indexOf('} catch (err: any) {'))).not.toMatch(/idemKey|lineLock|isChargedByKey/);
   });
-  it('이메일: 원문 자리는 옮기지 않고 멱등만 · 인앱: 원문 없을 때만 한 줄을 원문으로', () => {
+  it('이메일 · 인앱: 단계 없는 한 줄 = 400 · 옛 멱등 · 잠금 · 원문 전환 0', () => {
     const e = SRC('routes', 'email.ts');
-    expect(e).toContain("const lineOn = req.body?.one_line === true;");
-    expect(e).toContain('...(idemKey ? { idempotencyKey: idemKey } : {})');
-    expect(e).toContain('if (lineLock) releaseInflight(lineLock);');
+    expect(e).toContain("if (oneLineReq && !steps) return res.status(400).json({ success: false, error: '화면을 새로 고친 뒤 한 줄을 다시 넣어 주세요.', code: 'LINE_STEPS_REQUIRED' });");
+    expect(e).not.toContain('...(idemKey ? { idempotencyKey: idemKey } : {})');
+    expect(e).not.toContain('if (lineLock) releaseInflight(lineLock);');
     const c = SRC('routes', 'cdp.ts');
-    expect(c).toContain("const lineOn = req.body?.one_line === true;");
-    expect(c).toContain('eventText: lineAsEvent ?? (typeof event_text');
+    expect(c).toContain("if (req.body?.one_line === true) return res.status(400).json({ success: false, error: '화면을 새로 고친 뒤 한 줄을 다시 넣어 주세요.', code: 'LINE_STEPS_REQUIRED' });");
+    expect(c).not.toContain('lineAsEvent');
   });
   it('검수 응답에 첫 발행 관문 앞 두 칸을 싣는다(같은 함수)', () => {
     const d = SRC('routes', 'dm.ts');

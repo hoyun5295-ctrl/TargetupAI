@@ -26,7 +26,7 @@ import { partitionCustomerConditions } from './journey-target-extractor';
 import { formatConditionMenuForAi } from './journey-condition-fields';
 import { describeJourneyTrigger, describeJourneyTarget } from './journey-step-format';
 // ★ 2026-08-08 — 편집 결과도 생성과 같은 기계 차단을 지난다(프롬프트는 경계가 아니다).
-import { stripUnauthorizedBenefits } from './copy-benefit-detector';
+import { stripUnauthorizedBenefits, claimsInventedEfficacy, readingUnit, EFFICACY_PROMPT_RULES, EFFICACY_REWRITE_RULE } from './copy-benefit-detector';
 
 type ChannelType = 'sms' | 'lms' | 'mms' | 'kakao';
 
@@ -158,6 +158,8 @@ export async function editJourneyPackage(input: EditJourneyInput): Promise<any> 
     ? cur.benefitText.trim().slice(0, 200) : null;
 
   const system = `당신은 한줄로 AI Operator의 여정 편집기입니다. 사용자가 자연어로 요청한 수정을 현재 여정 패키지(JSON)에 정확히 반영해 전체 패키지를 JSON으로 다시 응답합니다.
+${EFFICACY_PROMPT_RULES}
+${EFFICACY_REWRITE_RULE}
 
 규칙:
 - 요청한 부분만 수정하고 나머지 step·문안·설정은 그대로 유지한다.
@@ -241,6 +243,13 @@ triggerEvent·templateCode·triggerFilters는 받은 값을 그대로 돌려주�
     if (s.stepType !== 'message' || s.channel === 'kakao') continue;
     s.messageTemplate = stripUnauthorizedBenefits(String(s.messageTemplate || ''), editBasis);
     s.subject = stripUnauthorizedBenefits(String(s.subject || ''), editBasis);
+  }
+  // ★ 2026-10-24 ② Codex 1R — 편집 = 다시 쓰기. 같은 근거(편집 전 글 + 요청 + 승인 혜택)에 없던 효능 말이 생기면 **수정 전체를 적용하지 않는다**
+  //   (원래 패키지 그대로 · 고객 글을 말없이 바꾸지 않는다 · 편집은 무과금이라 다시 누르면 된다). 제목 + 본문 = 이어 읽는 단위.
+  //   ★ Codex 2R — 근거에 편집 전 단계마다의 제목 + 본문도 같은 읽는 단위(readingUnit · 같은 순서 · 같은 경계)로 넣는다(문안을 그대로 둔 수정이 걸리지 않게).
+  const effGround = [editBasis, ...curSteps.map((c) => readingUnit(c?.subject, c?.messageTemplate))].join('\n');
+  if (steps.some((s) => s.stepType === 'message' && s.channel !== 'kakao' && claimsInventedEfficacy(readingUnit(s.subject, s.messageTemplate), effGround))) {
+    throw new JourneyInputError('원문에 없는 효능 말이 생겨 수정을 적용하지 않았어요. 다시 눌러 주세요.');
   }
 
   const validTemplates = ['onboarding', 'repeat', 'dormant', 'cart', 'birthday', 'reservation', 'custom'];

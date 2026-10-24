@@ -32,6 +32,7 @@ import {
 } from '../utils/imweb-client';
 import { isCdpEnabledForPlan } from '../utils/cdp-auth';
 
+import { publicErrorText } from '../utils/http-error';
 const router = Router();
 
 // ════════════════════════════════════════════════════════════════════
@@ -77,7 +78,7 @@ router.post('/webhook', async (req: Request, res: Response) => {
     return res.json({ success: true });
   } catch (err: any) {
     console.error('[Imweb Webhook] 오류:', err);
-    return res.status(500).json({ success: false, error: err?.message || 'webhook 처리 실패' });
+    return res.status(500).json({ success: false, error: publicErrorText(err, 'webhook 처리 실패') });
   }
 });
 
@@ -127,7 +128,7 @@ router.get('/oauth/authorize', async (req: Request, res: Response) => {
     return res.json({ success: true, authorize_url: authorizeUrl });
   } catch (err: any) {
     console.error('[Imweb /oauth/authorize] 오류:', err);
-    return res.status(500).json({ success: false, error: err?.message || 'authorize URL 생성 실패' });
+    return res.status(500).json({ success: false, error: publicErrorText(err, 'authorize URL 생성 실패') });
   }
 });
 
@@ -147,7 +148,7 @@ router.get('/status', async (req: Request, res: Response) => {
     });
   } catch (err: any) {
     console.error('[Imweb /status] 오류:', err);
-    return res.status(500).json({ success: false, error: err?.message || '조회 실패' });
+    return res.status(500).json({ success: false, error: publicErrorText(err, '조회 실패') });
   }
 });
 
@@ -174,7 +175,7 @@ router.delete('/disconnect', async (req: Request, res: Response) => {
     return res.json({ success: true });
   } catch (err: any) {
     console.error('[Imweb /disconnect] 오류:', err);
-    return res.status(500).json({ success: false, error: err?.message || '연동 해제 실패' });
+    return res.status(500).json({ success: false, error: publicErrorText(err, '연동 해제 실패') });
   }
 });
 
@@ -254,7 +255,7 @@ imwebCallbackRouter.get('/oauth/callback', async (req: Request, res: Response) =
     return res.send(renderCallbackHtml('ok', `아임웹(${siteCode}) 연동이 완료되었습니다. 본 창을 닫고 한줄로AI로 돌아가주세요.`));
   } catch (err: any) {
     console.error('[Imweb callback] 오류:', err);
-    return res.status(500).send(renderCallbackHtml('error', err?.message || '아임웹 연동 처리 중 오류가 발생했습니다.'));
+    return res.status(500).send(renderCallbackHtml('error', publicErrorText(err, '아임웹 연동 처리 중 오류가 발생했습니다.')));
   }
 });
 

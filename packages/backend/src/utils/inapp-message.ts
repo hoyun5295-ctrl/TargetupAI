@@ -19,6 +19,7 @@ import { query, pool } from '../config/database';
 import { customerMatchesSegment, customerMatchesFilter, isEmptySegment, normalizeSegmentConditions } from './inapp-segment-matcher';
 import { selectVariantForCustomer } from './inapp-variant-optimizer';
 import { isTimeWindowValid } from './inapp-trigger-engine';
+import { findAiFillPlaceholder } from './copy-benefit-detector';   // ★ 2026-10-24 ⑮ 게시 = 공용 채울 자리 판정도 함께
 
 // ════════════════════════════════════════════════════════════════════
 // 타입
@@ -593,6 +594,17 @@ export function inAppPublishDefect(row: Record<string, any>): InAppPublishDefect
   // 장이 있는 포스터 계열은 본문이 선택이다(배너 = 큰 글 한 줄 · 이벤트 카드 = 제목만 가능 · SDK·앱은 빈 본문을 그리지 않는다).
   const posterWithSlides = row.template === 'full_image' && slides.length > 0;
   if (!posterWithSlides && !String(row.body ?? '').trim()) return { message: '본문을 입력해 주세요.', field: 'body' };
+  // ★ 2026-10-24 세 채널 구조체크 ⑮ — 게시(고객에게 보이는 순간) = 공용 발송 길목 판정도 본다(꼴 + 문구 목록 · 문자 · DM · 이메일과 같은 판정).
+  //   옛: 인앱만 세 낱말이라 템플릿 · AI 가 남긴 「[질문을 작성해주세요]」 · 「[환영 메시지와 첫 사용 안내를 작성해주세요]」가 게시를 지났다.
+  //   저장(초안)은 옛 판정 그대로 — 템플릿의 안내 자리를 채워 가며 저장할 수 있어야 한다.
+  // ★ 2026-10-24 ② 혜택 자리가 아닌 채울 자리(효능을 뺀 「[상품 소개: 직접 작성해주세요]」 등)는 그 글자를 먼저 인용한다
+  //   (옛 순서 = 「직접 작성해주세요」를 품은 모든 자리에 「혜택 안내를…」이 떴다 · 화면 사본 inappSlides publishDefectOf 와 같은 순서).
+  const aiFill = findAiFillPlaceholder([
+    row.title, row.body, row.badge_text,
+    JSON.stringify(buttons), JSON.stringify(Array.isArray(row.content_blocks) ? row.content_blocks : []), JSON.stringify(slides),
+  ].map((v) => String(v ?? '')).join('\n'));
+  const fillMessage = { message: `직접 채울 자리 "${aiFill}"가 남아 있어요. 그 자리를 채운 뒤 게시해 주세요.`, field: 'placeholder' as const };
+  if (aiFill && !aiFill.startsWith('[혜택')) return fillMessage;
   if (
     textHasPlaceholder(row.title) || textHasPlaceholder(row.body) || textHasPlaceholder(row.badge_text)
     || buttons.some((b: any) => b && typeof b === 'object' && textHasPlaceholder(b.label))
@@ -601,6 +613,7 @@ export function inAppPublishDefect(row: Record<string, any>): InAppPublishDefect
   ) {
     return { message: '혜택 안내를 회사 정책에 맞게 직접 작성한 뒤 게시해 주세요.', field: 'placeholder' };
   }
+  if (aiFill) return fillMessage;
   if (row.template === 'full_image') {
     const idx = slides.findIndex((sl: any) => !sl || typeof sl !== 'object' || !String(sl.image_url ?? '').trim());
     if (idx >= 0) return { message: `${idx + 1}번째 장에 사진을 넣어 주세요.`, field: 'slide_image', slide: idx };
@@ -1527,23 +1540,6 @@ const FULL_COLUMNS = `id, title, body, action_url, action_label, position, backg
 export async function getActiveMessagesForCustomerV2(input: ActiveMessagesInput): Promise<InAppMessageDetail[]> {
   const trigger = input.triggerEvent || 'page_load';
 
-  // Step 1 — 부모 메시지 후보 조회 (trigger_event 또는 trigger_conditions.event 매칭)
-  const candidateResult = await query(
-    `SELECT ${FULL_COLUMNS}
-     FROM cdp_inapp_messages
-     WHERE company_id = $1::uuid
-       AND status = 'active'
-       AND channel = $3
-       AND parent_message_id IS NULL
-       AND (trigger_event = $2 OR (trigger_conditions->>'event' = $2))
-       AND (start_at IS NULL OR start_at <= NOW())
-       AND (end_at IS NULL OR end_at >= NOW())
-     ORDER BY created_at DESC
-     LIMIT 20`,
-    [input.companyId, trigger, input.channel || 'web']
-  );
-  let candidates: any[] = candidateResult.rows;
-
   // Step 2 — customer ID 매핑 (외부 ID → customer_id)
   let customerId: string | null = null;
   if (input.externalId) {
@@ -1564,6 +1560,54 @@ export async function getActiveMessagesForCustomerV2(input: ActiveMessagesInput)
     }
   }
 
+  // Step 1 — 부모 메시지 후보 조회 (trigger_event 또는 trigger_conditions.event 매칭)
+  // ★ 2026-10-24 세 채널 구조체크 ⑯ — 쪽마다 모든 거름(Step 3~8)을 지나게 하고, 보여 줄 메시지가 20개가 되거나 후보가 다할 때까지 다음 쪽을 본다
+  //   (옛: 최신 20개를 먼저 자르고 걸러 그 밖의 맞는 메시지가 안 보였다).
+  //   ★ Codex 2R — 후보 순서(id 만)를 요청 시작에 한 번 읽어 고정하고 쪽마다 그 id 로 행을 다시 읽는다(켜짐 조건 재확인).
+  //   OFFSET 쪽 읽기는 도중에 앞쪽 후보가 꺼지거나 켜지면 하나를 건너뛰거나 같은 부모를 두 번 냈다.
+  const candidateIds = (await query(
+    `SELECT id FROM cdp_inapp_messages
+     WHERE ${INAPP_CANDIDATE_WHERE}
+     ORDER BY created_at DESC, id DESC`,
+    [input.companyId, trigger, input.channel || 'web']
+  )).rows.map((r: any) => String(r.id));
+  const shown: InAppMessageDetail[] = [];
+  for (let i = 0; i < candidateIds.length && shown.length < INAPP_ACTIVE_MAX; i += INAPP_ACTIVE_PAGE) {
+    const pageIds = candidateIds.slice(i, i + INAPP_ACTIVE_PAGE);
+    const pageRes = await query(
+      `SELECT ${FULL_COLUMNS}
+       FROM cdp_inapp_messages
+       WHERE ${INAPP_CANDIDATE_WHERE}
+         AND id = ANY($4::uuid[])`,
+      [input.companyId, trigger, input.channel || 'web', pageIds]
+    );
+    const byId = new Map<string, any>(pageRes.rows.map((r: any) => [String(r.id), r]));
+    const pageRows = pageIds.map((id) => byId.get(id)).filter(Boolean);
+    shown.push(...(await evaluateInAppCandidates(input, trigger, customerId, pageRows)));
+  }
+  return shown.slice(0, INAPP_ACTIVE_MAX);
+}
+
+/** ★ 2026-10-24 ⑯ — 표시 후보 조건(켜짐 · 채널 · 부모 · 트리거 · 기간) · $1 회사 · $2 트리거 · $3 채널 · 순서 조회와 쪽 조회가 같은 조건 */
+const INAPP_CANDIDATE_WHERE = `company_id = $1::uuid
+       AND status = 'active'
+       AND channel = $3
+       AND parent_message_id IS NULL
+       AND (trigger_event = $2 OR (trigger_conditions->>'event' = $2))
+       AND (start_at IS NULL OR start_at <= NOW())
+       AND (end_at IS NULL OR end_at >= NOW())`;
+
+/** ★ 2026-10-24 ⑯ — 표시 응답 상한 · 후보 한 쪽 크기 */
+const INAPP_ACTIVE_MAX = 20;
+const INAPP_ACTIVE_PAGE = 50;
+
+/** ★ 2026-10-24 ⑯ — 후보 한 쪽 → 보여 줄 메시지(Step 3~8 · 옛 본문 그대로 옮김 · 쪽마다 같은 판정) */
+async function evaluateInAppCandidates(
+  input: ActiveMessagesInput,
+  trigger: string,
+  customerId: string | null,
+  candidates: any[],
+): Promise<InAppMessageDetail[]> {
   // Step 3 — 시간대 + 요일 윈도우 + 세그먼트 검증 (개별 후보 순회)
   const passed: any[] = [];
   for (const cand of candidates) {
@@ -1669,17 +1713,25 @@ export async function getActiveMessagesForCustomerV2(input: ActiveMessagesInput)
   const onceMessages = messages.filter((m) => m.displayFrequency === 'once_per_day');
   if (onceMessages.length > 0 && (input.externalId || input.anonymousId)) {
     const messageIds = onceMessages.map((m) => m.id);
-    const linkFilter = input.externalId
-      ? `AND identity_link_id IN (SELECT id FROM cdp_identity_links WHERE company_id = $1::uuid AND external_id = $3)`
-      : `AND anonymous_id = $3`;
+    // ★ 2026-10-24 세 채널 구조체크 ⑨ — 회원 증명 없는 추적은 기기 id 로만 남는다 → 회원이어도 이 기기 id 기록을 함께 센다(opt_out 조회와 같은 OR)
+    const seenParams: any[] = [input.companyId, messageIds];
+    const seenConds: string[] = [];
+    if (input.externalId) {
+      seenParams.push(input.externalId);
+      seenConds.push(`identity_link_id IN (SELECT id FROM cdp_identity_links WHERE company_id = $1::uuid AND external_id = $${seenParams.length})`);
+    }
+    if (input.anonymousId) {
+      seenParams.push(input.anonymousId);
+      seenConds.push(`anonymous_id = $${seenParams.length}`);
+    }
     const seenResult = await query(
       `SELECT DISTINCT message_id FROM cdp_inapp_impressions
        WHERE company_id = $1::uuid
          AND message_id = ANY($2::uuid[])
          AND event_type = 'impression'
          AND occurred_at > NOW() - INTERVAL '24 hours'
-         ${linkFilter}`,
-      [input.companyId, messageIds, input.externalId || input.anonymousId]
+         AND (${seenConds.join(' OR ')})`,
+      seenParams
     );
     const seenIds = new Set<string>(seenResult.rows.map((r: any) => r.message_id));
     messages = messages.filter((m) => m.displayFrequency !== 'once_per_day' || !seenIds.has(m.id));
@@ -1688,17 +1740,26 @@ export async function getActiveMessagesForCustomerV2(input: ActiveMessagesInput)
   // Step 6 — max_displays_per_user 검증 (사용자별 누적 impression 한도)
   const limitedMessages = messages.filter((m) => m.maxDisplaysPerUser !== null && m.maxDisplaysPerUser > 0);
   if (limitedMessages.length > 0 && (customerId || input.anonymousId)) {
-    const checkUserKey = customerId || input.anonymousId;
-    const userFilterSql = customerId ? `customer_id = $3::uuid` : `anonymous_id = $3`;
+    // ★ 2026-10-24 ⑨ — 회원 기록 + 이 기기 기록을 함께 센다(위 once_per_day 와 같은 이유 · 행 단위 OR 라 한 행을 두 번 세지 않는다)
+    const limitParams: any[] = [input.companyId, limitedMessages.map((m) => m.id)];
+    const limitConds: string[] = [];
+    if (customerId) {
+      limitParams.push(customerId);
+      limitConds.push(`customer_id = $${limitParams.length}::uuid`);
+    }
+    if (input.anonymousId) {
+      limitParams.push(input.anonymousId);
+      limitConds.push(`anonymous_id = $${limitParams.length}`);
+    }
     const limitR = await query(
       `SELECT message_id, COUNT(*)::int AS cnt
        FROM cdp_inapp_impressions
        WHERE company_id = $1::uuid
          AND message_id = ANY($2::uuid[])
          AND event_type = 'impression'
-         AND ${userFilterSql}
+         AND (${limitConds.join(' OR ')})
        GROUP BY message_id`,
-      [input.companyId, limitedMessages.map((m) => m.id), checkUserKey]
+      limitParams
     );
     const userCountMap = new Map<string, number>();
     limitR.rows.forEach((r: any) => userCountMap.set(String(r.message_id), Number(r.cnt || 0)));

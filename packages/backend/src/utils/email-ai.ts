@@ -19,7 +19,7 @@
  */
 import { callAIWithFallback } from '../services/ai';
 import { extractJsonFromAiText } from './ai-json';
-import { findInventedBenefits, findNewNumbers, htmlVisibleText, replaceInventedBenefits, replaceInventedBenefitsInHtml, replaceInventedBenefitsDeep } from './copy-benefit-detector';
+import { htmlVisibleText, replaceInventedBenefits, replaceInventedBenefitsDeep, claimsInventedEfficacy, dropInventedEfficacy, dropInventedEfficacyDeep, pairClaimsInventedEfficacy, rewriteAddsFacts, readingAddsEfficacy, EFFICACY_PLACEHOLDER, HEADLINE_PLACEHOLDER, EFFICACY_PROMPT_RULES, EFFICACY_REWRITE_RULE } from './copy-benefit-detector';
 import { buildSystemPromptWithBrandVoice } from './brand-voice-prompt';
 // 비주얼 빌더: AI 블록 출력 → 검증된 email Section[]
 import { normalizeAiBlocksToSections, buildCarouselProductsFromExtracted } from './email/email-blocks';
@@ -27,13 +27,12 @@ import { normalizeAiBlocksToSections, buildCarouselProductsFromExtracted } from 
 import { fetchProductOgImages } from './dm/dm-brand-extractor';
 import type { Section } from './dm/dm-section-registry';
 // 비주얼 에디터 "AI로 개선" 순수 코어(텍스트 수집·안전 검증·반영)
-import { collectRefinableTexts, applyRefinedTexts } from './email/email-section-refine';
+import { collectRefinableTexts, applyRefinedTexts, isRefinedTextSafe } from './email/email-section-refine';
 // 문안 두뇌: 성과 RAG + 시의성 + 브랜드 키트 주입 + 타사 표현 복제 가드
 import { composeCopyBrain } from './copy-prompt-composer';
 import { buildEventPromptBlock, validateProductsAgainstEventText } from './event-brief';
 // ★ 2026-07-14 디자인 4.0 M5 — 행사 → 정예 템플릿 스토리 힌트 (결정적 선택기, design-core)
 import { buildEventTemplateHintBlock } from './design-core/event-package';
-import { checkCopyLeak } from './copy-similarity-guard';
 // ★ 2026-09-03 참조 골격 학습층(설계서 §6-2)
 import { getStructureSkeleton } from './best-copy-assets';
 import { renderStructureBlock } from './email/email-structure-prompt';
@@ -41,14 +40,6 @@ import { renderStructureBlock } from './email/email-structure-prompt';
 // ════════════════════════════════════════════════════════════════════
 // 타입
 // ════════════════════════════════════════════════════════════════════
-
-export interface EmailGenResult {
-  name: string;
-  subjects: string[];      // 제목 3안
-  preheader: string;
-  htmlBody: string;
-  textBody: string;
-}
 
 export interface EmailCodeCheck {
   key: string;
@@ -246,116 +237,16 @@ const EMAIL_HTML_RULES = `
 - 구체 혜택 수치(할인율 %, 금액, 쿠폰, 무료, 사은품, 적립)를 임의로 만들지 않는다. 혜택 언급이 필요한 자리는 반드시 "[혜택을 직접 입력해주세요]" 그대로 적는다.
 - 수신거부 링크/문구를 직접 작성하지 않는다 (발송 시 시스템이 자동 부착).
 - 제목에 "(광고)" 표기를 직접 넣지 않는다 (광고성 캠페인은 발송 시 자동 부착).
-- 존재하지 않는 회사 정보·날짜·행사를 단정해 적지 않는다. 필요하면 "[기간을 직접 입력해주세요]" 형태로 남긴다.`;
-
-const EMAIL_GEN_SYSTEM = `당신은 한국어 이메일 마케팅 카피라이터입니다. 회사 마케팅 담당자가 입력한 요청을 바탕으로 발송 가능한 마케팅 이메일 1통을 완성합니다.
-${EMAIL_HTML_RULES}
-
-반드시 아래 JSON 스키마로만 출력합니다 (코드블록/설명 금지):
-{
-  "name": "캠페인 관리용 이름 (한글, 30자 이내)",
-  "subjects": ["제목 1안", "제목 2안", "제목 3안"],
-  "preheader": "수신함 미리보기 한 줄 (50자 이내)",
-  "html_body": "<table>...</table> 완성 HTML",
-  "text_body": "HTML과 같은 내용의 순수 텍스트 본문"
-}
-- subjects는 서로 다른 각도의 3안 (각 ${SUBJECT_MOBILE_LIMIT}자 이내 권장).
-- html_body는 인사 → 핵심 안내 → 버튼(또는 안내) → 맺음 구조.`;
-
-export async function generateEmailOneShot(input: {
-  companyId: string;
-  userId?: string;
-  prompt?: string;
-  scenario?: EmailScenarioKey;
-  isAd: boolean;
-}): Promise<EmailGenResult> {
-  const scenarioPreset = input.scenario ? EMAIL_SCENARIO_PRESETS[input.scenario] : null;
-  const parts: string[] = [];
-  if (scenarioPreset) parts.push(`[시나리오] ${scenarioPreset.label}: ${scenarioPreset.prompt}`);
-  if (input.prompt) parts.push(`[요청 내용] ${input.prompt}`);
-  parts.push(`[캠페인 성격] ${input.isAd ? '광고성 (표기는 발송 시 자동 부착, 직접 넣지 말 것)' : '정보성'}`);
-
-  const userMessage = `${parts.join('\n')}\n\n위 요청으로 이메일 1통을 JSON으로 완성하세요.`;
-  const baseSystem = await buildSystemPromptWithBrandVoice(input.companyId, EMAIL_GEN_SYSTEM);
-  // 이메일 학습 표본이 부족하면 LMS/MMS/SMS 회사 문안 톤을 교차 참조 (채널 우선순위 배열)
-  const brain = await composeCopyBrain({
-    companyId: input.companyId,
-    channels: ['EMAIL', 'LMS', 'MMS', 'SMS'],
-    isAd: input.isAd,
-  });
-
-  const genOnce = async (system: string): Promise<EmailGenResult> => parseEmailGenResult(
-    await callAIWithFallback({
-      system,
-      userMessage,
-      maxTokens: 4000,
-      temperature: 0.7,
-      model: 'opus',
-      companyId: input.companyId,
-      userId: input.userId,
-      source: 'email-ai-generate',
-      creditCost: 0, // 차감은 route에서 성공 후 1회 (실패 시 차감 0)
-    }),
-  );
-
-  let result = await genOnce(baseSystem + brain.promptSuffix);
-
-  // 복제 가드: 타사(업종) 예시 표현이 그대로 누출되면 예시 없이 1회 재생성
-  const industryTexts = brain.examples.filter((e) => e.source === 'industry').map((e) => e.text);
-  if (industryTexts.length > 0) {
-    const probe = `${result.textBody} ${result.subjects.join(' ')}`;
-    if (checkCopyLeak(probe, industryTexts).leaked) {
-      result = await genOnce(baseSystem);
-    }
-  }
-  // ★ 2026-09-30 WP2 혜택 서버 차단 — 근거 = 요청 · 시나리오. 없는 혜택 값 · 낱말은 자리표시(이메일 발송 가드가 막는다).
-  //   HTML 은 글자 부분만(태그 · 속성은 건드리지 않는다).
-  const emailGround = parts.join('\n');
-  const [guardedHtml, htmlInvented] = replaceInventedBenefitsInHtml(result.htmlBody, emailGround);
-  const textInvented = findInventedBenefits([result.textBody, result.preheader, ...result.subjects].join('\n'), emailGround);
-  if (htmlInvented.length > 0 || textInvented.length > 0) {
-    console.warn(`[copy-guard] 이메일 근거 없는 혜택 → 자리표시 (${Array.from(new Set([...htmlInvented, ...textInvented])).join(', ')})`);
-    result = {
-      ...result,
-      htmlBody: guardedHtml,
-      textBody: replaceInventedBenefits(result.textBody, emailGround),
-      preheader: replaceInventedBenefits(result.preheader, emailGround),
-      subjects: result.subjects.map((s) => replaceInventedBenefits(s, emailGround)),
-    };
-  }
-  return result;
-}
-
-/** AI 응답(JSON) → EmailGenResult 파싱 (제목 3안 보정 + 빈 결과 차단) */
-function parseEmailGenResult(text: string): EmailGenResult {
-  const parsed = extractJsonFromAiText<{
-    name?: string; subjects?: string[]; preheader?: string; html_body?: string; text_body?: string;
-  }>(text);
-
-  const subjects = (Array.isArray(parsed.subjects) ? parsed.subjects : [])
-    .map((s) => String(s || '').trim())
-    .filter(Boolean)
-    .slice(0, 3);
-  const htmlBody = String(parsed.html_body || '').trim();
-  if (subjects.length === 0 || !htmlBody) {
-    throw new Error('AI 생성 결과가 비어 있습니다. 다시 시도해주세요.');
-  }
-  while (subjects.length < 3) subjects.push(subjects[0]);
-
-  return {
-    name: String(parsed.name || '').trim().slice(0, 60) || 'AI 생성 이메일',
-    subjects,
-    preheader: String(parsed.preheader || '').trim().slice(0, 100),
-    htmlBody,
-    textBody: String(parsed.text_body || '').trim(),
-  };
-}
+- 존재하지 않는 회사 정보·날짜·행사를 단정해 적지 않는다. 필요하면 "[기간을 직접 입력해주세요]" 형태로 남긴다.
+${EFFICACY_PROMPT_RULES}`;
 
 export interface EmailSectionsGenResult {
   name: string;
   subjects: string[];
   preheader: string;
   sections: Section[];
+  /** ★ 2026-10-24 ② 근거 없는 효능을 뺀 수(라우트가 notes 서버 문장으로 바꾼다 · 응답에 그대로 내보내지 않는다) */
+  efficacyDropped: number;
 }
 
 const EMAIL_BLOCKS_SYSTEM = `당신은 한국어 이메일 마케팅 디자이너입니다. 회사 마케팅 담당자의 요청을 바탕으로 발송 가능한 비주얼 이메일의 블록 구성을 설계합니다.
@@ -379,6 +270,7 @@ const EMAIL_BLOCKS_SYSTEM = `당신은 한국어 이메일 마케팅 디자이�
 - [행사 내용] 원문에 상품 URL(http/https)이 적혀 있으면 해당 상품의 link_url에 원문 글자 그대로 넣는다(변형·축약·생성 금지). 원문에 URL이 없으면 link_url은 빈 문자열.
 - 모든 버튼 url은 빈 문자열로 둔다.
 - 권장 순서: header → hero → 본문(text_card / product_carousel / gallery) → cta → footer.
+${EFFICACY_PROMPT_RULES}
 
 반드시 아래 JSON으로만 출력한다 (코드블록/설명 금지):
 { "name": "캠페인 이름(30자 이내)", "subjects": ["제목1","제목2","제목3"], "preheader": "수신함 미리보기(50자 이내)", "blocks": [ { "type": "hero", "props": {} } ] }`;
@@ -448,20 +340,35 @@ export async function generateEmailSections(input: {
       s.props = p;
     }
   }
-  // ★ 2026-09-30 WP2 혜택 서버 차단 — 근거 = 행사 원문 · 요청 · 시나리오. 블록 글 필드의 없는 혜택 값 · 낱말은 자리표시
+  // ★ 2026-09-30 WP2 혜택 서버 차단 — 블록 글 필드의 없는 혜택 값 · 낱말은 자리표시
   //   (링크 · 이미지 · 모양 값 · 가격 숫자 필드는 건너뜀 · 상품 가격은 위 원문 검증이 이미 본다). 이메일 발송 가드가 자리표시를 막는다.
-  const blocksGround = parts.join('\n');
+  // ★ 2026-10-24 세 채널 구조체크 ② — 근거 = 사람 글(행사 원문 + 요청)만. 옛 근거 parts 는 우리 규칙 문장(「쿠폰 · 무료 · 사은품」) ·
+  //   시나리오 프리셋 · 템플릿 힌트를 품어 그 낱말이 근거가 됐다. 혜택 · 효능 같은 근거 변수(설계서 §3).
+  const blocksGround = [input.eventText, input.prompt].filter(Boolean).join('\n');
   const blockInvented: string[] = [];
-  const guardedSections = replaceInventedBenefitsDeep(sections, blocksGround, blockInvented);
+  const effDropped: string[] = [];
+  // 혜택 → 효능 순(효능 문장 빼기는 혜택 자리표시가 들어간 글 위에서 돈다)
+  const guardedSections = dropInventedEfficacyDeep(replaceInventedBenefitsDeep(sections, blocksGround, blockInvented), blocksGround, effDropped);
   const subjects = (Array.isArray(parsed.subjects) ? parsed.subjects : [])
-    .map((s) => replaceInventedBenefits(String(s || '').trim(), blocksGround)).filter(Boolean).slice(0, 3);
+    .map((s) => replaceInventedBenefits(String(s || '').trim(), blocksGround)).filter(Boolean)
+    .filter((s) => { const bad = claimsInventedEfficacy(s, blocksGround); if (bad) effDropped.push(s); return !bad; })
+    .slice(0, 3);
   while (subjects.length > 0 && subjects.length < 3) subjects.push(subjects[0]);
+  const pre = dropInventedEfficacy(replaceInventedBenefits(String(parsed.preheader || '').trim(), blocksGround), blocksGround);
+  effDropped.push(...pre.dropped);
+  // 수신함에서 제목 바로 뒤에 이어 읽힌다 — 어느 제목 후보와 이어 읽어도 단정이면 프리헤더를 비운다(★ Codex 1R)
+  let preheader = pre.text === EFFICACY_PLACEHOLDER ? '' : pre.text;
+  if (preheader && subjects.some((s) => pairClaimsInventedEfficacy(s, preheader, blocksGround))) { effDropped.push(preheader); preheader = ''; }
   if (blockInvented.length > 0) console.warn(`[copy-guard] 비주얼 이메일 근거 없는 혜택 → 자리표시 (${Array.from(new Set(blockInvented)).join(', ')})`);
+  if (effDropped.length > 0) console.warn(`[copy-guard] 비주얼 이메일 근거 없는 효능 ${effDropped.length}곳 뺌`);
   return {
     name: String(parsed.name || '').trim().slice(0, 60) || 'AI 비주얼 이메일',
-    subjects: subjects.length ? subjects : ['새 이메일'],
-    preheader: replaceInventedBenefits(String(parsed.preheader || '').trim(), blocksGround).slice(0, 100),
+    // 제목 후보가 다 빠지면 채울 자리(옛 '새 이메일' 무언 대체 금지 · 설계서 §2)
+    subjects: subjects.length ? subjects : [HEADLINE_PLACEHOLDER],
+    // 프리헤더 = 비워도 되는 칸(다 빠지면 빈 값)
+    preheader: preheader.slice(0, 100),
     sections: guardedSections,
+    efficacyDropped: effDropped.length,
   };
 }
 
@@ -476,6 +383,8 @@ export async function refineEmail(input: {
     input.companyId,
     `당신은 한국어 이메일 마케팅 카피 에디터입니다. 기존 이메일의 구조를 유지하면서 지시에 따라 다듬습니다.
 ${EMAIL_HTML_RULES}
+
+${EFFICACY_REWRITE_RULE}
 
 반드시 아래 JSON 스키마로만 출력합니다 (코드블록/설명 금지):
 { "subject": "다듬은 제목", "html_body": "다듬은 HTML 전체" }`,
@@ -500,10 +409,12 @@ ${EMAIL_HTML_RULES}
   // ★ 2026-09-30 WP2 — 다듬기 = 다시 쓰기. 근거 = 원래 제목 · 본문의 **보이는 글** · 다듬기 지시(지시에 적은 새 혜택 · 숫자는 사람이 준 것).
   //   원래 HTML 을 그대로 근거에 넣으면 속성 값(width="100%")이 혜택 근거가 된다(Codex 0930 2R). 다른 다시 쓰기 경로와 같게
   //   근거에 없는 숫자 · 혜택이 생기면 적용하지 않는다(차감 전 throw · 화면 = 이 문장).
+  // ★ 2026-10-24 ② 판정 = rewriteAddsFacts(숫자 ∥ 혜택 ∥ 효능 · 0930 근거 그대로) + 이어 읽는 단위의 효능(readingAddsEfficacy · 보이는 글 줄 · 연달아 온 문단 태그 · <br> = 한 경계 · 이웃 문단도 이어 읽힌다 · Codex 2R · 4R)
   const refineGround = `${input.subject}\n${htmlVisibleText(input.htmlBody)}\n${input.instruction}`;
   const refinedVisible = `${subject}\n${htmlVisibleText(htmlBody)}`;
-  if (findNewNumbers(refinedVisible, refineGround).length > 0 || findInventedBenefits(refinedVisible, refineGround).length > 0) {
-    throw new Error('원문에 없는 숫자나 혜택이 생겨 적용하지 않았어요. 다시 눌러 주세요.');
+  const visibleLines = (html: string) => htmlVisibleText(html).split(/\n+/);
+  if (rewriteAddsFacts(refinedVisible, refineGround) || readingAddsEfficacy([subject, ...visibleLines(htmlBody)], [input.subject, ...visibleLines(input.htmlBody)], input.instruction)) {
+    throw new Error('원문에 없는 숫자 · 혜택 · 효능 말이 생겨 적용하지 않았어요. 다시 눌러 주세요.');
   }
   return { subject, htmlBody };
 }
@@ -516,22 +427,24 @@ const EMAIL_SECTION_REFINE_SYSTEM = `당신은 한국어 이메일 마케팅 카
 - [직접 작성해주세요] 같은 자리표시자는 그대로 둡니다.
 - (광고) 표기나 수신거부 문구를 새로 넣지 않습니다(시스템이 자동 처리).
 - 빈 텍스트는 빈 문자열로 둡니다.
+${EFFICACY_REWRITE_RULE}
 반드시 아래 JSON 스키마로만 출력합니다 (코드블록/설명 금지):
 { "texts": ["다듬은 텍스트 1", "다듬은 텍스트 2"] }`;
 
 /**
  * 비주얼 에디터 "AI로 개선" — 블록의 마케팅 카피 텍스트만 다듬어 Section[] 반환.
  * 사실·혜택·법적 필드는 수집 대상이 아니고, 변수/자리표시자 손실분은 원본 유지(안전 코어).
- * 다듬을 텍스트가 없으면 changed=false(호출부가 차감하지 않음).
+ * 다듬을 텍스트가 없거나 ★ 2026-10-24 실제로 바뀐 조각이 0 이면 changed=false(호출부가 차감하지 않음 · 옛: 전부 되돌려도 1크레딧).
+ * rejected = 원문에 없는 숫자 · 혜택 · 효능이 생겨 원래 글로 둔 조각 수(라우트가 notes 서버 문장으로).
  */
 export async function refineEmailSections(input: {
   companyId: string;
   userId?: string;
   sections: Section[];
   instruction?: string;
-}): Promise<{ sections: Section[]; changed: boolean }> {
+}): Promise<{ sections: Section[]; changed: boolean; rejected: number }> {
   const { slots, texts } = collectRefinableTexts(input.sections);
-  if (texts.length === 0) return { sections: input.sections, changed: false };
+  if (texts.length === 0) return { sections: input.sections, changed: false, rejected: 0 };
 
   const system = await buildSystemPromptWithBrandVoice(input.companyId, EMAIL_SECTION_REFINE_SYSTEM);
   const userInstruction = (input.instruction || '전체 카피를 더 매끄럽고 자연스럽게 다듬어주세요.').trim();
@@ -553,12 +466,30 @@ export async function refineEmailSections(input: {
     throw new Error('AI 다듬기 결과를 해석하지 못했습니다. 다시 시도해주세요.');
   }
   // ★ 2026-09-30 WP2 — 조각마다 표현만 바꾼다. 원래 조각 · 지시에 없던 숫자 · 혜택 값이 생긴 조각은 원래 글로 되돌린다.
+  // ★ 2026-10-24 ② 판정 = rewriteAddsFacts(숫자 ∥ 혜택 ∥ 효능)
+  //   ★ Codex 3R — 바뀌지 않은 조각은 판정하지 않는다(버린 수에 넣지 않음) · 조각 근거 = 그 조각 + 지시(0930 계약 그대로 · Codex 4R = 이웃 조각을 근거로 넓히면 다른 상품의 할인을 옮겨 온다)
+  let rejected = 0;
   const safeRefined = refined.map((r, i) => {
-    const ground = `${texts[i]}\n${userInstruction}`;
-    return findNewNumbers(r, ground).length > 0 || findInventedBenefits(r, ground).length > 0 ? texts[i] : r;
+    if (r === texts[i]) return r;
+    if (!rewriteAddsFacts(r, `${texts[i]}\n${userInstruction}`)) return r;
+    rejected += 1;
+    return texts[i];
   });
-  const sections = applyRefinedTexts(input.sections, slots, safeRefined);
-  return { sections, changed: true };
+  // ★ Codex 1R — 섹션째 다시 본다(고친 조각 + 남은 조각을 고객이 이어 읽는다 · 「피부 고민」 + 「매끈하게 달라져요」) · 걸린 섹션은 조각 전부 원래 글
+  //   적용 결과 = applyRefinedTexts 가 실제로 넣는 값(안전 실패 조각은 원래 글) · changed = 그 결과로 정한다(차감 근거)
+  const effective = safeRefined.map((r, i) => (isRefinedTextSafe(texts[i], r) ? r : texts[i]));
+  const bySection = new Map<number, number[]>();
+  slots.forEach((slot, i) => bySection.set(slot.si, [...(bySection.get(slot.si) || []), i]));
+  for (const idx of bySection.values()) {
+    if (idx.every((i) => effective[i] === texts[i])) continue;
+    if (!readingAddsEfficacy(idx.map((i) => effective[i]), idx.map((i) => texts[i]), userInstruction)) continue;
+    rejected += 1;
+    for (const i of idx) effective[i] = texts[i];
+  }
+  const changed = effective.some((r, i) => r !== texts[i]);
+  if (!changed) return { sections: input.sections, changed: false, rejected };
+  const sections = applyRefinedTexts(input.sections, slots, effective);
+  return { sections, changed: true, rejected };
 }
 
 export async function analyzeSpamRisk(input: {

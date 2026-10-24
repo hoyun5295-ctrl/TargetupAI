@@ -13,11 +13,17 @@
  *    끼어들 자리를 늘 남겨 낱말 거름으로는 닫히지 않았다(1R~4R) → 사람이 고른다. 실제 대상은 언제나 사람이 고른 상품 키다.
  * ⛔ 기간 = 범위가 딱 하나일 때만 · 숫자만 쓴 날짜(10.10 · 10/10)는 읽지 않는다 · 지난 기간 = 칩 0 + 사유(내년으로 올리지 않는다 ·
  *    연말에 적은 1~3월만 내년 = 마감일 읽기 `lineEndDatePrefill` 와 같은 규칙) · 범위 바로 뒤가 기한 낱말(배송 · 발송 …)이면 읽지 않는다.
- * 재사용 = 혜택 `lineBenefitPrefill` · 상품 낱말 `lineProductTerms` · 전체 요청 `isPlainAllCustomersRequest` · 날짜 검사 `isValidLinePeriodEnd` · `kstDayOf`.
+ * 재사용 = 혜택 = 공용 듣기 `listenLine`(같은 한 줄 = 같은 의도 · 뿌리 대장 R9) · 상품 낱말 `lineProductTerms` · 전체 요청 `isPlainAllCustomersRequest` ·
+ *   날짜 검사 `isValidLinePeriodEnd` · `kstDayOf` · 질문 모양 · 답 검증 = `one-line-ct/questions`.
+ * ★ 2026-10-24 한 줄 + 모자란 것만 질문(뿌리 대장 R9) — 읽은 값은 그대로 두고 **못 읽은 칸만** 질문표로 묻는다(`plannerLineQuestions`).
+ *   답 → 저장 본문 = `plannerLineEventBody`(서버가 다시 만든 질문표로만 검증 · 저장 판정은 행사 담기와 같은 함수).
  */
-import { lineBenefitPrefill, lineProductTerms } from './one-line-facts';
+import { createHash } from 'crypto';
+import { lineProductTerms } from './one-line-facts';
 import { isPlainAllCustomersRequest } from './all-customers-signal';
 import { isValidLinePeriodEnd, kstDayOf } from './one-line-steps';
+import { listenLine } from './one-line-ct/listen';
+import { pickAnswer, type LineAnswers, type LineQuestion } from './one-line-ct/questions';
 
 export type PlannerLineAudience =
   | { kind: 'all' }
@@ -190,7 +196,7 @@ export function readPlannerLine(line: string, nowMs: number): PlannerLineRead {
   const noPeriod = pr.span ? `${rest.slice(0, pr.span[0])} ${rest.slice(pr.span[1])}` : rest;
   // 혜택 = 기간 · 대상 표지를 지운 한 줄 전체로 판정(대상 구획 속 조건 「회원만」도 혜택을 좁히는 말로 본다 · 넓히지 않게)
   const tNoPeriod = pr.span ? t.replace(rest.slice(pr.span[0], pr.span[1]), ' ') : t;
-  const benefit = lineBenefitPrefill(tNoPeriod.replace(TARGET_MARK_RE, ' '));
+  const benefit = listenLine(tNoPeriod.replace(TARGET_MARK_RE, ' '), { nowMs }).benefit;
   const title = readTitle(noPeriod);
   const { channels, unsupported } = readChannels(t);
   return {
@@ -203,4 +209,151 @@ export function readPlannerLine(line: string, nowMs: number): PlannerLineRead {
     channels,
     unsupported,
   };
+}
+
+// ── ★ 2026-10-24 한 줄 + 모자란 것만 질문(뿌리 대장 R9 · docs/ROOT-LEDGER.md) ─────────────────
+//   옛: 한 줄 → 전체 기입 창 + 읽은 줄마다 「맞아요」 확인(공용 묻기 경로 밖 · 같은 한 줄이 기능마다 다르게 굴렀다).
+//   지금: 읽은 칸은 그대로 · 못 읽은 칸만 질문표(여정 · 자동 마케팅과 같은 모양) → 버튼 한 번에 담는다(보내기는 늘 행사 확인 · 승인 뒤).
+
+/** 질문표를 만드는 그 회사 사정(라우트가 읽어 넘긴다 · 여기는 DB 0) */
+export interface PlannerLineAskContext {
+  /** 채널 준비 판정(문자 · DM · 메일) — 잠김 사유 = 고객 문장 */
+  channels: Array<{ channel: 'sms' | 'dm' | 'email'; label: string; available: boolean; reason: string | null }>;
+  /** 관측 상품(구매자 많은 순) · 못 읽음 = null(상품 보기 없이 묻는다) */
+  products: { door: 'mall' | 'ledger'; list: Array<{ key: string; name: string; buyers: number }> } | null;
+}
+
+/** 상품 보기 수(구매자 많은 순) · 한 줄 낱말에 맞은 상품 상한(= 저장 상한) */
+const PRODUCT_OPTIONS = 6;
+const READ_PRODUCT_MAX = 30;
+const SINCE_OPTIONS = [{ value: '90', label: '최근 90일' }, { value: '180', label: '6개월' }, { value: '365', label: '1년' }, { value: '0', label: '기록 전체' }];
+
+/** 한 줄 낱말에 맞은 관측 상품(맞춤 규칙 = confirmLineAudience 와 같다 · 화면 「「기초」가 든 상품 N개」 줄도 이것) */
+export function plannerLineBuyerProducts(read: PlannerLineRead, ctx: PlannerLineAskContext): Array<{ key: string; name: string }> {
+  const aud = read.audience;
+  if (!aud || aud.kind !== 'product_buyers' || !ctx.products) return [];
+  const terms = aud.terms.map((t) => t.toLowerCase());
+  return ctx.products.list.filter((p) => terms.every((t) => String(p.name || '').toLowerCase().includes(t))).map((p) => ({ key: p.key, name: p.name }));
+}
+
+/** 읽은 채널 중 지금 열린 것 = 담을 채널(닫힌 것은 빼고 담는다 · 화면 「이렇게 담을게요」도 이 값을 그린다) */
+export function plannerLineSendChannels(read: PlannerLineRead, ctx: PlannerLineAskContext): Array<'sms' | 'dm' | 'email'> {
+  return read.channels.filter((ch) => ctx.channels.some((c) => c.channel === ch && c.available));
+}
+
+/** (순수) 못 읽은 칸만 질문(읽은 칸은 묻지 않는다) */
+export function plannerLineQuestions(read: PlannerLineRead, ctx: PlannerLineAskContext): LineQuestion[] {
+  const qs: LineQuestion[] = [];
+  if (!read.title) qs.push({ id: 'title', kind: 'text', label: '행사 이름은?', required: true, maxLength: 120, placeholder: '예: 가을 기초 1+1' });
+  if (!read.period) {
+    const help = read.periodNote || undefined;
+    qs.push({ id: 'startsOn', kind: 'date', label: '행사 시작일은?', required: true, ...(help ? { help } : {}) });
+    qs.push({ id: 'endsOn', kind: 'date', label: '행사 마지막 날은?', required: true });
+  }
+  if (!read.benefit) {
+    qs.push({ id: 'benefit', kind: 'text', label: '혜택은?', help: '알림 문구에 들어가요. 혜택이 없는 행사면 「혜택 없이」를 눌러 주세요', required: true, maxLength: 300, placeholder: '예: 전 품목 20% 할인', noneLabel: '혜택 없이' });
+  }
+  const aud = read.audience;
+  const readBuyers = plannerLineBuyerProducts(read, ctx);
+  const audResolved = aud?.kind === 'all' || (aud?.kind === 'product_buyers' && readBuyers.length > 0 && readBuyers.length <= READ_PRODUCT_MAX);
+  if (!audResolved) {
+    const products = (ctx.products?.list || []).slice(0, PRODUCT_OPTIONS);
+    qs.push({
+      id: 'audience', kind: 'choice', label: '누구에게 보낼까요?', required: true,
+      help: aud?.kind === 'unread' ? `「${aud.raw}」은 아직 바로 고르지 못해요. 가까운 쪽을 골라 주세요` : '여러 상품을 묶은 조건은 담은 뒤 행사 화면에서 고칠 수 있어요',
+      options: [{ value: 'all', label: '전체 고객' }, ...products.map((p) => ({ value: `p:${p.key}`, label: `「${p.name}」 산 고객`, desc: `구매자 ${p.buyers}명` }))],
+    });
+  }
+  if (!audResolved || aud?.kind === 'product_buyers') {
+    // 구매자 대상일 때만 쓴다(전체 고객을 고르면 답하지 않아도 된다) · 「모두」라고 적었으면 기록 전체를 추천
+    // 기본값 없음 — 한 줄의 「모두」는 도움말로만 짚는다(대상 상품 고르기의 [기록 전체] 표시와 같은 규칙)
+    qs.push({
+      id: 'since', kind: 'choice', label: '언제 산 고객인가요?', required: false, options: SINCE_OPTIONS,
+      ...(aud?.kind === 'product_buyers' && aud.allTime ? { help: '한 줄에 「모두」라고 적으셨어요. 기록 전체가 그 뜻이에요' } : {}),
+    });
+  }
+  if (plannerLineSendChannels(read, ctx).length === 0) {
+    qs.push({
+      id: 'channel', kind: 'choice', label: '어디로 보낼까요?', required: true,
+      ...(read.channels.length > 0 ? { help: '한 줄에 적은 채널이 지금 닫혀 있어요. 열린 채널을 골라 주세요' } : {}),
+      options: ctx.channels.map((c) => ({ value: c.channel, label: c.label, ...(c.available ? {} : { disabled: true, reason: c.reason || '지금은 고를 수 없어요.' }) })),
+    });
+  }
+  return qs;
+}
+
+/**
+ * (순수) 화면에 보일 질문 창 한 벌 + 그 지문(★ Codex 1024 1R) — 읽기 · 담기가 같은 함수.
+ *   담기 때 서버가 다시 만든 창의 지문이 화면이 본 지문과 다르면(그 사이 상품 · 채널 사정이 바뀜) 저장하지 않고 새 창으로 다시 묻는다
+ *   — 사람이 고른 답을 조용히 버리거나 다른 대상으로 저장하지 않게(뿌리 대장 R5 · 본 것 = 저장하는 것).
+ */
+export function plannerLineAsk(read: PlannerLineRead, ctx: PlannerLineAskContext) {
+  const questions = plannerLineQuestions(read, ctx);
+  const buyers = plannerLineBuyerProducts(read, ctx);
+  const sendChannels = plannerLineSendChannels(read, ctx);
+  const askKey = createHash('sha256').update(JSON.stringify({ read, questions, buyers, sendChannels, door: ctx.products?.door ?? null })).digest('hex').slice(0, 32);
+  return { questions, buyerNames: buyers.map((p) => p.name), sendChannels, askKey };
+}
+
+/** 시작 기준일에서 N일 전(KST 'YYYY-MM-DD' · 0 = null = 기록 전체 · 화면 sinceDateOf 와 같은 계산) */
+function sinceDateOf(days: number, nowMs: number): string | null {
+  if (days === 0) return null;
+  const kst = new Date(nowMs + 9 * 3600 * 1000);
+  kst.setUTCDate(kst.getUTCDate() - days);
+  return kst.toISOString().slice(0, 10);
+}
+
+/**
+ * (순수) 한 줄 + 답 → 행사 담기 본문(parsePlannerEventInput · normalizePlannerAudience 가 그대로 판정한다).
+ * 질문표는 서버가 다시 만든 것만 쓴다(화면이 보낸 질문표를 믿지 않는다) · 답 검증 = pickAnswer.
+ */
+export function plannerLineEventBody(read: PlannerLineRead, answers: LineAnswers, ctx: PlannerLineAskContext, nowMs: number):
+  { ok: true; body: Record<string, unknown> } | { ok: false; error: string } {
+  const qs = plannerLineQuestions(read, ctx);
+  const got: Record<string, string> = {};
+  for (const q of qs) {
+    const a = pickAnswer(q, answers || {});
+    if (!a.ok) return a;
+    got[q.id] = a.value;
+  }
+  const startsOn = read.period?.startsOn ?? got.startsOn;
+  const endsOn = read.period?.endsOn ?? got.endsOn;
+  if (!read.period) {
+    const today = kstDayOf(nowMs);
+    if (endsOn < `${today.slice(0, 4)}-${today.slice(4, 6)}-${today.slice(6, 8)}`) return { ok: false, error: '이미 지난 날짜예요. 행사 마지막 날을 다시 골라 주세요.' };
+    if (!isValidLinePeriodEnd(endsOn, nowMs)) return { ok: false, error: '너무 먼 날짜예요. 행사 마지막 날을 다시 골라 주세요.' };
+  }
+  let audience: Record<string, unknown>;
+  const pick = got.audience;
+  if (pick === undefined) {
+    audience = read.audience?.kind === 'all'
+      ? { kind: 'all' }
+      : { kind: 'product_buyers', door: ctx.products!.door, ...keysOf(plannerLineBuyerProducts(read, ctx)), since: sinceOf(got.since, nowMs) };
+  } else if (pick === 'all') {
+    audience = { kind: 'all' };
+  } else {
+    const p = ctx.products?.list.find((x) => `p:${x.key}` === pick);
+    if (!p || !ctx.products) return { ok: false, error: '받는 사람을 다시 골라 주세요.' };
+    audience = { kind: 'product_buyers', door: ctx.products.door, ...keysOf([p]), since: sinceOf(got.since, nowMs) };
+  }
+  if (audience.kind === 'product_buyers' && audience.since === undefined) return { ok: false, error: '「언제 산 고객인가요?」에 답해 주세요.' };
+  const channels = got.channel ? [got.channel as 'sms' | 'dm' | 'email'] : plannerLineSendChannels(read, ctx);
+  return {
+    ok: true,
+    body: {
+      title: read.title ?? got.title,
+      startsOn, endsOn,
+      benefitText: read.benefit ?? got.benefit ?? '',
+      touchpoints: channels.map((channel) => ({ channel, timing: { anchor: 'start' } })),
+      audience,
+    },
+  };
+}
+
+const keysOf = (ps: Array<{ key: string; name: string }>) => ({ keys: ps.map((p) => p.key), names: ps.map((p) => p.name) });
+/** 답 → since(빈 답 = undefined = 아직 안 고름) */
+function sinceOf(v: string | undefined, nowMs: number): string | null | undefined {
+  if (!v) return undefined;
+  const days = Number(v);
+  return SINCE_OPTIONS.some((o) => o.value === v) ? sinceDateOf(days, nowMs) : undefined;
 }

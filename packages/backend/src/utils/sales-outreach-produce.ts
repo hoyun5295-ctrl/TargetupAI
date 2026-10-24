@@ -24,7 +24,7 @@ import * as path from 'path';
 import { AsyncLocalStorage } from 'async_hooks';
 import helmet from 'helmet';
 import { callAIWithFallback } from '../services/ai';
-import { stripUnauthorizedBenefits, BENEFIT_PLACEHOLDER } from './copy-benefit-detector';
+import { stripUnauthorizedBenefits, BENEFIT_PLACEHOLDER, claimsInventedEfficacy, dropInventedEfficacy, pairClaimsInventedEfficacy, guardReadingSequence, EFFICACY_PLACEHOLDER, EFFICACY_PROMPT_RULES } from './copy-benefit-detector';
 import { getActiveStyleGuide, type OutreachStyleGuide } from './sales-outreach-style';
 import {
   isStudioReady, writeTempBuffer, allocTempPath, writeTempMeta, findTempFile, moveTempToPermanent,
@@ -35,8 +35,9 @@ import sharp from 'sharp';
 import { STUDIO_TEMPLATES, getTemplate, type StudioTemplate, type TemplateCategory } from './image-studio-templates';
 import { SUB_BY_ID } from './image-studio-template-subs';
 import { publicImagePath } from './sales-outreach-purge';
-import { extractJson, DM_EDITABLE_TEXT_KEYS } from './dm/dm-ai';
-import { createDm, publishDm, updateDm } from './dm/dm-builder';
+import { extractJson, DM_EDITABLE_TEXT_KEYS, DM_READING_ORDERS } from './dm/dm-ai';
+import { createDm, updateDm } from './dm/dm-builder';
+import { publishDmWithPrizes } from './dm/dm-publish-core';
 import { renderEmailSections, EMAIL_FOOTER_SLOT, esc as escHtml } from './email/email-section-renderer';
 // ★ 2026-09-23 광고성 이메일 법정 footer 단일 출처(전송자 명칭 · 연락처 · 수신거부 링크 · 이스케이프 소유) — 담당자 직접 발송 조립에 재사용
 import { buildEmailAdFooter } from './email-channel';
@@ -2099,7 +2100,8 @@ export function fillOutreachDmMedia(
     const c = cleanBannerCaption(alt, media.companyName);
     if (!c) return null;
     const t = stripUnauthorizedBenefits(c, quoteForCaption);
-    return t.includes(BENEFIT_PLACEHOLDER) ? null : t.trim() || null;
+    // ★ 2026-10-24 ② 효능 캡션도 버린다(혜택과 같은 근거 · 캡션 없음 = 지금 대체값)
+    return t.includes(BENEFIT_PLACEHOLDER) || claimsInventedEfficacy(t, quoteForCaption) ? null : t.trim() || null;
   };
   // 갤러리 = 배너 통째 목록(list_1xN)이라 비율 군 분류가 필요 없다 — 문서 순서대로 잘라 넣는다(2장 미만이면 비움)
   const takeGallery = (n: number): OutreachFillImage[] => (remaining.length >= 2 ? remaining.splice(0, n) : []);
@@ -2372,7 +2374,8 @@ function fillOutreachDmMediaV3(sections: readonly Section[], media: OutreachFill
     const c = cleanBannerCaption(alt, media.companyName);
     if (!c) return null;
     const t = stripUnauthorizedBenefits(c, quoteForCaption);
-    return t.includes(BENEFIT_PLACEHOLDER) ? null : t.trim() || null;
+    // ★ 2026-10-24 ② 효능 캡션도 버린다(혜택과 같은 근거 · 캡션 없음 = 지금 대체값)
+    return t.includes(BENEFIT_PLACEHOLDER) || claimsInventedEfficacy(t, quoteForCaption) ? null : t.trim() || null;
   };
   const maxLabel = channel === 'DM' ? 16 : 8;
   const stripTrailingPunct = (t: unknown) => String(t || '').replace(/[\s.·!。:]+$/g, '').trim();
@@ -2679,14 +2682,24 @@ export function dropPlaceholderSentences(text: string): string {
 
 /**
  * 면허(재대조 통과 + 미래 종료일) 인용 밖의 혜택 수치를 문장째(짧은 prop은 prop째) 제거한다. 대상 prop = DM_EDITABLE_TEXT_KEYS(손목록 금지).
+ * ★ 2026-10-24 세 채널 구조체크 ② — 같은 칸 · 같은 근거(licensedQuote)로 근거 없는 효능 문장도 뺀다(긴 칸 = 문장 빼기 · 짧은 칸 = 비움 · 버튼 = 「자세히 보기」 ·
+ *   헤드라인 + 부제 · 본문 짝은 이어 읽어 걸리면 뒤 칸을 같은 규칙으로). 이 생산자의 기존 대체값을 그대로 쓴다(자리표시 0 · 엔진 deps.sanitize · 브랜드 이메일 공용).
  * 후처리: hero.headline이 비면 업체명 · text_card 세 prop이 전부 비면 섹션 제거(ALWAYS_KEEP이라 prune이 못 지운다).
  */
 export function sanitizeDmCopyBenefits(
   sections: readonly Section[],
   licensedQuote: string,
   companyName: string,
-): { sections: Section[]; stripped: number; removed: SectionType[]; heroFallback: boolean } {
+): { sections: Section[]; stripped: number; removed: SectionType[]; heroFallback: boolean; efficacyStripped: number } {
   let stripped = 0;
+  let efficacyStripped = 0;
+  // 효능 = 긴 칸은 걸린 문장만 · 짧은 칸은 칸째(혜택과 같은 대체값)
+  const dropEff = (k: string, v: string): string => {
+    const r = dropInventedEfficacy(v, licensedQuote);
+    if (r.dropped.length === 0) return v;
+    efficacyStripped += r.dropped.length;
+    return LONG_TEXT_PROPS.has(k) && r.text !== EFFICACY_PLACEHOLDER ? r.text : '';
+  };
   let heroFallback = false;
   const removed: SectionType[] = [];
   const out: Section[] = [];
@@ -2701,6 +2714,7 @@ export function sanitizeDmCopyBenefits(
             const label = String(b?.label || '');
             const t = stripUnauthorizedBenefits(label, licensedQuote);
             if (t !== label) stripped++;
+            if (!t.includes(BENEFIT_PLACEHOLDER) && claimsInventedEfficacy(t, licensedQuote)) { efficacyStripped++; return { ...b, label: '자세히 보기' }; }
             return { ...b, label: t.includes(BENEFIT_PLACEHOLDER) ? '자세히 보기' : t };
           });
         }
@@ -2714,6 +2728,15 @@ export function sanitizeDmCopyBenefits(
       } else {
         p[k] = t;
       }
+      if (typeof p[k] === 'string' && p[k]) p[k] = dropEff(k, p[k]);
+    }
+    // ★ Codex 5R — 이어 읽기 = DM 화면 표시 순서(DM_READING_ORDERS · 변형마다의 순서 전부 · DM 개선과 같은 표) · 걸린 칸 = 비움(이 생산자의 대체값)
+    for (const order of DM_READING_ORDERS[s.type] || []) {
+      const keys = order.filter((k) => typeof p[k] === 'string');
+      const lost: string[] = [];
+      const out = guardReadingSequence(keys.map((k) => ({ text: p[k], fallback: '', optional: k === 'tag' || k === 'sub_copy' })), licensedQuote, lost);
+      keys.forEach((k, i) => { p[k] = out[i]; });
+      efficacyStripped += lost.length;
     }
     // ★ 2026-09-06 S2 대체는 유지하되 사실을 남긴다(HERO_FALLBACK 품질 경고 · 실물 표본에 업체명 단독 헤드라인 0건)
     if (s.type === 'hero' && !String(p.headline || '').trim()) { p.headline = companyName; heroFallback = true; }
@@ -2723,7 +2746,15 @@ export function sanitizeDmCopyBenefits(
     }
     out.push({ ...s, props: p } as Section);
   }
-  return { sections: out, stripped, removed, heroFallback };
+  return { sections: out, stripped, removed, heroFallback, efficacyStripped };
+}
+
+/** 프리헤더(비워도 되는 칸) — 면허 밖 혜택 수치 · 근거 없는 효능이 들면 비운다(★ 2026-10-24 ② 브랜드 이메일 출구 한 곳 · 옛 campaign-customer-fill 에서 옮김) */
+export function licensedPreheaderOf(preheader: string | null | undefined, licensedQuote: string): string {
+  const raw = String(preheader || '').trim();
+  if (!raw) return '';
+  const t = stripUnauthorizedBenefits(raw, licensedQuote);
+  return t.includes(BENEFIT_PLACEHOLDER) || claimsInventedEfficacy(t, licensedQuote) ? '' : t.trim().slice(0, 90);
 }
 
 // ===== ★ 2026-09-06 S2 코드가 채우는 블록 2종(순수) — 사회적 증거 카드 · 카운트다운 위치 =====
@@ -3315,7 +3346,7 @@ export async function publishOutreachDm(a: AssembledDm, input: Pick<ProduceDmInp
     ai_prompt: input.material.slice(0, 2000),
     approval_status: 'draft',
   } as any);
-  const published = await publishDm(String(dm.id), input.companyId);
+  const published = await publishDmWithPrizes(String(dm.id), input.companyId);
   if (!published?.short_code) throw new Error('모바일 DM 발행 주소를 만들지 못했습니다.');
   return { dmId: String(dm.id), ...outreachDmUrlsOf(published.short_code) };
 }
@@ -3458,11 +3489,17 @@ export async function produceOutreachBrandEmail(input: Omit<ProduceDmInput, 'com
   const pruned = pruneEmptyDmSections(sanitized.sections);
   const looked = applyOutreachLook(pruned.sections, 'EMAIL', dims);
   const subjectRaw = String(gen.raw?.subject || '').trim();
-  const subject = stripUnauthorizedBenefits(subjectRaw, input.licensedQuote).split(BENEFIT_PLACEHOLDER).join('').trim().slice(0, 40);
+  const subjectStripped = stripUnauthorizedBenefits(subjectRaw, input.licensedQuote).split(BENEFIT_PLACEHOLDER).join('').trim().slice(0, 40);
+  // ★ 2026-10-24 ② 제목 · 프리헤더도 같은 근거로 효능을 거른다(빈 제목 = 소비처가 이름으로 대체 · 프리헤더 = 비워도 되는 칸)
+  //   프리헤더는 옛: 소비처 한 곳(campaign-quick 템플릿 갈래)만 혜택을 걸렀다 → 출구 한 곳으로.
+  const subject = claimsInventedEfficacy(subjectStripped, input.licensedQuote) ? '' : subjectStripped;
+  // 수신함에서 제목 뒤에 이어 읽힌다(★ Codex 1R) — 이어 읽어 단정이면 프리헤더(비워도 되는 칸)를 비운다
+  const preheaderLicensed = licensedPreheaderOf(String(gen.raw?.preheader || ''), input.licensedQuote).slice(0, 60);
+  const preheader = subject && preheaderLicensed && pairClaimsInventedEfficacy(subject, preheaderLicensed, input.licensedQuote) ? '' : preheaderLicensed;
   return {
     sections: looked.sections,
     subject,
-    preheader: String(gen.raw?.preheader || '').slice(0, 60),
+    preheader,
     benefitStripped: sanitized.stripped,
     exemplarCount: emailPrompt.exemplars.picked,
     exemplarTotal: emailPrompt.exemplars.total,
@@ -3497,6 +3534,7 @@ export function buildEmailIntroPrompt(guide: OutreachStyleGuide, input: SubjectI
     `톤: ${guide.email.tone}`,
     ...guide.prohibitions.map((p) => `금지: ${p}`),
     '서두는 그 업체 홈페이지에서 실제로 본 것 1~2가지를 구체적으로 언급한다(없는 것을 지어내지 않는다).',
+    EFFICACY_PROMPT_RULES,
     '출력은 JSON 하나만: {"subject":"...","intro":"..."} (subject 40자 이내 · intro 2~3문장)',
   ].join('\n');
   const user = [
@@ -3524,11 +3562,14 @@ export async function generateSubjectIntro(guide: OutreachStyleGuide, input: Sub
     const parsed = block ? extractJsonFromAiText(block[0]) : {};
     if (typeof parsed.subject === 'string' && parsed.subject.trim()) {
       const s = stripUnauthorizedBenefits(parsed.subject.trim(), licensedQuote);
-      if (!s.includes(BENEFIT_PLACEHOLDER) && s.length <= 40) subject = s;
+      // ★ 2026-10-24 ② 효능 제목 = 기본 제목(혜택 자리와 같은 대체값)
+      if (!s.includes(BENEFIT_PLACEHOLDER) && s.length <= 40 && !claimsInventedEfficacy(s, licensedQuote)) subject = s;
     }
     if (typeof parsed.intro === 'string' && parsed.intro.trim()) {
-      intro = stripUnauthorizedBenefits(parsed.intro.trim().slice(0, 500), licensedQuote);
-      generated = true;
+      // ★ 2026-10-24 ② 효능 문장은 뺀다 · 다 빠지면 기본 서두
+      const eff = dropInventedEfficacy(stripUnauthorizedBenefits(parsed.intro.trim().slice(0, 500), licensedQuote), licensedQuote);
+      intro = eff.text === EFFICACY_PLACEHOLDER ? '' : eff.text;
+      generated = !!intro;
     }
   } catch (err: any) {
     console.log('[sales-outreach] 제목·서두 생성 실패(기본값 사용):', err?.message);

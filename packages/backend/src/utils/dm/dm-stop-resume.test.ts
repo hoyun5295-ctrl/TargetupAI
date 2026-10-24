@@ -125,7 +125,7 @@ describe('DM 발행 중지 / 재개 (2026-08-06)', () => {
       expect(handlerBody("dmRouter.post('/:id/publish'")).toContain('await publishDmCore({');
       const core = readFileSync(resolve(__dirname, './dm-publish-core.ts'), 'utf8');
       expect(core, '이 가드가 없으면 화면의 [발행 주소 복사] 한 번으로 중지가 풀린다(그 버튼이 publish를 부른다)').toContain('DM_STOPPED');
-      expect(core.indexOf('isDmStopped(')).toBeLessThan(core.indexOf('await publishDm('));
+      expect(core.indexOf('isDmStopped(')).toBeLessThan(core.indexOf('await publishDmWithPrizes('));
     });
 
     it('실발송(send-to-target)이 중지분을 거절한다 — 잔액이 나가기 전에', () => {

@@ -10,7 +10,7 @@ import type { DmBrandKit } from '../dm/dm-tokens';
 import { formatLinePeriodEnd } from '../one-line-steps';
 import { kstDatePlus } from '../line-template-example';
 import {
-  LINE_COMPOSITIONS, composeRichDm, composeRichEmail, composeRichInapp, compositionFallbackCopy,
+  LINE_COMPOSITIONS, composeRichDm, composeRichEmail, composeRichInapp, compositionFallbackCopy, compositionChannelSlots,
   type LineComposition, type LineRichMaterials,
 } from '../line-compositions';
 import type { LineInAppMessage } from '../line-template-compose';
@@ -26,7 +26,10 @@ export function compositionCatalog(): Array<{
   design: { primary: string; accent: string };
 }> {
   return LINE_COMPOSITIONS.map((c) => {
-    const slot = (k: string) => c.slots.find((s) => s.key === k);
+    // ★ 1024 필요 칸 = 채널 칸 규칙 한 곳(옛: 이메일 상품 6 · 인앱 1 을 여기서 따로 셌다 · 한 줄 CT 구조체크 ⑦)
+    const dmSlots = compositionChannelSlots(c, 'dm');
+    const slot = (k: string) => dmSlots.find((s) => s.key === k);
+    const prodMax = (ch: 'dm' | 'email' | 'inapp') => compositionChannelSlots(c, ch).find((s) => s.key === 'products')?.max ?? 0;
     const prod = slot('products');
     const ben = slot('benefit');
     const ex = EXAMPLES[c.id];
@@ -36,7 +39,7 @@ export function compositionCatalog(): Array<{
       needs: {
         benefit: ben ? (ben.level === 'block' ? 'required' : 'optional') : 'none',
         period: slot('periodEnd')?.level === 'block' ? 'required' : 'none',
-        products: { min: prod?.level === 'block' ? prod.min : 0, max: { dm: prod?.max ?? 0, email: Math.min(prod?.max ?? 0, 6), inapp: prod ? 1 : 0 } },
+        products: { min: prod?.level === 'block' ? prod.min : 0, max: { dm: prodMax('dm'), email: prodMax('email'), inapp: prodMax('inapp') } },
         hero: 'ask',
       },
       example: { company: ex.company, industry: ex.industry, line: ex.line },

@@ -24,7 +24,7 @@ import { callAIWithFallback } from '../services/ai';
 import { query } from '../config/database';
 import { createVariant, VariantOfVariantError } from './inapp-variant-optimizer';
 // ★ 2026-09-26 한줄로 V2 R1-45 — AI가 지어낸 혜택 차단 CT(원본에 있던 혜택만 통과)
-import { findNewNumbers, stripUnauthorizedBenefits } from './copy-benefit-detector';
+import { rewriteAddsFacts, stripUnauthorizedBenefits, efficacyNote, EFFICACY_REWRITE_RULE } from './copy-benefit-detector';
 import { buildHourlyDistribution } from './inapp-funnel-stats';
 
 // ════════════════════════════════════════════════════════════════════
@@ -89,6 +89,7 @@ export async function quickActionAIRefine(
 - 구체 혜택 (% / 원 / 무료 / 쿠폰 / 사은품) 임의 작성 X. \`[혜택 안내: 직접 작성해주세요]\` placeholder 그대로 보존
 - 원본 안 변수 ({{ customer.name }}, %고객명% 등) 그대로 보존
 - 원본 안 URL placeholder ([URL: 회사 admin 수정]) 그대로 보존
+${EFFICACY_REWRITE_RULE}
 - 제목 20자 안 / 본문 200~400자
 
 [응답 JSON]
@@ -137,6 +138,7 @@ export async function quickActionAIRefine(
 
   // variant 자동 신설 (CT-80 createVariant 호출) — 가중치 동등 100/100/100
   const createdIds: string[] = [];
+  let rejected = 0;
   const parentText = `${parent.title || ''}
 ${parent.body || ''}`;
   for (const v of variants) {
@@ -149,8 +151,10 @@ ${v.body}`;
       continue;
     }
     // ★ 2026-09-30 WP2 — 톤만 바꾸는 변형이다. 원본에 없던 숫자(기한 · 수량 · 시간)가 생긴 안도 만들지 않는다
-    if (findNewNumbers(variantText, parentText).length > 0) {
-      console.warn(`[CT-84 quickActionAIRefine] 원본에 없던 숫자가 생겨 안을 건너뜀 (tone=${v.tone})`);
+    // ★ 2026-10-24 세 채널 구조체크 ② — 판정 = rewriteAddsFacts(숫자 ∥ 혜택 ∥ 효능 · 다시 쓰기 판정 하나)
+    if (rewriteAddsFacts(variantText, parentText)) {
+      rejected += 1;
+      console.warn(`[CT-84 quickActionAIRefine] 원본에 없던 숫자 · 혜택 · 효능이 생겨 안을 건너뜀 (tone=${v.tone})`);
       continue;
     }
     try {
@@ -174,10 +178,12 @@ ${v.body}`;
     }
   }
 
+  // ★ 2026-10-24 ② 건너뛴 안 수 = 서버 문장(결과 안내 한 줄에 그대로 붙인다)
+  const note = efficacyNote('rewrite', rejected);
   return {
     actionType: 'ai_refine',
     applied: createdIds.length > 0,
-    appliedDetails: `A/B 변형 ${createdIds.length}건을 일시정지로 만들었습니다. 변형 검토 창에서 문안을 확인하고 켜면 노출되고, 켠 변형끼리 성과로 승자를 고릅니다`,
+    appliedDetails: `A/B 변형 ${createdIds.length}건을 일시정지로 만들었습니다. 변형 검토 창에서 문안을 확인하고 켜면 노출되고, 켠 변형끼리 성과로 승자를 고릅니다${note ? `. ${note}` : ''}`,
     beforeAfter: {
       before: { variantCount: 0 },
       after: { variantCount: createdIds.length, tones: variants.map((v) => v.tone) },

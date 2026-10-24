@@ -24,6 +24,7 @@
 import { extractJsonFromAiText } from './ai-json';
 import { query } from '../config/database';
 import { callAIWithFallback } from '../services/ai';
+import { stripUnauthorizedBenefits, dropInventedEfficacyTitledBody, EFFICACY_PROMPT_RULES } from './copy-benefit-detector';
 import { buildJourneyStats, JourneyFullStats, JourneyStepStat } from './journey-stats';
 import { JOURNEY_SUBJECT_MAX_CHARS } from './journey-step-limits';
 
@@ -301,6 +302,7 @@ export async function recommendNextJourneyStep(
   const company = companyRes.rows[0] || {};
 
   const system = `당신은 CRM 여정(journey) 설계 전문가입니다.
+${EFFICACY_PROMPT_RULES}
 회사의 현재 여정 단계 흐름을 분석하여 가장 적합한 다음 단계 1개 + 대안 2개를 추천합니다.
 
 영구 원칙:
@@ -373,12 +375,21 @@ ${stepsDescription || '(단계 영역 없음)'}
 
     // ★ 2026-09-30 WP4 — JSON 추출은 CT 하나(ai-json · 머리말 · 코드펜스 · 문자열 안 제어문자 복구). 옛 코드펜스만 벗기는 인라인은 모델이 앞에 한 줄만 붙여도 실패했다.
     const parsed: any = extractJsonFromAiText(text);
+    // ★ 2026-10-24 세 채널 구조체크 ② — 추천 문안도 고객 글이다(이 생산자만 거름이 없었다 · R13).
+    //   근거 = 이 여정에 이미 저장된 본문 · 제목(사람이 확인한 글) · 혜택 → 자리표시 · 효능 → 문장 빼기(제목 = 비움)
+    const recGround = existingSteps.map((s: any) => `${s?.message_template || ''}\n${s?.subject || ''}`).join('\n');
+    //   제목 + 본문 = 이어 읽는 단위(CT dropInventedEfficacyTitledBody · 여정 생성과 같은 규칙)
+    const guardPair = (s: any) => dropInventedEfficacyTitledBody(
+      typeof s?.subject === 'string' ? stripUnauthorizedBenefits(s.subject.slice(0, JOURNEY_SUBJECT_MAX_CHARS), recGround) : '',
+      typeof s?.messageTemplate === 'string' ? stripUnauthorizedBenefits(s.messageTemplate.slice(0, 2000), recGround) : '',
+      recGround,
+    );
     const mapStep = (s: any): RecommendedStep => ({
       stepType: (['message', 'wait', 'condition'].includes(s?.stepType) ? s.stepType : 'message') as 'message' | 'wait' | 'condition',
       delayHours: typeof s?.delayHours === 'number' ? Math.max(0, Math.min(720, s.delayHours)) : 24,
       channel: (['sms', 'lms', 'mms'].includes(s?.channel) ? s.channel : null) as 'sms' | 'lms' | 'mms' | null,
-      messageTemplate: typeof s?.messageTemplate === 'string' ? s.messageTemplate.slice(0, 2000) : null,
-      subject: typeof s?.subject === 'string' ? s.subject.slice(0, JOURNEY_SUBJECT_MAX_CHARS) : null,
+      messageTemplate: typeof s?.messageTemplate === 'string' ? guardPair(s).body : null,
+      subject: typeof s?.subject === 'string' ? guardPair(s).subject : null,
       conditionType: typeof s?.conditionType === 'string' ? s.conditionType : null,
       reasoning: typeof s?.reasoning === 'string' ? s.reasoning : '',
       expectedImpact: typeof s?.expectedImpact === 'string' ? s.expectedImpact : '',

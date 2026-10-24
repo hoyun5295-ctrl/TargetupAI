@@ -14,6 +14,7 @@
  */
 import { OUTREACH_EXEMPLAR_SEED } from './sales-outreach-exemplar-seed';
 import { withExemplarHeader } from './sales-outreach-exemplar-mask';
+import { EFFICACY_PROMPT_RULES } from './copy-benefit-detector';
 // ★ v3 입구 타입(엔진 소유 · 엔진은 이 파일을 모른다 · 타입만)
 import type { EngineEntry } from './campaign-engine';
 
@@ -121,6 +122,8 @@ export const OUTREACH_GENERATION_RULES = [
   '- 행사가 있으면 행사 중심(행사명이 헤드라인에 그대로 · 기간·상품이 본문에) · 행사가 없을 때만 브랜드 중심. 한국어 · 존댓말 · 과장·강요 없이 · 이모지 0 · 줄표 0.',
   '- 헤드라인·태그·본문의 어투와 길이는 [배너 문구]·[홈페이지에서 읽은 내용]의 브랜드 말투를 따른다. "지금 만나보는 인기 라인", "많은 고객이 남긴 후기"처럼 어느 브랜드에나 맞는 범용 문구를 쓰지 마라.',
   '- 리뷰 수·평점·판매 순위 같은 사회적 증거 수치는 코드가 따로 카드로 싣는다: 그 수치로 text_card 를 만들지 마라.',
+  // ★ 2026-10-24 세 채널 구조체크 ② — 효능 단정 금지(같은 문안은 한 곳 · 서버가 면허 인용 밖 효능 문장을 기계로 뺀다)
+  EFFICACY_PROMPT_RULES,
   '- 출력은 JSON 하나만(코드블록·설명 금지).',
 ].join('\n');
 

@@ -7,6 +7,7 @@ import fs from 'fs';
 import { dropUploadedFiles } from '../utils/upload-cleanup';
 import { restoreUploadFileName } from '../utils/mms-image-fit';   // ★ 2026-10-19 B-1005-4③ 한글 첨부 이름
 import { isMissingSchemaError, migrationPendingBody } from '../utils/db-errors';
+import { publicErrorText } from '../utils/http-error';   // ★ 2026-10-24 R10 — 4xx 응답도 원문 0(우리 한국어 안내만 지나간다)
 import { recordCallbackNumberCreated } from '../utils/change-audit';
 import {
   // 담당자
@@ -115,7 +116,7 @@ router.post('/managers', authenticate, requireCompanyAdmin, demoBlock, docUpload
   } catch (error: any) {
     dropUploadedFiles(req); // R341 등록 실패 = 저장한 위임장 삭제
     console.error('담당자 등록 실패:', error);
-    res.status(400).json({ error: error.message || '담당자 등록 실패' });
+    res.status(400).json({ error: publicErrorText(error, '담당자 등록 실패') });
   }
 });
 
@@ -199,7 +200,7 @@ router.post(
       if (isMissingSchemaError(error)) {
         return res.status(503).json(migrationPendingBody('companies.subscriber_type · mobile_line_limit · landline_line_limit ALTER'));
       }
-      res.status(400).json({ error: error.message || '등록 신청 실패' });
+      res.status(400).json({ error: publicErrorText(error, '등록 신청 실패') });
     }
   }
 );
@@ -264,7 +265,7 @@ router.post('/admin/managers/:id/approve', authenticate, requireSuperAdmin, asyn
     res.json({ success: true, message: '담당자 위임장이 승인되었습니다.', manager });
   } catch (error: any) {
     console.error('담당자 승인 실패:', error);
-    res.status(400).json({ error: error.message || '승인 처리 실패' });
+    res.status(400).json({ error: publicErrorText(error, '승인 처리 실패') });
   }
 });
 
@@ -280,7 +281,7 @@ router.post('/admin/managers/:id/reject', authenticate, requireSuperAdmin, async
     res.json({ success: true, message: '담당자 위임장이 반려되었습니다.', manager });
   } catch (error: any) {
     console.error('담당자 반려 실패:', error);
-    res.status(400).json({ error: error.message || '반려 처리 실패' });
+    res.status(400).json({ error: publicErrorText(error, '반려 처리 실패') });
   }
 });
 
@@ -354,7 +355,7 @@ router.post('/admin/:id/approve', authenticate, requireSuperAdmin, async (req: R
     });
   } catch (error: any) {
     console.error('승인 처리 실패:', error);
-    res.status(400).json({ error: error.message || '승인 처리 실패' });
+    res.status(400).json({ error: publicErrorText(error, '승인 처리 실패') });
   }
 });
 
@@ -376,7 +377,7 @@ router.post('/admin/:id/reject', authenticate, requireSuperAdmin, async (req: Re
     });
   } catch (error: any) {
     console.error('반려 처리 실패:', error);
-    res.status(400).json({ error: error.message || '반려 처리 실패' });
+    res.status(400).json({ error: publicErrorText(error, '반려 처리 실패') });
   }
 });
 

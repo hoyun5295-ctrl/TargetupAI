@@ -15,6 +15,7 @@ import { tryAcquireInflight, releaseInflight, takeDailyQuota } from '../utils/in
 /** 회사당 하루 헤드라인 자동 추천 상한(한 줄 창을 열 때마다 1회 · 넘으면 갤러리에서 고른다) */
 const HEADLINE_PICKS_DAILY_MAX = 60;
 import { getBrandBasicInfo } from '../utils/brand-basic-info';
+import { aiZonePlanBlocked } from '../utils/plan-guard';
 import { getLineComposition } from '../utils/line-compositions';
 import { previewCards, previewMaterialsOf, renderCompositionPreview } from '../utils/one-line-ct/preview';
 import { compositionCatalog, renderCompositionExample } from '../utils/one-line-ct/catalog';
@@ -81,6 +82,8 @@ lineTemplatesRouter.get('/:id/example', (req: any, res: any) => {
 lineTemplatesRouter.post('/headline-picks', async (req: any, res: any) => {
   const companyId = req.user?.companyId;
   if (!isOpen(companyId)) return res.status(404).json(NOT_OPEN);
+  // ★ 2026-10-24 R2 — AI 를 부르는 주소 = 서버 요금제 문(비용은 우리 부담이어도 · 한 줄 CT 구조체크 ④)
+  if (await aiZonePlanBlocked(req, res)) return;
   const line = typeof req.body?.line === 'string' ? req.body.line.trim().slice(0, 2000) : '';
   if (!line) return res.status(400).json({ success: false, error: '한 줄을 먼저 적어 주세요.', code: 'INVALID' });
   const products = (Array.isArray(req.body?.products) ? req.body.products : [])

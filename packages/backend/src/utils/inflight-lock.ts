@@ -41,19 +41,22 @@ export async function acquireInflightWait(key: string, timeoutMs = 30_000, stepM
  *   (Codex E1 — 연결 닫힘에 놓으면 화면을 떠난 뒤에도 도는 생성 · 차감과 재시도가 겹쳤다).
  *   회사 · 사용자 없는 요청 = 잠금 없이 핸들러로(라우트가 403 으로 거른다).
  */
-export function singleFlight(kind: string, handler: (req: any, res: any) => Promise<unknown>) {
+export function singleFlight(kind: string, handler: (req: any, res: any) => Promise<unknown>, message = '지금 만드는 중이에요. 완성되면 이어서 진행해 주세요.') {
   return async (req: any, res: any): Promise<void> => {
     const companyId = req.user?.companyId;
     const userId = req.user?.userId;
     if (!companyId || !userId) { await handler(req, res); return; }
     const key = `paid-gen:${kind}:${companyId}:${userId}`;
     if (!tryAcquireInflight(key)) {
-      res.status(409).json({ success: false, error: '지금 만드는 중이에요. 완성되면 이어서 진행해 주세요.', code: 'IN_FLIGHT' });
+      res.status(409).json({ success: false, error: message, code: 'IN_FLIGHT' });
       return;
     }
     try { await handler(req, res); } finally { releaseInflight(key); }
   };
 }
+
+/** ★ 2026-10-24 세 채널 구조체크 ⑬ — 발송 입구(같은 사람 · 같은 발송 동시 두 번 = 409)의 안내 */
+export const SEND_IN_FLIGHT_MESSAGE = '보내는 중이에요. 끝나면 결과를 확인해 주세요.';
 
 /** 테스트 전용 — 케이스 사이 잠금 초기화 */
 export function clearInflightForTest(): void {

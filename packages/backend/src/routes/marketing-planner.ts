@@ -16,15 +16,16 @@ import { query } from '../config/database';
 import { authenticate } from '../middlewares/auth';
 import { handleDbMigrationError } from '../utils/db-migration-error';
 import { resolveOwnerScope } from '../utils/owner-scope';
+import { aiZonePlanBlocked } from '../utils/plan-guard';
 import { InsufficientCreditError } from '../utils/ai-credit';
 import { aiAutoBuildErrorResponse } from '../utils/ai-auto-build-materials';
 import { parsePlannerEventInput, parsePlanMonth, isPlannerDay, PLANNER_CHANNEL_LABEL } from '../utils/marketing-planner';
 import { getPlannerChannelAvailability, firstBlockedChannel } from '../utils/planner-channel-gate';
 import { cancelMonthlyApproval, resolveApprovalToken, PlannerApprovalError } from '../utils/planner-approval';
 import { loadTouchpointById, requirePlannerMeta } from '../utils/planner-touchpoint';
-import { loadPlannerEvent, normalizePlannerAudience, normalizePlannerMaterials, savePlannerEvent, PlannerEventWriteError, PlannerMaterials } from '../utils/planner-event';
-import { confirmLineAudienceForCompany, countPlannerAudience, countPlannerEmailRecipients, plannerLineEnabled, verifyPlannerAudience } from '../utils/planner-audience';
-import { readPlannerLine } from '../utils/planner-line-read';
+import { deletePlannerEvent, loadPlannerEvent, normalizePlannerAudience, normalizePlannerMaterials, savePlannerEvent, PlannerEventWriteError, PlannerMaterials } from '../utils/planner-event';
+import { countPlannerAudience, countPlannerEmailRecipients, loadPlannerLineAskContext, plannerLineEnabled, verifyPlannerAudience } from '../utils/planner-audience';
+import { confirmLineAudience, plannerLineAsk, plannerLineEventBody, readPlannerLine, type PlannerLineRead } from '../utils/planner-line-read';
 import { currentPurchaseDoor, listObservedProducts } from '../utils/journey-product';
 import { quotePlannerBuild, quotePlannerDraft, runPlannerBuild, PlannerBuildError } from '../utils/planner-build';
 import { editPlannerCopy, runPlannerCopyPass, PlannerCopyEditError } from '../utils/planner-copy';
@@ -170,15 +171,16 @@ function readMaterials(body: any, companyId: string): { ok: true; value: Planner
   return normalizePlannerMaterials(body.materials, companyId);
 }
 
-async function saveEvent(req: Request, res: Response, eventId?: string) {
+/** 행사 저장 — body = 담기 창 본문(기본) · 한 줄 담기가 만든 본문(같은 판정을 그대로 지난다) */
+async function saveEvent(req: Request, res: Response, eventId?: string, body: any = req.body) {
   const companyId = requireCompany(req, res);
   if (!companyId) return;
-  const parsed = parsePlannerEventInput(req.body);
+  const parsed = parsePlannerEventInput(body);
   if (!parsed.ok) return res.status(400).json({ error: parsed.error });
-  const materials = readMaterials(req.body, companyId);
+  const materials = readMaterials(body, companyId);
   if (!materials.ok) return res.status(400).json({ error: materials.error, code: 'MATERIALS_INVALID' });
   // ★ 2026-10-18 받는 사람 = 저장 본문에 꼭 있어야 한다(칸이 빠졌다고 조용히 전체로 받지 않는다 · 설계서 §3-6)
-  const aud = normalizePlannerAudience(req.body?.audience);
+  const aud = normalizePlannerAudience(body?.audience);
   if (!aud.ok) return res.status(400).json({ error: aud.error, code: 'AUDIENCE_REQUIRED' });
   try {
     await requirePlannerMeta();
@@ -209,17 +211,51 @@ async function saveEvent(req: Request, res: Response, eventId?: string) {
 // ── ★ 2026-10-18 v2 입력 축(설계서 docs/2026-10-18-planner-v2-design.md §3-6 · 회사 스위치 PLANNER_LINE_COMPANY_IDS) ──
 const LINE_CLOSED = { error: '이 기능은 아직 열리지 않았습니다.', code: 'FEATURE_DISABLED' };
 
-// POST /api/marketing-planner/line-read — 한 줄 → 행사명 · 기간 · 혜택 · 받는 사람 · 채널 제안(AI 0 · 0크레딧)
-//   ★ Codex B 3R · 4R — 구매자 제안은 그 회사 관측 상품명으로 확정(대상 CT · 못 읽음 · 시간 초과 = 사람이 고른다 · 나머지 제안은 그대로)
+/** 한 줄 → 읽기 + 그 회사 사정(구매자 제안 = 관측 상품명으로 확정 · ★ Codex B 3R · 4R) — 읽기 · 담기가 같은 함수 */
+async function readLineForCompany(req: Request, companyId: string, line: string, nowMs: number) {
+  const read: PlannerLineRead = readPlannerLine(line, nowMs);
+  const ctx = await loadPlannerLineAskContext(companyId, req.user?.userId || null);
+  read.audience = confirmLineAudience(read.audience, ctx.products ? ctx.products.list.map((p) => p.name) : null);
+  return { read, ctx };
+}
+
+// POST /api/marketing-planner/line-read — 한 줄 → 읽은 칸 + 못 읽은 칸만 질문표(AI 0 · 0크레딧 · ★ 1024 뿌리 대장 R9)
 router.post('/line-read', async (req: Request, res: Response) => {
   const companyId = requireCompany(req, res);
   if (!companyId) return;
   if (!plannerLineEnabled(companyId)) return res.status(404).json(LINE_CLOSED);
   const line = String(req.body?.line || '').trim();
   if (!line) return res.status(400).json({ error: '한 줄을 입력해 주세요.' });
-  const read = readPlannerLine(line, Date.now());
-  read.audience = await confirmLineAudienceForCompany(companyId, read.audience);
-  return res.json(read);
+  try {
+    const { read, ctx } = await readLineForCompany(req, companyId, line, Date.now());
+    return res.json({ ...read, ...plannerLineAsk(read, ctx) });
+  } catch (error: any) {
+    return sendPlannerError(error, res, 'planner_events', '한 줄을 읽지 못했습니다');
+  }
+});
+
+// POST /api/marketing-planner/line-start — 한 줄 + 답 → 행사 담기(질문표는 서버가 다시 만든다 · 저장 판정 = 담기 창과 같은 saveEvent)
+router.post('/line-start', async (req: Request, res: Response) => {
+  const companyId = requireCompany(req, res);
+  if (!companyId) return;
+  if (!plannerLineEnabled(companyId)) return res.status(404).json(LINE_CLOSED);
+  const line = String(req.body?.line || '').trim();
+  if (!line) return res.status(400).json({ error: '한 줄을 입력해 주세요.' });
+  const answers = req.body?.answers && typeof req.body.answers === 'object' && !Array.isArray(req.body.answers) ? req.body.answers : {};
+  try {
+    const nowMs = Date.now();
+    const { read, ctx } = await readLineForCompany(req, companyId, line, nowMs);
+    // 화면이 본 질문 창 = 지금 다시 만든 창이어야 저장한다(다르면 새 창으로 다시 묻는다 · 답을 조용히 버리지 않는다)
+    const ask = plannerLineAsk(read, ctx);
+    if (String(req.body?.askKey || '') !== ask.askKey) {
+      return res.status(409).json({ error: '그 사이 상품이나 채널 사정이 바뀌었어요. 바뀐 질문을 확인하고 다시 담아 주세요.', code: 'LINE_CHANGED', read: { ...read, ...ask } });
+    }
+    const built = plannerLineEventBody(read, answers, ctx, nowMs);
+    if (!built.ok) return res.status(400).json({ error: built.error, code: 'LINE_ANSWER_INVALID' });
+    return saveEvent(req, res, undefined, built.body);
+  } catch (error: any) {
+    return sendPlannerError(error, res, 'planner_events', '행사를 담지 못했습니다');
+  }
 });
 
 // GET /api/marketing-planner/audience/products — 대상 상품 목록(그 회사 지금 문 · 최근 180일 관측 · 여정과 같은 함수)
@@ -276,19 +312,7 @@ router.delete('/events/:id', async (req: Request, res: Response) => {
   const companyId = requireCompany(req, res);
   if (!companyId) return;
   try {
-    const ownerId = resolveOwnerScope(req);
-    const del = await query(
-      `DELETE FROM planner_events e
-        WHERE e.id = $1::uuid AND e.company_id = $2::uuid AND e.status IN ('draft', 'briefed')
-          AND ($3::text IS NULL OR e.created_by::text = $3::text)
-          AND (e.meta->'building' IS NULL OR jsonb_typeof(e.meta->'building') <> 'object'
-               OR (e.meta->'building'->>'at')::timestamptz < NOW() - interval '10 minutes')
-          AND NOT EXISTS (SELECT 1 FROM planner_touchpoints t WHERE t.event_id = e.id AND t.company_id = e.company_id
-                           AND (t.status IN ('sent', 'producing') OR t.exec_ref IS NOT NULL))
-        RETURNING e.id`,
-      [String(req.params.id), companyId, ownerId],
-    );
-    if (del.rows.length === 0) {
+    if (!(await deletePlannerEvent(companyId, String(req.params.id), resolveOwnerScope(req)))) {
       return res.status(409).json({ error: '승인 전이고 완성본을 만드는 중이 아닌 행사만 지울 수 있습니다. 승인한 행사는 [행사 취소]로 멈춰 주세요.', code: 'NOT_DELETABLE' });
     }
     return res.json({ deleted: true });
@@ -344,6 +368,7 @@ router.post('/events/:id/build', async (req: Request, res: Response) => {
   if (!companyId) return;
   const channel = req.body?.channel;
   if (channel !== 'dm' && channel !== 'email') return res.status(400).json({ error: '만들 채널을 골라 주세요.' });
+  if (await aiZonePlanBlocked(req, res)) return;   // ★ 2026-10-24 R2 — 생성비를 쓰는 주소 = 서버 요금제 문
   try {
     await requirePlannerMeta();
     const r = await runPlannerBuild({
@@ -394,6 +419,7 @@ router.get('/events/:id/confirm-view', async (req: Request, res: Response) => {
 router.post('/events/:id/approve', async (req: Request, res: Response) => {
   const companyId = requireCompany(req, res);
   if (!companyId) return;
+  if (await aiZonePlanBlocked(req, res)) return;   // ★ 2026-10-24 R2 — 대행료 · 발행비 · 발송 = 서버 요금제 문
   try {
     await requirePlannerMeta();
     const r = await approvePlannerEvent({
@@ -438,6 +464,8 @@ router.post('/events/:id/cancel', async (req: Request, res: Response) => {
 router.post('/touchpoints/:id/resume', async (req: Request, res: Response) => {
   const companyId = requireCompany(req, res);
   if (!companyId) return;
+  // ★ 2026-10-24 R2 — 다시 진행 = 발송을 다시 켠다 → 서버 요금제 문(끄기 · 건너뛰기 · 미루기는 문 없음 · 한 줄 CT 구조체크 ②)
+  if (await aiZonePlanBlocked(req, res)) return;
   try {
     const tp = await loadTouchpointById(companyId, String(req.params.id));
     const ownerId = resolveOwnerScope(req);
@@ -479,6 +507,7 @@ router.get('/touchpoints/:id/recheck', async (req: Request, res: Response) => {
 router.post('/touchpoints/:id/recheck/approve', async (req: Request, res: Response) => {
   const companyId = requireCompany(req, res);
   if (!companyId) return;
+  if (await aiZonePlanBlocked(req, res)) return;   // ★ 2026-10-24 R2 — 발송 = 서버 요금제 문
   try {
     await requirePlannerMeta();
     const r = await approvePlannerPairTx({
@@ -544,7 +573,7 @@ router.get('/brief/:month/result', async (req: Request, res: Response) => {
   const planMonth = parsePlanMonth(req.params.month);
   if (!planMonth) return res.status(400).json({ error: '조회할 달을 지정해 주세요. (YYYY-MM)' });
   try {
-    return res.json(await loadMonthlyResult(companyId, planMonth));
+    return res.json(await loadMonthlyResult(companyId, planMonth, resolveOwnerScope(req)));
   } catch (error: any) {
     return sendPlannerError(error, res, 'planner_touchpoints', '이달 결과를 불러오지 못했습니다');
   }

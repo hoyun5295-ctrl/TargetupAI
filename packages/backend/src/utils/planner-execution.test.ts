@@ -75,9 +75,10 @@ describe('실행 창 — 당일만', () => {
 describe('멱등키 — 고정 축', () => {
   it('생성·발송·환불 키가 서로 겹치지 않고 축이 고정이다', () => {
     expect(plannerProduceGenKey('tp-1')).toBe('planner-produce-gen:tp-1');
-    expect(plannerSendKey('tp-1')).toBe('planner-send:tp-1');
+    // ★ 1024 R4 — 문안비 키 = 캐리어 + 이번 시도의 적재 묶음(되돌린 시도의 키가 다음 시도를 「이미 냄」으로 읽히지 않게)
+    expect(plannerSendKey('tp-1', 'stg-1')).toBe('planner-send:tp-1:stg-1');
     expect(plannerRefundKey('c-1', '2026-09')).toBe('planner-refund:c-1:2026-09');
-    const keys = new Set([plannerProduceGenKey('tp-1'), plannerSendKey('tp-1'), plannerRefundKey('c-1', '2026-09')]);
+    const keys = new Set([plannerProduceGenKey('tp-1'), plannerSendKey('tp-1', 'stg-1'), plannerRefundKey('c-1', '2026-09')]);
     expect(keys.size).toBe(3);
   });
 
@@ -404,7 +405,9 @@ describe('워커 등재 — 선언이 아니라 부팅 호출이 가동의 근�
     const src = readFileSync(path.join(__dirname, 'planner-executor.ts'), 'utf8');
     expect(src).toContain("from './direct-send-core'");
     expect(src).toContain("from './planner-copy'");
-    expect(src).toContain("from './messageUtils'");
+    // ★ 1024 R5 — 080 · 발신번호 = 확인 화면 · 승인과 같은 번호 함수(planner-confirm 이 080 가드 CT messageUtils 를 부른다)
+    expect(src).toContain('plannerSendNumberTexts(tp.companyId, tp.createdBy)');
+    expect(readFileSync(path.join(__dirname, 'planner-confirm.ts'), 'utf8')).toContain("import { buildAdMessage, getOpt080Number } from './messageUtils';");
     expect(src).toContain("from './planner-audience'");
     expect(src).toContain("from './planner-channel-gate'");
     // 스팸 검사 CT는 문안 CT가 소유한다(CT-09) — 실행부는 재생성 없이(regenerate false) 부른다
@@ -551,7 +554,7 @@ describe('소스 계약 — 초안은 발행하지 않고, 검사 문안 = 발�
   it('워커는 DM을 발행하지 않는다 — 발행은 사람이 누른 승인(planner-approve → dm-publish-core)뿐이다', () => {
     for (const f of ['planner-executor.ts', 'planner-reconcile.ts', 'planner-review.ts', 'planner-copy.ts']) {
       const src = readFileSync(path.join(__dirname, f), 'utf8');
-      expect(src, f).not.toMatch(/\bpublishDm(Core)?\(/);
+      expect(src, f).not.toMatch(/\bpublishDm(Core|WithPrizes)?\(/);
       expect(src, f).not.toContain('generateFromBuildMaterials');
     }
     expect(readFileSync(path.join(__dirname, 'planner-approve.ts'), 'utf8')).toContain('await publishDmCore(');

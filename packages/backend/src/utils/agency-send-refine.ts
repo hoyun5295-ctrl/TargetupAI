@@ -17,7 +17,7 @@
  */
 import Anthropic from '@anthropic-ai/sdk';
 import { AI_MODELS, claudeRequestShape } from '../config/defaults';
-import { findNewNumbers, stripUnauthorizedBenefits } from './copy-benefit-detector';
+import { findNewNumbers, stripUnauthorizedBenefits, claimsInventedEfficacy, EFFICACY_REWRITE_RULE } from './copy-benefit-detector';
 import { recordAiCall } from './ai-rate-limit';
 
 export const AGENCY_REFINE_SOURCE = 'agency-send-refine';
@@ -83,6 +83,9 @@ export function checkRefined(original: string, refined: string): RefineCheck {
   const invented = findNewNumbers(text, original);
   if (invented.length > 0) return { ok: false, reason: `number-invented:${invented.slice(0, 3).join(',')}` };
 
+  // ④ ★ 2026-10-24 세 채널 구조체크 ② — 원문에 없던 효능 단정(같은 근거)
+  if (claimsInventedEfficacy(text, original)) return { ok: false, reason: 'efficacy-invented' };
+
   return { ok: true };
 }
 
@@ -94,6 +97,7 @@ const BASE_RULES = [
   '반드시 지킬 것:',
   '1. 날짜, 시각, 금액, 전화번호, 인터넷 주소, 매장 이름은 원문에 있는 그대로 씁니다. 한 글자도 바꾸지 않습니다.',
   '2. 원문에 없는 혜택이나 숫자를 만들지 않습니다. 할인율, 사은품, 무료 같은 말을 새로 넣지 않습니다.',
+  EFFICACY_REWRITE_RULE,
   '3. 퍼센트 기호를 감싼 낱말(예: %이름%)은 고객 정보가 들어갈 자리입니다. 그대로 두고 위치도 옮기지 않습니다.',
   '4. 원문과 길이가 비슷해야 합니다. 문장을 늘리지 않습니다.',
   '5. 다듬은 문안만 출력합니다. 설명, 인사, 따옴표를 붙이지 않습니다.',

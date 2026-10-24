@@ -16,7 +16,6 @@ import type { EngineChannel, EngineEventCard, EngineMaterials } from './campaign
 import { outreachEngineDeps, headlineFromCard, posterCategoryLabel, cutAtWord, toProductItems, productCtaLabel, sanitizeDmCopyBenefits, OUTREACH_SECTION_MAX } from './sales-outreach-produce';
 import { heroEligible, LANDSCAPE_RATIO, type LookImageDims } from './sales-outreach-look';
 import { AI_AUTO_BUILD_LOGO_MIN_RATIO } from './ai-auto-build-materials';
-import { stripUnauthorizedBenefits, BENEFIT_PLACEHOLDER } from './copy-benefit-detector';
 import type { OutreachProduct } from './sales-outreach-media';
 
 /**
@@ -348,12 +347,6 @@ export function keepLastCtaBar(sections: readonly Section[]): Section[] {
 }
 
 /** 프리헤더(받은편지함 미리보기) · 면허 밖 혜택 수치가 들면 비운다(짧은 글이라 문장째) · 90자 */
-export function licensedPreheaderOf(preheader: string | null | undefined, licensedQuote: string): string {
-  const raw = String(preheader || '').trim();
-  if (!raw) return '';
-  const t = stripUnauthorizedBenefits(raw, licensedQuote);
-  return t.includes(BENEFIT_PLACEHOLDER) ? '' : t.trim().slice(0, 90);
-}
 
 /** 고객 입구 엔진 의존 묶음 · 채우기만 고객 규칙 · 생성기·칩·차단·정리·룩·숨김·증거·페이지는 아웃리치 묶음 그대로(규칙이 갈라지지 않는다) */
 export function customerEngineDeps(): ReturnType<typeof outreachEngineDeps> {

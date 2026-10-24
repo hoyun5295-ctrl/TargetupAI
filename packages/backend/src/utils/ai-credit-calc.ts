@@ -239,6 +239,13 @@ export function dailyDbAnalysisCredits(customerCount: number): number {
   return Math.round(3 + (blocks - 1) * 1.5);
 }
 
+/**
+ * ★ 2026-10-24 발송 크레딧 source(뿌리 대장 R4 · docs/ROOT-LEDGER.md) — 보낼 때마다 걷는 AI 크레딧. 유일한 목록이다.
+ *   규칙 = 보내기 **전에** 엄격하게 잡는다(모자라면 보내지 않는다) · 못 보낸 시도는 되돌린다 · 선불 · 후불 모두 마이너스 0.
+ *   옛: 여정(1020) · 자동마케팅(1024)만 이 규칙으로 고쳤고 플래너 문안비는 발송 커밋 뒤 비엄격 차감이었다(그 사이 잔액이 빠지면 무과금 발송).
+ */
+export const SEND_CREDIT_SOURCES: ReadonlySet<string> = new Set(['continuous-operator-send', 'planner-touchpoint-send', 'journey-operation']);
+
 /** 운영(반복) 발송 source — 마이너스 허용 대상(활성 여정·자동마케팅 실행). 그 외는 0에서 차단. (v2 2026-06-30) */
 const OPERATION_SOURCES = new Set(['continuous-operator-send']);
 export function isOperationSource(source: string | undefined | null): boolean {

@@ -162,8 +162,6 @@ export default function PlannerRecheckPanel({
         {!view.actions.cancel.ok && reasonLine(view.actions.cancel.reason)}
       </div>
 
-      <p className="text-[10px] text-slate-400 italic">{view.dataSource}</p>
-
       <LinkConfirmSheet
         open={ask === 'approve'}
         title={`${choice === 'proposal' ? '새 문안' : '이 문안'}으로 보낼까요?`}

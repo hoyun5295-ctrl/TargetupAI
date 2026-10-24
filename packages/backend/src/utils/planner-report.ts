@@ -60,14 +60,19 @@ function fmt(n: number | null | undefined): string {
 }
 
 /** 월간 결과 — 결재 화면의 [결과] 탭이 그대로 쓰는 값. */
-export async function loadMonthlyResult(companyId: string, planMonth: string): Promise<MonthlyResult> {
+/**
+ * ★ 2026-10-24 ownerId = 사용자 범위(뿌리 대장 R3 · 관리자·월말 통지 = null = 회사 전체 · 담당자 = 자기가 만든 행사만).
+ *   옛: 범위 없이 회사 전체를 돌려줘 담당자가 다른 사람 행사의 결과를 봤다(캘린더 · 행사 · 재확인 주소는 이미 범위를 지켰다).
+ */
+export async function loadMonthlyResult(companyId: string, planMonth: string, ownerId: string | null): Promise<MonthlyResult> {
   const evRes = await query(
     // ★ 2026-08-21 date 컬럼은 `::text`로 받는다(임은지 접수 · 계약 = planner-date-contract.test.ts).
     `SELECT id, title, starts_on::text AS starts_on, ends_on::text AS ends_on, status
        FROM planner_events
       WHERE company_id = $1::uuid AND plan_month = $2 AND status <> 'cancelled'
+        AND ($3::text IS NULL OR created_by::text = $3::text)
       ORDER BY starts_on ASC, created_at ASC`,
-    [companyId, planMonth],
+    [companyId, planMonth, ownerId],
   );
   const eventIds = evRes.rows.map((r: any) => r.id);
   const tpRows = eventIds.length > 0
@@ -253,7 +258,7 @@ export async function runPlannerResultNotifyPass(): Promise<{ notified: number }
     const companyId = String(row.company_id);
     const planMonth = String(row.plan_month);
     try {
-      const result = await loadMonthlyResult(companyId, planMonth);
+      const result = await loadMonthlyResult(companyId, planMonth, null);   // 월말 통지 = 회사 관리자에게 회사 전체
       if (result.events.length === 0) {
         // 보낼 결과가 없다 — 다시 집지 않게 표식만 남긴다(빈 통지 금지).
         await query(

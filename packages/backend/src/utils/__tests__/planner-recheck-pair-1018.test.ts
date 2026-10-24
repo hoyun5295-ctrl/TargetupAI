@@ -35,6 +35,8 @@ vi.mock('../planner-confirm', async (orig) => {
       const text = rows.find((r) => r.channel === 'sms')?.execMeta?.copy?.text || '';
       return new Map(rows.map((r) => [r.id, `fp-${r.id}-${text}`]));
     }),
+    // ★ 1024 R5 — 화면 지문 · 각인에 같은 번호(발신 · 080)
+    plannerSendNumbers: vi.fn(async () => ({ cb: '0212345678', o80: '0801234567' })),
   };
 });
 vi.mock('../planner-channel-gate', async (orig) => {
@@ -81,7 +83,7 @@ function setup(over: { evStatus?: string; carrierStatus?: string; round?: number
   });
 }
 
-const seenFor = (text: string) => `fp-c1-${text}:fp-d1-${text}:2`;
+const seenFor = (text: string) => `fp-c1-${text}:fp-d1-${text}:2:0212345678:0801234567`;
 const actor = { userId: 'u-owner', via: 'pc' as const, ownerScope: null };
 
 describe('쌍 승인', () => {

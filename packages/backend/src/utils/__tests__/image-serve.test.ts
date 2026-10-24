@@ -234,10 +234,12 @@ describe('원본 삭제 = 변환본도 삭제 (★ 2026-09-28 한줄로 V2 R412)
     expect(fs.existsSync(otherPlain)).toBe(true);
   });
 
-  it('원본 삭제 경로 두 곳이 변환본 정리를 부른다 (DM 이미지 삭제 · 에셋 삭제)', () => {
+  it('원본 삭제 경로가 변환본 정리를 부른다 (에셋 삭제)', () => {
+    // ★ 2026-10-24 세 채널 구조체크 ⑪ — DM 이미지 삭제 주소(DELETE /api/dm/delete-image)는 화면이 부르지 않아 지웠다 → 원본 삭제 경로는 에셋 하나
     const dm = fs.readFileSync(path.join(__dirname, '..', '..', 'routes', 'dm.ts'), 'utf8');
     const assets = fs.readFileSync(path.join(__dirname, '..', 'assets.ts'), 'utf8');
-    expect(dm).toMatch(/if \(fs\.existsSync\(filePath\)\) fs\.unlinkSync\(filePath\);\s*dropServeVariants\(filePath\);/);
+    expect(dm).not.toContain("dmRouter.delete('/delete-image'");
+    expect(dm).not.toMatch(/fs\.unlinkSync\(/);
     expect(assets).toMatch(/dropServeVariants\(filepath\);/);
   });
 });

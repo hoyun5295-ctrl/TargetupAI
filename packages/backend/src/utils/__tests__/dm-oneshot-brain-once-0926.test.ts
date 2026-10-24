@@ -45,7 +45,8 @@ describe('원스텝 배선', () => {
     const iLoop = one.indexOf('for (let i = 0; i < sectionTypes.length; i++) {');
     expect(iBrain).toBeGreaterThan(-1);
     expect(iBrain).toBeLessThan(iLoop);
-    expect(one).toContain('generateCopy(spec, section, opts.companyId, eventContext, copyBrainSuffix)');
+    // ★ 2026-10-24 ② 여섯째 인자 = 효능 근거(사람 글)
+    expect(one).toContain('generateCopy(spec, section, opts.companyId, eventContext, copyBrainSuffix, efficacyGround)');
   });
 });
 

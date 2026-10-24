@@ -19,7 +19,7 @@ import {
   type EmailTargetSpec,
   type EmailRecipient,
 } from './email-channel';
-import { hasUneditedPlaceholder } from './email-ai';
+import { emailContentBlocker } from './email/email-send-gate';
 
 const INTERVAL_MS = 60 * 1000;       // 1분 주기
 const STUCK_MINUTES = 30;            // sending 정체 판정
@@ -93,12 +93,14 @@ export async function sweepScheduledEmailsOnce(): Promise<{ dispatched: number; 
 
     // ★ 2026-07-12 발송 직전 placeholder 재검사 — 예약 후 편집으로 미입력 자리가 되살아난 캠페인 차단
     //   (즉시 발송은 /send가 검사하지만 예약은 예약 시점 검사뿐이었음 — AI 임의 혜택 영구 룰의 예약 구멍 봉합)
-    if (hasUneditedPlaceholder(row.subject, row.html_body, row.text_body)) {
+    // ★ 2026-10-24 세 채널 구조체크 ⑥ — 판정 = 즉시 발송과 같은 CT(채울 자리 + 링크 결함 · 예약 뒤 PATCH 로 고친 본문도 여기서 다시 본다)
+    const contentBlock = emailContentBlocker({ subject: row.subject, htmlBody: row.html_body, textBody: row.text_body });
+    if (contentBlock) {
       await query(
         `UPDATE email_campaigns SET status = 'failed', updated_at = NOW() WHERE id = $1::uuid`,
         [campaignId],
       );
-      console.warn(`[email-send-sweeper] 미입력 placeholder 잔존 — 발송하지 않고 failed 처리 (campaign ${campaignId})`);
+      console.warn(`[email-send-sweeper] 발송 잠금(${contentBlock.code}) — 발송하지 않고 failed 처리 (campaign ${campaignId})`);
       continue;
     }
 

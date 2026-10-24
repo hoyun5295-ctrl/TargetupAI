@@ -25,7 +25,7 @@ import { createHash, createHmac, randomBytes, randomUUID, timingSafeEqual } from
 import multer from 'multer';
 import { authenticate } from '../middlewares/auth';
 import { query } from '../config/database';
-import { requirePlanFeature } from '../utils/plan-guard';
+import { requirePlanFeature, isPlanControlRequest } from '../utils/plan-guard';
 import { snsPublishEnabled, isSnsPlatform, SNS_OAUTH_STATE_TTL_MS, SNS_ERROR_CODES, type SnsPlatform } from '../utils/sns-constants';
 import { signSnsState, verifySnsState } from '../utils/sns-auth-state';
 import { getSnsAdapter, listSnsAdapters, SnsAdapterError } from '../utils/sns';
@@ -82,7 +82,8 @@ function adapterErrorMessage(err: unknown): string {
 // ───────────────────────────────── 인증 구간 ─────────────────────────────────
 
 router.use(authenticate);
-router.use(requirePlanFeature('sns_publish'));
+// ★ 2026-10-24 ③ 같은 뿌리 — 끄기(예약 취소 · 계정 끊기)는 연다(만료 뒤에도 예약 게시를 멈출 수 있게)
+router.use(requirePlanFeature('sns_publish', { except: isPlanControlRequest }));
 
 /**
  * 채널 규격 — 어댑터가 선언한 값 그대로. 화면은 이 값만 보고 추론하지 않는다(§3-3).

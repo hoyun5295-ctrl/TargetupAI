@@ -197,7 +197,7 @@ describe('④ 문 · 입구 · 생성 경로 무변경 · 0단계', () => {
   it('답 경로 = 메뉴마다 그 메뉴의 문', () => {
     // ★ 2026-10-23 여정 주소 문 = journeyGate 한 곳(그 안에서 isAiOperatorAllowed · utils/journey-route.ts)
     expect(body(ai, "router.post('/operator/journeys-ask'")).toContain('await journeyGate(req, res)');
-    expect(body(ai, "router.post('/operator/continuous-ask'")).toContain('isAiOperatorAllowed(planCtx, req.user)');
+    expect(body(ai, "router.post('/operator/continuous-ask'")).toContain('aiZonePlanBlocked(req, res, planCtx)');
     expect(body(read('routes/cdp.ts'), "router.post('/inapp/ask'")).toContain('await ensureInAppAccess(req, res)');
     expect(read('routes/dm.ts')).toContain("dmRouter.post('/one-line/ask'");
     expect(body(read('routes/email.ts'), "router.post('/one-line/ask'")).toContain('await ensureEmailAccess(req, res)');

@@ -578,3 +578,341 @@ export function replaceInventedBenefitsDeep<T>(value: T, ground: string, found: 
   };
   return walk(value, '') as T;
 }
+
+// ─────────────── 효능 단정(★ 2026-10-24 · 한 줄 CT 글 · 첫 화면 그림 글 · 문자 문안이 같은 판정 · 뿌리 대장 R1) ───────────────
+//   옛: 판정이 그림 글(line-headline)과 한 줄 판단 초안에만 있었고, 실제로 나가는 DM · 이메일 · 인앱 본문 문구와 문자 문안에는 없었다
+//   (공용 문자 프롬프트는 오히려 「성분 효능 · before/after 기대감」을 쓰라고 시켰다 · 1024 한 줄 CT 구조체크).
+//   판정 = **주장** 단위(대상 말 + 변화 말 한 짝) · 근거 = **고객이 긍정으로 쓴 그대로**(★ Codex 2R · 3R):
+//   주장 글자(대상 말 ~ 변화 말)가 근거 글에 공백만 빼고 그대로 있고 뒤에 부정 말이 없어야 근거 있는 말이다 — 프롬프트 계약과 같다
+//   (「고객이 요청에 직접 적은 기능 문구만 그 글자 그대로」). 근거 여기저기에 흩어진 낱말(「혈당 관리 … 포장재 감소」)이나
+//   바꿔 쓴 효능 문구는 근거가 아니다(★ Codex 1R · 2R: 낱말이 함께 있는지만 보면 근거 없는 주장이 계속 통과했다).
+//   ponytail: 낱말 목록 판정이다 — 목록 밖 효능 말은 프롬프트(### 4 · 맞춤 8번)가 첫 방어선 · 새 말은 목록에 더한다.
+
+/** 받침이 붙은 꼴까지 한 글자 범위(지 → 진 · 질 · 집 · 짐 / 져 → 졌) — 해요체 · 격식체 · 과거 · 관형 활용을 한 번에 덮는다(★ Codex 2R 「낮춥니다」) */
+const anyFinal = (syl: string): string => `[${syl}-${String.fromCharCode(syl.charCodeAt(0) + 27)}]`;
+const BECOME = `(?:${anyFinal('지')}|${anyFinal('져')})`;
+
+/** 대상 말(몸 · 피부) */
+const EFFICACY_BODY_RE = /(피부|모공|주름|각질|탄력|피지|여드름|트러블|두피|머릿결|모발|몸|체중|뱃살|군살|체지방|혈색|안색|컨디션|붓기|부기|노화|기미|잡티|다크서클|피로|면역력|면역|관절|소화|숙면|혈당|혈압|콜레스테롤)/g;
+/**
+ * 변화 말 — 날씨 · 기분 · 가격 말(「따뜻해지는 · 기분 좋아지는 · 착해진」)과 「빠지지 않는 필수템」은 효능 말이 아니다.
+ *   흔한 효능 서술(낮춰요 · 높여요 · 없애요 · 줄여요 · 잡아 줘요 · 지켜 줘요 · 도움)도 변화 말이다(★ Codex 1R).
+ */
+const EFFICACY_CHANGE_RE = new RegExp([
+  `(?<!따뜻|포근|훈훈|든든|행복|즐거|신나|설레|착)해${BECOME}`, `(?<!기분\\s*)좋아${BECOME}`, `달라${BECOME}`, `나아${BECOME}`,
+  `(?<!기분\\s*)맑아${BECOME}`, `가벼워${BECOME}`, `살아${anyFinal('나')}`, '개선', '효과', '회복', `사라${BECOME}`,
+  '줄어', `줄(?:${anyFinal('이')}|${anyFinal('여')})`, `낮(?:${anyFinal('추')}|${anyFinal('춰')}|아${BECOME})`,
+  `높(?:${anyFinal('이')}|${anyFinal('여')}|아${BECOME})`, `없(?:${anyFinal('애')}|어${BECOME})`,
+  `(?:잡아|지켜)\\s*(?:${anyFinal('주')}|${anyFinal('줘')}|드)`, '강화', '완화', '예방', '해소', '감소', '도움',
+].join('|'), 'g');
+/** 그 자체로 효능 단정인 말(대상 없이도) */
+const EFFICACY_STRONG_RE = new RegExp(`효능|약효|특효|치료|치유|완치|(?:군살|뱃살|체지방|붓기|부기|살)\\s*(?:이|가|은|는|도)?\\s*빠${BECOME}`, 'g');
+/** 「이」로 끝나는 흔한 부사 — 주어(「일정이」)와 가른다 */
+const ADVERB_I = new Set(['많이', '같이', '깊이', '높이', '깨끗이', '뚜렷이', '따뜻이', '촉촉이', '산뜻이', '반듯이', '가까이', '굳이', '일찍이', '틈틈이', '나날이']);
+
+/** 문장 하나(p = 문단 번호 · sep = 뒤 구분자) */
+interface CopyUnit { p: number; s: string; sep: string }
+/** 주장 하나 — span = 주장 글자(대상 말 ~ 변화 말 · 근거 대조용) · units = 걸친 문장 번호(뺄 문장) */
+interface EfficacyClaim { span: string; units: number[] }
+
+/** (순수) 문단(빈 줄) · 문장(. ! ? 뒤) 단위로 나눈다 — 한 문단 안의 줄바꿈은 같은 문장(문자는 17자마다 줄을 바꾼다) */
+function splitCopyUnits(src: string): CopyUnit[] {
+  const units: CopyUnit[] = [];
+  src.split(/\n[ \t]*\n/).forEach((para, p) => {
+    const parts = para.split(/((?<=[.!?。])\s+)/);
+    for (let i = 0; i < parts.length; i += 2) if (parts[i]) units.push({ p, s: parts[i], sep: parts[i + 1] ?? '' });
+  });
+  return units;
+}
+
+/** (순수) 글에 제 주어(○○이 · ○○가)가 있는가 — 있으면 앞 문장의 대상을 이어받지 않는다(「배송 일정이 달라져요」 · ★ Codex 2R) */
+function hasOwnSubject(s: string): boolean {
+  return Array.from(s.matchAll(/[가-힣]+(?:이|가)(?=[\s,.!?~]|$)/g), (m) => m[0]).some((w) => !ADVERB_I.has(w));
+}
+
+/**
+ * (순수) 효능 주장 목록 — 문단 안에서만 짝짓는다(문단을 넘어 잇지 않는다 · ★ Codex 2R).
+ *   변화 말의 주장 글자 = 같은 문장에서
+ *   ① 앞 변화 말 뒤 ~ 이 말 앞의 첫 대상부터 이 말까지(「혈당과 혈압을 낮춰요」 = 혈당부터 · ★ Codex 2R)
+ *   ② 앞 대상이 없거나 뜻이 갈리면(앞 변화 말이 뒤 대상으로 이미 쓴 말 · 한글 · 공백이 아닌 글자를 건너야 닿는 말) 이 말부터 다음 변화 말 앞까지
+ *      뒤에 오는 대상 **전부**도 주장 글자다 — 두 해석을 **모두** 근거와 대조한다(「달라지는 피부와 눈가 주름」 = 주름까지 ·
+ *      「달라지는 피부, 주름 개선과 모공 케어」의 개선 = 「피부, 주름 개선」과 「개선과 모공」 둘 다 · 연결 말을 읽지 않는다 · ★ Codex 3R · 4R · 5R)
+ *   ③ 둘 다 없으면 문장 안 이 말 앞의 첫 대상부터(「주름 개선과 혈당 감소에 도움」의 도움 = 주름부터)
+ *   ④ 문장 안에 대상이 없고 제 주어도 없으면 같은 문단 앞 문장의 가장 가까운 대상을 이어받는다(「피부 고민 끝! 매끈하게 달라져요.」 · ★ Codex 1R).
+ *   앞 대상이 한글 · 공백만 사이에 두고 붙어 있으면 뒤 명사는 꾸밈을 받는 말이다(「피부가 좋아지는 모공 케어」 · 「주름 개선 기능성 크림으로 피부결을 가꿔요」).
+ *   단정 말(효능 · 치료 · 살이 빠진다)은 그 자체로 한 주장(주장 글자 = 그 문장).
+ */
+function efficacyClaims(units: readonly CopyUnit[]): EfficacyClaim[] {
+  const claims: EfficacyClaim[] = [];
+  const paras = new Map<number, number[]>();
+  units.forEach((u, i) => paras.set(u.p, [...(paras.get(u.p) ?? []), i]));
+  for (const idxs of paras.values()) {
+    // 문단 = 문장을 한 칸 띄워 이은 한 글 · starts[k] = k번째 문장의 시작 위치
+    const starts: number[] = [];
+    let text = '';
+    for (const i of idxs) { starts.push(text.length); text += `${units[i].s} `; }
+    const sentenceOf = (pos: number): number => { let k = 0; while (k + 1 < starts.length && starts[k + 1] <= pos) k++; return k; };
+    const at = (re: RegExp) => Array.from(text.matchAll(re), (m) => {
+      const i = m.index ?? 0;
+      return { i, end: i + m[0].length, k: sentenceOf(i) };
+    });
+    const bodies = at(EFFICACY_BODY_RE);
+    // 단정 말은 낱말만으론 주장이 안 잡힌다 — 그 문장 전체가 주장 글자(근거에 그 문장이 그대로 있어야 한다)
+    for (const m of at(EFFICACY_STRONG_RE)) claims.push({ span: units[idxs[m.k]].s, units: [idxs[m.k]] });
+    const changes = at(EFFICACY_CHANGE_RE);
+    const taken = new Set<number>(); // 앞 변화 말이 뒤 대상으로 가져간 대상(위치)
+    changes.forEach((c, n) => {
+      const from = n > 0 && changes[n - 1].k === c.k ? changes[n - 1].end : starts[c.k];
+      const next = changes.slice(n + 1).find((d) => d.k === c.k);
+      const same = bodies.filter((b) => b.k === c.k);
+      const pre = same.find((b) => b.i >= from && b.i < c.i);
+      const post = same.filter((b) => b.i > c.i && (!next || b.i < next.i));
+      const first = same.find((b) => b.i < c.i);
+      const split = !pre || taken.has(pre.i) || /[^가-힣\s]/.test(text.slice(pre.end, c.i)); // 한글 · 공백이 아닌 글자(문장 부호 · 괄호 · 따옴표 · 줄표 등)를 건너면 뜻이 갈린다(★ Codex 6R)
+      const ranges: Array<{ i: number; end: number; k: number }> = [];
+      if (pre) ranges.push({ i: pre.i, end: c.end, k: c.k });
+      if (split && post.length > 0) {
+        post.forEach((b) => taken.add(b.i));
+        ranges.push({ i: c.i, end: post[post.length - 1].end, k: c.k });
+      }
+      if (ranges.length === 0 && first) ranges.push({ i: first.i, end: c.end, k: c.k });
+      if (ranges.length === 0 && !hasOwnSubject(text.slice(starts[c.k], c.i))) {
+        const prev = bodies.filter((b) => b.k < c.k).pop();
+        if (prev) ranges.push({ i: prev.i, end: c.end, k: prev.k });
+      }
+      for (const r of ranges) claims.push({ span: text.slice(r.i, r.end), units: Array.from(new Set([idxs[r.k], idxs[c.k]])) });
+    });
+  }
+  return claims;
+}
+
+const squash = (v: string): string => String(v || '').replace(/\s+/g, '');
+
+/** 부정 말 */
+const NEGATION_RE = /없|않|아니|아[닌닐닙]|못|불가|금지/;
+/** 부정이 아닌 「~뿐(만) 아니라」 — 이 말 그대로만 먼저 지운다(일반 「~이 아니라」는 부정 · ★ Codex 4R) */
+const NOT_ONLY_RE = /뿐\s*(?:만\s*)?아니라/g;
+/** 근거 절 끝 = 문장 부호 · 쉼표 · 줄만(「~고」 같은 어미로 끊지 않는다 — 「있다고 볼 수 없습니다」 · 「광고 금지」 · ★ Codex 4R) */
+const GROUND_CLAUSE_END_RE = /[,.!?。\n;]/;
+
+/**
+ * (순수) 근거 글에 주장 글자가 **긍정으로** 있는가 — 공백만 무시하고 그대로 있고, 그 뒤 같은 절에 부정 말이 없어야 한다
+ *   (「주름 개선 효과는 없습니다」는 「주름 개선 효과를 느껴 보세요」의 근거가 아니다 · ★ Codex 3R).
+ */
+function groundAffirms(ground: string, span: string): boolean {
+  const g = String(ground || '');
+  const chars = Array.from(squash(span));
+  if (chars.length === 0) return true;
+  const re = new RegExp(chars.map((ch) => ch.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('\\s*'), 'g');
+  for (const m of g.matchAll(re)) {
+    const rest = g.slice((m.index ?? 0) + m[0].length);
+    const end = rest.search(GROUND_CLAUSE_END_RE);
+    if (!NEGATION_RE.test((end < 0 ? rest : rest.slice(0, end)).replace(NOT_ONLY_RE, ''))) return true;
+  }
+  return false;
+}
+
+/** (순수) 근거 글에 긍정으로 그대로 있지 않은 주장만 */
+function inventedClaims(units: readonly CopyUnit[], ground: string): EfficacyClaim[] {
+  return efficacyClaims(units).filter((c) => !groundAffirms(ground, c.span));
+}
+
+/** (순수) 효능 단정 꼴인가 — 근거를 쓰지 않는 자리(그림에 박히는 글자)의 판정 */
+export function claimsEfficacy(v: string): boolean {
+  return efficacyClaims(splitCopyUnits(String(v || ''))).length > 0;
+}
+
+/**
+ * (순수) 근거 글에 없는 효능 주장이 있는가 — 주장마다 그 글자가 근거(사람이 쓴 한 줄 · 요청 · 상품 · 브랜드 정보)에 그대로 있어야 근거 있는 말이다
+ *   (고객이 직접 쓴 기능성 문구 등 · 혜택 판정과 같은 원칙). 하나라도 근거가 없으면 참.
+ */
+export function claimsInventedEfficacy(v: string, ground: string): boolean {
+  return inventedClaims(splitCopyUnits(String(v || '')), ground).length > 0;
+}
+
+/** 효능 단정 문장이 다 빠진 문안에 넣는 직접 채울 자리 — AI_FILL_DIRECT_PATTERN 꼴이라 발송 길목(send-placeholder-gate)이 사람이 고치기 전까지 막는다 */
+export const EFFICACY_PLACEHOLDER = '[상품 소개: 직접 작성해주세요]';
+
+/**
+ * (순수) 문안에서 근거 없는 효능 주장 문장을 뺀다 — 걸리지 않은 문장은 글자 그대로 둔다 · 뺀 문장 = 재생성 힌트 · 로그.
+ *   주장이 두 문장에 걸치면(이어받기) 두 문장을 함께 뺀다. 뺀 뒤 새로 붙는 이웃까지 다시 본다(고정점 · ★ Codex 2R).
+ *   다 빠지면 빈 글 대신 직접 채울 자리(★ Codex 2R: 빈 문안 → 실패 대체 문안이면 이미 낸 생성 요금이 남는다).
+ */
+export function dropInventedEfficacy(text: string, ground: string): { text: string; dropped: string[] } {
+  const src = String(text || '');
+  let units = splitCopyUnits(src);
+  const dropped: string[] = [];
+  // 한 바퀴에 한 문장 이상 빠지므로 문장 수 안에서 끝난다
+  for (;;) {
+    const bad = new Set(inventedClaims(units, ground).flatMap((c) => c.units));
+    if (bad.size === 0) break;
+    units.forEach((u, i) => { if (bad.has(i)) dropped.push(u.s.replace(/\s+/g, ' ').trim()); });
+    units = units.filter((_, i) => !bad.has(i));
+  }
+  if (dropped.length === 0) return { text: src, dropped: [] };
+  const paras: string[] = [];
+  for (const u of units) paras[u.p] = (paras[u.p] ?? '') + u.s + u.sep;
+  const out = paras.filter((x) => x && x.trim()).map((x) => x.trim()).join('\n\n');
+  return { text: out || EFFICACY_PLACEHOLDER, dropped };
+}
+
+// ─────────────── ★ 2026-10-24 세 채널 구조체크 ② — 생산자 출구 어댑터(판정 문법은 위 그대로 · 설계서 docs/2026-10-24-efficacy-guard-design.md) ───────────────
+//   고객에게 나가는 글을 만드는 모든 생산자(DM · 이메일 · 인앱 · AI 영업 · 여정 · SNS · 변형 · 꾸밈 · 대행 · 한 줄 템플릿)가 혜택 거름 바로 다음에 이것을 부른다.
+//   근거 = 그 생산자가 혜택에 쓰는 **사람 글** 근거와 같은 변수(AI 산출물 · 우리 지시문은 근거가 아니다).
+
+/** 효능 단정 금지 지시 — 고객 글을 만드는 생성 프롬프트가 이 문안을 그대로 쓴다(같은 문안은 한 곳 · 문자 ### 4 와 같음) */
+export const EFFICACY_PROMPT_RULES = `- 상품이 피부 · 몸을 바꾼다고 단정하지 마세요(효능 · 치료 · 개선 · 피부가 좋아진다 · 달라진다 · 살이 빠진다 · 붓기가 빠진다).
+- 사용감(텍스처 · 향) · 쓰는 장면 · 고민 공감으로 쓰세요. 고객이 요청에 직접 적은 기능 문구(예: 주름 개선 기능성)만 그 글자 그대로 쓸 수 있습니다.`;
+
+/** 다시 쓰기(다듬기 · 고치기 · 변형) 프롬프트 한 줄 — 근거는 글자 그대로여야 인정되므로 원문 기능 문구를 바꿔 쓰지 않게 */
+export const EFFICACY_REWRITE_RULE = '- 원문에 있는 기능 문구(예: 주름 개선 기능성)는 글자 그대로 둡니다. 원문에 없는 효능 · 피부 · 몸 변화 말은 새로 쓰지 않습니다.';
+
+/** 재생성 힌트(문자 재생성 · 생산자 재생성 공용) */
+export const EFFICACY_RETRY_HINT = '상품이 피부 · 몸을 바꾼다고 단정하지 않기(효능 · 개선 · 좋아진다 · 달라진다). 사용감 · 쓰는 장면 · 고민 공감으로 쓰기';
+
+/** 헤드라인 · 제목 칸이 효능으로 다 빠졌을 때의 직접 채울 자리(발송 길목 목록에 이미 있는 글자 · 제목에 '상품 소개' 자리가 오지 않게) */
+export const HEADLINE_PLACEHOLDER = '[헤드라인을 작성해주세요]';
+
+/** 제목류 칸(다 빠지면 헤드라인 자리) · 비워도 되는 칸 · 버튼 글 — 「그 칸 없이 글이 서는가」(설계서 §2) */
+const EFF_HEADLINE_KEY_RE = /^(headline|title|event_title|subject|closingHeadline|inapp_title)$/;
+const EFF_OPTIONAL_KEY_RE = /^(tag|eyebrow|badge|badge_text|preheader|sub_copy|caption|subtitle)$/;
+const EFF_BUTTON_KEY_RE = /^(label|cta_label|button_label)$/;
+/**
+ * 한 객체 안 글 칸의 **읽는 순서**(머리글 → 제목 → 부제 → 본문) — 있는 칸만 이 순서로 이어 읽는다(★ Codex 2R · 옛 고정 짝 4개는
+ *   뱃지 + 제목 · 태그 + 제목을 보지 않았다 · 규칙 한 벌 = guardReadingSequence).
+ */
+const EFF_READING_KEYS: readonly string[] = ['tag', 'eyebrow', 'badge', 'badge_text', 'headline', 'title', 'sub_copy', 'subtitle', 'body', 'description'];
+
+/** 다 빠진 칸의 대체값(키마다) */
+function efficacyFallbackFor(key: string): string {
+  if (EFF_HEADLINE_KEY_RE.test(key)) return HEADLINE_PLACEHOLDER;
+  if (EFF_OPTIONAL_KEY_RE.test(key)) return '';
+  if (EFF_BUTTON_KEY_RE.test(key)) return '자세히 보기';
+  return EFFICACY_PLACEHOLDER;
+}
+
+/**
+ * (순수) 블록 · 객체 트리의 글 칸마다 근거 없는 효능 문장을 뺀다(혜택 Deep 과 같은 걸음 · 링크 · 이미지 · 모양 값은 건너뜀).
+ *   새 객체를 돌려준다(입력 불변). 뺀 문장은 dropped 에 모은다.
+ *   다 빠진 칸 = 키마다 대체값(제목류 = HEADLINE_PLACEHOLDER · 비워도 되는 칸 = '' · 버튼 = 「자세히 보기」 · 그 밖 = EFFICACY_PLACEHOLDER · 말없이 빈 필수 칸 0).
+ *   같은 객체 안 글 칸은 읽는 순서(EFF_READING_KEYS)로 이어 읽어 걸리면 비워도 되는 칸부터 대체값으로(각각은 통과해도 이어 읽으면 단정인 꼴).
+ */
+export function dropInventedEfficacyDeep<T>(value: T, ground: string, dropped: string[] = []): T {
+  const walk = (v: any, key: string): any => {
+    if (typeof v === 'string') {
+      if (NON_COPY_KEY_RE.test(key) || !v.trim()) return v;
+      const r = dropInventedEfficacy(v, ground);
+      if (r.dropped.length === 0) return v;
+      dropped.push(...r.dropped);
+      return r.text === EFFICACY_PLACEHOLDER ? efficacyFallbackFor(key) : r.text;
+    }
+    if (Array.isArray(v)) return v.map((x) => walk(x, key));
+    if (v && typeof v === 'object') {
+      const o: any = {};
+      for (const [k, x] of Object.entries(v)) o[k] = walk(x, k);
+      const keys = EFF_READING_KEYS.filter((k) => typeof o[k] === 'string');
+      if (keys.length > 1) {
+        const texts = guardReadingSequence(keys.map((k) => ({ text: o[k], fallback: efficacyFallbackFor(k), optional: EFF_OPTIONAL_KEY_RE.test(k) })), ground, dropped);
+        keys.forEach((k, i) => { o[k] = texts[i]; });
+      }
+      return o;
+    }
+    return v;
+  };
+  return walk(value, '') as T;
+}
+
+/**
+ * (순수) 붙어 읽히는 두 칸(헤드라인 + 부제 · 제목 + 본문 · 제목 + 프리헤더)을 **문장 경계**로 이어 판정한다.
+ *   공백으로 이으면 앞 칸에 마침표가 없을 때 한 문장이 되어, 제 주어가 있는 뒤 칸(「이번 주 가격이 달라져요」)까지 앞 칸 대상을 이어받아 오탐한다.
+ *   문장 경계로 이으면 제 주어 판정이 살아나고, 주어 없는 뒤 칸(「매끈하게 달라져요」)은 같은 문단 이어받기로 그대로 잡힌다.
+ */
+export function pairClaimsInventedEfficacy(a: string, b: string, ground: string): boolean {
+  const x = String(a || '').trim();
+  const y = String(b || '').trim();
+  if (!x || !y) return claimsInventedEfficacy(x || y, ground);
+  return claimsInventedEfficacy(/[.!?。…]$/.test(x) ? `${x} ${y}` : `${x}. ${y}`, ground);
+}
+
+/** 읽는 순서로 붙어 읽히는 칸 하나(대체값 · 비워도 되는 칸인가) */
+export interface ReadingItem { text: string; fallback: string; optional?: boolean }
+
+/**
+ * (순수) ★ 1024 ② Codex 1R — **고객이 이어 읽는 단위**로 판정한다. 칸 · 블록을 따로 보면 「피부 고민」 + 「매끈하게 달라져요」처럼
+ *   각각은 통과하고 이어 읽으면 단정인 꼴이 빠진다(헤드라인 블록 + 본문 블록 · 제목 + 프리헤더 · 제목 + 본문).
+ *   빈 칸은 건너뛰고 앞 글과 잇는다. 걸리면 비워도 되는 쪽을 대체값으로(둘 다 필수면 뒤 칸 · 이미 대체값이면 다른 쪽) · 뺀 글은 dropped 에.
+ *   ★ Codex 2R — 칸을 비우면 새로 붙은 이웃이 생긴다 → **더 바뀌지 않을 때까지** 처음부터 다시 본다(바뀔 때마다 칸 하나가 대체값이 되므로 칸 수 안에서 끝난다).
+ */
+export function guardReadingSequence(items: readonly ReadingItem[], ground: string, dropped: string[] = []): string[] {
+  const out = items.map((x) => String(x.text ?? ''));
+  const done = items.map(() => false);
+  for (let round = 0; round <= items.length; round++) {
+    let hit = false;
+    let j = -1;
+    for (let i = 0; i < out.length && !hit; i++) {
+      if (!out[i].trim()) continue;
+      if (j >= 0 && pairClaimsInventedEfficacy(out[j], out[i], ground)) {
+        let t = !items[i].optional && items[j].optional ? j : i;
+        if (done[t]) t = t === i ? j : i;
+        if (done[t]) break;
+        dropped.push(out[t].replace(/\s+/g, ' ').trim());
+        out[t] = items[t].fallback;
+        done[t] = true;
+        hit = true;
+      }
+      j = i;
+    }
+    if (!hit) break;
+  }
+  return out;
+}
+
+/**
+ * (순수) 제목 + 본문(여정 · 문자형 한 건) — 제목 = 비워도 되는 칸(걸리면 비움) · 본문 = 문장 빼기(다 빠지면 직접 채울 자리) ·
+ *   그 뒤 둘을 이어 읽어 걸리면 제목을 비운다. dropped = 뺀 곳 수.
+ */
+export function dropInventedEfficacyTitledBody(subject: string, body: string, ground: string): { subject: string; body: string; dropped: number } {
+  const lost: string[] = [];
+  const s0 = String(subject || '');
+  const b = dropInventedEfficacy(String(body || ''), ground);
+  lost.push(...b.dropped);
+  const s1 = s0.trim() && claimsInventedEfficacy(s0, ground) ? (lost.push(s0), '') : s0;
+  const [s, body2] = guardReadingSequence([{ text: s1, fallback: '', optional: true }, { text: b.text, fallback: EFFICACY_PLACEHOLDER }], ground, lost);
+  return { subject: s, body: body2, dropped: lost.length };
+}
+
+/**
+ * 판정의 읽는 단위 — 한 섹션 · 한 건의 칸들을 읽는 순서로 잇는다(빈 칸 제외).
+ *   ★ Codex 2R — 칸 경계 = **문장 경계**(짝 판정 pairClaimsInventedEfficacy 와 같은 이음 · 한 벌). 줄바꿈으로 이으면 마침표 없는 두 칸이
+ *   한 문장이 되어 제 주어가 있는 뒤 칸(「이번 주 가격이 달라져요」)까지 앞 칸 대상을 이어받았다. 근거와 결과를 늘 이 함수 하나로 읽는다.
+ */
+export function readingUnit(...parts: Array<string | null | undefined>): string {
+  return parts.map((p) => String(p ?? '').trim()).filter(Boolean).map((p) => (/[.!?。…]$/.test(p) ? p : `${p}.`)).join(' ');
+}
+
+/**
+ * (순수) 다시 쓰기(다듬기 · 빠른 고치기 · 변형 · 꾸밈 · 대행 · 문자 다듬기)가 원문에 없던 사실을 더했는가 — 새 숫자 ∥ 지어낸 혜택 값 ∥ 근거 없는 효능.
+ *   before = 고치기 전 **실제 글** + 사람 지시(AI 가 돌려준 「전」 값은 근거가 아니다). 참이면 그 제안을 버리고 원래 글을 둔다.
+ */
+export function rewriteAddsFacts(after: string, before: string): boolean {
+  const a = String(after || '');
+  const b = String(before || '');
+  return findNewNumbers(a, b).length > 0 || findInventedBenefits(a, b).length > 0 || claimsInventedEfficacy(a, b);
+}
+
+/**
+ * (순수) 칸 여러 개(한 섹션 · 한 건)를 다시 쓴 결과를 **이어 읽으면** 원문에 없던 효능 단정이 생기는가(readingUnit · 근거 = 원래 칸들 + 사람 지시).
+ *   ★ Codex 4R — 이 판정은 **효능만** 본다. 숫자 · 혜택은 칸 · 조각마다 원래 계약(rewriteAddsFacts · 0930 근거) 그대로 —
+ *   섹션째로 넓히면 혜택 판정 문법 한계를 우회하려는 완화(원문 자기 대조 · 이웃 조각 근거)가 다른 자리 · 다른 상품의 할인을 통과시켰다.
+ */
+export function readingAddsEfficacy(afterParts: ReadonlyArray<string | null | undefined>, beforeParts: ReadonlyArray<string | null | undefined>, extraGround = ''): boolean {
+  return claimsInventedEfficacy(readingUnit(...afterParts), [readingUnit(...beforeParts), extraGround].filter(Boolean).join('\n'));
+}
+
+/** 화면에 갈 서버 문장 하나(화면은 문구를 짓지 않는다 · 뺀 문장 원문은 싣지 않는다 = 되살리기 길 0) */
+export function efficacyNote(kind: 'generate' | 'rewrite', count: number): string | null {
+  if (!(count > 0)) return null;
+  return kind === 'generate'
+    ? `요청에 없는 효능 문장 ${count}곳을 뺐어요. 인증받은 기능 문구가 있으면 한 줄에 그대로 적어 주세요.`
+    : `${count}곳은 원문에 없는 효능 · 숫자 · 혜택 말이 생겨 원래 글을 뒀어요.`;
+}

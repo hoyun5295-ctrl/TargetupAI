@@ -7,7 +7,12 @@ import { readFileSync } from 'fs';
 import { resolve } from 'path';
 
 vi.mock('../../config/database', () => ({ query: vi.fn() }));
-vi.mock('../plan-guard', () => ({ loadPlanContext: vi.fn(async () => ({ planCode: 'PRO' })), isAiOperatorAllowed: vi.fn(() => true) }));
+vi.mock('../plan-guard', () => ({
+  loadPlanContext: vi.fn(async () => ({ planCode: 'PRO' })),
+  isAiOperatorAllowed: vi.fn(() => true),
+  // ★ 1024 R2 — 여정 문의 요금제 = AI 존 서버 문 한 곳(통과 = false)
+  aiZonePlanBlocked: vi.fn(async () => false),
+}));
 
 import { query } from '../../config/database';
 import { journeyGate, journeyError } from '../journey-route';
@@ -82,7 +87,8 @@ describe('모든 여정 주소가 같은 문 · 같은 오류 매핑을 지난�
   const blocks = src.split(/\n(?=router\.(?:get|post|put|patch|delete)\()/).filter((b) => /^router\.\w+\('\/operator\/(journeys|preview-target-samples|grade-ranks)/.test(b));
   it('여정 주소 전부 journeyGate(★1023 = 57 · 한 줄 패키지 · 새 판 주소 삭제 · 질문표 프리셋 추가)', () => {
     expect(blocks.length).toBeGreaterThanOrEqual(55);
-    const noGate = blocks.filter((b) => !b.includes('await journeyGate(req, res)')).map((b) => b.split('\n')[0]);
+    // ★ 1024 R2 — 끄기 주소는 journeyGate(req, res, { plan: false })(같은 문 · 요금제만 열어 둔다 · 목록 = 뿌리 대장 시험)
+    const noGate = blocks.filter((b) => !b.includes('await journeyGate(req, res')).map((b) => b.split('\n')[0]);
     expect(noGate).toEqual([]);
   });
   it('여정 주소 안에 따로 쓴 문(loadPlanContext · isAiOperatorAllowed) 0 · 500 원문 0', () => {

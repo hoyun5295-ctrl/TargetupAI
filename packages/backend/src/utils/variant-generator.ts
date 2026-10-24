@@ -21,7 +21,7 @@ import { callAIWithFallback } from '../services/ai';
 import { query } from '../config/database';
 import { sanitizeForSms } from './message-sanitizer';
 import { extractJsonFromAiText } from './ai-json';
-import { findInventedBenefits, findNewNumbers } from './copy-benefit-detector';
+import { rewriteAddsFacts, EFFICACY_REWRITE_RULE } from './copy-benefit-detector';
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 // 외부 노출 인터페이스
@@ -88,6 +88,7 @@ export async function generateVariantsFromMessage(input: {
 지켜야 할 것:
 - 사실은 한 글자도 바꾸지 않습니다: 상품명 · 혜택과 그 숫자(%, 원, 쿠폰, 적립, 무료 등) · 날짜와 기간 · 시간 · 장소 · 연락처 · 링크.
 - 기준 문안에 없는 숫자 · 기간 · 수량 · 혜택을 새로 쓰지 않습니다("오늘 단 하루", "선착순 100명" 같은 조건도 새로 만들지 않습니다).
+${EFFICACY_REWRITE_RULE}
 - %이름% 같은 변수와 [혜택 안내: 직접 수정해주세요] 같은 채울 자리는 글자 그대로 둡니다.
 - 바꾸는 것은 인사 · 연결 문장 · 마무리 · 문장 리듬입니다. 세 변형은 도입과 마무리가 서로 확실히 달라야 합니다(같은 문장에 낱말만 바꾼 변형은 실패입니다).
 - 길이: 문자(SMS) 90바이트 · 장문(LMS · MMS) 2000바이트 이내.
@@ -158,13 +159,14 @@ ${baseMessage}
       // ★ 2026-09-30 WP2 — 변형은 톤만 바꾼다. 기준 문안에 없던 숫자(기간 · 수량 · 시간)나 혜택 값 · 낱말이 생긴 변형은 뺀다
       //   (프롬프트 "혜택 표현 유지"는 확률적 · 30%가 40%로 바뀐 변형이 A/B 로 발송되면 지어낸 혜택).
       .filter((v: GeneratedVariant) => {
-        const bad = findNewNumbers(v.messageTemplate, baseMessage).length > 0 || findInventedBenefits(v.messageTemplate, baseMessage).length > 0;
+        // ★ 2026-10-24 ② 판정 = rewriteAddsFacts(숫자 ∥ 혜택 ∥ 효능)
+        const bad = rewriteAddsFacts(v.messageTemplate, baseMessage);
         if (bad) droppedFabricated++;
         return !bad;
       });
 
     if (droppedFabricated > 0) {
-      warnings.push(`기준 문안에 없던 숫자나 혜택이 생긴 변형 ${droppedFabricated}개는 뺐어요.`);
+      warnings.push(`기준 문안에 없던 숫자 · 혜택 · 효능 말이 생긴 변형 ${droppedFabricated}개는 뺐어요.`);
     }
     if (variants.length === 0) {
       warnings.push('만들어진 변형이 없어요. 잠시 뒤 다시 시도해 주세요.');

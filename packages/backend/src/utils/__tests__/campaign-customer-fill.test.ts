@@ -10,9 +10,9 @@ import { describe, it, expect, vi } from 'vitest';
 vi.mock('../../config/database', () => ({ query: vi.fn(async () => ({ rows: [] })), pool: { connect: vi.fn() }, default: { connect: vi.fn(), query: vi.fn() } }));
 vi.mock('../../services/ai', () => ({ callAIWithFallback: vi.fn(async () => '') }));
 
-import { fillCustomerStandard, customerFillNotes, customerEngineDeps, keepLastCtaBar, licensedPreheaderOf, CUSTOMER_SECTION_MAX } from '../campaign-customer-fill';
+import { fillCustomerStandard, customerFillNotes, customerEngineDeps, keepLastCtaBar, CUSTOMER_SECTION_MAX } from '../campaign-customer-fill';
 import { assembleDmCampaign, type EngineMaterials, type EngineOptions } from '../campaign-engine';
-import { headlineFromCard, applyDmFeatures, OUTREACH_SECTION_MAX } from '../sales-outreach-produce';
+import { headlineFromCard, applyDmFeatures, licensedPreheaderOf, OUTREACH_SECTION_MAX } from '../sales-outreach-produce';
 import type { Section } from '../dm/dm-section-registry';
 
 const C = '/api/dm/v/images/c/';

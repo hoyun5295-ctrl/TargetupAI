@@ -27,7 +27,7 @@ import sharp from 'sharp';
 import { callAIWithFallback } from '../services/ai';
 import { query } from '../config/database';
 import { extractJsonFromAiText } from './ai-json';
-import { findBenefitSpans, findNewNumbers, stripUnauthorizedBenefits } from './copy-benefit-detector';
+import { findBenefitSpans, findNewNumbers, stripUnauthorizedBenefits, claimsInventedEfficacy, dropInventedEfficacy, efficacyNote, EFFICACY_PLACEHOLDER, EFFICACY_PROMPT_RULES, EFFICACY_REWRITE_RULE } from './copy-benefit-detector';
 import {
   buildSnsCaption, countSnsCaption, findBodyHashtagSpans, findSnsLinkSpans, normalizeSnsTags, snsLinkHost,
   extractBodyHashtags, type SnsCaptionSpec, type SnsTextSpan,
@@ -340,6 +340,7 @@ const REFINE_SYSTEM = [
   '- {{k1}} 같은 토큰은 링크·금액·혜택·태그 자리다. 토큰 글자를 하나도 바꾸지 말고 모두 남긴다. 문장에 맞게 자리를 옮기는 것은 된다.',
   '- 맞춤법·띄어쓰기·어색한 문장을 바로잡고 읽기 좋게 줄을 나눈다. 뜻은 바꾸지 않는다.',
   '- 효과를 장담하는 말(확산·바이럴·도달·팔로워 증가)을 쓰지 않는다.',
+  EFFICACY_REWRITE_RULE,
   '- 해시태그(#)를 새로 쓰지 않는다. 태그는 목록에서 고르기만 한다.',
   '- 이모지는 원문에 있던 만큼만 쓰고, 원문에 없으면 0~2개.',
   OUTPUT_RULE,
@@ -355,6 +356,7 @@ const PHOTO_SYSTEM = [
   '- 사진 속 장면은 한 문장 이하로만 거든다. 장면을 늘어놓거나 소설처럼 묘사하지 않는다.',
   '- 말투는 SNS에 올리는 친근한 존댓말(해요체). 2~4줄이고 줄마다 한 가지 이야기만 한다. 이모지는 0~2개.',
   '- 효과를 장담하는 말(확산·바이럴·도달·팔로워 증가)을 쓰지 않는다.',
+  EFFICACY_PROMPT_RULES,
   '- 해시태그(#)를 쓰지 않는다. 태그는 목록에서 고르기만 한다.',
   '- 사진 속 글이 없으면 사진에 보이는 것을 해요체로 두세 문장만 쓴다.',
   OUTPUT_RULE,
@@ -487,9 +489,12 @@ export async function generateSnsCaption(input: SnsAiCaptionInput): Promise<SnsA
     const license = [...imageText, brand].filter(Boolean).join('\n');
     text = dropInventedHashtags(text, license);
     text = keepPhotoSafeSentences(text, license);
+    // ★ 2026-10-24 ② Codex 1R — 같은 면허(사진 속 글 + 회사 이름)로 근거 없는 효능 문장을 뺀다(다 빠지면 아래 「짧음」 안내 · 자리표시를 올리지 않는다)
+    const eff = dropInventedEfficacy(text, license);
+    text = eff.text === EFFICACY_PLACEHOLDER ? '' : eff.text;
     if ([...text].length < PHOTO_DRAFT_MIN_CHARS) return { ...unchanged(mode, original, PHOTO_DRAFT_TOO_SHORT), tags, imageText };
     const caption = tail.trim() ? `${text}\n\n${tail.replace(/^\s+/, '')}` : text;
-    return { mode, caption, changed: true, tags, note: null, rejectedTags, imageText };
+    return { mode, caption, changed: true, tags, note: efficacyNote('generate', eff.dropped.length), rejectedTags, imageText };
   }
 
   // ① 토큰 복원 — 잃었으면 버리고 버렸다고 말한다.
@@ -508,6 +513,10 @@ export async function generateSnsCaption(input: SnsAiCaptionInput): Promise<SnsA
   // ⑤-0 원문에 없던 숫자(★ 2026-09-30 WP2 — 금액 · 링크는 가림 토큰이 지키지만 "3일만" · "선착순 50명" 같은 새 숫자는 못 잡는다)
   if (findNewNumbers(out, original).length > 0) {
     return { ...unchanged(mode, original, 'AI가 원래 없던 숫자를 넣으려 해서 넣지 않았어요. 한 번 더 눌러 주세요.'), tags };
+  }
+  // ⑤-1 ★ 2026-10-24 세 채널 구조체크 ② — 원문에 없던 효능 단정(같은 근거 · 숫자와 같은 길 = 넣지 않고 말한다)
+  if (claimsInventedEfficacy(out, original)) {
+    return { ...unchanged(mode, original, 'AI가 원래 없던 효능 말을 넣으려 해서 넣지 않았어요. 한 번 더 눌러 주세요.'), tags };
   }
 
   // ⑤ 끝 태그 줄 다시 붙이기(원문 그대로)

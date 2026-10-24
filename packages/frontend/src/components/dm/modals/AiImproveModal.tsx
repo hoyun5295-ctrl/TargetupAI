@@ -47,6 +47,8 @@ export default function AiImproveModal({ open, onClose, onlySectionId }: {
   const [suggestions, setSuggestions] = useState<Suggestion[]>([]);
   const [decisions, setDecisions] = useState<Record<number, Decision>>({});
   const [error, setError] = useState<string | null>(null);
+  // ★ 2026-10-24 ② 서버 안내 문장(원문에 없는 효능 · 숫자 · 혜택이 생겨 버린 제안 수)
+  const [notes, setNotes] = useState<string[]>([]);
 
   useEffect(() => {
     if (!open) return;
@@ -55,12 +57,14 @@ export default function AiImproveModal({ open, onClose, onlySectionId }: {
       setLoading(true);
       setError(null);
       setSuggestions([]);
+      setNotes([]);
       setDecisions({});
       try {
         const res = await api.post('/dm/ai/improve', { sections, brand_kit: brandKit });
         if (cancelled) return;
         const list: Suggestion[] = res.data?.suggestions || [];
         setSuggestions(list);
+        setNotes(Array.isArray(res.data?.notes) ? res.data.notes.map(String).filter(Boolean) : []);
         const initial: Record<number, Decision> = {};
         list.forEach((_, i) => (initial[i] = 'pending'));
         setDecisions(initial);
@@ -164,16 +168,18 @@ export default function AiImproveModal({ open, onClose, onlySectionId }: {
       {!loading && !error && suggestions.length === 0 && (
         <div style={{ padding: 40, textAlign: 'center', color: '#6b7280' }}>
           <div style={{ fontSize: 32, marginBottom: 12 }}>✨</div>
-          <div style={{ fontSize: 14, fontWeight: 600, color: '#111827', marginBottom: 4 }}>카피가 이미 좋아요!</div>
-          <div style={{ fontSize: 12 }}>AI가 특별히 개선할 부분을 찾지 못했어요.</div>
+          <div style={{ fontSize: 14, fontWeight: 600, color: '#111827', marginBottom: 4 }}>{notes.length > 0 ? '바꿀 제안이 없어요' : '카피가 이미 좋아요!'}</div>
+          <div style={{ fontSize: 12 }}>{notes.length > 0 ? notes[0] : 'AI가 특별히 개선할 부분을 찾지 못했어요.'}</div>
         </div>
       )}
 
       {!loading && suggestions.length > 0 && (
         <div>
-          <div style={{ fontSize: 12, color: '#6b7280', marginBottom: 14 }}>
+          <div style={{ fontSize: 12, color: '#6b7280', marginBottom: notes.length > 0 ? 6 : 14 }}>
             대기 {pendingCount}건 · 수락 {acceptedCount}건 · 거부 {Object.values(decisions).filter((d) => d === 'reject').length}건
           </div>
+          {/* ★ 2026-10-24 ② 버린 제안이 있으면 서버 문장 그대로(남은 제안이 있어도) */}
+          {notes.length > 0 && <div style={{ fontSize: 12, color: '#92400e', marginBottom: 14 }}>{notes[0]}</div>}
           <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
             {suggestions.map((s, i) => (
               <SuggestionCard

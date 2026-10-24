@@ -161,10 +161,11 @@ export async function getAbTestByShortCode(code: string): Promise<AbTestRecord |
   return res.rows[0] || null;
 }
 
-export async function listAbTests(companyId: string): Promise<AbTestRecord[]> {
+/** ★ 2026-10-24 ⑫ ownerId = 담당자(본인이 만든 것만) · null = 관리자(회사 전체) — resolveOwnerScope 와 같은 뜻 */
+export async function listAbTests(companyId: string, ownerId: string | null = null): Promise<AbTestRecord[]> {
   const res = await query(
-    `SELECT * FROM dm_ab_tests WHERE company_id = $1 ORDER BY created_at DESC LIMIT 100`,
-    [companyId],
+    `SELECT * FROM dm_ab_tests WHERE company_id = $1 AND ($2::uuid IS NULL OR created_by = $2::uuid) ORDER BY created_at DESC LIMIT 100`,
+    [companyId, ownerId],
   );
   return res.rows as AbTestRecord[];
 }

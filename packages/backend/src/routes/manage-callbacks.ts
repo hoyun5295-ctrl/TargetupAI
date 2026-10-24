@@ -15,6 +15,7 @@ import { normalizePhone } from '../utils/normalize-phone';
 import { checkCallbackSpec } from '../utils/callback-spec';
 import { recordCallbackNumberCreated, recordCallbackNumberUpdated, recordCallbackNumberDefaultChanged, recordCallbackNumberDeleted, recordCallbackAssignmentChanged } from '../utils/change-audit';
 
+import { publicErrorText } from '../utils/http-error';
 const router = Router();
 
 // ============================================================
@@ -345,7 +346,7 @@ router.put('/:id/scope', async (req: Request, res: Response) => {
     res.json({ success: true, message: scope === 'all' ? '전체 사용으로 변경되었습니다.' : '사용자 지정으로 변경되었습니다.' });
   } catch (error: any) {
     console.error('배정 범위 변경 실패:', error);
-    res.status(500).json({ error: error.message || '배정 범위 변경 실패' });
+    res.status(500).json({ error: publicErrorText(error, '배정 범위 변경 실패') });
   }
 });
 
@@ -400,7 +401,7 @@ router.put('/:id/assignments', async (req: Request, res: Response) => {
     res.json({ success: true, assignments, message: '사용자 배정이 저장되었습니다.' });
   } catch (error: any) {
     console.error('배정 저장 실패:', error);
-    res.status(400).json({ error: error.message || '배정 저장 실패' });
+    res.status(400).json({ error: publicErrorText(error, '배정 저장 실패') });   // ★ 2026-10-24 R10 4xx 도 원문 0
   }
 });
 

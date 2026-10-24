@@ -23,7 +23,9 @@ vi.mock('../system-alimtalk', () => ({ trySendAuthCodeAlimtalk: vi.fn(async () =
 vi.mock('../audit-log', () => ({ recordAuditLog: vi.fn(async () => undefined) }));
 
 import { query } from '../../config/database';
-import { plannerSpamVerdict } from '../planner-copy';
+import { spamVerdictOf } from '../spam-test-queue';
+// ★ 1024 판정 한 곳(뿌리 대장 R7) — 옛 plannerSpamVerdict(결과 전체) = 첫 안의 공용 판정
+const plannerSpamVerdict = (res: { variants: any[]; totalTestCount: number }) => spamVerdictOf(res?.variants?.[0], res?.totalTestCount);
 import { enterPairRecheck } from '../planner-review';
 import { recheckProposalIssue, buildRecheckNotice, plannerLinkApproveCompanyIds, recheckDeadlineAt } from '../planner-recheck';
 import { checkStrictSenderAuth, senderAuthDeviceProof } from '../sender-auth';

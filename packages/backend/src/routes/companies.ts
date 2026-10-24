@@ -38,6 +38,7 @@ import { buildRcsTemplateSheet, templateExportFilename } from '../utils/template
 import { swrCacheWithAt, dashboardCardsGenKey } from '../utils/swr-cache';
 import { CACHE_TTL } from '../config/defaults';
 import { computeMonthlyUsage } from '../utils/monthly-usage';
+import { publicErrorText } from '../utils/http-error';
 import { journeyCreditForecast, journeyCreditOverPlan } from '../utils/journey-credit-forecast';   // ★ 2026-10-20 여정 V.3 §5-5 요금제 내림 경고   // ★ 2026-10-18 이번달 사용금액 카드 = 발송 현황과 같은 CT
 
 const router = Router();
@@ -2141,7 +2142,7 @@ router.post('/:id/grant-basic-trial', requireUuidId, requireSuperAdmin, async (r
     // ★ 2026-10-04 선불 이용 기간 중인 회사 = 체험 코어가 409로 거절한다(결함이 아니라 업무 응답)
     if (err instanceof PlanTermError) return res.status(err.status).json(err.body);
     console.error('grant-basic-trial 실패:', err);
-    return res.status(500).json({ error: err?.message || 'BASIC 무료체험 부여 실패' });
+    return res.status(500).json({ error: publicErrorText(err, 'BASIC 무료체험 부여 실패') });
   }
 });
 
@@ -2376,7 +2377,7 @@ router.post('/:id/merge', requireUuidId, requireSuperAdmin, async (req: Request,
     }
     if (error instanceof CompanyMergeResidueError) {
       // 이동 후 잔존이 남아 롤백된 상태 — 성공으로 표시하지 않는다(6원칙 ②).
-      return res.status(500).json({ success: false, error: error.message, residue: error.residue });
+      return res.status(500).json({ success: false, error: publicErrorText(error), residue: error.residue });
     }
     const msg = error?.message || '';
     if (msg.includes('column') && msg.includes('does not exist')) {

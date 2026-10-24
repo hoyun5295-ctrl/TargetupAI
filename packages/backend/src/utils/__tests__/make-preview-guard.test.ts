@@ -198,7 +198,8 @@ describe('링크 발행 승인 금액 대조', () => {
     expect(route.slice(iGuard, iGuard + 300)).toContain("code: 'PUBLISH_FEE_REQUIRED'");
     expect(route).toContain('chargeNow = creditOn;');
     expect(iGuard).toBeLessThan(route.indexOf('if (chargeNow) await checkCredit(companyId, pubCost);'));
-    expect(iGuard).toBeLessThan(route.indexOf('await publishDm(dmId, companyId)'));
+    // ★ 2026-10-24 ⑭ 발행 = 경품 동기화 함께(publishDmWithPrizes) · 옛 글자(await publishDm()는 감싼 함수 안에서 우연히 맞았다
+    expect(route.indexOf('await publishDmWithPrizes(dmId, companyId)')).toBeGreaterThan(iGuard);
     // 차감은 대조 때 정한 chargeNow 로만(firstPublish 로 다시 정하지 않는다)
     expect(route).toContain('if (chargeNow) {\n    await deductCreditSafe({');
     expect(route).not.toMatch(/if \(firstPublish\) \{\s*await deductCreditSafe/);

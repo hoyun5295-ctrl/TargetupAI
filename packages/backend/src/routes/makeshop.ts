@@ -23,6 +23,7 @@ import { isCdpEnabledForPlan } from '../utils/cdp-auth';
 // ★ 2026-08-10: 스키마 실측 로그는 값이 아니라 구조로 남긴다(개인정보 미기록)
 import { describeJsonShape } from '../utils/json-shape';
 
+import { publicErrorText } from '../utils/http-error';
 const router = Router();
 
 router.use(authenticate);
@@ -67,7 +68,7 @@ router.post('/connect', async (req: Request, res: Response) => {
     console.error('[Makeshop /connect] 오류:', err?.message || err);
     return res.status(502).json({
       success: false,
-      error: err?.message || '메이크샵 연동 검증에 실패했습니다.',
+      error: publicErrorText(err, '메이크샵 연동 검증에 실패했습니다.'),
       hint: '파트너센터 App의 Client ID/Secret과 상점 ID(shop_uid)가 정확한지, App에 회원·주문 Read 권한이 있는지 확인해주세요.',
     });
   }
@@ -82,7 +83,7 @@ router.get('/status', async (req: Request, res: Response) => {
     return res.json({ success: true, connected: true, shop_uid: integration.shopUid, status: integration.status });
   } catch (err: any) {
     console.error('[Makeshop /status] 오류:', err);
-    return res.status(500).json({ success: false, error: err?.message || '조회 실패' });
+    return res.status(500).json({ success: false, error: publicErrorText(err, '조회 실패') });
   }
 });
 
@@ -108,7 +109,7 @@ router.get('/preview', async (req: Request, res: Response) => {
     return res.json({ success: true, ...preview });
   } catch (err: any) {
     console.error('[Makeshop /preview] 오류:', err?.message || err);
-    return res.status(502).json({ success: false, error: err?.message || '미리보기 조회 실패' });
+    return res.status(502).json({ success: false, error: publicErrorText(err, '미리보기 조회 실패') });
   }
 });
 
@@ -127,7 +128,7 @@ router.delete('/disconnect', async (req: Request, res: Response) => {
     return res.json({ success: true });
   } catch (err: any) {
     console.error('[Makeshop /disconnect] 오류:', err);
-    return res.status(500).json({ success: false, error: err?.message || '연동 해제 실패' });
+    return res.status(500).json({ success: false, error: publicErrorText(err, '연동 해제 실패') });
   }
 });
 

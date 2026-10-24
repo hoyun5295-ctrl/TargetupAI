@@ -19,6 +19,7 @@ import { useToast } from '../components/ToastProvider';
 import { useMediaQuery } from '../hooks/useMediaQuery';
 import PlannerEventModal from '../components/planner/PlannerEventModal';
 import PlannerRecheckModal from '../components/planner/PlannerRecheckModal';
+import PlannerLineAsk from '../components/planner/PlannerLineAsk';
 import {
   PLANNER_LEGEND, PLANNER_SEND_KIND, PLANNER_STATE, kstToday, plannerDay, plannerDaysBetween, plannerRange, plannerStateOf,
   type PlannerSendKind,
@@ -87,7 +88,9 @@ export default function MarketingPlannerPage() {
   const [loadState, setLoadState] = useState<'loading' | 'ok' | 'fail' | 'pending'>('loading');
   const [loadedAt, setLoadedAt] = useState<string>('');
   const [availability, setAvailability] = useState<Availability[]>([]);
-  const [modal, setModal] = useState<{ editing: CalendarEvent | null; date?: string | null; template?: LineTemplateId | LineCompositionId | null; lineRead?: PlannerLineRead | null } | null>(null);
+  const [modal, setModal] = useState<{ editing: CalendarEvent | null; date?: string | null; template?: LineTemplateId | LineCompositionId | null } | null>(null);
+  // ★ 2026-10-24 한 줄 → 못 읽은 칸만 질문 → 담기(뿌리 대장 R9)
+  const [lineAsk, setLineAsk] = useState<{ line: string; read: PlannerLineRead } | null>(null);
   const [line, setLine] = useState('');
   const [reading, setReading] = useState(false);
   const [templates, setTemplates] = useState<LineTemplateInfo[] | null>(null);
@@ -160,7 +163,7 @@ export default function MarketingPlannerPage() {
   const openEvent = (ev: CalendarEvent) => navigate(`/marketing-planner/events/${ev.id}`);
   const openCreate = (date?: string, template?: LineTemplateId | LineCompositionId) => setModal({ editing: null, date: date || null, template: template || null });
   const lineEnabled = !!cal?.lineEnabled;
-  // ★ 2026-10-18 한 줄 → 규칙 읽기(AI 0 · 0크레딧) → 판1 「이렇게 알아들었어요」 · 빈 줄 = 빈 판1
+  // ★ 2026-10-18 한 줄 → 규칙 읽기(AI 0 · 0크레딧) · ★ 1024 R9 = 못 읽은 칸만 묻는 창 → 버튼 한 번에 담기 · 빈 줄 = 빈 담기 창
   const submitLine = async () => {
     const t = line.trim();
     if (!t) { openCreate(); return; }
@@ -169,10 +172,20 @@ export default function MarketingPlannerPage() {
     try {
       const r = await plannerApi<PlannerLineRead>('/api/marketing-planner/line-read', { body: { line: t } });
       if (!r.ok) { toast.error(plannerErrorText(r, '한 줄을 읽지 못했어요. 행사 담기 창에서 직접 적어 주세요.')); return; }
-      setModal({ editing: null, date: null, lineRead: r.data });
+      setLineAsk({ line: t, read: r.data });
     } finally {
       setReading(false);
     }
+  };
+  // 담은 뒤: 모바일 DM · 메일이 든 행사 = 곧바로 재료 넣기 창(목록의 「재료 넣기」와 같은 창) · 문자만 = 문안 준비 알림
+  const afterLineSaved = async (saved: { id: string; month: string }) => {
+    setLineAsk(null);
+    setLine('');
+    const r = await plannerApi<PlannerCalendar>(`/api/marketing-planner/events?month=${saved.month}`);
+    if (saved.month !== month) setMonth(saved.month); else void load(month, true);
+    const ev = r.ok ? r.data.events.find((e) => e.id === saved.id) : undefined;
+    if (ev?.editable && ev.touchpoints.some((t) => t.channel === 'dm' || t.channel === 'email')) { setModal({ editing: ev }); return; }
+    toast.success(ev && ev.touchpoints.every((t) => t.channel === 'sms') ? '행사를 담았어요. 문자 문안을 준비하고 있어요' : '행사를 담았어요');
   };
   const templateLabel = (e: CalendarEvent) => (e.materials?.template ? templates?.find((t) => t.id === e.materials!.template!.id)?.label ?? null : null);
 
@@ -527,12 +540,20 @@ export default function MarketingPlannerPage() {
           initialDate={modal.date}
           initialTemplate={modal.template}
           lineEnabled={lineEnabled}
-          lineRead={modal.lineRead || null}
           editing={modal.editing}
           availability={availability}
           balance={cal?.kpi.balance ?? null}
           onClose={() => setModal(null)}
           onSaved={() => { void load(month, true); }}
+        />
+      )}
+      {lineAsk && (
+        <PlannerLineAsk
+          line={lineAsk.line}
+          read={lineAsk.read}
+          onClose={() => setLineAsk(null)}
+          onDirect={() => { setLineAsk(null); openCreate(); }}
+          onDone={(saved) => { void afterLineSaved(saved); }}
         />
       )}
     </ZoneFrame>

@@ -407,14 +407,21 @@ describe('고객 표준 채우기 배선 · 아트디렉션 · 로고 · 이메�
     await generateFromBuildMaterials({ companyId: COMPANY, userId: USER, materials: raw() }, b.deps);
     expect(b.captured.dm[0].m.logoUrl).toBeNull();
   });
-  it('이메일: 고객 채우기 주입 · CTA 띠는 마지막 1개 · 면허 밖 수치 프리헤더는 버린다 · 렌더와 저장이 같은 design', async () => {
+  // ★ 2026-10-24 ② 프리헤더 거름(면허 밖 수치 · 근거 없는 효능) = 생산자 출구 produceOutreachBrandEmail 한 곳 · 이 갈래는 받은 값을 그대로 싣는다
+  it('이메일: 프리헤더 거름은 생산자 출구에 있다(옛 소비처 한 곳 거름 삭제)', () => {
+    const produce = readFileSync(resolve(__dirname, '..', 'sales-outreach-produce.ts'), 'utf8').replace(/\r\n/g, '\n');
+    const body = produce.slice(produce.indexOf('export async function produceOutreachBrandEmail('));
+    expect(body.slice(0, body.indexOf('\n}\n'))).toContain("const preheaderLicensed = licensedPreheaderOf(String(gen.raw?.preheader || ''), input.licensedQuote).slice(0, 60);");
+    expect(readFileSync(resolve(__dirname, '..', 'campaign-quick.ts'), 'utf8')).not.toContain('licensedPreheaderOf(');
+  });
+  it('이메일: 고객 채우기 주입 · CTA 띠는 마지막 1개 · 렌더와 저장이 같은 design', async () => {
     const barCta = (i: number) => ({ id: `c${i}`, type: 'cta', order: i, visible: true, treatment: 'bar', background: 'tint', props: { buttons: [{ label: '보기', url: `https://shop.example/${i}` }] } }) as any;
     let impl: any = null;
     let renderedDesign: any = null;
     const { deps, drafts } = makeDeps({
       produceEmail: (async (_input: any, i: any) => {
         impl = i;
-        return { sections: [sec('header', {}, 0), barCta(1), barCta(2), barCta(3), sec('footer', {}, 4)], subject: '제목', preheader: '전 제품 30% 할인 진행 중', benefitStripped: 0, exemplarCount: 0, exemplarTotal: 0, look: { treatments: 0, backgrounds: 0, assigned: [] }, sliceMode: false, sliceCount: 0, features: { applied: [], removed: [], skipped: [] } } as any;
+        return { sections: [sec('header', {}, 0), barCta(1), barCta(2), barCta(3), sec('footer', {}, 4)], subject: '제목', preheader: '', benefitStripped: 0, exemplarCount: 0, exemplarTotal: 0, look: { treatments: 0, backgrounds: 0, assigned: [] }, sliceMode: false, sliceCount: 0, features: { applied: [], removed: [], skipped: [] } } as any;
       }) as any,
       renderEmail: ((_s: any, _k: any, design: any) => { renderedDesign = design; return { html: '<p>x</p>', text: 'x' }; }) as any,
     });

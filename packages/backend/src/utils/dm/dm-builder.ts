@@ -878,12 +878,16 @@ export async function publishDm(id: string, companyId: string) {
     attempts++;
   } while (attempts < 10);
 
+  // ★ 2026-10-24 세 채널 구조체크 ⑰ — 주소가 빈 행만 쓴다. 두 요청이 동시에 첫 발행하면 뒤 요청이 앞 주소를 덮어써
+  //   먼저 나간 링크가 죽었다. 졌으면 이긴 쪽 주소를 다시 읽어 돌려준다.
   const result = await query(
     `UPDATE dm_pages SET short_code = $1, status = 'published', updated_at = NOW()
-     WHERE id = $2 AND company_id = $3 RETURNING short_code`,
+     WHERE id = $2 AND company_id = $3 AND short_code IS NULL RETURNING short_code`,
     [code, id, companyId]
   );
-  return result.rows[0] || null;
+  if (result.rows[0]) return result.rows[0];
+  const won = await query(`SELECT short_code FROM dm_pages WHERE id = $1 AND company_id = $2`, [id, companyId]);
+  return won.rows[0]?.short_code ? { short_code: won.rows[0].short_code } : null;
 }
 
 // ────────────────── 열람 추적 ──────────────────

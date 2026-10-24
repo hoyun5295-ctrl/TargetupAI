@@ -18,6 +18,7 @@
 import { extractJsonFromAiText } from './ai-json';
 import { query, pool } from '../config/database';
 import { callAIWithFallback } from '../services/ai';
+import { stripUnauthorizedBenefits, dropInventedEfficacy, EFFICACY_PROMPT_RULES } from './copy-benefit-detector';
 import { buildMemoryPromptContext } from './company-memory';
 import { seedBaselineForJourney, seedGradeStateForJourney } from './journey-entry-ledger';
 import { formatStepTiming, formatConditionChip } from './journey-step-format';
@@ -545,6 +546,7 @@ async function generateCustomStepsWithAI(
   // ★ D188 Phase 2-B-1 (2026-05-21): wait + condition step 사용 가이드 + JSON 응답 형식 확장.
   const system = `당신은 한국 마케팅 자동화 여정 설계 전문가입니다.
 회사 admin이 자연어로 입력한 여정 목표를 받아, 2~7개의 step (시계열)을 JSON으로 응답합니다.
+${EFFICACY_PROMPT_RULES}
 
 step_type 3종:
 - "message": 메시지 발송 (SMS/LMS/MMS/알림톡)
@@ -619,7 +621,9 @@ JSON 형식만 응답:
     };
     if (stepType === 'message') {
       base.channel = ['sms', 'lms', 'mms', 'kakao', 'email'].includes(s.channel) ? s.channel : 'sms';
-      base.messageTemplate = String(s.messageTemplate || '').slice(0, 2000);
+      // ★ 2026-10-24 세 채널 구조체크 ② — 이 생산자만 거름이 없었다(R13 · 다른 여정 생성 경로와 같은 근거 = 회사가 준 목표문).
+      //   혜택 → 자리표시 · 효능 → 문장 빼기(다 빠지면 직접 채울 자리 · 활성화 관문이 막는다)
+      base.messageTemplate = dropInventedEfficacy(stripUnauthorizedBenefits(String(s.messageTemplate || '').slice(0, 2000), objective), objective).text;
       base.isAd = s.isAd !== undefined ? !!s.isAd : true;
     } else if (stepType === 'condition') {
       if (s.conditionJsonb && typeof s.conditionJsonb === 'object') {

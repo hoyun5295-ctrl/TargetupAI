@@ -122,7 +122,7 @@ describe('사람 입구 미들웨어', () => {
     expect(SRC('routes', 'campaigns.ts')).toContain("router.post(['/test-send', '/:id/send', '/direct-send/commit', '/direct-send', '/brand-send'], demoBlock);");
     const c = SRC('routes', 'campaigns.ts');
     expect(c.indexOf("router.post(['/test-send'")).toBeLessThan(c.indexOf("router.post('/test-send', async"));
-    expect(SRC('routes', 'dm.ts')).toContain("dmRouter.post('/:id/send-to-target', requireDmAccess, demoBlock, async");
+    expect(SRC('routes', 'dm.ts')).toContain("dmRouter.post('/:id/send-to-target', requireDmAccess, demoBlock, singleFlight('dm-send-to-target', async");
     expect(SRC('routes', 'dm.ts')).toContain("dmRouter.post('/:id/test-send', requireDmAccess, demoBlock, async");
     expect(SRC('routes', 'spam-filter.ts')).toContain("router.post('/test', authenticate, demoBlock, async");
     expect(SRC('routes', 'balance.ts')).toContain("router.post('/deposit-request', demoBlock, async");

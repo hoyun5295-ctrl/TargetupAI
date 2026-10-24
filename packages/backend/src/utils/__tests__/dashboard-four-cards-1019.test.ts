@@ -154,8 +154,12 @@ describe('대시보드 아래 한 줄 4칸 화면 계약', () => {
     const ai = readFileSync(resolve(__dirname, '../../routes/ai.ts'), 'utf8');
     const block = (start: string) => ai.slice(ai.indexOf(start), ai.indexOf('\nrouter.', ai.indexOf(start) + 1));
     expect(block("router.get('/operator/access',")).toContain('const allowed = isAiOperatorAllowed(planCtx, req.user);');
-    expect(block("router.get('/operator/self-diagnosis',")).toContain('if (!isAiOperatorAllowed(planCtx, req.user)) {');
-    expect(block("router.get('/operator/self-diagnosis',")).toContain("return res.status(403).json({ success: false, error: 'AI Operator 진입 권한이 없습니다.', code: 'AI_OPERATOR_GATED' });");
+    // ★ 1024 R2 — 같은 판정 = AI 존 서버 문 한 곳(진입 판정 주소와 같은 isAiOperatorAllowed 를 안에서 부른다)
+    expect(block("router.get('/operator/self-diagnosis',")).toContain('if (await aiZonePlanBlocked(req, res, planCtx)) return;');
+    // 거절 응답 = 공용 문 한 벌(대시보드가 읽는 code 그대로 · AI_OPERATOR_GATED)
+    const guard = readFileSync(resolve(__dirname, '../plan-guard.ts'), 'utf8');
+    expect(guard).toContain("export const AI_ZONE_GATED_CODE = 'AI_OPERATOR_GATED';");
+    expect(guard).toContain("code: AI_ZONE_GATED_CODE });");
     expect(dash).not.toContain('aiLineAllowed');
     // 다시 읽기 열쇠 = 요금제 코드 · 구독 상태 · 진단 완료 사건 횟수(Codex D3 · 진단 상태 다시 읽기 성공 여부와 무관)
     expect(dash).toContain("const recRevalidateKey = `${planInfo?.plan_code ?? ''}|${planInfo?.subscription_status ?? ''}|${recNonce}`;");

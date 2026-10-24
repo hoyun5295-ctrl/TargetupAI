@@ -12,7 +12,7 @@
  * 설계서: status/DM-PRO-DESIGN.md §9
  */
 import { extractJsonFromAiText } from '../ai-json';
-import { findInventedBenefits, findNewNumbers } from '../copy-benefit-detector';
+import { claimsInventedEfficacy, dropInventedEfficacy, pairClaimsInventedEfficacy, rewriteAddsFacts, readingAddsEfficacy, EFFICACY_PROMPT_RULES, EFFICACY_REWRITE_RULE, EFFICACY_RETRY_HINT, HEADLINE_PLACEHOLDER } from '../copy-benefit-detector';
 import { callAIWithFallback, getKoreanCalendar } from '../../services/ai';
 // ★ 2026-07-03 DM 문안두뇌 주입 (전 채널 학습 통합 Phase 1c) — 회사 성과 DM 문안 RAG + 브랜드 키트
 import { composeCopyBrain } from '../copy-prompt-composer';
@@ -77,6 +77,8 @@ export type CopyDraft = {
   subCopies?: string[];
   ctaLabels?: string[];
   body?: string;
+  /** ★ 2026-10-24 ② 근거 없는 효능으로 뺀 수(후보 · 문장) — 결과 안내 문장의 재료(원문은 싣지 않는다) */
+  efficacyDropped?: number;
 };
 
 export type ToneKey = 'direct' | 'emotional' | 'premium' | 'urgent' | 'friendly' | 'sales';
@@ -308,6 +310,7 @@ const COPY_GEN_SYSTEM = `당신은 리테일 브랜드 모바일 DM 카피라이
 - 개인화 변수는 %고객명% 같은 형태 유지
 - 구체 혜택 수치(20%, 5만원, 1+1, 무료배송, 쿠폰 금액, 사은품, 당첨 인원, 남은 수량 등) 절대 생성 금지. 회사가 직접 채울 자리이므로 비워 둔다
 - 모르는 사실(상품명·가격·일정·수량)을 지어내지 않는다. 구조와 분위기만 카피로 표현
+${EFFICACY_PROMPT_RULES}
 - JSON 외 다른 텍스트 출력 금지`;
 
 /** ★ 2026-07-16 M1 — 카피 생성에 행사 원문·브리프를 직투입하는 컨텍스트 (요약 병목 제거) */
@@ -331,7 +334,11 @@ export async function resolveDmCopyBrainSuffix(companyId?: string): Promise<stri
   }
 }
 
-export async function generateCopy(spec: CampaignSpec, section: Section, companyId?: string, eventContext?: EventCopyContext, copyBrainSuffix?: string): Promise<CopyDraft> {
+/**
+ * @param humanGround ★ 2026-10-24 ② 효능 근거 = 사람이 보고 남긴 글(한 줄 · 행사 원문 · 브랜드 · 상품 이름). 없으면 행사 원문.
+ *   specSummary(parsePrompt 의 AI 요약)는 효능 근거가 아니다(자기 참조).
+ */
+export async function generateCopy(spec: CampaignSpec, section: Section, companyId?: string, eventContext?: EventCopyContext, copyBrainSuffix?: string, humanGround?: string): Promise<CopyDraft> {
   const specSummary = JSON.stringify({
     brand: spec.brand.name,
     objective: spec.objective,
@@ -465,76 +472,86 @@ ${schema}`;
   const brainSuffix = copyBrainSuffix !== undefined ? copyBrainSuffix : await resolveDmCopyBrainSuffix(companyId);
   if (brainSuffix) genSystem = genSystem + brainSuffix;
 
-  const text = await callAIWithFallback({
-    system: genSystem,
-    userMessage,
-    maxTokens: 800,
-    temperature: 0.8,
-    model: 'opus',
-    companyId,
-    source: 'dm-copy', // ★ D227+ 종량제: 집계용(맵 미등록=0). dm-builder 묶음 안에선 자동 0
-  });
-  const draft = extractJson<CopyDraft>(text);
-  // ★ 2026-07-16 M1 출구 가드 — 원문 투입 시 카피의 혜택·수치 토큰은 전부 원문에 실존해야 한다.
-  //   지시(프롬프트)는 확률적으로 뚫린다 — 보장은 출구에서 코드가 한다 (0706 Liquid 사고 원칙).
-  //   위반 필드만 버리고 나머지는 유지(전체 실패 X — 빈 필드는 기존 placeholder 규칙).
-  // ★ 2026-09-30 WP2 — 행사 원문이 없을 때도 같은 출구 가드. 근거 = 캠페인 스펙(사용자 요청에서 뽑은 혜택 · 대상 · 목적).
-  //   옛: 원문이 없으면 "구체 혜택 수치 생성 금지" 지시뿐이라 지어낸 수치가 그대로 나갈 수 있었다.
-  const factGround = rawEvent || specSummary;
-  {
+  // ★ 2026-10-24 ② 「1회 생성」 = 부르기 + 혜택 출구 가드 + 효능 거름(재생성 결과도 같은 거름을 지난다)
+  const effGround = humanGround !== undefined ? humanGround : rawEvent;
+  const runOnce = async (retryHint: string): Promise<{ draft: CopyDraft; headlinesLost: boolean; dropped: number }> => {
+    const text = await callAIWithFallback({
+      system: retryHint ? `${genSystem}\n- 다시 쓰기: ${retryHint}` : genSystem,
+      userMessage,
+      maxTokens: 800,
+      temperature: 0.8,
+      model: 'opus',
+      companyId,
+      source: 'dm-copy', // ★ D227+ 종량제: 집계용(맵 미등록=0). dm-builder 묶음 안에선 자동 0
+    });
+    const draft = extractJson<CopyDraft>(text);
+    // ★ 2026-07-16 M1 출구 가드 — 원문 투입 시 카피의 혜택·수치 토큰은 전부 원문에 실존해야 한다.
+    //   지시(프롬프트)는 확률적으로 뚫린다 — 보장은 출구에서 코드가 한다 (0706 Liquid 사고 원칙).
+    //   위반 필드만 버리고 나머지는 유지(전체 실패 X — 빈 필드는 기존 placeholder 규칙).
+    // ★ 2026-09-30 WP2 — 행사 원문이 없을 때도 같은 출구 가드. 근거 = 캠페인 스펙(사용자 요청에서 뽑은 혜택 · 대상 · 목적).
+    //   옛: 원문이 없으면 "구체 혜택 수치 생성 금지" 지시뿐이라 지어낸 수치가 그대로 나갈 수 있었다.
+    const factGround = rawEvent || specSummary;
     const d: any = draft;
     if (Array.isArray(d.headlines)) d.headlines = d.headlines.filter((h: any) => copyFactsExistInText(h?.text, factGround));
     if (Array.isArray(d.subCopies)) d.subCopies = d.subCopies.filter((s: any) => copyFactsExistInText(s, factGround));
     if (Array.isArray(d.ctaLabels)) d.ctaLabels = d.ctaLabels.filter((l: any) => copyFactsExistInText(l, factGround));
     if (d.body && !copyFactsExistInText(d.body, factGround)) d.body = '';
+    // ★ 2026-10-24 세 채널 구조체크 ② — 근거 없는 효능(근거 = 사람 글 · 판정 = copy-benefit-detector 효능 절)
+    //   후보 = 걸린 후보만 버림 · 본문 = 문장 빼기(다 빠지면 직접 채울 자리) · 첫 헤드라인 + 본문 = 문장 경계로 이어 읽기
+    let dropped = 0;
+    const keep = <T,>(arr: T[], textOf: (x: T) => string): T[] => {
+      const out = arr.filter((x) => !claimsInventedEfficacy(textOf(x), effGround));
+      dropped += arr.length - out.length;
+      return out;
+    };
+    const hadHeadlines = Array.isArray(d.headlines) && d.headlines.length > 0;
+    if (Array.isArray(d.headlines)) d.headlines = keep(d.headlines, (h: any) => String(h?.text || ''));
+    if (Array.isArray(d.subCopies)) d.subCopies = keep(d.subCopies, (x: any) => String(x || ''));
+    if (Array.isArray(d.ctaLabels)) d.ctaLabels = keep(d.ctaLabels, (x: any) => String(x || ''));
+    if (d.body) {
+      const r = dropInventedEfficacy(String(d.body), effGround);
+      dropped += r.dropped.length;
+      d.body = r.text;
+    }
+    if (Array.isArray(d.headlines) && d.headlines.length > 0 && d.body) {
+      const ok = d.headlines.findIndex((h: any) => !pairClaimsInventedEfficacy(String(h?.text || ''), String(d.body), effGround));
+      if (ok < 0) { dropped += d.headlines.length; d.headlines = []; }
+      else if (ok > 0) d.headlines = [d.headlines[ok], ...d.headlines.filter((_: any, i: number) => i !== ok)];
+    }
+    // ★ Codex 1R — 히어로 = 첫 헤드라인 + 부제를 이어 읽는다 · 걸린 부제 후보만 버린다(부제 = 비워도 되는 칸)
+    if (Array.isArray(d.headlines) && d.headlines.length > 0 && Array.isArray(d.subCopies)) {
+      const head = String(d.headlines[0]?.text || '');
+      const kept = d.subCopies.filter((x: any) => !pairClaimsInventedEfficacy(head, String(x || ''), effGround));
+      dropped += d.subCopies.length - kept.length;
+      d.subCopies = kept;
+    }
+    return { draft, headlinesLost: hadHeadlines && (!Array.isArray(d.headlines) || d.headlines.length === 0) && dropped > 0, dropped };
+  };
+  let r = await runOnce('');
+  let droppedTotal = r.dropped;
+  // 헤드라인 후보가 효능으로 다 빠졌을 때만 이 섹션을 한 번 다시 만든다(묶음 안 · 고객 차감 0)
+  if (r.headlinesLost) { r = await runOnce(EFFICACY_RETRY_HINT); droppedTotal += r.dropped; }
+  if (r.headlinesLost && section.type !== 'cta') {
+    // 그래도 없으면 직접 채울 자리(버튼 섹션은 기본 라벨 「자세히 보기」가 남는다 · 말없이 빈 헤드라인 0)
+    (r.draft as any).headlines = [{ style: 'direct', text: HEADLINE_PLACEHOLDER }];
   }
-  return draft;
-}
-
-// ────────────── 4. Tone Transformer ──────────────
-
-const TONE_SYSTEM = `당신은 카피 톤 변환 전문가입니다.
-주어진 원문을 지정된 톤으로 자연스럽게 변환합니다.
-
-톤 종류:
-- direct: 직관형 (혜택을 바로 제시)
-- emotional: 감성형 (고객의 순간/감정 자극)
-- premium: 고급형 (절제된 언어, 여백의 미)
-- urgent: 긴박형 (원문에 있는 기간 · 수량만 강조. 원문에 없는 마감 · 희소성은 만들지 않는다)
-- friendly: 친절형 (따뜻한 어투)
-- sales: 세일즈형 (구매 전환 강조)
-
-제약:
-- 한국어 유지
-- 원문의 길이 대비 ±30% 이내
-- 이모지 사용 금지. 원문에 있던 이모지도 제거 (2026-07-02 디자인 v2 카피 규율)
-- 원문의 사실(상품명 · 혜택과 그 숫자 · 날짜 · 기간 · 수량 · 장소)은 그대로 둔다. 원문에 없는 숫자 · 혜택 · 조건을 새로 쓰지 않는다
-- 출력은 JSON: { "text": "변환된 문장" }
-- JSON 외 다른 텍스트 금지`;
-
-export async function transformTone(text: string, targetTone: ToneKey, companyId?: string): Promise<string> {
-  const userMessage = `원문: "${text}"
-목표 톤: ${targetTone} (${TONE_LABELS[targetTone] || targetTone})
-
-변환 결과를 JSON으로 반환.`;
-
-  const raw = await callAIWithFallback({
-    system: TONE_SYSTEM,
-    userMessage,
-    maxTokens: 300,
-    temperature: 0.7,
-    model: 'opus',
-    companyId,
-    source: 'dm-tone', // ★ D227+ 종량제: 집계용(맵 미등록=0)
-  });
-  const parsed = extractJson<{ text: string }>(raw);
-  const out = String(parsed.text || '').trim();
-  // ★ 2026-09-30 WP2 — 톤만 바꾼다. 원문에 없던 숫자 · 혜택 값이 생기면 원문을 그대로 돌려준다(긴박형 마감 창작 부류).
-  if (!out || findNewNumbers(out, text).length > 0 || findInventedBenefits(out, text).length > 0) return text;
-  return out;
+  r.draft.efficacyDropped = droppedTotal;
+  return r.draft;
 }
 
 // ────────────── 5. Improve Message (전체 섹션) ──────────────
+
+/** 섹션당 남기는 개선 제안 상한(부분 수락 조합 검사 = 2^n · 섹션 칸은 4개 안팎) */
+const IMPROVE_KEEP_PER_SECTION = 6;
+/**
+ * DM 섹션 글 칸의 화면 표시 순서(dm-section-renderer 의 변형 전부를 읽어 확인 · 변형은 편집기에서 바뀌므로 그 타입의 순서 **전부**를 본다).
+ *   히어로 = 제목 → 부제(5 변형 같음) · 텍스트 카드 = 태그 → 제목 → 본문(classic · lead · framed) · 인용형(quote) = 제목 → 본문 → 태그(★ Codex 5R).
+ *   소비처 = improveMessage(부분 조합 이어 읽기) · sales-outreach-produce sanitizeDmCopyBenefits(AI 영업 · 고객 입구 거름). 표에 없는 타입 = 칸끼리 잇지 않는다.
+ */
+export const DM_READING_ORDERS: Partial<Record<string, ReadonlyArray<readonly string[]>>> = {
+  hero: [['headline', 'sub_copy']],
+  text_card: [['tag', 'headline', 'body'], ['headline', 'body', 'tag']],
+};
 
 const IMPROVE_SYSTEM = `당신은 리테일 DM 카피 편집자입니다.
 여러 섹션의 카피를 받아 다음 기준으로 개선안을 제시합니다:
@@ -544,6 +561,7 @@ const IMPROVE_SYSTEM = `당신은 리테일 DM 카피 편집자입니다.
 - 혜택 강조 순서 개선
 - 너무 장황한 문구 축약
 - 반복 표현 제거
+${EFFICACY_REWRITE_RULE}
 
 출력 JSON:
 { "suggestions": [
@@ -560,7 +578,7 @@ export type ImprovementSuggestion = {
   reason: string;
 };
 
-export async function improveMessage(sections: Section[], brandKit?: DmBrandKit, companyId?: string): Promise<ImprovementSuggestion[]> {
+export async function improveMessage(sections: Section[], brandKit?: DmBrandKit, companyId?: string): Promise<{ suggestions: ImprovementSuggestion[]; rejected: number }> {
   // AI가 분석 가능한 섹션만 추려 페이로드 축소
   const payload = sections
     .filter((s) => SECTION_META[s.type].aiAware && s.visible && !s.ai_locked)
@@ -570,7 +588,7 @@ export async function improveMessage(sections: Section[], brandKit?: DmBrandKit,
       props: extractEditableFields(s),
     }));
 
-  if (payload.length === 0) return [];
+  if (payload.length === 0) return { suggestions: [], rejected: 0 };
 
   const userMessage = `브랜드 톤: ${brandKit?.tone || 'friendly'}
 
@@ -589,12 +607,44 @@ ${JSON.stringify(payload, null, 2)}
     source: 'dm-improve', // ★ D227+ 종량제: 집계용(맵 미등록=0)
   });
   const parsed = extractJson<{ suggestions?: ImprovementSuggestion[] }>(raw);
-  // ★ 2026-09-30 WP2 — 개선은 표현만. before 에 없던 숫자 · 혜택 값이 after 에 생긴 제안은 뺀다.
-  return (parsed.suggestions || []).filter((sg) => {
-    const before = String(sg?.before || '');
+  // ★ 2026-09-30 WP2 — 개선은 표현만. 고치기 전 글에 없던 숫자 · 혜택 값이 고친 글에 생긴 제안은 뺀다.
+  // ★ 2026-10-24 세 채널 구조체크 ② — 판정 = rewriteAddsFacts(숫자 ∥ 혜택 ∥ 효능) · 근거 = **요청 sections 의 실제 칸 값**
+  //   (옛: AI 가 돌려준 sg.before 를 근거로 써 자기 참조였다 · 화면은 after 를 그 칸에 그대로 넣는다). 화면 비교의 「전」도 실제 값으로 싣는다.
+  //   ★ Codex 1R — 판정 단위 = 그 섹션의 칸 전부(바뀐 칸 + 그대로 둔 칸을 고객이 이어 읽는다).
+  //   ★ Codex 2R — 사람은 제안을 골라 받는다 → 그 섹션에 남긴 제안의 **모든 부분 조합** + 이 제안이 걸리지 않아야 남긴다
+  //     (새 제안을 더할 때 그것을 포함한 조합만 보면 귀납으로 전 조합이 덮인다 · 섹션당 남기는 제안 상한 = IMPROVE_KEEP_PER_SECTION).
+  const byId = new Map(sections.map((s) => [s.id, s]));
+  const kept = new Map<string, Array<{ field: string; after: string }>>();   // 섹션 id → 남긴 제안(순서 = 화면이 적용하는 순서)
+  //   ★ Codex 3R · 4R · 5R — 이어 읽기는 **화면 표시 순서를 확인한 섹션**만(DM_READING_ORDERS · 변형마다의 순서 전부 · 빈 칸을 채우는 제안도 제자리) · 편집 칸 표는 표시 순서가 아니다
+  //     (머리글은 변형마다 보이는 칸이 다르다). 숫자 · 혜택 · 칸 하나의 효능 = 그 칸의 실제 값 대비 rewriteAddsFacts(지금 계약).
+  const partsOf = (order: readonly string[], f: Record<string, unknown>) => order.map((k) => f[k]).filter((v): v is string => typeof v === 'string');
+  let rejected = 0;
+  const suggestions: ImprovementSuggestion[] = [];
+  for (const sg of parsed.suggestions || []) {
+    const sec = byId.get(String(sg?.section_id || ''));
+    if (!sec) { rejected += 1; continue; }
+    const fields = extractEditableFields(sec);
+    const field = String(sg?.field || '');
+    const actual = typeof fields[field] === 'string' ? String(fields[field]) : '';
     const after = String(sg?.after || '');
-    return findNewNumbers(after, before).length === 0 && findInventedBenefits(after, before).length === 0;
-  });
+    if (rewriteAddsFacts(after, actual || JSON.stringify(fields))) { rejected += 1; continue; }
+    const orders = DM_READING_ORDERS[sec.type];
+    if (orders) {
+      const prev = kept.get(sec.id) || [];
+      if (prev.length >= IMPROVE_KEEP_PER_SECTION) continue;   // 상한 넘는 제안은 싣지 않는다(고객 글을 바꾸지 않음 · 조합 검사 2^n 상한)
+      let bad = false;
+      for (let mask = 0; mask < (1 << prev.length) && !bad; mask++) {
+        const state: Record<string, unknown> = { ...fields };
+        prev.forEach((p, i) => { if (mask & (1 << i)) state[p.field] = p.after; });
+        state[field] = after;
+        bad = orders.some((order) => readingAddsEfficacy(partsOf(order, state), partsOf(order, fields)));
+      }
+      if (bad) { rejected += 1; continue; }
+      kept.set(sec.id, [...prev, { field, after }]);
+    }
+    suggestions.push(actual ? { ...sg, before: actual } : sg);
+  }
+  return { suggestions, rejected };
 }
 
 // ────────────── 내부 헬퍼 ──────────────
@@ -684,6 +734,8 @@ export interface OneShotResult {
   coverage?: { missing: BriefCoverageItem[] };
   /** ★ 2026-09-03 참조 골격 — 구성이 어디서 왔는가(근거 패널이 지어내지 않게). 참조 골격을 쓴 경우에만 실린다. */
   structureSource?: { source: StructureSource; skeletonId: string; chainIdx: number; variant: 'media' | 'catalog'; removed: SectionType[] };
+  /** ★ 2026-10-24 ② 근거 없는 효능으로 뺀 수(섹션 합) — 라우트가 결과 안내 문장(efficacyNote)으로 싣는다 */
+  efficacyDropped?: number;
 }
 
 // ────────────── ★ 2026-07-16 M1 — 브리프 → 섹션 결정적 주입/보강 (순수 — 계약 테스트 고정) ──────────────
@@ -879,6 +931,11 @@ export async function oneShotGenerate(opts: {
    * 확정 카드와 같은 자리(장 나누기 · 비주얼 디렉터보다 앞)에서 코드가 놓는다(AI 를 지나지 않는다). 미지정 = 지금 그대로.
    */
   lineMaterials?: { heroImageUrl?: string | null; linkUrl?: string | null };
+  /**
+   * ★ 2026-10-24 ② 효능 근거로 쓸 사람 글(호출부가 보증 · 라우트가 행사 원문을 우리 규칙 문장으로 감싸 prompt 에 넣으므로 감싸기 전 글을 따로 받는다).
+   *   없으면 행사 원문(있을 때) 또는 prompt.
+   */
+  groundText?: string;
 }): Promise<OneShotResult> {
   const prompt = (opts.prompt || '').trim();
   const structure = opts.structure && Array.isArray(opts.structure.sectionTypes) && opts.structure.sectionTypes.length > 0
@@ -974,6 +1031,13 @@ export async function oneShotGenerate(opts: {
   // 3. 섹션 영역 생성 + 카피 자동 매핑
   // ★ 2026-09-26 한줄로 V2 R1-29 — 문안두뇌는 한 번만 읽어 섹션마다 넘긴다(같은 회사·채널·입력 = 같은 결과)
   const copyBrainSuffix = await resolveDmCopyBrainSuffix(opts.companyId);
+  // ★ 2026-10-24 ② 효능 근거 = 사람 글 + 브랜드 · 확정 상품 이름(AI 요약 spec · brief 는 근거가 아니다)
+  const efficacyGround = [
+    opts.groundText !== undefined ? opts.groundText : (rawEvent || prompt),
+    opts.brandName || '',
+    ...(Array.isArray(opts.confirmedCards) ? opts.confirmedCards.map((c: any) => String(c?.name || '')) : []),
+  ].filter(Boolean).join('\n');
+  let efficacyDropped = 0;
   const sections: Section[] = [];
   for (let i = 0; i < sectionTypes.length; i++) {
     const type = sectionTypes[i];
@@ -989,7 +1053,8 @@ export async function oneShotGenerate(opts: {
     const type = section.type as SectionType;
     if (!SECTION_META[type]?.aiAware) return;
     try {
-      const copy = await generateCopy(spec, section, opts.companyId, eventContext, copyBrainSuffix);
+      const copy = await generateCopy(spec, section, opts.companyId, eventContext, copyBrainSuffix, efficacyGround);
+      efficacyDropped += copy.efficacyDropped || 0;
       section.props = mergeCopyIntoProps(section.props as any, type, copy) as any;
     } catch (err) {
       console.warn(`[oneShotGenerate] generateCopy 실패 type=${type}:`, (err as any)?.message);
@@ -1102,6 +1167,7 @@ export async function oneShotGenerate(opts: {
     spec, sections: seeded, brandKit: enrichedKit, scenario: opts.scenario, layoutMode, pages,
     ...(brief ? { brief, coverage } : {}),
     ...(structureSource ? { structureSource } : {}),
+    ...(efficacyDropped > 0 ? { efficacyDropped } : {}),
   };
 }
 

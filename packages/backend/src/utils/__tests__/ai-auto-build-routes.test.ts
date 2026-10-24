@@ -53,8 +53,9 @@ describe('★ T4 라우트 — materials v1 분기 · ENV AND · 잠금 · 오�
     expect(route).toContain('generateEmailFromMaterials(');
     // ★ 2026-10-10 한 줄 이메일 — 혜택 답이 있을 때만 요청 글에 [혜택] 줄(genPrompt = prompt · 답 없으면 같은 글)
     expect(route).toContain('const result = await generateEmailSections({ companyId: auth.companyId, userId: auth.userId, prompt: genPrompt, scenario, isAd, eventText });');
-    // ★ 2026-10-17 단계 모달 요청이 아니면 옛 조립 그대로(단계 요청 = buildLineStepsEventText)
-    expect(route).toContain('(lineOn && lineFacts ? buildLineEventText(linePrompt, lineFacts) : linePrompt);');
+    // ★ 2026-10-24 세 채널 구조체크 ⑧ — 단계 없는 한 줄 갈래를 지웠다: 한 줄 요청은 단계(LINE_STEPS_REQUIRED 400) · 그 밖은 옛 일반 조립 그대로(genPrompt = linePrompt)
+    expect(route).toContain("if (oneLineReq && !steps) return res.status(400).json({ success: false, error: '화면을 새로 고친 뒤 한 줄을 다시 넣어 주세요.', code: 'LINE_STEPS_REQUIRED' });");
+    expect(route).toMatch(/textProducts: steps\.textProducts \}\)\n\s+: linePrompt;/);
   });
   it('견적 — POST /materials/quote(v1 · 정규화·게이트·역할·견적) · aiAutoBuildEnabled 403 · 오류 매핑 · GET 옛 견적 그대로', () => {
     const ec = code('routes/event-campaigns.ts');

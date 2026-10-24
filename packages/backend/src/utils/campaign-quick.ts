@@ -27,7 +27,7 @@ import { readImageSize } from './sales-outreach-media';
 import { assembleDmCampaign, type EngineMaterials, type EngineResult, type EngineEventCard, type EngineOptions, type EngineFeaturesResult } from './campaign-engine';
 import { outreachEngineDeps, produceOutreachBrandEmail, type BrandEmailResult, type BrandEmailImpl } from './sales-outreach-produce';
 // ★ 2026-09-15 AI 자동제작 고객 채우기(사용자 재료 우선 · 아웃리치 채우기 무변경) · 이메일 후처리 순수 함수
-import { customerEngineDeps, fillCustomerStandard, customerFillNotes, keepLastCtaBar, licensedPreheaderOf } from './campaign-customer-fill';
+import { customerEngineDeps, fillCustomerStandard, customerFillNotes, keepLastCtaBar } from './campaign-customer-fill';
 import { OUTREACH_DM_LAYOUT_MODE, OUTREACH_NEUTRAL_PRIMARY, accessiblePrimaryOf, outreachArtDirection, lookStatsOf, type OutreachLookStats } from './sales-outreach-look';
 import { createEmailCampaign, deleteEmailCampaign, type CreateCampaignInput } from './email-channel';
 import { isSmtpConfigured } from './company-smtp-client';
@@ -990,8 +990,8 @@ export async function generateFromBuildMaterials(
       },
       mediaSelection: null, ctaLinks: fromCards.ctaLinks, legal: null, brandColor: null, proof: null, entry: 'customer', eventCards, features: m.features,
     }, { fill: (s, ch) => fillCustomerStandard(s, engineMaterials, ch) });
-    // ★ 2026-09-15 CTA 풀폭 띠는 마지막 1개만(공용 룩 무변경) · 프리헤더는 면허 밖 수치를 거른 값만
-    sections = keepLastCtaBar(r.sections); pages = []; look = lookStatsOf(sections); benefitStripped = r.benefitStripped; features = r.features; subject = r.subject; preheader = licensedPreheaderOf(r.preheader, licensedQuote) || null;
+    // ★ 2026-09-15 CTA 풀폭 띠는 마지막 1개만(공용 룩 무변경) · 프리헤더는 면허 밖 수치 · 근거 없는 효능을 거른 값만(★ 1024 ② 거름 = 생산자 출구 produceOutreachBrandEmail)
+    sections = keepLastCtaBar(r.sections); pages = []; look = lookStatsOf(sections); benefitStripped = r.benefitStripped; features = r.features; subject = r.subject; preheader = r.preheader || null;
     name = buildDraftTitle(m.eventCards, companyName, 60);
     // 미리보기·발송은 캠페인 design 으로 다시 렌더한다 · 생성 렌더와 저장이 같은 design 을 쓴다(주색 보정 · 업종 아트디렉션 · 프리헤더)
     const design = normalizeEmailDesign({ palette: { primary: brandKit.primary_color }, art_direction: artDirection, ...(preheader ? { preheader } : {}) });

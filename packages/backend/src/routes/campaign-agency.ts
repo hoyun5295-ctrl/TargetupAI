@@ -26,6 +26,7 @@ import {
 import { nextStatusAfterDesign, canCustomerDownloadProposal } from '../utils/crm-agency-access';
 import { sendSystemAlert } from '../utils/system-alert';
 
+import { publicErrorText } from '../utils/http-error';
 const router = Router();
 router.use(authenticate);
 
@@ -157,7 +158,7 @@ function withImageUpload(handler: (req: any, res: Response) => Promise<any>) {
           return res.status(429).json({ success: false, error: err.message });
         }
         console.error('[캠페인대행 업로드 핸들러] 오류:', err?.message || err);
-        return res.status(err?.statusCode === 400 ? 400 : 500).json({ success: false, error: err?.message || '처리 실패' });
+        return res.status(err?.statusCode === 400 ? 400 : 500).json({ success: false, error: publicErrorText(err, '처리 실패') });
       }
     });
   };
@@ -517,7 +518,7 @@ router.post('/admin/requests/:id/design', requireSuperAdmin, async (req: Request
   } catch (err: any) {
     if (missingRelationResponse(res, err)) return;
     console.error('[캠페인대행 design] 오류:', err);
-    return res.status(500).json({ success: false, error: err?.message || '분석 실행 실패' });
+    return res.status(500).json({ success: false, error: publicErrorText(err, '분석 실행 실패') });
   }
 });
 

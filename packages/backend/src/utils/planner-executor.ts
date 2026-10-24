@@ -21,13 +21,15 @@
  *     토큰이 안 맞으면 그 실행은 아무것도 바꾸지 않고 물러난다(not_due · 판정은 새 주인).
  *   - 예정일은 선점 직전·직후에 다시 본다 — 그 사이 승인 풀기 · 날짜 변경 · 다시 승인이 끼면 다른 날의 접점을 오늘 보낸다(2R H5).
  *   - 고객에게 보이는 사유는 사전 문장만(planner-reasons · F4) · 원문 오류는 로그에만.
- *   - 문안비(10)는 발송 커밋 뒤 멱등키 `planner-send:{캐리어}`로 1회.
+ *   - 문안비(10)는 ★ 2026-10-24 **보내기 직전에 엄격하게** 잡는다(키 = 캐리어 + 적재 묶음 · 뿌리 대장 R4) · 확실히 안 나간 시도는 그 자리에서 되돌린다 ·
+ *     잡은 뒤 끊긴 시도는 대조 워커가 30분 뒤 되돌린다(releaseUnsentPlannerSendCharges). 옛: 커밋 뒤 비엄격 차감 = 그 사이 잔액이 빠지면 무과금 발송.
  */
 import { randomUUID } from 'crypto';
+import { query } from '../config/database';
 import { SEND_HOURS } from '../config/defaults';
 import { isSendableHourKst, hasUneditedBenefitPlaceholder } from './autosend-policy';
-import { getOpt080Number } from './messageUtils';
-import { checkCredit, deductCreditSafe, InsufficientCreditError } from './ai-credit';
+import { checkCredit, deductCreditOutcome, refundCredit, InsufficientCreditError } from './ai-credit';
+import { lineStepsCollected } from './line-steps-context';
 import { getCreditCost } from './ai-credit-calc';
 import { createDirectSendCampaign } from './direct-send-core';
 import { DirectSendError } from './direct-send-spec';
@@ -66,8 +68,8 @@ import {
 import { cleanupPlannerStaging, loadPlannerStaging, resolvePlannerAudience, resolvePlannerEmailRecipients } from './planner-audience';
 import { inspectDmForCarry, isDmCarryable } from './planner-dm-check';
 import { checkChannelReadiness } from './planner-channel-gate';
-import { computeTouchpointFingerprints } from './planner-confirm';
-import { loadPlannerDefaultCallback, spamCheckPlannerVerdict } from './planner-copy';
+import { computeTouchpointFingerprints, plannerNumbersMatch, plannerNumbersOf, plannerSendNumberTexts } from './planner-confirm';
+import { spamCheckPlannerVerdict } from './planner-copy';
 import { enterPairRecheck, kickPlannerReview, recheckPastDeadlineNotice, revertEventToReview, settleEventIfFinished } from './planner-review';
 import { kickPlannerRecheck, runPlannerRecheckPass } from './planner-recheck';
 import { firstSendDate } from './planner-event';
@@ -364,9 +366,17 @@ async function executeMessagingCore(
   // ① 준비 판정(F2 · 재료 창 · 승인과 같은 함수)
   const ready = await checkChannelReadiness(tp.channel === 'dm' ? 'dm' : 'sms', { companyId: tp.companyId, userId: tp.createdBy, phase: 'send' });
   if (!ready.ok) return end('locked', ready.reason || PLANNER_REASON.sendFailed, `'${tp.title}' ${label} 발송을 보류했습니다. ${ready.reason || ''}`.trim());
-  const callback = await loadPlannerDefaultCallback(tp.companyId);
-  const opt080 = await getOpt080Number(tp.createdBy || null, tp.companyId);
+  // 번호는 한 번 읽어 대조 · 발송에 같은 값(확인 화면 · 승인과 같은 함수 · ★ 1024 R5)
+  const sendNo = await plannerSendNumberTexts(tp.companyId, tp.createdBy);
+  const callback = sendNo.callback;
+  const opt080 = sendNo.opt080;
   if (!callback || !opt080) return end('locked', PLANNER_REASON.sendFailed, `'${tp.title}' ${label} 발송에 쓸 발신번호 또는 무료거부 번호를 확인하지 못해 보류했습니다.`);
+  // ★ 2026-10-24 R5 — 승인 때 각인한 번호 = 지금 보낼 번호(확인 화면에서 본 문자 = 나가는 문자 · 쌍이면 둘 다)
+  const nowNumbers = plannerNumbersOf(sendNo);
+  if (!plannerNumbersMatch(tp.execMeta?.approved?.numbers, nowNumbers) || (link.dm && !plannerNumbersMatch(link.dm.execMeta?.approved?.numbers, nowNumbers))) {
+    return review(PLANNER_REASON.changedAfterApproval, false,
+      `'${tp.title}' 승인한 뒤 보내는 번호(발신번호 · 무료거부 번호)가 바뀌어 오늘 발송을 멈췄습니다. 바뀐 내용을 확인한 뒤 다시 승인해 주세요. 다시 승인해도 크레딧은 두 번 빠지지 않습니다.`);
+  }
 
   // ② 지문 대조 ① — 선점 직후(승인한 것 = 나가는 것)
   if (!(await fingerprintsMatch(tp, link, claim))) {
@@ -441,6 +451,8 @@ async function executeMessagingCore(
 
   // ⑦ 커밋
   let campaignId: string;
+  const chargeKey = plannerSendKey(tp.id, stagingId);
+  let chargedNow = false;
   try {
     if (!(await stampSendAttempt(tp, claim, { staging_id: stagingId }, link.dm))) {
       // 이 실행이 더는 주인이 아니다(회수·다시 시작) — 보내지 않고 손대지 않는다(새 주인이 판정한다)
@@ -449,6 +461,29 @@ async function executeMessagingCore(
       return 'not_due';
     }
     hooks.onStamp();
+    // ★ 2026-10-24 R4 — 문안비를 **보내기 직전에** 엄격하게 잡는다(모자라면 보내지 않고 보류 · 원장 확인 실패 = 보내지 않는다)
+    if (cost > 0) {
+      let out: Awaited<ReturnType<typeof deductCreditOutcome>>;
+      try {
+        out = await deductCreditOutcome({
+          companyId: tp.companyId, cost, source: PLANNER_SEND_SOURCE, createdBy: tp.createdBy, idempotencyKey: chargeKey, throwOnInsufficient: true,
+        });
+      } catch (err) {
+        if (!(err instanceof InsufficientCreditError)) throw err;
+        await cleanupPlannerStaging(stagingId);
+        await clearSendAttempt(tp, link.dm, 'INSUFFICIENT_CREDIT');
+        hooks.onAbort();
+        return end('held', PLANNER_REASON.creditShort, `'${tp.title}' ${label} 발송이 크레딧 부족으로 보류됐습니다. 충전 후 [다시 시작]을 눌러 주세요.`);
+      }
+      if (!lineStepsCollected(out)) {
+        // 원장이 차감을 확정하지 못했다 — 보내지 않는다(표식을 걷어 다음 주기가 다시 본다 · 무과금 발송 0)
+        await cleanupPlannerStaging(stagingId);
+        await clearSendAttempt(tp, link.dm, 'CHARGE_UNCONFIRMED');
+        hooks.onAbort();
+        throw new Error(`문안비 차감을 확인하지 못해 보내지 않았습니다(${out})`);
+      }
+      chargedNow = out === 'deducted';
+    }
     const res = await createDirectSendCampaign(
       {
         stagingId,
@@ -473,11 +508,13 @@ async function executeMessagingCore(
       // 커밋이 확정적으로 안 됐다 — 표식을 걷어 무발송 달의 환불이 막히지 않게 한다.
       await clearSendAttempt(tp, link.dm, String(e.code));
       hooks.onAbort();
+      // ★ 2026-10-24 R4 — 이번 시도에 잡은 문안비를 돌려준다(확실히 안 나갔다 · 실패하면 대조 워커가 30분 뒤 다시)
+      if (chargedNow) await releasePlannerSendCharge(tp.companyId, chargeKey, cost);
       console.warn(`[planner-executor] 발송 접수 거부 tp=${tp.id} code=${e.code}: ${String(e.message || '').slice(0, 200)}`);
       if (e.code === 'INSUFFICIENT_BALANCE') {
         return end('held', PLANNER_REASON.creditShort, `'${tp.title}' ${label} 발송 잔액이 부족해 보류했습니다. 충전 후 [다시 시작]을 눌러 주세요.`);
       }
-      const why = sendRejectReason(String(e.code));
+      const why = sendRejectReason(String(e.code), String(e.message || ''));
       return end('locked', why, `'${tp.title}' ${label} 발송을 보류했습니다. ${why}`);
     }
     // ⛔ 표식을 남긴 뒤의 실패는 **다시 시도하지 않는다** — 커밋 여부를 확정할 수 없어 자동 재시도가 곧 이중 발송이 된다. 사람이 판정한다.
@@ -493,13 +530,6 @@ async function executeMessagingCore(
     return 'locked';
   }
 
-  // 발송이 커밋됐다 — 문안 크레딧을 멱등키로 1회 정산한다(미확정이면 [CREDIT][MISS] 로그 · 발송은 되돌리지 않는다).
-  if (cost > 0) {
-    const settled = await deductCreditSafe({
-      companyId: tp.companyId, cost, source: PLANNER_SEND_SOURCE, createdBy: tp.createdBy, idempotencyKey: plannerSendKey(tp.id),
-    });
-    if (!settled) console.warn(`[planner-executor] 문안 크레딧 미확정 tp=${tp.id} — [CREDIT][MISS] 로그 확인`);
-  }
   await markSent(
     tp, claim.token, campaignId, total,
     { campaign_id: campaignId, ...(link.url ? { dm_url: link.url } : {}), ...(link.dm ? { dm_touchpoint_id: link.dm.id } : {}) },
@@ -508,6 +538,46 @@ async function executeMessagingCore(
   await notifyPlanner(tp.companyId, tp.createdBy, '[마케팅 플래너] 발송 완료', `'${tp.title}' ${label} ${total.toLocaleString()}명 발송을 접수했습니다.`);
   console.log(`[planner-executor] ${tp.channel} 발송 tp=${tp.id}${link.dm ? ` +dm=${link.dm.id}` : ''} campaign=${campaignId} ${total}명 (${today})`);
   return 'sent';
+}
+
+/** ★ 2026-10-24 R4 — 확실히 안 나간 시도의 문안비 되돌림(`release:` 키 · 같은 키 두 번 환불 0 · 실패 = 대조 워커가 다시) */
+async function releasePlannerSendCharge(companyId: string, key: string, amount: number): Promise<void> {
+  try {
+    const out = await refundCredit({
+      companyId, amount, source: PLANNER_SEND_SOURCE,
+      reason: '마케팅 플래너 발송이 접수되지 않아 문안비를 돌려드림', idempotencyKey: `release:${key}`, originalIdempotencyKey: key,
+    });
+    if (out.refunded) console.log(`[planner-executor] 접수 안 된 시도 문안비 ${out.amount} 되돌림 key=${key}`);
+  } catch (e: any) {
+    console.error(`[planner-executor][REFUND-MISS] 문안비 되돌림 실패 key=${key}(대조 워커가 다시):`, e?.message || e);
+  }
+}
+
+/**
+ * ★ 2026-10-24 R4 — 잡아 둔 문안비 중 **보내지 못한 시도**만 30분 뒤 돌려준다(대조 워커 · 1시간 주기).
+ *   보내지 못한 시도 = 그 적재 묶음으로 만든 캠페인이 없고 · 접점의 시도 기록이 **더는 그 묶음을 들고 있지 않다**(상태 무관).
+ *   시도 기록(send_started_at)은 「확정 미커밋」에서만 지워진다(clearSendAttempt) → 지워진 뒤로는 그 묶음으로 커밋될 길이 없어 잠금 없이도 경합이 없다.
+ *   보내는 중 · 잠금(보낸 여부 모름 · recoverStale)은 기록이 남아 있으므로 되돌리지 않는다(사람 판정 · Codex 1024 1R).
+ *   거르는 조건은 전부 SQL 안(LIMIT 앞) — 정상 차감이 자리를 차지하지 않게(자동마케팅 1024 Codex 1R 과 같은 꼴).
+ *   캠페인이 있으면 전량 실패여도 남긴다(발송 결과는 캠페인 마감이 정한다 · 알려진 천장).
+ */
+export async function releaseUnsentPlannerSendCharges(): Promise<number> {
+  const r = await query(
+    `SELECT t.company_id, t.amount, t.idempotency_key
+       FROM ai_credit_transactions t
+      WHERE t.type = 'deduct' AND t.source = $1
+        AND t.idempotency_key LIKE 'planner-send:%:%'
+        AND t.created_at < NOW() - INTERVAL '30 minutes' AND t.created_at > NOW() - INTERVAL '7 days'
+        AND NOT EXISTS (SELECT 1 FROM ai_credit_transactions x WHERE x.idempotency_key = 'release:' || t.idempotency_key)
+        AND NOT EXISTS (SELECT 1 FROM campaigns c WHERE c.company_id = t.company_id AND c.staging_id::text = split_part(t.idempotency_key, ':', 3))
+        AND NOT EXISTS (SELECT 1 FROM planner_touchpoints p WHERE p.id::text = split_part(t.idempotency_key, ':', 2)
+                          AND p.exec_meta ? 'send_started_at' AND p.exec_meta->>'staging_id' = split_part(t.idempotency_key, ':', 3))
+      ORDER BY t.created_at ASC
+      LIMIT 20`,
+    [PLANNER_SEND_SOURCE],
+  );
+  for (const row of r.rows as any[]) await releasePlannerSendCharge(String(row.company_id), String(row.idempotency_key), Number(row.amount) || 0);
+  return r.rows.length;
 }
 
 /** 메일 — 승인 때 완성(50)한 캠페인을 예정일에 보낸다. 지문 · 준비 판정 · 내용 잠금 · 완성 여부를 다 본 뒤에만. */

@@ -44,6 +44,7 @@ import {
   syncRetryResponseBody,
 } from '../utils/sync-ingest';
 
+import { publicErrorText } from '../utils/http-error';
 const router = Router();
 
 // ★ 2026-07-01: 자동 업데이트 exe 릴리즈 디렉토리.
@@ -1672,14 +1673,13 @@ router.post('/field-definitions', async (req: SyncAuthRequest, res: Response) =>
       data: { upsertedCount }
     });
   } catch (error) {
-    // ★ D131 후속(2026-04-21): Agent 로그에서 원인 추적 가능하도록 에러 메시지를 응답에 포함.
-    //   (stack은 보안상 서버 console에만, 메시지는 운영에서도 공개 OK)
-    const errorMsg = error instanceof Error ? error.message : String(error);
+    // ★ D131 후속(2026-04-21) Agent 로그용 detail · ★ 2026-10-24 뿌리 대장 R10 = 원문(DB · 라이브러리)은 서버 로그에만,
+    //   detail 에는 우리 문장만(고객사 서버에 설치된 Agent 로그로 표 이름 · 내부 원문이 나가지 않게)
     console.error('[Sync Field Definitions Error]', error);
     return res.status(500).json({
       success: false,
       error: 'Failed to register field definitions',
-      detail: errorMsg,
+      detail: publicErrorText(error, '필드 정의를 저장하지 못했어요. 잠시 후 다시 시도해 주세요.'),
     });
   }
 });
@@ -1743,7 +1743,7 @@ router.post('/ai-mapping', async (req: SyncAuthRequest, res: Response) => {
     if (error instanceof AiMappingUnavailable) {
       return res.status(503).json({
         success: false,
-        error: error.message,
+        error: publicErrorText(error, 'AI 항목 맞추기를 지금 할 수 없어요. 잠시 후 다시 시도해 주세요.'),
         code: 'AI_MAPPING_UNAVAILABLE',
       });
     }

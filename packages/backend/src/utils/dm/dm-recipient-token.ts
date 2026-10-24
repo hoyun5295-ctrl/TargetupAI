@@ -121,6 +121,18 @@ export async function issueDmRecipientTokensBulk(
 }
 
 /**
+ * ★ 2026-10-24 세 채널 구조체크 ⑤ — 발송이 접수되지 않은 시도의 토큰을 지운다. 발급은 늘 새 토큰이라(재사용 0) 이번 시도 것만 지워진다.
+ *   남으면 캠페인 없는 토큰이 DM_TOKEN_SEND_STATE_SQL 에서 'sent' 로 읽혀 안 나간 사람이 「발송」으로 잡혔다.
+ */
+export async function discardDmRecipientTokens(dmId: string, companyId: string, tokens: string[]): Promise<void> {
+  if (tokens.length === 0) return;
+  await query(
+    `DELETE FROM dm_recipient_tokens WHERE dm_id = $1::uuid AND company_id = $2::uuid AND token = ANY($3::text[])`,
+    [dmId, companyId, tokens],
+  );
+}
+
+/**
  * ★ 2026-07-06 단축 코드 조회 (공개 리다이렉트 전용) — hlj.kr/<code> → 원 뷰어 URL 재료.
  * 만료 토큰도 dmCode는 반환(?r 없이 공용 렌더로 리다이렉트 — 링크가 죽지 않게).
  */

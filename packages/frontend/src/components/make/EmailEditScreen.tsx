@@ -62,7 +62,6 @@ export interface EmailEditScreenProps {
   campaignId?: string;
   completed?: boolean;
   fromName?: string;
-  hasPlaceholder?: boolean;
   /** 같은 재료로 만든 DM(있으면 머리 전환) */
   pairDmId?: string | null;
   /** ★ 2026-10-05 한 줄로 만든 이메일(스위치 켠 회사) — 완성도 줄 · 보강 시트를 그린다 */
@@ -77,7 +76,7 @@ export interface EmailEditScreenProps {
 
 export default function EmailEditScreen({
   initialSections, initialName, initialSubject, initialIsAd, initialDesign, aiGenerated, campaignId: initialId, completed,
-  fromName, hasPlaceholder, pairDmId, authHeaders, onClose, onSaved, onToast, lineAssist, onRegenerateWithBenefit,
+  fromName, pairDmId, authHeaders, onClose, onSaved, onToast, lineAssist, onRegenerateWithBenefit,
 }: EmailEditScreenProps) {
   const navigate = useNavigate();
   const [campaignId, setCampaignId] = useState<string | undefined>(initialId);
@@ -135,35 +134,43 @@ export default function EmailEditScreen({
   const lineTexts = useMemo(() => [...stringsDeep(sections), subject], [sections, subject]);
   const lineBenefitSlots = countSlots(lineTexts, 'benefit');
   const linePeriodSlots = countSlots(lineTexts, 'period');
-  const lineOtherSlots = Math.max(0, countEmailGatePlaceholders(lineTexts) - lineBenefitSlots - linePeriodSlots);
+  // ★ 2026-10-24 ② 효능 말을 뺀 상품 소개 자리 — 1곳 = 시트에서 채운다 · 2곳 이상 = 블록에서(같은 글을 여러 자리에 넣지 않는다)
+  const lineProductSlots = countSlots(lineTexts, 'product');
+  const lineProductFill = lineProductSlots === 1;
+  const lineGateSlots = countEmailGatePlaceholders(lineTexts);
+  const lineOtherSlots = Math.max(0, lineGateSlots - lineBenefitSlots - linePeriodSlots - lineProductSlots);
   const lineCanRegen = !!lineAssist?.gapBenefit && lineBenefitSlots === 0 && !!onRegenerateWithBenefit;
   const lineFields: LineFactsField[] = [
     ...(lineBenefitSlots > 0 || lineCanRegen ? (['benefit'] as const) : []),
     ...(linePeriodSlots > 0 ? (['period'] as const) : []),
+    ...(lineProductFill ? (['product'] as const) : []),
   ];
   const lineItems: FixItem[] = useMemo(() => {
     if (!lineAssist) return [];
     const out: FixItem[] = [];
     if (lineBenefitSlots > 0) out.push({ kind: 'must', title: `혜택 자리 ${lineBenefitSlots}곳이 비었어요`, sub: '적어 주시면 그 자리에 그대로 넣어요 · 무료', action: '채우기' });
     if (linePeriodSlots > 0) out.push({ kind: 'must', title: `기간 자리 ${linePeriodSlots}곳이 비었어요`, sub: '적어 주시면 그 자리에 그대로 넣어요 · 무료', action: '채우기' });
+    if (lineProductFill) out.push({ kind: 'must', title: '상품 소개 자리 1곳이 비었어요', sub: '효능 말을 뺀 자리예요 · 적어 주시면 그대로 넣어요 · 무료', action: '채우기' });
+    if (lineProductSlots > 1) out.push({ kind: 'must', title: `상품 소개 자리 ${lineProductSlots}곳이 남았어요`, sub: '효능 말을 뺀 자리예요 · 블록에서 사용감이나 쓰는 장면으로 적어 주세요' });
     if (lineOtherSlots > 0) out.push({ kind: 'must', title: `직접 채울 자리 ${lineOtherSlots}곳이 남았어요`, sub: '블록에서 그 자리를 고쳐 주세요' });
     if (!subject.trim()) out.push({ kind: 'must', title: '받은편지함 제목이 비었어요', sub: '위 제목 칸에 넣어 주세요' });
     if (lineCanRegen) out.push({ kind: 'suggest', title: '혜택을 적어 주시면 첫 줄이 혜택으로 시작해요', sub: `새 이메일로 만들어요 · ${AI_GENERATE_COSTS['email-ai-generate']}크레딧 · 지금 이메일은 그대로 남아요`, action: '넣기' });
     if (subject.trim()) out.push({ kind: 'ok', title: '받은편지함 제목 있음' });
-    if (lineBenefitSlots + linePeriodSlots + lineOtherSlots === 0) out.push({ kind: 'ok', title: '채울 자리 없음' });
+    if (lineGateSlots === 0) out.push({ kind: 'ok', title: '채울 자리 없음' });
     if (isAd) out.push({ kind: 'ok', title: '광고 표기 · 수신거부 자동' });
     return out;
-  }, [lineAssist, lineBenefitSlots, linePeriodSlots, lineOtherSlots, lineCanRegen, subject, isAd]);
+  }, [lineAssist, lineBenefitSlots, linePeriodSlots, lineProductSlots, lineProductFill, lineOtherSlots, lineGateSlots, lineCanRegen, subject, isAd]);
   // 생성 직후 보내기 전에 채울 자리가 있으면 시트를 한 번만 연다(그 밖에는 줄의 [채우기]로 연다)
   useEffect(() => {
     if (!lineAssist || lineAutoOpened.current) return;
     lineAutoOpened.current = true;
-    if (lineBenefitSlots + linePeriodSlots > 0) setLineSheet(true);
+    if (lineBenefitSlots + linePeriodSlots > 0 || lineProductFill) setLineSheet(true);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
   const lineTypedPeriod = typeof lineValues.period === 'string' ? lineValues.period.trim() : '';
   const lineTypedBenefit = typedBenefit(lineValues);
-  const lineFillable = (!!lineTypedBenefit && lineBenefitSlots > 0) || (!!lineTypedPeriod && linePeriodSlots > 0);
+  const lineTypedProduct = typeof lineValues.product === 'string' ? lineValues.product.trim() : '';
+  const lineFillable = (!!lineTypedBenefit && lineBenefitSlots > 0) || (!!lineTypedPeriod && linePeriodSlots > 0) || (!!lineTypedProduct && lineProductFill);
   const lineRegenReady = !lineFillable && !!lineTypedBenefit && lineCanRegen;
   const applyLineFill = () => {
     record();
@@ -171,6 +178,7 @@ export default function EmailEditScreen({
     let nextSubject = subject;
     if (lineTypedBenefit && lineBenefitSlots > 0) { next = fillSlotsDeep(next, 'benefit', lineTypedBenefit); nextSubject = fillSlots(nextSubject, 'benefit', lineTypedBenefit); }
     if (lineTypedPeriod && linePeriodSlots > 0) { next = fillSlotsDeep(next, 'period', lineTypedPeriod); nextSubject = fillSlots(nextSubject, 'period', lineTypedPeriod); }
+    if (lineTypedProduct && lineProductFill) { next = fillSlotsDeep(next, 'product', lineTypedProduct); nextSubject = fillSlots(nextSubject, 'product', lineTypedProduct); }
     setSections(next);
     setSubject(nextSubject);
     setLineSheet(false);
@@ -344,7 +352,8 @@ export default function EmailEditScreen({
       if (!subject && g.subjects?.[0]) setSubject(g.subjects[0]);
       if (g.preheader) setDesign((x) => ({ ...(x || {}), preheader: String(g.preheader).slice(0, 90) }));
       setAiPrompt('');
-      onToast(`AI가 이메일을 새로 구성했어요. (${AI_GENERATE_COSTS['email-ai-generate']} 크레딧)`, 'success');
+      const notes: string[] = Array.isArray(g.notes) ? g.notes.map(String).filter(Boolean) : [];
+      onToast(`AI가 이메일을 새로 구성했어요. (${AI_GENERATE_COSTS['email-ai-generate']} 크레딧)${notes.length > 0 ? ` ${notes[0]}` : ''}`, notes.length > 0 ? 'info' : 'success');
     } catch (e: any) { onToast(e?.message || '만들지 못했어요.', 'error'); } finally { setAiBusy(null); }
   };
   const refine = async () => {
@@ -354,7 +363,11 @@ export default function EmailEditScreen({
       const r = await fetch('/api/email/ai/refine-sections', { method: 'POST', headers: authHeaders(), body: JSON.stringify({ sections }) });
       const d = await r.json().catch(() => ({}));
       if (d?.code === 'INSUFFICIENT_CREDIT') { onToast('크레딧이 부족해요. 충전 뒤 다시 해 주세요.', 'warning'); return; }
-      if (d?.success && Array.isArray(d.data?.sections)) { record(); setSections(normalizeOrder(d.data.sections)); onToast(d.changed === false ? '다듬을 글이 없어요.' : 'AI가 문구를 다듬었어요. (1 크레딧)', d.changed === false ? 'info' : 'success'); }
+      if (d?.success && Array.isArray(d.data?.sections)) {
+        record(); setSections(normalizeOrder(d.data.sections));
+        const note = Array.isArray(d.notes) && d.notes[0] ? ` ${String(d.notes[0])}` : '';
+        onToast(d.changed === false ? `다듬을 글이 없어요.${note}` : `AI가 문구를 다듬었어요. (1 크레딧)${note}`, d.changed === false || note ? 'info' : 'success');
+      }
       else onToast(d?.error || '다듬지 못했어요.', 'error');
     } catch (e: any) { onToast(e?.message || '다듬지 못했어요.', 'error'); } finally { setAiBusy(null); }
   };
@@ -589,7 +602,7 @@ export default function EmailEditScreen({
         onClose={() => setSendOpen(false)}
         channel="email"
         dm={null}
-        email={campaignId ? { id: campaignId, name, subject, isAd, completed: completedState, hasPlaceholder } : null}
+        email={campaignId ? { id: campaignId, name, subject, isAd, completed: completedState, hasPlaceholder: lineGateSlots > 0 } : null}
         beforeSend={async () => beforeSend()}
         onSent={() => { onSaved(); onClose(); }}
         onSmtpChanged={onSaved}

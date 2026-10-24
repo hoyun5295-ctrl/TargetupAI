@@ -339,14 +339,12 @@ export async function fetchLineMallCandidates(terms: readonly string[], signal?:
 /** DM 한 줄 생성 요청(첫 화면 · 결과 화면 다시 만들기가 같은 함수를 쓴다) */
 export interface LineDmRequest {
   line: string;
-  facts?: { benefit: string | null };
   /** ★ 2026-10-10 H3 — 한 줄에 그대로 남은 사진 글 조각 · 「사진에서 읽은 숫자도 그대로 쓰기」 체크 */
   reads?: string[];
   readLicensed?: boolean;
-  /** undefined = 후보를 보여 주지 않음(지금처럼 이름 첨부) · 배열 = 보여 줬다(빈 배열 = 안 고름) */
-  products?: LineProductRef[];
-  /** ★ 2026-10-17 단계 모달 몸통(`buildLineStepsBody` · 상품 · 답 · 금액을 담는다 · 있으면 facts · products 대신 이것을 보낸다) */
-  steps?: Record<string, unknown>;
+  /** ★ 2026-10-17 단계 모달 몸통(`buildLineStepsBody` · 상품 · 답 · 금액을 담는다)
+   *  ★ 2026-10-24 세 채널 구조체크 ⑧ — 필수. 한 줄 요청은 단계 한 길이다(옛 facts · products 갈래는 서버가 400 으로 닫았다). */
+  steps: Record<string, unknown>;
 }
 export interface LineDmResponse {
   ok: boolean;
@@ -387,10 +385,7 @@ export async function requestLineDm(req: LineDmRequest): Promise<LineDmResponse>
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${localStorage.getItem('token') || ''}` },
       body: JSON.stringify({
         prompt: req.line, one_line: true, attempt_token: newAttemptToken(), land: 'result',
-        ...(req.steps ? req.steps : {
-          ...(req.facts ? { facts: req.facts } : {}),
-          ...(req.products ? { products: req.products.map((p) => ({ provider: p.provider, no: p.no })) } : {}),
-        }),
+        ...req.steps,
         ...(req.reads && req.reads.length > 0 ? { read_texts: req.reads, read_licensed: req.readLicensed === true } : {}),
       }),
     });
@@ -887,6 +882,8 @@ export function newAttemptToken(): string {
 export const SLOT_TEXTS = {
   benefit: ['[혜택을 직접 입력해주세요]', '[혜택 안내: 직접 수정해주세요]', '[혜택 안내: 직접 작성해주세요]', '[혜택 내용을 입력해주세요]'],
   period: ['[기간을 직접 입력해주세요]'],
+  // ★ 2026-10-24 ② 근거 없는 효능 문장을 뺀 자리(서버 copy-benefit-detector EFFICACY_PLACEHOLDER 와 같은 글자)
+  product: ['[상품 소개: 직접 작성해주세요]'],
 } as const;
 export type SlotKind = keyof typeof SLOT_TEXTS;
 
