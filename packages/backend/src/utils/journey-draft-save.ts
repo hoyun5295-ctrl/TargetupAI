@@ -63,7 +63,7 @@ export async function saveJourneyPackageAsDraft(
   companyId: string,
   userId: string,
   pkg: JourneyAIPackage,
-  opts: { callbackNumber: string; objective?: string; goalExitEnabled?: boolean },
+  opts: { callbackNumber: string; objective?: string; goalExitEnabled?: boolean; entryEndsOn?: string | null },
 ): Promise<string> {
   const triggerEvent = pkg.presetTriggerEvent || pkg.triggerEvent;
   const { journeyId } = await createJourneyFromTemplate({
@@ -82,6 +82,7 @@ export async function saveJourneyPackageAsDraft(
     goalExitEnabled: typeof opts.goalExitEnabled === 'boolean' ? opts.goalExitEnabled : pkg.goalExitDefault,
     triggerEvent,
     triggerFilters: pkg.triggerFilters || {},
+    entryEndsOn: opts.entryEndsOn || null,
   });
   return journeyId;
 }

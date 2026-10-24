@@ -308,10 +308,10 @@ export async function translateAudience(input: {
 
   const translated = await translateObjectiveToConditions(input.companyId, input.userId, objective, active);
   if (!translated) {
-    return { kind: 'blocked', code: 'TRANSLATE_FAILED', reason: '목표에서 누구에게 보낼지 읽지 못했어요. 세부 설정에서 발송 대상을 직접 골라 주세요.' };
+    return { kind: 'blocked', code: 'TRANSLATE_FAILED', reason: '목표에서 누구에게 보낼지 읽지 못했어요. 받는 분을 골라 주세요.' };
   }
   if (translated.everyone) {
-    return { kind: 'blocked', code: 'NO_CONDITION', reason: '누구에게 보낼지 조건이 없어요. 모든 고객에게 보내려면 세부 설정에서 「전체 고객」을 골라 주세요.' };
+    return { kind: 'blocked', code: 'NO_CONDITION', reason: '누구에게 보낼지 조건이 없어요. 받는 분을 골라 주세요. 모든 고객에게 보내려면 「전체 고객」을 고르면 돼요.' };
   }
   const pair = checkSchedulePairing(input.schedule, { hasConditions: true });
   if (!pair.ok) return { kind: 'blocked', code: 'PAIRING', reason: pair.reason, suggestKey: pair.suggestKey };
@@ -333,7 +333,7 @@ export async function translateAudience(input: {
   }
   if (unresolved.length > 0) return { kind: 'needs_choice', conditions, unresolved, options: withRelated(unresolved) };
   if (conditions.length === 0) {
-    return { kind: 'blocked', code: 'NO_CONDITION', reason: '누구에게 보낼지 조건이 없어요. 모든 고객에게 보내려면 세부 설정에서 「전체 고객」을 골라 주세요.' };
+    return { kind: 'blocked', code: 'NO_CONDITION', reason: '누구에게 보낼지 조건이 없어요. 받는 분을 골라 주세요. 모든 고객에게 보내려면 「전체 고객」을 고르면 돼요.' };
   }
   return { kind: 'filters', conditions };
 }

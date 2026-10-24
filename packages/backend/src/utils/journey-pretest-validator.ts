@@ -12,7 +12,7 @@
 
 import { query } from '../config/database';
 import { enqueueSpamTest, getSpamTestBatchResults } from './spam-test-queue';
-import { buildAdMessage, buildAdSubject, getOpt080Number } from './messageUtils';
+import { renderJourneySmsMessage, pickJourneySampleCustomer } from './journey-message-render';
 import { getCompanyCosts } from '../config/defaults';
 import { randomUUID } from 'crypto';
 import { isDemoCompany } from './demo-company';   // ★ 2026-10-10 시연 회사 = 검사 발송 0(발송 2시간 전 스캐너 · 활성화 검증 공용)
@@ -88,8 +88,6 @@ export async function validateJourneyForActivation(
   const failedSteps: FailedStep[] = [];
   let confidenceSum = 0;
   let scoredCount = 0;
-  // 실제 발송과 동일한 본문으로 검증 — 무료수신거부 080 조회 (buildAdMessage 합성용)
-  const opt080 = await getOpt080Number(userId, companyId);
 
   for (const step of steps) {
     // variant 조회 (옛 D188 Phase 2-B-3 정합)
@@ -154,7 +152,7 @@ export async function validateJourneyForActivation(
           channel: step.channel as 'sms' | 'lms' | 'mms',
           isAd: stIsAd,
           callbackNumber: step.callback_number || '',
-          opt080,
+          journeyId,
           variantId: msg.variantId || undefined,
         });
         if (!r.enqueueOk) {
@@ -256,7 +254,8 @@ async function pollSpamResult(
 
 // ════════════════════════════════════════════════════════════════════
 // runStepSpamTest — 공용 스팸테스트 (활성화 검증 + Phase 6B 발송 2시간 전 스캐너 공유)
-//   (광고)+무료거부+제목 합성 후 enqueue + 결과 폴링. 실발송과 동일 본문 가공.
+//   ★ 2026-10-23 여정 결함 0 — 검사 글 = journey-message-render 한 곳(실발송 · 미리보기와 같은 함수 · 표본 = 이 여정 대상 1명).
+//   옛: 저장된 광고 표시를 그대로 써서 실발송이 늘 붙이는 (광고) · 080 없이 검사할 수 있었고 Liquid 회사 · 예측 점수 갈래가 빠졌다.
 // ════════════════════════════════════════════════════════════════════
 export interface StepSpamTestResult {
   ok: boolean;            // 모든 통신사 통과
@@ -275,7 +274,8 @@ export async function runStepSpamTest(params: {
   channel: 'sms' | 'lms' | 'mms';
   isAd: boolean;
   callbackNumber: string;
-  opt080: string;
+  /** 표본 고객을 고를 여정(없으면 변수 자리를 비운 글로 검사). */
+  journeyId?: string;
   variantId?: string;
 }): Promise<StepSpamTestResult> {
   // ★ 2026-10-10 시연 회사 = 실제 검사 발송 0 — 검사하지 않고 통과로 본다(자동마케팅 autoSpamTestWithRegenerate 와 같은 규칙).
@@ -286,10 +286,18 @@ export async function runStepSpamTest(params: {
       return { ok: true, enqueueOk: true, failedCarriers: [], matchedStopWords: [], score: 100 };
     }
     const batchId = randomUUID();
-    const stMsgType = params.channel.toUpperCase() as 'SMS' | 'LMS' | 'MMS';
-    // 실제 발송(journey-executor prepareSendMessage)과 동일하게 (광고)+무료거부+제목 합성 후 검증.
-    const adBody = buildAdMessage(params.body, stMsgType, params.isAd, params.opt080);
-    const adSubject = buildAdSubject(params.subject || '', stMsgType, params.isAd);
+    const rendered = await renderJourneySmsMessage({
+      companyId: params.companyId,
+      createdBy: params.userId || null,
+      template: params.body,
+      subject: params.subject,
+      channel: params.channel,
+      isAd: params.isAd,
+      customer: await pickJourneySampleCustomer(params.companyId, params.journeyId),
+    });
+    const stMsgType = rendered.msgType;
+    const adBody = rendered.message;
+    const adSubject = rendered.subject;
     const enqueueResult = await enqueueSpamTest({
       companyId: params.companyId,
       userId: params.userId,

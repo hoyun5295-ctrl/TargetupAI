@@ -91,7 +91,9 @@ export async function loadCreditRow(client: any, companyId: string, forUpdate: b
 export function creditOverageAllowance(row: any, source: string): number {
   // ★ 2026-10-20 여정 V.3 D1(Harold 「선불이든 후불이든 크레딧이 모자르면 둘 다 멈추는게 맞는거지 · 다음달 크레딧에서 땡겨오냐」) —
   //   여정 운영은 그달 크레딧(기본 + 구매) 안에서만 쓴다. 선불 다음 달 당겨쓰기 · 후불 초과 청구 0. 모자라면 실행기가 보내기 전에 멈춘다.
-  if (source === 'journey-operation') return 0;
+  // ★ 2026-10-24 X1(자동 마케팅 · 설계서 docs/2026-10-24-automarketing-oneline-design.md §5) — 회차 발송 크레딧도 같다(선불 · 후불 모두 마이너스 0).
+  //   보내기 직전에 걷고, 모자라면 그 회차를 보내지 않고 멈춘다(continuous-operator dispatchProposalSend).
+  if (source === 'journey-operation' || source === 'continuous-operator-send') return 0;
   const planCredits = Number(row.plan_credits) || 0;
   return isOperationSource(source)
     ? planCredits

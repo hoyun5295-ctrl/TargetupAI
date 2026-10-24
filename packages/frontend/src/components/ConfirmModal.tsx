@@ -93,6 +93,7 @@ export default function ConfirmModal({ state, onClose }: Props) {
   const light = useLightSurface(); // ★ 2026-09-30 AI 존(밝은 작업대)에서 열리면 밝은 짝 · 그 밖은 원래 짙은 값
   const [running, setRunning] = useState(false);
   const confirmBtnRef = useRef<HTMLButtonElement>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
   const open = !!state;
   // ★ 2026-08-22 인터럽트 표시 — 도움말 런처가 이 창을 덮지 않게 숨는다(조기 return 위)
   useBodyFlag('data-interrupt-open', open);
@@ -104,9 +105,24 @@ export default function ConfirmModal({ state, onClose }: Props) {
     if (!open) return;
     // ★ 2026-10-14 실행 중(running)엔 닫지 않는다 — 저장이 끝나기 전에 창을 닫고 다른 화면으로 가면 완료 콜백이 엉뚱한 상태에 적용된다(Codex 1R)
     const onEsc = (e: KeyboardEvent) => { if (e.key === 'Escape' && !running) onClose(); };
+    // ★ 2026-10-23 여정 결함 0(B-1020-3) — Tab 을 창 안에 가둔다(aria-modal 인데 배경으로 포커스가 새던 자리 · 작업 화면 위 확인 창 등 모든 소비처 공통)
+    const onTab = (e: KeyboardEvent) => {
+      if (e.key !== 'Tab') return;
+      const panel = panelRef.current;
+      if (!panel) return;
+      const items = Array.from(panel.querySelectorAll<HTMLElement>('button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'));
+      if (items.length === 0) { e.preventDefault(); return; }
+      const first = items[0];
+      const last = items[items.length - 1];
+      const active = document.activeElement as HTMLElement | null;
+      if (!panel.contains(active)) { e.preventDefault(); (e.shiftKey ? last : first).focus(); return; }
+      if (!e.shiftKey && active === last) { e.preventDefault(); first.focus(); }
+      else if (e.shiftKey && active === first) { e.preventDefault(); last.focus(); }
+    };
     window.addEventListener('keydown', onEsc);
+    document.addEventListener('keydown', onTab, true);
     setTimeout(() => confirmBtnRef.current?.focus(), 50);
-    return () => window.removeEventListener('keydown', onEsc);
+    return () => { window.removeEventListener('keydown', onEsc); document.removeEventListener('keydown', onTab, true); };
   }, [open, onClose, running]);
 
   if (!open || !state) return null;
@@ -132,6 +148,7 @@ export default function ConfirmModal({ state, onClose }: Props) {
     >
       <div
         className={light ? `bg-white border ${config.border} rounded-2xl shadow-2xl max-w-md w-full overflow-hidden` : `bg-slate-900 border ${config.border} rounded-2xl shadow-2xl max-w-md w-full overflow-hidden`}
+        ref={panelRef}
         onClick={(e) => e.stopPropagation()}
         role="dialog"
         aria-modal="true"

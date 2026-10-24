@@ -18,6 +18,7 @@ import {
   TRIGGER_CONTRACTS, getTriggerContract, laneForTrigger, triggerLabel, triggerKeyForEvent, overlapTriggerEvents,
   resolveTriggerAvailability, toAvailabilityMap, isProductPickTrigger, type JourneyLane,
 } from './journey-trigger-capability';
+import { ownsOnlyOwnJourneys } from './journey-access';
 
 /** ★ 2026-09-30 V2 3차 — 만드는 길: 1클릭 프리셋 / 상품 고르기 창(상품을 골라야 하는 트리거). 서버가 정한다. */
 export type CreateMode = 'preset' | 'product';
@@ -327,7 +328,7 @@ function execScope(scopeSql: string, alias: string): string {
 
 async function loadPendingGoalExits(companyId: string, journeyIds: string[], scopeSql = ''): Promise<{ value: Map<string, number>; at: number } | null> {
   if (journeyIds.length === 0) return { value: new Map(), at: Date.now() };
-  const cacheKey = `${companyId}|${scopeSql}`;
+  const cacheKey = `${companyId}|${scopeSql}|${[...journeyIds].sort().join(',')}`;   // 담당자마다 여정 집합이 다르다
   const hit = pendingCache.get(cacheKey);
   if (hit && Date.now() - hit.at < PENDING_TTL_MS) return hit;
   const total = await query(
@@ -586,13 +587,15 @@ export async function buildLifecycleMap(companyId: string, viewerUserId?: string
   const lineageReady = await lineageColumnsReady().catch(() => false);
   // ★ 2026-10-19 B-1010-13 — 숫자(진행 중 · 대기 · 코호트 · 도달 · 이어받음 · 겹침)는 보는 사람 범위로 센다. 여정 · 선 상태 · 겹침 판정은 회사 그대로.
   const scopeSql = await getOwnerCustomerScopeSql(companyId, viewerUserId, 'sc');
+  // ★ 2026-10-23 여정 결함 0 — 담당자 화면 = 자기가 만든 여정만(캠페인 · 자동발송과 같다). 켜기 겹침 판정(viewer 없이 부름)은 회사 전체 그대로.
+  const ownerOnly = await ownsOnlyOwnJourneys(viewerUserId);
   const jr = await query(
     `SELECT id, name, status, trigger_event, trigger_filters, start_kind, goal_exit_enabled, goal_kind, pause_reason,
             allow_reentry, auto_reentry_enabled, threshold_recipients_per_step, updated_at${lineageReady ? ', lineage_id, entry_closed_at' : ''}
        FROM journeys
-      WHERE company_id = $1::uuid AND archived_at IS NULL
+      WHERE company_id = $1::uuid AND archived_at IS NULL${ownerOnly ? ' AND created_by::text = $2::text' : ''}
       ORDER BY created_at ASC`,
-    [companyId],
+    ownerOnly ? [companyId, viewerUserId] : [companyId],
   );
   const rows: any[] = jr.rows;
   const ids = rows.map((r) => String(r.id));
@@ -943,14 +946,15 @@ export async function buildLifecycleMap(companyId: string, viewerUserId?: string
   const ipc = await query(
     `SELECT COUNT(DISTINCT e.customer_id)::int AS n
        FROM journey_executions e JOIN journeys jj ON jj.id = e.journey_id
-      WHERE jj.company_id = $1::uuid AND jj.archived_at IS NULL AND e.status = 'active'${execScope(scopeSql, 'e')}`,
-    [companyId],
+      WHERE jj.company_id = $1::uuid AND jj.archived_at IS NULL AND e.status = 'active'${execScope(scopeSql, 'e')}${ownerOnly ? ' AND e.journey_id = ANY($2::uuid[])' : ''}`,
+    ownerOnly ? [companyId, ids] : [companyId],
   ).catch(() => null);
+  const visibleRoots = new Set(journeys.map((j) => j.lineageId || j.id));
   const summary: MapSummary = {
     activeJourneys: journeys.filter((j) => j.status === 'active').length,
     inProgressCustomers: Number(ipc?.rows?.[0]?.n || 0),
     fixCount: journeys.filter((j) => j.health.tone === 'fix' || j.health.tone === 'blocked').length,
-    operationCredits30d: credits ? [...credits.values()].reduce((s, v) => s + v, 0) : null,
+    operationCredits30d: credits ? [...credits].filter(([root]) => !ownerOnly || visibleRoots.has(root)).reduce((s, [, v]) => s + v, 0) : null,
   };
 
   // ── 유령 카드: 윗띠 레인마다 여정이 하나도 없으면 그 레인의 첫 트리거 하나(데이터가 없으면 자물쇠 + 사유).

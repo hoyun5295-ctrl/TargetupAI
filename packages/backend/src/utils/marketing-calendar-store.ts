@@ -27,7 +27,7 @@ export interface SavedMarketingCalendar {
   updatedAt: string | null;
 }
 
-function isMissingTable(err: unknown): boolean {
+export function isMissingTable(err: unknown): boolean {
   const msg = (err as any)?.message || '';
   return msg.includes('does not exist');
 }
@@ -158,6 +158,21 @@ export async function buildCompanyCalendarContext(companyId: string): Promise<Co
 }
 
 /** 등록 기록 — registrations["월"] = operator_id. 행 없으면 생성. 테이블 미생성 = 생략. */
+/**
+ * ★ 2026-10-24 등록과 같은 트랜잭션에서 남긴다(registerOperator · 회의론자 §9-4) — 표가 없으면 던진다(호출부가 저장점으로 되돌린다).
+ *   옛: 등록 뒤 따로 쓰고 실패를 무시 → 기록이 없으면 같은 달 「이미 등록」 확인이 안 걸려 새로 고친 뒤 200 이 한 번 더 빠졌다.
+ */
+export async function markCalendarRegistrationWith(client: { query: (sql: string, params?: any[]) => Promise<any> }, companyId: string, month: number, operatorId: string): Promise<void> {
+  await client.query(
+    `INSERT INTO company_marketing_calendars (company_id, entries, registrations, created_at, updated_at)
+     VALUES ($1::uuid, '[]'::jsonb, jsonb_build_object($2::text, $3::text), NOW(), NOW())
+     ON CONFLICT (company_id) DO UPDATE SET
+       registrations = company_marketing_calendars.registrations || jsonb_build_object($2::text, $3::text),
+       updated_at = NOW()`,
+    [companyId, String(month), operatorId],
+  );
+}
+
 export async function markCalendarRegistration(companyId: string, month: number, operatorId: string): Promise<void> {
   try {
     await query(

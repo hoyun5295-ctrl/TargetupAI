@@ -27,19 +27,22 @@ describe('직원 접수 1008', () => {
     expect(read('frontend/src/components/TargetSendModal.tsx')).not.toContain('까지 발송 가능');
   });
 
-  it('담당자 문안 문자 두 곳 = toSentCopy(발송과 같은 CT · 같은 080) · 검사 080 도 같은 값', () => {
+  it('담당자 문안 문자 두 곳 = 나가는 문안 한 함수(★ 1024 operatorFinalCopy · 혜택 치환 · 같은 080) · 검사 080 도 같은 값', () => {
     const src = read('backend/src/utils/continuous-operator.ts');
-    expect(src).toContain("const toSentCopy = (body: string) => buildAdMessage(body, channelForSpam, isAd, adOpt080);");
-    expect(src).toContain("'[AI 자동마케팅] 추천 문안', toSentCopy(finalNoticeCopy)");
-    expect(src).toContain('sendAutoSendPrepNotice(operator, proposalRes.rows[0].id, toSentCopy(finalNoticeCopy)');
+    expect(src).toContain("finalNoticeCopy = operatorFinalCopy(saved.rows[0].proposal_json, copyCtx)?.sent || finalNoticeCopy;");
+    expect(src).toContain("'[AI 자동마케팅] 추천 문안', finalNoticeCopy)");
+    expect(src).toContain('sendAutoSendPrepNotice(operator, proposalRes.rows[0].id, finalNoticeCopy,');
     expect(src).not.toContain('rejectNumber: ctx.reject_number || undefined');
-    expect(src).toContain('adOptOut: await opt080By.get(owner)!');
+    expect(src).toContain('adOptOut: ctx.opt080, finalCopies, finalIndex, copyCheck');
+    const fc = read('backend/src/utils/operator-final-copy.ts');
+    expect(fc).toContain("const sent = buildAdMessage(body, msgType, true, ctx.opt080 || '');");
   });
 
-  it('승인 화면 문안 = 광고 미러로 감싼다', () => {
+  it('승인 화면 문안 = 서버가 만든 나가는 글 그대로(★ 1024 화면 흉내 0 · 혜택 · (광고) · 080 포함)', () => {
     const card = read('frontend/src/components/automarketing/ProposalDecisionCard.tsx');
-    expect(card).toContain("buildAdMessageFront(effectiveBody, channelName, true, proposal.adOptOut || '')");
-    expect(card).toContain('buildAdSubjectFront(effectiveSubject, channelName, true)');
+    expect(card).toContain('{edited || !effectiveFinal ? effectiveBody : effectiveFinal.sent}');
+    expect(card).not.toContain('buildAdMessageFront');
+    expect(card).not.toContain('buildAdSubjectFront');
   });
 
   it('본인 전용 계정의 해외 접속 · 접근 예외는 본인 화면에서만(현황 건수 · 예외 목록 · 해외 접속 이력 + 건수)', () => {

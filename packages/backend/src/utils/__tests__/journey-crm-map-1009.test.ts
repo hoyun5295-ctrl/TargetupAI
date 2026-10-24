@@ -71,7 +71,9 @@ describe('칸 편집 정책 — 한 곳 · 묶음별', () => {
     const r = fs.readFileSync(path.join(__dirname, '..', '..', 'routes', 'ai.ts'), 'utf8');
     const patch = r.slice(r.indexOf("router.patch('/operator/journeys/:id/steps/:stepId'"), r.indexOf("router.post('/operator/journeys/:id/steps'"));
     expect(patch).toContain('delayMode: delayMode !== undefined ? delayMode : undefined');
-    expect(patch).toContain('if (err instanceof JourneyStepGateError)');
+    // ★ 2026-10-23 오류 매핑 = journeyError 한 벌(JourneyStepGateError → 409 · utils/journey-route.ts)
+    expect(patch).toContain('return journeyError(res, err');
+    expect(fs.readFileSync(path.join(__dirname, '..', 'journey-route.ts'), 'utf8')).toContain('if (err instanceof JourneyStepGateError) return res.status(409)');
   });
 });
 

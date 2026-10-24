@@ -73,7 +73,7 @@ export default function PricingPage() {
   const [selectedPlan, setSelectedPlan] = useState<Plan | null>(null);
   const [requestMessage, setRequestMessage] = useState('');
   /** ★ 2026-10-20 여정 V.3 §5-5 — 켜 둔 여정이 한 달에 쓰는 크레딧이 바꿀 요금제 기본보다 많을 때 서버가 돌려준 숫자(신청 창 안에서 한 번 확인). */
-  const [journeyCreditWarn, setJourneyCreditWarn] = useState<{ total: number; basis: string; lineages: number; planCredits: number } | null>(null);
+  const [journeyCreditWarn, setJourneyCreditWarn] = useState<{ total: number; basis: string; lineages: number; autoMarketing: number; planCredits: number } | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [showSuccessModal, setShowSuccessModal] = useState(false);
   const [successModalType, setSuccessModalType] = useState<'plan' | 'inquiry'>('plan');
@@ -263,6 +263,7 @@ export default function PricingPage() {
             total: Number(data.forecast.total) || 0,
             basis: String(data.forecast.basis || 'measured'),
             lineages: Array.isArray(data.forecast.perLineage) ? data.forecast.perLineage.length : 0,
+            autoMarketing: Number(data.forecast.autoMarketing30) || 0,
             planCredits: Number(data.planCredits) || 0,
           });
         } else {
@@ -782,11 +783,11 @@ export default function PricingPage() {
               {journeyCreditWarn && (
                 <div className="rounded-lg bg-amber-50 ring-1 ring-amber-200 px-3 py-2.5 mb-4 text-xs text-amber-900 leading-relaxed">
                   <p>
-                    켜 둔 여정 {journeyCreditWarn.lineages.toLocaleString()}개가 한 달에 {journeyCreditWarn.total.toLocaleString()}크레딧을 써요
+                    켜 둔 여정 {journeyCreditWarn.lineages.toLocaleString()}개{journeyCreditWarn.autoMarketing > 0 ? ` · 자동 마케팅(${journeyCreditWarn.autoMarketing.toLocaleString()})` : ''}가 한 달에 {journeyCreditWarn.total.toLocaleString()}크레딧을 써요
                     {journeyCreditWarn.basis === 'measured' ? '(지난 30일 실제)' : '(지난 30일 실제 · 켠 지 30일이 안 된 여정은 최대로 셈)'}.
                     바꿀 요금제의 한 달 기본 크레딧은 {journeyCreditWarn.planCredits.toLocaleString()}이에요.
                   </p>
-                  <p className="mt-1 font-semibold">크레딧이 모자라면 켜 둔 여정이 멈춰요.</p>
+                  <p className="mt-1 font-semibold">크레딧이 모자라면 켜 둔 여정 · 자동 마케팅이 멈춰요.</p>
                   <button type="button" onClick={() => navigate('/ai-journeys')} className="mt-2 h-8 px-3 rounded-lg bg-white ring-1 ring-amber-300 text-amber-900 font-semibold hover:bg-amber-100">
                     켜 둔 여정 고르기
                   </button>

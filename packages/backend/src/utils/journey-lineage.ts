@@ -344,16 +344,22 @@ export async function pausedClosedSiblings(companyId: string, journeyId: string)
 }
 
 /**
- * 진입이 닫혔고 진행 중 고객이 모두 끝난 옛 판을 끝남(ended)으로 — 진입 워커 회차 끝에서 부른다. DDL 전이면 0.
+ * 진입이 닫혔고 진행 중 고객이 모두 끝난 옛 판을 끝남(ended)으로 — 진입 워커 회차 끝에서 부른다.
  * 멈춘(paused) 옛 판은 건드리지 않는다(담당자가 멈춘 것 · 진행 중 고객이 남아 있을 수 있다).
+ * ★ 2026-10-23 1회 발송(one_shot)도 여기 한 곳 — 실행 행은 한 트랜잭션에 한꺼번에 만든다(dispatchOneShotJourney) → 행이 있고 진행 중 0 = 다 보냈다.
  */
 export async function endDrainedVersions(): Promise<number> {
-  if (!(await lineageColumnsReady())) return 0;
+  const lineage = await lineageColumnsReady();
   // ★ V.3 D2 — 마지막 날이 지나 새 고객을 안 받는 여정도 진행 중 고객이 모두 끝나면 끝남(칸이 있을 때만).
-  const ends = await entryEndsColumnReady();
+  const ends = lineage && await entryEndsColumnReady();
+  const closed = [
+    ...(lineage ? ['j.entry_closed_at IS NOT NULL'] : []),
+    ...(ends ? [`NOT ${ENTRY_ENDS_OPEN_SQL('j')}`] : []),
+    `(j.start_kind = 'one_shot' AND EXISTS (SELECT 1 FROM journey_executions x WHERE x.journey_id = j.id))`,
+  ];
   const r = await query(
     `UPDATE journeys j SET status = 'ended', updated_at = NOW()
-      WHERE j.status = 'active' AND (j.entry_closed_at IS NOT NULL${ends ? ` OR NOT ${ENTRY_ENDS_OPEN_SQL('j')}` : ''})
+      WHERE j.status = 'active' AND (${closed.join(' OR ')})
         AND NOT EXISTS (SELECT 1 FROM journey_executions e WHERE e.journey_id = j.id AND e.status = 'active')
       RETURNING j.id`,
   );

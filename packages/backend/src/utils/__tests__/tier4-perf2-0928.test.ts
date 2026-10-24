@@ -83,7 +83,8 @@ describe('R266 · R265 여정', () => {
   });
   it('미리보기는 한 번의 추출로 표본과 인원을 만든다', () => {
     const ai = read('routes/ai.ts');
-    expect((ai.match(/await previewJourneyTargets\(/g) || []).length).toBe(2);
+    // ★ 2026-10-23 저장 전 표본 주소(preview-target-samples)는 화면 소비처 0 이라 지웠다(한 줄 여정 한 길) · 남은 하나 = 여정 표본
+    expect((ai.match(/await previewJourneyTargets\(/g) || []).length).toBe(1);
     expect(ai).not.toContain('await buildJourneyPreviewSamples(');
     const ex = read('utils/journey-target-extractor.ts');
     const fn = ex.slice(ex.indexOf('export async function previewJourneyTargets('), ex.indexOf('/** 전체 매칭 수 + 등급 분포'));

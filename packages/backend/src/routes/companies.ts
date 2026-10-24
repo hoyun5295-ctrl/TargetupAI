@@ -596,7 +596,7 @@ router.post('/plan-request', demoBlock, async (req: Request, res: Response) => {
       const planCreditsNum = planCredits == null ? null : Number(planCredits);
       if (journeyCreditOverPlan(forecast, planCreditsNum)) {
         return res.status(409).json({
-          error: '켜 둔 여정이 쓰는 크레딧이 바꿀 요금제의 한 달 기본 크레딧보다 많아요.',
+          error: '켜 둔 여정 · 자동 마케팅이 쓰는 크레딧이 바꿀 요금제의 한 달 기본 크레딧보다 많아요.',
           code: 'JOURNEY_CREDIT_OVER_PLAN',
           forecast,
           planCredits: planCreditsNum,

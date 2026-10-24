@@ -179,17 +179,17 @@ const handleApproveRequest = async (id: string) => {
                       <AdminDetailItem label="메시지">{detail.message || '-'}</AdminDetailItem>
                       {/* ★ 2026-10-20 여정 V.3 §5-5 — 고객 신청 창과 같은 숫자(켜 둔 여정 한 달 운영 크레딧 · 승인은 막지 않는다) */}
                       {detail.status === 'pending' && (
-                        <AdminDetailItem label="켜 둔 여정 크레딧">
+                        <AdminDetailItem label="켜 둔 여정 · 자동 마케팅 크레딧">
                           {detail.journey_forecast == null
                             ? '확인 못 함'
-                            : detail.journey_forecast.perLineage?.length
+                            : (detail.journey_forecast.perLineage?.length || Number(detail.journey_forecast.autoMarketing30) > 0)
                               ? <span className={detail.requested_plan_credits != null && Number(detail.journey_forecast.total) > Number(detail.requested_plan_credits) ? 'text-amber-700 font-semibold' : ''}>
-                                  여정 {detail.journey_forecast.perLineage.length}개 · 한 달 {Number(detail.journey_forecast.total).toLocaleString()}
+                                  여정 {(detail.journey_forecast.perLineage?.length || 0)}개{Number(detail.journey_forecast.autoMarketing30) > 0 ? ` · 자동 마케팅 ${Number(detail.journey_forecast.autoMarketing30).toLocaleString()}` : ''} · 한 달 {Number(detail.journey_forecast.total).toLocaleString()}
                                   {detail.journey_forecast.basis === 'measured' ? '(지난 30일 실제)' : '(새 여정은 최대로 셈)'}
                                   {detail.requested_plan_credits != null ? ` · 신청 요금제 기본 ${Number(detail.requested_plan_credits).toLocaleString()}` : ''}
-                                  {detail.requested_plan_credits != null && Number(detail.journey_forecast.total) > Number(detail.requested_plan_credits) ? ' · 모자라면 여정이 멈춰요' : ''}
+                                  {detail.requested_plan_credits != null && Number(detail.journey_forecast.total) > Number(detail.requested_plan_credits) ? ' · 모자라면 여정 · 자동 마케팅이 멈춰요' : ''}
                                 </span>
-                              : '켜 둔 여정 없음'}
+                              : '켜 둔 여정 · 자동 마케팅 없음'}
                         </AdminDetailItem>
                       )}
                       <AdminDetailItem label="상태">{statusLabel(detail.status)}</AdminDetailItem>

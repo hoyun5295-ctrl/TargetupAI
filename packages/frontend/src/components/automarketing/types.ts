@@ -278,12 +278,31 @@ export interface OperatorProposal {
   operatorObjective?: string;
   /** ★ 2026-10-08 광고 무료거부 번호(080 · 발송과 같은 값) — 문안을 고객이 받는 모양으로 보여 줄 때 */
   adOptOut?: string;
+  /**
+   * ★ 2026-10-24 안마다 나가는 문안(서버 operatorFinalCopy · 혜택 · 080 · 회신번호까지) · 보낼 안 번호 · 검사 상태.
+   *   화면은 흉내 내지 않고 이것만 보여 준다(검사한 글 = 본 글 = 나가는 글). 승인은 그 안의 지문을 함께 보낸다.
+   */
+  finalCopies?: Array<OperatorFinalCopyView | null>;
+  finalIndex?: number;
+  copyCheck?: 'passed' | 'rechecking' | 'blocked' | 'stale' | 'none';
 }
 
-// ★ 2026-07-09 승인 시 사용자가 고른 변형 + (편집 시) 본문 — 없으면 백엔드가 Bandit 추천 사용(자동 발송 경로 동일).
+export interface OperatorFinalCopyView {
+  variantIndex: number;
+  msgType: 'SMS' | 'LMS' | 'MMS';
+  subject: string;
+  body: string;
+  sent: string;
+  sentSubject: string;
+  placeholderLeft: boolean;
+  fingerprint: string;
+}
+
+// ★ 2026-07-09 승인 시 사용자가 고른 변형 + (편집 시) 본문 · ★ 2026-10-24 늘 안 번호 + 그 안의 지문(본 글 ≠ 나갈 글이면 서버가 409)
 export interface ProposalApproveSelection {
   variantIndex: number;
-  body: string;
+  fingerprint: string;
+  body?: string;
   subject?: string;
 }
 

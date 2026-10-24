@@ -7,12 +7,14 @@
  * 원칙
  *   - 질문은 코드가 만든다(AI 가 질문을 지어내지 않는다). 선택지는 레지스트리 · 회사 데이터 판정 안에서만.
  *   - 추천 답은 미리 골라 둔다 · [이대로 만들기]가 늘 가능하다(추가 입력 강요 금지 · 1클릭 원칙).
- *   - 혜택은 미리 채우지 않는다(AI 가 지어낸 혜택이 발송되는 것을 막는 자리 · 혜택은 사람만 안다).
+ *   - 혜택은 AI 가 채우지 않는다(AI 가 지어낸 혜택이 발송되는 것을 막는 자리 · 혜택은 사람만 안다).
+ *     ★ 2026-10-23 한 줄 여정 한 길 — 담당자가 한 줄에 직접 적은 혜택 · 마감일은 듣기(listenLine)가 읽어 칸에 채워 둔다(사람의 글 · 고치거나 지울 수 있다).
  *   - 자동 종료 추천값 = 트리거 계약 파생(defaultGoalExitFor · Harold 승인 결정 1).
  */
 import {
   TRIGGER_CONTRACTS, aiSelectableTriggerEvents, defaultGoalExitFor, laneForTrigger, triggerLabel,
 } from './journey-trigger-capability';
+import type { LineQuestion, LineQuestionOption } from './one-line-ct/questions';
 
 export const MAX_INTERVIEW_PLANS = 4;
 export const MAX_BENEFIT_CHARS = 200;
@@ -24,32 +26,19 @@ export interface InterviewPlan {
   triggerEvent: string;
   title: string;
   objective: string;
+  /** ★ 2026-10-23 담당자가 쓴 한 줄 그대로(대상 조건 · 지역 · 성별 · 등급의 근거). 시작 사건이 정해진 입구(카드 · 빠른 시작)는 없다. */
+  sentence?: string;
 }
 
-export interface InterviewOption {
-  value: string;
-  label: string;
-  desc?: string;
-  disabled?: boolean;
-  reason?: string;
-}
+/** ★ 2026-10-24 질문 모양 = 한 줄 CT 한 곳(one-line-ct/questions · 자동 마케팅 질문표와 같은 모양) */
+export type InterviewOption = LineQuestionOption;
 
-export interface InterviewQuestion {
-  id: string;
+export interface InterviewQuestion extends LineQuestion {
   planKey: string;
-  kind: 'choice' | 'text';
-  label: string;
-  help?: string;
-  options?: InterviewOption[];
-  /** 미리 골라 둔 답(없으면 비워 둠 = 혜택). */
-  recommended?: string;
   /** 시작 사건별 추천 답(자동 종료 질문 · 시작 사건을 바꾸면 추천도 따라 바뀐다). */
   recommendedByTrigger?: Record<string, string>;
   /** 이 시작 사건을 고르면 질문을 숨긴다(자동 종료가 뜻이 없는 사건 = 메시지를 다 보내면 끝나는 여정). */
   hideForTriggers?: string[];
-  required: boolean;
-  placeholder?: string;
-  maxLength?: number;
 }
 
 export type TriggerAvailability = Record<string, { available: boolean; reason: string }>;
@@ -79,7 +68,10 @@ function triggerOptionsFor(plan: InterviewPlan, availability: TriggerAvailabilit
   });
 }
 
-export function buildInterviewQuestions(plans: InterviewPlan[], availability: TriggerAvailability): InterviewQuestion[] {
+/** 한 줄에서 읽어 칸에 채워 둘 값(담당자가 직접 적은 것만 · listenLine). */
+export interface InterviewPrefill { benefit?: string | null; entryEndsOn?: string | null }
+
+export function buildInterviewQuestions(plans: InterviewPlan[], availability: TriggerAvailability, prefill: InterviewPrefill = {}): InterviewQuestion[] {
   const out: InterviewQuestion[] = [];
   const exitEvents = TRIGGER_CONTRACTS.map((c) => c.event);
   for (const p of plans) {
@@ -128,9 +120,20 @@ export function buildInterviewQuestions(plans: InterviewPlan[], availability: Tr
       planKey: p.key,
       kind: 'text',
       label: '넣을 혜택이 있나요?',
-      help: '비워 두면 혜택 자리를 표시해 두고, 켜기 전에 채우게 해요.',
+      help: prefill.benefit ? '한 줄에 적은 혜택을 넣어 두었어요. 이 혜택만 실어요.' : '비워 두면 혜택 자리를 표시해 두고, 켜기 전에 채우게 해요.',
       placeholder: '예: 첫 구매 10% 쿠폰',
       maxLength: MAX_BENEFIT_CHARS,
+      ...(prefill.benefit ? { recommended: String(prefill.benefit).slice(0, MAX_BENEFIT_CHARS) } : {}),
+      required: false,
+    });
+    // ★ 2026-10-23 새 고객을 받는 마지막 날(V.3 entry_ends_on) — 한 줄에 마감이 있으면 그날을 채워 둔다 · 비우면 계속 받는다.
+    out.push({
+      id: `${p.key}:ends`,
+      planKey: p.key,
+      kind: 'date',
+      label: '새 고객은 언제까지 받을까요?',
+      help: prefill.entryEndsOn ? '한 줄에 적은 마감일을 넣어 두었어요. 그날 뒤로는 새 고객을 받지 않아요.' : '비워 두면 계속 받아요.',
+      ...(prefill.entryEndsOn ? { recommended: prefill.entryEndsOn } : {}),
       required: false,
     });
   }
@@ -147,6 +150,8 @@ export interface JourneyDesignSpec {
   messageCount: number;
   /** undefined = 계약 기본값에 맡긴다(메시지를 다 보내면 끝나는 사건). */
   goalExitEnabled: boolean | undefined;
+  /** 새 고객을 받는 마지막 날(YYYY-MM-DD · KST) · null = 계속 받는다. */
+  entryEndsOn: string | null;
 }
 
 export type InterviewAnswers = Record<string, string>;
@@ -159,6 +164,7 @@ export function decideJourneySpec(
   plan: InterviewPlan,
   questions: InterviewQuestion[],
   answers: InterviewAnswers,
+  todayKst?: string,
 ): { ok: true; spec: JourneyDesignSpec } | { ok: false; error: string } {
   const q = (suffix: string) => questions.find((x) => x.id === `${plan.key}:${suffix}`);
   const pick = (suffix: string): string | undefined => {
@@ -185,8 +191,17 @@ export function decideJourneySpec(
     goalExitEnabled = g === 'yes';
   }
 
-  const benefitRaw = String(answers[`${plan.key}:benefit`] ?? '').trim();
+  // 혜택 = 고른 답 · 없으면 한 줄에서 채워 둔 값(지우면 빈 글 = 혜택 없음)
+  const benefitRaw = String(answers[`${plan.key}:benefit`] ?? q('benefit')?.recommended ?? '').trim();
   if (benefitRaw.length > MAX_BENEFIT_CHARS) return { ok: false, error: `${plan.title}: 혜택은 ${MAX_BENEFIT_CHARS}자 안으로 적어 주세요.` };
+
+  const endsRaw = String(answers[`${plan.key}:ends`] ?? q('ends')?.recommended ?? '').trim();
+  let entryEndsOn: string | null = null;
+  if (endsRaw) {
+    if (!isYmd(endsRaw)) return { ok: false, error: `${plan.title}: 마지막 날은 날짜로 골라 주세요.` };
+    if (endsRaw < (todayKst || kstTodayYmd())) return { ok: false, error: `${plan.title}: 마지막 날이 이미 지났어요. 오늘이나 그 뒤로 골라 주세요.` };
+    entryEndsOn = endsRaw;
+  }
 
   const objectiveBase = plan.objective.trim() || `${triggerLabel(trigger)} 고객에게 보내는 여정`;
   return {
@@ -199,8 +214,21 @@ export function decideJourneySpec(
       benefitText: benefitRaw || null,
       messageCount,
       goalExitEnabled,
+      entryEndsOn,
     },
   };
+}
+
+function isYmd(v: string): boolean {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(v);
+  if (!m) return false;
+  const d = new Date(Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3])));
+  return d.getUTCFullYear() === Number(m[1]) && d.getUTCMonth() === Number(m[2]) - 1 && d.getUTCDate() === Number(m[3]);
+}
+
+/** 오늘(KST · YYYY-MM-DD). */
+export function kstTodayYmd(nowMs = Date.now()): string {
+  return new Date(nowMs + 9 * 3600 * 1000).toISOString().slice(0, 10);
 }
 
 /**
@@ -221,6 +249,7 @@ export function sanitizeInterviewPlans(raw: unknown): InterviewPlan[] {
       triggerEvent: ev,
       title: String(p?.title || triggerLabel(ev) + ' 여정').trim().slice(0, 30),
       objective: String(p?.objective || '').trim().slice(0, 300),
+      ...(String(p?.sentence || '').trim() ? { sentence: String(p.sentence).trim().slice(0, 300) } : {}),
     });
     if (out.length >= MAX_INTERVIEW_PLANS) break;
   }

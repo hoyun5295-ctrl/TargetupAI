@@ -69,10 +69,13 @@ describe('서버 글자표 = 화면 글자표', () => {
 
 describe('배선', () => {
   const executor = readFileSync(resolve(__dirname, '../journey-executor.ts'), 'utf8');
+  // ★ 2026-10-23 문안 조립이 journey-message-render 한 곳으로 옮겨 갔다(실행기 · 미리보기 · 검사 공용).
+  const render = readFileSync(resolve(__dirname, '../journey-message-render.ts'), 'utf8');
   it('여정 실행기 문자 단계는 새 함수를 부른다', () => {
-    expect(executor).toContain('sanitizeUnsendableForSms(step.message_template');
-    expect(executor).toContain('sanitizeUnsendableForSms(step.subject');
-    expect(executor).not.toMatch(/sanitizeForSms\(step\./);
+    expect(executor).toContain('renderJourneySmsMessage({');
+    expect(render).toContain('sanitizeUnsendableForSms(template)');
+    expect(render).toContain("sanitizeUnsendableForSms(String(input.subject || ''))");
+    expect(executor + render).not.toMatch(/sanitizeForSms\(/);
   });
 
   const page = readFileSync(resolve(__dirname, '../../../../frontend/src/pages/JourneysPage.tsx'), 'utf8');

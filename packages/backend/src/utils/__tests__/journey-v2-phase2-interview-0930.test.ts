@@ -92,7 +92,9 @@ describe('질문표 · 답', () => {
   const plan = { key: 'p1', triggerEvent: 'customer.created', title: '가입 환영', objective: '가입 고객을 반긴다' };
   it('추천 답이 미리 골라져 있고 혜택은 비어 있다', () => {
     const qs = buildInterviewQuestions([plan], OPEN);
-    expect(qs.map((q) => q.id)).toEqual(['p1:trigger', 'p1:messages', 'p1:goal', 'p1:benefit']);
+    // ★ 2026-10-23 새 고객 받는 마지막 날 칸(한 줄에 마감이 있으면 채워 둠 · 없으면 빈 칸)
+    expect(qs.map((q) => q.id)).toEqual(['p1:trigger', 'p1:messages', 'p1:goal', 'p1:benefit', 'p1:ends']);
+    expect(qs.find((q) => q.id === 'p1:ends')!.recommended).toBeUndefined();
     expect(qs.find((q) => q.id === 'p1:trigger')!.recommended).toBe('customer.created');
     expect(qs.find((q) => q.id === 'p1:messages')!.recommended).toBe('3');
     expect(qs.find((q) => q.id === 'p1:goal')!.recommended).toBe('yes');

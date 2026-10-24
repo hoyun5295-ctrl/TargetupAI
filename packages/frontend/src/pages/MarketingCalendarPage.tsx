@@ -4,12 +4,13 @@ import ZoneFrame from '../components/zone/ZoneFrame';
 // ★ 2026-07-05 재점검: 등록 = 연 1회(yearly + 대상 월) — 옛 monthly는 시즌 캠페인이 매월 반복 발송되는 구조 결함.
 //   설계는 서버 저장(새로고침에도 유지) + 등록된 달은 배지 표시·재등록 차단(200크레딧 중복 차감 방지).
 // 다크 slate + 단일 액센트, native dialog 0(useToast + CreditConfirmModal), 생성 중 로딩 오버레이 + 닫기 차단(D185).
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { goBackOr } from '../lib/scroll-restoration';
 import { ArrowLeft, CalendarDays, CalendarRange, Sparkles, Loader2, Check, CheckCircle2, RefreshCcw } from 'lucide-react';
 import { useToast } from '../components/ToastProvider';
 import CreditConfirmModal from '../components/credit/CreditConfirmModal';
+import { RequestKeys } from '../utils/request-id';
 import EventCampaignModal from '../components/EventCampaignModal';
 import EventCampaignResumeBar from '../components/EventCampaignResumeBar';
 
@@ -153,6 +154,8 @@ export default function MarketingCalendarPage() {
     }
   };
 
+  // ★ 2026-10-24 달마다 요청 키 하나(= 운영자 행 id) — 응답을 못 받은 재전송은 같은 키 = 같은 행(200 두 번 0) · 등록됐을 때만 지운다
+  const monthKeys = useRef(new RequestKeys());
   const registerSelected = async () => {
     const picks = entries.filter((e) => selected.has(e.month) && !registrations[String(e.month)]);
     if (picks.length === 0) return;
@@ -181,6 +184,7 @@ export default function MarketingCalendarPage() {
             send_time_mode: 'fixed',
             delivery_policy: 'monthly',
             calendar_month: e.month, // 서버 등록 기록 + 같은 달 중복 등록 409 차단
+            request_key: monthKeys.current.keyFor(`month:${e.month}`),
             // ★ 2026-07-07 완비: 대상 축 고정 + 혜택(선택) + 담당자(선택 — 미입력 = 등록 계정 연락처)
             target_hint: e.targetHint,
             ...(benefit ? { benefit_content: benefit } : {}),
@@ -190,6 +194,7 @@ export default function MarketingCalendarPage() {
         const data = await res.json();
         if (data.success) {
           ok++;
+          monthKeys.current.settled(`month:${e.month}`);
           if (data.operator?.id) setRegistrations((prev) => ({ ...prev, [String(e.month)]: String(data.operator.id) }));
           setSelected((prev) => { const next = new Set(prev); next.delete(e.month); return next; });
         } else {

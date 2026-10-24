@@ -31,6 +31,8 @@ export const MK_HEAD_SAVE_TONE: Record<'saved' | 'saving' | 'dirty' | 'error' | 
 
 /** 만들기 버튼(AI 생성 = 앰버 · 허브 [생성]과 같은 색) */
 export const MK_BTN_AI = 'inline-flex items-center justify-center gap-2 h-10 px-5 rounded-[10px] text-[14px] font-bold text-slate-900 bg-amber-500 hover:bg-amber-400 transition-colors disabled:opacity-40';
+/** ★ 2026-10-24 돈이 나가는 버튼 = 앰버 하나(존 색 규칙 · 앰버 = 유료 버튼만) — 크레딧이 빠지는 버튼은 이 상수를 쓴다 */
+export const MK_BTN_PAY = MK_BTN_AI;
 export const MK_BTN_PRIMARY = 'inline-flex items-center justify-center gap-2 h-10 px-4 rounded-[10px] text-[14px] font-bold text-white bg-indigo-600 hover:bg-indigo-700 transition-colors disabled:opacity-40';
 export const MK_BTN_OUTLINE = 'inline-flex items-center justify-center gap-1.5 h-9 px-3 rounded-[10px] text-[13px] font-semibold text-slate-700 border border-slate-200 bg-white hover:bg-slate-50 hover:border-slate-300 transition-colors disabled:opacity-40';
 export const MK_BTN_GHOST = 'inline-flex items-center justify-center gap-1.5 h-9 px-3 rounded-[10px] text-[13px] font-semibold text-slate-600 hover:text-slate-900 hover:bg-slate-100 transition-colors disabled:opacity-40';

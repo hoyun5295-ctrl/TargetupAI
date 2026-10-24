@@ -8,7 +8,9 @@
  * approved_at 은 다시 켤 때 NOW 로 덮여(journey-builder activateJourney) 「켠 지 며칠」의 기준으로 못 쓴다 → 원장 첫 차감을 쓴다.
  * 운영 키 = journey-operation:{계보 뿌리 또는 V.3 전 판 id}:{KST 날짜} → 키 둘째 마디를 여정 표로 이어 계보로 모은다.
  * ⛔ 조회 실패는 던진다(모르는 값을 0 으로 접지 않는다 · 호출부 503/500).
- * 한계: V.3 전 바닥 아래 공짜 발송일은 원장에 없어 그 기간 실측이 낮다 · 여정 밖 운영 출처(자동 마케팅)는 세지 않는다.
+ * 한계: V.3 전 바닥 아래 공짜 발송일은 원장에 없어 그 기간 실측이 낮다.
+ * ★ 2026-10-23 여정 결함 0(V.3 §16) — 자동 마케팅 운영 크레딧도 같은 달 크레딧에서 나간다 → 지난 30일 실제(원장 행 수 × 단가)를 합에 넣는다
+ *   (옛: 세지 않아 요금제를 내린 뒤 둘을 합친 사용이 기본 크레딧을 넘으면 여정이 크레딧 부족으로 멈췄다 · D1).
  */
 import { query } from '../config/database';
 import { lineageColumnsReady } from './journey-lineage';
@@ -25,7 +27,10 @@ export interface ForecastLineage {
 }
 
 export interface JourneyCreditForecast {
+  /** 여정 운영 예상 + 자동 마케팅 운영(지난 30일 실제) */
   total: number;
+  /** 자동 마케팅 운영 크레딧(지난 30일 실제 · 원장) */
+  autoMarketing30?: number;
   basis: 'measured' | 'max' | 'mixed';
   perLineage: ForecastLineage[];
 }
@@ -124,13 +129,21 @@ export async function journeyCreditForecast(companyId: string, now: Date = new D
       ORDER BY ${ready ? 'entry_closed_at NULLS FIRST, ' : ''}created_at ASC`,
     [companyId],
   );
-  if (act.rows.length === 0) return { total: 0, basis: 'measured', perLineage: [] };
+  const am = await query(
+    `SELECT COUNT(*)::int AS n FROM ai_credit_transactions
+      WHERE company_id = $1::uuid AND source = 'continuous-operator-send' AND type = 'deduct'
+        AND created_at > $2::timestamptz - INTERVAL '${FORECAST_WINDOW_DAYS} days'`,
+    [companyId, now.toISOString()],
+  );
+  const autoMarketing30 = (Number(am.rows[0]?.n) || 0) * getCreditCost('continuous-operator-send');
+  if (act.rows.length === 0) return { total: autoMarketing30, autoMarketing30, basis: 'measured', perLineage: [] };
   const { idToRoot, ledger } = await loadOperationLedger(companyId, now, rootSql);
-  return computeJourneyCreditForecast({
+  const f = computeJourneyCreditForecast({
     now,
     unitCost: getCreditCost('journey-operation'),
     active: act.rows.map((r: any) => ({ id: String(r.id), name: String(r.name || ''), root: String(r.root) })),
     idToRoot,
     ledger,
   });
+  return { ...f, total: f.total + autoMarketing30, autoMarketing30 };
 }

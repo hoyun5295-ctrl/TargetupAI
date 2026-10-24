@@ -36,6 +36,9 @@ import { normalizeProductFilters, mallItemKeySql, mallItemsSql, ledgerProductKey
 // ★ 2026-10-20 여정 V.3 §18 — 기존 여정 뒤에 붙이기(앞 여정을 마치면).
 import { readAfterConfig, outcomeStatuses, AFTER_JOURNEY_WINDOW_DAYS } from './journey-after-config';
 import { lineageColumnsReady } from './journey-lineage';
+// ★ 2026-10-23 여정 결함 0 — 대상 조건 칸 표 한 곳(추출 · 검증 · 사람 말 · AI 메뉴 공용)
+import { CUSTOMER_CONDITION_FIELDS, BIRTH_MONTH_SQL, normalizeGenderCode, conditionFieldLabelList } from './journey-condition-fields';
+import { getGenderVariants } from './normalize';
 
 export async function selectJourneyTargetCustomerIds(
   companyId: string,
@@ -1015,7 +1018,7 @@ export async function countJourneyTargetCustomers(
 // ★ 2026-09-29 여정 V2 — 허용 목록을 밖으로 꺼내 저장 · 활성화 검증(findCustomerConditionIssues)과 같은 단일 출처로 쓴다.
 // ★ 2026-10-20 여정 V.3 §7-3 — 「마지막 구매 N일」(days_since_purchase) = KST 오늘 − 최근 구매일(customers.recent_purchase_date date · 휴면 추출과 같은 칸).
 //   가상 칸이라 숫자 비교(>= <= > <)만 받는다. 구매 이력이 없는 고객(NULL)은 비교에서 빠진다. 「가입 N일」(created_at)은 만들지 않는다(고객 DB 를 다시 올리면 전원이 신규).
-export const CUSTOMER_CONDITION_FIELDS = ['grade', 'region', 'age', 'purchase_count', 'total_purchase_amount', 'sms_opt_in', 'store_name', 'store_code', 'points', 'days_since_purchase'] as const;
+export { CUSTOMER_CONDITION_FIELDS };
 export const CUSTOMER_CONDITION_OPS = ['==', '!=', '>=', '<=', '>', '<', 'in', 'not_in', 'is_null', 'not_null'] as const;
 const DAYS_SINCE_PURCHASE_OPS = ['>=', '<=', '>', '<'];
 const DAYS_SINCE_PURCHASE_SQL = `(${KST_TODAY_DATE_SQL} - c.recent_purchase_date)`;
@@ -1024,7 +1027,7 @@ export interface CustomerConditionIssue {
   index: number;
   field: string;
   op: string;
-  reason: 'unknown_field' | 'unknown_op' | 'empty_value' | 'bad_shape' | 'bad_logic' | 'bad_number';
+  reason: 'unknown_field' | 'unknown_op' | 'empty_value' | 'bad_shape' | 'bad_logic' | 'bad_number' | 'bad_value';
 }
 
 /**
@@ -1066,6 +1069,20 @@ export function findCustomerConditionIssues(conditions: unknown, logic?: unknown
     }
     if (op === 'is_null' || op === 'not_null') return;
     const v = raw.value;
+    // ★ 2026-10-23 성별 = 여성(F) · 남성(M) 두 값만(표기가 달라도 같은 코드) · 생일 달 = 1~12
+    if (field === 'gender' || field === 'birth_month') {
+      if (!['==', '!=', 'in', 'not_in'].includes(op) && !(field === 'birth_month' && ['>=', '<=', '>', '<'].includes(op))) {
+        issues.push({ index, field, op, reason: 'unknown_op' });
+        return;
+      }
+      const list = Array.isArray(v) ? v : [v];
+      if (list.length === 0 || list.some((x) => x === undefined || x === null || String(x).trim() === '')) { issues.push({ index, field, op, reason: 'empty_value' }); return; }
+      const ok = field === 'gender'
+        ? list.every((x) => normalizeGenderCode(x) !== null)
+        : list.every((x) => Number.isInteger(Number(x)) && Number(x) >= 1 && Number(x) <= 12);
+      if (!ok) issues.push({ index, field, op, reason: field === 'gender' ? 'bad_value' : 'bad_number' });
+      return;
+    }
     const emptyList = (op === 'in' || op === 'not_in') && (Array.isArray(v) ? v.length === 0 : v === undefined || v === null || v === '');
     if (emptyList || v === undefined || v === null || (typeof v === 'string' && v.trim() === '')) {
       issues.push({ index, field, op, reason: 'empty_value' });
@@ -1097,7 +1114,10 @@ export function partitionCustomerConditions(filters: Record<string, any> | null 
   const kept: any[] = [];
   f.customer_conditions.forEach((c: any, i: number) => {
     const issues = findCustomerConditionIssues([c]);
-    if (issues.length === 0) kept.push(c);
+    // ★ 2026-10-23 성별은 표준 코드(F · M)로 저장(AI 가 「여성」으로 내도 화면 · 추출이 같은 값을 본다)
+    if (issues.length === 0) kept.push(c?.field === 'gender' && c.op !== 'is_null' && c.op !== 'not_null'
+      ? { ...c, value: Array.isArray(c.value) ? c.value.map(normalizeGenderCode) : normalizeGenderCode(c.value) }
+      : c);
     else droppedNotices.push(`반영 안 됨: ${describeCustomerConditionIssue({ ...issues[0], index: i })}`);
   });
   f.customer_conditions = kept;
@@ -1108,8 +1128,9 @@ export function partitionCustomerConditions(filters: Record<string, any> | null 
 export function describeCustomerConditionIssue(issue: CustomerConditionIssue): string {
   const n = issue.index >= 0 ? `대상 조건 ${issue.index + 1}번째` : '대상 조건';
   switch (issue.reason) {
-    case 'unknown_field': return `${n}은 여정에서 쓸 수 없는 항목이라 저장하지 않았어요. 등급 · 지역 · 나이 · 구매 횟수 · 총 구매액 · 마지막 구매 · 매장 · 포인트 · 수신 동의로 다시 골라 주세요.`;
-    case 'bad_number': return `${n}의 값은 숫자로 넣어 주세요.`;
+    case 'unknown_field': return `${n}은 여정에서 쓸 수 없는 항목이라 저장하지 않았어요. ${conditionFieldLabelList()}으로 다시 골라 주세요.`;
+    case 'bad_number': return `${n}의 값은 숫자로 넣어 주세요(생일 달은 1~12).`;
+    case 'bad_value': return `${n}의 성별은 여성 또는 남성으로 골라 주세요.`;
     case 'unknown_op': return `${n}의 비교 방식을 알 수 없어요. 다시 골라 주세요.`;
     case 'empty_value': return `${n}의 값이 비어 있어요. 값을 넣어 주세요.`;
     case 'bad_logic': return '대상 조건을 묶는 방식(모두 만족 / 하나라도 만족)을 알 수 없어요. 다시 골라 주세요.';
@@ -1148,7 +1169,29 @@ export function applyCustomerConditions(
       continue;
     }
 
-    const col = cond.field === 'sms_opt_in' && consent ? consent.value : `c.${cond.field}`;
+    // ★ 2026-10-23 성별 = 표기 변형 전부(normalize getGenderVariants · 고객 필터와 같은 CT) · 다름 = NOT(그중 하나)
+    if (cond.field === 'gender' && cond.op !== 'is_null' && cond.op !== 'not_null') {
+      const codes = (Array.isArray(cond.value) ? cond.value : [cond.value]).map(normalizeGenderCode);
+      if (codes.length === 0 || codes.some((x) => x === null)) return FAIL_CLOSED;
+      const variants = [...new Set(codes.flatMap((x) => getGenderVariants(x as string)))];
+      const pos = cond.op === '==' || cond.op === 'in';
+      if (!pos && cond.op !== '!=' && cond.op !== 'not_in') return FAIL_CLOSED;
+      clauses.push(pos ? `c.gender = ANY(${bind(variants)}::text[])` : `NOT (c.gender = ANY(${bind(variants)}::text[]))`);
+      continue;
+    }
+    // ★ 2026-10-23 생일 달(1~12) = 월일 칸 우선 · 없으면 생일 날짜(생일 여정과 같은 두 칸)
+    if (cond.field === 'birth_month' && cond.op !== 'is_null' && cond.op !== 'not_null') {
+      const months = (Array.isArray(cond.value) ? cond.value : [cond.value]).map((x) => Number(x));
+      if (months.length === 0 || months.some((m) => !Number.isInteger(m) || m < 1 || m > 12)) return FAIL_CLOSED;
+      if (cond.op === 'in' || cond.op === 'not_in') {
+        clauses.push(`${BIRTH_MONTH_SQL} ${cond.op === 'in' ? 'IN' : 'NOT IN'} (${months.map((m) => `${bind(m)}::int`).join(', ')})`);
+      } else {
+        if (months.length !== 1) return FAIL_CLOSED;
+        clauses.push(`${BIRTH_MONTH_SQL} ${cond.op === '==' ? '=' : cond.op} ${bind(months[0])}::int`);
+      }
+      continue;
+    }
+    const col = cond.field === 'birth_month' ? BIRTH_MONTH_SQL : cond.field === 'sms_opt_in' && consent ? consent.value : `c.${cond.field}`;
     if (cond.op === 'is_null') {
       clauses.push(`${col} IS NULL`);
       continue;

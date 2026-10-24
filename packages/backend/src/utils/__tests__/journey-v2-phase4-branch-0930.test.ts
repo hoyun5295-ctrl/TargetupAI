@@ -175,7 +175,8 @@ describe('실행기 배선(원문)', () => {
     const waitAt = src.indexOf("if (step.step_type === 'wait') {");
     expect(endAt).toBeGreaterThan(-1);
     expect(endAt).toBeLessThan(waitAt);
-    const helper = src.slice(src.indexOf('async function completeAtEndStep'), src.indexOf('async function hasPurchasedSinceEntry'));
+    // ★ 2026-10-23 완료 = finishExecution 한 함수(마지막 칸 · 끝 칸 · 칸 없음 공용)
+    const helper = src.slice(src.indexOf('async function finishExecution'), src.indexOf('async function hasPurchasedSinceEntry'));
     // ★ 0930 Codex 1R — 완료 전환은 진행 중일 때만(CASE) · 발송비는 상태와 무관하게(codex-r1 테스트가 소유).
     expect(helper).toContain("THEN 'completed'");
     expect(helper).toContain("prev.status = 'active'");
@@ -184,10 +185,13 @@ describe('실행기 배선(원문)', () => {
   it('다음 칸이 끝이면 기다리지 않고 완료한다', () => {
     const adv = src.slice(src.indexOf('async function advanceOrComplete'), src.indexOf('// calculateNextRunAt'));
     expect(adv).toMatch(/String\(nextRes\.rows\[0\]\.step_type\) === 'end'/);
-    expect(adv).toContain('completeAtEndStep(');
+    expect(adv).toContain('finishExecution(exec.execution_id, exec.journey_id, { stepOrder: Number(nextRes.rows[0].step_order), addedCost, endStepId');
+    // 마지막 칸도 같은 함수(옛: 상태 확인 없이 completed 로 덮었다)
+    expect(adv).toContain('finishExecution(exec.execution_id, exec.journey_id, { stepOrder: currentStep.step_order, addedCost })');
+    expect(adv).not.toMatch(/status = 'completed',\s*completed_at = NOW\(\)/);
   });
   it('목표 판정 · 들어온 뒤 구매 조건은 같은 판정 함수를 쓴다 · 새 조건 DB 오류 = 보류', () => {
-    const goal = src.slice(src.indexOf('async function isGoalConvertedSinceEntry'), src.indexOf('async function completeAtEndStep'));
+    const goal = src.slice(src.indexOf('async function isGoalConvertedSinceEntry'), src.indexOf('async function finishExecution'));
     expect(goal).toContain('hasPurchasedSinceEntry(exec.company_id, exec.customer_id, exec.entered_at, { signupBatch: signupJourney })');
     const cond = src.slice(src.indexOf('async function evaluateCondition'), src.indexOf('async function evaluateCdpEventExistsCondition'));
     expect(cond).toContain("type === 'purchase_since_entry'");

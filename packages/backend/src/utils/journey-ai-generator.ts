@@ -17,7 +17,7 @@
 
 import { extractJsonFromAiText } from './ai-json';
 import { callAIWithFallback, getKoreanCalendar } from '../services/ai';
-import { randomUUID } from 'crypto';
+import { randomUUID, createHash } from 'crypto';
 import { buildMemoryPromptContext } from './company-memory';
 // ★ D225+ (2026-05-28 Harold 명시): Brand Voice Learning — 회사별 LMS 대표 문안 5건 + 가이드라인 자동 주입.
 import { buildSystemPromptWithBrandVoice } from './brand-voice-prompt';
@@ -40,12 +40,16 @@ import { normalizeProductFilters, type PurchaseDoor } from './journey-product';
 import { assertStepsWithinLimit, clampStepDelayHours, JourneyInputError, JOURNEY_SUBJECT_MAX_CHARS } from './journey-step-limits';
 // ★ 2026-09-29 여정 V2 0차 ② — AI 가 낸 대상 조건 중 쓸 수 없는 것은 빼고 "반영 안 됨"으로 알린다(조용히 넓히지 않는다).
 import { partitionCustomerConditions } from './journey-target-extractor';
+// ★ 2026-10-23 대상 조건 칸 메뉴 = journey-condition-fields 표 한 곳(옛 손 목록 8칸 · 추출기 10칸과 달랐다)
+import { formatConditionMenuForAi } from './journey-condition-fields';
 // 추천 문구의 단일 출처 — "이어서 만들기"와 기회 카드가 같은 목표 골격을 쓴다.
 import { presetObjectiveFor } from './journey-opportunities';
 // ★ 2026-08-02 (Codex 1R): AI가 지어낸 혜택 기계 차단 — 프롬프트는 경계가 아니다.
 import { findNewNumbers, stripUnauthorizedBenefits } from './copy-benefit-detector';
 // ★ 2026-09-27 한줄로 V2 R260 — 여정 자동 생성은 사전 확인 → 묶음 생성 → 1회 차감
-import { checkCredit, deductCreditSafe } from './ai-credit';
+import { checkCredit, deductCreditOutcome, isChargedByKey } from './ai-credit';
+import { joinInflight } from './inflight-lock';
+import { redis } from '../config/defaults';
 import { getCreditCost } from './ai-credit-calc';
 import { runInCreditBundle } from './ai-credit-context';
 // ★ 2026-09-26 한줄로 V2 R1-35 후속 — 날씨 지시는 날씨 CT가 소유(연결이 없으면 날씨 변수를 쓰지 않게)
@@ -71,8 +75,15 @@ export interface JourneyAIGenerateInput {
    *   혜택은 AI가 못 지어내는 유일한 값이라 사용자 입력이 정당한 자리다.
    *   값이 오면 ①AI는 placeholder 대신 이것을 문안에 녹이고 ②차단기의 허용 근거에 합류한다 —
    *   입력한 혜택은 살고, AI가 덧붙인 다른 혜택은 여전히 placeholder로 되돌아간다.
+   * ★ 2026-10-23 null = 사람이 질문표에서 혜택 칸을 비웠다 → 목표문(해석 AI 가 옮긴 글)도 근거가 아니다(혜택 자리 = placeholder).
+   *   undefined 만 옛 하위호환(목표문의 혜택이 근거)이다.
    */
-  benefitText?: string;
+  benefitText?: string | null;
+  /**
+   * ★ 2026-10-23 담당자가 쓴 한 줄 그대로(문장으로 만들기). 시작 사건이 정해져도 이 한 줄이 말한 대상 조건은 남긴다
+   *   (검증 = partitionCustomerConditions · 담지 못한 조건 = 「반영 안 됨」). 없으면(카드 · 빠른 시작) 조건을 비운다(0808 그대로).
+   */
+  audienceLine?: string;
   /**
    * ★ 2026-09-30 여정 V2 3차 — 상품 재구매 여정(상품 고르기 창에서만 온다). 상품은 담당자가 관측 목록에서 고른 것,
    *   사용 기간은 담당자가 확정한 일수 → 첫 문자 대기(delay)에 그대로 저장한다(AI 가 정하지 않는다).
@@ -84,6 +95,13 @@ export interface JourneyAIGenerateInput {
    *   dormantDays = 휴면 전환 · 휴면 복귀 두 여정이 같은 기준일을 쓰게(회의론자 D1).
    */
   timing?: { daysFromStart: number[]; dormantDays?: number | null };
+}
+
+/** AI 가 칸으로 담지 못한 대상 조건 → 「반영 안 됨」 문구(최대 5 · 각 80자). 화면 · 작업 화면이 그대로 보인다. */
+export function unsupportedConditionNotices(raw: unknown): string[] {
+  if (!Array.isArray(raw)) return [];
+  return raw.map((x) => String(x ?? '').trim().slice(0, 80)).filter(Boolean).slice(0, 5)
+    .map((x) => `반영 안 됨: 「${x}」 조건은 여정 대상 칸에 없어 이 조건 없이 만들었어요.`);
 }
 
 /** 휴면 기준일을 쓰는 시작 사건(대상 필터 dormant_days 를 읽는 둘). */
@@ -275,7 +293,8 @@ export async function generateJourneyPackage(input: JourneyAIGenerateInput): Pro
   // 차단기의 허용 근거 — **전용 입력이 있으면 그것 하나다**(Codex 1R). 목표문까지 합치면
   // 목표에 "20% 쿠폰 행사"라 쓰고 혜택 칸에 "10% 쿠폰"을 쓴 모순 입력에서 20%도 살아남아
   // 프롬프트의 "이것 하나뿐"이 경계가 아니게 된다. 전용 입력이 비었을 때만 목표문이 하위호환 근거다.
-  const benefitBasis = benefitText || objectiveText;
+  const benefitBasis = benefitText || (input.benefitText === null ? '' : objectiveText);
+  const audienceLine = String(input.audienceLine || '').trim().slice(0, 300);
 
   const ctx = await loadCompanyContext(input.companyId);
   const memoryContext = await buildMemoryPromptContext(input.companyId, 30).catch(() => '');
@@ -315,7 +334,9 @@ ${formatTriggerMenuForAi()}
 1-2. ★ 타겟 세그먼트 추출 (매우 중요, 절대 누락 금지)
    사용자가 "어떤 고객에게" 보낼지 조건을 말하면(예: "매장명이 송파가락점인 회원", "VIP 등급만", "서울 지역", "3회 이상 구매") 반드시 triggerFilters.customer_conditions 배열로 담는다.
    - 형식: { "field": "허용필드", "op": "==|!=|>=|<=|>|<|in|not_in", "value": 값 }
-   - 허용 field (이 목록 외 절대 사용 금지): store_name(매장명), store_code(매장코드), grade(등급), region(지역), age(나이), purchase_count(구매횟수), total_purchase_amount(총구매액), sms_opt_in(수신동의)
+   - 허용 field (이 목록 외 절대 사용 금지):
+${formatConditionMenuForAi()}
+   - 이 목록으로 담을 수 없는 대상 조건(예: 특정 상품을 산 고객 · 앱 설치 고객)은 지어내지 말고 "unsupportedConditions" 배열에 사람 말 그대로 적는다(화면이 「반영 안 됨」으로 알린다).
    - 여러 조건이면 logic을 "AND" 또는 "OR"로 명시.
    - 예: "매장명이 송파가락점인 회원에게" -> "customer_conditions": [{ "field": "store_name", "op": "==", "value": "송파가락점" }], "logic": "AND"
    ✗ 사용자가 세그먼트를 말했는데 customer_conditions를 비우면 전체 고객에게 발송되는 중대한 사고다. 명시된 조건은 반드시 담는다.
@@ -350,11 +371,11 @@ ${formatTriggerMenuForAi()}
    - "사장님이 직접" / "초특가" / "역대급": 광고 톤 X
 ✓ 대체 표현 매트릭스 (격조 + 정중 + 감사 본질):
    - "단골" → "오랜 시간 함께해주신" / "꾸준한 관심을 보내주신" / "변함없이 찾아주시는" / "한결같은 신뢰를 보내주신"
-   - "단골 고객님" → "오래 함께해주신 고객님" / "소중한 고객님" / "꾸준히 사랑해주시는 고객님"
+   - "단골 고객님" → "오래 함께해주신 고객님" / "꾸준히 사랑해주시는 고객님" / "한결같이 찾아주시는 고객님"
 ✓ 브랜드 톤 본질: 격조 / 정중함 / 진심 어린 감사 / 절제된 감성. 친근한 대화체 X, 정중한 안부 O
 ✓ 안내문 / 인사 / 감성 텍스트 / 회사 톤 = 매우 풍성하게 직접 작성 (마케팅 가치 본질, 계절 단어 없이)
    - 단순 "안녕하세요 고객님" 수준 X = 5단 매트릭스 자연 전개 의무 (★ D210+ Phase 2-fix6 Harold 명시 강화):
-     1) 공감 도입 (1~2 문장) = 안부 + %고객명%님 자연 호명 (메신저 보내듯 친밀한 톤)
+     1) 공감 도입 (1~2 문장) = 안부 + %고객명%님 자연 호명 (정중하면서 따뜻한 1:1 안부 톤)
      2) 감성 디테일 (2~3 문장) = 시간 불문 감성 묘사 + 사용자 일상 공감 ("첫 인연을 맺어주신 반가움", "늘 곁에 두고 싶은 브랜드가 되고 싶은 마음" 등 구체 묘사, 계절·날씨·월 언급 금지)
      3) 가치 제안 (2~3 문장) = [혜택 안내: 직접 수정해주세요] placeholder + 왜 이 안내가 특별한지 스토리 (기존 고객 / VIP / 오랜 관심 등 맥락)
      4) CTA 안내 (1~2 문장) = 구체 행동 유도 + URL 또는 매장 방문 자연 안내 ("아래 링크에서 확인하세요" / "%최근구매매장%에서 바로 사용 가능해요")
@@ -369,7 +390,6 @@ ${formatTriggerMenuForAi()}
 ✗ (광고) 표기 직접 작성 X (시스템 자동 합성)
 ✗ 무료수신거부 080 직접 작성 X (시스템 자동 합성)
 ✓ %고객명% 변수 사용 권장 (본문 영역만, 제목 영역은 변수 X)
-✓ LMS 300~500바이트 권장 (광고 합성 후 380~580바이트)
 
 [★ ★ ★ 보존 영역 vs 자유 영역 분리 (D209+ Harold 명시 강화, 옛 ai.ts 정합 통합) ★ ★ ★]
 ✓ 보존 영역 (절대 변경 X, 회사 admin이 직접 작성할 영역):
@@ -424,7 +444,7 @@ ${buildWeatherPromptBlock()}
 예시 1 (이탈 위험 분기):
 {{ customer.name | default: '고객' }}님,
 {% if customer.churn_risk > 0.7 %}
-오랜만에 인사드려요. 다시 뵙고 싶은 마음에 [회복 안내: 직접 작성해주세요] 준비했어요.
+오랜만에 인사드려요. 다시 뵙고 싶은 마음을 담아 [회복 안내: 직접 작성해주세요] 소식을 전해 드려요.
 {% elsif customer.purchase_likelihood > 0.6 %}
 {{ customer.name | default: '고객' }}님께 어울리는 새 상품 [추천 안내: 직접 작성해주세요]
 {% else %}
@@ -452,8 +472,8 @@ VIP 회원님께 가장 먼저 안내드리는 소식.
 ✗ 이모지 절대 사용 금지: 🎂 🎉 💝 🌸 🎁 ✨ 💌 🌷 🍀 ❤ 등 모든 이모지 통신사 미지원 (발송 실패 / 깨짐 위험)
 ✗ 비표준 특수문자 사용 금지:
   - 대시: em dash(U+2014)·en dash(U+2013)·hyphen bullet(U+2010) (대신 - 사용)
-  - 화살표: ▶ ▷ ➤ ➜ (대신 > 사용 or "자세히 →" 단어 형태)
-  - 표시: ★ ☆ ✓ ✗ ◆ ※ ‣ • (대신 * V X · 사용 or 단어로 풀어쓰기)
+  - 화살표: ➤ ➜ (대신 > 사용 or "자세히 →" 단어 형태)
+  - 표시: ✓ ✗ ‣ • (대신 V X · 사용 or 단어로 풀어쓰기)
   - 따옴표: " " ' ' 『 』 (대신 표준 " ' 사용)
   - 전각 기호: ＆ ％ ＋ ？ ！ (대신 표준 & % + ? ! 사용)
 ✓ 허용 단어: 한글 / 영문 / 숫자 / 표준 기호 ( . , ! ? : ; ( ) [ ] " ' + - * / = @ # $ % & | < > → ) / 줄바꿈
@@ -473,7 +493,7 @@ VIP 회원님께 가장 먼저 안내드리는 소식.
 일 년 중 단 하루, %고객명%님이 주인공인 날이니까요.
 
 %고객명%님의 이번 생일은
-조금 더 특별하게 기억되길 바라는 마음으로 작은 선물을 준비했어요.
+오래 기억에 남는 하루가 되길 바라는 마음으로 작은 선물을 전해 드려요.
 
 [혜택 안내: 직접 수정해주세요]
 
@@ -494,17 +514,17 @@ VIP 회원님께 가장 먼저 안내드리는 소식.
 오랜 시간 변함없이 찾아주시는 발걸음 하나하나가
 저희에게는 가장 큰 힘이 되고 있어요.
 
-VIP 회원님만을 위해 마련한 이번 특별 안내,
-가장 먼저 받아보실 수 있도록 정성껏 준비했답니다.
+VIP 회원님께 먼저 전하는 이번 안내,
+가장 먼저 받아보실 수 있도록 정성껏 담았어요.
 {% elsif customer.purchase_count > 10 %}
 {{ customer.name | default: '고객' }}님과 함께한 {{ customer.purchase_count }}번의 만남,
-어느덧 오랜 시간 함께해주신 소중한 고객님이 되어주셨네요.
+어느덧 오랜 시간 함께해주신 분이 되어주셨네요.
 
 매번 변함없는 신뢰로 찾아주셔서 진심으로 감사드려요.
 {{ customer.name | default: '고객' }}님 같은 고객님이 계셔서
 저희가 더 좋은 제품과 서비스를 고민할 수 있어요.
 
-오래 함께해주신 분들께만 전해드리는 특별한 인사 준비했어요.
+오래 함께해주신 분들께만 전하는 인사를 담았어요.
 {% else %}
 새로운 소식 전해드리고 싶어
 {{ customer.name | default: '고객' }}님께 인사드려요.
@@ -531,7 +551,7 @@ VIP 회원님만을 위해 마련한 이번 특별 안내,
 저희가 가장 정성껏 준비한 첫 인사를 드리고 싶었어요.
 
 처음 만나는 분께만 드리는 작은 선물 한 가지,
-오래 함께해주실 분들을 위해 정성껏 준비했답니다.
+오래 함께해주실 분들을 위해 정성껏 담았어요.
 
 [혜택 안내: 직접 수정해주세요]
 
@@ -548,7 +568,7 @@ VIP 회원님만을 위해 마련한 이번 특별 안내,
 혹시 그동안 불편하셨던 영역이 있었다면 부족함을 먼저 사과드리고 싶어요.
 
 다시 한 번 좋은 인연으로 이어가고 싶은 마음으로
-오랜 시간 함께해주신 분들께만 전해드리는 회복 안내 준비했답니다.
+오랜 시간 함께해주신 분들께만 전하는 회복 안내를 담았어요.
 
 [혜택 안내: 직접 수정해주세요]
 {% else %}
@@ -584,6 +604,7 @@ VIP 회원님만을 위해 마련한 이번 특별 안내,
       "stepIntent": "환영 인사 + 첫 구매 안내"
     }
   ],
+  "unsupportedConditions": [],
   "allowReentry": false,
   "reentryCooldownDays": null,
   "budgetMonthlyHint": null,
@@ -601,7 +622,7 @@ VIP 회원님만을 위해 마련한 이번 특별 안내,
 이번 생성에서는 "${benefitText}" 이 혜택 하나만 구체적으로 쓸 수 있습니다.
 [혜택 안내: 직접 수정해주세요] placeholder를 쓰지 말고 이 혜택을 본문에 자연스럽게 녹이세요.
 이 혜택 외의 다른 구체 혜택(%·원·쿠폰·무료 등)은 여전히 절대 금지입니다.`;
-  } else {
+  } else if (input.benefitText !== null) {
     system += `
 
 [혜택 규칙의 근거: 위 placeholder 규칙과 함께 적용]
@@ -620,6 +641,9 @@ VIP 회원님만을 위해 마련한 이번 특별 안내,
   //   (트리거 값 자체는 아래에서 계약값으로 덮어쓴다 — 이 지시는 문안이 신호와 맞게 하려는 것뿐이다)
   if (presetTrigger) {
     userMessage += `\n\n[시작 신호 고정] 이 여정은 "${describeJourneyTrigger(presetTrigger, {})}"에게 나갑니다. 스텝 수·발송 간격·문안을 그 상황에 맞춰 설계하세요.`;
+  }
+  if (audienceLine) {
+    userMessage += `\n\n[담당자가 쓴 한 줄: 대상 조건은 여기 적힌 것만 customer_conditions 에 담는다] ${audienceLine}`;
   }
 
   // ★ 2026-08-08 혜택 입력 — placeholder 대신 사용자가 준 혜택을 처음부터 녹인다.
@@ -711,10 +735,16 @@ VIP 회원님만을 위해 마련한 이번 특별 안내,
   //   AI가 재구매 여정을 만들어 놓는 어긋남을 여기서 닫는다.
   //   조건(triggerFilters)은 비운다 — 기본값은 추출기·워커가 소유한다(휴면 복귀 30일 등 카탈로그 값과 같다).
   //   AI가 지어낸 조건을 실으면 추천이 약속한 대상과 달라진다.
+  //   ★ 2026-10-23 단 사람이 한 줄로 말한 대상(audienceLine)은 남긴다(옛: 문장으로 만들기도 늘 이 길이라 「서울 여성」이 사라지고 전체에게 나갔다 · Codex 1R).
+  //     남기는 것은 대상 조건 · 묶는 방식 둘뿐 · 검증은 아래 partitionCustomerConditions.
   if (presetTrigger) {
     triggerEvent = presetTrigger;
     templateCode = triggerTemplateCode(presetTrigger) || 'custom';
-    triggerFilters = {};
+    const said = audienceLine ? triggerFilters : {};
+    triggerFilters = {
+      ...(said.customer_conditions !== undefined ? { customer_conditions: said.customer_conditions } : {}),
+      ...(said.logic !== undefined ? { logic: said.logic } : {}),
+    };
   }
   // ★ 2026-09-30 V2 3차 — 상품 재구매: 대상 = 고른 상품(담당자) · 첫 문자 = 확정한 사용 기간 뒤(AI 값 무시) · 진입 교체 켜짐.
   if (productFilters) {
@@ -761,7 +791,8 @@ VIP 회원님만을 위해 마련한 이번 특별 안내,
     thresholdCostHint: parsed.thresholdCostHint != null ? Number(parsed.thresholdCostHint) : null,
     reasoning: String(parsed.reasoning || '').slice(0, 500),
     goalExitDefault: defaultGoalExitFor(triggerEvent),
-    droppedConditionNotices: cond.droppedNotices,
+    // ★ 2026-10-23 AI 가 칸으로 못 담은 조건도 알린다(옛: AI 가 그 조건을 아예 안 내면 「반영 안 됨」도 없이 더 넓게 나갔다)
+    droppedConditionNotices: [...cond.droppedNotices, ...unsupportedConditionNotices(parsed.unsupportedConditions)],
     targetSummary: describeJourneyTarget(triggerEvent, triggerFilters),
   };
 }
@@ -1026,16 +1057,43 @@ export function parseAnchorOffsets(objective: string): number[] {
 //   오프셋은 정규식 파싱(결정적), 각 스텝 문안은 generateAnchorStepMessage(1건 1크레딧)로 생성.
 //   "7일전 3일전 당일" → D-7/D-3/D-0 3스텝 문안 자동 작성(구체 혜택은 placeholder).
 // ════════════════════════════════════════════════════════════════════
+type AnchorPlan = { steps: { offsetDays: number; subject: string; message: string }[] };
+/**
+ * ★ 2026-10-23 Codex 1R · 2R — 같은 요청 = 회사 · 화면 요청 키 · 목표문이 모두 같을 때만(요청 키에 입력을 묶는다).
+ *   다른 목표문 = 다른 키 = 새 요청(새 차감) · 낸 요청 키로 다른 입력을 만들 수 없다.
+ *   정산된 결과(차감됨 · 이미 냄 · 차감 대상 아님)만 24시간 보관해 응답이 끊긴 재시도에 그대로 돌려준다.
+ *   보관이 없는데 원장에 이 키의 차감이 있으면 같은 입력을 다시 만든다(잔액 검사 생략 · 차감은 같은 키라 0 · 낸 것을 잔액 부족으로 막지 않는다).
+ *   차감이 안 된 결과(DB 오류 · [CREDIT][MISS])는 보관하지 않는다 → 다음 재시도가 같은 키로 다시 정산한다.
+ */
+const ANCHOR_PLAN_TTL_SEC = 24 * 60 * 60;
+
 export async function generateAnchorJourneyPlan(input: {
+  /** 화면이 만든 요청 키(같은 창 · 같은 목표의 재시도 = 같은 키 · 없으면 매번 새 키) */
+  requestId?: string | null;
   companyId: string;
   objective: string;
-}): Promise<{ steps: { offsetDays: number; subject: string; message: string }[] }> {
+}): Promise<AnchorPlan> {
+  if (!input.requestId) return (await makeAnchorJourneyPlan(input, `journey-anchor-plan:${input.companyId}:${randomUUID()}`, false)).plan;
+  const inputTag = createHash('sha256').update(String(input.objective || '').trim()).digest('hex').slice(0, 16);
+  const key = `journey-anchor-plan:${input.companyId}:${input.requestId}:${inputTag}`;
+  return joinInflight(key, async () => {   // 동시에 온 같은 요청 = 한 번 만들고 같은 결과
+    const saved = await redis.get(`${key}:result`).catch(() => null);
+    if (saved) {
+      try { return JSON.parse(saved) as AnchorPlan; } catch { /* 깨진 보관 = 다시 만든다(차감은 같은 키라 한 번) */ }
+    }
+    const { plan, settled } = await makeAnchorJourneyPlan(input, key, await isChargedByKey(input.companyId, key));
+    if (settled) await redis.set(`${key}:result`, JSON.stringify(plan), 'EX', ANCHOR_PLAN_TTL_SEC).catch(() => { /* 보관 실패 = 다음 재시도는 원장을 보고 같은 입력을 다시 만든다 */ });
+    return plan;
+  });
+}
+
+async function makeAnchorJourneyPlan(input: { companyId: string; objective: string }, key: string, paid: boolean): Promise<{ plan: AnchorPlan; settled: boolean }> {
   const offsets = parseAnchorOffsets(input.objective);
   // ★ 2026-09-27 한줄로 V2 R260 — 옛: 오프셋마다 AI를 순차 호출하며 1크레딧씩 뺐다 → 중간 실패·부족이면 앞 차감은 남고 결과는 없었다(402·500).
   //   필요 크레딧을 먼저 확인하고(부족하면 InsufficientCreditError → 402), 묶음 실행(안쪽 차감 없음)으로 동시 3개까지 만든 뒤
   //   **전부 성공했을 때만** 한 번에 뺀다. 문안 1건 = 1크레딧은 그대로다.
   const cost = getCreditCost('journey-ai-refine') * offsets.length;
-  await checkCredit(input.companyId, cost);
+  if (!paid) await checkCredit(input.companyId, cost);
   const steps = await runInCreditBundle(async () => {
     const out: { offsetDays: number; subject: string; message: string }[] = new Array(offsets.length);
     let next = 0;
@@ -1050,8 +1108,10 @@ export async function generateAnchorJourneyPlan(input: {
     return out;
   });
   // 작업마다 고유 멱등키(Codex 2R medium) — 생략하면 대체 키가 밀리초 단위라 같은 순간의 두 요청이 한 번만 차감될 수 있다.
-  await deductCreditSafe({ companyId: input.companyId, cost, source: 'journey-ai-refine', idempotencyKey: `journey-anchor-plan:${randomUUID()}` });
-  return { steps };
+  // ★ 2026-10-23 여정 결함 0 — 같은 요청(회사 · 화면 요청 키 · 목표문) = 한 번만 차감(옛: 매번 새 키 = 두 번 누름 · 재시도가 두 번 차감)
+  //   사전 확인 뒤 잔액이 먼저 소진되면 402(결과를 무과금으로 내주지 않는다 · settleCreditAfterSuccess 와 같은 원칙 · Codex 2R)
+  const outcome = await deductCreditOutcome({ companyId: input.companyId, cost, source: 'journey-ai-refine', idempotencyKey: key, throwOnInsufficient: true });
+  return { plan: { steps }, settled: outcome !== 'failed' };
 }
 
 // ════════════════════════════════════════════════════════════════════

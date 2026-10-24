@@ -135,8 +135,11 @@ describe('회차 자동 검사 — 실제 발송과 같은 기본 발신번호�
   const round = op.slice(op.indexOf('// 9. ★ D227+ 스팸 안전망'), op.indexOf('const tested: Array<'));
 
   it('검사에 넘기는 번호 = 기본 발신번호(없으면 종전 값) · 자격 판정 값은 그대로', () => {
-    // ★ 2026-10-07 고른 회신번호가 있으면 그 번호 · 없으면(개별 회신 포함) 기본 발신번호
-    expect(round).toContain('const spamCallback = (await loadOperatorCallback(operator.companyId, operator.useIndividualCallback ? null : operator.callbackNumber)) || callbackForSpam;');
+    // ★ 2026-10-07 고른 회신번호가 있으면 그 번호 · 없으면(개별 회신 포함) 기본 발신번호 · ★ 1024 최종 문안 문맥(copyCtx)과 같은 값이라 검사 전에 정한다
+    // ★ 1024 Codex 1R — 지문 문맥의 번호 = 발송이 쓰는 값(대체 번호 0) · 검사 운반 번호만 대체 값
+    expect(op).toContain("const sendCallback = (await loadOperatorCallback(operator.companyId, operator.useIndividualCallback ? null : operator.callbackNumber)) || '';");
+    expect(op).toContain('const spamCallback = sendCallback || callbackForSpam;');
+    expect(op).toContain('const copyCtx = { benefit: operator.benefitContent, opt080: adOpt080, callback: sendCallback };');
     expect(round).toContain('callbackNumber: spamCallback,');
     expect(round).not.toContain('callbackNumber: callbackForSpam');
     expect(op).toContain("const canAutoSend = !!bestMessage && !!callbackForSpam && channelForSpam !== '카카오'");
@@ -152,7 +155,9 @@ describe('회차 자동 검사 — 실제 발송과 같은 기본 발신번호�
   });
 
   it('직접 쓴 문안의 통과 기록 지문에 발신번호가 들어간다(080 으로 검사한 옛 통과가 실제 번호 검사를 건너뛰지 않게)', () => {
-    expect(round).toContain('computeMessageHash(`${spamCallback}\\n${bestSubject}\\n${bestMessage}`)');
+    // ★ 1024 Codex 2R — 기록 키 = 검사한 모양의 지문 한 함수(검사 번호 · 080 · 채널 · 제목 · 본문 · 080 만 바뀌어도 다시 검사)
+    expect(round).toContain('copyFingerprint({ callback: spamCallback, opt080: adOpt080, msgType: testType, subject: bestSubject, body: bestMessage })');
+    expect(round).not.toContain('computeMessageHash(');
     expect(round.indexOf('const spamCallback =')).toBeLessThan(round.indexOf('const fixedHash ='));
   });
 });
@@ -161,10 +166,9 @@ describe('라우트 — 권한 · 요금제 게이트는 승인과 같다', () =
   const routes = back('routes/ai.ts');
   const post = routes.slice(routes.indexOf("router.post('/operator/proposals/:id/spam-test'"), routes.indexOf("router.get('/operator/proposals/:id/spam-test'"));
 
-  it('본인 자동마케팅(또는 회사 관리자) · 요금제 게이트', () => {
-    expect(post).toContain("userType !== 'company_admin' && own.rows[0].created_by !== userId");
-    expect(post).toContain('isAiOperatorAllowed(planCtx, req.user)');
-    expect(post).toContain('startProposalSpamRetest(companyId, req.params.id, userId');
+  it('본인 자동마케팅(또는 회사 관리자) · 요금제 게이트 = 문 한 벌(operatorGate · ★ 1024)', () => {
+    expect(post).toContain('const gate = await operatorGate(req, res, { plan: true });');
+    expect(post).toContain('startProposalSpamRetest(gate.companyId, req.params.id, gate.userId');
   });
 });
 
@@ -180,9 +184,9 @@ describe('화면 — 고른 안 · 고친 문안에서 검사 · 같은 글자�
     const at = card.indexOf('const startRetest = async () => {');
     const start = card.slice(at, card.indexOf('await fetch(', at));
     expect(start).toContain('if (selectedIdx == null) setSelectedIdx(effectiveIdx);');
-    // 선택이 있으면 승인은 그 안 · 본문 · 제목을 싣는다
-    expect(card).toContain('onApprove({ variantIndex: effectiveIdx, body: effectiveBody, subject: editedSubject != null ? editedSubject : effectiveMsg?.subject });');
-    expect(card).toContain('if (selectedIdx == null && editedBody == null && editedSubject == null) { onApprove(); return; }');
+    // ★ 2026-10-24 승인 = 늘 안 번호 + 그 안의 지문(선택 없는 승인 0 · 서버가 다시 뽑지 않는다) · 고친 글만 함께
+    expect(card).toContain('variantIndex: effectiveIdx,\n      fingerprint: effectiveFinal.fingerprint,\n      ...(edited ? { body: effectiveBody, subject: effectiveSubject } : {}),');
+    expect(card).not.toContain('onApprove();');
   });
 
   it('결과는 안 번호 · 본문 · 제목이 모두 같을 때만 붙는다', () => {
@@ -190,7 +194,7 @@ describe('화면 — 고른 안 · 고친 문안에서 검사 · 같은 글자�
   });
 
   it('고친 문안에는 자동 검사 결과(고치기 전 문안 판정)를 붙이지 않는다', () => {
-    expect(card).toContain('const autoHit = isSel && (editedBody != null || editedSubject != null) ? undefined : spamResultAt(i);');
+    expect(card).toContain('const autoHit = isSel && edited ? undefined : spamResultAt(i);');
   });
 
   it('처음 값 = 제안에 저장된 결과 · 덧댄 다시 읽기 장치(탭 복귀 · 상위 재조회)는 없다(글자 비교로 충분)', () => {

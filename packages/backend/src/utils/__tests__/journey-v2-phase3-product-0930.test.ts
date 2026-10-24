@@ -224,7 +224,7 @@ describe('워커 · 실행기 배선(원문)', () => {
     expect(fn).toContain('usesEntryReplacement(j.trigger_filters)');
   });
   it('실행기: 저장된 product 목표만 같은 상품 재구매 판정(상품 없으면 계속)', () => {
-    const fn = executor.slice(executor.indexOf('async function isGoalConvertedSinceEntry'), executor.indexOf('async function markExecutionCompleted'));
+    const fn = executor.slice(executor.indexOf('async function isGoalConvertedSinceEntry'), executor.indexOf('async function finishExecution'));
     expect(fn).toContain("if (v === 'product')");
     expect(fn).toContain('PRODUCT_REPURCHASE_SINCE_ENTRY_SQL');
     expect(fn).toMatch(/if \(productKeys\.length === 0\) return false;/);

@@ -117,12 +117,12 @@ const BENEFIT_CONDITION_RE = /이상|이하|부터|미만|구매\s*시|주문\s*
 const BENEFIT_MODIFIERS = ['최대', '최소', '추가', '즉시'] as const;
 /**
  * 미리 채울 수 있는 혜택 꼴(허용 목록 · 전체 일치) — 수식어(최대 · 추가 · 즉시)는 붙은 것 전부.
- *   N% 할인 · N원 할인/쿠폰/적립 · N+N · ○○ 증정 · 무료배송 · 반값. 이 밖의 꼴은 미리 채우지 않는다.
+ *   N% 할인 · N% (할인)쿠폰(★ 1024 자동 마케팅 한 줄) · N원 할인/쿠폰/적립 · N+N · ○○ 증정 · 무료배송 · 반값. 이 밖의 꼴은 미리 채우지 않는다.
  */
 const BENEFIT_SHAPES: readonly RegExp[] = [
   // 앞 경계 = 숫자 · 점 · 쉼표 · 만 · 천 뒤(사이 공백 포함)에서 시작하지 않는다(「1만 5,000원」 · 「1천 500원」의 뒷부분만 맞추지 않게 · 7R)
-  /(?:(?:최대|최소|추가|즉시)\s*)*(?<![\d.,만천]\s*)\d{1,2}(?:\.\d)?\s*(?:%|퍼센트)\s*(?:할인|세일|off|dc)/gi,
-  /(?:(?:최대|최소|추가|즉시)\s*)*(?<![\d.,만천]\s*)\d[\d,]*(?:\.\d+)?\s*(?:만\s*(?:\d+\s*천\s*)?|천\s*)?원\s*(?:할인|쿠폰|적립)/g,
+  /(?:(?:최대|최소|추가|즉시)\s*)*(?<![\d.,]\s*)(?<!\d\s*[만천]\s*)\d{1,2}(?:\.\d)?\s*(?:%|퍼센트)\s*(?:할인\s*쿠폰|할인|쿠폰|세일|off|dc)/gi,
+  /(?:(?:최대|최소|추가|즉시)\s*)*(?<![\d.,만천]\s*)\d[\d,]*(?:\.\d+)?\s*(?:만\s*(?:\d+\s*천\s*)?|천\s*)?원\s*(?:할인\s*쿠폰|할인|쿠폰|적립)/g,
   /(?<!\d)\d\s*\+\s*\d(?!\d)/g,
   /(?<![가-힣A-Za-z0-9])[가-힣A-Za-z0-9]{1,12}\s*증정/g,
   /무료\s*배송/g,
@@ -135,9 +135,8 @@ const BENEFIT_SHAPES: readonly RegExp[] = [
  *   허용 꼴(BENEFIT_SHAPES)에 맞는 자리가 한 줄 전체에 **딱 하나**이며, 한 줄의 수식어가 그 자리에 모두 들어 있을 때만 그 글자 그대로.
  *   그 밖은 비운다(사람이 적는다 · 안전 쪽 실패).
  */
-export function lineBenefitPrefill(line: string): string | null {
-  const t = String(line || '');
-  if (BENEFIT_NEGATION_RE.test(t) || BENEFIT_CONDITION_RE.test(t)) return null;
+/** 허용 꼴에 맞는 자리(겹치면 긴 쪽 하나 · 원문 순서) */
+function benefitShapeSpans(t: string): Array<{ s: number; e: number; text: string }> {
   const hits: Array<{ s: number; e: number; text: string }> = [];
   for (const re of BENEFIT_SHAPES) {
     re.lastIndex = 0;
@@ -145,11 +144,29 @@ export function lineBenefitPrefill(line: string): string | null {
   }
   // 겹치는 자리(「텀블러 증정」 안의 숫자 등)는 긴 쪽 하나
   hits.sort((a, b) => a.s - b.s || b.e - a.e);
-  const spans = hits.filter((h, i) => !hits.some((o, j) => j !== i && o.s <= h.s && o.e >= h.e && (o.e - o.s > h.e - h.s || j < i)));
+  return hits.filter((h, i) => !hits.some((o, j) => j !== i && o.s <= h.s && o.e >= h.e && (o.e - o.s > h.e - h.s || j < i)));
+}
+
+export function lineBenefitPrefill(line: string): string | null {
+  const t = String(line || '');
+  if (BENEFIT_NEGATION_RE.test(t) || BENEFIT_CONDITION_RE.test(t)) return null;
+  const spans = benefitShapeSpans(t);
   if (spans.length !== 1) return null;
   const out = spans[0].text;
   if (BENEFIT_MODIFIERS.some((w) => t.includes(w) && !out.includes(w))) return null;
   return out.length <= 30 ? out : null;
+}
+
+/**
+ * (순수) 미리 채울 수 없는 한 줄(조건 · 여러 값이 섞임)에서 혜택으로 보이는 조각(★ 2026-10-24 자동 마케팅 질문 ④의 글 칸 시작 글).
+ *   허용 꼴 자리만 원문 글자 그대로 · 여럿이면 「 · 」로 잇는다(조각마다 원문의 부분 문자열). 사람이 고치고 확인한다. 없으면 null.
+ *   ⛔ 부정 말(「제외 · 불가」)이 있으면 비운다 — 혜택이 아닌 것을 혜택처럼 채우지 않는다.
+ */
+export function lineBenefitFragments(line: string): string | null {
+  const t = String(line || '');
+  if (BENEFIT_NEGATION_RE.test(t)) return null;
+  const spans = benefitShapeSpans(t);
+  return spans.length > 0 ? spans.map((x) => x.text).join(' · ') : null;
 }
 
 /** 한 줄이 행사(혜택이 있을 법한 알림)를 말하는가. */

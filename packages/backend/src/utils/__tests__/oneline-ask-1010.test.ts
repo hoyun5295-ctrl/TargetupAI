@@ -195,7 +195,8 @@ describe('④ 문 · 입구 · 생성 경로 무변경 · 0단계', () => {
   });
 
   it('답 경로 = 메뉴마다 그 메뉴의 문', () => {
-    expect(body(ai, "router.post('/operator/journeys-ask'")).toContain('isAiOperatorAllowed(planCtx, req.user)');
+    // ★ 2026-10-23 여정 주소 문 = journeyGate 한 곳(그 안에서 isAiOperatorAllowed · utils/journey-route.ts)
+    expect(body(ai, "router.post('/operator/journeys-ask'")).toContain('await journeyGate(req, res)');
     expect(body(ai, "router.post('/operator/continuous-ask'")).toContain('isAiOperatorAllowed(planCtx, req.user)');
     expect(body(read('routes/cdp.ts'), "router.post('/inapp/ask'")).toContain('await ensureInAppAccess(req, res)');
     expect(read('routes/dm.ts')).toContain("dmRouter.post('/one-line/ask'");
@@ -239,9 +240,10 @@ describe('④ 문 · 입구 · 생성 경로 무변경 · 0단계', () => {
     const inapp = readFront('pages/InAppMessagesPage.tsx');
     expect(inapp.match(/lineAsk\.noteRead\(t\)/g)?.length).toBe(2);
     expect(inapp).toContain('disabled={aiGenerating || lineAsk.judging}');
-    expect(readFront('pages/JourneysPage.tsx').match(/disabled=\{generating \|\| lineAsk\.judging\}/g)?.length).toBe(2);
+    // ★ 2026-10-23 한 줄 여정 한 길 — 화면이 직접 생성하던 상태(generating)는 문장으로 만들기 창으로 옮겨 갔다 · 판정 중 잠금은 그대로
+    expect(readFront('pages/JourneysPage.tsx').match(/disabled=\{lineAsk\.judging\}/g)?.length).toBe(2);
     const auto = readFront('pages/ContinuousOperatorPage.tsx');
-    expect(auto).toContain('submitting={creating || lineAsk.judging}');
+    expect(auto).toContain('submitting={previewing || lineAsk.judging}');   // ★ 1024 바로 등록(creating) 길 삭제 · 한 줄 창 하나
     const cost = auto.slice(auto.indexOf('cardCost={(c) => {'), auto.indexOf('makeCost=', auto.indexOf('cardCost={(c) => {')));
     expect(cost).not.toContain('ownCopy');   // 카드 = handleBriefStart = 늘 AI 문안
     expect(read('utils/one-line-ask.ts')).toContain('const cards = opps.ok && skip.ok && !sc.blocked ? journeyCardsFrom(opps.value, skip.value) : [];');

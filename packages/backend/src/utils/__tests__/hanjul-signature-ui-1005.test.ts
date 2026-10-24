@@ -107,7 +107,10 @@ describe('4. 입구 배선', () => {
     expect(a).toContain('onClick={() => { void handleSubmit(); }}');
   });
   it('여정: 스위치 켠 회사의 명령 카드 한 줄은 안 보이는 모달 혜택을 싣지 않는다', () => {
-    expect(FRONT('pages', 'JourneysPage.tsx')).toContain('lineFactsOn ? undefined : benefitText');
+    // ★ 2026-10-23 한 줄 여정 한 길 — 명령 카드 한 줄은 문장만 넘긴다(혜택 = 질문표 칸에 보이는 값 · 안 보이는 옛 모달 값은 실을 길이 없다)
+    const page = FRONT('pages', 'JourneysPage.tsx');
+    expect(page).toContain('openLineJourney({ sentence: objective });');
+    expect(page).not.toContain('benefit: benefitText');
   });
 });
 

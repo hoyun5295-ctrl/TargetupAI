@@ -46,13 +46,10 @@ import JourneyMessageEditModal from '../components/journey/JourneyMessageEditMod
 import { useCustomerDataGate, CustomerDataRequiredBanner, CustomerDataRequiredModal } from '../components/CustomerDataGate';
 import AlimtalkChannelPanel, { validateAlimtalkChannelState, type AlimtalkSenderProfile, type AlimtalkTemplate, type AlimtalkChannelState } from '../components/alimtalk/AlimtalkChannelPanel';
 // ★ 2026-08-02 §13 화면 흐름 — 자연어 → 추천 모달 → 스텝별 전환 → 브리핑 모달
-import JourneyStepStudio from '../components/journey/JourneyStepStudio';
 import JourneyDataScopeNote from '../components/journey/JourneyDataScopeNote';
-import MarketingJourneyModal, { type QuickStartItem } from '../components/journey/MarketingJourneyModal';
+import InterviewModal, { type InterviewPreset, type InterviewQuickStart } from '../components/journey/map/InterviewModal';
+import { RequestKeys } from '../utils/request-id';
 import GradeOrderModal from '../components/journey/GradeOrderModal';
-import JourneyPlanModal from '../components/journey/JourneyPlanModal';
-import JourneyBriefingModal, { type BriefingIssue } from '../components/journey/JourneyBriefingModal';
-import SpamFilterTestModal from '../components/SpamFilterTestModal';
 import InfoAlertJourneyBuilder, { type InfoAlertBuildResult } from '../components/journey/InfoAlertJourneyBuilder';
 import DateAnchorJourneyBuilder, { type DateAnchorBuildResult } from '../components/journey/DateAnchorJourneyBuilder';
 import { TRIGGER_EVENTS } from '../utils/journey-trigger-catalog';
@@ -78,23 +75,6 @@ import { useToast } from '../components/ToastProvider';
 import { useLineAsk } from '../hooks/useLineAsk';
 import LineAnswer from '../components/zone/LineAnswer';
 import { AI_GENERATE_COSTS } from '../constants/credit';
-
-// ★ D210+ Phase 2-fix6 (Harold 명시 2026-05-23): 여정 생성 6 sub-agent 진행 카드 매트릭스.
-//   본질 = 옛 단순 로딩 → 6 sub-agent 시각 효과 → 사용자가 5~10초 기다리기 편함.
-interface JourneySubAgentStep {
-  icon: typeof Workflow;
-  label: string;
-  gradient: string;
-  hint: string;
-}
-const JOURNEY_SUB_AGENT_STEPS: JourneySubAgentStep[] = [
-  { icon: Workflow,      label: 'Trigger Detection',     gradient: 'from-rose-400 to-pink-500',     hint: '트리거 + 타겟 영역 자동 분석' },
-  { icon: Sparkles,      label: 'Season Context',         gradient: 'from-amber-400 to-orange-500',  hint: '시즌 + 회사 톤 종합' },
-  { icon: Brain,         label: 'Memory Learning',        gradient: 'from-emerald-400 to-teal-500',  hint: '회사 누적 학습 메모리 적용' },
-  { icon: LayoutGrid,    label: 'Step Design',            gradient: 'from-cyan-400 to-blue-500',     hint: '단계 + 흐름 자동 설계' },
-  { icon: MessageSquare, label: 'Message Composition',    gradient: 'from-violet-400 to-purple-500', hint: '본문 + 감성 풍성 작성' },
-  { icon: CheckCircle2,  label: 'Review Ready',           gradient: 'from-fuchsia-400 to-pink-500',  hint: '검토 준비 완료' },
-];
 
 // D187-fix3 (2026-05-21): One-shot AI Operator — 자연어 한 줄 → AI가 완전 패키지 자동 생성 → 1 페이지 검토 → 활성화
 //   영구 룰: AI는 흐름/안내문/감성 텍스트만 풍성하게 / 구체 혜택(% / 원 / 무료 / 쿠폰)은 회사 admin 직접 작성
@@ -434,16 +414,6 @@ const TEMPLATE_VISUAL: Record<TemplateCode, { icon: typeof UserPlus; gradient: s
  *   `TEMPLATE_VISUAL.label`은 캠페인 목적('재구매 유도')이지 진입 조건('주문 완료')이 아니다.
  *   추천 모달의 일이 "무엇이 이 여정을 시작하는가"를 확인시키는 것이라, 목적을 조건 자리에 쓰면 그 일을 못 한다.
  */
-/**
- * ★ 2026-08-02 — 가능 여부 판정에 쓸 key. **trigger_event가 먼저**다.
- *   템플릿 매핑(TEMPLATE_TRIGGER_KEY)은 빠른 시작 7종만 덮어서, 등급처럼 템플릿이 없는 트리거를 놓친다.
- */
-function capabilityKeyOf(triggerEvent?: string, templateCode?: TemplateCode): string | null {
-  const def = triggerEvent ? TRIGGER_EVENTS.find((t) => t.triggerEvent === triggerEvent) : undefined;
-  if (def) return def.key;
-  return templateCode ? TEMPLATE_TRIGGER_KEY[templateCode] : null;
-}
-
 function triggerLabelOf(triggerEvent?: string, templateCode?: TemplateCode): string {
   const def = triggerEvent ? TRIGGER_EVENTS.find((t) => t.triggerEvent === triggerEvent) : undefined;
   if (def) return def.label;
@@ -504,23 +474,6 @@ function hasPlaceholder(message: string): boolean {
  *   따로 쓰면 브리핑은 통과시키는데 저장은 거부하는(또는 그 반대) 어긋남이 생긴다.
  *   ★ D188 Phase 2-B-1 (2026-05-21) step_type별 분기를 그대로 옮긴 것 — 규칙 자체는 바뀌지 않았다.
  */
-/**
- * ★ 2026-08-02 §13-5 — 매장 구매 정책 노출.
- *   매장·ERP 문으로 구매가 들어오는 회사는 **하루 모아 다음 날 오전**에 나간다(설계서 §11-C-2).
- *   고객사 동기화 주기는 우리 권한이 아니라서 정책으로 고정한 것이고, 그 사실을 사용자가 알아야 한다.
- *   ⛔ 문구를 만드는 곳은 여기 하나다. 자사몰 문이면 즉시 나가므로 아무 말도 하지 않는다.
- */
-function storePurchaseNotice(
-  triggerKey: string | null,
-  door: { door: 'mall' | 'ledger'; lastArrivalAt: string | null } | null,
-): string | undefined {
-  if (triggerKey !== 'purchase' || !door || door.door !== 'ledger') return undefined;
-  const last = door.lastArrivalAt
-    ? `마지막으로 들어온 매장 구매는 ${new Date(door.lastArrivalAt).toLocaleString('ko-KR', { month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit' })}입니다.`
-    : '아직 들어온 매장 구매가 없습니다.';
-  return `매장 구매는 하루치를 모아 다음 날 오전에 발송합니다. 그날 구매가 밤 11시까지 한 번은 동기화되어야 합니다. ${last}`;
-}
-
 const CONDITION_OPS = ['==', '!=', '>=', '<=', '>', '<', 'in', 'not_in', 'is_null', 'not_null'];
 function collectStepIssues(steps: AIGeneratedStep[]): Array<{ stepOrder: number; message: string }> {
   const out: Array<{ stepOrder: number; message: string }> = [];
@@ -585,8 +538,7 @@ export default function JourneysPage() {
   const toast = useToast();
   // ★ 2026-08-02 §13-2 — 'studio' = 한 화면에서 스텝 하나를 완결하는 흐름(스텝마다 화면 전환).
   //   'review'(한 화면에 전부)는 정보 알림·날짜축 빌더와 저장된 여정 편집이 계속 쓴다.
-  const [view, setView] = useState<'main' | 'review' | 'studio'>('main');
-  const [planOpen, setPlanOpen] = useState(false);
+  const [view, setView] = useState<'main' | 'review'>('main');
   // ★ 2026-08-02 등급 서열 — 잠긴 자리에서 그 자리로 연다(설정 메뉴로 쫓아내지 않는다).
   const [gradeOrderOpen, setGradeOrderOpen] = useState(false);
   /**
@@ -594,10 +546,6 @@ export default function JourneysPage() {
    *   `objective` 텍스트 상자는 생성 이후에도 바뀌고, 빠른 시작·기회 카드 경로는 그 상자를 아예 안 쓴다.
    *   그 상자를 나중에 읽으면 AI 맥락과 화면이 생성과 무관한 문장을 물고 간다.
    */
-  const [genObjective, setGenObjective] = useState('');
-  const [studioIdx, setStudioIdx] = useState(0);
-  const [briefingOpen, setBriefingOpen] = useState(false);
-  const [studioSpamIdx, setStudioSpamIdx] = useState<number | null>(null);
   const [journeys, setJourneys] = useState<JourneyRow[]>([]);
   // ★ 2026-06-29: "오늘의 여정 기회" 카드 (실데이터 집계) + 페이징
   const [opportunities, setOpportunities] = useState<JourneyOpportunity[]>([]);
@@ -669,8 +617,9 @@ export default function JourneysPage() {
   //   (화면에 안 보이는 값이 혜택 근거가 되던 길). 혜택은 그 값이 보이는 모달 · 스튜디오 채움 패널에서만 받는다.
   const [lineFactsOn, setLineFactsOn] = useState(false);
   useEffect(() => { void fetchOneLineEnabled().then(setLineFactsOn); }, []);
-  const [generating, setGenerating] = useState(false);
-  // ★ 2026-10-10 한 줄 묻기 — 판정은 입구에서만(목록 한 줄 · 지도 ?objective= 자동 경로). handleAIGenerate 는 그대로다(다시 만들기 · 카드 등 다른 입구 무변).
+  // ★ 2026-10-23 한 줄 여정 한 길 — 열린 입구(한 줄 · 시작 사건). null = 닫힘.
+  const [lineJourney, setLineJourney] = useState<{ sentence?: string; preset?: InterviewPreset } | null>(null);
+  // ★ 2026-10-10 한 줄 묻기 — 판정은 입구에서만(목록 한 줄 · 지도 ?objective= 자동 경로). 만들기는 ★1023 openLineJourney 한 길.
   const lineAsk = useLineAsk('journeys');
   const journeyCost = `${AI_GENERATE_COSTS['journey-ai-generate']}크레딧`;
   // ★ 2026-08-01 설계서 §2-3 — 이 회사가 지금 만들 수 있는 여정. 못 만드는 것은 사유와 함께 잠근다.
@@ -681,7 +630,6 @@ export default function JourneysPage() {
   // ★ 2026-08-02 §13-5 — 구매가 어느 문으로 들어오는지 + 마지막 도착 시각. 매장 문이면 하루 모아 다음 날 오전에 나간다.
   const [purchaseDoor, setPurchaseDoor] = useState<{ door: 'mall' | 'ledger'; lastArrivalAt: string | null } | null>(null);
   // ★ D210+ Phase 2-fix6 (Harold 명시 2026-05-23): 6 sub-agent 진행 + 샘플 고객 머지 토글
-  const [progressStep, setProgressStep] = useState(0);
   const [sampleCustomer, setSampleCustomer] = useState<Record<string, string | number | null> | null>(null);
   // ★ D210+ Phase 2-fix9 (Harold 명시 2026-05-23): Liquid 렌더링 영역 (field 키 매트릭스).
   const [sampleCustomerFields, setSampleCustomerFields] = useState<Record<string, any> | null>(null);
@@ -727,7 +675,6 @@ export default function JourneysPage() {
   const [refineLoading, setRefineLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   // ★ D191 (2026-05-22) Phase B-1 Liquid Templating: 미리보기 모달 state
-  const [previewSamples, setPreviewSamples] = useState<PreviewSample[]>([]);
 
   const token = () => localStorage.getItem('token');
   const customerGate = useCustomerDataGate(token());
@@ -787,22 +734,8 @@ export default function JourneysPage() {
   };
   useEffect(() => { void loadDataCap(); }, []);
 
-  // 자동마케팅 승격 — 검증된 목표를 여정으로 가져와 프리필 (sessionStorage 핸드오프)
-  useEffect(() => {
-    const raw = sessionStorage.getItem('journeyObjectivePrefill');
-    if (!raw) return;
-    try {
-      const p = JSON.parse(raw);
-      sessionStorage.removeItem('journeyObjectivePrefill');
-      if (p.objective) setObjective(String(p.objective));
-      toast.info('자동마케팅에서 검증된 목표를 가져왔습니다. 생성하면 상시 여정이 됩니다.' + (p.message ? ' 검증된 문안은 검토 단계에서 붙여 넣을 수 있습니다.' : ''));
-    } catch {
-      sessionStorage.removeItem('journeyObjectivePrefill');
-    }
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
-
   // ★ 2026-09-29 여정 V2 1차 — 생애 지도 · 빈 곳 찾기의 [만들기]가 이 화면으로 온다(?preset=시작 사건&objective=문장).
-  //   기존 "오늘의 여정 기회" 1클릭 생성과 같은 경로(handleAIGenerate)를 한 번만 부른다. 고객 수 게이트가 읽힌 뒤에 부른다.
+  //   ★ 2026-10-23 모든 입구와 같은 한 길(openLineJourney = 문장으로 만들기 창)을 한 번만 연다. 고객 수 게이트가 읽힌 뒤에 연다.
   const [searchParams, setSearchParams] = useSearchParams();
   // ★ 2026-10-20 여정 V.3 §9-1 — 작업 화면 = 주소 ?journey=ID&step=ID(지도와 같은 방식 · 뒤로 가기 · 새로 고침에도 같은 창 · 목록 스크롤 유지).
   const wsJourney = searchParams.get('journey');
@@ -817,17 +750,25 @@ export default function JourneysPage() {
   useEffect(() => {
     if (presetHandledRef.current || customerGate.loading) return;
     const preset = searchParams.get('preset');
-    const queryObjective = searchParams.get('objective')?.trim() || '';
+    // ★ 2026-10-24 결함 14 — 허브 · 자동 마케팅의 「여정으로」 넘기기(sessionStorage)도 같은 한 길(문장으로 만들기 창)
+    //   옛: 목표만 입력칸에 넣고 없는 「검토 단계」를 안내했다(문안은 버려졌다).
+    let stashed = '';
+    try {
+      const raw = sessionStorage.getItem('journeyObjectivePrefill');
+      if (raw) stashed = String(JSON.parse(raw)?.objective || '').trim();
+    } catch { /* 깨진 값 = 버린다 */ }
+    sessionStorage.removeItem('journeyObjectivePrefill');
+    const queryObjective = searchParams.get('objective')?.trim() || stashed;
     if (!preset && !queryObjective) return;
     presetHandledRef.current = true;
     setSearchParams({}, { replace: true });
-    if (preset) { void handleAIGenerate(undefined, queryObjective || undefined, preset); return; }
+    if (preset) { openLineJourney({ preset: { triggerEvent: preset, objective: queryObjective || undefined } }); return; }
     // ★ 2026-09-30 AI 존 대개편(Codex R1): 지도 탭 명령 카드의 한 줄(목표만 · preset 없음)도 같은 가드 뒤 한 번만 생성한다 — 목록 한 줄과 같은 자유 문장 경로.
     // ★ 2026-10-10 한 줄 묻기 — 지도 한 줄도 질문이면 답만 연다(목록 한 줄과 같은 판정 · 여정을 만들지 않는다)
     setObjective(queryObjective);
     void (async () => {
       if (await lineAsk.route(queryObjective)) return;
-      void handleAIGenerate(undefined, queryObjective, undefined, benefitText);
+      openLineJourney({ sentence: queryObjective });
     })();
   }, [customerGate.loading]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -953,132 +894,25 @@ export default function JourneysPage() {
     alimtalkNextSubject: state.nextSubject,
   });
 
-  // ════════ One-shot AI 생성 ════════
-  // ★ 2026-08-08 이어달리기 — 3번째 인자 preferTriggerEvent: 추천이 약속한 트리거를 서버가 고정한다.
-  //   미지정 호출(자연어·빠른 시작·기존 기회 카드)은 옛 흐름 그대로다.
-  // ★ 2026-08-08 혜택 입력 — 4번째 인자 benefit: 호출부가 명시로 줄 때만 싣는다.
-  //   state를 직접 읽지 않는 이유 = 1클릭 카드가 모달에 남은 옛 입력을 끌고 가면 안 된다.
-  const handleAIGenerate = async (templateHint?: TemplateCode, objectiveOverride?: string, preferTriggerEvent?: string, benefit?: string) => {
+  // ════════ 한 줄 여정 = 한 길 ════════
+  // ★ 2026-10-23 여정 결함 0 — 여정을 만드는 모든 입구(한 줄 · 빠른 시작 · 기회 카드 · 다음 수 · 한 줄 답 카드 · 지도 ?preset · ?objective)가
+  //   문장으로 만들기 창 하나로 간다 → 질문표(재료 판 · 한 줄의 혜택 · 마감일을 채워 둠) → 서버 초안(초안마다 크레딧 · 멱등) → 작업 화면.
+  //   옛: 화면이 AI 패키지를 들고 있다 저장했다(돌려보기마다 차감 · 멱등 없음 · 화면 매핑 · 반복 발송 안내가 안 보이던 길).
+  const openLineJourney = (entry: { sentence?: string; preset?: InterviewPreset }) => {
     if (customerGate.isEmpty) { setShowDataGate(true); return; }
-    // 프리셋만 온 경로(다음 수 카드)는 목표 골격을 서버가 채운다 — 입력창에 남은 옛 문장을 끌고 가지 않는다.
-    const effectiveObjective = (objectiveOverride ?? (preferTriggerEvent ? '' : objective)).trim();
-    if (!templateHint && !preferTriggerEvent && effectiveObjective.length < 3) {
-      toast.warning('여정 목표를 자연어로 입력하거나 빠른 시작 카드를 선택해주세요.');
-      return;
-    }
-    setGenerating(true);
-    setProgressStep(0);
-    setError(null);
-    setSuccessionFrom(null);   // 새 생성이 시작되면 이전 "다음 수" 안내는 사라진다
-    try {
-      const res = await fetch('/api/ai/operator/journeys-ai-generate', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token()}` },
-        body: JSON.stringify({
-          objective: templateHint ? undefined : (effectiveObjective || undefined),
-          templateHint,
-          preferTriggerEvent,
-          benefitText: benefit?.trim() || undefined,
-        }),
-      });
-      const data = await res.json();
-      if (data.success) {
-        const pkg: AIJourneyPackage = data.package;
-        setAiPkg(pkg);
-        // 생성 요청에 실제로 실린 목적만 남긴다 — 빠른 시작(templateHint)은 목적 문장을 보내지 않는다.
-        setGenObjective(templateHint ? '' : effectiveObjective);
-        setReviewName(pkg.name);
-        setReviewCallback(pkg.callbackNumberHint || callbackOptions.find((c) => c.is_default)?.phone || (callbackOptions[0]?.phone || ''));
-        setReviewBudget(pkg.budgetMonthlyHint != null ? String(pkg.budgetMonthlyHint) : '');
-        setReviewThreshold(pkg.thresholdCostHint != null ? String(pkg.thresholdCostHint) : '');
-        // ★ D210+ Phase 2-fix7 (Harold 명시 2026-05-23): AI 응답 후 진행 시각 확보 영역.
-        //   옛 사고 = 즉시 setView('review') + finally setGenerating(false) → 진행 시각 X.
-        //   정정 = 1.5초 후 마지막 단계 완료 표시 → 2.2초 await 후 화면 전환 (사용자 자연 시각 흐름).
-        setTimeout(() => {
-          setProgressStep(JOURNEY_SUB_AGENT_STEPS.length);
-        }, 1500);
-        await new Promise((resolve) => setTimeout(resolve, 3700));
-        // ★ 2026-08-02 §13-4 — 검토 화면으로 바로 던지지 않고 **왜 이렇게 만들었는지**를 먼저 보여준다.
-        //   근거·목적·스텝 수 이유·이 회사 데이터로 가능한지 넷을 확인한 뒤 스텝 1로 넘어간다.
-        setStudioIdx(0);
-        setPlanOpen(true);
-
-        // 여정 trigger 기준 미리보기 고객 1건 fetch — 발송과 동일 기준(신규가입 등)으로 추출.
-        fetch('/api/ai/operator/sample-customer', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token()}` },
-          body: JSON.stringify({ triggerEvent: pkg.triggerEvent, triggerFilters: pkg.triggerFilters || {} }),
-        })
-          .then((sr) => sr.json())
-          .then((sd) => {
-            if (sd?.success && sd.sampleCustomer) {
-              setSampleCustomer(sd.sampleCustomer);
-              setSampleCustomerFields(sd.sampleCustomerFields || null);
-            } else {
-              setSampleCustomer(null);
-              setSampleCustomerFields(null);
-            }
-          })
-          .catch(() => {
-            setSampleCustomer(null);
-            setSampleCustomerFields(null);
-          });
-
-        // 10명 미리보기 모달용 실제 타겟 샘플 (trigger 기준, preview-target-samples)
-        fetch('/api/ai/operator/preview-target-samples', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token()}` },
-          body: JSON.stringify({ triggerEvent: pkg.triggerEvent, triggerFilters: pkg.triggerFilters || {} }),
-        })
-          .then((sr) => sr.json())
-          .then((sd) => {
-            setPreviewSamples(sd?.success && Array.isArray(sd.samples) ? sd.samples : []);
-          })
-          .catch(() => setPreviewSamples([]));
-      } else {
-        toast.error(data.error || 'AI 생성 실패. 다시 시도해주세요.');
-      }
-    } catch (e: any) {
-      toast.error(e?.message || '생성 중 오류');
-    } finally {
-      setGenerating(false);
-    }
+    setLineJourney(entry);
   };
+  /** 추천 카드(기회 · 한 줄 답) — 시작 사건이 있으면 그 사건의 질문표, 없으면 문장으로. */
+  const openFromCard = (objectiveText?: string, preferTriggerEvent?: string) => (preferTriggerEvent
+    ? openLineJourney({ preset: { triggerEvent: preferTriggerEvent, objective: objectiveText } })
+    : openLineJourney({ sentence: objectiveText || '' }));
 
-  // ★ D210+ Phase 2-fix6 (Harold 명시 2026-05-23): generating 영역 시 sub-agent 단계 자동 진행 (1.5초 주기)
-  useEffect(() => {
-    if (!generating) return;
-    if (progressStep >= JOURNEY_SUB_AGENT_STEPS.length) return;
-    const timer = setTimeout(() => {
-      setProgressStep((s) => Math.min(s + 1, JOURNEY_SUB_AGENT_STEPS.length));
-    }, 1500);
-    return () => clearTimeout(timer);
-  }, [generating, progressStep]);
-
-  /**
-   * ★ 2026-08-08 — **패키지를 다시 만드는 요청은 한 곳에서 조립한다.**
-   *   자리마다 인자를 손으로 맞추다가 프리셋 트리거를 세 번 떨어뜨렸다(검토 화면 · 추천 모달 · 대화형 수정).
-   *   프리셋이 있으면 그 축이 최우선이다 — 다시 만들기 한 번에 추천이 약속한 대상이 바뀌면 안 된다.
-   *   목적은 **생성에 실제로 쓴 문장**(genObjective)에서 온다. 입력창 값은 그 뒤에 바뀌었을 수 있다.
-   */
+  /** 다시 만들기 — 검토 화면의 패키지는 정보 알림 · 날짜축 빌더가 만든 것뿐이다(마케팅 한 줄은 서버 초안 길) → 처음 만든 빌더로 돌려보낸다. */
   const regenerateFromPackage = (pkg: AIJourneyPackage) => {
-    // ★ 2026-09-29 V2 (회의론자 0차 검증 1 · 치명) — 정보 알림 · 날짜축 · 1회 발송 패키지는 AI 다시 생성으로 만들면
-    //   시작 방식 · 날짜 설정이 사라진 마케팅 여정이 된다. 처음 만든 빌더로 돌려보낸다(설정은 그 화면이 소유한다).
-    if (pkg.startKind) {
-      setAiPkg(null);
-      setView('main');
-      setPurpose(pkg.startKind === 'date_anchor' ? 'date-anchor' : 'info-alert');
-      toast.info('이 여정은 처음 만든 화면에서 다시 만들어 주세요.');
-      return;
-    }
-    const obj = genObjective.trim();
-    // 혜택도 프리셋과 같은 축이다 — 다시 만들기 한 번에 혜택이 placeholder로 되돌아가면 안 된다.
-    const benefit = pkg.benefitText || undefined;
-    if (pkg.presetTriggerEvent) {
-      void handleAIGenerate(undefined, obj || undefined, pkg.presetTriggerEvent, benefit);
-      return;
-    }
-    void handleAIGenerate(obj ? undefined : pkg.templateCode, obj || undefined, undefined, benefit);
+    setAiPkg(null);
+    setView('main');
+    setPurpose(pkg.startKind === 'date_anchor' ? 'date-anchor' : 'info-alert');
+    toast.info('이 여정은 처음 만든 화면에서 다시 만들어 주세요.');
   };
 
   const handleRegenerate = () => {
@@ -1183,7 +1017,7 @@ export default function JourneysPage() {
   }, [dataCap]);
 
   /** 빠른 시작 카드 — 마케팅 모달 안에서만 쓴다(메인에서 옮김). 예약은 정보 알림 축이라 뺀다. */
-  const quickStartItems: QuickStartItem[] = useMemo(
+  const quickStartItems: InterviewQuickStart[] = useMemo(
     () => (Object.keys(TEMPLATE_VISUAL) as TemplateCode[])
       .filter((code) => code !== 'reservation')
       .map((code) => {
@@ -1213,7 +1047,7 @@ export default function JourneysPage() {
       aiPkg.steps.slice(0, upto + 1).reduce((sum, s) => sum + (Number(s.delayHours) || 0), 0);
     return {
       triggerLabel: triggerLabelOf(aiPkg.triggerEvent, aiPkg.templateCode),
-      objective: genObjective.trim() || aiPkg.name || undefined,
+      objective: aiPkg.name || undefined,
       stepOrder: aiPkg.steps[idx]?.stepOrder ?? idx + 1,
       hoursFromTrigger: cumulative(idx),
       previousMessages: aiPkg.steps
@@ -1265,65 +1099,6 @@ export default function JourneysPage() {
     if (!aiPkg || !refining) return;
     updateStep(refining.stepIdx, { messageTemplate: candidate.message });
     setRefining(null);
-  };
-
-  /**
-   * ★ 2026-08-08 혜택 입력 — 전 스텝의 placeholder를 입력한 혜택으로 일괄 치환한다.
-   *   문자열 치환이라 즉시·크레딧 0. 치환된 혜택은 본문에 있으므로 이후 [AI 다듬기]에서도 살아남는다
-   *   (다듬기의 차단 근거 = 현재 본문). 패키지에도 적어 재생성이 같은 혜택을 다시 싣는다.
-   */
-  const handleFillBenefit = (benefit: string) => {
-    if (!aiPkg) return;
-    const value = benefit.trim();
-    if (!value) return;
-    // ⛔ 제목은 50자 상한이 있다(저장 시 서버가 자른다). 치환으로 넘치면 **아무것도 바꾸지 않고** 알린다 —
-    //   조용히 잘리면 검토한 제목과 발송 제목이 달라진다(Codex 1R). 부분 적용도 하지 않는다(상태가 갈린다).
-    const overStep = aiPkg.steps.find(
-      (s) => s.subject && fillBenefitPlaceholders(s.subject, value).length > 50,
-    );
-    if (overStep) {
-      toast.warning(`스텝 ${overStep.stepOrder} 제목이 50자를 넘게 됩니다. 혜택을 짧게 쓰거나 그 제목을 먼저 줄여 주세요.`);
-      return;
-    }
-    setAiPkg({
-      ...aiPkg,
-      benefitText: value,
-      steps: aiPkg.steps.map((s) => ({
-        ...s,
-        messageTemplate: fillBenefitPlaceholders(s.messageTemplate || '', value),
-        subject: s.subject ? fillBenefitPlaceholders(s.subject, value) : s.subject,
-      })),
-    });
-    toast.success('혜택을 모든 스텝 문안에 넣었습니다.');
-  };
-
-  /**
-   * ★ 2026-08-08 (Harold 접수) — 링크도 값으로 받는다. `[URL 입력]`을 본문에서 손으로 고치게 하지 않는다.
-   *   ⛔ 스킴을 우리가 붙여 주지 않는다 — 틀린 주소는 발송 뒤에 되돌릴 수 없다. 형식이 아니면 넣지 않고 알린다.
-   */
-  const handleFillUrl = (url: string) => {
-    if (!aiPkg) return;
-    const value = url.trim();
-    if (!value) return;
-    if (!isSendableUrl(value)) {
-      toast.warning('링크는 https:// 로 시작하는 주소로 넣어 주세요.');
-      return;
-    }
-    // 제목 50자 상한 — 혜택과 같은 규약(넘치면 아무것도 바꾸지 않고 알린다).
-    const overStep = aiPkg.steps.find((s) => s.subject && fillUrlPlaceholders(s.subject, value).length > 50);
-    if (overStep) {
-      toast.warning(`스텝 ${overStep.stepOrder} 제목이 50자를 넘게 됩니다. 그 제목을 먼저 줄여 주세요.`);
-      return;
-    }
-    setAiPkg({
-      ...aiPkg,
-      steps: aiPkg.steps.map((s) => ({
-        ...s,
-        messageTemplate: fillUrlPlaceholders(s.messageTemplate || '', value),
-        subject: s.subject ? fillUrlPlaceholders(s.subject, value) : s.subject,
-      })),
-    });
-    toast.success('링크를 모든 스텝 문안에 넣었습니다.');
   };
 
   // ════════ 저장 + 활성화 ════════
@@ -1405,15 +1180,19 @@ export default function JourneysPage() {
   };
 
   // ★ 2026-06-30 여정 일반화 SP-B — 날짜축 자동 생성: 자연어 목표 → D-N 스텝 일괄 생성.
+  // ★ 2026-10-23 여정 결함 0 — 목표마다 요청 키 하나(RequestKeys CT) · 그 목표의 결과를 받을 때만 지운다.
+  //   같은 목표의 재시도 = 같은 요청 = 서버 한 번 차감 · 실패 응답으로 키를 버리지 않는다(3R) · 다른 목표의 성공이 이 키를 지우지 않는다(4R).
+  const anchorKeys = useRef(new RequestKeys());
   const handleAnchorGeneratePlan = async (objective: string): Promise<{ offsetDays: number; subject: string; message: string }[] | null> => {
+    const reqId = anchorKeys.current.keyFor(objective);
     try {
       const res = await fetch('/api/ai/operator/journeys/anchor-generate-plan', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token()}` },
-        body: JSON.stringify({ objective }),
+        body: JSON.stringify({ objective, requestId: reqId }),
       });
       const data = await res.json();
-      if (data.success) return Array.isArray(data.steps) ? data.steps : [];
+      if (data.success) { anchorKeys.current.settled(objective); return Array.isArray(data.steps) ? data.steps : []; }
       toast.error(data.error || 'AI 자동 생성 실패');
       return null;
     } catch (e: any) {
@@ -1455,31 +1234,6 @@ export default function JourneysPage() {
     } catch (e: any) {
       toast.error(e?.message || '꾸미기 중 오류');
       return null;
-    }
-  };
-
-  /**
-   * ★ 2026-08-02 §13-2 — 스텝 화면의 AI 꾸미기. 날짜축과 **같은 엔드포인트**를 쓴다(새 경로를 만들지 않는다).
-   *   변수는 회사 보유 컬럼(dataProfileVars)만 넘긴다 — 없는 컬럼을 넣으면 발송에서 빈칸이 된다.
-   */
-  const [studioDecorating, setStudioDecorating] = useState(false);
-  // ★ 2026-08-08 (Harold 접수) — 사용자가 고른 컬럼만 넘긴다. 전체를 넘기면 AI가 아무 컬럼이나 골라 넣는다.
-  const handleStudioDecorate = async (idx: number, selectedTokens: string[]) => {
-    if (!aiPkg) return;
-    const step = aiPkg.steps[idx];
-    const body = String(step.messageTemplate || '').trim();
-    if (body.length < 5) { toast.warning('꾸밀 문안을 먼저 만들어 주세요. [AI 문안생성]을 눌러도 됩니다.'); return; }
-    if (dataProfileVars.length === 0) { toast.warning('고객 데이터에 넣을 수 있는 항목이 아직 없어요.'); return; }
-    if (selectedTokens.length === 0) { toast.warning('넣을 컬럼을 1개 이상 골라 주세요.'); return; }
-    setStudioDecorating(true);
-    try {
-      const decorated = await handleAnchorDecorate(body, selectedTokens);
-      if (decorated) {
-        updateStep(idx, { messageTemplate: decorated });
-        toast.success('고객 정보를 문안에 녹였습니다.');
-      }
-    } finally {
-      setStudioDecorating(false);
     }
   };
 
@@ -1685,8 +1439,8 @@ export default function JourneysPage() {
                       </div>
                       <div className="mt-3 flex flex-wrap items-center gap-2">
                         <button
-                          onClick={() => handleAIGenerate(undefined, undefined, nextDef.triggerEvent)}
-                          disabled={generating || lineAsk.judging}
+                          onClick={() => openLineJourney({ preset: { triggerEvent: nextDef.triggerEvent } })}
+                          disabled={lineAsk.judging}
                           className="flex items-center justify-center gap-1.5 rounded-lg border border-indigo-200 bg-white text-indigo-700 hover:bg-indigo-50 px-3 h-8 text-[13px] font-semibold disabled:opacity-50"
                         >
                           <Sparkles className="h-3.5 w-3.5" /> 이어서 만들기
@@ -1764,8 +1518,8 @@ export default function JourneysPage() {
                             </div>
                           )}
                           <button
-                            onClick={() => handleAIGenerate(undefined, op.suggestedObjective, op.preferTriggerEvent)}
-                            disabled={generating || lineAsk.judging}
+                            onClick={() => openFromCard(op.suggestedObjective, op.preferTriggerEvent)}
+                            disabled={lineAsk.judging}
                             className="h-9 px-3 rounded-[10px] border border-indigo-200 bg-white text-indigo-700 hover:bg-indigo-50 text-[13px] font-semibold disabled:opacity-50 flex items-center justify-center gap-1.5"
                           >
                             <Sparkles className="w-3.5 h-3.5" /> 1클릭 생성
@@ -1781,13 +1535,13 @@ export default function JourneysPage() {
   const journeyOneLine = zoneModule('journeys').oneLine!;
   const scopeTotal = journeyScope.availableCount + journeyScope.lockedCount;
   const backFromView = () => (view !== 'main'
-    ? setConfirm({ mode: 'warning', title: '메인으로 돌아가기', description: '생성한 여정이 사라집니다. 메인으로 돌아가시겠습니까?', confirmLabel: '나가기', onConfirm: () => { setView('main'); setAiPkg(null); setStudioIdx(0); setBenefitText(''); } })
+    ? setConfirm({ mode: 'warning', title: '메인으로 돌아가기', description: '생성한 여정이 사라집니다. 메인으로 돌아가시겠습니까?', confirmLabel: '나가기', onConfirm: () => { setView('main'); setAiPkg(null); setBenefitText(''); } })
     : goUpTo(navigate, '/ai-operator')); // ★ 2026-10-01 첫 화면 ← = 항상 허브(머리 부품과 같은 규칙)
 
   return (
     <ZoneFrame
       moduleId="journeys"
-      sub={view === 'studio' ? `${aiPkg?.name || '여정'} · 스텝 ${studioIdx + 1}` : view === 'review' ? 'AI 생성 여정 검토' : null}
+      sub={view === 'review' ? 'AI 생성 여정 검토' : null}
       onBack={backFromView}
       backLabel={view === 'main' ? 'AI Operator로' : '여정 목록으로'}
       tabs={view === 'main' ? JOURNEY_TABS : undefined}
@@ -1799,26 +1553,24 @@ export default function JourneysPage() {
           onSubmit: () => {
             void (async () => {
               if (await lineAsk.route(objective)) return;
-              void handleAIGenerate(undefined, undefined, undefined, lineFactsOn ? undefined : benefitText);
+              openLineJourney({ sentence: objective });
             })();
           },
           placeholder: journeyOneLine.placeholder,
           verb: journeyOneLine.verb,
           icon: Sparkles,
-          busy: generating || lineAsk.judging,
+          busy: lineAsk.judging,
         },
       } : null}
       blocks={[
         ...(error ? [{ text: error, tone: 'rose' as const }] : []),
-        // ★ 2026-10-23 한줄 CT 반복 발송 점검(여정은 계속 나간다 · 날짜 말 · 혜택) — 이 여정을 만든 한 줄의 판정일 때만(막지 않음 · C1)
-        ...(view === 'review' && lineAsk.recurring.line && lineAsk.recurring.line === genObjective.trim() ? lineAsk.recurring.notes.map((n) => ({ text: n.text })) : []),
         ...(callbackOptions.length === 0 && !loading && view === 'main' ? [{ text: '회사에 등록된 발신번호가 없어 여정을 켤 수 없습니다. 만들기는 지금도 됩니다.' }] : []),
       ]}
       links={view === 'main' ? [{ label: `만들 수 있는 여정 ${journeyScope.availableCount}/${scopeTotal}종 · ${showScopeNote ? '접기' : '자세히'}`, onClick: () => setShowScopeNote((v) => !v) }] : []}
       stamp={view === 'main' ? { text: '다시 읽기', onRefresh: loadAll, loading } : null}
       start={view === 'main' && !lineAsk.hasCards ? {
         items: [
-          { icon: Megaphone, title: '마케팅 여정', desc: '빠른 시작을 고르고 혜택까지 넣어 설계', tint: 'from-fuchsia-400 to-purple-500', featured: true, badge: '추천', onClick: () => setPurpose('marketing-modal') },
+          { icon: Megaphone, title: '마케팅 여정', desc: '빠른 시작을 고르고 혜택까지 넣어 설계', tint: 'from-fuchsia-400 to-purple-500', featured: true, badge: '추천', onClick: () => openLineJourney({}) },
           { icon: Bell, title: '정보 알림', desc: '주문·배송 같은 거래가 일어나면 알림톡', tint: 'from-teal-400 to-emerald-500', onClick: () => setPurpose('info-alert') },
           { icon: CalendarClock, title: '날짜축 여정', desc: '정해 둔 날짜 기준 D-7·D-3·D-1·당일', tint: 'from-indigo-400 to-violet-500', onClick: () => setPurpose('date-anchor') },
         ],
@@ -1826,19 +1578,19 @@ export default function JourneysPage() {
       emphasis={view === 'main' && lineAsk.ask ? (
         <LineAnswer
           ask={lineAsk.ask}
-          busy={generating}
+          busy={false}
           cardCost={(c) => (c.action.kind === 'journey' ? journeyCost : undefined)}
           makeCost={journeyCost}
           onClose={lineAsk.close}
           onPick={(c) => {
             if (c.action.kind !== 'journey') return;
             lineAsk.close();
-            void handleAIGenerate(undefined, c.action.objective, c.action.preferTriggerEvent);
+            openFromCard(c.action.objective, c.action.preferTriggerEvent);
           }}
           onMakeAnyway={() => {
             const line = lineAsk.ask!.line;
             lineAsk.close();
-            void handleAIGenerate(undefined, line, undefined, lineFactsOn ? undefined : benefitText);
+            openLineJourney({ sentence: line });
           }}
         />
       ) : journeyEmphasis}
@@ -2022,50 +1774,6 @@ export default function JourneysPage() {
         {/* ════════════════════════════════════════
             REVIEW VIEW — AI 생성 여정 검토 + 수정
             ════════════════════════════════════════ */}
-        {/* ★ 2026-08-02 §13-2 — 스텝별 전환 화면. 한 화면 = 스텝 하나 완결. */}
-        {view === 'studio' && aiPkg && (
-          <div className="max-w-5xl mx-auto px-3 md:px-6 py-4 md:py-6">
-            <JourneyStepStudio
-              steps={aiPkg.steps}
-              index={Math.min(studioIdx, aiPkg.steps.length - 1)}
-              maxSteps={7}
-              variables={dataProfileVars.map((v) => v.token.replace(/%/g, ''))}
-              decorateVars={dataProfileVars}
-              triggerLabel={triggerLabelOf(aiPkg.triggerEvent, aiPkg.templateCode)}
-              objective={genObjective.trim() || undefined}
-              aiBusy={refineLoading || studioDecorating}
-              saving={saving}
-              onIndex={setStudioIdx}
-              onPatch={(i, patch) => updateStep(i, patch as Partial<AIGeneratedStep>)}
-              onAdd={() => { addStep(); setStudioIdx(aiPkg.steps.length); }}
-              onDelete={(i) => deleteStep(i)}
-              onAi={(i) => { void handleRefineOpen(i); }}
-              onDecorate={(i, tokens) => { void handleStudioDecorate(i, tokens); }}
-              onFillBenefit={handleFillBenefit}
-              onFillUrl={handleFillUrl}
-              sampleCustomer={sampleCustomer}
-              sampleCustomerFields={sampleCustomerFields}
-              opt080Number={opt080Number}
-              onSpamTest={(i) => {
-                // 스팸필터 테스트는 실제로 발송해 통신사 판정을 본다 — 문안과 회신번호가 없으면 열지 않는다.
-                if (!String(aiPkg.steps[i]?.messageTemplate || '').trim()) { toast.warning('테스트할 문안을 먼저 만들어 주세요.'); return; }
-                if (!reviewCallback) { toast.warning('회신번호를 먼저 정해 주세요. 아래 [전체 설정]에서 고를 수 있습니다.'); return; }
-                setStudioSpamIdx(i);
-              }}
-              onSave={() => setBriefingOpen(true)}
-            />
-            <div className="mt-3 text-center">
-              <button
-                type="button"
-                onClick={() => setView('review')}
-                className="text-[11px] text-slate-500 underline-offset-2 hover:text-slate-700 hover:underline"
-              >
-                전체 설정 한 화면에서 보기 (회신번호·예산·활성화)
-              </button>
-            </div>
-          </div>
-        )}
-
         {view === 'review' && aiPkg && (
           <div className="space-y-4">
             {/* AI reasoning */}
@@ -2860,7 +2568,7 @@ export default function JourneysPage() {
 
             {/* 액션 버튼 */}
             <div className="flex flex-wrap gap-2 pt-2 sticky bottom-0 bg-slate-100 backdrop-blur-sm border-t border-slate-200 -mx-3 md:-mx-6 px-3 md:px-6 py-3">
-              <button onClick={handleRegenerate} disabled={generating || saving} className="px-4 py-2 rounded-lg bg-slate-100 hover:bg-slate-700 text-sm flex items-center gap-2 disabled:opacity-50">
+              <button onClick={handleRegenerate} disabled={saving} className="px-4 py-2 rounded-lg bg-slate-100 hover:bg-slate-700 text-sm flex items-center gap-2 disabled:opacity-50">
                 <RefreshCw className="w-4 h-4" /> AI 다시 생성
               </button>
               <button onClick={() => setConfirm({ mode: 'warning', title: '메인으로 돌아가기', description: '변경사항이 사라집니다. 메인으로 돌아가시겠습니까?', confirmLabel: '나가기', onConfirm: () => { setView('main'); setAiPkg(null); } })} disabled={saving} className="px-4 py-2 rounded-lg bg-slate-100 hover:bg-slate-700 text-sm">취소</button>
@@ -2949,80 +2657,6 @@ export default function JourneysPage() {
           </div>
         );
       })()}
-
-      {/* AI 생성 중 오버레이 */}
-      {/* ★ D210+ Phase 2-fix6 (Harold 명시 2026-05-23): 6 sub-agent 진행 카드 매트릭스 (옛 단순 로딩 → AiOperatorPage 매트릭스 미러) */}
-      {generating && (
-        <div className="fixed inset-0 bg-black/85 backdrop-blur-sm flex items-center justify-center z-40 p-4">
-          <div className="max-w-3xl w-full animate-in fade-in duration-300">
-            <div className="text-center mb-6">
-              <p className="text-[11px] font-semibold tracking-[0.28em] text-slate-400 uppercase mb-2">AI Operator · Multi-Agent Pipeline</p>
-              <p className="text-slate-700 text-sm">6개 sub-agent가 협업하여 여정을 설계하고 있습니다</p>
-            </div>
-
-            {/* ★ D210+ Phase 2-fix8 (Harold 명시 2026-05-23): Stage 2 — 6단 모두 완료 후 둥근 스피너 + "마지막 다듬는 중" 안내 */}
-            {progressStep >= JOURNEY_SUB_AGENT_STEPS.length && (
-              <div className="mb-6 text-center animate-in fade-in duration-300">
-                <Loader2 className="w-10 h-10 animate-spin text-fuchsia-600 mx-auto mb-3" />
-                <p className="text-slate-700 text-sm font-medium">AI Operator가 여정 마지막 다듬는 중입니다</p>
-                <p className="text-slate-500 text-xs mt-1">검토 화면 준비 중. 잠시만 기다려주세요</p>
-              </div>
-            )}
-
-            <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
-              {JOURNEY_SUB_AGENT_STEPS.map((step, idx) => {
-                const Icon = step.icon;
-                const isDone = idx < progressStep;
-                const isActive = idx === progressStep;
-                const isPending = idx > progressStep;
-                return (
-                  <div
-                    key={step.label}
-                    className={`relative p-4 rounded-xl border backdrop-blur-xl transition-all duration-500 ${
-                      isDone ? 'bg-emerald-50 border-emerald-200' :
-                      isActive ? 'bg-slate-100 border-fuchsia-300 scale-[1.02] shadow-lg shadow-fuchsia-500/20' :
-                      'bg-white border-slate-100'
-                    }`}
-                  >
-                    <div className="flex items-center gap-3">
-                      <div className={`relative flex-shrink-0 w-10 h-10 rounded-lg flex items-center justify-center transition-all ${
-                        isDone ? 'bg-gradient-to-br from-emerald-400 to-teal-500' :
-                        isActive ? `bg-gradient-to-br ${step.gradient}` :
-                        'bg-white'
-                      }`}>
-                        {isDone ? (
-                          <CheckCircle2 className="w-5 h-5 text-slate-900" strokeWidth={3} />
-                        ) : isActive ? (
-                          <>
-                            <Icon className="w-5 h-5 text-slate-900 relative z-10" />
-                            <span className="absolute inset-0 rounded-lg bg-slate-200 animate-ping" />
-                          </>
-                        ) : (
-                          <Icon className={`w-5 h-5 ${isPending ? 'text-slate-300' : 'text-slate-900'}`} />
-                        )}
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <p className={`text-[10px] font-bold tracking-wider uppercase ${
-                          isDone ? 'text-emerald-700' :
-                          isActive ? 'text-slate-900' :
-                          'text-slate-400'
-                        }`}>
-                          {step.label}
-                        </p>
-                        <p className={`text-xs mt-0.5 truncate ${
-                          isDone || isActive ? 'text-slate-600' : 'text-slate-300'
-                        }`}>
-                          {isActive ? '진행 중...' : isDone ? '완료' : step.hint}
-                        </p>
-                      </div>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-        </div>
-      )}
 
       {/* ★ D211+ Phase 3-fix (2026-05-23 Harold 명시): archive/unarchive/delete 영역 커스텀 다크 톤 모달 (native confirm/prompt 영구 폐기) */}
       {actionModal && (
@@ -3174,105 +2808,21 @@ export default function JourneysPage() {
         token={token() || ''}
       />
 
-      {/* ★ 2026-08-02 마케팅 여정 진입 — 자연어 입력 + 빠른 시작을 여기로 모았다. */}
-      <MarketingJourneyModal
-        open={view === 'main' && purpose === 'marketing-modal'}
-        onClose={() => setPurpose('marketing')}
-        objective={objective}
-        onObjectiveChange={setObjective}
-        benefit={benefitText}
-        onBenefitChange={setBenefitText}
-        generating={generating}
+      {/* ★ 2026-10-23 한 줄 여정 한 길 — 여정을 만드는 모든 입구가 이 창 하나(질문표 · 서버 초안 · 작업 화면). */}
+      <InterviewModal
+        open={!!lineJourney}
+        onClose={() => setLineJourney(null)}
+        initialSentence={lineJourney?.sentence}
+        preset={lineJourney?.preset || null}
         quickStarts={quickStartItems}
-        availableCount={journeyScope.availableCount}
-        lockedCount={journeyScope.lockedCount}
-        lockedHints={journeyScope.lockedHints}
-        onGenerate={(templateCode) => {
-          setPurpose('marketing');
-          void handleAIGenerate(templateCode as TemplateCode | undefined, undefined, undefined, benefitText);
+        focusLabel="작업 화면 열기"
+        onFocusJourney={(id) => openWorkspace(id)}
+        onCreated={(made) => {
+          void loadAll();
+          // 다음 수 안내의 근거 = 서버가 만든 여정의 실제 시작 신호(옛 저장 응답과 같은 규칙)
+          if (made && made.length > 0) { setSuccessionFrom(made[0].triggerEvent || null); setSuccessionGoalExit(made[0].goalExitEnabled); }
         }}
       />
-
-      {/* ★ 2026-08-02 §13-4 — 진입 추천 모달. 왜 이렇게 만들었는지 넷을 보여주고 스텝 1로 넘긴다. */}
-      {aiPkg && (() => {
-        // ⛔ 2026-08-02 Codex — capability key는 **실제 trigger_event**에서 끌어온다.
-        //   templateCode로 판정하면 등급처럼 템플릿이 없는 트리거는 매핑이 없어 잠금 사유도, 푸는 버튼도 못 띄운다.
-        const trgKey = capabilityKeyOf(aiPkg.triggerEvent, aiPkg.templateCode);
-        const cap = trgKey ? dataCap?.[trgKey] : undefined;
-        // 트리거 데이터가 필요 없는 자유 여정(custom)과 판정 결과를 못 받은 경우는 잠그지 않는다(기존 게이트 규약).
-        const available = !trgKey || cap?.available !== false;
-        return (
-          <JourneyPlanModal
-            open={planOpen}
-            onClose={() => setPlanOpen(false)}
-            onNext={() => { setPlanOpen(false); setStudioIdx(0); setView('studio'); }}
-            // 처음 생성에 실린 것과 같은 요청으로 다시 만든다 — 조립은 regenerateFromPackage 한 곳이 소유한다.
-            onRegenerate={() => { setPlanOpen(false); regenerateFromPackage(aiPkg); }}
-            regenerating={generating}
-            name={aiPkg.name}
-            triggerLabel={triggerLabelOf(aiPkg.triggerEvent, aiPkg.templateCode)}
-            reasoning={aiPkg.reasoning}
-            objective={genObjective.trim() || undefined}
-            available={available}
-            unavailableReason={cap?.reason}
-            notice={[aiPkg.targetSummary, storePurchaseNotice(trgKey, purchaseDoor)].filter(Boolean).join(' · ') || undefined}
-            warnings={aiPkg.droppedConditionNotices}
-            lockAction={!available && trgKey === 'grade' ? { label: '등급 순서 정하기', onClick: () => setGradeOrderOpen(true) } : undefined}
-            steps={aiPkg.steps.map((s) => ({
-              stepOrder: s.stepOrder,
-              timingLabel: s.stepOrder === 1 ? `시작하면 ${formatStepDelay(s)}` : `앞 스텝 후 ${formatStepDelay(s)}`,
-              intent: s.stepIntent || '',
-              channel: s.channel,
-            }))}
-          />
-        );
-      })()}
-
-      {/* ★ 2026-08-02 §13-4 — 저장 브리핑. 스텝을 누르면 상세 문안이 펼쳐진다. */}
-      {aiPkg && (
-        <JourneyBriefingModal
-          open={briefingOpen}
-          onClose={() => setBriefingOpen(false)}
-          onConfirm={() => { setBriefingOpen(false); void handleSaveDraft(); }}
-          saving={saving}
-          name={aiPkg.name}
-          triggerLabel={triggerLabelOf(aiPkg.triggerEvent, aiPkg.templateCode)}
-          issues={collectStepIssues(aiPkg.steps) as BriefingIssue[]}
-          footnote="저장하면 초안으로 만들어집니다. 발송은 활성화할 때 시작되고, 스텝을 더 늘려도 추가 비용은 없습니다."
-          steps={aiPkg.steps.map((s) => ({
-            stepOrder: s.stepOrder,
-            timingLabel: s.stepOrder === 1 ? `시작하면 ${formatStepDelay(s)}` : `앞 스텝 후 ${formatStepDelay(s)}`,
-            channel: s.channel,
-            subject: s.subject,
-            messageTemplate: s.messageTemplate,
-            isAd: s.isAd,
-          }))}
-        />
-      )}
-
-      {/* 스팸필터 테스트 — 공용 모달을 그대로 쓴다(새로 만들지 않는다).
-          ⛔ 2026-08-02 (Codex 1R P2-3): **실제로 나가는 형태로 보낸다.** 모달은 받은 본문·제목을 그대로 제출하고
-            `isAd`로 합성해 주지 않는다. 순수 본문을 넘기면 (광고) 접두사와 무료수신거부가 빠진 문안을 검사하게 되어
-            통과라고 나와도 실제 발송은 다른 문안이다. 합성은 발송 경로와 같은 단일 출처(buildAd*Front)로만 한다. */}
-      {studioSpamIdx != null && aiPkg?.steps[studioSpamIdx] && (() => {
-        const s = aiPkg.steps[studioSpamIdx];
-        const ch = s.channel === 'sms' ? 'SMS' : s.channel === 'mms' ? 'MMS' : 'LMS';
-        // ⛔ 두 합성기는 대문자 메시지 타입('SMS'|'LMS'|'MMS')을 받는다. 소문자 channel을 그대로 넘기면
-        //   분기를 못 타 (광고)가 안 붙은 채 "합성했다"고 착각하게 된다.
-        const sentBody = buildAdMessageFront(s.messageTemplate, ch, s.isAd, opt080Number);
-        const sentSubject = buildAdSubjectFront(s.subject || '', ch, s.isAd);
-        return (
-          <SpamFilterTestModal
-            onClose={() => setStudioSpamIdx(null)}
-            messageContentSms={s.channel === 'sms' ? sentBody : undefined}
-            messageContentLms={s.channel !== 'sms' ? sentBody : undefined}
-            callbackNumber={reviewCallback}
-            messageType={ch}
-            subject={sentSubject}
-            isAd={s.isAd}
-          />
-        );
-      })()}
       <JourneyWorkspace
         journeyId={wsJourney}
         stepId={wsStep}

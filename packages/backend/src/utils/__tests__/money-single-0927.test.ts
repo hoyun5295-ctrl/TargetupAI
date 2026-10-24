@@ -31,12 +31,14 @@ describe('R260 여정 자동 생성 = 사전 확인 → 묶음 생성 → 1회 �
     const fn = g.slice(g.indexOf('export async function generateAnchorJourneyPlan('), g.indexOf('export async function regenerateStepAvoidingSpam('));
     const iCheck = fn.indexOf('await checkCredit(input.companyId, cost);');
     const iBundle = fn.indexOf('await runInCreditBundle(');
-    const iDeduct = fn.indexOf('await deductCreditSafe({');
+    const iDeduct = fn.indexOf('await deductCreditOutcome({');
     expect(iCheck).toBeGreaterThan(-1);
     expect(iCheck).toBeLessThan(iBundle);
     expect(iBundle).toBeLessThan(iDeduct);
     expect(fn).toContain("const cost = getCreditCost('journey-ai-refine') * offsets.length;");
-    expect(fn).toContain('idempotencyKey: `journey-anchor-plan:${randomUUID()}`');
+    // ★ 2026-10-23 같은 요청(화면 요청 키) = 한 번만 차감(옛: 매번 새 키)
+    expect(fn).toContain('const key = `journey-anchor-plan:${input.companyId}:${input.requestId}:${inputTag}`;');   // 요청 키 = 회사 · 화면 키 · 목표문(1023 2R)
+    expect(fn).toContain("idempotencyKey: key, throwOnInsufficient: true });");
   });
 });
 

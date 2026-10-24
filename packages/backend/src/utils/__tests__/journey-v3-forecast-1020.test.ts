@@ -86,6 +86,10 @@ describe('journeyCreditForecast (원장 조회 1번)', () => {
   });
   it('켜진 계보 · 계보 표 · 원장 묶음을 읽어 계산한다(원장은 journey-operation 차감만)', async () => {
     q.mockImplementation(async (sql: string) => {
+      if (/FROM ai_credit_transactions/.test(sql) && /continuous-operator-send/.test(sql)) {
+        expect(sql).toContain("type = 'deduct'");
+        return { rows: [{ n: 2 }] };   // ★ 2026-10-23 자동 마케팅 운영 2일 × 10
+      }
       if (/FROM ai_credit_transactions/.test(sql)) {
         expect(sql).toContain("source = 'journey-operation'");
         expect(sql).toContain("type = 'deduct'");
@@ -97,7 +101,8 @@ describe('journeyCreditForecast (원장 조회 1번)', () => {
     });
     const { journeyCreditForecast } = await import('../journey-credit-forecast');
     const r = await journeyCreditForecast('c', NOW);
-    expect(r.total).toBe(30);
+    expect(r.total).toBe(50);   // 여정 3일 × 10 + 자동 마케팅 2일 × 10
+    expect(r.autoMarketing30).toBe(20);
     expect(r.perLineage[0]).toMatchObject({ rootId: 'A', basis: 'measured' });
   });
 });

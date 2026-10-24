@@ -3,7 +3,7 @@
  *
  * Harold 1020 「선불이든 후불이든 크레딧을 월에 지급하는게 있는데 크레딧이 모자르면 둘 다 멈추는게 맞는거지 · 다음달 크레딧에서 땡겨오냐」.
  * 못 박는 것:
- *   - 여정 운영(journey-operation)은 마이너스 0(선불 · 후불 같음) · 자동 마케팅 운영(continuous-operator-send)은 옛 허용 그대로
+ *   - 여정 운영(journey-operation)은 마이너스 0(선불 · 후불 같음) · ★ 2026-10-24 자동 마케팅 회차 발송(continuous-operator-send)도 0(X1)
  *   - 실행기는 그날 그 계보의 운영 크레딧을 아직 안 냈을 때만 잔액을 보고, 모자라면 보내지 않고 멈춘다
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
@@ -18,9 +18,9 @@ describe('여정 운영 마이너스 0 (선불 · 후불 같음)', () => {
     expect(creditOverageAllowance(prepaid, 'journey-operation')).toBe(0);
     expect(creditOverageAllowance(postpaid, 'journey-operation')).toBe(0);
   });
-  it('자동 마케팅 운영은 옛 허용(−월 기본분) 그대로', () => {
-    expect(creditOverageAllowance(prepaid, 'continuous-operator-send')).toBe(300);
-    expect(creditOverageAllowance(postpaid, 'continuous-operator-send')).toBe(750);
+  it('★ 2026-10-24 X1 — 자동 마케팅 회차 발송도 마이너스 0(선불 · 후불 같음 · 보내기 직전에 걷고 모자라면 그 회차를 멈춘다)', () => {
+    expect(creditOverageAllowance(prepaid, 'continuous-operator-send')).toBe(0);
+    expect(creditOverageAllowance(postpaid, 'continuous-operator-send')).toBe(0);
   });
   it('다른 출처는 옛 규칙(후불 = 추가 사용 한도 · 선불 = 0)', () => {
     expect(creditOverageAllowance(postpaid, 'dm-ai')).toBe(5000);

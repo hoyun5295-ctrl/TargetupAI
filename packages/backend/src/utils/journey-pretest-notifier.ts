@@ -14,7 +14,6 @@ import { buildJourneyPauseUrl, generatePauseToken, pauseJourney } from './journe
 import { getAuthSmsTable, bulkInsertSmsQueue, getPlatformNoticeCallback } from './sms-queue';
 import { runStepSpamTest } from './journey-pretest-validator';
 import { regenerateStepAvoidingSpam } from './journey-ai-generator';
-import { getOpt080Number } from './messageUtils';
 import { groupPretestBundles, PretestScanRow, PretestBundle } from './journey-pretest-scan';
 
 type PretestMode = 'pretest_pass' | 'pretest_autofixed' | 'pretest_paused';
@@ -86,7 +85,6 @@ export async function scanAndPretest(): Promise<{
         continue;
       }
 
-      const opt080 = await getOpt080Number(b.createdBy, b.companyId);
       // ★ 2026-06-06: 2시간전 재검도 활성화 검증과 같은 회신번호로 테스트 — 빈 callback이면 테스트 발송이 실패해 오탐 정지 위험.
       const cbRes = await query(`SELECT regexp_replace(callback_number, '[^0-9]', '', 'g') AS cb FROM journeys WHERE id = $1::uuid`, [b.journeyId]);   // ★ 1019 B-1005-5② 같은 뿌리(숫자만)
       const stepCallback = String(cbRes.rows[0]?.cb || '');
@@ -94,7 +92,7 @@ export async function scanAndPretest(): Promise<{
       const r1 = await runStepSpamTest({
         companyId: b.companyId, userId: b.createdBy || '',
         body, subject: snap.message_subject ?? b.subject,
-        channel: b.channel, isAd: b.isAd, callbackNumber: stepCallback, opt080,
+        channel: b.channel, isAd: b.isAd, callbackNumber: stepCallback, journeyId: b.journeyId,
       });
 
       // 통과 → 담당자 안내(opt-in) + 기록 + ★ 1019 B-1009-6 그 판 = 검사 통과(confidence_score 100 · 실행기 재검사 전 관문이 연다).
@@ -128,7 +126,7 @@ export async function scanAndPretest(): Promise<{
         const r2 = await runStepSpamTest({
           companyId: b.companyId, userId: b.createdBy || '',
           body: regenBody, subject: snap.message_subject ?? b.subject,
-          channel: b.channel, isAd: b.isAd, callbackNumber: stepCallback, opt080,
+          channel: b.channel, isAd: b.isAd, callbackNumber: stepCallback, journeyId: b.journeyId,
         });
         if (r2.enqueueOk && r2.ok) {
           // ★ 2026-10-18 J2 — 사람이 본 적 없는 문안으로 바뀐다 · 단계 알림 설정과 상관없이 늘 알린다(설계서 2026-10-18 §0).

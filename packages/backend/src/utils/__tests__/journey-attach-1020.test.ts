@@ -334,7 +334,8 @@ describe('5. 만들기 길 차단 · 켜기 검사 · 감시 배선', () => {
     expect(formatTriggerMenuForAi()).not.toContain('journey.after');
     for (const f of ['journey-builder.ts', 'journey-ai-generator.ts']) expect(SRC(f)).toContain('isCreatableTriggerEvent(');
     expect(SRC('journey-ai-editor.ts')).toContain('if (!isCreatableTriggerEvent(triggerEvent)) {');
-    expect(fs.readFileSync(path.join(__dirname, '..', '..', 'routes', 'ai.ts'), 'utf-8')).toContain('if (preferTriggerEvent && !isCreatableTriggerEvent(String(preferTriggerEvent))) {');
+    // ★ 2026-10-23 시작 사건이 정해진 입구 = 질문표 프리셋(prepareInterviewPreset)이 같은 판정(옛 journeys-ai-generate 주소는 지움)
+    expect(SRC('journey-interview-ai.ts')).toContain('if (!trigger || !isCreatableTriggerEvent(trigger)) throw new JourneyInputError(');
   });
   it('켜기 검사 — 설정이 없으면 켜지 않는다 · 앞 여정 존재 확인 · 첫 켜기 기준 시각', () => {
     expect(validateJourneyEntryConfig({ trigger_event: 'journey.after', allow_reentry: false, reentry_cooldown_days: null, trigger_filters: {}, threshold_recipients_per_step: 100 }))

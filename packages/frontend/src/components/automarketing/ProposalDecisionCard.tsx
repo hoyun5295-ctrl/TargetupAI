@@ -14,7 +14,6 @@ import StatusBadge from './StatusBadge';
 import TargetRecipientsModal, { arrayPager, TargetRecipient } from '../TargetRecipientsModal';
 import SmsCharsetNotice from '../SmsCharsetNotice';
 import { hasUnsupportedSmsChars, SMS_CHARSET_BLOCK_MESSAGE } from '../../utils/smsSafeChars';
-import { buildAdMessageFront, buildAdSubjectFront } from '../../utils/formatDate';
 
 // [타겟확인] 응답 — 1회 로드(LIMIT 100) 후 클라 페이징(서버 재호출 0)
 interface TargetListInfo {
@@ -33,8 +32,8 @@ interface Props {
   variantData?: { variants: ProposalVariant[]; recommendation: BanditRecommendation | null };
   busy?: boolean;
   onToggleExpand: () => void;
-  // selection 없음(undefined) = 사용자가 아무것도 안 고름 → 백엔드 Bandit이 변형 결정(자동 경로 동일).
-  onApprove: (selection?: ProposalApproveSelection) => void;
+  // ★ 2026-10-24 승인 = 늘 안 번호 + 그 안의 지문(옛: 안 고르면 발송 순간 무작위 표집)
+  onApprove: (selection: ProposalApproveSelection) => void;
   onReject: () => void;
   onStop: () => void;
   onPromoteToJourney?: () => void;
@@ -52,6 +51,13 @@ const SPAM_RESULT_CHIP: Record<string, { text: string; cls: string }> = {
 };
 /** ★ 2026-10-06 화면 스팸 검사 횟수(서버 PROPOSAL_SPAM_RETEST_LIMIT 와 같은 값 · 서버가 막는다) */
 const SPAM_RETEST_LIMIT = 5;
+/** ★ 2026-10-24 지금 나갈 글의 검사 상태(서버 copyCheck) */
+const COPY_CHECK_CHIP: Record<string, { text: string; cls: string }> = {
+  passed: { text: '스팸 검사 통과', cls: 'bg-emerald-50 text-emerald-700' },
+  rechecking: { text: '혜택이 바뀌어 다시 검사하는 중', cls: 'bg-slate-100 text-slate-600' },
+  blocked: { text: '바뀐 문안이 스팸 검사에 걸렸어요', cls: 'bg-rose-50 text-rose-700' },
+  stale: { text: '검사한 뒤 혜택이 바뀌어 다시 검사가 필요해요', cls: 'bg-amber-50 text-amber-800' },
+};
 const authHeader = () => ({ Authorization: `Bearer ${localStorage.getItem('token')}` });
 
 export default function ProposalDecisionCard({
@@ -155,13 +161,17 @@ export default function ProposalDecisionCard({
     return () => clearInterval(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [retestRunning, proposal.id]);
-  const banditIdx = spamPassedIdx != null ? spamPassedIdx : (recommendedIdx != null && messages[recommendedIdx] ? recommendedIdx : 0);
-  // 사용자가 고른 변형이 있으면 그것, 없으면 검사 통과 안(없으면 추천 안). 미리보기·발송이 모두 이 index를 따른다.
-  const effectiveIdx = selectedIdx != null && messages[selectedIdx] ? selectedIdx : banditIdx;
+  // ★ 2026-10-24 보낼 안 = 서버가 정한 번호(사람이 고른 안 → 통과 안 → 저장된 추천 안 → 0 · 발송과 같은 함수) · 화면은 계산하지 않는다
+  const finals = proposal.finalCopies || [];
+  const serverIdx = Number.isInteger(proposal.finalIndex) && messages[proposal.finalIndex as number] ? (proposal.finalIndex as number) : 0;
+  const effectiveIdx = selectedIdx != null && messages[selectedIdx] ? selectedIdx : serverIdx;
   const effectiveMsg = messages[effectiveIdx];
-  const effectiveBody = editedBody != null ? editedBody : (effectiveMsg?.body || effectiveMsg?.message || '');
-  // ★ 2026-07-10: 화면 표시 제목 = 발송 제목(편집값 우선, 없으면 AI 생성 제목) — 발송부(dispatchProposalSend 1360행)와 동일 우선순위.
-  const effectiveSubject = editedSubject != null ? editedSubject : (effectiveMsg?.subject || '');
+  const effectiveFinal = finals[effectiveIdx] || null;
+  // 편집은 나가는 글(혜택을 넣은 글)에서 시작한다 — 고치지 않았으면 서버 글 그대로
+  const effectiveBody = editedBody != null ? editedBody : (effectiveFinal?.body ?? (effectiveMsg?.body || effectiveMsg?.message || ''));
+  const effectiveSubject = editedSubject != null ? editedSubject : (effectiveFinal?.subject ?? (effectiveMsg?.subject || ''));
+  const edited = (editedBody != null && editedBody !== (effectiveFinal?.body ?? '')) || (editedSubject != null && editedSubject !== (effectiveFinal?.subject ?? ''));
+  const finalMissing = canApprove && !effectiveFinal;
   // 실발송 제목이 비면 승인 차단(여정 LMS/MMS 필수 규칙과 동일) — Codex 지적: 편집값만 검사하면 AI 제목 부재 제안이 빈 제목으로 발송됨.
   const subjectInvalid = isLongType && canApprove && !effectiveSubject.trim();
   // ★ 2026-09-10 발송할 문안에 문자로 보낼 수 없는 글자가 남아 있으면 승인 차단(설계 D2 · 문안 아래 안내에서 바꾼다)
@@ -189,13 +199,14 @@ export default function ProposalDecisionCard({
       setRetestStarting(false);
     }
   };
-  // ★ Codex P3 (2026-07-09): 사용자가 명시적으로 선택/편집한 경우에만 selection 전송.
-  //   미조작 승인에 selection을 실으면 변형 데이터 로딩 전(recommendedIdx=undefined)엔 변형 A(0)가 강제되어
-  //   백엔드 Bandit 추천을 우회한다 — 미조작 = undefined로 보내 백엔드가 Bandit으로 결정(자동 경로 동일).
+  // ★ 2026-10-24 승인 = 늘 {안 번호 · 그 안의 지문}(본 뒤 혜택 · 080 · 회신번호가 바뀌면 서버가 409) · 고친 글만 함께 보낸다
   const submitApprove = () => {
-    if (subjectInvalid || charsetInvalid) return;
-    if (selectedIdx == null && editedBody == null && editedSubject == null) { onApprove(); return; }
-    onApprove({ variantIndex: effectiveIdx, body: effectiveBody, subject: editedSubject != null ? editedSubject : effectiveMsg?.subject });
+    if (subjectInvalid || charsetInvalid || !effectiveFinal) return;
+    onApprove({
+      variantIndex: effectiveIdx,
+      fingerprint: effectiveFinal.fingerprint,
+      ...(edited ? { body: effectiveBody, subject: effectiveSubject } : {}),
+    });
   };
 
   // ★ 2026-09-30 AI 존 보정: 대상·발송비를 오른쪽 끝에 떼어 두면 가운데가 빈다 → 기대 매출·ROI 옆 같은 칸(모바일 2×2)
@@ -248,7 +259,6 @@ export default function ProposalDecisionCard({
           </div>
         ))}
       </div>
-      {sourceLabel && <div className="text-[10px] text-slate-400 italic mt-1.5">{sourceLabel}</div>}
     </div>
   );
 
@@ -265,13 +275,15 @@ export default function ProposalDecisionCard({
           <MessageSquare className="w-3 h-3" />{channelName}: {channelReason}
         </span>
       )}
-      {spamPassedIdx != null ? (
-        <span className="inline-flex items-center gap-1 text-[11px] px-2 py-1 rounded-full bg-emerald-50 text-emerald-700">
-          <Target className="w-3 h-3" />스팸 검사 통과 문안 {variantLetter(spamPassedIdx)}
-        </span>
-      ) : recommendedIdx != null && (
+      {messages.length > 0 && (
         <span className="inline-flex items-center gap-1 text-[11px] px-2 py-1 rounded-full bg-indigo-100 text-indigo-800">
-          <Target className="w-3 h-3" />추천 문안 {variantLetter(recommendedIdx)}
+          <Target className="w-3 h-3" />보낼 문안 {variantLetter(serverIdx)}
+        </span>
+      )}
+      {/* ★ 2026-10-24 지금 나갈 글의 검사 상태(서버 판정 · 통과 지문 · 재검사) */}
+      {proposal.copyCheck && COPY_CHECK_CHIP[proposal.copyCheck] && (
+        <span className={`inline-flex items-center gap-1 text-[11px] px-2 py-1 rounded-full ${COPY_CHECK_CHIP[proposal.copyCheck].cls}`}>
+          <ShieldCheck className="w-3 h-3" />{COPY_CHECK_CHIP[proposal.copyCheck].text}
         </span>
       )}
     </div>
@@ -279,16 +291,18 @@ export default function ProposalDecisionCard({
 
   const messagePreview = effectiveMsg && (
     <div className="mt-3 rounded-lg border border-slate-200 bg-slate-100 px-3 py-2.5">
-      <div className="text-[10px] text-slate-400 mb-1">
-        발송 문안 · 변형 {variantLetter(effectiveIdx)}{(editedBody != null || editedSubject != null) ? ' · 편집됨' : ''}
+      <div className="text-[11px] text-slate-500 mb-1">
+        발송 문안 · 변형 {variantLetter(effectiveIdx)}{edited ? ' · 편집됨' : ''}
       </div>
-      {/* ★ 2026-10-08 (남지현 접수) 고객이 받는 모양 그대로 — 자동마케팅 = 늘 광고. (광고) · 무료수신거부를 발송과 같은 CT 미러로 붙인다 */}
-      {isLongType && (
+      {/* ★ 2026-10-08 (남지현 접수) 고객이 받는 모양 그대로 · ★ 2026-10-24 서버가 만든 나가는 글(혜택 · (광고) · 080)을 그대로 — 화면 흉내 0 */}
+      {(effectiveFinal?.msgType === 'LMS' || effectiveFinal?.msgType === 'MMS' || isLongType) && (
         <div className="text-[12px] text-slate-700 mb-1.5 pb-1.5 border-b border-slate-200">
-          <span className="text-slate-400 mr-1.5">제목</span>{effectiveSubject ? buildAdSubjectFront(effectiveSubject, channelName, true) : <span className="text-rose-700">제목 없음. 상세에서 입력해주세요</span>}
+          <span className="text-slate-500 mr-1.5">제목</span>{effectiveSubject ? (!edited && effectiveFinal?.sentSubject ? effectiveFinal.sentSubject : effectiveSubject) : <span className="text-rose-700">제목 없음. 상세에서 입력해주세요</span>}
         </div>
       )}
-      <div className="text-[13px] text-slate-700 leading-relaxed whitespace-pre-wrap">{buildAdMessageFront(effectiveBody, channelName, true, proposal.adOptOut || '')}</div>
+      <div className="text-[13px] text-slate-700 leading-relaxed whitespace-pre-wrap">{edited || !effectiveFinal ? effectiveBody : effectiveFinal.sent}</div>
+      {edited && <div className="mt-1.5 text-[11px] text-slate-500">(광고) 표기와 무료거부 번호는 보낼 때 붙어요.</div>}
+      {finalMissing && <div className="mt-1.5 text-[11px] text-rose-700">문안을 다시 불러와야 승인할 수 있어요. 목록을 새로 고쳐 주세요.</div>}
     </div>
   );
 
@@ -304,8 +318,8 @@ export default function ProposalDecisionCard({
       )}
       {canApprove && (
         <>
-          <button onClick={submitApprove} disabled={busy || subjectInvalid || charsetInvalid} title={charsetInvalid ? SMS_CHARSET_BLOCK_MESSAGE : undefined} className="inline-flex items-center gap-1.5 bg-indigo-200 hover:bg-indigo-200 disabled:opacity-40 text-indigo-900 text-sm font-semibold px-4 py-2 rounded-lg transition-colors">
-            <Send className="w-4 h-4" />승인하고 발송
+          <button onClick={submitApprove} disabled={busy || subjectInvalid || charsetInvalid || finalMissing} title={charsetInvalid ? SMS_CHARSET_BLOCK_MESSAGE : undefined} className="inline-flex items-center gap-1.5 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-40 text-white text-sm font-semibold px-4 py-2 rounded-lg transition-colors">
+            <Send className="w-4 h-4" />이 문안으로 승인
           </button>
           <button onClick={onReject} disabled={busy} className="inline-flex items-center gap-1.5 border border-rose-200 hover:bg-rose-100 disabled:opacity-40 text-rose-700 text-sm px-3 py-2 rounded-lg transition-colors">
             <X className="w-3.5 h-3.5" />거부
@@ -351,8 +365,8 @@ export default function ProposalDecisionCard({
               const rec = recommendedIdx === i;
               const isSel = canApprove && effectiveIdx === i;
               // 화면 검사 결과(같은 글자일 때만) → 없으면 자동 검사 결과(고친 문안에는 붙이지 않는다)
-              const reHit = retestFor(i, isSel ? effectiveBody : (m.body || m.message || ''), isSel ? effectiveSubject : (m.subject || ''));
-              const autoHit = isSel && (editedBody != null || editedSubject != null) ? undefined : spamResultAt(i);
+              const reHit = retestFor(i, isSel ? effectiveBody : (finals[i]?.body ?? (m.body || m.message || '')), isSel ? effectiveSubject : (finals[i]?.subject ?? (m.subject || '')));
+              const autoHit = isSel && edited ? undefined : spamResultAt(i);
               const testingThis = retestRunning && retest?.running?.variantIndex === i;
               return (
                 <div
@@ -394,7 +408,7 @@ export default function ProposalDecisionCard({
                       </div>
                     ) : (
                       <div className="text-[11px] text-slate-500 mb-1">
-                        <span className="text-slate-400 mr-1.5">제목</span>{isSel ? (effectiveSubject || '—') : (m.subject || '—')}
+                        <span className="text-slate-400 mr-1.5">제목</span>{isSel ? (effectiveSubject || '—') : (finals[i]?.subject || m.subject || '—')}
                       </div>
                     )
                   )}
@@ -408,12 +422,11 @@ export default function ProposalDecisionCard({
                       placeholder="발송할 문안을 자유롭게 편집하세요"
                     />
                   ) : (
-                    <div className="text-slate-600 whitespace-pre-wrap leading-relaxed">{isSel ? effectiveBody : (m.body || m.message || '')}</div>
+                    <div className="text-slate-600 whitespace-pre-wrap leading-relaxed">{isSel ? effectiveBody : (finals[i]?.body ?? (m.body || m.message || ''))}</div>
                   )}
                   {/* ★ 2026-09-10 발송할 문안에 문자로 보낼 수 없는 글자 — 누르면 본문·제목을 대체표로 바꾼다(편집값으로 승인) */}
                   {isSel && ['SMS', 'LMS', 'MMS'].includes(channelName) && (
                     <SmsCharsetNotice
-                      tone="dark"
                       className="mt-1.5"
                       texts={[effectiveBody, isLongType ? effectiveSubject : '']}
                       onApply={(fix) => {
@@ -432,7 +445,7 @@ export default function ProposalDecisionCard({
                       >
                         <Pencil className="w-3 h-3" />{editing ? '편집 완료' : '문안 편집'}
                       </button>
-                      {(editedBody != null || editedSubject != null) && !editing && (
+                      {edited && !editing && (
                         <button
                           onClick={(e) => { e.stopPropagation(); setEditedBody(null); setEditedSubject(null); }}
                           className="text-[11px] text-slate-500 hover:text-slate-700 px-1.5 py-1"
@@ -570,8 +583,9 @@ export default function ProposalDecisionCard({
           </div>
         </dl>
       </button>
+      {/* ★ 2026-10-24 배경을 눌러 닫지 않는다(0704 · 고친 문안이 사라지지 않게 · 닫기 = X) */}
       {expanded && createPortal(
-        <div className={MK_MODAL_BACKDROP} onMouseDown={(e) => { if (e.target === e.currentTarget) onToggleExpand(); }}>
+        <div className={MK_MODAL_BACKDROP}>
           <div className={`${MK_MODAL} w-full max-w-[860px] max-h-[92vh] flex flex-col overflow-hidden`} role="dialog" aria-modal="true" aria-label={`${proposal.operatorName || '제안'} 상세`}>
             <div className="flex items-start gap-3 px-5 py-4 border-b border-slate-200">
               <div className="flex-1 min-w-0">

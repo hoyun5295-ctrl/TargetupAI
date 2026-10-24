@@ -114,8 +114,13 @@ describe('R197 · R198 · m107 운영자', () => {
     const o = src('continuous-operator.ts');
     expect(o).not.toContain('created_at >= CURRENT_DATE');
     expect(o).not.toContain("date_trunc('month', NOW())");
-    expect((o.match(/\$\{KST_TODAY_START_SQL\}/g) || []).length).toBe(5);
-    expect((o.match(/\$\{KST_MONTH_START_SQL\}/g) || []).length).toBe(5);
+    // ★ 2026-10-24 결함 5 — 예산 합계 = operatorSpendSql 한 곳(목록 · 회차 · 발송 직전 둘 · 알림 = 그 함수를 부른다)
+    const spend = o.slice(o.indexOf('export function operatorSpendSql('), o.indexOf('export async function listOperators('));
+    expect(spend).toContain("const start = since === 'month' ? KST_MONTH_START_SQL : KST_TODAY_START_SQL;");
+    expect(spend).toContain("AND sp.status IN ('approved', 'auto_executed', 'sent', 'sending')");
+    expect((o.match(/operatorSpendSql\('o', 'month'/g) || []).length).toBe(5);
+    expect((o.match(/operatorSpendSql\('o', 'today'/g) || []).length).toBe(5);
+    expect(o).not.toMatch(/SUM\(cost_estimate\)/);
     expect(src('stats-aggregation.ts')).toContain("export const KST_MONTH_START_SQL = `(date_trunc('month', NOW() AT TIME ZONE 'Asia/Seoul') AT TIME ZONE 'Asia/Seoul')`;");
   });
   it('수동 승인 발송도 실측 수량·비용 기록', () => {

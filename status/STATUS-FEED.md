@@ -131,6 +131,8 @@
 
 ### C14 · 회전 기록(0912)
 - 회전(0912 · 30KB 초과): **링크가드**(0904 배포완료 · 잔여 = KISA 회신 docx) · **자동마케팅**(0805 배포완료 · 잔여 = 문서 §12) 카드 원문 → [archive/TASKS_2026-09.md](archive/TASKS_2026-09.md) · 호출어·SoT 는 그대로(`projects/linkguard/docs/FEATURE-LINKGUARD.md` · [FEATURE-AUTOMARKETING.md](../docs/FEATURE-AUTOMARKETING.md))
+- 회전(1024 · 30KB 초과 · C57 등재): STATUS 줄 원문 그대로 → C27 · **★1011 카드 목록 3열 · 상세 창(여정 · 자동 마케팅 실행 중 · 승인할 제안 · Codex 2R · 실측 통과 · 배포(1011 `9fc4bf88`) · DDL 0)** · 호출어 「여정 3열 / 목록 카드 / 공간 낭비」 → [원문](STATUS-FEED.md#c27)
+- 회전(1024 · 30KB 초과 · C57 등재): STATUS 줄 원문 그대로 → C28 · **★1011 귀국 전 서버 전체 점검(.62 · .65 정상) · 시스템 경보 · 충전 승인 문자 0통 결함 수정 · 배포 `19560965` · 경보 적재 실측 · DDL 0** · 호출어 「귀국 전 서버 점검 / 경보 문자 0통」 → [원문](STATUS-FEED.md#c28)
 
 ## 다음 세션 (예정) 항목 원문
 
@@ -185,6 +187,22 @@
 > 검증 = FE · BE tsc 0 · vitest 595파일 8,371건 · 렌더 108곳 · Codex 적대 1R approve(gpt-6-astra · 지적 0 · 지정 파일 66개 + 분리 전 원본을 읽고 대조)
 > 다음 = 배포(백엔드 reload + 프론트 build:safe · AI 영업 C12 와 한 번에) → 실측(목록 숫자 카드 값 · 상세 창 저장 · 7일 부여 1회)
 
+<a id="c57"></a>
+
+### C57 · ★1024 자동 마케팅 한 줄 · 질문 · 결함 닫기 · Codex 적대 5R approve · DDL 0 · 푸시 대기 · 배포 = Harold 귀국 뒤
+> 호출어 **"자동 마케팅 한 줄 / 자동마케팅 구조체크 / 한 창 두 상태"** → **[설계 · 기록](../docs/2026-10-24-automarketing-oneline-design.md)이 소유**(질문표 §1 · 한 창 §2 · 요청 키 §3 · 결함 처방 §4 · 돈 X1 · X2 §5 · 회의론자 16 §9 · 구현 · Codex · 배포 전 · 뒤 §10)
+> Harold 「한 줄로 더 쉽게 · 부족한 건 AI 가 질문을 통해 완벽하게 채우기」 + 구조체크 결함 16 + 회의 4 → 한 줄 → 모자란 것만 닫힌 질문(①~⑥ · 순수 함수) → 한 창 두 상태(답하기 전 0크레딧) · 돈 두 순간(첫 문안 5 · 시작 200) · 회차 발송 크레딧 = 보내기 직전 엄격 차감 · 나가는 문안 한 함수(검사 = 알림 = 화면 = 발송) · 짝(같은 고객 반복) = 등록 · 편집 · 승인 저장 모두 잠금 판정.
+> 검증 = backend · frontend tsc 0 · vitest 675파일 9,878건 · 렌더 3폭 33화면 넘침 0 · Codex 적대 1R 7 · 2R 2 · 3R 1 · 4R 1(전부 수용) → 5R approve.
+> 다음 = push(tp-push · C56 과 함께) → 귀국 뒤 information_schema 확인 → 배포(백엔드 reload + 프론트 build:safe) → 실측 1건(설계서 §10-4) · 범위 밖 기록 = [B-1024-1](BUGS.md).
+
+<a id="c56"></a>
+
+### C56 · ★1023 여정 결함 0 · 구조체크 17 전부 닫음 · Codex 적대 5R approve · DDL 0 · 푸시 대기 · 배포 = Harold 귀국 뒤
+> 호출어 **"여정 결함 0 / 여정 구조체크 / 만들기 한 길"** → **[설계 · 기록](../docs/2026-10-23-journey-zero-defect-design.md)이 소유**(결함 17 → 처방 §2 · 짝 시험 §3 · Codex §4 · 배포 전 · 뒤 §5 · 안 하는 것 §6)
+> Harold 「언제까지 결함이라고 할건데」 → 뿌리 3(같은 사실 여러 곳 · 기록만으로 넘김 · 프롬프트 모순) = 사실마다 CT 하나 + 건너뛰면 실패하는 짝 시험.
+> 검증 = tsc 0 · vitest 674파일 9,821건 · 렌더 3폭 · 구조체크 재실행 17 닫힘 · build:safe 두 패키지 성공.
+> 다음 = push(tp-push) → 귀국 뒤 배포 전 담당자 영향 SQL → 배포(백엔드 reload + 프론트 build:safe) → 한 줄 실측 1건(§5).
+
 <a id="c55"></a>
 
 ### C55 · ★1022 오류접수 묶음(서수란 · 박성용) · 구조체크 → 뿌리 처방 · Codex 적대 approve · DDL 0 · 푸시 대기
@@ -206,7 +224,7 @@
 
 <a id="c53"></a>
 
-### C53 · ★1022 한줄 프롬프트 CT(두뇌) · 구성 5종 · 재료 판 · 전 채널 배선 · 시연 6회 정정 · Codex 적대 approve · DDL 0 · 배포 완료 1023 · ★1023 완성 배포 대기
+### C53 · ★1022 한줄 프롬프트 CT(두뇌) · 구성 5종 · 재료 판 · 전 채널 배선 · 시연 6회 정정 · Codex 적대 approve · DDL 0 · 배포 완료 1023 · ★1023 완성 배포 완료
 > 호출어 **"한줄 CT / 한줄 두뇌 / 구성 5종 / 재료 판"** → 설계서 = `docs/2026-10-22-oneline-ct-design.md` §11(확정) · §12(구현 기록) · 브리핑 = https://claude.ai/artifact/VJ24x9RPDHNo3dAgVFNh7k
 > ① 단가 = 판단 2 · 판단 뒤 첫 결과물 13(합 15) · 판단 없이 15 · 채널 추가 · 다시 만들기 3 · 입구 무관. 판단 몫 판정 = `aiLineBasePaid`(문자) · `lineJudgeCovered`(콘텐츠) · 두 입구 한 줄 잠금 = `lineFpLockKey`.
 > ② 코드 = `utils/line-compositions.ts`(구성 5종 · 채널 칸 `compositionChannelSlots`) · `utils/one-line-ct/`(판단 · 요리 · 미리보기 · 목록) · `components/zone/LineCompositionBoard.tsx` · `LineStepsModal`(재료 판) · 플래너(`?set=compositions`).
@@ -216,7 +234,7 @@
 > ⑥ 남은 = Harold 판정(시연 5장) · 실과금 회사 1건 원장(판단 2 + 완성 13) · 추가 과제 = 정확도 덜 중요한 자리 opus → sonnet 후보 검토 · Codex 범위 밖 `line-compositions.ts:414`(사진 반 칸 · 시연 기간 어긋남 = ⑦ 에서 닫음).
 > 검증: backend vitest 667파일 9,733건 · tsc 0(양쪽) · build:safe 양쪽 · Codex 적대 CT 4R · 시연 정정 2R · 2R · 2R · 사진 순서 4R · 대체 문구 1R · 시험 날짜 1R approve.
 > ⑦ ★1023 CT 완성(Harold 「한 번에 완벽한 CT · 비어 있는 곳 배선까지」 · 승인 = 설계서 `docs/2026-10-23-oneline-ct-complete-design.md` · §10 구현 기록) · 새 CT = `one-line-ct/listen.ts`(듣기 한 곳) · `order.ts`(세 입구 돈 순서 한 곳 · 멱등 payload · 잠금 키 옛 값 그대로) · `recurring.ts`(여정 · 자동발송 반복 발송 점검) · 진단 한 곳 `diagnoseComposition` · 미리보기 = 만들기 본문 · 옛 템플릿 갈래 삭제(옛 id = 400 LINE_TEMPLATE_RETIRED) · 사진 묶음 반 칸 0(DM · 이메일) · 상대 마감 = 허용 목록 · 자동발송 혜택 근거 · 플래너 초안(B2)은 근거 없는 상품 특징이라 철회(추가 과제 = 몰 상품 설명 읽기).
-> 검증(1023): backend vitest 670파일 9,779건 · tsc 0(양쪽) · build:safe 양쪽 · 렌더 검사 20장(구성 5 × 풍부 · 최소 × DM · 이메일) · Codex 적대 6R approve(R1 3건 · R2 · R3 같은 부류 → 허용 목록 구조 처방 · R4 · R5 같은 뿌리 → 유니코드 경계) · DDL 0 · 배포 대기(백엔드 · 프론트 같은 배포) · R2 「다음 주문 줄 마감 살리기」 불수용(안전 쪽 비움 · 칩 한 번).
+> 검증(1023): backend vitest 670파일 9,779건 · tsc 0(양쪽) · build:safe 양쪽 · 렌더 검사 20장(구성 5 × 풍부 · 최소 × DM · 이메일) · Codex 적대 6R approve(R1 3건 · R2 · R3 같은 부류 → 허용 목록 구조 처방 · R4 · R5 같은 뿌리 → 유니코드 경계) · DDL 0 · 배포 완료(Harold · 백엔드 · 프론트 같은 배포) · C2 영향 = 켜진 AI 자동발송 0건(Harold SQL 1023) · R2 「다음 주문 줄 마감 살리기」 불수용(안전 쪽 비움 · 칩 한 번).
 
 <a id="c52"></a>
 

@@ -114,10 +114,15 @@ describe('배선', () => {
   });
 
   it('발송은 사용자가 고르지 않았으면 검사 통과 안을 보낸다(검사한 문안 = 나가는 문안)', () => {
+    // ★ 2026-10-24 보낼 안 = 한 함수(proposalSendIndex) — 사람이 고른 안 → 통과 안 → 저장된 추천 안 → 0(발송 자리 무작위 표집 0)
     const op = back('utils/continuous-operator.ts');
     const fn = op.slice(op.indexOf('async function dispatchProposalSend('));
-    expect(fn).toContain('spamCheckPassedIndex(pj)');
-    expect(fn.indexOf('spamCheckPassedIndex(pj)')).toBeLessThan(fn.indexOf('const userSel ='));
+    expect(fn).toContain('const chosenIndex = proposalSendIndex(pj);');
+    expect(fn.slice(0, 20000)).not.toContain('recommendVariantForProposal(');
+    const fc = back('utils/operator-final-copy.ts');
+    const idx = fc.slice(fc.indexOf('export function proposalSendIndex('), fc.indexOf('export function operatorFinalCopyAt('));
+    expect(idx.indexOf('pj?.userSelection?.variantIndex')).toBeLessThan(idx.indexOf('spamCheckPassedIndex(pj)'));
+    expect(idx.indexOf('spamCheckPassedIndex(pj)')).toBeLessThan(idx.indexOf('pj?.recommendedIndex'));
   });
 
   it('기본 동작(다른 호출처 5곳)은 그대로다 — 옵션이 없으면 순서 함수를 타지 않는다', () => {
@@ -148,7 +153,7 @@ describe('화면', () => {
  */
 describe('Codex 1R — 검사 결과 저장', () => {
   const op = back('utils/continuous-operator.ts');
-  const step9 = op.slice(op.indexOf('// 제안에 안별 결과와 통과 안 번호를 남긴다'), op.indexOf('// (검증 7일 게이팅 제거'));
+  const step9 = op.slice(op.indexOf('// 제안에 안별 결과와 통과 안 번호 · 통과 지문을 남긴다'), op.indexOf('// (검증 7일 게이팅 제거'));
 
   it('DB 의 지금 값에 검사 칸만 붙인다(제안 JSON 전체를 덮지 않는다)', () => {
     expect(step9).toContain("'{spamCheck}', $2::jsonb, true)");
@@ -164,7 +169,8 @@ describe('Codex 1R — 검사 결과 저장', () => {
   it('담당자 검토로 내리는 것·정지·통지는 사람이 손대지 않은 제안일 때만 · 바깥 오류 처리도 같다', () => {
     const downs = op.match(/SET status = 'admin_review', auto_executed = false, scheduled_send_at = NULL[^`]*WHERE id = \$1::uuid AND status IN \('pending', 'scheduled'\) AND reviewed_at IS NULL/g) || [];
     expect(downs.length).toBe(2);
-    expect(step9).toContain('if (downgraded.rows.length > 0) {');
+    expect(step9).toContain('if (downgraded.rows.length > 0 && chosenFirst != null) {');
+    expect(step9).toContain('} else if (downgraded.rows.length > 0) {');
   });
 
   it('준비 알림은 아직 자동 발송 예정(scheduled · 사람 손 안 탐)일 때만', () => {

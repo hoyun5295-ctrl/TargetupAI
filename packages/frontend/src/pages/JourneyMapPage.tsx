@@ -69,6 +69,8 @@ export default function JourneyMapPage() {
   const [search, setSearch] = useState('');
   const [gapOpen, setGapOpen] = useState(false);
   const [interviewOpen, setInterviewOpen] = useState(false);
+  // ★ 2026-10-23 한 줄 여정 한 길 — 지도 명령 줄 = 문장으로 만들기 창(그 문장을 바로 읽는다)
+  const [interviewSentence, setInterviewSentence] = useState('');
   const [productOpen, setProductOpen] = useState(false);
   const [batch, setBatch] = useState<{ open: boolean; preselect: string[] }>({ open: false, preselect: [] });
   // ★ V.3 §9-1 — 작업 화면 = 주소(?journey=&step=) · 모두 켜기 창의 「문안 고치기」로 열었으면 닫을 때 그 창으로 돌아간다.
@@ -279,8 +281,8 @@ export default function JourneyMapPage() {
         line: {
           value: mapLine,
           onChange: setMapLine,
-          // 목록 탭과 같은 경로: 목표 문장을 여정 목록으로 넘기면 거기서 바로 생성한다(?objective= · JourneysPage 자동 생성)
-          onSubmit: () => navigate(`/ai-journeys?objective=${encodeURIComponent(mapLine.trim())}`),
+          // ★ 2026-10-23 한 줄 여정 한 길 — 목록과 같은 창(질문표 · 서버 초안)을 지도 위에서 바로 연다
+          onSubmit: () => { const v = mapLine.trim(); if (v.length < 4) return; setInterviewSentence(v); setInterviewOpen(true); },
           placeholder: oneLine.placeholder,
           verb: oneLine.verb,
           icon: Sparkles,
@@ -290,7 +292,7 @@ export default function JourneyMapPage() {
       start={{
         items: [
           { icon: Sparkles, title: 'AI 진단', desc: gapCount > 0 ? `고객 구매 리듬으로 여정을 추천하고 손볼 곳 ${gapCount}곳을 알려 줘요` : '고객 구매 리듬을 재서 가입부터 재구매까지 여정을 추천해요', tint: 'from-fuchsia-400 to-purple-500', featured: true, badge: gapCount > 0 ? `${gapCount}곳` : undefined, onClick: () => setGapOpen(true) },
-          { icon: MessageSquarePlus, title: '문장으로 만들기', desc: '하고 싶은 것을 문장으로 쓰면 지도에 놓아요', tint: 'from-sky-400 to-indigo-500', onClick: () => setInterviewOpen(true) },
+          { icon: MessageSquarePlus, title: '문장으로 만들기', desc: '하고 싶은 것을 문장으로 쓰면 지도에 놓아요', tint: 'from-sky-400 to-indigo-500', onClick: () => { setInterviewSentence(''); setInterviewOpen(true); } },
         ],
       }}
       blocks={error ? [{ text: error }] : []}
@@ -380,6 +382,7 @@ export default function JourneyMapPage() {
       />
       <InterviewModal
         open={interviewOpen}
+        initialSentence={interviewSentence || undefined}
         onClose={() => setInterviewOpen(false)}
         onFix={handleFix}
         onFocusJourney={focusJourney}

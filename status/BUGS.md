@@ -55,6 +55,13 @@
 
 ## 2) 활성 버그
 
+### 🔵 B-1024-1 1024 자동 마케팅 한 줄 · 결함 닫기에서 짚은 범위 밖(기록만 · 착수 판단 = Harold님) · 2026-10-24
+- N7 공용 창 껍데기 `JourneyModalShell` 배경 클릭 닫힘 — disableDismiss 를 안 넘기는 소비처 13곳(늘 열림 5: 진단 초대 · 다시 켜기 · 모의 실행 · 플래너 행사 · 템플릿 크게 보기 / 바쁠 때만 막음 8: 켜기 확인 · 빈칸 찾기 · 일괄 켜기 · 붙이기 · 문장으로 만들기 · 작업 화면 · 진단 · 상품 여정). 예외 계약 둘 = 진단 초대(설계서 §5-2 「백드롭/Esc 허용」) · 템플릿 크게 보기(LESSONS_FRONTEND 「라이트박스 제외」). 1024 는 자동 마케팅 창만 disableDismiss(회의론자 §9-1 · 여정 C56 과 같은 날 배포라 13곳 회귀를 떠안지 않는다).
+- `StatusBadge` 글자 10px(렌더 검사 11px 미만 · 공용 부품 · 제안 카드 · 목록 전부).
+- 잔액 읽기가 화면마다 따로(`CreditConfirmModal` · `LineStepsModal` · `MakeSendModal` 등이 `/api/companies/my-credit` 를 각자) — 1024 새 훅 `hooks/useCreditBalance.ts` 로 모으기 별건.
+- 승인 대기(pending) 다건 허용은 기존 계약(`operator-proposal-dedup.test.ts`) — 주간 승인이 예약 회차와 공존할 수 있다(FEATURE-AUTOMARKETING §11 그대로).
+- 한 줄 질문 ② 「누구에게」에 칸 조건 고르기 없음(기준 값 입력이 함께 있어야 해 한 번 누름으로 닫히지 않는다 · 설계서 주재자 판정 11) · recurring.ts 의 자동 마케팅 입구 미추가(질문표 notes 가 같은 안내를 한다).
+
 ### 🟠 B-1022-1 이메일 대행 승인 뒤 취소하면 고객 발송결과에 「직접발송(실패)」 (★1022 수정 · Codex 적대 3R approve · 푸시 대기(pre-push = 다른 세션 시험) · DDL 0) · 2026-10-22 서수란 접수 `cmvj5rfsh01ikjn4eh5d3wy4u`
 - 원인(실측) = 예약 대행 캠페인 scheduled → 대행 취소 queueOnly(상태 유지) → cleanupScheduledCampaigns 가 큐 0건을 failed 로. 처방 = `utils/cancel-settle.ts` confirmQueueOnlyCancel(막은 예약 = cancelled · 상태만). 남음 = 배포 뒤 옛 failed 줄 바로잡기 · 실측. 원문 = STATUS-FEED C55.
 
@@ -120,7 +127,7 @@
 - 두 성격(마케팅 · 안부)이 다 있는 회사의 안부 · 알림 가이드라인(`memory_key='notice'`)은 AI 메모리 화면에서 직접 정정할 수 없다(재추출로만 갱신 · 카드 머리에 한 줄 안내).
 - AI 한줄로 칼럼 단계의 회사 칼럼 값 = `custom_fields` 원문 그대로 보여 준다(발송 치환은 `field_type` 에 따라 숫자 모양을 바꿀 수 있어 미리보기 · 발송 표기가 다를 수 있음).
 
-### 🔵 B-1020-3 1020 여정 V.3 · 뒤에 붙이기에서 짚은 범위 밖(기록만 · 착수 판단 = Harold님) · 2026-10-20
+### 🔵 B-1020-3 1020 여정 V.3 · 뒤에 붙이기에서 짚은 범위 밖 · 2026-10-20 · **★1023 7건 전부 닫음(여정 결함 0 · [기록](../docs/2026-10-23-journey-zero-defect-design.md) §2 8 · 9 · 10 · 13 · 15 · 16 · 4)**
 - `frontend/src/components/journey/JourneyActivationConfirmModal.tsx` 점검 실패 「다시 만들기」 = 토스트에 내부 이름(JourneysPage) 노출 + 듣는 곳 없는 이벤트(`journey:expand-step`). 작업 화면 그 칸으로 여는 것이 맞다.
 - `JourneyDetailPage` · `JourneyStatsPage` 가 상세 응답을 `detail.journey` 로 읽는다(실제 응답 = `journey` · `steps`) → 여정 이름이 비어 보일 수 있다.
 - `backend/src/utils/__tests__/ai-credit-calc.verify.ts` 「base-150 → 140」 줄이 0925 C-08 이후 갱신 안 됨(V.3 전부터 · 설계서 §17-4).

@@ -18,11 +18,16 @@ describe('1. 한 줄 = 미리보기 · 문안 직접 쓰기', () => {
     const fn = page.slice(page.indexOf('const handleNaturalSubmit = '), page.indexOf('const requestPreview = '));
     expect(fn).toContain("requestPreview({ ...SMART_DEFAULTS, name: goal.slice(0, 40), objective: goal, copyStyle }, ownCopy ? 'fixed' : 'ai');");
     expect(fn).not.toContain('setPendingConfig');
-    expect(page).toContain("body: JSON.stringify({ ...serialize(config), copy_mode: copyMode, infer_schedule: true }),");
-    // 오늘의 추천 [시작]도 같은 승인 창(옛: 매일 기본값으로 바로 등록)
+    expect(page).toContain("...(o.explicit ? {} : { infer_schedule: true }),");
+    expect(page).toContain('request_key: previewKeys.current.keyFor(keyName(config, copyMode, o)),');
+    // 오늘의 추천 [시작]도 같은 승인 창(옛: 매일 기본값으로 바로 등록) · ★ 1024 AI 가 쓴 목표 = 읽은 조각 취급
     const brief = page.slice(page.indexOf('const handleBriefStart = '), page.indexOf('const handleBriefStart = ') + 1500);
-    expect(brief).toContain("requestPreview({ ...SMART_DEFAULTS, name: rec.title.slice(0, 40), objective: rec.objective }, 'ai');");
+    expect(brief).toContain("requestPreview({ ...SMART_DEFAULTS, name: rec.title.slice(0, 40), objective: rec.objective }, 'ai', { ai: true });");
     expect(brief).not.toContain('setPendingConfig');
+    // ★ 1024 세부설정 새 시작도 같은 창(옛: 200 확인 창 → 바로 등록) · 화면의 POST /operator/continuous = 0(캘린더 전용)
+    expect(page).toContain("void requestPreview(cfg, 'ai', { explicit: true });");
+    expect(page).not.toMatch(/fetch\('\/api\/ai\/operator\/continuous', \{\s*method: 'POST'/);
+    expect(page).not.toContain('CreditConfirmModal');
   });
   it('[문안 직접 쓰기] = 0크레딧 · 끄면 제안 받기 5크레딧(서버 단가 미러)', () => {
     expect(page).toContain("credit: ownCopy ? '0크레딧' : `${AI_GENERATE_COSTS['ai-operator-propose']}크레딧`,");
@@ -35,12 +40,16 @@ describe('1. 한 줄 = 미리보기 · 문안 직접 쓰기', () => {
 });
 
 describe('2. 창 편집 · 시작 · 다음 승인', () => {
-  it('처음 시작 = 서버 보관본 편집 · 시작 = 200 확인 창 → preview_id 하나', () => {
+  it('처음 시작 = 서버 보관본 편집 · 시작 = 창 바닥 한 곳(금액 · 잔액) → preview_id · 판 · 본 탭', () => {
     expect(page).toContain("fetch('/api/ai/operator/continuous/preview/update', {");
     expect(page).toContain('body: JSON.stringify({ preview_id: cur.data.previewId, revision: cur.data.revision, ...patch }),');
-    expect(page).toContain("onStart={() => (preview?.mode === 'renewal' ? approveRenewal() : setStartConfirm(true))}");
-    expect(page).toMatch(/<CreditConfirmModal\s+open=\{startConfirm\}\s+source="continuous-operator"/);
-    expect(page).toContain('body: JSON.stringify({ preview_id: id, revision: preview?.data?.revision }),');
+    expect(page).toContain("onStart={(vi) => (preview?.mode === 'renewal' ? approveRenewal() : startFromPreview(vi))}");
+    expect(page).toContain('body: JSON.stringify({ preview_id: id, revision: preview?.data?.revision, variant_index: variantIndex }),');
+    // 결과 모름 = 새로 시작하지 않고 확인만
+    expect(page).toContain('setStartUnknown(true);');
+    // 확인 = 처음 시작에 보낸 안 번호 그대로(Codex 1R · 고른 안을 버리지 않는다)
+    expect(page).toContain('startVariant.current = variantIndex;');
+    expect(page).toContain('onCheckStart={() => startFromPreview(startVariant.current)}');
   });
   it('다음 승인 = 승인 창(고른 칸으로 다시 세기) · 승인 = approve-window(차감 0 · 확인 창 없음)', () => {
     expect(page).toContain('fetch(`/api/ai/operator/continuous/${op.id}/approval-preview`, {');
@@ -62,12 +71,17 @@ describe('3. 승인 창 — 목업 그대로 · 시작은 서버 판정', () => 
     expect(modal).toContain('지금 승인하시면 <b>{dayLabel(d.window.startAt)}부터 {dayLabel(d.window.until)}까지 7일 동안</b>');
     expect(modal).toContain('라 이 승인은 다음 회차 1회분이고, 그다음 회차 전에 다시 여쭤요.');
   });
-  it('시작 버튼 = 서버 ready · 고친 값이 적용되기 전엔 잠김 · 막힘이면 버튼 없음', () => {
-    expect(modal).toContain('const canStart = !!d && d.ready && !busy && !starting && !thresholdDirty && !fixedDirty && benefitDraft == null;');
-    expect(modal).toContain("{d && d.kind !== 'blocked' && (\n                <button type=\"button\" className={MK_BTN_AI} onClick={onStart} disabled={!canStart}>");
+  it('시작 버튼 = 서버 ready · 고친 값이 적용되기 전엔 잠김 · 막힘이면 버튼 없음 · 유료 = 앰버 한 상수', () => {
+    expect(modal).toContain('const canStart = !!d && d.ready && !busy && !starting && !thresholdDirty && !fixedDirty && benefitDraft == null && !whenOpen && !viaOpen;');
+    expect(modal).toContain("{d && d.kind !== 'blocked' && (startUnknown ? (");
+    expect(modal).toContain("className={mode === 'new' ? MK_BTN_PAY : MK_BTN_PRIMARY} onClick={() => onStart(messages.length > 0 ? Number(tab) : null)} disabled={!canStart}>");
+    // ★ 1024 창 = 공용 껍데기 · 배경 · Esc 닫힘 0 · 창 자체 Esc 0
+    expect(modal).toContain('disableDismiss>');
+    expect(modal).not.toContain("addEventListener('keydown'");
+    expect(modal).not.toContain('세부 설정에서 시작');
   });
   it('막힘 = 사유 그대로 · 넓히지 않는다는 말 · 짝 축 권하기 · 차감 0', () => {
-    expect(modal).toContain('이 목표로는 시작할 수 없어요');
+    expect(modal).toContain('이대로는 시작할 수 없어요');
     expect(modal).toContain('대상을 임의로 넓혀서 보내지 않아요.');
     expect(modal).toContain('onClick={() => onAxis(d.audience.suggestKey!)}');
   });

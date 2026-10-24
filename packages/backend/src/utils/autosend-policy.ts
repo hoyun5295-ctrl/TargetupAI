@@ -683,6 +683,35 @@ export function countEmptyRounds(log: Array<{ at: string; outcome: string }>, si
  *     「매달 생일자에게 생일인 날」의 「매달」은 주기가 아니라 「달마다 그달 생일자도」라는 말이다.
  *   주기 말이 없으면 null(호출부가 매월 · 오늘 날짜로 둔다).
  */
+/** (순수) 한 줄의 시각 말(HH:MM) — 「3시간 특가」는 시각이 아니다 · 없으면 null(★ 1024 주기 말 없는 한 줄도 시각은 읽는다) */
+export function parseTimeFromText(text: string): string | null {
+  const tm = String(text || '').match(/(오전|오후)?\s*(\d{1,2})\s*시(?!간)(?:\s*(\d{1,2})\s*분|\s*반)?/);
+  if (!tm) return null;
+  let h = parseInt(tm[2], 10);
+  const m = tm[3] ? parseInt(tm[3], 10) : (/반/.test(tm[0]) ? 30 : 0);
+  if (tm[1] === '오후' && h < 12) h += 12;
+  return h >= 0 && h <= 23 && m >= 0 && m <= 59 ? `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}` : null;
+}
+
+/**
+ * (순수) 발송 희망 시각을 발송 가능 시간 안으로 옮긴다(★ 1024 한 줄 · 물어도 답이 정해져 있어 옮기고 알린다).
+ *   이른 시각 = 시작 정각 · 늦은 시각 = 끝 앞 정각. 안이면 그대로. moved = 옮겼는가.
+ */
+export function clampToSendableTime(hhmm: string, startHour: number, endHour: number): { time: string; moved: boolean } {
+  const [hRaw, mRaw] = String(hhmm || '').split(':');
+  const h = parseInt(hRaw, 10);
+  if (!Number.isFinite(h)) return { time: hhmm, moved: false };
+  if (h >= startHour && h < endHour) return { time: `${String(h).padStart(2, '0')}:${String(parseInt(mRaw, 10) || 0).padStart(2, '0')}`, moved: false };
+  return { time: `${String(h < startHour ? startHour : endHour - 1).padStart(2, '0')}:00`, moved: true };
+}
+
+/** (순수) 「오전 9시 · 오후 2시 30분」 */
+export function koreanTimeLabel(hhmm: string): string {
+  const [h, m] = String(hhmm || '09:00').split(':').map((v) => parseInt(v, 10) || 0);
+  const h12 = h % 12 === 0 ? 12 : h % 12;
+  return `${h < 12 ? '오전' : '오후'} ${h12}시${m ? ` ${m}분` : ''}`;
+}
+
 export function parseScheduleFromText(text: string): {
   schedule: OperatorScheduleKind;
   scheduleDayOfWeek: number | null;
@@ -690,14 +719,7 @@ export function parseScheduleFromText(text: string): {
   scheduleTime: string | null;
 } | null {
   const t = String(text || '');
-  let scheduleTime: string | null = null;
-  const tm = t.match(/(오전|오후)?\s*(\d{1,2})\s*시(?!간)(?:\s*(\d{1,2})\s*분|\s*반)?/);   // 「3시간 특가」는 시각이 아니다
-  if (tm) {
-    let h = parseInt(tm[2], 10);
-    const m = tm[3] ? parseInt(tm[3], 10) : (/반/.test(tm[0]) ? 30 : 0);
-    if (tm[1] === '오후' && h < 12) h += 12;
-    if (h >= 0 && h <= 23 && m >= 0 && m <= 59) scheduleTime = `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
-  }
+  const scheduleTime = parseTimeFromText(t);
   if (/생일/.test(t) && /(당일|생일\s*인\s*날|생일날|생일\s*당일|생일\s*에\s*맞춰)/.test(t)) {
     return { schedule: 'daily', scheduleDayOfWeek: null, scheduleDayOfMonth: null, scheduleTime };
   }

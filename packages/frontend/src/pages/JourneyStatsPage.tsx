@@ -123,7 +123,7 @@ export default function JourneyStatsPage() {
         const journeyData = await journeyRes.json();
         if (statsData.success) setStats(statsData.stats);
         else setError(statsData.error || '통계 조회 실패');
-        if (journeyData.success) setJourneyName(journeyData.detail?.journey?.name || '');
+        if (journeyData.success) setJourneyName(journeyData.journey?.name || '');   // ★ 2026-10-23 응답 = { journey, steps }(옛: detail.journey)
       } catch {
         setError('네트워크 오류');
       } finally {

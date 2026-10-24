@@ -1,14 +1,15 @@
 // ============================================================
 // 자동 마케팅 [제안 받기] = 미리보기 · 승인 창 (★ 2026-10-05 · 설계서 docs/2026-10-05-automarketing-preview-design.md
-//   · docs/2026-10-05-automarketing-trust-design.md)
-//   미리보기 = 등록 없이 첫 회차와 같은 계산 · 대상은 대상 번역 module 이 계약으로 고정 · AI 문안 = 허브와 같은 키(5 · 대상 0명 0) ·
-//   직접 쓴 문안 = AI 0(0크레딧). 창 편집(칸 · 기준 · 문안 분기 · 혜택)은 서버 보관본에 반영한다.
-//   [이번 주 승인하고 시작] = 보관한 입력 그대로 등록(200 · 기존 멱등) + 승인 기간 + 본 제안 = 첫 회차.
+//   · docs/2026-10-05-automarketing-trust-design.md · ★ 2026-10-24 한 줄 · 질문 · 키 docs/2026-10-24-automarketing-oneline-design.md)
+//   미리보기 = 등록 없이 첫 회차와 같은 계산 · 대상은 대상 번역 module 이 계약으로 고정 · AI 문안 5(대상 0명 0) · 직접 쓴 문안 0.
+//   ★ 1024 한 줄 → 모자란 것만 묻는다(질문표 = automarketing-interview · 순수). 답하기 전에는 0크레딧.
+//   돈은 두 순간뿐 — [이대로 첫 문안 보기 · 5] · [이 대상으로 다시 만들기 · 5](요청 키 = 화면 키 + 문안 입력 지문) · [시작 · 200](키 = 미리보기 id = 운영자 행 id).
+//   창 편집(칸 · 기준 · 주기 · 번호 · 직접 쓴 문안)은 문안을 만들지 않고 다시 센다.
 //   실행 중 자동 마케팅의 [다음 승인] · [조건 확인]도 같은 계산(AI 문안 없이)을 쓴다.
 // ============================================================
-import { randomUUID } from 'crypto';
+import { createHash, randomUUID } from 'crypto';
 import { query } from '../config/database';
-import { getCompanyCosts } from '../config/defaults';
+import { getCompanyCosts, SEND_HOURS } from '../config/defaults';
 import { extractVarCatalog, filterVarCatalogByData } from '../services/ai';
 import { orchestrate } from '../services/ai-orchestrator';
 import { InsufficientCreditError } from './ai-credit';
@@ -20,13 +21,24 @@ import {
 } from './audience-translate';
 import {
   CreateOperatorInput, ContinuousOperator, OperatorProposal, OperatorCompanyContext,
-  createOperator, generateProposalForOperator, validateOperatorInput, operatorContextFields,
+  registerOperator, generateProposalForOperator, validateOperatorInput, operatorContextFields,
   explainEmptyRound, findOpenProposalForOperator,
   loadOperatorCompanyContext, buildOperatorOrchestrateContext,
-  approveOperatorWindow, normalizeFixedCopyInput, normalizeOperatorBenefit, mapRowToOperator, operatorContract, type FixedCopy,
-  OperatorCallbackError,
+  approveOperatorWindow, normalizeFixedCopyInput, normalizeOperatorBenefit, normalizeOperatorChannel, mapRowToOperator, operatorContract, type FixedCopy,
+  OperatorCallbackError, OperatorRegisterConflictError, OperatorChargeError, OperatorPairingError, OperatorScheduleChangedError, operatorScheduleShape, type OperatorScheduleShape,
+  checkOperatorCallback, listOperatorCallbackChoices, finalCopiesOf,
 } from './continuous-operator';
-import { computeApprovalWindow, countEmptyRounds, parseScheduleFromText, approvalSummarySince } from './autosend-policy';
+import type { OperatorFinalCopy } from './operator-final-copy';
+import {
+  computeApprovalWindow, countEmptyRounds, parseScheduleFromText, parseTimeFromText, clampToSendableTime, koreanTimeLabel, approvalSummarySince,
+} from './autosend-policy';
+import { buildOperatorQuestions, decideOperatorAnswers, datedTerms, type OperatorQuestion } from './automarketing-interview';
+import { listenLine } from './one-line-ct/listen';
+import { lineBenefitFragments } from './one-line-facts';
+import { listSegmentAvailability } from './operator-audience';
+import { getOpt080Number } from './messageUtils';
+import { isDemoCompany } from './demo-company';
+import { isUuid } from './normalize';
 
 /** 요청 본문 → 등록 입력(축 제외 · POST /operator/continuous 에서 그대로 옮김 · 등록 · 미리보기 공용) */
 export function createOperatorInputFromBody(companyId: string, userId: string, body: any): Omit<CreateOperatorInput, 'segmentKey' | 'segmentParams'> {
@@ -84,6 +96,11 @@ export function operatorSaveErrorResponse(err: any): { status: number; body: Rec
   if (err instanceof InsufficientCreditError) {
     return { status: 402, body: { success: false, error: '자동 마케팅 시작에 필요한 크레딧이 부족합니다. 크레딧을 충전해 주세요.', code: 'INSUFFICIENT_CREDIT' } };
   }
+  // ★ 2026-10-24 등록 한 트랜잭션(registerOperator) — 같은 키가 남의 행 = 409 · 차감 확인 실패 = 503(등록도 없다)
+  if (err instanceof OperatorRegisterConflictError) return { status: 409, body: { success: false, error: err.message, code: err.code } };
+  if (err instanceof OperatorChargeError) return { status: 503, body: { success: false, error: err.message, code: err.code } };
+  if (err instanceof OperatorPairingError) return { status: 400, body: { success: false, error: err.message, code: err.code } };
+  if (err instanceof OperatorScheduleChangedError) return { status: 409, body: { success: false, error: err.message, code: err.code } };
   const msg = err?.message || '';
   if (err?.code === 'DB_MIGRATION_PENDING' || err?.code === '42P01') {
     return { status: 503, body: { success: false, error: '지난번과 달라진 점을 찾는 조건은 준비 중입니다. 다른 조건으로 저장해 주세요.', code: 'DB_MIGRATION_PENDING' } };
@@ -132,8 +149,8 @@ interface PreviewEntry {
   translation: AudienceTranslation;
   /** AI 문안 결과 = 첫 회차. null = 직접 쓴 문안 · 변화 축 · 아직 없음 */
   result: any | null;
-  /** 결과를 만들 때의 핵심 혜택 — 바뀌면 결과를 버린다(혜택은 문안에 녹아 있다) */
-  resultBenefit: string | null;
+  /** 결과를 만들 때의 문안 입력 지문 — 지금 지문과 다르면 결과는 묵은 것(시작 잠금 · [이 대상으로 다시 만들기]) */
+  resultPrint: string | null;
   appliedSegment: { key: string; label: string } | null;
   createdAt: number;
   /** 실행 중 자동 마케팅의 승인 창이면 그 운영자(문안은 회차가 만든다 · 시작이 아니라 승인) */
@@ -142,9 +159,32 @@ interface PreviewEntry {
   rev: number;
   /** 화면에 마지막으로 보여 준 승인 기간 시작 — 발송 시각을 넘겨 기간이 바뀌면 판을 올리고 다시 확인받는다(Codex 3R) */
   shownStart: string | null;
+  /** ★ 1024 화면 키(한 줄마다 하나) — 5 의 원장 키 재료 · 같은 키 /preview = 이 보관본 그대로(AI 0 · 차감 0) */
+  screenKey: string | null;
+  /** ★ 1024 사람이 쓴 주기인가(한 줄의 주기 말 · 세부 설정) — ③ 짝 질문은 이때만 */
+  scheduleWritten: boolean;
+  /** ★ 1024 ④ 혜택 질문(답하면 null) */
+  benefitAsk: { reason: 'missing' | 'mixed'; prefill: string | null } | null;
+  /** ★ 1024 지금 질문표(서버가 만든 것 · 답은 이것으로만 검증) */
+  questions: OperatorQuestion[];
+  /** ★ 1024 옮기고 알린 것(시각 · 한 줄에서 읽은 혜택) — 결과 문장 아래 한 줄씩 */
+  notes: string[];
+  /** ★ 1024 이 보관본을 만든 요청 본문의 지문 — 같은 화면 키라도 본문이 다르면 재사용하지 않는다(Codex 1R) */
+  bodyPrint: string;
+  /** ★ 1024 이 창에서 ③ · ② 답으로 주기를 「매월로」 바꿨다 — 승인 창 저장이 이때만 주기를 넘긴다(그 밖 = 지금 저장된 주기 그대로 · 옛 창 값으로 덮지 않는다) */
+  scheduleAnswered?: true;
+  /** ★ 1024 승인 창을 열 때 운영자의 일정 — 승인 저장이 잠근 행과 비교한다(창을 연 뒤 바뀌었으면 409) */
+  scheduleSeen?: OperatorScheduleShape;
 }
 const previews = new Map<string, PreviewEntry>();
+/** ★ 1024 화면 키 → 미리보기 id(같은 키 재전송 = 같은 보관본 · 회의론자 §9-5b) */
+const previewByKey = new Map<string, string>();
 const inflight = new Set<string>();
+const keyRef = (companyId: string, userId: string, screenKey: string) => `${companyId}:${userId}:${screenKey}`;
+/** 화면 키 모양(영숫자 · 하이픈 8~64자) — 아니면 키 없음(옛 화면 = 지금 그대로) */
+function screenKeyOf(raw: unknown): string | null {
+  return typeof raw === 'string' && /^[A-Za-z0-9-]{8,64}$/.test(raw) ? raw : null;
+}
 
 export class PreviewBusyError extends Error {}
 export class PreviewInputError extends Error {}
@@ -182,12 +222,22 @@ function confirmedWindow(out: PreviewOutcome): { startAt: Date; until: Date; rou
   return { startAt: new Date(out.window.startAt), until: new Date(out.window.until), rounds: out.window.rounds.map((d) => new Date(d)) };
 }
 
+function dropPreview(id: string): void {
+  const e = previews.get(id);
+  if (e?.screenKey) {
+    const k = keyRef(e.companyId, e.userId, e.screenKey);
+    if (previewByKey.get(k) === id) previewByKey.delete(k);
+  }
+  previews.delete(id);
+}
+
 function putPreview(entry: PreviewEntry): string {
   const now = Date.now();
-  for (const [id, e] of previews) if (now - e.createdAt > PREVIEW_TTL_MS) previews.delete(id);
-  while (previews.size >= PREVIEW_MAX) previews.delete(previews.keys().next().value as string);
+  for (const [id, e] of previews) if (now - e.createdAt > PREVIEW_TTL_MS) dropPreview(id);
+  while (previews.size >= PREVIEW_MAX) dropPreview(previews.keys().next().value as string);
   const id = randomUUID();
   previews.set(id, entry);
+  if (entry.screenKey) previewByKey.set(keyRef(entry.companyId, entry.userId, entry.screenKey), id);
   return id;
 }
 
@@ -195,7 +245,7 @@ function putPreview(entry: PreviewEntry): string {
 export function takePreview(id: string, companyId: string, userId: string): PreviewEntry | null {
   const e = previews.get(id);
   if (!e || e.companyId !== companyId || e.userId !== userId) return null;
-  previews.delete(id);
+  dropPreview(id);
   return Date.now() - e.createdAt > PREVIEW_TTL_MS ? null : e;
 }
 
@@ -203,7 +253,7 @@ export function takePreview(id: string, companyId: string, userId: string): Prev
 function peekPreview(id: string, companyId: string, userId: string): PreviewEntry | null {
   const e = previews.get(id);
   if (!e || e.companyId !== companyId || e.userId !== userId) return null;
-  if (Date.now() - e.createdAt > PREVIEW_TTL_MS) { previews.delete(id); return null; }
+  if (Date.now() - e.createdAt > PREVIEW_TTL_MS) { dropPreview(id); return null; }
   return e;
 }
 
@@ -219,9 +269,23 @@ async function withLock<T>(companyId: string, userId: string, fn: () => Promise<
 export interface PreviewOutcome {
   /**
    * proposal = 시작 가능(AI 문안 · 직접 쓴 문안) · baseline = 변화 축(첫 회차는 기준만) · zero = 지금 대상 0명(시작 불가 · 차감 0)
-   * needs_choice = 칸을 골라야 한다 · blocked = 막힘(데이터 없음 · 조건 없음 · 주기 짝)
+   * questions = 여쭤볼 것이 있다(상태 A · 답하기 전 0크레딧) · needs_choice = 칸을 골라야 한다(승인 창) · blocked = 막힘(데이터 없음 · 080 · 발신번호)
    */
-  kind: 'proposal' | 'baseline' | 'zero' | 'needs_choice' | 'blocked';
+  kind: 'proposal' | 'baseline' | 'zero' | 'needs_choice' | 'blocked' | 'questions';
+  /** ★ 1024 여쭤볼 것(상태 A) — 비면 상태 B */
+  questions: OperatorQuestion[];
+  /** ★ 1024 옮기고 알린 것(시각 · 읽은 혜택 · 문안에서 뺀 날짜 말) */
+  notes: string[];
+  /** ★ 1024 막힘 갈래(080 · 발신번호 · 데이터) — 화면이 등록 화면으로 안내한다 */
+  blockCode: string | null;
+  /** ★ 1024 문안 입력(대상 칸 · 혜택 · 채널 · 문안 방식)이 바뀌어 문안이 묵었다 — 시작 잠금 + [이 대상으로 다시 만들기] */
+  copyStale: boolean;
+  /** ★ 1024 보내는 번호 · 알림 받는 번호(추천으로 정한 값 · 화면이 [바꾸기]) */
+  sendVia: { callback: string | null; adminPhone: string | null };
+  /** ★ 1024 문안 안마다 나가는 글(혜택 · (광고) · 080 · operatorFinalCopy) — 화면은 AI 원문 대신 이것을 보여 준다 */
+  finalCopies: Array<OperatorFinalCopy | null> | null;
+  /** ★ 1024 돈(서버 값 · 화면 상수 0) — 시작 · 문안 */
+  costs: { start: number; copy: number; send: number };
   previewId: string | null;
   proposal: any | null;
   reason: string | null;
@@ -289,34 +353,129 @@ async function measureEntry(e: PreviewEntry, win: { startAt: Date }) {
 /** AI 문안(첫 회차) — 허브와 같은 키(5) · 대상 0명이면 차감 0. anchor = 문안을 만들 회차(생일 = 생일자가 있는 첫날) */
 async function generateCopy(e: PreviewEntry, loaded: OperatorCompanyContext, anchor: Date): Promise<any> {
   const fields = operatorContextFields(e.input);
+  // ★ 1024 요청 키 = 화면 키 + 문안 입력 지문(같은 화면 · 같은 입력의 재전송 = 차감 0 · 입력이 바뀌면 새 5) · 잔액이 모자라면 결과를 내주지 않는다(402)
+  const key = e.screenKey
+    ? `ai-operator-propose:${e.companyId}:${createHash('sha256').update(`${e.userId}|${e.screenKey}|${copyPrint(e)}`).digest('hex').slice(0, 32)}`
+    : undefined;
   const result = await orchestrate(
     buildOperatorOrchestrateContext({ ...fields, id: null, anchorAt: anchor }, loaded),
-    { source: 'ai-operator-propose', cost: getCreditCost('ai-operator-propose'), chargeOnlyWithTarget: true },
+    { source: 'ai-operator-propose', cost: getCreditCost('ai-operator-propose'), chargeOnlyWithTarget: true, idempotencyKey: key, throwOnInsufficient: true },
   );
   if ((result.messages?.length || 0) === 0) throw new Error('문안 생성 결과 없음');
   return result;
 }
 
 /**
- * 미리보기를 한 번 계산한다(새로 만들기 · 창 편집 공용). AI 문안은 필요할 때만(AI 모드 · 결과 없음 · 대상 있음) 만든다.
+ * 문안 입력 지문 — 대상 칸(축 key · 칸 · 연산자 · **값 제외**) · 혜택 · 채널 · 문안 방식 · 문안 스타일.
+ *   기준 숫자(값)는 0크레딧으로 다시 센다(회의론자 §9-6). 이 지문이 바뀌면 만든 문안은 묵은 것이다(N5 · 「VIP 고객님께」 문안이 휴면 고객에게).
+ */
+function copyPrint(e: PreviewEntry): string {
+  const tr = e.translation;
+  const contract = tr.kind === 'axis' ? { k: tr.segmentKey }
+    : tr.kind === 'filters' || tr.kind === 'needs_choice' ? { c: tr.conditions.map((c) => `${c.field}:${c.operator}`).sort() } : {};
+  return createHash('sha256').update(JSON.stringify({
+    ...contract,
+    b: normalizeOperatorBenefit(e.input.benefitContent),
+    ch: normalizeOperatorChannel(e.input.channel),
+    m: e.input.copyMode === 'fixed' ? 'fixed' : 'ai',
+    st: e.input.copyStyle ?? null,
+  })).digest('hex').slice(0, 16);
+}
+
+interface PreviewBlock { code: string; reason: string }
+
+/** 계정 휴대폰(담당자 알림 기본값 · 등록과 같은 판정) */
+async function accountPhone(userId: string | null): Promise<string | null> {
+  if (!userId) return null;
+  const r = await query(`SELECT phone FROM users WHERE id = $1::uuid`, [userId]);
+  const d = String(r.rows[0]?.phone || '').replace(/\D/g, '');
+  return /^01\d{8,9}$/.test(d) ? d : null;
+}
+
+/**
+ * ★ 1024 질문표 · 막힘을 다시 정한다(편집마다 · 질문은 순수 함수 · 사실은 DB). 추천으로 정한 값(회신번호 후보 하나 · 계정 휴대폰)은
+ *   보관본 입력에 적는다(빈 칸에 기대지 않는다 · 회의론자 §9-13). 승인 창(실행 중) = 대상 질문만(번호 · 혜택은 이미 정해져 있다).
+ */
+async function settleQuestions(e: PreviewEntry): Promise<PreviewBlock | null> {
+  const owner = e.input.createdBy || e.userId;
+  const renewal = !!e.operatorId;
+  let block: PreviewBlock | null = null;
+  let callbackCandidates: string[] | null = null;
+  let adminPhoneMissing = false;
+  if (!renewal) {
+    const demo = await isDemoCompany(e.companyId);   // 시연 회사 = 실제로 보내지 않는다(발송 경로와 같은 판정)
+    if (!demo && !(await getOpt080Number(owner, e.companyId))) {
+      block = { code: 'OPT080_MISSING', reason: '광고 문자 끝에 넣을 무료거부 번호(080)가 없어 시작할 수 없어요. 설정에서 080 번호를 등록하면 바로 시작할 수 있어요.' };
+    }
+    if (!block && !demo && !e.input.callback) {
+      const ch = await listOperatorCallbackChoices(e.companyId, owner);
+      if (!ch.defaultNumber) {
+        if (ch.candidates.length === 0) {
+          block = { code: 'CALLBACK_MISSING', reason: '보낼 발신번호가 등록돼 있지 않아 시작할 수 없어요. 회사 관리자가 「관리」 메뉴에서 발신번호를 등록하면 바로 시작할 수 있어요.' };
+        } else if (ch.candidates.length === 1) {
+          e.input = { ...e.input, callback: { callbackNumber: ch.candidates[0], useIndividualCallback: false } };
+        } else {
+          callbackCandidates = ch.candidates;
+        }
+      }
+    }
+    if (!(e.input.adminPhoneNumbers && e.input.adminPhoneNumbers.length > 0)) {
+      const phone = await accountPhone(owner);
+      if (phone) e.input = { ...e.input, adminPhoneNumbers: [phone] };
+      else adminPhoneMissing = true;
+    }
+  }
+  const tr = e.translation;
+  const needAxes = (tr.kind === 'blocked' && (tr.code === 'NO_CONDITION' || tr.code === 'TRANSLATE_FAILED'))
+    || (tr.kind === 'axis' && tr.segmentKey === 'all' && tr.mapped);
+  const axes = needAxes
+    ? (await listSegmentAvailability(e.companyId)).map((a) => ({ key: a.key, label: a.label, available: a.available, reason: a.reason }))
+    : [];
+  const everyoneCount = needAxes
+    ? await countContractAudience({ companyId: e.companyId, ownerUserId: owner, schedule: 'monthly', segmentKey: 'all' }).catch(() => null)
+    : null;
+  e.questions = buildOperatorQuestions({
+    translation: tr, axes, everyoneCount,
+    schedule: e.input.schedule || 'monthly',
+    benefitAsk: renewal ? null : e.benefitAsk,
+    callbackCandidates, adminPhoneMissing,
+  });
+  return block;
+}
+
+/**
+ * 미리보기를 한 번 계산한다(새로 만들기 · 창 편집 공용).
+ *   ★ 1024 문안은 copyStep 'generate' 일 때만 만든다 — 상태 A [이대로 첫 문안 보기] · [이 대상으로 다시 만들기] · 질문 없는 첫 한 줄.
+ *   그 밖 편집은 'existing'(문안 0 · 다시 세기만 · 회의론자 §9-6). 질문이 남으면 상태 A(문안 · 차감 0).
  *   0명(축 · 칸 조건 · 지금 기준) = 시작 불가 · 차감 0. 생일 · 매일은 7일 예상이 기준(0명인 날은 정상).
  */
 async function refreshEntry(
   e: PreviewEntry,
   previewId: string | null,
-  /** generate = 필요하면 AI 문안을 만든다(미리보기 · 편집) · existing = 만들지 않고 있는 것만(시작 판정 · 돈 0) · skip = 문안 없이(승인 창 · 회차가 만든다) */
-  copyStep: 'generate' | 'existing' | 'skip' = 'generate',
+  /** generate = 필요하면 AI 문안을 만든다 · existing = 만들지 않고 있는 것만(돈 0) · skip = 문안 없이(승인 창 · 회차가 만든다) */
+  copyStep: 'generate' | 'existing' | 'skip' = 'existing',
 ): Promise<PreviewOutcome> {
   const loaded = await loadOperatorCompanyContext(e.companyId);
   if (!loaded) throw new PreviewInputError('회사 정보를 찾을 수 없습니다.');
+  const block = await settleQuestions(e);
   const win = windowFor(e.input);
   const tr = e.translation;
-  const channel = (e.input.channel ? String(e.input.channel) : 'lms').toLowerCase();
+  const channel = normalizeOperatorChannel(e.input.channel);
   const costs = getCompanyCosts(loaded.companyInfo as any) as Record<string, number>;
   const copyMode: 'ai' | 'fixed' = e.input.copyMode === 'fixed' ? 'fixed' : 'ai';
   const vars = await checkFixedCopyVariables(e.companyId, loaded.companyInfo.customer_schema, e.input.fixedCopy?.subject || '', e.input.fixedCopy?.body || '');
+  const print = copyPrint(e);
+  const stale = !!e.result && e.resultPrint !== print;
+  const dated = copyMode === 'ai' ? datedTerms(e.input.objective, e.input.schedule) : [];
 
   const base: Omit<PreviewOutcome, 'kind' | 'previewId' | 'proposal' | 'reason' | 'ready' | 'count' | 'forecast'> = {
+    questions: e.questions,
+    finalCopies: null,
+    notes: [...e.notes, ...dated.map((w) => `「${w}」은(는) 회차마다 지나가는 날짜라 문안에서 뺐어요.`)],
+    blockCode: block?.code ?? (tr.kind === 'blocked' ? tr.code : null),
+    copyStale: false,
+    sendVia: { callback: e.input.callback?.callbackNumber ?? null, adminPhone: e.input.adminPhoneNumbers?.[0] ?? null },
+    costs: { start: getCreditCost('continuous-operator'), copy: getCreditCost('ai-operator-propose'), send: getCreditCost('continuous-operator-send') },
     audience: {
       mode: tr.kind === 'axis' ? 'axis' : tr.kind === 'filters' ? 'filters' : 'none',
       label: tr.kind === 'axis' ? tr.label : null,
@@ -346,80 +505,175 @@ async function refreshEntry(
     segment: { key: tr.kind === 'axis' ? tr.segmentKey : null, params: tr.kind === 'axis' ? tr.segmentParams : null },
     revision: e.rev,
   };
+  const none = { proposal: null, count: null, forecast: null };
+  // 보여 줄 문안 = 나가는 글(혜택 · (광고) · 080) — 결과가 있을 때만 080 · 회신번호를 읽는다
+  const finalsOf = async (result: any): Promise<Array<OperatorFinalCopy | null> | null> => {
+    if (!result || !Array.isArray(result.messages)) return null;
+    const owner = e.input.createdBy || e.userId;
+    const cb = e.input.callback?.callbackNumber || (await listOperatorCallbackChoices(e.companyId, owner).catch(() => ({ defaultNumber: null }))).defaultNumber || '';
+    const opt080 = await getOpt080Number(owner, e.companyId).catch(() => '');
+    return finalCopiesOf(result, { benefit: e.input.benefitContent ?? null, opt080, callback: cb });
+  };
   // 직접 쓴 문안 = 문안이 있고 값 없는 %칸% 이 없어야 시작 · 승인(기준 축도 같다)
   const fixedText = e.input.fixedCopy?.body || '';
   const badVars = [...vars.empty, ...vars.unknown];
   const fixedReason = !fixedText ? '보낼 문안을 넣어 주세요.'
     : badVars.length > 0 ? `%${badVars.join('% · %')}% 칸은 값이 없어 쓸 수 없어요. 넣을 수 있는 칸만 써 주세요.` : null;
 
-  if (tr.kind === 'blocked') {
-    return { ...base, kind: 'blocked', previewId, proposal: null, reason: tr.reason, ready: false, count: null, forecast: null };
-  }
+  if (block) return { ...base, ...none, kind: 'blocked', previewId, reason: block.reason, ready: false };
+  if (e.questions.length > 0) return { ...base, ...none, kind: 'questions', previewId, reason: null, ready: false };
+  if (tr.kind === 'blocked') return { ...base, ...none, kind: 'blocked', previewId, reason: tr.reason, ready: false };
   if (tr.kind === 'needs_choice') {
     const terms = tr.unresolved.map((u) => `「${u.term}」`).join(' · ');
-    return { ...base, kind: 'needs_choice', previewId, proposal: null, reason: `${terms}을(를) 어느 칸으로 판단할지 골라 주세요. 값이 있는 칸만 고를 수 있어요.`, ready: false, count: null, forecast: null };
+    return { ...base, ...none, kind: 'needs_choice', previewId, reason: `${terms}을(를) 어느 칸으로 판단할지 골라 주세요. 값이 있는 칸만 고를 수 있어요.`, ready: false };
   }
 
   const m = await measureEntry(e, win);
   if (m.baseline) {
-    return { ...base, kind: 'baseline', previewId, proposal: null, reason: copyMode === 'fixed' ? fixedReason : null, ready: copyMode === 'ai' || !fixedReason, count: null, forecast: null };
+    return { ...base, ...none, kind: 'baseline', previewId, reason: copyMode === 'fixed' ? fixedReason : null, ready: copyMode === 'ai' || !fixedReason };
   }
   if (!m.forecast && (m.count || 0) === 0) {
-    return { ...base, kind: 'zero', previewId, proposal: null, reason: '지금 조건에 맞는 고객이 없어요. 조건을 임의로 넓혀서 보내지 않아요. 기준을 고치거나 세부 설정에서 대상을 바꿔 주세요.', ready: false, count: 0, forecast: null };
+    return { ...base, ...none, kind: 'zero', previewId, reason: '지금 조건에 맞는 고객이 없어요. 조건을 임의로 넓혀서 보내지 않아요. 기준을 고치거나 다른 대상을 골라 주세요.', ready: false, count: 0 };
   }
+  const counted = { count: m.count, forecast: m.forecast };
+  if (copyMode === 'fixed') return { ...base, ...counted, kind: 'proposal', previewId, proposal: null, reason: fixedReason, ready: !fixedReason };
+  if (copyStep === 'skip') return { ...base, ...counted, kind: 'proposal', previewId, proposal: null, reason: null, ready: true };
+  if (e.result && !stale) return { ...base, ...counted, kind: 'proposal', previewId, proposal: e.result, finalCopies: await finalsOf(e.result), reason: null, ready: true };
 
-  if (copyMode === 'fixed') {
-    return { ...base, kind: 'proposal', previewId, proposal: null, reason: fixedReason, ready: !fixedReason, count: m.count, forecast: m.forecast };
+  // 문안이 없거나 묵었다 — 생일 · 매일 = 생일자가 있는 첫날 기준
+  const firstDay = m.forecast ? m.forecast.findIndex((d: { count: number }) => d.count > 0) : 0;
+  if (firstDay < 0) {
+    // 7일 내내 생일 고객이 없다 — 미리 보여 줄 문안이 없다(차감 0). 시작하면 생일 고객이 있는 날 그날 문안을 만든다.
+    e.result = null;
+    return { ...base, ...counted, kind: 'proposal', previewId, proposal: null, reason: '앞으로 7일 동안 대상 고객이 없어 미리 보여 드릴 문안이 없어요. 시작하면 대상이 있는 날 그날 문안을 만들어 보내요.', ready: true };
   }
-
-  // AI 문안 — 결과가 없거나 핵심 혜택이 바뀌었으면 만든다(생일 · 매일 = 생일자가 있는 첫날 기준)
-  if (copyStep === 'skip') {
-    return { ...base, kind: 'proposal', previewId, proposal: null, reason: null, ready: true, count: m.count, forecast: m.forecast };
+  if (copyStep === 'existing') {
+    return {
+      ...base, ...counted, kind: 'proposal', previewId,
+      proposal: stale ? e.result : null,
+      finalCopies: stale ? await finalsOf(e.result) : null,
+      copyStale: stale,
+      reason: stale ? '받는 분이나 혜택이 바뀌어 문안을 다시 만들어야 시작할 수 있어요.' : '문안을 아직 만들지 않았어요.',
+      ready: false,
+    };
   }
-  const benefitNow = normalizeOperatorBenefit(e.input.benefitContent);
-  if (e.result && e.resultBenefit !== benefitNow) e.result = null;
-  if (!e.result) {
-    const firstDay = m.forecast ? m.forecast.findIndex((d: { count: number }) => d.count > 0) : 0;
-    if (firstDay < 0) {
-      // 7일 내내 생일 고객이 없다 — 미리 보여 줄 문안이 없다(차감 0). 시작하면 생일 고객이 있는 날 그날 문안을 만든다.
-      return { ...base, kind: 'proposal', previewId, proposal: null, reason: '앞으로 7일 동안 대상 고객이 없어 미리 보여 드릴 문안이 없어요. 시작하면 대상이 있는 날 그날 문안을 만들어 보내요.', ready: true, count: m.count, forecast: m.forecast };
-    }
-    if (copyStep === 'existing') {
-      return { ...base, kind: 'proposal', previewId, proposal: null, reason: '문안을 아직 만들지 않았어요. 다시 [제안 받기]를 눌러 주세요.', ready: false, count: m.count, forecast: m.forecast };
-    }
-    const anchor = new Date(win.startAt.getTime() + firstDay * 24 * 60 * 60 * 1000);
-    e.result = await generateCopy(e, loaded, anchor);
-    e.resultBenefit = benefitNow;
-  }
-  return { ...base, kind: 'proposal', previewId, proposal: e.result, reason: null, ready: true, count: m.count, forecast: m.forecast };
+  const anchor = new Date(win.startAt.getTime() + firstDay * 24 * 60 * 60 * 1000);
+  e.result = await generateCopy(e, loaded, anchor);
+  e.resultPrint = print;
+  return { ...base, ...counted, kind: 'proposal', previewId, proposal: e.result, finalCopies: await finalsOf(e.result), reason: null, ready: true };
 }
 
-/** 문장 주기 → 등록 본문 칸(없으면 매월 · 오늘 날짜 · 시각은 문장에 있으면 그것) */
-export function scheduleBodyFromText(objective: string, body: any, now: Date = new Date()): Record<string, any> {
+/** 가장 빨리 첫 회차가 나가는 날(KST) — 오늘 그 시각 전이면 오늘 · 지났으면 내일(주재자 판정 1) */
+function earliestRoundDay(time: string, now: Date): { dow: number; dom: number } {
+  const k = new Date(now.getTime() + 9 * 60 * 60 * 1000);
+  const [h, mi] = String(time || '09:00').split(':').map((v) => parseInt(v, 10) || 0);
+  const passed = k.getUTCHours() * 60 + k.getUTCMinutes() >= h * 60 + mi;
+  const d = passed ? new Date(k.getTime() + 24 * 60 * 60 * 1000) : k;
+  return { dow: d.getUTCDay(), dom: d.getUTCDate() };
+}
+
+/**
+ * 한 줄의 주기 → 등록 본문 칸(★ 1024 · 설계서 §1-1). 주기 말이 없으면 매월(written = false · 번역 뒤 생일 축이면 매일로 바뀐다).
+ *   날 = 가장 빨리 첫 회차가 나가는 날 · 시각 = 한 줄의 시각(주기 말이 없어도) → 없으면 09:00 · 발송 가능 시간 밖이면 옮긴다(검증 전 · §9-16).
+ */
+export function scheduleBodyFromText(objective: string, body: any, now: Date = new Date()): {
+  fields: Record<string, any>; written: boolean; moved: { from: string; to: string } | null;
+} {
   const s = parseScheduleFromText(objective);
-  const todayKst = new Date(now.getTime() + 9 * 60 * 60 * 1000).getUTCDate();
-  const v = s || { schedule: 'monthly' as const, scheduleDayOfWeek: null, scheduleDayOfMonth: todayKst, scheduleTime: null };
+  const rawTime = s?.scheduleTime || parseTimeFromText(objective) || (typeof body?.schedule_time === 'string' && body.schedule_time) || '09:00';
+  const c = clampToSendableTime(rawTime, SEND_HOURS.start, SEND_HOURS.end);
+  const day = earliestRoundDay(c.time, now);
+  const schedule = s?.schedule || 'monthly';
   return {
-    schedule: v.schedule,
-    schedule_day_of_week: v.schedule === 'weekly' ? v.scheduleDayOfWeek : null,
-    schedule_day_of_month: v.schedule === 'monthly' ? v.scheduleDayOfMonth : null,
-    schedule_time: v.scheduleTime || body?.schedule_time || '09:00',
+    fields: {
+      schedule,
+      schedule_day_of_week: schedule === 'weekly' ? (s?.scheduleDayOfWeek ?? day.dow) : null,
+      schedule_day_of_month: schedule === 'monthly' ? (s?.scheduleDayOfMonth ?? day.dom) : null,
+      schedule_time: c.time,
+    },
+    written: !!s,
+    moved: c.moved ? { from: rawTime, to: c.time } : null,
   };
+}
+
+/** 번역 → 보관본(★ 1024 번역은 늘 매월로 · 짝 판정은 질문표가 지금 주기로 한 번만 · §9-12) */
+async function retranslate(
+  e: PreviewEntry,
+  x: { segmentKey?: string | null; segmentParams?: Record<string, number> | null; conditions?: Array<{ term?: string; field: string; operator: string; value: any }> | null },
+): Promise<void> {
+  try {
+    e.translation = await translateAudience({
+      companyId: e.companyId, userId: e.userId, objective: e.input.objective, schedule: 'monthly',
+      segmentKey: x.segmentKey ?? null, segmentParams: x.segmentParams ?? null, conditions: x.conditions ?? null,
+      carry: e.translation,   // 창의 말(term)은 빠지지 않는다
+    });
+  } catch (err: any) {
+    if (err instanceof AudienceConditionError) throw new PreviewInputError(err.message);
+    throw err;
+  }
+  e.input = applyTranslation(e.input, e.translation);
+  e.appliedSegment = null;   // 사람이 고른 계약 — AI 가 고정했다는 안내는 더 이상 맞지 않는다
+}
+
+/**
+ * 추천 주기(사람이 주기를 쓰지 않았을 때만) — 대상이 바뀔 때마다 다시 정한다(Codex 1R: 생일 → 전체로 바꾸면 매일이 남아 짝을 우회했다).
+ *   생일 축 = 생일인 날(매일 · 생일은 반복 축이 아니다) · 그 밖 = 매월(가장 빨리 나가는 날).
+ */
+function birthdayDefault(e: PreviewEntry): void {
+  if (e.scheduleWritten) return;
+  const tr = e.translation;
+  if (tr.kind === 'axis' && tr.segmentKey === 'birthday') {
+    e.input = { ...e.input, schedule: 'daily', scheduleDayOfWeek: null, scheduleDayOfMonth: null };
+  } else if (e.input.schedule !== 'monthly') {
+    e.input = { ...e.input, schedule: 'monthly', scheduleDayOfWeek: null, scheduleDayOfMonth: earliestRoundDay(e.input.scheduleTime || '09:00', new Date()).dom };
+  }
+}
+
+/**
+ * 한 줄의 혜택 → 보관본(★ 1024 · 사람 글만 · listenLine). AI 가 쓴 목표(오늘의 추천 · 캘린더) = 읽은 조각 취급(채움 0 · 값이 없으면 묻는다).
+ *   허용 꼴 하나 = 칸에 채우고 알린다 · 행사 말인데 값 없음 = ④ 묻기 · 값이 조건과 섞임 = ④ 사람 글 조각을 채운 글 칸.
+ */
+function readLineBenefit(e: PreviewEntry, objectiveFromAi: boolean): void {
+  if (e.input.copyMode === 'fixed' || normalizeOperatorBenefit(e.input.benefitContent)) return;   // 직접 쓴 문안 · 화면이 적어 보낸 혜택
+  const intent = listenLine(e.input.objective, objectiveFromAi ? { reads: [e.input.objective] } : {});
+  if (intent.benefit) {
+    e.input = { ...e.input, benefitContent: intent.benefit };
+    e.notes.push(`적어 주신 혜택 「${intent.benefit}」만 실어요.`);
+  } else if (intent.gaps.benefit || (intent.concreteBenefit && !intent.typed.trim())) {
+    e.benefitAsk = { reason: 'missing', prefill: null };
+  } else if (intent.concreteBenefit) {
+    e.benefitAsk = { reason: 'mixed', prefill: lineBenefitFragments(intent.typed) };
+  }
 }
 
 /** [제안 받기] — 등록 없이 첫 회차와 같은 계산. 같은 회사 · 같은 사람의 동시 요청은 PreviewBusyError(409) */
 export async function runOperatorPreview(companyId: string, userId: string, body: any): Promise<PreviewOutcome> {
   return withLock(companyId, userId, async () => {
-    // ★ 2026-10-05 한 줄 · 오늘의 추천 입구(infer_schedule) — 문장의 주기(매일 · 매주 ○요일 · 매월 ○일 · 매월 초 · 생일인 날)를 읽는다.
-    //   주기 말이 없으면 매월 · 오늘 날짜(매일 · 매주 + 상태 조건은 같은 고객 반복이라 막히므로 · Q9). 정해진 주기는 승인 창 첫 줄에 날짜로 보인다.
-    if (body?.infer_schedule === true) body = { ...body, ...scheduleBodyFromText(String(body?.objective || ''), body) };
+    // ★ 1024 같은 화면 키 = 그 보관본 그대로(AI 0 · 차감 0 · 응답을 못 받은 재전송 · 회의론자 §9-5b)
+    const screenKey = screenKeyOf(body?.request_key);
+    const bodyPrint = createHash('sha256').update(JSON.stringify({ ...(body || {}), request_key: undefined })).digest('hex').slice(0, 16);
+    if (screenKey) {
+      const hitId = previewByKey.get(keyRef(companyId, userId, screenKey));
+      const hit = hitId ? peekPreview(hitId, companyId, userId) : null;
+      // 같은 화면 키 + 같은 본문 = 그 보관본(재전송) · 본문이 다르면 새 보관본(바뀐 설정이 옛 미리보기로 대체되지 않게)
+      if (hitId && hit && !hit.operatorId && hit.bodyPrint === bodyPrint) return shown(hit, await refreshEntry(hit, hitId, 'existing'));
+    }
+    // ★ 2026-10-05 한 줄 · 오늘의 추천 입구(infer_schedule) — 문장의 주기를 읽는다 · ★ 1024 시각은 검증 전에 발송 가능 시간 안으로 옮기고 알린다
+    const notes: string[] = [];
+    let scheduleWritten = true;
+    if (body?.infer_schedule === true) {
+      const r = scheduleBodyFromText(String(body?.objective || ''), body);
+      body = { ...body, ...r.fields };
+      scheduleWritten = r.written;
+      if (r.moved) notes.push(`적어 주신 ${koreanTimeLabel(r.moved.from)}는 보낼 수 없는 시각이라 ${koreanTimeLabel(r.moved.to)}로 옮겼어요.`);
+    }
     // 등록이 거절할 입력은 돈을 쓰기 전에 거른다(등록과 같은 검증 함수)
     const base = createOperatorInputFromBody(companyId, userId, body);
     try { validateOperatorInput(base as CreateOperatorInput); } catch (e: any) { throw new PreviewInputError(e?.message || '입력을 확인해 주세요.'); }
     let tr: AudienceTranslation;
     try {
       tr = await translateAudience({
-        companyId, userId, objective: base.objective, schedule: base.schedule || 'daily',
+        companyId, userId, objective: base.objective, schedule: 'monthly',   // 짝은 질문표가 지금 주기로 본다(§9-12)
         segmentKey: body?.segment_key, segmentParams: body?.segment_params, targetHint: body?.target_hint,
         conditions: Array.isArray(body?.audience_conditions) ? body.audience_conditions : null,
       });
@@ -429,120 +683,190 @@ export async function runOperatorPreview(companyId: string, userId: string, body
     }
     const copyMode: 'ai' | 'fixed' = body?.copy_mode === 'fixed' ? 'fixed' : 'ai';
     const fixed = copyMode === 'fixed' ? normalizeFixedCopyInput({ subject: body?.fixed_subject, body: body?.fixed_body }) : null;
-    const input: CreateOperatorInput = applyTranslation({ ...(base as CreateOperatorInput), copyMode, fixedCopy: fixed }, tr);
+    // ★ 1024 회신번호 — 화면(세부 설정)이 골랐을 때만 온다(검사 = 등록과 같은 함수)
+    const cb = body?.callback_number !== undefined || body?.use_individual_callback !== undefined
+      ? await checkOperatorCallback(companyId, userId, { callbackNumber: body.callback_number, useIndividualCallback: body.use_individual_callback })
+      : null;
+    const input: CreateOperatorInput = applyTranslation({ ...(base as CreateOperatorInput), copyMode, fixedCopy: fixed, ...(cb ? { callback: cb } : {}) }, tr);
     const entry: PreviewEntry = {
-      companyId, userId, input, translation: tr, result: null, resultBenefit: null,
-      appliedSegment: tr.kind === 'axis' && tr.mapped ? { key: tr.segmentKey, label: tr.label } : null,
+      companyId, userId, input, translation: tr, result: null, resultPrint: null,
+      appliedSegment: tr.kind === 'axis' && tr.mapped && tr.segmentKey !== 'all' ? { key: tr.segmentKey, label: tr.label } : null,
       createdAt: Date.now(), operatorId: null, rev: 0, shownStart: null,
+      screenKey, scheduleWritten, benefitAsk: null, questions: [], notes, bodyPrint,
     };
-    // 막힘은 보관하지 않는다(시작 · 편집할 것이 없다). 그 밖은 보관해 창 편집이 이어진다.
-    const previewId = tr.kind === 'blocked' ? null : putPreview(entry);
-    return shown(entry, await refreshEntry(entry, previewId));
+    birthdayDefault(entry);
+    readLineBenefit(entry, body?.objective_source === 'ai');
+    const previewId = putPreview(entry);
+    // 질문이 없을 때만 바로 문안(5) — 질문이 있으면 상태 A(0)
+    return shown(entry, await refreshEntry(entry, previewId, 'generate'));
   });
 }
 
+/** ★ 1024 답(서버 질문표로 검증한 값) → 보관본 */
+async function applyAnswers(e: PreviewEntry, a: ReturnType<typeof decideOperatorAnswers> & { ok: true }): Promise<void> {
+  const ans = a.patch;
+  const tr = e.translation;
+  const picks = Object.entries(ans.fields);
+  if (picks.length > 0 && tr.kind === 'needs_choice') {
+    const add = picks.map(([term, field]) => {
+      const u = tr.unresolved.find((x) => x.term === term);
+      const o = tr.options.find((x) => x.field === field);
+      const numeric = o?.dataType === 'number';
+      return { term, field, operator: u?.operator || (numeric ? 'gte' : 'eq'), value: u?.value ?? (numeric ? 1 : (o?.samples[0] ?? '')) };
+    });
+    await retranslate(e, { conditions: [...tr.conditions.map((c) => ({ term: c.term, field: c.field, operator: c.operator, value: c.value })), ...add] });
+  }
+  if (ans.segmentKey) {
+    await retranslate(e, { segmentKey: ans.segmentKey });
+    birthdayDefault(e);
+  }
+  if (ans.schedule === 'monthly') {
+    e.input = { ...e.input, schedule: 'monthly', scheduleDayOfWeek: null, scheduleDayOfMonth: earliestRoundDay(e.input.scheduleTime || '09:00', new Date()).dom };
+    e.scheduleAnswered = true;
+  }
+  if (ans.benefit !== undefined) {
+    e.input = { ...e.input, benefitContent: ans.benefit };
+    e.benefitAsk = null;
+  }
+  if (ans.callback) e.input = { ...e.input, callback: await checkOperatorCallback(e.companyId, e.input.createdBy || e.userId, { callbackNumber: ans.callback }) };
+  if (ans.adminPhone) e.input = { ...e.input, adminPhoneNumbers: [ans.adminPhone] };
+}
+
 /**
- * 창 편집(칸 고르기 · 기준 숫자 · 문안 분기 · 직접 쓴 문안 · 핵심 혜택) — 서버가 검증해 보관본에 반영하고 다시 계산한다.
- *   AI 문안이 필요해지면(AI 로 바꿈 · 칸을 골라 대상이 생김 · 핵심 혜택을 고침) 그때 만든다(5 · 대상 0명이면 0).
+ * 창 편집 — 서버가 검증해 보관본에 반영하고 다시 센다.
+ *   ★ 1024 문안은 둘에서만 만든다(5): 답(answers · 상태 A 버튼) · regenerate(상태 B [이 대상으로 다시 만들기] · AI 문안으로 바꾸기 · 혜택 고치고 다시 만들기).
+ *   그 밖(칸 · 기준 숫자 · 주기 · 번호 · 직접 쓴 문안)은 문안 0 · 지문이 바뀌면 시작 잠금.
  */
 export async function updateOperatorPreview(previewId: string, companyId: string, userId: string, patch: any): Promise<PreviewOutcome | null> {
   return withLock(companyId, userId, async () => {
     const e = peekPreview(previewId, companyId, userId);
     if (!e) return null;
-    const copyStep = e.operatorId ? 'skip' : 'generate';   // 승인 창 = AI 문안 0(회차가 만든다)
-    if (patch?.revision !== e.rev) throw new PreviewStaleError(PREVIEW_STALE_MESSAGE, shown(e, await refreshEntry(e, previewId, e.operatorId ? 'skip' : 'existing')));
-    const schedule = e.input.schedule || 'daily';
+    const renewal = !!e.operatorId;   // 승인 창 = AI 문안 0(회차가 만든다)
+    if (patch?.revision !== e.rev) throw new PreviewStaleError(PREVIEW_STALE_MESSAGE, shown(e, await refreshEntry(e, previewId, renewal ? 'skip' : 'existing')));
+    const k = screenKeyOf(patch?.request_key);
+    if (k && !e.screenKey) { e.screenKey = k; previewByKey.set(keyRef(companyId, userId, k), previewId); }
+    let wantsCopy = patch?.regenerate === true;
+    if (patch?.answers && typeof patch.answers === 'object' && !Array.isArray(patch.answers)) {
+      const d = decideOperatorAnswers(e.questions, patch.answers);
+      if (!d.ok) throw new PreviewInputError(d.error);
+      await applyAnswers(e, d);
+      wantsCopy = true;
+    }
     if (Array.isArray(patch?.conditions) || (typeof patch?.segment_key === 'string' && patch.segment_key.trim())) {
-      try {
-        e.translation = await translateAudience({
-          companyId, userId, objective: e.input.objective, schedule,
-          segmentKey: typeof patch.segment_key === 'string' ? patch.segment_key : null,
-          segmentParams: patch.segment_params || null,
-          conditions: Array.isArray(patch.conditions) ? patch.conditions : null,
-          carry: e.translation,   // 창의 말(term)은 빠지지 않는다
-        });
-      } catch (err: any) {
-        if (err instanceof AudienceConditionError) throw new PreviewInputError(err.message);
-        throw err;
+      await retranslate(e, {
+        segmentKey: typeof patch.segment_key === 'string' ? patch.segment_key : null,
+        segmentParams: patch.segment_params || null,
+        conditions: Array.isArray(patch.conditions) ? patch.conditions : null,
+      });
+      birthdayDefault(e);
+    }
+    if (!renewal) {
+      // ★ 1024 0크레딧 칸 — 주기 · 날 · 시각(등록과 같은 검증) · 회신번호(등록 번호만) · 알림 번호
+      const sched = ['daily', 'weekly', 'monthly'].includes(patch?.schedule) ? patch.schedule : null;
+      if (sched || typeof patch?.schedule_time === 'string' || patch?.schedule_day_of_week !== undefined || patch?.schedule_day_of_month !== undefined) {
+        const s2 = sched || e.input.schedule || 'monthly';
+        const t2 = typeof patch?.schedule_time === 'string' ? patch.schedule_time : (e.input.scheduleTime || '09:00');
+        const day = earliestRoundDay(t2, new Date());
+        const dow = patch?.schedule_day_of_week !== undefined && patch.schedule_day_of_week !== null ? Number(patch.schedule_day_of_week) : (e.input.scheduleDayOfWeek ?? day.dow);
+        const dom = patch?.schedule_day_of_month !== undefined && patch.schedule_day_of_month !== null ? Number(patch.schedule_day_of_month) : (e.input.scheduleDayOfMonth ?? day.dom);
+        const next: CreateOperatorInput = {
+          ...e.input, schedule: s2 as any, scheduleTime: t2,
+          scheduleDayOfWeek: s2 === 'weekly' && Number.isInteger(dow) && dow >= 0 && dow <= 6 ? dow : null,
+          scheduleDayOfMonth: s2 === 'monthly' && Number.isInteger(dom) && dom >= 1 && dom <= 31 ? dom : null,
+        };
+        if ((s2 === 'weekly' && next.scheduleDayOfWeek == null) || (s2 === 'monthly' && next.scheduleDayOfMonth == null)) throw new PreviewInputError('보낼 요일이나 날짜를 골라 주세요.');
+        try { validateOperatorInput(next); } catch (err: any) { throw new PreviewInputError(err?.message || '주기를 확인해 주세요.'); }
+        e.input = next;
+        e.scheduleWritten = true;
       }
-      e.input = applyTranslation(e.input, e.translation);
-      e.appliedSegment = null;   // 사람이 고른 계약 — AI 가 고정했다는 안내는 더 이상 맞지 않는다
+      if (patch?.callback_number !== undefined) {
+        e.input = { ...e.input, callback: await checkOperatorCallback(companyId, e.input.createdBy || userId, { callbackNumber: patch.callback_number }) };
+      }
+      if (patch?.admin_phone !== undefined) {
+        const d = String(patch.admin_phone || '').replace(/\D/g, '');
+        if (!/^01\d{8,9}$/.test(d)) throw new PreviewInputError('휴대폰 번호를 다시 확인해 주세요.');
+        e.input = { ...e.input, adminPhoneNumbers: [d] };
+      }
     }
     if (patch?.copy_mode === 'ai' || patch?.copy_mode === 'fixed') e.input = { ...e.input, copyMode: patch.copy_mode };
     if (typeof patch?.fixed_body === 'string' || typeof patch?.fixed_subject === 'string') {
       e.input = { ...e.input, fixedCopy: normalizeFixedCopyInput({ subject: patch.fixed_subject ?? e.input.fixedCopy?.subject, body: patch.fixed_body ?? e.input.fixedCopy?.body }) };
     }
-    if (patch?.benefit !== undefined) e.input = { ...e.input, benefitContent: typeof patch.benefit === 'string' ? patch.benefit : null };
+    if (patch?.benefit !== undefined) {
+      const b = typeof patch.benefit === 'string' ? patch.benefit : null;
+      const dated = datedTerms(b || '');
+      if (dated.length > 0) throw new PreviewInputError(`혜택 글의 「${dated[0]}」은(는) 회차마다 지나가는 날짜예요. 날짜는 빼고 적어 주세요.`);
+      e.input = { ...e.input, benefitContent: b };
+      e.benefitAsk = null;
+    }
     e.rev += 1;
-    return shown(e, await refreshEntry(e, previewId, copyStep));
+    return shown(e, await refreshEntry(e, previewId, renewal ? 'skip' : wantsCopy ? 'generate' : 'existing'));
   });
 }
 
 /**
- * [이번 주 승인하고 시작] — 보관한 입력으로 등록(200 · 멱등키 continuous-operator:{id}) → 승인 기간 → 첫 회차(AI 문안 = 본 제안).
- * null = 만료 · 남의 것(410 · 차감 0). 시작할 수 없는 상태면 PreviewInputError(400 · 차감 0).
- * 잔액 부족이면 보관본을 되돌려 충전 뒤 다시 누를 수 있게 한다.
+ * [이번 주 승인하고 시작] — 보관한 입력으로 등록(200 · registerOperator 한 트랜잭션 · 승인 기간 같은 INSERT) → 첫 회차(본 안 = 나가는 안).
+ *   ★ 1024 잠금 하나로 판정 + 등록(회의론자 §9-3) — 같은 시작의 재전송은 409(처리 중) · 보관본은 커밋 뒤에만 지운다.
+ *   행이 먼저다(id = 미리보기 id) — 응답을 못 받은 재전송 · 재시작 뒤에도 같은 행을 돌려준다(차감 0).
+ *   null = 만료 · 남의 것(410 · 차감 0). 시작할 수 없는 상태면 PreviewInputError(400 · 차감 0).
  */
-export async function startOperatorFromPreview(previewId: string, companyId: string, userId: string, revision: unknown): Promise<{
+export async function startOperatorFromPreview(previewId: string, companyId: string, userId: string, revision: unknown, variantIndex?: unknown): Promise<{
   operator: ContinuousOperator;
   appliedSegment: { key: string; label: string } | null;
   proposal: OperatorProposal | null;
   message: string | null;
   approvedUntil: string | null;
 } | null> {
-  const peek = peekPreview(previewId, companyId, userId);
-  if (!peek || peek.operatorId) return null;
-  // 시작 가능 판정은 서버가 다시 한다(창 상태를 믿지 않는다) — 판정 중 다른 요청이 같은 미리보기를 꺼내지 못하게 잠근다.
-  //   화면이 본 판이 아니면 시작하지 않고 지금 상태를 돌려준다(본 것 = 등록한 것 · Codex 2R).
-  const checked = await withLock(companyId, userId, async () => {
-    const out = await refreshEntry(peek, previewId, 'existing');
-    assertSeen(peek, out, revision);
-    return out;
-  });
-  if (!checked.ready) throw new PreviewInputError('아직 시작할 수 없는 상태예요. 창에 표시된 안내를 먼저 마무리해 주세요.');
-  const entry = takePreview(previewId, companyId, userId);
-  if (!entry) return null;
-  let operator: ContinuousOperator;
-  try {
-    operator = await createOperator(entry.input);
-  } catch (e) {
-    // 되돌림 = 행이 없음이 증명되는 오류만(Codex 1R high). 잔액 부족은 INSERT 전 사전 확인(checkCredit)에서만 던진다
-    //   (INSERT 뒤 차감은 부족해도 던지지 않는다). 그 밖 실패는 INSERT 가 커밋됐는지 모르므로 되돌리지 않는다 —
-    //   되돌리면 같은 미리보기로 두 번째 활성 등록이 생긴다. 그때는 다시 [제안 받기].
-    if (e instanceof InsufficientCreditError) previews.set(previewId, entry);
-    throw e;
-  }
-  // 승인 기간(첫 주) — 칸이 준비되기 전(DDL 전)이면 건너뛴다: 회차마다 승인 대기(더 안전한 쪽)로 남는다.
-  let approvedUntil: string | null = null;
-  try {
-    const win = await approveOperatorWindow({ companyId, operatorId: operator.id, userId, window: confirmedWindow(checked) });
-    approvedUntil = win ? win.until.toISOString() : null;
-    if (win) operator = { ...operator, approvedUntil: win.until };
-  } catch (e: any) {
-    console.warn('[AutomarketingPreview] 승인 기간 저장 생략(회차마다 승인으로):', e?.message || e);
-  }
-  // 등록은 끝났다 — 첫 회차 저장이 실패해도 등록 · 차감은 유효하다(정해진 회차에 다시 만든다). 500 으로 돌려 다시 누르게 하면 두 번 등록된다.
-  let proposal: OperatorProposal | null = null;
-  try {
-    const useResult = entry.input.copyMode !== 'fixed' && entry.result;
-    proposal = await generateProposalForOperator(operator.id, useResult ? { precomputed: entry.result } : undefined);
-  } catch (e: any) {
-    console.warn('[AutomarketingPreview] 첫 회차 저장 중 오류(등록 유지 · 저장 상태로 판정):', e?.message || e);
-  }
-  // 반환값만 믿지 않는다(Codex 1R) — 제안 INSERT 뒤 후속 단계가 던져도 행은 남는다. 저장 상태로 판정하고, 사유는 run-now 와 같은 함수로.
-  //   ⛔ 모르는 상태를 「없음」으로 접지 않는다(Codex 2R · 되돌림과 같은 뿌리) — 재조회가 실패하면 「확인하지 못했다」고 말한다.
-  //   「만들지 못했다」는 재조회가 0행을 정상으로 돌려준 때만.
-  let message: string | null = null;
-  if (!proposal) {
-    try {
-      proposal = await findOpenProposalForOperator(operator.id, companyId);
-      if (!proposal) message = await explainEmptyRound(operator.id, companyId);
-    } catch (e: any) {
-      console.warn('[AutomarketingPreview] 첫 회차 저장 상태 확인 실패:', e?.message || e);
-      message = START_STATE_UNKNOWN_MESSAGE;
+  if (!isUuid(previewId)) return null;
+  return withLock(companyId, userId, async () => {
+    const prior = await query(
+      `SELECT * FROM continuous_operators WHERE id = $1::uuid AND company_id = $2::uuid AND created_by = $3::uuid`,
+      [previewId, companyId, userId],
+    );
+    if (prior.rows[0]) {
+      const op = mapRowToOperator(prior.rows[0]);
+      dropPreview(previewId);
+      let proposal: OperatorProposal | null = null;
+      let message: string | null = null;
+      try {
+        proposal = await findOpenProposalForOperator(op.id, companyId);
+        if (!proposal) message = START_STATE_UNKNOWN_MESSAGE;
+      } catch { message = START_STATE_UNKNOWN_MESSAGE; }
+      return { operator: op, appliedSegment: null, proposal, message, approvedUntil: op.approvedUntil ? op.approvedUntil.toISOString() : null };
     }
-  }
-  return { operator, appliedSegment: entry.appliedSegment, proposal, message, approvedUntil };
+    const e = peekPreview(previewId, companyId, userId);
+    if (!e || e.operatorId) return null;
+    // 시작 가능 판정은 서버가 다시 한다(창 상태를 믿지 않는다) · 화면이 본 판이 아니면 지금 상태를 돌려준다(본 것 = 등록한 것 · Codex 2R)
+    const checked = await refreshEntry(e, previewId, 'existing');
+    assertSeen(e, checked, revision);
+    if (!checked.ready) throw new PreviewInputError(checked.reason || '아직 시작할 수 없는 상태예요. 창에 표시된 안내를 먼저 마무리해 주세요.');
+    const useResult = e.input.copyMode !== 'fixed' && e.result ? e.result : null;
+    const messages: any[] = Array.isArray(useResult?.messages) ? useResult.messages : [];
+    // ★ 1024 화면이 보고 있던 안 = 첫 회차가 보내는 안(회의론자 §9-9) — 없거나 틀리면 추천 순서(통과 안 → 추천 → 0)
+    const vi = typeof variantIndex === 'number' && Number.isInteger(variantIndex) && messages[variantIndex] ? variantIndex : null;
+    const win = confirmedWindow(checked);
+    const { operator } = await registerOperator(e.input, { id: previewId, window: { startAt: win.startAt, until: win.until } });
+    dropPreview(previewId);   // 커밋 뒤에만 지운다
+    // 등록은 끝났다 — 첫 회차 저장이 실패해도 등록 · 차감은 유효하다(정해진 회차에 다시 만든다).
+    let proposal: OperatorProposal | null = null;
+    try {
+      proposal = await generateProposalForOperator(operator.id, useResult ? { precomputed: useResult, variantIndex: vi } : undefined);
+    } catch (err: any) {
+      console.warn('[AutomarketingPreview] 첫 회차 저장 중 오류(등록 유지 · 저장 상태로 판정):', err?.message || err);
+    }
+    // 반환값만 믿지 않는다(Codex 1R) — 저장 상태로 판정하고, 사유는 run-now 와 같은 함수로. 재조회가 실패하면 「확인하지 못했다」(Codex 2R).
+    let message: string | null = null;
+    if (!proposal) {
+      try {
+        proposal = await findOpenProposalForOperator(operator.id, companyId);
+        if (!proposal) message = await explainEmptyRound(operator.id, companyId);
+      } catch (err: any) {
+        console.warn('[AutomarketingPreview] 첫 회차 저장 상태 확인 실패:', err?.message || err);
+        message = START_STATE_UNKNOWN_MESSAGE;
+      }
+    }
+    return { operator, appliedSegment: e.appliedSegment, proposal, message, approvedUntil: win.until.toISOString() };
+  });
 }
 
 // ── 실행 중 자동 마케팅의 승인 창(다음 승인 · 조건 확인) ──
@@ -600,8 +924,10 @@ export async function previewOperatorApproval(companyId: string, operatorId: str
     }, tr);
     // 승인 창도 서버 보관본 하나 — 편집(preview/update) · 승인(approve-window)이 이것만 쓴다. 보는 사람이 주인(잠금 · 꺼내기)
     const entry: PreviewEntry = {
-      companyId, userId: viewerUserId, input, translation: tr, result: null, resultBenefit: null, appliedSegment: null,
+      companyId, userId: viewerUserId, input, translation: tr, result: null, resultPrint: null, appliedSegment: null,
       createdAt: Date.now(), operatorId: op.id, rev: 0, shownStart: null,
+      screenKey: null, scheduleWritten: true, benefitAsk: null, questions: [], notes: [], bodyPrint: '',
+      scheduleSeen: operatorScheduleShape(op),
     };
     const previewId = putPreview(entry);
     // AI 문안은 회차마다 그때 만든다 — 승인 창에서는 만들지 않는다(차감 0)
@@ -667,9 +993,12 @@ export async function approveOperatorFromScreen(companyId: string, operatorId: s
       copy: { mode: copyMode, fixedCopy },
       benefitContent: e.input.benefitContent ?? null,
       window: confirmedWindow(out),
+      // ③ · ② 「매월로」 답일 때만 창이 보여 준 주기를 저장한다(창의 회차 = 이 주기) · 답이 없으면 넘기지 않는다(창을 연 뒤 바뀐 주기를 옛 값으로 덮지 않게)
+      schedule: e.scheduleAnswered ? { schedule: e.input.schedule as any, scheduleDayOfWeek: e.input.scheduleDayOfWeek ?? null, scheduleDayOfMonth: e.input.scheduleDayOfMonth ?? null } : null,
+      seenSchedule: e.scheduleSeen ?? null,
     });
     if (!win) return null;
-    previews.delete(previewId);   // 승인한 창은 끝 — 같은 창으로 두 번 저장하지 않는다
+    dropPreview(previewId);   // 승인한 창은 끝 — 같은 창으로 두 번 저장하지 않는다
     return { until: win.until.toISOString() };
   });
 }
@@ -677,6 +1006,7 @@ export async function approveOperatorFromScreen(companyId: string, operatorId: s
 /** 테스트 전용 — 보관 · 잠금 비우기 */
 export function __resetPreviewStoreForTest(): void {
   previews.clear();
+  previewByKey.clear();
   inflight.clear();
 }
 

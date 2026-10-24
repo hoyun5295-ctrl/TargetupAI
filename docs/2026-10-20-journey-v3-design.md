@@ -473,6 +473,8 @@ journey-activation.ts:85 `firstActivation` 한 값을 세 곳이 쓴다(과금 :
 
 ## 16. 범위 밖 · 추가 과제 (착수 안 함 · 기록만)
 
+> **★1023 여정 결함 0 에서 닫음:** 재검사 2시간 초과(보내지 않고 기다림 · 경보) · 요금제 내림 예상(자동 마케팅 포함) · 성별 · 생일 조건 · 지도 입구 한 길 · 탭 이름. 남은 것 = 칸 고친 시각(미검증) · 자동 마케팅 마이너스(축 밖) · 고객사 고유 칸(D4 「다음」) → [결함 0 기록](2026-10-23-journey-zero-defect-design.md) §6.
+
 - 문안을 고친 뒤 재검사가 2시간 안에 안 돌면 검사 없이 나감(executor:660 PRETEST-MISS) · 화면 문구는 「보내기 전에 다시 검사해요」로만 쓰고 시간을 약속하지 않는다.
 - journey_steps.updated_at 을 updateJourneyStep 이 올리지 않음(builder:1236-1253 · DB 트리거 여부 미검증 · 확인 = `SELECT tgname FROM pg_trigger WHERE tgrelid = 'journey_steps'::regclass`).
 - 요금제 내림 예상이 여정 밖 운영 출처(continuous-operator-send)를 세지 않음.

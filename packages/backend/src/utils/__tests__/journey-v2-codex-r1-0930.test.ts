@@ -178,11 +178,12 @@ describe('워커 배선(원문)', () => {
     expect(R).toContain('[journeyId, companyId, cooldownDays, PER_JOURNEY_BATCH_LIMIT, lineage]');
   });
   it('끝 칸 완료 = 발송비는 상태와 무관하게 · 완료 전환만 진행 중일 때', () => {
-    const fn = between(SRC('journey-executor.ts'), 'async function completeAtEndStep', '\n}\n');
-    expect(fn).toContain('total_cost = e.total_cost + $3');
+    // ★ 2026-10-23 완료 셋(마지막 칸 · 끝 칸 · 칸 없음)이 finishExecution 한 함수로 모였다
+    const fn = between(SRC('journey-executor.ts'), 'async function finishExecution', '\n}\n');
+    expect(fn).toContain('total_cost = e.total_cost + $3::numeric');
     expect(fn).toContain("CASE WHEN prev.status = 'active' THEN 'completed' ELSE e.status END");
     expect(fn).not.toMatch(/WHERE id = \$1::uuid AND status = 'active'/);
-    expect(fn).toContain('completed ? 1 : 0');
+    expect(fn).toContain('stats_total_completed = j.stats_total_completed + CASE WHEN done.completed THEN 1 ELSE 0 END');   // ★ 1023 한 문장
   });
 });
 

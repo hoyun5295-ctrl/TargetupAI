@@ -114,7 +114,7 @@ export default function PhoneComposer({
   const seeText = server ? server.message : localSeen;
   const sampleNote = mode !== 'see' ? null
     : journeyId
-      ? (server ? (server.hasSample ? `${server.sampleName || '대상'} 고객에게 가는 모습이에요` : '아직 이 조건의 고객이 없어 기본값으로 채워 보여요') : null)
+      ? (server ? (server.hasSample ? `${server.sampleName || '대상'} 고객에게 가는 모습이에요` : '아직 이 조건의 고객이 없어 고객 정보 자리는 비워 보여요') : null)
       : (sampleCustomer ? '대상 고객 1명 기준으로 채워 보여요' : '아직 이 조건의 고객이 없어 원문으로 보여요');
 
   const tab = (id: 'write' | 'see', label: string, Icon: typeof Eye) => (

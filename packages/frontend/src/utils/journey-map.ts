@@ -214,12 +214,12 @@ export interface AttachCheckRow {
   fix: AttachFix | null;
 }
 
-export interface InterviewPlan { key: string; triggerEvent: string; title: string; objective: string }
+export interface InterviewPlan { key: string; triggerEvent: string; title: string; objective: string; sentence?: string }
 export interface InterviewOption { value: string; label: string; desc?: string; disabled?: boolean; reason?: string }
 export interface InterviewQuestion {
   id: string;
   planKey: string;
-  kind: 'choice' | 'text';
+  kind: 'choice' | 'text' | 'date';
   label: string;
   help?: string;
   options?: InterviewOption[];
@@ -235,6 +235,8 @@ export interface InterviewPrepared {
   questions: InterviewQuestion[];
   callback: { defaultPhone: string | null; options: Array<{ phone: string; description: string | null }> };
   costPerJourney: number;
+  /** ★ 2026-10-23 한 줄 반복 발송 점검(날짜 말 · 혜택) — 질문 위에 보인다 · 막지 않는다. */
+  notes?: string[];
 }
 
 export type BatchResultCode = 'NOT_FOUND' | 'DB_MIGRATION_PENDING' | 'PRETEST_REQUIRED' | 'INSUFFICIENT_CREDIT' | 'ACTIVATE_FAILED' | 'CALLBACK_CONFIRM_REQUIRED' | 'NOT_ALLOWED';

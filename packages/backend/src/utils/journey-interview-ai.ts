@@ -13,13 +13,20 @@ import { callAIWithFallback } from '../services/ai';
 import { runInCreditBundle } from './ai-credit-context';
 import { checkCredit } from './ai-credit';
 import { getCreditCost } from './ai-credit-calc';
-import { formatTriggerMenuForAi, resolveTriggerAvailability, availabilityByEvent } from './journey-trigger-capability';
+import { formatTriggerMenuForAi, resolveTriggerAvailability, availabilityByEvent, isCreatableTriggerEvent, isProductPickTrigger, triggerLabel } from './journey-trigger-capability';
+// ★ 2026-10-23 한 줄 여정 한 길 — 듣기 · 반복 발송 점검 = 1023 한줄 CT(한 곳)
+import { listenLine } from './one-line-ct/listen';
+import { checkRecurringLine } from './one-line-ct/recurring';
+import { presetObjectiveFor } from './journey-opportunities';
+import { JOURNEY_TEMPLATES, type JourneyTemplateCode } from './journey-builder';
+import { entryEndsColumnReady } from './journey-lineage';
+import { JourneyMigrationPendingError } from './journey-trigger-db';
 import { getCompanyJourneyFacts } from './company-data-profile';
 import { generateJourneyPackage } from './journey-ai-generator';
 import { JourneyInputError } from './journey-step-limits';
 import { listJourneyCallbackNumbers, defaultCallbackOf, saveJourneyPackageAsDraft, nextDraftChargeKey, chargeThenSaveDraft } from './journey-draft-save';
 import {
-  buildInterviewQuestions, decideJourneySpec, sanitizeInterviewPlans, MAX_INTERVIEW_PLANS,
+  buildInterviewQuestions, decideJourneySpec, sanitizeInterviewPlans, MAX_INTERVIEW_PLANS, kstTodayYmd,
   type InterviewAnswers, type InterviewPlan, type InterviewQuestion, type TriggerAvailability,
 } from './journey-interview';
 
@@ -67,22 +74,57 @@ export async function loadInterviewAvailability(companyId: string): Promise<Trig
   return availabilityByEvent(resolveTriggerAvailability(await getCompanyJourneyFacts(companyId)));
 }
 
-export async function prepareInterview(companyId: string, sentence: string): Promise<{
+export interface InterviewPrepared {
   plans: InterviewPlan[];
   questions: InterviewQuestion[];
   callback: { defaultPhone: string | null; options: Array<{ phone: string; description: string | null }> };
   costPerJourney: number;
-}> {
+  /** ★ 2026-10-23 한 줄 반복 발송 점검(여정은 계속 나간다 · 날짜 말 · 혜택) — 막지 않는다 · 화면이 질문 위에 보인다. */
+  notes: string[];
+}
+
+/**
+ * ★ 2026-10-23 한 줄 여정 한 길 — 문장 → 계획(AI 해석 · 차감 0) + 듣기(listenLine · AI 0)로 혜택 · 마감일을 칸에 채워 둔다.
+ *   한 줄 입구 · 지도 한 줄 · 문장으로 만들기가 모두 이 함수 하나다(옛: 한 줄은 패키지를 화면에 돌려주는 다른 길 · 돌려보기마다 차감).
+ */
+export async function prepareInterview(companyId: string, sentence: string): Promise<InterviewPrepared> {
   const [plans, availability, numbers] = await Promise.all([
     parseJourneyIntent(companyId, sentence),
     loadInterviewAvailability(companyId),
     listJourneyCallbackNumbers(companyId),
   ]);
+  const intent = listenLine(sentence);
+  const said = String(sentence || '').trim().slice(0, MAX_INTERVIEW_SENTENCE);
   return {
-    plans,
-    questions: buildInterviewQuestions(plans, availability),
+    plans: plans.map((p) => ({ ...p, sentence: said })),   // 대상 조건은 해석 AI 가 옮긴 목표문이 아니라 이 한 줄에서 읽는다(Codex 1R)
+    questions: buildInterviewQuestions(plans, availability, { benefit: intent.concreteBenefit ? intent.benefit : null, entryEndsOn: intent.periodEnd }),
     callback: { defaultPhone: defaultCallbackOf(numbers), options: numbers.map((n) => ({ phone: n.phone, description: n.description })) },
     costPerJourney: getCreditCost('journey-ai-generate'),
+    notes: checkRecurringLine(intent, 'journeys').map((n) => n.text),
+  };
+}
+
+/**
+ * ★ 2026-10-23 한 줄 여정 한 길 — 시작 사건이 정해진 입구(빠른 시작 · 기회 카드 · 다음 수 · 한 줄 답 카드 · 지도 [만들기])의 질문표.
+ *   AI 0 · 차감 0 · 설계 · 저장은 문장과 같은 designJourneyFromInterview(초안마다 차감 · 멱등).
+ *   상품 재구매는 상품 고르기 창 전용(상품 없이 만들면 영영 0건).
+ */
+export async function prepareInterviewPreset(companyId: string, input: { triggerEvent?: string | null; templateCode?: string | null; objective?: string | null }): Promise<InterviewPrepared> {
+  const fromTemplate = input.templateCode ? JOURNEY_TEMPLATES[input.templateCode as JourneyTemplateCode]?.triggerEvent : undefined;
+  const trigger = String(input.triggerEvent || fromTemplate || '').trim();
+  if (!trigger || !isCreatableTriggerEvent(trigger)) throw new JourneyInputError('지원하지 않는 시작 사건이에요. 다시 골라 주세요.');
+  if (isProductPickTrigger(trigger)) throw new JourneyInputError('상품 재구매 여정은 상품을 고르는 창에서 만들어요.');
+  const objective = String(input.objective || '').trim().slice(0, 300) || presetObjectiveFor(trigger) || '';
+  const [plan] = sanitizeInterviewPlans({ plans: [{ triggerEvent: trigger, title: `${triggerLabel(trigger)} 여정`, objective }] });
+  if (!plan) throw new JourneyInputError('만들 수 없는 시작 사건이에요. 다시 골라 주세요.');
+  const [availability, numbers] = await Promise.all([loadInterviewAvailability(companyId), listJourneyCallbackNumbers(companyId)]);
+  const intent = objective ? listenLine(objective) : null;
+  return {
+    plans: [plan],
+    questions: buildInterviewQuestions([plan], availability, intent ? { benefit: intent.concreteBenefit ? intent.benefit : null, entryEndsOn: intent.periodEnd } : {}),
+    callback: { defaultPhone: defaultCallbackOf(numbers), options: numbers.map((n) => ({ phone: n.phone, description: n.description })) },
+    costPerJourney: getCreditCost('journey-ai-generate'),
+    notes: [],
   };
 }
 
@@ -91,6 +133,11 @@ export interface InterviewDesignResult {
   name: string;
   triggerEvent: string;
   charged: number;
+  /** ★ 2026-10-23 저장된 대상을 사람 말로(작업 화면을 열기 전에 보인다) · 반영 못 한 대상 조건 */
+  targetSummary?: string;
+  notices?: string[];
+  /** 저장한 「목표를 이루면 멈춤」(다음 수 안내가 「이어받습니다」를 말하는 근거) */
+  goalExitEnabled?: boolean;
 }
 
 // 같은 프로세스에서 같은 (회사 · 인터뷰 · 계획) 요청이 겹치거나 다시 오면 같은 결과를 돌려준다(두 번 누름 · 재시도). 30분 뒤 잊는다.
@@ -123,12 +170,12 @@ export async function designJourneyFromInterview(input: {
   if (running) return running;
 
   const job = (async () => {
-    const [plan] = sanitizeInterviewPlans({ plans: [input.plan] });
+    const [plan] = sanitizeInterviewPlans({ plans: [input.plan] });   // 사람이 쓴 한 줄(sentence)도 그대로 남는다
     if (!plan) throw new JourneyInputError('만들 수 없는 시작 사건이에요. 질문을 다시 받아 주세요.');
     plan.key = input.plan.key;
     plan.title = String(input.plan.title || plan.title).slice(0, 30);
     const availability = await loadInterviewAvailability(input.companyId);
-    const decided = decideJourneySpec(plan, buildInterviewQuestions([plan], availability), input.answers || {});
+    const decided = decideJourneySpec(plan, buildInterviewQuestions([plan], availability), input.answers || {}, kstTodayYmd());
     if (!decided.ok) throw new JourneyInputError(decided.error);
     const spec = decided.spec;
 
@@ -137,6 +184,9 @@ export async function designJourneyFromInterview(input: {
     const callbackNumber = wanted && numbers.some((n) => n.phone === wanted) ? wanted : defaultCallbackOf(numbers);
     if (!callbackNumber) throw new JourneyInputError(numbers.length === 0 ? '회신번호를 먼저 등록해 주세요.' : '보낼 회신번호를 골라 주세요.');
 
+    if (spec.entryEndsOn && !(await entryEndsColumnReady())) {
+      throw new JourneyMigrationPendingError('새 고객 받는 마지막 날을 저장할 준비가 아직 안 됐어요. DB 마이그레이션 필요: 운영자에게 여정 표 ALTER 실행을 요청하거나 마지막 날을 비우고 만들어 주세요.');
+    }
     const cost = getCreditCost('journey-ai-generate');
     const chargeKey = await nextDraftChargeKey(input.companyId, `journey-interview:${input.companyId}:${input.interviewId}:${plan.key}`);
     await checkCredit(input.companyId, cost);
@@ -149,7 +199,8 @@ export async function designJourneyFromInterview(input: {
       createdBy: input.userId,
       objective: `${spec.objective}${timingText}`,
       preferTriggerEvent: spec.triggerEvent,
-      benefitText: spec.benefitText || undefined,
+      audienceLine: plan.sentence,
+      benefitText: spec.benefitText,   // null = 질문표에서 비움(목표문을 혜택 근거로 쓰지 않는다 · Codex 1R)
       timing: input.timing,
     });
     const pkg = await runInCreditBundle(async () => {
@@ -169,9 +220,10 @@ export async function designJourneyFromInterview(input: {
         callbackNumber,
         objective: spec.objective,
         goalExitEnabled: spec.goalExitEnabled,
+        entryEndsOn: spec.entryEndsOn,
       }),
     });
-    const result: InterviewDesignResult = { journeyId, name: pkg.name, triggerEvent: spec.triggerEvent, charged };
+    const result: InterviewDesignResult = { journeyId, name: pkg.name, triggerEvent: spec.triggerEvent, charged, targetSummary: pkg.targetSummary, notices: pkg.droppedConditionNotices, goalExitEnabled: typeof spec.goalExitEnabled === 'boolean' ? spec.goalExitEnabled : pkg.goalExitDefault };
     designDone.set(key, { at: Date.now(), result });
     return result;
   })();

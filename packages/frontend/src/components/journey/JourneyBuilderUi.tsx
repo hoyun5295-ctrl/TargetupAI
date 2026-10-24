@@ -15,22 +15,27 @@ export interface AudienceCondition { field: string; op: string; value: string; }
  * applyCustomerConditions 허용 필드 = 서버 CUSTOMER_CONDITION_FIELDS 와 **같은 키 집합**(짝 시험 journey-v3-cond-fields-1020 이 고정).
  * ★ 2026-10-20 V.3 §7-1 — 수신 동의 · 마지막 구매 N일 을 더했다(옛 8칸 · 서버는 10칸이라 저장된 조건이 화면에서 키 그대로 보였다).
  *   kind = 값 입력 모양(목록 = 회사 실제 값에서 고름 · 숫자 · 예/아니오). 연산자는 모양마다 허용한 것만 보인다.
+ * ★ 2026-10-23 여정 결함 0 — 성별(여성 · 남성) · 생일 달(1~12)을 더했다(서버 journey-condition-fields 표와 같은 12칸).
  */
-export type CondKind = 'list' | 'text' | 'number' | 'bool' | 'days';
+export type CondKind = 'list' | 'text' | 'number' | 'bool' | 'days' | 'gender' | 'month';
 export const COND_FIELDS: Array<{ key: string; label: string; kind: CondKind; unit?: string }> = [
   { key: 'grade', label: '등급', kind: 'list' }, { key: 'region', label: '지역', kind: 'list' },
   { key: 'store_name', label: '매장명', kind: 'text' }, { key: 'store_code', label: '매장코드', kind: 'list' },
-  { key: 'age', label: '나이', kind: 'number', unit: '세' }, { key: 'purchase_count', label: '구매횟수', kind: 'number', unit: '번' },
+  { key: 'age', label: '나이', kind: 'number', unit: '세' }, { key: 'gender', label: '성별', kind: 'gender' }, { key: 'birth_month', label: '생일 달', kind: 'month', unit: '월' },
+  { key: 'purchase_count', label: '구매횟수', kind: 'number', unit: '번' },
   { key: 'total_purchase_amount', label: '누적구매액', kind: 'number', unit: '원' }, { key: 'points', label: '포인트', kind: 'number', unit: 'P' },
   { key: 'sms_opt_in', label: '문자 수신 동의', kind: 'bool' },
   { key: 'days_since_purchase', label: '마지막 구매 뒤 지난 날', kind: 'days', unit: '일' },
 ];
 export const condLabel = (k: string) => COND_FIELDS.find((f) => f.key === k)?.label || '알 수 없는 조건';
+/** 조건 값 사람 말 — 성별 코드(F · M) = 여성 · 남성 · 생일 달 = N월. */
+export const condValueText = (field: string, v: unknown) => (field === 'gender' ? (v === 'M' ? '남성' : v === 'F' ? '여성' : String(v ?? '')) : field === 'birth_month' ? `${v}월` : String(v ?? ''));
 export const COND_OPS = [
   { key: '==', label: '같음' }, { key: '!=', label: '다름' }, { key: '>=', label: '이상' }, { key: '<=', label: '이하' }, { key: '>', label: '초과' }, { key: '<', label: '미만' },
 ];
 const OPS_BY_KIND: Record<CondKind, string[]> = {
   list: ['==', '!='], text: ['==', '!='], bool: ['=='], number: ['>=', '<=', '>', '<', '==', '!='], days: ['>=', '<=', '>', '<'],
+  gender: ['==', '!='], month: ['==', '!=', '>=', '<='],
 };
 export const condOpsFor = (field: string) => {
   const kind = COND_FIELDS.find((f) => f.key === field)?.kind || 'text';
@@ -115,7 +120,8 @@ export function ConditionRow({ c, onChange, onRemove, valueOptions }: {
       <select value={c.field} aria-label="조건 칸" onChange={(e) => {
         const next = e.target.value;
         const nextOps = condOpsFor(next).map((o) => o.key);
-        onChange({ field: next, op: nextOps.includes(c.op) ? c.op : nextOps[0], value: COND_FIELDS.find((f) => f.key === next)?.kind === 'bool' ? 'true' : '' });
+        const nextKind = COND_FIELDS.find((f) => f.key === next)?.kind;
+        onChange({ field: next, op: nextOps.includes(c.op) ? c.op : nextOps[0], value: nextKind === 'bool' ? 'true' : nextKind === 'gender' ? 'F' : nextKind === 'month' ? String(new Date().getMonth() + 1) : '' });
       }} className={cls}>
         {!meta && <option value={c.field}>알 수 없는 조건</option>}
         {COND_FIELDS.map((f) => <option key={f.key} value={f.key}>{f.label}</option>)}
@@ -129,6 +135,15 @@ export function ConditionRow({ c, onChange, onRemove, valueOptions }: {
         <select value={String(c.value) === 'false' ? 'false' : 'true'} aria-label="값" onChange={(e) => onChange({ op: '==', value: e.target.value })} className={`${cls} flex-1 min-w-[120px]`}>
           <option value="true">동의한 고객</option>
           <option value="false">동의하지 않은 고객</option>
+        </select>
+      ) : meta?.kind === 'gender' ? (
+        <select value={c.value === 'M' ? 'M' : 'F'} aria-label="값" onChange={(e) => onChange({ value: e.target.value })} className={`${cls} flex-1 min-w-[120px]`}>
+          <option value="F">여성</option>
+          <option value="M">남성</option>
+        </select>
+      ) : meta?.kind === 'month' ? (
+        <select value={c.value} aria-label="값" onChange={(e) => onChange({ value: e.target.value })} className={`${cls} flex-1 min-w-[120px]`}>
+          {Array.from({ length: 12 }, (_, i) => String(i + 1)).map((m) => <option key={m} value={m}>{m}월</option>)}
         </select>
       ) : meta?.kind === 'list' && list.length > 0 ? (
         <select value={c.value} aria-label="값" onChange={(e) => onChange({ value: e.target.value })} className={`${cls} flex-1 min-w-[120px]`}>

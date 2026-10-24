@@ -49,10 +49,11 @@
 | **생성·활성화** | `utils/journey-builder.ts` | 템플릿 · 저장 화이트리스트 · 활성화 게이트 · 기준선 · 스텝 추가/삭제 · **검증 무효화 단일 문**(`withJourneyValidationReset`) |
 | **안전** | `utils/journey-safety-filter.ts` · `journey-intake-grace.ts` | 발송 자격 필터 · 이관 유예 |
 | **화면 카탈로그** | `frontend/utils/journey-trigger-catalog.ts` | 트리거 카드 · 이벤트 변수 호환 판정 · **배열 순서 = 표시 순서** |
-| **화면 — 진입** | `frontend/components/journey/JourneyPlanModal.tsx` | 추천 근거·목적·스텝 수 이유·데이터 가능 여부 |
-| **화면 — 스텝** | `frontend/components/journey/JourneyStepStudio.tsx` | 한 화면 = 스텝 하나 완결 · 스텝별 전환 · 야간 안내 |
-| **화면 — 저장** | `frontend/components/journey/JourneyBriefingModal.tsx` | 브리핑 · 스텝 클릭 상세 (판정은 페이지의 `collectStepIssues`가 소유) |
-| **화면 — 마케팅 진입** | `frontend/components/journey/MarketingJourneyModal.tsx` | 자연어 입력 · 빠른 시작(메인에서 옮겨 온 것) |
+| **화면 — 만들기 한 길(★1023)** | `frontend/components/journey/map/InterviewModal.tsx` | 모든 만들기 입구(목록 한 줄 · 지도 한 줄 · 빠른 시작 · 기회 · 다음 수 · 한 줄 답 카드 · ?preset · ?objective) = 문장으로 만들기 창 → 질문표 → 서버 초안(초안마다 3 · 원장 멱등) → 작업 화면. 결과 모름 = 같은 요청 키로 다시 시도. 옛 계획 · 브리핑 · 마케팅 진입 창은 1023 삭제 |
+| **화면 — 스텝** | `frontend/components/journey/JourneyStepStudio.tsx` | 한 화면 = 스텝 하나 완결 · 작업 화면 큰 휴대폰(한 칸 모드)이 쓴다 |
+| **문안 렌더 한 곳(★1023)** | `utils/journey-message-render.ts` | 실행기 · 미리보기 · 켜기 검사 · 2시간 전 재검사가 같은 함수(고유 칸 · Liquid 회사 · 예측 점수 · 날씨 · 장바구니 · (광고)+080). 링크 줄이기만 실발송 전용 |
+| **대상 조건 칸 한 곳(★1023)** | `utils/journey-condition-fields.ts` | CUSTOMER_CONDITION_SPECS 한 표 = 추출 · 검증 · 사람 말 · AI 메뉴. 성별 · 생일 달 |
+| **주인 · 문 · 오류(★1023)** | `utils/journey-access.ts` · `utils/journey-route.ts` | 담당자 = 자기가 만든 여정만 · 모든 여정 주소 = journeyGate(자원 주소 남의 것 404) · journeyError(500 원문 0 · DB 준비 전 503) |
 | **화면 — 데이터 안내** | `frontend/components/journey/JourneyDataScopeNote.tsx` | "연동이 여정의 폭을 정한다" 공통 문구 — 메인·세 모달이 공유 |
 | **화면 — 모달 껍데기** | `frontend/components/journey/JourneyModalShell.tsx` | dialog 의미 · 초기 포커스 · Tab 가둠 · Esc · 포커스 복귀. 여정 모달 전부가 이 안에 |
 | **칸 한도** (★0929 V2) | `utils/journey-step-limits.ts` | 칸 종류 화이트리스트 · 칸 수 · 대기 상한 단일 출처 · 넘치면 거부(자르지 않음) · 모르는 종류 거부 · `JourneyInputError`(400) |
@@ -110,6 +111,7 @@
 
 | 시점 | 무엇 | 문서 |
 |---|---|---|
+| 2026-10-23 | **여정 결함 0** — 구조체크 결함 17 전부 닫음(기록만 0) · 뿌리 3(같은 사실 여러 곳 · 기록만으로 넘김 · 프롬프트 모순) = 사실마다 CT 하나 + 건너뛰기를 막는 짝 시험 · 만들기 한 길 · 담당자 = 자기 여정 · V.3 §16 · B-1020-3 닫힘 · DDL 0 | [설계 · 기록](2026-10-23-journey-zero-defect-design.md) |
 | 2026-10-20 | **V.3 대개편(배포 · DDL 완료 1020) + §18 기존 여정 뒤에 붙이기(배포 · CHECK DDL 완료 1020 · 서버 반영 확인)** — 켜진 여정 그 자리 수정 · 새 모양 한 흐름 · 200 계보당 1번 · 운영 10 계보당 하루 1번 · 크레딧이 모자라면 선불 · 후불 모두 멈춤 · 다시 켜기 구멍 4 · 작업 화면 + 큰 휴대폰 · 지도 한눈에 · 기존 고객 받기 | [설계서](2026-10-20-journey-v3-design.md) — 결정 §15 / 묶음 §13 / 구현 기록 §17 |
 | 2026-08-08 | **꾸미기 컬럼 배선 정정 · 발송 시점 직접 입력**(Harold 접수) — `data-profile` 응답 키 어긋남으로 꾸미기 칩·변수 카드가 0630 이래 죽어 있던 것을 고치고, 초기 조회 5개의 응답 키를 테스트로 고정. 상세 = §6-1 08-08(6) 행 | 표시·배선만 · 발송 경로 무변경 |
 | 2026-08-08 | **AI 다듬기 = 비포/애프터**(Harold 접수) — 3톤 후보 나열을 폐기하고 원본↔결과 두 칸에 바뀐 부분만 강조. 하이라이트 CT 분리·후보 수 계약(`variants`). 상세 = §6-1 08-08(5) 행 | 표시·요청 계약만 · 발송 경로 무변경 |
@@ -221,5 +223,6 @@
 - **화면 실측 8종** · **자동 종료 기본화**
 - **별건 5** — 이어달리기 설계서 §9-A 2건 + 기존 3건
 - **V.3 실측(1020 배포)** — [V.3 설계서](2026-10-20-journey-v3-design.md) §14-2(발송 · 돈 · 다시 켜기) · §18-8(뒤에 붙이기 1건: 붙여서 켜고 마친 고객이 5분 안에 들어오는지 · 같은 마침 두 번 0 · 떼기 되돌림)
-- **V.3 추가 과제** — 앞 여정 사건 값(주문 · 상품)을 뒤 여정에 이어 주기(지금은 그 값을 쓰는 여정을 붙이지 않음) · 켜진 여정 그 자리 시작 조건 저장 때 감시 세대 올리기(옵션 저장 경로 · [B-1020-3](../status/BUGS.md)) · 범위 밖 = B-1020-3
+- **V.3 추가 과제** — 앞 여정 사건 값(주문 · 상품)을 뒤 여정에 이어 주기(지금은 그 값을 쓰는 여정을 붙이지 않음). 시작 조건 저장 세대 · B-1020-3 = 1023 닫힘([결함 0](2026-10-23-journey-zero-defect-design.md))
+- **결함 0 실측(1023 · 배포 뒤)** — [결함 0 기록](2026-10-23-journey-zero-defect-design.md) §5(배포 전 담당자 영향 확인 · 한 줄 1건) · 남긴 것 = 같은 문서 §6(고객사 고유 칸 · 자동 마케팅 마이너스 · 칸 고친 시각)
 - ⛔ 착수 전 필독은 §7 · 불변 원칙·판정 계약은 §2·§3이 소유한다(여기 재서술 금지)

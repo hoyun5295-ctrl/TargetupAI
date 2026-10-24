@@ -69,8 +69,9 @@ describe('2. 혜택 근거 = 사용자 원문 한정', () => {
     const o = SRC('services', 'ai-orchestrator.ts');
     expect((o.match(/buildLineEventText\(ctx\.objective, ctx\.lineFacts\)/g) || []).length).toBe(2);
     // ★ 2026-10-19 B-1005-1① — 답이 없는 요청도 근거 = 목표 문장(회사 메모리 · 계절 힌트는 근거가 아니다)
-    expect(o).toContain('licenseText: licenseText ?? ctx.objective,');
-    expect(o).toContain('licenseText: licenseTextAI ?? ctx.objective,');
+    // ★ 2026-10-24 자동 마케팅 회차 = 혜택 근거가 사람 칸 하나(benefitLicense · AI 가 쓴 목표의 숫자는 근거 아님) · 그 밖은 지금 그대로
+    expect(o).toContain('licenseText: ctx.benefitLicense ?? licenseText ?? ctx.objective,');
+    expect(o).toContain('licenseText: ctx.benefitLicense ?? licenseTextAI ?? ctx.objective,');
     // ★ 2026-10-23 자동발송 = 혜택 근거 = 컨셉 글(licenseText · 설계서 docs/2026-10-23-oneline-ct-complete-design.md C2) · cVariant · lineFacts 는 여전히 넘기지 않는다(C안 시험 오염 0)
     const worker = SRC('utils', 'auto-campaign-worker.ts');
     expect(worker).not.toMatch(/lineFacts|cVariant/);
@@ -78,7 +79,8 @@ describe('2. 혜택 근거 = 사용자 원문 한정', () => {
     expect(SRC('utils', 'planner-copy.ts')).not.toMatch(/lineFacts|licenseText|cVariant/);
     const co = SRC('utils', 'continuous-operator.ts');
     expect(co).toContain('lineFacts: { benefit: op.benefitContent || null },');
-    expect(co).not.toMatch(/cVariant|licenseText/);
+    expect(co).toContain("benefitLicense: buildLineEventText('', { benefit: op.benefitContent || null }),");
+    expect(co).not.toMatch(/cVariant|licenseText:/);
   });
 });
 

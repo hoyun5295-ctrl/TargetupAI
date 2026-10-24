@@ -292,14 +292,16 @@ describe('반복 발송 점검(여정 · 자동발송 · C1)', () => {
     expect(auto.map((n) => n.kind)).toEqual(['passing_date', 'benefit_missing']);
     expect(auto[0].text).toContain('「이번 주말」');
     expect(auto[1].text).toContain('채우지 않으면 그 회차는 나가지 않아요');
-    expect(checkRecurringLine(listenLine('가을 세일 안내'), 'journeys')[0].text).toBe('혜택 문구가 없어요. 만든 뒤 혜택 칸에서 채워 주세요');
+    expect(checkRecurringLine(listenLine('가을 세일 안내'), 'journeys')[0].text).toBe('혜택 문구가 없어요. 아래 「넣을 혜택」 칸에 적으면 그 혜택만 실어요');
     expect(checkRecurringLine(listenLine('전 상품 20% 할인 안내'), 'auto-send')).toEqual([{ kind: 'benefit_fixed', text: '적어 주신 혜택만 실어요: 「20% 할인」' }]);
     expect(checkRecurringLine(listenLine(''), 'journeys')).toEqual([]);
     for (const n of auto) expect(n.text).not.toMatch(/[—–]/);
   });
-  it('판정 응답에 싣는다(menu = journeys · auto-send) · 여정 검토 화면 · 자동발송 컨셉 칸이 보인다', () => {
-    expect(read('../../routes/ai.ts')).toContain("const recurring = enabled && (menu === 'journeys' || menu === 'auto-send') ? checkRecurringLine(heard, menu) : [];");
-    expect(fe('pages/JourneysPage.tsx')).toContain('lineAsk.recurring.line === genObjective.trim()');
+  it('자동발송 = 판정 응답 · 여정 = 한 줄 여정 한 길의 질문표(★1023 여정 결함 0 · 옛 검토 화면만 읽던 죽은 안내 0)', () => {
+    expect(read('../../routes/ai.ts')).toContain("const recurring = enabled && menu === 'auto-send' ? checkRecurringLine(heard, menu) : [];");
+    expect(read('../journey-interview-ai.ts')).toContain("notes: checkRecurringLine(intent, 'journeys').map((n) => n.text)");
+    expect(fe('components/journey/map/InterviewModal.tsx')).toContain('(prepared.notes || []).map((n) => (');
+    expect(fe('pages/JourneysPage.tsx')).not.toContain('lineAsk.recurring');
     expect(fe('components/AutoSendFormModal.tsx')).toContain("void fetchOneLineGaps(t, [], 'auto-send')");
   });
 });

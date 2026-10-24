@@ -49,6 +49,7 @@ describe('AI 직접 호출 불변식 (소스 전수 스캔)', () => {
   it('불변식 4 — AI 호출 파일의 JSON.parse 는 DB 값 허용 목록만 (AI 응답 = extractJsonFromAiText)', () => {
     const DB_VALUE_ARGS = new Set([
       'row.memory_value', 'raw', 'ex.rows[0].memory_value', 'dm.brand_kit', 'metaStr', 'data', 'p.proposal_json', 'value',
+      'saved',   // ★ 1023 날짜축 계획 보관(우리가 JSON.stringify 로 넣은 결과 · AI 응답 아님 · journey-ai-generator)
     ]);
     const offenders: string[] = [];
     for (const { rel, src } of sources()) {

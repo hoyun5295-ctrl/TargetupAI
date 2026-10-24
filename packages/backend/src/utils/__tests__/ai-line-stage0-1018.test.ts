@@ -95,9 +95,12 @@ describe('0-1 · 0-2 · 0-4 소스 계약', () => {
     expect(ai).toMatch(/userType: req\.user\?\.userType \?\? null/);
   });
   it('orchestrateWithAI 도 0명이면 차감하지 않는다', () => {
+    // ★ 2026-10-24 두 경로의 돈 = 한 곳(chargeOrchestrate) — orchestrateWithAI 도 그 함수를 지난다
     const fn = orch.slice(orch.indexOf('export async function orchestrateWithAI'), orch.indexOf('async function _orchestrateWithAIImpl'));
-    expect(fn).toContain('chargeOnlyWithTarget');
-    expect(fn).toMatch(/result\.target\?\.count \?\? 0\) > 0/);
+    expect(fn).toContain('return chargeOrchestrate(ctx, creditOpts, () => _orchestrateWithAIImpl(ctx));');
+    const charge = orch.slice(orch.indexOf('async function chargeOrchestrate('), orch.indexOf('export async function orchestrate('));
+    expect(charge).toContain('chargeOnlyWithTarget');
+    expect(charge).toMatch(/result\.target\?\.count \?\? 0\) > 0/);
   });
   it('허브 대상 수 두 갈래 모두 범위 CT', () => {
     expect((orch.match(/resolveHubStoreScope\(ctx\.companyId, ctx\.userId, ctx\.userType\)/g) || []).length).toBe(2);

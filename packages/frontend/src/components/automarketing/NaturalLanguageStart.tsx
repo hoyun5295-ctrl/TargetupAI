@@ -2,7 +2,7 @@
 // 마케팅 담당자 UX: 입력 한 칸 + 예시 한 클릭 + 버튼 하나. 추가 입력 없음.
 // AI 초안 생성은 5초+ 소요 → 제출 중 로딩 오버레이 + 닫기 차단(D185).
 import { useState } from 'react';
-import { Sparkles, Check, Lock, Loader2 } from 'lucide-react';
+import { Sparkles, Lock, Loader2 } from 'lucide-react';
 import CopyStylePicker, { CopyStyleKey } from './CopyStylePicker';
 import { AI_GENERATE_COSTS } from '../../constants/credit';
 
@@ -14,8 +14,6 @@ const EXAMPLES: Array<{ label: string; goal: string }> = [
   { label: '계절 프로모션', goal: '이번 시즌에 맞춰 전체 활성 고객에게 시즌 프로모션 안내' },
 ];
 
-const AUTO_ITEMS = ['타겟', '채널', '발송 시각', '문안 초안', '예상 성과'];
-
 export default function NaturalLanguageStart({ submitting, onSubmit }: { submitting: boolean; onSubmit: (goal: string, copyStyle: CopyStyleKey | null) => void }) {
   const [goal, setGoal] = useState('');
   const [copyStyle, setCopyStyle] = useState<CopyStyleKey | null>(null);
@@ -24,7 +22,8 @@ export default function NaturalLanguageStart({ submitting, onSubmit }: { submitt
   return (
     <div className="relative">
       <h2 className="text-lg md:text-xl font-semibold text-slate-900">어떤 마케팅을 할까요?</h2>
-      <p className="text-[13px] text-slate-500 mt-1.5">목표를 한 줄로 적으면 타겟·채널·발송 시각·문안 초안은 AI가 잡습니다.</p>
+      {/* ★ 2026-10-24 받는 분은 AI 가 「잡지」 않는다(대상 판정 원칙 · 한 줄에서 못 읽으면 여쭤본다) */}
+      <p className="text-[13px] text-slate-500 mt-1.5">목표를 한 줄로 적으면 한 줄에서 정하지 못한 것만 여쭤보고, 문안 초안은 AI가 써요.</p>
 
       <textarea
         value={goal}
@@ -54,17 +53,6 @@ export default function NaturalLanguageStart({ submitting, onSubmit }: { submitt
       <div className="mt-4">
         <div className="text-xs text-slate-400 mb-2">문안 느낌 고르기 (선택)</div>
         <CopyStylePicker compact value={copyStyle} onChange={setCopyStyle} disabled={submitting} />
-      </div>
-
-      <div className="mt-5 rounded-xl border border-slate-200 bg-white px-4 py-3">
-        <div className="text-xs text-slate-400 mb-2.5">이 항목은 AI가 자동으로 잡습니다. 필요하면 다음 단계에서 조정</div>
-        <div className="flex flex-wrap gap-2">
-          {AUTO_ITEMS.map((it) => (
-            <span key={it} className="inline-flex items-center gap-1 text-[11px] px-2.5 py-1 rounded-full bg-emerald-50 text-emerald-700">
-              <Check className="w-3 h-3" />{it}
-            </span>
-          ))}
-        </div>
       </div>
 
       <button

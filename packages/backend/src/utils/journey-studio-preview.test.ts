@@ -78,12 +78,11 @@ describe('스튜디오가 그 축을 쓴다', () => {
  */
 describe('AI 꾸미기 — 고른 컬럼만 넘긴다', () => {
   it('전체 컬럼을 통째로 넘기던 형태가 남아 있지 않다', () => {
+    // ★ 2026-10-23 화면 패키지 스튜디오가 지워져(한 줄 여정 한 길) 꾸미기는 작업 화면이 소유한다 — 고른 컬럼(tokens)만 넘긴다.
     const page = readFileSync(resolve(process.cwd(), '../frontend/src/pages/JourneysPage.tsx'), 'utf8');
-    expect(
-      page,
-      '전체를 넘기면 사용자가 고르지 않은 컬럼이 문안에 들어간다',
-    ).not.toMatch(/handleAnchorDecorate\(body, dataProfileVars\.map/);
-    expect(page).toMatch(/handleAnchorDecorate\(body, selectedTokens\)/);
+    const ws = readFileSync(resolve(process.cwd(), '../frontend/src/components/journey/workspace/JourneyWorkspace.tsx'), 'utf8');
+    expect(page, '전체를 넘기면 사용자가 고르지 않은 컬럼이 문안에 들어간다').not.toMatch(/handleAnchorDecorate\(body, dataProfileVars\.map/);
+    expect(ws).toMatch(/decorate-message', 'POST', \{ message: cur\.messageTemplate, selectedVars: tokens/);
   });
 
   it('선택 0개면 꾸미기가 잠긴다 (다른 두 화면과 같은 규약)', () => {

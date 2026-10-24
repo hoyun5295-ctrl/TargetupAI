@@ -16,6 +16,7 @@
  */
 
 import { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import JourneyModalShell from './JourneyModalShell';
 import {
   X, Sparkles, CheckCircle2, AlertTriangle, Loader2, Wallet, TrendingUp,
@@ -84,6 +85,7 @@ export default function JourneyActivationConfirmModal({
   journeyId, journeyName, journeyStatus, goalExitEnabled, thresholdRecipients, activationCost, onClose, onActivated, token,
 }: Props) {
   const toast = useToast();
+  const navigate = useNavigate();
   const [capInput, setCapInput] = useState(thresholdRecipients != null ? String(thresholdRecipients) : '');
   /** 서버에 저장된 값 — prop은 목록에서 오므로 저장 직후 갱신되지 않는다. 이걸 안 두면 저장·재검증이 반복된다. */
   const [savedCap, setSavedCap] = useState<number | null>(thresholdRecipients ?? null);
@@ -230,13 +232,11 @@ export default function JourneyActivationConfirmModal({
     }
   };
 
-  // AI 자동 재생성 1-click — step 단위 placeholder/spam 오류 정정 호출 (backend 추가 endpoint — 본 모달은 안내만 + JourneysPage 편집 진입)
+  // ★ 2026-10-23 여정 결함 0(B-1020-3) — 걸린 칸 고치기 = 작업 화면의 그 칸(주소 ?journey=&step= · 목록 · 지도 · 작업 화면 어디서 켜도 같은 자리).
+  //   옛: 토스트에 내부 화면 이름을 보이고 아무도 듣지 않는 이벤트(journey:expand-step)를 쐈다.
   const onRegenerate = (failedStep: FailedStep) => {
-    toast.info('JourneysPage 편집 영역에서 step 본문을 정정 후 다시 활성화 의무');
     onClose();
-    // step expand + 편집 UI scroll — 향후 강화 영역 (현 세션 범위 X)
-    const evt = new CustomEvent('journey:expand-step', { detail: { journeyId, stepId: failedStep.stepId } });
-    window.dispatchEvent(evt);
+    navigate(`/ai-journeys?journey=${encodeURIComponent(journeyId)}&step=${encodeURIComponent(failedStep.stepId)}`);
   };
 
   const isInsufficientBalance = balance != null && result != null && balance < result.totalCost;
@@ -467,7 +467,7 @@ export default function JourneyActivationConfirmModal({
                           className="mt-2 inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-violet-100 hover:bg-violet-100 text-violet-900 text-[11px] font-semibold transition-colors"
                         >
                           <Wand2 className="w-3 h-3" />
-                          step 편집 영역 진입
+                          이 칸 고치기
                         </button>
                       </div>
                     ))}

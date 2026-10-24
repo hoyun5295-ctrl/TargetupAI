@@ -4,17 +4,16 @@ import { query, pool } from '../config/database';
 import { authenticate } from '../middlewares/auth';
 import { checkAPIStatus, extractVarCatalog, filterVarCatalogByData, generateMessages, recommendTarget, countFilteredCustomers, recommendNextCampaign, refineDirectMessage, callAIWithFallback } from '../services/ai';
 import {
-  createOperatorInputFromBody, operatorSaveErrorResponse,
+  createOperatorInputFromBody,
   runOperatorPreview, startOperatorFromPreview, updateOperatorPreview, previewOperatorApproval, approveOperatorFromScreen,
-  PreviewBusyError, PreviewInputError, PreviewStaleError, PREVIEW_EXPIRED_MESSAGE, APPROVAL_EXPIRED_MESSAGE,
+  PREVIEW_EXPIRED_MESSAGE, APPROVAL_EXPIRED_MESSAGE,
 } from '../utils/automarketing-preview';   // ★ 2026-10-05 자동 마케팅 미리보기 · 승인 창
+import { operatorGate, operatorError } from '../utils/operator-route';   // ★ 2026-10-24 자동 마케팅 문 · 오류 한 벌
 import { translateAudience } from '../utils/audience-translate';   // ★ 2026-10-05 대상 번역(신뢰 설계 §2-2)
 import { validateOperatorInput } from '../utils/continuous-operator';
 import { isAboutPageViewer } from '../utils/about-page-access';   // ★ 2026-10-07 소개 페이지 숨김(hoyun 전용)
 import { buildGenderFilter, buildGradeFilter, buildRegionFilter, getGenderVariants, getRegionVariants, isUuid } from '../utils/normalize';
 import { FIELD_MAP, FIELD_DISPLAY_MAP, reverseDisplayValue, getColumnFields, renderFieldValue } from '../utils/standard-field-map';
-import { replaceVariables } from '../utils/messageUtils';
-import { STANDARD_FIELD_FALLBACKS } from '../utils/var-fallback';
 import { selectJourneyTargetCustomerIds, findCustomerConditionIssues, describeCustomerConditionIssue } from '../utils/journey-target-extractor';
 import { filterByIndividualCallback } from '../utils/callback-filter';
 import { isValidCustomFieldKey } from '../utils/safe-field-name';
@@ -38,7 +37,7 @@ import type { FilterCountResult } from '../services/ai';
 import { segmentNeedsCycleBaseline, normalizeSegmentKey, schedulePeriod } from '../utils/automarketing-segment';
 import { hasCycleBaseline } from '../utils/operator-cycle-snapshot';
 import { aggregateCampaignPerformance } from '../utils/stats-aggregation';
-import { formatDateValue, getOpt080Number, buildAdMessage, buildAdSubject } from '../utils/messageUtils';
+import { formatDateValue, getOpt080Number } from '../utils/messageUtils';
 import { resolveJourneyAdFlag } from '../utils/journey-ad-policy';
 import { loadPlanContext, canUseFeature, requirePlanFeature, isBetaAccessAllowed, isAiOperatorAllowed } from '../utils/plan-guard';
 import { snsPublishEnabled } from '../utils/sns-constants';   // ★ 2026-09-20 허브 SNS 플래그(§3-11)
@@ -48,6 +47,9 @@ import { buildLineStepsPlan, isLineStepsChannel, lineStepsFp } from '../utils/on
 import { loadLineStepsCompanyFacts, lineStepsFullCost, resolveLineStepsCharge } from '../utils/line-steps-context';
 import { buildCompositionPlans, compositionInfos, runLineJudge, LineJudgeBusyError, listenLine, type LineCompositionPlan } from '../utils/one-line-ct';
 import { checkRecurringLine } from '../utils/one-line-ct/recurring';
+import { renderJourneySmsMessage, pickJourneySampleCustomer } from '../utils/journey-message-render';
+import { journeyGate, journeyError, canAccessJourney } from '../utils/journey-route';
+import { accessibleJourneyIds } from '../utils/journey-access';
 import type { LineCompositionId } from '../utils/line-compositions';
 import { getBrandBasicInfo } from '../utils/brand-basic-info';
 import { resolveIntegrationActor } from '../utils/integration-scope';
@@ -82,7 +84,7 @@ import { aggregateSmsCountsByCampaign } from '../utils/stats-aggregation';
 // (2026-07-30) 브랜드 SMSQ 합류 — 옛 카카오 IMC 집계 import 폐기
 // ★ D176 (2026-05-19): Continuous Agentic Operator (사용자 동의 흐름)
 import {
-  createOperator,
+  registerOperator,
   listOperators,
   updateOperator,
   archiveOperator,
@@ -208,7 +210,9 @@ import { pauseReasonView } from '../utils/journey-pause-reason';
 import { reshapeJourney, ReshapeInputError } from '../utils/journey-reshape';
 import { buildAttachCheck } from '../utils/journey-lifecycle-map';
 import { isEndChipEnabled } from '../utils/journey-step-limits';
-import { createNewVersion } from '../utils/journey-lineage';
+import { lockLineage } from '../utils/journey-lineage';
+import { prepareInterviewPreset } from '../utils/journey-interview-ai';
+import { startGenOf } from '../utils/journey-after-config';
 import { attachCandidates, attachJourney, detachJourney, AttachBlockedError, AFTER_OUTCOMES, type AfterOutcome } from '../utils/journey-attach';
 import { prepareInterview, designJourneyFromInterview, MAX_INTERVIEW_SENTENCE } from '../utils/journey-interview-ai';
 import { listJourneyCallbackNumbers } from '../utils/journey-draft-save';
@@ -1083,8 +1087,9 @@ router.post('/one-line/gaps', async (req: Request, res: Response) => {
       }
     }
   }
-  // ★ 2026-10-23 한 번 만들면 계속 나가는 입구(여정 · 자동발송 설정 창) = 반복 발송 점검 문장(막지 않음 · C1)
-  const recurring = enabled && (menu === 'journeys' || menu === 'auto-send') ? checkRecurringLine(heard, menu) : [];
+  // ★ 2026-10-23 한 번 만들면 계속 나가는 입구 = 반복 발송 점검 문장(막지 않음 · C1). 여정은 한 줄 여정 한 길의 질문표(prepareInterview)가 소유한다
+  //   (옛: 여기서 여정 몫도 실었지만 화면이 검토 화면에서만 읽어 한 줄 기본 흐름에선 안 보였다 · 여정 결함 0).
+  const recurring = enabled && menu === 'auto-send' ? checkRecurringLine(heard, menu) : [];
   // ★ 2026-10-10 한 줄 DM 강화 — 몰 후보 검색어 · 혜택 % 값(여전히 AI 0 · DB 0 · 판정이 아니라 찾기 입력). 스위치 밖 = 빈 값.
   return res.json({
     success: true, enabled,
@@ -2048,40 +2053,33 @@ router.get('/operator/performance/data-availability', async (req: Request, res: 
 // ============================================================
 
 // Operator CRUD
+// ★ 2026-10-24 마케팅 캘린더 전용 등록(설계서 docs/2026-10-24-automarketing-oneline-design.md §2 · §3) — 다른 입구는 미리보기 창 하나로 간다.
+//   request_key = 화면 키(달마다 · 결과 받을 때만 지움) = 운영자 행 id. 같은 키 재전송 = 그 행(차감 0) · 등록 기록은 등록과 같은 트랜잭션.
 router.post('/operator/continuous', singleFlight('auto-marketing-create', async (req: Request, res: Response) => {
   try {
-    const companyId = req.user?.companyId;
-    const userId = req.user?.userId;
-    if (!companyId || !userId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
-    // 2026-06-19 (Harold 명시): 자동 마케팅 생성은 일반 사용자(company_user)도 가능 — 회사 관리자 전용 게이트 제거.
-    //   operator는 회사 스코프이며, 발송·돈 안전망(opt-out/광고080/예산/스팸)은 발송 시점에 그대로 적용된다.
-
-    const planCtx = await loadPlanContext(companyId);
-    if (!planCtx) return res.status(404).json({ success: false, error: '회사 정보를 찾을 수 없습니다.' });
-    if (!isAiOperatorAllowed(planCtx, req.user)) {
-      return res.status(403).json({ success: false, error: '본 기능은 요금제 가입 후 이용 가능합니다.', code: 'BETA_GATE' });
-    }
+    const gate = await operatorGate(req, res, { plan: true });
+    if (!gate) return;
+    const { companyId, userId } = gate;
+    const requestKey = typeof req.body?.request_key === 'string' ? req.body.request_key : '';
+    if (!isUuid(requestKey)) return res.status(400).json({ success: false, error: '화면을 새로 고친 뒤 다시 시도해 주세요.', code: 'REQUEST_KEY_REQUIRED' });
 
     const { calendar_month } = req.body;
-
-    // ★ 2026-07-05 마케팅 캘린더 경유 등록 — 같은 달에 살아있는 등록이 있으면 409(200크레딧 중복 차감 차단)
     const calendarMonth = calendar_month != null && Number(calendar_month) >= 1 && Number(calendar_month) <= 12
       ? Math.floor(Number(calendar_month)) : null;
-    if (calendarMonth != null) {
-      const { getActiveRegistration } = await import('../utils/marketing-calendar-store');
-      const existing = await getActiveRegistration(companyId, calendarMonth);
-      if (existing) {
-        return res.status(409).json({
-          success: false,
-          error: `${calendarMonth}월 캠페인은 이미 자동마케팅으로 등록되어 있습니다. 자동 마케팅 화면에서 확인해주세요.`,
-          code: 'CALENDAR_MONTH_ALREADY_REGISTERED',
-        });
-      }
+    if (calendarMonth == null) return res.status(400).json({ success: false, error: '이 입구는 마케팅 캘린더 등록 전용이에요. 자동 마케팅 화면에서 한 줄로 시작해 주세요.' });
+
+    // ★ 2026-07-05 마케팅 캘린더 경유 등록 — 같은 달에 살아있는 등록이 있으면 409(200크레딧 중복 차감 차단) · 같은 키 재전송은 아래 등록이 그 행을 돌려준다
+    const { getActiveRegistration } = await import('../utils/marketing-calendar-store');
+    const existing = await getActiveRegistration(companyId, calendarMonth);
+    if (existing && existing !== requestKey) {
+      return res.status(409).json({
+        success: false,
+        error: `${calendarMonth}월 캠페인은 이미 자동마케팅으로 등록되어 있습니다. 자동 마케팅 화면에서 확인해주세요.`,
+        code: 'CALENDAR_MONTH_ALREADY_REGISTERED',
+      });
     }
 
-    // ★ 2026-10-05 대상 번역(신뢰 설계 §2-2 · 등록 · 미리보기 · 승인 창 공용) — 축 · 칸 조건으로 한 번 고정한다.
-    //   옛: 등록 1회 축 매핑이 실패하면 자유 해석으로 등록돼 회차마다 AI 가 조건을 빼고 넓혔다(생일 쿠폰이 전체 고객).
-    //   막힘(데이터 없음 · 조건 없음 · 주기 짝) · 칸 고르기 필요 = 등록하지 않는다(400 · 차감 0). 등록이 거절할 입력은 AI 전에 거른다.
+    // ★ 2026-10-05 대상 번역(신뢰 설계 §2-2) — 축 · 칸 조건으로 한 번 고정한다. 막힘 · 칸 고르기 필요 = 등록하지 않는다(400 · 차감 0).
     const baseInput = createOperatorInputFromBody(companyId, userId, req.body);   // ★ 2026-10-05 미리보기와 같은 조립
     try { validateOperatorInput(baseInput as any); } catch (e: any) { return res.status(400).json({ success: false, error: e?.message || '입력을 확인해 주세요.' }); }
     const tr = await translateAudience({
@@ -2098,176 +2096,106 @@ router.post('/operator/continuous', singleFlight('auto-marketing-create', async 
         error: `${tr.unresolved.map((u) => `「${u.term}」`).join(' · ')}을(를) 어느 칸으로 판단할지 정해야 해요. 자동 마케팅 첫 화면의 한 줄 입력으로 시작하면 칸을 고를 수 있어요.`,
       });
     }
-    // ★ 2026-10-07 회신번호 — 화면이 바꿨을 때만 온다(안 오면 기본 번호 · 칸 없는 DB 에서도 등록이 막히지 않는다). 등록(차감) 전에 검사한다.
+    // ★ 2026-10-07 회신번호 — 화면이 바꿨을 때만 온다(안 오면 기본 번호). 등록(차감) 전에 검사한다.
     const cbInput = req.body?.callback_number !== undefined || req.body?.use_individual_callback !== undefined
       ? await checkOperatorCallback(companyId, userId, { callbackNumber: req.body.callback_number, useIndividualCallback: req.body.use_individual_callback })
       : null;
-    const operator = await createOperator({
+    const { operator } = await registerOperator({
       ...baseInput,
       segmentKey: tr.kind === 'axis' ? tr.segmentKey : null,
       segmentParams: tr.kind === 'axis' ? tr.segmentParams : null,
       audienceConditions: tr.kind === 'filters' ? tr.conditions : null,
-      callback: cbInput,   // 같은 INSERT 한 문장(차감 전 · Codex 1R)
-    });
+      callback: cbInput,   // 같은 INSERT 한 문장(차감과 같은 트랜잭션)
+    }, { id: requestKey, calendarMonth });
     const appliedSegment = tr.kind === 'axis' && tr.mapped ? { key: tr.segmentKey, label: tr.label } : null;
-    // ★ 2026-07-05: 캘린더 경유 등록 기록 — 실패해도 등록은 성공(fire-safe, 테이블 미생성 = 내부 생략)
-    if (calendarMonth != null) {
-      const { markCalendarRegistration } = await import('../utils/marketing-calendar-store');
-      markCalendarRegistration(companyId, calendarMonth, operator.id).catch((e: any) =>
-        console.log('[MarketingCalendar] 등록 기록 실패(등록은 성공):', e?.message || e));
-    }
     // appliedSegment — AI 매핑으로 고정된 축. 화면이 즉시 알린다(사용자 몰래 고정되는 상태 금지).
     return res.json({ success: true, operator, appliedSegment });
   } catch (err: any) {
-    const mapped = operatorSaveErrorResponse(err);   // ★ 2026-10-05 [시작]과 같은 응답
-    if (mapped) return res.status(mapped.status).json(mapped.body);
-    console.error('[Operator continuous POST] 오류:', err);
-    return res.status(500).json({ success: false, error: err?.message || 'Continuous Operator 신설 실패' });
+    return operatorError(res, err, 'continuous POST', '자동 마케팅을 등록하지 못했습니다. 잠시 뒤 다시 시도해 주세요.');
   }
 }));
 
 // ★ 2026-10-05 자동 마케팅 [제안 받기] = 미리보기(설계서 docs/2026-10-05-automarketing-preview-design.md §2)
-//   등록 0 · 첫 회차와 같은 계산 · 5크레딧(대상 0명이면 0). 시작은 아래 from-preview 가 미리보기 id 하나로만 한다.
+//   ★ 2026-10-24 한 줄 → 모자란 것만 묻는다(질문이 있으면 0 · 없으면 첫 문안 5 · 대상 0명 0) · request_key = 화면 키.
 router.post('/operator/continuous/preview', async (req: Request, res: Response) => {
   try {
-    const companyId = req.user?.companyId;
-    const userId = req.user?.userId;
-    if (!companyId || !userId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
-    const planCtx = await loadPlanContext(companyId);
-    if (!planCtx) return res.status(404).json({ success: false, error: '회사 정보를 찾을 수 없습니다.' });
-    if (!isAiOperatorAllowed(planCtx, req.user)) {
-      return res.status(403).json({ success: false, error: '본 기능은 요금제 가입 후 이용 가능합니다.', code: 'BETA_GATE' });
-    }
-    const out = await runOperatorPreview(companyId, userId, req.body);
+    const gate = await operatorGate(req, res, { plan: true });
+    if (!gate) return;
+    const out = await runOperatorPreview(gate.companyId, gate.userId, req.body);
     return res.json({ success: true, ...out });
   } catch (err: any) {
-    if (err instanceof PreviewBusyError) return res.status(409).json({ success: false, error: err.message, code: 'PREVIEW_BUSY' });
-    if (err instanceof PreviewInputError) return res.status(400).json({ success: false, error: err.message, code: 'PREVIEW_INPUT' });
-    if (err instanceof InsufficientCreditError) {
-      return res.status(402).json({ success: false, error: '제안을 받는 데 필요한 크레딧이 부족합니다. 크레딧을 충전해 주세요.', code: 'INSUFFICIENT_CREDIT' });
-    }
-    console.error('[Operator continuous preview] 오류:', err);
-    return res.status(500).json({ success: false, error: '제안을 만들지 못했습니다. 잠시 뒤 다시 시도해 주세요.' });
+    return operatorError(res, err, 'continuous preview', '제안을 만들지 못했습니다. 잠시 뒤 다시 시도해 주세요.');
   }
 });
 
-// ★ 2026-10-05 미리보기 → 시작. 본문 = preview_id 하나(화면 값으로 다시 만들지 않는다 · 본 것 = 등록한 것).
-//   만료 · 남의 것 = 410(차감 0). 등록 200(기존 멱등) + 본 제안 = 첫 회차.
+// ★ 2026-10-05 미리보기 → 시작. 본문 = preview_id(= 운영자 행 id) + 지금 탭의 variant_index(화면이 본 안 = 첫 회차가 보내는 안).
+//   만료 · 남의 것 = 410(차감 0). 같은 시작의 재전송 = 409(처리 중) · 등록된 뒤의 재전송 = 그 행(차감 0).
 router.post('/operator/continuous/from-preview', async (req: Request, res: Response) => {
   try {
-    const companyId = req.user?.companyId;
-    const userId = req.user?.userId;
-    if (!companyId || !userId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
-    const planCtx = await loadPlanContext(companyId);
-    if (!planCtx) return res.status(404).json({ success: false, error: '회사 정보를 찾을 수 없습니다.' });
-    if (!isAiOperatorAllowed(planCtx, req.user)) {
-      return res.status(403).json({ success: false, error: '본 기능은 요금제 가입 후 이용 가능합니다.', code: 'BETA_GATE' });
-    }
+    const gate = await operatorGate(req, res, { plan: true });
+    if (!gate) return;
     const previewId = typeof req.body?.preview_id === 'string' ? req.body.preview_id : '';
-    const out = previewId ? await startOperatorFromPreview(previewId, companyId, userId, req.body?.revision) : null;
+    const out = previewId ? await startOperatorFromPreview(previewId, gate.companyId, gate.userId, req.body?.revision, req.body?.variant_index) : null;
     if (!out) {
       return res.status(410).json({ success: false, error: PREVIEW_EXPIRED_MESSAGE, code: 'PREVIEW_EXPIRED' });
     }
     return res.json({ success: true, ...out });
   } catch (err: any) {
-    if (err instanceof PreviewStaleError) return res.status(409).json({ success: false, error: err.message, code: 'PREVIEW_STALE', current: err.current });
-    const mapped = operatorSaveErrorResponse(err);
-    if (mapped) return res.status(mapped.status).json(mapped.body);
-    console.error('[Operator continuous from-preview] 오류:', err);
-    return res.status(500).json({ success: false, error: err?.message || '자동 마케팅 시작 실패' });
+    return operatorError(res, err, 'continuous from-preview', '자동 마케팅을 시작하지 못했습니다. 잠시 뒤 [시작됐는지 확인하기]를 눌러 주세요.');
   }
 });
 
-// ★ 2026-10-05 미리보기 창 편집(신뢰 설계 §5) — 칸 고르기 · 기준 숫자 · 문안 분기 · 직접 쓴 문안 · 핵심 혜택.
-//   서버가 검증해 보관본에 반영한다(시작은 보관본만 쓴다). AI 문안이 필요해지면 그때 만든다(5 · 대상 0명 0).
+// ★ 2026-10-05 미리보기 창 편집(신뢰 설계 §5) · ★ 2026-10-24 질문 답(answers) · 다시 만들기(regenerate) · 주기 · 번호.
+//   문안은 답 · 다시 만들기에서만 만든다(5 · 대상 0명 0) · 그 밖은 다시 세기만(0).
 router.post('/operator/continuous/preview/update', async (req: Request, res: Response) => {
   try {
-    const companyId = req.user?.companyId;
-    const userId = req.user?.userId;
-    if (!companyId || !userId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
-    const planCtx = await loadPlanContext(companyId);
-    if (!planCtx) return res.status(404).json({ success: false, error: '회사 정보를 찾을 수 없습니다.' });
-    if (!isAiOperatorAllowed(planCtx, req.user)) {
-      return res.status(403).json({ success: false, error: '본 기능은 요금제 가입 후 이용 가능합니다.', code: 'BETA_GATE' });
-    }
+    const gate = await operatorGate(req, res, { plan: true });
+    if (!gate) return;
     const previewId = typeof req.body?.preview_id === 'string' ? req.body.preview_id : '';
-    const out = previewId ? await updateOperatorPreview(previewId, companyId, userId, req.body) : null;
+    const out = previewId ? await updateOperatorPreview(previewId, gate.companyId, gate.userId, req.body) : null;
     if (!out) return res.status(410).json({ success: false, error: PREVIEW_EXPIRED_MESSAGE, code: 'PREVIEW_EXPIRED' });
     return res.json({ success: true, ...out });
   } catch (err: any) {
-    if (err instanceof PreviewStaleError) return res.status(409).json({ success: false, error: err.message, code: 'PREVIEW_STALE', current: err.current });
-    if (err instanceof PreviewBusyError) return res.status(409).json({ success: false, error: err.message, code: 'PREVIEW_BUSY' });
-    if (err instanceof PreviewInputError) return res.status(400).json({ success: false, error: err.message, code: 'PREVIEW_INPUT' });
-    if (err instanceof InsufficientCreditError) {
-      return res.status(402).json({ success: false, error: '문안을 만드는 데 필요한 크레딧이 부족합니다. 크레딧을 충전해 주세요.', code: 'INSUFFICIENT_CREDIT' });
-    }
-    console.error('[Operator continuous preview update] 오류:', err);
-    return res.status(500).json({ success: false, error: '미리보기를 고치지 못했습니다. 잠시 뒤 다시 시도해 주세요.' });
+    return operatorError(res, err, 'continuous preview update', '미리보기를 고치지 못했습니다. 잠시 뒤 다시 시도해 주세요.');
   }
 });
 
 // ★ 2026-10-05 실행 중 자동 마케팅의 승인 창(다음 승인 · 조건 확인) — 지난 기간 요약 · 다음 7일 · 지금 계약의 근거(AI 문안 0 · 차감 0)
 router.post('/operator/continuous/:id/approval-preview', async (req: Request, res: Response) => {
   try {
-    const companyId = req.user?.companyId;
-    const userId = req.user?.userId;
-    if (!companyId || !userId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
-    const owner = await query(`SELECT created_by FROM continuous_operators WHERE id = $1::uuid AND company_id = $2::uuid`, [req.params.id, companyId]);
-    if (owner.rows.length === 0) return res.status(404).json({ success: false, error: '자동 마케팅을 찾을 수 없습니다.' });
-    if (req.user?.userType !== 'company_admin' && owner.rows[0].created_by !== userId) {
-      return res.status(403).json({ success: false, error: '본인이 만든 자동마케팅만 승인할 수 있습니다.' });
-    }
+    const gate = await operatorGate(req, res, { plan: true });
+    if (!gate) return;
     // 창을 열 때만 — 편집은 preview/update(보관본) · 승인은 approve-window(보관본 + 판 번호)
-    const out = await previewOperatorApproval(companyId, req.params.id, userId);
+    const out = await previewOperatorApproval(gate.companyId, req.params.id, gate.userId);
     if (!out) return res.status(404).json({ success: false, error: '자동 마케팅을 찾을 수 없습니다.' });
     return res.json({ success: true, ...out });
   } catch (err: any) {
-    if (err instanceof PreviewBusyError) return res.status(409).json({ success: false, error: err.message, code: 'PREVIEW_BUSY' });
-    if (err instanceof PreviewInputError) return res.status(400).json({ success: false, error: err.message, code: 'APPROVAL_INPUT' });
-    console.error('[Operator approval-preview] 오류:', err);
-    return res.status(500).json({ success: false, error: '승인 창을 열지 못했습니다. 잠시 뒤 다시 시도해 주세요.' });
+    return operatorError(res, err, 'approval-preview', '승인 창을 열지 못했습니다. 잠시 뒤 다시 시도해 주세요.');
   }
 });
 
 // ★ 2026-10-05 [다음 승인] · [조건 확인] — 계약 · 문안 분기 · 핵심 혜택을 서버가 다시 검증하고 승인 기간과 함께 한 문장에 저장(차감 0)
 router.post('/operator/continuous/:id/approve-window', async (req: Request, res: Response) => {
   try {
-    const companyId = req.user?.companyId;
-    const userId = req.user?.userId;
-    if (!companyId || !userId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
-    const planCtx = await loadPlanContext(companyId);
-    if (!planCtx || !isAiOperatorAllowed(planCtx, req.user)) {
-      return res.status(403).json({ success: false, error: '본 기능은 요금제 가입 후 이용 가능합니다.', code: 'BETA_GATE' });
-    }
-    const owner = await query(`SELECT created_by FROM continuous_operators WHERE id = $1::uuid AND company_id = $2::uuid`, [req.params.id, companyId]);
-    if (owner.rows.length === 0) return res.status(404).json({ success: false, error: '자동 마케팅을 찾을 수 없습니다.' });
-    if (req.user?.userType !== 'company_admin' && owner.rows[0].created_by !== userId) {
-      return res.status(403).json({ success: false, error: '본인이 만든 자동마케팅만 승인할 수 있습니다.' });
-    }
-    const out = await approveOperatorFromScreen(companyId, req.params.id, userId, req.body);
+    const gate = await operatorGate(req, res, { plan: true });
+    if (!gate) return;
+    const out = await approveOperatorFromScreen(gate.companyId, req.params.id, gate.userId, req.body);
     if (!out) return res.status(410).json({ success: false, error: APPROVAL_EXPIRED_MESSAGE, code: 'PREVIEW_EXPIRED' });
     return res.json({ success: true, approvedUntil: out.until });
   } catch (err: any) {
-    if (err instanceof PreviewStaleError) return res.status(409).json({ success: false, error: err.message, code: 'PREVIEW_STALE', current: err.current });
-    if (err instanceof PreviewBusyError) return res.status(409).json({ success: false, error: err.message, code: 'PREVIEW_BUSY' });
-    if (err instanceof PreviewInputError) return res.status(400).json({ success: false, error: err.message, code: 'APPROVAL_INPUT' });
-    const mapped = operatorSaveErrorResponse(err);
-    if (mapped) return res.status(mapped.status).json(mapped.body);
-    console.error('[Operator approve-window] 오류:', err);
-    return res.status(500).json({ success: false, error: err?.message || '승인을 저장하지 못했습니다.' });
+    return operatorError(res, err, 'approve-window', '승인을 저장하지 못했습니다. 잠시 뒤 다시 시도해 주세요.');
   }
 });
 
 router.get('/operator/continuous', async (req: Request, res: Response) => {
   try {
-    const companyId = req.user?.companyId;
-    if (!companyId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
-    // ★ 2026-07-09 노출 범위: 비관리자=본인이 만든 자동마케팅만, 관리자=회사 전체.
-    const operators = await listOperators(companyId, req.user?.userType === 'company_admin' ? null : req.user?.userId);
+    const gate = await operatorGate(req, res, { plan: false });
+    if (!gate) return;
+    // ★ 2026-07-09 노출 범위: 담당자 = 본인이 만든 자동마케팅만 · 관리자 = 회사 전체(★ 1024 주인 판정 한 함수)
+    const operators = await listOperators(gate.companyId, gate.ownOnly ? gate.userId : null);
     return res.json({ success: true, operators });
   } catch (err: any) {
-    console.error('[Operator continuous GET] 오류:', err);
-    return res.status(500).json({ success: false, error: err?.message || '조회 실패' });
+    return operatorError(res, err, 'continuous GET', '자동 마케팅 목록을 불러오지 못했습니다.');
   }
 });
 
@@ -2357,7 +2285,7 @@ router.post('/operator/marketing-calendar/generate', async (req: Request, res: R
       return res.status(402).json({ success: false, error: 'AI 크레딧이 부족합니다.', code: 'INSUFFICIENT_CREDIT' });
     }
     console.error('[MarketingCalendar] 생성 오류:', err);
-    return res.status(500).json({ success: false, error: err?.message || '캘린더 설계 실패' });
+    return operatorError(res, err, 'marketing-calendar generate', '캘린더를 설계하지 못했습니다. 잠시 뒤 다시 시도해 주세요.');
   }
 });
 
@@ -2446,7 +2374,7 @@ router.post('/operator/marketing-calendar/regenerate-month', async (req: Request
       return res.status(402).json({ success: false, error: 'AI 크레딧이 부족합니다.', code: 'INSUFFICIENT_CREDIT' });
     }
     console.error('[MarketingCalendar] 한 달 재설계 오류:', err);
-    return res.status(500).json({ success: false, error: err?.message || '한 달 재설계 실패' });
+    return operatorError(res, err, 'marketing-calendar regenerate', '그 달을 다시 설계하지 못했습니다. 잠시 뒤 다시 시도해 주세요.');
   }
 });
 
@@ -2473,7 +2401,7 @@ router.get('/operator/marketing-calendar', async (req: Request, res: Response) =
     return res.json({ success: true, calendar });
   } catch (err: any) {
     console.error('[MarketingCalendar] 조회 오류:', err);
-    return res.status(500).json({ success: false, error: err?.message || '캘린더 조회 실패' });
+    return operatorError(res, err, 'marketing-calendar GET', '캘린더를 불러오지 못했습니다.');
   }
 });
 
@@ -2488,10 +2416,11 @@ router.get('/operator/daily-brief', async (req: Request, res: Response) => {
   try {
     const companyId = req.user?.companyId;
     if (!companyId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
+    // ★ 2026-10-24 결함 12 — 오늘 · 어제 것만(오늘 것이 아직 안 만들어진 아침 포함) · 옛: 날짜를 보지 않아 몇 주 지난 브리핑이 「오늘의 추천」으로 남았다
     const r = await query(
       `SELECT brief_date, headline, recommendations, created_at, signals
          FROM company_daily_briefs
-        WHERE company_id = $1::uuid
+        WHERE company_id = $1::uuid AND brief_date >= (NOW() AT TIME ZONE 'Asia/Seoul')::date - 1
         ORDER BY brief_date DESC
         LIMIT 1`,
       [companyId],
@@ -2509,16 +2438,16 @@ router.get('/operator/daily-brief', async (req: Request, res: Response) => {
         code: 'DB_MIGRATION_PENDING',
       });
     }
-    console.error('[Operator daily-brief GET] 오류:', err);
-    return res.status(500).json({ success: false, error: err?.message || '조회 실패' });
+    return operatorError(res, err, 'daily-brief GET', '오늘의 추천을 불러오지 못했습니다.');
   }
 });
 
 router.put('/operator/continuous/:id', async (req: Request, res: Response) => {
   try {
-    const companyId = req.user?.companyId;
-    if (!companyId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
-    // 2026-06-19 (Harold 명시): 일반 사용자도 본인 회사의 자동 마케팅을 수정 가능 (operator는 회사 스코프).
+    // ★ 2026-10-24 결함 3 — 담당자는 자기가 만든 자동 마케팅만 고친다(옛: 회사 범위만 · 남의 것도 고쳤다) · 정지는 요금제가 잠겨도 된다
+    const gate = await operatorGate(req, res, { plan: false });
+    if (!gate) return;
+    const { companyId } = gate;
     const {
       name, objective, schedule, schedule_time, status,
       schedule_day_of_week, schedule_day_of_month, schedule_month,
@@ -2570,33 +2499,23 @@ router.put('/operator/continuous/:id', async (req: Request, res: Response) => {
       // ★ 2026-07-02 2단계: 문안 스타일 (미전송 = 변경 없음, null/그 외 = 해제)
       copyStyle: copy_style === undefined ? undefined : (typeof copy_style === 'string' ? copy_style : null),
     });
-    if (!operator) return res.status(404).json({ success: false, error: 'Operator를 찾을 수 없습니다.' });
+    if (!operator) return res.status(404).json({ success: false, error: '자동 마케팅을 찾을 수 없습니다.' });
     return res.json({ success: true, operator });
   } catch (err: any) {
-    const msg = err?.message || '';
-    if (err instanceof OperatorCallbackError) return res.status(400).json({ success: false, error: err.message, code: 'CALLBACK_NOT_REGISTERED' });
-    if (err?.code === 'DB_MIGRATION_PENDING' || err?.code === '42P01') {
-      return res.status(503).json({ success: false, error: '지난번과 달라진 점을 찾는 조건은 준비 중입니다. 다른 조건으로 저장해 주세요.', code: 'DB_MIGRATION_PENDING' });
-    }
-    if (msg.includes('column') && msg.includes('does not exist')) {
-      return res.status(503).json({ success: false, error: 'DB 마이그레이션이 필요합니다. 운영자에게 continuous_operators 컬럼 추가(ALTER)를 요청해주세요.', code: 'DB_MIGRATION_PENDING' });
-    }
-    console.error('[Operator continuous PUT] 오류:', err);
-    return res.status(500).json({ success: false, error: err?.message || '수정 실패' });
+    return operatorError(res, err, 'continuous PUT', '자동 마케팅을 고치지 못했습니다. 잠시 뒤 다시 시도해 주세요.');
   }
 });
 
 router.delete('/operator/continuous/:id', async (req: Request, res: Response) => {
   try {
-    const companyId = req.user?.companyId;
-    if (!companyId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
-    // 2026-06-19 (Harold 명시): 일반 사용자도 본인 회사의 자동 마케팅을 삭제(보관) 가능 (operator는 회사 스코프).
-    const ok = await archiveOperator(companyId, req.params.id);
-    if (!ok) return res.status(404).json({ success: false, error: 'Operator를 찾을 수 없습니다.' });
+    // ★ 2026-10-24 결함 3 — 자기가 만든 자동 마케팅만 보관(관리자 = 회사 전체) · 보관 = 열린 제안 전부 닫기(결함 8)
+    const gate = await operatorGate(req, res, { plan: false });
+    if (!gate) return;
+    const ok = await archiveOperator(gate.companyId, req.params.id);
+    if (!ok) return res.status(404).json({ success: false, error: '자동 마케팅을 찾을 수 없습니다.' });
     return res.json({ success: true });
   } catch (err: any) {
-    console.error('[Operator continuous DELETE] 오류:', err);
-    return res.status(500).json({ success: false, error: err?.message || '삭제 실패' });
+    return operatorError(res, err, 'continuous DELETE', '자동 마케팅을 멈추지 못했습니다. 잠시 뒤 다시 시도해 주세요.');
   }
 });
 
@@ -2605,10 +2524,9 @@ router.delete('/operator/continuous/:id', async (req: Request, res: Response) =>
 //   1번 + 2번 + 3번 통합 — ai_company_memory 누적 영역 + variant 자동 영역 + 어제 성과 영역 요약
 router.get('/operator/continuous/learning-summary', async (req: Request, res: Response) => {
   try {
-    const companyId = req.user?.companyId;
-    if (!companyId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
-    const planCtx = await loadPlanContext(companyId);
-    if (!planCtx) return res.status(404).json({ success: false, error: '회사 정보를 찾을 수 없습니다.' });
+    const gate = await operatorGate(req, res, { plan: false });
+    if (!gate) return;
+    const { companyId } = gate;
 
     // 1. ai_company_memory 누적 + 5 타입 분포 — ★ 2026-07-12 학습 5종 한정
     //    (전 타입 집계는 브랜드 자산 등록 회사에서 total·avg가 과대되던 혼입 결함)
@@ -2710,56 +2628,43 @@ router.get('/operator/continuous/learning-summary', async (req: Request, res: Re
       },
     });
   } catch (err: any) {
-    console.error('[Continuous learning-summary] 오류:', err);
-    return res.status(500).json({ success: false, error: err?.message || '학습 요약 조회 실패' });
+    return operatorError(res, err, 'learning-summary', '학습 요약을 불러오지 못했습니다.');
   }
 });
 
 router.post('/operator/continuous/:id/run-now', async (req: Request, res: Response) => {
   try {
-    const companyId = req.user?.companyId;
-    const userId = req.user?.userId;
-    const userType = req.user?.userType;
-    if (!companyId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
-    // ★ 2026-07-09 권한: 회사 관리자 OR 본인이 만든 operator만 실행. (생성/수정/삭제는 이미 사용자 허용 — 실행만 막히던 비대칭 해소)
-    const owner = await query(
-      `SELECT created_by FROM continuous_operators WHERE id = $1::uuid AND company_id = $2::uuid`,
-      [req.params.id, companyId]
-    );
-    if (owner.rows.length === 0) return res.status(404).json({ success: false, error: 'Operator를 찾을 수 없습니다.' });
-    if (userType !== 'company_admin' && owner.rows[0].created_by !== userId) {
-      return res.status(403).json({ success: false, error: '본인이 만든 자동마케팅만 실행할 수 있습니다.' });
-    }
+    // ★ 2026-07-09 권한: 회사 관리자 OR 본인이 만든 operator만 실행 · ★ 1024 주인 판정 한 함수(operatorGate)
+    const gate = await operatorGate(req, res, { plan: true });
+    if (!gate) return;
     const proposal = await generateProposalForOperator(req.params.id);
     if (!proposal) {
       // ★ 2026-10-05 사유 판정은 CT(explainEmptyRound)로 옮겼다 — 미리보기 시작과 같은 함수(동작 동일).
-      return res.json({ success: true, proposal: null, message: await explainEmptyRound(req.params.id, companyId) });
+      return res.json({ success: true, proposal: null, message: await explainEmptyRound(req.params.id, gate.companyId) });
     }
     return res.json({ success: true, proposal });
   } catch (err: any) {
-    console.error('[Operator run-now] 오류:', err);
-    return res.status(500).json({ success: false, error: err?.message || '제안서 생성 실패' });
+    return operatorError(res, err, 'run-now', '제안을 만들지 못했습니다. 잠시 뒤 다시 시도해 주세요.');
   }
 });
 
 // Proposals — 사용자 검토/승인/거부
 router.get('/operator/proposals', async (req: Request, res: Response) => {
   try {
-    const companyId = req.user?.companyId;
-    if (!companyId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
+    const gate = await operatorGate(req, res, { plan: false });
+    if (!gate) return;
     const status = (req.query.status as string) || 'pending';
     const validStatuses = ['pending', 'approved', 'rejected', 'auto_executed', 'expired', 'scheduled', 'sending', 'sent', 'skipped', 'admin_review', 'admin_stopped', 'all'];
     const proposals = await listProposals(
-      companyId,
+      gate.companyId,
       validStatuses.includes(status) ? (status as any) : 'pending',
       parseInt(String(req.query.limit || '50')) || 50,
-      // ★ 2026-07-09 노출 범위: 비관리자=본인이 만든 operator의 제안만, 관리자=회사 전체.
-      req.user?.userType === 'company_admin' ? null : req.user?.userId,
+      // ★ 2026-07-09 노출 범위: 담당자 = 본인이 만든 operator의 제안만 · 관리자 = 회사 전체
+      gate.ownOnly ? gate.userId : null,
     );
     return res.json({ success: true, proposals });
   } catch (err: any) {
-    console.error('[Proposals GET] 오류:', err);
-    return res.status(500).json({ success: false, error: err?.message || '조회 실패' });
+    return operatorError(res, err, 'proposals GET', '제안을 불러오지 못했습니다.');
   }
 });
 
@@ -2769,16 +2674,10 @@ router.get('/operator/proposals', async (req: Request, res: Response) => {
 //   SELECT 전용·크레딧 차감 없음.
 router.post('/operator/proposals/:id/recipients', async (req: Request, res: Response) => {
   try {
-    const companyId = req.user?.companyId;
-    const userId = req.user?.userId;
-    const userType = req.user?.userType;
-    if (!companyId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
-
-    const planCtx = await loadPlanContext(companyId);
-    if (!planCtx) return res.status(404).json({ success: false, error: '회사 정보를 찾을 수 없습니다.' });
-    if (!isAiOperatorAllowed(planCtx, req.user)) {
-      return res.status(403).json({ success: false, error: '본 기능은 요금제 가입 후 이용 가능합니다.', code: 'BETA_GATE' });
-    }
+    // ★ 2026-10-24 문 한 벌(회사 · 요금제 · 주인 · 남의 것 404)
+    const gate = await operatorGate(req, res, { plan: true });
+    if (!gate) return;
+    const { companyId } = gate;
 
     // 소유자 scope — listProposals/approve와 동일 기준(비관리자=본인 operator 제안만). 빠지면 타 담당자 고객 명단 노출.
     // ★ 2026-08-04(R1): p.operator_id를 함께 — 변화 축 컴파일이 지난 회차의 주인을 요구한다(없으면 이 화면만 500이었다).
@@ -2791,9 +2690,6 @@ router.post('/operator/proposals/:id/recipients', async (req: Request, res: Resp
     );
     if (pRes.rows.length === 0) return res.status(404).json({ success: false, error: '제안서를 찾을 수 없습니다.' });
     const prow = pRes.rows[0];
-    if (userType !== 'company_admin' && prow.created_by !== userId) {
-      return res.status(403).json({ success: false, error: '본인이 만든 자동마케팅의 발송 대상만 확인할 수 있습니다.' });
-    }
 
     const pj = prow.proposal_json || {};
     // dispatchProposalSend 준비부(utils/continuous-operator.ts 1380행대)와 동일 해석 — 값이 갈리면 원칙 2 위반.
@@ -2909,34 +2805,16 @@ router.post('/operator/proposals/:id/recipients', async (req: Request, res: Resp
     if (err?.code === 'TARGET_FILTER_EMPTY') {
       return res.status(400).json({ success: false, code: 'TARGET_FILTER_EMPTY', error: '이 제안은 대상 조건이 비어 있어 보낼 수 없어요. 자동 마케팅에서 대상 조건을 확인해 주세요.' });
     }
-    console.error('[Proposals recipients] 오류:', err);
-    return res.status(500).json({ success: false, error: err?.message || '발송 대상 조회 실패' });
+    return operatorError(res, err, 'proposals recipients', '발송 대상을 불러오지 못했습니다.');
   }
 });
 
 router.post('/operator/proposals/:id/approve', async (req: Request, res: Response) => {
   try {
-    const companyId = req.user?.companyId;
-    const userId = req.user?.userId;
-    const userType = req.user?.userType;
-    if (!companyId || !userId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
-    // ★ 2026-07-09 권한: 회사 관리자 OR 본인이 만든 operator의 제안만 승인·발송. (조회 scope와 동일 소유 기준)
-    const own = await query(
-      `SELECT o.created_by FROM operator_proposals p
-         JOIN continuous_operators o ON o.id = p.operator_id
-        WHERE p.id = $1::uuid AND p.company_id = $2::uuid`,
-      [req.params.id, companyId]
-    );
-    if (own.rows.length === 0) return res.status(404).json({ success: false, error: '제안서를 찾을 수 없습니다.' });
-    if (userType !== 'company_admin' && own.rows[0].created_by !== userId) {
-      return res.status(403).json({ success: false, error: '본인이 만든 자동마케팅만 승인·발송할 수 있습니다.' });
-    }
-    // ★ 발송 개시 경로 — 생성/propose와 동일 요금제 게이트. 강등 회사가 남은 pending을 수동 발송하는 구멍 차단(조회·거부·정지는 열어 둠).
-    const planCtx = await loadPlanContext(companyId);
-    if (!planCtx || !isAiOperatorAllowed(planCtx, req.user)) {
-      return res.status(403).json({ success: false, error: '본 기능은 요금제 가입 후 이용 가능합니다.', code: 'BETA_GATE' });
-    }
-    // ★ 2026-07-09 문안 3안: 사용자가 고른 변형 index + (편집 시) 본문/제목. 미지정이면 Bandit 추천(자동 경로 동일).
+    // ★ 발송 개시 경로 — 생성/propose와 동일 요금제 게이트 · 주인(회사 관리자 OR 본인이 만든 operator) · ★ 1024 문 한 벌
+    const gate = await operatorGate(req, res, { plan: true });
+    if (!gate) return;
+    // ★ 2026-10-24 결함 9 — 승인 = 늘 {안 번호 · 지문}(화면이 본 그 안의 나가는 문안 지문) · 다르면 409 + 지금 문안
     const sel = req.body && Number.isInteger(req.body.variantIndex)
       ? {
           variantIndex: Number(req.body.variantIndex),
@@ -2944,16 +2822,19 @@ router.post('/operator/proposals/:id/approve', async (req: Request, res: Respons
           subject: typeof req.body.subject === 'string' ? req.body.subject : undefined,
         }
       : null;
-    const result = await approveProposal(companyId, req.params.id, userId, sel);
-    if (!result.ok) return res.status(400).json({ success: false, error: result.reason });
-    // 승인 = 백엔드 즉시 발송(자동 경로와 동일). 크레딧↔발송 원자성.
+    const fingerprint = typeof req.body?.fingerprint === 'string' ? req.body.fingerprint : null;
+    const result = await approveProposal(gate.companyId, req.params.id, gate.userId, sel, fingerprint);
+    if (!result.ok) {
+      if (result.code === 'FINAL_CHANGED') return res.status(409).json({ success: false, error: result.reason, code: result.code, finalCopies: result.finals });
+      return res.status(400).json({ success: false, error: result.reason });
+    }
+    // 승인 = 백엔드 즉시 발송(자동 경로와 동일). 큐에 넣은 것은 「발송 시작」이다(결함 10).
     const message = result.action === 'sent'
-      ? `${result.sentCount ?? 0}명에게 발송했습니다.`
+      ? `발송을 시작했어요(${(result.sentCount ?? 0).toLocaleString('ko-KR')}명).`
       : (result.reason || '발송 대상이 없어 발송하지 않았습니다.');
     return res.json({ success: true, action: result.action, campaignId: result.campaignId, sentCount: result.sentCount, message });
   } catch (err: any) {
-    console.error('[Proposals approve] 오류:', err);
-    return res.status(500).json({ success: false, error: err?.message || '승인 실패' });
+    return operatorError(res, err, 'proposals approve', '승인하지 못했습니다. 잠시 뒤 다시 시도해 주세요.');
   }
 });
 
@@ -2961,28 +2842,12 @@ router.post('/operator/proposals/:id/approve', async (req: Request, res: Respons
 //   권한 · 요금제 게이트 = 승인과 같다(테스트폰으로 실제 문자가 나가는 입구다). 검사는 백그라운드 · 화면은 GET 으로 다시 읽는다.
 router.post('/operator/proposals/:id/spam-test', async (req: Request, res: Response) => {
   try {
-    const companyId = req.user?.companyId;
-    const userId = req.user?.userId;
-    const userType = req.user?.userType;
-    if (!companyId || !userId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
-    const own = await query(
-      `SELECT o.created_by FROM operator_proposals p
-         JOIN continuous_operators o ON o.id = p.operator_id
-        WHERE p.id = $1::uuid AND p.company_id = $2::uuid`,
-      [req.params.id, companyId]
-    );
-    if (own.rows.length === 0) return res.status(404).json({ success: false, error: '제안서를 찾을 수 없습니다.' });
-    if (userType !== 'company_admin' && own.rows[0].created_by !== userId) {
-      return res.status(403).json({ success: false, error: '본인이 만든 자동마케팅만 검사할 수 있습니다.' });
-    }
-    const planCtx = await loadPlanContext(companyId);
-    if (!planCtx || !isAiOperatorAllowed(planCtx, req.user)) {
-      return res.status(403).json({ success: false, error: '본 기능은 요금제 가입 후 이용 가능합니다.', code: 'BETA_GATE' });
-    }
+    const gate = await operatorGate(req, res, { plan: true });
+    if (!gate) return;
     if (!req.body || !Number.isInteger(req.body.variantIndex)) {
       return res.status(400).json({ success: false, error: '검사할 문안을 골라 주세요.' });
     }
-    const r = await startProposalSpamRetest(companyId, req.params.id, userId, {
+    const r = await startProposalSpamRetest(gate.companyId, req.params.id, gate.userId, {
       variantIndex: Number(req.body.variantIndex),
       body: typeof req.body.body === 'string' ? req.body.body : undefined,
       subject: typeof req.body.subject === 'string' ? req.body.subject : undefined,
@@ -2990,67 +2855,53 @@ router.post('/operator/proposals/:id/spam-test', async (req: Request, res: Respo
     if (!r.ok) return res.status(r.code ? 409 : 400).json({ success: false, error: r.reason, code: r.code });
     return res.json({ success: true, spamRetest: r.spamRetest });
   } catch (err: any) {
-    console.error('[Proposals spam-test] 오류:', err);
-    return res.status(500).json({ success: false, error: '스팸 검사를 시작하지 못했습니다.' });
+    return operatorError(res, err, 'proposals spam-test', '스팸 검사를 시작하지 못했습니다.');
   }
 });
 
 router.get('/operator/proposals/:id/spam-test', async (req: Request, res: Response) => {
   try {
-    const companyId = req.user?.companyId;
-    if (!companyId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
-    const retest = await readProposalSpamRetest(companyId, req.params.id);
+    // ★ 2026-10-24 결함 3 — 자기 제안의 검사 결과만(옛: 회사 범위만)
+    const gate = await operatorGate(req, res, { plan: false });
+    if (!gate) return;
+    const retest = await readProposalSpamRetest(gate.companyId, req.params.id);
     if (retest === undefined) return res.status(404).json({ success: false, error: '제안서를 찾을 수 없습니다.' });
     return res.json({ success: true, spamRetest: retest });
   } catch (err: any) {
-    console.error('[Proposals spam-test GET] 오류:', err);
-    return res.status(500).json({ success: false, error: '조회 실패' });
+    return operatorError(res, err, 'proposals spam-test GET', '검사 결과를 불러오지 못했습니다.');
   }
 });
 
 router.post('/operator/proposals/:id/reject', async (req: Request, res: Response) => {
   try {
-    const companyId = req.user?.companyId;
-    const userId = req.user?.userId;
-    const userType = req.user?.userType;
-    if (!companyId || !userId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
-    // ★ 2026-07-09 권한: 회사 관리자 OR 본인이 만든 operator의 제안만 거부.
-    const own = await query(
-      `SELECT o.created_by FROM operator_proposals p
-         JOIN continuous_operators o ON o.id = p.operator_id
-        WHERE p.id = $1::uuid AND p.company_id = $2::uuid`,
-      [req.params.id, companyId]
-    );
-    if (own.rows.length === 0) return res.status(404).json({ success: false, error: '제안서를 찾을 수 없습니다.' });
-    if (userType !== 'company_admin' && own.rows[0].created_by !== userId) {
-      return res.status(403).json({ success: false, error: '본인이 만든 자동마케팅만 거부할 수 있습니다.' });
-    }
-    const ok = await rejectProposal(companyId, req.params.id, userId);
-    if (!ok) return res.status(400).json({ success: false, error: 'pending 상태가 아니거나 권한이 없는 제안서입니다.' });
+    // ★ 2026-07-09 권한: 회사 관리자 OR 본인이 만든 operator의 제안만 거부 · ★ 1024 문 한 벌(요금제가 잠겨도 거부는 된다)
+    const gate = await operatorGate(req, res, { plan: false });
+    if (!gate) return;
+    const ok = await rejectProposal(gate.companyId, req.params.id, gate.userId);
+    if (!ok) return res.status(400).json({ success: false, error: '거부할 수 있는 상태가 아닌 제안입니다.' });
     return res.json({ success: true });
   } catch (err: any) {
-    console.error('[Proposals reject] 오류:', err);
-    return res.status(500).json({ success: false, error: err?.message || '거부 실패' });
+    return operatorError(res, err, 'proposals reject', '거부하지 못했습니다. 잠시 뒤 다시 시도해 주세요.');
   }
 });
 
 // ★ D212+ 정책 (2026-05-23 Harold 명시): 담당자 정지 endpoint — AI 학습 통합
 //   payload = { reason: 'spam_suspicion' | 'content_correction' | 'no_send' | 'other', detail?: string }
+//   ★ 2026-10-24 결함 3 — 자기가 만든 자동 마케팅의 제안만 정지(옛: 회사 범위만 · 남의 예약을 멈췄다)
 router.post('/operator/proposals/:id/admin-stop', async (req: Request, res: Response) => {
   try {
-    const companyId = req.user?.companyId;
-    if (!companyId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
+    const gate = await operatorGate(req, res, { plan: false });
+    if (!gate) return;
     const { reason, detail } = req.body || {};
     const validReasons = ['spam_suspicion', 'content_correction', 'no_send', 'other'];
     if (!validReasons.includes(reason)) {
-      return res.status(400).json({ success: false, error: '정지 사유를 골라 주세요(spam_suspicion · content_correction · no_send · other).' });
+      return res.status(400).json({ success: false, error: '정지 사유를 골라 주세요.' });
     }
-    const ok = await adminStopProposal(companyId, req.params.id, { reason, detail });
+    const ok = await adminStopProposal(gate.companyId, req.params.id, { reason, detail });
     if (!ok) return res.status(404).json({ success: false, error: '제안을 찾을 수 없습니다.' });
     return res.json({ success: true });
   } catch (err: any) {
-    console.error('[Proposals admin-stop] 오류:', err);
-    return res.status(500).json({ success: false, error: err?.message || '정지 처리 중 오류가 발생했습니다.' });
+    return operatorError(res, err, 'proposals admin-stop', '정지하지 못했습니다. 잠시 뒤 다시 시도해 주세요.');
   }
 });
 
@@ -3063,9 +2914,10 @@ router.post('/operator/proposals/:id/admin-stop', async (req: Request, res: Resp
 
 router.get('/operator/proposals/:id/variants', async (req: Request, res: Response) => {
   try {
-    const companyId = req.user?.companyId;
-    if (!companyId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
-    // 권한 검증 — proposal이 본 회사 소유인지
+    // ★ 2026-10-24 결함 3 — 자기 제안만(문 한 벌)
+    const gate = await operatorGate(req, res, { plan: false });
+    if (!gate) return;
+    const companyId = gate.companyId;
     const owner = await query(
       `SELECT operator_id FROM operator_proposals WHERE id = $1::uuid AND company_id = $2::uuid`,
       [req.params.id, companyId]
@@ -3080,8 +2932,7 @@ router.get('/operator/proposals/:id/variants', async (req: Request, res: Respons
     });
     return res.json({ success: true, variants, recommendation });
   } catch (err: any) {
-    console.error('[Proposals variants GET] 오류:', err);
-    return res.status(500).json({ success: false, error: err?.message || '조회 실패' });
+    return operatorError(res, err, 'proposals variants', '안 목록을 불러오지 못했습니다.');
   }
 });
 
@@ -3350,36 +3201,8 @@ router.post('/operator/explain', async (req: Request, res: Response) => {
   }
 });
 
-router.post('/operator/proposals/:id/variants/:vid/record', async (req: Request, res: Response) => {
-  try {
-    const companyId = req.user?.companyId;
-    const userType = req.user?.userType;
-    if (!companyId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
-    if (userType !== 'company_admin') {
-      return res.status(403).json({ success: false, error: 'reward 기록은 회사 관리자만 가능합니다.' });
-    }
-    // 권한 검증
-    const owner = await query(
-      `SELECT v.id FROM operator_proposal_variants v
-       JOIN operator_proposals p ON v.proposal_id = p.id
-       WHERE v.id = $1::uuid AND p.id = $2::uuid AND p.company_id = $3::uuid`,
-      [req.params.vid, req.params.id, companyId]
-    );
-    if (owner.rows.length === 0) return res.status(404).json({ success: false, error: 'variant를 찾을 수 없습니다.' });
-
-    const { sent, clicked, converted } = req.body;
-    await recordVariantReward({
-      variantId: req.params.vid,
-      sent: Number(sent || 0),
-      clicked: Number(clicked || 0),
-      converted: Number(converted || 0),
-    });
-    return res.json({ success: true });
-  } catch (err: any) {
-    console.error('[Proposals variant record] 오류:', err);
-    return res.status(500).json({ success: false, error: err?.message || 'reward 기록 실패' });
-  }
-});
+// ★ 2026-10-24 결함 13 — POST /operator/proposals/:id/variants/:vid/record 삭제(화면 호출 0 · 보상 숫자를 상한 없이 받던 죽은 주소 ·
+//   발송 변이 실측은 dispatchProposalSend 가 기록한다).
 
 // ════════════════════════════════════════════════════════════════════
 // D187 Journey Builder Lite — 7 표준 여정 (가입/재구매/휴면/장바구니/생일/예약/Custom)
@@ -3389,18 +3212,14 @@ router.post('/operator/proposals/:id/variants/:vid/record', async (req: Request,
 // GET /api/ai/operator/journeys — 회사 활성/대기 여정 목록 + 7 템플릿 카탈로그
 router.get('/operator/journeys', async (req: Request, res: Response) => {
   try {
-    const companyId = req.user?.companyId;
-    if (!companyId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
-    const planCtx = await loadPlanContext(companyId);
-    if (!planCtx) return res.status(404).json({ success: false, error: '회사 정보를 찾을 수 없습니다.' });
-    if (!isAiOperatorAllowed(planCtx, req.user)) {
-      return res.status(403).json({ success: false, error: 'AI Operator 진입 권한이 없습니다.', code: 'AI_OPERATOR_GATED' });
-    }
+    const gate = await journeyGate(req, res);
+    if (!gate) return;
+    const { companyId } = gate;
 
     const status = (req.query.status as JourneyStatus | 'all') || 'all';
     // ★ 2026-10-20 여정 V.3 §5-1 — 처음 켜기 크레딧은 서버가 정한다(화면이 상태로 200 을 매기지 않는다 · 새 판 초안 = 0).
     // ★ V.3 §6-6 — 멈춘 이유는 사람 말(pause_view)로만 그린다(원문 pause_reason 은 화면에 내보내지 않는다 · 목록 카드가 원문을 그리던 자리).
-    const journeys = (await listJourneys(companyId, status)).map((j: any) => ({
+    const journeys = (await listJourneys(companyId, status, gate)).map((j: any) => ({
       ...j, activation_cost: activationCostOf(j), pause_view: j.status === 'paused' ? pauseReasonView(j.pause_reason) : null,
     }));
 
@@ -3418,8 +3237,7 @@ router.get('/operator/journeys', async (req: Request, res: Response) => {
     // ★ V.3 §6-7 — 다시 켜기 한 줄의 운영 크레딧 숫자(단가표 한 곳 · 화면이 적지 않는다).
     return res.json({ success: true, journeys, templates, costs: { operation: getCreditCost('journey-operation') } });
   } catch (err: any) {
-    console.error('[Journeys list] 오류:', err);
-    return res.status(500).json({ success: false, error: err?.message || '여정 조회 실패' });
+    return journeyError(res, err, 'list', '여정 조회 실패');
   }
 });
 
@@ -3428,22 +3246,13 @@ router.get('/operator/journeys', async (req: Request, res: Response) => {
 //   읽기 전용. 선 상태 · 칸 출구 · 잠금의 의미는 서버 CT(journey-lifecycle-map · journey-graph)가 정하고 화면은 그리기만 한다.
 router.get('/operator/journeys/lifecycle-map', async (req: Request, res: Response) => {
   try {
-    const companyId = req.user?.companyId;
-    if (!companyId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
-    const planCtx = await loadPlanContext(companyId);
-    if (!planCtx) return res.status(404).json({ success: false, error: '회사 정보를 찾을 수 없습니다.' });
-    if (!isAiOperatorAllowed(planCtx, req.user)) {
-      return res.status(403).json({ success: false, error: 'AI Operator 진입 권한이 없습니다.', code: 'AI_OPERATOR_GATED' });
-    }
+    const gate = await journeyGate(req, res);
+    if (!gate) return;
+    const { companyId } = gate;
     const map = await buildLifecycleMap(companyId, req.user?.userId);   // ★ 1019 B-1010-13 숫자 = 보는 사람 범위
     return res.json({ success: true, map });
   } catch (err: any) {
-    const msg = err?.message || '';
-    if (msg.includes('column') && msg.includes('does not exist')) {
-      return res.status(503).json({ success: false, error: 'DB 마이그레이션 필요: 운영자에게 여정 테이블 ALTER 실행 요청', code: 'DB_MIGRATION_PENDING' });
-    }
-    console.error('[Journeys lifecycle-map] 오류:', err);
-    return res.status(500).json({ success: false, error: '여정 지도를 불러오지 못했습니다. 잠시 후 다시 시도해 주세요.' });
+    return journeyError(res, err, 'lifecycle-map', '여정 지도를 불러오지 못했습니다. 잠시 후 다시 시도해 주세요.');
   }
 });
 // ★ 2026-09-30 여정 V2 2차 — 문장으로 여정 만들기(설계서 §5)
@@ -3451,13 +3260,9 @@ router.get('/operator/journeys/lifecycle-map', async (req: Request, res: Respons
 //   설계는 여정 하나씩 요청한다(여러 개를 한 요청에 묶으면 응답 시간이 프록시 제한을 넘는다).
 router.post('/operator/journeys-interview/parse', async (req: Request, res: Response) => {
   try {
-    const companyId = req.user?.companyId;
-    if (!companyId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
-    const planCtx = await loadPlanContext(companyId);
-    if (!planCtx) return res.status(404).json({ success: false, error: '회사 정보를 찾을 수 없습니다.' });
-    if (!isAiOperatorAllowed(planCtx, req.user)) {
-      return res.status(403).json({ success: false, error: 'AI Operator 진입 권한이 없습니다.', code: 'AI_OPERATOR_GATED' });
-    }
+    const gate = await journeyGate(req, res);
+    if (!gate) return;
+    const { companyId } = gate;
     const sentence = String((req.body || {}).sentence || '').trim();
     if (sentence.length < 4) return res.status(400).json({ success: false, error: '만들고 싶은 여정을 한 문장으로 적어 주세요.' });
     if (sentence.length > MAX_INTERVIEW_SENTENCE) return res.status(400).json({ success: false, error: `${MAX_INTERVIEW_SENTENCE}자 안으로 적어 주세요.` });
@@ -3467,21 +3272,36 @@ router.post('/operator/journeys-interview/parse', async (req: Request, res: Resp
     }
     return res.json({ success: true, ...out });
   } catch (err: any) {
-    console.error('[Journeys interview parse] 오류:', err);
-    return res.status(500).json({ success: false, error: '문장을 읽지 못했어요. 잠시 뒤 다시 시도해 주세요.' });
+    return journeyError(res, err, 'interview parse', '문장을 읽지 못했어요. 잠시 뒤 다시 시도해 주세요.');
+  }
+});
+
+// ★ 2026-10-23 여정 결함 0 — 한 줄 여정 한 길: 시작 사건이 정해진 입구(빠른 시작 · 기회 카드 · 다음 수 · 한 줄 답 카드 · 지도 [만들기])도
+//   문장과 같은 질문표 · 같은 설계(초안마다 차감 · 멱등) · 같은 작업 화면으로 간다(옛: 화면이 패키지를 들고 있다 저장 · 돌려보기마다 차감).
+router.post('/operator/journeys-interview/preset', async (req: Request, res: Response) => {
+  try {
+    const gate = await journeyGate(req, res);
+    if (!gate) return;
+    const { companyId } = gate;
+    const b = req.body || {};
+    const out = await prepareInterviewPreset(companyId, {
+      triggerEvent: b.triggerEvent ? String(b.triggerEvent) : null,
+      templateCode: b.templateCode ? String(b.templateCode) : null,
+      objective: b.objective ? String(b.objective) : null,
+    });
+    return res.json({ success: true, ...out });
+  } catch (err: any) {
+    return journeyError(res, err, 'interview preset', '질문을 준비하지 못했어요. 잠시 뒤 다시 시도해 주세요.');
   }
 });
 
 router.post('/operator/journeys-interview/design', singleFlight('journey-generate', async (req: Request, res: Response) => {
   try {
-    const companyId = req.user?.companyId;
-    const userId = req.user?.userId;
-    if (!companyId || !userId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
-    const planCtx = await loadPlanContext(companyId);
-    if (!planCtx) return res.status(404).json({ success: false, error: '회사 정보를 찾을 수 없습니다.' });
-    if (!isAiOperatorAllowed(planCtx, req.user)) {
-      return res.status(403).json({ success: false, error: 'AI Operator 진입 권한이 없습니다.', code: 'AI_OPERATOR_GATED' });
-    }
+    const gate = await journeyGate(req, res);
+    if (!gate) return;
+    const { companyId } = gate;
+    const userId = gate.userId;
+    if (!userId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
     const { interviewId, plan, answers, callbackNumber } = req.body || {};
     const uuidRe = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
     if (!uuidRe.test(String(interviewId || ''))) return res.status(400).json({ success: false, error: '질문을 다시 받아 주세요.' });
@@ -3492,7 +3312,7 @@ router.post('/operator/journeys-interview/design', singleFlight('journey-generat
       companyId,
       userId,
       interviewId: String(interviewId),
-      plan: { key: String(plan.key), triggerEvent: String(plan.triggerEvent || ''), title: String(plan.title || ''), objective: String(plan.objective || '') },
+      plan: { key: String(plan.key), triggerEvent: String(plan.triggerEvent || ''), title: String(plan.title || ''), objective: String(plan.objective || ''), sentence: String(plan.sentence || '') },
       answers: answers && typeof answers === 'object' ? answers : {},
       callbackNumber: callbackNumber ? String(callbackNumber) : null,
     });
@@ -3501,18 +3321,7 @@ router.post('/operator/journeys-interview/design', singleFlight('journey-generat
     if (err instanceof InsufficientCreditError) {
       return res.status(402).json({ success: false, error: '여정 초안을 만드는 데 필요한 크레딧이 부족합니다. 크레딧을 충전해 주세요.', code: 'INSUFFICIENT_CREDIT' });
     }
-    if (err instanceof JourneyInputError) {
-      return res.status(400).json({ success: false, error: err.message, code: err.code, ...(err.journeyId ? { journeyId: err.journeyId } : {}) });
-    }
-    if (err instanceof JourneyStepGateError) {
-      return res.status(409).json({ success: false, error: err.message, code: err.code });
-    }
-    const cm = err?.message || '';
-    if (cm.includes('column') && cm.includes('does not exist')) {
-      return res.status(503).json({ success: false, error: 'DB 마이그레이션 필요: 운영자에게 journeys/journey_steps ALTER 실행 요청 의무', code: 'DB_MIGRATION_PENDING' });
-    }
-    console.error('[Journeys interview design] 오류:', err);
-    return res.status(500).json({ success: false, error: '여정을 설계하지 못했어요. 잠시 뒤 다시 시도해 주세요.' });
+    return journeyError(res, err, 'interview design', '여정을 설계하지 못했어요. 잠시 뒤 다시 시도해 주세요.');
   }
 }));
 
@@ -3520,52 +3329,39 @@ router.post('/operator/journeys-interview/design', singleFlight('journey-generat
 //   목록 · 사용 기간 제안 = DB 실측(AI 0 · 차감 0) · 만들기 = AI 설계 1회(여정 AI 생성 단가) + 서버 초안 저장.
 router.get('/operator/journeys-product/catalog', async (req: Request, res: Response) => {
   try {
-    const companyId = req.user?.companyId;
-    if (!companyId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
-    const planCtx = await loadPlanContext(companyId);
-    if (!planCtx) return res.status(404).json({ success: false, error: '회사 정보를 찾을 수 없습니다.' });
-    if (!isAiOperatorAllowed(planCtx, req.user)) {
-      return res.status(403).json({ success: false, error: 'AI Operator 진입 권한이 없습니다.', code: 'AI_OPERATOR_GATED' });
-    }
+    const gate = await journeyGate(req, res);
+    if (!gate) return;
+    const { companyId } = gate;
     const door = await currentPurchaseDoor(companyId);
     const [list, ready, lockedReason] = await Promise.all([listObservedProducts(companyId, door), dbAcceptsProductTrigger(), productJourneyLockReason(companyId)]);
     return res.json({ success: true, door, ...list, ready, lockedReason, costPerJourney: getCreditCost('journey-ai-generate') });
   } catch (err: any) {
-    console.error('[Journeys product catalog] 오류:', err);
-    return res.status(500).json({ success: false, error: '상품 목록을 불러오지 못했어요.' });
+    return journeyError(res, err, 'product catalog', '상품 목록을 불러오지 못했어요.');
   }
 });
 
 router.post('/operator/journeys-product/period', async (req: Request, res: Response) => {
   try {
-    const companyId = req.user?.companyId;
-    if (!companyId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
-    const planCtx = await loadPlanContext(companyId);
-    if (!planCtx) return res.status(404).json({ success: false, error: '회사 정보를 찾을 수 없습니다.' });
-    if (!isAiOperatorAllowed(planCtx, req.user)) {
-      return res.status(403).json({ success: false, error: 'AI Operator 진입 권한이 없습니다.', code: 'AI_OPERATOR_GATED' });
-    }
+    const gate = await journeyGate(req, res);
+    if (!gate) return;
+    const { companyId } = gate;
     const keys: string[] = Array.isArray((req.body || {}).keys) ? req.body.keys.map(String) : [];
     if (keys.length === 0) return res.status(400).json({ success: false, error: '상품을 골라 주세요.' });
     const door = await currentPurchaseDoor(companyId);
     const out = await suggestUsagePeriod(companyId, door, keys);
     return res.json({ success: true, ...out });
   } catch (err: any) {
-    console.error('[Journeys product period] 오류:', err);
-    return res.status(500).json({ success: false, error: '사용 기간을 계산하지 못했어요.' });
+    return journeyError(res, err, 'product period', '사용 기간을 계산하지 못했어요.');
   }
 });
 
 router.post('/operator/journeys-product/create', async (req: Request, res: Response) => {
   try {
-    const companyId = req.user?.companyId;
-    const userId = req.user?.userId;
-    if (!companyId || !userId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
-    const planCtx = await loadPlanContext(companyId);
-    if (!planCtx) return res.status(404).json({ success: false, error: '회사 정보를 찾을 수 없습니다.' });
-    if (!isAiOperatorAllowed(planCtx, req.user)) {
-      return res.status(403).json({ success: false, error: 'AI Operator 진입 권한이 없습니다.', code: 'AI_OPERATOR_GATED' });
-    }
+    const gate = await journeyGate(req, res);
+    if (!gate) return;
+    const { companyId } = gate;
+    const userId = gate.userId;
+    if (!userId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
     const { requestId, keys, periodDays, benefitText, callbackNumber } = req.body || {};
     const uuidRe = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
     if (!uuidRe.test(String(requestId || ''))) return res.status(400).json({ success: false, error: '상품 고르기 창을 다시 열어 주세요.' });
@@ -3583,38 +3379,7 @@ router.post('/operator/journeys-product/create', async (req: Request, res: Respo
     if (err instanceof InsufficientCreditError) {
       return res.status(402).json({ success: false, error: '여정 초안을 만드는 데 필요한 크레딧이 부족합니다. 크레딧을 충전해 주세요.', code: 'INSUFFICIENT_CREDIT' });
     }
-    if (err instanceof JourneyInputError) return res.status(400).json({ success: false, error: err.message, code: err.code, ...(err.journeyId ? { journeyId: err.journeyId } : {}) });
-    if (err instanceof JourneyMigrationPendingError) return res.status(503).json({ success: false, error: err.message, code: err.code });
-    // CHECK 위반(23514) = 시작 사건 목록 DDL 전 — 500 대신 마이그레이션 안내(db_alter_safety_net)
-    if (err?.code === '23514') {
-      return res.status(503).json({ success: false, error: 'DB 마이그레이션 필요: 운영자에게 journeys 시작 사건 목록(CHECK) 갱신 요청', code: 'DB_MIGRATION_PENDING' });
-    }
-    console.error('[Journeys product create] 오류:', err);
-    return res.status(500).json({ success: false, error: '여정을 만들지 못했어요. 잠시 뒤 다시 시도해 주세요.' });
-  }
-});
-
-// POST /api/ai/operator/journeys/:id/new-version — ★ 2026-09-30 여정 V2 5차 새 판(켜진 · 멈춘 여정의 구조 변경)
-//   복제 초안(lineage_id = 원 여정 계보)을 만든다. 새 판을 켜면 옛 판은 새 고객을 받지 않고 진행 중 고객만 마무리한다.
-router.post('/operator/journeys/:id/new-version', async (req: Request, res: Response) => {
-  try {
-    const companyId = req.user?.companyId;
-    if (!companyId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
-    const planCtx = await loadPlanContext(companyId);
-    if (!planCtx) return res.status(404).json({ success: false, error: '회사 정보를 찾을 수 없습니다.' });
-    if (!isAiOperatorAllowed(planCtx, req.user)) {
-      return res.status(403).json({ success: false, error: 'AI Operator 진입 권한이 없습니다.', code: 'AI_OPERATOR_GATED' });
-    }
-    const out = await createNewVersion(companyId, req.params.id);
-    return res.json({ success: true, ...out });
-  } catch (err: any) {
-    if (err instanceof JourneyInputError) return res.status(400).json({ success: false, error: err.message, code: err.code, ...(err.journeyId ? { journeyId: err.journeyId } : {}) });
-    const msg = err?.message || '';
-    if (msg.includes('column') && msg.includes('does not exist')) {
-      return res.status(503).json({ success: false, error: 'DB 마이그레이션 필요: 운영자에게 journeys lineage_id · entry_closed_at ALTER 실행 요청', code: 'DB_MIGRATION_PENDING' });
-    }
-    console.error('[Journeys new-version] 오류:', err);
-    return res.status(500).json({ success: false, error: '바뀐 모양을 만들지 못했어요. 잠시 뒤 다시 시도해 주세요.' });
+    return journeyError(res, err, 'product create', '여정을 만들지 못했어요. 잠시 뒤 다시 시도해 주세요.');
   }
 });
 
@@ -3623,14 +3388,11 @@ router.post('/operator/journeys/:id/new-version', async (req: Request, res: Resp
 //   사전검사(통신사 스팸 검사 포함)를 서버가 끝까지 기다리므로 수 초 걸린다 → 화면은 로딩 창을 띄운다.
 router.post('/operator/journeys/:id/reshape', async (req: Request, res: Response) => {
   try {
-    const companyId = req.user?.companyId;
-    const userId = req.user?.userId;
-    if (!companyId || !userId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
-    const planCtx = await loadPlanContext(companyId);
-    if (!planCtx) return res.status(404).json({ success: false, error: '회사 정보를 찾을 수 없습니다.' });
-    if (!isAiOperatorAllowed(planCtx, req.user)) {
-      return res.status(403).json({ success: false, error: 'AI Operator 진입 권한이 없습니다.', code: 'AI_OPERATOR_GATED' });
-    }
+    const gate = await journeyGate(req, res);
+    if (!gate) return;
+    const { companyId } = gate;
+    const userId = gate.userId;
+    if (!userId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
     const b = req.body || {};
     const arr = (v: unknown) => (Array.isArray(v) ? v : []);
     const r = await reshapeJourney(companyId, String(req.params.id), userId, {
@@ -3653,51 +3415,33 @@ router.post('/operator/journeys/:id/reshape', async (req: Request, res: Response
     }
   } catch (err: any) {
     if (err instanceof ReshapeInputError || err instanceof JourneyInputError) return res.status(400).json({ success: false, error: err.message });
-    if (err instanceof JourneyStepGateError) return res.status(409).json({ success: false, error: err.message, code: err.code });
     if (err instanceof InsufficientCreditError) return res.status(402).json({ success: false, error: err.message, code: 'INSUFFICIENT_CREDIT' });
-    const msg = err?.message || '';
-    if (msg.includes('column') && msg.includes('does not exist')) {
-      return res.status(503).json({ success: false, error: 'DB 마이그레이션 필요: 운영자에게 journeys lineage_id · entry_closed_at ALTER 실행 요청', code: 'DB_MIGRATION_PENDING' });
-    }
-    console.error('[Journeys reshape] 오류:', err);
-    return res.status(500).json({ success: false, error: '바뀐 모양으로 저장하지 못했어요. 잠시 뒤 다시 시도해 주세요.' });
+    return journeyError(res, err, 'reshape', '바뀐 모양으로 저장하지 못했어요. 잠시 뒤 다시 시도해 주세요.');
   }
 });
 
 // GET /api/ai/operator/journeys-attach-check?ids=a,b — ★ 2026-09-30 여정 V2 2차 이어붙이기 점검(지도 응답만 읽는다)
 router.get('/operator/journeys-attach-check', async (req: Request, res: Response) => {
   try {
-    const companyId = req.user?.companyId;
-    if (!companyId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
-    const planCtx = await loadPlanContext(companyId);
-    if (!planCtx) return res.status(404).json({ success: false, error: '회사 정보를 찾을 수 없습니다.' });
-    if (!isAiOperatorAllowed(planCtx, req.user)) {
-      return res.status(403).json({ success: false, error: 'AI Operator 진입 권한이 없습니다.', code: 'AI_OPERATOR_GATED' });
-    }
-    const ids = String(req.query.ids || '').split(',').map((x) => x.trim()).filter(Boolean).slice(0, 10);
+    const gate = await journeyGate(req, res);
+    if (!gate) return;
+    const { companyId } = gate;
+    const mine = await accessibleJourneyIds(gate);
+    const ids = String(req.query.ids || '').split(',').map((x) => x.trim()).filter(Boolean).filter((x) => !mine || mine.has(x)).slice(0, 10);
     if (ids.length === 0) return res.status(400).json({ success: false, error: '점검할 여정을 골라 주세요.' });
-    const map = await buildLifecycleMap(companyId);
+    const map = await buildLifecycleMap(companyId, gate.userId);   // 담당자 = 자기 여정 지도(남의 이름 · id 0)
     return res.json({ success: true, rows: buildAttachCheck(map, ids) });
   } catch (err: any) {
-    const msg = err?.message || '';
-    if (msg.includes('column') && msg.includes('does not exist')) {
-      return res.status(503).json({ success: false, error: 'DB 마이그레이션 필요: 운영자에게 여정 컬럼 확인 요청', code: 'DB_MIGRATION_PENDING' });
-    }
-    console.error('[Journeys attach-check] 오류:', err);
-    return res.status(500).json({ success: false, error: '이어붙이기 점검을 하지 못했어요.' });
+    return journeyError(res, err, 'attach-check', '이어붙이기 점검을 하지 못했어요.');
   }
 });
 
 
 router.get('/operator/journeys-opportunities', async (req: Request, res: Response) => {
   try {
-    const companyId = req.user?.companyId;
-    if (!companyId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
-    const planCtx = await loadPlanContext(companyId);
-    if (!planCtx) return res.status(404).json({ success: false, error: '회사 정보를 찾을 수 없습니다.' });
-    if (!isAiOperatorAllowed(planCtx, req.user)) {
-      return res.status(403).json({ success: false, error: 'AI Operator 진입 권한이 없습니다.', code: 'AI_OPERATOR_GATED' });
-    }
+    const gate = await journeyGate(req, res);
+    if (!gate) return;
+    const { companyId } = gate;
 
     // ★ 2026-10-10 한 줄 묻기 0단계 — 담당자는 자기 분류코드 고객만 센다(관리자 = 회사 전체 · 한 줄 답과 같은 숫자)
     const opportunities = await buildJourneyOpportunities(companyId, req.user?.userId);
@@ -3718,21 +3462,16 @@ router.get('/operator/journeys-opportunities', async (req: Request, res: Respons
 //   문 = 이 메뉴와 같은 isAiOperatorAllowed · 판정(질문인가)은 /one-line/gaps 가 하고, 화면은 질문일 때만 여기를 부른다.
 router.post('/operator/journeys-ask', async (req: Request, res: Response) => {
   try {
-    const companyId = req.user?.companyId;
-    if (!companyId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
-    const planCtx = await loadPlanContext(companyId);
-    if (!planCtx) return res.status(404).json({ success: false, error: '회사 정보를 찾을 수 없습니다.' });
-    if (!isAiOperatorAllowed(planCtx, req.user)) {
-      return res.status(403).json({ success: false, error: 'AI Operator 진입 권한이 없습니다.', code: 'AI_OPERATOR_GATED' });
-    }
+    const gate = await journeyGate(req, res);
+    if (!gate) return;
+    const { companyId } = gate;
     const { oneLineAskEnabled } = await import('../utils/one-line-facts');
     const { buildJourneyAsk, parseAskLine, LINE_ASK_DISABLED } = await import('../utils/one-line-ask');
     if (!oneLineAskEnabled(companyId)) return res.status(404).json(LINE_ASK_DISABLED);
     if (!parseAskLine(req.body)) return res.status(400).json({ success: false, error: '물어볼 내용을 한 줄로 적어 주세요.' });
     return res.json({ success: true, answer: await buildJourneyAsk(companyId, req.user?.userId) });
   } catch (err: any) {
-    console.error('[Journeys ask] 오류:', err);
-    return res.status(500).json({ success: false, error: '답을 준비하지 못했어요. 잠시 뒤 다시 물어봐 주세요.' });
+    return journeyError(res, err, 'ask', '답을 준비하지 못했어요. 잠시 뒤 다시 물어봐 주세요.');
   }
 });
 
@@ -3760,18 +3499,13 @@ router.post('/operator/continuous-ask', async (req: Request, res: Response) => {
 //   사실 · 간격 = 구매 원장 실측(SQL · AI 0 · 차감 0) · 창을 열 때만 부른다(지도 60초 갱신에 묶지 않는다 · 리듬 사실은 24시간 캐시).
 router.get('/operator/journeys-diagnosis', async (req: Request, res: Response) => {
   try {
-    const companyId = req.user?.companyId;
-    if (!companyId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
-    const planCtx = await loadPlanContext(companyId);
-    if (!planCtx) return res.status(404).json({ success: false, error: '회사 정보를 찾을 수 없습니다.' });
-    if (!isAiOperatorAllowed(planCtx, req.user)) {
-      return res.status(403).json({ success: false, error: 'AI Operator 진입 권한이 없습니다.', code: 'AI_OPERATOR_GATED' });
-    }
+    const gate = await journeyGate(req, res);
+    if (!gate) return;
+    const { companyId } = gate;
     const diagnosis = await buildJourneyDiagnosis(companyId);
     return res.json({ success: true, diagnosis });
   } catch (err: any) {
-    console.error('[Journeys diagnosis] 오류:', err);
-    return res.status(500).json({ success: false, error: '진단을 불러오지 못했어요. 잠시 뒤 다시 시도해 주세요.' });
+    return journeyError(res, err, 'diagnosis', '진단을 불러오지 못했어요. 잠시 뒤 다시 시도해 주세요.');
   }
 });
 
@@ -3779,14 +3513,11 @@ router.get('/operator/journeys-diagnosis', async (req: Request, res: Response) =
 //   차감 · 멱등 · 저장 = 문장으로 만들기와 같은 경로(designJourneyFromInterview · 요청 키 = 회사 · 계획 내용에서 결정적 = recoRequestId).
 router.post('/operator/journeys-reco/design', async (req: Request, res: Response) => {
   try {
-    const companyId = req.user?.companyId;
-    const userId = req.user?.userId;
-    if (!companyId || !userId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
-    const planCtx = await loadPlanContext(companyId);
-    if (!planCtx) return res.status(404).json({ success: false, error: '회사 정보를 찾을 수 없습니다.' });
-    if (!isAiOperatorAllowed(planCtx, req.user)) {
-      return res.status(403).json({ success: false, error: 'AI Operator 진입 권한이 없습니다.', code: 'AI_OPERATOR_GATED' });
-    }
+    const gate = await journeyGate(req, res);
+    if (!gate) return;
+    const { companyId } = gate;
+    const userId = gate.userId;
+    if (!userId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
     const { triggerEvent, callbackNumber, shownDays } = req.body || {};
     const plan = await recoPlanFor(companyId, String(triggerEvent || ''));
     if (!plan) return res.status(400).json({ success: false, error: '추천에 없는 시작 사건이에요. 진단을 다시 열어 주세요.' });
@@ -3810,32 +3541,18 @@ router.post('/operator/journeys-reco/design', async (req: Request, res: Response
     if (err instanceof InsufficientCreditError) {
       return res.status(402).json({ success: false, error: '여정 초안을 만드는 데 필요한 크레딧이 부족합니다. 크레딧을 충전해 주세요.', code: 'INSUFFICIENT_CREDIT' });
     }
-    if (err instanceof JourneyInputError) {
-      return res.status(400).json({ success: false, error: err.message, code: err.code, ...(err.journeyId ? { journeyId: err.journeyId } : {}) });
-    }
-    if (err instanceof JourneyStepGateError) {
-      return res.status(409).json({ success: false, error: err.message, code: err.code });
-    }
-    const cm = err?.message || '';
-    if (cm.includes('column') && cm.includes('does not exist')) {
-      return res.status(503).json({ success: false, error: 'DB 마이그레이션 필요: 운영자에게 journeys/journey_steps ALTER 실행 요청 의무', code: 'DB_MIGRATION_PENDING' });
-    }
-    console.error('[Journeys reco design] 오류:', err);
-    return res.status(500).json({ success: false, error: '추천 여정을 만들지 못했어요. 잠시 뒤 다시 시도해 주세요.' });
+    return journeyError(res, err, 'reco design', '추천 여정을 만들지 못했어요. 잠시 뒤 다시 시도해 주세요.');
   }
 });
 
 // POST /api/ai/operator/journeys — 신규 여정 생성 (템플릿 또는 자연어)
 router.post('/operator/journeys', async (req: Request, res: Response) => {
   try {
-    const companyId = req.user?.companyId;
-    const userId = req.user?.userId;
-    if (!companyId || !userId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
-    const planCtx = await loadPlanContext(companyId);
-    if (!planCtx) return res.status(404).json({ success: false, error: '회사 정보를 찾을 수 없습니다.' });
-    if (!isAiOperatorAllowed(planCtx, req.user)) {
-      return res.status(403).json({ success: false, error: 'AI Operator 진입 권한이 없습니다.', code: 'AI_OPERATOR_GATED' });
-    }
+    const gate = await journeyGate(req, res);
+    if (!gate) return;
+    const { companyId } = gate;
+    const userId = gate.userId;
+    if (!userId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
 
     const {
       templateCode,
@@ -3900,129 +3617,73 @@ router.post('/operator/journeys', async (req: Request, res: Response) => {
     return res.status(201).json({ success: true, journeyId, detail });
   } catch (err: any) {
     // ★ db_alter_safety_net — start_kind/anchor_* 등 신규 컬럼 미마이그레이션 시 503 + 운영자 안내(500 노출 X).
-    const cm = err?.message || '';
-    if (cm.includes('column') && cm.includes('does not exist')) {
-      return res.status(503).json({ success: false, error: 'DB 마이그레이션 필요: 운영자에게 journeys/journey_steps 여정 일반화 ALTER 실행 요청 의무', code: 'DB_MIGRATION_PENDING' });
-    }
-    if (err instanceof JourneyStepGateError) {
-      return res.status(409).json({ success: false, error: err.message, code: err.code });
-    }
-    if (err instanceof JourneyInputError) {
-      return res.status(400).json({ success: false, error: err.message, code: err.code, ...(err.journeyId ? { journeyId: err.journeyId } : {}) });
-    }
-    console.error('[Journeys create] 오류:', err);
-    return res.status(500).json({ success: false, error: err?.message || '여정 생성 실패' });
+    return journeyError(res, err, 'create', '여정 생성 실패');
   }
 });
 
 // GET /api/ai/operator/journeys/:id — 상세 (steps + 통계)
 router.get('/operator/journeys/:id', async (req: Request, res: Response) => {
   try {
-    const companyId = req.user?.companyId;
-    if (!companyId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
-    const planCtx = await loadPlanContext(companyId);
-    if (!planCtx) return res.status(404).json({ success: false, error: '회사 정보를 찾을 수 없습니다.' });
-    if (!isAiOperatorAllowed(planCtx, req.user)) {
-      return res.status(403).json({ success: false, error: 'AI Operator 진입 권한이 없습니다.', code: 'AI_OPERATOR_GATED' });
-    }
+    const gate = await journeyGate(req, res);
+    if (!gate) return;
+    const { companyId } = gate;
 
     const detail = await getJourneyDetail(companyId, req.params.id);
     if (!detail) return res.status(404).json({ success: false, error: '여정을 찾을 수 없습니다.' });
     return res.json({ success: true, ...detail });
   } catch (err: any) {
-    console.error('[Journeys detail] 오류:', err);
-    return res.status(500).json({ success: false, error: err?.message || '여정 상세 조회 실패' });
+    return journeyError(res, err, 'detail', '여정 상세 조회 실패');
+  }
+});
+
+// POST /api/ai/operator/journeys/preview-message — 받는 모습(실발송과 같은 글)
+// ★ 2026-10-23 여정 결함 0 — 글 = journey-message-render 한 곳(실행기 · 켜기 검사 · 발송 2시간 전 재검사와 같은 함수 · 표본 = 이 여정 대상 1명).
+//   옛: 라우트가 따로 조립해 미리보기에만 빈 칸 대체값이 들어가고 고객사 고유 칸 · Liquid 회사 · 예측 점수 · 날씨 · 장바구니가 빠졌다.
+//   화면(PhoneComposer)은 문자 칸(SMS · LMS · MMS)만 부른다 — 알림톡은 승인 템플릿이 본문이라 여기 대상이 아니다.
+router.post('/operator/journeys/preview-message', async (req: Request, res: Response) => {
+  try {
+    const gate = await journeyGate(req, res);
+    if (!gate) return;
+    const { companyId } = gate;
+    const { journeyId, message, subject, isAd, channel } = req.body as { journeyId?: string; message?: string; subject?: string; isAd?: boolean; channel?: string };
+    if (!message) return res.json({ success: true, previewMessage: '', previewSubject: '', hasSample: false, sampleName: null });
+    const ch = String(channel || 'lms').toLowerCase();
+    if (!['sms', 'lms', 'mms'].includes(ch)) return res.status(400).json({ success: false, error: '문자 칸만 받는 모습을 볼 수 있어요.' });
+    const jid = journeyId && isUuid(String(journeyId)) ? String(journeyId) : null;
+    // 본문으로 온 여정도 주인 확인(담당자 = 자기 여정만 · 남의 여정 대상 고객 이름이 표본으로 보이지 않게)
+    if (jid && !(await canAccessJourney(gate, jid))) return res.status(404).json({ success: false, error: '여정을 찾을 수 없습니다.' });
+    // 작성자(080 번호 기준) = 여정을 만든 사람 · 여정이 없으면 보는 사람(발송과 같은 기준)
+    const owner = jid ? await query('SELECT created_by FROM journeys WHERE id = $1::uuid AND company_id = $2::uuid', [jid, companyId]) : null;
+    const sample = await pickJourneySampleCustomer(companyId, jid);
+    const r = await renderJourneySmsMessage({
+      companyId,
+      createdBy: owner?.rows[0]?.created_by || req.user?.userId || null,
+      template: String(message),
+      subject: subject ? String(subject) : '',
+      channel: ch,
+      isAd,
+      customer: sample,
+    });
+    return res.json({
+      success: true,
+      previewMessage: r.message,
+      previewSubject: r.subject,
+      sampleName: sample?.name ? String(sample.name) : null,
+      hasSample: !!sample,
+    });
+  } catch (err: any) {
+    return journeyError(res, err, 'preview-message', '받는 모습을 만들지 못했어요. 잠시 뒤 다시 시도해 주세요.');
   }
 });
 
 // POST /api/ai/operator/journeys/:id/activate — 활성화
-// ★ 2026-06-22 Phase 6 (가): 실발송 미리보기 — 발송 함수(replaceVariables)로 회사 대표 고객 치환 = 미리보기 = 실발송 100% 일치
-router.post('/operator/journeys/preview-message', async (req: Request, res: Response) => {
-  try {
-    const companyId = req.user?.companyId;
-    if (!companyId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
-    const { journeyId, message, subject, isAd, channel } = req.body as { journeyId?: string; message?: string; subject?: string; isAd?: boolean; channel?: string };
-    if (!message) return res.json({ success: true, previewMessage: '', previewSubject: '', hasSample: false, sampleName: null });
-
-    const companyRow = await query('SELECT customer_schema FROM companies WHERE id = $1::uuid', [companyId]);
-    const { fieldMappings } = extractVarCatalog(companyRow.rows[0]?.customer_schema);
-
-    // ★ 추출된 발송 대상(여정 타겟 세그먼트) 중 상위 고객 1명으로 치환 = 실발송 미리보기 (회사 전체 아무나 X)
-    let sampleRaw: Record<string, any> | null = null;
-    if (journeyId) {
-      const jrow = await query('SELECT trigger_event, trigger_filters FROM journeys WHERE id = $1::uuid AND company_id = $2::uuid', [journeyId, companyId]);
-      const j = jrow.rows[0];
-      if (j?.trigger_event) {
-        try {
-          const ids = await selectJourneyTargetCustomerIds(companyId, j.trigger_event, j.trigger_filters || {}, 50, undefined, undefined, await getJourneyOwnerScopeSql(companyId, journeyId), await journeyOwnerConsent(companyId, journeyId));
-          if (ids.length > 0) {
-            const cr = await query(
-              `SELECT name, gender, age, grade, points, email, address,
-                      recent_purchase_store, registered_store, registration_type,
-                      store_phone, store_name, store_code, region,
-                      recent_purchase_amount, total_purchase_amount, purchase_count,
-                      birth_date, recent_purchase_date, custom_fields
-               FROM customers
-               WHERE company_id = $1::uuid AND id = ANY($2::uuid[])
-               ORDER BY recent_purchase_amount DESC NULLS LAST, total_purchase_amount DESC NULLS LAST LIMIT 1`,
-              [companyId, ids]
-            );
-            if (cr.rows[0]) {
-              const sr: Record<string, any> = { ...cr.rows[0] };
-              for (const fk of Object.keys(FIELD_DISPLAY_MAP)) {
-                if (sr[fk] != null) sr[fk] = reverseDisplayValue(fk, sr[fk]);
-              }
-              sampleRaw = sr;
-            }
-          }
-        } catch { /* 타겟 추출 실패 시 sampleRaw null → hasSample false (미리보기는 변수명/대체값으로) */ }
-      }
-    }
-
-    // 표준 대체값 (Phase 1) — 빈 변수 시 발송과 동일하게 채워 줄 누락 방지
-    const fieldDefaults: Record<string, string> = {};
-    for (const [varName, m] of Object.entries(fieldMappings)) {
-      const fb = STANDARD_FIELD_FALLBACKS[(m as { column: string }).column];
-      if (fb) fieldDefaults[varName] = fb;
-    }
-
-    let previewMessage = replaceVariables(message, sampleRaw, fieldMappings, undefined, { fieldDefaults });
-    let previewSubject = subject ? replaceVariables(subject, sampleRaw, fieldMappings, undefined, { fieldDefaults }) : '';
-
-    // ★ 2026-06-23: 미리보기 = 실발송 100% 일치 — 발송과 동일하게 (광고)+무료수신거부 본문 합성.
-    //   비카카오 여정은 무조건 광고(resolveJourneyAdFlag) → buildAdMessage가 발송(journey-executor)과 동일 합성.
-    //   카카오(알림톡)는 정보성이라 합성하지 않음. 이전엔 변수 치환만 해 본문에 (광고)가 빠져 보이던 문제.
-    const previewChannel = String(channel || 'lms').toLowerCase();
-    if (previewChannel !== 'kakao') {
-      const previewMsgType = previewChannel === 'lms' ? 'LMS' : previewChannel === 'mms' ? 'MMS' : 'SMS';
-      const previewAdFlag = resolveJourneyAdFlag(channel, isAd);
-      const previewOpt080 = await getOpt080Number(req.user?.userId || null, companyId);
-      previewMessage = buildAdMessage(previewMessage, previewMsgType, previewAdFlag, previewOpt080);
-      previewSubject = buildAdSubject(previewSubject, previewMsgType, previewAdFlag);
-    }
-
-    return res.json({
-      success: true,
-      previewMessage,
-      previewSubject,
-      sampleName: sampleRaw?.name ? String(sampleRaw.name) : null,
-      hasSample: !!sampleRaw,
-    });
-  } catch (err: any) {
-    return res.status(500).json({ success: false, error: err?.message || '미리보기 생성 실패' });
-  }
-});
-
 router.post('/operator/journeys/:id/activate', async (req: Request, res: Response) => {
   try {
-    const companyId = req.user?.companyId;
-    const userId = req.user?.userId;
-    if (!companyId || !userId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
-    const planCtx = await loadPlanContext(companyId);
-    if (!planCtx) return res.status(404).json({ success: false, error: '회사 정보를 찾을 수 없습니다.' });
-    if (!isAiOperatorAllowed(planCtx, req.user)) {
-      return res.status(403).json({ success: false, error: 'AI Operator 진입 권한이 없습니다.', code: 'AI_OPERATOR_GATED' });
-    }
+    const gate = await journeyGate(req, res);
+    if (!gate) return;
+    const { companyId } = gate;
+    const userId = gate.userId;
+    if (!userId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
 
     // ★ 2026-09-30 여정 V2 2차 — 켜기 게이트(검증 마커 · 매장번호 확인 · 최초 활성화 크레딧 확인/차감 · 1회 발송 적재)를
     //   CT(journey-activation.ts activateJourneyGuarded)로 옮겼다. [모두 켜기]와 같은 게이트를 쓴다. 응답은 옛 그대로 매핑한다.
@@ -4062,8 +3723,7 @@ router.post('/operator/journeys/:id/activate', async (req: Request, res: Respons
     if (err instanceof InsufficientCreditError) {
       return res.status(402).json({ success: false, error: '여정 저장에 필요한 크레딧이 부족합니다. 크레딧을 충전해 주세요.', code: 'INSUFFICIENT_CREDIT' });
     }
-    console.error('[Journeys activate] 오류:', err);
-    return res.status(500).json({ success: false, error: err?.message || '활성화 실패' });
+    return journeyError(res, err, 'activate', '활성화 실패');
   }
 });
 
@@ -4071,19 +3731,19 @@ router.post('/operator/journeys/:id/activate', async (req: Request, res: Respons
 //   받는 여정 먼저 · 시작 전 최초 활성화 합계 잔액 확인 · 여정마다 단건과 같은 게이트(activateJourneyGuarded) · 카드별 결과.
 router.post('/operator/journeys-activate-batch', async (req: Request, res: Response) => {
   try {
-    const companyId = req.user?.companyId;
-    const userId = req.user?.userId;
-    if (!companyId || !userId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
-    const planCtx = await loadPlanContext(companyId);
-    if (!planCtx) return res.status(404).json({ success: false, error: '회사 정보를 찾을 수 없습니다.' });
-    if (!isAiOperatorAllowed(planCtx, req.user)) {
-      return res.status(403).json({ success: false, error: 'AI Operator 진입 권한이 없습니다.', code: 'AI_OPERATOR_GATED' });
-    }
+    const gate = await journeyGate(req, res);
+    if (!gate) return;
+    const { companyId } = gate;
+    const userId = gate.userId;
+    if (!userId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
     const { journeyIds, confirmCallbackExclusionIds, acknowledgedOverlaps } = req.body || {};
     const uuidRe = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
     const ids: string[] = Array.isArray(journeyIds) ? journeyIds.map(String).filter((x: string) => uuidRe.test(x)) : [];
     if (ids.length === 0) return res.status(400).json({ success: false, error: '켤 여정을 골라 주세요.' });
     if (ids.length > MAX_BATCH_ACTIVATION) return res.status(400).json({ success: false, error: `한 번에 ${MAX_BATCH_ACTIVATION}개까지 켤 수 있어요.` });
+    // ★ 2026-10-23 여정 결함 0 — 묶음 켜기도 주인 확인(담당자 = 자기 여정만 · 하나씩 켜기와 같은 문)
+    const mine = await accessibleJourneyIds(gate);
+    if (mine && ids.some((x) => !mine.has(x))) return res.status(404).json({ success: false, error: '여정을 찾을 수 없습니다.' });
     const out = await activateJourneysInOrder(companyId, userId, ids, {
       confirmCallbackExclusionIds: Array.isArray(confirmCallbackExclusionIds) ? confirmCallbackExclusionIds.map(String) : [],
       acknowledgedOverlaps: Array.isArray(acknowledgedOverlaps) ? acknowledgedOverlaps.map(String) : [],
@@ -4092,21 +3752,16 @@ router.post('/operator/journeys-activate-batch', async (req: Request, res: Respo
     if (!out.ok) return res.status(402).json({ success: false, error: out.message, code: out.code, needed: out.needed });
     return res.json({ success: true, items: out.items });
   } catch (err: any) {
-    console.error('[Journeys activate-batch] 오류:', err);
-    return res.status(500).json({ success: false, error: '여정을 켜지 못했어요. 잠시 뒤 다시 시도해 주세요.' });
+    return journeyError(res, err, 'activate-batch', '여정을 켜지 못했어요. 잠시 뒤 다시 시도해 주세요.');
   }
 });
 
 // PATCH /api/ai/operator/journeys/:id/steps/:stepId — step 본문 갱신 (활성화 전 회사 admin 편집)
 router.patch('/operator/journeys/:id/steps/:stepId', async (req: Request, res: Response) => {
   try {
-    const companyId = req.user?.companyId;
-    if (!companyId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
-    const planCtx = await loadPlanContext(companyId);
-    if (!planCtx) return res.status(404).json({ success: false, error: '회사 정보를 찾을 수 없습니다.' });
-    if (!isAiOperatorAllowed(planCtx, req.user)) {
-      return res.status(403).json({ success: false, error: 'AI Operator 진입 권한이 없습니다.', code: 'AI_OPERATOR_GATED' });
-    }
+    const gate = await journeyGate(req, res);
+    if (!gate) return;
+    const { companyId } = gate;
     // ★ D188 Phase 2-B-1+2 (2026-05-21): stepType + conditionJsonb + 알림톡 + MMS 영역 patch 확장.
     // ★ D218+ (2026-05-26): notifyManagerOnPretest 추가 — step별 담당자 알림 ON/OFF/default 3 상태
     const {
@@ -4150,14 +3805,7 @@ router.patch('/operator/journeys/:id/steps/:stepId', async (req: Request, res: R
     if (err instanceof AlimtalkFallbackError) {
       return res.status(400).json({ success: false, error: err.message });
     }
-    if (err instanceof JourneyStepGateError) {
-      return res.status(409).json({ success: false, error: err.message, code: err.code });
-    }
-    if (err instanceof JourneyInputError) {
-      return res.status(400).json({ success: false, error: err.message, code: err.code, ...(err.journeyId ? { journeyId: err.journeyId } : {}) });
-    }
-    console.error('[Journeys update step] 오류:', err);
-    return res.status(500).json({ success: false, error: err?.message || 'step 수정 실패' });
+    return journeyError(res, err, 'update step', 'step 수정 실패');
   }
 });
 
@@ -4170,13 +3818,9 @@ router.patch('/operator/journeys/:id/steps/:stepId', async (req: Request, res: R
 // POST /api/ai/operator/journeys/:id/steps — step 추가 (맨 뒤)
 router.post('/operator/journeys/:id/steps', async (req: Request, res: Response) => {
   try {
-    const companyId = req.user?.companyId;
-    if (!companyId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
-    const planCtx = await loadPlanContext(companyId);
-    if (!planCtx) return res.status(404).json({ success: false, error: '회사 정보를 찾을 수 없습니다.' });
-    if (!isAiOperatorAllowed(planCtx, req.user)) {
-      return res.status(403).json({ success: false, error: 'AI Operator 진입 권한이 없습니다.', code: 'AI_OPERATOR_GATED' });
-    }
+    const gate = await journeyGate(req, res);
+    if (!gate) return;
+    const { companyId } = gate;
     const {
       stepType, delayHours, channel, messageTemplate, subject, isAd, conditionJsonb,
       alimtalkProfileId, alimtalkTemplateCode, alimtalkVariableMap,
@@ -4210,116 +3854,71 @@ router.post('/operator/journeys/:id/steps', async (req: Request, res: Response) 
     if (!result) return res.status(404).json({ success: false, error: '여정을 찾을 수 없거나 수정 권한이 없습니다.' });
     return res.json({ success: true, stepId: result.stepId, stepOrder: result.stepOrder, existed: result.existed === true });
   } catch (err: any) {
-    if (err instanceof JourneyStepGateError) {
-      return res.status(409).json({ success: false, error: err.message, code: err.code });
-    }
-    if (err instanceof JourneyInputError) {
-      return res.status(400).json({ success: false, error: err.message, code: err.code, ...(err.journeyId ? { journeyId: err.journeyId } : {}) });
-    }
-    const msg = String(err?.message || '');
-    if (msg.includes('column') && msg.includes('does not exist')) {
-      return res.status(503).json({ success: false, error: 'DB 마이그레이션 필요: journey_steps ALTER 실행 요청', code: 'DB_MIGRATION_PENDING' });
-    }
-    console.error('[Journeys add step] 오류:', err);
-    return res.status(500).json({ success: false, error: err?.message || 'step 추가 실패' });
+    return journeyError(res, err, 'add step', 'step 추가 실패');
   }
 });
 
 // ★ 2026-10-20 여정 V.3 §18 — 기존 여정 뒤에 붙이기 · 붙기 전 점검 · 떼기(점검 = journey-attach judgeAttach 한 함수).
-/** 붙이기 주소 공용 — 권한 확인(회사 · AI Operator). 통과하면 회사 id. */
-async function attachGate(req: Request, res: Response): Promise<string | null> {
-  const companyId = req.user?.companyId;
-  if (!companyId) { res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' }); return null; }
-  const planCtx = await loadPlanContext(companyId);
-  if (!planCtx) { res.status(404).json({ success: false, error: '회사 정보를 찾을 수 없습니다.' }); return null; }
-  if (!isAiOperatorAllowed(planCtx, req.user)) {
-    res.status(403).json({ success: false, error: 'AI Operator 진입 권한이 없습니다.', code: 'AI_OPERATOR_GATED' });
-    return null;
-  }
-  return companyId;
-}
-/** 붙이기 주소 공용 오류 — 막음 409 · DDL 전 503 · 그 밖 500(원문 노출 0). */
-function attachError(res: Response, err: any, label: string) {
-  if (err instanceof AttachBlockedError) return res.status(409).json({ success: false, error: err.message, code: err.code, blocks: err.blocks });
-  if (err instanceof JourneyMigrationPendingError) return res.status(503).json({ success: false, error: err.message, code: err.code });
-  if (err?.code === '23514') return res.status(503).json({ success: false, error: 'DB 마이그레이션 필요: 운영자에게 journeys 시작 사건 목록(CHECK) 갱신 요청', code: 'DB_MIGRATION_PENDING' });
-  const msg = String(err?.message || '');
-  if (msg.includes('column') && msg.includes('does not exist')) {
-    return res.status(503).json({ success: false, error: 'DB 마이그레이션 필요: journeys ALTER 실행 요청', code: 'DB_MIGRATION_PENDING' });
-  }
-  console.error(`[Journeys ${label}] 오류:`, err);
-  return res.status(500).json({ success: false, error: '처리하지 못했어요. 잠시 뒤 다시 시도해 주세요.' });
-}
 const parseOutcome = (v: unknown): AfterOutcome => (AFTER_OUTCOMES.includes(String(v) as AfterOutcome) ? (String(v) as AfterOutcome) : 'any');
 
 // GET /api/ai/operator/journeys/:id/attach-candidates?outcome= — 이 여정(앞) 뒤에 붙일 수 있는 여정 · 결과별 가능 여부
 router.get('/operator/journeys/:id/attach-candidates', async (req: Request, res: Response) => {
   try {
-    const companyId = await attachGate(req, res);
-    if (!companyId) return;
+    const gate = await journeyGate(req, res);
+    if (!gate) return;
+    const { companyId } = gate;
     const out = await attachCandidates(companyId, String(req.params.id), parseOutcome(req.query.outcome));
     if (!out) return res.status(404).json({ success: false, error: '여정을 찾을 수 없습니다.' });
-    return res.json({ success: true, ...out });
+    const mine = await accessibleJourneyIds(gate);   // 담당자 = 자기 여정만 후보(판정은 회사 전체 고리 · 계보로 그대로)
+    return res.json({ success: true, ...out, candidates: mine ? out.candidates.filter((c) => mine.has(c.id)) : out.candidates });
   } catch (err: any) {
-    return attachError(res, err, 'attach-candidates');
+    return journeyError(res, err, 'attach-candidates', '처리하지 못했어요. 잠시 뒤 다시 시도해 주세요.');
   }
 });
 
 // POST /api/ai/operator/journeys/:id/attach { afterJourneyId, outcome } — 이 여정(뒤)을 앞 여정 뒤에 붙인다(잠금 안 다시 점검)
 router.post('/operator/journeys/:id/attach', async (req: Request, res: Response) => {
   try {
-    const companyId = await attachGate(req, res);
-    if (!companyId) return;
+    const gate = await journeyGate(req, res);
+    if (!gate) return;
+    const { companyId } = gate;
     const afterId = String(req.body?.afterJourneyId || '');
     if (!isUuid(afterId)) return res.status(400).json({ success: false, error: '앞 여정을 골라 주세요.' });
+    if (!(await canAccessJourney(gate, afterId))) return res.status(404).json({ success: false, error: '여정을 찾을 수 없습니다.' });
     const outcome = String(req.body?.outcome || '') as AfterOutcome;
     if (!AFTER_OUTCOMES.includes(outcome)) return res.status(400).json({ success: false, error: '어떤 고객을 넘길지 골라 주세요.' });
     const out = await attachJourney(companyId, String(req.params.id), afterId, outcome);
     return res.json({ success: true, warns: out.warns });
   } catch (err: any) {
-    return attachError(res, err, 'attach');
+    return journeyError(res, err, 'attach', '처리하지 못했어요. 잠시 뒤 다시 시도해 주세요.');
   }
 });
 
 // POST /api/ai/operator/journeys/:id/detach — 앞 여정에서 떼고 붙이기 전 시작으로 되돌린다
 router.post('/operator/journeys/:id/detach', async (req: Request, res: Response) => {
   try {
-    const companyId = await attachGate(req, res);
-    if (!companyId) return;
+    const gate = await journeyGate(req, res);
+    if (!gate) return;
+    const { companyId } = gate;
     const out = await detachJourney(companyId, String(req.params.id));
     return res.json({ success: true, triggerEvent: out.triggerEvent });
   } catch (err: any) {
-    return attachError(res, err, 'detach');
+    return journeyError(res, err, 'detach', '처리하지 못했어요. 잠시 뒤 다시 시도해 주세요.');
   }
 });
 
 // DELETE /api/ai/operator/journeys/:id/steps/:stepId — step 삭제 + 재번호
 router.delete('/operator/journeys/:id/steps/:stepId', async (req: Request, res: Response) => {
   try {
-    const companyId = req.user?.companyId;
-    if (!companyId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
-    const planCtx = await loadPlanContext(companyId);
-    if (!planCtx) return res.status(404).json({ success: false, error: '회사 정보를 찾을 수 없습니다.' });
-    if (!isAiOperatorAllowed(planCtx, req.user)) {
-      return res.status(403).json({ success: false, error: 'AI Operator 진입 권한이 없습니다.', code: 'AI_OPERATOR_GATED' });
-    }
+    const gate = await journeyGate(req, res);
+    if (!gate) return;
+    const { companyId } = gate;
     const result = await deleteJourneyStep(companyId, req.params.id, req.params.stepId);
     if (!result) return res.status(404).json({ success: false, error: 'step을 찾을 수 없거나 수정 권한이 없습니다.' });
     return res.json({ success: true, deletedOrder: result.deletedOrder, renumbered: result.renumbered });
   } catch (err: any) {
     // 게이트(마지막 스텝·발송 이력·진행 중 고객)는 상태 문제라 409 — 사유가 화면에 그대로 나간다.
-    if (err instanceof JourneyStepGateError) {
-      return res.status(409).json({ success: false, error: err.message, code: err.code });
-    }
-    if (err instanceof JourneyInputError) {
-      return res.status(400).json({ success: false, error: err.message, code: err.code, ...(err.journeyId ? { journeyId: err.journeyId } : {}) });
-    }
-    const msg = String(err?.message || '');
-    if (msg.includes('column') && msg.includes('does not exist')) {
-      return res.status(503).json({ success: false, error: 'DB 마이그레이션 필요: journey_steps ALTER 실행 요청', code: 'DB_MIGRATION_PENDING' });
-    }
-    console.error('[Journeys delete step] 오류:', err);
-    return res.status(500).json({ success: false, error: err?.message || 'step 삭제 실패' });
+    return journeyError(res, err, 'delete step', 'step 삭제 실패');
   }
 });
 
@@ -4330,13 +3929,9 @@ router.delete('/operator/journeys/:id/steps/:stepId', async (req: Request, res: 
 // GET /api/ai/operator/journeys/:journeyId/steps/:stepId/variants — variants 조회
 router.get('/operator/journeys/:journeyId/steps/:stepId/variants', async (req: Request, res: Response) => {
   try {
-    const companyId = req.user?.companyId;
-    if (!companyId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
-    const planCtx = await loadPlanContext(companyId);
-    if (!planCtx) return res.status(404).json({ success: false, error: '회사 정보를 찾을 수 없습니다.' });
-    if (!isAiOperatorAllowed(planCtx, req.user)) {
-      return res.status(403).json({ success: false, error: 'AI Operator 진입 권한이 없습니다.', code: 'AI_OPERATOR_GATED' });
-    }
+    const gate = await journeyGate(req, res);
+    if (!gate) return;
+    const { companyId } = gate;
     // ⛔ 2026-08-02 — 여정만 회사로 검증하고 stepId는 안 보던 구멍(쓰기와 같은 부류의 읽기 판).
     //   URL의 journeyId가 내 것이어도 stepId가 남의 것이면 **다른 회사 변이 본문이 읽힌다.**
     //   대상 자원 자체를 소유 사슬(step → journey → company)로 확인한다.
@@ -4354,21 +3949,16 @@ router.get('/operator/journeys/:journeyId/steps/:stepId/variants', async (req: R
     const variantsCI = computeVariantsCI(variants);
     return res.json({ success: true, variants, winnerDeclaration, variantsCI });
   } catch (err: any) {
-    console.error('[Journeys variants list] 오류:', err);
-    return res.status(500).json({ success: false, error: err?.message || 'variants 조회 실패' });
+    return journeyError(res, err, 'variants list', 'variants 조회 실패');
   }
 });
 
 // POST /api/ai/operator/journeys/:journeyId/steps/:stepId/variants — variant 신규/UPSERT
 router.post('/operator/journeys/:journeyId/steps/:stepId/variants', async (req: Request, res: Response) => {
   try {
-    const companyId = req.user?.companyId;
-    if (!companyId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
-    const planCtx = await loadPlanContext(companyId);
-    if (!planCtx) return res.status(404).json({ success: false, error: '회사 정보를 찾을 수 없습니다.' });
-    if (!isAiOperatorAllowed(planCtx, req.user)) {
-      return res.status(403).json({ success: false, error: 'AI Operator 진입 권한이 없습니다.', code: 'AI_OPERATOR_GATED' });
-    }
+    const gate = await journeyGate(req, res);
+    if (!gate) return;
+    const { companyId } = gate;
     // 회사 격리 + 활성 여정 차단 (active 시 variant 신규 X)
     const j = await query(`SELECT status FROM journeys WHERE id = $1::uuid AND company_id = $2::uuid`, [req.params.journeyId, companyId]);
     if (j.rows.length === 0) return res.status(404).json({ success: false, error: '여정을 찾을 수 없습니다.' });
@@ -4393,21 +3983,16 @@ router.post('/operator/journeys/:journeyId/steps/:stepId/variants', async (req: 
     });
     return res.json({ success: true, id });
   } catch (err: any) {
-    console.error('[Journeys variants create] 오류:', err);
-    return res.status(500).json({ success: false, error: err?.message || 'variant 신규 실패' });
+    return journeyError(res, err, 'variants create', 'variant 신규 실패');
   }
 });
 
 // DELETE /api/ai/operator/journeys/variants/:variantId — variant 삭제
 router.delete('/operator/journeys/variants/:variantId', async (req: Request, res: Response) => {
   try {
-    const companyId = req.user?.companyId;
-    if (!companyId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
-    const planCtx = await loadPlanContext(companyId);
-    if (!planCtx) return res.status(404).json({ success: false, error: '회사 정보를 찾을 수 없습니다.' });
-    if (!isAiOperatorAllowed(planCtx, req.user)) {
-      return res.status(403).json({ success: false, error: 'AI Operator 진입 권한이 없습니다.', code: 'AI_OPERATOR_GATED' });
-    }
+    const gate = await journeyGate(req, res);
+    if (!gate) return;
+    const { companyId } = gate;
     // 회사 격리 — variant → step → journey 추적
     const own = await query(
       `SELECT 1 FROM journey_step_variants v
@@ -4422,17 +4007,17 @@ router.delete('/operator/journeys/variants/:variantId', async (req: Request, res
     const ok = await deleteJourneyStepVariant(req.params.variantId);
     return res.json({ success: ok });
   } catch (err: any) {
-    console.error('[Journeys variants delete] 오류:', err);
-    return res.status(500).json({ success: false, error: err?.message || 'variant 삭제 실패' });
+    return journeyError(res, err, 'variants delete', 'variant 삭제 실패');
   }
 });
 
 // POST /api/ai/operator/journeys/variants/:variantId/track — click/conversion 트래킹 (외부 webhook 또는 SDK 호출)
 router.post('/operator/journeys/variants/:variantId/track', async (req: Request, res: Response) => {
   try {
-    // ★ 본 endpoint는 외부 트래킹 영역 — 회사 격리만 가볍게 (variant → journey company_id 확인).
-    const companyId = req.user?.companyId;
-    if (!companyId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
+    // ★ 2026-10-23 여정 결함 0 — 문 없던 주소도 같은 문(회사 · 운영 권한 · 주인)을 지난다(화면 소비처 0 · 공개 기록은 cdp.ts 가 따로).
+    const gate = await journeyGate(req, res);
+    if (!gate) return;
+    const { companyId } = gate;
     const own = await query(
       `SELECT 1 FROM journey_step_variants v
        JOIN journey_steps s ON v.step_id = s.id
@@ -4449,21 +4034,16 @@ router.post('/operator/journeys/variants/:variantId/track', async (req: Request,
     await recordJourneyStepVariantReward(req.params.variantId, 0, clickedN, convertedN);
     return res.json({ success: true });
   } catch (err: any) {
-    console.error('[Journeys variants track] 오류:', err);
-    return res.status(500).json({ success: false, error: err?.message || 'track 실패' });
+    return journeyError(res, err, 'variants track', 'track 실패');
   }
 });
 
 // PATCH /api/ai/operator/journeys/:id/callback — 회신번호 갱신
 router.patch('/operator/journeys/:id/callback', async (req: Request, res: Response) => {
   try {
-    const companyId = req.user?.companyId;
-    if (!companyId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
-    const planCtx = await loadPlanContext(companyId);
-    if (!planCtx) return res.status(404).json({ success: false, error: '회사 정보를 찾을 수 없습니다.' });
-    if (!isAiOperatorAllowed(planCtx, req.user)) {
-      return res.status(403).json({ success: false, error: 'AI Operator 진입 권한이 없습니다.', code: 'AI_OPERATOR_GATED' });
-    }
+    const gate = await journeyGate(req, res);
+    if (!gate) return;
+    const { companyId } = gate;
     const { callbackNumber } = req.body || {};
     if (!callbackNumber || !String(callbackNumber).trim()) {
       return res.status(400).json({ success: false, error: '회신번호는 필수입니다.' });
@@ -4472,8 +4052,7 @@ router.patch('/operator/journeys/:id/callback', async (req: Request, res: Respon
     if (!ok) return res.status(404).json({ success: false, error: '여정을 찾을 수 없거나 활성 상태입니다 (먼저 일시정지).' });
     return res.json({ success: true });
   } catch (err: any) {
-    console.error('[Journeys update callback] 오류:', err);
-    return res.status(500).json({ success: false, error: err?.message || '회신번호 수정 실패' });
+    return journeyError(res, err, 'update callback', '회신번호 수정 실패');
   }
 });
 
@@ -4486,13 +4065,9 @@ router.patch('/operator/journeys/:id/callback', async (req: Request, res: Respon
 //    영구 룰 정합 — 회사 격리 + 실제 DB source (cdp_customer_predictions 영역 정합)
 router.get('/operator/journeys/:id/preview-samples', async (req: Request, res: Response) => {
   try {
-    const companyId = req.user?.companyId;
-    if (!companyId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
-    const planCtx = await loadPlanContext(companyId);
-    if (!planCtx) return res.status(404).json({ success: false, error: '회사 정보를 찾을 수 없습니다.' });
-    if (!isAiOperatorAllowed(planCtx, req.user)) {
-      return res.status(403).json({ success: false, error: 'AI Operator 진입 권한이 없습니다.', code: 'AI_OPERATOR_GATED' });
-    }
+    const gate = await journeyGate(req, res);
+    if (!gate) return;
+    const { companyId } = gate;
 
     // 여정 trigger 조회 + 회사 격리
     const jr = await query(
@@ -4511,8 +4086,7 @@ router.get('/operator/journeys/:id/preview-samples', async (req: Request, res: R
 
     return res.json({ success: true, samples, total: count.total, segments: count.segments, capped: count.capped });
   } catch (err: any) {
-    console.error('[Journeys preview-samples] 오류:', err);
-    return res.status(500).json({ success: false, error: err?.message || '미리보기 샘플 조회 실패' });
+    return journeyError(res, err, 'preview-samples', '미리보기 샘플 조회 실패');
   }
 });
 
@@ -4521,13 +4095,9 @@ router.get('/operator/journeys/:id/preview-samples', async (req: Request, res: R
 //   기존 검증 컬럼만 사용(journeys.trigger_event/trigger_filters/start_kind · customers 표시 필드) — 신규 컬럼 0.
 router.post('/operator/journeys/:id/target-recipients', async (req: Request, res: Response) => {
   try {
-    const companyId = req.user?.companyId;
-    if (!companyId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
-    const planCtx = await loadPlanContext(companyId);
-    if (!planCtx) return res.status(404).json({ success: false, error: '회사 정보를 찾을 수 없습니다.' });
-    if (!isAiOperatorAllowed(planCtx, req.user)) {
-      return res.status(403).json({ success: false, error: 'AI Operator 진입 권한이 없습니다.', code: 'AI_OPERATOR_GATED' });
-    }
+    const gate = await journeyGate(req, res);
+    if (!gate) return;
+    const { companyId } = gate;
 
     const jr = await query(
       `SELECT name, trigger_event, trigger_filters, start_kind FROM journeys WHERE id = $1::uuid AND company_id = $2::uuid`,
@@ -4596,35 +4166,7 @@ router.post('/operator/journeys/:id/target-recipients', async (req: Request, res
       ],
     });
   } catch (err: any) {
-    console.error('[Journeys target-recipients] 오류:', err);
-    return res.status(500).json({ success: false, error: err?.message || '발송 대상 조회 실패' });
-  }
-});
-
-// review 단계(저장 전) 미리보기 샘플 — triggerEvent/triggerFilters로 직접 추출 (preview-samples와 동일 빌더).
-router.post('/operator/preview-target-samples', async (req: Request, res: Response) => {
-  try {
-    const companyId = req.user?.companyId;
-    if (!companyId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
-    const planCtx = await loadPlanContext(companyId);
-    if (!planCtx) return res.status(404).json({ success: false, error: '회사 정보를 찾을 수 없습니다.' });
-    if (!isAiOperatorAllowed(planCtx, req.user)) {
-      return res.status(403).json({ success: false, error: 'AI Operator 진입 권한이 없습니다.', code: 'AI_OPERATOR_GATED' });
-    }
-
-    const { triggerEvent, triggerFilters } = req.body || {};
-    if (!triggerEvent || typeof triggerEvent !== 'string') {
-      return res.json({ success: true, samples: [], total: 0, segments: [], capped: false });
-    }
-
-    // ★ 2026-09-27 한줄로 V2 S5-04 — 저장 전 미리보기 = 요청자 분류코드 범위
-    const draftScopeSql = await getOwnerCustomerScopeSql(companyId, req.user?.userId);
-    // ★ 2026-09-28 한줄로 V2 R265 — 표본·인원을 한 번의 추출로(CT)
-    const { samples, count } = await previewJourneyTargets(companyId, triggerEvent, triggerFilters || {}, 10, undefined, draftScopeSql, await ownerJourneyConsent(companyId, req.user?.userId));
-    return res.json({ success: true, samples, total: count.total, segments: count.segments, capped: count.capped });
-  } catch (err: any) {
-    console.error('[Journeys preview-target-samples] 오류:', err);
-    return res.status(500).json({ success: false, error: err?.message || '미리보기 샘플 조회 실패' });
+    return journeyError(res, err, 'target-recipients', '발송 대상 조회 실패');
   }
 });
 
@@ -4633,13 +4175,9 @@ router.post('/operator/preview-target-samples', async (req: Request, res: Respon
 //    영구 룰 정합: feedback_no_target_auto_relax — 사용자 승인하 자동화 본질
 router.patch('/operator/journeys/:id/auto-reentry', async (req: Request, res: Response) => {
   try {
-    const companyId = req.user?.companyId;
-    if (!companyId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
-    const planCtx = await loadPlanContext(companyId);
-    if (!planCtx) return res.status(404).json({ success: false, error: '회사 정보를 찾을 수 없습니다.' });
-    if (!isAiOperatorAllowed(planCtx, req.user)) {
-      return res.status(403).json({ success: false, error: 'AI Operator 진입 권한이 없습니다.', code: 'AI_OPERATOR_GATED' });
-    }
+    const gate = await journeyGate(req, res);
+    if (!gate) return;
+    const { companyId } = gate;
     const enabled = !!req.body?.enabled;
     // ★ 2026-09-27 한줄로 V2 R298 — 켜기는 옵션 변경 규칙과 같게.
     // ★ 2026-10-20 여정 V.3 §4-1 — 옵션 규칙이 바뀌었다: 재진입은 켜진 채 그 자리(다음 진입부터) · 사전검사 표식 유지(재진입은 문안 검사 입력이 아니다).
@@ -4666,8 +4204,7 @@ router.patch('/operator/journeys/:id/auto-reentry', async (req: Request, res: Re
       reentryCooldownDays: r.rows[0].reentry_cooldown_days,
     });
   } catch (err: any) {
-    console.error('[Journeys auto-reentry] 오류:', err);
-    return res.status(500).json({ success: false, error: err?.message || '자동 재진입 토글 실패' });
+    return journeyError(res, err, 'auto-reentry', '자동 재진입 토글 실패');
   }
 });
 
@@ -4682,13 +4219,9 @@ router.patch('/operator/journeys/:id/options', async (req: Request, res: Respons
   let began = false;
   const rollback = async () => { if (client && began) { began = false; await client.query('ROLLBACK').catch(() => {}); } };
   try {
-    const companyId = req.user?.companyId;
-    if (!companyId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
-    const planCtx = await loadPlanContext(companyId);
-    if (!planCtx) return res.status(404).json({ success: false, error: '회사 정보를 찾을 수 없습니다.' });
-    if (!isAiOperatorAllowed(planCtx, req.user)) {
-      return res.status(403).json({ success: false, error: 'AI Operator 진입 권한이 없습니다.', code: 'AI_OPERATOR_GATED' });
-    }
+    const gate = await journeyGate(req, res);
+    if (!gate) return;
+    const { companyId } = gate;
     const body = req.body || {};
     const dryRun = body.dryRun === true;
     const journeyId = String(req.params.id);
@@ -4696,6 +4229,8 @@ router.patch('/operator/journeys/:id/options', async (req: Request, res: Respons
     client = await pool.connect();
     await client.query('BEGIN');
     began = true;
+    // ★ 2026-10-23 여정 결함 0 — 계보 잠금을 먼저(진입 감시 · 붙이기 · 떼기와 같은 줄 · 아래 세대 올림이 감시의 옛 조건 넣기와 엇갈리지 않게)
+    await lockLineage(client, journeyId);
     // 잠근 상태로 읽고 판정한다(옛: 트랜잭션 밖에서 읽고 status 만 쓰기 조건 · 켜진 여정 그 자리 수정이 생겨 병합 결과를 검사해야 한다)
     const curRes = await client.query(
       `SELECT status, trigger_filters, trigger_event, allow_reentry, reentry_cooldown_days, threshold_recipients_per_step
@@ -4815,6 +4350,9 @@ router.patch('/operator/journeys/:id/options', async (req: Request, res: Respons
     //   옛 코드는 트랜잭션 밖에서 읽은 JSON을 통째로 다시 썼다. 상한만 저장하는 요청과 다른 탭의
     //   휴면일수·포인트 임계 편집이 겹치면 둘 다 같은 옛 JSON을 읽고 **나중 요청이 앞 요청의 필터를 되돌린다**
     //   (그 뒤 모달이 되돌아간 필터로 재검증·활성화해 의도보다 넓은 고객군에 나간다). ★V.3 — 행 잠금 안이라 검사한 병합 결과가 곧 저장값이다.
+    // ★ 2026-10-23 여정 결함 0(B-1020-3) — 켜진 여정의 시작 조건을 그 자리에서 바꾸면 시작 설정 세대를 올린다(같은 병합 한 번).
+    //   감시가 옛 조건으로 뽑은 후보 · 커서 전진은 세대가 달라 쓰이지 않는다(붙이기 · 떼기와 같은 장치 · startSameSql).
+    if (status === 'active' && touchesEntry) norm.triggerFilters = { ...(norm.triggerFilters || {}), start_gen: startGenOf(curFilters) + 1 };
     if (Object.keys(norm.triggerFilters || {}).length > 0) {
       params.push(JSON.stringify(norm.triggerFilters));
       sets.push(`trigger_filters = COALESCE(trigger_filters, '{}'::jsonb) || $${params.length}::jsonb`);
@@ -4860,12 +4398,7 @@ router.patch('/operator/journeys/:id/options', async (req: Request, res: Respons
     return res.json({ success: true, matched });
   } catch (err: any) {
     await rollback();
-    const msg = err?.message || '';
-    if (msg.includes('column') && msg.includes('does not exist')) {
-      return res.status(503).json({ success: false, error: 'DB 마이그레이션이 필요합니다. 운영자에게 journeys 옵션 컬럼 확인을 요청해 주세요.', code: 'DB_MIGRATION_PENDING' });
-    }
-    console.error('[Journeys update options] 오류:', err);
-    return res.status(500).json({ success: false, error: err?.message || '여정 옵션 수정 실패' });
+    return journeyError(res, err, 'update options', '여정 옵션 수정 실패');
   } finally {
     client?.release?.();
   }
@@ -4876,13 +4409,9 @@ router.patch('/operator/journeys/:id/options', async (req: Request, res: Respons
 //   지금은 만들어지고 켜지고 0건으로 도는데, 고객사는 켜 뒀다고 믿고 우리는 아무것도 안 보낸다 — 그게 제일 나쁘다.
 router.get('/operator/journeys-data-capability', async (req: Request, res: Response) => {
   try {
-    const companyId = req.user?.companyId;
-    if (!companyId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
-    const planCtx = await loadPlanContext(companyId);
-    if (!planCtx) return res.status(404).json({ success: false, error: '회사 정보를 찾을 수 없습니다.' });
-    if (!isAiOperatorAllowed(planCtx, req.user)) {
-      return res.status(403).json({ success: false, error: 'AI Operator 진입 권한이 없습니다.', code: 'AI_OPERATOR_GATED' });
-    }
+    const gate = await journeyGate(req, res);
+    if (!gate) return;
+    const { companyId } = gate;
     const list = resolveTriggerAvailability(await getCompanyJourneyFacts(companyId));
     // ★ 2026-08-02 §13-5 — 매장 구매 정책을 화면이 말하려면 어느 문이 진실인지와 마지막 도착 시각이 필요하다.
     //   조회가 실패해도 가능 여부 판정까지 막지 않는다(문구가 빠질 뿐이다).
@@ -4890,12 +4419,7 @@ router.get('/operator/journeys-data-capability', async (req: Request, res: Respo
     // ★ 2026-09-30 여정 V2 4차 — 끝 칸 쓰기 스위치(JOURNEY_END_CHIP_ENABLED · 운영 한 주기 뒤 켠다). 화면은 켜졌을 때만 끝 칸 · 갈림 만들기를 보인다.
     return res.json({ success: true, triggers: toAvailabilityMap(list), anyAvailable: hasAnyAvailableTrigger(list), purchaseDoor, features: { endChip: isEndChipEnabled() } });
   } catch (err: any) {
-    const msg = err?.message || '';
-    if (msg.includes('column') && msg.includes('does not exist')) {
-      return res.status(503).json({ success: false, error: 'DB 마이그레이션이 필요합니다. 운영자에게 확인을 요청해 주세요.', code: 'DB_MIGRATION_PENDING' });
-    }
-    console.error('[Journeys data capability] 오류:', err);
-    return res.status(500).json({ success: false, error: err?.message || '여정 가능 여부 조회 실패' });
+    return journeyError(res, err, 'data capability', '여정 가능 여부 조회 실패');
   }
 });
 
@@ -4907,13 +4431,9 @@ router.get('/operator/journeys-data-capability', async (req: Request, res: Respo
 // GET /api/ai/operator/grade-ranks — 이 회사 등급 값 + 저장된 순서
 router.get('/operator/grade-ranks', async (req: Request, res: Response) => {
   try {
-    const companyId = req.user?.companyId;
-    if (!companyId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
-    const planCtx = await loadPlanContext(companyId);
-    if (!planCtx) return res.status(404).json({ success: false, error: '회사 정보를 찾을 수 없습니다.' });
-    if (!isAiOperatorAllowed(planCtx, req.user)) {
-      return res.status(403).json({ success: false, error: 'AI Operator 진입 권한이 없습니다.', code: 'AI_OPERATOR_GATED' });
-    }
+    const gate = await journeyGate(req, res);
+    if (!gate) return;
+    const { companyId } = gate;
     const values = await listCompanyGradeValues(companyId);
     // configured = 저장한 적이 있는가 / confirmed = 상승 판정이 가능한가.
     // ⛔ 둘은 다르다 — "전부 순서 없음"으로 저장한 회사는 configured이지만 confirmed는 아니다.
@@ -4925,28 +4445,20 @@ router.get('/operator/grade-ranks', async (req: Request, res: Response) => {
     return res.json({ success: true, values, configured, confirmed });
   } catch (err: any) {
     const msg = err?.message || '';
-    if (err?.code === '42P01' || (msg.includes('relation') && msg.includes('does not exist'))) {
-      return res.status(503).json({ success: false, error: '등급 순서 설정을 준비 중입니다. 잠시 후 다시 시도해 주세요.', code: 'DB_MIGRATION_PENDING' });
-    }
     if (msg.includes('column') && msg.includes('does not exist')) {
       return res.status(503).json({ success: false, error: 'DB 마이그레이션 필요: 운영자에게 customer_grade_ranks 생성 요청', code: 'DB_MIGRATION_PENDING' });
     }
-    console.error('[Grade ranks get] 오류:', err);
-    return res.status(500).json({ success: false, error: err?.message || '등급 순서 조회 실패' });
+    return journeyError(res, err, 'get', '등급 순서 조회 실패');
   }
 });
 
 // PUT /api/ai/operator/grade-ranks — 순서 저장(사람이 확인한 것만 믿는다)
 router.put('/operator/grade-ranks', async (req: Request, res: Response) => {
   try {
-    const companyId = req.user?.companyId;
-    const userId = req.user?.userId;
-    if (!companyId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
-    const planCtx = await loadPlanContext(companyId);
-    if (!planCtx) return res.status(404).json({ success: false, error: '회사 정보를 찾을 수 없습니다.' });
-    if (!isAiOperatorAllowed(planCtx, req.user)) {
-      return res.status(403).json({ success: false, error: 'AI Operator 진입 권한이 없습니다.', code: 'AI_OPERATOR_GATED' });
-    }
+    const gate = await journeyGate(req, res);
+    if (!gate) return;
+    const { companyId } = gate;
+    const userId = gate.userId;
     const rows = Array.isArray(req.body?.ranks) ? req.body.ranks : null;
     if (!rows) return res.status(400).json({ success: false, error: '등급 순서를 보내주세요.' });
 
@@ -4963,32 +4475,23 @@ router.put('/operator/grade-ranks', async (req: Request, res: Response) => {
     return res.json({ success: true, saved, confirmed: await hasUsableGradeOrder(companyId) });
   } catch (err: any) {
     const msg = err?.message || '';
-    if (err?.code === '42P01' || (msg.includes('relation') && msg.includes('does not exist'))) {
-      return res.status(503).json({ success: false, error: '등급 순서 설정을 준비 중입니다. 잠시 후 다시 시도해 주세요.', code: 'DB_MIGRATION_PENDING' });
-    }
-    console.error('[Grade ranks put] 오류:', err);
-    return res.status(500).json({ success: false, error: err?.message || '등급 순서 저장 실패' });
+    return journeyError(res, err, 'put', '등급 순서 저장 실패');
   }
 });
 
 // GET /api/ai/operator/journeys-callback-numbers — 회사 발신번호 합집합 (드롭다운)
 router.get('/operator/journeys-callback-numbers', async (req: Request, res: Response) => {
   try {
-    const companyId = req.user?.companyId;
-    const userId = req.user?.userId;
-    if (!companyId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
-    const planCtx = await loadPlanContext(companyId);
-    if (!planCtx) return res.status(404).json({ success: false, error: '회사 정보를 찾을 수 없습니다.' });
-    if (!isAiOperatorAllowed(planCtx, req.user)) {
-      return res.status(403).json({ success: false, error: 'AI Operator 진입 권한이 없습니다.', code: 'AI_OPERATOR_GATED' });
-    }
+    const gate = await journeyGate(req, res);
+    if (!gate) return;
+    const { companyId } = gate;
+    const userId = gate.userId;
     // ★ 2026-09-30 여정 V2 2차 — 목록 SQL 은 CT 한 곳(서버 초안 저장 · 인터뷰가 같이 쓴다 · journey-draft-save.ts).
     const numbers = await listJourneyCallbackNumbers(companyId);
     const opt080 = await getOpt080Number(userId || null, companyId).catch(() => '');
     return res.json({ success: true, numbers, opt080Number: opt080 });
   } catch (err: any) {
-    console.error('[Journeys callback-numbers] 오류:', err);
-    return res.status(500).json({ success: false, error: err?.message || '회신번호 조회 실패' });
+    return journeyError(res, err, 'callback-numbers', '회신번호 조회 실패');
   }
 });
 
@@ -4997,13 +4500,9 @@ router.get('/operator/journeys-callback-numbers', async (req: Request, res: Resp
 //   ★ 2026-08-08: 후보 수는 호출부가 정한다 — `variants: 1`(스튜디오 = 비포/애프터 한 쌍) / 미지정 = 3안(날짜축 등 옛 흐름)
 router.post('/operator/journeys-refine-step', async (req: Request, res: Response) => {
   try {
-    const companyId = req.user?.companyId;
-    if (!companyId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
-    const planCtx = await loadPlanContext(companyId);
-    if (!planCtx) return res.status(404).json({ success: false, error: '회사 정보를 찾을 수 없습니다.' });
-    if (!isAiOperatorAllowed(planCtx, req.user)) {
-      return res.status(403).json({ success: false, error: 'AI Operator 진입 권한이 없습니다.', code: 'AI_OPERATOR_GATED' });
-    }
+    const gate = await journeyGate(req, res);
+    if (!gate) return;
+    const { companyId } = gate;
     // ★ 2026-08-02 §13-3: 본문이 비어도 **여정 맥락이 있으면** 생성 모드로 간다.
     //   옛 흐름은 사람이 먼저 열 글자를 써야 AI를 부를 수 있었다(추가 입력 요구 = 1클릭 원칙 위반).
     //   맥락도 본문도 없을 때만 거절한다 — 지어낼 근거가 없기 때문이다.
@@ -5041,8 +4540,7 @@ router.post('/operator/journeys-refine-step', async (req: Request, res: Response
     });
     return res.json({ success: true, candidates, mode: body.trim() ? 'refine' : 'create' });
   } catch (err: any) {
-    console.error('[Journeys refine step] 오류:', err);
-    return res.status(500).json({ success: false, error: err?.message || 'AI 다듬기 실패' });
+    return journeyError(res, err, 'refine step', 'AI 다듬기 실패');
   }
 });
 
@@ -5053,13 +4551,9 @@ router.post('/operator/journeys-refine-step', async (req: Request, res: Response
 //   제안일 뿐 저장이 아니다 — 사용자가 검토 화면에서 확인한 뒤에야 여정이 만들어진다.
 router.post('/operator/journeys-suggest-trigger', async (req: Request, res: Response) => {
   try {
-    const companyId = req.user?.companyId;
-    if (!companyId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
-    const planCtx = await loadPlanContext(companyId);
-    if (!planCtx) return res.status(404).json({ success: false, error: '회사 정보를 찾을 수 없습니다.' });
-    if (!isAiOperatorAllowed(planCtx, req.user)) {
-      return res.status(403).json({ success: false, error: 'AI Operator 진입 권한이 없습니다.', code: 'AI_OPERATOR_GATED' });
-    }
+    const gate = await journeyGate(req, res);
+    if (!gate) return;
+    const { companyId } = gate;
     const { templateName, templateContent, candidates } = req.body || {};
     if (!templateContent || !String(templateContent).trim()) {
       return res.status(400).json({ success: false, error: '템플릿을 먼저 선택해주세요.' });
@@ -5078,8 +4572,7 @@ router.post('/operator/journeys-suggest-trigger', async (req: Request, res: Resp
     // 판단이 안 서면 제안하지 않는다 — 억지로 고른 트리거가 발송 대상이 되는 것보다 낫다.
     return res.json({ success: true, suggestion });
   } catch (err: any) {
-    console.error('[Journeys suggest trigger] 오류:', err);
-    return res.status(500).json({ success: false, error: err?.message || '트리거 제안 실패' });
+    return journeyError(res, err, 'suggest trigger', '트리거 제안 실패');
   }
 });
 
@@ -5087,18 +4580,15 @@ router.post('/operator/journeys-suggest-trigger', async (req: Request, res: Resp
 //   "7일전 3일전 당일"을 파싱해 D-7/D-3/D-0 스텝 + 각 LMS 문안을 자동 작성. 문안 1건당 1크레딧(생성 스텝 수만큼).
 router.post('/operator/journeys/anchor-generate-plan', async (req: Request, res: Response) => {
   try {
-    const companyId = req.user?.companyId;
-    if (!companyId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
-    const planCtx = await loadPlanContext(companyId);
-    if (!planCtx) return res.status(404).json({ success: false, error: '회사 정보를 찾을 수 없습니다.' });
-    if (!isAiOperatorAllowed(planCtx, req.user)) {
-      return res.status(403).json({ success: false, error: 'AI Operator 진입 권한이 없습니다.', code: 'AI_OPERATOR_GATED' });
-    }
+    const gate = await journeyGate(req, res);
+    if (!gate) return;
+    const { companyId } = gate;
     const { objective } = req.body || {};
     if (!objective || String(objective).trim().length < 3) {
       return res.status(400).json({ success: false, error: '무엇을 알릴지 목표를 입력해주세요.' });
     }
-    const { steps } = await generateAnchorJourneyPlan({ companyId, objective: String(objective) });
+    const requestId = isUuid(String(req.body?.requestId || '')) ? String(req.body.requestId) : null;
+    const { steps } = await generateAnchorJourneyPlan({ companyId, objective: String(objective), requestId });
     if (steps.length === 0) {
       return res.status(502).json({ success: false, error: 'AI 자동 생성에 실패했습니다. 잠시 후 다시 시도해주세요.' });
     }
@@ -5107,61 +4597,16 @@ router.post('/operator/journeys/anchor-generate-plan', async (req: Request, res:
     if (err instanceof InsufficientCreditError) {
       return res.status(402).json({ success: false, error: '자동 생성에 필요한 크레딧이 부족합니다. 크레딧을 충전해 주세요.', code: 'INSUFFICIENT_CREDIT' });
     }
-    console.error('[Journeys anchor plan] 오류:', err);
-    return res.status(500).json({ success: false, error: err?.message || 'AI 자동 생성 실패' });
+    return journeyError(res, err, 'anchor plan', 'AI 자동 생성 실패');
   }
 });
-
-// POST /api/ai/operator/journeys-ai-generate — One-shot 자연어 → 완전 여정 패키지
-//   D187-fix3 핵심: Opus 4.7 + 시즌 + 회사 메모리 + Multi-context → 완전 패키지
-router.post('/operator/journeys-ai-generate', singleFlight('journey-generate', async (req: Request, res: Response) => {
-  try {
-    const companyId = req.user?.companyId;
-    const userId = req.user?.userId;
-    if (!companyId || !userId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
-    const planCtx = await loadPlanContext(companyId);
-    if (!planCtx) return res.status(404).json({ success: false, error: '회사 정보를 찾을 수 없습니다.' });
-    if (!isAiOperatorAllowed(planCtx, req.user)) {
-      return res.status(403).json({ success: false, error: 'AI Operator 진입 권한이 없습니다.', code: 'AI_OPERATOR_GATED' });
-    }
-    const { objective, templateHint, preferTriggerEvent, benefitText } = req.body || {};
-    // ★ 2026-08-08 이어달리기 — 프리셋만 온 경로(다음 수 카드)는 목표 골격을 서버가 파생한다(클릭 1회).
-    if ((!objective || !String(objective).trim()) && !templateHint && !preferTriggerEvent) {
-      return res.status(400).json({ success: false, error: '자연어 목표 또는 템플릿 단축 진입 중 하나는 필수입니다.' });
-    }
-    // ★ 2026-08-08 이어달리기 — 추천 카드가 약속한 트리거. 등록·구현된 값만 받는다(fail-closed).
-    //   여기서 거르지 않으면 만들 수 없는 트리거로 초안이 만들어지고 저장·활성화에서야 막힌다.
-    if (preferTriggerEvent && !isCreatableTriggerEvent(String(preferTriggerEvent))) {
-      return res.status(400).json({ success: false, error: '지원하지 않는 발송 조건입니다. 트리거를 다시 선택해 주세요.' });
-    }
-    const pkg = await generateJourneyPackage({
-      companyId,
-      createdBy: userId,
-      objective: objective ? String(objective) : undefined,
-      templateHint: templateHint || undefined,
-      preferTriggerEvent: preferTriggerEvent ? String(preferTriggerEvent) : undefined,
-      benefitText: benefitText ? String(benefitText) : undefined,   // 상한·정규화는 생성기가 한다
-    });
-    return res.json({ success: true, package: pkg });
-  } catch (err: any) {
-    if (err instanceof JourneyInputError) {
-      return res.status(400).json({ success: false, error: err.message, code: err.code, ...(err.journeyId ? { journeyId: err.journeyId } : {}) });
-    }
-    console.error('[Journeys AI generate] 오류:', err);
-    return res.status(500).json({ success: false, error: err?.message || 'AI 생성 실패' });
-  }
-}));
 
 // POST /api/ai/operator/journeys-ai-edit — 대화형 여정 수정 (초안 패키지에 자연어 수정 반영)
 router.post('/operator/journeys-ai-edit', async (req: Request, res: Response) => {
   try {
-    const companyId = req.user?.companyId;
-    if (!companyId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
-    const planCtx = await loadPlanContext(companyId);
-    if (!planCtx) return res.status(404).json({ success: false, error: '회사 정보를 찾을 수 없습니다.' });
-    if (!isAiOperatorAllowed(planCtx, req.user)) {
-      return res.status(403).json({ success: false, error: 'AI Operator 진입 권한이 없습니다.', code: 'AI_OPERATOR_GATED' });
-    }
+    const gate = await journeyGate(req, res);
+    if (!gate) return;
+    const { companyId } = gate;
     const { package: currentPackage, instruction } = req.body || {};
     if (!currentPackage || !Array.isArray(currentPackage.steps)) {
       return res.status(400).json({ success: false, error: '수정할 여정 패키지가 없습니다.' });
@@ -5172,11 +4617,7 @@ router.post('/operator/journeys-ai-edit', async (req: Request, res: Response) =>
     const pkg = await editJourneyPackage({ companyId, currentPackage, instruction: String(instruction) });
     return res.json({ success: true, package: pkg });
   } catch (err: any) {
-    if (err instanceof JourneyInputError) {
-      return res.status(400).json({ success: false, error: err.message, code: err.code, ...(err.journeyId ? { journeyId: err.journeyId } : {}) });
-    }
-    console.error('[Journeys AI edit] 오류:', err);
-    return res.status(500).json({ success: false, error: err?.message || 'AI 수정 실패' });
+    return journeyError(res, err, 'AI edit', 'AI 수정 실패');
   }
 });
 
@@ -5220,21 +4661,16 @@ router.post('/operator/decorate-message', async (req: Request, res: Response) =>
 // POST /api/ai/operator/journeys/:id/pause — 일시정지
 router.post('/operator/journeys/:id/pause', async (req: Request, res: Response) => {
   try {
-    const companyId = req.user?.companyId;
-    if (!companyId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
-    const planCtx = await loadPlanContext(companyId);
-    if (!planCtx) return res.status(404).json({ success: false, error: '회사 정보를 찾을 수 없습니다.' });
-    if (!isAiOperatorAllowed(planCtx, req.user)) {
-      return res.status(403).json({ success: false, error: 'AI Operator 진입 권한이 없습니다.', code: 'AI_OPERATOR_GATED' });
-    }
+    const gate = await journeyGate(req, res);
+    if (!gate) return;
+    const { companyId } = gate;
 
     const reason = String(req.body?.reason || '관리자 일시정지');
     const ok = await pauseJourney(companyId, req.params.id, reason);
     if (!ok) return res.status(404).json({ success: false, error: 'active 상태 여정만 일시정지 가능합니다.' });
     return res.json({ success: true });
   } catch (err: any) {
-    console.error('[Journeys pause] 오류:', err);
-    return res.status(500).json({ success: false, error: err?.message || '일시정지 실패' });
+    return journeyError(res, err, 'pause', '일시정지 실패');
   }
 });
 
@@ -5245,14 +4681,11 @@ router.post('/operator/journeys/:id/pause', async (req: Request, res: Response) 
 // POST /api/ai/operator/journeys/:id/pretest-validate — 활성화 직전 자동 검증
 router.post('/operator/journeys/:id/pretest-validate', async (req: Request, res: Response) => {
   try {
-    const companyId = req.user?.companyId;
-    const userId = req.user?.userId;
-    if (!companyId || !userId) return res.status(403).json({ success: false, error: '회사/사용자 권한이 필요합니다.' });
-    const planCtx = await loadPlanContext(companyId);
-    if (!planCtx) return res.status(404).json({ success: false, error: '회사 정보를 찾을 수 없습니다.' });
-    if (!isAiOperatorAllowed(planCtx, req.user)) {
-      return res.status(403).json({ success: false, error: 'AI Operator 진입 권한이 없습니다.', code: 'AI_OPERATOR_GATED' });
-    }
+    const gate = await journeyGate(req, res);
+    if (!gate) return;
+    const { companyId } = gate;
+    const userId = gate.userId;
+    if (!userId) return res.status(403).json({ success: false, error: '회사/사용자 권한이 필요합니다.' });
 
     // ★ 2026-08-02 Codex 2R — 검사 **시작 시점**의 여정 판을 잡아 둔다.
     //   검사가 스텝 목록을 읽은 뒤 스텝이 추가되면(추가는 updated_at을 올린다) 마커는 옛 판을 통과시킨 기록이 된다.
@@ -5288,64 +4721,37 @@ router.post('/operator/journeys/:id/pretest-validate', async (req: Request, res:
     return res.json({ success: true, ...result });
   } catch (err: any) {
     // ★ D214+ db_alter_safety_net 정합 — DB 마이그레이션 미실행 시 503 + 사용자 친화 안내
-    const msg = err?.message || '';
-    console.error('[Journey pretest-validate] 오류:', err);  // 실제 에러(컬럼명 포함) 항상 로그 — 503 분기가 삼키지 않게
-    if (msg.includes('column') && msg.includes('does not exist')) {
-      return res.status(503).json({
-        success: false,
-        error: '여정 자동 검증을 준비 중입니다. 잠시 후 다시 시도해 주세요.',
-        code: 'DB_MIGRATION_PENDING',
-      });
-    }
-    return res.status(500).json({ success: false, error: err?.message || '검증 실패' });
+    return journeyError(res, err, 'pretest-validate', '검증 실패');
   }
 });
 
 // GET /api/ai/operator/journeys/:id/pause-logs — 정지 이력 조회 (admin UI 활용)
 router.get('/operator/journeys/:id/pause-logs', async (req: Request, res: Response) => {
   try {
-    const companyId = req.user?.companyId;
-    if (!companyId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
-    const planCtx = await loadPlanContext(companyId);
-    if (!planCtx) return res.status(404).json({ success: false, error: '회사 정보를 찾을 수 없습니다.' });
-    if (!isAiOperatorAllowed(planCtx, req.user)) {
-      return res.status(403).json({ success: false, error: 'AI Operator 진입 권한이 없습니다.', code: 'AI_OPERATOR_GATED' });
-    }
+    const gate = await journeyGate(req, res);
+    if (!gate) return;
+    const { companyId } = gate;
 
     const limit = Number(req.query?.limit) || 50;
     const logs = await getPauseLogs(companyId, req.params.id, limit);
     return res.json({ success: true, logs });
   } catch (err: any) {
-    const msg = err?.message || '';
-    if (msg.includes('column') && msg.includes('does not exist')) {
-      return res.status(503).json({
-        success: false,
-        error: '여정 일시중지 기록을 준비 중입니다. 잠시 후 다시 시도해 주세요.',
-        code: 'DB_MIGRATION_PENDING',
-      });
-    }
-    console.error('[Journey pause-logs] 오류:', err);
-    return res.status(500).json({ success: false, error: err?.message || '조회 실패' });
+    return journeyError(res, err, 'pause-logs', '조회 실패');
   }
 });
 
 // POST /api/ai/operator/journeys/:id/end — 종료
 router.post('/operator/journeys/:id/end', async (req: Request, res: Response) => {
   try {
-    const companyId = req.user?.companyId;
-    if (!companyId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
-    const planCtx = await loadPlanContext(companyId);
-    if (!planCtx) return res.status(404).json({ success: false, error: '회사 정보를 찾을 수 없습니다.' });
-    if (!isAiOperatorAllowed(planCtx, req.user)) {
-      return res.status(403).json({ success: false, error: 'AI Operator 진입 권한이 없습니다.', code: 'AI_OPERATOR_GATED' });
-    }
+    const gate = await journeyGate(req, res);
+    if (!gate) return;
+    const { companyId } = gate;
 
     const ok = await endJourney(companyId, req.params.id);
     if (!ok) return res.status(404).json({ success: false, error: '이미 종료된 여정입니다.' });
     return res.json({ success: true });
   } catch (err: any) {
-    console.error('[Journeys end] 오류:', err);
-    return res.status(500).json({ success: false, error: err?.message || '종료 실패' });
+    return journeyError(res, err, 'end', '종료 실패');
   }
 });
 
@@ -5359,57 +4765,42 @@ router.post('/operator/journeys/:id/end', async (req: Request, res: Response) =>
 // PATCH /api/ai/operator/journeys/:id/archive — 보관함 이동 (soft delete)
 router.patch('/operator/journeys/:id/archive', async (req: Request, res: Response) => {
   try {
-    const companyId = req.user?.companyId;
-    if (!companyId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
-    const planCtx = await loadPlanContext(companyId);
-    if (!planCtx) return res.status(404).json({ success: false, error: '회사 정보를 찾을 수 없습니다.' });
-    if (!isAiOperatorAllowed(planCtx, req.user)) {
-      return res.status(403).json({ success: false, error: 'AI Operator 진입 권한이 없습니다.', code: 'AI_OPERATOR_GATED' });
-    }
+    const gate = await journeyGate(req, res);
+    if (!gate) return;
+    const { companyId } = gate;
     const ok = await archiveJourney(companyId, req.params.id);
     if (!ok) return res.status(409).json({ success: false, error: '보관할 수 없습니다. 실행 중인 여정이거나 이미 보관함에 있습니다.' });
     return res.json({ success: true });
   } catch (err: any) {
-    console.error('[Journeys archive] 오류:', err);
-    return res.status(500).json({ success: false, error: err?.message || '보관 이동 실패' });
+    return journeyError(res, err, 'archive', '보관 이동 실패');
   }
 });
 
 // PATCH /api/ai/operator/journeys/:id/unarchive — 보관함 복원
 router.patch('/operator/journeys/:id/unarchive', async (req: Request, res: Response) => {
   try {
-    const companyId = req.user?.companyId;
-    if (!companyId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
-    const planCtx = await loadPlanContext(companyId);
-    if (!planCtx) return res.status(404).json({ success: false, error: '회사 정보를 찾을 수 없습니다.' });
-    if (!isAiOperatorAllowed(planCtx, req.user)) {
-      return res.status(403).json({ success: false, error: 'AI Operator 진입 권한이 없습니다.', code: 'AI_OPERATOR_GATED' });
-    }
+    const gate = await journeyGate(req, res);
+    if (!gate) return;
+    const { companyId } = gate;
     const ok = await unarchiveJourney(companyId, req.params.id);
     if (!ok) return res.status(404).json({ success: false, error: '보관함에서 찾을 수 없습니다.' });
     return res.json({ success: true });
   } catch (err: any) {
-    console.error('[Journeys unarchive] 오류:', err);
-    return res.status(500).json({ success: false, error: err?.message || '복원 실패' });
+    return journeyError(res, err, 'unarchive', '복원 실패');
   }
 });
 
 // DELETE /api/ai/operator/journeys/:id — 영구 삭제 (회사 admin 강력 confirm 후)
 router.delete('/operator/journeys/:id', async (req: Request, res: Response) => {
   try {
-    const companyId = req.user?.companyId;
-    if (!companyId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
-    const planCtx = await loadPlanContext(companyId);
-    if (!planCtx) return res.status(404).json({ success: false, error: '회사 정보를 찾을 수 없습니다.' });
-    if (!isAiOperatorAllowed(planCtx, req.user)) {
-      return res.status(403).json({ success: false, error: 'AI Operator 진입 권한이 없습니다.', code: 'AI_OPERATOR_GATED' });
-    }
+    const gate = await journeyGate(req, res);
+    if (!gate) return;
+    const { companyId } = gate;
     const result = await deleteJourney(companyId, req.params.id);
     if (!result.ok) return res.status(409).json({ success: false, error: result.reason || '영구 삭제 실패' });
     return res.json({ success: true });
   } catch (err: any) {
-    console.error('[Journeys delete] 오류:', err);
-    return res.status(500).json({ success: false, error: err?.message || '영구 삭제 실패' });
+    return journeyError(res, err, 'delete', '영구 삭제 실패');
   }
 });
 
@@ -5417,13 +4808,9 @@ router.delete('/operator/journeys/:id', async (req: Request, res: Response) => {
 // ★ D192 (2026-05-22): CT-51 listJourneyEnteredCustomers 통합 — 회사 격리 + 등급/지역 컬럼 추가
 router.get('/operator/journeys/:id/executions', async (req: Request, res: Response) => {
   try {
-    const companyId = req.user?.companyId;
-    if (!companyId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
-    const planCtx = await loadPlanContext(companyId);
-    if (!planCtx) return res.status(404).json({ success: false, error: '회사 정보를 찾을 수 없습니다.' });
-    if (!isAiOperatorAllowed(planCtx, req.user)) {
-      return res.status(403).json({ success: false, error: 'AI Operator 진입 권한이 없습니다.', code: 'AI_OPERATOR_GATED' });
-    }
+    const gate = await journeyGate(req, res);
+    if (!gate) return;
+    const { companyId } = gate;
 
     // ★ D210+ Phase 3 (2026-05-23 Harold 명시): page + search + filter + sort 영역 강화
     const page = Math.max(1, parseInt(String(req.query.page || '1'), 10) || 1);
@@ -5449,8 +4836,7 @@ router.get('/operator/journeys/:id/executions', async (req: Request, res: Respon
       limit: result.limit,
     });
   } catch (err: any) {
-    console.error('[Journeys executions] 오류:', err);
-    return res.status(500).json({ success: false, error: err?.message || 'execution 조회 실패' });
+    return journeyError(res, err, 'executions', 'execution 조회 실패');
   }
 });
 
@@ -5810,20 +5196,14 @@ router.post('/operator/predictive/recompute', async (req: Request, res: Response
 // ★ D192 (2026-05-22): CT-51 buildJourneyStats 통합 — 옛 단순 통계 진화
 router.get('/operator/journeys/:id/stats', async (req: Request, res: Response) => {
   try {
-    const companyId = req.user?.companyId;
-    if (!companyId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
-    const planCtx = await loadPlanContext(companyId);
-    if (!planCtx) return res.status(404).json({ success: false, error: '회사 정보를 찾을 수 없습니다.' });
-    if (!isAiOperatorAllowed(planCtx, req.user)) {
-      return res.status(403).json({ success: false, error: 'AI Operator 진입 권한이 없습니다.', code: 'AI_OPERATOR_GATED' });
-    }
+    const gate = await journeyGate(req, res);
+    if (!gate) return;
+    const { companyId } = gate;
 
     const stats = await buildJourneyStats(req.params.id, companyId);
     return res.json({ success: true, stats });
   } catch (err: any) {
-    console.error('[Journeys stats] 오류:', err);
-    const isAuthErr = err?.message?.includes('회사 격리');
-    return res.status(isAuthErr ? 403 : 500).json({ success: false, error: err?.message || '통계 조회 실패' });
+    return journeyError(res, err, 'stats', '통계 조회 실패');
   }
 });
 
@@ -5836,38 +5216,26 @@ router.get('/operator/journeys/:id/stats', async (req: Request, res: Response) =
 // GET /api/ai/operator/journeys/:id/step-diagnosis — 여정 단계별 진단
 router.get('/operator/journeys/:id/step-diagnosis', async (req: Request, res: Response) => {
   try {
-    const companyId = req.user?.companyId;
-    if (!companyId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
-    const planCtx = await loadPlanContext(companyId);
-    if (!planCtx) return res.status(404).json({ success: false, error: '회사 정보를 찾을 수 없습니다.' });
-    if (!isAiOperatorAllowed(planCtx, req.user)) {
-      return res.status(403).json({ success: false, error: 'AI Operator 진입 권한이 없습니다.', code: 'AI_OPERATOR_GATED' });
-    }
+    const gate = await journeyGate(req, res);
+    if (!gate) return;
+    const { companyId } = gate;
     const diagnosis = await diagnoseJourneySteps(req.params.id, companyId);
     return res.json({ success: true, diagnosis });
   } catch (err: any) {
-    console.error('[Journey step-diagnosis] 오류:', err);
-    const isAuthErr = err?.message?.includes('회사 격리');
-    return res.status(isAuthErr ? 403 : 500).json({ success: false, error: err?.message || '진단 중 오류가 발생했습니다.' });
+    return journeyError(res, err, 'step-diagnosis', '진단 중 오류가 발생했습니다.');
   }
 });
 
 // GET /api/ai/operator/journeys/:id/recommend-next-step — 다음 단계 자동 추천
 router.get('/operator/journeys/:id/recommend-next-step', async (req: Request, res: Response) => {
   try {
-    const companyId = req.user?.companyId;
-    if (!companyId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
-    const planCtx = await loadPlanContext(companyId);
-    if (!planCtx) return res.status(404).json({ success: false, error: '회사 정보를 찾을 수 없습니다.' });
-    if (!isAiOperatorAllowed(planCtx, req.user)) {
-      return res.status(403).json({ success: false, error: 'AI Operator 진입 권한이 없습니다.', code: 'AI_OPERATOR_GATED' });
-    }
+    const gate = await journeyGate(req, res);
+    if (!gate) return;
+    const { companyId } = gate;
     const recommendation = await recommendNextJourneyStep(req.params.id, companyId);
     return res.json({ success: true, recommendation });
   } catch (err: any) {
-    console.error('[Journey recommend-next-step] 오류:', err);
-    const isAuthErr = err?.message?.includes('회사 격리');
-    return res.status(isAuthErr ? 403 : 500).json({ success: false, error: err?.message || '추천 중 오류가 발생했습니다.' });
+    return journeyError(res, err, 'recommend-next-step', '추천 중 오류가 발생했습니다.');
   }
 });
 
@@ -5878,51 +5246,35 @@ router.get('/operator/journeys/:id/recommend-next-step', async (req: Request, re
 // GET /api/ai/operator/journeys/:id/simulate — 활성화 직전 가상 실행 시뮬레이션
 router.get('/operator/journeys/:id/simulate', async (req: Request, res: Response) => {
   try {
-    const companyId = req.user?.companyId;
-    if (!companyId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
-    const planCtx = await loadPlanContext(companyId);
-    if (!planCtx) return res.status(404).json({ success: false, error: '회사 정보를 찾을 수 없습니다.' });
-    if (!isAiOperatorAllowed(planCtx, req.user)) {
-      return res.status(403).json({ success: false, error: 'AI Operator 진입 권한이 없습니다.', code: 'AI_OPERATOR_GATED' });
-    }
+    const gate = await journeyGate(req, res);
+    if (!gate) return;
+    const { companyId } = gate;
     const simulation = await simulateJourney(req.params.id, companyId);
     return res.json({ success: true, simulation });
   } catch (err: any) {
-    console.error('[Journey simulate] 오류:', err);
-    const isAuthErr = err?.message?.includes('회사 격리');
-    return res.status(isAuthErr ? 403 : 500).json({ success: false, error: err?.message || '시뮬레이션 중 오류가 발생했습니다.' });
+    return journeyError(res, err, 'simulate', '시뮬레이션 중 오류가 발생했습니다.');
   }
 });
 
 // GET /api/ai/operator/journeys/:id/live-positions — 실시간 customer 진행 위치
 router.get('/operator/journeys/:id/live-positions', async (req: Request, res: Response) => {
   try {
-    const companyId = req.user?.companyId;
-    if (!companyId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
-    const planCtx = await loadPlanContext(companyId);
-    if (!planCtx) return res.status(404).json({ success: false, error: '회사 정보를 찾을 수 없습니다.' });
-    if (!isAiOperatorAllowed(planCtx, req.user)) {
-      return res.status(403).json({ success: false, error: 'AI Operator 진입 권한이 없습니다.', code: 'AI_OPERATOR_GATED' });
-    }
+    const gate = await journeyGate(req, res);
+    if (!gate) return;
+    const { companyId } = gate;
     const snapshot = await getJourneyLiveSnapshot(req.params.id, companyId);
     return res.json({ success: true, snapshot });
   } catch (err: any) {
-    console.error('[Journey live-positions] 오류:', err);
-    const isAuthErr = err?.message?.includes('회사 격리');
-    return res.status(isAuthErr ? 403 : 500).json({ success: false, error: err?.message || '실시간 위치 조회 중 오류가 발생했습니다.' });
+    return journeyError(res, err, 'live-positions', '실시간 위치 조회 중 오류가 발생했습니다.');
   }
 });
 
 // POST /api/ai/operator/journeys/steps/:stepId/variants/auto-generate — AI A/B variant 자동 생성
 router.post('/operator/journeys/steps/:stepId/variants/auto-generate', async (req: Request, res: Response) => {
   try {
-    const companyId = req.user?.companyId;
-    if (!companyId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
-    const planCtx = await loadPlanContext(companyId);
-    if (!planCtx) return res.status(404).json({ success: false, error: '회사 정보를 찾을 수 없습니다.' });
-    if (!isAiOperatorAllowed(planCtx, req.user)) {
-      return res.status(403).json({ success: false, error: 'AI Operator 진입 권한이 없습니다.', code: 'AI_OPERATOR_GATED' });
-    }
+    const gate = await journeyGate(req, res);
+    if (!gate) return;
+    const { companyId } = gate;
     // 회사 격리 검증 — step → journey → 회사 영역
     const own = await query(
       `SELECT 1 FROM journey_steps s
@@ -5950,8 +5302,7 @@ router.post('/operator/journeys/steps/:stepId/variants/auto-generate', async (re
     });
     return res.json({ success: true, ...result });
   } catch (err: any) {
-    console.error('[Journey variants auto-generate] 오류:', err);
-    return res.status(500).json({ success: false, error: err?.message || '변형 자동 생성 중 오류가 발생했습니다.' });
+    return journeyError(res, err, 'variants auto-generate', '변형 자동 생성 중 오류가 발생했습니다.');
   }
 });
 

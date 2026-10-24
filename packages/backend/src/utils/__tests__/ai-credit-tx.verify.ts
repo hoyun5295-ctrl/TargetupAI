@@ -237,15 +237,21 @@ async function ok(name: string, fn: () => Promise<void>) {
     assert.ok(threw instanceof InsufficientCreditError, '비운영 source는 0에서 차단');
   });
 
-  console.log('[ai-credit-tx] v2 리셋 음수 상계 — 지난달 음수면 이번달 grant에서 차감');
-  await ok('base-150 지난달 plan300 → 리셋 carriedBase=150, cost10 후 baseAfter=140', async () => {
-    const client = makeMockClient({ row: { base: -150, purchased: 0, cap: null, reset_at: '2026-05-01T00:00:00Z', plan_credits: 300 } });
+  // ★ 2026-10-23 여정 결함 0(V.3 §17-4 기록) — 0925 C-08 뒤 음수 이월은 선불만(carriedBaseOnReset). 옛 행엔 billing_type 이 없어 기대값이 어긋나 있었다.
+  console.log('[ai-credit-tx] v2 리셋 음수 상계 — 선불 지난달 음수면 이번달 grant에서 차감 · 후불은 이월 없음');
+  await ok('선불 base-150 지난달 plan300 → 리셋 carriedBase=150, cost10 후 baseAfter=140', async () => {
+    const client = makeMockClient({ row: { base: -150, purchased: 0, cap: null, reset_at: '2026-05-01T00:00:00Z', plan_credits: 300, billing_type: 'prepaid' } });
     const r = await _deductWithClient(client, { companyId: 'c1', cost: 10, source: 'orchestrate', aiCallLogId: 'rc1' }, NOW);
     assert.strictEqual(r.deducted, true);
     assert.strictEqual(r.baseAfter, 140);  // 300 + min(0,-150)=150 리셋 → 10 차감 → 140 (상계 동작)
   });
+  await ok('후불 base-150 지난달 plan300 → 리셋 base=300(이월 없음) → 10 차감 → 290', async () => {
+    const client = makeMockClient({ row: { base: -150, purchased: 0, cap: null, reset_at: '2026-05-01T00:00:00Z', plan_credits: 300, billing_type: 'postpaid' } });
+    const r = await _deductWithClient(client, { companyId: 'c1', cost: 10, source: 'orchestrate', aiCallLogId: 'rc1b' }, NOW);
+    assert.strictEqual(r.baseAfter, 290);
+  });
   await ok('리셋 INSERT — amount=grant(300), balance_base_after=carriedBase(150)', async () => {
-    const client = makeMockClient({ row: { base: -150, purchased: 0, cap: null, reset_at: '2026-05-01T00:00:00Z', plan_credits: 300 } });
+    const client = makeMockClient({ row: { base: -150, purchased: 0, cap: null, reset_at: '2026-05-01T00:00:00Z', plan_credits: 300, billing_type: 'prepaid' } });
     await _deductWithClient(client, { companyId: 'c1', cost: 10, source: 'orchestrate', aiCallLogId: 'rc2' }, NOW);
     const resetInsert = client.calls.find((c) => /INSERT INTO ai_credit_transactions/.test(c.sql) && /monthly-reset/.test(c.sql));
     assert.ok(resetInsert && resetInsert.params && resetInsert.params[1] === 300 && resetInsert.params[3] === 150, 'reset: amount=300, base_after=150');

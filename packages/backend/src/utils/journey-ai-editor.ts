@@ -23,6 +23,7 @@ import { isImplementedTriggerEvent, isCreatableTriggerEvent, triggerTemplateCode
 import { resolveStepType, assertStepsWithinLimit, clampStepDelayHours, MAX_JOURNEY_STEPS, MAX_MESSAGE_STEPS, MAX_WAIT_TIMEOUT_HOURS, JourneyInputError, JOURNEY_SUBJECT_MAX_CHARS } from './journey-step-limits';
 // ★ 2026-09-29 여정 V2 0차 ② — AI 가 낸 대상 조건 중 쓸 수 없는 것은 빼고 "반영 안 됨"으로 알린다.
 import { partitionCustomerConditions } from './journey-target-extractor';
+import { formatConditionMenuForAi } from './journey-condition-fields';
 import { describeJourneyTrigger, describeJourneyTarget } from './journey-step-format';
 // ★ 2026-08-08 — 편집 결과도 생성과 같은 기계 차단을 지난다(프롬프트는 경계가 아니다).
 import { stripUnauthorizedBenefits } from './copy-benefit-detector';
@@ -168,6 +169,8 @@ export async function editJourneyPackage(input: EditJourneyInput): Promise<any> 
 - 여정은 연중 상시 자동 발송이다. 문안을 새로 쓰거나 다듬을 때 계절·월·날씨·명절 언급 금지 (시간 불문 감성으로). 원본에 계절 표현이 있으면 시간 불문 표현으로 교체한다. 단, 사용자 요청문에 계절·명절이 명시된 경우에만 반영.
 - 문자 칸은 최대 ${MAX_MESSAGE_STEPS}개, 전체 칸은 최대 ${MAX_JOURNEY_STEPS}개. 조건 칸의 notMetGoto(미충족 시 이동할 칸 번호) · 대기 칸의 waitEventName/waitTimeoutHours 는 요청이 없으면 받은 값 그대로 돌려준다.
 - 개인화 변수는 %고객명% 형태만 쓰고, 불확실한 변수는 만들지 않는다.
+- 대상 조건(triggerFilters.customer_conditions · { field, op, value })의 field 는 아래 목록만 쓴다(목록 밖 칸은 저장되지 않는다):
+${formatConditionMenuForAi()}
 
 응답은 코드블록 없이 JSON만. 스키마:
 {

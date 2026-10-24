@@ -46,12 +46,7 @@ import {
   selectJourneyStepVariant,
   recordJourneyStepVariantReward,
 } from './bandit-optimizer';
-import {
-  prepareSendMessage,
-  prepareFieldMappings,
-  getOpt080Number,
-  composeSpamCheckText,
-} from './messageUtils';
+import { composeSpamCheckText } from './messageUtils';
 import { checkSpamBlockBeforeCharge } from './spam-block';
 import { resolveJourneyAdFlag } from './journey-ad-policy';
 import { isCallbackRegistered } from './callback-filter';
@@ -63,7 +58,6 @@ import { getCreditCost, kstDateTag } from './ai-credit-calc';
 import { logCampaignTraining } from './training-logger';
 import { normalizePhone } from './normalize-phone';
 import { getCompanyCosts, SEND_HOURS } from '../config/defaults';
-import { sanitizeUnsendableForSms } from './message-sanitizer';
 import { shortenUrlsInText } from './short-url';
 import { autoPauseExecution } from './journey-pause-handler';
 import { calculateNextRunAt, clampPersonalSendHour } from './send-time-util';
@@ -71,12 +65,13 @@ import { getOrCreateStepCampaign } from './journey-step-campaign';
 import { confirmJourneyClaimSent, resolveJourneyClaim } from './journey-send-claim';
 import { evaluateCustomerFieldCondition, type ConditionOutcome } from './journey-condition';
 import { isCustomerSendable } from './journey-safety-filter';
+import { renderJourneySmsMessage } from './journey-message-render';
 import { readOwnerConsentForCustomer } from './mall-consent';
 // ★ §11-5(§5-1) — 종료 신호는 트리거 계약(단일 출처)에서 파생한다.
 import { getTriggerContract } from './journey-trigger-capability';
 // ★ 2026-09-30 여정 V2 3차 — 상품 재구매 목표(같은 상품을 다시 샀는가) · 키 규칙은 journey-product 한 곳.
 import { PRODUCT_REPURCHASE_SINCE_ENTRY_SQL } from './journey-product';
-import { isSingleStepKind, normalizeStartKind } from './journey-start-kind';
+import { isSingleStepKind } from './journey-start-kind';
 import { isDemoCompany } from './demo-company';   // ★ 2026-10-09 시연 회사 = 발송 엔진 앞 절단(설계서 docs/2026-10-09-demo-company-design.md §2)
 import { aiOperatorAllowedForWorker } from './plan-guard';
 import { lineageColumnsReady } from './journey-lineage';
@@ -431,7 +426,7 @@ async function processExecution(exec: ExecutionRow): Promise<StepOutcome> {
   );
 
   if (stepRes.rows.length === 0) {
-    await markExecutionCompleted(exec.execution_id, exec.journey_id);
+    await finishExecution(exec.execution_id, exec.journey_id, { stepOrder: null, addedCost: 0 });
     return 'completed';
   }
 
@@ -472,7 +467,7 @@ async function processExecution(exec: ExecutionRow): Promise<StepOutcome> {
   //   message step = 기존 흐름 (메시지 발송).
   // ★ 2026-09-30 여정 V2 4차 — 끝 칸: 발송 0 · 도착하면 그 자리에서 완료(한 갈래를 마친다). 점프로 도착해도 같다.
   if (step.step_type === 'end') {
-    await completeAtEndStep(exec, step.id, step.step_order, 0);
+    await finishExecution(exec.execution_id, exec.journey_id, { stepOrder: step.step_order, addedCost: 0, endStepId: step.id });
     return 'completed';
   }
 
@@ -585,7 +580,7 @@ async function processExecution(exec: ExecutionRow): Promise<StepOutcome> {
       await logSkippedStep(exec.execution_id, step.id, jumped ? 'condition_branched' : 'condition_branch_target_missing');
       if (!jumped) {
         // 분기 대상 step 없음(삭제 등) — 미충족 발송 없이 완주 처리
-        await markExecutionCompleted(exec.execution_id, exec.journey_id);
+        await finishExecution(exec.execution_id, exec.journey_id, { stepOrder: null, addedCost: 0 });
       }
       console.log(`[JourneyExecutor] execution=${exec.execution_id} step=${step.step_order} condition 미충족 → ${jumped ? `step ${notMetGoto} 분기` : '분기 대상 없음(완료)'}`);
       return 'condition_branched';
@@ -675,7 +670,8 @@ async function processExecution(exec: ExecutionRow): Promise<StepOutcome> {
   //   판정 = 위에서 읽은 그 스냅샷의 검사 표식(confidence_score · 수정 = 0 · 활성화 · 재검사 통과 = 100) — 시간 짐작이 아니다(F3).
   //   재검사 전이면 10분 뒤로 미룬다 → 미룬 실행은 「곧 나갈 발송」이라 재검사 스캐너(5분 주기)가 그 판을 검사하고 100 으로 올린다.
   //   문자(SMS · LMS · MMS) 칸만(재검사 대상과 같다). 적재 중 표식 정리 · 이미 보냄 판정은 위에서 끝났다(그 둘은 막지 않는다).
-  //   ponytail: 스캐너가 2시간 안에 못 돌면(검사 큐 장애 · 스캐너 앞보기 창과 같은 2시간) 옛 동작대로 나간다 — [PRETEST-MISS] 경고로 남긴다.
+  //   ★ 2026-10-23 여정 결함 0 — 2시간이 넘어도 검사 없이 보내지 않는다(옛: [PRETEST-MISS] 로 그냥 나갔다 = 스팸 검사 우회).
+  //   계속 미루고(검사가 끝나는 즉시 나간다) 우리 쪽 장애이므로 운영 경보를 한 번 보낸다(6시간 쿨다운 · 여정마다).
   const gate = await query(
     `SELECT (next_run_at <= NOW()) AS due,
             ($2::timestamptz IS NOT NULL AND $2::timestamptz > NOW() - INTERVAL '${PRETEST_PENDING_MAX_HOURS} hours') AS pending
@@ -692,14 +688,20 @@ async function processExecution(exec: ExecutionRow): Promise<StepOutcome> {
     return 'waited';
   }
   if (pendingSnapshotAt && ['sms', 'lms', 'mms'].includes(String(step.channel))) {
-    if (gate.rows[0]?.pending) {
-      await query(
-        `UPDATE journey_executions SET next_run_at = NOW() + INTERVAL '${PRETEST_PENDING_RECHECK_MINUTES} minutes' WHERE id = $1::uuid AND status = 'active'`,
-        [exec.execution_id],
-      );
-      return 'waited';
+    await query(
+      `UPDATE journey_executions SET next_run_at = NOW() + INTERVAL '${PRETEST_PENDING_RECHECK_MINUTES} minutes' WHERE id = $1::uuid AND status = 'active'`,
+      [exec.execution_id],
+    );
+    if (!gate.rows[0]?.pending) {
+      console.warn(`[JourneyExecutor][PRETEST-LATE] execution=${exec.execution_id} step=${step.step_order} 수정 문안이 ${PRETEST_PENDING_MAX_HOURS}시간 넘게 재검사 전 — 보내지 않고 기다린다(스캐너 · 검사 큐 확인)`);
+      await sendSystemAlert({
+        dedupKey: `journey-pretest-late:${exec.journey_id}`,
+        title: `여정의 고친 문안을 ${PRETEST_PENDING_MAX_HOURS}시간 넘게 검사하지 못해 발송을 기다리고 있습니다.`,
+        details: ['확인할 곳: 발송 전 재검사 스캐너 로그 · 스팸 검사 대기열'],
+        action: '검사가 끝나면 그 자리에서 바로 나갑니다. 슈퍼관리자 여정 화면에서 회사를 확인해 주세요.',
+      }).catch((e: any) => console.warn('[JourneyExecutor] 재검사 지연 경보 실패:', e?.message));
     }
-    console.warn(`[JourneyExecutor][PRETEST-MISS] execution=${exec.execution_id} step=${step.step_order} 수정 문안이 ${PRETEST_PENDING_MAX_HOURS}시간 넘게 재검사 전 — 검사 없이 보낸다(스캐너 · 검사 큐 확인)`);
+    return 'waited';
   }
 
   // ★ D188 Phase 2-B-3 (2026-05-21): variants 선택 — Bandit Thompson Sampling.
@@ -830,58 +832,6 @@ async function processExecution(exec: ExecutionRow): Promise<StepOutcome> {
   const isKakao = channelLower === 'kakao';
   const channelType = (step.channel || 'lms').toUpperCase();
   const msgType = isKakao ? 'KAKAO' : (channelType === 'LMS' || channelType === 'MMS' ? channelType : 'SMS');
-  const fieldMappings = await prepareFieldMappings(exec.company_id);
-  const opt080Number = await getOpt080Number(exec.created_by, exec.company_id);
-  // ★ D194 (2026-05-22): Liquid context — company 정보 사전 조회 ({{ company.name }} / {{ company.brand_name }} 지원)
-  const companyRes = await query(
-    `SELECT company_name, brand_name FROM companies WHERE id = $1::uuid`,
-    [exec.company_id]
-  );
-  const companyContext = {
-    name: companyRes.rows[0]?.company_name || '',
-    brand_name: companyRes.rows[0]?.brand_name || '',
-  };
-
-  // ★ D197 (2026-05-22) Phase B-2: Predictive Suite 통합 — customer 객체에 click_score / churn_risk / purchase_likelihood 자동 첨부
-  //   Liquid 사용 가능: {% if customer.churn_risk > 0.7 %} 회복 안내 {% endif %}
-  //   cache 우선 조회 (24h TTL) — 없으면 즉시 계산 + 저장 (cdp_customer_predictions)
-  //   안전 fallback — 오류 시 원본 customer 반환 (발송 차단 X)
-  const { enrichCustomerWithPredictions } = await import('./predictive-suite');
-  const enrichedCustomer = await enrichCustomerWithPredictions(customer as Record<string, any>, exec.company_id);
-
-  // ★ D201 (2026-05-22) Phase B-3: Connected Content 통합 — 외부 실시간 데이터 (날씨/재고/가격/신상품) 통합
-  //   Liquid 변수 매칭된 경우만 fetch (불요 API 호출 0건)
-  //   timeout 5초 + 실패 시 빈 값 fallback (발송 차단 X)
-  let externalContext: Record<string, any> = {};
-  try {
-    const { enrichLiquidContextWithExternal } = await import('./connected-content');
-    externalContext = await enrichLiquidContextWithExternal(
-      step.message_template || '',
-      exec.company_id,
-      (enrichedCustomer as any).region || null,
-      // ★ D209+ (Harold 명시 2026-05-22): 매장 region 강화 — recent_purchase_store 우선, registered_store fallback
-      (enrichedCustomer as any).recent_purchase_store || (enrichedCustomer as any).registered_store || null,
-    );
-  } catch (err: any) {
-    console.warn('[JourneyExecutor] Connected Content skip:', err?.message);
-  }
-
-  // ★ 장바구니 리커버리 — 담은 상품 노출 ({{ cart.product_name }} 등). cart 여정 외에는
-  //   템플릿에 {{ cart.* }}가 없어 쿼리 skip. 실패 시 빈 객체 (발송 차단 X) — connected-content 동일 패턴.
-  try {
-    const { enrichLiquidContextWithCart } = await import('./cdp-events');
-    const cartContext = await enrichLiquidContextWithCart(
-      step.message_template || '',
-      exec.company_id,
-      exec.customer_id || null,
-    );
-    if (cartContext && Object.keys(cartContext).length > 0) {
-      externalContext = { ...externalContext, ...cartContext };
-    }
-  } catch (err: any) {
-    console.warn('[JourneyExecutor] cart context skip:', err?.message);
-  }
-
   // 광고 표기 — ★ 2026-06-23: 비카카오(SMS/LMS/MMS) 여정은 알림톡이 아니므로 무조건 광고성 → isAd 강제 true
   //   (AI가 isAd=false로 내렸거나 과거 is_ad=false로 저장된 여정도 발송 직전 교정. 정보통신망법 광고 표기 의무).
   //   카카오(알림톡)만 정보성 허용. buildAdMessage가 (광고)+무료수신거부(080) 자동 합성.
@@ -939,37 +889,19 @@ async function processExecution(exec: ExecutionRow): Promise<StepOutcome> {
     // 알림톡 자체는 subject 무관, LMS 대체(L/B) 발송 시점만 alimtalk_next_subject 사용 (insertAlimtalkQueue title_str 영역)
     subject = step.alimtalk_next_subject || '';
   } else {
-    // ★ 기존 흐름 — SMS/LMS/MMS는 prepareSendMessage 정합.
-    // ★ D187-fix5: 발송 직전 최후 안전망 — 보낼 수 없는 글자만 정리
-    // ★ 2026-09-26 한줄로 V2 m068(B-0910-5) — 옛 정리(CT-46 전체 규칙)는 사람이 쓴 문안의 ★♥☎을 지우고 ▶※“”를 바꿨다.
-    //   이 글자들은 그대로 보낼 수 있다. 보낼 수 있는 글자는 한 글자도 바꾸지 않는 발송 경로 전용 함수를 쓴다.
-    const sanTemplate = sanitizeUnsendableForSms(step.message_template || '');
-    const sanSubject = sanitizeUnsendableForSms(step.subject || '');
-    if (sanTemplate.hadChanges) {
-      console.log(`[JourneyExecutor] step ${step.step_order} 본문 sanitize:`, sanTemplate.warnings.join(' / '));
-    }
-    if (sanSubject.hadChanges) {
-      console.log(`[JourneyExecutor] step ${step.step_order} 제목 sanitize:`, sanSubject.warnings.join(' / '));
-    }
-
-    const prep = prepareSendMessage(
-      sanTemplate.sanitized,
-      enrichedCustomer,
-      fieldMappings,
-      {
-        msgType: msgType as 'SMS' | 'LMS' | 'MMS',
-        isAd,
-        opt080Number,
-        subject: sanSubject.sanitized,
-        // ★ D194 (2026-05-22): Liquid context — {{ company.name }} 지원
-        // ★ D197 (2026-05-22) Phase B-2: enrichedCustomer = customer + Predictive 점수 통합
-        // ★ D201 (2026-05-22) Phase B-3: externalContext = 날씨/재고/가격/신상품 통합
-        company: companyContext,
-        externalContext,
-      }
-    );
-    message = prep.message;
-    subject = prep.subject;
+    // ★ 2026-10-23 여정 결함 0 — 문안 = journey-message-render 한 곳(미리보기 · 켜기 검사 · 발송 2시간 전 재검사와 같은 함수).
+    //   필드 매핑 · 080 · Liquid 회사 · 예측 점수 · 날씨 · 장바구니 · 보낼 수 없는 글자 정리 · (광고)+080+제목 합성이 전부 그 안에 있다.
+    const rendered = await renderJourneySmsMessage({
+      companyId: exec.company_id,
+      createdBy: exec.created_by,
+      template: step.message_template || '',
+      subject: step.subject || '',
+      channel: step.channel || 'lms',
+      isAd: step.is_ad,
+      customer: customer as Record<string, any>,
+    });
+    message = rendered.message;
+    subject = rendered.subject;
 
     // LMS/MMS인데 subject 비어있으면 발송 차단 (통신사 정책 위반 차단)
     if ((msgType === 'LMS' || msgType === 'MMS') && (!subject || subject.trim().length === 0)) {
@@ -1486,34 +1418,9 @@ async function advanceOrComplete(exec: ExecutionRow, currentStep: StepRow, added
   //   date_anchor 다음 step은 anchor-scheduler가 별도 날짜에 새 단발 execution을 만든다(상대 시각 오염 차단).
   //   one_shot은 1회 발송이라 완료. event/standing(기존)은 아래 상대 advance 그대로 — start_kind null/event면 분기 안 탐(byte 불변).
   if (isSingleStepKind(exec.start_kind)) {
-    await query(
-      `UPDATE journey_executions SET
-         status = 'completed', completed_at = NOW(),
-         current_step_order = $2, total_cost = total_cost + $3
-       WHERE id = $1::uuid AND status = 'active'`,
-      [exec.execution_id, currentStep.step_order, addedCost]
-    );
-    await query(
-      `UPDATE journeys SET
-         stats_total_completed = stats_total_completed + 1,
-         stats_total_cost = stats_total_cost + $2,
-         updated_at = NOW()
-       WHERE id = $1::uuid`,
-      [exec.journey_id, addedCost]
-    );
-    // one_shot: 남은 active execution 0이면 여정 종료(ended). date_anchor는 사이클 진행 중 → anchor-scheduler가 관리.
-    if (normalizeStartKind(exec.start_kind) === 'one_shot') {
-      const remain = await query(
-        `SELECT 1 FROM journey_executions WHERE journey_id = $1::uuid AND status = 'active' LIMIT 1`,
-        [exec.journey_id]
-      );
-      if (remain.rows.length === 0) {
-        await query(
-          `UPDATE journeys SET status = 'ended', updated_at = NOW() WHERE id = $1::uuid AND status = 'active'`,
-          [exec.journey_id]
-        );
-      }
-    }
+    // ★ 2026-10-23 여정 결함 0 — 완료 = finishExecution 한 함수(옛: 진행 중 아니면 발송비가 빠지고 완료 수는 늘 +1)
+    await finishExecution(exec.execution_id, exec.journey_id, { stepOrder: currentStep.step_order, addedCost });
+    // one_shot 끝남(진행 중 실행 0) = 감시 워커 회차 끝 endDrainedVersions 한 곳(옛: 여기서 따로 · 실패하면 영영 켜짐). date_anchor = anchor-scheduler.
     return;
   }
 
@@ -1527,28 +1434,13 @@ async function advanceOrComplete(exec: ExecutionRow, currentStep: StepRow, added
   );
   // ★ 2026-09-30 V2 4차 — 다음 칸이 끝 칸이면 기다리지 않고 지금 끝낸다(끝 칸은 대기 0 · 발송 0 · 설계서 §7).
   if (nextRes.rows.length > 0 && String(nextRes.rows[0].step_type) === 'end') {
-    await completeAtEndStep(exec, String(nextRes.rows[0].id), Number(nextRes.rows[0].step_order), addedCost);
+    await finishExecution(exec.execution_id, exec.journey_id, { stepOrder: Number(nextRes.rows[0].step_order), addedCost, endStepId: String(nextRes.rows[0].id) });
     return;
   }
 
   if (nextRes.rows.length === 0) {
-    await query(
-      `UPDATE journey_executions SET
-         status = 'completed',
-         completed_at = NOW(),
-         current_step_order = $2,
-         total_cost = total_cost + $3
-       WHERE id = $1::uuid`,
-      [exec.execution_id, currentStep.step_order, addedCost]
-    );
-    await query(
-      `UPDATE journeys SET
-         stats_total_completed = stats_total_completed + 1,
-         stats_total_cost = stats_total_cost + $2,
-         updated_at = NOW()
-       WHERE id = $1::uuid`,
-      [exec.journey_id, addedCost]
-    );
+    // ★ 2026-10-23 여정 결함 0 — 완료 = finishExecution 한 함수(옛: 상태 확인 없이 completed 로 덮고 완료 수를 늘 더했다 · 끝 칸 갈래만 확인했다)
+    await finishExecution(exec.execution_id, exec.journey_id, { stepOrder: currentStep.step_order, addedCost });
     return;
   }
 
@@ -1719,32 +1611,41 @@ async function isGoalConvertedSinceEntry(exec: ExecutionRow): Promise<boolean> {
 }
 
 /**
- * ★ 2026-09-30 여정 V2 4차 — 끝 칸에서 완료: 실행 completed(current_step_order = 끝 칸) + 기록(end_step) + 여정 완료 수.
- *   완료 전환은 진행 중(active)일 때만(동시에 목표 달성 · 멈춤이 끼어들면 상태는 그쪽이 이긴다).
- * ★ 0930 Codex 1R — 직전 문자의 발송비(addedCost)는 상태와 무관하게 여기서 한 번 반영한다(문자는 이미 나갔다).
- *   멈춤이 끼어들어 완료를 건너뛰어도 비용이 실행 · 여정 합계에서 빠지지 않는다(다시 처리돼도 sent 가드가 0 으로 넘어와 이중 가산 0).
+ * 실행 완료 한 함수 (★ 2026-10-23 여정 결함 0 · 옛 셋 = 마지막 칸 · 끝 칸 · 칸 없음/분기 대상 없음)
+ *   완료 전환은 진행 중(active)일 때만(동시에 목표 달성 · 멈춤 · 종료가 끼어들면 상태는 그쪽이 이긴다) · 완료 수는 전환했을 때만 +1.
+ *   직전 문자의 발송비(addedCost)는 상태와 무관하게 한 번 반영한다(문자는 이미 나갔다 · 다시 처리돼도 sent 가드가 0 으로 넘어와 이중 가산 0).
+ *   stepOrder null = 지금 칸 그대로 · endStepId 있으면 끝 칸 기록(end_step).
  */
-async function completeAtEndStep(exec: ExecutionRow, endStepId: string, endStepOrder: number, addedCost: number): Promise<void> {
-  const r = await query(
-    `WITH prev AS (SELECT id, status FROM journey_executions WHERE id = $1::uuid FOR UPDATE)
-     UPDATE journey_executions e SET
-        total_cost = e.total_cost + $3,
-        status = CASE WHEN prev.status = 'active' THEN 'completed' ELSE e.status END,
-        completed_at = CASE WHEN prev.status = 'active' THEN NOW() ELSE e.completed_at END,
-        current_step_order = CASE WHEN prev.status = 'active' THEN $2 ELSE e.current_step_order END
-       FROM prev
-      WHERE e.id = prev.id
-      RETURNING (prev.status = 'active') AS completed`,
-    [exec.execution_id, endStepOrder, addedCost]
-  );
-  if (r.rows.length === 0) return;
-  const completed = r.rows[0].completed === true;
-  if (completed) await logSkippedStep(exec.execution_id, endStepId, 'end_step');
-  if (!completed && !(addedCost > 0)) return;
+async function finishExecution(
+  executionId: string,
+  journeyId: string,
+  opts: { stepOrder: number | null; addedCost: number; endStepId?: string },
+): Promise<void> {
+  // ★ 2026-10-23 Codex 1R — 한 문장(자료 바꾸는 WITH)이라 실행 완료 · 끝 칸 기록 · 여정 통계가 함께 커밋되거나 함께 안 된다
+  //   (옛: 완료를 먼저 커밋하고 기록 · 통계를 따로 써서, 뒤가 실패하면 완료된 실행은 다시 안 잡혀 영영 빠졌다).
   await query(
-    `UPDATE journeys SET stats_total_completed = stats_total_completed + $3, stats_total_cost = stats_total_cost + $2, updated_at = NOW()
-      WHERE id = $1::uuid`,
-    [exec.journey_id, addedCost, completed ? 1 : 0]
+    `WITH prev AS (SELECT id, status FROM journey_executions WHERE id = $1::uuid FOR UPDATE),
+     done AS (
+       UPDATE journey_executions e SET
+          total_cost = e.total_cost + $3::numeric,
+          status = CASE WHEN prev.status = 'active' THEN 'completed' ELSE e.status END,
+          completed_at = CASE WHEN prev.status = 'active' THEN NOW() ELSE e.completed_at END,
+          current_step_order = CASE WHEN prev.status = 'active' AND $2::int IS NOT NULL THEN $2::int ELSE e.current_step_order END
+         FROM prev
+        WHERE e.id = prev.id
+        RETURNING (prev.status = 'active') AS completed
+     ),
+     end_log AS (
+       INSERT INTO journey_step_logs (id, execution_id, step_id, sent_at, status, cost, error_reason)
+       SELECT gen_random_uuid(), $1::uuid, $5::uuid, NOW(), 'skipped', 0, 'end_step' FROM done WHERE done.completed AND $5::uuid IS NOT NULL
+     )
+     UPDATE journeys j SET
+        stats_total_completed = j.stats_total_completed + CASE WHEN done.completed THEN 1 ELSE 0 END,
+        stats_total_cost = j.stats_total_cost + $3::numeric,
+        updated_at = NOW()
+       FROM done
+      WHERE j.id = $4::uuid AND (done.completed OR $6::boolean)`,
+    [executionId, opts.stepOrder, opts.addedCost, journeyId, opts.endStepId || null, opts.addedCost > 0]
   );
 }
 
@@ -1793,19 +1694,6 @@ async function hasPurchasedSinceEntry(companyId: string, customerId: string, ent
     [companyId, customerId]
   );
   return byBatch.rows.length > 0;
-}
-
-async function markExecutionCompleted(executionId: string, journeyId: string): Promise<void> {
-  await query(
-    `UPDATE journey_executions SET status = 'completed', completed_at = NOW()
-     WHERE id = $1::uuid AND status = 'active'`,
-    [executionId]
-  );
-  await query(
-    `UPDATE journeys SET stats_total_completed = stats_total_completed + 1, updated_at = NOW()
-     WHERE id = $1::uuid`,
-    [journeyId]
-  );
 }
 
 async function pauseJourney(journeyId: string, reason: string): Promise<void> {

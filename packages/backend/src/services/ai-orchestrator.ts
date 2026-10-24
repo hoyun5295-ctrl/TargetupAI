@@ -60,7 +60,7 @@ import {
   InsightResult,
 } from '../utils/performance-insight';
 // ★ D227+ 종량제: 풀분석 묶음 차감 — 진입점 1회, sub-agent는 묶음 컨텍스트로 0(과차감 방지)
-import { checkCredit, deductCreditSafe } from '../utils/ai-credit';
+import { checkCredit, deductCreditOutcome, isChargedByKey } from '../utils/ai-credit';
 import { applyBenefitToBody, buildTargetHintPromptBlock, normalizeTargetHint } from '../utils/autosend-policy';
 import { currentUserId } from '../utils/request-context';
 import { runInCreditBundle } from '../utils/ai-credit-context';
@@ -122,6 +122,11 @@ export interface AgentContext {
    *   자동 마케팅(continuous-operator)은 넘기지 않는다 → 지금 그대로.
    */
   lineFacts?: LineFacts;
+  /**
+   * ★ 2026-10-24 혜택 근거를 이 글자로만(자동 마케팅 회차 = 사람이 적은 혜택 칸 · 설계서 docs/2026-10-24-automarketing-oneline-design.md §1-1).
+   *   목표 문장은 문안 요청으로만 간다 — AI 가 쓴 목표(오늘의 추천 · 캘린더)의 숫자 · 낱말이 혜택 근거가 되지 않는다. 없으면 지금 그대로.
+   */
+  benefitLicense?: string;
   /** ★ 2026-10-05 C안 시험(COPY_C_TEST_COMPANY_IDS · 허브 제안만) — 없으면 지금 그대로 */
   cVariant?: CopyCVariant;
   /**
@@ -374,23 +379,43 @@ passed=true 이면 warnings/suggestions 빈 배열 가능. 사소한 issue는 me
 // Orchestrator main — 6 Sub-agent 호출 + 결과 통합
 // ============================================================
 
-export async function orchestrate(ctx: AgentContext, creditOpts?: { source?: string; cost?: number; chargeOnlyWithTarget?: boolean }): Promise<OrchestratorResult> {
-  // ★ D227+ 종량제: 풀분석 묶음 — 진입 사전 체크 → 본문(sub는 묶음으로 차감 0) → 성공 후 1회 차감.
-  //   creditOpts: 자동마케팅 등이 source/cost 오버라이드(예: source 'continuous-operator' → 200). 미지정 시 풀분석 300.
+export interface OrchestrateCreditOpts {
+  source?: string;
+  cost?: number;
+  chargeOnlyWithTarget?: boolean;
+  /** ★ 2026-10-24 요청 키(자동 마케팅 미리보기) — 원장에 이 키가 있으면 잔액 확인을 건너뛰고 차감은 duplicate(0). 없으면 지금 그대로 */
+  idempotencyKey?: string;
+  /** ★ 2026-10-24 차감 때 잔액이 모자라면 결과를 내주지 않고 던진다(호출부 402). 없으면 지금 그대로(결과는 막지 않는다) */
+  throwOnInsufficient?: boolean;
+}
+
+/**
+ * 풀분석 묶음의 돈 한 곳(orchestrate · orchestrateWithAI 공용) — 진입 사전 체크 → 본문(sub는 묶음으로 차감 0) → 성공 후 1회 차감.
+ *   creditOpts: 자동마케팅 등이 source/cost 오버라이드. 미지정 시 풀분석 300.
+ * ★ 2026-07-08 (Harold 명시): 문안 미출력(0건 매칭 등) = 사용자 결과 없음 → 차감 skip(6원칙 ② 효과 검증 후 과금).
+ * ★ 2026-10-05 chargeOnlyWithTarget = 대상 0명이면 문안이 있어도 차감 0(시작할 수 없는 제안).
+ * ★ 2026-10-24 idempotencyKey — 결과를 못 받은 재전송이 냈는데도 402 가 되지 않게(회의론자 §9-5a) · 같은 키 차감은 원장이 막는다.
+ */
+async function chargeOrchestrate(ctx: AgentContext, creditOpts: OrchestrateCreditOpts | undefined, run: () => Promise<OrchestratorResult>): Promise<OrchestratorResult> {
   const source = creditOpts?.source ?? 'orchestrate';
   const cost = creditOpts?.cost ?? getCreditCost(source);
-  await checkCredit(ctx.companyId, cost);
+  const key = creditOpts?.idempotencyKey;
+  if (!(key && await isChargedByKey(ctx.companyId, key))) await checkCredit(ctx.companyId, cost);
   return runInCreditBundle(async () => {
-    const result = await _orchestrateImpl(ctx);
-    // ★ 2026-07-08 (Harold 명시): 문안 미출력(0건 매칭 등) = 사용자 결과 없음 → 차감 skip.
-    //   문안이 1개 이상 실제 생성된 경우에만 과금 (6원칙 ② 효과 검증 후 과금).
-    // ★ 2026-10-05 자동 마케팅 미리보기: chargeOnlyWithTarget = 대상 0명이면 문안이 있어도 차감 0(시작할 수 없는 제안).
-    //   지정하지 않은 호출(허브 제안 · 회차 생성)은 지금 그대로.
+    const result = await run();
     if ((result.messages?.length ?? 0) > 0 && (!creditOpts?.chargeOnlyWithTarget || (result.target?.count ?? 0) > 0)) {
-      await deductCreditSafe({ companyId: ctx.companyId, cost, source, createdBy: ctx.userId || currentUserId() || null });
+      await deductCreditOutcome({
+        companyId: ctx.companyId, cost, source, createdBy: ctx.userId || currentUserId() || null,
+        ...(key ? { idempotencyKey: key } : {}),
+        ...(creditOpts?.throwOnInsufficient ? { throwOnInsufficient: true } : {}),
+      });
     }
     return result;
   });
+}
+
+export async function orchestrate(ctx: AgentContext, creditOpts?: OrchestrateCreditOpts): Promise<OrchestratorResult> {
+  return chargeOrchestrate(ctx, creditOpts, () => _orchestrateImpl(ctx));
 }
 
 async function _orchestrateImpl(ctx: AgentContext): Promise<OrchestratorResult> {
@@ -564,7 +589,7 @@ async function _orchestrateImpl(ctx: AgentContext): Promise<OrchestratorResult> 
       companyId: ctx.companyId,
       // ★ 2026-10-19 B-1005-1① — 혜택 근거 = 사용자 글자(목표 문장 · 답)만. 옛: 답이 없는 요청은 목표 문장에 붙인 회사 AI 메모리 ·
       //   계절 힌트 · 대상 블록까지 근거와 혜택 감지에 들어가 지난 학습의 수치가 이번 혜택처럼 쓰일 수 있었다(문맥으로는 그대로 간다).
-      licenseText: licenseText ?? ctx.objective,
+      licenseText: ctx.benefitLicense ?? licenseText ?? ctx.objective,   // ★ 1024 자동 마케팅 회차 = 사람 칸만
       ...(ctx.cVariant ? { cVariant: ctx.cVariant } : {}),
     }
   );
@@ -767,21 +792,9 @@ const ORCHESTRATOR_TOOLS: Anthropic.Tool[] = [
   },
 ];
 
-export async function orchestrateWithAI(ctx: AgentContext, creditOpts?: { source?: string; cost?: number; chargeOnlyWithTarget?: boolean }): Promise<OrchestratorResult> {
+export async function orchestrateWithAI(ctx: AgentContext, creditOpts?: OrchestrateCreditOpts): Promise<OrchestratorResult> {
   // ★ D227+ 종량제: 풀분석 묶음 (orchestrate와 동일 — 진입 1회 차감). fallback은 _orchestrateImpl 직접(이중차감 방지).
-  const source = creditOpts?.source ?? 'orchestrate';
-  const cost = creditOpts?.cost ?? getCreditCost(source);
-  await checkCredit(ctx.companyId, cost);
-  return runInCreditBundle(async () => {
-    const result = await _orchestrateWithAIImpl(ctx);
-    // ★ 2026-07-08 (Harold 명시): 문안 미출력(0건 매칭 등) = 사용자 결과 없음 → 차감 skip.
-    //   문안이 1개 이상 실제 생성된 경우에만 과금 (6원칙 ② 효과 검증 후 과금).
-    // ★ 2026-10-18 orchestrate 와 같은 옵션 — chargeOnlyWithTarget = 대상 0명이면 문안이 있어도 0(허브 제안 결함 0-1)
-    if ((result.messages?.length ?? 0) > 0 && (!creditOpts?.chargeOnlyWithTarget || (result.target?.count ?? 0) > 0)) {
-      await deductCreditSafe({ companyId: ctx.companyId, cost, source, createdBy: ctx.userId || currentUserId() || null });
-    }
-    return result;
-  });
+  return chargeOrchestrate(ctx, creditOpts, () => _orchestrateWithAIImpl(ctx));
 }
 
 async function _orchestrateWithAIImpl(ctx: AgentContext): Promise<OrchestratorResult> {
@@ -903,7 +916,7 @@ async function _orchestrateWithAIImpl(ctx: AgentContext): Promise<OrchestratorRe
             model: 'sonnet',
             // ★ D225+ Brand Voice Learning — 회사별 가이드라인 자동 주입
             companyId: ctx.companyId,
-            licenseText: licenseTextAI ?? ctx.objective,   // ★ 1019 B-1005-1① 근거 = 사용자 글자만(계절 힌트 제외)
+            licenseText: ctx.benefitLicense ?? licenseTextAI ?? ctx.objective,   // ★ 1019 B-1005-1① 근거 = 사용자 글자만(계절 힌트 제외) · ★ 1024 자동 마케팅 = 사람 칸만
             ...(ctx.cVariant ? { cVariant: ctx.cVariant } : {}),
           }
         );

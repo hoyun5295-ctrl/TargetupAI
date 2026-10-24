@@ -24,7 +24,7 @@ export const INAPP_CHANNEL_TABS: ZoneTab[] = [
 /** 여정 = 목록 · 생애 지도(두 화면이 같은 목록을 import · 탭이 갈라지지 않는다 · ★ 2026-09-30 보정: 아이콘 타일) */
 export const JOURNEY_TABS: ZoneTab[] = [
   { id: 'list', label: '여정 목록', icon: LayoutList, to: '/ai-journeys' },
-  { id: 'map', label: '생애 지도', icon: MapIcon, to: '/ai-journeys/map' },
+  { id: 'map', label: '고객 관계 지도', icon: MapIcon, to: '/ai-journeys/map' },
 ];
 
 /** 여정 하나의 두 보기 = 진입 고객 · 성과(상세·통계 두 화면이 같은 목록 · ★ 2026-09-30 보정: 외톨이 머리 버튼 → 탭 타일) */

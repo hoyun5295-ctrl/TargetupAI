@@ -105,11 +105,12 @@ export default function JourneyDetailPage() {
       const statsData = await statsRes.json();
       const journeyData = await journeyRes.json();
       if (statsData.success) setOverview(statsData.stats.overview);
-      if (journeyData.success && journeyData.detail?.journey) {
+      // ★ 2026-10-23 여정 결함 0 — 상세 응답 = { success, journey, steps }(옛: detail.journey 로 읽어 이름이 늘 비었다)
+      if (journeyData.success && journeyData.journey) {
         setJourney({
-          id: journeyData.detail.journey.id,
-          name: journeyData.detail.journey.name,
-          status: journeyData.detail.journey.status,
+          id: journeyData.journey.id,
+          name: journeyData.journey.name,
+          status: journeyData.journey.status,
         });
       }
     } catch {

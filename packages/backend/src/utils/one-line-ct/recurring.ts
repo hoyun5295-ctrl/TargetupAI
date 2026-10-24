@@ -24,7 +24,7 @@ export function checkRecurringLine(intent: LineIntent, entrance: RecurringEntran
       kind: 'benefit_missing',
       text: entrance === 'auto-send'
         ? '혜택 문구를 컨셉에 적어 두세요. AI 가 혜택을 지어 쓰면 그 자리는 비워지고, 채우지 않으면 그 회차는 나가지 않아요'
-        : '혜택 문구가 없어요. 만든 뒤 혜택 칸에서 채워 주세요',
+        : '혜택 문구가 없어요. 아래 「넣을 혜택」 칸에 적으면 그 혜택만 실어요',
     });
   } else if (intent.benefit) {
     out.push({ kind: 'benefit_fixed', text: `적어 주신 혜택만 실어요: 「${intent.benefit}」` });

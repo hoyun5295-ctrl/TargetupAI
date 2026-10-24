@@ -10,7 +10,7 @@ import { readFileSync } from 'fs';
 import { join } from 'path';
 
 const src = readFileSync(join(__dirname, '..', 'continuous-operator.ts'), 'utf8');
-const upd = src.slice(src.indexOf('const runUpdate = (withSegment: boolean) => query('), src.indexOf('RETURNING *`,', src.indexOf('const runUpdate = (withSegment: boolean) => query(')) + 40);
+const upd = src.slice(src.indexOf('const runUpdate = (withSegment: boolean, run: TxRun) => run('), src.indexOf('RETURNING *`,', src.indexOf('const runUpdate = (withSegment: boolean, run: TxRun) => run(')) + 40);
 const params = src.slice(src.indexOf('RETURNING *`,', src.indexOf('const runUpdate')), src.indexOf('...(withSegment ? [segFinalKey'));
 
 describe('혜택·리마인더 비우기', () => {

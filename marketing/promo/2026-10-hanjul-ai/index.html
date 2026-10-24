@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>한줄로AI 소개 영상</title>
+<!-- 한줄로AI 홍보 영상(1920×1080 · 약 4분 36초) · 장면 = js/scenes · 시각표 = js/ui.js CH · 굽기 = node render.js
+     화면 글은 실제 화면 코드 원문(단계 제목 · 칩 · 단추) · 회사 · 고객 · 숫자는 예시(가상) · 포스터 = posters/(스튜디오 프롬프트 그대로 생성) -->
+<link rel="stylesheet" href="css/promo.css">
+</head>
+<body>
+<div id="stage">
+  <div id="scenes"></div>
+  <div id="chrome">
+    <div class="abs" id="mark"><img src="../../../packages/frontend/public/logo.png" alt="한줄로"><b>AI</b></div>
+    <div class="abs" id="chap"><span class="no" id="chapNo"></span><span id="chapName"></span><span class="bars" id="chapBars"></span></div>
+    <div class="abs" id="note">화면은 예시이며, 영상 속 회사와 고객은 가상입니다</div>
+  </div>
+  <svg id="pointer" viewBox="0 0 24 24"><path d="M4.04 4.69a.5.5 0 0 1 .65-.65l16 6.5a.5.5 0 0 1-.06.95l-6.13 1.58a2 2 0 0 0-1.43 1.43l-1.58 6.13a.5.5 0 0 1-.95.06z" fill="#0F172A" stroke="#fff" stroke-width="1.5" stroke-linejoin="round"/></svg>
+</div>
+<script src="js/engine.js"></script>
+<script src="js/ui.js"></script>
+<script src="js/scenes/c0-open.js"></script>
+<script src="js/scenes/c1-line.js"></script>
+<script src="js/scenes/c2-memory.js"></script>
+<script src="js/scenes/c3-studio.js"></script>
+<script src="js/scenes/c4-make.js"></script>
+<script src="js/scenes/c5-journey.js"></script>
+<script src="js/scenes/c6-birthday.js"></script>
+<script src="js/scenes/c7-planner.js"></script>
+<script src="js/scenes/c8-connect.js"></script>
+<script src="js/scenes/c9-outro.js"></script>
+<script>
+// 공용 머리: 장 1~8 동안만 로고 · 장 표시 · 예시 표기
+(() => {
+  const bars = V.$('chapBars');
+  const chapters = CH.filter((c) => c.no);
+  bars.innerHTML = chapters.map(() => '<i><b></b></i>').join('');
+  V.setChrome((t) => {
+    const cur = chapters.find((c) => t >= c.at && t < c.at + c.dur);
+    const on = !!cur && t >= cur.at + 2.7;
+    const vis = cur ? V.p(t, cur.at + 2.7, cur.at + 3.2) * (1 - V.p(t, cur.at + cur.dur - 0.4, cur.at + cur.dur)) : 0;
+    ['mark', 'chap', 'note'].forEach((id) => { V.$(id).style.opacity = (on ? vis : 0).toFixed(3); });
+    if (!cur) return;
+    V.$('chapNo').textContent = cur.no;
+    V.$('chapName').textContent = cur.name;
+    bars.querySelectorAll('b').forEach((b, k) => {
+      const c = chapters[k];
+      b.style.transform = `scaleX(${V.clamp((t - c.at) / c.dur).toFixed(4)})`;
+    });
+  });
+})();
+V.ready();
+</script>
+</body>
+</html>

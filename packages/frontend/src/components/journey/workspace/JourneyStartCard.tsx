@@ -8,7 +8,7 @@
  */
 import { useState } from 'react';
 import { CalendarClock, ChevronDown, ChevronUp, Loader2, Plus, Unlink, Users } from 'lucide-react';
-import { ConditionRow, COND_FIELDS, condLabel, useConditionValueOptions, type AudienceCondition } from '../JourneyBuilderUi';
+import { ConditionRow, COND_FIELDS, condLabel, condValueText, useConditionValueOptions, type AudienceCondition } from '../JourneyBuilderUi';
 import { TIMING, STANDING_TRIGGERS, numOrNull, type OptionForm } from '../../../utils/journey-start-form';
 
 export type { OptionForm } from '../../../utils/journey-start-form';
@@ -130,7 +130,7 @@ export default function JourneyStartCard({ journey, triggerLabel, form, setField
                 onRemove={() => setConds(conds.filter((_, idx) => idx !== i))} />
             ) : (
               <div key={i} className="flex items-center gap-2 rounded-lg bg-slate-50 px-2.5 py-2 text-[13px] text-slate-700">
-                <span className="min-w-0 flex-1 truncate">{condLabel(c.field)} {Array.isArray(c.value) ? `${c.value.join(', ')} 중 하나${c.op === 'not_in' ? '가 아님' : ''}` : c.op === 'is_null' ? '값 없음' : c.op === 'not_null' ? '값 있음' : String(c.value ?? '')}</span>
+                <span className="min-w-0 flex-1 truncate">{condLabel(c.field)} {Array.isArray(c.value) ? `${c.value.map((v: unknown) => condValueText(c.field, v)).join(', ')} 중 하나${c.op === 'not_in' ? '가 아님' : ''}` : c.op === 'is_null' ? '값 없음' : c.op === 'not_null' ? '값 있음' : condValueText(c.field, c.value)}</span>
                 {!locked && <button type="button" onClick={() => setConds(conds.filter((_, idx) => idx !== i))} className="shrink-0 text-[12px] text-slate-500 hover:text-rose-700">빼기</button>}
               </div>
             )))}

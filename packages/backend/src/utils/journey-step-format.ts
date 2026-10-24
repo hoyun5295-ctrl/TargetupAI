@@ -3,6 +3,7 @@
  *   DB import 0 — 순수. 저장된 여정 상세/타임라인 라벨의 단일 출처.
  *   편집 캔버스(생성 직후)는 입력 컨트롤이라 별도, 이 라벨은 저장된 여정 표시용.
  */
+import { conditionFieldLabel, normalizeGenderCode } from './journey-condition-fields';
 
 export interface StepTimingInput {
   delayMode?: string | null;
@@ -122,10 +123,7 @@ export function describeProductPick(triggerFilters: Record<string, any> | null |
  * ★ 2026-09-29 여정 V2 0차 ① — 대상 조건을 사람 말로(계획 모달 "누구에게"). 식별자 · 필드명을 화면에 내지 않는다.
  *   옛: 계획 모달은 트리거 이름만 보여 주고 대상 조건은 "추가 조건 N건"뿐이라, 저장값과 보인 것이 같은지 확인할 수 없었다.
  */
-const COND_FIELD_KO: Record<string, string> = {
-  grade: '등급', region: '지역', age: '나이', purchase_count: '구매 횟수', total_purchase_amount: '총 구매액',
-  sms_opt_in: '수신 동의', store_name: '매장', store_code: '매장 코드', points: '포인트',
-};
+// ★ 2026-10-23 칸 이름 = journey-condition-fields 표 한 곳(옛 여기 손 목록엔 「마지막 구매 뒤 지난 날」이 없어 「알 수 없는 항목」으로 보였다)
 const COND_OP_KO: Record<string, (v: string) => string> = {
   '==': (v) => `${v}`, '!=': (v) => `${v} 아님`, '>=': (v) => `${v} 이상`, '<=': (v) => `${v} 이하`,
   '>': (v) => `${v} 초과`, '<': (v) => `${v} 미만`, in: (v) => `${v} 중 하나`, not_in: (v) => `${v} 제외`,
@@ -135,8 +133,10 @@ const COND_OP_KO: Record<string, (v: string) => string> = {
 export function describeCustomerConditions(conditions: unknown, logic?: unknown): string {
   if (!Array.isArray(conditions) || conditions.length === 0) return '';
   const parts = conditions.map((c: any) => {
-    const field = COND_FIELD_KO[String(c?.field || '')] || '알 수 없는 항목';
-    const raw = Array.isArray(c?.value) ? c.value.join(' · ') : c?.value === true ? '예' : c?.value === false ? '아니오' : String(c?.value ?? '');
+    const key = String(c?.field || '');
+    const field = conditionFieldLabel(key) || '알 수 없는 항목';
+    const shown = (x: unknown) => (key === 'gender' ? (normalizeGenderCode(x) === 'F' ? '여성' : normalizeGenderCode(x) === 'M' ? '남성' : String(x ?? '')) : key === 'birth_month' ? `${x}월` : String(x ?? ''));
+    const raw = Array.isArray(c?.value) ? c.value.map(shown).join(' · ') : c?.value === true ? '예' : c?.value === false ? '아니오' : shown(c?.value);
     const op = COND_OP_KO[String(c?.op || '')];
     return op ? `${field} ${op(raw)}` : `${field} ${raw}`;
   });

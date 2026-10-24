@@ -45,6 +45,7 @@ import { getCompanyJourneyFacts } from './company-data-profile';
 import { MAX_JOURNEY_STEPS, MAX_STEP_DELAY_HOURS, MAX_WAIT_TIMEOUT_HOURS, isKnownStepType, resolveStepType, assertStepCountWithinLimit, assertStepsWithinLimit, MAX_MESSAGE_STEPS, JourneyInputError, JOURNEY_SUBJECT_MAX_CHARS } from './journey-step-limits';
 // ★ 2026-09-29 여정 V2 0차 ② — 대상 조건 검증은 추출기와 같은 허용 목록(단일 출처).
 import { findCustomerConditionIssues, describeCustomerConditionIssue } from './journey-target-extractor';
+import { journeyOwnerSql, type JourneyViewer } from './journey-access';
 
 export { MAX_JOURNEY_STEPS, JourneyInputError };
 
@@ -148,6 +149,8 @@ export interface CreateJourneyInput {
   anchorRecurrenceDay?: number | null;   // monthly_day일 때 N일
   anchorHourKst?: number | null;         // 기본 발송 시각(0~23), step별 targetHourKst override 가능
   oneShotScheduledAt?: string | null;    // one_shot 예약 시각(ISO). null = 즉시.
+  /** ★ 2026-10-23 새 고객 받는 마지막 날 'YYYY-MM-DD'(V.3 entry_ends_on). 값이 있을 때만 칸을 쓴다(칸 준비는 호출부가 먼저 확인). */
+  entryEndsOn?: string | null;
 }
 
 // ★ 2026-06-26 라프레리 신고 fix: 옛 ['[', ']'].every()는 대괄호가 있기만 하면 무조건 차단 →
@@ -409,7 +412,7 @@ export async function createJourneyFromTemplate(input: CreateJourneyInput): Prom
       threshold_recipients_per_step, threshold_cost_per_step, threshold_risk_level,
       callback_number, callback_mode,
       start_kind, anchor_date, anchor_recurrence, anchor_recurrence_day, anchor_hour_kst, one_shot_scheduled_at,
-      goal_exit_enabled, goal_kind,
+      goal_exit_enabled, goal_kind,${input.entryEndsOn ? ' entry_ends_on,' : ''}
       created_by, created_at, updated_at
     ) VALUES (
       gen_random_uuid(), $1::uuid, $2, $3, $4, $5::jsonb,
@@ -417,7 +420,7 @@ export async function createJourneyFromTemplate(input: CreateJourneyInput): Prom
       $9, $10, $11,
       $12, $13,
       $15, $16::date, $17, $18, $19, $20::timestamptz,
-      $21, $22,
+      $21, $22,${input.entryEndsOn ? ' $23::date,' : ''}
       $14::uuid, NOW(), NOW()
     ) RETURNING id`,
     [
@@ -446,6 +449,7 @@ export async function createJourneyFromTemplate(input: CreateJourneyInput): Prom
       // ★ 2026-09-29 여정 V2 0차 ⑫(Harold 승인 결정 2) — 새 여정의 목표 종류를 트리거 계약에서 정한다.
       //   옛: 컬럼 기본값 'purchase'라 포인트 소멸 여정도 "구매"로 끝났다. goal_kind = 0929 information_schema 실측 컬럼(NOT NULL · CHECK 없음).
       goalKindForTrigger(resolvedTriggerEvent),
+      ...(input.entryEndsOn ? [input.entryEndsOn] : []),
     ]
   );
 
@@ -1986,20 +1990,23 @@ export async function deleteJourney(companyId: string, journeyId: string): Promi
 // 조회
 // ════════════════════════════════════════════════════════════════════
 
-export async function listJourneys(companyId: string, status?: JourneyStatus | 'all' | 'archived') {
+export async function listJourneys(companyId: string, status?: JourneyStatus | 'all' | 'archived', viewer?: JourneyViewer) {
   // ★ Fix #3 (2026-06-05): status는 라우트가 받은 신뢰 불가 값(타입 캐스팅은 런타임 보장 X) →
   //   화이트리스트 CT로 검증해 SQL 주입을 차단한다. archived 분리 + 허용 상태만 보간.
   const where = journeyListWhere(status);
   // ★ 2026-07-10 goal_met_count — 목표 달성 종료(진입 이후 구매 확인) 카드 뱃지용. 회사당 여정 수가 작아 서브쿼리 COUNT 부담 미미.
   // ★ 2026-07-11 holdout_count — 홀드아웃 대조군(미발송) 카드 뱃지용. status 값만 신규(컬럼 신규 아님 — DDL 무관 안전).
+  // ★ 2026-10-23 여정 결함 0 — 담당자는 자기가 만든 여정만(캠페인 · 자동발송과 같다 · journey-access 한 곳)
+  const params: any[] = [companyId];
+  const owner = viewer ? journeyOwnerSql(viewer, params) : '';
   const r = await query(
     `SELECT j.*,
             (SELECT COUNT(*)::int FROM journey_executions e WHERE e.journey_id = j.id AND e.status = 'goal_met') AS goal_met_count,
             (SELECT COUNT(*)::int FROM journey_executions e WHERE e.journey_id = j.id AND e.status = 'holdout') AS holdout_count
      FROM journeys j
-     WHERE j.company_id = $1::uuid ${where}
+     WHERE j.company_id = $1::uuid ${where}${owner}
      ORDER BY j.status ASC, j.created_at DESC`,
-    [companyId]
+    params
   );
   return r.rows;
 }

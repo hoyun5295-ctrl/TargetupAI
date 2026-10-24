@@ -63,8 +63,8 @@ describe('R192 · R194 운영자', () => {
     expect(b).not.toContain('catch');
     expect(b).toContain('return (base + purchased) - cost >= -creditOverageAllowance(row, source);');
     const { creditOverageAllowance, carriedBaseOnReset } = await import('../ai-credit-tx');
-    // 운영 과금 = 한 달 기본분까지 음수 허용 · 그 외 = 후불 한도(선불 0)
-    expect(creditOverageAllowance({ plan_credits: 100, billing_type: 'postpaid', overage_limit: 1000 }, 'continuous-operator-send')).toBe(100);
+    // ★ 2026-10-24 X1 — 자동 마케팅 회차 발송 = 마이너스 0(선불 · 후불) · 그 외 = 후불 한도(선불 0)
+    expect(creditOverageAllowance({ plan_credits: 100, billing_type: 'postpaid', overage_limit: 1000 }, 'continuous-operator-send')).toBe(0);
     expect(creditOverageAllowance({ plan_credits: 100, billing_type: 'postpaid', overage_limit: 1000 }, 'ai-operator-explain')).toBe(1000);
     expect(creditOverageAllowance({ plan_credits: 100, billing_type: 'prepaid', overage_limit: 1000 }, 'ai-operator-explain')).toBe(0);
     // 월 리셋 = 기본분 + (선불만) 지난달 음수 상계
