@@ -11,6 +11,8 @@ BACKUP_DIR="/home/administrator/backups"
 MAX_AGE_HOURS=26          # 매일 03:00 백업 기준, 26h 넘으면 이상
 MARK="${BACKUP_DIR}/LAST_SUCCESS"
 [[ -f "${BACKUP_DIR}/.env" ]] && { set -a; source "${BACKUP_DIR}/.env"; set +a; }
+# 경보 = 공용 입구 ops-alert(문자 + 메일 · ROOT-LEDGER R14)
+OPS_ALERT="${OPS_ALERT:-/usr/local/bin/ops-alert}"
 
 msg=""
 if [[ ! -f "${MARK}" ]]; then
@@ -22,7 +24,8 @@ fi
 
 if [[ -n "${msg}" ]]; then
   echo "[$(date '+%F %T')] ALERT: ${msg}"
-  [[ -n "${ALERT_CMD:-}" ]] && ALERT_MSG="한줄로 백업 이상: ${msg}" bash -c "${ALERT_CMD}" || true
+  if [[ -x "${OPS_ALERT}" ]]; then "${OPS_ALERT}" "한줄로 백업 이상" "${msg}" || true
+  else echo "[$(date '+%F %T')] 공용 경보(${OPS_ALERT}) 없음 — 경보를 못 보냄"; fi
   exit 1
 fi
 echo "[$(date '+%F %T')] OK: 백업 신선도 정상"

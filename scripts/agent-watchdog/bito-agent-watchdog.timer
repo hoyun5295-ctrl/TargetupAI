@@ -1,0 +1,11 @@
+# 비토 에이전트 감시 — 1분마다 · 설치: /etc/systemd/system/bito-agent-watchdog.timer
+[Unit]
+Description=Bito agent watchdog every minute
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=60s
+AccuracySec=5s
+
+[Install]
+WantedBy=timers.target

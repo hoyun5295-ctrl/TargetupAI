@@ -878,3 +878,40 @@ describe('R13 고객 글 생산자 출구 = 혜택 · 숫자 · 효능 거름 �
     expect(be('utils/sales-outreach-exemplars.ts')).toMatch(/\bEFFICACY_PROMPT_RULES,/);
   });
 });
+
+// ── R14 감지했는데 사람에게 안 닿음 ─────────────────────────────────
+// ★ 2026-10-25 hanjul03 멈춤: 65번이 10분 만에 잡고도 화면에만 적었고, 운영자 문자는 16번 라인 → 65번 한 길이었다.
+//   운영 스크립트의 경보는 공용 입구 scripts/ops-alert.sh(문자 + 메일 두 길) 하나로만 나간다.
+//   대상 = scripts/ 아래 셸 · JS 전수(소스에서 기계로 뽑는다 · 주석 줄 제외).
+const SCRIPTS = join(BE, '..', '..', '..', 'scripts');
+/** 경보 명령을 직접 실행하는 꼴($ALERT_CMD · ${ALERT_CMD} · localhost 알림 주소) */
+const DIRECT_ALERT = /\$\{?ALERT_CMD\b|\/api\/internal\/(?:dist-)?alert\b/;
+const R14_OWNER = 'ops-alert.sh';
+describe('R14 감지했는데 사람에게 안 닿음 — 운영 경보 = 공용 입구(문자 + 메일)', () => {
+  const files = (readdirSync(SCRIPTS, { recursive: true }) as string[])
+    .map((f) => String(f).replace(/\\/g, '/'))
+    .filter((f) => /\.(sh|js|mjs)$/.test(f) && !/(^|\/)tests\//.test(f));
+  it('대상이 비어 있지 않다(뽑기가 죽지 않았다)', () => {
+    expect(files).toEqual(expect.arrayContaining(['backup.sh', 'backup-monitor.sh', 'monitor-dist.sh', 'ops-alert.sh', 'agent-watchdog/agent-watchdog.js']));
+  });
+  it('공용 입구 밖에서 경보 명령을 직접 부르지 않는다', () => {
+    const bad = files.filter((f) => f !== R14_OWNER).flatMap((f) => {
+      const src = read(join(SCRIPTS, f));
+      const code = /\.sh$/.test(f)
+        ? src.split('\n').filter((l) => !/^\s*#/.test(l)).join('\n')
+        : stripComments(src);
+      return DIRECT_ALERT.test(code) ? [f] : [];
+    });
+    expect(bad).toEqual([]);
+  });
+  it('공용 입구는 두 길(문자 · 메일)을 각각 시도하고 한 길 실패가 다른 길을 막지 않는다', () => {
+    const src = read(join(SCRIPTS, R14_OWNER));
+    expect(src).toMatch(/send_sms && sms_ok=1\nsend_mail && mail_ok=1/);
+    expect(src).toMatch(/curl -K -/); // 비밀번호는 명령 인자에 싣지 않는다
+    expect(src).not.toMatch(/--user\s/);
+  });
+  it('경보를 내는 스크립트는 공용 입구를 부른다', () => {
+    for (const f of ['backup.sh', 'backup-monitor.sh', 'monitor-dist.sh']) expect(read(join(SCRIPTS, f)), f).toMatch(/OPS_ALERT=.*ops-alert/);
+    expect(read(join(SCRIPTS, 'agent-watchdog', 'agent-watchdog.js'))).toMatch(/OPS_ALERT: '\/usr\/local\/bin\/ops-alert'/);
+  });
+});

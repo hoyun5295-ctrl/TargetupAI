@@ -19,6 +19,8 @@ BACKUP_DIR="/home/administrator/backups"
 PG_CONTAINER="targetup-postgres"; PG_USER="targetup"; PG_DB="targetup"
 MYSQL_CONTAINER="targetup-mysql"; MYSQL_USER="smsuser"; MYSQL_DB="smsdb"
 # MYSQL_BACKUP_PASS, ALERT_CMD 는 ${BACKUP_DIR}/.env 에서 로드 (chmod 600)
+# 경보 = 공용 입구 ops-alert(문자 + 메일 · ROOT-LEDGER R14) · ALERT_CMD 를 여기서 직접 부르지 않는다
+OPS_ALERT="${OPS_ALERT:-/usr/local/bin/ops-alert}"
 
 # 오프사이트 (59, backup 키). 암호문이라 59 접근자가 봐도 평문 노출 0.
 REMOTE_HOST="58.227.193.59"; REMOTE_PORT="27616"; REMOTE_USER="backup"
@@ -37,7 +39,8 @@ log(){ echo "[$(date '+%F %T')] $*"; }
 alert(){
   log "!! 백업 실패: $1"
   echo "$(date '+%F %T') FAILED: $1" > "${BACKUP_DIR}/LAST_FAILED"
-  [[ -n "${ALERT_CMD:-}" ]] && ALERT_MSG="한줄로 백업 실패: $1" bash -c "${ALERT_CMD}" || true
+  if [[ -x "${OPS_ALERT}" ]]; then "${OPS_ALERT}" "한줄로 백업 실패" "$1" || true
+  else log "!! 공용 경보(${OPS_ALERT}) 없음 — 경보를 못 보냄"; fi
 }
 trap 'alert "라인 ${LINENO} 중단(직전 명령 실패)"' ERR
 

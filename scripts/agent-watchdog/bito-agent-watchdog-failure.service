@@ -1,0 +1,8 @@
+# 감시 회차가 실패(예외 · 시간 초과)하면 경보 — 감시가 조용히 죽지 않게 · 설치: /etc/systemd/system/
+[Unit]
+Description=Bito agent watchdog failure alert
+
+[Service]
+Type=oneshot
+ExecStart=/bin/bash /opt/bito-watchdog/failure-alert.sh
+TimeoutStartSec=60

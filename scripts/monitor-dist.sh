@@ -5,35 +5,27 @@
 # 목적: 어떤 이유로든 dist/index.html이 사라진 경우 즉시 자동 복구 + Harold님 SMS 알림.
 #       atomic deploy(safe-build.sh)가 1차 안전망이지만, 만약을 대비한 2차 안전망.
 #
-# 알림: 자동 복구 시도 결과를 010-5295-8517로 SMS (LMS) 발송.
-#       backend localhost:3000/api/internal/dist-alert 호출 (사전테스트 라인 사용).
+# 알림: 자동 복구 시도 결과를 공용 경보 ops-alert(문자 + 메일)로 보낸다(★2026-10-25 R14).
 #
-# 설치 (서버 administrator 계정):
+# 설치 (서버 administrator 계정 · git 이 실행 비트를 안 실어 bash 로 부른다):
 #   crontab -e
-#   * * * * * /home/administrator/targetup-app/scripts/monitor-dist.sh >> /home/administrator/dist-monitor.log 2>&1
+#   * * * * * /bin/bash /home/administrator/targetup-app/scripts/monitor-dist.sh >> /home/administrator/dist-monitor.log 2>&1
 # ============================================================
 
 set -uo pipefail
 
 REPO_DIR="/home/administrator/targetup-app"
 TS="$(date '+%Y-%m-%d %H:%M:%S')"
-ALERT_URL="http://127.0.0.1:3000/api/internal/dist-alert"
+# 경보 = 공용 입구 ops-alert(문자 + 메일 · ROOT-LEDGER R14). 예전 localhost:3000 한 길은 백엔드가 죽으면 같이 죽었다.
+OPS_ALERT="${OPS_ALERT:-/usr/local/bin/ops-alert}"
 
-# === 알림 발송 함수 (backend localhost SMS API 호출) ===
+# === 알림 발송 함수 ===
 send_admin_alert() {
   local msg="$1"
-  # JSON escape (개행 → \\n, " → \\")
-  local escaped=$(printf '%s' "$msg" | sed 's/\\/\\\\/g; s/"/\\"/g; s/$/\\n/' | tr -d '\n' | sed 's/\\n$//')
-  local response
-  response=$(curl -X POST "$ALERT_URL" \
-    -H "Content-Type: application/json" \
-    -d "{\"message\":\"${escaped}\"}" \
-    --max-time 10 \
-    --silent --output /dev/null --write-out "%{http_code}" 2>/dev/null) || response="000"
-  if [ "$response" = "200" ]; then
-    echo "[$TS] 📱 SMS 알림 발송 완료 (HTTP 200)"
+  if [ -x "$OPS_ALERT" ]; then
+    "$OPS_ALERT" "한줄로 화면 배포 감시" "$msg" && echo "[$TS] 알림 발송 완료" || echo "[$TS] 알림 발송 실패(문자 · 메일 둘 다)"
   else
-    echo "[$TS] ⚠️  SMS 알림 발송 실패 (HTTP $response — backend down?)"
+    echo "[$TS] 공용 경보($OPS_ALERT) 없음 — 알림을 못 보냄"
   fi
 }
 

@@ -751,8 +751,8 @@ ${brandAccent
   let guarded = guardMessage(parsed);
   if (guarded.lost) {
     parsed = await generateOnce(EFFICACY_RETRY_HINT);
-    const again = guardMessage(parsed);
-    guarded = { ...again, dropped: [...guarded.dropped, ...again.dropped] };
+    // 안내 수 = 쓰는 결과에서 뺀 곳만(버린 1회차는 세지 않는다 · 1025 렌더 검사 = 16곳으로 부풀었다)
+    guarded = guardMessage(parsed);
   }
   const effDropped = guarded.dropped;
   const { title, body } = guarded.flat;

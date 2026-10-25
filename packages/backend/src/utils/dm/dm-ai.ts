@@ -528,14 +528,14 @@ ${schema}`;
     return { draft, headlinesLost: hadHeadlines && (!Array.isArray(d.headlines) || d.headlines.length === 0) && dropped > 0, dropped };
   };
   let r = await runOnce('');
-  let droppedTotal = r.dropped;
   // 헤드라인 후보가 효능으로 다 빠졌을 때만 이 섹션을 한 번 다시 만든다(묶음 안 · 고객 차감 0)
-  if (r.headlinesLost) { r = await runOnce(EFFICACY_RETRY_HINT); droppedTotal += r.dropped; }
+  // 안내 수 = 쓰는 결과에서 뺀 곳만(버린 1회차는 세지 않는다 · 1025 렌더 검사 = 인앱이 두 회차를 합쳐 부풀었다 · 같은 규칙)
+  if (r.headlinesLost) r = await runOnce(EFFICACY_RETRY_HINT);
   if (r.headlinesLost && section.type !== 'cta') {
     // 그래도 없으면 직접 채울 자리(버튼 섹션은 기본 라벨 「자세히 보기」가 남는다 · 말없이 빈 헤드라인 0)
     (r.draft as any).headlines = [{ style: 'direct', text: HEADLINE_PLACEHOLDER }];
   }
-  r.draft.efficacyDropped = droppedTotal;
+  r.draft.efficacyDropped = r.dropped;
   return r.draft;
 }
 

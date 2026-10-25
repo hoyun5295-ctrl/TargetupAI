@@ -1,0 +1,14 @@
+# 비토 에이전트 감시 — 한 회차(timer 가 1분마다) · 설계 docs/2026-10-25-agent-watchdog-design.md §5-A
+# 설치: /etc/systemd/system/bito-agent-watchdog.service
+# 잠금 = 손으로 돌리는 reset 과 회차가 같은 상태 파일을 동시에 쓰지 않게(reset 도 같은 잠금으로 부른다)
+[Unit]
+Description=Bito agent watchdog (one pass)
+OnFailure=bito-agent-watchdog-failure.service
+After=systemd-journald.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/flock -w 30 /run/bito-watchdog.lock /usr/bin/node /opt/bito-watchdog/agent-watchdog.js run
+# 판정 · 저장 · 끊기 · 경보(경보 한 통 최대 45초)까지 한 회차 상한
+TimeoutStartSec=110
+Nice=-5
