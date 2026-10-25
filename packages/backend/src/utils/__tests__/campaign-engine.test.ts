@@ -13,7 +13,7 @@ vi.mock('../../services/ai', () => ({ callAIWithFallback: vi.fn(async () => '') 
 
 import { assembleDmCampaign, type EngineMaterials } from '../campaign-engine';
 import { outreachEngineDeps, applyDmFeatures } from '../sales-outreach-produce';
-import { quoteQuickCampaign, quickMaterialsEnabled, normalizeQuickMaterials, materialTextFromEvents } from '../campaign-quick';
+import { quoteBuildMaterials, quickMaterialsEnabled, normalizeQuickMaterials, materialTextFromEvents } from '../campaign-quick';
 import type { Section } from '../dm/dm-section-registry';
 
 const read = (rel: string) => readFileSync(resolve(__dirname, '..', '..', rel), 'utf-8');
@@ -147,13 +147,14 @@ describe('조립 엔진 골든(아웃리치 deps + 고정 생성 픽스처)', ()
 });
 
 describe('재료 입구 순수 함수', () => {
+  // ★ 1025 #104 — 견적 = v1 한 곳(quoteBuildMaterials · 옛 v0 quoteQuickCampaign 삭제)
   it('견적 — 텍스트 있으면 생성만 · 텍스트 비고 이미지 있으면 판독 + 생성 · 신규 키 0', () => {
-    const a = quoteQuickCampaign({ imageCount: 3, hasText: true });
+    const a = quoteBuildMaterials({ channel: 'dm', imageCount: 3, textChars: 40 });
     expect(a.parts.map((p) => p.key)).toEqual(['dm-ai-generate']);
-    const b = quoteQuickCampaign({ imageCount: 2, hasText: false });
+    const b = quoteBuildMaterials({ channel: 'dm', imageCount: 2, textChars: 0 });
     expect(b.parts.map((p) => p.key)).toEqual(['event-image-extract', 'dm-ai-generate']);
     expect(b.total).toBe(b.parts[0].cost + b.parts[1].cost);
-    expect(quoteQuickCampaign({ imageCount: 0, hasText: false }).parts.map((p) => p.key)).toEqual(['dm-ai-generate']);
+    expect(quoteBuildMaterials({ channel: 'dm', imageCount: 0, textChars: 0 }).parts.map((p) => p.key)).toEqual(['dm-ai-generate']);
   });
   it('ENV 회사 목록 — 비면 전 회사 · 있으면 목록 회사만', () => {
     expect(quickMaterialsEnabled('c1', '')).toBe(true);
@@ -285,17 +286,15 @@ describe('소스 계약 — 엔진 격리 · 라우트 분기', () => {
     expect(engine).not.toMatch(/config\/database|await query\(|callAIWithFallback|https?\.request\(|[^a-zA-Z.]fetch\(/);
     expect(engine).toContain('export async function assembleDmCampaign');
   });
-  it('one-shot-generate materials 분기 — 몰 상품 자동 첨부 0 · structure 문자열 0 · 402 분기 · 노출 스위치', () => {
-    const route = code('routes/dm.ts');
-    const start = route.indexOf("if (req.body?.materials && typeof req.body.materials === 'object') {");
-    expect(start).toBeGreaterThan(-1);
-    const block = route.slice(start, route.indexOf("if (!prompt && !scenario && !eventText) {", start));
-    expect(block).toContain('generateDmFromMaterials(');
-    expect(block).toContain('quickMaterialsEnabled(companyId)');
-    expect(block).not.toContain('attachMallImagesToProductCarousels');
-    expect(block).not.toContain('structure:');
-    expect(block).toContain("code: 'INSUFFICIENT_CREDIT'");
-    expect(block).toContain('draft_id: r.draftId');
+  it('one-shot-generate materials = v1 만 · 옛 v0 재료 요청은 400 MATERIALS_INVALID(1025 #104 · 무과금 옛 갈래 0)', () => {
+    for (const rel of ['routes/dm.ts', 'routes/email.ts']) {
+      const route = code(rel);
+      const iV1 = route.indexOf('if (req.body?.materials && isBuildMaterialsV1(req.body.materials)) {');
+      const iOld = route.indexOf("if (req.body?.materials) return res.status(400).json({ success: false, error: '화면을 새로 고친 뒤 다시 만들어 주세요.', code: 'MATERIALS_INVALID' });");
+      expect(iV1).toBeGreaterThan(-1);
+      expect(iOld).toBeGreaterThan(iV1);
+      expect(route).not.toContain('FromMaterials(');
+    }
   });
   it('재료 입구 라우트 — 요금제 게이트는 dm 라우터 것과 같은 함수 · 텍스트 비었을 때만 판독 · 견적에 plan_locked·enabled', () => {
     const ec = code('routes/event-campaigns.ts');
@@ -303,34 +302,24 @@ describe('소스 계약 — 엔진 격리 · 라우트 분기', () => {
     // ★ v3 read=0(업로드 전용)이면 판독하지 않는다 · 기본 1 = 현행
     expect(ec).toContain('if (wantRead && !eventText && files.length) {');
     expect(ec).toContain("const wantRead = String(req.body?.read ?? '1') !== '0';");
+    // ★ 1025 #104 — GET 견적 = 노출 스위치만(옛 v0 견적 · 요금제 잠금 · 상한 삭제) · 견적은 POST v1 한 곳
     expect(ec).toContain("eventCampaignRouter.get('/materials/quote'");
-    expect(ec).toContain('plan_locked: await quickPlanLocked(companyId)');
-    expect(ec).toContain('enabled: quickMaterialsEnabled(companyId)');
+    expect(ec).toContain('return res.json({ success: true, auto_build_enabled: aiAutoBuildEnabled(companyId) });');
+    expect(ec).toContain("eventCampaignRouter.post('/materials/quote'");
     const quick = code('utils/campaign-quick.ts');
-    // 크레딧 = 기존 키 · 멱등 quick:{draftId} · 초안 행 뒤 차감 · 신규 키 0
-    expect(quick).toContain("idempotencyKey: `quick:${draftId}`");
-    expect(quick.indexOf('await createDm(')).toBeLessThan(quick.indexOf('await deductCreditSafe('));
-    expect(quick).toContain("licensedQuote: m.origin === 'user' ? m.event_text : ''");
+    // 크레딧 = 기존 키 · 초안 행 뒤 엄격 차감(못 걷으면 행 회수) · 신규 키 0
+    expect(quick).not.toContain("idempotencyKey: `quick:${draftId}`");
+    expect(quick).not.toContain('deductCreditSafe(');
     expect(quick).toContain("approval_status: 'draft'");
     // ★ 2026-09-15 예외 1개 = 카탈로그 DM 채널 생성 키 'catalog-dm-build'(Harold 확정 10 · FEATURE-AI-AUTO-BUILD §2-8 예외). 그 밖 신규 키는 여전히 0.
     expect(quick).not.toMatch(/getCreditCost\('(?!dm-ai-generate'|event-image-extract'|email-ai-generate'|catalog-dm-build')/);
     expect(quick).toContain("getCreditCost('catalog-dm-build')");
   });
-  it('★ S6 이메일 합류 — 같은 재료 · 브랜드 이메일 시안 함수 재사용 · 재료 없으면 기존 경로(분기 뒤에 옛 검사가 그대로) · 402 · 몰 첨부 0', () => {
+  it('★ S6 이메일 합류 — 재료 = v1 조립(옛 v0 generateEmailFromMaterials 삭제) · 재료 없으면 기존 경로(분기 뒤에 옛 검사가 그대로)', () => {
     const quick = code('utils/campaign-quick.ts');
-    expect(quick).toContain('export async function generateEmailFromMaterials(');
-    expect(quick).toContain('await produceOutreachBrandEmail({');
-    expect(quick).toContain("getCreditCost('email-ai-generate')");
+    expect(quick).not.toContain('export async function generateEmailFromMaterials(');
+    expect(quick).toContain("parts.push({ key: 'email-ai-generate', label: '이메일 생성', cost: costOf('email-ai-generate') });");
     const email = code('routes/email.ts');
-    const start = email.indexOf("if (req.body?.materials && typeof req.body.materials === 'object') {");
-    expect(start).toBeGreaterThan(-1);
-    const end = email.indexOf("if (!prompt && !scenario && !eventText) {", start);
-    expect(end).toBeGreaterThan(start);
-    const block = email.slice(start, end);
-    expect(block).toContain('generateEmailFromMaterials(');
-    expect(block).toContain("code: 'INSUFFICIENT_CREDIT'");
-    expect(block).not.toContain('attachMallImagesToProductCarousels');
-    expect(block).not.toContain('structure:');
     // 무후퇴 — 옛 경로 문자열이 그대로 남아 있다
     // ★ 2026-10-10 한 줄 이메일 — 혜택 답이 있을 때만 요청 글에 [혜택] 줄(genPrompt = prompt · 답 없으면 같은 글)
     expect(email).toContain('const result = await generateEmailSections({ companyId: auth.companyId, userId: auth.userId, prompt: genPrompt, scenario, isAd, eventText });');

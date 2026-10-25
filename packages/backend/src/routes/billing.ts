@@ -1,3 +1,4 @@
+import { uploadErrorText } from '../utils/http-error';
 import { Router, Request, Response } from 'express';
 import nodemailer from 'nodemailer';
 import { authenticate, requireSuperAdmin } from '../middlewares/auth';
@@ -1484,10 +1485,11 @@ router.put('/confirmations/:id/issue-date', async (req: Request, res: Response) 
 
 // POST /biz-registration-extract — 사업자등록증 이미지 → 사업자 정보 자동입력 (정산 탭 모달)
 //   크레딧 미차감(슈퍼관리자 내부 기능). CT = utils/biz-registration-extract.ts.
+const BIZREG_UPLOAD_LIMITS = { fileSize: 10 * 1024 * 1024, files: 1 };
 const bizRegUpload = multer({
   storage: multer.memoryStorage(),
   // ★ 2026-07-30 PDF 허용(서수란 접수 — 고객사 보관 파일 90%가 PDF) + 스캔 PDF 대비 10MB로 상향
-  limits: { fileSize: 10 * 1024 * 1024, files: 1 },
+  limits: BIZREG_UPLOAD_LIMITS,
   fileFilter: (_req, file, cb) => {
     const mime = (file.mimetype || '').toLowerCase();
     if (['image/jpeg', 'image/png', 'image/webp', 'application/pdf'].includes(mime)) cb(null, true);
@@ -1498,9 +1500,7 @@ const bizRegUpload = multer({
 const sniffPdf = (buf: Buffer): boolean => buf.length >= 4 && buf.toString('latin1', 0, 4) === '%PDF';
 router.post('/biz-registration-extract', (req: Request, res: Response) => {
   bizRegUpload.single('image')(req as any, res as any, async (uploadErr: any) => {
-    if (uploadErr) {
-      return res.status(400).json({ success: false, error: uploadErr.message || '파일 업로드 오류' });
-    }
+    if (uploadErr) return res.status(400).json({ success: false, error: uploadErrorText(uploadErr, BIZREG_UPLOAD_LIMITS) });   // ★ 2026-10-25 Z5
     try {
       const file = (req as any).file as Express.Multer.File | undefined;
       if (!file) return res.status(400).json({ success: false, error: '사업자등록증 이미지 또는 PDF를 올려주세요.' });
@@ -1677,7 +1677,7 @@ router.delete('/080-numbers/:id', async (req: Request, res: Response) => {
 //   검산 실패도 결과와 함께 돌려준다(valid=false) — 화면이 사유를 보여주고 [반영]만 막는다.
 router.post('/kt-statement/parse', (req: Request, res: Response) => {
   bizRegUpload.single('image')(req as any, res as any, async (uploadErr: any) => {
-    if (uploadErr) return res.status(400).json({ success: false, error: uploadErr.message || '파일 업로드 오류' });
+    if (uploadErr) return res.status(400).json({ success: false, error: uploadErrorText(uploadErr, BIZREG_UPLOAD_LIMITS) });   // ★ 2026-10-25 Z5
     try {
       const file = (req as any).file as Express.Multer.File | undefined;
       if (!file) return res.status(400).json({ success: false, error: 'KT 명세서 PDF 또는 이미지를 올려주세요.' });

@@ -12,7 +12,7 @@
  *
  * app_source 값:
  *   - 'hanjul' : 한줄로 서비스 (메인 hanjul.ai + 고객사관리자 app.hanjul.ai)
- *   - 'flyer'  : 전단AI 서비스
+ *   - (2026-10-25 'flyer' 폐기 — 전단AI는 hanjulDM 별도 프로젝트 · 로그인 입구 400 거절)
  *   - 'super'  : 슈퍼관리자 (sys.hanjullo.com)
  *
  * ★ 2026-08-18 접속 인계(takeover) — Harold님 지시:
@@ -444,9 +444,17 @@ export function newSessionId(): string {
 
 /**
  * appSource 값 정규화 — 유효한 값만 통과, 나머지는 기본값 'hanjul'.
+ * ★ 2026-10-25: 'flyer'(전단AI)는 hanjulDM 별도 프로젝트로 완전 분리 — 이 서비스의 값이 아니다.
+ *   들어오면 'hanjul' 로 바꾸지 않는다(같은 계정의 한줄로 세션을 조용히 밀어내는 경로) — 로그인 입구가 isRetiredAppSource 로 400 거절.
  */
 export function normalizeAppSource(raw: any): string {
-  const ALLOWED = new Set(['hanjul', 'flyer', 'super']);
+  const ALLOWED = new Set(['hanjul', 'super']);
   if (typeof raw === 'string' && ALLOWED.has(raw)) return raw;
   return 'hanjul';
 }
+
+/** 분리돼 나간 서비스의 appSource — 로그인 입구에서 거절한다 */
+export function isRetiredAppSource(raw: any): boolean {
+  return raw === 'flyer';
+}
+export const RETIRED_APP_SOURCE_MESSAGE = '한줄전단은 hanjul-flyer.kr 에서 로그인해 주세요.';

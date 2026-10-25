@@ -8,6 +8,13 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 const aiMock = vi.fn(async (_p: any): Promise<string> => '{}');
+// ★ 1025 D1 = A: 정산은 이 시험의 주제가 아니다. 크레딧제 미적용 회사로 둔다(원장 실패 = 503 은 ai-credit 시험이 고정).
+vi.mock('../ai-credit', async (orig) => ({
+  ...(await orig<any>()),
+  checkCredit: async () => undefined,
+  runChargedAi: async (o: any) => ({ result: await o.run(), charged: false }),
+  settleCreditAfterSuccess: async () => 'not_applicable',
+}));
 vi.mock('../../services/ai', () => ({ callAIWithFallback: (p: any) => aiMock(p), getSeasonContext: () => ({ month: 10, season: '가을', keywords: [] }) }));
 vi.mock('../../config/database', () => ({ query: vi.fn(async () => ({ rows: [] })), pool: { connect: vi.fn() }, default: { connect: vi.fn(), query: vi.fn() } }));
 vi.mock('../copy-prompt-composer', () => ({ composeCopyBrain: async () => ({ promptSuffix: '', examples: [] }) }));

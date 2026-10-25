@@ -19,6 +19,7 @@
  *   - callAIWithFallback의 cache_control ephemeral과 결합 (D167) → 90% 비용 절감
  */
 
+import { UserFacingError } from '../utils/http-error';
 import Anthropic from '@anthropic-ai/sdk';
 import { query } from '../config/database';
 import { getCompanyCosts, AI_MODELS, claudeRequestShape, resolveMaxTokens } from '../config/defaults';
@@ -60,7 +61,7 @@ import {
   InsightResult,
 } from '../utils/performance-insight';
 // ★ D227+ 종량제: 풀분석 묶음 차감 — 진입점 1회, sub-agent는 묶음 컨텍스트로 0(과차감 방지)
-import { checkCredit, deductCreditOutcome, isChargedByKey } from '../utils/ai-credit';
+import { checkCredit, deductCreditOutcome, isChargedByKey, CreditSettleError } from '../utils/ai-credit';
 import { applyBenefitToBody, buildTargetHintPromptBlock, normalizeTargetHint } from '../utils/autosend-policy';
 import { currentUserId } from '../utils/request-context';
 import { runInCreditBundle } from '../utils/ai-credit-context';
@@ -385,7 +386,8 @@ export interface OrchestrateCreditOpts {
   chargeOnlyWithTarget?: boolean;
   /** ★ 2026-10-24 요청 키(자동 마케팅 미리보기) — 원장에 이 키가 있으면 잔액 확인을 건너뛰고 차감은 duplicate(0). 없으면 지금 그대로 */
   idempotencyKey?: string;
-  /** ★ 2026-10-24 차감 때 잔액이 모자라면 결과를 내주지 않고 던진다(호출부 402). 없으면 지금 그대로(결과는 막지 않는다) */
+  /** ★ 2026-10-24 차감 때 잔액이 모자라면 결과를 내주지 않고 던진다(호출부 402).
+   *  ★ 2026-10-25 성공 뒤 차감 한 규칙(D1 A) — 이제 늘 그렇다(값과 무관 · 옛 호출부 호환으로만 남긴다) · 원장 쓰기 실패 = CreditSettleError(503). */
   throwOnInsufficient?: boolean;
 }
 
@@ -404,11 +406,13 @@ async function chargeOrchestrate(ctx: AgentContext, creditOpts: OrchestrateCredi
   return runInCreditBundle(async () => {
     const result = await run();
     if ((result.messages?.length ?? 0) > 0 && (!creditOpts?.chargeOnlyWithTarget || (result.target?.count ?? 0) > 0)) {
-      await deductCreditOutcome({
+      // ★ 2026-10-25 성공 뒤 차감 한 규칙(D1 A) — 동시 소진 402 · 원장 쓰기 실패 503 · 결과 안 줌(옛: 옵션이 없으면 둘 다 무과금 결과)
+      const outcome = await deductCreditOutcome({
         companyId: ctx.companyId, cost, source, createdBy: ctx.userId || currentUserId() || null,
         ...(key ? { idempotencyKey: key } : {}),
-        ...(creditOpts?.throwOnInsufficient ? { throwOnInsufficient: true } : {}),
+        throwOnInsufficient: true,
       });
+      if (outcome === 'failed') throw new CreditSettleError();
     }
     return result;
   });
@@ -481,7 +485,7 @@ async function _orchestrateImpl(ctx: AgentContext): Promise<OrchestratorResult> 
       // ⛔ 5R 정정: 제안 수도 발송과 같은 매장 범위로 센다. 종전엔 미리보기만 범위를 적용하고 제안 수·통지 수는
       //   회사 전체였다 — 담당자가 본 수와 실제 나가는 수가 갈렸다.
       const scope = await resolveOperatorStoreScope(ctx.companyId, ctx.userId || null);
-      if (scope.blocked) throw new Error('담당 매장이 지정되지 않아 발송 대상을 정할 수 없습니다.');
+      if (scope.blocked) throw new UserFacingError(409, 'STORE_SCOPE_MISSING', '담당 매장이 지정되지 않아 발송 대상을 정할 수 없어요. 관리자에게 매장 권한을 받아 주세요.');
       const measured = await countOperatorAudienceFor({
         companyId: ctx.companyId,
         segmentKey: rawSegmentKey,
@@ -515,7 +519,7 @@ async function _orchestrateImpl(ctx: AgentContext): Promise<OrchestratorResult> 
       if (isUnresolvedEmptyTarget(targetResult)) throw new HubTargetEmptyError();
       // ★ 2026-10-18 승인 발송(preview-recipients)과 같은 매장 범위로 센다 · 미배정 담당자 = 대상 0 + 사유
       const hubScope = await resolveHubStoreScope(ctx.companyId, ctx.userId, ctx.userType);
-      if (hubScope.blocked) throw new Error('담당 매장이 지정되지 않아 발송 대상을 정할 수 없습니다.');
+      if (hubScope.blocked) throw new UserFacingError(409, 'STORE_SCOPE_MISSING', '담당 매장이 지정되지 않아 발송 대상을 정할 수 없어요. 관리자에게 매장 권한을 받아 주세요.');
       const cnt = await countFilteredCustomers(ctx.companyId, targetResult.filters, ctx.userId || '', hubScope.storeFilter, hubScope.baseParams);
       actual = cnt.count;
     }

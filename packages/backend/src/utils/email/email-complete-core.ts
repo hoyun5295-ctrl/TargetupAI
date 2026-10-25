@@ -7,7 +7,7 @@
  * 잔액 부족(checkCredit)은 던진다(호출부 402). 캠페인 조회(소유 범위)는 호출부가 한다.
  */
 import { getCreditCost } from '../ai-credit-calc';
-import { checkCredit, deductCreditSafe } from '../ai-credit';
+import { checkCredit, settleCreditAfterSuccess } from '../ai-credit';
 import { isEmailCampaignCompleted } from './email-completion';
 import { emailSmtpBlocker, emailContentBlocker } from './email-send-gate';
 
@@ -43,7 +43,9 @@ export async function completeEmailCampaignCore(input: {
 
   const cost = getCreditCost('email-campaign-complete'); // 50
   await checkCredit(companyId, cost);
-  await deductCreditSafe({
+  // ★ 2026-10-25 성공 뒤 차감 한 규칙(D1 A · 원장 Z1) — 완성 여부의 진실은 원장 행이다. 옛: 차감이 끝내 실패해도 「완성」으로 답해
+  //   화면은 완성인데 발송은 「완성 저장 후」로 막혔다. 이제 동시 소진 = 402 · 원장 쓰기 실패 = 503(완성 안 됨 · 다시 누르면 같은 키).
+  await settleCreditAfterSuccess({
     companyId, cost, source: 'email-campaign-complete',
     createdBy: input.userId, idempotencyKey: `email-campaign-complete:${campaign.id}`,
   });

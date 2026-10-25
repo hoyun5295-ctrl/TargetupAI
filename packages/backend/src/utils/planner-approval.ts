@@ -13,6 +13,7 @@
  *   - 취소·실적·환불은 한 트랜잭션(월 원장 행 잠금) — 실행 선점 · 행사 승인과 같은 잠금 순서(월 원장 → companies).
  *   - 마이너스·자동충전 금지 — source를 OPERATION_SOURCES에 넣지 않는 것이 그 장치다(ai-credit-calc).
  */
+import { sendSystemAlert } from './system-alert';
 import { pool, query } from '../config/database';
 import { getCreditCost, kstMonthTag } from './ai-credit-calc';
 import { notifyOperatorAdmins } from './continuous-operator';
@@ -25,6 +26,9 @@ import { countMonthWork } from './planner-touchpoint';
 export const PLANNER_AGENCY_SOURCE = 'planner-monthly-agency';
 
 /** 그 달 대행 크레딧(= 승인 시 1회 차감분). */
+/** ★ 2026-10-25 원장 #52 — 환불해야 하는데 처리하지 못했을 때 담당자 문자 · 응답 문장(옛: 「전액 환불합니다」 판정 문장을 그대로 썼다) */
+const REFUND_MISS_TEXT = '대행료 환불을 처리하지 못했어요. 운영팀이 확인해 처리해 드릴게요.';
+
 export function getAgencyCredits(): number {
   return getCreditCost(PLANNER_AGENCY_SOURCE);
 }
@@ -134,6 +138,7 @@ export async function cancelMonthlyApproval(
   //   잠금 순서는 승인 원장 → companies로 통일한다(선점 경로와 같은 순서라 교착이 없다).
   let verdict = { refundable: false, amount: 0, reason: '환불할 대행료 차감 내역이 없습니다.' };
   let refunded = false;
+  let refundMissed = false;   // ★ 1025 #52 환불해야 하는데 못 했다(판정 문장 대신 실제 결과를 말한다)
   let work = { executed: 0 };
   const client = await pool.connect();
   try {
@@ -186,14 +191,15 @@ export async function cancelMonthlyApproval(
     // 실적 집계 — 같은 트랜잭션·잠금 안이라 그 사이 새 선점이 끼어들 수 없다. 판정 한 벌 = countMonthWork(★ 2026-10-04 §6-9).
     work = await countMonthWork(companyId, planMonth, client);
 
+    // ★ 2026-10-25 원장 #52 — 환불 금액 = 원 차감 원장 행의 금액(옛: 월 원장 agency_credits = 승인 때마다 그때 단가로 덮어쓴 값 · 다르면 환불 거절)
     const paidRes = await client.query(
-      `SELECT 1 FROM ai_credit_transactions
+      `SELECT amount FROM ai_credit_transactions
         WHERE idempotency_key = $1 AND company_id = $2::uuid AND type = 'deduct' AND source = $3 LIMIT 1`,
       [idempotencyKey, companyId, PLANNER_AGENCY_SOURCE],
     );
     verdict = evaluateCancelRefund({
       agencyPaid: paidRes.rows.length > 0,
-      agencyCredits: Number(lock.rows[0].agency_credits) || 0,
+      agencyCredits: Number(paidRes.rows[0]?.amount) || 0,
       executedCount: work.executed,
     });
 
@@ -210,6 +216,7 @@ export async function cancelMonthlyApproval(
       }, new Date());
       refunded = res.refunded;
       if (!refunded && res.skipReason !== 'duplicate') {
+        refundMissed = true;
         console.error(`[planner-approval][REFUND-MISS] company=${companyId} month=${planMonth} reason=${res.skipReason || 'unknown'}`);
       }
     }
@@ -221,14 +228,28 @@ export async function cancelMonthlyApproval(
     client.release();
   }
 
+  // ★ 2026-10-25 원장 #51 — 월 대행 취소도 그 달 행사의 모바일 DM 을 멈춘다(행사 취소와 같은 함수 · 옛: 멈추지 않아 취소한 달의 DM 주소가 열린 채)
+  let dmStuck = 0;
+  if (!alreadyCancelled) {
+    try {
+      const evs = await query(`SELECT id FROM planner_events WHERE company_id = $1::uuid AND plan_month = $2`, [companyId, planMonth]);
+      const { stopPlannerEventDms } = await import('./planner-approve');
+      dmStuck = (await stopPlannerEventDms(companyId, evs.rows.map((r: any) => String(r.id)))).length;
+    } catch (e: any) {
+      console.warn('[planner-approval] 월 취소 뒤 DM 멈춤 실패:', e?.message || e);
+      dmStuck = -1;
+    }
+  }
   try {
     if (!alreadyCancelled || refunded) await notifyOperatorAdmins(
       { adminPhoneNumbers: [], backupAdminPhone: null, companyId, createdBy: userId },
       '[마케팅 플래너] 월간 대행 취소',
       [
         `${Number(planMonth.slice(5, 7))}월 마케팅 대행이 취소됐습니다.`,
-        refunded ? `대행료 ${verdict.amount.toLocaleString()} 크레딧을 환불했습니다.` : verdict.reason,
+        // ★ 2026-10-25 원장 #52 — 환불을 못 했으면 판정 문장(「전액 환불합니다」)이 아니라 실제 결과를 말한다
+        refunded ? `대행료 ${verdict.amount.toLocaleString()} 크레딧을 환불했습니다.` : refundMissed ? REFUND_MISS_TEXT : verdict.reason,
         '남은 발송 계획은 모두 중지됐습니다.',
+        ...(dmStuck !== 0 ? [`모바일 DM ${dmStuck > 0 ? `${dmStuck}개는` : '일부를'} 멈추지 못해 주소가 아직 열려 있어요. 모바일 DM 목록에서 확인해 멈춰 주세요.`] : []),
       ].join('\n'),
       { noticeHeader: PLANNER_NOTICE_HEADER },
     );
@@ -236,8 +257,11 @@ export async function cancelMonthlyApproval(
     console.warn('[planner-approval] 취소 통지 실패:', e?.message || e);
   }
 
+  if (refundMissed) {
+    void sendSystemAlert({ dedupKey: `planner-refund-miss:${companyId}:${planMonth}`, message: `마케팅 플래너 ${planMonth} 월간 대행 취소 환불 실패 — 회사 ${companyId} · ${verdict.amount}크레딧 · 서버 로그 [planner-approval][REFUND-MISS] 확인 후 수동 환불 필요` });
+  }
   console.log(`[planner-approval] 월간 취소 ${companyId} ${planMonth} — 환불 ${refunded ? verdict.amount : 0} · 발송 시도 ${work.executed}`);
-  return { status: 'cancelled', refunded, refundAmount: refunded ? verdict.amount : 0, reason: verdict.reason };
+  return { status: 'cancelled', refunded, refundAmount: refunded ? verdict.amount : 0, reason: refundMissed ? REFUND_MISS_TEXT : verdict.reason };
 }
 
 // ── 결재 링크 착지 ───────────────────────────────────────────────────

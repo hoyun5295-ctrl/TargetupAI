@@ -25,6 +25,7 @@
  *   B4 사용 직전 토큰 갱신(X) · 실비 채널 월 상한(fail-closed · 불변 23).
  */
 
+import { notifySnsTargetsFailed } from './sns-failure-notice';
 import { randomUUID } from 'crypto';
 import { promises as fsp } from 'fs';
 import { query } from '../config/database';
@@ -105,9 +106,10 @@ async function ownedUpdate(targetId: string, lockToken: string, setSql: string, 
 }
 
 async function failTarget(targetId: string, lockToken: string, code: string, message: string): Promise<void> {
-  await ownedUpdate(targetId, lockToken,
+  const owned = await ownedUpdate(targetId, lockToken,
     `status = 'failed', last_error_code = $3, last_error = $4, lock_token = NULL, next_attempt_at = NULL`,
     [code, message]);
+  if (owned) await notifySnsTargetsFailed([targetId]);   // ★ 1025 #96 담당자에게(내가 끝낸 행만)
 }
 
 /** post 상태는 자식 집계 파생(§3-5) — 자식이 바뀔 때마다 같은 함수로 다시 계산한다. */
@@ -291,10 +293,11 @@ async function handleTarget(row: any): Promise<void> {
       console.warn(`[SNS publish] ${row.platform} target ${targetId} 컨테이너 ${st.raw} (${attempts}/${CONTAINER_FAIL_LIMIT}) ${st.detail || ''}`);
       if (attempts >= CONTAINER_FAIL_LIMIT) {
         // D3 — 같은 영상이 같은 이유로 계속 거부된다. 새 컨테이너를 더 만들지 않는다.
-        await ownedUpdate(targetId, lockToken,
+        const owned = await ownedUpdate(targetId, lockToken,
           `status = 'failed', container_status = $3, attempt_count = attempt_count + 1,
            last_error_code = $4, last_error = $5, lock_token = NULL, next_attempt_at = NULL`,
           [String(st.raw).slice(0, 20), SNS_ERROR_CODES.CONTAINER_FAILED, text]);
+        if (owned) await notifySnsTargetsFailed([targetId]);   // ★ 1025 #96
         return;
       }
       // 되살릴 수 없다 — 컨테이너를 버리고 다음 tick 에 다시 만든다. **키는 그대로다.**
@@ -372,10 +375,11 @@ async function tick(): Promise<void> {
         SET status = 'failed', last_error_code = $2,
             last_error = '예약 시각이 지나 올리지 않았습니다. 지금 올리기를 눌러 주세요.', updated_at = NOW()
       WHERE status = 'scheduled' AND scheduled_at < NOW() - ($1 || ' milliseconds')::interval
-      RETURNING post_id`,
+      RETURNING id, post_id`,
     [String(STALE_MS), SNS_ERROR_CODES.SCHEDULE_EXPIRED],
   );
   for (const r of stale.rows) await refreshPostStatus(r.post_id);
+  await notifySnsTargetsFailed(stale.rows.map((r: any) => String(r.id)));   // ★ 1025 #96 예약 시각이 지나 안 올린 게시도 담당자에게
 
   if (!armed) {
     const pending = await query(`SELECT COUNT(*)::int AS n FROM sns_post_targets WHERE status = 'scheduled' AND scheduled_at <= NOW()`);

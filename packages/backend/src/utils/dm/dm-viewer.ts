@@ -9,7 +9,7 @@
  * 폰트: Pretendard CDN + 시스템 폰트 fallback 체인.
  */
 import { inlineImage, publicImageUrl, youtubeEmbedUrl } from './dm-viewer-utils';
-import { renderSections, COUNTDOWN_SCRIPT, escapeHtml, safeUrl, safeColor, DM_TAB_PILL } from './dm-section-renderer';
+import { renderSections, COUNTDOWN_SCRIPT, escapeHtml, safeUrl, safeColor, DM_TAB_PILL, dmDdayText } from './dm-section-renderer';
 import { renderDmTokensCss, renderDmBaseCss, renderDmDesign3Css, renderDmVariantCss } from './dm-tokens';
 // ★ 2026-07-16 자가 호스팅 웹폰트 — 발행 서체를 우리 서버 @font-face로 로드(구글 CDN 미로드 궁서 폴백 정정)
 import { selfHostPreloadUrls } from '../design-core/fonts';
@@ -38,9 +38,7 @@ function renderHeader(template: string, data: any, rawStoreName: string): string
     case 'banner':
       return ''; // 풀 배너는 첫 페이지 이미지가 대체하므로 헤더 없음
     case 'countdown':
-      const eventDate = d.eventDate ? new Date(d.eventDate) : null;
-      const dday = eventDate ? Math.ceil((eventDate.getTime() - Date.now()) / 86400000) : 0;
-      const ddayText = dday > 0 ? `D-${dday}` : dday === 0 ? 'D-Day' : `D+${Math.abs(dday)}`;
+      const ddayText = dmDdayText(d.eventDate);   // ★ 2026-10-25 원장 #81 — 렌더러와 같은 한국 날짜 셈
       return `<div style="background:linear-gradient(135deg,#667eea 0%,#764ba2 100%);color:#fff;padding:24px 20px;text-align:center">
         <div style="font-size:36px;font-weight:900;letter-spacing:2px">${ddayText}</div>
         ${d.eventTitle ? `<div style="font-size:14px;opacity:0.9;margin-top:8px;font-weight:500">${escapeHtml(d.eventTitle)}</div>` : ''}

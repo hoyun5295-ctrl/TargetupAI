@@ -167,24 +167,39 @@ export default function QuickCampaignResultPage() {
 
   // ── 같은 재료로 다른 채널 1클릭(견적 = 서버 · 작은 차감이라 확인 창 없이 버튼에 금액) ──
   const otherChannel: MakeChannel = channel === 'dm' ? 'email' : 'dm';
-  const otherCost = AI_GENERATE_COSTS[otherChannel === 'email' ? 'email-ai-generate' : 'dm-ai-generate'];
   const [makingOther, setMakingOther] = useState(false);
   // 남아 있는 재료 초안이 이 완성본의 것인가(카탈로그 ↔ 카탈로그 재료 · 그 밖 ↔ 그 밖). 다르면 그 재료로 다시 만들기·다른 채널 만들기를 권하지 않는다.
   const draftFits = draftOwned && !!draft && (draft.channel === 'catalog') === isCatalog;
   // 다른 채널 1클릭 = 사진·글 재료가 있을 때만(카탈로그 재료 = 쪽 사진뿐이라 이메일·일반 DM 을 만들 수 없다 · 서버 견적이 재료 부족으로 돌려준다)
   const canMakeOther = draftFits && !isCatalog;
   const makeChannel = channel === 'email' ? 'email' : isCatalog ? 'catalog' : 'dm';
-  const regenCost = AI_GENERATE_COSTS[channel === 'email' ? 'email-ai-generate' : isCatalog ? 'catalog-dm-build' : 'dm-ai-generate'];
+  // ★ 2026-10-25 원장 #103 — 버튼 · 확인 창 금액 = 서버 견적 합계(옛: 화면 단가표의 생성비만 · 판독 캐시가 지나면 판독비가 더 붙었다)
+  const quoteOf = useCallback(async (ch: 'dm' | 'email' | 'catalog'): Promise<number> => {
+    if (!draft) throw new Error('재료를 찾지 못했어요.');
+    const q = await fetch('/api/event-campaigns/materials/quote', { method: 'POST', headers: authJson(), body: JSON.stringify({ materials: buildMaterialsPayload({ ...draft, channel: ch }, newAttemptToken(), 0) }) });
+    const qd = await q.json().catch(() => ({}));
+    if (!q.ok || qd?.success === false) throw new Error(buildErrorMessage(qd?.code, qd?.error, '견적을 계산하지 못했어요.'));
+    if (qd?.gate && qd.gate.ok === false) throw new Error('재료가 부족해 만들 수 없어요. 만들기 화면에서 재료를 더 넣어 주세요.');
+    return Number(qd.total) || 0;
+  }, [draft]);
+  const [otherCost, setOtherCost] = useState<number | null>(null);
+  const [regenCost, setRegenCost] = useState<number | null>(null);
+  useEffect(() => {
+    let alive = true;
+    setOtherCost(null); setRegenCost(null);
+    if (canMakeOther) quoteOf(otherChannel).then((t) => { if (alive) setOtherCost(t); }).catch(() => {});
+    if (draftFits) quoteOf(makeChannel).then((t) => { if (alive) setRegenCost(t); }).catch(() => {});
+    return () => { alive = false; };
+  }, [canMakeOther, draftFits, otherChannel, makeChannel, quoteOf]);
   const makeOther = useCallback(async () => {
-    if (!draft || !canMakeOther || makingOther) return;
+    if (!draft || !canMakeOther || makingOther || otherCost === null) return;
     setMakingOther(true);
     try {
       const base = { ...draft, channel: otherChannel as 'dm' | 'email' };
-      const q = await fetch('/api/event-campaigns/materials/quote', { method: 'POST', headers: authJson(), body: JSON.stringify({ materials: buildMaterialsPayload(base, newAttemptToken(), 0) }) });
-      const qd = await q.json().catch(() => ({}));
-      if (!q.ok || qd?.success === false) throw new Error(buildErrorMessage(qd?.code, qd?.error, '견적을 계산하지 못했어요.'));
-      if (qd?.gate && qd.gate.ok === false) throw new Error('재료가 부족해 만들 수 없어요. 만들기 화면에서 재료를 더 넣어 주세요.');
-      const materials = buildMaterialsPayload(base, newAttemptToken(), Number(qd.total) || 0);
+      // 누르는 순간 다시 견적 · 버튼에 보인 금액과 다르면 만들지 않고 새 금액을 보여 준다(보인 금액 = 걷는 금액)
+      const total = await quoteOf(otherChannel);
+      if (total !== otherCost) { setOtherCost(total); toast.warning(`금액이 ${total}크레딧으로 바뀌었어요. 확인하고 다시 눌러 주세요.`); return; }
+      const materials = buildMaterialsPayload(base, newAttemptToken(), total);
       const url = otherChannel === 'email' ? '/api/email/ai/generate-sections' : '/api/dm/ai/one-shot-generate';
       const r = await fetch(url, { method: 'POST', headers: authJson(), body: JSON.stringify({ materials }) });
       const d = await r.json().catch(() => ({}));
@@ -198,7 +213,7 @@ export default function QuickCampaignResultPage() {
     } finally {
       setMakingOther(false);
     }
-  }, [draft, canMakeOther, makingOther, otherChannel, channel, draftId, setParams, toast]);
+  }, [draft, canMakeOther, makingOther, otherCost, quoteOf, otherChannel, channel, draftId, setParams, toast]);
 
   // ★ 2026-10-10 한 줄로 만든 결과 = 같은 한 줄 + 답 + 고른 상품으로 다시 만든다(새 시도 토큰 · 그 채널 생성비 1회 · 지금 초안은 남는다)
   const [regenLine, setRegenLine] = useState(false);
@@ -369,11 +384,12 @@ export default function QuickCampaignResultPage() {
               </button>
             )}
             {!primaryLoading && draftFits && (
-              <button type="button" onClick={() => setConfirm({
+              <button type="button" disabled={regenCost === null} onClick={() => setConfirm({
                 mode: 'warning', title: '같은 재료로 다시 만들까요?',
                 description: `지금 고친 내용 대신 새 초안을 만들어요(${regenCost} 크레딧). 지금 초안은 목록에 그대로 남아요.`,
-                confirmLabel: '다시 만들기', onConfirm: () => navigate(`/quick-campaign?channel=${makeChannel}&regen=1`),
-              })} className="flex items-center gap-2 text-[12.5px] text-slate-500 hover:text-slate-900"><RotateCcw className="w-4 h-4" />다시 만들기 · {regenCost} 크레딧</button>
+                // 확인한 금액을 만들기 화면에 넘긴다 · 그 화면 견적이 다르면 바로 만들지 않고 새 금액으로 다시 묻는다
+                confirmLabel: '다시 만들기', onConfirm: () => navigate(`/quick-campaign?channel=${makeChannel}&regen=1&expected=${regenCost}`),
+              })} className="flex items-center gap-2 text-[12.5px] text-slate-500 hover:text-slate-900 disabled:opacity-50"><RotateCcw className="w-4 h-4" />다시 만들기 · {regenCost === null ? '금액 확인 중' : `${regenCost} 크레딧`}</button>
             )}
             <div className="text-[11px] text-slate-400">{channel !== 'dm' ? '이메일은 [자세히 편집]에서 고쳐요' : isCatalog ? '쪽을 바꾸거나 빼려면 [자세히 편집]에서' : '여기서 고친 내용은 바로 저장돼요'}</div>
           </div>
@@ -437,9 +453,9 @@ export default function QuickCampaignResultPage() {
                 <div className="text-[15px] font-bold text-slate-900">{canMakeOther ? `같은 재료로 ${otherChannel === 'email' ? '이메일' : '모바일 DM'}도 만들 수 있어요` : `${otherChannel === 'email' ? '이메일' : '모바일 DM'}도 만들 수 있어요`}</div>
                 <div className="text-[12.5px] text-slate-500 mt-1.5">{canMakeOther ? `${channel === 'dm' ? 'DM' : '이메일'}에 넣은 사진·문구·상품을 그대로 씁니다. 다시 넣을 것은 없어요.` : '만들기 화면에서 사진과 글을 넣으면 바로 만들어요.'}</div>
                 {canMakeOther ? (
-                  <button type="button" onClick={() => { void makeOther(); }} disabled={makingOther} className={`${MK_BTN_AI} h-[42px] px-5 text-[13.5px] mt-4`}>
+                  <button type="button" onClick={() => { void makeOther(); }} disabled={makingOther || otherCost === null} className={`${MK_BTN_AI} h-[42px] px-5 text-[13.5px] mt-4`}>
                     {makingOther ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}{otherChannel === 'email' ? '이메일도 만들기' : '모바일 DM도 만들기'}
-                    <span className="text-[11px] font-bold bg-slate-300 rounded-md px-1.5 py-0.5">{otherCost} 크레딧</span>
+                    <span className="text-[11px] font-bold bg-slate-300 rounded-md px-1.5 py-0.5">{otherCost === null ? '금액 확인 중' : `${otherCost} 크레딧`}</span>
                   </button>
                 ) : (
                   <button type="button" onClick={() => navigate(`/quick-campaign?channel=${otherChannel}`)} className={`${MK_BTN_GHOST} mt-4`}>만들기 화면에서 {otherChannel === 'email' ? '이메일' : 'DM'} 만들기</button>
@@ -477,7 +493,7 @@ export default function QuickCampaignResultPage() {
         dm={dmId && dmReady ? { id: dmId, title, heroSub, brand: storeName || null } : null}
         email={email ? { id: email.id, name: email.name, subject: email.subject, isAd: email.isAd, completed: !!email.completed, hasPlaceholder: email.hasPlaceholder } : null}
         beforeSend={async (c) => (c === 'dm' ? saveBarrier() : true)}
-        makeOther={canMakeOther ? { channel: otherChannel, label: `${otherChannel === 'email' ? '이메일' : 'DM'}도 만들기 · ${otherCost}`, busy: makingOther, run: () => { void makeOther(); } } : null}
+        makeOther={canMakeOther ? { channel: otherChannel, label: `${otherChannel === 'email' ? '이메일' : 'DM'}도 만들기 · ${otherCost === null ? '금액 확인 중' : otherCost}`, busy: makingOther, run: () => { void makeOther(); } } : null}
         onSent={() => navigate(channel === 'dm' ? '/dm-builder' : '/email-campaigns')}
         onOpenAdvancedDm={dmId ? () => navigate(`/dm-builder?id=${encodeURIComponent(dmId)}&send=1`) : undefined}
       />

@@ -16,8 +16,9 @@ describe('여정 통계 이벤트', () => {
     expect((STANDARD_EVENT_NAMES as readonly string[])).toContain('purchase');
     expect((STANDARD_EVENT_NAMES as readonly string[])).not.toContain('order');
     expect(src).not.toContain("ce.event_name = 'order'");
-    // 고친 두 곳 + 원래부터 purchase를 쓰던 여정 요약 쿼리 1곳
-    expect((src.match(/ce\.event_name = 'purchase'/g) || []).length).toBe(3);
+    // 고친 두 곳 · ★ 2026-10-25 #13 — 대조군 비교는 목표 판정 한 곳(journey-goal-purchase · 그 안도 purchase)
+    expect((src.match(/ce\.event_name = 'purchase'/g) || []).length).toBe(2);
+    expect(src).toContain("${purchasedSinceEntrySql('e', 'j.company_id', `j.trigger_event = 'customer.created'`)} AS conv");
   });
 
   it('단계 클릭 수는 그 여정 회사의 이벤트만', () => {

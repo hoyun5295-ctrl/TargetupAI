@@ -72,7 +72,7 @@ import { getFatigueCap, getFatigueBlockedSet, recordFatigueSends } from '../util
 import { deduplicateByPhone } from '../utils/deduplicate';
 import { getUserTestContacts } from '../utils/test-contact-helper';
 import { validateScheduledAt, isInSendChangeLock, SEND_CHANGE_LOCK_MINUTES } from '../utils/campaign-validation';
-import { isWithinBrandSendWindow, parseSplitSetting, planSplitSchedule, splitSendTime, splitSpanError, resolveSplitFirstSend } from '../utils/send-time-util';
+import { isWithinBrandSendWindow, brandSendWindowError, parseSplitSetting, planSplitSchedule, splitSendTime, splitSpanError, resolveSplitFirstSend } from '../utils/send-time-util';
 import { countStagingFiltered, countStagingChecks, planIndividualCallbackExclusion, createDirectSendCampaign, effectiveUnsubFilter } from '../utils/direct-send-core';
 import { DirectSendError, loadedSendFailureMessage } from '../utils/direct-send-spec';
 import { findUneditedSendPlaceholder } from '../utils/send-placeholder-gate';
@@ -3661,7 +3661,7 @@ router.put('/:id/reschedule', async (req: Request, res: Response) => {
       return res.status(400).json({ success: false, code: 'NIGHT_AD_RESTRICTED', error: rsNightMsg });
     }
     if (['kakao', 'both', 'kakao_brand'].includes(String(rsCamp.send_channel || '')) && !isWithinBrandSendWindow(newScheduledAt)) {
-      return res.status(400).json({ success: false, code: 'BRAND_SEND_WINDOW', error: '브랜드메시지는 오전 8시부터 저녁 8시 50분 사이에만 발송할 수 있습니다. 발송 시각을 조정해주세요' });
+      return res.status(400).json({ success: false, code: 'BRAND_SEND_WINDOW', error: brandSendWindowError() });
     }
 
     // 15분 이내 체크

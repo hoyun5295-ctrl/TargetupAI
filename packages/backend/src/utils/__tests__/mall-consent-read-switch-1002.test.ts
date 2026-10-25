@@ -156,7 +156,8 @@ describe('consentJoinSql — 집계용(조인 형태) 조각', () => {
     expect(read('routes/companies.ts')).toContain('FROM customers${consent.join}');
     expect(read('routes/customers.ts')).toContain('uo ON uo.phone = c.phone${consent.join}');
     // ★ 2026-10-18 허브 제안의 회사 통계는 utils/hub-company-context.ts 로 원형 이동(AI 한줄로와 같이 쓴다) → ai.ts 3곳 + 그 파일 1곳
-    expect((read('routes/ai.ts').match(/FROM customers\$\{consentU\.join\}/g) || [])).toHaveLength(3);
+    // ★ 1025 #13 — 부르는 곳 없던 /recommend-next-campaign 삭제로 ai.ts 3 → 2
+    expect((read('routes/ai.ts').match(/FROM customers\$\{consentU\.join\}/g) || [])).toHaveLength(2);
     expect(read('utils/hub-company-context.ts')).toContain('FROM customers${consentU.join}');
     expect(read('utils/hub-company-context.ts')).toContain("const consentU = await viewerConsentJoin(companyId, viewer, '', 'customers.id');");
     // ★ 2026-10-04 플래너 문맥 통계는 문안 CT(planner-copy)로 옮겼다 — 실행부는 문안을 만들지 않는다.
@@ -166,7 +167,7 @@ describe('consentJoinSql — 집계용(조인 형태) 조각', () => {
     // FILTER 안에 행 단위 조각(소속 표를 행마다 찾는 식)을 넣은 집계가 없다: FILTER 를 쓰는 파일의 조각은 전부 조인 형태로 만든 것이다
     const ai = read('routes/ai.ts');
     const filterLines = ai.split(/\r?\n/).map((l, i) => ({ l, i })).filter(({ l }) => l.includes('FILTER (WHERE ${consentU.isTrue})'));
-    expect(filterLines).toHaveLength(3);
+    expect(filterLines).toHaveLength(2);
     for (const { i } of filterLines) {
       const above = ai.split(/\r?\n/).slice(Math.max(0, i - 8), i).join('\n');
       expect(above).toContain("const consentU = await viewerConsentJoin(companyId, req.user, '', 'customers.id');");

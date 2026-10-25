@@ -13,6 +13,7 @@
  *   - 'campaign-start' = AI 캠페인 발송 시작(존재 재확인 → 중복 확인 → 실행 행 생성) ↔ 초안 삭제(가드 → 삭제)
  *                        (Codex 4차 2R high · 같은 잠금이 S1-H07 동시 발송 중복 방지도 한 줄로 세운다)
  *   - 'cancel-obligation' = 취소 CT의 환불 의무 기록 ↔ 취소 환불 재시도 워커의 캠페인별 처리(Codex 4차 5R)
+ *   - 'dm-publish'     = DM 첫 발행의 발행비 판정 → 발행 → 정산(편집기 발행 문 ↔ 보내기 · ★ 2026-10-26 Codex 2R)
  */
 const _chains = new Map<string, Promise<void>>();
 
@@ -43,6 +44,14 @@ export function uuidLockKey(id: string): string {
  */
 export function withCancelObligationLock<T>(campaignId: string, fn: () => Promise<T>): Promise<T> {
   return withKeyedLock('cancel-obligation', uuidLockKey(campaignId), fn);
+}
+
+/**
+ * DM 발행비 판정 → 첫 발행 → 정산 직렬화(★ 2026-10-26 Codex 2R) — 다른 요청이 첫 발행을 정산하는 동안 그 주소를 「이미 발행」으로 보고
+ *   면제받았다가, 그 정산이 실패해 주소가 거둬지면 새 주소를 무료로 받던 창을 닫는다(편집기 발행 문 · 보내기 두 입구가 같은 잠금).
+ */
+export function withDmPublishLock<T>(dmId: string, fn: () => Promise<T>): Promise<T> {
+  return withKeyedLock('dm-publish', uuidLockKey(dmId), fn);
 }
 
 /** 캠페인 발송 시작 ↔ 초안 삭제 직렬화 */

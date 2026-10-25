@@ -14,9 +14,7 @@
  *   - 추천 결과는 사용자가 직접 검토 + 승인 후 발송 (AI 단독 발송 X)
  */
 
-import { extractJsonFromAiText } from './ai-json';
 import { query } from '../config/database';
-import { callAIWithFallback } from '../services/ai';
 import { aggregateCampaignPerformance, aggregateSmsCountsByCampaign } from './stats-aggregation';
 // (2026-07-30) 브랜드 SMSQ 합류 — 옛 카카오 IMC 집계 import 폐기
 import { computeRoasMetric } from './performance-roas-core';
@@ -119,27 +117,6 @@ export async function buildFunnelStats(companyId: string, days = 30): Promise<Fu
   };
 }
 
-export interface NextActionResult {
-  /** 한 줄 요약 ("주말 저녁 8시 VIP 재구매 캠페인 추천 — 평균 성공률 +14%") */
-  summary: string;
-  /** 추천 타겟 (자연어) */
-  recommendedAudience: string;
-  /** 추천 채널 */
-  recommendedChannel: 'SMS' | 'LMS' | 'MMS' | 'KAKAO';
-  /** 추천 발송 시점 (ISO datetime) */
-  recommendedTime: string;
-  /** 핵심 인사이트 3~5개 */
-  insights: string[];
-  /** 다음 마케팅 목표 (AI Operator orchestrate에 전달할 자연어 한 줄) */
-  suggestedObjective: string;
-  /** 추정 성과 (클릭률 / 전환율 / 매출) */
-  expectedClickRate: number;
-  expectedConversionRate: number;
-  expectedRevenue: number;
-  /** Opus 4.7 reasoning trace (Extended Thinking 활성 시) */
-  reasoning?: string;
-}
-
 // ════════════════════════════════════════════════════════════════════
 // Performance Snapshot 생성
 // ════════════════════════════════════════════════════════════════════
@@ -235,109 +212,6 @@ export async function buildPerformanceSnapshot(companyId: string): Promise<Perfo
 // ════════════════════════════════════════════════════════════════════
 // AI 호출 — Opus 4.7 (AI Operator 영역, 모델 분리 룰 정합)
 // ════════════════════════════════════════════════════════════════════
-
-export async function recommendNextAction(
-  companyId: string,
-  snapshot: PerformanceSnapshot,
-  companyInfo: { company_name?: string; brand_name?: string; business_type?: string; brand_tone?: string }
-): Promise<NextActionResult> {
-  const brandName = companyInfo.brand_name || companyInfo.company_name || '브랜드';
-  const businessType = companyInfo.business_type || '기타';
-
-  const system = `당신은 CRM 마케팅 데이터 분석 전문가입니다.
-회사의 최근 30일 캠페인 성과 + 고객 데이터를 분석하여 다음 캠페인을 추천합니다.
-
-영구 원칙:
-- 타겟 매칭 0건 시 자동완화 절대 금지. 사용자에게 조건 재입력 안내만 제시할 것.
-- 추천 시점은 한국 표준시(KST) 기준 08:00~21:00 사이만 제안할 것.
-- 추천 결과는 사용자가 직접 검토 + 승인 후 발송. AI 단독 발송 X.
-
-JSON 형식으로만 응답하세요.`;
-
-  const userMessage = `## 회사 정보
-- 회사명: ${brandName}
-- 업종: ${businessType}
-- 브랜드 톤: ${companyInfo.brand_tone || '친근함'}
-
-## 최근 30일 캠페인 성과
-- 발송 캠페인 수: ${snapshot.totalCampaigns}개
-- 총 발송 건수: ${snapshot.totalSent.toLocaleString()}건
-- 성공 건수: ${snapshot.totalSuccess.toLocaleString()}건 (성공률 ${(snapshot.successRate * 100).toFixed(1)}%)
-- 채널별:
-${snapshot.byChannel.map((c) => `  · ${c.channel}: ${c.sent.toLocaleString()}건 (성공률 ${(c.successRate * 100).toFixed(1)}%)`).join('\n')}
-- 시간대별 (상위 5):
-${snapshot.byHour.sort((a, b) => b.sent - a.sent).slice(0, 5).map((h) => `  · ${h.hour}시: ${h.sent.toLocaleString()}건 (성공률 ${(h.successRate * 100).toFixed(1)}%)`).join('\n')}
-
-## 자사몰 CDP 데이터 (있을 시)
-- 30일 추정 매출: ${snapshot.estimatedRevenue.toLocaleString()}원
-- 30일 신규 고객: ${snapshot.newCustomers30d.toLocaleString()}명
-- 30일 활성 고객 (이벤트 발생): ${snapshot.activeCustomers30d.toLocaleString()}명
-
-## 요청
-위 데이터를 분석해 다음 캠페인을 추천해주세요:
-1. 한 줄 요약 (예: "주말 저녁 8시 VIP 재구매 캠페인 추천: 평균 성공률 +14% 기대")
-2. 추천 타겟 (자연어 한 줄, AI Operator orchestrate에 입력 가능한 형식)
-3. 추천 채널 (SMS / LMS / MMS / KAKAO 중 하나)
-4. 추천 발송 시점 (다음 7일 내 KST 08~21시 1개)
-5. 핵심 인사이트 3~5개 (데이터 기반, 구체 수치 포함)
-6. 다음 마케팅 목표 자연어 한 줄 (AI Operator 자연어 입력칸에 넣을 형식)
-7. 추정 성과 (클릭률 0.01~0.10, 전환율 0.001~0.05, 매출 원화)
-
-## 출력 형식 (JSON만 응답)
-{
-  "summary": "한 줄 요약",
-  "recommendedAudience": "자연어 타겟 설명",
-  "recommendedChannel": "SMS|LMS|MMS|KAKAO",
-  "recommendedTime": "YYYY-MM-DDTHH:mm:00+09:00",
-  "insights": ["인사이트1", "인사이트2", ...],
-  "suggestedObjective": "다음 캠페인 마케팅 목표 자연어 한 줄",
-  "expectedClickRate": 0.04,
-  "expectedConversionRate": 0.012,
-  "expectedRevenue": 1500000
-}`;
-
-  try {
-    const text = await callAIWithFallback({
-      system,
-      userMessage,
-      maxTokens: 2048,
-      temperature: 0.3,
-      // ★ D209+ (Harold 명시 2026-05-22): Sonnet 4.6 전환 — 다음 캠페인 단순 추천 영역. 비용 80% 절감.
-      //   Phase D 통합: companyId + source 전달 → 회사별 월 한도 + cache + 통계 자동 활성.
-      model: 'sonnet',
-      companyId,
-      source: 'next-action-advisor',
-    });
-
-    // ★ 2026-09-30 WP4 — JSON 추출은 CT 하나(ai-json · 머리말 · 코드펜스 · 문자열 안 제어문자 복구). 옛 코드펜스만 벗기는 인라인은 모델이 앞에 한 줄만 붙여도 실패했다.
-    const parsed: any = extractJsonFromAiText(text);
-    void companyId; // 추후 회사별 운영 로그 추가 영역
-    return {
-      summary: String(parsed.summary || ''),
-      recommendedAudience: String(parsed.recommendedAudience || ''),
-      recommendedChannel: (['SMS', 'LMS', 'MMS', 'KAKAO'].includes(parsed.recommendedChannel) ? parsed.recommendedChannel : 'SMS') as NextActionResult['recommendedChannel'],
-      recommendedTime: String(parsed.recommendedTime || ''),
-      insights: Array.isArray(parsed.insights) ? parsed.insights.slice(0, 5).map(String) : [],
-      suggestedObjective: String(parsed.suggestedObjective || ''),
-      expectedClickRate: typeof parsed.expectedClickRate === 'number' ? parsed.expectedClickRate : 0.03,
-      expectedConversionRate: typeof parsed.expectedConversionRate === 'number' ? parsed.expectedConversionRate : 0.008,
-      expectedRevenue: typeof parsed.expectedRevenue === 'number' ? parsed.expectedRevenue : 0,
-    };
-  } catch (err) {
-    console.error('[NextActionAdvisor] AI 호출 실패:', err);
-    return {
-      summary: '캠페인 추천 생성에 실패했습니다. 잠시 후 다시 시도해주세요.',
-      recommendedAudience: '',
-      recommendedChannel: 'SMS',
-      recommendedTime: '',
-      insights: ['AI 응답 처리 중 오류가 발생했습니다.'],
-      suggestedObjective: '',
-      expectedClickRate: 0,
-      expectedConversionRate: 0,
-      expectedRevenue: 0,
-    };
-  }
-}
 
 // ════════════════════════════════════════════════════════════════════
 // ★ D213+ (2026-05-24) buildPerformanceSnapshotV2 신설

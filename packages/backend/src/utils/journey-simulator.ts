@@ -13,6 +13,7 @@
  *   cdp_customer_predictions.purchase_likelihood/click_score, companies.cost_per_sms/lms/mms/kakao.
  */
 
+import { UserFacingError } from './http-error';
 import { query } from '../config/database';
 import { resolveChargeUnitPrice } from './unit-price';
 import { getJourneyOwnerScopeSql } from './store-scope';
@@ -24,6 +25,8 @@ import {
   JOURNEY_COUNT_CAP,
 } from './journey-target-extractor';
 import { buildProjection, SegmentBreakdown, ProjectionStep } from './journey-simulator-core';
+import { backfillPerDayOf, entryCapExceeded } from './journey-step-limits';
+import { resolveCdpCursorEventName } from './journey-cdp-cursor';
 
 export interface JourneySimulationResult {
   journeyId: string;
@@ -50,10 +53,10 @@ export async function simulateJourney(
 ): Promise<JourneySimulationResult> {
   // 회사 격리 + 여정 조회
   const jRes = await query(
-    `SELECT id, trigger_event, trigger_filters FROM journeys WHERE id = $1::uuid AND company_id = $2::uuid`,
+    `SELECT id, trigger_event, trigger_filters, threshold_recipients_per_step FROM journeys WHERE id = $1::uuid AND company_id = $2::uuid`,
     [journeyId, companyId],
   );
-  if (jRes.rows.length === 0) throw new Error('여정 접근 권한이 없습니다 (회사 격리).');
+  if (jRes.rows.length === 0) throw new UserFacingError(404, 'JOURNEY_NOT_FOUND', '여정을 찾을 수 없어요.');
   const journey = jRes.rows[0];
 
   const stepsRes = await query(
@@ -98,7 +101,17 @@ export async function simulateJourney(
   const warnings: string[] = [];
   if (matched === 0) warnings.push('트리거 조건에 맞는 고객이 0명입니다. 활성화해도 즉시 보낼 대상이 없으니 조건을 확인해 주세요.');
   if (steps.length === 0) warnings.push('단계가 없어 보낼 메시지가 없습니다.');
-  if (capped) warnings.push(`대상이 ${JOURNEY_COUNT_CAP.toLocaleString()}명을 넘어 그만큼까지만 집계했습니다. 실제 발송 때는 전체가 대상입니다.`);
+  // ★ 2026-10-25 #12 — 진입 감시와 같은 판정(entryCapExceeded). 지금 인원이 첫 회차인 건 상시 대상만(사건형은 사건마다 들어온다).
+  const cap = journey.threshold_recipients_per_step != null ? Number(journey.threshold_recipients_per_step) : null;
+  const backfill = backfillPerDayOf(journey);
+  const firstRoundIsMatched = !resolveCdpCursorEventName(String(journey.trigger_event || ''));
+  if (firstRoundIsMatched && entryCapExceeded(cap, backfill, matched)) {
+    warnings.push(`지금 대상 ${matched.toLocaleString()}명이 한 번에 보낼 최대 인원(${cap!.toLocaleString()}명)을 넘어, 켜면 바로 멈춰요. 최대 인원을 늘리거나 하루 몫을 정해 주세요.`);
+  }
+  if (firstRoundIsMatched && backfill != null && matched > backfill) {
+    warnings.push(`하루에 ${backfill.toLocaleString()}명씩 나눠 들어와요. 예상 발송 · 비용은 모두 들어왔을 때 기준이에요.`);
+  }
+  if (capped) warnings.push(`대상이 ${JOURNEY_COUNT_CAP.toLocaleString()}명을 넘어 그만큼까지만 셌어요.`);
   if (projection.dataNote) warnings.push(projection.dataNote);
 
   return {

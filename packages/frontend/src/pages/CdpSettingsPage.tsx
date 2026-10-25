@@ -330,7 +330,7 @@ export default function CdpSettingsPage() {
       .map((e) => ({
         key: e.provider,
         name: e.displayName,
-        desc: '곧 출시 예정. 현재는 자체 호스팅(webhook) 방식으로 연동할 수 있습니다.',
+        desc: '지금은 자체 호스팅(webhook) 방식으로 연동할 수 있어요.',   // ★ 2026-10-25 원장 #101 같은 뿌리 — 출시 예정(로드맵) 문장 0
         available: e.status === 'available',
         modalKey: null,
       }));

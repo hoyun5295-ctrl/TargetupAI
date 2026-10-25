@@ -9,6 +9,7 @@
  * 반드시 loadCreditRow(FOR UPDATE) → dup 체크 순서를 지킨다.
  */
 
+import { UserFacingError } from './http-error';
 import {
   needsMonthlyReset,
   splitDeduction,
@@ -456,13 +457,13 @@ export interface AdjustOpts {
  *   FOR UPDATE로 행 잠근 뒤 계산(동시 조정 직렬화).
  */
 export async function adjustCreditWithClient(client: any, opts: AdjustOpts, now: Date): Promise<{ purchasedAfter: number }> {
-  if (!opts.amount || opts.amount <= 0) throw new Error('금액은 1 이상이어야 합니다.');
+  if (!opts.amount || opts.amount <= 0) throw new UserFacingError(400, 'AMOUNT_INVALID', '금액은 1 이상이어야 해요.');
   await client.query('BEGIN');
 
   const locked = await loadCreditRow(client, opts.companyId, true);
   if (!locked) {
     await client.query('ROLLBACK');
-    throw new Error('회사를 찾을 수 없습니다.');
+    throw new UserFacingError(404, 'COMPANY_NOT_FOUND', '회사를 찾을 수 없어요.');
   }
 
   // ★ 멱등: 키가 오면 이미 처리된 지급/조정인지 확인(FOR UPDATE 뒤 = 더블클릭 직렬화). 키 없으면 기존 동작.
@@ -470,7 +471,7 @@ export async function adjustCreditWithClient(client: any, opts: AdjustOpts, now:
     const dup = await client.query(`SELECT 1 FROM ai_credit_transactions WHERE idempotency_key = $1 LIMIT 1`, [opts.idempotencyKey]);
     if (dup.rows.length > 0) {
       await client.query('ROLLBACK');
-      throw new Error('이미 처리된 요청입니다.');
+      throw new UserFacingError(409, 'ALREADY_PROCESSED', '이미 처리된 요청이에요.');
     }
   }
 
@@ -480,7 +481,7 @@ export async function adjustCreditWithClient(client: any, opts: AdjustOpts, now:
   const purchasedAfter = purchased + delta;
   if (purchasedAfter < 0) {
     await client.query('ROLLBACK');
-    throw new Error(`구매 크레딧이 부족합니다 (보유 ${purchased.toLocaleString()}).`);
+    throw new UserFacingError(402, 'INSUFFICIENT_PURCHASED', `구매 크레딧이 부족합니다 (보유 ${purchased.toLocaleString()}).`);
   }
 
   await client.query(

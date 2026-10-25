@@ -27,6 +27,11 @@ export type ValidationItem = {
   message: string;
   fix_suggestion?: string;
   /**
+   * ★ 2026-10-25 화면이 알아보는 고정 키(문장은 표시용 · 판정 = 키). 옛: 화면이 문장 글자(정규식)로 알아봐
+   *   문장을 다듬자 「버튼 주소 없음 → [넣기]」 · 「꼬리 블록 없음 → 그대로 보낼 수 있어요」가 조용히 꺼졌다.
+   */
+  code?: 'CTA_URL_EMPTY' | 'FOOTER_MISSING';
+  /**
    * 사용자가 자기 책임으로 넘기고 발행할 수 있는 치명인가 (★ 2026-07-28 서수란 접수).
    *
    * 완성 슬라이드 이미지만 올린 DM은 footer 섹션이 없어 required_info 치명에 항상 걸리는데,
@@ -96,9 +101,9 @@ export function validateLinks(sections: Section[]): ValidationItem[] {
     if (s.type === 'cta' && Array.isArray(p.buttons)) {
       p.buttons.forEach((b: any, i: number) => {
         if (!b.url || !b.url.trim()) {
-          out.push({ area: 'link', severity: 'fatal', section_id: s.id, message: `CTA 버튼 ${i + 1}번의 URL이 비어있어요.`, fix_suggestion: '연결할 페이지 URL을 입력해 주세요.' });
+          out.push({ area: 'link', severity: 'fatal', code: 'CTA_URL_EMPTY', section_id: s.id, message: `버튼 ${i + 1}번의 연결 주소가 비어 있어요.`, fix_suggestion: '연결할 페이지 주소를 넣어 주세요.' });
         } else if (!isSafeUrl(b.url)) {
-          out.push({ area: 'link', severity: 'recommend', section_id: s.id, message: `CTA 버튼 ${i + 1}번 URL(${b.url}) 형식이 유효하지 않아요.`, fix_suggestion: 'http:// 또는 https://로 시작하는 URL을 사용해 주세요.' });
+          out.push({ area: 'link', severity: 'recommend', section_id: s.id, message: `버튼 ${i + 1}번 연결 주소(${b.url}) 형식이 맞지 않아요.`, fix_suggestion: 'http:// 또는 https:// 로 시작하는 주소를 넣어 주세요.' });
         }
       });
     }
@@ -106,13 +111,13 @@ export function validateLinks(sections: Section[]): ValidationItem[] {
     // Coupon / PromoCode cta_url
     if (['coupon', 'promo_code', 'store_info'].includes(s.type)) {
       if (p.cta_url && !isSafeUrl(p.cta_url)) {
-        out.push({ area: 'link', severity: 'recommend', section_id: s.id, message: `연결 URL(${p.cta_url}) 형식이 유효하지 않아요.` });
+        out.push({ area: 'link', severity: 'recommend', section_id: s.id, message: `연결 주소(${p.cta_url}) 형식이 맞지 않아요.` });
       }
       if (p.map_url && !isSafeUrl(p.map_url)) {
-        out.push({ area: 'link', severity: 'recommend', section_id: s.id, message: '지도 링크 형식이 유효하지 않아요.' });
+        out.push({ area: 'link', severity: 'recommend', section_id: s.id, message: '지도 링크 형식이 맞지 않아요.' });
       }
       if (p.website && !isSafeUrl(p.website)) {
-        out.push({ area: 'link', severity: 'recommend', section_id: s.id, message: '홈페이지 URL 형식이 유효하지 않아요.' });
+        out.push({ area: 'link', severity: 'recommend', section_id: s.id, message: '홈페이지 주소 형식이 맞지 않아요.' });
       }
     }
 
@@ -120,7 +125,7 @@ export function validateLinks(sections: Section[]): ValidationItem[] {
     if (s.type === 'sns' && Array.isArray(p.channels)) {
       p.channels.forEach((ch: any, i: number) => {
         if (!ch.url || !isSafeUrl(ch.url)) {
-          out.push({ area: 'link', severity: 'recommend', section_id: s.id, message: `SNS 채널 ${i + 1}(${ch.type}) URL이 비어있거나 유효하지 않아요.` });
+          out.push({ area: 'link', severity: 'recommend', section_id: s.id, message: `SNS 채널 ${i + 1}번 주소가 비어 있거나 맞지 않아요.` });
         }
       });
     }
@@ -146,8 +151,8 @@ export function validatePersonalization(sections: Section[]): ValidationItem[] {
           area: 'personalization',
           severity: 'fatal',
           section_id: s.id,
-          message: `변수 ${v}에 fallback이 설정되지 않았어요.`,
-          fix_suggestion: '우측 패널 > 변수 fallback에서 기본값을 설정해 주세요.',
+          message: `개인화 칸 ${v}에 빈 값 대체 글이 없어요.`,
+          fix_suggestion: '오른쪽 칸 설정에서 값이 없을 때 보일 글을 넣어 주세요.',
         });
       }
     }
@@ -207,14 +212,14 @@ export function validateCountdown(sections: Section[]): ValidationItem[] {
 export function validateLayout(sections: Section[]): ValidationItem[] {
   const out: ValidationItem[] = [];
   if (sections.length === 0) {
-    out.push({ area: 'layout', severity: 'fatal', message: '섹션이 하나도 없어요. 최소 1개 이상 추가해 주세요.' });
+    out.push({ area: 'layout', severity: 'fatal', message: '블록이 하나도 없어요. 1개 이상 넣어 주세요.' });
     return out;
   }
   for (const s of sections) {
     if (!s.visible) continue;
     const len = countTextLen(s.props);
     if (len > MAX_TEXT_LEN_PER_SECTION) {
-      out.push({ area: 'layout', severity: 'recommend', section_id: s.id, message: `섹션 텍스트가 너무 길어요 (${len}자, 권장 ${MAX_TEXT_LEN_PER_SECTION}자 이내).`, fix_suggestion: 'AI 개선으로 문구를 축약할 수 있어요.' });
+      out.push({ area: 'layout', severity: 'recommend', section_id: s.id, message: `블록 글이 너무 길어요 (${len}자 · 권장 ${MAX_TEXT_LEN_PER_SECTION}자 이내).`, fix_suggestion: 'AI 다듬기로 글을 줄일 수 있어요.' });
     }
     const imgs = countImages(s.props);
     if (imgs > MAX_IMAGES_PER_SECTION) {
@@ -233,8 +238,8 @@ export function validateStyle(sections: Section[], brandKit?: DmBrandKit): Valid
       out.push({
         area: 'style',
         severity: 'recommend',
-        message: `브랜드 primary 색(${primary})과 흰 배경 간 대비가 낮아요 (WCAG AA 미달, ${ratio.toFixed(2)}:1).`,
-        fix_suggestion: '더 진한 브랜드 컬러로 조정하거나, CTA는 어두운 배경 위에 사용해 주세요.',
+        message: `브랜드 대표 색(${primary})이 흰 바탕에서 잘 안 보여요 (대비 ${ratio.toFixed(2)}:1 · 권장 4.5:1 이상).`,
+        fix_suggestion: '더 진한 대표 색으로 바꾸거나, 버튼은 어두운 바탕 위에 두어 주세요.',
       });
     }
   }
@@ -273,12 +278,12 @@ export function validateRequiredInfo(sections: Section[]): ValidationItem[] {
   //   (완성 슬라이드 이미지만 올린 DM은 footer가 구조적으로 없어 여기에 항상 걸린다)
   //   무시하면 누가 언제 무엇을 넘겼는지 dm_pages.validation_result에 기록된다 — 기록 없는 우회는 두지 않는다.
   if (!footer) {
-    out.push({ area: 'required_info', severity: 'fatal', overridable: true, message: 'Footer 섹션이 없어요. 고객센터/수신거부 정보 노출 의무를 위해 필수예요.' });
+    out.push({ area: 'required_info', severity: 'fatal', overridable: true, code: 'FOOTER_MISSING', message: '꼬리 블록(고객센터 · 수신거부)이 없어요. 광고 DM에는 꼭 있어야 해요.' });
   } else {
     const p: any = footer.props;
     const hasCs = !!(p.cs_phone || p.cs_hours);
     if (!hasCs && !storeInfo) {
-      out.push({ area: 'required_info', severity: 'fatal', overridable: true, section_id: footer.id, message: '고객센터 정보가 없어요 (KISA 발송 가이드).', fix_suggestion: 'Footer의 고객센터 전화 또는 Store Info 섹션을 추가해 주세요.' });
+      out.push({ area: 'required_info', severity: 'fatal', overridable: true, section_id: footer.id, message: '고객센터 정보가 없어요 (KISA 발송 가이드).', fix_suggestion: '꼬리 블록에 고객센터 전화를 넣거나 매장 정보 블록을 더해 주세요.' });
     }
     if (p.show_unsubscribe_link === false) {
       out.push({ area: 'required_info', severity: 'fatal', overridable: true, section_id: footer.id, message: '수신거부 링크가 숨김 상태예요. 광고성 메시지는 수신거부 링크 노출이 의무예요.' });
@@ -318,7 +323,7 @@ export function validateData(
           area: 'data',
           severity: 'recommend',
           section_id: s.id,
-          message: `변수 ${v}가 샘플 고객(VIP)에서 빈 값이에요. fallback이 필요해요.`,
+          message: `개인화 칸 ${v}가 예시 고객(VIP)에게 빈 값이에요. 빈 값 대체 글을 넣어 주세요.`,
         });
       }
     }

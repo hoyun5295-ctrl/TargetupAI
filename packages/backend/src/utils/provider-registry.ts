@@ -19,6 +19,7 @@
  *   - Webhook idempotency는 cdp_webhook_deliveries 표준 박힘
  */
 
+import { UserFacingError } from './http-error';
 // ════════════════════════════════════════════════════════════════════
 // 표준 타입
 // ════════════════════════════════════════════════════════════════════
@@ -188,19 +189,19 @@ export class SkeletonProviderAdapter implements IProviderAdapter {
   readonly available = false;
 
   buildAuthorizeUrl(): string {
-    throw new Error(`${this.displayName} 연동은 Phase 2에서 지원 예정입니다. 현재는 CDP API + SDK로 직접 호출 가능합니다.`);
+    throw new UserFacingError(400, 'PROVIDER_NOT_SUPPORTED', `${this.displayName} 자동 연동은 아직 쓸 수 없어요. 자사몰 연동(CDP) 직접 연결로 이어 주세요.`);
   }
   async exchangeCode(): Promise<ProviderTokenResponse> {
-    throw new Error(`${this.displayName} 연동은 Phase 2에서 지원 예정입니다.`);
+    throw new UserFacingError(400, 'PROVIDER_NOT_SUPPORTED', `${this.displayName} 자동 연동은 아직 쓸 수 없어요.`);
   }
   async refreshToken(): Promise<ProviderTokenResponse> {
-    throw new Error(`${this.displayName} 연동은 Phase 2에서 지원 예정입니다.`);
+    throw new UserFacingError(400, 'PROVIDER_NOT_SUPPORTED', `${this.displayName} 자동 연동은 아직 쓸 수 없어요.`);
   }
   verifyWebhookSignature(): boolean {
     return false;
   }
   async processWebhookEvent(): Promise<void> {
-    throw new Error(`${this.displayName} 연동은 Phase 2에서 지원 예정입니다.`);
+    throw new UserFacingError(400, 'PROVIDER_NOT_SUPPORTED', `${this.displayName} 자동 연동은 아직 쓸 수 없어요.`);
   }
   extractMallIdFromWebhook(): string | null {
     return null;

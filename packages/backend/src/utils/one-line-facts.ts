@@ -13,7 +13,6 @@
  */
 import { createHash } from 'crypto';
 import { companyListAllows } from './sns-constants';
-import { validateAnswer } from './content-interview';
 import { normalizeWooMallId } from './woocommerce-core';
 
 // ─────────────── 스위치 (비면 꺼짐 · `*` = 전 회사) ───────────────
@@ -503,15 +502,24 @@ export interface LineFacts {
 }
 
 /**
+ * (순수) 사람이 적은 혜택 칸 = null(「없음」) 또는 빈 글이 아닌 300자 이내 글.
+ * ★ 2026-10-25 R15 — 원스텝 인터뷰 CT(content-interview)를 지우며 쓰이던 규칙 하나만 옮겼다 · 한 줄 입구 세 곳(사실 · 단계 · AI 한줄로)이 이 함수 하나.
+ */
+export function isValidLineBenefit(b: unknown): boolean {
+  if (b === null) return true;
+  return typeof b === 'string' && b.trim().length > 0 && b.length <= 300;
+}
+
+/**
  * (순수) 요청 본문의 `facts` 검증. 없으면 undefined(= 묻지 않은 요청) · 형식이 틀리면 'invalid'.
- * 혜택 규칙은 원스텝 인터뷰와 같은 함수(`validateAnswer('benefit')` · 300자 · 빈 글 금지 · null = 없음).
+ * 혜택 규칙 = isValidLineBenefit(300자 · 빈 글 금지 · null = 없음).
  */
 export function sanitizeLineFacts(raw: unknown): LineFacts | undefined | 'invalid' {
   if (raw === undefined || raw === null) return undefined;
   if (typeof raw !== 'object' || Array.isArray(raw)) return 'invalid';
   const b = (raw as Record<string, unknown>).benefit;
   if (b === undefined) return 'invalid';
-  if (!validateAnswer('benefit', b).ok) return 'invalid';
+  if (!isValidLineBenefit(b)) return 'invalid';
   return { benefit: b === null ? null : String(b).trim() };
 }
 

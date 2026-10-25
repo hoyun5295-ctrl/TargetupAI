@@ -1,3 +1,4 @@
+import { roiMultiple } from '../../utils/roi-multiple';
 import React from 'react';
 import { TrendingUp, Users, MessageSquare, Target, Sparkles, AlertCircle, CheckCircle2, BarChart3, Database } from 'lucide-react';
 
@@ -39,7 +40,7 @@ export default function OperatorResultCard({ result, onApprove, onReject }: Oper
   const fmt = (n: any) => (typeof n === 'number' ? n.toLocaleString() : n ?? '-');
   const pct = (n: any) => (typeof n === 'number' ? `${(n * 100).toFixed(1)}%` : '-');
   // 투자 대비 배수 — 수만% ROI 비현실 표기 방지: 발송비 대비 예상 매출 절대 배수로 표시
-  const multiple = cost > 0 && revenue > 0 ? revenue / cost : 0;
+  const multiple = roiMultiple(revenue, cost) ?? 0;   // ★ 2026-10-25 원장 #32 — 제안 카드와 같은 함수
 
   return (
     <div className="rounded-2xl border border-white/10 bg-slate-900 p-5 space-y-4">

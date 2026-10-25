@@ -41,7 +41,7 @@ describe('하루 몫', () => {
     const block = src.slice(at, at + 4200);   // 1020 V.3 18: after branch sits between
     expect(block).toContain('await countEnteredTodayKst(j.id)');
     expect(block).toMatch(/if \(room <= 0\) return \{ matched: 0, enqueued: 0, skipped: 0 \};/);
-    expect(block).toMatch(/if \(backfill == null && cap != null && ids\.length > Number\(cap\)\)/);
+    expect(block).toContain('if (entryCapExceeded(cap, backfill, ids.length)) {');
   });
 });
 

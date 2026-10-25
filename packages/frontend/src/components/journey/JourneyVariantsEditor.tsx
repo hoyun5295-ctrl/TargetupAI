@@ -134,7 +134,7 @@ export default function JourneyVariantsEditor({
       );
       const data = await res.json();
       if (!res.ok || !data.success) {
-        throw new Error(data.error || 'variants 조회 실패');
+        throw new Error(data.error || 'A/B 문안을 불러오지 못했어요.');
       }
       const loaded: JourneyStepVariant[] = data.variants || [];
       setVariants(loaded);
@@ -178,7 +178,7 @@ export default function JourneyVariantsEditor({
       );
       const data = await res.json();
       if (!res.ok || !data.success) {
-        throw new Error(data.error || 'variant 생성 실패');
+        throw new Error(data.error || 'A/B 문안을 만들지 못했어요.');
       }
       await loadVariants();
       setActiveTab(newId);
@@ -208,9 +208,6 @@ export default function JourneyVariantsEditor({
             variantId: variant.variantId,
             messageTemplate: variant.messageTemplate,
             subject: variant.subject,
-            channel: variant.channel,
-            alimtalkTemplateCode: variant.alimtalkTemplateCode,
-            alimtalkVariableMap: variant.alimtalkVariableMap,
             trafficWeight: variant.trafficWeight,
           }),
         },
@@ -231,7 +228,7 @@ export default function JourneyVariantsEditor({
   const handleAutoGenerate = async () => {
     if (isReadOnly) return;
     if (!defaultMessageTemplate || defaultMessageTemplate.trim().length < 10) {
-      setError('base 메시지 영역 10자 이상 의무. step 본문 영역 먼저 작성해주세요.');
+      setError('이 칸 문안을 10자 이상 먼저 써 주세요.');
       return;
     }
     setAutoGenerating(true);
@@ -258,7 +255,7 @@ export default function JourneyVariantsEditor({
       setGeneratedVariants(data.variants || []);
       setGenerationWarnings(data.warnings || []);
     } catch (err: any) {
-      setError(err?.message || 'AI 자동 생성 영역 오류');
+      setError(err?.message || 'AI 문안을 만들지 못했어요.');
     } finally {
       setAutoGenerating(false);
     }
@@ -332,13 +329,15 @@ export default function JourneyVariantsEditor({
 
   const activeVariant = variants.find((v) => v.variantId === activeTab) || null;
   const trafficSum = variants.reduce((sum, v) => sum + v.trafficWeight, 0);
-  const channelOfActive = (activeVariant?.channel || defaultChannel) as ChannelType;
+  // ★ 2026-10-25 여정 구조체크 2차 #1 — A/B 문안 = 칸과 같은 채널의 다른 글(서버가 칸 채널로 저장 · 검사 · 발송이 같은 판을 본다).
+  //   옛: 변이마다 채널(알림톡 포함) · 템플릿 코드 · 변수 JSON 을 직접 넣게 해 검사한 적 없는 모양으로 나갔다.
+  const channelOfActive = defaultChannel;
 
   return (
     <div className="border-2 border-violet-200 rounded-xl bg-violet-50 p-4 space-y-3">
       <div className="flex items-center gap-2">
         <Beaker className="w-4 h-4 text-violet-700" />
-        <h4 className="text-sm font-semibold text-violet-800">A/B 테스트 (Bandit 자동 최적화)</h4>
+        <h4 className="text-sm font-semibold text-violet-800">A/B 문안 시험</h4>
         {onClose && (
           <button onClick={onClose} className="ml-auto p-1 hover:bg-slate-100 rounded" title="닫기">
             <X className="w-3.5 h-3.5 text-slate-500" />
@@ -347,9 +346,9 @@ export default function JourneyVariantsEditor({
       </div>
 
       <div className="text-[11px] text-violet-800 leading-relaxed">
-        Variant A/B/C에 다른 메시지를 작성하면 Thompson Sampling이 누적 발송 결과(클릭/전환)를 학습하여 자동으로 최선의 variant를 선택합니다.
+        A · B · C 안에 서로 다른 문안을 넣으면, 보낸 결과(클릭 · 구매)를 보고 반응이 좋은 안을 더 자주 보내요.
         <br />
-        <span className="text-amber-700">구체 혜택(%·원·쿠폰)은 AI가 임의로 만들지 않아요. 관리자가 직접 작성해주세요.</span>
+        <span className="text-amber-700">혜택(%·원·쿠폰)은 AI가 지어내지 않아요. 실제로 주는 혜택만 직접 넣어 주세요.</span>
       </div>
 
       {/* ★ D211+ Phase A 3번 (2026-05-23 Harold 명시): AI 자동 생성 영역 — 3 톤 (감성/실용/캐주얼) */}
@@ -357,7 +356,7 @@ export default function JourneyVariantsEditor({
         <div className="p-2.5 bg-gradient-to-br from-violet-50 to-fuchsia-50 border border-violet-200 rounded-lg">
           <div className="flex items-center gap-2 mb-1.5">
             <Sparkles className="w-3.5 h-3.5 text-violet-700" />
-            <span className="text-[11px] font-semibold text-violet-900">AI 자동 생성: 3 톤 다양화</span>
+            <span className="text-[11px] font-semibold text-violet-900">AI로 말투가 다른 안 3개 만들기</span>
             <button
               onClick={handleAutoGenerate}
               disabled={autoGenerating || !defaultMessageTemplate || defaultMessageTemplate.trim().length < 10}
@@ -371,7 +370,7 @@ export default function JourneyVariantsEditor({
             </button>
           </div>
           <div className="text-[10px] text-slate-500 leading-relaxed">
-            base 메시지 기준으로 감성적 · 실용적 · 캐주얼 3 톤 자동 생성 (혜택 영역 보존 / 인사·안내·마무리만 톤 다양화).
+            지금 문안을 바탕으로 감성적 · 실용적 · 캐주얼 세 말투를 만들어요. 혜택과 숫자는 그대로 두고 인사 · 안내 · 마무리만 바꿔요.
           </div>
 
           {/* 생성된 variant 목록 (회사 admin 명시 적용 의무) */}
@@ -397,7 +396,7 @@ export default function JourneyVariantsEditor({
                 </div>
               ))}
               <div className="text-[9px] text-amber-800 italic">
-                회사 admin 명시 검토 + "적용" 클릭 의무, 자동 저장 X.
+                읽어 보고 「적용」을 눌러야 저장돼요.
               </div>
             </div>
           )}
@@ -419,7 +418,7 @@ export default function JourneyVariantsEditor({
       {isReadOnly && (
         <div className="flex items-center gap-2 p-2 bg-amber-50 border border-amber-200 rounded text-[11px] text-amber-800">
           <Info className="w-3.5 h-3.5 flex-shrink-0" />
-          활성 여정의 variants는 수정 불가. 먼저 일시정지 후 수정해주세요.
+          켜진 여정의 A/B 문안은 고칠 수 없어요. 먼저 일시정지해 주세요.
         </div>
       )}
 
@@ -448,18 +447,18 @@ export default function JourneyVariantsEditor({
                 winnerDeclaration.status === 'leading' ? 'text-amber-800' :
                 'text-slate-600'
               }`}>
-                {winnerDeclaration.status === 'winner' && '🏆 Winner 자동 선언'}
-                {winnerDeclaration.status === 'leading' && '선두 영역 진입'}
-                {winnerDeclaration.status === 'low_confidence' && '데이터 누적 영역'}
-                {winnerDeclaration.status === 'cold_start' && '초기 탐색 영역'}
+                {winnerDeclaration.status === 'winner' && '반응이 좋은 안이 나왔어요'}
+                {winnerDeclaration.status === 'leading' && '앞서는 안이 있어요'}
+                {winnerDeclaration.status === 'low_confidence' && '결과를 모으는 중이에요'}
+                {winnerDeclaration.status === 'cold_start' && '처음에는 고르게 보내요'}
               </div>
               <div className="text-slate-600 leading-relaxed mb-2">{winnerDeclaration.reasoning}</div>
               {Object.keys(winnerDeclaration.variantProbabilities).length > 0 && (
                 <div className="space-y-1">
-                  <div className="text-[10px] text-slate-400">Variant별 winner 확률 (Monte Carlo 1,000회)</div>
+                  <div className="text-[10px] text-slate-400">안마다 가장 좋을 가능성</div>
                   {Object.entries(winnerDeclaration.variantProbabilities).map(([vid, prob]) => (
                     <div key={vid} className="flex items-center gap-2">
-                      <div className="text-[10px] text-slate-500 w-16">Variant {vid}</div>
+                      <div className="text-[10px] text-slate-500 w-16">{vid}안</div>
                       <div className="flex-1 h-1.5 bg-slate-100 rounded-full overflow-hidden">
                         <div
                           className={`h-full ${
@@ -484,14 +483,14 @@ export default function JourneyVariantsEditor({
                       : 'bg-amber-100 hover:bg-amber-200 text-amber-900'
                   }`}
                 >
-                  권장 traffic 적용 (회사 admin 명시 확인)
+                  좋은 안을 더 자주 보내기
                 </button>
               )}
               {/* ★ D211+ Phase A-fix (2026-05-23 Harold 명시): native confirm 폐기 — 인라인 confirm 카드 (권장 traffic 적용) */}
               {pendingTrafficApply && winnerDeclaration.winnerVariantId && (
                 <div className="mt-2 p-2.5 bg-slate-100 border border-violet-300 rounded-lg">
                   <div className="text-[11px] text-slate-700 mb-2 leading-relaxed">
-                    Variant <span className="font-semibold text-violet-800">{winnerDeclaration.winnerVariantId}</span> 영역 권장 traffic 적용하시겠습니까?
+                    <span className="font-semibold text-violet-800">{winnerDeclaration.winnerVariantId}안</span>을 더 자주 보내도록 비율을 바꿀까요?
                     <div className="mt-1 text-[10px] text-slate-500">{winnerDeclaration.reasoning}</div>
                   </div>
                   <div className="flex items-center gap-1.5">
@@ -517,9 +516,6 @@ export default function JourneyVariantsEditor({
                                   variantId: v.variantId,
                                   messageTemplate: v.messageTemplate,
                                   subject: v.subject,
-                                  channel: v.channel,
-                                  alimtalkTemplateCode: v.alimtalkTemplateCode,
-                                  alimtalkVariableMap: v.alimtalkVariableMap,
                                   trafficWeight: recommended,
                                 }),
                               },
@@ -527,7 +523,7 @@ export default function JourneyVariantsEditor({
                           }
                           await loadVariants();
                         } catch (err: any) {
-                          setError(err?.message || '권장 traffic 적용 실패');
+                          setError(err?.message || '보내는 비율을 바꾸지 못했어요.');
                         } finally {
                           setSaving(false);
                         }
@@ -554,13 +550,13 @@ export default function JourneyVariantsEditor({
         </div>
       ) : variants.length === 0 ? (
         <div className="text-center py-6 border border-dashed border-slate-200 rounded-lg">
-          <p className="text-xs text-slate-500 mb-2">A/B 테스트 variants가 없습니다.</p>
+          <p className="text-xs text-slate-500 mb-2">아직 A/B 문안이 없어요.</p>
           <button
             onClick={handleAddVariant}
             disabled={isReadOnly || saving}
             className="px-3 py-1.5 bg-violet-100 hover:bg-violet-100 disabled:opacity-50 text-violet-800 rounded text-xs flex items-center gap-1 mx-auto"
           >
-            <Plus className="w-3 h-3" /> 첫 Variant 추가 (기본 메시지 복제)
+            <Plus className="w-3 h-3" /> 지금 문안으로 A안 만들기
           </button>
         </div>
       ) : (
@@ -577,7 +573,7 @@ export default function JourneyVariantsEditor({
                     : 'border-transparent text-slate-400 hover:text-slate-600'
                 }`}
               >
-                Variant {v.variantId}
+                {v.variantId}안
                 <span className="ml-1 text-[10px] text-slate-400">
                   ({(v.trafficWeight * 100).toFixed(0)}%)
                 </span>
@@ -588,7 +584,7 @@ export default function JourneyVariantsEditor({
                 onClick={handleAddVariant}
                 disabled={isReadOnly || saving}
                 className="ml-auto p-1.5 hover:bg-slate-100 disabled:opacity-50 rounded text-violet-700"
-                title="Variant 추가"
+                title="안 추가"
               >
                 <Plus className="w-3.5 h-3.5" />
               </button>
@@ -603,7 +599,7 @@ export default function JourneyVariantsEditor({
                 <div className="p-3 bg-slate-100 border border-slate-200 rounded-lg">
                   <div className="flex items-center gap-1.5 mb-2">
                     <Activity className="w-3 h-3 text-violet-700" />
-                    <span className="text-[11px] font-semibold text-slate-700">Funnel: Variant {activeVariant.variantId}</span>
+                    <span className="text-[11px] font-semibold text-slate-700">{activeVariant.variantId}안 결과</span>
                   </div>
                   <div className="space-y-2">
                     {/* 발송 100% */}
@@ -667,7 +663,7 @@ export default function JourneyVariantsEditor({
                   <div className="text-sm font-semibold text-slate-800">{activeVariant.conversionCount}</div>
                 </div>
                 <div className="p-2 bg-white rounded text-center">
-                  <div className="text-[10px] text-slate-400">평균 클릭률</div>
+                  <div className="text-[10px] text-slate-400" title="지금까지 결과로 본 이 안의 예상 클릭률이에요(보낸 수가 적으면 실제 클릭률과 달라요)">예상 반응률</div>
                   <div className="text-sm font-semibold text-violet-700">
                     {((activeVariant.banditAlpha / (activeVariant.banditAlpha + activeVariant.banditBeta)) * 100).toFixed(1)}%
                   </div>
@@ -685,9 +681,9 @@ export default function JourneyVariantsEditor({
                 const widthPct = (intervalWidth * 100).toFixed(1);
                 // 신뢰도 안내 — interval 좁을수록 신뢰도 높음 (10%- 좁음 / 10~25% 중간 / 25%+ 넓음)
                 const reliabilityLabel =
-                  intervalWidth < 0.10 ? '신뢰도 높음' :
-                  intervalWidth < 0.25 ? '신뢰도 중간: 추가 발송 후 좁아짐' :
-                  '신뢰도 부족: 누적 발송 영역 부족';
+                  intervalWidth < 0.10 ? '결과가 충분해요' :
+                  intervalWidth < 0.25 ? '조금 더 보내면 또렷해져요' :
+                  '아직 보낸 수가 적어요';
                 const reliabilityColor =
                   intervalWidth < 0.10 ? 'text-emerald-700' :
                   intervalWidth < 0.25 ? 'text-amber-700' :
@@ -697,7 +693,7 @@ export default function JourneyVariantsEditor({
                     <div className="flex items-center justify-between mb-2">
                       <div className="text-[11px] font-semibold text-violet-800 flex items-center gap-1.5">
                         <BarChart3 className="w-3 h-3" />
-                        95% 신뢰 구간 (Beta-Bernoulli)
+                        클릭률이 있을 법한 범위
                       </div>
                       <div className={`text-[10px] font-medium ${reliabilityColor}`}>{reliabilityLabel}</div>
                     </div>
@@ -726,13 +722,13 @@ export default function JourneyVariantsEditor({
                         평균 <span className="font-mono text-violet-800 font-semibold">{meanPct}%</span>
                       </span>
                       <span>
-                        95% CI <span className="font-mono text-violet-800">{lowerPct}% ~ {upperPct}%</span>
+                        범위 <span className="font-mono text-violet-800">{lowerPct}% ~ {upperPct}%</span>
                         <span className="ml-1 text-slate-400">(폭 {widthPct}%p)</span>
                       </span>
                     </div>
                     <div className="mt-1.5 text-[10px] text-slate-400 leading-relaxed">
-                      클릭률은 통계적으로 <span className="text-violet-800 font-mono">{lowerPct}%~{upperPct}%</span> 사이 95% 확률.
-                      구간이 좁을수록 자동 winner 선언 신뢰도 높음.
+                      클릭률은 <span className="text-violet-800 font-mono">{lowerPct}%~{upperPct}%</span> 사이일 가능성이 커요.
+                      범위가 좁을수록 결과를 믿을 수 있어요.
                     </div>
                   </div>
                 );
@@ -742,34 +738,18 @@ export default function JourneyVariantsEditor({
                 <BarChart3 className="w-3 h-3 mt-0.5 flex-shrink-0" />
                 <span>
                   {activeVariant.sentCount < 3
-                    ? `초기 탐색 단계 (누적 발송 ${activeVariant.sentCount}회 < 3회). 모든 variant 동등 기회 제공. 누적 3회 이상부터 Bandit 추천 작동.`
-                    : `학습 단계: Thompson Sampling Beta(α=${activeVariant.banditAlpha.toFixed(1)}, β=${activeVariant.banditBeta.toFixed(1)}) 분포 기반 자동 선택.`}
+                    ? `처음에는 고르게 보내요(보낸 수 ${activeVariant.sentCount}회 · 3회부터 반응을 보고 골라요).`
+                    : '보낸 결과를 보고 반응이 좋은 안을 더 자주 보내는 중이에요.'}
                 </span>
-              </div>
-
-              {/* channel select */}
-              <div>
-                <label className="block text-[11px] text-slate-500 mb-1">채널</label>
-                <select
-                  value={channelOfActive}
-                  onChange={(e) => handleUpdateVariant(activeVariant, { channel: e.target.value })}
-                  disabled={isReadOnly}
-                  className="w-full px-2 py-1.5 bg-white border border-slate-200 rounded text-xs disabled:opacity-50"
-                >
-                  <option value="sms">SMS</option>
-                  <option value="lms">LMS</option>
-                  <option value="mms">MMS</option>
-                  <option value="kakao">알림톡</option>
-                </select>
               </div>
 
               {/* traffic_weight 슬라이더 */}
               <div>
                 <label className="block text-[11px] text-slate-500 mb-1">
-                  Traffic Weight: <span className="text-violet-700 font-semibold">{(activeVariant.trafficWeight * 100).toFixed(0)}%</span>
+                  보내는 비율: <span className="text-violet-700 font-semibold">{(activeVariant.trafficWeight * 100).toFixed(0)}%</span>
                   {trafficSum > 0 && (
                     <span className="ml-2 text-[10px] text-slate-400">
-                      (전체 합산 {(trafficSum * 100).toFixed(0)}%, Bandit이 자동 정규화)
+                      (합계 {(trafficSum * 100).toFixed(0)}% · 자동으로 100%에 맞춰요)
                     </span>
                   )}
                 </label>
@@ -785,45 +765,7 @@ export default function JourneyVariantsEditor({
                 />
               </div>
 
-              {/* 메시지 영역 — channel 별 분기 */}
-              {channelOfActive === 'kakao' ? (
-                <>
-                  <div>
-                    <label className="block text-[11px] text-slate-500 mb-1">
-                      알림톡 템플릿 코드 <span className="text-rose-600">*</span>
-                    </label>
-                    <input
-                      type="text"
-                      value={activeVariant.alimtalkTemplateCode || ''}
-                      onChange={(e) => handleUpdateVariant(activeVariant, { alimtalkTemplateCode: e.target.value })}
-                      placeholder="kakao_templates.template_code"
-                      disabled={isReadOnly}
-                      className="w-full px-2 py-1.5 bg-white border border-slate-200 rounded text-xs disabled:opacity-50"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-[11px] text-slate-500 mb-1">변수 매핑 (JSON)</label>
-                    <textarea
-                      value={JSON.stringify(activeVariant.alimtalkVariableMap || {}, null, 2)}
-                      onChange={(e) => {
-                        try {
-                          const parsed = JSON.parse(e.target.value);
-                          handleUpdateVariant(activeVariant, { alimtalkVariableMap: parsed });
-                        } catch {
-                          // JSON 파싱 실패 시 갱신 안 함 (사용자가 편집 중)
-                        }
-                      }}
-                      rows={4}
-                      disabled={isReadOnly}
-                      placeholder='{"name": "@@고객명@@", "amount": "@@최근구매금액@@"}'
-                      className="w-full px-2 py-1.5 bg-white border border-slate-200 rounded text-xs font-mono disabled:opacity-50"
-                    />
-                    <div className="text-[10px] text-slate-400 mt-1">
-                      알림톡 #{`{변수}`} → @@고객필드@@ 형식 매핑 (회사 admin 직접 작성).
-                    </div>
-                  </div>
-                </>
-              ) : (
+              {/* 문안 — 칸과 같은 채널 */}
                 <PhoneComposer
                   channel={(channelOfActive === 'sms' || channelOfActive === 'mms' ? channelOfActive : 'lms') as 'sms' | 'lms' | 'mms'}
                   subject={activeVariant.subject || ''}
@@ -836,7 +778,6 @@ export default function JourneyVariantsEditor({
                   placeholder="이 변형으로 보낼 문안이에요. 혜택은 실제로 주는 것만 써요."
                   resetKey={activeVariant.id || activeVariant.variantId}
                 />
-              )}
 
               {/* 액션 */}
               {!isReadOnly && (
@@ -847,8 +788,8 @@ export default function JourneyVariantsEditor({
                       <div className="flex items-start gap-2 mb-2">
                         <AlertTriangle className="w-3.5 h-3.5 text-rose-700 flex-shrink-0 mt-0.5" />
                         <span className="text-[11px] text-slate-700 leading-relaxed">
-                          Variant <span className="font-semibold text-rose-800">{activeVariant.variantId}</span> 삭제하시겠습니까?
-                          <span className="block text-[10px] text-slate-400 mt-0.5">옛 누적 발송/클릭/전환 통계 영역 함께 손실</span>
+                          <span className="font-semibold text-rose-800">{activeVariant.variantId}안</span>을 지울까요?
+                          <span className="block text-[10px] text-slate-400 mt-0.5">이 안의 보낸 수 · 클릭 · 구매 기록도 함께 지워져요.</span>
                         </span>
                       </div>
                       <div className="flex items-center gap-1.5">
@@ -876,7 +817,7 @@ export default function JourneyVariantsEditor({
                       className="flex-1 px-3 py-1.5 bg-violet-100 hover:bg-violet-100 disabled:opacity-50 text-violet-800 rounded text-xs flex items-center justify-center gap-1"
                     >
                       {saving ? <Loader2 className="w-3 h-3 animate-spin" /> : <Save className="w-3 h-3" />}
-                      Variant {activeVariant.variantId} 저장
+                      {activeVariant.variantId}안 저장
                     </button>
                     <button
                       onClick={() => handleDeleteVariant(activeVariant)}

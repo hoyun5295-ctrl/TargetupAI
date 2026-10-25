@@ -27,6 +27,45 @@ export interface AutoMarketingRoi {
   source: string;
 }
 
+/**
+ * ★ 2026-10-25 원장 #30 · #31 — 한 캠페인의 실수신자 구매(발송 뒤 7일 · 결제 확정 · 미환불 · 같은 주문 한 번) → 주문 키 · 금액.
+ *   ROI · 담당자 성과 문자 · A/B 밴딧 전환이 이 함수 하나로 센다(옛: 성과 문자 · 밴딧은 발송 뒤 7일의 회사 전체 구매를 셌다).
+ *   until = 창 끝을 더 앞으로(밴딧 = 다음 자동마케팅 발송 전까지 · 한 구매를 두 제안에 귀속하지 않게) · null = 수신자를 확인하지 못함(세지 않는다).
+ */
+export async function campaignRecipientOrders(companyId: string, campaignId: string, until: Date | string | null = null): Promise<Map<string, number> | null> {
+  const phones = await recipientPhonesOfCampaign(companyId, campaignId);
+  if (phones === null) return null;
+  const out = new Map<string, number>();
+  if (phones.length === 0) return out;
+  // 주문 단위로 판정한다(Codex 차수3 D 2R) — 같은 주문의 행 중 하나라도 환불 표식이면 그 주문 전체를 뺀다
+  //   (재전송으로 행이 둘이면 환불 표식은 가장 오래된 한 행에만 남는다 · cdp-orders syncOrder).
+  //   결제 확정 = CT-86 cdp-order-revenue 마커 규약 · 상태 없는 SDK 구매 이벤트는 그대로 인정.
+  const ev = await query(
+    `SELECT x.order_key, MAX(x.amount) FILTER (WHERE x.paid) AS amount
+       FROM (
+         SELECT e.source || ':' || COALESCE(NULLIF(e.properties->>'order_id', ''), e.id::text) AS order_key,
+                COALESCE((e.properties->>'total_amount')::numeric, 0)::float AS amount,
+                COALESCE(e.properties->>'revenue_reversed', '') = 'true' AS reversed,
+                COALESCE(e.properties->>'revenue_applied' = 'true' OR e.properties->>'status' IS NULL
+                         OR e.properties->>'status' IN ('completed', 'paid'), false) AS paid
+           FROM campaigns c
+           JOIN cdp_events e ON e.company_id = $1::uuid
+            AND e.event_name IN ('purchase', 'order')
+            AND e.occurred_at >= c.sent_at
+            AND e.occurred_at <= c.sent_at + INTERVAL '7 days'
+            AND ($4::timestamptz IS NULL OR e.occurred_at < $4::timestamptz)
+           JOIN customers cu ON cu.id = e.customer_id AND cu.company_id = $1::uuid
+          WHERE c.id = $2::uuid
+            AND regexp_replace(COALESCE(cu.phone, ''), '\\D', '', 'g') = ANY($3::text[])
+       ) x
+      GROUP BY x.order_key
+     HAVING NOT bool_or(x.reversed) AND bool_or(x.paid)`,
+    [companyId, campaignId, phones, until ? new Date(until).toISOString() : null],
+  );
+  for (const x of ev.rows) out.set(String(x.order_key), Number(x.amount) || 0);
+  return out;
+}
+
 export async function buildAutoMarketingRoi(
   companyId: string,
   analysisPeriodDays: number = 30,
@@ -95,35 +134,10 @@ export async function buildAutoMarketingRoi(
     scannedCampaigns = camps.rows.length;
     const seenEvents = new Map<string, number>();
     for (const row of camps.rows) {
-      const phones = await recipientPhonesOfCampaign(companyId, String(row.id));
-      if (phones === null) { unreadableCampaigns++; continue; }
-      if (phones.length === 0) continue;
-      // 주문 단위로 판정한다(Codex 차수3 D 2R) — 같은 주문의 행 중 하나라도 환불 표식이면 그 주문 전체를 뺀다
-      //   (재전송으로 행이 둘이면 환불 표식은 가장 오래된 한 행에만 남는다 · cdp-orders syncOrder).
-      //   결제 확정 = CT-86 cdp-order-revenue 마커 규약 · 상태 없는 SDK 구매 이벤트는 그대로 인정.
-      const ev = await query(
-        `SELECT x.order_key, MAX(x.amount) FILTER (WHERE x.paid) AS amount
-           FROM (
-             SELECT e.source || ':' || COALESCE(NULLIF(e.properties->>'order_id', ''), e.id::text) AS order_key,
-                    COALESCE((e.properties->>'total_amount')::numeric, 0)::float AS amount,
-                    COALESCE(e.properties->>'revenue_reversed', '') = 'true' AS reversed,
-                    COALESCE(e.properties->>'revenue_applied' = 'true' OR e.properties->>'status' IS NULL
-                             OR e.properties->>'status' IN ('completed', 'paid'), false) AS paid
-               FROM campaigns c
-               JOIN cdp_events e ON e.company_id = $1::uuid
-                AND e.event_name IN ('purchase', 'order')
-                AND e.occurred_at >= c.sent_at
-                AND e.occurred_at <= c.sent_at + INTERVAL '7 days'
-               JOIN customers cu ON cu.id = e.customer_id AND cu.company_id = $1::uuid
-              WHERE c.id = $2::uuid
-                AND regexp_replace(COALESCE(cu.phone, ''), '\\D', '', 'g') = ANY($3::text[])
-           ) x
-          GROUP BY x.order_key
-         HAVING NOT bool_or(x.reversed) AND bool_or(x.paid)`,
-        [companyId, row.id, phones],
-      );
+      const orders = await campaignRecipientOrders(companyId, String(row.id));
+      if (orders === null) { unreadableCampaigns++; continue; }
       // 같은 주문(출처·주문번호)은 한 번 — 재전송으로 이벤트 행이 둘이어도, 창이 겹친 캠페인끼리도(Codex 차수3 D 1R)
-      for (const x of ev.rows) seenEvents.set(String(x.order_key), Number(x.amount) || 0);
+      for (const [k, v] of orders) seenEvents.set(k, v);
     }
     purchases7d = seenEvents.size;
     revenue7dKrw = Math.round(Array.from(seenEvents.values()).reduce((a, b) => a + b, 0));

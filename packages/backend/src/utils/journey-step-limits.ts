@@ -47,6 +47,38 @@ export const MAX_STEP_DELAY_HOURS = 8760;
 /** "사건이 오면 바로" 대기의 최대 기다림(시간) = 30일. */
 export const MAX_WAIT_TIMEOUT_HOURS = 720;
 
+/**
+ * ★ 2026-10-25 여정 구조체크 2차 #6 · #12(뿌리 대장 R1) — 진입 상한 판정 한 곳(진입 감시 두 길 · 재진입 · 시뮬레이션).
+ *   하루 몫(backfill_per_day · 상시 · 휴면 시작만 · 1 이상)이 있으면 넘는 분은 다음 회차 · 다음 날로 넘긴다(멈추지 않는다).
+ *   없으면 한 회차 후보가 「한 번에 보낼 최대 인원」을 넘을 때 여정을 멈춘다(대량 진입 차단).
+ */
+export function backfillPerDayOf(j: { trigger_event: string; trigger_filters: any }): number | null {
+  if (j.trigger_event !== 'custom' && j.trigger_event !== 'customer.dormant') return null;
+  const n = Number((j.trigger_filters || {}).backfill_per_day);
+  return Number.isFinite(n) && n >= 1 ? Math.floor(n) : null;
+}
+export function entryCapExceeded(cap: number | string | null | undefined, backfill: number | null, candidates: number): boolean {
+  return backfill == null && cap != null && candidates > Number(cap);
+}
+/**
+ * 넣기 직전 남은 하루 몫(계보 잠금을 잡은 그 트랜잭션 run 으로 센다 · 하루 몫이 없으면 null · 0 이하 = 오늘 몫을 다 썼다).
+ *   ★ 2026-10-25 Codex 1R — 잠금 밖에서 센 몫으로 넣으면 진입 감시와 재진입이 같은 몫을 함께 써 하루 몫을 넘는다.
+ */
+export async function dailyRoomInLock(
+  run: { query: (text: string, params?: any[]) => Promise<any> },
+  j: { id: string; trigger_event: string; trigger_filters: any },
+): Promise<number | null> {
+  const backfill = backfillPerDayOf(j);
+  if (backfill == null) return null;
+  const r = await run.query(ENTERED_TODAY_KST_SQL, [j.id]);
+  return backfill - Number(r.rows[0]?.n || 0);
+}
+/** 오늘(KST) 이 여정에 들어온 실행 수 SQL($1 여정 · 대조군 포함 · 진입이 곧 하루 몫을 쓴다). */
+export const ENTERED_TODAY_KST_SQL =
+  `SELECT COUNT(*)::int AS n FROM journey_executions
+    WHERE journey_id = $1::uuid
+      AND entered_at >= ((NOW() AT TIME ZONE 'Asia/Seoul')::date::timestamp AT TIME ZONE 'Asia/Seoul')`;
+
 /** 사용자 입력 · AI 출력이 규약 밖일 때. 라우트는 400으로 돌려준다(500 아님). */
 export class JourneyInputError extends Error {
   readonly code = 'JOURNEY_INVALID_INPUT';

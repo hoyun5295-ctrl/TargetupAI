@@ -50,14 +50,11 @@ describe('허브가 실제로 쓰는 generateMessages(BRAND_SYSTEM_PROMPT)의 �
   });
 });
 
-describe('AI 문안 생성 프롬프트(generateCustomMessages · 직접 생성)의 제목 규칙 = 본문 줄 규칙과 분리', () => {
-  const start = svc.indexOf('## 채널: ${channel}');
-  const gen = svc.slice(start, svc.indexOf('## 요청사항', start));
-  it('제목 = 공백 포함 20자(40바이트) · 브랜드 표기까지 포함 · 본문 줄 17자는 따로', () => {
-    expect(gen).toContain('subject(제목) 필수 · 공백 포함 20자(40바이트) 이내 · 브랜드 표기 "[${brandName}]" 를 제목에 넣으면 그 글자까지 포함해 20자 이내 · 이모지 금지');
-    expect(gen).toContain('- 본문은 한 줄 최대 17자 이내로 짧게 줄바꿈');
-    expect(gen).not.toContain('subject(제목) 필수, 한 줄 최대 17자 이내로 짧게 줄바꿈');
+// ★ 1025 F — 직접 생성 프롬프트를 가진 generateCustomMessages 는 부르는 곳이 없어 지웠다 · 남은 규칙 = 시스템 프롬프트
+describe('AI 문안 생성 프롬프트의 제목 규칙 = 본문 줄 규칙과 분리', () => {
+  it('제목 = 40바이트 · 옛 맞춤 생성 프롬프트 0', () => {
+    expect(svc).not.toContain('export async function generateCustomMessages(');
     // 시스템 프롬프트의 LMS 규칙(40바이트)과 같은 길이 기준
-    expect(svc).toContain('- subject(제목) 필수! 40바이트 이내');
+    expect(svc).toContain('- subject(제목) 필수! 공백·브랜드 표기까지 포함해 40바이트(한글 20자) 이내');
   });
 });

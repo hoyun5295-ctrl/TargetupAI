@@ -19,6 +19,7 @@
  *   - 회사 격리 (company_id 의무)
  */
 
+import { UserFacingError } from './http-error';
 import { query } from '../config/database';
 import { sampleBeta, computeBetaCredibleInterval } from './bandit-optimizer';
 // ★ P1-4/P0-2 (2026-07-12) — 블록 정규화·스킴 무해화는 CT-27 단일 정의 재사용 (인라인 중복 금지)
@@ -133,7 +134,7 @@ export async function createVariant(
      WHERE id = $1::uuid AND company_id = $2::uuid LIMIT 1`,
     [input.parentMessageId, companyId]
   );
-  if (parentR.rows.length === 0) throw new Error('부모 메시지를 찾을 수 없습니다.');
+  if (parentR.rows.length === 0) throw new UserFacingError(404, 'MESSAGE_NOT_FOUND', '원본 메시지를 찾을 수 없어요.');
   const parent = parentR.rows[0];
   // ★ 2026-09-27 한줄로 V2 R257 — 변형의 변형은 만들지 않는다(서빙 후보 = 부모 직속 변형뿐이라 손자는 절대 노출되지 않는다)
   if (parent.parent_message_id) throw new VariantOfVariantError();

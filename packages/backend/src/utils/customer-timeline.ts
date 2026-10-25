@@ -68,8 +68,6 @@ export interface CustomerScope {
   ids: string[];
   /** 그 행들의 이메일(소문자) */
   emails: string[];
-  /** 그 행들에 발급된 모바일 DM 수신자 토큰 */
-  tokens: string[];
   /** 등록 매장 이름 */
   stores: string[];
 }
@@ -305,19 +303,10 @@ export async function resolveCustomerScope(companyId: string, customerId: string
     siblings.map((r: any) => String(r.store_name || '').trim()).filter(Boolean),
   ));
 
-  // 모바일 DM 열람은 수신자 토큰으로도 남는다(번호가 안 실린 열람 행이 있다)
-  let tokens: string[] = [];
-  try {
-    const t = await query(
-      `SELECT token FROM dm_recipient_tokens WHERE company_id = $1::uuid AND customer_id = ANY($2::uuid[]) LIMIT 500`,
-      [companyId, ids],
-    );
-    tokens = t.rows.map((r: any) => String(r.token)).filter(Boolean);
-  } catch {
-    tokens = [];
-  }
+  // 모바일 DM 열람은 수신자 토큰으로도 남는다(번호가 안 실린 열람 행이 있다) — 토큰은 열람 조회 안에서 고객 id 로 바로 찾는다
+  //   ★ 2026-10-25 원장 #9 — 옛: 토큰을 순서 없는 LIMIT 500 으로 먼저 뽑아 넘겨, DM 을 많이 받은 고객의 열람 기록이 임의로 잘렸다
 
-  return { row, phone, ids, emails, tokens, stores };
+  return { row, phone, ids, emails, stores };
 }
 
 // ────────────── 원천 1: 발송 (MySQL) ──────────────
@@ -555,13 +544,14 @@ async function fetchDmViews(companyId: string, scope: CustomerScope, f: SourceFi
        FROM dm_views v
        LEFT JOIN dm_pages p ON p.id = v.dm_id
       WHERE v.company_id = $1::uuid
-        AND (($2::text IS NOT NULL AND v.phone = $2::text) OR v.recipient_token = ANY($3::text[]))
+        AND (($2::text IS NOT NULL AND v.phone = $2::text)
+             OR v.recipient_token IN (SELECT t.token FROM dm_recipient_tokens t WHERE t.company_id = $1::uuid AND t.customer_id = ANY($3::uuid[])))
         AND ($4::timestamptz IS NULL OR v.viewed_at <= $4::timestamptz)
         AND ($6::timestamptz IS NULL OR v.viewed_at >= $6::timestamptz)
         AND ($7::text IS NULL OR p.title ILIKE $7)
       ORDER BY v.viewed_at DESC
       LIMIT $5`,
-    [companyId, scope.phone, scope.tokens, f.before, limit + 1, f.after, f.like],
+    [companyId, scope.phone, scope.ids, f.before, limit + 1, f.after, f.like],
   );
   return r.rows.map((row: any): TimelineEvent => {
     const parts: string[] = [];
@@ -828,11 +818,12 @@ async function buildSummary(companyId: string, scope: CustomerScope, sendCount: 
     query(
       `SELECT
          (SELECT COUNT(*) FROM dm_views v WHERE v.company_id = $1::uuid
-            AND (($2::text IS NOT NULL AND v.phone = $2::text) OR v.recipient_token = ANY($3::text[])))
-       + (SELECT COUNT(*) FROM dm_event_responses r WHERE r.company_id = $1::uuid AND r.customer_id = ANY($4::uuid[]))
-       + (SELECT COUNT(*) FROM cdp_inapp_impressions i WHERE i.company_id = $1::uuid AND i.customer_id = ANY($4::uuid[]))
+            AND (($2::text IS NOT NULL AND v.phone = $2::text)
+                 OR v.recipient_token IN (SELECT t.token FROM dm_recipient_tokens t WHERE t.company_id = $1::uuid AND t.customer_id = ANY($3::uuid[]))))
+       + (SELECT COUNT(*) FROM dm_event_responses r WHERE r.company_id = $1::uuid AND r.customer_id = ANY($3::uuid[]))
+       + (SELECT COUNT(*) FROM cdp_inapp_impressions i WHERE i.company_id = $1::uuid AND i.customer_id = ANY($3::uuid[]))
          AS n`,
-      [companyId, scope.phone, scope.tokens, scope.ids],
+      [companyId, scope.phone, scope.ids],
     ),
   ]);
 

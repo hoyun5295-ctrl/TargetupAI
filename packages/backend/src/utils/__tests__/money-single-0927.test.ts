@@ -61,7 +61,8 @@ describe('R327 DM 대상 발송 = 차감·발행은 싼 검사 뒤', () => {
     const dmAll = src('..', 'routes', 'dm.ts');
     const dm = dmAll.slice(dmAll.indexOf("dmRouter.post('/:id/send-to-target'"));
     const iZero = dm.indexOf("code: 'ZERO_MATCH'");
-    const iDeduct = dm.indexOf('idempotencyKey: `dm-publish:${req.params.id}`,\n      });');
+    // ★ 1025 D1 = A — 발행 뒤 정산(settleCreditAfterSuccess · 못 걷으면 첫 발행 되돌림)
+    const iDeduct = dm.indexOf('createdBy: req.user?.userId, idempotencyKey: `dm-publish:${req.params.id}`,');
     const iPublish = dm.indexOf('const pub = await publishDmWithPrizes(req.params.id, companyId);');   // ★ 1024 ⑭ 발행 = 경품 동기화 함께
     const iTokens = dm.indexOf('tokenPairs = await issueDmRecipientTokensBulk(');
     expect(iDeduct).toBeGreaterThan(iZero);
@@ -86,7 +87,7 @@ describe('R242 스튜디오 자리표시 문구 = 만들지 않는다', () => {
     const at = r.indexOf("imageStudioRouter.post('/generate'");
     const body = r.slice(at, r.indexOf("imageStudioRouter.post('/edit'", at));
     expect(body.indexOf('findUnfilledTemplateText(texts)')).toBeGreaterThan(-1);
-    expect(body.indexOf('findUnfilledTemplateText(texts)')).toBeLessThan(body.indexOf('await checkCredit(companyId, 2)'));
+    expect(body.indexOf('findUnfilledTemplateText(texts)')).toBeLessThan(body.indexOf('await checkCredit(companyId, getCreditCost(CREDIT_SOURCE.generate))'));   // ★ 1025 Z2 단가 = 단가표
     expect(body).toContain("code: 'PLACEHOLDER_TEXT'");
   });
 });

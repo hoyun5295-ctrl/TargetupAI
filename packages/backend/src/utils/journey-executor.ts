@@ -75,6 +75,8 @@ import { isSingleStepKind } from './journey-start-kind';
 import { isDemoCompany } from './demo-company';   // ★ 2026-10-09 시연 회사 = 발송 엔진 앞 절단(설계서 docs/2026-10-09-demo-company-design.md §2)
 import { aiOperatorAllowedForWorker } from './plan-guard';
 import { lineageColumnsReady } from './journey-lineage';
+import { applyVariantToStep } from './journey-step-versions';
+import { PURCHASED_SINCE_ENTRY_ONE_SQL, isSignupTrigger } from './journey-goal-purchase';
 
 // ════════════════════════════════════════════════════════════════════
 // 타입
@@ -206,6 +208,15 @@ const JOURNEY_TICK_BUDGET_MS = 4 * 60 * 1000;
 const JOURNEY_BATCH_SIZE = 100;
 const JOURNEY_PER_COMPANY_PER_BATCH = 25;
 
+/**
+ * ★ 2026-10-25 여정 구조체크 2차 #3(뿌리 대장 R8) — 처리 예외로 같은 실행을 다시 보는 상한.
+ *   옛: 오류 수만 올리고 다음 실행 시각을 그대로 둬 5분마다 끝없이 다시 돌았고(실행 후보 맨 앞 · 오류 기록 하루 288줄),
+ *   사람은 「이유 없이 안 나가는」 실행을 볼 길이 없었다. 12번(약 1시간) 넘게 실패하면 그 실행을 실패로 닫고 운영 경보를 한 번 보낸다
+ *   (잠깐의 잠금 대기 · 연결 끊김은 그 안에 풀린다 · DB 전체 장애면 실행 후보 조회부터 실패해 여기까지 오지 않는다). 오류 기록은 최근 20줄만 남긴다.
+ */
+export const EXECUTION_ERROR_MAX = 12;
+export const EXECUTION_ERROR_LOG_KEEP = 20;
+
 /** ★ 2026-10-19 B-1009-6 — 재검사 전 수정 문안의 문자 발송을 다시 볼 간격(재검사 스캔 5분 주기 × 2) · 미루는 상한(스캐너 앞보기 창 2시간) */
 export const PRETEST_PENDING_RECHECK_MINUTES = 10;
 export const PRETEST_PENDING_MAX_HOURS = 2;
@@ -283,17 +294,32 @@ export async function runJourneyExecutor(): Promise<{ processed: number; sent: n
         //   로그를 못 보는 사람에겐 "이유 없이 안 나가는" 상태가 된다 — 원인을 데이터에 남겨야 한다.
         //   ⚠ 기록 자체가 실패해도 워커 루프는 멈추지 않는다(다음 실행행 처리가 우선).
         try {
-          await query(
+          // ★ 2026-10-25 #3 — 상한(EXECUTION_ERROR_MAX)에 닿으면 같은 문장에서 실패로 닫는다(다음 주기에 다시 집지 않는다) · 기록은 최근 N줄.
+          const up = await query(
             `UPDATE journey_executions
                 SET error_count = COALESCE(error_count, 0) + 1,
                     last_error_at = NOW(),
-                    error_log = COALESCE(error_log, '[]'::jsonb) || $2::jsonb
-              WHERE id = $1::uuid`,
+                    error_log = (SELECT COALESCE(jsonb_agg(el.v ORDER BY el.n), '[]'::jsonb)
+                                   FROM jsonb_array_elements(COALESCE(error_log, '[]'::jsonb) || $2::jsonb) WITH ORDINALITY AS el(v, n)
+                                  WHERE el.n > jsonb_array_length(COALESCE(error_log, '[]'::jsonb) || $2::jsonb) - $4::int),
+                    status = CASE WHEN status = 'active' AND COALESCE(error_count, 0) + 1 >= $3::int THEN 'failed' ELSE status END,
+                    completed_at = CASE WHEN status = 'active' AND COALESCE(error_count, 0) + 1 >= $3::int THEN NOW() ELSE completed_at END
+              WHERE id = $1::uuid
+              RETURNING status`,
             [
               row.execution_id,
               JSON.stringify([{ at: new Date().toISOString(), stage: 'process_execution', reason: reason.slice(0, 500) }]),
+              EXECUTION_ERROR_MAX,
+              EXECUTION_ERROR_LOG_KEEP,
             ]
           );
+          if (up.rows[0]?.status === 'failed') {
+            console.error(`[JourneyExecutor] execution=${row.execution_id} 처리 실패 ${EXECUTION_ERROR_MAX}회 → 실패로 닫음`);
+            void sendSystemAlert({
+              dedupKey: `journey-exec-failed:${row.journey_id}`,
+              message: `여정 실행이 ${EXECUTION_ERROR_MAX}번 연속 처리 오류로 실패 처리됐습니다(더 보내지 않음). journey=${row.journey_id} execution=${row.execution_id} 마지막 오류: ${reason.slice(0, 200)}`,
+            }).catch(() => undefined);
+          }
         } catch (logErr: any) {
           console.error(`[JourneyExecutor] execution=${row.execution_id} 실패 기록 실패:`, logErr?.message || logErr);
         }
@@ -707,23 +733,18 @@ async function processExecution(exec: ExecutionRow): Promise<StepOutcome> {
   // ★ D188 Phase 2-B-3 (2026-05-21): variants 선택 — Bandit Thompson Sampling.
   //   step에 variants ≥ 1건 있으면 선택 후 step 변수 덮어쓰기. 발송 후 recordJourneyStepVariantReward 호출.
   let activeVariantId: string | null = null;
-  try {
-    const variants = await listJourneyStepVariants(step.id);
-    if (variants.length > 0) {
-      const rec = selectJourneyStepVariant(variants);
-      if (rec) {
-        activeVariantId = rec.variant.id;
-        step.message_template = rec.variant.messageTemplate || step.message_template;
-        step.subject = rec.variant.subject || step.subject;
-        step.channel = rec.variant.channel || step.channel;
-        step.alimtalk_template_code = rec.variant.alimtalkTemplateCode || step.alimtalk_template_code;
-        step.alimtalk_variable_map = rec.variant.alimtalkVariableMap || step.alimtalk_variable_map;
-        console.log(`[JourneyExecutor] step=${step.step_order} variant ${rec.variant.variantId} 선택 — ${rec.reasoning}`);
-      }
+  // ★ 2026-10-25 Codex 1R(R7 「판정 못 함을 반대로 읽음」) — 조회 실패 = 처리 예외(위 catch · 상한 EXECUTION_ERROR_MAX).
+  //   옛: 실패를 삼키고 칸 본문으로 보냈다 — 변이 칸은 켜기 검사 · 재검사가 변이 글만 보므로 검사하지 않은 글이 나갔다.
+  const variants = await listJourneyStepVariants(step.id);
+  if (variants.length > 0) {
+    const rec = selectJourneyStepVariant(variants);
+    if (rec) {
+      activeVariantId = rec.variant.id;
+      // ★ 2026-10-25 #1(R5) — 변이는 본문 · 제목만 덮는다(검사 · 재검사와 같은 규칙 · journey-step-versions). 채널 · 알림톡 값은 칸 그대로
+      //   (옛: 변이 채널 · 알림톡 코드까지 덮어 검사한 적 없는 모양으로 나갔다).
+      Object.assign(step, applyVariantToStep(step, rec.variant));
+      console.log(`[JourneyExecutor] step=${step.step_order} variant ${rec.variant.variantId} 선택 — ${rec.reasoning}`);
     }
-  } catch (variantsErr: any) {
-    // variants 조회 실패 시 fallback = step 본 영역 사용 (영역 안전망)
-    console.warn(`[JourneyExecutor] variants 조회 실패 fallback:`, variantsErr?.message || variantsErr);
   }
 
   // 2. 발송 시간 검증 (KST 08:00 ~ 21:00)
@@ -1044,21 +1065,13 @@ async function processExecution(exec: ExecutionRow): Promise<StepOutcome> {
   // 9. campaigns INSERT (source='journey' — 추적 정합)
   const cleanPhone = normalizePhone(customer.phone);
   if (!cleanPhone) {
-    // ★ D218+ (2026-05-26) phone 무효 실패 분기 — autoPauseExecution(phone_invalid) + 옛 흐름 정합 (재시도 X = advance).
+    // ★ 2026-10-25 여정 구조체크 2차 #4(R6) — 번호가 무효면 이 고객의 실행을 끝낸다(ended · 발송 0 · 비용 0).
+    //   옛: 멈춤(paused · 사유 phone_invalid)으로 바꾼 뒤 전진했다 — 다시 켜기가 되살리지 않는 멈춤이라 영원히 「진행 중」으로 남았다.
     await logFailedStep(exec.execution_id, step.id, 'invalid_phone');
-    try {
-      await autoPauseExecution({
-        companyId: exec.company_id,
-        journeyId: exec.journey_id,
-        stepId: step.id,
-        executionId: exec.execution_id,
-        pauseReason: 'phone_invalid',
-        pauseTriggerSource: 'auto_phone_check',
-      });
-    } catch (apErr: any) {
-      console.warn(`[JourneyExecutor] autoPauseExecution(phone_invalid) 사고 (skip):`, apErr?.message);
-    }
-    await advanceOrComplete(exec, step, 0);  // ★ J1: 발송 0 → 비용 0 (옛 sendCost 가산은 미발송인데 통계·예산 부풀림)
+    await query(
+      `UPDATE journey_executions SET status = 'ended', completed_at = NOW(), current_step_order = $2 WHERE id = $1::uuid AND status = 'active'`,
+      [exec.execution_id, step.step_order],
+    );
     return 'failed';
   }
 
@@ -1534,7 +1547,7 @@ async function isGoalConvertedSinceEntry(exec: ExecutionRow): Promise<boolean> {
   try {
     const gk = await query(`SELECT goal_kind, trigger_event, trigger_filters FROM journeys WHERE id = $1::uuid`, [exec.journey_id]);
     const v = String(gk.rows[0]?.goal_kind || '');
-    signupJourney = String(gk.rows[0]?.trigger_event || '') === 'customer.created';
+    signupJourney = isSignupTrigger(gk.rows[0]?.trigger_event);
     // ★ 2026-09-30 V2 3차 — 상품 재구매 여정(새 여정만 'product' 로 저장된다 · 기존 행 동작 무변경).
     if (v === 'product') {
       const tf = gk.rows[0]?.trigger_filters || {};
@@ -1655,45 +1668,10 @@ async function finishExecution(
  *   ⛔ SQL 은 2026-07-10 ~ 0929 목표 판정 원문 그대로(0930 이동 · 동작 동일). 오류는 호출부가 받는다.
  */
 async function hasPurchasedSinceEntry(companyId: string, customerId: string, enteredAt: unknown, opts: { signupBatch?: boolean } = {}): Promise<boolean> {
-  const byProfile = await query(
-    `SELECT 1 FROM customers
-      WHERE id = $1::uuid AND company_id = $2::uuid
-        AND recent_purchase_date IS NOT NULL
-        AND recent_purchase_date > ($3::timestamptz AT TIME ZONE 'Asia/Seoul')::date
-      LIMIT 1`,
-    [customerId, companyId, enteredAt]
-  );
-  if (byProfile.rows.length > 0) return true;
-  const byEvent = await query(
-    `SELECT 1
-      WHERE EXISTS (
-        SELECT 1 FROM cdp_events
-         WHERE company_id = $1::uuid AND customer_id = $2::uuid
-           AND event_name = 'purchase' AND occurred_at > $3::timestamptz
-      )
-      -- ★ 2026-08-01 §11-4: 매장(싱크) 구매는 원장에만 있다. 위 프로필 신호는 날짜 정밀이라
-      --   진입 당일 구매를 못 가르므로, 시각 정밀 판정을 위해 원장을 함께 본다(KST naive 규약).
-      OR EXISTS (
-        SELECT 1 FROM purchases
-         WHERE company_id = $1::uuid AND customer_id = $2::uuid
-           AND purchase_date IS NOT NULL
-           AND purchase_date > ($3::timestamptz AT TIME ZONE 'Asia/Seoul')
-      )`,
-    [companyId, customerId, enteredAt]
-  );
-  if (byEvent.rows.length > 0) return true;
-  if (!opts.signupBatch) return false;
-  // ★ 2026-10-19 B-1009-4 — 가입 묶음 구매: 고객 행이 들어온 뒤(도착 축 · 둘 다 NOW() 적재 = 같은 시계) 들어온 구매.
-  //   싱크는 가입 고객과 그 구매(구매일 = 어제)를 한 묶음으로 보낸다 · 구매일 축으로는 진입 뒤가 아니라 놓쳤다.
-  const byBatch = await query(
-    `SELECT 1 FROM purchases p
-       JOIN customers c ON c.id = p.customer_id AND c.company_id = p.company_id
-      WHERE p.company_id = $1::uuid AND p.customer_id = $2::uuid
-        AND p.created_at >= c.created_at
-      LIMIT 1`,
-    [companyId, customerId]
-  );
-  return byBatch.rows.length > 0;
+  // ★ 2026-10-25 여정 구조체크 2차 #13 — 판정 = journey-goal-purchase 한 곳(조건 칸 · 지도 「곧 마칠 예정」과 같은 조각 · 가입 묶음 포함).
+  //   신호 넷(프로필 · 자사몰 사건 · 매장 원장 · 가입 묶음)은 옛 세 문장의 SQL 그대로 한 문장으로 모았다.
+  const r = await query(PURCHASED_SINCE_ENTRY_ONE_SQL, [companyId, customerId, enteredAt, opts.signupBatch === true]);
+  return r.rows[0]?.hit === true;
 }
 
 async function pauseJourney(journeyId: string, reason: string): Promise<void> {
@@ -1829,9 +1807,13 @@ async function evaluateCondition(
   // ★ 2026-09-30 V2 4차 — 이 여정에 들어온 뒤 구매했나(목표 판정과 같은 신호). purchased: true(샀으면 맞음) / false(안 샀으면 맞음).
   if (type === 'purchase_since_entry') {
     try {
-      const ex = await query(`SELECT customer_id, entered_at FROM journey_executions WHERE id = $1::uuid`, [executionId]);
+      // ★ 2026-10-25 #13 — 목표와 같은 판정(가입 여정 = 가입 묶음 구매 포함 · 옛: 조건 칸만 가입 묶음을 몰랐다)
+      const ex = await query(
+        `SELECT e.customer_id, e.entered_at, j.trigger_event FROM journey_executions e JOIN journeys j ON j.id = e.journey_id WHERE e.id = $1::uuid`,
+        [executionId],
+      );
       if (ex.rows.length === 0) return 'not_met';
-      const purchased = await hasPurchasedSinceEntry(companyId, String(ex.rows[0].customer_id), ex.rows[0].entered_at);
+      const purchased = await hasPurchasedSinceEntry(companyId, String(ex.rows[0].customer_id), ex.rows[0].entered_at, { signupBatch: isSignupTrigger(ex.rows[0].trigger_event) });
       const want = condJsonb.purchased !== false;
       return purchased === want ? 'met' : 'not_met';
     } catch (err: any) {

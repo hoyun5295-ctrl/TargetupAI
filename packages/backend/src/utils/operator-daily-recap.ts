@@ -9,6 +9,7 @@
  * 컬럼 미생성(마이그레이션 전) = 전체 skip(안전) — ALTER 후 다음 사이클부터 자동 활성.
  */
 
+import { campaignRecipientOrders } from './automarketing-roi';
 import { query } from '../config/database';
 import { kstYesterdayRange, buildDailyRecapBody } from './autosend-policy';
 import { notifyOperatorAdmins } from './continuous-operator';
@@ -24,18 +25,10 @@ export async function sendOperatorDailyRecaps(
     // ★ 2026-07-12 C-3②: 발송 이후 자사몰 구매 실측(cdp) 동반 — automarketing-roi와 동일 이벤트·금액 산식.
     //   회고는 발송 다음날이라 귀속 창(7일)이 안 닫혀 "집계 중" 라벨로 정직 표기. CDP 미연동 = 0 → 줄 생략.
     const r = await query(
-      `SELECT p.id, o.name, o.admin_phone_numbers, o.backup_admin_phone,
+      `SELECT p.id, p.campaign_id, o.name, o.admin_phone_numbers, o.backup_admin_phone,
               COALESCE(c.sent_count, p.recipient_count, 0) AS sent_count,
               COALESCE(c.success_count, 0) AS success_count,
-              COALESCE((SELECT SUM(v.click_count) FROM operator_proposal_variants v WHERE v.proposal_id = p.id), 0) AS clicked,
-              COALESCE((SELECT COUNT(*) FROM cdp_events e
-                         WHERE e.company_id = p.company_id AND e.event_name IN ('purchase', 'order')
-                           AND e.occurred_at >= p.auto_sent_at
-                           AND e.occurred_at < LEAST(NOW(), p.auto_sent_at + INTERVAL '7 days')), 0) AS purchases,
-              COALESCE((SELECT SUM((e.properties->>'total_amount')::numeric) FROM cdp_events e
-                         WHERE e.company_id = p.company_id AND e.event_name IN ('purchase', 'order')
-                           AND e.occurred_at >= p.auto_sent_at
-                           AND e.occurred_at < LEAST(NOW(), p.auto_sent_at + INTERVAL '7 days')), 0) AS revenue
+              COALESCE((SELECT SUM(v.click_count) FROM operator_proposal_variants v WHERE v.proposal_id = p.id), 0) AS clicked
          FROM operator_proposals p
          JOIN continuous_operators o ON o.id = p.operator_id
          JOIN campaigns c ON c.id = p.campaign_id
@@ -59,6 +52,10 @@ export async function sendOperatorDailyRecaps(
   let notified = 0;
   for (const row of rows) {
     try {
+      // ★ 2026-10-25 원장 #30 — 구매 · 금액 = 실수신자 귀속 CT(ROI 와 같은 함수 · 옛: 발송 뒤 회사 전체 구매 · 환불 · 주문 중복 거름 0)
+      const orders = await campaignRecipientOrders(companyId, String(row.campaign_id)).catch(() => null);
+      const purchases = orders ? orders.size : 0;
+      const revenue = orders ? Math.round(Array.from(orders.values()).reduce((a, b) => a + b, 0)) : 0;
       await notifyOperatorAdmins(
         {
           adminPhoneNumbers: Array.isArray(row.admin_phone_numbers) ? row.admin_phone_numbers : [],
@@ -72,8 +69,8 @@ export async function sendOperatorDailyRecaps(
           sentCount: Number(row.sent_count) || 0,
           successCount: Number(row.success_count) || 0,
           clickedCount: Number(row.clicked) || 0,
-          purchaseCount: Number(row.purchases) || 0,
-          revenueKrw: Number(row.revenue) || 0,
+          purchaseCount: purchases,
+          revenueKrw: revenue,
         }),
       );
       // 수신처가 비어 있어도 기록 — 대상 없는 회고를 매일 재시도하지 않는다.

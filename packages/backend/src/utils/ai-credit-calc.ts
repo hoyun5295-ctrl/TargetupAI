@@ -126,14 +126,6 @@ export const CREDIT_COST_MAP: Record<string, number> = {
   //   ⛔ OPERATION_SOURCES에 넣지 않는다 — 플래너는 마이너스·자동충전 금지가 확정 정책이라
   //   잔액이 없으면 그 터치포인트만 보류되고 통지가 나가야 한다(조용한 증발 금지).
   'planner-touchpoint-send': 10,
-  // ★ 2026-08-13 원스텝 AI 컨텐츠 생성 — 오토설계 대행 50 (설계서 §6-2 · Harold 확정)
-  //   AI 원가가 아니라 **대행 가치**다(플래너 대행 축과 같은 성격). 인터뷰·프리필·견적은 AI 호출이 0이고,
-  //   생성 단계에서도 결정 파라미터가 parsePrompt·designSectionLayout 두 호출을 대체해 **원가는 오히려 준다.**
-  //   값 50의 근거 = 'email-campaign-complete'(설계·완성 대행)와 같은 부류·같은 값.
-  //   멱등키 = one-step:{세션} — 세션당 1회다. 재생성은 생성비(dm-ai-generate 5)만 다시 걷는다.
-  //   ⛔ 발행분(dm-builder)은 여기 포함하지 않는다 — 발행 라우트가 자기 키로 걷는다(이중 과금 차단).
-  //   ⛔ OPERATION_SOURCES에 넣지 않는다.
-  'one-step-interview': 50,
   // 예측 자동 분석 (3) — 연동 회사(싱크에이전트/SDK) 매일 1회 예측 점수 갱신. 회사+날짜 멱등.
   'predictive-daily': 3,
   // 모바일 DM 생성(돌려보기) 5 — 자연어→sections + 슬라이드 분할 + 전 섹션 카피까지 생성(범위 넓음). 호출마다 5. 발행은 'dm-builder' 100 별도.
@@ -161,6 +153,8 @@ export const CREDIT_COST_MAP: Record<string, number> = {
   'email-ai-generate': 3,
   // ★ 2026-07-08 행사 캠페인 이미지 판독 3 — 업로드 이미지(스샷)에서 행사 내용(브랜드·상품·정가·할인율·판매가·기간·혜택)을 전사해 행사 내용 텍스트 반환(vision). 성공 시에만 차감. 20 미만이라 확인 모달 비대상.
   'event-image-extract': 3,
+  // ★ 2026-10-25 원장 Z2 — DM 알림 문자 문안 생성 3(옛: 생산자가 숫자 3 을 박아 단가표 밖이었다 · 값 그대로)
+  'dm-copy-generate': 3,
   // ★ 2026-07-02 Harold 확정 — Email 캠페인 완성 50: AI/수동/템플릿 불문 "완성 저장" 시 1회(멱등키 email-campaign-complete:campaignId).
   //   임시저장 무료(발송·PC 미리보기 잠금) / 발송·수신/오픈/클릭 이력 = 무료(고객 SMTP) / 환불 없음.
   'email-campaign-complete': 50,
@@ -170,20 +164,14 @@ export const CREDIT_COST_MAP: Record<string, number> = {
   'inapp-publish': 100,
   // 문안 생성·분석·추천 (5)
   'generate-messages': 5,
-  'generate-custom-messages': 5,
   'recommend-target': 5,
-  'recommend-next-campaign': 5,
   'variant-generator': 5,
   'performance-explainer': 5,
   'performance-quick-action': 5,
-  'next-action-advisor': 5,
   'multi-goal-decisioning': 5,
   'cdp-fusion-explainer': 5,
-  'dm-event-recommender': 5,
   // Email 발송 후 성과 진단 5 — 실측 오픈/클릭 기반 topInsight + 개선 제안. 이벤트 0건 시 호출 차단(차감 0).
   'email-performance-insight': 5,
-  // Email 발송 시간 추천 5 — 자사 오픈 실측 분포. 표본 30건 미만 = insufficient_data(차감 0).
-  'email-send-time-recommend': 5,
   // 다듬기·진단·질문·매핑 (1) — 스팸필터는 크레딧 비대상(현금/후불 청구)
   'refine-direct': 1,
   'journey-ai-refine': 1,
@@ -193,7 +181,6 @@ export const CREDIT_COST_MAP: Record<string, number> = {
   // Email 발송 전 진단 1 — 스팸 위험 분석(AI). 광고 표기 등 기계 체크는 코드(0크레딧).
   'email-precheck': 1,
   'dm-quick-action-refine': 1,
-  'dm-self-diagnosis': 1,
   'inapp-explainer': 1,
   'inapp-quick-action': 1,
   'alimtalk-matcher': 1,

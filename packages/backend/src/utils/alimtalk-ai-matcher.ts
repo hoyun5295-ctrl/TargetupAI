@@ -22,9 +22,14 @@
  *   - 회사 격리 — 본 회사 보유 템플릿만 매트릭스 정독
  */
 
-import { extractJsonFromAiText } from './ai-json';   // ★ 2026-09-30 WP4 AI 응답 JSON 파싱 = CT(문자열 안 제어문자 복구)
+import { extractJsonFromAiText, aiStr } from './ai-json';   // ★ 2026-09-30 WP4 AI 응답 JSON 파싱 = CT(문자열 안 제어문자 복구)
 import { query } from '../config/database';
 import { callAIWithFallback } from '../services/ai';
+import { runChargedAi } from './ai-credit';
+import { getCreditCost } from './ai-credit-calc';
+
+/** 매칭 프롬프트에 싣는 승인 템플릿 상한(본문 200자 × N · 프롬프트 길이 보호) */
+const MATCH_CANDIDATES_MAX = 80;
 import { buildMemoryPromptContext } from './company-memory';
 
 // ════════════════════════════════════════════════════════════════════
@@ -65,6 +70,8 @@ export interface AlimtalkMatchResult {
     matchReason: string;
   }>;
   suggestion: string | null;       // 정합 0건 시 회사 admin 안내 텍스트
+  /** ★ 2026-10-25 #112 — 후보 상한을 넘어 최신 N개만 봤을 때 사람 문장(없으면 칸 없음) */
+  note?: string;
 }
 
 export interface MatchInput {
@@ -173,12 +180,16 @@ export async function matchAlimtalkTemplate(input: MatchInput): Promise<Alimtalk
      FROM kakao_templates t
      LEFT JOIN kakao_sender_profiles p ON p.id = t.profile_id
      WHERE t.company_id = $1::uuid AND UPPER(t.status) IN ('APPROVED', 'APR', 'A')
-     ORDER BY t.created_at DESC
-     LIMIT 50`,
+     ORDER BY t.created_at DESC`,
     [input.companyId]
   );
+  // ★ 2026-10-25 원장 #112 — 승인 템플릿 전부를 후보로 본다. 프롬프트 길이 상한(MATCH_CANDIDATES_MAX)을 넘으면 최신순 앞 N개만 · 응답에 그 사실을 싣는다
+  //   (옛: 조용히 50개 · 51번째부터 매칭 후보에서 빠졌다).
+  const truncatedNote = tplRes.rows.length > MATCH_CANDIDATES_MAX
+    ? `승인 템플릿 ${tplRes.rows.length.toLocaleString()}개 중 최근 ${MATCH_CANDIDATES_MAX}개에서 골랐어요.`
+    : null;
 
-  const templates: AlimtalkTemplate[] = tplRes.rows.map((r: any) => ({
+  const templates: AlimtalkTemplate[] = tplRes.rows.slice(0, MATCH_CANDIDATES_MAX).map((r: any) => ({
     id: r.id,
     template_code: r.template_code,
     template_name: r.template_name,
@@ -260,66 +271,65 @@ ${i + 1}. ID: ${t.id}
   // ★ D209+ (Harold 명시 2026-05-22): Sonnet 4.6 전환 — 단순 템플릿 매칭 + 변수 매핑 영역.
   //   AI 추론 깊이 의무 X = 비용 80% 절감 + 품질 정합.
   //   Phase D 통합: companyId + source 전달 → 회사별 월 한도 검증 + cache + 통계 자동 활성.
-  let aiResponse = '';
-  try {
-    const result = await callAIWithFallback({
-      model: 'sonnet',
-      system: systemPrompt,
-      userMessage,
-      maxTokens: 2000,
-      temperature: 0,
-      companyId: input.companyId,
-      source: 'alimtalk-matcher',
-    });
-    aiResponse = result || '';
-  } catch (err: any) {
-    console.error('[AlimtalkAIMatcher] AI 호출 실패:', err?.message || err);
-    return fallbackMatch(templates, input);
-  }
-
-  // 6. AI 응답 JSON 파싱
-  try {
-    const jsonMatch = aiResponse.match(/\{[\s\S]*\}/);
-    if (!jsonMatch) throw new Error('AI 응답에서 JSON 추출 실패');
-    const parsed = extractJsonFromAiText(jsonMatch[0]);
-
-    const matched = parsed.matched === true && parsed.match_score >= 50;
-    const bestTemplate = matched && parsed.best_template_id
-      ? templates.find((t) => t.id === parsed.best_template_id) || null
-      : null;
-
-    // 변수 자동 매핑 (best template 정합 시)
-    const variableMappings: VariableMapping[] = bestTemplate
-      ? autoMapVariables(bestTemplate.content, enabledFieldKeys)
-      : [];
-
-    // 차선 추천 매트릭스
-    const alternativeTemplates: AlimtalkMatchResult['alternativeTemplates'] = [];
-    const alternatives = Array.isArray(parsed.alternatives) ? parsed.alternatives.slice(0, 3) : [];
-    for (const alt of alternatives) {
-      const altTpl = templates.find((t) => t.id === alt.template_id);
-      if (altTpl && alt.match_score >= 30) {
-        alternativeTemplates.push({
-          template: altTpl,
-          matchScore: Number(alt.match_score) || 0,
-          matchReason: String(alt.match_reason || ''),
-        });
+  // ★ 2026-10-25 원장 #113 · Z4 — 돈 = AI 결과 정산 한 곳: AI 가 고를 템플릿을 낸 때만 1크레딧. AI 실패 · 읽지 못함 = 키워드 대체 결과(0원)
+  //   (옛: 응답 순간 1크레딧 · 읽지 못해 키워드 결과를 주면서도 걷었다). 바깥 묶음(AI 한줄로)이면 걷지 않는다(그 입구가 기본으로 걷는다).
+  const { result } = await runChargedAi({
+    companyId: input.companyId, cost: getCreditCost('alimtalk-matcher'), source: 'alimtalk-matcher',
+    run: async (): Promise<{ r: AlimtalkMatchResult; ai: boolean }> => {
+      let aiResponse = '';
+      try {
+        aiResponse = (await callAIWithFallback({
+          model: 'sonnet',
+          system: systemPrompt,
+          userMessage,
+          maxTokens: 2000,
+          temperature: 0,
+          companyId: input.companyId,
+          source: 'alimtalk-matcher',
+        })) || '';
+      } catch (err: any) {
+        console.error('[AlimtalkAIMatcher] AI 호출 실패:', err?.message || err);
+        return { r: fallbackMatch(templates, input), ai: false };
       }
-    }
-
-    return {
-      matched,
-      template: bestTemplate,
-      matchScore: Number(parsed.match_score) || 0,
-      matchReason: String(parsed.match_reason || ''),
-      variableMappings,
-      alternativeTemplates,
-      suggestion: matched ? null : (parsed.suggestion || '정합되는 알림톡 템플릿이 없습니다. 캠페인 의도에 맞는 템플릿을 추가 등록해주세요.'),
-    };
-  } catch (parseErr: any) {
-    console.error('[AlimtalkAIMatcher] JSON 파싱 실패:', parseErr?.message);
-    return fallbackMatch(templates, input);
-  }
+      try {
+        const jsonMatch = aiResponse.match(/\{[\s\S]*\}/);
+        if (!jsonMatch) return { r: fallbackMatch(templates, input), ai: false };
+        const parsed = extractJsonFromAiText(jsonMatch[0]);
+        const matched = parsed.matched === true && parsed.match_score >= 50;
+        const bestTemplate = matched && parsed.best_template_id
+          ? templates.find((t) => t.id === parsed.best_template_id) || null
+          : null;
+        // 변수 자동 매핑 (best template 정합 시)
+        const variableMappings: VariableMapping[] = bestTemplate ? autoMapVariables(bestTemplate.content, enabledFieldKeys) : [];
+        // 차선 추천 매트릭스
+        const alternativeTemplates: AlimtalkMatchResult['alternativeTemplates'] = [];
+        const alternatives = Array.isArray(parsed.alternatives) ? parsed.alternatives.slice(0, 3) : [];
+        for (const alt of alternatives) {
+          const altTpl = templates.find((t) => t.id === alt.template_id);
+          if (altTpl && alt.match_score >= 30) {
+            alternativeTemplates.push({ template: altTpl, matchScore: Number(alt.match_score) || 0, matchReason: aiStr(alt.match_reason) });
+          }
+        }
+        return {
+          r: {
+            matched,
+            template: bestTemplate,
+            matchScore: Number(parsed.match_score) || 0,
+            matchReason: aiStr(parsed.match_reason),
+            variableMappings,
+            alternativeTemplates,
+            suggestion: matched ? null : (parsed.suggestion || '정합되는 알림톡 템플릿이 없습니다. 캠페인 의도에 맞는 템플릿을 추가 등록해주세요.'),
+          },
+          ai: true,
+        };
+      } catch (parseErr: any) {
+        console.error('[AlimtalkAIMatcher] JSON 파싱 실패:', parseErr?.message);
+        return { r: fallbackMatch(templates, input), ai: false };
+      }
+    },
+    accept: (x) => x.ai && (!!x.r.template || x.r.alternativeTemplates.length > 0),
+  });
+  return truncatedNote ? { ...result.r, note: truncatedNote } : result.r;
 }
 
 /**

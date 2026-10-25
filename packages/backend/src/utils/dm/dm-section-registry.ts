@@ -1018,6 +1018,30 @@ export function isValidSectionType(type: string): type is SectionType {
 }
 
 /** 섹션 최대 개수 초과 여부 체크 */
+/**
+ * ★ 2026-10-25 원장 #69 — DM 한 장(모든 쪽)에 하나만 둘 수 있는 블록. 추첨 = DM 당 한 번(dm_draw_runs 가 DM 하나에 한 행 · 후보 = 첫 추첨 블록)이라
+ *   둘째 추첨 블록은 영영 추첨되지 않았다. 편집기 · 서버 저장 · 발행 검사가 이 판정 하나를 쓴다(DDL 0).
+ */
+export const DM_WIDE_ONE_TYPES: readonly SectionType[] = ['lucky_draw'];
+export function dmWideOneOverflow(sections: Array<{ type?: string } | null | undefined>): { type: SectionType; label: string } | null {
+  for (const t of DM_WIDE_ONE_TYPES) {
+    if (sections.filter((s) => s?.type === t).length > 1) return { type: t, label: SECTION_META[t].label };
+  }
+  return null;
+}
+/** 저장 모양(pages · sections)에서 모든 쪽의 블록을 펼친다(순수 · dm-builder extractFlatSectionsFromDm 와 같은 규칙) */
+export function flatSectionsOfBody(body: { pages?: any; sections?: any }): any[] {
+  let pages = body?.pages;
+  if (typeof pages === 'string') { try { pages = JSON.parse(pages); } catch { pages = null; } }
+  if (Array.isArray(pages) && pages.length > 0 && pages[0] && Array.isArray(pages[0].sections)) return pages.flatMap((p: any) => (Array.isArray(p?.sections) ? p.sections : []));
+  let sections = body?.sections;
+  if (typeof sections === 'string') { try { sections = JSON.parse(sections); } catch { sections = null; } }
+  return Array.isArray(sections) ? sections : [];
+}
+export function dmWideOneError(o: { label: string }): string {
+  return `${o.label}은(는) 한 DM 에 하나만 둘 수 있어요(추첨은 DM 마다 한 번 해요). 하나만 남겨 주세요.`;
+}
+
 export function isMaxCountExceeded(sections: Section[], type: SectionType): boolean {
   const max = SECTION_META[type].maxCount;
   const count = sections.filter((s) => s.type === type).length;

@@ -118,7 +118,7 @@ export function emailPaletteItems(): MakePaletteItem[] {
 // ─────────────── 결과 화면 "고칠 곳" ───────────────
 
 export interface ValidationLike {
-  items?: Array<{ area: string; severity: 'fatal' | 'recommend' | 'improve'; section_id?: string; message: string; fix_suggestion?: string; overridable?: boolean }>;
+  items?: Array<{ area: string; severity: 'fatal' | 'recommend' | 'improve'; section_id?: string; message: string; fix_suggestion?: string; overridable?: boolean; code?: string }>;
   can_publish?: boolean;
   /** ★ 2026-10-19 B-1005-1③ — 첫 발행 관문의 앞 두 칸(링크 결함 · 채울 자리 · 서버 /validate 가 싣는다) */
   publish_static_block?: { code: string; error: string } | null;
@@ -135,8 +135,7 @@ export interface FixItem {
   action?: string;
 }
 
-const CTA_EMPTY_RE = /CTA 버튼 \d+번의 URL이 비어/;
-const FOOTER_MISSING_RE = /^Footer 섹션이 없어요/;
+// ★ 2026-10-25 서버 검수 항목은 고정 키(code)로 알아본다(문장 글자 판정 0 · 서버 dm-validate ValidationItem.code)
 
 /**
  * 서버 검수 결과 + 블록 → 고칠 곳 목록. must(보내기 잠금) → suggest → ok → info 순.
@@ -155,7 +154,7 @@ export function fixItemsOf(v: ValidationLike | null, sections: ReadonlyArray<Pic
   for (const it of items) {
     if (it.severity !== 'fatal') continue;
     if (it.overridable === true) {
-      const footerMissing = it.area === 'required_info' && !it.section_id && FOOTER_MISSING_RE.test(it.message);
+      const footerMissing = it.code === 'FOOTER_MISSING';
       passable.push({
         kind: 'suggest',
         title: footerMissing ? '맨 아래 회사 정보 블록이 없어요' : it.message,
@@ -165,7 +164,7 @@ export function fixItemsOf(v: ValidationLike | null, sections: ReadonlyArray<Pic
       });
       continue;
     }
-    if (it.area === 'link' && CTA_EMPTY_RE.test(it.message)) {
+    if (it.code === 'CTA_URL_EMPTY') {
       const key = it.section_id || 'cta';
       if (seenCta.has(key)) continue;
       seenCta.add(key);
@@ -189,7 +188,12 @@ export function fixItemsOf(v: ValidationLike | null, sections: ReadonlyArray<Pic
   const hero = sections.find((s) => s.type === 'hero');
   if (hero && str((hero.props as any)?.image_url)) ok.push({ kind: 'ok', title: '첫 화면 사진 있음' });
   const ctas = sections.filter((s) => s.type === 'cta');
-  if (ctas.length > 0 && seenCta.size === 0) ok.push({ kind: 'ok', title: '버튼 주소 넣음' });
+  // ★ 2026-10-26 Codex 1R — 「버튼 주소 넣음」 = 블록에 실제로 주소가 다 있을 때(검수 키가 없다는 것을 정상의 근거로 쓰지 않는다)
+  const ctaUrlsFilled = ctas.length > 0 && ctas.every((s) => {
+    const bs = (s.props as any)?.buttons;
+    return Array.isArray(bs) && bs.length > 0 && bs.every((b: any) => str(b?.url));
+  });
+  if (ctaUrlsFilled && seenCta.size === 0 && !must.some((m) => ctas.some((c) => c.id === m.sectionId))) ok.push({ kind: 'ok', title: '버튼 주소 넣음' });
   if (v && !items.some((it) => it.area === 'link')) ok.push({ kind: 'ok', title: '링크 정상' });
   if (v && !items.some((it) => it.area === 'required_info' && it.severity === 'fatal')) ok.push({ kind: 'ok', title: '회사 정보 · 수신거부 안내 있음' });
   const info: FixItem[] = extraInfo.filter(Boolean).slice(0, 4).map((t) => ({ kind: 'info' as const, title: t }));
@@ -257,11 +261,7 @@ export function defaultDmSmsText(input: { brand?: string | null; title?: string 
   return [head, sub, '▶ 자세히 보기 %DM링크%'].filter(Boolean).join('\n');
 }
 
-/** 광고 야간 제한(21시~다음날 08시 · 백엔드 NIGHT_AD_RESTRICTED 와 같은 경계) */
-export function isNightAdHour(d: Date): boolean {
-  const h = d.getHours();
-  return h < 8 || h >= 21;
-}
+// ★ 2026-10-25 원장 #40 — 광고 야간 판정은 utils/send-policy isNightAdTime(서버 값 · KST)로 옮겼다(옛 isNightAdHour = 숫자 8 · 21 · 브라우저 시각)
 
 // ─────────────── 이메일 카드칩 표지(저장된 블록의 첫 사진) ───────────────
 

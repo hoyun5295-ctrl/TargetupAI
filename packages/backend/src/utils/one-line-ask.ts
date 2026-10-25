@@ -13,10 +13,11 @@
 import { query } from '../config/database';
 import { buildJourneyOpportunities, buildJourneyDiagnosis, type JourneyOpportunity } from './journey-opportunities';
 import { MARKETING_JOURNEY_SQL } from './journey-lifecycle-map';
+import { journeyCoverSql } from './journey-access';
 import { getOwnerCustomerScopeSql } from './store-scope';
 import { getCompanyJourneyFacts } from './company-data-profile';
 import { resolveTriggerAvailability, toAvailabilityMap } from './journey-trigger-capability';
-import { briefForViewer, type BriefRecommendation } from './daily-brief-policy';
+import { briefForViewer, type BriefRecommendation, CURRENT_BRIEF_DATE_SQL } from './daily-brief-policy';
 import { findNewNumbers } from './copy-benefit-detector';
 import { listPlannerEvents } from './planner-event';
 
@@ -73,12 +74,17 @@ async function viewerScope(companyId: string, userId: string | null | undefined)
   return { scope: sql ? 'mine' : 'company', blocked: sql === SCOPE_BLOCKED };
 }
 
-/** 초안 · 멈춤만 있는 마케팅 여정의 시작 사건 — 다시 권하지 않는다(만든 초안을 또 만들어 또 과금하지 않게 · 진단과 같은 기준) */
-async function nonActiveJourneyTriggers(companyId: string): Promise<Set<string>> {
+/**
+ * 초안 · 멈춤만 있는 마케팅 여정의 시작 사건 — 다시 권하지 않는다(만든 초안을 또 만들어 또 과금하지 않게 · 진단과 같은 기준)
+ *   ★ 2026-10-25 #9(D1 = A) — 담당자 = 자기 초안 · 멈춤만(journeyCoverSql · 진단과 같은 판정)
+ */
+async function nonActiveJourneyTriggers(companyId: string, userId: string | null | undefined): Promise<Set<string>> {
+  const params: any[] = [companyId];
+  const cover = await journeyCoverSql(userId, params);
   const r = await query(
     `SELECT DISTINCT j.trigger_event FROM journeys j
-      WHERE j.company_id = $1 AND j.status IN ('paused', 'draft') AND j.archived_at IS NULL AND ${MARKETING_JOURNEY_SQL}`,
-    [companyId],
+      WHERE j.company_id = $1 AND j.status IN ('paused', 'draft') AND j.archived_at IS NULL AND ${MARKETING_JOURNEY_SQL}${cover.where}`,
+    params,
   );
   return new Set<string>(r.rows.map((x: any) => String(x.trigger_event)));
 }
@@ -104,8 +110,8 @@ export async function buildJourneyAsk(companyId: string, userId: string | null |
   const sc = await viewerScope(companyId, userId);
   const [opps, diag, skip] = await Promise.all([
     settle(buildJourneyOpportunities(companyId, userId)),
-    settle(buildJourneyDiagnosis(companyId)),
-    settle(nonActiveJourneyTriggers(companyId)),
+    settle(buildJourneyDiagnosis(companyId, userId)),
+    settle(nonActiveJourneyTriggers(companyId, userId)),
   ]);
   const failed: string[] = [];
   if (!opps.ok) failed.push('여정 기회');
@@ -147,7 +153,7 @@ function dateText(v: unknown): string {
 export async function buildAutoAsk(companyId: string, isAdmin: boolean, now = new Date()): Promise<LineAskAnswer> {
   const r = await settle(query(
     `SELECT brief_date, headline, recommendations, signals FROM company_daily_briefs
-      WHERE company_id = $1::uuid ORDER BY brief_date DESC LIMIT 1`,
+      WHERE company_id = $1::uuid AND ${CURRENT_BRIEF_DATE_SQL} ORDER BY brief_date DESC LIMIT 1`,
     [companyId],
   ));
   const failed = r.ok ? [] : ['오늘의 추천'];
@@ -163,7 +169,7 @@ export async function buildAutoAsk(companyId: string, isAdmin: boolean, now = ne
   const blocked: LineAskAnswer['blocked'] = [];
   if (r.ok && (!view || date !== kstToday(now))) {
     blocked.push({
-      title: view ? `오늘의 추천이 아직 없어요(마지막 = ${date})` : '오늘의 추천이 아직 없어요',
+      title: view ? `오늘의 추천이 아직 없어요(어제 ${date} 추천을 보여 드려요)` : '오늘의 추천이 아직 없어요',
       reason: '추천은 매일 아침 유료 요금제 · 고객이 있는 회사에 만들어져요. 크레딧이 부족한 날은 건너뛰어요.',
     });
   }

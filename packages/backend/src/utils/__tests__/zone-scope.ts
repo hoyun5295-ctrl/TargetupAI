@@ -33,7 +33,6 @@ export const ZONE_ROOTS = [
   'pages/PlannerBriefPage.tsx',
   'pages/PlannerEventDetailPage.tsx', // ★ 2026-10-04 플래너 보강 · 행사 상세(로그인판 확인 화면)
   'pages/PredictiveDashboardPage.tsx',
-  'pages/QuickCampaignLegacyPage.tsx',
   'pages/QuickCampaignPage.tsx',
   'pages/QuickCampaignResultPage.tsx',
   'pages/SnsPage.tsx',

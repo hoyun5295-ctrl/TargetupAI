@@ -1,5 +1,6 @@
 import { extractJsonFromAiText } from '../utils/ai-json';   // ★ 2026-09-30 WP4 AI 응답 JSON 파싱 = CT(문자열 안 제어문자 복구)
 import { Request, Response, Router } from 'express';
+import { InsufficientCreditError } from '../utils/ai-credit';
 import fs from 'fs';
 import multer from 'multer';
 import path from 'path';
@@ -28,7 +29,7 @@ import { blockIfSyncActive } from '../middlewares/sync-active-check';
 import { requirePlanFeature } from '../utils/plan-guard';
 import { mapColumnsWithAi, ColumnMappingError } from '../utils/ai-column-mapper';
 
-import { publicErrorText } from '../utils/http-error';
+import { publicErrorText, respondUserError } from '../utils/http-error';
 const router = Router();
 
 // ★ 2026-07-06 raw fetch 폐기 — SDK 클라이언트 (7/1 Sonnet 5 게이팅 sweep이 raw fetch만 놓쳐
@@ -1053,6 +1054,9 @@ router.post(
 
       return res.json({ success: true, ...result });
     } catch (err: any) {
+      // ★ 2026-10-25 잔액 부족 402 · 원장 쓰기 실패 503(AI 결과 정산 한 곳 · 옛: 500)
+      if (err instanceof InsufficientCreditError) return res.status(402).json({ success: false, error: 'AI 크레딧이 부족합니다. 크레딧을 충전해 주세요.', code: 'INSUFFICIENT_CREDIT' });
+      if (respondUserError(res, err)) return;
       if (err instanceof ColumnMappingError) {
         return res.status(400).json({ success: false, code: err.code, error: err.message });
       }

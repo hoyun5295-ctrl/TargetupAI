@@ -15,6 +15,7 @@
  * - ★0905 조립 함수 분할(A-2): 순수 조립(buildProposalEmailSections · 한글 리터럴 0 · 문구는 style.emailCopy) ↔ AI 호출(generateSubjectIntro)
  *   ↔ 진입점(assembleProposalEmail = 조립 + 렌더 + 평문 + placeholder 합산).
  */
+import { UserFacingError } from './http-error';
 import { extractJsonFromAiText } from './ai-json';   // ★ 2026-09-30 WP4 AI 응답 JSON 파싱 = CT(문자열 안 제어문자 복구)
 import * as fs from 'fs';
 import * as net from 'net';
@@ -1228,7 +1229,7 @@ async function generatePosterWithRetry<T>(run: () => Promise<T>, jobId: string, 
 /** 대표 이미지 제작 진입점 — 아웃리치 이미지 제작은 대기열 한 자리를 지난다(불변 51). */
 export async function produceOutreachImage(input: OutreachImageInput): Promise<OutreachImageResult> {
   const r = await imageSlot.run(() => produceOutreachImageExclusive(input), OUTREACH_IMAGE_QUEUE_MAX_WAIT_MS);
-  if (!r.ok) throw new Error('다른 이미지 제작이 진행 중입니다. 잠시 후 재시도해주세요.');
+  if (!r.ok) throw new UserFacingError(409, 'IN_FLIGHT', '다른 이미지 제작이 진행 중입니다. 잠시 후 재시도해주세요.');
   return r.value;
 }
 
@@ -1509,7 +1510,7 @@ async function produceOutreachImageExclusive(input: OutreachImageInput): Promise
   if (!isStudioReady()) throw new Error('이미지 생성 서비스가 준비되지 않았습니다.');
   // ★ C-7 임시 저장 용량 게이트 — 락 교체는 하지 않는다
   if (companyTempUsageBytes(ctx.companyId) > STUDIO_TEMP_CAP_BYTES) {
-    throw new Error('이미지 임시 저장 용량이 가득 찼습니다. 잠시 후 다시 시도해주세요.');
+    throw new UserFacingError(409, 'TEMP_FULL', '이미지 임시 저장 용량이 가득 찼습니다. 잠시 후 다시 시도해주세요.');
   }
   // 동시 1건은 진입점(produceOutreachImage)의 대기열이 보장한다 — 자리 반납도 대기열이 한다
   {

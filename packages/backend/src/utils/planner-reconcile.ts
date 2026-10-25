@@ -172,6 +172,7 @@ async function reportCancelledLeftovers(): Promise<number> {
       WHERE e.status = 'cancelled'
         AND (t.exec_ref IS NOT NULL OR t.status = 'sent')
         AND COALESCE(t.exec_meta->>'cancel_leftover_notified', '') = ''
+      ORDER BY t.id   -- ★ 2026-10-25 R12: 순서 고정(순서 없는 LIMIT 0 · 알린 행은 표식으로 빠진다)
       LIMIT 100`,
   );
   let reported = 0;
@@ -195,6 +196,11 @@ async function sweepJoinClicks(monthFrom: string): Promise<number> {
        JOIN planner_events e ON e.id = t.event_id AND e.company_id = t.company_id
       WHERE t.channel = 'email' AND t.status = 'sent' AND t.asset_ref IS NOT NULL
         AND e.plan_month >= $1
+        -- ★ 2026-10-25 원장 #10 — 처리한 접점은 1시간 동안 빠지고 · 오래 안 본 순(옛: 처리해도 조건에서 안 빠지고 순서 없는 LIMIT 200 →
+        --   200개가 넘으면 뒤 접점은 참여 수집 영영 안 됨) · 표식 = ISO 글자(UTC) · 사전순 = 시간순
+        AND (t.exec_meta->>'join_swept_at' IS NULL
+             OR t.exec_meta->>'join_swept_at' < to_char((NOW() AT TIME ZONE 'UTC') - INTERVAL '1 hour', 'YYYY-MM-DD"T"HH24:MI:SS'))
+      ORDER BY t.exec_meta->>'join_swept_at' ASC NULLS FIRST, t.id
       LIMIT 200`,
     [monthFrom],
   );
@@ -211,6 +217,8 @@ async function sweepJoinClicks(monthFrom: string): Promise<number> {
     } catch (e: any) {
       console.warn(`[planner-reconcile] 참여 수집 실패 tp=${row.id}:`, e?.message || e);
     }
+    // 성공 · 실패 모두 차례를 뒤로(실패 행이 앞자리를 계속 차지하지 않게 · 1시간 뒤 다시 본다)
+    await stampExecMeta(String(row.company_id), String(row.id), { join_swept_at: new Date().toISOString() }).catch(() => { /* 다음 주기에 다시 앞 */ });
   }
   return inserted;
 }

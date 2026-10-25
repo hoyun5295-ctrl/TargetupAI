@@ -14,6 +14,7 @@
  */
 
 import { Request, Response, Router } from 'express';
+import { InsufficientCreditError } from '../utils/ai-credit';
 import { authenticate } from '../middlewares/auth';
 import {
   getOnboardingState,
@@ -31,7 +32,7 @@ import { mapColumnsWithAi, ColumnMappingError } from '../utils/ai-column-mapper'
 // ★ D219+ Part 2 후속 (2026-05-27) Task 7: isAiOperatorTrialActive duplicate 폐기 — plan-guard 단일 진입점 통합
 import { loadPlanContext } from '../utils/plan-guard';
 
-import { publicErrorText } from '../utils/http-error';
+import { publicErrorText, respondUserError } from '../utils/http-error';
 const router = Router();
 router.use(authenticate);
 
@@ -166,6 +167,9 @@ router.post('/import-analyze', requireAiOperatorTrialActive, async (req: Request
     });
     return res.json({ success: true, ...result });
   } catch (err: any) {
+    // ★ 2026-10-25 잔액 부족 402 · 원장 쓰기 실패 503(AI 결과 정산 한 곳 · 옛: 500)
+    if (err instanceof InsufficientCreditError) return res.status(402).json({ success: false, error: 'AI 크레딧이 부족합니다. 크레딧을 충전해 주세요.', code: 'INSUFFICIENT_CREDIT' });
+    if (respondUserError(res, err)) return;
     if (err instanceof ColumnMappingError) {
       return res.status(400).json({ success: false, code: err.code, error: err.message });
     }
@@ -196,6 +200,9 @@ router.post('/segment-generate', requireAiOperatorTrialActive, async (req: Reque
     });
     return res.json({ success: true, ...result });
   } catch (err: any) {
+    // ★ 2026-10-25 잔액 부족 402 · 원장 쓰기 실패 503(AI 결과 정산 한 곳 · 옛: 500)
+    if (err instanceof InsufficientCreditError) return res.status(402).json({ success: false, error: 'AI 크레딧이 부족합니다. 크레딧을 충전해 주세요.', code: 'INSUFFICIENT_CREDIT' });
+    if (respondUserError(res, err)) return;
     if (err instanceof SegmentGenerationError) {
       // ZERO_MATCH 등 사용자 안내 오류 = 400
       return res.status(400).json({ success: false, code: err.code, error: err.message });

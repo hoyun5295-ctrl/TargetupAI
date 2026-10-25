@@ -29,6 +29,7 @@ const REASON_TEXT: Record<string, string> = {
   placeholder_unedited: '채워야 할 자리표시(혜택 등)가 남아 있어요',
   variable_mapping_invalid: '알림톡 변수 연결이 비었어요',
   spam_filter_failed: '스팸 차단에 걸리는 문구가 있어요',
+  spam_check_unavailable: '스팸 검사를 마치지 못했어요(잠시 뒤 다시 켜 주세요)',
   subject_missing: '장문 문자 제목이 없어요',
 };
 

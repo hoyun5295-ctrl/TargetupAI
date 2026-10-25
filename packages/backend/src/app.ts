@@ -52,8 +52,6 @@ import balanceRoutes from './routes/balance';
 import agentChargeOrdersRoutes from './routes/agent-charge-orders';
 // ★ 2026-08-12 마케팅 플래너 Phase 1 (설계서 = docs/2026-08-12-ax-marketing-planner-design.md)
 import marketingPlannerRoutes from './routes/marketing-planner';
-// ★ 2026-08-13 원스텝 AI 컨텐츠 생성 (설계서 = docs/2026-08-13-one-step-content-interview-design.md)
-import contentInterviewRoutes from './routes/content-interview';
 import marketingDiagnosisRoutes from './routes/marketing-diagnosis';
 import marketingDiagnosisPublicRoutes from './routes/marketing-diagnosis-public';
 import introPublicRoutes from './routes/intro-public'; // ★ 2026-10-07 공개 소개 페이지 방문 · 시연 요청(무인증)
@@ -103,6 +101,7 @@ import emailRoutes from './routes/email';
 import shortUrlRoutes from './routes/short-url';  // D183: 단축 URL redirect (/c/:hash) — 공개 endpoint
 import journeyPausePublicRouter from './routes/journey-pause-public';  // ★ D218+ · 2026-10-18 여정 즉시 정지 링크 — 공개 endpoint (/api/journey-pause/*)
 import autosendStopPublicRouter from './routes/autosend-stop-public';  // ★ 2026-10-18 자동마케팅 예고 문자 멈춤 링크 — 공개 endpoint
+import sendPolicyRouter from './routes/send-policy';   // ★ 2026-10-25 원장 #40 서버 발송 규칙 값(무인증 · 화면이 숫자를 박지 않게)
 import plannerRecheckPublicRouter from './routes/planner-recheck-public';  // ★ 2026-10-18 플래너 당일 재확인 링크 — 공개 endpoint
 import { startAutoCampaignScheduler } from './utils/auto-campaign-worker';
 import { ensureMonthlyLogTables } from './utils/sms-queue';
@@ -468,6 +467,7 @@ app.use('/api/agency-approve', agencyApproveRoutes); // ★ 2026-08-25 대행발
 app.use('/api/charge-approve', chargeApproveRoutes); // ★ 2026-08-28(3) 충전 승인 링크(무인증 · 토큰 = 문자 안 주소)
 app.use('/api/journey-pause', journeyPausePublicRouter); // ★ 2026-10-18 여정 정지 링크(무인증 · 토큰 = 헤더 · 옛 루트 마운트 /journey-pause/:token 폐기 = 화면 라우트와 겹침)
 app.use('/api/planner-recheck', plannerRecheckPublicRouter);
+app.use('/api/send-policy', sendPolicyRouter);
 app.use('/api/autosend-stop', autosendStopPublicRouter); // ★ 2026-10-18 자동마케팅 예고 문자 멈춤 링크(무인증 · 토큰 = 헤더 · 멈추는 일만) // ★ 2026-10-18 플래너 당일 재확인 링크(무인증 · 토큰 = 헤더 · 설계서 2026-10-18 §3-2-4)
 app.use('/api/sales-outreach', salesOutreachRoutes); // ★ 2026-08-24 AI 영업 아웃리치(슈퍼관리자 ceo 전용)
 app.use('/api/outreach/v', outreachPublicRoutes); // ★ 2026-08-24 아웃리치 공개 샘플 페이지(무인증)
@@ -490,7 +490,6 @@ app.use('/api/agent-charge-orders', agentChargeOrdersRoutes);
 // ★ 2026-08-12 마케팅 플래너 Phase 1 — CRUD·가용성만(승인·차감·발송 없음). 테이블 미생성 시 503 DB_MIGRATION_PENDING
 app.use('/api/marketing-planner', marketingPlannerRoutes);
 // ★ 2026-08-13 원스텝 AI 컨텐츠 생성(인터뷰형) — 세션·견적·생성 확정. 테이블 미생성 시 503 DB_MIGRATION_PENDING
-app.use('/api/one-step', contentInterviewRoutes);
 // ★ 2026-08-16 AI 마케팅 진단(퍼널 A — 인증) — FREE 진단→TRIAL 7일 자동 지급. 테이블 미생성 시 503 DB_MIGRATION_PENDING
 app.use('/api/marketing-diagnosis', marketingDiagnosisRoutes);
 // ★ 2026-08-16 AI 마케팅 진단(퍼널 B — 미인증 리드). 본문 파서 32kb 한정은 전역 파서 앞에 선배치됨

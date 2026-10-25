@@ -13,8 +13,14 @@
  *
  * 크레딧: source 'event-image-extract' = 3 (callAIWithFallback이 성공 시에만 차감). 이미지 있으면 cache 우회.
  */
-import { extractJsonFromAiText } from './ai-json';   // ★ 2026-09-30 WP4 AI 응답 JSON 파싱 = CT(문자열 안 제어문자 복구)
+import { extractJsonFromAiText, aiStr } from './ai-json';   // ★ 2026-09-30 WP4 AI 응답 JSON 파싱 = CT(문자열 안 제어문자 복구)
 import { callAIWithFallback } from '../services/ai';
+import { runChargedAi } from './ai-credit';
+import { getCreditCost } from './ai-credit-calc';
+import { UserFacingError } from './http-error';
+
+const NO_IMAGE_TEXT = '판독할 이미지가 없습니다. jpg/png/webp 이미지를 올려주세요.';
+const UNREADABLE_TEXT = '이미지에서 행사 내용을 읽지 못했습니다. 텍스트가 잘 보이는 이미지로 다시 시도해주세요. 크레딧은 빠지지 않았어요.';
 import { normalizeEventText } from './event-brief';
 
 export interface EventImageInput {
@@ -144,12 +150,12 @@ function parseEvents(raw: string): ExtractedEvent[] | null {
     const arr = Array.isArray(obj?.events) ? obj.events : null;
     if (!arr) return null;
     const events: ExtractedEvent[] = arr.slice(0, MAX_EVENT_IMAGES).map((e: any) => ({
-      brand: String(e?.brand || '').trim().slice(0, 60),
-      title: String(e?.title || '').trim().slice(0, 120),
-      subtitle: String(e?.subtitle || '').trim().slice(0, 200),
-      benefit: String(e?.benefit || '').trim().slice(0, 200),
+      brand: aiStr(e?.brand).trim().slice(0, 60),
+      title: aiStr(e?.title).trim().slice(0, 120),
+      subtitle: aiStr(e?.subtitle).trim().slice(0, 200),
+      benefit: aiStr(e?.benefit).trim().slice(0, 200),
       products: (Array.isArray(e?.products) ? e.products : []).slice(0, 20).map((p: any) => ({
-        name: String(p?.name || '').trim().slice(0, 120),
+        name: aiStr(p?.name).trim().slice(0, 120),
         price: toInt(p?.price),
         sale_price: toInt(p?.sale_price),
         discount_rate: Math.min(99, toInt(p?.discount_rate)),
@@ -173,32 +179,32 @@ export async function extractEventsFromImages(params: {
   const images = (params.images || [])
     .filter((im) => im && typeof im.data === 'string' && im.data.length > 0 && ALLOWED_IMAGE_MEDIA_TYPES.has(im.media_type))
     .slice(0, MAX_EVENT_IMAGES);
-  if (!images.length) {
-    throw new Error('판독할 이미지가 없습니다. jpg/png/webp 이미지를 올려주세요.');
-  }
+  if (!images.length) throw new UserFacingError(400, 'NO_IMAGE', NO_IMAGE_TEXT);
 
-  const raw = await callAIWithFallback({
-    system: EXTRACT_STRUCT_SYSTEM_PROMPT,
-    userMessage: '위 이미지들에 실제로 보이는 행사 내용만 규칙대로 JSON으로 옮겨 적어줘. 안 보이는 값은 빈 문자열/0으로 두고 지어내지 마.',
-    maxTokens: 2500,
-    temperature: 0.1,
-    companyId: params.companyId,
-    userId: params.userId,
-    source: 'event-image-extract',
-    creditCost: 3,
-    images,
+  // ★ 2026-10-25 원장 Z4 · Z2 — 돈 = AI 결과 정산 한 곳 · 단가 = 단가표(event-image-extract). 글을 읽어 냈을 때만 3크레딧
+  //   (옛: 응답 순간 숫자 3 으로 걷고 글 0 이면 「읽지 못했습니다」를 던졌다 · 바깥 묶음(자동제작 v1)이면 걷지 않는다).
+  const { result } = await runChargedAi({
+    companyId: params.companyId, cost: getCreditCost('event-image-extract'), source: 'event-image-extract', createdBy: params.userId || null,
+    run: async () => {
+      const raw = await callAIWithFallback({
+        system: EXTRACT_STRUCT_SYSTEM_PROMPT,
+        userMessage: '위 이미지들에 실제로 보이는 행사 내용만 규칙대로 JSON으로 옮겨 적어줘. 안 보이는 값은 빈 문자열/0으로 두고 지어내지 마.',
+        maxTokens: 2500,
+        temperature: 0.1,
+        companyId: params.companyId,
+        userId: params.userId,
+        source: 'event-image-extract',
+        images,
+      });
+      const events = parseEvents(raw);
+      if (events) return { events, eventText: eventsToProse(events) };
+      // 형식 위반 폴백 — 원문을 산문으로(기존 체감 유지). 재호출 없음(중복 과금 방지).
+      return { events: null, eventText: normalizeEventText(stripWrapping(raw)) };
+    },
+    accept: (r) => !!r.eventText,
   });
-
-  const events = parseEvents(raw);
-  if (events) {
-    return { events, eventText: eventsToProse(events) };
-  }
-  // 형식 위반 폴백 — 원문을 산문으로(기존 체감 유지). 재호출 없음(중복 과금 방지).
-  const text = normalizeEventText(stripWrapping(raw));
-  if (!text) {
-    throw new Error('이미지에서 행사 내용을 읽지 못했습니다. 텍스트가 잘 보이는 이미지로 다시 시도해주세요.');
-  }
-  return { events: null, eventText: text };
+  if (!result.eventText) throw new UserFacingError(422, 'IMAGE_UNREADABLE', UNREADABLE_TEXT);
+  return result;
 }
 
 /**
@@ -213,25 +219,23 @@ export async function extractEventTextFromImages(params: {
   const images = (params.images || [])
     .filter((im) => im && typeof im.data === 'string' && im.data.length > 0 && ALLOWED_IMAGE_MEDIA_TYPES.has(im.media_type))
     .slice(0, MAX_EVENT_IMAGES);
-  if (!images.length) {
-    throw new Error('판독할 이미지가 없습니다. jpg/png/webp 이미지를 올려주세요.');
-  }
+  if (!images.length) throw new UserFacingError(400, 'NO_IMAGE', NO_IMAGE_TEXT);
 
-  const raw = await callAIWithFallback({
-    system: EXTRACT_SYSTEM_PROMPT,
-    userMessage: '위 이미지에 실제로 보이는 행사 내용만 규칙대로 그대로 옮겨 적어줘. 보이지 않는 값은 지어내지 말고 비워 둬.',
-    maxTokens: 1500,
-    temperature: 0.2,
-    companyId: params.companyId,
-    userId: params.userId,
-    source: 'event-image-extract',
-    creditCost: 3,
-    images,
+  // ★ 2026-10-25 원장 Z4 · Z2 — 위 함수와 같은 정산(글을 읽어 냈을 때만 · 단가표)
+  const { result: text } = await runChargedAi({
+    companyId: params.companyId, cost: getCreditCost('event-image-extract'), source: 'event-image-extract', createdBy: params.userId || null,
+    run: async () => normalizeEventText(stripWrapping(await callAIWithFallback({
+      system: EXTRACT_SYSTEM_PROMPT,
+      userMessage: '위 이미지에 실제로 보이는 행사 내용만 규칙대로 그대로 옮겨 적어줘. 보이지 않는 값은 지어내지 말고 비워 둬.',
+      maxTokens: 1500,
+      temperature: 0.2,
+      companyId: params.companyId,
+      userId: params.userId,
+      source: 'event-image-extract',
+      images,
+    }))),
+    accept: (t) => !!t,
   });
-
-  const text = normalizeEventText(stripWrapping(raw));
-  if (!text) {
-    throw new Error('이미지에서 행사 내용을 읽지 못했습니다. 텍스트가 잘 보이는 이미지로 다시 시도해주세요.');
-  }
+  if (!text) throw new UserFacingError(422, 'IMAGE_UNREADABLE', UNREADABLE_TEXT);
   return text;
 }

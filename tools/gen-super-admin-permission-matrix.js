@@ -134,17 +134,7 @@ const features = [
   // K. 시스템 설정 (3건)
   { cat: 'K. 시스템', name: '라인그룹 관리 (CRUD)', desc: 'SMS 발송 라인 그룹화', risk: '', api: '/api/admin/line-groups/*' },
   { cat: 'K. 시스템', name: '감사 로그 조회', desc: '전체 관리자 활동 로그', risk: '🔒', api: 'GET /api/admin/audit-logs' },
-  { cat: 'K. 시스템', name: '서비스 전환 (한줄로↔전단AI)', desc: 'JWT 재발급 → 서비스 컨텍스트 변경', risk: '', api: 'POST /api/admin/switch-service' },
 
-  // L. 전단AI (별도 서비스, 8건)
-  { cat: 'L. 전단AI (별도)', name: '전단AI 대시보드', desc: '전체 현황 요약', risk: '', api: 'GET /api/admin/flyer/dashboard' },
-  { cat: 'L. 전단AI (별도)', name: '전단AI 고객사 관리 (CRUD)', desc: '업체 목록·생성·수정·삭제', risk: '', api: '/admin/flyer/companies/*' },
-  { cat: 'L. 전단AI (별도)', name: '전단AI 사용자 관리', desc: '업체 사용자 계정', risk: '', api: '/admin/flyer/users/*' },
-  { cat: 'L. 전단AI (별도)', name: '전단AI 매장 관리 (CRUD+충전)', desc: '매장 활성화·충전', risk: '⚠️', api: '/admin/flyer/stores/*' },
-  { cat: 'L. 전단AI (별도)', name: '전단AI 업종 조회', desc: '마트/정육 등 업종', risk: '', api: 'GET /admin/flyer/business-types' },
-  { cat: 'L. 전단AI (별도)', name: '전단AI POS Agent 관리', desc: 'POS 연동 키 생성', risk: '🔒', api: '/admin/flyer/pos-agents/*' },
-  { cat: 'L. 전단AI (별도)', name: '전단AI 청구 조회', desc: '매장별 청구 현황', risk: '🔒', api: 'GET /admin/flyer/billing' },
-  { cat: 'L. 전단AI (별도)', name: '전단AI 감사 로그', desc: '전단AI 전용 감사 로그', risk: '🔒', api: 'GET /admin/flyer/audit-logs' },
 ];
 
 // ==========================================================================
@@ -233,12 +223,11 @@ const sheet3Data = [
   ['H', '발신/회신번호', 'KISA 승인, 담당자 위임장, 증빙서류'],
   ['I', '알림톡·RCS', '카카오 발신프로필, 템플릿 검수'],
   ['J', '싱크에이전트', 'Agent 명령·키 관리 (★ 키는 DB 직결)'],
-  ['K', '시스템', '라인그룹, 감사 로그, 서비스 전환'],
-  ['L', '전단AI', '전단AI 서비스 관리 (별도 서비스)'],
+  ['K', '시스템', '라인그룹, 감사 로그'],
   [],
   ['권장 기본 프리셋 (참고용)', '', ''],
   ['Owner (Harold)', '전체 O', '모든 권한 + 2FA 필수'],
-  ['Operations (서팀장)', 'E(입금승인까지 O), 마스킹해제/키조회/싱크키 X, L(전단AI) 조건부', '운영 필수 + 자금 일부'],
+  ['Operations (서팀장)', 'E(입금승인까지 O), 마스킹해제/키조회/싱크키 X', '운영 필수 + 자금 일부'],
   ['Support (직원A)', 'B/C/F/G/H/I 일부 O, 삭제·수정 X, 고객DB 엑셀 다운로드 X', '고객지원 조회 중심'],
   ['Viewer (직원B)', '모든 카테고리 조회만 O, 쓰기·삭제 전부 X', '리포트·통계 용도'],
 ];

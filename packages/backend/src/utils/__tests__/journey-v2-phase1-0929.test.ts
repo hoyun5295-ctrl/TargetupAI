@@ -160,8 +160,9 @@ describe('생애 지도 — 선 상태', () => {
     const m = await buildLifecycleMap('c');
     expect(m.journeys.find((j) => j.id === 'P')!.goalLabel).toBe('포인트 줄어듦');
     expect(m.journeys.find((j) => j.id === 'A')!.goalLabel).toBe('구매 확인');
-    // 매장 원장 문(자사몰 구매 사건 없음) = 같은 날 가입 · 구매는 둘 다 받는다(구매일이 진입 시각보다 앞)
-    expect(m.journeys.find((j) => j.id === 'A')!.notices.join()).toContain('둘 다 받아요');
+    // ★ 2026-10-25 #13 — 가입 묶음 구매 판정 = 실행기 목표와 같은 한 판정(journey-goal-purchase) · 문과 무관하게 첫 구매 여정이 맞이
+    expect(m.journeys.find((j) => j.id === 'A')!.notices.join()).toContain('환영 문자 대신 첫 구매 여정이 맞이해요');
+    expect(m.journeys.find((j) => j.id === 'A')!.notices.join()).not.toContain('둘 다 받아요');
     expect(m.journeys.find((j) => j.id === 'P')!.notices).toEqual([]);
   });
   it('편집 정책 = 상태별(초안 자유 · 진행 중 없는 멈춤 자유 · 켜짐 문안만 · ★ 1009 stepEditPolicy)', async () => {

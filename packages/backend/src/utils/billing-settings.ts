@@ -10,6 +10,7 @@
  *  - 날짜 산식은 **순수 함수**다. Date 문자열 연산으로 TZ 개입을 차단한다(toISOString 하루 밀림 계열 방지).
  */
 
+import { UserFacingError } from './http-error';
 import pool from '../config/database';
 
 export type BillingIssueScope = 'combined' | 'by_user';
@@ -61,10 +62,10 @@ export async function upsertCompanyBillingSettings(
   s: { issueScope: string; taxbillDayPolicy: string; manualBilling?: boolean; requireTaxbillRemark?: boolean; updatedBy?: string | null },
 ): Promise<void> {
   if (!ISSUE_SCOPES.includes(s.issueScope as BillingIssueScope)) {
-    throw new Error(`발행 단위 값이 올바르지 않습니다: ${s.issueScope}`);
+    throw new UserFacingError(400, 'BILLING_SETTING_INVALID', '발행 단위를 다시 골라 주세요.');
   }
   if (!DAY_POLICIES.includes(s.taxbillDayPolicy as TaxbillDayPolicy)) {
-    throw new Error(`계산서 발급일자 정책 값이 올바르지 않습니다: ${s.taxbillDayPolicy}`);
+    throw new UserFacingError(400, 'BILLING_SETTING_INVALID', '계산서 발급일 기준을 다시 골라 주세요.');
   }
   const updatedBy = s.updatedBy && UUID_RE.test(s.updatedBy) ? s.updatedBy : null;
   const manualProvided = s.manualBilling !== undefined;
@@ -132,7 +133,7 @@ export function normalizeBizNumber(raw: any): string | null {
   if (!s) return null;
   const d = s.replace(/\D/g, '');
   if (d.length !== 10) {
-    throw new Error(`사업자등록번호는 숫자 10자리여야 합니다 (입력: ${s})`);
+    throw new UserFacingError(400, 'BIZ_NO_INVALID', '사업자등록번호는 숫자 10자리로 넣어 주세요.');
   }
   return `${d.slice(0, 3)}-${d.slice(3, 5)}-${d.slice(5)}`;
 }
@@ -285,7 +286,7 @@ export function pickTaxbillParty(row: any): TaxbillParty {
 export function computeTaxbillIssueDate(policy: TaxbillDayPolicy, billingEnd: string): string | null {
   if (policy === 'manual') return null;
   if (!/^\d{4}-\d{2}-\d{2}$/.test(String(billingEnd || ''))) {
-    throw new Error(`기간 종료일 형식이 올바르지 않습니다: ${billingEnd}`);
+    throw new UserFacingError(400, 'BILLING_PERIOD_INVALID', '기간 종료일을 다시 골라 주세요.');
   }
   const y = Number(billingEnd.slice(0, 4));
   const m = Number(billingEnd.slice(5, 7)); // 1-based

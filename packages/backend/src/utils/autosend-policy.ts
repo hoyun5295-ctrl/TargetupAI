@@ -278,8 +278,14 @@ export function computeNextOccurrence(
   } else if (target.getTime() <= kstNow.getTime()) {
     if (schedule === 'daily') target.setUTCDate(target.getUTCDate() + 1);
     else if (schedule === 'weekly') target.setUTCDate(target.getUTCDate() + 7);
-    else if (schedule === 'monthly') target.setUTCMonth(target.getUTCMonth() + 1);
-    else if (schedule === 'yearly') target.setUTCFullYear(target.getUTCFullYear() + 1);
+    // ★ 2026-10-25 원장 #44 — 날짜 칸이 빈 옛 행 = 오늘 일자 기준 말일 보정(옛: setUTCMonth(+1) · 29~31일이 다음다음 달로 넘어갔다 · 2/29 연 1회도 같다)
+    else if (schedule === 'monthly' || schedule === 'yearly') {
+      const day = target.getUTCDate();
+      if (schedule === 'monthly') target.setUTCMonth(target.getUTCMonth() + 1, 1);
+      else target.setUTCFullYear(target.getUTCFullYear() + 1, target.getUTCMonth(), 1);
+      const last = new Date(Date.UTC(target.getUTCFullYear(), target.getUTCMonth() + 1, 0)).getUTCDate();
+      target.setUTCDate(Math.min(day, last));
+    }
   }
   // KST → UTC
   return new Date(target.getTime() - 9 * 60 * 60 * 1000);

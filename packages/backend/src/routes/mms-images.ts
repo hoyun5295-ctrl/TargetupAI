@@ -1,3 +1,4 @@
+import { uploadErrorText } from '../utils/http-error';
 import express from 'express';
 import multer from 'multer';
 import path from 'path';
@@ -13,12 +14,10 @@ const router = express.Router();
 const MMS_IMAGE_BASE = process.env.MMS_IMAGE_PATH || path.resolve('./uploads/mms');
 
 // multer 설정: 메모리에 임시 저장 후 검증 → 디스크 저장
+const MMS_UPLOAD_LIMITS = { fileSize: LIMITS.mmsImageSize, files: LIMITS.mmsImageCount };   // 300KB · 3개
 const upload = multer({
   storage: multer.memoryStorage(),
-  limits: {
-    fileSize: LIMITS.mmsImageSize, // 300KB 제한
-    files: LIMITS.mmsImageCount,   // 최대 3개
-  },
+  limits: MMS_UPLOAD_LIMITS,
   fileFilter: (req, file, cb) => {
     // JPG/JPEG만 허용
     const ext = path.extname(file.originalname).toLowerCase();
@@ -38,15 +37,7 @@ router.post('/upload', authenticate, (req: any, res: any) => {
   const uploadHandler = upload.array('images', 3);
 
   uploadHandler(req, res, async (err: any) => {
-    if (err) {
-      if (err.code === 'LIMIT_FILE_SIZE') {
-        return res.status(400).json({ error: '이미지 크기는 300KB 이하여야 합니다' });
-      }
-      if (err.code === 'LIMIT_FILE_COUNT') {
-        return res.status(400).json({ error: '이미지는 최대 3개까지 첨부 가능합니다' });
-      }
-      return res.status(400).json({ error: err.message || '이미지 업로드 실패' });
-    }
+    if (err) return res.status(400).json({ error: uploadErrorText(err, MMS_UPLOAD_LIMITS) });   // ★ 2026-10-25 Z5
 
     const files = req.files as Express.Multer.File[];
     if (!files || files.length === 0) {

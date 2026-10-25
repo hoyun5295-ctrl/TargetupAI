@@ -37,7 +37,7 @@ export async function makeLineHeadlineImage(input: {
   texts: { title: string; label?: string };
   /** 제품 템플릿일 때만 쓴다 */
   productImage?: string | null;
-}): Promise<{ url: string; filename: string }> {
+}): Promise<{ url: string; filename: string; bytes: number; ext: string; channelSpec: string }> {
   const { companyId, template } = input;
   const isProduct = (template.kind ?? 'product') === 'product';
   const src = isProduct ? lineHeadlineImageSource(input.productImage || '', companyId) : null;
@@ -74,7 +74,7 @@ export async function makeLineHeadlineImage(input: {
     clearTempMeta(companyId, tempId);
     throw new Error('HEADLINE_SAVE_FAILED');
   }
-  return { url: moved.url, filename: moved.filename };
+  return { url: moved.url, filename: moved.filename, bytes: moved.bytes, ext: moved.ext, channelSpec: preset.channelSpec };
 }
 
 export { getTemplate };

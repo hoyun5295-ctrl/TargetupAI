@@ -182,10 +182,9 @@ describe('⑦ 재오픈 뒤로가기 — 메뉴 첫 화면 ← = 항상 허브(g
       expect(read(rel), rel).toContain("goUpTo(navigate, '/ai-operator')");
     }
   });
-  it('하위 화면 부모 지정 = AI Batch·질문 → AI 메모리 · 옛 만들기 → DM 목록(허브로 건너뛰지 않게)', () => {
+  it('하위 화면 부모 지정 = AI Batch·질문 → AI 메모리(허브로 건너뛰지 않게 · 옛 만들기 화면은 1025 #104 삭제)', () => {
     expect(read('pages/AiBatchesPage.tsx')).toContain('backTo="/ai-memory"');
     expect(read('pages/AiExplainPage.tsx')).toContain('backTo="/ai-memory"');
-    expect(read('pages/QuickCampaignLegacyPage.tsx')).toContain('backTo="/dm-builder"');
   });
 });
 
@@ -199,7 +198,7 @@ describe('⑧ 이메일 편집기 나가기 — 한 번만 · 보이게 · 실�
   it('나가기 = 다시 눌러도 한 번 · "저장하고 나가는 중" 표시 · 저장 실패면 닫지 않고 확인 창', () => {
     expect(src).toContain('if (leavingRef.current) return;');
     expect(src).toContain("leaving ? { tone: 'saving', text: '저장하고 나가는 중' }");
-    expect(src).toContain('if (id) { onClose(); return; }');
+    expect(src).toContain('if (id) { after(); return; }');   // ★ 1026 after = 나간 뒤 할 일(기본 = 닫기)
     expect(src).toContain("title: '저장하지 못했어요'");
     expect(src).not.toContain('void persist().then(() => onClose());');
   });

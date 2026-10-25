@@ -250,9 +250,10 @@ describe('배선 — 스튜디오 라우트만 엔진을 넘긴다', () => {
     expect(r).toContain('generatePoster(prompt, preset, cutout, { engine: studioImageEngine() })');
     expect(r).toMatch(/editOrUpscale\(\{[\s\S]*?engine: studioImageEngine\(\),[\s\S]*?\}\);/);
   });
-  it('템플릿 예시 배치 · 아웃리치는 엔진을 넘기지 않는다(Gemini 그대로)', () => {
+  // ★ 1025 R15 — 화면이 부르지 않던 템플릿 예시 생성 주소(/template-samples/generate)는 지웠다
+  it('템플릿 예시 생성 주소 0 · 아웃리치는 엔진을 넘기지 않는다(Gemini 그대로)', () => {
     const r = src('..', 'routes', 'image-studio.ts');
-    expect(r).toContain('await generatePoster(prompt, preset, null);');
+    expect(r).not.toContain("imageStudioRouter.post('/template-samples/generate'");
     expect(src('sales-outreach-produce.ts')).not.toMatch(/studioImageEngine|engine:\s*'openai'/);
   });
 });

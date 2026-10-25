@@ -11,7 +11,7 @@ import { CalendarCheck, Loader2, X } from 'lucide-react';
 import { MK_MODAL, MK_MODAL_BACKDROP } from '../../utils/make-ui';
 import { useToast } from '../ToastProvider';
 import PlannerRecheckPanel from './PlannerRecheckPanel';
-import { plannerApi, type RecheckAction, type RecheckView } from './planner-api';
+import { plannerApi, plannerCancelText, type RecheckAction, type RecheckView } from './planner-api';
 import { plannerDay } from '../../constants/planner-status';
 
 const POLL_MS = 8000;
@@ -73,7 +73,8 @@ export default function PlannerRecheckModal({ carrierId, eventId, onClose, onCha
         return;
       }
       if (a.kind === 'edit') { toast.success('고친 문안을 실제 주소로 검사하고 있어요. 통과하면 여기서 보낼 수 있어요.'); await load(); return; }
-      toast.success(a.kind === 'approve' ? '보내기로 정했어요.' : a.kind === 'skip' ? '이 날 발송을 건너뛰었어요.' : a.kind === 'defer' ? '미뤘어요. 새 날짜 문안이 준비되면 알려 드려요.' : '행사를 취소했어요.');
+      if (a.kind === 'cancel') { const c = plannerCancelText(r.data); (c.warn ? toast.warning : toast.success)(c.text); }
+      else toast.success(a.kind === 'approve' ? '보내기로 정했어요.' : a.kind === 'skip' ? '이 날 발송을 건너뛰었어요.' : '미뤘어요. 새 날짜 문안이 준비되면 알려 드려요.');
       onChanged();
       onClose();
     } finally {

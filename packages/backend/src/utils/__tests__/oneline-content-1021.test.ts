@@ -203,7 +203,7 @@ describe('P2 R1 · 헤드라인 돈 · 값 · 누출 정정(Codex)', () => {
     const paid = at('alreadyPaid = await isChargedByKey(companyId, key);');
     const running = route.indexOf('if (!markLineHeadlineRunning(companyId, uid, lineFp)) return ledgerDown();', start);
     const make = route.indexOf('moved = await makeLineHeadlineImage({ companyId, template, texts, productImage: rawImg || null });', start);
-    const settle = route.indexOf('idempotencyKey: key });', start);
+    const settle = route.indexOf('idempotencyKey: key },', start);   // ★ 1026 settleOrUndo
     const last = route.indexOf("if (!markLineHeadlineDone(companyId, uid, lineFp, fp, moved.url, 'settling')) { drop(); return ledgerDown(); }", start);
     const open = route.indexOf("markLineHeadlineDone(companyId, uid, lineFp, fp, moved.url, 'done');", start);
     const clear = route.indexOf('if (running) clearLineHeadlineRunning(companyId, uid, lineFp);', start);

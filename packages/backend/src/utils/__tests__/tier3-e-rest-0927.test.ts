@@ -80,10 +80,13 @@ describe('JRN', () => {
   });
   it('R298 자동 재진입 = 옵션 규칙과 같은 판정(★1020 V.3 §4-1 · 켜진 채 그 자리 · 표식은 판정이 정함 · 읽은 상태를 쓰기 조건)', () => {
     const a = src('..', 'routes', 'ai.ts');
-    const b = between(a, "router.patch('/operator/journeys/:id/auto-reentry'", '\nrouter.');
-    expect(b).toContain('journeyOptionEditVerdict(String(st.rows[0].status), { autoReentryEnabled: enabled })');
-    expect(b).toContain('last_pretest_passed_at = CASE WHEN $4 THEN last_pretest_passed_at ELSE NULL END');
-    expect(b).toContain('AND status = $5');
+    // ★ 2026-10-25 #10(R15) — 전용 주소(화면 호출 0)를 지웠다 · 자동 재진입 = 옵션 주소 한 길(같은 판정 · 표식 · 읽은 상태를 쓰기 조건)
+    expect(a).not.toContain("router.patch('/operator/journeys/:id/auto-reentry'");
+    const b = between(a, "router.patch('/operator/journeys/:id/options'", '\nrouter.');
+    expect(b).toContain('const verdict = journeyOptionEditVerdict(status, body);');
+    expect(b).toContain("if ('autoReentryEnabled' in body) add('auto_reentry_enabled', norm.options.autoReentryEnabled);");
+    expect(b).toContain("if (!verdict.keepMarker) sets.push('last_pretest_passed_at = NULL');");
+    expect(b).toMatch(/AND status = \$\$\{params\.length\}/);
   });
   it('R424 진단 목표 = 실제 목표 칸 · 완주율 = 통계와 같은 값', () => {
     const d = src('journey-step-diagnosis.ts');

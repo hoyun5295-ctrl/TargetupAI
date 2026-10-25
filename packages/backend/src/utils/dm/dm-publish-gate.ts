@@ -12,6 +12,7 @@
  * ⛔ 무시 가능한 치명(required_info · `overridable`)은 막지 않는다 — 화면이 사용자 확인을 받고 넘긴다(0728 서수란 접수).
  * ⛔ 발행비 판정 두 벌은 옛 라우트 인라인과 **같은 식**이다(동작 무변경 · 계약 테스트가 고정).
  */
+import { dmWideOneOverflow, flatSectionsOfBody, dmWideOneError } from './dm-section-registry';
 import { query } from '../../config/database';
 import { findLinkDefectDeep } from '../normalize';
 import { PLACEHOLDER_PATTERN } from '../email-ai';
@@ -25,7 +26,7 @@ import { isInteractionCampaign } from './dm-interaction';
 
 export type DmPublishBlock = {
   status: 400;
-  code: 'LINK_DEFECT' | 'UNEDITED_PLACEHOLDER' | 'VALIDATION_BLOCKED';
+  code: 'LINK_DEFECT' | 'UNEDITED_PLACEHOLDER' | 'VALIDATION_BLOCKED' | 'DM_WIDE_ONE';
   error: string;
   items?: Array<Pick<ValidationItem, 'area' | 'message' | 'section_id'>>;
 };
@@ -67,6 +68,9 @@ export function dmPublishStaticBlock(dm: DmBodyRow): DmPublishBlock | null {
   };
   const link = findLinkDefectDeep(body, '링크는');
   if (link) return { status: 400, code: 'LINK_DEFECT', error: link };
+  // ★ 2026-10-25 원장 #69 — DM 한 장에 하나만 되는 블록(추첨) = 둘 이상이면 발행하지 않는다(둘째는 영영 추첨되지 않는다)
+  const wide = dmWideOneOverflow(flatSectionsOfBody(body));
+  if (wide) return { status: 400, code: 'DM_WIDE_ONE', error: dmWideOneError(wide) };
 
   // ★ 2026-10-24 세 채널 구조체크 ② — 찾은 자리 글자를 그대로 인용한다(인앱 · 이메일 관문과 같은 꼴 · 효능을 뺀 「[상품 소개: …]」도 무엇인지 보인다)
   const found = stringsOf(body).map((t) => (t ? t.match(PLACEHOLDER_PATTERN)?.[0] : undefined)).find(Boolean);
@@ -153,12 +157,12 @@ export async function isDmPublishFeeCharged(companyId: string, dmId: string): Pr
 }
 
 /**
- * `send-to-target` 발행비 게이트 — 미납 + 실발송 이력 없음 + 크레딧제 적용 회사일 때만 {source,cost}.
+ * `send-to-target` 발행비 게이트 — 판정 한 벌(`publishFeeDueStrict`)의 너그러운 판.
  * 판정 조회 실패 = null(옛 동작: 발송 우선 · 발송 무결 최우선) — 옛 인라인 try/catch 와 같다.
  */
 export async function resolveSendPublishFeeGate(companyId: string, dmId: string): Promise<{ source: string; cost: number } | null> {
   try {
-    return await sendPublishFeeGateStrict(companyId, dmId);
+    return await publishFeeDueStrict(companyId, dmId);
   } catch (feeErr: any) {
     console.warn('[DM 타겟 발송] 발행비 판정 실패 — 기존 동작으로 진행:', feeErr?.message);
     return null;
@@ -166,31 +170,31 @@ export async function resolveSendPublishFeeGate(companyId: string, dmId: string)
 }
 
 /**
- * ★ 2026-09-27 Codex 1R — 같은 판정의 엄격판(조회 실패 = 던진다). 발송 경로는 위 함수가 옛 동작대로 삼키고,
- * 선견적은 이 함수를 불러 "모르는 발행비"를 0 크레딧 견적으로 접지 않는다(화면은 견적을 모르면 [링크만 받기]를 막는다).
- * 크레딧제 판정 = isCreditEnabledStrict(행 부재 = 미적용 · 조회 실패 = throw) — 행이 있을 때의 판정식은 getCreditState 와 같다.
+ * ★ 2026-10-25 발행비 판정 한 벌(원장 docs/2026-10-25-oneline-all-structure-check.md #65 · 뿌리 R1) —
+ *   보내기 · 링크 받기 · 편집기 발행 · 목록 [발행 주소 복사] · 플래너 견적 · 승인이 모두 이것만 본다.
+ *   걷는 때 = 미납 + **아직 발행 전**(첫 발행 = 주소를 만드는 그 순간만 · 이미 발행된 DM 은 소급하지 않는다)
+ *            + 옛 실발송 이력 없음(구 정책 통과분 소급 금지) + 크레딧제 적용.
+ *   옛: 보내기 길만 옛 발송 이력을 면제하고 발행 길은 면제가 없어, 종량제 전에 발행된 DM 의 [발행 주소 복사]가
+ *       확인 없이 발행비를 걷었다(화면 「이미 발행, 추가 과금 없음」).
+ *   조회 실패 = 던진다(모르는 발행비를 0 으로 접지 않는다 · 크레딧제 판정 = isCreditEnabledStrict).
  */
-async function sendPublishFeeGateStrict(companyId: string, dmId: string): Promise<{ source: string; cost: number } | null> {
+export async function publishFeeDueStrict(companyId: string, dmId: string): Promise<{ source: string; cost: number } | null> {
   if (await isDmPublishFeeCharged(companyId, dmId)) return null;
-  const [legacyR, creditEnabled] = await Promise.all([
+  const [pubR, legacyR, creditEnabled] = await Promise.all([
+    query(`SELECT short_code FROM dm_pages WHERE id = $1 AND company_id = $2`, [dmId, companyId]),
     query(`SELECT 1 FROM dm_recipient_tokens WHERE dm_id = $1::uuid AND company_id = $2::uuid LIMIT 1`, [dmId, companyId]),
     isCreditEnabledStrict(companyId),
   ]);
+  if (pubR.rows[0]?.short_code) return null;
   if (legacyR.rows.length === 0 && creditEnabled) return dmPublishFeeSourceOf(companyId, dmId);
   return null;
 }
 
 /**
  * 선견적(표시용 · `GET /:id/publish-quote`) — 누르는 순간의 판정은 각 라우트가 다시 한다(불변 5).
- * via='send' = 보내기 경로(send-to-target 규칙) · via='publish' = 링크만 받기(첫 발행 규칙).
+ * ★ 2026-10-25 via(보내기 · 링크만 받기) 둘 다 같은 판정 한 벌이다(옛: 두 규칙 · #65). via 는 응답 표시용으로만 남긴다.
  */
-export async function quoteDmPublishFee(companyId: string, dmId: string, via: 'send' | 'publish'): Promise<{ required: boolean; cost: number; source: string | null }> {
-  if (via === 'send') {
-    const gate = await sendPublishFeeGateStrict(companyId, dmId);
-    return gate ? { required: true, cost: gate.cost, source: gate.source } : { required: false, cost: 0, source: null };
-  }
-  if (await isDmPublishFeeCharged(companyId, dmId)) return { required: false, cost: 0, source: null };
-  if (!(await isCreditEnabledStrict(companyId))) return { required: false, cost: 0, source: null };
-  const fee = await dmPublishFeeSourceOf(companyId, dmId);
-  return { required: true, cost: fee.cost, source: fee.source };
+export async function quoteDmPublishFee(companyId: string, dmId: string, _via: 'send' | 'publish'): Promise<{ required: boolean; cost: number; source: string | null }> {
+  const due = await publishFeeDueStrict(companyId, dmId);
+  return due ? { required: true, cost: due.cost, source: due.source } : { required: false, cost: 0, source: null };
 }

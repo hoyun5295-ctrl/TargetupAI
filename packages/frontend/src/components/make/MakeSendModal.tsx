@@ -8,6 +8,7 @@
  * 문자 기본 문안은 DM 내용으로 채운다(AI 0 · 자동 과금 0). 개별 회신(고객별 매장번호)은 보내는 번호 칸에서 고른다(★1007). 더 자세한 설정(AI 문안·꾸미기·스팸 검사)은 [자세히 설정] = 기존 발송 창.
  * ⛔ native dialog 0 · 모델명 0 · 금액 하드코딩 0(서버 견적·단가 표 CT).
  */
+import { recommendSendSlot, sendSlotText, DEFAULT_SLOT_LABEL } from '../../utils/send-time-recommend';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   X, Smartphone, Mail, Users, Type, Clock, Check, AlertCircle, Link2, Send, Loader2, Phone, Settings2, Copy, Sparkles,
@@ -22,7 +23,8 @@ import SmtpConnectModal from '../email/SmtpConnectModal';
 import type { EmailCampaign } from '../email/email-campaign-types';
 import { hasUnsupportedSmsChars, SMS_CHARSET_BLOCK_MESSAGE } from '../../utils/smsSafeChars';
 import { CONFIRM_CREDIT_COSTS } from '../../constants/credit';
-import { defaultDmSmsText, isNightAdHour, fixItemsOf, type FixItem } from '../../utils/make-flow';
+import { defaultDmSmsText, fixItemsOf, type FixItem } from '../../utils/make-flow';
+import { useSendPolicy, isNightAdTime, nightRangeText, getSendPolicy } from '../../utils/send-policy';
 import '../../styles/make.css';   // ★ 2026-10-10 mk-max-h-94(휴대폰 보이는 높이)
 import { MK_BTN_OUTLINE, MK_BTN_PRIMARY, MK_MODAL, MK_MODAL_BACKDROP } from '../../utils/make-ui';
 
@@ -34,12 +36,6 @@ const token = () => localStorage.getItem('token');
 const authGet = () => ({ Authorization: `Bearer ${token()}` });
 const authJson = () => ({ 'Content-Type': 'application/json', Authorization: `Bearer ${token()}` });
 const fmt = (n: number | null | undefined) => (typeof n === 'number' && Number.isFinite(n) ? n.toLocaleString() : '-');
-const pad = (n: number) => String(n).padStart(2, '0');
-const localNextMorning = () => {
-  const d = new Date(Date.now() + 24 * 60 * 60 * 1000);
-  d.setHours(10, 0, 0, 0);
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
-};
 
 type When = 'now' | 'scheduled' | 'recommend';
 /** 발신번호 select 특수값 — 고객별 등록매장 번호(개별 회신) · DmSendAndTrackModal 과 같은 값 */
@@ -199,7 +195,8 @@ function DmCard({ dm, beforeSend, onSent, onOpenAdvanced, onGoFix }: { dm: SendD
   }, [dm.id]);
 
   const effectiveTime = useMemo(() => (when === 'now' ? new Date() : scheduledAt ? new Date(scheduledAt) : null), [when, scheduledAt]);
-  const night = isAd && !!effectiveTime && isNightAdHour(effectiveTime);
+  const sendPolicy = useSendPolicy();
+  const night = isAd && !!effectiveTime && !!sendPolicy && isNightAdTime(sendPolicy, effectiveTime);
   const count = target?.channelEligibleCount ?? 0;
   const isIndividualCb = callback === INDIVIDUAL_CB;
   const feeCost = quote?.required ? (quote.cost || CONFIRM_CREDIT_COSTS[quote.source] || 0) : 0;
@@ -219,7 +216,7 @@ function DmCard({ dm, beforeSend, onSent, onOpenAdvanced, onGoFix }: { dm: SendD
     || (!message.trim() ? '문자 문안을 넣어 주세요.' : null)
     || (callbacks.length === 0 && ready ? '등록된 발신번호가 없어요. 발신번호 관리에서 등록해 주세요.' : null)
     || (isAd && opt080 === '' ? '광고 문자는 무료수신거부(080) 번호가 필요해요.' : null)
-    || (night ? '밤 9시부터 아침 8시까지는 광고 문자를 보낼 수 없어요.' : null)
+    || (night && sendPolicy ? `${nightRangeText(sendPolicy)}에는 광고 문자를 보낼 수 없어요.` : null)
     || (when !== 'now' && !scheduledAt ? '보낼 시각을 골라 주세요.' : null);
 
   const sendNow = useCallback(async (opts: { feeConfirmed?: boolean; exclusion?: boolean } = {}) => {
@@ -373,13 +370,14 @@ function DmCard({ dm, beforeSend, onSent, onOpenAdvanced, onGoFix }: { dm: SendD
       <Row icon={<Clock className="w-4 h-4" />} label="보낼 때">
         <div className="space-y-2">
           <div className="inline-flex rounded-xl border border-slate-200 bg-white p-1">
-            {([['now', '지금'], ['scheduled', '예약'], ['recommend', '추천 시간']] as const).map(([k, l]) => (
-              <button key={k} type="button" onClick={() => { setWhen(k); if (k === 'recommend') setScheduledAt(localNextMorning()); }}
+            {([['now', '지금'], ['scheduled', '예약'], ['recommend', DEFAULT_SLOT_LABEL]] as const).map(([k, l]) => (
+              <button key={k} type="button" onClick={() => { setWhen(k); if (k === 'recommend') setScheduledAt(recommendSendSlot(null, getSendPolicy()).local); }}
                 className={`h-8 px-3.5 rounded-lg text-[12.5px] font-semibold ${when === k ? 'bg-violet-600 text-white' : 'text-slate-500 hover:text-slate-900'}`}>{l}</button>
             ))}
           </div>
           {when === 'scheduled' && <DateTimeField value={localInputToIso(scheduledAt)} onChange={(iso) => setScheduledAt(isoToLocalInput(iso))} tone="dark" />}
-          {when === 'recommend' && scheduledAt && <div className="text-[12px] text-slate-500">내일 오전 10시 · 문자 열람이 많은 시간대예요</div>}
+          {/* ★ 2026-10-25 원장 #75 — 이 창은 열람 실측을 받지 않는다 · 기본 시각이라고 말한다(옛: 「문자 열람이 많은 시간대예요」 근거 0) */}
+          {when === 'recommend' && scheduledAt && <div className="text-[12px] text-slate-500">{sendSlotText(recommendSendSlot(null, getSendPolicy()))}</div>}
         </div>
       </Row>
 
@@ -540,7 +538,9 @@ function EmailCard({ email, beforeSend, onSent, onSmtpChanged }: { email: SendEm
       const r = await fetch(`/api/email/campaigns/${email.id}/send`, { method: 'POST', headers: authJson(), body: JSON.stringify(payload) });
       const d = await r.json().catch(() => ({}));
       if (!r.ok || !d?.success) { setBlockMsg(d?.error || '보내지 못했어요.'); return; }
-      toast.success(d.scheduled ? `예약했어요: ${new Date(d.scheduledAt).toLocaleString('ko-KR')} (${fmt(Number(d.total))}명)` : `${fmt(Number(d.total))}명에게 보내기 시작했어요.`);
+      // ★ 2026-10-25 원장 #83 — 새로 나가는 수 · 이미 받아 뺀 수를 그대로 말한다
+      const skipped = Number(d.alreadyDelivered) > 0 ? ` 이미 받은 ${fmt(Number(d.alreadyDelivered))}명은 뺐어요.` : '';
+      toast.success(d.scheduled ? `예약했어요: ${new Date(d.scheduledAt).toLocaleString('ko-KR')} (${fmt(Number(d.total))}명).${skipped}` : `${fmt(Number(d.total))}명에게 보내기 시작했어요.${skipped}`);
       onSent();
     } catch (e: any) {
       setBlockMsg(e?.message || '보내지 못했어요.');

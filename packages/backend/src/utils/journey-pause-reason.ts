@@ -34,6 +34,8 @@ const RULES: Array<{ test: RegExp; view: PauseReasonView }> = [
   { test: /조건 평가/, view: { kind: 'condition', text: '조건을 확인하다 오류가 나 멈췄어요. 잠시 뒤 다시 켜 주세요.', fix: { action: 'resume', label: '다시 켜기' } } },
   { test: /대량 진입 감지/, view: { kind: 'cap', text: '한 번에 들어온 고객이 최대 인원보다 많아 멈췄어요. 최대 인원을 늘리거나 조건을 좁힌 뒤 다시 켜 주세요.', fix: { action: 'edit_options', label: '최대 인원 바꾸기' } } },
   { test: /신규 고객 판정 불가/, view: { kind: 'identity', text: '새 고객을 가려낼 정보가 없어 멈췄어요. 고객 데이터 연동을 확인해 주세요.', fix: { action: 'contact', label: '문의하기' } } },
+  // ★ 2026-10-25 #14 — 검사 장애로 멈춤은 문안 탓이 아니다(스팸필터 줄보다 먼저 · 다시 켜기)
+  { test: /검사 장애/, view: { kind: 'pretest', text: '보내기 전 스팸 검사를 마치지 못해 멈췄어요. 문안 문제는 아니니 잠시 뒤 다시 켜 주세요.', fix: { action: 'resume', label: '다시 켜기' } } },
   { test: /스팸필터/, view: { kind: 'pretest', text: '보내기 전 검사에서 문안이 걸려 멈췄어요. 문안을 고친 뒤 다시 켜 주세요.', fix: { action: 'edit_step', label: '문안 고치기' } } },
   { test: /일시정지|담당자가/, view: { kind: 'manual', text: '멈춰 둔 여정이에요.', fix: { action: 'resume', label: '다시 켜기' } } },
 ];

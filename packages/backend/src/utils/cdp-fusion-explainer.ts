@@ -13,7 +13,8 @@
  *   - 회사 admin 실행 가능 영역만 추천 (구체 진입 경로 명시)
  */
 
-import { extractJsonFromAiText } from './ai-json';
+import { UserFacingError } from './http-error';
+import { extractJsonFromAiText, aiStr } from './ai-json';
 import { callAIWithFallback } from '../services/ai';
 import { randomUUID } from 'crypto';
 import { checkCredit, settleCreditAfterSuccess, InsufficientCreditError } from './ai-credit';
@@ -137,32 +138,36 @@ ${conflictSummary}
       overallHealthScore: typeof parsed.overallHealthScore === 'number'
         ? Math.max(0, Math.min(100, parsed.overallHealthScore))
         : 50,
-      topInsight: String(parsed.topInsight || ''),
+      topInsight: aiStr(parsed.topInsight),
       factors: Array.isArray(parsed.factors)
         ? parsed.factors.slice(0, 5).map((f: any) => ({
             category: ['mapping', 'events', 'webhook', 'multi_source', 'provider'].includes(f.category)
               ? f.category
               : 'mapping',
-            label: String(f.label || ''),
+            label: aiStr(f.label),
             impactScore: typeof f.impactScore === 'number' ? Math.max(0, Math.min(1, f.impactScore)) : 0.5,
             direction: ['positive', 'negative', 'neutral'].includes(f.direction) ? f.direction : 'neutral',
-            detail: String(f.detail || ''),
-            sourceField: String(f.sourceField || ''),
-          }))
+            detail: aiStr(f.detail),
+            sourceField: aiStr(f.sourceField),
+          })).filter((f: any) => f.label.trim() || f.detail.trim())   // ★ 1026 Codex 3R — 빈 요인 = 요인 아님
         : [],
       recommendations: Array.isArray(parsed.recommendations)
-        ? parsed.recommendations.slice(0, 4).map(String)
+        ? parsed.recommendations.slice(0, 4).map((x: unknown) => aiStr(x).trim()).filter(Boolean)
         : [],
       explainedAt: new Date().toISOString(),
     };
+    // ★ 1026 Codex 3R — 쓸 결과 = 요인 · 요약 · 권고 중 하나라도 실제 글(빈 진단 = 0원 · 아래 502)
+    if (result.factors.length === 0 && !result.topInsight.trim() && result.recommendations.length === 0) {
+      throw new UserFacingError(502, 'AI_RESULT_EMPTY', 'AI 진단 결과를 만들지 못했습니다. 크레딧은 빠지지 않았어요. 잠시 후 다시 시도해 주세요.');
+    }
     if (explainCost > 0) {
       // 차감 확정 — 동시 요청에 잔액이 먼저 쓰였으면 결과를 내주지 않는다(402 · Codex 차수3 D 1R)
       await settleCreditAfterSuccess({ companyId, cost: explainCost, source: 'cdp-fusion-explainer', idempotencyKey: `cdp-explain:${randomUUID()}` });
     }
     return result;
   } catch (err) {
-    if (err instanceof InsufficientCreditError || err instanceof AiRateLimitExceeded) throw err;
+    if (err instanceof InsufficientCreditError || err instanceof AiRateLimitExceeded || err instanceof UserFacingError) throw err;
     console.error('[CdpFusionExplainer] AI 호출 실패:', err);
-    throw new Error('AI 진단 결과를 만들지 못했습니다. 잠시 후 다시 시도해 주세요.');
+    throw new UserFacingError(502, 'AI_RESULT_EMPTY', 'AI 진단 결과를 만들지 못했습니다. 잠시 후 다시 시도해 주세요.');
   }
 }

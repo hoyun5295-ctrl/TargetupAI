@@ -17,6 +17,7 @@
  *   - 모델명/내부 시스템명 사용자 노출 절대 금지
  *   - 추정 숫자(전환율/오픈율 예측치) 임의 생성 금지 — 실측 집계만 전달
  */
+import { UserFacingError } from './http-error';
 import { callAIWithFallback } from '../services/ai';
 import { extractJsonFromAiText } from './ai-json';
 import { htmlVisibleText, replaceInventedBenefits, replaceInventedBenefitsDeep, claimsInventedEfficacy, dropInventedEfficacy, dropInventedEfficacyDeep, pairClaimsInventedEfficacy, rewriteAddsFacts, readingAddsEfficacy, EFFICACY_PLACEHOLDER, HEADLINE_PLACEHOLDER, EFFICACY_PROMPT_RULES, EFFICACY_REWRITE_RULE } from './copy-benefit-detector';
@@ -217,9 +218,6 @@ export function binOpenHours(rows: Array<{ hour: number; cnt: number }>): {
   return { total, top };
 }
 
-/** 발송 시간 추천 최소 표본 (통계 관례 n=30 — 미만이면 insufficient_data + 차감 0) */
-export const SEND_TIME_MIN_SAMPLE = 30;
-
 // ════════════════════════════════════════════════════════════════════
 // AI 호출 — 전부 creditCost: 0 (차감은 route에서 성공 후 1회)
 // ════════════════════════════════════════════════════════════════════
@@ -320,7 +318,7 @@ export async function generateEmailSections(input: {
   const parsed = extractJsonFromAiText<{ name?: string; subjects?: string[]; preheader?: string; blocks?: unknown[] }>(text);
   const sections = normalizeAiBlocksToSections(parsed.blocks);
   if (sections.length === 0) {
-    throw new Error('AI 블록 생성 결과가 비어 있습니다. 다시 시도해주세요.');
+    throw new UserFacingError(502, 'AI_RESULT_EMPTY', 'AI 블록 생성 결과가 비어 있습니다. 다시 시도해주세요.');
   }
   // ★ 2026-07-08 행사 원문 상품 기계 검증 — 가격이 원문에 실존하는 상품만 통과(환각 가격 차단, DM과 동일 규칙)
   // ★ 2026-07-13 — link_url 보존(검증기 3중 검증 + 결정적 배정 통과분) + og:image 자동 채움 (DM one-shot 미러).
@@ -405,7 +403,7 @@ ${EFFICACY_REWRITE_RULE}
   const parsed = extractJsonFromAiText<{ subject?: string; html_body?: string }>(text);
   const subject = String(parsed.subject || '').trim();
   const htmlBody = String(parsed.html_body || '').trim();
-  if (!subject || !htmlBody) throw new Error('AI 다듬기 결과가 비어 있습니다. 다시 시도해주세요.');
+  if (!subject || !htmlBody) throw new UserFacingError(502, 'AI_REFINE_EMPTY', 'AI 다듬기 결과가 비어 있습니다. 다시 시도해주세요.');
   // ★ 2026-09-30 WP2 — 다듬기 = 다시 쓰기. 근거 = 원래 제목 · 본문의 **보이는 글** · 다듬기 지시(지시에 적은 새 혜택 · 숫자는 사람이 준 것).
   //   원래 HTML 을 그대로 근거에 넣으면 속성 값(width="100%")이 혜택 근거가 된다(Codex 0930 2R). 다른 다시 쓰기 경로와 같게
   //   근거에 없는 숫자 · 혜택이 생기면 적용하지 않는다(차감 전 throw · 화면 = 이 문장).
@@ -414,7 +412,7 @@ ${EFFICACY_REWRITE_RULE}
   const refinedVisible = `${subject}\n${htmlVisibleText(htmlBody)}`;
   const visibleLines = (html: string) => htmlVisibleText(html).split(/\n+/);
   if (rewriteAddsFacts(refinedVisible, refineGround) || readingAddsEfficacy([subject, ...visibleLines(htmlBody)], [input.subject, ...visibleLines(input.htmlBody)], input.instruction)) {
-    throw new Error('원문에 없는 숫자 · 혜택 · 효능 말이 생겨 적용하지 않았어요. 다시 눌러 주세요.');
+    throw new UserFacingError(422, 'REFINE_ADDS_FACTS', '원문에 없는 숫자 · 혜택 · 효능 말이 생겨 적용하지 않았어요. 다시 눌러 주세요.');
   }
   return { subject, htmlBody };
 }
@@ -463,7 +461,7 @@ export async function refineEmailSections(input: {
   const parsed = extractJsonFromAiText<{ texts?: unknown }>(text);
   const refined = Array.isArray(parsed?.texts) ? (parsed.texts as unknown[]).map((t) => String(t ?? '')) : null;
   if (!refined || refined.length !== texts.length) {
-    throw new Error('AI 다듬기 결과를 해석하지 못했습니다. 다시 시도해주세요.');
+    throw new UserFacingError(502, 'AI_RESULT_EMPTY', 'AI 다듬기 결과를 해석하지 못했습니다. 다시 시도해주세요.');
   }
   // ★ 2026-09-30 WP2 — 조각마다 표현만 바꾼다. 원래 조각 · 지시에 없던 숫자 · 혜택 값이 생긴 조각은 원래 글로 되돌린다.
   // ★ 2026-10-24 ② 판정 = rewriteAddsFacts(숫자 ∥ 혜택 ∥ 효능)
@@ -557,7 +555,7 @@ export async function buildPerformanceInsight(input: {
 
   const parsed = extractJsonFromAiText<{ top_insight?: string; suggestions?: Array<{ title?: string; description?: string }> }>(text);
   const topInsight = String(parsed.top_insight || '').trim();
-  if (!topInsight) throw new Error('AI 진단 결과가 비어 있습니다. 다시 시도해주세요.');
+  if (!topInsight) throw new UserFacingError(502, 'AI_RESULT_EMPTY', 'AI 진단 결과가 비어 있습니다. 다시 시도해주세요.');
   return {
     topInsight,
     suggestions: (parsed.suggestions || [])
@@ -607,7 +605,7 @@ export async function buildEmailAccountInsight(input: {
 
   const parsed = extractJsonFromAiText<{ top_insight?: string; suggestions?: Array<{ title?: string; description?: string }> }>(text);
   const topInsight = String(parsed.top_insight || '').trim();
-  if (!topInsight) throw new Error('AI 진단 결과가 비어 있습니다. 다시 시도해주세요.');
+  if (!topInsight) throw new UserFacingError(502, 'AI_RESULT_EMPTY', 'AI 진단 결과가 비어 있습니다. 다시 시도해주세요.');
   return {
     topInsight,
     suggestions: (parsed.suggestions || [])
@@ -615,34 +613,4 @@ export async function buildEmailAccountInsight(input: {
       .filter((s2) => s2.title)
       .slice(0, 3),
   };
-}
-
-export async function recommendSendTime(input: {
-  companyId: string;
-  userId?: string;
-  total: number;
-  top: Array<{ hour: number; cnt: number; pct: number }>;
-}): Promise<{ recommendation: string; suggestedHour: number }> {
-  const text = await callAIWithFallback({
-    system: `당신은 한국어 이메일 발송 시간 추천 분석가입니다. 회사 자체 실측 오픈 분포만 근거로 추천합니다.
-[절대 금지] 실측에 없는 수치 추정/창작, 업계 평균 단정.
-반드시 아래 JSON 스키마로만 출력합니다 (코드블록/설명 금지):
-{ "suggested_hour": 10, "recommendation": "추천 사유 1~2문장 (실측 비중 인용)" }`,
-    userMessage: `[자사 실측: 최근 90일 오픈 ${input.total}건 (KST)]\n${input.top.map((h) => `- ${h.hour}시: ${h.cnt}건 (${h.pct}%)`).join('\n')}\n\n위 실측만 근거로 다음 발송 시간을 JSON으로 추천하세요.`,
-    maxTokens: 600,
-    temperature: 0.2,
-    model: 'opus',
-    companyId: input.companyId,
-    userId: input.userId,
-    source: 'email-send-time-recommend',
-    creditCost: 0,
-  });
-
-  const parsed = extractJsonFromAiText<{ suggested_hour?: number; recommendation?: string }>(text);
-  const suggestedHour = Number(parsed.suggested_hour);
-  const recommendation = String(parsed.recommendation || '').trim();
-  if (!recommendation || !Number.isFinite(suggestedHour) || suggestedHour < 0 || suggestedHour > 23) {
-    throw new Error('AI 추천 결과가 비어 있습니다. 다시 시도해주세요.');
-  }
-  return { recommendation, suggestedHour: Math.floor(suggestedHour) };
 }

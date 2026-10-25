@@ -37,6 +37,8 @@ export interface RecheckView {
   remaining: Array<{ date: string; label: string }>;
   actions: { approve: RecheckActionState; edit: RecheckActionState; skip: RecheckActionState; defer: RecheckActionState; cancel: RecheckActionState };
   auth: { required: boolean; alive: boolean; maskedPhone: string | null } | null;
+  /** ★ 2026-10-25 원장 #57 — 행사 승인을 풀 수 있는가(서버 판정 · 옛 서버면 없음) */
+  canUnapprove?: boolean;
 }
 export type RecheckAction =
   | { kind: 'approve'; choice: 'proposal' | 'current' }
@@ -152,3 +154,16 @@ export function plannerErrorText(r: ApiResult, fallback: string): string {
 }
 
 export const won = (n: number) => Math.round(Number(n) || 0).toLocaleString('ko-KR');
+
+/**
+ * ★ 2026-10-25 원장 #50 · #60 — 행사 취소 응답 → 결과 문장(남은 발송 · 못 멈춘 모바일 DM · 담당자 문자 결과 그대로).
+ *   PC 두 화면 · 휴대폰 링크 화면이 같은 함수를 쓴다(옛: 휴대폰은 늘 「담당자에게 알림이 갔어요」 · PC 는 DM 을 못 멈춘 사실을 말하지 않았다).
+ */
+export function plannerCancelText(data: any): { text: string; warn: boolean } {
+  const stuck = Number(data?.dmStuck) || 0;
+  const parts = [`행사를 취소했어요. 남은 발송 ${Number(data?.skipped || 0)}건은 보내지 않아요.`];
+  if (stuck > 0) parts.push(`모바일 DM ${stuck}개는 멈추지 못했어요. 모바일 DM 목록에서 멈춰 주세요.`);
+  if (data?.notified === true) parts.push('담당자에게 문자로 알렸어요.');
+  else if (data?.notified === false) parts.push('담당자 문자는 보내지 못했어요.');
+  return { text: parts.join(' '), warn: stuck > 0 };
+}

@@ -127,7 +127,8 @@ describe('배선', () => {
     expect(r).toContain("sendState: row.send_state || 'sent',");
     expect(r).toContain("sent: recipients.filter((x) => x.sendState === 'sent').length,");
     expect(r).toContain("scheduled: recipients.filter((x) => x.sendState === 'scheduled').length,");
-    expect(r).toContain('batches = await getDmSendBatches(req.params.id, companyId);');
+    // ★ 1025 R12 #80 — 묶음 = 상한 + 잘림 표시
+    expect(r).toContain('({ rows: batches, truncated: batchesTruncated } = await getDmSendBatches(req.params.id, companyId));');
   });
 
   it('목록은 다가오는 예약 시각을 내려준다(목록 칩 「예약」) · 목록 SQL 뒤에 따로 채운다(목록 SQL = 첫 쿼리 계약)', () => {

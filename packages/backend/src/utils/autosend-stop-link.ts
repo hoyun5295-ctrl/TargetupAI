@@ -92,6 +92,10 @@ export async function loadAutosendStopView(p: AutosendStopPayload): Promise<Auto
   );
   const row = r.rows[0];
   if (!row) return null;
+  // ★ 2026-10-25 원장 #28 — 「나갈 문안」 = 발송과 같은 함수(보낼 안 · 사람 편집 · 혜택 치환 · (광고) · 080 · 옛: 1안 원문 · 혜택 치환 전)
+  //   순환 import 를 피해 부를 때 읽는다(continuous-operator 가 이 파일의 멈춤 주소 함수를 쓴다)
+  const { loadProposalFinalCopy } = await import('./continuous-operator');
+  const final = await loadProposalFinalCopy(p.companyId, p.proposalId).catch(() => null);
   const msg = row.proposal_json?.messages?.[0] || {};
   return {
     operatorName: String(row.operator_name || ''),
@@ -99,7 +103,7 @@ export async function loadAutosendStopView(p: AutosendStopPayload): Promise<Auto
     proposalStatus: String(row.proposal_status || ''),
     sendAt: row.scheduled_send_at ? new Date(row.scheduled_send_at).toISOString() : null,
     recipientCount: Number(row.recipient_count || 0),
-    body: String(msg.body || msg.message || '').slice(0, 2000),
+    body: String(final ? final.sent : (msg.body || msg.message || '')).slice(0, 2000),
     canSkip: ['scheduled', 'admin_review', 'pending'].includes(String(row.proposal_status || '')),
     canPause: String(row.operator_status || '') === 'active',
   };

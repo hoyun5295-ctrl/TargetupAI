@@ -8,7 +8,7 @@ import { readEmailEntry, readMakeEntryLine } from '../utils/make-entry';   // �
 // ★ 2026-09-14 T5·T6 AI 자동제작 — 상단 카드띠(입구) · ?edit={campaignId} 딥링크(완성본 착지) · 생성 금액 단일 출처
 import AiBuildEntryStrip from '../components/ai-build/AiBuildEntryStrip';
 import { useAiAutoBuildEnabled } from '../utils/ai-build';
-import { AI_GENERATE_COSTS } from '../constants/credit';
+import { AI_GENERATE_COSTS, creditText } from '../constants/credit';
 // ★ 2026-10-10 한 줄 묻기 — 질문이면 회사 데이터로 답한다(설계서 docs/2026-10-10-oneline-ask-design.md)
 import { useLineAsk } from '../hooks/useLineAsk';
 import LineAnswer from '../components/zone/LineAnswer';
@@ -184,6 +184,10 @@ export default function EmailCampaignsPage() {
   const [listQuery, setListQuery] = useState('');
   const [listSort, setListSort] = useState('recent');
   const [listLimit, setListLimit] = useState(24);
+  // ★ 2026-10-25 원장 #86 — 서버 쪽 다음 쪽 · 전체 지표(옛: 최근 50개만 불러와 51번째부터 사라지고 평균도 50개로 셈)
+  const [listMore, setListMore] = useState<{ before: string; beforeId: string } | null>(null);
+  const [listTotals, setListTotals] = useState<{ total: number; sentCampaigns: number; sent: number; opens: number; clicks: number; bounces: number } | null>(null);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [detail, setDetail] = useState<EmailCampaign | null>(null);
   const [cloningId, setCloningId] = useState<string | null>(null);
   const [pageSend, setPageSend] = useState<EmailCampaign | null>(null);
@@ -234,7 +238,11 @@ export default function EmailCampaignsPage() {
         setSmtpFromName(String(statusData.from_name || ''));
       }
       if (configData.success && configData.config) setSmtpConfig(configData.config);
-      if (listData.success) setCampaigns(listData.campaigns || []);
+      if (listData.success) {
+        setCampaigns(listData.campaigns || []);
+        setListMore(listData.hasMore && listData.next ? listData.next : null);
+        setListTotals(listData.totals || null);
+      }
     } catch (e: any) {
       setError(e?.message || '조회 중 오류');
       showToast(e?.message || '조회 중 오류', 'error');
@@ -509,7 +517,7 @@ export default function EmailCampaignsPage() {
   const openRecipientsModal = (c: EmailCampaign) => {
     // ★ 2026-07-02(3) 미완성 = 발송 진입 차단 (버튼 미노출 + 함수 가드 + 백엔드 CAMPAIGN_NOT_COMPLETED 3중)
     if (!c.completed) {
-      showToast('완성 저장(50크레딧) 후 발송할 수 있습니다. 편집기에서 [완성 저장]을 눌러주세요.', 'warning');
+      showToast(`완성 저장(${creditText('email-campaign-complete')}) 후 발송할 수 있습니다. 편집기에서 [완성 저장]을 눌러주세요.`, 'warning');
       openEditor(c);
       return;
     }
@@ -784,26 +792,41 @@ export default function EmailCampaignsPage() {
   // ────────────────────────────────────────────────────────────────
 
   const stats = useMemo(() => {
-    const sent = campaigns.reduce((acc, c) => acc + (c.sentCount || 0), 0);
-    const opens = campaigns.reduce((acc, c) => acc + (c.openCount || 0), 0);
-    const clicks = campaigns.reduce((acc, c) => acc + (c.clickCount || 0), 0);
-    const bounces = campaigns.reduce((acc, c) => acc + (c.bounceCount || 0), 0);
+    // ★ 2026-10-25 원장 #86 — 서버가 전체로 센 지표가 있으면 그것(불러온 쪽만으로 세지 않는다)
+    const sent = listTotals ? listTotals.sent : campaigns.reduce((acc, c) => acc + (c.sentCount || 0), 0);
+    const opens = listTotals ? listTotals.opens : campaigns.reduce((acc, c) => acc + (c.openCount || 0), 0);
+    const clicks = listTotals ? listTotals.clicks : campaigns.reduce((acc, c) => acc + (c.clickCount || 0), 0);
+    const bounces = listTotals ? listTotals.bounces : campaigns.reduce((acc, c) => acc + (c.bounceCount || 0), 0);
     return {
-      total: campaigns.length,
+      total: listTotals ? listTotals.total : campaigns.length,
       active: campaigns.filter((c) => c.status === 'completed' || c.status === 'sending').length,
       sent,
       openRate: sent > 0 ? (opens / sent) * 100 : 0,
       clickRate: sent > 0 ? (clicks / sent) * 100 : 0,
       bounceRate: sent > 0 ? (bounces / sent) * 100 : 0,
     };
-  }, [campaigns]);
+  }, [campaigns, listTotals]);
+
+  const loadMoreCampaigns = async () => {
+    if (!listMore || loadingMore) return;
+    setLoadingMore(true);
+    try {
+      const r = await fetch(`/api/email/campaigns?limit=50&before=${encodeURIComponent(listMore.before)}&before_id=${encodeURIComponent(listMore.beforeId)}`, { headers: authHeaders() });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok || !d?.success) { showToast(d?.error || '더 불러오지 못했어요.', 'error'); return; }
+      setCampaigns((prev) => { const seen = new Set(prev.map((c) => c.id)); return [...prev, ...((d.campaigns || []) as EmailCampaign[]).filter((c) => !seen.has(c.id))]; });
+      setListMore(d.hasMore && d.next ? d.next : null);
+    } finally {
+      setLoadingMore(false);
+    }
+  };
 
   // ════════════════════════════════════════════════════════════════
   // 렌더링
   // ════════════════════════════════════════════════════════════════
 
   const emailOneLine = zoneModule('email').oneLine!;
-  const sentCampaignCount = campaigns.filter((c) => c.sentCount > 0).length;
+  const sentCampaignCount = listTotals ? listTotals.sentCampaigns : campaigns.filter((c) => c.sentCount > 0).length;
   if (planLocked) {
     return (
       <ZoneFrame moduleId="email">
@@ -973,6 +996,12 @@ export default function EmailCampaignsPage() {
               )}
               {shown.length > listLimit && (
                 <div className="flex justify-center mt-5"><button type="button" onClick={() => setListLimit((v) => v + 24)} className="h-9 px-4 rounded-lg text-[12.5px] font-semibold text-slate-600 border border-slate-300 hover:bg-slate-100">더 보기 ({(shown.length - listLimit).toLocaleString()})</button></div>
+              )}
+              {shown.length <= listLimit && listMore && (
+                <div className="flex flex-col items-center gap-2 mt-5">
+                  <p className="text-[12px] text-slate-500">최근 {campaigns.length.toLocaleString()}개를 불러왔어요{listTotals ? ` · 전체 ${listTotals.total.toLocaleString()}개` : ''}. 거름 · 찾기는 불러온 메일 안에서 해요.</p>
+                  <button type="button" onClick={() => { void loadMoreCampaigns(); }} disabled={loadingMore} className="h-9 px-4 rounded-lg text-[12.5px] font-semibold text-slate-600 border border-slate-300 hover:bg-slate-100 disabled:opacity-50 inline-flex items-center gap-1.5">{loadingMore && <Loader2 className="w-3.5 h-3.5 animate-spin" />}지난 메일 더 불러오기</button>
+                </div>
               )}
             </section>
           );
@@ -1293,7 +1322,8 @@ function CampaignFormModal({ editing, setEditing, saving, onSave, authHeaders, o
       if (data.success && data.data) {
         setEditing({ ...editing, subject: data.data.subject, htmlBody: data.data.htmlBody });
         if (!instructionOverride) setRefineInstruction('');
-        onToast('AI가 다듬었습니다. (1 크레딧)', 'success');
+        // ★ 2026-10-25 원장 #87 — 바뀐 때만 차감(서버 changed) · 같은 글이면 0크레딧이라고 말한다
+        onToast(data.changed === false ? '바뀐 곳이 없어 그대로 두었어요. 크레딧은 빠지지 않았어요.' : `AI가 다듬었습니다. (${creditText('email-refine')})`, data.changed === false ? 'info' : 'success');
       } else {
         onToast(data.error || 'AI 다듬기 실패', 'error');
       }
@@ -1387,7 +1417,7 @@ function CampaignFormModal({ editing, setEditing, saving, onSave, authHeaders, o
           <div className="bg-fuchsia-50 border border-fuchsia-200 rounded-lg p-3">
             <div className="flex items-center justify-between gap-2 mb-2">
               <div className="flex items-center gap-1.5 text-[11px] text-fuchsia-800 font-semibold">
-                <Wand2 className="w-3.5 h-3.5" /> AI 다듬기 (1 크레딧)
+                <Wand2 className="w-3.5 h-3.5" /> AI 다듬기 ({creditText('email-refine')})
               </div>
               <button
                 onClick={() => handleRefine(ONE_CLICK_REFINE)}

@@ -8,6 +8,8 @@
  *   그 밖 = [직접 고치기](그 자리 편집 · 검사는 서버 몇 분) · [미루기](행사 기간 안 · 다른 문자 없는 날) · [오늘만 건너뛰기] · [행사 취소](확인 창 · 비환불 고지).
  * ⛔ 확인 창 없이 실행하는 버튼 0 · native dialog 0 · 줄표 0 · 모델명 0.
  */
+import { PreviewFrame, recipientsText } from './PlannerConfirmView';
+import { useSendPolicy, plannerSendAtText } from '../../utils/send-policy';
 import { useEffect, useMemo, useState } from 'react';
 import { AlertTriangle, CalendarClock, Check, ChevronDown, Loader2, Pencil, Send, ShieldCheck, SkipForward, XCircle } from 'lucide-react';
 import LinkConfirmSheet from '../link/LinkConfirmSheet';
@@ -16,7 +18,8 @@ import { won, type RecheckAction, type RecheckView } from './planner-api';
 
 type Ask = null | 'approve' | 'skip' | 'defer' | 'cancel';
 
-const sendsAtText = (v: RecheckView) => (v.sendsAt === 'now' ? '누르면 곧 보내요' : v.sendsAt === 'morning' ? '오늘 오전 8시에 보내요' : `${plannerDay(v.pair.date)} 오전 8시부터 보내요`);
+// ★ 2026-10-25 원장 #62 — 발송 시각 = 서버 값(옛: 「오전 8시」 숫자)
+const sendsAtText = (v: RecheckView, at: string) => (v.sendsAt === 'now' ? '누르면 곧 보내요' : v.sendsAt === 'morning' ? `오늘${at ? ` ${at}에` : ''} 보내요` : `${plannerDay(v.pair.date)}${at ? ` ${at}부터` : '에'} 보내요`);
 
 function CopyBox({ text, subject, tone }: { text: string; subject: string; tone: 'slate' | 'rose' | 'emerald' }) {
   const box = tone === 'rose' ? 'bg-rose-50/70 border-rose-200' : tone === 'emerald' ? 'bg-emerald-50/60 border-emerald-200' : 'bg-slate-50 border-slate-200';
@@ -37,6 +40,8 @@ export default function PlannerRecheckPanel({
   /** 실행(확인 창을 지난 뒤) — 성공 · 실패 처리는 부모가 한다(링크는 인증번호 요구를 받으면 같은 동작을 다시 보낸다) */
   onAction: (a: RecheckAction) => Promise<void> | void;
 }) {
+  const sendPolicy = useSendPolicy();   // ★ 2026-10-25 원장 #62 발송 시각 · 문안 상한 = 서버 값
+  const sendAt = plannerSendAtText(sendPolicy);
   const defaultChoice: 'proposal' | 'current' = view.proposal.hash ? 'proposal' : 'current';
   const [choice, setChoice] = useState<'proposal' | 'current'>(defaultChoice);
   const [ask, setAsk] = useState<Ask>(null);
@@ -56,7 +61,8 @@ export default function PlannerRecheckPanel({
 
   const chosen = choice === 'proposal' ? view.proposal : view.current;
   const canSend = view.actions.approve.ok && !!chosen.hash;
-  const people = view.recipients.state === 'known' && view.recipients.count !== null ? `${won(view.recipients.count)}명` : '확인 중';
+  // ★ 2026-10-25 원장 #58 — 받는 사람 문구 = 확인 화면과 같은 함수(막힘 · 오류를 「확인 중」으로 뭉뚱그리지 않는다)
+  const people = recipientsText(view.recipients);
   const day = view.pair.date === view.today ? '오늘' : plannerDay(view.pair.date);
 
   const head = useMemo(() => {
@@ -119,7 +125,8 @@ export default function PlannerRecheckPanel({
             함께 나가는 모바일 DM 보기<ChevronDown className={`w-4 h-4 transition-transform ${dmOpen ? 'rotate-180' : ''}`} />
           </button>
           {dmOpen && (view.dm.html
-            ? <iframe title="모바일 DM 미리보기" srcDoc={view.dm.html} sandbox="" className="w-full bg-white block border-t border-slate-100" style={{ height: 520 }} />
+            // ★ 2026-10-25 원장 #59 — 확인 화면과 같은 공용 미리보기(스크립트 허용 · 슬라이드가 넘어간다 · 옛: sandbox="" iframe = 고객이 보는 DM 과 달랐다)
+            ? <div className="border-t border-slate-100"><PreviewFrame title="모바일 DM 미리보기" html={view.dm.html} height={520} /></div>
             : <p className="px-4 pb-4 text-[12.5px] text-slate-500">미리보기를 불러오지 못했어요.</p>)}
         </div>
       )}
@@ -129,7 +136,7 @@ export default function PlannerRecheckPanel({
           <p className="text-[13px] font-semibold text-slate-700">문안 직접 고치기</p>
           <input value={draftSubject} onChange={(e) => setDraftSubject(e.target.value)} maxLength={60} placeholder="제목"
             className="w-full h-10 px-3 rounded-lg border border-slate-300 text-[13.5px] text-slate-900" />
-          <textarea value={draft} onChange={(e) => setDraft(e.target.value)} rows={7} maxLength={1000}
+          <textarea value={draft} onChange={(e) => setDraft(e.target.value)} rows={7} maxLength={sendPolicy?.plannerCopyMax}
             className="w-full px-3 py-2.5 rounded-lg border border-slate-300 text-[13.5px] leading-relaxed text-slate-900" />
           <p className="text-[12px] text-slate-500">광고 표시 · 무료 수신거부 번호 · 모바일 DM 주소는 보낼 때 자동으로 붙어요. 저장하면 실제 주소로 다시 검사해요(몇 분).</p>
           <div className="flex gap-2 justify-end">
@@ -147,7 +154,7 @@ export default function PlannerRecheckPanel({
           className="w-full h-12 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-900 text-[15px] font-bold inline-flex items-center justify-center gap-2 disabled:opacity-40">
           <Send className="w-[17px] h-[17px]" />{choice === 'proposal' ? '새 문안으로' : view.current.edited ? '고친 문안으로' : '이 문안으로'} 보내기 · {people}
         </button>
-        {!view.actions.approve.ok ? reasonLine(view.actions.approve.reason) : <p className="text-center text-[12px] text-slate-500">{sendsAtText(view)} · 문안비 {won(view.copyCost)}크레딧은 보낸 뒤 1번</p>}
+        {!view.actions.approve.ok ? reasonLine(view.actions.approve.reason) : <p className="text-center text-[12px] text-slate-500">{sendsAtText(view, sendAt)} · 문안비 {won(view.copyCost)}크레딧은 보낸 뒤 1번</p>}
         <div className="grid grid-cols-3 gap-2 pt-1">
           <button type="button" onClick={() => setEditing(true)} disabled={busy || editing || !view.actions.edit.ok} className={btnOutline}><Pencil className="w-4 h-4" />고치기</button>
           <button type="button" onClick={() => setAsk('defer')} disabled={busy || !view.actions.defer.ok} className={btnOutline}><CalendarClock className="w-4 h-4" />미루기</button>
@@ -166,12 +173,13 @@ export default function PlannerRecheckPanel({
         open={ask === 'approve'}
         title={`${choice === 'proposal' ? '새 문안' : '이 문안'}으로 보낼까요?`}
         rows={[
-          { label: '보낼 날', value: `${plannerDay(view.pair.date)} · ${sendsAtText(view)}` },
+          { label: '보낼 날', value: `${plannerDay(view.pair.date)} · ${sendsAtText(view, sendAt)}` },
           { label: '받는 사람', value: people },
           { label: '비용', value: `지금 0 · 보낸 뒤 문안비 ${won(view.copyCost)}크레딧` },
         ]}
         notes={[
-          { tone: 'info', text: '보내기 전에는 PC 한줄로에서 행사 승인을 풀거나 행사를 취소해 멈출 수 있어요.' },
+          // ★ 2026-10-25 원장 #57 — 이미 나간 발송이 있으면 승인 풀기는 서버가 거절한다 · 안내도 그 판정대로
+          { tone: 'info', text: view.canUnapprove ? '보내기 전에는 PC 한줄로에서 행사 승인을 풀거나 행사를 취소해 멈출 수 있어요.' : '보내기 전에는 PC 한줄로에서 행사를 취소해 남은 발송을 멈출 수 있어요.' },
           { tone: 'warn', text: '나간 문자는 되돌릴 수 없어요.' },
           ...(mode === 'link' ? [{ tone: 'info' as const, text: '이 휴대폰으로 인증번호를 한 번 받을 수 있어요.' }] : []),
         ]}

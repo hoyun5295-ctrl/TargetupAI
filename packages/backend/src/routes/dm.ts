@@ -8,25 +8,22 @@
  * 한줄로 AI 프로 요금제 이상.
  */
 
+import { dmWideOneOverflow, flatSectionsOfBody, dmWideOneError } from '../utils/dm/dm-section-registry';
+import { resolveDmAlertMsgType } from '../utils/dm/dm-alert-msg-type';
 import { demoBlock } from '../utils/demo-company';   // ★ 2026-10-09 시연 회사 = 사람이 누르는 발송·돈 입구 거절(설계서 docs/2026-10-09-demo-company-design.md §3)
 import { Request, Response, Router, json } from 'express';
 import path from 'path';
 import fs from 'fs';
 import multer from 'multer';
 import { v4 as uuidv4 } from 'uuid';
+import { randomUUID } from 'crypto';
 import { DM_IMAGE_DIR, handleDmImageUpload } from '../utils/dm/dm-image-upload';
 import { query } from '../config/database';
 import { authenticate } from '../middlewares/auth';
-import {
-  createDm, updateDm, deleteDm, getDmList, getDmDetail, getDmByCode, getDmTrackTargetByCode, cloneDm, DmStaleSaveError, planDmRestore,
-  trackDmView, getDmStats, getDmRecipientEngagementRows, getDmSendBatches,
-  saveDmVersion, listDmVersions, restoreDmVersion, buildDmSnapshot,
-  extractFlatSectionsFromDm, extractPagesFromDm, extractDmCopyText, pagesFromSectionGroups,
-  stopDm, resumeDm, isDmStopped, isDmStoppedByCode, DM_TRANSITION_BLOCK_MESSAGES,
-} from '../utils/dm/dm-builder';
+import { createDm, updateDm, deleteDm, getDmList, getDmDetail, getDmByCode, getDmTrackTargetByCode, cloneDm, DmStaleSaveError, planDmRestore, trackDmView, getDmRecipientEngagementRows, getDmSendBatches, saveDmVersion, listDmVersions, restoreDmVersion, buildDmSnapshot, extractFlatSectionsFromDm, extractDmCopyText, pagesFromSectionGroups, stopDm, resumeDm, isDmStopped, isDmStoppedByCode, DM_TRANSITION_BLOCK_MESSAGES, revertFreshPublish } from '../utils/dm/dm-builder';
 // ★ 2026-09-16 쪽 템플릿 조립(블록 조립 화면·AI 자동제작 공용) — 자리 정의는 dm-catalog-templates, 합성 실행은 dm-catalog-render
 import { renderCatalogTemplatePage } from '../utils/dm/dm-catalog-render';
-import { CATALOG_TEMPLATES, catalogTemplateOf, type CatalogTemplateKey } from '../utils/dm/dm-catalog-templates';
+import { catalogTemplateOf, type CatalogTemplateKey } from '../utils/dm/dm-catalog-templates';
 // ★ 2026-08-25 DB 스키마 부재 → 503 안내(CLAUDE.md db_alter_safety_net)
 import { isMissingSchemaError, migrationPendingBody } from '../utils/db-errors';
 // ★ 2026-09-26 한줄로 V2 R1-18 — 추적 세그먼트 판정 한 벌(화면 버튼 수 = 재발송 대상) · 목록 상한
@@ -38,11 +35,9 @@ import { recordCustomerSends } from '../utils/customer-send-stats';
 import { renderDmViewerHtml, renderDmViewerHtmlWithCustomer, renderDmErrorHtml } from '../utils/dm/dm-viewer';
 // ★ 2026-07-08 연동 몰 상품 자동 첨부 (생성된 상품 슬라이드 항목명 → 몰 이름매칭 이미지·링크)
 import { attachMallImagesToProductCarousels } from '../utils/mall-product-match';
-import {
-  parsePrompt, improveMessage,
-  oneShotGenerate,
-} from '../utils/dm/dm-ai';
-import { checkCredit, deductCreditSafe, InsufficientCreditError, isCreditEnabledStrict } from '../utils/ai-credit';
+import { improveMessage, oneShotGenerate } from '../utils/dm/dm-ai';
+import { checkCredit, InsufficientCreditError, settleCreditAfterSuccess, settleOrUndo } from '../utils/ai-credit';
+import { withDmPublishLock } from '../utils/keyed-lock';
 import { buildLineEventText, isValidAttemptToken, oneLineInflightKey, sanitizeLineProducts, lineProductsKey, sanitizeLineReads, applyLineReads } from '../utils/one-line-facts';   // ★ 2026-10-05 한줄로 시그니처 · ★1010 몰 상품 확정
 import { linePriceNotes, linePinnedPrimary, mergeLineBrandKit, type LineMallCard } from '../utils/line-mall-cards';   // ★ 2026-10-10 한 줄 DM 강화
 import { resolveIntegrationActor } from '../utils/integration-scope';
@@ -54,7 +49,7 @@ import { getLineComposition, draftLineCook, buildLineCookDm, lineCompositionDmMa
 import { runLineCookOrder } from '../utils/one-line-ct/order';   // ★ 2026-10-23 돈 순서 한 곳
 import { prepareLineStepsRequest, isLineStepsReqError, resolveLineStepsDelivery } from '../utils/line-steps-context';
 // ★ 2026-09-27 만들기 개편 S6 — 첫 발행 잠금·발행비 판정은 CT 가 소유(두 발행 문이 같은 판정)
-import { dmPublishBlocker, dmPublishStaticBlock, resolveSendPublishFeeGate, quoteDmPublishFee } from '../utils/dm/dm-publish-gate';
+import { dmPublishBlocker, dmPublishStaticBlock, resolveSendPublishFeeGate, quoteDmPublishFee, publishFeeDueStrict } from '../utils/dm/dm-publish-gate';
 import { publishDmCore, publishDmWithPrizes } from '../utils/dm/dm-publish-core';
 import { generateDmAlertCopy } from '../utils/dm/dm-alert-copy';   // ★ 2026-10-24 ② DM 알림 문자 = CT(옛 라우트 인라인 AI)
 import { efficacyNote } from '../utils/copy-benefit-detector';
@@ -64,12 +59,7 @@ import type { Section } from '../utils/dm/dm-section-registry';
 import { selectSampleCustomers, selectSampleCustomerByKey, type SampleCustomerKey } from '../utils/dm/dm-sample-customer';
 import { lookupDmRecipientToken, issueDmRecipientTokensBulk, discardDmRecipientTokens, lookupDmShortLink, attachDmTokensToCampaign } from '../utils/dm/dm-recipient-token';
 // ★ 2026-07-10 고객사 자체 URL 단축(hlj.kr) — 박성용 신기능(도메인 평판 보호 · 2026-09-16 20크레딧)
-import {
-  createCustomShortLink, lookupCustomShortLink, recordCustomShortLinkClick,
-  listCustomShortLinks, setCustomShortLinkActive, ShortLinkSlugTakenError,
-  // ★ 2026-07-15 발행 DM 한글 주소 별칭
-  upsertDmAliasLink, getDmAliasLink, isSlugAvailable,
-} from '../utils/dm/dm-custom-short-link';
+import { createCustomShortLink, lookupCustomShortLink, recordCustomShortLinkClick, listCustomShortLinks, setCustomShortLinkActive, ShortLinkSlugTakenError, discardCustomShortLink, upsertDmAliasLink, getDmAliasLink } from '../utils/dm/dm-custom-short-link';
 import { validateCustomShortLinkUrl, normalizeCustomLinkTitle, CUSTOM_LINK_DAILY_LIMIT, validateCustomSlug } from '../utils/dm/dm-custom-short-link-core';
 import {
   computeDmProgressPct, isDmCompleted, sumSectionClicks,
@@ -82,7 +72,7 @@ import { buildChannelEligibilityWhere } from '../utils/channel-eligibility';
 import { createDirectSendCampaign, preFilterRecipientsLikeStaging, countStagingFiltered } from '../utils/direct-send-core';
 import { DirectSendError } from '../utils/direct-send-spec';
 import { getOpt080Number, stripAdPartsDeep } from '../utils/messageUtils';
-import { isUuid, findLinkDefectDeep } from '../utils/normalize';
+import { isUuid } from '../utils/normalize';
 import { canAccessDm, canAccessEveryDm, requireDmAccess, requireAbTestAccess, isDmControlRequest } from '../utils/dm-access';
 import { resolveOwnerScope } from '../utils/owner-scope';
 // ★ 2026-09-27 한줄로 V2 S5-04 — 고객 범위 SQL CT
@@ -100,7 +90,7 @@ import { searchNaverShopCandidates, isNaverShopSearchConfigured } from '../utils
 // ★ 2026-09-05 아웃리치 DM noindex(불변 23) — 공개 뷰어가 요청 시각에 회사 id로 판정(저장값 아님 · 기존 발행분 소급)
 import { getOutreachContext } from '../utils/sales-outreach-produce';
 // ★ 2026-09-06 S5 재료 입구(이미지·행사 텍스트 → 엔진 조립 · 초안 DM)
-import { generateDmFromMaterials, quickMaterialsEnabled, generateFromBuildMaterials, buildGenerateResponse } from '../utils/campaign-quick';
+import { generateFromBuildMaterials, buildGenerateResponse } from '../utils/campaign-quick';
 // ★ 2026-09-14 T4 AI 자동제작 v1(materials.version === 1) — 신규 ENV 게이트 · 회사 단위 in-flight 잠금 · 오류 status 매핑
 import { isBuildMaterialsV1, aiAutoBuildEnabled, aiAutoBuildErrorResponse, buildInflightKey } from '../utils/ai-auto-build-materials';
 import { tryAcquireInflight, releaseInflight, singleFlight, SEND_IN_FLIGHT_MESSAGE } from '../utils/inflight-lock';
@@ -109,34 +99,26 @@ import { handleDbMigrationError } from '../utils/db-migration-error';
 import { buildEventTemplateHintBlock } from '../utils/design-core/event-package';
 // ★ 2026-07-16 자가 호스팅 웹폰트 @font-face 생성 (궁서 폴백 정정)
 import { renderSelfHostFontFaceCss } from '../utils/design-core/fonts';
-import { listTemplates, getTemplate } from '../utils/dm/dm-template-registry';
 import { insertTestSmsQueue } from '../utils/sms-queue';
 import { getUserTestContacts } from '../utils/test-contact-helper';
 import { sanitizeSmsText } from '../utils/auto-notify-message';
 import { convertLegacyToSections } from '../utils/dm/dm-legacy-converter';
 import { previewBrandExtract } from '../utils/dm/dm-brand-kit';
-import {
-  createAbTest, getAbTest, getAbTestByShortCode, listAbTests, updateAbTest,
-  deleteAbTest, startAbTest, pauseAbTest, completeAbTest, aggregateResults,
-  pickVariant, variantToPageId, trackAbTestView,
-  type AbVariantKey,
-} from '../utils/dm/dm-ab-test';
+import { createAbTest, getAbTestByShortCode, listAbTests, updateAbTest, deleteAbTest, startAbTest, pauseAbTest, completeAbTest, aggregateResults, pickVariant, variantToPageId, trackAbTestView, type AbVariantKey } from '../utils/dm/dm-ab-test';
 // ★ CT-17: 모바일 DM 빌더는 PRO 이상만 사용 가능
 import { requirePlanFeature } from '../utils/plan-guard';
 // ★ D216+ 신규 5 AI 모듈 (CT-86 ~ CT-90)
 import { applyQuickAction, type QuickActionType } from '../utils/dm/dm-quick-action';
-import { recommendEventType } from '../utils/dm/dm-event-recommender';
-import { getPersonalizationVariables } from '../utils/dm/dm-personalization-engine';
 // ★ 2026-06-14 B 인터랙션 엔진 — 제출/추첨/조회/다운로드/사전지정/경품 CT
 import {
   submitEventResponse, getResponses, getWinners, getResponseStats, DM_TEST_LINK_MARKER,
   buildResponseExportRows, importPresetWinners,
 } from '../utils/dm/dm-interaction';
-import { parseWinnerRows, buildEventInsight } from '../utils/dm/dm-interaction-core';
+import { parseWinnerRows } from '../utils/dm/dm-interaction-core';
 import * as XLSX from 'xlsx';
 import { getServePath, parseFitOption } from '../utils/image-serve';
 
-import { publicErrorText } from '../utils/http-error';
+import { publicErrorText, respondUserError } from '../utils/http-error';
 // ────────────── D216+ 503 안전망 helper (db_alter_safety_net 영구 룰) ──────────────
 function isDbMigrationPendingError(err: any): boolean {
   const msg = err?.message || '';
@@ -294,6 +276,7 @@ dmPublicRouter.get('/:code', async (req: Request, res: Response) => {
     res.send(html);
   } catch (err: any) {
     console.error('[DM뷰어] 오류:', err.message);
+    if (respondUserError(res, err)) return;   // ★ 2026-10-25 R10 — 사용자 조건 오류 = 그 상태 · 문장 그대로
     res.status(500).send(renderDmErrorHtml('일시적 오류가 발생했습니다.'));
   }
 });
@@ -356,6 +339,7 @@ dmPublicRouter.post('/:code/track', async (req: Request, res: Response) => {
       return send503Migration(res, 'dm_views ALTER(recipient_token/anonymous_id/max_scroll_pct)');
     }
     console.error('[DM추적] 오류:', err.message);
+    if (respondUserError(res, err)) return;   // ★ 2026-10-25 R10 — 사용자 조건 오류 = 그 상태 · 문장 그대로
     res.status(500).json({ error: 'Internal error' });
   }
 });
@@ -388,6 +372,7 @@ dmRouter.get('/', async (req: any, res: any) => {
     return res.json(list);
   } catch (err: any) {
     console.error('[DM목록] 오류:', err.message);
+    if (respondUserError(res, err)) return;   // ★ 2026-10-25 R10 — 사용자 조건 오류 = 그 상태 · 문장 그대로
     return res.status(500).json({ error: '서버 오류' });
   }
 });
@@ -403,6 +388,7 @@ dmRouter.post('/', async (req: any, res: any) => {
     return res.json(dm);
   } catch (err: any) {
     console.error('[DM생성] 오류:', err.message);
+    if (respondUserError(res, err)) return;   // ★ 2026-10-25 R10 — 사용자 조건 오류 = 그 상태 · 문장 그대로
     return res.status(500).json({ error: '서버 오류' });
   }
 });
@@ -433,6 +419,7 @@ dmRouter.get('/short-links', async (req: any, res: any) => {
       return res.status(503).json({ success: false, error: '단축 URL 기능을 준비 중입니다. 잠시 후 다시 시도해 주세요.', code: 'DB_MIGRATION_PENDING' });
     }
     console.error('[커스텀 단축링크 목록] 오류:', msg);
+    if (respondUserError(res, err)) return;   // ★ 2026-10-25 R10 — 사용자 조건 오류 = 그 상태 · 문장 그대로
     return res.status(500).json({ error: '서버 오류' });
   }
 });
@@ -465,16 +452,21 @@ dmRouter.post('/short-links', async (req: any, res: any) => {
 
     // 크레딧 — 사전 확인 → 발급 성공 → 멱등 차감(키=링크 id). 발급 실패/상한 초과 시 미차감.
     //   일일 상한 판정은 CT의 INSERT 단문에 결합(선-카운트 TOCTOU 정정 — Codex 지적).
-    //   deductCreditSafe 영구 실패는 전사 정책대로 [CREDIT][MISS] 로그+수동 재차감(효과물 회수 없음 — DM 발행과 동일).
+    //   ★ 2026-10-25 성공 뒤 차감 한 규칙(D1 A) — 동시 소진 402 · 원장 쓰기 실패 503 = 만든 링크를 거둔다(무과금 링크 0).
     const cost = getCreditCost('dm-custom-short-link');
     await checkCredit(companyId, cost);
     const link = await createCustomShortLink({ companyId, userId, targetUrl: v.url, title, slug });
     if (!link) {
       return res.status(429).json({ error: `단축 링크는 하루 ${CUSTOM_LINK_DAILY_LIMIT}건까지 생성할 수 있습니다.` });
     }
-    await deductCreditSafe({
-      companyId, cost, source: 'dm-custom-short-link', createdBy: userId,
-      idempotencyKey: `dm-custom-short-link:${link.id}`,
+    // ★ 2026-10-25 성공 뒤 차감 한 규칙(D1 A) — 동시 소진(402) · 원장 쓰기 실패(503) = 방금 만든 링크를 거두고 결과를 건네지 않는다
+    await settleOrUndo({
+      settle: {
+        companyId, cost, source: 'dm-custom-short-link', createdBy: userId,
+        idempotencyKey: `dm-custom-short-link:${link.id}`,
+      },
+      undo: async () => { await discardCustomShortLink(companyId, link.id); },
+      what: '단축 링크',
     });
 
     return res.json({ success: true, link: { ...link, shortUrl: `${base}/${link.code}` } });
@@ -482,6 +474,7 @@ dmRouter.post('/short-links', async (req: any, res: any) => {
     if (err instanceof InsufficientCreditError) {
       return res.status(402).json({ error: err.message, code: 'INSUFFICIENT_CREDIT' });
     }
+    if (respondUserError(res, err)) return;
     // ★ 2026-09-16 지정 주소 선점 — 차감 전에 던져지므로 과금 0. 화면이 그 칸만 다시 받게 코드를 함께 준다.
     if (err instanceof ShortLinkSlugTakenError) {
       return res.status(409).json({ error: err.message, code: 'SHORT_LINK_SLUG_TAKEN' });
@@ -508,6 +501,7 @@ dmRouter.patch('/short-links/:linkId', async (req: any, res: any) => {
     return res.json({ success: true, link: { ...link, shortUrl: base ? `${base}/${link.code}` : null } });
   } catch (err: any) {
     console.error('[커스텀 단축링크 토글] 오류:', err?.message);
+    if (respondUserError(res, err)) return;   // ★ 2026-10-25 R10 — 사용자 조건 오류 = 그 상태 · 문장 그대로
     return res.status(500).json({ error: '서버 오류' });
   }
 });
@@ -547,6 +541,7 @@ dmRouter.get('/:id/alias', async (req: any, res: any) => {
       return res.status(503).json({ success: false, error: ALIAS_MIGRATION_MSG, code: 'DB_MIGRATION_PENDING' });
     }
     console.error('[DM 한글주소 조회] 오류:', err?.message);
+    if (respondUserError(res, err)) return;   // ★ 2026-10-25 R10 — 사용자 조건 오류 = 그 상태 · 문장 그대로
     return res.status(500).json({ error: '서버 오류' });
   }
 });
@@ -589,6 +584,7 @@ dmRouter.post('/:id/alias', async (req: any, res: any) => {
       return res.status(503).json({ success: false, error: ALIAS_MIGRATION_MSG, code: 'DB_MIGRATION_PENDING' });
     }
     console.error('[DM 한글주소 생성] 오류:', err?.message);
+    if (respondUserError(res, err)) return;   // ★ 2026-10-25 R10 — 사용자 조건 오류 = 그 상태 · 문장 그대로
     return res.status(500).json({ error: '서버 오류' });
   }
 });
@@ -665,6 +661,7 @@ dmRouter.get('/:id/public-link-stats', async (req: any, res: any) => {
       return res.status(503).json({ success: false, error: ALIAS_MIGRATION_MSG, code: 'DB_MIGRATION_PENDING' });
     }
     console.error('[DM 공용링크 추적] 오류:', err?.message);
+    if (respondUserError(res, err)) return;   // ★ 2026-10-25 R10 — 사용자 조건 오류 = 그 상태 · 문장 그대로
     return res.status(500).json({ error: '서버 오류' });
   }
 });
@@ -685,6 +682,7 @@ dmRouter.get('/:id', async (req: any, res: any, next: any) => {
     return res.json(dm);
   } catch (err: any) {
     console.error('[DM상세] 오류:', err.message);
+    if (respondUserError(res, err)) return;   // ★ 2026-10-25 R10 — 사용자 조건 오류 = 그 상태 · 문장 그대로
     return res.status(500).json({ error: '서버 오류' });
   }
 });
@@ -702,6 +700,12 @@ dmRouter.put('/:id', async (req: any, res: any, next: any) => {
     //   (옛: 게이트 없이 라이브 주소에 바로 썼다 · 발행은 막는 결함이 저장으로는 받는 사람에게 나갔다). 관문 판정 = 발행과 같은 CT.
     const curDm = await getDmDetail(req.params.id, companyId);
     if (!curDm) return res.status(404).json({ error: 'DM을 찾을 수 없습니다.' });
+    // ★ 2026-10-25 원장 #69 — 저장될 모습에 추첨 블록이 둘 이상이면 저장하지 않는다(발행 · 편집기와 같은 판정)
+    {
+      const pickBody = (k: string) => (req.body && req.body[k] !== undefined ? req.body[k] : curDm[k]);
+      const wide = dmWideOneOverflow(flatSectionsOfBody({ pages: pickBody('pages'), sections: pickBody('sections') }));
+      if (wide) return res.status(400).json({ error: dmWideOneError(wide), code: 'DM_WIDE_ONE' });
+    }
     if (curDm.status === 'published') {
       const pick = (k: string) => (req.body && req.body[k] !== undefined ? req.body[k] : curDm[k]);
       // ★ 2026-10-24 ⑮ 관문이 고객 화면도 그려 보므로 지금 DM 전체(제목 · 꼴 · 브랜드)에 바뀔 칸만 얹어 넘긴다
@@ -716,6 +720,7 @@ dmRouter.put('/:id', async (req: any, res: any, next: any) => {
     // ★ 2026-10-19 B-1014-3⑨ — 늦게 닿은 옛 저장(판 다름) = 409 · 지금 판을 돌려준다(화면이 마지막 내용으로 한 번 다시 보낸다)
     if (err instanceof DmStaleSaveError) return res.status(409).json({ error: '더 새로 저장된 내용이 있어요.', code: 'STALE_SAVE', current_version: err.currentVersion });
     console.error('[DM수정] 오류:', err.message);
+    if (respondUserError(res, err)) return;   // ★ 2026-10-25 R10 — 사용자 조건 오류 = 그 상태 · 문장 그대로
     return res.status(500).json({ error: '서버 오류' });
   }
 });
@@ -734,6 +739,7 @@ dmRouter.delete('/:id', async (req: any, res: any, next: any) => {
     return res.json({ success: true });
   } catch (err: any) {
     console.error('[DM삭제] 오류:', err.message);
+    if (respondUserError(res, err)) return;   // ★ 2026-10-25 R10 — 사용자 조건 오류 = 그 상태 · 문장 그대로
     return res.status(500).json({ error: '서버 오류' });
   }
 });
@@ -752,6 +758,7 @@ dmRouter.post('/:id/clone', async (req: any, res: any) => {
     return res.json({ success: true, dm: cloned });
   } catch (err: any) {
     console.error('[DM복제] 오류:', err.message);
+    if (respondUserError(res, err)) return;   // ★ 2026-10-25 R10 — 사용자 조건 오류 = 그 상태 · 문장 그대로
     return res.status(500).json({ error: '서버 오류' });
   }
 });
@@ -767,6 +774,7 @@ dmRouter.get('/:id/publish-quote', requireDmAccess, async (req: any, res: any) =
     return res.json({ success: true, via, ...q });
   } catch (err: any) {
     console.error('[DM 발행 선견적] 오류:', err?.message);
+    if (respondUserError(res, err)) return;   // ★ 2026-10-25 R10 — 사용자 조건 오류 = 그 상태 · 문장 그대로
     return res.status(500).json({ error: '발행비를 계산하지 못했어요.' });
   }
 });
@@ -795,6 +803,7 @@ dmRouter.post('/:id/render-preview', requireDmAccess, async (req: any, res: any)
     return res.json({ success: true, html });
   } catch (err: any) {
     console.error('[DM 무저장 미리보기] 오류:', err?.message);
+    if (respondUserError(res, err)) return;   // ★ 2026-10-25 R10 — 사용자 조건 오류 = 그 상태 · 문장 그대로
     return res.status(500).json({ error: '미리보기를 그리지 못했어요.' });
   }
 });
@@ -823,6 +832,7 @@ dmRouter.post('/:id/publish', requireDmAccess, async (req: any, res: any) => {
     if (err instanceof InsufficientCreditError) {
       return res.status(402).json({ error: err.message, code: 'INSUFFICIENT_CREDIT' });
     }
+    if (respondUserError(res, err)) return;
     console.error('[DM발행] 오류:', err.message);
     return res.status(500).json({ error: '서버 오류' });
   }
@@ -857,6 +867,7 @@ dmRouter.post('/:id/stop', async (req: any, res: any) => {
     return res.json({ success: true, status: row.status, short_code: row.short_code });
   } catch (err: any) {
     console.error('[DM중지] 오류:', err.message);
+    if (respondUserError(res, err)) return;   // ★ 2026-10-25 R10 — 사용자 조건 오류 = 그 상태 · 문장 그대로
     return res.status(500).json({ error: '서버 오류' });
   }
 });
@@ -885,19 +896,7 @@ dmRouter.post('/:id/resume', async (req: any, res: any) => {
     return res.json({ success: true, status: row.status, short_code: row.short_code });
   } catch (err: any) {
     console.error('[DM재개] 오류:', err.message);
-    return res.status(500).json({ error: '서버 오류' });
-  }
-});
-
-// GET /api/dm/:id/stats — 통계
-dmRouter.get('/:id/stats', requireDmAccess, async (req: any, res: any) => {
-  try {
-    const companyId = req.user?.companyId;
-    if (!companyId) return res.status(403).json({ error: '회사 권한이 필요합니다.' });
-    const stats = await getDmStats(req.params.id, companyId);
-    return res.json(stats);
-  } catch (err: any) {
-    console.error('[DM통계] 오류:', err.message);
+    if (respondUserError(res, err)) return;   // ★ 2026-10-25 R10 — 사용자 조건 오류 = 그 상태 · 문장 그대로
     return res.status(500).json({ error: '서버 오류' });
   }
 });
@@ -920,6 +919,7 @@ dmRouter.post('/one-line/ask', async (req: any, res: any) => {
     return res.json({ success: true, answer: await buildContentAsk(companyId, req.user?.userId, 'dm', resolveOwnerScope(req)) });
   } catch (err: any) {
     console.error('[DM one-line ask] 오류:', err);
+    if (respondUserError(res, err)) return;   // ★ 2026-10-25 R10 — 사용자 조건 오류 = 그 상태 · 문장 그대로
     return res.status(500).json({ success: false, error: '답을 준비하지 못했어요. 잠시 뒤 다시 물어봐 주세요.' });
   }
 });
@@ -936,7 +936,7 @@ dmRouter.post('/ai/one-shot-generate', singleFlight('dm-generate', async (req: a
     let eventText = req.body?.event_text ? normalizeEventText(req.body.event_text) : '';
 
     // ★ 2026-09-14 T4 AI 자동제작 v1(materials.version === 1 · 설계서 §6-5 · §6-7) — 신규 ENV(AI_AUTO_BUILD_COMPANY_IDS · 비면 403) AND · 회사 단위 in-flight 409 ·
-    //   판정(정규화·게이트·몰 재조회·견적 결박) → checkCredit 순서는 오케스트레이터가 소유 · 오류는 AiAutoBuildError.status 그대로 → 402 잔액 → 503 마이그레이션 → 500 · 몰 자동 첨부 0 · v0 경로는 아래 그대로.
+    //   판정(정규화·게이트·몰 재조회·견적 결박) → checkCredit 순서는 오케스트레이터가 소유 · 오류는 AiAutoBuildError.status 그대로 → 402 잔액 → 503 마이그레이션 → 500 · 몰 자동 첨부 0.
     if (req.body?.materials && isBuildMaterialsV1(req.body.materials)) {
       if (!aiAutoBuildEnabled(companyId)) return res.status(403).json({ success: false, error: '이 기능은 아직 열리지 않았습니다.', code: 'FEATURE_DISABLED' });
       const lockKey = buildInflightKey(companyId);
@@ -947,6 +947,7 @@ dmRouter.post('/ai/one-shot-generate', singleFlight('dm-generate', async (req: a
       } catch (err: any) {
         const mapped = aiAutoBuildErrorResponse(err);
         if (mapped) return res.status(mapped.status).json(mapped.body);
+        if (respondUserError(res, err)) return;   // ★ 2026-10-25 원장 쓰기 실패 = 503(성공 뒤 차감 한 규칙)
         if (err instanceof InsufficientCreditError) return res.status(402).json({ success: false, error: err.message, code: 'INSUFFICIENT_CREDIT' });
         if (handleDbMigrationError(err, res, 'dm_pages')) return;
         console.error('[DM AI one-shot-generate build-v1] 오류:', err?.message);
@@ -954,26 +955,8 @@ dmRouter.post('/ai/one-shot-generate', singleFlight('dm-generate', async (req: a
       } finally { releaseInflight(lockKey); }
     }
 
-    // ★ 2026-09-06 S5 재료 입구 — 업로드 이미지·행사 텍스트를 아웃리치 엔진(결정 구간 공용)이 조립한다. 응답 필드명 유지 + materials 계측 + draft_id.
-    //   몰 상품 자동 첨부는 이 분기에서 부르지 않는다(업로드 이미지는 상품 카드에 붙이지 않는다 · 상품은 재료 글줄). 크레딧 = 기존 키(dm-ai-generate) · 멱등 quick:{draftId}.
-    if (req.body?.materials && typeof req.body.materials === 'object') {
-      if (!quickMaterialsEnabled(companyId)) return res.status(403).json({ success: false, error: '이 기능은 아직 열리지 않았습니다.' });
-      try {
-        const r = await generateDmFromMaterials({ companyId, userId: req.user?.userId, materials: req.body.materials, industry: typeof req.body?.industry === 'string' ? req.body.industry : null });
-        return res.json({
-          success: true,
-          data: {
-            sections: r.sections, pages: r.pages, layout_mode: r.layout_mode, brand_kit: r.brand_kit,
-            spec: null, scenario: null, brief: null, coverage: null,
-            materials: r.materialsMeta, benefitStripped: r.benefitStripped, heroFallback: r.heroFallback, look: r.look, draft_id: r.draftId,
-          },
-        });
-      } catch (err: any) {
-        if (err instanceof InsufficientCreditError) return res.status(402).json({ success: false, error: err.message, code: 'INSUFFICIENT_CREDIT' });
-        console.error('[DM AI one-shot-generate materials] 오류:', err?.message);
-        return res.status(500).json({ success: false, error: '재료로 시안을 만들지 못했습니다. 잠시 후 다시 시도해주세요.' });
-      }
-    }
+    // ★ 2026-10-25 원장 #104 — 재료로 만들기 = v1 한 길(만들기 화면 · 편집기 패널은 그 화면으로 간다). 옛 v0 갈래(영업용 채우기 · 견적 결박 0)는 지웠다 · 열린 옛 화면 = 400
+    if (req.body?.materials) return res.status(400).json({ success: false, error: '화면을 새로 고친 뒤 다시 만들어 주세요.', code: 'MATERIALS_INVALID' });
 
     // ★ 2026-10-05 한줄로 시그니처(설계서 §5) — 한 줄 입구(one_line:true)만 해당한다. 빠른 시작 · 행사 원문 · 편집기 요청은 지금 그대로.
     //   스위치 켠 회사면 한 줄을 **사용자 원문(event_text)** 으로 옮긴다 — 출구 가드 근거가 parsePrompt 요약(자기 참조 · dm-ai.ts:480)이 아니라
@@ -1021,7 +1004,7 @@ dmRouter.post('/ai/one-shot-generate', singleFlight('dm-generate', async (req: a
       prompt = '';
     }
     if (!prompt && !scenario && !eventText) {
-      return res.status(400).json({ error: 'prompt 또는 scenario 영역 필요' });
+      return res.status(400).json({ error: '만들 내용을 한 줄로 적어 주세요.' });
     }
     if (prompt.length > 2000) {
       return res.status(400).json({ error: '프롬프트는 2000자 이내로 입력해주세요.' });
@@ -1146,7 +1129,8 @@ dmRouter.post('/ai/one-shot-generate', singleFlight('dm-generate', async (req: a
     const result = await runInCreditBundle(async () => {
       // ★ 2026-10-24 ② 효능 근거 = 감싸기 전 사람 글(행사 원문 + 요청) · effectivePrompt 는 우리 규칙 문장으로 감싼 글이라 근거가 아니다
       const r = await oneShotGenerate({ prompt: effectivePrompt, scenario, brandName, companyId, eventText, groundText: [eventText, prompt].filter(Boolean).join('\n') });
-      await deductCreditSafe({ companyId, cost: genCost, source: genSource, createdBy: req.user?.userId });
+      // ★ 2026-10-25 성공 뒤 차감 한 규칙(D1 A) — 동시 소진 402 · 원장 쓰기 실패 503 · 결과 안 줌
+      await settleCreditAfterSuccess({ companyId, cost: genCost, source: genSource, createdBy: req.user?.userId, idempotencyKey: `${genSource}:${randomUUID()}` });
       return r;
     });
     // ★ 2026-07-21 연락처 시드는 oneShotGenerate 내부(페이지 분할 전)에서 실제 회사 brand_kit로 수행 — sections·pages 모두 반영(편집=발송). 여기 재시드 불필요.
@@ -1172,6 +1156,7 @@ dmRouter.post('/ai/one-shot-generate', singleFlight('dm-generate', async (req: a
   } catch (err: any) {
     // ★ 2026-10-10 잔액 부족은 402(옛: 500) — 화면은 같은 문구를 보인다
     if (err instanceof InsufficientCreditError) return res.status(402).json({ success: false, error: err.message, code: 'INSUFFICIENT_CREDIT' });
+    if (respondUserError(res, err)) return;
     // ★ 2026-10-17 템플릿 생성 실패 = 정해 둔 상태 · 문장(차감 전 · 초안 0)
     if (err instanceof LineTemplateError) {
       console.error(`[DM template] ${err.code} ${err.detail}`);
@@ -1200,6 +1185,7 @@ dmRouter.post('/products/image-candidates', async (req: any, res: any) => {
     return res.json({ success: true, configured: true, candidates });
   } catch (err: any) {
     console.error('[DM products/image-candidates] 오류:', err.message);
+    if (respondUserError(res, err)) return;   // ★ 2026-10-25 R10 — 사용자 조건 오류 = 그 상태 · 문장 그대로
     return res.status(500).json({ success: false, error: publicErrorText(err, '후보 검색 실패') });
   }
 });
@@ -1217,20 +1203,8 @@ dmRouter.get('/variables', async (req: any, res: any) => {
     return res.json({ variables });
   } catch (err: any) {
     console.error('[DM 변수목록] 오류:', err.message);
+    if (respondUserError(res, err)) return;   // ★ 2026-10-25 R10 — 사용자 조건 오류 = 그 상태 · 문장 그대로
     return res.status(500).json({ error: publicErrorText(err, '변수 목록 로드 실패') });
-  }
-});
-
-// GET /api/dm/sample-customers — 샘플 고객 3종 (VIP/신규/Empty)
-dmRouter.get('/sample-customers', async (req: any, res: any) => {
-  try {
-    const companyId = req.user?.companyId;
-    if (!companyId) return res.status(403).json({ error: '회사 권한이 필요합니다.' });
-    const samples = await selectSampleCustomers(companyId, req.user?.userId);
-    return res.json({ samples });
-  } catch (err: any) {
-    console.error('[DM 샘플고객] 오류:', err.message);
-    return res.status(500).json({ error: publicErrorText(err, '샘플 로드 실패') });
   }
 });
 
@@ -1245,9 +1219,11 @@ dmRouter.post('/:id/send-to-target', requireDmAccess, demoBlock, singleFlight('d
     const userId = req.user?.userId || companyId;
     if (!companyId) return res.status(403).json({ error: '회사 권한이 필요합니다.' });
 
-    const { filter, messageText, subject: subjectReq, isAd, scheduledAt, allCustomers, callback: callbackReq, useIndividualCallback, confirmCallbackExclusion, resendCustomerIds, resendSegment } = req.body as {
+    const { filter, messageText, subject: subjectReq, isAd, scheduledAt, allCustomers, callback: callbackReq, useIndividualCallback, confirmCallbackExclusion, resendCustomerIds, resendSegment, preferSms } = req.body as {
       filter?: Record<string, { operator: string; value: any }>;
       messageText?: string;
+      /** ★ 2026-10-25 원장 #66 — 발송 창에서 「짧게(단문)」를 골랐다(90바이트 안일 때만 단문 · resolveDmAlertMsgType) */
+      preferSms?: boolean;
       /**
        * ★ 2026-09-12 (접수 `cmtwbdljp00a7jnlu4508oiik`) 발송 화면에서 입력한 문자 제목.
        *   종전에는 DM 템플릿 제목(dm.title)을 서버가 고정해, 수신함에 DM 제목이 그대로 찍혔다.
@@ -1279,8 +1255,12 @@ dmRouter.post('/:id/send-to-target', requireDmAccess, demoBlock, singleFlight('d
     const resendIds = segmentKey
       ? classifyDmRecipientSegments(await getDmRecipientEngagementRows(req.params.id, companyId))[segmentKey]
       : Array.isArray(resendCustomerIds)
-        ? resendCustomerIds.map((x) => String(x)).filter((x) => UUID_RE.test(x)).slice(0, 10000)
+        ? resendCustomerIds.map((x) => String(x)).filter((x) => UUID_RE.test(x))
         : [];
+    // ★ 2026-10-25 원장 #80 — 옛 화면 번들의 id 지정 재발송 = 1만 명까지 · 넘으면 조용히 자르지 않고 알린다(옛: .slice(0, 10000) 로 뒤 명단이 말없이 빠졌다)
+    if (!segmentKey && resendIds.length > 10000) {
+      return res.status(400).json({ error: '한 번에 1만 명까지 다시 보낼 수 있어요. 받는 사람 기준(미열람 · 클릭 등)으로 다시 보내기를 눌러 주세요.', code: 'RESEND_TOO_MANY' });
+    }
     // 세그먼트 재발송인데 대상이 0이면 아래 대상 조회가 0명(ZERO_MATCH)으로 반려한다 — 전체 발송으로 새지 않게 재발송 모드는 유지
     const isResend = resendIds.length > 0 || !!segmentKey;
     // ★ 2026-07-02(3) 전체 고객 발송 지원 — 타겟 추출 "전체 고객"(isAll) 확정분은 빈 filter 허용(= 조건 없음 = 전체 + DM 자격)
@@ -1426,15 +1406,35 @@ dmRouter.post('/:id/send-to-target', requireDmAccess, demoBlock, singleFlight('d
     //   옛: 차감·발행을 먼저 해 검사에 걸리면 발송은 안 되는데 발행과 과금은 됐다. 발행 확인(402)·잔액 확인은 위에서 이미 했다.
     // 발행(short_code) 보장 + 경품 동기화(★ 2026-10-24 ⑭ · 발행 문과 같은 함수 — 옛 publishDm 직접 호출은 추첨 · 룰렛 경품을 비웠다)
     //   ★ Codex 1R — 발행비 차감 **앞**이다. 경품 준비 · 발행이 실패하면 돈을 걷지 않고 멈춘다(옛: 차감 뒤 발행이라 실패해도 발행비만 나갔다).
-    const pub = await publishDmWithPrizes(req.params.id, companyId);
-    const shortCode = pub?.short_code || null;
-    if (!shortCode) return res.status(500).json({ error: 'DM 발행에 실패했습니다.' });
-    if (publishFeeGate) {
-      await deductCreditSafe({
-        companyId, cost: publishFeeGate.cost, source: publishFeeGate.source,
-        createdBy: req.user?.userId, idempotencyKey: `dm-publish:${req.params.id}`,
-      });
-    }
+    // ★ 2026-10-26 Codex 2R — 발행비 판정 → 발행 → 정산 = DM 단위 잠금(편집기 발행 문과 같은 잠금) · 잠금 안에서 판정을 다시 본다
+    //   (옛: 다른 요청이 첫 발행을 정산하는 동안 그 주소를 「이미 발행」으로 보고 면제받았다가, 그 정산이 실패해 주소가 거둬지면 새 주소를 무료로 받았다)
+    const pubOut = await withDmPublishLock(req.params.id, async () => {
+      // ★ 1026 Codex 3R — 잠금 안 = 엄격 판정(조회 실패 = 멈춤 503 · 너그러운 판정의 「실패 = null」 이 면제로 읽히지 않게)
+      let gateNow: Awaited<ReturnType<typeof publishFeeDueStrict>>;
+      try { gateNow = await publishFeeDueStrict(companyId, req.params.id); } catch { return { unknown: true as const }; }
+      if ((gateNow?.cost ?? null) !== (publishFeeGate?.cost ?? null)) return { changed: true as const };
+      const prevStatus = publishFeeGate ? String(dm.status || 'draft') : '';
+      const pub = await publishDmWithPrizes(req.params.id, companyId);
+      const code = pub?.short_code || null;
+      if (!code) return { failed: true as const };
+      if (publishFeeGate) {
+        // ★ 2026-10-25 성공 뒤 차감 한 규칙(D1 A) — 동시 소진(402) · 원장 쓰기 실패(503) = 방금 만든 첫 발행을 되돌리고 보내지 않는다
+        //   ★ 1026 Codex 1R — 되돌리기마저 실패 = [CREDIT][ORPHAN] 경보(발행 문과 같은 함수)
+        await settleOrUndo({
+          settle: {
+            companyId, cost: publishFeeGate.cost, source: publishFeeGate.source,
+            createdBy: req.user?.userId, idempotencyKey: `dm-publish:${req.params.id}`,
+          },
+          undo: () => revertFreshPublish(req.params.id, companyId, code, prevStatus),
+          what: 'DM 보내기 첫 발행',
+        });
+      }
+      return { shortCode: code };
+    });
+    if ('unknown' in pubOut) return res.status(503).json({ error: '발행 상태를 확인하지 못했어요. 잠시 후 다시 보내 주세요.', code: 'PUBLISH_STATE_UNKNOWN' });
+    if ('changed' in pubOut) return res.status(409).json({ error: '그 사이 발행 상태가 바뀌었어요. 다시 보내 주세요.', code: 'PUBLISH_STATE_CHANGED' });
+    if ('failed' in pubOut) return res.status(500).json({ error: 'DM 발행에 실패했습니다.' });
+    const shortCode = pubOut.shortCode;
 
     // 수신자별 토큰 발급(벌크) + 링크 구성
     let tokenPairs: Array<{ customerId: string; token: string; shortCode?: string }>;
@@ -1453,6 +1453,7 @@ dmRouter.post('/:id/send-to-target', requireDmAccess, demoBlock, singleFlight('d
     let campaignId: string;
     let sendCount = 0;
     let accepted = false;
+    let msgType: 'SMS' | 'LMS' = 'LMS';
     try {
       const tokenByCust: Record<string, string> = {};
       const shortByCust: Record<string, string> = {};
@@ -1507,13 +1508,17 @@ dmRouter.post('/:id/send-to-target', requireDmAccess, demoBlock, singleFlight('d
       const finalMessage = bodyText.includes('%DM링크%')
         ? bodyText.split('%DM링크%').join('%기타1%')
         : `${bodyText}\n%기타1%`;
+      // ★ 2026-10-25 원장 #66 — 문자 종류 = 실제 나갈 문장의 바이트(옛: 늘 LMS · 화면은 「SMS 짧게 · 저단가」)
+      msgType = await resolveDmAlertMsgType({
+        preferSms: preferSms === true, template: finalMessage, names, links, isAd: isAd === true, companyId, userId: userId || null,
+      });
 
       try {
         const result = await createDirectSendCampaign(
           {
             stagingId,
             campaignName: `DM 발송 · ${dm.title || ''} · ${new Date().toLocaleDateString('ko-KR')}`,
-            msgType: 'LMS',
+            msgType,
             message: finalMessage,
             subject: subjectText,
             callback: callback || '',
@@ -1576,8 +1581,11 @@ dmRouter.post('/:id/send-to-target', requireDmAccess, demoBlock, singleFlight('d
       }).catch(() => { /* 학습 적재 실패는 발송에 영향 없음 */ });
     }
 
-    return res.json({ success: true, campaignId, sent: sendCount });
+    return res.json({ success: true, campaignId, sent: sendCount, msgType });
   } catch (err: any) {
+    // ★ 2026-10-25 발행비 성공 뒤 차감(동시 소진 402 · 원장 쓰기 실패 503 · 첫 발행은 되돌림)
+    if (err instanceof InsufficientCreditError) return res.status(402).json({ error: '발행 크레딧이 부족합니다. 충전 후 다시 시도해주세요.', code: 'INSUFFICIENT_CREDIT' });
+    if (respondUserError(res, err)) return;
     console.error('[DM 타겟 발송] 오류:', err?.message);
     return res.status(500).json({ error: publicErrorText(err, 'DM 발송 실패') });
   }
@@ -1726,8 +1734,9 @@ dmRouter.get('/:id/recipients-tracking', requireDmAccess, async (req: any, res: 
 
     // ★ 2026-10-03 보낸 기록 = 발송(캠페인)마다 한 줄(시각·상태·사람 수) — 화면이 수신자 목록 시각을 잘라 묶던 것을 대신한다. 실패 격리.
     let batches: Array<{ at: string; state: string; count: number }> = [];
+    let batchesTruncated = false;
     try {
-      batches = await getDmSendBatches(req.params.id, companyId);
+      ({ rows: batches, truncated: batchesTruncated } = await getDmSendBatches(req.params.id, companyId));
     } catch (e: any) {
       console.warn('[DM 발송 추적] 보낸 기록 묶음 조회 실패:', e?.message);
     }
@@ -1737,7 +1746,7 @@ dmRouter.get('/:id/recipients-tracking', requireDmAccess, async (req: any, res: 
       // 목록은 상한까지(full=1 = CSV 등 전체) · 전체 수와 잘림 여부를 함께 준다
       recipients: listTruncated ? recipients.slice(0, DM_TRACK_LIST_CAP) : recipients,
       recipientsTotal: recipients.length, listTruncated, segments,
-      hourDistribution, sectionExits, batches,
+      hourDistribution, sectionExits, batches, batchesTruncated,
     });
   } catch (err: any) {
     const msg = err?.message || '';
@@ -1745,6 +1754,7 @@ dmRouter.get('/:id/recipients-tracking', requireDmAccess, async (req: any, res: 
       return res.status(503).json({ error: '수신자별 열람 기록을 준비 중입니다. 잠시 후 다시 시도해 주세요.', code: 'DB_MIGRATION_PENDING' });
     }
     console.error('[DM 발송 추적] 오류:', err?.message);
+    if (respondUserError(res, err)) return;   // ★ 2026-10-25 R10 — 사용자 조건 오류 = 그 상태 · 문장 그대로
     return res.status(500).json({ error: publicErrorText(err, '추적 조회 실패') });
   }
 });
@@ -1824,6 +1834,7 @@ dmRouter.get('/:id/recipient-detail', requireDmAccess, async (req: any, res: any
       return res.status(503).json({ error: 'DB 마이그레이션 필요: dm_recipient_tokens/dm_views/dm_event_responses 확인 요청', code: 'DB_MIGRATION_PENDING' });
     }
     console.error('[DM 수신자 상세] 오류:', err?.message);
+    if (respondUserError(res, err)) return;   // ★ 2026-10-25 R10 — 사용자 조건 오류 = 그 상태 · 문장 그대로
     return res.status(500).json({ error: publicErrorText(err, '수신자 상세 조회 실패') });
   }
 });
@@ -1853,30 +1864,13 @@ dmRouter.post('/:id/generate-copy', requireDmAccess, async (req: any, res: any) 
     return res.json({ success: true, message: msg, ...(note ? { notes: [note] } : {}) });
   } catch (err: any) {
     if (err instanceof InsufficientCreditError) return res.status(402).json({ error: '크레딧이 부족합니다. 충전 후 이용해주세요.', code: 'INSUFFICIENT_CREDIT' });
+    if (respondUserError(res, err)) return;   // ★ 2026-10-25 원장 쓰기 실패 = 503(AI 결과 정산 한 곳)
     console.error('[DM 문안 생성] 오류:', err?.message);
     return res.status(500).json({ error: publicErrorText(err, '문안 생성 실패') });
   }
 });
 
-// POST /api/dm/:id/render-sample — 샘플 고객 기준 뷰어 HTML 렌더링
-dmRouter.post('/:id/render-sample', requireDmAccess, async (req: any, res: any) => {
-  try {
-    const companyId = req.user?.companyId;
-    if (!companyId) return res.status(403).json({ error: '회사 권한이 필요합니다.' });
-    const sampleKey: SampleCustomerKey = (req.body?.sample_key || 'vip') as SampleCustomerKey;
-    const dm = await getDmDetail(req.params.id, companyId);
-    if (!dm) return res.status(404).json({ error: 'DM을 찾을 수 없습니다.' });
-    const sample = await selectSampleCustomerByKey(companyId, sampleKey, req.user?.userId);
-    const html = await renderDmViewerHtmlWithCustomer(dm, '/api/dm/v', sample.data, companyId);
-    return res.json({
-      sample: { key: sample.key, label: sample.label, description: sample.description },
-      html,
-    });
-  } catch (err: any) {
-    console.error('[DM 샘플렌더] 오류:', err.message);
-    return res.status(500).json({ error: publicErrorText(err, '렌더링 실패') });
-  }
-});
+// ★ 2026-10-25 R15 — POST /:id/render-sample(샘플 고객 기준 뷰어 HTML)은 부르던 옛 만들기 화면을 지워 부르는 곳 0 → 삭제
 
 // ============================================================
 //  레거시 → 섹션 변환 (D125 §15)
@@ -1912,6 +1906,7 @@ dmRouter.post('/:id/convert-to-scroll', requireDmAccess, async (req: any, res: a
     return res.json({ dm: updated, converted_sections: sections.length });
   } catch (err: any) {
     console.error('[DM 레거시변환] 오류:', err.message);
+    if (respondUserError(res, err)) return;   // ★ 2026-10-25 R10 — 사용자 조건 오류 = 그 상태 · 문장 그대로
     return res.status(500).json({ error: publicErrorText(err, '변환 실패') });
   }
 });
@@ -1937,8 +1932,6 @@ dmRouter.post('/:id/test-send', requireDmAccess, demoBlock, async (req: any, res
     if (cleanPhones.length === 0) return res.status(400).json({ error: '등록된 담당자 번호가 없어요. 설정 > 담당자 번호에서 추가해주세요.' });
     if (cleanPhones.length > 5) return res.status(400).json({ error: '테스트 발송은 최대 5명까지예요.' });
 
-    const sampleKey: SampleCustomerKey = (req.body?.sample_key || 'vip') as SampleCustomerKey;
-
     const dm = await getDmDetail(req.params.id, companyId);
     if (!dm) return res.status(404).json({ error: 'DM을 찾을 수 없어요.' });
 
@@ -1956,11 +1949,12 @@ dmRouter.post('/:id/test-send', requireDmAccess, demoBlock, async (req: any, res
     }
 
     const baseUrl = process.env.HANJUL_BASE_URL || 'https://hanjul.ai';
-    const url = `${baseUrl}/api/dm/v/dm-${dm.short_code}?p=test&s=${sampleKey}`;
-
-    const sampleLabel = sampleKey === 'vip' ? 'VIP 샘플' : sampleKey === 'newbie' ? '신규 샘플' : '데이터없음';
+    // ★ 2026-10-25 원장 #72 — 테스트 링크 = 공용 화면(?p=test = 기록 · 재고 · 1인 1회에 닿지 않는 표식).
+    //   옛: 「- 샘플: VIP 샘플」 · &s=vip 를 붙였지만 뷰어는 읽지 않아 「고객님」 화면이 열렸다(문장 ≠ 화면).
+    //   ⛔ 공개 주소가 샘플 값을 읽게 하지 않는다 — 샘플 = 실제 대표 고객이라 주소에 ?p=test&s=vip 만 붙이면 누구나 실고객 정보를 보게 된다.
+    const url = `${baseUrl}/api/dm/v/dm-${dm.short_code}?p=test`;
     const body = sanitizeSmsText(
-      `[DM 테스트 발송]\n${dm.title || '(제목 없음)'}\n\n미리보기: ${url}\n\n- 샘플: ${sampleLabel}\n- 발송 시각: ${new Date().toLocaleString('ko-KR')}`
+      `[DM 테스트 발송]\n${dm.title || '(제목 없음)'}\n\n미리보기: ${url}\n\n- 받는 분 이름 등 고객 값은 실제 발송 때 채워져요\n- 발송 시각: ${new Date().toLocaleString('ko-KR', { timeZone: 'Asia/Seoul' })}`
     );
 
     // ★ 2026-06-24: app_etc1은 SMSQ_SEND_10에서 varchar(50). 옛 `dm-test-${UUID}-${Date.now()}`(58자)가
@@ -2018,6 +2012,7 @@ dmRouter.post('/:id/test-send', requireDmAccess, demoBlock, async (req: any, res
     });
   } catch (err: any) {
     console.error('[DM 테스트발송] 오류:', err.message);
+    if (respondUserError(res, err)) return;   // ★ 2026-10-25 R10 — 사용자 조건 오류 = 그 상태 · 문장 그대로
     return res.status(500).json({ error: publicErrorText(err, '테스트 발송 실패') });
   }
 });
@@ -2036,10 +2031,11 @@ dmRouter.get('/:id/versions', async (req: any, res: any) => {
     if (!(await canAccessDm(req.params.id, companyId, req.user?.userType, req.user?.userId))) {
       return res.status(403).json({ error: '이 DM에 접근할 권한이 없어요.' });
     }
-    const versions = await listDmVersions(req.params.id, companyId);
-    return res.json({ versions });
+    const { rows: versions, truncated } = await listDmVersions(req.params.id, companyId);
+    return res.json({ versions, truncated });
   } catch (err: any) {
     console.error('[dm/versions] 목록 조회 실패:', err);
+    if (respondUserError(res, err)) return;   // ★ 2026-10-25 R10 — 사용자 조건 오류 = 그 상태 · 문장 그대로
     return res.status(500).json({ error: '버전 목록을 불러오지 못했습니다.' });
   }
 });
@@ -2075,6 +2071,7 @@ dmRouter.post('/:id/versions', async (req: any, res: any) => {
       return res.status(503).json(migrationPendingBody('dm_versions.snapshot 컬럼 추가'));
     }
     console.error('[dm/versions] 스냅샷 저장 실패:', err);
+    if (respondUserError(res, err)) return;   // ★ 2026-10-25 R10 — 사용자 조건 오류 = 그 상태 · 문장 그대로
     return res.status(500).json({ error: '스냅샷을 저장하지 못했습니다. 잠시 뒤 다시 시도해 주세요.' });
   }
 });
@@ -2111,6 +2108,7 @@ dmRouter.post('/:id/versions/:vid/restore', async (req: any, res: any) => {
     // ⛔ 드라이버·DB 원문을 사용자에게 돌려주지 않는다(★2026-08-24 접수 cmt6qug4s00v1jnotsqeaf12g).
     //   화면에 `invalid input syntax for type json`이 그대로 떴다. 원인은 로그로 남기고 고객에게는 할 일을 준다.
     console.error('[dm/versions/restore] 복원 실패:', err);
+    if (respondUserError(res, err)) return;   // ★ 2026-10-25 R10 — 사용자 조건 오류 = 그 상태 · 문장 그대로
     return res.status(500).json({ error: '이 버전으로 되돌리지 못했습니다. 잠시 뒤 다시 시도해 주세요.' });
   }
 });
@@ -2128,6 +2126,7 @@ dmRouter.get('/brand-kit', async (req: any, res: any) => {
     return res.json({ brand_kit: kit, default: DEFAULT_BRAND_KIT });
   } catch (err: any) {
     console.error('[DM BrandKit GET] 오류:', err.message);
+    if (respondUserError(res, err)) return;   // ★ 2026-10-25 R10 — 사용자 조건 오류 = 그 상태 · 문장 그대로
     return res.status(500).json({ error: publicErrorText(err) });
   }
 });
@@ -2142,6 +2141,7 @@ dmRouter.put('/brand-kit', async (req: any, res: any) => {
     return res.json({ brand_kit: kit });
   } catch (err: any) {
     console.error('[DM BrandKit PUT] 오류:', err.message);
+    if (respondUserError(res, err)) return;   // ★ 2026-10-25 R10 — 사용자 조건 오류 = 그 상태 · 문장 그대로
     return res.status(500).json({ error: publicErrorText(err) });
   }
 });
@@ -2152,6 +2152,7 @@ dmRouter.get('/industry-codes', async (req: any, res: any) => {
     if (!req.user?.companyId) return res.status(403).json({ error: '회사 권한이 필요합니다.' });
     return res.json({ industries: INDUSTRY_CODES.map((code) => ({ code, label: INDUSTRY_LABELS[code] })) });
   } catch (err: any) {
+    if (respondUserError(res, err)) return;   // ★ 2026-10-25 R10 — 사용자 조건 오류 = 그 상태 · 문장 그대로
     return res.status(500).json({ error: publicErrorText(err) });
   }
 });
@@ -2165,6 +2166,7 @@ dmRouter.get('/brand-basic-info', async (req: any, res: any) => {
     return res.json({ basic_info: info });
   } catch (err: any) {
     console.error('[DM BrandBasicInfo GET] 오류:', err.message);
+    if (respondUserError(res, err)) return;   // ★ 2026-10-25 R10 — 사용자 조건 오류 = 그 상태 · 문장 그대로
     return res.status(500).json({ error: publicErrorText(err) });
   }
 });
@@ -2186,35 +2188,9 @@ dmRouter.put('/brand-basic-info', async (req: any, res: any) => {
     const info = await updateBrandBasicInfo(companyId, req.body || {});
     return res.json({ basic_info: info });
   } catch (err: any) {
-    // 사업자등록번호 형식(normalizeBizNumber CT) = 입력 오류 → 400
-    if (String(err?.message || '').startsWith('사업자등록번호는')) {
-      return res.status(400).json({ error: '사업자등록번호는 숫자 10자리여야 해요.', code: 'INVALID_BUSINESS_NUMBER' });
-    }
+    // 사업자등록번호 형식(normalizeBizNumber CT) = 입력 오류 = UserFacingError(400 BIZ_NO_INVALID) → 아래 공용 응답(★ 1025 문장 글자 판정 0)
     console.error('[DM BrandBasicInfo PUT] 오류:', err.message);
-    return res.status(500).json({ error: publicErrorText(err) });
-  }
-});
-
-// GET /api/dm/templates — 템플릿 목록 (category/industry 필터)
-dmRouter.get('/templates', async (req: any, res: any) => {
-  try {
-    const category = req.query.category as any;
-    const industry = req.query.industry as any;
-    const items = listTemplates({ category, industry });
-    return res.json({ templates: items });
-  } catch (err: any) {
-    console.error('[DM Template 목록] 오류:', err.message);
-    return res.status(500).json({ error: publicErrorText(err) });
-  }
-});
-
-// GET /api/dm/templates/:id — 템플릿 상세
-dmRouter.get('/templates/:id', async (req: any, res: any) => {
-  try {
-    const t = getTemplate(req.params.id);
-    if (!t) return res.status(404).json({ error: '템플릿을 찾을 수 없어요.' });
-    return res.json({ template: t });
-  } catch (err: any) {
+    if (respondUserError(res, err)) return;   // ★ 2026-10-25 R10 — 사용자 조건 오류 = 그 상태 · 문장 그대로
     return res.status(500).json({ error: publicErrorText(err) });
   }
 });
@@ -2260,6 +2236,7 @@ dmRouter.post('/:id/validate', requireDmAccess, async (req: any, res: any) => {
     return res.json({ ...result, publish_static_block: staticBlock ? { code: staticBlock.code, error: staticBlock.error } : null });
   } catch (err: any) {
     console.error('[DM 검수] 오류:', err.message);
+    if (respondUserError(res, err)) return;   // ★ 2026-10-25 R10 — 사용자 조건 오류 = 그 상태 · 문장 그대로
     return res.status(500).json({ error: publicErrorText(err, '검수 실패') });
   }
 });
@@ -2269,7 +2246,7 @@ dmRouter.post('/ai/improve', async (req: any, res: any) => {
   try {
     const sections = req.body?.sections as Section[] | undefined;
     const brandKit = req.body?.brand_kit;
-    if (!Array.isArray(sections)) return res.status(400).json({ error: 'sections 배열이 필요해요.' });
+    if (!Array.isArray(sections)) return res.status(400).json({ error: '블록이 하나 이상 있어야 해요.' });
     const companyId = req.user?.companyId;
     if (!companyId) return res.status(403).json({ error: '회사 권한이 필요합니다.' });
     // ★ 2026-10-10 Harold 결정 H4 — 0크레딧 다듬기는 회사당 동시 1건(블록마다 버튼이 생겨 무료 AI 호출이 겹쳐 쌓이지 않게).
@@ -2286,6 +2263,7 @@ dmRouter.post('/ai/improve', async (req: any, res: any) => {
     return res.json({ suggestions: improved.suggestions, ...(note ? { notes: [note] } : {}) });
   } catch (err: any) {
     console.error('[DM AI improve] 오류:', err.message);
+    if (respondUserError(res, err)) return;   // ★ 2026-10-25 R10 — 사용자 조건 오류 = 그 상태 · 문장 그대로
     return res.status(500).json({ error: publicErrorText(err, 'AI 개선 제안 실패') });
   }
 });
@@ -2298,11 +2276,12 @@ dmRouter.post('/ai/improve', async (req: any, res: any) => {
 dmRouter.post('/brand-kit/extract', async (req: any, res: any) => {
   try {
     const url = (req.body?.url || '').toString().trim();
-    if (!url) return res.status(400).json({ error: 'url 필요' });
+    if (!url) return res.status(400).json({ error: '주소를 넣어 주세요.' });
     const result = await previewBrandExtract(url);
     return res.json(result);
   } catch (err: any) {
     console.error('[DM 브랜드추출] 오류:', err.message);
+    if (respondUserError(res, err)) return;   // ★ 2026-10-25 R10 — 사용자 조건 오류 = 그 상태 · 문장 그대로
     return res.status(500).json({ error: publicErrorText(err, '브랜드 추출 실패') });
   }
 });
@@ -2316,10 +2295,11 @@ dmRouter.get('/ab-tests', async (req: any, res: any) => {
   try {
     const companyId = req.user?.companyId;
     if (!companyId) return res.status(403).json({ error: '회사 권한이 필요합니다.' });
-    const tests = await listAbTests(companyId, resolveOwnerScope(req));   // ★ 2026-10-24 ⑫ 담당자 = 본인 것만
-    return res.json({ tests });
+    const { rows: tests, truncated } = await listAbTests(companyId, resolveOwnerScope(req));   // ★ 2026-10-24 ⑫ 담당자 = 본인 것만
+    return res.json({ tests, truncated });
   } catch (err: any) {
     console.error('[AB목록] 오류:', err.message);
+    if (respondUserError(res, err)) return;   // ★ 2026-10-25 R10 — 사용자 조건 오류 = 그 상태 · 문장 그대로
     return res.status(500).json({ error: publicErrorText(err) });
   }
 });
@@ -2332,7 +2312,7 @@ dmRouter.post('/ab-tests', async (req: any, res: any) => {
 
     const body = req.body || {};
     if (!body.name || !body.variant_a_page_id || !body.variant_b_page_id) {
-      return res.status(400).json({ error: 'name / variant_a_page_id / variant_b_page_id 필수' });
+      return res.status(400).json({ error: '비교 이름과 비교할 DM 두 개를 골라 주세요.' });
     }
     // ★ 2026-10-24 ⑫ — 비교할 DM 도 본인이 볼 수 있는 것만(DM 소유 가드 CT · 옛: 같은 회사 남의 DM 으로 테스트를 만들 수 있었다)
     if (!(await canAccessEveryDm([body.variant_a_page_id, body.variant_b_page_id, body.variant_c_page_id], companyId, req.user?.userType, req.user?.userId))) {
@@ -2366,6 +2346,7 @@ dmRouter.get('/ab-tests/:id', requireAbTestAccess, async (req: any, res: any) =>
     return res.json(summary);
   } catch (err: any) {
     console.error('[AB상세] 오류:', err.message);
+    if (respondUserError(res, err)) return;   // ★ 2026-10-25 R10 — 사용자 조건 오류 = 그 상태 · 문장 그대로
     return res.status(500).json({ error: publicErrorText(err) });
   }
 });
@@ -2399,6 +2380,7 @@ dmRouter.post('/ab-tests/:id/start', requireAbTestAccess, async (req: any, res: 
     return res.json({ test });
   } catch (err: any) {
     console.error('[AB시작] 오류:', err.message);
+    if (respondUserError(res, err)) return;   // ★ 2026-10-25 R10 — 사용자 조건 오류 = 그 상태 · 문장 그대로
     return res.status(500).json({ error: publicErrorText(err) });
   }
 });
@@ -2412,6 +2394,7 @@ dmRouter.post('/ab-tests/:id/pause', requireAbTestAccess, async (req: any, res: 
     if (!test) return res.status(404).json({ error: '실행 중인 테스트가 아닙니다.' });
     return res.json({ test });
   } catch (err: any) {
+    if (respondUserError(res, err)) return;   // ★ 2026-10-25 R10 — 사용자 조건 오류 = 그 상태 · 문장 그대로
     return res.status(500).json({ error: publicErrorText(err) });
   }
 });
@@ -2425,6 +2408,7 @@ dmRouter.post('/ab-tests/:id/complete', requireAbTestAccess, async (req: any, re
     if (!test) return res.status(404).json({ error: '찾을 수 없습니다.' });
     return res.json({ test });
   } catch (err: any) {
+    if (respondUserError(res, err)) return;   // ★ 2026-10-25 R10 — 사용자 조건 오류 = 그 상태 · 문장 그대로
     return res.status(500).json({ error: publicErrorText(err) });
   }
 });
@@ -2438,6 +2422,7 @@ dmRouter.delete('/ab-tests/:id', requireAbTestAccess, async (req: any, res: any)
     if (!ok) return res.status(404).json({ error: '찾을 수 없습니다.' });
     return res.json({ success: true });
   } catch (err: any) {
+    if (respondUserError(res, err)) return;   // ★ 2026-10-25 R10 — 사용자 조건 오류 = 그 상태 · 문장 그대로
     return res.status(500).json({ error: publicErrorText(err) });
   }
 });
@@ -2460,7 +2445,7 @@ dmPublicRouter.get('/ab/:code', async (req: Request, res: Response) => {
     const variant = pickVariant(test, existing);
 
     const pageId = variantToPageId(test, variant);
-    if (!pageId) return res.status(404).send(renderDmErrorHtml('선택된 variant DM이 없습니다.'));
+    if (!pageId) return res.status(404).send(renderDmErrorHtml('보여 드릴 비교 DM이 없어요.'));
 
     // ★ 2026-08-06 A/B 공개 URL도 발행 상태를 본다(Codex 적대검증 high).
     //   그 전에는 id로만 읽어, 중지한 variant가 이 주소로 계속 노출됐다 — 일반 뷰어만 막고 옆문을 열어 둔 셈이다.
@@ -2505,6 +2490,7 @@ dmPublicRouter.get('/ab/:code', async (req: Request, res: Response) => {
     res.send(html);
   } catch (err: any) {
     console.error('[AB뷰어] 오류:', err.message);
+    if (respondUserError(res, err)) return;   // ★ 2026-10-25 R10 — 사용자 조건 오류 = 그 상태 · 문장 그대로
     res.status(500).send(renderDmErrorHtml('일시적 오류가 발생했습니다.'));
   }
 });
@@ -2534,12 +2520,14 @@ dmPublicRouter.post('/ab/:code/track', async (req: Request, res: Response) => {
       totalPages: b.total_pages,
       durationDelta: b.duration,
       sectionDelta: b.section_interactions,
+      maxScrollPct: b.max_scroll_pct,   // ★ 1025 #64 일반 DM 비콘과 같은 칸(완독 판정)
       isInit: b.init === 1 || b.init === true,
       ip, userAgent: ua,
     });
     return res.json({ ok: true, variant });
   } catch (err: any) {
     console.error('[AB추적] 오류:', err.message);
+    if (respondUserError(res, err)) return;   // ★ 2026-10-25 R10 — 사용자 조건 오류 = 그 상태 · 문장 그대로
     return res.status(500).json({ error: 'Internal error' });
   }
 });
@@ -2550,19 +2538,6 @@ dmPublicRouter.post('/ab/:code/track', async (req: Request, res: Response) => {
 
 /** 한 번에 만들 수 있는 쪽 수 상한 — 합성은 쪽마다 sharp + 글자 합성 1회다 */
 const CATALOG_RENDER_MAX_PAGES = 30;
-
-// ── ★ 2026-09-16 쪽 템플릿 (블록 조립 화면이 쓰는 공용 경로) ──
-// GET /api/dm/catalog/templates — 자리 정의(화면이 미리보기·필요 사진 수를 그린다). AI 0 · 크레딧 0
-dmRouter.get('/catalog/templates', (req: any, res: any) => {
-  if (!req.user?.companyId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
-  return res.json({
-    success: true,
-    data: CATALOG_TEMPLATES.map((t) => ({
-      key: t.key, name: t.name, photos: t.images.length,
-      texts: t.texts.map((b) => ({ key: b.key, maxLines: b.maxLines })),
-    })),
-  });
-});
 
 // POST /api/dm/catalog/render-pages — 쪽 정의 N개 → 쪽 이미지 N장(1200×1600). AI 호출 0 · 크레딧 0(사용자가 자리에 직접 넣는 편집 행위)
 //   사진은 우리 저장본만 읽는다(dm-catalog-render readLocalImage) · 숫자는 새기지 않는다(상품 정보 = 쪽 밖 칩)
@@ -2593,6 +2568,7 @@ dmRouter.post('/catalog/render-pages', async (req: any, res: any) => {
     return res.json({ success: true, data: { pages, made, failed: pages.length - made } });
   } catch (err: any) {
     console.error('[DM catalog/render-pages] 오류:', err?.message);
+    if (respondUserError(res, err)) return;   // ★ 2026-10-25 R10 — 사용자 조건 오류 = 그 상태 · 문장 그대로
     return res.status(500).json({ success: false, error: '쪽을 만들지 못했습니다. 잠시 후 다시 시도해주세요.' });
   }
 });
@@ -2615,46 +2591,12 @@ dmRouter.post('/:id/quick-action', async (req: any, res: any) => {
     const result = await applyQuickAction(companyId, campaignId, action);
     return res.json({ success: true, data: result });
   } catch (err: any) {
+    if (err instanceof InsufficientCreditError) return res.status(402).json({ success: false, error: err.message, code: 'INSUFFICIENT_CREDIT' });
+    if (respondUserError(res, err)) return;
     console.error('[DM quick-action] 오류:', err.message);
     if (isDbMigrationPendingError(err)) {
       return send503Migration(res, 'dm_pages ALTER 4 + dm_event_responses CREATE');
     }
-    return res.status(500).json({ success: false, error: publicErrorText(err) });
-  }
-});
-
-// POST /api/dm/event-recommend — CT-88 이벤트 종류 추천
-dmRouter.post('/event-recommend', async (req: any, res: any) => {
-  try {
-    const companyId = req.user?.companyId;
-    if (!companyId) return res.status(403).json({ error: '회사 권한이 필요합니다.' });
-    const { campaign_goal, target_audience, budget_level } = req.body || {};
-    const result = await recommendEventType(companyId, {
-      campaign_goal,
-      target_audience,
-      budget_level,
-    });
-    return res.json({ success: true, data: result });
-  } catch (err: any) {
-    console.error('[DM event-recommend] 오류:', err.message);
-    if (isDbMigrationPendingError(err)) {
-      return send503Migration(res, 'dm_pages ALTER 4 + dm_event_responses CREATE');
-    }
-    return res.status(500).json({ success: false, error: publicErrorText(err) });
-  }
-});
-
-// GET /api/dm/personalization-vars — CT-90 Liquid 변수 자동 추천
-dmRouter.get('/personalization-vars', async (req: any, res: any) => {
-  try {
-    const companyId = req.user?.companyId;
-    if (!companyId) return res.status(403).json({ error: '회사 권한이 필요합니다.' });
-    const section_type = req.query.section_type as string | undefined;
-    const current_text = req.query.current_text as string | undefined;
-    const result = await getPersonalizationVariables(companyId, { section_type, current_text });
-    return res.json({ success: true, data: result });
-  } catch (err: any) {
-    console.error('[DM personalization-vars] 오류:', err.message);
     return res.status(500).json({ success: false, error: publicErrorText(err) });
   }
 });
@@ -2715,7 +2657,8 @@ dmRouter.get('/overview', async (req: any, res: any) => {
       console.warn('[DM overview] dm_event_responses 집계 skip:', e?.message);
     }
 
-    const avgCtr = totalViews > 0 ? (totalResponses / totalViews) * 100 : 0;
+    // ★ 2026-10-25 원장 #73 — 이 값은 응답(응모 · 설문) ÷ 열람이다(클릭이 아니다) · 이름 = 「평균 응답률」(옛: 「평균 클릭률」)
+    const avgResponseRate = totalViews > 0 ? (totalResponses / totalViews) * 100 : 0;
 
     return res.json({
       success: true,
@@ -2725,7 +2668,7 @@ dmRouter.get('/overview', async (req: any, res: any) => {
         total_views_30d: totalViews,
         unique_viewers_30d: uniqueViewers,
         total_responses_30d: totalResponses,
-        avg_ctr_30d: Number(avgCtr.toFixed(2)),
+        avg_response_rate_30d: Number(avgResponseRate.toFixed(2)),
       },
     });
   } catch (err: any) {
@@ -2733,6 +2676,7 @@ dmRouter.get('/overview', async (req: any, res: any) => {
     if (isDbMigrationPendingError(err)) {
       return send503Migration(res, 'dm_pages ALTER');
     }
+    if (respondUserError(res, err)) return;   // ★ 2026-10-25 R10 — 사용자 조건 오류 = 그 상태 · 문장 그대로
     return res.status(500).json({ success: false, error: publicErrorText(err) });
   }
 });
@@ -2745,7 +2689,7 @@ dmPublicRouter.post('/:code/event-response', async (req: Request, res: Response)
     const sectionId = body.section_id;
     const sectionType = body.section_type;
     if (!sectionId || !sectionType) {
-      return res.status(400).json({ success: false, error: 'section_id / section_type 필수' });
+      return res.status(400).json({ success: false, error: '참여 정보가 빠졌어요. 화면을 새로 고친 뒤 다시 해 주세요.' });
     }
     // 식별 우선순위: 토큰(body.r — 발송 링크, 서버 권위) > phone(?p= 쿼리/body — 구 링크 하위호환).
     // customer_id는 클라 신뢰 X.
@@ -2770,6 +2714,7 @@ dmPublicRouter.post('/:code/event-response', async (req: Request, res: Response)
     if (isDbMigrationPendingError(err)) {
       return send503Migration(res, 'dm_prizes / dm_winners / dm_draw_runs CREATE');
     }
+    if (respondUserError(res, err)) return;   // ★ 2026-10-25 R10 — 사용자 조건 오류 = 그 상태 · 문장 그대로
     return res.status(500).json({ success: false, error: publicErrorText(err) });
   }
 });
@@ -2824,26 +2769,13 @@ dmRouter.get('/:id/winners', requireDmAccess, async (req: any, res: any) => {
   }
 });
 
-// GET /api/dm/:id/event-stats — 응모·당첨·열람 집계 (열람 통계 /:id/stats와 별개)
+// GET /api/dm/:id/event-stats — 응모·당첨·열람 집계 (옛 열람 통계 /:id/stats 는 1025 R15 삭제)
 dmRouter.get('/:id/event-stats', requireDmAccess, async (req: any, res: any) => {
   try {
     const companyId = req.user?.companyId;
     if (!companyId) return res.status(403).json({ error: '회사 권한이 필요합니다.' });
     if (!(await assertDmOwner(req.params.id, companyId))) return res.status(404).json({ error: 'DM 미발견' });
     return res.json(await getResponseStats(companyId, req.params.id));
-  } catch (err: any) {
-    return handleInteractionError(res, err);
-  }
-});
-
-// GET /api/dm/:id/event-insight — 결과 분석 (응모·당첨·열람 실측 기반 인사이트, 임의 상수 0)
-dmRouter.get('/:id/event-insight', requireDmAccess, async (req: any, res: any) => {
-  try {
-    const companyId = req.user?.companyId;
-    if (!companyId) return res.status(403).json({ error: '회사 권한이 필요합니다.' });
-    if (!(await assertDmOwner(req.params.id, companyId))) return res.status(404).json({ error: 'DM 미발견' });
-    const stats = await getResponseStats(companyId, req.params.id);
-    return res.json(buildEventInsight(stats));
   } catch (err: any) {
     return handleInteractionError(res, err);
   }

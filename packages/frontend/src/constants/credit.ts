@@ -10,6 +10,8 @@ export interface CreditTaskCost {
   key: string;
   label: string;
   cost: number;
+  /** ★ 2026-10-25 원장 Z3 — 이 줄 금액의 서버 단가 키(백엔드 credit-price-parity 시험이 cost = CREDIT_COST_MAP[source] 를 대조) */
+  source: string;
   icon: LucideIcon;
 }
 
@@ -19,31 +21,36 @@ export interface CreditTaskCost {
  *  스팸필터 테스트는 비대상(0, 미표기).
  */
 export const CREDIT_TASK_COSTS: CreditTaskCost[] = [
-  { key: 'full', label: '풀분석', cost: 300, icon: Sparkles },
-  { key: 'auto', label: '자동 마케팅', cost: 200, icon: Repeat },
-  { key: 'journey', label: '여정 활성화', cost: 200, icon: Route },
-  { key: 'dm', label: 'DM 발행', cost: 100, icon: Smartphone },
-  { key: 'inapp', label: '인앱 게시', cost: 100, icon: Layers },
-  { key: 'shortlink', label: '단축 URL 발급', cost: 100, icon: Link2 }, // ★ 2026-07-10 고객사 자체 URL 단축(hlj.kr)
-  { key: 'email', label: '이메일 발행', cost: 50, icon: Mail },
-  { key: 'operation', label: '여정·운영 발송', cost: 10, icon: Send },
-  { key: 'copy', label: '문안·분석', cost: 5, icon: PenLine },
-  { key: 'decorate', label: '꾸미기', cost: 3, icon: Wand2 },
-  { key: 'generate', label: '생성·돌려보기', cost: 3, icon: Play },
-  { key: 'image', label: '이미지 생성', cost: 2, icon: ImagePlus }, // ★ 2026-07-19 P4 이미지 스튜디오 (생성 2·편집 1 · 4K 격상은 2026-09-30 제거 · 아래 'image-studio-4k' 이름표는 지난 차감 이력 표시용)
-  { key: 'refine', label: '다듬기·질문', cost: 1, icon: Wand2 },
+  { key: 'full', label: '풀분석', cost: 300, source: 'orchestrate', icon: Sparkles },
+  { key: 'auto', label: '자동 마케팅', cost: 200, source: 'continuous-operator', icon: Repeat },
+  { key: 'journey', label: '여정 활성화', cost: 200, source: 'journey-activate', icon: Route },
+  { key: 'dm', label: 'DM 발행', cost: 100, source: 'dm-builder', icon: Smartphone },
+  { key: 'inapp', label: '인앱 게시', cost: 100, source: 'inapp-publish', icon: Layers },
+  // ★ 2026-07-10 고객사 자체 URL 단축(hlj.kr) · ★ 2026-10-25 원장 Z3 100 → 20(서버는 2026-09-16 부터 20 · 이 줄만 옛 값이었다)
+  { key: 'shortlink', label: '단축 URL 발급', cost: 20, source: 'dm-custom-short-link', icon: Link2 },
+  { key: 'email', label: '이메일 발행', cost: 50, source: 'email-campaign-complete', icon: Mail },
+  { key: 'operation', label: '여정·운영 발송', cost: 10, source: 'journey-operation', icon: Send },
+  { key: 'copy', label: '문안·분석', cost: 5, source: 'ai-operator-propose', icon: PenLine },
+  // ★ 2026-10-25 원장 Z3 — 옛 「생성·돌려보기 3」 한 줄은 DM 생성(5)을 3으로 보였다 · 두 줄로 가른다
+  { key: 'dm-generate', label: 'DM 생성', cost: 5, source: 'dm-ai-generate', icon: Play },
+  { key: 'generate', label: '이메일·인앱·여정 생성', cost: 3, source: 'email-ai-generate', icon: Play },
+  { key: 'decorate', label: '꾸미기', cost: 3, source: 'ai-operator-decorate', icon: Wand2 },
+  { key: 'image', label: '이미지 생성', cost: 2, source: 'image-studio-generate', icon: ImagePlus }, // ★ 2026-07-19 P4 이미지 스튜디오 (생성 2·편집 1 · 4K 격상은 2026-09-30 제거 · 아래 'image-studio-4k' 이름표는 지난 차감 이력 표시용)
+  { key: 'refine', label: '다듬기·질문', cost: 1, source: 'refine-direct', icon: Wand2 },
 ];
 
 /**
- * 크레딧 → 대표 작업 환산 횟수. 실제 단가(풀분석 300·DM 30·문안 5)로만 계산 — 임의 상수 없음.
+ * 크레딧 → 대표 작업 환산 횟수. 단가표 값(풀분석 · DM 발행 · 문안)으로만 계산 — 임의 상수 없음.
  * "2,400 크레딧"이 막연하지 않게 "풀분석 8회"처럼 손에 잡히는 양으로 보여주는 용도.
+ * ★ 2026-10-25 원장 Z3 — 옛: DM 을 숫자 30 으로 나눠(DM 발행 = 100) 충전 창이 「모바일 DM 33건」처럼 세 배를 보였다.
  */
 export function creditConversions(credits: number) {
   const c = Math.max(0, Math.floor(Number(credits) || 0));
+  const per = (key: string) => Math.max(1, creditCost(key));
   return {
-    fullAnalysis: Math.floor(c / 300),
-    dm: Math.floor(c / 30),
-    copy: Math.floor(c / 5),
+    fullAnalysis: Math.floor(c / per('orchestrate')),
+    dm: Math.floor(c / per('dm-builder')),
+    copy: Math.floor(c / per('ai-operator-propose')),
   };
 }
 
@@ -111,7 +118,7 @@ export const CREDIT_SOURCE_LABELS: Record<string, string> = {
   'dm-custom-short-link': '단축 URL 발급',
   'inapp-ai-generator': '인앱 생성', 'inapp-publish': '인앱 게시', 'inapp-quick-action': '인앱 다듬기',
   'email-ai-generate': 'Email 생성', 'email-campaign-complete': 'Email 캠페인 완성', 'email-ai-publish': 'Email 발송 확정(구)', 'email-refine': 'Email 다듬기',
-  'event-image-extract': '이미지 판독',
+  'event-image-extract': '이미지 판독', 'dm-copy-generate': 'DM 알림 문안 생성',
   'image-studio-generate': '이미지 생성', 'image-studio-4k': '이미지 4K 격상', 'image-studio-edit': '이미지 배경 편집',
   'email-precheck': 'Email 발송 전 진단', 'email-performance-insight': 'Email 성과 진단',
   'email-send-time-recommend': 'Email 발송 시간 추천',
@@ -152,6 +159,21 @@ export const AI_GENERATE_COSTS: Record<string, number> = {
   'ai-line-intake': 2,
   'ai-line-compose': 2,
   'ai-line-decorate': 1,
+  // ★ 2026-10-25 원장 #91 · #105 · #116 · Z3 — 화면 문장에 숫자로 박혀 있던 단가(값 = 백엔드 CREDIT_COST_MAP · 값까지 대조 = 백엔드 credit-price-parity 시험)
+  'refine-direct': 1,
+  'ai-segment-generator': 1,
+  'ai-operator-decorate': 3,
+  'dm-copy-generate': 3,
+  'image-studio-generate': 2,
+  'image-studio-edit': 1,
+  'email-refine': 1,
+  'email-precheck': 1,
+  'email-performance-insight': 5,
+  'marketing-calendar-month': 10,
+  'oneline-judge': 2,
+  'oneline-recook': 3,
+  'journey-operation': 10,
+  'multi-goal-decisioning': 5,
 };
 
 export const CONFIRM_CREDIT_COSTS: Record<string, number> = {
@@ -169,10 +191,19 @@ export const CONFIRM_CREDIT_COSTS: Record<string, number> = {
   'orchestrate': 300,            // 풀분석
   // ★ 2026-08-13 마케팅 플래너 월간 대행 — 승인 버튼이 그 달 계약을 확정한다(승인 화면이 확인 모달을 띄운다).
   'planner-monthly-agency': 1000,
-  // ★ 2026-08-13 원스텝 오토설계 50 — 총액은 생성비가 더해져 달라지므로 **서버 견적이 진실**이다.
-  //   호출부는 `costOverride`로 그 값을 넘긴다(이 숫자는 견적을 못 받았을 때의 하한 표시용).
-  'one-step-interview': 50,
 };
+
+/**
+ * ★ 2026-10-25 원장 #91 · #105 · #116 — 화면 금액의 단일 입구. 문장 · 버튼에 「N크레딧」 숫자를 손으로 적지 않는다.
+ *   키가 두 표에 없으면 0 이 아니라 시험이 막는다(백엔드 credit-price-parity: 화면이 부르는 키 = 단가표 키 = 서버 키 · 값까지).
+ *   실제 차감은 서버 원장이 정한다 — 견적을 받는 화면은 견적 값을 쓴다.
+ */
+export function creditCost(key: string): number {
+  return AI_GENERATE_COSTS[key] ?? CONFIRM_CREDIT_COSTS[key] ?? 0;
+}
+export function creditText(key: string): string {
+  return `${creditCost(key)}크레딧`;
+}
 
 /** ai_credit_transactions.type → 한글. deduct는 source 라벨 우선. */
 export const CREDIT_TYPE_LABELS: Record<string, string> = {

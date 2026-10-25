@@ -66,7 +66,7 @@ export default function DmEditScreen({ onBack, onSend, pair, banner }: {
     if (!id) return;
     setTesting(true);
     try {
-      const r = await fetch(`/api/dm/${id}/test-send`, { method: 'POST', headers: authJson(), body: JSON.stringify({ sample_key: 'vip' }) });
+      const r = await fetch(`/api/dm/${id}/test-send`, { method: 'POST', headers: authJson(), body: JSON.stringify({}) });
       const d = await r.json().catch(() => ({}));
       if (!r.ok) throw new Error(d?.error || '테스트를 보내지 못했어요.');
       toast.success('담당자 번호로 테스트를 보냈어요. 테스트 링크의 참여는 기록되지 않아요.');

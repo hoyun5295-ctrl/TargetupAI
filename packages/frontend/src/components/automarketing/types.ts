@@ -157,6 +157,8 @@ export interface LearningSummary {
   };
   variantWinner: {
     variantLabel: string;
+    /** ★ 2026-10-25 원장 #37 그 문안 앞부분(한 제안의 한 안) */
+    snippet?: string;
     ctr: number;
     sent: number;
     clicks: number;
@@ -220,6 +222,8 @@ export interface ProposalJson {
     suggestedName?: string;
   };
   messages?: ProposalMessage[];
+  /** 만들 때 저장한 추천 안 번호(서버 proposal_json.recommendedIndex · 보낼 안 번호 판정의 셋째 자리) */
+  recommendedIndex?: number;
   recommendation?: string;
   recommendationReason?: string;
   channel?: {
@@ -257,7 +261,8 @@ export interface ProposalJson {
 export interface ProposalSpamRetest {
   count?: number;
   running?: { token?: string; variantIndex: number; startedAt: string };
-  results?: Array<{ variantIndex: number; body: string; subject: string; result: string; carriers?: Array<{ carrier: string; result: string }>; at: string }>;
+  /** body · subject = 검사한 글(나가는 글) · srcBody · srcSubject = 화면이 보낸 입력 글(★ 2026-10-25 원장 #29) */
+  results?: Array<{ variantIndex: number; body: string; subject: string; srcBody?: string; srcSubject?: string; result: string; carriers?: Array<{ carrier: string; result: string }>; at: string }>;
 }
 
 export interface OperatorProposal {
@@ -284,7 +289,7 @@ export interface OperatorProposal {
    */
   finalCopies?: Array<OperatorFinalCopyView | null>;
   finalIndex?: number;
-  copyCheck?: 'passed' | 'rechecking' | 'blocked' | 'stale' | 'none';
+  copyCheck?: 'passed' | 'rechecking' | 'blocked' | 'unchecked' | 'stale' | 'none';
 }
 
 export interface OperatorFinalCopyView {

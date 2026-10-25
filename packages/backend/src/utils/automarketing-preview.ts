@@ -7,6 +7,7 @@
 //   창 편집(칸 · 기준 · 주기 · 번호 · 직접 쓴 문안)은 문안을 만들지 않고 다시 센다.
 //   실행 중 자동 마케팅의 [다음 승인] · [조건 확인]도 같은 계산(AI 문안 없이)을 쓴다.
 // ============================================================
+import { UserFacingError } from './http-error';
 import { createHash, randomUUID } from 'crypto';
 import { query } from '../config/database';
 import { getCompanyCosts, SEND_HOURS } from '../config/defaults';
@@ -26,7 +27,7 @@ import {
   loadOperatorCompanyContext, buildOperatorOrchestrateContext,
   approveOperatorWindow, normalizeFixedCopyInput, normalizeOperatorBenefit, normalizeOperatorChannel, mapRowToOperator, operatorContract, type FixedCopy,
   OperatorCallbackError, OperatorRegisterConflictError, OperatorChargeError, OperatorPairingError, OperatorScheduleChangedError, operatorScheduleShape, type OperatorScheduleShape,
-  checkOperatorCallback, listOperatorCallbackChoices, finalCopiesOf,
+  checkOperatorCallback, listOperatorCallbackChoices, finalCopiesOf, approvalWindowSummary,
 } from './continuous-operator';
 import type { OperatorFinalCopy } from './operator-final-copy';
 import {
@@ -361,7 +362,7 @@ async function generateCopy(e: PreviewEntry, loaded: OperatorCompanyContext, anc
     buildOperatorOrchestrateContext({ ...fields, id: null, anchorAt: anchor }, loaded),
     { source: 'ai-operator-propose', cost: getCreditCost('ai-operator-propose'), chargeOnlyWithTarget: true, idempotencyKey: key, throwOnInsufficient: true },
   );
-  if ((result.messages?.length || 0) === 0) throw new Error('문안 생성 결과 없음');
+  if ((result.messages?.length || 0) === 0) throw new UserFacingError(502, 'AI_RESULT_EMPTY', '문안을 만들지 못했어요. 잠시 뒤 다시 해 주세요.');
   return result;
 }
 
@@ -935,22 +936,8 @@ export async function previewOperatorApproval(companyId: string, operatorId: str
     let lastWindow: ApprovalPreview['lastWindow'] = null;
     try {
       const since = approvalSummarySince(op.approvalMeta?.windowStart, op.autoSendLeadMinutes, new Date(Date.now() - 7 * 24 * 60 * 60 * 1000));
-      const s = await query(
-        `SELECT COUNT(*) FILTER (WHERE status IN ('sent', 'auto_executed'))::int AS sent_rounds,
-                COALESCE(SUM(recipient_count) FILTER (WHERE status IN ('sent', 'auto_executed')), 0)::int AS people,
-                COUNT(*) FILTER (WHERE status IN ('admin_review', 'admin_stopped', 'skipped'))::int AS held
-           FROM operator_proposals
-          WHERE operator_id = $1::uuid AND created_at >= $2
-            AND COALESCE(proposal_json->'meta'->>'is_reminder', 'false') <> 'true'`,
-        [op.id, since],
-      );
-      lastWindow = {
-        since: since.toISOString(),
-        sentRounds: Number(s.rows[0]?.sent_rounds) || 0,
-        people: Number(s.rows[0]?.people) || 0,
-        emptyDays: countEmptyRounds(op.roundLog, since),
-        held: Number(s.rows[0]?.held) || 0,
-      };
+      const s = await approvalWindowSummary(op.id, since);   // ★ 2026-10-25 원장 #45 갱신 안내와 같은 함수
+      lastWindow = { since: since.toISOString(), sentRounds: s.sentRounds, people: s.people, emptyDays: countEmptyRounds(op.roundLog, since), held: s.held };
     } catch { /* 요약은 부가 정보 */ }
     return { operatorId: op.id, name: op.name, objective: op.objective, needsContract, outcome, lastWindow, approvedUntil: op.approvedUntil ? op.approvedUntil.toISOString() : null };
   });

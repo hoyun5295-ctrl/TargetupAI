@@ -43,7 +43,7 @@ interface Props {
 interface FailedStep {
   stepId: string;
   variantId?: string;
-  reason: 'placeholder_unedited' | 'variable_mapping_invalid' | 'spam_filter_failed' | 'subject_missing';
+  reason: 'placeholder_unedited' | 'variable_mapping_invalid' | 'spam_filter_failed' | 'spam_check_unavailable' | 'subject_missing';
   details: string;
   matchedStopWords?: string[];
 }
@@ -66,19 +66,21 @@ interface CompanyBalance {
 }
 
 const REASON_LABEL: Record<FailedStep['reason'], string> = {
-  placeholder_unedited: '문안 placeholder 잔존',
-  variable_mapping_invalid: '알림톡 변수 매핑 누락',
-  spam_filter_failed: '스팸필터 차단',
-  subject_missing: 'LMS/MMS 제목 누락',
+  placeholder_unedited: '채울 자리가 남아 있어요',
+  variable_mapping_invalid: '알림톡 변수 연결이 비었어요',
+  spam_filter_failed: '스팸 차단에 걸려요',
+  // ★ 2026-10-25 #14 — 검사 장애(시간 초과 등)는 문안 문제가 아니다 → 고치기 대신 다시 검증
+  spam_check_unavailable: '스팸 검사를 마치지 못했어요',
+  subject_missing: '장문 문자 제목이 없어요',
 };
 
 const SUB_AGENT_CARDS = [
-  { icon: FileText, label: 'placeholder 잔존 검증', color: 'from-violet-500 to-purple-500' },
-  { icon: Hash, label: '변수 매핑 검증', color: 'from-fuchsia-500 to-pink-500' },
-  { icon: MessageSquare, label: 'LMS/MMS 제목 검증', color: 'from-indigo-500 to-blue-500' },
-  { icon: ShieldCheck, label: '통신3사 스팸필터 검증', color: 'from-cyan-500 to-teal-500' },
-  { icon: Calculator, label: '비용 합산 + 7일 누적 예상', color: 'from-emerald-500 to-green-500' },
-  { icon: Wallet, label: '회사 잔액 정합 확인', color: 'from-amber-500 to-orange-500' },
+  { icon: FileText, label: '채울 자리 확인', color: 'from-violet-500 to-purple-500' },
+  { icon: Hash, label: '알림톡 변수 연결 확인', color: 'from-fuchsia-500 to-pink-500' },
+  { icon: MessageSquare, label: '장문 문자 제목 확인', color: 'from-indigo-500 to-blue-500' },
+  { icon: ShieldCheck, label: '통신 3사 스팸 검사', color: 'from-cyan-500 to-teal-500' },
+  { icon: Calculator, label: '비용 · 7일 예상', color: 'from-emerald-500 to-green-500' },
+  { icon: Wallet, label: '잔액 확인', color: 'from-amber-500 to-orange-500' },
 ];
 
 export default function JourneyActivationConfirmModal({
@@ -364,7 +366,7 @@ export default function JourneyActivationConfirmModal({
               <div className="p-4 rounded-xl bg-emerald-50 border border-emerald-200">
                 <div className="flex items-center gap-2 mb-2">
                   <CheckCircle2 className="w-5 h-5 text-emerald-700" />
-                  <div className="text-[14px] font-semibold text-emerald-900">자동 검증 통과: 모든 step 정합 OK</div>
+                  <div className="text-[14px] font-semibold text-emerald-900">자동 검증 통과: 모든 칸이 보낼 준비가 됐어요</div>
                 </div>
                 {result.confidenceScore > 0 && (
                   <div className="text-[12px] text-emerald-900">
@@ -406,7 +408,7 @@ export default function JourneyActivationConfirmModal({
                   {isInsufficientBalance && (
                     <div className="text-[10px] text-rose-700 mt-1 flex items-center gap-1">
                       <AlertTriangle className="w-3 h-3" />
-                      잔액 부족: 충전 의무
+                      잔액이 모자라요. 충전해 주세요
                     </div>
                   )}
                 </div>
@@ -416,8 +418,8 @@ export default function JourneyActivationConfirmModal({
                 <div className="flex items-start gap-2">
                   <TrendingUp className="w-4 h-4 text-violet-700 flex-shrink-0 mt-0.5" />
                   <div className="text-[12px] text-violet-900 leading-relaxed">
-                    활성화 직후 = 모든 step + variant 본문 snapshot 저장 + 발송 2시간 전 담당자 LMS 자동 발송 스케줄 진행.
-                    회사 admin이 step 본문을 편집해도 발송 시점 = 활성화 시점 본문 100% 동일 보장.
+                    켜는 순간 모든 칸과 A/B 문안을 그대로 저장해요. 켠 뒤 칸을 고쳐도 켤 때 문안으로 나가요.
+                    보내기 2시간 전에는 담당자에게 확인 문자를 보내요.
                   </div>
                 </div>
               </div>
@@ -443,7 +445,7 @@ export default function JourneyActivationConfirmModal({
                     <div className="flex items-center gap-2">
                       <AlertTriangle className="w-5 h-5 text-rose-700" />
                       <div className="text-[14px] font-semibold text-rose-900">
-                        자동 검증 미통과: {result.failedSteps.length}건 정정 의무
+                        자동 검증에서 {result.failedSteps.length}건이 걸렸어요
                       </div>
                     </div>
                   </div>
@@ -459,16 +461,25 @@ export default function JourneyActivationConfirmModal({
                         <div className="text-[12px] text-slate-700 mb-2">{fs.details}</div>
                         {fs.matchedStopWords && fs.matchedStopWords.length > 0 && (
                           <div className="text-[11px] text-slate-500">
-                            매칭된 stop word: {fs.matchedStopWords.slice(0, 5).join(', ')}
+                            걸린 말: {fs.matchedStopWords.slice(0, 5).join(', ')}
                           </div>
                         )}
-                        <button
-                          onClick={() => onRegenerate(fs)}
-                          className="mt-2 inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-violet-100 hover:bg-violet-100 text-violet-900 text-[11px] font-semibold transition-colors"
-                        >
-                          <Wand2 className="w-3 h-3" />
-                          이 칸 고치기
-                        </button>
+                        {fs.reason === 'spam_check_unavailable' ? (
+                          <button
+                            onClick={() => void runValidate()}
+                            className="mt-2 inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-800 text-[11px] font-semibold transition-colors"
+                          >
+                            다시 검증
+                          </button>
+                        ) : (
+                          <button
+                            onClick={() => onRegenerate(fs)}
+                            className="mt-2 inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-violet-100 hover:bg-violet-100 text-violet-900 text-[11px] font-semibold transition-colors"
+                          >
+                            <Wand2 className="w-3 h-3" />
+                            이 칸 고치기
+                          </button>
+                        )}
                       </div>
                     ))}
                   </div>

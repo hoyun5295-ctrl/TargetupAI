@@ -1,8 +1,9 @@
+import { CURRENT_BRIEF_DATE_SQL } from '../utils/daily-brief-policy';
 import { Request, Response, Router } from 'express';
 import { isDemoCompany } from '../utils/demo-company';   // ★ 2026-10-09 시연 회사 = 여정 활성화 비용 0
 import { query, pool } from '../config/database';
 import { authenticate } from '../middlewares/auth';
-import { checkAPIStatus, extractVarCatalog, filterVarCatalogByData, generateMessages, recommendTarget, countFilteredCustomers, recommendNextCampaign, refineDirectMessage, callAIWithFallback } from '../services/ai';
+import { checkAPIStatus, extractVarCatalog, filterVarCatalogByData, generateMessages, recommendTarget, countFilteredCustomers, refineDirectMessage, callAIWithFallback } from '../services/ai';
 import {
   createOperatorInputFromBody,
   runOperatorPreview, startOperatorFromPreview, updateOperatorPreview, previewOperatorApproval, approveOperatorFromScreen,
@@ -10,13 +11,11 @@ import {
 } from '../utils/automarketing-preview';   // ★ 2026-10-05 자동 마케팅 미리보기 · 승인 창
 import { operatorGate, operatorError } from '../utils/operator-route';   // ★ 2026-10-24 자동 마케팅 문 · 오류 한 벌
 import { translateAudience } from '../utils/audience-translate';   // ★ 2026-10-05 대상 번역(신뢰 설계 §2-2)
-import { validateOperatorInput, isOperatorReactivation } from '../utils/continuous-operator';
+import { validateOperatorInput, isOperatorReactivation, HUMAN_APPROVED_PROPOSAL_SQL } from '../utils/continuous-operator';
 import { isAboutPageViewer } from '../utils/about-page-access';   // ★ 2026-10-07 소개 페이지 숨김(hoyun 전용)
-import { buildGenderFilter, buildGradeFilter, buildRegionFilter, getGenderVariants, getRegionVariants, isUuid } from '../utils/normalize';
-import { FIELD_MAP, FIELD_DISPLAY_MAP, reverseDisplayValue, getColumnFields, renderFieldValue } from '../utils/standard-field-map';
+import { getGenderVariants, isUuid } from '../utils/normalize';
+import { FIELD_MAP, FIELD_DISPLAY_MAP, reverseDisplayValue } from '../utils/standard-field-map';
 import { selectJourneyTargetCustomerIds, findCustomerConditionIssues, describeCustomerConditionIssue } from '../utils/journey-target-extractor';
-import { filterByIndividualCallback } from '../utils/callback-filter';
-import { isValidCustomFieldKey } from '../utils/safe-field-name';
 import { getStoreScope, getOwnerCustomerScopeSql, getJourneyOwnerScopeSql, resolveHubStoreScope } from '../utils/store-scope';
 import { mapSampleCustomerRow, SAMPLE_CUSTOMER_COLUMNS } from '../utils/sample-customer';
 import { loadHubCompanyContext } from '../utils/hub-company-context';
@@ -24,7 +23,6 @@ import { viewerConsentSql, viewerConsentJoin, ownerJourneyConsent, journeyOwnerC
 import { buildFilterWhereClauseCompat } from '../utils/customer-filter';
 import { buildSendableRecipientsSql, buildSendableRecipientsTopSql, buildAudienceCountSql, resolveConditionColumns, SENDABLE_RECIPIENTS_LIMIT } from '../utils/operator-recipients';
 // ★ 2026-07-10 [타겟확인]: 발송 피로도 cap — dispatchProposalSend 준비부와 동일 산출(원칙 2)
-import { getFatigueCap } from '../utils/fatigue-guard';
 // ★ 2026-08-03 타겟팅 재설계 A-1: 자동마케팅 대상 수·명단은 발송과 같은 게이트를 쓰는 단일 문 경유.
 import {
   resolveOperatorAudienceGates, compileOperatorAudience, listSegmentAvailability, resolveOperatorStoreScope,
@@ -36,10 +34,8 @@ import type { FilterCountResult } from '../services/ai';
 // ★ 2026-08-04 변화 축 — 기준선 유무 판정(화면 첫 회차 안내가 서버 답을 쓴다).
 import { segmentNeedsCycleBaseline, normalizeSegmentKey, schedulePeriod } from '../utils/automarketing-segment';
 import { hasCycleBaseline } from '../utils/operator-cycle-snapshot';
-import { aggregateCampaignPerformance } from '../utils/stats-aggregation';
 import { formatDateValue, getOpt080Number } from '../utils/messageUtils';
-import { resolveJourneyAdFlag } from '../utils/journey-ad-policy';
-import { loadPlanContext, canUseFeature, requirePlanFeature, isBetaAccessAllowed, isAiOperatorAllowed, aiZonePlanBlocked } from '../utils/plan-guard';
+import { loadPlanContext, canUseFeature, requirePlanFeature, isAiOperatorAllowed, aiZonePlanBlocked } from '../utils/plan-guard';
 import { snsPublishEnabled } from '../utils/sns-constants';   // ★ 2026-09-20 허브 SNS 플래그(§3-11)
 import { sanitizeLineFacts, pickCopyCVariant, lineBenefitPercents, sanitizeLineReads, oneLineAskEnabled, oneLineIntent, oneLineAskTopic, lineWithoutReads } from '../utils/one-line-facts';   // ★ 2026-10-05 한줄로 시그니처 · ★1010 몰 후보 검색어
 // ★ 2026-10-17 한 줄 단계 모달(설계서 docs/2026-10-17-oneline-steps-modal-design.md §4-1) — 판정 응답에 단계 목록(plan) · 버튼 라벨 금액
@@ -59,13 +55,12 @@ import { getMonthlyUsage, getDailyUsage, getModelBreakdown, checkAiRateLimit, Ai
 import { getCacheStats } from '../utils/ai-cache';
 import { orchestrate, orchestrateWithAI } from '../services/ai-orchestrator';
 // ★ 크레딧 종량제 — 여정 저장(활성화) 등 endpoint 직접 차감용 (callAIWithFallback 경유 외)
-import { checkCredit, deductCreditSafe, InsufficientCreditError, isChargedByKey, settleCreditAfterSuccess } from '../utils/ai-credit';
+import { checkCredit, deductCreditSafe, InsufficientCreditError, isChargedByKey, settleCreditAfterSuccess, runChargedAi } from '../utils/ai-credit';
 // ★ 2026-09-27 한줄로 V2 R079 — 묶음 과금 안의 AI 호출은 따로 차감하지 않는다
-import { runInCreditBundle } from '../utils/ai-credit-context';
 import { randomUUID } from 'crypto';
 import { getCreditCost, kstDateTag, dailyDbAnalysisCredits } from '../utils/ai-credit-calc';
 // ★ D174 (2026-05-19): Step 1 Next Action Advisor — Opus 4.7
-import { buildPerformanceSnapshot, recommendNextAction, buildPerformanceSnapshotV2, type PerformancePeriod } from '../utils/next-action-advisor';
+import { buildPerformanceSnapshot, buildPerformanceSnapshotV2, type PerformancePeriod } from '../utils/next-action-advisor';
 import { explainPerformance } from '../utils/performance-explainer';
 import { generateQuickAction, type QuickActionType } from '../utils/performance-quick-action';
 import { buildCohortRetention } from '../utils/performance-cohort';
@@ -83,39 +78,10 @@ import { industryLabel } from '../utils/industry-codes';
 import { aggregateSmsCountsByCampaign } from '../utils/stats-aggregation';
 // (2026-07-30) 브랜드 SMSQ 합류 — 옛 카카오 IMC 집계 import 폐기
 // ★ D176 (2026-05-19): Continuous Agentic Operator (사용자 동의 흐름)
-import {
-  registerOperator,
-  listOperators,
-  updateOperator,
-  archiveOperator,
-  adminStopProposal,
-  listProposals,
-  approveProposal,
-  rejectProposal,
-  startProposalSpamRetest,   // ★ 2026-10-06 화면 스팸 검사(고른 안 · 고친 문안)
-  readProposalSpamRetest,
-  generateProposalForOperator,
-  explainEmptyRound,   // ★ 2026-10-05 빈 회차 사유(run-now · 미리보기 시작 공용)
-  // ★ 2026-08-04 리마인드 명단 — 발송과 같은 코호트를 읽는다(보여준 수 = 나가는 수)
-  readCampaignQueuedPhones,
-  OPERATOR_STATUSES,
-  checkOperatorCallback,   // ★ 2026-10-07 회신번호(등록 번호 · 고객별 매장번호)
-  checkOperatorCallbackFor,
-  OperatorCallbackError,
-} from '../utils/continuous-operator';
+import { registerOperator, listOperators, updateOperator, archiveOperator, adminStopProposal, listProposals, approveProposal, rejectProposal, startProposalSpamRetest, readProposalSpamRetest, generateProposalForOperator, explainEmptyRound, readCampaignQueuedPhones, OPERATOR_STATUSES, checkOperatorCallback, checkOperatorCallbackFor } from '../utils/continuous-operator';
 // ★ D177 (2026-05-19): Self-Optimizing Bandit (Thompson Sampling)
 // ★ D188 Phase 2-B-3 (2026-05-21): journey_step_variants CRUD + reward + 추천 헬퍼 import 추가.
-import {
-  listVariantsByProposal,
-  recommendVariantForProposal,
-  recordVariantReward,
-  listJourneyStepVariants,
-  createJourneyStepVariant,
-  deleteJourneyStepVariant,
-  recordJourneyStepVariantReward,
-  declareVariantWinner,
-  computeVariantsCI,
-} from '../utils/bandit-optimizer';
+import { listVariantsByProposal, recommendVariantForProposal, listJourneyStepVariants, createJourneyStepVariant, deleteJourneyStepVariant, declareVariantWinner, computeVariantsCI } from '../utils/bandit-optimizer';
 // ★ D179 (2026-05-19): Multi-Goal Decisioning (Opus 4.7 충돌 분석)
 import { analyzeGoalConflicts, OperatorGoal } from '../utils/multi-goal-decisioning';
 // ★ D181 (2026-05-19): 회사별 메모리 누적 (Anthropic Memory 패턴)
@@ -134,28 +100,7 @@ import { matchAlimtalkTemplate } from '../utils/alimtalk-ai-matcher';
 // ★ D181 (2026-05-19): Anthropic Citations (AI 응답 근거 박음 — 사용자 신뢰)
 import { buildCompanyDocuments, callAIWithCitations } from '../utils/citations';
 // ★ D187 (2026-05-20): Journey Builder Lite — 7 표준 여정 + 자연어 진입 (Opus 4.7)
-import {
-  createJourneyFromTemplate,
-  activateJourney,
-  pauseJourney,
-  endJourney,  archiveJourney,
-  unarchiveJourney,
-  deleteJourney,
-  listJourneys,
-  getJourneyDetail,
-  updateJourneyStep,
-  // ★ 2026-08-02 §13-1 — 저장 후 스텝 추가·삭제(화면 흐름 재설계의 선행)
-  addJourneyStep,
-  deleteJourneyStep,
-  JourneyStepGateError,
-  // ★ 2026-09-29 여정 V2 0차 — 규약 밖 입력(모르는 칸 종류 · 칸 수 초과 · 모르는 대상 조건)은 400.
-  JourneyInputError,
-  updateJourneyCallback,
-  validateJourneyEntryConfig,
-  JOURNEY_TEMPLATES,
-  JourneyTemplateCode,
-  JourneyStatus,
-} from '../utils/journey-builder';
+import { createJourneyFromTemplate, pauseJourney, endJourney, archiveJourney, unarchiveJourney, deleteJourney, listJourneys, getJourneyDetail, updateJourneyStep, addJourneyStep, deleteJourneyStep, JourneyInputError, validateJourneyEntryConfig, JOURNEY_TEMPLATES, JourneyTemplateCode, JourneyStatus } from '../utils/journey-builder';
 import { AlimtalkFallbackError } from '../utils/alimtalk-fallback';
 // ★ 2026-08-02 §13-5: 구매 문 판정·마지막 도착 시각 — 판정은 CT가 소유하고 라우트는 그대로 전달만 한다.
 import { getPurchaseDoorStatus } from '../utils/journey-purchase-ledger';
@@ -165,23 +110,22 @@ import { listCompanyGradeValues, saveGradeRanks, hasUsableGradeOrder, hasGradeOr
 import { validateJourneyForActivation } from '../utils/journey-pretest-validator';
 import { getPauseLogs } from '../utils/journey-pause-handler';
 // ★ 2026-06-30 여정 일반화 — one_shot 활성 시점 단발 dispatch.
-import { dispatchOneShotJourney } from '../utils/journey-anchor-scheduler';
 // ★ D187-fix3 (2026-05-21): Journey AI Generator — One-shot 자연어 + 시즌 + 회사 메모리
-import { generateJourneyPackage, refineStepMessage, generateAnchorJourneyPlan } from '../utils/journey-ai-generator';
+import { refineStepMessage, generateAnchorJourneyPlan } from '../utils/journey-ai-generator';
 // ★ 2026-07-28 알림톡 템플릿 → 트리거 제안 (후보 밖 값 거부는 CT가 담당)
 import { suggestJourneyTrigger } from '../utils/journey-trigger-suggest';
 // ★ 2026-06-29: 대화형 여정 수정 — 초안 패키지에 자연어 수정 반영
 import { editJourneyPackage } from '../utils/journey-ai-editor';
 // ★ 2026-06-29: AI 꾸미기 — 추천 메시지에 선택 컬럼(%변수%) 자연스럽게 녹임
 import { decorateOperatorMessages } from '../utils/operator-message-decorator';
-import { countJourneyTargetCustomers, previewJourneyTargets, selectAnchorAudienceIds, JOURNEY_COUNT_CAP } from '../utils/journey-target-extractor';
+import { countJourneyTargetCustomers, selectAnchorAudienceIds, JOURNEY_COUNT_CAP } from '../utils/journey-target-extractor';
 import { describeJourneyTrigger } from '../utils/journey-step-format';
 import { normalizeStartKind } from '../utils/journey-start-kind';
 // ★ D210+ Phase 2-fix1 (Harold 명시 2026-05-23): CT-58 — 회사 customer DB 실측 프로필 조회.
 //   /operator/data-profile endpoint = 마케팅 담당자 검토 UI 안내 카드 data source.
 import { getCompanyDataProfile, getCompanyJourneyFacts } from '../utils/company-data-profile';
 // ★ 2026-08-01 여정 재설계 §2-3 — 회사가 준 데이터로 만들 수 있는 여정만 연다(못 여는 것은 사유와 함께 잠근다).
-import { resolveTriggerAvailability, toAvailabilityMap, hasAnyAvailableTrigger, isImplementedTriggerEvent, isCreatableTriggerEvent } from '../utils/journey-trigger-capability';
+import { resolveTriggerAvailability, toAvailabilityMap, hasAnyAvailableTrigger } from '../utils/journey-trigger-capability';
 // ★ D192 (2026-05-22): CT-51 Journey 통계 통합 진입점 — 옛 단순 통계(getJourneyStats/listExecutions)를 완전 진화 — buildJourneyStats (overview + steps + segments + hourly + weekday + variants) + listJourneyEnteredCustomers (회사 격리 + 페이지네이션)
 import { buildJourneyStats, listJourneyEnteredCustomers } from '../utils/journey-stats';
 // ★ D197 (2026-05-22) Phase B-2: Predictive Suite — 회사 예측 점수 분포 + Top 위험/구매 가능성 + 모델 정확도
@@ -213,11 +157,11 @@ import { isEndChipEnabled } from '../utils/journey-step-limits';
 import { lockLineage } from '../utils/journey-lineage';
 import { prepareInterviewPreset } from '../utils/journey-interview-ai';
 import { startGenOf } from '../utils/journey-after-config';
-import { attachCandidates, attachJourney, detachJourney, AttachBlockedError, AFTER_OUTCOMES, type AfterOutcome } from '../utils/journey-attach';
+import { attachCandidates, attachJourney, detachJourney, AFTER_OUTCOMES, type AfterOutcome } from '../utils/journey-attach';
 import { prepareInterview, designJourneyFromInterview, MAX_INTERVIEW_SENTENCE } from '../utils/journey-interview-ai';
 import { listJourneyCallbackNumbers } from '../utils/journey-draft-save';
 import { currentPurchaseDoor, listObservedProducts, suggestUsagePeriod, PRODUCT_TRIGGER_EVENT } from '../utils/journey-product';
-import { createProductJourneyDraft, dbAcceptsProductTrigger, JourneyMigrationPendingError, productJourneyLockReason } from '../utils/journey-product-create';
+import { createProductJourneyDraft, dbAcceptsProductTrigger, productJourneyLockReason } from '../utils/journey-product-create';
 import { normalizeJourneyOptions } from '../utils/journey-options-validator';
 import { journeyOptionEditVerdict, JOURNEY_ENTRY_KEYS, STANDING_COUNT_TRIGGERS } from '../utils/journey-step-edit-policy';
 import { generateVariantsFromMessage } from '../utils/variant-generator';
@@ -227,7 +171,7 @@ import { explainCustomerPrediction } from '../utils/predictive-explainer';
 import { singleFlight } from '../utils/inflight-lock';
 
 
-import { publicErrorText } from '../utils/http-error';
+import { publicErrorText, respondUserError } from '../utils/http-error';
 // ★ D79: 인라인 래퍼 제거 → CT-01 buildFilterWhereClauseCompat 직접 사용
 
 const router = Router();
@@ -283,11 +227,13 @@ router.get('/style-gallery', async (req: Request, res: Response) => {
     });
   } catch (err: any) {
     console.error('[style-gallery] 조회 실패:', err?.message);
+    if (respondUserError(res, err)) return;   // ★ 2026-10-25 R10 — 사용자 조건 오류 = 그 상태 · 문장 그대로
     res.status(500).json({ error: '스타일 참고 조회에 실패했습니다.' });
   }
 });
 
-router.post('/generate-message', async (req: Request, res: Response) => {
+// ★ 2026-10-25 R2 — AI 문안 생성 = 같은 기능의 다듬기 · 대상 추천과 같은 문(ai_messaging) · 옛: 문 없음
+router.post('/generate-message', requirePlanFeature('ai_messaging'), async (req: Request, res: Response) => {
   try {
     const companyId = req.user?.companyId;
     const userId = req.user?.userId;
@@ -405,6 +351,7 @@ router.post('/generate-message', async (req: Request, res: Response) => {
     return res.json(result);
   } catch (error) {
     console.error('AI 메시지 생성 오류:', error);
+    if (respondUserError(res, error)) return;   // ★ 2026-10-25 R10 — 사용자 조건 오류 = 그 상태 · 문장 그대로
     return res.status(500).json({ error: '서버 오류가 발생했습니다.' });
   }
 });
@@ -619,215 +566,11 @@ router.post('/recommend-target', async (req: Request, res: Response) => {
 
     return res.json(result);
   } catch (error) {
+    // ★ 2026-10-25 잔액 부족 402 · 원장 쓰기 실패 503(AI 결과 정산 한 곳 · 옛: 둘 다 500 「서버 오류」)
+    if (error instanceof InsufficientCreditError) return res.status(402).json({ error: 'AI 크레딧이 부족합니다. 크레딧을 충전해 주세요.', code: 'INSUFFICIENT_CREDIT' });
+    if (respondUserError(res, error)) return;
     console.error('AI 타겟 추천 오류:', error);
     return res.status(500).json({ error: '서버 오류가 발생했습니다.' });
-  }
-});
-
-// ============================================================
-// ★ 기능 2: AI 다음 캠페인 추천 (발송 결과 기반)
-// 프로 이상 ai_premium_enabled 전용
-// ============================================================
-router.post('/recommend-next-campaign', async (req: Request, res: Response) => {
-  try {
-    const companyId = req.user?.companyId;
-    const userId = req.user?.userId;
-
-    if (!companyId) {
-      return res.status(403).json({ error: '회사 권한이 필요합니다' });
-    }
-
-    // ★ CT-17: AI 프리미엄 게이팅 (PRO+)
-    {
-      const ctx = await loadPlanContext(companyId);
-      if (!ctx) return res.status(404).json({ error: '회사 정보를 찾을 수 없습니다.' });
-      const check = canUseFeature(ctx, 'ai_premium');
-      if (!check.allowed) {
-        return res.status(403).json({ error: check.errorMsg, code: check.errorCode });
-      }
-    }
-
-    const { months } = req.body;
-    const analysisMonths = Math.min(Math.max(months || 3, 1), 12);
-
-    // 1) 캠페인 성과 집계 — stats-aggregation.ts 컨트롤타워
-    const performanceData = await aggregateCampaignPerformance(companyId, analysisMonths);
-
-    if (performanceData.totalCampaigns === 0) {
-      return res.json({
-        recommended_target: { filters: {}, reasoning: '분석할 캠페인 데이터가 없습니다.' },
-        recommended_time: '',
-        recommended_channel: 'SMS',
-        insights: ['최근 발송한 캠페인이 없어 추천을 생성할 수 없습니다. 캠페인을 발송한 후 다시 시도해주세요.'],
-        suggested_objective: '',
-        performance_data: performanceData,
-      });
-    }
-
-    // 2) 고객 통계 조회
-    const consentU = await viewerConsentJoin(companyId, req.user, '', 'customers.id');   // ★ 2026-10-02 수신동의 읽기 = CT(mall-consent)
-    const statsResult = await query(
-      `SELECT
-        COUNT(*) as total,
-        COUNT(*) FILTER (WHERE ${consentU.isTrue}) as sms_opt_in_count,
-        COUNT(*) FILTER (WHERE gender IN ('M', '남', '남성', 'male')) as male_count,
-        COUNT(*) FILTER (WHERE gender IN ('F', '여', '여성', 'female')) as female_count
-       FROM customers${consentU.join} WHERE company_id = $1 AND is_active = true`,
-      [companyId]
-    );
-
-    // 3) 회사 정보
-    const companyResult = await query(
-      'SELECT company_name, business_type, brand_name FROM companies WHERE id = $1',
-      [companyId]
-    );
-
-    // 4) AI 추천 — services/ai.ts 컨트롤타워
-    const recommendation = await recommendNextCampaign(
-      companyId, performanceData, statsResult.rows[0], companyResult.rows[0]
-    );
-
-    return res.json({
-      ...recommendation,
-      performance_data: performanceData,
-    });
-  } catch (error) {
-    console.error('AI 캠페인 추천 오류:', error);
-    return res.status(500).json({ error: '서버 오류가 발생했습니다.' });
-  }
-});
-
-// ============================================================
-// 타겟 조건 수정 후 재조회 (AI 맞춤한줄 Step 3 수정하기)
-// ============================================================
-router.post('/recount-target', async (req: Request, res: Response) => {
-  try {
-    const companyId = req.user?.companyId;
-    const userId = req.user?.userId;
-    const userType = req.user?.userType;
-
-    if (!companyId) {
-      return res.status(403).json({ error: '회사 권한이 필요합니다' });
-    }
-
-    const { targetCondition, originalTargetFilters } = req.body;
-
-    if (!targetCondition) {
-      return res.status(400).json({ error: 'targetCondition이 필요합니다' });
-    }
-
-    // targetCondition → targetFilters 변환 (기본 필드)
-    const targetFilters: Record<string, any> = {};
-
-    if (targetCondition.gender) {
-      const g = targetCondition.gender;
-      const gKey = ['남성', '남', '남자', 'male', 'M', 'm'].some(v => g.includes(v)) ? 'M'
-        : ['여성', '여', '여자', 'female', 'F', 'f'].some(v => g.includes(v)) ? 'F' : null;
-      if (gKey) targetFilters.gender = gKey;
-    }
-
-    if (targetCondition.grade) {
-      const grades = targetCondition.grade.split(/[,\/\s]+/).map((g: string) => g.trim().toUpperCase()).filter(Boolean);
-      if (grades.length > 0) targetFilters.grade = { value: grades, operator: 'in' };
-    }
-
-    if (targetCondition.ageRange) {
-      const ageMatch = targetCondition.ageRange.match(/(\d+)/g);
-      if (ageMatch) {
-        const nums = ageMatch.map(Number);
-        if (nums.length === 1) {
-          const decade = nums[0] < 10 ? nums[0] * 10 : nums[0];
-          targetFilters.age = [decade, decade + 9];
-        } else {
-          const minDecade = Math.min(...nums) < 10 ? Math.min(...nums) * 10 : Math.min(...nums);
-          const maxDecade = Math.max(...nums) < 10 ? Math.max(...nums) * 10 + 9 : Math.max(...nums) + 9;
-          targetFilters.age = [minDecade, maxDecade];
-        }
-      }
-    }
-
-    if (targetCondition.region) {
-      targetFilters.region = { value: [targetCondition.region], operator: 'in' };
-    }
-
-    if (targetCondition.storeName) {
-      // ★ B+0407-2: 'eq'는 정확 일치만 → 사용자가 "강남점"이라 입력했는데
-      //   DB는 "강남직영점"이면 0건. 'contains'로 부분 매칭하여 사용자 친화적으로.
-      //   (CT-01 customer-filter는 contains 시 ILIKE '%X%'로 처리됨, D89)
-      targetFilters.store_name = { value: targetCondition.storeName, operator: 'contains' };
-    }
-
-    // ★ B+0407-2: 최소 구매금액 처리 (B옵션 — 안전 필드)
-    //   기존에는 처리 안 되어 originalTargetFilters의 원래 값이 그대로 사용됨 → 사용자 수정 무시 버그
-    if (targetCondition.minPurchaseAmount) {
-      const numStr = String(targetCondition.minPurchaseAmount).replace(/[^0-9]/g, '');
-      const amount = parseInt(numStr);
-      if (!isNaN(amount) && amount > 0) {
-        targetFilters.total_purchase_amount = { value: amount, operator: 'gte' };
-      }
-    }
-
-    // birth_date (생일 월 필터)
-    if (targetCondition.birthMonth) {
-      targetFilters.birth_date = { value: parseInt(targetCondition.birthMonth), operator: 'birth_month' };
-    }
-
-    // ★ D84+B+0407-2: 커스텀 필드 + 기타 필드 보존 — parseBriefing이 생성한 custom_fields.*, registered_store 등
-    // originalTargetFilters에서 기본 필드(위에서 이미 변환한 것)를 제외한 나머지를 merge
-    // ★ B+0407-2: total_purchase_amount 추가 — minPurchaseAmount 새로 처리하므로 originalTargetFilters의 원래 값 무시
-    if (originalTargetFilters && typeof originalTargetFilters === 'object') {
-      const basicFieldKeys = new Set([
-        'gender', 'grade', 'age', 'region', 'store_name', 'birth_date',
-        'total_purchase_amount',
-      ]);
-      for (const [key, value] of Object.entries(originalTargetFilters)) {
-        if (!basicFieldKeys.has(key) && value != null) {
-          targetFilters[key] = value;
-        }
-      }
-    }
-
-    // 사용자 매장 필터 (일반 사용자는 본인 store_codes만)
-    // ★ B16-01: 브랜드 격리 — store-scope 컨트롤타워
-    let storeFilter = '';
-    const baseParams: any[] = [companyId];
-
-    if (userType === 'company_user' && userId) {
-      const scope = await getStoreScope(companyId, userId);
-      if (scope.type === 'filtered') {
-        storeFilter = ' AND id IN (SELECT customer_id FROM customer_stores WHERE company_id = $1 AND store_code = ANY($2::text[]))';
-        baseParams.push(scope.storeCodes);
-      } else if (scope.type === 'blocked') {
-        return res.status(403).json({ error: '소속 브랜드가 지정되지 않았습니다. 관리자에게 문의하세요.' });
-      }
-    }
-
-    // buildFilterWhereClause 호출 (recommend-target과 동일한 조건)
-    const { sql: filterSql, params: filterParams } = buildFilterWhereClauseCompat(targetFilters, baseParams.length + 1, await viewerBrandConsent(companyId, req.user));
-
-    // ★ B17-01: 수신거부 user_id 기준 통일
-    const unsubIdxB = baseParams.length + filterParams.length + 1;
-    const consentC = await viewerConsentSql(companyId, req.user, 'c');   // ★ 2026-10-02 수신동의 읽기 = CT(mall-consent)
-    const countResult = await query(
-      `SELECT COUNT(*) FROM customers c
-       WHERE c.company_id = $1 AND c.is_active = true AND ${consentC.isTrue}${storeFilter} ${filterSql}
-       AND NOT EXISTS (SELECT 1 FROM unsubscribes u WHERE u.user_id = $${unsubIdxB} AND u.phone = c.phone)`,
-      [...baseParams, ...filterParams, userId]
-    );
-    const estimatedCount = parseInt(countResult.rows[0].count);
-
-    const unsubResult = await query(
-      `SELECT COUNT(*) FROM customers c
-       WHERE c.company_id = $1 AND c.is_active = true AND ${consentC.isTrue}${storeFilter} ${filterSql}
-       AND EXISTS (SELECT 1 FROM unsubscribes u WHERE u.user_id = $${unsubIdxB} AND u.phone = c.phone)`,
-      [...baseParams, ...filterParams, userId]
-    );
-    const unsubscribeCount = parseInt(unsubResult.rows[0].count);
-
-    res.json({ estimatedCount, unsubscribeCount, targetFilters });
-  } catch (error) {
-    console.error('타겟 재조회 오류:', error);
-    res.status(500).json({ error: '타겟 재조회 실패' });
   }
 });
 
@@ -911,6 +654,7 @@ router.post('/target-recipients', async (req: Request, res: Response) => {
       });
     }
     console.error('[ai/target-recipients] 오류:', err);
+    if (respondUserError(res, err)) return;   // ★ 2026-10-25 R10 — 사용자 조건 오류 = 그 상태 · 문장 그대로
     return res.status(500).json({ success: false, error: '대상 리스트 조회 실패' });
   }
 });
@@ -979,13 +723,18 @@ router.post('/refine-message', requirePlanFeature('ai_messaging'), async (req: R
     );
     const recentMessages: string[] = recentMsgResult.rows.map((r: any) => r.content);
 
-    const result = await refineDirectMessage({
-      message,
-      tone: safeTone,
-      companyName,
-      recentMessages,
-      rejectNumber,
-      companyId,  // ★ D225+ Brand Voice Learning — 회사별 가이드라인 자동 주입
+    // ★ 2026-10-25 AI 결과 정산 한 곳(원장 Z4 · D1 A) — 잔액 확인 → 다듬기 → 안이 나올 때만 1크레딧(잔액 부족 402 · 원장 실패 503 · 결과 안 줌)
+    const { result } = await runChargedAi({
+      companyId, cost: getCreditCost('refine-direct'), source: 'refine-direct', createdBy: req.user?.userId || null,
+      run: () => refineDirectMessage({
+        message,
+        tone: safeTone,
+        companyName,
+        recentMessages,
+        rejectNumber,
+        companyId,  // ★ D225+ Brand Voice Learning — 회사별 가이드라인 자동 주입
+      }),
+      accept: (r) => r.candidates.length > 0,
     });
 
     if (result.candidates.length === 0) {
@@ -995,10 +744,10 @@ router.post('/refine-message', requirePlanFeature('ai_messaging'), async (req: R
         candidates: [],
       });
     }
-    // 성공(다듬은 안 생성) 후 차감 — 문안 다듬기 1크레딧. refineDirectMessage는 callAIWithFallback 우회라 여기서 직접 차감. 실패 시 미차감.
-    await deductCreditSafe({ companyId, cost: getCreditCost('refine-direct'), source: 'refine-direct', createdBy: req.user?.userId });
     return res.json({ success: true, candidates: result.candidates });
   } catch (err: any) {
+    if (err instanceof InsufficientCreditError) return res.status(402).json({ success: false, error: 'AI 크레딧이 부족합니다. 크레딧을 충전해 주세요.', code: 'INSUFFICIENT_CREDIT' });
+    if (respondUserError(res, err)) return;
     console.error('[ai/refine-message] 오류:', err);
     return res.status(500).json({ success: false, error: publicErrorText(err, 'AI 다듬기 실패') });
   }
@@ -1139,6 +888,7 @@ router.post('/one-line/judge', async (req: Request, res: Response) => {
     if (err instanceof LineJudgeBusyError) return res.status(409).json({ success: false, error: '같은 한 줄을 지금 판단하는 중이에요. 잠시만 기다려 주세요.', code: 'IN_FLIGHT' });
     if (err instanceof InsufficientCreditError) return res.status(402).json({ success: false, error: '크레딧이 부족해요. 충전한 뒤 다시 시도해 주세요.', code: 'INSUFFICIENT_CREDIT' });
     console.error('[one-line judge] 실패:', err?.message);
+    if (respondUserError(res, err)) return;   // ★ 2026-10-25 R10 — 사용자 조건 오류 = 그 상태 · 문장 그대로
     return res.status(503).json({ success: false, error: '크레딧 내역을 확인하지 못했어요. 잠시 뒤 다시 시도해 주세요.', code: 'CREDIT_STATE_UNKNOWN' });
   }
 });
@@ -1180,6 +930,7 @@ router.get('/operator/data-profile', async (req: Request, res: Response) => {
     });
   } catch (err: any) {
     console.error('[AI Operator /data-profile] 오류:', err);
+    if (respondUserError(res, err)) return;   // ★ 2026-10-25 R10 — 사용자 조건 오류 = 그 상태 · 문장 그대로
     return res.status(500).json({ success: false, error: '회사 데이터 프로필 조회 실패' });
   }
 });
@@ -1278,6 +1029,7 @@ router.post('/operator/sample-customer', async (req: Request, res: Response) => 
     return res.json({ success: true, sampleCustomer: mapped.sampleCustomer, sampleCustomerFields: mapped.sampleCustomerFields });
   } catch (err: any) {
     console.error('[AI Operator /sample-customer] 오류:', err);
+    if (respondUserError(res, err)) return;   // ★ 2026-10-25 R10 — 사용자 조건 오류 = 그 상태 · 문장 그대로
     return res.status(500).json({ success: false, error: '샘플 고객 조회 실패' });
   }
 });
@@ -1350,12 +1102,15 @@ router.post('/operator/propose', async (req: Request, res: Response) => {
       // ★ 2026-10-05 한줄로 시그니처 — 스위치 켠 회사는 늘 원문 한정(답이 없어도 { benefit: null }) → 메모리 · 계절 · 대상 블록이 혜택 근거가 되지 않는다
       ...(lineOn ? { lineFacts: lineFacts ?? { benefit: null } } : {}),
       ...(copyCVariant ? { cVariant: copyCVariant } : {}),
-    }, { source: 'ai-operator-propose', cost: 5, chargeOnlyWithTarget: true });   // ★ 2026-10-18 대상 0명 = 문안이 나와도 0(결함 0-1)
+    }, { source: 'ai-operator-propose', cost: getCreditCost('ai-operator-propose'), chargeOnlyWithTarget: true });   // ★ 2026-10-18 대상 0명 = 문안이 나와도 0(결함 0-1) · ★ 1025 단가 = 단가표(숫자 박기 0 · Z2)
 
     return res.json({ success: true, ...result, copyCVariant: copyCVariant ?? null });
   } catch (err: any) {
+    // ★ 2026-10-25 잔액 부족 = 402(옛: 500) · 원장 쓰기 실패 = 503(성공 뒤 차감 한 규칙)
+    if (err instanceof InsufficientCreditError) return res.status(402).json({ success: false, error: 'AI 크레딧이 부족합니다. 크레딧을 충전해 주세요.', code: 'INSUFFICIENT_CREDIT' });
+    if (respondUserError(res, err)) return;
     console.error('[AI Operator] propose 오류:', err);
-    return res.status(500).json({ success: false, error: publicErrorText(err, 'AI Operator 제안서 생성 실패') });
+    return res.status(500).json({ success: false, error: publicErrorText(err, '제안서를 만들지 못했어요') });
   }
 });
 
@@ -1380,7 +1135,7 @@ router.post('/operator/preview-recipients', async (req: Request, res: Response) 
 
     const { filters, allCustomers } = req.body;
     if (!filters || typeof filters !== 'object') {
-      return res.status(400).json({ success: false, error: 'filters가 필요합니다.' });
+      return res.status(400).json({ success: false, error: '대상 조건을 골라 주세요.' });
     }
 
     // ★ B16-01: 브랜드 격리 — ★ 2026-10-18 허브 범위 CT(resolveHubStoreScope · 이 블록의 원형 이동 · 허브 대상 수와 같은 범위)
@@ -1457,6 +1212,7 @@ router.post('/operator/preview-recipients', async (req: Request, res: Response) 
     });
   } catch (err: any) {
     console.error('[AI Operator] preview-recipients 오류:', err);
+    if (respondUserError(res, err)) return;   // ★ 2026-10-25 R10 — 사용자 조건 오류 = 그 상태 · 문장 그대로
     return res.status(500).json({ success: false, error: publicErrorText(err, '수신자 조회 실패') });
   }
 });
@@ -1487,6 +1243,7 @@ router.get('/operator/segments', async (req: Request, res: Response) => {
       return res.status(503).json({ success: false, error: 'DB 마이그레이션 필요: 운영자에게 컬럼 확인을 요청해주세요.', code: 'DB_MIGRATION_PENDING' });
     }
     console.error('[AI Operator] segments 오류:', err);
+    if (respondUserError(res, err)) return;   // ★ 2026-10-25 R10 — 사용자 조건 오류 = 그 상태 · 문장 그대로
     return res.status(500).json({ success: false, error: publicErrorText(err, '발송 대상 축 조회 실패') });
   }
 });
@@ -1506,7 +1263,7 @@ router.post('/operator/target-recipients', async (req: Request, res: Response) =
     const { filters, segment_key, segment_params, operator_id, allCustomers } = req.body;
     const hasSegment = typeof segment_key === 'string' && segment_key.trim();
     if (!hasSegment && (!filters || typeof filters !== 'object')) {
-      return res.status(400).json({ success: false, error: 'filters 또는 segment_key가 필요합니다.' });
+      return res.status(400).json({ success: false, error: '대상 조건을 골라 주세요.' });
     }
 
     // ⛔ 2026-08-03 7R 정정: 화면과 실발송이 같은 해석기를 쓴다. 종전엔 화면은 JWT 역할, 발송은 DB 역할이라
@@ -1610,43 +1367,8 @@ router.post('/operator/target-recipients', async (req: Request, res: Response) =
       });
     }
     console.error('[AI Operator] target-recipients 오류:', err);
+    if (respondUserError(res, err)) return;   // ★ 2026-10-25 R10 — 사용자 조건 오류 = 그 상태 · 문장 그대로
     return res.status(500).json({ success: false, error: publicErrorText(err, '추출 대상 조회 실패') });
-  }
-});
-
-// ============================================================
-// ★ D174 (2026-05-19) Step 1 — Next Action Advisor (Opus 4.7)
-// AI Operator의 "1회성 발송툴 탈출" 진정 가치 박는 영역.
-// BUSINESS+ 베타 게이팅 (AI Operator와 동일 정책).
-// ============================================================
-router.post('/operator/next-action', async (req: Request, res: Response) => {
-  try {
-    const companyId = req.user?.companyId;
-    if (!companyId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
-
-    // 베타 게이팅 (operator/propose와 동일)
-    const planCtx = await loadPlanContext(companyId);
-    if (!planCtx) return res.status(404).json({ success: false, error: '회사 정보를 찾을 수 없습니다.' });
-    if (await aiZonePlanBlocked(req, res, planCtx)) return;
-
-    const companyResult = await query(
-      `SELECT company_name, business_type, brand_name, brand_tone FROM companies WHERE id = $1::uuid`,
-      [companyId]
-    );
-    const companyInfo = companyResult.rows[0] || {};
-
-    const snapshot = await buildPerformanceSnapshot(companyId);
-    const advice = await recommendNextAction(companyId, snapshot, companyInfo);
-
-    return res.json({
-      success: true,
-      snapshot,
-      advice,
-      generatedAt: new Date().toISOString(),
-    });
-  } catch (err: any) {
-    console.error('[AI Operator] next-action 오류:', err);
-    return res.status(500).json({ success: false, error: publicErrorText(err, '다음 캠페인 추천 생성 실패') });
   }
 });
 
@@ -1679,6 +1401,7 @@ router.get('/operator/performance/snapshot-v2', async (req: Request, res: Respon
     return res.json({ success: true, snapshot });
   } catch (err: any) {
     console.error('[Performance] snapshot-v2 오류:', err);
+    if (respondUserError(res, err)) return;   // ★ 2026-10-25 R10 — 사용자 조건 오류 = 그 상태 · 문장 그대로
     return res.status(500).json({ success: false, error: publicErrorText(err, '성과 매트릭스 조회 실패') });
   }
 });
@@ -1709,6 +1432,7 @@ router.post('/operator/performance/full-analysis/start', async (req: Request, re
     return res.json({ success: true, jobId: job.id, totalSteps: job.total_steps });
   } catch (err: any) {
     console.error('[full-analysis] start 오류:', err);
+    if (respondUserError(res, err)) return;   // ★ 2026-10-25 R10 — 사용자 조건 오류 = 그 상태 · 문장 그대로
     return res.status(500).json({ success: false, error: publicErrorText(err, '풀분석 시작 실패') });
   }
 });
@@ -1718,9 +1442,10 @@ router.get('/operator/performance/full-analysis/status/:id', async (req: Request
     const companyId = req.user?.companyId;
     if (!companyId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
     const job = await getJob(req.params.id, companyId);
-    if (!job) return res.status(404).json({ success: false, error: 'job을 찾을 수 없습니다.' });
+    if (!job) return res.status(404).json({ success: false, error: '진행 중인 작업을 찾을 수 없어요. 처음부터 다시 해 주세요.' });
     return res.json({ success: true, status: job.status, currentStep: job.current_step, totalSteps: job.total_steps, stepLabel: job.step_label, progress: stepProgress(job.current_step), error: job.error });
   } catch (err: any) {
+    if (respondUserError(res, err)) return;   // ★ 2026-10-25 R10 — 사용자 조건 오류 = 그 상태 · 문장 그대로
     return res.status(500).json({ success: false, error: publicErrorText(err, '상태 조회 실패') });
   }
 });
@@ -1747,6 +1472,7 @@ router.get('/operator/performance/full-analysis/download/:id', async (req: Reque
       if (e && e.code !== 'ERR_STREAM_PREMATURE_CLOSE') console.error('[full-analysis download] 전송 오류:', e?.message || e);
     });
   } catch (err: any) {
+    if (!res.headersSent && respondUserError(res, err)) return;   // ★ 2026-10-25 R10 — 사용자 조건 오류 = 그 상태 · 문장 그대로
     if (!res.headersSent) return res.status(500).json({ success: false, error: publicErrorText(err, 'PDF 다운로드 실패') });
   }
 });
@@ -1779,6 +1505,9 @@ router.post('/operator/performance/explain', async (req: Request, res: Response)
     const explanation = await explainPerformance(companyId, snapshot, companyInfo, extraLines);
     return res.json({ success: true, explanation });
   } catch (err: any) {
+    // ★ 2026-10-25 잔액 부족 402 · 원장 쓰기 실패 503(AI 결과 정산 한 곳 · 옛: 500)
+    if (err instanceof InsufficientCreditError) return res.status(402).json({ success: false, error: 'AI 크레딧이 부족합니다. 크레딧을 충전해 주세요.', code: 'INSUFFICIENT_CREDIT' });
+    if (respondUserError(res, err)) return;
     console.error('[Performance] explain 오류:', err);
     return res.status(500).json({ success: false, error: publicErrorText(err, 'AI 진단 생성 실패') });
   }
@@ -1796,7 +1525,7 @@ router.post('/operator/performance/quick-action', async (req: Request, res: Resp
     const actionTypeParam = String(req.body.actionType || '');
     const validActions: QuickActionType[] = ['channel_recovery', 'time_optimization', 'top_performer_replication'];
     if (!validActions.includes(actionTypeParam as QuickActionType)) {
-      return res.status(400).json({ success: false, error: '잘못된 actionType' });
+      return res.status(400).json({ success: false, error: '할 수 없는 동작이에요.' });
     }
     const actionType = actionTypeParam as QuickActionType;
 
@@ -1809,8 +1538,11 @@ router.post('/operator/performance/quick-action', async (req: Request, res: Resp
     const result = await generateQuickAction(companyId, actionType, snapshot, companyInfo);
     return res.json({ success: true, result });
   } catch (err: any) {
+    // ★ 2026-10-25 잔액 부족 402 · 원장 쓰기 실패 503(AI 결과 정산 한 곳 · 옛: 500)
+    if (err instanceof InsufficientCreditError) return res.status(402).json({ success: false, error: 'AI 크레딧이 부족합니다. 크레딧을 충전해 주세요.', code: 'INSUFFICIENT_CREDIT' });
+    if (respondUserError(res, err)) return;
     console.error('[Performance] quick-action 오류:', err);
-    return res.status(500).json({ success: false, error: publicErrorText(err, '1-click 액션 생성 실패') });
+    return res.status(500).json({ success: false, error: publicErrorText(err, '바로 실행 안을 만들지 못했어요') });
   }
 });
 
@@ -1920,6 +1652,7 @@ router.get('/operator/performance/campaigns', async (req: Request, res: Response
     });
   } catch (err: any) {
     console.error('[Performance] campaigns 오류:', err);
+    if (respondUserError(res, err)) return;   // ★ 2026-10-25 R10 — 사용자 조건 오류 = 그 상태 · 문장 그대로
     return res.status(500).json({ success: false, error: publicErrorText(err, '캠페인 드릴다운 조회 실패') });
   }
 });
@@ -1937,6 +1670,7 @@ router.get('/operator/performance/cohort', async (req: Request, res: Response) =
     return res.json({ success: true, cohort: result });
   } catch (err: any) {
     console.error('[Performance] cohort 오류:', err);
+    if (respondUserError(res, err)) return;   // ★ 2026-10-25 R10 — 사용자 조건 오류 = 그 상태 · 문장 그대로
     return res.status(500).json({ success: false, error: publicErrorText(err, '코호트 조회 실패') });
   }
 });
@@ -1955,7 +1689,8 @@ router.get('/operator/performance/attribution', async (req: Request, res: Respon
     return res.json({ success: true, attribution: result });
   } catch (err: any) {
     console.error('[Performance] attribution 오류:', err);
-    return res.status(500).json({ success: false, error: publicErrorText(err, 'attribution 조회 실패') });
+    if (respondUserError(res, err)) return;   // ★ 2026-10-25 R10 — 사용자 조건 오류 = 그 상태 · 문장 그대로
+    return res.status(500).json({ success: false, error: publicErrorText(err, '전환 성과를 불러오지 못했어요') });
   }
 });
 
@@ -1977,6 +1712,7 @@ router.get('/operator/performance/customer-axis', async (req: Request, res: Resp
     return res.json({ success: true, gradePerformance, recipientAttribution });
   } catch (err: any) {
     console.error('[Performance] customer-axis 오류:', err);
+    if (respondUserError(res, err)) return;   // ★ 2026-10-25 R10 — 사용자 조건 오류 = 그 상태 · 문장 그대로
     return res.status(500).json({ success: false, error: publicErrorText(err, '고객 축 조회 실패') });
   }
 });
@@ -1995,6 +1731,7 @@ router.get('/operator/performance/automarketing-roi', async (req: Request, res: 
     return res.json({ success: true, roi });
   } catch (err: any) {
     console.error('[Performance] automarketing-roi 오류:', err);
+    if (respondUserError(res, err)) return;   // ★ 2026-10-25 R10 — 사용자 조건 오류 = 그 상태 · 문장 그대로
     return res.status(500).json({ success: false, error: publicErrorText(err, 'ROI 조회 실패') });
   }
 });
@@ -2011,6 +1748,7 @@ router.get('/operator/performance/data-availability', async (req: Request, res: 
     return res.json({ success: true, availability: result });
   } catch (err: any) {
     console.error('[Performance] data-availability 오류:', err);
+    if (respondUserError(res, err)) return;   // ★ 2026-10-25 R10 — 사용자 조건 오류 = 그 상태 · 문장 그대로
     return res.status(500).json({ success: false, error: publicErrorText(err, '데이터 진단 실패') });
   }
 });
@@ -2232,7 +1970,8 @@ router.post('/operator/marketing-calendar/generate', async (req: Request, res: R
     if (entries.length === 0) {
       return res.status(502).json({ success: false, error: '캘린더 설계 생성에 실패했습니다. 크레딧은 차감되지 않았습니다. 잠시 후 다시 시도해주세요.' });
     }
-    await deductCreditSafe({
+    // ★ 2026-10-25 성공 뒤 차감 한 규칙(D1 A) — 동시 소진 402 · 원장 실패 503 · 결과 안 줌(저장도 안 함)
+    await settleCreditAfterSuccess({
       companyId,
       cost,
       source: 'marketing-calendar',
@@ -2267,7 +2006,7 @@ router.post('/operator/marketing-calendar/regenerate-month', async (req: Request
     if (await aiZonePlanBlocked(req, res, planCtx)) return;
     const month = Math.floor(Number(req.body?.month));
     if (!(month >= 1 && month <= 12)) {
-      return res.status(400).json({ success: false, error: 'month는 1~12 사이여야 합니다.' });
+      return res.status(400).json({ success: false, error: '달은 1월부터 12월 사이로 골라 주세요.' });
     }
 
     const { getSavedCalendar, saveCalendarEntries, getActiveRegistration, buildCompanyCalendarContext } = await import('../utils/marketing-calendar-store');
@@ -2320,7 +2059,8 @@ router.post('/operator/marketing-calendar/regenerate-month', async (req: Request
       return res.status(502).json({ success: false, error: '해당 달 재설계에 실패했습니다. 크레딧은 차감되지 않았습니다. 잠시 후 다시 시도해주세요.' });
     }
 
-    await deductCreditSafe({
+    // ★ 2026-10-25 성공 뒤 차감 한 규칙(D1 A) — 동시 소진 402 · 원장 실패 503 · 결과 안 줌(저장도 안 함)
+    await settleCreditAfterSuccess({
       companyId,
       cost,
       source: 'marketing-calendar-month',
@@ -2385,7 +2125,7 @@ router.get('/operator/daily-brief', async (req: Request, res: Response) => {
     const r = await query(
       `SELECT brief_date, headline, recommendations, created_at, signals
          FROM company_daily_briefs
-        WHERE company_id = $1::uuid AND brief_date >= (NOW() AT TIME ZONE 'Asia/Seoul')::date - 1
+        WHERE company_id = $1::uuid AND ${CURRENT_BRIEF_DATE_SQL}
         ORDER BY brief_date DESC
         LIMIT 1`,
       [companyId],
@@ -2404,6 +2144,7 @@ router.get('/operator/daily-brief', async (req: Request, res: Response) => {
       });
     }
     return operatorError(res, err, 'daily-brief GET', '오늘의 추천을 불러오지 못했습니다.');
+    if (respondUserError(res, err)) return;   // ★ 2026-10-25 R10 — 사용자 조건 오류 = 그 상태 · 문장 그대로
   }
 });
 
@@ -2533,7 +2274,7 @@ router.get('/operator/continuous/learning-summary', async (req: Request, res: Re
     const performanceRes = await query(
       `SELECT
          COUNT(*)::int AS total_proposals,
-         COUNT(*) FILTER (WHERE status = 'approved')::int AS approved_count,
+         COUNT(*) FILTER (WHERE ${HUMAN_APPROVED_PROPOSAL_SQL})::int AS approved_count,
          COUNT(*) FILTER (WHERE status = 'rejected')::int AS rejected_count,
          COUNT(*) FILTER (WHERE auto_executed = true)::int AS auto_executed_count,
          AVG(recipient_count) AS avg_recipients,
@@ -2545,19 +2286,18 @@ router.get('/operator/continuous/learning-summary', async (req: Request, res: Re
     );
     const perf = performanceRes.rows[0] || {};
 
-    // 4. variant 영역 안 옛 winner 영역 — 옛 14일 영역 안 가장 효과 좋은 variant_index
+    // 4. 지난 14일 클릭률이 가장 높은 문안 한 개(한 제안의 한 안 · 표본 30건 이상)
+    //   ★ 2026-10-25 원장 #37 — 옛: 서로 다른 제안의 같은 자리 번호(B안끼리)를 합쳐 「변형 B」라 했다(다른 글끼리의 합).
     const variantRes = await query(
-      `SELECT
-         v.variant_index,
-         SUM(v.sent_count)::int AS sent,
-         SUM(v.click_count)::int AS clicks,
-         CASE WHEN SUM(v.sent_count) > 0 THEN SUM(v.click_count)::float / SUM(v.sent_count) ELSE 0 END AS ctr
-       FROM operator_proposal_variants v
-       INNER JOIN operator_proposals p ON p.id = v.proposal_id
-       WHERE p.company_id = $1::uuid
-         AND p.created_at >= NOW() - INTERVAL '14 days'
-       GROUP BY v.variant_index
-       ORDER BY ctr DESC`,
+      `SELECT v.variant_index, v.message_body, v.sent_count AS sent, v.click_count AS clicks,
+              v.click_count::float / v.sent_count AS ctr
+         FROM operator_proposal_variants v
+         INNER JOIN operator_proposals p ON p.id = v.proposal_id
+        WHERE p.company_id = $1::uuid
+          AND p.created_at >= NOW() - INTERVAL '14 days'
+          AND v.sent_count >= 30
+        ORDER BY v.click_count::float / v.sent_count DESC, v.sent_count DESC
+        LIMIT 1`,
       [companyId],
     );
 
@@ -2591,6 +2331,7 @@ router.get('/operator/continuous/learning-summary', async (req: Request, res: Re
         },
         variantWinner: variantRes.rows.length > 0 ? {
           variantLabel: ['A', 'B', 'C'][variantRes.rows[0].variant_index] || 'A',
+          snippet: String(variantRes.rows[0].message_body || '').replace(/\s+/g, ' ').trim().slice(0, 24),
           ctr: Number(variantRes.rows[0].ctr) || 0,
           sent: Number(variantRes.rows[0].sent) || 0,
           clicks: Number(variantRes.rows[0].clicks) || 0,
@@ -2776,6 +2517,7 @@ router.post('/operator/proposals/:id/recipients', async (req: Request, res: Resp
       return res.status(400).json({ success: false, code: 'TARGET_FILTER_EMPTY', error: '이 제안은 대상 조건이 비어 있어 보낼 수 없어요. 자동 마케팅에서 대상 조건을 확인해 주세요.' });
     }
     return operatorError(res, err, 'proposals recipients', '발송 대상을 불러오지 못했습니다.');
+    if (respondUserError(res, err)) return;   // ★ 2026-10-25 R10 — 사용자 조건 오류 = 그 상태 · 문장 그대로
   }
 });
 
@@ -2922,10 +2664,10 @@ router.post('/operator/multi-goal/analyze', async (req: Request, res: Response) 
 
     const { goals } = req.body;
     if (!Array.isArray(goals) || goals.length === 0) {
-      return res.status(400).json({ success: false, error: 'goals 배열은 1건 이상 필요합니다.' });
+      return res.status(400).json({ success: false, error: '목표를 1개 이상 골라 주세요.' });
     }
     if (goals.length > 5) {
-      return res.status(400).json({ success: false, error: 'goals는 최대 5건까지 지원합니다.' });
+      return res.status(400).json({ success: false, error: '목표는 5개까지 고를 수 있어요.' });
     }
 
     // 가중치 합 정규화 (0.0~1.0 박지 X 시 자동 정규화)
@@ -2961,6 +2703,9 @@ router.post('/operator/multi-goal/analyze', async (req: Request, res: Response) 
 
     return res.json({ success: true, analysis });
   } catch (err: any) {
+    // ★ 2026-10-25 잔액 부족 402 · 원장 쓰기 실패 503(AI 결과 정산 한 곳 · 옛: 500)
+    if (err instanceof InsufficientCreditError) return res.status(402).json({ success: false, error: 'AI 크레딧이 부족합니다. 크레딧을 충전해 주세요.', code: 'INSUFFICIENT_CREDIT' });
+    if (respondUserError(res, err)) return;
     console.error('[AI Operator multi-goal] 오류:', err);
     return res.status(500).json({ success: false, error: publicErrorText(err, '충돌 분석 실패') });
   }
@@ -2986,6 +2731,7 @@ router.get('/operator/memory', async (req: Request, res: Response) => {
     return res.json({ success: true, memories });
   } catch (err: any) {
     console.error('[AI Operator memory GET] 오류:', err);
+    if (respondUserError(res, err)) return;   // ★ 2026-10-25 R10 — 사용자 조건 오류 = 그 상태 · 문장 그대로
     return res.status(500).json({ success: false, error: publicErrorText(err, '조회 실패') });
   }
 });
@@ -3000,14 +2746,14 @@ router.post('/operator/memory', async (req: Request, res: Response) => {
     }
     const { memory_type, memory_key, memory_value, importance, source, metadata } = req.body;
     if (!memory_type || !memory_key || !memory_value) {
-      return res.status(400).json({ success: false, error: 'memory_type, memory_key, memory_value는 필수입니다.' });
+      return res.status(400).json({ success: false, error: '기억할 종류 · 이름 · 내용을 모두 적어 주세요.' });
     }
     // ★ 2026-07-12 — 학습 5종만 허용. representative_message·brand_guideline은 구조 JSON이라 전용
     //   endpoint(/api/ai-memory/brand-voice/*)로만 저장 — 본 자유 텍스트 경로로 upsert되면 구조가 파손돼
     //   브랜드보이스 주입 전체가 조용히 소멸하는 우회 벡터였다(UI는 원래 5종만 노출).
     const validTypes: MemoryType[] = LEARNING_MEMORY_TYPES;
     if (!validTypes.includes(memory_type)) {
-      return res.status(400).json({ success: false, error: `memory_type은 ${validTypes.join('/')} 중 하나여야 합니다.` });
+      return res.status(400).json({ success: false, error: '기억할 종류를 다시 골라 주세요.' });
     }
     // ★ 2026-07-12 — 서버 길이 가드(UI 2000자와 동일 기준). 무제한 저장 = 매 AI 호출 프롬프트 토큰 폭증.
     if (String(memory_value).length > 2000) {
@@ -3028,6 +2774,7 @@ router.post('/operator/memory', async (req: Request, res: Response) => {
     return res.json({ success: true, memory: entry });
   } catch (err: any) {
     console.error('[AI Operator memory POST] 오류:', err);
+    if (respondUserError(res, err)) return;   // ★ 2026-10-25 R10 — 사용자 조건 오류 = 그 상태 · 문장 그대로
     return res.status(500).json({ success: false, error: publicErrorText(err, '메모리 등록 실패') });
   }
 });
@@ -3045,6 +2792,7 @@ router.delete('/operator/memory/:id', async (req: Request, res: Response) => {
     return res.json({ success: true });
   } catch (err: any) {
     console.error('[AI Operator memory DELETE] 오류:', err);
+    if (respondUserError(res, err)) return;   // ★ 2026-10-25 R10 — 사용자 조건 오류 = 그 상태 · 문장 그대로
     return res.status(500).json({ success: false, error: publicErrorText(err, '삭제 실패') });
   }
 });
@@ -3066,6 +2814,7 @@ router.post('/operator/memory/cleanup', async (req: Request, res: Response) => {
     return res.json({ success: true, ...result, olderThanDays, minImportance });
   } catch (err: any) {
     console.error('[AI Operator memory cleanup] 오류:', err);
+    if (respondUserError(res, err)) return;   // ★ 2026-10-25 R10 — 사용자 조건 오류 = 그 상태 · 문장 그대로
     return res.status(500).json({ success: false, error: publicErrorText(err, '메모리 정리 실패') });
   }
 });
@@ -3084,6 +2833,7 @@ router.get('/operator/batches', async (req: Request, res: Response) => {
     return res.json({ success: true, batches });
   } catch (err: any) {
     console.error('[AI Operator batches GET] 오류:', err);
+    if (respondUserError(res, err)) return;   // ★ 2026-10-25 R10 — 사용자 조건 오류 = 그 상태 · 문장 그대로
     return res.status(500).json({ success: false, error: publicErrorText(err, '조회 실패') });
   }
 });
@@ -3097,12 +2847,13 @@ router.post('/operator/batches/:batchId/poll', async (req: Request, res: Respons
       `SELECT id FROM ai_batch_jobs WHERE batch_id = $1 AND company_id = $2::uuid`,
       [req.params.batchId, companyId]
     );
-    if (owner.rows.length === 0) return res.status(404).json({ success: false, error: 'batch를 찾을 수 없습니다.' });
+    if (owner.rows.length === 0) return res.status(404).json({ success: false, error: '진행 중인 작업을 찾을 수 없어요.' });
     const job = await pollBatch(req.params.batchId);
     return res.json({ success: true, job });
   } catch (err: any) {
     console.error('[AI Operator batches poll] 오류:', err);
-    return res.status(500).json({ success: false, error: publicErrorText(err, 'poll 실패') });
+    if (respondUserError(res, err)) return;   // ★ 2026-10-25 R10 — 사용자 조건 오류 = 그 상태 · 문장 그대로
+    return res.status(500).json({ success: false, error: publicErrorText(err, '진행 상태를 불러오지 못했어요') });
   }
 });
 
@@ -3162,6 +2913,7 @@ router.post('/operator/explain', async (req: Request, res: Response) => {
   } catch (err: any) {
     if (err instanceof InsufficientCreditError) return res.status(402).json({ success: false, code: 'INSUFFICIENT_CREDIT', error: 'AI 크레딧이 부족합니다. 크레딧을 충전해 주세요.' });
     if (err instanceof AiRateLimitExceeded) return res.status(429).json({ success: false, code: 'AI_RATE_LIMIT', error: err.message });
+    if (respondUserError(res, err)) return;
     console.error('[AI Operator explain] 오류:', err);
     return res.status(500).json({ success: false, error: publicErrorText(err, '분석 실패') });
   }
@@ -3421,6 +3173,7 @@ router.get('/operator/journeys-opportunities', async (req: Request, res: Respons
     console.error('[Journeys opportunities] 오류:', err);
     // 기회 카드는 보조 기능 — 실패해도 빈 배열로 페이지 정상 동작
     return res.json({ success: true, opportunities: [] });
+    if (respondUserError(res, err)) return;   // ★ 2026-10-25 R10 — 사용자 조건 오류 = 그 상태 · 문장 그대로
   }
 });
 
@@ -3455,6 +3208,7 @@ router.post('/operator/continuous-ask', async (req: Request, res: Response) => {
     return res.json({ success: true, answer: await buildAutoAsk(companyId, isBriefAdmin(req)) });
   } catch (err: any) {
     console.error('[Continuous ask] 오류:', err);
+    if (respondUserError(res, err)) return;   // ★ 2026-10-25 R10 — 사용자 조건 오류 = 그 상태 · 문장 그대로
     return res.status(500).json({ success: false, error: '답을 준비하지 못했어요. 잠시 뒤 다시 물어봐 주세요.' });
   }
 });
@@ -3466,7 +3220,8 @@ router.get('/operator/journeys-diagnosis', async (req: Request, res: Response) =
     const gate = await journeyGate(req, res);
     if (!gate) return;
     const { companyId } = gate;
-    const diagnosis = await buildJourneyDiagnosis(companyId);
+    // ★ 2026-10-25 #9(D1 = A) — 판정 = 보는 사람 여정 + 관리자가 켠 여정
+    const diagnosis = await buildJourneyDiagnosis(companyId, gate.userId);
     return res.json({ success: true, diagnosis });
   } catch (err: any) {
     return journeyError(res, err, 'diagnosis', '진단을 불러오지 못했어요. 잠시 뒤 다시 시도해 주세요.');
@@ -3474,7 +3229,7 @@ router.get('/operator/journeys-diagnosis', async (req: Request, res: Response) =
 });
 
 // ★ 2026-10-09 — 추천 계획으로 초안 만들기. 계획은 서버가 다시 계산한다(화면이 보낸 간격 · 칸 수는 받지 않는다).
-//   차감 · 멱등 · 저장 = 문장으로 만들기와 같은 경로(designJourneyFromInterview · 요청 키 = 회사 · 계획 내용에서 결정적 = recoRequestId).
+//   차감 · 멱등 · 저장 = 문장으로 만들기와 같은 경로(designJourneyFromInterview · 요청 키 = 회사 · 보는 사람 · 계획 내용에서 결정적 = recoRequestId).
 router.post('/operator/journeys-reco/design', async (req: Request, res: Response) => {
   try {
     const gate = await journeyGate(req, res);
@@ -3483,14 +3238,14 @@ router.post('/operator/journeys-reco/design', async (req: Request, res: Response
     const userId = gate.userId;
     if (!userId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
     const { triggerEvent, callbackNumber, shownDays } = req.body || {};
-    const plan = await recoPlanFor(companyId, String(triggerEvent || ''));
+    const plan = await recoPlanFor(companyId, userId, String(triggerEvent || ''));
     if (!plan) return res.status(400).json({ success: false, error: '추천에 없는 시작 사건이에요. 진단을 다시 열어 주세요.' });
     if (plan.status === 'locked') return res.status(409).json({ success: false, error: plan.reason || '지금 데이터로는 만들 수 없어요.', code: 'TRIGGER_LOCKED' });
     const out = await designJourneyFromInterview({
       companyId,
       userId,
       // 요청 키 = 계획 내용에서 결정적(화면 키 · 날짜를 쓰지 않는다 · 다시 열거나 새로고침 · 자정을 넘겨도 같은 요청 = 중복 생성 · 차감 0)
-      interviewId: recoRequestId(companyId, plan),
+      interviewId: recoRequestId(companyId, userId, plan),
       plan: { key: `reco-${plan.key}`, triggerEvent: plan.triggerEvent, title: plan.title, objective: plan.objective },
       // 시작 사건을 명시한다 — 추천 답(같은 레인 첫 열린 사건)에 맡기면 잠긴 사건이 다른 사건으로 바뀌어 만들어진다(명시 + 잠김 = 거절).
       answers: { [`reco-${plan.key}:trigger`]: plan.triggerEvent, [`reco-${plan.key}:messages`]: String(plan.daysFromStart.length) },
@@ -3681,6 +3436,7 @@ router.post('/operator/journeys/:id/activate', async (req: Request, res: Respons
           message: r.message,
         });
       case 'INSUFFICIENT_CREDIT': return res.status(402).json({ success: false, error: r.message, code: 'INSUFFICIENT_CREDIT' });
+      case 'CREDIT_SETTLE_FAILED': return res.status(503).json({ success: false, error: r.message, code: r.code });
       default: return res.status(400).json({ success: false, error: r.message });
     }
   } catch (err: any) {
@@ -3762,7 +3518,7 @@ router.patch('/operator/journeys/:id/steps/:stepId', async (req: Request, res: R
       delayMode: delayMode !== undefined ? delayMode : undefined,
       targetHourKst: targetHourKst !== undefined && targetHourKst !== null && Number.isFinite(Number(targetHourKst)) ? Number(targetHourKst) : undefined,
     });
-    if (!ok) return res.status(404).json({ success: false, error: 'step을 찾을 수 없거나 수정 권한이 없습니다.' });
+    if (!ok) return res.status(404).json({ success: false, error: '단계를 찾을 수 없거나 고칠 권한이 없어요.' });
     return res.json({ success: true });
   } catch (err: any) {
     // ★ 2026-07-27: 전환재발송 규칙 위반은 입력 오류라 400으로 돌린다(500 = 서버 결함으로 오인).
@@ -3878,7 +3634,7 @@ router.delete('/operator/journeys/:id/steps/:stepId', async (req: Request, res: 
     if (!gate) return;
     const { companyId } = gate;
     const result = await deleteJourneyStep(companyId, req.params.id, req.params.stepId);
-    if (!result) return res.status(404).json({ success: false, error: 'step을 찾을 수 없거나 수정 권한이 없습니다.' });
+    if (!result) return res.status(404).json({ success: false, error: '단계를 찾을 수 없거나 고칠 권한이 없어요.' });
     return res.json({ success: true, deletedOrder: result.deletedOrder, renumbered: result.renumbered });
   } catch (err: any) {
     // 게이트(마지막 스텝·발송 이력·진행 중 고객)는 상태 문제라 409 — 사유가 화면에 그대로 나간다.
@@ -3927,11 +3683,11 @@ router.post('/operator/journeys/:journeyId/steps/:stepId/variants', async (req: 
     const j = await query(`SELECT status FROM journeys WHERE id = $1::uuid AND company_id = $2::uuid`, [req.params.journeyId, companyId]);
     if (j.rows.length === 0) return res.status(404).json({ success: false, error: '여정을 찾을 수 없습니다.' });
     if (j.rows[0].status === 'active') {
-      return res.status(409).json({ success: false, error: '활성 여정의 variant는 수정 X. 먼저 일시정지해주세요.' });
+      return res.status(409).json({ success: false, error: '켜진 여정의 A/B 문안은 고칠 수 없어요. 먼저 멈춰 주세요.' });
     }
     const { variantId, messageTemplate, subject, channel, alimtalkTemplateCode, alimtalkVariableMap, trafficWeight } = req.body || {};
     if (!variantId || typeof variantId !== 'string' || !variantId.trim()) {
-      return res.status(400).json({ success: false, error: 'variantId 필수 (예: A/B/C).' });
+      return res.status(400).json({ success: false, error: '문안 이름(A · B · C)을 골라 주세요.' });
     }
     const id = await createJourneyStepVariant({
       companyId,
@@ -3966,91 +3722,12 @@ router.delete('/operator/journeys/variants/:variantId', async (req: Request, res
       [req.params.variantId, companyId]
     );
     if (own.rows.length === 0) {
-      return res.status(404).json({ success: false, error: 'variant를 찾을 수 없거나 활성 여정 (먼저 일시정지).' });
+      return res.status(404).json({ success: false, error: 'A/B 문안을 찾을 수 없거나 켜진 여정이에요. 먼저 멈춰 주세요.' });
     }
     const ok = await deleteJourneyStepVariant(req.params.variantId);
     return res.json({ success: ok });
   } catch (err: any) {
     return journeyError(res, err, 'variants delete', 'variant 삭제 실패');
-  }
-});
-
-// POST /api/ai/operator/journeys/variants/:variantId/track — click/conversion 트래킹 (외부 webhook 또는 SDK 호출)
-router.post('/operator/journeys/variants/:variantId/track', async (req: Request, res: Response) => {
-  try {
-    // ★ 2026-10-23 여정 결함 0 — 문 없던 주소도 같은 문(회사 · 운영 권한 · 주인)을 지난다(화면 소비처 0 · 공개 기록은 cdp.ts 가 따로).
-    const gate = await journeyGate(req, res);
-    if (!gate) return;
-    const { companyId } = gate;
-    const own = await query(
-      `SELECT 1 FROM journey_step_variants v
-       JOIN journey_steps s ON v.step_id = s.id
-       JOIN journeys j ON s.journey_id = j.id
-       WHERE v.id = $1::uuid AND j.company_id = $2::uuid`,
-      [req.params.variantId, companyId]
-    );
-    if (own.rows.length === 0) {
-      return res.status(404).json({ success: false, error: 'variant를 찾을 수 없습니다.' });
-    }
-    const { clicked, converted } = req.body || {};
-    const clickedN = Math.max(0, Math.min(1, Number(clicked) || 0));
-    const convertedN = Math.max(0, Math.min(1, Number(converted) || 0));
-    await recordJourneyStepVariantReward(req.params.variantId, 0, clickedN, convertedN);
-    return res.json({ success: true });
-  } catch (err: any) {
-    return journeyError(res, err, 'variants track', 'track 실패');
-  }
-});
-
-// PATCH /api/ai/operator/journeys/:id/callback — 회신번호 갱신
-router.patch('/operator/journeys/:id/callback', async (req: Request, res: Response) => {
-  try {
-    const gate = await journeyGate(req, res);
-    if (!gate) return;
-    const { companyId } = gate;
-    const { callbackNumber } = req.body || {};
-    if (!callbackNumber || !String(callbackNumber).trim()) {
-      return res.status(400).json({ success: false, error: '회신번호는 필수입니다.' });
-    }
-    const ok = await updateJourneyCallback(companyId, req.params.id, String(callbackNumber));
-    if (!ok) return res.status(404).json({ success: false, error: '여정을 찾을 수 없거나 활성 상태입니다 (먼저 일시정지).' });
-    return res.json({ success: true });
-  } catch (err: any) {
-    return journeyError(res, err, 'update callback', '회신번호 수정 실패');
-  }
-});
-
-// ★ D210+ Phase 3 (2026-05-23 Harold 명시): 다중 시뮬레이션 endpoint — Liquid 분기 영역 사전 검증
-//    GET /api/ai/operator/journeys/:id/preview-samples
-//    회사 안 customer 영역 6 영역 자동 추출:
-//      - VIP / Gold / Silver / 신규 (등급 영역 4)
-//      - churn_risk > 0.7 (이탈 위험 영역 1)
-//      - purchase_likelihood > 0.6 (구매 가능성 영역 1)
-//    영구 룰 정합 — 회사 격리 + 실제 DB source (cdp_customer_predictions 영역 정합)
-router.get('/operator/journeys/:id/preview-samples', async (req: Request, res: Response) => {
-  try {
-    const gate = await journeyGate(req, res);
-    if (!gate) return;
-    const { companyId } = gate;
-
-    // 여정 trigger 조회 + 회사 격리
-    const jr = await query(
-      `SELECT trigger_event, trigger_filters FROM journeys WHERE id = $1::uuid AND company_id = $2::uuid`,
-      [req.params.id, companyId]
-    );
-    if (jr.rows.length === 0) return res.status(404).json({ success: false, error: '여정을 찾을 수 없습니다.' });
-
-    // 여정 trigger 기준 미리보기 샘플 10명 + 전체 매칭 수 (발송과 동일 추출 함수). 0명이면 빈 결과 (자동완화 X).
-    const triggerEvent = String(jr.rows[0].trigger_event || '');
-    const triggerFilters = jr.rows[0].trigger_filters || {};
-    // ★ 2026-09-27 한줄로 V2 S5-04 — 미리보기도 발송과 같은 범위(여정 작성자)
-    const scopeSql = await getJourneyOwnerScopeSql(companyId, req.params.id);
-    // ★ 2026-09-28 한줄로 V2 R265 — 표본·인원을 한 번의 추출로(CT)
-    const { samples, count } = await previewJourneyTargets(companyId, triggerEvent, triggerFilters, 10, req.params.id, scopeSql, await journeyOwnerConsent(companyId, req.params.id));
-
-    return res.json({ success: true, samples, total: count.total, segments: count.segments, capped: count.capped });
-  } catch (err: any) {
-    return journeyError(res, err, 'preview-samples', '미리보기 샘플 조회 실패');
   }
 });
 
@@ -4131,45 +3808,6 @@ router.post('/operator/journeys/:id/target-recipients', async (req: Request, res
     });
   } catch (err: any) {
     return journeyError(res, err, 'target-recipients', '발송 대상 조회 실패');
-  }
-});
-
-// ★ D210+ Phase 3 (2026-05-23 Harold 명시): 자동 재진입 토글 endpoint (회사 admin 명시 활성)
-//    PATCH /api/ai/operator/journeys/:id/auto-reentry — auto_reentry_enabled 토글 (default OFF)
-//    영구 룰 정합: feedback_no_target_auto_relax — 사용자 승인하 자동화 본질
-router.patch('/operator/journeys/:id/auto-reentry', async (req: Request, res: Response) => {
-  try {
-    // ★ 2026-10-24 R2 — 끄기(enabled false)는 만료 뒤에도 연다 · 켜기만 요금제 문(Codex 1024 2R)
-    const gate = await journeyGate(req, res, { plan: !!req.body?.enabled });
-    if (!gate) return;
-    const { companyId } = gate;
-    const enabled = !!req.body?.enabled;
-    // ★ 2026-09-27 한줄로 V2 R298 — 켜기는 옵션 변경 규칙과 같게.
-    // ★ 2026-10-20 여정 V.3 §4-1 — 옵션 규칙이 바뀌었다: 재진입은 켜진 채 그 자리(다음 진입부터) · 사전검사 표식 유지(재진입은 문안 검사 입력이 아니다).
-    //   판정 = journeyOptionEditVerdict 한 곳(끝난 여정만 거절). 옛: 운영 중이면 켜기를 막고 표식을 비웠다.
-    const st = await query(`SELECT status FROM journeys WHERE id = $1::uuid AND company_id = $2::uuid`, [req.params.id, companyId]);
-    if (st.rows.length === 0) return res.status(404).json({ success: false, error: '여정을 찾을 수 없습니다.' });
-    const verdict = journeyOptionEditVerdict(String(st.rows[0].status), { autoReentryEnabled: enabled });
-    if (!verdict.ok) return res.status(400).json({ success: false, error: verdict.message, code: verdict.code });
-    const r = await query(
-      `UPDATE journeys SET auto_reentry_enabled = $3,
-              last_pretest_passed_at = CASE WHEN $4 THEN last_pretest_passed_at ELSE NULL END,
-              updated_at = NOW()
-       WHERE id = $1::uuid AND company_id = $2::uuid AND status = $5
-       RETURNING id, auto_reentry_enabled, allow_reentry, reentry_cooldown_days`,
-      [req.params.id, companyId, enabled, verdict.keepMarker, String(st.rows[0].status)]
-    );
-    if (r.rows.length === 0) {
-      return res.status(409).json({ success: false, error: '여정 상태가 방금 바뀌었습니다. 새로고침 후 다시 시도해 주세요.', code: 'JOURNEY_STATE_CHANGED' });
-    }
-    return res.json({
-      success: true,
-      autoReentryEnabled: r.rows[0].auto_reentry_enabled,
-      allowReentry: r.rows[0].allow_reentry,
-      reentryCooldownDays: r.rows[0].reentry_cooldown_days,
-    });
-  } catch (err: any) {
-    return journeyError(res, err, 'auto-reentry', '자동 재진입 토글 실패');
   }
 });
 
@@ -4415,6 +4053,7 @@ router.get('/operator/grade-ranks', async (req: Request, res: Response) => {
       return res.status(503).json({ success: false, error: 'DB 마이그레이션 필요: 운영자에게 customer_grade_ranks 생성 요청', code: 'DB_MIGRATION_PENDING' });
     }
     return journeyError(res, err, 'get', '등급 순서 조회 실패');
+    if (respondUserError(res, err)) return;   // ★ 2026-10-25 R10 — 사용자 조건 오류 = 그 상태 · 문장 그대로
   }
 });
 
@@ -4604,10 +4243,10 @@ router.post('/operator/decorate-message', async (req: Request, res: Response) =>
       return res.status(400).json({ success: false, error: '꾸밀 메시지가 너무 짧습니다.' });
     }
     if (!Array.isArray(selectedVars) || selectedVars.length === 0) {
-      return res.status(400).json({ success: false, error: '활용할 컬럼을 1개 이상 선택해주세요.' });
+      return res.status(400).json({ success: false, error: '활용할 고객 정보를 1개 이상 골라 주세요.' });
     }
-    // 꾸미기 1회(여러 변형 일괄) = 단일 AI 호출 = 3크레딧(액션 단위, 변형당 차감 X)
-    const decoratedList = await decorateOperatorMessages({
+    // 꾸미기 1회(여러 변형 일괄) = 단일 AI 호출 = 3크레딧(액션 단위, 변형당 차감 X) · ★ 1025 #39 바뀐 안이 있을 때만 · 원문으로 둔 안은 알린다
+    const d = await decorateOperatorMessages({
       companyId,
       messages: list,
       selectedVars: selectedVars.map((v: any) => String(v)),
@@ -4615,8 +4254,13 @@ router.post('/operator/decorate-message', async (req: Request, res: Response) =>
       isAd: !!isAd,
       userId: userId || undefined,
     });
-    return res.json({ success: true, messages: decoratedList, message: decoratedList[0] });
+    const keptNote = d.kept.length === 0 ? null
+      : d.kept.length === list.length ? '칼럼을 넣지 못해 원문 그대로 두었어요. 크레딧은 빠지지 않았어요.'
+      : `${d.kept.length}개 문안은 원문 그대로 두었어요(원문에 없는 말이 생겨서).`;
+    return res.json({ success: true, messages: d.messages, message: d.messages[0], kept: d.kept, charged: d.charged, ...(keptNote ? { notes: [keptNote] } : {}) });
   } catch (err: any) {
+    if (err instanceof InsufficientCreditError) return res.status(402).json({ success: false, error: 'AI 크레딧이 부족합니다. 크레딧을 충전해 주세요.', code: 'INSUFFICIENT_CREDIT' });
+    if (respondUserError(res, err)) return;
     console.error('[Operator decorate] 오류:', err);
     return res.status(500).json({ success: false, error: publicErrorText(err, 'AI 꾸미기 실패') });
   }
@@ -4631,7 +4275,7 @@ router.post('/operator/journeys/:id/pause', async (req: Request, res: Response) 
 
     const reason = String(req.body?.reason || '관리자 일시정지');
     const ok = await pauseJourney(companyId, req.params.id, reason);
-    if (!ok) return res.status(404).json({ success: false, error: 'active 상태 여정만 일시정지 가능합니다.' });
+    if (!ok) return res.status(404).json({ success: false, error: '켜져 있는 여정만 잠시 멈출 수 있어요.' });
     return res.json({ success: true });
   } catch (err: any) {
     return journeyError(res, err, 'pause', '일시정지 실패');
@@ -4820,6 +4464,7 @@ router.get('/operator/predictive/distribution', async (req: Request, res: Respon
     return res.json({ success: true, distribution });
   } catch (err: any) {
     console.error('[Predictive distribution] 오류:', err);
+    if (respondUserError(res, err)) return;   // ★ 2026-10-25 R10 — 사용자 조건 오류 = 그 상태 · 문장 그대로
     return res.status(500).json({ success: false, error: publicErrorText(err, '예측 분포 조회 실패') });
   }
 });
@@ -4840,6 +4485,7 @@ router.get('/operator/predictive/settings', async (req: Request, res: Response) 
       return res.status(503).json({ success: false, error: 'DB 마이그레이션 필요: companies.predictive_enabled 컬럼 추가 요청 의무', code: 'DB_MIGRATION_PENDING' });
     }
     console.error('[Predictive settings GET] 오류:', err);
+    if (respondUserError(res, err)) return;   // ★ 2026-10-25 R10 — 사용자 조건 오류 = 그 상태 · 문장 그대로
     return res.status(500).json({ success: false, error: publicErrorText(err, '예측 설정 조회 실패') });
   }
 });
@@ -4861,6 +4507,7 @@ router.patch('/operator/predictive/settings', async (req: Request, res: Response
       return res.status(503).json({ success: false, error: 'DB 마이그레이션 필요: companies.predictive_enabled 컬럼 추가 요청 의무', code: 'DB_MIGRATION_PENDING' });
     }
     console.error('[Predictive settings PATCH] 오류:', err);
+    if (respondUserError(res, err)) return;   // ★ 2026-10-25 R10 — 사용자 조건 오류 = 그 상태 · 문장 그대로
     return res.status(500).json({ success: false, error: publicErrorText(err, '예측 설정 변경 실패') });
   }
 });
@@ -4904,6 +4551,7 @@ router.get('/operator/self-diagnosis', async (req: Request, res: Response) => {
     return res.json({ success: true, diagnosis, brief, autoMarketing });
   } catch (err: any) {
     console.error('[SelfDiagnosis] 오류:', err);
+    if (respondUserError(res, err)) return;   // ★ 2026-10-25 R10 — 사용자 조건 오류 = 그 상태 · 문장 그대로
     return res.status(500).json({ success: false, error: publicErrorText(err, '자율 진단 조회 실패') });
   }
 });
@@ -4920,6 +4568,7 @@ router.get('/operator/predictive/summary', async (req: Request, res: Response) =
     return res.json({ success: true, summary });
   } catch (err: any) {
     console.error('[Predictive summary] 오류:', err);
+    if (respondUserError(res, err)) return;   // ★ 2026-10-25 R10 — 사용자 조건 오류 = 그 상태 · 문장 그대로
     return res.status(500).json({ success: false, error: publicErrorText(err, '예측 요약 조회 실패') });
   }
 });
@@ -4958,6 +4607,7 @@ router.get('/operator/predictive/customers', async (req: Request, res: Response)
     return res.json({ success: true, ...result });
   } catch (err: any) {
     console.error('[Predictive customers] 오류:', err);
+    if (respondUserError(res, err)) return;   // ★ 2026-10-25 R10 — 사용자 조건 오류 = 그 상태 · 문장 그대로
     return res.status(500).json({ success: false, error: publicErrorText(err, '예측 고객 조회 실패') });
   }
 });
@@ -4978,8 +4628,8 @@ router.get('/operator/predictive/customers/:id/explain', async (req: Request, re
     return res.json({ success: true, explanation });
   } catch (err: any) {
     console.error('[Predictive explain] 오류:', err);
-    const isAuthErr = err?.message?.includes('회사 격리');
-    return res.status(isAuthErr ? 403 : 500).json({ success: false, error: publicErrorText(err, '예측 근거 조회 오류') });
+    if (respondUserError(res, err)) return;   // ★ 2026-10-25 R10 — 없는 고객 = 404(옛: 문장 글자 '회사 격리' 판정 · 문장이 바뀌자 500)
+    return res.status(500).json({ success: false, error: publicErrorText(err, '예측 근거 조회 오류') });
   }
 });
 
@@ -4996,7 +4646,7 @@ router.post('/operator/predictive/quick-action', async (req: Request, res: Respo
     const { actionType } = req.body || {};
     const validTypes = ['churn_recovery', 'purchase_push', 'vip_engagement', 'first_purchase', 'high_engagement', 'repurchase_imminent'];
     if (!validTypes.includes(actionType)) {
-      return res.status(400).json({ success: false, error: 'actionType이 올바르지 않습니다.' });
+      return res.status(400).json({ success: false, error: '할 수 없는 동작이에요.' });
     }
 
     // 영역별 매칭 customer 카운트 + AI Operator orchestrate 영역 prefill 안내
@@ -5094,7 +4744,8 @@ router.post('/operator/predictive/quick-action', async (req: Request, res: Respo
     });
   } catch (err: any) {
     console.error('[Predictive quick-action] 오류:', err);
-    return res.status(500).json({ success: false, error: publicErrorText(err, '1-click 액션 처리 오류') });
+    if (respondUserError(res, err)) return;   // ★ 2026-10-25 R10 — 사용자 조건 오류 = 그 상태 · 문장 그대로
+    return res.status(500).json({ success: false, error: publicErrorText(err, '바로 실행을 처리하지 못했어요') });
   }
 });
 
@@ -5134,6 +4785,7 @@ router.post('/operator/predictive/recompute', async (req: Request, res: Response
     return res.json({ success: true, ...result });
   } catch (err: any) {
     console.error('[Predictive recompute] 오류:', err);
+    if (respondUserError(res, err)) return;   // ★ 2026-10-25 R10 — 사용자 조건 오류 = 그 상태 · 문장 그대로
     return res.status(500).json({ success: false, error: publicErrorText(err, '전체 재계산 오류') });
   }
 });
@@ -5223,7 +4875,7 @@ router.post('/operator/journeys/steps/:stepId/variants/auto-generate', async (re
     const { companyId } = gate;
     // 회사 격리 검증 — step → journey → 회사 영역
     const own = await query(
-      `SELECT 1 FROM journey_steps s
+      `SELECT s.channel FROM journey_steps s
        INNER JOIN journeys j ON j.id = s.journey_id
        WHERE s.id = $1::uuid AND j.company_id = $2::uuid`,
       [req.params.stepId, companyId]
@@ -5231,18 +4883,20 @@ router.post('/operator/journeys/steps/:stepId/variants/auto-generate', async (re
     if (own.rows.length === 0) {
       return res.status(404).json({ success: false, error: '단계를 찾을 수 없습니다.' });
     }
-    const { baseMessage, channel, subject, isAd } = req.body || {};
+    const { baseMessage, subject, isAd } = req.body || {};
     if (typeof baseMessage !== 'string' || baseMessage.trim().length < 10) {
       return res.status(400).json({ success: false, error: '기준 메시지는 10자 이상이어야 합니다.' });
     }
-    if (!['sms', 'lms', 'mms', 'kakao'].includes(channel)) {
-      return res.status(400).json({ success: false, error: '채널은 sms·lms·mms·kakao 중 하나여야 합니다.' });
+    // ★ 2026-10-25 #1 — 변이 채널 = 칸 채널(화면이 보낸 채널은 받지 않는다) · 알림톡 칸은 A/B 문안이 없다(승인 템플릿이 본문)
+    const channel = String(own.rows[0].channel || '');
+    if (!['sms', 'lms', 'mms'].includes(channel)) {
+      return res.status(409).json({ success: false, error: '알림톡 칸은 승인된 템플릿이 본문이라 A/B 문안을 만들 수 없어요.', code: 'VARIANT_KAKAO' });
     }
     const result = await generateVariantsFromMessage({
       stepId: req.params.stepId,
       companyId,
       baseMessage: baseMessage.trim(),
-      channel,
+      channel: channel as 'sms' | 'lms' | 'mms',
       subject: typeof subject === 'string' ? subject : null,
       isAd: !!isAd,
     });
@@ -5280,6 +4934,9 @@ router.post('/operator/alimtalk/match', async (req: Request, res: Response) => {
 
     return res.json({ success: true, ...result });
   } catch (err: any) {
+    // ★ 2026-10-25 잔액 부족 402 · 원장 쓰기 실패 503(AI 결과 정산 한 곳)
+    if (err instanceof InsufficientCreditError) return res.status(402).json({ success: false, error: 'AI 크레딧이 부족합니다. 크레딧을 충전해 주세요.', code: 'INSUFFICIENT_CREDIT' });
+    if (respondUserError(res, err)) return;
     console.error('[AI Operator alimtalk match] 오류:', err);
     return res.status(500).json({ success: false, error: publicErrorText(err, '알림톡 매칭 실패') });
   }
@@ -5316,6 +4973,7 @@ router.get('/usage', async (req: Request, res: Response) => {
     });
   } catch (err: any) {
     console.error('[AI Usage] 오류:', err);
+    if (respondUserError(res, err)) return;   // ★ 2026-10-25 R10 — 사용자 조건 오류 = 그 상태 · 문장 그대로
     return res.status(500).json({ success: false, error: publicErrorText(err, '사용량 조회 실패') });
   }
 });

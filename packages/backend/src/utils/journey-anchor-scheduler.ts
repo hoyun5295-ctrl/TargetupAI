@@ -21,11 +21,12 @@
 
 import { query, pool } from '../config/database';
 // ★ 2026-09-30 여정 V2 5차 — 진입이 닫힌 옛 판은 새 날짜 사이클을 받지 않는다.
-import { entryOpenClause } from './journey-lineage';
+import { entryOpenClause, lockEntryIfActive } from './journey-lineage';
 import { selectAnchorAudienceIds, JOURNEY_COUNT_CAP } from './journey-target-extractor';
 // ★ 2026-09-27 한줄로 V2 S5-04 — 여정 작성자 분류코드 범위
 import { getJourneyOwnerScopeSql } from './store-scope';
 import { journeyOwnerConsent } from './mall-consent';
+import { entryCapExceeded } from './journey-step-limits';
 import { getJourneyHoldoutPct } from './journey-entry-ledger';
 import {
   computeAnchorStepRunAt,
@@ -39,7 +40,8 @@ const DEFAULT_ANCHOR_HOUR_KST = 10;
 interface AnchorJourneyRow {
   id: string;
   company_id: string;
-  anchor_date: Date | null;
+  /** ★ 2026-10-25 #7 — 기준일 글자('YYYY-MM-DD' · `anchor_date::text`). 드라이버 Date 는 서버 로컬 자정이라 하루 당겨진다(R16). */
+  anchor_day: string | null;
   anchor_recurrence: string | null;
   anchor_recurrence_day: number | null;
   anchor_hour_kst: number | null;
@@ -74,7 +76,7 @@ export async function runJourneyAnchorScheduler(now: Date = new Date()): Promise
 
   try {
     const jres = await query(
-      `SELECT id, company_id, anchor_date, anchor_recurrence, anchor_recurrence_day, anchor_hour_kst,
+      `SELECT id, company_id, anchor_date::text AS anchor_day, anchor_recurrence, anchor_recurrence_day, anchor_hour_kst,
               trigger_filters, threshold_recipients_per_step
        FROM journeys
        WHERE status = 'active' AND start_kind = 'date_anchor'${await entryOpenClause()}
@@ -100,8 +102,8 @@ export async function runJourneyAnchorScheduler(now: Date = new Date()): Promise
 }
 
 async function processAnchorJourney(j: AnchorJourneyRow, now: Date): Promise<{ dispatched: number; enqueued: number }> {
-  if (!j.anchor_date) return { dispatched: 0, enqueued: 0 };
-  const anchorDate = new Date(j.anchor_date);
+  if (!j.anchor_day) return { dispatched: 0, enqueued: 0 };
+  const anchorDate = String(j.anchor_day);
   const hourKst = j.anchor_hour_kst != null ? Number(j.anchor_hour_kst) : DEFAULT_ANCHOR_HOUR_KST;
   const todayKst = kstDateStr(now);
 
@@ -146,18 +148,21 @@ async function processAnchorJourney(j: AnchorJourneyRow, now: Date): Promise<{ d
         await query(
           `UPDATE journeys SET anchor_date = $2::date, updated_at = NOW()
            WHERE id = $1::uuid AND status = 'active' AND start_kind = 'date_anchor'`,
-          [j.id, kstDateStr(next)],
+          [j.id, next],
         );
-        console.log(`[JourneyAnchor] 여정=${j.id} 다음 앵커로 갱신 → ${kstDateStr(next)} (${recurrence})`);
+        console.log(`[JourneyAnchor] 여정=${j.id} 다음 앵커로 갱신 → ${next} (${recurrence})`);
       }
     } else {
-      await query(
+      // ★ 2026-10-25 #8 — 그 회차 실행이 아직 남아 있으면 멈추지 않는다(밤 경계로 다음 날 아침에 밀린 D-0 이 자정 멈춤에 걸려 안 나가던 것).
+      //   실행기는 여정이 켜져 있어야 보낸다 → 남은 회차가 다 나간 다음 30분 회차에 멈춘다.
+      const r = await query(
         `UPDATE journeys SET status = 'paused', paused_at = NOW(),
            pause_reason = $2, updated_at = NOW()
-         WHERE id = $1::uuid AND status = 'active' AND start_kind = 'date_anchor'`,
+         WHERE id = $1::uuid AND status = 'active' AND start_kind = 'date_anchor'
+           AND NOT EXISTS (SELECT 1 FROM journey_executions e WHERE e.journey_id = $1::uuid AND e.status = 'active')`,
         [j.id, '지정일 D-0 발송 완료. 다음 기준 날짜 지정 시 재가동'],
       );
-      console.log(`[JourneyAnchor] 여정=${j.id} D-0 완료 → 자동 정지(none)`);
+      if ((r?.rowCount || 0) > 0) console.log(`[JourneyAnchor] 여정=${j.id} D-0 완료 → 자동 정지(none)`);
     }
   }
 
@@ -176,7 +181,7 @@ async function dispatchAnchorStep(
   const extractLimit = cap != null ? Number(cap) + 1 : JOURNEY_COUNT_CAP;
   const ids = await selectAnchorAudienceIds(j.company_id, j.trigger_filters || {}, extractLimit, await getJourneyOwnerScopeSql(j.company_id, j.id), await journeyOwnerConsent(j.company_id, j.id));
   if (ids.length === 0) return { enqueued: 0 };
-  if (cap != null && ids.length > Number(cap)) {
+  if (cap != null && entryCapExceeded(cap, null, ids.length)) {   // 날짜축 = 하루 몫 없음(정한 날 한 번에)
     await query(
       `UPDATE journeys SET status = 'paused', paused_at = NOW(), pause_reason = $2, updated_at = NOW()
        WHERE id = $1::uuid AND status = 'active'`,
@@ -192,6 +197,11 @@ async function dispatchAnchorStep(
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
+    // ★ 2026-10-25 Codex 1R — 넣기 관문(같은 계보 잠금 안 · 그사이 끝내기 · 멈추기면 넣지 않는다)
+    if (!(await lockEntryIfActive(client, j.id)).ok) {
+      await client.query('ROLLBACK');
+      return { enqueued: 0 };
+    }
     const claimed = await client.query(
       `INSERT INTO journey_anchor_dispatch (journey_id, step_id, customer_id, send_date)
        SELECT $1::uuid, $2::uuid, cid, $3::date FROM unnest($4::uuid[]) AS t(cid)
@@ -268,7 +278,7 @@ export async function dispatchOneShotJourney(companyId: string, journeyId: strin
   const extractLimit = cap != null ? Number(cap) + 1 : JOURNEY_COUNT_CAP;
   const ids = await selectAnchorAudienceIds(companyId, j.trigger_filters || {}, extractLimit, await getJourneyOwnerScopeSql(companyId, journeyId), await journeyOwnerConsent(companyId, journeyId));
   if (ids.length === 0) return { enqueued: 0, reason: 'no_target' };
-  if (cap != null && ids.length > Number(cap)) {
+  if (cap != null && entryCapExceeded(cap, null, ids.length)) {   // 날짜축 = 하루 몫 없음(정한 날 한 번에)
     await query(
       `UPDATE journeys SET status = 'paused', paused_at = NOW(), pause_reason = $2, updated_at = NOW()
        WHERE id = $1::uuid AND status = 'active'`,
@@ -285,6 +295,11 @@ export async function dispatchOneShotJourney(companyId: string, journeyId: strin
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
+    // ★ 2026-10-25 Codex 1R — 넣기 관문(켜기 직후 그사이 끝내기 · 멈추기면 넣지 않는다)
+    if (!(await lockEntryIfActive(client, journeyId)).ok) {
+      await client.query('ROLLBACK');
+      return { enqueued: 0, reason: 'not_active' };
+    }
     const holdoutPct = await getJourneyHoldoutPct(journeyId);  // ★ 2026-07-11 홀드아웃 — 최초 진입에서만 배정
     const ins = await client.query(
       `INSERT INTO journey_executions (id, journey_id, customer_id, current_step_order, status, entered_at, next_run_at, created_at)

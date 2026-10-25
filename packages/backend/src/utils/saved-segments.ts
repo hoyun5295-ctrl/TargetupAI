@@ -5,6 +5,7 @@
  * company_id + user_id 기반 멀티테넌트 격리.
  * 사용자당 최대 20개 제한.
  */
+import { UserFacingError } from './http-error';
 import { query } from '../config/database';
 
 const MAX_SEGMENTS_PER_USER = 20;
@@ -60,7 +61,7 @@ export async function saveSegment(
     [companyId, userId]
   );
   if (countResult.rows[0].cnt >= MAX_SEGMENTS_PER_USER) {
-    throw new Error(`저장 세그먼트는 최대 ${MAX_SEGMENTS_PER_USER}개까지 가능합니다.`);
+    throw new UserFacingError(409, 'SEGMENT_LIMIT', `저장 조건은 ${MAX_SEGMENTS_PER_USER}개까지 둘 수 있어요. 안 쓰는 조건을 지운 뒤 다시 저장해 주세요.`);
   }
 
   const result = await query(

@@ -72,8 +72,10 @@ describe('S3 이메일 완성·발송 잠금', () => {
     const src = fs.readFileSync(path.join(__dirname, '../../../routes/email.ts'), 'utf-8');
     const complete = fs.readFileSync(path.join(__dirname, '../email-complete-core.ts'), 'utf-8');
     expect(complete.indexOf('emailSmtpBlocker(')).toBeGreaterThan(-1);
-    expect(complete.indexOf('emailSmtpBlocker(')).toBeLessThan(complete.indexOf('deductCreditSafe('));
-    expect(complete.indexOf('emailContentBlocker(')).toBeLessThan(complete.indexOf('deductCreditSafe('));
+    // ★ 1025 D1 = A — 차감 = settleCreditAfterSuccess(못 걷으면 완성 없음)
+    expect(complete.indexOf('emailSmtpBlocker(')).toBeLessThan(complete.indexOf('settleCreditAfterSuccess({'));
+    expect(complete.indexOf('emailContentBlocker(')).toBeLessThan(complete.indexOf('settleCreditAfterSuccess({'));
+    expect(complete).not.toContain('deductCreditSafe(');
     const send = src.slice(src.indexOf("router.post('/campaigns/:id/send'"), src.indexOf("router.post('/campaigns/:id/test-send'"));
     expect(send.indexOf('emailSmtpBlocker(')).toBeGreaterThan(-1);
     expect(send.indexOf('emailSmtpBlocker(')).toBeLessThan(send.indexOf("SET status = 'sending'"));

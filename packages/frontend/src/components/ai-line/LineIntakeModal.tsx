@@ -19,7 +19,7 @@ import { X, Check, Lock, Loader2, Sparkles, Users, AlertTriangle, MessageSquare,
 import JourneyModalShell from '../journey/JourneyModalShell';
 import DirectTargetFilterModal from '../DirectTargetFilterModal';
 import { toLineAudienceFilters } from '../../utils/customerFilterBuild';
-import { AI_GENERATE_COSTS } from '../../constants/credit';
+import { creditCost } from '../../constants/credit';
 import {
   type AiLineRun, type AiLineType, type AiLineCopyType, type AiLineChannel,
   AI_LINE_TYPE_META, AI_LINE_TYPE_ORDER, aiLineApi, activeFilters, filtersEmpty, allCustomersFlag, audienceOf, isAdOf, asksOf,
@@ -246,8 +246,8 @@ export default function LineIntakeModal({ open, run, creditTotal, loadError, onR
   const setChannel = (c: AiLineChannel) => onRun({ ...run, channel: c });
 
   const copyTypes = run.types.filter((t): t is AiLineCopyType => t !== 'direct');
-  const unit = AI_GENERATE_COSTS['ai-line-compose'] ?? 2;
-  const baseCost = intake?.base.paid ? 0 : (AI_GENERATE_COSTS['ai-line-intake'] ?? 2);
+  const unit = creditCost('ai-line-compose');
+  const baseCost = intake?.base.paid ? 0 : creditCost('ai-line-intake');
   const total = baseCost + copyTypes.length * unit;
   const directOnly = run.types.length === 1 && run.types[0] === 'direct';
 

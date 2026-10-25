@@ -13,6 +13,8 @@
  */
 
 import { Router, Request, Response } from 'express';
+import { InsufficientCreditError } from '../utils/ai-credit';
+import { respondUserError } from '../utils/http-error';
 import { authenticate } from '../middlewares/auth';
 import { requirePlanFeature } from '../utils/plan-guard';
 import { convertNaturalLanguageToFilter, SegmentGenerationError } from '../utils/ai-segment-generator';
@@ -50,7 +52,7 @@ router.post('/extract', requirePlanFeature('ai_messaging'), async (req: Request,
       return res.status(400).json({ success: false, error: '자연어 입력이 필요합니다.' });
     }
     if (!channel || !VALID_CHANNELS.includes(channel as ChannelKey)) {
-      return res.status(400).json({ success: false, error: '지원하지 않는 채널입니다. (email / dm / inapp / kakao)' });
+      return res.status(400).json({ success: false, error: '지원하지 않는 채널이에요. 이메일 · DM · 인앱 · 카카오 중에서 골라 주세요.' });
     }
     const ch = channel as ChannelKey;
 
@@ -89,6 +91,9 @@ router.post('/extract', requirePlanFeature('ai_messaging'), async (req: Request,
       samples,
     });
   } catch (err: any) {
+    // ★ 2026-10-25 잔액 부족 402 · 원장 쓰기 실패 503(AI 결과 정산 한 곳 · 옛: 500)
+    if (err instanceof InsufficientCreditError) return res.status(402).json({ success: false, error: 'AI 크레딧이 부족합니다. 크레딧을 충전해 주세요.', code: 'INSUFFICIENT_CREDIT' });
+    if (respondUserError(res, err)) return;
     if (err instanceof SegmentGenerationError) {
       return res.status(400).json({ success: false, code: err.code, error: err.message });
     }
@@ -123,7 +128,7 @@ router.post('/count', requirePlanFeature('ai_messaging'), async (req: Request, r
 
     const { channel, filter } = req.body as { channel?: string; filter?: Record<string, unknown> };
     if (!channel || !VALID_CHANNELS.includes(channel as ChannelKey)) {
-      return res.status(400).json({ success: false, error: '지원하지 않는 채널입니다. (email / dm / inapp / kakao)' });
+      return res.status(400).json({ success: false, error: '지원하지 않는 채널이에요. 이메일 · DM · 인앱 · 카카오 중에서 골라 주세요.' });
     }
     const ch = channel as ChannelKey;
     const safeFilter = filter && typeof filter === 'object' && !Array.isArray(filter) ? filter : {};
@@ -153,6 +158,7 @@ router.post('/count', requirePlanFeature('ai_messaging'), async (req: Request, r
       });
     }
     console.error('[targets/count] 실패:', err);
+    if (respondUserError(res, err)) return;   // ★ 2026-10-25 R10 — 사용자 조건 오류 = 그 상태 · 문장 그대로
     return res.status(500).json({ success: false, error: '타겟 인원 조회 실패' });
   }
 });
@@ -178,7 +184,7 @@ router.post('/recipients', requirePlanFeature('ai_messaging'), async (req: Reque
       pageSize?: number;
     };
     if (!channel || !VALID_CHANNELS.includes(channel as ChannelKey)) {
-      return res.status(400).json({ success: false, error: '지원하지 않는 채널입니다. (email / dm / inapp / kakao)' });
+      return res.status(400).json({ success: false, error: '지원하지 않는 채널이에요. 이메일 · DM · 인앱 · 카카오 중에서 골라 주세요.' });
     }
     const ch = channel as ChannelKey;
     const safeFilter = filter && typeof filter === 'object' ? filter : {};
@@ -238,6 +244,7 @@ router.post('/recipients', requirePlanFeature('ai_messaging'), async (req: Reque
       });
     }
     console.error('[targets/recipients] 실패:', err);
+    if (respondUserError(res, err)) return;   // ★ 2026-10-25 R10 — 사용자 조건 오류 = 그 상태 · 문장 그대로
     return res.status(500).json({ success: false, error: '타겟 리스트 조회 실패' });
   }
 });

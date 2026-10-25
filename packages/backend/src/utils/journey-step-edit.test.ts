@@ -159,7 +159,7 @@ describe('deleteJourneyStep — 재번호', () => {
 describe('addJourneyStep', () => {
   it('상한을 서버가 강제한다 — 넘으면 INSERT가 나가지 않는다', async () => {
     const { texts } = mockClient([
-      { match: /SELECT status FROM journeys/, rows: [{ status: 'draft' }] },
+      { match: /SELECT status, start_kind FROM journeys/, rows: [{ status: 'draft' }] },
       { match: /COUNT\(\*\)::int AS n/, rows: [{ n: MAX_JOURNEY_STEPS, mx: MAX_JOURNEY_STEPS }] },
     ]);
     await expect(addJourneyStep(COMPANY, JOURNEY, { stepType: 'message', delayHours: 0, channel: 'sms' })).rejects.toMatchObject({
@@ -170,17 +170,17 @@ describe('addJourneyStep', () => {
 
   it('맨 뒤(MAX+1)에 붙이고 부모 여정 행을 잠근 뒤 계산한다', async () => {
     const { texts, calls } = mockClient([
-      { match: /SELECT status FROM journeys/, rows: [{ status: 'draft' }] },
+      { match: /SELECT status, start_kind FROM journeys/, rows: [{ status: 'draft' }] },
       { match: /COUNT\(\*\)::int AS n/, rows: [{ n: 3, mx: 3 }] },
       { match: /INSERT INTO journey_steps/, rows: [{ id: STEP }] },
     ]);
     const r = await addJourneyStep(COMPANY, JOURNEY, { stepType: 'message', delayHours: 24, channel: 'sms' });
     expect(r).toEqual({ stepId: STEP, stepOrder: 4 });
 
-    const lock = calls.find((c) => /SELECT status FROM journeys/.test(c.text));
+    const lock = calls.find((c) => /SELECT status, start_kind FROM journeys/.test(c.text));
     expect(lock?.text).toMatch(/FOR UPDATE/);
     expect(lock?.text).toMatch(/company_id = \$2::uuid/); // 회사 격리
-    expect(at(texts, /SELECT status FROM journeys/)).toBeLessThan(at(texts, /COUNT\(\*\)::int AS n/));
+    expect(at(texts, /SELECT status, start_kind FROM journeys/)).toBeLessThan(at(texts, /COUNT\(\*\)::int AS n/));
 
     const ins = calls.find((c) => /INSERT INTO journey_steps/.test(c.text));
     expect(ins?.params?.[1]).toBe(4); // step_order
@@ -190,7 +190,7 @@ describe('addJourneyStep', () => {
 
   it('운영 중(active) 여정에는 추가하지 않는다 — 사전 스팸검사를 건너뛴 문안이 나간다', async () => {
     const { texts } = mockClient([
-      { match: /SELECT status FROM journeys/, rows: [{ status: 'active' }] },
+      { match: /SELECT status, start_kind FROM journeys/, rows: [{ status: 'active' }] },
       { match: /COUNT\(\*\)::int AS n/, rows: [{ n: 1, mx: 1 }] },
       { match: /INSERT INTO journey_steps/, rows: [{ id: STEP }] },
     ]);
@@ -223,7 +223,7 @@ describe('addJourneyStep', () => {
   });
 
   it('여정이 그 회사 것이 아니면 null', async () => {
-    const { texts } = mockClient([{ match: /SELECT status FROM journeys/, rows: [] }]);
+    const { texts } = mockClient([{ match: /SELECT status, start_kind FROM journeys/, rows: [] }]);
     await expect(addJourneyStep(COMPANY, JOURNEY, { stepType: 'message', delayHours: 0, channel: 'sms' })).resolves.toBeNull();
     expect(at(texts, /INSERT INTO journey_steps/)).toBe(-1);
   });
@@ -291,7 +291,7 @@ describe('withJourneyValidationReset — 변경과 무효화는 한 트랜잭션
 describe('addJourneyStep — 이미지 없는 MMS', () => {
   it('MMS인데 이미지가 없으면 INSERT가 나가지 않는다', async () => {
     const { texts } = mockClient([
-      { match: /SELECT status FROM journeys/, rows: [{ status: 'draft' }] },
+      { match: /SELECT status, start_kind FROM journeys/, rows: [{ status: 'draft' }] },
       { match: /COUNT\(\*\)::int AS n/, rows: [{ n: 1, mx: 1 }] },
       { match: /INSERT INTO journey_steps/, rows: [{ id: STEP }] },
     ]);
@@ -303,7 +303,7 @@ describe('addJourneyStep — 이미지 없는 MMS', () => {
 
   it('이미지가 있으면 통과한다', async () => {
     const { texts } = mockClient([
-      { match: /SELECT status FROM journeys/, rows: [{ status: 'draft' }] },
+      { match: /SELECT status, start_kind FROM journeys/, rows: [{ status: 'draft' }] },
       { match: /COUNT\(\*\)::int AS n/, rows: [{ n: 1, mx: 1 }] },
       { match: /INSERT INTO journey_steps/, rows: [{ id: STEP }] },
     ]);
@@ -316,7 +316,7 @@ describe('addJourneyStep — 이미지 없는 MMS', () => {
 
   it('메시지 스텝이 아니면 보지 않는다 — 대기 스텝은 채널 자체가 없다', async () => {
     const { texts } = mockClient([
-      { match: /SELECT status FROM journeys/, rows: [{ status: 'draft' }] },
+      { match: /SELECT status, start_kind FROM journeys/, rows: [{ status: 'draft' }] },
       { match: /COUNT\(\*\)::int AS n/, rows: [{ n: 1, mx: 1 }] },
       { match: /INSERT INTO journey_steps/, rows: [{ id: STEP }] },
     ]);

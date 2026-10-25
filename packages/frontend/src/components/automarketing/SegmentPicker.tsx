@@ -19,11 +19,9 @@ interface Props {
   disabled?: boolean;
   /**
    * 옛 방식으로 저장된 대상 축(target_hint). 계약 이전에 만들어진 자동마케팅만 갖는다.
-   * ⛔ 숨기면 화면은 "목표 문장으로 자동 판단"이라 말하는데 실제로는 그 축으로 나간다 — 그대로 보여준다.
+   * ⛔ 숨기면 화면은 대상이 비었다고 말하는데 실제로는 그 축으로 나간다 — 그대로 보여준다.
    */
   legacyHint?: string | null;
-  /** "목표 문장으로 자동 판단"을 명시적으로 고른 순간 — 옛 축(target_hint)도 함께 해제해야 한다. */
-  onClearLegacyHint?: () => void;
   /** 편집 중인 오퍼레이터 id — 있으면 그 오퍼레이터 소유자 기준으로 대상 수를 센다(관리자가 남의 것을 편집할 때). */
   operatorId?: string | null;
 }
@@ -36,7 +34,7 @@ const LEGACY_HINT_LABEL: Record<string, string> = {
 // ★ 2026-08-04: 자주 쓰는 값 목록(옛 QUICK_DAYS)을 여기서 제거했다. 축마다 자연스러운 구간이 달라
 //   (일 단위 / 금액 단위) 화면이 목록을 들고 있으면 금액 축에 '30일' 버튼이 뜬다. 범위를 정하는 곳이 정한다.
 
-export default function SegmentPicker({ value, params, onChange, disabled, legacyHint, onClearLegacyHint, operatorId }: Props) {
+export default function SegmentPicker({ value, params, onChange, disabled, legacyHint, operatorId }: Props) {
   const [segments, setSegments] = useState<SegmentAvailability[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -170,29 +168,17 @@ export default function SegmentPicker({ value, params, onChange, disabled, legac
 
   return (
     <div className="space-y-2">
+      {/* ★ 2026-10-25 원장 #36 — 「목표 문장으로 자동 판단 · 매 회차 다시 해석」 선택지를 지웠다(1005 에 없앤 동작 ·
+          고르면 대상 계약이 비어 다음 회차부터 멈췄다). 대상이 비어 있으면 사실만 알린다(고를 것은 아래 대상뿐). */}
+      {value === null && (
+        <div className="flex items-start gap-1.5 px-3 py-2.5 rounded-lg border border-amber-200 bg-amber-50 text-[11px] text-amber-900 leading-relaxed">
+          <Sparkles className="w-3.5 h-3.5 shrink-0 mt-0.5" />
+          <span>{legacyHint
+            ? `지금은 예전에 지정한 '${LEGACY_HINT_LABEL[legacyHint] || legacyHint}' 축으로 나갑니다. 아래에서 대상을 고르면 그 축으로 바뀝니다.`
+            : '아직 대상을 고르지 않았어요. 대상을 고르기 전에는 회차를 만들지 않아요. 아래에서 골라 주세요.'}</span>
+        </div>
+      )}
       <div className="grid grid-cols-2 gap-2">
-        {/* 계약 없음 — 목표 문장을 해석하는 종전 방식. 고르면 회차마다 조건이 달라질 수 있다. */}
-        <button
-          type="button"
-          onClick={() => { if (disabled) return; onChange(null, null); onClearLegacyHint?.(); }}
-          disabled={disabled}
-          className={`text-left px-3 py-2.5 rounded-lg border transition-colors ${
-            value === null
-              ? 'bg-indigo-100 border-indigo-300'
-              : 'bg-white border-slate-200 hover:border-slate-300'
-          } disabled:opacity-40`}
-        >
-          <div className="flex items-center gap-1.5">
-            <Sparkles className="w-3.5 h-3.5 text-indigo-700 shrink-0" />
-            <span className="text-xs font-medium text-slate-900">목표 문장으로 자동 판단</span>
-            {value === null && <Check className="w-3.5 h-3.5 text-indigo-700 ml-auto shrink-0" />}
-          </div>
-          <div className="text-[10px] text-slate-400 mt-1 leading-relaxed">
-            {value === null && legacyHint
-              ? `지금은 예전에 지정한 '${LEGACY_HINT_LABEL[legacyHint] || legacyHint}' 축으로 나갑니다. 아래에서 대상을 고르면 그 축으로 바뀝니다.`
-              : '매 회차 목표 문장을 다시 해석합니다. 회차마다 대상이 달라질 수 있습니다.'}
-          </div>
-        </button>
 
         {segments.map((s) => {
           const on = value === s.key;

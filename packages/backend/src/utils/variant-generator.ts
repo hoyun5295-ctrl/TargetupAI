@@ -18,9 +18,12 @@
  */
 
 import { callAIWithFallback } from '../services/ai';
+import { UserFacingError } from './http-error';
+import { getCreditCost } from './ai-credit-calc';
+import { runChargedAi, InsufficientCreditError } from './ai-credit';
 import { query } from '../config/database';
 import { sanitizeForSms } from './message-sanitizer';
-import { extractJsonFromAiText } from './ai-json';
+import { extractJsonFromAiText, aiStr } from './ai-json';
 import { rewriteAddsFacts, EFFICACY_REWRITE_RULE } from './copy-benefit-detector';
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -125,71 +128,84 @@ ${baseMessage}
 }`;
 
   try {
-    const text = await callAIWithFallback({
-      system,
-      userMessage,
-      maxTokens: 2000,
-      temperature: 0.7,
-      model: 'sonnet',
-      companyId,
-      source: 'variant-generator',
-    });
+    // ★ 2026-10-25 원장 Z4 — 돈 = AI 결과 정산 한 곳: 아래 본문이 끝까지 가면 걷고, 던지면(읽지 못함 등) catch 의 대체 결과 = 0원
+    //   (옛: AI 응답 순간 차감 · 대체 결과를 줘도 나갔다) · 바깥 묶음 안이면 걷지 않는다
+    const { result: chargedOut } = await runChargedAi({
+      companyId: companyId, cost: getCreditCost('variant-generator'), source: 'variant-generator', createdBy: null,
+      run: async () => {
+        const text = await callAIWithFallback({
+          system,
+          userMessage,
+          maxTokens: 2000,
+          temperature: 0.7,
+          model: 'sonnet',
+          companyId,
+          source: 'variant-generator',
+        });
 
-    // ★ 2026-09-30 WP4 — 추출은 CT 하나(코드펜스 · 머리말 · 문자열 안 줄바꿈 제어문자까지 처리 · 0630 사고 부류).
-    const parsed: any = extractJsonFromAiText(text);
-    let droppedFabricated = 0;
-    const variants: GeneratedVariant[] = (Array.isArray(parsed?.variants) ? parsed.variants : [])
-      .slice(0, 3)
-      .map((v: any) => {
-        const tone: VariantTone =
-          v?.tone === '감성적' || v?.tone === '실용적' || v?.tone === '캐주얼'
-            ? v.tone
-            : '실용적';
-        const sanitized = sanitizeForSms(String(v?.messageTemplate || '')).sanitized.slice(0, 2000);
-        const byteCount = computeByteCountSafe(sanitized);
-        return {
-          tone,
-          messageTemplate: sanitized,
-          subject: input.subject || null,
-          byteCount,
-          reasoning: typeof v?.reasoning === 'string' ? v.reasoning : '',
-        };
-      })
-      .filter((v: GeneratedVariant) => v.messageTemplate.length >= 10)
-      // ★ 2026-09-30 WP2 — 변형은 톤만 바꾼다. 기준 문안에 없던 숫자(기간 · 수량 · 시간)나 혜택 값 · 낱말이 생긴 변형은 뺀다
-      //   (프롬프트 "혜택 표현 유지"는 확률적 · 30%가 40%로 바뀐 변형이 A/B 로 발송되면 지어낸 혜택).
-      .filter((v: GeneratedVariant) => {
-        // ★ 2026-10-24 ② 판정 = rewriteAddsFacts(숫자 ∥ 혜택 ∥ 효능)
-        const bad = rewriteAddsFacts(v.messageTemplate, baseMessage);
-        if (bad) droppedFabricated++;
-        return !bad;
-      });
+        // ★ 2026-09-30 WP4 — 추출은 CT 하나(코드펜스 · 머리말 · 문자열 안 줄바꿈 제어문자까지 처리 · 0630 사고 부류).
+        const parsed: any = extractJsonFromAiText(text);
+        let droppedFabricated = 0;
+        const variants: GeneratedVariant[] = (Array.isArray(parsed?.variants) ? parsed.variants : [])
+          .slice(0, 3)
+          .map((v: any) => {
+            const tone: VariantTone =
+              v?.tone === '감성적' || v?.tone === '실용적' || v?.tone === '캐주얼'
+                ? v.tone
+                : '실용적';
+            const sanitized = sanitizeForSms(aiStr(v?.messageTemplate)).sanitized.slice(0, 2000);   // ★ 1026 Codex 2R — 글일 때만(객체 = 빈 글 → 아래 10자 거름)
+            const byteCount = computeByteCountSafe(sanitized);
+            return {
+              tone,
+              messageTemplate: sanitized,
+              subject: input.subject || null,
+              byteCount,
+              reasoning: typeof v?.reasoning === 'string' ? v.reasoning : '',
+            };
+          })
+          .filter((v: GeneratedVariant) => v.messageTemplate.length >= 10)
+          // ★ 2026-09-30 WP2 — 변형은 톤만 바꾼다. 기준 문안에 없던 숫자(기간 · 수량 · 시간)나 혜택 값 · 낱말이 생긴 변형은 뺀다
+          //   (프롬프트 "혜택 표현 유지"는 확률적 · 30%가 40%로 바뀐 변형이 A/B 로 발송되면 지어낸 혜택).
+          .filter((v: GeneratedVariant) => {
+            // ★ 2026-10-24 ② 판정 = rewriteAddsFacts(숫자 ∥ 혜택 ∥ 효능)
+            const bad = rewriteAddsFacts(v.messageTemplate, baseMessage);
+            if (bad) droppedFabricated++;
+            return !bad;
+          });
 
-    if (droppedFabricated > 0) {
-      warnings.push(`기준 문안에 없던 숫자 · 혜택 · 효능 말이 생긴 변형 ${droppedFabricated}개는 뺐어요.`);
-    }
-    if (variants.length === 0) {
-      warnings.push('만들어진 변형이 없어요. 잠시 뒤 다시 시도해 주세요.');
-    }
-
-    // SMS 영역 안 90바이트 초과 영역 경고
-    if (channel === 'sms') {
-      variants.forEach((v) => {
-        if (v.byteCount > 90) {
-          warnings.push(`${v.tone} 변형이 ${v.byteCount}바이트라 문자(SMS) 90바이트를 넘어요. 장문(LMS)으로 바꾸거나 본문을 줄여 주세요.`);
+        if (droppedFabricated > 0) {
+          warnings.push(`기준 문안에 없던 숫자 · 혜택 · 효능 말이 생긴 변형 ${droppedFabricated}개는 뺐어요.`);
         }
-      });
-    }
+        if (variants.length === 0) {
+          warnings.push('만들어진 변형이 없어요. 잠시 뒤 다시 시도해 주세요.');
+        }
 
-    return {
-      stepId,
-      baseMessage,
-      channel,
-      variants,
-      generatedAt: new Date(),
-      warnings,
-    };
+        // SMS 영역 안 90바이트 초과 영역 경고
+        if (channel === 'sms') {
+          variants.forEach((v) => {
+            if (v.byteCount > 90) {
+              warnings.push(`${v.tone} 변형이 ${v.byteCount}바이트라 문자(SMS) 90바이트를 넘어요. 장문(LMS)으로 바꾸거나 본문을 줄여 주세요.`);
+            }
+          });
+        }
+
+        return {
+          stepId,
+          baseMessage,
+          channel,
+          variants,
+          generatedAt: new Date(),
+          warnings,
+        };
+  
+      },
+      // ★ 1026 Codex 1R — 쓸 결과 = 최종 결과 기준(옛: 늘 참이라 빈 결과에도 걷었다)
+      accept: (r) => r.variants.length > 0,
+    });
+    return chargedOut;
   } catch (err: any) {
+    // 잔액 부족 · 원장 쓰기 실패는 대체 결과로 접지 않는다(호출부 402 · 503)
+    if (err instanceof InsufficientCreditError || err instanceof UserFacingError) throw err;
     console.error('[VariantGenerator] AI 호출 실패:', err?.message);
     return {
       stepId,

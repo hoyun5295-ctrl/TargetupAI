@@ -5,6 +5,7 @@
  * 입구 순서: 시연 회사 → 요금제에 스팸 검사 없음(체험 횟수를 쓰지 않는다) → 등록 발신번호 → 같은 글 24시간 재사용 → 사용자당 줄 1건 → 등록.
  * 검사 글 = 발송과 같은 표기((광고) + 본문 + 무료거부 080 · LMS 제목 (광고)) · 1위 고객 = 서버가 매장 범위 안 원본 행으로 치환.
  */
+import { UserFacingError } from '../utils/http-error';
 import { pool, query } from '../config/database';
 import { isDemoCompany } from '../utils/demo-company';
 import { getRegisteredCallbackSet } from '../utils/callback-filter';
@@ -17,7 +18,7 @@ import type { AiLineViewer } from './ai-line';
 /** 칩 상태 — 화면은 이 값만 그린다 */
 export type LineSpamState =
   | 'queued' | 'running' | 'pass' | 'blocked' | 'warn'
-  | 'demo' | 'unavailable' | 'unregistered' | 'no_balance' | 'busy' | 'charset';
+  | 'demo' | 'unavailable' | 'unregistered' | 'no_balance' | 'busy' | 'charset' | 'no_device';
 
 export interface LineSpamStart {
   state: LineSpamState;
@@ -173,7 +174,11 @@ export async function startLineSpamTest(v: AiLineViewer, input: {
   if (!out.ok) {
     if (out.insufficientBalance) return { state: 'no_balance', message: out.error };
     if (out.errorCode === 'SMS_UNSUPPORTED_CHARS') return { state: 'charset', message: out.error };
-    throw new Error(out.error || '스팸 검사 등록 실패');
+    // ★ 2026-10-25 원장 #114 — 사유마다 다른 답(옛: 전부 일반 Error → 500 「처리 중 문제」)
+    if (out.errorCode === 'NO_TEST_DEVICE') return { state: 'no_device' };
+    if (out.errorCode === 'DB_MIGRATION_PENDING') throw new UserFacingError(503, 'DB_MIGRATION_PENDING', 'DB 마이그레이션 필요: spam_filter_tests ALTER 실행 요청');
+    console.error('[ai-line-spam] 검사 등록 실패:', out.error);
+    throw new UserFacingError(503, 'SPAM_ENQUEUE_FAILED', '스팸 검사를 시작하지 못했어요. 잠시 뒤 다시 눌러 주세요.');
   }
   return { state: 'queued', testId: out.testId };
   }

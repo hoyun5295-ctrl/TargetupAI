@@ -157,7 +157,8 @@ export async function runLineCookOrder<R>(input: LineOrderInput<R>, deps: LineOr
         if (!removed) deps.draftMemo.remember(idemKey, id, 'orphan');
       }
       if (thrown) throw thrown;
-      console.log(`[CREDIT][MISS] one-line ${channel} 결과 안 건넴 company=${companyId} key=${idemKey} cost=${price.cost} outcome=${outcome}`);
+      // 차감 실패 보고(로그 + 운영 경보)는 deductCreditOutcome 이 이미 했다(원장 Z1 · reportCreditMiss) — 여기는 결과를 안 건넨 사실만
+      console.log(`[one-line order] 차감 못 함 · 결과 안 건넴 ${channel} company=${companyId} key=${idemKey} cost=${price.cost} outcome=${outcome}`);
       return null;
     });
     if (made === null) {

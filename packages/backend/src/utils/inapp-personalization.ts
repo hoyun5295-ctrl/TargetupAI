@@ -21,7 +21,7 @@ import { renderLiquid, flattenCustomerForLiquid, detectLiquidSyntax } from './li
 import { query } from '../config/database';
 import { getOwnerCustomerScopeSql } from './store-scope';
 import { getColumnFields } from './standard-field-map';
-import type { GeneratedInAppMessage, SegmentConditions } from './inapp-ai-generator';
+import type { SegmentConditions } from './inapp-ai-generator';
 import { matchCustomersBySegment, isEmptySegment } from './inapp-segment-matcher';
 
 // ════════════════════════════════════════════════════════════════════
@@ -161,42 +161,6 @@ export function renderBlocksForCustomer(blocksRaw: any, customer: Record<string,
     return nb;
   });
   return wasString ? JSON.stringify(out) : out;
-}
-
-/**
- * 인앱 메시지 전체 변수 치환 (title + body + buttons[].label).
- */
-export function renderInAppMessage(
-  message: GeneratedInAppMessage,
-  customer: Record<string, any>
-): RenderResult {
-  const errors: string[] = [];
-
-  const titleResult = renderTextForCustomer(message.title || '', customer);
-  if (titleResult.errors.length > 0) errors.push(...titleResult.errors.map((e) => `title: ${e}`));
-
-  const bodyResult = renderTextForCustomer(message.body || '', customer);
-  if (bodyResult.errors.length > 0) errors.push(...bodyResult.errors.map((e) => `body: ${e}`));
-
-  const renderedButtons = (message.buttons || []).map((btn) => {
-    const labelResult = renderTextForCustomer(btn.label || '', customer);
-    if (labelResult.errors.length > 0) errors.push(...labelResult.errors.map((e) => `button[${btn.id}].label: ${e}`));
-    return {
-      id: btn.id,
-      label: labelResult.rendered,
-      action_url: btn.action_url,
-      style: btn.style,
-      background_color: btn.background_color,
-      text_color: btn.text_color,
-    };
-  });
-
-  return {
-    title: titleResult.rendered,
-    body: bodyResult.rendered,
-    buttons: renderedButtons,
-    errors,
-  };
 }
 
 // ════════════════════════════════════════════════════════════════════

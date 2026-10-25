@@ -20,6 +20,7 @@
  *   현재는 발송 경로를 건드리지 않기 위해 동일 문자열을 미러만 한다.
  */
 
+import { UserFacingError } from './http-error';
 export type ChannelKey = 'email' | 'dm' | 'inapp' | 'kakao';
 
 /** SQL 식별자(테이블 alias)로 안전한 문자만 허용 — 주입 차단 */
@@ -56,6 +57,6 @@ export function buildChannelEligibilityWhere(channel: ChannelKey, alias: string 
     case 'inapp':
       return `${a}.is_active = true`;
     default:
-      throw new Error(`지원하지 않는 채널: ${channel}`);
+      throw new UserFacingError(400, 'CHANNEL_UNSUPPORTED', '지원하지 않는 채널이에요. 이메일 · DM · 인앱 · 카카오 중에서 골라 주세요.');
   }
 }

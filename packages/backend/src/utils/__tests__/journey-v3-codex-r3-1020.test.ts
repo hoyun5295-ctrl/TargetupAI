@@ -46,7 +46,7 @@ describe('칸 넣기 멱등(clientStepId)', () => {
 
   it('같은 여정에 같은 id 가 이미 있으면 만들지 않고 그 칸을 돌려준다 · 켜진 상태여도(이미 들어간 칸을 「못 넣었다」고 답하지 않는다)', async () => {
     const calls = mockClient([
-      { match: /SELECT status FROM journeys/, rows: [{ status: 'active' }] },
+      { match: /SELECT status, start_kind FROM journeys/, rows: [{ status: 'active' }] },
       { match: /SELECT journey_id, step_order FROM journey_steps WHERE id = \$1::uuid/, rows: [{ journey_id: JOURNEY, step_order: 3 }] },
     ]);
     const r = await addJourneyStep(COMPANY, JOURNEY, MSG, { clientStepId: CLIENT_ID });
@@ -54,13 +54,13 @@ describe('칸 넣기 멱등(clientStepId)', () => {
     expect(idx(calls, /INSERT INTO journey_steps/)).toBe(-1);
     expect(idx(calls, /last_pretest_passed_at = NULL/)).toBe(-1);
     // 여정 행 잠금 뒤에 본다(같은 요청이 동시에 와도 한 칸)
-    expect(idx(calls, /SELECT status FROM journeys/)).toBeLessThan(idx(calls, /SELECT journey_id, step_order FROM journey_steps/));
+    expect(idx(calls, /SELECT status, start_kind FROM journeys/)).toBeLessThan(idx(calls, /SELECT journey_id, step_order FROM journey_steps/));
     expect(idx(calls, /^ROLLBACK$/)).toBeGreaterThan(-1);
   });
 
   it('다른 여정의 칸 id 와 겹치면 409(STEP_ID_CONFLICT) · INSERT 없음', async () => {
     const calls = mockClient([
-      { match: /SELECT status FROM journeys/, rows: [{ status: 'draft' }] },
+      { match: /SELECT status, start_kind FROM journeys/, rows: [{ status: 'draft' }] },
       { match: /SELECT journey_id, step_order FROM journey_steps WHERE id = \$1::uuid/, rows: [{ journey_id: '99999999-9999-9999-9999-999999999999', step_order: 1 }] },
     ]);
     await expect(addJourneyStep(COMPANY, JOURNEY, MSG, { clientStepId: CLIENT_ID })).rejects.toMatchObject({ code: 'STEP_ID_CONFLICT' });
@@ -69,7 +69,7 @@ describe('칸 넣기 멱등(clientStepId)', () => {
 
   it('없으면 그 id 로 넣는다($20) · 응답에 existed 없음', async () => {
     const calls = mockClient([
-      { match: /SELECT status FROM journeys/, rows: [{ status: 'draft' }] },
+      { match: /SELECT status, start_kind FROM journeys/, rows: [{ status: 'draft' }] },
       { match: /COUNT\(\*\)::int AS n/, rows: [{ n: 2, mx: 2 }] },
       { match: /INSERT INTO journey_steps/, rows: [{ id: CLIENT_ID }] },
     ]);
@@ -82,7 +82,7 @@ describe('칸 넣기 멱등(clientStepId)', () => {
 
   it('id 를 안 주면(빌더 · 새 모양 복제본) 서버가 만든다 · 존재 확인도 안 한다', async () => {
     const calls = mockClient([
-      { match: /SELECT status FROM journeys/, rows: [{ status: 'draft' }] },
+      { match: /SELECT status, start_kind FROM journeys/, rows: [{ status: 'draft' }] },
       { match: /COUNT\(\*\)::int AS n/, rows: [{ n: 0, mx: 0 }] },
       { match: /INSERT INTO journey_steps/, rows: [{ id: 'x' }] },
     ]);

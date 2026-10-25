@@ -13,6 +13,7 @@
 import { query } from '../config/database';
 import {
   sendEmailCampaign,
+  notifyEmailSendFailed,
   resolveCustomerRecipients,
   resolveCustomerRecipientsByFilter,
   excludeOptedOutEmails,
@@ -101,6 +102,7 @@ export async function sweepScheduledEmailsOnce(): Promise<{ dispatched: number; 
         [campaignId],
       );
       console.warn(`[email-send-sweeper] 발송 잠금(${contentBlock.code}) — 발송하지 않고 failed 처리 (campaign ${campaignId})`);
+      await notifyEmailSendFailed(campaignId, contentBlock.error);   // ★ 1025 #85 담당자에게
       continue;
     }
 
@@ -113,12 +115,14 @@ export async function sweepScheduledEmailsOnce(): Promise<{ dispatched: number; 
       recipients = await resolveRecipients(companyId, spec, row.created_by || null);
     } catch (e: any) {
       console.error(`[email-send-sweeper] 수신자 해석 실패 — 다음 주기 재시도 (campaign ${campaignId}):`, e?.message);
-      await query(
+      const back = await query(
         `UPDATE email_campaigns
             SET status = CASE WHEN scheduled_at < NOW() - INTERVAL '1 hour' THEN 'failed' ELSE 'scheduled' END, updated_at = NOW()
-          WHERE id = $1::uuid AND status = 'sending'`,
+          WHERE id = $1::uuid AND status = 'sending' RETURNING status`,
         [campaignId],
-      ).catch(() => { /* 정체 복구(②)가 후위 안전망 */ });
+      ).catch(() => null);   // 정체 복구(②)가 후위 안전망
+      // ★ 1025 #85 — 1시간 동안 받는 사람을 못 정해 실패로 끝났으면 담당자에게
+      if (back?.rows?.[0]?.status === 'failed') await notifyEmailSendFailed(campaignId, '받는 사람을 정하지 못했어요(예약 시각 1시간 동안 다시 시도했어요).');
       continue;
     }
     if (recipients.length === 0) {
@@ -128,6 +132,7 @@ export async function sweepScheduledEmailsOnce(): Promise<{ dispatched: number; 
         [campaignId],
       );
       console.warn(`[email-send-sweeper] 예약 발송 대상 0건 — failed 처리 (campaign ${campaignId})`);
+      await notifyEmailSendFailed(campaignId, '예약 시각에 받을 사람이 0명이라 보내지 않았어요.');   // ★ 1025 #85
       continue;
     }
 
@@ -156,6 +161,8 @@ export async function sweepScheduledEmailsOnce(): Promise<{ dispatched: number; 
     failedStuck = stuckRes.rows.length;
     if (failedStuck > 0) {
       console.warn(`[email-send-sweeper] 정체 발송 ${failedStuck}건 failed 복구`);
+      // ★ 1025 #85 — 발송 중 멈춰 실패로 끝난 메일도 담당자에게(받은 사람은 이력에 남는다 · 다시 보내면 남은 사람에게만 간다)
+      for (const r of stuckRes.rows) await notifyEmailSendFailed(String(r.id), `발송 중 ${STUCK_MINUTES}분 넘게 멈춰 실패로 끝냈어요. 이미 받은 분은 이력에 남아 있어요.`);
     }
   } catch (err: any) {
     if (!isColumnMissing(err)) throw err;

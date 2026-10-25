@@ -1,5 +1,6 @@
 import ZoneFrame from '../components/zone/ZoneFrame';
 import { fetchOneLineEnabled } from '../utils/one-line';   // ★ 2026-10-05 한줄로 시그니처
+import { decorateOutcome } from '../utils/decorate-outcome';
 import ZoneEmphasis from '../components/zone/ZoneEmphasis';
 import ZoneRowActions from '../components/zone/ZoneRowActions';
 import ZoneSection from '../components/zone/ZoneSection';
@@ -31,7 +32,6 @@ import {
   Map as MapIcon,
 } from 'lucide-react';
 import JourneyMmsUploader from '../components/journey/JourneyMmsUploader';
-import LiquidPreviewModal from '../components/journey/LiquidPreviewModal';
 // ★ D211+ Phase 3-fix (2026-05-23 Harold 명시): native confirm/prompt 영구 폐기 — 커스텀 다크 톤 모달 정합
 import JourneyActionConfirmModal, { JourneyActionMode } from '../components/journey/JourneyActionConfirmModal';
 // ★ D211+ Phase A 4번 (2026-05-23 Harold 명시): 흐름 다이어그램 시각화
@@ -68,6 +68,7 @@ import { highlightVars, mergeAndHighlightVars, mergeVarsPlain } from '../utils/h
 import ConfirmModal, { type ConfirmState } from '../components/ConfirmModal';
 import JourneyWorkspace from '../components/journey/workspace/JourneyWorkspace';
 import PhoneComposer from '../components/journey/PhoneComposer';
+import { COND_FIELDS } from '../components/journey/JourneyBuilderUi';
 import type { PauseReasonView } from '../utils/journey-map';
 import { useJourneyActions } from '../components/journey/workspace/useJourneyActions';
 import { useToast } from '../components/ToastProvider';
@@ -167,15 +168,6 @@ interface JourneyStepStatFrontend {
   skippedNoCustomerCount: number;
   conditionFailedCount: number;
   waitedCount: number;
-}
-
-// ★ D210+ Phase 3 (2026-05-23 Harold 명시): 다중 미리보기 영역 — preview-samples endpoint 응답 매트릭스
-interface PreviewSample {
-  label: string;
-  customerId: string;
-  sampleCustomer: Record<string, any>;
-  sampleCustomerFields: Record<string, any>;
-  modelVersion: string | null;
 }
 
 // ★ D211+ Phase 2 (2026-05-23 Harold 명시): Journey Step Diagnosis 응답 매트릭스
@@ -843,7 +835,7 @@ export default function JourneysPage() {
         return;
       }
       if (!data.matched || !data.template) {
-        toast.warning(data.suggestion || '정합되는 알림톡 템플릿이 없습니다. 캠페인 의도에 맞는 템플릿을 추가 등록해주세요.');
+        toast.warning(data.suggestion || '이 여정에 맞는 알림톡 템플릿이 없어요. 맞는 템플릿을 등록해 주세요.');
         return;
       }
       // 매칭 결과 자동 적용 — 회사 admin 검토 후 추가 정정 가능
@@ -860,11 +852,11 @@ export default function JourneysPage() {
       });
       const unmappedCount = (data.variableMappings || []).filter((m: any) => !m.customerFieldKey).length;
       toast.success(
-        `AI 자동 매칭 완료 (정합 점수 ${data.matchScore})\n\n` +
+        `AI 자동 연결 완료 (맞음 점수 ${data.matchScore})\n\n` +
         `템플릿: ${data.template.template_name}\n` +
         `근거: ${data.matchReason}\n\n` +
-        `변수 자동 매핑: ${(data.variableMappings || []).length}건 (미매핑 ${unmappedCount}건, 회사 admin 직접 입력 필요)\n\n` +
-        `회사 admin 검토 + 정정 후 활성화해주세요.`
+        `변수 자동 연결: ${(data.variableMappings || []).length}건 (못 맞춘 ${unmappedCount}건은 직접 넣어 주세요)\n\n` +
+        `검토하고 고친 뒤 켜 주세요.`
       );
     } catch (err: any) {
       toast.error(err?.message || 'AI 매칭 중 오류');
@@ -1228,7 +1220,11 @@ export default function JourneysPage() {
         body: JSON.stringify({ message, selectedVars, channel: 'lms', isAd: true }),
       });
       const data = await res.json();
-      if (data.success) return String(data.message || '');
+      if (data.success) {
+        const o = decorateOutcome(data);
+        if (o.tone === 'info') toast.info(o.text);
+        return o.changed ? String(data.message || '') : null;
+      }
       toast.error(data.error || 'AI 꾸미기 실패');
       return null;
     } catch (e: any) {
@@ -2028,10 +2024,10 @@ export default function JourneysPage() {
                                   <option key={h} value={h}>{String(h).padStart(2, '0')}시</option>
                                 ))}
                               </select>
-                              <span className="text-[11px] text-sky-800">KST (오늘 영역 안 지난 시점 → 내일 정합)</span>
+                              <span className="text-[11px] text-sky-800">KST (오늘 그 시각이 지났으면 내일)</span>
                             </div>
                             <div className="text-[10px] text-sky-800">
-                              예: 09시 KST → 옛 발송 직후 오전 진입 시 오늘 09시 / 오후 진입 시 내일 09시 정합
+                              예: 09시 → 오전에 들어오면 오늘 09시, 오후에 들어오면 내일 09시
                             </div>
                           </div>
                         )}
@@ -2039,7 +2035,7 @@ export default function JourneysPage() {
                         {/* mode 3: next_business_day */}
                         {s.delayMode === 'next_business_day' && (
                           <div className="text-[10px] text-sky-800 leading-relaxed">
-                            다음 평일 (월~금) 09시 KST 정합. 토/일 진입 시 다음 월요일 09시 / 금요일 09시 이후 진입 시 다음 월요일 09시 정합.
+                            다음 평일(월~금) 09시에 보내요. 주말이나 금요일 09시 뒤에 들어오면 다음 월요일 09시예요.
                           </div>
                         )}
                       </div>
@@ -2089,7 +2085,7 @@ export default function JourneysPage() {
                                 updateStep(idx, {
                                   conditionJsonb: {
                                     type: 'customer_field',
-                                    field: 'recent_purchase_amount',
+                                    field: 'total_purchase_amount',
                                     operator: '>=',
                                     value: 100000,
                                   },
@@ -2192,18 +2188,13 @@ export default function JourneysPage() {
                                 }
                                 className="px-2 py-1.5 bg-white border border-slate-200 rounded text-xs"
                               >
-                                <option value="">필드 선택</option>
-                                <option value="recent_purchase_amount">최근 구매 금액</option>
-                                <option value="total_purchase_amount">누적 구매 금액</option>
-                                <option value="purchase_count">구매 횟수</option>
-                                <option value="grade">등급</option>
-                                <option value="points">포인트</option>
-                                <option value="age">나이</option>
-                                <option value="gender">성별</option>
-                                <option value="region">지역</option>
-                                <option value="sms_opt_in">SMS 수신동의</option>
-                                <option value="recent_purchase_date">최근 구매일</option>
-                                <option value="birth_date">생일</option>
+                                <option value="">고객 정보 선택</option>
+                                {/* ★ 2026-10-25 #15(R1) — 칸 목록 = 대상 조건 CT 와 같은 표(COND_FIELDS · 짝 시험 journey-v3-cond-fields-1020) · 옛 목록 값은 그대로 보여 준다 */}
+                                {(() => {
+                                  const cur = (s.conditionJsonb as ConditionJsonbCustomerField | undefined)?.field || '';
+                                  return cur && !COND_FIELDS.some((f) => f.key === cur) ? <option value={cur}>이전에 고른 정보(다시 골라 주세요)</option> : null;
+                                })()}
+                                {COND_FIELDS.map((f) => <option key={f.key} value={f.key}>{f.label}</option>)}
                               </select>
                               <select
                                 value={(s.conditionJsonb as ConditionJsonbCustomerField | undefined)?.operator || '>='}
@@ -2316,7 +2307,7 @@ export default function JourneysPage() {
                               </select>
                             </div>
                             <div className="text-[10px] text-emerald-800">
-                              예: "지난 7일 안 구매 이벤트 없음" → 마지막날 리마인드 발송 정합
+                              예: 「지난 7일 안 구매 없음」 → 마지막 날 다시 알림
                             </div>
                           </div>
                         )}
@@ -2380,7 +2371,7 @@ export default function JourneysPage() {
                               </select>
                             </div>
                             <div className="text-[10px] text-emerald-800">
-                              예: "Step 1 발송 후 5일 안 클릭 없음" → 다른 채널 영역 재시도 정합
+                              예: 「1번째 칸 발송 뒤 5일 안 클릭 없음」 → 다른 채널로 다시 보내기
                             </div>
                           </div>
                         )}
@@ -2397,7 +2388,7 @@ export default function JourneysPage() {
                             <button
                               onClick={() => handleAlimtalkAutoMatch(idx)}
                               className="px-2 py-1 bg-violet-100 hover:bg-violet-200 text-violet-800 rounded text-[11px] flex items-center gap-1"
-                              title="AI가 회사 보유 승인 알림톡 템플릿 중 캠페인 의도에 가장 정합하는 1건 자동 추천 + 변수(#{이름}/#{등급} 등) 자동 매핑. 결과 검토 후 회사 admin 정정 가능."
+                              title="AI가 회사의 승인된 알림톡 템플릿 중 이 여정에 가장 맞는 1건을 고르고 변수(#{이름}/#{등급} 등)를 연결해요. 결과를 보고 고칠 수 있어요."
                             >
                               <Wand2 className="w-3 h-3" />
                               AI 자동 매칭
@@ -2409,7 +2400,7 @@ export default function JourneysPage() {
                           <div className="mb-2 p-2 bg-violet-50 border border-violet-200 rounded text-[11px] text-violet-800 flex items-start gap-1.5">
                             <Wand2 className="w-3 h-3 mt-0.5 flex-shrink-0" />
                             <span>
-                              <strong className="text-violet-800">AI 자동 매칭</strong> 버튼을 누르면 회사 보유 승인 템플릿 중 캠페인 의도에 정합하는 1건 자동 추천 + 변수 자동 매핑. 또는 아래에서 직접 선택 가능.
+                              <strong className="text-violet-800">AI 자동 매칭</strong> 버튼을 누르면 회사의 승인된 템플릿 중 이 여정에 맞는 1건을 고르고 변수를 연결해요. 아래에서 직접 골라도 돼요.
                             </span>
                           </div>
                         )}
@@ -2467,7 +2458,7 @@ export default function JourneysPage() {
                         )}
 
                         <div className="flex flex-wrap items-center gap-x-3 text-[11px] text-slate-400">
-                          {placeholderWarn && <span className="text-amber-700">[...] 영역 - 직접 수정 필요</span>}
+                          {placeholderWarn && <span className="text-amber-700">[...] 자리는 직접 고쳐 주세요</span>}
                           {(() => {
                             const unsafe = detectUnsafe(s.messageTemplate + ' ' + s.subject);
                             if (unsafe.length === 0) return null;
@@ -2512,7 +2503,7 @@ export default function JourneysPage() {
                             const newType = e.target.value as StepType;
                             const patch: Partial<AIGeneratedStep> = { stepType: newType };
                             if (newType === 'condition' && !s.conditionJsonb) {
-                              patch.conditionJsonb = { type: 'customer_field', field: 'recent_purchase_amount', operator: '>=', value: 100000 };
+                              patch.conditionJsonb = { type: 'customer_field', field: 'total_purchase_amount', operator: '>=', value: 100000 };
                             }
                             // ★ 2026-09-30 V2 4차 — 끝 칸은 기다리지 않는다(대기 0 고정).
                             if (newType === 'end') patch.delayHours = 0;

@@ -13,7 +13,10 @@
  *   - 결과 = 사용자 검토 + 승인 흐름 정합 (AI 단독 발송 X)
  */
 
-import { extractJsonFromAiText } from './ai-json';
+import { extractJsonFromAiText, aiStr } from './ai-json';
+import { UserFacingError } from './http-error';
+import { getCreditCost } from './ai-credit-calc';
+import { runChargedAi, InsufficientCreditError } from './ai-credit';
 import { callAIWithFallback } from '../services/ai';
 import type { PerformanceSnapshot } from './next-action-advisor';
 
@@ -110,45 +113,58 @@ ${extraLines && extraLines.length > 0 ? `\n## 고객 축 실측 (등급·전 채
 }`;
 
   try {
-    const text = await callAIWithFallback({
-      system,
-      userMessage,
-      maxTokens: 2048,
-      temperature: 0.3,
-      // ★ AI Operator 영역 = Opus 4.7 (feedback_ai_operator_model_isolation)
-      model: 'opus',
-      companyId,
-      source: 'performance-explainer',
-    });
+    // ★ 2026-10-25 원장 Z4 — 돈 = AI 결과 정산 한 곳: 아래 본문이 끝까지 가면 걷고, 던지면(읽지 못함 등) catch 의 대체 결과 = 0원
+    //   (옛: AI 응답 순간 차감 · 대체 결과를 줘도 나갔다) · 바깥 묶음 안이면 걷지 않는다
+    const { result: chargedOut } = await runChargedAi({
+      companyId: companyId, cost: getCreditCost('performance-explainer'), source: 'performance-explainer', createdBy: null,
+      run: async () => {
+        const text = await callAIWithFallback({
+          system,
+          userMessage,
+          maxTokens: 2048,
+          temperature: 0.3,
+          // ★ AI Operator 영역 = Opus 4.7 (feedback_ai_operator_model_isolation)
+          model: 'opus',
+          companyId,
+          source: 'performance-explainer',
+        });
 
-    // ★ 2026-09-30 WP4 — JSON 추출은 CT 하나(ai-json · 머리말 · 코드펜스 · 문자열 안 제어문자 복구). 옛 코드펜스만 벗기는 인라인은 모델이 앞에 한 줄만 붙여도 실패했다.
-    const parsed: any = extractJsonFromAiText(text);
-    return {
-      overallScore: typeof parsed.overallScore === 'number' ? Math.max(0, Math.min(100, parsed.overallScore)) : 50,
-      topInsight: String(parsed.topInsight || ''),
-      factors: Array.isArray(parsed.factors)
-        ? parsed.factors.slice(0, 6).map((f: any) => {
-            const category = ['channel', 'time', 'campaign_type', 'audience', 'cdp_funnel'].includes(f.category)
-              ? f.category
-              : 'audience';
-            return {
-              category,
-              label: String(f.label || ''),
-              impactScore: typeof f.impactScore === 'number' ? Math.max(0, Math.min(1, f.impactScore)) : 0.5,
-              direction: ['positive', 'negative', 'neutral'].includes(f.direction) ? f.direction : 'neutral',
-              detail: String(f.detail || ''),
-              // ★ 2026-07-31 채널 요인의 출처는 서버가 고정한다.
-              //   채널 집계가 send_channel + message_type 두 컬럼으로 바뀌었는데(알림톡·브랜드가
-              //   전부 message_type='LMS'라 한 컬럼으로는 구분이 안 된다) AI가 옛 한 컬럼을 출처로
-              //   적으면 화면의 Source caption이 재현 불가능한 근거를 말하게 된다.
-              sourceField: category === 'channel' ? CHANNEL_SOURCE_FIELD : String(f.sourceField || ''),
-            };
-          })
-        : [],
-      recommendation: String(parsed.recommendation || ''),
-      explainedAt: new Date().toISOString(),
-    };
+        // ★ 2026-09-30 WP4 — JSON 추출은 CT 하나(ai-json · 머리말 · 코드펜스 · 문자열 안 제어문자 복구). 옛 코드펜스만 벗기는 인라인은 모델이 앞에 한 줄만 붙여도 실패했다.
+        const parsed: any = extractJsonFromAiText(text);
+        return {
+          overallScore: typeof parsed.overallScore === 'number' ? Math.max(0, Math.min(100, parsed.overallScore)) : 50,
+          topInsight: aiStr(parsed.topInsight),
+          factors: Array.isArray(parsed.factors)
+            ? parsed.factors.slice(0, 6).map((f: any) => {
+                const category = ['channel', 'time', 'campaign_type', 'audience', 'cdp_funnel'].includes(f.category)
+                  ? f.category
+                  : 'audience';
+                return {
+                  category,
+                  label: aiStr(f.label),
+                  impactScore: typeof f.impactScore === 'number' ? Math.max(0, Math.min(1, f.impactScore)) : 0.5,
+                  direction: ['positive', 'negative', 'neutral'].includes(f.direction) ? f.direction : 'neutral',
+                  detail: aiStr(f.detail),
+                  // ★ 2026-07-31 채널 요인의 출처는 서버가 고정한다.
+                  //   채널 집계가 send_channel + message_type 두 컬럼으로 바뀌었는데(알림톡·브랜드가
+                  //   전부 message_type='LMS'라 한 컬럼으로는 구분이 안 된다) AI가 옛 한 컬럼을 출처로
+                  //   적으면 화면의 Source caption이 재현 불가능한 근거를 말하게 된다.
+                  sourceField: category === 'channel' ? CHANNEL_SOURCE_FIELD : aiStr(f.sourceField),
+                };
+              }).filter((f: any) => f.label.trim() || f.detail.trim())   // ★ 1026 Codex 2R — 빈 요인({}) = 요인 아님(쓸 결과 판정)
+            : [],
+          recommendation: aiStr(parsed.recommendation),
+          explainedAt: new Date().toISOString(),
+        };
+  
+      },
+      // ★ 1026 Codex 1R — 쓸 결과 = 최종 결과 기준(옛: 늘 참이라 빈 결과에도 걷었다)
+      accept: (r) => r.factors.length > 0 || !!r.recommendation.trim() || !!r.topInsight.trim(),
+    });
+    return chargedOut;
   } catch (err) {
+    // 잔액 부족 · 원장 쓰기 실패는 대체 결과로 접지 않는다(호출부 402 · 503)
+    if (err instanceof InsufficientCreditError || err instanceof UserFacingError) throw err;
     console.error('[PerformanceExplainer] AI 호출 실패:', err);
     return {
       overallScore: 50,

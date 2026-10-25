@@ -1,6 +1,7 @@
 // 세부설정으로 시작 — 풀 컨트롤 모달 (2026-06-27)
 // 기본 4개(이름·목표·채널·주기+시각)는 펼쳐 두고, 고급 4개는 요약만 보이는 접힘 카드.
 // 다크 톤 모달: bg-slate-900 + border-white/10 + rounded-2xl + shadow-2xl. 콘텐츠 티어 z-50(인터럽트 z-[2000] 아래).
+import { useSendPolicy, hh, nightRangeText } from '../../utils/send-policy';
 import { ReactNode, useEffect, useState } from 'react';
 import {
   Brain, X, Gift, Layers, Bell, Wallet, ChevronDown, ChevronUp, Loader2, AlertCircle,
@@ -29,6 +30,7 @@ interface Props {
 
 export default function OperatorSetupModal({ editing, setEditing, saving, error, onClose, onSubmit }: Props) {
   const isEdit = !!editing.id;
+  const sendPolicy = useSendPolicy();   // ★ 2026-10-25 원장 #40 발송 창 = 서버 값
   const phones = editing.adminPhoneNumbers || [];
   // ★ 2026-10-07 (임은지 접수) 회신번호 고르기 — 등록 번호 목록(직접발송과 같은 조회)
   const [cbList, setCbList] = useState<Array<{ phone: string; isDefault: boolean }>>([]);
@@ -139,7 +141,6 @@ export default function OperatorSetupModal({ editing, setEditing, saving, error,
               disabled={saving}
               legacyHint={editing.targetHint ?? null}
               operatorId={editing.id ?? null}
-              onClearLegacyHint={() => setEditing({ ...editing, segmentKey: null, segmentParams: null, targetHint: null, targetHintTouched: true })}
             />
           </div>
 
@@ -155,9 +156,11 @@ export default function OperatorSetupModal({ editing, setEditing, saving, error,
             </div>
             <div>
               <label className={LAB}>발송 희망 시각 (KST)</label>
-              {/* ★ 2026-07-12 C-1: 야간 광고 발송 제한 — 08:00~20:59만. 백엔드 저장 가드가 최종 차단 */}
-              <input type="time" min="08:00" max="20:59" value={editing.scheduleTime || '09:00'} onChange={(e) => setEditing({ ...editing, scheduleTime: e.target.value })} className={INP} />
-              <div className="text-[10px] text-slate-400 mt-1">야간(21시~다음날 08시)에는 광고 발송이 제한되어 08:00~20:59만 선택할 수 있습니다.</div>
+              {/* ★ 2026-07-12 C-1: 야간 광고 발송 제한 — 발송 창 안만. 백엔드 저장 가드가 최종 차단 · ★ 1025 #40 창 = 서버 값 */}
+              <input type="time" min={sendPolicy ? `${hh(sendPolicy.startHour)}:00` : undefined} max={sendPolicy ? `${hh(sendPolicy.endHour - 1)}:59` : undefined} value={editing.scheduleTime || '09:00'} onChange={(e) => setEditing({ ...editing, scheduleTime: e.target.value })} className={INP} />
+              <div className="text-[10px] text-slate-400 mt-1">{sendPolicy
+                ? `야간(${nightRangeText(sendPolicy)})에는 광고 발송이 제한되어 ${hh(sendPolicy.startHour)}:00~${hh(sendPolicy.endHour - 1)}:59만 선택할 수 있습니다.`
+                : '야간에는 광고 발송이 제한됩니다.'}</div>
             </div>
           </div>
 

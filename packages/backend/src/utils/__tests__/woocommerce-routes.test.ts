@@ -132,7 +132,7 @@ describe('배선 — app.ts · register-providers.ts · 워커', () => {
 });
 
 describe('W5 — 상품 API 접점(mall-products · 이름 매칭 · AI 자동제작 재조회) 소스 계약', () => {
-  it('mall-products: providers 에 우커머스 몰별 탭(woocommerce:{mall}) · search/preview 는 회사 소속 몰만(getWooIntegration) · Store API 공개 조회', () => {
+  it('mall-products: providers 에 우커머스 몰별 탭(woocommerce:{mall}) · search 는 회사 소속 몰만(getWooIntegration) · Store API 공개 조회(원문 preview 주소는 1025 R15 삭제)', () => {
     const r = code('routes/mall-products.ts');
     // ★ 2026-10-17 몰 탭 목록 = 판정 한 벌(utils/mall-providers.ts · 단계 모달 후보 조회와 같은 함수)
     const providers = code('utils/mall-providers.ts');
@@ -142,7 +142,7 @@ describe('W5 — 상품 API 접점(mall-products · 이름 매칭 · AI 자동�
     expect(r).toContain("startsWith('woocommerce:')");
     expect(r).toContain('getWooIntegration(');
     expect(r).toContain('fetchWooStoreProducts(');
-    expect(r).toContain('fetchWooStoreProductsRaw(');
+    expect(r).not.toContain("mallProductsRouter.get('/preview'");
   });
   it('이름 매칭 CT 가 우커머스 몰을 순회한다(provider 미지정 시 회사의 몰 전부)', () => {
     const r = code('utils/mall-product-match.ts');

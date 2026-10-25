@@ -355,15 +355,11 @@ describe('7. 배선 계약', () => {
     expect(fn.indexOf('placeLineMallCards(')).toBeLessThan(fn.indexOf('computeBriefCoverage(factBrief'));
     expect(fn.indexOf('placeLineMallCards(')).toBeLessThan(fn.indexOf('splitSectionsIntoPages(seeded, layoutMode)'));
     expect(fn.indexOf('opts.pinPrimary')).toBeLessThan(fn.indexOf('applyVisualDirection(assembled'));
-    // ★ 2026-10-19 Codex E1 — 합쳐 놓기(원스텝 인터뷰)만 확정 카드가 있어도 원문 상품을 추출 · 검산한다 · 그 밖은 지금 그대로
-    expect(fn).toContain('if (((!confirmed && carouselIdx >= 0) || mergeSource) && productSource)');
-    expect(fn).toContain('const factBrief: EventBrief = confirmed && !mergeSource ? { ...brief, products: [] } : brief;');
-    const ci = BACK('routes', 'content-interview.ts');
-    // ★ 2026-10-19 B-1010-4 — 원스텝 인터뷰에서 고른 몰 상품 = 확정 카드(서버 재조회) · 고르면 이름 자동 첨부 안 함 · 주색 고정은 여전히 안 넘긴다
-    expect(ci).toContain('resolveLineMallCards(companyId, mallActor, mallRefsUnique)');
-    expect(ci).toContain('...(confirmedCards.length > 0 ? { confirmedCards, mergeSourceProducts: true } : {}),');
-    expect(ci.indexOf('if (mallRefs.length === 0) {')).toBeLessThan(ci.indexOf('attachMallImagesToProductCarousels(companyId, result.sections, mallActor)'));
-    expect(ci).not.toContain('pinPrimary');
+    // ★ 1025 R15 — 원스텝 인터뷰 주소(content-interview 라우트)를 지워 합쳐 놓기 갈래도 뺐다: 확정 카드가 있으면 원문 상품 추출 · 검산 0
+    expect(fn).toContain('if (!confirmed && carouselIdx >= 0 && productSource)');
+    expect(fn).toContain('const factBrief: EventBrief = confirmed ? { ...brief, products: [] } : brief;');
+    expect(fn).not.toContain('mergeSource');
+    expect(() => BACK('routes', 'content-interview.ts')).toThrow();
   });
   it('몰 검색 응답 = 세 몰 모두 재조회 번호 · 정확 일치 · 상품 바꾸기 = 범위 확인', () => {
     const mp = BACK('routes', 'mall-products.ts');

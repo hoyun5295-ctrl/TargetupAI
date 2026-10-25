@@ -8,6 +8,7 @@
  *   - [대상] 버튼 → 조건 모달. event=이벤트 발생 고객+조건 / segment=조건으로 대상 지정.
  */
 
+import { useSendPolicy, sendWindowText } from '../../utils/send-policy';
 import { useState, useRef, useEffect } from 'react';
 import { Bell, ShoppingBag, CalendarCheck, ShoppingCart, Truck, ArrowLeft, Zap, Clock, Users, MessageSquare, UserPlus, Moon, Cake, Coins } from 'lucide-react';
 // ★ 2026-07-28 트리거 카탈로그 + 템플릿 호환 판정 — 백엔드 switch 8종과 1:1(단일 출처).
@@ -74,6 +75,7 @@ interface Props {
 }
 
 export default function InfoAlertJourneyBuilder({ senders, templates, customerFieldOptions, hasMallIntegration = false, embedded = false, onBuild, onBack }: Props) {
+  const sendPolicy = useSendPolicy();   // ★ 2026-10-25 원장 #40 발송 창 = 서버 값
   const [alimtalk, setAlimtalk] = useState<AlimtalkChannelState>(EMPTY_STATE);
   const [startKind, setStartKind] = useState<InfoAlertStartKind>('event');
   const [txKey, setTxKey] = useState<string>('purchase');
@@ -400,7 +402,7 @@ export default function InfoAlertJourneyBuilder({ senders, templates, customerFi
                 tone="dark"
               />
             )}
-            <p className="text-[10px] text-slate-400 italic">발송 가능 시간(08~21시 KST) 밖이면 다음 가능 시각으로 자동 조정됩니다.</p>
+            <p className="text-[10px] text-slate-400 italic">발송 가능 시간{sendPolicy ? `(${sendWindowText(sendPolicy)} KST)` : ''} 밖이면 다음 가능 시각으로 자동 조정됩니다.</p>
           </div>
         )}
 

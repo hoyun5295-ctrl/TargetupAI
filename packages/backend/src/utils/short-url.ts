@@ -16,6 +16,7 @@
  *   - 만료된 단축 URL = redirect 차단 + fallback URL
  */
 
+import { UserFacingError } from './http-error';
 import { query } from '../config/database';
 import { randomBytes } from 'crypto';
 
@@ -62,7 +63,7 @@ export interface ShortUrlResolution {
  */
 export async function createShortUrl(input: CreateShortUrlInput): Promise<{ hash: string; shortUrl: string }> {
   if (!input.fullUrl || !/^https?:\/\//.test(input.fullUrl)) {
-    throw new Error('fullUrl은 http(s)://로 시작해야 합니다.');
+    throw new UserFacingError(400, 'URL_INVALID', '주소는 http:// 또는 https:// 로 시작해야 해요.');
   }
   if (!input.companyId) {
     throw new Error('companyId는 필수입니다.');

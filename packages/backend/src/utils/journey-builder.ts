@@ -15,7 +15,10 @@
  *   - ai_operator_user_gating: AI_OPERATOR_ALLOWED_USERS 게이팅 (routes/ai.ts 영역)
  */
 
-import { extractJsonFromAiText } from './ai-json';
+import { UserFacingError } from './http-error';
+import { extractJsonFromAiText, aiStr } from './ai-json';
+import { getCreditCost } from './ai-credit-calc';
+import { runChargedAi } from './ai-credit';
 import { query, pool } from '../config/database';
 import { callAIWithFallback } from '../services/ai';
 import { stripUnauthorizedBenefits, dropInventedEfficacy, EFFICACY_PROMPT_RULES } from './copy-benefit-detector';
@@ -33,7 +36,7 @@ import { normalizeProductFilters } from './journey-product';
 // ★ 2026-09-30 여정 V2 4차 — 활성화는 그래프 CT 의 구조 결함(닿지 않는 칸 · 첫 칸이 끝 칸)을 막는다(그림과 같은 규칙).
 import { buildJourneyGraph } from './journey-graph';
 // ★ 2026-09-30 여정 V2 5차 — 새 판을 켜면 같은 트랜잭션에서 같은 계보의 옛 판 진입을 닫는다(진행 중 고객만 마무리).
-import { lineageColumnsReady, lockLineageEntry, CLOSE_OTHER_VERSIONS_ENTRY_SQL, INHERIT_ENTRY_CURSORS_SQL, pauseJourneyLineage, entryEndsColumnReady } from './journey-lineage';
+import { lineageColumnsReady, lockLineageEntry, CLOSE_OTHER_VERSIONS_ENTRY_SQL, INHERIT_ENTRY_CURSORS_SQL, pauseJourneyLineage, endJourneyLineage, entryEndsColumnReady } from './journey-lineage';
 import { activationCostOf } from './journey-activation-cost';
 import { pauseReasonView } from './journey-pause-reason';
 import { applyResumeAdjustments } from './journey-resume';
@@ -47,6 +50,7 @@ import { MAX_JOURNEY_STEPS, MAX_STEP_DELAY_HOURS, MAX_WAIT_TIMEOUT_HOURS, isKnow
 // ★ 2026-09-29 여정 V2 0차 ② — 대상 조건 검증은 추출기와 같은 허용 목록(단일 출처).
 import { findCustomerConditionIssues, describeCustomerConditionIssue } from './journey-target-extractor';
 import { journeyOwnerSql, type JourneyViewer } from './journey-access';
+import { anchorSendHourIssue } from './send-time-util';
 
 export { MAX_JOURNEY_STEPS, JourneyInputError };
 
@@ -297,13 +301,13 @@ export const JOURNEY_TEMPLATES: Record<JourneyTemplateCode, JourneyTemplate> = {
 export async function createJourneyFromTemplate(input: CreateJourneyInput): Promise<{ journeyId: string }> {
   const tmpl = JOURNEY_TEMPLATES[input.templateCode];
   if (!tmpl) {
-    throw new Error(`알 수 없는 템플릿 코드: ${input.templateCode}`);
+    throw new JourneyInputError('알 수 없는 여정 종류예요. 여정 만들기를 다시 열어 주세요.');
   }
   if (input.templateCode === 'custom' && !input.customObjective && (!input.steps || input.steps.length === 0)) {
-    throw new Error('Custom 여정은 자연어 목표 또는 step 목록이 필요합니다.');
+    throw new JourneyInputError('직접 만드는 여정은 목표 한 줄이나 칸이 하나 이상 있어야 해요.');
   }
   if (!input.callbackNumber || !input.callbackNumber.trim()) {
-    throw new Error('회신번호는 필수입니다. 회사 admin이 활성화 전 선택해주세요.');
+    throw new JourneyInputError('보낼 회신번호를 골라 주세요.');
   }
 
   const ctx = await loadCompanyContext(input.companyId);
@@ -369,7 +373,7 @@ export async function createJourneyFromTemplate(input: CreateJourneyInput): Prom
   //   미구현 트리거(레지스트리 implemented=false)도 같은 이유로 거부 — 만들 수 없는 것은 만들어지지 않아야 한다.
   // ★ V.3 §18 — 붙이기 전용(앞 여정을 마치면)은 만들기에서 받지 않는다(지도 [뒤에 여정 붙이기]로만 생긴다).
   if (!isCreatableTriggerEvent(resolvedTriggerEvent)) {
-    throw new Error('지원하지 않는 발송 조건입니다. 트리거를 다시 선택해 주세요.');
+    throw new JourneyInputError('지원하지 않는 발송 조건이에요. 시작 사건을 다시 골라 주세요.');
   }
   const rawTriggerFilters = input.triggerFilters !== undefined ? input.triggerFilters : tmpl.triggerFilters;
   // ★ 2026-09-29 V2 (회의론자 0차 검증 2-나) — 타이밍 키(휴면 일수 · 방치 시간 등)는 옵션 PATCH 와 같은 범위로 정규화한다.
@@ -400,6 +404,11 @@ export async function createJourneyFromTemplate(input: CreateJourneyInput): Prom
     input.startKind || classifyStartKind(resolvedTriggerEvent, { expiryMode: (resolvedTriggerFilters as any)?.expiry_mode }),
   );
   const isAnchor = startKind === 'date_anchor';
+  // ★ 2026-10-25 #8 — 날짜 예약의 보내는 시각(기준 · 칸마다) = 발송 창 안(밖이면 다음 날로 밀려 날짜가 어긋난다 · 실행기와 같은 창)
+  if (isAnchor) {
+    const hourIssue = anchorSendHourIssue(input.anchorHourKst) || steps.map((s) => anchorSendHourIssue(s.targetHourKst)).find(Boolean) || null;
+    if (hourIssue) throw new JourneyInputError(hourIssue);
+  }
   const anchorDateVal = isAnchor ? (input.anchorDate || null) : null;
   const anchorRecurrenceVal = isAnchor ? normalizeAnchorRecurrence(input.anchorRecurrence) : 'none';
   const anchorRecurrenceDayVal = isAnchor && input.anchorRecurrenceDay != null ? Math.max(1, Math.min(31, Math.floor(Number(input.anchorRecurrenceDay)))) : null;
@@ -536,7 +545,18 @@ function customizeMessage(template: string, ctx: CompanyContext): string {
 // Custom 여정 — 자연어 진입 (D209+ Sonnet 4.6 전환 — 메시지 흐름 추론 ai.ts 정합)
 // ════════════════════════════════════════════════════════════════════
 
-async function generateCustomStepsWithAI(
+async function generateCustomStepsWithAI(...args: Parameters<typeof generateCustomStepsUncharged>): ReturnType<typeof generateCustomStepsUncharged> {
+  // ★ 2026-10-25 원장 Z4 — 돈 = AI 결과 정산 한 곳(단계를 읽어 냈을 때만) · 쓸 결과가 아니면 0원 · 잔액 부족 402 · 원장 쓰기 실패 503 · 바깥 묶음이면 0
+  const { result } = await runChargedAi({
+    companyId: args[0], cost: getCreditCost('journey-builder-custom'), source: 'journey-builder-custom',
+    run: () => generateCustomStepsUncharged(...args),
+    // ★ 1026 Codex 3R — 쓸 결과 = 본문이 남은 문자 칸이 하나라도(빈 칸만 = 0원)
+    accept: (r) => Array.isArray(r) && r.some((s: any) => s.stepType === 'message' && !!String(s.messageTemplate || '').trim()),
+  });
+  return result;
+}
+
+async function generateCustomStepsUncharged(
   companyId: string,
   objective: string,
   ctx: CompanyContext
@@ -623,7 +643,7 @@ JSON 형식만 응답:
       base.channel = ['sms', 'lms', 'mms', 'kakao', 'email'].includes(s.channel) ? s.channel : 'sms';
       // ★ 2026-10-24 세 채널 구조체크 ② — 이 생산자만 거름이 없었다(R13 · 다른 여정 생성 경로와 같은 근거 = 회사가 준 목표문).
       //   혜택 → 자리표시 · 효능 → 문장 빼기(다 빠지면 직접 채울 자리 · 활성화 관문이 막는다)
-      base.messageTemplate = dropInventedEfficacy(stripUnauthorizedBenefits(String(s.messageTemplate || '').slice(0, 2000), objective), objective).text;
+      base.messageTemplate = dropInventedEfficacy(stripUnauthorizedBenefits(aiStr(s.messageTemplate).slice(0, 2000), objective), objective).text;
       base.isAd = s.isAd !== undefined ? !!s.isAd : true;
     } else if (stepType === 'condition') {
       if (s.conditionJsonb && typeof s.conditionJsonb === 'object') {
@@ -634,7 +654,7 @@ JSON 형식만 응답:
   });
 
   if (steps.length === 0) {
-    throw new Error('AI가 유효한 step을 생성하지 못했습니다. 목표 문구를 더 명확히 작성해주세요.');
+    throw new UserFacingError(422, 'AI_RESULT_INVALID', 'AI가 쓸 수 있는 단계를 만들지 못했어요. 목표를 조금 더 구체적으로 적어 주세요.');
   }
 
   return steps;
@@ -789,19 +809,19 @@ export async function activateJourney(
   const startKind = normalizeStartKind(row.start_kind);
   if (startKind === 'date_anchor') {
     if (!row.anchor_date) {
-      return { ok: false, reason: '날짜축 여정은 기준 날짜(anchor_date)가 필요합니다. 빌더에서 기준 날짜를 지정해주세요.' };
+      return { ok: false, reason: '날짜로 보내는 여정은 기준 날짜가 있어야 해요. 기준 날짜를 정해 주세요.' };
     }
     const msgSteps = steps.filter((s: any) => String(s.type || 'message') === 'message');
     for (const s of msgSteps) {
       if (s.anchorOffset == null || Number.isNaN(Number(s.anchorOffset)) || Number(s.anchorOffset) < 0) {
-        return { ok: false, reason: `날짜축 step ${s.order}에 D-N(anchor_offset_days)이 비어있습니다. 며칠 전에 보낼지 지정해주세요.` };
+        return { ok: false, reason: `${s.order}번째 칸에 며칠 전에 보낼지(D-N)가 비어 있어요. 정해 주세요.` };
       }
     }
   }
   if (startKind === 'one_shot') {
     const msgSteps = steps.filter((s: any) => String(s.type || 'message') === 'message');
     if (msgSteps.length !== 1) {
-      return { ok: false, reason: '1회 발송(one_shot) 여정은 발송 step이 정확히 1개여야 합니다.' };
+      return { ok: false, reason: '한 번만 보내는 여정은 문자 칸이 꼭 하나여야 해요.' };
     }
   }
   // ★ 2026-09-30 V2 4차 — 갈림 구조 결함은 켜지 않는다(끝 칸 뒤 칸이 어느 갈래에서도 닿지 않음 · 첫 칸이 끝 칸).
@@ -819,7 +839,7 @@ export async function activateJourney(
 
     // ★ 2026-09-30 V2 4차 — 끝 칸: 발송 0 · 대기 0 고정. 본문 검증 없음.
     if (stepType === 'end') {
-      if (Number(s.delay || 0) !== 0) return { ok: false, reason: `step ${s.order} (끝) 끝 칸은 기다리지 않아요. 대기 시간을 0으로 두세요.` };
+      if (Number(s.delay || 0) !== 0) return { ok: false, reason: `${s.order}번째 칸(끝) 끝 칸은 기다리지 않아요. 대기 시간을 0으로 두세요.` };
       continue;
     }
 
@@ -830,20 +850,20 @@ export async function activateJourney(
       // ★ Fix #10 (2026-06-05): relative_at_hour 추가 — 다른 경로(타입·생성·calculateNextRunAt)는 다 지원하는데 wait 검증만 빠져 거부되던 문제.
       const validDelayModes = ['relative', 'relative_at_hour', 'specific_hour', 'next_business_day'];
       if (!validDelayModes.includes(delayMode)) {
-        return { ok: false, reason: `step ${s.order} (wait) delay_mode = ${validDelayModes.join(' / ')} 중 하나 의무.` };
+        return { ok: false, reason: `${s.order}번째 칸(기다리기) 기다리는 방식을 골라 주세요.` };
       }
 
       if (delayMode === 'relative') {
         // relative = delay_hours > 0 필수 (의미 있는 대기)
         const delay = Number(s.delay || 0);
         if (delay <= 0) {
-          return { ok: false, reason: `step ${s.order} (wait relative) 대기 시간이 0 이하입니다. 1시간 이상 설정해주세요.` };
+          return { ok: false, reason: `${s.order}번째 칸(기다리기) 기다리는 시간을 1시간 이상으로 정해 주세요.` };
         }
       } else if (delayMode === 'specific_hour' || delayMode === 'relative_at_hour') {
         // specific_hour / relative_at_hour = target_hour_kst (0~23) 의무
         const targetHour = Number(s.targetHourKst);
         if (!Number.isFinite(targetHour) || targetHour < 0 || targetHour > 23) {
-          return { ok: false, reason: `step ${s.order} (wait ${delayMode}) target_hour_kst = 0~23 의무.` };
+          return { ok: false, reason: `${s.order}번째 칸(기다리기) 보낼 시각을 0시에서 23시 사이로 골라 주세요.` };
         }
       }
       // next_business_day = 추가 검증 0건 (다음 평일 09시 KST 고정 영역)
@@ -858,13 +878,13 @@ export async function activateJourney(
       //   3. journey_step_clicked — 신규 (옛 step N 클릭 영역 EXISTS)
       const cond = s.condition;
       if (!cond || typeof cond !== 'object') {
-        return { ok: false, reason: `step ${s.order} (condition) condition_jsonb 미설정. 조건을 작성해주세요.` };
+        return { ok: false, reason: `${s.order}번째 칸(조건) 조건을 정해 주세요.` };
       }
       const condType = String((cond as any).type || '');
       // ★ 2026-09-30 V2 4차 — 새 조건 2종: 이 여정에 들어온 뒤 구매했나 · 이 칸 링크를 눌렀나(통계와 같은 step_id 축).
       const validTypes = ['customer_field', 'cdp_event_exists', 'journey_step_clicked', 'purchase_since_entry', 'step_link_clicked'];
       if (!validTypes.includes(condType)) {
-        return { ok: false, reason: `step ${s.order} (condition) type은 ${validTypes.join(' / ')} 중 하나여야 합니다.` };
+        return { ok: false, reason: `${s.order}번째 칸(조건) 지원하지 않는 조건이에요. 조건을 다시 골라 주세요.` };
       }
 
       // type 1: customer_field — 옛 매트릭스 (field + operator + value 영역)
@@ -872,15 +892,15 @@ export async function activateJourney(
         const condField = String((cond as any).field || '');
         const condOperator = String((cond as any).operator || '');
         if (!condField.trim()) {
-          return { ok: false, reason: `step ${s.order} (condition customer_field) 조건 필드명이 비어있습니다.` };
+          return { ok: false, reason: `${s.order}번째 칸(조건: 고객 정보) 볼 고객 정보를 골라 주세요.` };
         }
         const validOps = ['==', '!=', '>=', '<=', '>', '<', 'in', 'not_in', 'is_null', 'not_null'];
         if (!validOps.includes(condOperator)) {
-          return { ok: false, reason: `step ${s.order} (condition customer_field) operator는 ${validOps.join('/')} 중 하나여야 합니다.` };
+          return { ok: false, reason: `${s.order}번째 칸(조건: 고객 정보) 비교 방법을 다시 골라 주세요.` };
         }
         // is_null / not_null은 value 불요, 그 외는 value 필수
         if (!['is_null', 'not_null'].includes(condOperator) && (cond as any).value === undefined) {
-          return { ok: false, reason: `step ${s.order} (condition customer_field) value가 비어있습니다.` };
+          return { ok: false, reason: `${s.order}번째 칸(조건: 고객 정보) 비교할 값을 넣어 주세요.` };
         }
       }
 
@@ -890,13 +910,13 @@ export async function activateJourney(
         const withinDays = Number((cond as any).within_days);
         const presence = String((cond as any).presence || 'exists');
         if (!eventName) {
-          return { ok: false, reason: `step ${s.order} (condition cdp_event_exists) event_name 영역 필수입니다.` };
+          return { ok: false, reason: `${s.order}번째 칸(조건: 고객 행동) 볼 행동을 골라 주세요.` };
         }
         if (!Number.isFinite(withinDays) || withinDays < 1 || withinDays > 365) {
-          return { ok: false, reason: `step ${s.order} (condition cdp_event_exists) within_days = 1~365 범위 의무.` };
+          return { ok: false, reason: `${s.order}번째 칸(조건: 고객 행동) 기간을 1일에서 365일 사이로 정해 주세요.` };
         }
         if (!['exists', 'not_exists'].includes(presence)) {
-          return { ok: false, reason: `step ${s.order} (condition cdp_event_exists) presence = 'exists' / 'not_exists' 의무.` };
+          return { ok: false, reason: `${s.order}번째 칸(조건: 고객 행동) "했으면 / 안 했으면" 중 하나를 골라 주세요.` };
         }
       }
 
@@ -906,16 +926,16 @@ export async function activateJourney(
         const withinDays = Number((cond as any).within_days);
         const clicked = (cond as any).clicked;
         if (!Number.isFinite(stepOrderTarget) || stepOrderTarget < 1) {
-          return { ok: false, reason: `step ${s.order} (condition journey_step_clicked) step_order 영역 필수 (1+).` };
+          return { ok: false, reason: `${s.order}번째 칸(조건: 링크 클릭) 볼 문자 칸을 골라 주세요.` };
         }
         if (stepOrderTarget >= s.order) {
-          return { ok: false, reason: `step ${s.order} (condition journey_step_clicked) step_order = 옛 step만 참조 가능 (현재 ${s.order} > ${stepOrderTarget} 영역 의무).` };
+          return { ok: false, reason: `${s.order}번째 칸(조건: 링크 클릭) 앞쪽 문자 칸만 볼 수 있어요.` };
         }
         if (!Number.isFinite(withinDays) || withinDays < 1 || withinDays > 365) {
-          return { ok: false, reason: `step ${s.order} (condition journey_step_clicked) within_days = 1~365 범위 의무.` };
+          return { ok: false, reason: `${s.order}번째 칸(조건: 링크 클릭) 기간을 1일에서 365일 사이로 정해 주세요.` };
         }
         if (typeof clicked !== 'boolean') {
-          return { ok: false, reason: `step ${s.order} (condition journey_step_clicked) clicked 영역 = true / false 의무.` };
+          return { ok: false, reason: `${s.order}번째 칸(조건: 링크 클릭) "눌렀으면 / 안 눌렀으면" 중 하나를 골라 주세요.` };
         }
       }
 
@@ -923,16 +943,16 @@ export async function activateJourney(
       if (condType === 'purchase_since_entry') {
         const purchased = (cond as any).purchased;
         if (purchased !== undefined && typeof purchased !== 'boolean') {
-          return { ok: false, reason: `step ${s.order} (조건: 들어온 뒤 구매) "샀으면 / 안 샀으면" 중 하나를 골라 주세요.` };
+          return { ok: false, reason: `${s.order}번째 칸(조건: 들어온 뒤 구매) "샀으면 / 안 샀으면" 중 하나를 골라 주세요.` };
         }
       }
       // ★ 2026-09-30 V2 4차 — step_link_clicked: 이 여정의 **앞쪽 문자 칸** 하나 + clicked(true/false).
       if (condType === 'step_link_clicked') {
         const target = stepIdOrder.get(String((cond as any).step_id || ''));
-        if (!target) return { ok: false, reason: `step ${s.order} (조건: 링크 클릭) 볼 문자 칸을 이 여정 안에서 골라 주세요.` };
-        if (target.type !== 'message') return { ok: false, reason: `step ${s.order} (조건: 링크 클릭) 링크를 볼 칸은 문자 칸이어야 해요.` };
-        if (target.order >= Number(s.order)) return { ok: false, reason: `step ${s.order} (조건: 링크 클릭) 앞쪽 문자 칸만 볼 수 있어요.` };
-        if (typeof (cond as any).clicked !== 'boolean') return { ok: false, reason: `step ${s.order} (조건: 링크 클릭) "눌렀으면 / 안 눌렀으면" 중 하나를 골라 주세요.` };
+        if (!target) return { ok: false, reason: `${s.order}번째 칸(조건: 링크 클릭) 볼 문자 칸을 이 여정 안에서 골라 주세요.` };
+        if (target.type !== 'message') return { ok: false, reason: `${s.order}번째 칸(조건: 링크 클릭) 링크를 볼 칸은 문자 칸이어야 해요.` };
+        if (target.order >= Number(s.order)) return { ok: false, reason: `${s.order}번째 칸(조건: 링크 클릭) 앞쪽 문자 칸만 볼 수 있어요.` };
+        if (typeof (cond as any).clicked !== 'boolean') return { ok: false, reason: `${s.order}번째 칸(조건: 링크 클릭) "눌렀으면 / 안 눌렀으면" 중 하나를 골라 주세요.` };
       }
 
       continue; // condition step은 본문 검증 skip
@@ -941,10 +961,10 @@ export async function activateJourney(
     // message step = 본문 길이 + placeholder 검증 (기존 매트릭스)
     const msg = String(s.message || '').trim();
     if (!msg || msg.length < 10) {
-      return { ok: false, reason: `step ${s.order} 본문이 너무 짧습니다 (최소 10자).` };
+      return { ok: false, reason: `${s.order}번째 칸 본문이 너무 짧아요(10자 이상).` };
     }
     if (hasUneditedPlaceholder(msg)) {
-      return { ok: false, reason: `step ${s.order} 본문에 미편집 [...] 영역이 남아있습니다. 회사 admin이 직접 작성해주세요.` };
+      return { ok: false, reason: `${s.order}번째 칸 본문에 채울 자리 [...] 가 남아 있어요. 직접 고쳐 주세요.` };
     }
 
     // ★ D194 (2026-05-22) 강화: subject 빈 영역 차단 — LMS/MMS 채널은 제목 필수
@@ -952,7 +972,7 @@ export async function activateJourney(
     if (channel === 'lms' || channel === 'mms') {
       const subj = String(s.subject || '').trim();
       if (!subj) {
-        return { ok: false, reason: `step ${s.order} (${channel.toUpperCase()}) 제목이 비어있습니다. 본문 요약 단순 텍스트 한 줄로 작성해주세요.` };
+        return { ok: false, reason: `${s.order}번째 칸(${channel.toUpperCase()}) 제목이 비어 있어요. 본문을 한 줄로 줄인 제목을 넣어 주세요.` };
       }
     }
 
@@ -966,7 +986,7 @@ export async function activateJourney(
         nextSubject: s.alimtalkNextSubject,
       });
       if (violation) {
-        return { ok: false, reason: `step ${s.order} (알림톡) ${violation}` };
+        return { ok: false, reason: `${s.order}번째 칸(알림톡) ${violation}` };
       }
     }
 
@@ -976,8 +996,9 @@ export async function activateJourney(
       if (detectLiquidSyntax(msg)) {
         const valid = validateLiquidTemplate(msg);
         if (!valid.valid) {
-          const errMsg = valid.errors.map((e) => e.message).join(' / ');
-          return { ok: false, reason: `step ${s.order} Liquid 문법 오류: ${errMsg}. 미리보기 모달에서 문법 확인 후 재시도해주세요.` };
+          // ★ 2026-10-25 원장 #119 — 템플릿 엔진 원문(「Tag 미종결 (position N)」 등)은 로그로만 · 고객에게는 칸 번호 문장
+          console.warn(`[activateJourney] ${s.order}번째 칸 Liquid 오류:`, valid.errors.map((e) => e.message).join(' / '));
+          return { ok: false, reason: `${s.order}번째 칸의 개인화 문법이 맞지 않아요. 미리보기에서 확인해 주세요.` };
         }
       }
     } catch (err: any) {
@@ -1265,7 +1286,7 @@ export async function updateJourneyStep(
 
   // ★ D188 Phase 2-B-1: step_type 변경 시 conditionJsonb 정합 검증 (condition은 conditionJsonb 필수).
   if (patch.stepType === 'condition' && (!patch.conditionJsonb || typeof patch.conditionJsonb !== 'object')) {
-    throw new Error('condition step은 conditionJsonb가 필수입니다.');
+    throw new JourneyInputError('조건 칸은 조건을 정해야 저장할 수 있어요.');
   }
 
   // ★ 2026-07-27: 알림톡 전환재발송 검증은 "저장 후 최종 상태" 기준. 부분 수정(PATCH)이라
@@ -1321,6 +1342,11 @@ export async function updateJourneyStep(
   const keepMarker = keepsPretestMarkerForStep(patch as Record<string, unknown>);
   const r = (await withJourneyValidationReset(companyId, journeyId, async (run, journey) => {
     await assertStepEditAllowed(run, journey.status, journey.startKind);   // 잠근 상태로 판정(5R)
+    // ★ 2026-10-25 #8 — 날짜 예약 칸의 보내는 시각도 발송 창 안(만들기와 같은 판정)
+    if (journey.startKind === 'date_anchor') {
+      const hourIssue = anchorSendHourIssue(patch.targetHourKst);
+      if (hourIssue) throw new JourneyInputError(hourIssue);
+    }
     isActive = journey.status === 'active' && touchesCopy;
     const upd = await run(
     `UPDATE journey_steps SET
@@ -1673,12 +1699,17 @@ export async function addJourneyStep(
     const run: SqlRunner = (text, params) => client.query(text, params);
 
     const j = await run(
-      `SELECT status FROM journeys WHERE id = $1::uuid AND company_id = $2::uuid FOR UPDATE`,
+      `SELECT status, start_kind FROM journeys WHERE id = $1::uuid AND company_id = $2::uuid FOR UPDATE`,
       [journeyId, companyId]
     );
     if (j.rows.length === 0) {
       await client.query('ROLLBACK');
       return null;
+    }
+    // ★ 2026-10-25 #8 — 날짜 예약 칸의 보내는 시각 = 발송 창 안(만들기 · 고치기와 같은 판정)
+    if (String(j.rows[0].start_kind || '') === 'date_anchor') {
+      const hourIssue = anchorSendHourIssue(step.targetHourKst);
+      if (hourIssue) throw new JourneyInputError(hourIssue);
     }
     // 같은 칸 id 가 이미 있으면 = 앞서 보낸 넣기가 들어간 것 → 다시 만들지 않고 그 칸을 돌려준다(여정 행 잠금 뒤라 동시에 온 같은 요청도 한 칸).
     //   상태 · 개수 검사보다 앞이다 — 이미 들어간 칸을 「못 넣었다」고 답하지 않게.
@@ -1923,13 +1954,10 @@ export async function pauseJourney(companyId: string, journeyId: string, reason?
 }
 
 export async function endJourney(companyId: string, journeyId: string): Promise<boolean> {
-  const r = await query(
-    `UPDATE journeys SET status = 'ended', updated_at = NOW()
-     WHERE id = $1::uuid AND company_id = $2::uuid AND status != 'ended'
-     RETURNING id`,
-    [journeyId, companyId]
-  );
-  return r.rows.length > 0;
+  // ★ 2026-10-25 여정 구조체크 2차 #5 · #4 — 끝내기 = 계보 전체(멈추기와 같은 범위 · 같은 잠금) + 진행 중 실행 닫기(journey-lineage endJourneyLineage 한 곳).
+  //   옛: 지금 판만 끝내 옛 판이 진행 중 고객에게 계속 보냈다(화면은 「종료하면 발송이 멈추고」라고 약속).
+  const ended = await endJourneyLineage(companyId, journeyId);
+  return ended.includes(journeyId);
 }
 
 // ════════════════════════════════════════════════════════════════════

@@ -7,7 +7,11 @@
  *   DM 링크는 %DM링크% 위치에 자동 삽입(수신자별). 없으면 문안 끝에 첨부.
  */
 
+import { recommendSendSlot, sendSlotText, DEFAULT_SLOT_LABEL } from '../utils/send-time-recommend';
+import { getSendPolicy, isNightAdTime, nightRangeText, hh } from '../utils/send-policy';
 import { useEffect, useRef, useState } from 'react';
+import { decorateOutcome } from '../utils/decorate-outcome';
+import { creditText } from '../constants/credit';
 import { Sparkles, Send, RefreshCw, Check, X, Wand2, ShieldCheck, Clock, Smartphone, Download } from 'lucide-react';
 // ★ 2026-07-06 발송 추적 CSV 다운로드 (Harold 지시) — 공용 CT (BOM + 셀 이스케이프)
 import { downloadCsv, safeCsvFilename } from '../utils/csv-download';
@@ -336,7 +340,7 @@ export default function DmSendAndTrackModal({ dmId, dmTitle, show, onClose, init
     ? `(광고) ${previewBody}\n무료수신거부 ${opt080 || '(080 미등록, 수신거부번호 설정 필요)'}`
     : previewBody;
   // ★ 2026-09-12 미리보기 제목도 실발송과 같은 CT를 거친다(광고면 (광고) 접두 · 이미 있으면 중복 없음).
-  //   DM 발송은 LMS 고정이라 msgType도 그대로 맞춘다.
+  //   ★ 2026-10-25 원장 #66 — 짧게(단문)를 고른 발송은 90바이트 안이면 단문으로 나가 제목이 보이지 않는다(아래 칸 안내). 장문일 때의 제목을 보여 준다.
   const previewSubject = buildAdSubjectFront(subject.trim(), 'LMS', isAd);
   // ★ 2026-07-02(3) 스팸테스트 본문 = 첫 샘플 고객 치환본 (원본 변수 그대로 들어가던 결함 수정).
   //   링크는 실발송 개인화 링크와 같은 길이 구조의 자리값 — 바이트·스팸 판정 정확도 유지.
@@ -356,7 +360,7 @@ export default function DmSendAndTrackModal({ dmId, dmTitle, show, onClose, init
       const text = String(data.message || '').trim();
       if (!text) { toast.error('생성된 문안이 비어 있습니다. 다시 시도해주세요.'); return; }
       setMessageText(text);
-      toast.success('문안을 생성했습니다. (3크레딧) 핸드폰 미리보기에서 확인하세요.');
+      toast.success(`문안을 생성했습니다. (${creditText('dm-copy-generate')}) 핸드폰 미리보기에서 확인하세요.`);
     } catch (e: any) {
       toast.error(e?.message || '문안 생성 중 오류가 발생했습니다.');
     } finally {
@@ -377,7 +381,7 @@ export default function DmSendAndTrackModal({ dmId, dmTitle, show, onClose, init
         body: JSON.stringify({ message: messageText, selectedVars: vars, channel: 'lms', isAd }),
       });
       const data = await res.json();
-      if (data.success) { setMessageText(String(data.message || messageText)); toast.success('꾸미기를 적용했습니다. (3크레딧)'); }
+      if (data.success) { const o = decorateOutcome(data); if (o.changed) setMessageText(String(data.message || messageText)); (o.tone === 'success' ? toast.success : toast.info)(o.text); }
       else toast.error(data.error || 'AI 꾸미기에 실패했습니다.');
     } catch (e: any) {
       toast.error(e?.message || '꾸미기 중 오류가 발생했습니다.');
@@ -393,12 +397,10 @@ export default function DmSendAndTrackModal({ dmId, dmTitle, show, onClose, init
     setSpamOpen(true);
   };
 
+  // ★ 2026-10-25 원장 #75 — 추천 시간 = 이 DM 열람 시간대 실측(표본 30건 이상) · 모자라면 기본 시각(내일 오전 10시 · 「추천」이라 부르지 않는다)
+  const sendSlot = recommendSendSlot(tracking?.hourDistribution, getSendPolicy());
   const applyAiTime = () => {
-    // AI 추천 발송 시각 — 다음날 오전 10시(KST 근사, datetime-local 형식)
-    const d = new Date(Date.now() + 24 * 60 * 60 * 1000);
-    d.setHours(10, 0, 0, 0);
-    const pad = (n: number) => String(n).padStart(2, '0');
-    setScheduledAt(`${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`);
+    setScheduledAt(recommendSendSlot(tracking?.hourDistribution, getSendPolicy()).local);
     setScheduleMode('ai');
   };
 
@@ -418,10 +420,11 @@ export default function DmSendAndTrackModal({ dmId, dmTitle, show, onClose, init
     const scheduledAtVal = scheduleMode === 'immediate' ? null : scheduledAt;
     if (scheduleMode !== 'immediate' && !scheduledAtVal) { toast.warning('예약 시각을 선택해주세요.'); return; }
     // ★ 2026-07-12 D-2: 야간 광고 발송 제한 사전 안내 — 백엔드 공통 가드(NIGHT_AD_RESTRICTED)가 최종 차단
-    if (isAd) {
+    //   ★ 2026-10-25 원장 #40 — 경계 = 서버 값 · 한국 시각(옛: 숫자 8 · 21 · 브라우저 시각)
+    const policy = getSendPolicy();
+    if (isAd && policy) {
       const eff = scheduledAtVal ? new Date(scheduledAtVal) : new Date();
-      const hr = eff.getHours();
-      if (hr < 8 || hr >= 21) { toast.warning('야간(21시~다음날 08시)에는 광고 발송이 제한됩니다. 발송 시각을 08:00~20:59 사이로 선택해주세요.'); return; }
+      if (isNightAdTime(policy, eff)) { toast.warning(`야간(${nightRangeText(policy)})에는 광고 발송이 제한됩니다. 발송 시각을 ${hh(policy.startHour)}:00~${hh(policy.endHour - 1)}:59 사이로 선택해주세요.`); return; }
     }
     setSending(true);
     try {
@@ -444,6 +447,8 @@ export default function DmSendAndTrackModal({ dmId, dmTitle, show, onClose, init
           // ★ 2026-07-12 D-1: 발행비 확인 모달 통과 후 재요청 — 서버가 이 자리에서 발행비 확정(멱등)
           confirmPublishFee: feeConfirmed || publishFeeConfirmed,
           scheduledAt: scheduledAtVal ? new Date(scheduledAtVal).toISOString() : null,
+          // ★ 2026-10-25 원장 #66 — 「짧게(단문)」를 골랐으면 서버가 실제 문장 바이트로 단문 · 장문을 정한다(90바이트 안 = 단문 단가)
+          preferSms: copyLen === 'sms',
         }),
       });
       const data = await res.json();
@@ -466,7 +471,9 @@ export default function DmSendAndTrackModal({ dmId, dmTitle, show, onClose, init
       }
       if (!res.ok || !data.success) { toast.error(data?.error || '발송에 실패했습니다.'); return; }
       setSentCount(data.sent);
-      toast.success(scheduledAtVal ? `${Number(data.sent).toLocaleString()}명 예약 완료.` : `${Number(data.sent).toLocaleString()}명에게 발송했습니다. 열람 현황은 DM 카드의 [발송 추적]에서 확인하세요.`);
+      // 실제로 접수된 문자 종류를 그대로 말한다(짧게를 골랐어도 90바이트를 넘으면 장문)
+      const kind = data.msgType === 'SMS' ? '단문(SMS)' : '장문(LMS)';
+      toast.success(scheduledAtVal ? `${Number(data.sent).toLocaleString()}명 ${kind} 예약 완료.` : `${Number(data.sent).toLocaleString()}명에게 ${kind}로 발송했습니다. 열람 현황은 DM 카드의 [발송 추적]에서 확인하세요.`);
       // ★ 2026-07-02(5) 발송 완료 = 창 닫기 (Harold 지시) — 토스트는 z-9990이라 닫힌 뒤에도 표시됨
       onClose();
     } catch (e: any) {
@@ -537,7 +544,7 @@ export default function DmSendAndTrackModal({ dmId, dmTitle, show, onClose, init
                       {/* ★ 2026-07-07(4) SMS 우선 옵션 — hlj.kr 단축링크(22자)로 90바이트 단문 발송 가능 (원가 절감) */}
                       <div className="flex items-center gap-1.5 mb-1.5">
                         <span className="text-[10px] text-slate-400">길이</span>
-                        {([['lms', 'LMS 여유 (80~250자)'], ['sms', 'SMS 짧게 (90바이트·저단가)']] as const).map(([v, label]) => (
+                        {([['lms', 'LMS 여유 (80~250자)'], ['sms', 'SMS 짧게 (90바이트 안이면 단문 단가)']] as const).map(([v, label]) => (
                           <button
                             key={v}
                             onClick={() => setCopyLen(v)}
@@ -557,7 +564,7 @@ export default function DmSendAndTrackModal({ dmId, dmTitle, show, onClose, init
                   {/* ★ 2026-09-12 (접수 `cmtwbdljp00a7jnlu4508oiik`) 문자 제목 — DM 제목과 별개로 정한다.
                       종전에는 DM 제목이 그대로 수신함에 찍혔다. 기본값이 DM 제목이라 안 고치면 종전과 같다. */}
                   <div>
-                    <label className="text-[11px] text-slate-500 mb-1 block">문자 제목 <span className="text-slate-400">(수신함에 표시)</span></label>
+                    <label className="text-[11px] text-slate-500 mb-1 block">문자 제목 <span className="text-slate-400">{copyLen === 'sms' ? '(장문으로 나갈 때만 표시 · 90바이트 안 단문은 제목 없음)' : '(수신함에 표시)'}</span></label>
                     <div className="relative">
                       {isAd && (
                         <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm font-semibold text-fuchsia-700 pointer-events-none select-none">(광고)</span>
@@ -974,7 +981,7 @@ export default function DmSendAndTrackModal({ dmId, dmTitle, show, onClose, init
               <span className="text-[10px] text-slate-400 flex items-center gap-1 whitespace-nowrap"><Clock className="w-3 h-3" /> 발송 시각</span>
               <button onClick={() => setScheduleMode('immediate')} className={`px-2.5 py-1.5 rounded-lg text-[11px] font-semibold ${scheduleMode === 'immediate' ? 'bg-indigo-200 text-slate-900' : 'bg-white text-slate-500 hover:bg-slate-100'}`}>즉시</button>
               <button onClick={() => setScheduleMode('manual')} className={`px-2.5 py-1.5 rounded-lg text-[11px] font-semibold ${scheduleMode === 'manual' ? 'bg-indigo-200 text-slate-900' : 'bg-white text-slate-500 hover:bg-slate-100'}`}>직접 예약</button>
-              <button onClick={applyAiTime} title="AI 추천: 내일 오전 10시" className={`px-2.5 py-1.5 rounded-lg text-[11px] font-semibold ${scheduleMode === 'ai' ? 'bg-violet-200 text-slate-900' : 'bg-white text-slate-500 hover:bg-slate-100'}`}>AI 추천</button>
+              <button onClick={applyAiTime} title={sendSlotText(sendSlot)} className={`px-2.5 py-1.5 rounded-lg text-[11px] font-semibold ${scheduleMode === 'ai' ? 'bg-violet-200 text-slate-900' : 'bg-white text-slate-500 hover:bg-slate-100'}`}>{sendSlot.measured ? '추천 시간' : DEFAULT_SLOT_LABEL}</button>
               {scheduleMode !== 'immediate' && (
                 <DateTimeField
                   value={localInputToIso(scheduledAt)}

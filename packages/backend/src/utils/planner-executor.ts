@@ -610,7 +610,8 @@ async function executeEmail(tp: PlannerTouchpointRow, claim: ClaimCtx): Promise<
     return 'not_due';
   }
   try {
-    const res = await sendEmailCampaign({ campaignId, recipients, immediate: true });
+    // 실패는 아래 잠금 + 플래너 통지가 알린다(엔진 통지와 두 번 가지 않게)
+    const res = await sendEmailCampaign({ campaignId, recipients, immediate: true, notifyFailure: false });
     await markSent(tp, claim.token, campaignId, res.sentCount, { email_campaign_id: campaignId });
     await notifyPlanner(tp.companyId, tp.createdBy, '[마케팅 플래너] 발송 완료', `'${tp.title}' 메일 ${res.sentCount.toLocaleString()}명 발송을 완료했습니다.`);
     return 'sent';
@@ -728,8 +729,20 @@ export async function executeTouchpoint(tp: PlannerTouchpointRow, today = kstDat
       return 'locked';
     }
     // 발송 전 오류 — ready로 돌려 다음 주기가 다시 본다(같은 날 안에서는 재시도가 정상 · 각인은 그대로).
+    // ★ 2026-10-25 원장 #47 — 횟수 상한(3) · 닿으면 잠금 + 담당자 통지(옛: 상한 0 → 10분마다 하루 종일 다시 집고 매번 통신 3사 실검사)
+    //   [다시 시작](resumePlannerTouchpoint)이 횟수를 지운다
+    const fails = (Number(after?.execMeta?.pre_send_failures) || 0) + 1;
+    if (fails >= PRE_SEND_FAIL_LIMIT) {
+      const ok = await setTouchpointState({
+        companyId: tp.companyId, touchpointId: tp.id, status: 'locked', lockReason: PLANNER_REASON.preSendFailed,
+        fromStatuses: ['producing'], claimToken: token, execMetaPatch: { ...errPatch, pre_send_failures: fails },
+      }).catch(() => false);
+      if (!ok) return 'not_due';
+      await notifyPlanner(tp.companyId, tp.createdBy, '[마케팅 플래너] 발송 멈춤', `'${tp.title}' ${tp.channelLabel} ${PLANNER_REASON.preSendFailed}`);
+      return 'locked';
+    }
     await setTouchpointState({
-      companyId: tp.companyId, touchpointId: tp.id, status: 'ready', fromStatuses: ['producing'], claimToken: token, execMetaPatch: errPatch,
+      companyId: tp.companyId, touchpointId: tp.id, status: 'ready', fromStatuses: ['producing'], claimToken: token, execMetaPatch: { ...errPatch, pre_send_failures: fails },
     }).catch(() => { /* 다음 주기 */ });
     return 'not_due';
   }
@@ -763,12 +776,14 @@ export async function resumePlannerTouchpoint(tp: PlannerTouchpointRow): Promise
   // ★ 2026-10-18 검사 장애 횟수(spam_error)를 비운다 — [다시 시작]은 새로 검사한다는 뜻이다(남겨 두면 다음 장애 한 번에 곧바로 다시 잠긴다)
   const updated = await setTouchpointStates(
     tp.companyId,
-    [tp, ...siblings].map((r) => ({ id: r.id, status: 'ready', lockReason: null, execMetaPatch: { resumed_at: new Date().toISOString(), spam_error: null } })),
+    [tp, ...siblings].map((r) => ({ id: r.id, status: 'ready', lockReason: null, execMetaPatch: { resumed_at: new Date().toISOString(), spam_error: null, pre_send_failures: 0 } })),
     ['hold_credit', 'locked'],
   );
   return updated.includes(tp.id) ? 'ready' : 'unresumable';
 }
 const LIVE_RESUME_EVENT = ['approved', 'scheduled', 'producing'];
+/** ★ 2026-10-25 원장 #47 — 보내기 전 실패 횟수 상한(닿으면 잠금 + 통지 · [다시 시작]이 지운다) */
+const PRE_SEND_FAIL_LIMIT = 3;
 
 /**
  * ★ 2026-10-18 쌍 승인 직후 즉시 실행(B1) — **발송 시간대 안에서만**. 밖이면 아무것도 하지 않는다(08시 첫 주기가 집는다 ·

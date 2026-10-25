@@ -7,6 +7,7 @@
  * 고치기는 고칠 내용 옆에만(문안 = 시트 · 모바일 DM·메일 = 편집기). 행사 취소는 ⋯ 메뉴.
  * ⛔ 승인은 화면이 본 지문(fingerprint)과 표시 금액을 함께 보낸다 — 그 사이 바뀌었으면 서버가 409로 막고 화면이 다시 읽는다.
  */
+import { getSendPolicy, plannerSendAtText } from '../utils/send-policy';
 import { useCallback, useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { Check, CircleCheck, Lock, Pencil, RotateCcw, Send, ShieldCheck, TriangleAlert } from 'lucide-react';
@@ -16,7 +17,7 @@ import { useToast } from '../components/ToastProvider';
 import { useMediaQuery } from '../hooks/useMediaQuery';
 import { ApproveBody, ConfirmSummary, ConfirmTimeline, CopyEditDialog, CostCard, DeadlineLine, recipientsText } from '../components/planner/PlannerConfirmView';
 import { PLANNER_SEND_KIND, plannerDay, plannerRange, plannerStateOf } from '../constants/planner-status';
-import { plannerApi, plannerErrorText, won, type ConfirmSend, type ConfirmView } from '../components/planner/planner-api';
+import { plannerApi, plannerCancelText, plannerErrorText, won, type ConfirmSend, type ConfirmView } from '../components/planner/planner-api';
 
 const kstClock = (iso: string) => {
   const t = Date.parse(iso);
@@ -66,7 +67,7 @@ export default function PlannerEventDetailPage() {
     setWorking(false);
     setApproveOpen(false);
     if (r.ok) {
-      toast.success('승인했어요. 정해진 날 오전 8시에 그대로 나가요.');
+      { const at = plannerSendAtText(getSendPolicy()); toast.success(`승인했어요. 정해진 날${at ? ` ${at}에` : ''} 그대로 나가요.`); }
       void load(true);
       return;
     }
@@ -93,7 +94,7 @@ export default function PlannerEventDetailPage() {
     onConfirm: async () => {
       setConfirm(null);
       const r = await plannerApi(`/api/marketing-planner/events/${encodeURIComponent(id)}/cancel`, { body: {} });
-      if (r.ok) { toast.success('행사를 취소했어요. 남은 발송은 나가지 않아요.'); navigate('/marketing-planner'); return; }
+      if (r.ok) { const c = plannerCancelText(r.data); (c.warn ? toast.warning : toast.success)(c.text); navigate('/marketing-planner'); return; }
       toast.error(plannerErrorText(r, '행사를 취소하지 못했어요.'));
       void load(true);
     },
@@ -204,7 +205,7 @@ export default function PlannerEventDetailPage() {
             <ConfirmSummary view={view} />
           </div>
           <div className="rounded-2xl bg-white border border-slate-200 px-4 pt-5 pb-1">
-            <div className="flex items-baseline gap-2 mb-4"><h3 className="text-[17px] font-bold">보낼 내용 {view.sends.length}번</h3><span className="text-[12.5px] text-slate-600">나가는 순서대로</span></div>
+            <div className="flex items-baseline gap-2 mb-4"><h3 className="text-[17px] font-bold">보낼 내용 {pending.length}번</h3><span className="text-[12.5px] text-slate-600">나가는 순서대로</span></div>
             <ConfirmTimeline view={view} mode="phone" />
             <div className="pb-4" />
           </div>
@@ -251,7 +252,7 @@ export default function PlannerEventDetailPage() {
           </aside>
           <div className="col-span-8">
             <div className="rounded-2xl bg-white border border-slate-200 shadow-sm px-7 pt-7 pb-2">
-              <div className="flex items-baseline gap-2 mb-6"><h2 className="text-[18px] font-bold">보낼 내용 {view.sends.length}번</h2><span className="text-[13px] text-slate-600">나가는 순서대로 · 휴대폰 확인 화면과 같은 본문</span></div>
+              <div className="flex items-baseline gap-2 mb-6"><h2 className="text-[18px] font-bold">보낼 내용 {pending.length}번</h2><span className="text-[13px] text-slate-600">나가는 순서대로 · 휴대폰 확인 화면과 같은 본문</span></div>
               <ConfirmTimeline
                 view={view}
                 mode="pc"

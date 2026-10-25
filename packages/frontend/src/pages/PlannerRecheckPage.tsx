@@ -7,6 +7,7 @@
  *
  * ⛔ 판정은 서버(buildRecheckView) · native dialog 0 · 줄표 0 · 모델명 0.
  */
+import { getSendPolicy, plannerSendAtText } from '../utils/send-policy';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { CalendarCheck, CheckCircle2 } from 'lucide-react';
 import { useApproveToken } from '../hooks/useApproveToken';
@@ -15,7 +16,7 @@ import SenderAuthModal from '../components/SenderAuthModal';
 import { LinkShell, LinkLoading, LinkInvalid, LinkNotice } from '../components/link/LinkShell';
 import PlannerRecheckPanel from '../components/planner/PlannerRecheckPanel';
 import { plannerDay } from '../constants/planner-status';
-import type { RecheckAction, RecheckView } from '../components/planner/planner-api';
+import { plannerCancelText, type RecheckAction, type RecheckView } from '../components/planner/planner-api';
 
 type State =
   | { kind: 'loading' }
@@ -111,10 +112,10 @@ export default function PlannerRecheckPage() {
       const data = await res.json().catch(() => ({}));
       if (tokenRef.current !== token) return;
       if (res.ok && data?.success) {
-        if (a.kind === 'approve') setDone(data.sendsAt === 'now' ? `보내기로 정했어요. ${Number(data.recipients || 0).toLocaleString('ko-KR')}명에게 곧 나가요.` : data.sendsAt === 'morning' ? '보내기로 정했어요. 오늘 오전 8시에 나가요.' : `보내기로 정했어요. ${plannerDay(String(data.date))} 오전 8시부터 나가요.`);
+        if (a.kind === 'approve') { const at = plannerSendAtText(getSendPolicy()); setDone(data.sendsAt === 'now' ? `보내기로 정했어요. ${Number(data.recipients || 0).toLocaleString('ko-KR')}명에게 곧 나가요.` : data.sendsAt === 'morning' ? `보내기로 정했어요. 오늘${at ? ` ${at}에` : ''} 나가요.` : `보내기로 정했어요. ${plannerDay(String(data.date))}${at ? ` ${at}부터` : '에'} 나가요.`); }
         else if (a.kind === 'skip') setDone(`이 날 발송을 건너뛰었어요.${data.nextSend ? ` 다음 발송 ${plannerDay(String(data.nextSend))}은 그대로 가요.` : ''}`);
         else if (a.kind === 'defer') setDone(`${plannerDay(String(data.to))}로 미뤘어요. 새 날짜 문안을 만들어 검사한 뒤 다시 문자로 알려 드려요.`);
-        else if (a.kind === 'cancel') setDone(`행사를 취소했어요. 남은 발송 ${Number(data.skipped || 0)}건은 보내지 않아요.`);
+        else if (a.kind === 'cancel') setDone(plannerCancelText(data).text);
         else { setNotice({ tone: 'emerald', text: '고친 문안을 실제 주소로 검사하고 있어요. 통과하면 이 화면에서 바로 보낼 수 있어요.' }); polls.current = 0; await load(); }
         return;
       }
@@ -155,7 +156,8 @@ export default function PlannerRecheckPage() {
             <p className="text-[12.5px] text-slate-500 tabular-nums">{plannerDay(v.event.startsOn)} ~ {plannerDay(v.event.endsOn)}</p>
           </div>
           {done ? (
-            <LinkNotice tone="emerald" icon={CheckCircle2}><b>{done}</b> 담당자에게 알림이 갔어요. 이 창은 닫으셔도 돼요.</LinkNotice>
+            // ★ 2026-10-25 원장 #60 — 통지 사실은 서버가 돌려준 결과로만 말한다(done 문장 · 옛: 늘 「담당자에게 알림이 갔어요」)
+            <LinkNotice tone="emerald" icon={CheckCircle2}><b>{done}</b> 이 창은 닫으셔도 돼요.</LinkNotice>
           ) : (
             <>
               {notice && <LinkNotice tone={notice.tone}>{notice.text}</LinkNotice>}

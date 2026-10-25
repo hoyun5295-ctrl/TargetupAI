@@ -7,6 +7,8 @@
  *
  * ⛔ 내부 코드명·테이블명·영문 예외 문구·모델명·줄표 금지(사용자 노출 문구). 순수 모듈(DB·AI import 0).
  */
+import { PLANNER_APPROVAL_DEADLINE_HOUR } from './planner-deadline';
+import { nightRangeKo } from './send-time-util';
 import { findAiFillPlaceholder } from './copy-benefit-detector';
 
 /** 채널 준비 판정 코드 → 고객 문장 · 설정으로 가는 길 */
@@ -30,7 +32,7 @@ export type ReadinessCode = keyof typeof READINESS_REASON;
  */
 const SEND_REJECT_REASON: Record<string, string> = {
   INSUFFICIENT_BALANCE: '발송 잔액이 부족합니다. 충전 후 [다시 시작]을 눌러 주세요.',
-  NIGHT_AD_RESTRICTED: '광고 문자는 밤 9시부터 아침 8시까지 보낼 수 없습니다.',
+  NIGHT_AD_RESTRICTED: `광고 문자는 ${nightRangeKo()}에는 보낼 수 없습니다.`,   // ★ 1025 #62 서버 발송 창 값
   LINK_PLACEHOLDER_UNEDITED: '문안에 채워지지 않은 링크 자리가 있습니다.',
   BENEFIT_PLACEHOLDER_UNEDITED: '문안에 채워지지 않은 혜택 자리가 있습니다.',
   SPAM_BLOCKED: '문안에 발송이 제한된 표현이 있어 접수되지 않았습니다.',
@@ -51,6 +53,8 @@ export function sendRejectReason(code: string | null | undefined, message?: stri
 export const PLANNER_REASON = {
   sendUnknown: '발송 여부를 확인하지 못했습니다. 발송 내역 확인이 필요합니다.',
   sendFailed: '발송 접수에 실패했습니다. 발송 내역을 확인한 뒤 [다시 시작]을 눌러 주세요.',
+  // ★ 2026-10-25 원장 #47 — 보내기 전 실패가 상한(3번)에 닿아 멈춤
+  preSendFailed: '보내기 전 준비를 세 번 하지 못해 멈췄습니다. 잠시 뒤 [다시 시작]을 눌러 주세요.',
   cancelledMonth: '월간 대행이 취소돼 발송하지 않았습니다.',
   cancelledEvent: '행사가 취소돼 발송하지 않았습니다.',
   notApproved: '예정일까지 승인되지 않아 보내지 않았습니다.',
@@ -77,7 +81,7 @@ export const PLANNER_REASON = {
   recheckSpam: '이 날 문자가 스팸 검사에 막혀 다시 확인을 기다립니다. 새 문안으로 보내기 · 직접 고치기 · 미루기 · 건너뛰기 중에서 정해 주세요.',
   recheckDeferred: '미룬 날의 새 문안을 확인하고 보내기를 정해 주세요.',
   recheckMissed: '다시 확인되지 않아 보내지 않았습니다.',
-  recheckPastDeadline: '마감(20시) 뒤 검사에 막혀 이 날 발송을 건너뛰었습니다.',
+  recheckPastDeadline: `마감(${PLANNER_APPROVAL_DEADLINE_HOUR}시) 뒤 검사에 막혀 이 날 발송을 건너뛰었습니다.`,   // ★ 1025 #62 서버 마감 값
   recheckSkipped: '담당자가 이 날 발송을 건너뛰기로 했습니다.',
   spamCheckDown: '스팸 검사 장비 문제로 오늘 발송을 보류했습니다. [다시 시작]을 누르면 다시 검사합니다.',
 } as const;

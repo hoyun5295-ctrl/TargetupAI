@@ -19,6 +19,7 @@
  *   - 타겟 자동완화 X (D171 영구 원칙)
  */
 
+import { UserFacingError } from './http-error';
 import { query } from '../config/database';
 import { identifyCustomer, IdentifyInput } from './cdp-identity';
 import { trackEvent, validateProperties } from './cdp-events';
@@ -93,10 +94,10 @@ export async function syncOrder(
   input: OrderInput
 ): Promise<OrderResult> {
   if (!input.source || !input.orderId || !input.externalId) {
-    throw new Error('source, orderId, externalId는 필수입니다.');
+    throw new UserFacingError(400, 'CDP_INPUT', 'source, orderId, externalId는 필수입니다.');
   }
   if (!input.orderedAt || isNaN(new Date(input.orderedAt).getTime())) {
-    throw new Error('orderedAt 형식이 올바르지 않습니다 (ISO datetime).');
+    throw new UserFacingError(400, 'CDP_INPUT', 'orderedAt 형식이 올바르지 않습니다 (ISO datetime).');
   }
   // ★ 2026-10-04 상태 글자는 앞뒤 공백·대소문자를 걷어 한 모양으로(매출 판정 CT-86 은 'paid'·'completed'·'cancelled'·'refunded' 정확 일치).
   //   옛: 자체호스팅·/order API 가 'PAID'·'Completed' 로 보내면 결제 주문의 매출이 0이었다. 저장되는 이벤트 status 도 이 값이다.
@@ -116,7 +117,7 @@ export async function syncOrder(
 
   if (!idResult.customerId) {
     // identify 정정(2026-06-10) 후에는 도달 불가 경로지만, null로 0행 UPDATE를 침묵 진행하지 않도록 명시 차단
-    throw new Error('주문 처리 중 고객 식별에 실패했습니다. phone 또는 email을 포함해 다시 호출해주세요.');
+    throw new UserFacingError(400, 'CDP_INPUT', '주문 처리 중 고객 식별에 실패했습니다. phone 또는 email을 포함해 다시 호출해주세요.');
   }
 
   // ★ 2026-09-26 한줄로 V2 R1-34 — 같은 주문의 웹훅은 한 줄로 선다(조회 → 판정 → 반영 사이 끼어들기 금지).
@@ -321,7 +322,7 @@ export async function bulkImport(
   companyId: string,
   input: BulkImportInput
 ): Promise<BulkImportResult> {
-  if (!input.source) throw new Error('source는 필수입니다.');
+  if (!input.source) throw new UserFacingError(400, 'CDP_INPUT', 'source는 필수입니다.');
   const customersInput = input.customers || [];
   const ordersInput = input.orders || [];
   const customerList = customersInput.slice(0, BULK_IMPORT_MAX_ROWS);

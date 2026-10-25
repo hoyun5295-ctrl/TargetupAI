@@ -7,6 +7,7 @@
  * 불투명 출처 + CSP connect-src 'none' = 열람 · 응답 기록 호출이 나가지 않는다 · 열람 수 0).
  * 승인 확인 창 본문(ApproveBody)도 폰 시트 · PC 창이 같은 부품이다.
  */
+import { useSendPolicy } from '../../utils/send-policy';
 import { useEffect, useRef, useState } from 'react';
 import SharedPreviewFrame from '../make/PreviewFrame';
 import { AlarmClock, Check, ChevronDown, Info, Lock, Maximize2, Pencil, RotateCcw, ShieldCheck, TriangleAlert, X } from 'lucide-react';
@@ -48,7 +49,7 @@ export function SmsBubble({ text, linkPending, maxWidth = 300 }: { text: string;
 }
 
 /** 칸 폭에 맞춘 공용 미리보기 — 문서 폭 = 칸 폭(최소 minViewport · 좁으면 줄여 그린다 · 넓혀 키우지 않는다) */
-function PreviewFrame({ title, html, height, minViewport = 375 }: { title: string; html: string; height: number; minViewport?: number }) {
+export function PreviewFrame({ title, html, height, minViewport = 375 }: { title: string; html: string; height: number; minViewport?: number }) {
   const ref = useRef<HTMLDivElement | null>(null);
   const [w, setW] = useState(0);
   useEffect(() => {
@@ -242,7 +243,7 @@ export function ConfirmSummary({ view }: { view: ConfirmView }) {
     <dl className="mt-4 rounded-2xl bg-white border border-neutral-200 divide-y divide-neutral-100 text-[13.5px]">
       <div className="px-4 py-3 grid grid-cols-[72px_1fr] gap-2">
         <dt className="text-neutral-600">행사</dt>
-        <dd className="font-semibold tabular-nums">{view.event.template ? `${view.event.template.label} · ` : ''}{view.sends.length}번 발송</dd>
+        <dd className="font-semibold tabular-nums">{view.event.template ? `${view.event.template.label} · ` : ''}{pending.length}번 발송</dd>
       </div>
       {view.event.benefitText && (
         <div className="px-4 py-3">
@@ -364,7 +365,7 @@ export function CopyEditDialog({ send, eventId, onClose, onSaved, onError }: {
 }) {
   const [text, setText] = useState(send.sms?.rawText || '');
   const [saving, setSaving] = useState(false);
-  const MAX = 1000;
+  const MAX = useSendPolicy()?.plannerCopyMax ?? Infinity;   // ★ 2026-10-25 원장 #62 문안 상한 = 서버 값(받기 전 = 서버가 판정)
   const save = async () => {
     if (!text.trim()) { onError('문안을 입력해 주세요.'); return; }
     setSaving(true);

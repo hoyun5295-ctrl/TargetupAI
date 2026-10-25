@@ -35,7 +35,7 @@ export function plannerPreset(id: LineTemplateId | LineCompositionId, startsOn: 
 }
 
 /** (순수) 보낼 수 있는 가장 이른 날 — 오늘 승인 마감(KST 20시)이 지났으면 내일 */
-export function plannerMinSendDate(now: Date, deadlineHour = 20): string {
+export function plannerMinSendDate(now: Date, deadlineHour: number): string {   // ★ 1025 #62 마감 시각 = 서버 값(옛: 기본값 20)
   const kst = new Date(now.getTime() + 9 * 3600 * 1000);
   if (kst.getUTCHours() >= deadlineHour) kst.setUTCDate(kst.getUTCDate() + 1);
   return kst.toISOString().slice(0, 10);

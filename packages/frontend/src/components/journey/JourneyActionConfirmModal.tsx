@@ -152,7 +152,7 @@ export default function JourneyActionConfirmModal({ mode, journeyName, onConfirm
             <div className="text-[13px] text-slate-700 leading-relaxed">
               <div className="flex gap-2">
                 <Info className="w-4 h-4 text-cyan-700 flex-shrink-0 mt-0.5" />
-                <span>보관함에서 복원하면 여정 목록에 다시 노출됩니다. 옛 통계 영역 영향 없음.</span>
+                <span>보관함에서 복원하면 여정 목록에 다시 보여요. 지난 통계는 그대로예요.</span>
               </div>
             </div>
           )}
@@ -175,16 +175,16 @@ export default function JourneyActionConfirmModal({ mode, journeyName, onConfirm
               <div className="p-3 bg-rose-50 border border-rose-200 rounded-lg">
                 <div className="flex gap-2 mb-2">
                   <AlertTriangle className="w-4 h-4 text-rose-700 flex-shrink-0 mt-0.5" />
-                  <span className="text-[13px] font-semibold text-rose-900">영구 삭제 시 즉시 손실되는 영역</span>
+                  <span className="text-[13px] font-semibold text-rose-900">영구 삭제하면 바로 사라지는 것</span>
                 </div>
                 <ul className="text-[12px] text-rose-900 space-y-1 pl-6 leading-relaxed">
-                  <li>· 모든 step 정의</li>
-                  <li>· 진입 customer 실행 영역 (journey_executions)</li>
-                  <li>· 발송 로그 영역 (journey_step_logs)</li>
-                  <li>· A/B variant 영역 (journey_step_variants)</li>
+                  <li>· 모든 칸 설정</li>
+                  <li>· 이 여정에 들어온 고객 기록</li>
+                  <li>· 보낸 기록</li>
+                  <li>· A/B 문안</li>
                 </ul>
                 <div className="mt-2 text-[12px] text-rose-800">
-                  복구 불가. 통계 보존이 필요하면 "보관함" 영역 정합 권장.
+                  되돌릴 수 없어요. 통계를 남기려면 「보관함」으로 옮겨 주세요.
                 </div>
               </div>
 

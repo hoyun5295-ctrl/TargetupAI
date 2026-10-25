@@ -16,6 +16,7 @@
  *  - 디자인 토큰은 CSS 변수(var(--dm-*))로 참조
  *  - style_variant는 data 속성으로 전달 (CSS 측에서 상세 매핑)
  */
+import { kstDateTag } from '../ai-credit-calc';
 import type { Section, SectionType, HeaderProps, HeroProps, CouponProps, CountdownProps, TextCardProps, CtaProps, VideoProps, StoreInfoProps, SnsProps, PromoCodeProps, FooterProps } from './dm-section-registry';
 // ★ 2026-10-14 참여 8종 목록(완료 문구 마커 대상) — registry 소유
 import { PARTICIPATION_TYPES } from './dm-section-registry';
@@ -149,9 +150,7 @@ function renderHeader(props: HeaderProps, ctx: SectionRenderContext): string {
     // ★ 2026-07-30 (임은지 0729 접수) countdown·coupon 그라데이션 끝 색 = var(--dm-grad-to, 기존값) 소비.
     //   옛: 하드코딩 그라데이션이 래퍼(dm-bgx-gradient)를 덮어 "그라데이션 끝 색"이 로고형에서만 먹었다. 미지정=기존 폴백(발행물 무회귀). 캔버스 HeaderSection 미러.
     case 'countdown': {
-      const eventDate = props.event_date ? new Date(props.event_date) : null;
-      const dday = eventDate ? Math.ceil((eventDate.getTime() - Date.now()) / 86400000) : 0;
-      const ddayText = dday > 0 ? `D-${dday}` : dday === 0 ? 'D-Day' : `D+${Math.abs(dday)}`;
+      const ddayText = dmDdayText(props.event_date);
       return `<div class="dm-header dm-header-countdown" data-variant="${escapeHtml(variant)}" style="background:linear-gradient(135deg,var(--dm-primary) 0%,var(--dm-grad-to,var(--dm-primary-hover)) 100%);color:#fff;padding:var(--dm-sp-6) var(--dm-sp-5)">
         <div style="font-size:36px;font-weight:900;letter-spacing:2px">${escapeHtml(ddayText)}</div>
         ${props.event_title ? `<div style="font-size:var(--dm-fs-small);opacity:0.9;margin-top:var(--dm-sp-2);font-weight:500">${escapeHtml(props.event_title)}</div>` : ''}
@@ -1243,7 +1242,7 @@ function renderLuckyDraw(p: any): string {
     ${inputs}
     <label style="display:flex;align-items:flex-start;gap:6px;font-size:var(--dm-fs-tiny);color:var(--dm-neutral-600);margin-bottom:var(--dm-sp-3)"><input type="checkbox" data-consent style="margin-top:2px"/><span>${escapeHtml(p.consent_text || '')}</span></label>
     <button data-dm-submit class="dm-cta dm-cta-primary" style="width:100%">응모하기</button>
-    ${p.draw_at ? `<div style="font-size:var(--dm-fs-tiny);color:var(--dm-neutral-500);margin-top:var(--dm-sp-2);text-align:center">발표: ${escapeHtml(new Date(p.draw_at).toLocaleString('ko-KR'))}</div>` : ''}
+    ${p.draw_at ? `<div style="font-size:var(--dm-fs-tiny);color:var(--dm-neutral-500);margin-top:var(--dm-sp-2);text-align:center">발표: ${escapeHtml(dmKstDateTime(p.draw_at))}</div>` : ''}
     <div data-dm-result style="display:none"></div>`;
   return `<div class="dm-section dm-lucky-draw" data-dm-form>${dmEventCard({ accentVar: '--dm-accent', icon: 'gift', overline: 'EVENT', body })}</div>`;
 }
@@ -1274,7 +1273,7 @@ function renderInstantCoupon(p: any): string {
   const body = `
     <div style="font-size:var(--dm-fs-h3);font-weight:700;color:var(--dm-primary);margin-bottom:var(--dm-sp-2)">${escapeHtml(p.coupon_label || '')}</div>
     <div style="font-size:var(--dm-fs-small);color:var(--dm-neutral-700);margin-bottom:var(--dm-sp-3)">${escapeHtml(p.discount_description || '')}</div>
-    ${p.expires_at ? `<div style="font-size:var(--dm-fs-tiny);color:var(--dm-primary);margin-bottom:var(--dm-sp-3);font-weight:600">만료: ${escapeHtml(new Date(p.expires_at).toLocaleString('ko-KR'))}</div>` : ''}
+    ${p.expires_at ? `<div style="font-size:var(--dm-fs-tiny);color:var(--dm-primary);margin-bottom:var(--dm-sp-3);font-weight:600">만료: ${escapeHtml(dmKstDateTime(p.expires_at))}</div>` : ''}
     <button data-dm-claim data-claim-success="${escapeHtml(p.usage_instructions ? `쿠폰이 발급되었습니다. ${p.usage_instructions}` : '쿠폰이 발급되었습니다. 결제 시 적용해주세요.')}" class="dm-cta dm-cta-primary"${icStyle}>쿠폰 받기</button>
     ${p.conditions ? `<div style="font-size:var(--dm-fs-tiny);color:var(--dm-neutral-500);margin-top:var(--dm-sp-2);white-space:pre-wrap">${escapeHtml(p.conditions)}</div>` : ''}
     ${p.usage_instructions ? `<div style="font-size:var(--dm-fs-tiny);color:var(--dm-neutral-500);margin-top:4px;white-space:pre-wrap">${escapeHtml(p.usage_instructions)}</div>` : ''}
@@ -1472,11 +1471,43 @@ export function renderSections(sections: Section[], ctx: SectionRenderContext): 
 
 // ────────────── 유틸 ──────────────
 
+/**
+ * ★ 2026-10-25 원장 #81 — DM 날짜 · 시각 = 한국 시각(서버 시간대 무관). 날짜만 적힌 값(YYYY-MM-DD · 시각 붙은 지역 값)은 그 글자가 곧 한국 날짜다.
+ *   옛: 시간대 지정 없는 서버 로컬 표시 · D-day 는 'YYYY-MM-DD' 를 UTC 자정으로 읽어 KST 0~9시엔 당일이 「D-1」.
+ */
+function kstYmdOf(v: unknown): string | null {
+  const s = String(v ?? '').trim();
+  if (/^\d{4}-\d{2}-\d{2}(T\d{2}:\d{2}(:\d{2})?)?$/.test(s)) return s.slice(0, 10).replace(/-/g, '');
+  const d = new Date(s);
+  return isNaN(d.getTime()) ? null : kstDateTag(d);
+}
+/** D-day 글자(한국 날짜끼리 셈 · 값 없음 = D-Day) */
+export function dmDdayText(eventDate: unknown, nowMs: number = Date.now()): string {
+  const ev = eventDate ? kstYmdOf(eventDate) : null;
+  if (!ev) return 'D-Day';
+  const today = kstDateTag(new Date(nowMs));
+  const utc = (t: string) => Date.UTC(Number(t.slice(0, 4)), Number(t.slice(4, 6)) - 1, Number(t.slice(6, 8)));
+  const dday = Math.round((utc(ev) - utc(today)) / 86400000);
+  return dday > 0 ? `D-${dday}` : dday === 0 ? 'D-Day' : `D+${Math.abs(dday)}`;
+}
+/**
+ * 시각 표시(한국 시각) · ★ 1026 Codex 1R — 오프셋 없는 글(2026-10-26T10:00 · 편집기 입력)은 한국 시각으로 적힌 값으로 읽는다
+ *   (옛: new Date 가 서버 시간대로 읽어 UTC 서버면 19시로 보였다) · Date · 오프셋이 있는 글은 그 시점 그대로.
+ */
+export function dmKstDateTime(v: unknown): string {
+  const s = v instanceof Date ? '' : String(v ?? '').trim();
+  const m = /^(\d{4})-(\d{2})-(\d{2})(?:[T ](\d{2}):(\d{2})(?::(\d{2}))?)?$/.exec(s);
+  const d = v instanceof Date ? v
+    : m ? new Date(Date.UTC(+m[1], +m[2] - 1, +m[3], +(m[4] || 0) - 9, +(m[5] || 0), +(m[6] || 0)))
+    : new Date(s);
+  return isNaN(d.getTime()) ? String(v ?? '') : d.toLocaleString('ko-KR', { timeZone: 'Asia/Seoul' });
+}
+
 function formatKoreanDate(iso: string): string {
   try {
-    const d = new Date(iso);
-    if (isNaN(d.getTime())) return iso;
-    return `${d.getFullYear()}.${String(d.getMonth() + 1).padStart(2, '0')}.${String(d.getDate()).padStart(2, '0')}`;
+    const t = kstYmdOf(iso);
+    if (!t) return iso;
+    return `${t.slice(0, 4)}.${t.slice(4, 6)}.${t.slice(6, 8)}`;
   } catch {
     return iso;
   }

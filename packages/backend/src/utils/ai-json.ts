@@ -62,6 +62,16 @@ export function escapeControlCharsInJsonStrings(jsonStr: string): string {
  *   글 내용은 바꾸지 않는다. 걷는 것 = 굵게 · 기울임 쌍 표시 · 줄머리 머리글 # · 가로줄 · 코드 울타리 · 인라인 백틱.
  *   줄머리 목록 기호(- * +)는 "· "로 바꾼다. 쌍이 아닌 * 한 글자(예: "*표시 항목")는 둔다.
  */
+/**
+ * ★ 2026-10-26 Codex 2R — AI JSON 칸을 고객 글로 쓸 때 = 글(또는 숫자)일 때만 · 그 밖(객체 · 배열 · 참거짓)은 fallback.
+ *   옛: String(x || '') 라 객체 칸이 「[object Object]」 글이 되어 화면에 나가고 「쓸 결과」로 세어 돈을 걷었다.
+ */
+export function aiStr(v: unknown, fallback = ''): string {
+  if (typeof v === 'string') return v;
+  if (typeof v === 'number' && Number.isFinite(v)) return String(v);
+  return fallback;
+}
+
 export function plainTextFromAi(text: string): string {
   return String(text || '')
     .replace(/```[a-z]*[ \t]*\n?/gi, '')

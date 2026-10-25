@@ -43,6 +43,23 @@ export async function ownsOnlyOwnJourneys(userId: string | null | undefined): Pr
   return u.rows[0]?.user_type === 'user';
 }
 
+/**
+ * ★ 2026-10-25 여정 구조체크 2차 #9(결정 D1 = A) — 추천 판정(AI 진단 · 여정 기회 · 한 줄 묻기)이 「이 구간을 맡은 여정」으로 세는 여정.
+ *   관리자 · 사용자 id 없음 = 회사 전체(빈 조각) · 담당자 = 자기가 만든 여정 + 담당자가 아닌 사람(관리자 · 시스템)이 켠 여정
+ *   (그 여정은 회사 전체 고객에게 나가 겹치면 같은 고객이 두 통 받는다 · 관리자 초안 · 멈춤은 나가지 않아 세지 않는다).
+ *   옛: 회사 전체로 세어 담당자 B 가 A 의 초안 때문에 그 구간 추천을 못 받았다(B 화면엔 없는 초안).
+ *   mine = 「자기가 만든 여정인가」 SQL 식(관리자 = TRUE) · 남이 켠 여정이 막을 때 이유 문장을 가른다.
+ */
+export async function journeyCoverSql(userId: string | null | undefined, params: any[], alias = 'j'): Promise<{ where: string; mine: string }> {
+  if (!(await ownsOnlyOwnJourneys(userId))) return { where: '', mine: 'TRUE' };
+  params.push(userId);
+  const mine = `(${alias}.created_by::text = $${params.length}::text)`;
+  return {
+    where: ` AND (${mine} OR (${alias}.status = 'active' AND NOT EXISTS (SELECT 1 FROM users cu WHERE cu.id::text = ${alias}.created_by::text AND cu.user_type = 'user')))`,
+    mine,
+  };
+}
+
 /** 이 사람이 볼 수 있는 여정 id 집합(목록 거르기 · 여러 여정 주소용). 관리자 = null(거르지 않음). */
 export async function accessibleJourneyIds(viewer: JourneyViewer): Promise<Set<string> | null> {
   if (!viewer.ownOnly) return null;

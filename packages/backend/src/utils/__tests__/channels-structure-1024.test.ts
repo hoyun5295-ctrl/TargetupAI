@@ -42,7 +42,7 @@ describe('① 이메일 거부 신호 — 고객 표 갱신은 읽기와 같은 
     expect(stripComments(ch)).not.toMatch(/AND email_opt_in = true`/);
   });
   it('발송 엔진(단일 길목)이 보낼 명단을 거부 신호로 거른 뒤 보낸다 · 즉시 발송 화면 수도 같은 판정', () => {
-    const engine = fnBody(ch, 'export async function sendEmailCampaign(');
+    const engine = fnBody(ch, 'async function sendEmailCampaignInner(');
     const f = engine.indexOf('filterEmailSuppressed(campaign.companyId, input.recipients)');
     expect(f).toBeGreaterThan(-1);
     expect(engine.indexOf('allowed.recipients')).toBeGreaterThan(f);
@@ -177,7 +177,7 @@ describe('⑮ 인앱 게시 = 공용 채울 자리 판정 · 저장(초안)은 �
 
 describe('⑥ 예약 · 재발송 · 플래너 메일 = 즉시 발송과 같은 내용 잠금', () => {
   it('엔진 · 예약 워커가 emailContentBlocker(채울 자리 + 링크 결함)를 쓴다', () => {
-    const engine = fnBody(be('utils/email-channel.ts'), 'export async function sendEmailCampaign(');
+    const engine = fnBody(be('utils/email-channel.ts'), 'async function sendEmailCampaignInner(');
     expect(engine).toContain('const contentBlock = emailContentBlocker(campaign);');
     expect(engine).not.toContain('hasUneditedPlaceholder(');
     const sw = be('utils/email-send-sweeper.ts');
@@ -290,7 +290,9 @@ describe('⑫ A/B · 단축 링크 = 담당자 본인 것', () => {
       const used = new Set(Array.from(String(sql).matchAll(/\$(\d+)/g), (m) => Number(m[1])));
       expect(params.length).toBe(Math.max(...used));
     }
-    expect(queryMock.mock.calls.map(([, p]) => p)).toEqual([['c1', 'u1'], ['c1', null]]);
+    // ★ 1025 R12 #80 — 상한 + 1 을 읽어 잘림을 안다(LIMIT 자리 = 셋째 인자)
+    expect(queryMock.mock.calls.map(([, p]) => p.slice(0, 2))).toEqual([['c1', 'u1'], ['c1', null]]);
+    expect(queryMock.mock.calls.every(([sql]) => /ORDER BY created_at DESC LIMIT \$3/.test(String(sql)))).toBe(true);
   });
 });
 

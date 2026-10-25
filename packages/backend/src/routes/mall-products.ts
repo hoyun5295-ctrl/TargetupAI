@@ -1,15 +1,13 @@
 /**
  * 연동 몰 상품 조회 API (2026-07-08) — DM 상품 슬라이드 자동 채우기 소스.
  *
- * 1단계 = raw preview(실측): GET /api/mall-products/preview?provider=cafe24|naver&q=검색어
- *   → 연동된 몰의 상품 API 응답을 그대로 반환. 이미지·정가·할인가·상품링크 필드를 실측으로 확정한 뒤
- *     정규화 매핑 + DM 상품 피커를 붙인다(응답 스키마 추측 금지 영구 룰).
+ * 정규화된 상품 = providers · search · cards · line-candidates · match(원문 실측용 preview 주소는 1025 R15 삭제 · 부르는 화면 0).
  *   메이크샵·고도몰·아임웹은 각 상품 API 조사 후 추가.
  */
 import { Router, Response } from 'express';
 import { authenticate } from '../middlewares/auth';
-import { getCafe24Integration, getCafe24ByoCredentials, fetchCafe24ProductsRaw, fetchCafe24Products } from '../utils/cafe24-client';
-import { getNaverCommerceIntegration, getNaverCommerceCredentials, fetchNaverProductsRaw, fetchNaverProducts } from '../utils/naver-commerce-client';
+import { getCafe24Integration, getCafe24ByoCredentials, fetchCafe24Products } from '../utils/cafe24-client';
+import { getNaverCommerceIntegration, getNaverCommerceCredentials, fetchNaverProducts } from '../utils/naver-commerce-client';
 import { matchMallProductByName } from '../utils/mall-product-match';
 // ★ 2026-10-10 한 줄 DM 강화 — 후보의 재조회 상품번호 · 검색어 정확 일치 · 고른 상품 → 확정 카드(상품 바꾸기)
 import { type MallProduct } from '../utils/mall-product-normalize';
@@ -19,12 +17,12 @@ import { resolveLineMallCards } from '../utils/line-mall-cards';
 import { listMallProviders } from '../utils/mall-providers';
 import { findLineMallCandidates, lineMatchFieldsOf } from '../utils/line-mall-candidates';
 // ★ 2026-09-14 W5 우커머스 — Store API 공개 조회(키 불필요) · 몰별 탭 provider = woocommerce:{mall}
-import { getWooIntegration, fetchWooStoreProducts, fetchWooStoreProductsRaw } from '../utils/woocommerce-client';
+import { getWooIntegration, fetchWooStoreProducts } from '../utils/woocommerce-client';
 import { normalizeWooMallId } from '../utils/woocommerce-core';
 // ★ 2026-09-18 몰별 사용자 범위 — 관리자는 회사 전체 몰 · 사용자는 자기 분류코드 몰만(설계서 docs/2026-09-18-mall-integration-user-scope-design.md §3-5)
 import { resolveIntegrationActor, canTouchIntegration, type IntegrationActor } from '../utils/integration-scope';
 
-import { publicErrorText } from '../utils/http-error';
+import { publicErrorText, respondUserError } from '../utils/http-error';
 const WOO_PREFIX = 'woocommerce:';
 
 /**
@@ -60,49 +58,8 @@ mallProductsRouter.get('/providers', async (req: any, res: Response) => {
     return res.json({ success: true, providers: list.map((p) => ({ provider: p.provider, label: p.label, relookup: p.relookup })), ...(failed ? { partial: true } : {}) });
   } catch (err: any) {
     console.error('[mall-products providers] 오류:', err?.message);
+    if (respondUserError(res, err)) return;   // ★ 2026-10-25 R10 — 사용자 조건 오류 = 그 상태 · 문장 그대로
     return res.status(500).json({ success: false, error: publicErrorText(err, '연동 몰 조회 실패') });
-  }
-});
-
-// GET /preview?provider=cafe24|naver&q= — 연동 몰 상품 raw 응답(실측)
-mallProductsRouter.get('/preview', async (req: any, res: Response) => {
-  try {
-    const companyId = req.user?.companyId;
-    if (!companyId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
-    const provider = String(req.query.provider || '').trim();
-    const q = req.query.q ? String(req.query.q).trim() : undefined;
-
-    if (provider === 'cafe24') {
-      const integ = await getCafe24Integration(companyId);
-      if (!integ) return res.status(404).json({ success: false, error: '카페24 연동이 없습니다.' });
-      const creds = await getCafe24ByoCredentials(companyId, integ.mallId).catch(() => undefined);
-      const raw = await fetchCafe24ProductsRaw(integ, { limit: 5, productName: q }, creds);
-      return res.json({ success: true, provider, mallId: integ.mallId, raw });
-    }
-
-    if (provider === 'naver') {
-      const integ = await getNaverCommerceIntegration(companyId);
-      if (!integ) return res.status(404).json({ success: false, error: '네이버 스마트스토어 연동이 없습니다.' });
-      const creds = (await getNaverCommerceCredentials(companyId).catch(() => null)) || undefined;
-      const raw = await fetchNaverProductsRaw(integ, { size: 5, searchKeyword: q }, creds);
-      return res.json({ success: true, provider, storeId: integ.storeId, raw });
-    }
-
-    if (provider.startsWith('woocommerce:')) {
-      const integ = await wooMallOf(companyId, provider, await resolveIntegrationActor(req.user));
-      if (!integ) return res.status(404).json({ success: false, error: '우커머스 연동이 없는 몰입니다.' });
-      const raw = await fetchWooStoreProductsRaw(integ.siteUrl, { q, limit: 5 });
-      return res.json({ success: true, provider, mallId: integ.mallId, raw });
-    }
-
-    return res.status(400).json({
-      success: false,
-      error: 'provider는 cafe24 · naver · woocommerce:{몰}만 지원합니다 (메이크샵·고도몰·아임웹은 상품 API 조사 후 추가).',
-    });
-  } catch (err: any) {
-    // 실측 라우트 — 몰 API 에러(스코프 미동의·필수 body 누락 등)를 그대로 노출해 매핑 확정에 쓴다.
-    console.error('[mall-products preview] 오류:', err?.message);
-    return res.status(502).json({ success: false, error: publicErrorText(err, '상품 조회 실패') });
   }
 });
 
@@ -142,10 +99,11 @@ mallProductsRouter.get('/search', async (req: any, res: Response) => {
 
     return res.status(400).json({
       success: false,
-      error: '현재 상품 불러오기는 카페24·네이버·우커머스만 지원합니다 (메이크샵·고도몰·아임웹은 실측 후 추가).',
+      error: '상품 불러오기는 카페24 · 네이버 · 우커머스 쇼핑몰에서 할 수 있어요.',
     });
   } catch (err: any) {
     console.error('[mall-products search] 오류:', err?.message);
+    if (respondUserError(res, err)) return;   // ★ 2026-10-25 R10 — 사용자 조건 오류 = 그 상태 · 문장 그대로
     return res.status(502).json({ success: false, error: publicErrorText(err, '상품 조회 실패') });
   }
 });
@@ -162,6 +120,7 @@ mallProductsRouter.post('/cards', async (req: any, res: Response) => {
     return res.json({ success: true, cards: r.cards, excluded: r.excluded });
   } catch (err: any) {
     console.error('[mall-products cards] 오류:', err?.message);
+    if (respondUserError(res, err)) return;   // ★ 2026-10-25 R10 — 사용자 조건 오류 = 그 상태 · 문장 그대로
     return res.status(502).json({ success: false, error: '몰에서 상품을 확인하지 못했어요. 잠시 후 다시 시도해 주세요.' });
   }
 });
@@ -178,6 +137,7 @@ mallProductsRouter.post('/line-candidates', async (req: any, res: Response) => {
     return res.json({ success: true, ...r });
   } catch (err: any) {
     console.error('[mall-products line-candidates] 오류:', err?.message);
+    if (respondUserError(res, err)) return;   // ★ 2026-10-25 R10 — 사용자 조건 오류 = 그 상태 · 문장 그대로
     return res.status(502).json({ success: false, error: '몰에서 상품을 확인하지 못했어요.' });
   }
 });
@@ -196,6 +156,7 @@ mallProductsRouter.get('/match', async (req: any, res: Response) => {
     return res.json({ success: true, product: product || null });
   } catch (err: any) {
     console.error('[mall-products match] 오류:', err?.message);
+    if (respondUserError(res, err)) return;   // ★ 2026-10-25 R10 — 사용자 조건 오류 = 그 상태 · 문장 그대로
     return res.status(502).json({ success: false, error: publicErrorText(err, '상품 매칭 실패') });
   }
 });

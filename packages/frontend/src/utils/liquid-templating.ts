@@ -9,7 +9,7 @@
  *  - 안전 sandbox 동일 매트릭스 (eval/Function 미사용 + 무한 루프 차단)
  *  - filter 화이트리스트 10건 + tag 5건 (backend 정합)
  *
- * 사용처: JourneysPage step textarea 실시간 미리보기 + LiquidPreviewModal
+ * 사용처: JourneysPage step textarea 실시간 미리보기 · 칸 미리보기(PhoneComposer)
  */
 
 export interface LiquidContext {
@@ -505,7 +505,7 @@ function stringifyValue(value: any): string {
 }
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// 샘플 고객 매트릭스 (LiquidPreviewModal 사용)
+// 미리보기 표본 고객
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 export interface SampleCustomer {

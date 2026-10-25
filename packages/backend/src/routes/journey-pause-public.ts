@@ -9,6 +9,7 @@
 // ⛔ 무효는 전부 같은 404(무엇이 틀렸는지 알려주지 않는다) · 원문 오류는 로그에만.
 // ⛔ 멈추는 쪽 동작이라 인증번호 없이 연다(Harold 0526 「사용자 친화 우선」 · 1018 링크 규칙 = 멈추는 행동은 확인 창 + 기록).
 
+import { respondUserError } from '../utils/http-error';
 import express, { Request, Response } from 'express';
 import {
   JOURNEY_PAUSE_TOKEN_HEADER, loadPauseView, pauseStepForDay, pauseJourneyByToken,
@@ -27,6 +28,7 @@ router.get('/info', async (req: Request, res: Response) => {
     return res.json({ success: true, ...view });
   } catch (err: any) {
     console.error('[journey-pause info] 오류:', err?.message || err);
+    if (respondUserError(res, err)) return;   // ★ 2026-10-25 R10 — 사용자 조건 오류 = 그 상태 · 문장 그대로
     return res.status(500).json({ success: false, error: '내용을 불러오지 못했습니다. 잠시 후 다시 열어 주세요.' });
   }
 });
@@ -38,6 +40,7 @@ router.post('/pause', async (req: Request, res: Response) => {
     return res.json({ success: true, paused: r.paused, startedCount: r.startedCount, sendDate: r.sendDate });
   } catch (err: any) {
     console.error('[journey-pause pause] 오류:', err?.message || err);
+    if (respondUserError(res, err)) return;   // ★ 2026-10-25 R10 — 사용자 조건 오류 = 그 상태 · 문장 그대로
     return res.status(500).json({ success: false, error: '정지하지 못했습니다. 잠시 후 다시 시도해 주세요.' });
   }
 });
@@ -49,6 +52,7 @@ router.post('/pause-journey', async (req: Request, res: Response) => {
     return res.json({ success: true, changed: r.changed });
   } catch (err: any) {
     console.error('[journey-pause pause-journey] 오류:', err?.message || err);
+    if (respondUserError(res, err)) return;   // ★ 2026-10-25 R10 — 사용자 조건 오류 = 그 상태 · 문장 그대로
     return res.status(500).json({ success: false, error: '여정을 멈추지 못했습니다. 잠시 후 다시 시도해 주세요.' });
   }
 });

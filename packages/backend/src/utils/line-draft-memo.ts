@@ -11,6 +11,8 @@
  *   잊힌 orphan 은 [CREDIT][ORPHAN] 로그로 남는다(원장 쓰기와 삭제가 연달아 실패한 이중 장애에서만 생긴다). 영속이 필요해지면 초안 행에 멱등키 칸.
  */
 
+import { reportCreditMiss } from './ai-credit';
+
 const LINE_DRAFT_PAID_TTL_MS = 30 * 60 * 1000;
 type LineDraftState = 'paid' | 'orphan';
 const memo = new Map<string, { draftId: string; state: LineDraftState; at: number }>();
@@ -56,7 +58,8 @@ export async function deleteLineDraftWithRetry(
       return true;
     } catch (err: any) {
       if (i < attempts) { await sleep(i * 200); continue; }
-      console.log(`[CREDIT][ORPHAN] ${label} err=${err?.message}`);
+      // ★ 2026-10-25 원장 Z1 — 미과금 초안 회수 실패 = 사람에게 닿는다(로그 + 운영 경보 · 공용 함수)
+      reportCreditMiss({ companyId: null, source: 'line-draft', cost: 0, key: label, reason: String(err?.message || 'unknown'), tag: 'ORPHAN' });
     }
   }
   return false;

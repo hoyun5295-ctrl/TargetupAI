@@ -359,15 +359,10 @@ describe('흰 브랜드 킷 · 산출물 주색은 흰 글자가 읽히는 색',
     expect(renderedKit.primary_color).toBe('#1f2937');
     expect(drafts.email[0].design).toMatchObject({ palette: { primary: '#1f2937' } });
   });
-  it('옛 재료 경로 DM(generateDmFromMaterials)도 같은 보정을 지난다', () => {
+  it('옛 재료 경로(generateDmFromMaterials · v0)는 1025 #104 로 지워졌다 · 회사 킷을 보정 없이 쓰는 자리 0', () => {
     const quick = code('utils/campaign-quick.ts');
-    const start = quick.indexOf('export async function generateDmFromMaterials(');
-    const end = quick.indexOf('export async function generateEmailFromMaterials(', start);
-    expect(start).toBeGreaterThan(-1);
-    expect(end).toBeGreaterThan(start);
-    const block = quick.slice(start, end);
-    expect(block).toContain('readableCustomerBrandKit(await getCompanyBrandKit(companyId))');
-    expect(block).not.toMatch(/brand_kit:\s*\(?await getCompanyBrandKit/);
+    expect(quick).not.toContain('export async function generateDmFromMaterials(');
+    expect(quick).not.toMatch(/brand_kit:\s*\(?await getCompanyBrandKit/);
   });
   it('readableCustomerBrandKit: 흰색·3자리 hex·주색 없음 = 무채색 · 입력 객체는 바꾸지 않는다', async () => {
     const { readableCustomerBrandKit } = await import('../campaign-quick');
@@ -385,9 +380,6 @@ describe('고객 표준 채우기 배선 · 아트디렉션 · 로고 · 이메�
   it('DM 기본 의존성은 고객 채우기를 쓴다 · 옛 재료 경로는 아웃리치 채우기 그대로', () => {
     const quick = code('utils/campaign-quick.ts');
     expect(quick).toContain('assembleDm: (m, opts) => assembleDmCampaign(m, opts, customerEngineDeps())');
-    const start = quick.indexOf('export async function generateDmFromMaterials(');
-    const end = quick.indexOf('export async function generateEmailFromMaterials(', start);
-    expect(quick.slice(start, end)).toContain('outreachEngineDeps()');
   });
   it('DM 브랜드 킷: 회사 킷에 아트디렉션이 없으면 업종 표 값 · 있으면 회사 값', async () => {
     const { outreachArtDirection } = await import('../sales-outreach-look');
@@ -471,21 +463,11 @@ describe('계약 10·16 — 실패 위치에 따라 초안 행: 차감 전 실�
     expect(b.calls).toContain('deleteEmail:em-1');
     expect(b.drafts.email).toEqual([]);
   });
-  it('차감 결말 failed = 행 유지 · 결과 반환 · [CREDIT][MISS] 로그에 멱등키·attemptToken·초안 id', async () => {
-    const log = vi.spyOn(console, 'log').mockImplementation(() => {});
-    try {
-      const { deps, drafts } = makeDeps({ deductOutcome: async () => 'failed' });
-      const r = await generateFromBuildMaterials({ companyId: COMPANY, userId: USER, materials: raw() }, deps);
-      expect(r.deductOutcome).toBe('failed');
-      expect(drafts.dm).toHaveLength(1);
-      const line = log.mock.calls.map((c) => c.join(' ')).find((l) => l.includes('[CREDIT][MISS]'));
-      expect(line).toBeTruthy();
-      expect(line).toContain(keyOf(r));
-      expect(line).toContain(TOKEN);
-      expect(line).toContain('dm-1');
-    } finally {
-      log.mockRestore();
-    }
+  it('차감 결말 failed = 결과를 건네지 않는다(1025 D1 = A) · 만든 행을 거둔다 · 503 CREDIT_SETTLE_FAILED', async () => {
+    const { deps, drafts, calls } = makeDeps({ deductOutcome: async () => 'failed' });
+    await expect(generateFromBuildMaterials({ companyId: COMPANY, userId: USER, materials: raw() }, deps)).rejects.toMatchObject({ status: 503, code: 'CREDIT_SETTLE_FAILED' });
+    expect(drafts.dm).toHaveLength(0);
+    expect(calls).toContain('deleteDm:dm-1');
   });
 });
 
@@ -499,9 +481,9 @@ describe('소스 계약 — 카페24 상품번호 재조회 파라미터 · 기�
     expect(quick).toContain('smtpConfigured: (companyId) => isSmtpConfigured(companyId)');
     expect(quick).toContain('createEmail: (input) => createEmailCampaign(input)');
     expect(quick).toContain('deleteDm: (id, companyId) => deleteDm(id, companyId)');
-    // v0 경로(quick:{draftId} · createDm 뒤 deductCreditSafe)는 그대로 — 첫 등장 순서가 v0
-    expect(quick).toContain('idempotencyKey: `quick:${draftId}`');
-    expect(quick.indexOf('await createDm(')).toBeLessThan(quick.indexOf('await deductCreditSafe('));
+    // v0 경로(quick:{draftId} · 너그러운 차감)는 1025 #104 로 지워졌다
+    expect(quick).not.toContain('idempotencyKey: `quick:${draftId}`');
+    expect(quick).not.toContain('await deductCreditSafe(');
   });
 });
 
@@ -567,15 +549,15 @@ describe('★ Codex 1R(0914) — 돈 단위 결박: 같은 토큰 + 다른 재�
     expect(c.deductOutcome).toBe('duplicate');
     expect(ledger).toHaveLength(2);
   });
-  it('판독이 실제로 돌면 초안 뒤에 판독비를 시도 토큰 멱등키로 차감(원장 2행: 생성 + 판독) · 판독은 크레딧 묶음 안(소스 계약)', async () => {
+  it('판독이 실제로 돌면 초안 뒤에 판독비를 시도 토큰 멱등키로 먼저 차감(원장 2행: 판독 + 생성 · 1025 D1 = A) · 판독은 크레딧 묶음 안(소스 계약)', async () => {
     const { deps, ledger, calls } = makeDeps();
     const input = raw({ expectedTotal: 8, eventCards: [{ id: 'c1', title: '', text: '', images: [HERO] }] });
     const r = await generateFromBuildMaterials({ companyId: COMPANY, userId: USER, materials: input }, deps);
     expect(r.materialsMeta.reads).toBe(1);
     expect(r.readDeductOutcome).toBe('deducted');
     const readKey = buildReadIdempotencyKey(COMPANY, TOKEN, imagesHashOf([HERO.url]));
-    expect(ledger).toEqual([keyOf(r), readKey]);
-    expect(calls.filter((c) => c.startsWith('deduct:'))).toEqual([`deduct:${keyOf(r)}:dm-ai-generate:5`, `deduct:${readKey}:event-image-extract:3`]);
+    expect(ledger).toEqual([readKey, keyOf(r)]);
+    expect(calls.filter((c) => c.startsWith('deduct:'))).toEqual([`deduct:${readKey}:event-image-extract:3`, `deduct:${keyOf(r)}:dm-ai-generate:5`]);
     expect(calls.indexOf('createDm')).toBeLessThan(calls.indexOf(`deduct:${readKey}:event-image-extract:3`));
     expect(code('utils/campaign-quick.ts')).toContain('await runInCreditBundle(() => deps.extractFromImages(');
   });
@@ -606,25 +588,18 @@ describe('★ Codex 1R(0914) — 돈 단위 결박: 같은 토큰 + 다른 재�
     expect(r.materialsMeta).toMatchObject({ reads: 1, visionCached: true });
     expect(r.readDeductOutcome).toBe('deducted');
     const readKey = buildReadIdempotencyKey(COMPANY, TOKEN, imagesHashOf([HERO.url])); // 처음 읽은 시도(TOKEN)의 키
-    expect(ledger).toEqual([keyOf(r), readKey]);
+    expect(ledger).toEqual([readKey, keyOf(r)]);
     expect(calls.filter((c) => c === 'vision')).toHaveLength(1);
     // 정산 뒤 = 견적에서 판독이 빠진다
     const q2 = await quoteFromBuildMaterials({ companyId: COMPANY, materials: { ...input, expectedTotal: 0 } }, deps);
     expect(q2.quote.total).toBe(5);
   });
-  it('판독비 차감 호출이 던져도 초안은 남는다(생성비 차감 뒤 실패 = 회수 0) · 결말은 failed 로 [CREDIT][MISS]', async () => {
-    const log = vi.spyOn(console, 'log').mockImplementation(() => {});
-    try {
-      let n = 0;
-      const { deps, drafts } = makeDeps({ deductOutcome: async (o) => { n++; if (o.source === 'event-image-extract') throw new Error('원장 연결 끊김'); return 'deducted'; } });
-      const r = await generateFromBuildMaterials({ companyId: COMPANY, userId: USER, materials: raw({ expectedTotal: 8, eventCards: [{ id: 'c1', title: '', text: '', images: [HERO] }] }) }, deps);
-      expect(n).toBe(2);
-      expect(drafts.dm).toHaveLength(1);
-      expect(r.readDeductOutcome).toBe('failed');
-      expect(log.mock.calls.map((c) => c.join(' ')).some((l) => l.includes('[CREDIT][MISS]') && l.includes('quick-read:'))).toBe(true);
-    } finally {
-      log.mockRestore();
-    }
+  it('판독비 차감 호출이 던지면 생성비를 걷지 않고 초안을 거둔다(1025 D1 = A · 무과금 결과 0)', async () => {
+    let n = 0;
+    const { deps, drafts } = makeDeps({ deductOutcome: async (o) => { n++; if (o.source === 'event-image-extract') throw new Error('원장 연결 끊김'); return 'deducted'; } });
+    await expect(generateFromBuildMaterials({ companyId: COMPANY, userId: USER, materials: raw({ expectedTotal: 8, eventCards: [{ id: 'c1', title: '', text: '', images: [HERO] }] }) }, deps)).rejects.toThrow('원장 연결 끊김');
+    expect(n).toBe(1);
+    expect(drafts.dm).toHaveLength(0);
   });
 });
 

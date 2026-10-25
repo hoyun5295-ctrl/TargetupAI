@@ -239,7 +239,7 @@ export default function JourneyPauseLogsModal({ journeyId, journeyName, onClose,
               <History className="w-10 h-10 text-slate-300 mx-auto mb-2" />
               <div className="text-[13px] text-slate-500">정지 이력 없음</div>
               <div className="text-[11px] text-slate-400 mt-1">
-                담당자 단축 URL 정지 / 자동 정지 발화 시 본 영역에 영구 기록
+                담당자가 정지 링크로 멈추거나 자동으로 멈추면 여기에 남아요
               </div>
             </div>
           )}

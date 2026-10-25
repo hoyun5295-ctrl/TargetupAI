@@ -4,6 +4,7 @@
  * ★ 2026-07-06: 네이버 빌더 삭제 — 실제 커머스 API는 client_credentials(authorize URL 개념 없음, 서버 실측 확정).
  *   naver-commerce-client.ts 참조. 이 파일은 카페24 전용으로 축소.
  */
+import { UserFacingError } from './http-error';
 import type { ProviderOAuthCredentials } from './provider-credentials';
 
 /**
@@ -17,7 +18,7 @@ export function buildCafe24AuthorizeUrl(
   scope: string,
 ): string {
   if (!/^[a-z0-9_-]+$/i.test(mallId)) {
-    throw new Error('카페24 mall_id 형식이 올바르지 않습니다.');
+    throw new UserFacingError(400, 'MALL_ID_INVALID', '카페24 쇼핑몰 아이디 형식이 맞지 않아요.');
   }
   const params = new URLSearchParams({
     response_type: 'code',

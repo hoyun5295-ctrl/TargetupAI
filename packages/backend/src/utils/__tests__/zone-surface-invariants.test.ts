@@ -42,8 +42,9 @@ const FORBIDDEN = [
 ];
 
 describe('AI 존 표면 불변식', () => {
-  it('존 화면 25개 = 같은 틀(ZoneFrame · 편집기 머리 ZoneHeader) + 옛 머리·바닥 0회', () => {
-    expect(ZONE_PAGES.length).toBe(25);
+  // ★ 1025 #104 — 옛 만들기 화면(QuickCampaignLegacyPage) 삭제로 25 → 24
+  it('존 화면 24개 = 같은 틀(ZoneFrame · 편집기 머리 ZoneHeader) + 옛 머리·바닥 0회', () => {
+    expect(ZONE_PAGES.length).toBe(24);
     const offenders: string[] = [];
     for (const rel of ZONE_PAGES) {
       const src = code(rel);

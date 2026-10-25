@@ -50,7 +50,7 @@ type AbResult = {
     variant: AbVariantKey;
     page_id: string;
     views: number;
-    unique_phones: number;
+    unique_visitors: number;
     avg_duration_sec: number;
     completion_rate: number;
     clicks: number;
@@ -73,7 +73,7 @@ const STATUS_LABEL: Record<AbStatus, { text: string; bg: string; fg: string }> =
 const METRIC_LABEL: Record<string, string> = {
   view: '조회수',
   click: '클릭',
-  conversion: '전환',
+  conversion: '클릭(옛 전환 지표)',   // ★ 2026-10-25 원장 #64 — 판정은 클릭이다(새 시험은 고를 수 없다)
   complete_rate: '완독률',
 };
 
@@ -83,6 +83,7 @@ export default function AbTestModal({ open, onClose }: { open: boolean; onClose:
 
   const [view, setView] = useState<View>('list');
   const [tests, setTests] = useState<AbTest[]>([]);
+  const [testsTruncated, setTestsTruncated] = useState(false);   // ★ 2026-10-25 원장 #80
   const [dmList, setDmList] = useState<DmListItem[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [detail, setDetail] = useState<AbResult | null>(null);
@@ -103,6 +104,7 @@ export default function AbTestModal({ open, onClose }: { open: boolean; onClose:
         api.get('/dm?status=published&limit=100'),
       ]);
       setTests(tRes.data?.tests || []);
+      setTestsTruncated(tRes.data?.truncated === true);
       const dms: DmListItem[] = (dRes.data?.dms || dRes.data || []).map((d: any) => ({
         id: d.id, title: d.title, short_code: d.short_code,
       }));
@@ -221,6 +223,9 @@ export default function AbTestModal({ open, onClose }: { open: boolean; onClose:
             <div style={{ padding: 16, textAlign: 'center', color: '#9ca3af', fontSize: 12 }}>
               아직 A/B 테스트가 없어요.
             </div>
+          )}
+          {!loading && testsTruncated && (
+            <div style={{ padding: '6px 12px', color: '#64748b', fontSize: 11.5 }}>최근 {tests.length}개 시험만 보여요.</div>
           )}
           {tests.map((t) => {
             const sl = STATUS_LABEL[t.status];
@@ -369,7 +374,7 @@ function CreateAbForm({
 
       <FieldBox label="성과 지표">
         <select value={metric} onChange={(e) => setMetric(e.target.value as any)} style={inputStyle}>
-          {(['view', 'click', 'conversion', 'complete_rate'] as const).map((m) => (
+          {(['view', 'click', 'complete_rate'] as const).map((m) => (
             <option key={m} value={m}>{METRIC_LABEL[m]}</option>
           ))}
         </select>
@@ -518,11 +523,11 @@ function DetailView({
                   {v.variant.toUpperCase()}
                 </span>
                 <span style={{ fontSize: 13, fontWeight: 600, color: '#111827' }}>{dmName(v.page_id)}</span>
-                {isWinner && <span style={{ fontSize: 10, padding: '2px 6px', background: '#16a34a', color: '#fff', borderRadius: 10, fontWeight: 700 }}>WINNER</span>}
+                {isWinner && <span style={{ fontSize: 10, padding: '2px 6px', background: '#16a34a', color: '#fff', borderRadius: 10, fontWeight: 700 }}>승자</span>}
               </div>
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 8, fontSize: 11, color: '#374151' }}>
                 <Metric label="조회" value={v.views} />
-                <Metric label="순방문" value={v.unique_phones} />
+                <Metric label="순방문" value={v.unique_visitors} />
                 <Metric label="평균체류" value={`${Math.round(v.avg_duration_sec)}초`} />
                 <Metric label="완독률" value={`${Math.round(v.completion_rate * 100)}%`} />
               </div>

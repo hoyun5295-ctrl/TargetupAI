@@ -8,6 +8,7 @@
  * ⛔ 토큰은 헤더(X-Autosend-Stop-Token)로만 · 무효는 전부 같은 404 · 멈추는 일만(승인 · 재개 없음) · 인증번호 없음(멈추는 쪽) ·
  *   확인 창은 화면 · 담당자 전원 통보 · 감사 원장 기록.
  */
+import { respondUserError } from '../utils/http-error';
 import { Router, Request, Response } from 'express';
 import { query } from '../config/database';
 import { AUTOSEND_STOP_TOKEN_HEADER, loadAutosendStopView, verifyAutosendStopToken, type AutosendStopPayload } from '../utils/autosend-stop-link';
@@ -41,6 +42,7 @@ router.get('/view', async (req: Request, res: Response) => {
     return res.json({ success: true, view });
   } catch (err: any) {
     console.error('[autosend-stop] 조회 실패:', err?.message || err);
+    if (respondUserError(res, err)) return;   // ★ 2026-10-25 R10 — 사용자 조건 오류 = 그 상태 · 문장 그대로
     return res.status(500).json({ success: false, error: '내용을 불러오지 못했습니다.' });
   }
 });
@@ -63,6 +65,7 @@ router.post('/skip', async (req: Request, res: Response) => {
     return res.json({ success: true, view: await loadAutosendStopView(p).catch(() => null) });
   } catch (err: any) {
     console.error('[autosend-stop] 건너뛰기 실패:', err?.message || err);
+    if (respondUserError(res, err)) return;   // ★ 2026-10-25 R10 — 사용자 조건 오류 = 그 상태 · 문장 그대로
     return res.status(500).json({ success: false, error: '건너뛰지 못했습니다. 잠시 후 다시 시도해 주세요.' });
   }
 });
@@ -81,6 +84,7 @@ router.post('/pause', async (req: Request, res: Response) => {
     return res.json({ success: true, view: await loadAutosendStopView(p).catch(() => null) });
   } catch (err: any) {
     console.error('[autosend-stop] 일시정지 실패:', err?.message || err);
+    if (respondUserError(res, err)) return;   // ★ 2026-10-25 R10 — 사용자 조건 오류 = 그 상태 · 문장 그대로
     return res.status(500).json({ success: false, error: '일시정지하지 못했습니다. 잠시 후 다시 시도해 주세요.' });
   }
 });

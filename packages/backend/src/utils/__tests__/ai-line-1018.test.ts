@@ -465,7 +465,7 @@ describe('④ 진행 저장 = 계정별 · 결과 카드 본문 없음(★1019 H
 
 describe('② 꾸미기', () => {
   it('글이 바뀐 때만 1', async () => {
-    m.decorate.mockResolvedValue(['%고객명%님 감성 문안 본문입니다']);
+    m.decorate.mockResolvedValue({ messages: ['%고객명%님 감성 문안 본문입니다'], kept: [], charged: false });
     const out = await runLineDecorate(V, { body: '감성 문안 본문입니다', vars: ['고객명'], channel: 'LMS', isAd: true, attemptToken: 'attempt-12345678' });
     expect(out.changed).toBe(true);
     expect(m.settle.mock.calls[0][0]).toMatchObject({ cost: 1, source: 'ai-line-decorate' });
@@ -473,14 +473,14 @@ describe('② 꾸미기', () => {
   it('★ Codex 1R — 이미 낸 꾸미기 = 잔액 확인 0 · 차감 0', async () => {
     m.chargedAmountByKey.mockResolvedValue(1);
     m.hasCreditForStrict.mockResolvedValue(false);
-    m.decorate.mockResolvedValue(['%고객명%님 다시 꾸민 본문입니다']);
+    m.decorate.mockResolvedValue({ messages: ['%고객명%님 다시 꾸민 본문입니다'], kept: [], charged: false });
     const out = await runLineDecorate(V, { body: '꾸밀 본문입니다 다섯자', vars: ['고객명'], channel: 'LMS', isAd: true, attemptToken: 'attempt-deco-0001' });
     expect(m.hasCreditForStrict).not.toHaveBeenCalled();
     expect(m.settle).not.toHaveBeenCalled();
     expect(out.charged).toBe(0);
   });
   it('원문 그대로면 0', async () => {
-    m.decorate.mockResolvedValue(['감성 문안 본문입니다']);
+    m.decorate.mockResolvedValue({ messages: ['감성 문안 본문입니다'], kept: [], charged: false });
     const out = await runLineDecorate(V, { body: '감성 문안 본문입니다', vars: ['고객명'], channel: 'LMS', isAd: true, attemptToken: 'attempt-12345678' });
     expect(out).toEqual({ body: '감성 문안 본문입니다', changed: false, charged: 0 });
     expect(m.settle).not.toHaveBeenCalled();
@@ -542,8 +542,8 @@ describe('③ 소스 계약', () => {
   it('★ Codex 1R — 브랜드 조건 동의 = 그 브랜드 소속 행(해석기 옵션 · 실행 소비처 9곳)', () => {
     const cf = read('utils/customer-filter.ts');
     expect(cf).toContain('storeConsent: brand.storeConsent === true,');
-    // ★ 2026-10-19 B-1005-1④ — 부르는 화면이 없던 /generate-custom 삭제로 6 → 5
-    expect((read('routes/ai.ts').match(/viewerBrandConsent\(companyId, req\.user\)/g) || []).length).toBe(5);
+    // ★ 2026-10-19 B-1005-1④ — 부르는 화면이 없던 /generate-custom 삭제로 6 → 5 · ★ 1025 #13 부르는 곳 없던 /recount-target 삭제로 5 → 4
+    expect((read('routes/ai.ts').match(/viewerBrandConsent\(companyId, req\.user\)/g) || []).length).toBe(4);
     expect(read('services/ai.ts')).toContain('await ownerBrandConsent(companyId, userId || null)');
     expect(read('utils/operator-audience.ts')).toContain('await ownerBrandConsent(input.companyId, input.ownerUserId ?? null)');
     expect(read('services/ai-line.ts')).toContain('await viewerBrandConsent(v.companyId');

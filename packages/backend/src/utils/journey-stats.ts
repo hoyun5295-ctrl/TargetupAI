@@ -12,7 +12,9 @@
  *  - 한줄로 운영 영향 0 (Read-only 집계)
  */
 
+import { UserFacingError } from './http-error';
 import { query } from '../config/database';
+import { purchasedSinceEntrySql } from './journey-goal-purchase';
 import { isMallPurchaseDoorForJourneyStats } from './journey-purchase-ledger';
 // ★ Phase2 A (2026-06-26): 사후확률 α/β는 실측 count(sent/click)에서 도출 — bandit-arm 단일 진실.
 import { deriveBanditArm } from './bandit-arm';
@@ -137,7 +139,7 @@ async function verifyJourneyOwnership(journeyId: string, companyId: string): Pro
     [journeyId, companyId]
   );
   if (r.rows.length === 0) {
-    throw new Error('여정 접근 권한 없음 (회사 격리)');
+    throw new UserFacingError(404, 'JOURNEY_NOT_FOUND', '여정을 찾을 수 없어요.');
   }
 }
 
@@ -664,8 +666,9 @@ export async function buildJourneyStats(journeyId: string, companyId: string): P
     getJourneyVariantStats(journeyId),
   ]);
 
-  // ★ 2026-07-11 홀드아웃 증분 비교 — 대조군이 있을 때만(전환 판정 = purchase 이벤트 또는 프로필 최근구매일 갱신,
-  //   goal purchase 판정과 동일 신호). 발송군 = holdout 제외 전체.
+  // ★ 2026-07-11 홀드아웃 증분 비교 — 대조군이 있을 때만. 발송군 = holdout 제외 전체.
+  // ★ 2026-10-25 여정 구조체크 2차 #13(R1) — 전환 판정 = 목표 판정 한 곳(journey-goal-purchase · 가입 묶음 포함).
+  //   옛: 「goal purchase 판정과 동일 신호」라 적고 세 신호를 따로 적어 1019 가입 묶음이 빠졌다.
   let holdoutCompare: JourneyHoldoutCompare | null = null;
   if (overview.holdout > 0) {
     try {
@@ -677,23 +680,7 @@ export async function buildJourneyStats(journeyId: string, companyId: string): P
            COUNT(*) FILTER (WHERE e.status <> 'holdout' AND e.conv) AS s_conv
          FROM (
            SELECT e.id, e.status,
-                  (EXISTS (
-                     SELECT 1 FROM cdp_events ce
-                      WHERE ce.company_id = j.company_id AND ce.customer_id = e.customer_id
-                        AND ce.event_name = 'purchase' AND ce.occurred_at > e.entered_at
-                   ) OR EXISTS (
-                     SELECT 1 FROM customers c
-                      WHERE c.id = e.customer_id AND c.company_id = j.company_id
-                        AND c.recent_purchase_date IS NOT NULL
-                        AND c.recent_purchase_date > (e.entered_at AT TIME ZONE 'Asia/Seoul')::date
-                   ) OR EXISTS (
-                     -- ★ 2026-08-01 §11-4: 매장(싱크) 구매는 원장에만 있다. 위 프로필 신호는 날짜 정밀이라
-                     --   진입 당일 구매를 못 가르므로 원장을 시각 정밀로 함께 본다(KST naive 규약).
-                     SELECT 1 FROM purchases p
-                      WHERE p.company_id = j.company_id AND p.customer_id = e.customer_id
-                        AND p.purchase_date IS NOT NULL
-                        AND p.purchase_date > (e.entered_at AT TIME ZONE 'Asia/Seoul')
-                   )) AS conv
+                  ${purchasedSinceEntrySql('e', 'j.company_id', `j.trigger_event = 'customer.created'`)} AS conv
              FROM journey_executions e
              JOIN journeys j ON j.id = e.journey_id
             WHERE e.journey_id = $1::uuid

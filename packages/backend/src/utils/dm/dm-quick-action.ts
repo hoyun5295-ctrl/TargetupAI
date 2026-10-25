@@ -19,8 +19,14 @@
 import { rewriteAddsFacts, readingAddsEfficacy, efficacyNote, EFFICACY_PROMPT_RULES, EFFICACY_REWRITE_RULE } from '../copy-benefit-detector';
 import { query } from '../../config/database';
 // ★ 2026-09-26 한줄로 V2 R1-26 — 섹션 읽기·되쓰기 CT(pages 우선)
-import { extractFlatSectionsFromDm, mapDmSections } from './dm-builder';
+import { extractFlatSectionsFromDm, mapDmSections, getDmDetail, updateDm, DmStaleSaveError } from './dm-builder';
+import { dmPublishStaticBlock } from './dm-publish-gate';
 import { callAIWithFallback } from '../../services/ai';
+import { checkCredit, settleOrUndo } from '../ai-credit';
+import { runInCreditBundle } from '../ai-credit-context';
+import { getCreditCost } from '../ai-credit-calc';
+import { UserFacingError } from '../http-error';
+import { randomUUID } from 'crypto';
 import { extractJson } from './dm-ai';
 import type { SectionType } from './dm-section-registry';
 
@@ -123,11 +129,37 @@ ${EFFICACY_REWRITE_RULE}
 **출력 형식 (JSON):**
 { "refined": "..." }`;
 
-async function refineAllCopy(companyId: string, campaignId: string): Promise<QuickActionResult> {
-  // ★ 2026-09-26 한줄로 V2 R1-26 — pages 우선(요즘 DM) · 옛 sections 칸 폴백(CT)
-  const result = await query(`SELECT pages, sections FROM dm_pages WHERE id = $1`, [campaignId]);
-  const sections: any[] = extractFlatSectionsFromDm(result.rows[0]);
+/** 다듬기 돈 = 저장이 끝난 뒤 걷는다(applyQuickAction) · 이 함수는 금액과 키만 정한다 */
+type PendingCharge = { cost: number; source: string; key: string };
 
+async function refineAllCopy(companyId: string, campaignId: string): Promise<{ result: QuickActionResult; charge: PendingCharge | null }> {
+  // ★ 2026-09-26 한줄로 V2 R1-26 — pages 우선(요즘 DM) · 옛 sections 칸 폴백(CT)
+  const result = await query(`SELECT pages, sections FROM dm_pages WHERE id = $1 AND company_id = $2`, [campaignId, companyId]);
+  const sections: any[] = extractFlatSectionsFromDm(result.rows[0]);
+  // ★ 2026-10-25 원장 #67 · Z4 — 돈 = 바뀐 블록 수 × 단가를 성공 뒤 한 번(옛: 블록마다 응답 순간 1크레딧 · 버린 다듬기 · 바뀐 것 0 도 걷었다).
+  //   AI 를 부르기 전에 최대 금액(다듬을 블록 수 × 단가)으로 잔액을 본다 · 안쪽 AI 호출은 묶음(차감 0).
+  const unit = getCreditCost('dm-quick-action-refine');
+  const candidates = sections.filter((sec) => { const t = extractEditableText(sec); return !!t && t.length >= 5; }).length;
+  if (unit > 0 && candidates > 0) await checkCredit(companyId, unit * candidates);
+  const out = await runInCreditBundle(() => refineSectionsCopy(companyId, sections));
+  // ★ 1026 Codex 1R — 걷는 때 = 바뀐 내용이 저장된 뒤(옛: 여기서 걷고 그 뒤 관문 409 · 저장 실패면 결과 없이 돈만 나갔다)
+  const charge = unit > 0 && out.changes.length > 0
+    ? { cost: unit * out.changes.length, source: 'dm-quick-action-refine', key: `dm-quick-action-refine:${campaignId}:${randomUUID()}` }
+    : null;
+  const note = efficacyNote('rewrite', out.rejected);
+  return {
+    result: {
+      action: 'ai_refine',
+      campaign_id: campaignId,
+      changes: out.changes,
+      applied_at: new Date().toISOString(),
+      ...(note ? { notes: [note] } : {}),
+    },
+    charge,
+  };
+}
+
+async function refineSectionsCopy(companyId: string, sections: any[]): Promise<{ changes: QuickActionChange[]; rejected: number }> {
   const changes: QuickActionChange[] = [];
   let rejected = 0;
 
@@ -177,15 +209,7 @@ async function refineAllCopy(companyId: string, campaignId: string): Promise<Qui
       console.warn(`[dm-quick-action] refine 실패 section_id=${sec?.id}:`, err);
     }
   }
-
-  const note = efficacyNote('rewrite', rejected);
-  return {
-    action: 'ai_refine',
-    campaign_id: campaignId,
-    changes,
-    applied_at: new Date().toISOString(),
-    ...(note ? { notes: [note] } : {}),
-  };
+  return { changes, rejected };
 }
 
 // ────────────── design_align 액션 ──────────────
@@ -312,9 +336,10 @@ export async function applyQuickAction(
   action: QuickActionType,
 ): Promise<QuickActionResult> {
   let result: QuickActionResult;
+  let charge: PendingCharge | null = null;
   switch (action) {
     case 'ai_refine':
-      result = await refineAllCopy(companyId, campaignId);
+      ({ result, charge } = await refineAllCopy(companyId, campaignId));
       break;
     case 'design_align':
       result = await alignDesign(campaignId);
@@ -323,23 +348,45 @@ export async function applyQuickAction(
       result = await ensureVariableConsistency(campaignId);
       break;
     default:
-      throw new Error(`알 수 없는 액션: ${action}`);
+      throw new UserFacingError(400, 'QUICK_ACTION_INVALID', '고를 수 없는 빠른 수정이에요. 화면을 새로 고쳐 주세요.');
   }
 
   if (result.changes.length === 0) return result;
 
   // DB 반영 — ★ 2026-09-26 한줄로 V2 R1-26 읽은 곳에 쓴다(pages 구조면 pages 안 섹션 · 옛 DM이면 sections 칸 · CT mapDmSections).
-  const dbResult = await query(`SELECT pages, sections FROM dm_pages WHERE id = $1 AND company_id = $2`, [campaignId, companyId]);
-  const mapped = mapDmSections(dbResult.rows[0], (sec: any) => {
+  // ★ 2026-10-25 원장 #68 — 일반 저장(PUT /:id)과 같은 길: 발행 중 DM 이면 같은 정적 관문을 저장될 모습으로 보고(막히면 반영 0 · 409) ·
+  //   저장은 같은 저장 함수(updateDm · 저장 판이 함께 바뀐다). 옛: 관문 · 저장 판을 건너뛰고 라이브 DM 을 바로 덮었다.
+  const cur = await getDmDetail(campaignId, companyId);
+  if (!cur) return result;
+  const mapped = mapDmSections(cur, (sec: any) => {
     const change = result.changes.find((c) => c.section_id === sec?.id);
     return change ? { ...sec, props: change.after } : sec;
   });
   if (!mapped) return result;
-
-  await query(
-    `UPDATE dm_pages SET ${mapped.column} = $1, updated_at = NOW() WHERE id = $2 AND company_id = $3`,
-    [JSON.stringify(mapped.value), campaignId, companyId],
-  );
+  if (cur.status === 'published') {
+    const block = dmPublishStaticBlock({ ...cur, [mapped.column]: mapped.value } as any);
+    if (block) throw new UserFacingError(409, block.code || 'DM_PUBLISHED_BLOCK', `보내진 DM 이라 바로 반영하지 않았어요. ${block.error}`);
+  }
+  // ★ 1026 Codex 2R — 저장 · 되돌리기 = 저장 판 조건(읽은 판이 그대로일 때만 쓴다 · 그 사이 남이 고친 내용을 덮지 않는다)
+  let saved: any;
+  try {
+    saved = await updateDm(campaignId, companyId, { [mapped.column]: mapped.value } as any, { baseVersion: (cur as any).save_version || undefined });
+  } catch (err) {
+    if (err instanceof DmStaleSaveError) throw new UserFacingError(409, 'DM_CHANGED', '그 사이 DM 이 바뀌었어요. 화면을 새로 고친 뒤 다시 눌러 주세요.');
+    throw err;
+  }
+  if (!saved) return result;   // DM 이 없어졌다 = 반영 0 · 걷지 않는다
+  // ★ 1026 Codex 1R — 저장 뒤 걷는다 · 못 걷으면(402 · 503) 저장 전 내용으로 되돌린다(결과 없이 돈 0 · 돈 없이 결과 0)
+  //   되돌리기도 이 저장이 만든 판일 때만(그 사이 남이 고쳤으면 덮지 않고 DmStaleSaveError → [CREDIT][ORPHAN] 경보)
+  if (charge) {
+    const prev = { [mapped.column]: (cur as any)[mapped.column] };
+    const savedVersion = saved.save_version || undefined;
+    await settleOrUndo({
+      settle: { companyId, cost: charge.cost, source: charge.source, idempotencyKey: charge.key },
+      undo: async () => { await updateDm(campaignId, companyId, prev as any, { baseVersion: savedVersion }); },
+      what: 'DM 다듬기 반영',
+    });
+  }
 
   return result;
 }

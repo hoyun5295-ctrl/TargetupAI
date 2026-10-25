@@ -10,6 +10,7 @@
  * ⛔ 불러오기 실패는 빈 달력으로 속이지 않는다(차단 상자 + [다시 읽기] · F6). 날짜는 KST 'YYYY-MM-DD' 문자열 축.
  * ⛔ 공휴일 표는 서버 CT(utils/kr-holidays.ts) 하나가 진실이다. native dialog 0 · 모델명 0 · 줄표 0.
  */
+import { useSendPolicy, plannerSendAtText } from '../utils/send-policy';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { AlarmClock, BadgePercent, CalendarRange, ChartColumn, Check, ChevronDown, ChevronLeft, ChevronRight, Leaf, ListChecks, PackagePlus, PartyPopper, Plus, Send, type LucideIcon } from 'lucide-react';
@@ -80,6 +81,8 @@ const TEMPLATE_LOOK: Partial<Record<LineTemplateId | LineCompositionId, { icon: 
 export default function MarketingPlannerPage() {
   const navigate = useNavigate();
   const toast = useToast();
+  const sendPolicy = useSendPolicy();   // ★ 2026-10-25 원장 #62 발송 시각 · 승인 마감 · 확인 요청일 = 서버 값
+  const sendAt = plannerSendAtText(sendPolicy);
   const phone = useMediaQuery('(max-width: 767px)');
   const [searchParams, setSearchParams] = useSearchParams();
   const today = kstToday();
@@ -321,10 +324,10 @@ export default function MarketingPlannerPage() {
         : (e.notice || '발송이 멈춰 있어요. 사유를 확인해 주세요.');
     const left = e.deadline ? plannerDaysBetween(today, e.deadline.date) : null;
     const due = rc
-      ? `마감 ${plannerDay(rc.date)} 20시${rc.date === today ? ' · 오늘' : ''}`
+      ? `마감 ${plannerDay(rc.date)}${sendPolicy ? ` ${sendPolicy.plannerDeadlineHour}시` : ''}${rc.date === today ? ' · 오늘' : ''}`
       : e.deadline
       ? `승인 마감 ${plannerDay(e.deadline.date)} ${e.deadline.hour}시${left !== null ? ` · ${left > 0 ? `${left}일 남음` : left === 0 ? '오늘' : '지남'}` : ''}`
-      : e.firstSend ? `첫 발송 ${plannerDay(e.firstSend)} 오전 8시 · 그 전에 승인해야 나가요` : '';
+      : e.firstSend ? `첫 발송 ${plannerDay(e.firstSend)}${sendAt ? ` ${sendAt}` : ''} · 그 전에 승인해야 나가요` : '';
     const btn = rc
       ? <button type="button" onClick={() => setRecheck({ carrierId: rc.carrierId, eventId: e.id })} className={`${phone ? 'w-full h-11' : 'w-full h-10'} px-4 rounded-[10px] border border-amber-300 bg-white hover:bg-amber-50 text-amber-900 text-[13.5px] font-bold inline-flex items-center justify-center gap-1.5`}>다시 정하기</button>
       : e.displayState === 'material'
@@ -357,7 +360,7 @@ export default function MarketingPlannerPage() {
     if (!st) return null;
     const Icon = st.icon;
     const sub = e.displayState === 'making' ? (e.building ? '완성본을 만드는 중이에요' : e.notice || '문자 문안을 준비하고 있어요 · 준비되면 확인 요청이 가요')
-      : e.displayState === 'approved' ? '정해진 날 오전 8시에 그대로 나가요'
+      : e.displayState === 'approved' ? `정해진 날${sendAt ? ` ${sendAt}에` : ''} 그대로 나가요`
         : e.displayState === 'cancelled' ? (e.closedReason === 'not_approved' ? '승인되지 않아 보내지 않았어요' : e.closedReason === 'missed' ? '예정일이 지나 보내지 않았어요'
           : e.closedReason === 'skipped' ? '남은 발송을 건너뛰어 보내지 않았어요' : e.closedReason === 'recheck_missed' ? '다시 확인되지 않아 보내지 않았어요' : '취소한 행사예요')
           : '';
@@ -397,7 +400,7 @@ export default function MarketingPlannerPage() {
       <p className="text-[16px] font-bold">이달 첫 행사를 담아 보세요</p>
       <p className="text-[13px] text-slate-600 mt-1">행사 하나에 문자·모바일 DM·메일을 정해진 날 보내 드려요</p>
       <ol className="mt-5 space-y-4 text-[13px]">
-        {[['행사명·기간·혜택을 적어요', '혜택은 적은 글자 그대로 실려요'], ['사진·글·몰 상품을 넣어요', '모바일 DM과 메일 완성본을 만들어 드려요'], ['발송 3일 전, 실물을 보고 승인해요', '휴대폰으로 확인 요청이 가요 · 승인 전에는 아무것도 나가지 않아요']].map(([t, d], i) => (
+        {[['행사명·기간·혜택을 적어요', '혜택은 적은 글자 그대로 실려요'], ['사진·글·몰 상품을 넣어요', '모바일 DM과 메일 완성본을 만들어 드려요'], [sendPolicy ? `발송 ${sendPolicy.plannerReviewLeadDays}일 전, 실물을 보고 승인해요` : '발송 전에 실물을 보고 승인해요', '휴대폰으로 확인 요청이 가요 · 승인 전에는 아무것도 나가지 않아요']].map(([t, d], i) => (
           <li key={t} className="flex gap-3"><span className="w-6 h-6 rounded-full bg-slate-900 text-white text-[12px] font-bold grid place-items-center shrink-0">{i + 1}</span><div><b>{t}</b><p className="text-slate-600 mt-0.5">{d}</p></div></li>
         ))}
       </ol>
@@ -413,7 +416,7 @@ export default function MarketingPlannerPage() {
           <p className="text-slate-600 mt-0.5 tabular-nums">{upcoming.map(({ e, c }) => `${plannerDay(c.date)} ${e.title} ${PLANNER_SEND_KIND[c.kind].label}`).join(' · ')}</p></div>
       ) : (
         <div className="min-w-0"><p className="font-semibold">오늘·내일 나가는 발송 없음</p>
-          {nextAny && <p className="text-slate-600 mt-0.5 tabular-nums">다음 발송 {plannerDay(nextAny.c.date)} 오전 8시 · {nextAny.e.title} {PLANNER_SEND_KIND[nextAny.c.kind].label}{nextAny.e.displayState !== 'approved' && nextAny.e.displayState !== 'done' ? <> · <b className="text-amber-800">승인해야 나가요</b></> : null}</p>}
+          {nextAny && <p className="text-slate-600 mt-0.5 tabular-nums">다음 발송 {plannerDay(nextAny.c.date)}{sendAt ? ` ${sendAt}` : ''} · {nextAny.e.title} {PLANNER_SEND_KIND[nextAny.c.kind].label}{nextAny.e.displayState !== 'approved' && nextAny.e.displayState !== 'done' ? <> · <b className="text-amber-800">승인해야 나가요</b></> : null}</p>}
         </div>
       )}
     </div>
@@ -497,7 +500,7 @@ export default function MarketingPlannerPage() {
           icon: Plus, busy: reading, allowEmpty: true, tone: 'indigo',
         },
       } : {
-        note: phone ? undefined : '행사를 담고 모바일 DM·메일 재료를 넣으면 완성본을 만들어요. 발송 3일 전 휴대폰으로 실물 확인 요청이 가요',
+        note: phone ? undefined : `행사를 담고 모바일 DM·메일 재료를 넣으면 완성본을 만들어요. 발송${sendPolicy ? ` ${sendPolicy.plannerReviewLeadDays}일` : ''} 전 휴대폰으로 실물 확인 요청이 가요`,
         primary: { label: '행사 담기', icon: Plus, onClick: () => openCreate(), tone: 'indigo' },
       }}
       blocks={[

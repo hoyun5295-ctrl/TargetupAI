@@ -282,7 +282,9 @@ describe('원문 계약 — 등록 · 발송 돈 · 닫기 · 승인', () => {
   });
   it('중지 · 보관 = 열린 제안 전부 닫기 · 승인 선점 = 보관된 운영자 0 · 승인 = 안 번호 + 지문 · 사람 승인 지문', () => {
     expect(co).toContain("WHERE operator_id = $1::uuid AND status IN ('scheduled', 'pending', 'admin_review') RETURNING id`,");
-    expect((co.match(/await closeOpenProposals\(operatorId,/g) || []).length).toBe(2);
+    // ★ 1025 #23 — 중지 · 보관 두 자리 = 닫기 + 실패 시 재시도 · 통지(한 함수)
+    expect((co.match(/await closeOpenProposalsOrNotify\(\{/g) || []).length).toBe(2);
+    expect(co).toContain('try { await closeOpenProposals(op.id, reason); return; }');
     expect(co).not.toContain('cancelScheduledProposalsForOperator(');
     const ap = co.slice(co.indexOf('export async function approveProposal('), co.indexOf('export async function recheckOpenProposals('));
     expect(ap).toContain("AND EXISTS (SELECT 1 FROM continuous_operators o WHERE o.id = operator_proposals.operator_id AND o.status <> 'archived')");
@@ -315,7 +317,9 @@ describe('원문 계약 — 등록 · 발송 돈 · 닫기 · 승인', () => {
     expect(SRC('utils', 'operator-route.ts')).toContain("import { journeyViewerOf, type JourneyViewer } from './journey-access';");
   });
   it('브리핑 = 오늘 · 어제 것만', () => {
-    expect(SRC('routes', 'ai.ts')).toContain("WHERE company_id = $1::uuid AND brief_date >= (NOW() AT TIME ZONE 'Asia/Seoul')::date - 1");
+    // ★ 1025 — 날짜 조건 한 곳(daily-brief-policy) · 브리핑 주소와 한 줄 물어보기가 같은 값
+    expect(SRC('utils', 'daily-brief-policy.ts')).toContain("export const CURRENT_BRIEF_DATE_SQL = `brief_date >= (NOW() AT TIME ZONE 'Asia/Seoul')::date - 1`;");
+    expect(SRC('routes', 'ai.ts')).toContain('WHERE company_id = $1::uuid AND ${CURRENT_BRIEF_DATE_SQL}');
   });
 });
 

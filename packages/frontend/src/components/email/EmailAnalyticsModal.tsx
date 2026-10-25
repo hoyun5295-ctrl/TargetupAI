@@ -2,6 +2,7 @@
 // 요약 5지표(이전 동기간 대비) + AI 종합 진단(on-demand 5크레딧) + 일자별 추이 + 캠페인 비교(1클릭 액션).
 // 데이터 적응(부족하면 숨김) · 모델명 UI 0 · native dialog 0 · Source caption · 모바일 반응형.
 import { useEffect, useState } from 'react';
+import { creditText } from '../../constants/credit';
 import {
   BarChart3, Loader2, Smartphone, Sparkles, TrendingDown, TrendingUp, X,
 } from 'lucide-react';
@@ -69,7 +70,7 @@ export default function EmailAnalyticsModal({
       if (json.success && json.insufficientData) { setInsightMsg(json.message || '발송 데이터가 부족합니다.'); return; }
       if (json.success && json.insight) {
         setInsight(json.insight);
-        onToast('AI 종합 진단 완료 (5 크레딧)', 'success');
+        onToast(`AI 종합 진단 완료 (${creditText('email-performance-insight')})`, 'success');
       } else {
         onToast(json.error || 'AI 진단 실패', 'error');
       }
@@ -165,7 +166,7 @@ export default function EmailAnalyticsModal({
                   </div>
                   <button onClick={runAiInsight} disabled={aiBusy} className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-40 text-white text-xs font-bold rounded-lg flex items-center gap-1.5 whitespace-nowrap">
                     {aiBusy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Sparkles className="w-3.5 h-3.5" />}
-                    {insight ? '다시 진단' : 'AI 진단 받기 (5크레딧)'}
+                    {insight ? '다시 진단' : `AI 진단 받기 (${creditText('email-performance-insight')})`}
                   </button>
                 </div>
                 {insightMsg && <div className="text-xs text-slate-500 mt-1">{insightMsg}</div>}

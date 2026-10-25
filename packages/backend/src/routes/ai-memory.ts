@@ -19,9 +19,12 @@ import { buildMemoryPromptContext, listMemories, MemoryType, LEARNING_MEMORY_TYP
 import { fetchBrandGuideline, recordToneEvolution } from '../utils/brand-tone-evolution';
 import { scanLinkHabit, type LinkHabit } from '../utils/brand-link-core';
 import { splitBrandVoiceExtraction, planBrandVoiceRows, type BrandVoiceKind } from '../utils/brand-voice-prompt';
-import { extractJsonFromAiText, plainTextFromAi } from '../utils/ai-json';
+import { extractJsonFromAiText, plainTextFromAi, aiStr } from '../utils/ai-json';
 
-import { publicErrorText } from '../utils/http-error';
+import { publicErrorText, respondUserError } from '../utils/http-error';
+import { runChargedAi, checkCredit, settleCreditInTx, InsufficientCreditError } from '../utils/ai-credit';
+import { getCreditCost } from '../utils/ai-credit-calc';
+import { randomUUID } from 'crypto';
 const router = Router();
 router.use(authenticate);
 
@@ -200,14 +203,19 @@ ${memoryContext}
 - "~인 것 같습니다" 같은 가설 표현 금지. 근거 명확하면 단언, 부족하면 "데이터 부족" 명시
 - 전문 용어 풀어쓰기 (예: "RFM 분석" → "최근 구매 + 빈도 + 금액 기반 분석")`;
 
-    const answer = await callAIWithFallback({
-      system: systemPrompt,
-      userMessage: q,
-      maxTokens: 1500,
-      temperature: 0.3,
-      model: 'opus',
-      companyId,
-      source: 'ai-memory-search',
+    // ★ 2026-10-25 원장 Z4 — 돈 = AI 결과 정산 한 곳(AI 메모리 검색 · 답이 비면 0원) · 쓸 결과가 아니면 0원 · 잔액 부족 402 · 원장 쓰기 실패 503
+    const { result: answer } = await runChargedAi({
+      companyId: companyId, cost: getCreditCost('ai-memory-search'), source: 'ai-memory-search', createdBy: req.user?.userId || null,
+      run: () => callAIWithFallback({
+        system: systemPrompt,
+        userMessage: q,
+        maxTokens: 1500,
+        temperature: 0.3,
+        model: 'opus',
+        companyId,
+        source: 'ai-memory-search',
+      }),
+      accept: (answer) => !!plainTextFromAi(answer).trim(),
     });
 
     const lowerQ = q.toLowerCase();
@@ -235,6 +243,8 @@ ${memoryContext}
       no_data: false,
     });
   } catch (err: any) {
+    if (err instanceof InsufficientCreditError) return res.status(402).json({ success: false, error: 'AI 크레딧이 부족합니다. 크레딧을 충전해 주세요.', code: 'INSUFFICIENT_CREDIT' });
+    if (respondUserError(res, err)) return;
     console.error('[AI Memory search-natural] 오류:', err);
     const msg = err?.message || '';
     if (msg.includes('column') && msg.includes('does not exist')) {
@@ -688,6 +698,10 @@ JSON 단 1건만 출력. 다른 설명/주석/마크다운 코드블록 없음. 
 { "kinds": ["marketing 또는 notice", ... (문안 순서대로 ${parsedMessages.length}개)], "marketing": {14 항목} 또는 null, "notice": {14 항목} 또는 null }`;
 
     const { callAIWithFallback } = await import('../services/ai');
+    // ★ 2026-10-25 원장 Z4 — 돈 = 저장까지 끝난 추출만(잔액 확인 → AI 0크레딧 → 저장 트랜잭션 안에서 성공 뒤 차감)
+    //   옛: 응답 순간 1크레딧 · 형식 오류로 저장하지 못해도(500) 나갔다.
+    const extractCost = getCreditCost('brand-voice-extract');
+    await checkCredit(companyId, extractCost);
     let rawResponse: string;
     try {
       rawResponse = await callAIWithFallback({
@@ -699,6 +713,7 @@ JSON 단 1건만 출력. 다른 설명/주석/마크다운 코드블록 없음. 
         model: 'sonnet',
         companyId,
         source: 'brand-voice-extract',
+        creditCost: 0,
       });
     } catch (aiErr: any) {
       if (aiErr?.name === 'AiRateLimitExceeded') {
@@ -721,18 +736,18 @@ JSON 단 1건만 출력. 다른 설명/주석/마크다운 코드블록 없음. 
         if (!parsed || bodyTexts.length === 0) continue;
         const lengths = bodyTexts.map((t) => t.length);
         byKindGuideline[kind] = {
-          tone_signature: String(parsed.tone_signature || '정보/실용'),
+          tone_signature: aiStr(parsed.tone_signature, '정보/실용') || '정보/실용',
           avg_length_chars: Number(parsed.avg_length_chars) || 0,
           avg_length_bytes: Number(parsed.avg_length_bytes) || 0,
           frequent_expressions: Array.isArray(parsed.frequent_expressions)
             ? parsed.frequent_expressions.map((s: any) => String(s)).slice(0, 5)
             : [],
           ad_prefix_position: parsed.ad_prefix_position === 'back' ? 'back' : 'front',
-          greeting_pattern: String(parsed.greeting_pattern || ''),
+          greeting_pattern: aiStr(parsed.greeting_pattern),
           cta_patterns: Array.isArray(parsed.cta_patterns)
             ? parsed.cta_patterns.map((s: any) => String(s)).slice(0, 5)
             : [],
-          signature: String(parsed.signature || ''),
+          signature: aiStr(parsed.signature),
           reject_position: parsed.reject_position === 'front' ? 'front' : 'back',
           emoji_whitelist: Array.isArray(parsed.emoji_whitelist)
             ? parsed.emoji_whitelist.map((s: any) => String(s)).slice(0, 20)
@@ -756,9 +771,10 @@ JSON 단 1건만 출력. 다른 설명/주석/마크다운 코드블록 없음. 
     //   문안이 있는 성격의 묶음이 빠지면 아무것도 쓰지 않는다(불완전한 응답이 기존 학습을 지우거나 덮지 않게).
     const plan = planBrandVoiceRows(kinds, byKindGuideline);
     if (!plan.ok) {
-      return res.status(500).json({
+      return res.status(502).json({
         success: false,
-        error: 'AI 응답 JSON 형식 오류. 재시도해주세요.',
+        error: 'AI 가 말투를 읽어 내지 못했어요. 크레딧은 빠지지 않았어요. 다시 눌러 주세요.',
+        code: 'AI_PARSE_FAILED',
       });
     }
     const guideline: BrandGuidelineValue = plan.main;
@@ -832,6 +848,8 @@ JSON 단 1건만 출력. 다른 설명/주석/마크다운 코드블록 없음. 
           [parsedRows[i].id, companyId, JSON.stringify(value)],
         );
       }
+      // 저장이 다 된 뒤 · 커밋 앞에서 **같은 트랜잭션으로** 걷는다(못 걷으면 402 · 503 = 함께 롤백 · ★ 1026 Codex 1R — 옛: 다른 연결로 걸어 저장 COMMIT 이 실패해도 차감이 남았다)
+      await settleCreditInTx(client, { companyId, cost: extractCost, source: 'brand-voice-extract', createdBy: req.user?.userId || null, idempotencyKey: `brand-voice-extract:${companyId}:${randomUUID()}` });
       await client.query('COMMIT');
     } catch (txErr) {
       await client.query('ROLLBACK');
@@ -849,6 +867,8 @@ JSON 단 1건만 출력. 다른 설명/주석/마크다운 코드블록 없음. 
 
     return res.json({ success: true, guideline, notice_guideline: noticeGuideline, kinds: finalKinds });
   } catch (err: any) {
+    if (err instanceof InsufficientCreditError) return res.status(402).json({ success: false, error: 'AI 크레딧이 부족합니다. 크레딧을 충전해 주세요.', code: 'INSUFFICIENT_CREDIT' });
+    if (respondUserError(res, err)) return;
     console.error('[Brand Voice extract-guideline] 오류:', err);
     return res.status(500).json({ success: false, error: publicErrorText(err, '가이드라인 추출 실패') });
   }

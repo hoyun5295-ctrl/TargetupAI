@@ -18,9 +18,10 @@
  *  - routes/dm.ts (A/B CRUD 라우트 + /ab/:code 뷰어)
  */
 
+import { UserFacingError } from '../http-error';
 import crypto from 'crypto';
 import { query } from '../../config/database';
-import { clampPageReached, clampTotalPages, clampDurationDelta, sanitizeSectionInteractions, mergeSectionInteractions } from './dm-tracking';
+import { clampPageReached, clampTotalPages, clampDurationDelta, clampScrollPct, sanitizeSectionInteractions, mergeSectionInteractions, DM_VIEW_COMPLETED_SQL, DM_VIEW_CLICKS_SQL } from './dm-tracking';
 
 // ────────────── 타입 ──────────────
 
@@ -66,7 +67,8 @@ export interface AbVariantStats {
   variant: AbVariantKey;
   page_id: string;
   views: number;
-  unique_phones: number;
+  /** 순방문 = 방문자 키(토큰 · 번호 · 익명 키) 수(★ 2026-10-25 원장 #64 · 옛: 공개 A/B 링크에 없는 전화번호를 세어 0) */
+  unique_visitors: number;
   avg_duration_sec: number;
   completion_rate: number; // last page 도달율
   clicks: number;
@@ -117,7 +119,7 @@ export async function createAbTest(
     [companyId, pageIds],
   );
   if (owned.rows.length !== pageIds.length) {
-    throw new Error('A/B 테스트에 포함할 DM 중 일부를 찾을 수 없습니다.');
+    throw new UserFacingError(404, 'AB_DM_NOT_FOUND', 'A/B 비교에 넣을 DM 중 일부를 찾을 수 없어요.');
   }
 
   const res = await query(
@@ -139,7 +141,8 @@ export async function createAbTest(
       weightA,
       weightB,
       weightC,
-      input.primary_metric || 'view',
+      // ★ 2026-10-25 원장 #64 — 「전환」은 셀 길이 없다(공개 A/B 링크 = 익명 · 구매 귀속 0 · 판정이 클릭으로 대신했다) → 새로 만들 때는 클릭으로 받는다
+      input.primary_metric === 'conversion' ? 'click' : (input.primary_metric || 'view'),
     ],
   );
   return res.rows[0] as AbTestRecord;
@@ -162,12 +165,14 @@ export async function getAbTestByShortCode(code: string): Promise<AbTestRecord |
 }
 
 /** ★ 2026-10-24 ⑫ ownerId = 담당자(본인이 만든 것만) · null = 관리자(회사 전체) — resolveOwnerScope 와 같은 뜻 */
-export async function listAbTests(companyId: string, ownerId: string | null = null): Promise<AbTestRecord[]> {
+/** ★ 2026-10-25 원장 #80 — A/B 목록 상한(넘으면 잘림을 싣는다 · 화면이 「최근 N개」를 말한다) */
+export const AB_TEST_LIST_CAP = 100;
+export async function listAbTests(companyId: string, ownerId: string | null = null): Promise<{ rows: AbTestRecord[]; truncated: boolean }> {
   const res = await query(
-    `SELECT * FROM dm_ab_tests WHERE company_id = $1 AND ($2::uuid IS NULL OR created_by = $2::uuid) ORDER BY created_at DESC LIMIT 100`,
-    [companyId, ownerId],
+    `SELECT * FROM dm_ab_tests WHERE company_id = $1 AND ($2::uuid IS NULL OR created_by = $2::uuid) ORDER BY created_at DESC LIMIT $3`,
+    [companyId, ownerId, AB_TEST_LIST_CAP + 1],
   );
-  return res.rows as AbTestRecord[];
+  return { rows: (res.rows as AbTestRecord[]).slice(0, AB_TEST_LIST_CAP), truncated: res.rows.length > AB_TEST_LIST_CAP };
 }
 
 export async function updateAbTest(
@@ -190,7 +195,7 @@ export async function updateAbTest(
   if (current.status !== 'draft') {
     for (const f of frozenFields) {
       if (patch[f] !== undefined) {
-        throw new Error('실행 중이거나 완료된 테스트는 variant/가중치를 수정할 수 없습니다.');
+        throw new UserFacingError(409, 'AB_LOCKED', '진행 중이거나 끝난 비교는 고칠 수 없어요.');
       }
     }
   }
@@ -212,7 +217,7 @@ export async function updateAbTest(
   if (patch.variant_a_weight !== undefined) setField('variant_a_weight', patch.variant_a_weight);
   if (patch.variant_b_weight !== undefined) setField('variant_b_weight', patch.variant_b_weight);
   if (patch.variant_c_weight !== undefined) setField('variant_c_weight', patch.variant_c_weight);
-  if (patch.primary_metric !== undefined) setField('primary_metric', patch.primary_metric);
+  if (patch.primary_metric !== undefined) setField('primary_metric', patch.primary_metric === 'conversion' ? 'click' : patch.primary_metric);
 
   if (sets.length === 0) return current;
   sets.push(`updated_at = NOW()`);
@@ -270,7 +275,7 @@ export async function startAbTest(id: string, companyId: string): Promise<AbTest
       [companyId, pageIds],
     );
     if (published.rows.length !== pageIds.length) {
-      throw new Error('발행 중인 DM만 A/B 테스트를 시작할 수 있어요. 포함된 DM이 미발행이거나 중지 상태인지 확인해주세요.');
+      throw new UserFacingError(409, 'AB_DM_NOT_PUBLISHED', '발행 중인 DM만 A/B 테스트를 시작할 수 있어요. 포함된 DM이 미발행이거나 중지 상태인지 확인해주세요.');
     }
   }
 
@@ -353,7 +358,7 @@ export function variantToPageId(test: AbTestRecord, key: AbVariantKey): string |
  * dm_views를 variant별로 GROUP BY 하여 집계.
  * 열람 추적 컬럼:
  *   - views: COUNT(*)
- *   - unique_phones: DISTINCT phone
+ *   - unique_visitors: DISTINCT 방문자 키(토큰 · 번호 · 익명 키)
  *   - avg_duration: AVG(duration_seconds)
  *   - completion_rate: page_reached == total_pages 비율
  *
@@ -370,18 +375,13 @@ export async function aggregateResults(
     `SELECT
        ab_variant,
        COUNT(*)::int                                      AS views,
-       COUNT(DISTINCT phone)::int                         AS unique_phones,
+       COUNT(DISTINCT COALESCE(recipient_token, phone, anonymous_id))::int AS unique_visitors,
        COALESCE(AVG(duration_seconds), 0)::float          AS avg_duration_sec,
        CASE
          WHEN COUNT(*) = 0 THEN 0
-         ELSE (COUNT(*) FILTER (WHERE total_pages > 0 AND page_reached >= total_pages))::float / COUNT(*)
+         ELSE (COUNT(*) FILTER (WHERE ${DM_VIEW_COMPLETED_SQL}))::float / COUNT(*)
        END                                                AS completion_rate,
-       COALESCE(SUM(
-         CASE WHEN section_interactions ? 'cta_click'
-              THEN (section_interactions->>'cta_click')::int
-              ELSE 0
-         END
-       ), 0)::int                                         AS clicks
+       COALESCE(SUM(${DM_VIEW_CLICKS_SQL}), 0)::int        AS clicks
      FROM dm_views
      WHERE ab_test_id = $1
      GROUP BY ab_variant`,
@@ -399,7 +399,7 @@ export async function aggregateResults(
       variant: key,
       page_id: pageId,
       views: r?.views || 0,
-      unique_phones: r?.unique_phones || 0,
+      unique_visitors: r?.unique_visitors || 0,
       avg_duration_sec: r?.avg_duration_sec || 0,
       completion_rate: r?.completion_rate || 0,
       clicks: r?.clicks || 0,
@@ -416,7 +416,7 @@ export async function aggregateResults(
     switch (test.primary_metric) {
       case 'view': return v.views;
       case 'click': return v.clicks;
-      case 'conversion': return v.clicks; // 현재는 clicks를 proxy로 사용
+      case 'conversion': return v.clicks; // 옛 시험만(새로 만들 때 = 클릭) · 화면 이름표 = 「클릭(옛 전환 지표)」
       case 'complete_rate': return v.completion_rate;
       default: return v.views;
     }
@@ -455,6 +455,8 @@ export async function trackAbTestView(input: {
   totalPages: any;
   durationDelta: any;
   sectionDelta: any;
+  /** ★ 2026-10-25 원장 #64 — 스크롤 최대 도달 %(일반 DM 추적과 같은 칸 · 완독 판정이 쓴다 · 옛: A/B 는 받지 않았다) */
+  maxScrollPct?: any;
   isInit: boolean;
   ip: string | null;
   userAgent: string | null;
@@ -466,6 +468,7 @@ export async function trackAbTestView(input: {
   const durationDelta = clampDurationDelta(input.durationDelta);
   const sectionDelta = sanitizeSectionInteractions(input.sectionDelta);
   const hasSectionDelta = Object.keys(sectionDelta).length > 0;
+  const maxScrollPct = clampScrollPct(input.maxScrollPct);
   const anonymousId = input.anonymousId ? String(input.anonymousId).slice(0, 100) : null;
   const phone = input.phone ? String(input.phone).slice(0, 20) : null;
 
@@ -486,9 +489,10 @@ export async function trackAbTestView(input: {
            duration_seconds = duration_seconds + $3,
            section_interactions = COALESCE($4::jsonb, section_interactions),
            phone = COALESCE(phone, $5),
+           max_scroll_pct = CASE WHEN $7::int IS NULL THEN max_scroll_pct ELSE GREATEST(COALESCE(max_scroll_pct, 0), $7::int) END,
            last_active_at = NOW()
          WHERE id = $6`,
-        [pageReached, totalPages, durationDelta, merged ? JSON.stringify(merged) : null, phone, existing.id],
+        [pageReached, totalPages, durationDelta, merged ? JSON.stringify(merged) : null, phone, existing.id, maxScrollPct],
       );
       return;
     }
@@ -501,13 +505,13 @@ export async function trackAbTestView(input: {
     `INSERT INTO dm_views (
        dm_id, company_id, phone, anonymous_id, page_reached, total_pages,
        duration_seconds, section_interactions, ip, user_agent,
-       ab_test_id, ab_variant
+       ab_test_id, ab_variant, max_scroll_pct
      )
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`,
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`,
     [
       input.dmPageId, input.companyId, phone, anonymousId, pageReached, totalPages,
       durationDelta, hasSectionDelta ? JSON.stringify(sectionDelta) : null, input.ip, input.userAgent,
-      input.abTestId, input.variant,
+      input.abTestId, input.variant, maxScrollPct,
     ],
   );
 }

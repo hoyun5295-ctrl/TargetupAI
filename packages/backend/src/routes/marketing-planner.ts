@@ -11,6 +11,7 @@
  * ⛔ 사용자 범위(§3-10) = 관리자 회사 전체 · 담당자 자기 행사(resolveOwnerScope).
  * ⛔ `planner_events.meta`가 없으면(배포 뒤 DDL 전) 새 흐름 endpoint는 503 `DB_MIGRATION_PENDING`(db_alter_safety_net · requirePlannerMeta).
  */
+import { userErrorResponse, respondUserError } from '../utils/http-error';
 import { Router, Request, Response } from 'express';
 import { query } from '../config/database';
 import { authenticate } from '../middlewares/auth';
@@ -107,6 +108,7 @@ router.post('/confirm-view', async (req: Request, res: Response) => {
   } catch (error: any) {
     if (handleDbMigrationError(error, res, 'planner_events')) return;
     console.error('플래너 공개 확인 화면 실패:', error?.message || error);
+    if (respondUserError(res, error)) return;   // ★ 2026-10-25 R10 — 사용자 조건 오류 = 그 상태 · 문장 그대로
     return res.status(500).json({ error: '확인 화면을 불러오지 못했습니다. 잠시 후 다시 열어 주세요.' });
   }
 });
@@ -128,6 +130,9 @@ function sendPlannerError(err: any, res: Response, table: string, fallback: stri
     return res.status(err.status).json({ error: err.message, code: err.code, ...((err as any).extra || {}) });
   }
   if (err instanceof PlannerApprovalError) return res.status(err.status).json({ error: err.message, code: err.code });
+  // ★ 2026-10-25 사용자 조건 오류 · 원장 쓰기 실패(503 · 발행비 · 완성비 성공 뒤 차감 한 규칙)
+  const ue = userErrorResponse(err);
+  if (ue) return res.status(ue.status).json({ error: ue.body.error, code: ue.body.code });
   const mapped = aiAutoBuildErrorResponse(err);
   if (mapped) return res.status(mapped.status).json({ ...mapped.body, error: mapped.body.error });
   if (err instanceof InsufficientCreditError) {
@@ -147,6 +152,7 @@ router.get('/availability', async (req: Request, res: Response) => {
     return res.json({ channels: channels.map((c) => ({ ...c, label: PLANNER_CHANNEL_LABEL[c.channel] })) });
   } catch (error: any) {
     console.error('플래너 채널 가용성 조회 실패:', error);
+    if (respondUserError(res, error)) return;   // ★ 2026-10-25 R10 — 사용자 조건 오류 = 그 상태 · 문장 그대로
     return res.status(500).json({ error: '채널 상태를 불러오지 못했습니다. 잠시 후 다시 시도해 주세요.' });
   }
 });
@@ -156,7 +162,7 @@ router.get('/events', async (req: Request, res: Response) => {
   const companyId = requireCompany(req, res);
   if (!companyId) return;
   const planMonth = parsePlanMonth(req.query.month);
-  if (!planMonth) return res.status(400).json({ error: '조회할 달을 지정해 주세요. (YYYY-MM)' });
+  if (!planMonth) return res.status(400).json({ error: '볼 달을 골라 주세요.' });
   try {
     await requirePlannerMeta();
     return res.json(await buildPlannerCalendar(companyId, planMonth, resolveOwnerScope(req)));
@@ -571,7 +577,7 @@ router.get('/brief/:month/result', async (req: Request, res: Response) => {
   const companyId = requireCompany(req, res);
   if (!companyId) return;
   const planMonth = parsePlanMonth(req.params.month);
-  if (!planMonth) return res.status(400).json({ error: '조회할 달을 지정해 주세요. (YYYY-MM)' });
+  if (!planMonth) return res.status(400).json({ error: '볼 달을 골라 주세요.' });
   try {
     return res.json(await loadMonthlyResult(companyId, planMonth, resolveOwnerScope(req)));
   } catch (error: any) {
@@ -584,7 +590,7 @@ router.post('/brief/:month/cancel', async (req: Request, res: Response) => {
   const companyId = requireCompany(req, res);
   if (!companyId) return;
   const planMonth = parsePlanMonth(req.params.month);
-  if (!planMonth) return res.status(400).json({ error: '대상 달을 지정해 주세요. (YYYY-MM)' });
+  if (!planMonth) return res.status(400).json({ error: '대상 달을 골라 주세요.' });
   // 월 대행 취소는 회사 전체 행사를 멈춘다 — 회사 관리자만(§3-10).
   if (resolveOwnerScope(req) !== null) return res.status(403).json({ error: '월 대행 취소는 회사 관리자만 할 수 있습니다.', code: 'ADMIN_ONLY' });
   try {

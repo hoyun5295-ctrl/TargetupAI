@@ -5,13 +5,25 @@
  * 근거 = DM 페이지 글 + 추가 요청 · 알고 둔 한계 = DM 페이지 글이 AI 초안 그대로인 옛 DM 은 그 글이 근거가 된다(BUGS B-1024-4).
  */
 import { callAIWithFallback, getSeasonContext } from '../../services/ai';
+import { getCreditCost } from '../ai-credit-calc';
+import { runChargedAi } from '../ai-credit';
 import { buildSystemPromptWithBrandVoice } from '../brand-voice-prompt';
 import { extractJsonFromAiText } from '../ai-json';
 import { stripAdPartsDeep, normalizeSmsSeparatorLines } from '../messageUtils';
 import { findInventedBenefits, replaceInventedBenefits, dropInventedEfficacy, EFFICACY_PROMPT_RULES } from '../copy-benefit-detector';
 import { extractFlatSectionsFromDm } from './dm-builder';
 
-export async function generateDmAlertCopy(input: {
+export async function generateDmAlertCopy(...args: Parameters<typeof generateDmAlertCopyWithAi>): ReturnType<typeof generateDmAlertCopyWithAi> {
+  // ★ 2026-10-25 원장 Z4 — 돈 = AI 결과 정산 한 곳(문안이 나올 때만 · 단가 = 단가표(옛: 숫자 3)) · 쓸 결과가 아니면 0원 · 잔액 부족 402 · 원장 쓰기 실패 503 · 바깥 묶음이면 0
+  const { result } = await runChargedAi({
+    companyId: args[0].companyId, cost: getCreditCost('dm-copy-generate'), source: 'dm-copy-generate',
+    run: () => generateDmAlertCopyWithAi(...args),
+    accept: (r) => !!r.message.trim(),
+  });
+  return result;
+}
+
+async function generateDmAlertCopyWithAi(input: {
   dm: any;
   userPrompt: string;
   lengthMode: 'sms' | 'lms';
@@ -81,13 +93,13 @@ ${EFFICACY_PROMPT_RULES}
 
   const text = await callAIWithFallback({
     system,
-    userMessage: `${userPrompt ? `추가 요청: ${userPrompt}\n\n` : ''}[DM 페이지 편집 내용]을 고객에게 알리는 LMS 문안 1개를 본문 텍스트로만 작성하세요. %DM링크% 를 포함하세요.`,
+    // ★ 2026-10-25 원장 #82 — 단문(SMS)을 고른 요청은 사용자 지시도 단문(옛: 늘 「LMS 문안 1개」 · 시스템 지시와 갈렸다)
+    userMessage: `${userPrompt ? `추가 요청: ${userPrompt}\n\n` : ''}[DM 페이지 편집 내용]을 고객에게 알리는 ${lengthMode === 'sms' ? '단문(SMS)' : 'LMS'} 문안 1개를 본문 텍스트로만 작성하세요. %DM링크% 를 포함하세요.`,
     model: 'sonnet',
     maxTokens: 800,
     temperature: 0.7,
     companyId,
     source: 'dm-copy-generate',
-    creditCost: 3,
     userId,
   });
 

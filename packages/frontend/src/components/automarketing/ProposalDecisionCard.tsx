@@ -1,6 +1,7 @@
 // 오늘의 추천 — 의사결정 카드 (2026-06-27)
 // 버리는 데이터 0: proposal_json(orchestrate 결과 전체)을 위계로 렌더한다.
 //   히어로(기대 매출·ROI) → 근거(왜 지금·등급별 전환·안전·채널) → 보조(변형·인사이트·전략·리스크·비용·통합 분석).
+import { roiMultiple } from '../../utils/roi-multiple';
 import { ReactNode, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { MK_MODAL, MK_MODAL_BACKDROP } from '../../utils/make-ui';
@@ -56,6 +57,8 @@ const COPY_CHECK_CHIP: Record<string, { text: string; cls: string }> = {
   passed: { text: '스팸 검사 통과', cls: 'bg-emerald-50 text-emerald-700' },
   rechecking: { text: '혜택이 바뀌어 다시 검사하는 중', cls: 'bg-slate-100 text-slate-600' },
   blocked: { text: '바뀐 문안이 스팸 검사에 걸렸어요', cls: 'bg-rose-50 text-rose-700' },
+  // ★ 2026-10-25 원장 #18 — 검사 장비 문제로 끝내 검사를 못 함(차단이 아니다)
+  unchecked: { text: '검사 장비 문제로 다시 검사하지 못했어요 · 스팸 검사를 눌러 주세요', cls: 'bg-amber-50 text-amber-800' },
   stale: { text: '검사한 뒤 혜택이 바뀌어 다시 검사가 필요해요', cls: 'bg-amber-50 text-amber-800' },
 };
 const authHeader = () => ({ Authorization: `Bearer ${localStorage.getItem('token')}` });
@@ -83,10 +86,9 @@ export default function ProposalDecisionCard({
   const messages = pj.messages || [];
   const revenue = perf.expectedRevenue;
   const cost = proposal.costEstimate || pj.cost?.estimated || 0;
-  const roi = typeof perf.roi === 'number' && perf.roi > 0
-    ? perf.roi
-    : (cost > 0 && revenue ? revenue / cost : undefined);
-  const recommendedIdx = variantData?.recommendation?.variantIndex;
+  const roi = roiMultiple(revenue, cost);   // ★ 2026-10-25 원장 #32 — 매출 ÷ 비용(옛: 추정기 퍼센트 값 perf.roi 를 배수로 그려 100배)
+  // ★ 2026-10-25 원장 #33 — 「추천」 표지 = 만들 때 저장한 추천(서버 보낼 안 판정이 쓰는 값 · 옛: 열 때 다시 뽑은 밴딧 추천이라 안 나갈 안에 「추천」)
+  const recommendedIdx = typeof pj.recommendedIndex === 'number' && Number.isInteger(pj.recommendedIndex) && messages[pj.recommendedIndex] ? pj.recommendedIndex : undefined;
   const insufficient = basis.level === 'insufficient_data';
   const confidenceText = insufficient ? '데이터 부족' : (basis.confidence ? (CONFIDENCE_LABEL[basis.confidence] || basis.confidence) : null);
   const sourceLabel = basis.label;
@@ -147,7 +149,10 @@ export default function ProposalDecisionCard({
   const retestRunning = !!retest?.running && Date.now() - Date.parse(retest.running.startedAt) < 10 * 60 * 1000;
   const retestLeft = Math.max(0, SPAM_RETEST_LIMIT - (retest?.count || 0));
   const retestFor = (i: number, body: string, subject: string) =>
-    [...(retest?.results || [])].reverse().find((r) => r.variantIndex === i && r.body === body && (r.subject || '') === subject);
+    // ★ 2026-10-25 원장 #29 — 결과 글 = 나가는 글(이모지 안전화 · 장문 승격 뒤) · 화면이 보낸 입력 글(srcBody)로도 붙인다
+    [...(retest?.results || [])].reverse().find((r) => r.variantIndex === i
+      && (r.body === body || r.srcBody === body)
+      && ((r.subject || '') === subject || (r.srcSubject ?? null) === subject));
   const loadRetest = async () => {
     try {
       const res = await fetch(`/api/ai/operator/proposals/${proposal.id}/spam-test`, { headers: authHeader() });
@@ -473,7 +478,8 @@ export default function ProposalDecisionCard({
               );
             })}
           </div>
-          {variantData?.recommendation && (
+          {/* ★ 1025 #33 — 근거 문장은 「추천」 표지와 같은 안일 때만(다른 안을 말하는 두 번째 추천 0) */}
+          {variantData?.recommendation && variantData.recommendation.variantIndex === recommendedIdx && (
             <div className="mt-2 rounded-lg bg-indigo-50 border border-indigo-200 px-2.5 py-2 text-indigo-800 text-[11px]">
               <span className="font-medium">자동 최적화 추천:</span> {variantData.recommendation.reasoning}
               <div className="text-indigo-800 mt-0.5">AI 추천은 참고이며, 발송은 위에서 고른 변형(편집분 포함)으로 진행됩니다.</div>

@@ -12,6 +12,7 @@
  * 실측 = 2026-09-28 information_schema(기준 칸 14개 · 이 표들을 가리키는 외래키 0). 기간 인덱스는 sns_oauth_states.expires_at 뿐이라
  *   하루 1번 · 5,000행씩 끊어 지운다(잠금·WAL 폭주 방지). 실패는 표·파일마다 격리한다(정리 실패가 서비스를 막지 않는다).
  */
+import { sendSystemAlert } from './system-alert';
 import * as fs from 'fs';
 import * as path from 'path';
 import { query } from '../config/database';
@@ -80,20 +81,34 @@ export async function sweepExpiredAnalysisPdfs(opts: { pdfDir?: string } = {}): 
   const r = await query(
     `SELECT id, pdf_path FROM full_analysis_jobs
       WHERE status = 'done' AND pdf_path IS NOT NULL AND updated_at < NOW() - INTERVAL '${PDF_DAYS} days'
+      ORDER BY updated_at ASC, id
       LIMIT 1000`,
   );
+  // ★ 2026-10-25 원장 #11 — 옛: 폴더 밖 경로 · 삭제 실패 행이 표식 없이 남고 순서 없는 LIMIT 1000 → 쌓이면 뒤 PDF 를 영영 안 지웠다(보관 기한 위반)
+  //   폴더 밖 경로 = 지우지 않고(우리 폴더가 아니다) 경로를 비워 줄에서 빼고 사람에게 알린다 · 삭제 실패 = 다음 날 다시 + 사람에게
   const cleared: string[] = [];
+  const outside: string[] = [];
+  const failed: string[] = [];
   for (const row of r.rows as any[]) {
-    if (!isInsideDir(pdfDir, row.pdf_path)) continue;
+    if (!isInsideDir(pdfDir, row.pdf_path)) { outside.push(String(row.id)); continue; }
     try {
       if (fs.existsSync(row.pdf_path)) fs.unlinkSync(row.pdf_path);
       cleared.push(String(row.id));
     } catch (err: any) {
+      failed.push(String(row.id));
       console.warn('[retention] 풀분석 PDF 삭제 실패(다음 파일 계속):', err?.message || err);
     }
   }
   if (cleared.length > 0) {
     await query(`UPDATE full_analysis_jobs SET pdf_path = NULL, updated_at = NOW() WHERE id = ANY($1::uuid[])`, [cleared]);
+  }
+  const head = (ids: string[]) => `${ids.slice(0, 5).join(', ')}${ids.length > 5 ? ' 외' : ''}`;
+  if (outside.length > 0) {
+    const ok = await query(`UPDATE full_analysis_jobs SET pdf_path = NULL, updated_at = NOW() WHERE id = ANY($1::uuid[])`, [outside]).then(() => true, () => false);
+    void sendSystemAlert({ dedupKey: 'retention-pdf-outside', message: `풀분석 PDF 보관 기한 지남 · 보관 폴더 밖 경로 ${outside.length}건(작업 ${head(outside)}) — ${ok ? '경로를 비워 줄에서 뺐습니다' : '경로 비우기 실패 · 내일 다시'}. 그 파일이 남아 있으면 직접 지워 주세요.` });
+  }
+  if (failed.length > 0) {
+    void sendSystemAlert({ dedupKey: 'retention-pdf-delete-fail', message: `풀분석 PDF 보관 기한 지남 · 삭제 실패 ${failed.length}건(작업 ${head(failed)}) — 내일 다시 시도합니다. 계속되면 보관 폴더 권한을 확인해 주세요.` });
   }
   return cleared.length;
 }

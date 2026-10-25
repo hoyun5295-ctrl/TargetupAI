@@ -4,6 +4,7 @@
 //     바꾸면 바로 다시 센다(문안 0). 대상 칸 · 혜택이 바뀌어 문안이 묵으면 시작 잠금 + [이 대상으로 다시 만들기 · 5].
 //   돈 = 바닥 한 곳(시작 200 · 잔액 a → b · 회차 발송 크레딧) — 뒤에 뜨던 크레딧 확인 창 없음. 금액 = 서버 값(화면 상수 0).
 //   창 = JourneyModalShell · 배경 · Esc 닫힘 0(disableDismiss) · 닫기 = X 만 · 휴대폰 = 아래 시트. 모델명 0 · native dialog 0.
+import { useSendPolicy, hh, type SendPolicy } from '../../utils/send-policy';
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { Loader2, Sparkles, X, Users, Info, AlertTriangle, PenLine, Check, CalendarClock, Phone } from 'lucide-react';
 import JourneyModalShell from '../journey/JourneyModalShell';
@@ -69,8 +70,11 @@ const WEEK = ['일', '월', '화', '수', '목', '금', '토'];
 const SCHEDULE_ONCE: Record<string, string> = { weekly: '매주 1회', monthly: '매월 1회', yearly: '매년 1회' };
 const OP_TEXT: Record<string, string> = { gte: '이상', lte: '이하', eq: '', contains: '포함', days_within: '일 안', date_gte: '이후', date_lte: '이전', in: '중 하나', between: '사이', birth_month: '월' };
 const SUGGEST_LABEL: Record<string, string> = { went_quiet: '발길이 끊긴 고객', grade_up: '등급이 오른 고객' };
-/** 발송 가능 시각(08:00~20:30 · 서버가 다시 검증한다) */
-const TIME_CHOICES = Array.from({ length: 26 }, (_, i) => `${String(8 + Math.floor(i / 2)).padStart(2, '0')}:${i % 2 ? '30' : '00'}`);
+/** 발송 가능 시각 = 서버 발송 창(30분 간격 · 끝 시각 전까지 · 서버가 다시 검증한다 · ★ 2026-10-25 원장 #40 옛: 08:00~20:30 숫자) */
+function timeChoices(p: SendPolicy | null): string[] {
+  if (!p) return [];
+  return Array.from({ length: Math.max(0, (p.endHour - p.startHour) * 2) }, (_, i) => `${hh(p.startHour + Math.floor(i / 2))}:${i % 2 ? '30' : '00'}`);
+}
 
 function kstParts(iso: string) {
   const d = new Date(new Date(iso).getTime() + 9 * 60 * 60 * 1000);
@@ -134,6 +138,8 @@ export default function OperatorPreviewModal({
   onBlockAction: (code: string) => void;
   onCharge: () => void;
 }) {
+  const sendPolicy = useSendPolicy();
+  const TIME_CHOICES = timeChoices(sendPolicy);
   const messages = data?.proposal?.messages || [];
   const recommendedIdx = useMemo(() => {
     const rec = data?.proposal?.recommendation;

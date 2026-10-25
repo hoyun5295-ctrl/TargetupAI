@@ -56,8 +56,10 @@ describe('R093 · R165 실수신자 구매 귀속', () => {
     expect(a).toContain('const conv = await buildRecipientRunConversions(companyId, dateFrom, dateTo);');
   });
   it('자동마케팅 매출이 실수신자만 · 구매 1건 1회', () => {
+    // ★ 1025 #30 · #31 — 실수신자 구매 = 한 함수(campaignRecipientOrders · ROI · 성과 문자 · 밴딧 공용)
     const m = src('automarketing-roi.ts');
-    expect(m).toContain('const phones = await recipientPhonesOfCampaign(companyId, String(row.id));');
+    expect(m).toContain('const phones = await recipientPhonesOfCampaign(companyId, campaignId);');
+    expect(m).toContain('const orders = await campaignRecipientOrders(companyId, String(row.id));');
     expect(m).toContain('const seenEvents = new Map<string, number>();');
     expect(m).not.toContain('AND EXISTS (');
     expect(m).not.toMatch(/FROM purchases/);
@@ -182,7 +184,7 @@ describe('R078 · R193 고객 평균 구매 = 표준 컬럼', () => {
 describe('R183 자사몰 AI 진단', () => {
   it('크레딧·한도는 그대로 던지고 실패는 실패로 · 성공 뒤 차감', () => {
     const x = src('cdp-fusion-explainer.ts');
-    expect(x).toContain('if (err instanceof InsufficientCreditError || err instanceof AiRateLimitExceeded) throw err;');
+    expect(x).toContain('if (err instanceof InsufficientCreditError || err instanceof AiRateLimitExceeded || err instanceof UserFacingError) throw err;');   // ★ 1025 R10 사용자 조건 · 원장 실패(503)도 그대로
     expect(x).not.toContain('자사몰 진단 영역 일시 오류');
     expect(x).toContain('const text = await runInCreditBundle(() => callAIWithFallback({');
     expect(x.indexOf('const parsed = JSON.parse(jsonStr);')).toBeLessThan(x.indexOf("source: 'cdp-fusion-explainer', idempotencyKey: `cdp-explain:${randomUUID()}`"));
@@ -214,7 +216,7 @@ describe('Codex 차수3 D 1R — 성공 뒤 차감 확정 · 순매출 · KST �
     expect(m).toContain("HAVING NOT bool_or(x.reversed) AND bool_or(x.paid)");
     expect(m).toContain("MAX(x.amount) FILTER (WHERE x.paid) AS amount");
     expect(m).toContain("e.source || ':' || COALESCE(NULLIF(e.properties->>'order_id', ''), e.id::text) AS order_key");
-    expect(m).toContain('seenEvents.set(String(x.order_key), Number(x.amount) || 0);');
+    expect(m).toContain('for (const [k, v] of orders) seenEvents.set(k, v);');
   });
   it('campaign_runs 기간 경계 = KST 자정(UTC 벽시계로 바꿔 비교)', async () => {
     const { kstDayStartNaiveUtc } = await import('../stats-aggregation');

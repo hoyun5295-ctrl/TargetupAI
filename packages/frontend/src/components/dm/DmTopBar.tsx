@@ -197,7 +197,7 @@ export default function DmTopBar({ onBack, onTestSendClick, onPublishClick }: Dm
         style={{ ...btnStyle('primary'), ...(isStopped ? { opacity: 0.5, cursor: 'not-allowed' } : {}) }}
         title={isStopped
           ? '중지된 DM이에요. 목록에서 [재개] 후 발송할 수 있어요.'
-          : isPublished ? '타겟 고객에게 발송 (발행 완료, 추가 과금 없음)' : canPublish ? '발행: 자동 검수 후 진행 (100크레딧, DM당 1회)' : '발행: 자동 검수를 다시 실행합니다'}
+          : isPublished ? '타겟 고객에게 발송 (발행 완료, 추가 과금 없음)' : canPublish ? '발행: 자동 검수 후 금액을 확인하고 진행 (DM당 1회)' : '발행: 자동 검수를 다시 실행합니다'}
       >
         {isStopped ? '⏸ 중지됨' : isPublished ? '📨 발송' : '🚀 발행'}
       </button>

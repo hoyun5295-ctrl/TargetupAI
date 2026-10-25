@@ -13,6 +13,7 @@
  *   - 저장은 공용 saveStudioTemp(저장 공간 가득 · 이미 저장됨을 스튜디오와 같은 방식으로 가른다).
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { creditText } from '../../../constants/credit';
 import ModalBase, { ModalButton } from '../modals/ModalBase';
 import { useToast } from '../../ToastProvider';
 import TemplatePicker, { type StudioTemplatePublic } from '../../studio/TemplatePicker';
@@ -109,7 +110,7 @@ export default function StudioInsertModal({
     <div className="flex items-center gap-2 flex-wrap justify-end w-full">
       {generating && <span className="flex-1 min-w-[12rem] text-[11.5px] text-slate-500">만드는 중이에요(약 20~30초). 창을 닫아도 다시 열면 이어서 볼 수 있어요.</span>}
       <ModalButton onClick={() => setStep('pick')} disabled={generating}>다른 템플릿</ModalButton>
-      <ModalButton variant="primary" onClick={generate} disabled={generating}>{generating ? '만드는 중...' : '만들기 (2크레딧)'}</ModalButton>
+      <ModalButton variant="primary" onClick={generate} disabled={generating}>{generating ? '만드는 중...' : `만들기 (${creditText('image-studio-generate')})`}</ModalButton>
     </div>
   ) : step === 'result' ? (
     <div className="flex items-center gap-2 justify-end w-full">

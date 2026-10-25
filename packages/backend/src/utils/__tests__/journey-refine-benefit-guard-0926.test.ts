@@ -9,6 +9,13 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 const aiMock = vi.fn();
+// ★ 1025 D1 = A: 정산은 이 시험의 주제가 아니다. 크레딧제 미적용 회사로 둔다(원장 실패 = 503 은 ai-credit 시험이 고정).
+vi.mock('../ai-credit', async (orig) => ({
+  ...(await orig<any>()),
+  checkCredit: async () => undefined,
+  runChargedAi: async (o: any) => ({ result: await o.run(), charged: false }),
+  settleCreditAfterSuccess: async () => 'not_applicable',
+}));
 vi.mock('../../services/ai', async (orig) => {
   const actual: any = await orig();
   return { ...actual, callAIWithFallback: (...a: any[]) => (aiMock as any)(...a) };

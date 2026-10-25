@@ -10,6 +10,7 @@
  * (recap_notified_at·prep_reminder_sent_for와 동일한 신규 컬럼 양립 패턴).
  */
 
+import { campaignRecipientOrders } from './automarketing-roi';
 import { query } from '../config/database';
 import { recordVariantReward } from './bandit-optimizer';
 
@@ -19,7 +20,7 @@ export async function runOperatorConversionAttribution(
   let rows: any[] = [];
   try {
     const r = await query(
-      `SELECT p.id, p.auto_sent_at,
+      `SELECT p.id, p.auto_sent_at, p.campaign_id,
               (SELECT v.id FROM operator_proposal_variants v
                 WHERE v.proposal_id = p.id AND v.sent_count > 0
                 ORDER BY v.sent_count DESC LIMIT 1) AS sent_variant_id
@@ -48,21 +49,20 @@ export async function runOperatorConversionAttribution(
       // 발송 후 7일 창의 구매 실측 — automarketing-roi와 동일 이벤트·창 (임의 상수 0).
       // ★ Codex 정정: 창 상한 = min(+7일, 같은 회사의 다음 자동마케팅 발송 시각) — 연속 발송 창 겹침 시
       //   같은 구매가 여러 제안 변형에 이중 귀속되는 왜곡 차단(구매 1건 = 최대 1제안 귀속).
-      const conv = await query(
-        `SELECT COUNT(*)::int AS purchases
-           FROM cdp_events
-          WHERE company_id = $1::uuid
-            AND event_name IN ('purchase', 'order')
-            AND occurred_at >= $2
-            AND occurred_at < LEAST(
-                  $2::timestamptz + INTERVAL '7 days',
-                  COALESCE((SELECT MIN(p2.auto_sent_at) FROM operator_proposals p2
-                             WHERE p2.company_id = $1::uuid AND p2.status = 'sent'
-                               AND p2.auto_sent_at > $2::timestamptz),
-                           $2::timestamptz + INTERVAL '7 days'))`,
+      // ★ 2026-10-25 원장 #31 — 전환 = 그 캠페인 실수신자의 구매(ROI 와 같은 함수 · 옛: 회사 전체 구매 수 · 주석 「automarketing-roi 와 동일」이 0927 뒤로 거짓)
+      //   창 끝 = 다음 자동마케팅 발송 전까지(한 구매를 두 제안에 귀속하지 않는다)
+      //   ★ 1026 Codex 1R — 수신자를 못 읽음(null) = 귀속 완료로 적지 않고 다음 회차에 다시(옛: 0건으로 굳혀 장애가 풀려도 구매가 반영되지 않았다 · ROI 와 같은 규칙)
+      const nextSend = await query(
+        `SELECT MIN(p2.auto_sent_at) AS at FROM operator_proposals p2
+          WHERE p2.company_id = $1::uuid AND p2.status = 'sent' AND p2.auto_sent_at > $2::timestamptz`,
         [companyId, row.auto_sent_at],
       );
-      const purchases = Number(conv.rows[0]?.purchases) || 0;
+      const orders = row.campaign_id ? await campaignRecipientOrders(companyId, String(row.campaign_id), nextSend.rows[0]?.at || null) : new Map<string, number>();
+      if (orders === null) {
+        console.warn('[OperatorConversion] 수신자 확인 실패 · 다음 회차에 다시:', row.id);
+        continue;
+      }
+      const purchases = orders.size;
       if (purchases > 0 && row.sent_variant_id) {
         await recordVariantReward({ variantId: row.sent_variant_id, sent: 0, clicked: 0, converted: purchases });
       }

@@ -10,6 +10,7 @@
  *  - 행 삭제 시 실물 파일은 지우지 않는다 — 발행된 메시지가 같은 URL을 참조 중일 수 있어 이미지가 깨진다(비파괴).
  */
 
+import { UserFacingError } from './http-error';
 import fs from 'fs';
 import path from 'path';
 import { v4 as uuidv4 } from 'uuid';
@@ -190,7 +191,7 @@ export async function storeAssetFile(input: {
     } catch (e: any) {
       console.warn('[assets] 등재 실패 파일 회수 실패(고아 파일 가능):', filepath, e?.message);
     }
-    throw new Error('이미지를 라이브러리에 등재하지 못했습니다. 잠시 후 다시 시도해주세요.');
+    throw new UserFacingError(503, 'ASSET_REGISTER_FAILED', '이미지를 라이브러리에 등재하지 못했습니다. 잠시 후 다시 시도해주세요.');
   }
   return { url, filename, bytes: input.buffer.length, assetId };
 }

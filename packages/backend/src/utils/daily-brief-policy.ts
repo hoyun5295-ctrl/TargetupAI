@@ -10,6 +10,12 @@
  */
 import { extractJsonFromAiText } from './ai-json';   // 순수 CT(import 0) — 이 파일의 "DB 미import" 원칙 유지
 
+/**
+ * ★ 2026-10-25 원장 #35 — 「오늘의 추천」으로 보여도 되는 브리핑 = 오늘 · 어제 것(오늘 것이 아직 안 만들어진 아침 포함) · SQL 조각 한 곳.
+ *   대시보드(GET /operator/daily-brief)와 한 줄 묻기(buildAutoAsk)가 같은 조건으로 읽는다(옛: 한 줄 묻기는 날짜 무관 최신 · 몇 주 지난 추천이 카드로 떴다).
+ */
+export const CURRENT_BRIEF_DATE_SQL = `brief_date >= (NOW() AT TIME ZONE 'Asia/Seoul')::date - 1`;
+
 export interface BriefSignalOpportunity {
   type: string;
   title: string;

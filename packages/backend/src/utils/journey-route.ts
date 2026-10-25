@@ -9,6 +9,7 @@
  *
  * 주인 원칙(캠페인 campaigns.ts · 자동발송 auto-campaigns.ts 와 같다): 관리자 = 회사 전체 · 담당자(company_user) = 자기가 만든 여정만.
  */
+import { respondUserError } from './http-error';
 import type { Request, Response } from 'express';
 import { query } from '../config/database';
 import { aiZonePlanBlocked } from './plan-guard';
@@ -76,6 +77,8 @@ export async function journeyGate(req: Request, res: Response, opts: { plan: boo
  *   402 크레딧 · 400 입력 · 409 상태(칸 관문 · 붙이기 막음) · 503 DB 준비 전(CHECK 23514 · 표 42P01 · 칸 없음 · 준비 전 오류형).
  */
 export function journeyError(res: Response, err: any, label: string, fallback: string) {
+  // ★ 2026-10-25 사용자 조건 오류 · 원장 쓰기 실패(503 · 성공 뒤 차감 한 규칙) = 그 상태 그대로
+  if (respondUserError(res, err)) return res;
   if (err instanceof InsufficientCreditError) return res.status(402).json({ success: false, error: err.message || '크레딧이 부족합니다. 크레딧을 충전해 주세요.', code: 'INSUFFICIENT_CREDIT' });
   if (err instanceof JourneyInputError) return res.status(400).json({ success: false, error: err.message, code: err.code, ...(err.journeyId ? { journeyId: err.journeyId } : {}) });
   if (err instanceof ReshapeInputError || err instanceof AlimtalkFallbackError) return res.status(400).json({ success: false, error: err.message });

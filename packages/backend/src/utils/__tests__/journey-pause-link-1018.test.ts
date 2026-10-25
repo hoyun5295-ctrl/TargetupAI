@@ -86,7 +86,7 @@ describe('③④ [이 발송 정지] = 그날 대상 전부', () => {
     clientQuery.mockImplementation(async (sql: string) => {
       if (/FROM journeys WHERE id/.test(sql)) return { rows: [{ '?column?': 1 }] };
       if (/FOR UPDATE OF je/.test(sql)) return { rows: [{ id: 'e1' }, { id: 'e2' }, { id: 'e3' }] };
-      if (/UPDATE journey_executions SET status = 'paused'/.test(sql)) return { rows: [{ id: 'e1' }, { id: 'e2' }, { id: 'e3' }] };
+      if (/UPDATE journey_executions SET status = 'ended'/.test(sql)) return { rows: [{ id: 'e1' }, { id: 'e2' }, { id: 'e3' }] };
       if (/journey_step_snapshots/.test(sql)) return { rows: [{ id: 'snap', message_body: '본문' }] };
       return { rows: [] };
     });
@@ -98,7 +98,8 @@ describe('③④ [이 발송 정지] = 그날 대상 전부', () => {
     expect(r).toEqual({ ok: true, paused: 3, startedCount: 4, sendDate: '2026-10-20' });
     const sqls = clientQuery.mock.calls.map((c) => String(c[0]));
     const lockIdx = sqls.findIndex((s) => /FOR UPDATE OF je/.test(s));
-    const updIdx = sqls.findIndex((s) => /SET status = 'paused'/.test(s));
+    const updIdx = sqls.findIndex((s) => /SET status = 'ended', completed_at = NOW\(\)/.test(s));
+    expect(sqls.some((s) => /UPDATE journey_executions SET status = 'paused'/.test(s))).toBe(false);
     expect(lockIdx).toBeGreaterThan(-1);
     expect(updIdx).toBeGreaterThan(lockIdx);
     // 그 단계 · 그날 · active 조건이 잠금 조회에 있다

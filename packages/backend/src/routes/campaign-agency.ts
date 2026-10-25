@@ -26,7 +26,7 @@ import {
 import { nextStatusAfterDesign, canCustomerDownloadProposal } from '../utils/crm-agency-access';
 import { sendSystemAlert } from '../utils/system-alert';
 
-import { publicErrorText } from '../utils/http-error';
+import { publicErrorText, uploadErrorText } from '../utils/http-error';
 const router = Router();
 router.use(authenticate);
 
@@ -37,9 +37,10 @@ const STATUS_WHITELIST = ['received', 'designing', 'delivered', 'done', 'on_hold
 interface AgencyImageMeta { path: string; name: string; mime: string }
 
 // 행사 이미지 업로드 — event-campaigns imageUpload 미러(메모리 저장, 5MB×5장, jpg/png/webp)
+const AGENCY_UPLOAD_LIMITS = { fileSize: 5 * 1024 * 1024, files: MAX_EVENT_IMAGES };
 const imageUpload = multer({
   storage: multer.memoryStorage(),
-  limits: { fileSize: 5 * 1024 * 1024, files: MAX_EVENT_IMAGES },
+  limits: AGENCY_UPLOAD_LIMITS,
   fileFilter: (_req, file, cb) => {
     const mime = (file.mimetype || '').toLowerCase();
     if (['image/jpeg', 'image/png', 'image/webp'].includes(mime)) cb(null, true);
@@ -147,9 +148,7 @@ function withImageUpload(handler: (req: any, res: Response) => Promise<any>) {
   return (req: any, res: Response) => {
     imageUpload.array('images', MAX_EVENT_IMAGES)(req, res, async (uploadErr: any) => {
       if (uploadErr) {
-        const msg = uploadErr?.code === 'LIMIT_FILE_SIZE' ? '이미지는 장당 5MB 이하만 가능합니다.'
-          : uploadErr?.code === 'LIMIT_FILE_COUNT' || uploadErr?.code === 'LIMIT_UNEXPECTED_FILE' ? `이미지는 최대 ${MAX_EVENT_IMAGES}장까지 올릴 수 있습니다.`
-          : uploadErr?.message || '이미지 업로드 오류';
+        const msg = uploadErrorText(uploadErr, AGENCY_UPLOAD_LIMITS);   // ★ 2026-10-25 Z5 업로드 오류 한 곳
         return res.status(400).json({ success: false, error: msg });
       }
       try { await handler(req, res); } catch (err: any) {

@@ -25,7 +25,7 @@ import { heroEligible, OUTREACH_HERO_MIN_RATIO, applyOutreachLook, buildOutreach
 import { VISION_WARNING_OF, assessOutreachQuality, OUTREACH_QUALITY_THRESHOLDS, type OutreachQualityCode } from '../sales-outreach-review';
 import { getActiveStyleGuide } from '../sales-outreach-style';
 import { normalizeEditReason } from '../sales-outreach-jobs';
-import { normalizeQuickEventCards, materialsFromEventCards, quoteQuickCampaign, QUICK_EVENT_CARDS_MAX, QUICK_EVENT_CARD_IMAGES } from '../campaign-quick';
+import { normalizeQuickEventCards, materialsFromEventCards, quoteBuildMaterials, QUICK_EVENT_CARDS_MAX, QUICK_EVENT_CARD_IMAGES } from '../campaign-quick';
 import { rebuildDmPages } from '../dm/dm-section-prune';
 import { renderDmViewerHtml } from '../dm/dm-viewer';
 import type { Section } from '../dm/dm-section-registry';
@@ -484,11 +484,12 @@ describe('★ v3 고객 입구 — 행사 카드 정규화 · 재료 조각 · �
     expect(m.eventCards[1]).toMatchObject({ bannerUrl: `${P}c.jpg`, bannerSize: null, detailUrl: null, licensed: false, group: 'b' });
     expect(m.link).toBe('https://shop.example/ev/1');
   });
-  it('견적 — reads 는 0·1 만(호출 1회 = 3크레딧 고정 · 곱셈 0) · 옛 호출(hasText/imageCount)은 그대로', () => {
-    expect(quoteQuickCampaign({ imageCount: 9, hasText: true, reads: 1 }).parts.map((p) => p.key)).toEqual(['event-image-extract', 'dm-ai-generate']);
-    expect(quoteQuickCampaign({ imageCount: 9, hasText: false, reads: 3 }).parts.filter((p) => p.key === 'event-image-extract')).toHaveLength(1);
-    expect(quoteQuickCampaign({ imageCount: 9, hasText: false, reads: 0 }).parts.map((p) => p.key)).toEqual(['dm-ai-generate']);
-    expect(quoteQuickCampaign({ imageCount: 2, hasText: false }).parts.map((p) => p.key)).toEqual(['event-image-extract', 'dm-ai-generate']);
+  // ★ 1025 #104 — 견적 = v1 한 곳(quoteBuildMaterials) · 판독은 이미지 수와 무관하게 1회(곱셈 0) · 캐시 적중 = 0
+  it('견적 — 판독은 0·1 만(호출 1회 고정 · 곱셈 0) · 텍스트 있음 · 캐시 적중 = 판독 0', () => {
+    expect(quoteBuildMaterials({ channel: 'dm', imageCount: 9, textChars: 0 }).parts.filter((p) => p.key === 'event-image-extract')).toHaveLength(1);
+    expect(quoteBuildMaterials({ channel: 'dm', imageCount: 9, textChars: 30 }).parts.map((p) => p.key)).toEqual(['dm-ai-generate']);
+    expect(quoteBuildMaterials({ channel: 'dm', imageCount: 9, textChars: 0, visionCached: true }).parts.map((p) => p.key)).toEqual(['dm-ai-generate']);
+    expect(quoteBuildMaterials({ channel: 'dm', imageCount: 2, textChars: 0 }).parts.map((p) => p.key)).toEqual(['event-image-extract', 'dm-ai-generate']);
   });
   it('고객 채우기(3인자 · 카드 있음) — 카드1 배너 = 히어로 · 카드 본문 = 글자 카드 · 카드의 나머지 이미지 = 제목 캡션 갤러리 · 카드2 text_card + 갤러리 + cta · 카드 없으면 옛 경로 그대로', () => {
     const cards = normalizeQuickEventCards([

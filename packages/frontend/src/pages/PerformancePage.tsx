@@ -1,5 +1,6 @@
 import { OUI_CHART_AXIS, OUI_CHART_GRID, OUI_CHART_TOOLTIP } from '../utils/operator-ui';
 import ZoneFrame from '../components/zone/ZoneFrame';
+import { creditText } from '../constants/credit';
 import ZoneSegmented from '../components/zone/ZoneSegmented';
 /**
  * PerformancePage.tsx — 성과 리포트 전면 재설계 (2026-06-08)
@@ -648,7 +649,7 @@ export default function PerformancePage() {
           label: '풀분석 보고서',
           icon: Sparkles,
           tone: 'amber',
-          credit: '300크레딧',
+          credit: creditText('orchestrate'),
           onClick: () => setShowSettings(true),
           disabled: loading || !snapshot || snapshot.totalCampaigns.current === 0,
         },
@@ -672,7 +673,7 @@ export default function PerformancePage() {
                   <div className="flex items-center gap-3">
                     <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-violet-500 to-fuchsia-500 flex items-center justify-center flex-shrink-0"><FileDown className="w-5 h-5 text-white" /></div>
                     <div className="min-w-0">
-                      <div className="text-sm font-semibold text-slate-900 flex items-center gap-2">풀분석 보고서 <span className="px-1.5 py-0.5 rounded bg-violet-100 text-violet-800 text-[9px] font-bold">300 크레딧</span></div>
+                      <div className="text-sm font-semibold text-slate-900 flex items-center gap-2">풀분석 보고서 <span className="px-1.5 py-0.5 rounded bg-violet-100 text-violet-800 text-[9px] font-bold">{creditText('orchestrate')}</span></div>
                       <div className="text-[11px] text-slate-400">기간 종합 마케팅 분석 (회사 보고용)</div>
                     </div>
                     <button onClick={() => setShowSettings(false)} className="ml-auto p-1 hover:bg-slate-100 rounded-lg flex-shrink-0" aria-label="닫기"><X className="w-4 h-4 text-slate-400" /></button>

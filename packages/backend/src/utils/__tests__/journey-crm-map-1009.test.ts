@@ -209,7 +209,7 @@ describe('추천 시점 덮어쓰기', () => {
   it('추천 초안 라우트는 계획을 서버가 다시 계산한다(화면 간격 · 칸 수를 쓰지 않는다)', () => {
     const r = fs.readFileSync(path.join(__dirname, '..', '..', 'routes', 'ai.ts'), 'utf8');
     const route = r.slice(r.indexOf("router.post('/operator/journeys-reco/design'"), r.indexOf('// POST /api/ai/operator/journeys — 신규 여정 생성'));
-    expect(route).toContain('const plan = await recoPlanFor(companyId, String(triggerEvent || \'\'));');
+    expect(route).toContain('const plan = await recoPlanFor(companyId, userId, String(triggerEvent || \'\'));');
     expect(route).toContain('timing: { daysFromStart: plan.daysFromStart, dormantDays: plan.dormantDays }');
     expect(route).not.toMatch(/timing:\s*\{\s*daysFromStart:\s*shownDays/);
   });
@@ -329,19 +329,20 @@ describe('지도 배치(프론트 순수 함수)', () => {
 });
 
 describe('추천 요청 키(결정적 · Codex 3R)', () => {
-  it('같은 회사 · 계획 = 같은 키(날짜 없음 · 자정을 넘겨도 같다) · 회사나 내용이 다르면 다른 키 · uuid 모양', () => {
+  it('같은 회사 · 사람 · 계획 = 같은 키(날짜 없음 · 자정을 넘겨도 같다) · 회사 · 사람(★1025 #9) · 내용이 다르면 다른 키 · uuid 모양', () => {
     const plan = { triggerEvent: 'purchase.first', daysFromStart: [1, 40, 48], dormantDays: null };
-    const a = recoRequestId('c1', plan);
-    expect(recoRequestId('c1', { ...plan })).toBe(a);
+    const a = recoRequestId('c1', 'u1', plan);
+    expect(recoRequestId('c1', 'u1', { ...plan })).toBe(a);
     expect(a).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/);
-    expect(recoRequestId('c2', plan)).not.toBe(a);
-    expect(recoRequestId('c1', { ...plan, daysFromStart: [1, 41, 48] })).not.toBe(a);
-    expect(recoRequestId('c1', { ...plan, triggerEvent: 'cdp.purchase' })).not.toBe(a);
+    expect(recoRequestId('c2', 'u1', plan)).not.toBe(a);
+    expect(recoRequestId('c1', 'u2', plan)).not.toBe(a);   // 담당자 B 의 요청이 A 의 초안 「이미 만듦」에 막히지 않는다
+    expect(recoRequestId('c1', 'u1', { ...plan, daysFromStart: [1, 41, 48] })).not.toBe(a);
+    expect(recoRequestId('c1', 'u1', { ...plan, triggerEvent: 'cdp.purchase' })).not.toBe(a);
   });
   it('라우트는 화면 키를 받지 않고 서버가 계산한 키로 부른다', () => {
     const r = fs.readFileSync(path.join(__dirname, '..', '..', 'routes', 'ai.ts'), 'utf8');
     const route = r.slice(r.indexOf("router.post('/operator/journeys-reco/design'"), r.indexOf('// POST /api/ai/operator/journeys — 신규 여정 생성'));
-    expect(route).toContain('interviewId: recoRequestId(companyId, plan),');
+    expect(route).toContain('interviewId: recoRequestId(companyId, userId, plan),');
     expect(route).not.toMatch(/recoRequestId\([^)]*toISOString/);
     expect(route).not.toContain('recoId');
   });

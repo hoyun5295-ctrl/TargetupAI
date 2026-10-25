@@ -47,6 +47,8 @@ export default function VersionHistoryModal({ open, onClose }: { open: boolean; 
   const setToast = useDmBuilderStore((s) => s.setToast);
 
   const [versions, setVersions] = useState<Version[]>([]);
+  // ★ 2026-10-25 원장 #80 — 서버 상한에 걸렸으면 「최근 N개」라고 말한다(옛: 51번째부터 말없이 사라졌다)
+  const [truncated, setTruncated] = useState(false);
   const [loading, setLoading] = useState(false);
   const [saveLoading, setSaveLoading] = useState(false);
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -66,6 +68,7 @@ export default function VersionHistoryModal({ open, onClose }: { open: boolean; 
     try {
       const res = await api.get(`/dm/${dmId}/versions`);
       const list: Version[] = res.data?.versions || [];
+      setTruncated(res.data?.truncated === true);
       // sections/brand_kit이 string이면 parse
       const parsed = list.map((v) => ({
         ...v,
@@ -204,6 +207,9 @@ export default function VersionHistoryModal({ open, onClose }: { open: boolean; 
             </div>
           )}
 
+          {!loading && truncated && (
+            <div style={{ padding: '6px 12px', color: '#64748b', fontSize: 11.5 }}>최근 {versions.length}개 판만 보여요. 더 오래된 판은 목록에 나오지 않아요.</div>
+          )}
           {versions.map((v) => (
             <button
               key={v.id}

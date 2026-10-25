@@ -4,6 +4,7 @@
  * AI 0 · DB 0 · 0원. 전 회사(★ 2026-10-21 스위치 삭제 · 회사 권한만).
  * 예시 = 진짜 조립 함수 + 진짜 렌더러 + 가상 업체 고정 재료(보이는 것 = 나오는 것) · 날짜(마감)만 오늘 기준이라 KST 날짜별 메모리 캐시.
  */
+import { respondUserError } from '../utils/http-error';
 import { Router } from 'express';
 import { authenticate } from '../middlewares/auth';
 import { LINE_TEMPLATES, getLineTemplate, type LineChannel, type LineLayout } from '../utils/design-core/line-templates';
@@ -71,6 +72,7 @@ lineTemplatesRouter.get('/:id/example', (req: any, res: any) => {
     return res.json({ success: true, ...(out as object) });
   } catch (err: any) {
     console.error('[line-templates example] 오류:', err?.message);
+    if (respondUserError(res, err)) return;   // ★ 2026-10-25 R10 — 사용자 조건 오류 = 그 상태 · 문장 그대로
     return res.status(500).json({ success: false, error: '예시를 그리지 못했어요. 잠시 뒤 다시 열어 주세요.' });
   }
 });
@@ -106,6 +108,7 @@ lineTemplatesRouter.post('/headline-picks', async (req: any, res: any) => {
     return res.json({ success: true, ...r });
   } catch (err: any) {
     console.error('[line-templates headline-picks] 오류:', err?.message);
+    if (respondUserError(res, err)) return;   // ★ 2026-10-25 R10 — 사용자 조건 오류 = 그 상태 · 문장 그대로
     return res.status(500).json({ success: false, error: '첫 화면 템플릿을 고르지 못했어요. 잠시 뒤 다시 열어 주세요.' });
   } finally {
     releaseInflight(lockKey);
@@ -142,6 +145,7 @@ lineTemplatesRouter.post('/composition-preview', async (req: any, res: any) => {
     return res.json({ success: true, ...r, slots: r.slots.map((s) => ({ step: s.step, level: s.level, have: s.have, min: s.min, filled: s.filled })) });
   } catch (err: any) {
     console.error('[composition-preview] 실패:', err?.message);
+    if (respondUserError(res, err)) return;   // ★ 2026-10-25 R10 — 사용자 조건 오류 = 그 상태 · 문장 그대로
     return res.status(500).json({ success: false, error: '미리보기를 그리지 못했어요.', code: 'PREVIEW_FAILED' });
   }
 });

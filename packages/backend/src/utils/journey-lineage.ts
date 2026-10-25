@@ -127,6 +127,22 @@ export async function lockLineageEntry(run: { query: (text: string, params?: any
   return { open: !r.rows[0].entry_closed_at && r.rows[0].ends_passed !== true, lineageIds: [...new Set([journeyId, ...ids])] };
 }
 
+/**
+ * ★ 2026-10-25 여정 구조체크 2차(Codex 1R · 뿌리 R12 「잠금 밖에서 읽은 판정으로 쓰기」) — 실행 넣기 관문 한 곳.
+ *   같은 계보 잠금(끝내기 · 멈추기 · 붙이기 · 다른 넣기 워커와 줄 세움) 안에서 진입 열림 + 여정이 지금도 켜져 있는가를 다시 본다.
+ *   옛: 재진입 · 날짜축 · 1회 발송은 잠금 밖에서 읽은 「켜짐」으로 넣어, 그사이 끝낸 여정에 진행 중 실행이 다시 생겼다.
+ *   (진입 감시는 같은 잠금 안 startStillSame 으로 켜짐 + 시작 설정까지 본다.)
+ */
+export async function lockEntryIfActive(
+  run: { query: (text: string, params?: any[]) => Promise<any> },
+  journeyId: string,
+): Promise<{ ok: boolean; lineageIds: string[]; autoReentryEnabled: boolean }> {
+  const fresh = await lockLineageEntry(run, journeyId);
+  if (!fresh.open) return { ok: false, lineageIds: fresh.lineageIds, autoReentryEnabled: false };
+  const a = await run.query(`SELECT auto_reentry_enabled FROM journeys WHERE id = $1::uuid AND status = 'active'`, [journeyId]);
+  return { ok: a.rows.length > 0, lineageIds: fresh.lineageIds, autoReentryEnabled: a.rows[0]?.auto_reentry_enabled === true };
+}
+
 /** 여정 목록 WHERE 에 붙이는 "진입 열림" 조각. DDL 전이면 빈 문자열(옛 동작). alias 없으면 컬럼 이름만. */
 export async function entryOpenClause(alias = ''): Promise<string> {
   if (!(await lineageColumnsReady())) return '';
@@ -330,6 +346,45 @@ export async function pauseJourneyLineage(companyId: string, journeyId: string, 
 }
 
 /**
+ * ★ 2026-10-25 여정 구조체크 2차 #5 · #4 — 사람이 끝내면 같은 계보의 켜짐 · 멈춤 판 전부를 끝내고, 그 판들의 진행 중 실행도 닫는다.
+ *   옛: 끝내기는 지금 판 하나만 ended 로 바꿨다(멈추기는 1020 부터 계보 전체). 「새 모양」으로 고친 여정을 끝내도 옛 판이 진행 중 고객에게 계속 보냈고,
+ *   끝난 판의 실행은 active · paused 로 영원히 남아 「진행 중」으로 셌다(닫는 자리가 없는 상태 · R6).
+ *   멈추기 · 켜기와 같은 계보 잠금 안에서 · 한 트랜잭션. 돌려줌 = 이번에 끝낸 여정 id(지금 판이 이미 끝났으면 그 id 는 없다). 초안 판은 건드리지 않는다.
+ */
+export async function endJourneyLineage(companyId: string, journeyId: string): Promise<string[]> {
+  const ready = await lineageColumnsReady();
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    await lockLineage(client, journeyId);
+    const r = await client.query(
+      `UPDATE journeys j SET status = 'ended', updated_at = NOW()
+        WHERE j.company_id = $2::uuid AND j.status <> 'ended'
+          AND (j.id = $1::uuid${ready ? `
+               OR (j.status IN ('active', 'paused') AND j.lineage_id IS NOT NULL
+                   AND j.lineage_id = (SELECT s.lineage_id FROM journeys s WHERE s.id = $1::uuid AND s.company_id = $2::uuid))` : ''})
+        RETURNING j.id`,
+      [journeyId, companyId],
+    );
+    const ended = r.rows.map((x: any) => String(x.id));
+    if (ended.length > 0) {
+      await client.query(
+        `UPDATE journey_executions SET status = 'ended', completed_at = NOW()
+          WHERE journey_id = ANY($1::uuid[]) AND status IN ('active', 'paused')`,
+        [ended],
+      );
+    }
+    await client.query('COMMIT');
+    return ended;
+  } catch (e) {
+    await client.query('ROLLBACK').catch(() => undefined);
+    throw e;
+  } finally {
+    client.release();
+  }
+}
+
+/**
  * ★ V.3 §6-5 — 지금 판을 다시 켰을 때 함께 다시 켤 같은 계보의 멈춘 옛 판(진입 닫힘 · 진행 중 고객 마무리분). DDL 전이면 [].
  */
 export async function pausedClosedSiblings(companyId: string, journeyId: string): Promise<string[]> {
@@ -357,11 +412,19 @@ export async function endDrainedVersions(): Promise<number> {
     ...(ends ? [`NOT ${ENTRY_ENDS_OPEN_SQL('j')}`] : []),
     `(j.start_kind = 'one_shot' AND EXISTS (SELECT 1 FROM journey_executions x WHERE x.journey_id = j.id))`,
   ];
+  // ★ 2026-10-25 #4(R6) — 끝낸 판에 남은 멈춘 실행도 같은 문장에서 닫는다(끝난 판은 다시 켜지지 않아 되살릴 길이 없다).
   const r = await query(
-    `UPDATE journeys j SET status = 'ended', updated_at = NOW()
-      WHERE j.status = 'active' AND (${closed.join(' OR ')})
-        AND NOT EXISTS (SELECT 1 FROM journey_executions e WHERE e.journey_id = j.id AND e.status = 'active')
-      RETURNING j.id`,
+    `WITH done AS (
+       UPDATE journeys j SET status = 'ended', updated_at = NOW()
+        WHERE j.status = 'active' AND (${closed.join(' OR ')})
+          AND NOT EXISTS (SELECT 1 FROM journey_executions e WHERE e.journey_id = j.id AND e.status = 'active')
+        RETURNING j.id
+     ), closed_exec AS (
+       UPDATE journey_executions x SET status = 'ended', completed_at = NOW()
+        WHERE x.journey_id IN (SELECT id FROM done) AND x.status = 'paused'
+        RETURNING x.id
+     )
+     SELECT id FROM done`,
   );
   return r.rows.length;
 }

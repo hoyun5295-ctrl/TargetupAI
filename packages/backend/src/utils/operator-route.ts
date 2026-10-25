@@ -9,6 +9,7 @@
  * 주인 원칙 = 여정과 같은 한 함수(journey-access · owner-scope): 관리자 = 회사 전체 · 담당자 = 자기가 만든 자동 마케팅만 · 남의 것 = 404.
  * 요금제 문 = 돈이 나가거나 발송이 시작되는 주소만(plan: true). 조회 · 거부 · 정지 · 보관은 요금제가 잠겨도 열어 둔다(남은 예약을 멈출 수 있게 · 기존 계약).
  */
+import { respondUserError } from './http-error';
 import type { Request, Response } from 'express';
 import { query } from '../config/database';
 import { aiZonePlanBlocked } from './plan-guard';
@@ -64,6 +65,8 @@ export async function operatorGate(req: Request, res: Response, opts: { plan: bo
  *   402 크레딧 · 400 입력 · 409 처리 중 · 판 다름 · 409/503 등록(키 충돌 · 차감 확인 실패) · 503 DB 준비 전.
  */
 export function operatorError(res: Response, err: any, label: string, fallback: string) {
+  // ★ 2026-10-25 사용자 조건 오류 · 원장 쓰기 실패(503 · 성공 뒤 차감 한 규칙) = 그 상태 그대로
+  if (respondUserError(res, err)) return res;
   if (err instanceof PreviewStaleError) return res.status(409).json({ success: false, error: err.message, code: 'PREVIEW_STALE', current: err.current });
   if (err instanceof PreviewBusyError) return res.status(409).json({ success: false, error: err.message, code: 'PREVIEW_BUSY' });
   if (err instanceof PreviewInputError) return res.status(400).json({ success: false, error: err.message, code: 'PREVIEW_INPUT' });

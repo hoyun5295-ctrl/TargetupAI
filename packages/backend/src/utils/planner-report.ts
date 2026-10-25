@@ -9,6 +9,7 @@
  * ⛔ 월말 통지는 **월간 1회**다(`planner_monthly_approvals.result_notified_at` 멱등).
  *    그 컬럼은 배포 후 DDL이라, 없으면 통지 패스만 조용히 쉰다(결과 화면은 컬럼과 무관하게 동작한다).
  */
+import { isDemoCompany } from './demo-company';
 import { query } from '../config/database';
 import { PlannerChannel, PLANNER_CHANNEL_LABEL, computeTouchpointDate, TimingRule } from './marketing-planner';
 import { countPlannerParticipants } from './planner-participation';
@@ -250,7 +251,8 @@ export async function runPlannerResultNotifyPass(): Promise<{ notified: number }
   const targets = await query(
     `SELECT company_id, plan_month FROM planner_monthly_approvals
       WHERE status = 'approved' AND plan_month < $1 AND result_notified_at IS NULL
-      ORDER BY plan_month ASC LIMIT 50`,
+      -- ★ 2026-10-25 원장 #54 — 오래 안 본 순(못 보낸 달은 아래에서 차례를 뒤로 민다 · 옛: plan_month 순이라 못 보낸 달이 맨 앞을 영구히 차지)
+      ORDER BY updated_at ASC, plan_month ASC LIMIT 50`,
     [thisMonth],
   );
   let notified = 0;
@@ -268,20 +270,26 @@ export async function runPlannerResultNotifyPass(): Promise<{ notified: number }
         );
         continue;
       }
-      const creator = await query(
-        `SELECT created_by FROM planner_events
-          WHERE company_id = $1::uuid AND plan_month = $2 AND created_by IS NOT NULL LIMIT 1`,
-        [companyId, planMonth],
-      );
+      // ★ 2026-10-25 원장 #53 — 회사 전체 수치 = 회사 관리자에게(공용 연락처 CT · 만든 사람 null = 관리자 순) · 옛: 그 달 행사 만든 사람 중 아무나 하나
       const sent = await notifyPlanner(
         companyId,
-        creator.rows[0]?.created_by ? String(creator.rows[0].created_by) : null,
+        null,
         '[마케팅 플래너] 월간 결과 안내',
         buildResultNoticeBody(result),
       );
       // ⛔ 통지가 한 통도 못 나갔으면 표식을 남기지 않는다 — 번호를 채우면 다음 주기에 나간다
       //    (0803 0건 통지 교훈: 효과가 끝난 뒤에만 기록을 확정한다).
-      if (!sent) continue;
+      // ★ 2026-10-25 원장 #54 — 시연 회사 = 통지 0 이 정상이라 닫는다 · 그 밖(번호 없음 · 적재 실패) = 차례만 뒤로(다른 회사 결과가 막히지 않게)
+      if (!sent) {
+        const demo = await isDemoCompany(companyId).catch(() => false);
+        await query(
+          demo
+            ? `UPDATE planner_monthly_approvals SET result_notified_at = NOW(), updated_at = NOW() WHERE company_id = $1::uuid AND plan_month = $2 AND result_notified_at IS NULL`
+            : `UPDATE planner_monthly_approvals SET updated_at = NOW() WHERE company_id = $1::uuid AND plan_month = $2 AND result_notified_at IS NULL`,
+          [companyId, planMonth],
+        ).catch(() => { /* 다음 주기 */ });
+        continue;
+      }
       await query(
         `UPDATE planner_monthly_approvals SET result_notified_at = NOW(), updated_at = NOW()
           WHERE company_id = $1::uuid AND plan_month = $2 AND result_notified_at IS NULL`,

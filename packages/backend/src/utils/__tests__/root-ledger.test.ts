@@ -90,10 +90,27 @@ const MONEY_ROUTE_EXEMPT: Record<string, string> = {
   'marketing-planner.ts PUT /events/:id/copy': '고친 문안 다시 검사 · 우리 부담 AI(묶음 안 · 고객 차감 0) · 발송은 승인 · 실행 문이 지킨다',
   'marketing-planner.ts POST /touchpoints/:id/recheck/edit': '고친 문안 다시 검사 · 우리 부담 AI(묶음 안 · 고객 차감 0)',
   'marketing-planner.ts POST /touchpoints/:id/recheck/defer': '미루기 = 끄기 쪽(만료 뒤에도 연다)',
+  // ★ 2026-10-25 R2 전 라우터
+  'planner-recheck-public.ts POST /edit': '휴대폰 링크 고치기 = PC 와 같다(고친 문안 다시 검사 · 우리 부담 AI · 발송은 [보내기] 문이 지킨다)',
+  'planner-recheck-public.ts POST /defer': '휴대폰 링크 미루기 = 끄기 쪽(PC 와 같다)',
+  'campaigns.ts POST /test-send': '직접 발송 축 = 전 요금제 기본 기능(요금제 표 FREE 「문자 직접 발송」) · 통제 = 선불 잔액',
+  'campaigns.ts POST /direct-send': '직접 발송 축 = 전 요금제 기본 기능 · 통제 = 선불 잔액',
+  'campaigns.ts POST /direct-send/commit': '직접 발송 축 = 전 요금제 기본 기능 · 통제 = 선불 잔액',
+  'campaigns.ts POST /brand-send': '직접 발송 축(브랜드 메시지) = 요금제 문 대상 아님 · 통제 = 선불 잔액 · 채널 등록',
+  'spam-filter.ts POST /test': '스팸 검사 = 요금제 칸(spam_filter_enabled)을 주소 안에서 판정 · 없는 요금제 = 체험 횟수',
+  'event-campaigns.ts POST /extract-image': '사진 판독 = 입력칸 공용(AI 한줄로 · DM · 이메일 · 인앱) · 크레딧 확인 뒤 성공 때만 걷는다(원장 §4-G 결함 아님)',
+  'event-campaigns.ts POST /materials/quote': '견적 = 금액 계산 · 잔액 읽기만(돈을 쓰지 않는다)',
+  'mall-products.ts POST /cards': '몰 상품 조회만(AI 0 · 차감 0) · 기계 추적이 같은 이름(lookupMall)을 돈 함수로 본다',
+  'mall-products.ts POST /line-candidates': '몰 후보 조회만(AI 0 · 차감 0) · 기계 추적이 같은 이름(search)을 돈 함수로 본다',
 };
 
 /** 서버 요금제 문(공용 CT 하나 · 문 도우미는 안에서 같은 함수를 부른다 — 아래 시험이 그 사실을 확인한다) · 도우미를 { plan: false } 로 부르면 문이 아니다 */
-const PLAN_GATE = /\baiZonePlanBlocked\(|\b(?:journeyGate|operatorGate|ensureEmailAccess|ensureEmailAdmin)\((?![^)]*plan:\s*false)/;
+const AI_ZONE_GATE = /\baiZonePlanBlocked(?:For)?\(|\b(?:journeyGate|operatorGate|ensureEmailAccess|ensureEmailAdmin|lineGate)\((?![^)]*plan:\s*false)/;
+/**
+ * ★ 2026-10-25 R2 전 라우터 — 서버 요금제 문의 꼴 전부: AI 존 문 · 기능 칸 문(requirePlanFeature 미들웨어 · canUseFeature) · 유료 판정(isActivePaidPlan) ·
+ *   대행 계약 판정(requireAgencySend · 캠페인 대행 자격) · AI 체험 판정(requireAiOperatorTrialActive). 전부 plan-guard 의 판정 함수를 부른다.
+ */
+const PLAN_GATE = new RegExp(`${AI_ZONE_GATE.source}|\\b(?:requirePlanFeature|canUseFeature|isActivePaidPlan|requireAgencySend|requireAgencySendMw|checkEligibility|isCompanyEligible|requireAiOperatorTrialActive)\\b`);
 /**
  * 끄기 · 멈추기 · 취소 · 지우기 주소(만료 뒤에도 열어 둔다 · Codex 1024 1R)
  * ★ 2026-10-24 세 채널 구조체크 ③ — 목록은 요금제 문(plan-guard PLAN_CONTROL_PATH)의 식을 그대로 읽는다(시험과 문이 다른 목록을 갖지 않게).
@@ -105,58 +122,41 @@ const CONTROL_ROUTE = (b: { method: string; path: string }) => b.method === 'DEL
 const GATE_HELPERS: Record<string, string> = {
   journeyGate: 'utils/journey-route.ts', operatorGate: 'utils/operator-route.ts',
   ensureEmailAccess: 'routes/email.ts', ensureEmailAdmin: 'routes/email.ts',
+  lineGate: 'routes/ai-line.ts',
 };
 /**
- * 화면 PlanGate 기능 → 그 화면의 서버 주소(라우터 · 경로 앞머리). 화면에 PlanGate 가 새로 생기면 여기 없어서 실패한다.
- * 공용 채널 라우터(dm · sns)는 라우터 전체가 기능 문(requirePlanFeature)을 지난다 — 아래 ROUTER_LEVEL_GATE.
+ * ★ 2026-10-25 원장 R2 · #55 — 대상 = 전 라우터(공개 링크 포함 · 화면 PlanGate 손 표는 지웠다 · 옛: 표에 오른 라우터만 봐서 플래너 공개 링크가 밖이었다).
+ *   요금제 문 대상이 아닌 라우터는 이유와 함께 아래 면제(라우터 단위). 그 밖은 돈 · 발송 · AI 함수에 닿는 주소마다 문을 먼저 지난다.
  */
-const PLAN_SCREEN_ROUTERS: Record<string, Array<{ file: string; prefix?: string }>> = {
-  'connect-shop': [{ file: 'cdp.ts', prefix: '/inapp' }],
-  'inapp-message': [{ file: 'cdp.ts', prefix: '/inapp' }, { file: 'ai.ts', prefix: '/one-line' }, { file: 'line-templates.ts' }],
-  performance: [{ file: 'ai.ts', prefix: '/operator/performance' }],
-  predictive: [{ file: 'ai.ts', prefix: '/operator/predictive' }],
-  'auto-marketing': [{ file: 'ai.ts', prefix: '/operator/' }],
-  journeys: [{ file: 'ai.ts', prefix: '/operator/journeys' }],
-  'marketing-planner': [{ file: 'marketing-planner.ts' }],
-  'image-studio': [{ file: 'image-studio.ts' }],
-  'email-campaign': [{ file: 'email.ts' }, { file: 'ai.ts', prefix: '/one-line' }, { file: 'line-templates.ts' }],
-  'ai-memory': [{ file: 'ai-memory.ts' }, { file: 'ai.ts', prefix: '/operator/memory' }],
-  'quick-campaign': [{ file: 'dm.ts' }, { file: 'email.ts' }, { file: 'content-interview.ts' }],
-  'mobile-dm': [{ file: 'dm.ts' }, { file: 'content-interview.ts' }, { file: 'ai.ts', prefix: '/one-line' }, { file: 'line-templates.ts' }],
-  sns: [{ file: 'sns.ts' }],
-  // ★ 2026-10-24 세 채널 구조체크 ⑦ — 푸시 발송 화면은 PlanGate 가 아니라 관리자 입구(PrivateRoute)지만 발송 효과라 같은 서버 문을 본다
-  'push(관리자 화면 · PlanGate 없음)': [{ file: 'cdp.ts', prefix: '/push' }],
+const ALL_ROUTERS = sourceFiles(join(BE, 'routes'), /\.ts$/).filter((f) => !/\.(test|verify)\.ts$/.test(f));
+const R2_ROUTER_EXEMPT: Record<string, string> = {
+  'admin.ts': '슈퍼관리자 전용(/api/admin · 고객 요금제 대상 아님)',
+  'billing.ts': '슈퍼관리자 정산(/api/admin/billing · 고객 요금제 대상 아님)',
+  'sales-outreach.ts': '직원 영업 도구(router.use requireSuperAdmin · 회사 크레딧 0)',
+  'agency-approve.ts': '대행발송 승인 링크(토큰 + 인증번호 · 요금제가 아니라 대행 계약 · 계약 판정은 접수 때 requireAgencySend)',
 };
 const ROUTER_LEVEL_GATE = /\.use\(\s*requirePlanFeature\(/;
 
 describe('R2 화면에만 있는 문 — PlanGate 화면의 돈 · 발송 주소 = 서버 요금제 문', () => {
-  it('화면 PlanGate 기능이 전부 표에 있다(새 PlanGate 화면 = 서버 주소를 등재해야 통과)', () => {
-    const app = read(join(FE, 'App.tsx'));
-    const ids = Array.from(new Set(Array.from(app.matchAll(/PlanGate featureId="([^"]+)"/g)).map((m) => m[1])));
-    expect(ids.length).toBeGreaterThan(5);
-    expect(ids.filter((id) => !PLAN_SCREEN_ROUTERS[id])).toEqual([]);
-  });
   it('돈 · 발송 · AI 함수에 닿는 주소는(유틸까지 따라가 뽑는다) 그 호출보다 먼저 서버 요금제 문을 지난다', () => {
     const bad: string[] = [];
     const seen = new Set<string>();
     const traced = moneyCallRe();
     const usedExempt = new Set<string>();
-    for (const list of Object.values(PLAN_SCREEN_ROUTERS)) {
-      for (const { file, prefix } of list) {
-        const src = stripComments(be(`routes/${file}`));
-        if (ROUTER_LEVEL_GATE.test(src)) continue;
-        for (const b of routeBlocks(src)) {
-          if (prefix && !b.path.startsWith(prefix)) continue;
-          const id = `${file} ${key(b)}`;
-          if (seen.has(id)) continue;
-          seen.add(id);
-          if (CONTROL_ROUTE(b)) continue;
-          const at = [b.body.search(MONEY_CALL), b.body.search(traced)].filter((x) => x >= 0);
-          if (at.length === 0) continue;
-          if (MONEY_ROUTE_EXEMPT[id]) { usedExempt.add(id); continue; }
-          const gate = b.body.search(PLAN_GATE);
-          if (gate < 0 || gate > Math.min(...at)) bad.push(id);
-        }
+    for (const file of ALL_ROUTERS) {
+      if (R2_ROUTER_EXEMPT[file]) continue;
+      const src = stripComments(be(`routes/${file}`));
+      if (ROUTER_LEVEL_GATE.test(src)) continue;
+      for (const b of routeBlocks(src)) {
+        const id = `${file} ${key(b)}`;
+        if (seen.has(id)) continue;
+        seen.add(id);
+        if (CONTROL_ROUTE(b)) continue;
+        const at = [b.body.search(MONEY_CALL), b.body.search(traced)].filter((x) => x >= 0);
+        if (at.length === 0) continue;
+        if (MONEY_ROUTE_EXEMPT[id]) { usedExempt.add(id); continue; }
+        const gate = b.body.search(PLAN_GATE);
+        if (gate < 0 || gate > Math.min(...at)) bad.push(id);
       }
     }
     expect(bad).toEqual([]);
@@ -171,13 +171,11 @@ describe('R2 화면에만 있는 문 — PlanGate 화면의 돈 · 발송 주소
   it('라우터 머리 문은 끄기 요청을 연다(except · 세 채널 구조체크 ③ — 옛: DM · SNS 머리 문이 중지 · 삭제 · 예약 취소까지 막았다)', () => {
     const bare: string[] = [];
     let heads = 0;
-    for (const list of Object.values(PLAN_SCREEN_ROUTERS)) {
-      for (const { file } of list) {
-        const src = stripComments(be(`routes/${file}`));
-        for (const m of src.matchAll(/\.use\(\s*requirePlanFeature\(([^)]*\))?[^;]*;/g)) {
-          heads++;
-          if (!/requirePlanFeature\(\s*'[^']+'\s*,\s*\{\s*except:\s*is(?:Plan|Dm)ControlRequest\s*\}\s*\)/.test(m[0])) bare.push(`${file}: ${m[0].slice(0, 90)}`);
-        }
+    for (const file of ALL_ROUTERS) {
+      const src = stripComments(be(`routes/${file}`));
+      for (const m of src.matchAll(/\.use\(\s*requirePlanFeature\(([^)]*\))?[^;]*;/g)) {
+        heads++;
+        if (!/requirePlanFeature\(\s*'[^']+'\s*,\s*\{\s*except:\s*is(?:Plan|Dm)ControlRequest\s*\}\s*\)/.test(m[0])) bare.push(`${file}: ${m[0].slice(0, 90)}`);
       }
     }
     expect(heads).toBeGreaterThanOrEqual(2);
@@ -198,20 +196,18 @@ describe('R2 화면에만 있는 문 — PlanGate 화면의 돈 · 발송 주소
   });
   it('끄기 · 멈추기 · 취소 · 지우기 주소는 요금제 문을 지나지 않는다(만료 뒤에도 고객이 멈출 수 있다)', () => {
     const bad: string[] = [];
-    for (const list of Object.values(PLAN_SCREEN_ROUTERS)) {
-      for (const { file, prefix } of list) {
-        const src = stripComments(be(`routes/${file}`));
-        for (const b of routeBlocks(src)) {
-          if (prefix && !b.path.startsWith(prefix)) continue;
-          if (CONTROL_ROUTE(b) && PLAN_GATE.test(b.body)) bad.push(`${file} ${key(b)}`);
-        }
+    for (const file of ALL_ROUTERS) {
+      if (R2_ROUTER_EXEMPT[file]) continue;
+      const src = stripComments(be(`routes/${file}`));
+      for (const b of routeBlocks(src)) {
+        if (CONTROL_ROUTE(b) && AI_ZONE_GATE.test(b.body)) bad.push(`${file} ${key(b)}`);
       }
     }
     expect(Array.from(new Set(bad))).toEqual([]);
   });
   it('본문으로 끄는 주소(자동 재진입 · 옵션) = 끄기일 때만 문을 연다 · 메일 도우미의 요금제 판정 전체가 plan 표시 아래(Codex 1024 2R)', async () => {
     const ai = stripComments(be('routes/ai.ts'));
-    expect(ai).toContain("const gate = await journeyGate(req, res, { plan: !!req.body?.enabled });");
+    expect(ai).not.toContain("router.patch('/operator/journeys/:id/auto-reentry'");   // ★1025 R15 — 화면 호출 0 · 옵션 주소 한 길
     expect(ai).toContain('const gate = await journeyGate(req, res, { plan: !journeyOptionsOffOnly(req.body) });');
     // 자동 마케팅 고치기 = 꺼진 것을 다시 켤 때만 문(저장된 상태와 대조 · 한 줄 CT 구조체크 ② · Codex 1R)
     expect(ai).toContain('const gate = await operatorGate(req, res, { plan: reactivating });');
@@ -235,8 +231,11 @@ describe('R2 화면에만 있는 문 — PlanGate 화면의 돈 · 발송 주소
   });
   it('공용 서버 문은 요금제 조회 실패도 스스로 응답한다(호출부가 try 밖이어도 매달리지 않게)', () => {
     const src = stripComments(be('utils/plan-guard.ts'));
-    const at = src.indexOf('export async function aiZonePlanBlocked(');
+    const at = src.indexOf('export async function aiZonePlanBlockedFor(');
     expect(src.slice(at, src.indexOf('\n}\n', at))).toMatch(/try \{\s*plan = ctx === undefined \? await loadPlanContext\(companyId\) : ctx;\s*\} catch/);
+    // 로그인판은 회사 id 판(공개 링크와 같은 함수)을 부른다 — 두 벌 0
+    const w = src.slice(src.indexOf('export async function aiZonePlanBlocked('));
+    expect(w.slice(0, w.indexOf('\n}\n'))).toContain('return aiZonePlanBlockedFor(companyId, (req as any).user, res, ctx);');
   });
   it('문 도우미는 안에서 공용 서버 문(aiZonePlanBlocked)을 지난다', () => {
     for (const [name, rel] of Object.entries(GATE_HELPERS)) {
@@ -626,7 +625,9 @@ function unitsOfSource(file: string, text: string): { units: FnUnit[]; aiCalls: 
       const owner = ts.isClassLike(node.parent) && node.parent.name ? node.parent.name.text : `object@${lineOf(node)}`;
       push(`${owner}.${node.name.getText(sf)}`, node.name.getText(sf), node);
     } else if (ts.isVariableDeclaration(node) && ts.isIdentifier(node.name) && isFn(node.initializer)) push(node.name.text, node.name.text, node);
-    else if (ts.isPropertyAssignment(node) && isFn(node.initializer) && (ts.isIdentifier(node.name) || ts.isStringLiteral(node.name))) push(`${node.name.text}@${lineOf(node)}`, node.name.text, node);
+    // ★ 2026-10-25 — 호출 인자로 넘긴 객체의 콜백 속성(runChargedAi({ run: () => … }) 꼴)은 그 자리에서 도는 바깥 단위의 몸통이다(위 설계 · 이름 없는 콜백과 같다)
+    else if (ts.isPropertyAssignment(node) && isFn(node.initializer) && (ts.isIdentifier(node.name) || ts.isStringLiteral(node.name))
+      && !(ts.isObjectLiteralExpression(node.parent) && ts.isCallExpression(node.parent.parent))) push(`${node.name.text}@${lineOf(node)}`, node.name.text, node);
     else if (ts.isExportAssignment(node) && isFn(node.expression)) push(`default@${lineOf(node)}`, null, node);
     else if (file.startsWith('routes/') && ts.isCallExpression(node) && ts.isPropertyAccessExpression(node.expression)
       && /^(get|post|put|patch|delete)$/.test(node.expression.name.text) && node.arguments.length >= 2 && ts.isStringLiteralLike(node.arguments[0])) {
@@ -764,29 +765,23 @@ const R13_AI_NOT_COPY: Record<string, string> = {
   'routes/ai.ts#POST /operator/explain': '판단 설명(화면)',
   'routes/analysis.ts#POST /run': '분석 인사이트(화면 설명)',
   'routes/upload.ts#POST /mapping': '업로드 컬럼 매핑',
-  'services/ai.ts#parseBriefing': '브리핑 해석(값 뽑기)',
-  'services/ai.ts#recommendNextCampaign': '다음 캠페인 추천(대상 · 시각 · 채널 · 목표 한 줄 · 문안은 생성기가 만든다)',
   'utils/ai-column-mapper.ts#suggestVarColumnsWithAi': '변수 컬럼 매핑',
-  'utils/ai-column-mapper.ts#mapColumnsWithAi': '컬럼 매핑',
+  'utils/ai-column-mapper.ts#mapColumnsWithAiWithAi': '컬럼 매핑(★1025 성공 뒤 차감 감싸기로 안쪽 이름)',
   'utils/ai-mapping.ts#callAiMapping': '컬럼 매핑',
   'utils/ai-memory-accumulator-worker.ts#accumulateAvoidPatterns': '회사 메모리 학습(피할 표현 목록)',
-  'utils/ai-segment-generator.ts#convertNaturalLanguageToFilter': '자연어 → 필터 변환',
+  'utils/ai-segment-generator.ts#convertNaturalLanguageToFilterWithAi': '자연어 → 필터 변환(★1025 성공 뒤 차감 감싸기로 안쪽 이름)',
   'utils/best-copy-miner.ts#judgeBatch': '문안 판정 점수(글을 쓰지 않는다)',
   'utils/billing-080.ts#extractKtStatement': '청구서 값 뽑기',
   'utils/biz-registration-extract.ts#extractBizRegistration': '사업자등록증 값 뽑기',
   'utils/company-daily-brief.ts#generateCompanyDailyBrief': '회사 관리자 일보(직원 화면 · 고객 발송 아님)',
-  'utils/dm/dm-event-recommender.ts#recommendEventType': '행사 종류 추천(값)',
-  'utils/dm/dm-self-diagnosis.ts#deriveTopInsight': '진단 설명(화면)',
   'utils/email-ai.ts#analyzeSpamRisk': '스팸 위험 진단(화면 · 고치기는 사람이)',
   'utils/email-ai.ts#buildPerformanceInsight': '성과 인사이트(화면)',
   'utils/email-ai.ts#buildEmailAccountInsight': '계정 인사이트(화면)',
-  'utils/email-ai.ts#recommendSendTime': '발송 시각 추천(값)',
   'utils/help-answer.ts#answerHelpQuestion': '도움말 답(사용 안내)',
   'utils/inapp-explainer.ts#explainInAppMessage': '인앱 성과 설명(화면)',
   'utils/industry-formula.ts#distillIndustryFormula': '업종 공식 학습(내부)',
   'utils/journey-trigger-suggest.ts#suggestJourneyTrigger': '여정 시작 신호 추천(값)',
   'utils/multi-goal-decisioning.ts#analyzeGoalConflicts': '목표 충돌 분석(화면)',
-  'utils/next-action-advisor.ts#recommendNextAction': '다음 행동 추천(대상 · 채널 · 목표 한 줄 · 문안은 생성기가 만든다)',
   'utils/performance-quick-action.ts#generateQuickAction': '성과 빠른 조치 제안(목표 · 말투 · 시각 · 문안은 생성기가 만든다)',
   'utils/sales-outreach-produce.ts#transcribeBannerLines': '배너 글 전사(원문 읽기 · 면허 출처 검사가 따로 본다)',
   'utils/sales-outreach-produce.ts#scoreOutreachPoster': '포스터 점수 판정(글을 쓰지 않는다)',
@@ -857,7 +852,7 @@ describe('R13 고객 글 생산자 출구 = 혜택 · 숫자 · 효능 거름 �
     expect(unclassified.filter((k) => !(k in R13_AI_NOT_COPY))).toEqual([]);
     expect(Object.keys(R13_AI_NOT_COPY).filter((k) => !unclassified.includes(k)), '낡은 면제').toEqual([]);
     expect(wrappers.has('callOutreachAi') && wrappers.has('callAnthropic'), '래퍼 뽑기').toBe(true);
-    expect(ai.length).toBeGreaterThanOrEqual(90);   // (라) 1024 실측 95(구문 트리 단위 · 안쪽 함수 포함)
+    expect(ai.length).toBeGreaterThanOrEqual(80);   // ★1025 죽은 AI 함수 지움(묶음 F · 실측 84) · (라) 1024 실측 95(구문 트리 단위 · 안쪽 함수 포함)
   });
   it('(마) 고객 글을 만드는 생성 프롬프트는 효능 상수를 품는다(같은 문안은 한 곳) · AI 영업 예시에 효능 문장 0', async () => {
     const effRe = ctCallRe(EFFICACY_CT, allUnits);
@@ -913,5 +908,1324 @@ describe('R14 감지했는데 사람에게 안 닿음 — 운영 경보 = 공용
   it('경보를 내는 스크립트는 공용 입구를 부른다', () => {
     for (const f of ['backup.sh', 'backup-monitor.sh', 'monitor-dist.sh']) expect(read(join(SCRIPTS, f)), f).toMatch(/OPS_ALERT=.*ops-alert/);
     expect(read(join(SCRIPTS, 'agent-watchdog', 'agent-watchdog.js'))).toMatch(/OPS_ALERT: '\/usr\/local\/bin\/ops-alert'/);
+  });
+});
+
+// ════════════════════════════════════════════════════════════════════
+// ★ 2026-10-25 여정 구조체크 2차(설계서 docs/2026-10-25-journey-structure-check-2-design.md §4 · 재발 방지 설계 docs/2026-10-25-no-recurrence-system-design.md)
+//   기계 시험이 덮던 뿌리(R2 · R4 · R7 · R9 · R10 · R13)는 2차에서 결함 0 · 안 덮던 R1 · R6 · R8 · R12 · R11 에서 결함이 나왔다 → 여정까지 넓힌다.
+//   대상은 소스에서 기계로 뽑는다(손 등재 표 0) · 면제 = 이유 필수 · 낡은 면제 = 실패.
+// ════════════════════════════════════════════════════════════════════
+const BE_FILES = sourceFiles(BE, /\.ts$/);
+const JOURNEY_UTILS = BE_FILES.filter((f) => /^utils\/journey-[\w-]+\.ts$/.test(f));
+/** SQL 글(백틱 안) 전부 · 줄 번호 */
+function sqlTemplates(src: string): Array<{ sql: string; line: number }> {
+  const out: Array<{ sql: string; line: number }> = [];
+  const re = /`([^`]*)`/g;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(src))) out.push({ sql: m[1], line: src.slice(0, m.index).split('\n').length });
+  return out;
+}
+
+// ── R15 죽은 주소(새 · 세 번째: 1023 여정 #13 · 1024 자동 마케팅 13 · 1025 여정 #10) ──
+describe('R15 죽은 주소 — 여정 주소마다 화면 · SDK 호출이 있다', () => {
+  const SDK = join(BE, '..', '..', 'sdk-js', 'src');
+  const callers = [
+    ...sourceFiles(FE, /\.(ts|tsx)$/).map((f) => read(join(FE, f))),
+    ...sourceFiles(SDK, /\.ts$/).map((f) => read(join(SDK, f))),
+  ].map(stripComments).join('\n');
+  const ai = stripComments(be('routes/ai.ts'));
+  const routes = routeBlocks(ai).filter((b) => /^\/operator\/(journeys|preview-target-samples|grade-ranks)/.test(b.path));
+  const urlRe = (path: string) => new RegExp('/api/ai' + path.split(/(:\w+)/).map((p) => (p.startsWith(':') ? "(?:\\$\\{[^}]+\\}|[^/'\"`?]+)" : p.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))).join('') + "(?=['\"`?]|\\$\\{)");
+  // 작업대 동작 메뉴 = `/${mode}` 로 부른다(모드 = JourneyActionMode · 지우기 = DELETE 여정 주소)
+  const ws = read(join(FE, 'components/journey/workspace/JourneyWorkspace.tsx'));
+  const modes = ((read(join(FE, 'components/journey/JourneyActionConfirmModal.tsx')).match(/export type JourneyActionMode = ([^;]+);/) || [])[1] || '')
+    .split('|').map((x) => x.trim().replace(/'/g, '')).filter(Boolean);
+  const dynamicAction = (path: string) => {
+    const m = /^\/operator\/journeys\/:id\/(\w+)$/.exec(path);
+    return !!m && modes.includes(m[1]) && ws.includes("`/api/ai/operator/journeys/${journeyId}${mode === 'delete' ? '' : `/${mode}`}`");
+  };
+  it('여정 주소를 뽑았다(뽑기가 죽지 않았다)', () => {
+    expect(routes.length).toBeGreaterThanOrEqual(50);
+    expect(modes).toEqual(expect.arrayContaining(['archive', 'unarchive', 'end', 'pause']));
+  });
+  it('주소마다 화면 · SDK 에서 부르는 곳이 있다(없으면 지운다 · 남기면 같은 일을 하는 다른 길과 두 벌)', () => {
+    const dead = routes.filter((b) => !urlRe(b.path).test(callers) && !dynamicAction(b.path)).map(key);
+    expect(dead).toEqual([]);
+  });
+});
+
+// ── R16 DB 날짜 칸 = 글자(새 · 세 번째: 0726 발송통계 · 1020 마지막 날 · 1025 날짜축 하루 앞당김) ──
+describe('R16 DB 날짜 칸을 시각으로 읽음 — 날짜축 기준일은 글자(YYYY-MM-DD)로 읽고 글자로 계산한다', () => {
+  it('날짜 함수 셋은 글자(AnchorDay)만 받는다 · 날짜축 워커는 ::text 로 읽는다 · Date 를 넘기는 부르기 0', () => {
+    const st = be('utils/send-time-util.ts');
+    expect(st).toContain('export type AnchorDay = string;');
+    expect(st).toMatch(/export function computeAnchorStepRunAt\(\s*anchorDay: AnchorDay,/);
+    expect(st).toMatch(/export function computeNextAnchor\([\s\S]{0,120}current: AnchorDay,/);
+    expect(st).toMatch(/export function isAnchorCycleComplete\([\s\S]{0,80}anchorDay: AnchorDay,/);
+    expect(be('utils/journey-anchor-scheduler.ts')).toContain('anchor_date::text AS anchor_day');
+    const bad: string[] = [];
+    for (const f of BE_FILES) {
+      const src = stripComments(be(f));
+      for (const m of src.matchAll(/(?<!function\s)\b(computeAnchorStepRunAt|computeNextAnchor|isAnchorCycleComplete)\(([^;]*?)\)/g)) {
+        if (/\.anchor_date\b|new Date\(/.test(m[2])) bad.push(`${f} ${m[1]}(${m[2].slice(0, 60)})`);
+      }
+    }
+    expect(bad).toEqual([]);
+  });
+  it('DB 모양(글자) 기준일 = 그날 보낸다 · 연 반복은 같은 날', async () => {
+    const { computeAnchorStepRunAt, computeNextAnchor } = await import('../send-time-util');
+    expect(computeAnchorStepRunAt('2026-10-30', 0, 10).toISOString()).toBe('2026-10-30T01:00:00.000Z');
+    expect(computeAnchorStepRunAt('2026-10-30', 7, 10).toISOString()).toBe('2026-10-23T01:00:00.000Z');
+    expect(computeNextAnchor('yearly', null, '2026-10-30')).toBe('2027-10-30');
+  });
+});
+
+// ── R1 같은 사실 두 벌 — 여정 실행 넣는 곳 · 진입 뒤 구매 · 조건 칸 목록 ──
+describe('R1 여정 — 실행 넣는 곳마다 같은 진입 규칙 · 같은 판정 한 곳', () => {
+  const inserters = BE_FILES.filter((f) => /INSERT INTO journey_executions/.test(stripComments(be(f))));
+  it('실행 넣는 파일을 뽑았다', () => {
+    expect(inserters).toEqual(expect.arrayContaining(['utils/journey-trigger-watcher.ts', 'utils/journey-reentry-worker.ts', 'utils/journey-anchor-scheduler.ts']));
+  });
+  it('넣는 곳마다 상한 판정(entryCapExceeded) · 작성자 범위 · 첫 칸 보낼 시각(재진입 = 옛 결함: 셋 다 없었다)', () => {
+    const bad: string[] = [];
+    for (const f of inserters) {
+      const src = stripComments(be(f));
+      if (!/\bentryCapExceeded\(/.test(src)) bad.push(`${f} 상한 판정 없음`);
+      if (!/\bgetJourneyOwnerScopeSql\(/.test(src)) bad.push(`${f} 작성자 범위 없음`);
+      if (!/\b(calculateNextRunAt|computeAnchorStepRunAt)\(/.test(src)) bad.push(`${f} 보낼 시각 없음`);
+    }
+    expect(bad).toEqual([]);
+    // ★ Codex 1R — 넣기는 같은 계보 잠금 안에서 「지금도 켜짐」을 다시 본 뒤에만(관문 lockEntryIfActive · 감시 = 잠금 + startStillSame) ·
+    //   하루 몫을 쓰는 곳은 잠금 안에서 다시 센다(dailyRoomInLock) · 함수 단위(넣는 함수마다)
+    const gateBad: string[] = [];
+    const fnStart = (src: string, at: number) => Math.max(src.lastIndexOf('\nasync function ', at), src.lastIndexOf('\nexport async function ', at));
+    for (const f of inserters) {
+      const src = stripComments(be(f));
+      // 넣는 자리 = 넣기 SQL 이 든 함수 · 맨 위 상수(공용 넣기 SQL)면 그 상수를 쓰는 자리마다
+      const sites: number[] = [];
+      for (const m of src.matchAll(/INSERT INTO journey_executions/g)) {
+        const head = src.slice(src.lastIndexOf('\n', src.lastIndexOf('`', m.index!)) + 1, m.index!);
+        const konst = /^const (\w+) =\s*$/.exec(head.split('`')[0].trim() + ' ') || /^const (\w+) =/.exec(src.slice(src.lastIndexOf('\nconst ', m.index!) + 1, m.index!));
+        if (konst && fnStart(src, m.index!) < src.lastIndexOf('\nconst ' + konst[1], m.index!)) {
+          for (const u of src.matchAll(new RegExp(`\\b${konst[1]}\\b(?!\\s*=)`, 'g'))) sites.push(u.index!);
+        } else sites.push(m.index!);
+      }
+      for (const at of sites) {
+        const body = src.slice(fnStart(src, at), at);
+        const gated = /\blockEntryIfActive\(/.test(body) || (/\blockLineageEntry\(/.test(body) && /\bstartStillSame\(/.test(body));
+        if (!gated) gateBad.push(`${f}:${src.slice(0, at).split('\n').length} 넣기 관문 없음`);
+      }
+      // 하루 몫을 쓰는 파일 = 잠금 뒤 다시 센다
+      if (/\bbackfillPerDayOf\(/.test(src)) {
+        const recount = src.search(/\bdailyRoomInLock\(/);
+        if (recount < 0) gateBad.push(`${f} 하루 몫을 잠금 안에서 다시 세지 않음`);
+        else {
+          const body = src.slice(fnStart(src, recount), recount);
+          if (!/\block(EntryIfActive|LineageEntry)\(/.test(body)) gateBad.push(`${f} 하루 몫 재셈이 잠금 앞`);
+        }
+      }
+    }
+    expect(gateBad).toEqual([]);
+    // 상한 판정 자체를 따로 적은 곳 0(옛 = 네 벌)
+    const inline = BE_FILES.filter((f) => /threshold_recipients_per_step[\s\S]{0,400}\bids\.length\s*>\s*(Number\()?cap\b/.test(stripComments(be(f))));
+    expect(inline).toEqual([]);
+  });
+  it('「진입 뒤 구매했나」 = journey-goal-purchase 한 곳(실행기 목표 · 조건 칸 · 지도 숫자)', () => {
+    const copies = BE_FILES.filter((f) => f !== 'utils/journey-goal-purchase.ts' && /recent_purchase_date\s*>\s*\(\s*[\w$]+\.entered_at/.test(stripComments(be(f))));
+    expect(copies).toEqual([]);
+    for (const f of ['utils/journey-executor.ts', 'utils/journey-lifecycle-map.ts']) expect(be(f), f).toMatch(/from '\.\/journey-goal-purchase'/);
+  });
+  it('조건 칸 고객 정보 목록 = 대상 조건 CT 와 같은 표(검토 화면 손 목록 0)', () => {
+    const page = stripComments(read(join(FE, 'pages/JourneysPage.tsx')));
+    expect(page).toContain('{COND_FIELDS.map((f) => <option key={f.key} value={f.key}>{f.label}</option>)}');
+    expect(page).not.toMatch(/<option value="(recent_purchase_amount|recent_purchase_date|birth_date)">/);
+  });
+});
+
+// ── R6 닫히지 않는 상태 — 여정 실행 ──
+describe('R6 여정 실행 상태 — 쓰는 값은 아는 값만 · 멈춤은 되살릴 수 있는 사유만', () => {
+  const KNOWN = new Set(['active', 'paused', 'completed', 'goal_met', 'ended', 'failed', 'holdout']);
+  const writes: Array<{ f: string; line: number; at: number; status: string }> = [];
+  for (const f of BE_FILES) {
+    const src = stripComments(be(f));
+    for (const m of src.matchAll(/\b(UPDATE|INSERT INTO)\s+journey_executions\b/g)) {
+      const rest = src.slice(m.index!, src.indexOf('`', m.index!));
+      const head = rest.split(/\bWHERE\b|\bRETURNING\b/)[0];
+      const line = src.slice(0, m.index!).split('\n').length;
+      for (const x of head.matchAll(/(?<![\w.])status\s*=\s*'(\w+)'|THEN\s+'(\w+)'/g)) writes.push({ f, line, at: m.index!, status: x[1] || x[2] });
+      if (m[1] === 'INSERT INTO') for (const x of head.matchAll(/'(\w+)'/g)) if (KNOWN.has(x[1])) writes.push({ f, line, at: m.index!, status: x[1] });
+    }
+  }
+  it('뽑았다', () => { expect(writes.length).toBeGreaterThanOrEqual(10); });
+  it('실행 상태로 쓰는 값 = 아는 값(끝 · 되살림 · 진행 분류가 있는 값)만', () => {
+    expect(writes.filter((w) => !KNOWN.has(w.status)).map((w) => `${w.f}:${w.line} ${w.status}`)).toEqual([]);
+  });
+  it('실행을 paused 로 쓰는 곳 = autoPauseExecution 하나 · 그 사유 = 다시 켤 때 되살리는 사유만(옛: 번호 오류 멈춤 = 영원히 멈춤)', () => {
+    const paused = writes.filter((w) => w.status === 'paused');
+    const ph = stripComments(be('utils/journey-pause-handler.ts'));
+    // 함수 단위 — 같은 파일의 다른 함수(그날 정지 등)가 paused 를 쓰면 실패(★1025 변이 확인에서 파일 단위가 놓쳤다)
+    const fnAt = ph.indexOf('export async function autoPauseExecution(');
+    const fnEnd = ph.indexOf('\n}\n', fnAt);
+    expect(fnAt).toBeGreaterThan(-1);
+    expect(paused.length).toBeGreaterThan(0);
+    expect(paused.filter((w) => w.f !== 'utils/journey-pause-handler.ts' || w.at < fnAt || w.at > fnEnd).map((w) => `${w.f}:${w.line}`)).toEqual([]);
+    const sig = (ph.match(/export async function autoPauseExecution\([\s\S]*?pauseReason:\s*([^;]+);/) || [])[1] || '';
+    const reasons = Array.from(sig.matchAll(/'(\w+)'/g)).map((m) => m[1]).sort();
+    const revive = Array.from((be('utils/journey-resume.ts').match(/export const RESUME_REVIVE_REASONS = \[([^\]]+)\]/) || [])[1]?.matchAll(/'(\w+)'/g) || []).map((m) => m[1]).sort();
+    expect(reasons.length).toBeGreaterThan(0);
+    expect(reasons).toEqual(revive);
+  });
+});
+
+// ── R7 넓힘 — 낮은 층 검사 결과 함수도 공용 판정으로 ──
+describe('R7 넓힘 — 스팸 검사 결과를 직접 읽는 파일도 공용 판정(통과 · 차단 · 검사 장애)', () => {
+  it('getSpamTestBatchResults 를 부르는 파일은 spamVerdictOf · batchVerdictOf 로 읽는다(옛: 여정 검사만 낮은 층을 직접 읽어 장애 = 차단)', () => {
+    const users = BE_FILES.filter((f) => /\bgetSpamTestBatchResults\(/.test(stripComments(be(f))));
+    expect(users).toContain('utils/journey-pretest-validator.ts');
+    expect(users.filter((f) => !/\b(spamVerdictOf|batchVerdictOf)\(/.test(stripComments(be(f))))).toEqual([]);
+    const pn = stripComments(be('utils/journey-pretest-notifier.ts'));
+    expect(pn).toMatch(/verdict === 'error'|\.verdict === 'error'/);
+  });
+});
+
+// ── R8 넓힘 — 여정 재시도 상한 ──
+describe('R8 넓힘 — 여정 실행 · 재검사의 재시도에 상한', () => {
+  it('error_count 를 올리는 SQL 은 상한 판정과 함께 있다(같은 문장에서 failed 로 닫거나 · 앞에서 횟수를 본다)', () => {
+    const bad: string[] = [];
+    for (const f of JOURNEY_UTILS) {
+      const src = stripComments(be(f));
+      for (const m of src.matchAll(/error_count\s*=\s*COALESCE\(error_count,\s*0\)\s*\+\s*1/g)) {
+        const at = m.index!;
+        const stmt = src.slice(src.lastIndexOf('`', at), src.indexOf('`', at));
+        const before = src.slice(Math.max(0, at - 900), at);
+        if (!/THEN 'failed'/.test(stmt) && !/if \(errorCount < \d+\)/.test(before)) bad.push(`${f}:${src.slice(0, at).split('\n').length}`);
+      }
+    }
+    expect(bad).toEqual([]);
+    expect(be('utils/journey-executor.ts')).toMatch(/const EXECUTION_ERROR_MAX = \d+;/);
+  });
+  it('2시간 전 재검사의 검사 장애 = 같은 날 상한(PRETEST_CHECK_ERROR_MAX) 뒤 멈춤 · 고친 문안 검사 장애도 같은 상한', () => {
+    const pn = stripComments(be('utils/journey-pretest-notifier.ts'));
+    expect(pn).toMatch(/const PRETEST_CHECK_ERROR_MAX = \d+;/);
+    expect((pn.match(/if \(n < PRETEST_CHECK_ERROR_MAX\) continue;/g) || []).length).toBe(2);
+  });
+});
+
+// ── R12 LIMIT 뒤 거름 — 여정 ──
+describe('R12 넓힘 — 여정 SQL 의 묶음 LIMIT 은 순서가 정해져 있다 · 2시간 전 재검사 거름은 LIMIT 앞', () => {
+  it('여정 파일의 LIMIT(1 아닌 것)은 ORDER BY 와 함께(순서 없는 LIMIT 0 · 옛: 재검사 2,000행 순서 없음)', () => {
+    const bad: string[] = [];
+    for (const f of JOURNEY_UTILS) {
+      for (const t of sqlTemplates(stripComments(be(f)))) {
+        const lm = /\bLIMIT\s+(\S+)/.exec(t.sql);
+        if (lm && /\bSELECT\b/.test(t.sql) && lm[1] !== '1' && !/ORDER BY|\$\{order\w*\}/.test(t.sql)) bad.push(`${f}:${t.line}`);
+      }
+    }
+    expect(bad).toEqual([]);
+  });
+  it('재검사 후보 = 그날 처리 거름 · 묶음 하나 = 한 행이 LIMIT 앞(SQL)', () => {
+    const pn = stripComments(be('utils/journey-pretest-notifier.ts'));
+    const sql = pn.slice(pn.indexOf('SELECT DISTINCT ON (je.journey_id, s.id'), pn.indexOf('LIMIT ${PRETEST_SCAN_BUNDLE_LIMIT}'));
+    expect(sql).toContain('FROM journey_pretest_schedules ps');
+    expect(sql).toContain('ORDER BY b.next_run_at ASC');
+  });
+});
+
+// ── R11 넓힘 — 여정 화면 · 거절 문장 ──
+describe('R11 넓힘 — 여정 화면 · 서버 거절 문장에 내부 표 · 칸 이름 · 개발 용어 0', () => {
+  const JARGON = /영역|정합|매트릭스|의무|본질|Thompson|journey_(executions|steps|step_logs|step_variants)\b/;
+  it('여정 화면 글(주석 밖)에 개발 용어 · 내부 표 이름 0', () => {
+    const files = sourceFiles(FE, /\.tsx$/).filter((f) => /^components\/journey\//.test(f) || /^pages\/Journey\w*\.tsx$/.test(f));
+    expect(files.length).toBeGreaterThan(30);
+    const bad: string[] = [];
+    for (const f of files) {
+      stripComments(read(join(FE, f))).split('\n').forEach((ln, i) => { if (JARGON.test(ln)) bad.push(`${f}:${i + 1} ${ln.trim().slice(0, 60)}`); });
+    }
+    expect(bad).toEqual([]);
+  });
+  it('여정 서버가 고객에게 돌려주는 문장(reason · 입력 · 상태 오류)에 칸 이름 · 개발 용어 0', () => {
+    const MSG = /(?:reason:\s*|new (?:JourneyInputError|JourneyStepGateError)\()(['`"])((?:(?!\1).)*)\1/g;
+    const INTERNAL = /영역|정합|의무|매트릭스|\bstep \$\{|\b(anchor_date|anchor_offset_days|condition_jsonb|target_hour_kst|delay_mode|within_days|step_order|one_shot|customer_field|cdp_event_exists|journey_step_clicked)\b|회사 admin/;
+    const bad: string[] = [];
+    for (const f of JOURNEY_UTILS) {
+      const src = stripComments(be(f));
+      for (const m of src.matchAll(MSG)) if (INTERNAL.test(m[2])) bad.push(`${f}: ${m[2].slice(0, 60)}`);
+    }
+    expect(bad).toEqual([]);
+  });
+});
+
+// ── R10 넓힘 — 여정 CT 가 던지는 오류 종류 ──
+/** 일반 Error 로 두는 이유(사람이 고칠 입력이 아니다) — 키 = 파일 + 문장 앞 · 이 밖의 한국어 일반 Error = 입력 · 상태 오류를 500 으로 묻는다 */
+const JOURNEY_PLAIN_ERROR_OK: Record<string, string> = {
+  'utils/journey-ai-generator.ts|추천 칸 수(': 'AI 응답 실패(계획보다 적게 설계)',
+  'utils/journey-executor.ts|SMS 큐 적재 0건': '발송 큐 내부 실패(실행기가 잡아 재시도 · 상한)',
+  'utils/journey-identity-signals.ts|안전하지 않은 테이블 alias': '내부 불변식(코드가 넘기는 별칭)',
+  'utils/journey-intake-grace.ts|안전하지 않은 테이블 alias': '내부 불변식',
+  'utils/journey-pause-handler.ts|JOURNEY_PAUSE_TOKEN_SECRET 미설정': '서버 설정 누락(운영 경보 대상)',
+  'utils/journey-send-claim.ts|단계 캠페인을 찾지 못해': '발송 표식 내부 불변식',
+  'utils/journey-send-claim.ts|발송 테이블을 찾지 못해': '발송 표식 내부 불변식',
+};
+describe('R10 넓힘 — 여정 CT 의 입력 · 상태 오류 = JourneyInputError(400) · JourneyStepGateError(409)', () => {
+  const found: string[] = [];
+  for (const f of JOURNEY_UTILS) {
+    for (const m of stripComments(be(f)).matchAll(/throw new Error\((['`"])((?:(?!\1).)*[가-힣](?:(?!\1).)*)\1/g)) found.push(`${f}|${m[2]}`);
+  }
+  it('한국어 일반 Error 는 면제(이유 있음)뿐 · 낡은 면제 0', () => {
+    const keys = Object.keys(JOURNEY_PLAIN_ERROR_OK);
+    expect(found.filter((x) => !keys.some((k) => x.startsWith(k)))).toEqual([]);
+    expect(keys.filter((k) => !found.some((x) => x.startsWith(k)))).toEqual([]);
+  });
+});
+
+// ── R3 범위 — 여정 추천 판정(D1 = A) ──
+describe('R3 넓힘 — 여정 추천(AI 진단 · 기회 · 한 줄 묻기) = 보는 사람 판정 · 요청 키에 보는 사람', () => {
+  it('판정 SQL 이 범위 조각(journeyCoverSql)을 붙이고 · 부르는 곳이 보는 사람을 넘긴다', () => {
+    const op = stripComments(be('utils/journey-opportunities.ts'));
+    expect((op.match(/\$\{(?:cover|productCover)\.where\}/g) || []).length).toBe(3);
+    expect(stripComments(be('utils/one-line-ask.ts'))).toContain('${cover.where}');
+    const bad: string[] = [];
+    for (const f of BE_FILES) {
+      const src = stripComments(be(f));
+      for (const m of src.matchAll(/\b(buildJourneyDiagnosis|nonActiveJourneyTriggers)\(\s*companyId\s*\)/g)) bad.push(`${f} ${m[0]}`);
+      for (const m of src.matchAll(/\brecoRequestId\(\s*companyId\s*,\s*plan\s*\)/g)) bad.push(`${f} ${m[0]}`);
+    }
+    expect(bad).toEqual([]);
+    expect(stripComments(be('utils/journey-product-create.ts'))).toContain('`journey-product:${input.companyId}:${input.userId}:${input.requestId}`');
+  });
+});
+
+// ── R17 tsc 가 못 보는 SQL 모양 — 자리표($n) ↔ 바인드 배열(★2026-10-25 Codex 2R · 여정 재진입 후보 조회가 쓰지 않는 $1 바인드로 매번 42P18) ──
+//   대상 = 여정 utils · routes/ai.ts 의 query(글, [배열 글자]) 전부(펼침 없는 배열만 · 글 = 끼운 식의 소스 · 같은 파일에서 그 이름에 넣은 글까지 풀어 센다).
+//   결함 = 식 없는 글이면 자리표 ≠ 1..n · 식을 끼운 글이면 넘침(max > n) 또는 앞 번호 빈칸(쓰지 않는 앞 바인드 = 식이 설명 못 함).
+//   한계(알고 둠) = 식을 끼운 글에서 맨 뒤 바인드가 남는 꼴은 식이 그 번호를 채울 수 있어 못 잡는다(변이 확인 = 앞 빈칸 · 식 없는 글 넘침 · 없는 번호는 잡음).
+//   여정 밖 라우터 = 측정만(1025 = 3,135 개 중 이 규칙 오탐 3 · 모두 이웃 함수가 자리표를 만드는 꼴 · 결함 0).
+function bindMismatches(rel: string): string[] {
+  const text = be(rel);
+  const sf = ts.createSourceFile(rel, text, ts.ScriptTarget.Latest, true);
+  const names = new Map<string, string>();
+  const add = (k: string, v: string) => names.set(k, `${names.get(k) || ''} ${v}`);
+  const collect = (n: ts.Node) => {
+    if (ts.isVariableDeclaration(n) && ts.isIdentifier(n.name) && n.initializer) add(n.name.text, n.initializer.getText(sf));
+    if (ts.isBinaryExpression(n) && ts.isIdentifier(n.left) && (n.operatorToken.kind === ts.SyntaxKind.PlusEqualsToken || n.operatorToken.kind === ts.SyntaxKind.EqualsToken)) add(n.left.text, n.right.getText(sf));
+    ts.forEachChild(n, collect);
+  };
+  collect(sf);
+  const out: string[] = [];
+  const visit = (node: ts.Node) => {
+    if (ts.isCallExpression(node) && node.arguments.length >= 2 && /(^|\.)query$/.test(node.expression.getText(sf))) {
+      const [a0, a1] = node.arguments;
+      if (ts.isArrayLiteralExpression(a1) && !a1.elements.some(ts.isSpreadElement)) {
+        let lit: string | null = null;
+        let opaque = false;
+        if (ts.isNoSubstitutionTemplateLiteral(a0) || ts.isStringLiteral(a0)) lit = a0.text;
+        else if (ts.isTemplateExpression(a0)) {
+          const parts = [a0.head.text, ...a0.templateSpans.map((s) => s.literal.text)];
+          if (!parts.slice(0, -1).some((t) => /\$$/.test(t))) {   // $${식} = 자리 번호를 식으로 만든다 → 셀 수 없음
+            const subs = a0.templateSpans.map((s) => {
+              const e = s.expression;
+              if (ts.isIdentifier(e) && names.has(e.text)) return names.get(e.text)!;
+              if (ts.isStringLiteral(e) || ts.isNoSubstitutionTemplateLiteral(e)) return e.text;
+              opaque = true;
+              return e.getText(sf);
+            });
+            lit = `${parts.join(' ')} ${subs.join(' ')}`;
+          }
+        } else if (ts.isIdentifier(a0) && names.has(a0.text)) lit = names.get(a0.text)!;
+        if (lit != null) {
+          const used = new Set(Array.from(lit.matchAll(/\$(\d+)/g)).map((m) => Number(m[1])));
+          const n = a1.elements.length;
+          const max = used.size ? Math.max(...used) : 0;
+          const unused: number[] = [];
+          for (let k = 1; k <= n; k++) if (!used.has(k)) unused.push(k);
+          const gap = unused.some((k) => k < max);
+          if (max > n || (unused.length > 0 && (!opaque || gap))) out.push(`${rel}:${sf.getLineAndCharacterOfPosition(node.getStart(sf)).line + 1} 바인드 ${n} · 최대 $${max} · 안 쓰는 [${unused.join(',')}]`);
+        }
+      }
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(sf);
+  return out;
+}
+describe('R17 tsc 가 못 보는 SQL 모양 — 자리표 = 바인드(여정)', () => {
+  const files = [...JOURNEY_UTILS, 'routes/ai.ts'];
+  it('대상을 뽑았다', () => { expect(files.length).toBeGreaterThan(60); });
+  it('쓰지 않는 바인드 · 없는 바인드 0', () => {
+    expect(files.flatMap(bindMismatches)).toEqual([]);
+  });
+});
+
+// ── R1 단가 두 벌 (★ 2026-10-25 한 줄 전 기능 구조체크 · 원장 Z2 · Z3 · #91 · #105 · #116) ─────────
+//   단가는 서버 CREDIT_COST_MAP 한 곳이다. 서버 코드 · 화면 문장에 숫자로 다시 적으면 한쪽만 바뀐 날 표시 ≠ 차감이 된다
+//   (옛: 단축 URL 100 → 20 을 서버만 바꿔 요금 요약표가 100 · DM 발행 100 인데 충전 창이 30 으로 나눴다).
+const FRONT_CREDIT = read(join(FE, 'constants', 'credit.ts'));
+/** 이름 뒤 첫 `{` 부터 짝이 맞는 `}` 까지 */
+function objectBodyOf(src: string, anchor: string): string {
+  const start = src.indexOf(anchor);
+  if (start < 0) throw new Error(`앵커 없음: ${anchor}`);
+  const open = src.indexOf('{', start);
+  let depth = 0;
+  for (let i = open; i < src.length; i++) {
+    if (src[i] === '{') depth++;
+    else if (src[i] === '}' && --depth === 0) return src.slice(open + 1, i);
+  }
+  throw new Error(`닫는 괄호 없음: ${anchor}`);
+}
+const pairsOf = (body: string) => Array.from(stripComments(body).matchAll(/'([a-zA-Z][\w-]*)'\s*:\s*(\d+)/g), (m) => [m[1], Number(m[2])] as const);
+/** 서버 단가 숫자 박기 — 단가는 getCreditCost(키) 로만 읽는다 */
+const SERVER_PRICE_LITERAL: Array<[string, RegExp]> = [
+  ['creditCost: 숫자', /\bcreditCost\s*:\s*[1-9]/],
+  ['checkCredit(회사, 숫자)', /\bcheckCredit\(\s*[^,()]+,\s*[1-9]\d*\s*\)/],
+  ['차감 · 정산 호출의 cost: 숫자', /\b(?:deductCredit\w*|settleCreditAfterSuccess|runChargedAi|refundCredit)\(\s*\{[^}]*?\bcost\s*:\s*[1-9]\d*\s*[,}]/],
+  ['const cost = 숫자', /\bconst\s+cost\s*=\s*[1-9]\d*\s*;/],
+];
+describe('R1 단가 두 벌 — 단가 = 서버 단가표 한 곳 · 화면은 단가표 · 견적에서만 읽는다', () => {
+  it('서버 코드에 단가 숫자를 박지 않는다(getCreditCost(키) 로 읽는다)', () => {
+    const hits: string[] = [];
+    for (const dir of ['routes', 'utils', 'services']) {
+      for (const rel of sourceFiles(join(BE, dir), /\.ts$/)) {
+        if (rel === 'ai-credit-calc.ts') continue;   // 단가표 자신
+        const src = stripComments(be(`${dir}/${rel}`));
+        for (const [name, re] of SERVER_PRICE_LITERAL) if (re.test(src)) hits.push(`${dir}/${rel} · ${name}`);
+      }
+    }
+    expect(hits).toEqual([]);
+  });
+  it('화면 단가표 두 벌(작은 생성 · 확인 창) 금액 = 서버 단가표 금액(값까지)', async () => {
+    const { CREDIT_COST_MAP } = await import('../ai-credit-calc');
+    const pairs = [...pairsOf(objectBodyOf(FRONT_CREDIT, 'export const AI_GENERATE_COSTS')), ...pairsOf(objectBodyOf(FRONT_CREDIT, 'export const CONFIRM_CREDIT_COSTS'))];
+    expect(pairs.length).toBeGreaterThan(30);
+    expect(pairs.filter(([k, v]) => CREDIT_COST_MAP[k] !== v).map(([k, v]) => `${k} 화면 ${v} · 서버 ${CREDIT_COST_MAP[k]}`)).toEqual([]);
+  });
+  it('요금 요약표 줄마다 서버 단가 키가 있고 금액이 같다', async () => {
+    const { CREDIT_COST_MAP } = await import('../ai-credit-calc');
+    const body = stripComments(FRONT_CREDIT.slice(FRONT_CREDIT.indexOf('export const CREDIT_TASK_COSTS'), FRONT_CREDIT.indexOf('];', FRONT_CREDIT.indexOf('export const CREDIT_TASK_COSTS'))));
+    const rows = Array.from(body.matchAll(/\{\s*key:\s*'([^']+)'[^}]*\}/g), (m) => m[0]);
+    expect(rows.length).toBeGreaterThan(10);
+    const bad = rows.map((r) => {
+      const cost = Number((r.match(/cost:\s*(\d+)/) || [])[1]);
+      const source = (r.match(/source:\s*'([^']+)'/) || [])[1];
+      return !source ? `${r.slice(0, 40)} · source 없음` : CREDIT_COST_MAP[source] !== cost ? `${source} 화면 ${cost} · 서버 ${CREDIT_COST_MAP[source]}` : '';
+    }).filter(Boolean);
+    expect(bad).toEqual([]);
+  });
+  it('화면 문장 · 버튼에 「N크레딧」 숫자 0 · 단가표 키에 숫자 대체 값 0(단가표 · 견적 변수만)', () => {
+    const hits: string[] = [];
+    for (const rel of sourceFiles(FE, /\.tsx?$/)) {
+      const src = stripComments(read(join(FE, rel)));
+      const lines = src.split('\n');
+      lines.forEach((ln, i) => {
+        if (/[1-9]\d*\s?크레딧/.test(ln)) hits.push(`${rel}:${i + 1} 문장 숫자`);
+        if (/COSTS\[[^\]]*\]\s*(?:\?\?|\|\|)\s*[1-9]/.test(ln) || /\b\w*Cost\s*\?\?\s*[1-9]/.test(ln) || /\bcosts\??\.\w+\s*\?\?\s*[1-9]\d*\b(?!\.)/.test(ln) && !/perSms|perLms|perMms|perKakao/.test(ln)) hits.push(`${rel}:${i + 1} 숫자 대체 값`);
+      });
+    }
+    expect(hits).toEqual([]);
+  });
+  it('화면이 부르는 단가 키(creditText · creditCost)는 화면 단가표와 서버 단가표에 있다(없으면 0크레딧으로 보인다)', async () => {
+    const { CREDIT_COST_MAP } = await import('../ai-credit-calc');
+    const front = new Set([...pairsOf(objectBodyOf(FRONT_CREDIT, 'export const AI_GENERATE_COSTS')), ...pairsOf(objectBodyOf(FRONT_CREDIT, 'export const CONFIRM_CREDIT_COSTS'))].map(([k]) => k));
+    const used = new Set<string>();
+    for (const rel of sourceFiles(FE, /\.tsx?$/)) {
+      for (const m of read(join(FE, rel)).matchAll(/\bcredit(?:Text|Cost)\(\s*'([^']+)'\s*\)/g)) used.add(m[1]);
+    }
+    expect(used.size).toBeGreaterThan(15);
+    expect([...used].filter((k) => !front.has(k) || !(k in CREDIT_COST_MAP))).toEqual([]);
+  });
+});
+
+// ═════════════════════════════════════════════════════════════════════════════════════════════
+// ★ 2026-10-25 한 줄 전 기능 구조체크 — 덮음표(§3) 빈칸 → 시험(원장 docs/2026-10-25-oneline-all-structure-check.md §8-3)
+//   대상 = 소스에서 뽑는다 · 면제 = 줄(키)마다 이유 · 낡은 면제(쓰이지 않는 키) = 실패
+// ═════════════════════════════════════════════════════════════════════════════════════════════
+const SERVER_SRC = ['routes', 'utils', 'services'].flatMap((d) => sourceFiles(join(BE, d), /\.ts$/).map((f) => `${d}/${f}`));
+/** 문자열 리터럴(따옴표 · 백틱) · 줄 번호 — 주석은 부르는 쪽이 먼저 걷는다 */
+function stringLiterals(src: string): Array<{ text: string; line: number; at: number }> {
+  const out: Array<{ text: string; line: number; at: number }> = [];
+  const re = /'(?:[^'\\\n]|\\.)*'|"(?:[^"\\\n]|\\.)*"|`(?:[^`\\]|\\.)*`/g;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(src))) out.push({ text: m[0].slice(1, -1), line: src.slice(0, m.index).split('\n').length, at: m.index });
+  return out;
+}
+const unusedKeys = (table: Record<string, string>, used: Set<string>) => Object.keys(table).filter((k) => !used.has(k));
+
+/**
+ * 라우터 분류 = 전수(새 라우터는 둘 중 하나에 들어와야 통과) — 12기능 라우터는 아래 R10 · R11 · R15 를 0 으로 지킨다.
+ *   축 밖 라우터 = 이번 구조체크(한 줄 프롬프트 12기능) 밖 · 다음 축에서 같은 시험을 켠다(원장 §7 추가 과제).
+ */
+const ONE_LINE_ROUTERS = new Set([
+  'ai.ts', 'ai-line.ts', 'dm.ts', 'email.ts', 'cdp.ts', 'sns.ts', 'event-campaigns.ts', 'image-studio.ts', 'marketing-planner.ts',
+  'planner-recheck-public.ts', 'autosend-stop-public.ts', 'journey-pause-public.ts', 'mall-products.ts', 'assets.ts', 'line-templates.ts',
+  'send-policy.ts', 'targets.ts', 'saved-segments.ts',
+]);
+const OUT_OF_AXIS = (reason: string, files: string[]) => Object.fromEntries(files.map((f) => [f, reason]));
+const OUT_OF_AXIS_ROUTERS: Record<string, string> = {
+  ...OUT_OF_AXIS('슈퍼관리자 · 직원 도구', ['admin.ts', 'admin-ops-records.ts', 'admin-sync.ts', 'admin/login-blocks.ts', 'billing.ts', 'gateway-templates.ts', 'pay-mappings.ts', 'marketing-diagnosis-admin.ts', 'sales-outreach.ts']),
+  ...OUT_OF_AXIS('결제 · 정산 · 요금제', ['payments.ts', 'balance.ts', 'charge-approve.ts', 'agent-charge-orders.ts', 'plans.ts', 'plan-term.ts', 'invoice-public.ts', 'popbill-webhook.ts']),
+  ...OUT_OF_AXIS('문자 · 알림톡 직접 발송 축', ['campaigns.ts', 'results.ts', 'alimtalk.ts', 'sms-templates.ts', 'spam-filter.ts', 'send-checks.ts', 'mms-images.ts', 'unsubscribes.ts', 'test-contacts.ts', 'manage-scheduled.ts', 'auto-campaigns.ts', 'sender-registration.ts', 'manage-callbacks.ts', 'short-url.ts']),
+  ...OUT_OF_AXIS('대행(계약 기능)', ['agency-send.ts', 'agency-approve.ts', 'campaign-agency.ts']),
+  ...OUT_OF_AXIS('고객 DB · 쇼핑몰 연동', ['customers.ts', 'upload.ts', 'address-books.ts', 'sync.ts', 'cafe24.ts', 'imweb.ts', 'woocommerce.ts', 'naver-commerce.ts', 'makeshop.ts', 'godo.ts', 'analysis.ts', 'insight.ts']),
+  ...OUT_OF_AXIS('계정 · 회사 · 관리 · 도움말', ['auth.ts', 'companies.ts', 'manage-users.ts', 'manage-stats.ts', 'identity-return.ts', 'onboarding.ts', 'help.ts', 'internal-alert.ts', 'design-templates.ts', 'ai-memory.ts', 'ai-usage.ts']),
+  ...OUT_OF_AXIS('공개 소개 · 진단 · 영업 표본', ['intro-public.ts', 'outreach-public.ts', 'marketing-diagnosis-public.ts', 'marketing-diagnosis.ts']),
+};
+describe('라우터 분류 전수(1025) — 12기능 라우터 · 축 밖 라우터(이유) 둘 중 하나', () => {
+  it('모든 라우터 파일이 분류에 있고 · 겹치지 않고 · 없는 파일이 분류에 없다', () => {
+    const all = ALL_ROUTERS;
+    expect(all.length).toBeGreaterThan(60);
+    expect(all.filter((f) => !ONE_LINE_ROUTERS.has(f) && !OUT_OF_AXIS_ROUTERS[f])).toEqual([]);
+    expect(all.filter((f) => ONE_LINE_ROUTERS.has(f) && OUT_OF_AXIS_ROUTERS[f])).toEqual([]);
+    expect([...ONE_LINE_ROUTERS, ...Object.keys(OUT_OF_AXIS_ROUTERS)].filter((f) => !all.includes(f))).toEqual([]);
+  });
+});
+
+// ── R1 넓힘 ──
+describe('R1 넓힘(1025) — 서버 고객 문장의 단가 · 발송 시각 = 단가표 · 설정 한 곳 · 플래너 발송일 = 서버 식', () => {
+  it('서버 문장에 「N크레딧」 숫자 0(단가는 getCreditCost · 문장은 ${} 로 싣는다)', () => {
+    const hits: string[] = [];
+    for (const f of SERVER_SRC) {
+      if (f === 'utils/ai-credit-calc.ts') continue;
+      for (const s of stringLiterals(stripComments(be(f)))) {
+        const t = s.text.replace(/\$\{[^}]*\}/g, '');
+        if (/[가-힣]/.test(t) && /(?<![\w.])[1-9][\d,]*\s?크레딧/.test(t)) hits.push(`${f}:${s.line} ${t.slice(0, 40)}`);
+      }
+    }
+    expect(hits).toEqual([]);
+  });
+  it('브랜드메시지 발송 창 문장 = brandSendWindowError 한 곳(분 값으로 만든다 · 두 파일 글자 0)', () => {
+    for (const f of ['utils/brand-message.ts', 'routes/campaigns.ts']) {
+      const src = stripComments(be(f));
+      expect(src, f).not.toMatch(/오전 8시부터|8시 50분/);
+      expect(src, f).toMatch(/brandSendWindowError\(\)/);
+    }
+  });
+  it('플래너 발송일 화면 함수 = 서버 식(같은 입력 · 같은 답 · 화면만 빈 칸 = null)', async () => {
+    const { computeTouchpointDate } = await import('../marketing-planner');
+    const { plannerSendDateOf } = await import('../../../../frontend/src/utils/planner-dates');
+    const rules: any[] = [
+      { anchor: 'start' }, { anchor: 'end' }, { anchor: 'before_start' }, { anchor: 'before_start', offsetDays: 3 },
+      { anchor: 'before_start', offsetDays: 1 }, { anchor: 'start', on: '2026-11-07' }, { anchor: 'end', on: '2026-12-31' }, {},
+    ];
+    const spans: Array<[string, string]> = [['2026-11-03', '2026-11-09'], ['2026-03-01', '2026-03-01'], ['2027-01-01', '2027-01-31']];
+    let n = 0;
+    for (const r of rules) for (const [s, e] of spans) { expect(plannerSendDateOf(r, s, e), JSON.stringify([r, s, e])).toBe(computeTouchpointDate(r, s, e)); n++; }
+    expect(n).toBe(24);
+    expect(plannerSendDateOf({ anchor: 'start' }, '', '2026-11-09')).toBeNull();
+  });
+});
+
+// ── R3 넓힘 ──
+describe('R3 넓힘(1025) — 회사 전체 수치를 사람에게 보내는 문자 = 관리자 연락처(만든 사람 아무나 0)', () => {
+  it('회사 전체 범위(null)로 만든 월 결과를 보내는 자리는 만든 사람 대신 null(관리자 순 · 공용 연락처 CT)', () => {
+    const hits: string[] = [];
+    let seen = 0;
+    for (const f of SERVER_SRC.filter((x) => x.startsWith('utils/'))) {
+      const src = stripComments(be(f));
+      for (const m of src.matchAll(/loadMonthlyResult\(\s*\w+\s*,\s*\w+\s*,\s*null\s*\)/g)) {
+        seen++;
+        const tail = src.slice(m.index ?? 0, (m.index ?? 0) + 3000);
+        const call = tail.match(/notifyPlanner\(\s*([^,]+),\s*([^,]+),/);
+        if (!call || call[2].trim() !== 'null') hits.push(`${f} · ${call ? call[2].trim() : '보내는 자리 없음'}`);
+      }
+    }
+    expect(seen).toBeGreaterThan(0);
+    expect(hits).toEqual([]);
+  });
+});
+
+// ── R4 ──
+/** 차감 원장 직접 호출 허용(발송 · 정산 · 등록 · 공용 CT) — 그 밖 AI 결과는 runChargedAi(성공 뒤 차감 한 규칙 D1 = A) */
+const DIRECT_DEDUCT_OK: Record<string, string> = {
+  'utils/ai-credit.ts': '원장 CT 자신(settleCreditAfterSuccess · runChargedAi 가 이것을 부른다)',
+  'services/ai-orchestrator.ts': '풀분석 묶음 진입 1회 정산(runInCreditBundle 묶음의 주인)',
+  'utils/campaign-quick.ts': '만들기 v1 돈 순서(견적 결박 → 시도 토큰 키 차감 → 실패 시 만든 행 회수 · BuildDeps 계약 시험)',
+  'utils/continuous-operator.ts': '자동마케팅 저장 · 회차 발송 크레딧(발송 · 등록)',
+  'utils/journey-activation.ts': '여정 켜기 크레딧(등록)',
+  'utils/journey-ai-generator.ts': '여정 다듬기(잔액 부족 = 던짐 · 결과 전 차감)',
+  'utils/journey-draft-save.ts': '여정 초안 저장 크레딧(등록)',
+  'utils/journey-executor.ts': '여정 발송 크레딧(발송)',
+  'utils/one-line-ct/index.ts': '한 줄 판정 크레딧(한 줄 주문 CT · 성공 뒤)',
+  'utils/planner-executor.ts': '플래너 당일 문안비(발송 접수 뒤)',
+  'utils/predictive-worker.ts': '예측 일 갱신(회사 + 날짜 멱등 · 정산)',
+  'routes/ai.ts': '풀분석 진입 정산(라우트가 묶음 주인 · orchestrate)',
+};
+describe('R4 넓힘(1025) — 원장 직접 차감 = 허용 목록 · 회사 AI 호출 = 묶음 안', () => {
+  it('deductCreditOutcome · deductCreditSafe 를 직접 부르는 파일 = 허용 목록(이유)', () => {
+    const files = SERVER_SRC.filter((f) => /\b(?:deductCreditOutcome|deductCreditSafe)\(/.test(stripComments(be(f))));
+    const used = new Set(files.filter((f) => DIRECT_DEDUCT_OK[f]));
+    expect(files.filter((f) => !DIRECT_DEDUCT_OK[f])).toEqual([]);
+    expect(unusedKeys(DIRECT_DEDUCT_OK, used)).toEqual([]);
+  });
+});
+
+// ── R4 짝(1026 · Codex 1R 돈 묶음) — ① 만든 것을 걷기 전에 내놓은 자리 = settleOrUndo 한 벌 ② 쓸 결과 판정 = 최종 결과 기준 ──
+/** accept 가 늘 참인 자리(쓸 수 없는 결과면 run 이 던진다) */
+const ACCEPT_ALWAYS_OK: Record<string, string> = {
+  'utils/ai-segment-generator.ts': '조건 변환은 쓸 수 없는 결과면 던진다(빈 조건 · 형식 오류 · 검증 실패 = SegmentGenerationError)',
+  'services/ai.ts': '타겟 추천 = 형식 오류면 던지고 · 조건이 비어도 채널 · 시각 · 변수 추천이 결과다',
+};
+describe('R4 짝(1026) — 걷기 전 내놓은 결과는 한 함수로 되돌리고 · 쓸 결과는 최종 결과로 판정한다', () => {
+  it('정산을 try 로 감싸 손으로 되돌리는 꼴 0(되돌리기 실패 = 경보가 있는 settleOrUndo 한 벌)', () => {
+    const bad = SERVER_SRC.filter((f) => /try\s*\{\s*await settleCreditAfterSuccess\(/.test(stripComments(be(f))));
+    expect(bad).toEqual([]);
+    const ct = stripComments(be('utils/ai-credit.ts'));
+    const so = ct.slice(ct.indexOf('export async function settleOrUndo('), ct.indexOf('export async function settleCreditInTx('));
+    expect(so).toContain("tag: 'ORPHAN'");
+    expect(so).toContain('throw err;');
+  });
+  it('accept 가 늘 참인 자리 = 면제(이유)뿐 · 낡은 면제 0', () => {
+    const found = SERVER_SRC.filter((f) => /accept:\s*\(\s*\w*\s*\)\s*=>\s*true\b/.test(stripComments(be(f))));
+    expect(found.filter((f) => !ACCEPT_ALWAYS_OK[f])).toEqual([]);
+    expect(Object.keys(ACCEPT_ALWAYS_OK).filter((k) => !found.includes(k))).toEqual([]);
+  });
+  // ★ 1026 Codex 2R — AI JSON 칸 = 글일 때만(aiStr) · String(parsed.x || …) 는 객체 칸을 「[object Object]」 글로 만들어 화면에 내고 「쓸 결과」로 셌다
+  it('AI JSON 을 읽는 파일 = String(parsed.칸 || …) 0(aiStr 한 벌)', () => {
+    const bad = SERVER_SRC.filter((f) => { const s = stripComments(be(f)); return /extractJsonFromAiText\(/.test(s) && /String\(parsed\??\.\w+\s*\|\|/.test(s); });
+    expect(bad).toEqual([]);
+    expect(stripComments(be('utils/ai-json.ts'))).toContain('export function aiStr(v: unknown, fallback = \'\'): string {');
+  });
+  it('저장 트랜잭션 안의 차감 = settleCreditInTx(같은 연결) · 다른 연결 정산 0(브랜드 보이스)', () => {
+    const mem = stripComments(be('routes/ai-memory.ts'));
+    const i = mem.indexOf('await settleCreditInTx(client, {');
+    expect(i).toBeGreaterThan(-1);
+    expect(mem.lastIndexOf("await client.query('BEGIN');", i)).toBeGreaterThan(-1);
+    expect(mem.indexOf("await client.query('COMMIT');", i)).toBeGreaterThan(i);
+    expect(mem).not.toContain('settleCreditAfterSuccess(');
+  });
+});
+
+// ── R5 넓힘 ──
+describe('R5 넓힘(1025) — 보인 글 = 나가는 글(자리마다 같은 함수)', () => {
+  it('#88 테스트 메일 = 실발송과 같은 껍데기(composeCampaignShell) · (광고) 붙이기는 그 함수 한 곳', () => {
+    const route = stripComments(be('routes/email.ts'));
+    const t = route.indexOf("router.post('/campaigns/:id/test-send'");
+    expect(t).toBeGreaterThan(-1);
+    expect(route.slice(t, t + 4000)).toContain('composeCampaignShell(');
+    const eng = stripComments(be('utils/email-channel.ts'));
+    expect(eng).toContain('const shell = composeCampaignShell(campaign, adFooter);');
+    expect((eng.match(/\(광고\) \$\{subject\}/g) || []).length).toBe(1);   // 메일 제목 (광고) = composeCampaignShell 한 곳(미오픈자 SMS 문장은 다른 채널)
+    expect((route.match(/\(광고\) \$\{/g) || []).length).toBe(0);
+  });
+  it('#28 멈춤 링크 화면 · 담당자 정지 = 나가는 문안 함수(loadProposalFinalCopy) · #29 화면 검사 = 발송 조립(operatorFinalCopyAt)', () => {
+    expect(stripComments(be('utils/autosend-stop-link.ts'))).toContain('loadProposalFinalCopy(');
+    const op = stripComments(be('utils/continuous-operator.ts'));
+    const a = op.indexOf('export async function adminStopProposal(');
+    expect(op.slice(a, op.indexOf('\n}\n', a))).toContain('loadProposalFinalCopy(');
+    const r = op.indexOf('export async function startProposalSpamRetest(');
+    expect(op.slice(r, op.indexOf('\n}\n', r))).toContain('operatorFinalCopyAt(');
+    expect(SERVER_SRC.filter((f) => /\bresolveRetestCopy\b/.test(stripComments(be(f))))).toEqual([]);
+  });
+});
+
+// ── R7 넓힘(함수 단위) ──
+const SPAM_RUNNER = /\b(?:autoSpamTestWithRegenerate|runPlannerSpamTest|getSpamTestBatchResults|autoSpamTest)\(/;
+const SPAM_VERDICT = /\b(?:spamVerdictOf|spamVerdictWithRetry|batchVerdictOf|spamCheckPlannerVerdict|testCopyVariantsUntilPass)\(/;
+describe('R7 넓힘(1025) — 스팸 결과를 읽는 함수 = 공용 판정 셋(함수 단위)', () => {
+  it('검사를 부르고 결과(spamResult · passedVariantId)를 읽는 단위는 공용 판정을 부른다', () => {
+    const { units } = scanSources();
+    const bad = units.filter((u) => !u.file.endsWith('spam-test-queue.ts') && SPAM_RUNNER.test(u.body)
+      && /\.spamResult\b|\.passedVariantId\b/.test(u.body) && !SPAM_VERDICT.test(u.body)).map((u) => u.key);
+    expect(bad).toEqual([]);
+  });
+  it('원값 비교(spamResult === \'pass\')로 통과를 정하지 않는다(공용 판정 파일 밖 0)', () => {
+    const hits = SERVER_SRC.filter((f) => !f.endsWith('spam-test-queue.ts'))
+      .flatMap((f) => stripComments(be(f)).split('\n').map((l, i) => [f, i + 1, l] as const))
+      .filter(([, , l]) => /spamResult\s*===\s*'pass'|spamResult\s*!==\s*'pass'/.test(l) && !/spamVerdictOf\(/.test(l)
+        && !/spamResult\s*!==\s*'pass'\s*\?\s*[\w?.]+\.spamResult\s*:\s*'failed'/.test(l))   // 판정 뒤 기록 글자(통과 아닌 원값 그대로 · 아니면 failed)
+      .map(([f, n]) => `${f}:${n}`);
+    expect(hits).toEqual([]);
+  });
+  it('#46 고친 문안 검사 = 판정 셋(막힘 · 장애를 한 값으로 접지 않는다)', () => {
+    const src = stripComments(be('utils/planner-copy.ts'));
+    expect(src).not.toMatch(/\.then\(\s*\(r\)\s*=>\s*!!r\s*\)/);
+    expect(src).not.toMatch(/export async function spamCheckPlannerCopy\(/);
+  });
+});
+
+// ── R10 넓힘 ──
+/** 유틸 · 서비스의 한국어 일반 Error — 사람이 고칠 입력 · 상태가 아닌 것(내부 · 설정 · 외부 원문 · AI 해석 · DB 마이그레이션 안내) · 키 = 파일|문장 앞머리 */
+const PLAIN_ERROR_OK: Record<string, string> = {
+  "utils/account-action.ts|SYSTEM_SMS_CALLBACK 환경변수": "서버 설정 누락(운영 설정 · 고객에게는 라우트 안내 문장)",
+  "utils/agency-send-intake.ts|수신자 적재 불일치: 기대 … 실제 …": "내부 처리 실패(로그 · 경보 · 고객에게는 라우트 안내 문장)",
+  "utils/agency-send-link.ts|JWT_SECRET 미설정: 승인 토큰을 서": "서버 설정 누락(운영 설정 · 고객에게는 라우트 안내 문장)",
+  "utils/agent-charge-core.ts|주문 원복 불일치: …/…": "내부 처리 실패(로그 · 경보 · 고객에게는 라우트 안내 문장)",
+  "utils/ai-json.ts|extractJsonFromAiText: 빈": "AI 응답 해석 실패(다시 시도 · 고객에게는 라우트 안내 문장)",
+  "utils/alimtalk-api.ts|[IMC] 환경변수가 설정되지 않았습니다: ": "서버 설정 누락(운영 설정 · 고객에게는 라우트 안내 문장)",
+  "utils/auto-campaign-worker.ts|발송 대상 조건이 비어 있음 (조건 없는 전": "축 밖 모듈(정산 · 결제 · 연동 · 관리) · 다음 구조체크에서 사용자 조건을 가른다",
+  "utils/autosend-stop-link.ts|JWT_SECRET 미설정: 자동마케팅 멈춤": "서버 설정 누락(운영 설정 · 고객에게는 라우트 안내 문장)",
+  "utils/basic-trial.ts|무료체험 요금제가 존재하지 않습니다.": "축 밖 모듈(정산 · 결제 · 연동 · 관리) · 다음 구조체크에서 사용자 조건을 가른다",
+  "utils/basic-trial.ts|고객사를 찾을 수 없습니다.": "축 밖 모듈(정산 · 결제 · 연동 · 관리) · 다음 구조체크에서 사용자 조건을 가른다",
+  "utils/batch-ai.ts|ANTHROPIC_API_KEY 환경변수가 ": "서버 설정 누락(운영 설정 · 고객에게는 라우트 안내 문장)",
+  "utils/batch-ai.ts|requests 배열은 1건 이상 필요합니다": "축 밖 모듈(정산 · 결제 · 연동 · 관리) · 다음 구조체크에서 사용자 조건을 가른다",
+  "utils/batch-ai.ts|Anthropic Batch API 1회 한": "축 밖 모듈(정산 · 결제 · 연동 · 관리) · 다음 구조체크에서 사용자 조건을 가른다",
+  "utils/billing-080.ts|서명 비밀키가 설정되지 않았습니다.": "서버 설정 누락(운영 설정 · 고객에게는 라우트 안내 문장)",
+  "utils/billing-080.ts|정규형 불가, 비정수 금액": "축 밖 모듈(정산 · 결제 · 연동 · 관리) · 다음 구조체크에서 사용자 조건을 가른다",
+  "utils/billing-080.ts|KT 명세서에서 080 번호별 금액을 읽지 ": "내부 처리 실패(로그 · 경보 · 고객에게는 라우트 안내 문장)",
+  "utils/billing-080.ts|대상월 형식이 올바르지 않습니다 (YYYY-": "축 밖 모듈(정산 · 결제 · 연동 · 관리) · 다음 구조체크에서 사용자 조건을 가른다",
+  "utils/billing-080.ts|항목 내용을 입력해주세요.": "축 밖 모듈(정산 · 결제 · 연동 · 관리) · 다음 구조체크에서 사용자 조건을 가른다",
+  "utils/billing-080.ts|건당 금액(공급가)을 1원 이상 정수로 입력": "축 밖 모듈(정산 · 결제 · 연동 · 관리) · 다음 구조체크에서 사용자 조건을 가른다",
+  "utils/billing-080.ts|수량은 1~100 사이로 입력해주세요.": "축 밖 모듈(정산 · 결제 · 연동 · 관리) · 다음 구조체크에서 사용자 조건을 가른다",
+  "utils/billing-080.ts|회사를 선택해주세요.": "축 밖 모듈(정산 · 결제 · 연동 · 관리) · 다음 구조체크에서 사용자 조건을 가른다",
+  "utils/billing-080.ts|그 달 정산이 이미 발행돼 있어 항목을 추가": "축 밖 모듈(정산 · 결제 · 연동 · 관리) · 다음 구조체크에서 사용자 조건을 가른다",
+  "utils/billing-080.ts|그 달 전체가 이미 발행된 정산 기간(또는 ": "축 밖 모듈(정산 · 결제 · 연동 · 관리) · 다음 구조체크에서 사용자 조건을 가른다",
+  "utils/billing-080.ts|판독 결과 서명이 유효하지 않습니다. 명세서": "축 밖 모듈(정산 · 결제 · 연동 · 관리) · 다음 구조체크에서 사용자 조건을 가른다",
+  "utils/billing-080.ts|명세서 검산에 실패해 반영할 수 없습니다: ": "축 밖 모듈(정산 · 결제 · 연동 · 관리) · 다음 구조체크에서 사용자 조건을 가른다",
+  "utils/billing-bulk.ts|발급 대상에서 제외됨: 대기 중 수동 정산 ": "축 밖 모듈(정산 · 결제 · 연동 · 관리) · 다음 구조체크에서 사용자 조건을 가른다",
+  "utils/billing-issue.ts|청구 상세 적재 수량이 맞지 않습니다 (적재": "축 밖 모듈(정산 · 결제 · 연동 · 관리) · 다음 구조체크에서 사용자 조건을 가른다",
+  "utils/billing-lock.ts|정산 잠금 대상 중 실재하지 않는 고객사가 ": "축 밖 모듈(정산 · 결제 · 연동 · 관리) · 다음 구조체크에서 사용자 조건을 가른다",
+  "utils/billing-recipients.ts|수신자 이메일 형식이 올바르지 않습니다: …": "축 밖 모듈(정산 · 결제 · 연동 · 관리) · 다음 구조체크에서 사용자 조건을 가른다",
+  "utils/billing-recipients.ts|알 수 없는 문서 유형입니다: …": "축 밖 모듈(정산 · 결제 · 연동 · 관리) · 다음 구조체크에서 사용자 조건을 가른다",
+  "utils/biz-registration-extract.ts|판독할 파일이 없습니다. jpg/png/we": "축 밖 모듈(정산 · 결제 · 연동 · 관리) · 다음 구조체크에서 사용자 조건을 가른다",
+  "utils/biz-registration-extract.ts|사업자등록증에서 정보를 읽지 못했습니다. 글": "내부 처리 실패(로그 · 경보 · 고객에게는 라우트 안내 문장)",
+  "utils/brand-message.ts|object 아님": "내부 처리 실패(로그 · 경보 · 고객에게는 라우트 안내 문장)",
+  "utils/cafe24-client.ts|CAFE24_CLIENT_ID / CAFE2": "서버 설정 누락(운영 설정 · 고객에게는 라우트 안내 문장)",
+  "utils/cafe24-client.ts|카페24 OAuth 환경변수가 설정되지 않았": "서버 설정 누락(운영 설정 · 고객에게는 라우트 안내 문장)",
+  "utils/cafe24-client.ts|카페24 토큰 교환 실패 (…): …": "외부 연동 · 조회 실패 원문(로그 · 고객에게는 라우트 안내 문장)",
+  "utils/cafe24-client.ts|카페24 API 호출 실패 (…): …": "외부 연동 · 조회 실패 원문(로그 · 고객에게는 라우트 안내 문장)",
+  "utils/campaign-sync-worker.ts|여정 결과 안내 적재 0건": "내부 처리 실패(로그 · 경보 · 고객에게는 라우트 안내 문장)",
+  "utils/cdp-member-token.ts|회원 토큰 서명 키가 없습니다(서버 설정).": "서버 설정 누락(운영 설정 · 고객에게는 라우트 안내 문장)",
+  "utils/channel-eligibility.ts|안전하지 않은 테이블 alias: …": "내부 불변식(SQL 조각 안전)",
+  "utils/charge-approve-link.ts|JWT_SECRET 미설정: 승인 토큰을 서": "서버 설정 누락(운영 설정 · 고객에게는 라우트 안내 문장)",
+  "utils/citations.ts|ANTHROPIC_API_KEY 환경변수가 ": "서버 설정 누락(운영 설정 · 고객에게는 라우트 안내 문장)",
+  "utils/citations.ts|Citations 사용할 documents ": "축 밖 모듈(정산 · 결제 · 연동 · 관리) · 다음 구조체크에서 사용자 조건을 가른다",
+  "utils/company-merge.ts|파생할 수 없는 FK 서명: …": "내부 불변식(SQL 조각 안전)",
+  "utils/company-merge.ts|허용되지 않는 테이블명: …": "내부 불변식(SQL 조각 안전)",
+  "utils/company-merge.ts|허용되지 않는 컬럼명: …": "내부 불변식(SQL 조각 안전)",
+  "utils/company-smtp-client.ts|암호화할 비밀번호 필수": "내부 불변식(코드가 넘기는 값 · 사람이 고칠 입력 아님)",
+  "utils/company-smtp-client.ts|복호화할 비밀번호 필수": "내부 불변식(코드가 넘기는 값 · 사람이 고칠 입력 아님)",
+  "utils/company-smtp-client.ts|companyId 필수": "내부 불변식(코드가 넘기는 값 · 사람이 고칠 입력 아님)",
+  "utils/company-smtp-client.ts|companyId + toEmail 필수": "내부 불변식(코드가 넘기는 값 · 사람이 고칠 입력 아님)",
+  "utils/company-smtp-client.ts|회사 SMTP 설정 조회 실패": "외부 연동 · 조회 실패 원문(로그 · 고객에게는 라우트 안내 문장)",
+  "utils/company-smtp-client.ts|companyId + to + subject": "내부 불변식(코드가 넘기는 값 · 사람이 고칠 입력 아님)",
+  "utils/continuous-operator.ts|DB 마이그레이션 필요: continuous": "DB 마이그레이션 안내(운영자 503 · db_alter_safety_net)",
+  "utils/continuous-operator.ts|스팸 검사 결과를 저장할 제안 행이 없습니다": "내부 처리 실패(로그 · 경보 · 고객에게는 라우트 안내 문장)",
+  "utils/continuous-operator.ts|발송 시도 표식 실패(제안 상태 변경)": "내부 처리 실패(로그 · 경보 · 고객에게는 라우트 안내 문장)",
+  "utils/continuous-operator.ts|발송 크레딧 차감을 확인하지 못함": "내부 처리 실패(로그 · 경보 · 고객에게는 라우트 안내 문장)",
+  "utils/crm-agency-proposal-core.ts|AI가 유효한 캠페인 플랜을 생성하지 못했습": "AI 응답 해석 실패(다시 시도 · 고객에게는 라우트 안내 문장)",
+  "utils/crm-agency-proposal.ts|회사를 찾을 수 없습니다.": "축 밖 모듈(정산 · 결제 · 연동 · 관리) · 다음 구조체크에서 사용자 조건을 가른다",
+  "utils/custom-self-hosted-adapter.ts|자체 호스팅 자사몰은 OAuth 흐름이 없습": "연동 방식 불변식(부르지 않는 길 · 코드 잘못)",
+  "utils/custom-self-hosted-adapter.ts|자체 호스팅 자사몰은 OAuth code 교": "연동 방식 불변식(부르지 않는 길 · 코드 잘못)",
+  "utils/custom-self-hosted-adapter.ts|자체 호스팅 자사몰은 token refres": "연동 방식 불변식(부르지 않는 길 · 코드 잘못)",
+  "utils/demo-data.ts|합성 데이터 키가 시연 회사·허용 목록 회사": "축 밖 모듈(정산 · 결제 · 연동 · 관리) · 다음 구조체크에서 사용자 조건을 가른다",
+  "utils/demo-data.ts|옛 방식으로 만든 시연 회사입니다. 새 시연": "축 밖 모듈(정산 · 결제 · 연동 · 관리) · 다음 구조체크에서 사용자 조건을 가른다",
+  "utils/direct-send-core.ts|중화 UPDATE rowCount=…": "내부 처리 실패(로그 · 경보 · 고객에게는 라우트 안내 문장)",
+  "utils/direct-send-core.ts|queued 전환 rowCount=…": "내부 처리 실패(로그 · 경보 · 고객에게는 라우트 안내 문장)",
+  "utils/email-channel.ts|email_campaigns.design c": "DB 마이그레이션 안내(운영자 503 · db_alter_safety_net)",
+  "utils/email-tracking.ts|EMAIL_TRACKING_SECRET / ": "서버 설정 누락(운영 설정 · 고객에게는 라우트 안내 문장)",
+  "utils/event-brief.ts|JSON 없음": "AI 응답 해석 실패(다시 시도 · 고객에게는 라우트 안내 문장)",
+  "utils/fk-delete-plan.ts|… 지운 수(…)가 센 수(…)와 달라 멈춥": "내부 처리 실패(로그 · 경보 · 고객에게는 라우트 안내 문장)",
+  "utils/gateway-template-mapping.ts|GATEWAY_TMPL_API_TOKEN 미": "서버 설정 누락(운영 설정 · 고객에게는 라우트 안내 문장)",
+  "utils/godo-adapter.ts|고도몰은 폴링 연동입니다. 한줄로 관리자 →": "연동 방식 불변식(부르지 않는 길 · 코드 잘못)",
+  "utils/godo-adapter.ts|고도몰은 OAuth code 교환이 없습니다": "연동 방식 불변식(부르지 않는 길 · 코드 잘못)",
+  "utils/godo-adapter.ts|고도몰은 token refresh가 없습니다": "연동 방식 불변식(부르지 않는 길 · 코드 잘못)",
+  "utils/godo-adapter.ts|고도몰은 webhook을 사용하지 않습니다(": "연동 방식 불변식(부르지 않는 길 · 코드 잘못)",
+  "utils/imweb-client.ts|IMWEB_CLIENT_ID / IMWEB_": "서버 설정 누락(운영 설정 · 고객에게는 라우트 안내 문장)",
+  "utils/imweb-client.ts|아임웹 OAuth 환경변수가 설정되지 않았습": "서버 설정 누락(운영 설정 · 고객에게는 라우트 안내 문장)",
+  "utils/imweb-client.ts|아임웹 API 호출 실패 (…): …": "외부 연동 · 조회 실패 원문(로그 · 고객에게는 라우트 안내 문장)",
+  "utils/imweb-client.ts|아임웹 API 호출 실패(재시도 소진)": "외부 연동 · 조회 실패 원문(로그 · 고객에게는 라우트 안내 문장)",
+  "utils/inapp-ai-generator.ts|AI 응답 JSON 파싱 실패: …\\n응답 ": "AI 응답 해석 실패(다시 시도 · 고객에게는 라우트 안내 문장)",
+  "utils/inapp-explainer.ts|companyId + messageId 필수": "내부 불변식(코드가 넘기는 값 · 사람이 고칠 입력 아님)",
+  "utils/inapp-funnel-stats.ts|companyId + messageId 필수": "내부 불변식(코드가 넘기는 값 · 사람이 고칠 입력 아님)",
+  "utils/inapp-funnel-stats.ts|companyId 필수": "내부 불변식(코드가 넘기는 값 · 사람이 고칠 입력 아님)",
+  "utils/inapp-message.ts|cdp_inapp_messages.desig": "DB 마이그레이션 안내(운영자 503 · db_alter_safety_net)",
+  "utils/inapp-message.ts|cdp_inapp_messages.image": "DB 마이그레이션 안내(운영자 503 · db_alter_safety_net)",
+  "utils/inapp-message.ts|cdp_inapp_messages.poste": "DB 마이그레이션 안내(운영자 503 · db_alter_safety_net)",
+  "utils/inapp-quick-action.ts|companyId + messageId 필수": "내부 불변식(코드가 넘기는 값 · 사람이 고칠 입력 아님)",
+  "utils/inapp-segment-matcher.ts|companyId는 필수입니다.": "내부 불변식(코드가 넘기는 값 · 사람이 고칠 입력 아님)",
+  "utils/inapp-variant-optimizer.ts|companyId + parentMessag": "내부 불변식(코드가 넘기는 값 · 사람이 고칠 입력 아님)",
+  "utils/inicis-client.ts|[inicis-client] INICIS_M": "서버 설정 누락(운영 설정 · 고객에게는 라우트 안내 문장)",
+  "utils/invoice-confirm.ts|정산 행을 찾지 못했습니다": "내부 처리 실패(로그 · 경보 · 고객에게는 라우트 안내 문장)",
+  "utils/journey-ai-generator.ts|추천 칸 수(…)보다 적게 설계됐습니다(…)": "AI 응답 실패(계획보다 적게 설계 · 다시 시도)",
+  "utils/journey-executor.ts|SMS 큐 적재 0건(배치 INSERT 실패": "내부 처리 실패(로그 · 경보 · 고객에게는 라우트 안내 문장)",
+  "utils/journey-identity-signals.ts|안전하지 않은 테이블 alias: …": "내부 불변식(SQL 조각 안전)",
+  "utils/journey-intake-grace.ts|안전하지 않은 테이블 alias: …": "내부 불변식(SQL 조각 안전)",
+  "utils/journey-pause-handler.ts|JOURNEY_PAUSE_TOKEN_SECR": "서버 설정 누락(운영 설정 · 고객에게는 라우트 안내 문장)",
+  "utils/journey-send-claim.ts|단계 캠페인을 찾지 못해 적재 여부를 확인할": "내부 처리 실패(로그 · 경보 · 고객에게는 라우트 안내 문장)",
+  "utils/journey-send-claim.ts|발송 테이블을 찾지 못해 적재 여부를 확인할": "내부 처리 실패(로그 · 경보 · 고객에게는 라우트 안내 문장)",
+  "utils/liquid-templating.ts|Tag 미종결 (position …)": "템플릿 파서 안쪽(검증 함수가 받아 칸 번호 문장으로 바꾼다 · #119)",
+  "utils/liquid-templating.ts|Output 미종결 (position …)": "템플릿 파서 안쪽(검증 함수가 받아 칸 번호 문장으로 바꾼다 · #119)",
+  "utils/liquid-templating.ts|assign 문법 오류 (position …": "템플릿 파서 안쪽(검증 함수가 받아 칸 번호 문장으로 바꾼다 · #119)",
+  "utils/liquid-templating.ts|미지원 tag: … (position …)": "템플릿 파서 안쪽(검증 함수가 받아 칸 번호 문장으로 바꾼다 · #119)",
+  "utils/liquid-templating.ts|if 분기 토큰 오류": "템플릿 파서 안쪽(검증 함수가 받아 칸 번호 문장으로 바꾼다 · #119)",
+  "utils/liquid-templating.ts|if 미종결: 예상치 못한 tag: …": "템플릿 파서 안쪽(검증 함수가 받아 칸 번호 문장으로 바꾼다 · #119)",
+  "utils/liquid-templating.ts|for 문법 오류 (position …)": "템플릿 파서 안쪽(검증 함수가 받아 칸 번호 문장으로 바꾼다 · #119)",
+  "utils/liquid-templating.ts|for 미종결": "템플릿 파서 안쪽(검증 함수가 받아 칸 번호 문장으로 바꾼다 · #119)",
+  "utils/liquid-templating.ts|case 미종결: 예상치 못한 tag: …": "템플릿 파서 안쪽(검증 함수가 받아 칸 번호 문장으로 바꾼다 · #119)",
+  "utils/liquid-templating.ts|comment 미종결": "템플릿 파서 안쪽(검증 함수가 받아 칸 번호 문장으로 바꾼다 · #119)",
+  "utils/makeshop-client.ts|메이크샵 토큰 발급 응답에 access_to": "외부 연동 · 조회 실패 원문(로그 · 고객에게는 라우트 안내 문장)",
+  "utils/makeshop-client.ts|메이크샵 API 호출 실패 (…): …": "외부 연동 · 조회 실패 원문(로그 · 고객에게는 라우트 안내 문장)",
+  "utils/makeshop-client.ts|메이크샵은 OAuth 리다이렉트가 아니라 애": "연동 방식 불변식(부르지 않는 길 · 코드 잘못)",
+  "utils/makeshop-client.ts|메이크샵은 authorize code 교환을": "연동 방식 불변식(부르지 않는 길 · 코드 잘못)",
+  "utils/makeshop-client.ts|메이크샵 자격(client_id/secret": "축 밖 모듈(정산 · 결제 · 연동 · 관리) · 다음 구조체크에서 사용자 조건을 가른다",
+  "utils/mall-consent.ts|consentSql: 고객 id 열은 표(별": "내부 불변식(SQL 조각 안전)",
+  "utils/mall-consent.ts|consentCountTrue: 전화 열은 ": "내부 불변식(SQL 조각 안전)",
+  "utils/mfa.ts|SYSTEM_SMS_CALLBACK 환경변수": "서버 설정 누락(운영 설정 · 고객에게는 라우트 안내 문장)",
+  "utils/multi-goal-decisioning.ts|AI 응답에서 JSON 찾을 수 없음": "AI 응답 해석 실패(다시 시도 · 고객에게는 라우트 안내 문장)",
+  "utils/naver-commerce-client.ts|네이버 커머스 토큰 발급 응답에 access": "외부 연동 · 조회 실패 원문(로그 · 고객에게는 라우트 안내 문장)",
+  "utils/naver-commerce-client.ts|네이버 커머스 API 호출 실패 (…): …": "외부 연동 · 조회 실패 원문(로그 · 고객에게는 라우트 안내 문장)",
+  "utils/naver-commerce-client.ts|네이버 스마트스토어는 OAuth 리다이렉트가": "연동 방식 불변식(부르지 않는 길 · 코드 잘못)",
+  "utils/naver-commerce-client.ts|네이버 스마트스토어는 authorize co": "연동 방식 불변식(부르지 않는 길 · 코드 잘못)",
+  "utils/onboarding-wizard.ts|잘못된 step 번호: …": "축 밖 모듈(정산 · 결제 · 연동 · 관리) · 다음 구조체크에서 사용자 조건을 가른다",
+  "utils/payment-processor.ts|[payment-processor] 결제 금": "축 밖 모듈(정산 · 결제 · 연동 · 관리) · 다음 구조체크에서 사용자 조건을 가른다",
+  "utils/payment-processor.ts|[payment-processor] 결제 승": "축 밖 모듈(정산 · 결제 · 연동 · 관리) · 다음 구조체크에서 사용자 조건을 가른다",
+  "utils/payment-processor.ts|[payment-processor] pend": "축 밖 모듈(정산 · 결제 · 연동 · 관리) · 다음 구조체크에서 사용자 조건을 가른다",
+  "utils/payment-processor.ts|[payment-processor] 결제 주": "내부 처리 실패(로그 · 경보 · 고객에게는 라우트 안내 문장)",
+  "utils/payment-processor.ts|[payment-processor] 회사 영": "축 밖 모듈(정산 · 결제 · 연동 · 관리) · 다음 구조체크에서 사용자 조건을 가른다",
+  "utils/payment-processor.ts|[payment-processor] 선불 회": "축 밖 모듈(정산 · 결제 · 연동 · 관리) · 다음 구조체크에서 사용자 조건을 가른다",
+  "utils/payment-processor.ts|[payment-processor] paym": "축 밖 모듈(정산 · 결제 · 연동 · 관리) · 다음 구조체크에서 사용자 조건을 가른다",
+  "utils/plan-feature-intros-serve.ts|JWT_SECRET 없음: 영상 주소를 서명": "서버 설정 누락(운영 설정 · 고객에게는 라우트 안내 문장)",
+  "utils/plan-recommend.ts|answers 검증 미통과: …": "축 밖 모듈(정산 · 결제 · 연동 · 관리) · 다음 구조체크에서 사용자 조건을 가른다",
+  "utils/planner-executor.ts|문안비 차감을 확인하지 못해 보내지 않았습니": "내부 처리 실패(로그 · 경보 · 고객에게는 라우트 안내 문장)",
+  "utils/planner-review.ts|쌍 생략이 일부만 적용됐습니다": "내부 처리 실패(로그 · 경보 · 고객에게는 라우트 안내 문장)",
+  "utils/planner-review.ts|쌍 재확인 진입이 일부만 적용됐습니다": "내부 처리 실패(로그 · 경보 · 고객에게는 라우트 안내 문장)",
+  "utils/prepaid.ts|company_id=… 잔액 갱신 실패": "내부 처리 실패(로그 · 경보 · 고객에게는 라우트 안내 문장)",
+  "utils/sales-outreach-catalog.ts|카탈로그 DM 발행 주소를 만들지 못했습니다": "직원 영업 도구(슈퍼관리자 화면)",
+  "utils/sales-outreach-jobs.ts|AI가 빈 문안을 반환했습니다": "직원 영업 도구(슈퍼관리자 화면)",
+  "utils/sales-outreach-jobs.ts|OUTREACH_COMPANY_ID·OUTR": "직원 영업 도구(슈퍼관리자 화면)",
+  "utils/sales-outreach-jobs.ts|앞 단계 산출물이 없어 메일을 조립할 수 없": "직원 영업 도구(슈퍼관리자 화면)",
+  "utils/sales-outreach-produce.ts|OUTREACH_COMPANY_ID·OUTR": "직원 영업 도구(슈퍼관리자 화면)",
+  "utils/sales-outreach-produce.ts|이미지 생성 서비스가 준비되지 않았습니다.": "직원 영업 도구(슈퍼관리자 화면)",
+  "utils/sales-outreach-produce.ts|임시 저장소 기록에 실패했습니다.": "직원 영업 도구(슈퍼관리자 화면)",
+  "utils/sales-outreach-produce.ts|포스터 임시 저장에 실패했습니다.": "직원 영업 도구(슈퍼관리자 화면)",
+  "utils/sales-outreach-produce.ts|이미지 저장에 실패했습니다.": "직원 영업 도구(슈퍼관리자 화면)",
+  "utils/sales-outreach-produce.ts|AI가 섹션을 돌려주지 않았습니다.": "직원 영업 도구(슈퍼관리자 화면)",
+  "utils/sales-outreach-produce.ts|면허 인용에 출처 없는 배너 전사문이 섞였습": "직원 영업 도구(슈퍼관리자 화면)",
+  "utils/sales-outreach-produce.ts|내부 발행은 내부 전용 회사 계정으로만 가능": "직원 영업 도구(슈퍼관리자 화면)",
+  "utils/sales-outreach-produce.ts|모바일 DM 발행 주소를 만들지 못했습니다.": "직원 영업 도구(슈퍼관리자 화면)",
+  "utils/sales-outreach-produce.ts|이메일 버튼 라벨은 8자 이내여야 합니다: ": "직원 영업 도구(슈퍼관리자 화면)",
+  "utils/sales-outreach-purge.ts|DM 중지 실패(…): …": "직원 영업 도구(슈퍼관리자 화면)",
+  "utils/send-usage-aggregation.ts|에이전트 발송 통계를 조회하지 못했습니다(P": "서버 설정 누락(운영 설정 · 고객에게는 라우트 안내 문장)",
+  "utils/sender-auth.ts|JWT_SECRET 미설정: 기기 증명을 만": "서버 설정 누락(운영 설정 · 고객에게는 라우트 안내 문장)",
+  "utils/sender-registration.ts|승인 대기 상태의 담당자를 찾을 수 없습니다": "축 밖 모듈(정산 · 결제 · 연동 · 관리) · 다음 구조체크에서 사용자 조건을 가른다",
+  "utils/sender-registration.ts|먼저 담당자 등록 및 위임장 승인을 완료해주": "축 밖 모듈(정산 · 결제 · 연동 · 관리) · 다음 구조체크에서 사용자 조건을 가른다",
+  "utils/sender-registration.ts|이미 동일 번호로 승인 대기 중인 신청이 있": "축 밖 모듈(정산 · 결제 · 연동 · 관리) · 다음 구조체크에서 사용자 조건을 가른다",
+  "utils/sender-registration.ts|이미 등록된 발신번호입니다.": "축 밖 모듈(정산 · 결제 · 연동 · 관리) · 다음 구조체크에서 사용자 조건을 가른다",
+  "utils/sender-registration.ts|승인 대기 상태의 신청을 찾을 수 없습니다.": "축 밖 모듈(정산 · 결제 · 연동 · 관리) · 다음 구조체크에서 사용자 조건을 가른다",
+  "utils/sender-registration.ts|이미 등록된 발신번호입니다. 신청을 반려 처": "축 밖 모듈(정산 · 결제 · 연동 · 관리) · 다음 구조체크에서 사용자 조건을 가른다",
+  "utils/sender-registration.ts|… 신청을 반려해주세요.": "축 밖 모듈(정산 · 결제 · 연동 · 관리) · 다음 구조체크에서 사용자 조건을 가른다",
+  "utils/sender-registration.ts|… 상한을 조정한 뒤 승인해주세요.": "축 밖 모듈(정산 · 결제 · 연동 · 관리) · 다음 구조체크에서 사용자 조건을 가른다",
+  "utils/sender-registration.ts|해당 발신번호를 찾을 수 없습니다.": "축 밖 모듈(정산 · 결제 · 연동 · 관리) · 다음 구조체크에서 사용자 조건을 가른다",
+  "utils/sender-registration.ts|같은 회사에 속하지 않는 사용자가 포함되어 ": "축 밖 모듈(정산 · 결제 · 연동 · 관리) · 다음 구조체크에서 사용자 조건을 가른다",
+  "utils/short-url.ts|companyId는 필수입니다.": "내부 불변식(코드가 넘기는 값 · 사람이 고칠 입력 아님)",
+  "utils/short-url.ts|단축 URL 생성 실패 (hash 충돌 3회": "내부 처리 실패(로그 · 경보 · 고객에게는 라우트 안내 문장)",
+  "utils/sms-queue.ts|MMS는 이미지 첨부가 필수입니다 (inse": "내부 불변식(코드가 넘기는 값 · 사람이 고칠 입력 아님)",
+  "utils/spam-test-queue.ts|환불 미완(… …건)": "내부 처리 실패(로그 · 경보 · 고객에게는 라우트 안내 문장)",
+  "utils/spam-test-queue.ts|환불 미완(…)": "내부 처리 실패(로그 · 경보 · 고객에게는 라우트 안내 문장)",
+  "utils/staging-sweeper.ts|JWT_SECRET 미설정: 발송 준비 보관": "서버 설정 누락(운영 설정 · 고객에게는 라우트 안내 문장)",
+  "utils/taxbill-popbill.ts|작성일자 형식 오류: …": "축 밖 모듈(정산 · 결제 · 연동 · 관리) · 다음 구조체크에서 사용자 조건을 가른다",
+  "utils/taxbill-popbill.ts|uuid 형식 오류: …": "축 밖 모듈(정산 · 결제 · 연동 · 관리) · 다음 구조체크에서 사용자 조건을 가른다",
+  "utils/taxbill-popbill.ts|문서번호 규격 위반: …": "축 밖 모듈(정산 · 결제 · 연동 · 관리) · 다음 구조체크에서 사용자 조건을 가른다",
+  "utils/taxbill-popbill.ts|수정발행은 modifyCode와 당초 국세청": "축 밖 모듈(정산 · 결제 · 연동 · 관리) · 다음 구조체크에서 사용자 조건을 가른다",
+  "utils/taxbill-popbill.ts|지원하지 않는 수정사유 코드: … (지원 =": "축 밖 모듈(정산 · 결제 · 연동 · 관리) · 다음 구조체크에서 사용자 조건을 가른다",
+  "utils/taxbill-popbill.ts|…이(가) 정수가 아닙니다: …, 원 미만 ": "축 밖 모듈(정산 · 결제 · 연동 · 관리) · 다음 구조체크에서 사용자 조건을 가른다",
+  "utils/taxbill-popbill.ts|합계 불일치: 공급가액 … + 세액 … ≠ ": "내부 처리 실패(로그 · 경보 · 고객에게는 라우트 안내 문장)",
+  "utils/taxbill-popbill.ts|원본 계산서에 음수 금액: 공급가액 … / ": "축 밖 모듈(정산 · 결제 · 연동 · 관리) · 다음 구조체크에서 사용자 조건을 가른다",
+  "utils/taxbill-popbill.ts|부호가 섞인 장: 공급가액 … / 세액 …": "축 밖 모듈(정산 · 결제 · 연동 · 관리) · 다음 구조체크에서 사용자 조건을 가른다",
+  "utils/taxbill-popbill.ts|수정 장의 합계가 0원. 바꿀 것이 없는 수": "축 밖 모듈(정산 · 결제 · 연동 · 관리) · 다음 구조체크에서 사용자 조건을 가른다",
+  "utils/taxbill-popbill.ts|사유 …(해제·이중발급)는 음(-) 문서만 ": "축 밖 모듈(정산 · 결제 · 연동 · 관리) · 다음 구조체크에서 사용자 조건을 가른다",
+  "utils/taxbill-popbill.ts|공급받는자 사업자번호가 없거나 형식 오류: ": "축 밖 모듈(정산 · 결제 · 연동 · 관리) · 다음 구조체크에서 사용자 조건을 가른다",
+  "utils/taxbill-popbill.ts|공급자(인비토) 사업자번호 형식 오류: …": "축 밖 모듈(정산 · 결제 · 연동 · 관리) · 다음 구조체크에서 사용자 조건을 가른다",
+  "utils/taxbill-popbill.ts|참조 재전송 테이블(taxbill_email": "축 밖 모듈(정산 · 결제 · 연동 · 관리) · 다음 구조체크에서 사용자 조건을 가른다",
+  "utils/totp.ts|JWT_SECRET 미설정: 2FA 등록 토": "서버 설정 누락(운영 설정 · 고객에게는 라우트 안내 문장)",
+  "utils/web-push.ts|Web Push 발송 환경이 준비되지 않았습": "서버 설정 누락(운영 설정 · 고객에게는 라우트 안내 문장)",
+  "utils/woocommerce-adapter.ts|우커머스는 token refresh 가 없습": "연동 방식 불변식(부르지 않는 길 · 코드 잘못)",
+  "utils/woocommerce-adapter.ts|우커머스 연동이 없는 몰입니다: …": "축 밖 모듈(정산 · 결제 · 연동 · 관리) · 다음 구조체크에서 사용자 조건을 가른다",
+  "utils/woocommerce-plugin-zip.ts|플러그인 소스가 없습니다: …": "축 밖 모듈(정산 · 결제 · 연동 · 관리) · 다음 구조체크에서 사용자 조건을 가른다",
+  "utils/zip-store.ts|zip 항목 이름이 올바르지 않습니다: …": "축 밖 모듈(정산 · 결제 · 연동 · 관리) · 다음 구조체크에서 사용자 조건을 가른다",
+  "utils/zip-store.ts|zip 항목이 없습니다.": "축 밖 모듈(정산 · 결제 · 연동 · 관리) · 다음 구조체크에서 사용자 조건을 가른다",
+  "utils/dm/dm-ab-test.ts|short_code 발급 실패": "내부 처리 실패(로그 · 경보 · 고객에게는 라우트 안내 문장)",
+  "utils/dm/dm-ai.ts|빈 응답": "AI 응답 해석 실패(다시 시도 · 고객에게는 라우트 안내 문장)",
+  "utils/dm/dm-ai.ts|JSON 형식이 아닙니다: ": "AI 응답 해석 실패(다시 시도 · 고객에게는 라우트 안내 문장)",
+  "utils/dm/dm-ai.ts|JSON 파싱 실패: …, raw: …": "AI 응답 해석 실패(다시 시도 · 고객에게는 라우트 안내 문장)",
+  "utils/dm/dm-ai.ts|JSON 배열 형식이 아닙니다": "AI 응답 해석 실패(다시 시도 · 고객에게는 라우트 안내 문장)",
+  "services/ai-orchestrator.ts|OrchestratorAI: target_a": "AI 응답 해석 실패(다시 시도 · 고객에게는 라우트 안내 문장)",
+  "services/ai-orchestrator.ts|OrchestratorAI: message_": "AI 응답 해석 실패(다시 시도 · 고객에게는 라우트 안내 문장)",
+};
+describe('R10 넓힘(1025) — 사용자 조건 = 오류 종류(UserFacingError) · 라우트 catch = 공용 응답', () => {
+  const found: string[] = [];
+  for (const f of SERVER_SRC.filter((x) => !x.startsWith('routes/'))) {
+    for (const m of stripComments(be(f)).matchAll(/throw new Error\(\s*(['`"])((?:(?!\1).)*?[가-힣](?:(?!\1).)*?)\1/g)) {
+      found.push(`${f}|${m[2].replace(/\$\{[^}]*\}/g, '…').slice(0, 24)}`);
+    }
+    // ★ 1025 빈틈 — 「값 || '한국어'」 꼴도 같은 결함(옛 시험은 글 머리만 봐 operator-audience 두 자리를 놓쳤다)
+    for (const m of stripComments(be(f)).matchAll(/throw new Error\(\s*[^'`"\s)][^;\n]*?\|\|\s*(['`"])((?:(?!\1).)*?[가-힣](?:(?!\1).)*?)\1/g)) {
+      found.push(`${f}|${m[2].replace(/\$\{[^}]*\}/g, '…').slice(0, 24)}`);
+    }
+  }
+  it('한국어 일반 Error = 면제(이유)뿐 · 낡은 면제 0', () => {
+    expect(found.filter((x) => !PLAIN_ERROR_OK[x])).toEqual([]);
+    expect(Object.keys(PLAIN_ERROR_OK).filter((k) => !found.includes(k))).toEqual([]);
+  });
+  // ★ 1026 Codex 1R — 공용 응답이 다른 if(DB 마이그레이션 등) 안에 갇히면 일반 길에서 안 불린다(40곳 · 위 시험은 「앞에 있다」만 봐 통과했다)
+  it('12기능 라우터의 5xx catch 는 공용 응답(respondUserError)을 먼저 부른다 · catch 바닥 높이(일반 길) · 안쪽은 「오류 종류면」 블록만 · throw 뒤 0', () => {
+    const bad: string[] = [];
+    for (const file of ALL_ROUTERS.filter((f) => ONE_LINE_ROUTERS.has(f))) {
+      const src = stripComments(be(`routes/${file}`));
+      for (const m of src.matchAll(/catch\s*\(\s*(\w+)(?:\s*:\s*\w+)?\s*\)\s*\{/g)) {
+        const start = (m.index ?? 0) + m[0].length;
+        let i = start, depth = 1;
+        const opens: number[] = [];
+        let topLevelCall = false, ufeBlockCall = false;
+        let lastTop5xx = -1, firstTopCall = -1;
+        while (i < src.length && depth) {
+          const ch = src[i];
+          if (ch === '{') { depth++; opens.push(i); }
+          else if (ch === '}') { depth--; opens.pop(); }
+          else if (src.startsWith('respondUserError(', i) || src.startsWith('userErrorResponse(', i)) {
+            if (depth === 1) { topLevelCall = true; if (firstTopCall < 0) firstTopCall = i; }
+            else {
+              const opener = src.slice(src.lastIndexOf('\n', opens[opens.length - 1]) + 1, opens[opens.length - 1]);
+              if (/instanceof UserFacingError/.test(opener)) ufeBlockCall = true;
+              else bad.push(`${file}:${src.slice(0, i).split('\n').length} 갇힘`);
+            }
+            const before = src.slice(src.lastIndexOf(';', src.lastIndexOf('\n', i)) - 40, src.lastIndexOf('\n', i));
+            if (/\bthrow \w+;\s*$/.test(before)) bad.push(`${file}:${src.slice(0, i).split('\n').length} throw 뒤`);
+          } else if (depth === 1 && lastTop5xx < 0 && src.startsWith('res.status(', i) && /^res\.status\(\s*5\d\d/.test(src.slice(i, i + 20))) lastTop5xx = i;   // 첫 바닥 5xx
+          i++;
+        }
+        if (lastTop5xx >= 0 && !ufeBlockCall && (!topLevelCall || firstTopCall > lastTop5xx)) bad.push(`${file}:${src.slice(0, m.index).split('\n').length} 일반 길 없음`);
+      }
+    }
+    expect(bad).toEqual([]);
+  });
+  it('라우트가 오류 글자로 상태를 짐작하지 않는다(필수 · 0건 · 미완료 · 찾을 수 없 · 허용 → 400 꼴 0 · 12기능)', () => {
+    const bad: string[] = [];
+    for (const file of ALL_ROUTERS.filter((f) => ONE_LINE_ROUTERS.has(f))) {
+      stripComments(be(`routes/${file}`)).split('\n').forEach((l, i) => {
+        if (/message\??\.includes\('(?:필수|0건|미완료|허용|올바르지|초과|찾을 수 없)/.test(l) && /\?\s*4\d\d\s*:\s*5\d\d|status\(4\d\d\)/.test(l + ' ')) bad.push(`${file}:${i + 1}`);
+      });
+    }
+    expect(bad).toEqual([]);
+  });
+});
+
+// ── R11 넓힘 ──
+const R11_ALLOWED_WORDS = /(?<![A-Za-z])(?:DM|SMS|LMS|MMS|RCS|URL|ID|CSV|SMTP|AI|API|SNS|PDF|HTML|QR|PC|VIP|SDK|KB|MB|GB|OK|DB|CDP|KT|SKT|LGU|JPG|JPEG|PNG|GIF|WebP|WEBP|MP4|MOV|jpg|jpeg|png|gif|webp|xlsx|xls|csv|txt|Push|Web|In-app|Email|ROI|CTR|KISA|YouTube|Instagram|Kakao|Gmail|Naver|Google|Cafe24|WooCommerce|A|B|C|D|N|X|D-Day|ALTER|https?|www|com|kr|co|app)(?![A-Za-z])/g;
+/** 개발자 연동 주소(SDK · 웹훅 · 수집) — 받는 쪽이 개발자라 칸 이름이 맞다 */
+const R11_DEV_API_ROUTES: Record<string, string> = {
+  'cdp.ts POST /ingest': 'SDK 수집(개발자 API · 칸 이름 = 문서의 칸)', 'cdp.ts POST /identify': 'SDK(개발자 API)', 'cdp.ts POST /event': 'SDK(개발자 API)',
+  'cdp.ts POST /order': 'SDK(개발자 API)', 'cdp.ts POST /journey-variants/:variantId/track': 'SDK(개발자 API)', 'cdp.ts POST /inapp/track': 'SDK(개발자 API)',
+  'cdp.ts POST /webhook/custom': '자사몰 웹훅(개발자 API · 헤더 이름 = 문서)', 'cdp.ts POST /push/subscribe': 'SDK 웹 푸시(개발자 API)',
+  'cdp.ts POST /push/unsubscribe': 'SDK 웹 푸시(개발자 API)', 'cdp.ts POST /bulk-import': '대량 가져오기(개발자 API)', 'cdp.ts POST /member-token': 'SDK 회원 토큰(개발자 API)',
+  'cdp.ts GET /push/vapid-public-key': 'SDK 웹 푸시(개발자 API)',
+};
+describe('R11 넓힘(1025) — 고객 문장에 칸 이름 · 개발 용어 0 · 업로드 원문 0 · 남의 오류 원문 붙이기 0 · 화면 요약 내부 키 0', () => {
+  it('12기능 라우터가 돌려주는 고객 문장(error · message)에 칸 이름 · 영어 0(개발자 API 주소는 이유)', () => {
+    const bad: string[] = [];
+    const used = new Set<string>();
+    for (const file of ALL_ROUTERS.filter((f) => ONE_LINE_ROUTERS.has(f))) {
+      for (const b of routeBlocks(stripComments(be(`routes/${file}`)))) {
+        const id = `${file} ${key(b)}`;
+        for (const m of b.body.matchAll(/\b(?:error|message)\s*:\s*(['`"])((?:(?!\1).)*?)\1/g)) {
+          const s = m[2];
+          if (!/[가-힣]/.test(s) || /DB 마이그레이션/.test(s)) continue;
+          const t = s.replace(/\$\{[^}]*\}/g, '').replace(/https?:\/\/\S+/g, '').replace(/\b[a-z]+(?:\.[a-z]+){1,}\b/g, '').replace(R11_ALLOWED_WORDS, '');
+          if (!/[A-Za-z]{2,}/.test(t) && !/컬럼|admin|의무\b/.test(t)) continue;
+          if (R11_DEV_API_ROUTES[id]) { used.add(id); continue; }
+          bad.push(`${id} · ${s.slice(0, 50)}`);
+        }
+      }
+    }
+    expect(bad).toEqual([]);
+    expect(unusedKeys(R11_DEV_API_ROUTES, used)).toEqual([]);
+  });
+  it('업로드 오류 = uploadErrorText(전 라우터 · multer 원문 0)', () => {
+    const bad: string[] = [];
+    for (const file of ALL_ROUTERS) {
+      const src = stripComments(be(`routes/${file}`));
+      for (const m of src.matchAll(/\.(?:single|array|fields|any)\([^)]*\)\(\s*req[^,]*,\s*res[^,]*,\s*(?:async\s*)?\(\s*(\w+)/g)) {
+        const tail = src.slice(m.index ?? 0, (m.index ?? 0) + 600);
+        if (new RegExp(`\\b${m[1]}\\??\\.message\\s*\\|\\|`).test(tail)) bad.push(`${file}:${src.slice(0, m.index).split('\n').length}`);
+      }
+    }
+    expect(bad).toEqual([]);
+  });
+  it('다른 모듈 오류 원문을 고객 문장에 붙이지 않는다(errors.map(e => e.message).join 꼴을 reason · error 에 0)', () => {
+    const bad: string[] = [];
+    for (const f of SERVER_SRC) {
+      stripComments(be(f)).split('\n').forEach((l, i) => {
+        if (/\.map\(\s*\(?\w+\)?\s*=>\s*\w+\.message\s*\)\.join\(/.test(l) && /reason|error\s*:|throw new/.test(l) && !/console\./.test(l)) bad.push(`${f}:${i + 1}`);
+      });
+    }
+    expect(bad).toEqual([]);
+  });
+  it('화면 요약 · 목록 글에 내부 키(template · card_style · section_type · layout_mode) 원값 0', () => {
+    const bad: string[] = [];
+    for (const rel of sourceFiles(FE, /\.tsx$/)) {
+      stripComments(read(join(FE, rel))).split('\n').forEach((l, i) => {
+        if (/\bconst \w*[Kk]ey\s*=/.test(l)) return;   // 비교용 키 글자(화면에 안 나간다)
+        if (/\$\{[\w.?]+\.(?:template|card_style|section_type)\s*(?:\|\|[^}]*)?\}/.test(l) || />\s*\{[\w.?]+\.(?:section_type|card_style)\}\s*</.test(l)) bad.push(`${rel}:${i + 1}`);
+      });
+    }
+    expect(bad).toEqual([]);
+  });
+});
+
+// ── R11 짝(1025) — 문장 = 표시 · 판정 = 키 ──
+//   경위 = 검수 문장을 사람 말로 다듬자 화면(make-flow)이 옛 문장 글자 정규식으로 알아보던 「버튼 주소 없음 → [넣기]」 ·
+//   「꼬리 블록 없음 → 그대로 보낼 수 있어요」가 조용히 꺼졌다 · 예측 근거 주소는 '회사 격리' 글자로 403 을 고르다 500 이 됐다.
+//   대상 = 화면 전부 + 12기능 라우터 + utils · services(축 밖 라우터 = 다음 구조체크 · 원장 추가 과제).
+const TEXT_JUDGE_OK: Record<string, string> = {
+  "components/admin/tabs/PlanRequestsTab.tsx|message.startsWith('[무료체험]')": '요금제 요청 글의 머리표(서버가 붙이는 표식 · 오류 문장 아님)',
+  "routes/dm.ts|msg.includes('%DM링크%')": '문안 안의 변수 자리(오류 문장 아님)',
+};
+describe('R11 짝(1025) — 화면 · 서버가 오류 · 검수 문장을 글자로 판정하지 않는다(판정 = 고정 키 · 오류 종류)', () => {
+  const PATS = [
+    /\b(?:message|error|reason|msg)\??\.(?:includes|startsWith|endsWith)\(\s*(['"`])[^'"`]*[가-힣][^'"`]*\1\)/,
+    /\b(?:message|error|reason|msg)\s*\|\|\s*(['"`])\1\s*\)\.(?:includes|startsWith|endsWith)\(\s*(['"`])[^'"`]*[가-힣]/,   // (err?.message || '').includes('…')
+    /\/[^/\n]*[가-힣][^/\n]*\/[gimsuy]*\.test\(\s*[\w.?]+\.(?:message|error|reason)\b/,
+    /\b[A-Z][A-Z0-9_]*_RE\.test\(\s*[\w.?]+\.(?:message|error|reason)\s*\)/,
+    /\b(?:message|error|msg|reason)\s*===\s*(['"`])[^'"`]*[가-힣]/,
+  ];
+  const files: Array<[string, string]> = [
+    ...sourceFiles(FE, /\.(ts|tsx)$/).filter((f) => !/\.test\./.test(f)).map((f) => [f, read(join(FE, f))] as [string, string]),
+    ...SERVER_SRC.filter((f) => !f.startsWith('routes/') || ONE_LINE_ROUTERS.has(f.slice('routes/'.length))).map((f) => [f, be(f)] as [string, string]),
+  ];
+  it('글자 판정 = 면제(이유)뿐 · 낡은 면제 0', () => {
+    const found: string[] = [];
+    for (const [rel, src] of files) {
+      for (const l of stripComments(src).split('\n')) {
+        for (const p of PATS) {
+          const m = l.match(p);
+          if (m) { found.push(`${rel}|${m[0].slice(0, 60)}`); break; }
+        }
+      }
+    }
+    expect(found.filter((x) => !TEXT_JUDGE_OK[x])).toEqual([]);
+    expect(Object.keys(TEXT_JUDGE_OK).filter((k) => !found.includes(k))).toEqual([]);
+  });
+});
+
+// ── R12 넓힘 ──
+/** 묶음 SELECT LIMIT(1 아님)에 순서가 없어도 되는 자리 — 키 = 파일|LIMIT 값|FROM 표 */
+const LIMIT_NO_ORDER_OK: Record<string, string> = {
+  'routes/admin-sync.ts|LIMIT 5|jsonb_array_elements': '실패 행 상세 앞 5건(배열 순서 · 화면이 앞 5건 + 총수를 보인다)',
+  'routes/campaigns.ts|LIMIT 0|?': '칸 확인(행 0 · 컬럼 존재 확인)',
+  'routes/companies.ts|LIMIT 0|callback_numbers': '칸 확인(행 0)',
+  'routes/gateway-templates.ts|LIMIT 3|companies': '같은 이름 회사 몇 곳 경고(존재 확인 · 슈퍼관리자)',
+  'routes/manage-callbacks.ts|LIMIT 0|callback_numbers': '칸 확인(행 0)',
+  'utils/callback-filter.ts|LIMIT 0|callback_numbers': '칸 확인(행 0)',
+  'utils/cdp-webhook-retry-worker.ts|LIMIT 1000|cdp_webhook_deliveries': '지우는 묶음(처리한 행은 조건에서 빠진다 · 순서 무관)',
+  'utils/cdp-webhook-retry-worker.ts|LIMIT 500|cdp_webhook_deliveries': '비우는 묶음(처리한 행은 조건에서 빠진다 · 순서 무관)',
+  'utils/enabled-fields.ts|LIMIT 200|customers': '표본(값 꼴 판정 · 어느 행이든 같다)',
+  'utils/enabled-fields.ts|LIMIT 20|customers': '표본(값 꼴 판정 · 어느 행이든 같다)',
+  'utils/enabled-fields.ts|LIMIT 10|customers': '표본(전화 꼴 칸 찾기 · 어느 행이든 같다)',
+  'utils/geo-access.ts|LIMIT 2|users': '같은 이름 두 개 확인(1개 · 2개 이상만 가른다)',
+  'utils/geo-access.ts|LIMIT 2|companies': '같은 이름 두 개 확인(1개 · 2개 이상만 가른다)',
+  'utils/operator-recipients.ts|LIMIT ${SENDABLE_RECIPIENTS_LIMIT}|customers': '발송 대상 목록 상한(실제 대상 수 total 을 함께 내고 초과면 화면이 보내지 않는다 · C-07)',
+  'utils/retention-sweeper.ts|LIMIT ${RETENTION_BATCH}|?': '보관 기간 지난 행 지우기 묶음(지운 행은 빠진다 · 순서 무관)',
+};
+describe('R12 넓힘(1025) — 전 파일 묶음 SELECT 의 LIMIT 에 순서 · 목록 상한 = 잘림 칸', () => {
+  it('순서 없는 LIMIT = 면제(이유)뿐 · 낡은 면제 0', () => {
+    const found: string[] = [];
+    for (const f of SERVER_SRC) {
+      for (const { sql } of sqlTemplates(stripComments(be(f)))) {
+        const s = sql.replace(/--[^\n]*/g, '');
+        if (!/\bSELECT\b/i.test(s)) continue;
+        for (const lm of s.matchAll(/\bLIMIT\s+(\$\{[^}]+\}|\$\d+|\d+)/gi)) {
+          if (lm[1] === '1') continue;
+          const before = s.slice(Math.max(0, (lm.index ?? 0) - 600), lm.index);
+          const sel = before.toUpperCase().lastIndexOf('SELECT');
+          if (/\bORDER\s+BY\b/i.test(sel >= 0 ? before.slice(sel) : before)) continue;
+          const table = ((sel >= 0 ? before.slice(sel) : before).match(/\bFROM\s+([\w.]+)/i) || [])[1] || '?';
+          found.push(`${f}|LIMIT ${lm[1]}|${table}`);
+        }
+      }
+    }
+    expect(found.filter((x) => !LIMIT_NO_ORDER_OK[x])).toEqual([]);
+    expect(Object.keys(LIMIT_NO_ORDER_OK).filter((k) => !found.includes(k))).toEqual([]);
+  });
+  it('#80 · #86 · #100 목록 상한 = 잘림 칸(truncated · hasMore)을 응답에 싣는다', () => {
+    const ab = stripComments(be('utils/dm/dm-ab-test.ts'));
+    expect(ab).toMatch(/export async function listAbTests\([^)]*\)[^{]*\{[\s\S]*?truncated/);
+    const dm = stripComments(be('routes/dm.ts'));
+    expect(dm).toContain('batchesTruncated');
+    const em = stripComments(be('utils/email-channel.ts'));
+    expect(em).toMatch(/export async function listEmailCampaigns\([\s\S]*?hasMore/);
+    const ev = stripComments(be('routes/event-campaigns.ts'));
+    const d = ev.indexOf("get('/drafts'");
+    expect(d).toBeGreaterThan(-1);
+    expect(ev.slice(d, d + 2500)).toContain('truncated');
+  });
+});
+
+// ── R14 넓힘 ──
+describe('R14 넓힘(1025) — 미정산 알림 = 공용 함수(reportCreditMiss) · 직접 로그 0', () => {
+  it('[CREDIT][MISS] 글자는 원장 CT 한 곳', () => {
+    expect(SERVER_SRC.filter((f) => f !== 'utils/ai-credit.ts' && /\[CREDIT\]\[MISS\]/.test(stripComments(be(f))))).toEqual([]);
+    expect(stripComments(be('utils/ai-credit.ts'))).toMatch(/export (?:async )?function reportCreditMiss\(/);
+  });
+});
+
+// ── R15 넓힘 ──
+/** 12기능 라우터의 외부 호출 주소(화면 · SDK 원본이 아니라 밖에서 부른다) */
+const R15_EXTERNAL: Record<string, string> = {
+  'email.ts POST /webhook': '메일 발송사 웹훅', 'email.ts GET /t/o/:token': '받은 메일 열람 픽셀', 'email.ts GET /t/c/:token': '받은 메일 클릭 추적',
+  'email.ts GET /u/:token': '받은 메일 수신거부 링크', 'email.ts POST /u/:token': '받은 메일 수신거부 한 번 누르기(RFC 8058)',
+  'cdp.ts POST /ingest': 'SDK 수집(고객사 사이트)', 'cdp.ts POST /member-token': 'SDK 회원 토큰(고객사 서버)', 'cdp.ts POST /identify': 'SDK(고객사 사이트)',
+  'cdp.ts POST /event': 'SDK(고객사 사이트)', 'cdp.ts POST /order': 'SDK(고객사 서버)', 'cdp.ts POST /journey-variants/:variantId/track': 'SDK(고객사 사이트)',
+  'cdp.ts POST /webhook/custom': '자사몰 웹훅', 'cdp.ts GET /push/vapid-public-key': 'SDK 웹 푸시', 'cdp.ts POST /push/subscribe': 'SDK 웹 푸시',
+  'cdp.ts POST /push/unsubscribe': 'SDK 웹 푸시', 'cdp.ts POST /bulk-import': '대량 가져오기(고객사 서버)',
+  'sns.ts GET /m/:token': 'SNS 플랫폼이 게시 사진 · 영상을 가져가는 주소', 'sns.ts GET /auth/callback/:platform': 'SNS 로그인 콜백(OAuth)',
+  'sns.ts POST /deauthorize/:platform': 'SNS 플랫폼 연결 해제 웹훅',
+  'marketing-planner.ts GET /participate/:token': '고객이 받은 문자의 참여 링크', 'marketing-planner.ts GET /approval/:token': '옛 결재 문자 링크 착지(달만 정한다)',
+  // ★ 1025 앞부분 규칙을 좁히자 드러난 공개 DM 주소(받은 사람 · 서버가 그린 뷰어 HTML 이 부른다 · 화면 소스에 글자가 없다)
+  'dm.ts GET /fonts/:file': 'DM 뷰어 · 메일 글꼴(fonts.css 의 @font-face 가 부른다)', 'dm.ts GET /s/:code': '받은 사람이 여는 DM 단축 주소',
+  'dm.ts POST /:code/track': 'DM 뷰어 열람 기록(뷰어 HTML 스크립트 TRACK_URL)', 'dm.ts GET /ab/:code': '받은 사람이 여는 A/B DM 주소(화면은 주소를 보여 줄 뿐)',
+  'dm.ts POST /ab/:code/track': 'A/B DM 뷰어 열람 기록(뷰어 HTML 스크립트)', 'dm.ts POST /:code/event-response': 'DM 뷰어 참여 응답(뷰어 HTML 스크립트)',
+};
+describe('R15 넓힘(1025) — 12기능 라우터 주소마다 화면 · SDK 원본 호출(정확 대조 · 기준 주소 함수 · ${} 조각 · 자리 표)', () => {
+  // app.ts 는 줄 주석만 걷는다(stripComments 는 '/*' 꼴 문자열을 블록 주석 시작으로 읽어 import 를 지운다)
+  const APP = be('app.ts').split('\n').filter((l) => !/^\s*\/\//.test(l)).join('\n');
+  const ident2file = new Map<string, string>();
+  for (const m of APP.matchAll(/import\s+(\w+)?\s*,?\s*(\{[^}]*\})?\s*from\s+'\.\/routes\/([\w/-]+)'/g)) {
+    if (m[1]) ident2file.set(m[1], `${m[3]}.ts`);
+    for (const part of (m[2] || '').replace(/[{}]/g, '').split(',')) { const local = part.split(' as ').pop()!.trim(); if (local) ident2file.set(local, `${m[3]}.ts`); }
+  }
+  const mounts = new Map<string, Set<string>>();
+  for (const m of APP.matchAll(/app\.use\(\s*'([^']+)'\s*,([^;]*?)\)\s*;/g)) {
+    for (const id of m[2].match(/\b\w+\b/g) || []) { const f = ident2file.get(id); if (f) { if (!mounts.has(f)) mounts.set(f, new Set()); mounts.get(f)!.add(m[1]); } }
+  }
+  const SRC_ROOTS = [FE, join(BE, '..', '..', 'company-frontend', 'src'), join(BE, '..', '..', 'flyer-frontend', 'src'), join(BE, '..', '..', 'sdk-js', 'src')];
+  const cands = new Set<string>();
+  const norm = (u: string) => u.replace(/\?.*$/, '').replace(/\$\{[^}]*\}/g, '\u0001');
+  for (const root of SRC_ROOTS) {
+    let files: string[] = [];
+    try { files = sourceFiles(root, /\.(ts|tsx|js|jsx)$/); } catch { continue; }
+    for (const rel of files) {
+      const t = stripComments(read(join(root, rel)));
+      for (const m of t.matchAll(/[`'"](\/api\/[^`'"\s]*)[`'"]/g)) cands.add(norm(m[1]));
+      // 앞부분 후보 = 꼬리 전체가 `${}` 하나일 때만(글 끝 · 질의 앞). ★1025 빈틈: 옛 규칙은 `/api/dm/${id}/무엇` 의 앞부분을 받아
+      //   DM `/:id/…` 주소 전부를 「부르는 곳 있음」으로 셌다(화면을 지운 /:id/render-sample 이 통과).
+      for (const m of t.matchAll(/`(\/api\/[^`$]*)\$\{[^}`]*\}(?=`|\?)/g)) cands.add(norm(m[1]) + '\u0002');
+      // 질의만 동적인 글(`/api/x?name=${…}`) = 「?」 앞 경로 그대로
+      for (const m of t.matchAll(/`(\/api\/[^`$?\s]*)\?/g)) cands.add(norm(m[1]));
+      // 앞부분을 이름에 담아 잇는 글(const base = `/api/…`; `${base}/${kind}`) = 이어 붙인 경로
+      const baseVars = new Map(Array.from(t.matchAll(/\bconst (\w+) = [`'"](\/api\/[^`'"\s]*)[`'"]/g), (m) => [m[1], m[2]] as [string, string]));
+      for (const m of t.matchAll(/`\$\{(\w+)\}(\/[^`\s]*)`/g)) { const b = baseVars.get(m[1]); if (b) cands.add(norm(b + m[2])); }
+      const bases = Array.from(t.matchAll(/`(\/api\/[\w\-/]*?)\$\{\s*\w+\s*\}`/g), (m) => m[1]);
+      const rels = Array.from(t.matchAll(/\b\w+\(\s*[`'"](\/[^`'"\s]*)[`'"]/g), (m) => m[1]);
+      for (const b of bases) for (const r of rels) cands.add(norm(b + r));
+      if (/axios\.create\(\{\s*baseURL:\s*'\/api'/.test(t) || /from\s+'[./]*api\/client'/.test(t)) {
+        for (const m of t.matchAll(/\bapi\.(?:get|post|put|patch|delete)\(\s*[`'"](\/[^`'"\s]*)[`'"]/g)) cands.add(norm('/api' + m[1]));
+      }
+      // 자리 표 — 편집기 사진 올리기 주소(ImageUploadEndpointContext · axios baseURL '/api')
+      for (const m of t.matchAll(/ImageUploadEndpointContext\.Provider value="(\/[^"]+)"/g)) cands.add(norm('/api' + m[1]));
+    }
+  }
+  const esc = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const called = (full: string) => {
+    const x = full.replace(/:\w+/g, 'X');
+    for (const c of cands) {
+      if (c.endsWith('\u0002')) { if (new RegExp('^' + esc(c.slice(0, -1)).replace(/\u0001/g, '[^/]*')).test(x)) return true; continue; }
+      if (new RegExp('^' + esc(full).replace(/:\w+/g, '[^/]+') + '/?$').test(c.replace(/\u0001/g, 'X'))) return true;
+      if (new RegExp('^' + esc(c).replace(/\u0001/g, '[^/]+') + '/?$').test(x)) return true;
+    }
+    return false;
+  };
+  it('화면 · SDK 주소 글자를 뽑았다 · 마운트를 읽었다(뽑기가 죽지 않았다)', () => {
+    expect(cands.size).toBeGreaterThan(300);
+    expect(mounts.get('dm.ts')?.has('/api/dm')).toBe(true);
+    expect(mounts.get('sns.ts')?.has('/api/sns')).toBe(true);
+  });
+  it('주소마다 부르는 곳이 있다(외부 호출 주소 = 이유) · 낡은 면제 0', () => {
+    const dead: string[] = [];
+    const used = new Set<string>();
+    for (const file of ALL_ROUTERS.filter((f) => ONE_LINE_ROUTERS.has(f))) {
+      for (const b of routeBlocks(stripComments(be(`routes/${file}`)))) {
+        const id = `${file} ${key(b)}`;
+        const ok = [...(mounts.get(file) || [])].some((base) => called(base.replace(/\/$/, '') + (b.path === '/' ? '' : b.path)));
+        if (ok) continue;
+        if (R15_EXTERNAL[id]) { used.add(id); continue; }
+        dead.push(id);
+      }
+    }
+    expect(dead).toEqual([]);
+    expect(unusedKeys(R15_EXTERNAL, used)).toEqual([]);
+  });
+});
+
+// ── R16 넓힘 ──
+describe('R16 넓힘(1025) — 날짜 칸 = 글자로 읽는다 · DM 렌더러 날짜 = 한국 시각', () => {
+  it('자동마케팅 사전 안내 날짜 칸(prep_reminder_sent_for)은 ::text 로 읽는다', () => {
+    const src = stripComments(be('utils/operator-prep-reminder.ts'));
+    expect(src).toContain('prep_reminder_sent_for::text AS prep_reminder_sent_for');
+    expect(src).not.toMatch(/new Date\(row\.prep_reminder_sent_for\)/);
+  });
+  it('DM 렌더러 · 뷰어의 날짜 표시는 시간대를 정한다(서버 로컬 0) · D-day = 한국 날짜 셈 한 곳', () => {
+    const bad: string[] = [];
+    for (const f of SERVER_SRC.filter((x) => /^utils\/dm\/dm-(section-renderer|viewer|render-primitives)\.ts$/.test(x))) {
+      stripComments(be(f)).split('\n').forEach((l, i) => {
+        if (/new Date\([^)]*\)\.(?:toLocaleString|toLocaleDateString|toLocaleTimeString)\((?![^)]*timeZone)/.test(l)) bad.push(`${f}:${i + 1} 시간대 없는 표시`);
+        if (/\.get(?:FullYear|Month|Date|Hours|Day)\(\)/.test(l)) bad.push(`${f}:${i + 1} 서버 로컬 날짜 칸`);
+        if (/Math\.ceil\(\(\w+\.getTime\(\) - Date\.now\(\)\) \/ 86400000\)/.test(l)) bad.push(`${f}:${i + 1} UTC 자정 D-day`);
+      });
+    }
+    expect(bad).toEqual([]);
+  });
+});
+
+// ── R1 넓힘 ② 화면 발송 정책 시각 ──
+describe('R1 넓힘(1025) ② — 화면 문장의 발송 정책 시각 · 기본 추천 시각 = 설정 응답 · 추천 함수 한 곳', () => {
+  it('화면 문장에 발송 정책 시각(8 · 20 · 21시) 숫자 0(send-policy 설정 응답 값만)', () => {
+    const hits: string[] = [];
+    for (const rel of sourceFiles(FE, /\.tsx?$/)) {
+      if (rel === 'utils/send-policy.ts') continue;
+      stripComments(read(join(FE, rel))).split('\n').forEach((l, i) => {
+        for (const m of l.matchAll(/'[^'\n]*'|"[^"\n]*"|`[^`]*`|>[^<>{}]+</g)) {
+          const s = m[0].replace(/\$\{[^}]*\}/g, '');
+          if (/[가-힣]/.test(s) && /(?<![\d:])(?:0?8|2[01])\s?시(?!간)/.test(s)) hits.push(`${rel}:${i + 1} ${s.slice(0, 40)}`);
+        }
+      });
+    }
+    expect(hits).toEqual([]);
+  });
+  it('기본 추천 시각 글자(「내일 오전 10시」) = send-time-recommend 한 곳', () => {
+    const hits = sourceFiles(FE, /\.tsx?$/).filter((rel) => rel !== 'utils/send-time-recommend.ts' && /내일 오전 10시/.test(stripComments(read(join(FE, rel)))));
+    expect(hits).toEqual([]);
+  });
+});
+
+// ── R4 넓힘 ② 회사 AI 호출 = 묶음 안 ──
+describe('R4 넓힘(1025) ② — 회사 크레딧 AI 호출 = 묶음 안이거나 · 묶음 밖이면 AI 호출 함수가 성공 뒤 차감 한 규칙(D1 = A)', () => {
+  it('AI 호출 함수의 묶음 밖 차감 = settleCreditAfterSuccess(원장 실패 = 결과 안 줌 · 너그러운 차감 0)', () => {
+    const src = stripComments(be('services/ai.ts'));
+    const at = src.indexOf('export async function callAIWithFallback(');
+    const body = src.slice(at, src.indexOf('\n}\n', at));
+    // ★ 1026 Codex 1R — 정산 = 응답을 받은 뒤 한 곳(finishPaidCall · 공급자 try 밖 · 두 갈래가 같은 함수)
+    expect((body.match(/settleCreditAfterSuccess\(/g) || []).length).toBe(1);
+    // 별칭으로 다른 함수를 들여 이름만 같게 하는 꼴 0(가져오기 = 그 이름 그대로)
+    expect((body.match(/const \{ settleCreditAfterSuccess \} = await import\('\.\.\/utils\/ai-credit'\);/g) || []).length).toBe(1);
+    expect(body).toContain('if (claudeOut) return finishPaidCall(claudeOut);');
+    expect(body).toContain('return finishPaidCall(gptOut);');
+    expect(body).not.toMatch(/deductCredit(?:Safe|Outcome)\(/);
+    expect(body).toMatch(/isInCreditBundle\(\) \? 0 :/);   // 묶음 안 = 단가 0(묶음 주인이 한 번 걷는다)
+  });
+});
+
+// ── R6 넓힘 닫는 자리 표 ──
+const R6_SCOPE_FILE = /^(?:utils\/(?:continuous-operator|operator-|planner-|dm\/|email-|inapp-|sns|journey-|campaign-quick|event-|image-studio|line-|one-line|ai-line|autosend|automarketing)|services\/ai-line)/;
+const R6_TERMINAL = /^(?:sent|completed?|done|cancell?ed|failed|expired|rejected|skipped|archived|closed|stopped|admin_stopped|deleted|ended|finished|succeeded|success|refunded|voided?|inactive|error|blocked|purged|dismissed|revoked|disabled|superseded|merged|aborted|fulfilled|registered|approved|confirmed|verified|published|terminated|dormant|accepted|missed|goal_met|exited|APPROVED|REJECTED|DELETED|NORMAL)$/;
+/** 비종결 상태 → 닫는 자리(파일 · 그 파일 SQL 에 그 상태가 있다) 또는 「사람이 바꾸는 살아 있는 상태」(이유) */
+const R6_CLOSERS: Record<string, { file?: string; has?: RegExp; why: string }> = {
+  'cdp_inapp_messages|active': { why: '사람이 켜고 끄는 노출 상태(끝 = 보관)' },
+  'cdp_inapp_messages|paused': { why: '사람이 멈춘 노출(다시 켜거나 보관)' },
+  'continuous_operators|active': { why: '사람이 켠 자동 마케팅(끄기 · 보관 = 사람)' },
+  'continuous_operators|paused': { why: '사람이 멈춘 자동 마케팅' },
+  'continuous_operators|paused_no_credit': { why: '잔액 멈춤(충전 뒤 사람이 다시 켠다)' },
+  'dm_ab_tests|running': { why: '사람이 시작하고 끝낸다(complete)' },
+  'dm_ab_tests|paused': { why: '사람이 멈춘 비교' },
+  'email_campaigns|scheduled': { file: 'utils/email-send-sweeper.ts', has: /WHERE status = 'scheduled' AND scheduled_at IS NOT NULL AND scheduled_at <= NOW\(\)/, why: '예약 시각이 되면 집어 보낸다(집은 뒤 sending)' },
+  'email_campaigns|sending': { file: 'utils/email-send-sweeper.ts', why: '30분 정체 = 실패 종결' },
+  'journey_executions|active': { why: '여정 실행 상태 = R6 여정 시험이 값 · 멈춤 사유를 덮는다' },
+  'journey_executions|paused': { why: '여정 실행 상태 = R6 여정 시험이 덮는다' },
+  'journeys|active': { why: '사람이 켜고 끄는 여정' },
+  'journeys|draft': { why: '사람이 만드는 중인 여정(켜기 전)' },
+  'journeys|paused': { why: '사람이 멈춘 여정' },
+  'kakao_templates|REG': { file: 'utils/alimtalk-jobs.ts', has: /status IN \('REQUESTED','REVIEWING','REG'/, why: '검수 동기화 워커가 카카오 응답 값으로 바꾼다' },
+  'kakao_templates|REQUESTED': { file: 'utils/alimtalk-jobs.ts', has: /status IN \('REQUESTED'/, why: '검수 동기화 워커가 카카오 응답 값으로 바꾼다' },
+  'operator_proposals|admin_review': { file: 'utils/continuous-operator.ts', why: '검토 제안도 7일 만료(#20 · 승인 대기와 같은 판정)' },
+  'operator_proposals|scheduled': { file: 'utils/continuous-operator.ts', has: /WHERE status = 'scheduled' AND scheduled_send_at IS NOT NULL AND scheduled_send_at <= NOW\(\)/, why: '예약 시각에 발송 패스가 집는다' },
+  'operator_proposals|sending': { file: 'utils/continuous-operator.ts', has: /WHERE status = 'sending'[\s\S]{0,400}reviewed_at < NOW\(\) - \(\$1 \|\| ' minutes'\)::interval/, why: '멈춘 발송 = reconcileStuckSending 마감' },
+  'planner_events|briefed': { file: 'utils/planner-reconcile.ts', has: /MISSED_EVENT_STATUS = \[[^\]]*'briefed'/, why: '지난 행사 = 놓친 실행 정리가 닫는다' },
+  'planner_events|draft': { file: 'utils/planner-reconcile.ts', has: /MISSED_EVENT_STATUS = \[[^\]]*'draft'/, why: '지난 행사 = 놓친 실행 정리가 닫는다' },
+  'planner_touchpoints|planned': { file: 'utils/planner-reconcile.ts', has: /fromStatuses: \['planned', 'ready'/, why: '지난 날 놓친 실행 = 정리가 닫는다' },
+  'planner_touchpoints|ready': { file: 'utils/planner-reconcile.ts', has: /fromStatuses: \['planned', 'ready'/, why: '지난 날 놓친 실행 = 정리가 닫는다' },
+  'planner_touchpoints|producing': { file: 'utils/planner-reconcile.ts', has: /statuses: \['producing'\]/, why: '멈춘 제작 = 회수(recoverStale)' },
+  'sns_post_targets|claimed': { file: 'utils/sns-reconcile-worker.ts', why: '선점 뒤 정체 = 대조 워커 확인 · 포기 시계' },
+  'sns_post_targets|scheduled': { file: 'utils/sns-publish-worker.ts', why: '예약 시각에 올린다 · 지난 예약 = 실패 종결 + 통지' },
+  'sns_post_targets|submitted': { file: 'utils/sns-reconcile-worker.ts', has: /SET verify_gave_up_at = NOW\(\)[\s\S]{0,300}WHERE status = 'submitted'[\s\S]{0,200}COALESCE\(claimed_at, updated_at\) < NOW\(\)/, why: '대조 워커 게시 확인 · 포기 시계 종결 표식(#97)' },
+  'sns_accounts|pending': { file: 'utils/sns-accounts.ts', has: /SNS_PENDING_STUCK_MINUTES/, why: '계정 고르기 대기 · 오래된 대기 = 연결 화면이 「멈춤」으로 보이고 다시 연결' },
+};
+describe('R6 넓힘(1025) — 12기능 모듈이 쓰는 비종결 상태마다 닫는 자리(파일) 또는 살아 있는 상태 이유', () => {
+  const writes = new Set<string>();
+  for (const f of SERVER_SRC.filter((x) => R6_SCOPE_FILE.test(x))) {
+    for (const { sql } of sqlTemplates(stripComments(be(f)))) {
+      const s = sql.replace(/--[^\n]*/g, '');
+      const ins = s.match(/\bINSERT\s+INTO\s+([\w.]+)[\s\S]*?\bDO\s+UPDATE\b/i);
+      const um = ins ? [ins[0], ins[1]] as unknown as RegExpMatchArray : s.match(/\bUPDATE\s+([\w.]+)/i);
+      if (!um) continue;
+      const head = (ins ? s.slice(s.search(/\bDO\s+UPDATE\b/i)) : s).split(/\bWHERE\b/i)[0];
+      const vals = new Set<string>();
+      for (const m of head.matchAll(/\bstatus\s*=\s*'(\w+)'/g)) vals.add(m[1]);
+      for (const m of head.matchAll(/\b(?:THEN|ELSE)\s+'(\w+)'/g)) vals.add(m[1]);
+      for (const v of vals) if (!R6_TERMINAL.test(v)) writes.add(`${um[1]}|${v}`);
+    }
+  }
+  it('쓰는 비종결 상태를 뽑았다', () => { expect(writes.size).toBeGreaterThan(5); });
+  it('상태마다 닫는 자리 · 이유가 있고 · 닫는 파일 SQL 에 그 상태가 있다 · 낡은 줄 0', () => {
+    expect([...writes].filter((k) => !R6_CLOSERS[k]).sort()).toEqual([]);
+    expect(Object.keys(R6_CLOSERS).filter((k) => !writes.has(k))).toEqual([]);
+    // 자동 닫기 = 그 파일 SQL 중 WHERE 에 그 상태 + 시간 조건이 있는 것(사람 손 닫기는 세지 않는다 · #20 만료를 빼면 빨개진다) · 배열 상수로 닫는 곳 = has
+    const bad: string[] = [];
+    for (const [k, c] of Object.entries(R6_CLOSERS)) {
+      if (!c.file) continue;
+      const v = k.split('|')[1];
+      const src = stripComments(be(c.file));
+      if (c.has) { if (!c.has.test(src)) bad.push(`${k} → ${c.file}`); continue; }
+      // 닫는 SQL = 상태를 다른 값으로 바꾸고(SET status = 'y' · y ≠ v) · WHERE 에 그 상태 · 시각이 지났는가(< NOW · < 바인드) — 「아직 안 지났나(> NOW)」인 승인 SQL 은 세지 않는다
+      const ok = sqlTemplates(src).some(({ sql }) => {
+        const q = sql.replace(/--[^\n]*/g, '');
+        const parts = q.split(/\bWHERE\b/i);
+        if (parts.length < 2 || !/\bUPDATE\b/i.test(parts[0])) return false;
+        const sets = Array.from(parts[0].matchAll(/\bstatus\s*=\s*'(\w+)'/g), (m) => m[1]);
+        const w = parts.slice(1).join(' ');
+        return sets.some((y) => y !== v) && new RegExp(`'${v}'`).test(w) && /<=?\s*(?:NOW\(\)|\$\d+|\(NOW\(\))/i.test(w);
+      });
+      if (!ok) bad.push(`${k} → ${c.file}`);
+    }
+    expect(bad).toEqual([]);
+  });
+});
+
+// ── R8 넓힘 주기 작업 실패 갈래 ──
+/** 주기 작업 파일의 「행마다 도는 반복 안 catch」에서 횟수 · 다음 시각을 안 올려도 되는 자리(이유) — 키 = 파일:catch 앞 30자 */
+const R8_CATCH_OK: Record<string, string> = {
+  "utils/continuous-operator.ts:uuid`, [row.id], ); }": "회차 정산 표식 = try 앞 stampMetaAttempt(10분 뒤 · 미시도 우선 · #2)",
+  "utils/continuous-operator.ts:패스 재시도([CREDIT] 로그 확인)`); } }": "발송 크레딧 표식 = try 앞 stampMetaAttempt(chargeAttemptAt · #2)",
+  "utils/continuous-operator.ts:id, row.company_id], ); }": "멈춘 발송 판정 조회 실패 = 다음 패스(읽기만 · 상태 안 바꿈)",
+  "utils/continuous-operator.ts:indowSummary(op.id, since)); }": "승인 기간 요약 집계 실패 = 0 으로 이어 간다(재시도 아님)",
+  "utils/email-send-sweeper.ts:get_spec) : row.target_spec; }": "예약 조건 값 해석 실패 = 빈 조건(아래가 실패 종결 + 통지)",
+  "utils/email-send-sweeper.ts:[campaignId], ); }": "실패 종결 기록 실패 = 30분 정체 정리가 다시 닫는다",
+  "utils/journey-anchor-scheduler.ts:mary.enqueued += r.enqueued; }": "여정 하나 실패 = 다음 주기 다시(실행 넣기만 · 실행마다 상한 = 실행기 error_count)",
+  "utils/journey-executor.ts:() => undefined); } }": "실패 기록의 기록 실패(로그) · 실행 상한 = error_count(R8 여정 시험)",
+  "utils/journey-executor.ts:).catch(() => undefined); } }": "적재 표식 정리 실패(로그) · 다음 주기 같은 판정",
+  "utils/journey-reentry-worker.ts:wait client.query('COMMIT'); }": "재진입 묶음 되돌림(그 여정 이번 주기 건너뜀 · 다음 주기 같은 기준)",
+  "utils/journey-reentry-worker.ts:t; journeysProcessed++; }": "재진입 여정 하나 실패 = 다음 주기(발송 0 · 실행 넣기만)",
+  "utils/journey-trigger-watcher.ts:y.skipped += result.skipped; }": "신호 읽기 실패 = 다음 주기(발송 0 · 실행 넣기만)",
+  "utils/planner-reconcile.ts:; inserted += res.inserted; }": "성공 · 실패 모두 catch 뒤에서 차례 표식(join_swept_at · #10)",
+  "utils/sns-publish-worker.ts:{ await handleTarget(row); }": "선점 행 = 대조 워커 포기 시계(claimed_at · #97)가 닫는다",
+  "utils/sns-reconcile-worker.ts:[row.id], ); } }": "플랫폼 삭제 확인(읽기) 실패 = 다음 주기 · 상태 안 바꿈",
+};
+describe('R8 넓힘(1025) — 주기 작업의 행마다 실패 갈래 = 횟수 · 다음 시각 표식(무한 재시도 0)', () => {
+  it('setInterval 워커 파일의 for-of 안 catch 는 표식(시도 · 실패 · 다음 시각 · 종결)을 남긴다(이유 있는 면제만)', () => {
+    const found: string[] = [];
+    for (const f of SERVER_SRC.filter((x) => R6_SCOPE_FILE.test(x))) {
+      const src = stripComments(be(f));
+      if (!/\bsetInterval\(|\bstart\w*(?:Worker|Scheduler|Sweeper)\b/.test(src)) continue;
+      for (const loop of src.matchAll(/for\s*\(\s*const\s+\w+\s+of\s+[^)]+\)\s*\{/g)) {
+        let i = (loop.index ?? 0) + loop[0].length, depth = 1;
+        while (i < src.length && depth) { if (src[i] === '{') depth++; else if (src[i] === '}') depth--; i++; }
+        const body = src.slice((loop.index ?? 0) + loop[0].length, i);
+        for (const c of body.matchAll(/catch\s*(?:\(\s*\w+(?:\s*:\s*\w+)?\s*\))?\s*\{/g)) {
+          let j = (c.index ?? 0) + c[0].length, d2 = 1;
+          while (j < body.length && d2) { if (body[j] === '{') d2++; else if (body[j] === '}') d2--; j++; }
+          const cb = body.slice((c.index ?? 0) + c[0].length, j);
+          if (/UPDATE\s|attempt|Attempt|failures|Failures|fail\w*Count|nextAt|next_\w+_at|_at'|stamp\w*\(|mark\w*\(|note\w*\(|bump\w*\(|close\w*\(|sendSystemAlert\(|notify\w*\(/.test(cb)) continue;
+          const before = body.slice(Math.max(0, (c.index ?? 0) - 40), c.index).replace(/\s+/g, ' ').trim().slice(-30);
+          found.push(`${f}:${before}`);
+        }
+      }
+    }
+    expect(found.filter((k) => !R8_CATCH_OK[k])).toEqual([]);
+    expect(Object.keys(R8_CATCH_OK).filter((k) => !found.includes(k))).toEqual([]);
+  });
+  it('#47 플래너 보내기 전 실패 = 시도 상한 · #71 추첨 실패 = 횟수 표식 + 통지', () => {
+    const ex = stripComments(be('utils/planner-executor.ts'));
+    expect(ex).toMatch(/PRE_SEND_FAIL_LIMIT\s*=\s*3/);
+    expect(ex).toContain('pre_send_failures');
+    const dw = stripComments(be('utils/dm/dm-draw-worker.ts'));
+    expect(dw).toMatch(/drawFails/);
+    expect(dw).toMatch(/sendSystemAlert\(/);
   });
 });

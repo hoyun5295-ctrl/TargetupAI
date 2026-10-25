@@ -9,6 +9,7 @@
 //   [문안 직접 쓰기] = AI 문안 없이 대상만(미리보기 0크레딧) · 창 편집(칸 · 기준 · 문안 분기 · 혜택)은 서버가 다시 계산한다.
 //   탭 = 승인할 제안 / 실행 중(`?tab=running` · 허브 "관리 →" 착지). 핸들러·저장 계약은 그대로.
 // native dialog 0(ConfirmModal·useToast). 모델명 0.
+import { getSendPolicy, isNightAdTime, nightRangeText, koHour } from '../utils/send-policy';
 import { useEffect, useRef, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { goUpTo } from '../lib/scroll-restoration';
@@ -531,11 +532,15 @@ export default function ContinuousOperatorPage() {
     const schedLabel = sched
       ? sched.toLocaleString('ko-KR', { month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false })
       : '';
+    // ★ 2026-10-25 원장 #38 — 야간이면 서버가 다음 발송 가능 시각(아침)으로 예약한다 · 확인 창도 그 규칙대로 말한다(옛: 늘 「승인 즉시 발송」)
+    const policy = getSendPolicy();
+    const nightNow = !!policy && isNightAdTime(policy, new Date());
+    const nightLine = nightNow && policy ? `지금은 야간(${nightRangeText(policy)})이라 ${koHour(policy.nightArriveHour, 'ampm')}에 나가요.` : '';
     setConfirmState({
-      mode: passed ? 'warning' : 'default', title: '제안 승인 + 발송', confirmLabel: '승인 + 발송',
+      mode: passed ? 'warning' : 'default', title: '제안 승인 + 발송', confirmLabel: nightNow ? '승인 + 아침 발송 예약' : '승인 + 발송',
       description: passed
-        ? `발송 예정 시각(${schedLabel})이 이미 ${passedDays >= 1 ? `${passedDays}일 ` : ''}지났습니다.\n지금 승인하면 예정일과 무관하게 즉시 발송됩니다. 시즌·기념일 캠페인이라면 시점이 맞는지 확인해 주세요.`
-        : '이 제안을 승인하고 바로 발송하시겠습니까?\n승인 즉시 대상 고객에게 발송됩니다.',
+        ? `발송 예정 시각(${schedLabel})이 이미 ${passedDays >= 1 ? `${passedDays}일 ` : ''}지났습니다.\n${nightLine || '지금 승인하면 예정일과 무관하게 즉시 발송됩니다.'} 시즌·기념일 캠페인이라면 시점이 맞는지 확인해 주세요.`
+        : nightLine ? `이 제안을 승인할까요?\n${nightLine}` : '이 제안을 승인하고 바로 발송하시겠습니까?\n승인 즉시 대상 고객에게 발송됩니다.',
       onConfirm: async () => {
         const d = await proposalAction(`${p.id}/approve`, selection);
         if (d.success) { toast.success(d.message || '발송을 시작했어요.'); await loadAll(); return; }
@@ -726,7 +731,7 @@ export default function ContinuousOperatorPage() {
                       ? (roi.purchases7d > 0 && <span>발송 후 7일 안 구매 {roi.purchases7d.toLocaleString()}건이 귀속된 실측 매출입니다.</span>)
                       : <span>매출 귀속은 자사몰 연동(구매 데이터 수집) 후 표시됩니다.</span>)}
                     {learningSummary?.variantWinner && learningSummary.variantWinner.sent > 0 && (
-                      <span>지난 14일 가장 효과 좋은 변형 = <b className="font-semibold text-slate-700">변형 {learningSummary.variantWinner.variantLabel}</b> (클릭률 {(learningSummary.variantWinner.ctr * 100).toFixed(1)}% · 발송 {learningSummary.variantWinner.sent}건)</span>
+                      <span>지난 14일 클릭률이 가장 높은 문안 = <b className="font-semibold text-slate-700">{learningSummary.variantWinner.snippet ? `「${learningSummary.variantWinner.snippet}…」` : `변형 ${learningSummary.variantWinner.variantLabel}`}</b> (클릭률 {(learningSummary.variantWinner.ctr * 100).toFixed(1)}% · 발송 {learningSummary.variantWinner.sent}건)</span>
                     )}
                   </span>
                 ) : null}

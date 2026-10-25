@@ -21,7 +21,11 @@
  *   - 한줄로 운영 영향 0 (Read-only 진단 + 추천만)
  */
 
+import { nightRangeKo, sendWindowKo } from './send-time-util';
 import { extractJsonFromAiText } from './ai-json';
+import { UserFacingError } from './http-error';
+import { getCreditCost } from './ai-credit-calc';
+import { runChargedAi, InsufficientCreditError } from './ai-credit';
 import { query } from '../config/database';
 import { callAIWithFallback } from '../services/ai';
 import { stripUnauthorizedBenefits, dropInventedEfficacyTitledBody, EFFICACY_PROMPT_RULES } from './copy-benefit-detector';
@@ -152,10 +156,10 @@ export async function diagnoseJourneySteps(
       return b.dropoutRate - a.dropoutRate;
     })
     .slice(0, 3)
-    .map((s) => `Step ${s.stepOrder}: ${s.topExitReason} (이탈 ${(s.dropoutRate * 100).toFixed(0)}%)`);
+    .map((s) => `${s.stepOrder}번째 칸: ${s.topExitReason} (이탈 ${(s.dropoutRate * 100).toFixed(0)}%)`);
 
   if (topConcerns.length === 0 && messageSteps.length > 0) {
-    topConcerns.push('전체 단계 정상 흐름. 추가 단계 신설 검토 권장');
+    topConcerns.push('모든 칸이 잘 흘러가요. 칸을 더해 볼 수 있어요.');
   }
 
   return {
@@ -176,11 +180,11 @@ export async function diagnoseJourneySteps(
 
 function identifyTopExitReason(step: JourneyStepStat): { reason: string; count: number } {
   const candidates: Array<{ reason: string; count: number }> = [
-    { reason: '발송 시간대 차단 (KST 21~08시 영역)', count: step.skippedHoursCount },
+    { reason: `보낼 수 없는 발송 시간대(${nightRangeKo()})`, count: step.skippedHoursCount },
     { reason: '수신거부 (광고성 차단)', count: step.skippedOptOutCount },
-    { reason: '고객 영역 누락', count: step.skippedNoCustomerCount },
+    { reason: '고객 정보 없음', count: step.skippedNoCustomerCount },
     { reason: '조건 미충족', count: step.conditionFailedCount },
-    { reason: 'wait 시간 영역 초과', count: step.waitedCount },
+    { reason: '기다리는 중', count: step.waitedCount },
   ];
   candidates.sort((a, b) => b.count - a.count);
   if (candidates[0].count === 0) {
@@ -197,10 +201,10 @@ function buildStepRecommendation(
   // wait step 영역
   if (step.stepType === 'wait' && step.waitedCount > 0 && dropoutRate > 0.3) {
     return {
-      recommendation: `wait 시간 영역 이탈 ${(dropoutRate * 100).toFixed(0)}%. 대기 시간 단축 검토 (현재 영역 → 권장 50% 단축)`,
+      recommendation: `기다리는 칸에서 ${(dropoutRate * 100).toFixed(0)}%가 빠져요. 대기 시간을 지금의 절반으로 줄여 보세요.`,
       oneClickAction: {
         type: 'adjust_wait_hours',
-        label: 'wait 시간 50% 단축 적용',
+        label: '대기 시간 절반으로 줄이기',
         payload: { stepId: step.stepId, halveHours: true },
       },
     };
@@ -209,10 +213,11 @@ function buildStepRecommendation(
   // 발송 시간대 차단 영역
   if (topExitReason.includes('발송 시간대')) {
     return {
-      recommendation: `KST 21~08시 발송 차단으로 ${step.skippedHoursCount.toLocaleString()}건 영역 누락. 발송 시간대 매트릭스 확장 권장`,
+      recommendation: `${nightRangeKo()}에 걸려 ${step.skippedHoursCount.toLocaleString()}건이 못 나갔어요. 보내는 시각을 낮으로 옮겨 보세요.`,
       oneClickAction: {
         type: 'expand_send_hours',
-        label: '발송 가능 시간대 확장 (KST 09~20시 → 08~21시)',
+        // ★ 2026-10-25 원장 #40 — 옛 라벨 「KST 09~20시 → 08~21시」 = 없는 설정 · 숫자 박기
+        label: `보내는 시각을 발송 가능 시간대(${sendWindowKo()}) 안으로 옮기기`,
         payload: { stepId: step.stepId, expandHours: true },
       },
     };
@@ -221,7 +226,7 @@ function buildStepRecommendation(
   // 수신거부 영역
   if (topExitReason.includes('수신거부')) {
     return {
-      recommendation: `수신거부 누적 ${step.skippedOptOutCount.toLocaleString()}건. 비광고성 안내 흐름 추가 검토 + 이전 단계 안 메시지 톤 정정 권장`,
+      recommendation: `수신거부 ${step.skippedOptOutCount.toLocaleString()}건. 광고가 아닌 안내 흐름을 더하거나 앞 칸 문안 말투를 고쳐 보세요.`,
       oneClickAction: null,
     };
   }
@@ -229,10 +234,10 @@ function buildStepRecommendation(
   // 조건 미충족 영역
   if (topExitReason.includes('조건 미충족')) {
     return {
-      recommendation: `조건 미충족 ${step.conditionFailedCount.toLocaleString()}건. 조건 영역 완화 또는 대체 흐름 추가 검토`,
+      recommendation: `조건에 안 맞은 고객 ${step.conditionFailedCount.toLocaleString()}명. 조건을 넓히거나 다른 흐름을 더해 보세요.`,
       oneClickAction: {
         type: 'adjust_condition',
-        label: '조건 영역 검토',
+        label: '조건 다시 보기',
         payload: { stepId: step.stepId },
       },
     };
@@ -241,10 +246,10 @@ function buildStepRecommendation(
   // 클릭률 영역 (message step 안 클릭률 5% 미만)
   if (step.stepType === 'message' && step.sentCount > 100 && step.clickRate < 0.05) {
     return {
-      recommendation: `클릭률 ${(step.clickRate * 100).toFixed(1)}%. variant A/B 테스트 신설 권장 (옛 평균 대비 부족 영역)`,
+      recommendation: `클릭률 ${(step.clickRate * 100).toFixed(1)}%. A/B 문안 시험을 해 보세요.`,
       oneClickAction: {
         type: 'add_variant',
-        label: 'A/B variant 신설',
+        label: 'A/B 문안 만들기',
         payload: { stepId: step.stepId },
       },
     };
@@ -252,7 +257,7 @@ function buildStepRecommendation(
 
   // 정상 흐름 영역
   return {
-    recommendation: dropoutRate < 0.1 ? '정상 흐름. 추가 정정 영역 없음' : `이탈률 ${(dropoutRate * 100).toFixed(0)}%. 모니터링 영역`,
+    recommendation: dropoutRate < 0.1 ? '잘 흘러가고 있어요. 고칠 곳이 없어요.' : `이탈률 ${(dropoutRate * 100).toFixed(0)}%. 조금 더 지켜볼게요.`,
     oneClickAction: null,
   };
 }
@@ -282,7 +287,7 @@ export async function recommendNextJourneyStep(
     [journeyId, companyId],
   );
   if (journeyRes.rows.length === 0) {
-    throw new Error('여정 접근 권한 없음 (회사 격리)');
+    throw new UserFacingError(404, 'JOURNEY_NOT_FOUND', '여정을 찾을 수 없어요.');
   }
   const journey = journeyRes.rows[0];
   const existingSteps = (journey.steps || []) as Array<{
@@ -362,50 +367,63 @@ ${stepsDescription || '(단계 영역 없음)'}
 }`;
 
   try {
-    const text = await callAIWithFallback({
-      system,
-      userMessage,
-      maxTokens: 1500,
-      temperature: 0.3,
-      // ★ D209+ Phase D 비용 안전 매트릭스 정합: Sonnet 4.6 + companyId + source
-      model: 'sonnet',
-      companyId,
-      source: 'journey-step-diagnosis',
-    });
+    // ★ 2026-10-25 원장 Z4 — 돈 = AI 결과 정산 한 곳: 아래 본문이 끝까지 가면 걷고, 던지면(읽지 못함 등) catch 의 대체 결과 = 0원
+    //   (옛: AI 응답 순간 차감 · 대체 결과를 줘도 나갔다) · 바깥 묶음 안이면 걷지 않는다
+    const { result: chargedOut } = await runChargedAi({
+      companyId: companyId, cost: getCreditCost('journey-step-diagnosis'), source: 'journey-step-diagnosis', createdBy: null,
+      run: async () => {
+        const text = await callAIWithFallback({
+          system,
+          userMessage,
+          maxTokens: 1500,
+          temperature: 0.3,
+          // ★ D209+ Phase D 비용 안전 매트릭스 정합: Sonnet 4.6 + companyId + source
+          model: 'sonnet',
+          companyId,
+          source: 'journey-step-diagnosis',
+        });
 
-    // ★ 2026-09-30 WP4 — JSON 추출은 CT 하나(ai-json · 머리말 · 코드펜스 · 문자열 안 제어문자 복구). 옛 코드펜스만 벗기는 인라인은 모델이 앞에 한 줄만 붙여도 실패했다.
-    const parsed: any = extractJsonFromAiText(text);
-    // ★ 2026-10-24 세 채널 구조체크 ② — 추천 문안도 고객 글이다(이 생산자만 거름이 없었다 · R13).
-    //   근거 = 이 여정에 이미 저장된 본문 · 제목(사람이 확인한 글) · 혜택 → 자리표시 · 효능 → 문장 빼기(제목 = 비움)
-    const recGround = existingSteps.map((s: any) => `${s?.message_template || ''}\n${s?.subject || ''}`).join('\n');
-    //   제목 + 본문 = 이어 읽는 단위(CT dropInventedEfficacyTitledBody · 여정 생성과 같은 규칙)
-    const guardPair = (s: any) => dropInventedEfficacyTitledBody(
-      typeof s?.subject === 'string' ? stripUnauthorizedBenefits(s.subject.slice(0, JOURNEY_SUBJECT_MAX_CHARS), recGround) : '',
-      typeof s?.messageTemplate === 'string' ? stripUnauthorizedBenefits(s.messageTemplate.slice(0, 2000), recGround) : '',
-      recGround,
-    );
-    const mapStep = (s: any): RecommendedStep => ({
-      stepType: (['message', 'wait', 'condition'].includes(s?.stepType) ? s.stepType : 'message') as 'message' | 'wait' | 'condition',
-      delayHours: typeof s?.delayHours === 'number' ? Math.max(0, Math.min(720, s.delayHours)) : 24,
-      channel: (['sms', 'lms', 'mms'].includes(s?.channel) ? s.channel : null) as 'sms' | 'lms' | 'mms' | null,
-      messageTemplate: typeof s?.messageTemplate === 'string' ? guardPair(s).body : null,
-      subject: typeof s?.subject === 'string' ? guardPair(s).subject : null,
-      conditionType: typeof s?.conditionType === 'string' ? s.conditionType : null,
-      reasoning: typeof s?.reasoning === 'string' ? s.reasoning : '',
-      expectedImpact: typeof s?.expectedImpact === 'string' ? s.expectedImpact : '',
-    });
+        // ★ 2026-09-30 WP4 — JSON 추출은 CT 하나(ai-json · 머리말 · 코드펜스 · 문자열 안 제어문자 복구). 옛 코드펜스만 벗기는 인라인은 모델이 앞에 한 줄만 붙여도 실패했다.
+        const parsed: any = extractJsonFromAiText(text);
+        // ★ 2026-10-24 세 채널 구조체크 ② — 추천 문안도 고객 글이다(이 생산자만 거름이 없었다 · R13).
+        //   근거 = 이 여정에 이미 저장된 본문 · 제목(사람이 확인한 글) · 혜택 → 자리표시 · 효능 → 문장 빼기(제목 = 비움)
+        const recGround = existingSteps.map((s: any) => `${s?.message_template || ''}\n${s?.subject || ''}`).join('\n');
+        //   제목 + 본문 = 이어 읽는 단위(CT dropInventedEfficacyTitledBody · 여정 생성과 같은 규칙)
+        const guardPair = (s: any) => dropInventedEfficacyTitledBody(
+          typeof s?.subject === 'string' ? stripUnauthorizedBenefits(s.subject.slice(0, JOURNEY_SUBJECT_MAX_CHARS), recGround) : '',
+          typeof s?.messageTemplate === 'string' ? stripUnauthorizedBenefits(s.messageTemplate.slice(0, 2000), recGround) : '',
+          recGround,
+        );
+        const mapStep = (s: any): RecommendedStep => ({
+          stepType: (['message', 'wait', 'condition'].includes(s?.stepType) ? s.stepType : 'message') as 'message' | 'wait' | 'condition',
+          delayHours: typeof s?.delayHours === 'number' ? Math.max(0, Math.min(720, s.delayHours)) : 24,
+          channel: (['sms', 'lms', 'mms'].includes(s?.channel) ? s.channel : null) as 'sms' | 'lms' | 'mms' | null,
+          messageTemplate: typeof s?.messageTemplate === 'string' ? guardPair(s).body : null,
+          subject: typeof s?.subject === 'string' ? guardPair(s).subject : null,
+          conditionType: typeof s?.conditionType === 'string' ? s.conditionType : null,
+          reasoning: typeof s?.reasoning === 'string' ? s.reasoning : '',
+          expectedImpact: typeof s?.expectedImpact === 'string' ? s.expectedImpact : '',
+        });
 
-    return {
-      journeyId,
-      recommendedAt: new Date(),
-      currentStepCount: existingSteps.length,
-      recommended: mapStep(parsed.recommended || {}),
-      alternatives: Array.isArray(parsed.alternatives)
-        ? parsed.alternatives.slice(0, 3).map(mapStep)
-        : [],
-      reasoning: typeof parsed.reasoning === 'string' ? parsed.reasoning : '',
-    };
+        return {
+          journeyId,
+          recommendedAt: new Date(),
+          currentStepCount: existingSteps.length,
+          recommended: mapStep(parsed.recommended || {}),
+          alternatives: Array.isArray(parsed.alternatives)
+            ? parsed.alternatives.slice(0, 3).map(mapStep)
+            : [],
+          reasoning: typeof parsed.reasoning === 'string' ? parsed.reasoning : '',
+        };
+  
+      },
+      // ★ 1026 Codex 1R — 쓸 결과 = 최종 결과 기준(옛: 늘 참이라 빈 결과에도 걷었다)
+      accept: (r) => r.recommended.stepType !== 'message' || !!(r.recommended.messageTemplate || '').trim(),
+    });
+    return chargedOut;
   } catch (err: any) {
+    // 잔액 부족 · 원장 쓰기 실패는 대체 결과로 접지 않는다(호출부 402 · 503)
+    if (err instanceof InsufficientCreditError || err instanceof UserFacingError) throw err;
     console.error('[JourneyStepDiagnosis] AI 호출 실패:', err?.message);
     return {
       journeyId,
@@ -418,11 +436,11 @@ ${stepsDescription || '(단계 영역 없음)'}
         messageTemplate: null,
         subject: null,
         conditionType: null,
-        reasoning: 'AI 추천 영역 일시 불가. 잠시 후 다시 시도해주세요.',
+        reasoning: 'AI 추천을 지금 만들 수 없어요. 잠시 뒤 다시 시도해 주세요.',
         expectedImpact: '',
       },
       alternatives: [],
-      reasoning: 'AI 호출 영역 오류. 추후 자동 복구',
+      reasoning: 'AI 추천을 만들지 못했어요. 잠시 뒤 다시 시도해 주세요.',
     };
   }
 }

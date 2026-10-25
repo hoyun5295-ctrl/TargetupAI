@@ -162,7 +162,8 @@ describe('C 알림 · 정지 결과', () => {
   });
   it('자동 보정 = 알림 성공 뒤에만 본문 갱신 · 실패 = 여정 정지', () => {
     const src = read('../journey-pretest-notifier.ts');
-    const seg = src.slice(src.indexOf('if (r2.enqueueOk && r2.ok) {'));
+    expect(src.indexOf("if (r2.verdict === 'pass') {")).toBeGreaterThan(-1);   // ★1025 #14 — 판정 = 공용 3값
+    const seg = src.slice(src.indexOf("if (r2.verdict === 'pass') {"));
     inOrder(seg, ["if (!(await safeNotify(b, regenBody, 'pretest_autofixed'))) {", 'await pauseJourney(', 'continue;', 'UPDATE journey_step_snapshots SET message_body']);
   });
   it('정지 커밋 뒤 집계 · 조회 실패 = 실패로 답하지 않는다', () => {

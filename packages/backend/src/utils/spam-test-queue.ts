@@ -365,7 +365,7 @@ export async function enqueueSpamTest(params: SpamTestEnqueueParams): Promise<Sp
       `SELECT id, carrier, phone FROM spam_filter_devices WHERE is_active = true ORDER BY carrier`
     );
     if (devices.rows.length === 0) {
-      return { ok: false, error: '지금은 스팸 검사를 할 수 없습니다. 관리자에게 문의하세요.' };
+      return { ok: false, error: '지금은 스팸 검사를 할 수 없습니다. 관리자에게 문의하세요.', errorCode: 'NO_TEST_DEVICE' };
     }
 
     const messageTypes: string[] = [];
@@ -986,6 +986,39 @@ export function spamVerdictOf(
   if (results.length === 0) return 'error';
   if (results.some((r) => r?.result === 'timeout' || r?.result === 'failed' || !r?.result)) return 'error';
   return 'pass';
+}
+
+/** 검사 장애 때 다시 검사하는 횟수 상한 · 사이 쉼(★ 2026-10-25 원장 #18 · #19) */
+export const SPAM_ERROR_RETRY_MAX = 3;
+const SPAM_ERROR_RETRY_WAIT_MS = 60_000;
+
+/**
+ * ★ 2026-10-25 원장 #18 · #19 — 검사 한 안을 판정 셋(spamVerdictOf)으로 끝내는 공용 꼴. 검사 장애(예외 · 결과 0 · 시간 초과)는
+ *   통과도 차단도 아니다 → 쉬었다 다시 검사한다(상한 SPAM_ERROR_RETRY_MAX). 끝까지 장애면 'error'(부르는 쪽이 「검사를 못 함」으로 남긴다).
+ *   옛: 자동마케팅 재검사 · 리마인드 검사가 원값(passedVariantId · spamResult === 'pass')을 읽어 검사 장애 한 번이 「스팸에 걸림」으로 굳었다.
+ *   raw = 화면 기록용 원값(통과는 판정이 통과일 때만 'pass' · 장애는 'pass' 로 접지 않는다).
+ */
+export async function spamVerdictWithRetry(
+  run: () => Promise<{ variants?: Array<any>; totalTestCount?: number; passedVariantId?: string | null } | null | undefined>,
+  opts: { attempts?: number; waitMs?: number; label?: string } = {},
+): Promise<{ verdict: SpamVerdict; raw: string; variant: any | null; attempts: number }> {
+  const max = Math.max(1, opts.attempts ?? SPAM_ERROR_RETRY_MAX);
+  let last: any = null;
+  for (let i = 1; i <= max; i++) {
+    let verdict: SpamVerdict = 'error';
+    try {
+      const r = await run();
+      last = r?.variants?.[0] ?? null;
+      verdict = spamVerdictOf(last, Number(r?.totalTestCount ?? 1));
+    } catch (e: any) {
+      console.warn(`[spam-verdict] ${opts.label || ''} 검사 장애 ${i}/${max}:`, e?.message || e);
+      last = null;
+    }
+    if (verdict !== 'error') return { verdict, raw: verdict, variant: last, attempts: i };
+    if (i < max) await new Promise((ok) => setTimeout(ok, opts.waitMs ?? SPAM_ERROR_RETRY_WAIT_MS));
+  }
+  const rawLast = String(last?.spamResult || '');
+  return { verdict: 'error', raw: rawLast && rawLast !== 'pass' ? rawLast : 'failed', variant: last, attempts: max };
 }
 
 /**

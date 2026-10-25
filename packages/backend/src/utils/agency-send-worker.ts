@@ -1831,7 +1831,13 @@ async function alertStuckAttempt(): Promise<void> {
 async function runLockRecovery(): Promise<void> {
   const rows = await query(
     `SELECT id, company_id, status, lock_at, lock_token, campaign_id, dispatch_key, requested_at FROM agency_send_requests
-      WHERE status IN ('testing','final_testing') LIMIT 50`,
+      WHERE status IN ('testing','final_testing')
+        -- ★ 2026-10-25 원장 #5 — 늦음 판정을 SQL 에(LIMIT 앞) · 오래 잡힌 순(옛: 순서 없는 LIMIT 50 · 진행 중 행 50개가 자리를 차지하면 멈춘 건 복구 0)
+        --   JS 판정(isLockStale)과 같은 식 · 같은 상수
+        AND (lock_at IS NULL OR lock_at < NOW() - ($1 || ' minutes')::interval)
+      ORDER BY lock_at ASC NULLS FIRST, id
+      LIMIT 50`,
+    [String(LOCK_STALE_MINUTES)],
   );
   const now = new Date();
   for (const row of rows.rows) {

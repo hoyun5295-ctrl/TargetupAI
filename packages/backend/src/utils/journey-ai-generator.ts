@@ -15,7 +15,8 @@
  *   - (광고)+080+KISA 제목 = 시스템 자동 합성 (직접 작성 X)
  */
 
-import { extractJsonFromAiText } from './ai-json';
+import { UserFacingError } from './http-error';
+import { extractJsonFromAiText, aiStr } from './ai-json';
 import { callAIWithFallback, getKoreanCalendar } from '../services/ai';
 import { randomUUID, createHash } from 'crypto';
 import { buildMemoryPromptContext } from './company-memory';
@@ -47,7 +48,7 @@ import { presetObjectiveFor } from './journey-opportunities';
 // ★ 2026-08-02 (Codex 1R): AI가 지어낸 혜택 기계 차단 — 프롬프트는 경계가 아니다.
 import { findNewNumbers, stripUnauthorizedBenefits, claimsInventedEfficacy, dropInventedEfficacyTitledBody, efficacyNote, EFFICACY_PROMPT_RULES, EFFICACY_REWRITE_RULE } from './copy-benefit-detector';
 // ★ 2026-09-27 한줄로 V2 R260 — 여정 자동 생성은 사전 확인 → 묶음 생성 → 1회 차감
-import { checkCredit, deductCreditOutcome, isChargedByKey } from './ai-credit';
+import { checkCredit, deductCreditOutcome, isChargedByKey, CreditSettleError, runChargedAi } from './ai-credit';
 import { joinInflight } from './inflight-lock';
 import { redis } from '../config/defaults';
 import { getCreditCost } from './ai-credit-calc';
@@ -270,7 +271,7 @@ export async function generateJourneyPackage(input: JourneyAIGenerateInput): Pro
   //   라우트가 앞에서 400으로 거르지만, 발송 대상을 정하는 축이라 생성기도 그냥 넘기지 않는다.
   const presetTrigger = input.preferTriggerEvent ? String(input.preferTriggerEvent) : null;
   if (presetTrigger && !isCreatableTriggerEvent(presetTrigger)) {
-    throw new Error('지원하지 않는 발송 조건입니다. 트리거를 다시 선택해 주세요.');
+    throw new JourneyInputError('지원하지 않는 발송 조건이에요. 시작 사건을 다시 골라 주세요.');
   }
   // ★ 2026-09-30 V2 3차 — 상품을 골라야 하는 트리거는 상품 고르기 창(product 입력)에서만 만든다(상품 없이 만들면 영영 0건).
   if (presetTrigger && isProductPickTrigger(presetTrigger) && !input.product) {
@@ -286,7 +287,7 @@ export async function generateJourneyPackage(input: JourneyAIGenerateInput): Pro
   // ★ 2026-09-30 V2 — 이어받는 3종만 문장이 있던 것을 켤 수 있는 모든 시작 사건으로(presetObjectiveFor · 0930 Harold 접수).
   const objectiveText = (input.objective || '').trim() || (presetTrigger ? presetObjectiveFor(presetTrigger) || '' : '');
   if (!objectiveText && !input.templateHint) {
-    throw new Error('objective (자연어) 또는 templateHint (7 표준 단축) 중 하나는 필수입니다.');
+    throw new JourneyInputError('여정 목표를 한 줄로 적어 주세요.');
   }
   // ★ 2026-08-08 혜택 입력 — 사용자가 준 혜택 하나. 상한은 화면 입력 한 줄 분량이다.
   const benefitText = String(input.benefitText || '').trim().slice(0, 200);
@@ -679,7 +680,7 @@ VIP 회원님께 먼저 전하는 이번 안내,
     parsed = extractJsonFromAiText(text);
   } catch (err: any) {
     console.error('[journey-ai-generator] JSON parse 실패. raw:', text.slice(0, 500));
-    throw new Error('AI 응답 JSON 파싱 실패. 다시 시도해주세요.');
+    throw new UserFacingError(422, 'AI_RESULT_INVALID', 'AI가 여정을 만들지 못했어요. 다시 해 주세요.');
   }
 
   const rawSteps: any[] = Array.isArray(parsed.steps) ? parsed.steps : [];
@@ -689,8 +690,8 @@ VIP 회원님께 먼저 전하는 이번 안내,
   const steps: GeneratedStep[] = rawSteps.map((s: any, idx: number) => {
     const channel = ['sms', 'lms', 'mms'].includes(s.channel) ? s.channel : 'lms';
     // ★ D187-fix5: AI 응답에 이모지/비표준 특수문자 포함 가능성 — sanitize 자동 적용
-    const rawMessage = String(s.messageTemplate || '').slice(0, 2000);
-    const rawSubject = channel === 'sms' ? '' : String(s.subject || '').slice(0, JOURNEY_SUBJECT_MAX_CHARS);
+    const rawMessage = aiStr(s.messageTemplate).slice(0, 2000);
+    const rawSubject = channel === 'sms' ? '' : aiStr(s.subject).slice(0, JOURNEY_SUBJECT_MAX_CHARS);
     const messageSan = sanitizeForSms(rawMessage);
     const subjectSan = sanitizeForSms(rawSubject);
     if (messageSan.hadChanges) {
@@ -717,12 +718,12 @@ VIP 회원님께 먼저 전하는 이번 안내,
         efficacyBasis,
       )),
       isAd: resolveJourneyAdFlag(channel, s.isAd),
-      stepIntent: String(s.stepIntent || '').slice(0, 100),
+      stepIntent: aiStr(s.stepIntent).slice(0, 100),
     };
   });
 
   if (steps.length === 0) {
-    throw new Error('AI가 유효한 step을 생성하지 못했습니다. 목표 문구를 더 명확히 작성해주세요.');
+    throw new UserFacingError(422, 'AI_RESULT_INVALID', 'AI가 쓸 수 있는 단계를 만들지 못했어요. 목표를 조금 더 구체적으로 적어 주세요.');
   }
 
   const cbRes = await query(
@@ -735,7 +736,7 @@ VIP 회원님께 먼저 전하는 이번 안내,
 
   const validTemplates = ['onboarding','repeat','dormant','cart','birthday','reservation','custom'];
   let templateCode = validTemplates.includes(parsed.templateCode) ? parsed.templateCode : 'custom';
-  let triggerEvent = String(parsed.triggerEvent || 'custom').slice(0, 50);
+  let triggerEvent = aiStr(parsed.triggerEvent, 'custom').slice(0, 50);
   let triggerFilters: Record<string, any> =
     typeof parsed.triggerFilters === 'object' && parsed.triggerFilters !== null ? parsed.triggerFilters : {};
 
@@ -786,7 +787,7 @@ VIP 회원님께 먼저 전하는 이번 안내,
   const reentry = contractReentryPolicy(triggerEvent);
 
   return {
-    name: String(parsed.name || '여정').slice(0, 100),
+    name: aiStr(parsed.name, '여정').slice(0, 100),
     templateCode,
     triggerEvent,
     triggerFilters,
@@ -798,7 +799,7 @@ VIP 회원님께 먼저 전하는 이번 안내,
     callbackNumberHint: callbackHint,
     budgetMonthlyHint: parsed.budgetMonthlyHint != null ? Number(parsed.budgetMonthlyHint) : null,
     thresholdCostHint: parsed.thresholdCostHint != null ? Number(parsed.thresholdCostHint) : null,
-    reasoning: String(parsed.reasoning || '').slice(0, 500),
+    reasoning: aiStr(parsed.reasoning).slice(0, 500),
     goalExitDefault: defaultGoalExitFor(triggerEvent),
     // ★ 2026-10-23 AI 가 칸으로 못 담은 조건도 알린다(옛: AI 가 그 조건을 아예 안 내면 「반영 안 됨」도 없이 더 넓게 나갔다)
     // ★ 2026-10-24 ② 뺀 효능 수 = 서버 문장(패키지 안내 목록 · 인터뷰 창이 그대로 그린다)
@@ -843,7 +844,17 @@ function buildJourneyContextBlock(jc: JourneyStepAiContext | undefined, hasBody:
   return `${head}${prevBlock}${mode}`;
 }
 
-export async function refineStepMessage(input: StepRefineInput): Promise<{ candidates: StepRefineCandidate[] }> {
+export async function refineStepMessage(...args: Parameters<typeof refineStepMessageWithAi>): ReturnType<typeof refineStepMessageWithAi> {
+  // ★ 2026-10-25 원장 Z4 — 돈 = AI 결과 정산 한 곳(다듬은 안이 하나라도 남을 때만) · 쓸 결과가 아니면 0원 · 잔액 부족 402 · 원장 쓰기 실패 503 · 바깥 묶음이면 0
+  const { result } = await runChargedAi({
+    companyId: args[0].companyId, cost: getCreditCost('journey-ai-refine'), source: 'journey-ai-refine',
+    run: () => refineStepMessageWithAi(...args),
+    accept: (r) => r.candidates.length > 0,
+  });
+  return result;
+}
+
+async function refineStepMessageWithAi(input: StepRefineInput): Promise<{ candidates: StepRefineCandidate[] }> {
   // ★ 2026-08-02 §13-3 — 빈 스텝이면 **생성 모드**로 간다.
   //   옛 흐름은 사람이 먼저 열 글자를 써야 AI를 부를 수 있었다(추가 입력 요구 = marketing_user_ux_priority 위반).
   //   ⛔ 다만 맥락 없이 짓지는 않는다 — 여정 맥락도 본문도 없으면 지어낼 근거가 없으므로 빈손으로 돌린다.
@@ -953,7 +964,7 @@ ${single
   //     생성 모드는 원본이 없으므로 구체 혜택이 전부 placeholder가 된다 = 의도한 동작.
   // 절단은 위(raw)에서 요청한 수만큼 이미 끝났다 — 여기서 다시 3으로 자르면 그 계약이 무의미해진다.
   const candidates: StepRefineCandidate[] = raw.map((c: any) => {
-    const rawMsg = String(c.message || '').slice(0, maxBytes * 2);
+    const rawMsg = aiStr(c.message).slice(0, maxBytes * 2);
     // ★ D187-fix5: refine 응답도 sanitize 자동 적용
     const san = sanitizeForSms(rawMsg);
     const pure = stripUnauthorizedBenefits(stripAdParts(san.sanitized), input.currentMessage || '');
@@ -961,12 +972,13 @@ ${single
       message: pure, // 순수 본문 — (광고)는 발송/미리보기 합성 (이중부착 방지)
       tone: validTones.includes(c.tone) ? c.tone : '감성적',
       bytes: getBytes(pure),
-      reasoning: String(c.reasoning || '').slice(0, 200),
+      reasoning: aiStr(c.reasoning).slice(0, 200),
     };
   })
     // ★ 2026-09-30 WP2 — 다듬기(본문 있음)는 원문에 없던 숫자("90분 안에" · "3일 한정")가 생긴 안을 버린다.
     //   혜택 낱말 없이도 고객에게는 약속이다. 다 버려지면 빈 목록 = 화면 "다듬은 결과가 없습니다. 다시 시도해 주세요."
     //   생성 모드(본문 없음)는 대조할 원문이 없어 이 검사를 하지 않는다(혜택은 위 CT가 자리표시로 바꾼다).
+    .filter((c) => c.message.trim().length > 0)   // ★ 1026 Codex 3R — 빈 후보({} · 다 지워진 글) = 후보 아님(쓸 결과 판정)
     .filter((c) => !hasBody || findNewNumbers(c.message, input.currentMessage || '').length === 0)
     // ★ 2026-10-24 ② 근거(currentMessage · 혜택과 같은 근거) 없는 효능 단정이 든 안은 버린다(생성 모드 = 근거 0 · 혜택과 같은 엄격함)
     .filter((c) => !claimsInventedEfficacy(c.message, input.currentMessage || ''));
@@ -1045,8 +1057,8 @@ ${memoryContext}
   const benefitBasis = String(input.objective || '');
   // ★ 2026-10-24 ② 혜택 → 효능(같은 근거 · 제목 + 본문 = 이어 읽는 단위 · 본문 = 문장 빼기 · 제목 = 비워도 되는 칸)
   const g = dropInventedEfficacyTitledBody(
-    stripUnauthorizedBenefits(stripAdParts(sanitizeForSms(String(parsed.subject || '').slice(0, 80)).sanitized), benefitBasis).slice(0, 40),
-    stripUnauthorizedBenefits(stripAdParts(sanitizeForSms(String(parsed.message || '').slice(0, 4000)).sanitized), benefitBasis),
+    stripUnauthorizedBenefits(stripAdParts(sanitizeForSms(aiStr(parsed.subject).slice(0, 80)).sanitized), benefitBasis).slice(0, 40),
+    stripUnauthorizedBenefits(stripAdParts(sanitizeForSms(aiStr(parsed.message).slice(0, 4000)).sanitized), benefitBasis),
     benefitBasis,
   );
   const subj = g.subject;
@@ -1084,7 +1096,7 @@ type AnchorPlan = { steps: { offsetDays: number; subject: string; message: strin
  *   다른 목표문 = 다른 키 = 새 요청(새 차감) · 낸 요청 키로 다른 입력을 만들 수 없다.
  *   정산된 결과(차감됨 · 이미 냄 · 차감 대상 아님)만 24시간 보관해 응답이 끊긴 재시도에 그대로 돌려준다.
  *   보관이 없는데 원장에 이 키의 차감이 있으면 같은 입력을 다시 만든다(잔액 검사 생략 · 차감은 같은 키라 0 · 낸 것을 잔액 부족으로 막지 않는다).
- *   차감이 안 된 결과(DB 오류 · [CREDIT][MISS])는 보관하지 않는다 → 다음 재시도가 같은 키로 다시 정산한다.
+ *   ★ 2026-10-25 원장 쓰기 실패(failed) = 결과를 건네지 않는다(503 · 성공 뒤 차감 한 규칙 D1 A) → 다음 재시도가 같은 키로 다시 정산한다.
  */
 const ANCHOR_PLAN_TTL_SEC = 24 * 60 * 60;
 
@@ -1132,7 +1144,8 @@ async function makeAnchorJourneyPlan(input: { companyId: string; objective: stri
   // ★ 2026-10-23 여정 결함 0 — 같은 요청(회사 · 화면 요청 키 · 목표문) = 한 번만 차감(옛: 매번 새 키 = 두 번 누름 · 재시도가 두 번 차감)
   //   사전 확인 뒤 잔액이 먼저 소진되면 402(결과를 무과금으로 내주지 않는다 · settleCreditAfterSuccess 와 같은 원칙 · Codex 2R)
   const outcome = await deductCreditOutcome({ companyId: input.companyId, cost, source: 'journey-ai-refine', idempotencyKey: key, throwOnInsufficient: true });
-  return { plan: { steps }, settled: outcome !== 'failed' };
+  if (outcome === 'failed') throw new CreditSettleError();
+  return { plan: { steps }, settled: true };
 }
 
 // ════════════════════════════════════════════════════════════════════
@@ -1140,7 +1153,17 @@ async function makeAnchorJourneyPlan(input: { companyId: string; objective: stri
 //   source 'journey-ai-refine' → callAIWithFallback가 1크레딧 자동 차감.
 //   혜택/숫자/약속/placeholder/Liquid는 그대로 보존 (거짓 혜택 생성 금지).
 // ════════════════════════════════════════════════════════════════════
-export async function regenerateStepAvoidingSpam(input: StepSpamRegenInput): Promise<string | null> {
+export async function regenerateStepAvoidingSpam(...args: Parameters<typeof regenerateStepAvoidingSpamWithAi>): ReturnType<typeof regenerateStepAvoidingSpamWithAi> {
+  // ★ 2026-10-25 원장 Z4 — 돈 = AI 결과 정산 한 곳(다시 쓴 문안이 나올 때만) · 쓸 결과가 아니면 0원 · 잔액 부족 402 · 원장 쓰기 실패 503 · 바깥 묶음이면 0
+  const { result } = await runChargedAi({
+    companyId: args[0].companyId, cost: getCreditCost('journey-ai-refine'), source: 'journey-ai-refine',
+    run: () => regenerateStepAvoidingSpamWithAi(...args),
+    accept: (r) => r !== null,
+  });
+  return result;
+}
+
+async function regenerateStepAvoidingSpamWithAi(input: StepSpamRegenInput): Promise<string | null> {
   if (!input.currentMessage || input.currentMessage.trim().length < 5) return null;
 
   const ctx = await loadCompanyContext(input.companyId);

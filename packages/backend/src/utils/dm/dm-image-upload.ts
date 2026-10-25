@@ -5,6 +5,7 @@
  * 입구는 둘 = /api/dm/upload-image(모바일 DM 요금제 문) · /api/email/upload-image(이메일 요금제 문).
  * 옛: 이메일 편집기도 DM 입구를 써서 이메일만 쓰는 요금제 회사는 편집기에서 사진을 못 올렸다.
  */
+import { uploadErrorText } from '../http-error';
 import path from 'path';
 import fs from 'fs';
 import multer from 'multer';
@@ -12,9 +13,10 @@ import { v4 as uuidv4 } from 'uuid';
 
 export const DM_IMAGE_DIR = path.join(process.cwd(), 'uploads', 'dm-images');
 
+const DM_UPLOAD_LIMITS = { fileSize: 5 * 1024 * 1024, files: 5 };
 const dmImageUpload = multer({
   storage: multer.memoryStorage(),
-  limits: { fileSize: 5 * 1024 * 1024, files: 5 },
+  limits: DM_UPLOAD_LIMITS,
   fileFilter: (_req, file, cb) => {
     const ext = path.extname(file.originalname).toLowerCase();
     const mime = file.mimetype.toLowerCase();
@@ -33,8 +35,7 @@ export function handleDmImageUpload(req: any, res: any): void {
   const upload = dmImageUpload.array('images', 5);
   upload(req, res, async (err: any) => {
     if (err) {
-      if (err.code === 'LIMIT_FILE_SIZE') return res.status(400).json({ error: '파일 크기는 5MB 이하만 가능합니다.' });
-      return res.status(400).json({ error: err.message || '업로드 실패' });
+      return res.status(400).json({ error: uploadErrorText(err, DM_UPLOAD_LIMITS) });   // ★ 2026-10-25 Z5
     }
     const companyId = req.user?.companyId;
     if (!companyId) return res.status(403).json({ error: '회사 권한이 필요합니다.' });

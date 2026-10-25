@@ -33,9 +33,11 @@ describe('plannerPreset', () => {
 });
 
 describe('plannerMinSendDate', () => {
-  it('KST 20시 전 = 오늘 · 20시부터 = 내일', () => {
-    expect(plannerMinSendDate(new Date('2026-10-18T10:59:00Z'))).toBe('2026-10-18'); // KST 19:59
-    expect(plannerMinSendDate(new Date('2026-10-18T11:00:00Z'))).toBe('2026-10-19'); // KST 20:00
-    expect(plannerMinSendDate(new Date('2026-10-18T15:30:00Z'))).toBe('2026-10-19'); // KST 다음 날 00:30
+  // ★ 1025 #62 — 마감 시각 = 서버 값(GET /api/send-policy plannerDeadlineHour) · 화면 기본값 0
+  it('KST 마감(20시) 전 = 오늘 · 마감부터 = 내일 · 다른 마감 값도 그대로 따른다', () => {
+    expect(plannerMinSendDate(new Date('2026-10-18T10:59:00Z'), 20)).toBe('2026-10-18'); // KST 19:59
+    expect(plannerMinSendDate(new Date('2026-10-18T11:00:00Z'), 20)).toBe('2026-10-19'); // KST 20:00
+    expect(plannerMinSendDate(new Date('2026-10-18T15:30:00Z'), 20)).toBe('2026-10-19'); // KST 다음 날 00:30
+    expect(plannerMinSendDate(new Date('2026-10-18T09:30:00Z'), 18)).toBe('2026-10-19'); // KST 18:30 · 마감 18시
   });
 });

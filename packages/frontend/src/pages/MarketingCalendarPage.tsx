@@ -5,6 +5,7 @@ import ZoneFrame from '../components/zone/ZoneFrame';
 //   설계는 서버 저장(새로고침에도 유지) + 등록된 달은 배지 표시·재등록 차단(200크레딧 중복 차감 방지).
 // 다크 slate + 단일 액센트, native dialog 0(useToast + CreditConfirmModal), 생성 중 로딩 오버레이 + 닫기 차단(D185).
 import { useEffect, useRef, useState } from 'react';
+import { creditText } from '../constants/credit';
 import { useNavigate } from 'react-router-dom';
 import { goBackOr } from '../lib/scroll-restoration';
 import { ArrowLeft, CalendarDays, CalendarRange, Sparkles, Loader2, Check, CheckCircle2, RefreshCcw } from 'lucide-react';
@@ -143,7 +144,7 @@ export default function MarketingCalendarPage() {
       const data = await res.json();
       if (data?.success && data.entry) {
         setEntries((prev) => prev.map((e) => (e.month === month ? { ...data.entry, targetHint: normalizeHint(data.entry?.targetHint) } : e)));
-        toast.success(`${MONTH_LABEL[month]} 캠페인을 다시 설계했습니다. (10 크레딧)`);
+        toast.success(`${MONTH_LABEL[month]} 캠페인을 다시 설계했습니다. (${creditText('marketing-calendar-month')})`);
       } else {
         toast.error(data?.error || '한 달 재설계에 실패했습니다.');
       }
@@ -314,7 +315,7 @@ export default function MarketingCalendarPage() {
                           className="inline-flex items-center gap-1.5 text-[11px] text-slate-400 hover:text-slate-700 disabled:opacity-40 transition-colors"
                         >
                           <RefreshCcw className={`w-3 h-3 ${regenMonth === e.month ? 'animate-spin' : ''}`} />
-                          {regenMonth === e.month ? '다시 설계하는 중...' : '이 달만 다시 설계 (10 크레딧)'}
+                          {regenMonth === e.month ? '다시 설계하는 중...' : `이 달만 다시 설계 (${creditText('marketing-calendar-month')})`}
                         </button>
                       )}
                       <button

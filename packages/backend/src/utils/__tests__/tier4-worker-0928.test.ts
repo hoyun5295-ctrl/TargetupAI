@@ -132,8 +132,11 @@ describe('반복 부하·알림 남용', () => {
     expect(s).toContain('_insightIdleAt = companies.rows.length < INSIGHT_BATCH ? nowMs : 0;');
     expect(s).toContain("WHERE p.id IN (SELECT v.dm_id FROM dm_views v WHERE v.last_active_at >= NOW() - INTERVAL '7 days')");
     expect(s).not.toContain('SELECT DISTINCT t.company_id, t.dm_id');
-    expect(s).toContain('if (doneRecently(_dmDoneAt, String(row.dm_id), dmNow)) continue;');
-    expect(s).toContain('if (doneRecently(_emailDoneAt, String(row.id), emailNow)) continue;');
+    // ★ 1025 #6 — 20시간 거름 = 조회 SQL 안(옛: 읽은 뒤 건너뛰어 LIMIT 칸을 같은 후보가 매번 채웠다)
+    expect(s).toContain("AND NOT (p.id = ANY($1::uuid[]))");
+    expect(s).toContain("AND NOT (ec.id = ANY($1::uuid[]))");
+    expect((s.match(/\[recentlyDoneIds\(_(dm|email)DoneAt, Date\.now\(\)\)\]/g) || []).length).toBe(2);
+    expect(s).not.toContain('doneRecently(');
   });
   it('R261 지정일 스텝은 하루 한 번 추출(성공한 뒤에만 표시)', () => {
     const s = src('utils/journey-anchor-scheduler.ts');

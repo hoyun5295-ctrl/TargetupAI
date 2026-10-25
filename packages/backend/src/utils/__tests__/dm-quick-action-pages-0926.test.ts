@@ -40,8 +40,11 @@ describe('원클릭 액션 배선', () => {
     expect(src).not.toContain('SELECT sections, brand_kit FROM dm_pages');
     expect((src.match(/extractFlatSectionsFromDm\(/g) || []).length).toBeGreaterThanOrEqual(3);
   });
-  it('반영은 mapDmSections가 고른 칸에', () => {
+  // ★ 1025 #68 — 반영 = 일반 저장과 같은 길(발행 중이면 정적 관문 · 저장 함수 updateDm · 저장 판) · 직접 UPDATE 0
+  it('반영은 mapDmSections가 고른 칸에 · 일반 저장 함수로', () => {
     expect(src).toContain('const mapped = mapDmSections(');
-    expect(src).toContain('UPDATE dm_pages SET ${mapped.column} = $1, updated_at = NOW() WHERE id = $2 AND company_id = $3');
+    expect(src).toContain('saved = await updateDm(campaignId, companyId, { [mapped.column]: mapped.value } as any, { baseVersion: (cur as any).save_version || undefined });');   // ★ 1026 저장 판 조건
+    expect(src).toContain('const block = dmPublishStaticBlock({ ...cur, [mapped.column]: mapped.value } as any);');
+    expect(src).not.toContain('UPDATE dm_pages SET ${mapped.column}');
   });
 });

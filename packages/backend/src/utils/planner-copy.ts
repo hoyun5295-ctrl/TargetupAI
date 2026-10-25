@@ -21,6 +21,7 @@ import { orchestrate } from '../services/ai-orchestrator';
 import { generateMessages } from '../services/ai';
 import { buildSpamRegeneratePrompt } from './continuous-operator-policy';
 import { autoSpamTestWithRegenerate, spamVerdictOf, type SpamVerdict } from './spam-test-queue';
+import { unsupportedSmsCharCodes } from './sms-charset';
 import { applyBenefitToBody, hasUneditedBenefitPlaceholder } from './autosend-policy';
 import { getOpt080Number } from './messageUtils';
 import { runInCreditBundle } from './ai-credit-context';
@@ -126,6 +127,8 @@ export interface PlannerCopy {
 
 /** 고친 문안이 검사에서 걸렸을 때의 사유(고객 문장) */
 export const EDITED_COPY_SPAM_FAILED = '고치신 문안이 스팸 검사를 통과하지 못했습니다. 문구를 바꿔 다시 고쳐 주세요.';
+/** ★ 1026 Codex 2R — 고친 문안 검사가 장애로 상한만큼 끝나지 못했을 때(자동 재검사 멈춤 · 다시 저장하면 다시 검사) */
+export const EDITED_COPY_CHECK_STALLED = '고치신 문안을 검사하지 못했습니다. 문안 고치기에서 그대로 다시 저장하면 다시 검사해요.';
 /**
  * ★ 2026-10-24 R8 — 같은 리비전에서 문안 자동 생성 · 사전 검사가 이 횟수만큼 실패하면 문안 패스가 더 집지 않는다(뿌리 대장 R8).
  *   옛: 매시 AI 생성 + 스팸 실검사(최대 3회)를 행사 끝날 때까지 다시 돌렸고, 앞쪽 실패 20건이 뒤 행사 준비를 밀어냈다.
@@ -209,7 +212,7 @@ export interface PlannerSpamInput {
   regenerate: boolean;
 }
 
-/** 검사 한 번(재생성 규칙 포함) — 두 해석(`spamCheckPlannerCopy` · `spamCheckPlannerVerdict`)이 같은 실행을 쓴다. 예외는 그대로 던진다. */
+/** 검사 한 번(재생성 규칙 포함) — `spamCheckPlannerVerdict` 가 쓴다. 예외는 그대로 던진다. */
 async function runPlannerSpamTest(input: PlannerSpamInput) {
   const { tp } = input;
   const objective = buildPlannerCopyObjective(tp, tp.channelLabel, describeTiming(tp.timing), { withDmLink: input.withDmLink });
@@ -247,21 +250,10 @@ async function runPlannerSpamTest(input: PlannerSpamInput) {
 }
 
 /**
- * 스팸 검사(CT-09) — `regenerate` = 사람이 보기 전에만 true(이 파일의 사전 준비). 실행부는 false로 부른다(maxRetries 0).
+ * 스팸 검사(CT-09) — 판정 셋을 돌려준다(통과 · 차단 · 검사 장애). `regenerate` = 사람이 보기 전에만 true(이 파일의 사전 준비 · 재확인 새 문안).
  * 입력 `body`는 **링크까지 붙은 최종 형태**여야 한다. 재생성본도 같은 링크를 다시 붙인다(검사한 문안 = 나갈 문안).
- * 반환 = 통과본(링크 포함) 또는 null. 예외는 던진다(호출부가 다음 주기 재시도로 접는다).
- */
-export async function spamCheckPlannerCopy(input: PlannerSpamInput): Promise<{ body: string; subject: string } | null> {
-  const res = await runPlannerSpamTest(input);
-  const v = res.variants[0];
-  // 판정 = 공용 3분할(spam-test-queue · 뿌리 대장 R7) — 통과만 통과다
-  if (spamVerdictOf(v, res.totalTestCount) !== 'pass') return null;
-  return { body: v.messageText || input.body, subject: v.subject || input.subject };
-}
-
-/**
- * ★ 2026-10-18 판정을 돌려주는 검사(실행부 당일 · 승인 직후 · 재확인 패스) — `spamCheckPlannerCopy` 와 같은 입력 · 같은 재생성 규칙.
- * 예외(큐 · DB)도 error 로 접는다(검사 장애 ≠ 차단). 다른 호출처(사전 준비 패스)는 옛 함수 그대로.
+ * 예외(큐 · DB)도 error 로 접는다(검사 장애 ≠ 차단).
+ * ★ 2026-10-25 원장 #46 — 막힘 · 장애를 둘 다 null 로 내던 옛 함수(spamCheckPlannerCopy)는 지웠다 · 모든 호출처가 이 판정 셋을 쓴다.
  */
 export async function spamCheckPlannerVerdict(input: PlannerSpamInput): Promise<{ verdict: SpamVerdict; body: string; subject: string }> {
   try {
@@ -316,13 +308,25 @@ export async function preparePlannerEventCopy(companyId: string, eventId: string
         const o80 = await getOpt080Number(ev.createdBy || null, companyId);
         if (!cb || !o80) continue;
         const fake = withDmLink ? plannerFakeDmLink() : '';
-        const verdict = await spamCheckPlannerCopy({
+        // ★ 2026-10-25 원장 #46 — 판정 셋(재확인 checkEditedCopy 와 같은 함수) · 검사 장애 = 다음 주기에 다시(옛: 막힘 · 장애가 둘 다 「통과 못 함」으로 굳었다)
+        const check = await spamCheckPlannerVerdict({
           tp: carrier, body: appendDmLink(cur.text, fake), subject: cur.subject, callback: cb, rejectNumber: o80, link: fake, withDmLink, regenerate: false,
-        }).then((r) => !!r).catch((e: any) => {
-          console.warn(`[planner-copy] 고친 문안 검사 오류 tp=${carrier.id}(다음 주기 재시도):`, e?.message || e);
-          return null;
         });
-        if (verdict === null) continue;
+        if (check.verdict === 'error') {
+          // ★ 1026 Codex 1R — 검사 장애도 같은 리비전 실패 수에 센다(상한 = 문안 패스 후보 SQL · 옛: 상한 없이 매 주기 같은 검사)
+          // ★ 1026 Codex 2R — 이번이 상한이면 「검사 중」으로 두지 않는다: 검사 못 함(fail) + 다시 저장 안내(저장 = 리비전 + 1 = 다시 검사)
+          //   상한 전이면 검사 대기 그대로 + 사유(장애가 풀리면 다음 주기에 검사)
+          generationFailed = true;
+          const fails = (ev.meta as any)?.copyFailures;
+          const failsNow = Number(fails?.revision) === revision ? Number(fails?.count) || 0 : 0;
+          const at = new Date().toISOString();
+          await setTouchpointMetaIfCopyIs(companyId, carrier.id, cur, failsNow + 1 >= PLANNER_COPY_RETRY_LIMIT
+            ? { copy: { ...cur, spam: 'fail', checkedAt: at }, copy_error: { reason: EDITED_COPY_CHECK_STALLED, at } }
+            : { copy_error: { reason: PLANNER_REASON.copyFailed, at } },
+            { eventRevision: { eventId, revision } }).catch(() => false);   // ★ 1026 Codex 3R — 읽은 실패 수의 리비전일 때만
+          continue;
+        }
+        const verdict = check.verdict === 'pass';
         const checkedAt = new Date().toISOString();
         // ⛔ 검사한 문안이 그대로일 때만 결과를 쓴다(★ Codex 1R M10) — 검사 수 분 동안 담당자가 다시 고쳤으면 옛 결과가 새 문안을 덮지 않는다
         await setTouchpointMetaIfCopyIs(companyId, carrier.id, cur, verdict
@@ -351,19 +355,18 @@ export async function preparePlannerEventCopy(companyId: string, eventId: string
         continue;
       }
       const link = withDmLink ? plannerFakeDmLink() : '';
-      const passed = await spamCheckPlannerCopy({
+      // ★ 2026-10-25 원장 #46 같은 뿌리 — 판정 셋 · 검사 장애는 「스팸에 걸림」이 아니라 「준비 못 함 · 다시 준비」(실패 수 상한은 그대로)
+      const check = await spamCheckPlannerVerdict({
         tp: carrier, body: appendDmLink(draft.body, link), subject: draft.subject,
         callback, rejectNumber: opt080, link, withDmLink, regenerate: true,
-      }).catch((e: any) => {
-        console.warn(`[planner-copy] 사전 스팸 검사 실패 tp=${carrier.id}:`, e?.message || e);
-        return null;
       });
-      if (!passed) {
+      if (check.verdict !== 'pass') {
         generationFailed = true;
         await setTouchpointMetaIfCopyIs(companyId, carrier.id, before,
-          { copy_error: { reason: PLANNER_REASON.spamFailed, at: new Date().toISOString() } }).catch(() => false);
+          { copy_error: { reason: check.verdict === 'blocked' ? PLANNER_REASON.spamFailed : PLANNER_REASON.copyFailed, at: new Date().toISOString() } }).catch(() => false);
         continue;
       }
+      const passed = { body: check.body, subject: check.subject };
       const copy: PlannerCopy = {
         text: stripDmLink(passed.body, link),
         subject: passed.subject || '',
@@ -440,6 +443,10 @@ export async function editPlannerCopy(input: {
   if (!text) throw new PlannerCopyEditError(400, 'EMPTY', '문안을 입력해 주세요.');
   if (text.length > PLANNER_COPY_MAX) throw new PlannerCopyEditError(400, 'TOO_LONG', `문안은 ${PLANNER_COPY_MAX}자까지 쓸 수 있습니다.`);
   if (hasUneditedBenefitPlaceholder(text)) throw new PlannerCopyEditError(400, 'PLACEHOLDER', '채워지지 않은 자리가 남아 있습니다. 혜택 문구를 직접 써 주세요.');
+  // ★ 1026 Codex 1R — 문자로 못 보내는 글자는 저장에서 막는다(검사 큐가 매번 거절해 검사가 영영 끝나지 않았다 · 검사 · 발송과 같은 판정)
+  if (unsupportedSmsCharCodes(text, input.subject ?? '').length > 0) {
+    throw new PlannerCopyEditError(400, 'UNSUPPORTED_CHARS', '문자로 보낼 수 없는 글자(보이지 않는 글자 포함)가 있어요. 그 글자를 빼고 다시 저장해 주세요.');
+  }
   const planned = (await loadEventTouchpoints(input.companyId, ev.id)).filter((t) => t.status === 'planned');
   const g = carrierGroups(planned).find((x) => x.carrier.id === input.touchpointId);
   if (!g) throw new PlannerCopyEditError(404, 'NOT_FOUND', '고칠 문자를 찾을 수 없습니다.');

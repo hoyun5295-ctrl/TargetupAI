@@ -27,6 +27,7 @@
  *   - source는 cdp_identity_links.source와 일치 필수
  */
 
+import { UserFacingError } from './http-error';
 import { query, pool } from '../config/database';
 import { ensureAnonymousLink, identifyCustomer, findLinkedCustomerId } from './cdp-identity';
 // ★ 2026-06-25 (gap 5): 자사몰 전송 시각 미래 클램프(커서·통계 왜곡 차단)
@@ -38,7 +39,6 @@ import { isOverMonthlyCdpLimit, recordCdpApiCall } from './cdp-auth';
 import { verifyCdpMemberToken } from './cdp-member-token';
 // ★ D214+ (2026-05-24) Unified Customer Profile 정합
 import { fuseEventToCustomer } from './customer-cdp-fusion';
-import { recomputeProfile } from './unified-customer-profile';
 // ★ D215+ (2026-05-25) 인앱 메시지 트리거 매칭 fire-and-forget 로깅 (CT-82)
 import { listInAppTriggerCandidates } from './inapp-trigger-engine';
 
@@ -148,7 +148,7 @@ export async function trackEvent(
     throw new Error(propsCheck.error);
   }
   if (!input.source) {
-    throw new Error('source는 필수입니다.');
+    throw new UserFacingError(400, 'CDP_INPUT', 'source는 필수입니다.');
   }
 
   let identityLinkId: string | null = null;
@@ -179,7 +179,7 @@ export async function trackEvent(
     const anonExtId = `anon_${input.anonymousId}`;
     identityLinkId = await ensureAnonymousLink(companyId, input.source, anonExtId);
   } else {
-    throw new Error('externalId 또는 anonymousId 중 하나는 필수입니다.');
+    throw new UserFacingError(400, 'CDP_INPUT', 'externalId 또는 anonymousId 중 하나는 필수입니다.');
   }
 
   // 이벤트 INSERT — occurred_at은 미래 클램프(파싱 실패/미전달 → now, 과거는 그대로)
@@ -262,40 +262,6 @@ export interface RecentEventsResult {
     occurredAt: string;
   }>;
   total: number;
-}
-
-export async function getRecentEvents(
-  companyId: string,
-  limit: number = 50,
-  offset: number = 0
-): Promise<RecentEventsResult> {
-  const events = await query(
-    `SELECT e.id, e.event_name, e.properties, e.source, e.customer_id, e.occurred_at,
-            l.external_id
-     FROM cdp_events e
-     LEFT JOIN cdp_identity_links l ON e.identity_link_id = l.id
-     WHERE e.company_id = $1::uuid
-     ORDER BY e.occurred_at DESC
-     LIMIT $2 OFFSET $3`,
-    [companyId, Math.min(limit, 200), offset]
-  );
-  const totalResult = await query(
-    `SELECT COUNT(*)::int AS total FROM cdp_events WHERE company_id = $1::uuid`,
-    [companyId]
-  );
-
-  return {
-    events: events.rows.map((r: any) => ({
-      id: r.id,
-      eventName: r.event_name,
-      properties: r.properties || {},
-      source: r.source,
-      customerId: r.customer_id,
-      externalId: r.external_id,
-      occurredAt: r.occurred_at?.toISOString?.() || String(r.occurred_at),
-    })),
-    total: totalResult.rows[0].total,
-  };
 }
 
 // ═══════════════════════════════════════════════════════════

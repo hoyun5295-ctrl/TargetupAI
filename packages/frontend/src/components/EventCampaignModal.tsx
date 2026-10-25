@@ -11,10 +11,11 @@
  * - 편집 진입 = 각 채널 기존 편집기 그대로 (sessionStorage 초안 handoff, 30분 TTL)
  * - 혜택 영구 룰 양립: 행사 원문에 기재된 혜택만 원문 그대로 (백엔드 event-brief CT 검증)
  */
+import { INAPP_TEMPLATE_LABELS, CARD_STYLE_OPTIONS } from './inapp/blockTheme';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { CalendarRange, FolderOpen, ImagePlus, Layers, Loader2, Lock, Mail, Smartphone, Sparkles, X } from 'lucide-react';
-import { CONFIRM_CREDIT_COSTS } from '../constants/credit';
+import { creditCost } from '../constants/credit';
 import { downscaleToJpeg } from '../utils/image-downscale';
 import AssetLibraryPickerModal from './assets/AssetLibraryPickerModal';
 import { assetsToFiles } from '../lib/asset-to-file';
@@ -23,15 +24,15 @@ import { useAuthStore } from '../stores/authStore';
 type ChannelKey = 'dm' | 'email' | 'inapp';
 type ChannelStatus = 'generated' | 'opened';
 
-// 백엔드 ai-credit-calc CREDIT_COST_MAP 1:1 (dm-ai-generate 5 / email-ai-generate 3 / inapp-ai-generator 3)
+// 채널별 생성 단가 = 단가표(★ 2026-10-25 원장 #105 · 옛: 확인 창 표에 없는 키라 숫자 대체 값이 화면 금액이었다)
 const CH_COSTS: Record<ChannelKey, number> = {
-  dm: CONFIRM_CREDIT_COSTS['dm-ai-generate'] ?? 5,
-  email: CONFIRM_CREDIT_COSTS['email-ai-generate'] ?? 3,
-  inapp: CONFIRM_CREDIT_COSTS['inapp-ai-generator'] ?? 3,
+  dm: creditCost('dm-ai-generate'),
+  email: creditCost('email-ai-generate'),
+  inapp: creditCost('inapp-ai-generator'),
 };
 
-// 이미지 판독 크레딧 (백엔드 CREDIT_COST_MAP 'event-image-extract' 3과 1:1)
-const IMAGE_EXTRACT_COST = 3;
+// 이미지 판독 단가 = 단가표
+const IMAGE_EXTRACT_COST = creditCost('event-image-extract');
 const MAX_IMAGES = 5;
 const ALLOWED_IMAGE_TYPES = ['image/jpeg', 'image/png', 'image/webp'];
 
@@ -313,7 +314,10 @@ export default function EventCampaignModal({ open, onClose, initialText, resumeD
     if (ch === 'dm') return `섹션 ${(r.sections || []).length}개 · ${r.layout_mode === 'slides' ? '슬라이드형' : '스크롤형'}`;
     if (ch === 'email') return `${(r.subjects && r.subjects[0]) || r.name || '제목 생성됨'} · 블록 ${(r.sections || []).length}개`;
     const m = r.message || {};
-    return `${m.title || '(제목)'} · ${m.template || ''}${m.card_style && m.card_style !== 'classic' ? ` · ${m.card_style}` : ''}`;
+    // ★ 2026-10-25 원장 #110 — 표시 형태 · 카드 모양 = 한국어 이름표(공용 표) · 모르는 값은 빼고 보인다(영문 키 0)
+    const shape = INAPP_TEMPLATE_LABELS[String(m.template || '')] || '';
+    const card = m.card_style && m.card_style !== 'classic' ? (CARD_STYLE_OPTIONS.find((o) => o.key === m.card_style)?.label || '') : '';
+    return [m.title || '(제목)', shape, card].filter(Boolean).join(' · ');
   };
 
   if (!open) return null;

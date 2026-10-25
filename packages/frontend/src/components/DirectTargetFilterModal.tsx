@@ -1,3 +1,4 @@
+import { creditText } from '../constants/credit';
 import { Filter, RotateCcw, Search, Users, Sparkles, AlertCircle, AlertTriangle, Info, Check, Eye, X, ClipboardList, ShoppingBag, Store, Tag, Smartphone, Wrench, Pin, Loader2, Target, ArrowRight, type LucideIcon } from 'lucide-react';
 import {
   CUI_MODAL, CUI_MODAL_TITLE, CUI_BTN_PRIMARY, CUI_BTN_DANGER,
@@ -701,7 +702,7 @@ export default function DirectTargetFilterModal({ show, onClose, onExtracted, on
               >
                 {aiNlGenerating ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : null}
                 {aiNlGenerating ? '바꾸는 중' : '조건으로 바꾸기'}
-                {!aiNlGenerating && <span className="hidden sm:inline text-[11px] font-semibold text-white/60">1크레딧</span>}
+                {!aiNlGenerating && <span className="hidden sm:inline text-[11px] font-semibold text-white/60">{creditText('ai-segment-generator')}</span>}
               </button>
             </div>
             <div className="mt-2 flex items-center gap-1.5 overflow-x-auto sm:flex-wrap">

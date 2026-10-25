@@ -9,6 +9,7 @@
  * 1클릭 원칙(CLAUDE.md marketing_user_ux_priority)
  *   빈 스텝에서도 [AI 문안생성]이 눌린다. 사람이 먼저 열 글자를 쓰게 하지 않는다.
  */
+import { useSendPolicy, isSendableHour, nightRangeText, koHour } from '../../utils/send-policy';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Sparkles, Wand2, Beaker, Plus, Trash2, ChevronLeft, ChevronRight, Clock, AlertTriangle, Save, Loader2,
@@ -104,14 +105,10 @@ interface Props {
 }
 
 /**
- * 광고성 발송 금지 시간대 — 21시~08시 KST(`SEND_HOURS`).
- * ⛔ 밀려난 발송이 **도착하는 시각은 오전 9시**다(`send-time-util`의 `ARRIVE_HOUR = 9`).
- *   금지 창의 시작(08시)과 밀어 보내는 시각(09시)은 다른 값이다 — 화면이 8시라고 하면 한 시간 어긋난다.
+ * 광고성 발송 금지 시간대 = 서버 SEND_HOURS · 밀려난 발송이 **도착하는 시각** = 서버 NIGHT_ARRIVE_HOUR(utils/send-policy · GET /api/send-policy).
+ *   금지 창의 시작과 밀어 보내는 시각은 다른 값이다 — 화면이 창 시작 시각을 도착 시각이라고 하면 한 시간 어긋난다.
+ *   ★ 2026-10-25 원장 #40 — 옛: 21 · 8 · 9 를 숫자로 박았다(서버 환경 변수를 바꾸면 화면만 거짓).
  */
-const NIGHT_START = 21;
-const NIGHT_END = 8;
-const SHIFTED_ARRIVE_HOUR = 9;
-const isNightHour = (h: number) => h >= NIGHT_START || h < NIGHT_END;
 
 const DELAY_PRESETS: Array<{ label: string; hours: number }> = [
   { label: '즉시', hours: 0 },
@@ -136,6 +133,7 @@ export default function JourneyStepStudio({
   aiBusy = false, saving = false, maxSteps,
   single = false, bare = false, stacked = false, lockChannel = false, lockTiming = false, lockNote,
 }: Props) {
+  const sendPolicy = useSendPolicy();   // ★ 2026-10-25 원장 #40 야간 창 · 이월 시각 = 서버 값
   const step = steps[index];
   const taRef = useRef<HTMLTextAreaElement | null>(null);
   const [showVars, setShowVars] = useState(false);
@@ -192,7 +190,7 @@ export default function JourneyStepStudio({
   const delayHasOddHours = delayHoursNow % 24 !== 0;
 
   const hourFixed = step?.delayMode === 'specific_hour' || step?.delayMode === 'relative_at_hour';
-  const nightHit = hourFixed && step?.targetHourKst != null && isNightHour(Number(step.targetHourKst));
+  const nightHit = hourFixed && step?.targetHourKst != null && !!sendPolicy && !isSendableHour(sendPolicy, Number(step.targetHourKst));
 
   if (!step) return null;
 
@@ -588,8 +586,8 @@ export default function JourneyStepStudio({
             )}
           </fieldset>
 
-          {/* 야간 안내 — 광고성은 21~08시 발송 금지 */}
-          {step.isAd !== false && (
+          {/* 야간 안내 — 광고성은 야간(서버 발송 창 밖) 발송 금지 */}
+          {step.isAd !== false && sendPolicy && (
             <div
               className={`flex gap-2 rounded-xl border p-3 text-[12px] leading-relaxed ${
                 nightHit ? 'border-amber-200 bg-amber-50 text-amber-900' : 'border-slate-200 bg-slate-100 text-slate-500'
@@ -598,10 +596,10 @@ export default function JourneyStepStudio({
               <AlertTriangle className={`mt-0.5 h-3.5 w-3.5 shrink-0 ${nightHit ? 'text-amber-700' : 'text-slate-400'}`} />
               {nightHit ? (
                 <span>
-                  <strong className="font-semibold">밤 9시~아침 8시에는 광고 문자를 보낼 수 없습니다.</strong> 이 설정에 걸리는 문자는 자동으로 <strong>오전 {SHIFTED_ARRIVE_HOUR}시</strong>에 나갑니다.
+                  <strong className="font-semibold">{nightRangeText(sendPolicy)}에는 광고 문자를 보낼 수 없습니다.</strong> 이 설정에 걸리는 문자는 자동으로 <strong>{koHour(sendPolicy.nightArriveHour, 'ampm')}</strong>에 나갑니다.
                 </span>
               ) : (
-                <span>광고 문자는 밤 9시~아침 8시에 나가지 않습니다. 그 시간에 걸리면 오전 {SHIFTED_ARRIVE_HOUR}시에 자동으로 발송됩니다.</span>
+                <span>광고 문자는 {nightRangeText(sendPolicy)}에 나가지 않습니다. 그 시간에 걸리면 {koHour(sendPolicy.nightArriveHour, 'ampm')}에 자동으로 발송됩니다.</span>
               )}
             </div>
           )}

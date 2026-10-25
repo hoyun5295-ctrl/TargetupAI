@@ -43,6 +43,11 @@ export default function PlannerLineAsk({ line, read: first, onClose, onDirect, o
 
   const submit = async () => {
     if (busy) return;
+    // ★ 2026-10-25 원장 #61 — 보이는 필수 질문에 답이 없으면 담기 전에 알린다(서버와 같은 필수 표 · 옛: 한 번 거절된 뒤 다시 눌러야 했다)
+    //   「언제 산 고객」 = 대상을 상품으로 골랐으면 필수(서버 plannerLineEventBody 와 같은 규칙)
+    const needed = (q: { id: string; required: boolean }) => q.required || (q.id === 'since' && audQ && (answers.audience || '').startsWith('p:'));
+    const missing = shown.find((q) => needed(q) && !none[q.id] && !String(answers[q.id] ?? '').trim());
+    if (missing) { setError(`「${missing.label}」에 답해 주세요.`); return; }
     setBusy(true);
     setError(null);
     try {

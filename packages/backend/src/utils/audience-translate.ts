@@ -6,6 +6,7 @@
 //   ⛔ 근거 숫자(값 있는 고객 수 · 값 예시 · 대상 수)는 DB 만 센다. AI 가 낸 칸 · 연산자 · 값은 칸 목록으로 검증한다.
 //   회차는 이 결과(계약)만 컴파일한다 — 회차마다 대상 AI 를 부르지 않는다(§2 불변 원칙 1).
 // ============================================================
+import { UserFacingError } from './http-error';
 import { query } from '../config/database';
 import {
   detectActiveFields, suggestSegmentForObjective, translateObjectiveToConditions,
@@ -264,7 +265,8 @@ export async function translateAudience(input: {
 
   if (explicitKeyRaw) {
     const key = normalizeSegmentKey(explicitKeyRaw);
-    if (!key) throw new AudienceConditionError(`알 수 없는 발송 대상 축입니다: ${explicitKeyRaw.slice(0, 40)}`);
+    // ★ 2026-10-25 R11 — 다른 대상 판정과 같은 사람 문장(옛: 내부 키를 붙여 고객 화면에 보였다)
+    if (!key) throw new AudienceConditionError('알 수 없는 발송 대상이에요. 화면을 새로 고친 뒤 대상을 다시 골라 주세요.');
     return asAxis(key, input.segmentParams, false);
   }
 
@@ -356,7 +358,7 @@ export async function countContractAudience(input: {
   const key = normalizeSegmentKey(input.segmentKey);
   if (key && segmentNeedsCycleBaseline(key)) return null;
   const scope = await resolveOperatorStoreScope(input.companyId, input.ownerUserId);
-  if (scope.blocked) throw new Error('담당 매장이 지정되지 않아 발송 대상을 정할 수 없습니다.');
+  if (scope.blocked) throw new UserFacingError(409, 'STORE_SCOPE_MISSING', '담당 매장이 지정되지 않아 발송 대상을 정할 수 없어요. 관리자에게 매장 권한을 받아 주세요.');
   const m = await countOperatorAudienceFor({
     companyId: input.companyId,
     segmentKey: key,

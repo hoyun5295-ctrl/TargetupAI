@@ -18,7 +18,9 @@
  *   // mappings = [{ source: '이름', target: 'name', confidence: 0.98 }, ...]
  */
 
-import { extractJsonFromAiText } from './ai-json';
+import { extractJsonFromAiText, aiStr } from './ai-json';
+import { getCreditCost } from './ai-credit-calc';
+import { runChargedAi } from './ai-credit';
 import { callAIWithFallback } from '../services/ai';
 
 // ════════════════════════════════════════════════════════════════════
@@ -246,7 +248,17 @@ ${limitedSamples.map((row, idx) => `${idx + 1}. ${JSON.stringify(row)}`).join('\
 // 메인 함수
 // ════════════════════════════════════════════════════════════════════
 
-export async function mapColumnsWithAi(input: MapColumnsInput): Promise<MapColumnsResult> {
+export async function mapColumnsWithAi(...args: Parameters<typeof mapColumnsWithAiWithAi>): ReturnType<typeof mapColumnsWithAiWithAi> {
+  // ★ 2026-10-25 원장 Z4 — 돈 = AI 결과 정산 한 곳(매핑을 읽어 냈을 때만) · 쓸 결과가 아니면 0원 · 잔액 부족 402 · 원장 쓰기 실패 503 · 바깥 묶음이면 0
+  const { result } = await runChargedAi({
+    companyId: args[0].companyId, cost: getCreditCost('ai-column-mapper'), source: 'ai-column-mapper',
+    run: () => mapColumnsWithAiWithAi(...args),
+    accept: (r) => r.mappings.length > 0,
+  });
+  return result;
+}
+
+async function mapColumnsWithAiWithAi(input: MapColumnsInput): Promise<MapColumnsResult> {
   const { companyId, columnNames, sampleRows } = input;
 
   if (!Array.isArray(columnNames) || columnNames.length === 0) {
@@ -282,10 +294,10 @@ ${limitedSamples.map((row, idx) => `${idx + 1}. ${JSON.stringify(row)}`).join('\
   }
 
   const mappings: ColumnMapping[] = (parsed?.mappings || []).map((m: any) => ({
-    source: String(m.source || ''),
-    target: m.target ? String(m.target) : null,
+    source: aiStr(m.source),
+    target: aiStr(m.target) || null,
     confidence: Math.max(0, Math.min(1, Number(m.confidence) || 0)),
-    reason: String(m.reason || '').slice(0, 200),
+    reason: aiStr(m.reason).slice(0, 200),
   })).filter((m: ColumnMapping) => m.source);
 
   if (mappings.length === 0) {

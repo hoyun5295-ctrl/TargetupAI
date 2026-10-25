@@ -624,7 +624,7 @@ export async function runLineCompose(v: AiLineViewer, input: LineComposeInput, n
           userId: v.userId || undefined,
         }));
         short.forEach((c, i) => {
-          const next = String(fixed?.[i] || '').trim();
+          const next = String(fixed?.messages?.[i] || '').trim();
           if (next && missingLineVars(next, input.vars).length < missingLineVars(c.body, input.vars).length) c.body = next;
         });
       } catch (err: any) {
@@ -652,7 +652,7 @@ export async function runLineCompose(v: AiLineViewer, input: LineComposeInput, n
     idempotencyKey: copyKey,
   });
   // ★ Codex 2R high — 정산 뒤 원장이 진실: 같은 키가 이미 더 적게 냈으면(중복 정산 = 차감 생략) 낸 종류 수까지만 돌려주고 기억한다.
-  //   원장 쓰기 실패([CREDIT][MISS] · 행 없음)는 기존 원칙대로 결과를 막지 않는다(같은 키로 수동 재차감).
+  //   ★ 2026-10-25 원장 쓰기 실패는 settleCreditAfterSuccess 가 던진다(503 · 결과 안 줌 · 성공 뒤 차감 한 규칙 D1 A).
   const ledger = await paidAmountOf(v.companyId, copyKey);
   const finalCards = ledger !== null && unit > 0 ? cards.slice(0, Math.floor(ledger / unit)) : cards;
   if (finalCards.length === 0) throw new AiLineError('COMPOSE_EMPTY', '문안을 만들지 못했어요. 잠시 뒤 다시 눌러 주세요.', 502);
@@ -676,7 +676,7 @@ export async function runLineDecorate(v: AiLineViewer, input: { body: string; va
   } else {
     await assertCreditFor(v.companyId, cost, AI_LINE_SOURCE.decorate);
   }
-  const [decorated] = await runInCreditBundle(() => decorateOperatorMessages({
+  const { messages: [decorated] } = await runInCreditBundle(() => decorateOperatorMessages({
     companyId: v.companyId,
     messages: [input.body],
     selectedVars: input.vars,

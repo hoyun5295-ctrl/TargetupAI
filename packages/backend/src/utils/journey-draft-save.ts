@@ -12,7 +12,7 @@ import { query } from '../config/database';
 import { redis } from '../config/defaults';
 import { createJourneyFromTemplate, type JourneyTemplateCode } from './journey-builder';
 import type { JourneyAIPackage, GeneratedStep } from './journey-ai-generator';
-import { deductCreditOutcome, refundCredit } from './ai-credit';
+import { deductCreditOutcome, refundCredit, CreditSettleError } from './ai-credit';
 import { JourneyInputError } from './journey-step-limits';
 
 export interface CallbackNumberRow {
@@ -144,7 +144,8 @@ export async function nextDraftChargeKey(companyId: string, requestKey: string):
  * 차감 확정 → 초안 저장. 돌려주는 값 = 초안 id · 실제 차감액.
  *   - 잔액 부족(사전 확인 뒤 동시 소진) → InsufficientCreditError(라우트 402) · 초안 없음.
  *   - 같은 시도 키가 먼저 과금됨(duplicate · 다른 프로세스가 같은 요청을 먼저) → DRAFT_ALREADY_MADE · 초안 없음.
- *   - 그 밖 실패(DB 오류 · 영구 실패 = [CREDIT][MISS] 로그) · 크레딧제 미적용 → 결과는 막지 않는다(집안 원칙) · 차감액 0.
+ *   - ★ 2026-10-25 원장 쓰기 실패(DB 오류 · 영구 실패) = CreditSettleError(503) · 초안 없음(성공 뒤 차감 한 규칙 D1 A).
+ *   - 크레딧제 미적용 → 결과는 막지 않는다 · 차감액 0.
  *   - 저장 실패 → 차감했으면 같은 시도 키로 환불하고 저장 오류를 그대로 던진다(다음 요청은 다음 시도 번호).
  */
 export async function chargeThenSaveDraft(opts: {
@@ -163,6 +164,7 @@ export async function chargeThenSaveDraft(opts: {
     throwOnInsufficient: true,
   });
   if (outcome === 'duplicate') throw new JourneyInputError(DRAFT_ALREADY_MADE, await rememberedDraft(opts.companyId, requestKeyOf(opts.chargeKey)));
+  if (outcome === 'failed') throw new CreditSettleError();
   const charged = outcome === 'deducted' ? opts.cost : 0;
   try {
     const journeyId = await opts.save();

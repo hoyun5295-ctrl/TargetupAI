@@ -11,8 +11,7 @@
  *   - 원문 자리에는 사용자가 친 글자 · 칸에 적은 답만(원스텝 §0-6). 몰 값은 넣지 않는다.
  */
 import { createHash } from 'crypto';
-import { validateAnswer } from './content-interview';
-import { oneLineGaps, hasPromotionIntent, lineProductTerms, lineMoneyAmounts, lineWithoutReads, lineSegments } from './one-line-facts';
+import { oneLineGaps, hasPromotionIntent, lineProductTerms, lineMoneyAmounts, lineWithoutReads, lineSegments, isValidLineBenefit } from './one-line-facts';
 import { getLineTemplate, type LineTemplateId, type LineLayout } from './design-core/line-templates';
 import { isLineCompositionId, type LineCompositionId, type LineSlotLevel, type LineSlotFill } from './line-compositions';
 
@@ -424,7 +423,7 @@ export function sanitizeLineStepsBody(body: Record<string, unknown> | null | und
   const f = factsRaw as Record<string, unknown>;
   const facts: LineStepsBody['facts'] = {};
   if (f.benefit !== undefined) {
-    if (!validateAnswer('benefit', f.benefit).ok) return 'invalid';
+    if (!isValidLineBenefit(f.benefit)) return 'invalid';
     facts.benefit = f.benefit === null ? null : String(f.benefit).trim();
   }
   if (f.period_end !== undefined && f.period_end !== null) {

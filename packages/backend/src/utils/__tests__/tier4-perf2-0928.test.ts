@@ -81,15 +81,17 @@ describe('R266 · R265 여정', () => {
     expect(src).toContain('return { matched: ids.length, enqueued: 0, skipped: ids.length, paused: true };');
     expect(src).toContain('for (const id of Array.from(_stateTriggerRanAt.keys())) if (!activeIds.has(id)) _stateTriggerRanAt.delete(id);');
   });
-  it('미리보기는 한 번의 추출로 표본과 인원을 만든다', () => {
+  it('미리보기는 한 번의 추출로 표본과 인원을 만든다(★1025 R15 — 여정 표본 주소도 화면 호출 0 이라 지웠다 · 표본 함수까지)', () => {
     const ai = read('routes/ai.ts');
-    // ★ 2026-10-23 저장 전 표본 주소(preview-target-samples)는 화면 소비처 0 이라 지웠다(한 줄 여정 한 길) · 남은 하나 = 여정 표본
-    expect((ai.match(/await previewJourneyTargets\(/g) || []).length).toBe(1);
-    expect(ai).not.toContain('await buildJourneyPreviewSamples(');
+    // ★ 2026-10-23 저장 전 표본 주소(preview-target-samples) · ★ 2026-10-25 여정 표본 주소(preview-samples) = 화면 소비처 0 → 삭제
+    expect(ai).not.toContain('previewJourneyTargets');
+    expect(ai).not.toContain("'/operator/journeys/:id/preview-samples'");
     const ex = read('utils/journey-target-extractor.ts');
-    const fn = ex.slice(ex.indexOf('export async function previewJourneyTargets('), ex.indexOf('/** 전체 매칭 수 + 등급 분포'));
+    expect(ex).not.toContain('export async function previewJourneyTargets(');
+    expect(ex).not.toContain('export async function buildJourneyPreviewSamples(');
+    // 남은 인원 세기 = 발송과 같은 추출 한 번
+    const fn = ex.slice(ex.indexOf('export async function countJourneyTargetCustomers('), ex.indexOf('// customer_conditions 복합 조건'));
     expect((fn.match(/selectJourneyTargetCustomerIds\(/g) || []).length).toBe(1);
-    expect(fn).toContain('ids.slice(0, sampleLimit)');
   });
 });
 

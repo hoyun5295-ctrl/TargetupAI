@@ -146,11 +146,12 @@ describe('한 줄 CT 글 정리 = 같은 판정', () => {
     expect(r.copy.closingHeadline).toBe('지금 만나 보세요');
     expect(r.replaced).toEqual(expect.arrayContaining(['headline', 'sub']));
   });
-  it('문자 생성 두 경로가 같은 거름을 부른다(혜택 거름과 같은 근거 글)', () => {
+  // ★ 1025 F — 맞춤 생성(generateCustomMessages)은 부르는 곳이 없어 지웠다 · 남은 문자 생성 = 본문 · 제목 두 자리
+  it('문자 생성 경로가 같은 거름을 부른다(혜택 거름과 같은 근거 글)', () => {
     const ai = readFileSync(resolve(__dirname, '../../services/ai.ts'), 'utf8');
     expect(ai).toContain('const effHere = dropInventedEfficacy(msgField, benefitGround);');
     expect(ai).toContain('const subjEff = dropInventedEfficacy(subj, benefitGround);');
-    expect(ai).toContain('const customEff = dropInventedEfficacy(msg, customBenefitGround);');
+    expect(ai).not.toContain('export async function generateCustomMessages(');
     // 프롬프트에 효능을 쓰라는 신호가 남지 않는다(LESSONS_BACKEND 0809 — 반대 신호를 세어 지운다)
     expect(ai).not.toMatch(/before\/after 기대감|성분 효능 \+|체감 변화 \+|건강 이점|피부가 달라지는 마스크팩|몸이 가벼워지는|성분\/효과 기반 설득/);
   });

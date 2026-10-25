@@ -336,7 +336,8 @@ export async function buildPlannerTemplateChannel(input: {
   // 낸 결말(냄 · 같은 키 · 크레딧제 미적용 면제)만 건넨다(회의론자 3 · 1017 판정 재사용) · 그 밖 = 행을 거두고 다시 시도하게
   if (!lineStepsCollected(outcome as any)) {
     await (channel === 'dm' ? deps.deleteDm(draftId, ev.companyId) : deps.deleteEmail(ev.companyId, draftId)).catch(() => false);
-    console.log(`[CREDIT][MISS] planner-template company=${ev.companyId} channel=${channel} key=${idempotencyKey} draft=${draftId} outcome=${outcome}`);
+    // 차감 실패 보고(로그 + 운영 경보)는 deductCreditOutcome 이 이미 했다(원장 Z1 · reportCreditMiss) — 여기는 거둔 사실만
+    console.log(`[planner-build] 차감 못 함 · 완성본 거둠 company=${ev.companyId} channel=${channel} key=${idempotencyKey} draft=${draftId} outcome=${outcome}`);
     throw new PlannerBuildError(503, 'CREDIT_STATE_UNKNOWN', '크레딧 기록을 확인하지 못해 만든 완성본을 거뒀어요. 잠시 후 다시 시도해 주세요.');
   }
   return { draftId, deductOutcome: outcome };

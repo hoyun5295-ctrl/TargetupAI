@@ -8,6 +8,7 @@
  * 스텝 채널 = LMS((광고) 표기·무료수신거부 자동). 활성화 시 전체 문안 스팸필터 테스트.
  */
 
+import { useSendPolicy } from '../../utils/send-policy';
 import { useState } from 'react';
 import { CalendarClock, ArrowLeft, Plus, X, Repeat, Sparkles, Loader2, Wand2, Pencil, Check, CalendarDays, Users } from 'lucide-react';
 import { ModalShell, SummaryButton, AudienceModal, buildCustomerConditions, audienceSummary, type AudienceCondition } from './JourneyBuilderUi';
@@ -58,6 +59,7 @@ function SettingsModal({ initial, onSave, onClose }: {
   const [recurrence, setRecurrence] = useState(initial.recurrence);
   const [recurrenceDay, setRecurrenceDay] = useState(initial.recurrenceDay);
   const [hourKst, setHourKst] = useState(initial.hourKst);
+  const sendPolicy = useSendPolicy();   // ★ 2026-10-25 원장 #40 발송 창 = 서버 값
   return (
     <ModalShell title="발송 설정" subtitle="기준 날짜 · 발송 시각 · 반복" icon={<CalendarDays className="w-4 h-4 text-slate-900" />} onClose={onClose}
       footer={<>
@@ -72,7 +74,8 @@ function SettingsModal({ initial, onSave, onClose }: {
         <div>
           <label className="block text-[11px] text-slate-500 mb-1">발송 시각 (KST)</label>
           <select value={hourKst} onChange={(e) => setHourKst(e.target.value)} className="w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-sm text-slate-900">
-            {Array.from({ length: 14 }, (_, i) => i + 8).map((h) => <option key={h} value={h}>{h}시</option>)}
+            {/* ★ 2026-10-25 — 발송 창(시작 ~ 끝 전) 안 시각만(끝 시각은 다음 날로 밀려 날짜 예약이 어긋난다 · 서버 anchorSendHourIssue 와 같은 범위) · 창 = 서버 값(원장 #40) */}
+            {(sendPolicy ? Array.from({ length: Math.max(0, sendPolicy.endHour - sendPolicy.startHour) }, (_, i) => i + sendPolicy.startHour) : [Number(hourKst)]).map((h) => <option key={h} value={h}>{h}시</option>)}
           </select>
         </div>
       </div>

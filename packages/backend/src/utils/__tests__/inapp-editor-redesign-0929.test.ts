@@ -133,7 +133,7 @@ describe('⑤ 초안 판정', () => {
   });
   it('생성 CT — 초안만 완화 · 게시로 만드는 생성은 게시 조건 CT', () => {
     const c = between(utilSrc('inapp-message.ts'), 'export async function createInAppMessage(', '\nexport async function listInAppMessages(');
-    expect(c).toContain("if (!draft && (!input.title || !input.body)) throw new Error('title과 body는 필수입니다.');");
+    expect(c).toContain("if (!draft && (!input.title || !input.body)) throw new UserFacingError(400, 'INAPP_INPUT', '제목과 내용을 모두 적어 주세요.');");   // ★ 1025 R11 사람 문장 · 상태 그대로
     // (Codex 1R) 저장은 사진 없는 장을 버리지 않는다 — 게시 판정이 거절한다(조용한 장 유실 · 판정 우회 차단)
     expect(c).toContain('sanitizePosterSlides(input.poster_slides, { allowEmptyImage: true })');
     expect(between(utilSrc('inapp-message.ts'), 'export async function updateInAppMessage(', '\nexport async function propagatePosterToVariants(')).toContain('sanitizePosterSlides(input.poster_slides, { allowEmptyImage: true })');

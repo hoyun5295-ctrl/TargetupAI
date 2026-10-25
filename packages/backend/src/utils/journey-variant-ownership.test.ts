@@ -46,16 +46,16 @@ describe('createJourneyStepVariant — 소유 검증', () => {
   it('그 여정 소속이 아닌 step이면 INSERT가 나가지 않는다', async () => {
     const { texts } = mockClient([
       { match: /SELECT id, status, start_kind FROM journeys/, rows: [{ id: JOURNEY, status: 'draft' }] },
-      { match: /SELECT 1 FROM journey_steps WHERE id = \$1::uuid AND journey_id = \$2::uuid/, rows: [] },
+      { match: /SELECT channel FROM journey_steps WHERE id = \$1::uuid AND journey_id = \$2::uuid/, rows: [] },
     ]);
-    await expect(createJourneyStepVariant(input as any)).rejects.toThrow('그 여정의 step이 아닙니다.');
+    await expect(createJourneyStepVariant(input as any)).rejects.toThrow('이 여정의 칸이 아니에요');
     expect(texts.some((t) => /INSERT INTO journey_step_variants/.test(t))).toBe(false);
     expect(texts.some((t) => t === 'ROLLBACK')).toBe(true);
   });
 
   it('여정이 그 회사 것이 아니면 잠금 단계에서 멈춘다', async () => {
     const { texts, calls } = mockClient([{ match: /SELECT id, status, start_kind FROM journeys/, rows: [] }]);
-    await expect(createJourneyStepVariant(input as any)).rejects.toThrow('변이를 저장하지 못했습니다.');
+    await expect(createJourneyStepVariant(input as any)).rejects.toThrow('변형안을 저장하지 못했어요. 잠시 뒤 다시 해 주세요.');
     const lock = calls.find((c) => /SELECT id, status, start_kind FROM journeys/.test(c.text));
     expect(lock?.text).toMatch(/company_id = \$2::uuid/);   // 회사 격리가 잠금 조건에 있다
     expect(texts.some((t) => /INSERT INTO journey_step_variants/.test(t))).toBe(false);
@@ -64,11 +64,34 @@ describe('createJourneyStepVariant — 소유 검증', () => {
   it('소유가 맞고 비활성이면 저장된다', async () => {
     const { texts } = mockClient([
       { match: /SELECT id, status, start_kind FROM journeys/, rows: [{ id: JOURNEY, status: 'paused' }] },
-      { match: /SELECT 1 FROM journey_steps WHERE id = \$1::uuid AND journey_id = \$2::uuid/, rows: [{ '?column?': 1 }] },
+      { match: /SELECT channel FROM journey_steps WHERE id = \$1::uuid AND journey_id = \$2::uuid/, rows: [{ channel: 'lms' }] },
       { match: /INSERT INTO journey_step_variants/, rows: [{ id: 'new-variant' }] },
     ]);
-    await expect(createJourneyStepVariant(input as any)).resolves.toBe('new-variant');
+    await expect(createJourneyStepVariant({ ...input, channel: 'sms' } as any)).resolves.toBe('new-variant');
     expect(texts.some((t) => t === 'COMMIT')).toBe(true);
+  });
+
+  it('★ 2026-10-25 #1 — 변이 채널 = 칸 채널(요청이 다른 채널을 보내도) · 알림톡 칸 · 빈 본문은 만들지 않는다', async () => {
+    const { calls } = mockClient([
+      { match: /SELECT id, status, start_kind FROM journeys/, rows: [{ id: JOURNEY, status: 'draft' }] },
+      { match: /SELECT channel FROM journey_steps/, rows: [{ channel: 'lms' }] },
+      { match: /INSERT INTO journey_step_variants/, rows: [{ id: 'v' }] },
+    ]);
+    await createJourneyStepVariant({ ...input, channel: 'sms' } as any);
+    const ins = calls.find((c) => /INSERT INTO journey_step_variants/.test(c.text))!;
+    expect(ins.params![4]).toBe('lms');
+    expect(ins.params![5]).toBeNull();   // 알림톡 템플릿 코드 = 칸 것(변이에 따로 두지 않는다)
+    const kakao = mockClient([
+      { match: /SELECT id, status, start_kind FROM journeys/, rows: [{ id: JOURNEY, status: 'draft' }] },
+      { match: /SELECT channel FROM journey_steps/, rows: [{ channel: 'kakao' }] },
+    ]);
+    await expect(createJourneyStepVariant(input as any)).rejects.toMatchObject({ code: 'VARIANT_KAKAO' });
+    expect(kakao.texts.some((t) => /INSERT INTO journey_step_variants/.test(t))).toBe(false);
+    mockClient([
+      { match: /SELECT id, status, start_kind FROM journeys/, rows: [{ id: JOURNEY, status: 'draft' }] },
+      { match: /SELECT channel FROM journey_steps/, rows: [{ channel: 'sms' }] },
+    ]);
+    await expect(createJourneyStepVariant({ ...input, messageTemplate: '  ' } as any)).rejects.toMatchObject({ code: 'VARIANT_EMPTY' });
   });
 
   it('운영 중 여정이면 소유가 맞아도 거부한다', async () => {

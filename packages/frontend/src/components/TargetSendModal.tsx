@@ -1,5 +1,6 @@
 import { Sparkles, Users, Eye, Type, Archive, Save, ImagePlus, Bell, Search, RotateCcw, Trash2, Wand2, Loader2, Megaphone, Server, RefreshCw, X, Plus, ChevronDown, Link2 } from 'lucide-react';
 import SendWorkspaceShell, { FIELD_CLASS_INDIGO, WorkspaceNotice } from './shared/SendWorkspaceShell';
+import { creditText } from '../constants/credit';
 import { CUI_PILL_BASE, CUI_PANEL, CUI_SCROLL_X, CUI_THEAD, CUI_TH, CUI_TR, CUI_TD, CUI_CELL_DATA, CUI_BTN_GHOST, CUI_BTN_OUTLINE } from '../utils/console-ui';
 import { useEffect, useRef, useState } from 'react';
 import type { FieldMeta } from './DirectTargetFilterModal';
@@ -621,7 +622,7 @@ export default function TargetSendModal({
                     type="button"
                     onClick={handleAiDecorate}
                     disabled={decorating || usedVariableTokens.length === 0 || !targetMessage.trim()}
-                    title={usedVariableTokens.length === 0 ? '자동입력 변수를 먼저 넣어주세요' : `본문의 변수 ${usedVariableTokens.length}개를 자연스럽게 녹입니다 (3크레딧)`}
+                    title={usedVariableTokens.length === 0 ? '자동입력 변수를 먼저 넣어주세요' : `본문의 변수 ${usedVariableTokens.length}개를 자연스럽게 녹입니다 (최대 ${creditText('ai-operator-decorate')} · 바뀐 때만)`}
                     className={AI_BTN_OUTLINE}
                   >
                     {decorating ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Wand2 className="w-3.5 h-3.5" />}

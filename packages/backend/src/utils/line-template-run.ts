@@ -14,13 +14,12 @@ import { sanitizeLineUrl } from './one-line-steps';
 import type { LineMallCard } from './line-mall-cards';
 import type { LinePageMaterial } from './line-template-page';
 import type { LineTemplate, LineLayout, LineChannel, LineCopyKey } from './design-core/line-templates';
-import { composeLineDm, composeLineEmail, composeLineInapp, lineTemplateGate, type LineMaterials, type LineCopy, type LineDmResult, type LineInAppMessage } from './line-template-compose';
+import { composeLineDm, composeLineEmail, lineTemplateGate, type LineMaterials, type LineCopy, type LineDmResult } from './line-template-compose';
 import { fillLineTemplateCopy, type LineCopyGround } from './line-template-copy';
 import { withoutBenefitSpans } from './copy-benefit-detector';
 import { pickOutreachExemplarsDetail } from './sales-outreach-exemplars';
 import { loadOutreachExemplarSource } from './sales-outreach-examples';
 import type { Section } from './dm/dm-section-registry';
-import type { LineStepsManualProduct } from './one-line-steps';
 
 /**
  * 템플릿 생성 실패(문구 AI 응답 없음 · 품질 관문) — 라우트가 이 상태 · 코드 · 문장 그대로 돌려준다(차감 전 · 영어 코드 노출 0).
@@ -29,21 +28,6 @@ import type { LineStepsManualProduct } from './one-line-steps';
 export class LineTemplateError extends Error {
   /** missing = 비어서 막은 재료 판 단계 키(★ 2026-10-23 화면이 그 칸으로 데려간다 · 응답에 싣는다) */
   constructor(public status: number, public code: 'LINE_TEMPLATE_AI_FAILED' | 'LINE_TEMPLATE_GATE' | 'LINE_COMPOSITION_MISSING', message: string, public detail = '', public missing: string[] = []) { super(message); }
-}
-
-/**
- * (순수) 템플릿 직접 상품 — 사진이 있으면 카드(가격은 있으면 · 템플릿 카드는 가격 없이도 놓인다) · 사진이 없으면 글로 소개.
- *   1017 나누기(`splitLineManualProducts` = 사진 + 가격이어야 카드)는 그대로 두고 템플릿만 이 규칙을 쓴다.
- *   사진 주소는 요청 준비(`prepareLineStepsRequest`)가 이 회사 경로인지 이미 확인했다.
- */
-export function lineTemplateManual(rows: readonly LineStepsManualProduct[]): { cards: LineMallCard[]; textProducts: Array<{ name: string; price?: number }> } {
-  const cards: LineMallCard[] = [];
-  const textProducts: Array<{ name: string; price?: number }> = [];
-  for (const r of rows) {
-    if (r.image) cards.push({ name: r.name, price: r.price ?? 0, image_url: r.image, ...(r.url ? { link_url: r.url } : {}) });
-    else textProducts.push(r.price ? { name: r.name, price: r.price } : { name: r.name });
-  }
-  return { cards, textProducts };
 }
 
 export interface LineTemplateRunInput {
@@ -181,11 +165,6 @@ export function buildLineTemplateEmail(d: LineTemplateDraft): { sections: Sectio
   const bad = lineTemplateGate(r.sections);
   if (bad.length > 0) throw new LineTemplateError(500, 'LINE_TEMPLATE_GATE', '완성본을 조립하지 못했어요. 크레딧은 쓰지 않았어요.', `${d.t.id}: ${bad.join(' · ')}`);
   return r;
-}
-
-/** 인앱 조립(메시지 한 장) */
-export function buildLineTemplateInapp(d: LineTemplateDraft): LineInAppMessage {
-  return composeLineInapp(d.t, d.materials, d.copy);
 }
 
 /** 템플릿 DM 표식(편집 화면이 카탈로그 보기 · 장 추가를 숨기고 배치 전환을 장 키로 다시 묶는다) */

@@ -44,7 +44,7 @@ import { PRODUCT_TRIGGER_EVENT, normalizeProductFilters, currentPurchaseDoor, qu
 import { usesEntryReplacement, CLOSE_ACTIVE_FOR_REPLACEMENT_SQL } from './journey-entry-replace';
 // ★ 2026-09-30 여정 V2 5차 — 새 판 · 계보: 진입이 닫힌 옛 판은 받지 않고, 재진입 판정은 계보 단위(DDL 전 = 옛 동작).
 import { entryOpenClause, lineageJourneyIds, endDrainedVersions, lockLineageEntry } from './journey-lineage';
-import { JourneyInputError } from './journey-step-limits';
+import { JourneyInputError, backfillPerDayOf, entryCapExceeded, ENTERED_TODAY_KST_SQL, dailyRoomInLock } from './journey-step-limits';
 import { readAfterConfig, startGenOf } from './journey-after-config';
 
 // ════════════════════════════════════════════════════════════════════
@@ -331,7 +331,7 @@ async function processJourneyTrigger(j: ActiveJourney): Promise<{ matched: numbe
   if (ids.length === 0) {
     return { matched: 0, enqueued: 0, skipped: 0 };
   }
-  if (backfill == null && cap != null && ids.length > Number(cap)) {
+  if (entryCapExceeded(cap, backfill, ids.length)) {
     const paused = await pauseJourneyForCompany(
       j.id,
       j.company_id,
@@ -459,21 +459,12 @@ async function qualifyPurchaseTransition(j: ActiveJourney, batch: CdpCursorBatch
   });
 }
 
-/** ★ V.3 §8-1 — 하루 몫(상시 · 휴면만 · 1 이상). 사건형(구매 등)은 사건마다 들어오므로 하루 몫이 없다. */
-export function backfillPerDayOf(j: { trigger_event: string; trigger_filters: any }): number | null {
-  if (j.trigger_event !== 'custom' && j.trigger_event !== 'customer.dormant') return null;
-  const n = Number((j.trigger_filters || {}).backfill_per_day);
-  return Number.isFinite(n) && n >= 1 ? Math.floor(n) : null;
-}
+/** ★ V.3 §8-1 — 하루 몫 · 상한 판정 = journey-step-limits 한 곳(★ 2026-10-25 #12 · 재진입 · 시뮬레이션이 같은 함수). */
+export { backfillPerDayOf };
 
 /** ★ V.3 §8-1 — 오늘(KST) 이 여정에 들어온 실행 수(대조군 포함 · 진입이 곧 몫을 쓴다). */
 async function countEnteredTodayKst(journeyId: string): Promise<number> {
-  const r = await query(
-    `SELECT COUNT(*)::int AS n FROM journey_executions
-      WHERE journey_id = $1::uuid
-        AND entered_at >= ((NOW() AT TIME ZONE 'Asia/Seoul')::date::timestamp AT TIME ZONE 'Asia/Seoul')`,
-    [journeyId],
-  );
+  const r = await query(ENTERED_TODAY_KST_SQL, [journeyId]);
   return Number(r.rows[0]?.n || 0);
 }
 
@@ -510,7 +501,7 @@ async function finishCursorBatch(
 
   // 대량 차단기 — 후보 과다 시 정지+사유(커서 전진 안 함 → 재활성화 시 재평가).
   const cap = j.threshold_recipients_per_step;
-  if (cap != null && ids.length > Number(cap)) {
+  if (entryCapExceeded(cap, backfillPerDayOf(j), ids.length)) {
     const paused = await pauseJourneyForCompany(
       j.id,
       j.company_id,
@@ -773,7 +764,7 @@ async function enqueueCandidates(j: ActiveJourney, customerIds: string[], propsB
   const reentryGuard = j.allow_reentry ? `AND je.status = 'active'` : ``;
   // ★ 2026-06-22: 진입 properties(장바구니 cart_add 등)를 id 순서에 정렬해 entry_event_properties로 동봉.
   //   props 미전달(타 트리거) 시 전부 null → entry_event_properties NULL(기존 동작 불변).
-  const entryProps = buildEntryPropsArray(customerIds, propsByCustomer);
+  let entryProps = buildEntryPropsArray(customerIds, propsByCustomer);
   const holdoutPct = await getJourneyHoldoutPct(j.id);  // ★ 2026-07-11 홀드아웃 — 여정당 1회 조회
   let enqueued = 0;
   const client = await pool.connect();
@@ -787,6 +778,16 @@ async function enqueueCandidates(j: ActiveJourney, customerIds: string[], propsB
       return { matched, enqueued: 0, skipped: matched };
     }
     j.lineageIds = fresh.lineageIds;
+    // ★ 2026-10-25 Codex 1R — 하루 몫은 잠금 안에서 다시 센다(재진입 워커와 같은 계보 잠금 · 추출 앞의 셈은 미리 줄이기일 뿐) · 넘는 분은 다음 회차
+    const room = await dailyRoomInLock(client, j);
+    if (room != null && room <= 0) {
+      await client.query('ROLLBACK');
+      return { matched, enqueued: 0, skipped: matched };
+    }
+    if (room != null && customerIds.length > room) {
+      customerIds = customerIds.slice(0, room);
+      entryProps = entryProps.slice(0, room);
+    }
     // ★ 0930 V2 5차 — 계보가 있으면 같은 계보의 다른 판 실행도 본다(옛 판 진행 중 고객 이중 진입 0). 없으면 옛 문장 그대로.
     //   계보는 잠금 뒤 다시 읽은 목록(Codex 3R).
     const lineage = (j.lineageIds || [j.id]).length > 1 ? j.lineageIds! : null;

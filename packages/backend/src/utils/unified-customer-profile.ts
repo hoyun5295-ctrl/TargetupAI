@@ -205,38 +205,6 @@ export async function recomputeProfile(companyId: string, customerId: string): P
 }
 
 /**
- * 회사 전체 customer unified profile 재계산 (5분 cron).
- * 최근 6분 안 변경된 customer 또는 last_activity_at NULL 영역만 batch 처리.
- *
- * @param companyId - 회사 ID
- * @param fullRecompute - true = 회사 전체 (옛 영역 1회만 활용)
- */
-export async function recomputeProfileBatch(
-  companyId: string,
-  fullRecompute: boolean = false
-): Promise<{ processed: number; failed: number }> {
-  const whereClause = fullRecompute
-    ? `c.company_id = $1::uuid AND c.is_active = true`
-    : `c.company_id = $1::uuid AND c.is_active = true AND (c.updated_at >= NOW() - INTERVAL '6 minutes' OR c.last_activity_at IS NULL)`;
-  const result = await query(
-    `SELECT c.id FROM customers c WHERE ${whereClause} LIMIT 5000`,
-    [companyId]
-  );
-  let processed = 0;
-  let failed = 0;
-  for (const r of result.rows) {
-    try {
-      await recomputeProfile(companyId, r.id);
-      processed++;
-    } catch (err) {
-      console.error('[unified-profile] recompute 실패:', r.id, err);
-      failed++;
-    }
-  }
-  return { processed, failed };
-}
-
-/**
  * 회사 전체 cart_add_count_30d / wishlist_add_count_30d 재계산 (매일 cron).
  * cdp_events 30일 안 영역 → customers 영역 누적 매트릭스.
  */

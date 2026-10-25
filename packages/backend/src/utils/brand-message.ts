@@ -32,7 +32,7 @@ import { buildUnsubscribeExistsFilter, getUnsubscribedPhones } from './unsubscri
 import { normalizePhone } from './normalize-phone';
 import { normalize080Number, format080Number, isHttpLinkOrVariable, webLinkReason } from './normalize';
 // 발송 가능 시간 판정은 시각 CT가 소유한다(브랜드 창 08:00~20:50 — config/defaults BRAND_SEND_WINDOW).
-import { isWithinBrandSendWindow } from './send-time-util';
+import { isWithinBrandSendWindow, brandSendWindowError } from './send-time-util';
 import { BRAND_SEND_WINDOW } from '../config/defaults';
 import { query } from '../config/database';
 // ★ 2026-07-03 KAKAO(브랜드메시지) 문안 학습 코퍼스 적재 (전 채널 학습 통합 Phase 2) — fire-and-forget, 발송 무영향
@@ -547,9 +547,7 @@ export function buildBrandQueuePayload(p: BrandQueuePayloadParams): BrandQueuePa
   //   과거 시각이면 판정 기준도 '지금'이어야 한다 — 지난 시각으로 창을 재면 늘 통과한다.
   const judgeAt = isPast ? new Date() : sendAt;
   if (!isWithinBrandSendWindow(judgeAt, isImmediate ? marginMinutes : 0)) {
-    throw new BrandMessageBuildError(
-      '브랜드메시지는 오전 8시부터 저녁 8시 50분 사이에만 발송할 수 있습니다. 발송 시각을 조정해주세요'
-    );
+    throw new BrandMessageBuildError(brandSendWindowError());
   }
 
   const etcJson = JSON.stringify(etc);

@@ -19,6 +19,7 @@
  *   복귀 HTML 이 인라인 스크립트를 쓰기 때문이다. CSP 뒤에 두면 창이 안 닫힌다.
  */
 
+import { respondUserError } from '../utils/http-error';
 import { Router, Request, Response, urlencoded, raw } from 'express';
 import { isUuid } from '../utils/normalize';
 import { createHash, createHmac, randomBytes, randomUUID, timingSafeEqual } from 'crypto';
@@ -26,7 +27,7 @@ import multer from 'multer';
 import { authenticate } from '../middlewares/auth';
 import { query } from '../config/database';
 import { requirePlanFeature, isPlanControlRequest } from '../utils/plan-guard';
-import { snsPublishEnabled, isSnsPlatform, SNS_OAUTH_STATE_TTL_MS, SNS_ERROR_CODES, type SnsPlatform } from '../utils/sns-constants';
+import { snsPublishEnabled, isSnsPlatform, SNS_OAUTH_STATE_TTL_MS, type SnsPlatform } from '../utils/sns-constants';
 import { signSnsState, verifySnsState } from '../utils/sns-auth-state';
 import { getSnsAdapter, listSnsAdapters, SnsAdapterError } from '../utils/sns';
 import {
@@ -41,8 +42,7 @@ import { verifySnsMediaToken, isSnsMediaUrlLive } from '../utils/sns-signed-medi
 import { planSnsFit, planSnsVideoFit, type SnsVideoFacts } from '../utils/sns-media-fit';
 import { probeSnsVideoFile } from '../utils/sns-video-probe';
 import { snsChannelAvailable } from '../utils/sns-availability';
-import { normalizeSnsTags, countSnsCaption, type SnsCaptionSpec } from '../utils/sns-caption-rules';
-import { parseSnsScheduleAt } from '../utils/sns-schedule';
+import { normalizeSnsTags, type SnsCaptionSpec } from '../utils/sns-caption-rules';
 import { retrySnsTarget } from '../utils/sns-retry';
 import { listSnsPostsView, loadSnsPostsByIds, snsComposeDefaults } from '../utils/sns-posts';
 import { listSnsAttention } from '../utils/sns-attention';
@@ -100,11 +100,6 @@ function specsPayload(companyId: string | null) {
   }));
 }
 
-router.get('/specs', (req: Request, res: Response) => {
-  const companyId = ((req as any).user?.companyId as string) ?? null;
-  return res.json({ success: true, specs: specsPayload(companyId) });
-});
-
 /**
  * 화면 1콜. **ENV 게이트를 여기서 막지 않는다** — 미개방 회사도 `준비 중` 화면을 그려야 하므로
  * `enabled:false` 를 실어 보낸다(§2-16 · 403 빈 화면 0).
@@ -132,6 +127,7 @@ router.get('/overview', async (req: Request, res: Response) => {
   } catch (err: any) {
     if (isMissingSnsTable(err)) return sendDbPending(res);
     console.error('[SNS overview] 오류:', err);
+    if (respondUserError(res, err)) return;   // ★ 2026-10-25 R10 — 사용자 조건 오류 = 그 상태 · 문장 그대로
     return res.status(500).json({ success: false, error: '계정 정보를 불러오지 못했습니다.' });
   }
 });
@@ -157,6 +153,7 @@ router.post('/one-line/ask', async (req: Request, res: Response) => {
     return res.json({ success: true, answer: await buildContentAsk(companyId, (req as any).user?.userId, 'sns', resolveOwnerScope(req)) });
   } catch (err: any) {
     console.error('[SNS one-line ask] 오류:', err);
+    if (respondUserError(res, err)) return;   // ★ 2026-10-25 R10 — 사용자 조건 오류 = 그 상태 · 문장 그대로
     return res.status(500).json({ success: false, error: '답을 준비하지 못했어요. 잠시 뒤 다시 물어봐 주세요.' });
   }
 });
@@ -220,6 +217,7 @@ router.post('/auth/start/:platform', async (req: Request, res: Response) => {
   } catch (err: any) {
     if (isMissingSnsTable(err)) return sendDbPending(res);
     console.error('[SNS auth/start] state 저장 오류:', err);
+    if (respondUserError(res, err)) return;   // ★ 2026-10-25 R10 — 사용자 조건 오류 = 그 상태 · 문장 그대로
     return res.status(500).json({ success: false, error: '연결을 시작하지 못했습니다.' });
   }
 });
@@ -234,6 +232,7 @@ router.post('/accounts/:id/disconnect', async (req: Request, res: Response) => {
   } catch (err: any) {
     if (isMissingSnsTable(err)) return sendDbPending(res);
     console.error('[SNS disconnect] 오류:', err);
+    if (respondUserError(res, err)) return;   // ★ 2026-10-25 R10 — 사용자 조건 오류 = 그 상태 · 문장 그대로
     return res.status(500).json({ success: false, error: '연결을 해제하지 못했습니다.' });
   }
 });
@@ -253,6 +252,7 @@ router.post('/accounts/:id/reconnect', async (req: Request, res: Response) => {
   } catch (err: any) {
     if (isMissingSnsTable(err)) return sendDbPending(res);
     console.error('[SNS reconnect] 오류:', err);
+    if (respondUserError(res, err)) return;   // ★ 2026-10-25 R10 — 사용자 조건 오류 = 그 상태 · 문장 그대로
     return res.status(500).json({ success: false, error: '요청을 처리하지 못했습니다.' });
   }
 });
@@ -293,6 +293,7 @@ router.post('/media', snsUpload.single('file'), async (req: Request, res: Respon
     if (err instanceof SnsMediaError) return res.status(400).json({ success: false, code: err.code, error: err.message });
     if (isMissingSnsTable(err)) return sendDbPending(res);
     console.error('[SNS media] 업로드 오류:', err);
+    if (respondUserError(res, err)) return;   // ★ 2026-10-25 R10 — 사용자 조건 오류 = 그 상태 · 문장 그대로
     return res.status(500).json({ success: false, error: '사진을 올리지 못했습니다.' });
   }
 });
@@ -324,6 +325,7 @@ router.get('/assets', async (req: Request, res: Response) => {
     });
   } catch (err: any) {
     console.error('[SNS assets] 조회 오류:', err);
+    if (respondUserError(res, err)) return;   // ★ 2026-10-25 R10 — 사용자 조건 오류 = 그 상태 · 문장 그대로
     return res.status(500).json({ success: false, error: '소재를 불러오지 못했습니다.' });
   }
 });
@@ -360,6 +362,7 @@ router.post('/media/from-asset', async (req: Request, res: Response) => {
     if (err instanceof SnsMediaError) return res.status(400).json({ success: false, code: err.code, error: err.message });
     if (isMissingSnsTable(err)) return sendDbPending(res);
     console.error('[SNS media] 소재 가져오기 오류:', err);
+    if (respondUserError(res, err)) return;   // ★ 2026-10-25 R10 — 사용자 조건 오류 = 그 상태 · 문장 그대로
     return res.status(500).json({ success: false, error: '소재를 가져오지 못했습니다.' });
   }
 });
@@ -503,6 +506,7 @@ router.post('/media/lookup', async (req: Request, res: Response) => {
   } catch (err: any) {
     if (isMissingSnsTable(err)) return sendDbPending(res);
     console.error('[SNS media lookup] 오류:', err);
+    if (respondUserError(res, err)) return;   // ★ 2026-10-25 R10 — 사용자 조건 오류 = 그 상태 · 문장 그대로
     return res.status(500).json({ success: false, error: '사진을 불러오지 못했습니다.' });
   }
 });
@@ -527,6 +531,7 @@ router.get('/media/:id', async (req: Request, res: Response) => {
   } catch (err: any) {
     if (isMissingSnsTable(err)) return sendDbPending(res);
     console.error('[SNS media] 조회 오류:', err);
+    if (respondUserError(res, err)) return;   // ★ 2026-10-25 R10 — 사용자 조건 오류 = 그 상태 · 문장 그대로
     return res.status(500).json({ success: false, error: '사진을 불러오지 못했습니다.' });
   }
 });
@@ -554,6 +559,7 @@ router.get('/tag-set', async (req: Request, res: Response) => {
   } catch (err: any) {
     if (isMissingSnsTable(err)) return sendDbPending(res);
     console.error('[SNS tag-set] 조회 오류:', err);
+    if (respondUserError(res, err)) return;   // ★ 2026-10-25 R10 — 사용자 조건 오류 = 그 상태 · 문장 그대로
     return res.status(500).json({ success: false, error: '자주 쓰는 태그를 불러오지 못했어요.' });
   }
 });
@@ -599,6 +605,7 @@ router.post('/typo-check', async (req: Request, res: Response) => {
   } catch (err: any) {
     if (err?.name === 'AiRateLimitExceeded') return res.status(429).json({ success: false, code: 'AI_RATE_LIMIT', error: err.message });
     console.error('[SNS typo-check] 오류:', err);
+    if (respondUserError(res, err)) return;   // ★ 2026-10-25 R10 — 사용자 조건 오류 = 그 상태 · 문장 그대로
     return res.status(500).json({ success: false, error: '맞춤법을 검사하지 못했어요. 잠시 뒤 다시 시도해 주세요.' });
   }
 });
@@ -652,6 +659,7 @@ router.post('/caption', async (req: Request, res: Response) => {
     if (err?.name === 'AiRateLimitExceeded') return res.status(429).json({ success: false, code: 'AI_RATE_LIMIT', error: err.message });
     if (isMissingSnsTable(err)) return sendDbPending(res);
     console.error('[SNS caption] 오류:', err);
+    if (respondUserError(res, err)) return;   // ★ 2026-10-25 R10 — 사용자 조건 오류 = 그 상태 · 문장 그대로
     return res.status(500).json({ success: false, error: '글을 다듬지 못했습니다. 잠시 뒤 다시 시도해 주세요.' });
   }
 });
@@ -695,74 +703,8 @@ router.post('/posts', async (req: Request, res: Response) => {
   } catch (err: any) {
     if (isMissingSnsTable(err)) return sendDbPending(res);
     console.error('[SNS posts] 저장 오류:', err);
+    if (respondUserError(res, err)) return;   // ★ 2026-10-25 R10 — 사용자 조건 오류 = 그 상태 · 문장 그대로
     return res.status(500).json({ success: false, error: '저장하지 못했습니다.' });
-  }
-});
-
-/**
- * 게시·예약. 확인 창에서 누른 값을 **서버가 다시 검증**한다(§3-2) — 계정 상태가 그 사이 바뀌었으면 막는다.
- * ⛔ 상한을 넘는 채널이 있으면 **그 채널만 막는 것이 아니라 전체를 막는다.** 일부만 나가면 사용자가
- *   "올렸다"고 믿는 것과 실제가 갈린다.
- */
-router.post('/posts/:id/publish', async (req: Request, res: Response) => {
-  const companyId = (req as any).user?.companyId as string;
-  const postId = String(req.params.id);
-  // ★ 2026-09-24 예약 시각은 CT 하나로 읽는다 — 시간대 없는 값·지난 시각이 조용히 즉시 게시되던 결함(K5).
-  const sched = parseSnsScheduleAt(req.body?.scheduledAt);
-  if (!sched.ok) return res.status(400).json({ success: false, code: sched.code, error: sched.error });
-  const scheduledAt = sched.at;
-
-  try {
-    const post = await query(`SELECT * FROM sns_posts WHERE id = $1::uuid AND company_id = $2::uuid`, [postId, companyId]);
-    if (!post.rows[0]) return res.status(404).json({ success: false, error: '게시물을 찾을 수 없습니다.' });
-
-    const targets = await query(
-      `SELECT t.*, a.status AS account_status FROM sns_post_targets t
-         JOIN sns_accounts a ON a.id = t.account_id
-        WHERE t.post_id = $1::uuid AND t.company_id = $2::uuid AND t.status = 'draft'`,
-      [postId, companyId],
-    );
-    if (targets.rows.length === 0) return res.status(400).json({ success: false, error: '올릴 채널이 없습니다.' });
-
-    // 계정 상태 재검증
-    const changed = targets.rows.filter((t) => t.account_status !== 'active');
-    if (changed.length > 0) {
-      return res.status(409).json({
-        success: false, code: SNS_ERROR_CODES.ACCOUNT_STATE_CHANGED,
-        error: '연결 상태가 바뀐 채널이 있어요. 채널을 다시 확인해 주세요.',
-      });
-    }
-
-    // 캡션 상한 재검증 — 확정본 길이를 지금 다시 잰다(저장 뒤 규칙이 바뀌었을 수 있다).
-    // ★ 2026-09-24 채널 방식으로 센다(X 는 한글·이모지 2 · 링크 23). 코드포인트로 세면 X 가 거부할 글이 통과한다(K11).
-    const over = targets.rows.filter((t) => {
-      const adapter = getSnsAdapter(t.platform);
-      if (!adapter) return true;
-      return countSnsCaption(String(t.caption), adapter.capabilities.captionCounting) > adapter.capabilities.maxCaptionChars;
-    });
-    if (over.length > 0) {
-      return res.status(400).json({
-        success: false,
-        error: '글이 채널 상한을 넘는 곳이 있어요. 그 채널만 따로 줄여 주세요.',
-        platforms: over.map((t) => t.platform),
-      });
-    }
-
-    const when = scheduledAt ?? new Date();
-    await query(
-      `UPDATE sns_post_targets SET status = 'scheduled', scheduled_at = $3, updated_at = NOW()
-        WHERE post_id = $1::uuid AND company_id = $2::uuid AND status = 'draft'`,
-      [postId, companyId, when],
-    );
-    // ★ 2026-09-24 게시물의 예약 시각은 **사용자가 고른 시각만** 적는다 — 지금 올리기는 NULL(S7).
-    //   지금 올리기에도 지금 시각을 적으니 기록이 게시된 글에 '… 예정'을 붙였다(K8). target 은 워커가 읽으므로 그대로 둔다.
-    await query(`UPDATE sns_posts SET status = 'scheduled', scheduled_at = $3, updated_at = NOW() WHERE id = $1::uuid AND company_id = $2::uuid`, [postId, companyId, scheduledAt]);
-
-    return res.json({ success: true, scheduledAt: when.toISOString() });
-  } catch (err: any) {
-    if (isMissingSnsTable(err)) return sendDbPending(res);
-    console.error('[SNS publish] 예약 오류:', err);
-    return res.status(500).json({ success: false, error: '게시를 시작하지 못했습니다.' });
   }
 });
 
@@ -778,6 +720,7 @@ router.post('/posts/:id/reschedule', async (req: Request, res: Response) => {
   } catch (err: any) {
     if (isMissingSnsTable(err)) return sendDbPending(res);
     console.error('[SNS reschedule] 오류:', err);
+    if (respondUserError(res, err)) return;   // ★ 2026-10-25 R10 — 사용자 조건 오류 = 그 상태 · 문장 그대로
     return res.status(500).json({ success: false, error: '시각을 바꾸지 못했습니다.' });
   }
 });
@@ -797,6 +740,7 @@ router.post('/posts/:id/cancel', async (req: Request, res: Response) => {
     return res.json({ success: true, cancelled: r.rowCount });
   } catch (err: any) {
     if (isMissingSnsTable(err)) return sendDbPending(res);
+    if (respondUserError(res, err)) return;   // ★ 2026-10-25 R10 — 사용자 조건 오류 = 그 상태 · 문장 그대로
     return res.status(500).json({ success: false, error: '취소하지 못했습니다.' });
   }
 });
@@ -815,6 +759,7 @@ router.post('/targets/:id/retry', async (req: Request, res: Response) => {
   } catch (err: any) {
     if (isMissingSnsTable(err)) return sendDbPending(res);
     console.error('[SNS retry] 오류:', err);
+    if (respondUserError(res, err)) return;   // ★ 2026-10-25 R10 — 사용자 조건 오류 = 그 상태 · 문장 그대로
     return res.status(500).json({ success: false, error: '다시 시도하지 못했습니다.' });
   }
 });
@@ -845,6 +790,7 @@ router.get('/posts', async (req: Request, res: Response) => {
   } catch (err: any) {
     if (isMissingSnsTable(err)) return sendDbPending(res);
     console.error('[SNS posts] 목록 오류:', err);
+    if (respondUserError(res, err)) return;   // ★ 2026-10-25 R10 — 사용자 조건 오류 = 그 상태 · 문장 그대로
     return res.status(500).json({ success: false, error: '이력을 불러오지 못했습니다.' });
   }
 });
@@ -861,6 +807,7 @@ router.get('/posts/:id', async (req: Request, res: Response) => {
   } catch (err: any) {
     if (isMissingSnsTable(err)) return sendDbPending(res);
     console.error('[SNS posts] 글 조회 오류:', err);
+    if (respondUserError(res, err)) return;   // ★ 2026-10-25 R10 — 사용자 조건 오류 = 그 상태 · 문장 그대로
     return res.status(500).json({ success: false, error: '글을 불러오지 못했습니다.' });
   }
 });
@@ -955,6 +902,7 @@ snsPublicRouter.get('/auth/callback/:platform', async (req: Request, res: Respon
       return res.status(503).send(renderSnsReturnHtml('error', 'DB 마이그레이션이 끝나면 연결할 수 있어요.', platform, null, st.nonce));
     }
     console.error('[SNS callback] state 소비 오류:', err);
+    if (respondUserError(res, err)) return;   // ★ 2026-10-25 R10 — 사용자 조건 오류 = 그 상태 · 문장 그대로
     return res.status(500).send(renderSnsReturnHtml('error', '연결을 마치지 못했습니다.', platform, null, st.nonce));
   }
 

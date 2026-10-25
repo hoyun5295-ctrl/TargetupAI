@@ -30,6 +30,7 @@ async function sweepZombies(): Promise<void> {
       `SELECT id, stage FROM sales_outreach_jobs
         WHERE stage IN ('crawling','analyzing','producing_copy','producing_image','producing_dm','producing_email')
           AND COALESCE(lock_at, created_at) < NOW() - ($1 || ' minutes')::interval
+        ORDER BY COALESCE(lock_at, created_at), id   -- ★ 2026-10-25 R12: 오래 멈춘 것부터
         LIMIT 50`,
       [ZOMBIE_MINUTES],
     );
@@ -52,6 +53,7 @@ async function sweepStaleQueued(): Promise<void> {
       `SELECT id FROM sales_outreach_jobs
         WHERE stage = 'queued' AND lock_token IS NULL
           AND COALESCE(lock_at, created_at) < NOW() - ($1 || ' hours')::interval
+        ORDER BY COALESCE(lock_at, created_at), id   -- ★ 2026-10-25 R12: 오래 기다린 것부터
         LIMIT 50`,
       [STALE_QUEUED_HOURS],
     );
@@ -75,6 +77,7 @@ async function sweepExpired(): Promise<void> {
       `SELECT id FROM sales_outreach_jobs
         WHERE purged_at IS NULL
           AND COALESCE(forwarded_at, mail_sent_at, created_at) < NOW() - ($1 || ' days')::interval
+        ORDER BY COALESCE(forwarded_at, mail_sent_at, created_at), id   -- ★ 2026-10-25 R12: 오래된 것부터
         LIMIT 20`,
       [OUTREACH_PREVIEW_DAYS],
     );

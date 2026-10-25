@@ -64,7 +64,7 @@ describe('DM 위험 동작 불변식 (재발 방지책 2)', () => {
 
     it('footer 부재(required_info) = 치명이지만 넘길 수 있다 → blocking 0', async () => {
       const r = await validateDm({ sections: [sec('text', { text: '안내문' })] });
-      const footerItem = r.items.find((i) => i.area === 'required_info' && i.message.includes('Footer'));
+      const footerItem = r.items.find((i) => i.area === 'required_info' && i.code === 'FOOTER_MISSING');
       expect(footerItem, 'footer 부재 치명이 사라짐').toBeTruthy();
       expect(footerItem!.severity).toBe('fatal');
       expect(footerItem!.overridable, 'footer 부재를 넘길 수 없게 되면 이미지 전용 DM이 다시 영구 차단된다').toBe(true);

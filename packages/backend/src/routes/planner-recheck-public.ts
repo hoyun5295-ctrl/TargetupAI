@@ -13,6 +13,8 @@
  * ⛔ 판정 · 효과는 전부 CT(planner-recheck · sender-auth · planner-approve) — 이 파일은 부르고 HTTP 로 옮긴다.
  * ⛔ 보내기 · 고치기 · 취소 = 통지를 받은 계정 · 휴대폰 번호 = 인증 번호 · 회사 스위치 · 기기에 묶인 인증(`checkStrictSenderAuth` · 통과로 접지 않는다).
  */
+import { aiZonePlanBlockedFor } from '../utils/plan-guard';
+import { respondUserError } from '../utils/http-error';
 import { Router, Request, Response } from 'express';
 import {
   PLANNER_RECHECK_TOKEN_HEADER, PlannerRecheckError, RecheckPair, approvePlannerPairTx, buildRecheckView, deferPlannerPairTx,
@@ -39,6 +41,8 @@ function sendError(err: any, res: Response, fallback: string): Response | void {
   if (err instanceof PlannerRecheckError || err instanceof PlannerApproveError) {
     return res.status(err.status).json({ success: false, error: err.message, code: err.code, ...((err as any).extra || {}) });
   }
+  // ★ 2026-10-25 사용자 조건 오류 · 원장 쓰기 실패(503)
+  if (respondUserError(res, err)) return;
   if (isSenderAuthSchemaMissing(err)) return res.status(503).json({ success: false, code: 'DB_MIGRATION_PENDING', error: 'DB 마이그레이션 필요: sender_auth_challenges 생성 요청' });
   if (handleDbMigrationError(err, res, 'planner_touchpoints')) return;
   console.error(`[planner-recheck] ${fallback}:`, err?.message || err);
@@ -120,6 +124,7 @@ router.post('/approve', async (req: Request, res: Response) => {
     if (!p) return;
     const who = await actingUser(req, res, p);
     if (!who) return;
+    if (await aiZonePlanBlockedFor(p.ev.companyId, { userId: who.userId }, res)) return;   // ★ 2026-10-25 원장 #55 — PC [보내기]와 같은 요금제 문
     const choice = req.body?.choice === 'current' ? 'current' : 'proposal';
     const r = await approvePlannerPairTx({
       companyId: p.ev.companyId, carrierId: p.carrier.id, round: Number(p.recheck.round), choice, seenHash: String(req.body?.seenHash || ''),

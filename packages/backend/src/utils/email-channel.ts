@@ -19,6 +19,7 @@
  *   - 발신 도메인 = 회사 admin 본인 도메인 (한줄로 도메인 사용 X — SaaS 핵심)
  */
 
+import { UserFacingError } from './http-error';
 import { query, pool } from '../config/database';
 import { isPermanentSmtpRejection, sendEmail, isSmtpConfigured, getSmtpConfigPublic } from './company-smtp-client';
 import { applyTracking, buildUnsubscribeUrl, UNSUB_URL_MARKER } from './email-tracking';
@@ -101,6 +102,72 @@ export interface SendCampaignInput {
   campaignId: string;
   recipients: EmailRecipient[];
   immediate?: boolean;
+  /** ★ 2026-10-25 원장 #84 · #85 — false = 부르는 쪽이 실패를 자기 통지로 알린다(마케팅 플래너 · 잠금 + 통지) · 기본 = 이 엔진이 담당자에게 알린다 */
+  notifyFailure?: boolean;
+}
+
+/**
+ * ★ 2026-10-25 원장 #83 — 이 캠페인을 이미 받은 주소(소문자) — 발송 엔진의 재시도 멱등 · 보내기 응답의 「새로 나갈 수」가 같은 함수로 센다.
+ *   옛: 엔진만 건너뛰고 응답 · 화면은 「N명에게 보내기 시작했어요」(실제 새로 나가는 수 ≠ N · 다 받은 메일이면 0통).
+ */
+export async function deliveredEmailsOf(campaignId: string): Promise<Set<string>> {
+  const dRes = await query(
+    `SELECT DISTINCT lower(email) AS email FROM email_events WHERE campaign_id = $1::uuid AND event_type = 'delivered'`,
+    [campaignId],
+  );
+  return new Set<string>(dRes.rows.map((r: any) => String(r.email)));
+}
+
+/**
+ * ★ 2026-10-25 원장 #88 — 메일 껍데기 조립 한 곳(광고면 제목 (광고) · 수신거부 꼬리 · 꼬리 자리 정리). 실발송 엔진 · 테스트 메일이 같은 함수를 쓴다.
+ *   옛: 테스트 메일은 저장값 그대로라 (광고) 제목 · 수신거부 꼬리가 없었다(받아 본 메일 ≠ 고객이 받을 메일).
+ *   수신거부 링크 실존 판정 — 마커 또는 개인 토큰 URL이 실제로 있어야 꼬리를 생략한다(본문에 「수신거부」 글자만 있으면 수단 0 = 법 위반).
+ *   ★ 2026-07-13 디자인 3.0 — 꼬리는 EMAIL_FOOTER_SLOT(</body> 앞) 치환 · 슬롯 없는 옛 HTML = 말미에 붙인다.
+ */
+function hasUnsubLink(html: string): boolean { return html.includes(UNSUB_URL_MARKER) || html.includes('/api/email/u/'); }
+function injectFooter(html: string, footer: string): string {
+  return html.includes(EMAIL_FOOTER_SLOT) ? html.split(EMAIL_FOOTER_SLOT).join(footer) : (footer ? html + footer : html);
+}
+export function composeCampaignShell(campaign: { subject: string; htmlBody: string; isAd: boolean }, adFooter: string): { subject: string; html: string } {
+  let subject = String(campaign.subject || '');
+  const base = String(campaign.htmlBody || '');
+  if (campaign.isAd) {
+    if (!/^\s*[(（]\s*광고\s*[)）]/.test(subject)) subject = `(광고) ${subject}`; // 반각·전각 중복 방지
+    return { subject, html: injectFooter(base, hasUnsubLink(base) ? '' : adFooter) };
+  }
+  return { subject, html: injectFooter(base, '') };
+}
+
+/** ★ 2026-10-25 원장 #84 · #85 — 메일 발송이 실패로 끝난 사유(고객 말) · 내부 원문은 message(로그) */
+/** ★ 2026-10-25 R10 — 사용자 조건 오류 종류(상태 · 고객 문장 = userReason) · 내부 원문 = internal(로그) · 라우트 catch 의 글자 짐작 0 */
+export class EmailSendFailure extends UserFacingError {
+  constructor(public readonly userReason: string, public readonly internal: string, status: number = 409) {
+    super(status, 'EMAIL_SEND_BLOCKED', userReason);
+    this.name = 'EmailSendFailure';
+  }
+}
+
+/**
+ * ★ 2026-10-25 원장 #84 · #85 — 메일 발송이 실패로 끝나면 담당자에게 알린다(옛: 화면 상태 「보내지 못함」뿐 · 로그만 · 사람 0).
+ *   받는 사람 = 캠페인을 만든 계정 → 회사 대표 관리자(담당자 통지 공용 함수 하나) · 통지 실패는 삼킨다(발송 상태 판정에 영향 0).
+ *   발송 엔진(즉시 · 예약 · 미오픈 재발송)과 예약 워커의 엔진 앞 실패가 이 함수 하나를 부른다.
+ */
+export async function notifyEmailSendFailed(campaignId: string, userReason: string): Promise<void> {
+  try {
+    const r = await query(`SELECT company_id, created_by, name, subject FROM email_campaigns WHERE id = $1::uuid`, [campaignId]);
+    const row = r.rows[0];
+    if (!row) return;
+    const { notifyOperatorAdmins } = await import('./continuous-operator');
+    const label = String(row.name || row.subject || '이메일').slice(0, 40);
+    await notifyOperatorAdmins(
+      { adminPhoneNumbers: [], backupAdminPhone: null, companyId: row.company_id, createdBy: row.created_by || null },
+      '[이메일] 발송하지 못함',
+      `'${label}' 메일을 보내지 못했어요. ${userReason} 한줄로 이메일 화면에서 확인해 주세요.`,
+      { noticeHeader: '[한줄로 이메일 안내문자]' },
+    );
+  } catch (e: any) {
+    console.warn(`[Email] 발송 실패 통지 경고 (campaign ${campaignId}):`, e?.message);
+  }
 }
 
 // ════════════════════════════════════════════════════════════════════
@@ -147,7 +214,7 @@ export async function createEmailCampaign(input: CreateCampaignInput): Promise<E
   const defaultFromName = input.fromName || (await resolveEmailSender(input.companyId, null)).name;
 
   if (!defaultFromEmail) {
-    throw new Error('fromEmail 필수: 회사 admin SMTP 설정 안 from_email 등록 후 진입 의무');
+    throw new UserFacingError(409, 'EMAIL_FROM_MISSING', '회사 메일 연결에 보내는 주소가 없어요. 메일 연결 설정에서 보내는 주소를 넣어 주세요.');
   }
 
   const result = await query(
@@ -213,16 +280,47 @@ export async function createEmailCampaign(input: CreateCampaignInput): Promise<E
   return campaign;
 }
 
-export async function listEmailCampaigns(companyId: string, limit: number = 50, ownerId?: string | null): Promise<EmailCampaign[]> {
-  const ownerClause = ownerId ? ' AND created_by = $3::uuid' : '';
-  const params: any[] = [companyId, Math.min(limit, 200)];
-  if (ownerId) params.push(ownerId);
+/**
+ * ★ 2026-10-25 원장 #86 — 목록 = 최근순 한 쪽 + 다음 쪽 표지(옛: 최근 50개만 · 51번째부터 화면에서 사라졌다).
+ *   다음 쪽 표지 = 마지막 행의 만든 시각 원문(::text · µs 보존) + id. 같은 시각이면 id 로 가른다.
+ */
+export async function listEmailCampaigns(
+  companyId: string, limit: number = 50, ownerId?: string | null,
+  cursor?: { before: string; beforeId: string } | null,
+): Promise<{ rows: EmailCampaign[]; hasMore: boolean; next: { before: string; beforeId: string } | null }> {
+  const cap = Math.min(Math.max(1, limit), 200);
+  const params: any[] = [companyId, cap + 1];
+  let where = 'company_id = $1::uuid';
+  if (ownerId) { params.push(ownerId); where += ` AND created_by = $${params.length}::uuid`; }
+  if (cursor) {
+    params.push(cursor.before, cursor.beforeId);
+    where += ` AND (created_at, id) < ($${params.length - 1}::timestamptz, $${params.length}::uuid)`;
+  }
   const result = await query(
-    `SELECT * FROM email_campaigns WHERE company_id = $1::uuid${ownerClause}
-     ORDER BY created_at DESC LIMIT $2`,
+    `SELECT *, created_at::text AS created_at_text FROM email_campaigns WHERE ${where}
+     ORDER BY created_at DESC, id DESC LIMIT $2`,
     params
   );
-  return result.rows.map(mapRow);
+  const page = result.rows.slice(0, cap);
+  const last = page[page.length - 1];
+  const hasMore = result.rows.length > cap;
+  return { rows: page.map(mapRow), hasMore, next: hasMore && last ? { before: String(last.created_at_text), beforeId: String(last.id) } : null };
+}
+
+/** ★ 2026-10-25 원장 #86 — 목록 머리 지표(전체 · 보낸 메일 · 오픈 · 클릭 · 반송)는 서버가 전체로 센다(옛: 화면이 불러온 50개로 셈) */
+export async function emailCampaignTotals(companyId: string, ownerId?: string | null): Promise<{ total: number; sentCampaigns: number; sent: number; opens: number; clicks: number; bounces: number }> {
+  const params: any[] = [companyId];
+  const ownerClause = ownerId ? (params.push(ownerId), ' AND created_by = $2::uuid') : '';
+  const r = await query(
+    `SELECT COUNT(*)::int AS total,
+            COUNT(*) FILTER (WHERE sent_count > 0)::int AS sent_campaigns,
+            COALESCE(SUM(sent_count), 0)::bigint AS sent, COALESCE(SUM(open_count), 0)::bigint AS opens,
+            COALESCE(SUM(click_count), 0)::bigint AS clicks, COALESCE(SUM(bounce_count), 0)::bigint AS bounces
+       FROM email_campaigns WHERE company_id = $1::uuid${ownerClause}`,
+    params,
+  );
+  const x = r.rows[0] || {};
+  return { total: Number(x.total) || 0, sentCampaigns: Number(x.sent_campaigns) || 0, sent: Number(x.sent) || 0, opens: Number(x.opens) || 0, clicks: Number(x.clicks) || 0, bounces: Number(x.bounces) || 0 };
 }
 
 export async function getEmailCampaign(companyId: string, campaignId: string, ownerId?: string | null): Promise<EmailCampaign | null> {
@@ -353,7 +451,7 @@ export async function resolveEmailSender(
 }
 
 /** 미리보기 수신거부 자리 표시 — 누를 곳이 없다는 뜻. ⛔ 마커(UNSUB_URL_MARKER)를 쓰지 않는다(위 주석). */
-const EMAIL_PREVIEW_UNSUB_HREF = '#';
+export const EMAIL_PREVIEW_UNSUB_HREF = '#';
 
 /**
  * 편집 미리보기 HTML에 **실제로 붙을** 광고 footer를 채워 돌려준다(응답 전용 — 저장·발송 HTML 무관).
@@ -396,20 +494,31 @@ export async function withEmailPreviewAdFooter(
  *   7. 발송 실패 시 status = 'failed' 갱신 + 에러 throw
  */
 export async function sendEmailCampaign(input: SendCampaignInput): Promise<{ messageId: string; sentCount: number }> {
+  try {
+    return await sendEmailCampaignInner(input);
+  } catch (err: any) {
+    if (input.notifyFailure !== false) {
+      await notifyEmailSendFailed(input.campaignId, err instanceof EmailSendFailure ? err.userReason : '발송 중 문제가 생겼어요.');
+    }
+    throw err;
+  }
+}
+
+async function sendEmailCampaignInner(input: SendCampaignInput): Promise<{ messageId: string; sentCount: number }> {
   // 캠페인 조회
   const campaignRes = await query(
     `SELECT * FROM email_campaigns WHERE id = $1::uuid`,
     [input.campaignId]
   );
   if (campaignRes.rows.length === 0) {
-    throw new Error('캠페인을 찾을 수 없습니다.');
+    throw new UserFacingError(404, 'CAMPAIGN_NOT_FOUND', '캠페인을 찾을 수 없어요.');
   }
   const campaign = mapRow(campaignRes.rows[0]);
 
   // 회사 SMTP 설정 검증
   const smtpReady = await isSmtpConfigured(campaign.companyId);
   if (!smtpReady) {
-    throw new Error('회사 SMTP 설정 미완료. 회사 admin이 SMTP 정보 등록 후 발송 진입 의무');
+    throw new EmailSendFailure('회사 메일 연결이 끝나지 않았어요. 관리 메뉴에서 회사 메일을 연결해 주세요.', '회사 SMTP 설정 미완료. 회사 admin이 SMTP 정보 등록 후 발송 진입 의무');
   }
 
   // ★ 2026-07-12 발송 엔진 단일 길목 placeholder 가드 (Codex HIGH 정정) —
@@ -423,12 +532,12 @@ export async function sendEmailCampaign(input: SendCampaignInput): Promise<{ mes
       `UPDATE email_campaigns SET status = 'failed', updated_at = NOW() WHERE id = $1::uuid`,
       [campaign.id],
     );
-    throw new Error(contentBlock.error);
+    throw new EmailSendFailure(contentBlock.error, contentBlock.error);
   }
 
   // Zero-Count 영구 원칙
   if (input.recipients.length === 0) {
-    throw new Error('수신자 0건. Zero-Count 영구 원칙 발송 차단.');
+    throw new EmailSendFailure('받을 사람이 0명이라 보내지 않았어요.', '수신자 0건. Zero-Count 영구 원칙 발송 차단.');
   }
   // ★ 2026-10-24 세 채널 구조체크 ① — 거부 신호를 남긴 주소는 어떤 경로로 와도 보내지 않는다(이 엔진이 단일 길목 · 조회 실패 = 던진다 = 발송 안 함)
   const allowed = await filterEmailSuppressed(campaign.companyId, input.recipients);
@@ -437,7 +546,7 @@ export async function sendEmailCampaign(input: SendCampaignInput): Promise<{ mes
   }
   // 거른 뒤 0건도 Zero-Count(0명 「발송 완료」를 만들지 않는다 · 호출부 = 예약 워커 · 재발송 · 플래너가 실패로 처리)
   if (allowed.recipients.length === 0) {
-    throw new Error('보낼 수 있는 주소가 0건입니다(수신거부 · 반송 · 스팸 신고 주소 제외).');
+    throw new EmailSendFailure('보낼 수 있는 주소가 0건이에요(수신거부 · 반송 · 스팸 신고 주소 제외).', '보낼 수 있는 주소가 0건입니다(수신거부 · 반송 · 스팸 신고 주소 제외).');
   }
 
   // ★ 2026-07-12 재시도 멱등 (Codex MEDIUM 정정) — 부분 실패 후 같은 캠페인을 다시 발송할 때
@@ -445,11 +554,7 @@ export async function sendEmailCampaign(input: SendCampaignInput): Promise<{ mes
   //   totalAccepted를 과거 발송분에서 시작해 sent_count 누적이 재시도에도 정확하게 유지된다.
   let alreadyDelivered = new Set<string>();
   try {
-    const dRes = await query(
-      `SELECT DISTINCT lower(email) AS email FROM email_events WHERE campaign_id = $1::uuid AND event_type = 'delivered'`,
-      [campaign.id],
-    );
-    alreadyDelivered = new Set<string>(dRes.rows.map((r: any) => String(r.email)));
+    alreadyDelivered = await deliveredEmailsOf(campaign.id);
   } catch { /* 조회 실패 = 스킵 없이 기존 동작(발송 우선) */ }
   const sendTargets = alreadyDelivered.size > 0
     ? allowed.recipients.filter((r) => !alreadyDelivered.has(r.email.toLowerCase()))
@@ -472,23 +577,10 @@ export async function sendEmailCampaign(input: SendCampaignInput): Promise<{ mes
   // ★ 2026-09-27 R226 — 실제 From과 같은 발신자(CT) · From 이름도 이 값으로 보낸다(아래 sendEmail fromName)
   const sender = await resolveEmailSender(campaign.companyId, campaign);
   const adFooter = buildEmailAdFooter(sender.name, sender.email, UNSUB_URL_MARKER);
-  // 수신거부 링크 실존 판정 — 마커 또는 개인 토큰 URL이 실제로 있어야 생략.
-  // 본문에 '수신거부' 단어만 있는 경우(링크 없는 안내 문구)에 footer가 빠지면 수신거부 수단 0 = 법 위반.
-  const hasUnsubLink = (html: string): boolean => html.includes(UNSUB_URL_MARKER) || html.includes('/api/email/u/');
-  // ★ 2026-07-13 디자인 3.0 — 렌더러가 완전한 문서(</html>)를 내므로 footer는 EMAIL_FOOTER_SLOT(</body> 앞) 치환.
-  //   슬롯 없는 HTML(수동 작성·과거 저장분) = 기존 말미 append 폴백(무회귀). footer 불요 시 슬롯만 제거.
-  const injectFooter = (html: string, footer: string): string =>
-    html.includes(EMAIL_FOOTER_SLOT) ? html.split(EMAIL_FOOTER_SLOT).join(footer) : (footer ? html + footer : html);
-
   // 광고성 prefix + 무료거부 자동 합성 — 수신거부는 마커로 두고 발송 시 수신자별 개인 토큰 URL로 치환(applyTracking)
-  let finalSubject = campaign.subject;
-  let finalHtml = campaign.htmlBody;
-  if (campaign.isAd) {
-    if (!/^\s*[(（]\s*광고\s*[)）]/.test(finalSubject)) finalSubject = `(광고) ${finalSubject}`; // 반각·전각 중복 방지
-    finalHtml = injectFooter(finalHtml, hasUnsubLink(finalHtml) ? '' : adFooter);
-  } else {
-    finalHtml = injectFooter(finalHtml, '');
-  }
+  const shell = composeCampaignShell(campaign, adFooter);
+  const finalSubject = shell.subject;
+  let finalHtml = shell.html;
 
   let lastMessageId = '';
   let totalAccepted = alreadyDelivered.size; // 재시도 시 과거 발송분 유지 — sent_count 정확
@@ -621,6 +713,10 @@ export async function sendEmailCampaign(input: SendCampaignInput): Promise<{ mes
       }
     }
 
+    // ★ 2026-10-25 원장 #84 — 한 통도 못 나갔으면(회사 메일 인증 오류 등 수신자마다 실패) 완료가 아니라 실패다(옛: completed · 보낸 수 0 · 사람 0)
+    if (sendTargets.length > 0 && totalAccepted === 0) {
+      throw new EmailSendFailure('회사 메일 서버가 한 통도 받지 않았어요. 회사 메일 연결 정보(계정 · 비밀번호 · 발송 한도)를 확인해 주세요.', `전원 실패 ${totalRejected}건`, 502);   // 메일 서버가 거절 = 502
+    }
     await query(
       `UPDATE email_campaigns SET
          status = 'completed',
@@ -1114,20 +1210,6 @@ export async function getCampaignPerformanceStats(campaignId: string): Promise<{
     clickRatePct: sentCount > 0 ? Math.round((uniqueClickers / sentCount) * 1000) / 10 : null,
     topOpenHours: hourRes.rows.map((r: any) => ({ hour: Number(r.hour), cnt: Number(r.cnt) })),
   };
-}
-
-/** 회사 전체 오픈 시간대 분포(최근 90일, KST) — 발송 시간 추천. */
-export async function getCompanyOpenHourDistribution(companyId: string): Promise<Array<{ hour: number; cnt: number }>> {
-  const result = await query(
-    `SELECT EXTRACT(HOUR FROM ev.occurred_at AT TIME ZONE 'Asia/Seoul')::int AS hour, COUNT(*)::int AS cnt
-     FROM email_events ev
-     JOIN email_campaigns c ON c.id = ev.campaign_id
-     WHERE c.company_id = $1::uuid AND ev.event_type = 'open'
-       AND ev.occurred_at >= NOW() - INTERVAL '90 days'
-     GROUP BY 1 ORDER BY 1`,
-    [companyId],
-  );
-  return result.rows.map((r: any) => ({ hour: Number(r.hour), cnt: Number(r.cnt) }));
 }
 
 /** 미오픈자 — delivered 있고 open 없는 수신 이메일 → customers phone 매칭 (SMS 크로스 채널). */

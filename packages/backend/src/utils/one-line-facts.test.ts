@@ -133,6 +133,21 @@ describe('무과금 근거 — AI · DB import 0', () => {
     const src = readFileSync(join(__dirname, 'one-line-facts.ts'), 'utf8');
     const imports = Array.from(src.matchAll(/^import .* from '([^']+)';$/gm)).map((m) => m[1]);
     // ★ 2026-10-10 './woocommerce-core' = 몰 식별자 정규화(순수 · DB · AI 0) — 확정 상품 provider 검증
-    expect(imports.sort()).toEqual(['./content-interview', './sns-constants', './woocommerce-core', 'crypto']);
+    expect(imports.sort()).toEqual(['./sns-constants', './woocommerce-core', 'crypto']);
+  });
+});
+
+// ★ 1025 R15 — 혜택 칸 규칙(옛 원스텝 인터뷰 validateAnswer('benefit'))을 옮겼다 · 같은 규칙
+describe('isValidLineBenefit — null = 없음 · 빈 글 금지 · 300자', () => {
+  it('규칙', async () => {
+    const { isValidLineBenefit } = await import('./one-line-facts');
+    expect(isValidLineBenefit(null)).toBe(true);
+    expect(isValidLineBenefit('10% 할인')).toBe(true);
+    expect(isValidLineBenefit('  ')).toBe(false);
+    expect(isValidLineBenefit('')).toBe(false);
+    expect(isValidLineBenefit('가'.repeat(300))).toBe(true);
+    expect(isValidLineBenefit('가'.repeat(301))).toBe(false);
+    expect(isValidLineBenefit(3)).toBe(false);
+    expect(isValidLineBenefit(undefined)).toBe(false);
   });
 });

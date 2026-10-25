@@ -35,10 +35,7 @@ import CreditConfirmModal from '../components/credit/CreditConfirmModal';
 import { AI_GENERATE_COSTS } from '../constants/credit';
 import { useToast } from '../components/ToastProvider';
 import TargetExtractModal from '../components/TargetExtractModal';
-import {
-  THEME_OPTIONS, CARD_STYLE_OPTIONS, SIGNATURE_THEME_OPTIONS, INAPP_TREATMENTS, INAPP_TREATMENT_OPTIONS,
-  INAPP_FONT_CATALOG, type CardStyle,
-} from '../components/inapp/blockTheme';
+import { THEME_OPTIONS, CARD_STYLE_OPTIONS, SIGNATURE_THEME_OPTIONS, INAPP_TREATMENTS, INAPP_TREATMENT_OPTIONS, INAPP_FONT_CATALOG, type CardStyle, INAPP_TEMPLATE_LABELS } from '../components/inapp/blockTheme';
 // ★ 2026-07-14 디자인 3.0 — 골든 템플릿 12종 (형태×카드×테마×블록 완성형 — 혜택 placeholder 준수)
 // ★ 2026-07-14 Harold 지시 — 옛 골든 12종 노출 제거(정예 10종만). 타입만 유지(정예 적용 함수 공용).
 import { type GoldenInAppTemplate } from '../components/inapp/goldenTemplates';
@@ -241,21 +238,11 @@ const SUB_AGENT_VISUAL: Record<string, { icon: typeof Target; gradient: string; 
   audience_match:     { icon: Eye,        gradient: 'from-amber-400 to-orange-500', label: '대상 매칭' },
   template_selection: { icon: Layers,     gradient: 'from-emerald-400 to-teal-500', label: '템플릿 선택' },
   copy_design:        { icon: Wand2,      gradient: 'from-violet-400 to-purple-500',label: '본문 작성' },
-  variant_generation: { icon: Sparkles,   gradient: 'from-fuchsia-400 to-pink-500', label: 'Variant 생성' },
+  variant_generation: { icon: Sparkles,   gradient: 'from-fuchsia-400 to-pink-500', label: '변형안 만들기' },
   review_ready:       { icon: Activity,   gradient: 'from-cyan-400 to-blue-500',    label: '검토 진입' },
 };
 
-const TEMPLATE_LABELS: Record<Template, string> = {
-  top_banner: '상단 배너',
-  bottom_banner: '하단 배너',
-  center_modal: '중앙 모달',
-  full_screen: '전체 화면',
-  slide_in: '슬라이드 인',
-  inline_card: '인라인 카드',
-  toast: '토스트',
-  floating_button: '플로팅 버튼',
-  full_image: '포스터형',
-};
+const TEMPLATE_LABELS = INAPP_TEMPLATE_LABELS as Record<Template, string>;   // ★ 2026-10-25 원장 #110 — 공용 표(blockTheme) 한 벌
 
 // ★ 2026-07-18 정정 — 웹 기존 라벨(중앙 모달 등) 유지, 신설 포스터형만 라벨+힌트 부여
 const WEB_PICKER_LABELS: Partial<Record<Template, { label: string; hint: string }>> = {
@@ -737,8 +724,8 @@ export default function InAppMessagesPage() {
 
     const actionLabels: Record<typeof actionType, string> = {
       ai_refine: 'AI 본문 다듬기 (감성/실용/캐주얼 3안 자동 생성)',
-      time_optimize: '시간대 최적화 (best CTR 시간대 자동 적용)',
-      segment_refine: '세그먼트 정밀화 (LTV 상위 30% + 30일 활성)',
+      time_optimize: '시간대 최적화 (클릭률이 가장 높은 시간대 자동 적용)',
+      segment_refine: '대상 정밀화 (구매액 상위 30% · 30일 안 활동)',
     };
 
     setConfirmState({
@@ -962,8 +949,8 @@ export default function InAppMessagesPage() {
   const dataShortage = useMemo(() => {
     const issues: string[] = [];
     if (messages.length === 0) issues.push('등록된 메시지 없음. 자연어 입력 또는 빠른 시작 카드로 시작해주세요.');
-    if (overview && overview.totalImpressions30d < 100) issues.push(`최근 30일 impression ${overview.totalImpressions30d}건. 100건 이상 누적 후 정확한 분석 가능`);
-    if (overview && overview.avgCTR > 0 && overview.avgCTR < 0.03) issues.push(`평균 CTR ${(overview.avgCTR * 100).toFixed(1)}% (3% 미만). AI 다듬기 1-click 액션 권장`);
+    if (overview && overview.totalImpressions30d < 100) issues.push(`최근 30일 노출 ${overview.totalImpressions30d}건이에요. 100건 이상 쌓이면 정확히 분석해요`);
+    if (overview && overview.avgCTR > 0 && overview.avgCTR < 0.03) issues.push(`평균 클릭률 ${(overview.avgCTR * 100).toFixed(1)}% (3% 미만)예요. AI 다듬기로 바로 고쳐 보세요`);
     return issues;
   }, [messages, overview]);
 
@@ -1350,7 +1337,7 @@ export default function InAppMessagesPage() {
                 { label: '메시지', value: overview.totalMessages.toLocaleString() },
                 { label: '게시 중', value: overview.activeMessages.toLocaleString() },
                 { label: '평균 CTR', value: withDelta(`${(overview.avgCTR * 100).toFixed(2)}%`, overview.delta.avgCTRPercent) },
-                { label: '30일 impression', value: withDelta(overview.totalImpressions30d.toLocaleString(), overview.delta.impressionsPercent) },
+                { label: '30일 노출', value: withDelta(overview.totalImpressions30d.toLocaleString(), overview.delta.impressionsPercent) },
                 { label: '24h 매핑 구매', value: withDelta(overview.totalAttributedPurchases30d.toLocaleString(), overview.delta.purchasesPercent) },
               ]}
             />
@@ -1380,7 +1367,7 @@ export default function InAppMessagesPage() {
             {[
               { type: 'ai_refine' as const, icon: Wand2, title: '본문 다듬기', desc: '감성·실용·캐주얼 3안', iconBg: 'from-violet-50 to-purple-50', iconColor: 'text-violet-800' },
               { type: 'time_optimize' as const, icon: Clock, title: '시간대 최적화', desc: 'best CTR 시간 적용', iconBg: 'from-emerald-50 to-teal-50', iconColor: 'text-emerald-800' },
-              { type: 'segment_refine' as const, icon: Target, title: '세그먼트 정밀화', desc: 'LTV 상위 + 활성', iconBg: 'from-amber-50 to-orange-50', iconColor: 'text-amber-800' },
+              { type: 'segment_refine' as const, icon: Target, title: '대상 정밀화', desc: '구매액 상위 · 활동 고객', iconBg: 'from-amber-50 to-orange-50', iconColor: 'text-amber-800' },
             ].map((action) => (
               <button
                 key={action.type}
@@ -1585,7 +1572,7 @@ export default function InAppMessagesPage() {
             </div>
             <div className="p-5">
               {topMessages.length === 0 ? (
-                <div className="text-xs text-slate-400 py-8 text-center">데이터 누적 부족. impression 10건 이상 쌓이면 표시됩니다.</div>
+                <div className="text-xs text-slate-400 py-8 text-center">아직 자료가 적어요. 노출 10건 이상 쌓이면 보여 드려요.</div>
               ) : (
                 <div className="space-y-1.5">
                   {topMessages.map((m) => (
@@ -2696,7 +2683,7 @@ function EditModal({ editing, setEditing, availableVariables, fileInputRef, onIm
                   <textarea
                     value={editing.body || ''}
                     onChange={(e) => updateField('body', e.target.value)}
-                    placeholder={editing.template === 'full_image' ? '이미지 위에 얹는 짧은 문구 1~3줄. 길면 이미지 밖으로 잘려 보일 수 있어요' : '짧고 강렬하게 한두 문장. 혜택 부분은 [혜택 안내: 직접 작성해주세요] placeholder 사용'}
+                    placeholder={editing.template === 'full_image' ? '이미지 위에 얹는 짧은 문구 1~3줄. 길면 이미지 밖으로 잘려 보일 수 있어요' : '짧고 강렬하게 한두 문장. 혜택 부분은 [혜택 안내: 직접 작성해주세요] 자리로 두세요'}
                     className={`w-full px-3 py-2 mb-2 bg-white border border-slate-200 rounded-lg text-sm text-slate-900 placeholder-slate-400 resize-y ${editing.template === 'full_image' ? 'h-16' : 'h-24'} focus:outline-none focus:border-violet-300`}
                     maxLength={300}
                   />
@@ -2898,7 +2885,7 @@ function EditModal({ editing, setEditing, availableVariables, fileInputRef, onIm
                     )}
                     <div className="flex flex-wrap items-end gap-4">
                       <div>
-                        <label className="text-[10px] text-slate-500 block mb-1">모션 2.0 (CTA 맥동·쿠폰 샤인·초침 팝)</label>
+                        <label className="text-[10px] text-slate-500 block mb-1">움직임 (버튼 맥동 · 쿠폰 반짝임 · 초침)</label>
                         <div className="flex gap-1.5">
                           <button
                             onClick={() => setDesign({ motion: 'rich' })}
@@ -3588,7 +3575,7 @@ function EditModal({ editing, setEditing, availableVariables, fileInputRef, onIm
                     onChange={(e) => updateField('animation', e.target.value as Animation)}
                     className="w-full px-2 py-1.5 bg-white border border-slate-200 rounded text-xs text-slate-900"
                   >
-                    <option value="fade">기본 (Fade)</option>
+                    <option value="fade">기본 (서서히 나타남)</option>
                     <option value="slide">슬라이드</option>
                     <option value="bounce">바운스</option>
                     <option value="pulse">펄스</option>
@@ -3962,7 +3949,7 @@ function DrillDownModal({ loading, stats, explain, explainLoading, onRequestExpl
             <>
               {/* Funnel */}
               <div className="bg-white border border-slate-200 rounded-xl p-4">
-                <h4 className="text-sm font-bold text-slate-900 mb-3">Funnel: impression → click → 24h 매핑 구매</h4>
+                <h4 className="text-sm font-bold text-slate-900 mb-3">흐름: 노출 → 클릭 → 24시간 안 구매</h4>
                 <div className="space-y-2">
                   {stats.funnel.steps.map((step, idx) => {
                     const colors = ['bg-indigo-200', 'bg-emerald-200', 'bg-rose-200', 'bg-amber-200'];
@@ -4160,7 +4147,7 @@ const BLOCK_ADD_MENU: { type: string; label: string; desc: string; cat: BlockCat
   { type: 'media', label: '미디어', desc: '아이콘 · 일러스트 · 이미지', cat: '시각 요소', icon: ImageIcon },
   { type: 'benefit', label: '혜택(티켓)', desc: '점선 쿠폰 스타일 강조', cat: '전환 유도', icon: Ticket },
   { type: 'countdown', label: '카운트다운', desc: '마감까지 실시간 시계', cat: '전환 유도', icon: Timer },
-  { type: 'cta_group', label: '버튼(CTA)', desc: '이동 버튼 1~3개', cat: '전환 유도', icon: MousePointerClick },
+  { type: 'cta_group', label: '버튼', desc: '이동 버튼 1~3개', cat: '전환 유도', icon: MousePointerClick },
   { type: 'divider', label: '구분선', desc: '내용 사이 나누기', cat: '구조', icon: Minus },
   { type: 'spacer', label: '여백', desc: '간격 조절', cat: '구조', icon: MoveVertical },
 ];

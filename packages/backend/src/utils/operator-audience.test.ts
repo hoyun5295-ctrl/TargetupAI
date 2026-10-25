@@ -57,7 +57,7 @@ beforeEach(() => { snapState.ready = true; q.mockReset(); q.mockResolvedValue({ 
 describe('알 수 없는 축 — fail-closed', () => {
   it('값이 있는데 등록되지 않은 축이면 멈춘다 (legacy 빈 WHERE로 강등 금지)', async () => {
     await expect(compileOperatorAudience({ companyId: COMPANY, segmentKey: 'ltv_top_10', legacyFilters: {} }))
-      .rejects.toThrow(/알 수 없는 발송 대상 축/);
+      .rejects.toThrow(/알 수 없는 발송 대상이에요/);
     expect(q).not.toHaveBeenCalled();
   });
 
@@ -68,7 +68,7 @@ describe('알 수 없는 축 — fail-closed', () => {
   //   영구 금지라 표본으로 안전하다. 메시지까지 고정해 "무엇 때문에 멈췄는지"를 함께 단정한다.
   it('버전 스큐로 온 축도 전체 고객으로 열리지 않는다', async () => {
     await expect(compileOperatorAudience({ companyId: COMPANY, segmentKey: 'ltv_top_10' }))
-      .rejects.toThrow(/알 수 없는 발송 대상 축/);
+      .rejects.toThrow(/알 수 없는 발송 대상이에요/);
   });
 
   it('공백만 있는 값은 미지정으로 본다 (옛 행 호환)', async () => {
@@ -104,7 +104,7 @@ describe('저장된 미지의 축 — 매핑에서 깎이지 않고 컴파일에
     // mapRowToOperator가 원문을 보존하므로 컴파일이 이 값을 그대로 받는다.
     // 표본은 위와 같은 이유로 영구 금지 축(예측 기반)을 쓴다.
     await expect(compileOperatorAudience({ companyId: COMPANY, segmentKey: 'predicted_churn_risk', legacyFilters: {} }))
-      .rejects.toThrow(/알 수 없는 발송 대상 축/);
+      .rejects.toThrow(/알 수 없는 발송 대상이에요/);
   });
 });
 
@@ -248,7 +248,7 @@ describe('저장 검증(assertSegmentUsable) — 근거만 묻고 SQL은 만들�
 
   it('알 수 없는 축은 저장을 받지 않는다', async () => {
     mockFacts({ recentPurchase: 5 });
-    await expect(assertSegmentUsable(COMPANY, 'ltv_top_10')).rejects.toThrow(/알 수 없는 발송 대상 축/);
+    await expect(assertSegmentUsable(COMPANY, 'ltv_top_10')).rejects.toThrow(/알 수 없는 발송 대상이에요/);
   });
 
   it('근거 없는 축은 사유와 함께 거부한다', async () => {

@@ -360,18 +360,20 @@ export async function saveDmVersion(
   });
 }
 
-export async function listDmVersions(dmId: string, companyId: string): Promise<any[]> {
+/** ★ 2026-10-25 원장 #80 — 판 이력 목록 상한(넘으면 응답에 잘림을 싣는다 · 화면이 「최근 N개」를 말한다) */
+export const DM_VERSION_LIST_CAP = 50;
+export async function listDmVersions(dmId: string, companyId: string): Promise<{ rows: any[]; truncated: boolean }> {
   // company_id 소속 확인
   const own = await query(`SELECT id FROM dm_pages WHERE id = $1 AND company_id = $2`, [dmId, companyId]);
-  if (own.rows.length === 0) return [];
+  if (own.rows.length === 0) return { rows: [], truncated: false };
   const res = await query(
     `SELECT id, version_label, version_number, note, created_by, created_at,
             sections, brand_kit
      FROM dm_versions WHERE dm_id = $1 ORDER BY version_number DESC
-     LIMIT 50`,
-    [dmId],
+     LIMIT $2`,
+    [dmId, DM_VERSION_LIST_CAP + 1],
   );
-  return res.rows;
+  return { rows: res.rows.slice(0, DM_VERSION_LIST_CAP), truncated: res.rows.length > DM_VERSION_LIST_CAP };
 }
 
 /**
@@ -890,6 +892,18 @@ export async function publishDm(id: string, companyId: string) {
   return won.rows[0]?.short_code ? { short_code: won.rows[0].short_code } : null;
 }
 
+/**
+ * ★ 2026-10-25 방금 만든 **첫 발행**을 되돌린다 — 발행비를 걷지 못해 결과를 건네지 않는다(성공 뒤 차감 한 규칙 · 원장 §8-2 D1 A).
+ *   그 주소 그대로일 때만(사이에 다른 길이 바꾼 주소는 건드리지 않는다) · 주소는 응답 전이라 아무도 받지 않았다.
+ */
+export async function revertFreshPublish(id: string, companyId: string, shortCode: string, prevStatus: string): Promise<void> {
+  await query(
+    `UPDATE dm_pages SET short_code = NULL, status = $4, updated_at = NOW()
+      WHERE id = $1 AND company_id = $2 AND short_code = $3`,
+    [id, companyId, shortCode, prevStatus],
+  );
+}
+
 // ────────────────── 열람 추적 ──────────────────
 
 /**
@@ -975,7 +989,9 @@ export async function getDmRecipientEngagementRows(dmId: string, companyId: stri
  * 옛: 화면이 수신자 목록의 발급 시각을 분 단위로 묶었다(목록 상한 · UTC 글자 자르기로 9시간 어긋남).
  * 토큰에 캠페인 칸이 없으면(DDL 전) 발급 시각을 분 단위로 묶는다(종전과 같은 묶음 · 시각은 그대로 timestamptz).
  */
-export async function getDmSendBatches(dmId: string, companyId: string): Promise<Array<{ at: string; state: string; count: number }>> {
+/** ★ 2026-10-25 원장 #80 — 보낸 기록 묶음 상한(넘으면 잘림을 싣는다) */
+export const DM_SEND_BATCH_CAP = 100;
+export async function getDmSendBatches(dmId: string, companyId: string): Promise<{ rows: Array<{ at: string; state: string; count: number }>; truncated: boolean }> {
   const linked = await hasDmTokenCampaignColumn();
   const r = linked
     ? await query(
@@ -985,8 +1001,8 @@ export async function getDmSendBatches(dmId: string, companyId: string): Promise
         WHERE t.dm_id = $1::uuid AND t.company_id = $2::uuid
         GROUP BY COALESCE(t.campaign_id::text, to_char(date_trunc('minute', t.created_at), 'YYYY-MM-DD HH24:MI')), 2
         ORDER BY 1 DESC
-        LIMIT 100`,
-      [dmId, companyId],
+        LIMIT $3`,
+      [dmId, companyId, DM_SEND_BATCH_CAP + 1],
     )
     : await query(
       `SELECT date_trunc('minute', t.created_at) AS at, 'sent' AS state, COUNT(DISTINCT t.customer_id)::int AS cnt
@@ -994,14 +1010,15 @@ export async function getDmSendBatches(dmId: string, companyId: string): Promise
         WHERE t.dm_id = $1::uuid AND t.company_id = $2::uuid
         GROUP BY 1
         ORDER BY 1 DESC
-        LIMIT 100`,
-      [dmId, companyId],
+        LIMIT $3`,
+      [dmId, companyId, DM_SEND_BATCH_CAP + 1],
     );
-  return r.rows.map((x: any) => ({
+  const rows = r.rows.slice(0, DM_SEND_BATCH_CAP).map((x: any) => ({
     at: x.at instanceof Date ? x.at.toISOString() : String(x.at),
     state: String(x.state || 'sent'),
     count: Number(x.cnt) || 0,
   }));
+  return { rows, truncated: r.rows.length > DM_SEND_BATCH_CAP };
 }
 
 export async function trackDmView(input: DmViewTrackInput) {
@@ -1134,30 +1151,4 @@ export async function trackDmView(input: DmViewTrackInput) {
 }
 
 // ────────────────── 통계 ──────────────────
-
-export async function getDmStats(id: string, companyId: string) {
-  // 전체 요약
-  const summary = await query(
-    `SELECT COUNT(*) as total_views,
-            COUNT(DISTINCT phone) FILTER (WHERE phone IS NOT NULL) as unique_viewers,
-            AVG(page_reached)::numeric(5,1) as avg_page_reached,
-            AVG(duration_seconds)::numeric(10,0) as avg_duration,
-            COUNT(*) FILTER (WHERE page_reached >= total_pages AND total_pages > 0) as completed_views
-     FROM dm_views WHERE dm_id = $1 AND company_id = $2`,
-    [id, companyId]
-  );
-
-  // 전화번호별 상세
-  const byPhone = await query(
-    `SELECT phone, MAX(page_reached) as max_page, MAX(total_pages) as total_pages,
-            SUM(duration_seconds) as total_duration, MIN(viewed_at) as first_view, MAX(last_active_at) as last_view
-     FROM dm_views WHERE dm_id = $1 AND company_id = $2 AND phone IS NOT NULL
-     GROUP BY phone ORDER BY first_view DESC LIMIT 200`,
-    [id, companyId]
-  );
-
-  return {
-    summary: summary.rows[0],
-    viewers: byPhone.rows,
-  };
-}
+// ★ 2026-10-25 원장 #80 · R15 — getDmStats(GET /:id/stats)는 화면 · SDK 호출이 0이라 지웠다(통계 = recipients-tracking · event-stats)

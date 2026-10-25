@@ -25,7 +25,6 @@ import { STUDIO_DM_DRAFT_KEY } from '../lib/studio-draft';
 import AssetLibraryPickerModal, { type PickedAsset } from '../components/assets/AssetLibraryPickerModal';
 import ImageToCopyButton from '../components/ImageToCopyButton';
 // ★ 2026-09-06 S6 재료(이미지·행사 내용)로 초안 — 아웃리치 엔진 · 초안 id 로 이어서 편집
-import MaterialQuickPanel from '../components/MaterialQuickPanel';
 // ★ 2026-07-19: 기획전 스샷 구조화 판독 → DM 섹션 디터미니스틱 조립 (행사 N블록 = 70% 완성)
 import { buildDmSectionsFromEvents, deriveDmTitleFromEvents, summarizeEvents, eventsHaveNumbers } from '../utils/dm-event-assembly';
 import CreditConfirmModal from '../components/credit/CreditConfirmModal';
@@ -51,7 +50,7 @@ import DmQuickBar from '../components/dm/DmQuickBar';
 // ★ 2026-09-14 T5·T6 AI 자동제작 — 목록 카드띠(입구) · 편집 캔버스 위 결과 바 · 노출 스위치(신규 ENV)
 import AiBuildEntryStrip from '../components/ai-build/AiBuildEntryStrip';
 import BuildResultBar from '../components/ai-build/BuildResultBar';
-import { peekBuildResult, clearBuildResult, useAiAutoBuildEnabled, saveBuildResult, type BuildResultHandoff } from '../utils/ai-build';
+import { peekBuildResult, clearBuildResult, saveBuildResult, type BuildResultHandoff } from '../utils/ai-build';
 import AbTestModal from '../components/dm/modals/AbTestModal';
 import ModalBase, { ModalButton } from '../components/dm/modals/ModalBase';
 import '../styles/dm-builder.css';
@@ -147,7 +146,6 @@ export default function DmBuilderPage() {
   const [listFailed, setListFailed] = useState(false);
   const deepLinkHandled = useRef(false);
   // ★ 2026-09-14 T5 AI 자동제작 — 방금 만든 초안이면 결과 바(판정·미반영·다시 만들기) · 편집을 시작하면(isDirty) 접힘 · T6 목록 카드띠 노출 스위치
-  const autoBuild = useAiAutoBuildEnabled();
   const isDirtyForBar = useDmBuilderStore((s) => s.isDirty);
   const [buildBar, setBuildBar] = useState<BuildResultHandoff | null>(null);
   const [legacyDmError, setLegacyDmError] = useState<string | null>(null);
@@ -207,7 +205,7 @@ export default function DmBuilderPage() {
     if (!lineResult || !lineValidation) return [];
     const base = fixItemsOf(lineValidation, lineFlat, lineResult.missing.map((l) => `반영하지 못한 항목: ${l}`));
     const sb = lineValidation.publish_static_block as { code?: string; error?: string } | null | undefined;
-    const staticMust: FixItem[] = sb ? [{ kind: 'must', title: sb.code === 'LINK_DEFECT' ? '고쳐야 할 링크가 있어요' : '직접 채울 자리가 남았어요', sub: sb.error }] : [];
+    const staticMust: FixItem[] = sb ? [{ kind: 'must', title: sb.code === 'LINK_DEFECT' ? '고쳐야 할 링크가 있어요' : sb.code === 'DM_WIDE_ONE' ? '추첨 블록이 둘 이상이에요' : '직접 채울 자리가 남았어요', sub: sb.error }] : [];
     const benefitAsk: FixItem[] = lineResult.gapBenefit && !lineResult.benefit
       ? [{ kind: 'suggest', title: LINE_BENEFIT_SUGGEST, sub: '혜택을 넣어 새 DM으로 만들어요 · 지금 DM은 그대로 남아요', action: '새로 만들기' }]
       : [];
@@ -244,7 +242,7 @@ export default function DmBuilderPage() {
     total_views_30d: number;
     unique_viewers_30d: number;
     total_responses_30d: number;
-    avg_ctr_30d: number;
+    avg_response_rate_30d: number;
   } | null>(null);
   const [naturalLanguage, setNaturalLanguage] = useState('');
   const [lineFocus, setLineFocus] = useState(0);   // ★ 2026-10-20 만들기 [한 줄로 자동 생성]으로 들어오면 한 줄 칸에 커서
@@ -795,13 +793,18 @@ export default function DmBuilderPage() {
   // ★ 2026-09-27 만들기 개편 — 상세 창이 주소를 화면에 띄우도록 주소를 돌려준다(경로·과금 무변경)
   const handleCopyUrl = async (id: string): Promise<string | null> => {
     try {
-      const res = await api.post(`/dm/${id}/publish`);
+      // ★ 2026-10-25 원장 #65 — 복사는 돈을 걷지 않는다: 확인 금액 0 을 싣는다(발행비가 남았으면 서버가 차감 전에 402)
+      const res = await api.post(`/dm/${id}/publish`, { expected_fee: 0 });
       const url = res?.data?.short_url || '';
       if (!url) { setToast({ type: 'error', message: '발행 주소를 찾지 못했어요. 편집에서 발행 후 다시 시도해주세요.' }); return null; }
       try { await navigator.clipboard.writeText(url); } catch { /* 화면에 주소가 뜬다 */ }
       setToast({ type: 'success', message: '발행 주소를 복사했어요. (이미 발행, 추가 과금 없음)' });
       return url;
     } catch (err: any) {
+      if (err?.response?.data?.code === 'PUBLISH_FEE_REQUIRED') {
+        setToast({ type: 'error', message: '아직 발행 전이에요. 편집 화면에서 [발행]을 누르면 금액을 확인한 뒤 발행해요.' });
+        return null;
+      }
       setToast({ type: 'error', message: err?.response?.data?.error || '주소 복사 실패' });
       return null;
     }
@@ -1037,7 +1040,7 @@ export default function DmBuilderPage() {
     total_views_30d: 0,
     unique_viewers_30d: 0,
     total_responses_30d: 0,
-    avg_ctr_30d: 0,
+    avg_response_rate_30d: 0,
   };
   const metricsLoading = !overviewTried;
   const dmOneLine = zoneModule('dm').oneLine!;
@@ -1133,7 +1136,7 @@ export default function DmBuilderPage() {
         { label: '보낸 DM', value: metricsLoading ? '—' : ov.published_dm.toLocaleString() },
         { label: '30일 열람', value: metricsLoading ? '—' : ov.total_views_30d.toLocaleString() },
         { label: '30일 응답', value: metricsLoading ? '—' : ov.total_responses_30d.toLocaleString() },
-        { label: '평균 클릭률', value: metricsLoading ? '—' : `${ov.avg_ctr_30d}%` },
+        { label: '평균 응답률', value: metricsLoading ? '—' : `${ov.avg_response_rate_30d}%` },   // ★ 1025 #73 응답 ÷ 열람(클릭 아님)
       ]}
       emphasis={lineAsk.ask ? (
         <LineAnswer
@@ -1214,22 +1217,6 @@ export default function DmBuilderPage() {
 
 
         {customerGate.isEmpty && <CustomerDataRequiredBanner className="mb-4" />}
-        {/* ★ 2026-09-06 S6 재료 입구 — AI 자동제작이 안 열린 회사만(열린 회사는 시작 카드 [재료로 만들기] = 같은 곳) · ★0930 접힌 패널에서 꺼냄 */}
-        {autoBuild !== true && (
-          <div className="mb-6">
-            <MaterialQuickPanel
-              channel="dm"
-              disabled={generating}
-              onToast={(message, type) => setToast({ type: type === 'error' ? 'error' : type === 'warning' ? 'info' : 'success', message })}
-              onDone={async ({ draftId }) => {
-                if (!draftId) { setToast({ type: 'error', message: '초안이 만들어지지 않았습니다. 다시 시도해주세요.' }); return; }
-                await useDmBuilderStore.getState().loadDm(draftId);
-                setMode('edit');
-                setToast({ type: 'success', message: '재료로 초안을 만들었습니다. 이미지와 문구만 다듬어 주세요.' });
-              }}
-            />
-          </div>
-        )}
         {/* 완성 이미지 파일 입력 · 저장 소재 픽커 = "그 밖에" 버튼이 연다(상시 마운트) */}
         <input
           ref={completedImagesInputRef}
@@ -1399,13 +1386,16 @@ function TopBarWithBack({ onBack, onPublishDone, hidden = false, sendSignal = 0 
   // ★ 2026-10-19 B-1014-3⑤ — 서버 판정과 같은 목록(참여 8종 · dm-section-defaults PARTICIPATION_TYPES 미러)
   const hasInteraction = pages.some((p: any) => (p?.sections || []).some((sec: any) => sec && (PARTICIPATION_TYPES as readonly string[]).includes(sec.type)));
   const [confirmPublish, setConfirmPublish] = useState(false);
+  // ★ 2026-10-25 원장 #76 — 확인 창 금액 = 서버 견적(보내기 창과 같은 규칙 · 옛: 화면 단가표 금액만 띄우고 서버로 싣지 않았다)
+  const [publishQuote, setPublishQuote] = useState<{ cost: number; source: string } | null>(null);
   // ★ 2026-07-28 검수 치명을 확인하고 넘긴 발행 (서수란 접수). 검수 모달이 스토어에 채워 넣으면
   //   여기서 크레딧 확인 모달을 열고, 발행 시 서버로 함께 보내 기록으로 남긴다.
   //   null = 일반 발행(기존 경로 그대로).
   const validationOverride = useDmBuilderStore((s) => s.validationOverride);
   const setValidationOverride = useDmBuilderStore((s) => s.setValidationOverride);
   useEffect(() => {
-    if (validationOverride) setConfirmPublish(true);
+    if (validationOverride) void openPublishConfirm();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [validationOverride]);
   const [publishedUrl, setPublishedUrl] = useState<string | null>(null);
   const [sendModalOpen, setSendModalOpen] = useState(false);
@@ -1431,22 +1421,37 @@ function TopBarWithBack({ onBack, onPublishDone, hidden = false, sendSignal = 0 
       return;
     }
     try {
-      await api.post(`/dm/${dmId}/test-send`, { sample_key: 'vip' });
+      await api.post(`/dm/${dmId}/test-send`, {});
       setToast({ type: 'success', message: '테스트 발송 요청을 보냈어요.' });
     } catch (err: any) {
       setToast({ type: 'error', message: err?.response?.data?.error || '테스트 발송 실패' });
     }
   };
 
-  const handlePublish = async (validationOverride?: { items: { area: string; message: string }[] }) => {
+  // 서버 견적을 받아 확인 창을 연다(견적 실패 = 발행하지 않고 알린다)
+  const openPublishConfirm = async () => {
+    const id = useDmBuilderStore.getState().dmId;
+    if (!id) return;
+    try {
+      const r = await api.get(`/dm/${id}/publish-quote?via=publish`);
+      const q = r?.data || {};
+      setPublishQuote({ cost: q.required ? Number(q.cost) || 0 : 0, source: String(q.source || (hasInteraction ? 'dm-interaction-publish' : 'dm-builder')) });
+      setConfirmPublish(true);
+    } catch (err: any) {
+      setValidationOverride(null);
+      setToast({ type: 'error', message: err?.response?.data?.error || '발행 금액을 확인하지 못했어요. 잠시 후 다시 시도해 주세요.' });
+    }
+  };
+
+  const handlePublish = async (validationOverride: { items: { area: string; message: string }[] } | undefined, expectedFee: number) => {
     await saveStore();
     if (dmId) {
       try {
-        // ★ 2026-07-28 검수 치명을 확인하고 넘긴 경우 그 사실을 함께 보낸다 — 서버가 무시 항목·시각·사용자를
-        //   validation_result에 기록한다. 넘기지 않은 일반 발행은 body 없이 그대로(기존 동작 무변경).
+        // ★ 2026-07-28 검수 치명을 확인하고 넘긴 경우 그 사실을 함께 보낸다 — 서버가 무시 항목·시각·사용자를 validation_result에 기록한다.
+        // ★ 2026-10-25 원장 #76 — 확인 창 금액(expected_fee)을 늘 싣는다(서버 금액이 더 크면 차감 전에 402 → 새 금액으로 다시 묻는다)
         const res = await api.post(
           `/dm/${dmId}/publish`,
-          validationOverride ? { validation_override: validationOverride } : undefined,
+          { expected_fee: expectedFee, ...(validationOverride ? { validation_override: validationOverride } : {}) },
         );
         setPublished(true); // 발행 확정 — 버튼 [발송] 전환 + 이후 크레딧 모달 미노출
         const url = res?.data?.short_url || '';
@@ -1457,7 +1462,14 @@ function TopBarWithBack({ onBack, onPublishDone, hidden = false, sendSignal = 0 
         }
         setToast({ type: 'success', message: '발행했어요.' });
       } catch (err: any) {
-        setToast({ type: 'error', message: err?.response?.data?.error || '발행 실패' });
+        const d = err?.response?.data;
+        if (d?.code === 'PUBLISH_FEE_REQUIRED' && Number.isFinite(Number(d.cost))) {
+          setPublishQuote({ cost: Number(d.cost), source: String(d.costSource || 'dm-builder') });
+          setConfirmPublish(true);
+          setToast({ type: 'error', message: '발행 금액이 바뀌었어요. 다시 확인해 주세요.' });
+          return;
+        }
+        setToast({ type: 'error', message: d?.error || '발행 실패' });
         return;
       }
     }
@@ -1486,7 +1498,7 @@ function TopBarWithBack({ onBack, onPublishDone, hidden = false, sendSignal = 0 
             st().setOpenModal('validation'); // 문제 항목 + 바로 고치기 (넘길 수 있으면 모달이 그 버튼을 띄운다)
             return;
           }
-          setConfirmPublish(true);
+          await openPublishConfirm();
   };
   // ★ 2026-09-27 보내기 창 [자세히 설정] 신호
   useEffect(() => { if (sendSignal > 0) setSendModalOpen(true); }, [sendSignal]);
@@ -1501,15 +1513,17 @@ function TopBarWithBack({ onBack, onPublishDone, hidden = false, sendSignal = 0 
         />
       )}
       <CreditConfirmModal
-        open={confirmPublish}
-        source={hasInteraction ? 'dm-interaction-publish' : 'dm-builder'}
+        open={confirmPublish && !!publishQuote}
+        source={publishQuote?.source || (hasInteraction ? 'dm-interaction-publish' : 'dm-builder')}
+        costOverride={publishQuote?.cost ?? 0}
         onConfirm={() => {
           const ov = validationOverride;
+          const fee = publishQuote?.cost ?? 0;
           setConfirmPublish(false);
           setValidationOverride(null);
-          handlePublish(ov || undefined);
+          void handlePublish(ov || undefined, fee);
         }}
-        onCancel={() => { setConfirmPublish(false); setValidationOverride(null); }}
+        onCancel={() => { setConfirmPublish(false); setValidationOverride(null); setPublishQuote(null); }}
       />
       <ModalBase
         open={!!publishedUrl}

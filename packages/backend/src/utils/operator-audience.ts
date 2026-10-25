@@ -13,6 +13,7 @@
  *   3. 자동마케팅의 count·명단·staging 적재는 언제 세든 같은 게이트를 쓴다. 다른 것은 "언제 셌나"뿐이다.
  *   4. 이 문은 자동마케팅 전용이다. 캠페인 미리보기·대행 제안서는 발송 게이트가 다른 경로라 여기 묶지 않는다.
  */
+import { UserFacingError } from './http-error';
 import { query } from '../config/database';
 import { getFatigueCap } from './fatigue-guard';
 import { getStoreScope } from './store-scope';
@@ -218,11 +219,12 @@ export async function listSegmentAvailability(companyId: string): Promise<Segmen
  */
 export async function assertSegmentUsable(companyId: string, rawKey: string): Promise<void> {
   const key = normalizeSegmentKey(String(rawKey || '').trim() || null);
-  if (!key) throw new Error(`알 수 없는 발송 대상 축입니다: ${String(rawKey).slice(0, 40)}`);
+  if (!key) throw new UserFacingError(400, 'SEGMENT_UNKNOWN', '알 수 없는 발송 대상이에요. 화면을 새로 고친 뒤 대상을 다시 골라 주세요.');
   const facts = await loadCompanySegmentFacts(companyId);
   const availability = resolveSegmentAvailability(facts).find((a) => a.key === key);
   if (!availability || !availability.available) {
-    throw new Error(availability?.reason || '이 발송 대상 축을 지금은 쓸 수 없습니다.');
+    // ★ 2026-10-25 R10 — 회사 데이터가 아직 없는 대상 = 사람이 고칠 상태(409 · 사유 문장 그대로 · 옛: 일반 Error = 500)
+    throw new UserFacingError(409, 'SEGMENT_UNAVAILABLE', availability?.reason || '이 발송 대상은 지금 쓸 수 없어요. 다른 대상을 골라 주세요.');
   }
   // 변화 축은 회차 스냅샷 표가 있어야 회차가 돈다 — 표 없이 저장을 받으면 워커가 42P01로 돈다.
   if (segmentNeedsCycleBaseline(key) && !(await isCycleSnapshotReady())) {
@@ -299,7 +301,7 @@ export async function compileOperatorAudience(input: {
   //   종전엔 미등록 키가 조용히 legacy로 강등됐고, 그때 filters가 비어 있으면 WHERE가 통째로 비어
   //   전체 고객이 열렸다. 값이 있는데 우리가 모르는 축이면 멈춘다 — 버전 스큐·손상된 제안이 여기서 걸린다.
   if (raw && !key) {
-    throw new Error(`알 수 없는 발송 대상 축이라 대상을 만들 수 없습니다: ${raw.slice(0, 40)}`);
+    throw new UserFacingError(400, 'SEGMENT_UNKNOWN', '알 수 없는 발송 대상이에요. 화면을 새로 고친 뒤 대상을 다시 골라 주세요.');
   }
 
   if (!key) {
@@ -311,7 +313,8 @@ export async function compileOperatorAudience(input: {
   const facts = await loadCompanySegmentFacts(input.companyId);
   const availability = resolveSegmentAvailability(facts).find((a) => a.key === key);
   if (!availability || !availability.available) {
-    throw new Error(availability?.reason || '이 발송 대상 축을 지금은 쓸 수 없습니다.');
+    // ★ 2026-10-25 R10 — 회사 데이터가 아직 없는 대상 = 사람이 고칠 상태(409 · 사유 문장 그대로 · 옛: 일반 Error = 500)
+    throw new UserFacingError(409, 'SEGMENT_UNAVAILABLE', availability?.reason || '이 발송 대상은 지금 쓸 수 없어요. 다른 대상을 골라 주세요.');
   }
   // ⛔ 변화 축은 회차 스냅샷 표를 참조한다. 표가 아직 없으면 조건을 만들지 않고 여기서 멈춘다 —
   //   만들면 42P01이 화면에 500으로 나가고, 담당자는 무엇이 잘못됐는지 알 수 없다.

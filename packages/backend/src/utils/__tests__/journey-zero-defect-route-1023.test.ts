@@ -85,8 +85,8 @@ describe('오류 매핑 한 벌', () => {
 describe('모든 여정 주소가 같은 문 · 같은 오류 매핑을 지난다(새 주소가 우회하면 실패)', () => {
   const src = readFileSync(resolve(__dirname, '../../routes/ai.ts'), 'utf8');
   const blocks = src.split(/\n(?=router\.(?:get|post|put|patch|delete)\()/).filter((b) => /^router\.\w+\('\/operator\/(journeys|preview-target-samples|grade-ranks)/.test(b));
-  it('여정 주소 전부 journeyGate(★1023 = 57 · 한 줄 패키지 · 새 판 주소 삭제 · 질문표 프리셋 추가)', () => {
-    expect(blocks.length).toBeGreaterThanOrEqual(55);
+  it('여정 주소 전부 journeyGate(★1023 = 57 · 한 줄 패키지 · 새 판 주소 삭제 · 질문표 프리셋 추가 · ★1025 호출 0 주소 셋 삭제)', () => {
+    expect(blocks.length).toBeGreaterThanOrEqual(52);
     // ★ 1024 R2 — 끄기 주소는 journeyGate(req, res, { plan: false })(같은 문 · 요금제만 열어 둔다 · 목록 = 뿌리 대장 시험)
     const noGate = blocks.filter((b) => !b.includes('await journeyGate(req, res')).map((b) => b.split('\n')[0]);
     expect(noGate).toEqual([]);

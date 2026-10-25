@@ -15,6 +15,7 @@
  *   - ai_batch_jobs (Batch 처리 건수)
  */
 
+import { aiZonePlanBlocked } from '../utils/plan-guard';
 import { Request, Response, Router } from 'express';
 import { query } from '../config/database';
 import { authenticate } from '../middlewares/auth';
@@ -24,7 +25,9 @@ import { aiLimitCountedSql, getMonthlyUsage, getDailyUsage, getModelBreakdown } 
 import { getCacheStats } from '../utils/ai-cache';
 import { kstDateString } from '../utils/planner-execution';
 
-import { publicErrorText } from '../utils/http-error';
+import { publicErrorText, respondUserError } from '../utils/http-error';
+import { runChargedAi, checkCredit, settleCreditAfterSuccess, InsufficientCreditError } from '../utils/ai-credit';
+import { getCreditCost } from '../utils/ai-credit-calc';
 /** ★ 2026-09-27 한줄로 V2 R074 — 사용량 일평균·예측의 창(일). 일평균 = 이 창의 합 ÷ 이 일수(호출 없는 날도 0으로 센다). */
 const USAGE_WINDOW_DAYS = 30;
 
@@ -289,6 +292,7 @@ router.post('/search-natural', async (req: Request, res: Response) => {
     if (!companyId) {
       return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
     }
+    if (await aiZonePlanBlocked(req, res)) return;   // ★ 2026-10-25 R2 — AI 호출(크레딧) = AI 존 서버 문 · 옛: 문 없음
     const q = String(req.body?.query || '').trim();
     if (q.length < 2) {
       return res.status(400).json({ success: false, error: '질문은 2자 이상 입력해주세요.' });
@@ -344,14 +348,19 @@ ${topSources || '(데이터 없음)'}
 7. 호출 출처는 영문 이름(예: generate-messages)을 그대로 쓰지 말고 우리말 작업 이름으로 풀어 쓰세요(예: 문구 생성 · 타겟 추천).
 8. 화면에 글자 그대로 보이므로 굵은 글씨(**) · 머리글(#) · 표 같은 마크다운 기호는 쓰지 않는다. 목록이 필요하면 줄마다 "· "로 시작한다.`;
 
-    const answer = await callAIWithFallback({
-      system: systemPrompt,
-      userMessage: q,
-      maxTokens: 1500,
-      temperature: 0.3,
-      model: 'opus',
-      companyId,
-      source: 'ai-usage-search',
+    // ★ 2026-10-25 원장 Z4 — 돈 = AI 결과 정산 한 곳(AI 사용량 검색 · 답이 비면 0원) · 쓸 결과가 아니면 0원 · 잔액 부족 402 · 원장 쓰기 실패 503
+    const { result: answer } = await runChargedAi({
+      companyId: companyId, cost: getCreditCost('ai-usage-search'), source: 'ai-usage-search', createdBy: req.user?.userId || null,
+      run: () => callAIWithFallback({
+        system: systemPrompt,
+        userMessage: q,
+        maxTokens: 1500,
+        temperature: 0.3,
+        model: 'opus',
+        companyId,
+        source: 'ai-usage-search',
+      }),
+      accept: (answer) => !!plainTextFromAi(answer).trim(),
     });
 
     return res.json({
@@ -367,6 +376,8 @@ ${topSources || '(데이터 없음)'}
       },
     });
   } catch (err: any) {
+    if (err instanceof InsufficientCreditError) return res.status(402).json({ success: false, error: 'AI 크레딧이 부족합니다. 크레딧을 충전해 주세요.', code: 'INSUFFICIENT_CREDIT' });
+    if (respondUserError(res, err)) return;
     console.error('[AI Usage search-natural] 오류:', err);
     if (err?.name === 'AiRateLimitExceeded') {
       return res.status(429).json({ success: false, error: err.message, code: 'AI_RATE_LIMIT' });

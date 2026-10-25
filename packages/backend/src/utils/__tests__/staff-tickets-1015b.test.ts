@@ -36,7 +36,7 @@ describe('B-1015-4 카드 충전 = 결제수단을 적는다', () => {
 describe('B-1015-5 DM 보내기 창 = 고칠 곳을 항목으로 보여 준다', () => {
   const modal = read('frontend/src/components/make/MakeSendModal.tsx');
   it('검수 항목을 만들기 화면과 같은 변환기(fixItemsOf · must)로 바꿔 보관한다', () => {
-    expect(modal).toContain("import { defaultDmSmsText, isNightAdHour, fixItemsOf, type FixItem } from '../../utils/make-flow';");
+    expect(modal).toContain("import { defaultDmSmsText, fixItemsOf, type FixItem } from '../../utils/make-flow';");
     expect(modal).toContain("setFatalItems(fixItemsOf({ items }, [], []).filter((it) => it.kind === 'must'));");
   });
   it('항목(제목 · 방법)을 목록으로 그리고, 「만들기 화면에서 고치기」는 창을 닫아 [고치기] 버튼이 있는 화면으로 돌아간다', () => {

@@ -12,7 +12,7 @@
  * 발송·정산 테이블은 건드리지 않는다 — 생성 payload JSON만 별도 테이블(event_campaign_drafts)에 보관.
  * 신규 테이블 미생성(배포 순간) = handleDbMigrationError 503(DB_MIGRATION_PENDING).
  */
-import { Router, Request, Response } from 'express';
+import { Router, Response } from 'express';
 import multer from 'multer';
 import { authenticate } from '../middlewares/auth';
    // ★ 2026-10-17 템플릿 캠페인 이벤트 페이지 읽기
@@ -25,7 +25,7 @@ import { handleDbMigrationError } from '../utils/db-migration-error';
 import { InsufficientCreditError } from '../utils/ai-credit';
 // ★ 2026-09-06 S5 재료 입구(사본 저장 · 텍스트 비었을 때만 판독 · 견적)
 import { requirePlanFeature } from '../utils/plan-guard';
-import { saveMaterialImages, extractMaterialsText, quoteQuickCampaign, quickPlanLocked, quickMaterialsEnabled, quoteFromBuildMaterials, QUICK_MATERIALS_MAX_IMAGES, QUICK_CARD_UPLOAD_MAX, QUICK_EVENT_CARDS_MAX, QUICK_EVENT_CARD_IMAGES } from '../utils/campaign-quick';
+import { saveMaterialImages, extractMaterialsText, quickPlanLocked, quickMaterialsEnabled, quoteFromBuildMaterials, QUICK_CARD_UPLOAD_MAX } from '../utils/campaign-quick';
 // ★ 2026-09-14 T4 AI 자동제작 v1 견적(POST · 재료 본문) — 신규 ENV 게이트 · 화면 배지·버튼 잠금·금액의 단일 출처
 import { isBuildMaterialsV1, aiAutoBuildEnabled, aiAutoBuildErrorResponse, AI_AUTO_BUILD_CARDS_MAX, AI_AUTO_BUILD_CARD_IMAGES, AI_AUTO_BUILD_PRODUCTS_MAX, AI_AUTO_BUILD_MIN_TEXT_CHARS } from '../utils/ai-auto-build-materials';
 import { isCdpEnabledForPlan } from '../utils/cdp-auth';
@@ -33,7 +33,7 @@ import { isCdpEnabledForPlan } from '../utils/cdp-auth';
 import { readBrandPage, PageReadError } from '../utils/brand-page-reader';
 import { tryAcquireInflight, releaseInflight, takeDailyQuota } from '../utils/inflight-lock';
 
-import { publicErrorText } from '../utils/http-error';
+import { publicErrorText, respondUserError, uploadErrorText } from '../utils/http-error';
 export const eventCampaignRouter = Router();
 eventCampaignRouter.use(authenticate);
 
@@ -42,9 +42,10 @@ const DRAFT_STATUS = new Set(['active', 'archived']);
 const SOURCE_KINDS = new Set(['text', 'image']);
 
 // 이미지 업로드 — dm.ts dmImageUpload 미러(메모리 저장, 5MB×5장, jpg/png/webp)
+const EXTRACT_UPLOAD_LIMITS = { fileSize: 5 * 1024 * 1024, files: MAX_EVENT_IMAGES };
 const imageUpload = multer({
   storage: multer.memoryStorage(),
-  limits: { fileSize: 5 * 1024 * 1024, files: MAX_EVENT_IMAGES },
+  limits: EXTRACT_UPLOAD_LIMITS,
   fileFilter: (_req, file, cb) => {
     const mime = (file.mimetype || '').toLowerCase();
     if (['image/jpeg', 'image/png', 'image/webp'].includes(mime)) cb(null, true);
@@ -58,7 +59,7 @@ const imageUpload = multer({
 eventCampaignRouter.post('/extract-image', (req: any, res: Response) => {
   imageUpload.array('images', MAX_EVENT_IMAGES)(req, res, async (uploadErr: any) => {
     if (uploadErr) {
-      return res.status(400).json({ success: false, error: uploadErr.message || '이미지 업로드 오류' });
+      return res.status(400).json({ success: false, error: uploadErrorText(uploadErr, EXTRACT_UPLOAD_LIMITS) });   // ★ 2026-10-25 원장 #106
     }
     try {
       const companyId = req.user?.companyId;
@@ -76,6 +77,7 @@ eventCampaignRouter.post('/extract-image', (req: any, res: Response) => {
       if (err?.name === 'AiRateLimitExceeded') {
         return res.status(429).json({ success: false, error: err.message });
       }
+      if (respondUserError(res, err)) return;   // ★ 2026-10-25 이미지 없음 400 · 읽지 못함 422 · 원장 쓰기 실패 503
       console.error('[event-campaigns extract-image] 오류:', err?.message);
       return res.status(500).json({ success: false, error: publicErrorText(err, '이미지 판독 실패') });
     }
@@ -83,21 +85,18 @@ eventCampaignRouter.post('/extract-image', (req: any, res: Response) => {
 });
 
 // ─────────────────────────────────────────────────────────────────────
-// ★ 2026-09-06 S5 재료 입구 — GET /materials/quote(견적 · 노출 스위치 · 요금제 잠금) · POST /materials(사본 저장 + 텍스트 비었을 때만 판독)
+// ★ 2026-09-06 S5 재료 입구 — GET /materials/quote(노출 스위치) · POST /materials(사본 저장 + 텍스트 비었을 때만 판독)
+//   ★ 2026-10-25 원장 #104 — GET 은 스위치만 답한다(옛 v0 견적 · 요금제 잠금 · 상한은 읽는 화면이 지워져 뺐다 · 견적은 POST v1 한 곳)
 // ─────────────────────────────────────────────────────────────────────
 eventCampaignRouter.get('/materials/quote', async (req: any, res: Response) => {
   try {
     const companyId = req.user?.companyId;
     if (!companyId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
-    const imageCount = Math.max(0, Math.min(QUICK_CARD_UPLOAD_MAX, Number(req.query?.images) || 0));
-    const hasText = String(req.query?.has_text || '') === '1';
-    // ★ v3 reads = 판독 호출 수(카드 대표 이미지 묶음 1회 · 있으면 1 · 곱셈 0) · 없으면 옛 판정(텍스트 비고 이미지 있음)
-    const reads = req.query?.reads !== undefined ? Math.max(0, Math.min(1, Number(req.query.reads) || 0)) : undefined;
-    const quote = quoteQuickCampaign({ imageCount, hasText, reads });
-    // ★ 2026-09-14 T6 auto_build_enabled = 신규 ENV(AI_AUTO_BUILD_COMPANY_IDS) 노출 스위치 — 화면(카드띠·패널 링크·페이지 분기)이 묻는 값 · enabled(v0)와 별개
-    return res.json({ success: true, enabled: quickMaterialsEnabled(companyId), auto_build_enabled: aiAutoBuildEnabled(companyId), plan_locked: await quickPlanLocked(companyId), max_images: QUICK_MATERIALS_MAX_IMAGES, max_cards: QUICK_EVENT_CARDS_MAX, max_card_images: QUICK_EVENT_CARD_IMAGES, ...quote });
+    // ★ 2026-09-14 T6 auto_build_enabled = 신규 ENV(AI_AUTO_BUILD_COMPANY_IDS) 노출 스위치 — 화면(카드띠·패널 링크·페이지 분기)이 묻는 값
+    return res.json({ success: true, auto_build_enabled: aiAutoBuildEnabled(companyId) });
   } catch (err: any) {
     console.error('[event-campaigns materials/quote] 오류:', err?.message);
+    if (respondUserError(res, err)) return;   // ★ 2026-10-25 R10 — 사용자 조건 오류 = 그 상태 · 문장 그대로
     return res.status(500).json({ success: false, error: '견적을 계산하지 못했습니다.' });
   }
 });
@@ -120,6 +119,7 @@ eventCampaignRouter.post('/materials/read-url', async (req: any, res: Response) 
   } catch (err: any) {
     if (err instanceof PageReadError) return res.status(err.status).json({ success: false, error: err.message, code: err.code });
     console.error('[event-campaigns materials/read-url] 오류:', err?.message);
+    if (respondUserError(res, err)) return;   // ★ 2026-10-25 R10 — 사용자 조건 오류 = 그 상태 · 문장 그대로
     return res.status(500).json({ success: false, error: '페이지를 읽지 못했어요. 사진·글을 직접 넣어 주세요.' });
   } finally {
     releaseInflight(lockKey);
@@ -148,14 +148,16 @@ eventCampaignRouter.post('/materials/quote', async (req: any, res: Response) => 
     const mapped = aiAutoBuildErrorResponse(err);
     if (mapped) return res.status(mapped.status).json(mapped.body);
     console.error('[event-campaigns materials/quote v1] 오류:', err?.message);
+    if (respondUserError(res, err)) return;   // ★ 2026-10-25 R10 — 사용자 조건 오류 = 그 상태 · 문장 그대로
     return res.status(500).json({ success: false, error: '견적을 계산하지 못했습니다.' });
   }
 });
 
 // ★ v3 행사 카드 업로드(카드당 3장 × 3카드 = 9) — 같은 저장 경로 · 판독은 read 파라미터로만(read=0 = 업로드 전용 · 기본 1 = 현행)
+const CARD_UPLOAD_LIMITS = { fileSize: 5 * 1024 * 1024, files: QUICK_CARD_UPLOAD_MAX };
 const cardImageUpload = multer({
   storage: multer.memoryStorage(),
-  limits: { fileSize: 5 * 1024 * 1024, files: QUICK_CARD_UPLOAD_MAX },
+  limits: CARD_UPLOAD_LIMITS,
   fileFilter: (_req, file, cb) => {
     const mime = (file.mimetype || '').toLowerCase();
     if (['image/jpeg', 'image/png', 'image/webp'].includes(mime)) cb(null, true);
@@ -165,7 +167,7 @@ const cardImageUpload = multer({
 
 eventCampaignRouter.post('/materials', requirePlanFeature('mobile_dm'), (req: any, res: Response) => {
   cardImageUpload.array('images', QUICK_CARD_UPLOAD_MAX)(req, res, async (uploadErr: any) => {
-    if (uploadErr) return res.status(400).json({ success: false, error: uploadErr.message || '이미지 업로드 오류' });
+    if (uploadErr) return res.status(400).json({ success: false, error: uploadErrorText(uploadErr, CARD_UPLOAD_LIMITS) });   // ★ 2026-10-25 원장 #106
     try {
       const companyId = req.user?.companyId;
       if (!companyId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
@@ -188,6 +190,7 @@ eventCampaignRouter.post('/materials', requirePlanFeature('mobile_dm'), (req: an
     } catch (err: any) {
       if (err instanceof InsufficientCreditError) return res.status(402).json({ success: false, error: err.message, code: 'INSUFFICIENT_CREDIT' });
       if (err?.name === 'AiRateLimitExceeded') return res.status(429).json({ success: false, error: err.message });
+      if (respondUserError(res, err)) return;   // ★ 2026-10-25 이미지 없음 400 · 읽지 못함 422 · 원장 쓰기 실패 503
       console.error('[event-campaigns materials] 오류:', err?.message);
       return res.status(500).json({ success: false, error: '재료를 저장하지 못했습니다. 잠시 후 다시 시도해주세요.' });
     }
@@ -224,6 +227,7 @@ eventCampaignRouter.post('/drafts', async (req: any, res: Response) => {
   } catch (err: any) {
     if (handleDbMigrationError(err, res, 'event_campaign_drafts')) return;
     console.error('[event-campaigns POST /drafts] 오류:', err?.message);
+    if (respondUserError(res, err)) return;   // ★ 2026-10-25 R10 — 사용자 조건 오류 = 그 상태 · 문장 그대로
     return res.status(500).json({ success: false, error: publicErrorText(err, '초안 보관 실패') });
   }
 });
@@ -268,6 +272,7 @@ eventCampaignRouter.patch('/drafts/:id', async (req: any, res: Response) => {
   } catch (err: any) {
     if (handleDbMigrationError(err, res, 'event_campaign_drafts')) return;
     console.error('[event-campaigns PATCH /drafts] 오류:', err?.message);
+    if (respondUserError(res, err)) return;   // ★ 2026-10-25 R10 — 사용자 조건 오류 = 그 상태 · 문장 그대로
     return res.status(500).json({ success: false, error: publicErrorText(err, '초안 갱신 실패') });
   }
 });
@@ -287,13 +292,15 @@ eventCampaignRouter.get('/drafts', async (req: any, res: Response) => {
        FROM event_campaign_drafts
        WHERE company_id = $1::uuid AND status = 'active' AND updated_at > NOW() - INTERVAL '30 days'${ownerClause}
        ORDER BY updated_at DESC
-       LIMIT 50`,
+       LIMIT 51`,
       params,
     );
-    return res.json({ success: true, drafts: r.rows });
+    // ★ 2026-10-25 원장 #100 — 상한(50)에 걸렸으면 잘림을 싣는다(옛: 51번째부터 말없이 잘렸다)
+    return res.json({ success: true, drafts: r.rows.slice(0, 50), truncated: r.rows.length > 50 });
   } catch (err: any) {
     if (handleDbMigrationError(err, res, 'event_campaign_drafts')) return;
     console.error('[event-campaigns GET /drafts] 오류:', err?.message);
+    if (respondUserError(res, err)) return;   // ★ 2026-10-25 R10 — 사용자 조건 오류 = 그 상태 · 문장 그대로
     return res.status(500).json({ success: false, error: publicErrorText(err, '초안 목록 조회 실패') });
   }
 });
@@ -318,6 +325,7 @@ eventCampaignRouter.get('/drafts/:id', async (req: any, res: Response) => {
   } catch (err: any) {
     if (handleDbMigrationError(err, res, 'event_campaign_drafts')) return;
     console.error('[event-campaigns GET /drafts/:id] 오류:', err?.message);
+    if (respondUserError(res, err)) return;   // ★ 2026-10-25 R10 — 사용자 조건 오류 = 그 상태 · 문장 그대로
     return res.status(500).json({ success: false, error: publicErrorText(err, '초안 조회 실패') });
   }
 });
@@ -342,6 +350,7 @@ eventCampaignRouter.post('/drafts/:id/archive', async (req: any, res: Response) 
   } catch (err: any) {
     if (handleDbMigrationError(err, res, 'event_campaign_drafts')) return;
     console.error('[event-campaigns POST /drafts/:id/archive] 오류:', err?.message);
+    if (respondUserError(res, err)) return;   // ★ 2026-10-25 R10 — 사용자 조건 오류 = 그 상태 · 문장 그대로
     return res.status(500).json({ success: false, error: publicErrorText(err, '보관 종료 실패') });
   }
 });

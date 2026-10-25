@@ -6,6 +6,7 @@
  * ⛔ 단문 90바이트를 넘게 되는 고치기는 잠근다(판정은 호출부 · 발송 바이트 계산과 같은 함수).
  */
 import { useEffect, useRef } from 'react';
+import { creditText } from '../../constants/credit';
 import { Check, Sparkles, X } from 'lucide-react';
 import type { SpellIssue, SpellRow } from '../../utils/send-checks';
 
@@ -89,7 +90,7 @@ export default function DirectSpellModal({ open, rows, quotaText, onFix, onKeep,
         <div className="ds-dlg__foot">
           <div className="flex-1 min-w-0 flex flex-col items-start gap-1">
             <button type="button" className="ds-spell-ai" onClick={onAiRefine}>
-              <Sparkles size={13} strokeWidth={2} />문장까지 AI로 다듬기 · 1크레딧
+              <Sparkles size={13} strokeWidth={2} />문장까지 AI로 다듬기 · {creditText('refine-direct')}
             </button>
             <span className="ds-dlg__fine">{quotaText}</span>
           </div>

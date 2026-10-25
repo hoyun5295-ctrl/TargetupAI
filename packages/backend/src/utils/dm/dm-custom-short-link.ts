@@ -9,6 +9,7 @@
  * 테이블 = dm_custom_short_links (2026-07-10 신규 — DDL은 Harold 서버 실행, 미생성 시 라우트가 503 안내).
  */
 
+import { UserFacingError } from '../http-error';
 import { query } from '../../config/database';
 import { generateDmShortCode } from './dm-recipient-token';
 import { CUSTOM_LINK_DAILY_LIMIT } from './dm-custom-short-link-core';
@@ -53,7 +54,7 @@ async function issueUniqueCode(): Promise<string> {
     );
     if (dup.rows.length === 0) return code;
   }
-  throw new Error('단축 코드 발급 실패 (충돌 5회). 잠시 후 다시 시도해주세요.');
+  throw new UserFacingError(503, 'SHORT_CODE_RETRY', '짧은 주소를 만들지 못했어요. 잠시 뒤 다시 해 주세요.');
 }
 
 /** 지정 slug가 이미 쓰인 코드였다 — 라우트가 409로 옮긴다(크레딧 차감 전이라 과금 0). */
@@ -228,6 +229,14 @@ export async function listCustomShortLinks(companyId: string, ownerId: string | 
     [companyId, ownerId],
   );
   return r.rows.map(mapRow);
+}
+
+/**
+ * ★ 2026-10-25 방금 만든 링크를 거둔다 — 돈을 걷지 못해 건네지 않는 결과(성공 뒤 차감 한 규칙 · 원장 §8-2 D1 A).
+ *   발급 직후라 클릭 0 · 일일 상한 칸도 함께 돌려받는다(행을 지운다).
+ */
+export async function discardCustomShortLink(companyId: string, linkId: string): Promise<void> {
+  await query(`DELETE FROM dm_custom_short_links WHERE id = $1::uuid AND company_id = $2::uuid`, [linkId, companyId]);
 }
 
 /** 활성/비활성 토글 — 회사 격리. 반환 = 갱신 후 행(미존재 null). */

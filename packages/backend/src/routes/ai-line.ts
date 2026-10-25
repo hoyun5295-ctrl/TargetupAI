@@ -10,9 +10,8 @@ import { Router, Request, Response } from 'express';
 import { authenticate } from '../middlewares/auth';
 import { aiZonePlanBlocked } from '../utils/plan-guard';
 import { InsufficientCreditError } from '../utils/ai-credit';
-import { isValidAttemptToken } from '../utils/one-line-facts';
+import { isValidAttemptToken, isValidLineBenefit } from '../utils/one-line-facts';
 import { isValidLinePeriodEnd } from '../utils/one-line-steps';
-import { validateAnswer } from '../utils/content-interview';
 import { matchAlimtalkTemplate } from '../utils/alimtalk-ai-matcher';
 import { readAiLine, sanitizeLineTypes, readLineAnswers, type AiLineAnswer } from '../utils/ai-line';
 import {
@@ -21,6 +20,7 @@ import {
   type AiLineViewer,
 } from '../services/ai-line';
 import { startLineSpamTest, readLineSpamTest } from '../services/ai-line-spam';
+import { respondUserError } from '../utils/http-error';
 
 const router = Router();
 router.use(authenticate);
@@ -35,7 +35,7 @@ function viewerOf(req: Request): AiLineViewer | null {
 }
 
 /** 요금제 — 통과면 viewer, 아니면 응답을 보내고 null */
-async function gate(req: Request, res: Response): Promise<AiLineViewer | null> {
+async function lineGate(req: Request, res: Response): Promise<AiLineViewer | null> {
   const v = viewerOf(req);
   if (!v) { res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' }); return null; }
   // ★ 2026-10-24 요금제 = AI 존 서버 문 한 곳(뿌리 대장 R2)
@@ -59,7 +59,7 @@ function readFacts(raw: unknown): { benefit: string | null; periodEnd: string | 
   if (raw === undefined || raw === null) return { benefit: null, periodEnd: null };
   if (!isPlainObject(raw)) return 'invalid';
   const b = raw.benefit;
-  if (b !== undefined && b !== null && !validateAnswer('benefit', b).ok) return 'invalid';
+  if (b !== undefined && b !== null && !isValidLineBenefit(b)) return 'invalid';
   const pe = raw.period_end;
   if (pe !== undefined && pe !== null && !isValidLinePeriodEnd(pe, Date.now())) return 'invalid';
   const answers = readLineAnswers(raw.answers);
@@ -96,6 +96,8 @@ function fail(res: Response, err: any, where: string): Response {
   if (err instanceof AiLineError) {
     return res.status(err.status).json({ success: false, error: err.message, code: err.code });
   }
+  // ★ 2026-10-25 원장 쓰기 실패 = 결과 안 줌(503 · 성공 뒤 차감 한 규칙)
+  if (respondUserError(res, err)) return res;
   const msg = String(err?.message || '');
   console.error(`[ai-line ${where}] 오류:`, msg);
   return res.status(500).json({ success: false, error: '처리 중 문제가 생겼어요. 잠시 뒤 다시 시도해 주세요.' });
@@ -112,7 +114,7 @@ router.post('/read', async (req: Request, res: Response) => {
 // POST /intake — 대상 AI · 승인 발송과 같은 세기 · 1위 고객 · 칼럼 채움 · 기본 2(1명 이상)
 router.post('/intake', async (req: Request, res: Response) => {
   try {
-    const v = await gate(req, res);
+    const v = await lineGate(req, res);
     if (!v) return;
     const line = readLine(req.body?.line);
     if (!line) return res.status(400).json({ success: false, error: '한 줄을 5자 이상 적어 주세요.', code: 'LINE_INVALID' });
@@ -126,7 +128,7 @@ router.post('/intake', async (req: Request, res: Response) => {
 // POST /recount — 0크레딧 · 확인 판의 조건 켜기/끄기
 router.post('/recount', async (req: Request, res: Response) => {
   try {
-    const v = await gate(req, res);
+    const v = await lineGate(req, res);
     if (!v) return;
     const filters = isPlainObject(req.body?.filters) ? req.body.filters : {};
     const out = await runLineRecount(v, filters, req.body?.allCustomers === true);
@@ -139,7 +141,7 @@ router.post('/recount', async (req: Request, res: Response) => {
 // POST /retarget — 0크레딧 · 직접 타겟 선택 · 「전체 고객」 답 뒤(칩 · 1위 고객 · 칼럼까지)
 router.post('/retarget', async (req: Request, res: Response) => {
   try {
-    const v = await gate(req, res);
+    const v = await lineGate(req, res);
     if (!v) return;
     const filters = isPlainObject(req.body?.filters) ? req.body.filters : {};
     const out = await runLineRetarget(v, filters, req.body?.allCustomers === true);
@@ -152,7 +154,7 @@ router.post('/retarget', async (req: Request, res: Response) => {
 // POST /proceed — 직접입력만 · 알림톡 갈래 = 대상 확정 + 기본(아직이면)
 router.post('/proceed', async (req: Request, res: Response) => {
   try {
-    const v = await gate(req, res);
+    const v = await lineGate(req, res);
     if (!v) return;
     const line = readLine(req.body?.line);
     if (!line) return res.status(400).json({ success: false, error: '한 줄을 5자 이상 적어 주세요.', code: 'LINE_INVALID' });
@@ -167,7 +169,7 @@ router.post('/proceed', async (req: Request, res: Response) => {
 // POST /compose — 고른 종류 × 고른 칼럼 · 2 × 나온 종류(+ 기본 미납분)
 router.post('/compose', async (req: Request, res: Response) => {
   try {
-    const v = await gate(req, res);
+    const v = await lineGate(req, res);
     if (!v) return;
     const b = req.body || {};
     const line = readLine(b.line);
@@ -194,7 +196,7 @@ router.post('/compose', async (req: Request, res: Response) => {
 // POST /decorate — 고른 문안 1개에 칼럼을 더 넣는다 · 1(글이 바뀐 때만)
 router.post('/decorate', async (req: Request, res: Response) => {
   try {
-    const v = await gate(req, res);
+    const v = await lineGate(req, res);
     if (!v) return;
     const b = req.body || {};
     const body = typeof b.body === 'string' ? b.body.trim() : '';
@@ -214,7 +216,7 @@ router.post('/decorate', async (req: Request, res: Response) => {
 // POST /alimtalk-match — 알림톡 갈래 · 승인 템플릿 매칭(매칭 AI 는 묶음 = 추가 차감 0 · 이 한 줄의 기본을 낸 뒤에만)
 router.post('/alimtalk-match', async (req: Request, res: Response) => {
   try {
-    const v = await gate(req, res);
+    const v = await lineGate(req, res);
     if (!v) return;
     const line = readLine(req.body?.line);
     if (!line) return res.status(400).json({ success: false, error: '한 줄을 5자 이상 적어 주세요.', code: 'LINE_INVALID' });
@@ -236,7 +238,7 @@ router.post('/alimtalk-match', async (req: Request, res: Response) => {
       score: t.matchScore,
       reason: t.matchReason,
     }));
-    return res.json({ success: true, matched: m.matched, templates: list, mappings: m.variableMappings, suggestion: m.suggestion, charged, paid });
+    return res.json({ success: true, matched: m.matched, templates: list, mappings: m.variableMappings, suggestion: m.suggestion, ...(m.note ? { note: m.note } : {}), charged, paid });
   } catch (err: any) {
     return fail(res, err, 'alimtalk-match');
   }
@@ -245,7 +247,7 @@ router.post('/alimtalk-match', async (req: Request, res: Response) => {
 // POST /spam-test — 자동 스팸 검사(수동 검사와 같은 선불 경로 · 같은 글 24시간 재사용 · 사용자당 줄 1건)
 router.post('/spam-test', async (req: Request, res: Response) => {
   try {
-    const v = await gate(req, res);
+    const v = await lineGate(req, res);
     if (!v) return;
     const b = req.body || {};
     const body = typeof b.body === 'string' ? b.body.trim() : '';
@@ -269,7 +271,7 @@ router.post('/spam-test', async (req: Request, res: Response) => {
 // GET /spam-test/:id — 칩 상태(줄 대기 · 확인 중 · 통과 · 막힘 · 결과 없음)
 router.get('/spam-test/:id', async (req: Request, res: Response) => {
   try {
-    const v = await gate(req, res);
+    const v = await lineGate(req, res);
     if (!v) return;
     // 이 카드가 보낼 유형(SMS = 단문 · 그 밖 = 장문으로 검사)에 결속
     const msgType: 'SMS' | 'LMS' = String(req.query.type || '').toUpperCase() === 'SMS' ? 'SMS' : 'LMS';

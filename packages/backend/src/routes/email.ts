@@ -38,60 +38,17 @@ import { query } from '../config/database';
 import { isEmailCampaignCompleted, emailCompletionContextOf } from '../utils/email/email-completion';
 import { emailContentBlocker, emailSmtpBlocker } from '../utils/email/email-send-gate';
 import { completeEmailCampaignCore } from '../utils/email/email-complete-core';
-import {
-  createEmailCampaign,
-  listEmailCampaigns,
-  getEmailCampaign,
-  updateEmailCampaign,
-  deleteEmailCampaign,
-  sendEmailCampaign,
-  recordEmailEvent,
-  resolveCustomerRecipients,
-  resolveCustomerRecipientsByFilter,
-  previewCustomerRecipients,
-  listCustomerGrades,
-  scheduleCampaign,
-  getCampaignPerformanceStats,
-  getCompanyOpenHourDistribution,
-  getCampaignNonOpeners,
-  getCampaignResendRecipients,
-  countResendChildren,
-  createResendChildCampaign,
-  listEmailPersonalizationVars,
-  excludeOptedOutEmails,
-  filterEmailSuppressed,
-  // ★ 2026-09-16 편집 미리보기에 실제 법정 footer 표시(임은지 접수 — 수신거부 토글)
-  withEmailPreviewAdFooter,
-  type EmailRecipient,
-  type EmailTargetSpec,
-} from '../utils/email-channel';
+import { createEmailCampaign, listEmailCampaigns, emailCampaignTotals, deliveredEmailsOf, composeCampaignShell, resolveEmailSender, buildEmailAdFooter, EMAIL_PREVIEW_UNSUB_HREF, getEmailCampaign, updateEmailCampaign, deleteEmailCampaign, sendEmailCampaign, recordEmailEvent, resolveCustomerRecipients, resolveCustomerRecipientsByFilter, previewCustomerRecipients, listCustomerGrades, scheduleCampaign, getCampaignPerformanceStats, getCampaignNonOpeners, getCampaignResendRecipients, countResendChildren, createResendChildCampaign, listEmailPersonalizationVars, excludeOptedOutEmails, filterEmailSuppressed, withEmailPreviewAdFooter, type EmailRecipient, type EmailTargetSpec } from '../utils/email-channel';
 import {
   saveSmtpConfig,
   getSmtpConfigPublic,
   clearSmtpConfig,
   sendTestEmail,
   sendEmail,
-  isSmtpConfigured,
-} from '../utils/company-smtp-client';
-import {
-  verifyTrackingToken,
-  TRACKING_PIXEL_GIF,
-} from '../utils/email-tracking';
+  isSmtpConfigured, SmtpKeyMissingError } from '../utils/company-smtp-client';
+import { verifyTrackingToken, TRACKING_PIXEL_GIF, UNSUB_URL_MARKER } from '../utils/email-tracking';
 import { efficacyNote } from '../utils/copy-benefit-detector';
-import {
-  generateEmailSections,
-  refineEmail,
-  refineEmailSections,
-  analyzeSpamRisk,
-  runEmailCodeChecks,
-  buildPerformanceInsight,
-  buildEmailAccountInsight,
-  recommendSendTime,
-  binOpenHours,
-  SEND_TIME_MIN_SAMPLE,
-  EMAIL_SCENARIO_PRESETS,
-  type EmailScenarioKey,
-} from '../utils/email-ai';
+import { generateEmailSections, refineEmail, refineEmailSections, analyzeSpamRisk, runEmailCodeChecks, buildPerformanceInsight, buildEmailAccountInsight, binOpenHours, EMAIL_SCENARIO_PRESETS, type EmailScenarioKey } from '../utils/email-ai';
 // 비주얼 빌더: DM Section[] → 이메일 안전 HTML 렌더 + 회사 브랜드킷
 import { renderEmailSections, extractEmailText, EMAIL_FOOTER_SLOT } from '../utils/email/email-section-renderer';
 // ★ 2026-07-13 디자인 3.0 — 캠페인 단위 design(테마·아트디렉션·프리헤더) 입력 정규화(단일 지점)
@@ -103,9 +60,8 @@ import { getCompanyBrandKit, getCompanyBrandKitRaw } from '../utils/dm/dm-brand-
 import { normalizeEventText } from '../utils/event-brief';
 // ★ 2026-07-08 연동 몰 상품 자동 첨부 (이메일 상품 블록 항목명 → 몰 이름매칭 이미지·링크)
 import { attachMallImagesToProductCarousels } from '../utils/mall-product-match';
-import { industryLabel } from '../utils/industry-codes';
 import type { Section } from '../utils/dm/dm-section-registry';
-import { checkCredit, deductCreditSafe, InsufficientCreditError } from '../utils/ai-credit';
+import { checkCredit, InsufficientCreditError, settleCreditAfterSuccess } from '../utils/ai-credit';
 import { isValidAttemptToken, oneLineInflightKey, sanitizeLineProducts, lineProductsKey, sanitizeLineReads, applyLineReads } from '../utils/one-line-facts';   // ★ 2026-10-05 한줄로 시그니처 · ★1010 혜택 답 · 몰 상품 확정
 import { placeLineMallCards, linePriceNotes, linePinnedPrimary, lineEmailDesign, type LineMallCard } from '../utils/line-mall-cards';   // ★ 2026-10-10 한 줄 이메일 강화
 import { resolveIntegrationActor } from '../utils/integration-scope';
@@ -122,13 +78,13 @@ import { createSection } from '../utils/dm/dm-section-registry';
 import { randomUUID } from 'crypto';
 import { getCreditCost } from '../utils/ai-credit-calc';
 // ★ 2026-09-06 S6 재료 입구(이미지·행사 텍스트 → 아웃리치 브랜드 이메일 시안 경로)
-import { generateEmailFromMaterials, quickMaterialsEnabled, generateFromBuildMaterials, buildGenerateResponse } from '../utils/campaign-quick';
+import { generateFromBuildMaterials, buildGenerateResponse } from '../utils/campaign-quick';
 // ★ 2026-09-14 T4 AI 자동제작 v1(materials.version === 1) — 신규 ENV 게이트 · 회사 단위 in-flight 잠금 · 오류 status 매핑
 import { isBuildMaterialsV1, aiAutoBuildEnabled, aiAutoBuildErrorResponse, buildInflightKey } from '../utils/ai-auto-build-materials';
 import { tryAcquireInflight, releaseInflight, singleFlight } from '../utils/inflight-lock';
 import { handleDmImageUpload } from '../utils/dm/dm-image-upload';
 
-import { publicErrorText } from '../utils/http-error';
+import { publicErrorText, respondUserError } from '../utils/http-error';
 const router = Router();
 
 // ════════════════════════════════════════════════════════════════════
@@ -149,11 +105,10 @@ function handleDbMigrationError(err: any, res: Response, tableName: string): boo
 }
 
 function handleEncryptionKeyError(err: any, res: Response): boolean {
-  const msg = err?.message || '';
-  if (msg.includes('SMTP_ENCRYPTION_KEY 미설정')) {
+  if (err instanceof SmtpKeyMissingError) {   // ★ 2026-10-25 판정 = 오류 종류(옛: 문장 글자)
     res.status(503).json({
       success: false,
-      error: 'SMTP 암호화 키 미설정. 운영자에게 .env SMTP_ENCRYPTION_KEY 등록 요청 의무',
+      error: '메일 연결 정보를 지금 저장할 수 없어요. 고객센터에 알려 주세요.',
       code: 'SMTP_ENCRYPTION_KEY_MISSING',
     });
     return true;
@@ -223,7 +178,7 @@ function renderUnsubPage(mode: 'confirm' | 'done' | 'invalid' | 'error', token: 
 // ════════════════════════════════════════════════════════════════════
 
 router.post('/webhook', json({ limit: '16kb' }), (_req: Request, res: Response) => {
-  return res.status(410).json({ success: false, error: '지원이 종료된 endpoint입니다.' });
+  return res.status(410).json({ success: false, error: '더 이상 쓰지 않는 기능이에요. 화면을 새로 고쳐 주세요.' });
 });
 
 // ════════════════════════════════════════════════════════════════════
@@ -296,6 +251,7 @@ router.post('/u/:token', async (req: Request, res: Response) => {
     return res.status(200).send(renderUnsubPage('done', req.params.token, payload.e));
   } catch (e: any) {
     console.error('[Email /u POST] 오류:', e?.message);
+    if (respondUserError(res, e)) return;   // ★ 2026-10-25 R10 — 사용자 조건 오류 = 그 상태 · 문장 그대로
     return res.status(500).send(renderUnsubPage('error', req.params.token, payload.e));
   }
 });
@@ -330,6 +286,7 @@ async function ensureEmailAdmin(req: Request, res: Response, opts: { plan: boole
       cdpEnabled = await isCdpEnabledForPlan(companyId);
     } catch (err: any) {
       console.error('[email] 자격 확인 조회 실패:', err?.message || err);
+      if (respondUserError(res, err)) return null;   // ★ 2026-10-25 R10 — 사용자 조건 오류 = 그 상태 · 문장 그대로
       res.status(500).json({ success: false, error: '잠시 후 다시 시도해 주세요.' });
       return null;
     }
@@ -360,6 +317,7 @@ async function ensureEmailAccess(req: Request, res: Response, opts: { plan: bool
       cdpEnabled = await isCdpEnabledForPlan(companyId);
     } catch (err: any) {
       console.error('[email] 자격 확인 조회 실패:', err?.message || err);
+      if (respondUserError(res, err)) return null;   // ★ 2026-10-25 R10 — 사용자 조건 오류 = 그 상태 · 문장 그대로
       res.status(500).json({ success: false, error: '잠시 후 다시 시도해 주세요.' });
       return null;
     }
@@ -403,6 +361,7 @@ router.get('/status', async (req: Request, res: Response) => {
   } catch (err: any) {
     console.error('[Email /status] 오류:', err);
     if (handleDbMigrationError(err, res, 'companies')) return;
+    if (respondUserError(res, err)) return;   // ★ 2026-10-25 R10 — 사용자 조건 오류 = 그 상태 · 문장 그대로
     return res.status(500).json({ success: false, error: publicErrorText(err, '조회 실패') });
   }
 });
@@ -416,6 +375,7 @@ router.get('/smtp-config', async (req: Request, res: Response) => {
   } catch (err: any) {
     console.error('[Email /smtp-config GET] 오류:', err);
     if (handleDbMigrationError(err, res, 'companies')) return;
+    if (respondUserError(res, err)) return;   // ★ 2026-10-25 R10 — 사용자 조건 오류 = 그 상태 · 문장 그대로
     return res.status(500).json({ success: false, error: publicErrorText(err, '조회 실패') });
   }
 });
@@ -426,7 +386,7 @@ router.put('/smtp-config', async (req: Request, res: Response) => {
   try {
     const { host, port, user, password, secure, from_email, from_name } = req.body;
     if (!host || !port || !user || !password || !from_email) {
-      return res.status(400).json({ success: false, error: 'host / port / user / password / from_email 필수' });
+      return res.status(400).json({ success: false, error: '메일 서버 주소 · 포트 · 아이디 · 비밀번호 · 보내는 주소를 모두 넣어 주세요.' });
     }
     await saveSmtpConfig(auth.companyId, {
       host: String(host),
@@ -442,6 +402,7 @@ router.put('/smtp-config', async (req: Request, res: Response) => {
     console.error('[Email /smtp-config PUT] 오류:', err);
     if (handleDbMigrationError(err, res, 'companies')) return;
     if (handleEncryptionKeyError(err, res)) return;
+    if (respondUserError(res, err)) return;   // ★ 2026-10-25 R10 — 사용자 조건 오류 = 그 상태 · 문장 그대로
     return res.status(500).json({ success: false, error: publicErrorText(err, 'SMTP 설정 저장 실패') });
   }
 });
@@ -455,6 +416,7 @@ router.delete('/smtp-config', async (req: Request, res: Response) => {
   } catch (err: any) {
     console.error('[Email /smtp-config DELETE] 오류:', err);
     if (handleDbMigrationError(err, res, 'companies')) return;
+    if (respondUserError(res, err)) return;   // ★ 2026-10-25 R10 — 사용자 조건 오류 = 그 상태 · 문장 그대로
     return res.status(500).json({ success: false, error: publicErrorText(err, 'SMTP 설정 삭제 실패') });
   }
 });
@@ -465,7 +427,7 @@ router.post('/smtp-test', async (req: Request, res: Response) => {
   try {
     const { to_email } = req.body;
     if (!to_email) {
-      return res.status(400).json({ success: false, error: 'to_email 필수 (테스트 발송 수신 이메일)' });
+      return res.status(400).json({ success: false, error: '테스트 메일을 받을 주소를 넣어 주세요.' });
     }
     const result = await sendTestEmail(auth.companyId, String(to_email));
     return res.json({ success: true, result });
@@ -473,6 +435,7 @@ router.post('/smtp-test', async (req: Request, res: Response) => {
     console.error('[Email /smtp-test] 오류:', err);
     if (handleDbMigrationError(err, res, 'companies')) return;
     if (handleEncryptionKeyError(err, res)) return;
+    if (respondUserError(res, err)) return;   // ★ 2026-10-25 R10 — 사용자 조건 오류 = 그 상태 · 문장 그대로
     return res.status(500).json({ success: false, error: publicErrorText(err, '테스트 발송 실패') });
   }
 });
@@ -493,6 +456,7 @@ router.get('/personalization-vars', async (req: Request, res: Response) => {
     return res.json({ success: true, vars });
   } catch (err: any) {
     console.error('[Email personalization-vars] 오류:', err);
+    if (respondUserError(res, err)) return;   // ★ 2026-10-25 R10 — 사용자 조건 오류 = 그 상태 · 문장 그대로
     return res.status(500).json({ success: false, error: publicErrorText(err, '조회 실패') });
   }
 });
@@ -502,7 +466,14 @@ router.get('/campaigns', async (req: Request, res: Response) => {
     const companyId = req.user?.companyId;
     if (!companyId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
     const limit = Math.min(parseInt(String(req.query.limit || '50')) || 50, 200);
-    const campaigns = await listEmailCampaigns(companyId, limit, resolveOwnerScope(req));
+    // ★ 2026-10-25 원장 #86 — 다음 쪽(before = 만든 시각 원문 · before_id) · 첫 쪽에는 전체 지표를 함께 준다
+    const before = typeof req.query.before === 'string' ? req.query.before : '';
+    const beforeId = typeof req.query.before_id === 'string' ? req.query.before_id : '';
+    const cursor = before && /^[0-9a-f-]{36}$/i.test(beforeId) && /^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2}(\.\d+)?([+-]\d{2}(:?\d{2})?|Z)?$/.test(before) ? { before, beforeId } : null;
+    const owner = resolveOwnerScope(req);
+    const page = await listEmailCampaigns(companyId, limit, owner, cursor);
+    const campaigns = page.rows;
+    const totals = cursor ? null : await emailCampaignTotals(companyId, owner);
     // ★ 2026-07-02 완성 여부 플래그 — 프론트 발송/PC 미리보기 잠금 판단용 (신·구 멱등키 인정)
     try {
       // ★ 2026-09-27 S2 — 발송 게이트와 같은 판정(크레딧제 미적용 회사 = 전부 완성)
@@ -513,10 +484,11 @@ router.get('/campaigns', async (req: Request, res: Response) => {
     } catch (flagErr: any) {
       console.log('[Email campaigns GET] completed 플래그 계산 오류 — 플래그 없이 반환:', flagErr?.message);
     }
-    return res.json({ success: true, campaigns });
+    return res.json({ success: true, campaigns, hasMore: page.hasMore, next: page.next, ...(totals ? { totals } : {}) });
   } catch (err: any) {
     console.error('[Email /campaigns GET] 오류:', err);
     if (handleDbMigrationError(err, res, 'email_campaigns')) return;
+    if (respondUserError(res, err)) return;   // ★ 2026-10-25 R10 — 사용자 조건 오류 = 그 상태 · 문장 그대로
     return res.status(500).json({ success: false, error: publicErrorText(err, '조회 실패') });
   }
 });
@@ -531,6 +503,7 @@ router.get('/campaigns/:id', async (req: Request, res: Response) => {
   } catch (err: any) {
     console.error('[Email /campaigns/:id] 오류:', err);
     if (handleDbMigrationError(err, res, 'email_campaigns')) return;
+    if (respondUserError(res, err)) return;   // ★ 2026-10-25 R10 — 사용자 조건 오류 = 그 상태 · 문장 그대로
     return res.status(500).json({ success: false, error: publicErrorText(err, '조회 실패') });
   }
 });
@@ -555,6 +528,7 @@ router.post('/campaigns/:id/complete', async (req: Request, res: Response) => {
     if (err instanceof InsufficientCreditError) {
       return res.status(402).json({ success: false, error: err.message, code: 'INSUFFICIENT_CREDIT' });
     }
+    if (respondUserError(res, err)) return;
     if (handleDbMigrationError(err, res, 'email_campaigns')) return;
     return res.status(500).json({ success: false, error: publicErrorText(err, '완성 처리 실패') });
   }
@@ -566,7 +540,7 @@ router.post('/campaigns', async (req: Request, res: Response) => {
   try {
     const { name, subject, html_body, text_body, from_name, from_email, is_ad, scheduled_at, ai_generated, sections } = req.body;
     if (!name || !subject) {
-      return res.status(400).json({ success: false, error: 'name, subject는 필수입니다.' });
+      return res.status(400).json({ success: false, error: '캠페인 이름과 메일 제목을 넣어 주세요.' });
     }
     // 비주얼 빌더: sections 있으면 이메일 HTML 렌더 → html_body (없으면 클라이언트 html_body 직접 흐름 보존)
     // ★ 2026-07-13 디자인 3.0 — design(테마·아트디렉션·프리헤더) 정규화 후 렌더·저장 동승
@@ -581,7 +555,7 @@ router.post('/campaigns', async (req: Request, res: Response) => {
       finalSections = sections;
     }
     if (!finalHtml) {
-      return res.status(400).json({ success: false, error: 'html_body 또는 sections는 필수입니다.' });
+      return res.status(400).json({ success: false, error: '메일 내용이 비어 있어요. 블록을 하나 이상 넣어 주세요.' });
     }
     const campaign = await createEmailCampaign({
       companyId: auth.companyId,
@@ -602,6 +576,7 @@ router.post('/campaigns', async (req: Request, res: Response) => {
   } catch (err: any) {
     console.error('[Email /campaigns POST] 오류:', err);
     if (handleDbMigrationError(err, res, 'email_campaigns')) return;
+    if (respondUserError(res, err)) return;   // ★ 2026-10-25 R10 — 사용자 조건 오류 = 그 상태 · 문장 그대로
     return res.status(500).json({ success: false, error: publicErrorText(err, '캠페인 신설 실패') });
   }
 });
@@ -633,6 +608,7 @@ router.post('/campaigns/:id/clone', async (req: Request, res: Response) => {
   } catch (err: any) {
     console.error('[Email /campaigns/:id/clone] 오류:', err);
     if (handleDbMigrationError(err, res, 'email_campaigns')) return;
+    if (respondUserError(res, err)) return;   // ★ 2026-10-25 R10 — 사용자 조건 오류 = 그 상태 · 문장 그대로
     return res.status(500).json({ success: false, error: publicErrorText(err, '복제 실패') });
   }
 });
@@ -674,6 +650,7 @@ router.patch('/campaigns/:id', async (req: Request, res: Response) => {
   } catch (err: any) {
     console.error('[Email /campaigns PATCH] 오류:', err);
     if (handleDbMigrationError(err, res, 'email_campaigns')) return;
+    if (respondUserError(res, err)) return;   // ★ 2026-10-25 R10 — 사용자 조건 오류 = 그 상태 · 문장 그대로
     return res.status(500).json({ success: false, error: publicErrorText(err, '캠페인 수정 실패') });
   }
 });
@@ -688,6 +665,7 @@ router.delete('/campaigns/:id', async (req: Request, res: Response) => {
   } catch (err: any) {
     console.error('[Email /campaigns DELETE] 오류:', err);
     if (handleDbMigrationError(err, res, 'email_campaigns')) return;
+    if (respondUserError(res, err)) return;   // ★ 2026-10-25 R10 — 사용자 조건 오류 = 그 상태 · 문장 그대로
     return res.status(500).json({ success: false, error: publicErrorText(err, '캠페인 삭제 실패') });
   }
 });
@@ -748,7 +726,7 @@ router.post('/campaigns/:id/send', async (req: Request, res: Response) => {
       targetSpec = { type: 'filter', filter: target.filter };
       resolved = await resolveCustomerRecipientsByFilter(auth.companyId, target.filter, auth.ownerId);
     } else {
-      return res.status(400).json({ success: false, error: '발송 대상을 지정해주세요 (recipients 또는 target).' });
+      return res.status(400).json({ success: false, error: '받는 사람을 골라 주세요.' });
     }
     // ★ 2026-10-24 세 채널 구조체크 ① — 거부 신호 주소 제외(엔진과 같은 판정 · 화면에 보일 수와 실제 발송 수가 같게)
     const suppressed = await filterEmailSuppressed(auth.companyId, resolved);
@@ -771,9 +749,17 @@ router.post('/campaigns/:id/send', async (req: Request, res: Response) => {
     if (!(await isEmailCampaignCompleted(auth.companyId, campaign.id))) {
       return res.status(400).json({
         success: false,
-        error: '완성 저장(50크레딧) 후 발송할 수 있습니다. 편집기에서 [완성 저장]을 눌러주세요.',
+        error: `완성 저장(${getCreditCost('email-campaign-complete')}크레딧) 후 발송할 수 있습니다. 편집기에서 [완성 저장]을 눌러주세요.`,
         code: 'CAMPAIGN_NOT_COMPLETED',
       });
+    }
+
+    // ★ 2026-10-25 원장 #83 — 새로 나갈 수 = 이미 받은 분을 뺀 수(발송 엔진과 같은 함수) · 다 받았으면 보내지 않는다
+    const delivered = await deliveredEmailsOf(campaign.id).catch(() => new Set<string>());
+    const freshCount = resolved.filter((r: any) => !delivered.has(String(r.email || '').toLowerCase())).length;
+    const alreadyDelivered = resolved.length - freshCount;
+    if (resolved.length > 0 && freshCount === 0) {
+      return res.status(409).json({ success: false, error: '고른 분들이 이 메일을 이미 모두 받았어요. 새로 보낼 사람이 없어요.', code: 'ALL_ALREADY_SENT' });
     }
 
     // 예약 발송 — target_spec 저장 + status='scheduled'. sweeper가 도래 시 발송.
@@ -783,7 +769,7 @@ router.post('/campaigns/:id/send', async (req: Request, res: Response) => {
         return res.status(400).json({ success: false, error: '예약 시각은 현재보다 1분 이상 이후여야 합니다.' });
       }
       const updated = await scheduleCampaign(auth.companyId, campaign.id, targetSpec, when);
-      return res.json({ success: true, scheduled: true, total: resolved.length, excludedOptOut, scheduledAt: updated?.scheduledAt });
+      return res.json({ success: true, scheduled: true, total: freshCount, alreadyDelivered, excludedOptOut, scheduledAt: updated?.scheduledAt });
     }
 
     // 즉시 발송 — status='sending' 선점 후 응답, 실제 SMTP 루프는 백그라운드(타임아웃 차단)
@@ -810,16 +796,17 @@ router.post('/campaigns/:id/send', async (req: Request, res: Response) => {
           } catch { /* 상태 복구 실패는 sweeper 정체 복구가 후위 안전망 */ }
         });
     });
-    return res.json({ success: true, queued: true, total: resolved.length, excludedOptOut });
+    return res.json({ success: true, queued: true, total: freshCount, alreadyDelivered, excludedOptOut });
   } catch (err: any) {
     console.error('[Email /campaigns/:id/send] 오류:', err);
     if (err instanceof InsufficientCreditError) {
       return res.status(402).json({ success: false, error: err.message, code: 'INSUFFICIENT_CREDIT' });
     }
+    if (respondUserError(res, err)) return;
     if (handleDbMigrationError(err, res, 'email_campaigns')) return;
     if (handleEncryptionKeyError(err, res)) return;
-    const status = err?.message?.includes('0건') || err?.message?.includes('필수') || err?.message?.includes('미완료') ? 400 : 500;
-    return res.status(status).json({ success: false, error: publicErrorText(err, '발송 실패') });
+    // ★ 2026-10-25 R10 — 글자 짐작(0건 · 필수 · 미완료) 0 · 사용자 조건은 오류 종류가 위 respondUserError 로 나간다
+    return res.status(500).json({ success: false, error: publicErrorText(err, '발송 실패') });
   }
 });
 
@@ -839,11 +826,11 @@ router.post('/campaigns/:id/test-send', async (req: Request, res: Response) => {
     const campaign = await getEmailCampaign(auth.companyId, req.params.id, auth.ownerId);
     if (!campaign) return res.status(404).json({ success: false, error: '캠페인을 찾을 수 없습니다.' });
 
-    // 완성 저장(50크레딧) 후에만 — 실발송과 동일 게이트(방어). 미완성이면 안내.
+    // 완성 저장 후에만 — 실발송과 동일 게이트(방어). 미완성이면 안내.
     if (!(await isEmailCampaignCompleted(auth.companyId, campaign.id))) {
       return res.status(400).json({
         success: false,
-        error: '완성 저장(50크레딧) 후 테스트발송할 수 있습니다. 편집기에서 [완성 저장]을 눌러주세요.',
+        error: `완성 저장(${getCreditCost('email-campaign-complete')}크레딧) 후 테스트발송할 수 있습니다. 편집기에서 [완성 저장]을 눌러주세요.`,
         code: 'CAMPAIGN_NOT_COMPLETED',
       });
     }
@@ -861,10 +848,12 @@ router.post('/campaigns/:id/test-send', async (req: Request, res: Response) => {
       return res.status(400).json({ success: false, error: '유효한 이메일 주소를 1개 이상 입력해주세요 (최대 3개).' });
     }
 
-    // (광고)·수신거부 footer는 실발송 엔진에서만 부착 — 테스트발송은 저장값 그대로.
-    //   htmlBody의 광고 footer 슬롯 마커만 제거(HTML 주석이라 비노출이나 정리 차원). 추적 픽셀·통계 미반영.
-    const html = String(campaign.htmlBody || '').split(EMAIL_FOOTER_SLOT).join('');
-    const subject = String(campaign.subject || '');
+    // ★ 2026-10-25 원장 #88 — 테스트 메일 = 실발송과 같은 껍데기((광고) 제목 · 수신거부 꼬리 · composeCampaignShell).
+    //   테스트 받는 분은 고객이 아니라 수신거부 링크만 미리보기 주소로 둔다 · 추적 픽셀 · 통계 미반영(그대로).
+    const sender = await resolveEmailSender(auth.companyId, campaign);
+    const shell = composeCampaignShell(campaign, buildEmailAdFooter(sender.name, sender.email, EMAIL_PREVIEW_UNSUB_HREF));
+    const html = shell.html.split(UNSUB_URL_MARKER).join(EMAIL_PREVIEW_UNSUB_HREF);
+    const subject = shell.subject;
 
     let lastErr: any = null;
     const results: Array<{ email: string; ok: boolean }> = [];
@@ -892,6 +881,7 @@ router.post('/campaigns/:id/test-send', async (req: Request, res: Response) => {
     console.error('[Email /campaigns/:id/test-send] 오류:', err);
     if (handleDbMigrationError(err, res, 'email_campaigns')) return;
     if (handleEncryptionKeyError(err, res)) return;
+    if (respondUserError(res, err)) return;   // ★ 2026-10-25 R10 — 사용자 조건 오류 = 그 상태 · 문장 그대로
     return res.status(500).json({ success: false, error: publicErrorText(err, '테스트발송 실패') });
   }
 });
@@ -910,7 +900,7 @@ router.get('/campaigns/:id/export-html', async (req: Request, res: Response) => 
     if (!(await isEmailCampaignCompleted(auth.companyId, campaign.id))) {
       return res.status(400).json({
         success: false,
-        error: '완성 저장(50크레딧) 후 HTML로 저장할 수 있습니다. 편집기에서 [완성 저장]을 눌러주세요.',
+        error: `완성 저장(${getCreditCost('email-campaign-complete')}크레딧) 후 HTML로 저장할 수 있습니다. 편집기에서 [완성 저장]을 눌러주세요.`,
         code: 'CAMPAIGN_NOT_COMPLETED',
       });
     }
@@ -931,6 +921,7 @@ router.get('/campaigns/:id/export-html', async (req: Request, res: Response) => 
   } catch (err: any) {
     console.error('[Email /campaigns/:id/export-html] 오류:', err);
     if (handleDbMigrationError(err, res, 'email_campaigns')) return;
+    if (respondUserError(res, err)) return;   // ★ 2026-10-25 R10 — 사용자 조건 오류 = 그 상태 · 문장 그대로
     return res.status(500).json({ success: false, error: publicErrorText(err, 'HTML 내보내기 실패') });
   }
 });
@@ -959,6 +950,7 @@ router.post('/campaigns/:id/cancel-schedule', async (req: Request, res: Response
   } catch (err: any) {
     console.error('[Email /campaigns/:id/cancel-schedule] 오류:', err);
     if (handleDbMigrationError(err, res, 'email_campaigns')) return;
+    if (respondUserError(res, err)) return;   // ★ 2026-10-25 R10 — 사용자 조건 오류 = 그 상태 · 문장 그대로
     return res.status(500).json({ success: false, error: publicErrorText(err, '예약 취소 실패') });
   }
 });
@@ -1061,6 +1053,7 @@ router.get('/campaigns/:id/events', async (req: Request, res: Response) => {
   } catch (err: any) {
     console.error('[Email /campaigns/:id/events] 오류:', err);
     if (handleDbMigrationError(err, res, 'email_events')) return;
+    if (respondUserError(res, err)) return;   // ★ 2026-10-25 R10 — 사용자 조건 오류 = 그 상태 · 문장 그대로
     return res.status(500).json({ success: false, error: publicErrorText(err, '이력 조회 실패') });
   }
 });
@@ -1077,6 +1070,7 @@ router.get('/recipients/grades', async (req: Request, res: Response) => {
     return res.json({ success: true, grades });
   } catch (err: any) {
     console.error('[Email /recipients/grades] 오류:', err);
+    if (respondUserError(res, err)) return;   // ★ 2026-10-25 R10 — 사용자 조건 오류 = 그 상태 · 문장 그대로
     return res.status(500).json({ success: false, error: publicErrorText(err, '등급 조회 실패') });
   }
 });
@@ -1090,19 +1084,15 @@ router.post('/recipients/preview', async (req: Request, res: Response) => {
     return res.json({ success: true, ...preview });
   } catch (err: any) {
     console.error('[Email /recipients/preview] 오류:', err);
+    if (respondUserError(res, err)) return;   // ★ 2026-10-25 R10 — 사용자 조건 오류 = 그 상태 · 문장 그대로
     return res.status(500).json({ success: false, error: publicErrorText(err, '대상 미리보기 실패') });
   }
 });
 
 // ════════════════════════════════════════════════════════════════════
 // AI — 원샷 생성(3) / 다듬기(1) / 발송 전 진단(1) / 발송 후 성과(5) / 발송 시간(5)
-//   차감 = checkCredit → 작업 성공 → deductCreditSafe (실패 시 차감 0). 내부 callAIWithFallback은 creditCost:0.
+//   차감 = checkCredit → 작업 성공 → settleCreditAfterSuccess(실패 시 차감 0 · ★1025 동시 소진 402 · 원장 실패 503 = 결과 안 줌). 내부 callAIWithFallback은 creditCost:0.
 // ════════════════════════════════════════════════════════════════════
-
-router.get('/ai/scenarios', async (_req: Request, res: Response) => {
-  const scenarios = Object.entries(EMAIL_SCENARIO_PRESETS).map(([key, v]) => ({ key, label: v.label }));
-  return res.json({ success: true, scenarios });
-});
 
 // 비주얼 빌더 — AI가 이메일 블록 Section[]을 생성(이미지·혜택은 빈 자리). 크레딧 3.
 // ★ 2026-10-10 한 줄 묻기(설계서 docs/2026-10-10-oneline-ask-design.md §3-2) — 이메일 한 줄 질문의 답(AI 0 · 차감 0). 문 = ensureEmailAccess.
@@ -1117,6 +1107,7 @@ router.post('/one-line/ask', async (req: Request, res: Response) => {
     return res.json({ success: true, answer: await buildContentAsk(auth.companyId, auth.userId, 'email', auth.ownerId) });
   } catch (err: any) {
     console.error('[Email one-line ask] 오류:', err);
+    if (respondUserError(res, err)) return;   // ★ 2026-10-25 R10 — 사용자 조건 오류 = 그 상태 · 문장 그대로
     return res.status(500).json({ success: false, error: '답을 준비하지 못했어요. 잠시 뒤 다시 물어봐 주세요.' });
   }
 });
@@ -1142,6 +1133,7 @@ router.post('/ai/generate-sections', singleFlight('email-generate', async (req: 
       } catch (err: any) {
         const mapped = aiAutoBuildErrorResponse(err);
         if (mapped) return res.status(mapped.status).json(mapped.body);
+        if (respondUserError(res, err)) return;   // ★ 2026-10-25 원장 쓰기 실패 = 503(성공 뒤 차감 한 규칙)
         if (err instanceof InsufficientCreditError) return res.status(402).json({ success: false, error: err.message, code: 'INSUFFICIENT_CREDIT' });
         if (handleDbMigrationError(err, res, 'email_campaigns')) return;
         console.error('[Email /ai/generate-sections build-v1] 오류:', err?.message);
@@ -1149,19 +1141,8 @@ router.post('/ai/generate-sections', singleFlight('email-generate', async (req: 
       } finally { releaseInflight(lockKey); }
     }
 
-    // ★ 2026-09-06 S6 재료 입구 — materials 가 오면 아웃리치 브랜드 이메일 시안 경로(이메일 독립 계약 · EMAIL 룩)로 조립한다. 재료가 없으면 아래 기존 경로 그대로(무후퇴).
-    //   응답 형태는 편집기가 읽는 그대로(sections · subjects · preheader · name) + materials 계측. 몰 상품 자동 첨부는 이 분기에서 부르지 않는다.
-    if (req.body?.materials && typeof req.body.materials === 'object') {
-      if (!quickMaterialsEnabled(auth.companyId)) return res.status(403).json({ success: false, error: '이 기능은 아직 열리지 않았습니다.' });
-      try {
-        const r = await generateEmailFromMaterials({ companyId: auth.companyId, userId: auth.userId, materials: req.body.materials, industry: typeof req.body?.industry === 'string' ? req.body.industry : null });
-        return res.json({ success: true, data: { sections: r.sections, subjects: [r.subject].filter(Boolean), preheader: r.preheader, name: r.name, materials: r.materialsMeta, benefitStripped: r.benefitStripped, look: r.look } });
-      } catch (err: any) {
-        if (err instanceof InsufficientCreditError) return res.status(402).json({ success: false, error: err.message, code: 'INSUFFICIENT_CREDIT' });
-        console.error('[Email /ai/generate-sections materials] 오류:', err?.message);
-        return res.status(500).json({ success: false, error: '재료로 이메일을 만들지 못했습니다. 잠시 후 다시 시도해주세요.' });
-      }
-    }
+    // ★ 2026-10-25 원장 #104 — 재료로 만들기 = v1 한 길. 옛 v0 갈래(영업용 이메일 시안 · 차감 멱등키 0)는 지웠다 · 열린 옛 화면 = 400
+    if (req.body?.materials) return res.status(400).json({ success: false, error: '화면을 새로 고친 뒤 다시 만들어 주세요.', code: 'MATERIALS_INVALID' });
     if (!prompt && !scenario && !eventText) {
       return res.status(400).json({ success: false, error: '요청 내용 또는 시나리오를 입력해주세요.' });
     }
@@ -1319,7 +1300,7 @@ router.post('/ai/generate-sections', singleFlight('email-generate', async (req: 
     const cost = getCreditCost('email-ai-generate'); // 3
     await checkCredit(auth.companyId, cost);
     const result = await generateEmailSections({ companyId: auth.companyId, userId: auth.userId, prompt: genPrompt, scenario, isAd, eventText });
-    await deductCreditSafe({ companyId: auth.companyId, cost, source: 'email-ai-generate', createdBy: auth.userId });
+    await settleCreditAfterSuccess({ companyId: auth.companyId, cost, source: 'email-ai-generate', createdBy: auth.userId, idempotencyKey: `email-ai-generate:${randomUUID()}` });
     // ★ 2026-07-08 연동 몰 상품 자동 첨부 — 상품 슬라이드 항목명 이름매칭 → 이미지·링크·정가·할인가(빈 값만, 실패 skip). 발송 코어 무관(생성 결과 후처리).
     try { await attachMallImagesToProductCarousels(auth.companyId, (result as any)?.sections, await resolveIntegrationActor(req.user)); } catch { /* best-effort */ }
     // ★ 2026-10-24 ② 결과 안내(서버 문장 · 근거 없는 효능을 뺀 수)
@@ -1336,6 +1317,7 @@ router.post('/ai/generate-sections', singleFlight('email-generate', async (req: 
     if (err instanceof InsufficientCreditError) {
       return res.status(402).json({ success: false, error: err.message, code: 'INSUFFICIENT_CREDIT' });
     }
+    if (respondUserError(res, err)) return;
     return res.status(500).json({ success: false, error: publicErrorText(err, 'AI 비주얼 생성 실패') });
   }
 }));
@@ -1373,6 +1355,7 @@ router.post('/render-preview', async (req: Request, res: Response) => {
     return res.json({ success: true, html: previewHtml });
   } catch (err: any) {
     console.error('[Email /render-preview] 오류:', err);
+    if (respondUserError(res, err)) return;   // ★ 2026-10-25 R10 — 사용자 조건 오류 = 그 상태 · 문장 그대로
     return res.status(500).json({ success: false, error: publicErrorText(err, '미리보기 렌더 실패') });
   }
 });
@@ -1386,21 +1369,8 @@ router.get('/preview-customers', async (req: Request, res: Response) => {
     return res.json({ success: true, customers });
   } catch (err: any) {
     console.error('[Email /preview-customers] 오류:', err);
+    if (respondUserError(res, err)) return;   // ★ 2026-10-25 R10 — 사용자 조건 오류 = 그 상태 · 문장 그대로
     return res.status(500).json({ success: false, error: publicErrorText(err, '샘플 고객 조회 실패') });
-  }
-});
-
-// 템플릿 추천용 회사 업종 신호(companies.industry_code — 기존 컬럼). 미설정/실패 시 null → 갤러리는 전체만 노출(추측 추천 0).
-router.get('/brand-signal', async (req: Request, res: Response) => {
-  const auth = await ensureEmailAccess(req, res);
-  if (!auth) return;
-  try {
-    const r = await query('SELECT industry_code FROM companies WHERE id = $1', [auth.companyId]);
-    const code = r.rows[0]?.industry_code || null;
-    return res.json({ success: true, industry_code: code, industry_label: code ? industryLabel(code) : null });
-  } catch (err: any) {
-    console.error('[Email /brand-signal] 오류:', err);
-    return res.json({ success: true, industry_code: null, industry_label: null });
   }
 });
 
@@ -1495,6 +1465,7 @@ router.get('/analytics', async (req: Request, res: Response) => {
   } catch (err: any) {
     console.error('[Email /analytics] 오류:', err);
     if (handleDbMigrationError(err, res, 'email_campaigns')) return;
+    if (respondUserError(res, err)) return;   // ★ 2026-10-25 R10 — 사용자 조건 오류 = 그 상태 · 문장 그대로
     return res.status(500).json({ success: false, error: publicErrorText(err, '분석 조회 실패') });
   }
 });
@@ -1559,13 +1530,14 @@ router.post('/ai/account-insight', async (req: Request, res: Response) => {
         worst: ranked.length ? ranked[ranked.length - 1] : null,
       },
     });
-    await deductCreditSafe({ companyId: auth.companyId, cost, source: 'email-performance-insight', createdBy: auth.userId });
+    await settleCreditAfterSuccess({ companyId: auth.companyId, cost, source: 'email-performance-insight', createdBy: auth.userId, idempotencyKey: `email-performance-insight:${randomUUID()}` });
     return res.json({ success: true, insight });
   } catch (err: any) {
     console.error('[Email /ai/account-insight] 오류:', err);
     if (err instanceof InsufficientCreditError) {
       return res.status(402).json({ success: false, error: err.message, code: 'INSUFFICIENT_CREDIT' });
     }
+    if (respondUserError(res, err)) return;
     if (handleDbMigrationError(err, res, 'email_campaigns')) return;
     return res.status(500).json({ success: false, error: publicErrorText(err, 'AI 진단 실패') });
   }
@@ -1579,18 +1551,23 @@ router.post('/ai/refine', async (req: Request, res: Response) => {
     const htmlBody = String(req.body?.html_body || '').trim();
     const instruction = String(req.body?.instruction || '').trim();
     if (!subject || !htmlBody || !instruction) {
-      return res.status(400).json({ success: false, error: 'subject, html_body, instruction은 필수입니다.' });
+      return res.status(400).json({ success: false, error: '제목 · 내용 · 다듬을 방향을 모두 넣어 주세요.' });
     }
     const cost = getCreditCost('email-refine'); // 1
     await checkCredit(auth.companyId, cost);
     const result = await refineEmail({ companyId: auth.companyId, userId: auth.userId, subject, htmlBody, instruction });
-    await deductCreditSafe({ companyId: auth.companyId, cost, source: 'email-refine', createdBy: auth.userId });
-    return res.json({ success: true, data: result });
+    // ★ 2026-10-25 #87 — 블록 다듬기와 같은 규칙: 제목 · 본문이 실제로 바뀐 때만 1크레딧(옛: 바뀐 것이 없어도 걷었다)
+    const changed = result.subject !== subject || result.htmlBody !== htmlBody;
+    if (changed) {
+      await settleCreditAfterSuccess({ companyId: auth.companyId, cost, source: 'email-refine', createdBy: auth.userId, idempotencyKey: `email-refine:${randomUUID()}` });
+    }
+    return res.json({ success: true, data: result, changed });
   } catch (err: any) {
     console.error('[Email /ai/refine] 오류:', err);
     if (err instanceof InsufficientCreditError) {
       return res.status(402).json({ success: false, error: err.message, code: 'INSUFFICIENT_CREDIT' });
     }
+    if (respondUserError(res, err)) return;
     return res.status(500).json({ success: false, error: publicErrorText(err, 'AI 다듬기 실패') });
   }
 });
@@ -1609,7 +1586,7 @@ router.post('/ai/refine-sections', async (req: Request, res: Response) => {
     await checkCredit(auth.companyId, cost);
     const result = await refineEmailSections({ companyId: auth.companyId, userId: auth.userId, sections, instruction });
     if (result.changed) {
-      await deductCreditSafe({ companyId: auth.companyId, cost, source: 'email-refine', createdBy: auth.userId });
+      await settleCreditAfterSuccess({ companyId: auth.companyId, cost, source: 'email-refine', createdBy: auth.userId, idempotencyKey: `email-refine:${randomUUID()}` });
     }
     // ★ 2026-10-24 ② 원래 글로 둔 조각 수 = 서버 문장(화면은 그대로 그린다)
     const note = efficacyNote('rewrite', result.rejected);
@@ -1619,6 +1596,7 @@ router.post('/ai/refine-sections', async (req: Request, res: Response) => {
     if (err instanceof InsufficientCreditError) {
       return res.status(402).json({ success: false, error: err.message, code: 'INSUFFICIENT_CREDIT' });
     }
+    if (respondUserError(res, err)) return;
     return res.status(500).json({ success: false, error: publicErrorText(err, 'AI 개선 실패') });
   }
 });
@@ -1645,13 +1623,14 @@ router.post('/ai/precheck', async (req: Request, res: Response) => {
       companyId: auth.companyId, userId: auth.userId,
       subject: campaign.subject, htmlBody: campaign.htmlBody, isAd: campaign.isAd,
     });
-    await deductCreditSafe({ companyId: auth.companyId, cost, source: 'email-precheck', createdBy: auth.userId });
+    await settleCreditAfterSuccess({ companyId: auth.companyId, cost, source: 'email-precheck', createdBy: auth.userId, idempotencyKey: `email-precheck:${randomUUID()}` });
     return res.json({ success: true, codeChecks, spamRisk });
   } catch (err: any) {
     console.error('[Email /ai/precheck] 오류:', err);
     if (err instanceof InsufficientCreditError) {
       return res.status(402).json({ success: false, error: err.message, code: 'INSUFFICIENT_CREDIT' });
     }
+    if (respondUserError(res, err)) return;
     if (handleDbMigrationError(err, res, 'email_campaigns')) return;
     return res.status(500).json({ success: false, error: publicErrorText(err, '발송 전 진단 실패') });
   }
@@ -1685,46 +1664,16 @@ router.post('/ai/insight', async (req: Request, res: Response) => {
         topOpenHours: binOpenHours(stats.topOpenHours).top,
       },
     });
-    await deductCreditSafe({ companyId: auth.companyId, cost, source: 'email-performance-insight', createdBy: auth.userId });
+    await settleCreditAfterSuccess({ companyId: auth.companyId, cost, source: 'email-performance-insight', createdBy: auth.userId, idempotencyKey: `email-performance-insight:${randomUUID()}` });
     return res.json({ success: true, stats, insight });
   } catch (err: any) {
     console.error('[Email /ai/insight] 오류:', err);
     if (err instanceof InsufficientCreditError) {
       return res.status(402).json({ success: false, error: err.message, code: 'INSUFFICIENT_CREDIT' });
     }
+    if (respondUserError(res, err)) return;
     if (handleDbMigrationError(err, res, 'email_campaigns')) return;
     return res.status(500).json({ success: false, error: publicErrorText(err, '성과 진단 실패') });
-  }
-});
-
-router.post('/ai/send-time', async (req: Request, res: Response) => {
-  // 회사 전체 발송 시각 집계 = 관리자 조회 영역
-  const auth = await ensureEmailAdmin(req, res);
-  if (!auth) return;
-  try {
-    const dist = await getCompanyOpenHourDistribution(auth.companyId);
-    const binned = binOpenHours(dist);
-    // 표본 부족 = AI 호출 생략 + 차감 0 (임의 상수 금지 — 실데이터만)
-    if (binned.total < SEND_TIME_MIN_SAMPLE) {
-      return res.json({
-        success: true,
-        insufficientData: true,
-        sampleSize: binned.total,
-        minSample: SEND_TIME_MIN_SAMPLE,
-        message: `오픈 데이터가 ${binned.total}건으로 부족합니다 (최소 ${SEND_TIME_MIN_SAMPLE}건). 발송이 쌓이면 추천이 가능합니다.`,
-      });
-    }
-    const cost = getCreditCost('email-send-time-recommend'); // 5
-    await checkCredit(auth.companyId, cost);
-    const rec = await recommendSendTime({ companyId: auth.companyId, userId: auth.userId, total: binned.total, top: binned.top });
-    await deductCreditSafe({ companyId: auth.companyId, cost, source: 'email-send-time-recommend', createdBy: auth.userId });
-    return res.json({ success: true, insufficientData: false, sampleSize: binned.total, top: binned.top, ...rec });
-  } catch (err: any) {
-    console.error('[Email /ai/send-time] 오류:', err);
-    if (err instanceof InsufficientCreditError) {
-      return res.status(402).json({ success: false, error: err.message, code: 'INSUFFICIENT_CREDIT' });
-    }
-    return res.status(500).json({ success: false, error: publicErrorText(err, '발송 시간 추천 실패') });
   }
 });
 
@@ -1761,6 +1710,7 @@ router.get('/campaigns/:id/non-openers', async (req: Request, res: Response) => 
   } catch (err: any) {
     console.error('[Email /campaigns/:id/non-openers] 오류:', err);
     if (handleDbMigrationError(err, res, 'email_campaigns')) return;
+    if (respondUserError(res, err)) return;   // ★ 2026-10-25 R10 — 사용자 조건 오류 = 그 상태 · 문장 그대로
     return res.status(500).json({ success: false, error: publicErrorText(err, '미오픈자 조회 실패') });
   }
 });
@@ -1829,6 +1779,7 @@ router.post('/campaigns/:id/resend-non-openers', async (req: Request, res: Respo
     console.error('[Email /campaigns/:id/resend-non-openers] 오류:', err);
     if (handleDbMigrationError(err, res, 'email_campaigns')) return;
     if (handleEncryptionKeyError(err, res)) return;
+    if (respondUserError(res, err)) return;   // ★ 2026-10-25 R10 — 사용자 조건 오류 = 그 상태 · 문장 그대로
     return res.status(500).json({ success: false, error: publicErrorText(err, '재발송 실패') });
   }
 });

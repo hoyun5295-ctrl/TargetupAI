@@ -20,6 +20,7 @@
  *   /orders/preview 실측으로 구조 확인 후 CDP 매핑(identify/syncOrder 연결)을 후속 작업으로 붙인다.
  */
 
+import { UserFacingError } from './http-error';
 import { query } from '../config/database';
 import { TIMEOUTS } from '../config/defaults';
 // ★ 2026-09-26 한줄로 V2 R1-31 — 토큰 요청 실패 판정 CT(제공자 거절일 때만 연동 만료)
@@ -525,7 +526,7 @@ export const naverSmartStoreAdapter: IProviderAdapter = {
   async refreshToken(integration: ProviderIntegration) {
     // refresh_token 없음 — 저장 자격(meta) → env 순으로 재발급.
     const creds = (await getNaverCommerceCredentials(integration.companyId, integration.mallId)) ?? envNaverCreds();
-    if (!creds) throw new Error('네이버 커머스 자격(client_id/secret)이 없습니다. 연동 화면에서 다시 연결해주세요.');
+    if (!creds) throw new UserFacingError(409, 'NAVER_RECONNECT', '네이버 스마트스토어 연결 정보가 없어요. 연동 화면에서 다시 연결해 주세요.');
     const tokenRes = await issueNaverCommerceToken(creds);
     return toProviderTokenResponse(tokenRes);
   },

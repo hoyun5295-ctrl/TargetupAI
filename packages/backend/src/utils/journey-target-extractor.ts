@@ -2,7 +2,7 @@
  * Journey Target Extractor — 여정 trigger 조건으로 후보 customer_id 추출 (공유 컨트롤타워)
  *
  * 목적
- *   발송(journey-trigger-watcher)과 미리보기(ai.ts sample-customer / preview-samples)가
+ *   발송(journey-trigger-watcher)과 미리보기(ai.ts sample-customer)가
  *   동일 기준으로 고객을 추출하도록 단일 진입점으로 둔다.
  *
  * 동작 보존
@@ -844,82 +844,6 @@ export async function selectCartAbandonProperties(
 }
 
 // ════════════════════════════════════════════════════════════════════
-// 미리보기 샘플 빌더 — 여정 trigger 기준 N명 (label + 한국어키 + 영문키)
-//   preview-samples(저장 후 journeyId) + preview-target-samples(review 단계 trigger) 공통 사용.
-// ════════════════════════════════════════════════════════════════════
-
-export interface JourneyPreviewSample {
-  label: string;
-  customerId: string;
-  sampleCustomer: Record<string, any>;
-  sampleCustomerFields: Record<string, any>;
-  modelVersion: string | null;
-}
-
-export async function buildJourneyPreviewSamples(
-  companyId: string,
-  triggerEvent: string,
-  triggerFilters: Record<string, any>,
-  limit: number,
-  journeyId?: string,
-  scopeSql = '',   // ★ 2026-09-27 S5-04 — 미리보기도 발송과 같은 범위
-  consent?: JourneyConsent,   // ★ 2026-10-02 수신동의 조각(mall-consent journeyOwnerConsent · 없으면 고객 행)
-): Promise<JourneyPreviewSample[]> {
-  const ids = await selectJourneyTargetCustomerIds(companyId, triggerEvent, triggerFilters, limit, journeyId, undefined, scopeSql, consent);
-  return buildPreviewSamplesForIds(companyId, ids);
-}
-
-/** 추출된 고객 id(추출 순서)로 미리보기 표본을 만든다 — 표본 추출과 인원 추출을 한 번의 추출로 나눠 쓰는 자리 공용. */
-async function buildPreviewSamplesForIds(companyId: string, ids: string[]): Promise<JourneyPreviewSample[]> {
-  if (ids.length === 0) return [];
-
-  // 추출 순서(trigger ORDER BY — 신규가입=created_at DESC 등) 유지 + 예측 점수 LEFT JOIN
-  const r = await query(
-    `SELECT c.*, p.click_score, p.churn_risk, p.purchase_likelihood, p.model_version
-     FROM customers c
-     LEFT JOIN cdp_customer_predictions p ON p.customer_id = c.id
-     WHERE c.company_id = $1::uuid AND c.id = ANY($2::uuid[])
-     ORDER BY array_position($2::uuid[], c.id)`,
-    [companyId, ids],
-  );
-
-  return r.rows.map((row: any, i: number): JourneyPreviewSample => ({
-    label: row.name || `대상 ${i + 1}`,
-    customerId: row.id,
-    sampleCustomer: {
-      고객명: row.name || '',
-      이름: row.name || '',
-      등급: row.grade || '',
-      지역: row.region || '',
-      전화번호: row.phone || '',
-      포인트: row.points != null ? Number(row.points).toLocaleString() : '',
-      최근구매일: row.recent_purchase_date ? new Date(row.recent_purchase_date).toLocaleDateString('ko-KR') : '',
-      총구매액: row.total_purchase_amount != null ? Number(row.total_purchase_amount).toLocaleString() : '',
-      누적구매횟수: row.purchase_count != null ? String(row.purchase_count) : '',
-    },
-    sampleCustomerFields: {
-      name: row.name || null,
-      phone: row.phone || null,
-      grade: row.grade || null,
-      region: row.region || null,
-      age: row.age != null ? Number(row.age) : null,
-      gender: row.gender || null,
-      purchase_count: row.purchase_count != null ? Number(row.purchase_count) : 0,
-      total_purchase_amount: row.total_purchase_amount != null ? Number(row.total_purchase_amount) : 0,
-      recent_purchase_amount: row.recent_purchase_amount != null ? Number(row.recent_purchase_amount) : 0,
-      recent_purchase_date: row.recent_purchase_date || null,
-      birth_date: row.birth_date || null,
-      points: row.points != null ? Number(row.points) : 0,
-      email: row.email || null,
-      click_score: row.click_score != null ? Number(row.click_score) : 0.5,
-      churn_risk: row.churn_risk != null ? Number(row.churn_risk) : 0.5,
-      purchase_likelihood: row.purchase_likelihood != null ? Number(row.purchase_likelihood) : 0.5,
-    },
-    modelVersion: row.model_version || null,
-  }));
-}
-
-// ════════════════════════════════════════════════════════════════════
 // 전체 매칭 수 + 등급 분포 — 미리보기·시뮬레이션 공용 (Phase 9)
 //   발송과 동일한 selectJourneyTargetCustomerIds로 ID를 받아(상한 JOURNEY_COUNT_CAP) 등급만 집계.
 //   → 미리보기·시뮬레이션 = 실발송 대상 100% 일치(같은 함수). 상한 초과 시 capped=true(정직 표기).
@@ -968,28 +892,6 @@ export async function averageScoresForIds(
   const row = r.rows[0] || {};
   const num = (v: any) => (v != null ? Number(v) : null);
   return { avgOrderValue: num(row.aov), avgConversion: num(row.conv), avgClick: num(row.clk) };
-}
-
-/**
- * ★ 2026-09-28 한줄로 V2 R265 — 미리보기 = 표본 + 인원·등급 분포를 **한 번의 추출**로.
- *   옛: 표본(10명)과 인원(상한까지)을 같은 추출 함수로 두 번 돌렸다. 표본 = 같은 추출의 앞 N명(추출 순서 그대로).
- *   추출은 발송과 같은 함수다(미리보기 = 실제 대상 계약) — 그래서 인원을 SQL COUNT 로 따로 세지 않는다.
- */
-export async function previewJourneyTargets(
-  companyId: string,
-  triggerEvent: string,
-  triggerFilters: Record<string, any>,
-  sampleLimit: number,
-  journeyId?: string,
-  scopeSql = '',
-  consent?: JourneyConsent,   // ★ 2026-10-02 수신동의 조각(mall-consent journeyOwnerConsent · 없으면 고객 행)
-): Promise<{ samples: JourneyPreviewSample[]; count: JourneyTargetCount }> {
-  const ids = await selectJourneyTargetCustomerIds(companyId, triggerEvent, triggerFilters, JOURNEY_COUNT_CAP, journeyId, undefined, scopeSql, consent);
-  const [samples, breakdown] = await Promise.all([
-    buildPreviewSamplesForIds(companyId, ids.slice(0, sampleLimit)),
-    gradeBreakdownForIds(companyId, ids),
-  ]);
-  return { samples, count: { total: breakdown.total, segments: breakdown.segments, capped: ids.length >= JOURNEY_COUNT_CAP } };
 }
 
 /** 전체 매칭 수 + 등급 분포 (미리보기·시뮬레이션 공용). 발송과 동일 함수로 ID 추출. */

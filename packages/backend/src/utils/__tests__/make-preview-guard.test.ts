@@ -8,9 +8,10 @@ import { readFileSync } from 'fs';
 import { resolve } from 'path';
 import { guardPreviewHtml, MK_PREVIEW_CSP } from '../../../../frontend/src/utils/make-preview';
 import {
-  fixItemsOf, fixHeadline, readCardUseNote, dmChipStatus, emailChipStatus, makeResultPath, defaultDmSmsText, blockLabel, dmPaletteItems, isNightAdHour,
+  fixItemsOf, fixHeadline, readCardUseNote, dmChipStatus, emailChipStatus, makeResultPath, defaultDmSmsText, blockLabel, dmPaletteItems,
 } from '../../../../frontend/src/utils/make-flow';
 import { catalogPagesOf } from '../dm/dm-catalog-pages';
+import { isNightAdTime } from '../../../../frontend/src/utils/send-policy';
 import { validateDm } from '../dm/dm-validate';
 
 const DOC = '<!doctype html><html lang="ko"><head><meta charset="utf-8"><title>t</title></head><body><div data-section-id="s1">a</div><script>var x=1;</script></body></html>';
@@ -75,8 +76,8 @@ describe('고칠 곳 판정', () => {
   ] as any;
   it('버튼 주소 없음 = must 1건(같은 블록 중복 0) · 사람 말 · 넣기', () => {
     const items = fixItemsOf({ items: [
-      { area: 'link', severity: 'fatal', section_id: 'c', message: 'CTA 버튼 1번의 URL이 비어있어요.' },
-      { area: 'link', severity: 'fatal', section_id: 'c', message: 'CTA 버튼 2번의 URL이 비어있어요.' },
+      { area: 'link', severity: 'fatal', code: 'CTA_URL_EMPTY', section_id: 'c', message: '버튼 1번의 연결 주소가 비어 있어요.' },
+      { area: 'link', severity: 'fatal', code: 'CTA_URL_EMPTY', section_id: 'c', message: '버튼 2번의 연결 주소가 비어 있어요.' },
       { area: 'layout', severity: 'recommend', section_id: 'h', message: '섹션 텍스트가 너무 길어요' },
     ] }, sections);
     expect(items[0]).toMatchObject({ kind: 'must', title: '버튼이 갈 주소가 없어요', sectionId: 'c', action: '넣기' });
@@ -85,10 +86,19 @@ describe('고칠 곳 판정', () => {
     expect(items.some((i) => i.title === '버튼 주소 넣음')).toBe(false);
     expect(fixHeadline(items)).toMatchObject({ tone: 'warn', count: 1 });
   });
-  it('치명 0 = 보낼 준비 · 버튼 주소 넣음', () => {
-    const items = fixItemsOf({ items: [] }, sections);
+  // ★ 2026-10-25 화면 판정 = 서버 고정 키(문장을 다듬자 정규식 판정이 조용히 꺼졌다) · 실제 서버 검수 결과로 잠근다
+  it('실제 서버 검수의 버튼 주소 없음 = 사람 말 [넣기] 한 줄(문장이 바뀌어도 키로 알아본다)', async () => {
+    const v = await validateDm({ sections: [{ id: 'c', type: 'cta', visible: true, props: { buttons: [{ label: '보러 가기', url: '' }] } }] as any, publish_mode: 'now' });
+    const items = fixItemsOf(v as any, sections);
+    expect(items.filter((i) => i.kind === 'must' && i.title === '버튼이 갈 주소가 없어요' && i.action === '넣기')).toHaveLength(1);
+  });
+  it('치명 0 = 보낼 준비 · 버튼 주소 넣음(블록에 주소가 실제로 있을 때만 · 1026 Codex 1R)', () => {
+    const filled = [sections[0], { id: 'c', type: 'cta', props: { buttons: [{ label: '보러 가기', url: 'https://shop.example/x' }] } }] as any;
+    const items = fixItemsOf({ items: [] }, filled);
     expect(fixHeadline(items).tone).toBe('good');
     expect(items.some((i) => i.title === '버튼 주소 넣음')).toBe(true);
+    // 검수 항목이 없다는 것만으로는 「넣음」이라 하지 않는다(주소가 빈 블록)
+    expect(fixItemsOf({ items: [] }, sections).some((i) => i.title === '버튼 주소 넣음')).toBe(false);
   });
 
   // ★ 2026-10-01 박성용 접수(카탈로그 · footer 섹션 필수로 다음으로 못 넘어감) — 잠금 수 = 서버 발행 관문이 막는 수
@@ -110,7 +120,7 @@ describe('고칠 곳 판정', () => {
   });
   it('넘길 수 없는 치명만 잠금 · 블록이 있는 넘길 수 있는 줄은 [고치기] 권고 · 잠금 줄이 먼저', () => {
     const v = { items: [
-      { area: 'required_info', severity: 'fatal', overridable: true, message: 'Footer 섹션이 없어요. 고객센터/수신거부 정보 노출 의무를 위해 필수예요.' },
+      { area: 'required_info', severity: 'fatal', overridable: true, code: 'FOOTER_MISSING', message: '꼬리 블록(고객센터 · 수신거부)이 없어요. 광고 DM에는 꼭 있어야 해요.' },
       { area: 'required_info', severity: 'fatal', overridable: true, section_id: 'f', message: '수신거부 링크가 숨김 상태예요. 광고성 메시지는 수신거부 링크 노출이 의무예요.' },
       { area: 'countdown', severity: 'fatal', section_id: 'k', message: '카운트다운 종료 일시가 이미 지나갔어요.', fix_suggestion: '미래 시점으로 다시 설정해 주세요.' },
       { area: 'layout', severity: 'fatal', message: '섹션이 하나도 없어요. 최소 1개 이상 추가해 주세요.' },
@@ -140,7 +150,9 @@ describe('결과 화면 · 수정 화면의 카탈로그 배선', () => {
   it('다시 만들기 · 재료 다시 보기는 만든 채널로 가고 금액은 원장 키로 적는다', () => {
     expect(page).not.toContain('quick-campaign?channel=${channel}');
     expect(page.match(/quick-campaign\?channel=\$\{makeChannel\}/g)).toHaveLength(2);
-    expect(page).toContain("isCatalog ? 'catalog-dm-build' : 'dm-ai-generate'");
+    // ★ 2026-10-25 금액 = 서버 견적(그 채널 · 원장 단가) · 화면 단가 표 0
+    expect(page).toContain('if (draftFits) quoteOf(makeChannel).then((t) => { if (alive) setRegenCost(t); })');
+    expect(page).not.toContain("'catalog-dm-build'");
     expect(read('pages/DmBuilderPage.tsx')).toContain("buildBar.channel === 'catalog' ? 'catalog' : 'dm'");
     expect(read('pages/DmBuilderPage.tsx')).not.toContain("navigate('/quick-campaign?channel=dm&regen=1')");
   });
@@ -189,20 +201,21 @@ describe('링크 발행 승인 금액 대조', () => {
     // ★ 2026-10-04 발행 본문은 코어 CT(dm-publish-core) — 라우트는 expected_fee를 그대로 넘긴다.
     const dm = readFileSync(resolve(__dirname, '../../routes/dm.ts'), 'utf-8');
     expect(dm).toContain("expectedFee: typeof req.body?.expected_fee === 'number' ? req.body.expected_fee : undefined,");
+    // ★ 2026-10-25 #65 · #76 — 판정 = publishFeeDueStrict 한 벌(크레딧제 strict 포함) · 금액을 싣지 않은 발행도 402 · 그 판정(due)을 차감까지 그대로
     const core = readFileSync(resolve(__dirname, '../dm/dm-publish-core.ts'), 'utf-8');
-    const route = core.slice(core.indexOf('const { source: costSource, cost: pubCost } = await dmPublishFeeSourceOf(companyId, dmId);'));
-    const iOn = route.indexOf('const creditOn = await isCreditEnabledStrict(companyId);');
-    const iGuard = route.indexOf('if (creditOn && pubCost > expectedFee) {');
-    expect(iOn).toBeGreaterThan(0);
-    expect(iGuard).toBeGreaterThan(iOn);
-    expect(route.slice(iGuard, iGuard + 300)).toContain("code: 'PUBLISH_FEE_REQUIRED'");
-    expect(route).toContain('chargeNow = creditOn;');
-    expect(iGuard).toBeLessThan(route.indexOf('if (chargeNow) await checkCredit(companyId, pubCost);'));
-    // ★ 2026-10-24 ⑭ 발행 = 경품 동기화 함께(publishDmWithPrizes) · 옛 글자(await publishDm()는 감싼 함수 안에서 우연히 맞았다
-    expect(route.indexOf('await publishDmWithPrizes(dmId, companyId)')).toBeGreaterThan(iGuard);
-    // 차감은 대조 때 정한 chargeNow 로만(firstPublish 로 다시 정하지 않는다)
-    expect(route).toContain('if (chargeNow) {\n    await deductCreditSafe({');
-    expect(route).not.toMatch(/if \(firstPublish\) \{\s*await deductCreditSafe/);
+    const iDue = core.indexOf('const due = await publishFeeDueStrict(companyId, dmId);');
+    const iGuard = core.indexOf("if (due && (typeof expectedFee !== 'number' || due.cost > expectedFee)) {");
+    expect(iDue).toBeGreaterThan(0);
+    expect(iGuard).toBeGreaterThan(iDue);
+    expect(core.slice(iGuard, iGuard + 300)).toContain("code: 'PUBLISH_FEE_REQUIRED'");
+    expect(iGuard).toBeLessThan(core.indexOf('if (due) await checkCredit(companyId, due.cost);'));
+    expect(iGuard).toBeLessThan(core.indexOf('await publishDmWithPrizes('));
+    expect(core).toContain("settle: { companyId, cost: due.cost, source: due.source, createdBy: input.userId, idempotencyKey: `dm-publish:${dmId}` },");   // ★ 1026 settleOrUndo
+    const gate = readFileSync(resolve(__dirname, '../dm/dm-publish-gate.ts'), 'utf-8');
+    expect(gate.slice(gate.indexOf('export async function publishFeeDueStrict('))).toContain('isCreditEnabledStrict(companyId)');
+    // ★ 2026-10-24 ⑭ 발행 = 경품 동기화 함께(publishDmWithPrizes)
+    expect(core.indexOf('await publishDmWithPrizes(dmId, companyId)')).toBeGreaterThan(iGuard);
+    expect(core).not.toContain('deductCreditSafe(');
   });
   it('보내기 창: 링크 발행에 expected_fee · 402 = 확인 창 · 성공 뒤 서버 견적 다시 받기(임의 required=false 0)', () => {
     const src = readFileSync(resolve(__dirname, '../../../../frontend/src/components/make/MakeSendModal.tsx'), 'utf-8');
@@ -245,8 +258,11 @@ describe('기타 순수 함수', () => {
     expect(emailChipStatus({ status: 'failed' })).toBe('failed');
     expect(makeResultPath('dm', 'a1', 'b2')).toBe('/quick-campaign/result?channel=dm&draft=a1&pair=b2');
     expect(defaultDmSmsText({ brand: '하루온', title: '가을 신상', sub: '' })).toBe('[하루온] 가을 신상\n▶ 자세히 보기 %DM링크%');
-    expect(isNightAdHour(new Date(2026, 8, 27, 21, 0))).toBe(true);
-    expect(isNightAdHour(new Date(2026, 8, 27, 8, 0))).toBe(false);
+    // ★ 2026-10-25 #40 — 야간 = 서버 발송 시간 값 · KST(브라우저 시간대 무관)
+    const p = { startHour: 8, endHour: 21 } as any;
+    expect(isNightAdTime(p, new Date('2026-09-27T12:00:00Z'))).toBe(true);    // KST 21시
+    expect(isNightAdTime(p, new Date('2026-09-26T23:00:00Z'))).toBe(false);   // KST 8시
+    expect(isNightAdTime(p, new Date('2026-09-26T22:59:00Z'))).toBe(true);    // KST 7시 59분
   });
   it('블록 이름 · 팔레트(참여형은 한 칸으로 묶는다)', () => {
     expect(blockLabel({ type: 'hero', props: {} } as any)).toBe('첫 화면');

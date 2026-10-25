@@ -20,7 +20,12 @@
  *   - 모델 분리 #3 — Opus 4.7 영역 (AI Operator 영역, Sonnet 4.6 흐름 영향 0건)
  */
 
-import { extractJsonFromAiText } from './ai-json';   // ★ 2026-09-30 WP4 AI 응답 JSON 파싱 = CT(문자열 안 제어문자 복구)
+import { extractJsonFromAiText, aiStr } from './ai-json';   // ★ 2026-09-30 WP4 AI 응답 JSON 파싱 = CT(문자열 안 제어문자 복구)
+import { randomUUID } from 'crypto';
+import { UserFacingError } from './http-error';
+import { isInCreditBundle } from './ai-credit-context';
+import { getCreditCost } from './ai-credit-calc';
+import { checkCredit, settleCreditAfterSuccess, InsufficientCreditError } from './ai-credit';
 import { callAIWithFallback } from '../services/ai';
 
 // ════════════════════════════════════════════════════════════════════
@@ -65,7 +70,7 @@ export async function analyzeGoalConflicts(input: {
   const { goals, companyInfo, customerStats } = input;
 
   if (goals.length === 0) {
-    throw new Error('goals 배열은 1건 이상 필요합니다.');
+    throw new UserFacingError(400, 'GOALS_REQUIRED', '목표를 1개 이상 골라 주세요.');
   }
 
   // 단일 목표면 충돌 분석 박지 X — 단순 박음
@@ -99,6 +104,9 @@ ${goals.map((g, i) => `${i + 1}. "${g.name}" (가중치 ${g.weight}${g.descripti
 각 목표에 대해 sub_plan을 생성하고, 다른 목표와의 충돌 영역(동일 고객 동시 발송 / 메시지 중복 / 시점 겹침 등)을 분석해주세요.
 응답은 반드시 valid JSON으로만 응답해주세요 (다른 텍스트 X).`;
 
+  // ★ 2026-10-25 원장 Z4 — 돈 = 읽어 낸 분석만(잔액 먼저 · 호출 0크레딧 · 읽은 뒤 성공 뒤 차감). 옛: 응답 순간 5크레딧 · 읽지 못해 단순 정렬 대체를 줘도 나갔다
+  const analyzeCost = companyInfo?.id ? getCreditCost('multi-goal-decisioning') : 0;
+  if (analyzeCost > 0 && !isInCreditBundle()) await checkCredit(companyInfo.id, analyzeCost);
   let aiResponse = '';
   try {
     const aiResult = await callAIWithFallback({
@@ -110,6 +118,7 @@ ${goals.map((g, i) => `${i + 1}. "${g.name}" (가중치 ${g.weight}${g.descripti
       // ★ D209+ Phase D 통합: companyId + source 전달 → 회사별 월 한도 + cache + 통계 자동 활성.
       companyId: companyInfo?.id,
       source: 'multi-goal-decisioning',
+      creditCost: 0,
     });
     aiResponse = aiResult || '';
   } catch (err: any) {
@@ -122,20 +131,21 @@ ${goals.map((g, i) => `${i + 1}. "${g.name}" (가중치 ${g.weight}${g.descripti
     const jsonMatch = aiResponse.match(/\{[\s\S]*\}/);
     if (!jsonMatch) throw new Error('AI 응답에서 JSON 찾을 수 없음');
     const parsed = extractJsonFromAiText(jsonMatch[0]);
-    return {
+    const out: MultiGoalAnalysis = {
       goals,
-      subPlans: (parsed.sub_plans || parsed.subPlans || []).map((sp: any, idx: number) => ({
-        goalName: sp.goal_name || sp.goalName || goals[idx]?.name || `목표 ${idx + 1}`,
-        targetCriteria: sp.target_criteria || sp.targetCriteria || '',
-        channelRecommended: sp.channel_recommended || sp.channelRecommended || 'SMS',
-        timingRecommended: sp.timing_recommended || sp.timingRecommended || '오후 2~4시 (KST)',
-        conflicts: Array.isArray(sp.conflicts) ? sp.conflicts : [],
-        priority: Number(sp.priority || idx + 1),
-        shouldExecute: sp.should_execute !== false && sp.shouldExecute !== false,
-        reasoning: sp.reasoning || '',
-      })),
-      overallStrategy: parsed.overall_strategy || parsed.overallStrategy || '',
-      conflictMatrix: parsed.conflict_matrix || parsed.conflictMatrix || '',
+      // ★ 1026 Codex 2R — AI 칸 = 글일 때만(aiStr) · 대상 기준도 근거도 없는 계획({}) = 계획 아님(쓸 결과 판정 · 기본값으로 채운 빈 계획에 걷지 않는다)
+      subPlans: (Array.isArray(parsed.sub_plans) ? parsed.sub_plans : Array.isArray(parsed.subPlans) ? parsed.subPlans : []).map((sp: any, idx: number) => ({
+        goalName: aiStr(sp?.goal_name) || aiStr(sp?.goalName) || goals[idx]?.name || `목표 ${idx + 1}`,
+        targetCriteria: aiStr(sp?.target_criteria) || aiStr(sp?.targetCriteria),
+        channelRecommended: aiStr(sp?.channel_recommended) || aiStr(sp?.channelRecommended) || 'SMS',
+        timingRecommended: aiStr(sp?.timing_recommended) || aiStr(sp?.timingRecommended) || '오후 2~4시 (KST)',
+        conflicts: Array.isArray(sp?.conflicts) ? sp.conflicts : [],
+        priority: Number(sp?.priority || idx + 1),
+        shouldExecute: sp?.should_execute !== false && sp?.shouldExecute !== false,
+        reasoning: aiStr(sp?.reasoning),
+      })).filter((p: GoalSubPlan) => p.targetCriteria.trim() || p.reasoning.trim()),
+      overallStrategy: aiStr(parsed.overall_strategy) || aiStr(parsed.overallStrategy),
+      conflictMatrix: aiStr(parsed.conflict_matrix) || aiStr(parsed.conflictMatrix),
       recommendedOrder: Array.isArray(parsed.recommended_order)
         ? parsed.recommended_order
         : Array.isArray(parsed.recommendedOrder)
@@ -143,7 +153,15 @@ ${goals.map((g, i) => `${i + 1}. "${g.name}" (가중치 ${g.weight}${g.descripti
           : goals.map((g) => g.name),
       analyzedAt: new Date(),
     };
+    // ★ 1026 Codex 1R — 쓸 결과(목표별 계획 1개 이상)일 때만 걷는다 · 빈 계획 = 대체 분석(무료 · 옛: 읽어 내기만 하면 걷었다)
+    if (out.subPlans.length === 0) return fallbackAnalysis(goals);
+    // 잔액 부족 402 · 원장 쓰기 실패 503 · 바깥 묶음이면 0
+    if (analyzeCost > 0 && !isInCreditBundle()) {
+      await settleCreditAfterSuccess({ companyId: companyInfo.id, cost: analyzeCost, source: 'multi-goal-decisioning', idempotencyKey: `multi-goal-decisioning:${companyInfo.id}:${randomUUID()}` });
+    }
+    return out;
   } catch (err: any) {
+    if (err instanceof InsufficientCreditError || err instanceof UserFacingError) throw err;
     console.error('[MultiGoal] JSON 파싱 실패:', err?.message || err);
     return fallbackAnalysis(goals);
   }

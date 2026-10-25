@@ -35,7 +35,7 @@ import { operationCredits30dByRoot } from './journey-credit-forecast';
 import { lineageColumnsReady } from './journey-lineage';
 // ★ 2026-10-09 고객 관계 지도 — 칸 편집 정책(PATCH 게이트와 같은 함수) · 구매 문(가입 안내문이 문마다 다르다)
 import { stepEditPolicy, type StepEditPolicy } from './journey-step-edit-policy';
-import { isMallPurchaseDoorActive } from './journey-purchase-ledger';
+import { purchasedSinceEntrySql } from './journey-goal-purchase';
 // ★ 2026-10-20 여정 V.3 §18 — 기존 여정 뒤에 붙이기(붙인 여정 = 앞 여정 열 · 바로 아래 · 선)
 import { readAfterConfig, AFTER_OUTCOME_LABEL, type AfterOutcome } from './journey-after-config';
 
@@ -271,17 +271,14 @@ const GOAL_LABEL: Record<string, string> = { purchase: '구매 확인', points_u
 
 /**
  * 카드 안내(사실 문장).
- *   ★ 2026-10-09 — 가입 직후 구매 안내는 구매 문에 따라 다르다(회의론자 최종 검증 A5).
- *   자사몰 문 = 구매 사건 시각이 진입 뒤라 목표 판정이 첫 칸 앞에서 잡힌다 → 환영 대신 첫 구매 여정.
- *   매장 원장 문(싱크) = 고객과 구매가 같은 묶음으로 오고 구매일(어제)이 진입 시각(오늘)보다 앞 → 목표로 안 잡혀 둘 다 받는다
- *   (journey-executor 구매 판정 = 진입 뒤 구매). 사실과 다른 문장을 싣지 않는다.
+ *   ★ 2026-10-09 — 가입 직후 구매 안내(회의론자 최종 검증 A5).
+ *   ★ 2026-10-25 #13 — 1019 B-1009-4 뒤로 두 문 모두 같다: 자사몰 = 구매 사건 시각이 진입 뒤 · 매장 원장 = 가입 묶음 구매(고객 행 뒤 도착)를
+ *     목표로 잡아 첫 칸 앞에서 마친다(journey-goal-purchase 한 판정). 옛 문장(매장 문 = 「둘 다 받아요」)은 고치기 전 동작이었다.
  */
-function journeyNotices(triggerEvent: string, goalExitEnabled: boolean, door: 'mall' | 'ledger'): string[] {
+function journeyNotices(triggerEvent: string, goalExitEnabled: boolean): string[] {
   const out: string[] = [];
   if (triggerEvent === 'customer.created' && goalExitEnabled) {
-    out.push(door === 'mall'
-      ? '가입 직후 구매한 고객은 환영 문자 대신 첫 구매 여정이 맞이해요.'
-      : '같은 날 가입하고 산 고객은 환영 문자와 첫 구매 문자를 둘 다 받아요.');
+    out.push('가입 직후 구매한 고객은 환영 문자 대신 첫 구매 여정이 맞이해요.');
   }
   return out;
 }
@@ -336,23 +333,12 @@ async function loadPendingGoalExits(companyId: string, journeyIds: string[], sco
     [journeyIds],
   );
   if (Number(total.rows[0]?.n || 0) > PENDING_MAX_ACTIVE) return null;
+  // ★ 2026-10-25 #13 — 판정 = journey-goal-purchase 한 곳(실행기 목표와 같은 조각 · 가입 여정 = 가입 묶음 구매 포함 · 옛: 세 신호만 따로 적었다)
   const r = await query(
     `SELECT e.journey_id, e.current_step_order AS k, COUNT(*)::int AS pending
        FROM journey_executions e
       WHERE e.journey_id = ANY($2::uuid[]) AND e.status = 'active'${execScope(scopeSql, 'e')}
-        AND (
-          EXISTS (SELECT 1 FROM customers c
-                   WHERE c.id = e.customer_id AND c.company_id = $1::uuid
-                     AND c.recent_purchase_date IS NOT NULL
-                     AND c.recent_purchase_date > (e.entered_at AT TIME ZONE 'Asia/Seoul')::date)
-          OR EXISTS (SELECT 1 FROM cdp_events ce
-                      WHERE ce.company_id = $1::uuid AND ce.customer_id = e.customer_id
-                        AND ce.event_name = 'purchase' AND ce.occurred_at > e.entered_at)
-          OR EXISTS (SELECT 1 FROM purchases p
-                      WHERE p.company_id = $1::uuid AND p.customer_id = e.customer_id
-                        AND p.purchase_date IS NOT NULL
-                        AND p.purchase_date > (e.entered_at AT TIME ZONE 'Asia/Seoul'))
-        )
+        AND ${purchasedSinceEntrySql('e', '$1::uuid', `(SELECT jg.trigger_event FROM journeys jg WHERE jg.id = e.journey_id) = 'customer.created'`)}
       GROUP BY e.journey_id, e.current_step_order`,
     [companyId, journeyIds],
   );
@@ -708,7 +694,6 @@ export async function buildLifecycleMap(companyId: string, viewerUserId?: string
     const v = key ? availability[key] : undefined;
     return v ? { available: v.available, reason: v.reason } : null;
   };
-  const door: 'mall' | 'ledger' = (await isMallPurchaseDoorActive(companyId).catch(() => false)) ? 'mall' : 'ledger';
 
   const goalJourneyIds = rows
     .filter((r) => r.status === 'active' && r.goal_exit_enabled === true && ['purchase', '', null, undefined].includes(r.goal_kind)
@@ -748,7 +733,7 @@ export async function buildLifecycleMap(companyId: string, viewerUserId?: string
       goalExitEnabled,
       goalKind,
       goalLabel: GOAL_LABEL[goalKind] || '목표 달성',
-      notices: journeyNotices(triggerEvent, goalExitEnabled, door),
+      notices: journeyNotices(triggerEvent, goalExitEnabled),
       allowReentry: r.allow_reentry === true,
       autoReentry: r.auto_reentry_enabled === true,
       thresholdRecipients: r.threshold_recipients_per_step != null ? Number(r.threshold_recipients_per_step) : null,

@@ -67,10 +67,13 @@ describe('S6 발행비 판정 — 옛 send-to-target 인라인과 같은 식', (
     (isInteractionCampaign as any).mockResolvedValue(true);
     expect(await resolveSendPublishFeeGate(C, D)).toEqual({ source: 'dm-interaction-publish', cost: 120 });
   });
-  it('이미 납부 = null · 실발송 이력 있음 = null · 미적용 회사 = null', async () => {
+  it('이미 납부 = null · 이미 발행 = null · 실발송 이력 있음 = null · 미적용 회사 = null', async () => {
+    // 조회 순서 = 납부(원장) → [발행 주소 · 옛 실발송 이력] (1025 #65 · 발행 전에만 걷는다)
     q.mockResolvedValueOnce({ rows: [{ '?column?': 1 }] });
     expect(await resolveSendPublishFeeGate(C, D)).toBeNull();
-    q.mockResolvedValueOnce({ rows: [] }).mockResolvedValueOnce({ rows: [{ '?column?': 1 }] });
+    q.mockResolvedValueOnce({ rows: [] }).mockResolvedValueOnce({ rows: [{ short_code: 'abc123' }] }).mockResolvedValueOnce({ rows: [] });
+    expect(await resolveSendPublishFeeGate(C, D)).toBeNull();
+    q.mockResolvedValueOnce({ rows: [] }).mockResolvedValueOnce({ rows: [{ short_code: null }] }).mockResolvedValueOnce({ rows: [{ '?column?': 1 }] });
     expect(await resolveSendPublishFeeGate(C, D)).toBeNull();
     q.mockResolvedValue({ rows: [] });
     (isCreditEnabledStrict as any).mockResolvedValue(false);
@@ -110,14 +113,15 @@ describe('S7~S10 라우트 배선', () => {
     expect(publish).toContain('await publishDmCore({');
     const core = readFileSync(resolve(__dirname, './dm-publish-core.ts'), 'utf-8');
     expect(core).toMatch(/if \(!dmBodyRow\.short_code\) \{\s*const block = await dmPublishBlocker\(dmBodyRow\)/);
-    expect(core.indexOf('dmPublishBlocker(')).toBeLessThan(core.indexOf('deductCreditSafe('));
+    expect(core.indexOf('dmPublishBlocker(')).toBeLessThan(core.indexOf('settleOrUndo('));
+    // ★ 1025 #65 — 발행비 판정 한 벌(publishFeeDueStrict · 납부 · 발행 전 · 옛 실발송 면제 · 크레딧제)
+    expect(core).toContain('const due = await publishFeeDueStrict(companyId, dmId);');
     expect(core).toContain('dmPublishFeeSourceOf(companyId, dmId)');
-    expect(core).toContain('isDmPublishFeeCharged(companyId, dmId)');
   });
   it('send-to-target = 첫 발행은 전체 잠금 · 이미 발행된 DM 은 정적 관문(1024 ⑮) · 발행비 판정(CT)·차감보다 앞 · 인라인 발행비 SQL 0', () => {
     expect(send).toContain('const block = dm.short_code ? dmPublishStaticBlock(dm) : await dmPublishBlocker(dm);');
     expect(send.indexOf('dmPublishBlocker(dm)')).toBeLessThan(send.indexOf('resolveSendPublishFeeGate('));
-    expect(send.indexOf('resolveSendPublishFeeGate(')).toBeLessThan(send.indexOf('deductCreditSafe('));
+    expect(send.indexOf('resolveSendPublishFeeGate(')).toBeLessThan(send.indexOf('settleOrUndo('));
     expect(send).not.toContain('FROM dm_recipient_tokens WHERE dm_id = $1::uuid AND company_id = $2::uuid LIMIT 1');
   });
   it('선견적·무저장 미리보기 = 소유 가드(requireDmAccess) · 미리보기는 DB 쓰기 0', () => {

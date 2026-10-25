@@ -155,6 +155,7 @@ export default function JourneyStatsPage() {
   const hourlyData = stats.hourly.map((h) => ({ name: `${h.hour}시`, 발송: h.sentCount, 클릭: h.clickCount }));
   const weekdayData = stats.weekday.map((w) => ({ name: WEEKDAY_LABELS[w.weekday], 발송: w.sentCount, 클릭: w.clickCount }));
   const segmentData = stats.segments.map((s) => ({ name: s.segment, 진입: s.enteredCount, 완료: s.completedCount, 클릭: s.clickCount, 전환: s.conversionCount }));
+  const stepOrderById = new Map(stats.steps.map((s) => [s.stepId, s.stepOrder]));
 
   return (
     <ZoneFrame
@@ -211,12 +212,12 @@ export default function JourneyStatsPage() {
         )}
 
         {/* Step별 통계 */}
-        <Section title="Step별 효과 매트릭스" subtitle="발송/실패/Skip + 클릭률 + 전환율">
+        <Section title="칸별 효과" subtitle="발송 · 실패 · 건너뜀 · 클릭률 · 전환율">
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead className="bg-white border-b border-slate-200">
                 <tr className="text-left text-slate-500 text-xs">
-                  <th className="px-3 py-2.5 font-medium">Step</th>
+                  <th className="px-3 py-2.5 font-medium">칸</th>
                   <th className="px-3 py-2.5 font-medium">유형</th>
                   <th className="px-3 py-2.5 font-medium">채널</th>
                   <th className="px-3 py-2.5 font-medium text-right">진입</th>
@@ -256,7 +257,7 @@ export default function JourneyStatsPage() {
         </Section>
 
         {/* 등급별 Bar chart */}
-        <Section title="등급별 효과 매트릭스" subtitle="진입/완료/클릭/전환 카운트">
+        <Section title="등급별 효과" subtitle="진입 · 완료 · 클릭 · 전환 수">
           {segmentData.length === 0 ? (
             <div className="text-center py-8 text-slate-400">데이터 없음</div>
           ) : (
@@ -277,7 +278,7 @@ export default function JourneyStatsPage() {
         </Section>
 
         {/* 시간대별 Line chart */}
-        <Section title="시간대별 효과 (24시간 KST)" subtitle="발송 + 클릭 정시별 매트릭스">
+        <Section title="시간대별 효과 (24시간 KST)" subtitle="시간마다 발송 · 클릭">
           <ResponsiveContainer width="100%" height={280}>
             <LineChart data={hourlyData}>
               <CartesianGrid strokeDasharray="3 3" stroke={OUI_CHART_GRID} />
@@ -292,7 +293,7 @@ export default function JourneyStatsPage() {
         </Section>
 
         {/* 요일별 Bar chart */}
-        <Section title="요일별 효과" subtitle="발송 + 클릭 요일별 매트릭스">
+        <Section title="요일별 효과" subtitle="요일마다 발송 · 클릭">
           <ResponsiveContainer width="100%" height={250}>
             <BarChart data={weekdayData}>
               <CartesianGrid strokeDasharray="3 3" stroke={OUI_CHART_GRID} />
@@ -306,34 +307,32 @@ export default function JourneyStatsPage() {
           </ResponsiveContainer>
         </Section>
 
-        {/* Variant Bandit 효과 */}
+        {/* A/B 문안 시험 결과 */}
         {stats.variants.length > 0 && (
-          <Section title="A/B Variant Bandit 효과" subtitle="Thompson Sampling posterior 매트릭스: 자동 최적화 효과">
+          <Section title="A/B 문안 시험 결과" subtitle="반응이 좋은 문안을 더 자주 보내요">
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
                 <thead className="bg-white border-b border-slate-200">
                   <tr className="text-left text-slate-500 text-xs">
-                    <th className="px-3 py-2.5 font-medium">Step</th>
-                    <th className="px-3 py-2.5 font-medium">Variant</th>
+                    <th className="px-3 py-2.5 font-medium">칸</th>
+                    <th className="px-3 py-2.5 font-medium">문안</th>
                     <th className="px-3 py-2.5 font-medium text-right">분배율</th>
                     <th className="px-3 py-2.5 font-medium text-right">발송</th>
                     <th className="px-3 py-2.5 font-medium text-right">클릭</th>
                     <th className="px-3 py-2.5 font-medium text-right">전환</th>
-                    <th className="px-3 py-2.5 font-medium text-right">사후 평균</th>
-                    <th className="px-3 py-2.5 font-medium text-right">신뢰</th>
+                    <th className="px-3 py-2.5 font-medium text-right">예상 반응률</th>
                   </tr>
                 </thead>
                 <tbody>
                   {stats.variants.map((v) => (
                     <tr key={v.variantId} className="border-b border-slate-100 hover:bg-white">
-                      <td className="px-3 py-2.5 text-xs font-mono">{v.stepId.slice(0, 8)}</td>
+                      <td className="px-3 py-2.5">{stepOrderById.get(v.stepId) != null ? `${stepOrderById.get(v.stepId)}번째` : '-'}</td>
                       <td className="px-3 py-2.5"><span className="px-2 py-0.5 bg-violet-100 text-violet-800 rounded text-xs">{v.variantLabel}</span></td>
                       <td className="px-3 py-2.5 text-right font-mono">{formatPct(v.trafficWeight)}</td>
                       <td className="px-3 py-2.5 text-right font-mono">{v.sentCount.toLocaleString()}</td>
                       <td className="px-3 py-2.5 text-right font-mono text-cyan-700">{v.clickCount.toLocaleString()}</td>
                       <td className="px-3 py-2.5 text-right font-mono text-emerald-700">{v.conversionCount.toLocaleString()}</td>
                       <td className="px-3 py-2.5 text-right font-mono text-violet-700">{formatPct(v.posteriorMean)}</td>
-                      <td className="px-3 py-2.5 text-right font-mono text-xs text-slate-500">α={v.posteriorAlpha.toFixed(1)} β={v.posteriorBeta.toFixed(1)}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -341,7 +340,7 @@ export default function JourneyStatsPage() {
             </div>
             <div className="mt-3 p-2 bg-violet-50 border border-violet-200 rounded text-[11px] text-violet-800 flex items-start gap-1.5">
               <Beaker className="w-3 h-3 flex-shrink-0 mt-0.5" />
-              <span>Thompson Sampling 자동 최적화. 효과 높은 variant 자동 가중치 증가. 사후 평균이 높을수록 우수 variant.</span>
+              <span>반응이 좋은 문안일수록 더 자주 나가요. 예상 반응률이 높을수록 잘 되는 문안이에요.</span>
             </div>
           </Section>
         )}

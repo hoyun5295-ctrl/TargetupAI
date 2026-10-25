@@ -26,6 +26,7 @@
  *   - SMTP_ENCRYPTION_KEY 미설정 시 = 명시 에러 throw (catch 안 503 분기 의무)
  */
 
+import { UserFacingError } from './http-error';
 import nodemailer, { Transporter } from 'nodemailer';
 import crypto from 'crypto';
 import { emailSafeImageHtml } from './email-safe-image';
@@ -84,10 +85,18 @@ export interface SendEmailResult {
 const ALGORITHM = 'aes-256-gcm';
 const IV_LENGTH = 16;
 
+/** ★ 2026-10-25 서버 설정 누락 = 오류 종류로 알린다(라우트가 문장 글자로 판정하지 않게 · 문장 = 운영 로그용) */
+export class SmtpKeyMissingError extends Error {
+  constructor() {
+    super('SMTP_ENCRYPTION_KEY 미설정: 운영자에게 .env 등록 요청 의무 (64자 hex)');
+    this.name = 'SmtpKeyMissingError';
+  }
+}
+
 function getEncryptionKey(): Buffer {
   const keyHex = process.env.SMTP_ENCRYPTION_KEY || '';
   if (!keyHex || keyHex.length !== 64) {
-    throw new Error('SMTP_ENCRYPTION_KEY 미설정: 운영자에게 .env 등록 요청 의무 (64자 hex)');
+    throw new SmtpKeyMissingError();
   }
   return Buffer.from(keyHex, 'hex');
 }
@@ -106,7 +115,7 @@ export function decryptPassword(encrypted: string): string {
   if (!encrypted) throw new Error('복호화할 비밀번호 필수');
   const key = getEncryptionKey();
   const parts = encrypted.split(':');
-  if (parts.length !== 3) throw new Error('SMTP 비밀번호 형식 오류: 회사 admin 재설정 의무');
+  if (parts.length !== 3) throw new UserFacingError(409, 'SMTP_PASSWORD_RESET', '저장된 메일 비밀번호를 읽을 수 없어요. 메일 연결에서 비밀번호를 다시 저장해 주세요.');
   const iv = Buffer.from(parts[0], 'base64');
   const ciphertext = Buffer.from(parts[1], 'base64');
   const authTag = Buffer.from(parts[2], 'base64');
@@ -156,17 +165,17 @@ export function clearTransporterCache(companyId: string): void {
 export async function saveSmtpConfig(companyId: string, config: SmtpConfig): Promise<void> {
   if (!companyId) throw new Error('companyId 필수');
   if (!config.host || !config.port || !config.user || !config.password || !config.fromEmail) {
-    throw new Error('SMTP 설정 필드 (host/port/user/password/fromEmail) 필수');
+    throw new UserFacingError(400, 'SMTP_INPUT', '메일 서버 주소 · 포트 · 아이디 · 비밀번호 · 보내는 주소를 모두 넣어 주세요.');
   }
   // 포트 범위 검증 (1~65535)
   const port = Number(config.port);
   if (!Number.isInteger(port) || port < 1 || port > 65535) {
-    throw new Error('SMTP 포트 범위 오류 (1~65535)');
+    throw new UserFacingError(400, 'SMTP_INPUT', '포트는 1~65535 사이 숫자로 넣어 주세요.');
   }
   // 이메일 형식 단순 검증
   const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
   if (!emailPattern.test(config.fromEmail)) {
-    throw new Error('SMTP fromEmail 형식 오류');
+    throw new UserFacingError(400, 'SMTP_INPUT', '보내는 메일 주소 형식이 맞지 않아요.');
   }
 
   const encrypted = encryptPassword(config.password);
@@ -254,11 +263,11 @@ async function getTransporter(companyId: string): Promise<Transporter> {
      FROM companies WHERE id = $1::uuid LIMIT 1`,
     [companyId]
   );
-  if (r.rows.length === 0) throw new Error(`회사 ${companyId} 미발견`);
+  if (r.rows.length === 0) throw new UserFacingError(404, 'COMPANY_NOT_FOUND', '회사를 찾을 수 없어요.');
   const row = r.rows[0];
 
   if (!row.smtp_host || !row.smtp_user || !row.smtp_password_encrypted) {
-    throw new Error('SMTP 설정 미완료. 회사 admin이 SMTP 정보 등록 후 진입 의무');
+    throw new UserFacingError(409, 'SMTP_NOT_CONFIGURED', '회사 메일 연결이 끝나지 않았어요. 관리 메뉴에서 회사 메일을 연결해 주세요.');
   }
 
   // 복호화 → transporter 생성 → 즉시 평문 폐기
@@ -288,7 +297,7 @@ async function getTransporter(companyId: string): Promise<Transporter> {
 export async function sendTestEmail(companyId: string, toEmail: string): Promise<SendEmailResult> {
   if (!companyId || !toEmail) throw new Error('companyId + toEmail 필수');
   const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-  if (!emailPattern.test(toEmail)) throw new Error('수신 이메일 형식 오류');
+  if (!emailPattern.test(toEmail)) throw new UserFacingError(400, 'EMAIL_INVALID', '받는 메일 주소 형식이 맞지 않아요.');
 
   const transporter = await getTransporter(companyId);
   const config = await getSmtpConfigPublic(companyId);

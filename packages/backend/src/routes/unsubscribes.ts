@@ -1,3 +1,4 @@
+import { uploadErrorText } from '../utils/http-error';
 import { Request, Response, Router } from 'express';
 import { logPrivacyExport } from '../utils/privacy-audit';
 import fs from 'fs';
@@ -46,9 +47,10 @@ const unsubUploadStorage = multer.diskStorage({
     cb(null, `unsub-${uniqueSuffix}${ext}`);
   },
 });
+const UNSUB_UPLOAD_LIMITS = { fileSize: 20 * 1024 * 1024, files: 1 };
 const unsubUpload = multer({
   storage: unsubUploadStorage,
-  limits: { fileSize: 20 * 1024 * 1024, files: 1 },
+  limits: UNSUB_UPLOAD_LIMITS,
   fileFilter: (_req, file, cb) => {
     const allowed = ['.xlsx', '.xls', '.csv', '.txt'];
     const ext = path.extname(file.originalname).toLowerCase();
@@ -60,9 +62,7 @@ const unsubUpload = multer({
 function unsubUploadMw(req: Request, res: Response, next: () => void) {
   unsubUpload.single('file')(req, res, (err: any) => {
     if (err) {
-      const msg = err instanceof multer.MulterError && err.code === 'LIMIT_FILE_SIZE'
-        ? '파일이 너무 큽니다. (최대 20MB)'
-        : (err?.message || '파일 업로드 오류');
+      const msg = uploadErrorText(err, UNSUB_UPLOAD_LIMITS);   // ★ 2026-10-25 Z5 업로드 오류 한 곳(multer 원문 0)
       return res.status(400).json({ error: msg });
     }
     next();

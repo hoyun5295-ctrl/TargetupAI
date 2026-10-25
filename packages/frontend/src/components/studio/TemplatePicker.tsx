@@ -11,6 +11,7 @@
  *   자동 진입은 창(autoOpenIndustry)에서 업종 카테고리가 하나일 때만 한다(요식 = 셋이라 카페·식당 추측 금지).
  */
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
+import { creditText } from '../../constants/credit';
 import { ShoppingBag, Sparkles, ChevronLeft, Search, X } from 'lucide-react';
 import ZoneSegmented from '../zone/ZoneSegmented';
 import { studioFetch } from '../../lib/studio-api';
@@ -217,8 +218,8 @@ export default function TemplatePicker({
           </div>
           <p className="text-[10px] text-slate-400 italic mt-3">
             {industryOn
-              ? '브랜드 기본 정보의 업종 기준으로 우리 업종 카테고리를 앞에 놓았어요. 생성 1회 2크레딧.'
-              : '카테고리를 고르면 템플릿 목록으로 이동합니다. 생성 1회 2크레딧.'}
+              ? `브랜드 기본 정보의 업종 기준으로 우리 업종 카테고리를 앞에 놓았어요. 생성 1회 ${creditText('image-studio-generate')}.`
+              : `카테고리를 고르면 템플릿 목록으로 이동합니다. 생성 1회 ${creditText('image-studio-generate')}.`}
           </p>
         </section>
       )}

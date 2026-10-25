@@ -8,7 +8,7 @@
  */
 import { query, pool, withTransaction } from '../../config/database';
 import { getDmByCode, extractFlatSectionsFromDm } from './dm-builder';
-import { PARTICIPATION_TYPES } from './dm-section-registry';
+import { PARTICIPATION_TYPES, SECTION_META } from './dm-section-registry';
 import { lookupDmRecipientToken } from './dm-recipient-token';
 import {
   pickRouletteForParticipant,
@@ -286,7 +286,8 @@ export async function getResponses(companyId: string, dmId: string, page = 1, li
 
 export async function getWinners(companyId: string, dmId: string): Promise<any[]> {
   const r = await query(
-    `SELECT w.id, w.rank, w.win_method, w.winner_name, w.winner_phone, w.winner_email,
+    // ★ 2026-10-25 원장 #70 — 응모 번호(response_id)도 꺼낸다(응모자 엑셀의 당첨 여부 · 등급이 이것으로 이어진다 · 옛: 빠져 추첨 당첨자가 늘 빈칸)
+    `SELECT w.id, w.response_id, w.rank, w.win_method, w.winner_name, w.winner_phone, w.winner_email,
             w.is_member, w.reward_code, w.notified_at, w.drawn_at, p.name AS prize_name
      FROM dm_winners w
      LEFT JOIN dm_prizes p ON p.id = w.prize_id
@@ -345,7 +346,7 @@ export function buildResponseExportRows(responses: any[], winners: any[]): any[]
       전화: r.customer_phone || r.response_data?.phone || '',
       이메일: r.customer_email || r.response_data?.email || '',
       회원여부: r.customer_id ? '회원' : '비회원',
-      참여섹션: r.section_type,
+      참여섹션: (SECTION_META as Record<string, { label: string } | undefined>)[r.section_type]?.label || '참여 블록',   // ★ 2026-10-25 원장 #63 — 한국어 이름(옛: lucky_draw 같은 원문)
       참여시각: r.occurred_at,
       당첨여부: w || r.response_data?.spin_result?.won ? '당첨' : '',
       당첨등급: w?.rank ?? '',
@@ -466,7 +467,7 @@ export async function syncPrizesFromSections(companyId: string, dmId: string): P
 
 // ────────────────── 마감 추첨 워커 전용 DB ──────────────────
 
-export type DrawableCampaign = { campaignId: string; companyId: string; sectionId: string; drawAt: string };
+export type DrawableCampaign = { campaignId: string; companyId: string; sectionId: string; drawAt: string; title?: string; createdBy?: string | null };
 
 /**
  * 발행 중이거나 중지된 lucky_draw + 아직 미추첨(dm_draw_runs 없음) 중 draw_at 도래 후보.
@@ -479,7 +480,7 @@ export type DrawableCampaign = { campaignId: string; companyId: string; sectionI
  */
 export async function loadDrawableLuckyDraws(): Promise<DrawableCampaign[]> {
   const r = await query(
-    `SELECT id, company_id, sections, pages FROM dm_pages
+    `SELECT id, company_id, sections, pages, title, created_by FROM dm_pages
      WHERE status IN ('published', 'stopped')
        AND (event_type = 'lucky_draw' OR sections::text LIKE '%"lucky_draw"%' OR pages::text LIKE '%"lucky_draw"%')
        AND NOT EXISTS (SELECT 1 FROM dm_draw_runs dr WHERE dr.campaign_id = dm_pages.id)`,
@@ -491,7 +492,7 @@ export async function loadDrawableLuckyDraws(): Promise<DrawableCampaign[]> {
     const drawAt = sec?.props?.draw_at;
     if (!sec || !drawAt) continue;
     if (new Date(drawAt).getTime() > Date.now()) continue; // 아직 마감 전
-    out.push({ campaignId: dm.id, companyId: dm.company_id, sectionId: sec.id, drawAt });
+    out.push({ campaignId: dm.id, companyId: dm.company_id, sectionId: sec.id, drawAt, title: String(dm.title || ''), createdBy: dm.created_by || null });
   }
   return out;
 }

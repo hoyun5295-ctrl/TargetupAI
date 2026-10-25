@@ -11,6 +11,7 @@
  *     멈추기 · 다시 켜기 = 공용 훅 · 「새 판」 버튼 없음(고치기 = 작업 화면이 새 모양을 서버 한 흐름으로) · 판 아래 기준 줄 삭제(머리 표지 툴팁).
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { creditCost } from '../constants/credit';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { ArrowLeft, List, Loader2, Map as MapIcon, MessageSquarePlus, Power, RefreshCw, Search, Sparkles } from 'lucide-react';
 import { JOURNEY_TABS } from '../components/zone/zone-tabs';
@@ -132,7 +133,7 @@ export default function JourneyMapPage() {
     setSearchParams((prev) => { const n = new URLSearchParams(prev); n.delete('journey'); n.delete('step'); return n; }, { replace: true });
     if (returnToBatch) { setBatch({ open: true, preselect: returnToBatch }); setReturnToBatch(null); }
   }, [setSearchParams, returnToBatch]);
-  const journeyActions = useJourneyActions({ onChanged: () => { void load(true); }, operationCost: data?.costs.operation ?? 10 });
+  const journeyActions = useJourneyActions({ onChanged: () => { void load(true); }, operationCost: data?.costs.operation ?? creditCost('journey-operation') });
 
   const create = useCallback((triggerEvent: string, objective?: string, mode?: CreateMode) => {
     // ★ 2026-09-30 V2 3차 — 상품을 골라야 하는 여정(상품 재구매)은 상품 고르기 창으로(1클릭 프리셋으로 만들 수 없다).

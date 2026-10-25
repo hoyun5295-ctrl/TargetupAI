@@ -91,7 +91,7 @@ describe('0-1 · 0-2 · 0-4 소스 계약', () => {
   const orch = read('services/ai-orchestrator.ts');
   const comp = read('routes/companies.ts');
   it('허브 제안 = chargeOnlyWithTarget + 요청 사용자 유형', () => {
-    expect(ai).toMatch(/source: 'ai-operator-propose', cost: 5, chargeOnlyWithTarget: true/);
+    expect(ai).toMatch(/source: 'ai-operator-propose', cost: getCreditCost\('ai-operator-propose'\), chargeOnlyWithTarget: true/);   // ★ 1025 Z2 단가 = 단가표
     expect(ai).toMatch(/userType: req\.user\?\.userType \?\? null/);
   });
   it('orchestrateWithAI 도 0명이면 차감하지 않는다', () => {

@@ -7,6 +7,7 @@
  *
  * cdp_assets 테이블 미생성 환경 = 503 DB_MIGRATION_PENDING (db_alter_safety_net 미러 — 500 노출 금지).
  */
+import { respondUserError, uploadErrorText } from '../utils/http-error';
 import { Router, Response } from 'express';
 import multer from 'multer';
 import path from 'path';
@@ -21,9 +22,10 @@ assetsRouter.use(authenticate);
 // 업로드 한도·형식 = 인앱 업로드(routes/cdp.ts inappImageUpload)와 동일 규격.
 // 단 이쪽은 요금제 게이트가 없다 — 브랜드 메시지 발송이 요금제 무관(발신프로필만 전제)이라
 // 편집기 업로드도 같은 기준이어야 죽은 버튼이 안 생긴다. 규모 통제는 플랜별 저장 한도가 담당.
+const ASSET_UPLOAD_LIMITS = { fileSize: 2 * 1024 * 1024, files: 1 };
 const assetImageUpload = multer({
   storage: multer.memoryStorage(),
-  limits: { fileSize: 2 * 1024 * 1024, files: 1 },
+  limits: ASSET_UPLOAD_LIMITS,
   fileFilter: (_req, file, cb) => {
     const ext = path.extname(file.originalname).toLowerCase();
     const mime = file.mimetype.toLowerCase();
@@ -54,6 +56,7 @@ assetsRouter.get('/', async (req: any, res: Response) => {
   } catch (err: any) {
     if (isAssetsTableMissing(err)) return respondMigrationPending(res);
     console.error('[assets list] 오류:', err?.message);
+    if (respondUserError(res, err)) return;   // ★ 2026-10-25 R10 — 사용자 조건 오류 = 그 상태 · 문장 그대로
     return res.status(500).json({ success: false, error: '라이브러리를 불러오지 못했습니다.' });
   }
 });
@@ -61,12 +64,7 @@ assetsRouter.get('/', async (req: any, res: Response) => {
 // 업로드 + 자동 등재 — 브랜드 편집기 등 발송 화면 공용. 응답 url은 상대 경로(공개 서빙).
 assetsRouter.post('/upload', (req: any, res: Response) => {
   assetImageUpload.single('image')(req, res, async (err: any) => {
-    if (err) {
-      if (err.code === 'LIMIT_FILE_SIZE') {
-        return res.status(400).json({ success: false, error: '이미지 크기는 2MB 이하여야 합니다.' });
-      }
-      return res.status(400).json({ success: false, error: err.message || '이미지 업로드 실패' });
-    }
+    if (err) return res.status(400).json({ success: false, error: uploadErrorText(err, ASSET_UPLOAD_LIMITS) });   // ★ 2026-10-25 Z5 업로드 오류 한 곳
     const companyId = req.user?.companyId;
     const userId = req.user?.userId;
     if (!companyId || !userId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
@@ -88,6 +86,7 @@ assetsRouter.post('/upload', (req: any, res: Response) => {
       } catch (usageErr: any) {
         if (isAssetsTableMissing(usageErr)) return respondMigrationPending(res);
         console.error('[assets upload] 용량 확인 실패:', usageErr?.message);
+        if (respondUserError(res, usageErr)) return;   // ★ 2026-10-25 R10 — 사용자 조건 오류 = 그 상태 · 문장 그대로
         return res.status(500).json({ success: false, error: '저장 공간을 확인하지 못했습니다. 잠시 후 다시 시도해주세요.' });
       }
       const stored = await storeAssetFile({
@@ -96,6 +95,7 @@ assetsRouter.post('/upload', (req: any, res: Response) => {
       return res.json({ success: true, url: stored.url, filename: stored.filename, size: stored.bytes, assetId: stored.assetId });
     } catch (e: any) {
       console.error('[assets upload] 오류:', e?.message);
+      if (respondUserError(res, e)) return;   // ★ 2026-10-25 R10 — 사용자 조건 오류 = 그 상태 · 문장 그대로
       return res.status(500).json({ success: false, error: '이미지를 저장하지 못했습니다.' });
     }
   });
@@ -117,6 +117,7 @@ assetsRouter.delete('/:id', async (req: any, res: Response) => {
   } catch (err: any) {
     if (isAssetsTableMissing(err)) return respondMigrationPending(res);
     console.error('[assets delete] 오류:', err?.message);
+    if (respondUserError(res, err)) return;   // ★ 2026-10-25 R10 — 사용자 조건 오류 = 그 상태 · 문장 그대로
     return res.status(500).json({ success: false, error: '삭제하지 못했습니다.' });
   }
 });

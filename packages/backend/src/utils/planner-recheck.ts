@@ -15,6 +15,7 @@
  *   - 승인 직후 즉시 실행은 이 파일이 하지 않는다(실행부 순환 import 금지) — 라우트가 `kickPlannerTouchpointNow`(실행부 · 발송 시간대 안에서만 · B1)를 부른다.
  *   - 고객 문장은 사유 사전(planner-reasons) · 원문 오류는 로그에만 · 줄표 0.
  */
+import { SPAM_ERROR_RETRY_MAX } from './spam-test-queue';
 import { createHash, randomBytes, timingSafeEqual } from 'crypto';
 import { pool, query } from '../config/database';
 import { SEND_HOURS } from '../config/defaults';
@@ -27,10 +28,7 @@ import { maskPhone } from './mfa';
 import { isStrictSenderAuthAlive } from './sender-auth';
 import { normalizePhone } from './normalize-phone';
 import { pickOperatorFallbackContact, notifyOperatorAdmins } from './continuous-operator';
-import {
-  PlannerTouchpointRow, loadEventTouchpoints, loadTouchpointById, loadAllLiveTouchpoints, notifyPlanner,
-  guardPlannerMetaOrSkip, setTouchpointMetaIfCopyIs,
-} from './planner-touchpoint';
+import { PlannerTouchpointRow, loadEventTouchpoints, loadTouchpointById, loadAllLiveTouchpoints, notifyPlanner, guardPlannerMetaOrSkip, setTouchpointMetaIfCopyIs, touchpointSendStarted } from './planner-touchpoint';
 import { PLANNER_NOTICE_HEADER, PLANNER_SEND_SOURCE, addDays, appendDmLink, kstDateString, resolveAudienceMode } from './planner-execution';
 import { PlannerEventRow, loadPlannerEvent, firstSendDate } from './planner-event';
 import { PLANNER_APPROVAL_DEADLINE_HOUR, computeTouchpointFingerprints, plannerNumbersOf, plannerSendNumberTexts, plannerSendNumbers, type PlannerSendNumbers } from './planner-confirm';
@@ -58,6 +56,9 @@ export interface PlannerRecheckMeta {
   /** 새 문안을 마지막으로 만들어 본 날(KST · 하루 1회) */
   proposalTried?: string | null;
   proposalError?: 'failed' | 'unsafe' | 'blocked' | null;
+  /** ★ 2026-10-25 원장 #48 — 검사 장애로 판정을 못 받은 새 문안(다음 주기에 이 글로 다시 검사 · AI 다시 부르지 않음) · 장애 횟수 */
+  proposalDraft?: { body: string; subject: string } | null;
+  proposalCheckErrors?: number;
   notifiedAt?: string | null;
   notifiedUserId?: string | null;
   tokenHash?: string | null;
@@ -595,13 +596,26 @@ async function notifyRecheck(p: RecheckPair, now: Date): Promise<boolean> {
 async function remindRecheck(p: RecheckPair, now: Date): Promise<boolean> {
   const contact = await pickOperatorFallbackContact(p.ev.companyId, p.ev.createdBy).catch(() => null);
   if (!contact) return false;
-  if (!(await patchRecheck(p, { remindedAt: now.toISOString() }))) return false;
-  return notifyOperatorAdmins(
+  const stamp = now.toISOString();
+  if (!(await patchRecheck(p, { remindedAt: stamp }))) return false;
+  const sent = await notifyOperatorAdmins(
     { adminPhoneNumbers: [contact.phone], backupAdminPhone: null, companyId: p.ev.companyId, createdBy: p.ev.createdBy },
     '[마케팅 플래너] 오늘 발송 마감 전',
     `'${p.ev.title}' 오늘 문자를 아직 정하지 않으셨어요. ${PLANNER_APPROVAL_DEADLINE_HOUR}시까지 앞서 보내 드린 링크에서 정해 주세요. 정하지 않으시면 이 날 발송만 건너뜁니다.`,
     { noticeHeader: PLANNER_NOTICE_HEADER },
   ).catch(() => false);
+  if (!sent) {
+    // ★ 2026-10-25 원장 #49 — 못 나갔으면 「보냄」 기록을 되돌려 다음 주기가 다시 보낸다(같은 파일 notifyRecheck 와 같은 꼴 · 옛: 기록을 먼저 쓰고 결과를 안 봐 다시 안 보냄)
+    //   내가 쓴 기록 그대로일 때만 지운다(그 사이 다른 실행이 쓴 기록을 지우지 않게)
+    await query(
+      `UPDATE planner_touchpoints
+          SET exec_meta = exec_meta || jsonb_build_object('recheck', (exec_meta->'recheck') || '{"remindedAt": null}'::jsonb)
+        WHERE company_id = $1::uuid AND id = ANY($2::uuid[]) AND exec_meta->'recheck'->>'remindedAt' = $3`,
+      [p.ev.companyId, pairIds(p), stamp],
+    ).catch(() => null);
+    console.warn(`[planner-recheck] 마감 전 문자 실패 carrier=${p.carrier.id} — 다음 주기 재시도`);
+  }
+  return sent;
 }
 
 // ── 재확인 패스 ─────────────────────────────────────────────────────
@@ -616,12 +630,19 @@ async function prepareProposal(p: RecheckPair, today: string): Promise<void> {
     const callback = await loadPlannerDefaultCallback(p.ev.companyId);
     const opt080 = await getOpt080Number(p.ev.createdBy || null, p.ev.companyId);
     if (ctx && callback && opt080 && (!withDmLink || url)) {
-      const draft = await generatePlannerCopyText(p.carrier, ctx, withDmLink).catch(() => null);
+      const draft = p.recheck.proposalDraft?.body ? p.recheck.proposalDraft : await generatePlannerCopyText(p.carrier, ctx, withDmLink).catch(() => null);
       if (draft && draft.body.trim() && !hasUneditedBenefitPlaceholder(draft.body)) {
         const check = await spamCheckPlannerVerdict({
-          tp: p.carrier, body: appendDmLink(draft.body, url), subject: draft.subject, callback, rejectNumber: opt080, link: url, withDmLink, regenerate: true,
+          tp: p.carrier, body: appendDmLink(draft.body, url), subject: draft.subject, callback, rejectNumber: opt080, link: url, withDmLink, regenerate: !p.recheck.proposalDraft,
         });
-        if (check.verdict === 'pass') {
+        if (check.verdict === 'error') {
+          // ★ 2026-10-25 원장 #48 — 검사 장애 = 통과도 차단도 아니다. 만든 글을 두고 다음 주기에 다시 검사(상한 · 넘으면 오늘은 「만들지 못함」)
+          const errors = Number(p.recheck.proposalCheckErrors || 0) + 1;
+          if (errors < SPAM_ERROR_RETRY_MAX) {
+            await patchRecheck(p, { proposalDraft: { body: draft.body, subject: draft.subject || '' }, proposalCheckErrors: errors });
+            return;
+          }
+        } else if (check.verdict === 'pass') {
           const text = stripDmLink(check.body, url);
           const orig = p.carrier.execMeta?.copy as PlannerCopy | undefined;
           const issue = recheckProposalIssue({
@@ -638,7 +659,7 @@ async function prepareProposal(p: RecheckPair, today: string): Promise<void> {
   } catch (e: any) {
     console.warn(`[planner-recheck] 새 문안 준비 실패 carrier=${p.carrier.id}:`, e?.message || e);
   }
-  await patchRecheck(p, { proposal, proposalTried: today, proposalError });
+  await patchRecheck(p, { proposal, proposalTried: today, proposalError, proposalDraft: null, proposalCheckErrors: 0 });
 }
 
 /** 고친 글 검사(이 회차 · 실주소 링크 · 재생성 0) — 검사한 글이 그대로일 때만 결과를 쓴다(CAS). 검사 장애는 다음 주기에 다시. */
@@ -772,6 +793,8 @@ export interface RecheckView {
   actions: { approve: ActionState; edit: ActionState; skip: ActionState; defer: ActionState; cancel: ActionState };
   /** 링크 화면만 — 인증 상태(보내기 · 고치기 · 취소 앞) */
   auth: { required: boolean; alive: boolean; maskedPhone: string | null } | null;
+  /** ★ 2026-10-25 원장 #57 — 행사 승인을 풀 수 있는가(승인됨 + 이 행사에 시작된 발송 0 · 승인 풀기와 같은 판정) */
+  canUnapprove: boolean;
 }
 
 async function loadCompanyName(companyId: string): Promise<string> {
@@ -856,5 +879,6 @@ export async function buildRecheckView(p: RecheckPair, opts: { mode: 'public' | 
         maskedPhone: linkActor?.maskedPhone || null,
       }
       : null,
+    canUnapprove: p.ev.status === 'approved' && !p.all.some((t) => touchpointSendStarted(t)),
   };
 }

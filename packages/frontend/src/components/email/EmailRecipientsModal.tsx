@@ -2,6 +2,7 @@
 // ★ 2026-09-27 만들기 개편 — EmailCampaignsPage 의 발송 대상 창(RecipientsModal)을 원본 그대로 옮겼다.
 //   결과 화면·보내기 창·이메일 첫 화면이 같은 창을 쓴다(고객DB·직접 입력·AI 정밀 타겟 · 즉시/예약 · 발송 전 AI 진단).
 import { useEffect, useState } from 'react';
+import { creditText } from '../../constants/credit';
 import { AlertCircle, AlertTriangle, Check, Clock, Loader2, PenLine, Send, Sparkles, Users, X } from 'lucide-react';
 import { DateTimeField, isoToLocalInput, localInputToIso } from '../DateTimeField';
 import TargetExtractModal, { type ExtractedTarget } from '../TargetExtractModal';
@@ -85,7 +86,7 @@ export default function EmailRecipientsModal({ campaign, authHeaders, onProceed,
       });
       const data = await res.json();
       if (data?.code === 'INSUFFICIENT_CREDIT') { onToast('크레딧이 부족합니다. 충전 후 이용해주세요.', 'warning'); return; }
-      if (data.success) { setPrecheck({ codeChecks: data.codeChecks, spamRisk: data.spamRisk }); onToast('발송 전 진단 완료 (1 크레딧)', 'success'); }
+      if (data.success) { setPrecheck({ codeChecks: data.codeChecks, spamRisk: data.spamRisk }); onToast(`발송 전 진단 완료 (${creditText('email-precheck')})`, 'success'); }
       else onToast(data.error || '진단 실패', 'error');
     } catch (e: any) {
       onToast(e?.message || '진단 중 오류', 'error');
@@ -226,7 +227,7 @@ export default function EmailRecipientsModal({ campaign, authHeaders, onProceed,
               className="text-xs text-fuchsia-700 hover:text-fuchsia-800 flex items-center gap-1.5 disabled:opacity-50"
             >
               {prechecking ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Sparkles className="w-3.5 h-3.5" />}
-              발송 전 AI 진단 (스팸 위험 · 광고 표기 · 모바일 잘림 · 1 크레딧)
+              발송 전 AI 진단 (스팸 위험 · 광고 표기 · 모바일 잘림 · {creditText('email-precheck')})
             </button>
             {precheck && (
               <div className="mt-3 space-y-2 bg-violet-50 rounded-lg p-3">

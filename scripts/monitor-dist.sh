@@ -77,6 +77,6 @@ check_and_recover() {
 
 check_and_recover "frontend"
 # 2026-07-18 company-frontend 폐기(관리자 화면 차단·패키지 제거) — 감시 대상에서 제외
-check_and_recover "flyer-frontend"
+# 2026-10-25 flyer-frontend 폐기(전단AI = hanjulDM 별도 프로젝트) — 감시 대상에서 제외
 
 exit 0

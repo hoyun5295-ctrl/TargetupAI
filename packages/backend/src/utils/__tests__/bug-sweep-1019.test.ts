@@ -50,11 +50,12 @@ describe('B-1009-6 켜진 여정 문안 수정 = 발송 시점 관문 · 판마�
     expect(ex).not.toContain('last_pretest_passed_at');
     expect(jb).toContain('VALUES ($1, $2, $3, NULL, $4, $5, $6, $7, $8, $9, $10, 0)');
     const pn = readFileSync(join(__dirname, '..', 'journey-pretest-notifier.ts'), 'utf8');
-    expect(pn.indexOf('await markSnapshotChecked(snap.id);')).toBeGreaterThan(pn.indexOf('if (r1.enqueueOk && r1.ok) {'));
+    expect(pn.indexOf("if (verdict === 'pass') {")).toBeGreaterThan(-1);
+    expect(pn.indexOf('await markSnapshotChecked(snap.id);')).toBeGreaterThan(pn.indexOf("if (verdict === 'pass') {"));
     expect(pn).toContain('SET message_body = $2, confidence_score = 100 WHERE id = $1::uuid');
-    // F4 — 판을 먼저 보고 재검사 전 판은 날짜별 처리 기록으로 건너뛰지 않는다 · 조회 실패는 문자 칸을 미룬다
-    expect(pn.indexOf('const unchecked =')).toBeLessThan(pn.indexOf('FROM journey_pretest_schedules'));
-    expect(pn).toContain('if (!unchecked) {');
+    // F4 — 재검사 전 판은 날짜별 처리 기록으로 건너뛰지 않는다(★1025 #2 = 후보 SQL 안 · LIMIT 앞) · 조회 실패는 문자 칸을 미룬다
+    expect(pn).toMatch(/ORDER BY ss\.created_at DESC LIMIT 1\), 100\) < 100\s+OR NOT EXISTS \(SELECT 1 FROM journey_pretest_schedules/);
+    expect(pn.indexOf('FROM journey_pretest_schedules ps')).toBeLessThan(pn.indexOf('LIMIT ${PRETEST_SCAN_BUNDLE_LIMIT}'));
     expect(ex).toContain('snapshotReadFailed = true;');
     expect(ex.indexOf("if (snapshotReadFailed && ['sms', 'lms', 'mms']")).toBeGreaterThan(ex.indexOf('const gate = await query('));
     expect(jb).not.toContain('UPDATE journey_executions je SET next_run_at');

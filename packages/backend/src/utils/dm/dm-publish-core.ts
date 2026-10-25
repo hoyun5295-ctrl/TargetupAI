@@ -9,10 +9,11 @@
  * 반환 = 성공(주소·청구 여부) 또는 거절(라우트가 그대로 HTTP로 옮길 status·code·문구). 잔액 부족(checkCredit)은 던진다(호출부 402).
  */
 import { query } from '../../config/database';
-import { checkCredit, deductCreditSafe, isCreditEnabledStrict } from '../ai-credit';
+import { withDmPublishLock } from '../keyed-lock';
+import { checkCredit, settleOrUndo } from '../ai-credit';
 import { findLinkDefectDeep } from '../normalize';
-import { dmPublishBlocker, dmPublishFeeSourceOf, isDmPublishFeeCharged } from './dm-publish-gate';
-import { getDmDetail, isDmStopped, publishDm } from './dm-builder';
+import { dmPublishBlocker, dmPublishFeeSourceOf, publishFeeDueStrict } from './dm-publish-gate';
+import { getDmDetail, isDmStopped, publishDm, revertFreshPublish } from './dm-builder';
 import { syncPrizesFromSections } from './dm-interaction';
 
 export type DmPublishCoreResult =
@@ -73,59 +74,61 @@ export async function publishDmCore(input: {
   const block = await dmPublishBlockOf(companyId, dmId);
   if (block) return { ok: false, ...block };
 
-  // ★ 종량제: 발행(단축URL 확정) 최초 1회만(멱등키 dm-publish:dmId). 인터랙션 캠페인 · 일반 DM 단가 = 단가표. 재발행은 멱등 0.
-  const { source: costSource, cost: pubCost } = await dmPublishFeeSourceOf(companyId, dmId);
-  const firstPublish = !(await isDmPublishFeeCharged(companyId, dmId));
-  // ★ 2026-09-27 Codex 3R·4R — 화면이 확인한 발행비(expected_fee)가 오면 **청구 여부를 여기서 한 번 정하고** 차감까지 그대로 쓴다.
-  //   지금 발행비가 더 크면 차감 전에 402 · 크레딧제 미적용으로 통과한 요청은 뒤에 켜져도 걷지 않는다.
-  //   값을 싣지 않는 옛 호출부(편집기 발행 · 목록 주소 복사)는 동작 그대로(chargeNow = firstPublish).
-  const expectedFee = input.expectedFee;
-  let chargeNow = firstPublish;
-  if (typeof expectedFee === 'number' && firstPublish) {
-    const creditOn = await isCreditEnabledStrict(companyId);
-    if (creditOn && pubCost > expectedFee) {
-      return { ok: false, status: 402, code: 'PUBLISH_FEE_REQUIRED', error: '발행 비용을 다시 확인해 주세요.', extra: { costSource, cost: pubCost } };
+  // ★ 2026-10-26 Codex 2R — 발행비 판정 → 발행 → 정산 = DM 단위 잠금(보내기 길과 같은 잠금 · 정산 중인 남의 첫 발행 주소를 면제 근거로 쓰지 않는다)
+  return withDmPublishLock(dmId, async () => {
+    // ★ 종량제: 발행(단축URL 확정) 최초 1회만(멱등키 dm-publish:dmId). 인터랙션 캠페인 · 일반 DM 단가 = 단가표. 재발행은 멱등 0.
+    // ★ 2026-10-25 발행비 판정 한 벌(#65 · publishFeeDueStrict) — 보내기 길과 같은 식(첫 발행만 · 옛 실발송 이력 면제 · 크레딧제 적용).
+    //   화면이 확인한 발행비(expected_fee)보다 지금 발행비가 크면 차감 전에 402(화면이 견적을 다시 받는다).
+    const due = await publishFeeDueStrict(companyId, dmId);
+    const { source: costSource } = due || await dmPublishFeeSourceOf(companyId, dmId);
+    const expectedFee = input.expectedFee;
+    // ★ 2026-10-25 원장 #65 · #76 — 금액 확인 없는 발행(옛: 편집기 [발행] · 목록 [발행 주소 복사]가 금액을 싣지 않아 확인 없이 차감)도 402
+    if (due && (typeof expectedFee !== 'number' || due.cost > expectedFee)) {
+      return { ok: false, status: 402, code: 'PUBLISH_FEE_REQUIRED', error: '발행 비용을 다시 확인해 주세요.', extra: { costSource: due.source, cost: due.cost } };
     }
-    chargeNow = creditOn;
-  }
-  if (chargeNow) await checkCredit(companyId, pubCost);
-  const result = await publishDmWithPrizes(dmId, companyId);
-  if (!result) return { ok: false, status: 404, code: null, error: 'DM을 찾을 수 없습니다.' };
+    if (due) await checkCredit(companyId, due.cost);
+    const before = due ? (await query(`SELECT status FROM dm_pages WHERE id = $1 AND company_id = $2`, [dmId, companyId])).rows[0] : null;
+    const result = await publishDmWithPrizes(dmId, companyId);
+    if (!result) return { ok: false, status: 404, code: null, error: 'DM을 찾을 수 없습니다.' };
 
-  // ★ 2026-07-28 검수 치명 무시 발행 기록 — 무시 가능한 치명(required_info)만 프론트가 넘길 수 있고 "누가 언제 무엇을 넘겼는지"를 남긴다.
-  //   실패해도 발행은 유지한다(경품 동기화와 같은 원칙).
-  const overrideReq = input.validationOverride;
-  if (overrideReq && Array.isArray(overrideReq.items) && overrideReq.items.length > 0) {
-    try {
-      await query(
-        // dm_pages.validation_result = jsonb (2026-07-28 information_schema 실측 확정).
-        `UPDATE dm_pages
-            SET validation_result = (COALESCE(validation_result::jsonb, '{}'::jsonb) || $1::jsonb),
-                updated_at = NOW()
-          WHERE id = $2 AND company_id = $3`,
-        [
-          JSON.stringify({
-            overridden_at: new Date().toISOString(),
-            overridden_by: input.userId || null,
-            overridden_items: overrideReq.items
-              .filter((i: any) => i && typeof i.message === 'string')
-              .map((i: any) => ({ area: String(i.area || ''), message: String(i.message) })),
-          }),
-          dmId,
-          companyId,
-        ],
-      );
-    } catch (e: any) {
-      console.error('[DM발행] 검수 무시 기록 실패:', e?.message);
+    // ★ 2026-07-28 검수 치명 무시 발행 기록 — 무시 가능한 치명(required_info)만 프론트가 넘길 수 있고 "누가 언제 무엇을 넘겼는지"를 남긴다.
+    //   실패해도 발행은 유지한다(경품 동기화와 같은 원칙).
+    const overrideReq = input.validationOverride;
+    if (overrideReq && Array.isArray(overrideReq.items) && overrideReq.items.length > 0) {
+      try {
+        await query(
+          // dm_pages.validation_result = jsonb (2026-07-28 information_schema 실측 확정).
+          `UPDATE dm_pages
+              SET validation_result = (COALESCE(validation_result::jsonb, '{}'::jsonb) || $1::jsonb),
+                  updated_at = NOW()
+            WHERE id = $2 AND company_id = $3`,
+          [
+            JSON.stringify({
+              overridden_at: new Date().toISOString(),
+              overridden_by: input.userId || null,
+              overridden_items: overrideReq.items
+                .filter((i: any) => i && typeof i.message === 'string')
+                .map((i: any) => ({ area: String(i.area || ''), message: String(i.message) })),
+            }),
+            dmId,
+            companyId,
+          ],
+        );
+      } catch (e: any) {
+        console.error('[DM발행] 검수 무시 기록 실패:', e?.message);
+      }
     }
-  }
-  if (chargeNow) {
-    await deductCreditSafe({
-      companyId, cost: pubCost, source: costSource, createdBy: input.userId,
-      idempotencyKey: `dm-publish:${dmId}`,
-    });
-  }
-  return { ok: true, shortCode: result.short_code, shortUrl: dmShortUrlOf(result.short_code), charged: chargeNow, cost: chargeNow ? pubCost : 0, source: costSource };
+    if (due) {
+      // ★ 2026-10-25 성공 뒤 차감 한 규칙(D1 A) — 동시 소진(402) · 원장 쓰기 실패(503) = 방금 만든 첫 발행을 되돌리고 던진다(무과금 주소 0)
+      //   ★ 1026 Codex 1R — 되돌리기마저 실패 = [CREDIT][ORPHAN] 경보(같은 키 dm-publish:{id} 로 사람이 걷는다 · 옛: 로그 한 줄)
+      await settleOrUndo({
+        settle: { companyId, cost: due.cost, source: due.source, createdBy: input.userId, idempotencyKey: `dm-publish:${dmId}` },
+        undo: () => revertFreshPublish(dmId, companyId, result.short_code, String(before?.status || 'draft')),
+        what: 'DM 첫 발행',
+      });
+    }
+    return { ok: true, shortCode: result.short_code, shortUrl: dmShortUrlOf(result.short_code), charged: !!due, cost: due ? due.cost : 0, source: costSource };
+  });
 }
 
 /**

@@ -14,6 +14,8 @@ import { join } from 'path';
 
 const src = readFileSync(join(__dirname, '..', '..', 'routes', 'cdp.ts'), 'utf8');
 const put = src.slice(src.indexOf("router.put('/inapp/:id',"), src.indexOf("router.put('/inapp/:id/audience-filter'"));
+const inapp = readFileSync(join(__dirname, '..', 'inapp-message.ts'), 'utf8');
+const settle = inapp.slice(inapp.indexOf('export async function settleInAppPublish('), inapp.indexOf('export async function createInAppMessage('));
 
 describe('PUT 게시 과금 순서', () => {
   it('전환 전: 정규 id·이전 상태를 읽고 미과금이면 잔액 확인', () => {
@@ -24,21 +26,26 @@ describe('PUT 게시 과금 순서', () => {
   });
 
   it('게시 뒤 = 게시로 넘어간 경우에만 수정 결과의 정규 id 키로 과금', () => {
+    // ★ 1025 #92 — 게시비 = POST 와 같은 함수(settleInAppPublish · 정규 id 키 · 걷지 못하면 이전 상태로)
     const iUpdate = put.indexOf('await updateInAppMessage(');
-    const iCharge = put.indexOf('const publishOutcome = await deductCreditOutcome({');
+    const iCharge = put.indexOf('if (publishing) await settleInAppPublish(companyId, message.id, req.user?.userId, prevStatus as any);');
     expect(iCharge).toBeGreaterThan(iUpdate);
     // ★ Codex 7차 2R — 상태를 active로 요청했고 이전 상태를 확실히 읽었을 때만(상태 생략 수정은 과금·되돌림 없음)
     expect(put).toContain("const publishing = wantsActive && prevStatus !== null && prevStatus !== 'active' && message.status === 'active';");
-    expect(put.slice(iCharge, iCharge + 400)).toContain('idempotencyKey: `inapp-publish:${message.id}`');
+    expect(settle).toContain('idempotencyKey: `inapp-publish:${messageId}`');
     expect(put).not.toContain('idempotencyKey: `inapp-publish:${req.params.id}`');
   });
 
   it('과금 실패 = 게시를 이전 상태로 되돌리고 거절(잔액 부족 402 · 그 밖 503)', () => {
-    const blk = put.slice(put.indexOf("if (publishOutcome === 'failed') {"), put.indexOf('return res.json({ success: true, message });'));
-    expect(blk).toContain("UPDATE cdp_inapp_messages SET status = $3, updated_at = NOW()");
-    expect(blk).toContain("WHERE id = $1::uuid AND company_id = $2::uuid AND status = 'active'");
-    expect(blk).toMatch(/res\.status\(402\)/);
-    expect(blk).toMatch(/res\.status\(503\)/);
+    // 되돌림 = 정산 함수 안(잔액 부족 · 원장 쓰기 실패 모두) · 라우트 = 402(잔액 부족) · 그 밖 사용자 오류 상태(원장 실패 503)
+    expect(settle).toContain("UPDATE cdp_inapp_messages SET status = $3, updated_at = NOW()");
+    expect(settle).toContain("WHERE id = $1::uuid AND company_id = $2::uuid AND status = 'active'");
+    // ★ 1026 — 걷기 · 되돌리기 · 다시 던지기 = settleOrUndo 한 벌(되돌리기 실패 = [CREDIT][ORPHAN] 경보)
+    expect(settle.indexOf('await settleOrUndo({')).toBeLessThan(settle.indexOf('UPDATE cdp_inapp_messages SET status = $3'));
+    expect(settle).toContain('undo: async () => {');
+    const c = put.slice(put.indexOf('} catch (err: any) {'));
+    expect(c).toMatch(/res\.status\(402\)/);
+    expect(c).toContain('if (respondUserError(res, err)) return;');
   });
 
   it('잔액 부족 예외는 402로 답한다', () => {
@@ -52,7 +59,7 @@ describe('동시성·상태 생략 (Codex 7차 2R high)', () => {
     const iLock = put.indexOf("return await withKeyedLock('inapp-publish', uuidLockKey(String(req.params.id)), async () => {");
     expect(iLock).toBeGreaterThan(-1);
     expect(iLock).toBeLessThan(put.indexOf('SELECT id, channel, status FROM cdp_inapp_messages'));
-    expect(iLock).toBeLessThan(put.indexOf('const publishOutcome = await deductCreditOutcome({'));
+    expect(iLock).toBeLessThan(put.indexOf('if (publishing) await settleInAppPublish('));
   });
   it('게시 요청인데 이전 상태 조회가 실패하면 503(모르는 상태로 진행하지 않는다)', () => {
     const blk = put.slice(put.indexOf('SELECT id, channel, status FROM cdp_inapp_messages'), put.indexOf('await updateInAppMessage('));

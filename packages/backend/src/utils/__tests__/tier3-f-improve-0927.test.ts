@@ -44,7 +44,8 @@ describe('CDP 개선', () => {
 describe('STUDIO · AI · ANAL · OPS · ADMIN 개선', () => {
   it('R125 임시 쓰기 라우트 전부 상한 확인', () => {
     const r = src('..', 'routes', 'image-studio.ts');
-    for (const route of ["'/generate'", "'/edit'", "'/ingest-product'", "'/upload-product'", "'/remove-bg'", "'/compose'"]) {
+    // ★ 1025 R15 — /compose 는 부르는 곳이 없어 지웠다 · 임시 그림을 쓰는 /line-headline 이 대상
+    for (const route of ["'/generate'", "'/edit'", "'/line-headline'", "'/ingest-product'", "'/upload-product'", "'/remove-bg'"]) {
       const b = between(r, `imageStudioRouter.post(${route}`, '\nimageStudioRouter.');
       expect(b, route).toContain("if (isStudioTempFull(companyId)) return respondStudioError(res, new StudioError('TEMP_FULL', 409));");
     }

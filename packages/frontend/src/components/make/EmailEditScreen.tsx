@@ -27,7 +27,7 @@ import { EMAIL_TREATMENT_OPTIONS, emailMotifLabel, type EmailDesign } from '../.
 import { createSection, normalizeOrder, resequence, moveWithin, type Section, type SectionType } from '../../utils/dm-section-defaults';
 import { blockLabel, blockPanelSub, blockSummary, emailPaletteItems, isAutoBlock, type MakePaletteItem } from '../../utils/make-flow';
 import { peekBuildResult, clearBuildResult, type BuildResultHandoff } from '../../utils/ai-build';
-import { AI_GENERATE_COSTS, CONFIRM_CREDIT_COSTS } from '../../constants/credit';
+import { AI_GENERATE_COSTS, CONFIRM_CREDIT_COSTS, creditText } from '../../constants/credit';
 // ★ 2026-10-05 한줄로 시그니처(설계서 docs/2026-10-05-hanjul-signature-design.md §5) — 완성도 줄 · 보강 시트(혜택 · 기간 자리 0크레딧 채우기)
 import ZoneCompletion from '../zone/ZoneCompletion';
 import { LineFacts, LineFactsSheet, typedBenefit, type LineFactsValues, type LineFactsField } from '../zone/LineFacts';
@@ -254,22 +254,23 @@ export default function EmailEditScreen({
           : dirty ? { tone: 'dirty', text: '고치는 중 · 곧 자동 저장돼요' }
             : { tone: 'saved', text: savedAt ? '자동 저장됨' : '저장 전' };
 
-  const leave = () => {
+  // ★ 1026 Codex 1R — after = 저장(또는 확인) 뒤 할 일(기본 = 닫기 · 만들기 화면으로 가기도 이 길)
+  const leave = (after: () => void = onClose) => {
     if (leavingRef.current) return;
-    if (!dirty) { onClose(); return; }
+    if (!dirty) { after(); return; }
     if (canSave) {
       leavingRef.current = true;
       setLeaving(true);
       void persist().then((id) => {
         leavingRef.current = false;
         setLeaving(false);
-        if (id) { onClose(); return; }
+        if (id) { after(); return; }
         // 저장이 실패하면 말없이 닫지 않는다(전에는 닫혀 고친 내용이 사라졌다)
-        setConfirm({ mode: 'warning', title: '저장하지 못했어요', description: '지금 나가면 고친 내용이 사라져요. 계속 고치면 자동 저장을 다시 시도해요.', confirmLabel: '저장하지 않고 나가기', cancelLabel: '계속 고치기', onConfirm: () => onClose() });
+        setConfirm({ mode: 'warning', title: '저장하지 못했어요', description: '지금 나가면 고친 내용이 사라져요. 계속 고치면 자동 저장을 다시 시도해요.', confirmLabel: '저장하지 않고 나가기', cancelLabel: '계속 고치기', onConfirm: () => after() });
       });
       return;
     }
-    setConfirm({ mode: 'warning', title: '저장하지 않은 내용이 있어요', description: '받은편지함 제목과 블록이 있어야 저장돼요. 이대로 나가면 고친 내용이 사라져요.', confirmLabel: '저장하지 않고 나가기', cancelLabel: '계속 고치기', onConfirm: () => onClose() });
+    setConfirm({ mode: 'warning', title: '저장하지 않은 내용이 있어요', description: '받은편지함 제목과 블록이 있어야 저장돼요. 이대로 나가면 고친 내용이 사라져요.', confirmLabel: '저장하지 않고 나가기', cancelLabel: '계속 고치기', onConfirm: () => after() });
   };
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -366,7 +367,7 @@ export default function EmailEditScreen({
       if (d?.success && Array.isArray(d.data?.sections)) {
         record(); setSections(normalizeOrder(d.data.sections));
         const note = Array.isArray(d.notes) && d.notes[0] ? ` ${String(d.notes[0])}` : '';
-        onToast(d.changed === false ? `다듬을 글이 없어요.${note}` : `AI가 문구를 다듬었어요. (1 크레딧)${note}`, d.changed === false || note ? 'info' : 'success');
+        onToast(d.changed === false ? `다듬을 글이 없어요.${note}` : `AI가 문구를 다듬었어요. (${creditText('email-refine')})${note}`, d.changed === false || note ? 'info' : 'success');
       }
       else onToast(d?.error || '다듬지 못했어요.', 'error');
     } catch (e: any) { onToast(e?.message || '다듬지 못했어요.', 'error'); } finally { setAiBusy(null); }
@@ -542,15 +543,8 @@ export default function EmailEditScreen({
             <button type="button" onClick={() => { void generate(); }} disabled={!!aiBusy || (!aiPrompt.trim() && !aiEvent.trim())} className="inline-flex items-center gap-1.5 h-9 px-3 rounded-lg text-[12.5px] font-semibold text-white bg-indigo-600 hover:bg-indigo-700 disabled:opacity-40">{aiBusy === 'gen' ? <Loader2 className="w-4 h-4 animate-spin" /> : <Wand2 className="w-4 h-4" />}AI로 만들기 · {AI_GENERATE_COSTS['email-ai-generate']}</button>
             <button type="button" onClick={() => { void refine(); }} disabled={!!aiBusy || sections.length === 0} className="inline-flex items-center gap-1.5 h-9 px-3 rounded-lg text-[12.5px] font-semibold text-fuchsia-900 border border-fuchsia-300 bg-fuchsia-50 hover:bg-fuchsia-100 disabled:opacity-40">{aiBusy === 'refine' ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}문구 다듬기 · 1</button>
           </div>
-          <MaterialQuickPanel channel="email" isAd={isAd} disabled={!!aiBusy} onToast={(m, t) => onToast(m, t)} onDone={({ data }) => {
-            const g = data || {};
-            record();
-            setSections(normalizeOrder(g.sections || []));
-            setSelectedId(g.sections?.[0]?.id || null);
-            if (!subject && g.subjects?.[0]) setSubject(g.subjects[0]);
-            if (g.preheader) setDesign((x) => ({ ...(x || {}), preheader: String(g.preheader).slice(0, 90) }));
-            onToast(`재료로 블록 ${Array.isArray(g.sections) ? g.sections.length : 0}개를 만들었어요.`, 'success');
-          }} />
+          {/* ★ 2026-10-25 원장 #104 — 재료로 만들기 = 만들기 화면 한 길(링크) */}
+          <MaterialQuickPanel channel="email" disabled={!!aiBusy} onNavigate={(go) => leave(go)} />
         </div>
       </PanelBlock>
       <PanelBlock title="완성" hint={completedState ? '완성한 이메일이에요' : '처음 보낼 때 한 번 완성돼요'}>
@@ -575,7 +569,7 @@ export default function EmailEditScreen({
         save={save}
         channel="email"
         pair={pairDmId ? { onSwitch: () => { void (dirty && canSave ? persist() : Promise.resolve(null)).then(() => navigate(`/dm-builder?id=${encodeURIComponent(pairDmId)}${campaignId ? `&pair=${encodeURIComponent(campaignId)}` : ''}`)); } } : null}
-        onBack={leave}
+        onBack={() => leave()}   // 인자 없이(버튼 이벤트가 「나간 뒤 할 일」로 넘어가지 않게)
         onUndo={undo}
         onRedo={redo}
         canUndo={past.current.length > 0}

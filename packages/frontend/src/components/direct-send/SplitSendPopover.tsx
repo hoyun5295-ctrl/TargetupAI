@@ -6,6 +6,7 @@
  *   전에는 여기서 「시작 + 회차×1분」으로 따로 세서 밤 9시~아침 8시 건너뜀이 빠졌다.
  * 끝나는 날 한도(12일)를 넘으면 적용을 막는다 — 서버도 보낼 때 같은 함수로 다시 막는다.
  */
+import { useSendPolicy, nightRangeText } from '../../utils/send-policy';
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import {
   SPLIT_COUNT_RANGE, SPLIT_INTERVAL_RANGE, SPLIT_MAX_SPAN_DAYS, fetchSplitPreview, kstDayLabel, kstHourMinute,
@@ -33,6 +34,7 @@ interface Props {
 }
 
 export default function SplitSendPopover({ open, enabled, value, interval, recipientCount, startAt, onApply, onOff, onClose }: Props) {
+  const sendPolicy = useSendPolicy();   // ★ 2026-10-25 원장 #40 야간 구간 = 서버 값
   const [countText, setCountText] = useState(String(value || 1000));
   const [gapText, setGapText] = useState(String(interval || 1));
   const [preview, setPreview] = useState<SplitPreview | null>(null);
@@ -179,7 +181,7 @@ export default function SplitSendPopover({ open, enabled, value, interval, recip
           </div>
         ) : crossesDay ? (
           <div className="ds-split-note ds-split-note--amber">
-            밤 9시~아침 8시에는 쉬었다가 <b>{lastDay}</b>까지 이어서 보내요.
+            {sendPolicy ? nightRangeText(sendPolicy) : '야간'}에는 쉬었다가 <b>{lastDay}</b>까지 이어서 보내요.
           </div>
         ) : null}
         <span className="ds-split-fine">받는 사람 수는 중복·수신거부를 빼기 전 기준이에요. 시각은 실제 발송과 같은 규칙으로 계산해요.</span>

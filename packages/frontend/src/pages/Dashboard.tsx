@@ -1,5 +1,6 @@
 ﻿import { AlertTriangle, Award, BarChart3, LayoutGrid, Bell, BellOff, Cake, Calendar, ChevronLeft, ChevronRight, Clock, CreditCard, DollarSign, HelpCircle, Lightbulb, Mail, MapPin, Percent, Rocket, Send, ShoppingCart, Sparkles, Store, TrendingDown, TrendingUp, User, UserPlus, Users, UserX } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
+import { decorateOutcome } from '../utils/decorate-outcome';
 import { createPortal } from 'react-dom';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useToast } from '../components/ToastProvider';
@@ -683,7 +684,8 @@ export default function Dashboard() {
       const data = await res.json();
       if (data?.code === 'AI_OPERATOR_GATED') { openUpgrade(); return null; }
       if (data?.success && typeof data.message === 'string' && data.message.trim()) {
-        setToast({ show: true, type: 'success', message: '꾸미기를 적용했습니다 (3크레딧)' });
+        const o = decorateOutcome(data);
+        setToast({ show: true, type: o.tone, message: o.text });
         setTimeout(() => setToast({ show: false, type: 'success', message: '' }), 3000);
         return data.message;
       }
@@ -1259,7 +1261,7 @@ export default function Dashboard() {
   // 직접발송 자체 토스트 → 공용 useToast(다크 톤) shim. 기존 setToast({show,type,message}) 호출 유지.
   const _toast = useToast();
   // ★ 2026-10-19 B-1010-8 — 표시 시간을 넘긴다(옛 변환은 버려 4~6초 의도가 3초로 끝났다)
-  const setToast = (t: { show: boolean; type: 'success' | 'error' | 'warning'; message: string; duration?: number }) => {
+  const setToast = (t: { show: boolean; type: 'success' | 'error' | 'warning' | 'info'; message: string; duration?: number }) => {
     if (t.show && t.message) _toast[t.type](t.message, t.duration);
   };
 

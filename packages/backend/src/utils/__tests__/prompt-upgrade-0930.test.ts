@@ -213,7 +213,7 @@ describe('Codex 0930 2R — 위치 맞춤을 없앤 구조 · 한글 단위 문�
     // ★ 2026-10-24 ② 숫자 · 혜택 = 0930 근거 그대로 · 효능은 이어 읽는 단위도(readingAddsEfficacy · Codex 4R)
     expect(e).toContain('const refineGround = `${input.subject}\\n${htmlVisibleText(input.htmlBody)}\\n${input.instruction}`;');
     expect(e).toContain('if (rewriteAddsFacts(refinedVisible, refineGround) || readingAddsEfficacy([subject, ...visibleLines(htmlBody)], [input.subject, ...visibleLines(input.htmlBody)], input.instruction)) {');
-    expect(e).toContain("throw new Error('원문에 없는 숫자 · 혜택 · 효능 말이 생겨 적용하지 않았어요. 다시 눌러 주세요.');");
+    expect(e).toContain("throw new UserFacingError(422, 'REFINE_ADDS_FACTS', '원문에 없는 숫자 · 혜택 · 효능 말이 생겨 적용하지 않았어요. 다시 눌러 주세요.');");   // ★ 1025 R10
   });
   it('[high] 이모지 엔티티 뒤의 값도 조각 안에서 바뀐다(엔티티는 그대로)', () => {
     const [h] = replaceInventedBenefitsInHtml('<p>&#x1F389;&#x1F381;30% 할인</p>', '');

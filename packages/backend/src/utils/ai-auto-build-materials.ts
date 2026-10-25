@@ -283,7 +283,7 @@ export function normalizeBuildMaterials(raw: unknown, companyId: string): BuildN
   if (!isBuildMaterialsV1(raw)) return { ok: false, field: 'version', error: '요청 형식이 맞지 않아요. 화면을 새로고침한 뒤 다시 시도해 주세요.' };
   const r = raw as Record<string, unknown>;
   const tokenRaw = String(r.attemptToken ?? '').trim();
-  if (!UUID_RE.test(tokenRaw)) return { ok: false, field: 'attemptToken', error: '시도 토큰이 없거나 형식이 맞지 않습니다.' };
+  if (!UUID_RE.test(tokenRaw)) return { ok: false, field: 'attemptToken', error: '화면을 새로 고친 뒤 다시 만들어 주세요.' }   // ★ 2026-10-25 원장 #107 — 개발 용어(시도 토큰) 0;
   const channelRaw = String(r.channel ?? '').trim().toLowerCase();
   if (channelRaw !== 'dm' && channelRaw !== 'email' && channelRaw !== 'catalog') return { ok: false, field: 'channel', error: '채널은 모바일 DM · 이메일 · 카탈로그 DM만 고를 수 있습니다.' };
   const total = r.expectedTotal;
@@ -312,11 +312,6 @@ export function normalizeBuildMaterials(raw: unknown, companyId: string): BuildN
       catalogTitle: isCatalog ? (collapseWs(r.catalogTitle).slice(0, TITLE_MAX) || null) : null,
     },
   };
-}
-
-/** 카드 순서대로 편 전체 이미지(역할 판정·게이트·지문의 입력) */
-export function buildImagesOf(m: Pick<BuildMaterials, 'eventCards'>): BuildImage[] {
-  return m.eventCards.flatMap((c) => c.images);
 }
 
 export type BuildImageRole = 'hero' | 'photo' | 'logo' | 'unknown';

@@ -16,6 +16,7 @@
  *   그것이 곧 되돌림 사고다.
  */
 
+import { notifySnsTargetsFailed } from './sns-failure-notice';
 import { query } from '../config/database';
 import { getSnsAdapter } from './sns';
 import { isSnsPublishAdapter, SnsAdapterError, type ISnsAdapter, type SnsPublishRequest } from './sns/adapter';
@@ -74,6 +75,7 @@ async function recoverStalled(): Promise<void> {
   );
   if (unknown.rowCount) console.warn(`[SNS reconcile] 게시 호출 후 결과 모름 ${unknown.rowCount}건 → 다시 시도 잠금 · 채널에서 확인`);
   for (const r of unknown.rows) await refreshPostStatus(r.post_id);
+  await notifySnsTargetsFailed(unknown.rows.map((r: any) => String(r.id)));   // ★ 1025 #96 결과 모름으로 끝난 게시도 담당자에게
 
   const back = await query(
     `UPDATE sns_post_targets
@@ -99,15 +101,25 @@ async function verifySubmitted(): Promise<void> {
       LIMIT ${BATCH}`,
   );
 
+  // ★ 2026-10-25 원장 #97 — 확인할 수 없는 행 = 「확인 불가」로 닫는다(사람이 보는 목록에 뜬다 · 옛: 건너뛰고 갱신 시각을 안 바꿔 순서 맨 앞을 24시간 차지)
+  const cannotVerify = async (id: string, why: string) => {
+    await query(
+      `UPDATE sns_post_targets SET verify_gave_up_at = NOW(), last_verify_error = $2, updated_at = NOW()
+        WHERE id = $1::uuid AND verified_at IS NULL AND verify_gave_up_at IS NULL`,
+      [id, why],
+    ).catch((e: any) => console.warn(`[SNS reconcile] 확인 불가 표식 실패 ${id}:`, e?.message));
+  };
   for (const row of rows.rows) {
-    if (!isSnsPlatform(row.platform)) continue;
+    if (!isSnsPlatform(row.platform)) { await cannotVerify(row.id, '알 수 없는 채널이라 게시 확인을 하지 못했어요. 채널에서 직접 확인해 주세요.'); continue; }
     const adapter = getSnsAdapter(row.platform);
-    if (!isSnsPublishAdapter(adapter)) continue;
-    if (adapter.capabilities.verify === 'none') continue;   // 확인 수단이 없는 채널은 건드리지 않는다
+    if (!isSnsPublishAdapter(adapter) || adapter.capabilities.verify === 'none') {   // 확인 수단이 없는 채널
+      await cannotVerify(row.id, '이 채널은 게시 확인을 지원하지 않아요. 채널에서 직접 확인해 주세요.');
+      continue;
+    }
 
     try {
       const req = await buildRequest(row, adapter);
-      if (!req) continue;
+      if (!req) { await cannotVerify(row.id, '채널 연결이 끊겨 게시 확인을 하지 못했어요. 채널에서 직접 확인해 주세요.'); continue; }
       const fetched = await adapter.fetchPost(req, row.platform_post_id);
       if (fetched.exists) {
         await query(
@@ -137,12 +149,14 @@ async function verifySubmitted(): Promise<void> {
   }
 
   // 24시간이 지나도 확인이 안 된 것 — 포기하고 사람이 보게 한다. **이후 조회에서 빠진다.**
+  // ★ 2026-10-25 원장 #97(R8) — 시계 = 게시 선점 시각(claimed_at · 없으면 갱신 시각). 옛: 갱신 시각이라 매 시도가 시계를 되돌려
+  //   계속 확인이 안 되는 행은 포기에 영영 닿지 않았다(상한 없는 재시도).
   const gaveUp = await query(
     `UPDATE sns_post_targets
         SET verify_gave_up_at = NOW(), updated_at = NOW()
       WHERE status = 'submitted' AND platform_post_id IS NOT NULL
         AND verified_at IS NULL AND verify_gave_up_at IS NULL
-        AND updated_at < NOW() - ($1 || ' hours')::interval
+        AND COALESCE(claimed_at, updated_at) < NOW() - ($1 || ' hours')::interval
       RETURNING id`,
     [String(VERIFY_GIVE_UP_HOURS)],
   );

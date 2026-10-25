@@ -10,7 +10,8 @@ import { resolve } from 'path';
 const code = (rel: string) => readFileSync(resolve(__dirname, '..', '..', rel), 'utf-8').replace(/\/\*[\s\S]*?\*\//g, ' ').replace(/^\s*\/\/.*$/gm, ' ');
 
 const V1_IF = 'if (req.body?.materials && isBuildMaterialsV1(req.body.materials)) {';
-const V0_IF = "if (req.body?.materials && typeof req.body.materials === 'object') {";
+// ★ 1025 #104 — 옛 v0 재료 갈래 삭제 · v1 뒤 = 옛 재료 요청 400 한 줄
+const V0_IF = "if (req.body?.materials) return res.status(400).json({ success: false, error: '화면을 새로 고친 뒤 다시 만들어 주세요.', code: 'MATERIALS_INVALID' });";
 
 function v1Block(route: string): string {
   const v1 = route.indexOf(V1_IF);
@@ -49,15 +50,15 @@ describe('★ T4 라우트 — materials v1 분기 · ENV AND · 잠금 · 오�
     expect(block).toContain("code: 'INSUFFICIENT_CREDIT'");
     expect(block).toContain("handleDbMigrationError(err, res, 'email_campaigns')");
     expect(block).not.toContain('quickMaterialsEnabled(');
-    // v0 무후퇴
-    expect(route).toContain('generateEmailFromMaterials(');
+    // v0 삭제(1025 #104)
+    expect(route).not.toContain('generateEmailFromMaterials(');
     // ★ 2026-10-10 한 줄 이메일 — 혜택 답이 있을 때만 요청 글에 [혜택] 줄(genPrompt = prompt · 답 없으면 같은 글)
     expect(route).toContain('const result = await generateEmailSections({ companyId: auth.companyId, userId: auth.userId, prompt: genPrompt, scenario, isAd, eventText });');
     // ★ 2026-10-24 세 채널 구조체크 ⑧ — 단계 없는 한 줄 갈래를 지웠다: 한 줄 요청은 단계(LINE_STEPS_REQUIRED 400) · 그 밖은 옛 일반 조립 그대로(genPrompt = linePrompt)
     expect(route).toContain("if (oneLineReq && !steps) return res.status(400).json({ success: false, error: '화면을 새로 고친 뒤 한 줄을 다시 넣어 주세요.', code: 'LINE_STEPS_REQUIRED' });");
     expect(route).toMatch(/textProducts: steps\.textProducts \}\)\n\s+: linePrompt;/);
   });
-  it('견적 — POST /materials/quote(v1 · 정규화·게이트·역할·견적) · aiAutoBuildEnabled 403 · 오류 매핑 · GET 옛 견적 그대로', () => {
+  it('견적 — POST /materials/quote(v1 · 정규화·게이트·역할·견적) · aiAutoBuildEnabled 403 · 오류 매핑 · GET = 노출 스위치만(1025 #104)', () => {
     const ec = code('routes/event-campaigns.ts');
     const start = ec.indexOf("eventCampaignRouter.post('/materials/quote'");
     expect(start).toBeGreaterThan(-1);
@@ -70,7 +71,7 @@ describe('★ T4 라우트 — materials v1 분기 · ENV AND · 잠금 · 오�
     expect(block).not.toContain('checkCredit(');
     expect(block).not.toContain('deductCredit');
     expect(ec).toContain("eventCampaignRouter.get('/materials/quote'");
-    expect(ec).toContain('quoteQuickCampaign({ imageCount, hasText, reads })');
+    expect(ec).not.toContain('quoteQuickCampaign(');
   });
   it('ENV 게이트 = 3곳 모두 aiAutoBuildEnabled · 잠금 키는 CT(buildInflightKey) · 라우트에 인라인 잠금 Set 0', () => {
     for (const f of ['routes/dm.ts', 'routes/email.ts', 'routes/event-campaigns.ts']) {

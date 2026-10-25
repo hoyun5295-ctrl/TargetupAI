@@ -1,5 +1,7 @@
 import { Router, Request, Response } from 'express';
 import { authenticate } from '../middlewares/auth';
+import { InsufficientCreditError } from '../utils/ai-credit';
+import { respondUserError } from '../utils/http-error';
 import { saveSegment, getSegments, deleteSegment, updateSegment, touchSegment } from '../utils/saved-segments';
 // ★ D220+ (2026-05-27 Task 6): 자연어 변환 + 매칭 미리보기 (CT-97 + CT-01)
 import {
@@ -25,6 +27,7 @@ router.get('/', async (req: Request, res: Response) => {
     return res.json({ success: true, segments });
   } catch (error: any) {
     console.error('세그먼트 목록 조회 에러:', error);
+    if (respondUserError(res, error)) return;   // ★ 2026-10-25 R10 — 사용자 조건 오류 = 그 상태 · 문장 그대로
     return res.status(500).json({ error: '조회 중 오류가 발생했습니다.' });
   }
 });
@@ -44,7 +47,7 @@ router.post('/', async (req: Request, res: Response) => {
       return res.status(400).json({ error: '세그먼트명과 유형은 필수입니다.' });
     }
     if (segmentType !== 'hanjullo' && segmentType !== 'custom') {
-      return res.status(400).json({ error: '유형은 hanjullo 또는 custom이어야 합니다.' });
+      return res.status(400).json({ error: '조건 종류를 다시 골라 주세요.' });
     }
     if (segmentType === 'hanjullo' && !prompt) {
       return res.status(400).json({ error: 'AI 한줄로 세그먼트는 프롬프트가 필수입니다.' });
@@ -55,10 +58,8 @@ router.post('/', async (req: Request, res: Response) => {
     });
     return res.json({ success: true, segment, message: '세그먼트가 저장되었습니다.' });
   } catch (error: any) {
-    if (error.message?.includes('최대')) {
-      return res.status(400).json({ error: error.message });
-    }
     console.error('세그먼트 저장 에러:', error);
+    if (respondUserError(res, error)) return;   // ★ 2026-10-25 R10 — 사용자 조건 오류 = 그 상태 · 문장 그대로
     return res.status(500).json({ error: '저장 중 오류가 발생했습니다.' });
   }
 });
@@ -83,6 +84,7 @@ router.put('/:id', async (req: Request, res: Response) => {
     return res.json({ success: true, segment, message: '수정되었습니다.' });
   } catch (error: any) {
     console.error('세그먼트 수정 에러:', error);
+    if (respondUserError(res, error)) return;   // ★ 2026-10-25 R10 — 사용자 조건 오류 = 그 상태 · 문장 그대로
     return res.status(500).json({ error: '수정 중 오류가 발생했습니다.' });
   }
 });
@@ -101,6 +103,7 @@ router.delete('/:id', async (req: Request, res: Response) => {
     return res.json({ success: true, message: '삭제되었습니다.' });
   } catch (error: any) {
     console.error('세그먼트 삭제 에러:', error);
+    if (respondUserError(res, error)) return;   // ★ 2026-10-25 R10 — 사용자 조건 오류 = 그 상태 · 문장 그대로
     return res.status(500).json({ error: '삭제 중 오류가 발생했습니다.' });
   }
 });
@@ -115,6 +118,7 @@ router.post('/:id/touch', async (req: Request, res: Response) => {
     return res.json({ success: true });
   } catch (error: any) {
     console.error('세그먼트 touch 에러:', error);
+    if (respondUserError(res, error)) return;   // ★ 2026-10-25 R10 — 사용자 조건 오류 = 그 상태 · 문장 그대로
     return res.status(500).json({ error: '갱신 중 오류가 발생했습니다.' });
   }
 });
@@ -154,6 +158,9 @@ router.post(
       });
       return res.json({ success: true, ...result });
     } catch (err: any) {
+      // ★ 2026-10-25 잔액 부족 402 · 원장 쓰기 실패 503(AI 결과 정산 한 곳 · 옛: 500)
+      if (err instanceof InsufficientCreditError) return res.status(402).json({ success: false, error: 'AI 크레딧이 부족합니다. 크레딧을 충전해 주세요.', code: 'INSUFFICIENT_CREDIT' });
+      if (respondUserError(res, err)) return;
       if (err instanceof SegmentGenerationError) {
         return res.status(400).json({ success: false, code: err.code, error: err.message });
       }
@@ -198,6 +205,7 @@ router.post('/:id/preview', async (req: Request, res: Response) => {
     return res.json({ success: true, ...result });
   } catch (err: any) {
     console.error('[saved-segments/preview] 실패:', err);
+    if (respondUserError(res, err)) return;   // ★ 2026-10-25 R10 — 사용자 조건 오류 = 그 상태 · 문장 그대로
     return res.status(500).json({ success: false, error: '미리보기 실패' });
   }
 });

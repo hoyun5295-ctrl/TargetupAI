@@ -43,6 +43,14 @@ export interface PlannerTouchpointRow {
 }
 
 // ── exec_meta 준비 판정 ──────────────────────────────────────────────
+/**
+ * ★ 2026-10-25 원장 #57 — 이 접점의 발송이 시작됐는가(보내는 중 · 보냄 · 캠페인 연결 · 시도 표식).
+ *   승인 풀기(unapprovePlannerEvent · SQL 같은 조건)와 재확인 화면의 「승인 풀기 가능」 판정이 같은 규칙을 쓴다.
+ */
+export function touchpointSendStarted(t: { status: string; execRef: string | null; execMeta: Record<string, any> | null }): boolean {
+  return t.status === 'producing' || t.status === 'sent' || !!t.execRef || !!t.execMeta?.send_started_at;
+}
+
 let execMetaReady: boolean | null = null;
 
 /**
@@ -444,14 +452,22 @@ export async function setTouchpointMetaIfCopyIs(
   touchpointId: string,
   expectedCopy: unknown,
   patch: Record<string, any>,
+  /** ★ 1026 Codex 3R — 그 행사가 이 리비전일 때만(패스가 읽은 실패 수 · 판정이 지난 리비전 것이면 쓰지 않는다) */
+  opts: { eventRevision?: { eventId: string; revision: number } } = {},
 ): Promise<boolean> {
+  const params: any[] = [touchpointId, companyId, JSON.stringify(expectedCopy ?? null), JSON.stringify(patch)];
+  let revCond = '';
+  if (opts.eventRevision) {
+    params.push(opts.eventRevision.eventId, opts.eventRevision.revision);
+    revCond = `\n        AND EXISTS (SELECT 1 FROM planner_events e WHERE e.id = $5::uuid AND e.company_id = $2::uuid AND COALESCE((e.meta->>'revision')::int, 0) = $6::int)`;
+  }
   const r = await query(
     `UPDATE planner_touchpoints
         SET exec_meta = COALESCE(exec_meta, '{}'::jsonb) || $4::jsonb
       WHERE id = $1::uuid AND company_id = $2::uuid AND status = 'planned'
-        AND COALESCE(exec_meta->'copy', 'null'::jsonb) = $3::jsonb
+        AND COALESCE(exec_meta->'copy', 'null'::jsonb) = $3::jsonb${revCond}
       RETURNING id`,
-    [touchpointId, companyId, JSON.stringify(expectedCopy ?? null), JSON.stringify(patch)],
+    params,
   );
   return r.rows.length > 0;
 }

@@ -7,7 +7,7 @@ import { useNavigate } from 'react-router-dom';
 // ★ 2026-09-14 T5·T6 AI 자동제작 — 결과 바(캔버스 위) · 생성 버튼 금액 = 단일 출처
 import BuildResultBar from '../ai-build/BuildResultBar';
 import { peekBuildResult, clearBuildResult, type BuildResultHandoff } from '../../utils/ai-build';
-import { AI_GENERATE_COSTS } from '../../constants/credit';
+import { AI_GENERATE_COSTS, creditText } from '../../constants/credit';
 import {
   ArrowDown, ArrowUp, Copy, Eye, GripVertical, Loader2, Monitor, Palette, Plus, Save, Sparkles, Trash2, Type, Wand2, X,
 } from 'lucide-react';
@@ -190,6 +190,19 @@ export default function EmailVisualEditor({
     return () => window.removeEventListener('keydown', onKey);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [themeOpen, fontOpen, pcPreviewOpen, addOpen, confirmState, saving, name, subject, isAd, sections, design]);
+
+  // ★ 1026 Codex 1R — 편집기 밖으로 가는 길(만들기 화면 · 다시 만들기)도 ESC 닫기와 같은 확인을 거친다(옛: 바로 이동해 고친 내용이 사라졌다)
+  const guardLeave = (go: () => void) => {
+    if (!isDirty()) { go(); return; }
+    setConfirmState({
+      mode: 'warning',
+      title: '편집 중인 내용이 있습니다',
+      description: '저장하지 않고 나가면 지금까지 편집한 내용이 사라집니다.',
+      confirmLabel: '저장하지 않고 나가기',
+      cancelLabel: '계속 편집',
+      onConfirm: go,
+    });
+  };
 
   const selected = useMemo(() => sections.find((s) => s.id === selectedId) || null, [sections, selectedId]);
 
@@ -404,7 +417,7 @@ export default function EmailVisualEditor({
       if (data.success && Array.isArray(data.data?.sections)) {
         setSections(normalizeOrder(data.data.sections));
         const note = Array.isArray(data.notes) && data.notes[0] ? ` ${String(data.notes[0])}` : '';
-        onToast(data.changed === false ? `다듬을 텍스트가 없어요.${note}` : `AI가 카피를 다듬었어요. (1 크레딧)${note}`, data.changed === false || note ? 'info' : 'success');
+        onToast(data.changed === false ? `다듬을 텍스트가 없어요.${note}` : `AI가 카피를 다듬었어요. (${creditText('email-refine')})${note}`, data.changed === false || note ? 'info' : 'success');
       } else {
         onToast(data.error || 'AI 개선 실패', 'error');
       }
@@ -445,7 +458,7 @@ export default function EmailVisualEditor({
         onToast(
           completedState
             ? '저장 완료'
-            : '임시저장 완료. 발송은 완성 저장(50크레딧) 후 열립니다.',
+            : `임시저장 완료. 발송은 완성 저장(${creditText('email-campaign-complete')}) 후 열립니다.`,
           'success',
         );
         onSaved();
@@ -463,9 +476,9 @@ export default function EmailVisualEditor({
     if (sections.length === 0) { onToast('블록을 1개 이상 추가해주세요.', 'warning'); return; }
     setConfirmState({
       mode: 'warning',
-      title: '캠페인 완성 (50크레딧)',
-      description: '완성 저장 시 50크레딧이 차감됩니다 (캠페인당 1회 · 환불 없음).\n이후 이 캠페인의 수정·재저장·발송·수신/오픈/클릭 이력 관리는 추가 차감 없이 무제한입니다.',
-      confirmLabel: '50크레딧 차감하고 완성',
+      title: `캠페인 완성 (${creditText('email-campaign-complete')})`,
+      description: `완성 저장 시 ${creditText('email-campaign-complete')}이 차감됩니다 (캠페인당 1회 · 환불 없음).\n이후 이 캠페인의 수정·재저장·발송·수신/오픈/클릭 이력 관리는 추가 차감 없이 무제한입니다.`,
+      confirmLabel: `${creditText('email-campaign-complete')} 차감하고 완성`,
       cancelLabel: '취소',
       onConfirm: async () => {
         setSaving(true);
@@ -543,7 +556,7 @@ export default function EmailVisualEditor({
               {/* ★ 2026-07-02(3) Harold 지시 — PC 미리보기는 편집 중(완성 전)에도 항상 사용. 잠금은 발송에만 유지 */}
               <Monitor className="w-4 h-4" /><span className="hidden lg:inline">PC 미리보기</span>
             </button>
-            <button onClick={handleImprove} disabled={improving || sections.length === 0} className="inline-flex items-center gap-1.5 rounded-lg border border-fuchsia-300 bg-fuchsia-100 px-3 py-2 text-sm font-semibold text-fuchsia-900 hover:bg-fuchsia-100 disabled:opacity-40 shrink-0" title="AI가 블록 카피를 매끄럽게 다듬어요 (1 크레딧 · 사실·혜택 보존)">
+            <button onClick={handleImprove} disabled={improving || sections.length === 0} className="inline-flex items-center gap-1.5 rounded-lg border border-fuchsia-300 bg-fuchsia-100 px-3 py-2 text-sm font-semibold text-fuchsia-900 hover:bg-fuchsia-100 disabled:opacity-40 shrink-0" title={`AI가 블록 카피를 매끄럽게 다듬어요 (${creditText('email-refine')} · 바뀐 때만 · 사실·혜택 보존)`}>
               {improving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Wand2 className="w-4 h-4" />}<span className="hidden lg:inline">AI로 개선</span>
             </button>
             {completedState ? (
@@ -555,7 +568,7 @@ export default function EmailVisualEditor({
                 <button onClick={handleSave} disabled={saving} className="inline-flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-100 disabled:opacity-50 shrink-0" title="무료 (발송은 잠긴 상태로 보관됩니다)">
                   {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}<span className="hidden lg:inline">임시저장</span>
                 </button>
-                <button onClick={handleComplete} disabled={saving} className="inline-flex items-center gap-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-700 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50 shrink-0" title="50크레딧 1회, 이후 수정·발송·이력 무제한 무료">
+                <button onClick={handleComplete} disabled={saving} className="inline-flex items-center gap-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-700 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50 shrink-0" title={`${creditText('email-campaign-complete')} 1회, 이후 수정·발송·이력 무제한 무료`}>
                   <Save className="w-4 h-4" />완성 저장 · 50
                 </button>
               </>
@@ -569,7 +582,7 @@ export default function EmailVisualEditor({
             handoff={buildBar}
             collapsed={buildBarCollapsed}
             onDismiss={() => { clearBuildResult(); setBuildBar(null); }}
-            onRegenerate={() => { clearBuildResult(); setBuildBar(null); onClose(); navigate('/quick-campaign?channel=email&regen=1'); }}
+            onRegenerate={() => guardLeave(() => { clearBuildResult(); setBuildBar(null); onClose(); navigate('/quick-campaign?channel=email&regen=1'); })}
           />
         )}
         <div className="flex-1 flex min-h-0">
@@ -611,22 +624,8 @@ export default function EmailVisualEditor({
                 {aiBusy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Wand2 className="w-3.5 h-3.5" />}{aiBusy ? '생성 중...' : `AI 생성 (${AI_GENERATE_COSTS['email-ai-generate']}크레딧)`}
               </button>
               <div className="text-[10px] text-slate-400 leading-relaxed">상품 이름·가격·링크를 넣으면 상품 카드가 자동으로 만들어져요. 가격·혜택은 넣어주신 원문 그대로만 사용됩니다.</div>
-              {/* ★ 2026-09-06 S6 재료 입구 — 이미지·행사 내용 → 블록 전체 교체(기존 AI 생성과 같은 적용 경로) */}
-              <MaterialQuickPanel
-                channel="email"
-                isAd={isAd}
-                disabled={aiBusy}
-                onToast={(message, type) => onToast(message, type)}
-                onDone={({ data }) => {
-                  const g = data || {};
-                  setSections(normalizeOrder(g.sections || []));
-                  setSelectedId(g.sections?.[0]?.id || null);
-                  if (!name || name === 'AI 비주얼 이메일') setName(g.name || name);
-                  if (!subject) setSubject((g.subjects && g.subjects[0]) || '');
-                  if (g.preheader) setDesign((d) => ({ ...(d || {}), preheader: String(g.preheader).slice(0, 90) }));
-                  onToast(`재료로 이메일 블록 ${Array.isArray(g.sections) ? g.sections.length : 0}개를 만들었습니다. 이미지와 문구만 다듬어 주세요.`, 'success');
-                }}
-              />
+              {/* ★ 2026-10-25 원장 #104 — 재료로 만들기 = 만들기 화면 한 길(링크) */}
+              <MaterialQuickPanel channel="email" disabled={aiBusy} onNavigate={guardLeave} />
             </div>
             <div className="flex-1 overflow-y-auto p-2">
               <DndContext sensors={dndSensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>

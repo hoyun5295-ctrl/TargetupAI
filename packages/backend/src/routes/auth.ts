@@ -5,7 +5,7 @@ import rateLimit from 'express-rate-limit';
 import { query } from '../config/database';
 import { TIMEOUTS } from '../config/defaults';
 import { authenticate, generateToken, JwtPayload } from '../middlewares/auth';
-import { rotateUserSession, normalizeAppSource, newSessionId, verifyPasswordChangeToken } from '../utils/session-manager';
+import { rotateUserSession, normalizeAppSource, isRetiredAppSource, RETIRED_APP_SOURCE_MESSAGE, newSessionId, verifyPasswordChangeToken } from '../utils/session-manager';
 import { resolveCompanyAccessDenial } from '../utils/company-access';
 import { issueUserLogin, loadLoginUser } from '../utils/login-issue';
 import {
@@ -59,10 +59,11 @@ router.post('/login', loginLimiter, async (req: Request, res: Response) => {
     // ★ loginId 앞뒤 공백 제거 — frontend trim 누락 또는 다른 클라이언트 방어선
     const loginId: string = String(req.body.loginId || '').trim();
     const { password, userType } = req.body;
-    // ★ D111 P0: app_source 기반 단일 세션 — 'hanjul' | 'flyer' | 'super'
+    // ★ D111 P0: app_source 기반 단일 세션 — 'hanjul' | 'super'
     //   - 한줄로 메인(hanjul.ai) + 고객사관리자(app.hanjul.ai) 전부 'hanjul'로 묶음
-    //   - 전단AI(flyer-frontend)는 'flyer' → 한줄로와 별개 공존
+    //   - ★ 2026-10-25 'flyer'(전단AI) 폐기 — hanjulDM 별도 프로젝트. 들어오면 거절(한줄로 세션을 밀어내지 않게)
     //   - 슈퍼관리자 경로는 자동으로 'super'로 덮어씀 (아래)
+    if (isRetiredAppSource(req.body.appSource)) return res.status(400).json({ error: RETIRED_APP_SOURCE_MESSAGE });
     const appSource = normalizeAppSource(req.body.appSource);
 
     if (!loginId || !password) {
@@ -604,6 +605,7 @@ router.post('/mfa/verify', loginLimiter, async (req: Request, res: Response) => 
       });
     }
 
+    if (isRetiredAppSource(req.body.appSource)) return res.status(400).json({ error: RETIRED_APP_SOURCE_MESSAGE });
     const issue = await issueUserLogin({
       user,
       loginId: user.login_id,
@@ -748,6 +750,7 @@ router.post('/identity/complete', loginLimiter, async (req: Request, res: Respon
     // 인증된 이름·번호가 반영된 행으로 세션을 발급한다.
     // 본인인증이 이 로그인의 추가 인증이다 — 방금 그 휴대폰을 가진 사람임이 확인됐으므로 인증번호를 또 묻지 않는다.
     const fresh = (await loadLoginUser(user.id)) || user;
+    if (isRetiredAppSource(req.body.appSource)) return res.status(400).json({ error: RETIRED_APP_SOURCE_MESSAGE });
     const issue = await issueUserLogin({
       user: fresh,
       loginId: fresh.login_id,

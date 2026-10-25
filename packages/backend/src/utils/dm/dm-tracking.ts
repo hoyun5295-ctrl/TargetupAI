@@ -169,6 +169,18 @@ export function computeDmProgressPct(pageReached: any, totalPages: any, maxScrol
  * 완독 판정 — 깊이 측정값이 있으면 90% 이상, 없으면(구 데이터) 다페이지 마지막 도달.
  * 단일 페이지 + 깊이 미측정은 판정 불가 = false (구 로직의 "열람=완독" 오판 제거).
  */
+/**
+ * ★ 2026-10-25 원장 #64 — 완독 판정 SQL(dm_views 행 · 표 별칭 없이) = 아래 isDmCompleted 와 같은 식. 집계 SQL 이 이 조각을 쓴다.
+ */
+export const DM_VIEW_COMPLETED_SQL = `(CASE WHEN max_scroll_pct IS NOT NULL THEN max_scroll_pct >= 90 ELSE COALESCE(total_pages, 0) > 1 AND page_reached >= total_pages END)`;
+
+/**
+ * ★ 2026-10-25 원장 #64 — 한 열람 행의 클릭 수 SQL = 섹션별 clicks 합(기록 모양 = sanitizeSectionInteractions · sumSectionClicks 와 같은 셈).
+ *   옛 A/B 집계는 기록에 없는 키(cta_click)를 세어 늘 0 이었다.
+ */
+export const DM_VIEW_CLICKS_SQL = `(SELECT COALESCE(SUM(CASE WHEN jsonb_typeof(e.value) = 'object' AND (e.value->>'clicks') ~ '^[0-9]+$' THEN (e.value->>'clicks')::int ELSE 0 END), 0)
+   FROM jsonb_each(CASE WHEN jsonb_typeof(section_interactions) = 'object' THEN section_interactions ELSE '{}'::jsonb END) e)`;
+
 export function isDmCompleted(pageReached: any, totalPages: any, maxScrollPct: any): boolean {
   const pct = clampScrollPct(maxScrollPct);
   if (pct !== null) return pct >= 90;

@@ -23,7 +23,7 @@ import { getDmDetail } from './dm/dm-builder';
 import { renderDmViewerHtml } from './dm/dm-viewer';
 import { getLineTemplate } from './design-core/line-templates';
 import { getLineComposition } from './line-compositions';
-import { dmPublishFeeSourceOf, isDmPublishFeeCharged } from './dm/dm-publish-gate';
+import { dmPublishFeeSourceOf, isDmPublishFeeCharged, publishFeeDueStrict } from './dm/dm-publish-gate';
 import { isEmailCampaignCompleted } from './email/email-completion';
 import { withEmailPreviewAdFooter, resolveEmailSender } from './email-channel';
 import { loadAgencyPaymentState, PLANNER_AGENCY_SOURCE } from './planner-approval';
@@ -35,8 +35,9 @@ import {
 import { carrierGroups, loadPlannerDefaultCallback } from './planner-copy';
 import { countEventSmsAudience, countPlannerEmailRecipients, PlannerAudienceCount } from './planner-audience';
 
-/** 승인 마감 시각(첫 발송일 · KST) — 발송 창이 21시에 닫히므로 한 시간 앞에서 끊는다(설계서 Q5 · §6-4). */
-export const PLANNER_APPROVAL_DEADLINE_HOUR = 20;
+// 승인 마감 시각 = utils/planner-deadline(순수 모듈 · ★ 2026-10-25 원장 #62 사유 문장 · 화면과 한 값)
+import { PLANNER_APPROVAL_DEADLINE_HOUR } from './planner-deadline';
+export { PLANNER_APPROVAL_DEADLINE_HOUR };
 /** 확인 링크 최대 수명(D2). */
 export const PLANNER_PREVIEW_MAX_DAYS = 7;
 /** DM 링크 자리(승인 전 · 실주소는 승인 때 정해진다) — 화면이 이 자리에 "승인 뒤 정해지는 주소"를 그린다. */
@@ -165,9 +166,11 @@ export async function quoteEventApproval(ev: Pick<PlannerEventRow, 'companyId' |
   const emailId = live.find((t) => t.channel === 'email' && t.assetRef)?.assetRef || null;
   let dm: ApprovalQuote['dm'] = null;
   if (dmId) {
-    const fee = await dmPublishFeeSourceOf(ev.companyId, dmId);
+    // ★ 2026-10-25 발행비 판정 한 벌(#65 · 승인 때 발행 코어가 보는 식과 같다 · 이미 발행 = 소급 0)
+    const due = await publishFeeDueStrict(ev.companyId, dmId);
+    const fee = due || await dmPublishFeeSourceOf(ev.companyId, dmId);
     const charged = await isDmPublishFeeCharged(ev.companyId, dmId);
-    dm = { dmId, source: fee.source, cost: creditEnabled && !charged ? fee.cost : 0, charged };
+    dm = { dmId, source: fee.source, cost: due ? due.cost : 0, charged };
   }
   let email: ApprovalQuote['email'] = null;
   if (emailId) {
@@ -374,7 +377,8 @@ export async function buildConfirmView(ev: PlannerEventRow, opts: { mode: 'publi
     return { sentAt: t.execMeta?.sent_at || null, sentCount, successCount, openCount, clickCount };
   };
 
-  for (const { carrier, dm } of carrierGroups(tps)) {
+  // ★ 2026-10-25 원장 #56 — 생략한 문자는 본문에서 뺀다(메일 · 서버 승인 판정과 같은 규칙 · 옛: 생략까지 세어 「N번」 · 문안비 · [승인하기] 잠금이 어긋났다)
+  for (const { carrier, dm } of carrierGroups(tps.filter((t) => t.status !== 'skipped'))) {
     const copy = carrier.execMeta?.copy || null;
     const dmTp = carrier.channel === 'dm' ? carrier : dm;
     const realUrl = String(carrier.execMeta?.dm_url || dmTp?.execMeta?.dm_url || '');

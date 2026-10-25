@@ -52,7 +52,8 @@ export async function createProductJourneyDraft(input: {
   benefitText?: string | null;
   callbackNumber?: string | null;
 }): Promise<ProductDraftResult> {
-  const memo = `${input.companyId}:${input.requestId}`;
+  // ★ 2026-10-25 #9(D1 = A) — 요청 키에 보는 사람 id(옛 = 회사 단위라 진단 창의 상품 초안 키가 담당자끼리 같아 B 가 A 의 초안으로 막혔다)
+  const memo = `${input.companyId}:${input.userId}:${input.requestId}`;
   const now = Date.now();
   for (const [k, v] of done) if (now - v.at > TTL_MS) done.delete(k);
   const hit = done.get(memo);
@@ -87,7 +88,7 @@ export async function createProductJourneyDraft(input: {
 
     const cost = getCreditCost('journey-ai-generate');
     // ★ 0930 Codex 1R · 6R — 요청 키에 회사 id(원장 중복 판정은 키 하나로 본다) · 이미 초안을 만든 요청이면 AI 를 부르지 않는다(재시작 · 만료 뒤 재전송).
-    const chargeKey = await nextDraftChargeKey(input.companyId, `journey-product:${input.companyId}:${input.requestId}`);
+    const chargeKey = await nextDraftChargeKey(input.companyId, `journey-product:${input.companyId}:${input.userId}:${input.requestId}`);
     await checkCredit(input.companyId, cost);
     const head = names.slice(0, 3).join(', ') + (names.length > 3 ? ` 외 ${names.length - 3}개` : '');
     const objective = `${head}을(를) 산 고객이 ${periodDays}일쯤 지나 다 써 갈 때 같은 상품을 다시 사도록 권한다. 첫 문자는 다 써 갈 때쯤 보낸다.`;

@@ -16,6 +16,7 @@
  * 투영은 `message_click`과 같은 부류다(클릭 → cdp_events). 원본은 email_events에 그대로 남고,
  * 이 표에는 회사·고객·행사 축으로 멱등 적재만 한다.
  */
+import { UserFacingError } from './http-error';
 import crypto from 'crypto';
 import { query } from '../config/database';
 
@@ -38,7 +39,7 @@ function requireTokenSecret(): string {
   const secret = String(process.env.PLANNER_JOIN_TOKEN_SECRET || process.env.JOURNEY_PAUSE_TOKEN_SECRET || '').trim();
   if (!secret) {
     console.error('[planner-participation] PLANNER_JOIN_TOKEN_SECRET 미설정 — 참여 링크를 만들지 않는다');
-    throw new Error('참여 링크 설정이 완료되지 않았습니다. 관리자 확인이 필요합니다.');
+    throw new UserFacingError(409, 'PARTICIPATION_NOT_READY', '참여 링크 설정이 끝나지 않았어요. 관리자에게 알려 주세요.');
   }
   return secret;
 }

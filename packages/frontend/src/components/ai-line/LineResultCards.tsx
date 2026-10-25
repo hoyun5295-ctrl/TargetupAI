@@ -10,7 +10,7 @@
  */
 import { useEffect, useRef, useState } from 'react';
 import { Check, Loader2, PencilLine, ShieldCheck, ShieldAlert, Wand2, Clock3, RotateCw } from 'lucide-react';
-import { AI_GENERATE_COSTS } from '../../constants/credit';
+import { creditCost } from '../../constants/credit';
 import {
   type AiLineRun, type AiLineType, type AiLineChannel, type AiLineSpamChip, type AiLineColumn,
   aiLineApi, spamFp, audienceOf, missingVarsIn,
@@ -21,7 +21,7 @@ const BUSY_RETRY_MS = 5000;
 const AUTO_LIMIT = 2;
 const RUNNING: ReadonlyArray<AiLineSpamChip['state']> = ['queued', 'running'];
 /** 검사를 다시 걸어도 결과가 같은 상태(사람이 고쳐야 바뀐다) — 지문이 바뀌기 전에는 자동으로 다시 걸지 않는다 */
-const HOLD: ReadonlyArray<AiLineSpamChip['state']> = ['demo', 'unavailable', 'unregistered', 'no_balance', 'charset'];
+const HOLD: ReadonlyArray<AiLineSpamChip['state']> = ['demo', 'unavailable', 'unregistered', 'no_balance', 'charset', 'no_device'];
 
 export interface LineResultCardsProps {
   run: AiLineRun;
@@ -56,6 +56,8 @@ function chipView(chip: AiLineSpamChip | undefined, stale: boolean): { tone: str
     case 'unregistered': return { tone: 'bg-amber-50 text-amber-800', icon: 'none', text: '등록된 발신번호로만 검사해요' };
     case 'no_balance': return { tone: 'bg-amber-50 text-amber-800', icon: 'none', text: '잔액이 부족해 검사하지 못했어요' };
     case 'charset': return { tone: 'bg-amber-50 text-amber-800', icon: 'none', text: '보낼 수 없는 글자가 있어요' };
+    // ★ 2026-10-25 원장 #114 — 검사 장비(시험폰)가 없을 때(옛: 500 「처리 중 문제」)
+    case 'no_device': return { tone: 'bg-slate-100 text-slate-600', icon: 'none', text: '지금은 스팸 검사를 할 수 없어요' };
     default: return { tone: 'bg-slate-100 text-slate-600', icon: 'wait', text: '검사 전' };
   }
 }
@@ -155,7 +157,7 @@ export default function LineResultCards(p: LineResultCardsProps) {
   const [decoVars, setDecoVars] = useState<string[]>([]);
   const [decoBusy, setDecoBusy] = useState(false);
   const [decoError, setDecoError] = useState<string | null>(null);
-  const decoCost = AI_GENERATE_COSTS['ai-line-decorate'] ?? 1;
+  const decoCost = creditCost('ai-line-decorate');
 
   const cols = types.length >= 3 ? 'lg:grid-cols-3' : types.length === 2 ? 'md:grid-cols-2' : '';
   return (

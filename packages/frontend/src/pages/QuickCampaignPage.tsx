@@ -4,7 +4,7 @@
  * 입구 하나. 담당자가 가진 재료 무엇이든: 홈페이지·행사 페이지 주소(있으면 · AI 0 가드 크롤) · 사진·글 판 · 상품(연동 = 몰 후보 줄 / 미연동 = 글줄) · 브랜드 칩.
  * 하단 바 [만들기] → 크레딧 확인 창 1회(주소 읽기 재료면 도메인 실명 고지 · 감사 기록은 서버) → 서버 단계 진행 → 결과 화면(`/quick-campaign/result`).
  * 재료 계약·금액·시도 토큰은 그대로(AI 자동제작 v1 · 서버 견적 단일 출처 · attemptToken 누름마다 · 같은 재료 재시도 = 같은 토큰).
- * 신규 ENV 미개방 회사 = 옛 화면(QuickCampaignLegacyPage). native dialog 0 · 모델명 0 · 하드코딩 금액 0.
+ * 신규 ENV 미개방 회사 = 안내 한 줄(★ 2026-10-25 원장 #104 · 옛 v0 화면은 지웠다). native dialog 0 · 모델명 0 · 하드코딩 금액 0.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
@@ -20,7 +20,6 @@ import { AI_BUILD_PRODUCTS_MAX } from '../components/ai-build/ProductPickList';
 import AssetLibraryPickerModal, { type PickedAsset } from '../components/assets/AssetLibraryPickerModal';
 import CreditConfirmModal from '../components/credit/CreditConfirmModal';
 import { useToast } from '../components/ToastProvider';
-import QuickCampaignLegacyPage from './QuickCampaignLegacyPage';
 import EventCampaignModal from '../components/EventCampaignModal';
 import EventCampaignResumeBar from '../components/EventCampaignResumeBar';
 import {
@@ -63,9 +62,11 @@ export default function QuickCampaignPage() {
   const [entry] = useState(() => ({
     channel: (['email', 'catalog', 'dm'].includes(String(searchParams.get('channel'))) ? searchParams.get('channel') : null) as BuildChannel | null,
     regen: searchParams.get('regen') === '1',
+    // ★ 2026-10-25 원장 #103 — 결과 화면이 확인받은 금액(이 화면 견적이 다르면 바로 만들지 않고 확인 창으로 새 금액을 묻는다)
+    expected: Number.isFinite(Number(searchParams.get('expected'))) && searchParams.get('expected') !== null ? Number(searchParams.get('expected')) : null,
   }));
 
-  // 노출 스위치(신규 ENV) — 서버가 정한다. 미개방 = 옛 화면 그대로.
+  // 노출 스위치(신규 ENV) — 서버가 정한다. 미개방 = 안내 한 줄.
   const [flag, setFlag] = useState<'loading' | 'on' | 'off'>('loading');
   useEffect(() => {
     const ctrl = new AbortController();
@@ -352,8 +353,9 @@ export default function QuickCampaignPage() {
     if (!quote.gate.ok || planLocked) { setRegenPending(false); return; }
     setRegenPending(false);
     attemptRef.current = newAttemptToken();
+    if (entry.expected === null || quote.total !== entry.expected) { setConfirmOpen(true); return; }
     void run();
-  }, [regenPending, quote, busy, planLocked, run]);
+  }, [regenPending, quote, busy, planLocked, run, entry.expected]);
 
   const resetAll = () => {
     clearBuildDraft();
@@ -362,7 +364,10 @@ export default function QuickCampaignPage() {
     setRead(null); setCarriedRead([]); setAddress(''); setReadState({ kind: 'idle' }); setBoardOpen(true);
   };
 
-  if (flag === 'off') return <QuickCampaignLegacyPage />;
+  // ★ 2026-10-25 원장 #104 — 옛 v0 화면(다른 채우기 · 다른 돈 규칙)은 지웠다 · 스위치 밖 회사 = 안내 한 줄
+  if (flag === 'off') {
+    return <ZoneFrame moduleId="make" backTo="/dm-builder"><div className="py-24 text-center text-sm text-slate-500">아직 이 화면이 열리지 않았어요. 모바일 DM · 이메일 편집기에서 만들어 주세요.</div></ZoneFrame>;
+  }
   if (flag === 'loading') {
     return <ZoneFrame moduleId="make" backTo="/dm-builder"><div className="py-24 flex justify-center"><Loader2 className="w-6 h-6 animate-spin text-indigo-600" /></div></ZoneFrame>;
   }

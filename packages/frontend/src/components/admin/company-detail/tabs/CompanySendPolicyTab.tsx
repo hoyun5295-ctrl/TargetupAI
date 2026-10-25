@@ -2,6 +2,7 @@
  * CompanySendPolicyTab — 슈퍼관리자 CompanyDetailModal 에서 옮긴 화면(★ 2026-10-09 파일 분리 E · 설계서 docs/2026-10-03-admin-dashboard-split-design.md §5)
  * 옮긴 방법 = 스크립트(원문 그대로 · 글자 대조). 상태(use*)는 본체에 남고 props 로 받는다 — 탭을 옮겨 다녀도 값이 그대로다(동작 변경 0).
  */
+import { useSendPolicy, sendWindowText } from '../../../../utils/send-policy';
 import type { Dispatch, SetStateAction } from 'react';
 
 export interface CompanySendPolicyTabProps {
@@ -11,6 +12,7 @@ export interface CompanySendPolicyTabProps {
 
 export default function CompanySendPolicyTab(props: CompanySendPolicyTabProps) {
   const { editCompany, setEditCompany } = props;
+  const sendPolicy = useSendPolicy();   // ★ 2026-10-25 원장 #40 발송 창 = 서버 값
 
   return (
     <>
@@ -55,7 +57,7 @@ export default function CompanySendPolicyTab(props: CompanySendPolicyTabProps) {
                   </div>
                   <div className="bg-blue-50 rounded-lg p-3 mt-2">
                     <p className="text-xs text-blue-700">
-                      발송 시간은 한국 시간(KST) 기준이며, 광고성 메시지는 08:00~21:00 사이에만 발송할 수 있습니다.
+                      발송 시간은 한국 시간(KST) 기준이며, 광고성 메시지는 {sendPolicy ? `${sendWindowText(sendPolicy)} 사이에만` : '야간에는'} 발송할 수 {sendPolicy ? '있습니다' : '없습니다'}.
                     </p>
                   </div>
                 </div>

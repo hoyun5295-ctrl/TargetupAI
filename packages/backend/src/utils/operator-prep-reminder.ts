@@ -25,7 +25,7 @@ export async function sendMonthlyPrepReminders(
   try {
     const r = await query(
       `SELECT id, name, schedule, schedule_time, schedule_day_of_month, schedule_month, benefit_content,
-              admin_phone_numbers, backup_admin_phone, prep_reminder_sent_for
+              admin_phone_numbers, backup_admin_phone, prep_reminder_sent_for::text AS prep_reminder_sent_for
          FROM continuous_operators
         WHERE company_id = $1::uuid AND status = 'active' AND schedule IN ('monthly', 'yearly')`,
       [companyId],
@@ -40,21 +40,24 @@ export async function sendMonthlyPrepReminders(
   }
 
   const targetTag = kstDateTag(new Date(now.getTime() + 2 * 24 * 60 * 60 * 1000)); // 오늘+2일 (KST)
+  const todayTag = kstDateTag(now);
   let notified = 0;
 
   for (const row of rows) {
     try {
       const sendAt = computeNextOccurrence(row.schedule === 'yearly' ? 'yearly' : 'monthly', row.schedule_time, null, row.schedule_day_of_month ?? null, row.schedule_month ?? null, now);
-      if (kstDateTag(sendAt) !== targetTag) continue;
-      const sentFor = row.prep_reminder_sent_for ? kstDateTag(new Date(row.prep_reminder_sent_for)) : null;
-      // date 컬럼은 자정(UTC) 해석 시 KST 태그가 어긋날 수 있어 문자열 비교도 함께 — YYYY-MM-DD 원본 대조
-      const sentForRaw = row.prep_reminder_sent_for ? String(row.prep_reminder_sent_for).slice(0, 10).replace(/-/g, '') : null;
-      if (sentFor === targetTag || sentForRaw === targetTag) continue;
+      // ★ 2026-10-25 원장 #22 — 오늘+2일까지(발송일 전날까지) 안 보낸 안내를 본다(옛: 딱 오늘+2일만 · D-2 에 못 보내면 다시 안 봤다)
+      const sendTag = kstDateTag(sendAt);
+      if (!(sendTag > todayTag && sendTag <= targetTag)) continue;
+      // ★ 2026-10-25 원장 #43 — date 칸은 SQL 에서 글자(YYYY-MM-DD)로 읽는다(드라이버 Date 변환 · 서버 시간대에 안 기댄다 · 옛 두 갈래 대조 = 한쪽은 늘 거짓)
+      const sentFor = row.prep_reminder_sent_for ? String(row.prep_reminder_sent_for).slice(0, 10).replace(/-/g, '') : null;
+      if (sentFor === sendTag) continue;
 
       const when = sendAt.toLocaleString('ko-KR', {
         timeZone: 'Asia/Seoul', month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false,
       });
-      await notifyOperatorAdmins(
+      // 적재된 뒤에만 「보냄」 기록(못 보냈으면 기록하지 않고 다음 날 다시 · 발송일 전날까지)
+      const sent = await notifyOperatorAdmins(
         {
           adminPhoneNumbers: Array.isArray(row.admin_phone_numbers) ? row.admin_phone_numbers : [],
           backupAdminPhone: row.backup_admin_phone || null,
@@ -67,6 +70,7 @@ export async function sendMonthlyPrepReminders(
           benefitContent: row.benefit_content || null,
         }),
       );
+      if (!sent) continue;
       await query(
         `UPDATE continuous_operators
             SET prep_reminder_sent_for = ($2::timestamptz AT TIME ZONE 'Asia/Seoul')::date, updated_at = NOW()
@@ -130,7 +134,8 @@ export async function sendPendingExpiryReminders(
       const expiresLabel = new Date(row.expires_at).toLocaleString('ko-KR', {
         timeZone: 'Asia/Seoul', month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false,
       });
-      await notifyOperatorAdmins(
+      // ★ 2026-10-25 원장 #22 — 적재된 뒤에만 기록(못 보냈으면 다음 회차가 다시 · 만료 전까지)
+      const sent = await notifyOperatorAdmins(
         {
           adminPhoneNumbers: Array.isArray(row.admin_phone_numbers) ? row.admin_phone_numbers : [],
           backupAdminPhone: row.backup_admin_phone || null,
@@ -145,6 +150,7 @@ export async function sendPendingExpiryReminders(
           costEstimate: Number(row.cost_estimate) || 0,
         }),
       );
+      if (!sent) continue;
       await query(
         `UPDATE operator_proposals SET expiry_reminder_sent_at = NOW() WHERE id = $1::uuid`,
         [row.id],

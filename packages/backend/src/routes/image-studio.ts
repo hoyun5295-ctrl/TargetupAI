@@ -18,6 +18,7 @@
  */
 
 import { Router, Response } from 'express';
+import { getCreditCost } from '../utils/ai-credit-calc';
 import multer from 'multer';
 import fs from 'fs';
 import path from 'path';
@@ -27,28 +28,17 @@ import { resolveCompanyIndustry } from '../utils/copy-prompt-composer';
 import { authenticate } from '../middlewares/auth';
 import { resolveOwnerScope } from '../utils/owner-scope';
 import { LIMITS } from '../config/defaults';
-import { checkCredit, settleCreditAfterSuccess, InsufficientCreditError, isChargedByKey } from '../utils/ai-credit';
+import { checkCredit, settleCreditAfterSuccess, settleOrUndo, reportCreditMiss, InsufficientCreditError, isChargedByKey } from '../utils/ai-credit';
 import { runSerial } from '../utils/inflight-lock';
 import { studioAttemptKey, rememberStudioResult, recallStudioResult } from '../utils/image-studio-attempt';
 // ★ 2026-10-24 요금제 = AI 존 서버 문 한 곳(뿌리 대장 R2 · 옛 studioPlanBlocked 1019 = 같은 판정의 사본) · 크레딧을 쓰는 생성 · 수정에만
 import { aiZonePlanBlocked } from '../utils/plan-guard';
-import { registerAsset, getStorageUsage, isAssetsTableMissing, getAsset, getAssetByUrl } from '../utils/assets';
-import {
-  isStudioReady, StudioError, CREDIT_SOURCE,
-  resolvePreset, buildPosterPrompt, hasBenefitPattern, buildAssetDisplayName,
-  generatePoster, editOrUpscale, buildEditInstruction, studioImageEngine,
-  removeBackground, composeImage,
-  writeTempBuffer, allocTempPath, writeTempMeta, readTempMeta, clearTempMeta, findTempFile, moveTempToPermanent, restorePermanentToTemp, findPermanentByTempId,
-  companyTempUsageBytes, isValidTempId, newTempId,
-  tryAcquireGenerateLock, releaseGenerateLock,
-  findTemplateSample, writeTemplateSample,
-  isStudioTempFull,
-  STUDIO_TEMP_CAP_BYTES, STUDIO_TEMP_TTL_DAYS,
-  type ComposeTypography, type TempMeta,
-} from '../utils/image-studio';
+import { registerAsset, getStorageUsage, isAssetsTableMissing, getAsset, getAssetByUrl, deleteAsset } from '../utils/assets';
+import { isStudioReady, StudioError, CREDIT_SOURCE, resolvePreset, buildPosterPrompt, hasBenefitPattern, buildAssetDisplayName, generatePoster, editOrUpscale, buildEditInstruction, studioImageEngine, removeBackground, composeImage, writeTempBuffer, allocTempPath, writeTempMeta, readTempMeta, clearTempMeta, findTempFile, moveTempToPermanent, restorePermanentToTemp, findPermanentByTempId, companyTempUsageBytes, isValidTempId, newTempId, tryAcquireGenerateLock, releaseGenerateLock, findTemplateSample, discardTemp, isStudioTempFull, STUDIO_TEMP_CAP_BYTES, STUDIO_TEMP_TTL_DAYS, type TempMeta } from '../utils/image-studio';
 import { getTemplate, listTemplatesPublic, findUnfilledTemplateText } from '../utils/image-studio-templates';
 import { SUB_ORDER } from '../utils/image-studio-template-subs';
 import { createHash } from 'crypto';
+import { userErrorResponse, respondUserError, uploadErrorText } from '../utils/http-error';
 import { headlineTextSafe, LINE_HEADLINE_TITLE_MAX, LINE_HEADLINE_LABEL_MAX } from '../utils/line-headline';
 import { makeLineHeadlineImage, lineHeadlineImageSource, LineHeadlineInputError, resolveLineHeadlineLast, lineHeadlineCreditKey, readLineHeadlineByFp, markLineHeadlineRunning, markLineHeadlineDone, unmarkLineHeadlineDone, clearLineHeadlineRunning } from '../utils/line-headline-make';
 
@@ -72,7 +62,6 @@ imageStudioRouter.get('/template-sample/:id', (req: any, res: Response) => {
 
 imageStudioRouter.use(authenticate);
 
-const FONT_DIR = process.env.STUDIO_FONT_DIR || path.resolve('./uploads/fonts');
 // 라이브러리 자산 실물 경로 — utils/assets.ts와 동일 정의 미러(단일 env 소스)
 const INAPP_IMAGE_BASE = process.env.INAPP_IMAGE_PATH || path.resolve('./uploads/inapp');
 // MMS 이미지 저장소 — routes/mms-images.ts와 동일 정의 미러(변환 산출물을 기존 발송 계약 저장소로)
@@ -80,6 +69,9 @@ const MMS_IMAGE_BASE = process.env.MMS_IMAGE_PATH || path.resolve('./uploads/mms
 
 // StudioError / 크레딧 부족 → 표준 응답. 그 외 = 로그 후 GEN_FAILED.
 function respondStudioError(res: Response, err: any): Response {
+  // ★ 2026-10-25 원장 쓰기 실패 = 결과를 건네지 않는다(503 · 성공 뒤 차감 한 규칙 · 원장 docs/2026-10-25-oneline-all-structure-check.md §8-2)
+  const ue = userErrorResponse(err);
+  if (ue) return res.status(ue.status).json(ue.body);
   if (err instanceof StudioError) {
     return res.status(err.httpStatus).json({ success: false, error: err.userMessage, code: err.code });
   }
@@ -117,63 +109,6 @@ imageStudioRouter.get('/templates', async (req: any, res: Response) => {
   const industryCategories = companyId ? studioIndustryCategories(await resolveCompanyIndustry(companyId)) : null;
   // ★ 2026-10-06 subOrder = 카테고리별 세부 칩 순서(화면이 이 순서로 칩을 그린다)
   return res.json({ success: true, templates, subOrder: SUB_ORDER, industryCategories });
-});
-
-// ── POST /template-samples/generate — 예시 실샘플 배치 생성 (★슈퍼관리자 전용·내부 원가) ──
-//   템플릿 sample 카피(무드별 실카피·혜택 수치 0)로 제품 없이 1장씩 생성해 영구 저장.
-//   크레딧 미차감(고객 과금 아님 — Gemini 원가만). HTTP 타임아웃 대비 호출당 limit장(기본 2·최대 5)씩 진행,
-//   remaining이 0이 될 때까지 재호출. 동시 실행 1회(모듈 잠금).
-let sampleGenInFlight = false;
-imageStudioRouter.post('/template-samples/generate', async (req: any, res: Response) => {
-  if (req.user?.userType !== 'super_admin') {
-    return res.status(403).json({ success: false, error: '슈퍼관리자만 실행할 수 있습니다.' });
-  }
-  if (!isStudioReady()) return respondStudioError(res, new StudioError('STUDIO_NOT_READY', 503));
-  if (sampleGenInFlight) return res.status(409).json({ success: false, error: '샘플 생성이 이미 진행 중입니다.' });
-  sampleGenInFlight = true;
-  try {
-    const limit = Math.max(1, Math.min(5, Number(req.body?.limit) || 2));
-    const publicList = listTemplatesPublic();
-    const missing = publicList.filter((t) => !t.exampleUrl && !findTemplateSample(t.id));
-    const targets = missing.slice(0, limit);
-    const preset = resolvePreset('poster');
-    // 토큰({productName})·placeholder([...]) 포함 기본값은 샘플에 쓰지 않는다 — sample 카피가 항상 우선.
-    const clean = (s?: string) => (s && !s.includes('{') && !s.includes('[') ? s : '');
-    const generated: string[] = [];
-    const failed: string[] = [];
-    for (const pub of targets) {
-      const t = getTemplate(pub.id);
-      if (!t) continue;
-      try {
-        const prompt = buildPosterPrompt({
-          template: t,
-          preset,
-          texts: {
-            label: clean(t.defaultTexts.label),
-            title: t.sample?.title || clean(t.defaultTexts.title) || t.name,
-            subtitle: t.sample?.subtitle || '',
-          },
-          userHint: null,
-          hasProduct: false,
-        });
-        const img = await generatePoster(prompt, preset, null);
-        writeTemplateSample(t.id, Buffer.from(img.base64, 'base64'), img.mime);
-        generated.push(t.id);
-      } catch (err: any) {
-        console.error(`[image-studio] 템플릿 샘플 생성 실패(${t.id}):`, err?.message || err);
-        failed.push(t.id);
-      }
-    }
-    return res.json({
-      success: true,
-      generated,
-      failed,
-      remaining: missing.length - generated.length,
-      total: publicList.length,
-    });
-  } finally {
-    sampleGenInFlight = false;
-  }
 });
 
 // ── POST /generate — 템플릿 + 누끼 + 지정 문구 → 완성 포스터 1장 (2크레딧 고정) ──
@@ -223,8 +158,8 @@ imageStudioRouter.post('/generate', async (req: any, res: Response) => {
     return res.status(400).json({ success: false, error: '문구 칸에 예시 문구가 그대로 있습니다. 실제 문구로 바꾼 뒤 만들어 주세요.', code: 'PLACEHOLDER_TEXT', field: unfilledField });
   }
 
-  // 사전 차단(최대 2크레딧 기준) — 이미 낸 시도는 걷지 않으므로 보지 않는다
-  if (!alreadyPaid) { try { await checkCredit(companyId, 2); } catch (err) { return respondStudioError(res, err); } }
+  // 사전 차단(생성 단가) — 이미 낸 시도는 걷지 않으므로 보지 않는다 · ★ 2026-10-25 원장 #116 단가 = 단가표(옛: 숫자 2)
+  if (!alreadyPaid) { try { await checkCredit(companyId, getCreditCost(CREDIT_SOURCE.generate)); } catch (err) { return respondStudioError(res, err); } }
 
     // temp 상한 검사(200MB) — ★ 2026-09-27 R125 CT(모든 임시 쓰기 라우트가 같은 판정)
     if (isStudioTempFull(companyId)) return respondStudioError(res, new StudioError('TEMP_FULL', 409));
@@ -256,13 +191,22 @@ imageStudioRouter.post('/generate', async (req: any, res: Response) => {
       return { tempId, url: `/api/image-studio/temp/${tempId}`, presetKey: preset.key };
     });
 
-    // 성공 후 차감 — 생성 1회 = 2크레딧 고정(★2026-07-30 Harold 확정: 1장 생성이어도 2). 멱등키 = 생성 요청 uuid.
-    const cost = 2;
+    // 성공 후 차감 — 생성 1회 = 단가표 값(★2026-07-30 Harold 확정: 1장 생성이어도 같은 값). 멱등키 = 생성 요청 uuid.
+    const cost = getCreditCost(CREDIT_SOURCE.generate);
     if (!alreadyPaid) {
       // ★ Codex E1 — 사전 확인 뒤 다른 기능이 잔액을 먼저 쓰면 여기서 402(무과금 결과를 내주지도 기억하지도 않는다)
-      await settleCreditAfterSuccess({
-        companyId, cost, source: CREDIT_SOURCE.generate, createdBy: userId,
-        idempotencyKey: attemptKey || `image-studio:${newTempId()}`,
+      // ★ 2026-10-25 원장 쓰기 실패 = 503 · 만든 임시 그림은 거둔다(성공 뒤 차감 한 규칙)
+      await settleOrUndo({
+        settle: {
+          companyId, cost, source: CREDIT_SOURCE.generate, createdBy: userId,
+          idempotencyKey: attemptKey || `image-studio:${newTempId()}`,
+        },
+        undo: () => {
+          let firstErr: unknown = null;
+          for (const im of images) { try { discardTemp(companyId, im.tempId); } catch (e) { firstErr = firstErr || e; } }
+          if (firstErr) throw firstErr;   // 다 거두어 본 뒤 하나라도 못 지웠으면 경보
+        },
+        what: '스튜디오 임시 그림',
       });
     }
 
@@ -318,8 +262,8 @@ imageStudioRouter.post('/edit', async (req: any, res: Response) => {
     return res.status(404).json({ success: false, error: '편집 가능한 생성 이미지가 아닙니다.', code: 'NOT_EDITABLE' });
   }
 
-  const cost = 1;
   const source = CREDIT_SOURCE.edit;
+  const cost = getCreditCost(source);
   if (!(instruction && String(instruction).trim())) {
     return res.status(400).json({ success: false, error: '어떻게 바꿀지 알려주세요.' });
   }
@@ -345,7 +289,12 @@ imageStudioRouter.post('/edit', async (req: any, res: Response) => {
     });
 
     if (!alreadyPaid) {
-      await settleCreditAfterSuccess({ companyId, cost, source, createdBy: userId, idempotencyKey: attemptKey || `image-studio:${newTempId()}` });   // ★ Codex E1 동시 소진 = 402
+      // ★ Codex E1 동시 소진 = 402 · ★ 2026-10-25 원장 쓰기 실패 = 503 · 만든 임시 그림은 거둔다
+      await settleOrUndo({
+        settle: { companyId, cost, source, createdBy: userId, idempotencyKey: attemptKey || `image-studio:${newTempId()}` },
+        undo: () => { discardTemp(companyId, newTemp); },
+        what: '스튜디오 임시 그림',
+      });
     }
     const body = { success: true, image: { tempId: newTemp, url: `/api/image-studio/temp/${newTemp}` } };
     if (attemptKey) rememberStudioResult(attemptKey, body);
@@ -412,33 +361,76 @@ imageStudioRouter.post('/line-headline', async (req: any, res: Response) => {
     try { alreadyPaid = await isChargedByKey(companyId, key); } catch {
       return res.status(503).json({ success: false, error: '크레딧 내역을 확인하지 못했어요. 잠시 뒤 다시 시도해주세요.', code: 'CREDIT_STATE_UNKNOWN' });
     }
-    if (!alreadyPaid) { try { await checkCredit(companyId, 2); } catch (err) { return respondStudioError(res, err); } }
+    if (!alreadyPaid) { try { await checkCredit(companyId, getCreditCost(CREDIT_SOURCE.generate)); } catch (err) { return respondStudioError(res, err); } }
     if (isStudioTempFull(companyId)) return respondStudioError(res, new StudioError('TEMP_FULL', 409));
+    // ★ 2026-10-25 원장 #117 — 그림은 소재 라이브러리에 오른다(스튜디오 저장과 같은 용량 셈) · 꽉 찼으면 만들지 않는다
+    const storageFull = () => res.status(409).json({ success: false, error: '저장 용량 한도를 초과했습니다. 라이브러리에서 정리 후 다시 만들어 주세요.', code: 'STORAGE_FULL' });
+    const usage = await getStorageUsage(companyId);
+    if (usage.usedBytes >= usage.limitBytes) return storageFull();
 
     const ledgerDown = () => res.status(503).json({ success: false, error: '그림 기록을 남기지 못했어요. 잠시 뒤 다시 시도해주세요.', code: 'HEADLINE_LEDGER_UNAVAILABLE' });
     if (!markLineHeadlineRunning(companyId, uid, lineFp)) return ledgerDown();
     running = true;
-    let moved: { url: string; filename: string };
+    let moved: Awaited<ReturnType<typeof makeLineHeadlineImage>>;
     try {
       moved = await makeLineHeadlineImage({ companyId, template, texts, productImage: rawImg || null });
     } catch (err: any) {
       if (err instanceof LineHeadlineInputError) return res.status(400).json({ success: false, error: err.message, code: err.code });
       throw err;
     }
+    let assetId: string | null = null;
     const drop = () => {
       unmarkLineHeadlineDone(companyId, uid, lineFp, fp, moved.url);
       try { fs.unlinkSync(path.join(INAPP_IMAGE_BASE, companyId, moved.filename)); } catch { /* noop */ }
+      if (assetId) void deleteAsset(companyId, assetId).catch(() => { /* 지우기 실패 = 행만 남는다(파일 없음) · 로그는 deleteAsset 쪽 */ });
     };
+    // ★ 1026 Codex 2R — 정산 실패의 거두기 = 기다리고 · 못 지우면 던진다(파일 · 소재 행 · 없는 파일은 이미 거둔 것) → settleOrUndo 가 [CREDIT][ORPHAN] 경보
+    //   ★ 1026 Codex 3R — 파일 · 소재 행을 **각각** 시도한 뒤 첫 오류(파일을 못 지워도 행은 거둔다 · 쓸 수 있는 무과금 소재 0)
+    const dropStrict = async () => {
+      unmarkLineHeadlineDone(companyId, uid, lineFp, fp, moved.url);
+      let firstErr: unknown = null;
+      try { fs.unlinkSync(path.join(INAPP_IMAGE_BASE, companyId, moved.filename)); } catch (e: any) { if (e?.code !== 'ENOENT') firstErr = e; }
+      if (assetId) {
+        try {
+          const r = await deleteAsset(companyId, assetId);
+          if (r.inUse) throw new Error('헤드라인 소재가 이미 쓰이고 있어 거두지 못함');
+        } catch (e) { firstErr = firstErr || e; }
+      }
+      if (firstErr) throw firstErr;
+    };
+    // 만든 뒤 크기를 더하면 한도를 넘는다 = 건네지 않는다(걷기 전 · 스튜디오 저장과 같은 판정)
+    if (usage.usedBytes + moved.bytes > usage.limitBytes) { drop(); return storageFull(); }
     // 차감 전 = 「차감 중」 기록(차감된 그림은 늘 원장에 있다 · Codex R5) · 이 동안 같은 입력 · /last 는 주소를 못 받고 기다린다(차감 실패로 지워질 그림을 내보내지 않게 · Codex R6)
     //   차감 뒤 = 완료(공개) · 응답 유실 뒤 GET /line-headline/last 가 0크레딧으로 되찾는다
     if (!markLineHeadlineDone(companyId, uid, lineFp, fp, moved.url, 'settling')) { drop(); return ledgerDown(); }
     running = false;
+    // ★ 2026-10-25 원장 #117 — 소재 등재(라이브러리에서 다시 쓰기 · 지우기 · 용량 셈) · 걷기 전에 한다(등재 못 한 그림은 건네지도 걷지도 않는다)
+    //   registerAsset 은 던지지 않는다(null = 실패 또는 「커밋됐는데 응답만 끊김」) → 주소로 다시 확인 · 확인마저 실패 = 파일은 남기고(행이 있을 수 있다) 건네지 않는다
+    assetId = await registerAsset({
+      companyId, createdBy: userId, kind: 'generated', origin: 'studio',
+      url: moved.url, filename: buildAssetDisplayName(title, moved.channelSpec, moved.ext), bytes: moved.bytes, format: moved.ext === 'png' ? 'png' : 'jpg',
+      prompt: null, channelSpec: moved.channelSpec, width: null, height: null,
+    });
+    if (!assetId) {
+      let committed: { id: string } | null = null;
+      try { committed = await getAssetByUrl(companyId, moved.url); } catch {
+        // ★ 1026 Codex 1R — 등재 여부를 모른다 = 그림 파일을 거두고(행이 있어도 파일 없는 행 = 쓸 수 없다 · 무과금 소재 0) 사람에게 알린다
+        drop();
+        reportCreditMiss({ companyId, source: CREDIT_SOURCE.generate, cost: 0, key: moved.url, reason: '소재 등재 확인 실패(파일 거둠 · 행 확인 필요)', tag: 'ORPHAN' });
+        return res.status(503).json({ success: false, error: '그림을 라이브러리에 올렸는지 확인하지 못했어요. 잠시 뒤 다시 만들어 주세요.', code: 'ASSET_REGISTER_UNKNOWN' });
+      }
+      if (!committed) { drop(); return res.status(503).json({ success: false, error: '그림을 라이브러리에 올리지 못했어요. 잠시 뒤 다시 만들어 주세요.', code: 'ASSET_REGISTER_FAILED' }); }
+      assetId = committed.id;
+    }
     if (!alreadyPaid) {
       try {
-        await settleCreditAfterSuccess({ companyId, cost: 2, source: CREDIT_SOURCE.generate, createdBy: userId, idempotencyKey: key });
+        // 동시 소진 · 원장 쓰기 실패 = 결과를 건네지 않는다(미과금 결과 0) · 거두기 실패 = [CREDIT][ORPHAN] 경보(★ 1026 한 함수)
+        await settleOrUndo({
+          settle: { companyId, cost: getCreditCost(CREDIT_SOURCE.generate), source: CREDIT_SOURCE.generate, createdBy: userId, idempotencyKey: key },
+          undo: dropStrict,
+          what: '헤드라인 그림',
+        });
       } catch (err) {
-        // 동시 소진 = 결과를 건네지 않는다(미과금 결과 0)
-        drop();
         return respondStudioError(res, err);
       }
     }
@@ -471,9 +463,10 @@ imageStudioRouter.post('/ingest-product', async (req: any, res: Response) => {
 });
 
 // ── POST /upload-product (multipart) ───────────────────────────
+const PRODUCT_UPLOAD_LIMITS = { fileSize: 10 * 1024 * 1024, files: 1 };
 const productUpload = multer({
   storage: multer.memoryStorage(),
-  limits: { fileSize: 10 * 1024 * 1024, files: 1 },
+  limits: PRODUCT_UPLOAD_LIMITS,
   fileFilter: (_req, file, cb) => {
     if (file.mimetype.toLowerCase().startsWith('image/')) cb(null, true);
     else cb(new Error('이미지 파일만 업로드할 수 있습니다.'));
@@ -481,7 +474,7 @@ const productUpload = multer({
 });
 imageStudioRouter.post('/upload-product', (req: any, res: Response) => {
   productUpload.single('image')(req, res, (err: any) => {
-    if (err) return res.status(400).json({ success: false, error: err.message || '업로드 실패' });
+    if (err) return res.status(400).json({ success: false, error: uploadErrorText(err, PRODUCT_UPLOAD_LIMITS) });   // ★ 2026-10-25 원장 #118
     const companyId = req.user?.companyId;
     if (!companyId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
     if (isStudioTempFull(companyId)) return respondStudioError(res, new StudioError('TEMP_FULL', 409));  // ★ 2026-09-27 R125
@@ -508,65 +501,6 @@ imageStudioRouter.post('/remove-bg', async (req: any, res: Response) => {
     const { width, height } = await removeBackground(src.absPath, absPath);
     writeTempMeta(companyId, tempId, { kind: 'cutout', ext: 'png', mime: 'image/png', width, height });
     return res.json({ success: true, cutout: { tempId, url: `/api/image-studio/temp/${tempId}`, width, height } });
-  } catch (err) {
-    return respondStudioError(res, err);
-  }
-});
-
-// ── POST /compose (서버 합성 — 무료) ────────────────────────────
-imageStudioRouter.post('/compose', async (req: any, res: Response) => {
-  const companyId = req.user?.companyId;
-  if (!companyId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
-  if (isStudioTempFull(companyId)) return respondStudioError(res, new StudioError('TEMP_FULL', 409));  // ★ 2026-09-27 R125
-
-  const { bgTempId, cutoutTempId, layout, typography, presetKey } = req.body || {};
-  const bg = findTempFile(companyId, bgTempId);
-  const bgMeta = readTempMeta(companyId, bgTempId);
-  if (!bg || !bgMeta) return res.status(404).json({ success: false, error: '배경 이미지를 찾을 수 없습니다.' });
-  const cutout = cutoutTempId ? findTempFile(companyId, cutoutTempId) : null;
-  if (cutoutTempId && !cutout) return res.status(404).json({ success: false, error: '누끼 이미지를 찾을 수 없습니다.' });
-
-  const preset = resolvePreset(presetKey || bgMeta.presetKey || undefined);
-  const isMms = preset.track === 'mms';
-
-  // 타이포 폰트 키 → 서버 폰트 경로(있으면). 없으면 python이 기본 폰트 폴백.
-  const typo: ComposeTypography[] = Array.isArray(typography)
-    ? typography.slice(0, 5).map((t: any) => {
-        const key = String(t.font || '').replace(/[^a-zA-Z0-9_-]/g, '');
-        const fp = key ? path.join(FONT_DIR, `${key}.ttf`) : '';
-        return {
-          text: String(t.text || '').slice(0, 200),
-          fontPath: fp && fs.existsSync(fp) ? fp : null,
-          size: Math.min(0.3, Math.max(0.01, Number(t.size) || 0.06)),
-          color: /^#[0-9a-fA-F]{6}$/.test(t.color) ? t.color : '#ffffff',
-          align: ['left', 'center', 'right'].includes(t.align) ? t.align : 'center',
-          x: Math.min(1, Math.max(0, Number(t.x) || 0.5)),
-          y: Math.min(1, Math.max(0, Number(t.y) || 0.1)),
-        } as ComposeTypography;
-      }).filter((t) => t.text)
-    : [];
-
-  try {
-    const { tempId, absPath } = allocTempPath(companyId, 'jpeg');
-    const r = await composeImage({
-      bgPath: bg.absPath,
-      cutoutPath: cutout?.absPath || null,
-      outPath: absPath,
-      layout: layout && typeof layout === 'object' ? {
-        x: Math.min(1, Math.max(0, Number(layout.x) || 0.5)),
-        y: Math.min(1, Math.max(0, Number(layout.y) || 0.72)),
-        scale: Math.min(1, Math.max(0.1, Number(layout.scale) || 0.5)),
-      } : null,
-      typography: typo,
-      mmsMaxBytes: isMms ? LIMITS.mmsImageSize : null,
-      format: 'jpeg',
-    });
-    writeTempMeta(companyId, tempId, {
-      kind: 'composite', ext: 'jpeg', mime: r.mime, prompt: bgMeta.prompt,
-      presetKey: preset.key, channelSpec: preset.channelSpec, width: r.width, height: r.height,
-      aspectRatio: preset.aspectRatio,
-    });
-    return res.json({ success: true, composite: { tempId, url: `/api/image-studio/temp/${tempId}`, bytes: r.bytes, width: r.width, height: r.height } });
   } catch (err) {
     return respondStudioError(res, err);
   }
@@ -728,6 +662,7 @@ imageStudioRouter.post('/save', async (req: any, res: Response) => {
       return res.status(503).json({ success: false, error: '이미지 보관함을 준비 중입니다. 잠시 후 다시 시도해 주세요.', code: 'DB_MIGRATION_PENDING' });
     }
     return respondStudioError(res, err);
+    if (respondUserError(res, err)) return;   // ★ 2026-10-25 R10 — 사용자 조건 오류 = 그 상태 · 문장 그대로
   }
   });
 });
@@ -776,6 +711,7 @@ imageStudioRouter.post('/mms-from-asset', async (req: any, res: Response) => {
       return res.status(503).json({ success: false, error: '이미지 보관함을 준비 중입니다. 잠시 후 다시 시도해 주세요.', code: 'DB_MIGRATION_PENDING' });
     }
     return respondStudioError(res, err);
+    if (respondUserError(res, err)) return;   // ★ 2026-10-25 R10 — 사용자 조건 오류 = 그 상태 · 문장 그대로
   }
 });
 

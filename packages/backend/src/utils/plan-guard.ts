@@ -360,6 +360,19 @@ export const AI_ZONE_GATED_CODE = 'AI_OPERATOR_GATED';
 export async function aiZonePlanBlocked(req: Request, res: Response, ctx?: PlanContext | null): Promise<boolean> {
   const companyId = (req as any).user?.companyId;
   if (!companyId) { res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' }); return true; }
+  return aiZonePlanBlockedFor(companyId, (req as any).user, res, ctx);
+}
+
+/**
+ * ★ 2026-10-25 원장 #55 — 같은 요금제 문을 회사 id 로(로그인 없는 공개 링크 · 행위자 = 링크 담당자 계정).
+ *   옛: 휴대폰 링크 [보내기]가 PC 같은 동작이 지나는 이 문을 안 지났다.
+ */
+export async function aiZonePlanBlockedFor(
+  companyId: string,
+  user: { loginId?: string; userId?: string; userType?: string } | null | undefined,
+  res: Response,
+  ctx?: PlanContext | null,
+): Promise<boolean> {
   let plan: PlanContext | null;
   try {
     plan = ctx === undefined ? await loadPlanContext(companyId) : ctx;
@@ -371,7 +384,7 @@ export async function aiZonePlanBlocked(req: Request, res: Response, ctx?: PlanC
     return true;
   }
   if (!plan) { res.status(404).json({ success: false, error: '회사 정보를 찾을 수 없습니다.' }); return true; }
-  if (isAiOperatorAllowed(plan, (req as any).user)) return false;
+  if (isAiOperatorAllowed(plan, user)) return false;
   res.status(403).json({ success: false, error: '이 기능은 요금제 가입 후 이용할 수 있어요.', code: AI_ZONE_GATED_CODE });
   return true;
 }

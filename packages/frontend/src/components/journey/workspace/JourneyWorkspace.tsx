@@ -16,6 +16,8 @@
  * ⛔ 「새 판」이라는 말을 쓰지 않는다 · 모델명 0 · 네이티브 확인 창 0 · 내부 코드 0.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { decorateOutcome } from '../../../utils/decorate-outcome';
+import { creditCost } from '../../../constants/credit';
 import { useNavigate } from 'react-router-dom';
 import {
   AlertTriangle, Beaker, ExternalLink, Flag, GitBranch, Hourglass, Loader2, MessageSquare, Pause, Play, Plus,
@@ -198,7 +200,7 @@ export default function JourneyWorkspace({ journeyId, stepId, map, onClose, onCh
   const locked = archived || status === 'ended' || !mj;
   const edit: StepEditPolicy = mj?.edit || { copy: false, timing: false, structure: false, ops: false, reason: '보관된 여정이에요. 복원한 뒤 고칠 수 있어요.' };
   const reshapeAllowed = isActive && mj?.startKind !== 'one_shot';
-  const operationCost = mapData?.costs.operation ?? 10;
+  const operationCost = mapData?.costs.operation ?? creditCost('journey-operation');
   const triggerLabel = mj?.triggerLabel || TRIGGER_EVENTS.find((t) => t.triggerEvent === journey?.trigger_event)?.label || '정한 사건';
 
   // ★ Codex 적대 B1 — 창은 계속 붙어 있어 A 를 닫고 B 를 열면 A 의 늦은 응답이 B 를 덮을 수 있었다. 요청 순번 + 지금 여정이 같을 때만 반영한다.
@@ -449,7 +451,9 @@ export default function JourneyWorkspace({ journeyId, stepId, map, onClose, onCh
     try {
       const r = await sendJson('/api/ai/operator/decorate-message', 'POST', { message: cur.messageTemplate, selectedVars: tokens, channel: cur.channel, isAd: cur.isAd !== false });
       if (!r.ok || !r.data?.message) throw new Error(r.data?.error || 'AI 꾸미기를 받지 못했어요.');
-      applyAiBody(id, cur.messageTemplate, String(r.data.message), '고객 정보를 문안에 녹였어요. 저장해야 반영돼요.');
+      const o = decorateOutcome(r.data);
+      if (!o.changed) { toast.info(o.text); return; }
+      applyAiBody(id, cur.messageTemplate, String(r.data.message), `고객 정보를 문안에 녹였어요. 저장해야 반영돼요.${o.tone === 'info' ? ` ${o.text}` : ''}`);
     } catch (e: any) {
       toast.error(e?.message || 'AI 꾸미기를 받지 못했어요.');
     } finally {
@@ -954,7 +958,8 @@ export default function JourneyWorkspace({ journeyId, stepId, map, onClose, onCh
                         </div>
                       )}
                       <div className="flex flex-wrap items-center gap-2">
-                        {selRaw.step_type === 'message' && (
+                        {/* ★ 2026-10-25 #1 — 알림톡 칸은 승인 템플릿이 본문이라 A/B 문안이 없다(서버도 막는다) */}
+                        {selRaw.step_type === 'message' && selRaw.channel !== 'kakao' && (
                           <button type="button" onClick={() => setVariantsOpen((v) => (v === selRaw.id ? null : selRaw.id))} aria-expanded={variantsOpen === selRaw.id}
                             className={`inline-flex h-9 items-center gap-1.5 rounded-lg border px-3 text-[13px] font-medium ${variantsOpen === selRaw.id ? 'border-indigo-300 bg-indigo-50 text-indigo-800' : 'border-slate-200 bg-white text-slate-700 hover:border-slate-300'}`}>
                             <Beaker className="h-4 w-4" aria-hidden />A/B 문안 시험

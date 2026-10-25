@@ -11,6 +11,7 @@
  * ⛔ 바깥 눌러 닫힘 없음 · 모델명 0 · native dialog 0 · 줄표 0.
  */
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { creditCost, creditText } from '../../constants/credit';
 import { X, ChevronLeft, Camera, Check, Loader2, Gift, Link2, CalendarDays, ImageIcon, PencilLine, Plus, Coins, ShoppingBag, Search, Globe, LayoutTemplate, Eye } from 'lucide-react';
 import JourneyModalShell from '../journey/JourneyModalShell';
 import ZoneSegmented from './ZoneSegmented';
@@ -1236,7 +1237,7 @@ export default function LineStepsModal({ open, channel, state, onClose, onMake }
         <p className="text-[12px] text-slate-500 mt-1 leading-relaxed">
           {compMode ? (cost !== null && generateCost !== null && cost <= generateCost
             ? `오늘 같은 한 줄로 만든 적이 있어 다시 만들기 ${cost}크레딧만 받아요`
-            : `${judgePaid || plan!.cost?.judged ? '판단 2크레딧은 이미 냈어요 · ' : ''}칸 채우기 · 몰 찾기 · 사진 올리기 · 구성 바꾸기는 무료 · 같은 한 줄로 다시 만들면 ${generateCost ?? 3}크레딧`)
+            : `${judgePaid || plan!.cost?.judged ? `판단 ${creditText('oneline-judge')}은 이미 냈어요 · ` : ''}칸 채우기 · 몰 찾기 · 사진 올리기 · 구성 바꾸기는 무료 · 같은 한 줄로 다시 만들면 ${generateCost ?? creditCost('oneline-recook')}크레딧`)
             : cost !== null && generateCost !== null && cost <= generateCost ? `오늘 같은 한 줄로 만든 적이 있어 생성비 ${cost}크레딧만 받아요` : cost !== null && generateCost !== null ? `생성 ${generateCost} + 한 줄 완성 ${cost - generateCost} · 묻기 · 몰 찾기 · 사진 올리기는 무료` : '묻기 · 몰 찾기 · 사진 올리기는 무료예요'}
         </p>
         {short && <p className="text-[12.5px] font-semibold text-rose-600 mt-1.5">크레딧이 부족해요. 충전한 뒤 만들 수 있어요</p>}

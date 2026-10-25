@@ -1,6 +1,8 @@
 import { Request, Response, Router } from 'express';
 // ★ 2026-09-11 전송자격인증 4.2 — 조회(logPrivacyView)·등록/수정(logPrivacyEdit) 이력 추가(누가·어느 화면·몇 건 · 원문 없음)
 import { logPrivacyExport, logPrivacyView, logPrivacyEdit } from '../utils/privacy-audit';
+import { InsufficientCreditError } from '../utils/ai-credit';
+import { respondUserError } from '../utils/http-error';
 // ★ 2026-09-11 전송자격인증 4.2 — 삭제 감사 기록의 전화번호는 저장 시점에 가린다(마스킹 CT 재사용)
 import { maskPhone } from '../utils/mfa';
 import * as XLSX from 'xlsx';
@@ -499,6 +501,7 @@ router.get('/fields', async (req: Request, res: Response) => {
       `SELECT DISTINCT jsonb_object_keys(custom_fields) as field_name
        FROM customers
        WHERE company_id = $1 AND custom_fields IS NOT NULL AND custom_fields != '{}'
+       ORDER BY field_name   -- ★ 2026-10-25 R12: 매번 같은 100개(순서 없는 LIMIT 0)
        LIMIT 100`,
       [companyId]
     );
@@ -1991,6 +1994,9 @@ router.post(
 
       return res.json({ success: true, ...result });
     } catch (err: any) {
+      // ★ 2026-10-25 잔액 부족 402 · 원장 쓰기 실패 503(AI 결과 정산 한 곳 · 옛: 500)
+      if (err instanceof InsufficientCreditError) return res.status(402).json({ success: false, error: 'AI 크레딧이 부족합니다. 크레딧을 충전해 주세요.', code: 'INSUFFICIENT_CREDIT' });
+      if (respondUserError(res, err)) return;
       if (err instanceof SegmentGenerationError) {
         // ZERO_MATCH / FILTER_VALIDATION_FAILED 등 사용자 안내 오류 = 400
         return res.status(400).json({ success: false, code: err.code, error: err.message });

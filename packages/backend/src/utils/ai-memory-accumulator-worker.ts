@@ -46,11 +46,13 @@ let _insightIdleAt = 0;             // R157 등급 인사이트 — 밀린 회�
 const _dmDoneAt = new Map<string, number>();     // R159 DM별 마지막 학습
 const _emailDoneAt = new Map<string, number>();  // R159 이메일 캠페인별 마지막 학습
 
-/** 20시간 안에 처리한 대상이면 true. 오래된 표식은 지운다(메모리 상한). */
-function doneRecently(map: Map<string, number>, id: string, nowMs: number): boolean {
+/**
+ * 20시간 안에 처리한 대상 목록 — SQL 에서 뺀다(오래된 표식은 지운다 · 메모리 상한).
+ * ★ 2026-10-25 원장 #6 — 옛: 뽑은 뒤 JS(doneRecently)에서 건너뛰어 LIMIT 20 · 50 칸을 끝난 것이 차지하면 나머지가 영영 미학습.
+ */
+function recentlyDoneIds(map: Map<string, number>, nowMs: number): string[] {
   for (const [k, at] of map) if (nowMs - at >= REPEAT_GATE_MS) map.delete(k);
-  const at = map.get(id);
-  return at !== undefined && nowMs - at < REPEAT_GATE_MS;
+  return Array.from(map.keys());
 }
 
 /** 1시간 cron tick — 여정 학습 + 등급 인사이트 + 수명관리. idempotent. */
@@ -273,14 +275,16 @@ async function accumulateDmEngagement(): Promise<number> {
                  AND m.metadata->>'last_dm_id' = p.id::text
                  AND m.updated_at >= NOW() - INTERVAL '20 hours'
             )
+        AND NOT (p.id = ANY($1::uuid[]))
+      ORDER BY p.id
       LIMIT 20`,
+    [recentlyDoneIds(_dmDoneAt, Date.now())],
   );
   let learned = 0;
   const dmNow = Date.now();
   for (const row of dms.rows) {
     // ★ 2026-09-28 한줄로 V2 R159 — DB 멱등 표식(last_dm_id)은 회사당 한 행이라 마지막 DM만 기억한다.
-    //   회사에 DM이 여럿이면 나머지가 매시간 다시 집계됐다 → DM마다 20시간 표식을 여기서 둔다.
-    if (doneRecently(_dmDoneAt, String(row.dm_id), dmNow)) continue;
+    //   회사에 DM이 여럿이면 나머지가 매시간 다시 집계됐다 → DM마다 20시간 표식을 여기서 둔다(★1025 #6 거름은 위 SQL).
     _dmDoneAt.set(String(row.dm_id), dmNow);
     try {
       const rows = await getDmRecipientEngagementRows(row.dm_id, row.company_id);
@@ -352,13 +356,15 @@ async function accumulateEmailEngagement(): Promise<number> {
                  AND m.metadata->>'last_campaign_id' = ec.id::text
                  AND m.updated_at >= NOW() - INTERVAL '20 hours'
             )
+        AND NOT (ec.id = ANY($1::uuid[]))
+      ORDER BY ec.sent_at DESC, ec.id
       LIMIT 50`,
+    [recentlyDoneIds(_emailDoneAt, Date.now())],
   );
   let learned = 0;
   const emailNow = Date.now();
   for (const row of campaigns.rows) {
-    // ★ 2026-09-28 한줄로 V2 R159 — DM과 같은 이유(회사당 한 행 표식) · 캠페인마다 20시간 표식
-    if (doneRecently(_emailDoneAt, String(row.id), emailNow)) continue;
+    // ★ 2026-09-28 한줄로 V2 R159 — DM과 같은 이유(회사당 한 행 표식) · 캠페인마다 20시간 표식(★1025 #6 거름은 위 SQL)
     _emailDoneAt.set(String(row.id), emailNow);
     try {
       const ok = await recordEmailEngagementLearning({
@@ -385,6 +391,24 @@ async function accumulateEmailEngagement(): Promise<number> {
 //    최근 30일 rejected 제안 5건+ 회사만, 기존 증류가 7일 내면 skip(멱등·LLM 비용 가드), tick당 5사 상한.
 //    산출 = ai_company_memory(brand_tone_evolution/avoid_patterns 단일 행 upsert) →
 //    buildMemoryPromptContext 경유로 Operator + 문안 생성(composeCopyBrain ③)에 자동 주입.
+/**
+ * ★ 2026-10-25 원장 #7 — 증류를 시도했는데 쓸 결과가 없던 회사(표본 부족 · AI 실패 · 빈 결과) = 다음 시도 24시간 뒤 · 3번 연속이면 7일 뒤.
+ *   옛: 기록 없이 continue → 그 회사가 매 회차 후보(LIMIT 5)로 다시 올라와 AI 를 다시 불렀고(상한 0) · 5개사가 걸리면 나머지 영영 미처리.
+ *   거름은 SQL(LIMIT 앞) · ponytail: 횟수 · 시각은 프로세스 메모리(재기동하면 한 번 더 시도한다 · 기억 표에 표식 행을 더하지 않는다).
+ */
+const _avoidTried = new Map<string, { at: number; fails: number }>();
+const AVOID_RETRY_MS = 24 * 60 * 60 * 1000;
+const AVOID_GIVE_UP_MS = 7 * 24 * 60 * 60 * 1000;
+function avoidWaitingIds(nowMs: number): string[] {
+  const out: string[] = [];
+  for (const [id, t] of _avoidTried) if (nowMs - t.at < (t.fails >= 3 ? AVOID_GIVE_UP_MS : AVOID_RETRY_MS)) out.push(id);
+  return out;
+}
+function noteAvoidTried(companyId: string): void {
+  const prev = _avoidTried.get(companyId);
+  _avoidTried.set(companyId, { at: Date.now(), fails: (prev?.fails || 0) + 1 });
+}
+
 async function accumulateAvoidPatterns(): Promise<number> {
   const companies = await query(
     `SELECT p.company_id, COUNT(*)::int AS cnt
@@ -398,9 +422,12 @@ async function accumulateAvoidPatterns(): Promise<number> {
                  AND m.memory_key = 'avoid_patterns'
                  AND m.updated_at >= NOW() - INTERVAL '7 days'
             )
+        AND NOT (p.company_id = ANY($1::uuid[]))
       GROUP BY p.company_id
      HAVING COUNT(*) >= 5
+      ORDER BY p.company_id
       LIMIT 5`,
+    [avoidWaitingIds(Date.now())],
   );
   let learned = 0;
   for (const row of companies.rows) {
@@ -424,7 +451,7 @@ async function accumulateAvoidPatterns(): Promise<number> {
         }
         if (texts.length >= 15) break;
       }
-      if (texts.length < 3) continue; // 표본 부족 — 증류 보류(가짜 패턴 차단)
+      if (texts.length < 3) { noteAvoidTried(row.company_id); continue; } // 표본 부족 — 증류 보류(가짜 패턴 차단)
 
       const raw = await callAIWithFallback({
         system:
@@ -438,10 +465,10 @@ async function accumulateAvoidPatterns(): Promise<number> {
         creditCost: 0, // 내부 학습 — 사용자 크레딧 차감 없음
       });
       const m = raw.match(/\[[\s\S]*\]/);
-      if (!m) continue;
+      if (!m) { noteAvoidTried(row.company_id); continue; }
       let donts: string[] = [];
-      try { donts = (extractJsonFromAiText(m[0]) as any[]).map(String).filter((s) => s.trim()).slice(0, 5); } catch { continue; }
-      if (donts.length === 0) continue;
+      try { donts = (extractJsonFromAiText(m[0]) as any[]).map(String).filter((s) => s.trim()).slice(0, 5); } catch { noteAvoidTried(row.company_id); continue; }
+      if (donts.length === 0) { noteAvoidTried(row.company_id); continue; }
 
       await addMemory({
         companyId: row.company_id,
@@ -452,8 +479,10 @@ async function accumulateAvoidPatterns(): Promise<number> {
         source: 'reject_distill',
         metadata: { sample_count: texts.length, rejected_30d: Number(row.cnt) || 0 },
       });
+      _avoidTried.delete(row.company_id);
       learned += 1;
     } catch (err: any) {
+      noteAvoidTried(row.company_id);
       console.log(`[ai-memory-accumulator] avoid company=${row.company_id} 오류 — ${err?.message || 'unknown'}`);
     }
   }
@@ -470,6 +499,7 @@ async function pruneOverCapMemories(): Promise<number> {
         WHERE memory_type = $1
         GROUP BY company_id
         HAVING COUNT(*) > $2
+        ORDER BY COUNT(*) DESC, company_id   -- ★ 2026-10-25 R12: 가장 많이 넘친 회사부터(순서 없는 LIMIT 0)
         LIMIT 100`,
       [type, cap],
     );

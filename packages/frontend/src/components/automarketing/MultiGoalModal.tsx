@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { GitMerge, X, AlertCircle, Plus, Loader2, Sparkles } from 'lucide-react';
 import { MultiGoalInput, MultiGoalAnalysis } from './types';
 import { useToast } from '../ToastProvider';
+import { creditText } from '../../constants/credit';
 
 const INP = 'px-3 py-2 bg-white border border-slate-200 rounded-lg text-sm text-slate-900 placeholder-slate-400 focus:outline-none focus:border-indigo-300 transition-colors';
 
@@ -97,7 +98,7 @@ export default function MultiGoalModal({ onClose }: { onClose: () => void }) {
               <div className="flex gap-2 justify-end pt-2 border-t border-slate-200">
                 <button onClick={onClose} className="px-4 py-2 bg-white border border-slate-200 rounded-lg text-sm text-slate-700 hover:bg-slate-100 transition-colors">취소</button>
                 <button onClick={analyze} disabled={analyzing} className="px-4 py-2 bg-violet-100 hover:bg-violet-200 text-violet-900 text-sm rounded-lg disabled:opacity-40 flex items-center gap-1.5 transition-colors">
-                  {analyzing ? <><Loader2 className="w-3.5 h-3.5 animate-spin" /> AI 분석 중...</> : <><Sparkles className="w-3.5 h-3.5" /> 충돌 분석 시작</>}
+                  {analyzing ? <><Loader2 className="w-3.5 h-3.5 animate-spin" /> AI 분석 중...</> : <><Sparkles className="w-3.5 h-3.5" /> 충돌 분석 시작 · {creditText('multi-goal-decisioning')}</>}
                 </button>
               </div>
             </>

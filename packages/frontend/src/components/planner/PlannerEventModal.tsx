@@ -14,6 +14,8 @@
  *   받는 사람 = [상품을 산 고객][전체 고객] 미리 고르지 않음(스위치 열린 회사) · 판2 대상 상품 + 「언제 산」(PlannerAudiencePicker).
  * ⛔ native dialog 0 · 모델명 0 · 줄표 0.
  */
+import { plannerSendDateOf } from '../../utils/planner-dates';
+import { useSendPolicy, plannerSendAtText } from '../../utils/send-policy';
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { ArrowLeft, ArrowRight, ArrowUpRight, CalendarClock, Check, ChevronDown, CircleX, FolderOpen, ImageIcon, Layers, LoaderCircle, Lock, Plus, RotateCw, Rows3, ShoppingBag, WandSparkles, X } from 'lucide-react';
@@ -53,18 +55,9 @@ type Tpl = { id: LineTemplateId | LineCompositionId; layout: LineLayout };
 
 const ANCHOR_LABEL: Record<Anchor, string> = { start: '행사 시작일', end: '마지막 날', before_start: '시작 전' };
 
-/** (순수) 시점 하나의 발송일(서버 computeTouchpointDate와 같은 규칙) */
-function sendDateOf(timing: TimingRule, startsOn: string, endsOn: string): string | null {
-  if (timing.on && /^\d{4}-\d{2}-\d{2}$/.test(timing.on)) return timing.on; // ★ 2026-10-18 미룬 날(서버만 쓴다)
-  if (timing.anchor === 'end') return /^\d{4}-\d{2}-\d{2}$/.test(endsOn) ? endsOn : null;
-  if (timing.anchor === 'before_start') {
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(startsOn)) return null;
-    const d = new Date(`${startsOn}T00:00:00Z`);
-    d.setUTCDate(d.getUTCDate() - (timing.offsetDays || 3));
-    return d.toISOString().slice(0, 10);
-  }
-  return /^\d{4}-\d{2}-\d{2}$/.test(startsOn) ? startsOn : null;
-}
+// ★ 2026-10-25 원장 #62 — 시점 하나의 발송일 = utils/planner-dates plannerSendDateOf(서버 computeTouchpointDate 와 글자까지 같은 식 · 계약 시험이 두 식을 같은 입력으로 대조)
+//   옛: 이 파일의 sendDateOf 가 「시작 전」 기본값을 3일로 셈(서버 = 0일 · 화면이 보인 날 ≠ 나가는 날)
+const sendDateOf = plannerSendDateOf;
 
 /** (순수) 보내는 순서 — 날짜별 한 덩어리(같은 날 문자+DM = 1통 · 메일은 따로) */
 function sendDaysOf(tps: Tp[], startsOn: string, endsOn: string): Array<{ date: string; kinds: PlannerSendKind[] }> {
@@ -171,7 +164,8 @@ export default function PlannerEventModal({ month, initialDate, initialTemplate 
   const [savedId, setSavedId] = useState<string | null>(editing?.id || null);
   const tokens = useRef<Partial<Record<'dm' | 'email', string>>>({});
   const heroFileRef = useRef<HTMLInputElement | null>(null);
-  const minDate = useMemo(() => plannerMinSendDate(new Date()), []);
+  const sendPolicy = useSendPolicy();   // ★ 2026-10-25 원장 #62 승인 마감 · 발송 시각 · 확인 요청일 = 서버 값
+  const minDate = useMemo(() => plannerMinSendDate(new Date(), sendPolicy?.plannerDeadlineHour ?? 24), [sendPolicy]);
 
   // ── ★ 2026-10-18 받는 사람 · 한 줄 확인 ──────────────────────────────
   const a0 = editing?.audience ?? null;
@@ -714,7 +708,7 @@ export default function PlannerEventModal({ month, initialDate, initialTemplate 
         {firstSend && (
           <p className="mt-2 text-[12.5px] text-slate-700 flex items-start gap-2 leading-snug">
             <CalendarClock className="w-[15px] h-[15px] text-slate-500 mt-0.5 shrink-0" />
-            <span>같은 고객에게 <b className="tabular-nums">{sendCount}번</b> · 첫 발송 <b className="tabular-nums">{plannerDay(firstSend)} 오전 8시</b> · 확인 요청은 <b className="tabular-nums">{reviewRequestDay(firstSend)}</b>쯤 휴대폰으로 가요 · 승인 마감 그날 20시</span>
+            <span>같은 고객에게 <b className="tabular-nums">{sendCount}번</b> · 첫 발송 <b className="tabular-nums">{plannerDay(firstSend)}{sendPolicy ? ` ${plannerSendAtText(sendPolicy)}` : ''}</b>{sendPolicy && <> · 확인 요청은 <b className="tabular-nums">{reviewRequestDay(firstSend, sendPolicy.plannerReviewLeadDays)}</b>쯤 휴대폰으로 가요 · 승인 마감 그날 {sendPolicy.plannerDeadlineHour}시</>}</span>
           </p>
         )}
       </div>
@@ -821,7 +815,7 @@ export default function PlannerEventModal({ month, initialDate, initialTemplate 
   );
 }
 
-/** 마감 표기용 — 확인 요청이 가는 날(첫 발송 3일 전) */
-export function reviewRequestDay(firstSend: string): string {
-  return plannerDay(new Date(Date.parse(`${firstSend}T00:00:00Z`) - 3 * 86400000).toISOString().slice(0, 10));
+/** 마감 표기용 — 확인 요청이 가는 날(첫 발송 N일 전 · N = 서버 PLANNER_LINK_LEAD_DAYS · ★ 1025 #62 옛: 숫자 3) */
+export function reviewRequestDay(firstSend: string, leadDays: number): string {
+  return plannerDay(new Date(Date.parse(`${firstSend}T00:00:00Z`) - leadDays * 86400000).toISOString().slice(0, 10));
 }

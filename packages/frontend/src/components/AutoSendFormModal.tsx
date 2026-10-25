@@ -12,6 +12,7 @@
  * ★ D83 교훈: 타겟 필터 없이({}) 발송 = 전체 고객 발송 사고 → 필터 필수 검증
  */
 
+import { useSendPolicy, hh, type SendPolicy } from '../utils/send-policy';
 import { useEffect, useState, useMemo, useRef } from 'react';
 import { aiApi } from '../api/client';
 import { fetchOneLineGaps, type LineRecurringNote } from '../utils/one-line';   // ★ 2026-10-23 한줄 CT 반복 발송 점검
@@ -60,10 +61,14 @@ const SCHEDULE_TYPES = [
 
 const WEEKDAYS = ['일요일', '월요일', '화요일', '수요일', '목요일', '금요일', '토요일'];
 
-const HOURS = Array.from({ length: 14 }, (_, i) => {
-  const h = i + 8; // 08:00 ~ 21:00
-  return { value: `${String(h).padStart(2, '0')}:00`, label: `${String(h).padStart(2, '0')}:00` };
-});
+/** ★ 2026-10-25 원장 #40 — 시각 선택지 = 서버 발송 창(시작 ~ 끝 전 · 옛: 08:00~21:00 숫자 · 21:00 은 보낼 수 없는 시각이었다) */
+function hourOptions(p: SendPolicy | null): Array<{ value: string; label: string }> {
+  if (!p) return [];
+  return Array.from({ length: Math.max(0, p.endHour - p.startHour) }, (_, i) => {
+    const h = p.startHour + i;
+    return { value: `${hh(h)}:00`, label: `${hh(h)}:00` };
+  });
+}
 
 // 카테고리 한글 라벨 (AiCustomSendFlow 패턴)
 const DEFAULT_CATEGORY_LABELS: Record<string, string> = {
@@ -90,6 +95,7 @@ const AI_TONES = [
 
 export default function AutoSendFormModal({ campaign, aiPremiumEnabled, onClose, onSuccess }: AutoSendFormModalProps) {
   const isEdit = !!campaign;
+  const HOURS = hourOptions(useSendPolicy());
 
   // 폼 상태
   const [campaignName, setCampaignName] = useState(campaign?.campaign_name || '');

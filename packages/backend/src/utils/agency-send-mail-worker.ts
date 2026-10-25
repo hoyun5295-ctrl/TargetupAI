@@ -947,20 +947,17 @@ async function processMessage(ctx: TickCtx, seq: number, uidl: string): Promise<
     //   ⛔ 여기 걸린 건은 "오류"가 아니라 **사용자가 원한 상태가 이미 원장에 있는 것**이다.
     //      그래서 반려가 아니라 이 파일만 건너뛴다 — 안 그러면 일부만 고쳐 다시 보낼 때
     //      나머지가 중복이라 전량 반려되어 고친 건이 영영 안 들어온다(왕복 무한).
-    const dupCandidates = await query(
+    // ★ 2026-10-25 원장 #4 — 받는 사람 지문도 SQL 조건으로(옛: 같은 회사 · 시각 · 문안 후보를 LIMIT 5 로 뽑은 뒤 명단을 JS 에서 비교 →
+    //   같은 문안 · 시각의 다른 명단 접수가 5건 넘으면 진짜 중복을 못 봐 두 번 접수). 지문 = JS 와 같은 식(번호 정렬 · 쉼표 이음 · C 정렬 = JS 기본 정렬 · 해시 없이 이은 글자를 그대로 비교)
+    const dupHit = await query(
       `SELECT id FROM agency_send_requests
         WHERE company_id = $1::uuid AND ${dupTimeSql} AND original_content = $3 AND ${EMAIL_DUP_BLOCKING_SQL}
-        LIMIT 5`,
-      [unitAcct.companyId, analysis.requestedAtIso, analysis.content],
+          AND (SELECT string_agg(x.phone, ',' ORDER BY x.phone COLLATE "C")
+                 FROM agency_send_recipients x WHERE x.request_id = agency_send_requests.id) = $4
+        LIMIT 1`,
+      [unitAcct.companyId, analysis.requestedAtIso, analysis.content, phones.join(',')],
     );
-    let alreadyAccepted = false;
-    for (const cand of dupCandidates.rows) {
-      const agg = await query(
-        `SELECT array_agg(phone ORDER BY phone) AS phones FROM agency_send_recipients WHERE request_id = $1::uuid`, [cand.id],
-      );
-      const candHash = sha256(((agg.rows[0]?.phones as string[] | null) || []).join(','));
-      if (candHash === recipientsHash) { alreadyAccepted = true; break; }
-    }
+    const alreadyAccepted = dupHit.rows.length > 0;
     if (alreadyAccepted) {
       dupSkipped.push(u.fileName);
       continue;

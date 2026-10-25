@@ -16,6 +16,7 @@
  *   - PredictiveDashboardPage customer 상세 영역 expand
  */
 
+import { UserFacingError } from './http-error';
 import { query } from '../config/database';
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -76,7 +77,7 @@ export async function explainCustomerPrediction(
   );
 
   if (r.rows.length === 0) {
-    throw new Error('고객 접근 권한 없음 (회사 격리)');
+    throw new UserFacingError(404, 'CUSTOMER_NOT_FOUND', '고객을 찾을 수 없어요.');
   }
 
   const row = r.rows[0];

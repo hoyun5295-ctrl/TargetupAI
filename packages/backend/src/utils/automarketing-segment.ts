@@ -32,6 +32,7 @@
  *   비교할 항목을 스냅샷에 하나 더 담으면 축이 하나 더 열린다.
  */
 
+import { UserFacingError } from './http-error';
 /** 상태 축(명부 한 장으로 판정) */
 type StateSegmentKey = 'all' | 'dormant' | 'recent_buyers' | 'vip' | 'birthday' | 'new_customers';
 /** 변화 축(지난 회차 스냅샷과 비교해 판정 — 자동마케팅 고유) */
@@ -205,7 +206,7 @@ function cycleCompare(
 ): string {
   const operatorId = String(ctx.operatorId || '').trim();
   if (!operatorId) {
-    throw new Error('이 조건은 지난번 발송 때와 비교해서 대상을 정합니다. 저장하면 첫 회차에 기준을 잡고 그다음 회차부터 대상이 잡힙니다.');
+    throw new UserFacingError(409, 'SEGMENT_BASELINE', '이 조건은 지난번 발송 때와 비교해서 대상을 정합니다. 저장하면 첫 회차에 기준을 잡고 그다음 회차부터 대상이 잡힙니다.');
   }
   params.push(operatorId);
   const opIdx = params.length;
@@ -285,7 +286,7 @@ export const SEGMENT_CONTRACTS: SegmentContract[] = [
     build: (params, _values, ctx) => {
       const tops = (ctx.topGradeValues || []).filter((v) => typeof v === 'string' && v.trim());
       // 잠긴 축을 컴파일하려 한 것이다. 조용한 0건 대신 멈춘다.
-      if (tops.length === 0) throw new Error('상위 등급 값이 확인되지 않아 상위 등급 축을 만들 수 없습니다.');
+      if (tops.length === 0) throw new UserFacingError(409, 'SEGMENT_GRADE_UNKNOWN', '상위 등급 값을 확인하지 못해 이 대상을 만들 수 없어요. 고객 등급 정보를 확인해 주세요.');
       params.push(tops);
       return `AND c.grade = ANY($${params.length}::text[])`;
     },
@@ -525,6 +526,6 @@ export function buildSegmentPredicate(
   ctx: SegmentBuildContext,
 ): string {
   const contract = getSegmentContract(key);
-  if (!contract) throw new Error(`알 수 없는 발송 대상 축입니다: ${String(key)}`);
+  if (!contract) throw new UserFacingError(400, 'SEGMENT_UNKNOWN', '알 수 없는 발송 대상이에요. 화면을 새로 고친 뒤 대상을 다시 골라 주세요.');
   return contract.build(params, normalizeSegmentParams(key, rawParams), ctx);
 }

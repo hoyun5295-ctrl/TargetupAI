@@ -158,26 +158,3 @@ export type EventInsightStats = {
   by_section: Array<{ section_type: string; responses: number; members: number }>;
 };
 export type EventInsight = { hasData: boolean; headline: string; lines: string[] };
-
-/** 응모·당첨·열람 실측 → 사실 기반 인사이트. 데이터 0이면 insufficient(추정 0). 비율은 실측 분모만(div0 가드). */
-export function buildEventInsight(s: EventInsightStats): EventInsight {
-  const responses = s.total_responses || 0;
-  const views = s.views || 0;
-  if (responses === 0 && views === 0) {
-    return { hasData: false, headline: '아직 데이터가 충분하지 않습니다.', lines: ['열람·응모가 쌓이면 분석이 표시됩니다.'] };
-  }
-  const ko = (n: number) => n.toLocaleString('ko-KR');
-  const lines: string[] = [`열람 ${ko(views)}회 · 응모 ${ko(responses)}건`];
-  if (views > 0) {
-    const rate = Math.round((s.unique_participants / views) * 1000) / 10;
-    lines.push(`참여 전환율 ${rate}% (순참여 ${ko(s.unique_participants)}명 / 열람 ${ko(views)}회)`);
-  }
-  const members = s.by_section.reduce((a, x) => a + (x.members || 0), 0);
-  if (responses > 0) {
-    const memberPct = Math.round((members / responses) * 1000) / 10;
-    lines.push(`회원 참여 비중 ${memberPct}% (회원 ${ko(members)} / 전체 ${ko(responses)})`);
-  }
-  if (s.winners > 0) lines.push(`당첨 ${ko(s.winners)}명 처리 완료`);
-  const headline = responses > 0 ? `응모 ${ko(responses)}건이 모였습니다.` : `열람 ${ko(views)}회 · 아직 응모 전입니다.`;
-  return { hasData: true, headline, lines };
-}

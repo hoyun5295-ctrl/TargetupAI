@@ -3,7 +3,10 @@
  * 옛 AiOperatorPage 의 한 줄 입력 · 추천 띠 · 제안 · 결과 · 승인 발송을 원형 이동했다(기능 카드는 /ai-operator 로).
  * 새 흐름 스위치(AI_LINE_V2_COMPANY_IDS)가 꺼진 회사 = 이 화면이 옛 제안 흐름 그대로다.
  */
+import { useSendPolicy, getSendPolicy, isNightAdTime, sendWindowText } from '../utils/send-policy';
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { useToast } from '../components/ToastProvider';
+import { decorateOutcome } from '../utils/decorate-outcome';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import {
   AlertTriangle,
@@ -403,6 +406,8 @@ export default function AiLinePage() {
   // ★ 2026-07-22 (Harold 명시) 광고표기 on/off 토글 (직접발송 미러·기본 ON) — 제안 로드 시 AI 판정(마케팅=ON)으로 초기화
   const [adEnabled, setAdEnabled] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const toast = useToast();
+  const sendPolicy = useSendPolicy();   // ★ 2026-10-25 원장 #40
   // ★ D165: 메시지 3안 토글 + 다듬기 모달 + 다듬기 결과 오버라이드
   const [selectedVariantIdx, setSelectedVariantIdx] = useState(0);
   const [showRefineModal, setShowRefineModal] = useState(false);
@@ -517,7 +522,8 @@ export default function AiLinePage() {
     const ov = subjectOverrides[idx];
     if (ov != null) return ov;
     const v = proposal?.messages?.[idx];
-    return (v?.subject || proposal?.target?.suggestedName || `${companyName || ''} AI 캠페인`.trim() || 'AI Operator').slice(0, LMS_SUBJECT_MAX_CHARS);
+    // ★ 2026-10-25 원장 #111 — 받는 고객 폰에 뜨는 제목이다. 대체 = 「[회사명] 소식」(옛: 내부 캠페인 이름 → 「회사 AI 캠페인」 → 영어 개발 이름)
+    return (v?.subject || (companyName ? `[${companyName}] 소식` : '새 소식')).slice(0, LMS_SUBJECT_MAX_CHARS);
   };
   // 실효 단가/예상비용 — 채널 변경 시 회사 실단가로 재계산 (미변경 시 백엔드 계산값=진실)
   const effectiveUnitCost = (() => {
@@ -826,16 +832,21 @@ export default function AiLinePage() {
       });
       const data = await res.json();
       if (data.success && Array.isArray(data.messages)) {
+        // ★ 2026-10-25 원장 #39 — 원문으로 둔 안(kept)은 「AI 꾸밈」 표지를 달지 않고 알린다(차감 = 바뀐 안이 있을 때만)
+        const o = decorateOutcome(data);
+        const keptSet = new Set(o.kept);
+        const changedAt = (msg: unknown, i: number) => typeof msg === 'string' && !!msg.trim() && !keptSet.has(i);
         setRefinedOverrides((prev) => {
           const next = { ...prev };
-          (data.messages as string[]).forEach((msg, i) => { if (typeof msg === 'string' && msg.trim()) next[i] = msg; });
+          (data.messages as string[]).forEach((msg, i) => { if (changedAt(msg, i)) next[i] = msg; });
           return next;
         });
         setAiRefinedIdx((prev) => {
           const next = { ...prev };
-          (data.messages as string[]).forEach((msg, i) => { if (typeof msg === 'string' && msg.trim()) next[i] = true; });
+          (data.messages as string[]).forEach((msg, i) => { if (changedAt(msg, i)) next[i] = true; });
           return next;
         });
+        if (o.tone === 'info') toast.info(o.text);
       } else {
         setError(data.error || 'AI 꾸미기에 실패했습니다. 다시 시도해주세요.');
       }
@@ -998,10 +1009,10 @@ export default function AiLinePage() {
         if (customDate.getTime() <= now + MIN_FUTURE_MS) {
           throw new Error('예약 시점은 현재로부터 1분 이상 미래여야 합니다.');
         }
-        // 발송 허용 시간대 (08:00 ~ 21:00 KST) — 한줄로 SEND_HOURS 정합
-        const hour = customDate.getHours();
-        if (hour < 8 || hour >= 21) {
-          throw new Error('예약 시점은 08:00 ~ 21:00 사이여야 합니다.');
+        // 발송 허용 시간대 = 서버 SEND_HOURS(★ 2026-10-25 원장 #40 · 한국 시각 · 옛: 숫자 8 · 21 · 브라우저 시각) · 값을 못 받았으면 서버가 판정한다
+        const policy = getSendPolicy();
+        if (policy && isNightAdTime(policy, customDate)) {
+          throw new Error(`예약 시점은 ${sendWindowText(policy)} 사이여야 합니다.`);
         }
         scheduled = true;
         scheduledAt = customDate.toISOString();
@@ -1950,7 +1961,7 @@ export default function AiLinePage() {
                               onOpenChange={setCustomPickerOpen}
                               tone="dark"
                             />
-                            <p className="text-[10px] text-slate-400 mt-1">발송 허용 시간 · 08:00 ~ 21:00 KST</p>
+                            {sendPolicy && <p className="text-[10px] text-slate-400 mt-1">발송 허용 시간 · {sendWindowText(sendPolicy)} KST</p>}
                           </div>
                         </div>
                       </div>

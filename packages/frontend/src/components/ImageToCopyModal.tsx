@@ -8,6 +8,7 @@
  * z-[2000] 인터럽트 티어 — 다른 모달(예: 행사 캠페인 모달) 위에서도 위로 뜬다. 백드롭 클릭 닫힘 없음(X만).
  */
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { creditCost } from '../constants/credit';
 import { createPortal } from 'react-dom';
 import { FolderOpen, ImagePlus, Loader2, Sparkles, X } from 'lucide-react';
 import { downscaleToJpeg } from '../utils/image-downscale';
@@ -15,7 +16,8 @@ import AssetLibraryPickerModal from './assets/AssetLibraryPickerModal';
 import { assetsToFiles } from '../lib/asset-to-file';
 
 const MAX_IMAGES = 5;
-const IMAGE_EXTRACT_COST = 3;
+// ★ 2026-10-25 원장 #105 — 판독 단가 = 단가표(옛: 숫자 3)
+const IMAGE_EXTRACT_COST = creditCost('event-image-extract');
 const ALLOWED_IMAGE_TYPES = ['image/jpeg', 'image/png', 'image/webp'];
 
 export default function ImageToCopyModal({ open, onClose, onExtracted, onStructured }: {

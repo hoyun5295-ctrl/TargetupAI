@@ -247,7 +247,7 @@ const composeInput = (over: Partial<Parameters<typeof runLineCompose>[1]> = {}) 
 describe('② 만들기 = 고른 칼럼 활용 · 답 · 성격', () => {
   it('고른 칼럼이 빠진 문안만 묶음 안에서 넣는다(추가 차감 0) · 들어가면 표시 없음', async () => {
     db(5);
-    m.decorate.mockResolvedValue(['%고객명%님 혜택 본문입니다 지금 확인해 보세요']);
+    m.decorate.mockResolvedValue({ messages: ['%고객명%님 혜택 본문입니다 지금 확인해 보세요'], kept: [], charged: false });
     const out = await runLineCompose(V, composeInput());
     expect(m.decorate).toHaveBeenCalledTimes(1);
     expect(m.decorate.mock.calls[0][0]).toMatchObject({ messages: ['혜택 본문입니다 지금 확인해 보세요'], selectedVars: ['고객명'], channel: 'lms' });
@@ -261,7 +261,7 @@ describe('② 만들기 = 고른 칼럼 활용 · 답 · 성격', () => {
     const out = await runLineCompose(V, composeInput({ attemptToken: 'attempt-20201021' }));
     expect(out.cards.find((c) => c.type === 'benefit')?.body).toBe('혜택 본문입니다 지금 확인해 보세요');
     m.decorate.mockReset();
-    m.decorate.mockResolvedValue(['혜택 본문을 바꿨지만 칼럼은 없음']);
+    m.decorate.mockResolvedValue({ messages: ['혜택 본문을 바꿨지만 칼럼은 없음'], kept: [], charged: false });
     const again = await runLineCompose(V, composeInput({ attemptToken: 'attempt-20201024' }));
     expect(again.cards.find((c) => c.type === 'benefit')?.body).toBe('혜택 본문입니다 지금 확인해 보세요');
   });
@@ -272,7 +272,7 @@ describe('② 만들기 = 고른 칼럼 활용 · 답 · 성격', () => {
   });
   it('답 = 근거 글 「확인한 사실」 · 회사 칼럼 = 변수 표에 실림 · 성격 = 광고 여부', async () => {
     db(5);
-    m.decorate.mockResolvedValue(['%고객명%님 %피부 타입% 혜택 본문입니다', '%고객명%님 %피부 타입% 혜택 본문입니다']);
+    m.decorate.mockResolvedValue({ messages: ['%고객명%님 %피부 타입% 혜택 본문입니다', '%고객명%님 %피부 타입% 혜택 본문입니다'], kept: [], charged: false });
     await runLineCompose(V, composeInput({
       facts: { benefit: '5천원 쿠폰', periodEnd: null, answers: [{ q: '쿠폰은 어디서 쓰나요?', a: '온라인몰' }] },
       vars: ['고객명', '피부 타입'], isAd: false, attemptToken: 'attempt-20201023',
@@ -427,7 +427,9 @@ describe('④ 소스 계약', () => {
     expect(mem).toContain("memory_type = 'brand_guideline' AND memory_key IN ('main', 'notice')");
     expect(mem.match(/memory_type = 'brand_guideline'\s*\n\s*LIMIT 1/g)).toBeNull();
     // 추출 = 호출 한 번(차감 1 그대로) · main · notice · 문안 성격 한 묶음 · 사람이 정한 성격은 덮지 않음
-    expect((mem.match(/source: 'brand-voice-extract'/g) || []).length).toBe(1);
+    // ★ 1025 Z4 — AI 호출 1(묶음 안 · 차감 0) + 성공 뒤 정산 1
+    expect((mem.match(/source: 'brand-voice-extract'/g) || []).length).toBe(2);
+    expect((mem.match(/settleCreditInTx\(client, \{ companyId, cost: extractCost, source: 'brand-voice-extract'/g) || []).length).toBe(1);   // ★ 1026 저장과 같은 트랜잭션
     expect(mem).toContain("'brand_guideline', 'notice', $2");
     expect(mem).toContain('if (adminKinds[i]) continue;');
   });

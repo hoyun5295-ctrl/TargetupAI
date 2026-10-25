@@ -71,6 +71,8 @@ export async function generateCompanyDailyBrief(companyId: string): Promise<Dail
         WHERE o.company_id = $1::uuid AND o.status = 'active'
         GROUP BY o.id, o.name, o.objective
        HAVING COALESCE(SUM(v.sent_count), 0) >= 30 AND COALESCE(SUM(v.click_count), 0) >= 5
+        -- ★ 2026-10-25 원장 #8 — 성과순(클릭률 높은 순 · 옛: 순서 없는 LIMIT 5 = 임의 5개)
+        ORDER BY (COALESCE(SUM(v.click_count), 0)::float / NULLIF(COALESCE(SUM(v.sent_count), 0), 0)) DESC NULLS LAST, o.id
         LIMIT 5`,
       [companyId],
     ).catch(() => ({ rows: [] as any[] })),

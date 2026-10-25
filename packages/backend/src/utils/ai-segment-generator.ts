@@ -24,7 +24,9 @@
  *   7. 결과 반환 = { filter, explanation, matchCount, samples }
  */
 
-import { extractJsonFromAiText } from './ai-json';
+import { extractJsonFromAiText, aiStr } from './ai-json';
+import { getCreditCost } from './ai-credit-calc';
+import { runChargedAi } from './ai-credit';
 import { callAIWithFallback } from '../services/ai';
 import { buildCustomerFilter } from './customer-filter';
 import { ownerConsentSql } from './mall-consent';
@@ -234,7 +236,17 @@ export { isPlainAllCustomersRequest } from './all-customers-signal';
  * @throws SegmentGenerationError code='EMPTY_FILTER' AI가 조건을 추출하지 못함
  * @throws SegmentGenerationError code='FILTER_VALIDATION_FAILED' CT-01 호환 검증 실패
  */
-export async function convertNaturalLanguageToFilter(
+export async function convertNaturalLanguageToFilter(...args: Parameters<typeof convertNaturalLanguageToFilterWithAi>): ReturnType<typeof convertNaturalLanguageToFilterWithAi> {
+  // ★ 2026-10-25 원장 Z4 — 돈 = AI 결과 정산 한 곳(조건을 만들어 냈을 때만 · 실패는 던진다) · 쓸 결과가 아니면 0원 · 잔액 부족 402 · 원장 쓰기 실패 503 · 바깥 묶음이면 0
+  const { result } = await runChargedAi({
+    companyId: args[0].companyId, cost: getCreditCost('ai-segment-generator'), source: 'ai-segment-generator',
+    run: () => convertNaturalLanguageToFilterWithAi(...args),
+    accept: (r) => true,
+  });
+  return result;
+}
+
+async function convertNaturalLanguageToFilterWithAi(
   input: GenerateSegmentInput,
 ): Promise<{ filter: GenerateSegmentResult['filter']; explanation: string; isAll?: boolean }> {
   const { companyId, naturalLanguage } = input;
@@ -270,7 +282,7 @@ export async function convertNaturalLanguageToFilter(
   }
 
   const filter = parsed?.filter;
-  const explanation = String(parsed?.explanation || '').slice(0, 500);
+  const explanation = aiStr(parsed?.explanation).slice(0, 500);
 
   // ★ 2026-07-02(3) 전체 고객 = 1급 타겟 — "전체고객에게 발송"이 EMPTY_FILTER로 죽던 구멍 수정. filter {} = 조건 없음 = 전체.
   // ★ 2026-09-26 한줄로 V2 R1-21 — 전체는 **조건이 비었고 입력이 조건 없는 전체 요청일 때만**(허용 목록).
@@ -329,7 +341,17 @@ export async function convertNaturalLanguageToFilter(
  * @throws SegmentGenerationError code='FILTER_VALIDATION_FAILED' CT-01 호환 검증 실패
  * @throws SegmentGenerationError code='ZERO_MATCH' 0건 매칭 (자동 완화 X — D171 영구 룰)
  */
-export async function generateSegmentFromNaturalLanguage(
+export async function generateSegmentFromNaturalLanguage(...args: Parameters<typeof generateSegmentFromNaturalLanguageWithAi>): ReturnType<typeof generateSegmentFromNaturalLanguageWithAi> {
+  // ★ 2026-10-25 원장 Z4 — 돈 = AI 결과 정산 한 곳(1명 이상 맞을 때만 · 0명 · 실패는 던진다) · 쓸 결과가 아니면 0원 · 잔액 부족 402 · 원장 쓰기 실패 503 · 바깥 묶음이면 0
+  const { result } = await runChargedAi({
+    companyId: args[0].companyId, cost: getCreditCost('ai-segment-generator'), source: 'ai-segment-generator',
+    run: () => generateSegmentFromNaturalLanguageWithAi(...args),
+    accept: (r) => r.matchCount > 0,
+  });
+  return result;
+}
+
+async function generateSegmentFromNaturalLanguageWithAi(
   input: GenerateSegmentInput,
 ): Promise<GenerateSegmentResult> {
   const { filter, explanation } = await convertNaturalLanguageToFilter(input);

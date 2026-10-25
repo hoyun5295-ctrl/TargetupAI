@@ -14,6 +14,8 @@ import { StatusChip, fmtDate } from './HomeParts';
 import { MK_BTN_OUTLINE, MK_BTN_PRIMARY, MK_MODAL, MK_MODAL_BACKDROP } from '../../utils/make-ui';
 import { dmChipStatus, INTERACTION_SECTION_TYPES } from '../../utils/make-flow';
 import { formatKstMonthDayTime } from '../../utils/formatDate';
+import { SECTION_META } from '../../utils/dm-section-defaults';
+import { downloadAuthFile } from '../../lib/auth-download';
 
 export interface DmDetailItem {
   id: string; title: string; status?: string; short_code?: string | null; layout_mode?: string; catalog?: boolean;
@@ -35,6 +37,8 @@ interface Track {
   recipients: Array<{ customerId: string; name: string | null; phone: string | null; sendState?: string; sentAt: string | null; viewed: boolean; progressPct: number; clicks: number; responded: boolean }>;
   /** ★ 2026-10-03 발송마다 한 줄(시각 = 예약 시각 → 실제 발송 시각 · 상태 · 사람 수) */
   batches?: Array<{ at: string; state: string; count: number }>;
+  /** ★ 2026-10-25 원장 #80 — 보낸 기록이 서버 상한에 걸렸다(「최근 N번」이라고 말한다) */
+  batchesTruncated?: boolean;
   recipientsTotal?: number; listTruncated?: boolean;
   segments?: { unviewed?: number };
   hourDistribution?: Array<{ hour: number; cnt: number }>;
@@ -42,6 +46,8 @@ interface Track {
 }
 
 const authGet = () => ({ Authorization: `Bearer ${localStorage.getItem('token')}` });
+/** 당첨 방법(서버 dm_winners.win_method) → 화면 말 */
+const WIN_METHOD_LABEL: Record<string, string> = { random: '추첨', roulette: '룰렛', preset: '미리 정함' };
 const pct = (a: number, b: number) => (b > 0 ? Math.round((a / b) * 1000) / 10 : 0);
 const maskPhone = (p: string | null) => (p ? p.replace(/(\d{3})\d{3,4}(\d{4})/, '$1-****-$2') : '');
 const maskName = (n: string | null) => (n ? (n.length <= 1 ? n : `${n[0]}${'*'.repeat(Math.max(1, n.length - 2))}${n.length > 2 ? n[n.length - 1] : ''}`) : '이름 없음');
@@ -68,7 +74,9 @@ export default function DmDetailModal({ dm, onClose, onEdit, onClone, onStop, on
   const [loading, setLoading] = useState(true);
   const [alias, setAlias] = useState<string | null>(null);
   const [shortUrl, setShortUrl] = useState<string | null>(null);
-  const [resp, setResp] = useState<{ total: number; rows: any[]; stats?: any } | null>(null);
+  // ★ 2026-10-25 원장 #63 — 응답 탭 = 응답(더 보기) + 당첨자 명단 + 응모자 엑셀 + 미리 정한 당첨자 올리기(서버 주소 셋 그대로)
+  const [resp, setResp] = useState<{ total: number; rows: any[]; stats?: any; winners: any[]; page: number } | null>(null);
+  const [respBusy, setRespBusy] = useState<'' | 'more' | 'import'>('');
   const status = dmChipStatus(dm);
   const interactive = (dm.section_summary?.types || []).some((t) => INTERACTION_SECTION_TYPES.includes(t as any));
 
@@ -96,15 +104,46 @@ export default function DmDetailModal({ dm, onClose, onEdit, onClone, onStop, on
     let alive = true;
     (async () => {
       try {
-        const [a, b] = await Promise.all([
+        const [a, b, w] = await Promise.all([
           fetch(`/api/dm/${dm.id}/responses?page=1&limit=50`, { headers: authGet() }).then((r) => r.json()).catch(() => ({})),
           fetch(`/api/dm/${dm.id}/event-stats`, { headers: authGet() }).then((r) => r.json()).catch(() => ({})),
+          fetch(`/api/dm/${dm.id}/winners`, { headers: authGet() }).then((r) => r.json()).catch(() => []),
         ]);
-        if (alive) setResp({ total: Number(a?.total) || 0, rows: Array.isArray(a?.rows) ? a.rows : [], stats: b });
-      } catch { if (alive) setResp({ total: 0, rows: [] }); }
+        if (alive) setResp({ total: Number(a?.total) || 0, rows: Array.isArray(a?.rows) ? a.rows : [], stats: b, winners: Array.isArray(w) ? w : [], page: 1 });
+      } catch { if (alive) setResp({ total: 0, rows: [], winners: [], page: 1 }); }
     })();
     return () => { alive = false; };
   }, [tab, resp, dm.id]);
+
+  const loadMoreResponses = async () => {
+    if (!resp || respBusy) return;
+    setRespBusy('more');
+    try {
+      const a = await fetch(`/api/dm/${dm.id}/responses?page=${resp.page + 1}&limit=50`, { headers: authGet() }).then((r) => r.json());
+      const more = Array.isArray(a?.rows) ? a.rows : [];
+      setResp((cur) => cur && ({ ...cur, rows: [...cur.rows, ...more], page: cur.page + 1, total: Number(a?.total) || cur.total }));
+    } catch { toast.error('응답을 더 불러오지 못했어요. 잠시 뒤 다시 눌러 주세요.'); }
+    finally { setRespBusy(''); }
+  };
+  // 미리 정한 당첨자 엑셀 — 추첨 블록 응모와 이어 붙인다(그 블록 응모가 있으면 그 칸 번호로 · 없으면 명단만)
+  const importWinners = async (file: File | null | undefined) => {
+    if (!file || respBusy) return;
+    setRespBusy('import');
+    try {
+      const fd = new FormData();
+      fd.append('file', file);
+      const sectionId = resp?.rows.find((r) => r.section_type === 'lucky_draw')?.section_id;
+      if (sectionId) fd.append('section_id', String(sectionId));
+      const r = await fetch(`/api/dm/${dm.id}/winners/import`, { method: 'POST', headers: authGet(), body: fd });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok || !d?.success) { toast.error(String(d?.error || '당첨자 엑셀을 올리지 못했어요.')); return; }
+      const bad = Array.isArray(d.parse_errors) ? d.parse_errors.length : 0;
+      toast.success(`당첨자 ${Number(d.inserted) || 0}명을 올렸어요${Number(d.linked) > 0 ? ` · 응모와 이어진 ${d.linked}명` : ''}${bad > 0 ? ` · 읽지 못한 줄 ${bad}개(이름 · 전화 확인)` : ''}`);
+      const w = await fetch(`/api/dm/${dm.id}/winners`, { headers: authGet() }).then((x) => x.json()).catch(() => null);
+      if (Array.isArray(w)) setResp((cur) => cur && ({ ...cur, winners: w }));
+    } catch { toast.error('당첨자 엑셀을 올리지 못했어요. 잠시 뒤 다시 해 주세요.'); }
+    finally { setRespBusy(''); }
+  };
 
   const s = track?.summary;
   // ★ 2026-10-03 보낸 기록 = 서버 묶음(발송마다 한 줄 · 남지현 접수). 옛 서버 응답이면 수신자 시각을 분 단위로 묶는다 —
@@ -249,6 +288,7 @@ export default function DmDetailModal({ dm, onClose, onEdit, onClone, onStop, on
               ) : tab === 'batches' ? (
                 batches.length === 0 ? <Empty text="개인화 문자로 보낸 기록이 없어요." /> : (
                   <div className="space-y-1.5">
+                    {track?.batchesTruncated && <p className="text-[12px] text-slate-500 px-1">최근 {batches.length}번 보낸 기록만 보여요.</p>}
                     {batches.map((b, i) => (
                       <div key={`${b.at}-${b.state}-${i}`} className="flex items-center gap-3 h-11 px-4 rounded-xl bg-white">
                         <Send className="w-4 h-4 text-violet-700" />
@@ -277,28 +317,62 @@ export default function DmDetailModal({ dm, onClose, onEdit, onClone, onStop, on
                   </div>
                 )
               ) : (
-                !resp ? <div className="py-10 flex justify-center"><Loader2 className="w-5 h-5 animate-spin text-slate-400" /></div> : resp.total === 0 ? <Empty text="아직 응답이 없어요." /> : (
+                !resp ? <div className="py-10 flex justify-center"><Loader2 className="w-5 h-5 animate-spin text-slate-400" /></div> : (
                   <div className="space-y-3">
                     <div className="grid grid-cols-3 gap-2">
                       <Tile k="응답" v={resp.total} />
                       <Tile k="참여한 사람" v={Number(resp.stats?.unique_participants) || 0} />
-                      <Tile k="당첨" v={Number(resp.stats?.winners) || 0} />
+                      <Tile k="당첨" v={resp.winners.length} />
                     </div>
-                    <div className="space-y-1.5">
-                      {resp.rows.map((r) => (
-                        <div key={r.id} className="flex items-center gap-3 h-10 px-3 rounded-lg bg-white text-[12px] text-slate-700">
-                          <span className="w-[120px] shrink-0 text-slate-500">{new Date(r.occurred_at).toLocaleString('ko-KR', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</span>
-                          <span className="truncate flex-1">{maskName(r.customer_name)}</span><span className="text-slate-400">{r.section_type}</span>
-                        </div>
-                      ))}
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <button type="button" disabled={resp.total === 0} onClick={() => { void downloadAuthFile(`/api/dm/${dm.id}/responses/export`, 'DM응모자.xlsx', (m) => toast.error(m)); }} className={MK_BTN_OUTLINE}>응모자 엑셀 받기</button>
+                      <label className={`${MK_BTN_OUTLINE} cursor-pointer ${respBusy === 'import' ? 'opacity-50 pointer-events-none' : ''}`}>
+                        {respBusy === 'import' ? <Loader2 className="w-4 h-4 animate-spin" /> : null}미리 정한 당첨자 올리기
+                        <input type="file" accept=".xlsx,.xls" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ''; void importWinners(f); }} />
+                      </label>
+                      <span className="text-[11px] text-slate-400">엑셀 첫 줄 = 이름 · 전화(꼭) · 이메일 · 등급</span>
                     </div>
+                    {resp.winners.length > 0 && (
+                      <div className="rounded-lg border border-slate-200 bg-white overflow-x-auto">
+                        <div className="px-3 py-2 text-[12px] font-semibold text-slate-800 border-b border-slate-100">당첨자 {resp.winners.length}명</div>
+                        <table className="w-full text-[12px] text-slate-700">
+                          <thead><tr className="text-left text-slate-400"><th className="px-3 py-1.5 font-medium">등수</th><th className="px-3 py-1.5 font-medium">이름</th><th className="px-3 py-1.5 font-medium">전화</th><th className="px-3 py-1.5 font-medium">경품</th><th className="px-3 py-1.5 font-medium">방법</th></tr></thead>
+                          <tbody>
+                            {resp.winners.map((w) => (
+                              <tr key={w.id} className="border-t border-slate-100">
+                                <td className="px-3 py-1.5">{w.rank ?? '-'}</td>
+                                <td className="px-3 py-1.5">{w.winner_name || '이름 없음'}</td>
+                                <td className="px-3 py-1.5 whitespace-nowrap">{w.winner_phone || '-'}</td>
+                                <td className="px-3 py-1.5">{w.prize_name || '-'}</td>
+                                <td className="px-3 py-1.5 whitespace-nowrap">{WIN_METHOD_LABEL[String(w.win_method)] || '추첨'}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+                    {resp.total === 0 ? <Empty text="아직 응답이 없어요." /> : (
+                      <div className="space-y-1.5">
+                        {resp.rows.map((r) => (
+                          <div key={r.id} className="flex items-center gap-3 h-10 px-3 rounded-lg bg-white text-[12px] text-slate-700">
+                            <span className="w-[120px] shrink-0 text-slate-500">{new Date(r.occurred_at).toLocaleString('ko-KR', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</span>
+                            <span className="truncate flex-1">{maskName(r.customer_name)}</span><span className="text-slate-400">{(SECTION_META as Record<string, { label: string } | undefined>)[r.section_type]?.label || '참여 블록'}</span>
+                          </div>
+                        ))}
+                        {resp.rows.length < resp.total && (
+                          <button type="button" onClick={() => { void loadMoreResponses(); }} disabled={respBusy === 'more'} className="w-full h-9 rounded-lg border border-slate-200 bg-white text-[12px] text-slate-600 hover:bg-slate-50 disabled:opacity-50">
+                            {respBusy === 'more' ? '불러오는 중' : `더 보기 · ${resp.rows.length.toLocaleString()} / ${resp.total.toLocaleString()}건`}
+                          </button>
+                        )}
+                      </div>
+                    )}
                   </div>
                 )
               )}
           </div>
 
           <div className="flex items-center justify-end gap-2 pt-4 mt-2 border-t border-slate-200 flex-wrap">
-            <span className="mr-auto text-[10px] text-slate-400 italic">구매 = 열람 뒤 7일 안 주문</span>
+            <span className="mr-auto text-[10px] text-slate-400 italic">구매 = 발송 뒤 7일 안 주문</span>
             {s && (track?.segments?.unviewed || 0) > 0 && (
               <button type="button" onClick={onResendUnviewed} className={MK_BTN_OUTLINE}><RefreshCw className="w-4 h-4" />안 본 사람에게 다시 보내기 · {(track!.segments!.unviewed || 0).toLocaleString()}명</button>
             )}

@@ -17,7 +17,7 @@ vi.mock('../../services/ai', () => ({ callAIWithFallback: vi.fn(), getKoreanCale
 vi.mock('../company-memory', () => ({ buildMemoryPromptContext: vi.fn(async () => '') }));
 vi.mock('../brand-voice-prompt', () => ({ buildSystemPromptWithBrandVoice: vi.fn(async (_c: string, s: string) => s) }));
 vi.mock('../company-data-profile', () => ({ getCompanyDataProfile: vi.fn(async () => null), formatProfileForAiPrompt: vi.fn(() => '') }));
-vi.mock('../ai-credit', () => ({ checkCredit: vi.fn(async () => undefined), deductCreditOutcome: vi.fn(async () => 'deducted'), isChargedByKey: vi.fn(async () => false) }));
+vi.mock('../ai-credit', () => ({ checkCredit: vi.fn(async () => undefined), deductCreditOutcome: vi.fn(async () => 'deducted'), isChargedByKey: vi.fn(async () => false), CreditSettleError: class CreditSettleError extends Error {} }));
 const store = new Map<string, string>();
 vi.mock('../../config/defaults', async (orig) => ({
   ...(await orig<typeof import('../../config/defaults')>()),
@@ -143,11 +143,11 @@ describe('F5 날짜축 계획 = 같은 요청 같은 결과', () => {
     expect((checkCredit as any).mock.calls.length).toBe(2);   // 두 번째도 잔액 검사(낸 키의 생략을 받지 않는다)
   });
 
-  it('차감이 안 된 결과(failed)는 보관하지 않는다 → 같은 키 재시도가 다시 정산한다(2R)', async () => {
+  it('차감이 안 된 결과(failed)는 건네지도 보관하지도 않는다(1025 D1 = A · 503) → 같은 키 재시도가 다시 정산한다(2R)', async () => {
     ai.mockResolvedValue(stepJson);
     (deductCreditOutcome as any).mockResolvedValueOnce('failed');
     const rid = '77777777-7777-4777-8777-777777777777';
-    await generateAnchorJourneyPlan({ companyId: COMPANY, objective: '포인트 소멸 당일', requestId: rid });
+    await expect(generateAnchorJourneyPlan({ companyId: COMPANY, objective: '포인트 소멸 당일', requestId: rid })).rejects.toThrow();
     await generateAnchorJourneyPlan({ companyId: COMPANY, objective: '포인트 소멸 당일', requestId: rid });
     expect((deductCreditOutcome as any).mock.calls.length).toBe(2);
     expect(ai.mock.calls.length).toBe(2);

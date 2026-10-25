@@ -25,9 +25,10 @@
  *   - 초기 3회 미만은 explore (모든 variant 박을 기회 동등 박음)
  */
 
+import { UserFacingError } from './http-error';
 import { query } from '../config/database';
 // ★ 2026-08-02 Codex 4R: 검증 무효화는 공용 문 하나를 지난다(부모 여정 잠금 + 마커·판 동시 갱신).
-import { applyVariableDefaults, withJourneyValidationReset } from './journey-builder';
+import { applyVariableDefaults, withJourneyValidationReset, JourneyStepGateError } from './journey-builder';
 // ★ Phase2 A (2026-06-26): α/β는 실측 count에서 도출(단일 진실) — bandit-arm 순수 모듈.
 import { deriveBanditArm } from './bandit-arm';
 import { JOURNEY_SUBJECT_MAX_CHARS } from './journey-step-limits';
@@ -534,14 +535,21 @@ export async function createJourneyStepVariant(input: {
   const r = await withJourneyValidationReset(input.companyId, input.journeyId, async (run, journey) => {
     // ⛔ 2026-08-02 Codex 5R — 활성 판정은 **잠근 뒤에** 한다. 라우트가 먼저 읽은 status는
     //   그 사이 활성화가 성사되면 옛 값이고, 그러면 운영 중 여정의 변이를 바꾸게 된다.
+    // ★ 2026-10-25 #16 — 상태 · 입력 오류는 409 로(옛: 일반 Error = 500 「variant 신규 실패」로 이유가 사라졌다)
     if (journey.status === 'active') {
-      throw new Error('운영 중인 여정의 변이는 바꿀 수 없습니다. 먼저 일시정지해 주세요.');
+      throw new JourneyStepGateError('운영 중인 여정의 A/B 문안은 바꿀 수 없어요. 먼저 일시정지해 주세요.', 'JOURNEY_ACTIVE');
     }
     const own = await run(
-      `SELECT 1 FROM journey_steps WHERE id = $1::uuid AND journey_id = $2::uuid`,
+      `SELECT channel FROM journey_steps WHERE id = $1::uuid AND journey_id = $2::uuid`,
       [input.stepId, input.journeyId],
     );
-    if (own.rows.length === 0) throw new Error('그 여정의 step이 아닙니다.');
+    if (own.rows.length === 0) throw new JourneyStepGateError('이 여정의 칸이 아니에요. 화면을 새로 열어 주세요.', 'STEP_NOT_IN_JOURNEY');
+    // ★ 2026-10-25 #1(R5) — 변이 = 같은 채널의 다른 글. 채널 · 알림톡 값은 칸 것을 그대로 쓴다(검사 · 재검사 · 실행기가 같은 판을 보게 · journey-step-versions).
+    //   알림톡 칸은 승인 템플릿이 본문이라 A/B 문안을 만들지 않는다.
+    const stepChannel = String(own.rows[0].channel || '');
+    if (stepChannel === 'kakao') throw new JourneyStepGateError('알림톡 칸은 승인된 템플릿이 본문이라 A/B 문안을 만들 수 없어요.', 'VARIANT_KAKAO');
+    // 빈 본문 변이는 받지 않는다(빈 변이는 검사 · 발송에서 어느 글로 메울지가 갈린다)
+    if (!String(input.messageTemplate ?? '').trim()) throw new JourneyStepGateError('A/B 문안 본문을 넣어 주세요.', 'VARIANT_EMPTY');
     return run(
     `INSERT INTO journey_step_variants (
       id, step_id, variant_id, message_template, subject, channel,
@@ -567,15 +575,15 @@ export async function createJourneyStepVariant(input: {
       input.variantId.slice(0, 8),
       input.messageTemplate != null ? applyVariableDefaults(input.messageTemplate.slice(0, 2000)) : null,
       input.subject?.slice(0, JOURNEY_SUBJECT_MAX_CHARS) || null,
-      input.channel || null,
-      input.alimtalkTemplateCode || null,
-      input.alimtalkVariableMap ? JSON.stringify(input.alimtalkVariableMap) : null,
+      stepChannel || null,
+      null,
+      null,
       input.trafficWeight != null ? Math.max(0, Math.min(1, input.trafficWeight)) : 0.5,
     ]
     );
   });
   // ★ Fix #4 (2026-06-05): 변이 본문 추가/수정 시 발송 전 검증 마커 무효화 — 위 트랜잭션이 함께 커밋했다.
-  if (!r || r.rows.length === 0) throw new Error('변이를 저장하지 못했습니다.');
+  if (!r || r.rows.length === 0) throw new UserFacingError(503, 'VARIANT_SAVE_FAILED', '변형안을 저장하지 못했어요. 잠시 뒤 다시 해 주세요.');
   return r.rows[0].id as string;
 }
 
@@ -596,7 +604,7 @@ export async function deleteJourneyStepVariant(variantId: string): Promise<boole
 
   const r = await withJourneyValidationReset(null, ownerJourneyId, (run, journey) => {
     if (journey.status === 'active') {
-      throw new Error('운영 중인 여정의 변이는 지울 수 없습니다. 먼저 일시정지해 주세요.');
+      throw new JourneyStepGateError('운영 중인 여정의 A/B 문안은 지울 수 없어요. 먼저 일시정지해 주세요.', 'JOURNEY_ACTIVE');
     }
     return run(`DELETE FROM journey_step_variants WHERE id = $1::uuid RETURNING id`, [variantId]);
   });
@@ -639,7 +647,7 @@ export function declareVariantWinner(variants: JourneyStepVariant[]): VariantWin
       recommendedTrafficWeights: {},
       totalTrials: 0,
       variantProbabilities: {},
-      reasoning: 'variant 영역 0건',
+      reasoning: '아직 A/B 문안이 없어요.',
       status: 'cold_start',
     };
   }
@@ -657,7 +665,7 @@ export function declareVariantWinner(variants: JourneyStepVariant[]): VariantWin
       recommendedTrafficWeights: weights,
       totalTrials,
       variantProbabilities: {},
-      reasoning: `데이터 누적 영역 (누적 ${totalTrials}회 < 30회). 균등 영역 정합 + Bandit 자동 추천 흐름 유지 영역.`,
+      reasoning: `아직 보낸 수가 적어요(${totalTrials}회 · 30회부터 판단). 지금은 안마다 고르게 보내요.`,
       status: 'cold_start',
     };
   }
@@ -707,7 +715,7 @@ export function declareVariantWinner(variants: JourneyStepVariant[]): VariantWin
       recommendedTrafficWeights: trafficWeights,
       totalTrials,
       variantProbabilities,
-      reasoning: `Winner = Variant ${topVariantId} (신뢰도 ${(topProbability * 100).toFixed(1)}% / 평균 클릭률 ${(topClickRate * 100).toFixed(1)}%). 100% traffic 적용 권장. 회사 admin 명시 적용 의무.`,
+      reasoning: `${topVariantId}안이 가장 좋아요(가능성 ${(topProbability * 100).toFixed(1)}% · 평균 클릭률 ${(topClickRate * 100).toFixed(1)}%). 「좋은 안을 더 자주 보내기」를 누르면 이 안만 보내요.`,
       status: 'winner',
     };
   }
@@ -722,7 +730,7 @@ export function declareVariantWinner(variants: JourneyStepVariant[]): VariantWin
       recommendedTrafficWeights: trafficWeights,
       totalTrials,
       variantProbabilities,
-      reasoning: `선두 = Variant ${topVariantId} (신뢰도 ${(topProbability * 100).toFixed(1)}% / 평균 클릭률 ${(topClickRate * 100).toFixed(1)}%). 80% traffic 권장 + 추가 발송 후 재평가 의무.`,
+      reasoning: `${topVariantId}안이 앞서요(가능성 ${(topProbability * 100).toFixed(1)}% · 평균 클릭률 ${(topClickRate * 100).toFixed(1)}%). 더 보내 본 뒤 다시 봐요. 지금 바꾸면 이 안을 80% 보내요.`,
       status: 'leading',
     };
   }
@@ -736,7 +744,7 @@ export function declareVariantWinner(variants: JourneyStepVariant[]): VariantWin
     recommendedTrafficWeights: trafficWeights,
     totalTrials,
     variantProbabilities,
-    reasoning: `데이터 영역 부족. 선두 Variant ${topVariantId} 영역 ${(topProbability * 100).toFixed(1)}% 영역 (95% 이상 의무). 균등 영역 정합 + 추가 발송 후 재평가.`,
+    reasoning: `아직 판단하기 일러요. ${topVariantId}안이 앞서지만 가능성이 ${(topProbability * 100).toFixed(1)}%예요(95%를 넘어야 정해요). 안마다 고르게 보내요.`,
     status: 'low_confidence',
   };
 }

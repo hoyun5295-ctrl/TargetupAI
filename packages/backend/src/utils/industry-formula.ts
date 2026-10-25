@@ -3,7 +3,7 @@
 //   입력 = 승인 시드(원문, 내부 전용) → 출력 = 공식 JSON(구조·톤·후킹) + AI 재창작 예시(사용자 노출용).
 //   원문의 벽: 예시는 유사도 가드(jaccard3 < 0.35) 통과분만 저장 — 시드 원문·조각의 사용자 노출 0.
 //   구체 혜택 금지 — 예시의 혜택 자리는 "[직접 작성해주세요]" placeholder(영구 룰).
-import { extractJsonFromAiText } from './ai-json';
+import { extractJsonFromAiText, aiStr } from './ai-json';
 import { callAIWithFallback } from '../services/ai';
 import { listCuratedSeeds } from './copy-seed-curator';
 import {
@@ -69,10 +69,10 @@ export async function distillIndustryFormula(industryCode: string): Promise<Dist
   if (!parsed || !parsed.structure) return { ok: false, reason: 'ai_parse_failed' };
   const meta: IndustryFormulaMeta = {
     hooks: Array.isArray(parsed.hooks) ? parsed.hooks.map(String).slice(0, 4) : [],
-    structure: String(parsed.structure || ''),
-    tone: String(parsed.tone || ''),
-    cta: String(parsed.cta || ''),
-    length_hint: String(parsed.length_hint || ''),
+    structure: aiStr(parsed.structure),
+    tone: aiStr(parsed.tone),
+    cta: aiStr(parsed.cta),
+    length_hint: aiStr(parsed.length_hint),
     donts: Array.isArray(parsed.donts) ? parsed.donts.map(String).slice(0, 3) : [],
   };
 

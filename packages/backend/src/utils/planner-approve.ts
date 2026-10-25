@@ -18,6 +18,7 @@
  *   - 견적(회차 · 결제 상태)은 월 원장 잠금 안에서 다시 낸다(★ Codex 1R H2) · 생성 중(building)이면 승인하지 않는다(H8).
  *   - 사용자 범위(§3-10) — 관리자 = 회사 전체 · 담당자 = 자기 행사(호출부가 ownerId로 준다).
  */
+import { sendSystemAlert } from './system-alert';
 import { pool } from '../config/database';
 import { checkCredit } from './ai-credit';
 import { _deductWithClient } from './ai-credit-tx';
@@ -251,14 +252,14 @@ export async function approvePlannerEvent(input: {
           SET status = 'approved',
               approved_by = COALESCE(approved_by, $3),
               approved_at = COALESCE(approved_at, NOW()),
-              agency_credits = $4,
+              agency_credits = CASE WHEN $8::int > 0 THEN $8::int ELSE COALESCE(agency_credits, $4) END,   -- ★ 1025 #52 걷은 금액 그대로(옛: 승인 때마다 지금 단가로 덮어씀) · 안 걷었으면 그대로
               deduct_idempotency_key = $5,
               deducted_at = CASE WHEN $6 AND deducted_at IS NULL THEN NOW() ELSE deducted_at END,
               event_ids = CASE WHEN $7::uuid = ANY(event_ids) THEN event_ids ELSE array_append(event_ids, $7::uuid) END,
               approve_attempt = NULL,
               updated_at = NOW()
         WHERE company_id = $1::uuid AND plan_month = $2`,
-      [ev.companyId, ev.planMonth, input.userId, getAgencyCredits(), lockedQuote.agency.key, agencyPaid, ev.id],
+      [ev.companyId, ev.planMonth, input.userId, getAgencyCredits(), lockedQuote.agency.key, agencyPaid, ev.id, charged.agency || 0],
     );
     await client.query('COMMIT');
   } catch (err) {
@@ -295,6 +296,7 @@ export async function unapprovePlannerEvent(input: { companyId: string; ownerId:
       [ev.id, ev.companyId],
     );
     if (String(evLock.rows[0]?.status || '') !== 'approved') throw new PlannerApproveError(409, 'NOT_APPROVED', '승인한 행사만 풀 수 있습니다.');
+    // ★ 1025 #57 — 조건 = planner-touchpoint touchpointSendStarted 와 같은 규칙(재확인 화면이 같은 판정으로 「승인 풀기」 안내를 가른다)
     const started = await client.query(
       `SELECT 1 FROM planner_touchpoints
         WHERE event_id = $1::uuid AND company_id = $2::uuid
@@ -341,14 +343,38 @@ export async function unapprovePlannerEvent(input: { companyId: string; ownerId:
  * 행사 취소(발송 전 또는 남은 발송) — 남은 접점을 생략으로 닫고 모바일 DM 발행을 멈춘다(§6-9).
  * 이미 낸 DM 발행비 · 메일 완성비는 돌려드리지 않는다(승인 창 고지 · D1). 진행 중(producing)이 있으면 그 발송이 끝난 뒤 다시.
  */
+/**
+ * ★ 2026-10-25 원장 #50 · #51 — 취소한 행사의 모바일 DM 멈춤 한 함수(행사 취소 · 월 대행 취소가 같이 쓴다 · 옛: 월 취소는 멈추지 않았다).
+ *   멈춤 = 1회 재시도 · 이미 멈춤 · 발행 전 · 없음 = 멈출 것이 없다(성공) · 못 멈춘 DM = 돌려주고 운영 경보(부르는 쪽이 담당자 문자에 적는다).
+ */
+export async function stopPlannerEventDms(companyId: string, eventIds: string[]): Promise<string[]> {
+  const dmIds = new Set<string>();
+  for (const eventId of eventIds) {
+    for (const t of await loadEventTouchpoints(companyId, eventId)) if (t.channel === 'dm' && t.assetRef) dmIds.add(String(t.assetRef));
+  }
+  const stuck: string[] = [];
+  for (const id of dmIds) {
+    let ok = false;
+    for (let attempt = 0; attempt < 2 && !ok; attempt++) {
+      const r = await stopDm(id, companyId).catch((e: any) => { console.warn(`[planner-approve] 취소 뒤 DM 멈춤 ${attempt + 1}차 실패 dm=${id}:`, e?.message); return null; });
+      ok = !!r && (r.row !== null || r.block === 'not_published' || r.block === 'not_found');
+    }
+    if (!ok) stuck.push(id);
+  }
+  if (stuck.length > 0) {
+    void sendSystemAlert({ dedupKey: `planner-cancel-dm:${companyId}:${eventIds.slice(0, 3).join(',')}`, message: `마케팅 플래너 행사 취소 뒤 모바일 DM 멈춤 실패 ${stuck.length}개(${stuck.join(', ')}): 주소가 열려 있음 · 행사 ${eventIds.join(', ')}` });
+  }
+  return stuck;
+}
+
 export async function cancelPlannerEvent(input: {
   companyId: string; userId: string | null; ownerId: string | null; eventId: string;
   /** ★ Codex A 2R — 휴대폰 링크 취소 = 그 토큰이 지금 회차의 토큰일 때만(같은 트랜잭션 · 잠금 순서 그대로 · 아니면 410) */
   linkGuard?: { touchpointId: string; tokenHash: string; round: number };
-}): Promise<{ status: 'cancelled'; skipped: number }> {
+}): Promise<{ status: 'cancelled'; skipped: number; notified: boolean; dmStuck: number }> {
   const ev = await loadPlannerEvent(input.companyId, input.eventId, input.ownerId);
   if (!ev) throw new PlannerApproveError(404, 'NOT_FOUND', '행사를 찾을 수 없습니다.');
-  if (ev.status === 'cancelled') return { status: 'cancelled', skipped: 0 };
+  if (ev.status === 'cancelled') return { status: 'cancelled', skipped: 0, notified: false, dmStuck: 0 };
   if (ev.status === 'done' || ev.status === 'reported') throw new PlannerApproveError(409, 'ALREADY_DONE', '모든 발송이 끝난 행사는 취소할 수 없습니다.');
   let skipped = 0;
   const client = await pool.connect();
@@ -395,9 +421,11 @@ export async function cancelPlannerEvent(input: {
     client.release();
   }
   // DM 발행 멈춤(있으면 · 실패해도 취소는 유지 — 담당자가 DM 목록에서 직접 멈출 수 있다)
-  const dmIds = Array.from(new Set((await loadEventTouchpoints(ev.companyId, ev.id)).filter((t) => t.channel === 'dm' && t.assetRef).map((t) => String(t.assetRef))));
-  for (const id of dmIds) await stopDm(id, ev.companyId).catch(() => null);
-  await notifyPlanner(ev.companyId, input.userId, '[마케팅 플래너] 행사 취소', `'${ev.title}' 행사를 취소했습니다. 남은 발송 ${skipped}건은 보내지 않습니다.`);
+  const stuck = await stopPlannerEventDms(ev.companyId, [ev.id]);
+  const stuckNote = stuck.length > 0 ? ` 모바일 DM ${stuck.length}개는 멈추지 못해 주소가 아직 열려 있어요. 모바일 DM 목록에서 확인해 멈춰 주세요.` : '';
+  // ★ 2026-10-25 원장 #60 — 통지 결과를 돌려준다(화면이 「알림이 갔어요」를 결과 그대로 말한다)
+  const notified = await notifyPlanner(ev.companyId, input.userId, '[마케팅 플래너] 행사 취소', `'${ev.title}' 행사를 취소했습니다. 남은 발송 ${skipped}건은 보내지 않습니다.${stuckNote}`);
+
   console.log(`[planner-approve] 행사 취소 company=${ev.companyId} event=${ev.id} 남은 접점 ${skipped}`);
-  return { status: 'cancelled', skipped };
+  return { status: 'cancelled', skipped, notified, dmStuck: stuck.length };
 }

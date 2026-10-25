@@ -593,8 +593,3 @@ export function compositionGate(sections: readonly Section[]): string[] {
   if (ctas > 1) out.push('버튼 둘 이상');
   return out;
 }
-
-/** (순수) 구역 수(머리 · 꼬리 제외) — 6 미만이면 재료 판이 짚는다 */
-export function compositionBodyCount(sections: readonly Section[]): number {
-  return sections.filter((s) => s.type !== 'header' && s.type !== 'footer').length;
-}

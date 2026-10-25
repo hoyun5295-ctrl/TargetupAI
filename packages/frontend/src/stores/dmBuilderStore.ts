@@ -697,6 +697,11 @@ export const useDmBuilderStore = create<DmBuilderState>((set, get) => ({
   addSection: (type, afterId) => {
     const state = get();
     const cur = state.pages[state.currentPageIndex]?.sections || [];
+    // ★ 2026-10-25 원장 #69 — 추첨은 DM 한 장(모든 쪽)에 하나(서버 저장 · 발행 검사와 같은 판정 · 옛: 쪽마다 하나라 둘째는 영영 추첨되지 않았다)
+    if (type === 'lucky_draw' && state.pages.some((p) => (p?.sections || []).some((s) => s.type === 'lucky_draw'))) {
+      set({ toast: { type: 'error', message: `${SECTION_META[type].label}은(는) 한 DM 에 하나만 둘 수 있어요(추첨은 DM 마다 한 번 해요).` } });
+      return;
+    }
     if (isMaxCountExceeded(cur, type)) {
       set({ toast: { type: 'error', message: `${SECTION_META[type].label}은(는) 이 페이지에 최대 ${SECTION_META[type].maxCount}개까지 추가할 수 있어요.` } });
       return;

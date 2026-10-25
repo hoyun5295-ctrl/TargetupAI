@@ -207,8 +207,10 @@ export async function pauseStepForDay(token: string, pauseTriggerSource = 'manag
     const due = await client.query(`SELECT je.id ${DUE_EXECUTIONS_SQL} FOR UPDATE OF je`, [payload.journey_id, payload.step_id, sendDate]);
     const ids = (due.rows as any[]).map((r) => String(r.id));
     if (ids.length > 0) {
+      // ★ 2026-10-25 여정 구조체크 2차 #4(R6) — 그날 정지 = 그 실행을 끝냄(ended). 다시 켜기가 되살리지 않는 멈춤이라
+      //   옛 `paused` 는 영원히 「진행 중」으로 남아 칸 고치기를 잠그고 지도 숫자를 부풀렸다(닫는 자리가 없는 상태).
       const up = await client.query(
-        `UPDATE journey_executions SET status = 'paused' WHERE id = ANY($1::uuid[]) AND status = 'active' RETURNING id`,
+        `UPDATE journey_executions SET status = 'ended', completed_at = NOW() WHERE id = ANY($1::uuid[]) AND status = 'active' RETURNING id`,
         [ids],
       );
       paused = up.rows.length;
@@ -292,7 +294,8 @@ export async function autoPauseExecution(params: {
   journeyId: string;
   stepId: string;
   executionId: string;
-  pauseReason: 'balance_insufficient' | 'carrier_temp_fail' | 'phone_invalid' | 'auto_retry_exhausted';
+  // ★ 2026-10-25 #4 — 멈춤(paused)은 다시 켜기가 되살리는 사유만(journey-resume RESUME_REVIVE_REASONS · 짝 시험). 번호 오류는 끝냄(실행기).
+  pauseReason: 'balance_insufficient' | 'carrier_temp_fail' | 'auto_retry_exhausted';
   pauseTriggerSource: string;
 }): Promise<void> {
   const client = await pool.connect();

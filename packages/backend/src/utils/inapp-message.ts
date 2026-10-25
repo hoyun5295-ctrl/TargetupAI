@@ -14,6 +14,7 @@
  *   - status='active' + start_at/end_at 윈도우 + 트리거 이벤트 매칭만 반환
  */
 
+import { UserFacingError } from './http-error';
 import { query, pool } from '../config/database';
 // ★ D215+ (2026-05-25) 통합 영역 — CT-78 (segment) + CT-80 (variant) + CT-82 (trigger window)
 import { customerMatchesSegment, customerMatchesFilter, isEmptySegment, normalizeSegmentConditions } from './inapp-segment-matcher';
@@ -686,6 +687,32 @@ export function sanitizeAppMessageColors(m: any): void {
   }
 }
 
+/**
+ * ★ 2026-10-25 인앱 게시비 한 규칙(원장 docs/2026-10-25-oneline-all-structure-check.md #92 · 성공 뒤 차감 D1 A).
+ *   새로 게시(POST) · 고쳐서 게시(PUT)가 같은 함수를 부른다(옛: POST 는 차감이 실패해도 게시가 남았고 PUT 만 되돌렸다).
+ *   걷음 · 이미 걷음 = 그대로 · 잔액 부족(402) · 원장 쓰기 실패(503) = 게시를 이전 상태로 되돌리고(새 메시지 = paused) 그 오류를 던진다.
+ *   되돌리기마저 실패하면 운영 경보(무과금 게시 · 수동 확인).
+ */
+export async function settleInAppPublish(companyId: string, messageId: string, createdBy: string | null | undefined, prevStatus: InAppStatus): Promise<void> {
+  const { settleOrUndo } = await import('./ai-credit');
+  const { getCreditCost } = await import('./ai-credit-calc');
+  // ★ 1026 Codex 1R — 걷고 · 못 걷으면 이전 상태로 · 되돌리기 실패 = [CREDIT][ORPHAN] 경보(한 함수 · 다른 결과물과 같은 길)
+  await settleOrUndo({
+    settle: {
+      companyId, cost: getCreditCost('inapp-publish'), source: 'inapp-publish', createdBy: createdBy || null,
+      idempotencyKey: `inapp-publish:${messageId}`,
+    },
+    undo: async () => {
+      await query(
+        `UPDATE cdp_inapp_messages SET status = $3, updated_at = NOW()
+          WHERE id = $1::uuid AND company_id = $2::uuid AND status = 'active'`,
+        [messageId, companyId, prevStatus],
+      );
+    },
+    what: '인앱 게시',
+  });
+}
+
 export async function createInAppMessage(
   companyId: string,
   createdBy: string,
@@ -693,7 +720,7 @@ export async function createInAppMessage(
 ): Promise<InAppMessage> {
   // ★ 2026-09-29 초안(편집기 자동 저장)은 빈 제목·본문을 받아 둔다 — 게시로 넘어갈 때 inAppPublishDefect 가 요구한다.
   const draft = isInAppDraftSave(input);
-  if (!draft && (!input.title || !input.body)) throw new Error('title과 body는 필수입니다.');
+  if (!draft && (!input.title || !input.body)) throw new UserFacingError(400, 'INAPP_INPUT', '제목과 내용을 모두 적어 주세요.');
   const validPositions: InAppPosition[] = ['top_banner', 'bottom_banner', 'center_modal'];
   const validFrequencies: InAppFrequency[] = ['once_per_session', 'once_per_day', 'always'];
 
@@ -709,12 +736,12 @@ export async function createInAppMessage(
   // ★ D230+ 블록 — 정규화 + 혜택 placeholder 미편집 차단 (AI 임의 혜택 영구 룰)
   const contentBlocks = template === 'full_image' ? [] : sanitizeContentBlocks(input.content_blocks);
   if (!draft && blocksHaveUneditedPlaceholder(contentBlocks)) {
-    throw new Error(`${BENEFIT_PLACEHOLDER_ERROR}: 혜택 안내를 회사 정책에 맞게 직접 작성한 뒤 저장해주세요.`);
+    throw new UserFacingError(400, 'BENEFIT_PLACEHOLDER_UNEDITED', '혜택 안내를 회사 정책에 맞게 직접 작성한 뒤 저장해주세요.');
   }
   // ★ 2026-07-21 포스터 캐러셀 — full_image 전용. 슬라이드 정규화 + 혜택 placeholder 차단.
   const posterSlides = template === 'full_image' ? sanitizePosterSlides(input.poster_slides, { allowEmptyImage: true }) : [];
   if (!draft && posterSlidesHaveUneditedPlaceholder(posterSlides)) {
-    throw new Error(`${BENEFIT_PLACEHOLDER_ERROR}: 혜택 안내를 회사 정책에 맞게 직접 작성한 뒤 저장해주세요.`);
+    throw new UserFacingError(400, 'BENEFIT_PLACEHOLDER_UNEDITED', '혜택 안내를 회사 정책에 맞게 직접 작성한 뒤 저장해주세요.');
   }
   const hasSlides = posterSlides.length > 0;
 
@@ -864,7 +891,7 @@ export async function updateInAppMessage(
   if (input.content_blocks !== undefined) {
     const blocks = sanitizeContentBlocks(input.content_blocks);
     if (!draft && blocksHaveUneditedPlaceholder(blocks)) {
-      throw new Error(`${BENEFIT_PLACEHOLDER_ERROR}: 혜택 안내를 회사 정책에 맞게 직접 작성한 뒤 저장해주세요.`);
+      throw new UserFacingError(400, 'BENEFIT_PLACEHOLDER_UNEDITED', '혜택 안내를 회사 정책에 맞게 직접 작성한 뒤 저장해주세요.');
     }
     blocksParam = JSON.stringify(blocks);
     if (blocks.length > 0) composed = composeFlatFromBlocks(blocks);
@@ -876,7 +903,7 @@ export async function updateInAppMessage(
   if (posterSlidesProvided) {
     const slides = sanitizePosterSlides(input.poster_slides, { allowEmptyImage: true });
     if (!draft && posterSlidesHaveUneditedPlaceholder(slides)) {
-      throw new Error(`${BENEFIT_PLACEHOLDER_ERROR}: 혜택 안내를 회사 정책에 맞게 직접 작성한 뒤 저장해주세요.`);
+      throw new UserFacingError(400, 'BENEFIT_PLACEHOLDER_UNEDITED', '혜택 안내를 회사 정책에 맞게 직접 작성한 뒤 저장해주세요.');
     }
     posterSlidesParam = slides.length > 0 ? JSON.stringify(slides) : null;
     if (slides.length > 0) {
@@ -1189,53 +1216,6 @@ export interface ActiveMessagesInput {
   channel?: 'web' | 'app';
 }
 
-export async function getActiveMessagesForCustomer(input: ActiveMessagesInput): Promise<InAppMessage[]> {
-  const trigger = input.triggerEvent || 'page_load';
-
-  const result = await query(
-    `SELECT * FROM cdp_inapp_messages
-     WHERE company_id = $1::uuid
-       AND status = 'active'
-       AND trigger_event = $2
-       AND (start_at IS NULL OR start_at <= NOW())
-       AND (end_at IS NULL OR end_at >= NOW())
-     ORDER BY created_at DESC
-     LIMIT 5`,
-    [input.companyId, trigger]
-  );
-
-  let messages = result.rows.map(mapRowToMessage);
-
-  // display_frequency 서버측 보조 검증 (클라이언트 localStorage가 진짜 진실의 원천)
-  // once_per_day 메시지는 같은 사용자가 24h 안에 본 적 있는지 cdp_inapp_impressions 검증
-  const onceMessages = messages.filter((m) => m.displayFrequency === 'once_per_day');
-  if (onceMessages.length > 0 && (input.externalId || input.anonymousId)) {
-    const messageIds = onceMessages.map((m) => m.id);
-    const linkFilter = input.externalId
-      ? `AND identity_link_id IN (SELECT id FROM cdp_identity_links WHERE company_id = $1::uuid AND external_id = $3)`
-      : `AND anonymous_id = $3`;
-    const seenResult = await query(
-      `SELECT DISTINCT message_id FROM cdp_inapp_impressions
-       WHERE company_id = $1::uuid
-         AND message_id = ANY($2::uuid[])
-         AND event_type = 'impression'
-         AND occurred_at > NOW() - INTERVAL '24 hours'
-         ${linkFilter}`,
-      [input.companyId, messageIds, input.externalId || input.anonymousId]
-    );
-    const seenIds = new Set<string>(seenResult.rows.map((r: any) => r.message_id));
-    messages = messages.filter((m) => m.displayFrequency !== 'once_per_day' || !seenIds.has(m.id));
-  }
-
-  // 클라이언트가 전달한 seenMessageIds 제외 (once_per_session 메시지)
-  if (input.seenMessageIds && input.seenMessageIds.length > 0) {
-    const seenSet = new Set(input.seenMessageIds);
-    messages = messages.filter((m) => m.displayFrequency !== 'once_per_session' || !seenSet.has(m.id));
-  }
-
-  return messages;
-}
-
 // ════════════════════════════════════════════════════════════════════
 // SDK — 표시/클릭/dismiss 트래킹
 // ════════════════════════════════════════════════════════════════════
@@ -1255,22 +1235,22 @@ export interface TrackImpressionInput {
 
 export async function trackImpression(input: TrackImpressionInput): Promise<void> {
   if (!input.companyId || !input.messageId || !input.eventType) {
-    throw new Error('companyId, messageId, eventType은 필수입니다.');
+    throw new UserFacingError(400, 'CDP_INPUT', 'companyId, messageId, eventType은 필수입니다.');
   }
   if (!['impression', 'click', 'dismiss', 'opt_out'].includes(input.eventType)) {
-    throw new Error(`허용되지 않는 event_type: ${input.eventType}`);
+    throw new UserFacingError(400, 'CDP_INPUT', `허용되지 않는 event_type: ${input.eventType}`);
   }
   // ★ P0-3 (2026-07-12) — message 소유 검증. 타사/임의 uuid로 자기 회사 impressions에 유령 행 적재 차단.
   //   CT 단일 길목(소비처 = POST /inapp/track 1곳)이라 여기서 전부 커버. uuid 형식 오류도 동일 메시지로 400 매핑.
   if (!/^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/.test(input.messageId)) {
-    throw new Error('메시지를 찾을 수 없습니다.');
+    throw new UserFacingError(400, 'MESSAGE_NOT_FOUND', '메시지를 찾을 수 없습니다.');
   }
   const own = await query(
     `SELECT 1 FROM cdp_inapp_messages WHERE id = $1::uuid AND company_id = $2::uuid LIMIT 1`,
     [input.messageId, input.companyId]
   );
   if (own.rows.length === 0) {
-    throw new Error('메시지를 찾을 수 없습니다.');
+    throw new UserFacingError(400, 'MESSAGE_NOT_FOUND', '메시지를 찾을 수 없습니다.');
   }
   await query(
     `INSERT INTO cdp_inapp_impressions (
@@ -1354,55 +1334,6 @@ export async function getMessageStatsBatch(companyId: string, messageIds: readon
     });
   }
   return out;
-}
-
-// ★ D210+ Phase 3 B-4 (2026-05-23 Harold 명시): 회사 전체 메시지 통계 (CTR funnel 시각화)
-//   회사 admin Dashboard 메시지별 funnel 시각화 + 비교 표 일치
-export async function getCompanyInAppStats(companyId: string, channel?: 'web' | 'app'): Promise<Array<{
-  messageId: string;
-  title: string;
-  status: string;
-  impressions: number;
-  clicks: number;
-  dismisses: number;
-  ctr: number;             // click / impression
-  dismissRate: number;     // dismiss / impression
-  uniqueImpressions: number;  // distinct customer_id
-}>> {
-  const r = await query(
-    `SELECT
-       m.id AS message_id,
-       m.title,
-       m.status,
-       COUNT(*) FILTER (WHERE i.event_type = 'impression')::int AS impressions,
-       COUNT(*) FILTER (WHERE i.event_type = 'click')::int AS clicks,
-       COUNT(*) FILTER (WHERE i.event_type = 'dismiss')::int AS dismisses,
-       COUNT(DISTINCT i.customer_id) FILTER (WHERE i.event_type = 'impression' AND i.customer_id IS NOT NULL)::int AS unique_impressions
-     FROM cdp_inapp_messages m
-     LEFT JOIN cdp_inapp_impressions i ON i.message_id = m.id AND i.company_id = m.company_id
-     WHERE m.company_id = $1::uuid
-       AND ($2::varchar IS NULL OR m.channel = $2)
-     GROUP BY m.id, m.title, m.status, m.created_at
-     ORDER BY m.created_at DESC`,
-    // ★ P1-3 (2026-07-12) — SQL에 $2::varchar(channel)가 있는데 params가 1개라 호출 시 항상 PG bind 오류 500이던 버그 수리
-    [companyId, channel || null]
-  );
-  return r.rows.map((row: any) => {
-    const impressions = Number(row.impressions) || 0;
-    const clicks = Number(row.clicks) || 0;
-    const dismisses = Number(row.dismisses) || 0;
-    return {
-      messageId: row.message_id,
-      title: row.title,
-      status: row.status,
-      impressions,
-      clicks,
-      dismisses,
-      ctr: impressions > 0 ? clicks / impressions : 0,
-      dismissRate: impressions > 0 ? dismisses / impressions : 0,
-      uniqueImpressions: Number(row.unique_impressions) || 0,
-    };
-  });
 }
 
 // ════════════════════════════════════════════════════════════════════

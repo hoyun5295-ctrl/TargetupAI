@@ -1,5 +1,6 @@
 import ZoneFrame from '../components/zone/ZoneFrame';
 import { ChevronRight } from 'lucide-react';
+import { creditText } from '../constants/credit';
 /**
  * ImageStudioPage — P4 AI 이미지 스튜디오 (2026-07-19 v2 · 템플릿 갤러리 재정의)
  *
@@ -300,7 +301,7 @@ export default function ImageStudioPage() {
             <div className="lg:col-span-6 space-y-4">
               <StudioMakeFields make={make} disabled={busy} />
               <button onClick={() => generate()} disabled={busy || !ready} className="text-white w-full flex items-center justify-center gap-2 px-4 py-3.5 rounded-2xl bg-indigo-600 hover:bg-indigo-700 text-sm font-bold disabled:opacity-40">
-                <Sparkles className="w-4 h-4" /> 완성 포스터 만들기 · 2크레딧
+                <Sparkles className="w-4 h-4" /> 완성 포스터 만들기 · {creditText('image-studio-generate')}
               </button>
             </div>
           </section>

@@ -192,7 +192,8 @@ describe('5. 채널 · 겹친 창 · 업종 응답', () => {
   });
   it('/templates 는 회사 업종 카테고리를 기존 조회 함수로 싣고 공용 캐시를 붙이지 않는다', () => {
     const r = back('routes/image-studio.ts');
-    const h = r.slice(r.indexOf("imageStudioRouter.get('/templates'"), r.indexOf("imageStudioRouter.post('/template-samples/generate'"));
+    const at = r.indexOf("imageStudioRouter.get('/templates'");
+    const h = r.slice(at, r.indexOf('imageStudioRouter.', at + 10));
     expect(h).toContain('studioIndustryCategories(await resolveCompanyIndustry(companyId))');
     expect(h).toContain('industryCategories');
     expect(h).not.toMatch(/Cache-Control/);

@@ -12,7 +12,7 @@
  *    그래도 중간 실패가 나면 이미 켜진 것은 그대로 두고 카드별 결과를 돌려준다(되돌리지 않는다 · 켜짐은 사용자가 확인한 동작).
  */
 import { query } from '../config/database';
-import { checkCredit, deductCreditOutcome, InsufficientCreditError } from './ai-credit';
+import { checkCredit, deductCreditOutcome, InsufficientCreditError, type DeductOutcome } from './ai-credit';
 import { getCreditCost } from './ai-credit-calc';
 import { selectJourneyTargetCustomerIds, JOURNEY_COUNT_CAP } from './journey-target-extractor';
 import { getJourneyOwnerScopeSql } from './store-scope';
@@ -27,13 +27,16 @@ import { chargesFirstActivation } from './journey-activation-cost';   // ★ V.3
 
 export type GuardedActivation =
   | { ok: true; firstActivation: boolean; charged: number }
-  | { ok: false; code: 'NOT_FOUND' | 'DB_MIGRATION_PENDING' | 'PRETEST_REQUIRED' | 'INSUFFICIENT_CREDIT' | 'ACTIVATE_FAILED'; message: string }
+  | { ok: false; code: 'NOT_FOUND' | 'DB_MIGRATION_PENDING' | 'PRETEST_REQUIRED' | 'INSUFFICIENT_CREDIT' | 'ACTIVATE_FAILED' | 'CREDIT_SETTLE_FAILED'; message: string }
   | { ok: false; code: 'CALLBACK_CONFIRM_REQUIRED'; message: string; callbackUnregisteredCount: number; unregisteredDetails: unknown };
 
 /**
  * 여정 하나 켜기(게이트 전부). 옛 라우트 본문과 같은 순서:
  *   ①상태 · 검증 마커 조회(컬럼 없음 = 마이그레이션 필요) ②검증 마커 없음 = 거부 ③매장번호 모드 미등록 회신 확인
- *   ④최초 활성화면 크레딧 확인 ⑤activateJourney ⑥1회 발송 첫 적재(최초만 · 실패 격리) ⑦최초면 차감(멱등키 고정)
+ *   ④최초 활성화면 크레딧 확인 ⑤activateJourney ⑥최초면 차감(멱등키 고정) ⑦1회 발송 첫 적재(최초만 · 실패 격리)
+ * ★ 2026-10-25 성공 뒤 차감 한 규칙(원장 docs/2026-10-25-oneline-all-structure-check.md §8-2 D1 A) — 차감이 동시 소진(잔액 부족) ·
+ *   원장 쓰기 실패로 끝나면 방금 켠 첫 켜기를 초안으로 되돌리고 거절한다(옛: 켜진 채 0크레딧). 1회 발송 적재는 차감이 끝난 **뒤**로 옮겼다
+ *   (되돌린 여정의 발송이 이미 줄에 서지 않게). 실패한 시도는 원장에 행이 없어 다음 켜기가 같은 키로 정상 차감한다.
  */
 export async function activateJourneyGuarded(
   companyId: string,
@@ -102,6 +105,33 @@ export async function activateJourneyGuarded(
   const result = await activateJourney(companyId, journeyId, userId, { requireActiveSource: opts.requireActiveSource });
   if (!result.ok) return { ok: false, code: 'ACTIVATE_FAILED', message: result.reason || '활성화 실패' };
 
+  // ★ V.3 Codex 적대 A8 — charged = 실제로 받은 크레딧(차감 결말 그대로). 크레딧제 미적용 = 0(화면이 받지 않은 금액을 말하지 않게).
+  let charged = 0;
+  if (charge) {
+    let outcome: DeductOutcome = 'failed';
+    let insufficient = false;
+    try {
+      outcome = await deductCreditOutcome({
+        companyId,
+        cost: getCreditCost('journey-activate'),
+        source: 'journey-activate',
+        createdBy: userId,
+        idempotencyKey: `journey-activate:${journeyId}`,
+        throwOnInsufficient: true,
+      });
+    } catch (e) {
+      if (!(e instanceof InsufficientCreditError)) throw e;
+      insufficient = true;
+    }
+    if (insufficient || outcome === 'failed') {
+      await revertFirstActivation(companyId, journeyId);
+      return insufficient
+        ? { ok: false, code: 'INSUFFICIENT_CREDIT', message: '여정 저장에 필요한 크레딧이 부족합니다. 크레딧을 충전해 주세요.' }
+        : { ok: false, code: 'CREDIT_SETTLE_FAILED', message: '크레딧 기록을 확인하지 못해 켜지 않았어요. 잠시 후 다시 시도해 주세요.' };
+    }
+    charged = outcome === 'deducted' || outcome === 'duplicate' ? getCreditCost('journey-activate') : 0;
+  }
+
   if (firstActivation && String(row.start_kind) === 'one_shot') {
     try {
       const dr = await dispatchOneShotJourney(companyId, journeyId);
@@ -110,20 +140,31 @@ export async function activateJourneyGuarded(
       console.error('[Journeys activate] one_shot dispatch 실패:', dispErr?.message);
     }
   }
-
-  // ★ V.3 Codex 적대 A8 — charged = 실제로 받은 크레딧(차감 결말 그대로). 크레딧제 미적용 · 차감 실패면 0(화면이 받지 않은 금액을 말하지 않게).
-  let charged = 0;
-  if (charge) {
-    const outcome = await deductCreditOutcome({
-      companyId,
-      cost: getCreditCost('journey-activate'),
-      source: 'journey-activate',
-      createdBy: userId,
-      idempotencyKey: `journey-activate:${journeyId}`,
-    });
-    charged = outcome === 'deducted' || outcome === 'duplicate' ? getCreditCost('journey-activate') : 0;
-  }
   return { ok: true, firstActivation, charged };
+}
+
+/**
+ * ★ 2026-10-25 첫 켜기 되돌리기(차감을 걷지 못함 · 위 규칙) — 계보 첫 켜기(초안 → 켜짐)만 여기 온다.
+ *   켜기가 바꾼 칸(상태 · 승인 · 「앞 여정을 마치면」 기준 시각)을 초안 때로 돌린다. 그 사이 다른 전이가 있었으면(active 아님) 건드리지 않는다.
+ */
+async function revertFirstActivation(companyId: string, journeyId: string): Promise<void> {
+  try {
+    await query(
+      `UPDATE journeys SET status = 'draft', approved_by = NULL, approved_at = NULL,
+              last_event_cursor = CASE WHEN trigger_event = 'journey.after' THEN NULL ELSE last_event_cursor END,
+              updated_at = NOW()
+        WHERE id = $1::uuid AND company_id = $2::uuid AND status = 'active'`,
+      [journeyId, companyId],
+    );
+  } catch (err: any) {
+    console.error(`[Journeys activate] 첫 켜기 되돌리기 실패 — 무과금 켜짐(수동 확인) journey=${journeyId}:`, err?.message || err);
+    void import('./system-alert').then(({ sendSystemAlert }) => sendSystemAlert({
+      dedupKey: `journey-activate-revert:${journeyId}`,
+      title: '여정 켜기 크레딧을 걷지 못했는데 켜기를 되돌리지 못했습니다.',
+      details: ['상태: 돈을 받지 않은 여정이 켜져 있음'],
+      action: '슈퍼관리자에서 그 회사의 여정 상태를 확인해 주세요.',
+    })).catch(() => undefined);
+  }
 }
 
 /**

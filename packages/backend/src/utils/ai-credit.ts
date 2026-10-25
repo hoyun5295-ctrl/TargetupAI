@@ -17,6 +17,7 @@ import { isDemoCompany } from './demo-company';   // ★ 2026-10-09 시연 회�
 import { pool } from '../config/database';
 import { needsMonthlyReset } from './ai-credit-calc';
 import { setCreditEvent } from './request-context';
+import { UserFacingError } from './http-error';
 import {
   loadCreditRow,
   applyResetIfNeeded,
@@ -285,7 +286,7 @@ export async function deductCreditOutcome(
       // 차감이 안 일어났다 — 사유를 봐야 "돈이 빠졌는가"가 갈린다(재시도해도 바뀌지 않는 결말들이다).
       if (result?.skipReason === 'duplicate') return 'duplicate';
       if (result?.skipReason === 'not_applicable') return 'not_applicable';
-      console.log(`[CREDIT][MISS] company=${opts.companyId} source=${opts.source} cost=${opts.cost} aiCallLogId=${opts.aiCallLogId || 'none'} reason=${result?.skipReason || 'unknown'}`);
+      reportCreditMiss({ companyId: opts.companyId, source: opts.source, cost: opts.cost, key: idempotencyKey || opts.aiCallLogId || null, reason: String(result?.skipReason || 'unknown') });
       return 'failed';
     } catch (err: any) {
       // 잔액 부족 = 정상 차단(사전 checkCredit 통과 후 동시 소진). 재시도 무의미.
@@ -298,8 +299,8 @@ export async function deductCreditOutcome(
         await sleep(attempt * 200);
         continue;
       }
-      // 영구 실패 — stdout 추적(LESSONS_BACKEND: console.log 의무). aiCallLogId로 수동 재차감 가능.
-      console.log(`[CREDIT][MISS] company=${opts.companyId} source=${opts.source} cost=${opts.cost} aiCallLogId=${opts.aiCallLogId || 'none'} attempts=${MAX_ATTEMPTS} err=${err?.message}`);
+      // 영구 실패 — stdout 추적(LESSONS_BACKEND: console.log 의무) + 운영 경보(Z1). 같은 키로 수동 재차감 가능.
+      reportCreditMiss({ companyId: opts.companyId, source: opts.source, cost: opts.cost, key: idempotencyKey || opts.aiCallLogId || null, reason: `attempts=${MAX_ATTEMPTS} err=${err?.message}` });
       return 'failed';
     }
   }
@@ -316,12 +317,129 @@ export async function settleCreditAfterSuccess(opts: {
   companyId: string;
   cost: number;
   source: string;
-  idempotencyKey: string;
   createdBy?: string | null;
-}): Promise<void> {
+} & (
+  { idempotencyKey: string; aiCallLogId?: never }
+  // ★ 2026-10-25 R4 — AI 호출 함수의 묶음 밖 1회 차감 = 그 호출 기록 id 가 시도 키(기록이 없으면 원장 함수의 호출당 1회 대체 키)
+  | { aiCallLogId: string | null; idempotencyKey?: never }
+)): Promise<DeductOutcome> {
   // 잔액 부족은 차감 시점의 판정을 그대로 던진다(Codex 차수3 D 2R — 뒤에 다시 조회하면 그 사이 충전·리셋으로 통과될 수 있었다).
-  //   'failed'가 돌아오면 잔액 부족이 아닌 실패(DB 오류·영구 실패) — 기존 원칙대로 결과는 막지 않는다([CREDIT][MISS]).
-  await deductCreditOutcome({ ...opts, throwOnInsufficient: true });
+  // ★ 2026-10-25 성공 뒤 차감 한 규칙(원장 docs/2026-10-25-oneline-all-structure-check.md §8-2 D1 = A · Harold 결정):
+  //   'failed'(원장 쓰기 실패 · 영구 실패) = 결과를 건네지 않는다 → CreditSettleError(503). 경보는 deductCreditOutcome 이 이미 냈다.
+  //   호출부는 만든 결과(임시 그림 · 초안 행)를 거두고 503 으로 답한다. 잔액 부족 = InsufficientCreditError(402) 그대로.
+  const outcome = await deductCreditOutcome({ ...opts, throwOnInsufficient: true });
+  if (outcome === 'failed') throw new CreditSettleError();
+  return outcome;
+}
+
+/**
+ * ★ 2026-10-26 성공 뒤 차감 + 되돌리기 한 벌(Codex 1R 돈 묶음 · 뿌리 R4 · D1 = A) — 만든 것(첫 발행 · 게시 · 링크 · 그림 · 저장)을
+ *   건네기 직전에 걷고, 못 걷으면(잔액 부족 402 · 원장 쓰기 실패 503) 만든 것을 되돌린 뒤 그 오류를 그대로 던진다.
+ *   되돌리기마저 실패 = [CREDIT][ORPHAN] 경보(사람이 같은 키로 걷거나 거둔다 · 옛: 자리마다 console.error 한 줄이라 아무도 몰랐다).
+ *   쓰는 곳 = 결과를 이미 저장 · 공개한 뒤 걷는 자리 전부(되돌릴 것이 없으면 settleCreditAfterSuccess 를 그대로 쓴다).
+ */
+export async function settleOrUndo(opts: {
+  settle: Parameters<typeof settleCreditAfterSuccess>[0];
+  /** 걷지 못했을 때 만든 것을 거두는 일 */
+  undo: () => Promise<void> | void;
+  /** 경보에 남길 이름(무엇을 거두려 했나) */
+  what: string;
+}): Promise<DeductOutcome> {
+  try {
+    return await settleCreditAfterSuccess(opts.settle);
+  } catch (err) {
+    try {
+      await opts.undo();
+    } catch (undoErr: any) {
+      const s = opts.settle as { companyId: string; source: string; cost: number; idempotencyKey?: string };
+      reportCreditMiss({ companyId: s.companyId, source: s.source, cost: s.cost, key: s.idempotencyKey ?? null, reason: `${opts.what} 되돌리기 실패 ${undoErr?.message || undoErr}`, tag: 'ORPHAN' });
+    }
+    throw err;
+  }
+}
+
+/**
+ * ★ 2026-10-26 호출부 트랜잭션 안의 성공 뒤 차감(Codex 1R 돈 묶음 #2 · 뿌리 R4) — 저장과 차감이 함께 커밋 · 롤백된다.
+ *   옛: 저장 트랜잭션 안에서 다른 연결로 걷어, 저장 COMMIT 이 실패해도 차감만 남았다.
+ *   잔액 부족 = InsufficientCreditError(호출부 ROLLBACK → 402) · 원장 쓰기 실패 = CreditSettleError(호출부 ROLLBACK → 503) · 시연 회사 · 크레딧제 미적용 = 걷지 않는다.
+ */
+export async function settleCreditInTx(client: any, opts: { companyId: string; cost: number; source: string; createdBy?: string | null; idempotencyKey: string }): Promise<DeductOutcome> {
+  if (!opts.companyId || !opts.cost || opts.cost <= 0) return 'not_required';
+  if (await isDemoCompany(opts.companyId)) return 'not_applicable';
+  let r: DeductResult;
+  try {
+    r = await _deductWithClient(client, opts, new Date(), { manageTx: false });
+  } catch (err: any) {
+    if (err instanceof InsufficientCreditError) throw err;
+    reportCreditMiss({ companyId: opts.companyId, source: opts.source, cost: opts.cost, key: opts.idempotencyKey, reason: `tx err=${err?.message}` });
+    throw new CreditSettleError();
+  }
+  if (r.deducted) {
+    setCreditEvent({ used: opts.cost, balance: (r.baseAfter || 0) + (r.purchasedAfter || 0), source: opts.source });
+    return 'deducted';
+  }
+  if (r.skipReason === 'duplicate') return 'duplicate';
+  if (r.skipReason === 'not_applicable') return 'not_applicable';
+  reportCreditMiss({ companyId: opts.companyId, source: opts.source, cost: opts.cost, key: opts.idempotencyKey, reason: String(r.skipReason || 'unknown') });
+  throw new CreditSettleError();
+}
+
+/**
+ * ★ 2026-10-25 원장 쓰기 실패로 결과를 건네지 않는다(성공 뒤 차감 한 규칙 · D1 A). 라우트 = 503 · 사람 문장 그대로.
+ * 사용자 조건 오류 종류(UserFacingError)라 `userErrorResponse` 가 그 상태로 돌려준다.
+ */
+export class CreditSettleError extends UserFacingError {
+  constructor() {
+    super(503, 'CREDIT_SETTLE_FAILED', '크레딧 기록을 확인하지 못해 결과를 건네지 않았어요. 잠시 후 다시 시도해 주세요.');
+    this.name = 'CreditSettleError';
+  }
+}
+
+/**
+ * ★ 2026-10-25 차감을 끝내 기록하지 못했다 = 사람에게 닿아야 한다(원장 Z1 · 뿌리 R14).
+ * 옛: `[CREDIT][MISS]` stdout 한 줄이 전부라 아무도 몰랐다. 이제 로그(검색 꼬리표 그대로) + 운영 경보(공용 입구 · 1시간 1회 묶음).
+ * 경보는 기다리지 않는다(차감 경로를 늦추지 않게) · 경보 실패는 경보 함수가 삼킨다.
+ */
+export function reportCreditMiss(info: { companyId: string | null; source: string; cost: number; key?: string | null; reason: string; tag?: 'MISS' | 'ORPHAN' }): void {
+  const tag = info.tag || 'MISS';
+  console.log(`[CREDIT][${tag}] company=${info.companyId} source=${info.source} cost=${info.cost} key=${info.key || 'none'} reason=${info.reason}`);
+  void import('./system-alert').then(({ sendSystemAlert }) => sendSystemAlert({
+    dedupKey: `credit-${tag.toLowerCase()}`,
+    cooldownMs: 60 * 60 * 1000,
+    title: tag === 'MISS' ? '크레딧 차감을 기록하지 못했습니다.' : '돈을 받지 않은 결과(초안 · 발행 · 게시 · 그림)를 거두지 못했습니다.',
+    details: [`기능: ${info.source}`, `금액: ${info.cost}`, `사유: ${info.reason.slice(0, 80)}`],
+    action: `서버 로그에서 [CREDIT][${tag}] 줄을 찾아 같은 키로 처리해 주세요.`,
+  })).catch(() => undefined);
+}
+
+/**
+ * ★ 2026-10-25 AI 결과 정산 한 곳(원장 Z4 · 뿌리 R4) — 고객에게 결과를 돌려주는 AI 생산자는 이 함수만 쓴다.
+ *   순서: 잔액 확인(402) → 묶음 안 AI(안쪽 차감 0) → 쓸 결과인가(accept) → 성공 뒤 차감(한 규칙 · 402 · 503).
+ *   쓸 결과가 아니면(읽지 못함 · 전부 거절 · 바뀐 것 0) 0원이다. cost 0 · 크레딧제 미적용은 걷지 않는다.
+ * 옛: `callAIWithFallback` 이 응답을 받는 순간 걷어, 형식 오류 · 거절된 결과에도 돈이 나갔다(#39 · #67 · #93 · #113 · 판독).
+ */
+export async function runChargedAi<T>(opts: {
+  companyId: string;
+  cost: number;
+  source: string;
+  createdBy?: string | null;
+  /** 같은 시도 재요청 = 같은 키(없으면 호출마다 새 키) */
+  idempotencyKey?: string;
+  run: () => Promise<T>;
+  accept: (result: T) => boolean;
+}): Promise<{ result: T; charged: boolean }> {
+  const { runInCreditBundle, isInCreditBundle } = await import('./ai-credit-context');
+  // 바깥 묶음(AI 한줄로 만들기 · 오케스트레이터 등)이 차감을 소유하면 안에서 걷지 않는다(callAIWithFallback 과 같은 규칙)
+  if (isInCreditBundle()) return { result: await opts.run(), charged: false };
+  if (opts.cost > 0) await checkCredit(opts.companyId, opts.cost);
+  const result = await runInCreditBundle(opts.run);
+  if (opts.cost <= 0 || !opts.accept(result)) return { result, charged: false };
+  const { randomUUID } = await import('crypto');
+  const outcome = await settleCreditAfterSuccess({
+    companyId: opts.companyId, cost: opts.cost, source: opts.source, createdBy: opts.createdBy ?? null,
+    idempotencyKey: opts.idempotencyKey || `${opts.source}:${randomUUID()}`,
+  });
+  return { result, charged: outcome === 'deducted' };
 }
 
 /**

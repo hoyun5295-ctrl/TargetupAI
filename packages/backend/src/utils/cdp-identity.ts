@@ -20,6 +20,7 @@
  *   - source/external_id 미박힘 시 link 박지 X (비회원 이벤트 별도 처리)
  */
 
+import { UserFacingError } from './http-error';
 import { query } from '../config/database';
 // ★ 2026-08-14: normalizeDate 추가 — 자사몰(카페24 등)이 준 생일 문자열이 정규화 없이 SQL 파라미터로
 //   들어가 달력에 없는 값이면 PG가 행을 거절하던 자리(sync·upload와 동일 결함).
@@ -129,7 +130,7 @@ export async function identifyCustomer(
   input: IdentifyInput
 ): Promise<IdentifyResult> {
   if (!input.source || !input.externalId) {
-    throw new Error('source와 externalId는 필수입니다.');
+    throw new UserFacingError(400, 'CDP_INPUT', 'source와 externalId는 필수입니다.');
   }
 
   const normalizedPhone = input.phone ? normalizePhone(input.phone) : null;
@@ -384,7 +385,7 @@ export async function ensureAnonymousLink(
   externalId: string
 ): Promise<string> {
   if (!source || !externalId) {
-    throw new Error('source와 externalId는 필수입니다.');
+    throw new UserFacingError(400, 'CDP_INPUT', 'source와 externalId는 필수입니다.');
   }
   const result = await query(
     `INSERT INTO cdp_identity_links (

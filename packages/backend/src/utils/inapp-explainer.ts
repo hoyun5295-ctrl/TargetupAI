@@ -13,8 +13,11 @@
  *   - Source caption 의무 (모든 factor에 dataSource 명시)
  */
 
-import { extractJsonFromAiText } from './ai-json';
+import { extractJsonFromAiText, aiStr } from './ai-json';
 import { callAIWithFallback } from '../services/ai';
+import { runChargedAi } from './ai-credit';
+import { getCreditCost } from './ai-credit-calc';
+import { UserFacingError } from './http-error';
 import { query } from '../config/database';
 
 // ════════════════════════════════════════════════════════════════════
@@ -176,7 +179,7 @@ export async function explainInAppMessage(
   if (!companyId || !messageId) throw new Error('companyId + messageId 필수');
 
   const ctx = await loadMessageContext(companyId, messageId);
-  if (!ctx) throw new Error('메시지를 찾을 수 없습니다.');
+  if (!ctx) throw new UserFacingError(404, 'MESSAGE_NOT_FOUND', '메시지를 찾을 수 없어요.');
 
   const companyAvg = await loadCompanyAverageCTR(companyId);
   const deltaPercent = companyAvg.avgCTR > 0
@@ -278,47 +281,58 @@ priority: high / medium / low
 
 응답은 위 JSON 형식 그대로.`;
 
-  const aiResult = await callAIWithFallback({
-    system,
-    userMessage,
-    model: 'opus',
-    maxTokens: 3072,
-    temperature: 0.5,
-    companyId,
-    source: 'inapp-explainer', // ★ D227+ 종량제: 인앱 설명·개선추천 1크레딧
+  // ★ 2026-10-25 원장 #93 · Z4 — 돈 = AI 결과 정산 한 곳: 읽힘 + 요인 · 추천이 하나라도 있을 때만 1크레딧(옛: 응답 순간 차감 · 읽지 못해도 나감)
+  const { result: out } = await runChargedAi({
+    companyId, cost: getCreditCost('inapp-explainer'), source: 'inapp-explainer',
+    run: async () => {
+      const aiResult = await callAIWithFallback({
+        system,
+        userMessage,
+        model: 'opus',
+        maxTokens: 3072,
+        temperature: 0.5,
+        companyId,
+        source: 'inapp-explainer', // ★ D227+ 종량제: 인앱 설명·개선추천 1크레딧
+      });
+
+      let parsed: any;
+      try {
+        parsed = extractJsonFromAiText(aiResult || '');   // ★ 2026-09-30 WP4 — JSON 추출은 CT 하나(ai-json · 코드펜스 · 머리말 · 문자열 안 줄바꿈 제어문자 복구 · 0630 사고 부류). 인라인 추출 정의 금지.
+      } catch (e: any) {
+        // ★ 2026-10-25 원장 Z7 — 읽지 못함 = 사용자에게 보일 문장 · 원문은 로그만(옛: 응답 원문을 오류 글에 실었다)
+        console.error(`[inapp-explainer] AI 응답 읽기 실패: ${e.message} 앞 300자: ${String(aiResult || '').slice(0, 300)}`);
+        throw new UserFacingError(502, 'AI_PARSE_FAILED', 'AI 분석 결과를 읽지 못했어요. 크레딧은 빠지지 않았어요. 다시 시도해 주세요.');
+      }
+
+      const factors: ImpactFactor[] = Array.isArray(parsed.factors)
+        ? parsed.factors.slice(0, 5).map((f: any) => ({
+            factor: aiStr(f.factor),
+            impact: Math.max(0, Math.min(1, Number(f.impact) || 0)),
+            direction: ['positive', 'negative', 'neutral'].includes(f.direction) ? f.direction : 'neutral',
+            description: aiStr(f.description),
+            dataSource: aiStr(f.dataSource, '회사 누적 30일'),
+          })).filter((f: ImpactFactor) => f.factor.trim() || f.description.trim())   // ★ 1026 Codex 2R — 빈 요인 = 요인 아님
+        : [];
+
+      const recommendations: Recommendation[] = Array.isArray(parsed.recommendations)
+        ? parsed.recommendations.slice(0, 3).map((r: any) => ({
+            title: aiStr(r.title),
+            description: aiStr(r.description),
+            priority: ['high', 'medium', 'low'].includes(r.priority) ? r.priority : 'medium',
+            actionType: ['ai_refine', 'time_optimize', 'segment_refine', 'manual'].includes(r.actionType)
+              ? r.actionType
+              : 'manual',
+          })).filter((r: Recommendation) => r.title.trim() || r.description.trim())   // ★ 1026 Codex 2R — 빈 권고 = 권고 아님
+        : [];
+      return { parsed, factors, recommendations };
+    },
+    accept: (r) => r.factors.length > 0 || r.recommendations.length > 0,
   });
-
-  let parsed: any;
-  try {
-    parsed = extractJsonFromAiText(aiResult || '');   // ★ 2026-09-30 WP4 — JSON 추출은 CT 하나(ai-json · 코드펜스 · 머리말 · 문자열 안 줄바꿈 제어문자 복구 · 0630 사고 부류). 인라인 추출 정의 금지.
-  } catch (e: any) {
-    throw new Error(`AI 응답 JSON 파싱 실패: ${e.message}\n응답 앞 300자: ${String(aiResult || '').slice(0, 300)}`);
-  }
-
-  const factors: ImpactFactor[] = Array.isArray(parsed.factors)
-    ? parsed.factors.slice(0, 5).map((f: any) => ({
-        factor: String(f.factor || ''),
-        impact: Math.max(0, Math.min(1, Number(f.impact) || 0)),
-        direction: ['positive', 'negative', 'neutral'].includes(f.direction) ? f.direction : 'neutral',
-        description: String(f.description || ''),
-        dataSource: String(f.dataSource || '회사 누적 30일'),
-      }))
-    : [];
-
-  const recommendations: Recommendation[] = Array.isArray(parsed.recommendations)
-    ? parsed.recommendations.slice(0, 3).map((r: any) => ({
-        title: String(r.title || ''),
-        description: String(r.description || ''),
-        priority: ['high', 'medium', 'low'].includes(r.priority) ? r.priority : 'medium',
-        actionType: ['ai_refine', 'time_optimize', 'segment_refine', 'manual'].includes(r.actionType)
-          ? r.actionType
-          : 'manual',
-      }))
-    : [];
+  const { parsed, factors, recommendations } = out;
 
   return {
     messageId: ctx.id,
-    topInsight: String(parsed.topInsight || ''),
+    topInsight: aiStr(parsed.topInsight),
     factors,
     recommendations,
     comparisonContext: {
@@ -327,7 +341,7 @@ priority: high / medium / low
       deltaPercent,
       sampleSize: companyAvg.sampleSize,
     },
-    reasoning: String(parsed.reasoning || ''),
+    reasoning: aiStr(parsed.reasoning),
   };
 }
 

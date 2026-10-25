@@ -14,7 +14,11 @@
  *   - 구체 혜택(%/원/쿠폰) X (feedback_ai_no_arbitrary_benefit)
  */
 
-import { extractJsonFromAiText } from './ai-json';
+import { sendWindowKo } from './send-time-util';
+import { extractJsonFromAiText, aiStr } from './ai-json';
+import { UserFacingError } from './http-error';
+import { getCreditCost } from './ai-credit-calc';
+import { runChargedAi, InsufficientCreditError } from './ai-credit';
 import { callAIWithFallback } from '../services/ai';
 import type { PerformanceSnapshot } from './next-action-advisor';
 
@@ -60,7 +64,7 @@ export async function generateQuickAction(
 
 영구 원칙:
 - 타겟 0건 자동완화 X (조건 완화 X, 0건이면 빈 결과 응답)
-- 추천 시점 = KST 08~21시
+- 추천 시점 = KST ${sendWindowKo()}
 - AI 단독 발송 X (사용자 검토 + 승인 후 진행)
 - 구체 혜택(%/원/쿠폰) X. 흐름/안내문/감성 텍스트만 (회사 admin 직접 작성)
 
@@ -110,34 +114,47 @@ ${actionType === 'channel_recovery'
 }`;
 
   try {
-    const text = await callAIWithFallback({
-      system,
-      userMessage,
-      maxTokens: 1024,
-      temperature: 0.3,
-      // ★ AI Operator 영역 = Opus 4.7
-      model: 'opus',
-      companyId,
-      source: 'performance-quick-action',
-    });
+    // ★ 2026-10-25 원장 Z4 — 돈 = AI 결과 정산 한 곳: 아래 본문이 끝까지 가면 걷고, 던지면(읽지 못함 등) catch 의 대체 결과 = 0원
+    //   (옛: AI 응답 순간 차감 · 대체 결과를 줘도 나갔다) · 바깥 묶음 안이면 걷지 않는다
+    const { result: chargedOut } = await runChargedAi({
+      companyId: companyId, cost: getCreditCost('performance-quick-action'), source: 'performance-quick-action', createdBy: null,
+      run: async () => {
+        const text = await callAIWithFallback({
+          system,
+          userMessage,
+          maxTokens: 1024,
+          temperature: 0.3,
+          // ★ AI Operator 영역 = Opus 4.7
+          model: 'opus',
+          companyId,
+          source: 'performance-quick-action',
+        });
 
-    // ★ 2026-09-30 WP4 — JSON 추출은 CT 하나(ai-json · 머리말 · 코드펜스 · 문자열 안 제어문자 복구). 옛 코드펜스만 벗기는 인라인은 모델이 앞에 한 줄만 붙여도 실패했다.
-    const parsed: any = extractJsonFromAiText(text);
-    return {
-      actionType,
-      objective: String(parsed.objective || ''),
-      targetFilters: typeof parsed.targetFilters === 'object' && parsed.targetFilters ? parsed.targetFilters : {},
-      suggestedChannel: ['SMS', 'LMS', 'MMS', 'KAKAO'].includes(parsed.suggestedChannel) ? parsed.suggestedChannel : 'SMS',
-      suggestedTone: String(parsed.suggestedTone || '친근함'),
-      suggestedHour:
-        typeof parsed.suggestedHour === 'number' && parsed.suggestedHour >= 0 && parsed.suggestedHour <= 23
-          ? parsed.suggestedHour
-          : 11,
-      expectedImpact: String(parsed.expectedImpact || ''),
-      reasoning: String(parsed.reasoning || ''),
-      generatedAt: new Date().toISOString(),
-    };
+        // ★ 2026-09-30 WP4 — JSON 추출은 CT 하나(ai-json · 머리말 · 코드펜스 · 문자열 안 제어문자 복구). 옛 코드펜스만 벗기는 인라인은 모델이 앞에 한 줄만 붙여도 실패했다.
+        const parsed: any = extractJsonFromAiText(text);
+        return {
+          actionType,
+          objective: aiStr(parsed.objective),
+          targetFilters: typeof parsed.targetFilters === 'object' && parsed.targetFilters ? parsed.targetFilters : {},
+          suggestedChannel: ['SMS', 'LMS', 'MMS', 'KAKAO'].includes(parsed.suggestedChannel) ? parsed.suggestedChannel : 'SMS',
+          suggestedTone: aiStr(parsed.suggestedTone, '친근함'),
+          suggestedHour:
+            typeof parsed.suggestedHour === 'number' && parsed.suggestedHour >= 0 && parsed.suggestedHour <= 23
+              ? parsed.suggestedHour
+              : 11,
+          expectedImpact: aiStr(parsed.expectedImpact),
+          reasoning: aiStr(parsed.reasoning),
+          generatedAt: new Date().toISOString(),
+        };
+  
+      },
+      // ★ 1026 Codex 1R — 쓸 결과 = 최종 결과 기준(옛: 늘 참이라 빈 결과에도 걷었다)
+      accept: (r) => !!r.objective.trim(),
+    });
+    return chargedOut;
   } catch (err) {
+    // 잔액 부족 · 원장 쓰기 실패는 대체 결과로 접지 않는다(호출부 402 · 503)
+    if (err instanceof InsufficientCreditError || err instanceof UserFacingError) throw err;
     console.error('[QuickAction] AI 호출 실패:', err);
     return {
       actionType,

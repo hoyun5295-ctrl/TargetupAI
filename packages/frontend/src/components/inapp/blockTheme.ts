@@ -473,6 +473,19 @@ export function normalizeCardStyle(v: any): CardStyle {
   return (CARD_STYLES as string[]).includes(String(v)) ? (String(v) as CardStyle) : 'classic';
 }
 
+/** ★ 2026-10-25 원장 #110 — 인앱 표시 형태 한국어 이름표(편집기 · 만들기 결과 요약이 같은 표를 쓴다 · 옛: 결과 요약에 center_modal 같은 키 그대로) */
+export const INAPP_TEMPLATE_LABELS: Record<string, string> = {
+  top_banner: '상단 배너',
+  bottom_banner: '하단 배너',
+  center_modal: '중앙 모달',
+  full_screen: '전체 화면',
+  slide_in: '슬라이드 인',
+  inline_card: '인라인 카드',
+  toast: '토스트',
+  floating_button: '플로팅 버튼',
+  full_image: '포스터형',
+};
+
 export const CARD_STYLE_OPTIONS: { key: CardStyle; label: string; hint: string }[] = [
   { key: 'classic', label: '클래식 카드', hint: '정돈된 기본 카드' },
   { key: 'bubble', label: '둥근 말풍선', hint: '아바타 채팅 + 답장 칩' },

@@ -12,7 +12,8 @@
  *  - 초안 패키지 편집만 — 저장/발송 경로 무변경 (프론트가 setAiPkg)
  */
 
-import { extractJsonFromAiText } from './ai-json';
+import { UserFacingError } from './http-error';
+import { extractJsonFromAiText, aiStr } from './ai-json';
 import { callAIWithFallback } from '../services/ai';
 import { sanitizeForSms } from './message-sanitizer';
 import { stripAdParts } from './messageUtils';
@@ -127,7 +128,7 @@ function normalizeStep(s: any, idx: number): any {
 export async function editJourneyPackage(input: EditJourneyInput): Promise<any> {
   const cur = input.currentPackage || {};
   const instruction = String(input.instruction || '').trim();
-  if (instruction.length < 2) throw new Error('수정 요청 문구가 너무 짧습니다.');
+  if (instruction.length < 2) throw new JourneyInputError('고칠 내용을 조금 더 적어 주세요.');
 
   // ★ 2026-08-08 이어달리기 — 고정된 시작 신호는 편집으로 풀리지 않는다.
   //   후처리로 트리거만 되돌리면 **문안은 다른 대상 기준으로 다시 쓰인 채** 남아 대상과 내용이 갈린다.
@@ -218,7 +219,7 @@ triggerEvent·templateCode·triggerFilters는 받은 값을 그대로 돌려주�
   try {
     parsed = extractJsonFromAiText(text);
   } catch {
-    throw new Error('AI 응답 JSON 파싱 실패. 요청을 더 명확히 작성해주세요.');
+    throw new UserFacingError(422, 'AI_RESULT_INVALID', 'AI가 수정 결과를 만들지 못했어요. 요청을 조금 더 구체적으로 적어 주세요.');
   }
 
   const rawSteps: any[] = Array.isArray(parsed?.steps) ? parsed.steps : [];
@@ -226,7 +227,7 @@ triggerEvent·templateCode·triggerFilters는 받은 값을 그대로 돌려주�
   // ★ 2026-09-30 V2 4차 — 문자 칸 7 + 전체 12(칸 종류를 보고 센다).
   assertStepsWithinLimit(rawSteps.map((s: any) => ({ stepType: s?.stepType })), '수정 결과');
   const steps = rawSteps.map((s, idx) => normalizeStep(s, idx));
-  if (steps.length === 0) throw new Error('수정 결과에 유효한 step이 없습니다.');
+  if (steps.length === 0) throw new UserFacingError(422, 'AI_RESULT_INVALID', '수정 결과에 쓸 수 있는 단계가 없어요. 요청을 다시 적어 주세요.');
 
   // ★ 2026-08-08 (Codex 1R) — 프롬프트는 경계가 아니다. 편집 결과의 지어낸 혜택도 기계로 되돌린다.
   //   근거 = 사용자가 준 문장 전부: 수정 요청문 + 승인 혜택 + **편집 전 패키지의 본문·제목**(비파괴 —
@@ -254,7 +255,7 @@ triggerEvent·templateCode·triggerFilters는 받은 값을 그대로 돌려주�
 
   const validTemplates = ['onboarding', 'repeat', 'dormant', 'cart', 'birthday', 'reservation', 'custom'];
   let templateCode = validTemplates.includes(parsed?.templateCode) ? parsed.templateCode : (cur.templateCode || 'custom');
-  let triggerEvent = String(parsed?.triggerEvent || cur.triggerEvent || 'custom').slice(0, 50);
+  let triggerEvent = (aiStr(parsed?.triggerEvent) || cur.triggerEvent || 'custom').slice(0, 50);
   // ★ 2026-09-29 V2 0차 ① — 모르는 트리거로 바뀐 응답은 받지 않는다(현재값 유지).
   //   (회의론자 0차 검증 1) 현재값도 모르는 값이면 'custom'(= 전 고객)으로 떨어뜨리지 않고 거부한다.
   if (!isCreatableTriggerEvent(triggerEvent)) {
@@ -302,7 +303,7 @@ triggerEvent·templateCode·triggerFilters는 받은 값을 그대로 돌려주�
 
   // 발송·타겟에 직결되는 trigger/회신/예산 힌트는 편집으로 잃지 않도록 현재값 유지 우선
   return {
-    name: String(parsed?.name || cur.name || '여정').slice(0, 100),
+    name: (aiStr(parsed?.name) || cur.name || '여정').slice(0, 100),
     templateCode,
     triggerEvent,
     triggerFilters,
@@ -329,6 +330,6 @@ triggerEvent·templateCode·triggerFilters는 받은 값을 그대로 돌려주�
     callbackNumberHint: cur.callbackNumberHint ?? null,
     budgetMonthlyHint: cur.budgetMonthlyHint ?? null,
     thresholdCostHint: cur.thresholdCostHint ?? null,
-    reasoning: (keptTargetNotice || String(parsed?.reasoning || '')).slice(0, 500),
+    reasoning: (keptTargetNotice || aiStr(parsed?.reasoning)).slice(0, 500),
   };
 }

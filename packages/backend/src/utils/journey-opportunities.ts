@@ -41,6 +41,8 @@ import { DEFAULT_DORMANT_DAYS } from './journey-lifecycle-map';
 import { getCreditCost } from './ai-credit-calc';
 // ★ 2026-10-10 한 줄 묻기 0단계 — 담당자 범위(관리자 · 분류 없는 회사 = 빈 조각 = 종전 SQL 그대로)
 import { getOwnerCustomerScopeSql } from './store-scope';
+// ★ 2026-10-25 #9(D1 = A) — 「이 구간을 맡은 여정」 = 보는 사람 여정 + 관리자가 켠 여정(한 곳)
+import { journeyCoverSql } from './journey-access';
 
 export type JourneyOpportunityType =
   | 'cart_recovery' | 'onboarding' | 'dormant' | 'birthday' | 'repurchase_due' | 'wishlist'
@@ -82,10 +84,13 @@ function perHead(total: number, cnt: number): string {
  */
 /**
  * @param ownerUserId ★ 2026-10-10 한 줄 묻기 0단계 — 보는 사람(담당자면 자기 분류코드 고객만 센다 · 관리자 · 없음 = 회사 전체).
- *   범위는 **인원 · 규모 집계에만** 건다. 켜진 여정 판정 · 리듬 · 진단 계획은 회사 전체 그대로(캐시 키 · 결정적 요청 키).
+ *   범위는 인원 · 규모 집계에 건다. 리듬은 회사 전체 그대로(캐시 키).
+ *   ★ 2026-10-25 #9(D1 = A) — 켜진 여정 판정 = journeyCoverSql(담당자 = 자기 여정 + 관리자가 켠 여정 · 관리자 = 회사 전체).
  */
 export async function buildJourneyOpportunities(companyId: string, ownerUserId?: string | null): Promise<JourneyOpportunity[]> {
   const scopeSql = await getOwnerCustomerScopeSql(companyId, ownerUserId, 'c');
+  const coverParams: any[] = [companyId];
+  const cover = await journeyCoverSql(ownerUserId, coverParams);
   // 1) 활성(미보관) 여정 유형 — 이미 커버 중인 기회는 제안하지 않는다.
   //    ★ 2026-08-08 이어달리기 — trigger_event도 함께 읽는다. 후속 트리거 3종이 전부 template_code='repeat'을
   //      공유해, 이어달리기 dedup을 template_code로 하면 서로를 오차단한다(설계서 사실 10).
@@ -94,8 +99,8 @@ export async function buildJourneyOpportunities(companyId: string, ownerUserId?:
   //   주문 완료 알림톡(정보 알림)이 재구매 구간을 채운 것으로 셌다. 이제 마케팅 여정의 트리거만 센다.
   const activeRes = await query(
     `SELECT DISTINCT j.trigger_event FROM journeys j
-      WHERE j.company_id = $1 AND j.status = 'active' AND j.archived_at IS NULL AND ${MARKETING_JOURNEY_SQL}`,
-    [companyId],
+      WHERE j.company_id = $1 AND j.status = 'active' AND j.archived_at IS NULL AND ${MARKETING_JOURNEY_SQL}${cover.where}`,
+    coverParams,
   );
   const activeTriggers = new Set<string>(activeRes.rows.map((r: any) => String(r.trigger_event)));
 
@@ -453,6 +458,8 @@ export function buildFlowPlan(
   activeTriggers: Set<string>,
   availability: Record<string, { available: boolean; reason: string } | undefined>,
   draftedTriggers: Set<string> = new Set(),
+  /** ★ 2026-10-25 #9 — 담당자 화면에서 관리자가 켠 여정이 맡은 구간(담당자 목록 · 지도에 없는 여정이라 이유를 따로 말한다) */
+  othersTriggers: Set<string> = new Set(),
 ): FlowPlanItem[] {
   const f2s = rhythm?.firstToSecond;
   const gap = rhythm?.gap;
@@ -512,6 +519,7 @@ export function buildFlowPlan(
       : { ...raw, daysFromStart };
     const cap = availability[triggerKeyForEvent(it.triggerEvent) || ''];
     if (activeTriggers.has(it.triggerEvent)) return { ...it, status: 'exists' as const, reason: '이미 켜진 여정이 있어요.' };
+    if (othersTriggers.has(it.triggerEvent)) return { ...it, status: 'exists' as const, reason: '관리자가 켠 여정이 이 구간을 맡고 있어요.' };
     if (draftedTriggers.has(it.triggerEvent)) return { ...it, status: 'drafted' as const, reason: '만들어 둔 초안이 있어요. 켜기 전 점검에서 확인하고 켜 주세요.' };
     if (cap && !cap.available) return { ...it, status: 'locked' as const, reason: cap.reason };
     return { ...it, status: 'ready' as const, reason: '' };
@@ -543,20 +551,30 @@ export async function loadCompanyRhythm(companyId: string): Promise<PurchaseRhyt
   return (await loadDiagnosisFacts(companyId)).rhythm;
 }
 
-export async function buildJourneyDiagnosis(companyId: string): Promise<JourneyDiagnosis> {
+/**
+ * @param viewerUserId ★ 2026-10-25 #9(D1 = A) — 판정 = 보는 사람 여정 + 관리자가 켠 여정(journeyCoverSql · 관리자 = 회사 전체).
+ *   리듬 사실은 회사 하나(캐시 키 = 회사) · 판정만 보는 사람마다 다르다.
+ */
+export async function buildJourneyDiagnosis(companyId: string, viewerUserId?: string | null): Promise<JourneyDiagnosis> {
   const facts0 = await loadDiagnosisFacts(companyId);
+  const params: any[] = [companyId];
+  const cover = await journeyCoverSql(viewerUserId, params);
   const activeRes = await query(
-    `SELECT DISTINCT j.trigger_event, j.status FROM journeys j
-      WHERE j.company_id = $1 AND j.status IN ('active', 'paused', 'draft') AND j.archived_at IS NULL AND ${MARKETING_JOURNEY_SQL}`,
-    [companyId],
+    `SELECT DISTINCT j.trigger_event, j.status, ${cover.mine} AS mine FROM journeys j
+      WHERE j.company_id = $1 AND j.status IN ('active', 'paused', 'draft') AND j.archived_at IS NULL AND ${MARKETING_JOURNEY_SQL}${cover.where}`,
+    params,
   );
-  const activeTriggers = new Set<string>(activeRes.rows.filter((r: any) => r.status === 'active').map((r: any) => String(r.trigger_event)));
+  const triggersOf = (keep: (r: any) => boolean) => new Set<string>(activeRes.rows.filter(keep).map((r: any) => String(r.trigger_event)));
+  const activeTriggers = triggersOf((r) => r.status === 'active' && r.mine === true);
   // 초안 · 멈춤만 있는 레인 = 다시 권하지 않는다(만든 초안을 또 만들어 또 과금하지 않게 · Codex 1R medium).
-  const draftedTriggers = new Set<string>(activeRes.rows.filter((r: any) => r.status !== 'active').map((r: any) => String(r.trigger_event)));
+  const draftedTriggers = triggersOf((r) => r.status !== 'active');
+  const othersTriggers = triggersOf((r) => r.status === 'active' && r.mine !== true);
+  const productParams: any[] = [companyId];
+  const productCover = await journeyCoverSql(viewerUserId, productParams);
   const productRes = await query(
-    `SELECT trigger_filters FROM journeys
-      WHERE company_id = $1 AND trigger_event = 'purchase.product' AND status IN ('active', 'paused', 'draft') AND archived_at IS NULL`,
-    [companyId],
+    `SELECT j.trigger_filters FROM journeys j
+      WHERE j.company_id = $1 AND j.trigger_event = 'purchase.product' AND j.status IN ('active', 'paused', 'draft') AND j.archived_at IS NULL${productCover.where}`,
+    productParams,
   );
   const coveredKeys = new Set<string>();
   for (const r of productRes.rows) for (const k of ((r.trigger_filters || {}).product_keys || [])) coveredKeys.add(String(k));
@@ -582,7 +600,7 @@ export async function buildJourneyDiagnosis(companyId: string): Promise<JourneyD
     computedAt: new Date(facts0.at).toISOString(),
     rhythm,
     facts,
-    flowPlan: buildFlowPlan(rhythm, activeTriggers, availability, draftedTriggers),
+    flowPlan: buildFlowPlan(rhythm, activeTriggers, availability, draftedTriggers, othersTriggers),
     products: facts0.products.map((p) => ({ ...p, status: coveredKeys.has(p.key) ? 'exists' as const : 'ready' as const })),
     quote: { draftEach: getCreditCost('journey-ai-generate'), activateEach: getCreditCost('journey-activate') },
     source: rhythm
@@ -592,20 +610,21 @@ export async function buildJourneyDiagnosis(companyId: string): Promise<JourneyD
 }
 
 /**
- * 추천 초안 요청 키(결정적) — 회사 · 시작 사건 · 간격 · 휴면 기준일 **내용만**으로 계산한다(Codex 3R high · 4R medium).
+ * 추천 초안 요청 키(결정적) — 회사 · 보는 사람 · 시작 사건 · 간격 · 휴면 기준일 **내용만**으로 계산한다(Codex 3R high · 4R medium).
+ *   ★ 2026-10-25 #9(D1 = A) — 보는 사람 id 를 넣는다(옛 = 회사 단위라 담당자 B 의 요청이 A 의 초안 「이미 만듦」으로 막혔다 · B 는 그 초안을 못 연다).
  *   화면이 만든 무작위 키는 화면 수명(창 · 페이지)이 끝날 때마다 새로 생겨, 결과를 모르는 요청을 다시 보낼 때 다른 요청으로 보였다.
  *   날짜도 넣지 않는다 — 넣으면 자정을 넘긴 재시도가 다른 요청이 된다. 같은 내용 = 같은 키 → 과금 원장 시도 키(차감이 있으면 DRAFT_ALREADY_MADE).
  *   대가: 같은 내용의 초안을 다시 만들 수 없다(실측 간격이 바뀌면 키가 바뀐다 · 직접 만들기 경로는 그대로).
  */
-export function recoRequestId(companyId: string, plan: Pick<FlowPlanItem, 'triggerEvent' | 'daysFromStart' | 'dormantDays'>): string {
+export function recoRequestId(companyId: string, userId: string, plan: Pick<FlowPlanItem, 'triggerEvent' | 'daysFromStart' | 'dormantDays'>): string {
   const h = createHash('sha256')
-    .update(`${companyId}|reco|${plan.triggerEvent}|${plan.daysFromStart.join(',')}|${plan.dormantDays ?? ''}`)
+    .update(`${companyId}|${userId}|reco|${plan.triggerEvent}|${plan.daysFromStart.join(',')}|${plan.dormantDays ?? ''}`)
     .digest('hex');
   return `${h.slice(0, 8)}-${h.slice(8, 12)}-${h.slice(12, 16)}-${h.slice(16, 20)}-${h.slice(20, 32)}`;
 }
 
 /** 추천 계획 하나를 서버가 다시 계산해 돌려준다(화면이 보낸 숫자는 믿지 않는다 · 설계서 §5). */
-export async function recoPlanFor(companyId: string, triggerEvent: string): Promise<FlowPlanItem | null> {
-  const d = await buildJourneyDiagnosis(companyId);
+export async function recoPlanFor(companyId: string, viewerUserId: string, triggerEvent: string): Promise<FlowPlanItem | null> {
+  const d = await buildJourneyDiagnosis(companyId, viewerUserId);
   return d.flowPlan.find((p) => p.triggerEvent === triggerEvent) || null;
 }

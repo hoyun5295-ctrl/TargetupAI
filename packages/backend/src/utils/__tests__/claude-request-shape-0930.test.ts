@@ -111,12 +111,12 @@ describe('문안 생성 생각하기 스위치(CLAUDE_COPY_THINKING · 0930 Haro
     expect(resolveMaxTokens(12000, 'claude-sonnet-5-5', true)).toBe(16000);
     expect(resolveMaxTokens(2048, 'claude-sonnet-4-5-20250929', true)).toBe(2048);
   });
-  it('스위치는 기본 · 맞춤 문안 생성에만 · AI Operator(opus) 호출은 따르지 않는다 · 공통 CT 는 thinking 을 한도에 넘긴다', () => {
+  // ★ 1025 F — 부르는 곳 없던 맞춤 문안 생성(generateCustomMessages) 삭제 → 스위치 소비 = 기본 문안 생성 1곳
+  it('스위치는 기본 문안 생성에만 · AI Operator(opus) 호출은 따르지 않는다 · 공통 CT 는 thinking 을 한도에 넘긴다', () => {
     const ai = readFileSync(resolve(process.cwd(), 'src', 'services', 'ai.ts'), 'utf8');
-    expect((ai.match(/copyThinkingEnabled\(\)/g) || []).length).toBe(2);
+    expect((ai.match(/copyThinkingEnabled\(\)/g) || []).length).toBe(1);
     expect(ai).toContain("thinking: extraContext?.model === 'opus' ? undefined : (copyThinkingEnabled() || undefined),");
-    const custom = ai.slice(ai.indexOf('export async function generateCustomMessages('), ai.indexOf('export async function countFilteredCustomers('));
-    expect(custom).toContain('thinking: copyThinkingEnabled() || undefined,');
+    expect(ai).not.toContain('export async function generateCustomMessages(');
     expect(ai).toContain('max_tokens: resolveMaxTokens(params.maxTokens, modelName, params.thinking === true),');
   });
 });

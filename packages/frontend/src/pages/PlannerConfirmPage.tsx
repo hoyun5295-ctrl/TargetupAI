@@ -134,7 +134,8 @@ export default function PlannerConfirmPage() {
     );
   }
 
-  const canApprove = state.member && ev.displayState === 'review' && !view.sends.some((s) => s.sms && s.sms.spam !== 'pass');
+  // ★ 2026-10-25 원장 #56 — 잠금 = 남은 발송의 문안만(서버 승인 판정 = 생략 · 보냄 뺀 것)
+  const canApprove = state.member && ev.displayState === 'review' && !pending.some((s) => s.sms && s.sms.spam !== 'pass');
   return (
     <div className="relative min-h-screen bg-neutral-50">
       {header}
@@ -148,7 +149,7 @@ export default function PlannerConfirmPage() {
           </p>
         )}
         <ConfirmSummary view={view} />
-        <div className="mt-7 mb-4 flex items-baseline gap-2"><h3 className="text-[17px] font-bold">보낼 내용 {view.sends.length}번</h3><span className="text-[12.5px] text-neutral-600">나가는 순서대로</span></div>
+        <div className="mt-7 mb-4 flex items-baseline gap-2"><h3 className="text-[17px] font-bold">보낼 내용 {pending.length}번</h3><span className="text-[12.5px] text-neutral-600">나가는 순서대로</span></div>
         {view.sends.length > 1 && (
           // ★ 2026-10-18 발송 번호 띠(머리 아래 붙음 · 누르면 그 발송으로 · 주소 # 은 확인 토큰 자리라 쓰지 않는다)
           <nav aria-label="발송 순서" className="sticky top-[61px] z-[5] -mx-4 px-4 py-2 mb-4 bg-neutral-50/95 backdrop-blur border-b border-neutral-200 flex gap-1.5 overflow-x-auto">

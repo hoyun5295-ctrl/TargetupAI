@@ -20,6 +20,7 @@
  *   - 0건 매칭 시 발송 차단 (Harold Zero-Count 영구 원칙 정합)
  */
 
+import { UserFacingError } from './http-error';
 import { withKeyedLock } from './keyed-lock';
 import { query } from '../config/database';
 
@@ -105,7 +106,7 @@ export interface SaveSubscriptionInput {
 export async function saveSubscription(input: SaveSubscriptionInput): Promise<{ id: string; isNew: boolean }> {
   const { companyId, customerId, identityLinkId, subscription, userAgent } = input;
   if (!subscription?.endpoint || !subscription?.keys?.p256dh || !subscription?.keys?.auth) {
-    throw new Error('Web Push subscription 형식이 올바르지 않습니다.');
+    throw new UserFacingError(400, 'PUSH_SUBSCRIPTION_INVALID', 'Web Push subscription 형식이 올바르지 않습니다.');   // SDK(개발자) 입력
   }
 
   const result = await query(
@@ -196,7 +197,7 @@ async function sendPushCampaignUnlocked(
     throw new Error('Web Push 발송 환경이 준비되지 않았습니다. VAPID 환경변수 + web-push 라이브러리 설치를 확인해주세요.');
   }
   if (!payload.title || !payload.body) {
-    throw new Error('title과 body는 필수입니다.');
+    throw new UserFacingError(400, 'PUSH_INPUT', '제목과 내용을 모두 적어 주세요.');
   }
 
   // 1. 캠페인 row 박음
@@ -228,7 +229,7 @@ async function sendPushCampaignUnlocked(
        WHERE id = $1::uuid`,
       [campaignId]
     );
-    throw new Error('활성 Web Push 구독자가 0건입니다. 발송이 차단되었습니다. 자사몰에 push 구독 SDK 통합 후 사용자 동의 확보가 필요합니다.');
+    throw new UserFacingError(409, 'PUSH_NO_SUBSCRIBERS', '푸시를 받을 구독자가 없어요. 자사몰에 웹 푸시 구독 연동을 먼저 해 주세요.');   // ★ 1025 R10 — 사용자 조건(옛: 라우트가 「0건」 글자로 400 짐작)
   }
 
   // 4. 발송

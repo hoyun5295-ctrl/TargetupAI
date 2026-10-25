@@ -466,6 +466,7 @@ async function retryTerminalTemplateAlarms(): Promise<void> {
         WHERE t.status IN ('APPROVED','REJECTED','KREJ')
           AND t.alarm_notified_status IS NULL
           AND (t.last_synced_at IS NULL OR t.last_synced_at < now() - INTERVAL '6 hours')
+        ORDER BY t.last_synced_at NULLS FIRST, t.id   -- ★ 2026-10-25 R12: 안 본 · 오래 안 본 순
         LIMIT 100`,
     );
     rows = res.rows;

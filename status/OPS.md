@@ -103,6 +103,7 @@ tp-deploy               # 서버 git pull → pm2 restart all (백엔드만)
 tp-deploy-full          # 서버 git pull → backend(npm install + build) → frontend build → flyer-frontend build → pm2 restart all
 ```
 
+> **★ 2026-10-25:** `packages/flyer-frontend` 삭제 — 서버 배포 함수에 flyer-frontend 빌드 단계가 남아 있으면 그 단계를 지운다(폴더가 없어 체인이 멈춘다).
 > **⚠️ D130 (2026-04-18) 변경:** `tp-deploy-full`에 **backend `npm install`** + **`flyer-frontend` 빌드** 추가. 새 의존성 추가 시 별도 서버 SSH 없이 자동 처리됨.
 >
 > **교훈:** `$cmds = @(...) -join " && "` + `ssh remote $cmds` PowerShell 배열 패턴이 긴 체인 전달 시 서버 sshd에서 `Connection closed by port 22` 발생 가능. → 반드시 **한 줄 쌍따옴표 방식** `ssh remote "cmd1 && cmd2 && ..."`로 작성.
@@ -155,7 +156,7 @@ pm2 status
 - 성공 = `66 source import verified` + import ID. 묶음의 `gitCommit` 이 62 `git rev-parse HEAD` 와 같아야 하고 `dirty: false` 여야 한다.
 - 운영 성공 · 66 실패면 "운영 배포 성공 / 66 동기화 실패"로 적고 66 을 최신이라 하지 않는다. 충돌·잠금이 나오면 다시 덮지 말고 원인부터 본다(CureOPS 규칙).
 
-### 2-2-B. 서버 배포 — flyer-frontend만 빌드 (전단AI 전용, D129+)
+### 2-2-B. ~~서버 배포 — flyer-frontend만 빌드~~ (★ 2026-10-25 폐기 — `packages/flyer-frontend` 삭제 · 전단AI = hanjulDM 별도 프로젝트 · 아래는 옛 기록)
 
 > **전단AI 프론트엔드만 수정/배포할 때 사용.** 한줄로(frontend/company-frontend)와 완전 분리.
 > 동일 서버(58.227.193.62), 동일 레포(`targetup-app`) 내 `packages/flyer-frontend/` 만 빌드.

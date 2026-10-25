@@ -9,6 +9,7 @@
  * 그림 안 글자 = 숫자 · 혜택 낱말 0 — 화면은 고치지 않고 알려만 준다(서버가 생성 직전 다시 본다 · 고쳐 쓰면 「10만원 → 만원」 같은 변조가 생긴다).
  */
 import { useEffect, useState } from 'react';
+import { creditText } from '../../constants/credit';
 import { Loader2, Sparkles, Check, LayoutTemplate } from 'lucide-react';
 import { studioPost, studioFetch } from '../../lib/studio-api';
 import TemplatePicker, { type StudioTemplatePublic } from '../studio/TemplatePicker';
@@ -198,7 +199,7 @@ export default function LineHeadlineStep({ storeKey, lineFp, line, productImage,
           {chosen && (
             <button type="button" onClick={() => void make()} disabled={busy || waiting || blocked || titleBad || labelBad}
               className="w-full h-12 rounded-xl bg-violet-600 text-white text-[14px] font-bold hover:bg-violet-700 disabled:opacity-60 inline-flex items-center justify-center gap-2">
-              {busy ? <><Loader2 className="w-5 h-5 animate-spin" />첫 화면 그림을 만드는 중 · {secs}초(보통 20~40초)</> : <><Sparkles className="w-5 h-5" />{made ? '이 템플릿으로 다시 만들기' : '이 템플릿으로 첫 화면 만들기'} · 2크레딧</>}
+              {busy ? <><Loader2 className="w-5 h-5 animate-spin" />첫 화면 그림을 만드는 중 · {secs}초(보통 20~40초)</> : <><Sparkles className="w-5 h-5" />{made ? '이 템플릿으로 다시 만들기' : '이 템플릿으로 첫 화면 만들기'} · {creditText('image-studio-generate')}</>}
             </button>
           )}
           <p className="text-[12px] text-slate-500">가격 · 할인율은 그림이 아니라 상품 카드에 정확히 들어가요{productImage ? ' · 상품 사진은 배경만 지우고 그대로 써요' : ''}</p>

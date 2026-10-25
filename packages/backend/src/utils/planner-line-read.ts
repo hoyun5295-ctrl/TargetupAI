@@ -267,8 +267,10 @@ export function plannerLineQuestions(read: PlannerLineRead, ctx: PlannerLineAskC
   if (!audResolved || aud?.kind === 'product_buyers') {
     // 구매자 대상일 때만 쓴다(전체 고객을 고르면 답하지 않아도 된다) · 「모두」라고 적었으면 기록 전체를 추천
     // 기본값 없음 — 한 줄의 「모두」는 도움말로만 짚는다(대상 상품 고르기의 [기록 전체] 표시와 같은 규칙)
+    // ★ 2026-10-25 원장 #61 — 필수 = 서버 담기 판정과 같다(대상이 상품 구매자로 정해졌으면 답이 있어야 담는다 · 옛: 늘 required false 로 내보내고 담기에서 거절)
+    //   대상을 아직 안 골랐으면 상품을 고를 때만 필요하다(전체 고객이면 묻지 않는다) — 그 갈래는 화면이 상품을 고른 뒤에만 보이고 그때 필수로 다룬다(PlannerLineAsk)
     qs.push({
-      id: 'since', kind: 'choice', label: '언제 산 고객인가요?', required: false, options: SINCE_OPTIONS,
+      id: 'since', kind: 'choice', label: '언제 산 고객인가요?', required: audResolved && aud?.kind === 'product_buyers', options: SINCE_OPTIONS,
       ...(aud?.kind === 'product_buyers' && aud.allTime ? { help: '한 줄에 「모두」라고 적으셨어요. 기록 전체가 그 뜻이에요' } : {}),
     });
   }

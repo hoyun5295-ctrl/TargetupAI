@@ -8,7 +8,9 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'fs';
 import { join, resolve } from 'path';
-import { resolveRetestCopy, PROPOSAL_SPAM_RETEST_LIMIT } from '../continuous-operator-policy';
+import { PROPOSAL_SPAM_RETEST_LIMIT } from '../continuous-operator-policy';
+import { operatorFinalCopyAt } from '../operator-final-copy';
+import { hasUneditedBenefitPlaceholder } from '../autosend-policy';
 
 const back = (rel: string) => readFileSync(join(__dirname, '..', '..', rel), 'utf8');
 const FRONT = resolve(__dirname, '../../../../frontend/src');
@@ -23,28 +25,33 @@ const pj = (channel: string) => ({
   ],
 });
 
-describe('resolveRetestCopy — 발송과 같은 순서로 검사할 문안을 정한다', () => {
+// ★ 2026-10-25 원장 #29 — 검사할 글 = 발송 CT(operatorFinalCopyAt) 한 벌(옛 resolveRetestCopy 삭제 · 「발송 쪽을 바꾸면 여기도」 0)
+const CTX = { benefit: null, opt080: '0800000000', callback: '0200000000' };
+const at = (p: any, i: number, sel?: { body?: string; subject?: string }) =>
+  operatorFinalCopyAt(sel ? { ...p, userSelection: { variantIndex: i, ...sel } } : p, i, CTX);
+
+describe('검사할 글 = 발송과 같은 함수(operatorFinalCopyAt)', () => {
   it('고르기만 한 안 = 그 안의 본문 · 제목', () => {
-    expect(resolveRetestCopy(pj('LMS'), { variantIndex: 0 })).toMatchObject({ ok: true, body: '1안 본문', subject: '1안 제목', msgType: 'LMS' });
+    expect(at(pj('LMS'), 0)).toMatchObject({ body: '1안 본문', subject: '1안 제목', msgType: 'LMS' });
   });
 
   it('고친 본문 · 제목이 오면 그것', () => {
-    expect(resolveRetestCopy(pj('LMS'), { variantIndex: 0, body: '고친 본문', subject: '고친 제목' })).toMatchObject({ ok: true, body: '고친 본문', subject: '고친 제목' });
+    expect(at(pj('LMS'), 0, { body: '고친 본문', subject: '고친 제목' })).toMatchObject({ body: '고친 본문', subject: '고친 제목' });
   });
 
   it('message 칸만 있는 안도 읽는다', () => {
-    expect(resolveRetestCopy(pj('SMS'), { variantIndex: 2 })).toMatchObject({ ok: true, body: '3안 본문', subject: '' });
+    expect(at(pj('SMS'), 2)).toMatchObject({ body: '3안 본문', subject: '' });
   });
 
-  it('단문을 90byte 넘게 고치면 장문으로 검사한다(발송 승격과 같다)', () => {
+  it('단문이 90byte 를 넘으면 장문으로 검사한다(고쳤든 안 고쳤든 · 발송 승격과 같다 · #29)', () => {
     const long = '가'.repeat(46); // 92byte
-    expect(resolveRetestCopy(pj('SMS'), { variantIndex: 0, body: long })).toMatchObject({ ok: true, msgType: 'LMS' });
-    expect(resolveRetestCopy(pj('SMS'), { variantIndex: 0, body: '짧은 문안' })).toMatchObject({ ok: true, msgType: 'SMS' });
+    expect(at(pj('SMS'), 0, { body: long })).toMatchObject({ msgType: 'LMS' });
+    expect(at({ channel: { recommended: 'SMS' }, messages: [{ body: long }] }, 0)).toMatchObject({ msgType: 'LMS' });
+    expect(at(pj('SMS'), 0, { body: '짧은 문안' })).toMatchObject({ msgType: 'SMS' });
   });
 
-  it('없는 안 · 빈 문안은 거절', () => {
-    expect(resolveRetestCopy(pj('SMS'), { variantIndex: 5 })).toMatchObject({ ok: false });
-    expect(resolveRetestCopy({ messages: [{ body: '' }] }, { variantIndex: 0 })).toMatchObject({ ok: false });
+  it('없는 안 = null', () => {
+    expect(at(pj('SMS'), 5)).toBeNull();
   });
 
   it('횟수 = 제안마다 5회(Harold 1006)', () => {
@@ -59,22 +66,23 @@ describe('resolveRetestCopy — 발송과 같은 순서로 검사할 문안을 �
  *   혜택 자리가 없으면 발송의 혜택 치환이 아무것도 바꾸지 않으므로 검사한 글자 = 화면 글자 = 나가는 글자.
  */
 describe('혜택 자리가 남은 문안은 검사하지 않는다(검사한 글자 = 화면 글자 = 나가는 글자)', () => {
-  it('본문에 [혜택 …] 이 남으면 거절 · 혜택을 직접 넣으라고 안내', () => {
-    const r = resolveRetestCopy(pj('LMS'), { variantIndex: 1 });
-    expect(r).toMatchObject({ ok: false });
-    expect((r as { reason: string }).reason).toContain('혜택을 직접 넣은 뒤');
+  const op = back('utils/continuous-operator.ts');
+  const fn = op.slice(op.indexOf('export async function startProposalSpamRetest('), op.indexOf('export async function readProposalSpamRetest('));
+  it('본문 · 제목에 [혜택 …] 이 남으면 거절 · 혜택을 직접 넣으라고 안내(입력 글로 판정 · 검사 전)', () => {
+    expect(fn).toContain('if (hasUneditedBenefitPlaceholder(rawBody) || hasUneditedBenefitPlaceholder(rawSubject)) {');
+    expect(fn).toContain('문안 편집에서 혜택을 직접 넣은 뒤 검사해 주세요.');
+    expect(fn.indexOf('hasUneditedBenefitPlaceholder(rawBody)')).toBeLessThan(fn.indexOf('operatorFinalCopyAt('));
   });
 
-  it('제목 · 직접 입력 안내 문구도 같다', () => {
-    expect(resolveRetestCopy(pj('LMS'), { variantIndex: 0, subject: '[혜택] 안내' })).toMatchObject({ ok: false });
-    expect(resolveRetestCopy(pj('LMS'), { variantIndex: 0, body: '혜택은 직접 입력해주세요' })).toMatchObject({ ok: false });
+  it('제목 · 직접 입력 안내 문구도 혜택 자리다', () => {
+    expect(hasUneditedBenefitPlaceholder('[혜택] 안내')).toBe(true);
+    expect(hasUneditedBenefitPlaceholder('혜택은 직접 입력해주세요')).toBe(true);
+    expect(hasUneditedBenefitPlaceholder('2안 10% 할인 본문')).toBe(false);
   });
 
-  it('혜택을 문안에 직접 넣으면 검사한다 · 그 글자가 그대로 나간다(발송 치환은 자리가 없으면 그대로)', async () => {
-    const { applyBenefitToBody } = await import('../autosend-policy');
-    const r = resolveRetestCopy(pj('LMS'), { variantIndex: 1, body: '2안 10% 할인 본문' });
-    expect(r).toMatchObject({ ok: true, body: '2안 10% 할인 본문' });
-    expect(applyBenefitToBody('2안 10% 할인 본문', '30% 할인')).toBe('2안 10% 할인 본문');
+  it('혜택을 문안에 직접 넣으면 검사한다 · 그 글자가 그대로 나간다(발송 치환은 자리가 없으면 그대로)', () => {
+    const r = operatorFinalCopyAt({ ...pj('LMS'), userSelection: { variantIndex: 1, body: '2안 10% 할인 본문' } }, 1, { ...CTX, benefit: '30% 할인' });
+    expect(r).toMatchObject({ body: '2안 10% 할인 본문', placeholderLeft: false });
   });
 
   it('검사 함수는 혜택 값을 받지 않는다 · 혜택 대조 장치는 없다', () => {
@@ -190,7 +198,8 @@ describe('화면 — 고른 안 · 고친 문안에서 검사 · 같은 글자�
   });
 
   it('결과는 안 번호 · 본문 · 제목이 모두 같을 때만 붙는다', () => {
-    expect(card).toContain('r.variantIndex === i && r.body === body && (r.subject || \'\') === subject');
+    // ★ 1025 #29 — 결과 글 = 나가는 글 · 화면이 보낸 입력 글(srcBody)로도 붙인다
+    expect(card).toContain("[...(retest?.results || [])].reverse().find((r) => r.variantIndex === i\n      && (r.body === body || r.srcBody === body)\n      && ((r.subject || '') === subject || (r.srcSubject ?? null) === subject));");
   });
 
   it('고친 문안에는 자동 검사 결과(고치기 전 문안 판정)를 붙이지 않는다', () => {

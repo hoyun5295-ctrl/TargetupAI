@@ -22,11 +22,12 @@
  *   - 0건 자동 완화 X (segment 0건이면 안내만)
  */
 
+import { UserFacingError } from './http-error';
 import { replaceInventedBenefits, replaceInventedBenefitsDeep, dropInventedEfficacyDeep, guardReadingSequence, EFFICACY_PLACEHOLDER, HEADLINE_PLACEHOLDER, EFFICACY_PROMPT_RULES, EFFICACY_RETRY_HINT } from './copy-benefit-detector';
 
 /** ★ 1024 ② Codex 1R — 읽는 순서로 이어 읽히는 블록(머리글 → 제목 → 본문) · 다 빠지면 블록 종류마다 대체값(머리글 = 비움) */
 const READING_BLOCK_FALLBACK: Record<string, string> = { eyebrow: '', headline: HEADLINE_PLACEHOLDER, body: EFFICACY_PLACEHOLDER };
-import { extractJsonFromAiText } from './ai-json';
+import { extractJsonFromAiText, aiStr } from './ai-json';
 import { callAIWithFallback } from '../services/ai';
 import { randomUUID } from 'crypto';
 import { checkCredit, settleCreditAfterSuccess } from './ai-credit';
@@ -40,7 +41,7 @@ import { buildEventPromptBlock, benefitMatchesEventText, normalizeEventText, val
 // ★ 2026-07-14 디자인 3.0 — og:image 자동 채움 (연결 고정 + 바이트 상한 공용 CT — DM/이메일과 동일 엔진)
 import { fetchProductOgImages } from './dm/dm-brand-extractor';
 // ★ D230+ 블록 — CT-27 공용 검증/정규화 (인라인 중복 금지)
-import { sanitizeContentBlocks, normalizeTheme, normalizeCardStyle, INAPP_CARD_STYLES, BENEFIT_PLACEHOLDER, sanitizeInAppDesign, filterBlocksForTemplate } from './inapp-message';
+import { sanitizeContentBlocks, normalizeTheme, normalizeCardStyle, INAPP_CARD_STYLES, BENEFIT_PLACEHOLDER, sanitizeInAppDesign, filterBlocksForTemplate, composeFlatFromBlocks } from './inapp-message';
 // ★ 2026-07-14 디자인 4.0 M2 — 결정적 디자인 추천 소유 = design-core/recommend (값 무변 이관)
 import { INAPP_SCENARIO_CARD_STYLE, INAPP_SCENARIO_TREATMENT } from './design-core/recommend';
 // ★ 2026-07-14 디자인 4.0 M5 — 행사 → 정예 템플릿 스토리 힌트 (결정적 선택기, design-core)
@@ -340,7 +341,7 @@ async function enrichProductBlocksFromEventText(blocks: any[], eventText: string
   validated.forEach((p, i) => { if (!byName.has(p.name)) byName.set(p.name, { p, image: ogImages[i] }); });
   return blocks.map((b) => {
     if (!b || b.type !== 'product') return b;
-    const hit = byName.get(String(b.name || '').trim().slice(0, 80));
+    const hit = byName.get(aiStr(b?.name).trim().slice(0, 80));
     if (!hit) {
       // 원문 검증 탈락 — 수치·링크 제거(환각 가격/URL 차단), 상품명 카피는 유지
       const { price: _p, discount_price: _d, link_url: _l, ...rest } = b;
@@ -353,7 +354,7 @@ async function enrichProductBlocksFromEventText(blocks: any[], eventText: string
       ...(hit.p.discount_price ? { discount_price: hit.p.discount_price } : {}),
       ...(hit.p.link_url ? { link_url: hit.p.link_url } : {}),
       // 이미지는 AI 작성 금지(forceBlockSafety 삭제) — og:image 자동 채움만 (빈 값 보충)
-      ...(hit.image && !String(b.image || '').trim() ? { image: hit.image } : {}),
+      ...(hit.image && !aiStr(b?.image).trim() ? { image: hit.image } : {}),
     };
   });
 }
@@ -424,7 +425,7 @@ export async function generateInAppMessagePackage(
     input.templateHint = undefined;
   }
   if (!input.objective && !input.templateHint && !eventText) {
-    throw new Error('objective (자연어) 또는 templateHint (빠른 시작 시나리오) 또는 event_text (행사 내용) 중 하나는 필수입니다.');
+    throw new UserFacingError(400, 'INAPP_INPUT', '만들 내용(목표 · 빠른 시작 · 행사 내용) 중 하나를 넣어 주세요.');
   }
 
   // templateHint 우선 — 빠른 시작 SEED 사용
@@ -722,19 +723,19 @@ ${brandAccent
   const guardMessage = (p: any) => {
     const dropped: string[] = [];
     const flat = dropInventedEfficacyDeep({
-      title: replaceInventedBenefits(String(p.title || ''), inappGround).slice(0, 100),
-      body: replaceInventedBenefits(String(p.body || ''), inappGround),
-      badge_text: replaceInventedBenefits(String(p.badge_text || ''), inappGround).slice(0, 20),
-      buttons: Array.isArray(p.buttons) ? p.buttons.slice(0, 3).map((b: any) => ({ label: replaceInventedBenefits(String(b?.label || ''), inappGround).slice(0, 30) })) : [],
+      title: replaceInventedBenefits(aiStr(p.title), inappGround).slice(0, 100),
+      body: replaceInventedBenefits(aiStr(p.body), inappGround),
+      badge_text: replaceInventedBenefits(aiStr(p.badge_text), inappGround).slice(0, 20),
+      buttons: Array.isArray(p.buttons) ? p.buttons.slice(0, 3).map((b: any) => ({ label: replaceInventedBenefits(aiStr(b?.label), inappGround).slice(0, 30) })) : [],
     }, inappGround, dropped);
     const badge = flat.badge_text || scenarioStyle?.badge || null;
     const buttons = Array.isArray(p.buttons) ? p.buttons.slice(0, 3).map((b: any, idx: number) => ({
-      id: String(b.id || `btn_${idx}`),
+      id: aiStr(b?.id) || `btn_${idx}`,
       label: flat.buttons[idx]?.label ?? '',
       action_url: b.action_url || null,
       style: (['primary', 'secondary', 'tertiary', 'ghost'].includes(b.style) ? b.style : 'primary') as InAppButton['style'],
-      background_color: String(b.background_color || '#4f46e5'),
-      text_color: String(b.text_color || '#ffffff'),
+      background_color: aiStr(b?.background_color) || '#4f46e5',
+      text_color: aiStr(b?.text_color) || '#ffffff',
     })) : [];
     // ★ Codex 2R — AI 블록이 없으면 **여기서** 평면 값으로 합성한다(합성 블록도 같은 읽는 순서 판정 · 재생성 판단을 지난다)
     const fromAi: any[] = dropInventedEfficacyDeep(replaceInventedBenefitsDeep(sanitizeContentBlocks(p.content_blocks).map((b) => forceBlockSafety(b, eventText)), inappGround), inappGround, dropped)
@@ -792,8 +793,8 @@ ${brandAccent
     template: validateTemplate(parsed.template) || suggestedTemplate,
     image_url: null, // AI 이미지 환각 차단 — 존재하지 않는 URL 생성 방지(D152 AI 창작 금지 정합). 이미지는 회사 admin 직접 업로드만.
     buttons,
-    background_color: String(parsed.background_color || scenarioStyle?.background || '#4f46e5'),
-    text_color: String(parsed.text_color || scenarioStyle?.textColor || '#ffffff'),
+    background_color: aiStr(parsed.background_color) || scenarioStyle?.background || '#4f46e5',
+    text_color: aiStr(parsed.text_color) || scenarioStyle?.textColor || '#ffffff',
     // ★ 2026-07-18 (Harold 확정) — 빠른 시작 = 세그·트리거·빈도 결정 주입 (AI 산출 덮음 — 카드 문구와 실조건 1:1 기계 보장).
     //   자연어 자유 입력 경로(templateHint 없음)만 AI 산출 사용.
     segment_conditions: input.templateHint ? SCENARIO_CONDITIONS[input.templateHint].segment : (parsed.segment_conditions || {}),
@@ -824,6 +825,12 @@ ${brandAccent
 
   // 6 sub-agent 진행 — Frontend 시각 효과용 응답 (5~10초 시뮬레이션)
   // ★ 2026-09-27 R246 — 파싱·조립이 끝났다 = 크레딧을 받을 결과가 있다(1회 · 작업마다 고유 키)
+  // ★ 1026 Codex 3R · 4R — 쓸 결과 = 실제로 쓰이는 제목 · 본문에 글(빈 메시지 = 0원 · 다시 시도).
+  //   블록 메시지는 화면 · 저장이 블록으로 제목 · 본문을 합성하므로 템플릿 거름 뒤 블록(composeFlatFromBlocks · 저장 규칙과 같은 함수)도 본다.
+  const fromBlocks = composeFlatFromBlocks(message.content_blocks || []);
+  if (!message.title.trim() && !message.body.trim() && !String(fromBlocks.title || '').trim() && !String(fromBlocks.body || '').trim()) {
+    throw new UserFacingError(502, 'AI_RESULT_EMPTY', 'AI 가 인앱 메시지를 만들지 못했어요. 크레딧은 빠지지 않았어요. 다시 시도해 주세요.');
+  }
   if (inappCost > 0) {
     // 차감 확정 — 동시 요청에 잔액이 먼저 쓰였으면 결과를 내주지 않는다(402 · Codex 차수3 D 1R)
     await settleCreditAfterSuccess({ companyId: input.companyId, cost: inappCost, source: 'inapp-ai-generator', idempotencyKey: `inapp-ai:${randomUUID()}` });
@@ -840,7 +847,7 @@ ${brandAccent
 
   return {
     message,
-    reasoning: String(parsed.reasoning || ''),
+    reasoning: aiStr(parsed.reasoning),
     progress_steps: progressSteps,
     efficacyDropped: effDropped.length,
   };

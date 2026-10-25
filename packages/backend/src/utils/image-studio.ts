@@ -53,13 +53,6 @@ export function findTemplateSample(templateId: string): { absPath: string; mime:
   return null;
 }
 
-export function writeTemplateSample(templateId: string, buffer: Buffer, mime: string): void {
-  fs.mkdirSync(STUDIO_SAMPLE_BASE, { recursive: true });
-  const ext = ((mime.split('/')[1] || 'jpeg').toLowerCase()).replace('jpeg', 'jpg');
-  const safeExt = (SAMPLE_EXTS as readonly string[]).includes(ext) ? ext : 'jpg';
-  fs.writeFileSync(path.join(STUDIO_SAMPLE_BASE, `${templateId}.${safeExt}`), buffer);
-}
-
 /** 스튜디오 사용 가능 여부(키 미설정 = 카드 "준비 중", 500 금지 §5-3). */
 export function isStudioReady(): boolean {
   return !!GEMINI_API_KEY;
@@ -713,6 +706,14 @@ export function writeTempMeta(companyId: string, tempId: string, meta: Omit<Temp
 export function clearTempMeta(companyId: string, tempId: string): void {
   if (!isValidTempId(tempId)) return;
   try { fs.unlinkSync(path.join(companyTempDir(companyId), `${tempId}.json`)); } catch { /* noop */ }
+}
+
+/** 임시 그림 · 사이드카를 함께 지운다(돈을 걷지 못해 건네지 않는 결과 · ★ 2026-10-25 성공 뒤 차감 한 규칙) */
+/** ★ 1026 Codex 2R — 못 지우면 던진다(거두기 실패 = 경보 · settleOrUndo) · 없는 파일은 이미 거둔 것 */
+export function discardTemp(companyId: string, tempId: string): void {
+  const f = findTempFile(companyId, tempId);
+  if (f) { try { fs.unlinkSync(f.absPath); } catch (e: any) { if (e?.code !== 'ENOENT') throw e; } }
+  clearTempMeta(companyId, tempId);
 }
 
 export function readTempMeta(companyId: string, tempId: string): TempMeta | null {

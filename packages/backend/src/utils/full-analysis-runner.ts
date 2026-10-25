@@ -13,7 +13,7 @@ import { buildSegmentAnalysis } from './segment-analysis';
 import { buildMultiDimComparison, buildMessageAnalysis, buildForecast } from './full-analysis-collect';
 import { buildActionPlan } from './action-plan';
 import { renderPerformanceReportPdf } from './performance-pdf-render';
-import { deductCreditSafe } from './ai-credit';
+import { settleOrUndo } from './ai-credit';
 // ★ 2026-09-27 한줄로 V2 R079 — 풀분석 차감(orchestrate 300) 하나가 전체를 덮는다
 import { runInCreditBundle } from './ai-credit-context';
 import { getCreditCost } from './ai-credit-calc';
@@ -92,7 +92,12 @@ export async function runFullAnalysis(jobId: string, companyId: string, period: 
     await new Promise<void>((resolve, reject) => { stream.on('finish', () => resolve()); stream.on('error', reject); });
 
     // 분석·PDF 모두 성공 — 이 시점에만 차감(멱등 키=jobId). 앞 단계 실패 시 여기 도달 안 해 차감 0.
-    await deductCreditSafe({ companyId, cost: getCreditCost('orchestrate'), source: 'orchestrate', createdBy, idempotencyKey: `full-analysis:${jobId}` });
+    // ★ 2026-10-25 성공 뒤 차감 한 규칙(원장 §8-2 D1 A) — 동시 소진(잔액 부족) · 원장 쓰기 실패 = 작업 실패 · 만든 PDF 를 지운다(옛: 걷지 못해도 완료 = 무과금 300 보고서)
+    await settleOrUndo({
+      settle: { companyId, cost: getCreditCost('orchestrate'), source: 'orchestrate', createdBy, idempotencyKey: `full-analysis:${jobId}` },
+      undo: () => fs.promises.unlink(pdfPath),
+      what: '풀분석 PDF',
+    });
     await completeJob(jobId, pdfPath);
     console.log(`[full-analysis] done job=${jobId} company=${companyId} period=${period}`);
   } catch (err: any) {

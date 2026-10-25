@@ -19,12 +19,31 @@
  *   - 워커/라우트에서 운영자 알림 문자를 인라인으로 직접 INSERT 금지 — 반드시 이 CT 경유.
  */
 
+import { execFile } from 'child_process';
+import fs from 'fs';
 import { getAuthSmsTable, bulkInsertSmsQueue } from './sms-queue';
 import { sanitizeSmsText } from './auto-notify-message';
 import { query } from '../config/database';
 import { isAlertOnCooldown } from './system-alert-cooldown';
 
 const DEFAULT_COOLDOWN_MS = 6 * 60 * 60 * 1000; // 6시간
+
+/** 공용 운영 경보 입구(scripts/ops-alert.sh 를 서버에 설치한 경로 · 문자 = ALERT_CMD · 메일 = 하이웍스) */
+const OPS_ALERT_BIN = process.env.OPS_ALERT_BIN || '/usr/local/bin/ops-alert';
+
+export function opsAlertInstalled(): boolean {
+  try { return fs.existsSync(OPS_ALERT_BIN); } catch { return false; }
+}
+
+/** 공용 입구로 보낸다 — 두 길 중 하나라도 나가면 true(입구가 exit 0) · 비밀값은 입구가 자기 설정 파일에서 읽는다(인자 = 제목 · 본문만) */
+function sendViaOpsAlert(subject: string, body: string): Promise<boolean> {
+  return new Promise((resolve) => {
+    execFile(OPS_ALERT_BIN, [subject, body], { timeout: 90_000 }, (err) => {
+      if (err) console.error('[system-alert] 공용 입구 실패:', err.message);
+      resolve(!err);
+    });
+  });
+}
 
 // dedupKey → 쿨다운 만료 시각
 const cooldownMap = new Map<string, number>();
@@ -141,7 +160,10 @@ export function buildSystemAlertBody(p: SystemAlertParams): string {
 export async function sendSystemAlert(params: SystemAlertParams): Promise<number> {
   try {
     const phones = params.phones ? parseAlertPhones(params.phones.join(',')) : getSystemAlertPhones();
-    if (phones.length === 0) {
+    // ★ 2026-10-25 운영 경보 두 길(뿌리 대장 R14 · 원장 Z8) — 받는 사람을 따로 정하지 않은 경보는 공용 입구(문자 + 메일)를 먼저 탄다.
+    //   옛: 인증 문자 한 길뿐이라 경보 대상(발송 장애 · MySQL)이 바로 그 길을 끊으면 한 통도 안 닿았다.
+    const viaOps = !params.phones && opsAlertInstalled();
+    if (phones.length === 0 && !viaOps) {
       log(`수신자 미설정(${params.phones ? '지정 번호' : 'SYSTEM_ALERT_PHONES'}) — 발송 생략: ${params.dedupKey}`);
       return 0;
     }
@@ -166,6 +188,18 @@ export async function sendSystemAlert(params: SystemAlertParams): Promise<number
       '',
       '슈퍼관리자에서 확인해주세요.',
     ].join('\n');
+
+    if (viaOps) {
+      const subject = `[한줄로 시스템 알림] ${(params.title || buildSystemAlertBody(params).split('\n')[0] || params.dedupKey).slice(0, 60)}`;
+      if (await sendViaOpsAlert(subject, body)) {
+        await markSentNow(params.dedupKey);
+        cooldownMap.set(params.dedupKey, now + cooldownMs);
+        log(`공용 입구 발송 — ${params.dedupKey}: ${buildSystemAlertBody(params).slice(0, 80)}`);
+        return 1;
+      }
+      console.log(`[system-alert] 공용 입구 두 길 모두 실패 · 인증 문자로 다시 보냄: ${params.dedupKey}`);
+      if (phones.length === 0) return 0;
+    }
 
     const authTable = await getAuthSmsTable();
     const callback = phones[0]; // 운영자 본인 번호 — 회신 안전

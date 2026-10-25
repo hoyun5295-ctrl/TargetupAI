@@ -16,12 +16,13 @@ import { resolve } from 'path';
 vi.mock('../../config/database', () => ({ query: vi.fn(), pool: { connect: vi.fn() } }));
 vi.mock('../ai-credit', () => {
   class InsufficientCreditError extends Error {}
-  return { deductCreditOutcome: vi.fn(), refundCredit: vi.fn(), InsufficientCreditError };
+  class CreditSettleError extends Error {}
+  return { deductCreditOutcome: vi.fn(), refundCredit: vi.fn(), InsufficientCreditError, CreditSettleError };
 });
 vi.mock('../journey-builder', () => ({ createJourneyFromTemplate: vi.fn() }));
 
 import { query, pool } from '../../config/database';
-import { deductCreditOutcome, refundCredit, InsufficientCreditError } from '../ai-credit';
+import { deductCreditOutcome, refundCredit, InsufficientCreditError, CreditSettleError } from '../ai-credit';
 import { nextDraftChargeKey, chargeThenSaveDraft, DRAFT_ALREADY_MADE } from '../journey-draft-save';
 import { lineageColumnsReady, resetLineageCache, createNewVersion, CLOSE_OTHER_VERSIONS_ENTRY_SQL, INHERIT_ENTRY_CURSORS_SQL, lockLineageEntry } from '../journey-lineage';
 
@@ -63,11 +64,18 @@ describe('AI 초안 과금 = 차감 확정 → 저장(무과금 초안 0) · 저
     await expect(chargeThenSaveDraft({ ...base, save })).rejects.toThrow(DRAFT_ALREADY_MADE);
     expect(save).not.toHaveBeenCalled();
   });
-  it('그 밖 실패 · 크레딧제 미적용 = 결과는 막지 않고 차감액 0', async () => {
-    for (const o of ['failed', 'not_applicable', 'not_required']) {
+  it('크레딧제 미적용 = 결과는 막지 않고 차감액 0', async () => {
+    for (const o of ['not_applicable', 'not_required']) {
       outcome.mockResolvedValueOnce(o);
       expect(await chargeThenSaveDraft({ ...base, save: async () => 'j' })).toEqual({ journeyId: 'j', charged: 0 });
     }
+    expect(refund).not.toHaveBeenCalled();
+  });
+  it('원장 쓰기 실패(failed) = 초안 없음 · CreditSettleError(1025 D1 = A · 라우트 503)', async () => {
+    outcome.mockResolvedValueOnce('failed');
+    const save = vi.fn(async () => 'j');
+    await expect(chargeThenSaveDraft({ ...base, save })).rejects.toBeInstanceOf(CreditSettleError);
+    expect(save).not.toHaveBeenCalled();
     expect(refund).not.toHaveBeenCalled();
   });
   it('저장이 실패하면 같은 시도 키로 환불하고 저장 오류를 그대로 던진다 · 차감 0 이면 환불 없음', async () => {
@@ -110,7 +118,7 @@ describe('AI 초안 과금 = 차감 확정 → 저장(무과금 초안 0) · 저
       expect(s.indexOf('await nextDraftChargeKey(input.companyId')).toBeLessThan(s.indexOf('runInCreditBundle(async'));
     }
     expect(SRC('journey-interview-ai.ts')).toContain('`journey-interview:${input.companyId}:${input.interviewId}:${plan.key}`');
-    expect(SRC('journey-product-create.ts')).toContain('`journey-product:${input.companyId}:${input.requestId}`');
+    expect(SRC('journey-product-create.ts')).toContain('`journey-product:${input.companyId}:${input.userId}:${input.requestId}`');
   });
 });
 
@@ -173,9 +181,12 @@ describe('워커 배선(원문)', () => {
   it('재진입 워커 = 이력 · 진행 중 · 최신 판정을 계보 전체에서 · 넣는 곳은 이 판', () => {
     const R = SRC('journey-reentry-worker.ts');
     expect(R).toContain('const lineage = fresh.lineageIds;');   // ★ 3R — 계보는 진입 잠금 뒤 다시 읽은 목록
-    expect((R.match(/journey_id = ANY\(\$5::uuid\[\]\)/g) || []).length).toBe(3);
-    expect(R).toContain("gen_random_uuid(), $1::uuid, je.customer_id");
-    expect(R).toContain('[journeyId, companyId, cooldownDays, PER_JOURNEY_BATCH_LIMIT, lineage]');
+    // ★ 2026-10-25 Codex 2R — 후보 조회 바인드 = 쓰는 것만($1 회사 · $2 쿨다운 · $3 뽑기 수 · $4 계보 · 옛 $1 journeyId 는 42P18)
+    expect((R.match(/journey_id = ANY\(\$4::uuid\[\]\)/g) || []).length).toBe(3);
+    // ★ 2026-10-25 #6 — 후보를 뽑고(상한 · 하루 몫 판정) 그 id 들만 첫 칸 보낼 시각으로 넣는다
+    expect(R).toContain("SELECT gen_random_uuid(), $1::uuid, t.cid, 0, 'active', $2, NOW(), NOW()");
+    expect(R).toContain('[companyId, cooldownDays, pickLimit, lineage]');
+    expect(R).not.toContain('[journeyId, companyId, cooldownDays, pickLimit, lineage]');
   });
   it('끝 칸 완료 = 발송비는 상태와 무관하게 · 완료 전환만 진행 중일 때', () => {
     // ★ 2026-10-23 완료 셋(마지막 칸 · 끝 칸 · 칸 없음)이 finishExecution 한 함수로 모였다
@@ -224,7 +235,12 @@ describe('Codex 2라운드', () => {
     const enq = between(W, 'async function enqueueCandidates', '\n}\n');
     expect(enq.indexOf('const fresh = await lockLineageEntry')).toBeLessThan(enq.indexOf('const journeyMatch'));
     const R = SRC('journey-reentry-worker.ts');
-    expect(R).toMatch(/await client\.query\('BEGIN'\);[\s\S]{0,400}const fresh = await lockLineageEntry\(client, journeyId\);\r?\n\s+const lineage = fresh\.lineageIds;\r?\n\s+if \(!fresh\.open\) throw new EntryClosedSkip\(\);\r?\n\s+const r = await client\.query\(/);
+    // ★ 2026-10-25 Codex 1R — 넣기 관문 = 같은 잠금 안에서 켜짐 · 자동 재진입 켬 · 하루 몫 다시 셈
+    expect(R).toMatch(/await client\.query\('BEGIN'\);[\s\S]{0,600}const fresh = await lockEntryIfActive\(client, journeyId\);\r?\n\s+const lineage = fresh\.lineageIds;\r?\n\s+if \(!fresh\.ok \|\| !fresh\.autoReentryEnabled\) throw new EntryClosedSkip\(\);\r?\n\s+const room = await dailyRoomInLock\(client, j\);[\s\S]{0,200}\r?\n\s+const cand = await client\.query\(/);
+    // ★ 2026-10-25 #6 — 넣기 · 합계가 같은 트랜잭션(상한 멈춤 갈래의 COMMIT 과 갈라 본다)
+    const ins = between(R, 'const r = ids.length === 0', "await client.query('COMMIT');");
+    expect(ins).toContain('INSERT INTO journey_executions');
+    expect(ins).toContain('stats_total_entered = stats_total_entered + $2');
     expect(R).toContain('if (!(txErr instanceof EntryClosedSkip)) throw txErr;');
     const tx = between(R, "await client.query('BEGIN');", "await client.query('COMMIT');");
     expect(tx).toContain('UPDATE journeys SET');
