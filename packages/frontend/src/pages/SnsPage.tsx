@@ -474,7 +474,9 @@ export default function SnsPage() {
         ) : (
           <div className="space-y-8">
             {attentionBand}
+            {/* ★ 2026-10-26 Codex 4R — 작성기 상태(쓰던 글 · 사진 · 보존 키)의 주인 = 회사 · 사용자. 바뀌면 새로 만든다(앞 사람 글이 새 키로 넘어가지 않게) */}
             <SnsComposer
+              key={`${user?.company?.id ?? '-'}:${user?.id ?? '-'}`}
               specs={specs}
               accounts={accounts}
               defaults={defaults}

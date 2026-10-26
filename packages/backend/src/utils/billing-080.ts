@@ -16,7 +16,7 @@
  *  - creditCost 0 — 슈퍼관리자 내부 운영 기능(biz-registration-extract와 동일).
  */
 
-import { extractJsonFromAiText } from './ai-json';   // ★ 2026-09-30 WP4 AI 응답 JSON 파싱 = CT(문자열 안 제어문자 복구)
+import { extractJsonFromAiText, aiStr } from './ai-json';   // ★ 2026-09-30 WP4 AI 응답 JSON 파싱 = CT(문자열 안 제어문자 복구) · ★ 2026-10-26 S8 칸 = aiStr
 import { createHmac, timingSafeEqual } from 'crypto';
 import pool from '../config/database';
 // ★ 2026-08-05 회사 단위 정산 잠금 CT — 발행과 **같은 두 겹**을 잡아야 반영·취소가 발행을 막는다.
@@ -187,7 +187,7 @@ export function parseKtStatementJson(raw: string): KtStatementParse | null {
     const readCall = (r: any): { call_fee: number; call_lines?: KtCallLine[] } => {
       if (!Array.isArray(r?.call_lines)) return { call_fee: toInt(r?.call_fee) };
       const lines: KtCallLine[] = r.call_lines.map((l: any) => ({
-        label: String(l?.label ?? '').slice(0, 40),
+        label: aiStr(l?.label).slice(0, 40),
         amount: lineAmount(l?.amount),
       }));
       const sum = lines.reduce((acc, l) => acc + l.amount, 0);
@@ -204,7 +204,7 @@ export function parseKtStatementJson(raw: string): KtStatementParse | null {
       .filter((r: KtStatementEntry) => r.number.length > 0);
     if (entries.length === 0) return null;
     return {
-      usage_period: String(obj?.usage_period ?? '').slice(0, 40),
+      usage_period: aiStr(obj?.usage_period).slice(0, 40),
       count_080: toInt(obj?.count_080) || 0,
       total_080: toInt(obj?.total_080) || 0,
       entries,

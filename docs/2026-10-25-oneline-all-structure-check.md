@@ -353,7 +353,7 @@ Z1 소비처 추가 = line-draft-memo.ts `deleteLineDraftWithRetry` `[CREDIT][OR
 | 결함 목록 | 됨(116건 · 공용 Z1~Z8 · 부록 §7) |
 | 처방 설계안 | 됨(§8 · 결함 116건 전부 처방에 매김(기계 대조) · 결정 1 = D1 = A · Harold님 동의 1025) |
 | 구현 · 시험 · 변이 · Codex · build:safe | 됨 1026(§9 · backend vitest 689파일 10,108건 · tsc 0 · 0 · Codex 적대 5R approve · build:safe 백엔드 · 화면 성공) |
-| 배포 | 대기(C61 과 한 번에 · §9-5 · 서버 확인은 「배포 시작하자」 때) |
+| 배포 | 됨 1026 07:34(C61 과 한 번에 · 커밋 6bf658af · 서버 확인 §9-5) · 실측 = 이번 주 직원 시험 |
 
 ## §7 부록 · 측정 목록 (처방 때 시험이 자리마다 판정을 강제한다)
 
@@ -680,4 +680,9 @@ Z1 소비처 추가 = line-draft-memo.ts `deleteLineDraftWithRetry` `[CREDIT][OR
 
 ### §9-5 배포(C61 과 한 번에 · 명령은 「배포 시작하자」 때 하나씩)
 - DDL 0 · 서버 확인 = 시간대(#81) · AI_AUTO_BUILD_COMPANY_IDS · 켜진 옛 자동발송 행 수(#15 결정) · 매월인데 날짜 빈 옛 행(#44) · 새 ORDER BY 칸 존재(information_schema · kakao_templates.last_synced_at · sales_outreach 칸 등) · 운영 경보 두 길 확인.
+- 1026 서버 확인(배포 전) = 새 SQL 칸 22개 전부 있음(information_schema) · AI_AUTO_BUILD_COMPANY_IDS = `*`(전 회사 · 옛 v0 화면 삭제로 닫히는 회사 0) · 시간대 = 시스템 Asia/Seoul · 프로세스 spawn TZ 없음 · .env TZ 없음 · Node 해석 Asia/Seoul.
+- 1026 07:29~07:34 배포(C61 · C62 한 번에 · 커밋 6bf658af) = 백엔드 · 화면 build:safe 성공 · reload · online · health 200 · 새 코드 표식 있음 · 지운 content-interview.js 없음 · reload 뒤 새 오류 0(고도몰 인증키 · CDP 전화 충돌 줄은 전부터 30분마다 · 축 밖 기록).
+- 배포 뒤 조회 = 켜진 옛 자동발송(auto_campaigns active) 0행 · 0회사(#15 → 처방 = 옛 주소 · 워커 · 화면 삭제 · 다음 작업) · 매월인데 날짜 빈 상시 운영 행(active · paused) 0(#44). C61 세 조회 = 여정 자동마케팅을 쓰는 회사가 아직 없어(Harold) 표본 없음 · 첫 사용 때 본다.
+- 운영 경보 두 길 = 백엔드 계정(administrator)이 `/usr/local/bin/ops-alert` 실행 가능 · `/etc/bito-ops-alert.env`(root:administrator 640) 읽기 가능 · OPS_ALERT_BIN 설정 없음 = 기본 경로(시험 경보는 1025 설치 때 문자 · 메일 실수신 확인).
 - 실측 1건 = 크레딧제 시험 회사에서 DM 첫 발행(발행비 1행 · 원장 = 결과) · AI 다듬기 1회(바뀐 블록 수 × 단가 1행) · 이메일 편집기에서 만들기 화면 이동(고친 내용 저장 뒤 이동).
+  - 1026 = 서버 조회상 최근 2시간 발행 · 저장된 DM 0 · 원장 0(실측 전) → Harold 「직원들이 이번 주부터 또 테스트할 거라 일단 두고 보자」 = 직원 시험으로 넘김. 확인 조회 = DM 상태 · 크레딧 조건 · 원장 행을 한 번에 보는 `dm_pages` × `ai_credit_transactions` 조회(이 대화 1026).

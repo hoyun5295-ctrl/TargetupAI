@@ -15,7 +15,7 @@
  *
  * 하는 일은 창작이 아니라 분류다 — 후보가 유한하고 근거가 템플릿 본문에 있어 환각 여지가 작다.
  */
-import { extractJsonFromAiText } from './ai-json';   // ★ 2026-09-30 WP4 AI 응답 JSON 파싱 = CT(문자열 안 제어문자 복구)
+import { extractJsonFromAiText, aiStr } from './ai-json';   // ★ 2026-09-30 WP4 AI 응답 JSON 파싱 = CT(문자열 안 제어문자 복구) · ★ 2026-10-26 S8 칸 = aiStr
 import { callAIWithFallback } from '../services/ai';
 
 export interface TriggerCandidate {
@@ -128,11 +128,11 @@ function parseSuggestion(text: string): { key: string; reason: string; delayDays
   if (start < 0 || end <= start) return null;
   try {
     const o = extractJsonFromAiText(raw.slice(start, end + 1));
-    const key = String(o?.key || '').trim();
+    const key = aiStr(o?.key).trim();
     if (!key) return null;
     return {
       key,
-      reason: String(o?.reason || '').trim(),
+      reason: aiStr(o?.reason).trim(),
       delayDays: Number.isFinite(Number(o?.delayDays)) ? Number(o.delayDays) : 0,
     };
   } catch {

@@ -18,7 +18,7 @@
 
 import { promises as fsp } from 'fs';
 import {
-  registerSnsAdapter, SnsAdapterError,
+  registerSnsAdapter, SnsAdapterError, isSnsNotFound,
   type ISnsPublishAdapter, type SnsOAuthCreds, type SnsOAuthExtra, type SnsTokenResult, type SnsAccountProfile,
   type SnsPublishRequest, type SnsContainerResult, type SnsContainerStatus, type SnsFetchedPost, type SnsPublishMedia,
 } from './adapter';
@@ -53,7 +53,10 @@ async function readX(res: Response, step: string): Promise<any> {
     const msg = String(
       body?.detail || body?.error_description || body?.title || body?.errors?.[0]?.message || body?.error || text.slice(0, 300) || '',
     );
-    throw new SnsAdapterError('x', `${step}:${res.status}`, msg || `${step} 실패(HTTP ${res.status})`, res.status, body ?? text.slice(0, 500));
+    // ★ 2026-10-26 S4 — 끊김 = 401 · OAuth 「refresh token 무효」(invalid_grant · 문서 기준) · 그 밖 = 상태 코드 기본값(adapter.ts)
+    const oauth = String(body?.error || '');
+    const kind = oauth === 'invalid_grant' || oauth === 'invalid_token' ? 'auth' : undefined;
+    throw new SnsAdapterError('x', `${step}:${res.status}`, msg || `${step} 실패(HTTP ${res.status})`, res.status, body ?? text.slice(0, 500), kind);
   }
   return body;
 }
@@ -274,8 +277,13 @@ export const xAdapter: ISnsPublishAdapter = {
   /** 1건 확인($0.005). 주소는 사용자 이름 없이 열리는 형태를 쓴다. */
   async fetchPost(req: SnsPublishRequest, platformPostId: string): Promise<SnsFetchedPost> {
     const res = await fetch(`${API}/2/tweets/${platformPostId}`, { headers: bearer(req.accessToken) });
-    if (res.status === 404) return { exists: false, permalink: null };
-    const body = await readX(res, 'fetch');
+    let body: any;
+    try {
+      body = await readX(res, 'fetch');
+    } catch (err) {
+      if (isSnsNotFound(err)) return { exists: false, permalink: null };   // ★ 2026-10-26 S2 — 404 만
+      throw err;
+    }
     const id = String(body?.data?.id || '');
     if (!id) return { exists: false, permalink: null };
     return { exists: true, permalink: `https://x.com/i/web/status/${id}` };

@@ -19,7 +19,7 @@
  */
 import { UserFacingError } from './http-error';
 import { callAIWithFallback } from '../services/ai';
-import { extractJsonFromAiText } from './ai-json';
+import { extractJsonFromAiText, aiStr } from './ai-json';   // ★ 2026-10-26 S8 — AI JSON 칸 = 글일 때만
 import { htmlVisibleText, replaceInventedBenefits, replaceInventedBenefitsDeep, claimsInventedEfficacy, dropInventedEfficacy, dropInventedEfficacyDeep, pairClaimsInventedEfficacy, rewriteAddsFacts, readingAddsEfficacy, EFFICACY_PLACEHOLDER, HEADLINE_PLACEHOLDER, EFFICACY_PROMPT_RULES, EFFICACY_REWRITE_RULE } from './copy-benefit-detector';
 import { buildSystemPromptWithBrandVoice } from './brand-voice-prompt';
 // 비주얼 빌더: AI 블록 출력 → 검증된 email Section[]
@@ -352,7 +352,7 @@ export async function generateEmailSections(input: {
     .filter((s) => { const bad = claimsInventedEfficacy(s, blocksGround); if (bad) effDropped.push(s); return !bad; })
     .slice(0, 3);
   while (subjects.length > 0 && subjects.length < 3) subjects.push(subjects[0]);
-  const pre = dropInventedEfficacy(replaceInventedBenefits(String(parsed.preheader || '').trim(), blocksGround), blocksGround);
+  const pre = dropInventedEfficacy(replaceInventedBenefits(aiStr(parsed.preheader).trim(), blocksGround), blocksGround);
   effDropped.push(...pre.dropped);
   // 수신함에서 제목 바로 뒤에 이어 읽힌다 — 어느 제목 후보와 이어 읽어도 단정이면 프리헤더를 비운다(★ Codex 1R)
   let preheader = pre.text === EFFICACY_PLACEHOLDER ? '' : pre.text;
@@ -360,7 +360,7 @@ export async function generateEmailSections(input: {
   if (blockInvented.length > 0) console.warn(`[copy-guard] 비주얼 이메일 근거 없는 혜택 → 자리표시 (${Array.from(new Set(blockInvented)).join(', ')})`);
   if (effDropped.length > 0) console.warn(`[copy-guard] 비주얼 이메일 근거 없는 효능 ${effDropped.length}곳 뺌`);
   return {
-    name: String(parsed.name || '').trim().slice(0, 60) || 'AI 비주얼 이메일',
+    name: aiStr(parsed.name).trim().slice(0, 60) || 'AI 비주얼 이메일',
     // 제목 후보가 다 빠지면 채울 자리(옛 '새 이메일' 무언 대체 금지 · 설계서 §2)
     subjects: subjects.length ? subjects : [HEADLINE_PLACEHOLDER],
     // 프리헤더 = 비워도 되는 칸(다 빠지면 빈 값)
@@ -401,8 +401,8 @@ ${EFFICACY_REWRITE_RULE}
   });
 
   const parsed = extractJsonFromAiText<{ subject?: string; html_body?: string }>(text);
-  const subject = String(parsed.subject || '').trim();
-  const htmlBody = String(parsed.html_body || '').trim();
+  const subject = aiStr(parsed.subject).trim();
+  const htmlBody = aiStr(parsed.html_body).trim();
   if (!subject || !htmlBody) throw new UserFacingError(502, 'AI_REFINE_EMPTY', 'AI 다듬기 결과가 비어 있습니다. 다시 시도해주세요.');
   // ★ 2026-09-30 WP2 — 다듬기 = 다시 쓰기. 근거 = 원래 제목 · 본문의 **보이는 글** · 다듬기 지시(지시에 적은 새 혜택 · 숫자는 사람이 준 것).
   //   원래 HTML 을 그대로 근거에 넣으면 속성 값(width="100%")이 혜택 근거가 된다(Codex 0930 2R). 다른 다시 쓰기 경로와 같게
@@ -554,7 +554,7 @@ export async function buildPerformanceInsight(input: {
   });
 
   const parsed = extractJsonFromAiText<{ top_insight?: string; suggestions?: Array<{ title?: string; description?: string }> }>(text);
-  const topInsight = String(parsed.top_insight || '').trim();
+  const topInsight = aiStr(parsed.top_insight).trim();
   if (!topInsight) throw new UserFacingError(502, 'AI_RESULT_EMPTY', 'AI 진단 결과가 비어 있습니다. 다시 시도해주세요.');
   return {
     topInsight,
@@ -604,7 +604,7 @@ export async function buildEmailAccountInsight(input: {
   });
 
   const parsed = extractJsonFromAiText<{ top_insight?: string; suggestions?: Array<{ title?: string; description?: string }> }>(text);
-  const topInsight = String(parsed.top_insight || '').trim();
+  const topInsight = aiStr(parsed.top_insight).trim();
   if (!topInsight) throw new UserFacingError(502, 'AI_RESULT_EMPTY', 'AI 진단 결과가 비어 있습니다. 다시 시도해주세요.');
   return {
     topInsight,

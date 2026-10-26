@@ -142,29 +142,41 @@ export function resolveSnsCredentials(
   return { ok: true, credentials: resolved.credentials };
 }
 
-/** 회사의 계정 전부(해제분 포함 — 화면이 `해제됨` 카드를 그린다). */
-export async function listSnsAccounts(companyId: string): Promise<SnsAccountRow[]> {
+/**
+ * ★ 2026-10-26 S3 · D1(R3 사용자 범위) — 계정의 주인 = 연결한 사람(`connected_by`).
+ *   ownerId = `resolveOwnerScope(req)` — 관리자 · 슈퍼 = null(회사 전체) · 담당자 = 본인 id(자기가 연결한 계정만 · 작성자 빈 옛 행 = 관리자만).
+ *   SQL 조각 = `($n::uuid IS NULL OR 칸 = $n::uuid)` 한 꼴(계정 · 글 · 사진이 같은 꼴).
+ */
+export function snsOwnerClause(column: string, param: number): string {
+  return `($${param}::uuid IS NULL OR ${column} = $${param}::uuid)`;
+}
+
+/** 회사의 계정 전부(해제분 포함 — 화면이 `해제됨` 카드를 그린다). 담당자 = 자기가 연결한 계정만(★ S3). */
+export async function listSnsAccounts(companyId: string, ownerId: string | null = null): Promise<SnsAccountRow[]> {
   // ★ 2026-09-24 기다리는 예약 수를 함께 싣는다(해제 확인 창 · '확인할 것' 띠 · 카드).
   const r = await query(
     `SELECT a.*,
             (SELECT COUNT(*)::int FROM sns_post_targets t
               WHERE t.company_id = a.company_id AND t.account_id = a.id AND t.status = 'scheduled') AS waiting_scheduled
        FROM sns_accounts a
-      WHERE a.company_id = $1::uuid
+      WHERE a.company_id = $1::uuid AND ${snsOwnerClause('a.connected_by', 2)}
       ORDER BY a.platform, a.created_at`,
-    [companyId],
+    [companyId, ownerId],
   );
   return r.rows as SnsAccountRow[];
 }
 
-/** 계정 1행 — **company_id 조건 필수**(불변 5). 남의 회사 행은 애초에 안 나온다. */
-export async function getSnsAccount(companyId: string, accountId: string): Promise<SnsAccountRow | null> {
+/** 계정 1행 — **company_id 조건 필수**(불변 5). 남의 회사 행은 애초에 안 나온다 · 담당자 = 자기가 연결한 계정만(★ S3). */
+export async function getSnsAccount(companyId: string, accountId: string, ownerId: string | null = null): Promise<SnsAccountRow | null> {
+  if (!UUID_RE.test(String(accountId || ''))) return null;   // ★ 2026-10-26 형식이 틀린 id = 없음(옛: uuid 변환 오류 500)
   const r = await query(
-    `SELECT * FROM sns_accounts WHERE id = $1::uuid AND company_id = $2::uuid`,
-    [accountId, companyId],
+    `SELECT * FROM sns_accounts WHERE id = $1::uuid AND company_id = $2::uuid AND ${snsOwnerClause('connected_by', 3)}`,
+    [accountId, companyId, ownerId],
   );
   return (r.rows[0] as SnsAccountRow) ?? null;
 }
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 /**
  * 토큰 저장 = `pending`(불변 3). 같은 계정을 다시 연결하면 토큰만 갈아끼우고 상태를 `pending` 으로 되돌린다 —
@@ -190,7 +202,10 @@ export async function upsertPendingAccount(input: {
            scope = EXCLUDED.scope,
            status = 'pending',
            status_reason = NULL,
-           connected_by = EXCLUDED.connected_by,
+           -- ★ 2026-10-26 S3 · D1 — 주인(연결한 사람)은 지킨다. 관리자가 다시 연결해도 담당자 계정이 관리자 것이 되지 않는다.
+           --   주인이 없거나(옛 행) 해제된 계정이면 새로 연결한 사람이 주인이 된다.
+           connected_by = CASE WHEN sns_accounts.connected_by IS NULL OR sns_accounts.status = 'revoked'
+                               THEN EXCLUDED.connected_by ELSE sns_accounts.connected_by END,
            connected_at = NOW(),
            -- ★ 2026-09-24 다시 연결하면 연장 실패 표식도 지운다(남으면 '확인할 것' 띠가 연결 뒤에도 남는다)
            meta = COALESCE(sns_accounts.meta, '{}'::jsonb) - 'refresh_error' - 'refresh_error_at',
@@ -279,7 +294,9 @@ export async function setSnsAccountStatus(
 export async function revokeSnsAccount(
   companyId: string,
   accountId: string,
+  ownerId: string | null = null,
 ): Promise<{ row: SnsAccountRow; cancelled: number } | null> {
+  if (!UUID_RE.test(String(accountId || ''))) return null;
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
@@ -291,9 +308,9 @@ export async function revokeSnsAccount(
               refresh_token = NULL,
               token_expires_at = NULL,
               updated_at = NOW()
-        WHERE id = $1::uuid AND company_id = $2::uuid
+        WHERE id = $1::uuid AND company_id = $2::uuid AND ${snsOwnerClause('connected_by', 3)}
         RETURNING *`,
-      [accountId, companyId],
+      [accountId, companyId, ownerId],
     );
     if (!r.rows[0]) {
       await client.query('ROLLBACK');
@@ -334,11 +351,13 @@ export async function saveRefreshedToken(accountId: string, token: SnsTokenResul
 
 // ───────────────────────── ★ 2026-09-23 1차-B — 재연결 판정 · 사용 직전 갱신 ─────────────────────────
 
-/** 이 오류가 "사람이 다시 연결해야 하는 상태"인가 — 일시 장애와 가른다(토큰 워커에서 옮겨 와 발행·대조 워커와 같이 쓴다). */
+/**
+ * 이 오류가 "사람이 다시 연결해야 하는 상태"인가 — 일시 장애와 가른다(토큰 · 발행 · 대조 워커가 같이 쓴다).
+ * ★ 2026-10-26 S4 — 판정 = 어댑터가 오류 본문으로 정한 종류(`kind === 'auth'`) 하나. 옛: 상태 코드 400 · 403 · 문장 정규식이라
+ *   Meta 의 만료 토큰(400 · OAuthException 190)은 게시 중엔 끊김으로 안 보였고(401 만 봄) 토큰 워커에선 한도 · 내용 오류까지 끊김으로 읽었다.
+ */
 export function isSnsReauthError(err: unknown): boolean {
-  if (!(err instanceof SnsAdapterError)) return false;
-  if (err.httpStatus === 400 || err.httpStatus === 401 || err.httpStatus === 403) return true;
-  return /expired|invalid|revoked|permission/i.test(err.message || '');
+  return err instanceof SnsAdapterError && err.kind === 'auth';
 }
 
 /** 만료 이만큼 전이면 게시 전에 갱신한다. */

@@ -50,13 +50,14 @@ import {
   syncSenderStatusJob,
 } from '../utils/alimtalk-jobs';
 
-import { publicErrorText } from '../utils/http-error';
+import { publicErrorText, uploadGuard } from '../utils/http-error';
 const router = Router();
 
 // 메모리 스토리지 multer — 파일은 IMC로 즉시 스트림
+const ALIMTALK_UPLOAD_LIMITS = { fileSize: 5 * 1024 * 1024 }; // 5MB 기본 (ALIMTALK-DESIGN.md §3-7 규격 참조)
 const upload = multer({
   storage: multer.memoryStorage(),
-  limits: { fileSize: 5 * 1024 * 1024 }, // 5MB 기본 (ALIMTALK-DESIGN.md §3-7 규격 참조)
+  limits: ALIMTALK_UPLOAD_LIMITS,
 });
 
 // ════════════════════════════════════════════════════════════
@@ -1870,7 +1871,7 @@ router.delete(
 router.post(
   '/templates/:templateCode/inspection-meta',
   requireCompanyAdmin as any,
-  upload.single('evidenceFile'),
+  uploadGuard(upload.single('evidenceFile'), ALIMTALK_UPLOAD_LIMITS),   // ★ 2026-10-26 S6
   async (req: Request, res: Response) => {
     try {
       const ctx = await requireTemplateAccess(req, res);
@@ -1975,7 +1976,7 @@ router.post(
 
 router.post(
   '/templates/:templateCode/inspect-with-file',
-  upload.single('file'),
+  uploadGuard(upload.single('file'), ALIMTALK_UPLOAD_LIMITS),   // ★ 2026-10-26 S6
   async (req: Request, res: Response) => {
     try {
       const ctx = await requireTemplateAccess(req, res);
@@ -2647,7 +2648,7 @@ function requireFiles(req: Request, res: Response): Express.Multer.File[] | null
 router.post(
   '/images/alimtalk/template',
   requireCompanyAdmin as any,
-  upload.single('image'),
+  uploadGuard(upload.single('image'), ALIMTALK_UPLOAD_LIMITS),   // ★ 2026-10-26 S6
   async (req: Request, res: Response) => {
     try {
       const file = requireFile(req, res); if (!file) return;
@@ -2662,7 +2663,7 @@ router.post(
 router.post(
   '/images/alimtalk/highlight',
   requireCompanyAdmin as any,
-  upload.single('image'),
+  uploadGuard(upload.single('image'), ALIMTALK_UPLOAD_LIMITS),   // ★ 2026-10-26 S6
   async (req: Request, res: Response) => {
     try {
       const file = requireFile(req, res); if (!file) return;
@@ -2677,7 +2678,7 @@ router.post(
 router.post(
   '/images/brand/default',
   requireCompanyAdmin as any,
-  upload.single('image'),
+  uploadGuard(upload.single('image'), ALIMTALK_UPLOAD_LIMITS),   // ★ 2026-10-26 S6
   async (req: Request, res: Response) => {
     try {
       const file = requireFile(req, res); if (!file) return;
@@ -2692,7 +2693,7 @@ router.post(
 router.post(
   '/images/brand/wide',
   requireCompanyAdmin as any,
-  upload.single('image'),
+  uploadGuard(upload.single('image'), ALIMTALK_UPLOAD_LIMITS),   // ★ 2026-10-26 S6
   async (req: Request, res: Response) => {
     try {
       const file = requireFile(req, res); if (!file) return;
@@ -2707,7 +2708,7 @@ router.post(
 router.post(
   '/images/brand/wide-list/first',
   requireCompanyAdmin as any,
-  upload.single('image'),
+  uploadGuard(upload.single('image'), ALIMTALK_UPLOAD_LIMITS),   // ★ 2026-10-26 S6
   async (req: Request, res: Response) => {
     try {
       const file = requireFile(req, res); if (!file) return;
@@ -2723,7 +2724,7 @@ router.post(
 router.post(
   '/images/brand/wide-list',
   requireCompanyAdmin as any,
-  upload.array('images', 3),
+  uploadGuard(upload.array('images', 3), { ...ALIMTALK_UPLOAD_LIMITS, files: 3 }),   // ★ 2026-10-26 S6
   async (req: Request, res: Response) => {
     try {
       const files = requireFiles(req, res); if (!files) return;
@@ -2750,7 +2751,7 @@ router.post(
 router.post(
   '/images/brand/carousel-feed',
   requireCompanyAdmin as any,
-  upload.array('images', 10),
+  uploadGuard(upload.array('images', 10), { ...ALIMTALK_UPLOAD_LIMITS, files: 10 }),   // ★ 2026-10-26 S6
   async (req: Request, res: Response) => {
     try {
       const files = requireFiles(req, res); if (!files) return;
@@ -2777,7 +2778,7 @@ router.post(
 router.post(
   '/images/brand/carousel-commerce',
   requireCompanyAdmin as any,
-  upload.array('images', 11),
+  uploadGuard(upload.array('images', 11), { ...ALIMTALK_UPLOAD_LIMITS, files: 11 }),   // ★ 2026-10-26 S6
   async (req: Request, res: Response) => {
     try {
       const files = requireFiles(req, res); if (!files) return;
@@ -2804,7 +2805,7 @@ router.post(
 router.post(
   '/images/marketing-agree/:senderId',
   requireSuperAdmin as any,
-  upload.single('image'),
+  uploadGuard(upload.single('image'), ALIMTALK_UPLOAD_LIMITS),   // ★ 2026-10-26 S6
   async (req: Request, res: Response) => {
     try {
       const file = requireFile(req, res); if (!file) return;

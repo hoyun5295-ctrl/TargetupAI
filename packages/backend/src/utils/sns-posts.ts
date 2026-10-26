@@ -4,7 +4,8 @@
  *
  * 이 파일이 소유하는 것
  *   - 기록 화면 목록(`listSnsPostsView`) — 예약 묶음과 기록 묶음을 서버가 가른다
- *   - 묶음 상태 = **계정별 최신 행으로 읽을 때 파생**(S6). `sns_posts.status` 를 읽는 곳은 여기 한 곳이다.
+ *   - 묶음 상태 = **계정별 최신 행으로 읽을 때 파생**(S6). `sns_posts.status` 는 읽지 않는다(★ 2026-10-26 S14 · 넣을 때 값만 · 다시 계산하는 사본 삭제).
+ *   - ★ 2026-10-26 S3(R3) — 담당자 = 자기가 만든 글만(ownerId = resolveOwnerScope · 관리자 = null = 회사 전체).
  *     다시 시도가 성공해도 옛 failed 행 때문에 '일부 실패'로 남던 결함(K12)을 여기서 닫는다.
  *   - 작성 기본값(`snsComposeDefaults`) — 지난번에 올린 채널(D1)
  *
@@ -16,7 +17,7 @@ import { derivePostStatus, type SnsTargetStatus } from './sns-constants';
 import { snsLatestTargetSql, snsFailureAction, type SnsFailureAction } from './sns-retry';
 import { getSnsAdapter } from './sns';
 import { snsChannelAvailable } from './sns-availability';
-import { snsChannelUrl } from './sns-accounts';
+import { snsChannelUrl, snsOwnerClause } from './sns-accounts';
 
 /** 예약 묶음 상한 — 예약이 기록 50건에 묻히지 않게 따로 싣는다. */
 export const SNS_UPCOMING_LIMIT = 200;
@@ -70,12 +71,12 @@ export interface SnsPostViewRow {
 
 const iso = (v: unknown): string | null => (v ? new Date(v as any).toISOString() : null);
 
-async function loadPosts(companyId: string, ids: string[], now: number): Promise<SnsPostViewRow[]> {
+async function loadPosts(companyId: string, ids: string[], now: number, ownerId: string | null): Promise<SnsPostViewRow[]> {
   if (ids.length === 0) return [];
   const posts = await query(
     `SELECT id, body, tags, scheduled_at, created_at, media_ids FROM sns_posts
-      WHERE company_id = $1::uuid AND id = ANY($2::uuid[])`,
-    [companyId, ids],
+      WHERE company_id = $1::uuid AND id = ANY($2::uuid[]) AND ${snsOwnerClause('created_by', 3)}`,
+    [companyId, ids, ownerId],
   );
   const targets = await query(
     `SELECT t.id, t.post_id, t.platform, t.account_id, t.status, t.permalink, t.verified_at,
@@ -165,7 +166,7 @@ async function loadPosts(companyId: string, ids: string[], now: number): Promise
  *   posts    = 그 밖의 글(여집합) · ★0925 한 페이지 10개 · 채널 줄이 전부 초안인 글과 글 고치기로 통째 대체된 글은 뺀다
  * ⛔ 같은 글이 두 배열에 동시에 나오지 않는다(계약 테스트).
  */
-export async function listSnsPostsView(companyId: string, now: number = Date.now(), page = 1): Promise<{
+export async function listSnsPostsView(companyId: string, now: number = Date.now(), page = 1, ownerId: string | null = null): Promise<{
   upcoming: SnsPostViewRow[];
   posts: SnsPostViewRow[];
   page: number;
@@ -178,38 +179,40 @@ export async function listSnsPostsView(companyId: string, now: number = Date.now
               WHERE t.post_id = p.id AND t.status = 'scheduled' AND ${snsLatestTargetSql('t')}) AS next_at
        FROM sns_posts p
       WHERE p.company_id = $1::uuid
+        AND ${snsOwnerClause('p.created_by', 2)}
         AND p.scheduled_at IS NOT NULL
         AND EXISTS (SELECT 1 FROM sns_post_targets t
                      WHERE t.post_id = p.id AND t.company_id = p.company_id
                        AND t.status = 'scheduled' AND ${snsLatestTargetSql('t')})
       ORDER BY next_at ASC NULLS LAST, p.created_at ASC
       LIMIT ${SNS_UPCOMING_LIMIT}`,
-    [companyId],
+    [companyId, ownerId],
   );
   const upcomingIds: string[] = up.rows.map((r) => r.id);
 
   // 기록 조건 하나를 목록·개수가 같이 쓴다(둘이 갈리면 마지막 페이지가 비거나 넘친다)
   const historyWhere = `p.company_id = $1::uuid
+        AND ${snsOwnerClause('p.created_by', 3)}
         AND NOT (p.id = ANY($2::uuid[]))
         AND EXISTS (SELECT 1 FROM sns_post_targets t WHERE t.post_id = p.id AND t.company_id = p.company_id AND t.status <> 'draft')
         AND EXISTS (SELECT 1 FROM sns_post_targets t WHERE t.post_id = p.id AND t.company_id = p.company_id
                      -- ⛔ COALESCE — 코드가 NULL 인 취소 행에서 비교가 NULL 이 되면 사용자가 취소한 글이 목록에서 사라진다
                      AND NOT (t.status = 'cancelled' AND COALESCE(t.last_error_code, '') = 'REPLACED'))`;
   const safePage = Math.min(SNS_HISTORY_MAX_PAGE, Math.max(1, Math.floor(Number(page) || 1)));
-  const count = await query(`SELECT COUNT(*)::int AS n FROM sns_posts p WHERE ${historyWhere}`, [companyId, upcomingIds]);
+  const count = await query(`SELECT COUNT(*)::int AS n FROM sns_posts p WHERE ${historyWhere}`, [companyId, upcomingIds, ownerId]);
   const total = Number(count.rows[0]?.n || 0);
   const hist = await query(
     `SELECT p.id FROM sns_posts p
       WHERE ${historyWhere}
       ORDER BY p.created_at DESC, p.id DESC
-      LIMIT ${SNS_HISTORY_PAGE_SIZE} OFFSET $3`,
-    [companyId, upcomingIds, (safePage - 1) * SNS_HISTORY_PAGE_SIZE],
+      LIMIT ${SNS_HISTORY_PAGE_SIZE} OFFSET $4`,
+    [companyId, upcomingIds, ownerId, (safePage - 1) * SNS_HISTORY_PAGE_SIZE],
   );
   const historyIds: string[] = hist.rows.map((r) => r.id);
 
   return {
-    upcoming: await loadPosts(companyId, upcomingIds, now),
-    posts: await loadPosts(companyId, historyIds, now),
+    upcoming: await loadPosts(companyId, upcomingIds, now, ownerId),
+    posts: await loadPosts(companyId, historyIds, now, ownerId),
     page: safePage,
     pageSize: SNS_HISTORY_PAGE_SIZE,
     total,
@@ -217,8 +220,8 @@ export async function listSnsPostsView(companyId: string, now: number = Date.now
 }
 
 /** 특정 글들을 목록 모양으로(띠 [보기]가 가리키는 글이 목록 밖일 때 덧붙이기용). */
-export async function loadSnsPostsByIds(companyId: string, ids: string[], now: number = Date.now()): Promise<SnsPostViewRow[]> {
-  return loadPosts(companyId, ids, now);
+export async function loadSnsPostsByIds(companyId: string, ids: string[], now: number = Date.now(), ownerId: string | null = null): Promise<SnsPostViewRow[]> {
+  return loadPosts(companyId, ids, now, ownerId);
 }
 
 /**
@@ -227,15 +230,15 @@ export async function loadSnsPostsByIds(companyId: string, ids: string[], now: n
  *   거르기 = 지금 active ∩ 이 회사에 열린 채널 ∩ 실비 채널(X) 제외(건당 비용이라 자동으로 켜지 않는다)
  *   기록이 없고 고를 수 있는 계정이 정확히 1개면 그 계정(L2)
  */
-export async function snsComposeDefaults(companyId: string, userId: string | null): Promise<{
+export async function snsComposeDefaults(companyId: string, userId: string | null, ownerId: string | null = null): Promise<{
   accountIds: string[];
   /** 지난 글에서 골랐지만 지금은 뺀 계정과 이유(화면 사유 줄) */
   dropped: Array<{ accountId: string; reason: 'disconnected' | 'metered' | 'closed' }>;
   source: 'last_post' | 'only_account' | 'none';
 }> {
   const accounts = await query(
-    `SELECT id, platform, status FROM sns_accounts WHERE company_id = $1::uuid AND status <> 'revoked'`,
-    [companyId],
+    `SELECT id, platform, status FROM sns_accounts WHERE company_id = $1::uuid AND status <> 'revoked' AND ${snsOwnerClause('connected_by', 2)}`,
+    [companyId, ownerId],
   );
   const usable = new Map<string, { platform: string; ok: boolean; metered: boolean }>();
   for (const a of accounts.rows) {

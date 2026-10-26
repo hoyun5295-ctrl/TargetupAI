@@ -1,3 +1,4 @@
+import { uploadGuard } from '../utils/http-error';
 import { extractJsonFromAiText } from '../utils/ai-json';   // ★ 2026-09-30 WP4 AI 응답 JSON 파싱 = CT(문자열 안 제어문자 복구)
 import { Request, Response, Router } from 'express';
 import { InsufficientCreditError } from '../utils/ai-credit';
@@ -64,12 +65,13 @@ const storage = multer.diskStorage({
 // ================================================================
 // ★ 2026-09-27 한줄로 V2 R144 — dedupeHeaders는 엑셀 열 CT(excel-columns.ts)로 옮겼다(헤더·행 나누기 CT splitHeaderRows가 쓴다).
 
+const PARSE_UPLOAD_LIMITS = {
+  fileSize: 50 * 1024 * 1024, // 50MB — 엑셀 업로드 상한
+  files: 1,
+};
 const upload = multer({
   storage,
-  limits: {
-    fileSize: 50 * 1024 * 1024, // 50MB — 엑셀 업로드 상한
-    files: 1,
-  },
+  limits: PARSE_UPLOAD_LIMITS,
   fileFilter: (req, file, cb) => {
     const allowedTypes = ['.xlsx', '.xls', '.csv'];
     const ext = path.extname(file.originalname).toLowerCase();
@@ -86,7 +88,7 @@ const upload = multer({
 // allData는 ?includeData=true일 때만 포함 (직접발송/주소록용)
 // 고객DB 업로드는 allData 불필요 (/save에서 파일 직접 재파싱)
 // ================================================================
-router.post('/parse', authenticate, upload.single('file'), async (req: Request, res: Response) => {
+router.post('/parse', authenticate, uploadGuard(upload.single('file'), PARSE_UPLOAD_LIMITS), async (req: Request, res: Response) => {   // ★ 2026-10-26 S6
   try {
     // ★ 2026-08-14: D53 customer_db_enabled 게이팅 제거 — 고객 DB 잠금 폐지(plan-guard.ts 상단 주석).
     //   canUseFeature('customer_db')는 항상 허용으로 바꿨는데 이 인라인 조회가 남아 미가입 업로드를 계속 막았다(Codex 1R).

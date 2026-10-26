@@ -98,13 +98,24 @@ export async function registerAsset(input: {
   }
 }
 
-/** 회사 사용량 + 플랜 한도 — 플랜 조회 실패 시 기본 한도(fail-safe, 500 방지) */
+/**
+ * 회사 사용량 + 플랜 한도 — 플랜 조회 실패 시 기본 한도(fail-safe, 500 방지)
+ * ★ 2026-10-26 S10 · D3 — 사용량 = 소재 라이브러리 + SNS 에 올린 원본(영상 300MB 가 상한 없이 쌓이던 길을 닫는다 · 원본은 90일 정리 · sns-media.ts).
+ *   SNS 표가 없는 배포(마이그레이션 전)에서는 SNS 몫 0(라이브러리 업로드를 막지 않는다).
+ */
 export async function getStorageUsage(companyId: string): Promise<{ usedBytes: number; limitBytes: number; planCode: string }> {
   const usedResult = await query(
     `SELECT COALESCE(SUM(bytes), 0) AS used FROM cdp_assets WHERE company_id = $1::uuid`,
     [companyId],
   );
-  const usedBytes = Number(usedResult.rows[0]?.used || 0);
+  let snsBytes = 0;
+  try {
+    const s = await query(`SELECT COALESCE(SUM(bytes), 0) AS used FROM sns_media WHERE company_id = $1::uuid`, [companyId]);
+    snsBytes = Number(s.rows[0]?.used || 0);
+  } catch (err: any) {
+    if (String(err?.code || '') !== '42P01') throw err;   // 표 없음만 0 · 그 밖의 조회 실패는 모르는 사용량을 0 으로 접지 않는다
+  }
+  const usedBytes = Number(usedResult.rows[0]?.used || 0) + snsBytes;
   let planCode = 'FREE';
   try {
     const ctx = await loadPlanContext(companyId);

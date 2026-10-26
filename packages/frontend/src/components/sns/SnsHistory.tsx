@@ -120,6 +120,8 @@ export default function SnsHistory({ specs, accounts, reloadKey, focusPostId, on
   const [pageSize, setPageSize] = useState(10);
   const [total, setTotal] = useState(0);
   const [pageLoading, setPageLoading] = useState(false);
+  /** ★ 2026-10-26 S16 — 조회 실패 = 「기록 없음」이 아니다(빈 화면과 가른다) */
+  const [loadFailed, setLoadFailed] = useState(false);
   const [modalPost, setModalPost] = useState<SnsPostView | null>(null);
 
   const auth = () => ({ Authorization: `Bearer ${localStorage.getItem('token')}` });
@@ -127,7 +129,8 @@ export default function SnsHistory({ specs, accounts, reloadKey, focusPostId, on
   const load = async (nextPage: number = pageRef.current) => {
     try {
       const res = await fetch(`/api/sns/posts?page=${nextPage}`, { headers: auth() });
-      const data = await res.json();
+      const data = await res.json().catch(() => null);
+      setLoadFailed(!data?.success);
       if (data?.success) {
         const size = Number(data.pageSize) || 10;
         const count = Number(data.total) || 0;
@@ -143,7 +146,7 @@ export default function SnsHistory({ specs, accounts, reloadKey, focusPostId, on
         if (data.attention) attentionRef.current(data.attention);
       }
     } catch {
-      /* 목록 조회 실패는 조용히 — 다음 폴링이 되살린다 */
+      setLoadFailed(true);   // 폴링이 되살리면 다시 지워진다 · 처음부터 못 읽었으면 아래 줄이 알린다
     } finally {
       setLoading(false);
       setPageLoading(false);
@@ -388,6 +391,17 @@ export default function SnsHistory({ specs, accounts, reloadKey, focusPostId, on
     return (
       <div className={`${OUI_CARD} p-8 flex justify-center`}>
         <Loader2 className="w-5 h-5 animate-spin text-violet-600" />
+      </div>
+    );
+  }
+
+  if (loadFailed && upcoming.length === 0 && posts.length === 0) {
+    return (
+      <div className={`${OUI_CARD} p-6 text-center`}>
+        <p className="text-sm font-semibold text-slate-700">올린 기록을 불러오지 못했어요</p>
+        <button onClick={() => { setLoading(true); void load(); }} className={`${OUI_BTN_GHOST} mt-3 inline-flex`}>
+          다시 불러오기
+        </button>
       </div>
     );
   }

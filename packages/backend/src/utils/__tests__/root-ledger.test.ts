@@ -2229,3 +2229,240 @@ describe('R8 넓힘(1025) — 주기 작업의 행마다 실패 갈래 = 횟수 
     expect(dw).toMatch(/sendSystemAlert\(/);
   });
 });
+
+// ── ★ 1026 이미지 스튜디오 · SNS 구조체크(원장 docs/2026-10-26-image-studio-sns-structure-check.md · 결함 S1~S21) ──
+/** R3 SNS 주소 중 담당자 범위 함수를 부르지 않아도 되는 주소(이유 = 그 주소가 남의 데이터를 열지 않는 까닭) */
+const SNS_SCOPE_EXEMPT: Record<string, string> = {
+  'POST /auth/start/:platform': '새 계정 연결 = 연결을 시작한 사람이 주인(state 행 created_by → connected_by)',
+  'POST /media': '자기 업로드(created_by = 본인)',
+  'POST /media/uploads': '자기 업로드 시작(조각 세션 = 회사 폴더 · id 추측 불가)',
+  'PUT /media/uploads/:id/chunks/:index': '자기 업로드 조각',
+  'POST /media/uploads/:id/complete': '자기 업로드 마무리(created_by = 본인)',
+  'GET /tag-set': '회사 공용 설정(brand_kit · 데이터 아님)',
+  'PATCH /tag-set': '회사 공용 설정(brand_kit · 데이터 아님)',
+  'POST /typo-check': '데이터 0(보낸 글만 검사)',
+};
+/** AI 를 부르는 파일에서 JSON 해석 결과를 담는 변수(호출 꼴 · 제네릭 · 해석기 이름 무관) */
+const AI_PARSE_ASSIGN = /\b(?:const|let)\s+(\w+)\s*(?::[^=;]+)?=\s*(?:await\s+)?(?:extractJsonFromAiText|extractJsonObject|safeJsonParse|parseAiJson)\s*(?:<[^>]*>)?\s*\(|\b(\w+)\s*=\s*(?:await\s+)?(?:extractJsonFromAiText|extractJsonObject)\s*(?:<[^>]*>)?\s*\(/g;
+/** R10 도달성 — return · throw 문장 바로 뒤 같은 깊이 줄(이어지는 줄 = 닫는 괄호 · 주석 · case 만 허용) */
+function unreachableAfterExit(src: string): number[] {
+  const lines = src.split('\n');
+  const out: number[] = [];
+  for (let i = 0; i < lines.length - 1; i++) {
+    const a = lines[i].trim();
+    const b = lines[i + 1].trim();
+    if (!/^(?:return\b[^;]*;|throw\b[^;]*;)\s*(?:\/\/.*)?$/.test(a)) continue;
+    if (!b || /^(?:\}|\/\/|\*|\/\*|case\s|default:)/.test(b)) continue;
+    const ia = lines[i].length - lines[i].trimStart().length;
+    const ib = lines[i + 1].length - lines[i + 1].trimStart().length;
+    if (ia === ib) out.push(i + 2);
+  }
+  return out;
+}
+
+describe('1026 스튜디오 · SNS — 뿌리 넓힘(R3 · R4 · R7 · R10 · R18 · Z5)', () => {
+  it('R18(신설) 판정 시계 = 사건 시각 — 서명 주소 절대 상한 · X 월 상한 = 게시 선점 시각(claimed_at)', () => {
+    expect(stripComments(be('utils/sns-signed-media.ts'))).toContain('const startedAt = row.claimed_at ? new Date(row.claimed_at) : new Date(row.created_at);');
+    expect(stripComments(be('routes/sns.ts'))).toContain('SELECT t.id, t.status, t.container_created_at, t.created_at, t.claimed_at, t.verified_at');
+    const w = stripComments(be('utils/sns-publish-worker.ts'));
+    const mc = w.slice(w.indexOf('async function meteredMonthCount'), w.indexOf('async function meteredMonthCount') + 600);
+    expect(w.indexOf('async function meteredMonthCount')).toBeGreaterThan(-1);
+    expect(mc).toContain("COALESCE(claimed_at, created_at) >= (date_trunc('month'");
+    expect(mc).not.toMatch(/AND created_at >=/);
+  });
+
+  it('R7 재조회 「없음」 = 플랫폼이 없다고 답한 꼴만(어댑터 전수에서 뽑음 · 상태 코드 400 을 없음으로 읽는 줄 0) · 확인 · 삭제 감지 = 연결된 계정만', () => {
+    const files = sourceFiles(join(BE, 'utils', 'sns'), /\.ts$/).filter((f) => f !== 'adapter.ts' && f !== 'index.ts');
+    expect(files.length).toBeGreaterThanOrEqual(4);
+    for (const f of files) {
+      const s = stripComments(be(`utils/sns/${f}`));
+      const at = s.indexOf('async fetchPost(');
+      expect(at, f).toBeGreaterThan(-1);
+      const fp = s.slice(at);
+      expect(fp, f).not.toMatch(/status\s*===\s*400/);
+      expect(fp, f).toMatch(/if \(isSnsNotFound\(err\)\) return \{ exists: false, permalink: null \};\s*throw err;/);
+    }
+    expect(stripComments(be('utils/sns-reconcile-worker.ts'))).toContain("if (!account?.access_token || account.status !== 'active') return null;");
+  });
+
+  it('R7 · R14 다시 연결 판정 = 오류 종류 한 곳(상태 코드 · 문장 정규식 0) · 발행 워커도 그 함수만', () => {
+    const acc = stripComments(be('utils/sns-accounts.ts'));
+    const at = acc.indexOf('export function isSnsReauthError');
+    expect(at).toBeGreaterThan(-1);
+    const fn = acc.slice(at, acc.indexOf('\n}', at));
+    expect(fn).toContain("err.kind === 'auth'");
+    expect(fn).not.toMatch(/httpStatus|\.test\(/);
+    expect(stripComments(be('utils/sns-publish-worker.ts'))).not.toMatch(/httpStatus === 401/);
+    expect(stripComments(be('utils/sns/adapter.ts'))).toMatch(/metaErrorKind\(res\.status, err\)\);/);
+  });
+
+  it('R3 SNS 주소 = 담당자 범위 함수를 지난다(라우터에서 뽑음 · 면제 = 이유 · 공개 라우터 제외)', () => {
+    const blocks = routeBlocks(stripComments(be('routes/sns.ts'))).filter((b) => b.body.startsWith('router.'));
+    expect(blocks.length).toBeGreaterThan(15);
+    const bad = blocks.filter((b) => !SNS_SCOPE_EXEMPT[key(b)] && !/resolveOwnerScope\(req\)/.test(b.body)).map(key);
+    expect(bad).toEqual([]);
+    // ★ 1026 변이(목록 범위 빼기 생존) — 「범위 함수를 부른다」가 아니라 **데이터를 읽는 호출마다 범위 인자를 넘긴다**
+    const SCOPED = /\b(listSnsPostsView|loadSnsPostsByIds|listSnsAccounts|listSnsAttention|getSnsAccount|revokeSnsAccount|retrySnsTarget|rescheduleSnsPost|loadSnsCaptionImages|listAssets|getAsset|snsComposeDefaults)\(([^;]*?)\);/g;
+    const unscoped: string[] = [];
+    for (const b of blocks) {
+      for (const m of b.body.matchAll(SCOPED)) if (!/\bownerId\b|resolveOwnerScope\(req\)/.test(m[2])) unscoped.push(`${key(b)} · ${m[1]}`);
+      if (/composeSnsPost\(\{/.test(b.body) && !/ownerId: resolveOwnerScope\(req\)/.test(b.body)) unscoped.push(`${key(b)} · composeSnsPost`);
+      if (/snsOwnerClause\(/.test(b.body) && !/\[[^\]]*resolveOwnerScope\(req\)[^\]]*\]/.test(b.body)) unscoped.push(`${key(b)} · snsOwnerClause 바인드`);
+    }
+    expect(unscoped).toEqual([]);
+    // ★ 1026 Codex 1R — 요청 길(저장 · 다시 시도 · 목록 기본값)이 계정 표를 읽는 SQL 마다 계정 주인 조각(다시 시도가 계정 범위를 빠뜨려 남의 계정에 새로 올렸다)
+    const ACCOUNT_SQL_FILES = ['utils/sns-compose.ts', 'utils/sns-retry.ts', 'utils/sns-posts.ts'];
+    const noOwner: string[] = [];
+    for (const f of ACCOUNT_SQL_FILES) {
+      const s = stripComments(be(f));
+      for (const m of s.matchAll(/`[^`]*\bFROM sns_accounts\b[^`]*`/g)) if (!/snsOwnerClause\('(?:\w+\.)?connected_by'/.test(m[0])) noOwner.push(`${f}:${s.slice(0, m.index).split('\n').length}`);
+    }
+    expect(noOwner).toEqual([]);
+    expect(Object.keys(SNS_SCOPE_EXEMPT).filter((k) => !blocks.some((b) => key(b) === k))).toEqual([]);
+    for (const [fn, file] of [['listSnsAccounts', 'utils/sns-accounts.ts'], ['getSnsAccount', 'utils/sns-accounts.ts'], ['revokeSnsAccount', 'utils/sns-accounts.ts'], ['listSnsPostsView', 'utils/sns-posts.ts'], ['retrySnsTarget', 'utils/sns-retry.ts'], ['rescheduleSnsPost', 'utils/sns-compose.ts']]) {
+      const s = stripComments(be(file));
+      const at = s.indexOf(`export async function ${fn}(`);
+      expect(at, fn).toBeGreaterThan(-1);
+      expect(s.slice(at, at + 2500), fn).toMatch(/snsOwnerClause\(/);
+    }
+  });
+
+  it('R4 AI JSON 칸 = aiStr — AI 를 부르는 파일에서 해석 결과 칸을 String() 으로 읽는 꼴 0(호출 꼴 · 제네릭 · 해석기 · 변수 이름 무관)', () => {
+    const bad: string[] = [];
+    for (const f of SERVER_SRC) {
+      const s = stripComments(be(f));
+      if (!/\bcallAIWithFallback\(/.test(s)) continue;
+      const vars = new Set<string>();
+      for (const m of s.matchAll(AI_PARSE_ASSIGN)) vars.add(m[1] || m[2]);
+      for (const v of vars) {
+        const re = new RegExp(`String\\(\\s*${v}\\??\\.\\w+\\s*(?:\\|\\||\\?\\?)`, 'g');
+        for (const m of s.matchAll(re)) bad.push(`${f}:${s.slice(0, m.index).split('\n').length}`);
+      }
+    }
+    expect(bad).toEqual([]);
+  });
+
+  it('R10 return · throw 바로 뒤 같은 깊이 줄 0(도달 불가 · 1025 넣기 스크립트 흔적 · 전 서버 파일)', () => {
+    const bad = SERVER_SRC.flatMap((f) => unreachableAfterExit(stripComments(be(f))).map((n) => `${f}:${n}`));
+    expect(bad).toEqual([]);
+  });
+
+  it('Z5 multer 를 미들웨어 자리에 그대로 두지 않는다(uploadGuard 또는 콜백 꼴 · 전 라우터) · 전역 처리기 = 업로드 오류 번역', () => {
+    const bad: string[] = [];
+    for (const file of ALL_ROUTERS) {
+      const src = stripComments(be(`routes/${file}`));
+      // 허용 = uploadGuard(…) 감싸기 · 바로 부르는 콜백 꼴 `x.single(…)(req, …)` · 처리기 변수에 담아 콜백으로 부르는 꼴 `const h = x.single(…); h(req, res, (err) => …)`
+      for (const m of src.matchAll(/(uploadGuard\(\s*)?(=\s*)?\b\w+\.(?:single|array|fields)\([^)]*\)(\s*\(\s*req)?/g)) {
+        if (!m[1] && !m[2] && !m[3]) bad.push(`${file}:${src.slice(0, m.index).split('\n').length}`);
+      }
+    }
+    expect(bad).toEqual([]);
+    const app = stripComments(be('app.ts'));
+    expect(app).toMatch(/err\?\.name === 'MulterError'\) return res\.status\(400\)\.json\(\{ success: false, error: uploadErrorText\(err\) \}\)/);
+  });
+
+  it('S5 SNS 고객 글 = 공용 CT(publicErrorText) · 플랫폼 원문 0(게시 실패 · 컨테이너 사유 · 승인 취소 · 연결 실패)', () => {
+    const w = stripComments(be('utils/sns-publish-worker.ts'));
+    const fm = w.slice(w.indexOf('function failureMessage('), w.indexOf('function failureCode('));
+    expect(fm).toMatch(/if \(err instanceof SnsAdapterError\) \{[\s\S]*?return publicErrorText\(err,/);
+    expect(fm).not.toMatch(/SnsAdapterError\) return err\.message|err\.message \|\|/);   // 우리 미디어 오류(SnsMediaError) 문장만 그대로
+    const ct = w.slice(w.indexOf('function containerFailureText('), w.indexOf('function containerFailureText(') + 400);
+    expect(ct).not.toMatch(/\$\{d/);
+    const r = stripComments(be('routes/sns.ts'));
+    expect(r).not.toMatch(/\(\$\{denied\}\)/);
+    const am = r.slice(r.indexOf('function adapterErrorMessage('), r.indexOf('function adapterErrorMessage(') + 300);
+    expect(am).toMatch(/publicErrorText\(err,/);
+  });
+
+  it('S10 쌓이는 SNS 파일 = 정리 워커가 부른다 · 저장 공간 셈에 SNS 원본 · 원본이 없으면 올리지 않는다', () => {
+    const sw = stripComments(be('utils/studio-temp-sweeper.ts'));
+    expect(sw).toMatch(/sweepSnsRenderFiles\(\)/);
+    expect(sw).toMatch(/sweepSnsMediaFiles\(\{ query \}\)/);
+    expect(stripComments(be('utils/assets.ts'))).toMatch(/SELECT COALESCE\(SUM\(bytes\), 0\) AS used FROM sns_media WHERE company_id = \$1::uuid/);
+    expect(stripComments(be('utils/sns-media.ts'))).not.toMatch(/export function removeSnsRenderFile/);
+    const w = stripComments(be('utils/sns-publish-worker.ts'));
+    expect(w).toMatch(/LEFT JOIN sns_media m ON m\.id = mi\.media_id AND m\.company_id = p\.company_id/);
+    expect(w).toMatch(/mediaRows\.rows\.some\(\(m: any\) => !m\.id\)\) throw new SnsMediaError\('SOURCE_MISSING'/);
+  });
+
+  it('Codex 1R · 2R 복원 · 불러오기 = 첨부를 말없이 줄이지 않는다(시작부터 원래 id 를 든다 · 확인 중 · 못 찾음 = 올리기 잠금 · 보존 = media + held)', () => {
+    const c = read(join(FE, 'components/sns/SnsComposer.tsx'));
+    const la = c.slice(c.indexOf('const loadAttachments = async'), c.indexOf('const loadAttachments = async') + 400);
+    expect(c.indexOf('const loadAttachments = async')).toBeGreaterThan(-1);
+    expect(la.indexOf('setHeldMediaIds(ids);')).toBeGreaterThan(-1);
+    expect(la.indexOf('setHeldMediaIds(ids);')).toBeLessThan(la.indexOf('await lookupMedia(ids, isCurrent)'));
+    expect(c).not.toMatch(/await lookupMedia\((?!ids, isCurrent\))/);   // 불러오기 · 복원은 모두 loadAttachments 를 지난다
+    expect((c.match(/const missing = await loadAttachments\([^)]*\);\s*if \(!missing\) return;/g) || []).length).toBe(2);
+    // 차례 — 비우기 · 새 불러오기 뒤에 늦게 돌아온 옛 불러오기는 붙이지도 · 잠금을 풀지도 않는다
+    expect(la).toMatch(/if \(!isCurrent\(\)\) return null;/);
+    expect(c).toMatch(/await appendMedia\(item, undefined, isCurrent\)/);
+    expect(c).toMatch(/if \(!alive\.current \|\| \(isCurrent && !isCurrent\(\)\)\)/);
+    expect(c).toMatch(/if \(mediaChecking\) return '사진과 영상을 불러오는 중이에요/);
+    expect(c).toMatch(/if \(heldMediaIds\.length > 0\) return replacing/);
+    expect(c).toMatch(/mediaIds: Array\.from\(new Set\(\[\.\.\.media\.map\(\(m\) => m\.id\), \.\.\.heldMediaIds\]\)\)/);
+  });
+
+  it('Codex 3R 불러오기 = 한 차례(첫 await 전에 받고 돌아올 때마다 확인) · 복원 판정 중 = 입력 · 보존 · 다른 불러오기 멈춤', () => {
+    const c = read(join(FE, 'components/sns/SnsComposer.tsx'));
+    expect(c).toMatch(/const beginLoad = \(\) => \{\s*const gen = \+\+loadGen\.current;\s*return \(\) => alive\.current && gen === loadGen\.current;/);
+    expect(c).toMatch(/const resetAll = \(opts\?: \{ keepSelected\?: boolean \}\) => \{\s*loadGen\.current \+= 1;\s*setRestoring\(false\);/);
+    // 모든 첨부 불러오기는 부른 쪽 차례를 넘긴다(혼자 차례를 만들지 않는다)
+    expect(c).not.toMatch(/loadAttachments\([^,()]*\)/);
+    expect(c).toMatch(/resetAll\(\);\s*const isCurrent = beginLoad\(\);/);
+    expect(c).toMatch(/await loadAttachments\(post\.media_ids \|\| \[\], isCurrent\)/);
+    expect(c).toMatch(/loadAttachments\(heldMediaIds, beginLoad\(\)\)/);
+    // 복원 — 첫 await 전에 차례 · 판정 중 표시 · await 마다 확인 · 판정이 끝나야 입력이 열린다
+    const start = c.indexOf('// 복원(처음 한 번)');
+    const rb = c.slice(start, c.indexOf('}, [draftKey]);', start));
+    expect(start).toBeGreaterThan(-1);
+    const firstAwait = rb.indexOf('await ');
+    expect(rb.indexOf('const isCurrent = beginLoad();')).toBeGreaterThan(-1);
+    expect(rb.indexOf('const isCurrent = beginLoad();')).toBeLessThan(firstAwait);
+    expect(rb.indexOf('setRestoring(true);')).toBeGreaterThan(-1);
+    expect(rb.indexOf('setRestoring(true);')).toBeLessThan(firstAwait);
+    expect(rb).toMatch(/const live = \(\) => !cancelled && isCurrent\(\);/);
+    expect(rb).toMatch(/await snsComposePostId\([^;]*;\s*if \(!live\(\)\) return;/);
+    expect(rb).toMatch(/const \{ res, data \} = await fetchAuthJson\(`\/api\/sns\/posts\/\$\{postId\}`, \{\}, SNS_LOAD_STEP_TIMEOUT_MS\);\s*if \(!live\(\)\) return;/);
+    expect(rb).toMatch(/if \(!live\(\)\) return;\s*setBodyByApp\(d\.body\);/);
+    expect(rb).toMatch(/setRestoring\(false\);\s*const missing = await loadAttachments\(d\.mediaIds \|\| \[\], live\);/);
+    expect(rb).toMatch(/return \(\) => \{ cancelled = true; setRestoring\(false\); \};/);
+    // 보존 = 판정 중에는 쓰지도 지우지도 않는다
+    expect(c).toMatch(/if \(!draftKey \|\| restoring\) return;\s*const t = setTimeout/);
+    // 판정 중 = 작성기 입력 잠금(확인 창 · 소재 창은 잠금 밖) · 넣기는 기다림 · 불러오기는 확인
+    const fs = c.indexOf('<fieldset disabled={restoring}');
+    expect(fs).toBeGreaterThan(-1);
+    expect(fs).toBeLessThan(c.indexOf('{/* 1. 사진 */}'));
+    expect(c.indexOf('{/* 5. 실행 */}')).toBeLessThan(c.indexOf('</fieldset>'));
+    expect(c.indexOf('</fieldset>')).toBeLessThan(c.indexOf('<ConfirmModal'));
+    expect(c.indexOf('</fieldset>')).toBeLessThan(c.indexOf('<SnsAssetPicker'));
+    expect(c).toMatch(/if \(restoring\) \{ toastRef\.current\.info\(/);
+    expect(c).toMatch(/if \(hasContent \|\| replacing \|\| restoring\) \{/);
+  });
+
+  it('Codex 4R 불러오기 차례 안의 기다림 = 전부 상한(게시 확인 · 사진 조회 · 미리보기) · 작성기 주인 = 회사 · 사용자(바뀌면 새로 만듦)', () => {
+    const c = read(join(FE, 'components/sns/SnsComposer.tsx'));
+    expect(c).toMatch(/const SNS_LOAD_STEP_TIMEOUT_MS = \d[\d_]*;/);
+    const block = (from: string, to: string) => { const s = c.indexOf(from); expect(s).toBeGreaterThan(-1); return c.slice(s, c.indexOf(to, s)); };
+    // 차례 안 기다림에는 상한 없는 fetch 가 없다
+    const lookup = block('const lookupMedia = async', 'const loadAttachments = async');
+    const restore = block('// 복원(처음 한 번)', '}, [draftKey]);');
+    for (const b of [lookup, restore]) expect(b).not.toMatch(/await fetch\(/);
+    expect(lookup).toMatch(/await fetchAuthJson\('\/api\/sns\/media\/lookup', \{[\s\S]*?\}, SNS_LOAD_STEP_TIMEOUT_MS\);/);
+    expect(restore).toMatch(/await fetchAuthJson\(`\/api\/sns\/posts\/\$\{postId\}`, \{\}, SNS_LOAD_STEP_TIMEOUT_MS\)/);
+    const append = block('const appendMedia = async', 'const specOf =');
+    expect(append).toMatch(/fetchAuthObjectUrl\(`\/api\/sns\/media\/\$\{data\.media\.id\}`, SNS_LOAD_STEP_TIMEOUT_MS\)/);
+    // 호출부 = 회사 · 사용자로 다시 만든다(같은 인스턴스가 다른 보존 키로 넘어가지 않는다)
+    const page = read(join(FE, 'pages/SnsPage.tsx'));
+    expect(page).toMatch(/<SnsComposer\s+key=\{`\$\{user\?\.company\?\.id \?\? '-'\}:\$\{user\?\.id \?\? '-'\}`\}/);
+    expect((page.match(/<SnsComposer\b/g) || []).length).toBe(1);
+    expect(page).toMatch(/companyId=\{user\?\.company\?\.id \?\? null\}\s+userId=\{user\?\.id \?\? null\}/);
+  });
+
+  it('S7 한 줄 → 작성기 = 넣은 뒤 글로 AI 모드 판정(넣기 전 글로 계산한 값 0)', () => {
+    const c = read(join(FE, 'components/sns/SnsComposer.tsx'));
+    const seed = c.slice(c.indexOf("if (req.kind === 'seed')"), c.indexOf("if (req.kind === 'seed')") + 1200);
+    expect(c.indexOf("if (req.kind === 'seed')")).toBeGreaterThan(-1);
+    expect(seed).toMatch(/snsCaptionMode\(\{ body: next, imageCount: summary\.images, videoCount: summary\.videos \}\)\.mode !== 'locked'\) void runAi\('write'\)/);
+    expect(seed).not.toMatch(/aiMode\.mode/);
+  });
+});

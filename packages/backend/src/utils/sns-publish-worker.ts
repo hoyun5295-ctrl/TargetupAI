@@ -26,6 +26,7 @@
  */
 
 import { notifySnsTargetsFailed } from './sns-failure-notice';
+import { publicErrorText } from './http-error';
 import { randomUUID } from 'crypto';
 import { promises as fsp } from 'fs';
 import { query } from '../config/database';
@@ -61,10 +62,17 @@ function mediaUrlFor(targetId: string, mediaId: string, companyId: string, salt:
   return `${publicOrigin()}/api/sns/m/${token}`;
 }
 
-/** 사람이 읽는 실패 사유 한 줄. 원문은 로그와 `last_error` 괄호 안에 남긴다(사유를 버리지 않는다). */
+/**
+ * 사람이 읽는 실패 사유 한 줄. 원문은 로그에 남긴다(사유를 버리지 않는다 · 아래 console.error 가 code · raw 를 싣는다).
+ * ★ 2026-10-26 S5 — 고객 글 = 공용 CT `publicErrorText`(우리 한국어 문장만 통과 · 플랫폼 영어 원문 0).
+ *   이 값이 기록 화면 · 확인할 것 띠 · 담당자 안내 문자로 그대로 나간다.
+ */
 function failureMessage(err: unknown): string {
   if (err instanceof SnsMediaError) return err.message;
-  if (err instanceof SnsAdapterError) return err.message || '채널이 게시를 받아들이지 않았어요.';
+  if (err instanceof SnsAdapterError) {
+    if (err.kind === 'rate') return '채널의 게시 한도에 걸렸어요. 잠시 뒤 다시 올려 주세요.';
+    return publicErrorText(err, '채널이 게시를 받아들이지 않았어요. 글과 사진을 확인한 뒤 다시 올려 주세요.', 'sns-publish');
+  }
   return '게시 중 문제가 생겼어요.';
 }
 function failureCode(err: unknown): string {
@@ -89,10 +97,9 @@ const CONTAINER_REASON: Record<string, string> = {
   INVALID_AUDIO_CHANNEL_LAYOUT: '소리는 모노·스테레오만 받아요.',
 };
 function containerFailureText(detail: string | null | undefined): string {
+  // ★ 2026-10-26 S5 — 고객 글에 플랫폼 원문(영문 코드 · 문장)을 붙이지 않는다. 원문은 호출부 console.warn 이 남긴다.
   const d = String(detail || '').trim();
-  const known = CONTAINER_REASON[d];
-  if (known) return `${known} (${d})`;
-  return d ? `채널이 게시물을 처리하지 못했어요. (${d.slice(0, 160)})` : '채널이 게시물을 처리하지 못했어요.';
+  return CONTAINER_REASON[d] ?? '채널이 게시물을 처리하지 못했어요. 다른 사진이나 영상으로 다시 올려 주세요.';
 }
 
 /** 소유권 확인하며 쓴다. 0행이면 남이 이 건을 가져간 것이므로 **그 뒤 아무것도 하지 않는다.** */
@@ -112,28 +119,6 @@ async function failTarget(targetId: string, lockToken: string, code: string, mes
   if (owned) await notifySnsTargetsFailed([targetId]);   // ★ 1025 #96 담당자에게(내가 끝낸 행만)
 }
 
-/** post 상태는 자식 집계 파생(§3-5) — 자식이 바뀔 때마다 같은 함수로 다시 계산한다. */
-async function refreshPostStatus(postId: string): Promise<void> {
-  await query(
-    `UPDATE sns_posts p
-        SET status = CASE
-              WHEN NOT EXISTS (SELECT 1 FROM sns_post_targets t WHERE t.post_id = p.id) THEN 'draft'
-              WHEN NOT EXISTS (SELECT 1 FROM sns_post_targets t WHERE t.post_id = p.id AND t.status <> 'cancelled') THEN 'cancelled'
-              WHEN NOT EXISTS (SELECT 1 FROM sns_post_targets t WHERE t.post_id = p.id AND t.status <> 'published') THEN 'published'
-              WHEN EXISTS (SELECT 1 FROM sns_post_targets t WHERE t.post_id = p.id AND t.status IN ('claimed','submitted')) THEN 'publishing'
-              WHEN EXISTS (SELECT 1 FROM sns_post_targets t WHERE t.post_id = p.id AND t.status = 'published')
-               AND EXISTS (SELECT 1 FROM sns_post_targets t WHERE t.post_id = p.id AND t.status = 'failed') THEN 'partial_failed'
-              WHEN EXISTS (SELECT 1 FROM sns_post_targets t WHERE t.post_id = p.id AND t.status = 'scheduled') THEN 'scheduled'
-              WHEN EXISTS (SELECT 1 FROM sns_post_targets t WHERE t.post_id = p.id AND t.status = 'failed') THEN 'failed'
-              WHEN EXISTS (SELECT 1 FROM sns_post_targets t WHERE t.post_id = p.id AND t.status = 'published') THEN 'published'
-              ELSE 'draft'
-            END,
-            updated_at = NOW()
-      WHERE p.id = $1::uuid`,
-    [postId],
-  );
-}
-
 /** 이 계정의 최근 24시간 게시 성공 건수 — 레이트리밋 판정은 **우리 원장**으로 한다(플랫폼에 묻지 않는다). */
 async function recentPublishCount(accountId: string): Promise<number> {
   const r = await query(
@@ -147,12 +132,13 @@ async function recentPublishCount(accountId: string): Promise<number> {
 /**
  * 실비 채널의 이번 달(KST) 게시 건수 — **전 회사 합산**(청구서가 우리 한 장이다).
  * ⚠ 같은 순간 다른 워커가 잡은 행은 세지 못한다 → 최대 한 배치(5건)까지 넘칠 수 있다. 콘솔 지출 상한이 두 번째 겹이다.
+ * ★ 2026-10-26 S12(R18) — 시계 = 게시를 시작한 시각(claimed_at). 옛: 글 저장 시각이라 지난달 저장 · 이번 달 게시분이 이번 달 셈에서 빠졌다.
  */
 async function meteredMonthCount(platform: string): Promise<number> {
   const r = await query(
     `SELECT COUNT(*)::int AS n FROM sns_post_targets
       WHERE platform = $1 AND platform_post_id IS NOT NULL
-        AND created_at >= (date_trunc('month', NOW() AT TIME ZONE 'Asia/Seoul') AT TIME ZONE 'Asia/Seoul')`,
+        AND COALESCE(claimed_at, created_at) >= (date_trunc('month', NOW() AT TIME ZONE 'Asia/Seoul') AT TIME ZONE 'Asia/Seoul')`,
     [platform],
   );
   return Number(r.rows[0]?.n || 0);
@@ -166,11 +152,13 @@ async function buildMedia(row: any, adapter: ISnsAdapter): Promise<SnsPublishMed
   const mediaRows = await query(
     `SELECT m.id, m.path, m.kind, m.format, m.bytes FROM sns_posts p
        JOIN LATERAL unnest(p.media_ids) WITH ORDINALITY AS mi(media_id, ord) ON TRUE
-       JOIN sns_media m ON m.id = mi.media_id
-      WHERE p.id = $1::uuid AND m.company_id = $2::uuid
+       LEFT JOIN sns_media m ON m.id = mi.media_id AND m.company_id = p.company_id
+      WHERE p.id = $1::uuid AND p.company_id = $2::uuid
       ORDER BY mi.ord`,
     [row.post_id, row.company_id],
   );
+  // ★ 2026-10-26 D3 — 원본이 하나라도 없으면 올리지 않는다(옛: JOIN 이 빠진 사진을 조용히 걸러 캐러셀이 장수가 준 채 나갈 수 있었다 · 원본 정리 워커와 짝)
+  if (mediaRows.rows.some((m: any) => !m.id)) throw new SnsMediaError('SOURCE_MISSING', '원본 사진을 찾지 못했어요. 다시 올려 주세요.');
   const out: SnsPublishMedia[] = [];
   for (const m of mediaRows.rows) {
     // salt = targetId. target 당 고정이라 URL 안정(플랫폼 캐시 생존) 조건을 만족하고, 추측 불가능한 UUID 다(§3-7).
@@ -265,7 +253,6 @@ async function handleTarget(row: any): Promise<void> {
         err instanceof SnsAdapterError ? { code: err.code, raw: err.raw } : err);
       await failTarget(targetId, lockToken, failureCode(err), failureMessage(err));
     }
-    await refreshPostStatus(row.post_id);
     return;
   }
 
@@ -357,14 +344,12 @@ async function handleTarget(row: any): Promise<void> {
     } else if (publishCalled && !definitiveReject) {
       await failTarget(targetId, lockToken, SNS_ERROR_CODES.PUBLISH_OUTCOME_UNKNOWN,
         '올라갔는지 확인하지 못했어요. 채널에서 먼저 확인해 주세요.');
-    } else if (isSnsReauthError(err) && err instanceof SnsAdapterError && err.httpStatus === 401) {
+    } else if (isSnsReauthError(err)) {   // ★ 2026-10-26 S4 — 종류로(옛: 401 만 · Meta 만료 토큰 400 은 계정이 active 로 남았다)
       await setSnsAccountStatus(row.company_id, account.id, 'reauth_required', '채널 연결이 만료되었어요. 다시 연결해 주세요.');
       await failTarget(targetId, lockToken, SNS_ERROR_CODES.REAUTH_REQUIRED, '채널 연결이 만료되어 게시하지 못했습니다. 다시 연결해 주세요.');
     } else {
       await failTarget(targetId, lockToken, failureCode(err), failureMessage(err));
     }
-  } finally {
-    await refreshPostStatus(row.post_id);
   }
 }
 
@@ -378,7 +363,6 @@ async function tick(): Promise<void> {
       RETURNING id, post_id`,
     [String(STALE_MS), SNS_ERROR_CODES.SCHEDULE_EXPIRED],
   );
-  for (const r of stale.rows) await refreshPostStatus(r.post_id);
   await notifySnsTargetsFailed(stale.rows.map((r: any) => String(r.id)));   // ★ 1025 #96 예약 시각이 지나 안 올린 게시도 담당자에게
 
   if (!armed) {

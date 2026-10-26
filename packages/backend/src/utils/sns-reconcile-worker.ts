@@ -39,7 +39,9 @@ async function buildRequest(row: any, adapter: ISnsAdapter): Promise<SnsPublishR
     [row.account_id, row.company_id],
   );
   const account = acc.rows[0];
-  if (!account?.access_token) return null;
+  // ★ 2026-10-26 S2 — 연결된(active) 계정만 묻는다. 권한 회수 · 만료로 끊긴 계정은 토큰이 남아 있어도 답이 「없음」처럼 오면
+  //   살아 있는 글이 「삭제됨」으로 찍혔다(판정 못 함을 반대로 읽음 · R7).
+  if (!account?.access_token || account.status !== 'active') return null;
   return {
     externalAccountId: account.external_account_id,
     // ★ 1차-B — X 는 액세스 토큰이 2시간이라 확인 직전에 갱신한다(행 잠금 안에서 · 불변 25).
@@ -74,7 +76,6 @@ async function recoverStalled(): Promise<void> {
     [String(STALL_MINUTES), SNS_ERROR_CODES.PUBLISH_OUTCOME_UNKNOWN],
   );
   if (unknown.rowCount) console.warn(`[SNS reconcile] 게시 호출 후 결과 모름 ${unknown.rowCount}건 → 다시 시도 잠금 · 채널에서 확인`);
-  for (const r of unknown.rows) await refreshPostStatus(r.post_id);
   await notifySnsTargetsFailed(unknown.rows.map((r: any) => String(r.id)));   // ★ 1025 #96 결과 모름으로 끝난 게시도 담당자에게
 
   const back = await query(
@@ -103,11 +104,13 @@ async function verifySubmitted(): Promise<void> {
 
   // ★ 2026-10-25 원장 #97 — 확인할 수 없는 행 = 「확인 불가」로 닫는다(사람이 보는 목록에 뜬다 · 옛: 건너뛰고 갱신 시각을 안 바꿔 순서 맨 앞을 24시간 차지)
   const cannotVerify = async (id: string, why: string) => {
-    await query(
+    const r = await query(
       `UPDATE sns_post_targets SET verify_gave_up_at = NOW(), last_verify_error = $2, updated_at = NOW()
-        WHERE id = $1::uuid AND verified_at IS NULL AND verify_gave_up_at IS NULL`,
+        WHERE id = $1::uuid AND verified_at IS NULL AND verify_gave_up_at IS NULL
+        RETURNING id`,
       [id, why],
-    ).catch((e: any) => console.warn(`[SNS reconcile] 확인 불가 표식 실패 ${id}:`, e?.message));
+    ).catch((e: any) => { console.warn(`[SNS reconcile] 확인 불가 표식 실패 ${id}:`, e?.message); return null; });
+    if (r?.rowCount) await notifySnsTargetsFailed([id]);   // ★ 2026-10-26 S21 — 내가 닫은 행만 담당자에게
   };
   for (const row of rows.rows) {
     if (!isSnsPlatform(row.platform)) { await cannotVerify(row.id, '알 수 없는 채널이라 게시 확인을 하지 못했어요. 채널에서 직접 확인해 주세요.'); continue; }
@@ -128,7 +131,6 @@ async function verifySubmitted(): Promise<void> {
             WHERE id = $1::uuid AND verified_at IS NULL`,
           [row.id, fetched.permalink],
         );
-        await refreshPostStatus(row.post_id);
         continue;
       }
       // 아직 안 보인다 — 횟수만 올리고 다음 tick 에 다시 본다.
@@ -161,6 +163,8 @@ async function verifySubmitted(): Promise<void> {
     [String(VERIFY_GIVE_UP_HOURS)],
   );
   if (gaveUp.rowCount) console.warn(`[SNS reconcile] 확인 포기 ${gaveUp.rowCount}건 — 화면에 permalink 로 안내`);
+  // ★ 2026-10-26 S21(R14) — 「올라갔는지 모름」도 담당자에게(실패 · 결과 모름과 같은 안내 함수 · 옛: 화면 띠뿐)
+  await notifySnsTargetsFailed(gaveUp.rows.map((r: any) => String(r.id)));
 }
 
 /** ③ 삭제 감지 — 확인이 끝난 것 중 표본만 본다(전수를 매 tick 도는 것은 낭비다). */
@@ -194,27 +198,6 @@ async function detectDeleted(): Promise<void> {
       }
     } catch { /* 일시 오류로 삭제 판정하지 않는다 */ }
   }
-}
-
-async function refreshPostStatus(postId: string): Promise<void> {
-  await query(
-    `UPDATE sns_posts p
-        SET status = CASE
-              WHEN NOT EXISTS (SELECT 1 FROM sns_post_targets t WHERE t.post_id = p.id) THEN 'draft'
-              WHEN NOT EXISTS (SELECT 1 FROM sns_post_targets t WHERE t.post_id = p.id AND t.status <> 'cancelled') THEN 'cancelled'
-              WHEN NOT EXISTS (SELECT 1 FROM sns_post_targets t WHERE t.post_id = p.id AND t.status <> 'published') THEN 'published'
-              WHEN EXISTS (SELECT 1 FROM sns_post_targets t WHERE t.post_id = p.id AND t.status IN ('claimed','submitted')) THEN 'publishing'
-              WHEN EXISTS (SELECT 1 FROM sns_post_targets t WHERE t.post_id = p.id AND t.status = 'published')
-               AND EXISTS (SELECT 1 FROM sns_post_targets t WHERE t.post_id = p.id AND t.status = 'failed') THEN 'partial_failed'
-              WHEN EXISTS (SELECT 1 FROM sns_post_targets t WHERE t.post_id = p.id AND t.status = 'scheduled') THEN 'scheduled'
-              WHEN EXISTS (SELECT 1 FROM sns_post_targets t WHERE t.post_id = p.id AND t.status = 'failed') THEN 'failed'
-              WHEN EXISTS (SELECT 1 FROM sns_post_targets t WHERE t.post_id = p.id AND t.status = 'published') THEN 'published'
-              ELSE 'draft'
-            END,
-            updated_at = NOW()
-      WHERE p.id = $1::uuid`,
-    [postId],
-  );
 }
 
 export function startSnsReconcileWorker(): void {

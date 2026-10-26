@@ -17,6 +17,7 @@ import { callAIWithFallback } from '../services/ai';
 import { buildCompanyMemoryContext } from '../services/ai-orchestrator';
 import { buildJourneyOpportunities } from './journey-opportunities';
 import { kstYesterdayRange } from './autosend-policy';
+import { aiStr } from './ai-json';   // ★ 2026-10-26 S8 — AI JSON 칸 = 글일 때만
 import {
   sanitizeBriefRecommendations, extractJsonObject,
   buildDailyBriefSystemPrompt, buildDailyBriefUserMessage,
@@ -114,7 +115,7 @@ export async function generateCompanyDailyBrief(companyId: string): Promise<Dail
       });
       aiCalled = true;
       const parsed = extractJsonObject(text);
-      headline = String(parsed?.headline || '').trim().slice(0, 200);
+      headline = aiStr(parsed?.headline).trim().slice(0, 200);
       recommendations = sanitizeBriefRecommendations(parsed?.recommendations, opportunities);
     } catch (err: any) {
       console.warn('[DailyBrief] AI 종합 판단 실패 — 빈 브리핑으로 저장:', err?.message);

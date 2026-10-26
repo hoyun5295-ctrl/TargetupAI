@@ -74,6 +74,7 @@ training-logger(logTrainingData · logCampaignTraining) 맨 앞 · AI 메모리 
 - **삭제 계획기** = `utils/fk-delete-plan.ts`(퇴역 시연 회사 삭제 스크립트와 공용 · DB 카탈로그가 정한다).
 - 외래키 없는 customer_id 표(customer_stores 등)는 건드리지 않는다(새 고객은 새 uuid).
 - 시험 = `utils/__tests__/synthetic-test-company-1020.test.ts`.
+- **★1026 직원 계정 범위** = 합성 고객이 분류코드 DM01~DM03 소속으로 들어가 회사에 분류 체계가 생겼다 → `store-scope.ts` 판정상 미배정 직원(suran · sgbaek) = 차단 0명 · gwchae `{JIHYUN}` = 없는 코드라 0명(관리자만 3,279명). 서버 SQL 로 `companies.allow_user_full_access = true`(이전 false) · gwchae `store_codes = {DM01}`(이전 `{JIHYUN}` · 1,109명)로 바꿨다(Harold 실행 · 값 확인). 재설정 스크립트를 다시 돌려도 이 두 값은 그대로다(고객 · 구매만 다룬다).
 
 ## 10. 범위 밖 (기록)
 

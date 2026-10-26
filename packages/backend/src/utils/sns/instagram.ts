@@ -17,7 +17,7 @@
  */
 
 import {
-  registerSnsAdapter, readSnsJson, SnsAdapterError,
+  registerSnsAdapter, readSnsJson, SnsAdapterError, isSnsNotFound,
   type ISnsPublishAdapter, type SnsOAuthCreds, type SnsTokenResult, type SnsAccountProfile,
   type SnsPublishRequest, type SnsContainerResult, type SnsContainerStatus, type SnsFetchedPost,
 } from './adapter';
@@ -308,11 +308,14 @@ export const instagramAdapter: ISnsPublishAdapter = {
   async fetchPost(req: SnsPublishRequest, platformPostId: string): Promise<SnsFetchedPost> {
     const q = new URLSearchParams({ fields: 'id,permalink,media_type,timestamp', access_token: req.accessToken });
     const res = await fetch(`${GRAPH}/${platformPostId}?${q.toString()}`);
-    if (res.status === 404 || res.status === 400) {
-      // 지워졌거나 접근할 수 없다 — 대조 워커가 "게시물 없음"으로 읽는다.
-      return { exists: false, permalink: null };
+    let body: any;
+    try {
+      body = await readSnsJson('instagram', res, 'fetch');
+    } catch (err) {
+      // ★ 2026-10-26 S2 — 「없음」은 플랫폼이 없다고 답한 꼴만. 400 전부를 없음으로 읽으면 끊긴 계정의 글이 「삭제됨」이 된다.
+      if (isSnsNotFound(err)) return { exists: false, permalink: null };
+      throw err;
     }
-    const body = await readSnsJson('instagram', res, 'fetch');
     const id = String(body?.id || '');
     if (!id) return { exists: false, permalink: null };
     return {

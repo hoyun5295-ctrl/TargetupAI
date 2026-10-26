@@ -17,6 +17,8 @@ import { randomUUID } from 'crypto';
 import { pool } from '../config/database';
 import { buildSnsIdempotencyKey } from './sns-idempotency';
 import { SNS_ERROR_CODES } from './sns-constants';
+import { snsOwnerClause } from './sns-accounts';
+import { isUuid } from './normalize';
 
 /**
  * "이 행보다 나중에 같은 게시물·같은 계정으로 만든 행이 없다" = 그 계정의 **최신 행**.
@@ -77,13 +79,18 @@ export type SnsRetryResult =
  *   ③ 계정 FOR SHARE — active 가 아니면 다시 연결이 먼저다
  *   ④ INSERT — 예약 시각은 원래 시각을 지킨다(미래 예약이 지금 올라가던 결함)
  */
-export async function retrySnsTarget(companyId: string, targetId: string): Promise<SnsRetryResult> {
+export async function retrySnsTarget(companyId: string, targetId: string, ownerId: string | null = null): Promise<SnsRetryResult> {
+  if (!isUuid(targetId)) return { ok: false, status: 404, code: 'NOT_FOUND', error: '다시 올릴 글을 찾지 못했어요. 목록을 새로 고쳐 주세요.' };
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
+    // ★ 2026-10-26 S3(R3) — 담당자 = 자기 글의 줄만(글 주인 = sns_posts.created_by)
     const locked = await client.query(
-      `SELECT * FROM sns_post_targets WHERE id = $1::uuid AND company_id = $2::uuid FOR UPDATE`,
-      [targetId, companyId],
+      `SELECT t.* FROM sns_post_targets t
+         JOIN sns_posts p ON p.id = t.post_id AND p.company_id = t.company_id
+        WHERE t.id = $1::uuid AND t.company_id = $2::uuid AND ${snsOwnerClause('p.created_by', 3)}
+        FOR UPDATE OF t`,
+      [targetId, companyId, ownerId],
     );
     const old = locked.rows[0];
     if (!old || old.status !== 'failed' || old.platform_post_id) {
@@ -109,9 +116,11 @@ export async function retrySnsTarget(companyId: string, targetId: string): Promi
       return { ok: false, status: 409, code: 'ALREADY_RETRIED', error: '이미 다시 올렸어요. 목록을 새로 고쳐 주세요.' };
     }
 
+    // ★ 2026-10-26 Codex 1R — 계정도 지금 주인 범위로(해제 뒤 다른 담당자가 같은 외부 계정을 연결하면 주인이 바뀐다 ·
+    //   옛 글 주인이 다시 시도로 남의 계정에 새로 올리던 길 · 새 게시 = compose 와 같은 계정 범위)
     const acc = await client.query(
-      `SELECT status FROM sns_accounts WHERE id = $1::uuid AND company_id = $2::uuid FOR SHARE`,
-      [old.account_id, companyId],
+      `SELECT status FROM sns_accounts WHERE id = $1::uuid AND company_id = $2::uuid AND ${snsOwnerClause('connected_by', 3)} FOR SHARE`,
+      [old.account_id, companyId, ownerId],
     );
     if (acc.rows[0]?.status !== 'active') {
       await client.query('ROLLBACK');

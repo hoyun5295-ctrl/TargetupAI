@@ -51,22 +51,7 @@ export async function readSnsTagSet(companyId: string): Promise<SnsTagSetView> {
   return view(rawList(r.rows[0]?.brand_kit));
 }
 
-/** 통째 저장(옛 화면 호환). 형식 위반·상한 초과는 거절한다. */
-export async function replaceSnsTagSet(companyId: string, input: unknown[]): Promise<SnsTagSetView> {
-  const invalid = invalidSnsTags(input);
-  if (invalid.length) throw new SnsTagSetError('TAG_INVALID', invalid[0].reason, 400, invalid);
-  const tags = normalizeSnsTags(input);
-  if (tags.length > SNS_TAG_SET_MAX) throw new SnsTagSetError('TAG_SET_FULL', `자주 쓰는 태그는 ${SNS_TAG_SET_MAX}개까지 저장할 수 있어요.`);
-  await query(
-    `UPDATE companies
-        SET brand_kit = jsonb_set(COALESCE(brand_kit, '{}'::jsonb), '{sns_tag_set}', $2::jsonb, true), updated_at = NOW()
-      WHERE id = $1::uuid`,
-    [companyId, JSON.stringify(tags)],
-  );
-  return view(tags);
-}
-
-/** 더하기·빼기. 빼기는 옛 형식 위반 값도 뺄 수 있다(원문 비교). */
+/** 더하기·빼기(★ 2026-10-26 S13 — 통째 저장 = 옛 화면 호환 주소와 함께 삭제 · 화면 호출 0). 빼기는 옛 형식 위반 값도 뺄 수 있다(원문 비교). */
 export async function patchSnsTagSet(companyId: string, input: { add?: unknown[]; remove?: unknown[] }): Promise<SnsTagSetView> {
   const addRaw = Array.isArray(input.add) ? input.add : [];
   const removeKeys = new Set((Array.isArray(input.remove) ? input.remove : []).map((v) => tagKey(String(v ?? ''))).filter(Boolean));

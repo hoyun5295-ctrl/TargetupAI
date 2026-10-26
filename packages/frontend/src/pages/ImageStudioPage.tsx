@@ -93,15 +93,18 @@ export default function ImageStudioPage() {
   const [libManageOpen, setLibManageOpen] = useState(false); // 전체 보기·관리(검색·삭제) — 픽커 재사용
   const [libAssets, setLibAssets] = useState<LibAsset[]>([]);
   const [libUsage, setLibUsage] = useState<{ usedBytes: number; limitBytes: number } | null>(null);
+  /** ★ 2026-10-26 S16 — 라이브러리 조회 실패 = 「소재 없음」이 아니다(다시 불러오기 줄) */
+  const [libFailed, setLibFailed] = useState(false);
   const loadLibrary = useCallback(async () => {
     try {
       const r = await authFetch('/api/assets');
-      const d = await r.json();
+      const d = await r.json().catch(() => null);
+      setLibFailed(!(r.ok && d?.success));
       if (r.ok && d?.success) {
         setLibAssets(Array.isArray(d.assets) ? d.assets.map((a: any) => ({ id: a.id, url: a.url, filename: a.filename, bytes: a.bytes, channelSpec: a.channel_spec ?? null })) : []);
         setLibUsage(d.usage || null);
       }
-    } catch { /* 표시 전용 — 실패 무시 */ }
+    } catch { setLibFailed(true); }
   }, []);
 
   // 결과
@@ -234,13 +237,18 @@ export default function ImageStudioPage() {
   const overlayMsg = busyMsg || make.busyMsg;
 
   // 0단계 — 내 라이브러리 폴더(저장 소재 띠) · 고르기 첫 화면에만(TemplatePicker rootExtra)
-  const libraryStrip = libAssets.length > 0 ? (
+  const libraryStrip = libFailed && libAssets.length === 0 ? (
+    <section className="rounded-2xl border border-slate-200 bg-white p-4 flex items-center justify-between gap-3 flex-wrap">
+      <p className="text-sm text-slate-700 flex items-center gap-2"><FolderOpen className="w-4 h-4 text-violet-700" /> 내 라이브러리를 불러오지 못했어요</p>
+      <button onClick={() => void loadLibrary()} className="text-xs px-3 py-1.5 rounded-lg border border-slate-200 text-slate-600 hover:text-slate-900 hover:bg-slate-100">다시 불러오기</button>
+    </section>
+  ) : libAssets.length > 0 ? (
     <section className="rounded-2xl border border-slate-200 bg-white p-4">
       <div className="flex items-center justify-between mb-3">
         <h2 className="text-sm font-bold flex items-center gap-2">
           <FolderOpen className="w-4 h-4 text-violet-700" /> 내 라이브러리
           <span className="text-[11px] text-slate-400 font-normal">
-            {libAssets.length}개{libUsage ? ` · ${(libUsage.usedBytes / 1048576).toFixed(1)}MB / ${(libUsage.limitBytes / 1073741824).toFixed(1)}GB` : ''}
+            {libAssets.length}개{libUsage ? ` · 저장 공간 ${(libUsage.usedBytes / 1048576).toFixed(1)}MB / ${(libUsage.limitBytes / 1073741824).toFixed(1)}GB` : ''}
           </span>
         </h2>
         <button onClick={() => setLibManageOpen(true)} className="text-xs px-3 py-1.5 rounded-lg border border-slate-200 text-slate-500 hover:text-slate-900 hover:bg-slate-100">

@@ -79,13 +79,18 @@ export function isSnsMediaUrlLive(row: {
   container_created_at: Date | null;
   created_at: Date;
   verified_at: Date | null;
+  /** 발행 워커가 이 행을 잡은 시각 — 절대 상한의 시계(★ 2026-10-26 S1) */
+  claimed_at?: Date | null;
 }, now: Date = new Date()): boolean {
   // 종결·확정은 즉시 만료 — 게시가 끝났는데 주소가 살아 있을 이유가 없다.
   if (row.verified_at) return false;
   if (!['claimed', 'submitted'].includes(row.status)) return false;
 
   // 절대 상한(36h) — 어떤 경우에도 이보다 오래 살지 않는다.
-  if (now.getTime() - new Date(row.created_at).getTime() > SNS_MEDIA_ABSOLUTE_TTL_MS) return false;
+  // ★ 2026-10-26 S1(R18) — 시계 = 게시를 시작한 시각(선점). 옛: 글을 저장한 시각이라 36시간 넘게 뒤로 예약한 사진 글은
+  //   게시 순간 주소가 이미 죽어 인스타 · Threads · 페이스북이 미디어를 못 받았다(1026 실행 확인 live=false).
+  const startedAt = row.claimed_at ? new Date(row.claimed_at) : new Date(row.created_at);
+  if (now.getTime() - startedAt.getTime() > SNS_MEDIA_ABSOLUTE_TTL_MS) return false;
 
   // 컨테이너를 만들었다면 그 시각 + 26h(인스타 컨테이너 만료 24h 보다 넉넉히).
   if (row.container_created_at) {

@@ -119,6 +119,7 @@ import * as XLSX from 'xlsx';
 import { getServePath, parseFitOption } from '../utils/image-serve';
 
 import { publicErrorText, respondUserError } from '../utils/http-error';
+import { uploadGuard } from '../utils/http-error';
 // ────────────── D216+ 503 안전망 helper (db_alter_safety_net 영구 룰) ──────────────
 function isDbMigrationPendingError(err: any): boolean {
   const msg = err?.message || '';
@@ -2723,9 +2724,10 @@ dmPublicRouter.post('/:code/event-response', async (req: Request, res: Response)
 //  인터랙션 결과 — 회사 admin 조회·다운로드·사전지정·경품 (B / 2026-06-14)
 // ════════════════════════════════════════════════════════════
 
+const DM_XLSX_LIMITS = { fileSize: 5 * 1024 * 1024, files: 1 };
 const dmXlsxUpload = multer({
   storage: multer.memoryStorage(),
-  limits: { fileSize: 5 * 1024 * 1024, files: 1 },
+  limits: DM_XLSX_LIMITS,
 });
 
 /** dm 소유 검증 (companyId 격리) */
@@ -2810,7 +2812,7 @@ dmRouter.get('/:id/responses/export', requireDmAccess, async (req: any, res: any
 });
 
 // POST /api/dm/:id/winners/import — 엑셀 사전 지정 당첨자 업로드
-dmRouter.post('/:id/winners/import', requireDmAccess, dmXlsxUpload.single('file'), async (req: any, res: any) => {
+dmRouter.post('/:id/winners/import', requireDmAccess, uploadGuard(dmXlsxUpload.single('file'), DM_XLSX_LIMITS), async (req: any, res: any) => {   // ★ 2026-10-26 S6
   try {
     const companyId = req.user?.companyId;
     if (!companyId) return res.status(403).json({ error: '회사 권한이 필요합니다.' });

@@ -18,7 +18,7 @@
  */
 
 import {
-  registerSnsAdapter, readSnsJson, SnsAdapterError,
+  registerSnsAdapter, readSnsJson, SnsAdapterError, isSnsNotFound,
   type ISnsPublishAdapter, type SnsOAuthCreds, type SnsTokenResult, type SnsAccountProfile,
   type SnsPublishRequest, type SnsContainerResult, type SnsContainerStatus, type SnsFetchedPost,
   type SnsConnectableAccount,
@@ -268,8 +268,13 @@ export const facebookPageAdapter: ISnsPublishAdapter = {
       access_token: req.accessToken,
     });
     const res = await fetch(`${GRAPH}/${platformPostId}?${q.toString()}`);
-    if (res.status === 404 || res.status === 400) return { exists: false, permalink: null };
-    const body = await readSnsJson('facebook_page', res, 'fetch');
+    let body: any;
+    try {
+      body = await readSnsJson('facebook_page', res, 'fetch');
+    } catch (err) {
+      if (isSnsNotFound(err)) return { exists: false, permalink: null };   // ★ 2026-10-26 S2 — 없다고 답한 꼴만
+      throw err;
+    }
     if (!body?.id) return { exists: false, permalink: null };
     if (isVideo) {
       const vs = String(body?.status?.video_status || '');

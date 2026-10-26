@@ -16,7 +16,7 @@
  *   ↔ 진입점(assembleProposalEmail = 조립 + 렌더 + 평문 + placeholder 합산).
  */
 import { UserFacingError } from './http-error';
-import { extractJsonFromAiText } from './ai-json';   // ★ 2026-09-30 WP4 AI 응답 JSON 파싱 = CT(문자열 안 제어문자 복구)
+import { extractJsonFromAiText, aiStr } from './ai-json';   // ★ 2026-09-30 WP4 AI 응답 JSON 파싱 = CT(문자열 안 제어문자 복구) · ★ 2026-10-26 S8 칸 = aiStr
 import * as fs from 'fs';
 import * as net from 'net';
 import * as dns from 'dns';
@@ -464,12 +464,12 @@ export function parseTemplatePick(raw: string, allowed: { product: readonly stri
   let j: any;
   try { j = extractJsonFromAiText(m[0]); } catch { return null; }
   if (!j || typeof j !== 'object') return null;
-  const take = (v: unknown, ok: readonly string[]) => (Array.isArray(v) ? v : []).map((x) => String(x || '').trim())
+  const take = (v: unknown, ok: readonly string[]) => (Array.isArray(v) ? v : []).map((x) => aiStr(x).trim())
     .filter((id, i, arr) => ok.includes(id) && arr.indexOf(id) === i).slice(0, OUTREACH_TEMPLATE_RANK);
   const product = take(j.product, allowed.product);
   const event = take(j.event, allowed.event);
   if (!product.length && !event.length) return null;
-  return { product, event, reason: String(j.reason || '').replace(/\s+/g, ' ').trim().slice(0, 80) };
+  return { product, event, reason: aiStr(j.reason).replace(/\s+/g, ' ').trim().slice(0, 80) };
 }
 
 export interface TemplateJudgeInput {

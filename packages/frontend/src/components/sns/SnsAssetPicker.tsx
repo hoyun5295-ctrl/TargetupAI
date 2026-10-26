@@ -4,9 +4,10 @@
 // 이미지 스튜디오에서 만든 소재와 올려 둔 소재를 그대로 쓴다. 다시 올릴 필요가 없다.
 // ★ 여기서 고른 사진만 `asset_id` 를 갖고, 그것이 AI 표시 자동 부착의 근거가 된다(§3-9).
 // 커스텀 모달 — native dialog 0.
+// ★ 2026-10-26 S16 · S17 — 목록 = 라이브러리 공용 CT(담당자 = 자기 소재 · 200건 · 검색) · 불러오지 못하면 「없음」이 아니라 「다시 불러오기」.
 
 import { useEffect, useState } from 'react';
-import { X, Loader2, ImageOff, Check } from 'lucide-react';
+import { X, Loader2, ImageOff, Check, Search, RefreshCw } from 'lucide-react';
 
 interface Asset {
   id: string;
@@ -25,25 +26,40 @@ interface Props {
 export default function SnsAssetPicker({ open, onClose, onPick }: Props) {
   const [assets, setAssets] = useState<Asset[]>([]);
   const [loading, setLoading] = useState(true);
+  const [failed, setFailed] = useState(false);
   const [picked, setPicked] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
+  const [q, setQ] = useState('');
+  const [reloadKey, setReloadKey] = useState(0);
+
+  useEffect(() => {
+    if (open) { setPicked([]); setQ(''); }
+  }, [open]);
 
   useEffect(() => {
     if (!open) return;
+    let alive = true;
     setLoading(true);
-    setPicked([]);
-    void (async () => {
-      try {
-        const res = await fetch('/api/sns/assets', { headers: { Authorization: `Bearer ${localStorage.getItem('token')}` } });
-        const data = await res.json();
-        setAssets(data?.success && Array.isArray(data.assets) ? data.assets : []);
-      } catch {
-        setAssets([]);
-      } finally {
-        setLoading(false);
-      }
-    })();
-  }, [open]);
+    setFailed(false);
+    // 찾기 칸은 멈춘 뒤 읽는다(글자마다 묻지 않는다)
+    const t = setTimeout(() => {
+      void (async () => {
+        try {
+          const qs = q.trim() ? `?q=${encodeURIComponent(q.trim())}` : '';
+          const res = await fetch(`/api/sns/assets${qs}`, { headers: { Authorization: `Bearer ${localStorage.getItem('token')}` } });
+          const data = await res.json().catch(() => null);
+          if (!alive) return;
+          if (!res.ok || !data?.success || !Array.isArray(data.assets)) { setFailed(true); setAssets([]); return; }
+          setAssets(data.assets);
+        } catch {
+          if (alive) { setFailed(true); setAssets([]); }
+        } finally {
+          if (alive) setLoading(false);
+        }
+      })();
+    }, q ? 300 : 0);
+    return () => { alive = false; clearTimeout(t); };
+  }, [open, q, reloadKey]);
 
   if (!open) return null;
 
@@ -76,9 +92,30 @@ export default function SnsAssetPicker({ open, onClose, onPick }: Props) {
           </button>
         </div>
 
+        <div className="px-5 pt-3">
+          <label className="relative block">
+            <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+            <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="파일 이름으로 찾기"
+              className="w-full h-10 pl-9 pr-3 rounded-lg border border-slate-200 bg-white text-sm text-slate-800 placeholder:text-slate-400 focus:outline-none focus:border-violet-400" />
+          </label>
+        </div>
+
         <div className="flex-1 overflow-y-auto px-5 py-4">
           {loading ? (
             <div className="py-16 flex justify-center"><Loader2 className="w-6 h-6 animate-spin text-violet-600" /></div>
+          ) : failed ? (
+            <div className="py-16 text-center">
+              <p className="text-sm font-semibold text-slate-700">소재를 불러오지 못했어요</p>
+              <button onClick={() => setReloadKey((k) => k + 1)}
+                className="mt-3 h-9 px-3 rounded-lg text-xs font-semibold border border-slate-300 text-slate-700 hover:bg-slate-50 inline-flex items-center gap-1.5">
+                <RefreshCw className="w-3.5 h-3.5" /> 다시 불러오기
+              </button>
+            </div>
+          ) : assets.length === 0 && q.trim() ? (
+            <div className="py-16 text-center">
+              <p className="text-sm font-semibold text-slate-700">「{q.trim()}」 이름의 소재가 없어요</p>
+              <p className="text-xs text-slate-500 mt-1.5">다른 낱말로 찾아 보세요.</p>
+            </div>
           ) : assets.length === 0 ? (
             <div className="py-16 text-center">
               <div className="w-12 h-12 rounded-2xl bg-white border border-slate-200 mx-auto flex items-center justify-center mb-3">

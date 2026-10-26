@@ -362,7 +362,9 @@ describe('올린 기록 카드 · 상세 창 상태(0925)', () => {
     const POSTS = readFileSync(resolve(__dirname, '../sns-posts.ts'), 'utf8');
     expect(POSTS).toMatch(/SNS_HISTORY_PAGE_SIZE = 10/);
     expect(POSTS).toMatch(/COUNT\(\*\)::int AS n FROM sns_posts p WHERE \$\{historyWhere\}/);
-    expect(POSTS).toMatch(/WHERE \$\{historyWhere\}\s+ORDER BY p\.created_at DESC, p\.id DESC\s+LIMIT \$\{SNS_HISTORY_PAGE_SIZE\} OFFSET \$3/);
+    // ★ 2026-10-26 S3 — 기록 조건에 담당자 범위($3)가 들어 쪽 넘김은 $4(목록 · 개수가 같은 조건 · 같은 범위)
+    expect(POSTS).toMatch(/WHERE \$\{historyWhere\}\s+ORDER BY p\.created_at DESC, p\.id DESC\s+LIMIT \$\{SNS_HISTORY_PAGE_SIZE\} OFFSET \$4/);
+    expect(POSTS).toMatch(/historyWhere = `p\.company_id = \$1::uuid\s+AND \$\{snsOwnerClause\('p\.created_by', 3\)\}/);
     expect(ROUTE).toMatch(/router\.get\('\/posts\/:id'/);
   });
 

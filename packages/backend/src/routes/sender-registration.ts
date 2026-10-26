@@ -1,3 +1,4 @@
+import { uploadGuard } from '../utils/http-error';
 import { Router, Request, Response } from 'express';
 import { demoBlock } from '../utils/demo-company';   // ★ 2026-10-09 시연 회사 = 사람이 누르는 발송·돈 입구 거절(설계서 docs/2026-10-09-demo-company-design.md §3)
 import { authenticate, requireCompanyAdmin, requireSuperAdmin } from '../middlewares/auth';
@@ -54,6 +55,7 @@ const docStorage = multer.diskStorage({
   },
 });
 
+const DOC_UPLOAD_LIMITS = { fileSize: 10 * 1024 * 1024 }; // 10MB
 const docUpload = multer({
   storage: docStorage,
   fileFilter: (_req, file, cb) => {
@@ -65,7 +67,7 @@ const docUpload = multer({
       cb(new Error('허용되지 않는 파일 형식입니다. (PDF, JPG, PNG 등만 가능)'));
     }
   },
-  limits: { fileSize: 10 * 1024 * 1024 }, // 10MB
+  limits: DOC_UPLOAD_LIMITS,
 });
 
 // ============================================================
@@ -87,7 +89,7 @@ router.get('/managers', authenticate, requireCompanyAdmin, async (req: Request, 
 });
 
 // POST /managers — 담당자 등록 (위임장 파일 첨부 필수)
-router.post('/managers', authenticate, requireCompanyAdmin, demoBlock, docUpload.single('authorizationDoc'), async (req: Request, res: Response) => {
+router.post('/managers', authenticate, requireCompanyAdmin, demoBlock, uploadGuard(docUpload.single('authorizationDoc'), DOC_UPLOAD_LIMITS), async (req: Request, res: Response) => {   // ★ 2026-10-26 S6
   try {
     const companyId = (req as any).user!.companyId;
     const { managerName, managerPhone, managerEmail } = req.body;
@@ -146,7 +148,7 @@ router.post(
   authenticate,
   demoBlock,
   requireCompanyAdmin,
-  docUpload.array('documents', 5),
+  uploadGuard(docUpload.array('documents', 5), { ...DOC_UPLOAD_LIMITS, files: 5 }),   // ★ 2026-10-26 S6
   async (req: Request, res: Response) => {
     try {
       const { companyId, userId } = (req as any).user!;

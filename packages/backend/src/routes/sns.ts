@@ -19,7 +19,7 @@
  *   복귀 HTML 이 인라인 스크립트를 쓰기 때문이다. CSP 뒤에 두면 창이 안 닫힌다.
  */
 
-import { respondUserError } from '../utils/http-error';
+import { respondUserError, publicErrorText, uploadGuard } from '../utils/http-error';
 import { Router, Request, Response, urlencoded, raw } from 'express';
 import { isUuid } from '../utils/normalize';
 import { createHash, createHmac, randomBytes, randomUUID, timingSafeEqual } from 'crypto';
@@ -27,15 +27,17 @@ import multer from 'multer';
 import { authenticate } from '../middlewares/auth';
 import { query } from '../config/database';
 import { requirePlanFeature, isPlanControlRequest } from '../utils/plan-guard';
+import { resolveOwnerScope } from '../utils/owner-scope';
+import { listAssets, getAsset, getStorageUsage } from '../utils/assets';
 import { snsPublishEnabled, isSnsPlatform, SNS_OAUTH_STATE_TTL_MS, type SnsPlatform } from '../utils/sns-constants';
 import { signSnsState, verifySnsState } from '../utils/sns-auth-state';
 import { getSnsAdapter, listSnsAdapters, SnsAdapterError } from '../utils/sns';
 import {
   listSnsAccounts, getSnsAccount, upsertPendingAccount, applyAccountProfile,
-  setSnsAccountStatus, revokeSnsAccount, resolveSnsCredentials, toAccountCard, isMissingSnsTable,
+  setSnsAccountStatus, revokeSnsAccount, resolveSnsCredentials, toAccountCard, isMissingSnsTable, snsOwnerClause,
 } from '../utils/sns-accounts';
 import {
-  storeSnsMedia, copyAssetToSnsMedia, snsMediaAbsPath, SnsMediaError, SNS_IMAGE_MAX_BYTES,
+  storeSnsMedia, copyAssetToSnsMedia, snsMediaAbsPath, SnsMediaError, SNS_IMAGE_MAX_BYTES, SNS_MEDIA_KEEP_DAYS,
   startSnsVideoUpload, appendSnsVideoChunk, completeSnsVideoUpload, resolveSnsServeFile, SNS_UPLOAD_CHUNK_BYTES, snsMediaThumbnail,
 } from '../utils/sns-media';
 import { verifySnsMediaToken, isSnsMediaUrlLive } from '../utils/sns-signed-media';
@@ -48,7 +50,7 @@ import { listSnsPostsView, loadSnsPostsByIds, snsComposeDefaults } from '../util
 import { listSnsAttention } from '../utils/sns-attention';
 import { generateSnsCaption, loadSnsCaptionImages, splitTrailingTagLines, type SnsCaptionAction } from '../utils/sns-caption-ai';
 import { snsMediaNeedsAiNotice, snsMediaAiNoticeMap } from '../utils/sns-ai-notice';
-import { readSnsTagSet, replaceSnsTagSet, patchSnsTagSet, snsTagSeeds, SnsTagSetError } from '../utils/sns-tag-set';
+import { readSnsTagSet, patchSnsTagSet, snsTagSeeds, SnsTagSetError } from '../utils/sns-tag-set';
 import { checkSnsSpelling } from '../utils/sns-spell-check';
 import { composeSnsPost, rescheduleSnsPost } from '../utils/sns-compose';
 import { restoreUploadFileName } from '../utils/mms-image-fit';
@@ -71,12 +73,12 @@ function sendDbPending(res: Response) {
   });
 }
 
-/** 어댑터 오류를 사람이 읽는 한 줄로. 원문은 서버 로그에 남긴다(사유를 버리지 않는다). */
+/**
+ * 어댑터 오류를 사람이 읽는 한 줄로. 원문은 서버 로그에 남긴다(사유를 버리지 않는다).
+ * ★ 2026-10-26 S5 — 고객 글 = 공용 CT `publicErrorText`(우리 한국어 문장만 · 플랫폼 영어 원문 0).
+ */
 function adapterErrorMessage(err: unknown): string {
-  if (err instanceof SnsAdapterError) {
-    return err.message || '채널 연결 중 문제가 생겼어요. 잠시 뒤 다시 시도해 주세요.';
-  }
-  return '채널 연결 중 문제가 생겼어요. 잠시 뒤 다시 시도해 주세요.';
+  return publicErrorText(err, '채널 연결 중 문제가 생겼어요. 잠시 뒤 다시 시도해 주세요.', 'sns-callback');
 }
 
 // ───────────────────────────────── 인증 구간 ─────────────────────────────────
@@ -111,11 +113,13 @@ router.get('/overview', async (req: Request, res: Response) => {
     return res.json({ success: true, enabled: false, accounts: [], specs: specsPayload(companyId) });
   }
   try {
-    const rows = await listSnsAccounts(companyId);
+    // ★ 2026-10-26 S3(R3) — 담당자 = 자기가 연결한 계정 · 자기 글만(관리자 = 회사 전체)
+    const ownerId = resolveOwnerScope(req);
+    const rows = await listSnsAccounts(companyId, ownerId);
     const userId = ((req as any).user?.userId as string) ?? null;
     // ★ 2026-09-24 화면 1콜에 '확인할 것' 띠(C1)와 작성 기본값(D1 · 지난번 채널)을 함께 싣는다.
-    const attention = await listSnsAttention(companyId, rows);
-    const defaults = await snsComposeDefaults(companyId, userId);
+    const attention = await listSnsAttention(companyId, rows, Date.now(), ownerId);
+    const defaults = await snsComposeDefaults(companyId, userId, ownerId);
     return res.json({
       success: true,
       enabled: true,
@@ -226,7 +230,7 @@ router.post('/auth/start/:platform', async (req: Request, res: Response) => {
 router.post('/accounts/:id/disconnect', async (req: Request, res: Response) => {
   const companyId = (req as any).user?.companyId as string;
   try {
-    const done = await revokeSnsAccount(companyId, String(req.params.id));
+    const done = await revokeSnsAccount(companyId, String(req.params.id), resolveOwnerScope(req));
     if (!done) return res.status(404).json({ success: false, error: '계정을 찾을 수 없습니다.' });
     return res.json({ success: true, account: toAccountCard(done.row), cancelledScheduled: done.cancelled });
   } catch (err: any) {
@@ -245,7 +249,7 @@ router.post('/accounts/:id/reconnect', async (req: Request, res: Response) => {
   const companyId = (req as any).user?.companyId as string;
   const userId = (req as any).user?.userId ?? null;
   try {
-    const row = await getSnsAccount(companyId, String(req.params.id));
+    const row = await getSnsAccount(companyId, String(req.params.id), resolveOwnerScope(req));
     if (!row) return res.status(404).json({ success: false, error: '계정을 찾을 수 없습니다.' });
     const r = await startSnsAuth(companyId, userId, row.platform);
     return res.status(r.status).json({ platform: row.platform, ...r.body });
@@ -259,22 +263,41 @@ router.post('/accounts/:id/reconnect', async (req: Request, res: Response) => {
 
 // ───────────────────────────────── 미디어 (S2) ─────────────────────────────────
 
+const SNS_UPLOAD_LIMITS = { fileSize: SNS_IMAGE_MAX_BYTES, files: 1 };
 const snsUpload = multer({
   storage: multer.memoryStorage(),
-  limits: { fileSize: SNS_IMAGE_MAX_BYTES, files: 10 },
+  limits: SNS_UPLOAD_LIMITS,
 });
+
+/**
+ * ★ 2026-10-26 S10 · D3 — SNS 원본도 회사 저장 공간을 쓴다(getStorageUsage = 라이브러리 + SNS 원본).
+ *   넘치면 저장하지 않는다. 문장이 정리 길(라이브러리 정리 · SNS 원본 90일 자동 정리)을 함께 말한다.
+ */
+async function snsStorageFull(companyId: string, addBytes: number): Promise<boolean> {
+  const u = await getStorageUsage(companyId);
+  return u.usedBytes + Math.max(0, addBytes) > u.limitBytes;
+}
+function sendStorageFull(res: Response) {
+  return res.status(409).json({
+    success: false,
+    code: 'STORAGE_FULL',
+    error: `저장 공간이 가득 찼어요. 라이브러리에서 소재를 정리해 주세요. SNS에 올린 사진과 영상은 ${SNS_MEDIA_KEEP_DAYS}일 동안 쓰지 않으면 자동으로 정리돼요.`,
+  });
+}
 
 /**
  * 사진 업로드. **원본을 그대로 저장한다** — 규격 맞춤은 게시 직전에 채널별로 따로 한다.
  * 응답에 채널별 판정(`fits`)을 실어, 화면이 "이 사진은 어느 채널에서 손대지 않고 올라가는가"를 바로 말할 수 있게 한다.
+ * ★ 2026-10-26 S6 — 업로드 오류(크기 · 개수)는 공용 번역(uploadErrorText) · 옛: 미들웨어 꼴이라 전역 처리기 500 「서버 오류」.
  */
-router.post('/media', snsUpload.single('file'), async (req: Request, res: Response) => {
+router.post('/media', uploadGuard(snsUpload.single('file'), SNS_UPLOAD_LIMITS), async (req: Request, res: Response) => {
   const companyId = (req as any).user?.companyId as string;
   const userId = (req as any).user?.userId ?? null;
   const file = (req as any).file as { buffer: Buffer; originalname: string } | undefined;
   if (!file) return res.status(400).json({ success: false, error: '파일이 없습니다.' });
 
   try {
+    if (await snsStorageFull(companyId, file.buffer.length)) return sendStorageFull(res);
     const stored = await storeSnsMedia({ companyId, buffer: file.buffer, originalName: restoreUploadFileName(file.originalname) });   // ★ 1019 B-1005-4③ 같은 원인
     const r = await query(
       `INSERT INTO sns_media (company_id, created_by, kind, path, format, bytes, width, height)
@@ -287,7 +310,7 @@ router.post('/media', snsUpload.single('file'), async (req: Request, res: Respon
       success: true,
       // ★ 2026-09-24 B-8 — 직접 올린 사진은 AI 표시 대상이 아니다(판정 CT = sns-ai-notice).
       media: { id: row.id, width: row.width, height: row.height, kind: 'image', aiNotice: false },
-      fits: fitsByChannel(stored.width, stored.height),
+      fits: fitsByChannel(stored.width, stored.height, companyId),
     });
   } catch (err: any) {
     if (err instanceof SnsMediaError) return res.status(400).json({ success: false, code: err.code, error: err.message });
@@ -305,17 +328,12 @@ router.post('/media', snsUpload.single('file'), async (req: Request, res: Respon
 router.get('/assets', async (req: Request, res: Response) => {
   const companyId = (req as any).user?.companyId as string;
   try {
-    const r = await query(
-      `SELECT id, url, filename, kind, width, height, created_at
-         FROM cdp_assets
-        WHERE company_id = $1::uuid
-        ORDER BY created_at DESC
-        LIMIT 60`,
-      [companyId],
-    );
+    // ★ 2026-10-26 S3 · S17 — 라이브러리 CT 한 벌(담당자 = 자기 소재 · 검색 · 200건). 옛: 회사 전체 최신 60개라 남의 소재가 보였고 오래된 소재는 못 골랐다.
+    const q = typeof req.query.q === 'string' ? req.query.q.slice(0, 100) : undefined;
+    const rows = await listAssets(companyId, q, resolveOwnerScope(req));
     return res.json({
       success: true,
-      assets: r.rows.map((a) => ({
+      assets: rows.map((a) => ({
         id: a.id,
         url: a.url,
         kind: a.kind,
@@ -341,10 +359,12 @@ router.post('/media/from-asset', async (req: Request, res: Response) => {
   if (!assetId) return res.status(400).json({ success: false, error: '소재를 골라 주세요.' });
 
   try {
-    const a = await query(`SELECT id, url, kind FROM cdp_assets WHERE id = $1::uuid AND company_id = $2::uuid`, [assetId, companyId]);
-    if (!a.rows[0]) return res.status(404).json({ success: false, error: '소재를 찾을 수 없습니다.' });
+    // ★ 2026-10-26 S3 — 라이브러리 CT(담당자 = 자기 소재만) · 형식이 틀린 id = 없음
+    const asset = isUuid(assetId) ? await getAsset(companyId, assetId, resolveOwnerScope(req)) : null;
+    if (!asset) return res.status(404).json({ success: false, error: '소재를 찾을 수 없습니다.' });
 
-    const stored = await copyAssetToSnsMedia({ companyId, assetUrl: a.rows[0].url });
+    if (await snsStorageFull(companyId, Number(asset.bytes) || 0)) return sendStorageFull(res);
+    const stored = await copyAssetToSnsMedia({ companyId, assetUrl: asset.url });
     const r = await query(
       `INSERT INTO sns_media (company_id, created_by, kind, path, format, bytes, width, height, asset_id)
        VALUES ($1::uuid, $2::uuid, 'image', $3, $4, $5, $6, $7, $8::uuid)
@@ -355,8 +375,8 @@ router.post('/media/from-asset', async (req: Request, res: Response) => {
     return res.json({
       success: true,
       // ★ 2026-09-24 B-8 — 이미지 스튜디오에서 만든 소재만 AI 표시 대상(직접 올려 둔 소재는 아니다).
-      media: { id: row.id, width: row.width, height: row.height, kind: 'image', aiNotice: a.rows[0].kind === 'generated' },
-      fits: fitsByChannel(stored.width, stored.height),
+      media: { id: row.id, width: row.width, height: row.height, kind: 'image', aiNotice: await snsMediaNeedsAiNotice(companyId, [row.id]) },
+      fits: fitsByChannel(stored.width, stored.height, companyId),
     });
   } catch (err: any) {
     if (err instanceof SnsMediaError) return res.status(400).json({ success: false, code: err.code, error: err.message });
@@ -367,9 +387,12 @@ router.post('/media/from-asset', async (req: Request, res: Response) => {
   }
 });
 
-/** 이 사진이 채널마다 어떻게 되는가 — **화면이 추론하지 않게 서버가 계산해서 준다.** */
-function fitsByChannel(width: number, height: number) {
-  return listSnsAdapters().filter((a) => a.available).map((a) => {
+/**
+ * 이 사진이 채널마다 어떻게 되는가 — **화면이 추론하지 않게 서버가 계산해서 준다.**
+ * ★ 2026-10-26 S15(R1) — 채널 = 이 회사에 열린 것만(개방 판정 CT 한 벌 · 옛: 어댑터 준비만 봐 닫힌 채널 안내가 섞였다).
+ */
+function fitsByChannel(width: number, height: number, companyId: string) {
+  return listSnsAdapters().filter((a) => snsChannelAvailable(a, companyId).ok).map((a) => {
     const plan = planSnsFit(width, height, a.capabilities, 'pad');
     return {
       platform: a.platform,
@@ -382,8 +405,8 @@ function fitsByChannel(width: number, height: number) {
 }
 
 /** ★ 1차-B — 이 영상을 채널마다 받는가. 영상은 손대지 않으므로 받으면 언제나 "그대로"다(불변 21). */
-function videoFitsByChannel(v: SnsVideoFacts) {
-  return listSnsAdapters().filter((a) => a.available).map((a) => {
+function videoFitsByChannel(v: SnsVideoFacts, companyId: string) {
+  return listSnsAdapters().filter((a) => snsChannelAvailable(a, companyId).ok).map((a) => {
     const fit = planSnsVideoFit(v, a.capabilities.video);
     return { platform: a.platform, label: a.label, untouched: true, notice: fit.notice, accepted: fit.accepted };
   });
@@ -403,6 +426,7 @@ router.post('/media/uploads', async (req: Request, res: Response) => {
   const companyId = (req as any).user?.companyId as string;
   const userId = (req as any).user?.userId ?? null;
   try {
+    if (await snsStorageFull(companyId, Number(req.body?.bytes) || 0)) return sendStorageFull(res);
     const r = await startSnsVideoUpload({
       companyId,
       userId,
@@ -456,7 +480,7 @@ router.post('/media/uploads/:id/complete', async (req: Request, res: Response) =
     return res.json({
       success: true,
       media: { id: row.id, width: row.width, height: row.height, kind: 'video', durationSec: stored.probe.durationSec, aiNotice: false },
-      fits: videoFitsByChannel(facts),
+      fits: videoFitsByChannel(facts, companyId),
       relocated: stored.relocated,
     });
   } catch (err: any) {
@@ -474,8 +498,8 @@ router.post('/media/lookup', async (req: Request, res: Response) => {
   if (!ids.length) return res.json({ success: true, items: [], missing: [] });
   try {
     const r = await query(
-      `SELECT id, kind, path, bytes, width, height FROM sns_media WHERE company_id = $1::uuid AND id = ANY($2::uuid[])`,
-      [companyId, ids],
+      `SELECT id, kind, path, bytes, width, height FROM sns_media WHERE company_id = $1::uuid AND id = ANY($2::uuid[]) AND ${snsOwnerClause('created_by', 3)}`,
+      [companyId, ids, resolveOwnerScope(req)],
     );
     const byId = new Map(r.rows.map((row: any) => [String(row.id), row]));
     const ai = await snsMediaAiNoticeMap(companyId, ids);
@@ -490,7 +514,7 @@ router.post('/media/lookup', async (req: Request, res: Response) => {
           const facts: SnsVideoFacts = { bytes: Number(m.bytes) || 0, durationSec: probe.durationSec, width: probe.width, height: probe.height, videoCodec: probe.videoCodec };
           items.push({
             media: { id: m.id, width: probe.width, height: probe.height, kind: 'video', durationSec: probe.durationSec, aiNotice: ai.get(id) ?? false },
-            fits: videoFitsByChannel(facts),
+            fits: videoFitsByChannel(facts, companyId),
           });
         } catch {
           missing.push(id);
@@ -499,7 +523,7 @@ router.post('/media/lookup', async (req: Request, res: Response) => {
       }
       items.push({
         media: { id: m.id, width: m.width, height: m.height, kind: 'image', aiNotice: ai.get(id) ?? false },
-        fits: fitsByChannel(Number(m.width) || 0, Number(m.height) || 0),
+        fits: fitsByChannel(Number(m.width) || 0, Number(m.height) || 0, companyId),
       });
     }
     return res.json({ success: true, items, missing });
@@ -512,13 +536,50 @@ router.post('/media/lookup', async (req: Request, res: Response) => {
 });
 
 /**
+ * ★ 2026-10-26 S11 · D4 — 「AI로 만든 사진·영상이에요」 직접 표시(0917 설계 §3-9 · 기본 꺼짐 · 1탭).
+ *   다른 도구로 만든 AI 이미지를 직접 올렸을 때 표시할 길. 스튜디오에서 만든 소재(asset kind=generated)는 언제나 붙고 끌 수 없다(판정 CT = sns-ai-notice).
+ *   응답 = 판정 CT 결과(화면이 혼자 판단하지 않는다).
+ */
+router.patch('/media/:id/ai-declared', async (req: Request, res: Response) => {
+  const companyId = (req as any).user?.companyId as string;
+  const mediaId = String(req.params.id);
+  if (!isUuid(mediaId)) return res.status(404).json({ success: false, error: '사진을 찾을 수 없습니다.' });
+  const declared = req.body?.declared === true;
+  try {
+    const r = await query(
+      `UPDATE sns_media SET ai_declared = $4
+        WHERE id = $1::uuid AND company_id = $2::uuid AND ${snsOwnerClause('created_by', 3)}
+        RETURNING id`,
+      [mediaId, companyId, resolveOwnerScope(req), declared],
+    );
+    if (!r.rows[0]) return res.status(404).json({ success: false, error: '사진을 찾을 수 없습니다.' });
+    return res.json({ success: true, aiNotice: await snsMediaNeedsAiNotice(companyId, [mediaId]) });
+  } catch (err: any) {
+    // db_alter_safety_net — 칸이 없는 배포(마이그레이션 전)는 500 대신 안내
+    const msg = String(err?.message || '');
+    if (err?.code === '42703' || (msg.includes('column') && msg.includes('does not exist'))) {
+      return res.status(503).json({ success: false, code: 'DB_MIGRATION_PENDING', error: 'DB 마이그레이션 필요: sns_media.ai_declared ALTER 실행 요청' });
+    }
+    if (isMissingSnsTable(err)) return sendDbPending(res);
+    console.error('[SNS media ai-declared] 오류:', err);
+    if (respondUserError(res, err)) return;
+    return res.status(500).json({ success: false, error: 'AI 표시를 바꾸지 못했어요. 잠시 뒤 다시 눌러 주세요.' });
+  }
+});
+
+/**
  * 화면 미리보기 — 인증 + 회사 조건. 영구히 살아 있다(플랫폼이 쓰는 주소와 다르다 · 불변 14).
  * ★ 2026-09-24 `?thumb=1` = 목록 썸네일(사진만 · 192px).
  */
 router.get('/media/:id', async (req: Request, res: Response) => {
   const companyId = (req as any).user?.companyId as string;
   try {
-    const r = await query(`SELECT path, kind FROM sns_media WHERE id = $1::uuid AND company_id = $2::uuid`, [String(req.params.id), companyId]);
+    const mediaId = String(req.params.id);
+    if (!isUuid(mediaId)) return res.status(404).json({ success: false, error: '사진을 찾을 수 없습니다.' });
+    const r = await query(
+      `SELECT path, kind FROM sns_media WHERE id = $1::uuid AND company_id = $2::uuid AND ${snsOwnerClause('created_by', 3)}`,
+      [mediaId, companyId, resolveOwnerScope(req)],
+    );
     if (!r.rows[0]) return res.status(404).json({ success: false, error: '사진을 찾을 수 없습니다.' });
     res.setHeader('Cache-Control', 'private, max-age=3600');
     if (req.query.thumb === '1') {
@@ -561,17 +622,6 @@ router.get('/tag-set', async (req: Request, res: Response) => {
     console.error('[SNS tag-set] 조회 오류:', err);
     if (respondUserError(res, err)) return;   // ★ 2026-10-25 R10 — 사용자 조건 오류 = 그 상태 · 문장 그대로
     return res.status(500).json({ success: false, error: '자주 쓰는 태그를 불러오지 못했어요.' });
-  }
-});
-
-/** 통째 저장(옛 화면 호환 · 상한·형식 거절). */
-router.put('/tag-set', async (req: Request, res: Response) => {
-  const companyId = (req as any).user?.companyId as string;
-  try {
-    const set = await replaceSnsTagSet(companyId, Array.isArray(req.body?.tags) ? req.body.tags : []);
-    return res.json({ success: true, tags: set.tags, invalid: set.invalid });
-  } catch (err: any) {
-    return sendTagSetError(res, err, '저장');
   }
 });
 
@@ -633,7 +683,7 @@ router.post('/caption', async (req: Request, res: Response) => {
       fit = { label: adapter.label, spec: adapter.capabilities, aiNotice: await snsMediaNeedsAiNotice(companyId, mediaIds) };
     }
     const photoDraft = !splitTrailingTagLines(body).head.trim();
-    const media = await loadSnsCaptionImages(companyId, mediaIds, photoDraft);
+    const media = await loadSnsCaptionImages(companyId, mediaIds, photoDraft, resolveOwnerScope(req));
     const tagSet = (await readSnsTagSet(companyId)).tags;
     // ★ 0925 사진 초안의 면허에 회사 이름이 든다(브랜드명 우선)
     let brandName = '';
@@ -682,6 +732,7 @@ router.post('/posts', async (req: Request, res: Response) => {
     const r = await composeSnsPost({
       companyId,
       userId,
+      ownerId: resolveOwnerScope(req),
       body: req.body?.body,
       tags: req.body?.tags,
       mediaIds: req.body?.mediaIds,
@@ -714,7 +765,7 @@ router.post('/posts/:id/reschedule', async (req: Request, res: Response) => {
   const postId = String(req.params.id);
   if (!isUuid(postId)) return res.status(400).json({ success: false, error: '잘못된 요청입니다.' });
   try {
-    const r = await rescheduleSnsPost(companyId, postId, req.body?.scheduledAt);
+    const r = await rescheduleSnsPost(companyId, postId, req.body?.scheduledAt, resolveOwnerScope(req));
     if (!r.ok) return res.status(r.status).json({ success: false, code: r.code, error: r.error });
     return res.json({ success: true, scheduledAt: r.scheduledAt, moved: r.moved });
   } catch (err: any) {
@@ -728,15 +779,19 @@ router.post('/posts/:id/reschedule', async (req: Request, res: Response) => {
 /** 취소 — `scheduled` 만. 선점된 뒤에는 409(이미 나가는 중이라 되돌리면 이중 게시가 된다). */
 router.post('/posts/:id/cancel', async (req: Request, res: Response) => {
   const companyId = (req as any).user?.companyId as string;
+  const postId = String(req.params.id);
+  if (!isUuid(postId)) return res.status(404).json({ success: false, error: '글을 찾을 수 없어요.' });
   try {
+    // ★ 2026-10-26 S3 — 담당자 = 자기 글만 · S14 — 묶음 상태는 줄에서 파생하므로 sns_posts.status 는 쓰지 않는다
     const r = await query(
-      `UPDATE sns_post_targets SET status = 'cancelled', updated_at = NOW()
-        WHERE post_id = $1::uuid AND company_id = $2::uuid AND status = 'scheduled'
-        RETURNING id`,
-      [String(req.params.id), companyId],
+      `UPDATE sns_post_targets t SET status = 'cancelled', updated_at = NOW()
+         FROM sns_posts p
+        WHERE p.id = t.post_id AND p.company_id = t.company_id AND ${snsOwnerClause('p.created_by', 3)}
+          AND t.post_id = $1::uuid AND t.company_id = $2::uuid AND t.status = 'scheduled'
+        RETURNING t.id`,
+      [postId, companyId, resolveOwnerScope(req)],
     );
-    if (r.rowCount === 0) return res.status(409).json({ success: false, error: '이미 올라가고 있어 취소할 수 없어요.' });
-    await query(`UPDATE sns_posts SET status = 'cancelled', updated_at = NOW() WHERE id = $1::uuid AND company_id = $2::uuid`, [String(req.params.id), companyId]);
+    if (r.rowCount === 0) return res.status(409).json({ success: false, error: '이미 올라가고 있거나 취소할 예약이 없어요. 목록을 새로 고쳐 주세요.' });
     return res.json({ success: true, cancelled: r.rowCount });
   } catch (err: any) {
     if (isMissingSnsTable(err)) return sendDbPending(res);
@@ -753,7 +808,7 @@ router.post('/posts/:id/cancel', async (req: Request, res: Response) => {
 router.post('/targets/:id/retry', async (req: Request, res: Response) => {
   const companyId = (req as any).user?.companyId as string;
   try {
-    const r = await retrySnsTarget(companyId, String(req.params.id));
+    const r = await retrySnsTarget(companyId, String(req.params.id), resolveOwnerScope(req));
     if (!r.ok) return res.status(r.status).json({ success: false, code: r.code, error: r.error, action: r.action ?? null });
     return res.json({ success: true, targetId: r.targetId, scheduledAt: r.scheduledAt });
   } catch (err: any) {
@@ -775,9 +830,10 @@ router.get('/posts', async (req: Request, res: Response) => {
   const companyId = (req as any).user?.companyId as string;
   const page = Number.parseInt(String(req.query.page ?? '1'), 10);
   try {
-    const view = await listSnsPostsView(companyId, Date.now(), Number.isFinite(page) ? page : 1);
-    const accounts = await listSnsAccounts(companyId);
-    const attention = await listSnsAttention(companyId, accounts);
+    const ownerId = resolveOwnerScope(req);   // ★ 2026-10-26 S3
+    const view = await listSnsPostsView(companyId, Date.now(), Number.isFinite(page) ? page : 1, ownerId);
+    const accounts = await listSnsAccounts(companyId, ownerId);
+    const attention = await listSnsAttention(companyId, accounts, Date.now(), ownerId);
     return res.json({
       success: true,
       upcoming: view.upcoming,
@@ -801,7 +857,7 @@ router.get('/posts/:id', async (req: Request, res: Response) => {
   const postId = String(req.params.id);
   if (!isUuid(postId)) return res.status(400).json({ success: false, error: '잘못된 요청입니다.' });
   try {
-    const [post] = await loadSnsPostsByIds(companyId, [postId]);
+    const [post] = await loadSnsPostsByIds(companyId, [postId], Date.now(), resolveOwnerScope(req));
     if (!post) return res.status(404).json({ success: false, error: '글을 찾을 수 없어요.' });
     return res.json({ success: true, post });
   } catch (err: any) {
@@ -824,7 +880,7 @@ snsPublicRouter.get('/m/:token', async (req: Request, res: Response) => {
 
   try {
     const r = await query(
-      `SELECT t.id, t.status, t.container_created_at, t.created_at, t.verified_at, t.company_id,
+      `SELECT t.id, t.status, t.container_created_at, t.created_at, t.claimed_at, t.verified_at, t.company_id,
               p.media_ids
          FROM sns_post_targets t JOIN sns_posts p ON p.id = t.post_id
         WHERE t.id = $1::uuid AND t.company_id = $2::uuid`,
@@ -875,8 +931,10 @@ snsPublicRouter.get('/auth/callback/:platform', async (req: Request, res: Respon
   }
   const code = String(req.query.code || '');
   if (!code) {
+    // ★ 2026-10-26 S5 — 플랫폼이 준 거절 사유(영어 원문)는 로그로만. 고객 글은 한 문장.
     const denied = String(req.query.error_description || req.query.error || '');
-    return res.send(renderSnsReturnHtml('error', denied ? `연결이 취소되었습니다. (${denied})` : '연결이 취소되었습니다. 이 창을 닫고 다시 시도해 주세요.', platform, null, st.nonce));
+    if (denied) console.warn(`[SNS callback] ${platform} 승인 취소 사유: ${denied.slice(0, 300)}`);
+    return res.send(renderSnsReturnHtml('error', '연결이 취소되었습니다. 이 창을 닫고 다시 시도해 주세요.', platform, null, st.nonce));
   }
 
   // 1회용 소비 — 0행이면 이미 쓴 state 이거나 만료다.

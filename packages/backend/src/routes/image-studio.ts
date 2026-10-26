@@ -20,6 +20,7 @@
 import { Router, Response } from 'express';
 import { getCreditCost } from '../utils/ai-credit-calc';
 import multer from 'multer';
+import sharp from 'sharp';   // ★ 2026-10-26 S19 상품 사진 = 실제 형식 판정
 import fs from 'fs';
 import path from 'path';
 // ★ 2026-09-27 R126 — 가드 이미지 CT
@@ -38,7 +39,7 @@ import { isStudioReady, StudioError, CREDIT_SOURCE, resolvePreset, buildPosterPr
 import { getTemplate, listTemplatesPublic, findUnfilledTemplateText } from '../utils/image-studio-templates';
 import { SUB_ORDER } from '../utils/image-studio-template-subs';
 import { createHash } from 'crypto';
-import { userErrorResponse, respondUserError, uploadErrorText } from '../utils/http-error';
+import { userErrorResponse, uploadErrorText } from '../utils/http-error';
 import { headlineTextSafe, LINE_HEADLINE_TITLE_MAX, LINE_HEADLINE_LABEL_MAX } from '../utils/line-headline';
 import { makeLineHeadlineImage, lineHeadlineImageSource, LineHeadlineInputError, resolveLineHeadlineLast, lineHeadlineCreditKey, readLineHeadlineByFp, markLineHeadlineRunning, markLineHeadlineDone, unmarkLineHeadlineDone, clearLineHeadlineRunning } from '../utils/line-headline-make';
 
@@ -473,16 +474,19 @@ const productUpload = multer({
   },
 });
 imageStudioRouter.post('/upload-product', (req: any, res: Response) => {
-  productUpload.single('image')(req, res, (err: any) => {
+  productUpload.single('image')(req, res, async (err: any) => {
     if (err) return res.status(400).json({ success: false, error: uploadErrorText(err, PRODUCT_UPLOAD_LIMITS) });   // ★ 2026-10-25 원장 #118
     const companyId = req.user?.companyId;
     if (!companyId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
     if (isStudioTempFull(companyId)) return respondStudioError(res, new StudioError('TEMP_FULL', 409));  // ★ 2026-09-27 R125
     const file = req.file as Express.Multer.File | undefined;
     if (!file) return res.status(400).json({ success: false, error: '이미지를 선택해주세요.' });
-    const ctype = file.mimetype.toLowerCase();
-    const ext = ctype.includes('png') ? 'png' : ctype.includes('webp') ? 'webp' : 'jpeg';
-    const tempId = writeTempBuffer(companyId, file.buffer, { kind: 'source', ext, mime: ctype, width: null, height: null });
+    // ★ 2026-10-26 S19 — 형식 = 실제 내용(브라우저가 적은 형식은 거짓일 수 있다 · SNS 저장과 같은 규칙). 그림이 아니면 저장하지 않는다.
+    let format = '';
+    try { format = String((await sharp(file.buffer).metadata()).format || ''); } catch { format = ''; }
+    const kind = format === 'png' ? 'png' : format === 'webp' ? 'webp' : format === 'jpeg' ? 'jpeg' : null;
+    if (!kind) return res.status(400).json({ success: false, error: 'JPG · PNG · WEBP 사진만 올릴 수 있어요.' });
+    const tempId = writeTempBuffer(companyId, file.buffer, { kind: 'source', ext: kind, mime: `image/${kind}`, width: null, height: null });
     return res.json({ success: true, source: { tempId, url: `/api/image-studio/temp/${tempId}` } });
   });
 });
@@ -662,7 +666,6 @@ imageStudioRouter.post('/save', async (req: any, res: Response) => {
       return res.status(503).json({ success: false, error: '이미지 보관함을 준비 중입니다. 잠시 후 다시 시도해 주세요.', code: 'DB_MIGRATION_PENDING' });
     }
     return respondStudioError(res, err);
-    if (respondUserError(res, err)) return;   // ★ 2026-10-25 R10 — 사용자 조건 오류 = 그 상태 · 문장 그대로
   }
   });
 });
@@ -711,7 +714,6 @@ imageStudioRouter.post('/mms-from-asset', async (req: any, res: Response) => {
       return res.status(503).json({ success: false, error: '이미지 보관함을 준비 중입니다. 잠시 후 다시 시도해 주세요.', code: 'DB_MIGRATION_PENDING' });
     }
     return respondStudioError(res, err);
-    if (respondUserError(res, err)) return;   // ★ 2026-10-25 R10 — 사용자 조건 오류 = 그 상태 · 문장 그대로
   }
 });
 

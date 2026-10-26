@@ -9,6 +9,7 @@ import aiMemoryRoutes from './routes/ai-memory';
 import aiUsageRoutes from './routes/ai-usage';
 import express from 'express';
 import { getCreditEvent } from './utils/request-context';
+import { uploadErrorText } from './utils/http-error';   // ★ 2026-10-26 S6 전역 처리기 안전망
 import cors from 'cors';
 import helmet from 'helmet';
 import morgan from 'morgan';
@@ -567,6 +568,11 @@ app.use((req, res) => {
 
 // 에러 핸들러
 app.use((err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {
+  // ★ 2026-10-26 S6 — 안전망: 미들웨어 단계의 업로드 · 본문 오류는 그 상태 + 사람 문장(옛: 전부 500 「서버 오류」).
+  //   라우트는 uploadGuard 로 그 상한 문장을 낸다 · 여기는 빠진 자리를 받는 바닥이다.
+  if (err?.name === 'MulterError') return res.status(400).json({ success: false, error: uploadErrorText(err) });
+  if (err?.type === 'entity.too.large') return res.status(413).json({ success: false, error: '보낸 내용이 너무 커요. 더 작게 나눠 다시 시도해 주세요.' });
+  if (err?.type === 'entity.parse.failed') return res.status(400).json({ success: false, error: '요청을 읽지 못했어요. 화면을 새로 고친 뒤 다시 시도해 주세요.' });
   console.error('서버 에러:', err);
   res.status(500).json({ error: '서버 오류가 발생했습니다.' });
 });

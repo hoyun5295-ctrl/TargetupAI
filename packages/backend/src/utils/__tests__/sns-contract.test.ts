@@ -310,8 +310,13 @@ describe('소재 라이브러리 픽커 (§4-2 · §3-9)', () => {
   });
 
   it('소재는 회사 조건으로만 꺼낸다 — 남의 회사 소재를 가져올 수 없다', () => {
-    expect(ROUTE).toMatch(/FROM cdp_assets\s*\n?\s*WHERE company_id = \$1::uuid/);
-    expect(ROUTE).toMatch(/FROM cdp_assets WHERE id = \$1::uuid AND company_id = \$2::uuid/);
+    // ★ 2026-10-26 S3 · S17 — 라이브러리 CT 한 벌(회사 조건 + 담당자 = 자기 소재)
+    expect(ROUTE).toMatch(/listAssets\(companyId, q, resolveOwnerScope\(req\)\)/);
+    expect(ROUTE).toMatch(/getAsset\(companyId, assetId, resolveOwnerScope\(req\)\)/);
+    expect(ROUTE).not.toMatch(/FROM cdp_assets/);
+    const ASSETS = readFileSync(resolve(__dirname, '../assets.ts'), 'utf8');
+    expect(ASSETS).toMatch(/FROM cdp_assets\s+WHERE company_id = \$1::uuid/);
+    expect(ASSETS).toMatch(/WHERE id = \$1::uuid AND company_id = \$2::uuid\$\{ownerClause\}/);
   });
 });
 
@@ -332,7 +337,8 @@ describe('작성 구역 미리보기 · 인증 주소는 헤더를 실어 받는
 
   it('미리보기 주소를 그대로 쓰지 않고 공용 CT 로 받는다', () => {
     expect(COMPOSER).toMatch(/import \{[^}]*fetchAuthObjectUrl[^}]*\} from '\.\.\/\.\.\/lib\/auth-download'/);
-    const uses = [...COMPOSER.matchAll(/`\/api\/sns\/media\/\$\{/g)];
+    // ★ 2026-10-26 D4 — AI 표시 바꾸기(PATCH …/ai-declared)는 미리보기가 아니다(그림을 받지 않는다)
+    const uses = [...COMPOSER.matchAll(/`\/api\/sns\/media\/\$\{[^}]+\}(?!\/ai-declared)/g)];
     expect(uses.length).toBeGreaterThan(0);
     for (const u of uses) {
       expect(COMPOSER.slice(Math.max(0, u.index! - 40), u.index)).toMatch(/fetchAuthObjectUrl\($/);

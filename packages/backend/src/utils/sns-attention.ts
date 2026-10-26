@@ -18,7 +18,7 @@
 import { query } from '../config/database';
 import { SNS_ERROR_CODES } from './sns-constants';
 import { snsLatestTargetSql } from './sns-retry';
-import { toAccountCard, snsChannelUrl, type SnsAccountRow } from './sns-accounts';
+import { toAccountCard, snsChannelUrl, snsOwnerClause, type SnsAccountRow } from './sns-accounts';
 
 export const SNS_ATTENTION_DAYS = 7;
 export const SNS_ATTENTION_SHOW = 3;
@@ -46,7 +46,8 @@ export interface SnsAttentionItem {
   checkUrl?: string | null;
 }
 
-export async function listSnsAttention(companyId: string, accounts: SnsAccountRow[], now: number = Date.now()): Promise<{
+/** ★ 2026-10-26 S3(R3) — accounts = 부르는 쪽이 이미 범위로 거른 계정 · ownerId = 담당자면 자기 글만(③④). */
+export async function listSnsAttention(companyId: string, accounts: SnsAccountRow[], now: number = Date.now(), ownerId: string | null = null): Promise<{
   items: SnsAttentionItem[];
   total: number;
 }> {
@@ -88,6 +89,7 @@ export async function listSnsAttention(companyId: string, accounts: SnsAccountRo
        JOIN sns_posts p ON p.id = t.post_id AND p.company_id = t.company_id
        LEFT JOIN sns_accounts a ON a.id = t.account_id AND a.company_id = t.company_id
       WHERE t.company_id = $1::uuid
+        AND ${snsOwnerClause('p.created_by', 3)}
         AND t.updated_at > NOW() - ($2 || ' days')::interval
         AND ${snsLatestTargetSql('t')}
         AND ((t.status = 'failed' AND t.platform_post_id IS NULL)
@@ -101,7 +103,7 @@ export async function listSnsAttention(companyId: string, accounts: SnsAccountRo
              AND (p2.body = p.body OR p2.media_ids && p.media_ids))
       ORDER BY t.updated_at DESC
       LIMIT 50`,
-    [companyId, String(SNS_ATTENTION_DAYS)],
+    [companyId, String(SNS_ATTENTION_DAYS), ownerId],
   );
   for (const t of rows.rows) {
     const base = {

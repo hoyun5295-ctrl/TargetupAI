@@ -26,6 +26,7 @@ import { snsMediaNeedsAiNotice } from './sns-ai-notice';
 import { parseSnsScheduleAt } from './sns-schedule';
 import { buildSnsIdempotencyKey } from './sns-idempotency';
 import { SNS_ERROR_CODES } from './sns-constants';
+import { snsOwnerClause } from './sns-accounts';
 
 /** composeId 이름 공간(고정 · 바꾸면 같은 composeId 가 다른 글이 된다 · 화면 미러 sns-draft.ts 와 같은 값) */
 export const SNS_COMPOSE_NAMESPACE = '3b1f6a52-9c0e-5d7a-8e41-6f2c9a0b7d13';
@@ -52,6 +53,8 @@ export function snsComposeTargetId(postId: string, accountId: string): string {
 export interface SnsComposeInput {
   companyId: string;
   userId: string | null;
+  /** ★ 2026-10-26 S3(R3) — resolveOwnerScope(req) · 관리자 = null(회사 전체) · 담당자 = 본인(자기가 연결한 계정 · 자기가 올린 사진 · 자기 글만) */
+  ownerId?: string | null;
   body: unknown;
   tags: unknown;
   mediaIds: unknown;
@@ -130,6 +133,7 @@ async function compareExisting(db: Client, companyId: string, postId: string, wa
 
 export async function composeSnsPost(input: SnsComposeInput): Promise<SnsComposeResult> {
   const { companyId, userId } = input;
+  const ownerId = input.ownerId ?? null;
   const body = String(input.body ?? '');
   const rawTags = Array.isArray(input.tags) ? input.tags : [];
   const invalid = invalidSnsTags(rawTags);
@@ -139,7 +143,7 @@ export async function composeSnsPost(input: SnsComposeInput): Promise<SnsCompose
   const accountIds: string[] = Array.from(new Set(Array.isArray(input.accountIds) ? input.accountIds.map(String) : []));
   const composeId = typeof input.composeId === 'string' && isUuid(input.composeId) ? input.composeId : null;
   const replacesPostId = typeof input.replacesPostId === 'string' && isUuid(input.replacesPostId) ? input.replacesPostId : null;
-  const publish = !!input.publish;
+  const publish = input.publish;
 
   if (!body.trim() && mediaIds.length === 0) {
     return fail(400, 'EMPTY_POST', '글이나 사진·영상 중 하나는 있어야 해요.');
@@ -150,28 +154,26 @@ export async function composeSnsPost(input: SnsComposeInput): Promise<SnsCompose
   if (!mediaIds.every(isUuid) || !accountIds.every(isUuid)) {
     return fail(400, 'BAD_REQUEST', '요청을 읽지 못했어요. 화면을 새로 고쳐 주세요.');
   }
-  // 글 고치기는 옛 예약을 취소하고 새 예약을 거는 한 동작이다 — 초안만 만들면 옛 예약만 사라진다.
-  if (replacesPostId && !publish) {
-    return fail(400, 'BAD_REQUEST', '글 고치기는 예약과 함께만 저장할 수 있어요. 화면을 새로 고쳐 주세요.');
+  // ★ 2026-10-26 S13(R15) — 저장 = 언제나 올리기(예약 포함) 한 동작. 초안만 만드는 옛 갈래는 지웠다(화면은 늘 publish 를 싣고
+  //   초안을 올리던 /publish 는 1025 에 지웠다 · 초안은 영영 올릴 수 없는 행이 됐다).
+  if (!publish) {
+    return fail(400, 'BAD_REQUEST', '요청을 읽지 못했어요. 화면을 새로 고쳐 주세요.');
   }
   // ★2026-09-22 글 속 링크에 실존하지 않는 도메인이 있으면 올리지 않는다 — 게시는 되고 보는 사람이
   //   눌렀을 때 안 열린다. 판정은 CT(findLinkDefectInText)가 소유하고 전 채널이 같은 문구를 쓴다.
   const snsLinkDefect = findLinkDefectInText(body, '글 속 링크는');
   if (snsLinkDefect) return fail(400, 'LINK_DEFECT', snsLinkDefect);
 
-  let scheduledAt: Date | null = null;
-  if (publish) {
-    // ★ 2026-09-24 예약 시각은 CT 하나로 읽는다(S3 · /publish·시각 바꾸기와 같은 판정).
-    const sched = parseSnsScheduleAt(input.publish?.scheduledAt);
-    if (!sched.ok) return fail(400, sched.code, sched.error);
-    scheduledAt = sched.at;
-  }
+  // ★ 2026-09-24 예약 시각은 CT 하나로 읽는다(S3 · 시각 바꾸기와 같은 판정).
+  const sched = parseSnsScheduleAt(publish.scheduledAt);
+  if (!sched.ok) return fail(400, sched.code, sched.error);
+  const scheduledAt: Date | null = sched.at;
 
   // ★ 1차-B — 채널마다 이 미디어를 받는지 **저장 전에** 판정한다(워커에서 터지지 않게 · 설계 1b §3-4).
   //   화면 칩 잠금과 같은 규칙·같은 문구다(sns-view.ts 미러 · 계약 테스트).
   const uniqueMediaIds = Array.from(new Set(mediaIds));
   const mediaRes = uniqueMediaIds.length
-    ? await query(`SELECT id, kind, path, bytes FROM sns_media WHERE company_id = $1::uuid AND id = ANY($2::uuid[])`, [companyId, uniqueMediaIds])
+    ? await query(`SELECT id, kind, path, bytes FROM sns_media WHERE company_id = $1::uuid AND id = ANY($2::uuid[]) AND ${snsOwnerClause('created_by', 3)}`, [companyId, uniqueMediaIds, ownerId])
     : { rows: [] as any[] };
   if (mediaRes.rows.length !== uniqueMediaIds.length || uniqueMediaIds.length !== mediaIds.length) {
     return fail(400, 'MEDIA_NOT_FOUND', '올린 사진이나 영상을 찾지 못했어요. 다시 올려 주세요.');
@@ -207,9 +209,9 @@ export async function composeSnsPost(input: SnsComposeInput): Promise<SnsCompose
     // 계정은 **내 회사 것만** 쓴다(불변 5). ★ 0924 — 고른 계정이 **전부** active 여야 한다(일부만 나가는 것 0) · 게시 동안 해제 못 하게 FOR SHARE.
     const accRes = await client.query(
       `SELECT id, platform, status FROM sns_accounts
-        WHERE company_id = $1::uuid AND id = ANY($2::uuid[])
+        WHERE company_id = $1::uuid AND id = ANY($2::uuid[]) AND ${snsOwnerClause('connected_by', 3)}
         FOR SHARE`,
-      [companyId, accountIds],
+      [companyId, accountIds, ownerId],
     );
     const notActive = accountIds.filter((id) => !accRes.rows.some((a) => String(a.id) === id && a.status === 'active'));
     if (notActive.length) {
@@ -241,7 +243,7 @@ export async function composeSnsPost(input: SnsComposeInput): Promise<SnsCompose
       acc,
       caption: buildSnsCaption({ body, tags, aiNotice }, getSnsAdapter(acc.platform)!.capabilities),
     }));
-    if (publish) {
+    {
       const bad = built.filter((b) => !b.caption.ok);
       if (bad.length) {
         await client.query('ROLLBACK');
@@ -270,7 +272,7 @@ export async function composeSnsPost(input: SnsComposeInput): Promise<SnsCompose
 
     // 글 고치기(E6) — 옛 글의 계정별 최신 행이 전부 예약 중일 때만 바꾼다. 사진·채널은 그대로여야 한다.
     if (replacesPostId) {
-      const old = await client.query(`SELECT media_ids FROM sns_posts WHERE id = $1::uuid AND company_id = $2::uuid`, [replacesPostId, companyId]);
+      const old = await client.query(`SELECT media_ids FROM sns_posts WHERE id = $1::uuid AND company_id = $2::uuid AND ${snsOwnerClause('created_by', 3)}`, [replacesPostId, companyId, ownerId]);
       const locked = await client.query(
         `SELECT id, account_id, status, created_at FROM sns_post_targets
           WHERE post_id = $1::uuid AND company_id = $2::uuid
@@ -299,7 +301,6 @@ export async function composeSnsPost(input: SnsComposeInput): Promise<SnsCompose
         await client.query('ROLLBACK');
         return fail(409, 'REPLACE_TARGET_GONE', '고치던 예약이 이미 올라가기 시작했거나 취소됐어요. 이 글은 새 글로 올릴 수 있어요.');
       }
-      await client.query(`UPDATE sns_posts SET status = 'cancelled', updated_at = NOW() WHERE id = $1::uuid AND company_id = $2::uuid`, [replacesPostId, companyId]);
     }
 
     // ★ 2026-09-24 게시물의 예약 시각은 **사용자가 고른 시각만** 적는다 — 지금 올리기는 NULL(S7).
@@ -308,7 +309,7 @@ export async function composeSnsPost(input: SnsComposeInput): Promise<SnsCompose
        VALUES ($1::uuid, $2::uuid, $3, $4::text[], $5::uuid[], $6, $7::uuid, $8)
        ON CONFLICT (id) DO NOTHING
        RETURNING id`,
-      [postId, companyId, body, tags, mediaIds, publish ? 'scheduled' : 'draft', userId, publish ? scheduledAt : null],
+      [postId, companyId, body, tags, mediaIds, 'scheduled', userId, scheduledAt],
     );
     if (!ins.rows[0]) {
       // 같은 composeId 가 동시에 들어와 먼저 들어간 쪽이 있다 — 그 글과 대조한다.
@@ -319,7 +320,7 @@ export async function composeSnsPost(input: SnsComposeInput): Promise<SnsCompose
 
     // ★ 1차-B — 영상은 채널 중립 값 'video'. 인스타는 어댑터가 릴스로 보낸다.
     const format = summary.videos > 0 ? 'video' : mediaIds.length > 1 ? 'carousel' : mediaIds.length === 1 ? 'feed' : 'text';
-    const when = publish ? (scheduledAt ?? new Date()) : null;
+    const when = scheduledAt ?? new Date();
     const targets: SnsComposeTarget[] = [];
     for (const { acc, caption } of built) {
       const targetId = composeId ? snsComposeTargetId(postId, String(acc.id)) : randomUUID();
@@ -328,7 +329,7 @@ export async function composeSnsPost(input: SnsComposeInput): Promise<SnsCompose
         `INSERT INTO sns_post_targets
            (id, post_id, company_id, account_id, platform, format, caption, status, scheduled_at, idempotency_key)
          VALUES ($1::uuid, $2::uuid, $3::uuid, $4::uuid, $5, $6, $7, $8, $9, $10)`,
-        [targetId, postId, companyId, acc.id, acc.platform, format, caption.text, publish ? 'scheduled' : 'draft', when, idem],
+        [targetId, postId, companyId, acc.id, acc.platform, format, caption.text, 'scheduled', when, idem],
       );
       targets.push({
         targetId, accountId: String(acc.id), platform: acc.platform,
@@ -341,8 +342,8 @@ export async function composeSnsPost(input: SnsComposeInput): Promise<SnsCompose
       ok: true,
       existing: false,
       postId,
-      published: publish,
-      scheduledAt: when ? when.toISOString() : null,
+      published: true,
+      scheduledAt: when.toISOString(),
       targets,
     };
   } catch (err) {
@@ -362,7 +363,7 @@ export type SnsRescheduleResult =
  *   잠금은 NOWAIT — 워커가 잡고 있으면(=올리는 중) 기다리지 않고 409(55P03).
  *   컨테이너·다음 시도 시각을 비운다(옛 시각에 만든 컨테이너를 새 시각에 쓰지 않게).
  */
-export async function rescheduleSnsPost(companyId: string, postId: string, rawAt: unknown): Promise<SnsRescheduleResult> {
+export async function rescheduleSnsPost(companyId: string, postId: string, rawAt: unknown, ownerId: string | null = null): Promise<SnsRescheduleResult> {
   const sched = parseSnsScheduleAt(rawAt);
   if (!sched.ok) return { ok: false, status: 400, code: sched.code, error: sched.error };
   if (!sched.at) return { ok: false, status: 400, code: 'SCHEDULE_REQUIRED', error: '바꿀 시각을 골라 주세요.' };
@@ -371,6 +372,12 @@ export async function rescheduleSnsPost(companyId: string, postId: string, rawAt
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
+    // ★ 2026-10-26 S3 — 담당자 = 자기 글만(남의 글 = 없음과 같다)
+    const own = await client.query(`SELECT 1 FROM sns_posts WHERE id = $1::uuid AND company_id = $2::uuid AND ${snsOwnerClause('created_by', 3)}`, [postId, companyId, ownerId]);
+    if (!own.rows[0]) {
+      await client.query('ROLLBACK');
+      return { ok: false, status: 404, code: 'NOT_FOUND', error: '글을 찾을 수 없어요. 목록을 새로 고쳐 주세요.' };
+    }
     let locked;
     try {
       locked = await client.query(

@@ -26,7 +26,8 @@
 import sharp from 'sharp';
 import { callAIWithFallback } from '../services/ai';
 import { query } from '../config/database';
-import { extractJsonFromAiText } from './ai-json';
+import { extractJsonFromAiText, aiStr } from './ai-json';
+import { snsOwnerClause } from './sns-accounts';
 import { findBenefitSpans, findNewNumbers, stripUnauthorizedBenefits, claimsInventedEfficacy, dropInventedEfficacy, efficacyNote, EFFICACY_PLACEHOLDER, EFFICACY_PROMPT_RULES, EFFICACY_REWRITE_RULE } from './copy-benefit-detector';
 import {
   buildSnsCaption, countSnsCaption, findBodyHashtagSpans, findSnsLinkSpans, normalizeSnsTags, snsLinkHost,
@@ -236,7 +237,7 @@ function sameText(a: string, b: string): boolean {
  * 사진 초안에 넘길 사진 — **회사 조건으로 다시 읽고** 영상은 빼고 요청 순서대로 앞 3장 · 긴 변 1024 로 줄여 JPEG.
  * 공용 AI 함수(`services/ai.ts` images)는 고치지 않는다.
  */
-export async function loadSnsCaptionImages(companyId: string, mediaIds: readonly string[], withImages = true): Promise<{
+export async function loadSnsCaptionImages(companyId: string, mediaIds: readonly string[], withImages = true, ownerId: string | null = null): Promise<{
   images: Array<{ media_type: string; data: string }>;
   /** images 와 같은 순서의 미디어 id(사진 속 글 캐시 키) */
   imageIds: string[];
@@ -245,9 +246,10 @@ export async function loadSnsCaptionImages(companyId: string, mediaIds: readonly
 }> {
   const ids = [...new Set(mediaIds.map(String))].slice(0, 20);
   if (!ids.length) return { images: [], imageIds: [], imageCount: 0, videoCount: 0 };
+  // ★ 2026-10-26 S3(R3) — 담당자 = 자기가 올린 사진만 AI 에 넘긴다
   const r = await query(
-    `SELECT id, kind, path FROM sns_media WHERE company_id = $1::uuid AND id = ANY($2::uuid[])`,
-    [companyId, ids],
+    `SELECT id, kind, path FROM sns_media WHERE company_id = $1::uuid AND id = ANY($2::uuid[]) AND ${snsOwnerClause('created_by', 3)}`,
+    [companyId, ids, ownerId],
   );
   const byId = new Map(r.rows.map((row: any) => [String(row.id), row]));
   const ordered = ids.map((id) => byId.get(id)).filter(Boolean) as Array<{ id: string; kind: string; path: string }>;
@@ -317,7 +319,7 @@ export async function transcribeSnsImageText(input: {
   try {
     const parsed = extractJsonFromAiText<{ lines?: unknown }>(String(raw));
     lines = (Array.isArray(parsed.lines) ? parsed.lines : [])
-      .map((x) => String(x ?? '').replace(/\s+/g, ' ').trim())
+      .map((x) => aiStr(x).replace(/\s+/g, ' ').trim())   // ★ 2026-10-26 S8 — 글일 때만(객체 줄 = 빈 줄로 걸러진다)
       .filter(Boolean)
       .slice(0, IMAGE_TEXT_MAX_LINES)
       .map((l) => [...l].slice(0, IMAGE_TEXT_MAX_CHARS).join(''));
@@ -483,7 +485,7 @@ export async function generateSnsCaption(input: SnsAiCaptionInput): Promise<SnsA
   const tags = suggested.filter((t) => candKeys.has(t.toLowerCase()));
   const rejectedTags = suggested.filter((t) => !candKeys.has(t.toLowerCase()));
 
-  let text = String(parsed.caption ?? '').trim();
+  let text = aiStr(parsed.caption).trim();   // ★ 2026-10-26 S8 — 객체 칸 = 빈 글(「[object Object]」가 초안이 되지 않게)
   if (mode === 'photo_draft') {
     // 면허 = 사진 속 글 + 회사 이름 — 그 밖의 사실·태그가 든 문장은 뺀다
     const license = [...imageText, brand].filter(Boolean).join('\n');

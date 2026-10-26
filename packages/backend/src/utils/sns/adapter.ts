@@ -238,26 +238,56 @@ export function isSnsPublishAdapter(a: ISnsAdapter | null): a is ISnsPublishAdap
   return !!a && typeof (a as ISnsPublishAdapter).createPost === 'function';
 }
 
+/**
+ * ★ 2026-10-26 S2 · S4 — 실패의 종류. **판정 = 이 값 하나**(상태 코드 · 문장 글자로 가르지 않는다).
+ *   auth      사람이 다시 연결해야 한다(만료 · 회수 · 권한 없음)
+ *   rate      플랫폼 한도 — 끊김이 아니다(미루면 된다)
+ *   not_found 그 게시물이 없다고 플랫폼이 확정해 답했다(404 · 「대상 없음」 꼴)
+ *   other     그 밖(일시 장애 · 내용 거절 · 모름)
+ */
+export type SnsErrorKind = 'auth' | 'rate' | 'not_found' | 'other';
+
 /** 어댑터 호출이 실패했을 때 사유를 들고 올라간다 — catch 에서 사유를 버리지 않기 위한 형(型). */
 export class SnsAdapterError extends Error {
   readonly platform: SnsPlatform;
   readonly code: string;
   readonly httpStatus: number | null;
   readonly raw: unknown;
+  readonly kind: SnsErrorKind;
 
-  constructor(platform: SnsPlatform, code: string, message: string, httpStatus: number | null = null, raw: unknown = null) {
+  constructor(platform: SnsPlatform, code: string, message: string, httpStatus: number | null = null, raw: unknown = null, kind?: SnsErrorKind) {
     super(message);
     this.name = 'SnsAdapterError';
     this.platform = platform;
     this.code = code;
     this.httpStatus = httpStatus;
     this.raw = raw;
+    this.kind = kind ?? (httpStatus === 401 ? 'auth' : httpStatus === 404 ? 'not_found' : httpStatus === 429 ? 'rate' : 'other');
   }
+}
+
+/**
+ * ★ 2026-10-26 S2 · S4 — Meta(Graph · Instagram · Threads) 오류 본문 → 종류. 공식 오류 코드 표 기준(raw 미검증 · 설계 2026-10-26 §4-2 ④ 에서 확정).
+ *   190 · 102 = 토큰 만료 · 무효 / 10 · 200~299 = 권한 없음 → auth(Meta 는 이것을 HTTP 400 으로 준다)
+ *   4 · 17 · 32 · 613 · 80000~80014 = 한도 → rate
+ *   100 + 하위 33 = 「대상이 없거나 볼 수 없다」 → not_found
+ */
+export function metaErrorKind(httpStatus: number, err: { code?: unknown; error_subcode?: unknown } | null | undefined): SnsErrorKind {
+  const code = Number(err?.code);
+  const sub = Number(err?.error_subcode);
+  if (code === 190 || code === 102 || code === 10 || (code >= 200 && code <= 299)) return 'auth';
+  if (code === 4 || code === 17 || code === 32 || code === 613 || (code >= 80000 && code <= 80014)) return 'rate';
+  if (code === 100 && sub === 33) return 'not_found';
+  if (httpStatus === 401) return 'auth';
+  if (httpStatus === 404) return 'not_found';
+  if (httpStatus === 429) return 'rate';
+  return 'other';
 }
 
 /**
  * 플랫폼 응답을 JSON 으로 읽고, 오류면 **사유를 담아** 던진다.
  * ⛔ catch 에서 사유를 버리면 화면에 "실패했습니다"만 남는다(memory feedback_rejection_reasons_must_reach_model_and_log).
+ *   원문(message)은 로그 · 진단용이다. 고객 글은 호출부가 publicErrorText 로 고른다(★ 2026-10-26 S5).
  */
 export async function readSnsJson(platform: SnsPlatform, res: Response, step: string): Promise<any> {
   const text = await res.text();
@@ -271,9 +301,14 @@ export async function readSnsJson(platform: SnsPlatform, res: Response, step: st
     const err = body?.error || {};
     const code = String(err.code ?? err.type ?? res.status);
     const msg = String(err.message ?? err.error_message ?? text.slice(0, 300) ?? '');
-    throw new SnsAdapterError(platform, `${step}:${code}`, msg || `${step} 실패(HTTP ${res.status})`, res.status, body ?? text.slice(0, 500));
+    throw new SnsAdapterError(platform, `${step}:${code}`, msg || `${step} 실패(HTTP ${res.status})`, res.status, body ?? text.slice(0, 500), metaErrorKind(res.status, err));
   }
   return body;
+}
+
+/** ★ 2026-10-26 S2 — 재조회의 「없음」 = 플랫폼이 없다고 확정한 답뿐이다. 그 밖의 실패(끊김 · 한도 · 400)는 던진다(판정 못 함 ≠ 없음). */
+export function isSnsNotFound(err: unknown): boolean {
+  return err instanceof SnsAdapterError && err.kind === 'not_found';
 }
 
 const REGISTRY = new Map<SnsPlatform, ISnsAdapter>();

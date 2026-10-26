@@ -18,7 +18,7 @@
  */
 
 import {
-  registerSnsAdapter, readSnsJson, SnsAdapterError,
+  registerSnsAdapter, readSnsJson, SnsAdapterError, isSnsNotFound,
   type ISnsPublishAdapter, type SnsOAuthCreds, type SnsTokenResult, type SnsAccountProfile,
   type SnsPublishRequest, type SnsContainerResult, type SnsContainerStatus, type SnsFetchedPost,
 } from './adapter';
@@ -248,8 +248,13 @@ export const threadsAdapter: ISnsPublishAdapter = {
   async fetchPost(req: SnsPublishRequest, platformPostId: string): Promise<SnsFetchedPost> {
     const q = new URLSearchParams({ fields: 'id,permalink,timestamp', access_token: req.accessToken });
     const res = await fetch(`${GRAPH}/${platformPostId}?${q.toString()}`);
-    if (res.status === 404 || res.status === 400) return { exists: false, permalink: null };
-    const body = await readSnsJson('threads', res, 'fetch');
+    let body: any;
+    try {
+      body = await readSnsJson('threads', res, 'fetch');
+    } catch (err) {
+      if (isSnsNotFound(err)) return { exists: false, permalink: null };   // ★ 2026-10-26 S2 — 없다고 답한 꼴만
+      throw err;
+    }
     const id = String(body?.id || '');
     if (!id) return { exists: false, permalink: null };
     return { exists: true, permalink: body?.permalink ? String(body.permalink) : null, raw: { timestamp: body?.timestamp } };

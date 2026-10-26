@@ -32,7 +32,11 @@ const SNS_RENDER_BASE = process.env.SNS_RENDER_PATH || path.resolve('./uploads/s
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 /** 올릴 수 있는 이미지 형식. gif 는 애니메이션이라 제외(플랫폼이 첫 프레임만 받거나 거부한다). */
 const ALLOWED_IMAGE_EXT = new Set(['.jpg', '.jpeg', '.png', '.webp']);
-export const SNS_IMAGE_MAX_BYTES = 8 * 1024 * 1024;
+/**
+ * ★ 2026-10-26 S18 · D2 — 원본 상한 20MB(옛 8MB = 휴대폰 원본을 다시 내보내게 했다). 채널 상한(인스타 8MB 등)은
+ *   게시본을 구울 때 폭 상한 + 품질 사다리로 맞춘다(renderSnsPublishFile) — 원본 상한과 채널 상한은 다른 값이다.
+ */
+export const SNS_IMAGE_MAX_BYTES = 20 * 1024 * 1024;
 
 /** 게시본 JPEG 품질 사다리. 용량 상한을 넘으면 이 순서로 낮춰 다시 굽는다(마지막도 넘으면 실패). */
 const QUALITY_LADDER = [92, 86, 80, 72] as const;
@@ -76,7 +80,7 @@ export async function storeSnsMedia(input: {
     throw new SnsMediaError('BAD_FORMAT', '올릴 수 없는 형식이에요. JPG·PNG·WEBP 파일을 올려 주세요.');
   }
   if (input.buffer.length > SNS_IMAGE_MAX_BYTES) {
-    throw new SnsMediaError('TOO_LARGE', '사진이 너무 큽니다. 8MB 이하로 올려 주세요.');
+    throw new SnsMediaError('TOO_LARGE', `사진이 너무 큽니다. ${SNS_IMAGE_MAX_BYTES / 1024 / 1024}MB 이하로 올려 주세요.`);
   }
 
   // 확장자는 거짓일 수 있다. 실제 내용으로 판정한다.
@@ -265,12 +269,81 @@ export function snsRenderAbsPath(relPath: string): string {
   return path.join(SNS_RENDER_BASE, rel);
 }
 
-/** 게시본 삭제(보관 기간 지난 것). 원본은 건드리지 않는다. */
-export function removeSnsRenderFile(relPath: string): void {
-  try {
-    const abs = snsRenderAbsPath(relPath);
-    if (fs.existsSync(abs)) fs.unlinkSync(abs);
-  } catch { /* best-effort */ }
+// ───────────────────────── ★ 2026-10-26 S10 · D3 — 쌓이는 파일의 정리 짝 ─────────────────────────
+// 게시본 = 채널 규격으로 구운 사본(원본에서 언제든 다시 굽는다) → 7일 · 원본 = 사용자 자산(불러와서 쓰기) → 마지막으로 쓴 지 90일.
+// 원본은 회사 저장 공간 셈에 든다(assets.ts getStorageUsage) — 정리가 없으면 한도가 영영 안 풀린다.
+
+/** 게시본 보관 일수(스튜디오 임시 파일과 같은 값) */
+export const SNS_RENDER_KEEP_DAYS = 7;
+/** 원본 보관 일수 — 이 기간 동안 어떤 글에도 쓰이지 않고 올리는 중인 글도 없으면 지운다 */
+export const SNS_MEDIA_KEEP_DAYS = 90;
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+function oldFiles(dir: string, olderThanMs: number): string[] {
+  const out: string[] = [];
+  let names: string[] = [];
+  try { names = fs.readdirSync(dir); } catch { return out; }
+  const cutoff = Date.now() - olderThanMs;
+  for (const name of names) {
+    const abs = path.join(dir, name);
+    try {
+      const st = fs.statSync(abs);
+      if (st.isFile() && st.mtimeMs < cutoff) out.push(abs);
+    } catch { /* 넘어간다 */ }
+  }
+  return out;
+}
+
+/** 게시본 정리(파일 시각 기준). 게시는 선점 직후 굽고 몇 분 안에 끝나므로 7일 지난 게시본은 끝난 글의 것이다. */
+export function sweepSnsRenderFiles(): number {
+  let removed = 0;
+  let companies: string[] = [];
+  try { companies = fs.readdirSync(SNS_RENDER_BASE); } catch { return 0; }
+  for (const c of companies) {
+    if (!UUID_RE.test(c)) continue;
+    for (const abs of oldFiles(path.join(SNS_RENDER_BASE, c), SNS_RENDER_KEEP_DAYS * DAY_MS)) {
+      try { fs.unlinkSync(abs); removed += 1; } catch { /* 다음 날 다시 */ }
+    }
+  }
+  return removed;
+}
+
+/**
+ * 원본 정리 — 파일이 90일 넘었고, 그 원본을 쓴 글이 90일 안에 없고, 올리는 중(예약 · 선점 · 접수)인 줄도 없을 때만.
+ * 행을 먼저 지우고 파일을 지운다(행만 남으면 사용량에 잡힌 채 쓸 수 없는 사진이 된다). 조회가 실패하면 지우지 않는다.
+ */
+export async function sweepSnsMediaFiles(db: { query: (sql: string, params?: any[]) => Promise<{ rows: any[]; rowCount?: number | null }> }): Promise<number> {
+  let removed = 0;
+  let companies: string[] = [];
+  try { companies = fs.readdirSync(SNS_MEDIA_BASE); } catch { return 0; }
+  for (const c of companies) {
+    if (!UUID_RE.test(c)) continue;   // `_incoming` 등은 건너뛴다(조각은 업로드 시작 때 6시간 기준으로 정리)
+    for (const abs of oldFiles(path.join(SNS_MEDIA_BASE, c), SNS_MEDIA_KEEP_DAYS * DAY_MS)) {
+      const relPath = `${c}/${path.basename(abs)}`;
+      try {
+        await db.query(
+          `DELETE FROM sns_media m
+            WHERE m.company_id = $1::uuid AND m.path = $2
+              AND NOT EXISTS (SELECT 1 FROM sns_posts p
+                               WHERE p.company_id = m.company_id AND m.id = ANY(p.media_ids)
+                                 AND p.created_at > NOW() - ($3 || ' days')::interval)
+              AND NOT EXISTS (SELECT 1 FROM sns_posts p JOIN sns_post_targets t ON t.post_id = p.id AND t.company_id = p.company_id
+                               WHERE p.company_id = m.company_id AND m.id = ANY(p.media_ids)
+                                 AND t.status IN ('scheduled', 'claimed', 'submitted'))`,
+          [c, relPath, String(SNS_MEDIA_KEEP_DAYS)],
+        );
+        const known = await db.query(`SELECT 1 FROM sns_media WHERE company_id = $1::uuid AND path = $2 LIMIT 1`, [c, relPath]);
+        // 행이 없으면(방금 지움 · 애초에 고아 파일) 파일을 지운다. 행이 남았으면 아직 쓰인다.
+        if (known.rows.length === 0) {
+          fs.unlinkSync(abs);
+          removed += 1;
+        }
+      } catch (err: any) {
+        console.warn('[sns-media] 원본 정리 건너뜀:', relPath, err?.message || err);
+      }
+    }
+  }
+  return removed;
 }
 
 // ───────────────────────── ★ 2026-09-23 1차-B — 미디어별 게시본 · 영상 ─────────────────────────

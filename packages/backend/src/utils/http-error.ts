@@ -52,6 +52,23 @@ export function uploadErrorText(err: unknown, limits: { fileSize?: number; files
   return publicErrorText(err, UPLOAD_FALLBACK, 'upload');
 }
 
+/**
+ * ★ 2026-10-26 S6(Z5 같은 뿌리) — multer 를 라우트 미들웨어 자리에 둘 때의 한 벌.
+ *   업로드 오류(크기 · 개수 · 형식 거름) = 400 + uploadErrorText(그 업로드의 상한). 옛: `upload.single('file')` 을 그대로 두면
+ *   오류가 전역 처리기로 가서 500 「서버 오류가 발생했습니다」(SNS 큰 사진 · DM 당첨자 엑셀 · 발신 담당자 서류 · 엑셀 업로드).
+ */
+export function uploadGuard(
+  mw: (req: any, res: any, next: (err?: unknown) => void) => void,
+  limits: { fileSize?: number; files?: number } = {},
+) {
+  return (req: any, res: any, next: (err?: unknown) => void) => {
+    mw(req, res, (err?: unknown) => {
+      if (err) return res.status(400).json({ success: false, error: uploadErrorText(err, limits) });
+      next();
+    });
+  };
+}
+
 /** (순수) 오류 → 고객 글. 허용 꼴이 아니면 fallback(원문은 label 과 함께 로그) */
 export function publicErrorText(err: unknown, fallback: string = DEFAULT_FALLBACK, label?: string): string {
   if (err instanceof UserFacingError) return err.message;   // ★ 2026-10-25 R10 — 종류가 곧 「고객 문장」(상태는 respondUserError 가 낸다)

@@ -21,7 +21,7 @@ import SnsAssetPicker from './SnsAssetPicker';
 import ConfirmModal, { ConfirmState } from '../ConfirmModal';
 import { DateTimeField } from '../DateTimeField';
 import { useToast } from '../ToastProvider';
-import { fetchAuthObjectUrl } from '../../lib/auth-download';
+import { fetchAuthObjectUrl, fetchAuthJson } from '../../lib/auth-download';
 import { highlightAdditions, highlightRemovals } from '../../utils/text-diff';
 import {
   snsMediaBlockReason, formatSnsDuration, SNS_VIDEO_MAX_BYTES,
@@ -108,6 +108,11 @@ interface Replacing {
 }
 
 const AI_DIFF_MAX = 1500;
+/**
+ * ★ 2026-10-26 Codex 4R — 불러오기 차례 안의 기다림 한 단계 상한(게시 확인 · 사진 조회 · 미리보기 한 장).
+ *   넘으면 끊고 실패 갈래로 간다(복원 = 그대로 복원 · 사진 = 못 찾음 알림 · 미리보기 = 빈 칸). 잠금이 끝없이 남지 않게.
+ */
+const SNS_LOAD_STEP_TIMEOUT_MS = 15_000;
 
 function whenText(iso: string | null | undefined): string {
   if (!iso) return '';
@@ -151,6 +156,26 @@ export default function SnsComposer({
   const [reusedBody, setReusedBody] = useState<string | null>(null);
   const [alreadySaved, setAlreadySaved] = useState<string | null>(null);
   const [replaceGone, setReplaceGone] = useState(false);
+  /**
+   * ★ 2026-10-26 Codex 1R · 2R(같은 부류 두 번 → 구조) — 「이 글에 붙어 있어야 할 사진」을 불러온 사진(media)과 따로 든다.
+   *   heldMediaIds = 아직 media 에 없는 첨부 id(불러오는 중 · 못 찾음) · mediaChecking = 확인 중.
+   *   불러오기를 시작하는 순간 원래 id 전부를 든다 → 끝나면 못 찾은 것만 남는다. 보존은 늘 media + held(원래 id 를 잃지 않는다).
+   *   올리기 잠금 = 확인 중 · 못 찾은 것이 남음(사람이 빼고 올리기를 누르거나 다시 불러와 찾을 때까지).
+   */
+  const [heldMediaIds, setHeldMediaIds] = useState<string[]>([]);
+  const [mediaChecking, setMediaChecking] = useState(false);
+  /**
+   * ★ 2026-10-26 Codex 3R(같은 부류 세 번째 → 불러오기 전체를 한 차례로) — 불러오기(복원 · 불러와서 쓰기 · 다시 불러오기)는
+   *   첫 await 전에 차례를 받고, 돌아올 때마다 아직 그 차례인지 본다. 비우기 · 새 불러오기가 차례를 올리면
+   *   옛 불러오기는 글 · 사진 · held · 확인 중 · 알림 · 보존 무엇도 바꾸지 않는다.
+   */
+  const loadGen = useRef(0);
+  const beginLoad = () => {
+    const gen = ++loadGen.current;
+    return () => alive.current && gen === loadGen.current;
+  };
+  /** 쓰던 글 복원 판정 중(이미 올린 글인지 묻는 중) — 그동안 작성기는 입력을 받지 않고(fieldset) · 보존은 쓰지도 지우지도 않는다 */
+  const [restoring, setRestoring] = useState(false);
   /** 409 CAPTION_CHANGED — 서버 확정본. sig 가 같을 때만 유효(무엇이든 바뀌면 미러로 돌아간다) */
   const [serverCaptions, setServerCaptions] = useState<{ sig: string; map: Record<string, string> } | null>(null);
   const [channelsOpen, setChannelsOpen] = useState(false);
@@ -234,12 +259,14 @@ export default function SnsComposer({
     data: { media: { id: string; width: number; height: number; kind?: string; durationSec?: number | null; aiNotice?: boolean }; fits?: unknown },
     /** ★ 1차-B — 영상은 이미 손에 든 파일로 미리 본다(300MB 를 다시 내려받지 않는다). 이 주소도 여기서부터 반납 대상이다 */
     localPreview?: string,
+    /** 불러오기 차례가 지났으면 붙이지 않는다(미리보기를 받는 사이에 비우기 · 새 불러오기가 올 수 있다) */
+    isCurrent?: () => boolean,
   ) => {
     let previewUrl: string | null = localPreview ?? null;
     if (!localPreview && data.media.kind !== 'video') {
-      try { previewUrl = await fetchAuthObjectUrl(`/api/sns/media/${data.media.id}`); } catch { /* 미리보기만 못 띄운다 */ }
+      try { previewUrl = await fetchAuthObjectUrl(`/api/sns/media/${data.media.id}`, SNS_LOAD_STEP_TIMEOUT_MS); } catch { /* 미리보기만 못 띄운다 */ }
     }
-    if (!alive.current) { if (previewUrl) URL.revokeObjectURL(previewUrl); return; }
+    if (!alive.current || (isCurrent && !isCurrent())) { if (previewUrl) URL.revokeObjectURL(previewUrl); return; }
     setMedia((prev) => (prev.some((x) => x.id === data.media.id) ? prev : [...prev, {
       id: data.media.id,
       kind: data.media.kind === 'video' ? 'video' : 'image',
@@ -372,7 +399,8 @@ export default function SnsComposer({
   const worstOver = [...overChannels].sort((x, y) => y.cap.overBy - x.cap.overBy)[0] ?? null;
   const placeholderLeft = captions.some((c) => c.cap.placeholderLeft) || (captions.length === 0 && tailBasis?.cap.placeholderLeft);
 
-  const sig = JSON.stringify([body, activeTags, media.map((m) => m.id), [...selected].sort()]);
+  // ★ 2026-10-26 D4 — AI 표시가 바뀌면 확정본도 바뀐다(서버 확정본 대조가 옛 값을 쓰지 않게 지문에 넣는다)
+  const sig = JSON.stringify([body, activeTags, media.map((m) => `${m.id}${m.aiNotice ? '*' : ''}`), [...selected].sort()]);
   const serverMap = serverCaptions && serverCaptions.sig === sig ? serverCaptions.map : null;
   const textOf = (c: { account: SnsAccount; cap: SnsCaptionView }) => serverMap?.[c.account.id] ?? c.cap.text;
 
@@ -515,16 +543,54 @@ export default function SnsComposer({
   };
 
   /** 불러와서 쓰기·복원 — 예전 미디어를 회사 조건으로 다시 읽어 같은 함수로 붙인다(E7). */
-  const lookupMedia = async (ids: string[]): Promise<number> => {
-    if (!ids.length) return 0;
+  const lookupMedia = async (ids: string[], isCurrent: () => boolean): Promise<string[]> => {
+    if (!ids.length) return [];
     try {
-      const res = await fetch('/api/sns/media/lookup', { method: 'POST', headers: jsonHeaders(), body: JSON.stringify({ mediaIds: ids }) });
-      const data = await res.json();
-      if (!data?.success) return ids.length;
-      for (const item of Array.isArray(data.items) ? data.items : []) await appendMedia(item);
-      return Array.isArray(data.missing) ? data.missing.length : 0;
+      const { data } = await fetchAuthJson('/api/sns/media/lookup', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ mediaIds: ids }),
+      }, SNS_LOAD_STEP_TIMEOUT_MS);
+      if (!data?.success) return ids;
+      for (const item of Array.isArray(data.items) ? data.items : []) await appendMedia(item, undefined, isCurrent);
+      return Array.isArray(data.missing) ? data.missing.map(String) : [];
     } catch {
-      return ids.length;
+      return ids;
+    }
+  };
+
+  /**
+   * 첨부 불러오기 한 벌(불러와서 쓰기 · 복원 · 다시 불러오기) — 시작부터 끝까지 원래 id 를 든다.
+   *   차례는 부른 쪽이 첫 await 전에 받은 것(beginLoad). 지났으면 null — 부른 쪽은 알림 없이 멈춘다.
+   */
+  const loadAttachments = async (ids: string[], isCurrent: () => boolean): Promise<string[] | null> => {
+    setHeldMediaIds(ids);
+    setMediaChecking(ids.length > 0);
+    const missing = await lookupMedia(ids, isCurrent);
+    if (!isCurrent()) return null;
+    setHeldMediaIds(missing);
+    setMediaChecking(false);
+    return missing;
+  };
+
+  /**
+   * ★ 2026-10-26 S11 · D4 — AI 표시 직접 켜기·끄기. 결과(aiNotice)는 서버 판정 CT 가 준 값만 쓴다
+   *   (스튜디오에서 만든 소재는 끄려 해도 켜진 채 돌아온다 · 그때 이유 한 줄).
+   */
+  const [aiDeclareBusy, setAiDeclareBusy] = useState<string | null>(null);
+  const toggleAiDeclared = async (m: UploadedMedia) => {
+    if (aiDeclareBusy) return;
+    setAiDeclareBusy(m.id);
+    try {
+      const res = await fetch(`/api/sns/media/${m.id}/ai-declared`, { method: 'PATCH', headers: jsonHeaders(), body: JSON.stringify({ declared: !m.aiNotice }) });
+      const data = await res.json().catch(() => null);
+      if (!alive.current) return;
+      if (!res.ok || !data?.success) { toastRef.current.error(data?.error || 'AI 표시를 바꾸지 못했어요. 잠시 뒤 다시 눌러 주세요.'); return; }
+      const on = data.aiNotice === true;
+      if (m.aiNotice && on) toastRef.current.info('이미지 스튜디오에서 만든 사진은 AI 표시를 끌 수 없어요.');
+      setMedia((prev) => prev.map((x) => (x.id === m.id ? { ...x, aiNotice: on } : x)));
+    } catch {
+      toastRef.current.error('AI 표시를 바꾸지 못했어요. 잠시 뒤 다시 눌러 주세요.');
+    } finally {
+      setAiDeclareBusy(null);
     }
   };
 
@@ -751,6 +817,8 @@ export default function SnsComposer({
   // ── 전체 비우기 · 불러오기 ──
 
   const resetAll = (opts?: { keepSelected?: boolean }) => {
+    loadGen.current += 1;
+    setRestoring(false);
     setMedia([]);
     setBodyByApp('');
     setScheduledAt('');
@@ -767,6 +835,8 @@ export default function SnsComposer({
     setReusedBody(null);
     setAlreadySaved(null);
     setReplaceGone(false);
+    setHeldMediaIds([]);
+    setMediaChecking(false);
     setComposeId(newSnsComposeId());
     if (!opts?.keepSelected) setSelected([]);
   };
@@ -777,6 +847,7 @@ export default function SnsComposer({
     const post = req.post;
     const latest = post.targets.filter((t) => !t.superseded);
     resetAll();
+    const isCurrent = beginLoad();
     initRef.current.tagsApplied = true;
     initRef.current.defaultsApplied = true;
     setBodyByApp(post.body || '');
@@ -798,8 +869,9 @@ export default function SnsComposer({
       }));
       setReusedBody(post.body || '');
     }
-    const missing = await lookupMedia(post.media_ids || []);
-    if (missing > 0) toastRef.current.warning(`예전 사진·영상 ${missing}개를 찾지 못했어요. 다시 올려 주세요.`);
+    const missing = await loadAttachments(post.media_ids || [], isCurrent);
+    if (!missing) return;
+    if (missing.length > 0) toastRef.current.warning(`예전 사진이나 영상 ${missing.length}개를 찾지 못했어요. 다시 올리거나 빼고 올려 주세요.`);
     sectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
   };
 
@@ -810,15 +882,18 @@ export default function SnsComposer({
     if (req.kind === 'seed') {
       // ★ 2026-09-30 Codex R1: 글쓰기 진행 중에는 본문을 바꾸지 않는다(바꾸면 진행 중 결과가 본문 변경 검사에 걸려 버려진다)
       if (aiBusy) { toastRef.current.info('AI가 글을 쓰는 중이에요. 끝난 뒤 다시 넣어 주세요.'); return; }
+      if (restoring) { toastRef.current.info('쓰던 글을 불러오는 중이에요. 끝난 뒤 다시 넣어 주세요.'); return; }
       // 쓰던 글이 있으면 그 뒤에 이어 붙인다(지우지 않는다) · AI 가 그 글을 바탕으로 채널 글을 쓴다
       const cur = bodyRef.current.trim();
-      setBodyByApp(cur ? `${cur}
-${req.text}` : req.text);
+      const next = cur ? `${cur}
+${req.text}` : req.text;
+      setBodyByApp(next);
       sectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-      if (aiMode.mode !== 'locked') void runAi('write');
+      // ★ 2026-10-26 S7(R9) — 판정 = 넣은 뒤 글(옛: 넣기 전 글로 계산된 aiMode 라 빈 작성기에 한 줄을 넣으면 locked 로 읽혀 AI 가 돌지 않았다)
+      if (snsCaptionMode({ body: next, imageCount: summary.images, videoCount: summary.videos }).mode !== 'locked') void runAi('write');
       return;
     }
-    if (hasContent || replacing) {
+    if (hasContent || replacing || restoring) {
       setConfirmState({
         mode: 'warning',
         title: '쓰던 글을 비우고 불러올까요?',
@@ -842,24 +917,29 @@ ${req.text}` : req.text);
     initRef.current.restored = true;
     initRef.current.tagsApplied = true;
     let cancelled = false;
+    const isCurrent = beginLoad();
+    const live = () => !cancelled && isCurrent();
+    setRestoring(true);
     (async () => {
       const postId = companyId ? await snsComposePostId(companyId, userId, d.composeId) : null;
+      if (!live()) return;
       if (postId) {
         try {
-          const res = await fetch('/api/sns/posts', { headers: auth() });
-          const data = await res.json();
-          const ids = new Set([...(data?.upcoming ?? []), ...(data?.posts ?? [])].map((p: { id: string }) => p.id));
-          if (ids.has(postId)) {
+          // ★ 2026-10-26 S20 — 그 글 하나를 묻는다(옛: 기록 1쪽 10개에서만 찾아 11번째 이후 글은 다시 복원됐다)
+          const { res, data } = await fetchAuthJson(`/api/sns/posts/${postId}`, {}, SNS_LOAD_STEP_TIMEOUT_MS);
+          if (!live()) return;
+          if (res.ok && data?.success && data.post) {
             // 이미 올라간 글 — 복원하지 않고 새 글 상태(자주 쓰는 태그 켜짐)로 돌아간다
             removeSnsDraft(draftKey);
             initRef.current.restored = false;
             initRef.current.tagsApplied = false;
+            setRestoring(false);
             void loadTagSet();
             return;
           }
         } catch { /* 확인 못 하면 복원한다 — 올리기에서 서버가 같은 글인지 다시 본다 */ }
       }
-      if (cancelled || !alive.current) return;
+      if (!live()) return;
       setBodyByApp(d.body);
       setOnTags(normalizeSnsTags(d.onTags || []));
       setExtraTags(normalizeSnsTags(d.extraTags || []));
@@ -867,22 +947,25 @@ ${req.text}` : req.text);
       if (d.scheduledAt && new Date(d.scheduledAt).getTime() > Date.now()) setScheduledAt(d.scheduledAt);
       setComposeId(d.composeId || newSnsComposeId());
       if (d.replacesPostId) setReplacing({ postId: d.replacesPostId, accountIds: d.selected || [], mediaIds: d.mediaIds || [], whenIso: d.scheduledAt || null });
-      await lookupMedia(d.mediaIds || []);
-      toastRef.current.info('쓰던 글을 이어서 불러왔어요.');
+      setRestoring(false);
+      const missing = await loadAttachments(d.mediaIds || [], live);
+      if (!missing) return;
+      if (missing.length > 0) toastRef.current.warning(`쓰던 글을 불러왔어요. 사진이나 영상 ${missing.length}개를 찾지 못했어요. 다시 올리거나 빼고 올려 주세요.`);
+      else toastRef.current.info('쓰던 글을 이어서 불러왔어요.');
     })();
-    return () => { cancelled = true; };
+    return () => { cancelled = true; setRestoring(false); };
   }, [draftKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // 1초 뒤 저장(비었으면 지운다)
   useEffect(() => {
-    if (!draftKey) return;
+    if (!draftKey || restoring) return;
     const t = setTimeout(() => {
-      if (!body.trim() && media.length === 0) { removeSnsDraft(draftKey); return; }
+      if (!body.trim() && media.length === 0 && heldMediaIds.length === 0) { removeSnsDraft(draftKey); return; }
       writeSnsDraft(draftKey, {
         body,
         onTags: activeTags,
         extraTags,
-        mediaIds: media.map((m) => m.id),
+        mediaIds: Array.from(new Set([...media.map((m) => m.id), ...heldMediaIds])),
         selected,
         scheduledAt: scheduledAt && new Date(scheduledAt).getTime() > Date.now() ? scheduledAt : '',
         composeId,
@@ -891,7 +974,7 @@ ${req.text}` : req.text);
       });
     }, 1000);
     return () => clearTimeout(t);
-  }, [draftKey, body, activeTags, extraTags, media, selected, scheduledAt, composeId, replacing]);
+  }, [draftKey, body, activeTags, extraTags, media, selected, scheduledAt, composeId, replacing, heldMediaIds, restoring]);
 
   // 다른 탭에서 올리기에 성공하면(보존 글이 지워지면) 이 탭의 composeId 를 새로 만든다
   useEffect(() => {
@@ -913,6 +996,10 @@ ${req.text}` : req.text);
     if (selected.length === 0) return '올릴 채널을 골라 주세요.';
     if (!body.trim() && media.length === 0) return '글이나 사진·영상 중 하나는 있어야 해요.';
     if (scheduleInPast) return '이미 지난 시각이에요. 다른 시각을 고르거나 지금 올려 주세요.';
+    if (mediaChecking) return '사진과 영상을 불러오는 중이에요. 잠시만 기다려 주세요.';
+    if (heldMediaIds.length > 0) return replacing
+      ? `예약 글의 사진이나 영상 ${heldMediaIds.length}개를 불러오지 못했어요. 「다시 불러오기」를 누르거나 고치기를 그만둬 주세요.`
+      : `찾지 못한 사진이나 영상이 ${heldMediaIds.length}개 있어요. 다시 올리거나 「빼고 올리기」를 눌러 주세요.`;
     if (placeholderLeft) return '글에 채워야 할 자리가 남아 있어요. [ ] 안을 직접 고쳐 주세요.';
     if (overChannels.length) return `${overChannels.map((c) => c.spec.label).join(' · ')} 글자 수를 넘었어요.`;
     return null;
@@ -1048,6 +1135,12 @@ ${req.text}` : req.text);
         )}
       </div>
 
+      {restoring && (
+        <div role="status" className="rounded-xl border border-slate-200 bg-white px-4 py-3 flex items-center gap-2 text-xs text-slate-600">
+          <Loader2 className="w-4 h-4 animate-spin text-violet-600 flex-shrink-0" /> 쓰던 글을 불러오는 중이에요.
+        </div>
+      )}
+      <fieldset disabled={restoring} aria-busy={restoring} className="m-0 p-0 border-0 min-w-0 space-y-3">
       {replacing && (
         <div className="rounded-xl border border-sky-200 bg-sky-50 px-4 py-3 flex items-start gap-2">
           <Pencil className="w-4 h-4 text-sky-700 flex-shrink-0 mt-0.5" />
@@ -1084,6 +1177,30 @@ ${req.text}` : req.text);
 
       {/* 1. 사진 */}
       <div className={`${OUI_CARD} p-4`}>
+        {heldMediaIds.length > 0 && !mediaChecking && (
+          <div className="mb-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2.5 flex items-center gap-2 flex-wrap">
+            <span className="text-xs text-amber-900 flex-1 min-w-[12rem] break-keep">
+              {replacing
+                ? `예약 글의 사진이나 영상 ${heldMediaIds.length}개를 불러오지 못했어요. 다시 불러오거나 고치기를 그만둬 주세요.`
+                : `예전 사진이나 영상 ${heldMediaIds.length}개를 찾지 못했어요(오래 쓰지 않은 파일은 정리돼요). 다시 올리거나, 빼고 올려 주세요.`}
+            </span>
+            <button type="button" onClick={() => void loadAttachments(heldMediaIds, beginLoad())}
+              className="h-8 px-3 rounded-lg text-xs font-semibold border border-amber-300 text-amber-900 bg-white hover:bg-amber-100">
+              다시 불러오기
+            </button>
+            {replacing ? (
+              <button type="button" onClick={() => resetAll({ keepSelected: true })}
+                className="h-8 px-3 rounded-lg text-xs font-semibold border border-amber-300 text-amber-900 bg-white hover:bg-amber-100">
+                고치기 그만두기
+              </button>
+            ) : (
+              <button type="button" onClick={() => setHeldMediaIds([])}
+                className="h-8 px-3 rounded-lg text-xs font-semibold border border-amber-300 text-amber-900 bg-white hover:bg-amber-100">
+                빼고 올리기
+              </button>
+            )}
+          </div>
+        )}
         <input ref={fileRef} type="file" accept="image/jpeg,image/png,image/webp,video/mp4,video/quicktime" multiple hidden
           onChange={(e) => void upload(e.target.files)} />
 
@@ -1126,7 +1243,15 @@ ${req.text}` : req.text);
                     </div>
                   )}
                   {m.kind !== 'video' && <span className="absolute left-1 top-1 text-[10px] px-1 rounded bg-slate-100 text-slate-600">{i + 1}</span>}
-                  {m.aiNotice && <span className="absolute left-1 bottom-1 text-[9px] px-1 rounded bg-violet-200 text-slate-900">AI</span>}
+                  {/* ★ 2026-10-26 S11 · D4 — AI 표시 1탭(다른 도구로 만든 AI 사진·영상 · 스튜디오 소재는 늘 켜짐 · 판정 = 서버) */}
+                  <button type="button" onClick={() => void toggleAiDeclared(m)} disabled={aiDeclareBusy === m.id}
+                    aria-pressed={m.aiNotice}
+                    title={m.aiNotice ? 'AI 표시가 붙어요. 눌러서 끌 수 있어요(스튜디오에서 만든 사진은 늘 붙어요).' : 'AI로 만든 사진이나 영상이면 눌러서 표시해요.'}
+                    className={`absolute left-1 bottom-1 text-[10px] leading-none px-1.5 py-1 rounded border transition-colors disabled:opacity-60 ${
+                      m.aiNotice ? 'bg-violet-600 border-violet-600 text-white' : 'bg-white/90 border-slate-300 text-slate-600 hover:border-violet-400 hover:text-violet-700'
+                    }`}>
+                    {aiDeclareBusy === m.id ? '…' : m.aiNotice ? 'AI 표시' : 'AI?'}
+                  </button>
                   {!mediaLocked && (
                     <button onClick={() => setMedia((prev) => prev.filter((x) => x.id !== m.id))}
                       className="absolute right-1 top-1 p-0.5 rounded bg-slate-100 text-slate-600 hover:text-slate-900" aria-label="빼기">
@@ -1148,6 +1273,10 @@ ${req.text}` : req.text);
               </button>
               </>)}
             </div>
+
+            {media.some((m) => !m.aiNotice) && (
+              <p className="mt-2 text-[11px] text-slate-500 break-keep">AI로 만든 사진·영상이면 그 칸의 「AI?」를 눌러 주세요. 글 끝에 AI 표시 문장이 붙어요.</p>
+            )}
 
             {/* ⛔ 잘린다는 말이 나오지 않는다 — 기본이 여백 채우기라 잘리지 않는다. */}
             {fitSummary && (
@@ -1639,6 +1768,7 @@ ${req.text}` : req.text);
           <p className="mt-2 text-[11px] text-slate-400">시각을 고르지 않으면 누르는 즉시 올라가요.</p>
         )}
       </div>
+      </fieldset>
 
       <SnsAssetPicker open={pickerOpen} onClose={() => setPickerOpen(false)} onPick={pickFromLibrary} />
       <ConfirmModal state={confirmState} onClose={() => setConfirmState(null)} />

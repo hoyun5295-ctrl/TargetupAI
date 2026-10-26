@@ -2144,7 +2144,6 @@ router.get('/operator/daily-brief', async (req: Request, res: Response) => {
       });
     }
     return operatorError(res, err, 'daily-brief GET', '오늘의 추천을 불러오지 못했습니다.');
-    if (respondUserError(res, err)) return;   // ★ 2026-10-25 R10 — 사용자 조건 오류 = 그 상태 · 문장 그대로
   }
 });
 
@@ -2517,7 +2516,6 @@ router.post('/operator/proposals/:id/recipients', async (req: Request, res: Resp
       return res.status(400).json({ success: false, code: 'TARGET_FILTER_EMPTY', error: '이 제안은 대상 조건이 비어 있어 보낼 수 없어요. 자동 마케팅에서 대상 조건을 확인해 주세요.' });
     }
     return operatorError(res, err, 'proposals recipients', '발송 대상을 불러오지 못했습니다.');
-    if (respondUserError(res, err)) return;   // ★ 2026-10-25 R10 — 사용자 조건 오류 = 그 상태 · 문장 그대로
   }
 });
 
@@ -3173,7 +3171,6 @@ router.get('/operator/journeys-opportunities', async (req: Request, res: Respons
     console.error('[Journeys opportunities] 오류:', err);
     // 기회 카드는 보조 기능 — 실패해도 빈 배열로 페이지 정상 동작
     return res.json({ success: true, opportunities: [] });
-    if (respondUserError(res, err)) return;   // ★ 2026-10-25 R10 — 사용자 조건 오류 = 그 상태 · 문장 그대로
   }
 });
 
@@ -4053,7 +4050,6 @@ router.get('/operator/grade-ranks', async (req: Request, res: Response) => {
       return res.status(503).json({ success: false, error: 'DB 마이그레이션 필요: 운영자에게 customer_grade_ranks 생성 요청', code: 'DB_MIGRATION_PENDING' });
     }
     return journeyError(res, err, 'get', '등급 순서 조회 실패');
-    if (respondUserError(res, err)) return;   // ★ 2026-10-25 R10 — 사용자 조건 오류 = 그 상태 · 문장 그대로
   }
 });
 
