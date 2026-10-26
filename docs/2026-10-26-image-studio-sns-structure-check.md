@@ -163,6 +163,7 @@ D1~D4 동의 → `LESSONS_FRONTEND` 디자인 하한 · `LESSONS_BACKEND` 정독
 ### §8-2 시험 · 변이
 - 짝 시험 `sns-structure-1026.test.ts`(시계 · 오류 종류 · 재조회 · X · 범위 조각 · 업로드 감싸개 · 초안 갈래 · 정리 2).
 - 뿌리 대장 끝 「1026 스튜디오 · SNS」 10건(R18 신설 · R7 재조회 · 다시 연결 · R3 SNS 주소 전수 · R4 AI JSON 칸 = 해석 결과 변수 기준 · R10 도달성 · Z5 미들웨어 꼴 · S5 · S10 · S7). **넓힌 계약이 같은 뿌리를 다른 기능에서 더 찾았다** = AI 칸 6줄 · 업로드 12곳(§8-1).
+- ★1026 push 전 전체 실행에서 `journey-v3-credit-out-1020`(준비 단계 10초) · `oneline-content-1021`(시험 20초)이 시간 초과로 push 를 막음(값 실패 0 · 단독 통과 · 불러오기 합계 1,170초 부하) → `packages/backend/vitest.config.ts` 에 hookTimeout 신설 · 두 제한 60초(9-29 testTimeout 만 올렸던 같은 뿌리 · Harold 승인).
 - 고친 시험 = sns-0924(쪽 넘김 자리표 $4) · sns-contract(소재 = 라이브러리 CT · 미리보기 정규식에서 AI 표시 PATCH 제외 · 함수 순서) · AI 존 기준표(SNS 호출 꼴 3줄 · 그 밖 = 늘어난 값).
 
 ### §8-4 Codex 적대 리뷰 (gpt-6-astra · 라운드마다 직전에 고친 줄만)
