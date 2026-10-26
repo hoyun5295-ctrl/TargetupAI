@@ -86,10 +86,14 @@
 | 원격 접속망 | 없음 | **Tailscale 동작**(100.88.72.107 · UDP 41641) = Phase 2 「두 번째 문」 후보 | (측정) |
 | `.gitignore` | 개인키 패턴 없음 · NUL 70 | **개인키 패턴 5 · NUL 0**(해결) | (AI 실행) |
 | `sync-agent/.env.bak` | git 추적 | 파일 있음 · `.env.*` 무시 규칙 있음 · **추적 여부 미확인**(git 명령) | (AI 실행) |
-| 운영 의존성 취약 버전 | 미측정 | **백엔드 32(치명 2 = fast-xml-parser · proxy-addr · 높음 22) · 프론트 6(높음 2 = axios · form-data)** → 묶음 1~4 처리 후 **백엔드 0 · 프론트 2**(react-router 7.18 미만 · 닿지 않음) · 배포 대기 | (AI 실행) `npm audit --omit=dev` · 처리 = 아래 3-9-1 |
-| 서버 Node 런타임 | 미측정 | **20.20.0(NodeSource node_20.x) = 2026-04-30 지원 끝** · 20.20.2 보안판도 미적용(NodeSource 는 자동 갱신 대상 아님) → 24.22.1 교체 설계 · 배포 대기 | (측정) Harold `node -v` · `apt-cache policy nodejs` · (문서) nodejs Release schedule |
+| 운영 의존성 취약 버전 | 미측정 | **백엔드 32(치명 2 = fast-xml-parser · proxy-addr · 높음 22) · 프론트 6(높음 2 = axios · form-data)** → 묶음 1~4 처리 후 **백엔드 0 · 프론트 2**(react-router 7.18 미만 · 닿지 않음) · **배포 완료 1027**(서버 백엔드 audit 0 실측) | (AI 실행) `npm audit --omit=dev` · 처리 = 아래 3-9-1 |
+| 서버 Node 런타임 | 미측정 | **20.20.0(NodeSource node_20.x) = 2026-04-30 지원 끝** · 20.20.2 보안판도 미적용(NodeSource 는 자동 갱신 대상 아님) → **24.22.1 교체 완료 1027**(Node 앱 4 · 재시작 0) · 자동 보안 갱신에 NodeSource 추가(`51unattended-upgrades-nodesource`) | (측정) Harold `node -v` · `apt-cache policy nodejs` · (문서) nodejs Release schedule |
 
 판정(10-26): 인터넷 노출면은 22 · 80 · 443 로 이미 좁혀져 있다 → §5 Phase 5(애플리케이션 계층)가 주 전선이다. 남은 서버 쪽 위험 = 원격 로그인 비밀번호 인증 · 하나로호스팅 패널 2단계 인증(상태 미확인) · 백업 복구 실측 · 다른 서버(.65 · .66 · .58 · .54) 미측정.
+
+#### 3-9-2. 보안 극대화 1~10 (2026-10-27) → 원장 = [docs/2026-10-27-security-hardening.md](2026-10-27-security-hardening.md)
+
+렌더 크롬 샌드박스 필수 · 매일 보안 감시 · 앱 계층 감사(A2 이메일 미리보기 XSS 한 겹 · A3 080 콜백이 다른 도메인으로 열림 · A4 웹훅 값 없으면 통과) · 침해 대응 1장. 이 문서 §5 Phase 5 · 6 의 진행분.
 
 #### 3-9-1. 의존성 보안판 · Node 런타임 (2026-10-26 · Harold 「해킹 · 외부 위협 불허」 · 설계 승인 = 묶음 1~4)
 
@@ -104,7 +108,7 @@
 
 같은 뿌리로 함께 닫은 것 = 유령 의존성(남의 꾸러미 안에 딸려 온 사본을 빌려 씀) uuid · pngjs · content-disposition 선언 · 계약 시험 R21(`docs/ROOT-LEDGER.md`).
 남은 것 = 프론트 react-router 7.18 미만 2건(바깥 값으로 이동 0 · SSR 없음 · 메이저 이관은 별도) · 프론트 개발 도구(vite 5 · tailwind 3 · esbuild 0.21 · 빌드 때만 · 메이저).
-범위 밖 기록 = 업로드 날짜+시각 셀이 다음 날로 저장(normalizeDate 올림 · 판과 무관 기존 동작) · 렌더 워커 샌드박스 실패 시 --no-sandbox 재시도(.62 실제 동작 미검증) · @prisma/client 선언만(소스 import 0) · 비토엔진(.65) 등 다른 서버 Node 판 미확인 · 개발 PC Node 20.19.4.
+★1027 실측으로 확정된 남은 문 = **렌더 워커가 .62 에서 샌드박스 없이 돈다**(sandbox=false · 오류 로그 「sandbox 기동 실패 → --no-sandbox 재시도」 · 바깥 사이트를 연다 → Chrome 취약점 = 서버 권한). 범위 밖 기록 = 업로드 날짜+시각 셀이 다음 날로 저장(normalizeDate 올림 · 판과 무관 기존 동작) · @prisma/client 선언만(소스 import 0) · 비토엔진(.65) 등 다른 서버 Node 판 미확인 · 개발 PC Node 20.19.4.
 
 ### 3-8. 자산 관리
 `.65`가 우리 문서 어디에도 없었다. 서버별 **콘솔 경로(KVM 등)가 문서화돼 있지 않다.** 오늘 복구 지연의 직접 원인.

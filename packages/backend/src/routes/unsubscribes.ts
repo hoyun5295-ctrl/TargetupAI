@@ -11,6 +11,7 @@ import { recordUnsubscribeDeleted } from '../utils/change-audit';
 import { process080Callback, getUserUnsubscribes, registerUnsubscribe, IsolationBlockedError, isUserIsolationEnabled, deleteIsolatedUnsubscribes, UNSUB_UPLOAD_CONCURRENCY } from '../utils/unsubscribe-helper';
 // ★ 2026-09-26 한줄로 V2 R1-17 — 파일 등록 동시 상한(입력 순서 보존 CT)
 import { mapWithConcurrency } from '../utils/concurrency';
+import { isOpt080CallbackIp } from '../utils/ip-allowlist';
 import { deduplicateByPhone } from '../utils/deduplicate';
 import { normalizePhone, formatPhoneDisplay } from '../utils/normalize';
 import { isFirstRowHeaderRow } from '../utils/excel-columns';
@@ -145,8 +146,13 @@ async function syncCustomerOptInBulk(companyId: string, phones: string[], optIn:
 // ================================================================
 router.get('/080callback', async (req: Request, res: Response) => {
   try {
+    // ★ 2026-10-27 두 번째 겹 — nginx 허용 목록(나래 6개 IP)과 같은 판정을 앱도 한다(보안 장부 A3 · 판정 = ip-allowlist 한 곳).
+    //   nginx 설정이 다른 서버 블록에서 빠지거나 바뀌어도 아무나 번호를 수신거부로 넣지 못한다.
+    if (!isOpt080CallbackIp(req.ip)) {
+      console.warn(`[080콜백] 허용 밖 출발지 거부 - ip=${req.ip}`);
+      return res.status(403).send('0');
+    }
     const { cid, fr } = req.query;
-    // ★ 토큰 검증 제거 — Nginx IP 화이트리스트(나래 6개 IP)로 보안 보장
 
     if (!cid || !fr) {
       console.log(`[080콜백] 필수 파라미터 누락 - cid=${cid}, fr=${fr}`);

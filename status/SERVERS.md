@@ -42,6 +42,7 @@
 ## 2. 서버별 상세
 
 ### .62 — 한줄로 운영 (58.227.193.62 / `administrator`)
+- **★1027 Node 24.22.1**(NodeSource `node_24.x` · 옛 줄 백업 `/root/nodesource.list.bak-20261027`) · npm 11.19.1(의존성 설치 스크립트 = package.json `allowScripts` 만) · 전역 ts-node 10.9.2 · pm2 = 전역 · PM2 앱 = targetup-backend · outreach-render(둘 다 `/usr/bin/ts-node`) · hanjuldm-api(`dist/app.js` · 로그 `~/hanjuldm-app/logs/`) · pm2-logrotate · studio-py(Python) · 자동 보안 갱신 = Ubuntu + NodeSource(`/etc/apt/apt.conf.d/51unattended-upgrades-nodesource`) · Chrome 156 = `~/.cache/puppeteer` · 근거 = 보안 설계서 §3-9-1
 운영 전체가 도는 서버. 디스크가 용도별로 갈려 있다 — `/` 98G(5%) · `/boot` 974M · `/home` 1.5T(2%) · `/var` 295G(26%).
 - **도커 4개**: `targetup-mysql`·`targetup-postgres`·`targetup-redis`·`pay-ingest-db`
 - **메모리 상위**: mysqld 4.5G · postgres 1.2G · java ×4(각 1G, QTmsg 에이전트) · node 762M

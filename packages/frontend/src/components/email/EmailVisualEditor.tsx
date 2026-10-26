@@ -924,10 +924,13 @@ export default function EmailVisualEditor({
               >PC</button>
             </div>
             <div className="flex-1 overflow-hidden bg-white">
+              {/* ★ 2026-10-27 보안 — 스크립트 실행 0(sandbox) · 같은 출처 접근만 남겨 스크롤 보존(handlePreviewLoad)은 그대로.
+                  sandbox 가 없으면 미리보기 HTML 안 스크립트가 이 화면과 같은 출처로 돌아 로그인 토큰을 읽을 수 있다 */}
               <iframe
                 ref={previewFrameRef}
                 onLoad={handlePreviewLoad}
                 title="이메일 미리보기"
+                sandbox="allow-same-origin"
                 srcDoc={previewHtml}
                 className="border-0"
                 style={previewWidth === 'pc'
@@ -949,7 +952,7 @@ export default function EmailVisualEditor({
           </div>
           <div className="flex-1 overflow-auto p-4 md:p-8 flex justify-center" onClick={(e) => e.stopPropagation()}>
             <div className="w-full max-w-[680px] bg-white rounded-lg shadow-2xl overflow-hidden">
-              <iframe title="PC 미리보기" srcDoc={previewHtml} className="w-full border-0" style={{ height: '82vh' }} />
+              <iframe title="PC 미리보기" sandbox="" srcDoc={previewHtml} className="w-full border-0" style={{ height: '82vh' }} />
             </div>
           </div>
         </div>

@@ -15,10 +15,16 @@
  * 프로세스 규율: 브라우저 1개 재사용 · 잡마다 BrowserContext 생성→종료 · 종료가 5초 안에 안 끝나면 SIGKILL 후 재기동 ·
  *  잡 시작마다 옛 프로필 디렉터리를 단 크롬 고아 프로세스(300초 초과) 수거.
  * HTTP API(127.0.0.1 만): POST /render {url, deadlineMs?, screenshot?} → {ok, ...} · 다른 렌더 진행 중이면 409 · GET /health.
+ * ★ 2026-10-27 샌드박스 없이 크롬을 띄우지 않는다 — 바깥 사이트를 여는 프로세스라 샌드박스가 크롬 취약점과 서버 권한 사이의 벽이다.
+ *   기동 실패 = 렌더 거부(백엔드는 정적 수집으로 전진) · 사유 = /health sandboxError(scripts/security-watch.sh 가 읽어 경보).
+ *   Ubuntu 24.04 는 비특권 사용자 네임스페이스를 AppArmor 로 막는다 → 처방 = 크롬 실행 파일 전용 AppArmor 프로필(status/OPS.md §2-2-E ⑧).
+ *   크롬 = root 만 쓸 수 있는 전용 경로(OUTREACH_RENDER_CHROME · /opt/hanjul-chrome) — 프로필이 그 경로에만 예외를 주므로 다른 실행 파일은 예외를 못 얻는다(Codex 1R).
+ *   환경 변수가 없으면 puppeteer 기본 경로(사용자 캐시)로 띄우고, 프로필이 맞지 않아 샌드박스가 안 뜨면 거부된다(닫힌 쪽 기본값).
  */
 import http from 'node:http';
 import net from 'node:net';
 import os from 'node:os';
+import fs from 'node:fs';
 import path from 'node:path';
 import { execSync } from 'node:child_process';
 import type { AddressInfo } from 'node:net';
@@ -31,9 +37,10 @@ import {
 const LOG = '[outreach-render]';
 const PORT = Number(process.env.OUTREACH_RENDER_PORT || 4317);
 const PROFILE_MARK = 'outreach-render-profile';
+/** 크롬 실행 파일(운영 = /opt/hanjul-chrome/current/chrome-linux64/chrome · ecosystem.config.js) · 비면 puppeteer 기본 */
+const CHROME_PATH = process.env.OUTREACH_RENDER_CHROME || undefined;
 const USER_AGENT = process.env.OUTREACH_RENDER_UA
   || 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36';
-const FORCE_NO_SANDBOX = process.env.OUTREACH_RENDER_NO_SANDBOX === '1';
 const CONTEXT_CLOSE_GRACE_MS = 5_000;
 const ORPHAN_AGE_SEC = 300;
 
@@ -108,7 +115,8 @@ proxy.on('connect', (req, clientSocket: net.Socket, head: Buffer) => {
 // ===== 브라우저 수명 =====
 
 let browser: Browser | null = null;
-let browserSandbox = true;
+/** 마지막 기동 실패 사유(샌드박스 기동 실패 포함) · 성공하면 비운다 · /health 로 내보낸다 */
+let lastLaunchError: string | null = null;
 let launchSeq = 0;
 let currentProfileDir: string | null = null;
 
@@ -127,24 +135,19 @@ async function launchBrowser(proxyPort: number): Promise<Browser> {
     '--mute-audio',
     '--lang=ko-KR',
   ];
-  const tryLaunch = (noSandbox: boolean) => puppeteer.launch({
-    headless: true,
-    userDataDir: profileDir,
-    args: noSandbox ? [...baseArgs, '--no-sandbox', '--disable-setuid-sandbox'] : baseArgs,
-    protocolTimeout: 60_000,
-  });
+  // 앞 브라우저의 프로필 폴더 회수(ensureBrowser 는 앞 브라우저가 끊긴 뒤에만 여기로 온다 · 고아 프로세스는 reapOrphans 가 경로로 수거)
+  if (currentProfileDir) { removeProfileDir(currentProfileDir); currentProfileDir = null; }
   let b: Browser;
-  if (FORCE_NO_SANDBOX) {
-    b = await tryLaunch(true); browserSandbox = false;
-  } else {
-    try {
-      b = await tryLaunch(false); browserSandbox = true;
-    } catch (e: any) {
-      // Ubuntu 24.04 계열은 비특권 사용자 네임스페이스를 막아 sandbox 기동이 실패한다. 트래픽은 프록시가 가두므로 --no-sandbox 로 재시도하고 그 사실을 남긴다.
-      console.warn(`${LOG} sandbox 기동 실패 → --no-sandbox 재시도: ${String(e?.message || e).slice(0, 160)}`);
-      b = await tryLaunch(true); browserSandbox = false;
-    }
+  try {
+    b = await puppeteer.launch({ headless: true, executablePath: CHROME_PATH, userDataDir: profileDir, args: baseArgs, protocolTimeout: 60_000 });
+  } catch (e: any) {
+    // ★ 2026-10-27 샌드박스 없이 다시 띄우지 않는다(옛 = --no-sandbox 재시도). 렌더는 거부되고 백엔드는 정적 수집으로 전진한다.
+    lastLaunchError = String(e?.message || e).replace(/\s+/g, ' ').slice(0, 300);
+    console.error(`${LOG} 크롬 기동 실패 — 렌더 거부(샌드박스 없이 열지 않는다): ${lastLaunchError}`);
+    removeProfileDir(profileDir);   // 실패마다 새 폴더라 남기면 /tmp 가 찬다(Codex 1R)
+    throw e;
   }
+  lastLaunchError = null;
   currentProfileDir = profileDir;
   try {
     const session = await b.target().createCDPSession();
@@ -154,7 +157,7 @@ async function launchBrowser(proxyPort: number): Promise<Browser> {
     console.warn(`${LOG} 다운로드 거부 설정 실패(계속): ${String(e?.message || e).slice(0, 120)}`);
   }
   b.on('disconnected', () => { if (browser === b) browser = null; });
-  console.log(`${LOG} 크롬 기동 (sandbox=${browserSandbox} · 프로필 ${profileDir})`);
+  console.log(`${LOG} 크롬 기동 (sandbox=true · 프로필 ${profileDir})`);
   return b;
 }
 
@@ -170,6 +173,12 @@ function killBrowser(reason: string): void {
   if (!b) return;
   console.warn(`${LOG} 크롬 강제 종료: ${reason}`);
   try { b.process()?.kill('SIGKILL'); } catch { /* 이미 종료 */ }
+}
+
+/** 이 워커가 만든 프로필 폴더만 지운다(이름 표식 · tmp 아래) — 실패 · 교체 때 */
+function removeProfileDir(dir: string): void {
+  if (!path.basename(dir).startsWith(`${PROFILE_MARK}-`) || path.dirname(dir) !== os.tmpdir()) return;
+  try { fs.rmSync(dir, { recursive: true, force: true }); } catch { /* 이미 없음 */ }
 }
 
 /** 옛 프로필을 단 크롬 고아 프로세스 수거(Linux) — 현재 살아 있는 프로필은 건드리지 않는다. */
@@ -364,7 +373,7 @@ async function renderOnce(input: RenderRequest, proxyPort: number): Promise<Rend
       textChars: dom.text.length,
       imgCount: dom.imgCount,
       imgWide: dom.imgWide,
-      sandbox: browserSandbox,
+      sandbox: true,
       timedOut,
       overBudget,
     };
@@ -415,7 +424,7 @@ async function main(): Promise<void> {
     void (async () => {
       const url = req.url || '/';
       if (req.method === 'GET' && url === '/health') {
-        send(res, 200, { ok: true, busy, browser: !!(browser && browser.connected), sandbox: browserSandbox, proxyPort });
+        send(res, 200, { ok: true, busy, browser: !!(browser && browser.connected), sandbox: true, sandboxError: lastLaunchError, proxyPort });
         return;
       }
       if (req.method === 'POST' && url === '/render') {
@@ -441,7 +450,7 @@ async function main(): Promise<void> {
   api.requestTimeout = 90_000;
   api.headersTimeout = 20_000;
   await new Promise<void>((resolve) => api.listen(PORT, '127.0.0.1', () => resolve()));
-  console.log(`${LOG} 시작 (포트 ${PORT} · 프록시 ${proxyPort} · 동시 1 · sandbox 강제해제=${FORCE_NO_SANDBOX})`);
+  console.log(`${LOG} 시작 (포트 ${PORT} · 프록시 ${proxyPort} · 동시 1 · 샌드박스 필수)`);
 
   const shutdown = (sig: string) => {
     console.log(`${LOG} 종료 신호 ${sig}`);

@@ -82,6 +82,9 @@ module.exports = {
       env: {
         NODE_ENV: 'production',
         OUTREACH_RENDER_PORT: '4317',
+        // ★ 2026-10-27 크롬 = root 만 쓸 수 있는 전용 경로(AppArmor 프로필 scripts/apparmor/puppeteer-chrome 이 이 경로에만 샌드박스 예외 · OPS.md §2-2-E ⑧)
+        //   바꾸면 scripts/security-watch.sh 의 SECURITY_WATCH_CHROME 기본값도 같이(R7 넓힘 1027 시험이 둘을 대조한다)
+        OUTREACH_RENDER_CHROME: '/opt/hanjul-chrome/current/chrome-linux64/chrome',
       },
     },
   ],

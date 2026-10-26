@@ -200,13 +200,22 @@
 > 검증 = backend · frontend tsc 0 · backend vitest 696파일 전부 통과 · 변이 7건 전부 잡힘 · 렌더 검사(실제 JourneyStepStudio · 360~1920 일곱 폭 · 세 채널) · Codex 1R high 1(모르는 역할이 전체로) 수용 → 2R approve
 > 배포 전 = 운영 users.user_type 분포 ★1027 실측 admin 133 · system 83 · user 108(모르는 값 0 · 역할 관문에 걸리는 계정 0) · 같은 폴더의 C67(의존성 · Node 24) 미커밋 변경과 섞이지 않게 파일 지정 커밋 · 배포 뒤 실측 = sgbaek 자동마케팅 1개 → 대상 수 = 인비토 전체 · 여정 칸 탭 「단문 문자」
 
+<a id="c69"></a>
+
+### C69 · ★1027 보안 극대화 1~10 — Codex 적대 4R approve · 배포 대기
+> 호출어 **"보안 극대화 / 보안 감시 / 샌드박스 필수 / 080 콜백 두 겹"** → 장부 [docs/2026-10-27-security-hardening.md](../docs/2026-10-27-security-hardening.md)(설계 1~10 · 진행 · 7번 감사 판정) · 침해 대응 = [1장](../docs/2026-10-27-incident-response.md) · 뿌리 = R7 · R11 · R14 넓힘(1027)
+> 만든 것 = ① 렌더 워커 샌드박스 필수(실패 = 거부 · 크롬 = root 전용 /opt/hanjul-chrome · AppArmor 프로필 · install-render-chrome.sh · render-chrome-probe.sh) ② security-watch.sh(매일 08:40 · 의존성 · Node 지원 · 보안 업데이트 · 재부팅 · 크롬 · 워커 → ops-alert) ⑩ 침해 대응 1장 · 7번 감사 = A2 이메일 미리보기 iframe sandbox · A3 080 콜백 앱 두 번째 겹(app.hanjul.ai · sys.hanjullo.com 으로 열려 있던 문) · A4 알림톡 웹훅 IP 값 없으면 거부 · IP 판정 한 곳(ip-allowlist)
+> 실측(Harold 1027) = apparmor_restrict_unprivileged_userns 1 · No usable sandbox · IMC IP 값 있음 · HMAC · 팝빌 키 없음 · nginx 080 location XFF 있음 · 080 정상 출발지 = 183.98.207.13 한 곳 · 검증 = backend tsc 0 · vitest 697 파일 10,242건 · frontend tsc 0
+> 남은 것 = 배포(크롬 설치 → 기동 시험 → 코드 → 실측) · 3 밤 창 apt 80 + 재부팅 · 4 SSH 키 전용 · 5 패널 2단계 · 6 떠돌이 파일 · 8 이상 행위 경보(기준값 실측) · 9 백업 복구 훈련 · A4 HMAC(업체 키) · A1 · A5(낮음)
+
 <a id="c67"></a>
 
-### C67 · ★1026 운영 의존성 보안판 · 서버 Node 20.20.0 → 24.22.1 — Codex 적대 2R approve · 배포 대기
+### C67 · ★1026 운영 의존성 보안판 · 서버 Node 20.20.0 → 24.22.1 — Codex 적대 2R approve · 배포 · 실측 완료 1027
 > 호출어 **"의존성 보안판 / Node 24 교체 / npm allowScripts"** → 설계 · 결과 = [보안 설계서 §3-9-1](../docs/2026-08-09-security-architecture-design.md) · 뿌리 = [뿌리 대장](../docs/ROOT-LEDGER.md) R21 · 교훈 = LESSONS_DEPLOY 1026 두 줄
 > 바뀐 것 = 묶음 1 비메이저(express · axios · multer · mysql2 · sharp · mailparser 등 · zod · bullmq 삭제) · 2 xlsx = SheetJS 공식 0.20.3 tgz · 3 nodemailer 10 · fast-xml-parser 5 · 4 puppeteer 25(Chrome 156) + 서버 Node 24 · 유령 의존성 uuid · pngjs · content-disposition 선언 · allowScripts(puppeteer@25.16.0 · esbuild@0.21.5 허용 · prisma 셋 막음) · 코드 1곳(alimtalk content-type)
 > 검증 = Node 24 backend tsc 0 · vitest 696파일 10,224건 · Node 20 도 통과 · frontend tsc 0 · build · npm ci 재현 · audit 운영 백엔드 0 · 프론트 2(react-router 7.18 미만 · 닿지 않음) · xlsx 판 전후 비교 · 고도몰 엔티티 시험 빨강 → 초록 · R21 변이 5 전부 잡힘 · Codex 1R medium 2(fast-xml-parser 5 숫자 문자 참조 미해석 = 4.5.0 대비 회귀 실측 → htmlEntities · R21 이 import = require · 변수 require 를 놓침) 수용 + 다음 단계(allowScripts ↔ lock 단정) 수용 → 변이 8 전부 잡힘 → 2R approve · 마지막 전체 696파일 10,228건
-> 배포 = 업무시간 외 · 순서 = 서버 Node 교체(NodeSource node_24.x) → pm2 update → backend · frontend npm ci(puppeteer postinstall 줄 확인) → build:safe → reload → 실측(MySQL 연결 줄 · 렌더 워커 Chrome · 업로드 · 메일 · 고도몰)
+> ★1027 실행(Harold · 07:0x~07:3x KST) = pull · build:safe · reload(새 코드 + 옛 라이브러리 · 정상) → 사전 점검(PM2 앱 5 · Node 20 전용 네이티브 0 · 전역 ts-node 10.9.2) → root `nodejs=24.22.1-1nodesource1`(백업 /root/nodesource.list.bak-20261027) → npm install(puppeteer postinstall · Chrome 156 · 백엔드 audit 0 · 104개 빠짐) → build:safe 둘 → `pm2 update`(Node 앱 4 = 24.22.1 · 재시작 0) → 실측 = MySQL(QTmsg) 연결됨 · /health ok · 렌더 example.com ok(Chrome 156) · 한줄전단 /health 200 · 새 오류 0 → 자동 보안 갱신에 NodeSource 추가(`/etc/apt/apt.conf.d/51unattended-upgrades-nodesource` · dry-run Allowed origins 에 site=deb.nodesource.com)
+> 실측으로 확정된 남은 문 = 렌더 워커 sandbox=false(「sandbox 기동 실패 → --no-sandbox 재시도」 · Ubuntu 24.04) · 범위 밖 = 서버 작업 트리 떠돌이 파일(ALTER · ^C · backup_uploadedby.dump · sdk-js lock 수정) · 커널 6.8.0-147 설치됨 · 구동 142(재부팅 대기) · apt 80개 미적용
 
 <a id="c66"></a>
 

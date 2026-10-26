@@ -18,6 +18,7 @@
 import crypto from 'crypto';
 import { query } from '../config/database';
 import { IMC_REPORT_CODE_MAP, resolveReportCode } from './alimtalk-result-map';
+import { parseIpAllowlist, isIpAllowed } from './ip-allowlist';
 
 // ════════════════════════════════════════════════════════════
 // 타입
@@ -80,18 +81,12 @@ export function verifyWebhookSignature(
 }
 
 /**
- * IP 화이트리스트 체크.
- * env `IMC_WEBHOOK_ALLOWED_IPS` (쉼표 구분) 에 포함된 IP만 허용.
- * 값 미설정 시 `true` 반환 (Phase 0 대응 — 개발 환경 편의).
+ * IP 화이트리스트 체크 — env `IMC_WEBHOOK_ALLOWED_IPS`(쉼표 구분)에 있는 IP 만 허용.
+ * ★ 2026-10-27 값이 없으면 거부(옛 = 통과 · Phase 0 편의). 운영 값 있음 = Harold 1027 실측 · 판정 = ip-allowlist 한 곳(::ffff: 접두 포함).
+ *   HMAC(IMC_WEBHOOK_HMAC_SECRET)은 업체가 키를 발급해야 켤 수 있어 아직 IP 한 겹이다(보안 장부 A4).
  */
-export function isAllowedWebhookIp(clientIp: string | undefined): boolean {
-  const csv = process.env.IMC_WEBHOOK_ALLOWED_IPS;
-  if (!csv || csv.trim() === '') return true;
-  if (!clientIp) return false;
-  const allow = csv.split(',').map((s) => s.trim()).filter(Boolean);
-  if (allow.length === 0) return true;
-  // IPv6 `::ffff:xxx.xxx.xxx.xxx` 형식도 허용하기 위해 suffix 비교
-  return allow.some((ip) => clientIp === ip || clientIp.endsWith(`:${ip}`));
+export function isAllowedWebhookIp(clientIp: string | undefined, csv: string | undefined = process.env.IMC_WEBHOOK_ALLOWED_IPS): boolean {
+  return isIpAllowed(clientIp, parseIpAllowlist(csv));
 }
 
 // ════════════════════════════════════════════════════════════

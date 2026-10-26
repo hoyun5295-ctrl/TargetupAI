@@ -1,0 +1,14 @@
+# ★2026-10-27 AI 영업 렌더 워커 크롬 = 샌드박스로 띄우기 위한 AppArmor 프로필(보안 설계서 §3-9-1 · status/OPS.md §2-2-E ⑧)
+# Ubuntu 24.04 는 kernel.apparmor_restrict_unprivileged_userns=1 로 비특권 사용자 네임스페이스를 막는다 →
+# 크롬 「No usable sandbox!」(.62 실측 1027). 시스템 설정은 그대로 두고 크롬 실행 파일 하나에만 userns 를 연다.
+# 근거 = chromium docs/security/apparmor-userns-restrictions.md(공식 처방).
+# ⛔ 경로는 root 만 쓸 수 있는 /opt/hanjul-chrome 아래만 — 사용자가 쓸 수 있는 경로(~/.cache)를 걸면 그 사용자의 아무 실행 파일이나
+#   같은 예외를 얻는다(Codex 1R). 크롬 판 옮기기 = scripts/install-render-chrome.sh(root).
+abi <abi/4.0>,
+include <tunables/global>
+
+profile hanjul-render-chrome /opt/hanjul-chrome/*/chrome-linux64/chrome flags=(unconfined) {
+  userns,
+
+  include if exists <local/hanjul-render-chrome>
+}

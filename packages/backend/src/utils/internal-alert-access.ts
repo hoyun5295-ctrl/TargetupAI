@@ -9,17 +9,13 @@
 // ============================================================
 
 import { normalizeIp } from './geo-access';
+import { parseIpAllowlist, isIpAllowed } from './ip-allowlist';
 
 const LOOPBACK = new Set(['127.0.0.1', '::1']);
 
 /** 쉼표로 적은 허용 주소를 정리한다. IP 형식이 아닌 조각은 버린다(대역 표기 미지원). */
 export function parseInternalAlertAllowedIps(raw: string | null | undefined): Set<string> {
-  const out = new Set<string>();
-  for (const part of String(raw ?? '').split(',')) {
-    const ip = normalizeIp(part);
-    if (ip) out.add(ip.toLowerCase());
-  }
-  return out;
+  return parseIpAllowlist(raw);   // ★1027 판정 한 곳(ip-allowlist)
 }
 
 /** 시스템 알림 API 를 불러도 되는 출발지인가 — 루프백 또는 INTERNAL_ALERT_ALLOWED_IPS 에 적은 주소 */
@@ -30,5 +26,5 @@ export function isInternalAlertCallerAllowed(
   const ip = normalizeIp(rawIp)?.toLowerCase();
   if (!ip) return false;
   if (LOOPBACK.has(ip)) return true;
-  return parseInternalAlertAllowedIps(allowedRaw).has(ip);
+  return isIpAllowed(ip, parseInternalAlertAllowedIps(allowedRaw));
 }

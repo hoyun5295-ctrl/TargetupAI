@@ -7,6 +7,7 @@
 
 ## 핵심 원칙
 
+- **★ 같은 백엔드로 보내는 nginx 사이트가 여럿이면 한 사이트에만 건 허용 목록은 문이 아니다 — 앱이 두 번째 겹으로 같은 판정을 한다 (2026-10-27 080 콜백)** — 080 수신거부 콜백 허용 목록(6개 IP + deny all)이 hanjul.ai 사이트에만 있었고 app.hanjul.ai · sys.hanjullo.com 이 /api/ 전체를 그대로 넘겨 누구나 부를 수 있었다. 공개 콜백 · 웹훅은 앱이 출발지(req.ip = nginx 가 넘긴 X-Forwarded-For)를 직접 보고(공용 판정 `utils/ip-allowlist.ts`), 켜기 전에 접근 기록으로 정상 출발지를 증명한다(1027 = 183.98.207.13 한 곳).
 - **★ 의존성을 지우면 그 꾸러미 안에 딸려 와 있던 패키지를 빌려 쓰던 코드가 깨진다 — 코드가 여는 패키지는 package.json 에 직접 선언한다 (2026-10-26 의존성 보안판)** — 쓰지 않는 bullmq 를 지우자 그 안의 uuid 를 import 하던 6개 파일이 tsc 에서 깨졌다(선언 없이 node_modules 맨 위에 올라온 사본을 쓰고 있었다). 같은 꼴인 pngjs(qrcode 안)는 require 라 tsc 도 못 잡고 운영에서 처음 터진다. 계약 시험 = 뿌리 대장 R21(코드 import ⊆ 선언 · 운영 선언 ⊆ 코드 import).
 - **★ Node 24 의 npm 11 은 의존성 설치 스크립트(postinstall)를 기본으로 건너뛴다 — 필요한 것은 package.json `allowScripts` 에 판 고정으로 허용한다 (2026-10-26)** — puppeteer 의 Chrome 내려받기 · esbuild 확인 스크립트가 조용히 빠지고 설치는 성공으로 끝난다(puppeteer 는 그다음 launch 에서 Chrome 없음으로 실패). 허용 = `npm install-scripts approve <패키지>`(판 고정 기록) · 쓰지 않는 것은 `deny`. 판을 올리면 고정 항목이 안 맞아 다시 막히므로 같은 커밋에서 다시 approve 한다. 서버 판정 = `npm ci` 출력에 `> puppeteer@판 postinstall` 줄이 있는가.
 - **★ 같은 iptables 체인을 부팅 장치 두 곳이 쓰면 순서가 곧 차단이다 — 영구 규칙의 소유는 한 곳(서비스 파일)이고, 손으로 넣은 `iptables -I` 는 그 파일에 옮겨 적기 전엔 끝난 게 아니다 (2026-10-14 [B-1014-1](../BUGS.md))** — 0820 .65 허용을 손으로 넣고 after.rules 에 영속화했지만 0707 `pay-ingest-fw.service` 가 부팅 때 자기 묶음(.65 없음)을 체인 위에 넣어 그 DROP 이 .65 를 가렸다. 7일 동안 게이트웨이 통계만 조용히 끊겼고(중계 3대는 정상) 직원 접수로 발견. 처방 = 서비스가 `-F` 뒤 전 규칙을 다시 쓴다. 규칙을 더할 때는 `iptables -S <체인>` 으로 "묶음 하나 · DROP 맨 끝"을 확인한다.

@@ -908,7 +908,7 @@ describe('R14 감지했는데 사람에게 안 닿음 — 운영 경보 = 공용
     expect(src).not.toMatch(/--user\s/);
   });
   it('경보를 내는 스크립트는 공용 입구를 부른다', () => {
-    for (const f of ['backup.sh', 'backup-monitor.sh', 'monitor-dist.sh']) expect(read(join(SCRIPTS, f)), f).toMatch(/OPS_ALERT=.*ops-alert/);
+    for (const f of ['backup.sh', 'backup-monitor.sh', 'monitor-dist.sh', 'security-watch.sh']) expect(read(join(SCRIPTS, f)), f).toMatch(/OPS_ALERT=.*ops-alert/);   // ★1027 보안 감시
     expect(read(join(SCRIPTS, 'agent-watchdog', 'agent-watchdog.js'))).toMatch(/OPS_ALERT: '\/usr\/local\/bin\/ops-alert'/);
   });
 });
@@ -2696,5 +2696,117 @@ describe('R21 외부 부품 — 쓰는 패키지는 선언돼 있고 · 선언�
       }).map((k) => `${label}: ${k}`);
       expect(stale).toEqual([]);
     }
+  });
+});
+
+// ── ★1027 보안 극대화 1번 — 렌더 워커가 샌드박스 기동에 실패하면 --no-sandbox 로 바깥 사이트를 열었다(.62 실측 sandbox=false) ──
+//   「보안 장치를 못 켬」을 「꺼도 된다」로 읽은 것 = R7(판정 못 함을 반대로 읽음)과 같은 뿌리. 못 켜면 거부하고 사유를 남긴다.
+describe('R7 넓힘(1027) — 크롬은 샌드박스 없이 띄우지 않는다 · 못 띄우면 거부하고 사유를 /health 에 남긴다', () => {
+  const W = 'workers/outreach-render-worker.ts';
+  it('백엔드 운영 소스에 샌드박스를 끄는 크롬 인자 0(--no-sandbox · --disable-setuid-sandbox · 대소문자 무관) · 끄는 환경 변수 0', () => {
+    const bad = sourceFiles(BE, /\.ts$/).filter((f) => /no-sandbox|disable-setuid-sandbox|OUTREACH_RENDER_NO_SANDBOX/i.test(stripComments(be(f))));
+    expect(bad).toEqual([]);
+  });
+  it('크롬 기동 = 한 곳 · 인자는 허용 목록 안의 글자뿐(조립 · 변수로 끄는 인자를 넣지 못한다 · Codex 1R)', () => {
+    const src = stripComments(be(W));
+    const launches = src.match(/puppeteer\.launch\(/g) || [];
+    expect(launches.length).toBe(1);
+    expect(src).toMatch(/puppeteer\.launch\(\{ headless: true, executablePath: CHROME_PATH, userDataDir: profileDir, args: baseArgs, protocolTimeout: 60_000 \}\)/);
+    const block = (src.match(/const baseArgs = \[([\s\S]*?)\];/) || [])[1] || '';
+    const items = block.split(',').map((s) => s.trim()).filter(Boolean);
+    const ALLOWED = new Set(['`--proxy-server=http://127.0.0.1:${proxyPort}`', "'--proxy-bypass-list=<-loopback>'", "'--disable-dev-shm-usage'", "'--no-first-run'",
+      "'--no-default-browser-check'", "'--disable-extensions'", "'--disable-background-networking'", "'--disable-sync'", "'--mute-audio'", "'--lang=ko-KR'"]);
+    expect(items.length).toBeGreaterThan(5);
+    expect(items.filter((x) => !ALLOWED.has(x))).toEqual([]);
+    expect(src).not.toMatch(/ignoreDefaultArgs|baseArgs\.push|baseArgs\s*=\s*\[\s*\.\.\./);
+  });
+  it('렌더 워커 = 기동 실패를 잡아 사유를 남기고 프로필을 지우고 다시 던진다 · /health 가 sandboxError 를 내보낸다', () => {
+    const src = stripComments(be(W));
+    expect(src).toMatch(/catch \(e: any\) \{\s*lastLaunchError = [^;]+;\s*console\.error\([^;]+;\s*removeProfileDir\(profileDir\);\s*throw e;\s*\}/);
+    expect(src).toMatch(/sandboxError: lastLaunchError/);
+  });
+  it('크롬 경로 한 곳 = ecosystem OUTREACH_RENDER_CHROME = 보안 감시 기본값 · AppArmor 프로필은 root 전용 /opt/hanjul-chrome 아래만', () => {
+    const eco = read(join(BE, '..', '..', '..', 'ecosystem.config.js'));
+    const ecoPath = (eco.match(/OUTREACH_RENDER_CHROME: '([^']+)'/) || [])[1];
+    const sh = read(join(SCRIPTS, 'security-watch.sh'));
+    const shPath = (sh.match(/SECURITY_WATCH_CHROME="\$\{SECURITY_WATCH_CHROME:-([^}]+)\}"/) || [])[1];
+    expect(ecoPath).toBe('/opt/hanjul-chrome/current/chrome-linux64/chrome');
+    expect(shPath).toBe(ecoPath);
+    const prof = read(join(SCRIPTS, 'apparmor', 'puppeteer-chrome'));
+    const attach = (prof.match(/^profile \S+ (\S+) flags=\(unconfined\) \{/m) || [])[1];
+    expect(attach).toBe('/opt/hanjul-chrome/*/chrome-linux64/chrome');
+    expect(prof).not.toMatch(/\/home\//);
+    expect(sh).toMatch(/sandboxError/);
+    // 「기동 성공」 정의 = render-chrome-probe.sh 한 곳(종료 코드 0 + DOM) · 설치 · 감시가 같이 부른다(Codex 3R)
+    const probe = read(join(SCRIPTS, 'render-chrome-probe.sh'));
+    expect(probe).toMatch(/timeout --kill-after=\d+ \d+ "\$\{chrome\}"[^\n]*--dump-dom about:blank/);
+    expect(probe).toMatch(/if \[\[ \$\{rc\} -eq 0 && "\$\{out\}" == \*"<body>"\* \]\]; then/);
+    for (const f of ['security-watch.sh', 'install-render-chrome.sh']) {
+      const s = read(join(SCRIPTS, f));
+      expect(s, f).toMatch(/scripts\/render-chrome-probe\.sh/);
+      expect(s, f).not.toMatch(/--dump-dom/);   // 시험을 다시 따로 갖지 않는다
+    }
+  });
+});
+
+// ── ★1027 보안 극대화 7번 감사 — 이메일 편집기 미리보기 iframe 2개가 sandbox 없이 서버 HTML 을 같은 출처로 그렸다 ──
+//   토큰이 localStorage 에 있어 미리보기 HTML 안 스크립트 한 줄 = 로그인 탈취. 렌더러 이스케이프 한 번 빠지면 바로 뚫리는 구조.
+describe('R11 넓힘(1027) — 화면이 HTML 을 그리는 iframe(srcDoc)은 sandbox 가 있고 스크립트 허용과 같은 출처 허용을 함께 주지 않는다', () => {
+  // 구문 트리로 읽는다(Codex 2R — 정규식은 sandbox={undefined} 를 빈 값으로 읽어 통과시켰다). 해석 못 하는 값(변수 · undefined · 조건식) = 실패.
+  type IframeVerdict = { line: number; srcDoc: boolean; sandbox: 'none' | 'dynamic' | string };
+  function iframesOf(file: string, text: string): IframeVerdict[] {
+    const sf = ts.createSourceFile(file, text, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
+    const out: IframeVerdict[] = [];
+    const visit = (n: ts.Node) => {
+      const el = ts.isJsxSelfClosingElement(n) || ts.isJsxOpeningElement(n) ? n : null;
+      if (el && el.tagName.getText(sf) === 'iframe') {
+        let srcDoc = false;
+        let spread = false;
+        let sandbox: IframeVerdict['sandbox'] = 'none';
+        for (const a of el.attributes.properties) {
+          if (!ts.isJsxAttribute(a)) { spread = true; continue; }   // {...props} = 어디에 있든 sandbox 를 덮을 수 있다(Codex 3R · 순서 무관)
+          const name = a.name.getText(sf);
+          if (name === 'srcDoc') srcDoc = true;
+          if (name !== 'sandbox') continue;
+          const init = a.initializer;
+          if (!init) sandbox = '';
+          else if (ts.isStringLiteral(init)) sandbox = init.text;
+          else if (ts.isJsxExpression(init) && init.expression && (ts.isStringLiteral(init.expression) || ts.isNoSubstitutionTemplateLiteral(init.expression))) sandbox = init.expression.text;
+          else sandbox = 'dynamic';
+        }
+        // 펼침이 있으면 sandbox · srcDoc 최종값을 확정할 수 없다 = 판정 불가(위험 쪽)
+        if (spread) { sandbox = 'dynamic'; srcDoc = true; }
+        out.push({ line: sf.getLineAndCharacterOfPosition(el.getStart(sf)).line + 1, srcDoc, sandbox });
+      }
+      ts.forEachChild(n, visit);
+    };
+    visit(sf);
+    return out;
+  }
+  const unsafe = (v: IframeVerdict) => v.srcDoc && (v.sandbox === 'none' || v.sandbox === 'dynamic' || (/allow-scripts/.test(v.sandbox) && /allow-same-origin/.test(v.sandbox)));
+  it('판정기 자체 — sandbox={undefined} · 중괄호 안 위험 문자열 · 없음 = 실패 · 글자 값 = 통과', () => {
+    const cases: Array<[string, boolean]> = [
+      ['<iframe srcDoc={h} sandbox={undefined} />', true],
+      ["<iframe srcDoc={h} sandbox={ 'allow-scripts allow-same-origin' } />", true],
+      ['<iframe srcDoc={h} />', true],
+      ['<iframe srcDoc={h} sandbox={mode} />', true],
+      ['<iframe srcDoc={h} {...rest} />', true],
+      ['<iframe srcDoc={h} sandbox="" {...rest} />', true],
+      ['<iframe {...rest} sandbox="" srcDoc={h} />', true],
+      ['<iframe srcDoc={h} sandbox="allow-same-origin" />', false],
+      ['<iframe srcDoc={h} sandbox="" />', false],
+      ["<iframe srcDoc={h} sandbox={'allow-scripts'} />", false],
+      ['<iframe src={u} />', false],
+    ];
+    for (const [code, bad] of cases) {
+      const v = iframesOf('case.tsx', `const X = () => (${code});`);
+      expect(v.length, code).toBe(1);
+      expect(unsafe(v[0]), code).toBe(bad);
+    }
+  });
+  it('화면 전수 — srcDoc iframe 마다 해석되는 sandbox · allow-scripts 와 allow-same-origin 동시 0', () => {
+    const all = sourceFiles(FE, /\.tsx$/).flatMap((f) => iframesOf(f, read(join(FE, f))).map((v) => ({ f, ...v })));
+    expect(all.filter((x) => x.srcDoc).length).toBeGreaterThanOrEqual(4);   // 뽑기가 살아 있다
+    expect(all.filter(unsafe).map((x) => `${x.f}:${x.line} sandbox=${x.sandbox}`)).toEqual([]);
   });
 });

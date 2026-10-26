@@ -112,7 +112,7 @@ export interface RenderMeta {
   textChars: number;
   imgCount: number;
   imgWide: number;
-  /** 크롬 sandbox 사용 여부 — false 는 서버가 사용자 네임스페이스를 막아 --no-sandbox 로 기동한 경우(로그·문서로 남긴다) */
+  /** 크롬 sandbox 사용 여부 — ★2026-10-27 부터 늘 true(샌드박스 없이 띄우지 않는다 · 못 띄우면 렌더 거부) · 옛 행의 false = 그때 샌드박스 없이 기동한 기록 */
   sandbox: boolean;
   timedOut: boolean;
   /** ★ 2026-09-09 바이트 상한 도달 — 프록시가 그 뒤 로딩만 끊었고 그 시점까지 그린 DOM 으로 계속했다(실패 아님 · 옛 행에는 키 없음) */

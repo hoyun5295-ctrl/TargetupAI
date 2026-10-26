@@ -459,10 +459,19 @@ pm2 logs outreach-render --nostream --lines 30 | grep -E "\[outreach-render\] (�
 ```bash
 curl -s http://127.0.0.1:4317/health
 ```
-   `sandbox=false` 가 찍히면 서버가 비특권 사용자 네임스페이스를 막아 `--no-sandbox` 로 재시도한 것이다(트래픽은 프록시가 가둔다 · 설계서 §3-4 미검증 항목).
+   ★2026-10-27 부터 **샌드박스 없이 띄우지 않는다**(옛 = `--no-sandbox` 재시도 · .62 실측 sandbox=false). 기동 실패 = 렌더 거부(정적 크롤로 전진) + `/health` 의 `sandboxError` · 매일 보안 감시가 경보.
+   .62(Ubuntu 24.04)는 비특권 사용자 네임스페이스를 막으므로 **크롬을 root 전용 경로로 옮기고 그 경로에만 AppArmor 예외**(root · 사용자 경로에 예외를 주면 그 사용자의 아무 실행 파일이나 예외를 얻는다 · Codex 1R): `bash /home/administrator/targetup-app/scripts/install-render-chrome.sh` = puppeteer 기대 판을 `/opt/hanjul-chrome/<판>`(root 소유 · current 링크)로 복사 + 프로필 `/etc/apparmor.d/hanjul-render-chrome` + administrator 로 샌드박스 기동 시험. 워커는 ecosystem 의 `OUTREACH_RENDER_CHROME` 으로 그 경로를 쓴다(ecosystem env 를 바꿨으니 `pm2 reload ecosystem.config.js --only outreach-render --update-env`). **puppeteer 를 올린 배포마다 이 스크립트를 다시 돌린다**(안 돌리면 매일 보안 감시가 「판 어긋남」 경보). 확인 = `/health` 의 `sandbox: true` · `sandboxError: null` · 렌더 ok.
 4. 실측 1건 — AI 영업 화면에서 **아이소이(https://www.isoi.co.kr) 새 업체 등록** → 확인 대기 화면 "홈페이지에서 읽은 재료" 카드에 `화면을 그려서 읽음`(또는 `바로 읽기 + 화면을 그려서 읽음`) · 상품 4개 이상 · 배너 후보 5장 이상 · 리뷰 45만 · 평점 4.9 가 보이면 통과. 정적만 나오면 `pm2 logs outreach-render --nostream --lines 50` 의 `렌더 실패` 줄 사유를 본다.
 5. 이후 코드 변경 = `pm2 reload outreach-render`(env 변경 시 `pm2 restart outreach-render --update-env`). 워커가 죽어 있어도 backend 는 정적 크롤로 전진한다(대기 0 · 사유 = `stage_results.rendering='unavailable'`).
 6. 롤백 = `pm2 stop outreach-render`(정적 크롤로 즉시 복귀) + 코드 되돌리기. 새 jsonb 키는 구코드가 읽지 않는다.
+
+**⑧-2 ★2026-10-27 보안 감시(매일 · `scripts/security-watch.sh`)** — 운영 의존성 경보(치명 · 높음 · 늘어남) · Node 지원 종료 180일 전 · 서버 보안 업데이트 대기 · 재부팅 대기 3일 · 렌더 크롬 샌드박스 기동 · 렌더 워커 기동 실패 기록을 보고 공용 입구 `ops-alert` 로 경보(R14). 근거 = 보안 설계서 §3-9-1.
+1. 설치(administrator · 한 번): `chmod +x /home/administrator/targetup-app/scripts/security-watch.sh` 후 crontab 에 `40 8 * * * /home/administrator/targetup-app/scripts/security-watch.sh >> /home/administrator/backups/security-watch.log 2>&1`
+2. 첫 실행은 손으로 돌려 로그 · 문자 · 메일 수신을 본다(경보 0 이면 문자 없음 · 로그 끝줄 = `OK: 보안 감시 이상 없음`). 첫 실행이 각 앱의 보통 · 낮음 경보 수를 기준으로 남긴다.
+
+**⑧-3 ★2026-10-27 출발지 IP 허용 목록(두 겹)** — 판정 = `packages/backend/src/utils/ip-allowlist.ts` 한 곳 · 빈 목록 = 거부.
+- 080 수신거부 콜백 = nginx `sites-enabled/targetup` 의 `location = /api/unsubscribes/080callback`(allow 6 + deny all) **와** 앱(기본값 = 같은 6개 · 1027 실측). 나래인터넷이 출발지를 바꾸면 **nginx 와 `OPT080_CALLBACK_ALLOWED_IPS`(backend .env · 쉼표)를 함께** 바꾼다. 앱 판정은 req.ip(= nginx 가 넘긴 실제 출발지)라 그 location 이 X-Forwarded-For 를 넘겨야 한다.
+- 알림톡(IMC) 웹훅 = `IMC_WEBHOOK_ALLOWED_IPS` 가 비면 **거부**(1027 · 옛 = 통과). HMAC 은 업체가 키를 발급하면 `IMC_WEBHOOK_HMAC_SECRET` 에 넣는다(지금 없음 = IP 한 겹 · 보안 장부 A4).
 
 **⑨ 2026-09-23 담당자 직접 발송 · 엑셀 자동 영업 · 제안 메일 재구성 배포** (설계 = [직접 발송 설계서](../docs/2026-09-23-outreach-direct-send-design.md) · **DDL = 2026-09-23 Harold 실행 완료**(jobs ALTER 5칸 + `sales_outreach_sends`·`sales_outreach_suppressions`·`sales_outreach_controls` · information_schema 8행 실측 · 원문 = 설계서 §4) · 워커 무변경)
 1. 코드 배포 = §2-2 표준 순서(백엔드 먼저 · 업무시간 밖). 새 jsonb 키·칸은 구코드가 읽지 않는다.
