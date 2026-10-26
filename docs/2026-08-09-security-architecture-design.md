@@ -74,6 +74,38 @@
 - 위생: `.gitignore`에 NUL 바이트 70개 → 파일이 바이너리로 분류돼 검색 불능
 - 검토 필요: 공개 뷰어 2개(모바일 DM · 거래내역서 확인)가 인라인 스크립트 때문에 helmet 앞에 마운트돼 보안 헤더 미적용. 의도된 선택이나 자체 CSP 필요
 
+### 3-9. 2026-10-26 재측정 (.62 · Harold 실행 · 로컬 점검은 AI 실행)
+| 항목 | 08-09 | 10-26 | 근거 |
+|---|---|---|---|
+| 외부 도달 포트 | 22 · 80 · 443 | **22 · 80 · 443 만 True** · 3000 · 3001 · 9001 · 9011 · 23388 False | (측정) Harold 노트북 `Test-NetConnection` · 회선(핫스팟 여부) 미확인 — 「막힘」 판정은 허용 목록이 접근을 더할 뿐이라 회선과 무관하게 유효 · 「열림」 3개는 원래 공개 포트 |
+| 23388 | 0.0.0.0 · 방화벽만 | 0.0.0.0 + [::] 그대로 · **의도된 입구**(PAY 통계 적재 · `pay-ingest-fw.service` 허용 5 = .54 · .57 · .58 · .65 · 139.150.81.213 + DROP · `sales` 계정 IP 전용 = OPS.md) · 지금 접속원 127.0.0.1 2건 | (측정) `ss` · (문서) OPS.md |
+| 3000 · 3001 | 정체 미확인 | 3000 = `targetup-backend` · 3001 = `hanjuldm-api` · 둘 다 `*` 바인딩 · 외부 차단 | (측정) `ss -tlnp` · pm2 |
+| 9001~9011 | 정체 미확인 | QTmsg 발송 에이전트 관리 포트(java 11개 · OPS.md 라인 표) · 외부 차단(UFW · 02-28) | (측정) + (문서) |
+| IPv6 | — | 공인 IPv6 없음(Tailscale 내부 `fd7a:115c:a1e0::/48` 하나) · UFW `IPV6=yes` · docker daemon.json 없음 | (측정) |
+| 원격 로그인 | root 차단 · 비번 인증 기본 허용 · fail2ban | **같음**(비번 인증 설정 없음 = 허용) · fail2ban active | (측정) |
+| 원격 접속망 | 없음 | **Tailscale 동작**(100.88.72.107 · UDP 41641) = Phase 2 「두 번째 문」 후보 | (측정) |
+| `.gitignore` | 개인키 패턴 없음 · NUL 70 | **개인키 패턴 5 · NUL 0**(해결) | (AI 실행) |
+| `sync-agent/.env.bak` | git 추적 | 파일 있음 · `.env.*` 무시 규칙 있음 · **추적 여부 미확인**(git 명령) | (AI 실행) |
+| 운영 의존성 취약 버전 | 미측정 | **백엔드 32(치명 2 = fast-xml-parser · proxy-addr · 높음 22) · 프론트 6(높음 2 = axios · form-data)** → 묶음 1~4 처리 후 **백엔드 0 · 프론트 2**(react-router 7.18 미만 · 닿지 않음) · 배포 대기 | (AI 실행) `npm audit --omit=dev` · 처리 = 아래 3-9-1 |
+| 서버 Node 런타임 | 미측정 | **20.20.0(NodeSource node_20.x) = 2026-04-30 지원 끝** · 20.20.2 보안판도 미적용(NodeSource 는 자동 갱신 대상 아님) → 24.22.1 교체 설계 · 배포 대기 | (측정) Harold `node -v` · `apt-cache policy nodejs` · (문서) nodejs Release schedule |
+
+판정(10-26): 인터넷 노출면은 22 · 80 · 443 로 이미 좁혀져 있다 → §5 Phase 5(애플리케이션 계층)가 주 전선이다. 남은 서버 쪽 위험 = 원격 로그인 비밀번호 인증 · 하나로호스팅 패널 2단계 인증(상태 미확인) · 백업 복구 실측 · 다른 서버(.65 · .66 · .58 · .54) 미측정.
+
+#### 3-9-1. 의존성 보안판 · Node 런타임 (2026-10-26 · Harold 「해킹 · 외부 위협 불허」 · 설계 승인 = 묶음 1~4)
+
+판정 기준 = 설치 판이 경보 범위 안 + 우리 코드에서 닿는 길(코드 근거). 닿는 문 = xlsx(로그인 사용자 업로드 → 프로토타입 오염 · 한 프로세스를 같이 쓰는 다른 고객사까지) · body-parser · qs · path-to-regexp(로그인 없이 바깥 누구나 · nginx 통과 여부 미실측) · mailparser(대행 메일함 = 메일만 보내면 누구나) · puppeteer(AI 영업 렌더가 바깥 사이트를 연다 · Chrome 146) · sharp(내용으로 형식 판정 → .png 이름의 SVG 도 librsvg) · nodemailer · axios(xlsx 가 오염 원천이 되는 사슬 · 미검증) · multer · mysql2 · form-data · fast-xml-parser(고도몰 응답 · 4.5.0 실측 = 입력 11KB → 결과 10MB).
+
+| 묶음 | 내용 | 결과 |
+|---|---|---|
+| 1 비메이저 | express 4.22.3(body-parser 1.20.9 · qs 6.16.1 · path-to-regexp 0.1.13 · proxy-addr 2.0.8) · axios 1.20.0 · form-data 4.0.6 · multer 2.5.0 · mysql2 3.24.6 · sharp 0.35.5 · mailparser 3.12.4 · express-rate-limit 8.7.1 · morgan 1.12.1 · 안쪽 audit fix · uuid(exceljs 안) overrides 11.1.1 · 프론트 axios 1.20.0 · react-router-dom 6.30.6 · 쓰지 않는 zod · bullmq 삭제 | 코드 수정 1곳(alimtalk-api content-type 타입) |
+| 2 xlsx 공식판 | npm 에 고친 판 없음 → SheetJS 공식 tgz 0.20.3(lock integrity 고정) · 접목 관문 = 설치 스크립트 · 의존성 · 네트워크 · 환경변수 0 | 0.18.5 와 같은 고정 파일 비교 = xlsx · xls 는 날짜 52초 오차만 사라짐 · csv 는 정확해지는 쪽으로만 |
+| 3 메이저 | nodemailer 10.2.1 · fast-xml-parser 5.11.2(+ htmlEntities: true = 5.x 기본값이 숫자 문자 참조를 안 풀어 4.5.0 대비 회귀 · Codex 1R) | 고도몰 엔티티 부풀림 시험 4.5.0 빨강 → 5.11.2 초록 · 숫자 참조 시험 |
+| 4 런타임 | 서버 Node 20.20.0 → 24.22.1 · puppeteer 25.16.0(Chrome 156) | Node 24 의 npm 11 은 의존성 설치 스크립트를 막는다 → allowScripts = puppeteer@25.16.0 · esbuild@0.21.5 허용(판 고정) · prisma 셋 막음 |
+
+같은 뿌리로 함께 닫은 것 = 유령 의존성(남의 꾸러미 안에 딸려 온 사본을 빌려 씀) uuid · pngjs · content-disposition 선언 · 계약 시험 R21(`docs/ROOT-LEDGER.md`).
+남은 것 = 프론트 react-router 7.18 미만 2건(바깥 값으로 이동 0 · SSR 없음 · 메이저 이관은 별도) · 프론트 개발 도구(vite 5 · tailwind 3 · esbuild 0.21 · 빌드 때만 · 메이저).
+범위 밖 기록 = 업로드 날짜+시각 셀이 다음 날로 저장(normalizeDate 올림 · 판과 무관 기존 동작) · 렌더 워커 샌드박스 실패 시 --no-sandbox 재시도(.62 실제 동작 미검증) · @prisma/client 선언만(소스 import 0) · 비토엔진(.65) 등 다른 서버 Node 판 미확인 · 개발 PC Node 20.19.4.
+
 ### 3-8. 자산 관리
 `.65`가 우리 문서 어디에도 없었다. 서버별 **콘솔 경로(KVM 등)가 문서화돼 있지 않다.** 오늘 복구 지연의 직접 원인.
 

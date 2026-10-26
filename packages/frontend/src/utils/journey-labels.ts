@@ -45,12 +45,18 @@ export function funnelBarClass(pct: number): string {
   return 'bg-rose-400';
 }
 
-/** 여정 문자 칸 채널 → 사람 말(★ 2026-09-29 V2 1차 생애 지도). 모르는 값은 "문자". */
+/**
+ * 여정 문자 칸 채널 → 사람 말(★ 2026-09-29 V2 1차 생애 지도). 모르는 값은 "문자".
+ * ★ 2026-10-26 남지현 접수(여정 생성 시 문자 타입 표기) — 채널 고르기 탭 · 휴대폰 미리보기 · 문안 고치기 창 · 칸 고르기가
+ *   「문자 / SMS」를 따로 적어 같은 단문 칸이 화면마다 다른 이름이었다. 여정 화면의 채널 이름은 이 함수 하나가 정한다(계약 시험 root-ledger R1).
+ *   email = 서버 칸 채널 값(journey-builder ChannelType)에 있어 "문자"로 떨어지지 않게 둔다.
+ */
 export const STEP_CHANNEL_LABEL: Record<string, string> = {
   sms: '단문 문자',
   lms: '장문 문자',
   mms: '사진 문자',
   kakao: '알림톡',
+  email: '이메일',
 };
 
 export function stepChannelLabel(channel: string | null | undefined): string {

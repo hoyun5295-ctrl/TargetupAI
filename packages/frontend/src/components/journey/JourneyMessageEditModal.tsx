@@ -22,6 +22,7 @@ import { useToast } from '../ToastProvider';
 import { findUndefaultedLiquidVars } from '../../utils/highlightVars';
 import { LMS_SUBJECT_MAX_CHARS } from '../../utils/formatDate';
 import PhoneComposer from './PhoneComposer';
+import { stepChannelLabel } from '../../utils/journey-labels';
 
 interface MessageStep {
   id: string;
@@ -40,10 +41,6 @@ interface Props {
   onClose: () => void;
   onSaved: () => void;
 }
-
-const CHANNEL_LABEL: Record<string, string> = {
-  sms: 'SMS', lms: 'LMS', mms: 'MMS', kakao: '알림톡', email: '이메일',
-};
 
 export default function JourneyMessageEditModal({
   journeyId, journeyName, journeyStatus, token, onClose, onSaved,
@@ -212,7 +209,7 @@ export default function JourneyMessageEditModal({
                   <div key={s.id} className="flex w-[min(396px,calc(100vw-56px))] shrink-0 flex-col gap-2 overflow-y-auto">
                     <div className="flex items-center gap-2">
                       <span className="rounded-full bg-violet-100 px-2 py-0.5 text-[12px] font-semibold text-violet-800">{s.stepOrder}번째 칸</span>
-                      <span className="flex items-center gap-1 rounded bg-slate-100 px-2 py-0.5 text-[12px] text-slate-600"><MessageSquare className="h-3 w-3" />{CHANNEL_LABEL[s.channel] || '문자'}</span>
+                      <span className="flex items-center gap-1 rounded bg-slate-100 px-2 py-0.5 text-[12px] text-slate-600"><MessageSquare className="h-3 w-3" />{stepChannelLabel(s.channel)}</span>
                     </div>
                     {undefaulted.length > 0 && (
                       <div className="flex items-start gap-1.5 rounded-lg border border-amber-200 bg-amber-50 p-2">

@@ -53,7 +53,8 @@ import GradeOrderModal from '../components/journey/GradeOrderModal';
 import InfoAlertJourneyBuilder, { type InfoAlertBuildResult } from '../components/journey/InfoAlertJourneyBuilder';
 import DateAnchorJourneyBuilder, { type DateAnchorBuildResult } from '../components/journey/DateAnchorJourneyBuilder';
 import { TRIGGER_EVENTS } from '../utils/journey-trigger-catalog';
-// ★ 2026-09-29 여정 V2 0차 ⑤⑦ — 칸 종류 · 흐름 색 표기는 공용 유틸 한 곳.
+// ★ 2026-09-29 여정 V2 0차 ⑤⑦ — 칸 종류 · 흐름 색 표기는 공용 유틸 한 곳(★1026 칸 채널 이름도 같은 함수).
+import { stepChannelLabel } from '../utils/journey-labels';
 // ★ 2026-08-08 — 문안 placeholder(혜택·링크) 판정·치환 단일 정의(스튜디오 카드와 같은 규약).
 import { fillBenefitPlaceholders, fillUrlPlaceholders, isSendableUrl } from '../utils/message-placeholders';
 // ★ 2026-08-08 — 다듬기 결과는 비포/애프터로 본다. 하이라이트는 직접발송 모달과 같은 CT.
@@ -506,13 +507,13 @@ function collectStepIssues(steps: AIGeneratedStep[]): Array<{ stepOrder: number;
       continue;
     }
     if ((s.channel === 'lms' || s.channel === 'mms') && (!s.subject || !s.subject.trim())) {
-      out.push({ stepOrder: s.stepOrder, message: '제목 없음(LMS·MMS 필수)' });
+      out.push({ stepOrder: s.stepOrder, message: '제목 없음(장문 문자, 사진 문자는 제목 필수)' });
       continue;
     }
     // ★ 2026-08-02 Harold 지시 — 이미지 없는 MMS는 저장하지 않는다.
     //   그대로 두면 LMS보다 비싼 단가로 글자만 나간다(고객사 돈이 새는 방향).
     if (s.channel === 'mms' && (s.mmsImagePaths?.length ?? 0) === 0) {
-      out.push({ stepOrder: s.stepOrder, message: '이미지 없음(MMS 필수)' });
+      out.push({ stepOrder: s.stepOrder, message: '이미지 없음(사진 문자는 이미지 필수)' });
     }
   }
   return out;
@@ -2519,10 +2520,7 @@ export default function JourneysPage() {
                         {s.stepType === 'message' && (
                           <>
                             <select value={s.channel} onChange={(e) => updateStep(idx, { channel: e.target.value as ChannelType })} className="px-2 py-1 bg-slate-100 border border-slate-200 rounded">
-                              <option value="sms">SMS</option>
-                              <option value="lms">LMS</option>
-                              <option value="mms">MMS</option>
-                              <option value="kakao">알림톡</option>
+                              {(['sms', 'lms', 'mms', 'kakao'] as const).map((c) => <option key={c} value={c}>{stepChannelLabel(c)}</option>)}
                             </select>
                             <label className="flex items-center gap-1 cursor-pointer px-2 py-1 rounded bg-slate-100 border border-slate-200">
                               <input type="checkbox" checked={s.isAd} onChange={(e) => updateStep(idx, { isAd: e.target.checked })} className="rounded" />

@@ -1532,7 +1532,7 @@ function assertMmsHasImage(stepType: unknown, channel: unknown, images: unknown)
   if (String(channel || '') !== 'mms') return;
   if (Array.isArray(images) && images.length > 0) return;
   throw new JourneyStepGateError(
-    'MMS는 이미지를 넣어야 저장할 수 있습니다. 이미지를 올리거나 채널을 LMS로 바꿔 주세요.',
+    '사진 문자는 이미지를 넣어야 저장할 수 있습니다. 이미지를 올리거나 장문 문자로 바꿔 주세요.',
     'MMS_IMAGE_REQUIRED'
   );
 }

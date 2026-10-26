@@ -119,6 +119,9 @@ git pull
 # 2. 의존성 설치 (새 패키지 추가 시 — 그 패키지 폴더에서)
 cd packages/backend && npm install     # 예: 0730 popbill 추가
 cd packages/frontend && npm install
+# ★ 2026-10-26 Node 24(npm 11)부터 의존성 설치 스크립트는 package.json allowScripts 에 있는 것만 돈다.
+#   백엔드 출력에 「> puppeteer@판 postinstall」 줄이 없으면 Chrome 이 안 내려온 것이다(렌더 워커 launch 실패) — 거기서 멈춘다.
+#   판을 올리면 allowScripts 판 고정 항목도 같은 커밋에서 다시 approve(교훈 = LESSONS_DEPLOY 1026).
 
 # ⚠️ 3. 백엔드 빌드 (TypeScript → JavaScript, 변경 시 필수!)
 # git pull만으로는 dist/ 미갱신 → 코드 수정이 서버에 반영 안 됨 (D67 교훈)

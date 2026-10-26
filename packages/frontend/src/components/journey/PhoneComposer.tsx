@@ -13,6 +13,7 @@ import { Eye, Image as ImageIcon, Loader2, Lock, PenLine, User } from 'lucide-re
 import { buildAdMessageFront, buildAdSubjectFront, calculateSmsBytes, LMS_SUBJECT_MAX_CHARS, startsWithAdMark } from '../../utils/formatDate';
 import { highlightVars, mergeVarsPlain } from '../../utils/highlightVars';
 import { renderLiquid, flattenCustomerForLiquid } from '../../utils/liquid-templating';
+import { stepChannelLabel } from '../../utils/journey-labels';
 
 export type ComposerChannel = 'sms' | 'lms' | 'mms';
 
@@ -143,7 +144,7 @@ export default function PhoneComposer({
           </div>
 
           <div className="flex-1 px-4 pb-4 pt-3">
-            <div className="mb-2 text-center text-[12px] text-slate-400">{channel === 'sms' ? '문자' : channel === 'lms' ? '장문 문자' : '사진 문자'}</div>
+            <div className="mb-2 text-center text-[12px] text-slate-400">{stepChannelLabel(channel)}</div>
             <div className={`max-w-[92%] rounded-[22px] rounded-bl-md bg-[#e9e9eb] px-4 py-3 text-slate-900 ${mode === 'write' && !readOnly ? 'focus-within:ring-2 focus-within:ring-indigo-300' : ''}`}>
               {mode === 'see' && serverBusy ? (
                 <div className="flex items-center gap-2 py-6 text-[14px] text-slate-500"><Loader2 className="h-4 w-4 animate-spin" />받는 모습을 만드는 중</div>
@@ -207,7 +208,7 @@ export default function PhoneComposer({
           {mode === 'see' && serverBytes != null && serverBytes !== bytes && (
             <span className="text-slate-500">고객 값이 들어가면 {bytes.toLocaleString('ko-KR')}바이트에서 {serverBytes.toLocaleString('ko-KR')}바이트가 돼요</span>
           )}
-          {over && channel === 'sms' && <span className="text-rose-700">90바이트를 넘으면 문자가 잘리지 않게 장문으로 보내야 해요</span>}
+          {over && channel === 'sms' && <span className="text-rose-700">90바이트를 넘으면 문자가 잘리지 않게 장문 문자로 보내야 해요</span>}
           {subjectOver && <span className="text-rose-700">제목이 {LMS_SUBJECT_MAX_CHARS}자를 넘어요. 줄여 주세요</span>}
         </div>
         {sampleNote && <p className="mt-1 text-[12px] text-slate-500">{sampleNote}</p>}

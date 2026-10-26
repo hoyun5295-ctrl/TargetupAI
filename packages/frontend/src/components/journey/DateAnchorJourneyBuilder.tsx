@@ -138,7 +138,7 @@ function StepEditModal({ step, dataProfileVars, opt080Number, onRefine, onDecora
         <span className="ml-auto text-[11px] text-indigo-700 font-mono">D-{offset}</span>
       </div>
       <div>
-        <label className="block text-[11px] text-slate-500 mb-1">제목 (LMS 필수)</label>
+        <label className="block text-[11px] text-slate-500 mb-1">제목 (장문 문자 필수)</label>
         <input value={subject} onChange={(e) => setSubject(e.target.value.slice(0, 40))} placeholder="본문 요약 한 줄" className="w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-sm text-slate-900" />
       </div>
       <div>
@@ -316,7 +316,7 @@ export default function DateAnchorJourneyBuilder({ embedded = false, dataProfile
             })}
           </div>
         )}
-        <p className="text-[10px] text-slate-400 italic mt-1.5">LMS로 발송되며 (광고) 표기·무료수신거부가 자동 부착됩니다. 활성화 시 전체 문안 스팸필터 테스트를 거칩니다.</p>
+        <p className="text-[10px] text-slate-400 italic mt-1.5">장문 문자로 발송되며 (광고) 표기·무료수신거부가 자동 부착됩니다. 활성화 시 전체 문안 스팸필터 테스트를 거칩니다.</p>
       </div>
 
       {/* 대상 — 요약 버튼 → 모달 */}

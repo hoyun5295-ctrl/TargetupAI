@@ -54,6 +54,9 @@ const xmlParser = new XMLParser({
   ignoreAttributes: true,
   parseTagValue: false,   // orderNo 등 큰 수를 문자열로 보존(정밀도 손실 방지)
   trimValues: true,
+  // ★ 2026-10-26 fast-xml-parser 5 는 기본값에서 숫자 문자 참조(&#38; · &#x26; · &#39;)를 풀지 않는다(4.5.0 은 풀었다 · Codex 1R 실측).
+  //   상품명에 「A&#38;B」가 그대로 남지 않게 연다. DOCTYPE 엔티티 부풀림 상한은 processEntities 기본값이 지킨다.
+  htmlEntities: true,
   isArray: (tagName: string) => REPEATED_TAGS.has(tagName),
 });
 

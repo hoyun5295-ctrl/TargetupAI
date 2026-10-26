@@ -163,6 +163,16 @@ function isFullScopeRole(raw: unknown): boolean {
   return t === 'admin' || t === 'company_admin' || t === 'super_admin' || t === 'system';
 }
 
+/**
+ * 매장 코드로 범위를 정하는 일반 사용자 역할 — DB `user` · 토큰 `company_user` 만.
+ * ★ 2026-10-26 Codex 1R high: 모르는 값 · 빈 값은 범위 판정(getStoreScope)으로 보내지 않고 보류한다.
+ *   getStoreScope 는 역할을 보지 않아 회사 설정(전체 허용)이 켜지면 모르는 역할에도 회사 전체를 낸다(승격 오판 = 비인가 발송).
+ */
+function isStoreScopedRole(raw: unknown): boolean {
+  const t = String(raw || '').trim().toLowerCase();
+  return t === 'user' || t === 'company_user';
+}
+
 export async function resolveOperatorStoreScope(
   companyId: string,
   createdBy: string | null | undefined,
@@ -183,6 +193,7 @@ export async function resolveOperatorStoreScope(
   );
   if (u.rows.length === 0) return blocked;              // 삭제·비활성·타사 계정
   if (isFullScopeRole(u.rows[0].user_type)) return full;
+  if (!isStoreScopedRole(u.rows[0].user_type)) return blocked;   // 모르는 역할 = 넓히지 않는다(6R 원칙 · 1026 Codex 1R)
 
   const scope = await getStoreScope(companyId, createdBy);
   if (scope.type === 'blocked') return blocked;
@@ -193,15 +204,13 @@ export async function resolveOperatorStoreScope(
       blocked: false,
     };
   }
-  // ⛔ 6R 정정: getStoreScope는 배정 코드가 하나도 매칭되지 않으면 no_filter로 폴백한다(D136 유령 배정 방어 —
-  //   조회 화면이 빈 목록이 되는 것을 막는 판단이다). 발송은 판단이 달라야 한다. 매장 체계가 있는 회사에서
-  //   배정이 안 맞으면 전체로 넓히는 대신 보류한다 — 읽기는 넓게, 보내기는 좁게.
-  const hasStores = await query(
-    `SELECT EXISTS(SELECT 1 FROM customer_stores WHERE company_id = $1::uuid LIMIT 1) AS e`,
-    [companyId],
-  );
-  if (hasStores.rows[0]?.e === true) return blocked;
-  return full;   // 매장 체계 자체가 없는 회사 = 나눌 범위가 없다
+  // no_filter = 공용 판정이 정한 「회사 전체」 — 분류 체계가 없는 회사이거나, 회사 설정(allow_user_full_access)으로
+  //   미배정 담당자에게 회사 전체를 연 회사다. 직접 발송 · 고객 조회와 같은 범위로 보낸다.
+  // ★ 2026-10-26 정정(임은지 접수 · 자동마케팅 담당 매장 지정): 옛 6R 검사(「분류 체계가 있으면 보류」)는 배정 코드가 안 맞을 때
+  //   CT 가 no_filter 로 넓히던 시절(D136 유령 배정)을 막던 것이다. 0918 CT 정정 뒤 그 갈래는 CT 가 filtered(0명)로 좁힌다 →
+  //   이 검사가 바꾸던 경우는 회사 설정이 켜진 회사 하나뿐이었고, 자동마케팅만 그 설정을 무시해 생성 · 회차가 막혔다.
+  //   범위 판정은 getStoreScope 한 곳 — 감싸는 함수가 결과를 다시 판정하지 않는다(계약 시험 root-ledger R1 넓힘 1026).
+  return full;
 }
 
 /** 화면·등록 검증이 보는 축 목록(가능 여부 + 사유 + 파라미터 정의). */

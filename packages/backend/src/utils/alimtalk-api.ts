@@ -810,9 +810,10 @@ export async function getAlimtalkCommentFile(
     },
   );
   const buffer = Buffer.from(res.data);
+  const contentType = res.headers['content-type'];
   return {
     buffer,
-    contentType: res.headers['content-type'] || 'application/octet-stream',
+    contentType: typeof contentType === 'string' && contentType ? contentType : 'application/octet-stream',
     size: buffer.length,
   };
 }

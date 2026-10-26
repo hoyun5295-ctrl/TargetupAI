@@ -112,7 +112,7 @@ describe('매장 발송 범위 — DB 원시 역할값으로 판정한다 (6R)',
   /** users.user_type 실측값 = admin / user / system. JWT의 company_user는 DB에 없다. */
   const mockScope = (opts: {
     role?: string | null; rowMissing?: boolean;
-    storeCodes?: string[] | null; assignedMatches?: boolean; companyHasStores?: boolean;
+    storeCodes?: string[] | null; assignedMatches?: boolean; companyHasStores?: boolean; fullAccess?: boolean;
   }) => {
     q.mockReset();
     q.mockImplementation(async (sql: string) => {
@@ -125,7 +125,7 @@ describe('매장 발송 범위 — DB 원시 역할값으로 판정한다 (6R)',
       if (/SELECT store_codes FROM users/.test(sql)) return { rows: [{ store_codes: opts.storeCodes ?? null }], rowCount: 1 };
       if (/has_match/.test(sql)) return { rows: [{ has_match: opts.assignedMatches === true }], rowCount: 1 };
       if (/has_stores/.test(sql)) return { rows: [{ has_stores: opts.companyHasStores === true }], rowCount: 1 };
-      if (/AS e\b/.test(sql)) return { rows: [{ e: opts.companyHasStores === true }], rowCount: 1 };
+      if (/allow_user_full_access/.test(sql)) return { rows: [{ allow_user_full_access: opts.fullAccess === true }], rowCount: 1 };
       return { rows: [], rowCount: 0 };
     });
   };
@@ -150,6 +150,20 @@ describe('매장 발송 범위 — DB 원시 역할값으로 판정한다 (6R)',
   it('매장 미배정 + 회사에 매장 체계 있음 → 보류(전사 발송 금지)', async () => {
     mockScope({ role: 'user', storeCodes: null, companyHasStores: true });
     expect((await resolveOperatorStoreScope(COMPANY, USER)).blocked).toBe(true);
+  });
+
+  it('★1026 매장 미배정 + 매장 체계 있음 + 회사 설정 「전체 허용」 → 회사 전체(직접 발송 · 고객 조회와 같은 범위 · 임은지 접수)', async () => {
+    for (const storeCodes of [null, [] as string[]]) {
+      mockScope({ role: 'user', storeCodes, companyHasStores: true, fullAccess: true });
+      expect(await resolveOperatorStoreScope(COMPANY, USER)).toEqual({ storeFilter: '', baseParams: [COMPANY], blocked: false });
+    }
+  });
+
+  it('★1026 공용 판정 결과를 다시 판정하지 않는다 — 이 함수가 직접 매장 체계를 묻는 SQL 0(묻는 것은 getStoreScope 뿐)', async () => {
+    mockScope({ role: 'user', storeCodes: null, companyHasStores: false });
+    expect(await resolveOperatorStoreScope(COMPANY, USER)).toEqual({ storeFilter: '', baseParams: [COMPANY], blocked: false });
+    const own = q.mock.calls.map((c) => String(c[0])).filter((s) => /customer_stores/.test(s) && !/has_stores|has_match/.test(s));
+    expect(own).toEqual([]);
   });
 
   it('배정 코드가 하나도 안 맞아도 전사로 넓히지 않는다 (★0918: 격리 CT 가 직접 좁힌다 = filtered · 대상 0명 · 보류가 아니다)', async () => {
@@ -179,6 +193,19 @@ describe('매장 발송 범위 — DB 원시 역할값으로 판정한다 (6R)',
   it('모르는 역할값은 승격하지 않는다', async () => {
     mockScope({ role: 'manager', storeCodes: null, companyHasStores: true });
     expect((await resolveOperatorStoreScope(COMPANY, USER)).blocked).toBe(true);
+  });
+
+  it('★1026 Codex 1R — 회사 설정 「전체 허용」이 켜져도 모르는 역할 · 빈 역할은 보류(일반 사용자만 회사 전체)', async () => {
+    for (const role of ['manager', null, '']) {
+      for (const storeCodes of [null, ['A']]) {
+        mockScope({ role, storeCodes, assignedMatches: true, companyHasStores: true, fullAccess: true });
+        expect((await resolveOperatorStoreScope(COMPANY, USER)).blocked).toBe(true);
+      }
+    }
+    mockScope({ role: 'user', storeCodes: null, companyHasStores: true, fullAccess: true });
+    expect(await resolveOperatorStoreScope(COMPANY, USER)).toEqual({ storeFilter: '', baseParams: [COMPANY], blocked: false });
+    mockScope({ role: 'company_user', storeCodes: ['A'], assignedMatches: true, companyHasStores: true, fullAccess: true });
+    expect((await resolveOperatorStoreScope(COMPANY, USER)).baseParams).toEqual([COMPANY, ['A']]);
   });
 });
 

@@ -49,6 +49,7 @@
 > 호출어 **"보안"** → **[설계서](../docs/2026-08-09-security-architecture-design.md)가 전부 소유**(위협 모델 §2 · 실측 현황 §3 · 원칙 §4 · 단계 §5 · 미확인 §6). 여기 재서술 금지. 경위 = 0809 .65 UFW 락아웃 + Harold 지시
 > ⛔ **잠그기 전에 두 번째 문(콘솔·예비 허용)을 실측 확인** — Phase 1 전 잠금 작업 금지 / **노출 판정은 패널이 아니라 외부 측정으로**(0809 실증) / 방화벽이 유일 방어인 자산은 결함으로 본다
 > 잔여 = Phase 0 즉시 조치 4건(호스팅 비밀번호·이메일 2FA·`.env.bak` 추적 제거·`.gitignore` 키 패턴) → Phase 1 자산·콘솔 경로 측정 → Phase 2 WireGuard. **.65 락아웃은 하나로호스팅 지원 요청 대기 중**
+> ★1026 재측정(설계서 §3-9) = .62 외부 노출 22 · 80 · 443 만 · `.gitignore` 2건 해결 · 의존성 취약 버전 백엔드 32(치명 2) · 프론트 6 · 남은 것 = 원격 로그인 비번 인증 · 호스팅 2FA · 백업 복구 실측 · 다른 서버 측정 · Phase 5(앱 계층)가 주 전선.
 
 <a id="c08"></a>
 
@@ -190,6 +191,22 @@
 > 7일 체험 = `basic-trial.ts` `ADMIN_WEEK_TRIAL`(7일 · 크레딧 300 · 화면은 kind 만) · 30일(750) 그대로 · 연장은 크레딧 안 채움(종전)
 > 검증 = FE · BE tsc 0 · vitest 595파일 8,371건 · 렌더 108곳 · Codex 적대 1R approve(gpt-6-astra · 지적 0 · 지정 파일 66개 + 분리 전 원본을 읽고 대조)
 > 다음 = 배포(백엔드 reload + 프론트 build:safe · AI 영업 C12 와 한 번에) → 실측(목록 숫자 카드 값 · 상세 창 저장 · 7일 부여 1회)
+
+<a id="c68"></a>
+
+### C68 · ★1026 오류접수 2건 · 여정 채널 이름 한 곳(B-1026-2) · 자동마케팅 매장 범위(B-1026-1) — Codex 적대 2R approve · 배포 대기 · DDL 0
+> 호출어 **"여정 채널 이름 / 자동마케팅 담당 매장 / B-1026"** → 원장 = [BUGS.md](BUGS.md) B-1026-1 · 2 · 3(범위 밖) · 뿌리 대장 R1 ★1026
+> 바뀐 것 = ㄱ 여정 칸 채널 이름 = `journey-labels` stepChannelLabel 한 곳(탭 · 휴대폰 머리 · 문안 고치기 창 · 옛 칸 고르기 + 여정 화면 · 저장 거절 문장의 SMS · LMS · MMS → 단문 문자 · 장문 문자 · 사진 문자 · 사진 첨부 칸은 채널 이름 없는 말) · ㄴ `resolveOperatorStoreScope` 가 회사 설정(전체 허용)을 다시 판정해 막던 검사 삭제 + 역할 세 갈래(관리자 = 전체 · 일반 사용자 = getStoreScope · 모르는 값 = 보류) · ㄷ 계약 시험 R1 넓힘(1026) 3 + R11 거절 문장 정규식 여러 줄 허용
+> 검증 = backend · frontend tsc 0 · backend vitest 696파일 전부 통과 · 변이 7건 전부 잡힘 · 렌더 검사(실제 JourneyStepStudio · 360~1920 일곱 폭 · 세 채널) · Codex 1R high 1(모르는 역할이 전체로) 수용 → 2R approve
+> 배포 전 = 운영 users.user_type 분포 ★1027 실측 admin 133 · system 83 · user 108(모르는 값 0 · 역할 관문에 걸리는 계정 0) · 같은 폴더의 C67(의존성 · Node 24) 미커밋 변경과 섞이지 않게 파일 지정 커밋 · 배포 뒤 실측 = sgbaek 자동마케팅 1개 → 대상 수 = 인비토 전체 · 여정 칸 탭 「단문 문자」
+
+<a id="c67"></a>
+
+### C67 · ★1026 운영 의존성 보안판 · 서버 Node 20.20.0 → 24.22.1 — Codex 적대 2R approve · 배포 대기
+> 호출어 **"의존성 보안판 / Node 24 교체 / npm allowScripts"** → 설계 · 결과 = [보안 설계서 §3-9-1](../docs/2026-08-09-security-architecture-design.md) · 뿌리 = [뿌리 대장](../docs/ROOT-LEDGER.md) R21 · 교훈 = LESSONS_DEPLOY 1026 두 줄
+> 바뀐 것 = 묶음 1 비메이저(express · axios · multer · mysql2 · sharp · mailparser 등 · zod · bullmq 삭제) · 2 xlsx = SheetJS 공식 0.20.3 tgz · 3 nodemailer 10 · fast-xml-parser 5 · 4 puppeteer 25(Chrome 156) + 서버 Node 24 · 유령 의존성 uuid · pngjs · content-disposition 선언 · allowScripts(puppeteer@25.16.0 · esbuild@0.21.5 허용 · prisma 셋 막음) · 코드 1곳(alimtalk content-type)
+> 검증 = Node 24 backend tsc 0 · vitest 696파일 10,224건 · Node 20 도 통과 · frontend tsc 0 · build · npm ci 재현 · audit 운영 백엔드 0 · 프론트 2(react-router 7.18 미만 · 닿지 않음) · xlsx 판 전후 비교 · 고도몰 엔티티 시험 빨강 → 초록 · R21 변이 5 전부 잡힘 · Codex 1R medium 2(fast-xml-parser 5 숫자 문자 참조 미해석 = 4.5.0 대비 회귀 실측 → htmlEntities · R21 이 import = require · 변수 require 를 놓침) 수용 + 다음 단계(allowScripts ↔ lock 단정) 수용 → 변이 8 전부 잡힘 → 2R approve · 마지막 전체 696파일 10,228건
+> 배포 = 업무시간 외 · 순서 = 서버 Node 교체(NodeSource node_24.x) → pm2 update → backend · frontend npm ci(puppeteer postinstall 줄 확인) → build:safe → reload → 실측(MySQL 연결 줄 · 렌더 워커 Chrome · 업로드 · 메일 · 고도몰)
 
 <a id="c66"></a>
 

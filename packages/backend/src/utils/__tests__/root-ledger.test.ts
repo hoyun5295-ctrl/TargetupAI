@@ -8,6 +8,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import { readFileSync, readdirSync } from 'fs';
 import { join } from 'path';
+import { builtinModules } from 'module';
 import * as ts from 'typescript';
 import { extractJsonFromAiText } from '../ai-json';
 
@@ -1146,7 +1147,8 @@ describe('R11 넓힘 — 여정 화면 · 서버 거절 문장에 내부 표 · 
     expect(bad).toEqual([]);
   });
   it('여정 서버가 고객에게 돌려주는 문장(reason · 입력 · 상태 오류)에 칸 이름 · 개발 용어 0', () => {
-    const MSG = /(?:reason:\s*|new (?:JourneyInputError|JourneyStepGateError)\()(['`"])((?:(?!\1).)*)\1/g;
+    // ★1026 여러 줄로 쓴 거절 문장(괄호 뒤 줄바꿈)도 읽는다 — 옛 모양은 괄호 바로 뒤 따옴표만 읽어 4개를 못 봤다(B-1026-3)
+    const MSG = /(?:reason:\s*|new (?:JourneyInputError|JourneyStepGateError)\(\s*)(['`"])((?:(?!\1)[\s\S])*)\1/g;
     const INTERNAL = /영역|정합|의무|매트릭스|\bstep \$\{|\b(anchor_date|anchor_offset_days|condition_jsonb|target_hour_kst|delay_mode|within_days|step_order|one_shot|customer_field|cdp_event_exists|journey_step_clicked)\b|회사 admin/;
     const bad: string[] = [];
     for (const f of JOURNEY_UTILS) {
@@ -2569,5 +2571,130 @@ describe('R20 사건 없는 상태값 — 상태 칸은 사건이 쓴다(DB 기�
       ...sourceFiles(FE, /\.tsx?$/).filter((f) => re.test(stripComments(read(join(FE, f))))).map((f) => `frontend/${f}`),
     ];
     expect(hits).toEqual([]);
+  });
+});
+
+// ── ★1026 오류접수 2건(남지현 · 여정 문자 타입 표기 / 임은지 · 자동마케팅 담당 매장 지정) — 같은 사실을 여러 곳이 따로 정함 ──
+describe('R1 넓힘(1026) — 여정 칸 채널 이름 = journey-labels 한 곳 · 매장 범위 판정 = getStoreScope 한 곳', () => {
+  const JOURNEY_SCREENS = sourceFiles(FE, /\.tsx?$/).filter((f) => /^components\/journey\//.test(f) || /^pages\/Journey\w*\.tsx$/.test(f));
+  it('여정 화면은 채널 값을 사람 말로 직접 바꾸지 않는다(삼항 · 이름 표 0) · 문장에 영문 채널 이름 0 · 「단문 · 장문」은 「~ 문자」로만', () => {
+    expect(JOURNEY_SCREENS.length).toBeGreaterThan(30);
+    const NAME = /문자|단문|장문|사진|SMS|LMS|MMS/;   // 채널 이름이 되는 말(광고 표기 같은 다른 글은 아니다)
+    const TERNARY = new RegExp(`===\\s*['"](sms|lms|mms)['"]\\s*\\?\\s*['"][^'"]*(${NAME.source})`);
+    const NAME_MAP = new RegExp(`\\b(sms|lms|mms)\\s*:\\s*['"][^'"]*(${NAME.source})`);
+    const bad: string[] = [];
+    for (const f of JOURNEY_SCREENS) {
+      stripComments(read(join(FE, f))).split('\n').forEach((ln, i) => {
+        const hangul = /[가-힣]/.test(ln);
+        if (TERNARY.test(ln) || NAME_MAP.test(ln) || (hangul && /\b(SMS|LMS|MMS)\b/.test(ln)) || /(단문|장문)(?! 문자)/.test(ln)) bad.push(`${f}:${i + 1} ${ln.trim().slice(0, 70)}`);
+      });
+    }
+    expect(bad).toEqual([]);
+    // 살아 있음 — 채널 이름을 그리는 화면(탭 · 휴대폰 미리보기 · 문안 고치기 창 · 옛 칸 고르기 · 지도 · 작업대)이 공용 함수를 부른다
+    const users = JOURNEY_SCREENS.filter((f) => /\bstepChannelLabel\(/.test(stripComments(read(join(FE, f)))));
+    for (const f of ['components/journey/JourneyStepStudio.tsx', 'components/journey/PhoneComposer.tsx', 'components/journey/JourneyMessageEditModal.tsx', 'pages/JourneysPage.tsx']) expect(users).toContain(f);
+  });
+  it('여정 서버가 고객에게 돌려주는 입력 · 상태 오류에 영문 채널 이름 0(화면 이름과 같은 말)', () => {
+    const MSG = /new (?:JourneyInputError|JourneyStepGateError)\(\s*(['`"])((?:(?!\1)[\s\S])*)\1/g;
+    const bad: string[] = [];
+    for (const f of JOURNEY_UTILS) for (const m of stripComments(be(f)).matchAll(MSG)) if (/\b(SMS|LMS|MMS)\b/.test(m[2])) bad.push(`${f}: ${m[2].slice(0, 60)}`);
+    expect(bad).toEqual([]);
+  });
+  it('「회사에 분류 체계가 있는가」(customer_stores 회사 전체 존재)를 묻는 SQL 은 store-scope.ts 밖에 0 — 감싸는 함수가 범위 판정을 다시 하지 않는다', () => {
+    const ASK = /EXISTS\s*\(\s*SELECT 1 FROM customer_stores WHERE company_id = \$\d+(?:::uuid)?\s+LIMIT 1\s*\)/;
+    const hits = sourceFiles(BE, /\.ts$/).filter((f) => ASK.test(stripComments(read(join(BE, f)))));
+    expect(hits).toEqual(['utils/store-scope.ts']);
+  });
+});
+
+// ── ★1026 의존성 보안판(R21) — bullmq 를 지우자 그 안에 딸려 온 uuid 를 빌려 쓰던 6개 파일이 tsc 에서 깨졌다 ──
+//   같은 꼴 = pngjs(qrcode 안 · require 라 tsc 가 못 본다) · 선언만 있고 쓰는 곳 0 = zod · bullmq(취약 판을 실어 날랐다).
+//   ★Codex 1R = import x = require('y') · 글자가 아닌 인자로 여는 require · import() 를 놓쳤다 → 둘 다 읽는다.
+const BUILTINS = new Set(builtinModules);
+function packageOf(spec: string): string | null {
+  if (/^[./]/.test(spec) || spec.startsWith('node:') || spec.startsWith('@/')) return null;
+  const name = spec.startsWith('@') ? spec.split('/').slice(0, 2).join('/') : spec.split('/')[0];
+  return BUILTINS.has(name) ? null : name;
+}
+/** 여는 함수인가 = require · import() · createRequire(...)() */
+function isLoaderCall(n: ts.CallExpression): boolean {
+  const e = n.expression;
+  return e.kind === ts.SyntaxKind.ImportKeyword
+    || (ts.isIdentifier(e) && e.text === 'require')
+    || (ts.isCallExpression(e) && ts.isIdentifier(e.expression) && e.expression.text === 'createRequire');
+}
+/** 파일이 여는 외부 패키지(import · export from · import x = require · import() · require() · createRequire) — 구문 트리로 읽는다(정규식 속 'from' 오탐 0).
+ *  dynamic = 글자가 아닌 인자로 여는 자리 · 「파일: 인자 글자」(무엇을 여는지 정적으로 모른다 → 시험이 자리마다 판정) */
+function packagesImported(file: string, text: string): { pkgs: string[]; dynamic: string[] } {
+  const sf = ts.createSourceFile(file, text, ts.ScriptTarget.Latest, false, file.endsWith('x') ? ts.ScriptKind.TSX : ts.ScriptKind.TS);
+  const specs: string[] = [];
+  const dynamic: string[] = [];
+  const visit = (n: ts.Node) => {
+    if ((ts.isImportDeclaration(n) || ts.isExportDeclaration(n)) && n.moduleSpecifier && ts.isStringLiteral(n.moduleSpecifier)) specs.push(n.moduleSpecifier.text);
+    else if (ts.isImportEqualsDeclaration(n) && ts.isExternalModuleReference(n.moduleReference)) {
+      const e = n.moduleReference.expression;
+      if (ts.isStringLiteralLike(e)) specs.push(e.text); else dynamic.push(`${file}: ${e.getText(sf)}`);
+    } else if (ts.isCallExpression(n) && isLoaderCall(n)) {
+      const a = n.arguments[0];
+      if (a && ts.isStringLiteralLike(a)) specs.push(a.text); else dynamic.push(`${file}: ${a ? a.getText(sf) : ''}`);
+    }
+    ts.forEachChild(n, visit);
+  };
+  visit(sf);
+  return { pkgs: specs.map(packageOf).filter((x): x is string => !!x), dynamic };
+}
+const allFiles = (root: string, ext: RegExp) => (readdirSync(root, { recursive: true }) as string[])
+  .map((f) => String(f).replace(/\\/g, '/')).filter((f) => ext.test(f) && !/(^|\/)(dist|dist-old|node_modules)\//.test(f));
+const isTestFile = (f: string) => /(^|\/)__tests__\//.test(f) || /\.(test|spec|verify)\.tsx?$/.test(f);
+const manifest = (dir: string) => JSON.parse(read(join(dir, 'package.json'))) as {
+  dependencies?: Record<string, string>; devDependencies?: Record<string, string>; allowScripts?: Record<string, boolean>;
+};
+
+describe('R21 외부 부품 — 쓰는 패키지는 선언돼 있고 · 선언한 운영 패키지는 쓴다 · 설치 스크립트는 허용 · 차단을 정했다', () => {
+  const BE_PKG = manifest(join(BE, '..'));
+  const FE_PKG = manifest(join(FE, '..'));
+  const beProd = new Set(Object.keys(BE_PKG.dependencies || {}));
+  const beAll = new Set([...beProd, ...Object.keys(BE_PKG.devDependencies || {})]);
+  const feAll = new Set([...Object.keys(FE_PKG.dependencies || {}), ...Object.keys(FE_PKG.devDependencies || {})]);
+  const beScan = allFiles(BE, /\.(ts|js|mjs)$/).map((f) => ({ f, ...packagesImported(f, read(join(BE, f))) }));
+  const feScan = allFiles(FE, /\.(tsx?|jsx?)$/).map((f) => ({ f, ...packagesImported(f, read(join(FE, f))) }));
+
+  it('백엔드 운영 소스가 여는 패키지 = dependencies 에 선언(남의 꾸러미 안에 딸려 온 사본을 빌려 쓰지 않는다)', () => {
+    const bad = beScan.filter((s) => !isTestFile(s.f)).flatMap((s) => s.pkgs.filter((p) => !beProd.has(p)).map((p) => `${s.f}: ${p}`));
+    expect(bad).toEqual([]);
+  });
+  it('백엔드 시험이 여는 패키지 = dependencies · devDependencies 에 선언', () => {
+    const bad = beScan.filter((s) => isTestFile(s.f)).flatMap((s) => s.pkgs.filter((p) => !beAll.has(p)).map((p) => `${s.f}: ${p}`));
+    expect(bad).toEqual([]);
+  });
+  it('프론트 소스가 여는 패키지 = package.json 에 선언', () => {
+    const bad = feScan.flatMap((s) => s.pkgs.filter((p) => !feAll.has(p)).map((p) => `${s.f}: ${p}`));
+    expect(bad).toEqual([]);
+  });
+  it('글자가 아닌 인자로 여는 자리 0(무엇을 여는지 시험이 못 본다) · 면제 = 프론트 소스 파일 경로(pathToFileURL)를 여는 시험 1자리(인자 글자까지 묶는다 · 같은 파일에 새 자리가 생기면 실패)', () => {
+    const dyn = [...beScan.flatMap((s) => s.dynamic.map((f) => `backend/${f}`)), ...feScan.flatMap((s) => s.dynamic.map((f) => `frontend/${f}`))];
+    expect(dyn).toEqual(['backend/utils/__tests__/brand-send-input-guard.test.ts: pathToFileURL(path.join(FRONT, file)).href']);
+  });
+  it('백엔드 운영 의존성은 운영 소스가 연다(선언만 있는 패키지 = 취약 판만 실어 나른다) · 타입 꾸러미(@types) 제외', () => {
+    // @prisma/client = prisma CLI(package.json db:* 스크립트)의 짝 · 소스 import 0 · 지울지는 1026 범위 밖 기록(설계서 §3-9-1)
+    const KEEP = new Set(['@prisma/client']);
+    const used = new Set(beScan.filter((s) => !isTestFile(s.f)).flatMap((s) => s.pkgs));
+    expect([...beProd].filter((p) => !p.startsWith('@types/') && !used.has(p) && !KEEP.has(p))).toEqual([]);
+    for (const p of KEEP) expect(used.has(p)).toBe(false);   // 쓰기 시작하면 면제를 지운다
+  });
+  it('설치 스크립트가 있는 패키지(lock hasInstallScript · 서버 linux 에 설치되는 것)는 allowScripts 가 허용 · 차단을 정했고 · 판 고정 항목은 lock 의 판과 같다(npm 11 은 정하지 않은 스크립트를 조용히 건너뛴다 · puppeteer 를 올리고 다시 정하지 않으면 Chrome 이 안 내려온다)', () => {
+    for (const [label, dir, pkg] of [['backend', join(BE, '..'), BE_PKG], ['frontend', join(FE, '..'), FE_PKG]] as const) {
+      const lock = JSON.parse(read(join(dir, 'package-lock.json'))) as { packages: Record<string, { version?: string; hasInstallScript?: boolean; os?: string[] }> };
+      const allow = pkg.allowScripts || {};
+      const installed = Object.entries(lock.packages).filter(([k]) => k.includes('node_modules/'))
+        .map(([k, v]) => ({ name: k.slice(k.lastIndexOf('node_modules/') + 'node_modules/'.length), version: v.version || '', script: !!v.hasInstallScript, linux: !v.os || v.os.includes('linux') }));
+      const undecided = installed.filter((x) => x.script && x.linux && !(`${x.name}@${x.version}` in allow) && !(x.name in allow)).map((x) => `${label}: ${x.name}@${x.version}`);
+      expect(undecided).toEqual([]);
+      const stale = Object.keys(allow).filter((k) => k.lastIndexOf('@') > 0).filter((k) => {
+        const at = k.lastIndexOf('@');
+        return !installed.some((x) => x.name === k.slice(0, at) && x.version === k.slice(at + 1));
+      }).map((k) => `${label}: ${k}`);
+      expect(stale).toEqual([]);
+    }
   });
 });

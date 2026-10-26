@@ -23,6 +23,7 @@ import PhoneComposer from './PhoneComposer';
 import JourneyMmsUploader from './JourneyMmsUploader';
 // ★ 2026-08-08 — 혜택·링크 placeholder는 텍스트 수술이 아니라 값 입력으로 채운다(판정·치환 단일 정의).
 import { hasBenefitPlaceholder, hasUrlPlaceholder } from '../../utils/message-placeholders';
+import { stepChannelLabel } from '../../utils/journey-labels';
 
 export type StudioChannel = 'sms' | 'lms' | 'mms';
 export type StudioDelayMode = 'relative' | 'relative_at_hour' | 'specific_hour' | 'next_business_day';
@@ -279,7 +280,7 @@ export default function JourneyStepStudio({
                   channel === c ? 'bg-violet-100 text-violet-900 ring-1 ring-violet-300' : 'text-slate-500 hover:bg-slate-100'
                 }`}
               >
-                {c === 'sms' ? '문자' : c === 'lms' ? '장문' : '사진'}
+                {stepChannelLabel(c)}
               </button>
             ))}
           </fieldset>
@@ -311,7 +312,7 @@ export default function JourneyStepStudio({
               <div className="mb-2 flex items-center gap-2">
                 <ImageIcon className="h-3.5 w-3.5 text-violet-700" />
                 <span className="text-[12px] font-semibold text-slate-600">이미지 첨부</span>
-                <span className="text-[12px] text-slate-400">MMS는 이미지가 함께 나갑니다</span>
+                <span className="text-[12px] text-slate-400">사진 문자는 이미지가 함께 나갑니다</span>
               </div>
               <JourneyMmsUploader
                 value={step.mmsImagePaths || []}
@@ -319,7 +320,7 @@ export default function JourneyStepStudio({
               />
               {(step.mmsImagePaths?.length ?? 0) === 0 && (
                 <p className="mt-2 text-[12px] leading-relaxed text-amber-800">
-                  아직 이미지가 없습니다. 이대로 두면 글자만 나가니, 이미지를 넣거나 채널을 LMS로 되돌려 주세요.
+                  아직 이미지가 없습니다. 이대로 두면 글자만 나가니, 이미지를 넣거나 장문 문자로 되돌려 주세요.
                 </p>
               )}
             </div>

@@ -73,10 +73,10 @@ export default function JourneyMmsUploader({ value, onChange, disabled, maxCount
         body: JSON.stringify({ assetId }),
       });
       const data = await res.json();
-      if (!res.ok || !data?.success || !data.image?.serverPath) throw new Error(data?.error || 'MMS 변환 실패');
+      if (!res.ok || !data?.success || !data.image?.serverPath) throw new Error(data?.error || '사진 변환 실패');
       onChange([...value, data.image.serverPath]);
     } catch (e: any) {
-      setError(e?.message || 'MMS 변환 실패');
+      setError(e?.message || '사진 변환 실패');
     } finally {
       setUploading(false);
     }
@@ -154,7 +154,7 @@ export default function JourneyMmsUploader({ value, onChange, disabled, maxCount
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2 text-xs font-semibold text-cyan-800">
           <ImageIcon className="w-3.5 h-3.5" />
-          MMS 이미지 ({value.length}/{maxCount})
+          첨부 이미지 ({value.length}/{maxCount})
         </div>
         {canAdd && (
           <div className="flex items-center gap-1.5">
@@ -172,7 +172,7 @@ export default function JourneyMmsUploader({ value, onChange, disabled, maxCount
               onClick={() => setLibOpen(true)}
               disabled={uploading}
               className="px-2 py-1 bg-emerald-100 hover:bg-emerald-100 disabled:opacity-50 text-emerald-800 rounded text-[11px] flex items-center gap-1"
-              title="라이브러리 소재를 MMS 규격(≤300KB)으로 자동 변환해 첨부"
+              title="라이브러리 소재를 사진 규격(≤300KB)으로 자동 변환해 첨부"
             >
               <FolderOpen className="w-3 h-3" />
               라이브러리
@@ -211,7 +211,7 @@ export default function JourneyMmsUploader({ value, onChange, disabled, maxCount
             <div key={idx} className="relative group">
               <img
                 src={img.url}
-                alt={`MMS ${idx + 1}`}
+                alt={`첨부 이미지 ${idx + 1}`}
                 className="w-full h-20 object-cover rounded border border-slate-200"
               />
               {!disabled && (
