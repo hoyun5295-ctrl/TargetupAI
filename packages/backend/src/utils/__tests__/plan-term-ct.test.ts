@@ -8,12 +8,12 @@
  *      잠김이면 오늘부터 1개월 + 원래 요금제 복구
  *   3. 신청 승인: 올림 = 차액 즉시 · 부족 = 402(상태 무변화) · 내림 = 예약만 · DDL 전 = 미처리
  *   4. 정렬: 미리 산 다른 요금제 구간이 시작되면 plan_id 교체 · CT 밖에서 바뀐 plan_id는 손대지 않는다
- *   5. 복구 시 AI 크레딧: 잠긴 동안 월 리셋이 돌았을 때만 보충
+ *   5. 복구 시 AI 크레딧: 그 달 남은 기간 몫(★1026 요금제 변경 CT 공통 · 옛 「리셋이 돌았으면 한 달치 보충」은 겹쳐서 지움)
  *   6. 소스 계약: plan_term 칸·원장·요금제 이용료 차감은 CT 파일만 쓴다 · CT에 CURRENT_DATE 0 · plan_id 쓰기 파일 허용 목록
  *
  * ⚠ 가짜 DB는 CT가 실제로 보내는 SQL만 해석한다. 모르는 SQL이면 던진다(관대한 mock 금지).
  */
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import * as fs from 'fs';
 import * as path from 'path';
 
@@ -115,9 +115,9 @@ function exec(sql: string, p: any[] = []): any {
   }
   // recordPlanChange
   if (s.startsWith('SELECT pg_advisory_xact_lock')) return { rows: [] };
-  if (s.startsWith('SELECT plan_code, monthly_price FROM plans')) {
+  if (s.startsWith('SELECT plan_code, monthly_price, COALESCE(ai_credits_per_month, 0) AS credits FROM plans')) {
     const pl = byId(p[0]);
-    return { rows: pl ? [{ plan_code: pl.plan_code, monthly_price: pl.monthly_price }] : [] };
+    return { rows: pl ? [{ plan_code: pl.plan_code, monthly_price: pl.monthly_price, credits: pl.ai_credits_per_month }] : [] };
   }
   if (s.startsWith('SELECT to_plan_id, to_plan_code, to_monthly_price FROM company_plan_changes')) {
     return { rows: db.planChanges.length ? [db.planChanges[db.planChanges.length - 1]] : [] };
@@ -125,18 +125,27 @@ function exec(sql: string, p: any[] = []): any {
   if (s.startsWith('SELECT EXISTS(SELECT 1 FROM users')) return { rows: [{ in_users: true, super_login: null }] };
   if (s.startsWith('INSERT INTO company_plan_changes')) {
     db.planChanges.push({ to_plan_id: p[2], to_plan_code: p[4], to_monthly_price: p[6], change_type: p[8], effective_date: p[7] });
-    return { rows: [] };
+    return { rows: [{ id: `chg${db.planChanges.length}` }] };
   }
-  // AI 크레딧 보충
-  if (s.startsWith('SELECT 1 FROM ai_credit_transactions')) {
-    return { rows: db.creditTx.some((t) => t.source === 'monthly-reset' && t.created_at >= p[1]) ? [{ '?column?': 1 }] : [] };
+  // AI 크레딧 — 요금제 변경 CT(recordPlanChange)의 남은 기간 반영 · 월 리셋
+  if (s.startsWith('SELECT c.ai_credits_base_remaining AS base')) {
+    // 리셋 시각을 안 줬으면 「이번 달 리셋 끝」으로 본다
+    return { rows: [{ base: db.co.ai_base, purchased: db.co.ai_purchased, cap: null, reset_at: db.co.ai_reset_at ?? new Date().toISOString(),
+      billing_type: db.co.billing_type, overage_limit: 0, plan_credits: byId(db.co.plan_id)?.ai_credits_per_month ?? null }] };
+  }
+  if (s.startsWith('SELECT COALESCE(ai_credits_per_month, 0) AS credits FROM plans')) {
+    return { rows: [{ credits: byId(p[0])?.ai_credits_per_month ?? 0 }] };
   }
   if (s.startsWith('INSERT INTO ai_credit_transactions')) {
     if (db.creditTx.some((t) => t.key === p[2])) return { rows: [], rowCount: 0 };
-    db.creditTx.push({ source: 'plan-term-restore', key: p[2], amount: p[1], base_after: p[3] });
+    db.creditTx.push({ type: s.includes("'plan_prorate'") ? 'plan_prorate' : s.includes("'reset'") ? 'reset' : '?', key: p[2], amount: p[1], base_after: p[3] });
     return { rows: [], rowCount: 1 };
   }
-  if (s.startsWith('UPDATE companies SET ai_credits_base_remaining')) { db.co.ai_base = p[1]; return { rows: [] }; }
+  if (s.startsWith('UPDATE companies SET ai_credits_base_remaining')) {
+    db.co.ai_base = p[1];
+    if (s.includes('ai_credits_reset_at = NOW()')) db.co.ai_reset_at = new Date().toISOString();
+    return { rows: [] };
+  }
   throw new Error(`가짜 DB가 모르는 SQL: ${s.slice(0, 120)}`);
 }
 
@@ -265,25 +274,35 @@ describe('1개월 연장(고객 관리자)', () => {
 });
 
 describe('잠김 → 1개월 연장 = 다시 열기', () => {
-  it('오늘부터 1개월 · 원래 요금제 복구 · 잠긴 동안 월 리셋이 돌았으면 AI 크레딧 보충', async () => {
-    resetDb({ plan_id: PLANS.FREE.id, plan_term_restore_plan_id: PLANS.PRO.id, balance: 5000000, ai_base: -30 });
+  afterEach(() => { vi.useRealTimers(); });
+  it('오늘부터 1개월 · 원래 요금제 복구 · AI 크레딧 = 그 달 남은 기간 몫(★1026)', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-12-10T03:00:00Z'));   // KST 12/10
+    // 잠긴 동안 12/1 리셋이 미가입(0) 기준으로 돌았다 — 선불 음수 상계분 −30 이 남아 있다
+    resetDb({ plan_id: PLANS.FREE.id, plan_term_restore_plan_id: PLANS.PRO.id, balance: 5000000, ai_base: -30, ai_reset_at: '2026-11-30T15:00:00.000Z' });
+    db.planChanges = [{ to_plan_id: PLANS.FREE.id, to_plan_code: 'FREE', to_monthly_price: 0 }];
     addEvent({ term_version: 1, event_type: 'block', plan_id: PLANS.PRO.id, created_at: '2026-11-04T00:00:00.000Z', detail: { reason: 'insufficient' } });
-    db.creditTx.push({ source: 'monthly-reset', created_at: '2026-12-01T00:00:00.000Z' });
     const q = await getPlanTermQuote(CID, '2026-12-10');
     expect(q).toMatchObject({ restoring: true, starts_on: '2026-12-10', new_expires: '2027-01-09' });
     const r = await extendPlanTerm(CID, { requestId: REQ1, version: q.version, total: q.total }, ADMIN, '2026-12-10');
     expect(r).toMatchObject({ restored: true, expires_on: '2027-01-09' });
     expect(db.co.plan_id).toBe(PLANS.PRO.id);
     expect(db.co.plan_term_restore_plan_id).toBeNull();
-    expect(db.co.ai_base).toBe(2400 - 30);
-    expect(db.creditTx.filter((t) => t.source === 'plan-term-restore')).toHaveLength(1);
+    // 프로 2400 × 22/31 = 1703.2 → 1703 · 한 달치(2400)가 아니다
+    expect(db.creditTx.filter((t) => t.type === 'plan_prorate').map((t) => t.amount)).toEqual([1703]);
+    expect(db.co.ai_base).toBe(-30 + 1703);
   });
-  it('잠긴 동안 리셋이 안 돌았으면 크레딧은 손대지 않는다', async () => {
-    resetDb({ plan_id: PLANS.FREE.id, plan_term_restore_plan_id: PLANS.PRO.id, balance: 5000000, ai_base: 300 });
+  it('이번 달 리셋 전이면 직전 요금제(미가입 0)로 리셋부터 — 그 위에 남은 기간 몫만', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-11-10T03:00:00Z'));   // KST 11/10
+    resetDb({ plan_id: PLANS.FREE.id, plan_term_restore_plan_id: PLANS.PRO.id, balance: 5000000, ai_base: 300, ai_reset_at: '2026-10-05T00:00:00.000Z' });
+    db.planChanges = [{ to_plan_id: PLANS.FREE.id, to_plan_code: 'FREE', to_monthly_price: 0 }];
     addEvent({ term_version: 1, event_type: 'block', plan_id: PLANS.PRO.id, created_at: '2026-11-04T00:00:00.000Z' });
     const q = await getPlanTermQuote(CID, '2026-11-10');
     await extendPlanTerm(CID, { requestId: REQ1, version: q.version, total: q.total }, ADMIN, '2026-11-10');
-    expect(db.co.ai_base).toBe(300);
+    // 리셋(미가입 0 · 선불 양수 잔액은 이월 안 함) → 0, 그 위에 프로 2400 × 21/30 = 1680
+    expect(db.creditTx.map((t) => [t.type, t.amount])).toEqual([['reset', 0], ['plan_prorate', 1680]]);
+    expect(db.co.ai_base).toBe(1680);
   });
 });
 

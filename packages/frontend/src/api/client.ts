@@ -63,7 +63,6 @@ export const companiesApi = {
   list: (params?: any) => api.get('/companies', { params }),
   get: (id: string) => api.get(`/companies/${id}`),
   create: (data: any) => api.post('/companies', data),
-  update: (id: string, data: any) => api.put(`/companies/${id}`, data),
   createAdmin: (id: string, data: any) => api.post(`/companies/${id}/admin`, data),
 };
 

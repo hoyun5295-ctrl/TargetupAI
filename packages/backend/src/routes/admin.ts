@@ -1664,7 +1664,7 @@ router.put('/companies/:id', authenticate, requireSuperAdmin, async (req: Reques
     try {
       await planClient.query('BEGIN');
       const beforePlan = await planClient.query(
-        `SELECT plan_id, status, ${planTermManagedSql('companies')} AS plan_term_managed FROM companies WHERE id = $1::uuid FOR UPDATE`, [id]);
+        `SELECT plan_id, status, subscription_status, ${planTermManagedSql('companies')} AS plan_term_managed FROM companies WHERE id = $1::uuid FOR UPDATE`, [id]);
       if (beforePlan.rows.length === 0) {
         await planClient.query('ROLLBACK');
         return res.status(404).json({ error: '회사를 찾을 수 없습니다.' });
@@ -1677,7 +1677,6 @@ router.put('/companies/:id', authenticate, requireSuperAdmin, async (req: Reques
       }
       // ★ 2026-07-28 잠근 행에서 읽은 직전 플랜으로만 "실제 변경"을 판정한다(이력 기록과 같은 기준).
       //   planChanged=false면 구독 상태·체험 만료일을 건드리지 않는다.
-      //   trialDaysParam: null = 체험 아님(만료일 삭제) / N = 오늘부터 N일.
       const planChanged =
         Boolean(planId) && String(beforePlan.rows[0].plan_id || '') !== String(planId);
       // ★ 2026-10-04 선불 이용 기간 중인 회사의 요금제 직접 변경은 막는다(설계 §5-1 · G4) — 돈이 걸린 판정은 신청 승인 CT 한 길.
@@ -1686,10 +1685,16 @@ router.put('/companies/:id', authenticate, requireSuperAdmin, async (req: Reques
         const e = planTermManagedError('요금제를 여기서 바꿀 수 없습니다');
         return res.status(e.status).json(e.body);
       }
-      let trialDaysParam: number | null = null;
-      if (planChanged) {
-        finalSubscriptionStatus = planIsTrial ? 'trial' : 'paid';
-        trialDaysParam = planIsTrial ? (planTrialDays > 0 ? planTrialDays : 30) : null;
+      // ★ 2026-10-26 무료체험(TRIAL)은 체험 CT(grantFreeTrial) 한 길 — 만료일 · 체험 크레딧 · 이력(trial_start)이 함께 들어간다.
+      //   이 UPDATE 는 요금제 칸을 건드리지 않고, 커밋 전에 같은 트랜잭션에서 CT 를 부른다(뿌리 대장 R6).
+      const trialViaCt = planChanged && planIsTrial;
+      const planChangedHere = planChanged && !trialViaCt;
+      if (planChangedHere) finalSubscriptionStatus = 'paid';
+      // ★ 2026-10-26 구독 상태 칸을 손으로 'trial' 로 바꾸면 만료일 없는 체험 상태가 생긴다(체험 부여 버튼 = 만료일 · 크레딧 · 이력 한 길).
+      //   이미 체험 중인 회사의 저장(같은 값)은 그대로 받는다.
+      if (subscriptionStatus === 'trial' && beforePlan.rows[0].subscription_status !== 'trial' && !trialViaCt) {
+        await planClient.query('ROLLBACK');
+        return res.status(400).json({ error: '체험 상태는 체험 부여 버튼(7일 · 1개월)으로 바꿉니다(만료일과 체험 크레딧이 함께 들어갑니다).', code: 'TRIAL_VIA_BUTTON' });
       }
       result = await planClient.query(`
       UPDATE companies
@@ -1702,13 +1707,9 @@ router.put('/companies/:id', authenticate, requireSuperAdmin, async (req: Reques
           -- ★ 2026-07-28 판정 축을 "planId가 실려 왔는가"($6)에서 "요금제가 실제로 바뀌었는가"($38)로 바꿨다.
           --   전자는 연락처만 고쳐도 planId가 함께 오면 진행 중인 체험을 'paid'로 덮었다.
           subscription_status = CASE WHEN $38::boolean IS TRUE THEN $31::varchar ELSE COALESCE($31, subscription_status) END,
-          -- ★ 2026-07-28 체험 만료일도 같은 트랜잭션에서. $39 = 체험 일수(NULL이면 체험 아님 → 만료일 삭제).
-          --   요금제가 안 바뀌면 손대지 않는다.
-          trial_expires_at = CASE
-            WHEN $38::boolean IS NOT TRUE THEN trial_expires_at
-            WHEN $39::int IS NULL THEN NULL
-            ELSE NOW() + ($39::int || ' days')::interval
-          END,
+          -- ★ 2026-07-28 체험 만료일도 같은 트랜잭션에서. 유료 요금제로 바뀌면 체험 만료일을 지운다.
+          --   요금제가 안 바뀌면 손대지 않는다. 체험(TRIAL) 배정은 이 UPDATE 가 아니라 체험 CT 가 쓴다(★1026).
+          trial_expires_at = CASE WHEN $38::boolean IS TRUE THEN NULL ELSE trial_expires_at END,
           reject_number = COALESCE($7, reject_number),
           brand_name = COALESCE($8, brand_name),
           send_start_hour = COALESCE($9, send_start_hour),
@@ -1745,9 +1746,9 @@ router.put('/companies/:id', authenticate, requireSuperAdmin, async (req: Reques
           updated_at = NOW()
       WHERE id = $32
       RETURNING *
-    `, [companyName, contactName, contactEmail, contactPhone, status, planId, rejectNumber, brandName, sendHourStart, sendHourEnd, dailyLimit, holidaySend, duplicateDays, null /* ★2026-07-26 단가 쓰기 경로 통합 — 이 라우트는 단가를 더 이상 저장하지 않는다.
+    `, [companyName, contactName, contactEmail, contactPhone, status, trialViaCt ? null : planId, rejectNumber, brandName, sendHourStart, sendHourEnd, dailyLimit, holidaySend, duplicateDays, null /* ★2026-07-26 단가 쓰기 경로 통합 — 이 라우트는 단가를 더 이상 저장하지 않는다.
              기준(unit_price_basis)과 원자적으로 써야 하는 값이라 쓰기 경로를 하나로 좁혔다:
-             PUT /api/admin/companies/:id/unit-prices */, null, null, null, storeCodeList ? JSON.stringify(storeCodeList) : null, businessNumber, ceoName, businessType, businessItem, address, allowCallbackSelfRegister !== undefined ? allowCallbackSelfRegister : null, maxUsers || null, sessionTimeoutMinutes || null, approvalRequired !== undefined ? approvalRequired : null, targetStrategy || null, lineGroupId || null, kakaoEnabled !== undefined ? kakaoEnabled : null, finalSubscriptionStatus, id, userIsolationEnabled !== undefined ? userIsolationEnabled : null, usageType || null, industryCodeParam, null /* 테스트 단가도 위 전용 엔드포인트에서만 저장한다 */, null, planChanged, trialDaysParam]);
+             PUT /api/admin/companies/:id/unit-prices */, null, null, null, storeCodeList ? JSON.stringify(storeCodeList) : null, businessNumber, ceoName, businessType, businessItem, address, allowCallbackSelfRegister !== undefined ? allowCallbackSelfRegister : null, maxUsers || null, sessionTimeoutMinutes || null, approvalRequired !== undefined ? approvalRequired : null, targetStrategy || null, lineGroupId || null, kakaoEnabled !== undefined ? kakaoEnabled : null, finalSubscriptionStatus, id, userIsolationEnabled !== undefined ? userIsolationEnabled : null, usageType || null, industryCodeParam, null /* 테스트 단가도 위 전용 엔드포인트에서만 저장한다 */, null, planChangedHere]);
 
       // 요금제가 실제로 바뀐 때만 기록한다(COALESCE라 planId가 null이면 미변경).
       const newPlanId = result.rows[0]?.plan_id;
@@ -1760,6 +1761,10 @@ router.put('/companies/:id', authenticate, requireSuperAdmin, async (req: Reques
           changedBy: (req as any).user?.userId || null,
           reason: '회사 수정(요금제 변경·슈퍼관리자)',
         });
+      }
+      if (trialViaCt && result.rows.length > 0) {
+        const granted = await grantFreeTrial(id, planTrialDays > 0 ? planTrialDays : 30, { client: planClient });
+        result.rows[0] = { ...result.rows[0], plan_id: granted.plan_id, subscription_status: granted.subscription_status, trial_expires_at: granted.trial_expires_at };
       }
       await planClient.query('COMMIT');
     } catch (err) {
@@ -1891,7 +1896,7 @@ router.patch('/companies/:id/cdp-auto-execute', authenticate, requireSuperAdmin,
 });
 
 // ★ 2026-08-22 대행발송 스위치 — 슈퍼관리자가 "이 회사에 열어 준다"를 켠다(docs/2026-08-22-agency-send-design.md §4-1).
-//   메뉴는 모든 회사에 보이고(미끼), 실제 진입은 이 스위치 AND 유료 = canUseAgencySend가 판정한다.
+//   메뉴는 모든 회사에 보이고(미끼), 실제 진입은 이 스위치(★1026 요금제 무관 · 정지 · 만료만 막음) = canUseAgencySend가 판정한다.
 //   ⛔ 끈다고 진행 중인 건이 멈추지 않는다(Harold 확정): 새 접수·승인만 막고, 이미 승인된 건은 워커가 끝까지 처리한다.
 router.patch('/companies/:id/agency-send', authenticate, requireSuperAdmin, async (req: Request, res: Response) => {
   const { id } = req.params;
@@ -2918,7 +2923,9 @@ router.put('/plan-requests/:id/approve', authenticate, requireSuperAdmin, async 
 
     // ★ 2026-06-08: 무료체험 신청([무료체험] 센티넬)이면 1개월 체험 부여, 그 외는 일반 플랜 변경.
     //   ★ 2026-07-28 배정 플랜 BASIC → TRIAL(월 0원). 기능 권한은 TRIAL 플래그가 BASIC과 동일하게 맞춰져 있다.
-    const isTrialReq = typeof request.message === 'string' && request.message.startsWith('[무료체험]');
+    // ★ 2026-10-26 TRIAL 요금제를 직접 고른 신청도 체험으로 처리한다 — 옛 경로는 상태만 trial 로 바꾸고 만료일을 안 넣어 체험이 끝나지 않았다.
+    const requestedPlanCode = (await client.query(`SELECT plan_code FROM plans WHERE id = $1`, [request.requested_plan_id])).rows[0]?.plan_code;
+    const isTrialReq = (typeof request.message === 'string' && request.message.startsWith('[무료체험]')) || requestedPlanCode === 'TRIAL';
     // ★ 2026-10-04 선불 이용 기간 — 판정·차감·이력은 CT가 먼저 한다(설계 §5-2: 올림 = 차액 즉시 · 내림 = 다음 구매부터 · 잠김 = 다시 열기 ·
     //   미관리 선불의 유료 승인 = 첫 1개월 결제로 시작). 처리되면 아래 기존 UPDATE·이력을 건너뛴다. 후불·DDL 전은 미처리 = 기존 그대로.
     // 이름 조회는 트랜잭션 밖 연결로 — 실패해도 승인 트랜잭션을 중단시키지 않는다(PG는 실패한 문 뒤로 트랜잭션 전체를 막는다)
@@ -2934,11 +2941,9 @@ router.put('/plan-requests/:id/approve', authenticate, requireSuperAdmin, async 
       // 같은 트랜잭션(client 주입 — 체험 지급 CT는 호출부 트랜잭션을 그대로 탄다)
       await grantFreeTrial(request.company_id, 30, { client });
     } else {
-      // ★ CT-17: 요금제 승인 시 TRIAL plan이면 'trial' 유지, 그 외는 'paid'(정식 구독).
+      // ★ CT-17: 요금제 승인 = 'paid'(정식 구독). 체험(TRIAL) 신청은 위 갈래(체험 CT)가 받는다(★1026).
       //   (과거: 무조건 'active'로 덮어써서 ① 체험 상태 파괴 ② companies.status='active'와 네이밍 충돌)
-      const approvedPlanRes = await client.query(`SELECT plan_code FROM plans WHERE id = $1`, [request.requested_plan_id]);
-      const approvedIsTrial = approvedPlanRes.rows[0]?.plan_code === 'TRIAL';
-      const approvedStatus = approvedIsTrial ? 'trial' : 'paid';
+      const approvedStatus = 'paid';
       // ★ 2026-07-25 플랜 변경과 이력을 한 트랜잭션으로(Codex 지적 C).
       //   승급/강등 판정은 recordPlanChange 안에서 INSERT에 쓰는 바로 그 직전 값으로 한다(지적 F) —
       //   호출부가 미리 계산하면 그 사이 다른 변경이 끼어들 때 방향이 뒤집힌다.

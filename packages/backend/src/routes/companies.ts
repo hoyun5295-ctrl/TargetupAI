@@ -18,8 +18,8 @@ import { grantFreeTrial, isTrialApplyOpen, ADMIN_WEEK_TRIAL } from '../utils/bas
 // ★ 2026-07-25 요금제 변경 이력 CT — 청구서 일할계산의 진실의 원천(빠지면 그 구간이 증발)
 import { recordPlanChange, alertPlanChangeFailure } from '../utils/plan-change-log';
 // ★ 2026-10-04 선불 요금제 이용 기간 — 관리 중 게이트 · my-plan 표시(docs/2026-10-04-prepaid-plan-term-design.md)
-import { planTermManagedSql, planTermManagedError, PlanTermError, getPlanTermView, getScheduledFromForPlan } from '../utils/plan-term';
-import { canUseAgencySend, loadPlanContext } from '../utils/plan-guard';
+import { planTermManagedSql, PlanTermError, getPlanTermView, getScheduledFromForPlan } from '../utils/plan-term';
+import { canUseAgencySend, loadPlanContext, SPAM_FILTER_OPEN_SQL } from '../utils/plan-guard';
 import { parseAgentLedgerFields, parseAgentLedgerPatch, getAgentCustNameMap } from '../utils/pay-stats';
 // ★ 2026-08-20 발송ID 표기 정규화 CT — 저장(여기)·비교(집계)가 같은 규약(대문자)을 쓴다
 import { normalizeAgentSendId } from '../utils/send-usage-aggregation';
@@ -476,7 +476,7 @@ router.get('/my-plan', async (req: Request, res: Response) => {
         p.max_customers,
         p.ai_analysis_level,
         p.customer_db_enabled,
-        p.spam_filter_enabled,
+        ${SPAM_FILTER_OPEN_SQL} AS spam_filter_enabled,
         p.ai_messaging_enabled,
         p.auto_spam_test_enabled,
         p.ai_premium_enabled,
@@ -517,7 +517,7 @@ router.get('/my-plan', async (req: Request, res: Response) => {
     }
 
     // ★ 2026-08-22 대행발송(docs/2026-08-22-agency-send-design.md §4-1) — 헤더 메뉴는 모든 회사에 보이고,
-    //   들어갈 수 있는지만 이 값이 가른다. 판정은 서버 하나(canUseAgencySend = 회사 스위치 AND 유료).
+    //   들어갈 수 있는지만 이 값이 가른다. 판정은 서버 하나(canUseAgencySend = 회사 스위치 · ★1026 요금제 무관).
     //   ⛔ 플래그와 요금제를 따로 내리지 않는다 — 프론트가 조합하면 판정이 두 벌이 된다.
     //   조회 실패는 메뉴 진입만 막고 플랜 조회 자체(대시보드 핵심)는 살린다.
     let agencySendAllowed = false;
@@ -1840,170 +1840,9 @@ router.post('/', requireSuperAdmin, async (req: Request, res: Response) => {
   }
 });
 
-// ============================================================
-// ★ CT-17: 30일 PRO 무료체험 부여/취소 (슈퍼관리자 전용)
-//   - grant-trial : 회사에 30일 동안 PRO 기능 개방
-//   - revoke-trial: 즉시 취소 (FREE 강등)
-//   - 만료 자동 강등: utils/trial-downgrade-worker.ts (Cron 매일 04:00 KST)
-// ============================================================
-
-/**
- * POST /api/companies/:id/grant-trial
- * body: { days?: number = 30 }
- */
-// ★ D162-4 (2026-05-15): `/:id` UUID 검증 미들웨어 (일관성)
-router.post('/:id/grant-trial', requireUuidId, requireSuperAdmin, async (req: Request, res: Response) => {
-  try {
-    const { id } = req.params;
-    const days = Math.max(1, Math.min(Number((req.body as any)?.days) || 30, 365));
-
-    // 회사 존재 확인
-    const companyRes = await query(
-      `SELECT c.id, p.plan_code
-         FROM companies c
-         LEFT JOIN plans p ON c.plan_id = p.id
-        WHERE c.id = $1`,
-      [id],
-    );
-    if (companyRes.rows.length === 0) {
-      return res.status(404).json({ error: '고객사를 찾을 수 없습니다.' });
-    }
-
-    // TRIAL plan id 조회 (무료체험 전용 plan — PRO와 동일 기능)
-    const trialRes = await query(
-      `SELECT id FROM plans WHERE plan_code = 'TRIAL' AND is_active = true LIMIT 1`,
-    );
-    if (trialRes.rows.length === 0) {
-      return res.status(500).json({ error: '무료체험(TRIAL) 요금제가 존재하지 않습니다. 슈퍼관리자에게 문의하세요.' });
-    }
-    const trialPlanId = trialRes.rows[0].id;
-
-    // ★ RETURNING에 plan_code 포함 — AdminDashboard 가 응답값으로 planCode 표시
-    // ★ 2026-07-25 플랜 변경과 이력을 한 트랜잭션으로(Codex 지적 C) — 이력 유실 시 이후 구간이 연쇄로 틀어진다.
-    const client = await pool.connect();
-    let updated: any;
-    try {
-      await client.query('BEGIN');
-      updated = await client.query(
-        `UPDATE companies c
-            SET plan_id             = $1,
-                subscription_status = 'trial',
-                trial_expires_at    = NOW() + ($2::int || ' days')::interval,
-                updated_at          = NOW()
-          WHERE c.id = $3
-            -- ★ 2026-10-04 선불 이용 기간 중인 회사는 체험 대상이 아니다(설계 §5-1) — 잠금과 판정이 한 문장
-            AND NOT ${planTermManagedSql('c')}
-        RETURNING c.id, c.plan_id, c.subscription_status, c.trial_expires_at,
-                  (SELECT plan_code FROM plans WHERE id = $1) AS plan_code`,
-        [trialPlanId, days, id],
-      );
-      if (updated.rows.length === 0) {
-        await client.query('ROLLBACK');
-        const e = planTermManagedError('무료체험을 줄 수 없습니다');
-        return res.status(e.status).json(e.body);
-      }
-      if (updated.rows.length > 0) {
-        await recordPlanChange({
-          client,
-          companyId: id,
-          toPlanId: trialPlanId,
-          changeType: 'trial_start',
-          changedBy: (req as any).user?.userId || null,
-          reason: `${days}일 무료체험 부여`,
-        });
-      }
-      await client.query('COMMIT');
-    } catch (err) {
-      try { await client.query('ROLLBACK'); } catch { /* 아래 알림에 포함 */ }
-      await alertPlanChangeFailure(id, err);
-      return res.status(500).json({ error: '무료체험 부여에 실패했습니다. 다시 시도해주세요.' });
-    } finally {
-      client.release();
-    }
-
-    return res.json({
-      success: true,
-      message: `${days}일 PRO 무료체험이 부여되었습니다.`,
-      company: updated.rows[0],
-    });
-  } catch (err) {
-    console.error('grant-trial 실패:', err);
-    return res.status(500).json({ error: '체험 부여 실패' });
-  }
-});
-
-/**
- * POST /api/companies/:id/revoke-trial
- *   - 활성 체험 즉시 종료 → plan_id=FREE + subscription_status='trial_expired'
- *   - 정식 구독(subscription_status='paid')은 대상 아님
- *   - 조건: plan_code='TRIAL' 인 경우만 (subscription_status 값에 무관 — 'active'/'trial' 둘 다 허용)
- *     ※ 과거 subscription_status='trial' 조건만으로는 admin.ts가 'active'로 덮어쓴 케이스에서 취소 불가했음.
- */
-// ★ D162-4 (2026-05-15): `/:id` UUID 검증 미들웨어 (일관성)
-router.post('/:id/revoke-trial', requireUuidId, requireSuperAdmin, async (req: Request, res: Response) => {
-  try {
-    const { id } = req.params;
-
-    const freeRes = await query(
-      `SELECT id FROM plans WHERE plan_code = 'FREE' LIMIT 1`,
-    );
-    if (freeRes.rows.length === 0) {
-      return res.status(500).json({ error: 'FREE 요금제가 존재하지 않습니다.' });
-    }
-    const freePlanId = freeRes.rows[0].id;
-
-    // ★ 2026-07-25 플랜 변경과 이력을 한 트랜잭션으로(Codex 지적 C).
-    const client = await pool.connect();
-    let updated: any;
-    try {
-      await client.query('BEGIN');
-      updated = await client.query(
-        `UPDATE companies c
-            SET plan_id             = $1,
-                subscription_status = 'trial_expired',
-                -- ★ 2026-07-28 만료일도 함께 비운다. 남겨 두면 이 회사에 체험을 다시 줄 때
-                --   옛 만료일이 살아나 부여 즉시 만료 상태가 된다.
-                trial_expires_at    = NULL,
-                updated_at          = NOW()
-           FROM plans p
-          WHERE c.id = $2
-            AND c.plan_id = p.id
-            AND p.plan_code = 'TRIAL'
-        RETURNING c.id, c.plan_id, c.subscription_status, c.trial_expires_at,
-                  (SELECT plan_code FROM plans WHERE id = $1) AS plan_code`,
-        [freePlanId, id],
-      );
-      if (updated.rows.length === 0) {
-        await client.query('ROLLBACK');
-        return res.status(400).json({ error: '취소할 활성 체험이 없습니다.' });
-      }
-      await recordPlanChange({
-        client,
-        companyId: id,
-        toPlanId: freePlanId,
-        changeType: 'trial_expire',
-        changedBy: (req as any).user?.userId || null,
-        reason: '무료체험 취소(관리자)',
-      });
-      await client.query('COMMIT');
-    } catch (err) {
-      try { await client.query('ROLLBACK'); } catch { /* 아래 알림에 포함 */ }
-      await alertPlanChangeFailure(id, err);
-      return res.status(500).json({ error: '무료체험 취소에 실패했습니다. 다시 시도해주세요.' });
-    } finally {
-      client.release();
-    }
-
-    return res.json({
-      success: true,
-      message: '무료체험이 취소되고 미가입(FREE) 상태로 전환되었습니다.',
-      company: updated.rows[0],
-    });
-  } catch (err) {
-    console.error('revoke-trial 실패:', err);
-    return res.status(500).json({ error: '체험 취소 실패' });
-  }
-});
+// ★ 2026-10-26 옛 30일 PRO 체험 주소(grant-trial · revoke-trial)를 지웠다 — 화면 호출 0(2026-06-08 BASIC 체험으로 통합 뒤).
+//   grant-trial 은 체험 CT 를 거치지 않고 TRIAL 을 써서 체험 크레딧이 빠졌다(두 벌 · 뿌리 대장 R15 죽은 주소).
+//   체험 부여 · 취소 = 아래 grant-basic-trial · revoke-basic-trial(체험 CT grantFreeTrial) 한 길.
 
 // ============================================================
 // ★ D219+ Part 2 (2026-05-27): AI 오퍼레이션 30일 무료체험 부여/취소 (슈퍼관리자 전용)
@@ -2202,142 +2041,8 @@ router.post('/:id/revoke-basic-trial', requireUuidId, requireSuperAdmin, async (
   }
 });
 
-// PUT /api/companies/:id - 고객사 수정 (전체 설정 포함)
-// ★ D162-4 (2026-05-15): `/:id` UUID 검증 미들웨어 — 미래에 1-segment 명시 PUT 라우트 추가 시 충돌 방지
-router.put('/:id', requireUuidId, requireSuperAdmin, async (req: Request, res: Response) => {
-  try {
-    const { id } = req.params;
-    const {
-      companyName, businessNumber, ceoName,
-      contactName, contactEmail, contactPhone,
-      address, planId, status, dataInputMethod,
-      rejectNumber,
-      // 발송정책
-      sendHourStart, sendHourEnd, dailyLimit,
-      holidaySend, duplicateDays,
-      // ★ 2026-07-26 단가는 이 라우트에서 받지 않는다 — 식별자를 없애 두면 재바인딩을 tsc가 막는다.
-      //   전용 경로 = PUT /api/admin/companies/:id/unit-prices (기준과 원자적으로 저장)
-      // AI설정
-      targetStrategy, crossCategoryAllowed, excludedSegments,
-      approvalRequired,
-      // 분류코드
-      storeCodeList,
-      // ★ 2026-07-03 사용구분: web / agent / both
-      usageType,
-    } = req.body;
-
-    if (usageType !== undefined && !['web', 'agent', 'both'].includes(usageType)) {
-      return res.status(400).json({ error: 'usageType은 web/agent/both 중 하나여야 합니다.' });
-    }
-
-    // ★ 2026-07-25 요금제가 바뀌는 경로라 변경과 이력을 한 트랜잭션으로(Codex 지적 A·C).
-    //   이 엔드포인트는 전에 이력 배선이 빠져 있었다 — `SET plan_id` 리터럴 grep이 다중 컴럼 UPDATE의
-    //   중간 줄(`plan_id = COALESCE($8, plan_id)`)을 못 잡았다. 전 출현 분류로 재검증해 찾았다.
-    const client = await pool.connect();
-    let result: any;
-    try {
-      await client.query('BEGIN');
-      const before = await client.query(
-        `SELECT plan_id, ${planTermManagedSql('companies')} AS plan_term_managed FROM companies WHERE id = $1::uuid FOR UPDATE`, [id]);
-      if (before.rows.length === 0) {
-        await client.query('ROLLBACK');
-        return res.status(404).json({ error: '고객사를 찾을 수 없습니다.' });
-      }
-      // ★ 2026-10-04 선불 이용 기간 중인 회사의 요금제 직접 변경은 막는다(설계 §5-1 · G4)
-      if (planId && String(before.rows[0].plan_id || '') !== String(planId) && before.rows[0].plan_term_managed === true) {
-        await client.query('ROLLBACK');
-        const e = planTermManagedError('요금제를 여기서 바꿀 수 없습니다');
-        return res.status(e.status).json(e.body);
-      }
-      result = await client.query(
-      `UPDATE companies SET
-        company_name = COALESCE($1, company_name),
-        name = COALESCE($1, name),
-        business_number = COALESCE($2, business_number),
-        ceo_name = COALESCE($3, ceo_name),
-        contact_name = COALESCE($4, contact_name),
-        contact_email = COALESCE($5, contact_email),
-        contact_phone = COALESCE($6, contact_phone),
-        address = COALESCE($7, address),
-        plan_id = COALESCE($8, plan_id),
-        status = COALESCE($9, status),
-        data_input_method = COALESCE($10, data_input_method),
-        reject_number = COALESCE($11, reject_number),
-        send_start_hour = COALESCE($12, send_start_hour),
-        send_end_hour = COALESCE($13, send_end_hour),
-        daily_limit_per_customer = COALESCE($14, daily_limit_per_customer),
-        holiday_send_allowed = COALESCE($15, holiday_send_allowed),
-        duplicate_prevention_days = COALESCE($16, duplicate_prevention_days),
-        cost_per_sms = COALESCE($17, cost_per_sms),
-        cost_per_lms = COALESCE($18, cost_per_lms),
-        cost_per_mms = COALESCE($19, cost_per_mms),
-        cost_per_kakao = COALESCE($20, cost_per_kakao),
-        target_strategy = COALESCE($21, target_strategy),
-        cross_category_allowed = COALESCE($22, cross_category_allowed),
-        excluded_segments = COALESCE($23, excluded_segments),
-        approval_required = COALESCE($24, approval_required),
-        store_code_list = COALESCE($25, store_code_list),
-        usage_type = COALESCE($26, usage_type),
-        updated_at = CURRENT_TIMESTAMP
-      WHERE id = $27
-      RETURNING *`,
-      [
-        companyName, businessNumber, ceoName, contactName,
-        contactEmail, contactPhone, address, planId,
-        status, dataInputMethod, rejectNumber,
-        sendHourStart, sendHourEnd, dailyLimit,
-        holidaySend, duplicateDays,
-        // ★2026-07-26 단가는 전용 엔드포인트(PUT /api/admin/companies/:id/unit-prices)에서만 저장한다.
-        null, null, null, null,
-        targetStrategy, crossCategoryAllowed,
-        excludedSegments ? JSON.stringify(excludedSegments) : null,
-        approvalRequired,
-        storeCodeList ? JSON.stringify(storeCodeList) : null,
-        usageType,
-        id
-      ]
-      );
-
-      // 요금제가 실제로 바뀜 때만 기록한다(COALESCE라 planId가 null이면 미변경).
-      const newPlanId = result.rows[0]?.plan_id;
-      if (planId && newPlanId && String(newPlanId) !== String(before.rows[0].plan_id)) {
-        await recordPlanChange({
-          client,
-          companyId: id,
-          toPlanId: String(newPlanId),
-          changeType: 'auto',
-          changedBy: (req as any).user?.userId || null,
-          reason: '고객사 수정(요금제 변경)',
-        });
-      }
-      await client.query('COMMIT');
-    } catch (err) {
-      try { await client.query('ROLLBACK'); } catch { /* 아래 알림에 포함 */ }
-      await alertPlanChangeFailure(id, err);
-      throw err;
-    } finally {
-      client.release();
-    }
-
-    return res.json({
-      message: '고객사가 수정되었습니다.',
-      // ★2026-09-13 `RETURNING *`에 실린 비밀값 컬럼은 응답에서 뺀다(적대검토 등재분 ① · 워크플로 1R)
-      company: omitCompanySecrets(result.rows[0]),
-    });
-  } catch (error: any) {
-    console.error('고객사 수정 에러:', error);
-    // ★ 2026-07-03 db_alter_safety_net: usage_type 컬럼 미마이그레이션 서버 방어
-    const msg = error?.message || '';
-    if (msg.includes('column') && msg.includes('does not exist')) {
-      return res.status(503).json({
-        success: false,
-        error: 'DB 마이그레이션 필요: 운영자에게 companies.usage_type ALTER 실행 요청',
-        code: 'DB_MIGRATION_PENDING',
-      });
-    }
-    return res.status(500).json({ error: '서버 오류가 발생했습니다.' });
-  }
-});
+// ★ 2026-10-26 옛 고객사 수정 주소(PUT /api/companies/:id)를 지웠다 — 화면 호출 0(슈퍼관리자 회사 수정 = PUT /api/admin/companies/:id).
+//   요금제 칸을 상태 · 체험 만료일 없이 덮어써서 만료일 없는 무료체험을 만들 수 있었다(뿌리 대장 R6 · R15).
 
 // ============================================================
 // ★ 2026-07-29 회사 병합 (슈퍼관리자 전용)

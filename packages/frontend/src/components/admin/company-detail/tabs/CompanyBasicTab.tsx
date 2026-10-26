@@ -211,7 +211,7 @@ export default function CompanyBasicTab(props: CompanyBasicTabProps) {
           if (data.company) {
             setEditCompany((prev) => ({
               ...prev,
-              subscriptionStatus: data.company.subscription_status || 'trial',
+              subscriptionStatus: data.company.subscription_status || '',
               trialExpiresAt: data.company.trial_expires_at || '',
               planId: data.company.plan_id || prev.planId,
               planCode: data.company.plan_code || 'TRIAL',
@@ -357,6 +357,7 @@ export default function CompanyBasicTab(props: CompanyBasicTabProps) {
                       <select value={editCompany.subscriptionStatus}
                         onChange={(e) => setEditCompany({ ...editCompany, subscriptionStatus: e.target.value })}
                         className={ADMIN_FIELD_INPUT}>
+                        <option value="">미설정 (요금제 없음 · 미가입)</option>
                         <option value="trial">체험 (trial)</option>
                         <option value="trial_expired">체험만료 (trial_expired)</option>
                         <option value="paid">정식 구독 (paid)</option>
@@ -704,7 +705,7 @@ export default function CompanyBasicTab(props: CompanyBasicTabProps) {
                     </label>
                   </div>
                   {/* ★ 2026-08-22 대행발송 스위치 (docs/2026-08-22-agency-send-design.md §4-1)
-                      메뉴는 모든 회사에 보이고, 이 스위치 AND 유료 요금제일 때만 화면으로 들어간다.
+                      메뉴는 모든 회사에 보이고, 이 스위치를 켠 회사만 화면으로 들어간다(★1026 요금제 무관 · 스팸 검사도 함께 열림).
                       끄면 새 접수만 막히고 이미 승인된 건은 예정대로 나간다. */}
                   <div className="border border-indigo-200 bg-indigo-50/40 rounded-xl p-4">
                     <div className="flex items-start justify-between">
@@ -714,7 +715,7 @@ export default function CompanyBasicTab(props: CompanyBasicTabProps) {
                           <span className="text-xs bg-indigo-500 text-white px-1.5 py-0.5 rounded">NEW</span>
                         </div>
                         <p className="text-xs text-gray-500 mt-1">
-                          ON = 이 회사가 대행발송 화면으로 들어가 명단·문안을 직접 접수합니다 (요금제를 쓰는 계정만).
+                          ON = 이 회사가 대행발송 화면으로 들어가 명단·문안을 직접 접수합니다. 요금제와 관계없이 열리고, 스팸 검사도 함께 열립니다.
                           OFF = 메뉴는 보이되 안내만 나갑니다. 끄더라도 이미 승인된 건은 예정대로 발송됩니다.
                         </p>
                       </div>

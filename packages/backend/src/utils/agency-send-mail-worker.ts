@@ -668,7 +668,7 @@ async function processMessage(ctx: TickCtx, seq: number, uidl: string): Promise<
       }
     }
     if (verdict.ok) {
-      // 자격(회사 스위치 AND 유료) — 네 번째 우회 입구 방지(§18-2)
+      // 자격(회사 스위치 · ★1026 요금제 무관) — 네 번째 우회 입구 방지(§18-2)
       const ctxPlan = await loadPlanContext(acct.companyId);
       if (!canUseAgencySend(ctxPlan)) {
         verdict = { ok: false, code: 'not_allowed', reason: '대행발송이 열려 있지 않은 계정입니다. 한줄로 담당자에게 문의해 주세요.' };

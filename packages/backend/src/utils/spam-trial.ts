@@ -13,6 +13,7 @@
 import { query } from '../config/database';
 import { normalizePhone } from './normalize';
 import { SPAM_RESULT } from './sms-result-map';
+import { SPAM_FILTER_OPEN_SQL } from './plan-guard';
 
 /** 회사당 평생 체험 횟수 */
 export const SPAM_TRIAL_LIMIT = 3;
@@ -82,7 +83,7 @@ export interface SpamTrialStatus {
 /** 체험 현황 — 화면 칸·안내 창이 쓴다. */
 export async function readSpamTrialStatus(companyId: string): Promise<SpamTrialStatus> {
   const plan = await query(
-    `SELECT p.spam_filter_enabled FROM companies c LEFT JOIN plans p ON c.plan_id = p.id WHERE c.id = $1::uuid`,
+    `SELECT ${SPAM_FILTER_OPEN_SQL} AS spam_filter_enabled FROM companies c LEFT JOIN plans p ON c.plan_id = p.id WHERE c.id = $1::uuid`,
     [companyId],
   );
   const eligible = !plan.rows[0]?.spam_filter_enabled;

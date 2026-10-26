@@ -86,7 +86,7 @@ describe('omitCompanySecrets: 고객사 행 응답에서 비밀값 컬럼을 뺀
     expect(omitCompanySecrets(undefined as any)).toBeUndefined();
   });
 
-  it('슈퍼관리자 고객사 응답 6곳(목록·상세 2·생성·수정 2)이 이 함수를 지난다', () => {
+  it('슈퍼관리자 고객사 응답 5곳(목록·상세 2·생성·수정)이 이 함수를 지난다 · ★1026 옛 수정 주소(PUT /api/companies/:id)는 지웠다', () => {
     const companies = fs.readFileSync(path.join(__dirname, '../../routes/companies.ts'), 'utf8');
     const admin = fs.readFileSync(path.join(__dirname, '../../routes/admin.ts'), 'utf8');
 
@@ -107,10 +107,8 @@ describe('omitCompanySecrets: 고객사 행 응답에서 비밀값 컬럼을 뺀
     expect(adminDetail.length).toBeGreaterThan(0);
     expect(adminDetail).toContain('company: omitCompanySecrets(result.rows[0])');
 
-    // ★워크플로 1R: 수정(PUT) 응답도 `UPDATE ... RETURNING *` 행을 그대로 내려주고 있었다(같은 결함 · 저장할 때마다 호출)
-    const update = companies.slice(companies.indexOf("router.put('/:id', requireUuidId, requireSuperAdmin"), companies.indexOf('고객사 수정 에러'));
-    expect(update.length).toBeGreaterThan(0);
-    expect(update).toContain('company: omitCompanySecrets(result.rows[0])');
+    // ★ 2026-10-26 옛 수정 주소(PUT /api/companies/:id · 화면 호출 0)를 지웠다 — 비밀값을 내릴 주소 자체가 없다
+    expect(companies).not.toContain("router.put('/:id', requireUuidId, requireSuperAdmin");
 
     const adminUpdate = admin.slice(admin.indexOf("router.put('/companies/:id', authenticate, requireSuperAdmin"), admin.indexOf("console.error('회사 수정 실패:'"));
     expect(adminUpdate.length).toBeGreaterThan(0);

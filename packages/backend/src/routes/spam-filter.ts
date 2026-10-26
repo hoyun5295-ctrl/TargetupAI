@@ -22,6 +22,7 @@ import {
 } from '../utils/spam-trial';
 
 import { spamAppTokenVerdict } from '../utils/spam-app-auth';
+import { SPAM_FILTER_OPEN_SQL } from '../utils/plan-guard';
 // ★ 2026-09-28 검사 입구 글자 검사 — 발송 버튼과 같은 판정(게이트웨이 CP949 표)
 import { unsupportedSmsCharCodes } from '../utils/sms-charset';
 
@@ -73,9 +74,9 @@ router.post('/test', authenticate, demoBlock, async (req: Request, res: Response
       return res.status(400).json({ error: '등록된 발신번호로만 스팸 검사를 할 수 있습니다. 발신번호 관리에서 확인해 주세요.', code: 'UNREGISTERED_CALLBACK' });
     }
 
-    // ★ D53: 요금제 게이팅 — spam_filter_enabled 체크 (스타터+ 이용 가능)
+    // ★ D53: 요금제 게이팅 — spam_filter_enabled 체크 (스타터+ 이용 가능) · ★1026 대행 스위치 회사도 열린다(판정 조각 = plan-guard)
     const planCheck = await query(
-      `SELECT p.spam_filter_enabled FROM companies c
+      `SELECT ${SPAM_FILTER_OPEN_SQL} AS spam_filter_enabled FROM companies c
        LEFT JOIN plans p ON c.plan_id = p.id
        WHERE c.id = $1`,
       [companyId]

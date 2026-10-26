@@ -142,7 +142,7 @@ interface PlanInfo {
   ai_premium_enabled?: boolean;
   // ★ 2026-08-20 상위 등급 게이트 플래그(plans.advanced_access_enabled) — 헤더 캠페인 대행 메뉴 판정 원천
   advanced_access_enabled?: boolean;
-  // ★ 2026-08-22 대행발송 이용 자격(서버 canUseAgencySend = 회사 스위치 AND 유료).
+  // ★ 2026-08-22 대행발송 이용 자격(서버 canUseAgencySend = 회사 스위치 · ★1026 요금제 무관).
   //   메뉴는 모든 회사에 보이고 이 값이 false면 안내 모달로 간다(docs/2026-08-22-agency-send-design.md §4-1).
   agency_send_allowed?: boolean;
   // ★ 2026-10-04 선불 요금제 이용 기간(관리 대상이 아니면 null · docs/2026-10-04-prepaid-plan-term-design.md)
@@ -207,7 +207,7 @@ export default function Dashboard() {
   const hideFileUpload = isHidden('file_upload');
 
   // 요금제 잠금 체크
-  const subscriptionStatus = (user as any)?.company?.subscriptionStatus || 'trial';
+  const subscriptionStatus = (user as any)?.company?.subscriptionStatus || '';
   const [showSubscriptionLock, setShowSubscriptionLock] = useState(false);
   const [showPlanApproval, setShowPlanApproval] = useState(false);
   const [planApproval, setPlanApproval] = useState<{requestId: string; planName: string; scheduledFrom?: string | null} | null>(null);

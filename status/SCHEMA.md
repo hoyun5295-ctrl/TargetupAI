@@ -354,7 +354,7 @@
 | created_at | timestamp | |
 | updated_at | timestamp | |
 | service_type | varchar | ★ 2026-06-08 실측 보강 |
-| subscription_status | varchar | ★ 실측 |
+| subscription_status | varchar | ★ 실측 · ★1026 information_schema 실측 = **DB 기본값 `'trial'`**(미가입이 「체험 중」으로 태어난 뿌리 · R20) → 생성 CT 가 직접 쓴다(유료 paid · 미가입 · 요금제 없음 NULL) · 배포 뒤 DDL = `DROP DEFAULT` + CHECK `companies_trial_needs_expiry`(trial 이면 만료일 필수 · 원장 docs/2026-10-26-plan-credit-trial-agency.md §6) |
 | plan_notified_code | varchar(20) | ★ 2026-07-06 추가 (ALTER) — 요금제 변경 안내 1회 노출용. 마지막 안내한 plan_code(localStorage 비교 대체). NULL=현재 값으로 조용히 초기화 |
 | line_group_id | uuid | ★ 실측 (발송 라인그룹) |
 | kakao_enabled | boolean | ★ 실측 |
@@ -1945,7 +1945,7 @@ kind별 payload 키:
 |------|------|------|
 | id | uuid PK | gen_random_uuid() |
 | company_id | uuid FK | companies(id) |
-| type | varchar(20) | deduct / grant / purchase / reset / postpaid_grant / **refund**(★2026-08-13 신설 — 마케팅 플래너 월간 대행 취소 환불) |
+| type | varchar(20) | deduct / grant / purchase / reset / postpaid_grant / **refund**(★2026-08-13 신설 — 마케팅 플래너 월간 대행 취소 환불) / **plan_prorate**(★1026 요금제 변경 남은 기간 크레딧 · **amount 부호 = 방향**(양수 지급 · 음수 회수) · 키 `plan-prorate:{company_plan_changes.id}` · 쓰는 곳 = `plan-change-log.ts` 한 곳) |
 | amount | integer | 크레딧 양 (항상 양수, 방향은 type) |
 | bucket | varchar(10) | base / purchased / mixed (reset=base) |
 | source | varchar(60) | AI 작업 source (orchestrate / dm-ai / generate-messages 등) |
@@ -1976,6 +1976,10 @@ kind별 payload 키:
     "승인 → 무작업 취소·환불 → 재승인"이 duplicate로 끝나 **무료 대행**이 된다(Codex 1R high).
 
 > CT `utils/ai-credit.ts` (checkCredit/deductCredit/resetMonthlyCreditsIfNeeded) 단일 진입점. 2버킷(base→purchased) 트랜잭션 차감 + SELECT FOR UPDATE 음수 방지 + idempotency_key 중복 차단. 순수 계산은 `utils/ai-credit-calc.ts`(node:assert 검증). 차감=호출 성공 후(실패 시 미차감). 인덱스 `idx_ai_credit_tx_company_created (company_id, created_at DESC)`.
+
+### ai_credit_requests (후불 AI 크레딧 충전 요청) — ★2026-10-26 information_schema · pg_constraint 실측 등재(Harold)
+`id uuid PK DEFAULT gen_random_uuid()` · `company_id uuid NOT NULL FK companies` · `user_id uuid NULL` · `credits integer NOT NULL` · `unit_price integer NOT NULL DEFAULT 2000` · `supply_amount numeric NOT NULL` · `vat numeric NOT NULL` · `total_amount numeric NOT NULL` · `billing_type varchar NOT NULL` · `payment_method varchar NOT NULL` · `status varchar NOT NULL DEFAULT 'pending'`(pending · approved · rejected · **CHECK 없음**) · `processed_by uuid NULL` · `processed_at timestamptz NULL` · `admin_note text NULL` · `billed boolean NOT NULL DEFAULT false` · `billed_invoice_id uuid NULL`(FK 아님) · `credit_tx_id uuid NULL` · `created_at timestamptz NOT NULL DEFAULT now()`. 제약 = PK · FK(company_id) 둘뿐.
+> 정산 발행이 집계하는 조건 = `status = 'approved' AND billed = false` + `processed_at` 기간(`billing-issue.ts`). 청구서 삭제 되돌림 = `billed_invoice_id` 로만 푼다(`billing.ts`). 쓰는 곳 = `utils/ai-credit-recharge.ts`(요청 · 승인 · 반려). 무상 지급은 이 경로가 아니라 관리자 지급(admin-grant)이다(1026 제시뉴욕 가입기념 100 이 이 경로로 들어가 55,000원 청구될 뻔 → 보정 SQL = docs/2026-10-26-plan-credit-trial-agency.md §5 A).
 
 ### campaigns 보호 trigger (★ D145 PDF 후속 — 2026-05-07)
 

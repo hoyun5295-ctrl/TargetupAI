@@ -231,7 +231,7 @@ export default function AdminDashboard() {
     cdpAutoExecuteMaxCostKrw: 50000,
     cdpAutoExecuteMaxRisk: 'low',
     agencySendEnabled: false,  // ★ 2026-08-22 대행발송 스위치(companies.agency_send_enabled)
-    subscriptionStatus: 'trial',
+    subscriptionStatus: '',
     // ★ CT-17: 30일 PRO 체험 관리 (표시용)
     trialExpiresAt: '' as string | null | '',
     planCode: '',

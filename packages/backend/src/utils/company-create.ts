@@ -16,6 +16,7 @@ import { ensureSystemSyncUser } from './system-sync-user';
 // ★2026-09-12 싱크에이전트 시크릿은 해시만 저장한다(원문 미저장)
 import { hashSecret } from './secret-hash';
 import { recordPlanChange } from './plan-change-log';
+import { grantFreeTrial } from './basic-trial';
 // ★ 2026-10-02 고객사 등록 · 계정 발급 기록(전송자격인증 4.1 ②) — 실패해도 생성에는 영향 없다
 import { recordAccountIssued, recordCompanyRegistered, AccountIssueChannel } from './account-issue';
 import { NEW_COMPANY_DEFAULT_PRICES } from './unit-price';
@@ -63,6 +64,15 @@ export async function createCompanyCore(p: CreateCompanyParams): Promise<any> {
   let result: any;
   try {
     await client.query('BEGIN');
+    // ★ 2026-10-26 구독 상태를 생성 때 직접 쓴다 — DB 기본값('trial')에 맡기면 미가입 · 유료 회사가 전부 「체험 중」으로 태어났다
+    //   (운영 1026 = 체험 이력 0 인 미가입 32곳 · LESSONS_DB 9). 유료 = 'paid' · 미가입(FREE) · 요금제 없음 = NULL.
+    //   무료체험(TRIAL)은 요금제 없이 만든 뒤 아래에서 체험 CT 가 만료일 · 체험 크레딧 · 이력을 함께 넣는다(뿌리 대장 R6).
+    const planRow = p.planId
+      ? (await client.query(`SELECT plan_code, COALESCE(trial_days, 0) AS trial_days FROM plans WHERE id = $1::uuid`, [p.planId])).rows[0]
+      : null;
+    const isTrialPlan = planRow?.plan_code === 'TRIAL';
+    const initialPlanId = isTrialPlan ? null : (p.planId ?? null);
+    const initialStatus = initialPlanId && planRow?.plan_code !== 'FREE' ? 'paid' : null;
     result = await client.query(
       // ★ 2026-10-21 기본 단가(SMS · LMS · MMS · 알림톡 · 브랜드)를 생성 때 칸에 써 넣는다 — 비워 두면 선불 발송 차단 · 후불 발행 차단(unit-price.ts).
       `INSERT INTO companies (
@@ -70,25 +80,31 @@ export async function createCompanyCore(p: CreateCompanyParams): Promise<any> {
         contact_name, contact_email, contact_phone, address,
         plan_id, data_input_method, api_key, api_secret_hash, db_name,
         created_by, usage_type,
-        cost_per_sms, cost_per_lms, cost_per_mms, cost_per_kakao, cost_per_brand, unit_price_basis
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22)
+        cost_per_sms, cost_per_lms, cost_per_mms, cost_per_kakao, cost_per_brand, unit_price_basis,
+        subscription_status
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23)
       RETURNING *`,
       [
         p.companyName, p.companyCode, p.companyName, p.businessNumber ?? null, p.ceoName ?? null,
         p.contactName ?? null, p.contactEmail ?? null, p.contactPhone ?? null, p.address ?? null,
-        p.planId ?? null, p.dataInputMethod ?? 'file', apiKey, apiSecretHash, dbName,
+        initialPlanId, p.dataInputMethod ?? 'file', apiKey, apiSecretHash, dbName,
         p.createdBy ?? null, p.usageType ?? 'web',
         NEW_COMPANY_DEFAULT_PRICES.sms, NEW_COMPANY_DEFAULT_PRICES.lms, NEW_COMPANY_DEFAULT_PRICES.mms,
         NEW_COMPANY_DEFAULT_PRICES.kakao, NEW_COMPANY_DEFAULT_PRICES.brand, NEW_COMPANY_DEFAULT_PRICES.basis,
+        initialStatus,
       ],
     );
 
-    // 플랜 미지정(NULL) 회사는 남길 값이 없으므로 건너뛴다.
-    if (p.planId) {
+    // 플랜 미지정(NULL) 회사는 남길 값이 없으므로 건너뛴다. 체험은 체험 CT 가 이력(trial_start)까지 남긴다.
+    if (isTrialPlan) {
+      const days = Number(planRow.trial_days) > 0 ? Number(planRow.trial_days) : 30;
+      const granted = await grantFreeTrial(result.rows[0].id, days, { client });
+      result.rows[0] = { ...result.rows[0], plan_id: granted.plan_id, subscription_status: granted.subscription_status, trial_expires_at: granted.trial_expires_at };
+    } else if (initialPlanId) {
       await recordPlanChange({
         client,
         companyId: result.rows[0].id,
-        toPlanId: p.planId,
+        toPlanId: initialPlanId,
         changeType: 'initial',
         changedBy: p.createdBy ?? null,
         reason: '회사 생성 시 최초 요금제',

@@ -218,7 +218,7 @@ export default function CompaniesTab(props: CompaniesTabProps) {
           cdpAutoExecuteMaxCostKrw: c.cdp_auto_execute_max_cost_krw ?? 50000,
           cdpAutoExecuteMaxRisk: c.cdp_auto_execute_max_risk ?? 'low',
           agencySendEnabled: c.agency_send_enabled ?? false,  // ★ 2026-08-22 대행발송 스위치
-          subscriptionStatus: c.subscription_status || 'trial',
+          subscriptionStatus: c.subscription_status || '',  // ★1026 빈 상태 = 미설정(체험 중으로 메우지 않는다)
           // ★ CT-17
           trialExpiresAt: c.trial_expires_at || '',
           planCode: c.plan_code || '',

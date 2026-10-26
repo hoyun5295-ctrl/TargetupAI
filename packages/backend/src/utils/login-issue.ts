@@ -184,7 +184,8 @@ export async function issueUserLogin(params: {
           name: user.company_name,
           code: user.company_code,
           kakaoEnabled,
-          subscriptionStatus: user.subscription_status || 'trial',
+          // ★ 2026-10-26 빈 상태(미가입 · 요금제 없음)를 'trial' 로 메우지 않는다 — 체험 중이 아닌 회사가 체험 중으로 보인다(뿌리 대장 R20)
+          subscriptionStatus: user.subscription_status || null,
           // ★ 2026-07-03 사용구분: web(웹발송) / agent(QTmsg 에이전트 전용 — 메뉴 게이팅) / both
           usageType: user.usage_type || 'web',
           // ★ 2026-10-09 시연 회사 표식(화면 띠 전용 · 차단 판정은 서버가 따로 한다)

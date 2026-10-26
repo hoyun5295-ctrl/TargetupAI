@@ -102,7 +102,7 @@ export interface PlanContext {
   aiOperatorTrialUntil: Date | null;
   isAiOperatorTrialActive: boolean;      // ai_operator_trial_until > NOW()
   // ★ 2026-08-22 대행발송: 슈퍼관리자가 이 회사에 열어 줬는가(회사 단위 스위치. 요금제 등급과 별개).
-  //   실제 이용 가부는 이 값 AND 유료 = canUseAgencySend 하나가 판정한다.
+  //   실제 이용 가부는 이 값(★1026 요금제 무관 · 정지 · 만료만 막음) = canUseAgencySend 하나가 판정한다.
   agencySendEnabled: boolean;
 }
 
@@ -117,6 +117,16 @@ export interface FeatureCheckResult {
 // ═══════════════════════════════════════════════════════════
 
 /**
+ * ★ 2026-10-26 스팸 검사가 열린 회사 = 요금제 칸(spam_filter_enabled) **OR** 대행발송 스위치.
+ *   Harold 1026 「대행 업체는 요금제를 안 쓰는데 스팸필터 테스트를 하게 하려고 무료체험을 반복해서 줬다」 —
+ *   스위치로 열면 체험 우회가 필요 없다. 청구는 그대로(체험 무료 3회만 청구에서 빠진다 · 열린 회사의 검사 = 일반 검사).
+ *   ⛔ 판정은 이 조각 하나 — 검사 주소 · 체험 횟수 · AI 한줄 · 화면 요금제 정보 · 요금제 상태 조회가 같이 쓴다(뿌리 대장 R1).
+ *   별칭 = companies c · plans p. 스위치 칸은 ALTER 전에도 깨지지 않게 to_jsonb 로 읽는다(아래 상태 조회와 같은 방식).
+ */
+export const SPAM_FILTER_OPEN_SQL =
+  `(COALESCE(p.spam_filter_enabled, false) OR COALESCE((to_jsonb(c) ->> 'agency_send_enabled')::boolean, false))`;
+
+/**
  * 요금제·구독 상태를 한 번에 조회하는 SELECT 조각.
  * 호출부: `FROM companies c LEFT JOIN plans p ON c.plan_id = p.id` 형태에서 사용.
  */
@@ -127,7 +137,7 @@ export const PLAN_STATUS_SELECT_EXPR = `
   COALESCE(p.ai_mapping_enabled, false)  AS ai_mapping_enabled,
   p.ai_messaging_enabled, p.ai_premium_enabled,
   p.auto_campaign_enabled, p.max_auto_campaigns,
-  p.spam_filter_enabled, p.auto_spam_test_enabled,
+  ${SPAM_FILTER_OPEN_SQL} AS spam_filter_enabled, p.auto_spam_test_enabled,
   COALESCE(p.mobile_dm_enabled, false) AS mobile_dm_enabled,
   COALESCE(p.cdp_enabled, false) AS cdp_enabled,
   p.cdp_events_per_month,
@@ -266,14 +276,16 @@ export function isActivePaidPlan(ctx: PlanContext | null): boolean {
 /**
  * 대행발송 이용 자격 (★ 2026-08-22 · docs/2026-08-22-agency-send-design.md §4-1).
  *
- * = 슈퍼관리자가 이 회사에 켠 스위치 **AND** 요금제 사용 중.
+ * = 슈퍼관리자가 이 회사에 켠 스위치 · 구독이 정지 · 만료가 아닐 것.
+ *   ★ 2026-10-26 「요금제 사용 중」 조건을 뺐다(Harold 승인) — 대행 업체는 요금제를 안 쓰는데, 이 조건 때문에 직원이 무료체험을
+ *   반복해서 줘서 열었다(운영 1026 = 스위치 켠 4곳이 체험 2회씩). 스위치가 곧 「이 회사에 열어 준다」는 슈퍼관리자 결정이다.
  * ⛔ 이 판정은 여기 하나뿐이다. 메뉴는 모든 회사에 보이고(미끼), 들어가는 것만 이 함수가 가른다.
  *   프론트가 플래그와 요금제를 각각 받아 조합하면 판정이 두 벌이 된다 — my-plan은 이 함수의 결과 한 값만 내린다.
  * ⛔ 쓰기 경로에서는 라우트 장식이 아니라 **효과를 만드는 함수 안**에서 부른다(feedback_gate_belongs_where_the_effect_is_created).
  */
 export function canUseAgencySend(ctx: PlanContext | null): boolean {
   if (!ctx) return false;
-  return ctx.agencySendEnabled && isActivePaidPlan(ctx);
+  return ctx.agencySendEnabled && !isSubscriptionBlocked(ctx).blocked;
 }
 
 // ═══════════════════════════════════════════════════════════

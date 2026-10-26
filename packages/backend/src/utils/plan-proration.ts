@@ -368,49 +368,56 @@ export function evaluatePlanHistoryGate(opts: {
 }
 
 // ============================================================
-//  크레딧 일할 (★ Harold 지시 2026-07-26)
+//  요금제 변경 크레딧 일할 (★ 2026-10-26 Harold 「신청 승인 · 업그레이드 = 남은 기간 크레딧」)
 // ============================================================
 
-/**
- * (순수) 그 달의 **크레딧 권리**를 구간별 일할로 재계산한다.
- *
- * Harold 지시 두 갈래를 하나의 산식으로 합친 것이다.
- *   - 올릴 때: "일할계산해서 추가 크레딧을 자동으로 지급해야 하잖아?"
- *   - 내릴 때: "다운그레이드하려는 요금제 미만의 크레딧이 남아 있다면 이미 다 써버리고 내린 것 아니냐"
- *
- * 방향별로 다른 규칙을 두면 내릴 때 이득이 되는 구조가 남는다 —
- * PRO 크레딧을 열흘에 다 쓰고 BASIC으로 내리면 열흘치 요금만 내고 한 달치 크레딧을 가져간다.
- * 그래서 **권리를 일할로 다시 계산하고 이미 부여된 양과의 차이를 반영**한다. 올림/내림이 같은 식이 된다.
- *
- * 결과가 음수여도 자르지 않는다. `base`가 음수로 남는 구조는 이미 있고
- * (다음 달 리셋이 `min(0, 지난 base)`로 상계, 후불이면 초과분으로 청구),
- * 0에서 자르면 다 쓰고 내리는 게 이득이 되는 구조가 그대로 남는다.
- */
-export function prorateMonthlyCredits(
-  segments: Array<{ planCredits: number; days: number; monthDays: number }>,
-): number {
-  return (segments || []).reduce((s, x) => {
-    const c = Number(x.planCredits) || 0;
-    if (!x.monthDays || x.monthDays <= 0) return s;
-    return s + (c * (Number(x.days) || 0)) / x.monthDays;
-  }, 0);
-}
-
-export interface CreditEntitlementAdjust {
-  /** 일할로 재계산한 그 달의 권리 */
-  entitlement: number;
-  /** 이 달에 이미 부여된 양(리셋 grant + 앞선 일할 조정) */
-  granted: number;
-  /** base에 더할 값. 음수면 회수 방향 */
-  adjustment: number;
+export interface PlanCreditDelta {
+  /** 그 달 남은 일수(변경일 포함) */
+  remainingDays: number;
+  /** 그 달 일수 — 분모 */
+  monthDays: number;
+  /** 기본 칸에 더할 값. 음수면 회수 */
+  delta: number;
+  /** 반영 뒤 기본 칸 */
+  newBase: number;
 }
 
 /**
- * (순수) 부여할(또는 회수할) 크레딧 조정량.
- * 반올림은 마지막 한 번만 한다 — 구간마다 반올림하면 조정이 몇 크레딧씩 흔들린다.
+ * (순수) 요금제가 바뀐 날 기본 칸에 반영할 크레딧.
+ *
+ * - 그 달 남은 일수(변경일 포함) 몫만 = `(새 월 크레딧 − 직전 월 크레딧) × 남은 일수 ÷ 그 달 일수`, 반올림 한 번.
+ *   올림 = 지급 · 내림 = 회수(07-26 Harold — 방향별 규칙을 두면 다 쓰고 내리는 게 이득이 된다). 음수여도 자르지 않는다.
+ * - 직전이 무료체험이면 체험 남은 크레딧은 없애고 새 요금제 일할로 바꾼다(1026 Harold 승인 — 체험 만료가 기본 칸을 비우는 것과 같은 규칙).
+ *   선불의 음수 상계분은 남긴다(월 리셋 `carriedBaseOnReset`과 같은 규칙).
+ * - 기본 칸은 「이번 달」 잔액이다. 변경일이 지난달이면(잠금을 기다리다 달을 넘긴 처리 · Codex 1R) 이번 달 1일부터 센다 —
+ *   지난달 몫은 이미 리셋으로 사라진 잔액이라 줄 자리가 없다. 변경일이 다음 달 이후면 null(아직 오지 않은 달의 몫을 지금 주지 않는다).
+ *
+ * ★ 07-26판 「그 달 권리 − 이미 부여한 양」 산식은 지웠다. 체험 부여 · 만료가 기본 칸을 원장 없이 덮어써서
+ *   「이미 부여한 양」이 틀린다(제시뉴욕 1026 = 체험 리셋 750 이 남아 스타터 전환에 −160 회수가 나왔다).
+ *   직전 → 새 요금제 차이만 보는 이 식은 원장 합계에 기대지 않는다.
  */
-export function buildCreditAdjustment(entitlementRaw: number, grantedThisMonth: number): CreditEntitlementAdjust {
-  const entitlement = Math.round(Number(entitlementRaw) || 0);
-  const granted = Math.round(Number(grantedThisMonth) || 0);
-  return { entitlement, granted, adjustment: entitlement - granted };
+export function planChangeCreditDelta(o: {
+  effectiveDate: string;
+  today: string;
+  fromCredits: number;
+  toCredits: number;
+  fromTrial: boolean;
+  base: number;
+  carriesNegative: boolean;
+}): PlanCreditDelta | null {
+  const eff = normDay(o.effectiveDate);
+  const today = normDay(o.today);
+  if (!eff || !today || eff.slice(0, 7) > today.slice(0, 7)) return null;
+  const start = eff.slice(0, 7) < today.slice(0, 7) ? `${today.slice(0, 7)}-01` : eff;
+  const monthDays = daysInMonth(Number(start.slice(0, 4)), Number(start.slice(5, 7)));
+  const remainingDays = monthDays - Number(start.slice(8, 10)) + 1;
+  const from = Math.max(0, Number(o.fromCredits) || 0);
+  const to = Math.max(0, Number(o.toCredits) || 0);
+  const base = Number(o.base) || 0;
+  if (o.fromTrial) {
+    const newBase = Math.round((to * remainingDays) / monthDays) + (o.carriesNegative ? Math.min(0, base) : 0);
+    return { remainingDays, monthDays, delta: newBase - base, newBase };
+  }
+  const delta = Math.round(((to - from) * remainingDays) / monthDays);
+  return { remainingDays, monthDays, delta, newBase: base + delta };
 }

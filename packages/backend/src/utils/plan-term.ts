@@ -20,7 +20,6 @@ import { randomUUID } from 'crypto';
 import pool, { query } from '../config/database';
 import { recordPlanChange, todayKst } from './plan-change-log';
 import { sendSystemAlert } from './system-alert';
-import { carriedBaseOnReset } from './ai-credit-tx';
 import { shiftDayKey } from './plan-proration';
 import {
   periodEnd, monthlyCharge, planOfDay, upgradeCharge, upgradeRuns, currentTermEvents, lastPlanSetterPlanId, daysLeft,
@@ -84,8 +83,6 @@ interface TermRow {
   restore_plan_id: string | null;
   next_plan_id: string | null;
   version: number;
-  ai_base: number;
-  ai_purchased: number;
 }
 
 interface TermState { row: TermRow; events: (TermEvent & { id: string; created_at: string; detail: any })[]; today: string }
@@ -101,9 +98,7 @@ const ROW_SELECT = `
          COALESCE((to_jsonb(c) ->> 'plan_term_auto_renew')::boolean, true) AS auto_renew,
          to_jsonb(c) ->> 'plan_term_restore_plan_id' AS restore_plan_id,
          to_jsonb(c) ->> 'plan_term_next_plan_id' AS next_plan_id,
-         COALESCE((to_jsonb(c) ->> 'plan_term_version')::int, 0) AS version,
-         COALESCE(c.ai_credits_base_remaining, 0) AS ai_base,
-         COALESCE(c.ai_credits_purchased, 0) AS ai_purchased
+         COALESCE((to_jsonb(c) ->> 'plan_term_version')::int, 0) AS version
     FROM companies c
    WHERE c.id = $1`;
 
@@ -121,8 +116,6 @@ function toRow(r: any): TermRow {
     restore_plan_id: r.restore_plan_id || null,
     next_plan_id: r.next_plan_id || null,
     version: Number(r.version) || 0,
-    ai_base: Number(r.ai_base) || 0,
-    ai_purchased: Number(r.ai_purchased) || 0,
   };
 }
 
@@ -352,37 +345,9 @@ async function purchase(
     balanceBefore: d.before, balanceAfter: d.after, balanceTxId: d.txId || null,
     expiresBefore, expiresAfter: coversTo, actor: o.actor, requestId: o.requestId ?? null,
   });
+  // ★ 2026-10-26 AI 크레딧은 changePlan → recordPlanChange 가 그 달 남은 기간 몫으로 반영한다(다시 열기 · 첫 결제 공통).
+  //   옛 「잠긴 동안 월 리셋이 돌았으면 한 달치 보충」(topUpAiCreditsOnRestore)은 지웠다 — 남겨 두면 일할 위에 한 달치가 겹친다.
   if (planChanged) await changePlan(client, s, o.plan, o.actor, `선불 이용 기간 ${o.kind === 'restore' ? '다시 열기' : '시작'}(${o.plan.plan_code})`);
-  if (o.kind === 'restore') await topUpAiCreditsOnRestore(client, s, o.plan, v);
-}
-
-/**
- * 잠긴 동안 FREE 기준으로 월 리셋이 돌았으면 복구 요금제 한 달치로 base를 다시 채운다(설계 §4 · 회의론자 최종 #17).
- * 리셋이 안 돌았으면 손대지 않는다 — 다음 AI 사용 때 복구된 요금제로 lazy 리셋된다.
- * INSERT가 먼저고, 실제로 들어간 경우에만 base를 고친다(이중 지급 차단).
- */
-async function topUpAiCreditsOnRestore(client: PoolClient, s: TermState, plan: PlanRow, version: number): Promise<void> {
-  const block = [...s.events].reverse().find((e) => e.event_type === 'block');
-  if (!block) return;
-  const reset = await client.query(
-    `SELECT 1 FROM ai_credit_transactions
-      WHERE company_id = $1::uuid AND source = 'monthly-reset' AND created_at >= $2::timestamptz LIMIT 1`,
-    [s.row.id, block.created_at],
-  );
-  if (reset.rows.length === 0) return;
-  const credits = plan.ai_credits_per_month;
-  const base = carriedBaseOnReset({ plan_credits: credits, base: s.row.ai_base, billing_type: 'prepaid' });
-  const ins = await client.query(
-    `INSERT INTO ai_credit_transactions
-       (company_id, type, amount, bucket, source, idempotency_key, balance_base_after, balance_purchased_after, reason)
-     VALUES ($1::uuid, 'reset', $2, 'base', 'plan-term-restore', $3, $4, $5, $6)
-     ON CONFLICT (idempotency_key) DO NOTHING`,
-    [s.row.id, credits, `plan-term-restore:${s.row.id}:${version}`, base, s.row.ai_purchased,
-      `선불 이용 기간 다시 열기: 잠긴 동안 지난 월 리셋분 보충(${plan.plan_code})`],
-  );
-  if ((ins.rowCount || 0) === 0) return;
-  await client.query(`UPDATE companies SET ai_credits_base_remaining = $2 WHERE id = $1::uuid`, [s.row.id, base]);
-  s.row.ai_base = base;
 }
 
 /** 잠금: plan_id ← FREE, 복구할 요금제 기억(D2). subscription_status는 건드리지 않는다(expired는 발송까지 막는다). */

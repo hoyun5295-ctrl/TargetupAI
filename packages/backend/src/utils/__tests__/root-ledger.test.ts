@@ -98,7 +98,7 @@ const MONEY_ROUTE_EXEMPT: Record<string, string> = {
   'campaigns.ts POST /direct-send': '직접 발송 축 = 전 요금제 기본 기능 · 통제 = 선불 잔액',
   'campaigns.ts POST /direct-send/commit': '직접 발송 축 = 전 요금제 기본 기능 · 통제 = 선불 잔액',
   'campaigns.ts POST /brand-send': '직접 발송 축(브랜드 메시지) = 요금제 문 대상 아님 · 통제 = 선불 잔액 · 채널 등록',
-  'spam-filter.ts POST /test': '스팸 검사 = 요금제 칸(spam_filter_enabled)을 주소 안에서 판정 · 없는 요금제 = 체험 횟수',
+  'spam-filter.ts POST /test': '스팸 검사 = 요금제 칸 OR 대행 스위치(plan-guard SPAM_FILTER_OPEN_SQL · ★1026)를 주소 안에서 판정 · 닫힌 회사 = 체험 횟수',
   'event-campaigns.ts POST /extract-image': '사진 판독 = 입력칸 공용(AI 한줄로 · DM · 이메일 · 인앱) · 크레딧 확인 뒤 성공 때만 걷는다(원장 §4-G 결함 아님)',
   'event-campaigns.ts POST /materials/quote': '견적 = 금액 계산 · 잔액 읽기만(돈을 쓰지 않는다)',
   'mall-products.ts POST /cards': '몰 상품 조회만(AI 0 · 차감 0) · 기계 추적이 같은 이름(lookupMall)을 돈 함수로 본다',
@@ -1707,6 +1707,8 @@ const PLAIN_ERROR_OK: Record<string, string> = {
   "utils/sender-registration.ts|… 상한을 조정한 뒤 승인해주세요.": "축 밖 모듈(정산 · 결제 · 연동 · 관리) · 다음 구조체크에서 사용자 조건을 가른다",
   "utils/sender-registration.ts|해당 발신번호를 찾을 수 없습니다.": "축 밖 모듈(정산 · 결제 · 연동 · 관리) · 다음 구조체크에서 사용자 조건을 가른다",
   "utils/sender-registration.ts|같은 회사에 속하지 않는 사용자가 포함되어 ": "축 밖 모듈(정산 · 결제 · 연동 · 관리) · 다음 구조체크에서 사용자 조건을 가른다",
+  "utils/plan-change-log.ts|무료체험(TRIAL)은 체험 부여(grant": "내부 불변식(배정 경로가 체험 CT 를 안 지남 = 코드 잘못 · 사람이 고칠 입력 아님 · 트랜잭션 롤백 + 실패 경보) ★1026",
+  "utils/plan-change-log.ts|무료체험(TRIAL) 배정에 만료일이 없습니": "내부 불변식(체험 CT 가 만료일을 안 씀 = 코드 잘못 · 사람이 고칠 입력 아님 · 트랜잭션 롤백 + 실패 경보) ★1026",
   "utils/short-url.ts|companyId는 필수입니다.": "내부 불변식(코드가 넘기는 값 · 사람이 고칠 입력 아님)",
   "utils/short-url.ts|단축 URL 생성 실패 (hash 충돌 3회": "내부 처리 실패(로그 · 경보 · 고객에게는 라우트 안내 문장)",
   "utils/sms-queue.ts|MMS는 이미지 첨부가 필수입니다 (inse": "내부 불변식(코드가 넘기는 값 · 사람이 고칠 입력 아님)",
@@ -2499,5 +2501,73 @@ describe('R19 AI 답 모양 변주 — JSON 읽기 CT 한 곳(AI 호출 파일 �
       expect(String(warn.mock.calls[0][0])).toContain('[ai-json]');
       expect(String(warn.mock.calls[0][0])).not.toContain('홍길동');
     } finally { warn.mockRestore(); }
+  });
+});
+
+// ════════════════════════════════════════════════════════════
+// ★ 2026-10-26 요금제 · 체험 · 상태 기본값 · 대행 스위치(Harold 「무료체험 끝나면 미가입으로 가는지 · 승인하면 남은 기간 크레딧」)
+// ════════════════════════════════════════════════════════════
+
+/** 소스의 백틱 문자열(SQL)을 파일과 함께 전수로 뽑는다 — 주석은 걷는다 */
+function sqlLiterals(root: string, files: string[]): Array<{ file: string; sql: string }> {
+  const out: Array<{ file: string; sql: string }> = [];
+  for (const f of files) {
+    const src = stripComments(read(join(root, f)));
+    for (const m of src.matchAll(/`([^`]*)`/g)) out.push({ file: f, sql: m[1] });
+  }
+  return out;
+}
+
+describe('R1 넓힘(1026) — 스팸 검사 문 = plan-guard 조각 한 곳(요금제 칸 OR 대행 스위치)', () => {
+  const lits = sqlLiterals(BE, sourceFiles(BE, /\.ts$/));
+  it('요금제 칸(p.spam_filter_enabled)을 직접 읽는 SQL 은 plan-guard.ts 밖에 0', () => {
+    const raw = lits.filter((l) => /\bp\.spam_filter_enabled\b/.test(l.sql)).map((l) => l.file);
+    expect([...new Set(raw)]).toEqual(['utils/plan-guard.ts']);
+  });
+  it('「AS spam_filter_enabled」로 읽는 SQL 은 전부 그 조각(SPAM_FILTER_OPEN_SQL)을 쓴다', () => {
+    const named = lits.filter((l) => /AS spam_filter_enabled\b/.test(l.sql));
+    expect(named.length).toBeGreaterThanOrEqual(5);   // 상태 조회 · 검사 주소 · 체험 횟수 · AI 한줄 · 화면 요금제 정보
+    expect(named.filter((l) => !l.sql.includes('${SPAM_FILTER_OPEN_SQL}')).map((l) => l.file)).toEqual([]);
+  });
+});
+
+describe('R6 넓힘(1026) — 무료체험(TRIAL)은 체험 CT 한 길 · 체험 상태를 쓰면 만료일도 쓴다', () => {
+  const lits = sqlLiterals(BE, sourceFiles(BE, /\.ts$/));
+  it('★ TRIAL 요금제 id 를 뽑아 배정하는 SQL 은 체험 CT(utils/basic-trial.ts)만', () => {
+    const fetch = lits.filter((l) => /SELECT\s+id\b[\s\S]*FROM\s+plans[\s\S]*plan_code\s*=\s*'TRIAL'/.test(l.sql)).map((l) => l.file);
+    expect([...new Set(fetch)]).toEqual(['utils/basic-trial.ts']);
+  });
+  it('★ UPDATE 의 SET 이 체험 상태(subscription_status = \'trial\')를 쓰면 같은 SET 이 만료일을 값으로 쓴다(NULL 0)', () => {
+    const sets = lits
+      .filter((l) => /UPDATE\s+companies\b/i.test(l.sql))
+      .map((l) => ({ file: l.file, set: (l.sql.split(/\bSET\b/i)[1] || '').split(/\bWHERE\b/i)[0] }))
+      .filter((x) => /subscription_status\s*=\s*'trial'/.test(x.set));
+    expect(sets.length).toBeGreaterThanOrEqual(1);   // 체험 CT 가 잡혀야 이 검사가 살아 있다
+    expect(sets.filter((x) => !/trial_expires_at\s*=/.test(x.set) || /trial_expires_at\s*=\s*NULL\b/i.test(x.set)).map((x) => x.file)).toEqual([]);
+  });
+  it('★ 슈퍼관리자 회사 수정 = 체험 아닌 회사의 구독 상태를 손으로 trial 로 바꾸면 UPDATE 전에 되돌리고 400(체험 부여 버튼 한 길)', () => {
+    const put = be('routes/admin.ts').slice(be('routes/admin.ts').indexOf("router.put('/companies/:id', authenticate"));
+    const guard = put.indexOf("if (subscriptionStatus === 'trial' && beforePlan.rows[0].subscription_status !== 'trial' && !trialViaCt) {");
+    expect(guard).toBeGreaterThan(0);
+    expect(guard).toBeLessThan(put.indexOf('UPDATE companies'));
+    const block = put.slice(guard, guard + 400);
+    expect(block.indexOf("await planClient.query('ROLLBACK');")).toBeLessThan(block.indexOf('return res.status(400)'));
+    expect(block).toContain("code: 'TRIAL_VIA_BUTTON'");
+  });
+});
+
+describe('R20 사건 없는 상태값 — 상태 칸은 사건이 쓴다(DB 기본값 · 빈 값 메우기 0)', () => {
+  it('★ 회사 INSERT 는 구독 상태(subscription_status)를 직접 쓴다 — DB 기본값(trial)에 맡기면 미가입이 「체험 중」으로 태어난다', () => {
+    const ins = sqlLiterals(BE, sourceFiles(BE, /\.ts$/)).filter((l) => /INSERT INTO companies\s*\(/.test(l.sql));
+    expect(ins.length).toBeGreaterThanOrEqual(1);
+    expect(ins.filter((l) => !/\bsubscription_status\b/.test(l.sql.split(/\)\s*VALUES/i)[0])).map((l) => l.file)).toEqual([]);
+  });
+  it('★ 빈 구독 상태를 \'trial\' 로 메우는 코드 0(서버 · 화면)', () => {
+    const re = /(subscription_status|subscriptionStatus)[^\n;]{0,60}\|\|\s*'trial'/;
+    const hits = [
+      ...sourceFiles(BE, /\.ts$/).filter((f) => re.test(stripComments(read(join(BE, f))))).map((f) => `backend/${f}`),
+      ...sourceFiles(FE, /\.tsx?$/).filter((f) => re.test(stripComments(read(join(FE, f))))).map((f) => `frontend/${f}`),
+    ];
+    expect(hits).toEqual([]);
   });
 });

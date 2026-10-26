@@ -117,7 +117,7 @@ export default function DashboardHeader({
     //   진입은 대시보드 "DB 현황" 카드의 상세보기 하나로 충분하다. 진입점을 늘리지 않는다.
     { label: '직접발송', onClick: onDirectSend, color: 'green', path: '/' },
     // ★ 2026-08-22 대행발송(docs/2026-08-22-agency-send-design.md §4-1) — **모든 회사에 보인다**(Harold "미끼로 한다").
-    //   들어가는 것은 서버 판정(agencySendAllowed = 회사 스위치 AND 유료)뿐이고, 아니면 안내 모달이 뜬다.
+    //   들어가는 것은 서버 판정(agencySendAllowed = 회사 스위치 · ★1026 요금제 무관)뿐이고, 아니면 안내 모달이 뜬다.
     //   NEW 배지는 갓 출시 표시라 4~6주 뒤 제거한다(뱃지 3단 정책).
     {
       label: '대행발송',

@@ -13,6 +13,7 @@ import { buildAdMessage, buildAdSubject, getOpt080Number, prepareFieldMappings, 
 import { enqueueSpamTest, computeMessageHash, spamTestStartedAtMs, loadDefaultSpamFirstRecipient } from '../utils/spam-test-queue';
 import { judgeSpamVerdict, withExpectedSpamDevices, isAutoSpamSource } from '../utils/spam-trial';
 import { resolveHubStoreScope } from '../utils/store-scope';
+import { SPAM_FILTER_OPEN_SQL } from '../utils/plan-guard';
 import type { AiLineViewer } from './ai-line';
 
 /** 칩 상태 — 화면은 이 값만 그린다 */
@@ -93,7 +94,7 @@ export async function startLineSpamTest(v: AiLineViewer, input: {
 }): Promise<LineSpamStart> {
   if (await isDemoCompany(v.companyId)) return { state: 'demo' };
   const plan = await query(
-    `SELECT p.spam_filter_enabled FROM companies c LEFT JOIN plans p ON c.plan_id = p.id WHERE c.id = $1`,
+    `SELECT ${SPAM_FILTER_OPEN_SQL} AS spam_filter_enabled FROM companies c LEFT JOIN plans p ON c.plan_id = p.id WHERE c.id = $1`,
     [v.companyId],
   );
   if (!plan.rows[0]?.spam_filter_enabled) return { state: 'unavailable' };
