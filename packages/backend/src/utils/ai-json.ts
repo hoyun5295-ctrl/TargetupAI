@@ -94,6 +94,7 @@ export function plainTextFromAi(text: string): string {
  */
 export function extractJsonFromAiText<T = any>(text: string): T {
   if (!text || typeof text !== 'string' || text.trim().length === 0) {
+    console.warn(`[ai-json] 빈 AI 응답 · at=${aiJsonCaller()}`);
     throw new Error('extractJsonFromAiText: 빈 AI 응답');
   }
 
@@ -129,14 +130,25 @@ export function extractJsonFromAiText<T = any>(text: string): T {
     }
   }
 
-  // 1차 정상 파싱 → 실패 시(문자열 내부 raw 제어문자 등) escape 후 1회 재파싱. 그래도 실패하면 throw.
+  // 1차 정상 파싱 → 실패 시(문자열 내부 raw 제어문자 등) escape 후 1회 재파싱.
   try {
     return JSON.parse(s) as T;
   } catch (firstErr) {
     const repaired = escapeControlCharsInJsonStrings(s);
     if (repaired !== s) {
-      return JSON.parse(repaired) as T; // 재파싱 실패 시 throw → 호출부 fallback
+      try { return JSON.parse(repaired) as T; } catch { /* 아래 = 경고 1줄 + 처음 오류 */ }
     }
+    // 3) ★2026-10-26 끝내 못 읽음 = 흔적을 남기고 던진다(호출부 fallback · 조용한 실패 0 · 경위 = 나인 직접발송 맞춤법 「실패」).
+    //    덩어리를 건지거나 AI 가 뜻한 덩어리를 짐작하지 않는다 — 건지기 규칙은 반례가 계속 나왔다(Codex 1R~3R:
+    //    예시 덩어리 채택 · 깨진 객체의 안쪽 배열 · 깨진 교정 + 예시). 다시 묻기는 호출부 몫(맞춤법 = 1회 · 캐시 0).
+    //    답 원문 · 파서 오류 문장(원문 조각이 들어간다)은 남기지 않는다 = 고객 글이 로그로 새지 않게.
+    console.warn(`[ai-json] 읽기 실패 · len=${text.length} · at=${aiJsonCaller()}`);
     throw firstErr;
   }
+}
+
+/** 실패 로그용 호출 위치(파일:줄 · 원문 0) */
+function aiJsonCaller(): string {
+  const line = (new Error().stack || '').split('\n')[3] || '';
+  return line.trim().replace(/^at\s+/, '').slice(0, 160);
 }

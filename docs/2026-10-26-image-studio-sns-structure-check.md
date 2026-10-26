@@ -178,7 +178,7 @@ D1~D4 동의 → `LESSONS_FRONTEND` 디자인 하한 · `LESSONS_BACKEND` 정독
 - 변이: 1R 3 · 2R 8 · 3R 22 · 4R 8 전부 잡음. 새로 쓴 화면 문장 가운뎃점 0(9곳 풀어 씀 · 원래 있던 문장은 그대로).
 - 마지막 검증(5R approve 뒤 · 코드 변경 0): backend · frontend tsc 0 · build:safe 화면 · 백엔드 성공 · backend vitest 690파일 10,138건 전부 통과(단독 실행). 다른 전체 시험과 겹쳐 돈 회차의 실패는 전부 10~36초 시간 초과였다.
 
-### §8-3 배포 때 낼 것(「배포 시작하자」 때 하나씩 · DDL 0 예정) — ★1026 배포 전 확인 = `sns_media.ai_declared` 있음(boolean · 기본 false · Harold 실행) · 배포 = Harold 직접 · 아래 「배포 뒤 확인」이 남은 실측
+### §8-3 배포 때 낼 것(「배포 시작하자」 때 하나씩 · DDL 0 예정) — ★1026 배포 전 확인 = `sns_media.ai_declared` 있음(boolean · 기본 false · Harold 실행) · 배포 완료(Harold 보고) · 아래 「배포 뒤 확인」이 남은 실측
 - 배포 전 = `sns_media.ai_declared` 칸 존재(information_schema · D4 가 처음 쓴다 · 읽기 SQL 은 전부터 있었다) · 없으면 D4 주소가 503 DB_MIGRATION_PENDING 으로 답한다(그 밖 동작 무관).
 - 배포 = 백엔드 → 화면(build:safe · 업무 시간 밖) · 정리 워커는 기동 직후 1회 · 그 뒤 1일 1회(게시본 7일 · 원본 90일).
 - 배포 뒤 확인 = 전역 처리기 업로드 오류(큰 파일 1건 = 400 문장) · SNS 담당자 계정으로 목록 · 소재 고르기가 자기 것만인지 · 페북 · X 연동 = §4-2.
@@ -196,6 +196,6 @@ D1~D4 동의 → `LESSONS_FRONTEND` 디자인 하한 · `LESSONS_BACKEND` 정독
 | 읽기 · 결함 · 덮음표 | 됨 1026 |
 | 처방 설계안 · 결정 D1~D4 | 됨 1026 · Harold 「끝까지 구현하고 닫은다음에 코덱스적대리뷰까지」 = 추천안으로 진행 |
 | 구현 · 시험 · 변이 · Codex · build:safe | 됨 1026 · Codex 적대 5R approve(§8-4) · 배포 대기 |
-| 배포 | 1026 Harold 직접(배포 전 `sns_media.ai_declared` 있음 실측 · `tp-push` 진행 확인 · pull · build:safe · reload = Harold 마무리 · 서버 확인 출력은 이 세션에 없음) · 배포 뒤 확인 = §8-3 |
+| 배포 | 완료 1026(Harold 보고 · 배포 전 `sns_media.ai_declared` 있음 실측 · push 1차 = 시험 시간 초과로 막힘 → 시험 제한 60초 → 2차 push 성공 · pull · build:safe · reload = Harold · 서버 확인 출력은 이 세션에 없음) · 배포 뒤 확인 = §8-3 |
 | 페북 · X 연동(§4-2) | 대기 |
 | 틱톡 설계서 | 대기(§4-3) |

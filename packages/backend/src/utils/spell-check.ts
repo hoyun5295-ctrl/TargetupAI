@@ -208,25 +208,37 @@ export async function runSpellCheck(input: {
   const textHash = spellTextHash(text);
   if (!text.trim()) return { textHash, issues: [], failed: false };
 
-  const raw = await callAIWithFallback({
-    system: input.system,
-    userMessage: input.userMessage,
-    maxTokens: 1500,
-    temperature: 0,
-    companyId: input.companyId,
-    userId: input.userId ?? undefined,
-    source: input.source,
-  });
-
-  // ⛔ 답을 읽지 못한 것을 '고칠 곳 없음'으로 보이지 않는다(가짜 성공 0).
-  let parsed: { issues?: unknown };
-  try {
-    parsed = extractJsonFromAiText(String(raw));
-  } catch {
-    return { textHash, issues: [], failed: true };
+  // ★1026 답을 읽지 못하면(자기 정정으로 JSON 두 덩어리 · 깨진 답) 한 번만 다시 묻는다 — 같은 문안 재현 5번 중 4번은 정상이었다.
+  //   캐시 0 = 읽지 못한 답이 5분 캐시에 남아 「다시 검사」도 같은 실패를 받던 것을 막는다(맞춤법 = 크레딧 0 · AI 호출 한도 면제).
+  for (let attempt = 1; attempt <= SPELL_READ_ATTEMPTS; attempt++) {
+    const raw = await callAIWithFallback({
+      system: input.system,
+      userMessage: input.userMessage,
+      maxTokens: 1500,
+      temperature: 0,
+      companyId: input.companyId,
+      userId: input.userId ?? undefined,
+      source: input.source,
+      noCache: true,
+    });
+    const list = readSpellCandidates(String(raw));
+    if (list) return { textHash, issues: judgeSpellCandidates(text, list, input.protectedSpans), failed: false };
   }
-  const candidates = Array.isArray(parsed.issues) ? (parsed.issues as SpellCandidate[]) : [];
-  return { textHash, issues: judgeSpellCandidates(text, candidates, input.protectedSpans), failed: false };
+  // ⛔ 답을 읽지 못한 것을 '고칠 곳 없음'으로 보이지 않는다(가짜 성공 0).
+  return { textHash, issues: [], failed: true };
+}
+
+const SPELL_READ_ATTEMPTS = 2;
+
+/** AI 답 → 후보 목록. 못 읽음 · issues 배열 없음 = null(「고칠 곳 없음」 아님) · 맨 배열 답은 후보 목록으로 받는다 */
+function readSpellCandidates(raw: string): SpellCandidate[] | null {
+  try {
+    const parsed = extractJsonFromAiText(raw);
+    const list: unknown = Array.isArray(parsed) ? parsed : parsed?.issues;
+    return Array.isArray(list) ? (list as SpellCandidate[]) : null;
+  } catch {
+    return null;
+  }
 }
 
 /** ★ 2026-10-19 문자 · SNS 맞춤법이 같이 쓴다(B-0925-3 · sms-spell-check 에서 이동) */

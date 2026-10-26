@@ -5,10 +5,11 @@
  * 막은 것을 지키는 기계 장치가 없었다. 그래서 이 시험은 **대상을 소스에서 기계로 뽑는다**(주소 · 호출 · 화면 파일).
  * 표에 적은 예외만 통과하고, 새 주소 · 새 호출 · 새 화면은 분류 없이 들어오면 실패한다(손으로 등재한 표 = 등재한 것만 지킨다 · LESSONS_BACKEND 1014).
  */
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { readFileSync, readdirSync } from 'fs';
 import { join } from 'path';
 import * as ts from 'typescript';
+import { extractJsonFromAiText } from '../ai-json';
 
 const BE = join(__dirname, '..', '..');
 const FE = join(__dirname, '..', '..', '..', '..', 'frontend', 'src');
@@ -2464,5 +2465,39 @@ describe('1026 스튜디오 · SNS — 뿌리 넓힘(R3 · R4 · R7 · R10 · R1
     expect(c.indexOf("if (req.kind === 'seed')")).toBeGreaterThan(-1);
     expect(seed).toMatch(/snsCaptionMode\(\{ body: next, imageCount: summary\.images, videoCount: summary\.videos \}\)\.mode !== 'locked'\) void runAi\('write'\)/);
     expect(seed).not.toMatch(/aiMode\.mode/);
+  });
+});
+
+describe('R19 AI 답 모양 변주 — JSON 읽기 CT 한 곳(AI 호출 파일 전수 = ai-call-invariants 불변식 4)은 망가진 답을 건지지 않는다 · 못 읽으면 흔적', () => {
+  // 판정 자리 = extractJsonFromAiText 한 곳(53곳 공용). 답 모양이 새로 나오면 여기에 한 줄 더한다.
+  // 읽는다 = 원래 읽히던 모양만 · 던진다 = 덩어리 여럿(자기 정정 · 예시) · 깨진 덩어리 · 건지기 0(Codex 1R~3R 반례) · 다시 묻기는 호출부 몫
+  const READS: Array<[string, string, unknown]> = [
+    ['코드 울타리', '```json\n{"a":1}\n```', { a: 1 }],
+    ['앞 설명 + 단일 JSON', '설명입니다. {"a":[1,2]} 끝', { a: [1, 2] }],
+    ['문자열 안 raw 줄바꿈', '{"t":"a\nb"}', { t: 'a\nb' }],
+  ];
+  for (const [name, raw, want] of READS) {
+    it(`읽는다 · ${name}`, () => { expect(extractJsonFromAiText(raw)).toEqual(want); });
+  }
+  const THROWS: Array<[string, string]> = [
+    ['자기 정정 뒤 두 번째 JSON(1026 운영 재현)', '{"issues":[{"before":"a","after":"b","reason":"r"}]}\n\nHmm, wait. Correcting my output:\n\n{"issues":[]}'],
+    ['교정 뒤 예시', '{"issues":[{"before":"a","after":"b"}]} 예: {"issues":[]}'],
+    ['괄호 짝 깨짐 뒤 안쪽 배열', '{"issues":[{"before":"a","after":"b"}}, "notes":[]}'],
+    ['깨진 교정 + 예시', '{"issues":[{"before":"a","after":"b"}],} 참고: {"issues":[]}'],
+  ];
+  for (const [name, raw] of THROWS) {
+    it(`던진다 · ${name}`, () => {
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      try { expect(() => extractJsonFromAiText(raw)).toThrow(); expect(warn).toHaveBeenCalledTimes(1); } finally { warn.mockRestore(); }
+    });
+  }
+  it('못 읽는 답 = 던지고 경고 1줄 · 답 원문 0', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      expect(() => extractJsonFromAiText('{"issues":[{"before":"홍길동"')).toThrow();
+      expect(warn).toHaveBeenCalledTimes(1);
+      expect(String(warn.mock.calls[0][0])).toContain('[ai-json]');
+      expect(String(warn.mock.calls[0][0])).not.toContain('홍길동');
+    } finally { warn.mockRestore(); }
   });
 });
