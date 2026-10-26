@@ -79,6 +79,12 @@ ALTER TABLE companies ADD CONSTRAINT companies_trial_needs_expiry CHECK (subscri
 ```
 되돌리기: `ALTER TABLE companies DROP CONSTRAINT companies_trial_needs_expiry; ALTER TABLE companies ALTER COLUMN subscription_status SET DEFAULT 'trial';`
 
+## 6-1. 실행 기록 (Harold 1026)
+- 배포 `a5d49927` · reload 18:20(KST) · dist 문자열 확인 · 에러 로그에 이번 변경 줄 0.
+- §5 A = DO 성공 · 10월 청구 대상 충전 0건 · 원장 = 리셋 750 · 관리자 50 · 가입기념 100(grant 로 전환) · plan_prorate +8(기본 8 · 구매 40).
+- §5 B = UPDATE 32 · §5 C = UPDATE 2(만료 2026-11-02 10:01 UTC = 19:01 KST) · 「trial · 만료일 없음」 0.
+- §6 = 기본값 제거 · CHECK 추가 확인 → 되돌리기 명령이 함께 실행돼 한 번 풀림 → 다시 실행해 최종 = 기본값 없음 · CHECK 있음.
+
 ## 7. 실측 1건 시나리오 (배포 뒤)
 - 다음 요금제 승인(또는 직접 변경) 1건 → `SELECT type, amount, reason FROM ai_credit_transactions WHERE company_id = … AND type = 'plan_prorate' ORDER BY created_at DESC LIMIT 1` = 남은 일수 몫(식 §3).
 - 대행 스위치 켠 미가입 회사(체험 끝난 paulaschoice 등) = 대행발송 화면 진입 · 스팸 검사 시작 정상.

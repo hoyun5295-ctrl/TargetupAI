@@ -354,7 +354,7 @@
 | created_at | timestamp | |
 | updated_at | timestamp | |
 | service_type | varchar | ★ 2026-06-08 실측 보강 |
-| subscription_status | varchar | ★ 실측 · ★1026 information_schema 실측 = **DB 기본값 `'trial'`**(미가입이 「체험 중」으로 태어난 뿌리 · R20) → 생성 CT 가 직접 쓴다(유료 paid · 미가입 · 요금제 없음 NULL) · 배포 뒤 DDL = `DROP DEFAULT` + CHECK `companies_trial_needs_expiry`(trial 이면 만료일 필수 · 원장 docs/2026-10-26-plan-credit-trial-agency.md §6) |
+| subscription_status | varchar | ★ 실측 · ★1026 information_schema 실측 = **DB 기본값 `'trial'`**(미가입이 「체험 중」으로 태어난 뿌리 · R20) → 생성 CT 가 직접 쓴다(유료 paid · 미가입 · 요금제 없음 NULL) · ★1026 **DDL 실행완료(Harold · information_schema · pg_constraint 확인)** = 기본값 없음 + CHECK `companies_trial_needs_expiry`(`subscription_status IS DISTINCT FROM 'trial' OR trial_expires_at IS NOT NULL` · 원장 docs/2026-10-26-plan-credit-trial-agency.md §6) |
 | plan_notified_code | varchar(20) | ★ 2026-07-06 추가 (ALTER) — 요금제 변경 안내 1회 노출용. 마지막 안내한 plan_code(localStorage 비교 대체). NULL=현재 값으로 조용히 초기화 |
 | line_group_id | uuid | ★ 실측 (발송 라인그룹) |
 | kakao_enabled | boolean | ★ 실측 |
