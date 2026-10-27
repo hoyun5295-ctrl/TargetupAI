@@ -24,6 +24,7 @@
  */
 
 import { query } from '../config/database';
+import { saveIntegrationRowGuarded } from './integration-scope';   // ★ 2026-10-27 자사몰 대비 K9 SC1 — 연동 행 저장 = 회사 모드 잠금 → 판정 → 저장(한 트랜잭션)
 import { TIMEOUTS } from '../config/defaults';
 import { joinInflight } from './inflight-lock';
 // ★ 2026-09-26 한줄로 V2 R1-31 — 토큰 요청 실패 판정 CT(제공자 거절일 때만 연동 만료)
@@ -38,6 +39,7 @@ import {
 } from './provider-registry';
 import { identifyCustomer } from './cdp-identity';
 import { syncOrder } from './cdp-orders';
+import type { WebhookCtx, WebhookProcessResult } from './cdp-webhook-delivery';
 import { orderExternalId } from './cdp-order-identity';
 import { trackEvent } from './cdp-events';
 import { buildWebhookIdempotencyKey } from './cdp-idempotency';
@@ -205,7 +207,7 @@ export async function saveCafe24Integration(
   tokenRes: Cafe24TokenResponse,
   webhookSecret: string | null = null
 ): Promise<void> {
-  await query(
+  await saveIntegrationRowGuarded(companyId, 'cafe24', mallId, null, (run) => run(
     `INSERT INTO company_integrations (
       id, company_id, provider, mall_id, access_token, refresh_token,
       token_expires_at, scope, meta, webhook_secret, connected_at, status,
@@ -239,7 +241,7 @@ export async function saveCafe24Integration(
       }),
       webhookSecret,
     ]
-  );
+  ));
 }
 
 export async function getCafe24Integration(companyId: string, mallId?: string): Promise<Cafe24Integration | null> {
@@ -311,7 +313,7 @@ const CAFE24_CALLBACK_REDIRECT = process.env.CAFE24_REDIRECT_URI || 'https://app
  * OAuth 전이라 토큰 없음(status='pending_oauth'). 이후 callback이 토큰을 채우고 active로 전환.
  */
 export async function saveCafe24ByoCredentials(companyId: string, mallId: string, clientId: string, clientSecret: string): Promise<void> {
-  await query(
+  await saveIntegrationRowGuarded(companyId, 'cafe24', mallId, null, (run) => run(
     `INSERT INTO company_integrations (
       id, company_id, provider, mall_id, access_token, refresh_token,
       token_expires_at, scope, meta, webhook_secret, connected_at, status, created_at, updated_at
@@ -323,7 +325,7 @@ export async function saveCafe24ByoCredentials(companyId: string, mallId: string
       meta = company_integrations.meta || EXCLUDED.meta,
       updated_at = NOW()`,
     [companyId, mallId, JSON.stringify({ app_client_id: clientId, app_client_secret: clientSecret })]
-  );
+  ));
 }
 
 /**
@@ -601,14 +603,22 @@ const CAFE24_PAID_STATUS = new Set(['N10', 'N20', 'N21', 'N22', 'N30', 'N40', 'N
 const CAFE24_CANCELLED_STATUS = new Set(['C40', 'C41', 'C42', 'C43', 'C47', 'C48', 'C49']);
 const CAFE24_REFUNDED_STATUS = new Set(['R40', 'R41', 'R42', 'R43']);
 export function mapCafe24OrderStatus(raw: unknown): string {
+  return cafe24OrderStatusOf(raw).status;
+}
+
+/** 공식 코드표에 있으나 매출을 건드리지 않는 진행 코드(입금전 · 접수 · 교환 · 취소 · 반품 진행) — 「아는 상태」 판정용(K10 SC2) */
+const CAFE24_PROGRESS_STATUS_RE = /^(N0[0-3]|C(00|10|3[4-6])|R([0-2]\d|3[0-6])|E\d\d)$/;
+
+/** ★ 2026-10-27 자사몰 대비 K10 SC2 — { 적재 상태, 코드표에 있는 글자인가 }. 모르는 글자 = 원문 그대로(매출 변화 없음) + known false */
+export function cafe24OrderStatusOf(raw: unknown): { status: string; known: boolean } {
   const s = String(raw ?? '').trim();
-  if (!s) return 'pending';
+  if (!s) return { status: 'pending', known: false };
   const code = s.toUpperCase();
-  if (CAFE24_PAID_STATUS.has(code)) return 'paid';
-  if (CAFE24_CANCELLED_STATUS.has(code)) return 'cancelled';
-  if (CAFE24_REFUNDED_STATUS.has(code)) return 'refunded';
-  if (s.toLowerCase() === 'completed') return 'completed';
-  return s;
+  if (CAFE24_PAID_STATUS.has(code)) return { status: 'paid', known: true };
+  if (CAFE24_CANCELLED_STATUS.has(code)) return { status: 'cancelled', known: true };
+  if (CAFE24_REFUNDED_STATUS.has(code)) return { status: 'refunded', known: true };
+  if (s.toLowerCase() === 'completed') return { status: 'completed', known: true };
+  return { status: s, known: CAFE24_PROGRESS_STATUS_RE.test(code) };
 }
 
 // 금액 파싱은 공용 CT normalize.firstPositiveAmount 사용 — "0.00" 문자열 truthy 함정 방어
@@ -681,12 +691,13 @@ export const cafe24Adapter: IProviderAdapter = {
     return verifyCafe24WebhookSignature(rawBody, signature, secret);
   },
 
-  async processWebhookEvent(companyId: string, event: string, resource: Record<string, any>): Promise<void> {
-    // routes/cafe24.ts processCafe24Event가 여기로 위임 — 단일 진실.
+  async processWebhookEvent(companyId: string, event: string, resource: Record<string, any>, ctx: WebhookCtx): Promise<WebhookProcessResult> {
+    // 수신 CT(cdp-webhook-delivery)가 부른다 — 단일 진실. ★ 1027 K1-3 · K1-6 — 원천 시각이 없으면 받은 시각(ctx.observedAt) · 옛 스냅숏 = 'stale'
     switch (event) {
       case 'customer.created':
       case 'customer.updated':
         await identifyCustomer(companyId, {
+          ...(ctx.storeCode ? { storeCode: ctx.storeCode } : {}),   // ★ 1027 K9 — 연동 행 분류코드(소속 행 · 몰 동의)
           source: 'cafe24',
           externalId: String(resource.member_id || resource.customer_id || ''),
           email: resource.email,
@@ -709,7 +720,9 @@ export const cafe24Adapter: IProviderAdapter = {
         // ★ 2026-07-03 실측 정정(gyunoo83 실주문 payload) — 상품 목록은 items가 아니라 extra_info로 온다.
         const orderItems = Array.isArray(resource.items) ? resource.items
           : (Array.isArray(resource.extra_info) ? resource.extra_info : undefined);
-        await syncOrder(companyId, {
+        const st = cafe24OrderStatusOf(resource.order_status);
+        const placed = await syncOrder(companyId, {
+          ...(ctx.storeCode ? { storeCode: ctx.storeCode } : {}),   // ★ 1027 K9 — 연동 행 분류코드(소속 행 · 몰 동의)
           source: 'cafe24',
           orderId: String(resource.order_id || ''),
           // ★ 2026-09-27 한줄로 V2 R245 — 비회원 주문도 적재(주문 외부 id CT)
@@ -717,7 +730,8 @@ export const cafe24Adapter: IProviderAdapter = {
           email: resource.buyer_email,
           phone: resource.buyer_cellphone || resource.buyer_phone,
           name: resource.buyer_name,
-          status: mapCafe24OrderStatus(resource.order_status),
+          status: st.status,
+          statusKnown: st.known,
           totalAmount: firstPositiveAmount(resource.actual_payment_amount, resource.initial_total_amount_due, resource.order_price_amount),
           itemCount: orderItems ? orderItems.length : undefined,
           items: orderItems ? orderItems.map((it: any) => ({
@@ -726,16 +740,19 @@ export const cafe24Adapter: IProviderAdapter = {
             price: it.product_price ? Number(it.product_price) : undefined,
             quantity: it.quantity ? Number(it.quantity) : undefined,
           })) : undefined,
-          orderedAt: resource.order_date || new Date().toISOString(),
+          orderedAt: resource.order_date || ctx.observedAt,
+          srcAt: ctx.observedAt,
           currency: 'KRW',
         });
+        if (placed.stale) return 'stale';
         break;
       }
 
       case 'order.cancelled':
       case 'order.refunded':
         // 매출 차감은 syncOrder가 담당 (CT-86 revenue_reversed 멱등 마커 — 반영된 주문만 차감)
-        await syncOrder(companyId, {
+        const reversed = await syncOrder(companyId, {
+          ...(ctx.storeCode ? { storeCode: ctx.storeCode } : {}),   // ★ 1027 K9 — 연동 행 분류코드(소속 행 · 몰 동의)
           source: 'cafe24',
           orderId: String(resource.order_id || ''),
           // ★ 2026-09-27 한줄로 V2 R245 — 비회원 주문도 적재(주문 외부 id CT)
@@ -745,9 +762,11 @@ export const cafe24Adapter: IProviderAdapter = {
           name: resource.buyer_name,
           status: event === 'order.refunded' ? 'refunded' : 'cancelled',
           totalAmount: firstPositiveAmount(resource.actual_payment_amount, resource.initial_total_amount_due, resource.order_price_amount),
-          orderedAt: resource.cancelled_date || resource.order_date || new Date().toISOString(),
+          orderedAt: resource.cancelled_date || resource.order_date || ctx.observedAt,
+          srcAt: ctx.observedAt,
           currency: 'KRW',
         });
+        if (reversed.stale) return 'stale';
         // 여정/캠페인 trigger용 취소 신호 이벤트는 기존대로 기록
         await trackEvent(companyId, {
           source: 'cafe24',
@@ -758,7 +777,7 @@ export const cafe24Adapter: IProviderAdapter = {
             status: resource.order_status,
             cancelled_amount: resource.actual_payment_amount,
           },
-          occurredAt: resource.cancelled_date || new Date().toISOString(),
+          occurredAt: resource.cancelled_date || ctx.observedAt,
         }).catch((err) => {
           console.log('[Cafe24 Adapter] 취소 신호 이벤트 기록 실패(차감은 완료):', err?.message || err);
         });
@@ -782,7 +801,7 @@ export const cafe24Adapter: IProviderAdapter = {
               product_name: resource.product_name,
               quantity: resource.quantity,
             },
-            occurredAt: resource.created_date || new Date().toISOString(),
+            occurredAt: resource.created_date || ctx.observedAt,
           });
         }
         break;

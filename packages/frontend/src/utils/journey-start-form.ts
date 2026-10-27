@@ -9,11 +9,12 @@
 export type OptionForm = Record<string, any>;
 
 // 시작 사건별 진입 기준(trigger_filters 키) — 서버 normalizeJourneyOptions 가 받는 키만.
-export const TIMING: Record<string, { key: string; before: string; after: string; def: number; min: number; max: number }> = {
+export const TIMING: Record<string, { key: string; before: string; after: string; def: number; min: number; max: number; note?: string }> = {
   'customer.created': { key: 'recent_hours', before: '가입하고', after: '시간 안에 들어와요', def: 24, min: 1, max: 720 },
   'customer.dormant': { key: 'dormant_days', before: '마지막 구매 뒤', after: '일이 지나면 휴면으로 봐요', def: 30, min: 1, max: 3650 },
   'customer.birthday_approaching': { key: 'days_before', before: '생일', after: '일 전에 들어와요', def: 7, min: 0, max: 90 },
-  'cdp.cart_abandon': { key: 'abandon_hours', before: '장바구니에 담고', after: '시간 동안 사지 않으면 들어와요', def: 24, min: 1, max: 168 },
+  // ★ 2026-10-27 자사몰 대비 K1-10 — 결제 전 주문도 주문 시도라 이 여정에서 빠진다(서버 orderAttemptSql)
+  'cdp.cart_abandon': { key: 'abandon_hours', before: '장바구니에 담고', after: '시간 동안 사지 않으면 들어와요', def: 24, min: 1, max: 168, note: '결제 전 주문이 있어도 보내지 않아요' },
 };
 const PURCHASE_FLOW = ['cdp.purchase', 'purchase.first', 'customer.dormant_return'];
 export const STANDING_TRIGGERS = ['custom', 'customer.dormant'];

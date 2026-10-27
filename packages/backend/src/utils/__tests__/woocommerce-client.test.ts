@@ -226,12 +226,12 @@ describe('연결 검증 1콜 — 주문 1건 읽기 · 실패 코드 매핑 · �
 });
 
 describe('processWooResource — 매핑 → identify(수신동의 있을 때) → syncOrder · 회원은 identify 만', () => {
-  it('주문: 수신동의 Y → identifyCustomer(smsOptIn true) 뒤 syncOrder(orderId 몰 접두)', async () => {
+  // ★ 2026-10-27 자사몰 대비 K2-1 — 주문 본문의 동의는 syncOrder 한 호출로(판정 = 식별 CT · 회원 연결이 있으면 무시)
+  it('주문: 수신동의 Y → syncOrder 에 smsOptIn true 를 싣는다(따로 identify 0 · orderId 몰 접두)', async () => {
     const r = await processWooResource(COMPANY, MALL, 'order', order(727), 'marketing_agree');
     expect(r).toBe('synced');
-    expect(identifyCustomer).toHaveBeenCalledTimes(1);
-    expect((identifyCustomer as any).mock.calls[0][1]).toMatchObject({ source: 'woocommerce', externalId: 'ilbonimo.com:25', phone: '010-0000-0001', smsOptIn: true });
-    expect((syncOrder as any).mock.calls[0][1]).toMatchObject({ source: 'woocommerce', orderId: 'ilbonimo.com:727', status: 'paid', totalAmount: 1000 });
+    expect(identifyCustomer).not.toHaveBeenCalled();
+    expect((syncOrder as any).mock.calls[0][1]).toMatchObject({ source: 'woocommerce', orderId: 'ilbonimo.com:727', status: 'paid', totalAmount: 1000, smsOptIn: true });
   });
   it('주문: 수신동의 메타키 미설정 → identify 0 · syncOrder 1(식별은 syncOrder 가 한다)', async () => {
     await processWooResource(COMPANY, MALL, 'order', order(727), null);

@@ -1,10 +1,13 @@
 import { defineConfig } from 'vitest/config';
+import { UNIT_INCLUDE, UNIT_EXCLUDE } from './vitest.globs';
 
 // 순수 유닛 테스트 전용 — DB/네트워크 의존 없는 함수만 대상.
 // backend는 운영 ts-node/tsc OOM 이력이 있어, vitest(esbuild 기반)로 가볍게 분리한다.
+// ★ 2026-10-27 실 PG 시험(*.pg.test.ts)은 npm run test:pg 로만 돈다(vitest.pg.config.ts · push 전 시험에 안 든다 · 글로브 = vitest.globs.ts).
 export default defineConfig({
   test: {
-    include: ['src/**/*.test.ts'],
+    include: UNIT_INCLUDE,
+    exclude: UNIT_EXCLUDE,
     environment: 'node',
     // ★ 2026-09-29 테스트 안에서 모듈을 그 자리에서 불러오는(await import) 파일이 43개 — 불러오는 시간이 제한 시간에 들어간다.
     //   혼자 돌리면 1초대인 테스트(tier2-rest-0927 R372)가 push 전 전체 병렬 실행 부하에서 기본 5초를 넘어 push 가 막혔다.

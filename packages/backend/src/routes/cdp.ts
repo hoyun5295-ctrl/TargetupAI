@@ -92,6 +92,7 @@ import {
   quickActionSegmentRefine,
 } from '../utils/inapp-quick-action';
 import { query } from '../config/database';
+import { deliverWebhookToCompanies } from '../utils/cdp-webhook-delivery';
 import { checkCredit, isChargedByKey, chargedKeysAmong, InsufficientCreditError } from '../utils/ai-credit';
 import { sanitizeLineProducts, lineProductsKey, sanitizeLineReads, applyLineReads, oneLineInflightKey } from '../utils/one-line-facts';   // ★ 2026-10-05 한줄로 시그니처
 // ★ 2026-10-17 한 줄 단계 모달(설계서 docs/2026-10-17-oneline-steps-modal-design.md §3-12) — 인앱도 같은 돈 계약(시도 토큰 · 잠금 · 결과 뒤 1회 차감)
@@ -474,50 +475,18 @@ router.post(
       const resource = req.body?.resource || req.body || {};
       const idempotencyKey = customSelfHostedAdapter.buildIdempotencyKey(String(event), resource, req.body || {});
 
-      // 중복 차단 + 처리 row INSERT
-      const insertRes = await query(
-        `INSERT INTO cdp_webhook_deliveries (
-          id, company_id, source, webhook_event, idempotency_key, payload, status, retry_count, created_at
-        ) VALUES (
-          gen_random_uuid(), $1::uuid, 'custom', $2, $3, $4::jsonb, 'received', 0, NOW()
-        )
-        ON CONFLICT (company_id, source, idempotency_key) DO NOTHING
-        RETURNING id`,
-        [companyId, event, idempotencyKey, JSON.stringify(req.body || {})]
-      );
-
-      if (insertRes.rows.length === 0) {
-        // 2026-06-10 정정: updated_at은 cdp_webhook_deliveries에 없는 컬럼(실측) — 포함 시 중복 응답이 전부 500
-        await query(
-          `UPDATE cdp_webhook_deliveries
-           SET status = 'duplicate', processed_at = NOW()
-           WHERE company_id = $1::uuid AND source = 'custom' AND idempotency_key = $2
-           -- ★ 2026-09-26 한줄로 V2 R1-02 — 처리 완료 행만 중복 표시(실패 행을 덮으면 재처리 워커 대상에서 빠져 이벤트가 유실됐다)
-           AND status = 'processed'`,
-          [companyId, idempotencyKey]
-        );
-        return res.json({ success: true, duplicate: true });
-      }
-
-      const deliveryId = insertRes.rows[0].id;
-
-      try {
-        await customSelfHostedAdapter.processWebhookEvent(String(companyId), String(event), resource);
-        await query(
-          `UPDATE cdp_webhook_deliveries SET status = 'processed', processed_at = NOW() WHERE id = $1::uuid`,
-          [deliveryId]
-        );
-        return res.json({ success: true });
-      } catch (processErr: any) {
-        console.error('[Custom Webhook] 이벤트 처리 실패:', processErr);
-        await query(
-          `UPDATE cdp_webhook_deliveries
-           SET status = 'failed', error_message = $2, processed_at = NOW()
-           WHERE id = $1::uuid`,
-          [deliveryId, String(processErr?.message || 'unknown').slice(0, 1000)]
-        );
-        return res.json({ success: false, error: '이벤트 처리 실패' });
-      }
+      // ★ 2026-10-27 자사몰 대비 K2-5 — 기록 · 중복 · 처리는 공용 수신 CT 하나(옛 인라인 기록 합침) · 기록 → 즉시 200 → 처리는 뒤
+      const outcome = await deliverWebhookToCompanies({
+        source: 'custom',
+        companyIds: [String(companyId)],
+        event: String(event),
+        idempotencyKey,
+        payload: req.body || {},
+        mallId: 'self',
+        logTag: 'Custom',
+      });
+      if (outcome.recorded === 0) return res.json({ success: true, duplicate: true });
+      return res.json({ success: true });
     } catch (err: any) {
       console.error('[Custom Webhook] 오류:', err);
       if (respondUserError(res, err)) return;   // ★ 2026-10-25 R10 — 사용자 조건 오류 = 그 상태 · 문장 그대로

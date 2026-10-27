@@ -24,7 +24,7 @@ import {
   GodoApiError,
 } from '../utils/godo-client';
 
-import { publicErrorText } from '../utils/http-error';
+import { publicErrorText, respondUserError } from '../utils/http-error';
 const router = Router();
 router.use(authenticate);
 
@@ -73,6 +73,7 @@ router.post('/credentials', async (req: Request, res: Response) => {
     return res.json({ success: true });
   } catch (err: any) {
     console.error('[Godo /credentials] 오류:', err);
+    if (respondUserError(res, err)) return;   // ★ 2026-10-27 자사몰 대비 K9 SC1 — 분류코드 모드 거절(409 · 고객 문장)
     return res.status(500).json({ success: false, error: publicErrorText(err, '인증키 저장 실패') });
   }
 });

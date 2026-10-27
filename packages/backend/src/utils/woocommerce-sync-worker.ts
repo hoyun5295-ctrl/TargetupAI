@@ -18,7 +18,7 @@
 import { query } from '../config/database';
 import {
   syncWooOrdersSince, enqueueWooBackfill, ensureWooWebhooks, startWooOrderReread, removeWooWebhooks, listWooWebhookCleanupTargets,
-  WooApiError, DEFAULT_BACKFILL_DAYS, MAX_SYNC_ORDERS,
+  runWooMemberRereadPass, WooApiError, DEFAULT_BACKFILL_DAYS, MAX_SYNC_ORDERS,
 } from './woocommerce-client';
 import { isCdpEnabledForPlan } from './cdp-auth';
 
@@ -221,8 +221,25 @@ async function tick(): Promise<void> {
   }
 }
 
+/** ★ 2026-10-27 자사몰 대비 K3 — 회원 재대조 확인 주기(창 KST 02~06시 안에서만 돈다 · 도는 중이면 줄이 겹치지 않게 막는다) */
+const MEMBER_REREAD_CHECK_MS = 10 * 60 * 1000;
+let rereadRunning = false;
+async function rereadTick(): Promise<void> {
+  if (rereadRunning) return;
+  rereadRunning = true;
+  try {
+    const n = await runWooMemberRereadPass(isCdpEnabledForPlan);
+    if (n > 0) console.log(`[Woo Reread] 회원 재대조 ${n}몰`);
+  } catch (err) {
+    console.error('[Woo Reread] 회차 오류:', err);
+  } finally {
+    rereadRunning = false;
+  }
+}
+
 export function startWoocommerceSyncWorker(): void {
   setInterval(tick, SYNC_INTERVAL_MS);
+  setInterval(rereadTick, MEMBER_REREAD_CHECK_MS);
   // 기동 4분 후 첫 실행 (고도몰 워커 3분과 겹치지 않게)
   setTimeout(tick, 4 * 60 * 1000);
   console.log(`[Woo Sync] 워커 시작 (${SYNC_INTERVAL_MS / 60000}분 주기 · 겹침 ${OVERLAP_MS / 3600000}시간 · 상한 ${MAX_WINDOW_DAYS}일)`);

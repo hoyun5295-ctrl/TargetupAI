@@ -4,10 +4,14 @@
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
-vi.mock('../../config/database', () => ({ query: vi.fn(async () => ({ rows: [], rowCount: 0 })) }));
+vi.mock('../../config/database', () => {
+  const query = vi.fn(async () => ({ rows: [], rowCount: 0 }));
+  // ★ 2026-10-27 K1-2 — 주문 사건 · 고객 요약 = 한 트랜잭션
+  return { query, withTransaction: async (work: any) => work(query) };
+});
 vi.mock('../cdp-identity', () => ({ identifyCustomer: vi.fn(async () => ({ customerId: 'c1', linkId: 'l1', wasCreated: false, wasMerged: false })) }));
 // ★ 2026-09-26 R1-34 — 주문 CT가 이벤트 속성 검증(validateProperties)을 함께 쓴다: 실제 함수 + trackEvent만 목
-vi.mock('../cdp-events', async (importOriginal) => ({ ...(await importOriginal<any>()), trackEvent: vi.fn(async () => ({})) }));
+vi.mock('../cdp-events', async (importOriginal) => ({ ...(await importOriginal<any>()), trackOrderEvent: vi.fn(async () => ({ eventId: 'e1' })) }));
 
 import { identifyCustomer } from '../cdp-identity';
 import { syncOrder } from '../cdp-orders';

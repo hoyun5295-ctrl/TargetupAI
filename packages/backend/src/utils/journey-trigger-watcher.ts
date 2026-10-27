@@ -29,7 +29,7 @@ import { query, pool } from '../config/database';
 // ★ 2026-09-27 한줄로 V2 S5-04 — 여정 작성자 분류코드 범위
 import { getJourneyOwnerScopeSql } from './store-scope';
 import { journeyOwnerConsent } from './mall-consent';
-import { selectJourneyTargetCustomerIds, selectAfterJourneyCandidates, selectCdpEventRowsForCursor, selectPurchaseLedgerRowsForCursor, selectCartAbandonProperties, selectLastPriorPurchase, JOURNEY_COUNT_CAP } from './journey-target-extractor';
+import { selectJourneyTargetCustomerIds, selectAfterJourneyCandidates, selectCdpEventRowsForCursor, selectPurchaseLedgerRowsForCursor, selectCartAbandonProperties, selectLastPriorPurchase, triggerEntryUsedSql, JOURNEY_COUNT_CAP } from './journey-target-extractor';
 import { planCdpCursorBatch, buildEntryPropsArray, resolveCdpCursorEventName, usesPurchaseLedger, type CdpCursorBatch, type CdpEventRow } from './journey-cdp-cursor';
 import { clampInt } from './journey-points-trigger';
 // ★ 2026-08-01 §11-4 — 싱크 구매는 원장(purchases)이 문이다. 어느 회사에서 그 문을 열지·창 길이 판정.
@@ -543,6 +543,13 @@ async function finishCursorBatch(
     }
     j.lineageIds = fresh.lineageIds;
     for (const customerId of ids) {
+      // ★ 2026-10-27 자사몰 대비 K1-2 ② — 잠금 안에서 그 고객의 대표 사건이 이 계보에 이미 진입에 쓰였으면 건너뛴다(교체 닫기 · 쿨다운보다 먼저 ·
+      //   승격으로 커서를 다시 지나는 같은 사건이 교체 모드에서 옛 실행을 닫고 다시 들어가는 순서를 막는다).
+      const entryKey = batch.eventIdByCustomer?.[customerId];
+      if (entryKey) {
+        const used = await client.query(`SELECT ${triggerEntryUsedSql('$1', '$2::uuid', '$3')} AS used`, [j.lineageIds || [j.id], customerId, String(entryKey)]);
+        if (used.rows[0]?.used) { skipped++; continue; }
+      }
       // ★ 0930 V2 5차 · Codex 1R — 진입 교체: 시간 쿨다운이 지났을 때만 계보 전체의 진행 중 실행을 닫고 새 주기로 넣는다
       //   (옛 판에서 돌던 주기도 교체 · 닫기와 넣기가 늘 함께 · 닫기만 하고 못 넣는 경우 0). 교체가 아니면 옛 판정 그대로.
       if (replaceEntry) {
@@ -716,6 +723,7 @@ async function processCdpCursorJourney(j: ActiveJourney, eventName: string): Pro
     PURCHASE_TRIGGER_MAX_AGE_HOURS,
     CDP_EVENT_CHUNK + 1,
     await getJourneyOwnerScopeSql(j.company_id, j.id), await journeyOwnerConsent(j.company_id, j.id),
+    j.lineageIds || [j.id],   // ★ 1027 K1-2 ① 이미 그 사건으로 진입한 행은 사건 행 단계에서 뺀다
   );
   const batch = planCdpCursorBatch(rows, CDP_EVENT_CHUNK, windowEnd, axis);
   await qualifyPurchaseTransition(j, batch, rows);

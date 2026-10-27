@@ -20,10 +20,12 @@
  */
 
 import { UserFacingError } from './http-error';
-import { query } from '../config/database';
+import { query, withTransaction } from '../config/database';
 import { identifyCustomer, IdentifyInput } from './cdp-identity';
-import { trackEvent, validateProperties } from './cdp-events';
-import { decideOrderRevenueAction } from './cdp-order-revenue';
+import { trackOrderEvent, validateProperties } from './cdp-events';
+import { decideOrderRevenueAction, isCancelStatus, isRevenueStatus } from './cdp-order-revenue';
+import { kstDateKey } from './agency-send-state';
+import type { MemberIdFormat } from './mall-consent';
 // ★ 2026-09-26 한줄로 V2 R1-34 — 같은 주문 웹훅 직렬화(공용 잠금 CT)
 import { withKeyedLock } from './keyed-lock';
 
@@ -45,6 +47,27 @@ export interface OrderInput {
   itemCount?: number;
   items?: Array<{ productId?: string; productName?: string; price?: number; quantity?: number; categoryName?: string }>;
   orderedAt: string;                        // ISO datetime
+  /**
+   * ★ 2026-10-27 자사몰 대비 K1-3 — 결제 시각(ISO). 우커머스 = date_paid_gmt · 그 밖 provider = 원문 확인 전이라 비움(= 주문 시각).
+   * 구매 사건 시각 · RFM 날짜는 orderPaidAt(paidAt ?? orderedAt) 한 함수로 읽는다.
+   */
+  paidAt?: string;
+  /**
+   * ★ 1027 K1-6 — 이 스냅숏의 원천 시각(ISO). source 종류 provider(우커머스) = 원문 수정 시각(date_modified_gmt) ·
+   * received 종류 = 받은 시각(웹훅 ctx.observedAt · 주기 수집 = 그 쪽을 읽은 시각). 비우면 지금(동기 API 의 받은 시각).
+   */
+  srcAt?: string;
+  /** ★ 1027 K10 SC2 — 상태 변환 표에 없는 원문 상태였으면 false(판정은 결제 아님 그대로 · properties.status_known = false 로 남긴다) */
+  statusKnown?: boolean;
+  /** ★ 1027 K10 SC2 — 모르는 상태였을 때 그 원문 글자(변환이 pending 으로 접어도 감시 표가 원문을 본다) */
+  statusRaw?: string;
+  /**
+   * ★ 1027 K2-1 — 주문 본문의 수신동의(해석된 값만). 식별 CT 가 판정한다: 그 몰의 회원 연결이 있는 고객 = 무시(회원 정보만 진실) ·
+   * 없는 고객 = 원천 시각 min(주문 시각, 받은 시각) · 고객 행은 만들 때와 NO 로 내릴 때만. 회원 쪽 동의 쓰기를 따로 부르지 않는다.
+   */
+  smsOptIn?: boolean;
+  /** ★ 1027 K2-1 — 그 몰의 회원 연결 식별자 모양(우커머스 wooMemberIdFormat). 없으면 비회원 꼴(guest: · order:)이 아닌 연결 = 회원 */
+  memberIdFormat?: MemberIdFormat;
   currency?: string;                        // 기본 KRW
   /**
    * 분류코드 (2026-09-18 · 설계서 docs/2026-09-18-mall-integration-user-scope-design.md §3-3)
@@ -59,6 +82,49 @@ export interface OrderResult {
   linkId: string;
   wasCustomerCreated: boolean;
   rfmUpdated: boolean;
+  /** ★ 1027 K1-6 — 옛 스냅숏이라 아무것도 쓰지 않음(웹훅 전달 = superseded) */
+  stale: boolean;
+}
+
+// ═══════════════════════════════════════════════════════════
+// ★ 2026-10-27 자사몰 대비 K1 — 결제 시각 · 스냅숏 시계 판정(한 함수씩 · 설계서 docs/2026-10-27-mall-integration-hardening-design.md)
+// ═══════════════════════════════════════════════════════════
+
+/** 결제 시각 = paidAt ?? orderedAt — 신규 기록 · 승격 · RFM 날짜가 이 함수만 쓴다(두 유입 순서의 occurred_at 이 같다 · R1) */
+export function orderPaidAt(input: Pick<OrderInput, 'paidAt' | 'orderedAt'>): string {
+  return input.paidAt ?? input.orderedAt;
+}
+
+/** 원천 시각 종류 — source = 원문이 수정 시각을 준다(우커머스) · received = 받은 시각뿐 */
+export type OrderSrcKind = 'source' | 'received';
+export function orderSrcKind(source: string): OrderSrcKind {
+  return source === 'woocommerce' ? 'source' : 'received';
+}
+
+const srcMs = (iso: string | null | undefined): number => {
+  const t = iso ? new Date(iso).getTime() : NaN;
+  return Number.isFinite(t) ? t : -Infinity;
+};
+
+/**
+ * 이 스냅숏을 쓸 것인가(I3 · K1-6). 3-A · 3-B · 3-C · 4단계 모든 갈래가 쓰기 전에 지난다.
+ *   - 들어온 src_at < 마지막 src_at = stale · 같으면 취소 · 환불만 apply(동률에서 취소가 이김) · 더 늦으면 apply
+ *   - 종결 규칙(먼저): 취소 · 환불을 본 주문(cancel_seen_at)의 결제 본문 = source 종류는 src_at > cancel_seen_at 일 때만 · received 종류는 0
+ */
+export function orderSnapshotVerdict(
+  last: { srcAt: string | null; cancelSeenAt: string | null } | null,
+  incoming: { srcAt: string; status: string; kind: OrderSrcKind },
+): 'apply' | 'stale' {
+  if (!last) return 'apply';
+  const inc = srcMs(incoming.srcAt);
+  const prev = srcMs(last.srcAt);
+  if (inc < prev) return 'stale';
+  if (inc === prev && !isCancelStatus(incoming.status)) return 'stale';
+  if (last.cancelSeenAt && isRevenueStatus(incoming.status)) {
+    if (incoming.kind === 'received') return 'stale';
+    if (!(inc > srcMs(last.cancelSeenAt))) return 'stale';
+  }
+  return 'apply';
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -102,6 +168,11 @@ export async function syncOrder(
   // ★ 2026-10-04 상태 글자는 앞뒤 공백·대소문자를 걷어 한 모양으로(매출 판정 CT-86 은 'paid'·'completed'·'cancelled'·'refunded' 정확 일치).
   //   옛: 자체호스팅·/order API 가 'PAID'·'Completed' 로 보내면 결제 주문의 매출이 0이었다. 저장되는 이벤트 status 도 이 값이다.
   input = { ...input, status: String(input.status ?? '').trim().toLowerCase() };
+  if (input.paidAt !== undefined && isNaN(new Date(input.paidAt).getTime())) {
+    throw new UserFacingError(400, 'CDP_INPUT', 'paidAt 형식이 올바르지 않습니다 (ISO datetime).');
+  }
+  // 스냅숏 원천 시각 — 비우면 지금(동기 API 호출의 받은 시각). 형식이 틀리면 받은 시각으로(판정만 쓰는 값 · 사건 시각 아님)
+  const srcAt = input.srcAt && !isNaN(new Date(input.srcAt).getTime()) ? new Date(input.srcAt).toISOString() : new Date().toISOString();
 
   // 1. customer + link 보장
   const identifyInput: IdentifyInput = {
@@ -112,6 +183,11 @@ export async function syncOrder(
     name: input.name,
     // ★ 2026-09-18: 분류코드가 있을 때만 키를 싣는다(생략 시 식별 입력 불변 = 계약 테스트 cdp-orders-store-code)
     ...(input.storeCode ? { storeCode: input.storeCode } : {}),
+    ...(input.memberIdFormat ? { memberIdFormat: input.memberIdFormat } : {}),
+    // ★ 1027 K2-1 — 주문 본문의 동의는 이 한 호출로(판정 = 식별 CT) · 원천 시각 = min(주문 시각, 받은 시각)
+    ...(input.smsOptIn !== undefined
+      ? { smsOptIn: input.smsOptIn, consentFromOrder: true, consentAt: new Date(Math.min(new Date(input.orderedAt).getTime(), new Date(srcAt).getTime())).toISOString() }
+      : {}),
   };
   const idResult = await identifyCustomer(companyId, identifyInput);
 
@@ -122,15 +198,14 @@ export async function syncOrder(
 
   // ★ 2026-09-26 한줄로 V2 R1-34 — 같은 주문의 웹훅은 한 줄로 선다(조회 → 판정 → 반영 사이 끼어들기 금지).
   //   옛: 둘이 동시에 오면 둘 다 기존 이벤트를 못 보고 둘 다 매출을 더할 수 있었다. PM2 fork 단일 프로세스 전제(공용 잠금 CT).
-  //   프로세스를 넘는 경합은 아래 표식 선점(조건부 UPDATE)이 막는다.
-  const rfmUpdated = await withKeyedLock('cdp-order', `${companyId}:${input.source}:${input.orderId}`, async () => {
-  // 2. 같은 order_id의 기존 purchase 이벤트 조회 — 매출 반영 여부는 CT-86 마커(revenue_applied)로 판정
-  //    (2026-06-10 정정: 이벤트 존재 = 무조건 중복이라 pending→paid 전환 매출이 영원히 빠지던 결함 +
-  //     cancelled/refunded 차감 미구현 결함을 함께 해소)
-  const existingRes = await query(
-    `SELECT id, properties FROM cdp_events
+  //   프로세스를 넘는 경합은 아래 조건부 UPDATE(표식 · src_at · cancel_seen_at 이 판정 때와 같을 때만)가 막는다.
+  // ★ 2026-10-27 자사몰 대비 K1-2 — 주문 사건 · 표식 · 고객 요약 = 한 트랜잭션(중간 종료 = 전부 롤백 · 재처리가 한 번 더함 · 옛 표식 되돌림 함수 삭제).
+  const outcome = await withKeyedLock('cdp-order', `${companyId}:${input.source}:${input.orderId}`, () => withTransaction(async (run): Promise<{ rfmUpdated: boolean; stale: boolean }> => {
+  // 2. 같은 order_id의 기존 주문 사건 조회 — 결제 전(order_placed)이든 결제(purchase)든 한 주문 한 행
+  const existingRes = await run(
+    `SELECT id, event_name, properties FROM cdp_events
      WHERE company_id = $1::uuid
-       AND event_name = 'purchase'
+       AND event_name IN ('purchase', 'order_placed')
        AND source = $2
        AND properties->>'order_id' = $3
      ORDER BY occurred_at ASC, id ASC
@@ -138,151 +213,147 @@ export async function syncOrder(
     [companyId, input.source, input.orderId]
   );
   const existing = existingRes.rows.length > 0 ? existingRes.rows[0] : null;
-  const decision = decideOrderRevenueAction(
-    existing ? { properties: existing.properties || null } : null,
-    input.status
+  const props: Record<string, any> = existing?.properties || {};
+  const lastSrcRaw = String(props.src_at ?? '');
+  const lastCancelRaw = String(props.cancel_seen_at ?? '');
+
+  // ★ 1027 K1-6 — 늦게 온 옛 스냅숏은 쓰지 않는다(상태 갱신 · 승격 · 매출 0 · 수신 = superseded)
+  const verdict = orderSnapshotVerdict(
+    existing ? { srcAt: lastSrcRaw || null, cancelSeenAt: lastCancelRaw || null } : null,
+    { srcAt, status: input.status, kind: orderSrcKind(input.source) },
   );
+  if (verdict === 'stale') return { rfmUpdated: false, stale: true };
 
-  // ★ 2026-09-26 한줄로 V2 R1-34 — **표식 먼저, 매출 나중.**
-  //   옛: 매출을 먼저 더하고 표식을 뒤에 남기며 그 실패를 삼켰다 → 표식이 없으면 같은 주문의 다음 웹훅이 다시 더했다.
-  //   표식 되돌림은 키 삭제가 아니라 명시 false다(키가 없으면 옛 데이터 호환 규칙이 "결제 상태 = 반영됨"으로 읽는다).
-  const releaseMarker = async (eventId: string | null | undefined, marker: 'revenue_applied' | 'revenue_reversed') => {
-    if (!eventId) {
-      console.error(`[CDP Orders] 매출 반영 실패 뒤 되돌릴 이벤트 id 없음(수동 확인) order=${input.orderId} marker=${marker}`);
-      return;
-    }
-    await query(
-      `UPDATE cdp_events
-       SET properties = COALESCE(properties, '{}'::jsonb) || jsonb_build_object('${marker}', false)
-       WHERE id = $1::uuid`,
-      [eventId]
-    ).catch((relErr: any) => {
-      console.error(`[CDP Orders] 매출 표식 되돌림 실패(재시도 시 누락 가능 · 수동 확인) event=${eventId} marker=${marker}:`, relErr?.message || relErr);
-    });
-  };
+  const decision = decideOrderRevenueAction(existing ? { properties: props } : null, input.status);
+  const cancel = isCancelStatus(input.status);
+  // 모르는 상태 표식 = 받아들인 쓰기마다 다시 쓴다(알려진 상태로 바뀌면 지운다 · 원문 글자 · 본 시각 · Codex 1R)
+  const extra = input.statusKnown === false
+    ? { status_known: false, status_raw: String(input.statusRaw ?? input.status).slice(0, 60), status_unknown_at: srcAt }
+    : {};
+  const UNKNOWN_KEYS = `- 'status_known' - 'status_raw' - 'status_unknown_at'`;
+  const paidAt = orderPaidAt(input);
+  // 판정에 쓴 값이 저장 때까지 같은가(다른 프로세스가 그 사이 바꿨으면 0행 = stale · R12)
+  const guard = (s: number, c: number) => `COALESCE(properties->>'src_at', '') = $${s} AND COALESCE(properties->>'cancel_seen_at', '') = $${c}`;
 
-  // 3-A. 결제 확정 — 매출 더하기 (마커 없는 주문만 1회)
+  // 3-A. 결제 확정 — 매출 더하기 (마커 없는 주문만 1회) · 결제 전 행이면 그 순간 purchase 로 승격(K1-2)
   if (decision.action === 'apply') {
-    let markedEventId: string | null = null;
     if (existing) {
-      // pending으로 먼저 기록됐던 이벤트 → 반영 표식 선점(이미 표식이 있으면 0행 = 더하지 않는다) + 확정 상태/금액 갱신
-      const claim = await query(
-        `UPDATE cdp_events
-         SET properties = COALESCE(properties, '{}'::jsonb)
-           || jsonb_build_object('revenue_applied', true, 'status', $2::text, 'total_amount', $3::numeric)
+      const claim = await run(
+        `UPDATE cdp_events SET
+           event_name = 'purchase',
+           occurred_at = CASE WHEN event_name = 'order_placed' THEN $5::timestamptz ELSE occurred_at END,
+           created_at = CASE WHEN event_name = 'order_placed' THEN NOW() ELSE created_at END,
+           properties = (COALESCE(properties, '{}'::jsonb) ${UNKNOWN_KEYS})
+             || jsonb_build_object('revenue_applied', true, 'status', $2::text, 'total_amount', $3::numeric, 'src_at', $4::text)
+             || CASE WHEN event_name = 'order_placed' THEN jsonb_build_object('first_arrived_at', created_at) ELSE '{}'::jsonb END
+             || $8::jsonb
          WHERE id = $1::uuid
            AND COALESCE(properties->>'revenue_applied', '') <> 'true'
            AND COALESCE(properties->>'revenue_reversed', '') <> 'true'
+           AND ${guard(6, 7)}
          RETURNING id`,
-        [existing.id, input.status, input.totalAmount]
+        [existing.id, input.status, input.totalAmount, srcAt, paidAt, lastSrcRaw, lastCancelRaw, JSON.stringify(extra)]
       );
-      if (claim.rows.length === 0) return false;
-      markedEventId = String(existing.id);
+      if (claim.rows.length === 0) return { rfmUpdated: false, stale: true };
     } else {
-      // 새 주문 — 표식을 실은 이벤트 기록이 먼저다. 실패하면 매출을 더하지 않고 오류를 올린다(웹훅 재시도).
-      const tracked = await trackEvent(companyId, {
+      await trackOrderEvent(run, companyId, {
+        name: 'purchase',
         source: input.source,
-        eventName: 'purchase',
-        externalId: input.externalId,
-        properties: purchaseEventProperties(input, { revenue_applied: true }),
-        occurredAt: input.orderedAt,
+        identityLinkId: idResult.linkId,
+        customerId: idResult.customerId,
+        properties: purchaseEventProperties(input, { revenue_applied: true, src_at: srcAt, ...extra }),
+        occurredAt: paidAt,
       });
-      markedEventId = tracked?.eventId || null;
     }
-    const orderedDate = new Date(input.orderedAt);
-    try {
-      // ★ 2026-10-04 최근 구매 금액·마지막 구매일은 이 주문이 기존 최근 구매보다 늦거나 같을 때만 바꾼다(최근 구매일은 원래 GREATEST).
-      //   옛: 무조건 이번 주문 값이라, 옛 주문이 나중에 처리되면(백필 · 지연 웹훅) 날짜는 새 값인데 금액·마지막 구매일은 옛 값이 됐다.
-      //   SET 의 오른쪽은 모두 갱신 전 값을 본다(recent_purchase_date 비교가 이 문장의 GREATEST 결과에 영향받지 않는다).
-      await query(
-        `UPDATE customers SET
-          total_purchase_amount = COALESCE(total_purchase_amount, 0) + $2,
-          total_purchase = COALESCE(total_purchase, 0) + $2,
-          purchase_count = COALESCE(purchase_count, 0) + 1,
-          recent_purchase_date = GREATEST(COALESCE(recent_purchase_date, $3::date), $3::date),
-          recent_purchase_amount = CASE WHEN recent_purchase_date IS NULL OR $3::date >= recent_purchase_date THEN $2 ELSE recent_purchase_amount END,
-          last_purchase_date = CASE WHEN COALESCE(last_purchase_date, '') = '' OR TO_CHAR($3::date, 'YYYY-MM-DD') >= last_purchase_date
-                                    THEN TO_CHAR($3::date, 'YYYY-MM-DD') ELSE last_purchase_date END,
-          avg_order_value = (COALESCE(total_purchase_amount, 0) + $2) / GREATEST(COALESCE(purchase_count, 0) + 1, 1),
-          updated_at = NOW()
-        WHERE id = $1::uuid`,
-        [idResult.customerId, input.totalAmount, orderedDate]
-      );
-    } catch (rfmErr) {
-      await releaseMarker(markedEventId, 'revenue_applied');
-      throw rfmErr;
-    }
-    return true;
+    // ★ 2026-10-04 최근 구매 금액·마지막 구매일은 이 주문이 기존 최근 구매보다 늦거나 같을 때만 바꾼다(최근 구매일은 원래 GREATEST).
+    //   옛: 무조건 이번 주문 값이라, 옛 주문이 나중에 처리되면(백필 · 지연 웹훅) 날짜는 새 값인데 금액·마지막 구매일은 옛 값이 됐다.
+    //   SET 의 오른쪽은 모두 갱신 전 값을 본다(recent_purchase_date 비교가 이 문장의 GREATEST 결과에 영향받지 않는다).
+    // ★ 1027 K1-4 — 날짜 = 결제 시각의 KST 날짜(글자 · R16)
+    const paidDay = kstDateKey(new Date(paidAt));
+    await run(
+      `UPDATE customers SET
+        total_purchase_amount = COALESCE(total_purchase_amount, 0) + $2,
+        total_purchase = COALESCE(total_purchase, 0) + $2,
+        purchase_count = COALESCE(purchase_count, 0) + 1,
+        recent_purchase_date = GREATEST(COALESCE(recent_purchase_date, $3::date), $3::date),
+        recent_purchase_amount = CASE WHEN recent_purchase_date IS NULL OR $3::date >= recent_purchase_date THEN $2 ELSE recent_purchase_amount END,
+        last_purchase_date = CASE WHEN COALESCE(last_purchase_date, '') = '' OR TO_CHAR($3::date, 'YYYY-MM-DD') >= last_purchase_date
+                                  THEN TO_CHAR($3::date, 'YYYY-MM-DD') ELSE last_purchase_date END,
+        avg_order_value = (COALESCE(total_purchase_amount, 0) + $2) / GREATEST(COALESCE(purchase_count, 0) + 1, 1),
+        updated_at = NOW()
+      WHERE id = $1::uuid`,
+      [idResult.customerId, input.totalAmount, paidDay]
+    );
+    return { rfmUpdated: true, stale: false };
   }
 
-  // 3-B. 취소/환불 — 반영된 주문만 1회 차감 (차감액 = 반영 시점 기록 금액)
+  // 3-B. 취소/환불 — 반영된 주문만 1회 차감 (차감액 = 반영 시점 기록 금액) · 취소를 본 시각을 남긴다(지우지 않음 · K1-6 종결 규칙)
   if (decision.action === 'reverse') {
-    if (!existing) return false;
-    // 차감 표식 선점(이미 차감됐으면 0행 = 빼지 않는다)
-    const claim = await query(
+    if (!existing) return { rfmUpdated: false, stale: false };
+    const claim = await run(
       `UPDATE cdp_events
-       SET properties = COALESCE(properties, '{}'::jsonb)
-         || jsonb_build_object('revenue_reversed', true, 'status', $2::text)
+       SET properties = (COALESCE(properties, '{}'::jsonb) ${UNKNOWN_KEYS})
+         || jsonb_build_object('revenue_reversed', true, 'status', $2::text, 'src_at', $3::text)
+         || CASE WHEN properties ? 'cancel_seen_at' THEN '{}'::jsonb ELSE jsonb_build_object('cancel_seen_at', $3::text) END
+         || $6::jsonb
        WHERE id = $1::uuid
          AND COALESCE(properties->>'revenue_reversed', '') <> 'true'
+         AND ${guard(4, 5)}
        RETURNING id`,
-      [existing.id, input.status]
+      [existing.id, input.status, srcAt, lastSrcRaw, lastCancelRaw, JSON.stringify(extra)]
     );
-    if (claim.rows.length === 0) return false;
+    if (claim.rows.length === 0) return { rfmUpdated: false, stale: true };
     const reverseAmount = decision.reverseAmount ?? input.totalAmount;
-    try {
-      await query(
-        `UPDATE customers SET
-          total_purchase_amount = GREATEST(COALESCE(total_purchase_amount, 0) - $2, 0),
-          total_purchase = GREATEST(COALESCE(total_purchase, 0) - $2, 0),
-          purchase_count = GREATEST(COALESCE(purchase_count, 0) - 1, 0),
-          avg_order_value = CASE
-            WHEN COALESCE(purchase_count, 0) - 1 > 0
-              THEN GREATEST(COALESCE(total_purchase_amount, 0) - $2, 0) / (COALESCE(purchase_count, 0) - 1)
-            ELSE 0
-          END,
-          updated_at = NOW()
-        WHERE id = $1::uuid`,
-        [idResult.customerId, reverseAmount]
-      );
-    } catch (rfmErr) {
-      await releaseMarker(String(existing.id), 'revenue_reversed');
-      throw rfmErr;
-    }
-    return true;
-  }
-
-  // 3-C. 매출 변화 없는 상태 갱신 (pending→shipping 등) — 이벤트 status만 추적
-  if (existing) {
-    await query(
-      `UPDATE cdp_events
-       SET properties = COALESCE(properties, '{}'::jsonb) || jsonb_build_object('status', $2::text)
-       WHERE id = $1::uuid`,
-      [existing.id, input.status]
+    await run(
+      `UPDATE customers SET
+        total_purchase_amount = GREATEST(COALESCE(total_purchase_amount, 0) - $2, 0),
+        total_purchase = GREATEST(COALESCE(total_purchase, 0) - $2, 0),
+        purchase_count = GREATEST(COALESCE(purchase_count, 0) - 1, 0),
+        avg_order_value = CASE
+          WHEN COALESCE(purchase_count, 0) - 1 > 0
+            THEN GREATEST(COALESCE(total_purchase_amount, 0) - $2, 0) / (COALESCE(purchase_count, 0) - 1)
+          ELSE 0
+        END,
+        updated_at = NOW()
+      WHERE id = $1::uuid`,
+      [idResult.customerId, reverseAmount]
     );
-    return false;
+    return { rfmUpdated: true, stale: false };
   }
 
-  // 4. 기존 이벤트가 없으면 'purchase' 이벤트 신규 기록 (trigger campaign용 · 매출 변화 없는 호출)
-  try {
-    await trackEvent(companyId, {
-      source: input.source,
-      eventName: 'purchase',
-      externalId: input.externalId,
-      properties: purchaseEventProperties(input, {}),
-      occurredAt: input.orderedAt,
-    });
-  } catch (eventErr) {
-    console.warn('[CDP Orders] purchase 이벤트 기록 실패 (매출 변화 없는 호출):', eventErr);
+  // 3-C. 매출 변화 없는 상태 갱신 (pending→shipping 등) — 이벤트 status만 추적 · 취소 · 환불을 처음 본 시각 기록
+  if (existing) {
+    const upd = await run(
+      `UPDATE cdp_events
+       SET properties = (COALESCE(properties, '{}'::jsonb) ${UNKNOWN_KEYS}) || jsonb_build_object('status', $2::text, 'src_at', $3::text)
+         || CASE WHEN $4::boolean AND NOT (properties ? 'cancel_seen_at') THEN jsonb_build_object('cancel_seen_at', $3::text) ELSE '{}'::jsonb END
+         || $7::jsonb
+       WHERE id = $1::uuid
+         AND ${guard(5, 6)}
+       RETURNING id`,
+      [existing.id, input.status, srcAt, cancel, lastSrcRaw, lastCancelRaw, JSON.stringify(extra)]
+    );
+    return { rfmUpdated: false, stale: upd.rows.length === 0 };
   }
-  return false;
+
+  // 4. 처음 본 주문인데 매출 변화가 없다(결제 전 · 결제 실패 · 취소 먼저) = order_placed(★ 1027 K1-1 · 구매 사건 아님 · 결제되는 순간 3-A 가 승격)
+  await trackOrderEvent(run, companyId, {
+    name: 'order_placed',
+    source: input.source,
+    identityLinkId: idResult.linkId,
+    customerId: idResult.customerId,
+    properties: purchaseEventProperties(input, { src_at: srcAt, ...(cancel ? { cancel_seen_at: srcAt } : {}), ...extra }),
+    occurredAt: input.orderedAt,
   });
+  return { rfmUpdated: false, stale: false };
+  }));
 
   return {
     customerId: idResult.customerId,
     linkId: idResult.linkId,
     wasCustomerCreated: idResult.wasCreated,
-    rfmUpdated,
+    rfmUpdated: outcome.rfmUpdated,
+    stale: outcome.stale,
   };
 }
 

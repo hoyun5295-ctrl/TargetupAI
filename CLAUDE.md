@@ -46,7 +46,7 @@
 
     <RULE id="no_system_modification">
       AI는 코드 수정과 검증을 맡는다. push · 배포 · 서버 설정은 Harold님이 실행하고, AI는 단계마다 명령 하나씩 안내한다.
-      [절대 금지] git 직접 실행, 서버 SSH 접속(`ssh administrator@...`), `.env` 비밀번호 열람, `sudo` 명령어 안내, `tp-deploy-full` 명령어 실행 및 안내 (빌드는 오직 `atomic safe-build` = `npm run build:safe`만 허용)
+      [절대 금지] git 직접 실행(예외 = 읽기 전용 `git log` · `git merge-base` · `git --no-optional-locks status` 세 명령 · ★1027 Harold 승인 · 배포 원장 계산용 · 그 밖의 git 은 그대로 금지), 서버 SSH 접속(`ssh administrator@...`), `.env` 비밀번호 열람, `sudo` 명령어 안내, `tp-deploy-full` 명령어 실행 및 안내 (빌드는 오직 `atomic safe-build` = `npm run build:safe`만 허용)
     </RULE>
 
     <RULE id="no_source_read_without_permission">
@@ -148,6 +148,7 @@
       (테이블 신규는 `information_schema.tables`) ②실제 존재를 확인받은 뒤에만 코드를 쓴다.
       SCHEMA.md는 참조용일 뿐 — 존재 확정은 `information_schema`로만. JOIN이면 대상 테이블·컬럼·FK 컬럼 3개 모두.
       [절대 금지] 미검증 상태로 SQL을 쓰고 "tsc 통과했으니 OK" 보고.
+      [덤프 확인 · ★1027 Harold 승인] 운영과 정의 해시가 같다고 마지막으로 대조된 덤프에 그 뒤 닫힌 DDL(배포 원장 §2)을 모두 얹은 시험 DB(`t_tpl_closed`)가 있으면 그 information_schema 조회를 ①의 확인으로 친다(조회 출력과 test:pg 보고 줄을 보고에 붙인다). 대조 기록이 없거나 다르면 원래대로. 분포 · 행 수는 언제나 Harold님 실행.
     </RULE>
 
     <RULE id="scope_discipline_one_ticket_axis" priority="HIGH">

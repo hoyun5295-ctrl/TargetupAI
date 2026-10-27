@@ -22,6 +22,7 @@ import { buildJourneySafetyFilter, buildReentryAntiJoin } from './journey-safety
 import type { JourneyConsent } from './mall-consent';
 import { resolvePointsExpiringConfig, clampInt } from './journey-points-trigger';
 import { buildLedgerAntiJoin, hasBaseline } from './journey-entry-ledger';
+import { orderAttemptSql } from './journey-purchase-ledger';
 // ★ 2026-08-01 여정 재설계 §3-0-2 — "우리가 처음 본 사람" ≠ "신규 고객".
 //   추출은 회사 능력을 조회하지 않는다(Codex 3R). 술어는 데이터로만 평가되고,
 //   "판정 가능한가" 게이트는 발송 진입 경로(journey-trigger-watcher)가 소유한다.
@@ -185,7 +186,7 @@ export async function selectJourneyTargetCustomerIds(
            SELECT 1 FROM cdp_events e2
            WHERE e2.company_id = $1::uuid
              AND e2.customer_id = a.customer_id
-             AND e2.event_name IN ('checkout_start', 'purchase')
+             AND (e2.event_name = 'checkout_start' OR ${orderAttemptSql('e2')})   -- ★ 1027 K1-9 결제 전 주문도 주문 시도
              AND e2.occurred_at > a.cart_add_at
          )
            -- ★ 2026-08-01 §11-4: 매장(싱크)에서 산 사람에게 장바구니 리마인드를 보내지 않는다.
@@ -231,7 +232,7 @@ export async function selectJourneyTargetCustomerIds(
          WHERE NOT EXISTS (
            SELECT 1 FROM cdp_events e2
            WHERE e2.company_id = $1::uuid AND e2.customer_id = v.customer_id
-             AND e2.event_name = 'purchase' AND e2.occurred_at > v.viewed_at
+             AND ${orderAttemptSql('e2')} AND e2.occurred_at > v.viewed_at   -- ★ 1027 K1-9 결제 전 주문도 주문 시도
          )
            AND NOT EXISTS (
              SELECT 1 FROM purchases p2
@@ -656,6 +657,18 @@ export interface CdpCursorQuery {
   axis: 'created_at' | 'occurred_at';
 }
 
+/**
+ * ★ 2026-10-27 자사몰 대비 K1-2 — 그 사건 id 로 이 여정 계보에 이미 트리거 진입했는가(EXISTS 조각).
+ *   사건 행 단계(selectCdpEventRowsForCursor) · 잠금 안 다시 보기(journey-trigger-watcher 진입 반복문) 두 겹이 같은 조각을 쓴다.
+ *   진입 표식 = 트리거 진입 반복문이 남기는 entry_event_properties.__entry = { src: 'trigger', key: 사건 id }(0929 부터).
+ */
+export function triggerEntryUsedSql(lineageRef: string, customerRef: string, keyRef: string): string {
+  return `EXISTS (SELECT 1 FROM journey_executions tu
+                   WHERE tu.journey_id = ANY(${lineageRef}::uuid[]) AND tu.customer_id = ${customerRef}
+                     AND tu.entry_event_properties->'__entry'->>'src' = 'trigger'
+                     AND tu.entry_event_properties->'__entry'->>'key' = ${keyRef})`;
+}
+
 export async function selectCdpEventRowsForCursor(
   companyId: string,
   eventName: string,
@@ -666,6 +679,8 @@ export async function selectCdpEventRowsForCursor(
   chunkLimit: number,
   scopeSql = '',   // ★ 2026-09-27 S5-04 — 커서 창 안에서 거른다(범위 밖 행은 커서가 지나가며 소비된다)
   consent?: JourneyConsent,   // ★ 2026-10-02 수신동의 조각(mall-consent journeyOwnerConsent · 없으면 고객 행)
+  /** ★ 1027 K1-2 — 이 여정 계보(있으면 그 계보에서 이미 진입에 쓰인 사건 행을 뺀다 · 승격으로 커서를 다시 지나는 사건) */
+  entryLineage?: string[],
 ): Promise<CdpEventRow[]> {
   // 축은 화이트리스트 두 값뿐 — 문자열이 그대로 SQL에 들어가므로 여기서 닫는다(주입 표면 0).
   const axis = cursor.axis === 'created_at' ? 'created_at' : 'occurred_at';
@@ -678,6 +693,11 @@ export async function selectCdpEventRowsForCursor(
     cursorClause = `e.${axis} > $3::timestamptz`;
   }
   const cond = applyCustomerConditions(filters.customer_conditions || [], filters.logic || 'AND', params, consent);
+  let usedClause = '';
+  if (entryLineage && entryLineage.length > 0) {
+    params.push(entryLineage);
+    usedClause = `AND NOT ${triggerEntryUsedSql(`$${params.length}`, 'e.customer_id', 'e.id::text')}`;
+  }
   params.push(String(chunkLimit));
   const r = await query(
     `SELECT e.id, e.customer_id, e.created_at, e.occurred_at,
@@ -692,6 +712,7 @@ export async function selectCdpEventRowsForCursor(
        AND e.occurred_at >= NOW() - ($5 || ' hours')::interval
        AND ${buildJourneySafetyFilter('c', consent?.isTrue)}${scopeSql}
        ${cond ? ` AND ${cond}` : ''}
+       ${usedClause}
      ORDER BY e.${axis} ASC, e.id ASC
      LIMIT $${params.length}::int`,
     params,

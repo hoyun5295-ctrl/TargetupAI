@@ -97,6 +97,7 @@ export default function JourneyStartCard({ journey, triggerLabel, form, setField
             <span>{timing.before}</span>
             <NumField label={timing.before} value={form[timing.key]} onChange={(v) => setField(timing.key, v ?? timing.def)} unit="" min={timing.min} max={timing.max} disabled={locked} />
             <span>{timing.after}</span>
+            {timing.note && <span className="basis-full text-[12px] text-slate-500">{timing.note}</span>}
           </div>
         )}
         {te === 'customer.points_expiring' && (

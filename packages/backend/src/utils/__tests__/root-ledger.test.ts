@@ -2810,3 +2810,177 @@ describe('R11 넓힘(1027) — 화면이 HTML 을 그리는 iframe(srcDoc)은 sa
     expect(all.filter(unsafe).map((x) => `${x.f}:${x.line} sandbox=${x.sandbox}`)).toEqual([]);
   });
 });
+
+// ── ★ 2026-10-27 자사몰 대비 묶음 0 · A(설계서 docs/2026-10-27-mall-integration-hardening-design.md §6) ─────────────
+/** 백엔드 운영 소스 전수(utils · routes · services · workers · config · app.ts) — 대상은 여기서 뽑는다 */
+const MALL_SRC_DIRS = ['utils', 'routes', 'services', 'workers', 'config'];
+function backendSources(): Array<{ rel: string; text: string }> {
+  const out: Array<{ rel: string; text: string }> = [];
+  for (const dir of MALL_SRC_DIRS) {
+    for (const f of sourceFiles(join(BE, dir), /\.ts$/)) out.push({ rel: `${dir}/${f}`, text: be(`${dir}/${f}`) });
+  }
+  out.push({ rel: 'app.ts', text: be('app.ts') });
+  return out;
+}
+/** 이름이 name 인 부르기(구문 트리 · 정의 제외)마다 [파일 · 줄 · 인자 수] */
+function callSitesOf(name: string): Array<{ at: string; args: number }> {
+  const out: Array<{ at: string; args: number }> = [];
+  for (const { rel, text } of backendSources()) {
+    if (!text.includes(`${name}(`)) continue;
+    const sf = ts.createSourceFile(rel, text, ts.ScriptTarget.Latest, true);
+    const visit = (n: ts.Node) => {
+      if (ts.isCallExpression(n)) {
+        const e = n.expression;
+        const nm = ts.isIdentifier(e) ? e.text : ts.isPropertyAccessExpression(e) ? e.name.text : '';
+        if (nm === name) out.push({ at: `${rel}:${sf.getLineAndCharacterOfPosition(n.getStart()).line + 1}`, args: n.arguments.length });
+      }
+      ts.forEachChild(n, visit);
+    };
+    visit(sf);
+  }
+  return out;
+}
+/** 글자 조각(SQL · 이름 글자)이 들어 있는 파일 */
+const filesWith = (needle: string | RegExp) => backendSources()
+  .filter(({ text }) => (typeof needle === 'string' ? stripComments(text).includes(needle) : needle.test(stripComments(text))))
+  .map(({ rel }) => rel).sort();
+
+describe('R22 신설(1027) 구매 사건 = 결제 확정 — 주문 사건 이름 · 매출 표식 판정 · 시각은 주문 CT 한 곳', () => {
+  it('주문 사건 쓰기 길(trackOrderEvent)을 부르는 파일 = cdp-orders.ts 하나', () => {
+    expect(callSitesOf('trackOrderEvent').map((c) => c.at.split(':')[0]).filter((f, i, a) => a.indexOf(f) === i)).toEqual(['utils/cdp-orders.ts']);
+  });
+  it('order_placed 를 쓰거나 읽는 파일 = 주문 CT · 사건 쓰기 · 원장 문(주문 시도) · 고객 360 라벨(K1-9 목록)', () => {
+    expect(filesWith("'order_placed'")).toEqual(['utils/cdp-events.ts', 'utils/cdp-orders.ts', 'utils/journey-purchase-ledger.ts', 'utils/mall-integration-monitor.ts']);
+    expect(stripComments(be('utils/customer-timeline.ts'))).toContain("order_placed: '주문 · 결제 전'");
+  });
+  it('일반 사건 길(trackEvent)로 purchase 를 쓰는 곳 0 · 예약 이름 표가 서버 /event · 브라우저 둘 다에 걸린다', () => {
+    expect(filesWith(/eventName:\s*'purchase'/)).toEqual([]);
+    const ev = stripComments(be('utils/cdp-events.ts'));
+    const track = ev.slice(ev.indexOf('export async function trackEvent('), ev.indexOf('const eventNameCheck = validateEventName(input.eventName);'));
+    expect(track).toContain('RESERVED_EVENT_RENAME[input.eventName]');
+    expect(ev).toContain('const eventName = RESERVED_EVENT_RENAME[rawName] || rawName;');
+    expect(ev).not.toContain('BROWSER_EVENT_RENAME');
+  });
+  it('매출 반영 판정 조각(표식 jsonb 비교) = cdp-order-revenue.ts 하나 · 구매이력 · 자동마케팅 성과 · 플래너 대상이 부른다', () => {
+    expect(filesWith("'revenue_applied' = 'true'::jsonb")).toEqual(['utils/cdp-order-revenue.ts']);
+    for (const f of ['utils/purchase-history-source.ts', 'utils/automarketing-roi.ts', 'utils/planner-audience.ts']) {
+      expect(stripComments(be(f)), f).toMatch(/netPurchaseSql\('(e|pb)'\)/);
+    }
+  });
+  it('어댑터 웹훅 처리의 시각 대체 = 받은 시각(ctx.observedAt) · NOW 대체 0(K1-3 전수 목록 자리)', () => {
+    for (const f of ['utils/cafe24-client.ts', 'utils/imweb-client.ts', 'utils/custom-self-hosted-adapter.ts', 'utils/naver-commerce-client.ts']) {
+      const t = stripComments(be(f));
+      const body = t.slice(t.indexOf('processWebhookEvent('));
+      expect((body.match(/\|\| new Date\(\)\.toISOString\(\)/g) || []).length, f).toBe(0);
+    }
+  });
+  it('취소를 본 시각(cancel_seen_at)을 지우는 SQL 0 · 결제 시각 계산(paidAt ??) = orderPaidAt 하나', () => {
+    expect(filesWith("- 'cancel_seen_at'")).toEqual([]);
+    expect(backendSources().flatMap(({ rel, text }) => (stripComments(text).match(/paidAt \?\? [\w.]*orderedAt/g) || []).map(() => rel))).toEqual(['utils/cdp-orders.ts']);
+  });
+  it('주문 사건의 상태 · 이름 · 표식을 바꾸는 UPDATE = 판정 뒤에만 · 그 WHERE 에 판정 때 src_at · cancel_seen_at(R12)', () => {
+    const o = stripComments(be('utils/cdp-orders.ts'));
+    const ups = Array.from(o.matchAll(/`UPDATE cdp_events[\s\S]*?`/g)).map((m) => m[0]);
+    expect(ups.length).toBeGreaterThanOrEqual(3);
+    for (const u of ups) expect(u, u.slice(0, 80)).toContain('${guard(');
+    expect(o.indexOf("if (verdict === 'stale') return")).toBeLessThan(o.indexOf('`UPDATE cdp_events'));
+  });
+});
+
+describe('R18 넓힘(1027) 값의 시계 — 동의 쓰기 · 웹훅 처리에 원천 시각 · NOW 동의 일자 0', () => {
+  it('동의 쓰기 부르기마다 시각 인자(소속 행 · 공란 규칙 · 탈퇴) · 웹훅 처리 부르기마다 수신 맥락(ctx)', () => {
+    const short = (name: string, need: number) => callSitesOf(name).filter((c) => c.args < need).map((c) => `${c.at} (${c.args})`);
+    expect(short('upsertStoreConsent', 6)).toEqual([]);
+    expect(short('applyMissingConsentRule', 5)).toEqual([]);
+    expect(short('withdrawMemberConsent', 4)).toEqual([]);
+    expect(short('processWebhookEvent', 4)).toEqual([]);
+    expect(callSitesOf('processWebhookEvent').map((c) => c.at.split(':')[0])).toEqual(['utils/cdp-webhook-delivery.ts']);
+  });
+  it('동의 쓰기 문장에 consent_at = NOW() 0 · 소속 행 · 고객 행 쓰기는 같은 시계 조각(consentClockSql)을 지난다', () => {
+    for (const f of ['utils/mall-consent.ts', 'utils/cdp-identity.ts']) expect(stripComments(be(f)), f).not.toMatch(/consent_at = NOW\(\)|consent_source, NOW\(\)|\$5, NOW\(\)/);
+    const mc = stripComments(be('utils/mall-consent.ts'));
+    for (const fn of ['export async function upsertStoreConsent(', 'export async function applyMissingConsentRule(']) {
+      const body = mc.slice(mc.indexOf(fn), mc.indexOf('\n}\n', mc.indexOf(fn)));
+      expect(body, fn).toContain('consentClockSql(');
+      expect(body, fn).toContain('isConsentClockMissing(err)');
+    }
+    const id = stripComments(be('utils/cdp-identity.ts'));
+    expect(id).not.toMatch(/sms_opt_in = COALESCE\(\$\d+::boolean, (customers\.)?sms_opt_in\)/);
+    expect((id.match(/runConsentClocked\('customers'/g) || []).length).toBeGreaterThanOrEqual(3);
+  });
+});
+
+describe('R7 넓힘(1027) 연동 행 저장 = 회사 모드 잠금을 같은 트랜잭션에서 먼저(분류코드 모드 판정 · I15)', () => {
+  it('INSERT INTO company_integrations 를 쓰는 함수마다 모드 문(saveIntegrationRowGuarded · guardIntegrationMode)을 지난다', () => {
+    const bad: string[] = [];
+    let found = 0;
+    for (const { rel, text } of backendSources()) {
+      if (!text.includes('INSERT INTO company_integrations')) continue;
+      const sf = ts.createSourceFile(rel, text, ts.ScriptTarget.Latest, true);
+      const visit = (n: ts.Node) => {
+        if ((ts.isNoSubstitutionTemplateLiteral(n) || ts.isTemplateExpression(n)) && n.getText().includes('INSERT INTO company_integrations')) {
+          found++;
+          // 감싼 함수(이름 있는 함수 · 화살표 · 메서드)를 바깥으로 거슬러 오르며 하나라도 모드 문을 INSERT 앞에 품으면 통과
+          let ok = false;
+          for (let fn: ts.Node | undefined = n.parent; fn && !ok; fn = fn.parent) {
+            if (!(ts.isFunctionDeclaration(fn) || ts.isMethodDeclaration(fn) || ts.isArrowFunction(fn) || ts.isFunctionExpression(fn) || ts.isCallExpression(fn))) continue;
+            const body = fn.getText();
+            ok = /saveIntegrationRowGuarded\(/.test(body)
+              || (body.includes('guardIntegrationMode(') && body.indexOf('guardIntegrationMode(') < body.indexOf('INSERT INTO company_integrations'));
+          }
+          if (!ok) bad.push(`${rel}:${sf.getLineAndCharacterOfPosition(n.getStart()).line + 1}`);
+        }
+        ts.forEachChild(n, visit);
+      };
+      visit(sf);
+    }
+    expect(found).toBeGreaterThanOrEqual(8);   // 저장 함수 8곳(카페24 2 · 아임웹 · 고도몰 · 메이크샵 · 네이버 · 우커머스 · 자체호스팅)
+    expect(bad).toEqual([]);
+  });
+  it('모드 판정 · 잠금 · 분류코드 정하기 정의 = integration-scope.ts 하나(라우트 안 0)', () => {
+    for (const name of ['assertStoreCodeMode', 'lockCompanyIntegrationMode', 'guardIntegrationMode', 'decideStoreCode']) {
+      expect(filesWith(new RegExp(`function ${name}\\(`)), name).toEqual(['utils/integration-scope.ts']);
+    }
+  });
+});
+
+describe('R1 넓힘(1027) 자사몰 대비 — 새 CT 마다 밖 0', () => {
+  it('SSRF 판정 정의(isPrivateIp · resolvePublicAddress · pinnedLookup) = outbound-guard 하나 · 몰 서버 호출(우커머스)이 지난다', () => {
+    // geo-access.ts 의 같은 이름 함수 = 로그인 · 기계 출발지의 클라이언트 IP 분류(밖으로 나가는 요청 판정 아님 · 사유)
+    const EXEMPT = new Set(['utils/geo-access.ts']);
+    for (const name of ['isPrivateIp', 'resolvePublicAddress', 'pinnedLookup']) {
+      expect(filesWith(new RegExp(`function ${name}\\(`)).filter((f) => !EXEMPT.has(f)), name).toEqual(['utils/outbound-guard.ts']);
+    }
+    const w = stripComments(be('utils/woocommerce-client.ts'));
+    const http = w.slice(w.indexOf('async function wooHttp('), w.indexOf('function wooEnsureOk('));
+    expect(http).toContain('assertOutboundUrl(url);');
+    expect(http).toContain('...OUTBOUND_AXIOS_GUARD,');
+  });
+  it('웹훅 전달 행 기록 = 공용 수신 CT 하나(OAuth 상태 저장 문장은 대상 밖 · 사유 = 같은 표를 쓰는 1회용 행)', () => {
+    const bad = backendSources().filter(({ rel }) => rel !== 'utils/cdp-webhook-delivery.ts').flatMap(({ rel, text }) =>
+      Array.from(stripComments(text).matchAll(/`INSERT INTO cdp_webhook_deliveries[\s\S]*?`/g)).filter((m) => !m[0].includes("'oauth_state'")).map(() => rel));
+    expect(bad).toEqual([]);
+  });
+  it('처리할 전달 행을 고르는 문장(재시도 횟수 판정) = claimDeliveries 하나 · 수신 줄 · 재처리 워커가 같은 처리 함수', () => {
+    expect(filesWith(/cdp_webhook_deliveries[\s\S]{0,600}retry_count < \$1/)).toEqual(['utils/cdp-webhook-delivery.ts']);
+    expect(stripComments(be('utils/cdp-webhook-retry-worker.ts'))).toContain('await processClaimedDelivery(row, true)');
+    expect(stripComments(be('utils/cdp-webhook-retry-worker.ts'))).not.toMatch(/created_at > NOW\(\) - INTERVAL '7 days'/);
+  });
+  it('연동 문제 분류 = integrationProblemOf 하나(감시 표가 부른다)', () => {
+    expect(filesWith(/function integrationProblemOf\(/)).toEqual(['utils/integration-problem.ts']);
+    expect(stripComments(be('utils/mall-integration-monitor.ts'))).toContain('integrationProblemOf(provider, r.status, errorCode)');
+  });
+});
+
+describe('I14(1027) 백엔드 프로세스 1개 전제 — 메모리 잠금 · 수신 줄이 기대는 값', () => {
+  it('ecosystem.config.js 두 앱(targetup-backend · outreach-render) = instances 1 · fork', () => {
+    const eco = read(join(BE, '..', '..', '..', 'ecosystem.config.js'));
+    for (const name of ['targetup-backend', 'outreach-render']) {
+      const i = eco.indexOf(`name: '${name}'`);
+      expect(i, name).toBeGreaterThan(-1);
+      const block = eco.slice(i, eco.indexOf('\n    }', i));
+      expect(block, name).toMatch(/instances: 1,/);
+      expect(block, name).toMatch(/exec_mode: 'fork',/);
+    }
+  });
+});

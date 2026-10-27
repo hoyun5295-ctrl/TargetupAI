@@ -16,6 +16,7 @@
  *   ↔ 진입점(assembleProposalEmail = 조립 + 렌더 + 평문 + placeholder 합산).
  */
 import { UserFacingError } from './http-error';
+import { isPrivateIp } from './outbound-guard';
 import { extractJsonFromAiText, aiStr } from './ai-json';   // ★ 2026-09-30 WP4 AI 응답 JSON 파싱 = CT(문자열 안 제어문자 복구) · ★ 2026-10-26 S8 칸 = aiStr
 import * as fs from 'fs';
 import * as net from 'net';
@@ -212,23 +213,7 @@ export const OUTREACH_PREVIEW_DAYS = 30;
 
 // ===== 이미지 수급 (SSRF 가드 fetch — H8) =====
 
-function isPrivateIp(ip: string): boolean {
-  // IPv4-mapped IPv6(::ffff:x.y.z.w)는 IPv4로 환원해 같은 판정기를 태운다 — prefix 몇 개만 나열하면
-  // ::ffff:169.254.* 등 누락 범위가 그대로 통과한다(Codex 1R high).
-  const mapped = ip.toLowerCase().match(/^::ffff:(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})$/);
-  if (mapped) return isPrivateIp(mapped[1]);
-  if (net.isIPv4(ip)) {
-    const [a, b] = ip.split('.').map(Number);
-    if (a === 10 || a === 127 || a === 0) return true;
-    if (a === 169 && b === 254) return true;
-    if (a === 172 && b >= 16 && b <= 31) return true;
-    if (a === 192 && b === 168) return true;
-    if (a === 100 && b >= 64 && b <= 127) return true;
-    return false;
-  }
-  const low = ip.toLowerCase();
-  return low === '::1' || low.startsWith('fc') || low.startsWith('fd') || low.startsWith('fe80');
-}
+// 사설 · 예약 IP 판정 = utils/outbound-guard.ts isPrivateIp 한 곳(★ 2026-10-27 자사몰 대비 K8 · 옛 사본 삭제 · 범위는 두 사본의 합집합)
 
 /** 가드 이미지 다운로드 — 실패는 null(사유 로그만). 리다이렉트는 SSRF 우회 경로라 거부.
  *  검증한 DNS 주소를 **연결에 고정**한다(host=검증 IP · servername/Host=원 호스트) — 검사 때 공인 IP,

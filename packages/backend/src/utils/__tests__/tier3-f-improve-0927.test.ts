@@ -30,7 +30,8 @@ describe('CDP 개선', () => {
   });
   it('R187 처리 끝난 웹훅 기록은 보관 기한(★0928 전송자격인증 4.2 = 1년 이상 → 13개월) 뒤 정리', () => {
     const w = src('cdp-webhook-retry-worker.ts');
-    expect(w).toContain("WHERE status IN ('processed', 'duplicate') AND created_at < NOW() - make_interval(days => $1)");
+    // ★ 2026-10-27 K2-6 — superseded(옛 스냅숏이라 쓰지 않음)도 끝난 행
+    expect(w).toContain("WHERE status IN ('processed', 'duplicate', 'superseded') AND created_at < NOW() - make_interval(days => $1)");
     expect(w).toContain('[LOG_RETENTION_DAYS],');
     expect(w).not.toContain("INTERVAL '180 days'");
     expect(readFileSync(join(__dirname, '..', '..', 'config', 'defaults.ts'), 'utf8')).toContain('export const LOG_RETENTION_DAYS = 395;');

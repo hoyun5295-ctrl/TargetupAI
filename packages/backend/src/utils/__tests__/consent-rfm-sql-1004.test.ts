@@ -14,14 +14,18 @@ import { newDb } from 'pg-mem';
 const holder: { client: any } = { client: null };
 const captured: Array<{ sql: string; params: any[] }> = [];
 let captureOnly = false;
+const runSql = async (sql: string, params: any[] = []) => {
+  if (captureOnly) {
+    captured.push({ sql, params });
+    return { rows: /RETURNING id/.test(sql) ? [{ id: 'ev-1' }] : [], rowCount: 1 };
+  }
+  // pg-mem 은 '-infinity' 시각을 못 읽는다 — 시험 자료보다 이른 같은 뜻의 시각으로 바꿔 돌린다(동의 시계 조각 · 시험 전용)
+  return holder.client.query(sql.replace(/'-infinity'::timestamptz/g, "'1900-01-01T00:00:00Z'::timestamptz"), params);
+};
 vi.mock('../../config/database', () => ({
-  query: async (sql: string, params: any[] = []) => {
-    if (captureOnly) {
-      captured.push({ sql, params });
-      return { rows: /RETURNING id/.test(sql) ? [{ id: 'ev-1' }] : [], rowCount: 1 };
-    }
-    return holder.client.query(sql, params);
-  },
+  query: (sql: string, params: any[] = []) => runSql(sql, params),
+  // ★ 2026-10-27 K1-2 — 주문 사건 · 고객 요약 = 한 트랜잭션(시험은 같은 처리기로)
+  withTransaction: async (work: any) => work((sql: string, params: any[]) => runSql(sql, params)),
 }));
 vi.mock('../cdp-identity', async (orig) => {
   const real: any = await orig();
@@ -32,6 +36,7 @@ vi.mock('../cdp-identity', async (orig) => {
 });
 vi.mock('../cdp-events', () => ({
   trackEvent: vi.fn(async () => ({ eventId: 'ev-new', identityLinkId: 'l', customerId: CUST })),
+  trackOrderEvent: vi.fn(async () => ({ eventId: 'ev-new' })),
   validateProperties: () => ({ ok: true }),
 }));
 
@@ -47,7 +52,7 @@ function freshDb() {
   const db = newDb();
   db.public.none(`
     CREATE TABLE customers (
-      id uuid PRIMARY KEY, company_id uuid, phone text, sms_opt_in boolean,
+      id uuid PRIMARY KEY, company_id uuid, phone text, sms_opt_in boolean, consent_source_at timestamptz,
       total_purchase_amount numeric, total_purchase numeric, purchase_count integer,
       recent_purchase_date date, recent_purchase_amount numeric, last_purchase_date varchar(20),
       avg_order_value numeric, updated_at timestamp
@@ -156,10 +161,29 @@ describe('I2 탈퇴 = 연결된 고객만 수신동의 철회', () => {
         ('${CO}', 'cafe24', 'u-1', '00000000-0000-0000-0000-00000000b002'),
         ('${CO2}', 'imweb', 'u-1', '00000000-0000-0000-0000-00000000b003');
     `);
-    const n = await withdrawMemberConsent(CO, 'imweb', 'u-1');
+    const n = await withdrawMemberConsent(CO, 'imweb', 'u-1', '2026-10-04T01:00:00.000Z');   // ★ 1027 K2-2 탈퇴 시각
     expect(n).toBe(1);
     const rows = db.public.many(`SELECT id, sms_opt_in FROM customers ORDER BY id`);
     expect(rows.map((r: any) => r.sms_opt_in)).toEqual([false, true, true]);
-    expect(await withdrawMemberConsent(CO, 'imweb', 'nobody')).toBe(0);
+    expect(await withdrawMemberConsent(CO, 'imweb', 'nobody', '2026-10-04T01:00:00.000Z')).toBe(0);
+  });
+  it('★Codex 1R — 이미 NO 인 고객의 탈퇴도 시계를 앞으로(늦게 온 옛 YES 가 탈퇴를 못 넘는다) · 더 새 시계는 건드리지 않는다', async () => {
+    const db = freshDb();
+    db.public.none(`
+      INSERT INTO customers (id, company_id, sms_opt_in, consent_source_at) VALUES
+        ('00000000-0000-0000-0000-00000000c001', '${CO}', false, '2026-10-04T01:00:00Z'),
+        ('00000000-0000-0000-0000-00000000c002', '${CO}', true, '2026-10-09T00:00:00Z');
+      INSERT INTO cdp_identity_links (company_id, source, external_id, customer_id) VALUES
+        ('${CO}', 'imweb', 'u-1', '00000000-0000-0000-0000-00000000c001'),
+        ('${CO}', 'imweb', 'u-2', '00000000-0000-0000-0000-00000000c002');
+    `);
+    await withdrawMemberConsent(CO, 'imweb', 'u-1', '2026-10-05T00:00:00.000Z');
+    await withdrawMemberConsent(CO, 'imweb', 'u-2', '2026-10-05T00:00:00.000Z');
+    const rows = db.public.many(`SELECT id, sms_opt_in, consent_source_at FROM customers ORDER BY id`);
+    expect(new Date(rows[0].consent_source_at).toISOString()).toBe('2026-10-05T00:00:00.000Z');
+    expect(rows[0].sms_opt_in).toBe(false);
+    // 탈퇴(10-05)보다 새 동의 관측(10-09)이 있는 행 = 그대로
+    expect(rows[1].sms_opt_in).toBe(true);
+    expect(new Date(rows[1].consent_source_at).toISOString()).toBe('2026-10-09T00:00:00.000Z');
   });
 });

@@ -331,6 +331,10 @@ export function mapWooOrderToCdp(raw: any, opts: WooMapOptions): WooMappedOrder 
     itemCount: items.length || undefined,
     items: items.length ? items : undefined,
     orderedAt,
+    // ★ 2026-10-27 자사몰 대비 K1-3 · K1-6 — 결제 시각(구매 사건 시각) · 원문 수정 시각(우커머스 = source 종류 시계)
+    paidAt: wooDateToIso(raw.date_paid_gmt, raw.date_paid) || undefined,
+    // 수정 시각이 없으면 주문 시각(같은 원천 시계 · 받은 시각을 섞으면 시계가 앞서 나가 뒤 본문을 옛것으로 버린다)
+    srcAt: wooDateToIso(raw.date_modified_gmt, raw.date_modified) || orderedAt,
     currency: str(raw.currency) || 'KRW',
   };
   return { order, consentRaw: wooMetaValue(raw.meta_data, opts.consentMetaKey) };

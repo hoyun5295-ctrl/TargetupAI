@@ -12,8 +12,9 @@
  * ⛔ 회사 공용(분류코드 없는) 몰은 사용자가 다루지 못한다 — 관리자가 붙인 회사 전체의 자산이다.
  * ⛔ 잠금 사유 문장은 여기 한 곳이 소유한다(화면이 권한을 계산하거나 문구를 지어내지 않는다).
  */
-import { query } from '../config/database';
+import { query, withTransaction, type TxRun } from '../config/database';
 import { normalizeWooMallId } from './woocommerce-core';
+import { UserFacingError } from './http-error';
 
 export type IntegrationBlockReason = 'NO_COMPANY' | 'NOT_ALLOWED' | 'NO_STORE_CODE';
 
@@ -29,7 +30,8 @@ export type IntegrationLockCode =
   | IntegrationBlockReason
   | StoreCodePickFailure
   | 'MALL_OWNED_BY_OTHER_STORE'
-  | 'STORE_CODE_CHANGE_NOT_SUPPORTED';
+  | 'STORE_CODE_CHANGE_NOT_SUPPORTED'
+  | 'STORE_CODE_MODE_MIXED';
 
 const cleanCodes = (raw: unknown): string[] =>
   (Array.isArray(raw) ? raw : [])
@@ -137,5 +139,104 @@ export function integrationLockMessage(code: IntegrationLockCode): string {
       return '이 몰은 다른 담당자의 분류 코드로 이미 연결되어 있습니다.';
     case 'STORE_CODE_CHANGE_NOT_SUPPORTED':
       return '연결된 몰의 분류 코드는 바꿀 수 없습니다. 연동을 해제한 뒤 다시 연결해 주세요.';
+    case 'STORE_CODE_MODE_MIXED':
+      return STORE_CODE_MODE_SENTENCE;
   }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ★ 2026-10-27 자사몰 대비 K9 SC1 — 분류코드 모드 하나(I15 · 설계서 docs/2026-10-27-mall-integration-hardening-design.md)
+//   한 회사의 몰 연동 행은 모두 분류코드가 있거나 모두 없다(만드는 순간 판정 · 해제 행 포함 = getMallConsentStoreCodes 와 같은 진실).
+//   섞이면 관리자 범위 동의 읽기(consentSql uploadOnly)가 분류코드 없는 몰로만 들어온 고객을 동의 아님으로 뺀다.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** 모드가 섞이는 연결을 거절하는 문장(고객이 읽는 말) */
+export const STORE_CODE_MODE_SENTENCE = '이미 연결된 몰과 같은 방식으로 연결해야 해요. 분류 코드를 쓰는 회사는 모든 몰을 분류 코드로, 쓰지 않는 회사는 모든 몰을 분류 코드 없이 연결해 주세요.';
+
+/** 저장 · 해제 권한 게이트의 거부(저장 CT 의 잠금 안에서 던지고 라우트가 사유 문장으로 답한다) */
+export class IntegrationRejected extends Error {
+  constructor(public httpStatus: number, public lockCode: IntegrationLockCode) { super(lockCode); }
+}
+
+/**
+ * 회사 단위 연동 모드 잠금(트랜잭션 끝에 풀린다) — 정산 회사 잠금(billing-lock)과 같은 꼴 · 다른 축 이름.
+ * 키는 uuid 로 정규화한 표기(같은 회사의 대문자 · 소문자 표기가 서로 다른 잠금을 잡지 않게 · Codex R5).
+ */
+export async function lockCompanyIntegrationMode(run: TxRun, companyId: string): Promise<void> {
+  await run(`SELECT pg_advisory_xact_lock(hashtext($1::uuid::text), hashtext('integration_mode'))`, [companyId]);
+}
+
+/**
+ * 새 몰(또는 해제됐다 되살리는 몰)의 분류코드가 회사의 다른 몰들과 같은 모드인가. 아니면 던진다(409 · 저장 0).
+ *   다른 몰에 분류코드 몰이 있으면 새 몰도 분류코드 필수(관리자도) · 분류코드 없는 몰이 있으면 분류코드 몰을 새로 못 만든다.
+ */
+export async function assertStoreCodeMode(run: TxRun, companyId: string, provider: string, mallId: string, storeCode: string | null): Promise<void> {
+  const r = await run(
+    `SELECT COUNT(*) FILTER (WHERE COALESCE(meta->>'store_code', '') <> '')::int AS coded,
+            COUNT(*) FILTER (WHERE COALESCE(meta->>'store_code', '') = '')::int AS plain
+       FROM company_integrations
+      WHERE company_id = $1::uuid AND NOT (provider = $2 AND mall_id = $3)`,
+    [companyId, provider, mallId],
+  );
+  const coded = Number(r.rows[0]?.coded || 0);
+  const plain = Number(r.rows[0]?.plain || 0);
+  const code = cleanCode(storeCode);
+  if (coded > 0 && !code) throw new UserFacingError(409, 'STORE_CODE_REQUIRED', STORE_CODE_MODE_SENTENCE);
+  if (plain > 0 && code) throw new UserFacingError(409, 'STORE_CODE_MODE_MIXED', STORE_CODE_MODE_SENTENCE);
+}
+
+/**
+ * 연동 행 저장의 모드 문 — 같은 트랜잭션에서 잠금 → (그 행이 없거나 해제 행이면) 모드 판정. 저장 문장은 이 뒤에 같은 연결로 쓴다.
+ * 이미 있는 행의 재저장(토큰 갱신 · 재승인)은 판정하지 않는다(I15 = 만드는 순간 판정 · 옛 섞인 회사의 기존 몰을 멈추지 않게).
+ */
+export async function guardIntegrationMode(run: TxRun, companyId: string, provider: string, mallId: string, storeCode: string | null): Promise<void> {
+  await lockCompanyIntegrationMode(run, companyId);
+  const cur = await run(
+    `SELECT status FROM company_integrations WHERE company_id = $1::uuid AND provider = $2 AND mall_id = $3`,
+    [companyId, provider, mallId],
+  );
+  if (cur.rows.length === 0 || cur.rows[0].status === 'revoked') await assertStoreCodeMode(run, companyId, provider, mallId, storeCode);
+}
+
+/** 모드 문을 지난 저장 — provider 저장 함수가 연동 행 INSERT 를 이 안에서 쓴다(R7 · 잠금 → 판정 → 저장 = 한 트랜잭션) */
+export async function saveIntegrationRowGuarded<T>(
+  companyId: string, provider: string, mallId: string, storeCode: string | null,
+  save: (run: TxRun) => Promise<T>,
+): Promise<T> {
+  return withTransaction(async (run) => {
+    await guardIntegrationMode(run, companyId, provider, mallId, storeCode);
+    return save(run);
+  });
+}
+
+/**
+ * 새로 저장하는 몰의 분류코드를 정한다(권한 CT) + 이미 있는 몰이면 소유 · 변경 규칙을 건다(★ 1027 우커머스 라우트 안 함수를 옮김 · R1).
+ * 반환 decide = 저장 CT 가 대상 행을 정한 뒤 **같은 잠금 안에서** 부른다(그 사이 대상이 바뀌어도 소유 검사가 빠지지 않게 · Codex 1001 R1).
+ */
+export async function decideStoreCode(
+  actor: IntegrationActor,
+  requested: unknown,
+): Promise<{ ok: false; code: StoreCodePickFailure } | { ok: true; decide: (existing: { storeCode?: string | null } | null) => { storeCode: string | null | undefined } }> {
+  const pick = await pickStoreCodeForConnect(actor, requested);
+  if (!pick.ok) return pick;
+  return {
+    ok: true,
+    decide: (existing) => {
+      if (existing) {
+        if (!canTouchIntegration(actor, existing.storeCode)) throw new IntegrationRejected(409, 'MALL_OWNED_BY_OTHER_STORE');
+        // 몰 1행 = 분류코드 1개. 관리자가 다른 코드로 다시 저장하려 하면 거부(해제 뒤 재연결이 길이다).
+        if (actor.kind === 'admin' && pick.storeCode !== null && pick.storeCode !== existing.storeCode) throw new IntegrationRejected(409, 'STORE_CODE_CHANGE_NOT_SUPPORTED');
+      }
+      return { storeCode: existing ? undefined : pick.storeCode };
+    },
+  };
+}
+
+/** 그 연동 행의 분류코드(없으면 null) — 웹훅 처리가 어댑터에 넘긴다(★ 1027 K9 · 해제 행도 읽는다 = 그 몰 소속 행에 쓴다) */
+export async function integrationStoreCodeOf(companyId: string, provider: string, mallId: string): Promise<string | null> {
+  const r = await query(
+    `SELECT meta->>'store_code' AS store_code FROM company_integrations WHERE company_id = $1::uuid AND provider = $2 AND mall_id = $3 LIMIT 1`,
+    [companyId, provider, mallId],
+  );
+  return cleanCode(r.rows[0]?.store_code) || null;
 }

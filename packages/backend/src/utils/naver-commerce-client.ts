@@ -21,6 +21,7 @@
  */
 
 import { UserFacingError } from './http-error';
+import { saveIntegrationRowGuarded } from './integration-scope';   // ★ 2026-10-27 자사몰 대비 K9 SC1 — 연동 행 저장 = 회사 모드 잠금 → 판정 → 저장(한 트랜잭션)
 import { query } from '../config/database';
 import { TIMEOUTS } from '../config/defaults';
 // ★ 2026-09-26 한줄로 V2 R1-31 — 토큰 요청 실패 판정 CT(제공자 거절일 때만 연동 만료)
@@ -36,6 +37,7 @@ import {
 } from './provider-registry';
 import { identifyCustomer } from './cdp-identity';
 import { syncOrder } from './cdp-orders';
+import { isKnownOrderStatus } from './cdp-order-revenue';
 import { orderExternalId } from './cdp-order-identity';
 import { trackEvent } from './cdp-events';
 import { buildWebhookIdempotencyKey } from './cdp-idempotency';
@@ -143,7 +145,7 @@ export async function saveNaverCommerceIntegration(
     meta.app_client_id = creds.clientId;
     meta.app_client_secret = creds.clientSecret;
   }
-  await query(
+  await saveIntegrationRowGuarded(companyId, 'naver_smart_store', storeId, null, (run) => run(
     `INSERT INTO company_integrations (
       id, company_id, provider, mall_id, access_token, refresh_token,
       token_expires_at, scope, meta, webhook_secret, connected_at, status,
@@ -171,7 +173,7 @@ export async function saveNaverCommerceIntegration(
       JSON.stringify(meta),
       webhookSecret,
     ]
-  );
+  ));
 }
 
 /**
@@ -535,13 +537,15 @@ export const naverSmartStoreAdapter: IProviderAdapter = {
     return verifyNaverCommerceWebhookSignature(rawBody, signature, secret);
   },
 
-  async processWebhookEvent(companyId, event, resource) {
+  async processWebhookEvent(companyId, event, resource, ctx) {
     // 네이버 커머스 표준 이벤트 매트릭스 (외부 API 검증 후 정정 가능)
+    // ★ 2026-10-27 자사몰 대비 K1-3 · K1-6 — 원천 시각이 없으면 받은 시각(ctx.observedAt) · 옛 스냅숏 = 'stale'
     switch (event) {
       case 'customer.created':
       case 'customer.updated':
       case 'member.joined':
         await identifyCustomer(companyId, {
+          ...(ctx.storeCode ? { storeCode: ctx.storeCode } : {}),   // ★ 1027 K9 — 연동 행 분류코드(소속 행 · 몰 동의)
           source: 'naver_smart_store',
           externalId: String(resource.member_id || resource.customer_id || resource.external_id || ''),
           email: resource.email,
@@ -559,8 +563,10 @@ export const naverSmartStoreAdapter: IProviderAdapter = {
 
       case 'order.placed':
       case 'order.created':
-      case 'order.completed':
-        await syncOrder(companyId, {
+      case 'order.completed': {
+        const naverStatus = String(resource.status || 'pending');
+        const placed = await syncOrder(companyId, {
+          ...(ctx.storeCode ? { storeCode: ctx.storeCode } : {}),   // ★ 1027 K9 — 연동 행 분류코드(소속 행 · 몰 동의)
           source: 'naver_smart_store',
           orderId: String(resource.order_id || resource.product_order_id || ''),
           // ★ 2026-09-27 한줄로 V2 R245 — 비회원 주문도 적재(주문 외부 id CT)
@@ -568,7 +574,8 @@ export const naverSmartStoreAdapter: IProviderAdapter = {
           email: resource.buyer_email || resource.email,
           phone: resource.buyer_cellphone || resource.phone,
           name: resource.buyer_name || resource.name,
-          status: String(resource.status || 'pending'),
+          status: naverStatus,
+          statusKnown: isKnownOrderStatus(naverStatus),
           // "0.00" 문자열 truthy 함정 방어 — 공용 CT firstPositiveAmount (2026-07-03 카페24 실측 교훈 동반 적용)
           totalAmount: firstPositiveAmount(resource.total_payment_amount, resource.total_amount),
           itemCount: Array.isArray(resource.items) ? resource.items.length : undefined,
@@ -578,10 +585,13 @@ export const naverSmartStoreAdapter: IProviderAdapter = {
             price: it.price != null ? Number(it.price) : undefined,
             quantity: it.quantity != null ? Number(it.quantity) : undefined,
           })) : undefined,
-          orderedAt: String(resource.ordered_at || resource.order_date || new Date().toISOString()),
+          orderedAt: String(resource.ordered_at || resource.order_date || ctx.observedAt),
+          srcAt: ctx.observedAt,
           currency: 'KRW',
         });
+        if (placed.stale) return 'stale';
         break;
+      }
 
       case 'order.cancelled':
       case 'order.refunded':
@@ -594,7 +604,7 @@ export const naverSmartStoreAdapter: IProviderAdapter = {
             status: resource.status,
             cancelled_amount: resource.total_payment_amount,
           },
-          occurredAt: String(resource.cancelled_at || new Date().toISOString()),
+          occurredAt: String(resource.cancelled_at || ctx.observedAt),
         });
         break;
 

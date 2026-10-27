@@ -88,6 +88,7 @@ import { loadWatchIps, loadWatchIpEvents } from '../utils/watch-alert'; // ★ 2
 import { loadIntroLeads, parseIntroLeadsQuery } from '../utils/intro-leads'; // ★ 2026-10-07 소개 방문 · 시연 요청(ceo · suran)
 import { loadFeatureInterest, parseFeatureInterestQuery } from '../utils/feature-interest'; // ★ 2026-10-06 기능 관심 업체(ceo 전용)
 import { loadIdentityStatus } from '../utils/identity-status'; // ★ 2026-10-07 본인인증 현황(ceo 전용)
+import { loadMallIntegrationMonitor } from '../utils/mall-integration-monitor'; // ★ 2026-10-27 자사몰 연동 감시 표 1단(K10)
 import { isIdentitySchemaMissing, IDENTITY_MIGRATION_RESPONSE } from '../utils/identity-verify';
 // ★ 2026-10-02 계정 발급 기록(전송자격인증 4.1 ②)
 import { recordAccountIssued } from '../utils/account-issue';
@@ -5072,6 +5073,19 @@ router.get('/intro-leads', authenticate, requireSuperAdmin, async (req: Request,
   } catch (err: any) {
     console.error('[admin/intro-leads] 조회 실패:', err);
     return res.status(500).json({ success: false, error: '소개 방문 · 시연 요청을 불러오지 못했습니다.' });
+  }
+});
+
+/**
+ * ★ 2026-10-27 자사몰 연동 감시 표 1단(자사몰 대비 설계 K10 · 읽기만 · 행 버튼 0) — 조회 소유 = utils/mall-integration-monitor.ts
+ *   한 행 = 몰 하나 · 문제(K7 분류) · 마지막 수신 · 평소 간격 대비 · 토큰 만료 · 가져오기 · 모르는 주문 상태 글자. 첫 고객 동행 14일 동안 매일 본다.
+ */
+router.get('/mall-integrations/monitor', authenticate, requireSuperAdmin, async (_req: Request, res: Response) => {
+  try {
+    return res.json({ success: true, rows: await loadMallIntegrationMonitor() });
+  } catch (err: any) {
+    console.error('[admin/mall-integrations/monitor] 조회 실패:', err);
+    return res.status(500).json({ success: false, error: '자사몰 연동 현황을 불러오지 못했습니다.' });
   }
 });
 

@@ -17,10 +17,10 @@
  *  - routes/dm.ts POST /brand-kit/extract
  */
 
-import { lookup } from 'node:dns/promises';
 import http from 'node:http';
 import https from 'node:https';
 import type { DmBrandKit } from './dm-tokens';
+import { isPrivateIp, resolvePublicAddress, pinnedLookup } from '../outbound-guard';
 
 export type BrandExtractResult = {
   site_name?: string;
@@ -283,72 +283,11 @@ function isFetchableProductUrl(url: string): boolean {
   }
 }
 
-// ── ★ 2026-07-13 DNS 해석 레벨 SSRF 가드 (Codex 적대 리뷰 지적 정정) ──
-// 호스트명 문자열 검사만으로는 "공개 도메인이 사설 IP로 풀리는" 우회를 못 막는다 →
-// fetch 직전 홉마다 DNS 해석 결과(전 주소)가 공인망인지 확인. 하나라도 사설/예약 = 차단(보수).
-// 한계: 조회↔fetch 사이 재바인딩(TOCTOU)은 이 층에서 못 막는다 — 소켓 IP 고정은 별도 과제로 문서화.
-
-function isPrivateIpV4(ip: string): boolean {
-  const m = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(ip);
-  if (!m) return true; // 형식 불명 = 차단(보수)
-  const a = Number(m[1]);
-  const b = Number(m[2]);
-  if (a === 0 || a === 10 || a === 127) return true;               // 예약·사설·루프백
-  if (a === 100 && b >= 64 && b <= 127) return true;               // 100.64/10 CGN
-  if (a === 169 && b === 254) return true;                         // 링크로컬(메타데이터 서비스 포함)
-  if (a === 172 && b >= 16 && b <= 31) return true;                // 172.16/12
-  if (a === 192 && b === 168) return true;                         // 192.168/16
-  if (a === 198 && (b === 18 || b === 19)) return true;            // 벤치마크 예약
-  if (a >= 224) return true;                                       // 멀티캐스트·예약·브로드캐스트
-  return false;
-}
-
-/** 사설/예약 IP 판정 (순수 — SSRF 가드 회귀 테스트용 export) */
-export function isPrivateIp(addr: string): boolean {
-  const ip = addr.toLowerCase();
-  if (ip.includes(':')) {
-    const mapped = /^::ffff:(\d{1,3}(?:\.\d{1,3}){3})$/.exec(ip);  // v4-mapped v6
-    if (mapped) return isPrivateIpV4(mapped[1]);
-    if (ip === '::' || ip === '::1') return true;                  // 미지정·루프백
-    if (/^f[cd]/.test(ip)) return true;                            // fc00::/7 ULA
-    if (/^fe[89ab]/.test(ip)) return true;                         // fe80::/10 링크로컬
-    if (/^ff/.test(ip)) return true;                               // 멀티캐스트
-    return false;
-  }
-  return isPrivateIpV4(ip);
-}
-
-/** 호스트명 → 검증된 공인 주소 1개 (전 해석 주소가 공인이어야 통과 — 하나라도 사설이면 차단). */
-/** ★ 2026-09-06 export — 아웃리치 렌더 워커의 로컬 프록시가 같은 판정기를 재사용한다(새 판정기 0 · 불변 7). 동작 무변경. */
-export async function resolvePublicAddress(hostname: string): Promise<{ address: string; family: number } | null> {
-  if (/^\d{1,3}(?:\.\d{1,3}){3}$/.test(hostname)) return isPrivateIpV4(hostname) ? null : { address: hostname, family: 4 };
-  if (hostname.includes(':')) return isPrivateIp(hostname) ? null : { address: hostname, family: 6 }; // IPv6 리터럴(new URL이 대괄호 제거)
-  try {
-    const addrs = await lookup(hostname, { all: true });
-    if (!addrs.length || addrs.some((a) => isPrivateIp(a.address))) return null;
-    return { address: addrs[0].address, family: addrs[0].family };
-  } catch {
-    return null; // 해석 실패 = 차단
-  }
-}
+// ── ★ 2026-07-13 DNS 해석 레벨 SSRF 가드 → ★ 2026-10-27 utils/outbound-guard.ts 로 옮김(자사몰 대비 K8 · 판정기 한 곳) ──
+// 이 파일은 그대로 부르고 옛 import 자리(렌더 워커 · 시험)를 위해 재export 한다.
+export { isPrivateIp, resolvePublicAddress, pinnedLookup };
 
 const MAX_HTML_BYTES = 200_000;
-
-/**
- * ★ 2026-09-05 [B-0905-1] 고정 IP lookup 콜백 — Node 20은 `autoSelectFamily`가 기본 on이라 소켓이
- *   `lookup(host, { all: true }, cb)`로 부르고 **배열**을 기대한다. 옛 형태 `cb(err, address, family)`만 돌려주면
- *   `ERR_INVALID_IP_ADDRESS`로 연결 자체가 실패해 fetchHtmlGuarded가 전 사이트 null을 냈다(운영 실측 2026-09-05 · 로컬 0/12).
- *   두 호출 형태를 모두 받는다(순수 · 계약 테스트 = __tests__/dm-brand-extractor-lookup.test.ts).
- */
-export function pinnedLookup(pinned: { address: string; family: number }) {
-  return (_hostname: string, options: unknown, cb: (...args: any[]) => void): void => {
-    if (options && typeof options === 'object' && (options as { all?: boolean }).all) {
-      cb(null, [{ address: pinned.address, family: pinned.family }]);
-      return;
-    }
-    cb(null, pinned.address, pinned.family);
-  };
-}
 
 /** 검증된 IP로 연결을 고정한 단발 GET (Codex 2R 정정) —
  *  ① lookup 콜백이 검증 주소만 돌려줘 fetch류의 자체 DNS 재해석(리바인딩 창)을 제거.

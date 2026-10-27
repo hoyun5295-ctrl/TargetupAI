@@ -27,6 +27,15 @@ export function isCancelStatus(status: string): boolean {
   return (CANCEL_STATUSES as readonly string[]).includes(status);
 }
 
+/**
+ * ★ 2026-10-27 자사몰 대비 K10 SC2 — 주문 적재 CT 가 뜻을 아는 상태 글자. 변환 표가 없는 provider(아임웹 · 네이버 · 자체호스팅)는
+ * 원문이 이 목록에 없으면 「모르는 상태」(판정은 결제 아님 그대로 · 운영 감시 표가 글자 · 건수를 띄운다).
+ */
+export const KNOWN_ORDER_STATUSES = ['completed', 'paid', 'cancelled', 'refunded', 'pending', 'shipping'] as const;
+export function isKnownOrderStatus(status: string): boolean {
+  return (KNOWN_ORDER_STATUSES as readonly string[]).includes(String(status || '').trim().toLowerCase());
+}
+
 export interface ExistingPurchaseEvent {
   /** cdp_events.properties (기존 purchase 이벤트) */
   properties: Record<string, any> | null;
@@ -53,6 +62,19 @@ export function isRevenueApplied(existing: ExistingPurchaseEvent | null): boolea
   // 마커 도입(2026-06-10) 전 행 호환: 기록 당시 paid/completed였으면 이전 코드가 이미 더했음
   if (p.revenue_applied === undefined && isRevenueStatus(String(p.status || ''))) return true;
   return false;
+}
+
+/**
+ * ★ 2026-10-27 자사몰 대비 K1-8 — 「매출 반영된 결제 주문」 SQL 조각(별칭 alias 의 cdp_events 행) · 판정 한 곳(R1).
+ *   = purchase 이면서 표식 반영(isRevenueApplied 와 같은 규칙 · 표식 도입 0610 전 행은 기록 당시 결제 상태) · 차감 안 됨.
+ *   구매이력 · 자동마케팅 성과 · 플래너 대상이 부른다(옛: 셋이 표식 · 「상태 없음 = 결제」 · 상태 글자로 저마다 판정 · M1 · M26).
+ */
+export function netPurchaseSql(alias: string): string {
+  const p = `${alias}.properties`;
+  const paid = REVENUE_STATUSES.map((x) => `'${x}'`).join(', ');
+  return `(${alias}.event_name = 'purchase'`
+    + ` AND (${p}->'revenue_applied' = 'true'::jsonb OR (NOT (${p} ? 'revenue_applied') AND ${p}->>'status' IN (${paid})))`
+    + ` AND COALESCE(${p}->'revenue_reversed' = 'true'::jsonb, false) = false)`;
 }
 
 /** 기존 purchase 이벤트가 이미 차감까지 끝났는지 */

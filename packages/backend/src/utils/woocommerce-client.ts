@@ -23,6 +23,8 @@ import * as https from 'https';
 import { randomBytes } from 'crypto';
 import { query, pool } from '../config/database';
 import { runSerial } from './inflight-lock';
+import { guardIntegrationMode } from './integration-scope';
+import { assertOutboundUrl, OUTBOUND_AXIOS_GUARD } from './outbound-guard';
 import { syncOrder } from './cdp-orders';
 import { identifyCustomer, parseConsentValue, isConsentAbsent, CdpPhoneRequiredError } from './cdp-identity';
 import { WOO_SOURCE, normalizeWooMallId, wooSiteOrigin, wooSelfHost, mapWooCustomerToCdp, mapWooOrderToCdp, wooMemberIdFormat, wooConsentReadable, type WooTopicResource } from './woocommerce-core';
@@ -189,6 +191,8 @@ export interface WooIntegration {
   syncError: { message: string; code: string; at: string | null } | null;
   /** 기존 회원·주문 가져오기 진행 상태(meta.woo_backfill). null = 한 번도 시작 안 함 */
   backfill: WooBackfillState | null;
+  /** ★ 1027 K3 회원 재대조 진행 상태(meta.woo_member_reread). null = 한 번도 안 돌았음 */
+  memberReread: WooMemberRereadState | null;
 }
 
 /**
@@ -271,6 +275,8 @@ interface WooMeta {
   woo_sync_error_code?: string;
   woo_sync_error_at?: string;
   woo_backfill?: unknown;
+  /** ★ 2026-10-27 자사몰 대비 K3 — 회원 재대조 진행(woo_backfill 과 따로) */
+  woo_member_reread?: unknown;
 }
 
 const ROW_COLUMNS = 'id, company_id, mall_id, status, connected_at, last_synced_at, webhook_secret, meta';
@@ -299,6 +305,7 @@ function toIntegration(r: any): WooIntegration {
       ? { message: meta.woo_sync_error, code: meta.woo_sync_error_code || 'unknown', at: meta.woo_sync_error_at || null }
       : null,
     backfill: readBackfill(meta.woo_backfill),
+    memberReread: readMemberReread(meta.woo_member_reread),
   };
 }
 
@@ -433,6 +440,8 @@ async function saveWooCredentialsInLine(
       storeCode = input.decide(row && row.status !== 'revoked' ? toIntegration(row) : null).storeCode;
     }
     if (storeCode !== undefined) meta.store_code = storeCode ? String(storeCode).trim() || null : null;
+    // ★ 2026-10-27 자사몰 대비 K9 SC1 — 같은 트랜잭션에서 회사 모드 잠금 → (새 몰 · 되살리는 몰이면) 모드 판정. 잠그는 순서 = 우커머스 주소 잠금 → 모드 잠금(늘 같음)
+    await guardIntegrationMode((sql, params) => db.query(sql, params) as any, companyId, 'woocommerce', mallId, meta.store_code ?? null);
     const r = await db.query(
     `INSERT INTO company_integrations (
       id, company_id, provider, mall_id, access_token, refresh_token,
@@ -638,6 +647,11 @@ export interface WooMallStatus {
   syncError: { message: string; code: string; at: string | null } | null;
   /** 기존 회원·주문 가져오기 진행(없으면 null) — 수십 분~수 시간 걸리는 일이라 화면이 "도는 중"임을 말해야 한다 */
   backfill: { stage: WooBackfillState['stage']; customersImported: number; ordersImported: number; noPhone: number; failed: number; truncated: boolean; doneAt: string | null } | null;
+  /**
+   * ★ 2026-10-27 자사몰 대비 K3 — 회원 정보 다시 맞추기(reason = 'reread' · 첫 가져오기 'first' = backfill 칸). 화면은 진행 칸 대신 회색 한 줄로 말한다.
+   * 첫 가져오기를 끝낸 몰만(그 전에는 null).
+   */
+  memberReread: { reason: 'reread'; running: boolean; lastDoneAt: string | null } | null;
 }
 
 export interface WooStatus {
@@ -666,6 +680,9 @@ export async function getWooStatus(companyId: string): Promise<WooStatus> {
         noPhone: i.backfill.customers_no_phone + i.backfill.orders_no_phone, failed: i.backfill.failed,
         truncated: i.backfill.truncated, doneAt: i.backfill.done_at,
       }
+      : null,
+    memberReread: i.backfill?.stage === 'done'
+      ? { reason: 'reread' as const, running: !!i.memberReread && !i.memberReread.done_at, lastDoneAt: i.memberReread?.last_done_at ?? null }
       : null,
   }));
   return { connected: malls.some((m) => m.connected), malls };
@@ -870,11 +887,14 @@ async function wooRequest(method: 'GET' | 'POST' | 'PUT' | 'DELETE', url: string
 async function wooHttp(method: 'GET' | 'POST' | 'PUT' | 'DELETE', url: string, headers: Record<string, string>, body: unknown, maxRedirects: number): Promise<any> {
   let res: any;
   try {
+    // ★ 2026-10-27 자사몰 대비 K8 — 몰 서버 호출은 공용 SSRF 가드를 지난다(연결마다 lookup 가드 · 리다이렉트 홉의 IP 리터럴 거절 · 첫 주소 리터럴 판정)
+    assertOutboundUrl(url);
     const common = {
       headers: { Accept: 'application/json', 'User-Agent': USER_AGENT, ...headers },
       timeout: HTTP_TIMEOUT_MS,
       validateStatus: () => true,
       maxRedirects,
+      ...OUTBOUND_AXIOS_GUARD,
       ...(maxRedirects === 0 ? { transport: wooWideHeaderTransport } : {}),
     };
     res = method === 'GET'
@@ -951,13 +971,14 @@ export async function verifyWooConnection(companyId: string, mallId: string): Pr
 // 적재 — 자원 1건 → 매핑 → identify / syncOrder
 // ════════════════════════════════════════════════════════════════════
 
-/** synced = 적재 · skipped = 매핑 불가(식별 수단·주문시각 없음 · 운영자 역할) · no_phone = 신규 고객인데 쓸 수 있는 휴대폰 번호가 없다(CDP 고객은 휴대폰이 열쇠) */
-export type WooProcessResult = 'synced' | 'skipped' | 'no_phone';
+/** synced = 적재 · skipped = 매핑 불가(식별 수단·주문시각 없음 · 운영자 역할) · no_phone = 신규 고객인데 쓸 수 있는 휴대폰 번호가 없다(CDP 고객은 휴대폰이 열쇠)
+ *  · stale = 더 새 스냅숏을 이미 반영한 주문의 옛 본문(★ 1027 K1-6 · 쓰지 않음 · 웹훅 전달 = superseded) */
+export type WooProcessResult = 'synced' | 'skipped' | 'no_phone' | 'stale';
 
 /**
  * 우커머스 자원 1건 적재. 웹훅 수신·백필·주기 수집·재처리 워커가 전부 이 함수 하나를 부른다.
  * - 회원: identifyCustomer(수신동의 raw 가 해석되면 smsOptIn 동봉). 식별 수단 없으면 skipped.
- * - 주문: 수신동의가 해석될 때만 identify(smsOptIn) → syncOrder(식별·매출·이벤트는 syncOrder 가 소유). 적재 불가(삭제 페이로드)면 skipped.
+ * - 주문: syncOrder 한 호출(수신동의는 OrderInput.smsOptIn 으로 싣고 판정은 식별 CT · ★ 1027 K2-1). 적재 불가(삭제 페이로드)면 skipped.
  * - 신규 고객인데 휴대폰 번호가 없으면(CdpPhoneRequiredError) 던지지 않고 no_phone — 그 건을 넣을 수 없을 뿐 장애가 아니다.
  *   던지면 웹훅은 같은 건을 끝없이 재처리하고 가져오기는 그 한 건에서 전체가 멈춘다(★0921 4몰 실측). 그 밖의 오류는 그대로 던진다.
  */
@@ -969,9 +990,11 @@ export async function processWooResource(
   consentMetaKey: string | null | undefined,
   /** 이 몰 행의 분류코드(WooIntegration.storeCode). 없으면 키를 싣지 않는다 = 지금과 같은 적재 */
   storeCode?: string | null,
+  /** ★ 2026-10-27 자사몰 대비 K2-2 — 회원 정보를 본 시각(웹훅 = 받은 시각 ctx.observedAt · 가져오기 · 주기 수집 · 재대조 = 그 쪽을 요청한 시각) */
+  observedAt?: string,
 ): Promise<WooProcessResult> {
   try {
-    return await applyWooResource(companyId, mallId, kind, raw, consentMetaKey, storeCode);
+    return await applyWooResource(companyId, mallId, kind, raw, consentMetaKey, storeCode, observedAt);
   } catch (err) {
     if (err instanceof CdpPhoneRequiredError) return 'no_phone';
     throw err;
@@ -985,8 +1008,10 @@ async function applyWooResource(
   raw: any,
   consentMetaKey: string | null | undefined,
   storeCode?: string | null,
-): Promise<'synced' | 'skipped'> {
+  observedAt?: string,
+): Promise<'synced' | 'skipped' | 'stale'> {
   const store = storeCode ? { storeCode } : {};
+  const memberIdFormat = wooMemberIdFormat(mallId);   // ★ 1027 K2-1 · K2-3 — 이 몰의 회원 연결 모양(가족 번호 · 주문 동의 판정)
   if (kind === 'customer') {
     const m = mapWooCustomerToCdp(raw, { mallId, consentMetaKey });
     if (!m) return 'skipped';
@@ -997,28 +1022,20 @@ async function applyWooResource(
     const absent = consent === undefined && wooConsentReadable(raw?.meta_data, consentMetaKey) && isConsentAbsent(m.consentRaw);
     await identifyCustomer(companyId, {
       ...m.identify,
-      ...(consent !== undefined ? { smsOptIn: consent } : {}),
-      ...(absent ? { profileConsentAbsent: { consentKey: String(consentMetaKey || '').trim(), ...wooMemberIdFormat(mallId) } } : {}),
+      ...(consent !== undefined ? { smsOptIn: consent, consentAt: observedAt } : {}),
+      ...(absent ? { profileConsentAbsent: { consentKey: String(consentMetaKey || '').trim(), ...memberIdFormat }, consentAt: observedAt } : {}),
+      memberIdFormat,
       ...store,
     });
     return 'synced';
   }
   const m = mapWooOrderToCdp(raw, { mallId, consentMetaKey });
   if (!m) return 'skipped';
+  // ★ 2026-10-27 자사몰 대비 K2-1 — 주문 본문의 동의는 주문 CT 한 호출로 싣는다(옛: 주문을 읽을 때마다 따로 식별해 회원 동의로 썼다 ·
+  //   회원이 주문 뒤 몰에서 거부하면 그 옛 주문의 상태가 바뀌는 순간 동의로 되돌아갔다 · M2). 판정 = 식별 CT(회원 연결이 있으면 무시).
   const consent = parseConsentValue(m.consentRaw);
-  if (consent !== undefined) {
-    await identifyCustomer(companyId, {
-      source: WOO_SOURCE,
-      externalId: m.order.externalId,
-      phone: m.order.phone,
-      name: m.order.name,
-      email: m.order.email,
-      smsOptIn: consent,
-      ...store,
-    });
-  }
-  await syncOrder(companyId, { ...m.order, ...store });
-  return 'synced';
+  const placed = await syncOrder(companyId, { ...m.order, ...store, memberIdFormat, ...(consent !== undefined ? { smsOptIn: consent } : {}) });
+  return placed.stale ? 'stale' : 'synced';
 }
 
 // ════════════════════════════════════════════════════════════════════
@@ -1039,10 +1056,13 @@ function isRetryableWooError(err: unknown): boolean {
  * 한 페이지 읽기 + 같은 페이지 재시도(wooTuning.retryDelaysMs). 수백~천 페이지를 도는 가져오기에서 한 번의 시간 초과가
  * 전체를 죽이지 않게 한다(★0921: 203페이지 중 1회 ECONNABORTED 로 회원·주문 전량 미적재).
  */
-async function fetchWooPageWithRetry(integ: WooIntegration, resource: 'orders' | 'customers', params: UrlParams): Promise<WooPage> {
+async function fetchWooPageWithRetry(integ: WooIntegration, resource: 'orders' | 'customers', params: UrlParams): Promise<WooPage & { readAt: string }> {
   for (let attempt = 0; ; attempt++) {
+    // ★ 2026-10-27 Codex 1R — 그 쪽의 원천 시각 = 성공한 요청을 보낸 시각(응답이 그 뒤 상태를 담을 수 없다 · 처리 시각을 쓰면
+    //   요청과 처리 사이에 받은 새 웹훅을 옛 쪽 값이 덮는다). 처리 함수가 이 값을 동의 시계로 넘긴다.
+    const readAt = new Date().toISOString();
     try {
-      return await fetchWooPage(integ, resource, params);
+      return { ...(await fetchWooPage(integ, resource, params)), readAt };
     } catch (err) {
       if (!isRetryableWooError(err) || attempt >= wooTuning.retryDelaysMs.length) throw err;
       console.log(`[WooCommerce] ${resource} page=${params.page} 재시도 ${attempt + 1}/${wooTuning.retryDelaysMs.length} mall=${integ.mallId} code=${(err as WooApiError).code}`);
@@ -1066,14 +1086,15 @@ interface WooRunGuard { streak: number; logged: number }
  * 한 페이지의 건들을 적재한다 — 한 건의 실패가 회차 전체를 죽이지 않는다(★0921: 전화번호 없는 회원 1명에 4몰 가져오기 전부 중단).
  * no_phone 은 processWooResource 가 값으로 돌려준다. 그 밖의 예외는 그 건만 failed 로 세고 로그(몰·종류·id·사유 — 개인정보 없음)를 남긴다.
  */
-async function processWooItems(integ: WooIntegration, kind: WooTopicResource, items: any[], guard: WooRunGuard): Promise<WooItemTally> {
+async function processWooItems(integ: WooIntegration, kind: WooTopicResource, items: any[], guard: WooRunGuard, readAt: string): Promise<WooItemTally> {
   const t: WooItemTally = { synced: 0, noPhone: 0, failed: 0 };
   for (const raw of items) {
-    const put = () => processWooResource(integ.companyId, integ.mallId, kind, raw, integ.consentMetaKey, integ.storeCode);
+    // 원천 시각 = 그 쪽을 읽은 시각(readAt · 한 쪽의 모든 건 · 재시도 같은 값)
+    const put = () => processWooResource(integ.companyId, integ.mallId, kind, raw, integ.consentMetaKey, integ.storeCode, readAt);
     try {
       // UNIQUE 위반(23505) = 동시에 도는 다른 페이지가 같은 휴대폰·이메일의 고객을 방금 만들었다 → 한 번 더 넣으면 그 고객에 합쳐진다
       const r = await put().catch((e: any) => { if (e?.code === '23505') return put(); throw e; });
-      if (r === 'synced') t.synced++;
+      if (r === 'synced' || r === 'stale') t.synced++;   // stale = 이미 더 새 본문을 반영한 주문(처리 끝)
       else if (r === 'no_phone') t.noPhone++;
       guard.streak = 0;
     } catch (err: any) {
@@ -1108,7 +1129,7 @@ async function walkPages(
     const res = await fetchWooPageWithRetry(integ, resource, { ...baseParams, page });
     pages++;
     totalPages = res.totalPages;
-    imported += (await processWooItems(integ, kind, res.items, guard)).synced;
+    imported += (await processWooItems(integ, kind, res.items, guard, res.readAt)).synced;
     if (res.items.length === 0) break;
   }
   return { imported, pages, truncated };
@@ -1163,7 +1184,7 @@ async function runBackfillStage(companyId: string, mallId: string, st: WooBackfi
       : await fetchWooPageWithRetry(integ, 'orders', { per_page: PAGE_SIZE, after: st.orders_after, dates_are_gmt: 'true', orderby: 'date', order: 'asc', page });
     if (res.items.length === 0) emptyAt = Math.min(emptyAt, page);
     totalPages = Number.isFinite(totalPages) ? Math.max(totalPages, res.totalPages) : res.totalPages;
-    const t = await processWooItems(integ, isCustomers ? 'customer' : 'order', res.items, guard);
+    const t = await processWooItems(integ, isCustomers ? 'customer' : 'order', res.items, guard, res.readAt);
     st.failed += t.failed;
     if (isCustomers) { st.customers_imported += t.synced; st.customers_no_phone += t.noPhone; }
     else { st.orders_imported += t.synced; st.orders_no_phone += t.noPhone; }
@@ -1320,6 +1341,139 @@ export async function startWooOrderReread(companyId: string, mallId: string, rea
 /** 줄이 빌 때까지 기다린다(테스트·종료 처리용). */
 export function wooBackfillIdle(): Promise<void> {
   return backfillChain;
+}
+
+// ════════════════════════════════════════════════════════════════════
+// ★ 2026-10-27 자사몰 대비 K3 — 회원 재대조(설계서 docs/2026-10-27-mall-integration-hardening-design.md · M12)
+//   회원이 몰에서 바꾼 동의 · 정보를 웹훅이 빠뜨렸어도 맞춰 둔다. 상태 = meta.woo_member_reread(가져오기 woo_backfill 과 따로 · 주문 주기 수집은 계속).
+//   자기 줄(가져오기 줄 backfillChain 밖) · 동시 1 · KST 02~06시만 · 7일에 한 바퀴(못 끝내면 다음 밤에 그 쪽부터) ·
+//   429 · 5xx 는 같은 쪽 재시도(fetchWooPageWithRetry) 뒤 그 몰을 멈추고 다음 밤에 · 원천 시각 = 그 쪽을 읽은 시각(동의 시계) ·
+//   목록에 없음 = 탈퇴 근거 아님(아무것도 지우지 않는다).
+// ════════════════════════════════════════════════════════════════════
+
+export const WOO_MEMBER_REREAD_CYCLE_DAYS = 7;
+export const WOO_MEMBER_REREAD_KST_HOURS = { start: 2, end: 6 } as const;
+
+export interface WooMemberRereadState {
+  /** 다음에 읽을 회원 쪽(1부터) */
+  page: number;
+  /** 이번 바퀴를 시작한 시각 */
+  cycle_started_at: string;
+  updated_at: string;
+  /** 이번 바퀴가 끝난 시각(null = 도는 중) */
+  done_at: string | null;
+  /** 마지막으로 끝낸 바퀴의 시각(화면 · 감시) */
+  last_done_at: string | null;
+  customers_read: number;
+}
+
+function readMemberReread(v: any): WooMemberRereadState | null {
+  if (!v || typeof v !== 'object') return null;
+  const page = Number(v.page);
+  if (!Number.isFinite(page) || page < 1 || typeof v.cycle_started_at !== 'string') return null;
+  return {
+    page: Math.floor(page),
+    cycle_started_at: v.cycle_started_at,
+    updated_at: String(v.updated_at || v.cycle_started_at),
+    done_at: typeof v.done_at === 'string' ? v.done_at : null,
+    last_done_at: typeof v.last_done_at === 'string' ? v.last_done_at : null,
+    customers_read: Number.isFinite(Number(v.customers_read)) ? Math.max(0, Math.floor(Number(v.customers_read))) : 0,
+  };
+}
+
+/** 지금이 재대조 창(KST 02~06시)인가(순수) */
+export function wooMemberRereadWindowOpen(nowMs: number): boolean {
+  const h = new Date(nowMs + 9 * 3600_000).getUTCHours();
+  return h >= WOO_MEMBER_REREAD_KST_HOURS.start && h < WOO_MEMBER_REREAD_KST_HOURS.end;
+}
+
+/** 이번 창의 끝(다음 KST 06:00 · epoch ms) */
+export function wooMemberRereadWindowEnd(nowMs: number): number {
+  const kst = new Date(nowMs + 9 * 3600_000);
+  const end = Date.UTC(kst.getUTCFullYear(), kst.getUTCMonth(), kst.getUTCDate(), WOO_MEMBER_REREAD_KST_HOURS.end, 0, 0) - 9 * 3600_000;
+  return end > nowMs ? end : end + 24 * 3600_000;
+}
+
+/** 이 몰을 지금 어떻게 할까(순수) — 상태 없음 = 새 바퀴 · 도는 중 = 이어 감 · 끝났고 7일 지남 = 새 바퀴 · 그 밖 = 없음 */
+export function wooMemberRereadDue(st: WooMemberRereadState | null, nowMs: number): 'start' | 'continue' | 'none' {
+  if (!st) return 'start';
+  if (!st.done_at) return 'continue';
+  const started = Date.parse(st.cycle_started_at);
+  return !Number.isFinite(started) || nowMs - started >= WOO_MEMBER_REREAD_CYCLE_DAYS * 24 * 3600_000 ? 'start' : 'none';
+}
+
+async function saveMemberReread(companyId: string, mallId: string, st: WooMemberRereadState): Promise<void> {
+  st.updated_at = new Date().toISOString();
+  await query(
+    `UPDATE company_integrations
+        SET meta = COALESCE(meta, '{}'::jsonb) || jsonb_build_object('woo_member_reread', $3::jsonb), updated_at = NOW()
+      WHERE company_id = $1::uuid AND provider = 'woocommerce' AND mall_id = $2 AND status <> 'revoked'`,
+    [companyId, mallId, JSON.stringify(st)],
+  );
+}
+
+/**
+ * 한 몰의 회원 재대조를 창 끝(untilMs)까지 쪽마다 이어 간다. 쪽이 끝날 때마다 다음 쪽을 저장한다(재시작 · 다음 밤에 그 쪽부터).
+ * 첫 가져오기를 끝내지 않은 몰 · 키 없는 몰은 건드리지 않는다(첫 가져오기가 회원을 읽는다). 반환 = 끝난 상태(아무것도 안 했으면 null).
+ */
+export async function runWooMemberRereadSlice(companyId: string, mallId: string, untilMs: number, nowMs: () => number = Date.now): Promise<WooMemberRereadState | null> {
+  const integ = await getWooIntegration(companyId, mallId);
+  if (!integ || !hasKeys(integ) || integ.backfill?.stage !== 'done') return null;
+  const due = wooMemberRereadDue(integ.memberReread, nowMs());
+  if (due === 'none') return null;
+  const st: WooMemberRereadState = due === 'start'
+    ? { page: 1, cycle_started_at: new Date(nowMs()).toISOString(), updated_at: new Date(nowMs()).toISOString(), done_at: null, last_done_at: integ.memberReread?.last_done_at ?? null, customers_read: 0 }
+    : { ...integ.memberReread! };
+  await saveMemberReread(companyId, mallId, st);
+  const guard: WooRunGuard = { streak: 0, logged: 0 };
+  while (nowMs() < untilMs) {
+    const cur = await requireIntegration(companyId, mallId);   // 도는 중 해제 · 키 변경을 그 즉시 따른다
+    if (!hasKeys(cur)) break;
+    const res = await fetchWooPageWithRetry(cur, 'customers', { per_page: PAGE_SIZE, role: 'all', orderby: 'id', order: 'asc', page: st.page });
+    // 원천 시각 = 그 쪽을 요청한 시각(res.readAt · 처리 시각 아님 · Codex 1R)
+    const t = await processWooItems(cur, 'customer', res.items, guard, res.readAt);
+    st.customers_read += t.synced;
+    if (res.items.length === 0 || st.page >= res.totalPages) {
+      st.done_at = new Date(nowMs()).toISOString();
+      st.last_done_at = st.done_at;
+      await saveMemberReread(companyId, mallId, st);
+      console.log(`[WooCommerce reread] 회원 재대조 한 바퀴 끝 company=${companyId} mall=${mallId} 회원 ${st.customers_read}`);
+      return st;
+    }
+    st.page += 1;
+    await saveMemberReread(companyId, mallId, st);
+  }
+  return st;
+}
+
+const MEMBER_REREAD_LINE = 'woo-member-reread';
+
+/**
+ * 재대조 한 회차 — 창이 열려 있으면 대상 몰을 하나씩(자기 줄 · 동시 1) 창 끝까지. 한 몰의 실패가 다음 몰을 막지 않는다.
+ * 대상 = 활성 · 연결 확인 · 첫 가져오기 끝 · 요금제 문 통과(호출부 워커가 요금제를 본다).
+ */
+export function runWooMemberRereadPass(isAllowed: (companyId: string) => Promise<boolean>, nowMs: () => number = Date.now): Promise<number> {
+  return runSerial(MEMBER_REREAD_LINE, async () => {
+    if (!wooMemberRereadWindowOpen(nowMs())) return 0;
+    const until = wooMemberRereadWindowEnd(nowMs());
+    const r = await query(
+      `SELECT company_id, mall_id FROM company_integrations
+        WHERE provider = 'woocommerce' AND status = 'active' AND connected_at IS NOT NULL
+          AND meta->'woo_backfill'->>'stage' = 'done'
+        ORDER BY COALESCE((meta->'woo_member_reread'->>'updated_at')::timestamptz, connected_at) ASC`,
+    );
+    let n = 0;
+    for (const row of r.rows as Array<{ company_id: string; mall_id: string }>) {
+      if (nowMs() >= until) break;
+      try {
+        if (!(await isAllowed(row.company_id))) continue;
+        if (await runWooMemberRereadSlice(row.company_id, row.mall_id, until, nowMs)) n += 1;
+      } catch (e: any) {
+        console.warn(`[WooCommerce reread] 회원 재대조 멈춤(다음 밤에 그 쪽부터) company=${row.company_id} mall=${row.mall_id} code=${e instanceof WooApiError ? e.code : 'unknown'} — ${e?.message || e}`);
+      }
+    }
+    return n;
+  });
 }
 
 // ════════════════════════════════════════════════════════════════════

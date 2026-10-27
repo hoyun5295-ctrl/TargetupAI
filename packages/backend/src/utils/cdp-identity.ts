@@ -33,7 +33,10 @@ import { detectIdentityConflict } from './cdp-identity-conflict';
 import { recordIdentityReview } from './cdp-identity-review';
 // ★ 2026-09-18 자사몰 적재의 분류코드 기록 — 형제 적재 경로(upload·sync·단건)와 같은 줄을 CT 하나가 소유한다
 import { linkCustomerStore } from './customer-store-link';
-import { upsertStoreConsent, applyMissingConsentRule } from './mall-consent';
+import {
+  upsertStoreConsent, applyMissingConsentRule, consentClockSql, consentSourceAt, memberLinkExistsSql,
+  isConsentClockMissing, warnConsentClockMissingOnce, type MemberIdFormat,
+} from './mall-consent';
 
 // ═══════════════════════════════════════════════════════════
 // 타입
@@ -65,6 +68,18 @@ export interface IdentifyInput {
    *   비회원 주문도 전화번호로 회원 고객에 합쳐진다. `smsOptIn` 이 있으면 무시된다(명시 값이 진실).
    */
   profileConsentAbsent?: { consentKey: string; memberIdPrefix: string; memberIdRestPattern: string };
+  /**
+   * ★ 2026-10-27 자사몰 대비 K2-2 — smsOptIn 을 본 원천 시각(ISO). 웹훅 = 받은 시각 · 가져오기 = 읽은 시각 · 비우면 지금.
+   * 동의 쓰기는 그 자원에서 본 것 중 가장 늦은 시각 이상일 때만(같은 시각이면 NO 만 · 소속 행 · 고객 행 같은 조각).
+   */
+  consentAt?: string;
+  /**
+   * ★ 1027 K2-1 — smsOptIn 이 **주문 본문**에서 왔다(회원 정보가 아님). 그 고객에게 그 몰의 회원 연결이 있으면 무시(회원 정보만 진실) ·
+   * 고객 행은 만들 때와 NO 로 내릴 때만. syncOrder 만 싣는다(OrderInput.smsOptIn).
+   */
+  consentFromOrder?: boolean;
+  /** ★ 1027 K2-1 · K2-3 — 그 몰의 회원 연결 식별자 모양(우커머스 = `{몰}:` + 숫자). 없으면 비회원 꼴(guest: · order:)이 아닌 연결을 회원으로 본다 */
+  memberIdFormat?: MemberIdFormat;
   /**
    * 분류코드 (2026-09-18 · 설계서 docs/2026-09-18-mall-integration-user-scope-design.md §3-3)
    * - 이 회원이 들어온 몰의 분류코드. 주면 고객을 customer_stores 에 그 코드로 기록한다
@@ -135,6 +150,7 @@ export async function identifyCustomer(
 
   const normalizedPhone = input.phone ? normalizePhone(input.phone) : null;
   const email = input.email?.toLowerCase().trim() || null;
+  const consentAt = consentSourceAt(input.consentAt);   // ★ 1027 K2-2 — 동의 시계(없으면 지금 = 동기 호출의 받은 시각)
 
   // ★ 2026-09-22 몰별 수신동의(설계서 docs/2026-09-22-mall-consent-isolation-design.md §4-2 · H2):
   //   분류코드가 실린 호출(= 몰 단위 연동)의 수신동의는 **그 몰의 소속 행**이 진실이다(아래 recordStoreMembership).
@@ -142,9 +158,16 @@ export async function identifyCustomer(
   //   ⛔ 단 **철회(false)는 고객 행에도 내린다**(Codex 0922 R1): 몰 동의 읽기(ENV)가 켜지기 전과 관리자·여정·자동발송은 아직 고객 행을 읽는다.
   //      철회를 버리면 거부한 사람에게 나간다. 내리는 방향은 "덜 보낸다"뿐이고, 몰 사용자 발송은 ENV ON 뒤 소속 행만 본다(H2).
   //   storeCode 가 없는 호출(기존 호출처 전부)은 rowInput === input 이라 1바이트도 다르지 않다.
-  const rowInput: IdentifyInput = input.storeCode
+  const baseRowInput: IdentifyInput = input.storeCode
     ? { ...input, smsOptIn: input.smsOptIn === false ? false : undefined }
     : input;
+  // ★ 2026-10-27 자사몰 대비 K2-1 — 주문 본문의 동의는 그 고객에게 그 몰의 회원 연결이 없을 때만 · 고객 행은 만들 때와 NO 로 내릴 때만.
+  //   (고객 확정 뒤 판정 — 기존 고객에게 YES 는 고객 행에 올리지 않는다 · 소속 행은 recordStoreMembership 이 같은 판정으로)
+  const rowInputFor = async (existingCustomerId: string | null): Promise<IdentifyInput> => {
+    if (!input.consentFromOrder || baseRowInput.smsOptIn === undefined || !existingCustomerId) return baseRowInput;
+    if (baseRowInput.smsOptIn === true) return { ...baseRowInput, smsOptIn: undefined };
+    return (await hasMallMemberLink(companyId, existingCustomerId, input)) ? { ...baseRowInput, smsOptIn: undefined } : baseRowInput;
+  };
 
   // ★ 1단계: 기존 link 매칭 (source + external_id)
   const existingLink = await query(
@@ -162,7 +185,7 @@ export async function identifyCustomer(
     const linkRow = existingLink.rows[0];
     if (linkRow.customer_id) {
       // 기존 연결 완료 link → last_seen 갱신 + customer 컬럼 변경 사항만 update
-      await syncCustomerFields(companyId, linkRow.customer_id, rowInput, normalizedPhone, email);
+      await syncCustomerFields(companyId, linkRow.customer_id, await rowInputFor(linkRow.customer_id), normalizedPhone, email);
       await query(
         `UPDATE cdp_identity_links
          SET external_email = COALESCE($2, external_email),
@@ -226,16 +249,30 @@ export async function identifyCustomer(
     }
     // 2026-06-10 정정: sms_opt_in 무조건 true → 명시 동의값만 반영, 미전달 신규는 false.
     // (동의 없는 자사몰 회원이 광고 발송 대상이 되던 구조 차단 — 정보통신망법 사전 동의)
-    const newCustomer = await query(
-      `INSERT INTO customers (
+    // ★ 2026-10-27 자사몰 대비 K2-4 — 새 고객 = 시계 칸에 원천 시각 · 같은 번호 행과 부딪히면(비활성 행) 그 행 값은 시계 조각을 지난다.
+    //   ON CONFLICT 갈래는 이미 있는 고객이라 주문 본문의 YES 는 올리지 않는다(만들 때와 NO 로 내릴 때만 · K2-1).
+    const insertOptIn = baseRowInput.smsOptIn ?? null;
+    const conflictOptIn = input.consentFromOrder && insertOptIn === true ? null : insertOptIn;
+    const buildInsert = (clock: boolean): { sql: string; params: any[] } => {
+      const params: any[] = [
+        companyId, normalizedPhone, input.name || null, email, input.gender || null,
+        normalizeDate(input.birthDate) || null, input.grade || null, input.address || null,
+        JSON.stringify(input.customFields || {}), `cdp_${input.source}`, insertOptIn, conflictOptIn,
+      ];
+      let atRef = '';
+      if (clock) { params.push(consentAt); atRef = `$${params.length}::timestamptz`; }
+      const ok = consentOkSql(params, 'customers', '$12::boolean', atRef, input);
+      return {
+        params,
+        sql: `INSERT INTO customers (
         id, company_id, phone, name, email,
         gender, birth_date, grade, address,
-        custom_fields, source, is_active, sms_opt_in,
+        custom_fields, source, is_active, sms_opt_in,${clock ? ' consent_source_at,' : ''}
         created_at, updated_at
       ) VALUES (
         gen_random_uuid(), $1::uuid, $2, $3, $4,
         $5, $6, $7, $8,
-        $9::jsonb, $10, true, COALESCE($11::boolean, false),
+        $9::jsonb, $10, true, COALESCE($11::boolean, false),${clock ? ` CASE WHEN $11::boolean IS NOT NULL THEN ${atRef} END,` : ''}
         NOW(), NOW()
       )
       ON CONFLICT (company_id, phone)
@@ -246,29 +283,19 @@ export async function identifyCustomer(
         birth_date = COALESCE(EXCLUDED.birth_date, customers.birth_date),
         grade = COALESCE(EXCLUDED.grade, customers.grade),
         address = COALESCE(EXCLUDED.address, customers.address),
-        sms_opt_in = COALESCE($11::boolean, customers.sms_opt_in),
+        sms_opt_in = CASE WHEN ${ok} THEN $12::boolean ELSE customers.sms_opt_in END,${clock ? `
+        consent_source_at = CASE WHEN ${ok} THEN ${atRef} ELSE customers.consent_source_at END,` : ''}
         updated_at = NOW()
       RETURNING id, (xmax = 0) AS was_inserted`,
-      [
-        companyId,
-        normalizedPhone,
-        input.name || null,
-        email,
-        input.gender || null,
-        normalizeDate(input.birthDate) || null,
-        input.grade || null,
-        input.address || null,
-        JSON.stringify(input.customFields || {}),
-        `cdp_${input.source}`,
-        rowInput.smsOptIn ?? null,
-      ]
-    );
+      };
+    };
+    const newCustomer = await runConsentClocked('customers', buildInsert);
     customerId = newCustomer.rows[0].id;
     wasCreated = !!newCustomer.rows[0].was_inserted;
     if (!wasCreated) wasMerged = true;
   } else {
     // 매칭된 기존 customer에 필드 sync
-    await syncCustomerFields(companyId, customerId, rowInput, normalizedPhone, email);
+    await syncCustomerFields(companyId, customerId, await rowInputFor(customerId), normalizedPhone, email);
   }
 
   // ★ link INSERT (모든 경로 공통)
@@ -341,18 +368,35 @@ export async function identifyCustomer(
  * ⛔ 영구 수신거부 표(unsubscribes)로 옮기지 않는다(D93 · unsubscribe-helper brandRefusalCopyCond 주석 — 몰 동의로 보내는 계정이
  *   다시 동의해도 풀리지 않게 된다). 연결된 고객이 없으면 0(모르는 회원을 만들지 않는다).
  */
-export async function withdrawMemberConsent(companyId: string, source: string, externalId: string): Promise<number> {
+export async function withdrawMemberConsent(
+  companyId: string,
+  source: string,
+  externalId: string,
+  /** ★ 2026-10-27 자사몰 대비 K2-2 · K5 — 탈퇴를 본 원천 시각(삭제 시각 · 모르면 받은 시각) */
+  sourceAt: string,
+): Promise<number> {
   if (!source || !externalId) return 0;
-  const r = await query(
-    `UPDATE customers SET sms_opt_in = false, updated_at = NOW()
+  const r = await runConsentClocked('customers', (clock) => {
+    const params: any[] = [companyId, source, externalId];
+    let clockSet = '';
+    let clockWhere = '';
+    if (clock) {
+      params.push(consentSourceAt(sourceAt));
+      clockSet = `, consent_source_at = $${params.length}::timestamptz`;
+      clockWhere = `AND ${consentClockSql('consent_source_at', `$${params.length}::timestamptz`, 'false')}`;
+    }
+    // 시계 판 = 이미 NO 인 행도 시계는 앞으로(값이 같아도 시계 한 칸 · 늦게 온 옛 YES 가 탈퇴를 못 넘게) · 지금 동작 판 = 바뀌는 행만(옛 그대로)
+    return {
+      params,
+      sql: `UPDATE customers SET sms_opt_in = false${clockSet}, updated_at = NOW()
       WHERE company_id = $1::uuid
         AND id IN (
           SELECT customer_id FROM cdp_identity_links
            WHERE company_id = $1::uuid AND source = $2 AND external_id = $3 AND customer_id IS NOT NULL
         )
-        AND (sms_opt_in IS NULL OR sms_opt_in = true)`,
-    [companyId, source, externalId]
-  );
+        ${clock ? clockWhere : 'AND (sms_opt_in IS NULL OR sms_opt_in = true)'}`,
+    };
+  });
   return r.rowCount || 0;
 }
 
@@ -416,7 +460,7 @@ async function recordStoreMembership(
   companyId: string,
   customerId: string,
   /** 식별 입력 원본(동결 전) — 분류코드 · 그 몰이 준 수신동의(명시 값일 때만) · 출처 · 식별자 · 「회원 정보에 값 없음」 표시 */
-  input: Pick<IdentifyInput, 'storeCode' | 'smsOptIn' | 'source' | 'externalId' | 'profileConsentAbsent'>,
+  input: Pick<IdentifyInput, 'storeCode' | 'smsOptIn' | 'source' | 'externalId' | 'profileConsentAbsent' | 'consentAt' | 'consentFromOrder' | 'memberIdFormat'>,
 ): Promise<void> {
   const { storeCode, smsOptIn, source } = input;
   if (!storeCode) return;
@@ -430,7 +474,15 @@ async function recordStoreMembership(
   // ⛔ 이 쓰기의 실패는 삼키지 않는다(Codex 0922 R1) — 철회(false)가 조용히 사라지면 그 몰에서 거부한 사람에게 계속 나간다.
   //    던지면 웹훅은 재처리 경로로, 가져오기는 그 건만 failed 로 남는다. 컬럼 미존재(42703)는 CT 가 안에서 처리한다.
   if (smsOptIn !== undefined) {
-    await upsertStoreConsent(companyId, customerId, storeCode, smsOptIn, source || 'unknown');
+    // ★ 2026-10-27 자사몰 대비 K2-1 — 주문 본문의 동의 = 그 몰의 회원 연결이 없는 고객에게만(회원은 회원 정보가 진실)
+    if (input.consentFromOrder) {
+      if (await hasMallMemberLink(companyId, customerId, input)) return;
+      await upsertStoreConsent(companyId, customerId, storeCode, smsOptIn, source || 'unknown', consentSourceAt(input.consentAt));
+      return;
+    }
+    // ★ 1027 K2-3 — 회원 정보의 동의 = 그 고객에게 그 몰의 다른 회원 연결이 있으면 YES 거절(가족 번호 · NO 만 받음)
+    await upsertStoreConsent(companyId, customerId, storeCode, smsOptIn, source || 'unknown', consentSourceAt(input.consentAt),
+      { source: source || 'unknown', externalId: input.externalId, format: input.memberIdFormat ?? null });
     return;
   }
   // ★ 2026-10-02 「회원 정보에 동의 값이 없으면 동의」 규칙(CT mall-consent · 연동 행 meta.consent_missing_agree_key).
@@ -446,10 +498,42 @@ async function recordStoreMembership(
       consentKey: absent.consentKey,
       memberIdPrefix: absent.memberIdPrefix,
       memberIdRestPattern: absent.memberIdRestPattern,
-    });
+    }, consentSourceAt(input.consentAt));
   } catch (err: any) {
     console.warn('[CDP Identity] 회원 정보 동의 값 없음 규칙 적용 실패 (식별 자체는 완료 · 모름으로 남는다):', err?.message || err);
   }
+}
+
+/**
+ * ★ 2026-10-27 자사몰 대비 K2-4 — 고객 행 동의를 써도 되는가(SQL 조각): 값이 실렸고 · 시계 조각(atRef 가 있을 때) · YES 면 그 몰의 다른 회원 연결 없음(가족 번호).
+ *   주문 본문의 동의(consentFromOrder)는 가족 번호 대상이 아니다(회원 연결이 있으면 호출 전에 이미 빠진다).
+ */
+function consentOkSql(params: any[], table: string, optInRef: string, atRef: string, input: IdentifyInput, companyRef = '$1::uuid', customerRef = `${table}.id`): string {
+  const clock = atRef ? ` AND ${consentClockSql(`${table}.consent_source_at`, atRef, optInRef)}` : '';
+  const family = !input.consentFromOrder && input.source && input.externalId
+    ? ` AND (${optInRef} = false OR NOT ${memberLinkExistsSql(params, { companyRef, customerRef, source: input.source, excludeExternalId: input.externalId, format: input.memberIdFormat ?? null })})`
+    : '';
+  return `(${optInRef} IS NOT NULL${clock}${family})`;
+}
+
+/** 시계 칸이 있으면 시계 판, 없으면(DDL-3 전 · 42703) 지금 동작 판으로 한 번 더(경고 1회) */
+async function runConsentClocked(table: string, build: (clock: boolean) => { sql: string; params: any[] }): Promise<any> {
+  try {
+    const q = build(true);
+    return await query(q.sql, q.params);
+  } catch (err: any) {
+    if (!isConsentClockMissing(err)) throw err;
+    warnConsentClockMissingOnce(table);
+    const q = build(false);
+    return await query(q.sql, q.params);
+  }
+}
+
+/** 그 고객에게 그 몰의 회원 연결이 있는가(주문 본문 동의 판정 · K2-1) */
+async function hasMallMemberLink(companyId: string, customerId: string, input: Pick<IdentifyInput, 'source' | 'memberIdFormat'>): Promise<boolean> {
+  const params: any[] = [companyId, customerId];
+  const r = await query(`SELECT ${memberLinkExistsSql(params, { companyRef: '$1::uuid', customerRef: '$2::uuid', source: input.source, format: input.memberIdFormat ?? null })} AS has`, params);
+  return r.rows[0]?.has === true;
 }
 
 /** 같은 회사에서 normalizedPhone을 보유한 활성 고객 id 1건(없으면 null). A1/A4 phone 충돌 판정 공용. */
@@ -473,19 +557,9 @@ async function syncCustomerFields(
 ): Promise<void> {
   // 자사몰이 제공한 필드만 COALESCE 덮어쓰기 (NULL은 기존 값 유지)
   // sms_opt_in은 명시 전달된 경우에만 반영 (동의 부여/철회 모두 자사몰 값이 권위)
-  await query(
-    `UPDATE customers SET
-      name = COALESCE($2, name),
-      email = COALESCE($3, email),
-      gender = COALESCE($4, gender),
-      birth_date = COALESCE($5, birth_date),
-      grade = COALESCE($6, grade),
-      address = COALESCE($7, address),
-      custom_fields = COALESCE(custom_fields, '{}'::jsonb) || $8::jsonb,
-      sms_opt_in = COALESCE($9::boolean, sms_opt_in),
-      updated_at = NOW()
-    WHERE id = $1::uuid`,
-    [
+  // ★ 2026-10-27 자사몰 대비 K2-4 — 동의 칸은 시계 조각 · 가족 번호를 지난다(소속 행과 같은 조각 · 다른 칸은 그대로)
+  await runConsentClocked('customers', (clock) => {
+    const params: any[] = [
       customerId,
       input.name || null,
       email,
@@ -495,8 +569,27 @@ async function syncCustomerFields(
       input.address || null,
       JSON.stringify(input.customFields || {}),
       input.smsOptIn ?? null,
-    ]
-  );
+      companyId,
+    ];
+    let atRef = '';
+    if (clock) { params.push(consentSourceAt(input.consentAt)); atRef = `$${params.length}::timestamptz`; }
+    const ok = consentOkSql(params, 'customers', '$9::boolean', atRef, input, '$10::uuid', '$1::uuid');
+    return {
+      params,
+      sql: `UPDATE customers SET
+      name = COALESCE($2, name),
+      email = COALESCE($3, email),
+      gender = COALESCE($4, gender),
+      birth_date = COALESCE($5, birth_date),
+      grade = COALESCE($6, grade),
+      address = COALESCE($7, address),
+      custom_fields = COALESCE(custom_fields, '{}'::jsonb) || $8::jsonb,
+      sms_opt_in = CASE WHEN ${ok} THEN $9::boolean ELSE sms_opt_in END,${clock ? `
+      consent_source_at = CASE WHEN ${ok} THEN ${atRef} ELSE consent_source_at END,` : ''}
+      updated_at = NOW()
+    WHERE id = $1::uuid AND company_id = $10::uuid`,
+    };
+  });
 
   // ★ A1·A4 (2026-06-25): phone 자동 갱신 + 충돌(타 고객 점유 / email-phone 불일치) 검수 플래그.
   //   - 번호 변경 회원이 이전 번호로 남아 발송 실패하던 문제(A1) 해소: 점유자 없으면 자동 갱신.

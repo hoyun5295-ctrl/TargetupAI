@@ -48,33 +48,35 @@ router.post('/webhook', async (req: Request, res: Response) => {
       return res.status(400).json({ success: false, error: 'imweb event 또는 siteCode가 누락되었습니다.' });
     }
 
-    // ★ 2026-09-27 한줄로 V2 R244 — 같은 사이트가 여러 회사에 연동돼 있으면 전부에게 전달한다(옛: LIMIT 1 임의 한 회사).
-    const integrations = await getImwebIntegrationsBySiteCode(String(siteCode));
-    if (integrations.length === 0) {
-      console.warn('[Imweb Webhook] 미연동 siteCode, 무시:', siteCode);
-      return res.status(404).json({ success: false, error: '연동된 siteCode가 없습니다.' });
-    }
-
     // 공유 토큰(헤더) 검증 — env IMWEB_WEBHOOK_SECRET 기준
+    // ★ 2026-10-27 자사몰 대비 K2-5(SC3) — 인증을 연동 조회보다 먼저 본다(인증 실패 = 401 그대로 · 인증 통과 + 연동 없음 = 200).
     if (!verifyImwebWebhook(req.headers, null)) {
       console.warn('[Imweb Webhook] 인증 토큰 검증 실패, siteCode=', siteCode);
       return res.status(401).json({ success: false, error: '웹훅 인증에 실패했습니다.' });
     }
 
+    // ★ 2026-09-27 한줄로 V2 R244 — 같은 사이트가 여러 회사에 연동돼 있으면 전부에게 전달한다(옛: LIMIT 1 임의 한 회사).
+    const integrations = await getImwebIntegrationsBySiteCode(String(siteCode));
+    if (integrations.length === 0) {
+      // ★ 1027 — 시험 사이트를 지운 뒤 · 해제 뒤 404 실패가 쌓이면 몰 쪽이 웹훅을 끌 수 있어 카페24 와 같은 꼴(200 · 기록 0 · 로그 1줄)
+      console.log('[Imweb Webhook] 미연동 siteCode — 인증된 요청이라 200 무시:', siteCode, 'event:', event);
+      return res.json({ success: true, ignored: true });
+    }
+
     const resource = extractWebhookResource('imweb', req.body || {});
     const idempotencyKey = imwebAdapter.buildIdempotencyKey(event, resource, req.body || {});
 
+    // 기록 → 즉시 200 → 처리는 뒤(★ 1027 K2-5)
     const outcome = await deliverWebhookToCompanies({
       source: 'imweb',
       companyIds: integrations.map((i) => i.companyId),
       event,
       idempotencyKey,
       payload: req.body || {},
-      process: (companyId) => imwebAdapter.processWebhookEvent(companyId, event, resource),
+      mallId: String(siteCode),
       logTag: 'Imweb',
     });
-    if (outcome.failed > 0) return res.json({ success: false, error: '이벤트 처리 실패' });
-    if (outcome.processed === 0 && outcome.duplicate > 0) return res.json({ success: true, duplicate: true });
+    if (outcome.recorded === 0 && outcome.duplicate > 0) return res.json({ success: true, duplicate: true });
     return res.json({ success: true });
   } catch (err: any) {
     console.error('[Imweb Webhook] 오류:', err);

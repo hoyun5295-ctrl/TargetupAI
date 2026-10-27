@@ -102,41 +102,42 @@ describe('parseWooEvent — "{mall}:{topic}" 분해', () => {
   });
 });
 
-describe('processWebhookEvent — 재처리 워커와 같은 시그니처(companyId, event, resource)', () => {
+describe('processWebhookEvent — 재처리 워커와 같은 시그니처(companyId, event, resource, ctx)', () => {
+  const CTX = { observedAt: '2026-09-14T09:30:00.000Z', storeCode: null };   // ★ 2026-10-27 K2-5 수신 맥락
   const order = { id: 727, status: 'processing', currency: 'KRW', date_created_gmt: '2026-09-14T09:28:02', total: '1000', customer_id: 25, billing: { first_name: '길동', last_name: '홍', email: 'h@example.invalid', phone: '010-0000-0001' }, meta_data: [{ key: 'marketing_agree', value: 'Y' }], line_items: [] };
-  it('주문 생성: 행 meta 의 수신동의 메타키로 identify(smsOptIn) → syncOrder(orderId 몰 접두)', async () => {
-    await woocommerceAdapter.processWebhookEvent(COMPANY, 'ilbonimo.com:order.created', order);
-    expect((identifyCustomer as any).mock.calls[0][1]).toMatchObject({ source: 'woocommerce', externalId: 'ilbonimo.com:25', smsOptIn: true });
-    expect((syncOrder as any).mock.calls[0][1]).toMatchObject({ source: 'woocommerce', orderId: 'ilbonimo.com:727', status: 'paid' });
+  // ★ 2026-10-27 자사몰 대비 K2-1 — 주문 본문의 동의는 syncOrder 한 호출로(따로 식별해 회원 동의로 쓰지 않는다 · 판정 = 식별 CT)
+  it('주문 생성: 행 meta 의 수신동의 메타키로 읽은 값을 syncOrder 에 싣는다(orderId 몰 접두) · 따로 identify 0', async () => {
+    await woocommerceAdapter.processWebhookEvent(COMPANY, 'ilbonimo.com:order.created', order, CTX);
+    expect(identifyCustomer).not.toHaveBeenCalled();
+    expect((syncOrder as any).mock.calls[0][1]).toMatchObject({ source: 'woocommerce', orderId: 'ilbonimo.com:727', status: 'paid', smsOptIn: true, memberIdFormat: { memberIdPrefix: 'ilbonimo.com:' } });
     // 행 조회는 회사 + 몰 둘로 좁힌다(타사 몰 오적재 차단)
     const sel = q.mock.calls.find((c: any[]) => String(c[0]).includes('SELECT'));
     expect(sel![1]).toEqual([COMPANY, MALL]);
   });
   it('★0918 몰 행에 분류코드가 있으면 웹훅 적재도 그 코드로 (identify·syncOrder 양쪽) · 없으면 키 없음', async () => {
     q.mockImplementation(async () => ({ rows: [{ ...integrationRow, meta: { ...integrationRow.meta, store_code: 'ILBON' } }] }));
-    await woocommerceAdapter.processWebhookEvent(COMPANY, 'ilbonimo.com:order.created', order);
-    expect((identifyCustomer as any).mock.calls[0][1]).toMatchObject({ storeCode: 'ILBON' });
+    await woocommerceAdapter.processWebhookEvent(COMPANY, 'ilbonimo.com:order.created', order, CTX);
     expect((syncOrder as any).mock.calls[0][1]).toMatchObject({ orderId: 'ilbonimo.com:727', storeCode: 'ILBON' });
     (identifyCustomer as any).mockClear();
     (syncOrder as any).mockClear();
     q.mockImplementation(async () => ({ rows: [integrationRow] }));
-    await woocommerceAdapter.processWebhookEvent(COMPANY, 'ilbonimo.com:order.created', order);
+    await woocommerceAdapter.processWebhookEvent(COMPANY, 'ilbonimo.com:order.created', order, CTX);
     expect('storeCode' in (syncOrder as any).mock.calls[0][1]).toBe(false);
   });
   it('회원 갱신: identify 만', async () => {
-    await woocommerceAdapter.processWebhookEvent(COMPANY, 'ilbonimo.com:customer.updated', { id: 25, email: 'h@example.invalid', first_name: '길동', last_name: '홍', billing: { phone: '010-0000-0001' }, meta_data: [] });
+    await woocommerceAdapter.processWebhookEvent(COMPANY, 'ilbonimo.com:customer.updated', { id: 25, email: 'h@example.invalid', first_name: '길동', last_name: '홍', billing: { phone: '010-0000-0001' }, meta_data: [] }, CTX);
     expect(identifyCustomer).toHaveBeenCalledTimes(1);
     expect(syncOrder).not.toHaveBeenCalled();
   });
   it('삭제 주제({id}만) · 미지 주제 → 적재 0 · 던지지 않는다', async () => {
-    await woocommerceAdapter.processWebhookEvent(COMPANY, 'ilbonimo.com:order.deleted', { id: 727 });
-    await woocommerceAdapter.processWebhookEvent(COMPANY, 'ilbonimo.com:product.created', { id: 1 });
+    await woocommerceAdapter.processWebhookEvent(COMPANY, 'ilbonimo.com:order.deleted', { id: 727 }, CTX);
+    await woocommerceAdapter.processWebhookEvent(COMPANY, 'ilbonimo.com:product.created', { id: 1 }, CTX);
     expect(identifyCustomer).not.toHaveBeenCalled();
     expect(syncOrder).not.toHaveBeenCalled();
   });
   it('회사에 그 몰 행이 없으면 던진다(재처리 워커가 failed 로 남긴다 · 조용히 성공 처리하지 않는다)', async () => {
     q.mockImplementation(async () => ({ rows: [] }));
-    await expect(woocommerceAdapter.processWebhookEvent(COMPANY, 'lens007.net:order.created', order)).rejects.toThrow(/연동/);
+    await expect(woocommerceAdapter.processWebhookEvent(COMPANY, 'lens007.net:order.created', order, CTX)).rejects.toThrow(/연동/);
     expect(syncOrder).not.toHaveBeenCalled();
   });
 });

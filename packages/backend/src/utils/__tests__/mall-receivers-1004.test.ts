@@ -31,6 +31,8 @@ import { runCdpWebhookRetryPass } from '../cdp-webhook-retry-worker';
 import * as registry from '../provider-registry';
 
 const CO = '00000000-0000-0000-0000-0000000000c1';
+/** ★ 2026-10-27 K2-5 — 수신 CT 가 넘기는 맥락(받은 시각 · 연동 행 분류코드) */
+const CTX = { observedAt: '2026-10-04T01:00:00.000Z', storeCode: null };
 
 beforeEach(() => {
   q.mockReset();
@@ -56,47 +58,51 @@ describe('C5 카페24 주문 상태 코드', () => {
 
 describe('I2~I5 아임웹 수신부', () => {
   it('탈퇴 = 그 회원 연결 고객의 수신동의 철회 + 기록 이벤트', async () => {
-    await imwebAdapter.processWebhookEvent!(CO, 'END_USER_WITHDRAWAL', { memberUid: 'u-1' });
-    expect(withdrawMemberConsent).toHaveBeenCalledWith(CO, 'imweb', 'u-1');
+    await imwebAdapter.processWebhookEvent!(CO, 'END_USER_WITHDRAWAL', { memberUid: 'u-1' }, CTX);
+    expect(withdrawMemberConsent).toHaveBeenCalledWith(CO, 'imweb', 'u-1', CTX.observedAt);   // ★ 1027 K2-2 탈퇴 시각(모르면 받은 시각)
   });
   it('장바구니 = 표준 이름 cart_add', async () => {
-    await imwebAdapter.processWebhookEvent!(CO, 'END_USER_CART_ADD', { memberUid: 'u-1', prodNo: 'P1' });
+    await imwebAdapter.processWebhookEvent!(CO, 'END_USER_CART_ADD', { memberUid: 'u-1', prodNo: 'P1' }, CTX);
     expect(vi.mocked(trackEvent).mock.calls[0][1]).toMatchObject({ eventName: 'cart_add' });
   });
   it('입금 완료 = paid', async () => {
-    await imwebAdapter.processWebhookEvent!(CO, 'ORDER_DEPOSIT_COMPLETE', { orderNo: 'O1', memberUid: 'u-1', totalPrice: 1000, orderTime: '2026-10-04T10:00:00+09:00' });
+    await imwebAdapter.processWebhookEvent!(CO, 'ORDER_DEPOSIT_COMPLETE', { orderNo: 'O1', memberUid: 'u-1', totalPrice: 1000, orderTime: '2026-10-04T10:00:00+09:00' }, CTX);
     expect(vi.mocked(syncOrder).mock.calls[0][1]).toMatchObject({ status: 'paid', orderId: 'O1' });
   });
   it('취소 완료 = 매출 차감(cancelled) · 환불 = refunded · 같은 고객 식별 규칙', async () => {
-    await imwebAdapter.processWebhookEvent!(CO, 'ORDER_CANCEL_COMPLETE', { orderNo: 'O1', memberUid: 'u-1' });
-    await imwebAdapter.processWebhookEvent!(CO, 'ORDER_REFUND', { orderNo: 'O2', call: '01000000001' });
+    await imwebAdapter.processWebhookEvent!(CO, 'ORDER_CANCEL_COMPLETE', { orderNo: 'O1', memberUid: 'u-1' }, CTX);
+    await imwebAdapter.processWebhookEvent!(CO, 'ORDER_REFUND', { orderNo: 'O2', call: '01000000001' }, CTX);
     expect(vi.mocked(syncOrder).mock.calls[0][1]).toMatchObject({ status: 'cancelled', orderId: 'O1', externalId: 'u-1' });
     expect(vi.mocked(syncOrder).mock.calls[1][1]).toMatchObject({ status: 'refunded', orderId: 'O2', externalId: 'guest:01000000001' });
   });
   it('회원도 번호도 없는 취소 = 고객을 지어내지 않는다(차감 생략 · 예외 없음)', async () => {
-    await expect(imwebAdapter.processWebhookEvent!(CO, 'ORDER_CANCEL_COMPLETE', { orderNo: 'O3' })).resolves.toBeUndefined();
+    await expect(imwebAdapter.processWebhookEvent!(CO, 'ORDER_CANCEL_COMPLETE', { orderNo: 'O3' }, CTX)).resolves.toBeUndefined();
     expect(syncOrder).not.toHaveBeenCalled();
     expect(trackEvent).not.toHaveBeenCalled();
   });
 });
 
 describe('W1 웹훅 재처리', () => {
-  it("'received' 로 멈춘 행도 집는다 · 실패하면 failed 로 · 다 쓰면 알림", async () => {
+  // ★ 2026-10-27 자사몰 대비 K2-6 — 선택은 선점 문장 하나(claimDeliveries)로 바뀌었다. 행 상태 단정은 cdp-webhook-claim-1027(pg-mem)이 맡는다.
+  it("'received' 로 멈춘 행도 집는다 · 실패하면 failed 로(재처리 = 횟수 + 1) · 다 쓰면 알림", async () => {
     vi.spyOn(registry, 'getProvider').mockReturnValue({
       processWebhookEvent: vi.fn(async () => { throw new Error('boom'); }),
     } as any);
+    let claimed = false;
     q.mockImplementation(async (sql: string) => {
-      if (/SELECT id, company_id, source, webhook_event, payload, retry_count/.test(sql)) {
-        return { rows: [{ id: 'd1', company_id: CO, source: 'cafe24', webhook_event: 'order.created', payload: { resource: {} }, retry_count: 0 }], rowCount: 1 };
+      if (/SET processed_at = NOW\(\)\s+WHERE id IN/.test(sql)) {
+        if (claimed) return { rows: [], rowCount: 0 };
+        claimed = true;
+        return { rows: [{ id: 'd1', company_id: CO, source: 'cafe24', webhook_event: 'order.created', payload: { resource: {} }, retry_count: 0, created_at: new Date() }], rowCount: 1 };
       }
       if (/COUNT\(\*\)::int AS n FROM cdp_webhook_deliveries/.test(sql)) return { rows: [{ n: 2 }], rowCount: 1 };
       return { rows: [], rowCount: 0 };
     });
     await runCdpWebhookRetryPass();
-    const select = q.mock.calls.find((c) => /SELECT id, company_id, source/.test(String(c[0])))![0] as string;
-    expect(select).toMatch(/status = 'received' AND created_at < NOW\(\) - INTERVAL '10 minutes'/);
-    const failUpdate = q.mock.calls.find((c) => /SET status = 'failed',\s*retry_count = retry_count \+ 1/.test(String(c[0])));
-    expect(failUpdate).toBeTruthy();
+    const claim = q.mock.calls.find((c) => /SET processed_at = NOW\(\)\s+WHERE id IN/.test(String(c[0])))![0] as string;
+    expect(claim).toMatch(/status = 'received' AND COALESCE\(processed_at, created_at\) < NOW\(\) - INTERVAL '10 minutes'/);
+    const failUpdate = q.mock.calls.find((c) => /SET status = 'failed'/.test(String(c[0])));
+    expect(failUpdate?.[1]).toEqual(['d1', 'boom', 1]);
     expect(sendSystemAlert).toHaveBeenCalledWith(expect.objectContaining({ dedupKey: 'cdp-webhook-exhausted' }));
   });
 });

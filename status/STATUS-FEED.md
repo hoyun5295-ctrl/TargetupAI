@@ -214,6 +214,27 @@
 > W1 한줄전단 API(별개 저장소 hanjulDM · 원장 = hanjulDM status/STATUS.md 1027 절) = 첫 경보로 찾음 → 같은 날 닫음. 의존성 = 운영 audit 치명 1 · 높음 19 → 0(puppeteer 25 · xlsx 공식 0.20.3 · zod 제거 · allowScripts = puppeteer@25.16.0 만) · W3 렌더 크롬 = 기동 한 곳 `utils/flyer/product/render-browser.ts` · --no-sandbox 0 · 같은 /opt/hanjul-chrome · 못 뜨면 실패 · W2 로그인 요청 제한 = 비밀번호 · OTP · 등록 토큰 확인 5곳 `middlewares/login-limiter.ts`(같은 IP 처리 중 + 1분 안 실패 > 10 = 429 · 들어올 때 세고 성공하면 뺌 · Codex 1R 「동시 정상 11건째 429」는 끝난 실패만 세면 몰아 보내는 추측이 한도 없이 통과해 불수용 · 두 동작 시험 고정) · 함께 닫음 = xlsx 0.20.3 이 날짜 칸을 서버 시각대 자정으로 줘 고객 업로드 생일이 KST 에서 하루 앞 → CT `sheetDateToYmd`. 검증 = tsc 0 · vitest 375 · 변이 5 · Codex 적대 2R approve(1R 은 요청문이 파일 읽기까지 막아 4개만 읽음 = 재발 기록). 실측(09:10) = audit 운영 0 · build:safe · 새 dist 크롬 = /opt 156 · 샌드박스 끄는 인자 0 · PDF · PNG 생성 · restart 뒤 online · Node 24.22.1 · health 200 · nginx 경유 없는 아이디 11번 = 401 10 → 429(도메인 DNS = .62 직결 · CDN 없음) · 에러 로그 새 줄 0.
 > 남은 것 = 3 밤 창 apt 99 + 커널 재부팅 · 4 SSH 키 전용(두 번째 문 실측 먼저) · 5 패널 2단계(Harold) · 6 떠돌이 파일 · 8 이상 행위 경보(기준값 실데이터) · 9 백업 복구 훈련 · A4 HMAC(IMC 업체 키 발급 요청) · A1 · A5 · 미실측 = 재시작 뒤 정상 080 콜백 등록 줄 · 한줄전단 실제 전단 PDF · OG 경로 첫 요청 · 범위 밖 기록 = 한줄전단 고객 화면 파일 업로드 응답 계약 불일치(success · fileId) · pdfkit 미사용 선언 · 한줄로 프론트 react-router 7(닿지 않는 2건) · pos-agent 의존성(별도 배포본)
 
+<a id="c72"></a>
+
+### C72 · ★1027 실 PG 시험층 · 배포 원장 설계 — Codex 적대 5R approve · Harold 검토 대기
+> 호출어 **"실 PG 시험층 / 배포 원장 / 개발 루프"** → [설계서](../docs/2026-10-27-real-pg-test-deploy-ledger-design.md)(D1~D6 · 진행표 §11)
+> 왜 = Harold 1027 「과연 주인님인 나랑 일하면서 효율이 좋아 질것인가 아님 또다른 방해요소일까 그리고 발전적으로 할 방법이 뭐일까」 → 브레인스토밍(기획 · 백엔드 · 회의론자) → 「수렴안과 추천 1~4대로 설계서 작성 시작해」.
+> 정한 것 = 그릇 tu-pgtest(Harold 1회 · AI 는 t_ DB 만) · 실행기 허용 목록 env · 운영 schema-only 덤프(저장소 밖) · 정의 해시 대조 · 첫 판 선점 시험 1파일 · 스탬프 계약 · 배포 원장(pulled_head · deployed_head 계산 · 카드 표시 계산 · git 밖 단계만) · 규칙 3줄(구현 첫 단계).
+> 구현(1027 · Harold 「D5 · D6 추천대로 받고 구현 시작해」) = 규칙 3줄(CLAUDE.md no_system_modification git 읽기 세 명령 · db_column_verify_before_code 덤프 확인 · never_operate 메모리 tu-pgtest 예외) · [배포 원장](DEPLOY-LEDGER.md)(C70 · C71 · C72 · C71 DDL 원문을 설계서에서 옮김) · OPS §2-2 · STATUS 연결 · `scripts/test-pg-env.mjs` · `test-pg.mjs` · `deploy-ledger-lib.mjs` · `deploy-ledger.mjs` · `vitest.pg.config.ts` · `vitest.globs.ts` · `src/utils/__tests__/pg/*`(안전문 · 관리 연결 · 덤프 · 정의 해시 · template · 보고 줄 · 스탬프 · 최소 행) · 첫 판 `cdp-webhook-claim-1027.pg.test.ts`(짝 pg-mem 판은 첫 통과 · 변이 뒤 삭제).
+> 검증 = backend tsc 0 · 기본 vitest 전체 통과(수치 = 설계서 §11-6) · test:pg 실측 = 주 프로세스 안전문 통과 → 그릇 없음 안내 · 작업자 env 실측(FORCE_TTY) · Codex 적대 구현 1R 6 → 2R 1(같은 뿌리 → 원장 줄 허용 꼴 표) → 3R approve. 실 PG 시험 자체는 그릇 · 덤프가 생긴 뒤 처음 돈다(미검증).
+> 그릇(1027) = 이 PC 에 떠 있음(Harold 승인 · AI 1회 기동 · 그 전에 같은 명령이 운영 서버에서 두 번 실행돼 컨테이너 · 이미지 태그를 지움) · test:pg = 「덤프 없음」에서 멈춤(정상).
+> 첫 배포 창(1027 밤 ~ 1028 아침) = 사전 실측 S5 · S10 · S15 → 첫 덤프 → test:pg 첫 판 **1파일 15건 통과**(대기 DDL 블록 2 통과 · 해시 대조 같음 043ff07c). 그 사이 정의 해시 상수 결함 둘("char" 잇기 42725 · 덤프 왕복 표기 94줄)을 고침 · Codex 정의 해시 5R approve(R2 · R3 문자열 경계 → 구조 수정 · R4 ANY 밖 식). 경위 = 설계서 §2-5 · §2-6 · §11-7.
+> 다음 = 커밋 → C71 코드 배포(원장 순서) → 첫 통과 뒤 변이 M1~M4 · pg-mem 판 삭제(§8-6).
+
+<a id="c71"></a>
+
+### C71 · ★1027 자사몰 연동 대비 묶음 0 · A 구현 — Codex 적대 2R approve · 커밋 · DDL · 배포 대기
+> 호출어 **"자사몰 대비 설계 / 자사몰 구조체크"** → 설계 · 진행표 = [설계서](../docs/2026-10-27-mall-integration-hardening-design.md) §11 6~8 · 원장 = [구조체크](../docs/2026-10-27-mall-integration-structure-check.md) · 뿌리 = [뿌리 대장](../docs/ROOT-LEDGER.md) R22 신설 · R18 · R7 · R1 넓힘 · I14
+> 왜 = Harold 1027 「설계안 승인합니다. 묶음 0 · A부터 구현 시작해」 → 「구현까지 끝내고 코덱스리뷰 돌려놓으라」. 실연동 이에스페이먼츠(우커머스 4몰)의 결제 안 된 주문 6,064건이 구매로 읽혀 구매 여정이 나가던 것(S1)부터.
+> 바뀐 것 = 0 SSRF 판정 한 곳(outbound-guard · IPv6 16비트 풀이 · 우커머스 호출 연결마다 · 리다이렉트마다) · ① 웹훅 다섯 라우트 = 기록 → 즉시 200 → 회사별 줄 · 선점 문장 하나 · 재처리 7일 제한 삭제 · 적체 경보 · superseded · ② 결제 전 = order_placed · 결제 순간 승격 · 한 트랜잭션 · 옛 스냅숏 판정 · 여정 중복 진입 두 겹 · 매출 판정 조각 하나 · ④ 동의 시계(두 표 · 같은 시각 = NO · 가족 번호 · 주문 동의 판정 · 쪽 원천 시각 = 요청 시각) · ⑤ 분류코드 모드(저장 8곳 회사 잠금 → 판정 → 저장) · ENV-3 미설정 = * · ⑥ 우커머스 회원 재대조(KST 02~06 · 7일) · ⑦ 연동 문제 분류 · 슈퍼관리자 「연동 · 인프라 → 자사몰 연동 감시」 1단 표.
+> 검증 = backend tsc 0 · frontend tsc 0 · backend vitest 701파일 10,315건 · 새 시험 3파일(axios 실물 · pg-mem 실행 · 판정) · 변이 2 잡힘 · Codex 적대 1R 4(high 3 · medium 1) 전부 수용 → 2R approve.
+> 배포 = 「배포 시작하자」 때 하나씩: 실측 S5(분류코드 섞인 회사) · S10(전달 status 제약) · S15(7일 넘은 미처리 전달) → 코드 배포(백엔드 · 프론트) → DDL-1 · DDL-3 → DML-1(앞뒤 S1) → S9 → IDX-1. 칸이 없어도 코드는 지금 동작으로 돈다(경고 1회).
+
 <a id="c70"></a>
 
 ### C70 · ★1027 슈퍼관리자 세션 · ceo 만 1440분 — Codex 적대 1R approve · DDL 0 · 화면 0 · 배포 대기

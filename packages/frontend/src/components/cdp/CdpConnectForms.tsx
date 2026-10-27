@@ -714,6 +714,8 @@ export interface WooMallStatus {
   syncError: { message: string; code: string; at: string | null } | null;
   /** ★2026-09-21 기존 회원·주문 가져오기 진행(수십 분~수 시간 · 백그라운드). 옛 서버 응답엔 없다 → optional */
   backfill?: { stage: 'customers' | 'orders' | 'done'; customersImported: number; ordersImported: number; noPhone?: number; failed?: number; truncated: boolean; doneAt: string | null } | null;
+  /** ★2026-10-27 회원 정보 다시 맞추기(서버 사유 = reread · 첫 가져오기를 끝낸 몰만). 옛 서버 응답엔 없다 → optional */
+  memberReread?: { reason: 'reread'; running: boolean; lastDoneAt: string | null } | null;
 }
 
 /**
@@ -905,6 +907,9 @@ export function CdpWooConnectForm(p: CdpWooConnectFormProps) {
                       {(m.backfill.failed ?? 0) > 0 ? ` · 형식 문제로 건너뛴 ${(m.backfill.failed ?? 0).toLocaleString()}건` : ''}
                       {m.backfill.truncated ? ' · 상한에 닿아 일부만 가져왔습니다' : ''}
                     </div>
+                  )}
+                  {m.memberReread?.reason === 'reread' && (
+                    <div className="mt-0.5 text-[11px] text-slate-400">매주 새벽 회원 정보를 다시 맞춰요</div>
                   )}
                   {m.syncError && (
                     <div className="mt-2 text-[11px] text-rose-800 bg-rose-50 border border-rose-200 rounded-lg px-3 py-2 inline-flex items-start gap-1.5">

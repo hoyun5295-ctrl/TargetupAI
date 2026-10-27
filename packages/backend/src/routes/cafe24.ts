@@ -38,7 +38,7 @@ import {
 import { ensureCafe24ScriptTag, removeCafe24ScriptTag } from '../utils/cafe24-scripttag';
 import { signCafe24InstallState, verifyCafe24InstallState } from '../utils/cafe24-install-state';
 
-import { publicErrorText } from '../utils/http-error';
+import { publicErrorText, respondUserError } from '../utils/http-error';
 const router = Router();
 
 // ════════════════════════════════════════════════════════════════════
@@ -104,21 +104,17 @@ router.post('/webhook', json({ limit: '1mb', verify: (req: any, _res, buf) => { 
     const resource = extractWebhookResource('cafe24', req.body || {});
     const idempotencyKey = cafe24Adapter.buildIdempotencyKey(event, resource, req.body || {});
 
-    // ★ 회사마다 전달 행 기록 + 이벤트별 처리 (cdp-* CT 자동 호출) — 적재·중복·실패 기록은 CT 하나
+    // ★ 회사마다 전달 행 기록 → 즉시 200 → 처리는 뒤(★ 2026-10-27 자사몰 대비 K2-5 · 처리 = 수신 CT 의 줄 · 재처리 워커가 같은 함수)
     const outcome = await deliverWebhookToCompanies({
       source: 'cafe24',
       companyIds: targets.map((i) => i.companyId),
       event,
       idempotencyKey,
       payload: req.body || {},
-      process: (companyId) => processCafe24Event(companyId, event, resource),
+      mallId,
       logTag: 'Cafe24',
     });
-    if (outcome.failed > 0) {
-      // 카페24는 200 반환해야 retry 안 일어남 — 한줄로 측 재처리 워커가 실패 행을 다시 돈다
-      return res.json({ success: false, error: '이벤트 처리 실패, 한줄로 측에서 재처리 예약됩니다.' });
-    }
-    if (outcome.processed === 0 && outcome.duplicate > 0) return res.json({ success: true, duplicate: true });
+    if (outcome.recorded === 0 && outcome.duplicate > 0) return res.json({ success: true, duplicate: true });
     return res.json({ success: true });
   } catch (err: any) {
     console.error('[Cafe24 Webhook] 오류:', err);
@@ -226,6 +222,7 @@ router.post('/byo-credentials', async (req: Request, res: Response) => {
     return res.json({ success: true });
   } catch (err: any) {
     console.error('[Cafe24 /byo-credentials] 오류:', err);
+    if (respondUserError(res, err)) return;   // ★ 2026-10-27 자사몰 대비 K9 SC1 — 분류코드 모드 거절(409 · 고객 문장)
     return res.status(500).json({ success: false, error: publicErrorText(err, 'self-app 자격 저장 실패') });
   }
 });
@@ -400,14 +397,6 @@ cafe24CallbackRouter.get('/oauth/callback', async (req: Request, res: Response) 
     return res.status(500).send(renderCafe24CallbackHtml('error', publicErrorText(err, '카페24 연동 처리 중 오류가 발생했습니다.')));
   }
 });
-
-// ════════════════════════════════════════════════════════════════════
-// 이벤트 처리 디스패처 — D173 cafe24Adapter.processWebhookEvent로 위임 (단일 진실)
-// ════════════════════════════════════════════════════════════════════
-
-async function processCafe24Event(companyId: string, event: string, resource: any): Promise<void> {
-  return cafe24Adapter.processWebhookEvent(companyId, event, resource);
-}
 
 // ════════════════════════════════════════════════════════════════════
 // callback HTML 응답 (사용자가 새 창에서 보는 화면)

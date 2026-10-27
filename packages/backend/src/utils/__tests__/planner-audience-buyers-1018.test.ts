@@ -9,6 +9,7 @@
  *   ⑤ 저장 전 재검증 = 스위치 · 지금 문 · 관측 목록 키 · 이름은 서버 목록 이름
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { netPurchaseSql } from '../cdp-order-revenue';
 
 const db = { meta: {} as any, found: true };
 vi.mock('../../config/database', () => ({
@@ -58,9 +59,10 @@ describe('① 상품 구매자 술어', () => {
   it('자사몰 = 결제된 주문만 · 키 · since · $1 · c.id', () => {
     const params: any[] = ['co-1'];
     const sql = buildBuyerPredicate(params, BUYERS);
-    expect(params).toEqual(['co-1', ['P1'], '2026-07-20', ['completed', 'paid']]);
-    expect(sql).toContain("pb.event_name = 'purchase'");
-    expect(sql).toContain("LOWER(TRIM(COALESCE(pb.properties->>'status', ''))) = ANY($4::text[])");
+    // ★ 2026-10-27 자사몰 대비 K1-8 — 결제된 구매 = 판정 조각 netPurchaseSql 한 곳(표식 · 차감 · 옛 행 호환 · 상태 글자 자리 0)
+    expect(params).toEqual(['co-1', ['P1'], '2026-07-20']);
+    expect(sql).toContain(netPurchaseSql('pb'));
+    expect(sql).not.toContain("LOWER(TRIM(COALESCE(pb.properties->>'status', '')))");
     expect(sql).toContain("pb.occurred_at >= ($3::date::timestamp AT TIME ZONE 'Asia/Seoul')");
     expect(sql).toContain('= ANY($2::text[])');
     expect(sql).toContain('pb.company_id = $1');
@@ -86,7 +88,7 @@ describe('② 대상 = 행사 meta 한 곳', () => {
     const a = await resolvePlannerAudience({ companyId: 'co-1', createdBy: 'u-1', mode: 'all', plannerEventId: 'ev-1' });
     expect(a.blocked).toBe(false);
     expect(a.filterWhere).toContain('FROM cdp_events pb');
-    expect([...a.baseParams, ...a.filterParams]).toEqual(['co-1', ['P1'], '2026-07-20', ['completed', 'paid']]);
+    expect([...a.baseParams, ...a.filterParams]).toEqual(['co-1', ['P1'], '2026-07-20']);
   });
   it('깨진 값 · 행사 없음 · 스위치 밖 · 문 바뀜 = 막음', async () => {
     db.meta = { audience: { kind: 'product_buyers', door: 'mall', keys: [] } };

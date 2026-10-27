@@ -159,7 +159,7 @@ export async function buildCdpDiagnostics(companyId: string): Promise<CdpDiagnos
       `SELECT
           source,
           COUNT(*)::int AS total,
-          COUNT(*) FILTER (WHERE status = 'processed')::int AS success_count,
+          COUNT(*) FILTER (WHERE status IN ('processed', 'superseded'))::int AS success_count,   -- ★ 1027 K2-6 옛 스냅숏이라 쓰지 않은 전달 = 처리됨
           COUNT(*) FILTER (WHERE status = 'failed')::int AS failed_count,
           COUNT(*) FILTER (WHERE status = 'duplicate')::int AS duplicate_count
          FROM cdp_webhook_deliveries

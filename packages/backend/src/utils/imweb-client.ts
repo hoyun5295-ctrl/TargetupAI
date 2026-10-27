@@ -30,6 +30,7 @@
  */
 
 import { query } from '../config/database';
+import { saveIntegrationRowGuarded } from './integration-scope';   // ★ 2026-10-27 자사몰 대비 K9 SC1 — 연동 행 저장 = 회사 모드 잠금 → 판정 → 저장(한 트랜잭션)
 import { TIMEOUTS } from '../config/defaults';
 import { joinInflight } from './inflight-lock';
 // ★ 2026-09-26 한줄로 V2 R1-31 — 토큰 요청 실패 판정 CT(제공자 거절일 때만 연동 만료)
@@ -44,6 +45,7 @@ import {
 } from './provider-registry';
 import { identifyCustomer, withdrawMemberConsent } from './cdp-identity';
 import { syncOrder } from './cdp-orders';
+import { isKnownOrderStatus } from './cdp-order-revenue';
 import { orderExternalId } from './cdp-order-identity';
 import { trackEvent } from './cdp-events';
 import { buildWebhookIdempotencyKey } from './cdp-idempotency';
@@ -177,7 +179,7 @@ export async function saveImwebIntegration(
   expiresInSec: number = 2 * 60 * 60, // Access Token 2시간
 ): Promise<void> {
   const expiresAt = new Date(Date.now() + expiresInSec * 1000);
-  await query(
+  await saveIntegrationRowGuarded(companyId, 'imweb', siteCode, null, (run) => run(
     `INSERT INTO company_integrations (
       id, company_id, provider, mall_id, access_token, refresh_token,
       token_expires_at, scope, meta, webhook_secret, connected_at, status,
@@ -197,7 +199,7 @@ export async function saveImwebIntegration(
       connected_at = COALESCE(company_integrations.connected_at, NOW()),
       updated_at = NOW()`,
     [companyId, siteCode, token.accessToken, token.refreshToken, expiresAt, token.scope || DEFAULT_SCOPE, IMWEB_WEBHOOK_SECRET || null]
-  );
+  ));
 }
 
 function rowToIntegration(r: any): ImwebIntegration {
@@ -401,7 +403,8 @@ export const imwebAdapter: IProviderAdapter = {
     return !!(secret || IMWEB_WEBHOOK_SECRET);
   },
 
-  async processWebhookEvent(companyId, event, resource) {
+  async processWebhookEvent(companyId, event, resource, ctx) {
+    // ★ 2026-10-27 자사몰 대비 K1-3 · K1-6 — 원천 시각이 없으면 받은 시각(ctx.observedAt) · 옛 스냅숏 = 'stale'
     switch (event) {
       // 회원 — 생성/수정/동의수정/등급변경/일괄등록 → identify
       case 'END_USER_SIGN_UP':
@@ -410,6 +413,7 @@ export const imwebAdapter: IProviderAdapter = {
       case 'END_USER_AGREE_INFO_UPDATE':
       case 'END_USER_GRADE_UPDATE':
         await identifyCustomer(companyId, {
+          ...(ctx.storeCode ? { storeCode: ctx.storeCode } : {}),   // ★ 1027 K9 — 연동 행 분류코드(소속 행 · 몰 동의)
           source: 'imweb',
           externalId: String(resource.memberUid || resource.member_uid || resource.memberCode || ''),
           email: resource.email,
@@ -429,13 +433,13 @@ export const imwebAdapter: IProviderAdapter = {
       //   이제 연결된 고객의 수신동의를 내린다(withdrawMemberConsent · 영구 수신거부 표로는 옮기지 않는다 = D93).
       case 'END_USER_WITHDRAWAL': {
         const withdrawnId = String(resource.memberUid || resource.member_uid || '');
-        await withdrawMemberConsent(companyId, 'imweb', withdrawnId);
+        await withdrawMemberConsent(companyId, 'imweb', withdrawnId, String(resource.occurredAt || ctx.observedAt));
         await trackEvent(companyId, {
           source: 'imweb',
           eventName: 'custom_member_withdrawn',
           externalId: withdrawnId,
           properties: { imweb_member_uid: resource.memberUid },
-          occurredAt: String(resource.occurredAt || new Date().toISOString()),
+          occurredAt: String(resource.occurredAt || ctx.observedAt),
         });
         break;
       }
@@ -451,14 +455,16 @@ export const imwebAdapter: IProviderAdapter = {
             product_no: resource.prodNo || resource.productNo,
             product_name: resource.prodName || resource.productName,
           },
-          occurredAt: String(resource.occurredAt || new Date().toISOString()),
+          occurredAt: String(resource.occurredAt || ctx.observedAt),
         });
         break;
 
       // 주문 — 생성/입금완료 → 구매이력 동기화
       case 'ORDER_CREATE':
-      case 'ORDER_DEPOSIT_COMPLETE':
-        await syncOrder(companyId, {
+      case 'ORDER_DEPOSIT_COMPLETE': {
+        const imwebStatus = event === 'ORDER_DEPOSIT_COMPLETE' ? 'paid' : String(resource.orderStatus || event);
+        const placed = await syncOrder(companyId, {
+          ...(ctx.storeCode ? { storeCode: ctx.storeCode } : {}),   // ★ 1027 K9 — 연동 행 분류코드(소속 행 · 몰 동의)
           source: 'imweb',
           orderId: String(resource.orderNo || resource.order_no || ''),
           // ★ 2026-09-27 한줄로 V2 R245 — 비회원 주문도 적재(주문 외부 id CT)
@@ -468,12 +474,16 @@ export const imwebAdapter: IProviderAdapter = {
           name: resource.name || resource.ordererName,
           // ★ 2026-10-04 입금 완료 웹훅은 그 자체가 결제 사실이다 → 'paid'(옛: 이벤트 이름이 상태로 들어가 매출이 반영되지 않았다).
           //   주문 생성의 몰 상태 값은 아직 원문 미확인이라 그대로 둔다(모르는 값 = 매출 변화 없음).
-          status: event === 'ORDER_DEPOSIT_COMPLETE' ? 'paid' : String(resource.orderStatus || event),
+          status: imwebStatus,
+          statusKnown: isKnownOrderStatus(imwebStatus),
           totalAmount: firstPositiveAmount(resource.totalPrice, resource.paidPrice, resource.totalRefundPrice),
-          orderedAt: String(resource.orderTime || resource.orderedAt || new Date().toISOString()),
+          orderedAt: String(resource.orderTime || resource.orderedAt || ctx.observedAt),
+          srcAt: ctx.observedAt,
           currency: 'KRW',
         });
+        if (placed.stale) return 'stale';
         break;
+      }
 
       // 배송 상태 변화 → 배송 여정 트리거(발송 알림·배송완료 후기/재구매)
       case 'ORDER_SHIPPING_READY':
@@ -489,7 +499,7 @@ export const imwebAdapter: IProviderAdapter = {
             section_code: resource.orderSectionCode,
             invoice_no: resource.invoiceNo,
           },
-          occurredAt: String(resource.occurredAt || new Date().toISOString()),
+          occurredAt: String(resource.occurredAt || ctx.observedAt),
         });
         break;
 
@@ -503,7 +513,8 @@ export const imwebAdapter: IProviderAdapter = {
         const orderNo = resource.orderNo || resource.order_no;
         // 주문 생성 때와 같은 고객 식별 규칙(orderExternalId) · 회원도 번호도 없으면 고객을 지어내지 않는다(차감 생략 · 로그)
         if (orderNo && (memberUid || phone)) {
-          await syncOrder(companyId, {
+          const reversed = await syncOrder(companyId, {
+            ...(ctx.storeCode ? { storeCode: ctx.storeCode } : {}),   // ★ 1027 K9 — 연동 행 분류코드(소속 행 · 몰 동의)
             source: 'imweb',
             orderId: String(orderNo),
             externalId: orderExternalId(memberUid, phone, orderNo),
@@ -512,9 +523,11 @@ export const imwebAdapter: IProviderAdapter = {
             name: resource.name || resource.ordererName,
             status: event === 'ORDER_CANCEL_COMPLETE' ? 'cancelled' : 'refunded',
             totalAmount: firstPositiveAmount(resource.totalPrice, resource.paidPrice, resource.totalRefundPrice),
-            orderedAt: String(resource.orderTime || resource.orderedAt || resource.occurredAt || new Date().toISOString()),
+            orderedAt: String(resource.orderTime || resource.orderedAt || resource.occurredAt || ctx.observedAt),
+            srcAt: ctx.observedAt,
             currency: 'KRW',
           });
+          if (reversed.stale) return 'stale';
         } else {
           console.log(`[Imweb Adapter] ${event} — 주문번호·고객 식별값 없음, 매출 차감 생략 (order=${orderNo || '-'})`);
         }
@@ -524,7 +537,7 @@ export const imwebAdapter: IProviderAdapter = {
             eventName: 'custom_order_cancelled',
             externalId: String(memberUid),
             properties: { order_no: orderNo, status: event },
-            occurredAt: String(resource.occurredAt || new Date().toISOString()),
+            occurredAt: String(resource.occurredAt || ctx.observedAt),
           });
         }
         break;

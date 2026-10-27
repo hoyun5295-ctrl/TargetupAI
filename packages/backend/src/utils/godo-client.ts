@@ -12,10 +12,10 @@
  */
 
 import axios from 'axios';
+import { saveIntegrationRowGuarded } from './integration-scope';   // ★ 2026-10-27 자사몰 대비 K9 SC1 — 연동 행 저장 = 회사 모드 잠금 → 판정 → 저장(한 트랜잭션)
 import { query } from '../config/database';
 import { syncOrder } from './cdp-orders';
-import { identifyCustomer, parseConsentValue } from './cdp-identity';
-import { GODO_SOURCE, parseGodoOrderResponse, mapGodoOrderToCdp, type GodoParsedResponse } from './godo-parse';
+import { parseGodoOrderResponse, mapGodoOrderToCdp, type GodoParsedResponse } from './godo-parse';
 
 // ════════════════════════════════════════════════════════════════════
 // 상수
@@ -156,17 +156,7 @@ export async function backfillGodoOrders(
       for (const raw of page.orders) {
         const mapped = mapGodoOrderToCdp(raw);
         if (!mapped) continue;
-        const consent = parseConsentValue(mapped.smsRaw);
-        if (consent !== undefined) {
-          await identifyCustomer(companyId, {
-            source: GODO_SOURCE,
-            externalId: mapped.order.externalId,
-            phone: mapped.order.phone,
-            name: mapped.order.name,
-            email: mapped.order.email,
-            smsOptIn: consent,
-          });
-        }
+        // ★ 2026-10-27 자사몰 대비 K2-1 — 주문마다 실린 smsFl 은 원문으로 칸 뜻을 확인하기 전 동의로 쓰지 않는다(옛: 옛 주문의 Y 가 새 거부를 되돌렸다 · M2).
         await syncOrder(companyId, mapped.order);
         imported++;
       }
@@ -210,7 +200,7 @@ export async function verifyGodoConnection(companyId: string): Promise<void> {
 
 /** 고객 쇼핑몰 인증키(key)를 company_integrations.meta.godo_key에 저장. */
 export async function saveGodoCredentials(companyId: string, key: string): Promise<void> {
-  await query(
+  await saveIntegrationRowGuarded(companyId, 'godo', GODO_INTEGRATION_MALL_ID, null, (run) => run(
     `INSERT INTO company_integrations (
       id, company_id, provider, mall_id, access_token, refresh_token,
       token_expires_at, scope, meta, webhook_secret, connected_at, status, created_at, updated_at
@@ -223,7 +213,7 @@ export async function saveGodoCredentials(companyId: string, key: string): Promi
       status = 'pending',
       updated_at = NOW()`,
     [companyId, GODO_INTEGRATION_MALL_ID, JSON.stringify({ godo_key: key })],
-  );
+  ));
 }
 
 /** 저장된 고도몰 key 조회(없으면 undefined). */

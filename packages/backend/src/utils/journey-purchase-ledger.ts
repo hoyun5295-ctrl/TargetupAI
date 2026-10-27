@@ -96,14 +96,24 @@ export function resetPurchaseLedgerCaches(): void {
  * 자사몰 문이 현역인가 — 최근 구매 이벤트가 있으면 참.
  * 참이면 원장 문을 닫는다(같은 구매를 두 번 읽지 않는다).
  */
+/**
+ * ★ 2026-10-27 자사몰 대비 K1-9 — 「주문 시도」 조각(별칭 alias 의 cdp_events 행) = 결제됐든 결제 전이든 주문을 넣었다.
+ *   장바구니 포기 · 둘러보고 안 삼의 **제외 판정**만 쓴다(결제 전 주문이 있는 고객에게 「안 샀어요」 문자를 보내지 않는다).
+ *   시작 · 목표 · 구매 문에는 쓰지 않는다(구매 사건 = purchase 만 · I1).
+ */
+export function orderAttemptSql(alias: string): string {
+  return `${alias}.event_name IN ('purchase', 'order_placed')`;
+}
+
 export async function isMallPurchaseDoorActive(companyId: string): Promise<boolean> {
   const cached = doorCache.get(companyId);
   // true(원장 잠금)만 캐시를 신뢰한다 — false를 캐시하면 그 사이 자사몰 구매가 들어와도 원장 문이 열려 있다.
   if (cached?.mallActive && Date.now() - cached.at < DOOR_CLOSED_TTL_MS) return true;
+  // ★ 2026-10-27 자사몰 대비 K1-9 — 결제 전 주문(order_placed)도 문을 닫는다(결제 전 주문만 오는 동안 원장 문이 열려 같은 구매가 두 문으로 들어가지 않게).
   const r = await query(
     `SELECT 1 FROM cdp_events
       WHERE company_id = $1::uuid
-        AND event_name = 'purchase'
+        AND event_name IN ('purchase', 'order_placed')
         AND occurred_at >= NOW() - ($2 || ' days')::interval
       LIMIT 1`,
     [companyId, String(MALL_DOOR_ACTIVE_DAYS)],
@@ -146,9 +156,10 @@ export interface PurchaseDoorStatus {
 export async function getPurchaseDoorStatus(companyId: string): Promise<PurchaseDoorStatus> {
   const mallActive = await isMallPurchaseDoorActive(companyId);
   if (mallActive) {
+    // ★ 1027 K1-9 — 마지막 도착 = 결제 전 주문 도착도 포함(동기화 상태를 말하는 시각)
     const r = await query(
       `SELECT MAX(created_at)::text AS last FROM cdp_events
-        WHERE company_id = $1::uuid AND event_name = 'purchase'`,
+        WHERE company_id = $1::uuid AND event_name IN ('purchase', 'order_placed')`,
       [companyId],
     );
     return { door: 'mall', lastArrivalAt: r.rows[0]?.last || null };

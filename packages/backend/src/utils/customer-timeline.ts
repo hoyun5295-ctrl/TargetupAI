@@ -476,6 +476,7 @@ const BEHAVIOR_LABELS: Record<string, string> = {
   checkout_start: '결제 시작',
   checkout_complete: '결제 완료',
   purchase: '구매',
+  order_placed: '주문 · 결제 전',   // ★ 2026-10-27 자사몰 대비 K1-10 — 결제 전 주문(원문 이름 노출 방지)
   wishlist_add: '찜하기',
   wishlist_remove: '찜 해제',
   product_view: '상품 조회',

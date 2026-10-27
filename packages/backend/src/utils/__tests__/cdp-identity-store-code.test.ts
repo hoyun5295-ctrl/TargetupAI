@@ -12,7 +12,8 @@ vi.mock('../../config/database', () => ({ query: vi.fn() }));
 vi.mock('../unified-customer-profile', () => ({ recomputeProfile: vi.fn(async () => undefined) }));
 vi.mock('../cdp-identity-review', () => ({ recordIdentityReview: vi.fn(async () => undefined) }));
 vi.mock('../customer-store-link', () => ({ linkCustomerStore: vi.fn(async () => true) }));
-vi.mock('../mall-consent', () => ({ upsertStoreConsent: vi.fn(async () => true), applyMissingConsentRule: vi.fn(async () => false) }));
+// ★ 2026-10-27 K2 — 시계 · 회원 연결 조각은 실제 함수(CT mall-consent) · 쓰기 두 함수만 목
+vi.mock('../mall-consent', async (orig) => ({ ...(await orig<any>()), upsertStoreConsent: vi.fn(async () => true), applyMissingConsentRule: vi.fn(async () => false) }));
 
 import { query } from '../../config/database';
 import { linkCustomerStore } from '../customer-store-link';
@@ -128,20 +129,20 @@ describe('identifyCustomer · 몰 수신동의는 소속 행에 · 고객 행 �
     db();
     await identifyCustomer(COMPANY, { source: 'woocommerce', externalId: 'ilbonimo.com:9', phone: PHONE, smsOptIn: true, storeCode: '일본이모' });
     expect(insertParams()[10]).toBeNull();
-    expect(consent).toHaveBeenCalledWith(COMPANY, 'cust-new', '일본이모', true, 'woocommerce');
+    expect(consent).toHaveBeenCalledWith(COMPANY, 'cust-new', '일본이모', true, 'woocommerce', expect.stringMatching(/^\d{4}-\d{2}-\d{2}T/), expect.objectContaining({ source: 'woocommerce' }));   // ★ 1027 K2 원천 시각 · 가족 번호 판정 연결
     expect(link.mock.invocationCallOrder[0]).toBeLessThan(consent.mock.invocationCallOrder[0]);
   });
   it('storeCode 있음 · 기존 연결 · 두 번째 몰의 **동의**: 고객 행을 올리지 않는다(앞선 몰의 미동의를 덮지 않는다) · 그 몰 소속 행에만 true', async () => {
     db({ hasLink: true, linkedCustomerId: 'cust-linked' });
     await identifyCustomer(COMPANY, { source: 'woocommerce', externalId: 'ilbonimo.com:9', phone: PHONE, smsOptIn: true, storeCode: '일본이모' });
     expect(updateParams()[8]).toBeNull();
-    expect(consent).toHaveBeenCalledWith(COMPANY, 'cust-linked', '일본이모', true, 'woocommerce');
+    expect(consent).toHaveBeenCalledWith(COMPANY, 'cust-linked', '일본이모', true, 'woocommerce', expect.stringMatching(/^\d{4}-\d{2}-\d{2}T/), expect.objectContaining({ source: 'woocommerce' }));   // ★ 1027 K2 원천 시각 · 가족 번호 판정 연결
   });
   it('storeCode 있음 · **철회(false)는 고객 행에도 내린다** — 몰 동의 읽기가 켜지기 전·관리자·여정은 아직 고객 행을 읽는다(Codex R1 · 덜 보내는 방향)', async () => {
     db({ hasLink: true, linkedCustomerId: 'cust-linked' });
     await identifyCustomer(COMPANY, { source: 'woocommerce', externalId: 'ilbonimo.com:9', phone: PHONE, smsOptIn: false, storeCode: '일본이모' });
     expect(updateParams()[8]).toBe(false);
-    expect(consent).toHaveBeenCalledWith(COMPANY, 'cust-linked', '일본이모', false, 'woocommerce');
+    expect(consent).toHaveBeenCalledWith(COMPANY, 'cust-linked', '일본이모', false, 'woocommerce', expect.stringMatching(/^\d{4}-\d{2}-\d{2}T/), expect.objectContaining({ source: 'woocommerce' }));   // ★ 1027 K2 원천 시각 · 가족 번호 판정 연결
   });
   it('동의 값이 없으면(주문 등) 소속 행 동의를 건드리지 않는다 — 모름은 모름으로 둔다', async () => {
     db();
@@ -157,13 +158,13 @@ describe('identifyCustomer · 몰 수신동의는 소속 행에 · 고객 행 �
     db();
     await identifyCustomer(COMPANY, { source: 'woocommerce', externalId: 'ilbonimo.com:9', phone: PHONE, storeCode: '일본이모', profileConsentAbsent: ABSENT });
     expect(missingRule).toHaveBeenCalledTimes(1);
-    expect(missingRule).toHaveBeenCalledWith(COMPANY, 'cust-new', '일본이모', { source: 'woocommerce', externalId: 'ilbonimo.com:9', ...ABSENT });
+    expect(missingRule).toHaveBeenCalledWith(COMPANY, 'cust-new', '일본이모', { source: 'woocommerce', externalId: 'ilbonimo.com:9', ...ABSENT }, expect.stringMatching(/^\d{4}-\d{2}-\d{2}T/));   // ★ 1027 K2 원천 시각
     expect(link.mock.invocationCallOrder[0]).toBeLessThan(missingRule.mock.invocationCallOrder[0]);
   });
   it('기존 연결 조기 반환 경로(회원 정보 재수신 · 다시 읽기)에서도 규칙 CT 에 넘긴다', async () => {
     db({ hasLink: true, linkedCustomerId: 'cust-linked' });
     await identifyCustomer(COMPANY, { source: 'woocommerce', externalId: 'ilbonimo.com:9', phone: PHONE, storeCode: '일본이모', profileConsentAbsent: ABSENT });
-    expect(missingRule).toHaveBeenCalledWith(COMPANY, 'cust-linked', '일본이모', { source: 'woocommerce', externalId: 'ilbonimo.com:9', ...ABSENT });
+    expect(missingRule).toHaveBeenCalledWith(COMPANY, 'cust-linked', '일본이모', { source: 'woocommerce', externalId: 'ilbonimo.com:9', ...ABSENT }, expect.stringMatching(/^\d{4}-\d{2}-\d{2}T/));   // ★ 1027 K2 원천 시각
   });
   it('명시 값(동의·거부)이 오면 표시가 실려 있어도 규칙을 부르지 않는다 — 명시 값이 진실이다', async () => {
     db();

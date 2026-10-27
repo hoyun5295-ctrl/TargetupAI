@@ -92,18 +92,18 @@ describe('processWooResource — 분류코드를 적재로 넘긴다', () => {
     expect(identify.mock.calls[0][1]).toMatchObject({ externalId: 'iroirotokyo.net:25', storeCode: 'IROIRO' });
   });
 
-  it('주문: 수신동의 identify 와 syncOrder 양쪽에 storeCode', async () => {
+  // ★ 2026-10-27 K2-1 — 주문 본문의 동의는 syncOrder 한 호출로(따로 identify 0) · 분류코드도 그 한 호출에
+  it('주문: syncOrder 에 storeCode(따로 identify 0)', async () => {
     await processWooResource(COMPANY, MALL, 'order', order, 'mssms_agreement', 'IROIRO');
-    expect(identify.mock.calls[0][1]).toMatchObject({ storeCode: 'IROIRO' });
+    expect(identify).not.toHaveBeenCalled();
     expect(sync.mock.calls[0][1]).toMatchObject({ orderId: 'iroirotokyo.net:727', storeCode: 'IROIRO' });
   });
 
   it('분류코드 없는 몰: identify·syncOrder 입력에 storeCode 키가 없다(현재 동작 캡처)', async () => {
     await processWooResource(COMPANY, MALL, 'order', order, 'mssms_agreement');
-    expect('storeCode' in identify.mock.calls[0][1]).toBe(false);
     expect('storeCode' in sync.mock.calls[0][1]).toBe(false);
     await processWooResource(COMPANY, MALL, 'customer', customer, 'mssms_agreement', null);
-    expect('storeCode' in identify.mock.calls[1][1]).toBe(false);
+    expect('storeCode' in identify.mock.calls[0][1]).toBe(false);
   });
 });
 

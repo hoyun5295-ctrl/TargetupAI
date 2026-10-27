@@ -33,7 +33,7 @@ import { isCdpEnabledForPlan } from '../utils/cdp-auth';
 // ★ 2026-08-10: 스키마 실측 로그는 값이 아니라 구조로 남긴다(개인정보 미기록)
 import { describeJsonShape } from '../utils/json-shape';
 
-import { publicErrorText } from '../utils/http-error';
+import { publicErrorText, respondUserError } from '../utils/http-error';
 const router = Router();
 
 // ════════════════════════════════════════════════════════════════════
@@ -70,17 +70,17 @@ router.post(
       const resource = extractWebhookResource('naver_smart_store', req.body || {});
       const idempotencyKey = naverSmartStoreAdapter.buildIdempotencyKey(event, resource, req.body || {});
 
+      // 기록 → 즉시 200 → 처리는 뒤(★ 2026-10-27 자사몰 대비 K2-5)
       const outcome = await deliverWebhookToCompanies({
         source: 'naver_smart_store',
         companyIds: targets.map((i) => i.companyId),
         event,
         idempotencyKey,
         payload: req.body || {},
-        process: (companyId) => naverSmartStoreAdapter.processWebhookEvent(companyId, event, resource),
+        mallId: String(storeId),
         logTag: 'NaverCommerce',
       });
-      if (outcome.failed > 0) return res.json({ success: false, error: '이벤트 처리 실패' });
-      if (outcome.processed === 0 && outcome.duplicate > 0) return res.json({ success: true, duplicate: true });
+      if (outcome.recorded === 0 && outcome.duplicate > 0) return res.json({ success: true, duplicate: true });
       return res.json({ success: true });
     } catch (err: any) {
       console.error('[NaverCommerce Webhook] 오류:', err);
@@ -145,6 +145,7 @@ router.post('/connect', async (req: Request, res: Response) => {
     });
   } catch (err: any) {
     console.error('[NaverCommerce /connect] 오류:', err?.message || err);
+    if (respondUserError(res, err)) return;   // ★ 2026-10-27 자사몰 대비 K9 SC1 — 분류코드 모드 거절(409 · 고객 문장)
     // 토큰 발급 실패 = 외부 검증 실패 — 원인 메시지를 그대로 전달해 사용자가 스스로 교정 가능하게
     // ★ 보안: 서버 IP는 응답에 노출하지 않는다 — 담당자 개별 안내.
     return res.status(502).json({

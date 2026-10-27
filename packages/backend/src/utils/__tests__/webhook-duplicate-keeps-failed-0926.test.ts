@@ -12,7 +12,8 @@ import { join } from 'path';
 const ROUTES = ['cafe24.ts', 'cdp.ts', 'imweb.ts', 'naver-commerce.ts', 'woocommerce.ts'];
 
 // ★ 2026-09-27 차수 3 R098 — 카페24·아임웹·네이버는 회사마다 전달하는 CT(cdp-webhook-delivery)로 옮겼다(같은 문장을 CT가 소유).
-const DELEGATED = new Set(['cafe24.ts', 'imweb.ts', 'naver-commerce.ts']);
+// ★ 2026-10-27 자사몰 대비 K2-5 — 우커머스 · 자체호스팅 인라인 기록도 같은 CT 로 합쳤다(다섯 곳 모두 위임).
+const DELEGATED = new Set(['cafe24.ts', 'imweb.ts', 'naver-commerce.ts', 'cdp.ts', 'woocommerce.ts']);
 
 describe('웹훅 중복 표시', () => {
   for (const f of ROUTES) {

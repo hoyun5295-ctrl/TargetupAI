@@ -19,6 +19,7 @@
  */
 
 import { query } from '../config/database';
+import { saveIntegrationRowGuarded } from './integration-scope';   // ★ 2026-10-27 자사몰 대비 K9 SC1 — 연동 행 저장 = 회사 모드 잠금 → 판정 → 저장(한 트랜잭션)
 import { TIMEOUTS } from '../config/defaults';
 // ★ 2026-09-26 한줄로 V2 R1-31 — 토큰 요청 실패 판정 CT(제공자 거절일 때만 연동 만료)
 import { tokenHttpError, reconnectRequiredError, isDefinitiveTokenRejection } from './integration-token-error';
@@ -114,7 +115,7 @@ export async function saveMakeshopIntegration(
     meta.app_client_id = creds.clientId;
     meta.app_client_secret = creds.clientSecret;
   }
-  await query(
+  await saveIntegrationRowGuarded(companyId, 'makeshop', shopUid, null, (run) => run(
     `INSERT INTO company_integrations (
       id, company_id, provider, mall_id, access_token, refresh_token,
       token_expires_at, scope, meta, webhook_secret, connected_at, status,
@@ -134,7 +135,7 @@ export async function saveMakeshopIntegration(
       connected_at = NOW(),
       updated_at = NOW()`,
     [companyId, shopUid, tokenRes.access_token, expiresAt, JSON.stringify(meta)],
-  );
+  ));
 }
 
 function rowToIntegration(r: any): MakeshopIntegration {

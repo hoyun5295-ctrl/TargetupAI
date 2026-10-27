@@ -23,7 +23,7 @@ import { isCdpEnabledForPlan } from '../utils/cdp-auth';
 // ★ 2026-08-10: 스키마 실측 로그는 값이 아니라 구조로 남긴다(개인정보 미기록)
 import { describeJsonShape } from '../utils/json-shape';
 
-import { publicErrorText } from '../utils/http-error';
+import { publicErrorText, respondUserError } from '../utils/http-error';
 const router = Router();
 
 router.use(authenticate);
@@ -66,6 +66,7 @@ router.post('/connect', async (req: Request, res: Response) => {
     return res.json({ success: true, message: '메이크샵 연동이 완료되었습니다.', shop_uid: shopUid, token_expires_at: tokenExpiresAt });
   } catch (err: any) {
     console.error('[Makeshop /connect] 오류:', err?.message || err);
+    if (respondUserError(res, err)) return;   // ★ 2026-10-27 자사몰 대비 K9 SC1 — 분류코드 모드 거절(409 · 고객 문장)
     return res.status(502).json({
       success: false,
       error: publicErrorText(err, '메이크샵 연동 검증에 실패했습니다.'),

@@ -21,6 +21,7 @@ import PlanTermBox, { PlanTermLockNote } from '../components/admin/PlanTermBox';
 import HelpQuestionsTab from '../components/admin/HelpQuestionsTab'; // ★ 2026-08-24 도움말 질문 이력(ceo 전용)
 import FeatureInterestTab from '../components/admin/FeatureInterestTab'; // ★ 2026-10-06 기능 관심 업체(ceo 전용)
 import IdentityStatusTab from '../components/admin/IdentityStatusTab'; // ★ 2026-10-07 본인인증 현황(ceo 전용)
+import MallIntegrationMonitorTab from '../components/admin/MallIntegrationMonitorTab'; // ★ 2026-10-27 자사몰 연동 감시 표 1단(K10)
 import IntroLeadsTab from '../components/admin/IntroLeadsTab'; // ★ 2026-10-07 소개 방문 · 시연 요청(ceo · suran)
 import WatchLogTab from '../components/admin/WatchLogTab'; // ★ 2026-10-07 감시 기록(ceo 전용)
 import PrecheckUsageTab from '../components/admin/PrecheckUsageTab'; // ★ 2026-09-26 스팸 검사·맞춤법 사용 현황(ceo 전용)
@@ -97,7 +98,7 @@ export default function AdminDashboard() {
   const navigate = useNavigate();
   const { user, logout } = useAuthStore();
 
-  const [activeTab, setActiveTab] = useState<'companies' | 'users' | 'scheduled' | 'callbacks' | 'plans' | 'requests' | 'deposits' | 'credits' | 'allCampaigns' | 'stats' | 'billing' | 'syncAgents' | 'auditLogs' | 'lineGroups' | 'templates' | 'loginBlocks' | 'agentDeploy' | 'marketingDiagnosis' | 'spamBlock' | 'geoAccess' | 'helpQuestions' | 'agencyMail' | 'agencyLedger' | 'adminAccounts' | 'precheckUsage' | 'featureInterest' | 'identityStatus' | 'introLeads' | 'watchLog' | 'opsRecords'>('companies');
+  const [activeTab, setActiveTab] = useState<'companies' | 'users' | 'scheduled' | 'callbacks' | 'plans' | 'requests' | 'deposits' | 'credits' | 'allCampaigns' | 'stats' | 'billing' | 'syncAgents' | 'auditLogs' | 'lineGroups' | 'templates' | 'loginBlocks' | 'agentDeploy' | 'marketingDiagnosis' | 'spamBlock' | 'geoAccess' | 'helpQuestions' | 'agencyMail' | 'agencyLedger' | 'adminAccounts' | 'precheckUsage' | 'featureInterest' | 'identityStatus' | 'introLeads' | 'watchLog' | 'opsRecords' | 'mallMonitor'>('companies');
   // ★ 2026-06-11: 감사 로그 열람 권한 (AUDIT_LOG_VIEWER_IDS — 기본 ceo 전용) — 허용 계정에만 메뉴/탭 노출
   const [auditAccessAllowed, setAuditAccessAllowed] = useState(false);
   // ★ 2026-08-27 직원 계정·권한 (전송자격인증 3.2·3.3) — 권한분류표 원본은 서버(utils/admin-role.ts)
@@ -2786,6 +2787,8 @@ const loadStatsDetail = async (date: string, companyId: string, companyName: str
                 label: '연동 · 인프라',
                 items: [
                   { key: 'syncAgents', label: 'Sync 모니터링' },
+                  // ★ 2026-10-27 자사몰 연동 감시(자사몰 대비 설계 K10 1단 · 읽기만)
+                  { key: 'mallMonitor', label: '자사몰 연동 감시' },
                   { key: 'agentDeploy', label: '싱크에이전트 배포' },
                   // ★ 2026-07-17: 발송 라인 설정 = 허용 계정(기본 ceo,admin)에만 노출
                   ...(lineGroupCanManage ? [{ key: 'lineGroups', label: '발송 라인 설정' }] : []),
@@ -4840,6 +4843,7 @@ const loadStatsDetail = async (date: string, companyId: string, companyName: str
 
       {/* ★ 2026-10-03 운영 기록 대장(로그 점검 · 방화벽 변경 · 권한 점검) */}
       {activeTab === 'opsRecords' && <OpsRecordsTab />}
+      {activeTab === 'mallMonitor' && <MallIntegrationMonitorTab />}
 
       {/* ★ 2026-07-17 발송 라인 설정 탭 — LINE_GROUP_ADMIN_USERS(기본 ceo,admin) 전용 */}
       {activeTab === 'lineGroups' && lineGroupCanManage && <LineGroupsTab {...{ lineGroups, lineGroupsLoading, loadLineGroups, setEditingLineGroup, showAlert, showConfirm }} />}

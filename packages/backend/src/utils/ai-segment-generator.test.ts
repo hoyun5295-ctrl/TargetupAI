@@ -43,7 +43,7 @@ describe('previewMatching — filter 참조 필드를 샘플 열로 싣는다', 
       grade: { operator: 'equals', value: 'VIP' },
       custom_3: { operator: 'equals', value: '멤버십A' },
     } as any);
-    const sampleSql = qmock.mock.calls.map((c: any[]) => String(c[0])).find((s) => !s.includes('COUNT(*)'))!;
+    const sampleSql = qmock.mock.calls.map((c: any[]) => String(c[0])).find((s) => !s.includes('COUNT(*)') && !s.includes('FROM company_integrations'))!;   // ★ 1027 ENV-3 — 몰 동의 분류코드 조회가 먼저 돈다
     expect(norm(sampleSql)).toContain(', c.grade AS "grade"');
     expect(norm(sampleSql), 'custom 슬롯은 JSONB 경로로 — 직접 컬럼으로 추측하면 42703').toContain(`c.custom_fields ->> 'custom_3' AS "custom_3"`);
     expect(r.sampleFields).toEqual([
@@ -60,7 +60,7 @@ describe('previewMatching — filter 참조 필드를 샘플 열로 싣는다', 
       days_since_last_purchase: { operator: 'lte', value: 30 },
       region: { operator: 'equals', value: '서울' },
     } as any);
-    const sampleSql = qmock.mock.calls.map((c: any[]) => String(c[0])).find((s) => !s.includes('COUNT(*)'))!;
+    const sampleSql = qmock.mock.calls.map((c: any[]) => String(c[0])).find((s) => !s.includes('COUNT(*)') && !s.includes('FROM company_integrations'))!;   // ★ 1027 ENV-3 — 몰 동의 분류코드 조회가 먼저 돈다
     expect(r.sampleFields).toEqual([]);
     expect(norm(sampleSql)).not.toContain('days_since_last_purchase');
     expect(norm(sampleSql), '기본 열(region)이 추가 열로 중복되면 별칭이 충돌한다').not.toContain('AS "region"');

@@ -24,6 +24,7 @@
  */
 
 import { createHmac, randomBytes, timingSafeEqual } from 'crypto';
+import { saveIntegrationRowGuarded } from './integration-scope';   // ★ 2026-10-27 자사몰 대비 K9 SC1 — 연동 행 저장 = 회사 모드 잠금 → 판정 → 저장(한 트랜잭션)
 import {
   IProviderAdapter,
   ProviderCapabilities,
@@ -32,6 +33,8 @@ import {
 } from './provider-registry';
 import { identifyCustomer, parseConsentValue } from './cdp-identity';
 import { syncOrder } from './cdp-orders';
+import { isKnownOrderStatus } from './cdp-order-revenue';
+import type { WebhookProcessResult } from './cdp-webhook-delivery';
 import { trackEvent } from './cdp-events';
 import { buildWebhookIdempotencyKey } from './cdp-idempotency';
 import { query } from '../config/database';
@@ -87,11 +90,13 @@ export const customSelfHostedAdapter: IProviderAdapter = {
     }
   },
 
-  async processWebhookEvent(companyId, event, resource): Promise<void> {
+  async processWebhookEvent(companyId, event, resource, ctx): Promise<WebhookProcessResult> {
+    // ★ 2026-10-27 자사몰 대비 K1-3 · K1-6 — 원천 시각이 없으면 받은 시각(ctx.observedAt) · 옛 스냅숏 = 'stale'
     switch (event) {
       case 'customer.created':
       case 'customer.updated':
         await identifyCustomer(companyId, {
+          ...(ctx.storeCode ? { storeCode: ctx.storeCode } : {}),   // ★ 1027 K9 — 연동 행 분류코드(소속 행 · 몰 동의)
           source: 'custom',
           externalId: String(resource.external_id || resource.customer_id || ''),
           email: resource.email,
@@ -104,19 +109,23 @@ export const customSelfHostedAdapter: IProviderAdapter = {
           customFields: resource.custom_fields || {},
           // 마케팅 수신동의 — 자사몰이 보낸 명시값만 반영, 미전달 시 undefined(기존값 유지·신규는 false)
           smsOptIn: parseConsentValue(resource.sms_opt_in ?? resource.marketing_consent),
+          consentAt: ctx.observedAt,   // ★ 1027 K2-2 — 동의 시계 = 받은 시각
         });
         break;
 
       case 'order.created':
-      case 'order.updated':
-        await syncOrder(companyId, {
+      case 'order.updated': {
+        const customStatus = String(resource.status || 'pending');
+        const placed = await syncOrder(companyId, {
+          ...(ctx.storeCode ? { storeCode: ctx.storeCode } : {}),   // ★ 1027 K9 — 연동 행 분류코드(소속 행 · 몰 동의)
           source: 'custom',
           orderId: String(resource.order_id || ''),
           externalId: String(resource.external_id || resource.customer_id || ''),
           email: resource.email,
           phone: resource.phone,
           name: resource.name,
-          status: String(resource.status || 'pending'),
+          status: customStatus,
+          statusKnown: isKnownOrderStatus(customStatus),
           totalAmount: Number(resource.total_amount || 0),
           itemCount: Array.isArray(resource.items) ? resource.items.length : undefined,
           items: Array.isArray(resource.items) ? resource.items.map((it: any) => ({
@@ -125,15 +134,19 @@ export const customSelfHostedAdapter: IProviderAdapter = {
             price: it.price != null ? Number(it.price) : undefined,
             quantity: it.quantity != null ? Number(it.quantity) : undefined,
           })) : undefined,
-          orderedAt: String(resource.ordered_at || new Date().toISOString()),
+          orderedAt: String(resource.ordered_at || ctx.observedAt),
+          srcAt: ctx.observedAt,
           currency: String(resource.currency || 'KRW'),
         });
+        if (placed.stale) return 'stale';
         break;
+      }
 
       case 'order.cancelled':
       case 'order.refunded':
         // 매출 차감은 syncOrder가 담당 (CT-86 revenue_reversed 멱등 마커 — 반영된 주문만 차감)
-        await syncOrder(companyId, {
+        const reversed = await syncOrder(companyId, {
+          ...(ctx.storeCode ? { storeCode: ctx.storeCode } : {}),   // ★ 1027 K9 — 연동 행 분류코드(소속 행 · 몰 동의)
           source: 'custom',
           orderId: String(resource.order_id || ''),
           externalId: String(resource.external_id || resource.customer_id || ''),
@@ -142,9 +155,11 @@ export const customSelfHostedAdapter: IProviderAdapter = {
           name: resource.name,
           status: event === 'order.refunded' ? 'refunded' : 'cancelled',
           totalAmount: Number(resource.total_amount || 0),
-          orderedAt: String(resource.cancelled_at || resource.ordered_at || new Date().toISOString()),
+          orderedAt: String(resource.cancelled_at || resource.ordered_at || ctx.observedAt),
+          srcAt: ctx.observedAt,
           currency: String(resource.currency || 'KRW'),
         });
+        if (reversed.stale) return 'stale';
         // 여정/캠페인 trigger용 취소 신호 이벤트는 기존대로 기록 (실패해도 차감 결과는 유지)
         await trackEvent(companyId, {
           source: 'custom',
@@ -155,7 +170,7 @@ export const customSelfHostedAdapter: IProviderAdapter = {
             status: resource.status,
             cancelled_amount: resource.total_amount,
           },
-          occurredAt: String(resource.cancelled_at || new Date().toISOString()),
+          occurredAt: String(resource.cancelled_at || ctx.observedAt),
         }).catch((err) => {
           console.log('[Custom Self-Hosted Adapter] 취소 신호 이벤트 기록 실패(차감은 완료):', err?.message || err);
         });
@@ -210,7 +225,7 @@ function buildWebhookUrl(): string {
 export async function issueCustomWebhookSecret(companyId: string): Promise<{ secret: string; webhookUrl: string; issuedAt: Date }> {
   const secret = randomBytes(32).toString('hex');
   const now = new Date();
-  await query(
+  await saveIntegrationRowGuarded(companyId, 'custom', 'self', null, (run) => run(
     `INSERT INTO company_integrations (
       id, company_id, provider, mall_id, access_token, refresh_token,
       token_expires_at, scope, meta, webhook_secret, connected_at, status,
@@ -226,7 +241,7 @@ export async function issueCustomWebhookSecret(companyId: string): Promise<{ sec
       status = 'active',
       updated_at = NOW()`,
     [companyId, secret]
-  );
+  ));
   return { secret, webhookUrl: buildWebhookUrl(), issuedAt: now };
 }
 

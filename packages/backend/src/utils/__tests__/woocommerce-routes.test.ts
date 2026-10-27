@@ -26,25 +26,27 @@ describe('routes/woocommerce.ts — 웹훅 수신', () => {
     expect(r).toMatch(/status\(401\)/);
     expect(r).toMatch(/ignored: true/);
   });
-  it('첫 서명 통과 = 연결 신호 · 멱등 = cdp_webhook_deliveries UNIQUE(company_id, source, idempotency_key) · 상태 3종', () => {
+  // ★ 2026-10-27 자사몰 대비 K2-5 — 기록 · 중복 · 처리는 공용 수신 CT(cdp-webhook-delivery) 하나(옛 인라인 기록 합침 · 의도 변경)
+  it('첫 서명 통과 = 연결 신호 · 멱등 = 공용 수신 CT(UNIQUE(company_id, source, idempotency_key)) · 라우트 안 기록 문장 0', () => {
     const r = route();
+    const ct = code('utils/cdp-webhook-delivery.ts');
     expect(r).toContain('markWooConnected(');
-    expect(r).toContain('INSERT INTO cdp_webhook_deliveries');
-    expect(r).toContain("'woocommerce'");
-    expect(r).toContain('ON CONFLICT (company_id, source, idempotency_key) DO NOTHING');
-    expect(r).toContain("status = 'duplicate'");
-    expect(r).toContain("status = 'processed'");
-    expect(r).toContain("status = 'failed'");
+    expect(r).toContain('deliverWebhookToCompanies({');
+    expect(r).toContain("source: 'woocommerce'");
+    // 웹훅 블록 안 기록 문장 0(oauth_state 1회용 행 INSERT 는 승인 콜백 블록 · 대상 밖)
+    expect(r.slice(r.indexOf("router.post(['/webhook/:mallId'"), r.indexOf("'/auth-callback'"))).not.toContain('INSERT INTO cdp_webhook_deliveries');
+    expect(ct).toContain('ON CONFLICT (company_id, source, idempotency_key) DO NOTHING');
+    expect(ct).toContain("status = 'duplicate'");
     // 전송 고유값(delivery id)을 멱등키 재료로 넘긴다
     expect(r).toMatch(/x-wc-webhook-delivery-id/);
     expect(r).toContain('buildIdempotencyKey(');
-    // 재처리 워커가 payload.resource 를 꺼내므로 저장 본문에 resource 키가 있어야 한다
-    expect(r).toMatch(/JSON\.stringify\(\{[^}]*resource/);
+    // 재처리 워커 · 증명 주소 학습이 payload.resource · payload.mall_id 를 꺼내므로 저장 본문 모양이 그대로여야 한다
+    expect(r).toMatch(/payload: \{ mall_id: integ\.mallId, topic, delivery_id: deliveryId, resource: body \}/);
   });
-  it('처리는 어댑터 한 함수(processWebhookEvent) — 라우트가 identify/syncOrder 를 직접 부르지 않는다', () => {
+  it('처리는 어댑터 한 함수(processWebhookEvent · 공용 수신 CT 가 부른다) — 라우트가 identify/syncOrder 를 직접 부르지 않는다', () => {
     const r = route();
-    expect(r).toContain('woocommerceAdapter.processWebhookEvent(');
-    expect(r).not.toMatch(/identifyCustomer\(|syncOrder\(/);
+    expect(code('utils/cdp-webhook-delivery.ts')).toContain('adapter.processWebhookEvent(row.company_id, row.webhook_event, resource, ctx)');
+    expect(r).not.toMatch(/identifyCustomer\(|syncOrder\(|processWebhookEvent\(/);
   });
 });
 
@@ -61,7 +63,9 @@ describe('routes/woocommerce.ts — 인증 라우트(★0918 권한 CT 경유 ·
   });
   it('★0918 분류코드는 본문이 아니라 권한 CT 가 정한다 — 본문 store_code 는 pickStoreCodeForConnect 의 선택지로만 · 저장 함수에 직접 흐르지 않는다', () => {
     const r = route();
-    expect(r).toMatch(/pickStoreCodeForConnect\(actor, req\.body\?\.store_code\)/);
+    // ★ 2026-10-27 K9 — 정하기 = CT decideStoreCode(안에서 pickStoreCodeForConnect · 라우트 안 판정 0)
+    expect(r).toMatch(/decideStoreCode\(actor, req\.body\?\.store_code\)/);
+    expect(code('utils/integration-scope.ts')).toMatch(/const pick = await pickStoreCodeForConnect\(actor, requested\);/);
     expect(r).not.toMatch(/saveWooCredentials\([\s\S]{0,400}req\.body\?\.store_code/);
     expect(r).not.toMatch(/storeCode:\s*req\.body/);
   });
@@ -78,9 +82,11 @@ describe('routes/woocommerce.ts — 인증 라우트(★0918 권한 CT 경유 ·
     expect(block("'/credentials'", "'/connect'")).toContain('decideStoreCode(');
     expect(block("'/connect-url'", "'/rotate-secret'")).toContain('decideStoreCode(');
     expect(r).toContain("'MALL_OWNED_BY_OTHER_STORE'");
-    expect(r).toContain("'STORE_CODE_CHANGE_NOT_SUPPORTED'");
-    // 기존 행에는 storeCode 를 덮어쓰지 않는다(undefined 로 저장)
-    expect(r).toMatch(/storeCode: existing \? undefined : pick\.storeCode/);
+    // ★ 1027 K9 — 저장 게이트(소유 · 코드 변경 거부 · 기존 행 storeCode 미덮어쓰기)는 CT integration-scope decideStoreCode 가 소유
+    const ct = code('utils/integration-scope.ts');
+    expect(ct).toContain("'STORE_CODE_CHANGE_NOT_SUPPORTED'");
+    expect(ct).toMatch(/storeCode: existing \? undefined : pick\.storeCode/);
+    expect(r).not.toMatch(/function decideStoreCode\(/);
   });
   it('★0918 잠금 사유 문장은 CT(integrationLockMessage)가 소유 — 라우트에 관리자 한정 문구를 손으로 적지 않는다', () => {
     const r = route();

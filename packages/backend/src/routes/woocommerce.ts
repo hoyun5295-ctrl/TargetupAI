@@ -24,6 +24,7 @@ import { Router, Request, Response, json } from 'express';
 import { randomBytes } from 'crypto';
 import { authenticate } from '../middlewares/auth';
 import { query } from '../config/database';
+import { deliverWebhookToCompanies } from '../utils/cdp-webhook-delivery';
 import { isCdpEnabledForPlan } from '../utils/cdp-auth';
 import { normalizeWooMallId, wooTopicKind } from '../utils/woocommerce-core';
 import { woocommerceAdapter, buildWooEvent, wooHeader } from '../utils/woocommerce-adapter';
@@ -53,13 +54,14 @@ import { buildWooPluginZip, WOO_PLUGIN_ZIP_NAME } from '../utils/woocommerce-plu
 import {
   resolveIntegrationActor,
   canTouchIntegration,
-  pickStoreCodeForConnect,
+  decideStoreCode,
+  IntegrationRejected,
   listCompanyStoreCodes,
   integrationLockMessage,
   type IntegrationActor,
 } from '../utils/integration-scope';
 
-import { publicErrorText } from '../utils/http-error';
+import { publicErrorText, respondUserError } from '../utils/http-error';
 const router = Router();
 
 // ════════════════════════════════════════════════════════════════════
@@ -113,43 +115,18 @@ router.post(['/webhook/:mallId', '/webhook'], json({ limit: '1mb', verify: (req:
     const deliveryId = wooHeader(headers, 'x-wc-webhook-delivery-id');
     const idempotencyKey = woocommerceAdapter.buildIdempotencyKey(event, body, { ...body, ...(deliveryId ? { delivery_id: deliveryId } : {}) });
 
-    const insertRes = await query(
-      `INSERT INTO cdp_webhook_deliveries (
-        id, company_id, source, webhook_event, idempotency_key, payload, status, retry_count, created_at
-      ) VALUES (
-        gen_random_uuid(), $1::uuid, 'woocommerce', $2, $3, $4::jsonb, 'received', 0, NOW()
-      )
-      ON CONFLICT (company_id, source, idempotency_key) DO NOTHING
-      RETURNING id`,
-      [integ.companyId, event, idempotencyKey, JSON.stringify({ mall_id: integ.mallId, topic, delivery_id: deliveryId, resource: body })],
-    );
-
-    if (insertRes.rows.length === 0) {
-      await query(
-        `UPDATE cdp_webhook_deliveries
-         SET status = 'duplicate', processed_at = NOW()
-         WHERE company_id = $1::uuid AND source = 'woocommerce' AND idempotency_key = $2
-           -- ★ 2026-09-26 한줄로 V2 R1-02 — 처리 완료 행만 중복 표시(실패 행을 덮으면 재처리 워커 대상에서 빠져 이벤트가 유실됐다)
-           AND status = 'processed'`,
-        [integ.companyId, idempotencyKey],
-      );
-      return res.json({ success: true, duplicate: true });
-    }
-    const deliveryRowId = insertRes.rows[0].id;
-
-    try {
-      await woocommerceAdapter.processWebhookEvent(integ.companyId, event, body);
-      await query(`UPDATE cdp_webhook_deliveries SET status = 'processed', processed_at = NOW() WHERE id = $1::uuid`, [deliveryRowId]);
-      return res.json({ success: true });
-    } catch (processErr: any) {
-      console.error('[WooCommerce Webhook] 이벤트 처리 실패:', processErr?.message || processErr);
-      await query(
-        `UPDATE cdp_webhook_deliveries SET status = 'failed', error_message = $2, processed_at = NOW() WHERE id = $1::uuid`,
-        [deliveryRowId, String(processErr?.message || 'unknown').slice(0, 1000)],
-      );
-      // 발신 측 재시도 대신 한줄로 재처리 워커(cdp-webhook-retry-worker)가 맡는다 — 200 계열로 닫는다
-      return res.json({ success: false, error: '이벤트 처리 실패, 한줄로 측에서 재처리합니다.' });
-    }
+    // ★ 2026-10-27 자사몰 대비 K2-5 — 기록 · 중복 · 처리는 공용 수신 CT 하나(옛 인라인 기록 합침) · 기록 → 즉시 200 → 처리는 뒤.
+    //   payload 모양 = { mall_id, topic, delivery_id, resource }(재처리 · 증명 주소 학습 learnWooHostFromSignedDeliveries 가 이 모양을 읽는다)
+    const outcome = await deliverWebhookToCompanies({
+      source: 'woocommerce',
+      companyIds: [integ.companyId],
+      event,
+      idempotencyKey,
+      payload: { mall_id: integ.mallId, topic, delivery_id: deliveryId, resource: body },
+      logTag: 'WooCommerce',
+    });
+    if (outcome.recorded === 0) return res.json({ success: true, duplicate: true });
+    return res.json({ success: true });
   } catch (err: any) {
     console.error('[WooCommerce Webhook] 오류:', err);
     return res.status(500).json({ success: false, error: publicErrorText(err, 'webhook 처리 실패') });
@@ -308,38 +285,19 @@ function gateMall(res: Response, actor: IntegrationActor, storeCode: string | nu
   return false;
 }
 
-/** 저장·해제 권한 게이트의 거부 — client CT 의 잠금 안에서 던지고 라우트가 사유 문장으로 답한다. */
-class WooSaveRejected extends Error {
-  constructor(public httpStatus: number, public lockCode: Parameters<typeof integrationLockMessage>[0]) { super(lockCode); }
+/** 저장·해제 권한 게이트의 거부 — client CT 의 잠금 안에서 던지고 라우트가 사유 문장으로 답한다(같은 꼴 = CT IntegrationRejected). */
+class WooSaveRejected extends IntegrationRejected {}
+
+/** 분류코드를 못 정하면 응답을 보낸다(정하기 = CT decideStoreCode · ★ 1027 K9 라우트 안 판정 0) */
+function sendStorePickFailure(res: Response, code: Parameters<typeof integrationLockMessage>[0]): void {
+  res.status(400).json({ success: false, error: integrationLockMessage(code), code });
 }
 
-/**
- * 새로 저장하는 몰의 분류코드를 정한다(권한 CT) + 이미 있는 몰이면 소유·변경 규칙을 건다.
- * 반환 = 저장 CT 에 넘길 게이트(decide) · 분류코드를 못 정하면 응답을 보내고 null.
- * ★ 2026-10-01 (Codex R1) 게이트는 **저장 CT 가 대상 행을 정한 뒤 같은 잠금 안에서** 돈다(saveWooCredentials decide) —
- *   여기서 먼저 행을 찾아 판정하면, 판정과 저장 사이에 그 주소가 다른 담당자 몰의 증명 주소가 됐을 때 소유 검사 없이 덮어쓴다.
- */
-async function decideStoreCode(req: Request, res: Response, actor: IntegrationActor): Promise<{ decide: (existing: WooIntegration | null) => { storeCode: string | null | undefined } } | null> {
-  const pick = await pickStoreCodeForConnect(actor, req.body?.store_code);
-  if (!pick.ok) {
-    res.status(400).json({ success: false, error: integrationLockMessage(pick.code), code: pick.code });
-    return null;
-  }
-  return {
-    decide: (existing) => {
-      if (existing) {
-        if (!canTouchIntegration(actor, existing.storeCode)) throw new WooSaveRejected(409, 'MALL_OWNED_BY_OTHER_STORE');
-        // 몰 1행 = 분류코드 1개. 관리자가 다른 코드로 다시 저장하려 하면 거부(해제 뒤 재연결이 길이다).
-        if (actor.kind === 'admin' && pick.storeCode !== null && pick.storeCode !== existing.storeCode) throw new WooSaveRejected(409, 'STORE_CODE_CHANGE_NOT_SUPPORTED');
-      }
-      return { storeCode: existing ? undefined : pick.storeCode };
-    },
-  };
-}
 
 /** WooApiError → 상태코드. 몰 서버 쪽 문제(network·rate_limited·http·header_overflow)는 502, 입력·권한 문제는 400. */
 function sendWooError(res: Response, err: unknown): void {
-  if (err instanceof WooSaveRejected) {
+  if (respondUserError(res, err)) return;   // ★ 1027 K9 분류코드 모드 거절(409 · 고객 문장)
+  if (err instanceof IntegrationRejected) {
     res.status(err.httpStatus).json({ success: false, error: integrationLockMessage(err.lockCode), code: err.lockCode });
     return;
   }
@@ -366,8 +324,9 @@ router.post('/credentials', async (req: Request, res: Response) => {
     if (!(await isCdpEnabledForPlan(companyId))) return res.status(403).json(PLAN_LOCKED);
     const siteUrl = String(req.body?.site_url || '').trim();
     if (!siteUrl) return res.status(400).json({ success: false, error: '쇼핑몰 주소(site_url)를 입력해주세요.' });
-    const decided = await decideStoreCode(req, res, actor);
-    if (!decided) return;
+    // 분류코드 = 권한 CT 가 정한다(★ 2026-10-01 Codex R1 — 게이트는 저장 CT 가 대상 행을 정한 뒤 같은 잠금 안에서 돈다 · decide)
+    const decided = await decideStoreCode(actor, req.body?.store_code);
+    if (!decided.ok) return sendStorePickFailure(res, decided.code);
     const r = await saveWooCredentials(companyId, {
       siteUrl,
       consumerKey: String(req.body?.consumer_key || ''),
@@ -440,8 +399,8 @@ router.post('/connect-url', async (req: Request, res: Response) => {
     const siteUrl = String(req.body?.site_url || '').trim();
     if (!siteUrl) return res.status(400).json({ success: false, error: '쇼핑몰 주소(site_url)를 입력해주세요.' });
     // ★ 분류코드는 여기(세션으로 몰 행을 만드는 시점)에서 정한다. 승인 콜백은 이미 있는 행에 키만 얹으므로 state 에 실을 필요가 없다.
-    const decided = await decideStoreCode(req, res, actor);
-    if (!decided) return;
+    const decided = await decideStoreCode(actor, req.body?.store_code);
+    if (!decided.ok) return sendStorePickFailure(res, decided.code);
     const saved = await saveWooCredentials(companyId, { siteUrl, consumerKey: '', consumerSecret: '', consentMetaKey: String(req.body?.consent_meta_key || ''), decide: decided.decide });
     const integ = await getWooIntegration(companyId, saved.mallId);
     if (!integ) return res.status(500).json({ success: false, error: '몰 저장 뒤 조회에 실패했습니다.' });

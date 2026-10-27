@@ -265,6 +265,9 @@ describe('mapWooOrderToCdp — 주문 JSON → OrderInput(+ 수신동의 raw)', 
         { productId: '94', productName: '렌즈 케이스', price: 11350, quantity: 1 },
       ],
       orderedAt: '2026-09-14T09:28:02Z',
+      // ★ 2026-10-27 자사몰 대비 K1-3 · K1-6 — 결제 시각(date_paid_gmt · 이 본문에 없음) · 원문 수정 시각(source 종류 시계)
+      paidAt: undefined,
+      srcAt: '2026-09-14T09:28:08Z',
       currency: 'KRW',
     });
     expect(r!.consentRaw).toBe('Y');

@@ -21,15 +21,8 @@
  *   두 갈래는 서로 배타다(Codex 1001 R2) — 접두 비교는 우커머스에만 건다. 접두 없는 주문번호가 어느 연동의 mall_id 와 우연히 같아도 붙지 않는다.
  */
 
-import { REVENUE_STATUSES } from './cdp-order-revenue';
-
-/**
- * 매출 반영된 주문인가 — CT-86 isRevenueApplied 와 같은 규칙(고객 요약 칸과 같은 셈):
- *   revenue_applied = JSON true · 또는 표식 도입(0610) 전 행이면 기록 당시 상태가 결제 완료. 차감 끝난 주문(revenue_reversed = true)은 뺀다.
- */
-const APPLIED = `(e.properties->'revenue_applied' = 'true'::jsonb`
-  + ` OR (NOT (e.properties ? 'revenue_applied') AND e.properties->>'status' IN (${REVENUE_STATUSES.map((x) => `'${x}'`).join(', ')})))`;
-const NOT_REVERSED = `COALESCE(e.properties->'revenue_reversed' = 'true'::jsonb, false) = false`;
+// 매출 반영된 주문 = CT-86 판정 조각 netPurchaseSql 한 곳(★ 2026-10-27 자사몰 대비 K1-8 · 옛 이 파일 사본 삭제 · 같은 규칙)
+import { netPurchaseSql } from './cdp-order-revenue';
 
 /** 문자열 숫자만 숫자로 — 다른 값이면 0(한 행의 이상한 값이 화면 전체를 500 으로 만들지 않게) */
 const num = (expr: string) => `CASE WHEN (${expr}) ~ '^-?[0-9]+(\\.[0-9]+)?$' THEN (${expr})::numeric ELSE 0 END`;
@@ -74,10 +67,8 @@ export function purchaseHistorySourceSql(companyRef: string): string {
          LIMIT 1
       ) mi ON true
      WHERE e.company_id = ${companyRef}
-       AND e.event_name = 'purchase'
        AND e.customer_id IS NOT NULL
-       AND ${APPLIED}
-       AND ${NOT_REVERSED}
+       AND ${netPurchaseSql('e')}
        AND NOT EXISTS (
          SELECT 1 FROM purchases px
           WHERE px.company_id = e.company_id AND px.customer_id = e.customer_id

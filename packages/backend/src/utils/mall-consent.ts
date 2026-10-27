@@ -44,11 +44,19 @@ export function mallConsentCodeAmong(companyRef: string, codesRef: string): stri
   return `EXISTS (SELECT 1 FROM company_integrations mci WHERE mci.company_id = ${companyRef} AND mci.meta->>'store_code' = ANY(${codesRef}))`;
 }
 
+/**
+ * ★ 2026-10-27 자사몰 대비 ENV-3(G6 · M7) — 미설정(빈 값 포함) = `*`(몰 동의 분류코드가 있는 회사 전부) · 끄기 = `off`.
+ *   옛: 미설정 = 아무도 아님이라, 쓰기(cdp-identity · 분류코드 몰이면 고객 행 동의를 올리지 않음)와 읽기(ENV 에 있는 회사만)가 다른 기준이었다
+ *   → ENV 에 없는 분류코드 몰 회사의 고객 행 동의가 멈춘 채로 읽혔다. 이제 두 쪽 모두 연동 행 meta.store_code 하나가 기준이다.
+ */
 function enforceList(): string[] {
-  return String(process.env[ENFORCE_ENV] || '').split(',').map((s) => s.trim()).filter(Boolean);
+  const raw = String(process.env[ENFORCE_ENV] ?? '').trim();
+  if (!raw) return ['*'];
+  if (raw.toLowerCase() === 'off') return [];
+  return raw.split(',').map((s) => s.trim()).filter(Boolean);
 }
 
-/** 이 회사에 몰 동의 읽기가 켜져 있는가. ENV 빈 값 = 아무도 아님 · `*` = 몰 동의 분류코드가 있는 회사 전부. */
+/** 이 회사에 몰 동의 읽기가 켜져 있는가. ENV 미설정 = `*` = 몰 동의 분류코드가 있는 회사 전부 · `off` = 아무도 아님. */
 export async function isMallConsentEnforced(companyId: string): Promise<boolean> {
   const list = enforceList();
   if (list.length === 0) return false;
@@ -411,8 +419,66 @@ export async function ownerBrandConsent(companyId: string, ownerUserId?: string 
 }
 
 let warnedMissingColumn = false;
+let warnedMissingClock = false;
 /** 테스트 전용 — 경고 1회 제한을 되돌린다 */
-export function _resetMallConsentWarnForTest(): void { warnedMissingColumn = false; }
+export function _resetMallConsentWarnForTest(): void { warnedMissingColumn = false; warnedMissingClock = false; }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ★ 2026-10-27 자사몰 대비 K2 — 동의 값의 시계(설계서 docs/2026-10-27-mall-integration-hardening-design.md · I3 · I4)
+//   값 쓰기는 그 자원에서 본 것 중 가장 늦은 원천 시각 이상일 때만 · 같은 시각이면 NO 만(위험이 적은 쪽).
+//   두 표(customer_stores · customers)가 같은 조각을 쓴다(R18 · 한 함수). 시계 칸(consent_source_at)이 없는 DDL 전은 지금 동작 + 경고 1회.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** 동의 시계 조각 — 저장된 시각(NULL = -infinity)보다 늦거나, 같은 시각의 NO. */
+export function consentClockSql(storedAt: string, incomingAt: string, incomingOptIn: string): string {
+  return `(COALESCE(${storedAt}, '-infinity'::timestamptz) < ${incomingAt} OR (${storedAt} = ${incomingAt} AND ${incomingOptIn} = false))`;
+}
+
+/** 시계 칸이 없는 DB(DDL-1 · DDL-3 전)인가 — 그 칸 이름이 든 42703 만 */
+export function isConsentClockMissing(err: any): boolean {
+  return err?.code === '42703' && String(err?.message || '').includes('consent_source_at');
+}
+export function warnConsentClockMissingOnce(table: string): void {
+  if (warnedMissingClock) return;
+  warnedMissingClock = true;
+  console.warn(`[MallConsent] ${table}.consent_source_at 칸이 아직 없습니다(DDL 전) — 동의 시계 비교 없이 지금 동작으로 씁니다. 설계서 §3 DDL 실행 뒤 시계가 켜집니다.`);
+}
+
+/** 그 몰의 회원 연결 식별자 모양 — 우커머스 = `{몰}:` + 숫자뿐. 없으면 비회원 꼴(guest: · order: · anon_)이 아닌 연결을 회원으로 본다. */
+export interface MemberIdFormat { memberIdPrefix: string; memberIdRestPattern: string }
+
+/**
+ * 그 고객에게 그 몰의 회원 연결이 있는가(EXISTS 조각) — 가족 번호(다른 회원 연결이 있으면 YES 거절 · K2-3) ·
+ * 주문 동의(회원 연결이 있으면 주문 동의 무시 · K2-1) · 공란 규칙 판정 ②가 같은 조각을 쓴다.
+ * params 에 값을 넣고 조각을 돌려준다(자리표 번호는 params 길이로 매긴다).
+ */
+export function memberLinkExistsSql(params: any[], o: {
+  companyRef: string; customerRef: string; source: string; excludeExternalId?: string; format?: MemberIdFormat | null;
+}): string {
+  params.push(o.source);
+  const src = `$${params.length}`;
+  let excl = '';
+  if (o.excludeExternalId) { params.push(o.excludeExternalId); excl = `AND ml.external_id <> $${params.length}`; }
+  let fmt = `ml.external_id NOT LIKE 'guest:%' AND ml.external_id NOT LIKE 'order:%' AND ml.external_id NOT LIKE 'anon\\_%'`;
+  if (o.format?.memberIdPrefix && o.format.memberIdRestPattern) {
+    params.push(o.format.memberIdPrefix, o.format.memberIdRestPattern);
+    const pre = `$${params.length - 1}`;
+    const pat = `$${params.length}`;
+    fmt = `left(ml.external_id, char_length(${pre})) = ${pre} AND substr(ml.external_id, char_length(${pre}) + 1) ~ ${pat}`;
+  }
+  return `EXISTS (SELECT 1 FROM cdp_identity_links ml
+                   WHERE ml.company_id = ${o.companyRef} AND ml.customer_id = ${o.customerRef} AND ml.source = ${src} ${excl}
+                     AND ${fmt})`;
+}
+
+/** 원천 시각(ISO) 정규화 — 없거나 틀리면 지금(동기 호출의 받은 시각) */
+export function consentSourceAt(at: string | null | undefined): string {
+  const t = at ? new Date(at).getTime() : NaN;
+  return Number.isFinite(t) ? new Date(t).toISOString() : new Date().toISOString();
+}
+
+/** 가족 번호 판정에 쓸 이 호출의 회원 연결(없으면 판정 안 함 = 옛 동작) */
+export interface ConsentWriter { source: string; externalId: string; format?: MemberIdFormat | null }
 
 /**
  * 몰이 준 수신동의를 그 몰의 소속 행에 쓴다(명시 값 쓰기 입구는 여기 하나).
@@ -431,19 +497,51 @@ export async function upsertStoreConsent(
   storeCode: string | null | undefined,
   optIn: boolean,
   source: string,
+  /** ★ 1027 K2-2 — 이 값을 본 원천 시각(ISO · 웹훅 = 받은 시각 · 가져오기 = 읽은 시각 · 탈퇴 = 삭제 시각) */
+  sourceAt: string,
+  /** ★ 1027 K2-3 — 쓰는 회원 연결(있으면 그 고객에게 그 몰의 **다른** 회원 연결이 있을 때 YES 를 거절 · NO 만 받음) */
+  writer?: ConsentWriter | null,
 ): Promise<boolean> {
   const code = typeof storeCode === 'string' ? storeCode.trim() : '';
   if (!companyId || !customerId || !code) return false;
+  const at = consentSourceAt(sourceAt);
+  const build = (clock: boolean): { sql: string; params: any[] } => {
+    // $6 = 원천 시각 — 동의 일자(consent_at · 증빙)와 시계(consent_source_at)가 같은 값(★ 1027 R18 · NOW() 0)
+    const params: any[] = [companyId, customerId, code, optIn, source, at];
+    // 가족 번호 거름 — SELECT 의 WHERE 라 새 행 · 기존 행 갱신을 함께 막는다
+    const family = writer?.source && writer.externalId
+      ? `WHERE $4::boolean = false OR NOT ${memberLinkExistsSql(params, { companyRef: '$1::uuid', customerRef: '$2::uuid', source: writer.source, excludeExternalId: writer.externalId, format: writer.format })}`
+      : '';
+    // 값이 다를 때 = 값 · 출처 · 동의 일자 · 시계 / 같을 때 = 시계 한 칸만 앞으로(K2-2)
+    const sql = clock
+      ? `INSERT INTO customer_stores (company_id, customer_id, store_code, sms_opt_in, consent_source, consent_at, consent_source_at)
+         SELECT $1::uuid, $2::uuid, $3, $4::boolean, $5, $6::timestamptz, $6::timestamptz ${family}
+         ON CONFLICT (customer_id, store_code) DO UPDATE
+            SET sms_opt_in = EXCLUDED.sms_opt_in,
+                consent_source = CASE WHEN customer_stores.sms_opt_in IS DISTINCT FROM EXCLUDED.sms_opt_in THEN EXCLUDED.consent_source ELSE customer_stores.consent_source END,
+                consent_at = CASE WHEN customer_stores.sms_opt_in IS DISTINCT FROM EXCLUDED.sms_opt_in THEN EXCLUDED.consent_at ELSE customer_stores.consent_at END,
+                consent_source_at = EXCLUDED.consent_source_at
+          WHERE customer_stores.company_id = EXCLUDED.company_id
+            AND ${consentClockSql('customer_stores.consent_source_at', 'EXCLUDED.consent_source_at', 'EXCLUDED.sms_opt_in')}`
+      : `INSERT INTO customer_stores (company_id, customer_id, store_code, sms_opt_in, consent_source, consent_at)
+         SELECT $1::uuid, $2::uuid, $3, $4::boolean, $5, $6::timestamptz ${family}
+         ON CONFLICT (customer_id, store_code) DO UPDATE
+            SET sms_opt_in = EXCLUDED.sms_opt_in, consent_source = EXCLUDED.consent_source, consent_at = EXCLUDED.consent_at
+          WHERE customer_stores.company_id = EXCLUDED.company_id`;
+    return { sql, params };
+  };
   try {
-    const r = await query(
-      `INSERT INTO customer_stores (company_id, customer_id, store_code, sms_opt_in, consent_source, consent_at)
-       VALUES ($1::uuid, $2::uuid, $3, $4, $5, NOW())
-       ON CONFLICT (customer_id, store_code) DO UPDATE
-          SET sms_opt_in = EXCLUDED.sms_opt_in, consent_source = EXCLUDED.consent_source, consent_at = EXCLUDED.consent_at
-        WHERE customer_stores.company_id = EXCLUDED.company_id`,
-      [companyId, customerId, code, optIn, source],
-    );
-    return (r.rowCount || 0) > 0;
+    try {
+      const q = build(true);
+      const r = await query(q.sql, q.params);
+      return (r.rowCount || 0) > 0;
+    } catch (err: any) {
+      if (!isConsentClockMissing(err)) throw err;
+      warnConsentClockMissingOnce('customer_stores');   // 시계 칸 없음(DDL-1 전) = 지금 동작
+      const q = build(false);
+      const r = await query(q.sql, q.params);
+      return (r.rowCount || 0) > 0;
+    }
   } catch (err: any) {
     if (err?.code === '42703') {
       if (!warnedMissingColumn) {
@@ -510,6 +608,8 @@ export async function applyMissingConsentRule(
   customerId: string,
   storeCode: string | null | undefined,
   profile: MissingConsentProfile,
+  /** ★ 1027 K2-2 — 그 회원 정보를 받은 시각(NOW 아님 · 채운 값의 시계) */
+  sourceAt: string,
 ): Promise<boolean> {
   const code = typeof storeCode === 'string' ? storeCode.trim() : '';
   if (!companyId || !customerId || !code) return false;
@@ -520,25 +620,40 @@ export async function applyMissingConsentRule(
   const rest = String(profile?.memberIdRestPattern || '');
   // 어느 키로 읽었는지 · 회원 연결의 모양을 모르면 판정할 수 없다 → 채우지 않는다(덜 보내는 방향)
   if (!source || !externalId || !consentKey || !prefix || !rest) return false;
-  try {
-    const r = await query(
-      `UPDATE customer_stores
-          SET sms_opt_in = true, consent_source = $4, consent_at = NOW()
+  const at = consentSourceAt(sourceAt);
+  const build = (clock: boolean): { sql: string; params: any[] } => {
+    // $6 = 그 회원 정보를 받은 시각 — 동의 일자 · 시계(★ 1027 R18 · NOW() 0)
+    const params: any[] = [companyId, customerId, code, missingConsentSource(source), consentKey, at];
+    const other = memberLinkExistsSql(params, { companyRef: '$1::uuid', customerRef: '$2::uuid', source, excludeExternalId: externalId, format: { memberIdPrefix: prefix, memberIdRestPattern: rest } });
+    // 채우기 = YES 라 같은 시각은 이기지 못한다(시계 조각의 YES 갈래)
+    const clockSet = clock ? ', consent_source_at = $6::timestamptz' : '';
+    const clockWhere = clock ? `AND ${consentClockSql('consent_source_at', '$6::timestamptz', 'true')}` : '';
+    return {
+      params,
+      sql: `UPDATE customer_stores
+          SET sms_opt_in = true, consent_source = $4, consent_at = $6::timestamptz${clockSet}
         WHERE company_id = $1::uuid AND customer_id = $2::uuid AND store_code = $3
           AND sms_opt_in IS NULL
+          ${clockWhere}
           AND EXISTS (
             SELECT 1 FROM company_integrations ci
              WHERE ci.company_id = $1::uuid AND ci.meta->>'store_code' = $3
-               AND ci.meta->>'${MISSING_CONSENT_RULE_KEY}' = $9)
-          AND NOT EXISTS (
-            SELECT 1 FROM cdp_identity_links l
-             WHERE l.company_id = $1::uuid AND l.customer_id = $2::uuid AND l.source = $5
-               AND l.external_id <> $6
-               AND left(l.external_id, char_length($7)) = $7
-               AND substr(l.external_id, char_length($7) + 1) ~ $8)`,
-      [companyId, customerId, code, missingConsentSource(source), source, externalId, prefix, rest, consentKey],
-    );
-    return (r.rowCount || 0) > 0;
+               AND ci.meta->>'${MISSING_CONSENT_RULE_KEY}' = $5)
+          AND NOT ${other}`,
+    };
+  };
+  try {
+    try {
+      const q = build(true);
+      const r = await query(q.sql, q.params);
+      return (r.rowCount || 0) > 0;
+    } catch (err: any) {
+      if (!isConsentClockMissing(err)) throw err;
+      warnConsentClockMissingOnce('customer_stores');
+      const q = build(false);
+      const r = await query(q.sql, q.params);
+      return (r.rowCount || 0) > 0;
+    }
   } catch (err: any) {
     if (err?.code === '42703') return false;
     throw err;

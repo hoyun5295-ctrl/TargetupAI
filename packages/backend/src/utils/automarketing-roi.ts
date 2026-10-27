@@ -12,6 +12,7 @@
 
 import { query } from '../config/database';
 import { recipientPhonesOfCampaign } from './recipient-conversion';
+import { netPurchaseSql } from './cdp-order-revenue';
 
 /** 매출 귀속에서 훑는 캠페인 수 — 캠페인마다 발송 큐를 읽으므로 최근 것부터 이만큼만(넘으면 source에 표기). */
 const ROI_CAMPAIGN_SCAN_LIMIT = 100;
@@ -39,15 +40,14 @@ export async function campaignRecipientOrders(companyId: string, campaignId: str
   if (phones.length === 0) return out;
   // 주문 단위로 판정한다(Codex 차수3 D 2R) — 같은 주문의 행 중 하나라도 환불 표식이면 그 주문 전체를 뺀다
   //   (재전송으로 행이 둘이면 환불 표식은 가장 오래된 한 행에만 남는다 · cdp-orders syncOrder).
-  //   결제 확정 = CT-86 cdp-order-revenue 마커 규약 · 상태 없는 SDK 구매 이벤트는 그대로 인정.
+  //   결제 확정 = CT-86 판정 조각 netPurchaseSql(★ 2026-10-27 자사몰 대비 K1-8 — 옛 「상태 없음 = 결제」 삭제 · 결제 전 주문은 성과가 아니다).
   const ev = await query(
     `SELECT x.order_key, MAX(x.amount) FILTER (WHERE x.paid) AS amount
        FROM (
          SELECT e.source || ':' || COALESCE(NULLIF(e.properties->>'order_id', ''), e.id::text) AS order_key,
                 COALESCE((e.properties->>'total_amount')::numeric, 0)::float AS amount,
                 COALESCE(e.properties->>'revenue_reversed', '') = 'true' AS reversed,
-                COALESCE(e.properties->>'revenue_applied' = 'true' OR e.properties->>'status' IS NULL
-                         OR e.properties->>'status' IN ('completed', 'paid'), false) AS paid
+                COALESCE(${netPurchaseSql('e')}, false) AS paid
            FROM campaigns c
            JOIN cdp_events e ON e.company_id = $1::uuid
             AND e.event_name IN ('purchase', 'order')

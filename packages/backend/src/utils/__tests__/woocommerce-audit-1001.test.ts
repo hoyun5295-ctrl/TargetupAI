@@ -256,14 +256,17 @@ describe('W-1 몰 주소 — 서명 검증된 본문이 증명한 주소로만 �
   });
   it('라우트: 화면 저장 2곳은 게이트를 저장 CT 에 넘긴다(먼저 행을 찾아 판정하지 않는다) · 거부는 사유 문장으로 답한다(소스 계약)', () => {
     const route = readFileSync(resolve(SRC, 'routes/woocommerce.ts'), 'utf8');
-    const gate = route.slice(route.indexOf('async function decideStoreCode('), route.indexOf('/** WooApiError → 상태코드.'));
+    // ★ 2026-10-27 자사몰 대비 K9 — 게이트 = CT integration-scope decideStoreCode(라우트 안 함수를 옮김 · 거부 = IntegrationRejected · 우커머스 거부도 같은 꼴)
+    const ct = readFileSync(resolve(SRC, 'utils/integration-scope.ts'), 'utf8');
+    const gate = ct.slice(ct.indexOf('export async function decideStoreCode('));
     expect(gate).not.toMatch(/getWooIntegration\(|resolveWooMallIdForSave\(|normalizeWooMallId\(/);
-    expect(gate).toContain("if (!canTouchIntegration(actor, existing.storeCode)) throw new WooSaveRejected(409, 'MALL_OWNED_BY_OTHER_STORE');");
-    expect(gate).toContain("throw new WooSaveRejected(409, 'STORE_CODE_CHANGE_NOT_SUPPORTED');");
+    expect(gate).toContain("if (!canTouchIntegration(actor, existing.storeCode)) throw new IntegrationRejected(409, 'MALL_OWNED_BY_OTHER_STORE');");
+    expect(gate).toContain("throw new IntegrationRejected(409, 'STORE_CODE_CHANGE_NOT_SUPPORTED');");
     expect(gate).toContain('return { storeCode: existing ? undefined : pick.storeCode };');
+    expect(route).toContain('class WooSaveRejected extends IntegrationRejected {}');
     expect((route.match(/decide: decided\.decide/g) || []).length).toBe(2);
     expect(route).not.toMatch(/storeCode: decided\.storeCode/);
-    expect(route).toContain('if (err instanceof WooSaveRejected) {');
+    expect(route).toContain('if (err instanceof IntegrationRejected) {');
     expect(route).toContain('res.status(err.httpStatus).json({ success: false, error: integrationLockMessage(err.lockCode), code: err.lockCode });');
   });
   it('해제된 행은 주소를 갖지 않는다(Codex R2) — 되살릴 때 옛 증명 주소·굳힌 기준 주소를 버리고, 해제된 행을 연결로 되돌리는 자리는 저장 하나', () => {
@@ -312,7 +315,8 @@ describe('W-1 몰 주소 — 서명 검증된 본문이 증명한 주소로만 �
     const hook = route.slice(route.indexOf("router.post(['/webhook/:mallId', '/webhook']"), route.indexOf('// 앱 인증(wc-auth) 콜백'));
     const after = hook.slice(hook.indexOf("return res.status(401).json({ success: false, error: '웹훅 서명 검증에 실패했습니다.' });"));
     expect(after).toContain('const event = buildWooEvent(integ.mallId, topic);');
-    expect(after).toContain('JSON.stringify({ mall_id: integ.mallId, topic, delivery_id: deliveryId, resource: body })');
+    // ★ 2026-10-27 K2-5 — 기록은 공용 수신 CT 가(원문 모양 그대로 · 서명 맞은 행의 몰 식별자)
+    expect(after).toContain('payload: { mall_id: integ.mallId, topic, delivery_id: deliveryId, resource: body },');
     expect(after).toContain('await markWooConnected(integ.companyId, integ.mallId);');
     expect(after).not.toMatch(/buildWooEvent\(mallId|mall_id: mallId|markWooConnected\(integ\.companyId, mallId\)/);
   });

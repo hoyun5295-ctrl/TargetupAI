@@ -28,7 +28,7 @@
  */
 
 import { UserFacingError } from './http-error';
-import { query, pool } from '../config/database';
+import { query, pool, type TxRun } from '../config/database';
 import { ensureAnonymousLink, identifyCustomer, findLinkedCustomerId } from './cdp-identity';
 // ★ 2026-06-25 (gap 5): 자사몰 전송 시각 미래 클램프(커서·통계 왜곡 차단)
 import { clampOccurredAt } from './cdp-occurred-at';
@@ -126,6 +126,37 @@ export function validateProperties(properties: any): { ok: boolean; error?: stri
 }
 
 // ═══════════════════════════════════════════════════════════
+// ★ 2026-10-27 자사몰 대비 K1-7 — 주문 사건 쓰기(주문 CT 전용 · import = cdp-orders.ts 하나 · R22)
+// ═══════════════════════════════════════════════════════════
+
+/** 주문 사건 이름 — purchase = 결제된 적 있는 주문 · order_placed = 결제 전 · 결제 실패 · 취소가 먼저 온 주문(I1 · 표준 목록 밖) */
+export type OrderEventName = 'purchase' | 'order_placed';
+
+/**
+ * 주문 사건 1행 INSERT — 주문 CT 의 트랜잭션 연결(run)로 쓴다(표식 · 고객 요약과 한 트랜잭션 · K1-2).
+ * 예약 이름 바꾸기 · 표준 이름 검사를 지나지 않는 내부 길이라 밖에서 부르지 않는다(R22 계약). 고객 · 연결은 syncOrder 의 식별이 이미 만들었다.
+ */
+export async function trackOrderEvent(
+  run: TxRun,
+  companyId: string,
+  input: { name: OrderEventName; source: string; identityLinkId: string; customerId: string; properties: Record<string, unknown>; occurredAt: string },
+): Promise<{ eventId: string }> {
+  if (input.name !== 'purchase' && input.name !== 'order_placed') throw new Error(`not an order event name: ${input.name}`);   // 내부 길 계약 위반(고객 문장 아님)
+  const propsCheck = validateProperties(input.properties);
+  if (!propsCheck.ok) throw new Error(propsCheck.error);
+  const r = await run(
+    `INSERT INTO cdp_events (
+      id, company_id, identity_link_id, customer_id, event_name, properties, source, occurred_at, created_at
+    ) VALUES (
+      gen_random_uuid(), $1::uuid, $2::uuid, $3::uuid, $4, $5::jsonb, $6, $7, NOW()
+    )
+    RETURNING id`,
+    [companyId, input.identityLinkId, input.customerId, input.name, JSON.stringify(input.properties || {}), input.source, clampOccurredAt(input.occurredAt, new Date())],
+  );
+  return { eventId: String(r.rows[0].id) };
+}
+
+// ═══════════════════════════════════════════════════════════
 // 메인 — trackEvent
 // ═══════════════════════════════════════════════════════════
 
@@ -139,6 +170,12 @@ export async function trackEvent(
   companyId: string,
   input: TrackEventInput
 ): Promise<TrackEventResult> {
+  // ★ 2026-10-27 자사몰 대비 K1-7 — 구매 사건 이름은 주문 CT(trackOrderEvent) 만 쓴다. 서버 /event 로 온 purchase 도 브라우저와 같이 바꿔 적는다.
+  const reserved = RESERVED_EVENT_RENAME[input.eventName];
+  if (reserved) {
+    console.log(`[CDP Events] 예약 이름을 바꿔 적습니다 company=${companyId} ${input.eventName} → ${reserved}`);
+    input = { ...input, eventName: reserved };
+  }
   const eventNameCheck = validateEventName(input.eventName);
   if (!eventNameCheck.ok) {
     throw new Error(eventNameCheck.error);
@@ -332,7 +369,8 @@ const BROWSER_CONTROL_KEYS = new Set([
  * 같은 주문이 몰 웹훅 purchase 와 두 건이 됐다(성과·여정 이중 계상) · 공개키만으로 구매 이벤트를 지어낼 수 있었다
  * (2026-10-04 싱크·자사몰 전수점검 SDK2 · C2). SDK 만 단 몰의 구매는 비밀키 /api/cdp/order 로 받는다.
  */
-const BROWSER_EVENT_RENAME: Record<string, string> = { purchase: 'checkout_complete' };
+// ★ 2026-10-27 자사몰 대비 K1-7 — 이름만 바꿔 서버 /event(trackEvent)도 같은 표를 쓴다(구매 사건 = 주문 CT 의 결제 확정만 · I1).
+const RESERVED_EVENT_RENAME: Record<string, string> = { purchase: 'checkout_complete' };
 
 export interface BrowserIngestBatch {
   anonymousId: string | null;
@@ -375,7 +413,7 @@ function normalizeBrowserEvent(e: Record<string, any>): NormalizedBrowserEvent |
   if (type === 'track') {
     const rawName = String(e?.event || '');
     if (!validateEventName(rawName).ok) return null;
-    const eventName = BROWSER_EVENT_RENAME[rawName] || rawName;
+    const eventName = RESERVED_EVENT_RENAME[rawName] || rawName;
     const props = e?.properties && typeof e.properties === 'object' && !Array.isArray(e.properties)
       ? e.properties
       : {};

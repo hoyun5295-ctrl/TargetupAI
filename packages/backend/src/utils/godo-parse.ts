@@ -37,8 +37,14 @@ const STATUS_MAP: Record<string, OrderInput['status']> = {
 
 /** 고도몰 주문상태코드 → syncOrder status. 미지의 코드는 'pending'(매출 미반영 안전). */
 export function mapGodoOrderStatus(code: string): OrderInput['status'] {
+  return godoOrderStatusOf(code).status;
+}
+
+/** ★ 2026-10-27 자사몰 대비 K10 SC2 — { 적재 상태, 표에 있는 코드인가 }. 모르는 코드 = pending(매출 미반영) + known false */
+export function godoOrderStatusOf(code: string): { status: OrderInput['status']; known: boolean } {
   const c = (code || '').trim().toLowerCase();
-  return STATUS_MAP[c] ?? 'pending';
+  const mapped = STATUS_MAP[c];
+  return mapped ? { status: mapped, known: true } : { status: 'pending', known: false };
 }
 
 // ════════════════════════════════════════════════════════════════════
@@ -156,6 +162,7 @@ export function mapGodoOrderToCdp(order: any): GodoMappedOrder | null {
   const settle = toNumber(order?.settlePrice);
   const totalAmount = settle > 0 ? settle : toNumber(order?.totalGoodsPrice) + toNumber(order?.totalDeliveryCharge);
 
+  const st = godoOrderStatusOf(String(order?.orderStatus ?? ''));
   const orderInput: OrderInput = {
     source: GODO_SOURCE,
     orderId,
@@ -163,7 +170,9 @@ export function mapGodoOrderToCdp(order: any): GodoMappedOrder | null {
     phone,
     name,
     email,
-    status: mapGodoOrderStatus(String(order?.orderStatus ?? '')),
+    status: st.status,
+    statusKnown: st.known,
+    ...(st.known ? {} : { statusRaw: String(order?.orderStatus ?? '') }),
     totalAmount,
     itemCount: items.length || undefined,
     items: items.length ? items : undefined,

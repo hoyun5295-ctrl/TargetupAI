@@ -39,8 +39,9 @@ describe('CDP', () => {
     expect(extractWebhookResource('cafe24', { resource: { b: 2 } })).toEqual({ b: 2 });
     expect(extractWebhookResource('cafe24', { x: 1 })).toEqual({});
     expect(extractWebhookResource('naver_smart_store', { x: 1 })).toEqual({ x: 1 });
-    const w = src('cdp-webhook-retry-worker.ts');
-    expect(w).toContain('const resource = extractWebhookResource(row.source, payload);');
+    // ★ 2026-10-27 K2-6 — 수신 줄 · 재처리 워커가 같은 처리 함수(processClaimedDelivery) 하나를 지난다(그 안에서 같은 규칙)
+    expect(src('cdp-webhook-delivery.ts')).toContain('const resource = extractWebhookResource(row.source, row.payload || {});');
+    expect(src('cdp-webhook-retry-worker.ts')).toContain('await processClaimedDelivery(row, true)');
   });
   it('R124 고도몰 백필 끝이 해제한 연동을 되살리지 않는다', () => {
     const g = src('godo-client.ts');

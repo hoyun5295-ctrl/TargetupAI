@@ -14,6 +14,7 @@
 
 import { createHmac, timingSafeEqual } from 'crypto';
 import { IProviderAdapter, ProviderCapabilities, ProviderTokenResponse } from './provider-registry';
+import type { WebhookProcessResult } from './cdp-webhook-delivery';
 import { buildWebhookIdempotencyKey } from './cdp-idempotency';
 import { normalizeWooMallId, wooTopicKind, type WooTopicResource, type WooTopicEvent } from './woocommerce-core';
 import { WOO_PROVIDER, getWooIntegration, processWooResource } from './woocommerce-client';
@@ -90,7 +91,8 @@ export const woocommerceAdapter: IProviderAdapter = {
     }
   },
 
-  async processWebhookEvent(companyId, event, resource): Promise<void> {
+  async processWebhookEvent(companyId, event, resource, ctx): Promise<WebhookProcessResult> {
+    // 주문 = 원문 수정 시각(date_modified_gmt)이 시계(★ 1027 K1-6 source 종류) · 회원 동의 = 받은 시각(ctx.observedAt · K2-2)
     const parsed = parseWooEvent(event);
     if (!parsed) {
       console.log(`[WooCommerce Adapter] 처리하지 않는 event: ${event}`);
@@ -104,9 +106,10 @@ export const woocommerceAdapter: IProviderAdapter = {
       return;
     }
     // ★ 2026-09-18 몰 행의 분류코드를 함께 넘긴다(웹훅·백필·주기 수집이 같은 함수라 자리는 하나 · 설계서 §3-4)
-    const r = await processWooResource(companyId, parsed.mallId, parsed.kind.resource, resource, integ.consentMetaKey, integ.storeCode);
+    const r = await processWooResource(companyId, parsed.mallId, parsed.kind.resource, resource, integ.consentMetaKey, integ.storeCode, ctx.observedAt);
     if (r === 'skipped') console.log(`[WooCommerce Adapter] 적재 불가(식별 수단·주문시각 없음): ${event} id=${resource?.id}`);
     else if (r === 'no_phone') console.log(`[WooCommerce Adapter] 적재 안 함(신규 고객인데 휴대폰 번호 없음): ${event} id=${resource?.id}`);
+    else if (r === 'stale') return 'stale';
   },
 
   extractMallIdFromWebhook(headers): string | null {

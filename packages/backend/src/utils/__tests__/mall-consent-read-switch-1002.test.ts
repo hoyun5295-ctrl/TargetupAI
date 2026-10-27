@@ -39,7 +39,7 @@ const q = query as unknown as ReturnType<typeof vi.fn>;
 const ENV = 'MALL_CONSENT_ENFORCE_COMPANY_IDS';
 const saved = process.env[ENV];
 
-beforeEach(() => { q.mockReset(); delete process.env[ENV]; });
+beforeEach(() => { q.mockReset(); process.env[ENV] = 'off'; /* ★ 1027 ENV-3 — 미설정 = * 로 뜻이 바뀌어 꺼짐은 off 로 쓴다 */ });
 afterEach(() => { if (saved === undefined) delete process.env[ENV]; else process.env[ENV] = saved; });
 
 const MALLS = ['렌즈고고', '일본이모'];

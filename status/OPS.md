@@ -109,6 +109,7 @@ tp-deploy-full          # 서버 git pull → backend(npm install + build) → f
 > **교훈:** `$cmds = @(...) -join " && "` + `ssh remote $cmds` PowerShell 배열 패턴이 긴 체인 전달 시 서버 sshd에서 `Connection closed by port 22` 발생 가능. → 반드시 **한 줄 쌍따옴표 방식** `ssh remote "cmd1 && cmd2 && ..."`로 작성.
 
 ### 2-2. 서버 배포 (SSH 접속 후)
+> **배포 전 = [DEPLOY-LEDGER.md](DEPLOY-LEDGER.md)**(★1027 · 이번 pull 에 딸려 가는 것 · git 밖 단계 DDL · DML · ENV · 실측 · 계산 = `packages/backend` 에서 `node scripts/deploy-ledger.mjs`). 아래 순서는 이 절이 소유한다(원장은 가리키기만).
 ```bash
 ssh administrator@58.227.193.62
 

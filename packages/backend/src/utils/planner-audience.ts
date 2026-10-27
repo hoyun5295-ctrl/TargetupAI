@@ -25,7 +25,7 @@ import { buildParticipantPredicate } from './planner-participation';
 import { PlannerAudienceMode } from './planner-execution';
 import { readStoredAudience, type PlannerAudience } from './planner-event';
 import { currentPurchaseDoor, ledgerProductKeySql, listObservedProducts, mallItemKeySql, mallItemsSql } from './journey-product';
-import { REVENUE_STATUSES } from './cdp-order-revenue';
+import { netPurchaseSql } from './cdp-order-revenue';
 import { companyListAllows } from './sns-constants';
 import { countCustomerRecipientsWhere, resolveCustomerRecipientsWhere, type EmailRecipient } from './email-channel';
 import { PLANNER_REASON } from './planner-reasons';
@@ -182,7 +182,6 @@ export function plannerLineEnabled(companyId: string | null | undefined, env: st
 }
 
 /** 결제된 주문만(매출 판정 CT-86 과 같은 상태 목록 · 글자는 앞뒤 공백 · 대소문자를 걷어 비교) */
-const PAID_STATUSES: string[] = [...REVENUE_STATUSES];
 
 /**
  * (순수) 상품 구매자 술어 — customers 알리아스 c 기준 · `$1` = 회사 id(baseParams 계약) · params 에 값을 push 하고 조각을 돌려준다.
@@ -194,14 +193,12 @@ export function buildBuyerPredicate(params: any[], a: Extract<PlannerAudience, {
   let sinceIdx = 0;
   if (a.since) { params.push(a.since); sinceIdx = params.length; }
   if (a.door === 'mall') {
-    params.push(PAID_STATUSES);
-    const paidIdx = params.length;
+    // ★ 2026-10-27 자사몰 대비 K1-8 — 결제된 구매 = 판정 조각 netPurchaseSql 한 곳(옛: 상태 글자만 봐서 매출 반영 뒤 결제 전 계열로 바뀐 주문을 뺐다 · M26)
     return `AND EXISTS (
             SELECT 1 FROM cdp_events pb, ${mallItemsSql('pb')} it
              WHERE pb.company_id = $1
                AND pb.customer_id = c.id
-               AND pb.event_name = 'purchase'
-               AND LOWER(TRIM(COALESCE(pb.properties->>'status', ''))) = ANY($${paidIdx}::text[])
+               AND ${netPurchaseSql('pb')}
                ${sinceIdx ? `AND pb.occurred_at >= ($${sinceIdx}::date::timestamp AT TIME ZONE 'Asia/Seoul')` : ''}
                AND ${mallItemKeySql('it')} = ANY($${keysIdx}::text[])
           )`;

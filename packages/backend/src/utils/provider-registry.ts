@@ -20,6 +20,7 @@
  */
 
 import { UserFacingError } from './http-error';
+import type { WebhookCtx, WebhookProcessResult } from './cdp-webhook-delivery';
 // ════════════════════════════════════════════════════════════════════
 // 표준 타입
 // ════════════════════════════════════════════════════════════════════
@@ -99,8 +100,10 @@ export interface IProviderAdapter {
    * Webhook 이벤트를 한줄로 CDP에 박음 (identifyCustomer/syncOrder/trackEvent).
    * - 이벤트 종류는 provider별 표준 (cafe24: order.created / makeshop: order/save 등)
    * - 본 함수 내부에서 cdp-* CT 호출
+   * - ★ 2026-10-27 자사몰 대비 K2-5 · K1-6 — ctx.observedAt = 받은 시각(전달 행 created_at · 재처리 때도 같은 값) ·
+   *   반환 'stale' = 옛 스냅숏이라 쓰지 않음(전달 행 = superseded). 부르는 곳 = 수신 CT(cdp-webhook-delivery processClaimedDelivery) 하나.
    */
-  processWebhookEvent(companyId: string, event: string, resource: Record<string, any>): Promise<void>;
+  processWebhookEvent(companyId: string, event: string, resource: Record<string, any>, ctx: WebhookCtx): Promise<WebhookProcessResult>;
 
   /**
    * Webhook payload에서 mall_id 추출 (자사몰별 다름).
