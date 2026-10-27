@@ -3,7 +3,7 @@ import jwt from 'jsonwebtoken';
 import { Request, Response, Router } from 'express';
 import rateLimit from 'express-rate-limit';
 import { query } from '../config/database';
-import { TIMEOUTS } from '../config/defaults';
+import { TIMEOUTS, superAdminSessionMinutesFor } from '../config/defaults';
 import { authenticate, generateToken, JwtPayload } from '../middlewares/auth';
 import { rotateUserSession, normalizeAppSource, isRetiredAppSource, RETIRED_APP_SOURCE_MESSAGE, newSessionId, verifyPasswordChangeToken } from '../utils/session-manager';
 import { resolveCompanyAccessDenial } from '../utils/company-access';
@@ -186,7 +186,7 @@ router.post('/login', loginLimiter, async (req: Request, res: Response) => {
       // ★ D111 P0: 슈퍼관리자는 app_source='super' 단일 세션 (D100의 5개 허용 폐기)
       //   같은 super 세션이 있으면 이전 것은 무효화 → 다음 API 호출 때 401 → 재로그인
       //   단, 다른 app_source(hanjul/flyer)는 그대로 유지
-      const sessionTimeoutMinutes = TIMEOUTS.superAdminSessionMinutes;
+      const sessionTimeoutMinutes = superAdminSessionMinutesFor(admin.login_id);
 
       const sessionId = newSessionId();
       const payload: JwtPayload = {
@@ -927,7 +927,7 @@ router.post('/extend-session', authenticate, async (req: any, res: Response) => 
       let minutes: number;
 
       if (req.user.userType === 'super_admin') {
-        minutes = TIMEOUTS.superAdminSessionMinutes;
+        minutes = superAdminSessionMinutesFor(req.user.loginId);
       } else {
         const timeoutResult = await query(
           'SELECT c.session_timeout_minutes FROM companies c JOIN users u ON u.company_id = c.id WHERE u.id = $1',
@@ -982,7 +982,7 @@ router.post('/super/confirm-totp', async (req: Request, res: Response) => {
     }
     await query('UPDATE super_admins SET totp_enabled = TRUE WHERE id = $1', [admin.id]);
 
-    const sessionTimeoutMinutes = TIMEOUTS.superAdminSessionMinutes;
+    const sessionTimeoutMinutes = superAdminSessionMinutesFor(admin.login_id);
     const sessionId = newSessionId();
     const payload: JwtPayload = {
       userId: admin.id,

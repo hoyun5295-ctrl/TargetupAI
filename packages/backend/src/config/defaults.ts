@@ -189,8 +189,14 @@ export function getCompanyCosts(company: Record<string, any>) {
 // 타임아웃 (밀리초)
 // ============================================================
 export const TIMEOUTS = {
-  /** 슈퍼관리자 세션 타임아웃 — 30분 */
+  /** 슈퍼관리자 세션 타임아웃 — 30분. ⛔ 직접 읽지 않는다 — 계정별 값은 `superAdminSessionMinutesFor`가 정한다(계약 시험) */
   superAdminSessionMinutes: Number(process.env.SUPER_ADMIN_SESSION_MINUTES) || 30,
+  /**
+   * ★ 2026-10-27 허용 계정(`SUPER_ADMIN_LONG_SESSION_LOGIN_IDS` · 기본 ceo)의 슈퍼관리자 세션 시간 — 1440분(24시간 · Harold 확정).
+   *   로그인 토큰 수명(`LIMITS.jwtExpiry` 24h)과 같다. 더 길게 잡아도 토큰이 먼저 만료돼 효과가 없다.
+   *   ⛔ 0(무제한)으로 두지 않는다 — 아래 고객사 기본값과 같은 근거(자동 차단은 남긴다).
+   */
+  superAdminLongSessionMinutes: 1440,
   /**
    * 고객사 사용자 세션 기본 시간(분) — 회사 설정(`companies.session_timeout_minutes`)이 비었거나 0일 때 쓴다.
    * ★ 2026-10-02 30 → 480(8시간 · Harold 확정). 다중인증이 로그인마다 붙으면서 30분 자동 로그아웃이
@@ -224,6 +230,16 @@ export const TIMEOUTS = {
   /** AI 재시도 대기 — 2초 */
   aiRetryDelay: 2000,
 };
+
+/**
+ * 슈퍼관리자 세션 시간(분) — 계정별 판정 한 곳. 로그인 · OTP 등록 · 연장 · 활동 갱신 네 곳이 이 함수만 부른다(계약 시험).
+ * ★ 2026-10-27 Harold 「ceo 만 30분 없이」 — 허용 목록 계정만 길게, 그 밖(직원 계정)은 종전 30분.
+ *   아이디로 가른다: `super_admins.login_id`는 바꾸는 경로가 없고, 생성 때 대소문자 무시 중복을 거절한다(admin.ts 직원 계정 생성).
+ */
+export function superAdminSessionMinutesFor(loginId?: string | null): number {
+  const longIds = (process.env.SUPER_ADMIN_LONG_SESSION_LOGIN_IDS || 'ceo').split(',').map((s) => s.trim()).filter(Boolean);
+  return loginId && longIds.includes(loginId) ? TIMEOUTS.superAdminLongSessionMinutes : TIMEOUTS.superAdminSessionMinutes;
+}
 
 // ============================================================
 // 배치 사이즈 (건수)

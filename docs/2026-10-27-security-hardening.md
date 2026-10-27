@@ -23,11 +23,17 @@
 
 | # | 상태 | 비고 |
 |---|---|---|
-| 1 | 코드 · 시험 완료 · **Codex 4R approve** · 서버 대기 | .62 실측 = `apparmor_restrict_unprivileged_userns=1` · 크롬 156 「No usable sandbox!」 · AppArmor 켜짐 |
-| 2 | 코드 완료(로컬 가짜 경보 실행 확인) · **Codex 4R approve** · cron 대기 | |
-| 1 | (갱신) Codex 1R high 1 · medium 4 수용 → 크롬 = root 전용 /opt/hanjul-chrome · `scripts/install-render-chrome.sh` · 감시 = sandbox=true 를 스스로 말해야 정상 · 기준값은 경보 전송 뒤 · 2R 진행 | |
+| 1 | **배포 · 실측 완료 1027 08:27**(크롬 = /opt/hanjul-chrome/156.0.8078.47 · install 스크립트 샌드박스 기동 정상 · 워커 `/health` sandbox true · sandboxError null · example.com 렌더 ok · 크롬 기동 sandbox=true) | .62 실측 = `apparmor_restrict_unprivileged_userns=1` · 크롬 156 「No usable sandbox!」 · AppArmor 켜짐 · Codex 1R high 1 · medium 4 → 2R 2 → 3R 2(같은 자리 두 번째 = 뿌리로) → 4R approve |
+| 2 | **cron 등록 · 첫 실행 완료 1027**(`40 8 * * *` · 로그 /home/administrator/backups/security-watch.log) · 첫 실행 08:28 = 경보 3건 · 문자 200 · 메일 2명 수신(한줄전단 API 의존성 치명 1 · 높음 19 · 보안 업데이트 대기 3/99 · 재부팅 대기 13일) | 첫 경보 1건(한줄전단 의존성)은 W1 으로 같은 날 닫음 |
+| 3 | 대기 — 밤 창(업무시간 외)에 apt 99(보안 3) + 커널 6.8.0-147 재부팅(구동 142 · 13일째) | 끝 = 구동 커널 = 설치 커널 · 대기 0 · 보안 감시 경보 0 |
+| 4 | 대기 — SSH 비밀번호 로그인 끄기 | 두 번째 문(호스팅 패널 콘솔) 실측 먼저(설계서 원칙 3) |
+| 5 | 대기(Harold) — 호스팅 패널 2단계 인증 · 비밀번호 교체 | |
+| 6 | 대기 — 서버 작업 트리 떠돌이 파일(ALTER · ^C · backup_uploadedby.dump · sdk-js lock) | 내용 확인 → 판단 → 정리 |
+| 7 | ①~⑥ 1차 완료 · 고친 것 A2 · A3 · A4(IP) **배포 1027 08:26~27**(백엔드 · 프론트 build:safe · 080 = app.hanjul.ai 로 부르면 403 실측) · Codex 4R approve | 남은 것 = A4 HMAC(IMC 업체 키 발급) · A1 · A5(낮음) · 정상 080 콜백이 재시작 뒤 등록되는지 접근 기록 확인(미실측) · §3 |
+| 8 | 대기 — 이상 행위 경보 | 기준값 = 실데이터 SQL 먼저(임의 상수 금지) |
+| 9 | 대기 — 백업 복구 실측 훈련 | 끝 = 복구본 행 수 대조 |
 | 10 | 문서 완료 = [침해 대응 1장](2026-10-27-incident-response.md)(법정 기한 · 72시간 개인정보 · 24시간 침해사고는 원문 확인 필요 표기) | |
-| 7 | ①~⑥ 1차 완료 · 고친 것 A2 · A3 · A4(IP) · 남은 것 A4(HMAC 업체 키) · A1 · A5(낮음) · Codex 4R 진행 | §3 |
+| W1 | **배포 · 실측 완료 1027 09:10**(한줄전단 API · hanjulDM f3b7cb7) | §3 W1 · 원장 = hanjulDM status/STATUS.md 1027 절 |
 
 ## 3. 7번 감사 장부 (직접 읽기)
 
@@ -38,7 +44,7 @@
 | A1 | routes/auth.ts:887 `/change-password` | 성립(낮음). 인증 없이 userId + 현재 비밀번호로 바꾼다(첫 로그인 강제 변경용). 요청 제한은 로그인과 같은 IP 버킷(분 10회)이라 대입 속도는 로그인과 같다 · 다만 로그인 실패 기록(audit_logs login_fail)을 남기지 않아 실패 감시에 안 잡히고, 바꾼 뒤 기존 세션을 끊지 않는다. 계정 단위 잠금은 로그인에도 없다(IP 단위만) → 8번 경보 · 계정 잠금과 함께 설계 |
 | 확인 · 문제없음 | auto-campaigns 멈춤 · 재개 · 삭제(`checkOwnership` 먼저) · 알림톡 템플릿 수정 · 검수(`requireTemplateAccess` = 회사 + 작성자) · 자기 회사 행 UPDATE(companies WHERE id = 내 회사) · 공개 청구서 확인(토큰) · 스팸 검사 단말 보고 | 도우미 함수가 소유를 먼저 본다 |
 | A2 | frontend components/email/EmailVisualEditor.tsx:926 · 952 | **성립 · 고침(1027)**. 이메일 편집기 미리보기 iframe 두 개가 sandbox 없이 서버 HTML 을 같은 출처로 그렸다. 토큰 = localStorage 라 미리보기 안 스크립트 한 줄 = 로그인 탈취. 지금 렌더러는 esc 로 막고 있으나 한 번 빠지면 바로 뚫리는 한 겹 구조 → 패널 = sandbox allow-same-origin(스크립트 0 · 스크롤 보존 유지) · 전체화면 = sandbox 빈 값. 계약 = R11 넓힘(1027) 화면 srcDoc iframe 전수 |
-| A3 | routes/unsubscribes.ts:146 `/080callback` | **성립 · 지금 열린 문 · 고침(1027 · 배포 대기)**. 실측 = hanjul.ai 에는 nginx 허용 6개 + deny all 이 있으나 **app.hanjul.ai · sys.hanjullo.com 이 /api/ 를 허용 목록 없이 백엔드로 넘겨** 그 도메인으로는 누구나 부를 수 있다. 정상 콜백 출발지 = 접근 기록 전부 183.98.207.13(200 4,072 · 502 5 · 목록 안) → 앱 판정을 켜도 정상 수신거부는 그대로. 앱 두 번째 겹 = ip-allowlist `isOpt080CallbackIp`(기본값 = 같은 6개). 배포 전 확인 = 그 location 이 실제 출발지(X-Forwarded-For)를 넘기는가(안 넘기면 정상 콜백이 막힌다) · 로그인 · 토큰 없이 받는다 · 코드 주석상 보안 = nginx IP 허용 목록(나래 6개) 한 겹. 열려 있으면 080 번호(광고에 찍힘)만으로 아무 번호나 수신거부 등록 = 고객사 발송 방해. 처방 = 앱도 출발지 IP 를 본다(두 번째 겹) · nginx 허용 목록 실측 먼저 |
+| A3 | routes/unsubscribes.ts:146 `/080callback` | **성립 · 지금 열린 문 · 고침 · 배포 1027 08:27(app.hanjul.ai 로 부르면 403 · 본문 0 실측)**. 실측 = hanjul.ai 에는 nginx 허용 6개 + deny all 이 있으나 **app.hanjul.ai · sys.hanjullo.com 이 /api/ 를 허용 목록 없이 백엔드로 넘겨** 그 도메인으로는 누구나 부를 수 있다. 정상 콜백 출발지 = 접근 기록 전부 183.98.207.13(200 4,072 · 502 5 · 목록 안) → 앱 판정을 켜도 정상 수신거부는 그대로. 앱 두 번째 겹 = ip-allowlist `isOpt080CallbackIp`(기본값 = 같은 6개). 배포 전 확인 = 그 location 이 실제 출발지(X-Forwarded-For)를 넘기는가(안 넘기면 정상 콜백이 막힌다) · 로그인 · 토큰 없이 받는다 · 코드 주석상 보안 = nginx IP 허용 목록(나래 6개) 한 겹. 열려 있으면 080 번호(광고에 찍힘)만으로 아무 번호나 수신거부 등록 = 고객사 발송 방해. 처방 = 앱도 출발지 IP 를 본다(두 번째 겹) · nginx 허용 목록 실측 먼저 |
 | A4 | utils/alimtalk-webhook-handler.ts:87 · routes/alimtalk.ts:136 | **IP = 고침(1027 · 값 없으면 거부 · 운영 값 있음 실측) · HMAC = 업체 키 발급 대기(운영 값 없음 실측)** · 팝빌 웹훅 키 없음 실측(S2-03 보류 그대로). IP 허용(IMC_WEBHOOK_ALLOWED_IPS) · HMAC(IMC_WEBHOOK_HMAC_SECRET) 둘 다 **환경 변수가 없으면 검사 없이 통과**(옛 Phase 0 편의). 둘 다 없으면 누구나 가짜 카카오 결과 보고 → 발송 결과 · 환불 판단을 흔든다. 처방 = 운영 값 있는지 실측 → 있으면 「없으면 거부」로 바꾼다(없으면 넣고 나서). 같은 꼴 = 팝빌 웹훅 키(S2-03 보류) |
 | A5 | app.ts:309 `morgan('dev')` | 성립(낮음 · 위생). 요청 줄을 주소째 남겨 토큰 주소(청구서 · 승인 · 정지 링크)가 pm2 로그에 남는다 · 로그를 대화에 붙이면 토큰이 밖으로 나간다 → 토큰 모양 경로 조각을 가린 형식으로 |
 | 확인 · 문제없음 ② | 업로드 전 경로 | 형식 허용 목록 + sharp 로 실제 내용 확인 + 서버가 정한 파일 이름 + nosniff(helmet). 이미지 스튜디오 · SNS = 내용 판정 · 알림톡 증빙 = 카카오로만 보냄(우리 출처에서 서빙 0) |
@@ -46,3 +52,4 @@
 | 확인 · 좁음 ⑥ | utils/woocommerce-core.ts:81 | 몰 주소 = IP 직접 입력 거부 · https 고정 · 이동은 서명 웹훅으로 증명된 호스트만. 사설 주소로 풀리는 도메인은 남지만 https · 고정 경로라 영향 좁음(기록) · 나머지 외부 호출 = 고정 주소 API |
 | 확인 ③ | 돈 경로 | 클라이언트가 금액을 넣는 자리 4곳(충전 · 무통장 · 결제 준비 · 관리자 조정) = 서버 금액 CT `parseWonAmount`(정수 · 범위) · 크레딧 충전은 수량만 클라이언트(단가 · 차감 = 서버 · FOR UPDATE · 멱등 키) · 0926 ① 발송 · 돈 + PAY 묶음 수정 배포 · 10월 새 돈 경로 = R4 계약 시험(보내기 전 엄격 차감 · AI 결과 정산 한 곳) |
 | 확인 ⑤ | 콜백 | 알림톡 = IP(+HMAC 대기) · 카페24 · 아임웹 · 우커머스 = 서명 · state nonce · 결제(이니시스) = 승인 금액 · 주문번호 대조(PAY m006) · 팝빌 = 키 없음(S2-03 보류 · 상태 재확인 트리거만) · 080 = A3 |
+| W1 | .62 hanjuldm-app/packages/backend(한줄전단 API · 별개 저장소 hanjulDM) | **보안 감시 첫 실행이 찾음(1027)** — 운영 의존성 치명 1 · 높음 19 · 보통 5. 같은 서버에서 바깥으로 열린 API → 같은 절차(C67)로 별도 진행. **1027 hanjulDM 저장소에서 코드 완료 · Codex 적대 2R approve · 배포 · 실측 완료 1027 오전(f3b7cb7 · audit 0 · 크롬 /opt 156 샌드박스 기동 · 로그인 제한 nginx 경유 401×10 → 429 · health 200)** = 의존성 audit 0 · W2 로그인 5곳 요청 제한 · W3 렌더 크롬 샌드박스 필수(같은 /opt/hanjul-chrome) · 함께 닫음 = xlsx 0.20.3 생일 하루 앞(원장 = hanjulDM status/STATUS.md 1027 절) |

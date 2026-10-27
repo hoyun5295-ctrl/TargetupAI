@@ -41,8 +41,8 @@ describe('고객사 세션 기본 8시간', () => {
     const extend = route.slice(route.indexOf("router.post('/extend-session'"), route.indexOf("router.get('/session-check'"));
     expect(extend).toContain('session_timeout_minutes || TIMEOUTS.companySessionDefaultMinutes');
     expect(extend).not.toMatch(/\|\| 30\b/);
-    // 슈퍼관리자는 종전 그대로(30분 · ENV)
-    expect(extend).toContain('minutes = TIMEOUTS.superAdminSessionMinutes;');
+    // 슈퍼관리자는 계정별 판정 한 곳(★1027 ceo 1440분 · 직원 30분 = super-admin-session-ceo-1027.test.ts)
+    expect(extend).toContain('minutes = superAdminSessionMinutesFor(req.user.loginId);');
   });
 
   it('화면 기본값 = 서버 상수', () => {

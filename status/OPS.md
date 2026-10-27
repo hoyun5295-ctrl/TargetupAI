@@ -466,7 +466,7 @@ curl -s http://127.0.0.1:4317/health
 6. 롤백 = `pm2 stop outreach-render`(정적 크롤로 즉시 복귀) + 코드 되돌리기. 새 jsonb 키는 구코드가 읽지 않는다.
 
 **⑧-2 ★2026-10-27 보안 감시(매일 · `scripts/security-watch.sh`)** — 운영 의존성 경보(치명 · 높음 · 늘어남) · Node 지원 종료 180일 전 · 서버 보안 업데이트 대기 · 재부팅 대기 3일 · 렌더 크롬 샌드박스 기동 · 렌더 워커 기동 실패 기록을 보고 공용 입구 `ops-alert` 로 경보(R14). 근거 = 보안 설계서 §3-9-1.
-1. 설치(administrator · 한 번): `chmod +x /home/administrator/targetup-app/scripts/security-watch.sh` 후 crontab 에 `40 8 * * * /home/administrator/targetup-app/scripts/security-watch.sh >> /home/administrator/backups/security-watch.log 2>&1`
+1. 설치(administrator · 한 번): crontab 에 `40 8 * * * bash /home/administrator/targetup-app/scripts/security-watch.sh >> /home/administrator/backups/security-watch.log 2>&1`(★1027 이 줄로 등록 실측 · `bash` 로 부르므로 실행 권한 불필요)
 2. 첫 실행은 손으로 돌려 로그 · 문자 · 메일 수신을 본다(경보 0 이면 문자 없음 · 로그 끝줄 = `OK: 보안 감시 이상 없음`). 첫 실행이 각 앱의 보통 · 낮음 경보 수를 기준으로 남긴다.
 
 **⑧-3 ★2026-10-27 출발지 IP 허용 목록(두 겹)** — 판정 = `packages/backend/src/utils/ip-allowlist.ts` 한 곳 · 빈 목록 = 거부.
@@ -933,7 +933,7 @@ head -c 3000 /tmp/out.json
 
 **주의 2건 (모르면 작업 중간에 끊긴다)**
 - **슈퍼관리자는 `super` 단일 세션**(auth.ts D111 P0) · **★2026-08-18 이후 살아 있는 접속이 있으면 새 로그인은 자동으로 끊지 않고 `409 SESSION_IN_USE` + `takeoverTicket`(2분짜리)을 돌려준다** → 같은 요청 본문에 `"takeoverTicket":"<그 값>"`을 더해 바로 다시 보내야 토큰이 나온다(같은 OTP 재사용 가능 · `session-manager.ts` 409행). 1)의 명령만 쓰면 `len=0`으로 끝난다(2026-10-05 실측). 넘겨받기까지 자동으로 하는 명령 = [FEATURE-IMAGE-STUDIO §5](../docs/FEATURE-IMAGE-STUDIO.md)의 `login()` 함수. 넘겨받으면 다른 쪽(브라우저·이전 curl) 세션은 끊긴다. **한 번에 한쪽만 쓴다.**
-- **토큰 수명 30분**(`TIMEOUTS.superAdminSessionMinutes`, D55) — 긴 작업은 중간에 1)을 다시 실행해 갱신.
+- **토큰 수명 30분**(직원 계정 · `TIMEOUTS.superAdminSessionMinutes`, D55) — 긴 작업은 중간에 1)을 다시 실행해 갱신. ★1027 `ceo`(설정 `SUPER_ADMIN_LONG_SESSION_LOGIN_IDS` · 기본 ceo)는 1440분(24시간 = 로그인 토큰 수명) · 판정 = `superAdminSessionMinutesFor`(config/defaults.ts) 한 곳.
 
 **라우트 배포 반영 확인(토큰 불필요)** — 인증 걸린 경로라 살아있으면 401, 미탑재면 404다.
 

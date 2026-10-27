@@ -20,7 +20,7 @@
 | R24 | SQL Injection → 내부 DB 공격 (127.0.0.1 우회) | 1 | 5 | 5 | ✅ 해결: D56 테이블명 화이트리스트 + D57-C4 sendTime 파라미터화 + **D59 custom_fields JSONB 키 화이트리스트(safe-field-name.ts 신규, campaigns/customers/ai 3파일 적용) + dateFilter MySQL 파라미터화 + mms-images UUID 검증 + upload.ts path.basename 경로탐색 방어** |
 | R29 | 스팸필터 테스트 선불 차감 누락 → 무과금 발송 | 1 | 3 | 3 | ✅ 해결: D56 — spam-filter.ts에 prepaidDeduct 적용, 테스트폰×메시지타입 건수 차감 |
 | R26 | JWT_SECRET/MYSQL_PASSWORD 환경변수 누락 → 서버 기동 실패 | 1 | 5 | 5 | ✅ 해결: D55 — fail-fast 적용, 폴백값 완전 제거. dotenv.config() app.ts 최상단 이동으로 로딩 순서 보장 |
-| R27 | 슈퍼관리자 세션 무제한 → 토큰 탈취 시 24시간 악용 | 1 | 5 | 5 | ✅ 해결: D55 — 세션 레코드 생성+30분 타임아웃+서버측 세션 체크 적용 |
+| R27 | 슈퍼관리자 세션 무제한 → 토큰 탈취 시 24시간 악용 | 1 | 5 | 5 | ✅ 해결: D55 — 세션 레코드 생성+30분 타임아웃+서버측 세션 체크 적용. ★1027 Harold 지시로 `ceo` 한 계정만 유휴 1440분(24시간 = 토큰 수명) · 직원 계정 30분 그대로 · 로그인 OTP · 국내 접속 · 한 곳 접속은 그대로(C70) |
 | R28 | Math.random() 임시비밀번호 → 예측 가능 | 1 | 3 | 3 | ✅ 해결: D55 — crypto.randomInt() CSPRNG 교체 |
 | R25 | 백업 부재 → 랜섬웨어 시 복구 불가 | 1 | 3 | 3 | ✅ 해결: 2026-03-05 — pg_dump+mysqldump 자동화, 59번 서버(58.227.193.59) SCP 전송, SSH 키 인증, crontab 매일 03:00, 7일 보관 |
 | R30 | 전화번호 정규화 불일치 → 개인화 메시지 치환 실패 | 1 | 4 | 4 | ✅ 해결: D57 C2 — normalizePhone() 단일함수 통일, directCustomerMap 키 불일치 수정 |

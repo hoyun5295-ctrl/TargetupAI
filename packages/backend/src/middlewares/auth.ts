@@ -1,7 +1,7 @@
 import { Request, Response, NextFunction } from 'express';
 import jwt from 'jsonwebtoken';
 import { query } from '../config/database';
-import { TIMEOUTS, LIMITS } from '../config/defaults';
+import { TIMEOUTS, LIMITS, superAdminSessionMinutesFor } from '../config/defaults';
 import { requestContext } from '../utils/request-context';
 import { isBestLayoutViewer } from '../utils/audit-log';
 import { fetchAdminRole, canForMethod } from '../utils/admin-role';
@@ -114,7 +114,7 @@ export const authenticate = async (req: Request, res: Response, next: NextFuncti
       query(
         sessionSql,
         isSuper
-          ? [decoded.sessionId, TIMEOUTS.superAdminSessionMinutes]
+          ? [decoded.sessionId, superAdminSessionMinutesFor(decoded.loginId)]
           : [decoded.sessionId, decoded.userId, TIMEOUTS.companySessionDefaultMinutes]
       ).catch(err => console.error('세션 활동 갱신 실패:', err));
     }
