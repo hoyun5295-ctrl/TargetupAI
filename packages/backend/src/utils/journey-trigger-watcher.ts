@@ -31,6 +31,7 @@ import { getJourneyOwnerScopeSql } from './store-scope';
 import { journeyOwnerConsent } from './mall-consent';
 import { selectJourneyTargetCustomerIds, selectAfterJourneyCandidates, selectCdpEventRowsForCursor, selectPurchaseLedgerRowsForCursor, selectCartAbandonProperties, selectLastPriorPurchase, triggerEntryUsedSql, JOURNEY_COUNT_CAP } from './journey-target-extractor';
 import { planCdpCursorBatch, buildEntryPropsArray, resolveCdpCursorEventName, usesPurchaseLedger, type CdpCursorBatch, type CdpEventRow } from './journey-cdp-cursor';
+import { isFirstImportRunning } from './mall-import';
 import { clampInt } from './journey-points-trigger';
 // ★ 2026-08-01 §11-4 — 싱크 구매는 원장(purchases)이 문이다. 어느 회사에서 그 문을 열지·창 길이 판정.
 import { resolvePurchaseLedgerGate, isLedgerRunWindowHour, PURCHASE_TRIGGER_MAX_AGE_HOURS } from './journey-purchase-ledger';
@@ -229,6 +230,13 @@ export function startJourneyTriggerWatcher(): void {
 // 여정별 trigger 처리
 // ════════════════════════════════════════════════════════════════════
 
+/** 이전 구매 이력으로 진입을 가르는 여정인가(첫 구매 보호 대상) */
+function judgesPriorPurchase(j: ActiveJourney): boolean {
+  const f = j.trigger_filters || {};
+  return j.trigger_event === 'purchase.first' || j.trigger_event === 'customer.dormant_return'
+    || (j.trigger_event === 'cdp.purchase' && (f.exclude_first_purchase === true || f.exclude_dormant_return === true));
+}
+
 async function processJourneyTrigger(j: ActiveJourney): Promise<{ matched: number; enqueued: number; skipped: number; paused?: boolean }> {
   j.lineageIds = await lineageJourneyIds(j.id);
   // ★ Phase 3: 구매·예약·배송(custom_order_shipped)은 이벤트 커서 경로(누락 0 + 정확히 1회 + properties 동봉). 그 외는 공유 컨트롤타워 추출.
@@ -250,6 +258,10 @@ async function processJourneyTrigger(j: ActiveJourney): Promise<{ matched: numbe
       return { matched: 0, enqueued: 0, skipped: 0, paused: true };
     }
   }
+  // ★ 2026-10-28 자사몰 대비 K11 첫 구매 보호(검증 수정 14) — 그 회사의 어느 몰이든 첫 가져오기가 도는 동안 이전 구매로 판정하는 여정
+  //   (첫 구매 · 휴면 복귀 · 주문 완료의 첫 구매 빼기 · 휴면 복귀 빼기)은 커서를 세운다(보류 = 기다림 · 상한 48시간 < 3일 창).
+  //   옛 구매가 다 들어오기 전에 「이전 구매 없음」으로 읽으면 단골에게 첫 구매 문자가 나간다.
+  if (cursorEvent && judgesPriorPurchase(j) && await isFirstImportRunning(j.company_id)) return { matched: 0, enqueued: 0, skipped: 0 };
   if (cursorEvent) {
     const fromEvents = await processCdpCursorJourney(j, cursorEvent);
     // ★ 2026-08-01 §11-4: 구매는 문이 둘이다(자사몰 cdp_events / 싱크 purchases 원장).

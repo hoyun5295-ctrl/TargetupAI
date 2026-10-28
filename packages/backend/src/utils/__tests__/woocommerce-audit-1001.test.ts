@@ -28,7 +28,7 @@ import {
   saveWooCredentials, resolveWooMallIdForSave, fetchWooStoreProducts, getWooIntegration, buildWooWebhookUrl, type WooIntegration,
   wooOrderRereadDue, startWooOrderReread, runWooBackfill, wooBackfillIdle, removeWooWebhooks, resetWooSeenHostRefusals,
   listWooWebhookCleanupTargets, WOO_WEBHOOK_CLEANUP_DAYS, disconnectWoo,
-  WOO_ORDER_RULE_VERSION, WOO_REREAD_MIN_GAP_MS, MAX_SYNC_ORDERS, PAGE_SIZE, WOO_LEARN_LOOKBACK_DAYS,
+  WOO_ORDER_RULE_VERSION, WOO_REREAD_MIN_GAP_MS, MAX_SYNC_ORDERS, PAGE_SIZE, WOO_LEARN_LOOKBACK_DAYS, WOO_WEBHOOK_TOPICS,
 } from '../woocommerce-client';
 
 const COMPANY = '11111111-1111-4111-8111-111111111111';
@@ -132,7 +132,7 @@ describe('W-1 몰 주소 — 서명 검증된 본문이 증명한 주소로만 �
     expect(upd[0]).toContain("o.company_id = t.company_id AND o.provider = 'woocommerce' AND o.id <> t.id AND o.status <> 'revoked'");
     expect(upd[0]).toContain("AND (o.mall_id = $3 OR (o.meta->'woo_seen_hosts') ? $3))");
     const allow = q.mock.calls.find((c: any[]) => String(c[0]).includes('cdp_allowed_origins'))!;
-    expect(allow[1][1]).toEqual(['https://lensgogo.net', 'https://www.lensgogo.net']);
+    expect(allow[1]).toEqual([COMPANY, 'woocommerce', MALL, ['https://lensgogo.net', 'https://www.lensgogo.net', 'https://m.lensgogo.net']]);   // ★1028 K12 그 몰 행의 값
     expect(i.seenHosts).toEqual(['lensgogo.net']);
     q.mockClear();
     expect(await noteWooSeenHost(i, { _links: { self: [{ href: 'https://www.lensgogo.net/wp-json/wc/v3/orders/2' }] } })).toBe(false);
@@ -193,8 +193,8 @@ describe('W-1 몰 주소 — 서명 검증된 본문이 증명한 주소로만 �
     expect(r.mallId).toBe(MALL);
     expect(r.webhookUrl).toBe(buildWooWebhookUrl(MALL));
     const ins = q.mock.calls.find((c: any[]) => String(c[0]).includes('INSERT INTO company_integrations'))!;
-    expect(ins[1][1]).toBe(MALL);
-    expect(JSON.parse(ins[1][2]).woo_site_url).toBe('https://www.lensgogo.net/');
+    expect(ins[1][2]).toBe(MALL);
+    expect(JSON.parse(ins[1].at(-1)).woo_site_url).toBe('https://www.lensgogo.net/');
   });
   it('저장 대상 행 판정: 같은 식별자 행 먼저 · 없으면 증명 주소 행 · 해제된 행은 보지 않는다', async () => {
     q.mockImplementation(async (sql: string) => (String(sql).includes("(meta->'woo_seen_hosts') ? $2") ? { rows: [{ mall_id: MALL }] } : { rows: [] }));
@@ -242,7 +242,7 @@ describe('W-1 몰 주소 — 서명 검증된 본문이 증명한 주소로만 �
     const r = await saveWooCredentials(COMPANY, { siteUrl: 'https://www.lensgogo.net/', consumerKey: '', consumerSecret: '', consentMetaKey: '', storeCode: '덮어쓰면안됨', decide: () => ({ storeCode: undefined }) });
     expect(r.mallId).toBe(MALL);
     const ins = q.mock.calls.find((c: any[]) => String(c[0]).includes('INSERT INTO company_integrations'))!;
-    expect(JSON.parse(ins[1][2])).not.toHaveProperty('store_code');
+    expect(JSON.parse(ins[1].at(-1))).not.toHaveProperty('store_code');
     const order = q.mock.calls.map((c: any[]) => String(c[0]));
     expect(order.findIndex((s) => s.includes('COMMIT'))).toBeGreaterThan(order.findIndex((s) => s.includes('INSERT INTO company_integrations')));
     for (const cur of [[{ ...other, status: 'revoked' }], []]) {
@@ -251,7 +251,7 @@ describe('W-1 몰 주소 — 서명 검증된 본문이 증명한 주소로만 �
       await saveWooCredentials(COMPANY, { siteUrl: 'https://new-mall.example/', consumerKey: '', consumerSecret: '', consentMetaKey: '', decide: (e) => { got = e; return { storeCode: '새코드' }; } });
       expect(got).toBeNull();
       const last = q.mock.calls.filter((c: any[]) => String(c[0]).includes('INSERT INTO company_integrations')).pop()!;
-      expect(JSON.parse(last[1][2]).store_code).toBe('새코드');
+      expect(JSON.parse(last[1].at(-1)).store_code).toBe('새코드');
     }
   });
   it('라우트: 화면 저장 2곳은 게이트를 저장 CT 에 넘긴다(먼저 행을 찾아 판정하지 않는다) · 거부는 사유 문장으로 답한다(소스 계약)', () => {
@@ -269,11 +269,15 @@ describe('W-1 몰 주소 — 서명 검증된 본문이 증명한 주소로만 �
     expect(route).toContain('if (err instanceof IntegrationRejected) {');
     expect(route).toContain('res.status(err.httpStatus).json({ success: false, error: integrationLockMessage(err.lockCode), code: err.lockCode });');
   });
-  it('해제된 행은 주소를 갖지 않는다(Codex R2) — 되살릴 때 옛 증명 주소·굳힌 기준 주소를 버리고, 해제된 행을 연결로 되돌리는 자리는 저장 하나', () => {
+  it('해제된 행은 주소를 갖지 않는다(Codex R2) — 되살릴 때 옛 증명 주소·굳힌 기준 주소를 버리고, 해제된 행을 연결로 되돌리는 자리는 저장 하나', async () => {
     const client = readFileSync(resolve(SRC, 'utils/woocommerce-client.ts'), 'utf8');
     // 저장 upsert: 해제됐던 행이면 두 키를 뺀 meta 에 덧쓴다(해제된 동안 그 주소를 다른 몰이 가져갔을 수 있다) · 살아 있는 행은 그대로
-    expect(client).toContain("meta = (CASE WHEN company_integrations.status = 'revoked'\n                   THEN company_integrations.meta - 'woo_seen_hosts' - 'woo_rest_origin' - 'woo_webhook_cleanup'\n                   ELSE company_integrations.meta END) || EXCLUDED.meta,");
-    expect(client).not.toContain('meta = company_integrations.meta || EXCLUDED.meta,');
+    //   ★1028 K9 — 문장은 행 생성 CT 가 만든다(들어온 meta 의 몰 접두는 걷는다) → 실제로 나간 문장을 본다
+    q.mockImplementation(async (sql: string) => (String(sql).includes('INSERT INTO company_integrations') ? { rows: [{ webhook_secret: 's'.repeat(64) }] } : { rows: [] }));
+    await saveWooCredentials(COMPANY, { siteUrl: 'https://www.lensgogo.info/', consumerKey: '', consumerSecret: '', consentMetaKey: '' });
+    const ins = String(q.mock.calls.find((c: any[]) => String(c[0]).includes('INSERT INTO company_integrations'))![0]);
+    expect(ins).toContain("meta = (CASE WHEN company_integrations.status = 'revoked'\n                   THEN company_integrations.meta - 'woo_seen_hosts' - 'woo_rest_origin' - 'woo_webhook_cleanup'\n                   ELSE company_integrations.meta END) || (EXCLUDED.meta - 'id_prefix'),");
+    expect(ins).not.toContain('meta = company_integrations.meta || EXCLUDED.meta,');
     // 연결 표시는 해제된 행을 건드리지 않는다(도는 중이던 가져오기·수신이 해제 뒤에 끝나도 되살리지 않는다)
     const mark = client.slice(client.indexOf('export async function markWooConnected('), client.indexOf('export async function disconnectWoo('));
     expect(mark).toContain("WHERE company_id = $1::uuid AND provider = 'woocommerce' AND mall_id = $2 AND status <> 'revoked'`");
@@ -300,7 +304,7 @@ describe('W-1 몰 주소 — 서명 검증된 본문이 증명한 주소로만 �
     const client = readFileSync(resolve(SRC, 'utils/woocommerce-client.ts'), 'utf8');
     expect(client).toContain("AND (mall_id = $1 OR (meta->'woo_seen_hosts') ? $1) AND status IN ('active', 'pending')");
     const scope = readFileSync(resolve(SRC, 'utils/integration-scope.ts'), 'utf8');
-    expect(scope).toContain("AND (mall_id = $2 OR (meta->'woo_seen_hosts') ? $2) AND status <> 'revoked'");
+    expect(scope).not.toContain('resolveStoreCodeByOriginHost');   // ★1028 R23 브라우저 수집은 분류코드를 고르지 않는다(잇기만)
     const route = readFileSync(resolve(SRC, 'routes/woocommerce.ts'), 'utf8');
     const verify = route.indexOf('woocommerceAdapter.verifyWebhookSignature(rawBody, signature, c.webhookSecret)');
     const reject = route.indexOf("return res.status(401).json({ success: false, error: '웹훅 서명 검증에 실패했습니다.' });");
@@ -412,37 +416,38 @@ describe('W-3 꺼진 웹훅 다시 켜기', () => {
       { id: 2, topic: 'order.updated', delivery_url: url, status: 'disabled' },
       { id: 3, topic: 'customer.created', delivery_url: url, status: 'paused' },
     ] });
-    request.mockImplementation(async (cfg: any) => ({ status: cfg.method === 'PUT' ? 200 : 201, headers: {}, data: { id: 4 } }));
+    let nid = 4;
+    request.mockImplementation(async (cfg: any) => ({ status: cfg.method === 'PUT' ? 200 : 201, headers: {}, data: { id: cfg.method === 'PUT' ? 2 : nid++ } }));
     const r = await ensureWooWebhooks(COMPANY, MALL);
-    expect(r).toEqual({ created: 1, existing: 3, reactivated: 1, ids: [1, 2, 3, 4] });
+    expect(r).toEqual({ created: 2, existing: 3, reactivated: 1, ids: [1, 2, 3, 4, 5] });   // ★1028 K5 주제 5종(회원 삭제)
     const put = request.mock.calls.map((c: any[]) => c[0]).filter((c: any) => c.method === 'PUT');
     expect(put).toHaveLength(1);
     expect(put[0].url).toBe('https://www.lensgogo.info/wp-json/wc/v3/webhooks/2');
     expect(JSON.parse(put[0].data)).toEqual({ status: 'active' });
   });
   it('바뀐 것이 없으면 연동 행을 다시 쓰지 않는다(주기 워커가 회차마다 부른다)', async () => {
-    q.mockImplementation(async (sql: string) => (String(sql).includes('SELECT') ? { rows: [row({ woo_webhook_ids: [1, 2, 3, 4] })] } : { rows: [] }));
+    q.mockImplementation(async (sql: string) => (String(sql).includes('SELECT') ? { rows: [row({ woo_webhook_ids: [1, 2, 3, 4, 5] })] } : { rows: [] }));
     const url = buildWooWebhookUrl(MALL);
-    get.mockResolvedValueOnce({ status: 200, headers: {}, data: ['order.created', 'order.updated', 'customer.created', 'customer.updated'].map((topic, n) => ({ id: n + 1, topic, delivery_url: url, status: 'active' })) });
+    get.mockResolvedValueOnce({ status: 200, headers: {}, data: [...WOO_WEBHOOK_TOPICS].map((topic, n) => ({ id: n + 1, topic, delivery_url: url, status: 'active' })) });
     const r = await ensureWooWebhooks(COMPANY, MALL);
-    expect(r).toEqual({ created: 0, existing: 4, reactivated: 0, ids: [1, 2, 3, 4] });
+    expect(r).toEqual({ created: 0, existing: 5, reactivated: 0, ids: [1, 2, 3, 4, 5] });
     expect(q.mock.calls.some((c: any[]) => String(c[0]).includes('UPDATE company_integrations'))).toBe(false);
   });
   it('우리 웹훅 식별: 몰이 수신 주소 표기를 바꿔 돌려줘도 우리가 만든 id 면 우리 것 — 회차마다 새로 만들지 않는다', async () => {
-    q.mockImplementation(async (sql: string) => (String(sql).includes('SELECT') ? { rows: [row({ woo_webhook_ids: [11, 12, 13, 14] })] } : { rows: [] }));
+    q.mockImplementation(async (sql: string) => (String(sql).includes('SELECT') ? { rows: [row({ woo_webhook_ids: [11, 12, 13, 14, 15] })] } : { rows: [] }));
     const other = buildWooWebhookUrl(MALL) + '/';
-    get.mockResolvedValueOnce({ status: 200, headers: {}, data: ['order.created', 'order.updated', 'customer.created', 'customer.updated'].map((topic, n) => ({ id: 11 + n, topic, delivery_url: other, status: 'active' })) });
+    get.mockResolvedValueOnce({ status: 200, headers: {}, data: [...WOO_WEBHOOK_TOPICS].map((topic, n) => ({ id: 11 + n, topic, delivery_url: other, status: 'active' })) });
     const r = await ensureWooWebhooks(COMPANY, MALL);
-    expect(r).toEqual({ created: 0, existing: 4, reactivated: 0, ids: [11, 12, 13, 14] });
+    expect(r).toEqual({ created: 0, existing: 5, reactivated: 0, ids: [11, 12, 13, 14, 15] });
     expect(request).not.toHaveBeenCalled();
   });
   it('웹훅이 100개 넘는 몰: 뒤 쪽까지 읽어 우리 것을 찾는다(한 쪽만 보고 또 만들지 않는다)', async () => {
-    q.mockImplementation(async (sql: string) => (String(sql).includes('SELECT') ? { rows: [row({ woo_webhook_ids: [501, 502, 503, 504] })] } : { rows: [] }));
+    q.mockImplementation(async (sql: string) => (String(sql).includes('SELECT') ? { rows: [row({ woo_webhook_ids: [501, 502, 503, 504, 505] })] } : { rows: [] }));
     const url = buildWooWebhookUrl(MALL);
     get.mockResolvedValueOnce({ status: 200, headers: {}, data: Array.from({ length: 100 }, (_, n) => ({ id: n + 1, topic: 'order.created', delivery_url: 'https://other.example/hook', status: 'active' })) });
-    get.mockResolvedValueOnce({ status: 200, headers: {}, data: ['order.created', 'order.updated', 'customer.created', 'customer.updated'].map((topic, n) => ({ id: 501 + n, topic, delivery_url: url, status: 'active' })) });
+    get.mockResolvedValueOnce({ status: 200, headers: {}, data: [...WOO_WEBHOOK_TOPICS].map((topic, n) => ({ id: 501 + n, topic, delivery_url: url, status: 'active' })) });
     const r = await ensureWooWebhooks(COMPANY, MALL);
-    expect(r).toEqual({ created: 0, existing: 4, reactivated: 0, ids: [501, 502, 503, 504] });
+    expect(r).toEqual({ created: 0, existing: 5, reactivated: 0, ids: [501, 502, 503, 504, 505] });
     expect(get).toHaveBeenCalledTimes(2);
     expect(new URL(get.mock.calls[1][0]).searchParams.get('page')).toBe('2');
     expect(request).not.toHaveBeenCalled();
@@ -490,7 +495,7 @@ describe('W-3 꺼진 웹훅 다시 켜기', () => {
       let releaseList!: (v: any) => void;
       get.mockReturnValueOnce(new Promise((r) => { releaseList = r; }));          // 점검이 목록 조회에서 멈춰 있다
       // 그다음 목록 조회 = 제거의 재확인(점검이 만든 4개가 몰에 있다)
-      get.mockImplementation(async () => ({ status: 200, headers: {}, data: [700, 701, 702, 703].map((id, n) => ({ id, topic: ['order.created', 'order.updated', 'customer.created', 'customer.updated'][n], delivery_url: buildWooWebhookUrl(MALL), status: 'active' })) }));
+      get.mockImplementation(async () => ({ status: 200, headers: {}, data: [700, 701, 702, 703, 704].map((id, n) => ({ id, topic: [...WOO_WEBHOOK_TOPICS][n], delivery_url: buildWooWebhookUrl(MALL), status: 'active' })) }));
       let nextId = 700;
       request.mockImplementation(async (cfg: any) => (cfg.method === 'DELETE' ? { status: 200, headers: {}, data: {} } : { status: 201, headers: {}, data: { id: nextId++ } }));
 
@@ -502,10 +507,10 @@ describe('W-3 꺼진 웹훅 다시 켜기', () => {
       expect(request).not.toHaveBeenCalled();                                       // 점검이 안 끝났으니 제거도 아직
       releaseList({ status: 200, headers: {}, data: [] });
 
-      expect(await ensuring).toMatchObject({ created: 4, ids: [700, 701, 702, 703] });
-      expect(await removing).toBe(4);
-      expect(methods()).toEqual(['POST', 'POST', 'POST', 'POST', 'DELETE', 'DELETE', 'DELETE', 'DELETE']);
-      expect(request.mock.calls.slice(4).map((c: any[]) => c[0].url)).toEqual([700, 701, 702, 703].map((id) => `https://www.lensgogo.info/wp-json/wc/v3/webhooks/${id}?force=true`));
+      expect(await ensuring).toMatchObject({ created: 5, ids: [700, 701, 702, 703, 704] });
+      expect(await removing).toBe(5);
+      expect(methods()).toEqual(['POST', 'POST', 'POST', 'POST', 'POST', 'DELETE', 'DELETE', 'DELETE', 'DELETE', 'DELETE']);
+      expect(request.mock.calls.slice(5).map((c: any[]) => c[0].url)).toEqual([700, 701, 702, 703, 704].map((id) => `https://www.lensgogo.info/wp-json/wc/v3/webhooks/${id}?force=true`));
       expect(state.meta.woo_webhook_ids).toBeUndefined();
     });
     it('id 는 추적값이라 행 상태와 무관하게 적는다(해제 직후 끝난 점검이 만든 것도 제거가 찾는다)', () => {
@@ -708,7 +713,7 @@ describe('W-3 꺼진 웹훅 다시 켜기', () => {
       expect(saved.mallId).toBe(MALL);
       const inserts = q.mock.calls.filter((c: any[]) => String(c[0]).includes('INSERT INTO company_integrations'));
       expect(inserts).toHaveLength(1);                                               // 어긋난 첫 시도는 쓰지 않았다
-      expect(inserts[0][1][1]).toBe(MALL);
+      expect(inserts[0][1][2]).toBe(MALL);
       expect(resolves).toBe(3);                                                      // 줄 고르기 1 · 어긋남 확인 1 · 다시 선 줄 안 1
       const client = readFileSync(resolve(SRC, 'utils/woocommerce-client.ts'), 'utf8');
       expect(client).toContain('const out = await runSerial(wooWebhookLine(companyId, mall), () => saveWooCredentialsInLine(companyId, input, typedMallId, mall));');
@@ -753,7 +758,7 @@ describe('W-3 꺼진 웹훅 다시 켜기', () => {
   it('주기 워커가 수집 성공 뒤 쓰기 권한 키 몰만 점검하고 그 실패는 수집 성공을 뒤집지 않는다(소스 계약)', () => {
     const w = readFileSync(resolve(SRC, 'utils/woocommerce-sync-worker.ts'), 'utf8');
     const ok = w.indexOf('await markSuccess(row.company_id, row.mall_id);');
-    const check = w.indexOf("if (String(row.meta?.woo_key_permissions || '').includes('write')) {");
+    const check = w.indexOf("if (wooWebhookOwner(row.meta?.woo_key_permissions) === 'auto') {");   // ★1028 M11 판정 한 곳
     const call = w.indexOf('const wh = await ensureWooWebhooks(row.company_id, row.mall_id);');
     expect(ok).toBeGreaterThan(-1);
     expect(check).toBeGreaterThan(ok);
@@ -834,7 +839,8 @@ describe('W-4 이미 읽은 주문을 새 상태 규칙으로 한 번 다시 읽
     expect(reread).toBeGreaterThan(cont);
     expect(sync).toBeGreaterThan(reread);
     expect(loop.slice(reread, sync)).toContain('continue;');
-    expect(reread).toBeGreaterThan(loop.indexOf('isCdpEnabledForPlan('));
+    expect(loop.indexOf('factAllowed(')).toBeGreaterThan(-1);
+    expect(reread).toBeGreaterThan(loop.indexOf('factAllowed('));
   });
 });
 

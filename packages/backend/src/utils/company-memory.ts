@@ -50,7 +50,7 @@ export type MemoryType =
  * 관련 학습 표시가 전부 이 화이트리스트를 공유한다.
  * 같은 테이블의 비학습 타입(brand_guideline 10·representative_message 8·brand_link 7)이 높은 중요도로
  * 슬롯을 잠식해 문안 생성(6슬롯)의 학습 주입이 0이 되던 결함의 단일 정답.
- * (Brand Voice 2종 = buildSystemPromptWithBrandVoice 별도 주입 / brand_link = 링크 칩·{{LINK}} 치환 별도 소비)
+ * (Brand Voice 2종 = 목소리 CT composeVoicePrompt 별도 주입 / brand_link = 링크 칩·{{LINK}} 치환 별도 소비)
  */
 export const LEARNING_MEMORY_TYPES: MemoryType[] = [
   'success_pattern', 'customer_insight', 'brand_tone_evolution', 'channel_performance', 'compliance_learning',
@@ -197,12 +197,12 @@ export async function buildMemoryPromptContext(companyId: string, maxEntries: nu
     brand_tone_evolution: '브랜드 톤 진화',
     channel_performance: '채널 성과',
     compliance_learning: '컴플라이언스 학습',
-    // ★ D225+ Brand Voice Learning — AI Operator 호출 영역 분리 (별도 buildSystemPromptWithBrandVoice 헬퍼 활용)
+    // ★ D225+ Brand Voice Learning — AI Operator 호출 영역 분리 (별도 목소리 CT composeVoicePrompt)
     representative_message: '대표 문안',
     brand_guideline: 'Brand Voice 가이드라인',
   };
 
-  // AI Operator 호출 = 5 학습 타입 한정 (Brand Voice 2 타입은 buildSystemPromptWithBrandVoice로 별도 주입)
+  // AI Operator 호출 = 5 학습 타입 한정 (Brand Voice 2 타입은 목소리 CT composeVoicePrompt 로 별도 주입)
   const sections: string[] = [];
   for (const type of LEARNING_MEMORY_TYPES) {
     const arr = byType.get(type) || [];
@@ -438,13 +438,15 @@ export async function cleanupDeprecatedMemories(
   const olderThanDays = Math.max(7, Math.min(365, options.olderThanDays || 90));
   const minImportance = Math.max(1, Math.min(10, options.minImportance || 3));
 
+  // ★ 2026-10-28 AI 메모리 설계 K14-4 — 지우는 대상 = 학습 5종만(대표 문안 · 가이드라인 · 목소리 상태 · 사람 행 · 고친 차이 · 습관 · 링크는 사람 · 상태 행이라 지우지 않는다)
   const r = await query(
     `DELETE FROM ai_company_memory
      WHERE company_id = $1::uuid
+       AND memory_type = ANY($4::text[])
        AND importance < $2
        AND last_accessed_at < NOW() - ($3 * INTERVAL '1 day')
      RETURNING id`,
-    [companyId, minImportance, olderThanDays]
+    [companyId, minImportance, olderThanDays, LEARNING_MEMORY_TYPES]
   );
   return { deletedCount: r.rows.length };
 }

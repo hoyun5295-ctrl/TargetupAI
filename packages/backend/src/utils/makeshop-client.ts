@@ -23,6 +23,9 @@ import { saveIntegrationRowGuarded } from './integration-scope';   // ★ 2026-1
 import { TIMEOUTS } from '../config/defaults';
 // ★ 2026-09-26 한줄로 V2 R1-31 — 토큰 요청 실패 판정 CT(제공자 거절일 때만 연동 만료)
 import { tokenHttpError, reconnectRequiredError, isDefinitiveTokenRejection } from './integration-token-error';
+import { markTokenRejected, saveRefreshedToken, reReadAfterLostRefresh } from './integration-token';
+import { createIntegrationRow } from './integration-row';   // ★ 1028 K9 — 연동 행 INSERT = CT 하나(몰 접두 고정)
+import { openSecret } from './secret-box';   // ★1028 K8 자격 읽기 이중(암호문 · 평문)
 import {
   IProviderAdapter,
   ProviderCapabilities,
@@ -55,6 +58,8 @@ export interface MakeshopIntegration {
   shopUid: string;      // 상점 ID (mall_id로 저장)
   accessToken: string;
   tokenExpiresAt: Date;
+  /** ★ 1028 K6 — token_expires_at DB 원문(만료 표시 CAS · markTokenRejected) */
+  tokenExpiresAtRaw: string | null;
   status: string;
 }
 
@@ -104,7 +109,9 @@ export async function saveMakeshopIntegration(
   shopUid: string,
   tokenRes: MakeshopTokenResponse,
   creds?: MakeshopCredentials,
-): Promise<void> {
+  /** ★1028 N6 연결 때 고른 분류코드(재발급 = 없음 · 그대로) */
+  storeCode: string | null = null,
+): Promise<Date> {
   const expiresAt = new Date(Date.now() + (tokenRes.expires_in || 300) * 1000);
   const meta: Record<string, unknown> = {
     token_type: tokenRes.token_type,
@@ -115,27 +122,24 @@ export async function saveMakeshopIntegration(
     meta.app_client_id = creds.clientId;
     meta.app_client_secret = creds.clientSecret;
   }
-  await saveIntegrationRowGuarded(companyId, 'makeshop', shopUid, null, (run) => run(
-    `INSERT INTO company_integrations (
-      id, company_id, provider, mall_id, access_token, refresh_token,
-      token_expires_at, scope, meta, webhook_secret, connected_at, status,
-      created_at, updated_at
-    ) VALUES (
-      gen_random_uuid(), $1::uuid, 'makeshop', $2, $3, '',
-      $4, '', $5::jsonb, NULL, NOW(), 'active',
-      NOW(), NOW()
-    )
-    ON CONFLICT (company_id, provider, mall_id) DO UPDATE SET
-      access_token = EXCLUDED.access_token,
-      refresh_token = '',
-      token_expires_at = EXCLUDED.token_expires_at,
-      scope = '',
-      meta = company_integrations.meta || EXCLUDED.meta,
-      status = 'active',
-      connected_at = NOW(),
-      updated_at = NOW()`,
-    [companyId, shopUid, tokenRes.access_token, expiresAt, JSON.stringify(meta)],
-  ));
+  if (storeCode) meta.store_code = storeCode;
+  await saveIntegrationRowGuarded(companyId, 'makeshop', shopUid, storeCode, (run) => createIntegrationRow(run, {
+    companyId, provider: 'makeshop', mallId: shopUid,
+    accessToken: { v: tokenRes.access_token },
+    tokenExpiresAt: { v: expiresAt },
+    meta,
+    connectedAt: { sql: 'NOW()' },
+    status: { sql: "'active'" },
+    onConflict: [
+      'access_token = EXCLUDED.access_token',
+      "refresh_token = ''",
+      'token_expires_at = EXCLUDED.token_expires_at',
+      "scope = ''",
+      "status = 'active'",
+      'connected_at = NOW()',
+    ],
+  }));
+  return expiresAt;   // ★ 1028 K6 — 저장한 토큰판(호출부가 든 행의 원문을 맞춘다)
 }
 
 function rowToIntegration(r: any): MakeshopIntegration {
@@ -143,8 +147,9 @@ function rowToIntegration(r: any): MakeshopIntegration {
     id: r.id,
     companyId: r.company_id,
     shopUid: r.mall_id,
-    accessToken: r.access_token,
+    accessToken: openSecret(r.access_token),
     tokenExpiresAt: new Date(r.token_expires_at),
+    tokenExpiresAtRaw: r.token_expires_at_raw ?? null,
     status: r.status,
   };
 }
@@ -152,12 +157,12 @@ function rowToIntegration(r: any): MakeshopIntegration {
 export async function getMakeshopIntegration(companyId: string, shopUid?: string): Promise<MakeshopIntegration | null> {
   const r = shopUid
     ? await query(
-        `SELECT id, company_id, mall_id, access_token, token_expires_at, status
+        `SELECT id, company_id, mall_id, access_token, token_expires_at, token_expires_at::text AS token_expires_at_raw, status
          FROM company_integrations WHERE company_id = $1::uuid AND provider = 'makeshop' AND mall_id = $2 LIMIT 1`,
         [companyId, shopUid],
       )
     : await query(
-        `SELECT id, company_id, mall_id, access_token, token_expires_at, status
+        `SELECT id, company_id, mall_id, access_token, token_expires_at, token_expires_at::text AS token_expires_at_raw, status
          FROM company_integrations WHERE company_id = $1::uuid AND provider = 'makeshop'
          ORDER BY connected_at DESC NULLS LAST LIMIT 1`,
         [companyId],
@@ -172,7 +177,7 @@ export async function getMakeshopCredentials(companyId: string, shopUid?: string
     : await query(`SELECT meta FROM company_integrations WHERE company_id = $1::uuid AND provider = 'makeshop' ORDER BY connected_at DESC NULLS LAST LIMIT 1`, [companyId]);
   const meta = (r.rows[0]?.meta || {}) as { app_client_id?: string; app_client_secret?: string };
   const id = String(meta.app_client_id || '').trim();
-  const secret = String(meta.app_client_secret || '').trim();
+  const secret = String(openSecret(meta.app_client_secret) || '').trim();
   if (id && secret) return { clientId: id, clientSecret: secret };
   return envMakeshopCreds();
 }
@@ -185,13 +190,15 @@ export async function ensureFreshMakeshopToken(integration: MakeshopIntegration,
     const c = creds ?? (await getMakeshopCredentials(integration.companyId, integration.shopUid)) ?? envMakeshopCreds();
     if (!c) throw reconnectRequiredError('메이크샵 자격(client_id/secret)이 없습니다. 연동 화면에서 다시 연결해주세요.');
     const reissued = await issueMakeshopToken(c, integration.shopUid);
-    await saveMakeshopIntegration(integration.companyId, integration.shopUid, reissued, c);
-    return { ...integration, accessToken: reissued.access_token, tokenExpiresAt: new Date(Date.now() + (reissued.expires_in || 300) * 1000) };
+    // ★ 1028 Codex R1 #2 — 재발급 저장 = 그 토큰판 · 해제 아닌 행일 때만(재연결 upsert 를 쓰지 않는다 · 자격 meta 는 건드리지 않는다)
+    const savedExpiry = new Date(Date.now() + (reissued.expires_in || 300) * 1000);
+    const saved = await saveRefreshedToken({ id: integration.id, tokenExpiresAtRaw: integration.tokenExpiresAtRaw, accessToken: reissued.access_token, tokenExpiresAt: savedExpiry, meta: { token_type: reissued.token_type, expires_in: reissued.expires_in } });
+    if (!saved) return reReadAfterLostRefresh(await getMakeshopIntegration(integration.companyId, integration.shopUid).catch(() => null), integration.id);
+    return { ...integration, accessToken: reissued.access_token, tokenExpiresAt: savedExpiry, tokenExpiresAtRaw: savedExpiry.toISOString() };
   } catch (err) {
     // ★ 2026-09-26 R1-31 — 제공자가 거절했을 때만 만료로 표시한다(일시 장애 한 번에 연동이 끊겨 웹훅이 유실됐다)
-    if (isDefinitiveTokenRejection(err)) {
-      await query(`UPDATE company_integrations SET status = 'token_expired', updated_at = NOW() WHERE id = $1::uuid`, [integration.id]);
-    }
+    // ★ 1028 K6 — 그 요청에 쓴 토큰판일 때만 · 유예 시계 같은 문장(markTokenRejected)
+    if (isDefinitiveTokenRejection(err)) await markTokenRejected(integration);
     throw err;
   }
 }
@@ -200,9 +207,9 @@ export async function ensureFreshMakeshopToken(integration: MakeshopIntegration,
  * ★ 연동 진입점 — 자격+shop_uid로 토큰 발급을 "실제 검증"한 뒤에만 active 저장 (6원칙 ②).
  * 발급 실패 시 그대로 throw — 저장/상태 변경 0.
  */
-export async function connectMakeshop(companyId: string, shopUid: string, creds: MakeshopCredentials): Promise<{ tokenExpiresAt: Date }> {
+export async function connectMakeshop(companyId: string, shopUid: string, creds: MakeshopCredentials, storeCode: string | null = null): Promise<{ tokenExpiresAt: Date }> {
   const tokenRes = await issueMakeshopToken(creds, shopUid);
-  await saveMakeshopIntegration(companyId, shopUid, tokenRes, creds);
+  await saveMakeshopIntegration(companyId, shopUid, tokenRes, creds, storeCode);
   return { tokenExpiresAt: new Date(Date.now() + (tokenRes.expires_in || 300) * 1000) };
 }
 

@@ -29,7 +29,7 @@
 
 import { UserFacingError } from './http-error';
 import { query, pool, type TxRun } from '../config/database';
-import { ensureAnonymousLink, identifyCustomer, findLinkedCustomerId } from './cdp-identity';
+import { ensureAnonymousLink, linkBrowserMember } from './cdp-identity';
 // ★ 2026-06-25 (gap 5): 자사몰 전송 시각 미래 클램프(커서·통계 왜곡 차단)
 import { clampOccurredAt } from './cdp-occurred-at';
 import { isUuid } from './normalize';
@@ -378,12 +378,6 @@ export interface BrowserIngestBatch {
   schemaVersion: string;
   sentAt: string | null;
   events: Array<Record<string, any>>;
-  /**
-   * 분류코드(2026-09-18 · 설계서 docs/2026-09-18-mall-integration-user-scope-design.md §3-4).
-   * SDK 공개키는 회사당 하나라 몰은 Origin 만 안다 — 라우트가 검증된 Origin 으로 찾은 값을 싣는다(요청 본문 값 금지).
-   * 없으면 지금과 같은 무분류 적재.
-   */
-  storeCode?: string | null;
   /** ★ 2026-10-04 SDK 가 그 페이지에서 받은 회원 증명(identify 없는 배치의 고객 연결 근거 · 토큰 검증 뒤에만 쓴다) */
   member?: { externalId: string; memberToken: string } | null;
 }
@@ -432,7 +426,7 @@ function normalizeBrowserEvent(e: Record<string, any>): NormalizedBrowserEvent |
 
 /**
  * 브라우저 SDK 배치 1건을 cdp_events에 정규화 적재.
- * 1) 배치 식별 해소: identify 이벤트(external_id) → identifyCustomer / 없으면 anonymous_id 기존 known customer 재사용
+ * 1) 배치 식별 해소: 회원 토큰이 맞는 identify(또는 회원 증명) → 서버 연결의 고객에 잇기만(linkBrowserMember · ★1028 K4)
  * 2) 트랜잭션 INSERT (정규화된 모든 이벤트)
  * 3) identify로 신규 식별 시 같은 anonymous_id의 옛 익명 이벤트에 customer_id 소급(stitching)
  */
@@ -477,30 +471,23 @@ export async function ingestBrowserEvents(
   if (identifyEvts.length > 0 && !identifyEvt) {
     console.log('[CDP ingestBrowser] 회원 토큰 없음·불일치 — 식별 없이 익명 적재');
   }
+  // ★ 2026-10-28 자사몰 대비 K4(I5 · R23) — 브라우저는 고객을 **잇기만** 한다. 페이지가 보낸 이메일 · 전화 · 이름은 쓰지 않는다
+  //   (옛: identifyCustomer 로 회원 프로필 · 전화를 덮었다 · M5). 근거 = 그 회원 번호의 서버 연결이 가리키는 고객 하나(CT linkBrowserMember).
   if (identifyEvt) {
-    try {
-      const r = await identifyCustomer(companyId, {
-        source: 'sdk',
-        externalId: String(identifyEvt.external_id),
-        email: identifyEvt.email ? String(identifyEvt.email) : undefined,
-        phone: identifyEvt.phone ? String(identifyEvt.phone) : undefined,
-        name: identifyEvt.name ? String(identifyEvt.name) : undefined,
-        // ★ 2026-09-18 Origin 으로 찾은 몰의 분류코드(있을 때만 키를 싣는다)
-        ...(batch.storeCode ? { storeCode: batch.storeCode } : {}),
-      });
+    const r = await linkBrowserMember(companyId, String(identifyEvt.external_id));
+    if (r) {
       customerId = r.customerId;
       identityLinkId = r.linkId;
       didIdentify = true;
-    } catch (err: any) {
-      // 식별 실패(예: 신규인데 phone 누락) — 이벤트 적재는 익명으로 계속
-      console.log('[CDP ingestBrowser] identify skip:', err?.message || err);
+    } else {
+      console.log('[CDP ingestBrowser] 서버 연결이 없거나 고객이 둘 이상 — 익명 적재');
     }
   }
 
-  // ② identify 가 없는 배치 = 배치에 실린 회원 증명으로만 잇는다(없거나 틀리면 익명)
+  // ② identify 가 없는 배치 = 배치에 실린 회원 증명으로만 잇는다(없거나 틀리면 익명 · 같은 CT)
   if (!customerId && identifyEvts.length === 0 && batch.member?.externalId
     && verifyCdpMemberToken(batch.member.memberToken, companyId, batch.member.externalId)) {
-    customerId = await findLinkedCustomerId(companyId, 'sdk', batch.member.externalId);
+    customerId = (await linkBrowserMember(companyId, batch.member.externalId))?.customerId ?? null;
   }
 
   // 익명 이벤트라도 anonymous link 1건 보장 (추후 회원 가입 시 추적 흐름 일치)

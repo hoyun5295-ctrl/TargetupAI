@@ -48,7 +48,8 @@ import { INAPP_SCENARIO_CARD_STYLE, INAPP_SCENARIO_TREATMENT } from './design-co
 import { buildEventTemplateHintBlock } from './design-core/event-package';
 // ★ 2026-07-14 디자인 4.0 M2 — 브랜드 톤 파이프 연결: DM·이메일·여정과 동일하게 Brand Voice 주입
 //   (실측 2026-07-14: 3채널 중 인앱 생성기만 미주입이던 구멍 — 가이드라인 미학습 회사는 base 그대로 = 영향 0)
-import { buildSystemPromptWithBrandVoice } from './brand-voice-prompt';
+import { composeVoicePrompt } from './brand-voice-prompt';
+import { resolveCopyIntent } from './copy-content-type';
 
 // ════════════════════════════════════════════════════════════════════
 // 타입
@@ -685,7 +686,12 @@ ${brandAccent
 
   // ★ 2026-07-14 디자인 4.0 M2 — 브랜드 학습(Brand Voice) 파이프 연결.
   //   가이드라인 학습 회사 = 톤 가이드 prefix 주입 / 미학습 = system 그대로 반환(기존 흐름 영향 0).
-  const systemWithVoice = await buildSystemPromptWithBrandVoice(input.companyId, system);
+  // ★ 2026-10-28 AI 메모리 설계 K11-1 · K11-2 — 인앱 생성 = 쓰기 · 화면 글이라 말투 · 호칭 · 맺음만(모양 · 기호 = 인앱 규칙)
+  //   인앱은 자사몰 방문 고객에게 띄우는 판촉 글(광고 여부 축 없음) · 행사 글이 오면 행사 종류
+  const { system: systemWithVoice } = await composeVoicePrompt({
+    companyId: input.companyId, producer: 'inapp-generate', mode: 'write', scope: 'tone',
+    kind: resolveCopyIntent({ inputType: eventText ? 'promo' : null, isAd: true }).kind, basePrompt: system,
+  });
 
   // AI Operator 영역 호출 (model: 'opus')
   // ★ 2026-09-27 한줄로 V2 R246 — 성공 뒤 차감. 옛: AI 호출 안에서 3크레딧이 먼저 빠져 응답 JSON이 깨져도 돌려받지 못했고,

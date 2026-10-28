@@ -7,6 +7,7 @@
  * 실패 응답 = { success:false, error, code } · 크레딧 부족 402 INSUFFICIENT_CREDIT · 원장 조회 실패 503.
  */
 import { Router, Request, Response } from 'express';
+import { isCopyContentType } from '../utils/copy-content-type';
 import { authenticate } from '../middlewares/auth';
 import { aiZonePlanBlocked } from '../utils/plan-guard';
 import { InsufficientCreditError } from '../utils/ai-credit';
@@ -186,6 +187,8 @@ router.post('/compose', async (req: Request, res: Response) => {
     const out = await runLineCompose(v, {
       line, facts, filters: isPlainObject(b.filters) ? b.filters : {}, allCustomers: b.allCustomers === true,
       types, vars, channel, isAd: b.isAd !== false, attemptToken: b.attemptToken,
+      // ★ 2026-10-28 K4-4 종류 칩(허용값 밖 = 없음)
+      contentType: isCopyContentType(b.contentType) ? b.contentType : null,
     });
     return res.json({ success: true, ...out });
   } catch (err: any) {

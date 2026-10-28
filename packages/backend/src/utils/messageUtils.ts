@@ -458,6 +458,31 @@ export function buildAdMessage(
 }
 
 /**
+ * ★ 2026-10-28 AI 메모리 설계 K1-1(docs/2026-10-28-ai-memory-brand-voice-design.md) — 광고 문자의 전송자 명칭(법)을 코드가 지킨다.
+ *   AI 가 만든 광고 문안에만 쓴다(사람이 쓴 발송 본문은 바꾸지 않는다).
+ *   통과 = LMS · MMS 제목 또는 본문 첫 줄((광고) 다음)에 이름 집합 중 하나가 있다. 없으면 맨 앞에 [이름] 한 줄(SMS = 같은 줄)을 붙인다.
+ *   근거 = 문자 지시문 「전송자 명칭은 광고 본문보다 앞」 · 2차 자료(광고 표기 · 발송 주체 = 시작 부분) · 시행령 원문 확인 = 설계서 §8 Q1.
+ */
+export function ensureSenderName(
+  text: string,
+  ctx: { isAd: boolean; channel: string; subject?: string | null; names: ReadonlyArray<string | null | undefined> },
+): { text: string; added: boolean } {
+  const src = String(text || '');
+  // 빈 본문에 이름만 붙이면 무내용 글이 성공으로 지나간다(빈 글 = 빈 글 · 받는 쪽 빈 글 판정이 그대로 막는다 · Codex 구현 1R)
+  if (!ctx.isAd || !src.trim()) return { text: src, added: false };
+  const names = Array.from(new Set(ctx.names.map((n) => String(n || '').trim()).filter((n) => n.length > 0)));
+  if (names.length === 0) return { text: src, added: false };
+  const squashed = (v: string) => v.replace(/\s+/g, '');
+  const has = (v: string) => names.some((n) => squashed(v).includes(squashed(n)));
+  const ch = String(ctx.channel || '').toUpperCase();
+  const isLms = ch === 'LMS' || ch === 'MMS';
+  if (isLms && ctx.subject && has(String(ctx.subject))) return { text: src, added: false };
+  const firstLine = src.replace(/^\s*[(（]\s*광고\s*[)）]\s*/, '').split('\n').find((l) => l.trim().length > 0) || '';
+  if (has(firstLine)) return { text: src, added: false };
+  return { text: isLms ? `[${names[0]}]\n${src}` : `[${names[0]}] ${src}`, added: true };
+}
+
+/**
  * ★ D142+ (2026-04-29) 0429 PDF B1 — INSERT 직전 D103 강제 정규화 컨트롤타워
  *
  * frontend `formatDate.ts:909 stripAdParts`와 정확히 동일 로직(미러).

@@ -24,6 +24,7 @@ import { isCdpEnabledForPlan } from '../utils/cdp-auth';
 import { describeJsonShape } from '../utils/json-shape';
 
 import { publicErrorText, respondUserError } from '../utils/http-error';
+import { storeCodeForConnect } from '../utils/integration-scope';   // ★1028 N6 연결 분류코드
 const router = Router();
 
 router.use(authenticate);
@@ -62,7 +63,8 @@ router.post('/connect', async (req: Request, res: Response) => {
       return res.status(400).json({ success: false, error: 'Client ID와 Client Secret을 모두 입력해주세요.' });
     }
 
-    const { tokenExpiresAt } = await connectMakeshop(companyId, shopUid, { clientId, clientSecret });
+    const storeCode = await storeCodeForConnect(req.user, req.body?.store_code);   // ★1028 N6 분류코드 회사 = 매장 고르기(모드 판정 = 저장 CT)
+    const { tokenExpiresAt } = await connectMakeshop(companyId, shopUid, { clientId, clientSecret }, storeCode);
     return res.json({ success: true, message: '메이크샵 연동이 완료되었습니다.', shop_uid: shopUid, token_expires_at: tokenExpiresAt });
   } catch (err: any) {
     console.error('[Makeshop /connect] 오류:', err?.message || err);

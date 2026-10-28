@@ -23,12 +23,14 @@
  *   - CAFE24_REDIRECT_URI: OAuth callback URL (예: https://app.hanjul.ai/api/cafe24/oauth/callback)
  */
 
-import { query } from '../config/database';
+import { query, type TxRun } from '../config/database';
 import { saveIntegrationRowGuarded } from './integration-scope';   // ★ 2026-10-27 자사몰 대비 K9 SC1 — 연동 행 저장 = 회사 모드 잠금 → 판정 → 저장(한 트랜잭션)
 import { TIMEOUTS } from '../config/defaults';
 import { joinInflight } from './inflight-lock';
 // ★ 2026-09-26 한줄로 V2 R1-31 — 토큰 요청 실패 판정 CT(제공자 거절일 때만 연동 만료)
 import { tokenHttpError, reconnectRequiredError, isDefinitiveTokenRejection } from './integration-token-error';
+import { markTokenRejected, receiveEligibleSql, saveRefreshedToken, reReadAfterLostRefresh } from './integration-token';
+import { createIntegrationRow } from './integration-row';   // ★ 1028 K9 — 연동 행 INSERT = CT 하나(몰 접두 고정)
 import { createHmac, timingSafeEqual } from 'crypto';
 import {
   IProviderAdapter,
@@ -40,13 +42,16 @@ import {
 import { identifyCustomer } from './cdp-identity';
 import { syncOrder } from './cdp-orders';
 import type { WebhookCtx, WebhookProcessResult } from './cdp-webhook-delivery';
-import { orderExternalId } from './cdp-order-identity';
+import { mallScopedIds } from './integration-row';
+import { registerMallAllowedOrigins, mallPlatformOrigins } from './mall-origins';
+import { openSecret } from './secret-box';   // ★1028 K8 자격 읽기 이중(암호문 · 평문)
 import { trackEvent } from './cdp-events';
 import { buildWebhookIdempotencyKey } from './cdp-idempotency';
 import { buildCafe24AuthorizeUrl as buildCafe24Url } from './provider-oauth-url';
 import { firstPositiveAmount } from './normalize';
 import { resolveProviderOAuthCredentials, type ProviderOAuthCredentials } from './provider-credentials';
 import { type MallProduct, normalizeCafe24Product } from './mall-product-normalize';
+import { sendSystemAlert } from './system-alert';   // ★1028 K10 2단 M36
 
 const CAFE24_CLIENT_ID = process.env.CAFE24_CLIENT_ID || '';
 const CAFE24_CLIENT_SECRET = process.env.CAFE24_CLIENT_SECRET || '';
@@ -88,6 +93,8 @@ export interface Cafe24Integration {
   accessToken: string;
   refreshToken: string;
   tokenExpiresAt: Date;
+  /** ★ 1028 K6 — token_expires_at DB 원문(만료 표시 CAS · markTokenRejected) */
+  tokenExpiresAtRaw: string | null;
   scope: string;
   webhookSecret: string | null;
   status: string;
@@ -205,56 +212,59 @@ export async function saveCafe24Integration(
   companyId: string,
   mallId: string,
   tokenRes: Cafe24TokenResponse,
-  webhookSecret: string | null = null
+  webhookSecret: string | null = null,
+  /** ★1028 N6 연결 때 고른 분류코드(토큰 갱신 = 없음 · 그대로) */
+  storeCode: string | null = null,
+  /** ★1028 Codex R2 #1 바깥 트랜잭션(승인 확정) — 주면 허용 도메인 등록은 호출부가 커밋 뒤에 한다(같은 행 잠금 교착 방지) */
+  outer?: TxRun,
 ): Promise<void> {
-  await saveIntegrationRowGuarded(companyId, 'cafe24', mallId, null, (run) => run(
-    `INSERT INTO company_integrations (
-      id, company_id, provider, mall_id, access_token, refresh_token,
-      token_expires_at, scope, meta, webhook_secret, connected_at, status,
-      created_at, updated_at
-    ) VALUES (
-      gen_random_uuid(), $1::uuid, 'cafe24', $2, $3, $4,
-      $5, $6, $7::jsonb, $8, NOW(), 'active',
-      NOW(), NOW()
-    )
-    ON CONFLICT (company_id, provider, mall_id) DO UPDATE SET
-      access_token = EXCLUDED.access_token,
-      refresh_token = EXCLUDED.refresh_token,
-      token_expires_at = EXCLUDED.token_expires_at,
-      scope = EXCLUDED.scope,
-      meta = company_integrations.meta || EXCLUDED.meta,
-      webhook_secret = COALESCE(EXCLUDED.webhook_secret, company_integrations.webhook_secret),
-      status = 'active',
-      updated_at = NOW()`,
-    [
-      companyId,
-      mallId,
-      tokenRes.access_token,
-      tokenRes.refresh_token,
-      new Date(tokenRes.expires_at),
-      Array.isArray(tokenRes.scopes) ? tokenRes.scopes.join(',') : DEFAULT_SCOPE,
-      JSON.stringify({
-        user_id: tokenRes.user_id,
-        shop_no: tokenRes.shop_no,
-        issued_at: tokenRes.issued_at,
-        refresh_token_expires_at: tokenRes.refresh_token_expires_at,
-      }),
-      webhookSecret,
-    ]
-  ));
+  await saveIntegrationRowGuarded(companyId, 'cafe24', mallId, storeCode, (run) => createIntegrationRow(run, {
+    companyId, provider: 'cafe24', mallId,
+    accessToken: { v: tokenRes.access_token },
+    refreshToken: { v: tokenRes.refresh_token },
+    tokenExpiresAt: { v: new Date(tokenRes.expires_at) },
+    scope: { v: Array.isArray(tokenRes.scopes) ? tokenRes.scopes.join(',') : DEFAULT_SCOPE },
+    meta: {
+      user_id: tokenRes.user_id,
+      shop_no: tokenRes.shop_no,
+      issued_at: tokenRes.issued_at,
+      refresh_token_expires_at: tokenRes.refresh_token_expires_at,
+      ...(storeCode ? { store_code: storeCode } : {}),
+    },
+    webhookSecret: { v: webhookSecret },
+    connectedAt: { sql: 'NOW()' },
+    status: { sql: "'active'" },
+    onConflict: [
+      'access_token = EXCLUDED.access_token',
+      'refresh_token = EXCLUDED.refresh_token',
+      'token_expires_at = EXCLUDED.token_expires_at',
+      'scope = EXCLUDED.scope',
+      'webhook_secret = COALESCE(EXCLUDED.webhook_secret, company_integrations.webhook_secret)',
+      "status = 'active'",
+      'connected_at = COALESCE(company_integrations.connected_at, NOW())',
+    ],
+  }), outer);
+  // ★ 1028 K12 · M28 — 1클릭 연동이 SDK 를 몰에 넣으므로 그 몰 도메인을 수집 허용 도메인에(옛: 등록 0 → 방문 · 클릭 전부 403) · 실패는 연결을 막지 않는다(토큰 유지 워커가 다시 넣는다)
+  if (!outer) await registerCafe24AllowedOrigins(companyId, mallId);
+}
+
+/** 카페24 몰의 플랫폼 도메인({몰}.cafe24.com · m.{몰}.cafe24.com)을 그 행의 값으로 수집 허용 도메인에(대표 도메인 칸 = 리허설 뒤) */
+export async function registerCafe24AllowedOrigins(companyId: string, mallId: string): Promise<void> {
+  await registerMallAllowedOrigins(companyId, 'cafe24', mallId, mallPlatformOrigins('cafe24', mallId))
+    .catch((e: any) => console.warn(`[Cafe24] 수집 허용 도메인 등록 실패(연결은 그대로) mall=${mallId}: ${e?.message || e}`));
 }
 
 export async function getCafe24Integration(companyId: string, mallId?: string): Promise<Cafe24Integration | null> {
   const result = mallId
     ? await query(
-        `SELECT id, company_id, mall_id, access_token, refresh_token, token_expires_at, scope, webhook_secret, status
+        `SELECT id, company_id, mall_id, access_token, refresh_token, token_expires_at, token_expires_at::text AS token_expires_at_raw, scope, webhook_secret, status
          FROM company_integrations
          WHERE company_id = $1::uuid AND provider = 'cafe24' AND mall_id = $2
          LIMIT 1`,
         [companyId, mallId]
       )
     : await query(
-        `SELECT id, company_id, mall_id, access_token, refresh_token, token_expires_at, scope, webhook_secret, status
+        `SELECT id, company_id, mall_id, access_token, refresh_token, token_expires_at, token_expires_at::text AS token_expires_at_raw, scope, webhook_secret, status
          FROM company_integrations
          WHERE company_id = $1::uuid AND provider = 'cafe24'
          ORDER BY connected_at DESC NULLS LAST
@@ -267,11 +277,12 @@ export async function getCafe24Integration(companyId: string, mallId?: string): 
     id: r.id,
     companyId: r.company_id,
     mallId: r.mall_id,
-    accessToken: r.access_token,
-    refreshToken: r.refresh_token,
+    accessToken: openSecret(r.access_token),
+    refreshToken: openSecret(r.refresh_token),
     tokenExpiresAt: new Date(r.token_expires_at),
+    tokenExpiresAtRaw: r.token_expires_at_raw ?? null,
     scope: r.scope || '',
-    webhookSecret: r.webhook_secret,
+    webhookSecret: openSecret(r.webhook_secret),
     status: r.status,
   };
 }
@@ -283,9 +294,9 @@ export async function getCafe24Integration(companyId: string, mallId?: string): 
  */
 export async function getCafe24IntegrationsByMallId(mallId: string): Promise<Cafe24Integration[]> {
   const result = await query(
-    `SELECT id, company_id, mall_id, access_token, refresh_token, token_expires_at, scope, webhook_secret, status
+    `SELECT id, company_id, mall_id, access_token, refresh_token, token_expires_at, token_expires_at::text AS token_expires_at_raw, scope, webhook_secret, status
      FROM company_integrations
-     WHERE provider = 'cafe24' AND mall_id = $1 AND status = 'active'
+     WHERE provider = 'cafe24' AND mall_id = $1 AND ${receiveEligibleSql('cafe24')}
      ORDER BY connected_at DESC NULLS LAST`,
     [mallId]
   );
@@ -293,11 +304,12 @@ export async function getCafe24IntegrationsByMallId(mallId: string): Promise<Caf
     id: r.id,
     companyId: r.company_id,
     mallId: r.mall_id,
-    accessToken: r.access_token,
-    refreshToken: r.refresh_token,
+    accessToken: openSecret(r.access_token),
+    refreshToken: openSecret(r.refresh_token),
     tokenExpiresAt: new Date(r.token_expires_at),
+    tokenExpiresAtRaw: r.token_expires_at_raw ?? null,
     scope: r.scope || '',
-    webhookSecret: r.webhook_secret,
+    webhookSecret: openSecret(r.webhook_secret),
     status: r.status,
   }));
 }
@@ -312,20 +324,13 @@ const CAFE24_CALLBACK_REDIRECT = process.env.CAFE24_REDIRECT_URI || 'https://app
  * 회사가 입력한 self-app 자격(client_id/secret)을 company_integrations.meta에 저장.
  * OAuth 전이라 토큰 없음(status='pending_oauth'). 이후 callback이 토큰을 채우고 active로 전환.
  */
-export async function saveCafe24ByoCredentials(companyId: string, mallId: string, clientId: string, clientSecret: string): Promise<void> {
-  await saveIntegrationRowGuarded(companyId, 'cafe24', mallId, null, (run) => run(
-    `INSERT INTO company_integrations (
-      id, company_id, provider, mall_id, access_token, refresh_token,
-      token_expires_at, scope, meta, webhook_secret, connected_at, status, created_at, updated_at
-    ) VALUES (
-      gen_random_uuid(), $1::uuid, 'cafe24', $2, '', '',
-      NULL, '', $3::jsonb, NULL, NULL, 'pending_oauth', NOW(), NOW()
-    )
-    ON CONFLICT (company_id, provider, mall_id) DO UPDATE SET
-      meta = company_integrations.meta || EXCLUDED.meta,
-      updated_at = NOW()`,
-    [companyId, mallId, JSON.stringify({ app_client_id: clientId, app_client_secret: clientSecret })]
-  ));
+export async function saveCafe24ByoCredentials(companyId: string, mallId: string, clientId: string, clientSecret: string, storeCode: string | null = null): Promise<void> {
+  await saveIntegrationRowGuarded(companyId, 'cafe24', mallId, storeCode, (run) => createIntegrationRow(run, {
+    companyId, provider: 'cafe24', mallId,
+    meta: { app_client_id: clientId, app_client_secret: clientSecret, ...(storeCode ? { store_code: storeCode } : {}) },
+    status: { sql: "'pending_oauth'" },
+    onConflict: [],
+  }));
 }
 
 /**
@@ -340,7 +345,7 @@ export async function getCafe24ByoCredentials(companyId: string, mallId: string)
   if (r.rows.length === 0) return undefined;
   const meta = (r.rows[0].meta || {}) as { app_client_id?: string; app_client_secret?: string };
   const resolved = resolveProviderOAuthCredentials(
-    { app_client_id: meta.app_client_id, app_client_secret: meta.app_client_secret, app_redirect_uri: CAFE24_CALLBACK_REDIRECT },
+    { app_client_id: meta.app_client_id, app_client_secret: openSecret(meta.app_client_secret), app_redirect_uri: CAFE24_CALLBACK_REDIRECT },
     null,
   );
   return resolved.ok ? resolved.credentials : undefined;
@@ -369,23 +374,24 @@ async function refreshCafe24Once(held: Cafe24Integration, creds?: ProviderOAuthC
 
   try {
     const refreshed = await refreshCafe24Token(integration.mallId, integration.refreshToken, creds);
-    await saveCafe24Integration(integration.companyId, integration.mallId, refreshed);
+    // ★ 1028 Codex R1 #2 — 갱신 저장 = 그 토큰판 · 해제 아닌 행일 때만(재연결 upsert 를 쓰지 않는다 · 도는 사이 해제한 연동을 되살리지 않는다)
+    const saved = await saveRefreshedToken({
+      id: integration.id, tokenExpiresAtRaw: integration.tokenExpiresAtRaw,
+      accessToken: refreshed.access_token, refreshToken: refreshed.refresh_token, tokenExpiresAt: new Date(refreshed.expires_at),
+      meta: { issued_at: refreshed.issued_at, refresh_token_expires_at: refreshed.refresh_token_expires_at },
+    });
+    if (!saved) return reReadAfterLostRefresh(await getCafe24Integration(integration.companyId, integration.mallId).catch(() => null), integration.id);
     return {
       ...integration,
       accessToken: refreshed.access_token,
       refreshToken: refreshed.refresh_token,
       tokenExpiresAt: new Date(refreshed.expires_at),
+      tokenExpiresAtRaw: new Date(refreshed.expires_at).toISOString(),
     };
   } catch (err) {
     // ★ 2026-09-26 R1-31 — 제공자가 거절했을 때만 만료로 표시한다(일시 장애 한 번에 연동이 끊겨 웹훅이 유실됐다)
-    if (isDefinitiveTokenRejection(err)) {
-      await query(
-        `UPDATE company_integrations
-         SET status = 'token_expired', updated_at = NOW()
-         WHERE id = $1::uuid`,
-        [integration.id]
-      );
-    }
+    // ★ 1028 K6 — 그 요청에 쓴 토큰판일 때만(늦게 온 옛 거절이 새 승인 · 다른 갱신의 토큰을 덮지 않게) · 유예 시계 같은 문장
+    if (isDefinitiveTokenRejection(err)) await markTokenRejected(integration);
     throw err;
   }
 }
@@ -399,6 +405,9 @@ async function refreshCafe24Once(held: Cafe24Integration, creds?: ProviderOAuthC
  * - 자동 토큰 갱신 (만료 임박 시)
  * - 5xx 시 1회 retry
  */
+/** 앱 API 버전(개발자센터 설정과 같은 값 · 막히면 경보 · M36) */
+const CAFE24_API_VERSION = '2026-03-01';
+
 export async function cafe24ApiCall<T = unknown>(
   integration: Cafe24Integration,
   path: string,
@@ -424,7 +433,7 @@ export async function cafe24ApiCall<T = unknown>(
     'Content-Type': 'application/json',
     // ★ 2026-07-03 실측 정정 — 앱 API 버전(개발자센터 설정)이 2026-03-01. 옛 2024-09-01은 이 앱에서 미제공(400).
     //   (gyunoo83 scripttags GET raw 응답: "2024-09-01 version ... not available. default ... 2026-03-01")
-    'X-Cafe24-Api-Version': '2026-03-01',
+    'X-Cafe24-Api-Version': CAFE24_API_VERSION,
   };
 
   const fetchOpts: RequestInit = {
@@ -447,6 +456,16 @@ export async function cafe24ApiCall<T = unknown>(
       continue;
     }
     const errBody = await safeJsonText(res);
+    // ★ 1028 K10 2단 · M36 — 고정한 API 버전이 막히면(0703 실측 원문 「… version … not available」 · 400) 상품 고르기 · 스크립트 등록이 일제히 실패한다 → 그 자리에서 경보
+    if (res.status === 400 && /version/i.test(errBody) && /not available/i.test(errBody)) {
+      void sendSystemAlert({
+        dedupKey: 'cafe24-api-version-rejected',
+        cooldownMs: 24 * 60 * 60 * 1000,
+        title: '카페24 API 버전을 카페24가 받지 않습니다.',
+        details: [`고정한 판: ${CAFE24_API_VERSION}`, `몰: ${fresh.mallId}`],
+        action: '카페24 개발자센터의 앱 API 버전을 확인하고 X-Cafe24-Api-Version 값을 올려 주세요.',
+      }).catch(() => undefined);
+    }
     throw new Error(`카페24 API 호출 실패 (${res.status}): ${errBody}`);
   }
   throw lastErr || new Error('카페24 API 호출 실패');
@@ -666,6 +685,12 @@ function toProviderTokenResponse(tokenRes: Cafe24TokenResponse): ProviderTokenRe
   };
 }
 
+/** 카페24 주문의 고객 열쇠 · 주문 번호(★ 1028 K9 — 그 연동 행의 몰 접두 · mallScopedIds 반환값) */
+function cafe24OrderIds(ctx: WebhookCtx, resource: Record<string, any>): { orderId: string; externalId: string } {
+  const ids = mallScopedIds(ctx.idScope, { memberId: resource.member_id || resource.customer_id, phone: resource.buyer_cellphone || resource.buyer_phone, orderId: resource.order_id });
+  return { orderId: ids.orderId, externalId: ids.externalId };
+}
+
 export const cafe24Adapter: IProviderAdapter = {
   provider: 'cafe24',
   displayName: '카페24',
@@ -699,7 +724,7 @@ export const cafe24Adapter: IProviderAdapter = {
         await identifyCustomer(companyId, {
           ...(ctx.storeCode ? { storeCode: ctx.storeCode } : {}),   // ★ 1027 K9 — 연동 행 분류코드(소속 행 · 몰 동의)
           source: 'cafe24',
-          externalId: String(resource.member_id || resource.customer_id || ''),
+          externalId: mallScopedIds(ctx.idScope, { memberId: resource.member_id || resource.customer_id }).memberExternalId,
           email: resource.email,
           phone: resource.cellphone || resource.phone,
           name: resource.name,
@@ -724,9 +749,7 @@ export const cafe24Adapter: IProviderAdapter = {
         const placed = await syncOrder(companyId, {
           ...(ctx.storeCode ? { storeCode: ctx.storeCode } : {}),   // ★ 1027 K9 — 연동 행 분류코드(소속 행 · 몰 동의)
           source: 'cafe24',
-          orderId: String(resource.order_id || ''),
-          // ★ 2026-09-27 한줄로 V2 R245 — 비회원 주문도 적재(주문 외부 id CT)
-          externalId: orderExternalId(resource.member_id || resource.customer_id, resource.buyer_cellphone || resource.buyer_phone, resource.order_id),
+          ...cafe24OrderIds(ctx, resource),
           email: resource.buyer_email,
           phone: resource.buyer_cellphone || resource.buyer_phone,
           name: resource.buyer_name,
@@ -754,9 +777,7 @@ export const cafe24Adapter: IProviderAdapter = {
         const reversed = await syncOrder(companyId, {
           ...(ctx.storeCode ? { storeCode: ctx.storeCode } : {}),   // ★ 1027 K9 — 연동 행 분류코드(소속 행 · 몰 동의)
           source: 'cafe24',
-          orderId: String(resource.order_id || ''),
-          // ★ 2026-09-27 한줄로 V2 R245 — 비회원 주문도 적재(주문 외부 id CT)
-          externalId: orderExternalId(resource.member_id || resource.customer_id, resource.buyer_cellphone || resource.buyer_phone, resource.order_id),
+          ...cafe24OrderIds(ctx, resource),
           email: resource.buyer_email,
           phone: resource.buyer_cellphone || resource.buyer_phone,
           name: resource.buyer_name,
@@ -771,7 +792,7 @@ export const cafe24Adapter: IProviderAdapter = {
         await trackEvent(companyId, {
           source: 'cafe24',
           eventName: 'custom_order_cancelled',
-          externalId: String(resource.member_id || resource.customer_id || ''),
+          externalId: mallScopedIds(ctx.idScope, { memberId: resource.member_id || resource.customer_id }).memberExternalId,
           properties: {
             order_id: resource.order_id,
             status: resource.order_status,
@@ -787,7 +808,7 @@ export const cafe24Adapter: IProviderAdapter = {
         // ★ 2026-07-03 — 장바구니 웹훅(90084). SDK 미설치 몰에서도 cart_add 신호 확보 (성과리포트 퍼널 축과 동일 이벤트명).
         // 비회원 장바구니(member_id 없음)는 고객 매칭 불가 — 기록 생략 (deliveries 원문은 이미 저장됨).
         {
-          const cartExternalId = String(resource.member_id || resource.customer_id || '');
+          const cartExternalId = mallScopedIds(ctx.idScope, { memberId: resource.member_id || resource.customer_id }).memberExternalId;
           if (!cartExternalId) {
             console.log('[Cafe24 Adapter] cart.added 비회원 — 고객 매칭 생략');
             break;

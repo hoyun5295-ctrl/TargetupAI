@@ -17,9 +17,16 @@ import { aiZonePlanBlocked } from '../utils/plan-guard';
 import { callAIWithFallback } from '../services/ai';
 import { buildMemoryPromptContext, listMemories, MemoryType, LEARNING_MEMORY_TYPES } from '../utils/company-memory';
 import { fetchBrandGuideline, recordToneEvolution } from '../utils/brand-tone-evolution';
-import { scanLinkHabit, type LinkHabit } from '../utils/brand-link-core';
-import { splitBrandVoiceExtraction, planBrandVoiceRows, type BrandVoiceKind } from '../utils/brand-voice-prompt';
-import { extractJsonFromAiText, plainTextFromAi, aiStr } from '../utils/ai-json';
+import { REPRESENTATIVE_KEEP, type BrandVoiceKind } from '../utils/brand-voice-prompt';
+import { lockBrandVoiceState, writeBrandVoiceState, readBrandVoiceState, onMessageWrite, extractDoneFor, onExtractSuccess, onExtractError, onReview, canSample, onSample, onAdminEdit, onReset } from '../utils/brand-voice-state';
+import { isSkeletonOfText, textHash } from '../utils/brand-voice-skeleton';
+import { buildExtractionResult, buildVoiceExtractionPrompt, type RepresentativeMessageValue, type BrandGuidelineValue } from '../utils/brand-voice-extract';
+import { COPY_CONTENT_TYPES, COPY_CONTENT_TYPE_LABEL, isCopyContentType, kindOfContentType, type CopyContentType } from '../utils/copy-content-type';
+import { listHumanSentCandidates } from '../utils/human-sent-messages';
+import { generateBrandVoiceSamples } from '../utils/brand-voice-sample';
+import { readHabit, readVoiceEdit, decidePhraseCandidate, removeAcceptedPhrase } from '../utils/voice-habits';
+import { isUuid } from '../utils/normalize';
+import { extractJsonFromAiText, plainTextFromAi } from '../utils/ai-json';
 
 import { publicErrorText, respondUserError } from '../utils/http-error';
 import { runChargedAi, checkCredit, settleCreditInTx, InsufficientCreditError } from '../utils/ai-credit';
@@ -327,83 +334,104 @@ router.get('/top-impact', async (req: Request, res: Response) => {
 //   SMS 학습 제외 (33글자 한도 = 톤 분석 의미 X) — LMS 위주 학습.
 // ════════════════════════════════════════════════════════════════════
 
-interface RepresentativeMessageValue {
-  channel: 'LMS' | 'MMS';
-  message_text: string;
-  message_subject?: string;
-  image_url?: string | null;
-  manual_priority: number;
-  created_by_admin: boolean;
-  /** ★ 2026-10-20 문자 성격(마케팅 · 안부/알림) · 없으면 가이드라인 추출 때 AI 가 판정 · 설계서 docs/2026-10-18-ai-line-design.md §17 */
-  kind?: BrandVoiceKind;
-  /** admin = 사람이 정함(추출이 덮지 않는다) · ai = 추출이 판정 */
-  kind_source?: 'admin' | 'ai';
-}
 
-interface BrandGuidelineValue {
-  tone_signature: string;
-  avg_length_chars: number;
-  avg_length_bytes: number;
-  frequent_expressions: string[];
-  ad_prefix_position: 'front' | 'back';
-  greeting_pattern: string;
-  cta_patterns: string[];
-  signature: string;
-  reject_position: 'front' | 'back';
-  emoji_whitelist: string[];
-  extracted_at: string;
-  admin_edited: boolean;
-  // ★ 브랜드 키트 (admin 명시 자산 — AI 추출이 덮지 않고 보존). 전부 optional.
-  signature_locked?: string;
-  signature_mode?: 'append' | 'ai_blend';
-  slogans?: string[];
-  required_words?: string[];
-  banned_words?: string[];
-  // ★ 2026-07-02 형태 명세 — CT-99 BrandGuideline과 동일 구조 (주입·검증이 소비)
-  hook_types?: string[];
-  body_structure?: string[];
-  sentence_ending_style?: '해요체' | '합쇼체' | '혼합';
-  sentence_ending_examples?: string[];
-  customer_address?: string;
-  symbol_style?: string;
-  length_range?: { min_chars: number; max_chars: number };
-  link_habit?: LinkHabit;
-  /** ★ 2026-10-20 이 가이드라인을 뽑은 문안의 성격(main 행 · 없으면 마케팅) */
-  voice_kind?: BrandVoiceKind;
-}
 
-/** 입력/AI 응답에서 형태 명세 필드만 안전 정제 (extract·update 공용) */
-function sanitizeFormSpec(input: any): Pick<BrandGuidelineValue,
-  'hook_types' | 'body_structure' | 'sentence_ending_style' | 'sentence_ending_examples' | 'customer_address' | 'symbol_style'> {
+
+/**
+ * 입력에서 브랜드 키트 필드만 정제 (update-guideline용) · 요청에 든 칸만 낸다(화면은 고친 칸만 보낸다 · 빠진 칸 = 그대로 · 빈 값 = 비움).
+ *   ★ 2026-10-28 Codex 구현 1R — 빠진 칸을 [] 로 채워 병합하면 맺음말 한 칸 고침이 금지어 · 넣을 말 · 슬로건을 지웠다.
+ */
+function sanitizeBrandKit(input: any): Partial<Pick<BrandGuidelineValue,
+  'signature_locked' | 'signature_mode' | 'slogans' | 'required_words' | 'banned_words'>> {
   const arr = (v: any, max: number): string[] => Array.isArray(v)
     ? v.map((s: any) => String(s || '').trim()).filter(Boolean).slice(0, max) : [];
-  const endingStyle = input?.sentence_ending_style;
+  const has = (k: string) => !!input && typeof input === 'object' && k in input;
   return {
-    hook_types: arr(input?.hook_types, 2),
-    body_structure: arr(input?.body_structure, 7),
-    sentence_ending_style: endingStyle === '해요체' || endingStyle === '합쇼체' || endingStyle === '혼합' ? endingStyle : undefined,
-    sentence_ending_examples: arr(input?.sentence_ending_examples, 3),
-    customer_address: String(input?.customer_address || '').trim().slice(0, 50) || undefined,
-    symbol_style: String(input?.symbol_style || '').trim().slice(0, 200) || undefined,
-  };
-}
-
-/** 입력에서 브랜드 키트 필드만 정제 (update-guideline용) */
-function sanitizeBrandKit(input: any): Pick<BrandGuidelineValue,
-  'signature_locked' | 'signature_mode' | 'slogans' | 'required_words' | 'banned_words'> {
-  const arr = (v: any, max: number): string[] => Array.isArray(v)
-    ? v.map((s: any) => String(s || '').trim()).filter(Boolean).slice(0, max) : [];
-  return {
-    signature_locked: String(input?.signature_locked || '').trim().slice(0, 200) || undefined,
-    signature_mode: input?.signature_mode === 'ai_blend' ? 'ai_blend' : 'append',
-    slogans: arr(input?.slogans, 10),
-    required_words: arr(input?.required_words, 20),
-    banned_words: arr(input?.banned_words, 50),
+    ...(has('signature_locked') ? { signature_locked: String(input.signature_locked || '').trim().slice(0, 200) } : {}),
+    ...(has('signature_mode') ? { signature_mode: input.signature_mode === 'ai_blend' ? 'ai_blend' as const : 'append' as const } : {}),
+    ...(has('slogans') ? { slogans: arr(input.slogans, 10) } : {}),
+    ...(has('required_words') ? { required_words: arr(input.required_words, 20) } : {}),
+    ...(has('banned_words') ? { banned_words: arr(input.banned_words, 50) } : {}),
   };
 }
 
 // ─────────────────────────────────────────────────────────────
-// 1. GET /api/ai-memory/brand-voice
+// ★ 2026-10-28 AI 메모리 설계(docs/2026-10-28-ai-memory-brand-voice-design.md) K5 · K7 · K8 · K9 — 브랜드 보이스 주소 묶음
+//   권한(Harold 1028 ②) = 추가 · 고침 · 배우기 · 확인 · 견본 · 직접 정정 = 회사 관리자 + 담당자 · 대표 문안 삭제 · 초기화 = 회사 관리자.
+//   세대값 = 상태 행(brand_voice_state) · 모든 쓰기 = 같은 상태 행을 잠근 트랜잭션 안(R12).
+//   학습 = [저장하고 배우기 · 6](추출 1 + 견본 5) · 사람 클릭 없는 과금 0 · 실패 = 0 · 같은 세대 다시 = 0(I10).
+// ─────────────────────────────────────────────────────────────
+
+const BV_EXTRACT = 'brand-voice-extract';
+const BV_SAMPLE = 'generate-messages';
+const bvPrices = () => {
+  const extract = getCreditCost(BV_EXTRACT);
+  const sample = getCreditCost(BV_SAMPLE);
+  return { extract, sample, learn: extract + sample };
+};
+
+function bvCanEdit(req: Request): boolean {
+  const t = req.user?.userType;
+  return t === 'company_admin' || t === 'company_user';
+}
+function bvIsAdmin(req: Request): boolean {
+  return req.user?.userType === 'company_admin';
+}
+
+/** 대표 문안 한 건 입력 정제(채널 SMS 허용 · K7-6) · 오류 = 사람 문장 */
+function sanitizeMessageInput(m: any, index: number): { ok: true; value: Omit<RepresentativeMessageValue, 'manual_priority' | 'created_by_admin'> } | { ok: false; error: string } {
+  const ch = String(m?.channel || '').toUpperCase();
+  const channel: 'SMS' | 'LMS' | 'MMS' = ch === 'SMS' ? 'SMS' : ch === 'MMS' ? 'MMS' : 'LMS';
+  const text = String(m?.text || '').trim();
+  const subject = String(m?.subject || '').trim().slice(0, 100);
+  const label = index >= 0 ? `대표 문안 ${index + 1}번 ` : '';
+  if (text.length < 10) return { ok: false, error: `${label}본문은 10자 이상 입력해주세요.` };
+  if (text.length > 2000) return { ok: false, error: `${label}본문은 2000자 이내로 입력해주세요.` };
+  const contentType = isCopyContentType(m?.contentType) ? m.contentType : null;
+  const kind: BrandVoiceKind | null = contentType ? kindOfContentType(contentType) : (m?.kind === 'notice' || m?.kind === 'marketing' ? m.kind : null);
+  return {
+    ok: true,
+    value: {
+      channel,
+      message_text: text,
+      message_subject: channel === 'SMS' ? undefined : subject || undefined,
+      image_url: m?.imageUrl ? String(m.imageUrl).trim() : null,
+      ...(contentType ? { content_type: contentType, content_type_source: 'admin' as const } : {}),
+      ...(kind ? { kind, kind_source: 'admin' as const } : {}),
+      source: m?.source === 'sent_history' ? 'sent_history' : 'admin_input',
+      ...(m?.source === 'sent_history' && m?.campaignId ? { source_campaign_id: String(m.campaignId).slice(0, 64) } : {}),
+    },
+  };
+}
+
+async function insertRepresentativeMessage(client: any, companyId: string, userId: string | null, value: RepresentativeMessageValue): Promise<string> {
+  const r = await client.query(
+    `INSERT INTO ai_company_memory (id, company_id, memory_type, memory_key, memory_value, importance, source, metadata, last_accessed_at, created_at, updated_at)
+     VALUES (gen_random_uuid(), $1::uuid, 'representative_message', $2, $3, 8, 'admin_input', $4::jsonb, NOW(), NOW(), NOW())
+     RETURNING id`,
+    [companyId, `msg_${randomUUID()}`, JSON.stringify(value), JSON.stringify({ created_by: userId, updated_by: userId, source: value.source || 'admin_input' })],
+  );
+  return String(r.rows[0].id);
+}
+
+/** 같은 글의 대표 문안 id(같은 글 = 한 행 · 다시 누름 · 학습 실패 뒤 재시도가 행을 늘리지 않게 · 상태 행 잠금 안에서 부른다) */
+async function findRepresentativeByText(client: any, companyId: string, text: string): Promise<string | null> {
+  const r = await client.query(
+    `SELECT id FROM ai_company_memory
+      WHERE company_id = $1::uuid AND memory_type = 'representative_message' AND memory_value::jsonb->>'message_text' = $2
+      LIMIT 1`,
+    [companyId, text],
+  );
+  return r.rows[0] ? String(r.rows[0].id) : null;
+}
+
+async function bvInvalidate(companyId: string): Promise<void> {
+  const { invalidateBrandVoiceCache } = await import('../utils/brand-voice-prompt');
+  invalidateBrandVoiceCache(companyId);
+}
+
+// ─────────────────────────────────────────────────────────────
+// 1. GET /api/ai-memory/brand-voice — 화면 한 번에(문안 · 가이드라인 · 사람 행 · 상태 · 단가 · 권한)
 // ─────────────────────────────────────────────────────────────
 router.get('/brand-voice', async (req: Request, res: Response) => {
   try {
@@ -411,39 +439,49 @@ router.get('/brand-voice', async (req: Request, res: Response) => {
     if (!companyId) {
       return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
     }
-
-    const messagesRes = await query(
-      `SELECT id, memory_key, memory_value, created_at, updated_at
-       FROM ai_company_memory
-       WHERE company_id = $1::uuid AND memory_type = 'representative_message'
-       ORDER BY memory_key ASC`,
-      [companyId],
-    );
-
-    // ★ 2026-10-20 가이드라인 행 = main(마케팅) · notice(안부/알림) — 키를 지정해 읽는다
-    const guidelineRes = await query(
-      `SELECT memory_key, memory_value, updated_at
-       FROM ai_company_memory
-       WHERE company_id = $1::uuid AND memory_type = 'brand_guideline' AND memory_key IN ('main', 'notice')`,
-      [companyId],
-    );
+    const [messagesRes, guidelineRes] = await Promise.all([
+      query(
+        `SELECT id, memory_value, metadata, created_at, updated_at
+           FROM ai_company_memory
+          WHERE company_id = $1::uuid AND memory_type = 'representative_message'
+          ORDER BY created_at ASC, memory_key ASC`,
+        [companyId],
+      ),
+      // ★ 2026-10-20 가이드라인 행 = main(마케팅) · notice(안부/알림) — 키를 지정해 읽는다
+      query(
+        `SELECT memory_key, memory_value, updated_at
+           FROM ai_company_memory
+          WHERE company_id = $1::uuid AND memory_type = 'brand_guideline' AND memory_key IN ('main', 'notice')`,
+        [companyId],
+      ),
+    ]);
+    const { getBrandVoiceSnapshot, resolveGuidelineFor, voiceLearnedOf, pendingPhrasesOf, voiceStatusOfSnapshot } = await import('../utils/brand-voice-prompt');
+    const snap = await getBrandVoiceSnapshot(companyId);
+    const state = snap.state;
 
     const messages = messagesRes.rows.map((row: any) => {
       let value: RepresentativeMessageValue | null = null;
-      try {
-        value = typeof row.memory_value === 'string' ? JSON.parse(row.memory_value) : row.memory_value;
-      } catch {
-        value = null;
-      }
+      try { value = typeof row.memory_value === 'string' ? JSON.parse(row.memory_value) : row.memory_value; } catch { value = null; }
+      const text = value?.message_text || '';
+      const hash = textHash(text);
+      const pending = value?.skeleton && value.skeleton.hash === hash ? value.skeleton : null;
+      const reviewed = state.reviewed?.skeletons?.[String(row.id)];
+      const contentType = isCopyContentType(value?.content_type) ? value!.content_type! : null;
       return {
         id: row.id,
         priority: value?.manual_priority || 0,
         channel: value?.channel || 'LMS',
         subject: value?.message_subject || '',
-        text: value?.message_text || '',
+        text,
         imageUrl: value?.image_url || null,
-        kind: value?.kind === 'notice' || value?.kind === 'marketing' ? value.kind : null,
-        kindSource: value?.kind_source === 'admin' ? 'admin' : value?.kind ? 'ai' : null,
+        contentType,
+        contentTypeSource: contentType ? (value?.content_type_source === 'admin' ? 'admin' : 'ai') : null,
+        kind: contentType ? kindOfContentType(contentType) : value?.kind === 'notice' || value?.kind === 'marketing' ? value.kind : null,
+        kindSource: value?.kind_source === 'admin' || value?.content_type_source === 'admin' ? 'admin' : value?.kind ? 'ai' : null,
+        source: value?.source === 'sent_history' ? 'sent_history' : 'admin_input',
+        pendingSkeleton: pending ? pending.text : null,
+        pendingExtractGen: pending ? pending.extractGen : null,
+        reviewedSkeleton: reviewed && reviewed.hash === hash ? reviewed.text : null,
         createdAt: row.created_at,
         updatedAt: row.updated_at,
       };
@@ -454,19 +492,22 @@ router.get('/brand-voice', async (req: Request, res: Response) => {
     let noticeGuideline: BrandGuidelineValue | null = null;
     for (const row of guidelineRes.rows) {
       let parsed: BrandGuidelineValue | null = null;
-      try {
-        const raw = row.memory_value;
-        parsed = typeof raw === 'string' ? JSON.parse(raw) : raw;
-      } catch {
-        parsed = null;
-      }
-      if (row.memory_key === 'notice') {
-        noticeGuideline = parsed;
-      } else {
-        guideline = parsed;
-        guidelineUpdatedAt = parsed ? row.updated_at : null;
-      }
+      try { parsed = typeof row.memory_value === 'string' ? JSON.parse(row.memory_value) : row.memory_value; } catch { parsed = null; }
+      if (row.memory_key === 'notice') noticeGuideline = parsed;
+      else { guideline = parsed; guidelineUpdatedAt = parsed ? row.updated_at : null; }
     }
+    // 상태 = CT 한 곳(AI 한줄로 확인 판 · 생성 화면 칩과 같은 판정)
+    const status = voiceStatusOfSnapshot(snap);
+    // ★ K8-3 다시 배우기 제안 = 마지막 학습 30일 경과 + 그 뒤 새로 보낸 문자 1건 이상(클릭할 때 걷는다)
+    let relearnSuggestion: { newCount: number } | null = null;
+    const lastLearnAt = state.extract?.at ? Date.parse(state.extract.at) : NaN;
+    if (Number.isFinite(lastLearnAt) && Date.now() - lastLearnAt > 30 * 86400000 && bvCanEdit(req)) {
+      const fresh = (await listHumanSentCandidates(companyId, { userId: req.user?.userId || null, userType: req.user?.userType || null }, { days: 180 }).catch(() => []))
+        .filter((c) => c.sentAt && Date.parse(c.sentAt) > lastLearnAt);
+      if (fresh.length > 0) relearnSuggestion = { newCount: fresh.length };
+    }
+    const pendingNotice = noticeGuideline || (guideline?.voice_kind === 'notice' ? guideline : null);
+    const pendingMarketing = guideline?.voice_kind === 'notice' ? null : guideline;
 
     return res.json({
       success: true,
@@ -474,6 +515,25 @@ router.get('/brand-voice', async (req: Request, res: Response) => {
       guideline,
       notice_guideline: noticeGuideline,
       guideline_updated_at: guidelineUpdatedAt,
+      resolved: { marketing: resolveGuidelineFor(snap, 'marketing'), notice: resolveGuidelineFor(snap, 'notice') },
+      admin: snap.admin,
+      pending_phrases: { marketing: pendingPhrasesOf(pendingMarketing as any), notice: pendingPhrasesOf(pendingNotice as any) },
+      state: {
+        gen: state.gen,
+        guidelineGen: state.guidelineGen,
+        extractGen: state.extract?.gen ?? null,
+        reviewedExtractGen: state.reviewed?.extractGen ?? null,
+        extractError: state.extractError,
+        sample: state.sample && state.sample.gen === state.gen ? state.sample.result : null,
+      },
+      status,
+      relearn_suggestion: relearnSuggestion,
+      voice_learned: voiceLearnedOf(snap),
+      voice_learned_by_kind: { marketing: voiceLearnedOf(snap, 'marketing'), notice: voiceLearnedOf(snap, 'notice') },
+      prices: bvPrices(),
+      permissions: { canEdit: bvCanEdit(req), canDelete: bvIsAdmin(req) },
+      content_types: COPY_CONTENT_TYPES.map((key) => ({ key, label: COPY_CONTENT_TYPE_LABEL[key], kind: kindOfContentType(key) })),
+      keep_limit: REPRESENTATIVE_KEEP,
       registered: messages.length >= 1,
       guideline_extracted: guideline !== null,
     });
@@ -484,88 +544,33 @@ router.get('/brand-voice', async (req: Request, res: Response) => {
 });
 
 // ─────────────────────────────────────────────────────────────
-// 2. POST /api/ai-memory/brand-voice/save-messages
+// 2. POST /api/ai-memory/brand-voice/messages — 대표 문안 한 건 추가(세대 + 1 · K7-2)
 // ─────────────────────────────────────────────────────────────
-router.post('/brand-voice/save-messages', async (req: Request, res: Response) => {
+router.post('/brand-voice/messages', async (req: Request, res: Response) => {
   try {
     const companyId = req.user?.companyId;
-    const userType = req.user?.userType;
-    if (!companyId) {
-      return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
-    }
-    if (userType !== 'company_admin') {
-      return res.status(403).json({ success: false, error: '대표 문안 등록은 회사 관리자만 가능합니다.' });
-    }
+    if (!companyId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
+    if (!bvCanEdit(req)) return res.status(403).json({ success: false, error: '대표 문안은 회사 관리자와 담당자가 올릴 수 있어요.' });
+    const input = sanitizeMessageInput(req.body || {}, -1);
+    if (!input.ok) return res.status(400).json({ success: false, error: input.error });
 
-    const messages = Array.isArray(req.body?.messages) ? req.body.messages : [];
-    if (messages.length < 1 || messages.length > 10) {
-      return res.status(400).json({ success: false, error: '대표 문안은 1~10건 등록 가능합니다.' });
-    }
-
-    const normalized: Array<{ priority: number; value: RepresentativeMessageValue }> = [];
-    for (let i = 0; i < messages.length; i++) {
-      const m = messages[i] || {};
-      const channel = m.channel === 'MMS' ? 'MMS' : 'LMS';
-      const text = String(m.text || '').trim();
-      const subject = String(m.subject || '').trim();
-      const imageUrl = m.imageUrl ? String(m.imageUrl).trim() : null;
-      const priority = Number(m.priority) || i + 1;
-      // ★ 2026-10-20 문자 성격 — 화면이 받은 값을 돌려보낸다(사람이 고른 것 = admin · AI 판정 = ai · 없으면 다음 추출에서 판정)
-      const kind: BrandVoiceKind | undefined = m.kind === 'notice' || m.kind === 'marketing' ? m.kind : undefined;
-      const kindSource: 'admin' | 'ai' | undefined = kind ? (m.kindSource === 'admin' ? 'admin' : 'ai') : undefined;
-
-      if (text.length < 10) {
-        return res.status(400).json({
-          success: false,
-          error: `대표 문안 ${i + 1}번 본문은 10자 이상 입력해주세요.`,
-        });
-      }
-      if (text.length > 2000) {
-        return res.status(400).json({
-          success: false,
-          error: `대표 문안 ${i + 1}번 본문은 2000자 이내로 입력해주세요.`,
-        });
-      }
-
-      normalized.push({
-        priority,
-        value: {
-          channel,
-          message_text: text,
-          message_subject: subject || undefined,
-          image_url: imageUrl,
-          manual_priority: priority,
-          created_by_admin: true,
-          ...(kind ? { kind, kind_source: kindSource } : {}),
-        },
-      });
-    }
-
-    // ★ D225+ transaction 안전 영역 — 단일 client 활용 (pool.connect + finally release 의무)
     const client = await pool.connect();
+    let id = '';
     try {
       await client.query('BEGIN');
-
-      await client.query(
-        `DELETE FROM ai_company_memory
-         WHERE company_id = $1::uuid AND memory_type = 'representative_message'`,
-        [companyId],
-      );
-
-      for (const item of normalized) {
-        const memoryKey = `msg_${String(item.priority).padStart(2, '0')}`;
-        await client.query(
-          `INSERT INTO ai_company_memory (
-            id, company_id, memory_type, memory_key, memory_value,
-            importance, source, metadata, last_accessed_at, created_at, updated_at
-          ) VALUES (
-            gen_random_uuid(), $1::uuid, 'representative_message', $2, $3,
-            8, 'admin_input', '{}'::jsonb, NOW(), NOW(), NOW()
-          )`,
-          [companyId, memoryKey, JSON.stringify(item.value)],
-        );
+      const state = await lockBrandVoiceState(client, companyId);
+      const existing = await findRepresentativeByText(client, companyId, input.value.message_text);
+      if (existing) {
+        await client.query('ROLLBACK');
+        return res.json({ success: true, id: existing, duplicate: true });
       }
-
+      const cnt = await client.query(`SELECT COUNT(*)::int AS n, COALESCE(MAX((memory_value::jsonb->>'manual_priority')::int), 0) AS p FROM ai_company_memory WHERE company_id = $1::uuid AND memory_type = 'representative_message'`, [companyId]);
+      if ((cnt.rows[0]?.n || 0) >= REPRESENTATIVE_KEEP) {
+        await client.query('ROLLBACK');
+        return res.status(400).json({ success: false, error: `대표 문안은 ${REPRESENTATIVE_KEEP}건까지 둘 수 있어요. 오래된 것을 빼고 올려 주세요.` });
+      }
+      id = await insertRepresentativeMessage(client, companyId, req.user?.userId || null, { ...input.value, manual_priority: (cnt.rows[0]?.p || 0) + 1, created_by_admin: true });
+      await writeBrandVoiceState(client, companyId, onMessageWrite(state));
       await client.query('COMMIT');
     } catch (txErr) {
       await client.query('ROLLBACK');
@@ -573,283 +578,63 @@ router.post('/brand-voice/save-messages', async (req: Request, res: Response) =>
     } finally {
       client.release();
     }
-
-    const { invalidateBrandVoiceCache } = await import('../utils/brand-voice-prompt');
-    invalidateBrandVoiceCache(companyId);
-
-    return res.json({ success: true, saved_count: normalized.length });
+    await bvInvalidate(companyId);
+    return res.json({ success: true, id });
   } catch (err: any) {
-    console.error('[Brand Voice save-messages] 오류:', err);
+    console.error('[Brand Voice add-message] 오류:', err);
     return res.status(500).json({ success: false, error: publicErrorText(err, '저장 실패') });
   }
 });
 
 // ─────────────────────────────────────────────────────────────
-// 3. POST /api/ai-memory/brand-voice/extract-guideline
+// 3. PUT /api/ai-memory/brand-voice/messages/:id — 한 건 고침(updated_at 대조 · 다르면 409 · 세대 + 1)
 // ─────────────────────────────────────────────────────────────
-router.post('/brand-voice/extract-guideline', async (req: Request, res: Response) => {
+router.put('/brand-voice/messages/:id', async (req: Request, res: Response) => {
   try {
     const companyId = req.user?.companyId;
-    const userType = req.user?.userType;
-    if (!companyId) {
-      return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
-    }
-    if (await aiZonePlanBlocked(req, res)) return;   // ★ 2026-10-24 R2 — AI 를 쓰는 주소 = 서버 요금제 문
-    if (userType !== 'company_admin') {
-      return res.status(403).json({ success: false, error: '가이드라인 추출은 회사 관리자만 가능합니다.' });
-    }
+    if (!companyId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
+    if (!bvCanEdit(req)) return res.status(403).json({ success: false, error: '대표 문안은 회사 관리자와 담당자가 고칠 수 있어요.' });
+    const memoryId = String(req.params.id || '').trim();
+    if (!isUuid(memoryId)) return res.status(400).json({ success: false, error: '대표 문안을 찾을 수 없어요.' });
+    const input = sanitizeMessageInput(req.body || {}, -1);
+    if (!input.ok) return res.status(400).json({ success: false, error: input.error });
+    const seenUpdatedAt = String(req.body?.updatedAt || '');
 
-    const messagesRes = await query(
-      `SELECT id, memory_value FROM ai_company_memory
-       WHERE company_id = $1::uuid AND memory_type = 'representative_message'
-       ORDER BY memory_key ASC`,
-      [companyId],
-    );
-    if (messagesRes.rows.length < 1) {
-      return res.status(400).json({
-        success: false,
-        error: '대표 문안을 1건 이상 먼저 등록해주세요.',
-      });
-    }
-
-    const parsedRows: Array<{ id: string; value: RepresentativeMessageValue }> = [];
-    for (const row of messagesRes.rows) {
-      try {
-        const value = typeof row.memory_value === 'string' ? JSON.parse(row.memory_value) : row.memory_value;
-        if (value && typeof value.message_text === 'string') {
-          parsedRows.push({ id: String(row.id), value });
-        }
-      } catch {
-        // 잘못된 JSON 영역 = skip
-      }
-    }
-    const parsedMessages: RepresentativeMessageValue[] = parsedRows.map((r) => r.value);
-    if (parsedMessages.length < 1) {
-      return res.status(400).json({
-        success: false,
-        error: '대표 문안을 다시 등록해주세요. (JSON 영역 손상)',
-      });
-    }
-
-    // ★ 2026-10-20 문자 성격(설계서 docs/2026-10-18-ai-line-design.md §17) — 사람이 정한 성격은 AI 가 덮지 않는다
-    const adminKinds: Array<BrandVoiceKind | null> = parsedMessages.map((m) =>
-      m.kind_source === 'admin' && (m.kind === 'marketing' || m.kind === 'notice') ? m.kind : null);
-    const KIND_KR: Record<BrandVoiceKind, string> = { marketing: '마케팅', notice: '안부 · 알림' };
-
-    const messagesText = parsedMessages.map((m, i) =>
-      `### 문안 ${i + 1} (채널: ${m.channel}${m.message_subject ? `, 제목: ${m.message_subject}` : ''}${adminKinds[i] ? `, 성격: ${KIND_KR[adminKinds[i]!]}(사람이 정함)` : ''})\n${m.message_text}`,
-    ).join('\n\n');
-
-    const systemPrompt = `당신은 회사 문자 메시지를 분석하여 회사별 brand voice 가이드라인을 JSON으로 자동 추출하는 전문가입니다.
-
-분석 대상 = 동일 회사의 대표 LMS/MMS 문안 ${parsedMessages.length}건. 본 문안 = 회사 brand voice 자체.
-
-## 1단계: 문안마다 성격 판정
-
-- marketing = 할인 · 쿠폰 · 이벤트 · 신상품 · 구매를 권하는 광고성 문자 ("(광고)" 표기가 있으면 marketing).
-- notice = 안부 · 감사 인사 · 생일 축하 · 배송 · 예약 · 소멸 안내처럼 구매를 권하지 않는 알림성 문자.
-- "성격: … (사람이 정함)" 이 붙은 문안은 그 성격 그대로 둔다.
-
-## 2단계: 성격별로 아래 14 항목을 따로 추출
-
-marketing 문안끼리, notice 문안끼리 따로 분석한다. 문안이 0건인 성격은 null.
-
-\`\`\`json
-{
-  "tone_signature": "친근/캐주얼 | 정중/격조 | 활기/감성 | 정보/실용 | 럭셔리/세련 중 1 선택",
-  "avg_length_chars": 245,
-  "avg_length_bytes": 380,
-  "frequent_expressions": ["빈출 표현 1", "빈출 표현 2", "빈출 표현 3"],
-  "ad_prefix_position": "front 또는 back",
-  "greeting_pattern": "자주 활용 인사말 패턴 1건",
-  "cta_patterns": ["CTA 패턴 1", "CTA 패턴 2", "CTA 패턴 3"],
-  "signature": "회사 시그니처 (있을 시, 없으면 빈 문자열)",
-  "reject_position": "front 또는 back",
-  "emoji_whitelist": ["★", "♥", "▶"],
-  "hook_types": ["질문형", "영문 슬로건"],
-  "body_structure": ["(광고)+브랜드", "후크", "본문", "혜택/조건", "기간", "CTA"],
-  "sentence_ending_style": "해요체 | 합쇼체 | 혼합 중 1 선택",
-  "sentence_ending_examples": ["~해보세요", "~습니다"],
-  "customer_address": "고객님",
-  "symbol_style": "CTA 끝에 > 부착"
-}
-\`\`\`
-
-## 분석 원칙
-
-1. tone_signature: 5 분류 중 1 선택. 메시지 톤이 친근/격조 어느 영역인지 정확 판단.
-2. avg_length_chars + avg_length_bytes: 그 성격 문안 본문 평균 길이 (한글 2바이트 기준).
-3. frequent_expressions: 2건 이상 출현한 표현 3~5건 추출. 빈도 높은 영역 우선.
-4. ad_prefix_position: "(광고)" 위치가 본문 앞이면 front, 뒤면 back.
-5. greeting_pattern: "[브랜드명] OOO님께" 등 자주 활용한 인사말 1건. 없으면 빈 문자열.
-6. cta_patterns: "지금 바로 ~", "5월이 끝나기 전 ~" 등 행동 유도 표현 3건. 다양성 우선.
-7. signature: 회사 슬로건 또는 영문 시그니처. 없으면 빈 문자열.
-8. reject_position: "무료수신거부 080..." 위치가 본문 앞이면 front, 뒤면 back.
-9. emoji_whitelist: 실제 활용된 이모지/특수문자 배열 (★ ♥ ▶ 등). 활용 없으면 빈 배열.
-10. hook_types: 첫 문장의 후크 유형을 빈도순 1~2건: "질문형" / "선언형" / "영문 슬로건" / "혜택 직접형" 중 선택.
-11. body_structure: 문안들의 공통 구조를 등장 순서대로 3~7개 블록으로 (예: "(광고)+브랜드", "후크", "본문", "혜택/조건", "기간", "CTA", "수신거부"). 실제 문안에 있는 블록만.
-12. sentence_ending_style: 본문 종결어미가 해요체(~요) / 합쇼체(~습니다) / 혼합 중 무엇인지 + sentence_ending_examples에 대표 어미 2~3건.
-13. customer_address: 고객 호칭 (예: "고객님", "회원님", "실버 등급 고객님"). 없으면 빈 문자열.
-14. symbol_style: 기호·구분선 사용 패턴 한 줄 서술 (예: "CTA 끝에 > 부착, 【】로 혜택 강조"). 없으면 빈 문자열.
-
-## 응답 형식
-
-JSON 단 1건만 출력. 다른 설명/주석/마크다운 코드블록 없음. 응답 시작 = "{" / 응답 끝 = "}".
-{ "kinds": ["marketing 또는 notice", ... (문안 순서대로 ${parsedMessages.length}개)], "marketing": {14 항목} 또는 null, "notice": {14 항목} 또는 null }`;
-
-    const { callAIWithFallback } = await import('../services/ai');
-    // ★ 2026-10-25 원장 Z4 — 돈 = 저장까지 끝난 추출만(잔액 확인 → AI 0크레딧 → 저장 트랜잭션 안에서 성공 뒤 차감)
-    //   옛: 응답 순간 1크레딧 · 형식 오류로 저장하지 못해도(500) 나갔다.
-    const extractCost = getCreditCost('brand-voice-extract');
-    await checkCredit(companyId, extractCost);
-    let rawResponse: string;
-    try {
-      rawResponse = await callAIWithFallback({
-        system: systemPrompt,
-        userMessage: messagesText,
-        // ★ 2026-10-20 성격별 두 묶음까지 받는다(잘린 JSON 방지) · 호출은 한 번(차감 1 그대로)
-        maxTokens: 3000,
-        temperature: 0.2,
-        model: 'sonnet',
-        companyId,
-        source: 'brand-voice-extract',
-        creditCost: 0,
-      });
-    } catch (aiErr: any) {
-      if (aiErr?.name === 'AiRateLimitExceeded') {
-        return res.status(429).json({ success: false, error: aiErr.message, code: 'AI_RATE_LIMIT' });
-      }
-      throw aiErr;
-    }
-
-    // 성격별 가이드라인(마케팅 · 안부) — 코드 결정 항목(길이 범위 · 링크 습관)은 그 성격 문안에서 직접 계산
-    const byKindGuideline: Partial<Record<BrandVoiceKind, BrandGuidelineValue>> = {};
-    // ★ Codex R2 — 처음엔 모두 「모름」(기본값으로 메우지 않는다 · 모르는 문안이 하나라도 있으면 저장 계획이 거절)
-    let kinds: Array<BrandVoiceKind | null> = parsedMessages.map(() => null);
-    try {
-      // ★ 2026-07-02 robust 파싱(CT ai-json) — AI 응답 raw 제어문자 대비 (0630 fallback 회귀 교훈)
-      const split = splitBrandVoiceExtraction(extractJsonFromAiText(rawResponse), adminKinds);
-      kinds = split.kinds;
-      for (const kind of ['marketing', 'notice'] as const) {
-        const parsed: any = split.byKind[kind];
-        const bodyTexts = parsedMessages.filter((_, i) => kinds[i] === kind).map((m) => m.message_text);
-        if (!parsed || bodyTexts.length === 0) continue;
-        const lengths = bodyTexts.map((t) => t.length);
-        byKindGuideline[kind] = {
-          tone_signature: aiStr(parsed.tone_signature, '정보/실용') || '정보/실용',
-          avg_length_chars: Number(parsed.avg_length_chars) || 0,
-          avg_length_bytes: Number(parsed.avg_length_bytes) || 0,
-          frequent_expressions: Array.isArray(parsed.frequent_expressions)
-            ? parsed.frequent_expressions.map((s: any) => String(s)).slice(0, 5)
-            : [],
-          ad_prefix_position: parsed.ad_prefix_position === 'back' ? 'back' : 'front',
-          greeting_pattern: aiStr(parsed.greeting_pattern),
-          cta_patterns: Array.isArray(parsed.cta_patterns)
-            ? parsed.cta_patterns.map((s: any) => String(s)).slice(0, 5)
-            : [],
-          signature: aiStr(parsed.signature),
-          reject_position: parsed.reject_position === 'front' ? 'front' : 'back',
-          emoji_whitelist: Array.isArray(parsed.emoji_whitelist)
-            ? parsed.emoji_whitelist.map((s: any) => String(s)).slice(0, 20)
-            : [],
-          extracted_at: new Date().toISOString(),
-          admin_edited: false,
-          // ★ 2026-07-02 형태 명세 — AI 추출 6항목(sanitize) + 코드 계산 2항목(길이 범위·링크 습관)
-          ...sanitizeFormSpec(parsed),
-          length_range: lengths.length > 0
-            ? { min_chars: Math.min(...lengths), max_chars: Math.max(...lengths) }
-            : undefined,
-          link_habit: scanLinkHabit(bodyTexts),
-          voice_kind: kind,
-        };
-      }
-    } catch (parseErr) {
-      console.error('[Brand Voice extract] JSON parse 실패:', parseErr, rawResponse.slice(0, 500));
-    }
-
-    // ★ Codex 1020 R1 — 저장할 행 = 진실 하나(planBrandVoiceRows): 마케팅 + 안부 = main · notice / 마케팅만 = main / 안부만 = main 하나가 안부 말투.
-    //   문안이 있는 성격의 묶음이 빠지면 아무것도 쓰지 않는다(불완전한 응답이 기존 학습을 지우거나 덮지 않게).
-    const plan = planBrandVoiceRows(kinds, byKindGuideline);
-    if (!plan.ok) {
-      return res.status(502).json({
-        success: false,
-        error: 'AI 가 말투를 읽어 내지 못했어요. 크레딧은 빠지지 않았어요. 다시 눌러 주세요.',
-        code: 'AI_PARSE_FAILED',
-      });
-    }
-    const guideline: BrandGuidelineValue = plan.main;
-    const finalKinds = kinds as BrandVoiceKind[];   // plan 통과 = 모든 문안의 성격이 정해졌다
-    const noticeGuideline: BrandGuidelineValue | null = plan.notice;
-
-    const prevGuideline = await fetchBrandGuideline(companyId);
-
-    // ★ 브랜드 키트(admin 명시 자산)는 AI 재추출이 덮지 않음 — 기존 값 보존(성격별 두 행 모두)
-    if (prevGuideline) {
-      // fetchBrandGuideline은 memory_value를 통째 파싱하므로 키트 값이 런타임에 포함됨(타입만 좁음)
-      const prevKit = prevGuideline as unknown as Partial<BrandGuidelineValue>;
-      for (const g of [guideline, noticeGuideline]) {
-        if (!g) continue;
-        g.signature_locked = prevKit.signature_locked;
-        g.signature_mode = prevKit.signature_mode;
-        g.slogans = prevKit.slogans;
-        g.required_words = prevKit.required_words;
-        g.banned_words = prevKit.banned_words;
-      }
-    }
-
-    // main · notice · 문안 성격을 한 번에(어긋난 상태로 남지 않게)
     const client = await pool.connect();
     try {
       await client.query('BEGIN');
-      await client.query(
-        `INSERT INTO ai_company_memory (
-          id, company_id, memory_type, memory_key, memory_value,
-          importance, source, metadata, last_accessed_at, created_at, updated_at
-        ) VALUES (
-          gen_random_uuid(), $1::uuid, 'brand_guideline', 'main', $2,
-          10, 'ai_auto', '{}'::jsonb, NOW(), NOW(), NOW()
-        )
-        ON CONFLICT (company_id, memory_type, memory_key) DO UPDATE SET
-          memory_value = EXCLUDED.memory_value,
-          importance = 10,
-          updated_at = NOW(),
-          last_accessed_at = NOW()`,
-        [companyId, JSON.stringify(guideline)],
+      const state = await lockBrandVoiceState(client, companyId);
+      const cur = await client.query(
+        `SELECT memory_value, metadata, updated_at FROM ai_company_memory
+          WHERE id = $1::uuid AND company_id = $2::uuid AND memory_type = 'representative_message' FOR UPDATE`,
+        [memoryId, companyId],
       );
-      if (noticeGuideline) {
-        await client.query(
-          `INSERT INTO ai_company_memory (
-            id, company_id, memory_type, memory_key, memory_value,
-            importance, source, metadata, last_accessed_at, created_at, updated_at
-          ) VALUES (
-            gen_random_uuid(), $1::uuid, 'brand_guideline', 'notice', $2,
-            10, 'ai_auto', '{}'::jsonb, NOW(), NOW(), NOW()
-          )
-          ON CONFLICT (company_id, memory_type, memory_key) DO UPDATE SET
-            memory_value = EXCLUDED.memory_value,
-            importance = 10,
-            updated_at = NOW(),
-            last_accessed_at = NOW()`,
-          [companyId, JSON.stringify(noticeGuideline)],
-        );
-      } else {
-        await client.query(
-          `DELETE FROM ai_company_memory
-            WHERE company_id = $1::uuid AND memory_type = 'brand_guideline' AND memory_key = 'notice'`,
-          [companyId],
-        );
+      if (cur.rows.length === 0) { await client.query('ROLLBACK'); return res.status(404).json({ success: false, error: '대표 문안을 찾을 수 없어요.' }); }
+      const seenMs = Date.parse(seenUpdatedAt);
+      if (!Number.isFinite(seenMs) || new Date(cur.rows[0].updated_at).getTime() !== seenMs) {
+        await client.query('ROLLBACK');
+        return res.status(409).json({ success: false, error: '다른 사람이 먼저 고쳤어요. 새로 불러온 뒤 다시 고쳐 주세요.', code: 'STALE' });
       }
-      for (let i = 0; i < parsedRows.length; i++) {
-        if (adminKinds[i]) continue;   // 사람이 정한 성격은 그대로
-        const value: RepresentativeMessageValue = { ...parsedRows[i].value, kind: finalKinds[i], kind_source: 'ai' };
-        await client.query(
-          `UPDATE ai_company_memory SET memory_value = $3, updated_at = NOW()
-            WHERE id = $1::uuid AND company_id = $2::uuid AND memory_type = 'representative_message'`,
-          [parsedRows[i].id, companyId, JSON.stringify(value)],
-        );
-      }
-      // 저장이 다 된 뒤 · 커밋 앞에서 **같은 트랜잭션으로** 걷는다(못 걷으면 402 · 503 = 함께 롤백 · ★ 1026 Codex 1R — 옛: 다른 연결로 걸어 저장 COMMIT 이 실패해도 차감이 남았다)
-      await settleCreditInTx(client, { companyId, cost: extractCost, source: 'brand-voice-extract', createdBy: req.user?.userId || null, idempotencyKey: `brand-voice-extract:${companyId}:${randomUUID()}` });
+      let prev: RepresentativeMessageValue | null = null;
+      const raw = cur.rows[0].memory_value;
+      try { prev = typeof raw === 'string' ? JSON.parse(raw) : raw; } catch { prev = null; }
+      // 종류 · 성격을 사람이 고르지 않았으면 이전 판정을 둔다(글이 바뀌었으면 다음 학습이 다시 판정한다) · 뼈대는 글 해시가 달라져 자동으로 안 쓰인다
+      const value: RepresentativeMessageValue = {
+        ...(prev || {}),
+        ...input.value,
+        manual_priority: prev?.manual_priority || 1,
+        created_by_admin: true,
+        ...(input.value.content_type ? {} : prev?.content_type ? { content_type: prev.content_type, content_type_source: prev.content_type_source } : {}),
+        ...(input.value.kind ? {} : prev?.kind ? { kind: prev.kind, kind_source: prev.kind_source } : {}),
+        source: prev?.source || input.value.source,
+      } as RepresentativeMessageValue;
+      const meta = { ...(cur.rows[0].metadata || {}), updated_by: req.user?.userId || null };
+      await client.query(
+        `UPDATE ai_company_memory SET memory_value = $3, metadata = $4::jsonb, updated_at = NOW()
+          WHERE id = $1::uuid AND company_id = $2::uuid AND memory_type = 'representative_message'`,
+        [memoryId, companyId, JSON.stringify(value), JSON.stringify(meta)],
+      );
+      await writeBrandVoiceState(client, companyId, onMessageWrite(state));
       await client.query('COMMIT');
     } catch (txErr) {
       await client.query('ROLLBACK');
@@ -857,56 +642,387 @@ JSON 단 1건만 출력. 다른 설명/주석/마크다운 코드블록 없음. 
     } finally {
       client.release();
     }
-
-    await recordToneEvolution(companyId, prevGuideline, guideline).catch((e: any) =>
-      console.log('[brand-tone-evolution] extract 기록 오류 —', e?.message || e),
-    );
-
-    const { invalidateBrandVoiceCache } = await import('../utils/brand-voice-prompt');
-    invalidateBrandVoiceCache(companyId);
-
-    return res.json({ success: true, guideline, notice_guideline: noticeGuideline, kinds: finalKinds });
+    await bvInvalidate(companyId);
+    return res.json({ success: true });
   } catch (err: any) {
-    if (err instanceof InsufficientCreditError) return res.status(402).json({ success: false, error: 'AI 크레딧이 부족합니다. 크레딧을 충전해 주세요.', code: 'INSUFFICIENT_CREDIT' });
-    if (respondUserError(res, err)) return;
-    console.error('[Brand Voice extract-guideline] 오류:', err);
-    return res.status(500).json({ success: false, error: publicErrorText(err, '가이드라인 추출 실패') });
+    console.error('[Brand Voice update-message] 오류:', err);
+    return res.status(500).json({ success: false, error: publicErrorText(err, '저장 실패') });
   }
 });
 
 // ─────────────────────────────────────────────────────────────
-// 4. DELETE /api/ai-memory/brand-voice/message/:id
+// 4. GET /api/ai-memory/brand-voice/sent-candidates — 「사람이 보낸 발송」 후보(K8 · 보낸 문자 고르기 창)
+// ─────────────────────────────────────────────────────────────
+router.get('/brand-voice/sent-candidates', async (req: Request, res: Response) => {
+  try {
+    const companyId = req.user?.companyId;
+    if (!companyId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
+    if (!bvCanEdit(req)) return res.status(403).json({ success: false, error: '회사 관리자와 담당자만 볼 수 있어요.' });
+    const candidates = await listHumanSentCandidates(companyId, { userId: req.user?.userId || null, userType: req.user?.userType || null }, { days: 180 });
+    return res.json({ success: true, candidates, prices: bvPrices() });
+  } catch (err: any) {
+    console.error('[Brand Voice sent-candidates] 오류:', err);
+    return res.status(500).json({ success: false, error: publicErrorText(err, '조회 실패') });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────
+// 5. POST /api/ai-memory/brand-voice/extract-guideline — [저장하고 배우기 · 6] 의 추출 1(K7-4 · 옛 주소 이름 그대로 = 뿌리 대장 R13 분류 유지)
+//    한 요청 = (새 문안 저장 + 세대 g) COMMIT → 추출 AI(잠금 밖) → 상태 행 잠금 · gen = g 일 때만 저장 + 1 걷기.
+//    같은 세대에 이미 추출했으면 다시 걷지 않고 저장된 결과(0) · 견본 5 는 확인 뒤(K9).
+// ─────────────────────────────────────────────────────────────
+router.post('/brand-voice/extract-guideline', async (req: Request, res: Response) => {
+  const companyId = req.user?.companyId;
+  let g = -1;   // ① 에서 확정(바깥 catch 의 실패 표식도 이 세대에)
+  try {
+    if (!companyId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
+    if (await aiZonePlanBlocked(req, res)) return;   // ★ 2026-10-24 R2 — AI 를 쓰는 주소 = 서버 요금제 문
+    if (!bvCanEdit(req)) return res.status(403).json({ success: false, error: '목소리 학습은 회사 관리자와 담당자가 할 수 있어요.' });
+    const userId = req.user?.userId || null;
+    const incoming = Array.isArray(req.body?.messages) ? req.body.messages.slice(0, REPRESENTATIVE_KEEP) : [];
+    const sanitized: Array<Omit<RepresentativeMessageValue, 'manual_priority' | 'created_by_admin'>> = [];
+    for (let i = 0; i < incoming.length; i++) {
+      const r = sanitizeMessageInput(incoming[i], i);
+      if (!r.ok) return res.status(400).json({ success: false, error: r.error });
+      sanitized.push(r.value);
+    }
+    const relearn = req.body?.relearn === true;
+
+    // ① 새 문안 저장 · 세대 확정 · 이미 있는 글은 다시 넣지 않는다(학습 실패 뒤 같은 고르기로 다시 눌러도 행 · 세대가 늘지 않는다 · Codex 구현 1R)
+    let alreadyExtracted = false;
+    {
+      const client = await pool.connect();
+      try {
+        await client.query('BEGIN');
+        let state = await lockBrandVoiceState(client, companyId);
+        const fresh: typeof sanitized = [];
+        for (const v of sanitized) {
+          if (fresh.some((f) => f.message_text === v.message_text)) continue;
+          if (await findRepresentativeByText(client, companyId, v.message_text)) continue;
+          fresh.push(v);
+        }
+        if (fresh.length > 0) {
+          const cnt = await client.query(`SELECT COUNT(*)::int AS n, COALESCE(MAX((memory_value::jsonb->>'manual_priority')::int), 0) AS p FROM ai_company_memory WHERE company_id = $1::uuid AND memory_type = 'representative_message'`, [companyId]);
+          if ((cnt.rows[0]?.n || 0) + fresh.length > REPRESENTATIVE_KEEP) {
+            await client.query('ROLLBACK');
+            return res.status(400).json({ success: false, error: `대표 문안은 ${REPRESENTATIVE_KEEP}건까지 둘 수 있어요. 오래된 것을 빼고 다시 골라 주세요.` });
+          }
+          let p = cnt.rows[0]?.p || 0;
+          for (const v of fresh) await insertRepresentativeMessage(client, companyId, userId, { ...v, manual_priority: ++p, created_by_admin: true });
+          state = onMessageWrite(state);
+        }
+        if (relearn && fresh.length === 0) state = onMessageWrite(state);
+        g = state.gen;
+        alreadyExtracted = extractDoneFor(state, g);
+        await writeBrandVoiceState(client, companyId, state);
+        await client.query('COMMIT');
+      } catch (txErr) {
+        await client.query('ROLLBACK');
+        throw txErr;
+      } finally {
+        client.release();
+      }
+      await bvInvalidate(companyId);
+    }
+    if (alreadyExtracted) return res.json({ success: true, gen: g, extractGen: g, charged: 0, reused: true });
+
+    const messagesRes = await query(
+      `SELECT id, memory_value FROM ai_company_memory
+        WHERE company_id = $1::uuid AND memory_type = 'representative_message'
+        ORDER BY created_at ASC, memory_key ASC`,
+      [companyId],
+    );
+    const parsedRows: Array<{ id: string; value: RepresentativeMessageValue }> = [];
+    for (const row of messagesRes.rows) {
+      try {
+        const value = typeof row.memory_value === 'string' ? JSON.parse(row.memory_value) : row.memory_value;
+        if (value && typeof value.message_text === 'string') parsedRows.push({ id: String(row.id), value });
+      } catch { /* 손상 행 = 건너뜀 */ }
+    }
+    if (parsedRows.length < 1) return res.status(400).json({ success: false, error: '대표 문안을 1건 이상 먼저 올려 주세요.' });
+
+    const prices = bvPrices();
+    try {
+      await checkCredit(companyId, prices.extract);
+    } catch (e) {
+      if (e instanceof InsufficientCreditError) {
+        await bvMarkExtractError(companyId, g, 'credit');
+        return res.status(402).json({ success: false, error: '크레딧이 부족해 아직 못 배웠어요. 문안은 저장됐어요. 충전한 뒤 [다시 배우기]를 눌러 주세요.', code: 'INSUFFICIENT_CREDIT', saved: true });
+      }
+      throw e;
+    }
+
+    // ② 추출(잠금 밖 · 단가 0 · 저장까지 끝나야 걷는다)
+    const adminTypes: Array<CopyContentType | null> = parsedRows.map((r) => (r.value.content_type_source === 'admin' && isCopyContentType(r.value.content_type) ? r.value.content_type : null));
+    const adminKinds: Array<BrandVoiceKind | null> = parsedRows.map((r, i) => adminTypes[i] ? kindOfContentType(adminTypes[i]!) : (r.value.kind_source === 'admin' && (r.value.kind === 'marketing' || r.value.kind === 'notice') ? r.value.kind : null));
+    const messagesText = parsedRows.map((r, i) =>
+      `### 문안 ${i + 1} (채널: ${r.value.channel}${r.value.message_subject ? `, 제목: ${r.value.message_subject}` : ''}${adminTypes[i] ? `, 종류: ${adminTypes[i]}(사람이 정함)` : adminKinds[i] ? `, 성격: ${adminKinds[i]}(사람이 정함)` : ''})\n${r.value.message_text}`,
+    ).join('\n\n');
+    let rawResponse = '';
+    try {
+      rawResponse = await callAIWithFallback({
+        system: buildVoiceExtractionPrompt(parsedRows.length),
+        userMessage: messagesText,
+        maxTokens: 4000,
+        temperature: 0.2,
+        model: 'sonnet',
+        companyId,
+        source: BV_EXTRACT,
+        creditCost: 0,
+        noCache: true,
+      });
+    } catch (aiErr: any) {
+      await bvMarkExtractError(companyId, g, 'ai');
+      if (aiErr?.name === 'AiRateLimitExceeded') return res.status(429).json({ success: false, error: aiErr.message, code: 'AI_RATE_LIMIT' });
+      return res.status(503).json({ success: false, error: 'AI 응답이 늦어 아직 못 배웠어요. 크레딧은 빠지지 않았어요. 잠시 뒤 [다시 배우기]를 눌러 주세요.', code: 'AI_DELAYED' });
+    }
+
+    // ③ 응답 → 문안별 종류 · 뼈대 · 성격별 가이드라인(문구 칸 = 칸 친 뒤 · 모양 · 길이 · 링크 = 코드가 잰다)
+    let built: ReturnType<typeof buildExtractionResult>;
+    try {
+      built = buildExtractionResult(extractJsonFromAiText(rawResponse), parsedRows, adminTypes, adminKinds, g);
+    } catch (parseErr) {
+      console.error('[Brand Voice learn] JSON parse 실패:', parseErr, rawResponse.slice(0, 500));
+      built = { ok: false } as any;
+    }
+    if (!built.ok) {
+      await bvMarkExtractError(companyId, g, 'parse');
+      return res.status(502).json({ success: false, error: 'AI 가 말투를 읽어 내지 못했어요. 크레딧은 빠지지 않았어요. 다시 눌러 주세요.', code: 'AI_PARSE_FAILED' });
+    }
+
+    const prevGuideline = await fetchBrandGuideline(companyId);
+    if (prevGuideline) {
+      // 브랜드 키트(사람이 적은 칸)는 추출이 덮지 않는다 — 성격별 두 행 모두
+      const prevKit = prevGuideline as unknown as Partial<BrandGuidelineValue>;
+      for (const gl of [built.main, built.notice]) {
+        if (!gl) continue;
+        gl.signature_locked = prevKit.signature_locked;
+        gl.signature_mode = prevKit.signature_mode;
+        gl.slogans = prevKit.slogans;
+        gl.required_words = prevKit.required_words;
+        gl.banned_words = prevKit.banned_words;
+      }
+    }
+
+    // ④ 저장 트랜잭션 = 상태 행 잠금 · gen = g 일 때만 · 걷기도 같은 트랜잭션(못 걷으면 함께 롤백)
+    const unclassifiedCount = built.unclassified;
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      const state = await lockBrandVoiceState(client, companyId);
+      const next = onExtractSuccess(state, g);
+      if (!next.ok) {
+        await client.query('ROLLBACK');
+        // 같은 세대를 다른 요청이 먼저 배웠다 = 그 결과를 그대로 둔다(덮으면 화면이 본 적 없는 결과가 확인된다 · Codex 구현 1R)
+        if (next.code === 'done') return res.json({ success: true, gen: g, extractGen: g, charged: 0, reused: true });
+        return res.status(409).json({ success: false, error: '그 사이 새 문안이 들어왔어요. 다시 배우기를 눌러 주세요. 크레딧은 빠지지 않았어요.', code: 'STALE_GENERATION' });
+      }
+      await upsertGuidelineRow(client, companyId, 'main', built.main);
+      if (built.notice) {
+        await upsertGuidelineRow(client, companyId, 'notice', built.notice);
+      // ★ R2 보호 — 종류 미정 문안이 남아 있으면 기존 안부 학습을 지우지 않는다(판정이 빠진 응답이 학습을 지우지 않게)
+      } else if (unclassifiedCount === 0) {
+        await client.query(`DELETE FROM ai_company_memory WHERE company_id = $1::uuid AND memory_type = 'brand_guideline' AND memory_key = 'notice'`, [companyId]);
+      }
+      for (const m of built.messages) {
+        await client.query(
+          `UPDATE ai_company_memory SET memory_value = $3, updated_at = updated_at
+            WHERE id = $1::uuid AND company_id = $2::uuid AND memory_type = 'representative_message'`,
+          [m.id, companyId, JSON.stringify(m.value)],
+        );
+      }
+      await settleCreditInTx(client, { companyId, cost: prices.extract, source: BV_EXTRACT, createdBy: userId, idempotencyKey: `brand-voice-extract:${companyId}:${g}` });
+      await writeBrandVoiceState(client, companyId, next.state);
+      await client.query('COMMIT');
+    } catch (txErr) {
+      await client.query('ROLLBACK');
+      throw txErr;
+    } finally {
+      client.release();
+    }
+    await recordToneEvolution(companyId, prevGuideline, built.main).catch((e: any) => console.log('[brand-tone-evolution] learn 기록 오류 —', e?.message || e));
+    await bvInvalidate(companyId);
+    return res.json({ success: true, gen: g, extractGen: g, charged: prices.extract, unclassified: built.unclassified });
+  } catch (err: any) {
+    if (err instanceof InsufficientCreditError) {
+      if (companyId && g >= 0) await bvMarkExtractError(companyId, g, 'credit').catch(() => {});
+      return res.status(402).json({ success: false, error: '크레딧이 부족해 아직 못 배웠어요. 문안은 저장됐어요. 충전한 뒤 [다시 배우기]를 눌러 주세요.', code: 'INSUFFICIENT_CREDIT', saved: true });
+    }
+    if (respondUserError(res, err)) return;
+    console.error('[Brand Voice learn] 오류:', err);
+    return res.status(500).json({ success: false, error: publicErrorText(err, '학습 실패') });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────
+// 6. POST /api/ai-memory/brand-voice/review — [확인] = 화면이 본 추출 세대만(K5-4 · 409)
+// ─────────────────────────────────────────────────────────────
+router.post('/brand-voice/review', async (req: Request, res: Response) => {
+  try {
+    const companyId = req.user?.companyId;
+    if (!companyId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
+    if (!bvCanEdit(req)) return res.status(403).json({ success: false, error: '회사 관리자와 담당자만 확인할 수 있어요.' });
+    const seen = Number(req.body?.seenExtractGen);
+    if (!Number.isInteger(seen) || seen < 0) return res.status(400).json({ success: false, error: '확인할 학습 결과를 다시 불러와 주세요.' });
+    const edits: Record<string, string> = req.body?.skeletons && typeof req.body.skeletons === 'object' ? req.body.skeletons : {};
+
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      const state = await lockBrandVoiceState(client, companyId);
+      const rows = await client.query(
+        `SELECT id, memory_value FROM ai_company_memory WHERE company_id = $1::uuid AND memory_type = 'representative_message'`,
+        [companyId],
+      );
+      const skeletons: Record<string, { hash: string; text: string }> = {};
+      for (const row of rows.rows) {
+        let v: RepresentativeMessageValue | null = null;
+        try { v = typeof row.memory_value === 'string' ? JSON.parse(row.memory_value) : row.memory_value; } catch { v = null; }
+        if (!v?.message_text) continue;
+        const hash = textHash(v.message_text);
+        const pending = v.skeleton && v.skeleton.hash === hash && v.skeleton.extractGen === seen ? v.skeleton.text : null;
+        const edited = typeof edits[String(row.id)] === 'string' ? String(edits[String(row.id)]) : null;
+        // 사람이 고친 뼈대 = 원문 글자 + 칸만(새 글 금지 · I16)
+        if (edited != null) {
+          if (!isSkeletonOfText(edited, v.message_text)) {
+            await client.query('ROLLBACK');
+            return res.status(400).json({ success: false, error: '뼈대에는 원문 글자와 칸만 둘 수 있어요. 새 글은 대표 문안을 고쳐서 넣어 주세요.', code: 'SKELETON_NOT_SUBSET', id: row.id });
+          }
+          skeletons[String(row.id)] = { hash, text: edited };
+        } else if (pending) {
+          skeletons[String(row.id)] = { hash, text: pending };
+        }
+      }
+      const gl = await client.query(
+        `SELECT memory_key, memory_value FROM ai_company_memory WHERE company_id = $1::uuid AND memory_type = 'brand_guideline' AND memory_key IN ('main', 'notice')`,
+        [companyId],
+      );
+      const { pendingPhrasesOf } = await import('../utils/brand-voice-prompt');
+      const byKey: Record<string, any> = {};
+      for (const row of gl.rows) { try { byKey[row.memory_key] = typeof row.memory_value === 'string' ? JSON.parse(row.memory_value) : row.memory_value; } catch { /* skip */ } }
+      const mainIsNotice = byKey.main?.voice_kind === 'notice';
+      const phrases = {
+        ...(byKey.main && !mainIsNotice ? { marketing: pendingPhrasesOf(byKey.main) } : {}),
+        ...(byKey.notice || mainIsNotice ? { notice: pendingPhrasesOf(byKey.notice || byKey.main) } : {}),
+      };
+      const next = onReview(state, seen, { by: req.user?.userId || null, skeletons, phrases });
+      if (!next.ok) {
+        await client.query('ROLLBACK');
+        return res.status(409).json({ success: false, error: '그 사이 학습 결과가 바뀌었어요. 새로 불러온 뒤 다시 확인해 주세요.', code: 'STALE_EXTRACT', extractGen: state.extract?.gen ?? null });
+      }
+      // 사람이 고친 뼈대는 문안 행에도 남긴다(다음 화면 · 출처 = admin)
+      for (const [id, sk] of Object.entries(skeletons)) {
+        if (typeof edits[id] !== 'string') continue;
+        await client.query(
+          `UPDATE ai_company_memory SET memory_value = jsonb_set(memory_value::jsonb, '{skeleton}', $3::jsonb)::text, updated_at = updated_at
+            WHERE id = $1::uuid AND company_id = $2::uuid AND memory_type = 'representative_message'`,
+          [id, companyId, JSON.stringify({ text: sk.text, hash: sk.hash, extractGen: seen, source: 'admin' })],
+        );
+      }
+      await writeBrandVoiceState(client, companyId, next.state);
+      await client.query('COMMIT');
+    } catch (txErr) {
+      await client.query('ROLLBACK');
+      throw txErr;
+    } finally {
+      client.release();
+    }
+    await bvInvalidate(companyId);
+    return res.json({ success: true });
+  } catch (err: any) {
+    console.error('[Brand Voice review] 오류:', err);
+    return res.status(500).json({ success: false, error: publicErrorText(err, '확인 실패') });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────
+// 7. POST /api/ai-memory/brand-voice/sample — 견본 두 장(K9 · 확인 뒤 · 성공 뒤 5 · 같은 세대 = 저장된 결과 0)
+// ─────────────────────────────────────────────────────────────
+router.post('/brand-voice/sample', async (req: Request, res: Response) => {
+  try {
+    const companyId = req.user?.companyId;
+    if (!companyId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
+    if (await aiZonePlanBlocked(req, res)) return;
+    if (!bvCanEdit(req)) return res.status(403).json({ success: false, error: '회사 관리자와 담당자만 견본을 만들 수 있어요.' });
+    const g = Number(req.body?.gen);
+    const before = await readBrandVoiceState(companyId);
+    if (!Number.isInteger(g) || !canSample(before, g)) {
+      return res.status(409).json({ success: false, error: '배운 내용을 확인한 뒤에 견본을 만들 수 있어요. 새로 불러와 주세요.', code: 'SAMPLE_NOT_READY' });
+    }
+    if (before.sample && before.sample.gen === g && before.sample.result) {
+      return res.json({ success: true, gen: g, samples: before.sample.result, charged: 0, reused: true });
+    }
+    const cost = bvPrices().sample;
+    await checkCredit(companyId, cost);
+    const samples = await generateBrandVoiceSamples(companyId);
+
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      const state = await lockBrandVoiceState(client, companyId);
+      const next = onSample(state, g, samples);
+      if (!next.ok) {
+        await client.query('ROLLBACK');
+        return res.status(409).json({ success: false, error: '그 사이 학습 내용이 바뀌어 견본을 버렸어요. 크레딧은 빠지지 않았어요.', code: 'STALE_GENERATION' });
+      }
+      await settleCreditInTx(client, { companyId, cost, source: 'brand-voice-sample', createdBy: req.user?.userId || null, idempotencyKey: `brand-voice-sample:${companyId}:${g}` });
+      await writeBrandVoiceState(client, companyId, next.state);
+      await client.query('COMMIT');
+    } catch (txErr) {
+      await client.query('ROLLBACK');
+      throw txErr;
+    } finally {
+      client.release();
+    }
+    await bvInvalidate(companyId);
+    return res.json({ success: true, gen: g, samples, charged: cost });
+  } catch (err: any) {
+    if (err instanceof InsufficientCreditError) return res.status(402).json({ success: false, error: '크레딧이 부족해 견본을 못 만들었어요. 충전한 뒤 다시 눌러 주세요.', code: 'INSUFFICIENT_CREDIT' });
+    if (respondUserError(res, err)) return;
+    console.error('[Brand Voice sample] 오류:', err);
+    return res.status(503).json({ success: false, error: '견본을 만들지 못했어요. 크레딧은 빠지지 않았어요. 잠시 뒤 다시 눌러 주세요.', code: 'SAMPLE_FAILED' });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────
+// 8. DELETE /api/ai-memory/brand-voice/message/:id — 대표 문안 삭제(관리자 · 세대 + 1)
 // ─────────────────────────────────────────────────────────────
 router.delete('/brand-voice/message/:id', async (req: Request, res: Response) => {
   try {
     const companyId = req.user?.companyId;
-    const userType = req.user?.userType;
     if (!companyId) {
       return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
     }
-    if (userType !== 'company_admin') {
+    if (!bvIsAdmin(req)) {
       return res.status(403).json({ success: false, error: '대표 문안 삭제는 회사 관리자만 가능합니다.' });
     }
-
     const memoryId = String(req.params.id || '').trim();
-    if (!memoryId) {
+    if (!isUuid(memoryId)) {
       return res.status(400).json({ success: false, error: 'memory id가 필요합니다.' });
     }
-
-    const result = await query(
-      `DELETE FROM ai_company_memory
-       WHERE id = $1::uuid AND company_id = $2::uuid AND memory_type = 'representative_message'
-       RETURNING id`,
-      [memoryId, companyId],
-    );
-
-    if (result.rows.length === 0) {
-      return res.status(404).json({ success: false, error: '대표 문안을 찾을 수 없습니다.' });
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      const state = await lockBrandVoiceState(client, companyId);
+      const result = await client.query(
+        `DELETE FROM ai_company_memory
+          WHERE id = $1::uuid AND company_id = $2::uuid AND memory_type = 'representative_message'
+          RETURNING id`,
+        [memoryId, companyId],
+      );
+      if (result.rows.length === 0) {
+        await client.query('ROLLBACK');
+        return res.status(404).json({ success: false, error: '대표 문안을 찾을 수 없습니다.' });
+      }
+      await writeBrandVoiceState(client, companyId, onMessageWrite(state));
+      await client.query('COMMIT');
+    } catch (txErr) {
+      await client.query('ROLLBACK');
+      throw txErr;
+    } finally {
+      client.release();
     }
-
-    const { invalidateBrandVoiceCache } = await import('../utils/brand-voice-prompt');
-    invalidateBrandVoiceCache(companyId);
-
+    await bvInvalidate(companyId);
     return res.json({ success: true });
   } catch (err: any) {
     console.error('[Brand Voice delete-message] 오류:', err);
@@ -915,38 +1031,51 @@ router.delete('/brand-voice/message/:id', async (req: Request, res: Response) =>
 });
 
 // ─────────────────────────────────────────────────────────────
-// 5. DELETE /api/ai-memory/brand-voice/guideline — 가이드라인 초기화
-//    (2026-07-09 Harold): 학습된 가이드라인 1행만 삭제. 대표 문안은 유지 → "AI 가이드라인 자동 추출" 재실행 가능.
+// 9. DELETE /api/ai-memory/brand-voice/guideline — 초기화(관리자 · K5-4)
+//    AI 가이드라인 · 사람 행 · 문안 행의 뼈대 · 대기 추출본 · 확인된 묶음 전부 비움 · 대표 문안은 남는다 · 세대 + 1(학습 미완)
 // ─────────────────────────────────────────────────────────────
 router.delete('/brand-voice/guideline', async (req: Request, res: Response) => {
   try {
     const companyId = req.user?.companyId;
-    const userType = req.user?.userType;
     if (!companyId) {
       return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
     }
-    if (userType !== 'company_admin') {
+    if (!bvIsAdmin(req)) {
       return res.status(403).json({ success: false, error: '가이드라인 초기화는 회사 관리자만 가능합니다.' });
     }
-
-    await query(
-      `DELETE FROM ai_company_memory
-       WHERE company_id = $1::uuid AND memory_type = 'brand_guideline'`,
-      [companyId],
-    );
-    // 효과 검증 — 잔존 0 재확인 후에만 성공 (6원칙 ②)
-    const check = await query(
-      `SELECT COUNT(*)::int AS n FROM ai_company_memory
-        WHERE company_id = $1::uuid AND memory_type = 'brand_guideline'`,
-      [companyId],
-    );
-    if ((check.rows[0]?.n || 0) > 0) {
-      return res.status(500).json({ success: false, error: '초기화가 완료되지 않았습니다. 다시 시도해 주세요.' });
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      const state = await lockBrandVoiceState(client, companyId);
+      await client.query(
+        `DELETE FROM ai_company_memory WHERE company_id = $1::uuid AND memory_type IN ('brand_guideline', 'brand_voice_admin')`,
+        [companyId],
+      );
+      await client.query(
+        `UPDATE ai_company_memory SET memory_value = (memory_value::jsonb - 'skeleton')::text, updated_at = updated_at
+          WHERE company_id = $1::uuid AND memory_type = 'representative_message' AND memory_value::jsonb ? 'skeleton'`,
+        [companyId],
+      );
+      await writeBrandVoiceState(client, companyId, onReset(state));
+      // 효과 검증 — 잔존 0 재확인 후에만 성공(6원칙 ②)
+      const check = await client.query(
+        `SELECT
+           (SELECT COUNT(*) FROM ai_company_memory WHERE company_id = $1::uuid AND memory_type IN ('brand_guideline', 'brand_voice_admin'))::int AS rows,
+           (SELECT COUNT(*) FROM ai_company_memory WHERE company_id = $1::uuid AND memory_type = 'representative_message' AND memory_value::jsonb ? 'skeleton')::int AS skel`,
+        [companyId],
+      );
+      if ((check.rows[0]?.rows || 0) > 0 || (check.rows[0]?.skel || 0) > 0) {
+        await client.query('ROLLBACK');
+        return res.status(500).json({ success: false, error: '초기화가 완료되지 않았습니다. 다시 시도해 주세요.' });
+      }
+      await client.query('COMMIT');
+    } catch (txErr) {
+      await client.query('ROLLBACK');
+      throw txErr;
+    } finally {
+      client.release();
     }
-
-    const { invalidateBrandVoiceCache } = await import('../utils/brand-voice-prompt');
-    invalidateBrandVoiceCache(companyId);
-
+    await bvInvalidate(companyId);
     return res.json({ success: true });
   } catch (err: any) {
     console.error('[Brand Voice reset-guideline] 오류:', err);
@@ -954,90 +1083,224 @@ router.delete('/brand-voice/guideline', async (req: Request, res: Response) => {
   }
 });
 
+/** 직접 정정할 수 있는 목소리 칸(코드가 잰 칸 = 모양 · 길이 범위 · 링크 습관은 받지 않는다 · K5-2) */
+const ADMIN_VOICE_FIELDS = [
+  'tone_signature', 'frequent_expressions', 'greeting_pattern', 'cta_patterns', 'signature', 'emoji_whitelist',
+  'hook_types', 'body_structure', 'sentence_ending_style', 'sentence_ending_examples', 'customer_address',
+] as const;
+
+function sanitizeAdminField(field: string, v: any): unknown {
+  const arr = (x: any, max: number) => Array.isArray(x) ? x.map((s: any) => String(s || '').trim()).filter(Boolean).slice(0, max) : [];
+  switch (field) {
+    case 'frequent_expressions': case 'cta_patterns': return arr(v, 5);
+    case 'emoji_whitelist': return arr(v, 20);
+    case 'hook_types': return arr(v, 2);
+    case 'body_structure': return arr(v, 7);
+    case 'sentence_ending_examples': return arr(v, 3);
+    case 'sentence_ending_style': return v === '해요체' || v === '합쇼체' || v === '혼합' ? v : undefined;
+    default: return String(v ?? '').trim().slice(0, 200);
+  }
+}
+
 // ─────────────────────────────────────────────────────────────
-// 5. POST /api/ai-memory/brand-voice/update-guideline (회사 admin 직접 정정)
+// 10. POST /api/ai-memory/brand-voice/update-guideline — 직접 정정(성격별 사람 행 · 고친 칸만 · 세대 + 1 · K5-4 · K7-1)
+//     브랜드 키트 칸(서명 고정 · 슬로건 · 넣을 말 · 금지어)은 지금처럼 main 가이드라인 행(추출이 덮지 않는 사람 칸)
 // ─────────────────────────────────────────────────────────────
 router.post('/brand-voice/update-guideline', async (req: Request, res: Response) => {
   try {
     const companyId = req.user?.companyId;
-    const userType = req.user?.userType;
     if (!companyId) {
       return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
     }
-    if (userType !== 'company_admin') {
-      return res.status(403).json({ success: false, error: '가이드라인 정정은 회사 관리자만 가능합니다.' });
+    if (!bvCanEdit(req)) {
+      return res.status(403).json({ success: false, error: '가이드라인은 회사 관리자와 담당자가 고칠 수 있어요.' });
     }
-
+    const kind: BrandVoiceKind = req.body?.kind === 'notice' ? 'notice' : 'marketing';
     const input = req.body?.guideline || {};
-    const guideline: BrandGuidelineValue = {
-      tone_signature: String(input.tone_signature || '정보/실용'),
-      avg_length_chars: Number(input.avg_length_chars) || 0,
-      avg_length_bytes: Number(input.avg_length_bytes) || 0,
-      frequent_expressions: Array.isArray(input.frequent_expressions)
-        ? input.frequent_expressions.map((s: any) => String(s)).slice(0, 5)
-        : [],
-      ad_prefix_position: input.ad_prefix_position === 'back' ? 'back' : 'front',
-      greeting_pattern: String(input.greeting_pattern || ''),
-      cta_patterns: Array.isArray(input.cta_patterns)
-        ? input.cta_patterns.map((s: any) => String(s)).slice(0, 5)
-        : [],
-      signature: String(input.signature || ''),
-      reject_position: input.reject_position === 'front' ? 'front' : 'back',
-      emoji_whitelist: Array.isArray(input.emoji_whitelist)
-        ? input.emoji_whitelist.map((s: any) => String(s)).slice(0, 20)
-        : [],
-      extracted_at: new Date().toISOString(),
-      admin_edited: true,
-      // ★ 브랜드 키트 (admin 직접 입력 — 시그니처 조합·금지어 등)
-      ...sanitizeBrandKit(input),
-      // ★ 2026-07-02 형태 명세 — admin 직접 정정 지원 (length_range·link_habit은 코드 계산값 보존)
-      ...sanitizeFormSpec(input),
-      length_range: input?.length_range
-        && Number(input.length_range.min_chars) > 0
-        && Number(input.length_range.max_chars) >= Number(input.length_range.min_chars)
-        ? { min_chars: Number(input.length_range.min_chars), max_chars: Number(input.length_range.max_chars) }
-        : undefined,
-      link_habit: input?.link_habit && typeof input.link_habit.uses_url === 'boolean'
-        ? {
-            uses_url: input.link_habit.uses_url === true,
-            position: input.link_habit.position === 'body_end' || input.link_habit.position === 'mid'
-              ? input.link_habit.position : 'none',
-            avg_urls_per_message: Number(input.link_habit.avg_urls_per_message) || 0,
-          }
-        : undefined,
-    };
+    const { getBrandVoiceSnapshot, resolveGuidelineFor } = await import('../utils/brand-voice-prompt');
+    const snap = await getBrandVoiceSnapshot(companyId);
+    const current = resolveGuidelineFor(snap, kind) as any;
+    const changed: Record<string, unknown> = {};
+    for (const f of ADMIN_VOICE_FIELDS) {
+      if (!(f in input)) continue;
+      const v = sanitizeAdminField(f, input[f]);
+      if (v === undefined) continue;
+      if (JSON.stringify(v) !== JSON.stringify(current?.[f] ?? (Array.isArray(v) ? [] : ''))) changed[f] = v;
+    }
+    const kitIn = ['signature_locked', 'signature_mode', 'slogans', 'required_words', 'banned_words'].some((k) => k in input);
 
-    const prevGuideline = await fetchBrandGuideline(companyId);
-    // ★ 2026-10-20 main 이 안부 문안으로 뽑힌 행이면(마케팅 문안 0건) 그 표시를 지킨다(직접 정정이 성격을 바꾸지 않게)
-    if ((prevGuideline as unknown as Partial<BrandGuidelineValue> | null)?.voice_kind === 'notice') guideline.voice_kind = 'notice';
-
-    await query(
-      `INSERT INTO ai_company_memory (
-        id, company_id, memory_type, memory_key, memory_value,
-        importance, source, metadata, last_accessed_at, created_at, updated_at
-      ) VALUES (
-        gen_random_uuid(), $1::uuid, 'brand_guideline', 'main', $2,
-        10, 'admin_input', '{}'::jsonb, NOW(), NOW(), NOW()
-      )
-      ON CONFLICT (company_id, memory_type, memory_key) DO UPDATE SET
-        memory_value = EXCLUDED.memory_value,
-        source = 'admin_input',
-        updated_at = NOW(),
-        last_accessed_at = NOW()`,
-      [companyId, JSON.stringify(guideline)],
-    );
-
-    await recordToneEvolution(companyId, prevGuideline, guideline).catch((e: any) =>
-      console.log('[brand-tone-evolution] update 기록 오류 —', e?.message || e),
-    );
-
-    const { invalidateBrandVoiceCache } = await import('../utils/brand-voice-prompt');
-    invalidateBrandVoiceCache(companyId);
-
-    return res.json({ success: true, guideline });
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      const state = await lockBrandVoiceState(client, companyId);
+      if (Object.keys(changed).length > 0) {
+        const cur = await client.query(
+          `SELECT memory_value FROM ai_company_memory WHERE company_id = $1::uuid AND memory_type = 'brand_voice_admin' AND memory_key = $2 FOR UPDATE`,
+          [companyId, kind],
+        );
+        let row: Record<string, unknown> = {};
+        const raw = cur.rows[0]?.memory_value;
+        try { row = raw ? (typeof raw === 'string' ? JSON.parse(raw) : raw) || {} : {}; } catch { row = {}; }
+        const at = new Date().toISOString();
+        for (const [f, v] of Object.entries(changed)) row[f] = { value: v, at, by: req.user?.userId || null };
+        await client.query(
+          `INSERT INTO ai_company_memory (id, company_id, memory_type, memory_key, memory_value, importance, source, metadata, last_accessed_at, created_at, updated_at)
+           VALUES (gen_random_uuid(), $1::uuid, 'brand_voice_admin', $2, $3, 10, 'admin_input', '{}'::jsonb, NOW(), NOW(), NOW())
+           ON CONFLICT (company_id, memory_type, memory_key) DO UPDATE SET memory_value = EXCLUDED.memory_value, updated_at = NOW()`,
+          [companyId, kind, JSON.stringify(row)],
+        );
+      }
+      if (kitIn) {
+        const kit = sanitizeBrandKit(input);
+        const k = await client.query(
+          `UPDATE ai_company_memory SET memory_value = (memory_value::jsonb || $2::jsonb)::text, updated_at = NOW()
+            WHERE company_id = $1::uuid AND memory_type = 'brand_guideline' AND memory_key = 'main'`,
+          [companyId, JSON.stringify(kit)],
+        );
+        // 키트는 배운 가이드라인 행에 함께 둔다 · 행이 없으면 조용히 0행이 되지 않게 알린다(효과 확인 뒤 성공 · 6원칙 ②)
+        if ((k.rowCount || 0) === 0) {
+          await client.query('ROLLBACK');
+          return res.status(409).json({ success: false, error: '먼저 목소리를 배운 뒤에 브랜드 키트를 저장할 수 있어요.', code: 'GUIDELINE_MISSING' });
+        }
+      }
+      if (Object.keys(changed).length > 0) await writeBrandVoiceState(client, companyId, onAdminEdit(state));
+      await client.query('COMMIT');
+    } catch (txErr) {
+      await client.query('ROLLBACK');
+      throw txErr;
+    } finally {
+      client.release();
+    }
+    await bvInvalidate(companyId);
+    return res.json({ success: true, changed: Object.keys(changed) });
   } catch (err: any) {
     console.error('[Brand Voice update-guideline] 오류:', err);
     return res.status(500).json({ success: false, error: publicErrorText(err, '정정 실패') });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────
+// 11. POST /api/ai-memory/brand-voice/admin-field/reset — 칸을 AI 에게 다시 맡기기(사람 행에서 지움 · 세대 + 1)
+// ─────────────────────────────────────────────────────────────
+router.post('/brand-voice/admin-field/reset', async (req: Request, res: Response) => {
+  try {
+    const companyId = req.user?.companyId;
+    if (!companyId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
+    if (!bvCanEdit(req)) return res.status(403).json({ success: false, error: '회사 관리자와 담당자만 바꿀 수 있어요.' });
+    const kind: BrandVoiceKind = req.body?.kind === 'notice' ? 'notice' : 'marketing';
+    const field = String(req.body?.field || '');
+    if (!(ADMIN_VOICE_FIELDS as readonly string[]).includes(field)) return res.status(400).json({ success: false, error: '바꿀 수 없는 칸이에요.' });
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      const state = await lockBrandVoiceState(client, companyId);
+      const r = await client.query(
+        `UPDATE ai_company_memory SET memory_value = (memory_value::jsonb - $3::text)::text, updated_at = NOW()
+          WHERE company_id = $1::uuid AND memory_type = 'brand_voice_admin' AND memory_key = $2 AND memory_value::jsonb ? $3::text
+          RETURNING id`,
+        [companyId, kind, field],
+      );
+      if (r.rows.length > 0) await writeBrandVoiceState(client, companyId, onAdminEdit(state));
+      await client.query('COMMIT');
+    } catch (txErr) {
+      await client.query('ROLLBACK');
+      throw txErr;
+    } finally {
+      client.release();
+    }
+    await bvInvalidate(companyId);
+    return res.json({ success: true });
+  } catch (err: any) {
+    console.error('[Brand Voice admin-field reset] 오류:', err);
+    return res.status(500).json({ success: false, error: publicErrorText(err, '변경 실패') });
+  }
+});
+
+/** 추출 실패 기록(그 세대일 때만 · 다음 성공 · 세대 변경 때 지워진다) */
+async function bvMarkExtractError(companyId: string, g: number, code: 'credit' | 'ai' | 'parse'): Promise<void> {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const state = await lockBrandVoiceState(client, companyId);
+    await writeBrandVoiceState(client, companyId, onExtractError(state, g < 0 ? state.gen : g, code));
+    await client.query('COMMIT');
+  } catch {
+    await client.query('ROLLBACK').catch(() => {});
+  } finally {
+    client.release();
+  }
+  await bvInvalidate(companyId);
+}
+
+async function upsertGuidelineRow(client: any, companyId: string, key: 'main' | 'notice', value: BrandGuidelineValue): Promise<void> {
+  await client.query(
+    `INSERT INTO ai_company_memory (id, company_id, memory_type, memory_key, memory_value, importance, source, metadata, last_accessed_at, created_at, updated_at)
+     VALUES (gen_random_uuid(), $1::uuid, 'brand_guideline', $2, $3, 10, 'ai_auto', '{}'::jsonb, NOW(), NOW(), NOW())
+     ON CONFLICT (company_id, memory_type, memory_key) DO UPDATE SET
+       memory_value = EXCLUDED.memory_value, importance = 10, updated_at = NOW(), last_accessed_at = NOW()`,
+    [companyId, key, JSON.stringify(value)],
+  );
+}
+
+
+
+// ─────────────────────────────────────────────────────────────
+// ★ 2026-10-28 AI 메모리 설계 K14 — 쓸수록(습관 조언 · 고친 차이 후보 칩)
+//   조언 = 숫자로 만든 코드 문장(페이지를 열 때 AI 0) · 후보 = 서로 다른 발송 3건 이상 반복 · 사람이 받아들인 것만 「쓸 것 · 피할 것」.
+// ─────────────────────────────────────────────────────────────
+router.get('/voice-habits', async (req: Request, res: Response) => {
+  try {
+    const companyId = req.user?.companyId;
+    if (!companyId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
+    const [habit, edit] = await Promise.all([readHabit(companyId), readVoiceEdit(companyId)]);
+    return res.json({
+      success: true,
+      habit: habit.profile,
+      advice: habit.advice,
+      computedAt: habit.computedAt,
+      candidates: edit.candidates,
+      accepted: { use: edit.accepted_use, avoid: edit.accepted_avoid },
+      editSamples: edit.form?.samples ?? 0,
+      canEdit: bvCanEdit(req),
+    });
+  } catch (err: any) {
+    console.error('[Voice habits GET] 오류:', err);
+    return res.status(500).json({ success: false, error: publicErrorText(err, '조회 실패') });
+  }
+});
+
+router.post('/voice-habits/candidates/:id', async (req: Request, res: Response) => {
+  try {
+    const companyId = req.user?.companyId;
+    if (!companyId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
+    if (!bvCanEdit(req)) return res.status(403).json({ success: false, error: '회사 관리자와 담당자만 정할 수 있어요.' });
+    const action = req.body?.action === 'accept' ? 'accept' : req.body?.action === 'dismiss' ? 'dismiss' : null;
+    const id = String(req.params.id || '');
+    if (!action || !/^[0-9a-f]{16}$/.test(id)) return res.status(400).json({ success: false, error: '요청이 올바르지 않아요.' });
+    const r = await decidePhraseCandidate(companyId, id, action, req.user?.userId || null);
+    if (r === 'not_found') return res.status(404).json({ success: false, error: '이미 정한 후보예요. 새로 불러와 주세요.' });
+    await bvInvalidate(companyId);
+    return res.json({ success: true });
+  } catch (err: any) {
+    console.error('[Voice habits candidate] 오류:', err);
+    return res.status(500).json({ success: false, error: publicErrorText(err, '저장 실패') });
+  }
+});
+
+router.post('/voice-habits/accepted/remove', async (req: Request, res: Response) => {
+  try {
+    const companyId = req.user?.companyId;
+    if (!companyId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
+    if (!bvCanEdit(req)) return res.status(403).json({ success: false, error: '회사 관리자와 담당자만 바꿀 수 있어요.' });
+    const mode = req.body?.mode === 'avoid' ? 'avoid' : req.body?.mode === 'use' ? 'use' : null;
+    const text = String(req.body?.text || '').slice(0, 60);
+    if (!mode || !text) return res.status(400).json({ success: false, error: '요청이 올바르지 않아요.' });
+    await removeAcceptedPhrase(companyId, mode, text);
+    await bvInvalidate(companyId);
+    return res.json({ success: true });
+  } catch (err: any) {
+    console.error('[Voice habits remove] 오류:', err);
+    return res.status(500).json({ success: false, error: publicErrorText(err, '저장 실패') });
   }
 });
 

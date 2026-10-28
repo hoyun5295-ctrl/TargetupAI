@@ -45,6 +45,7 @@ import {
   ensureWooWebhooks,
   recordWooSetupError,
   noteWooSeenHost,
+  wooPluginKeyFor,
   type WooIntegration,
 } from '../utils/woocommerce-client';
 // ★ ① 1클릭 연결 — 우커머스 내장 앱 인증(/wc-auth/v1/authorize) · state 서명 CT · 플러그인 zip
@@ -445,6 +446,30 @@ router.post('/rotate-secret', async (req: Request, res: Response) => {
     return res.json({ success: true, mall_id: mallId, webhook_url: r.webhookUrl, webhook_secret: r.webhookSecret });
   } catch (err) {
     console.error('[WooCommerce /rotate-secret] 오류:', err);
+    return sendWooError(res, err);
+  }
+});
+
+/**
+ * POST /api/woocommerce/plugin-key
+ * body: { mall_id, rotate? } → 그 몰의 플러그인 키(★ 2026-10-28 자사몰 대비 K8 · 몰 하나 · 회원 토큰 발급만).
+ * rotate = 새로 발급(옛 키는 그 순간 멈춘다). 키는 화면에 저장하지 않고 이 응답에서만 받는다.
+ */
+router.post('/plugin-key', async (req: Request, res: Response) => {
+  try {
+    const g = await gateActor(req, res);
+    if (!g) return;
+    const { companyId, actor } = g;
+    const mallId = normalizeWooMallId(String(req.body?.mall_id || ''));
+    if (!mallId) return res.status(400).json({ success: false, error: '몰 식별자(mall_id)가 올바르지 않습니다.' });
+    const owned = await getWooIntegration(companyId, mallId);
+    if (!owned) return res.status(404).json({ success: false, error: '연결된 몰이 아니에요.' });
+    if (!gateMall(res, actor, owned.storeCode)) return;
+    const key = await wooPluginKeyFor(companyId, mallId, req.body?.rotate === true);
+    if (!key) return res.status(404).json({ success: false, error: '연결된 몰이 아니에요.' });
+    return res.json({ success: true, mall_id: mallId, plugin_key: key });
+  } catch (err) {
+    console.error('[WooCommerce /plugin-key] 오류:', err);
     return sendWooError(res, err);
   }
 });

@@ -27,6 +27,9 @@ export default function BrandKitTab({ apiBase, token, onToast }: Props) {
   const [saving, setSaving] = useState(false);
   const [uploadingLogo, setUploadingLogo] = useState(false);
   const [form, setForm] = useState<KitForm>({});
+  // ★ 2026-10-28 AI 메모리 설계 K13-6 — 목소리 회사 = 톤 칩 읽기 전용 · 사람이 고르지 않은 톤은 저장하지 않는다(서버 기본값을 그대로 다시 쓰지 않게)
+  const [voiceOn, setVoiceOn] = useState(false);
+  const [toneTouched, setToneTouched] = useState(false);
   const logoRef = useRef<HTMLInputElement>(null);
   const authHeaders = useRef({ Authorization: `Bearer ${token}` }).current;
 
@@ -34,6 +37,7 @@ export default function BrandKitTab({ apiBase, token, onToast }: Props) {
     (async () => {
       try {
         const k = await fetch(`${apiBase}/api/dm/brand-kit`, { headers: authHeaders }).then((r) => r.json()).catch(() => ({}));
+        fetch(`${apiBase}/api/ai-memory/brand-voice`, { headers: authHeaders }).then((r) => r.json()).then((v) => setVoiceOn(v?.voice_learned === true)).catch(() => {});
         const kit = k?.brand_kit || {};
         setForm({
           logo_url: kit.logo_url || '',
@@ -43,7 +47,8 @@ export default function BrandKitTab({ apiBase, token, onToast }: Props) {
           // normalizeBrandKit이 구키 폴백 → font_ko/en 채워져 옴
           font_ko: kit.font_ko || '',
           font_en: kit.font_en || '',
-          tone: kit.tone || 'friendly',
+          // ★ 2026-10-28 AI 메모리 설계 K13-6 — 빈 톤을 friendly 로 채워 저장하지 않는다(고르지 않은 값은 빈 채로)
+          tone: kit.tone || '',
         });
       } finally { setLoading(false); }
     })();
@@ -82,7 +87,7 @@ export default function BrandKitTab({ apiBase, token, onToast }: Props) {
         primary_color: form.primary_color, accent_color: form.accent_color, background_color: form.background_color,
         font_ko: koFont || null, font_en: enFont || null,
         font_family: fontFamily, // font_ko/en과 동기 — 레거시 font_family 소비 경로 정합
-        tone: form.tone,
+        ...(toneTouched && form.tone ? { tone: form.tone } : {}),
       };
       const res = await fetch(`${apiBase}/api/dm/brand-kit`, {
         method: 'PUT', headers: { 'Content-Type': 'application/json', ...authHeaders }, body: JSON.stringify(patch),
@@ -145,12 +150,13 @@ export default function BrandKitTab({ apiBase, token, onToast }: Props) {
         </div>
       </section>
 
-      {/* 톤 */}
+      {/* 톤 — ★ 2026-10-28 K13-6 목소리 회사 = 배운 목소리가 진실 · 이 칩은 읽기 전용 */}
       <section className="p-4 bg-white border border-slate-200 rounded-xl space-y-3">
         <div className="text-xs font-semibold text-slate-600">브랜드 톤</div>
+        {voiceOn && <p className="text-[11.5px] text-slate-600">우리 회사 목소리를 배워서 문안은 배운 말투로 써요. 톤은 브랜드 보이스 탭에서 고쳐요.</p>}
         <div className="flex flex-wrap gap-2">
           {TONES.map((t) => (
-            <button key={t.value} onClick={() => setForm((f) => ({ ...f, tone: t.value }))} className={`px-3 py-1.5 rounded-full text-xs font-medium border transition-colors ${form.tone === t.value ? 'bg-sky-100 border-sky-300 text-sky-900' : 'bg-white border-slate-200 text-slate-500 hover:bg-slate-100'}`}>{t.label}</button>
+            <button key={t.value} disabled={voiceOn} aria-pressed={form.tone === t.value} onClick={() => { setToneTouched(true); setForm((f) => ({ ...f, tone: t.value })); }} className={`px-3 py-1.5 rounded-full text-xs font-medium border transition-colors disabled:cursor-not-allowed disabled:opacity-60 ${form.tone === t.value ? 'bg-sky-100 border-sky-300 text-sky-900' : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-100'}`}>{t.label}</button>
           ))}
         </div>
       </section>

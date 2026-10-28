@@ -67,7 +67,9 @@ describe('STUDIO · AI · ANAL · OPS · ADMIN 개선', () => {
   it('R291 few-shot = 최근 발송 순(두 곳)', () => {
     const a = src('..', 'routes', 'ai.ts');
     expect(a).not.toMatch(/ORDER BY content\s+LIMIT 10/);
-    expect((a.match(/ORDER BY MAX\(sent_at\) DESC/g) || []).length).toBe(2);
+    // ★ 2026-10-28 AI 메모리 설계 K8-4 — 두 곳 = 「사람이 보낸 발송」 CT 하나 · 최근 발송 순은 CT 가 지킨다
+    expect((a.match(/listRecentHumanSentTexts\(companyId, \{ days: 30, limit: 10 \}\)/g) || []).length).toBe(2);
+    expect(src('human-sent-messages.ts')).toContain('ORDER BY COALESCE(c.sent_at, c.created_at) DESC');
   });
   it('R164 ROI 자사몰 보유 확인 = EXISTS', () => {
     const m = src('automarketing-roi.ts');

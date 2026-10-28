@@ -12,7 +12,7 @@ import pool from '../config/database';
 import type { CopyExample, IndustryFeatureSummary } from './copy-rag-retriever';
 import { retrieveCopyExamples } from './copy-rag-retriever';
 import { buildTemporalContext, buildIndustryEvents, renderContextForPrompt } from './copy-context';
-import { getBrandGuideline } from './brand-voice-prompt';
+import { getBrandGuideline, voiceLearned } from './brand-voice-prompt';
 import { hasIdentifierLeak } from './copy-deidentify';
 // ★ 2026-07-04 진화(specs/2026-07-04-best-copy-evolution-design.md): 시드 사용 기록 + 업종 승리 공식 주입
 import { recordSeedUsage, getIndustryFormula } from './best-copy-assets';
@@ -33,6 +33,8 @@ export interface ComposeInput {
   channels: string[]; // 우선 채널 (예: ['EMAIL'] 또는 ['SMS','LMS','MMS'])
   isAd: boolean;
   now?: Date;
+  /** ★ 2026-10-28 K6-3 호출자가 학습 메모리를 이미 넣었으면 건너뛴다(AI 한줄로 두 번 주입 V15) */
+  memoryIncluded?: boolean;
 }
 
 /** 회사 업종 코드 조회 (companies.industry_code — 미설정 시 null, 실패해도 null)
@@ -62,6 +64,8 @@ export function buildCopyBrainPrompt(opts: {
   kit: BrandKit;
   channel: string;
   formulaBlock?: string; // ★ 2026-07-04: 업종 승리 공식 지침(Track B만, 원문 아님)
+  /** ★ 2026-10-28 K6-3 목소리 회사 = 회사 성과 예시 원문 0 · 업종 원문 0(목소리 예시는 확인된 뼈대뿐 · I6 · I16) */
+  voiceMode?: boolean;
 }): string {
   const { examples, industryFeatures, contextLine, kit } = opts;
   const parts: string[] = [];
@@ -70,7 +74,7 @@ export function buildCopyBrainPrompt(opts: {
     parts.push(`## 발송 맥락\n${contextLine.trim()}\n위 맥락이 자연스럽게 어울리면 반영하되, 억지로 끼워넣지 마세요.`);
   }
 
-  const company = examples.filter((e) => e.source === 'company');
+  const company = opts.voiceMode ? [] : examples.filter((e) => e.source === 'company');
 
   if (company.length > 0) {
     const list = company.map((e, i) => `${i + 1}. ${e.text}`).join('\n');
@@ -78,7 +82,7 @@ export function buildCopyBrainPrompt(opts: {
   }
 
   // ★ 2026-07-04 같은 업종 베스트(탈색·검수된 큐레이션 시드)를 참고 원문으로 렌더. 식별자 잔존 행은 방어적으로 제외.
-  const industry = examples.filter((e) => e.source === 'industry' && !hasIdentifierLeak(e.text));
+  const industry = opts.voiceMode ? [] : examples.filter((e) => e.source === 'industry' && !hasIdentifierLeak(e.text));
   if (industry.length > 0) {
     const list = industry.map((e, i) => `${i + 1}. ${e.text}`).join('\n');
     parts.push(`## 같은 업종에서 검증된 문안 (탈색됨, 구조·표현만 참고, 회사 식별정보 제거 / 그대로 베끼지 말 것)\n${list}`);
@@ -136,11 +140,11 @@ export async function composeCopyBrain(input: ComposeInput): Promise<ComposeResu
 
   // ★ A6: 브랜드 키트 + 등록 여부 먼저 (등록 회사면 업종 폴백 OFF — 자기것만)
   let kit: BrandKit = {};
-  let brandVoiceRegistered = false;
+  // ★ 2026-10-28 K6-3 — 목소리 판정 = voiceLearned(주입할 목소리 · I3) · 키트는 사람이 적은 칸이라 가이드라인 행에서 그대로
+  const brandVoiceRegistered = await voiceLearned(input.companyId);
   try {
     const g = await getBrandGuideline(input.companyId);
     if (g) {
-      brandVoiceRegistered = true;
       kit = {
         signatureLocked: g.signature_locked,
         signatureMode: g.signature_mode,
@@ -196,14 +200,14 @@ export async function composeCopyBrain(input: ComposeInput): Promise<ComposeResu
   // ★ 2026-07-04 학습 루프 ③: 회사 축적 메모리 상위 6건(성공 패턴·채널 성과·거부 학습 포함) 주입.
   //   실패·빈 결과 = 빈 문자열(기존 흐름 무영향). 과길이 방어 1,200자 cap.
   let memoryBlock = '';
-  try {
+  if (!input.memoryIncluded) try {
     const ctx = await buildMemoryPromptContext(input.companyId, 6);
     if (ctx && ctx.trim()) memoryBlock = ctx.trim().slice(0, 1200);
   } catch (err) {
     console.warn('[copy-brain] 회사 메모리 조회 실패 — 메모리 없이 진행:', (err as Error)?.message);
   }
 
-  let promptSuffix = buildCopyBrainPrompt({ examples, industryFeatures, contextLine, kit, channel, formulaBlock });
+  let promptSuffix = buildCopyBrainPrompt({ examples, industryFeatures, contextLine, kit, channel, formulaBlock, voiceMode: brandVoiceRegistered });
   if (memoryBlock) promptSuffix = `${promptSuffix}\n\n${memoryBlock}`;
   return { promptSuffix, examples, bannedWords: kit.bannedWords || [] };
 }

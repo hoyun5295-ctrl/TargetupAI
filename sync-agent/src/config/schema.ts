@@ -108,6 +108,19 @@ const MappingConfigSchema = z.object({
   customFieldLabels: z.record(z.string()).default({}),
 });
 
+// ─── 설치별 값 분류 (★ 2026-10-28 P2 · docs/2026-10-28-sync-value-check-summary-guard-design.md §3) ──
+// 설치 마법사 · 설정 편집의 「값 확인」에서 낱말표가 모르는 글자만 설치 담당이 분류해 둔다. column · table · source = 분류할 때의
+// 원본 컬럼 · 고객 테이블 · 접속(normalize valueMapSourceOf) — 셋 다 지금 설정과 같을 때만 쓴다(normalize resolveValueMaps).
+// 최상위에 두는 이유 = 원격 매핑 갱신이 mapping 칸을 통째로 새로 써서 그 안이면 지워진다. 칸이 잘못되면 버린다(.catch) — 이 칸 하나로 기동이 막히지 않게.
+
+const ValueMapScope = { column: z.string().min(1), table: z.string().min(1), source: z.string().min(1) };
+const ValueMapsSchema = z.object({
+  sms_opt_in: z.object({ ...ValueMapScope, values: z.record(z.boolean()) }).optional(),   // true = 수신동의
+  is_opt_out: z.object({ ...ValueMapScope, values: z.record(z.boolean()) }).optional(),   // true = 탈퇴·거부(발송 제외)
+  gender: z.object({ ...ValueMapScope, values: z.record(z.enum(['M', 'F'])) }).optional(),
+});
+export type ValueMaps = z.infer<typeof ValueMapsSchema>;
+
 // ─── Agent 메타 설정 ────────────────────────────────────
 
 const AgentMetaSchema = z.object({
@@ -132,6 +145,7 @@ export const AgentConfigSchema = z.object({
   database: DatabaseConfigSchema,
   sync: SyncConfigSchema,
   mapping: MappingConfigSchema,
+  valueMaps: ValueMapsSchema.optional().catch(undefined),
   agent: AgentMetaSchema,
   log: LogConfigSchema.default({}),
 });

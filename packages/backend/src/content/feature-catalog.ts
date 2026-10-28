@@ -1030,6 +1030,7 @@ export const NOT_DOCUMENTED_ROUTES: Record<string, string> = {
   '/privacy': '개인정보처리방침',
   '/payment/result': '결제 결과 리다이렉트',
   '/cafe24/launch': '카페24 앱 진입 리다이렉트',
+  '/oauth-confirm': '몰 승인 확정 경유 화면(★1028 M24 · 콜백이 돌려보내 확정만 하고 닫힘)',
   '/journey-pause': '여정 담당자가 안내 문자 속 주소로 여는 발송 정지 화면(로그인 없음)', // ★ 2026-10-18 토큰 = 주소 # 뒤
   '/journey-pause/:token': '이미 나간 옛 정지 주소(경로 토큰 · 화면이 읽고 지운다)',
   '/agency-approve': '대행발송 담당자가 문자 속 주소로 여는 승인 화면(로그인 없음)', // ★2026-08-25 링크 승인

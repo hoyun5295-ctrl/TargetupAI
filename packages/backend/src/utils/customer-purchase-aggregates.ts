@@ -61,28 +61,59 @@ async function hasWebhookRevenueHistory(companyId: string): Promise<boolean> {
 }
 
 /**
+ * ★ 2026-10-28 고객 누계 보호(P3 · 설계서 docs/2026-10-28-sync-value-check-summary-guard-design.md §4).
+ * 고객 매핑으로 요약 칸을 주는 회사(에이전트 1.7.3+ 가 구매 요청에 customerSummaryFields 로 싣는다)는 고객 원본이 그 칸의 진실이다 —
+ * 원장 재계산은 그 칸을 **고객 적재(customer-upsert.ts)와 같은 합치기 규칙**으로만 쓴다 — 같은 칸을 쓰는 두 작성자가 규칙이 다르면
+ * 번갈아 덮거나(옛: 원장이 늘 덮음) 한쪽 값이 굳는다(COALESCE 로 채운 원장 값이 다음 구매에 안 바뀜 · Codex 설계 1R · 구현 1R 같은 뿌리).
+ *   - greatest = 고객 적재가 GREATEST 인 칸(구매횟수 · 최근구매일) → 원장도 GREATEST(지금 값, 원장 값): 원본이 비어도 원장이 계속 채우고 굳지 않는다.
+ *   - master   = 고객 적재가 「원본 값이 있으면 덮음」인 칸(누적금액 · 최근구매금액 · 최근구매매장 · 환불로 줄 수 있어 큰 값 규칙 불가)
+ *                → 원장은 쓰지 않는다(원본이 비운 칸 = 원본의 값).
+ * 옛: 고객 적재와 원장 재계산이 같은 칸을 번갈아 덮었다(일별 집계 원장이면 구매횟수 = 구매한 날 수).
+ * [칸, 원장 식, 지킬 때 규칙]. ⛔ SQL 에는 이 표의 고정 조각만 들어간다(요청 글자를 넣지 않는다). 에이전트 `mapping/index.ts CUSTOMER_SUMMARY_FIELDS` 와 같은 5칸.
+ */
+const SUMMARY_SET_FRAGMENTS: ReadonlyArray<readonly [string, string, 'greatest' | 'master']> = [
+  ['total_purchase_amount', 'agg.total_amount', 'master'],
+  ['purchase_count', 'agg.cnt', 'greatest'],
+  ['recent_purchase_date', 'agg.recent_date', 'greatest'],
+  ['recent_purchase_amount', 'agg.recent_amount', 'master'],
+  ['recent_purchase_store', 'agg.recent_store', 'master'],
+];
+
+/** 구매 요청의 customerSummaryFields → 허용 5칸만(배열 아님 · 모르는 칸 = 버림). 새 칸이 없는 요청(1.7.2 이하) = [] = 지금 동작. */
+export function parseCustomerSummaryFields(raw: unknown): string[] {
+  if (!Array.isArray(raw)) return [];
+  const allowed = new Set(SUMMARY_SET_FRAGMENTS.map(([col]) => col));
+  return [...new Set(raw.filter((v): v is string => typeof v === 'string' && allowed.has(v)))];
+}
+
+/**
  * 주어진 고객들의 구매 요약 컬럼을 purchases 원장 기준으로 재계산한다.
  * 웹훅 매출 이력이 있는 회사는 skip(0 반환) — cdp-orders 증분 집계가 그 회사의 진실.
+ * keepColumns = 고객 원본이 주는 요약 칸(parseCustomerSummaryFields 결과) — 그 칸은 고객 적재와 같은 규칙(위 표)으로만 쓴다.
  * @returns 갱신된 고객 행 수 (skip 시 0)
  */
 export async function updateCustomerPurchaseAggregates(
   companyId: string,
   customerIds: string[],
+  opts: { keepColumns?: string[] } = {},
 ): Promise<number> {
   if (!companyId || !customerIds?.length) return 0;
   const ids = [...new Set(customerIds.filter(Boolean))];
   if (!ids.length) return 0;
+
+  const keep = new Set(opts.keepColumns || []);
+  const sets = SUMMARY_SET_FRAGMENTS.flatMap(([col, expr, rule]) => {
+    if (!keep.has(col)) return [`${col} = ${expr}`];
+    return rule === 'greatest' ? [`${col} = GREATEST(c.${col}, ${expr})`] : [];
+  });
+  if (!sets.length) return 0;
 
   // ★ 이중 진실 가드 — 웹훅 매출 회사는 원장-only 재계산이 웹훅 반영분을 덮어쓰므로 skip
   if (await hasWebhookRevenueHistory(companyId)) return 0;
 
   const result = await query(
     `UPDATE customers c
-        SET total_purchase_amount = agg.total_amount,
-            purchase_count = agg.cnt,
-            recent_purchase_date = agg.recent_date,
-            recent_purchase_amount = agg.recent_amount,
-            recent_purchase_store = agg.recent_store
+        SET ${sets.join(',\n            ')}
        FROM (
          SELECT p.customer_id,
                 SUM(p.total_amount) AS total_amount,

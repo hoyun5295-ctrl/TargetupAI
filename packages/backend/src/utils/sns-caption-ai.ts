@@ -24,6 +24,8 @@
  */
 
 import sharp from 'sharp';
+import { composeVoicePrompt } from './brand-voice-prompt';
+import { resolveCopyIntent } from './copy-content-type';
 import { callAIWithFallback } from '../services/ai';
 import { query } from '../config/database';
 import { extractJsonFromAiText, aiStr } from './ai-json';
@@ -461,8 +463,13 @@ export async function generateSnsCaption(input: SnsAiCaptionInput): Promise<SnsA
     ? `고를 수 있는 태그(이 목록 밖은 절대 쓰지 마라 · 글과 맞는 것만 · 없으면 빈 배열): ${candidates.join(', ')}`
     : '고를 태그가 없다. tags 는 빈 배열로 둔다.');
 
+  // ★ 2026-10-28 AI 메모리 설계 K11-1 · K11-2 — SNS 캡션 = 사진 초안은 쓰기 · 다듬기는 고치기 · SNS 라 말투 · 호칭 · 맺음만(모양 · 이모지 = SNS 규칙)
+  const { system: voiceSystem } = await composeVoicePrompt({
+    companyId: input.companyId, producer: 'sns-caption', mode: mode === 'photo_draft' ? 'write' : 'rewrite', scope: 'tone',
+    kind: resolveCopyIntent({ isAd: true }).kind, basePrompt: mode === 'photo_draft' ? PHOTO_SYSTEM : REFINE_SYSTEM,
+  });
   const raw = await callAIWithFallback({
-    system: mode === 'photo_draft' ? PHOTO_SYSTEM : REFINE_SYSTEM,
+    system: voiceSystem,
     userMessage: lines.join('\n'),
     maxTokens: 1200,
     temperature: input.action === 'again' ? 0.9 : input.action === 'fit' ? 0.3 : 0.6,

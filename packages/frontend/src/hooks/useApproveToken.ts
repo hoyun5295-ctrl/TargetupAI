@@ -24,15 +24,21 @@ function readAndStrip(): string {
   return t;
 }
 
-// 최초 페이지 로드 시 1회. 이후 재진입은 hashchange가 갱신한다
-let capturedToken = readAndStrip();
+// ★ 2026-10-28 — 캡처 · 주소 정리는 승인 화면이 처음 그려질 때 그 경로에서 한 번(StrictMode 두 번 초기화 = 같은 경로라 다시 안 읽음).
+//   옛: 모듈을 읽는 순간 캡처해 이 훅을 쓰는 화면이 즉시 import 되면(JourneyPausePage) 앱 시작 때 **모든 화면**의 쿼리 · 해시를 지웠다
+//   (카페24 앱 실행 ?mall_id · 자사몰 승인 확정 ?oauth_confirm · 아임웹 ?site_code 가 읽히기 전에 사라짐 · 1028 렌더 검사로 확인).
+let captured: { path: string; token: string } | null = null;
+function captureOnce(): string {
+  if (!captured || captured.path !== window.location.pathname) captured = { path: window.location.pathname, token: readAndStrip() };
+  return captured.token;
+}
 
 export function useApproveToken(): string {
-  const [token, setToken] = useState<string>(capturedToken);
+  const [token, setToken] = useState<string>(captureOnce);
   useEffect(() => {
     const onHash = () => {
       const t = readAndStrip();
-      capturedToken = t;
+      captured = { path: window.location.pathname, token: t };
       setToken(t);
     };
     window.addEventListener('hashchange', onHash);

@@ -12,7 +12,11 @@
  */
 
 import axios from 'axios';
-import { saveIntegrationRowGuarded } from './integration-scope';   // ★ 2026-10-27 자사몰 대비 K9 SC1 — 연동 행 저장 = 회사 모드 잠금 → 판정 → 저장(한 트랜잭션)
+import { saveIntegrationRowGuarded, integrationRowScopeOf } from './integration-scope';   // ★ 2026-10-27 자사몰 대비 K9 SC1 — 연동 행 저장 = 회사 모드 잠금 → 판정 → 저장(한 트랜잭션)
+import { createIntegrationRow } from './integration-row';   // ★ 1028 K9 — 연동 행 INSERT = CT 하나(몰 접두 고정)
+import { openSecret } from './secret-box';   // ★1028 K8 자격 읽기 이중(암호문 · 평문)
+import { processImportItems, newImportGuard } from './mall-import';
+import { integrationProblemOf, type IntegrationProblem } from './integration-problem';
 import { query } from '../config/database';
 import { syncOrder } from './cdp-orders';
 import { parseGodoOrderResponse, mapGodoOrderToCdp, type GodoParsedResponse } from './godo-parse';
@@ -115,6 +119,9 @@ export interface GodoBackfillResult {
   imported: number;
   windows: number;
   pages: number;
+  /** ★1028 K11 · M27 — 넣을 수 없는 건(휴대폰 없음 · 형식) · 그 밖 실패로 그 건만 건너뛴 수 */
+  skipped: number;
+  failed: number;
 }
 
 /**
@@ -123,7 +130,7 @@ export interface GodoBackfillResult {
  */
 export async function backfillGodoOrders(
   companyId: string,
-  opts?: { days?: number; sandbox?: boolean },
+  opts?: { days?: number; sandbox?: boolean; first?: boolean },
 ): Promise<GodoBackfillResult> {
   const creds = await getGodoCredentials(companyId);
   if (!creds?.key) throw new GodoApiError('key', '고도몰 쇼핑몰 인증키가 설정되지 않았습니다.');
@@ -132,7 +139,16 @@ export async function backfillGodoOrders(
   let imported = 0;
   let windows = 0;
   let pages = 0;
+  let skipped = 0;
+  let failed = 0;
+  const guard = newImportGuard();
 
+  // ★ 1028 K9 — 이 연동 행의 몰 접두(외부 번호 = mallScopedIds · 고도몰 = 빈 접두) · ★ Codex R1 #6 분류코드(연결 때 고른 값 · 적재마다 싣는다)
+  const rowScope = await integrationRowScopeOf(companyId, 'godo', GODO_INTEGRATION_MALL_ID);
+  const idScope = { provider: 'godo', mallId: GODO_INTEGRATION_MALL_ID, idPrefix: rowScope.idPrefix };
+
+  // ★ 1028 K11 첫 구매 보호 — 첫 가져오기가 끝날 때까지 표시(처음 시작 시각을 지킴 · 성공해야 지움 · 실패하면 남아 주기 수집이 90일 창으로 잇는다 · 48시간 뒤 판정에서 빠짐)
+  if (opts?.first) await setGodoFirstImportMark(companyId, true);
   let windowEnd = new Date();
   const floor = new Date();
   floor.setDate(floor.getDate() - days);
@@ -153,19 +169,25 @@ export async function backfillGodoOrders(
         sandbox: opts?.sandbox,
       });
       pages++;
-      for (const raw of page.orders) {
-        const mapped = mapGodoOrderToCdp(raw);
-        if (!mapped) continue;
+      // ★ 1028 K11 · M27 — 건별 반복 = 공용 CT(그 건만 건너뜀 · 연속 실패만 멈춤 · 23505 1회 재시도) · 옛: 한 건 예외(유선 번호만 있는 비회원)가 회차 전체를 죽이고 30분마다 같은 창을 다시 읽어 또 죽었다.
+      const t = await processImportItems(page.orders, async (raw: any) => {
+        const mapped = mapGodoOrderToCdp(raw, idScope);
+        if (!mapped) return false;
         // ★ 2026-10-27 자사몰 대비 K2-1 — 주문마다 실린 smsFl 은 원문으로 칸 뜻을 확인하기 전 동의로 쓰지 않는다(옛: 옛 주문의 Y 가 새 거부를 되돌렸다 · M2).
-        await syncOrder(companyId, mapped.order);
-        imported++;
-      }
+        await syncOrder(companyId, { ...mapped.order, ...(rowScope.storeCode ? { storeCode: rowScope.storeCode } : {}) });
+        return true;
+      }, guard, (raw: any) => `godo company=${companyId} order=${String(raw?.orderNo ?? '-')}`);
+      imported += t.results.filter(Boolean).length;
+      skipped += t.skipped;
+      failed += t.failed;
       cursor = page.hasNext ? page.lastOrderNo ?? undefined : undefined;
     } while (cursor);
 
     windows++;
     windowEnd = new Date(start);
   }
+  // 끝까지 읽었고 다시 해야 할 실패가 0일 때만 지운다(Codex R1 #3 · R2 #3 · 중간에 던지거나 재시도 부류 실패가 남으면 표시가 남아 다음 회차가 90일 창으로 다시 읽는다)
+  if (opts?.first && failed === 0) await setGodoFirstImportMark(companyId, false).catch((e) => console.error('[Godo backfill] 첫 가져오기 표시 지우기 실패(48시간 뒤 판정에서 빠짐 · 다음 성공 회차가 지움):', e?.message || e));
 
   // ★ 2026-09-27 한줄로 V2 R124 — 백필 도중 연동을 해제(revoked)했으면 되살리지 않는다(옛: 조건 없이 active로 덮어 수집이 재개됐다).
   await query(
@@ -174,7 +196,18 @@ export async function backfillGodoOrders(
     [companyId, GODO_INTEGRATION_MALL_ID],
   );
 
-  return { imported, windows, pages };
+  return { imported, windows, pages, skipped, failed };
+}
+
+async function setGodoFirstImportMark(companyId: string, on: boolean): Promise<void> {
+  await query(
+    `UPDATE company_integrations
+        SET meta = CASE WHEN NOT $3 THEN COALESCE(meta, '{}'::jsonb) - 'first_import_started_at'
+                        WHEN meta ? 'first_import_started_at' THEN meta   -- 이어 가는 회차 = 처음 시작 시각 그대로(48시간 상한이 늘지 않게)
+                        ELSE COALESCE(meta, '{}'::jsonb) || jsonb_build_object('first_import_started_at', to_char(NOW() AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"')) END
+      WHERE company_id = $1::uuid AND provider = 'godo' AND mall_id = $2`,
+    [companyId, GODO_INTEGRATION_MALL_ID, on],
+  );
 }
 
 /** 연결 확인 — 최근 1일 1건 조회로 partner_key·key·IP 유효성 확인. 실패 시 GodoApiError throw(성공=void). */
@@ -186,9 +219,11 @@ export async function verifyGodoConnection(companyId: string): Promise<void> {
   start.setDate(start.getDate() - 1);
   await fetchGodoOrderPage({ key: creds.key, startDate: ymd(start), endDate: ymd(end), size: 1 });
   // ★ 2026-07-03 검증 성공 시에만 active + connected_at 기록 (실제 효과 검증 후 연동 표시 — 6원칙 ②).
+  // ★ 1028 K11 — 검증 성공 = 키 · IP 조치가 풀렸다 → 주기 수집이 action 원인으로 멈춰 둔 사유를 지운다(다음 회차부터 다시 부른다)
   await query(
     `UPDATE company_integrations
-     SET status = 'active', connected_at = COALESCE(connected_at, NOW()), updated_at = NOW()
+     SET status = 'active', connected_at = COALESCE(connected_at, NOW()), updated_at = NOW(),
+         meta = COALESCE(meta, '{}'::jsonb) - 'godo_sync_error' - 'godo_sync_error_code' - 'godo_sync_error_at'
      WHERE company_id = $1::uuid AND provider = 'godo' AND mall_id = $2`,
     [companyId, GODO_INTEGRATION_MALL_ID],
   );
@@ -199,21 +234,13 @@ export async function verifyGodoConnection(companyId: string): Promise<void> {
 // ════════════════════════════════════════════════════════════════════
 
 /** 고객 쇼핑몰 인증키(key)를 company_integrations.meta.godo_key에 저장. */
-export async function saveGodoCredentials(companyId: string, key: string): Promise<void> {
-  await saveIntegrationRowGuarded(companyId, 'godo', GODO_INTEGRATION_MALL_ID, null, (run) => run(
-    `INSERT INTO company_integrations (
-      id, company_id, provider, mall_id, access_token, refresh_token,
-      token_expires_at, scope, meta, webhook_secret, connected_at, status, created_at, updated_at
-    ) VALUES (
-      gen_random_uuid(), $1::uuid, 'godo', $2, '', '',
-      NULL, '', $3::jsonb, NULL, NULL, 'pending', NOW(), NOW()
-    )
-    ON CONFLICT (company_id, provider, mall_id) DO UPDATE SET
-      meta = company_integrations.meta || EXCLUDED.meta,
-      status = 'pending',
-      updated_at = NOW()`,
-    [companyId, GODO_INTEGRATION_MALL_ID, JSON.stringify({ godo_key: key })],
-  ));
+export async function saveGodoCredentials(companyId: string, key: string, storeCode: string | null = null): Promise<void> {
+  await saveIntegrationRowGuarded(companyId, 'godo', GODO_INTEGRATION_MALL_ID, storeCode, (run) => createIntegrationRow(run, {
+    companyId, provider: 'godo', mallId: GODO_INTEGRATION_MALL_ID,
+    meta: { godo_key: key, ...(storeCode ? { store_code: storeCode } : {}) },   // ★1028 N6 분류코드
+    status: { sql: "'pending'" },
+    onConflict: ["status = 'pending'"],
+  }));
 }
 
 /** 저장된 고도몰 key 조회(없으면 undefined). */
@@ -226,7 +253,8 @@ export async function getGodoCredentials(companyId: string): Promise<{ key: stri
   if (r.rows.length === 0) return undefined;
   if (r.rows[0].status === 'revoked') return undefined;
   const meta = (r.rows[0].meta || {}) as { godo_key?: string };
-  return meta.godo_key ? { key: meta.godo_key } : undefined;
+  const key = openSecret(meta.godo_key);   // ★1028 K8 읽기 이중
+  return key ? { key } : undefined;
 }
 
 export interface GodoStatus {
@@ -237,6 +265,8 @@ export interface GodoStatus {
   lastSyncedAt?: string | null;
   /** ★2026-08-10 마지막 수집 실패 사유. 있으면 화면이 '조치 필요'로 말한다(키 무효·IP 미등록·호출 한도). */
   syncError?: { message: string; code: string; at: string | null } | null;
+  /** ★1028 K7 — 문제 분류(서버 판정 · 없으면 null) */
+  problem?: IntegrationProblem | null;
 }
 
 /** 연동센터 표시용 상태. */
@@ -260,6 +290,7 @@ export async function getGodoStatus(companyId: string): Promise<GodoStatus> {
     syncError: meta.godo_sync_error
       ? { message: meta.godo_sync_error, code: meta.godo_sync_error_code || 'unknown', at: meta.godo_sync_error_at || null }
       : null,
+    problem: meta.godo_sync_error ? integrationProblemOf('godo', row.status, meta.godo_sync_error_code || 'unknown') : null,
   };
 }
 

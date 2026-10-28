@@ -214,6 +214,37 @@
 > W1 한줄전단 API(별개 저장소 hanjulDM · 원장 = hanjulDM status/STATUS.md 1027 절) = 첫 경보로 찾음 → 같은 날 닫음. 의존성 = 운영 audit 치명 1 · 높음 19 → 0(puppeteer 25 · xlsx 공식 0.20.3 · zod 제거 · allowScripts = puppeteer@25.16.0 만) · W3 렌더 크롬 = 기동 한 곳 `utils/flyer/product/render-browser.ts` · --no-sandbox 0 · 같은 /opt/hanjul-chrome · 못 뜨면 실패 · W2 로그인 요청 제한 = 비밀번호 · OTP · 등록 토큰 확인 5곳 `middlewares/login-limiter.ts`(같은 IP 처리 중 + 1분 안 실패 > 10 = 429 · 들어올 때 세고 성공하면 뺌 · Codex 1R 「동시 정상 11건째 429」는 끝난 실패만 세면 몰아 보내는 추측이 한도 없이 통과해 불수용 · 두 동작 시험 고정) · 함께 닫음 = xlsx 0.20.3 이 날짜 칸을 서버 시각대 자정으로 줘 고객 업로드 생일이 KST 에서 하루 앞 → CT `sheetDateToYmd`. 검증 = tsc 0 · vitest 375 · 변이 5 · Codex 적대 2R approve(1R 은 요청문이 파일 읽기까지 막아 4개만 읽음 = 재발 기록). 실측(09:10) = audit 운영 0 · build:safe · 새 dist 크롬 = /opt 156 · 샌드박스 끄는 인자 0 · PDF · PNG 생성 · restart 뒤 online · Node 24.22.1 · health 200 · nginx 경유 없는 아이디 11번 = 401 10 → 429(도메인 DNS = .62 직결 · CDN 없음) · 에러 로그 새 줄 0.
 > 남은 것 = 3 밤 창 apt 99 + 커널 재부팅 · 4 SSH 키 전용(두 번째 문 실측 먼저) · 5 패널 2단계(Harold) · 6 떠돌이 파일 · 8 이상 행위 경보(기준값 실데이터) · 9 백업 복구 훈련 · A4 HMAC(IMC 업체 키 발급 요청) · A1 · A5 · 미실측 = 재시작 뒤 정상 080 콜백 등록 줄 · 한줄전단 실제 전단 PDF · OG 경로 첫 요청 · 범위 밖 기록 = 한줄전단 고객 화면 파일 업로드 응답 계약 불일치(success · fileId) · pdfkit 미사용 선언 · 한줄로 프론트 react-router 7(닿지 않는 2건) · pos-agent 의존성(별도 배포본)
 
+<a id="c76"></a>
+
+### C76 · ★1028 싱크에이전트 설치 값 확인(P2) · 고객 누계 보호(P3) · 1.7.3 — 설계 1R · 구현 Codex 적대 4R approve · 배포 대기
+> 호출어 **"엠티콜렉션 싱크 / 값 확인 / 고객 누계 보호 / 1.7.3"** → [설계서](../docs/2026-10-28-sync-value-check-summary-guard-design.md) · [기능 문서](../docs/FEATURE-SYNC-AGENT.md) §7 2026-10-28 · §10 · 원장 C76-G1 · 뿌리 = R1(요약 칸 두 작성자 같은 규칙)
+> 한 것 = 마법사 · 설정 편집 [6] 이 수신동의 · 탈퇴 · 성별 컬럼 값을 세어 낱말표 밖 글자만 분류(valueMaps · 원본 · 테이블에 묶음) · 분류 변경 = 다음 고객 동기화 전량(appliedValueMapsDigest · 진행 중 표시) · 매핑 교체를 엔진 실행 한 줄에 줄 세움 · 값 세기 상한 5분 · 구매 요청 customerSummaryFields → 서버 원장 재계산이 고객 적재와 같은 규칙(구매횟수 · 최근구매일 GREATEST · 누적금액 · 최근구매금액 · 매장 = 안 씀). 다른 업체 영향 0 = 1.7.3 서버에 안 올림 · 낱말표 불변 · 새 칸 없는 요청 = 지금 SQL. DDL 0 · ENV 0.
+> 검증 = 에이전트 tsc 0 · vitest 32파일 284건 · 백엔드 tsc 0 · vitest 718파일 10,544건 · 실 PG 13파일 65건 · 변이 4 · Codex 설계 1R 4 → 구현 1R 5 → 2R 2 → 3R 1 → 4R approve. 남은 것 = 커밋 · 백엔드 배포(Harold · C73~C76 한 번에) · 엠티 VM 재검증(Harold 승인) 뒤 zip 개별 전달 · P1(판매 뷰 휴대폰 조인 · 고객사 · Harold 판단).
+
+<a id="c75"></a>
+
+### C75 · ★1028 오류접수 2건 · 여정 안내 받는 사람 · 정지 링크(B-1028-1) · 구성 상품 칸(B-1028-2) — Codex 적대 2R approve · 배포 대기
+> 호출어 **"여정 안내 받는 사람 / 정지 링크 단축 / 구성 상품 사진 / B-1028"** → 원문 = [BUGS](BUGS.md) B-1028-1 · B-1028-2 · 뿌리 = [뿌리 대장](../docs/ROOT-LEDGER.md) R1 · R3
+> 한 것 = 담당자 통지 받는 사람 한 곳(`owner-contact.ts` · 만든 계정 → 회사 관리자 · 회사 조건 공통) · 여정 정지 링크 단축 · 담당자 링크 비추적 판정 한 곳(자동마케팅 멈춤 링크의 토큰 기록 · 클릭 통계 섞임 함께 닫음) · 구성 상품 수 = 실리는 상품(사진) · 사진 · 상한 안내 · 버튼 글자. DDL 0 · ENV 0.
+> 검증 = backend tsc 0 · frontend tsc 0 · vitest 718파일 10,543건 · 실 PG 12파일 59건 · 변이 · Codex 1R 2 → 2R approve. 남은 것 = 커밋 · 배포(Harold) · 실측 시나리오(BUGS 각 항목).
+
+<a id="c74"></a>
+
+### C74 · ★1028 AI 메모리 · 브랜드 보이스(목소리 복제) 구현 — Codex 적대 구현 5R approve · 배포 대기
+> 호출어 **"AI 메모리 구조체크 / 브랜드 보이스 구조체크 / 목소리 복제"** → [설계서](../docs/2026-10-28-ai-memory-brand-voice-design.md) §12 · 원장 = [구조체크](../docs/2026-10-28-ai-memory-brand-voice-structure-check.md) · 뿌리 = [뿌리 대장](../docs/ROOT-LEDGER.md) R24 신설 · 배포 = [원장](DEPLOY-LEDGER.md) C74
+> 왜 = Harold 1028 5축(성격 × 종류 분류 · 말투 · 줄띄움 · 기호 복제 = 여정 · 자동마케팅 전부 · 사실만 넣어도 회사 목소리 · 쓸수록 습관 · 조언 · 회사별 격리) · 「설계서 구조체크 닫히면 구현까지 끝내고 구현도 코덱스 리뷰 닫힐 때까지」 · 학습 = 6크레딧(추출 1 + 견본 5) · 삭제 · 초기화 = 관리자.
+> 한 것 = 묶음 0(법 출구: 전송자 명칭 · 없는 날짜 · 여정 계절 · 법 칸 삭제) · A(종류 5 → 성격 · 집 규칙 둘 · 목소리 CT 하나 composeVoicePrompt · 상태 행 세대 · 뼈대 확인 · 견본 · 출구 CT · 회차 재생성 예산 · 사람이 보낸 발송 CT · 학습 원장 authorship · 렌더본 정리 스크립트) · B · C(고친 차이 · 습관 · 조언 · 화면). DDL 0.
+> 검증 = backend tsc 0 · frontend tsc 0 · vitest 717파일 10,535건 · 라우트 손잡이 시험 · 변이 · Codex 구현 1R 5 → 2R 2 → 3R 4(같은 두 자리 → 날짜 문법 하나 · 위치 토큰 · 견본 덮는 구간) → 4R 1 → 5R approve. 남은 것 = 커밋 · 배포(Harold) · 원장 C74(Q-D3 · ENV-1 · DML-1) · Q1 시행령 별표6 원문 · 리허설(설계서 §7).
+
+<a id="c73"></a>
+
+### C73 · ★1028 자사몰 연동 대비 묶음 B · C 구현 — Codex 적대 6R approve · 배포 대기
+> 호출어 **"자사몰 대비 묶음 B / 자사몰 B C / 자사몰 연동 마무리"** → [설계서](../docs/2026-10-27-mall-integration-hardening-design.md) §11 9~9-3 · 배포 = [원장](DEPLOY-LEDGER.md) C73
+> 왜 = Harold 1028 「메이크샵, 카페24, 고도몰, 네이버스마트스토어 다 제끼고」 · 「구조체크 닫힐때까지 돌리고 수정하고 코드 수정마무리하고 보고해」.
+> 한 것 = K4 · K8 플러그인 키 · M22 · M21 · K6 · K9 · M19 · K11(가져오기 CT · 고도몰 M27 · 첫 구매 보호) · K5(탈퇴) · K7(요금제 한 벌 · 사실 경로 90일 · 카드 문구 · 조치 필요 = action) · K12(허용 도메인) · K8 암호화(secret-box · 읽기 이중 · DML-2 스크립트) · M24(승인 확정 화면) · K14(N1~N6 · M11 · M30) · K10 2단 경보 · K13 준비 됨 표 · M25. 넣지 않은 것 = 카페24 · 아임웹 과거 · 주기 수집(몰 API 원문 미확인 · 준비 됨 표 none).
+> 검증 = backend tsc 0 · frontend tsc 0 · vitest 711파일 10,452건 · test:pg 11파일 55건 · 렌더 검사(/oauth-confirm · /cafe24/launch 모바일) · 구조체크 1회차 2 · Codex 1R 8 · 2R 3 · 3R 1 · 4R 1 · 5R 1 · 6R approve.
+> 남은 것 = 커밋 · 배포(Harold) · 원장 C73 순서 · 우커머스 가져오기의 재시도 부류 실패 건 다시 읽기(같은 뿌리 · 추가 과제) · 리허설(§7).
+
 <a id="c72"></a>
 
 ### C72 · ★1027 실 PG 시험층 · 배포 원장 설계 — Codex 적대 5R approve · Harold 검토 대기
@@ -237,7 +268,7 @@
 
 <a id="c70"></a>
 
-### C70 · ★1027 슈퍼관리자 세션 · ceo 만 1440분 — Codex 적대 1R approve · DDL 0 · 화면 0 · 배포 대기
+### C70 · ★1027 슈퍼관리자 세션 · ceo 만 1440분 — Codex 적대 1R approve · DDL 0 · 화면 0 · 배포 완료 1028 · 적용 확인(Harold 1028 「이미 적용 잘되어 있어」)
 > 호출어 **"슈퍼관리자 세션 / ceo 세션"** → 판정 = `superAdminSessionMinutesFor`(packages/backend/src/config/defaults.ts) · 시험 = `super-admin-session-ceo-1027.test.ts` · 운영 명령 = [OPS.md](OPS.md) 슈퍼관리자 토큰 절 · 위험표 = [RISKS.md](RISKS.md) R27
 > 왜 = Harold 1027 「슈퍼관리자에 ceo 내 계정만 30분 로그인 세션 유지 없이 지속되게」 → 활성 4계정(suran lead · eunji_admin · jihyun_admin support · ceo super · 1027 실측)이 설정 하나(`SUPER_ADMIN_SESSION_MINUTES` · 기본 30)를 같이 써서 명령만으로는 ceo 만 못 바꿈 → 설계안 승인 · 값 = 1440분(Harold 확정 · 로그인 토큰 24h 와 같음 · 더 길면 효과 없음 · 0 무제한 금지).
 > 바뀐 것 = 허용 목록(설정 `SUPER_ADMIN_LONG_SESSION_LOGIN_IDS` · 기본 ceo · 아이디 정확히 같을 때만) 계정 = 1440분 · 그 밖 = 30분. 세션 시간을 정하는 네 곳(로그인 · OTP 등록 확정 · 연장 · 5분 활동 갱신)이 판정 함수만 부른다. 아이디로 가르는 근거 = login_id 를 바꾸는 쓰기 경로 0 · 생성 때 대소문자 무시 중복 거절. 화면은 로그인 응답 시간을 그대로 쓴다(고치지 않음).

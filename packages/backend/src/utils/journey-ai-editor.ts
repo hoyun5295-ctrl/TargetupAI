@@ -13,10 +13,12 @@
  */
 
 import { UserFacingError } from './http-error';
+import { composeVoicePrompt, VOICE_KIND_BY_STEP } from './brand-voice-prompt';
 import { extractJsonFromAiText, aiStr } from './ai-json';
 import { callAIWithFallback } from '../services/ai';
 import { sanitizeForSms } from './message-sanitizer';
-import { stripAdParts } from './messageUtils';
+import { stripAdParts, ensureSenderName } from './messageUtils';
+import { query } from '../config/database';
 import { resolveJourneyAdFlag } from './journey-ad-policy';
 // ★ 2026-08-08 이어달리기 — 고정된 트리거는 편집으로 풀리지 않는다(설계서 §6).
 import { isImplementedTriggerEvent, isCreatableTriggerEvent, triggerTemplateCode, contractReentryPolicy, defaultGoalExitFor, storageTemplateCodeFor } from './journey-trigger-capability';
@@ -27,7 +29,7 @@ import { partitionCustomerConditions } from './journey-target-extractor';
 import { formatConditionMenuForAi } from './journey-condition-fields';
 import { describeJourneyTrigger, describeJourneyTarget } from './journey-step-format';
 // ★ 2026-08-08 — 편집 결과도 생성과 같은 기계 차단을 지난다(프롬프트는 경계가 아니다).
-import { stripUnauthorizedBenefits, claimsInventedEfficacy, readingUnit, EFFICACY_PROMPT_RULES, EFFICACY_REWRITE_RULE } from './copy-benefit-detector';
+import { stripUnauthorizedBenefits, claimsInventedEfficacy, readingUnit, EFFICACY_PROMPT_RULES, EFFICACY_REWRITE_RULE, findSeasonWords } from './copy-benefit-detector';
 
 type ChannelType = 'sms' | 'lms' | 'mms' | 'kakao';
 
@@ -205,8 +207,12 @@ triggerEvent·templateCode·triggerFilters는 받은 값을 그대로 돌려주�
 ` : ''}
 위 요청을 반영한 전체 패키지를 JSON으로만 응답하세요.`;
 
+  // ★ 2026-10-28 AI 메모리 설계 K11-1 · K11-4 — 여정 편집 = 고치기(예시 0 · 원문 꼴 유지) · 패키지라 성격별 블록 둘
+  const { system: voiceSystem } = await composeVoicePrompt({
+    companyId: input.companyId, producer: 'journey-edit', mode: 'rewrite', kind: VOICE_KIND_BY_STEP, channel: 'LMS', isAd: true, basePrompt: system,
+  });
   const text = await callAIWithFallback({
-    system,
+    system: voiceSystem,
     userMessage,
     maxTokens: 4096,
     temperature: 0.3,
@@ -251,6 +257,20 @@ triggerEvent·templateCode·triggerFilters는 받은 값을 그대로 돌려주�
   const effGround = [editBasis, ...curSteps.map((c) => readingUnit(c?.subject, c?.messageTemplate))].join('\n');
   if (steps.some((s) => s.stepType === 'message' && s.channel !== 'kakao' && claimsInventedEfficacy(readingUnit(s.subject, s.messageTemplate), effGround))) {
     throw new JourneyInputError('원문에 없는 효능 말이 생겨 수정을 적용하지 않았어요. 다시 눌러 주세요.');
+  }
+  // ★ 2026-10-28 AI 메모리 설계 K1-7 — 같은 근거에 없던 계절 · 월 낱말이 생기면 효능과 같이 수정 전체를 적용하지 않는다(여정은 연중 나간다)
+  if (steps.some((s) => s.stepType === 'message' && findSeasonWords(readingUnit(s.subject, s.messageTemplate), effGround).length > 0)) {
+    throw new JourneyInputError('여정은 1년 내내 나가는데 계절이나 달 이름이 새로 들어가 수정을 적용하지 않았어요. 다시 눌러 주세요.');
+  }
+  // ★ 2026-10-28 K1-1 — AI 가 새로 쓴 문자 광고 단계 = 첫 줄 또는 제목에 전송자 명칭(편집 전과 같은 본문 = 사람이 둔 글 · 손대지 않는다)
+  const curBodies = new Set(curSteps.map((c) => String(c?.messageTemplate || '')));
+  const toName = steps.filter((s) => s.stepType === 'message' && ['sms', 'lms', 'mms'].includes(s.channel) && !curBodies.has(String(s.messageTemplate || '')));
+  if (toName.length > 0) {
+    const nr = await query(`SELECT brand_name, company_name FROM companies WHERE id = $1::uuid`, [input.companyId]);
+    const names = [nr.rows[0]?.brand_name, nr.rows[0]?.company_name];
+    for (const s of toName) {
+      s.messageTemplate = ensureSenderName(String(s.messageTemplate || ''), { isAd: resolveJourneyAdFlag(s.channel, s.isAd), channel: s.channel, subject: s.subject, names }).text;
+    }
   }
 
   const validTemplates = ['onboarding', 'repeat', 'dormant', 'cart', 'birthday', 'reservation', 'custom'];

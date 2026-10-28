@@ -16,8 +16,10 @@ import { createHmac, timingSafeEqual } from 'crypto';
 import { IProviderAdapter, ProviderCapabilities, ProviderTokenResponse } from './provider-registry';
 import type { WebhookProcessResult } from './cdp-webhook-delivery';
 import { buildWebhookIdempotencyKey } from './cdp-idempotency';
-import { normalizeWooMallId, wooTopicKind, type WooTopicResource, type WooTopicEvent } from './woocommerce-core';
+import { normalizeWooMallId, wooTopicKind, WOO_SOURCE, type WooTopicResource, type WooTopicEvent } from './woocommerce-core';
 import { WOO_PROVIDER, getWooIntegration, processWooResource } from './woocommerce-client';
+import { withdrawMemberConsent } from './cdp-identity';
+import { mallScopedIds } from './integration-row';
 
 const capabilities: ProviderCapabilities = {
   oauth: false,
@@ -101,7 +103,12 @@ export const woocommerceAdapter: IProviderAdapter = {
     const integ = await getWooIntegration(companyId, parsed.mallId);
     if (!integ) throw new Error(`우커머스 연동이 없는 몰입니다: ${parsed.mallId}`);
     if (parsed.kind.event === 'deleted') {
-      // 삭제 페이로드는 {id} 만 온다 — 적재할 값이 없다(매출 되돌림은 refunded/cancelled 상태 갱신이 맡는다)
+      // ★ 2026-10-28 자사몰 대비 K5 — 회원 삭제 = 그 회원의 광고 수신 철회(삭제 페이로드는 {id} 만 · 시각 = 받은 시각 · 연결 행은 지우지 않음)
+      if (parsed.kind.resource === 'customer' && resource?.id != null) {
+        await withdrawMemberConsent(companyId, WOO_SOURCE, mallScopedIds({ provider: WOO_SOURCE, mallId: parsed.mallId }, { memberId: resource.id }).memberExternalId, ctx.observedAt, integ.storeCode);
+        return;
+      }
+      // 주문 삭제 = 적재할 값이 없다(매출 되돌림은 refunded/cancelled 상태 갱신이 맡는다)
       console.log(`[WooCommerce Adapter] 삭제 이벤트는 적재하지 않는다: ${event} id=${resource?.id}`);
       return;
     }

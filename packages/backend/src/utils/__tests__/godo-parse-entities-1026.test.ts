@@ -30,7 +30,7 @@ describe('고도몰 응답 해석 — 판 교체 회귀', () => {
     expect(r.code).toBe('000');
     expect(r.hasNext).toBe(false);
     expect(r.lastOrderNo).toBe('2610261234567890123');
-    const m = mapGodoOrderToCdp(r.orders[0]);
+    const m = mapGodoOrderToCdp(r.orders[0], { provider: 'godo', mallId: 'godo', idPrefix: null });
     expect(m?.order.orderId).toBe('2610261234567890123');
     expect(m?.order.items?.[0]).toEqual({ productId: '0077', productName: 'A&B 세트 <한정>', price: 15000, quantity: 1 });
     expect(m?.order.name).toBe('주문자');
@@ -41,7 +41,7 @@ describe('고도몰 응답 해석 — 판 교체 회귀', () => {
 
   it('숫자 문자 참조(10진 · 16진)도 풀어서 읽는다 — 5.x 기본값은 풀지 않아 「A&#38;B」가 상품명에 남았다(Codex 1R)', () => {
     const xml = ORDER_XML.replace('A&amp;B 세트 &lt;한정&gt;', 'A&#38;B &#x26; &#39;한정&#39; &#44608;밥');
-    const m = mapGodoOrderToCdp(parseGodoOrderResponse(xml).orders[0]);
+    const m = mapGodoOrderToCdp(parseGodoOrderResponse(xml).orders[0], { provider: 'godo', mallId: 'godo', idPrefix: null });
     expect(m?.order.items?.[0]?.productName).toBe("A&B & '한정' 김밥");
   });
 });

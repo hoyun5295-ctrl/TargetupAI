@@ -23,7 +23,8 @@
 
 import { query } from '../config/database';
 import { backfillGodoOrders, GodoApiError } from './godo-client';
-import { isCdpEnabledForPlan } from './cdp-auth';
+import { cdpFactCollectGate } from './cdp-auth';
+import { integrationProblemOf } from './integration-problem';
 
 /** 주기. 고도몰은 호출 한도(429·EXHAUSTED)가 있어 짧게 돌리지 않는다. */
 const SYNC_INTERVAL_MS = 30 * 60 * 1000;
@@ -57,6 +58,10 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 interface GodoSyncTarget {
   company_id: string;
+  /** 마지막 실패 코드(meta.godo_sync_error_code · 없으면 null) */
+  error_code: string | null;
+  /** 첫 가져오기가 아직 안 끝났다(meta.first_import_started_at 있음 · 연결 때 백필이 중간에 실패) */
+  first_pending: boolean;
   /** 마지막 성공 수집 시각. NULL이면 아직 이 워커가 돈 적 없는 회사. */
   last_synced_at: Date | null;
   connected_at: Date | null;
@@ -125,7 +130,8 @@ export async function runGodoSyncPass(): Promise<GodoSyncPassResult> {
 
   // 검증된 연동만 — 저장만 하고 확인 안 된 키는 getGodoStatus와 같은 기준으로 제외한다(status='active' + connected_at).
   const targets = await query(
-    `SELECT company_id, last_synced_at, connected_at
+    `SELECT company_id, last_synced_at, connected_at, meta->>'godo_sync_error_code' AS error_code,
+            (meta ? 'first_import_started_at') AS first_pending
        FROM company_integrations
       WHERE provider = 'godo'
         AND mall_id = $1
@@ -139,8 +145,11 @@ export async function runGodoSyncPass(): Promise<GodoSyncPassResult> {
   for (const row of targets.rows as GodoSyncTarget[]) {
     result.companies++;
     try {
-      // 요금제 게이트 — 연결 라우트와 같은 기준. 다운그레이드한 회사가 계속 수집되지 않게 한다.
-      if (!(await isCdpEnabledForPlan(row.company_id))) continue;
+      // 요금제 게이트 — 주문 = 사실 경로(★1028 K7 요금제가 활성에서 빠진 뒤 90일까지 받고 멈춤 · 판정 = cdpFactCollectGate 한 곳)
+      if (!(await cdpFactCollectGate(row.company_id)).allowed) continue;
+      // ★ 1028 K11(SC8 · R8) — 마지막 원인이 사람 조치(키 거절 · 권한 · IP 미등록)면 다시 부르지 않는다(같은 거절을 30분마다 다시 사지 않음).
+      //   풀리는 자리 = 연결 확인 성공(verifyGodoConnection 이 사유를 지움) · 일시 원인(호출 한도 · 모르는 오류)은 다음 회차에 같은 창을 다시 본다.
+      if (integrationProblemOf('godo', 'active', row.error_code)?.kind === 'action') continue;
 
       if (isGapBeyondWindow(row.last_synced_at, row.connected_at, now)) {
         // 여기까지 오면 재연결도 답이 아니다 — `/connect` 백필이 같은 깊이라 더 과거는 어느 경로로도 안 들어온다.
@@ -150,11 +159,19 @@ export async function runGodoSyncPass(): Promise<GodoSyncPassResult> {
         );
       }
 
-      const days = resolveWindowDays(row.last_synced_at, row.connected_at, now);
-      const r = await backfillGodoOrders(row.company_id, { days });
+      // ★ 1028 Codex R1 #3 — 첫 가져오기가 안 끝났으면 연결 때와 같은 깊이(90일)로 잇고 끝나면 첫 구매 보호 표시를 지운다
+      const days = row.first_pending ? MAX_WINDOW_DAYS : resolveWindowDays(row.last_synced_at, row.connected_at, now);
+      const r = await backfillGodoOrders(row.company_id, { days, first: row.first_pending === true });
+      // ★ 1028 Codex R2 #3 — 다시 해야 할 실패가 남으면 성공 시각을 올리지 않는다(올리면 다음 회차 창이 줄어 그 주문을 영영 못 읽는다 · 같은 창을 다시 본다)
+      if (r.failed > 0) {
+        result.failed++;
+        await markFailure(row.company_id, 'partial_failed', `주문 ${r.failed}건을 넣지 못해 같은 기간을 다시 읽습니다.`);
+        continue;
+      }
       await markSuccess(row.company_id);
       result.synced++;
       result.imported += r.imported;
+      if (r.skipped + r.failed > 0) console.warn(`[Godo Sync] 그 건만 건너뜀 company=${row.company_id} 넣을 수 없는 건 ${r.skipped} · 실패 ${r.failed}`);
     } catch (err: any) {
       result.failed++;
       const code = err instanceof GodoApiError ? err.code : 'unknown';

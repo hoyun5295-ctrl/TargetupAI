@@ -293,6 +293,35 @@ export class MysqlConnector implements IDbConnector {
     };
   }
 
+  /**
+   * ★ 2026-10-28 설치 값 확인(P2) — 계약 = types.ts countColumnValues · 식별자 = countKeyUniqueness 와 같은 백틱 규칙.
+   * 값은 고객 조회와 같은 한글 보정(fixRowEncoding)을 거친다 — 분류 키가 동기화 때 정규화에 들어오는 글자와 같아야 표가 맞는다(Codex 구현 1R).
+   * 실행 시간 = mysql2 쿼리 timeout(넘으면 그 연결을 끊고 던진다 → 마법사는 건너뜀).
+   */
+  async countColumnValues(
+    tableName: string, column: string, limit: number, timeoutMs: number,
+  ): Promise<{ values: Array<{ value: string | null; count: number }>; truncated: boolean }> {
+    this.ensureConnected();
+    const col = `\`${column.replace(/`/g, '``')}\``;
+    const table = `\`${tableName.replace(/`/g, '``')}\``;
+    let rows: unknown;
+    try {
+      [rows] = await this.pool!.query({
+        sql: `SELECT ${col} AS v, COUNT(*) AS n FROM ${table} GROUP BY ${col} ORDER BY n DESC LIMIT ?`,
+        values: [limit + 1],
+        timeout: timeoutMs,
+      });
+    } catch (e: any) {
+      if (e?.code === 'PROTOCOL_SEQUENCE_TIMEOUT') throw new Error(`값 세기 시간 초과(${Math.round(timeoutMs / 1000)}초)`);
+      throw e;
+    }
+    const list = this.fixRowEncoding(rows as RawRow[]) as Record<string, unknown>[];
+    return {
+      values: list.slice(0, limit).map((r) => ({ value: r.v == null ? null : String(r.v), count: Number(r.n) || 0 })),
+      truncated: list.length > limit,
+    };
+  }
+
   async getColumns(tableName: string): Promise<ColumnInfo[]> {
     this.ensureConnected();
 

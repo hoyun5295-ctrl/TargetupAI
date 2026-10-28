@@ -56,7 +56,7 @@ describe('수신 = 기록 → 즉시 반환 → 줄이 자기 행을 잡아 처�
     await drainWebhookQueueForTest();
     const r = (await query(`SELECT * FROM cdp_webhook_deliveries`)).rows[0];
     expect(r.status).toBe('processed');
-    expect(processWebhookEvent).toHaveBeenCalledWith(CO, 'order.created', { x: 1 }, { observedAt: new Date(r.created_at).toISOString(), storeCode: null });
+    expect(processWebhookEvent).toHaveBeenCalledWith(CO, 'order.created', { x: 1 }, { observedAt: new Date(r.created_at).toISOString(), storeCode: null, idScope: { provider: 'cafe24', mallId: '', idPrefix: null } });
   });
   it("처리가 'stale' 이면 superseded 로 닫는다", async () => {
     processWebhookEvent.mockImplementation(async () => 'stale');

@@ -52,7 +52,7 @@ import {
   sanitizeAiAsks, mergeLineAsks, readLineAnswers, lineAnswersLicense, lineAnswersContext, missingLineVars, lineVoiceKind, lineRuleGaps, readAiLine, aiLineCopyKey,
 } from '../ai-line';
 import { runLineIntake, runLineCompose, aiLineVarTokensFor } from '../../services/ai-line';
-import { buildSystemPromptWithBrandVoice, splitBrandVoiceExtraction, planBrandVoiceRows, getBrandVoiceFit, invalidateBrandVoiceCache } from '../brand-voice-prompt';
+import { composeVoicePrompt, splitBrandVoiceExtraction, planBrandVoiceRows, getBrandVoiceFit, invalidateBrandVoiceCache } from '../brand-voice-prompt';
 
 const SRC = join(__dirname, '..', '..');
 const FE = join(__dirname, '..', '..', '..', '..', 'frontend', 'src');
@@ -206,7 +206,8 @@ describe('② 대상 찾기 = 묻는 목록 · 회사 칼럼 · 추천 칼럼 ·
     expect(params[params.length - 1]).toBe('skin_type');
     expect(String(fillCall![0])).toContain(`c.custom_fields->>$${params.length}`);
     expect(String(fillCall![0])).not.toContain('skin_type');
-    expect(out.voice).toEqual({ learned: false, marketing: false, notice: false });
+    // ★ 2026-10-28 K13-7 · K7-5 — 칩 상태(AI 메모리와 같은 판정) · 대표 문안 0 = none
+    expect(out.voice).toEqual({ learned: false, marketing: false, notice: false, status: 'none' });
   });
   it('★ 1021 실측 — 처음 대상이 0명이어도 추천 칼럼은 응답 한 칸으로 남는다(대상 상세와 분리)', async () => {
     db(0);
@@ -311,8 +312,9 @@ const G = (tone: string, extra: Record<string, unknown> = {}) => JSON.stringify(
 });
 const MSG = (text: string, kind?: string) => JSON.stringify({ channel: 'LMS', message_text: text, manual_priority: 1, ...(kind ? { kind } : {}) });
 
-function voiceDb(rows: { main?: string; notice?: string; messages: string[] }) {
+function voiceDb(rows: { main?: string; notice?: string; messages: string[]; admin?: Partial<Record<'marketing' | 'notice', string>> }) {
   m.query.mockImplementation(async (sql: string) => {
+    if (sql.includes("memory_type = 'brand_voice_admin'")) return { rows: Object.entries(rows.admin || {}).map(([k, v]) => ({ memory_key: k, memory_value: v })) };
     if (sql.includes("memory_type = 'brand_guideline'")) {
       const out: any[] = [];
       if (rows.main) out.push({ memory_key: 'main', memory_value: rows.main });
@@ -325,50 +327,62 @@ function voiceDb(rows: { main?: string; notice?: string; messages: string[] }) {
 }
 
 describe('③ 브랜드 보이스 = 성격별', () => {
-  it('성격을 안 주면 옛 글자 그대로(마케팅 가이드라인 · 광고 줄 · 080 줄 · 광고 압축 · 대표 문안 전체)', async () => {
+  // ★ 2026-10-28 AI 메모리 설계 K6 — 목소리 CT = composeVoicePrompt 하나(옛 껍데기 삭제 · 묶음 B 끝) · K1-5 법 줄 없음 · I16 확인 전 AI 문구 · 원문 0
+  const compose = (company: string, kind: 'marketing' | 'notice', extra: Record<string, unknown> = {}) =>
+    composeVoicePrompt({ companyId: company, producer: 'test', mode: 'write', kind, basePrompt: 'BASE', ...extra } as any);
+  it('마케팅 = main 가이드라인 · 법 줄 없음 · 확인 전 = AI 문구 칸 · 대표 문안 원문 0', async () => {
     invalidateBrandVoiceCache('B1');
     voiceDb({ main: G('활기/감성'), notice: G('정중/격조'), messages: [MSG('마케팅 문안 하나', 'marketing'), MSG('안부 문안 하나', 'notice'), MSG('옛 문안')] });
-    const p = await buildSystemPromptWithBrandVoice('B1', 'BASE');
-    expect(p).toContain('본 회사의 마케팅 문안 5건 분석 결과');
-    expect(p).toContain('- 톤 시그니처: 활기/감성');
-    expect(p).toContain('- 빈출 표현 (1건 이상 자연 활용 의무): 딱 오늘\n- 광고 표기 "(광고)" 위치: 본문 앞\n- 인사말 패턴');
-    expect(p).toContain('- 시그니처 (메시지 마지막 부분): (시그니처 없음)\n- 무료수신거부 080 위치: 본문 뒤\n- 활용 가능 이모지/특수문자: ★');
-    expect(p).toContain('SMS 90바이트 - (광고) 6바이트');
-    expect(p).toContain('아래 3건은 본 회사의 실제 마케팅 문안입니다.');
-    expect(p).toContain('안부 문안 하나');
+    const r = await compose('B1', 'marketing', { channel: 'SMS', isAd: true });
+    expect(r.system).toContain('- 톤 시그니처: 활기/감성');
+    expect(r.system).toContain('이 회사 마케팅 문자 기준');
+    expect(r.system).not.toContain('광고 표기 "(광고)" 위치');
+    expect(r.system).not.toContain('무료수신거부 080 위치');
+    expect(r.system).toContain('SMS 90바이트 - (광고) 6바이트');
+    expect(r.system).not.toContain('딱 오늘');   // 확인 전 AI 문구 칸 = 싣지 않는다(I16)
+    expect(r.system).not.toContain('마케팅 문안 하나');   // 원문 0
+    expect(r.voiceLearned).toBe(false);
   });
-  it('안부 = notice 가이드라인 · 광고 줄 없음 · 안부 예시만', async () => {
+  it('안부 = notice 가이드라인 · 광고 아니면 광고 바이트 줄 없음', async () => {
     invalidateBrandVoiceCache('B2');
     voiceDb({ main: G('활기/감성'), notice: G('정중/격조'), messages: [MSG('마케팅 문안 하나', 'marketing'), MSG('안부 문안 하나', 'notice')] });
-    const p = await buildSystemPromptWithBrandVoice('B2', 'BASE', { kind: 'notice' });
-    expect(p).toContain('- 톤 시그니처: 정중/격조');
-    expect(p).toContain('본 회사의 안부 · 알림 문안 분석 결과');
-    expect(p).not.toContain('광고 표기 "(광고)" 위치');
-    expect(p).not.toContain('무료수신거부 080 위치');
-    expect(p).not.toContain('(광고) 6바이트');
-    expect(p).toContain('아래 1건은 본 회사의 실제 안부 · 알림 문안입니다.');
-    expect(p).not.toContain('마케팅 문안 하나');
+    const r = await compose('B2', 'notice', { channel: 'SMS', isAd: false });
+    expect(r.system).toContain('- 톤 시그니처: 정중/격조');
+    expect(r.system).toContain('이 회사 안부 · 알림 문자 기준');
+    expect(r.system).not.toContain('(광고) 6바이트');
+    expect(r.system).not.toContain('안부 문안 하나');
   });
-  it('안부 학습본이 없으면 마케팅 가이드라인 · 예시 전체(지금처럼) · 마케팅 = 마케팅 예시만', async () => {
+  it('안부 학습본이 없으면 main 가이드라인 · 목소리 없는 회사 = 지시문 그대로(+ 링크 규칙만)', async () => {
     invalidateBrandVoiceCache('B3');
-    voiceDb({ main: G('활기/감성'), messages: [MSG('마케팅 문안 하나', 'marketing'), MSG('옛 문안')] });
-    const n = await buildSystemPromptWithBrandVoice('B3', 'BASE', { kind: 'notice' });
-    expect(n).toContain('- 톤 시그니처: 활기/감성');
-    expect(n).toContain('아래 2건은 본 회사의 실제 마케팅 문안입니다.');
+    voiceDb({ main: G('활기/감성'), messages: [MSG('마케팅 문안 하나', 'marketing')] });
+    expect((await compose('B3', 'notice')).system).toContain('- 톤 시그니처: 활기/감성');
     invalidateBrandVoiceCache('B4');
-    voiceDb({ main: G('활기/감성'), notice: G('정중/격조'), messages: [MSG('마케팅 문안 하나', 'marketing'), MSG('안부 문안 하나', 'notice')] });
-    const mk = await buildSystemPromptWithBrandVoice('B4', 'BASE', { kind: 'marketing' });
-    expect(mk).toContain('아래 1건은 본 회사의 실제 마케팅 문안입니다.');
-    expect(mk).not.toContain('안부 문안 하나');
+    voiceDb({ messages: [] });
+    expect((await compose('B4', 'marketing')).system).toBe('BASE');
   });
-  it('말투 학습 여부 = 성격별(main 이 안부로 뽑힌 행이면 마케팅은 배우지 않은 것)', async () => {
+  it('말투만(HTML · SNS · K11-2) = 기호 · 모양 줄 없음 · 성격별 블록 둘(여정 · K11-4)', async () => {
+    invalidateBrandVoiceCache('B8');
+    voiceDb({ main: G('활기/감성'), notice: G('정중/격조'), messages: [] });
+    const tone = await compose('B8', 'marketing', { scope: 'tone' });
+    expect(tone.system).not.toContain('쓰는 기호');
+    expect(tone.system).toContain('말투 · 호칭 · 맺음만 따른다');
+    const both = await compose('B8', 'by_step' as any);
+    expect(both.system).toContain('- 톤 시그니처: 활기/감성');
+    expect(both.system).toContain('- 톤 시그니처: 정중/격조');
+    expect(both.system).toContain('단계마다 성격');
+    const rw = await compose('B8', 'marketing', { mode: 'rewrite' });
+    expect(rw.system).toContain('## 고치기 규칙');
+  });
+  // ★ 2026-10-28 AI 메모리 설계 I3 · K6-4 — 학습 여부 = 주입할 목소리(확인된 뼈대 · 사람 행 칸) · 확인 전 가이드라인만 있으면 목소리 없음
+  it('말투 학습 여부 = 성격별 · 확인 전 가이드라인만 = 목소리 없음 · 사람 행 칸 = 그 성격 목소리', async () => {
     invalidateBrandVoiceCache('B5');
     voiceDb({ main: G('정중/격조', { voice_kind: 'notice' }), notice: G('정중/격조'), messages: [] });
-    expect(await getBrandVoiceFit('B5', 'marketing')).toEqual({ learned: true, kindLearned: false });
-    expect(await getBrandVoiceFit('B5', 'notice')).toEqual({ learned: true, kindLearned: true });
+    expect(await getBrandVoiceFit('B5', 'marketing')).toEqual({ learned: false, kindLearned: false });
+    expect(await getBrandVoiceFit('B5', 'notice')).toEqual({ learned: false, kindLearned: false });
     invalidateBrandVoiceCache('B6');
-    voiceDb({ messages: [] });
-    expect(await getBrandVoiceFit('B6', 'marketing')).toEqual({ learned: false, kindLearned: false });
+    voiceDb({ messages: [], admin: { notice: JSON.stringify({ tone_signature: { value: '정중/격조', at: '', by: null } }) } });
+    expect(await getBrandVoiceFit('B6', 'notice')).toEqual({ learned: true, kindLearned: true });
+    expect(await getBrandVoiceFit('B6', 'marketing')).toEqual({ learned: true, kindLearned: false });
   });
   it('★ Codex R1 — 저장 계획 = 진실 하나(안부만 = main 하나 · 복제 행 없음) · 문안이 있는 성격의 묶음이 빠지면 저장 안 함', () => {
     const mk = { t: 'm' }; const no = { t: 'n' };
@@ -378,20 +392,22 @@ describe('③ 브랜드 보이스 = 성격별', () => {
     expect(planBrandVoiceRows(['marketing', 'notice'], { marketing: mk })).toEqual({ ok: false, missing: ['notice'], unclassified: 0 });
     expect(planBrandVoiceRows(['marketing', 'notice'], { notice: no })).toEqual({ ok: false, missing: ['marketing'], unclassified: 0 });
     expect(planBrandVoiceRows([], {})).toMatchObject({ ok: false });
-    // ★ Codex R2 — 성격을 모르는 문안이 하나라도 있으면 묶음이 다 있어도 저장 안 함
-    expect(planBrandVoiceRows(['marketing', null], { marketing: mk })).toEqual({ ok: false, missing: [], unclassified: 1 });
+    // ★ 2026-10-28 K4-3 — 종류 미정 문안은 거절 사유가 아니다(분류된 문안이 1건 이상이면 저장) · 기존 안부 학습 보존은 라우트가 한다(미정 문안이 남으면 notice 행을 지우지 않는다)
+    expect(planBrandVoiceRows(['marketing', null], { marketing: mk })).toEqual({ ok: true, main: mk, notice: null });
+    expect(planBrandVoiceRows([null, null], {})).toMatchObject({ ok: false, unclassified: 2 });
   });
   it('★ Codex R1 — 안부만 있는 회사 = main 이 안부 말투 · 안부 생성은 그 한 행(직접 정정이 곧바로 반영)', async () => {
     invalidateBrandVoiceCache('B7');
     voiceDb({ main: G('정중/격조', { voice_kind: 'notice' }), messages: [MSG('안부 문안 하나', 'notice')] });
-    const p = await buildSystemPromptWithBrandVoice('B7', 'BASE', { kind: 'notice' });
+    const p = (await compose('B7', 'notice')).system;
     expect(p).toContain('- 톤 시그니처: 정중/격조');
-    expect(p).toContain('본 회사의 안부 · 알림 문안 분석 결과');
-    expect(await getBrandVoiceFit('B7', 'notice')).toEqual({ learned: true, kindLearned: true });
-    expect(await getBrandVoiceFit('B7', 'marketing')).toEqual({ learned: true, kindLearned: false });
+    expect(p).toContain('이 회사 안부 · 알림 문자 기준');
+    // 학습 여부(I3)는 확인 전이라 없음(가이드라인 칸 = 싣는다 · 확인 전 문구 · 예시 = 싣지 않는다)
+    expect(await getBrandVoiceFit('B7', 'notice')).toEqual({ learned: false, kindLearned: false });
+    // ★ 2026-10-28 K7-4 — 저장 계획은 추출 결과 CT(buildExtractionResult) 안 · 계획 거절이면 쓰기 전에 502(저장 0 · 걷기 0)
     const mem = read('routes/ai-memory.ts');
-    expect(mem).toContain('const plan = planBrandVoiceRows(kinds, byKindGuideline);');
-    expect(mem.indexOf('if (!plan.ok) {')).toBeLessThan(mem.indexOf("'brand_guideline', 'main', $2,\n          10, 'ai_auto'"));
+    expect(read('utils/brand-voice-extract.ts')).toContain('const plan = planBrandVoiceRows(kinds, byKind);\n  if (!plan.ok) return { ok: false };');
+    expect(mem.indexOf('if (!built.ok) {')).toBeLessThan(mem.indexOf("await upsertGuidelineRow(client, companyId, 'main', built.main);"));
   });
   it('추출 응답 나누기 = 사람이 정한 성격은 그대로 · 묶음 = 성격 키 객체만(옛 모양 = 저장 0) · 문안 0건 성격은 묶음 없음', () => {
     const g = { tone_signature: 'x' };
@@ -405,15 +421,17 @@ describe('③ 브랜드 보이스 = 성격별', () => {
     expect(r3).toEqual({ kinds: ['marketing'], byKind: {} });
     expect(planBrandVoiceRows(r3.kinds, r3.byKind)).toMatchObject({ ok: false, missing: ['marketing'] });
     const mixed = splitBrandVoiceExtraction({ kinds: ['marketing'], marketing: g, notice: g }, ['notice', null]);
-    expect(planBrandVoiceRows(mixed.kinds, mixed.byKind)).toMatchObject({ ok: false });
+    expect(planBrandVoiceRows(mixed.kinds, mixed.byKind)).toMatchObject({ ok: true, main: g, notice: null });
     expect(splitBrandVoiceExtraction({ tone_signature: 'flat' }, ['notice', 'marketing'])).toEqual({ kinds: ['notice', 'marketing'], byKind: {} });
     expect(splitBrandVoiceExtraction('x', [null])).toEqual({ kinds: [null], byKind: {} });
     expect(splitBrandVoiceExtraction({ kinds: ['ad'], marketing: g }, [null]).kinds).toEqual([null]);
-    // R2 재현: 마케팅 · 안부 문안 각 1개인데 판정 하나 · 마케팅 묶음만 = 저장 거절(기존 안부 학습 보존)
+    // R2 재현: 마케팅 · 안부 문안 각 1개인데 판정 하나 · 마케팅 묶음만 = 저장은 하되 기존 안부 학습은 지우지 않는다(라우트 · 미정 문안이 남음)
     const r2 = splitBrandVoiceExtraction({ kinds: ['marketing'], marketing: g, notice: null }, [null, null]);
     expect(r2.kinds).toEqual(['marketing', null]);
-    expect(planBrandVoiceRows(r2.kinds, r2.byKind)).toMatchObject({ ok: false, unclassified: 1 });
-    expect(read('routes/ai-memory.ts')).toContain('let kinds: Array<BrandVoiceKind | null> = parsedMessages.map(() => null);');
+    expect(planBrandVoiceRows(r2.kinds, r2.byKind)).toMatchObject({ ok: true, notice: null });
+    expect(read('routes/ai-memory.ts')).toContain('} else if (unclassifiedCount === 0) {');
+    // ★ 2026-10-28 K4-3 — 문안마다 종류 → 성격(사람이 정한 종류 · 성격 먼저 · 모르면 null · 기본값으로 메우지 않는다)
+    expect(read('utils/brand-voice-extract.ts')).toContain('const kinds: Array<BrandVoiceKind | null> = rows.map((_, i) => (types[i] ? kindOfContentType(types[i]!) : adminKinds[i]));');
   });
 });
 
@@ -427,18 +445,20 @@ describe('④ 소스 계약', () => {
     expect(mem).toContain("memory_type = 'brand_guideline' AND memory_key IN ('main', 'notice')");
     expect(mem.match(/memory_type = 'brand_guideline'\s*\n\s*LIMIT 1/g)).toBeNull();
     // 추출 = 호출 한 번(차감 1 그대로) · main · notice · 문안 성격 한 묶음 · 사람이 정한 성격은 덮지 않음
-    // ★ 1025 Z4 — AI 호출 1(묶음 안 · 차감 0) + 성공 뒤 정산 1
-    expect((mem.match(/source: 'brand-voice-extract'/g) || []).length).toBe(2);
-    expect((mem.match(/settleCreditInTx\(client, \{ companyId, cost: extractCost, source: 'brand-voice-extract'/g) || []).length).toBe(1);   // ★ 1026 저장과 같은 트랜잭션
-    expect(mem).toContain("'brand_guideline', 'notice', $2");
-    expect(mem).toContain('if (adminKinds[i]) continue;');
+    // ★ 1025 Z4 — AI 호출 1(묶음 안 · 차감 0) + 성공 뒤 정산 1 · ★ 2026-10-28 K7-4 멱등 키 = 세대(같은 세대 다시 = 0)
+    expect(mem).toContain("const BV_EXTRACT = 'brand-voice-extract';");
+    expect((mem.match(/source: BV_EXTRACT,/g) || []).length).toBe(2);
+    expect((mem.match(/settleCreditInTx\(client, \{ companyId, cost: prices\.extract, source: BV_EXTRACT, createdBy: userId, idempotencyKey: `brand-voice-extract:\$\{companyId\}:\$\{g\}` \}\)/g) || []).length).toBe(1);   // ★ 1026 저장과 같은 트랜잭션
+    expect(mem).toContain("await upsertGuidelineRow(client, companyId, 'notice', built.notice);");
+    expect(read('utils/brand-voice-extract.ts')).toContain("kind_source: adminKinds[i] || adminTypes[i] ? 'admin' : 'ai'");
   });
   it('생성기 = 실제 변수를 「금지 예시」로 부르지 않는다 · 성격 옵션은 줄 때만', () => {
     const ai = read('services/ai.ts');
     expect(ai).not.toContain('금지 예시: %매장번호%, %매장명%, %고객명%');
     expect(ai).toContain(".filter((v) => !realVarNames.has(v));");
-    expect(ai).toContain("...(extraContext?.voiceKind ? { kind: extraContext.voiceKind } : {}),");
-    expect(read('services/ai-line.ts')).toContain('voiceKind: lineVoiceKind(input.isAd),');
+    // ★ 2026-10-28 K4-4 — 성격 = 주면 그 값 · 안 주면 종류 판정 순서(입력 종류 > 목적 코드 > AI 판정 > 광고 여부)
+    expect(ai).toContain('const voiceKind: BrandVoiceKind = extraContext?.voiceKind ?? intent.kind;');
+    expect(read('services/ai-line.ts')).toContain('voiceKind: input.contentType ? kindOfContentType(input.contentType) : lineVoiceKind(input.isAd),');
   });
   it('대상 AI 한 줄 접수 = 질문 · 추천 변수 출력(옵션일 때만) · 혜택 값 칩 금지 문장', () => {
     const ai = read('services/ai.ts');

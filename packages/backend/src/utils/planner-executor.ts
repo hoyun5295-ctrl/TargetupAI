@@ -499,7 +499,7 @@ async function executeMessagingCore(
         unsubFilterEnabled: true,
       },
       { companyId: tp.companyId, userId: tp.createdBy || tp.companyId },
-      { finalSource: 'selected_as_is', aiMessages: [finalBody] },
+      { finalSource: 'selected_as_is', aiMessages: [finalBody], authorship: 'path_ai' },
     );
     campaignId = res.campaignId;
   } catch (e: any) {

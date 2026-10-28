@@ -1,6 +1,6 @@
 /**
  * brand-voice-validator 확장 테스트 — 2026-07-02 형태 명세 검증 (종결어미·길이 범위).
- * 기존 3 필수(빈출 표현·(광고) 위치·이모지) 하위 호환 포함.
+ * 기존 필수(빈출 표현·이모지) 하위 호환 포함 · (광고) 위치 검사 = 2026-10-28 삭제(법이 정한다).
  */
 import { describe, it, expect } from 'vitest';
 import { validateBrandVoiceCompliance } from './brand-voice-validator';
@@ -12,11 +12,9 @@ function baseGuideline(over: Partial<BrandGuideline> = {}): BrandGuideline {
     avg_length_chars: 0,
     avg_length_bytes: 0,
     frequent_expressions: [],
-    ad_prefix_position: 'front',
     greeting_pattern: '',
     cta_patterns: [],
     signature: '',
-    reject_position: 'back',
     emoji_whitelist: [],
     extracted_at: '2026-07-02T00:00:00.000Z',
     admin_edited: false,
@@ -30,10 +28,17 @@ describe('기존 검증 하위 호환', () => {
     expect(r.valid).toBe(true);
   });
 
-  it('빈출 표현 미포함이면 기존대로 미달', () => {
+  // ★ 2026-10-28 AI 메모리 설계 K5-5 — 빈출 표현은 필수 → 경고(확인된 문구 칸만 들어온다 · 재생성 사유 아님)
+  it('빈출 표현 미포함 = 경고(재생성 사유 아님)', () => {
     const g = baseGuideline({ frequent_expressions: ['쿠폰코드'] });
     const r = validateBrandVoiceCompliance('(광고) 본문입니다.', g);
-    expect(r.valid).toBe(false);
+    expect(r.valid).toBe(true);
+    expect(r.warnings.some((w) => w.includes('빈출 표현'))).toBe(true);
+  });
+  it('C안 길이 검사 제외(skipLength · K3-5)', () => {
+    const g = baseGuideline({ length_range: { min_chars: 100, max_chars: 200 } });
+    expect(validateBrandVoiceCompliance('짧은 본문', g, { channel: 'LMS' }).valid).toBe(false);
+    expect(validateBrandVoiceCompliance('짧은 본문', g, { channel: 'LMS', skipLength: true }).valid).toBe(true);
   });
 
   it('카카오 채널은 이모지 화이트리스트 검사를 건너뛴다 (이모지 허용 채널)', () => {

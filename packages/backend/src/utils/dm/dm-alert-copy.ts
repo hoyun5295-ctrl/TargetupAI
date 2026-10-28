@@ -7,7 +7,8 @@
 import { callAIWithFallback, getSeasonContext } from '../../services/ai';
 import { getCreditCost } from '../ai-credit-calc';
 import { runChargedAi } from '../ai-credit';
-import { buildSystemPromptWithBrandVoice } from '../brand-voice-prompt';
+import { composeVoicePrompt } from '../brand-voice-prompt';
+import { resolveCopyIntent } from '../copy-content-type';
 import { extractJsonFromAiText } from '../ai-json';
 import { stripAdPartsDeep, normalizeSmsSeparatorLines } from '../messageUtils';
 import { findInventedBenefits, replaceInventedBenefits, dropInventedEfficacy, EFFICACY_PROMPT_RULES } from '../copy-benefit-detector';
@@ -89,7 +90,13 @@ ${lengthRule}
 - 개인화는 %고객명% 등 명시된 변수만 사용.
 ${EFFICACY_PROMPT_RULES}
 [출력 형식: 절대 준수] 문자 본문 텍스트만 그대로 출력. JSON·코드블록·따옴표·"channel"·"body" 같은 형식 절대 금지.${dmSummary}`;
-  const system = await buildSystemPromptWithBrandVoice(companyId, baseSystem);
+  // ★ 2026-10-28 AI 메모리 설계 K11-1 — DM 알림 문자 = 쓰기(문자 · 뼈대 예시) · DM 알림은 행사 페이지를 알리는 광고 문자(성격 = 광고 여부)
+  //   출력 형식 = 이 생산자 줄(본문 글만) · 옛 껍데기의 「JSON 재확인」 줄은 이 생산자 출력과 어긋났다
+  const { system } = await composeVoicePrompt({
+    companyId, producer: 'dm-alert-copy', mode: 'write', kind: resolveCopyIntent({ isAd: true }).kind, isAd: true,
+    channel: lengthMode === 'sms' ? 'SMS' : 'LMS', basePrompt: baseSystem,
+    outputFormat: '[출력 형식: 다시 확인] 문자 본문 텍스트만 출력. 뼈대 예시처럼 칸을 남기지 않는다.',
+  });
 
   const text = await callAIWithFallback({
     system,

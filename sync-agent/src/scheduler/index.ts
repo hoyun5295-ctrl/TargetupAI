@@ -304,8 +304,8 @@ export class Scheduler {
             const mapping = payload.mapping;
             if (mapping && (mapping.customers || mapping.purchases || mapping.customFieldLabels)) {
               logger.info('🔧 원격 명령: 매핑 갱신(update_config)');
-              // 1) 런타임 매핑 즉시 교체 (재시작 없이 다음 배치부터 적용)
-              this.engine.updateMapping({ customers: mapping.customers, purchases: mapping.purchases });
+              // 1) 런타임 매핑 교체 (재시작 없이 · ★ 2026-10-28 엔진 실행 한 줄에 줄 서서 도는 동기화가 끝난 뒤 바뀐다 = 한 실행 안에서 섞이지 않음)
+              await this.engine.updateMapping({ customers: mapping.customers, purchases: mapping.purchases });
               // 2) config.enc 영구 저장 + 필드정의 재등록 (index.ts 콜백)
               if (this.mappingUpdateHandler) {
                 await this.mappingUpdateHandler(mapping);

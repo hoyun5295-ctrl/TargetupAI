@@ -13,7 +13,6 @@ import {
   resolveIntegrationActor,
   canTouchIntegration,
   pickStoreCodeForConnect,
-  resolveStoreCodeByOriginHost,
   integrationLockMessage,
 } from '../integration-scope';
 
@@ -106,26 +105,6 @@ describe('pickStoreCodeForConnect', () => {
 
   it('blocked 는 거부', async () => {
     expect(await pickStoreCodeForConnect({ kind: 'blocked', reason: 'NO_STORE_CODE' }, 'IROIRO')).toEqual({ ok: false, code: 'NOT_ALLOWED' });
-  });
-});
-
-describe('resolveStoreCodeByOriginHost', () => {
-  it('브라우저 수집의 Origin 호스트로 그 회사 연동 행의 분류코드를 찾는다(www 제거 = 몰 식별자와 같은 정규화)', async () => {
-    db({ originStoreCode: 'IROIRO' });
-    expect(await resolveStoreCodeByOriginHost(COMPANY, 'https://www.iroirotokyo.net')).toBe('IROIRO');
-    const [sql, params] = q.mock.calls[0];
-    expect(sql).toContain('FROM company_integrations');
-    expect(sql).toContain("status <> 'revoked'");
-    expect(params).toEqual([COMPANY, 'iroirotokyo.net']);
-  });
-  it('못 찾거나 호스트가 이상하면 null(현행과 같은 무분류 적재)', async () => {
-    db();
-    expect(await resolveStoreCodeByOriginHost(COMPANY, 'https://unknown.example')).toBeNull();
-    expect(await resolveStoreCodeByOriginHost(COMPANY, '')).toBeNull();
-  });
-  it('조회 실패는 던지지 않는다(수집을 막지 않는다)', async () => {
-    q.mockRejectedValueOnce(new Error('boom'));
-    await expect(resolveStoreCodeByOriginHost(COMPANY, 'https://iroirotokyo.net')).resolves.toBeNull();
   });
 });
 

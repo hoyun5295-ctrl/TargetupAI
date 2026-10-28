@@ -30,7 +30,10 @@ import { acquireInflightWait, releaseInflight } from '../utils/inflight-lock';
 import { lineJudgeCovered } from '../utils/line-steps-context';
 import { decorateOperatorMessages } from '../utils/operator-message-decorator';
 import { enrichWithCustomFields } from '../utils/messageUtils';
-import { getBrandVoiceFit } from '../utils/brand-voice-prompt';
+import { getBrandVoiceFit, getBrandVoiceSnapshot, voiceStatusOfSnapshot } from '../utils/brand-voice-prompt';
+import type { VoiceStatus } from '../utils/brand-voice-state';
+import { COPY_CONTENT_TYPES, COPY_CONTENT_TYPE_LABEL, isCopyContentType, kindOfContentType, type CopyContentType } from '../utils/copy-content-type';
+import { variantNamesFor } from '../utils/copy-house-rules';
 import {
   AI_LINE_SOURCE, AI_LINE_TYPE_BY_VARIANT, AI_LINE_TYPE_LABEL, AI_LINE_COLUMN_EXCLUDE, AI_LINE_FILL_LOCK, AI_LINE_MAX_AUDIENCE,
   aiLineBaseKey, aiLineBaseKeys, aiLineCopyKey, aiLineDecoKey, aiLineComposeCost, filterChipText, quoteInLine, styleToType, maskName,
@@ -266,6 +269,11 @@ export async function aiLineVarTokensFor(companyId: string): Promise<Set<string>
 }
 
 export interface LineIntakeResult {
+  /** ★ 2026-10-28 AI 메모리 설계 K4-4 · K13-7 — 문자 종류(사실 읽기 판정 · 모르면 null) · 칩 라벨(서버가 내린다) */
+  contentType: CopyContentType | null;
+  contentTypes: Array<{ key: CopyContentType; label: string }>;
+  /** ★ 2026-10-28 K3-2 목소리 회사 = 안 이름(서버 variantNamesFor · 키는 그대로) · 아니면 null(화면 기본 이름) */
+  typeNames: Record<'emo' | 'benefit' | 'mz', string> | null;
   filters: Record<string, any>;
   allCustomers: boolean;
   conditions: Array<{ key: string; label: string; text: string; origin: 'line' | 'ai' }>;
@@ -293,7 +301,7 @@ export interface LineIntakeResult {
   /** ★ 2026-10-20 묻는 목록 한 자리(AI 가 한 줄을 읽고 판단 + 규칙 안전망 · 설계서 §17) — 비면 묻지 않고 다음 */
   asks: AiLineAsk[];
   /** ★ 2026-10-20 브랜드 말투를 배웠는가(성격별) — 모르면 null(안내 줄을 그리지 않는다) */
-  voice: { learned: boolean; marketing: boolean; notice: boolean } | null;
+  voice: { learned: boolean; marketing: boolean; notice: boolean; status: VoiceStatus } | null;
   /** ★ 2026-10-21 추천 칼럼(대상 상세와 분리 · 처음 대상이 0명이어도 남는다 · 칩을 끈 뒤 칼럼 단계가 미리 체크에 쓴다) */
   recommendedVars: string[];
 }
@@ -375,8 +383,9 @@ async function audienceDetail(companyId: string, audience: HubAudience, count: n
 /** 성격별 브랜드 말투 학습 여부(확인 판 안내 줄) — 조회 실패 = null(안내를 그리지 않는다 · 생성은 그대로) */
 async function lineVoiceFit(companyId: string): Promise<LineIntakeResult['voice']> {
   try {
-    const [m, n] = await Promise.all([getBrandVoiceFit(companyId, 'marketing'), getBrandVoiceFit(companyId, 'notice')]);
-    return { learned: m.learned, marketing: m.kindLearned, notice: n.kindLearned };
+    const [m, n, snap] = await Promise.all([getBrandVoiceFit(companyId, 'marketing'), getBrandVoiceFit(companyId, 'notice'), getBrandVoiceSnapshot(companyId)]);
+    // ★ 2026-10-28 K13-7 · K7-5 — 칩 상태(학습 미완 = [다시 배우기 · 6] · 확인 대기 · 견본 미완) = AI 메모리와 같은 판정
+    return { learned: m.learned, marketing: m.kindLearned, notice: n.kindLearned, status: voiceStatusOfSnapshot(snap) };
   } catch (err: any) {
     console.warn('[ai-line] 브랜드 말투 조회 실패:', err?.message);
     return null;
@@ -417,7 +426,12 @@ export async function runLineIntake(v: AiLineViewer, line: string, now: Date = n
   }
   const rt = styleToType(target.recommended_style);
   const ch = String(target.recommended_channel || 'LMS').toUpperCase();
+  // ★ 2026-10-28 AI 메모리 설계 K4-4 · K13-7 — 종류 = 사실 읽기 판정(화면 칩 · 1클릭 바꾸기 · 광고 칩과 독립)
+  const contentType = isCopyContentType(target.content_type) ? target.content_type : null;
   return {
+    contentType,
+    contentTypes: COPY_CONTENT_TYPES.map((key) => ({ key, label: COPY_CONTENT_TYPE_LABEL[key] })),
+    typeNames: voice?.learned ? (([a, b, c]) => ({ emo: a, benefit: b, mz: c }))(variantNamesFor(true, '')) : null,
     filters, allCustomers, conditions, untranslated, count, zeroReason,
     reasoning: String(target.reasoning || ''),
     top, sampleCustomer, columns,
@@ -512,6 +526,8 @@ export interface LineComposeInput {
   channel: 'SMS' | 'LMS' | 'MMS';
   isAd: boolean;
   attemptToken: string;
+  /** ★ 2026-10-28 K4-4 화면 종류 칩(사람이 고른 것 = 입력 종류 · 없으면 광고 여부로 성격) */
+  contentType?: CopyContentType | null;
 }
 
 export interface LineComposeCard { type: AiLineCopyType; label: string; body: string; subject: string; byteCount: number }
@@ -535,6 +551,7 @@ export async function runLineCompose(v: AiLineViewer, input: LineComposeInput, n
   const copyKey = aiLineCopyKey(v.companyId, input.attemptToken, {
     line: input.line, facts: input.facts, filters: input.filters, allCustomers: input.allCustomers,
     types: input.types, vars: input.vars, channel, isAd: input.isAd,
+    ...(input.contentType ? { contentType: input.contentType } : {}),   // 종류 없음 = 옛 모양(같은 시도 재요청 키 무변)
   });
   return withKeyLock(copyKey, async () => {
   // ★ Codex 1R high — 같은 시도를 이미 냈으면: 기억한 결과 그대로 · 없으면 다시 만들되 낸 종류 수까지만 · 잔액 확인 · 차감 0
@@ -586,7 +603,9 @@ export async function runLineCompose(v: AiLineViewer, input: LineComposeInput, n
         licenseText,
         exactVars: input.vars,
         // ★ 2026-10-20 문자 성격(광고 여부 하나) = 그 성격의 브랜드 보이스 가이드라인 · 대표 문안만
-        voiceKind: lineVoiceKind(input.isAd),
+        // ★ 2026-10-28 K4-4 — 사람이 고른 종류가 있으면 성격은 종류에서(광고 여부는 법 축만)
+        voiceKind: input.contentType ? kindOfContentType(input.contentType) : lineVoiceKind(input.isAd),
+        ...(input.contentType ? { contentType: input.contentType } : {}),
       },
     );
   });
@@ -605,7 +624,9 @@ export async function runLineCompose(v: AiLineViewer, input: LineComposeInput, n
     const vv = byType.get(t);
     const body = String(vv?.message_text || '').trim();
     if (!body) continue;
-    cards.push({ type: t, label: AI_LINE_TYPE_LABEL[t], body, subject: String(vv?.subject || '').trim(), byteCount: Number(vv?.byte_count) || 0 });
+    // ★ 2026-10-28 K3-2 목소리 회사 = 서버 이름(우리 문자처럼 · 혜택 먼저 · 짧게) · 아니면 지금 이름
+    const label = (generated as any).voice_mode === true && vv?.variant_name ? String(vv.variant_name) : AI_LINE_TYPE_LABEL[t];
+    cards.push({ type: t, label, body, subject: String(vv?.subject || '').trim(), byteCount: Number(vv?.byte_count) || 0 });
   }
   if (cards.length === 0) throw new AiLineError('COMPOSE_EMPTY', '문안을 만들지 못했어요. 잠시 뒤 다시 눌러 주세요. 크레딧은 빠지지 않았어요.', 502);
 

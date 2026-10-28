@@ -68,7 +68,7 @@ export default function CdpIntegrationDashboard({
     <section className="space-y-4">
       {/* 요약 지표 3개 — 숫자만 크게, 설명은 작게(§5-1) */}
       {!hideSummary && <div className="flex flex-wrap items-stretch gap-2.5" aria-live="polite">
-        <SummaryTile n={summary.receiving} label="데이터 수신 중" tone="text-emerald-700" />
+        <SummaryTile n={summary.receiving} label="연결됨" tone="text-emerald-700" />
         <SummaryTile n={summary.preparing} label="연동 준비 중" tone="text-violet-800" />
         <SummaryTile n={summary.action} label="조치 필요" tone="text-rose-800" />
         {onRefresh && (

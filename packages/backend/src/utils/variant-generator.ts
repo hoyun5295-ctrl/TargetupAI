@@ -18,6 +18,8 @@
  */
 
 import { callAIWithFallback } from '../services/ai';
+import { composeVoicePrompt } from './brand-voice-prompt';
+import { resolveCopyIntent } from './copy-content-type';
 import { UserFacingError } from './http-error';
 import { getCreditCost } from './ai-credit-calc';
 import { runChargedAi, InsufficientCreditError } from './ai-credit';
@@ -133,8 +135,12 @@ ${baseMessage}
     const { result: chargedOut } = await runChargedAi({
       companyId: companyId, cost: getCreditCost('variant-generator'), source: 'variant-generator', createdBy: null,
       run: async () => {
+        // ★ 2026-10-28 AI 메모리 설계 K11-1 · K11-5 — 변형 3안 = 쓰기 · 목소리 회사 = 톤 칸 줄 대신 가이드라인 톤 · 예시
+        const voice = await composeVoicePrompt({
+          companyId, producer: 'variant-generator', mode: 'write', kind: resolveCopyIntent({ isAd: true }).kind, channel, isAd: true, basePrompt: system,
+        });
         const text = await callAIWithFallback({
-          system,
+          system: voice.voiceLearned ? voice.system.replace(/- 브랜드 톤: [^\n]*\n/, '') : voice.system,
           userMessage,
           maxTokens: 2000,
           temperature: 0.7,

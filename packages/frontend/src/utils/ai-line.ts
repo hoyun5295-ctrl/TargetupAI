@@ -41,6 +41,9 @@ export interface AiLineAsk {
   source: 'ai' | 'rule';
 }
 
+/** ★ 2026-10-28 문자 종류(행사 · 신제품 · 기능 · 안부 · 공지) */
+export type AiLineContentType = 'promo' | 'launch' | 'howto' | 'greeting' | 'notice';
+
 export interface AiLineIntake {
   filters: Record<string, unknown>;
   allCustomers: boolean;
@@ -63,8 +66,13 @@ export interface AiLineIntake {
   needAudience: boolean;
   /** ★ 2026-10-20 묻는 목록(비면 묻지 않고 다음 · 1020 앞에 저장된 진행 = 없음) */
   asks?: AiLineAsk[];
-  /** ★ 2026-10-20 브랜드 말투 학습(성격별) · 모르면 null */
-  voice?: { learned: boolean; marketing: boolean; notice: boolean } | null;
+  /** ★ 2026-10-20 브랜드 말투 학습(성격별) · 모르면 null · ★ 2026-10-28 status = AI 메모리와 같은 칩 판정 */
+  voice?: { learned: boolean; marketing: boolean; notice: boolean; status?: 'none' | 'incomplete' | 'review_pending' | 'sample_pending' | 'ready' } | null;
+  /** ★ 2026-10-28 AI 메모리 설계 K4-4 · K13-7 — 문자 종류(사실 읽기 판정 · 모르면 null) · 칩 라벨(서버) */
+  contentType?: AiLineContentType | null;
+  contentTypes?: Array<{ key: AiLineContentType; label: string }>;
+  /** ★ 2026-10-28 K3-2 목소리 회사 = 서버가 정한 안 이름(없으면 화면 기본 이름) */
+  typeNames?: Partial<Record<string, string>> | null;
   /** ★ 2026-10-21 이 한 줄에 맞는 추천 칼럼(대상 상세와 분리 · 처음 대상이 0명이어도 남는다) */
   recommendedVars?: string[];
 }
@@ -111,6 +119,8 @@ export interface AiLineRun {
   facts: { benefit: string | null; period_end: string | null; answers?: Array<{ q: string; a: string }> } | null;
   /** ★ 2026-10-20 문자 성격을 사람이 바꿨으면(true = 마케팅 · 광고 / false = 안부 · 알림) · null = 대상 찾기 판정 */
   isAd: boolean | null;
+  /** ★ 2026-10-28 K13-7 문자 종류를 사람이 바꿨으면 그 값 · 없으면 대상 찾기 판정(광고 칩과 독립) */
+  contentType?: AiLineContentType | null;
   branch: AiLineBranch;
   intake: AiLineIntake | null;
   /** 꺼 둔 조건 키(기본 = 전부 켬) */
@@ -324,6 +334,7 @@ export const aiLineApi = {
   compose: (body: {
     line: string; facts: AiLineRun['facts']; filters: Record<string, unknown>; allCustomers: boolean;
     types: AiLineCopyType[]; vars: string[]; channel: AiLineChannel; isAd: boolean; attemptToken: string;
+    contentType?: AiLineContentType | null;
   }) => call<{ cards: AiLineCard[]; channel: AiLineChannel; count: number; charged: { base: number; copies: number } }>('/compose', body),
   decorate: (body: { body: string; vars: string[]; channel: AiLineChannel; isAd: boolean; attemptToken: string }) =>
     call<{ body: string; changed: boolean; charged: number }>('/decorate', body),

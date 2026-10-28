@@ -1433,13 +1433,21 @@ export async function insertAlimtalkQueue(
         [getSourceRef(appEtc1)],
       );
       if (dup.rows.length > 0) return; // 기존 경로가 이미 이 캠페인 문안을 적재함
+      // ★ 2026-10-28 AI 메모리 설계 K10-1 — 본문 = 같은 회사 승인 템플릿 원문 · 못 읽으면 적재 0(첫 수신자 렌더본 금지)
+      if (!first.templateCode) return;
+      const tpl = await query(
+        `SELECT content FROM kakao_templates WHERE company_id = $1 AND template_code = $2 LIMIT 1`,
+        [first.companyId, first.templateCode],
+      );
+      const tplText = String(tpl.rows[0]?.content || '');
+      if (!tplText.trim()) return;
       await logCampaignTraining({
         campaignId: appEtc1,
         companyId: first.companyId,
         messageType: 'KAKAO',
         isAd: false,
         targetCount: inserted,
-        finalMessage: first.message,
+        finalMessage: tplText,
         finalSource: 'manual',
       });
     } catch { /* 학습 적재 실패는 발송에 영향 없음 */ }

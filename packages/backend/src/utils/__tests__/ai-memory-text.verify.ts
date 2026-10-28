@@ -70,7 +70,7 @@ console.log('[ai-memory-text] diffGuideline — 첫 등록·무변화 null / 톤
 const baseG = {
   tone_signature: '정보/실용', avg_length_chars: 245,
   cta_patterns: ['지금 확인'], emoji_whitelist: ['★'],
-  greeting_pattern: '안녕하세요', ad_prefix_position: 'front', reject_position: 'back',
+  greeting_pattern: '안녕하세요',
 };
 
 ok('첫 등록(prev 없음) → null', () =>

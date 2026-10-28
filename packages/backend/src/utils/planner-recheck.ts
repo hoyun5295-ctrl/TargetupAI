@@ -10,7 +10,7 @@
  *   - 승인 CT 와 같은 잠금 순서(월 원장 → 행사 → 접점) · 쓰기는 읽어 둔 recheck · copy 와 같을 때만(CAS · 그 사이 바뀌면 409 + 최신 화면).
  *   - 사람 고친 글 보존 — 새 문안은 `recheck.proposal` 로 따로 두고, 고른 쪽만 copy 가 된다(B3 · 행사 리비전 · 상태 그대로).
  *   - 새 문안 = AI 1회(회사 부담 · 크레딧 묶음 · 원가 0) + 실주소 DM 링크 검사(재생성 2회) · 하루 1회 · 혜택이 빠지거나 원문에 없던 숫자가 생기면 버린다.
- *   - 통지 = 받는 사람 하나를 `pickOperatorFallbackContact` 가 정한다 → 그 번호로 보내고 그 계정을 기록한다(B8 · 링크 권한의 주인).
+ *   - 통지 = 받는 사람 하나를 `pickOwnerContact`(utils/owner-contact.ts) 가 정한다 → 그 번호로 보내고 그 계정을 기록한다(B8 · 링크 권한의 주인).
  *   - 링크 인증 = 기기에 묶인 세션(sender-auth `checkStrictSenderAuth` · B5) · 통과로 접는 앞단 없음 · 회사 스위치(PLANNER_LINK_APPROVE_COMPANY_IDS) 빈 값 = 링크 보내기 닫힘.
  *   - 승인 직후 즉시 실행은 이 파일이 하지 않는다(실행부 순환 import 금지) — 라우트가 `kickPlannerTouchpointNow`(실행부 · 발송 시간대 안에서만 · B1)를 부른다.
  *   - 고객 문장은 사유 사전(planner-reasons) · 원문 오류는 로그에만 · 줄표 0.
@@ -27,7 +27,8 @@ import { renderDmViewerHtml } from './dm/dm-viewer';
 import { maskPhone } from './mfa';
 import { isStrictSenderAuthAlive } from './sender-auth';
 import { normalizePhone } from './normalize-phone';
-import { pickOperatorFallbackContact, notifyOperatorAdmins } from './continuous-operator';
+import { notifyOperatorAdmins } from './continuous-operator';
+import { pickOwnerContact } from './owner-contact';
 import { PlannerTouchpointRow, loadEventTouchpoints, loadTouchpointById, loadAllLiveTouchpoints, notifyPlanner, guardPlannerMetaOrSkip, setTouchpointMetaIfCopyIs, touchpointSendStarted } from './planner-touchpoint';
 import { PLANNER_NOTICE_HEADER, PLANNER_SEND_SOURCE, addDays, appendDmLink, kstDateString, resolveAudienceMode } from './planner-execution';
 import { PlannerEventRow, loadPlannerEvent, firstSendDate } from './planner-event';
@@ -559,7 +560,7 @@ export function buildRecheckNotice(input: {
 
 /** 통지 1통(링크) — 받는 사람 하나를 정하고(B8) · 토큰을 먼저 기록한 뒤 보낸다 · 못 보냈으면 기록을 되돌려 다음 주기가 다시 보낸다. */
 async function notifyRecheck(p: RecheckPair, now: Date): Promise<boolean> {
-  const contact = await pickOperatorFallbackContact(p.ev.companyId, p.ev.createdBy).catch(() => null);
+  const contact = await pickOwnerContact(p.ev.companyId, p.ev.createdBy).catch(() => null);
   if (!contact) {
     console.warn(`[planner-recheck] 통지 받을 담당자 번호 없음 carrier=${p.carrier.id}`);
     return false;
@@ -594,7 +595,7 @@ async function notifyRecheck(p: RecheckPair, now: Date): Promise<boolean> {
 
 /** 17시 리마인드 1회 — 새 링크를 만들지 않는다(앞서 보낸 링크로 · 열려 있는 화면을 죽이지 않게). 받는 사람 = 같은 함수. */
 async function remindRecheck(p: RecheckPair, now: Date): Promise<boolean> {
-  const contact = await pickOperatorFallbackContact(p.ev.companyId, p.ev.createdBy).catch(() => null);
+  const contact = await pickOwnerContact(p.ev.companyId, p.ev.createdBy).catch(() => null);
   if (!contact) return false;
   const stamp = now.toISOString();
   if (!(await patchRecheck(p, { remindedAt: stamp }))) return false;

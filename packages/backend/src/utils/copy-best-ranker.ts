@@ -22,8 +22,9 @@ export function scoreCandidate(row: CandidateRow): number {
   let score = 0;
   // 사람 선택 신호(Tier 0): 실무자가 고른/수정한 문안 우대
   const fs = row.final_source || '';
-  if (fs === 'selected_as_is' || fs === 'edited') score += 0.3;
-  else if (fs === 'manual') score += 0.15;
+  // ★ 2026-10-28 AI 메모리 설계 K10-3 — 사람 손이 닿은 글(고침 · 직접 씀) 0.3 · AI 안 그대로 0.15(두 값의 자리만 바꿈)
+  if (fs === 'edited' || fs === 'manual') score += 0.3;
+  else if (fs === 'selected_as_is') score += 0.15;
   // 스팸 이력: 없으면 우대, 있으면 강한 감점
   if ((row.spam_blocked || 0) > 0) score -= 0.5;
   else score += 0.2;

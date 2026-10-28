@@ -288,9 +288,9 @@ describe('⑥ 배선 계약', () => {
   it('B8 — 통지 받는 사람은 함수 하나(번호 없는 통지와 재확인 링크가 같이 쓴다)', () => {
     const co = src('utils/continuous-operator.ts');
     const notify = co.slice(co.indexOf('export async function notifyOperatorAdmins'), co.indexOf('export async function notifyOperatorAdmins') + 3000);
-    expect(notify).toMatch(/pickOperatorFallbackContact\(/);
+    expect(notify).toMatch(/pickOwnerContact\(/);   // ★ 2026-10-28 B-1028-1 = utils/owner-contact.ts 한 곳(여정 안내 두 종도 같은 함수)
     const rc = src('utils/planner-recheck.ts');
-    expect(rc).toMatch(/pickOperatorFallbackContact\(p\.ev\.companyId, p\.ev\.createdBy\)/);
+    expect(rc).toMatch(/pickOwnerContact\(p\.ev\.companyId, p\.ev\.createdBy\)/);
     expect(rc).toMatch(/notifiedUserId: contact\.userId/);
     expect(rc).toMatch(/adminPhoneNumbers: \[contact\.phone\]/);
   });

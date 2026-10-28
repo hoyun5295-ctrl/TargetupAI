@@ -21,13 +21,15 @@ import { callAIWithFallback, getKoreanCalendar } from '../services/ai';
 import { randomUUID, createHash } from 'crypto';
 import { buildMemoryPromptContext } from './company-memory';
 // ★ D225+ (2026-05-28 Harold 명시): Brand Voice Learning — 회사별 LMS 대표 문안 5건 + 가이드라인 자동 주입.
-import { buildSystemPromptWithBrandVoice } from './brand-voice-prompt';
+import { composeVoicePrompt, VOICE_KIND_BY_STEP, getBrandVoiceSnapshot, voiceLearnedOf, resolveGuidelineFor } from './brand-voice-prompt';
+import { resolveCopyIntent, isCopyContentType, type CopyContentType } from './copy-content-type';
+import { rewriteShapeDrift, shapeIssues } from './copy-shape';
 // ★ 2026-06-23: 비카카오 여정 광고 표기 강제 정책 — AI 정보성 오판으로 (광고) 누락 차단.
 import { resolveJourneyAdFlag } from './journey-ad-policy';
 import { query } from '../config/database';
 import { sanitizeForSms } from './message-sanitizer';
 // ★ 2026-06-30: AI가 본문에 박은 (광고)/무료수신거부 제거 — body는 순수 본문, (광고)+080은 발송 시 buildAdMessage 자동 합성.
-import { stripAdParts } from './messageUtils';
+import { stripAdParts, ensureSenderName } from './messageUtils';
 // ★ D210+ Phase 2 (Harold 명시 2026-05-23): CT-58 — 회사 customer DB 실측 프로필 동적 주입.
 //   본질 = AI가 어설픈 변수 임의 작성 차단 (Harold 명시: "개인화 어설프게 실수로 들어가는게 더 안좋다").
 import { getCompanyDataProfile, formatProfileForAiPrompt } from './company-data-profile';
@@ -46,7 +48,7 @@ import { formatConditionMenuForAi } from './journey-condition-fields';
 // 추천 문구의 단일 출처 — "이어서 만들기"와 기회 카드가 같은 목표 골격을 쓴다.
 import { presetObjectiveFor } from './journey-opportunities';
 // ★ 2026-08-02 (Codex 1R): AI가 지어낸 혜택 기계 차단 — 프롬프트는 경계가 아니다.
-import { findNewNumbers, stripUnauthorizedBenefits, claimsInventedEfficacy, dropInventedEfficacyTitledBody, efficacyNote, EFFICACY_PROMPT_RULES, EFFICACY_REWRITE_RULE } from './copy-benefit-detector';
+import { findNewNumbers, stripUnauthorizedBenefits, claimsInventedEfficacy, dropInventedEfficacyTitledBody, efficacyNote, findSeasonWords, dropSeasonSentences, seasonNote, EFFICACY_PROMPT_RULES, EFFICACY_REWRITE_RULE } from './copy-benefit-detector';
 // ★ 2026-09-27 한줄로 V2 R260 — 여정 자동 생성은 사전 확인 → 묶음 생성 → 1회 차감
 import { checkCredit, deductCreditOutcome, isChargedByKey, CreditSettleError, runChargedAi } from './ai-credit';
 import { joinInflight } from './inflight-lock';
@@ -133,6 +135,8 @@ export interface GeneratedStep {
   subject: string;
   isAd: boolean;
   stepIntent: string;
+  /** ★ 2026-10-28 AI 메모리 설계 K11-4 — 이 단계 종류(목소리 회사 = 단계마다 받는다 · 없으면 null = 목적 코드 → 광고 여부 순) · 단계 다듬기가 이어받는다 */
+  contentType?: CopyContentType | null;
 }
 
 export interface JourneyAIPackage {
@@ -198,6 +202,8 @@ export interface StepRefineInput {
   channel: 'sms' | 'lms' | 'mms';
   isAd: boolean;
   stepIntent?: string;
+  /** ★ 2026-10-28 K11-4 그 단계의 종류(생성 때 정한 값 · 없으면 광고 여부로 성격) */
+  contentType?: CopyContentType | null;
   journey?: JourneyStepAiContext;
   /**
    * ★ 2026-08-08 — 후보를 몇 개 만들 것인가(1 또는 3, 기본 3).
@@ -660,28 +666,59 @@ VIP 회원님께 먼저 전하는 이번 안내,
   }
 
   // ★ D225+ Brand Voice Learning — 회사별 가이드라인 자동 주입 (회사 등록 미존재 시 옛 흐름 그대로)
-  system = await buildSystemPromptWithBrandVoice(input.companyId, system);
+  // ★ 2026-10-28 AI 메모리 설계 K11-4 — 여정 패키지 = 한 호출이 여러 단계 · 성격별 목소리 블록 둘 + 단계마다 contentType 칸(목소리 없는 회사 = 지금 글자)
+  system = (await composeVoicePrompt({
+    companyId: input.companyId, producer: 'journey-package', mode: 'write', kind: VOICE_KIND_BY_STEP, channel: 'LMS', isAd: true, basePrompt: system,
+    outputFormat: '[출력 다시 확인] 앞에서 정한 JSON 하나 · steps 마다 "contentType" 칸을 더한다.',
+  })).system;
 
   // ★ D209+ (Harold 명시 2026-05-22): Sonnet 4.6 전환 — 기존 ai.ts generateMessages 시스템 프롬프트
   //   매트릭스(D152 + D80 정합) 정합 본질 + 비용 80% 절감.
   //   Phase D 통합: companyId + source 전달 → 회사별 월 한도 + cache + 통계 자동 활성.
-  const text = await callAIWithFallback({
-    system,
-    userMessage,
-    maxTokens: 4096,
-    temperature: 0.4,
-    model: 'opus',
-    companyId: input.companyId,
-    source: 'journey-ai-generate',
-  });
-
-  let parsed: any;
-  try {
-    parsed = extractJsonFromAiText(text);
-  } catch (err: any) {
-    console.error('[journey-ai-generator] JSON parse 실패. raw:', text.slice(0, 500));
-    throw new UserFacingError(422, 'AI_RESULT_INVALID', 'AI가 여정을 만들지 못했어요. 다시 해 주세요.');
+  const callPackage = async (hint: string): Promise<any> => {
+    const text = await callAIWithFallback({
+      system,
+      userMessage: userMessage + hint,
+      maxTokens: 4096,
+      temperature: 0.4,
+      model: 'opus',
+      companyId: input.companyId,
+      source: 'journey-ai-generate',
+    });
+    try {
+      return extractJsonFromAiText(text);
+    } catch (err: any) {
+      console.error('[journey-ai-generator] JSON parse 실패. raw:', text.slice(0, 500));
+      throw new UserFacingError(422, 'AI_RESULT_INVALID', 'AI가 여정을 만들지 못했어요. 다시 해 주세요.');
+    }
+  };
+  let parsed: any = await callPackage('');
+  // ★ 2026-10-28 AI 메모리 설계 K1-7 — 여정은 연중 나간다 · 목표에 없는 계절 · 월 낱말이 실리면 그 낱말을 짚어 1회 다시 쓴다
+  //   (다시 써도 남은 문장은 아래 단계 출구가 뺀다 · 다시 쓰기가 실패하면 첫 결과로 간다)
+  const seasonGround = [objectiveText, benefitText].filter(Boolean).join('\n');
+  const seasonHits = Array.isArray(parsed.steps)
+    ? Array.from(new Set(parsed.steps.flatMap((s: any) => findSeasonWords(`${aiStr(s?.subject)}\n${aiStr(s?.messageTemplate)}`, seasonGround))))
+    : [];
+  // ★ 2026-10-28 K11-4 — 목소리 회사 = 단계마다 그 단계 성격의 모양 기준으로 잰다(측정 칸만 · SMS 줄 검사 제외) · 걸리면 같은 다시 쓰기 1회에 싣는다
+  const voiceSnap = await getBrandVoiceSnapshot(input.companyId).catch(() => null);
+  const shapeHits: string[] = [];
+  if (voiceSnap && voiceLearnedOf(voiceSnap) && Array.isArray(parsed.steps)) {
+    for (const st of parsed.steps) {
+      const kind = resolveCopyIntent({ inputType: st?.contentType, purpose: { journeyTemplate: aiStr(parsed.templateCode) }, isAd: true }).kind;
+      const shape = resolveGuidelineFor(voiceSnap, kind)?.shape;
+      const ch = String(st?.channel || 'lms').toUpperCase();
+      for (const issue of shapeIssues(aiStr(st?.messageTemplate), shape && shape.n > 0 ? shape : null, ch)) shapeHits.push(`${Number(st?.stepOrder) || '?'}단계 ${issue}`);
+    }
   }
+  if (seasonHits.length > 0 || shapeHits.length > 0) {
+    const hint = [
+      seasonHits.length > 0 ? `앞선 결과에 목표에 없는 시점 말(${seasonHits.join(' · ')})이 들어갔습니다. 이 여정은 연중 나가니 계절 · 월 · 날씨 · 명절 말 없이 다시 쓰세요.` : '',
+      shapeHits.length > 0 ? `회사 문자 모양과 다른 곳: ${shapeHits.slice(0, 6).join(' / ')}. 그 단계 성격의 회사 모양대로 다시 쓰세요.` : '',
+    ].filter(Boolean).join(' ');
+    parsed = await callPackage(`\n\n[다시 쓰기] ${hint}`)
+      .catch(() => parsed);
+  }
+  let seasonDroppedPkg = 0;
 
   const rawSteps: any[] = Array.isArray(parsed.steps) ? parsed.steps : [];
   // ★ 2026-09-29 V2 0차 ⑧ — 옛: 5칸 넘으면 조용히 잘랐다. 이제 여정 칸 상한(CT)을 넘을 때만 거부한다(자르지 않는다).
@@ -712,13 +749,22 @@ VIP 회원님께 먼저 전하는 이번 안내,
       //   **생성 경로에는 빠져 있었다**). 근거로 인정하는 것은 사용자가 준 목표 하나뿐 —
       //   프리셋 1클릭 경로는 목표에 혜택이 없으므로 숫자가 나오면 전부 창작이다.
       // ★ 2026-10-24 ② 혜택 → 효능(제목 + 본문 = 이어 읽는 단위 · 본문 = 문장 빼기 · 다 빠지면 직접 채울 자리 · 제목 = 비워도 되는 칸)
-      ...((g) => { effDroppedPkg += g.dropped; return { messageTemplate: g.body, subject: g.subject }; })(dropInventedEfficacyTitledBody(
+      ...((g) => {
+        effDroppedPkg += g.dropped;
+        // ★ 2026-10-28 K1-7 계절 낱말 = 문장 빼기(제목은 비워도 되는 칸) · K1-1 광고 단계 = 첫 줄 또는 제목에 전송자 명칭
+        const season = dropSeasonSentences(g.body, seasonGround);
+        seasonDroppedPkg += season.dropped.length;
+        const subject = findSeasonWords(g.subject, seasonGround).length > 0 ? '' : g.subject;
+        const named = ensureSenderName(season.text, { isAd: resolveJourneyAdFlag(channel, s.isAd), channel, subject, names: [ctx.brandName, ctx.companyName] });
+        return { messageTemplate: named.text, subject };
+      })(dropInventedEfficacyTitledBody(
         stripUnauthorizedBenefits(stripAdParts(subjectSan.sanitized), benefitBasis),
         stripUnauthorizedBenefits(stripAdParts(messageSan.sanitized), benefitBasis),
         efficacyBasis,
       )),
       isAd: resolveJourneyAdFlag(channel, s.isAd),
       stepIntent: aiStr(s.stepIntent).slice(0, 100),
+      contentType: isCopyContentType(s.contentType) ? s.contentType : null,
     };
   });
 
@@ -803,7 +849,7 @@ VIP 회원님께 먼저 전하는 이번 안내,
     goalExitDefault: defaultGoalExitFor(triggerEvent),
     // ★ 2026-10-23 AI 가 칸으로 못 담은 조건도 알린다(옛: AI 가 그 조건을 아예 안 내면 「반영 안 됨」도 없이 더 넓게 나갔다)
     // ★ 2026-10-24 ② 뺀 효능 수 = 서버 문장(패키지 안내 목록 · 인터뷰 창이 그대로 그린다)
-    droppedConditionNotices: [...cond.droppedNotices, ...unsupportedConditionNotices(parsed.unsupportedConditions), ...(efficacyNote('generate', effDroppedPkg) ? [efficacyNote('generate', effDroppedPkg)!] : [])],
+    droppedConditionNotices: [...cond.droppedNotices, ...unsupportedConditionNotices(parsed.unsupportedConditions), ...(efficacyNote('generate', effDroppedPkg) ? [efficacyNote('generate', effDroppedPkg)!] : []), ...(seasonDroppedPkg > 0 ? [seasonNote(seasonDroppedPkg)] : [])],
     targetSummary: describeJourneyTarget(triggerEvent, triggerFilters),
   };
 }
@@ -932,8 +978,12 @@ ${single
     ? `원본 메시지:\n${input.currentMessage}\n\n위 메시지를 ${countPhrase} 다듬어 JSON으로 응답하세요. 혜택 placeholder + 변수는 그대로 유지하고 안내문/감성 텍스트만 정련하세요.`
     : `이 스텝의 문안을 처음부터 ${countPhrase} 써서 JSON으로 응답하세요. 위 [여정 맥락]의 트리거·목적·순번·발송 시점에 맞추고, [앞 스텝 문안]과 내용이 겹치지 않게 하세요. 구체 혜택은 지어내지 말고 placeholder로 두세요.`;
 
-  // ★ D225+ Brand Voice Learning — 회사별 가이드라인 자동 주입 (회사 등록 미존재 시 옛 흐름 그대로)
-  system = await buildSystemPromptWithBrandVoice(input.companyId, system);
+  // ★ 2026-10-28 AI 메모리 설계 K11-1 · K11-4 — 본문이 있으면 고치기(예시 0 · 원문 꼴 유지) · 없으면 쓰기 · 성격 = 그 단계 종류(없으면 광고 여부)
+  system = (await composeVoicePrompt({
+    companyId: input.companyId, producer: 'journey-step-refine', mode: hasBody ? 'rewrite' : 'write',
+    kind: resolveCopyIntent({ inputType: input.contentType, isAd: input.isAd }).kind, contentType: isCopyContentType(input.contentType) ? input.contentType : null,
+    channel: input.channel.toUpperCase(), isAd: input.isAd, basePrompt: system,
+  })).system;
 
   // ★ D209+ (Harold 명시 2026-05-22): Sonnet 4.6 전환 — D152 AI 다듬기 정합 본질
   //   (기존 ai.ts 흐름과 동일 모델) + 비용 80% 절감.
@@ -981,7 +1031,16 @@ ${single
     .filter((c) => c.message.trim().length > 0)   // ★ 1026 Codex 3R — 빈 후보({} · 다 지워진 글) = 후보 아님(쓸 결과 판정)
     .filter((c) => !hasBody || findNewNumbers(c.message, input.currentMessage || '').length === 0)
     // ★ 2026-10-24 ② 근거(currentMessage · 혜택과 같은 근거) 없는 효능 단정이 든 안은 버린다(생성 모드 = 근거 0 · 혜택과 같은 엄격함)
-    .filter((c) => !claimsInventedEfficacy(c.message, input.currentMessage || ''));
+    .filter((c) => !claimsInventedEfficacy(c.message, input.currentMessage || ''))
+    // ★ 2026-10-28 K11-1 고치기 출구 대조 — 원문이 있으면 그 꼴이 무너진 안은 버린다(I12)
+    .filter((c) => !hasBody || rewriteShapeDrift(input.currentMessage, c.message).length === 0)
+    // ★ 2026-10-28 K1-7 — 근거(원문 · 여정 목표)에 없는 계절 · 월 낱말이 든 안은 버린다(여정은 연중 나간다)
+    .filter((c) => findSeasonWords(c.message, [input.currentMessage || '', jc?.objective || ''].join('\n')).length === 0)
+    // ★ 2026-10-28 K1-1 — 광고 단계 = 첫 줄에 전송자 명칭(숫자 대조 뒤에 붙인다 · 이름의 숫자가 새 숫자로 잡히지 않게)
+    .map((c) => {
+      const n = ensureSenderName(c.message, { isAd: input.isAd, channel: input.channel, names: [ctx.brandName, ctx.companyName] });
+      return n.added ? { ...c, message: n.text, bytes: getBytes(n.text) } : c;
+    });
 
   return { candidates };
 }
@@ -1035,7 +1094,10 @@ ${memoryContext}
 [출력 JSON: 다른 텍스트 금지]
 { "subject": "제목 한 줄", "message": "본문" }`;
 
-  system = await buildSystemPromptWithBrandVoice(input.companyId, system);
+  // ★ 2026-10-28 K11-1 — 기준일 단계 = 쓰기 · LMS 광고 단계(성격 = 광고 여부)
+  system = (await composeVoicePrompt({
+    companyId: input.companyId, producer: 'journey-anchor-step', mode: 'write', kind: resolveCopyIntent({ isAd: true }).kind, channel: 'LMS', isAd: true, basePrompt: system,
+  })).system;
 
   const userMessage = `여정 목표(회사 입력): ${String(input.objective || '').trim() || '(미입력)'}\n\n위 목표와 발송 시점(${timing})에 맞춰 LMS 제목+본문 1건을 JSON으로 응답하세요. 구체 혜택은 placeholder로 두세요.`;
 
@@ -1061,8 +1123,9 @@ ${memoryContext}
     stripUnauthorizedBenefits(stripAdParts(sanitizeForSms(aiStr(parsed.message).slice(0, 4000)).sanitized), benefitBasis),
     benefitBasis,
   );
-  const subj = g.subject;
-  const msg = g.body;
+  // ★ 2026-10-28 K1-7 계절 낱말 = 문장 빼기(근거 = 목표문 · 제목은 비워도 되는 칸) · K1-1 기준일 단계 = LMS 광고 → 첫 줄 또는 제목에 전송자 명칭
+  const subj = findSeasonWords(g.subject, benefitBasis).length > 0 ? '' : g.subject;
+  const msg = ensureSenderName(dropSeasonSentences(g.body, benefitBasis).text, { isAd: true, channel: 'lms', subject: subj, names: [ctx.brandName, ctx.companyName] }).text;
   return { subject: subj, message: msg };
 }
 
@@ -1186,7 +1249,11 @@ ${EFFICACY_REWRITE_RULE}
 
 [출력: 다른 텍스트 없이 재작성된 문안만]`;
 
-  system = await buildSystemPromptWithBrandVoice(input.companyId, system);
+  // ★ 2026-10-28 K11-1 — 스팸 재작성 = 고치기(예시 0 · 원문 꼴 유지) · 성격 = 광고 여부
+  system = (await composeVoicePrompt({
+    companyId: input.companyId, producer: 'journey-spam-rewrite', mode: 'rewrite', kind: resolveCopyIntent({ isAd: input.isAd }).kind,
+    channel: input.channel.toUpperCase(), isAd: input.isAd, basePrompt: system,
+  })).system;
 
   const userMessage = `원본 문안:\n${input.currentMessage}\n\n스팸필터에 걸린 표현: ${avoid.length ? avoid.join(', ') : '(불명, 광고성 과장·금지 표현 추정)'}\n\n위 표현을 피해 같은 의미로 1개 문안만 재작성하세요. 혜택·숫자·placeholder·Liquid는 그대로 두세요.`;
 
@@ -1220,5 +1287,16 @@ ${EFFICACY_REWRITE_RULE}
     console.log(`[journey-ai-refine] 원본에 없던 효능 말이 생겨 재작성을 버림 company=${input.companyId}`);
     return null;
   }
-  return out;
+  // ★ 2026-10-28 K11-1 고치기 출구 대조 — 원문의 줄바꿈 · 빈 줄 · 기호 꼴이 무너진 다시 쓰기는 버린다(I12)
+  if (out && rewriteShapeDrift(input.currentMessage, out).length > 0) {
+    console.log(`[journey-ai-refine] 원문 꼴이 무너져 재작성을 버림 company=${input.companyId}`);
+    return null;
+  }
+  // ★ 2026-10-28 K1-7 원본에 없던 계절 · 월 낱말도 같은 이유로 버린다
+  if (out && findSeasonWords(out, input.currentMessage).length > 0) {
+    console.log(`[journey-ai-refine] 원본에 없던 계절 낱말이 생겨 재작성을 버림 company=${input.companyId}`);
+    return null;
+  }
+  // ★ 2026-10-28 K1-1 광고 단계 = 첫 줄에 전송자 명칭(위 대조가 끝난 뒤)
+  return out ? ensureSenderName(out, { isAd: input.isAd, channel: input.channel, names: [ctx.brandName, ctx.companyName] }).text : out;
 }

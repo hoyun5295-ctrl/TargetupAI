@@ -1548,6 +1548,9 @@ describe('R7 넓힘(1025) — 스팸 결과를 읽는 함수 = 공용 판정 셋
 // ── R10 넓힘 ──
 /** 유틸 · 서비스의 한국어 일반 Error — 사람이 고칠 입력 · 상태가 아닌 것(내부 · 설정 · 외부 원문 · AI 해석 · DB 마이그레이션 안내) · 키 = 파일|문장 앞머리 */
 const PLAIN_ERROR_OK: Record<string, string> = {
+  // ★1028 자사몰 대비 K8 · M24 — 사용자 조건이 아닌 운영 · 위조 갈래(라우트가 고객 문장으로 따로 답한다)
+  "utils/oauth-pending.ts|승인 상태가 없습니다(만료 또는 변조).": "몰 콜백 위조 · 만료(콜백이 오류 화면으로 답함 · 코드 잘못 아님 · 고객 조건 아님)",
+  "utils/secret-box-reseal.ts|CDP_SECRET_BOX_KEY 가 없거나": "운영 스크립트 전제(키 없음 = 서버 설정 · 화면 경로 없음)",
   "utils/account-action.ts|SYSTEM_SMS_CALLBACK 환경변수": "서버 설정 누락(운영 설정 · 고객에게는 라우트 안내 문장)",
   "utils/agency-send-intake.ts|수신자 적재 불일치: 기대 … 실제 …": "내부 처리 실패(로그 · 경보 · 고객에게는 라우트 안내 문장)",
   "utils/agency-send-link.ts|JWT_SECRET 미설정: 승인 토큰을 서": "서버 설정 누락(운영 설정 · 고객에게는 라우트 안내 문장)",
@@ -1968,6 +1971,7 @@ const R15_EXTERNAL: Record<string, string> = {
   'email.ts POST /webhook': '메일 발송사 웹훅', 'email.ts GET /t/o/:token': '받은 메일 열람 픽셀', 'email.ts GET /t/c/:token': '받은 메일 클릭 추적',
   'email.ts GET /u/:token': '받은 메일 수신거부 링크', 'email.ts POST /u/:token': '받은 메일 수신거부 한 번 누르기(RFC 8058)',
   'cdp.ts POST /ingest': 'SDK 수집(고객사 사이트)', 'cdp.ts POST /member-token': 'SDK 회원 토큰(고객사 서버)', 'cdp.ts POST /identify': 'SDK(고객사 사이트)',
+  'cdp.ts POST /plugin/member-token': '워드프레스 플러그인 회원 토큰(몰 서버 · 플러그인 키 · ★1028 K8)',
   'cdp.ts POST /event': 'SDK(고객사 사이트)', 'cdp.ts POST /order': 'SDK(고객사 서버)', 'cdp.ts POST /journey-variants/:variantId/track': 'SDK(고객사 사이트)',
   'cdp.ts POST /webhook/custom': '자사몰 웹훅', 'cdp.ts GET /push/vapid-public-key': 'SDK 웹 푸시', 'cdp.ts POST /push/subscribe': 'SDK 웹 푸시',
   'cdp.ts POST /push/unsubscribe': 'SDK 웹 푸시', 'cdp.ts POST /bulk-import': '대량 가져오기(고객사 서버)',
@@ -2887,6 +2891,40 @@ describe('R22 신설(1027) 구매 사건 = 결제 확정 — 주문 사건 이�
   });
 });
 
+describe('R23 신설(1028) 식별 신뢰 등급 — 회원 정보 > 주문(빈 칸만) > 브라우저(잇기만)', () => {
+  /**
+   * identifyCustomer 를 부르는 파일마다 등급 · 이유(대상 = 소스에서 기계로 뽑은 부르는 곳 · 새 파일은 이 표에 줄 없이 들어오면 실패).
+   * 브라우저 수집(cdp-events.ts)은 표에 없다 = 부르면 실패(고객 칸 쓰기 0 · linkBrowserMember 로 잇기만 · M5).
+   */
+  const TIER: Record<string, string> = {
+    'routes/cdp.ts': 'profile · 몰 서버가 비밀키로 보낸 회원 정보(/identify)',
+    'routes/short-url.ts': 'profile · 칸 없음(외부 회원 번호만 · 새 고객 0 · 연결 시각만)',
+    'utils/cafe24-client.ts': 'profile · 회원 웹훅',
+    'utils/imweb-client.ts': 'profile · 회원 웹훅',
+    'utils/custom-self-hosted-adapter.ts': 'profile · 회원 웹훅',
+    'utils/woocommerce-client.ts': 'profile · 회원 웹훅 · 회원 가져오기 · 재대조',
+    'utils/cdp-orders.ts': 'order = syncOrder(주문자 정보) · profile = 일괄 적재의 회원 목록',
+  };
+  it('identifyCustomer 를 부르는 파일 = 등급 표의 파일(브라우저 수집 0)', () => {
+    const files = callSitesOf('identifyCustomer').map((c) => c.at.split(':')[0]).filter((f, i, a) => a.indexOf(f) === i).sort();
+    expect(files).toEqual(Object.keys(TIER).sort());
+  });
+  it('syncOrder 의 식별 입력 = tier order · 브라우저 수집은 linkBrowserMember 로만 잇는다', () => {
+    const o = stripComments(be('utils/cdp-orders.ts'));
+    const input = o.slice(o.indexOf('const identifyInput: IdentifyInput = {'), o.indexOf('const idResult = await identifyCustomer(companyId, identifyInput);'));
+    expect(input).toContain("tier: 'order'");
+    const ev = stripComments(be('utils/cdp-events.ts'));
+    const ingest = ev.slice(ev.indexOf('export async function ingestBrowserEvents('));
+    expect((ingest.match(/linkBrowserMember\(/g) || []).length).toBe(2);
+  });
+  it('order 등급 = 고객 칸 쓰기 조각 하나(fieldWriteSql) · 전화 교체 갈래는 order 에서 빠진다', () => {
+    const id = stripComments(be('utils/cdp-identity.ts'));
+    expect(id).toContain("return input.tier === 'order' ? `COALESCE(${existing}, ${incoming})` : `COALESCE(${incoming}, ${existing})`;");
+    expect(id).not.toMatch(/name = COALESCE\((\$\d|EXCLUDED\.name)/);
+    expect(id).toContain("if (normalizedPhone && input.tier !== 'order') {");
+  });
+});
+
 describe('R18 넓힘(1027) 값의 시계 — 동의 쓰기 · 웹훅 처리에 원천 시각 · NOW 동의 일자 0', () => {
   it('동의 쓰기 부르기마다 시각 인자(소속 행 · 공란 규칙 · 탈퇴) · 웹훅 처리 부르기마다 수신 맥락(ctx)', () => {
     const short = (name: string, need: number) => callSitesOf(name).filter((c) => c.args < need).map((c) => `${c.at} (${c.args})`);
@@ -2910,23 +2948,53 @@ describe('R18 넓힘(1027) 값의 시계 — 동의 쓰기 · 웹훅 처리에 �
   });
 });
 
+describe('R7 넓힘(1028) 웹훅 수신 자격 = 조각 하나 · 만료 표시 = 토큰판 CAS 하나(K6 · I6)', () => {
+  it("카페24 · 아임웹 웹훅 라우팅 SQL = receiveEligibleSql 만(status = 'active' 글자 0)", () => {
+    for (const [f, fn] of [['utils/cafe24-client.ts', 'getCafe24IntegrationsByMallId'], ['utils/imweb-client.ts', 'getImwebIntegrationsBySiteCode']] as const) {
+      const t = stripComments(be(f));
+      const body = t.slice(t.indexOf(`export async function ${fn}(`), t.indexOf('\n}\n', t.indexOf(`export async function ${fn}(`)));
+      expect(body, f).toContain('${receiveEligibleSql(');
+      expect(body, f).not.toContain("status = 'active'");
+    }
+  });
+  it("status = 'token_expired' 를 쓰는 SQL = markTokenRejected 하나 · 그 문장은 토큰판(token_expires_at) 조건과 유예 시계를 함께 쓴다", () => {
+    expect(filesWith("status = 'token_expired'")).toEqual(['utils/integration-token.ts']);
+    const t = stripComments(be('utils/integration-token.ts'));
+    const body = t.slice(t.indexOf('export async function markTokenRejected('), t.indexOf('\n}\n', t.indexOf('export async function markTokenRejected(')));
+    expect(body).toContain('token_expires_at IS NOT DISTINCT FROM $2::timestamptz');
+    expect(body).toContain("'token_expired_at', NOW()");
+  });
+  it("active 를 쓰는 승인 저장 upsert 는 connected_at 도 채운다(BYO 승인 뒤 수신 자격 · R1 #6)", () => {
+    const bad: string[] = [];
+    for (const { rel, text } of backendSources()) {
+      for (const m of stripComments(text).matchAll(/ON CONFLICT \(company_id, provider, mall_id\) DO UPDATE SET[\s\S]*?`/g)) {
+        if (/status = 'active'/.test(m[0]) && !/connected_at = /.test(m[0])) bad.push(rel);
+      }
+    }
+    expect(bad).toEqual([]);
+  });
+});
+
 describe('R7 넓힘(1027) 연동 행 저장 = 회사 모드 잠금을 같은 트랜잭션에서 먼저(분류코드 모드 판정 · I15)', () => {
-  it('INSERT INTO company_integrations 를 쓰는 함수마다 모드 문(saveIntegrationRowGuarded · guardIntegrationMode)을 지난다', () => {
+  it('INSERT INTO company_integrations = 행 생성 CT(integration-row.ts) 하나 · 그 CT 를 부르는 곳마다 모드 문(saveIntegrationRowGuarded · guardIntegrationMode)을 먼저 지난다', () => {
+    // ★1028 K9 — 몰 접두(meta.id_prefix)를 새 행에 고정하는 자리가 하나여야 재연결 · 재저장이 접두를 바꾸지 못한다(I9 · M38)
+    expect(filesWith('INSERT INTO company_integrations')).toEqual(['utils/integration-row.ts']);
     const bad: string[] = [];
     let found = 0;
     for (const { rel, text } of backendSources()) {
-      if (!text.includes('INSERT INTO company_integrations')) continue;
+      if (rel === 'utils/integration-row.ts' || !text.includes('createIntegrationRow(')) continue;
       const sf = ts.createSourceFile(rel, text, ts.ScriptTarget.Latest, true);
       const visit = (n: ts.Node) => {
-        if ((ts.isNoSubstitutionTemplateLiteral(n) || ts.isTemplateExpression(n)) && n.getText().includes('INSERT INTO company_integrations')) {
+        if (ts.isCallExpression(n) && n.expression.getText() === 'createIntegrationRow') {
           found++;
-          // 감싼 함수(이름 있는 함수 · 화살표 · 메서드)를 바깥으로 거슬러 오르며 하나라도 모드 문을 INSERT 앞에 품으면 통과
+          // 감싼 함수 · 호출을 바깥으로 거슬러 오르며 하나라도 모드 문을 그 호출 앞에 품으면 통과
           let ok = false;
           for (let fn: ts.Node | undefined = n.parent; fn && !ok; fn = fn.parent) {
             if (!(ts.isFunctionDeclaration(fn) || ts.isMethodDeclaration(fn) || ts.isArrowFunction(fn) || ts.isFunctionExpression(fn) || ts.isCallExpression(fn))) continue;
             const body = fn.getText();
-            ok = /saveIntegrationRowGuarded\(/.test(body)
-              || (body.includes('guardIntegrationMode(') && body.indexOf('guardIntegrationMode(') < body.indexOf('INSERT INTO company_integrations'));
+            const at = n.getStart() - fn.getStart();
+            ok = (ts.isCallExpression(fn) && fn.expression.getText() === 'saveIntegrationRowGuarded')
+              || (body.includes('guardIntegrationMode(') && body.indexOf('guardIntegrationMode(') < at);
           }
           if (!ok) bad.push(`${rel}:${sf.getLineAndCharacterOfPosition(n.getStart()).line + 1}`);
         }
@@ -2941,6 +3009,132 @@ describe('R7 넓힘(1027) 연동 행 저장 = 회사 모드 잠금을 같은 트
     for (const name of ['assertStoreCodeMode', 'lockCompanyIntegrationMode', 'guardIntegrationMode', 'decideStoreCode']) {
       expect(filesWith(new RegExp(`function ${name}\\(`)), name).toEqual(['utils/integration-scope.ts']);
     }
+  });
+});
+
+describe('R1 넓힘(1028) 자사몰 대비 묶음 B · C — 새 CT 마다 밖 0(설계서 §6 R1 넓힘 2)', () => {
+  const fe = (rel: string) => stripComments(read(join(FE, rel)));
+  it('수집 허용 도메인 meta.auto_origins 를 쓰는 SQL = mall-origins.ts 하나 · 몰 연결 저장 · 해제가 그 CT 를 부른다', () => {
+    expect(filesWith("'auto_origins'")).toEqual(['utils/mall-origins.ts']);
+    expect(filesWith(/cdp_allowed_origins = ARRAY/).filter((f) => f !== 'utils/mall-origins.ts')).toEqual(['routes/cdp.ts']);   // 손 등록 라우트(사유 = 회사 관리자 입력)
+    for (const f of ['utils/woocommerce-client.ts', 'utils/cafe24-client.ts']) expect(stripComments(be(f)), f).toContain('registerMallAllowedOrigins(');
+    for (const f of ['utils/woocommerce-client.ts', 'routes/cafe24.ts']) expect(stripComments(be(f)), f).toContain('releaseMallAllowedOrigins(');
+  });
+  it('가져오기 건별 반복 · 23505 재시도 = processImportItems 하나 · 적재 오류 판정 = classifyIngestError 하나(수신 CT 가 부른다)', () => {
+    // 몰 적재 파일 안(문구 시드 큐레이터 = 다른 기능 · 중복 = 거절이 정답)
+    expect(filesWith(/code === '23505'\) return /).filter((f) => /woocommerce|godo|cafe24|imweb|custom-self|mall-|cdp-/.test(f))).toEqual(['utils/mall-import.ts']);
+    expect(filesWith(/function classifyIngestError\(/)).toEqual(['utils/mall-import.ts']);
+    for (const f of ['utils/woocommerce-client.ts', 'utils/godo-client.ts']) expect(stripComments(be(f)), f).toContain('processImportItems(');
+    expect(stripComments(be('utils/cdp-webhook-delivery.ts'))).toContain("classifyIngestError(err) === 'skip'");
+  });
+  it('자격 칸 · meta 비밀 키 읽기 = openSecret 을 지난다(연동 행 매퍼 · sns 표 = 다른 표 · 사유) · 쓰기 = 행 생성 CT 의 봉인', () => {
+    // sns 표 = 다른 표 · 다시 쓰기 본체 = 원문을 읽어 봉인 · 풀어 쓰는 자리(사유)
+    const OTHER_TABLE = new Set(['utils/sns-accounts.ts', 'utils/sns-token-worker.ts', 'utils/secret-box-reseal.ts']);
+    const bad: string[] = [];
+    for (const { rel, text } of backendSources()) {
+      if (OTHER_TABLE.has(rel)) continue;
+      const lines = stripComments(text).split('\n');
+      lines.forEach((l, i) => {
+        if (/\b(r|row|rows\[0\]|result\.rows\[0\]|r\.rows\[0\]\??)\.(access_token|refresh_token|webhook_secret)\b/.test(l) || /\bmeta\.(woo_consumer_key|woo_consumer_secret|godo_key|app_client_secret)\b(?!\s*=)/.test(l)) {
+          if (!l.includes('openSecret(') && !/!!\S*\.webhook_secret/.test(l)) bad.push(`${rel}:${i + 1}`);
+        }
+      });
+    }
+    expect(bad).toEqual([]);
+    expect(stripComments(be('utils/integration-row.ts'))).toContain('meta: sealMetaSecrets(spec.meta)');
+    expect(filesWith(/function (sealSecret|openSecret)[<(]/)).toEqual(['utils/secret-box.ts']);
+  });
+  it('연동 문제 원인 → 고객 문장 표 = 서버 원인 목록과 같다(화면 · 감시 · 경보가 같은 판정) · 웹훅 소유 판정 = wooWebhookOwner 하나', async () => {
+    const { INTEGRATION_CAUSES } = await import('../integration-problem');
+    const src = fe('utils/integration-cause.ts');
+    const keys = Array.from(src.slice(src.indexOf('CAUSE_SENTENCE')).matchAll(/^\s{2}(\w+): '/gm)).map((m) => m[1]).sort();
+    expect(keys).toEqual([...INTEGRATION_CAUSES].sort());
+    expect(filesWith(/\.includes\('write'\)/).filter((f) => f.startsWith('utils/woocommerce'))).toEqual(['utils/woocommerce-client.ts']);
+    expect((stripComments(be('utils/woocommerce-client.ts')).match(/\.includes\('write'\)/g) || []).length).toBe(1);
+  });
+  it('「준비 됨」 표 단계 = 화면 문장 표 단계 · 등록된 provider 마다 표(없으면 화면이 말하지 않음 · 문장은 test 이상만 「됩니다」)', async () => {
+    const { READINESS_STAGES, PROVIDER_READINESS } = await import('../provider-readiness');
+    const src = fe('utils/provider-readiness-copy.ts');
+    const keys = Array.from(src.slice(src.indexOf('STAGE_SENTENCE')).matchAll(/^\s{2}(\w+): \{ ready:/gm)).map((m) => m[1]).sort();
+    expect(keys).toEqual([...READINESS_STAGES].sort());
+    for (const [p, row] of Object.entries(PROVIDER_READINESS)) {
+      for (const st of READINESS_STAGES) expect((row as any)[st]?.evidence, `${p}.${st}`).toBeTruthy();
+    }
+    expect(src).toContain("if (g === 'live' || g === 'test') out.ready.push(STAGE_SENTENCE[st].ready);");
+  });
+  it('연동 화면은 날짜 · 임계값을 계산하지 않는다(서버 값만 · I11) · 승인 콜백은 연동 행을 바로 쓰지 않는다(확정 = 로그인된 화면 · M24)', () => {
+    for (const f of ['pages/CdpSettingsPage.tsx', 'components/cdp/CdpConnectForms.tsx', 'hooks/useCdpIntegrationStatus.ts', 'components/cdp/CdpIntegrationStepper.tsx', 'components/cdp/CdpIntegrationDashboard.tsx']) {
+      expect(fe(f), f).not.toMatch(/Date\.now\(\)\s*-|getTime\(\)\s*[-<>]/);
+    }
+    for (const f of ['routes/cafe24.ts', 'routes/imweb.ts']) {
+      const t = stripComments(be(f));
+      const cb = t.slice(t.indexOf("CallbackRouter.get('/oauth/callback'"));
+      const body = cb.slice(0, cb.indexOf('\n});'));
+      expect(body, f).toContain('stashPendingApproval(');
+      expect(body, f).not.toMatch(/save(Cafe24|Imweb)Integration\(/);
+    }
+  });
+  it('Codex R1 고침 계약 — 갱신 저장 = saveRefreshedToken(재연결 upsert 0) · 되돌림 전 고객 행 잠금 · 확정 = 한 트랜잭션 · 해제 정리 = 해제 행만 · 복호 실패 = 던짐', () => {
+    for (const f of ['utils/cafe24-client.ts', 'utils/imweb-client.ts', 'utils/makeshop-client.ts', 'utils/naver-commerce-client.ts']) {
+      const t = stripComments(be(f));
+      const once = t.search(/async function refresh\w+Once\(/);
+      const ensure = t.slice(once >= 0 ? once : t.search(/async function ensureFresh\w+Token\(/));
+      const body = ensure.slice(0, ensure.indexOf('\n}\n'));
+      expect(body, f).toContain('saveRefreshedToken(');
+      expect(body, f).not.toMatch(/save(Cafe24|Imweb|Makeshop|NaverCommerce)Integration\(/);
+    }
+    const o = stripComments(be('utils/cdp-orders.ts'));
+    expect(o.indexOf('SELECT 1 FROM customers WHERE id = $1::uuid FOR UPDATE')).toBeGreaterThan(-1);
+    expect(o.indexOf('SELECT 1 FROM customers WHERE id = $1::uuid FOR UPDATE')).toBeLessThan(o.indexOf('UPDATE customers c SET'));
+    expect(stripComments(be('utils/oauth-pending.ts'))).toContain('return withTransaction(async (run) => {');
+    expect(stripComments(be('utils/mall-origins.ts'))).toContain("AND status = 'revoked' AND EXISTS (SELECT 1 FROM lock) FOR UPDATE");
+    expect(stripComments(be('utils/secret-box.ts'))).toContain("throw new SecretUnreadableError(");
+  });
+  it('주소 쿼리 · 해시를 지우는 코드는 모듈을 읽는 순간 돌지 않는다(그 화면이 그려질 때만 · 즉시 import 된 화면이 앱 전체 주소를 지우지 않게 · 1028 렌더 검사)', () => {
+    const hook = fe('hooks/useApproveToken.ts');
+    expect(hook).not.toMatch(/^(let|const|var) \w+ = readAndStrip\(\);/m);
+    expect(hook).toContain('useState<string>(captureOnce)');
+  });
+  it('요금제 판정 = ACTIVE_PAID_PLAN_WHERE 한 벌 · 몰 수집 워커 · 플러그인 = 사실 경로 판정 · 첫 구매 보호 = 이전 구매 판정 여정만', () => {
+    const auth = stripComments(be('utils/cdp-auth.ts'));
+    const fn = auth.slice(auth.indexOf('export async function isCdpEnabledForPlan('), auth.indexOf('export const FACT_COLLECT_GRACE_DAYS'));
+    expect(fn).toContain('${ACTIVE_PAID_PLAN_WHERE}');
+    for (const f of ['utils/godo-sync-worker.ts', 'utils/woocommerce-sync-worker.ts', 'utils/cdp-plugin-auth.ts']) {
+      const t = stripComments(be(f));
+      expect(t, f).toContain('cdpFactCollectGate(');
+      expect(t, f).not.toContain('isCdpEnabledForPlan(');
+    }
+    const w = stripComments(be('utils/journey-trigger-watcher.ts'));
+    expect(w).toContain('if (cursorEvent && judgesPriorPurchase(j) && await isFirstImportRunning(j.company_id)) return');
+  });
+});
+
+describe('R1 넓힘(1028) 외부 회원 · 주문 번호 = mallScopedIds 하나(몰 접두 · I9 · M38)', () => {
+  /** 식별 · 주문 적재를 부르는데 번호를 스스로 만들지 않는 파일(사유) — 대상 = 부르는 곳에서 기계로 뽑는다 · 새 파일은 사유 없이 들어오면 실패 */
+  const NOT_MINTING: Record<string, string> = {
+    'utils/cdp-orders.ts': '적재 CT 자신(받은 번호를 그대로 씀)',
+    'routes/cdp.ts': '몰 서버 API(/identify · /orders · 일괄) — 몰이 자기 번호를 보낸다',
+    'routes/short-url.ts': '링크에서 읽은 번호(새로 만들지 않음)',
+    'utils/woocommerce-client.ts': '번호 = woocommerce-core 매핑(아래 파일)',
+    'utils/godo-client.ts': '번호 = godo-parse 매핑(아래 파일)',
+  };
+  const MAPPERS = ['utils/woocommerce-core.ts', 'utils/godo-parse.ts'];
+  it('적재를 부르는 어댑터 · 매핑 파일마다 mallScopedIds 를 부르고 번호를 손으로 잇지 않는다', () => {
+    const callers = [...callSitesOf('identifyCustomer'), ...callSitesOf('syncOrder')]
+      .map((c) => c.at.split(':')[0]).filter((f, i, a) => a.indexOf(f) === i && f !== 'utils/cdp-identity.ts');
+    const minting = [...callers.filter((f) => !(f in NOT_MINTING)), ...MAPPERS].sort();
+    expect(minting.length).toBeGreaterThanOrEqual(5);   // 카페24 · 아임웹 · 자체호스팅 + 매핑 2
+    for (const f of minting) {
+      const t = stripComments(be(f));
+      expect(t, f).toContain('mallScopedIds(');
+      expect(t.match(/\b(externalId|orderId|cartExternalId|withdrawnId)\s*[:=]\s*(String\(|`)/g) || [], f).toEqual([]);
+    }
+    for (const f of Object.keys(NOT_MINTING)) expect(callers, f).toContain(f);   // 사유 줄이 죽은 줄이 아니다
+  });
+  it('어댑터 수신 맥락의 범위 = 그 연동 행(integrationRowScopeOf) · 몰 접두 판정 = integration-row.ts 하나', () => {
+    expect(filesWith(/function mallIdPrefix\(|function newRowIdPrefix\(/)).toEqual(['utils/integration-row.ts']);
+    expect(filesWith("meta ? 'id_prefix'")).toEqual(['utils/integration-scope.ts']);
+    expect(stripComments(be('utils/cdp-webhook-delivery.ts'))).toContain('idScope: { provider: row.source, mallId, idPrefix: scope.idPrefix },');
   });
 });
 

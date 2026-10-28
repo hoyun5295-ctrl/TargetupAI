@@ -50,8 +50,10 @@ describe('1. C안 교체', () => {
   });
   it('생성기의 이름 지시가 같은 이름표를 쓴다', () => {
     const s = SRC('services', 'ai.ts');
-    expect(s).toContain(`"\${COPY_C_NAMES[extraContext?.cVariant === 'punchy' ? 'punchy' : 'mz']}"(C)`);
-    expect(s).toContain('applyCopyCVariant(BRAND_SYSTEM_PROMPT, extraContext?.cVariant)');
+    // ★ 2026-10-28 AI 메모리 설계 K3-2 — 이름은 서버 함수 variantNamesFor 한 곳(목소리 회사 = 목소리 이름 · C안 시험 제외)
+    expect(s).toContain(`variantNamesFor(voiceMode, COPY_C_NAMES[!voiceMode && extraContext?.cVariant === 'punchy' ? 'punchy' : 'mz'])`);
+    expect(s).toContain('"${variantNames[2]}"(C)');
+    expect(s).toContain('applyCopyCVariant(BRAND_SYSTEM_PROMPT, voiceMode ? undefined : extraContext?.cVariant)');
   });
 });
 

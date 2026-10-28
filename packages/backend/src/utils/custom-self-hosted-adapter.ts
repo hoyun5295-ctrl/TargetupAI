@@ -25,16 +25,19 @@
 
 import { createHmac, randomBytes, timingSafeEqual } from 'crypto';
 import { saveIntegrationRowGuarded } from './integration-scope';   // ★ 2026-10-27 자사몰 대비 K9 SC1 — 연동 행 저장 = 회사 모드 잠금 → 판정 → 저장(한 트랜잭션)
+import { createIntegrationRow } from './integration-row';   // ★ 1028 K9 — 연동 행 INSERT = CT 하나(몰 접두 고정)
+import { openSecret } from './secret-box';   // ★1028 K8 자격 읽기 이중(암호문 · 평문)
 import {
   IProviderAdapter,
   ProviderCapabilities,
   ProviderTokenResponse,
   registerProvider,
 } from './provider-registry';
-import { identifyCustomer, parseConsentValue } from './cdp-identity';
+import { identifyCustomer, parseConsentValue, withdrawMemberConsent } from './cdp-identity';
 import { syncOrder } from './cdp-orders';
 import { isKnownOrderStatus } from './cdp-order-revenue';
 import type { WebhookProcessResult } from './cdp-webhook-delivery';
+import { mallScopedIds } from './integration-row';
 import { trackEvent } from './cdp-events';
 import { buildWebhookIdempotencyKey } from './cdp-idempotency';
 import { query } from '../config/database';
@@ -98,7 +101,7 @@ export const customSelfHostedAdapter: IProviderAdapter = {
         await identifyCustomer(companyId, {
           ...(ctx.storeCode ? { storeCode: ctx.storeCode } : {}),   // ★ 1027 K9 — 연동 행 분류코드(소속 행 · 몰 동의)
           source: 'custom',
-          externalId: String(resource.external_id || resource.customer_id || ''),
+          externalId: mallScopedIds(ctx.idScope, { memberId: resource.external_id || resource.customer_id }).memberExternalId,
           email: resource.email,
           phone: resource.phone,
           name: resource.name,
@@ -113,14 +116,24 @@ export const customSelfHostedAdapter: IProviderAdapter = {
         });
         break;
 
+      // ★ 2026-10-28 자사몰 대비 K5 — 규격 선택 칸 `customer.deleted`(탈퇴 · 삭제) = 그 회원의 광고 수신 철회(연결 행은 지우지 않음 · 삭제 시각 = deleted_at · 없으면 받은 시각)
+      case 'customer.deleted':
+        await withdrawMemberConsent(
+          companyId, 'custom',
+          mallScopedIds(ctx.idScope, { memberId: resource.external_id || resource.customer_id }).memberExternalId,
+          String(resource.deleted_at || ctx.observedAt),
+          ctx.storeCode,
+        );
+        break;
+
       case 'order.created':
       case 'order.updated': {
         const customStatus = String(resource.status || 'pending');
         const placed = await syncOrder(companyId, {
           ...(ctx.storeCode ? { storeCode: ctx.storeCode } : {}),   // ★ 1027 K9 — 연동 행 분류코드(소속 행 · 몰 동의)
           source: 'custom',
-          orderId: String(resource.order_id || ''),
-          externalId: String(resource.external_id || resource.customer_id || ''),
+          orderId: mallScopedIds(ctx.idScope, { orderId: resource.order_id }).orderId,
+          externalId: mallScopedIds(ctx.idScope, { memberId: resource.external_id || resource.customer_id }).memberExternalId,
           email: resource.email,
           phone: resource.phone,
           name: resource.name,
@@ -148,8 +161,8 @@ export const customSelfHostedAdapter: IProviderAdapter = {
         const reversed = await syncOrder(companyId, {
           ...(ctx.storeCode ? { storeCode: ctx.storeCode } : {}),   // ★ 1027 K9 — 연동 행 분류코드(소속 행 · 몰 동의)
           source: 'custom',
-          orderId: String(resource.order_id || ''),
-          externalId: String(resource.external_id || resource.customer_id || ''),
+          orderId: mallScopedIds(ctx.idScope, { orderId: resource.order_id }).orderId,
+          externalId: mallScopedIds(ctx.idScope, { memberId: resource.external_id || resource.customer_id }).memberExternalId,
           email: resource.email,
           phone: resource.phone,
           name: resource.name,
@@ -164,7 +177,7 @@ export const customSelfHostedAdapter: IProviderAdapter = {
         await trackEvent(companyId, {
           source: 'custom',
           eventName: 'custom_order_cancelled',
-          externalId: String(resource.external_id || resource.customer_id || ''),
+          externalId: mallScopedIds(ctx.idScope, { memberId: resource.external_id || resource.customer_id }).memberExternalId,
           properties: {
             order_id: resource.order_id,
             status: resource.status,
@@ -222,26 +235,18 @@ function buildWebhookUrl(): string {
  * - 64자 hex secret 박음 (raw는 본 함수 반환에만 1회 노출 — caller가 즉시 회사 admin에게 전달)
  * - company_integrations에 provider='custom' + mall_id='self' UNIQUE 박음 (재발급 시 옛 secret 폐기)
  */
-export async function issueCustomWebhookSecret(companyId: string): Promise<{ secret: string; webhookUrl: string; issuedAt: Date }> {
+export async function issueCustomWebhookSecret(companyId: string, storeCode: string | null = null): Promise<{ secret: string; webhookUrl: string; issuedAt: Date }> {
   const secret = randomBytes(32).toString('hex');
   const now = new Date();
-  await saveIntegrationRowGuarded(companyId, 'custom', 'self', null, (run) => run(
-    `INSERT INTO company_integrations (
-      id, company_id, provider, mall_id, access_token, refresh_token,
-      token_expires_at, scope, meta, webhook_secret, connected_at, status,
-      created_at, updated_at
-    ) VALUES (
-      gen_random_uuid(), $1::uuid, 'custom', 'self', '', '',
-      NOW() + INTERVAL '100 years', '', '{}'::jsonb, $2, NOW(), 'active',
-      NOW(), NOW()
-    )
-    ON CONFLICT (company_id, provider, mall_id) DO UPDATE SET
-      webhook_secret = EXCLUDED.webhook_secret,
-      connected_at = NOW(),
-      status = 'active',
-      updated_at = NOW()`,
-    [companyId, secret]
-  ));
+  await saveIntegrationRowGuarded(companyId, 'custom', 'self', storeCode, (run) => createIntegrationRow(run, {
+    companyId, provider: 'custom', mallId: 'self',
+    tokenExpiresAt: { sql: "NOW() + INTERVAL '100 years'" },
+    meta: { ...(storeCode ? { store_code: storeCode } : {}) },   // ★1028 N6 분류코드
+    webhookSecret: { v: secret },
+    connectedAt: { sql: 'NOW()' },
+    status: { sql: "'active'" },
+    onConflict: ['webhook_secret = EXCLUDED.webhook_secret', 'connected_at = NOW()', "status = 'active'"],
+  }));
   return { secret, webhookUrl: buildWebhookUrl(), issuedAt: now };
 }
 
@@ -270,7 +275,7 @@ export async function getCustomIntegrationByCompanyId(
     [companyId]
   );
   if (result.rows.length === 0) return null;
-  return { webhookSecret: result.rows[0].webhook_secret };
+  return { webhookSecret: openSecret(result.rows[0].webhook_secret) };   // ★1028 K8 읽기 이중
 }
 
 export async function revokeCustomWebhookSecret(companyId: string): Promise<boolean> {

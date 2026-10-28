@@ -47,8 +47,8 @@ describe('네 어댑터 배선', () => {
       expect(src).toContain(`throw tokenHttpError(\`${msg} (\${res.status}): \${errBody}\`, res.status);`);
       const fn = src.slice(src.indexOf(fnHead));
       const c = fn.slice(fn.indexOf('} catch (err) {'), fn.indexOf('throw err;') + 10);
-      expect(c).toMatch(/if \(isDefinitiveTokenRejection\(err\)\) \{\s*await query\(/);
-      expect(c).toContain("status = 'token_expired'");
+      // ★1028 K6 — 만료 표시 = CT markTokenRejected(token_expires_at 비교 · 그사이 다른 갱신이 새 토큰을 썼으면 덮지 않는다)
+      expect(c).toContain('if (isDefinitiveTokenRejection(err)) await markTokenRejected(integration);');
     });
   }
 

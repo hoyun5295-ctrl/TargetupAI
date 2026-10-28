@@ -15,7 +15,7 @@ vi.mock('../../config/database', () => ({
 }));
 vi.mock('../../services/ai', () => ({ callAIWithFallback: vi.fn(), getKoreanCalendar: vi.fn(() => '') }));
 vi.mock('../company-memory', () => ({ buildMemoryPromptContext: vi.fn(async () => '') }));
-vi.mock('../brand-voice-prompt', () => ({ buildSystemPromptWithBrandVoice: vi.fn(async (_c: string, s: string) => s) }));
+vi.mock('../brand-voice-prompt', () => ({ VOICE_KIND_BY_STEP: 'by_step', voiceLearned: async () => false, getBrandVoiceSnapshot: async () => null, voiceLearnedOf: () => false, resolveGuidelineFor: () => null, composeVoicePrompt: async (i: { basePrompt: string }) => ({ system: i.basePrompt, guideline: null, shape: null, voiceLearned: false, exampleCount: 0 }) }));
 vi.mock('../company-data-profile', () => ({ getCompanyDataProfile: vi.fn(async () => null), formatProfileForAiPrompt: vi.fn(() => '') }));
 vi.mock('../ai-credit', () => ({ checkCredit: vi.fn(async () => undefined), deductCreditOutcome: vi.fn(async () => 'deducted'), isChargedByKey: vi.fn(async () => false), CreditSettleError: class CreditSettleError extends Error {} }));
 const store = new Map<string, string>();

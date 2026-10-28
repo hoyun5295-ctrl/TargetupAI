@@ -1,7 +1,7 @@
 /**
  * mall-user-scope-routes.test.ts — 몰별 사용자 범위의 배선 소스 계약 (설계서 docs/2026-09-18-mall-integration-user-scope-design.md §3-4 · §3-5 · §4)
  *  라우트 층은 DB·네트워크 0 소스 계약으로 고정한다(선례 woocommerce-routes.test.ts).
- *  - 브라우저 수집(/api/cdp/ingest): 검증된 Origin 으로 분류코드를 찾아 배치에 싣는다(요청 본문 값 금지).
+ *  - 브라우저 수집(/api/cdp/ingest): ★1028 K4 — 고객을 잇기만 해서 분류코드를 찾지도 싣지도 않는다(요청 본문 값도 읽지 않는다).
  *  - 상품 피커(mall-products): 사용자는 자기 분류코드의 우커머스 몰만 탭·조회한다.
  */
 import { describe, it, expect } from 'vitest';
@@ -11,13 +11,12 @@ import { resolve } from 'path';
 const SRC = resolve(__dirname, '..', '..');
 const code = (rel: string) => readFileSync(resolve(SRC, rel), 'utf-8').replace(/\/\*[\s\S]*?\*\//g, ' ').replace(/^\s*\/\/.*$/gm, ' ');
 
-describe('routes/cdp.ts — /ingest 의 분류코드는 Origin 에서', () => {
-  it('resolveStoreCodeByOriginHost(companyId, Origin 헤더) → ingestBrowserEvents 배치의 storeCode · 본문에서 읽지 않는다', () => {
+describe('routes/cdp.ts — /ingest 는 분류코드를 쓰지 않는다(★1028 K4 · 브라우저 = 잇기만)', () => {
+  it('ingestBrowserEvents 배치에 storeCode 없음 · 본문에서도 읽지 않는다', () => {
     const r = code('routes/cdp.ts');
-    const block = r.slice(r.indexOf("router.post('/ingest'"), r.indexOf("router.post('/identify'"));
-    expect(block).toMatch(/resolveStoreCodeByOriginHost\(companyId, [^)]*origin/);
-    expect(block).toMatch(/ingestBrowserEvents\(companyId, \{[\s\S]{0,400}storeCode/);
-    expect(block).not.toMatch(/req\.body\??\.store_code|req\.body\??\.storeCode/);
+    const block = r.slice(r.indexOf("router.post('/ingest'"), r.indexOf("router.post('/plugin/member-token'"));
+    expect(block).toContain('ingestBrowserEvents(companyId, {');
+    expect(block).not.toMatch(/storeCode|store_code/);
   });
 });
 

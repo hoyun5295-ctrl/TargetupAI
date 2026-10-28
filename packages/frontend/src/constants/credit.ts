@@ -133,7 +133,7 @@ export const CREDIT_SOURCE_LABELS: Record<string, string> = {
   'inapp-explainer': '인앱 설명', 'alimtalk-matcher': '알림톡 매칭',
   'ai-memory-search': '메모리 검색', 'ai-usage-search': '사용 검색',
   'ai-segment-generator': '세그먼트 생성', 'ai-column-mapper': '컬럼 매핑',
-  'brand-voice-extract': '브랜드보이스 추출', 'parse-briefing': '브리핑 분석',
+  'brand-voice-extract': '목소리 배우기', 'brand-voice-sample': '목소리 견본', 'parse-briefing': '브리핑 분석',
 };
 
 /**
@@ -174,6 +174,9 @@ export const AI_GENERATE_COSTS: Record<string, number> = {
   'oneline-recook': 3,
   'journey-operation': 10,
   'multi-goal-decisioning': 5,
+  // ★ 2026-10-28 AI 메모리 설계 K7-4 — 목소리 배우기 = 추출 + 견본(화면 금액은 서버 GET 이 내린 값 · 여기는 미러)
+  'brand-voice-extract': 1,
+  'generate-messages': 5,
 };
 
 export const CONFIRM_CREDIT_COSTS: Record<string, number> = {

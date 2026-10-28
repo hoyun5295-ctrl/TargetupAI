@@ -19,8 +19,9 @@ import type { SyncTarget, SyncMode, SyncResult, SyncError, SyncCursorState } fro
 // ★ 2026-08-03 커서 재설계 — 키셋 커서·원본 행 키 직렬화(순수 모듈, 어댑터 4종 공유)
 import { serializeSourceRowKey, cursorKeysValid, keylessRetryKeys } from '../db/keyset';
 import type { ColumnMapping } from '../mapping';
-import { mapBatch } from '../mapping';
-import { normalizeCustomerBatch, normalizePurchaseBatch } from '../normalize';
+import { mapBatch, customerSummaryFieldsOf } from '../mapping';
+import { normalizeCustomerBatch, normalizePurchaseBatch, resolveValueMaps, valueMapsDigest } from '../normalize';
+import type { ValueMaps } from '../config/schema';
 import { validateCustomers } from '../types/customer';
 import { validatePurchases } from '../types/purchase';
 import { SyncStateManager } from './state';
@@ -31,6 +32,9 @@ import { maskPhone, maskEmail, maskSensitiveData, maskRecordKey } from '../logge
 import { formatValidationIssues, safeErrorText, buildSyncLogErrorMessage } from './error-text';
 
 const logger = getLogger('sync:engine');
+
+/** ★ 2026-10-28 고객 전량을 시작했지만 아직 완결 못 함 — valueMapsDigest 결과('' 또는 '[' 로 시작)와 절대 같지 않다 */
+const APPLIED_DIGEST_PENDING = '!pending';
 
 export interface SyncEngineConfig {
   /** 배치 크기 (기본 4000) */
@@ -57,6 +61,10 @@ export interface SyncEngineConfig {
    */
   customerKeyColumns?: string[];
   purchaseKeyColumns?: string[];
+  /** ★ 2026-10-28 설치별 값 분류(config.valueMaps) — 배치마다 지금 고객 매핑 · 테이블 · 원본으로 resolveValueMaps 를 거쳐 쓴다 */
+  valueMaps?: ValueMaps;
+  /** 분류표 원본 식별 = normalize valueMapSourceOf(config.database) · 없으면 분류표를 쓰지 않는다 */
+  valueMapsSource?: string;
   /** dry run 모드 (API 전송 안 하고 로그만) */
   dryRun?: boolean;
 }
@@ -67,6 +75,8 @@ export class SyncEngine {
   private stateManager: SyncStateManager;
   private config: SyncEngineConfig;
   private alertManager: AlertManager | null;
+  /** ★ 2026-10-28 직전 fullScan 이 완결됐는가(스캔 끝 · 전송 실패 없음 · dry run 아님) — full 감싸개만 읽는다 */
+  private lastFullScanComplete = false;
   /**
    * ★ 1.7.2 실행 한 줄 — 고객·구매·원격 명령(full_sync·update_config)의 전체/증분을 도착 순서대로 하나씩 돌린다.
    * 옛: 스케줄러 플래그는 같은 대상의 cron 만 막았고 원격 명령의 전체 동기화는 그 밖이라 같은 커서·같은 서버 행을
@@ -119,13 +129,17 @@ export class SyncEngine {
 
   /**
    * 런타임 매핑 교체 (원격 update_config 명령용 — 2026-07-01).
-   * config.enc 영구 저장은 호출부(scheduler)가 담당하고, 여기서는 실행 중 engine이
-   * 참조하는 매핑만 즉시 교체한다 → 재시작 없이 다음 배치부터 새 매핑 적용.
+   * config.enc 영구 저장은 호출부(scheduler)가 담당하고, 여기서는 engine 이 참조하는 매핑만 교체한다 → 재시작 없이 다음 실행부터 새 매핑.
    * 부분 갱신: 넘긴 것만 교체하고 나머지는 유지(구매만/고객만 갱신 안전).
+   * ★ 2026-10-28 교체도 실행 한 줄(inLane)에 줄 세운다 — 옛: 도는 전량의 배치 사이에 바로 바뀌어 한 실행 안에서 옛 · 새 매핑(과 설치별
+   *   값 분류)이 섞였다(Codex 구현 1R · 2R 같은 뿌리 세 번). 이제 실행 도중에는 매핑이 바뀔 수 없다.
+   *   ⛔ 실행 한 줄 안(동기화 실행 중)에서 이 함수를 await 하면 교착 — 부르는 곳 = scheduler update_config(줄 밖) · 시험.
    */
-  updateMapping(m: { customers?: ColumnMapping; purchases?: ColumnMapping }): void {
-    if (m.customers) this.config.customerMapping = m.customers;
-    if (m.purchases) this.config.purchaseMapping = m.purchases;
+  updateMapping(m: { customers?: ColumnMapping; purchases?: ColumnMapping }): Promise<void> {
+    return this.inLane(async () => {
+      if (m.customers) this.config.customerMapping = m.customers;
+      if (m.purchases) this.config.purchaseMapping = m.purchases;
+    });
   }
 
   /** 현재 런타임 매핑 조회 (검증/로깅용). */
@@ -316,6 +330,14 @@ export class SyncEngine {
       };
     }
 
+    // ★ 2026-10-28 설치별 값 분류가 마지막 고객 전량 때와 다르면(설정 편집 [6] · 원격 매핑 갱신) 고객 전량으로 다시 보낸다 —
+    //   커서 이전 고객 · 증분 보류 · 시각 컬럼 없음 어느 경로든 여기 한 곳(Codex 설계 1R · 구현 1R).
+    //   ⛔ 분류표 없는 설치 = 지금 '' · 기록 '' → 그대로(업그레이드만으로 전량이 돌지 않는다).
+    if (target === 'customers' && this.currentValueMapsDigest() !== this.appliedValueMapsDigest()) {
+      logger.info('설치별 값 분류가 마지막 고객 전량 때와 다름 — 고객 전량으로 다시 보냅니다');
+      return this.full('customers');
+    }
+
     const startedAt = new Date().toISOString();
     const startTime = Date.now();
     const errors: SyncError[] = [];
@@ -461,6 +483,35 @@ export class SyncEngine {
   private cursorFingerprint(tableName: string, timestampCol: string, pkCols: string[]): string {
     const sourceId = this.db.getSourceId ? this.db.getSourceId() : '';
     return JSON.stringify([this.db.dbType, sourceId, tableName, timestampCol, pkCols]);
+  }
+
+  /** ★ 2026-10-28 지금 고객 매핑 · 테이블 · 원본과 맞는 분류표(정규화 · 적용 지문 공용 한 곳) */
+  private effectiveValueMaps(): ValueMaps | undefined {
+    if (!this.config.valueMaps || !this.config.valueMapsSource) return undefined;
+    return resolveValueMaps(this.config.valueMaps, this.config.customerMapping, {
+      table: this.config.customerTable,
+      source: this.config.valueMapsSource,
+    });
+  }
+
+  /** 지금 쓰이는 분류표 지문('' = 없음) */
+  private currentValueMapsDigest(): string {
+    const maps = this.effectiveValueMaps();
+    return maps ? valueMapsDigest(maps) : '';
+  }
+
+  /**
+   * 고객 전량에 마지막으로 적용한 분류표 지문. 시험용 가짜 상태(메서드 없음) = ''(분류표 없음)로 본다 —
+   * 실제 SyncStateManager 는 늘 메서드가 있다.
+   */
+  private appliedValueMapsDigest(): string {
+    const sm = this.stateManager as Partial<SyncStateManager>;
+    return sm.getAppliedValueMapsDigest ? sm.getAppliedValueMapsDigest() : '';
+  }
+
+  /** 디스크에 못 쓰면 던진다(SyncStateManager.setAppliedValueMapsDigest) — 부르는 쪽(full)이 보내기 전에 멈춘다 */
+  private recordAppliedValueMapsDigest(digest: string): void {
+    (this.stateManager as Partial<SyncStateManager>).setAppliedValueMapsDigest?.(digest);
   }
 
   /**
@@ -708,7 +759,43 @@ export class SyncEngine {
     return this.inLane(() => this.full(target));
   }
 
+  /**
+   * ★ 2026-10-28 전량 감싸개 — 고객 전량의 설치별 값 분류 적용 기록. 매핑 교체가 실행 한 줄에 줄 서므로(updateMapping) 한 실행 안의
+   * 매핑 · 분류표는 처음부터 끝까지 같다. 시작 지문이 기록과 다르면 **보내기 전에** 「진행 중」을 디스크에 박는다 —
+   * 일부만 보내고 실패하거나 그 뒤 분류가 옛 값으로 되돌아와도(A→B→A) 기록이 그 옛 값과 같아지지 않아 다음에 다시 전량이 돈다(Codex 구현 2R).
+   * 「진행 중」을 디스크에 못 쓰면 한 건도 보내지 않는다(쓰지 못한 채 보내고 죽으면 재시작이 옛 기록을 믿는다 · Codex 구현 2R).
+   * 완결됐을 때만 시작 지문을 기록. ⛔ 분류표 없는 설치(시작 '' = 기록 '')는 상태 파일에 아무것도 쓰지 않는다. 구매 전량은 그대로 fullScan.
+   */
   private async full(target: SyncTarget): Promise<SyncResult> {
+    if (target !== 'customers') return this.fullScan(target);
+    const digestAtStart = this.currentValueMapsDigest();
+    if (digestAtStart !== this.appliedValueMapsDigest()) {
+      try {
+        this.recordAppliedValueMapsDigest(APPLIED_DIGEST_PENDING);
+      } catch (e) {
+        return this.lockedResult(
+          'customers',
+          'VALUE_MAPS_STATE_SAVE_FAILED',
+          `설치별 값 분류가 바뀌어 고객 전체를 다시 보내야 하는데, 상태 파일(data/sync_state.json)에 진행 표시를 쓰지 못해 보내지 않았습니다(${safeErrorText(e instanceof Error ? e.message : String(e))}). ` +
+            '디스크 공간 · 쓰기 권한을 확인해 주세요. 다음 주기에 다시 시도합니다.',
+          'full',
+        );
+      }
+    }
+    const result = await this.fullScan(target);
+    if (this.lastFullScanComplete && digestAtStart !== this.appliedValueMapsDigest()) {
+      try {
+        this.recordAppliedValueMapsDigest(digestAtStart);
+      } catch (e) {
+        // 「진행 중」이 디스크에 남아 다음 고객 동기화가 전량을 다시 돈다(빠짐 없음 · 한 번 더 보낼 뿐)
+        logger.warn('고객 전량 완료 기록을 상태 파일에 쓰지 못함 — 다음 고객 동기화가 전량을 다시 보냅니다', { error: safeErrorText(e instanceof Error ? e.message : String(e)) });
+      }
+    }
+    return result;
+  }
+
+  private async fullScan(target: SyncTarget): Promise<SyncResult> {
+    this.lastFullScanComplete = false;
     // ★ v1.4.1: 구매 테이블 미사용(옵션) — 조기 종료하여 빈 결과 반환
     if (target === 'purchases' && !this.config.purchaseTable) {
       logger.info('구매 테이블 미설정 — 구매 전체 동기화 스킵 (사용 안 함 옵션)');
@@ -967,6 +1054,9 @@ export class SyncEngine {
       }
     }
 
+    // ★ 2026-10-28 전량 완결 여부(스캔 끝 · 전송 실패 없음) — 고객 전량 감싸개(full)가 「분류표 적용함」 기록에 쓴다
+    this.lastFullScanComplete = scanComplete && !apiFailed && !this.config.dryRun;
+
     const result: SyncResult = {
       target,
       mode: 'full',
@@ -1014,7 +1104,11 @@ export class SyncEngine {
 
     // ② 데이터 정규화
     const normalizeResult = target === 'customers'
-      ? normalizeCustomerBatch(mapped, { dbType: this.db.dbType })
+      ? normalizeCustomerBatch(mapped, {
+          dbType: this.db.dbType,
+          // ★ 2026-10-28 설치별 값 분류 — 지금 매핑 · 테이블 · 원본과 맞는 표(매핑 교체는 실행 사이에만 일어나 한 실행 안에서 같다)
+          valueMaps: this.effectiveValueMaps(),
+        })
       : normalizePurchaseBatch(mapped, { dbType: this.db.dbType });
 
     // 정규화 실패 건 로깅
@@ -1099,11 +1193,14 @@ export class SyncEngine {
             });
             successCount = response.data?.upsertedCount ?? validData.length;
           } else {
+            // ★ 2026-10-28 P3 고객 매핑이 주는 요약 칸 — 배치마다 지금 매핑으로(원격 매핑 갱신 즉시 반영) · 비면 싣지 않는다
+            const customerSummaryFields = customerSummaryFieldsOf(this.config.customerMapping);
             const response = await this.apiClient.syncPurchases({
               purchases: validData as any,
               mode,
               batchIndex,
               totalBatches,
+              ...(customerSummaryFields.length > 0 ? { customerSummaryFields } : {}),
             });
             successCount = response.data?.insertedCount ?? validData.length;
           }
@@ -1158,10 +1255,11 @@ export class SyncEngine {
 
     // 알림 모듈에 결과 보고
     if (this.alertManager) {
-      const hasApiError = result.errors.some(e => e.code === 'API_SEND_FAILED');
-      const success = result.failCount === 0 && !hasApiError;
-      const details = hasApiError
-        ? result.errors.filter(e => e.code === 'API_SEND_FAILED').map(e => safeErrorText(e.message)).join('; ')
+      // ★ 2026-10-28 운영 실패(보내지 못함) = 전송 실패 + 「진행 중」 저장 실패(고객 전송을 멈춘 잠금 · 보낸 건수 0 이어도 실패 · Codex 구현 3R)
+      const opErrors = result.errors.filter(e => e.code === 'API_SEND_FAILED' || e.code === 'VALUE_MAPS_STATE_SAVE_FAILED');
+      const success = result.failCount === 0 && opErrors.length === 0;
+      const details = opErrors.length > 0
+        ? opErrors.map(e => safeErrorText(e.message)).join('; ')
         : undefined;
       this.alertManager.onSyncResult(success, details);
     }

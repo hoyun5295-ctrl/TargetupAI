@@ -6,6 +6,7 @@
 //   게이트에서 학습이 보류된다(가짜 0% 차단). 등급 인사이트는 customers 실측만 사용(cdp 불요).
 
 import { extractJsonFromAiText } from './ai-json';   // ★ 2026-09-30 WP4 AI 응답 JSON 파싱 = CT(문자열 안 제어문자 복구)
+import { refreshVoiceHabits } from './voice-habits';
 import { query } from '../config/database';
 import {
   recordCampaignLearning, addMemory, cleanupDeprecatedMemories,
@@ -67,10 +68,12 @@ export async function runAiMemoryAccumulatorTick(): Promise<void> {
     const emailLearned = await accumulateEmailEngagement();
     // ★ 2026-07-04 학습 루프 ②: 거부 제안 5건+ 회사의 "피할 것" 증류 (주간 멱등·tick당 5사 상한)
     const avoidLearned = await accumulateAvoidPatterns();
+    // ★ 2026-10-28 AI 메모리 설계 K14 — 쓸수록(습관 · 고친 차이) · 20시간 멱등 · tick 당 10사
+    const habitCompanies = await accumulateVoiceHabits();
     const pruned = await pruneOverCapMemories();
-    if (journeyLearned || insightCompanies || dmLearned || emailLearned || avoidLearned || pruned) {
+    if (journeyLearned || insightCompanies || dmLearned || emailLearned || avoidLearned || habitCompanies || pruned) {
       console.log(
-        `[ai-memory-accumulator] tick — 여정 ${journeyLearned} / 등급인사이트 ${insightCompanies}사 / DM ${dmLearned} / 이메일 ${emailLearned} / 거부증류 ${avoidLearned}사 / 정리 ${pruned}건`,
+        `[ai-memory-accumulator] tick — 여정 ${journeyLearned} / 등급인사이트 ${insightCompanies}사 / DM ${dmLearned} / 이메일 ${emailLearned} / 거부증류 ${avoidLearned}사 / 습관 ${habitCompanies}사 / 정리 ${pruned}건`,
       );
     }
   } catch (err: any) {
@@ -490,6 +493,34 @@ async function accumulateAvoidPatterns(): Promise<number> {
 }
 
 // 3) 타입별 상한 초과 메모리 정리 — 초과한 (회사,타입)만 골라 저신호 우선 삭제(pickMemoriesToPrune).
+/**
+ * ★ 2026-10-28 K14-1 · K14-2 — 쓸수록 다시 재기. 대상 = 최근 180일 사람이 보낸 직접 발송이 있고 습관 행이 없거나 20시간 지난 회사(시연 회사 제외는 학습 원장 · 발송 거름이 이미 한다).
+ *   회사마다 실패 격리 · 기록 쪽 upsert = 멱등.
+ */
+async function accumulateVoiceHabits(): Promise<number> {
+  const r = await query(
+    `SELECT co.id AS company_id
+       FROM companies co
+      WHERE EXISTS (SELECT 1 FROM campaigns c WHERE c.company_id = co.id AND c.send_type = 'direct' AND c.status = 'completed'
+                       AND COALESCE(c.sent_at, c.created_at) >= NOW() - INTERVAL '180 days')
+        AND NOT EXISTS (SELECT 1 FROM ai_company_memory m WHERE m.company_id = co.id AND m.memory_type = 'habit_profile' AND m.memory_key = 'main'
+                           AND m.updated_at >= NOW() - INTERVAL '20 hours')
+      ORDER BY co.id
+      LIMIT 10`,
+    [],
+  );
+  let done = 0;
+  for (const row of r.rows as any[]) {
+    try {
+      await refreshVoiceHabits(String(row.company_id));
+      done += 1;
+    } catch (err: any) {
+      console.log(`[ai-memory-accumulator] voice-habits company=${row.company_id} 오류 — ${err?.message || 'unknown'}`);
+    }
+  }
+  return done;
+}
+
 async function pruneOverCapMemories(): Promise<number> {
   let deleted = 0;
   for (const [type, cap] of Object.entries(TYPE_CAPS)) {

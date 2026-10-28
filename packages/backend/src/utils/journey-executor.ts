@@ -66,6 +66,7 @@ import { confirmJourneyClaimSent, resolveJourneyClaim } from './journey-send-cla
 import { evaluateCustomerFieldCondition, type ConditionOutcome } from './journey-condition';
 import { isCustomerSendable } from './journey-safety-filter';
 import { renderJourneySmsMessage } from './journey-message-render';
+import { flattenLiquidToPlainText } from './liquid-templating';
 import { readOwnerConsentForCustomer } from './mall-consent';
 // ★ §11-5(§5-1) — 종료 신호는 트리거 계약(단일 출처)에서 파생한다.
 import { getTriggerContract } from './journey-trigger-capability';
@@ -1123,13 +1124,16 @@ async function processExecution(exec: ExecutionRow): Promise<StepOutcome> {
   }
 
   // AI 학습 데이터 적재 — 여정 발송(공유 step campaign, source_ref 멱등으로 (여정,step,일)당 1건, 발송 영향 0).
-  void logCampaignTraining({
+  // ★ 2026-10-28 AI 메모리 설계 K10-1 — 본문 = 단계 템플릿 원문(알림톡 = 승인 템플릿 · 문자 = Liquid 평문화) · 첫 고객 렌더본 금지(이름 · 쿠폰이 학습 원장에 남는다)
+  const trainingText = isKakao && kakaoTemplateRow ? String(kakaoTemplateRow.content || '') : flattenLiquidToPlainText(step.message_template || '');
+  if (trainingText.trim()) void logCampaignTraining({
     campaignId,
     companyId: exec.company_id,
     messageType: (msgType === 'KAKAO' ? 'KAKAO' : String(msgType || 'LMS').toUpperCase()) as 'SMS' | 'LMS' | 'MMS' | 'KAKAO',
     isAd,
-    finalMessage: message,
+    finalMessage: trainingText,
     finalSource: 'selected_as_is',
+    authorship: 'path_ai',
     sendAt: new Date(),
   });
 

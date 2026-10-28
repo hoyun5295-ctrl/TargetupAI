@@ -43,6 +43,9 @@ export interface SyncState {
     customers?: string | null;
     purchases?: string | null;
   };
+  // ★ 2026-10-28 고객 전량에 마지막으로 적용한 설치별 값 분류 지문(normalize valueMapsDigest · '' = 분류표 없음 · 칸 없음 = '').
+  //   고객 동기화 시작 때 지금 분류표 지문과 다르면 전량을 돌린다(커서 · 증분 보류와 무관한 한 곳 · Codex 구현 1R).
+  appliedValueMapsDigest?: string;
 }
 
 /**

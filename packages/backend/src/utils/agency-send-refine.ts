@@ -16,6 +16,9 @@
  *   기록만 `ai_call_log`에 `agency-send-refine`으로 남겨 원가를 잰다.
  */
 import Anthropic from '@anthropic-ai/sdk';
+import { composeVoicePrompt } from './brand-voice-prompt';
+import { resolveCopyIntent } from './copy-content-type';
+import { rewriteShapeDrift } from './copy-shape';
 import { AI_MODELS, claudeRequestShape } from '../config/defaults';
 import { findNewNumbers, stripUnauthorizedBenefits, claimsInventedEfficacy, EFFICACY_REWRITE_RULE } from './copy-benefit-detector';
 import { recordAiCall } from './ai-rate-limit';
@@ -155,7 +158,14 @@ export async function refineForSpam(opts: {
   const original = String(opts.original || '').trim();
   if (!original) return { ok: false, reason: 'empty-original' };
 
-  const { system, user } = buildRefinePrompt(original, opts.round);
+  const built = buildRefinePrompt(original, opts.round);
+  // ★ 2026-10-28 AI 메모리 설계 K11-1 — 대행 스팸 회피 = 고치기(예시 0 · 원문 꼴 유지 · 평문 출력) · 성격 = 원문 광고 표기
+  const { system } = await composeVoicePrompt({
+    companyId: opts.companyId, producer: 'agency-spam-refine', mode: 'rewrite',
+    kind: resolveCopyIntent({ isAd: /\(광고\)/.test(original) }).kind, basePrompt: built.system,
+    outputFormat: '[출력 다시 확인] 다듬은 문안 본문만 평문으로 출력한다.',
+  });
+  const user = built.user;
   const call = opts.callModel || callAnthropic;
 
   let text = '';
@@ -176,7 +186,9 @@ export async function refineForSpam(opts: {
     inputTokens, outputTokens, costWon: 0,
   });
 
-  const check = checkRefined(original, text);
+  // ★ 2026-10-28 K11-1 고치기 출구 대조 — 원문 꼴(줄바꿈 · 빈 줄 · 기호)이 무너진 안은 버린다(I12)
+  const drift = rewriteShapeDrift(original, text);
+  const check = drift.length > 0 ? { ok: false as const, reason: `shape-drift:${drift.join(',')}` } : checkRefined(original, text);
   if (!check.ok) {
     console.warn(`[agency-send][refine] 다듬은 문안을 버렸다: ${check.reason}`);
     return { ok: false, reason: check.reason };

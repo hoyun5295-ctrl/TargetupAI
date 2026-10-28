@@ -48,6 +48,8 @@ export type OrderRevenueAction =
 
 export interface OrderRevenueDecision {
   action: OrderRevenueAction;
+  /** ★ 1028 M22 — apply 가 「차감까지 끝난 주문의 되살림」이다(취소 뒤 몰에서 다시 결제 · 원천 시각이 취소를 본 시각보다 늦은 source 종류만) */
+  revive?: boolean;
   /** 기존 이벤트가 이미 매출 반영 상태였는지 (마커 또는 과거 호환 간주 포함) */
   alreadyApplied: boolean;
   /** 차감 시 사용할 금액 — 반영 시점에 기록된 금액이 진실 (이번 호출 금액 아님) */
@@ -87,18 +89,26 @@ export function isRevenueReversed(existing: ExistingPurchaseEvent | null): boole
  *
  * @param existing      같은 order_id의 기존 purchase 이벤트 (없으면 null)
  * @param incomingStatus 이번 호출의 주문 status
+ * @param opts.revivable ★ 1028 M22 — 차감까지 끝난 주문을 이 결제 본문으로 되살려도 되는가. 주문 CT 가 정한다:
+ *   원천 시각이 수정 시각인 provider(source 종류) · 취소를 본 시각(cancel_seen_at)이 남아 있음 · 스냅숏 판정(orderSnapshotVerdict)이
+ *   그보다 늦은 본문만 통과시킴. 받은 시각뿐인 provider · 취소 시각 기록 없는 옛 차감 행 = 되살리지 않는다(안전 방향 · 늦게 다시 온 옛 결제 본문).
  */
 export function decideOrderRevenueAction(
   existing: ExistingPurchaseEvent | null,
-  incomingStatus: string
+  incomingStatus: string,
+  opts: { revivable?: boolean } = {},
 ): OrderRevenueDecision {
   const applied = isRevenueApplied(existing);
   const reversed = isRevenueReversed(existing);
 
   if (isRevenueStatus(incomingStatus)) {
-    // 결제 확정 — 아직 반영 전이면 더한다. 이미 반영(또는 차감 종료)이면 재반영 금지.
+    // 결제 확정 — 아직 반영 전이면 더한다. 이미 반영이면 재반영 금지.
     if (!applied && !reversed) {
       return { action: 'apply', alreadyApplied: false, reverseAmount: null };
+    }
+    // 차감까지 끝난 주문이 몰에서 다시 결제됨(M22) — 근거가 있을 때만 다시 더한다
+    if (reversed && opts.revivable) {
+      return { action: 'apply', revive: true, alreadyApplied: false, reverseAmount: null };
     }
     return { action: 'none', alreadyApplied: applied, reverseAmount: null };
   }

@@ -44,6 +44,7 @@ import { AlertManager, loadAlertConfig } from './alert';
 import { AGENT_VERSION } from './version';
 import { selfHealBinaries } from './updater';
 import { resolveCustomFieldLabels, labelsAfterMappingUpdate } from './mapping/templates';
+import { valueMapSourceOf } from './normalize';
 
 // ★ v1.5.1: Windows 서비스 실행 시 cwd=C:\Windows\System32 → config/data/logs 경로 틀어짐
 //   → 바이너리 실행 경로(process.execPath) 기준으로 cwd 강제 설정
@@ -277,6 +278,9 @@ async function main(): Promise<void> {
     fallbackToFullSync: config.sync.fallbackToFullSync,
     customerMapping,
     purchaseMapping,
+    // ★ 2026-10-28 설치별 값 분류(마법사 · 설정 편집 「값 확인」) — 없으면 지금 동작 그대로 · 원본 식별은 저장된 접속 설정으로
+    valueMaps: config.valueMaps,
+    valueMapsSource: valueMapSourceOf(config.database),
     dryRun: DRY_RUN,
   }, alertManager);
 

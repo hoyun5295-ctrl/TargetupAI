@@ -16,6 +16,7 @@
 import type { IdentifyInput } from './cdp-identity';
 import type { OrderInput } from './cdp-orders';
 import { normalizePhone } from './normalize';
+import { mallScopedIds } from './integration-row';
 
 export const WOO_SOURCE = 'woocommerce';
 
@@ -245,7 +246,7 @@ export function mapWooCustomerToCdp(raw: any, opts: WooMapOptions): WooMappedCus
 
   const identify: IdentifyInput = {
     source: WOO_SOURCE,
-    externalId: `${mallId}:${id}`,
+    externalId: mallScopedIds({ provider: WOO_SOURCE, mallId }, { memberId: id }).memberExternalId,
     email,
     phone,
     name: wooFullName(raw.first_name || billing.first_name, raw.last_name || billing.last_name),
@@ -310,18 +311,16 @@ export function mapWooOrderToCdp(raw: any, opts: WooMapOptions): WooMappedOrder 
 
   const customerId = toNumber(raw.customer_id);
   const guestPhone = phone ? normalizePhone(phone) : null;
-  const externalId = customerId > 0
-    ? `${mallId}:${customerId}`
-    : guestPhone
-      ? `${mallId}:guest:${guestPhone}`
-      : `${mallId}:order:${id}`;
+  // ★ 1028 K9 — 몰 접두 외부 번호 = CT 하나(우커머스 = `{몰}:` · 지금 글자 그대로)
+  const ids = mallScopedIds({ provider: WOO_SOURCE, mallId }, { memberId: customerId > 0 ? customerId : '', phone: guestPhone ?? '', orderId: id });
+  const externalId = ids.externalId;
 
   const lineItems: any[] = Array.isArray(raw.line_items) ? raw.line_items : [];
   const items = lineItems.map(mapLineItem);
 
   const order: OrderInput = {
     source: WOO_SOURCE,
-    orderId: `${mallId}:${id}`,
+    orderId: ids.orderId,
     externalId,
     email,
     phone,

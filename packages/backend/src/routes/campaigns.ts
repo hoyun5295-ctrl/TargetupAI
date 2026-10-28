@@ -1368,6 +1368,8 @@ await query(
         finalMessage: campaign.message_content || '',
         finalSource: (campaign.message_template && campaign.message_template === campaign.message_content) ? 'selected_as_is' : 'edited',
         sendAt: campaign.scheduled_at ? new Date(campaign.scheduled_at) : new Date(),
+        // ★ 2026-10-28 K10-2 — 템플릿과 본문은 늘 같아 위 칸은 사람 판정 근거가 못 된다 · 출처는 AI 경로
+        authorship: 'path_ai',
       });
 
       return res.json({

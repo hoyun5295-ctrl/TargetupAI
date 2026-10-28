@@ -14,7 +14,7 @@ import { buildRefundPending } from './refund-pending';
 import { sendSystemAlert } from './system-alert';
 import { triggerDirectSendWorker } from './direct-send-worker';
 import { CAMPAIGN_INSERT_SQL, buildDirectSendCampaignParams, DirectSendError, type DirectSendSpec } from './direct-send-spec';
-import { logCampaignTraining } from './training-logger';
+import { logCampaignTraining, type TrainingAuthorship } from './training-logger';
 import { findUneditedSendPlaceholder } from './send-placeholder-gate';
 import { composeSpamCheckText } from './messageUtils';
 import { checkSpamBlockBeforeCharge } from './spam-block';
@@ -218,7 +218,7 @@ export async function createDirectSendCampaign(
      */
     activationGuard?: { sql: string; params: any[] };
   },
-  training?: { finalSource?: 'manual' | 'selected_as_is' | 'edited'; userPrompt?: string; aiMessages?: string[] },
+  training?: { finalSource?: 'manual' | 'selected_as_is' | 'edited'; userPrompt?: string; aiMessages?: string[]; authorship?: TrainingAuthorship },
 ): Promise<{ campaignId: string; accepted: number }> {
   // ★ 2026-10-09 시연 회사 = 발송 0 — 사람 직접 발송 · DM 대상 발송 · 플래너 · 대행의 공통 길목(자동마케팅은 이보다 앞에서 끊는다)
   await assertNotDemoCompany(ctx.companyId);
@@ -412,6 +412,7 @@ export async function createDirectSendCampaign(
     userPrompt: training?.userPrompt,
     aiMessages: training?.aiMessages,
     sendAt: spec.scheduled && spec.scheduledAt ? new Date(spec.scheduledAt) : undefined,
+    authorship: training?.authorship,
   });
 
   // worker 즉시 트리거 (5초 대기 없이)

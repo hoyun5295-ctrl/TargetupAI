@@ -8,6 +8,8 @@
  *   - 호출부는 `runInCreditBundle` 안에서 부른다(이 호출 자체의 차감 0 · 라우트가 한 줄 완성 키로 1회 차감).
  */
 import { callAIWithFallback } from '../services/ai';
+import { composeVoicePrompt } from './brand-voice-prompt';
+import { resolveCopyIntent } from './copy-content-type';
 import { extractJsonFromAiText } from './ai-json';
 import { rewriteAddsFacts, EFFICACY_PROMPT_RULES } from './copy-benefit-detector';
 import type { LineTemplate, LineCopyKey } from './design-core/line-templates';
@@ -76,8 +78,12 @@ export async function fillLineTemplateCopy(t: LineTemplate, g: LineCopyGround, c
     `[채울 칸]\n${fields}`,
     'JSON 으로만 답하세요.',
   ].filter(Boolean).join('\n');
+  // ★ 2026-10-28 AI 메모리 설계 K11-1 · K11-3 — 한 줄 제작 문구 = 쓰기 · 목소리 회사 = 다른 브랜드 예시 대신 자기 대표 문안 뼈대(예시는 lineCopyExemplars 가 뺀다)
+  const { system: voiceSystem } = await composeVoicePrompt({
+    companyId: ctx.companyId, producer: 'line-template-copy', mode: 'write', scope: 'tone', kind: resolveCopyIntent({ isAd: true }).kind, basePrompt: SYSTEM,
+  });
   const text = await callAIWithFallback({
-    system: SYSTEM,
+    system: voiceSystem,
     userMessage: user,
     maxTokens: 1200,
     temperature: 0.6,

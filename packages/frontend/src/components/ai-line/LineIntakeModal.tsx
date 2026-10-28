@@ -312,6 +312,7 @@ export default function LineIntakeModal({ open, run, creditTotal, loadError, onR
       const out = await aiLineApi.compose({
         line: run.line, facts: run.facts, filters: activeFilters(run), allCustomers: allCustomersFlag(run),
         types: copyTypes, vars: varsArg, channel: run.channel, isAd: isAdOf(run), attemptToken: run.attemptToken,
+        contentType: run.contentType ?? intake.contentType ?? null,
       });
       onCharged();
       const direct = run.types.includes('direct') ? [{ type: 'direct' as const, label: AI_LINE_TYPE_META.direct.label, body: '', subject: '', byteCount: 0 }] : [];
@@ -361,8 +362,11 @@ export default function LineIntakeModal({ open, run, creditTotal, loadError, onR
   // ── 문자 성격 · 브랜드 말투 ──
   const isAdNow = isAdOf(run);
   const voice = intake?.voice ?? null;
+  // ★ 2026-10-28 AI 메모리 설계 K13-7 · K7-5 — 칩 상태(학습 미완 · 확인 대기)는 AI 메모리와 같은 판정 · 버튼 = 브랜드 보이스 바로 열기
   const voiceNote: string | null = !voice ? null
-    : !voice.learned ? '브랜드 말투 학습본이 없어 기본 말투로 써요. AI 메모리에 보냈던 문자를 올리면 그 말투 · 특수문자로 맞춰져요'
+    : voice.status === 'review_pending' ? '배운 내용을 아직 확인하지 않아 기본 말투로 써요. 확인하면 바로 그 말투로 써요'
+    : voice.status === 'incomplete' && !voice.learned ? '새로 올린 문안을 아직 배우지 않았어요. [다시 배우기]를 누르면 그 말투로 써요'
+    : !voice.learned ? '브랜드 말투 학습본이 없어 기본 말투로 써요. 보냈던 문자를 고르면 그 말투 · 줄띄움 · 기호로 맞춰져요'
     : isAdNow ? (voice.marketing ? null : '마케팅 문자 학습본이 없어 학습된 말투로 써요. AI 메모리에 마케팅 문자를 올리면 맞춰져요')
     : (voice.notice ? null : '안부 문자 학습본이 없어 마케팅 말투로 써요. AI 메모리에 안부 문자를 올리면 맞춰져요');
 
@@ -716,7 +720,7 @@ export default function LineIntakeModal({ open, run, creditTotal, loadError, onR
                             <button key={t} type="button" onClick={() => toggleType(t)} aria-pressed={on}
                               className={`relative rounded-xl p-3 text-left transition-colors ${on ? 'border-2 border-violet-600 bg-violet-50/60' : 'border border-slate-200 hover:border-slate-300'}`}>
                               {rec && <span className="absolute top-2 right-2 rounded-full bg-violet-600 text-white text-[10.5px] font-bold px-1.5 leading-[18px]">추천</span>}
-                              <p className="font-semibold text-slate-900">{AI_LINE_TYPE_META[t].label}</p>
+                              <p className="font-semibold text-slate-900">{intake.typeNames?.[t] || AI_LINE_TYPE_META[t].label}</p>
                               <p className={`text-[12px] ${on ? 'text-violet-900/80' : 'text-slate-500'}`}>{rec && intake.recommend?.reason ? intake.recommend.reason : AI_LINE_TYPE_META[t].desc}</p>
                               <p className={`mt-1 text-[12px] font-semibold ${on ? 'text-violet-800' : 'text-slate-600'}`}>{t === 'direct' ? '+0' : `+${unit}`}{on ? ' · 고름' : ''}</p>
                             </button>
@@ -764,10 +768,27 @@ export default function LineIntakeModal({ open, run, creditTotal, loadError, onR
                         ))}
                       </div>
                       <p className="text-[11.5px] text-slate-500">한 줄을 읽고 {intake.isAd ? '마케팅' : '안부 · 알림'}으로 골랐어요. 이 성격의 브랜드 말투 · 대표 문안으로 써요. 할인 · 쿠폰처럼 구매를 권하면 마케팅으로 보내야 해요(광고 표기 의무).</p>
+                      {!!intake.contentTypes?.length && (
+                        <div>
+                          <p className="text-[12.5px] font-semibold text-slate-500 mb-1.5">문자 종류</p>
+                          <div className="flex flex-wrap gap-1.5">
+                            {intake.contentTypes.map((c) => {
+                              const on = (run.contentType ?? intake.contentType ?? null) === c.key;
+                              return (
+                                <button key={c.key} type="button" aria-pressed={on} onClick={() => onRun({ ...run, contentType: c.key })}
+                                  className={`h-8 px-3 rounded-full text-[12.5px] font-semibold ${on ? 'border-2 border-violet-600 bg-violet-50 text-violet-900' : 'border border-slate-200 bg-white text-slate-600 hover:border-slate-300'}`}>
+                                  {c.label}{on && run.contentType == null && intake.contentType === c.key ? ' · AI' : ''}
+                                </button>
+                              );
+                            })}
+                          </div>
+                          <p className="text-[11.5px] text-slate-500 mt-1">종류에 맞는 대표 문안의 뼈대로 써요. 광고 표기는 위 성격만 따라요.</p>
+                        </div>
+                      )}
                       {voiceNote && (
                         <div className="rounded-xl bg-amber-50 border border-amber-200 px-3 py-2.5 text-[12.5px] text-amber-900 flex items-start gap-2">
                           <Sparkles className="w-4 h-4 mt-0.5 shrink-0" />
-                          <span className="flex-1">{voiceNote} <Link to="/ai-memory" className="font-semibold underline underline-offset-2">AI 메모리 열기</Link></span>
+                          <span className="flex-1">{voiceNote} <Link to="/ai-memory?learn=voice" className="font-semibold underline underline-offset-2">목소리 배우기</Link></span>
                         </div>
                       )}
                     </>
@@ -816,7 +837,7 @@ export default function LineIntakeModal({ open, run, creditTotal, loadError, onR
         <>
           <div className="flex-1 min-h-0 overflow-y-auto px-5 py-4 space-y-3">
             <p className="text-[12.5px] text-slate-500">
-              받는 사람 <b className="text-slate-800 tabular-nums">{count.toLocaleString()}명</b> · {copyTypes.map((t) => AI_LINE_TYPE_META[t].label).join(' · ')} · {isAdNow ? '마케팅' : '안부 · 알림'}
+              받는 사람 <b className="text-slate-800 tabular-nums">{count.toLocaleString()}명</b> · {copyTypes.map((t) => intake.typeNames?.[t] || AI_LINE_TYPE_META[t].label).join(' · ')} · {isAdNow ? '마케팅' : '안부 · 알림'}
             </p>
             <p className="text-[13px] text-slate-700">
               {aud.top?.name ? <>이 대상 1위 고객 <b>{aud.top.name}</b>의 실제 값이에요. </> : null}

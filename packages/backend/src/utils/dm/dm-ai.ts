@@ -12,6 +12,8 @@
  * 설계서: status/DM-PRO-DESIGN.md §9
  */
 import { UserFacingError } from '../http-error';
+import { composeVoicePrompt, voiceLearned } from '../brand-voice-prompt';
+import { resolveCopyIntent } from '../copy-content-type';
 import { extractJsonFromAiText } from '../ai-json';
 import { claimsInventedEfficacy, dropInventedEfficacy, pairClaimsInventedEfficacy, rewriteAddsFacts, readingAddsEfficacy, EFFICACY_PROMPT_RULES, EFFICACY_REWRITE_RULE, EFFICACY_RETRY_HINT, HEADLINE_PLACEHOLDER } from '../copy-benefit-detector';
 import { callAIWithFallback, getKoreanCalendar } from '../../services/ai';
@@ -473,6 +475,11 @@ ${schema}`;
   const brainSuffix = copyBrainSuffix !== undefined ? copyBrainSuffix : await resolveDmCopyBrainSuffix(companyId);
   if (brainSuffix) genSystem = genSystem + brainSuffix;
 
+  // ★ 2026-10-28 AI 메모리 설계 K11-1 · K11-2 — DM 생성 = 쓰기 · 페이지 글이라 말투 · 호칭 · 맺음만 · DM = 판촉 기본(광고)
+  genSystem = (await composeVoicePrompt({
+    companyId, producer: 'dm-generate', mode: 'write', scope: 'tone', kind: resolveCopyIntent({ inputType: rawEvent ? 'promo' : null, isAd: true }).kind, basePrompt: genSystem,
+  })).system;
+
   // ★ 2026-10-24 ② 「1회 생성」 = 부르기 + 혜택 출구 가드 + 효능 거름(재생성 결과도 같은 거름을 지난다)
   const effGround = humanGround !== undefined ? humanGround : rawEvent;
   const runOnce = async (retryHint: string): Promise<{ draft: CopyDraft; headlinesLost: boolean; dropped: number }> => {
@@ -591,15 +598,21 @@ export async function improveMessage(sections: Section[], brandKit?: DmBrandKit,
 
   if (payload.length === 0) return { suggestions: [], rejected: 0 };
 
-  const userMessage = `브랜드 톤: ${brandKit?.tone || 'friendly'}
+  // ★ 2026-10-28 K13-6 — 목소리 회사 = 브랜드킷 톤 칩 대신 배운 목소리(아래 목소리 CT) · 아니면 지금처럼 톤 칩
+  const toneLine = (await voiceLearned(companyId)) ? '' : `브랜드 톤: ${brandKit?.tone || 'friendly'}
 
-현재 섹션 카피:
+`;
+  const userMessage = `${toneLine}현재 섹션 카피:
 ${JSON.stringify(payload, null, 2)}
 
 개선 제안 JSON.`;
 
+  // ★ 2026-10-28 K11-1 — DM 개선 = 고치기(예시 0 · 원문 꼴 유지) · 말투만
+  const { system: improveSystem } = await composeVoicePrompt({
+    companyId, producer: 'dm-improve', mode: 'rewrite', scope: 'tone', kind: resolveCopyIntent({ isAd: true }).kind, basePrompt: IMPROVE_SYSTEM,
+  });
   const raw = await callAIWithFallback({
-    system: IMPROVE_SYSTEM,
+    system: improveSystem,
     userMessage,
     maxTokens: 1800,
     temperature: 0.5,

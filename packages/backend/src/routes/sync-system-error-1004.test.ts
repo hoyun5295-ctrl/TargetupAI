@@ -41,7 +41,7 @@ vi.mock('../utils/secret-hash', () => ({
 }));
 vi.mock('../utils/system-sync-user', () => ({ ensureSystemSyncUser: vi.fn(async () => 'sys-user') }));
 vi.mock('../utils/unsubscribe-helper', () => ({ registerBulkCompanyUserUnsubscribes: vi.fn(async () => 0) }));
-vi.mock('../utils/customer-purchase-aggregates', () => ({ updateCustomerPurchaseAggregates: vi.fn(async () => undefined) }));
+vi.mock('../utils/customer-purchase-aggregates', () => ({ updateCustomerPurchaseAggregates: vi.fn(async () => undefined), parseCustomerSummaryFields: vi.fn(() => []) }));
 vi.mock('../utils/enabled-fields', () => ({ clearEnabledFieldsCache: vi.fn() }));
 vi.mock('../utils/ai-mapping', () => ({
   callAiMapping: vi.fn(),

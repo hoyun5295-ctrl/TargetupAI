@@ -18,11 +18,15 @@ import * as readline from 'node:readline';
 import {
   loadConfigDecrypted,
   saveConfigEncrypted,
+  updateConfigEncrypted,
   type AgentConfig,
 } from '../config';
 // ★2026-09-13(3) 싱크 ⓑ 가리는 모양은 masking.ts 한 곳이 정한다(키 = 앞뒤 4자 · 시크릿·비밀번호 = 전부)
 import { maskApiKey, maskPassword } from '../logger/masking';
 import { customSlotSources, resolveCustomFieldLabels } from '../mapping/templates';
+import { createDbConnector } from '../db';
+import { resolveValueMaps, valueMapSourceOf, VALUE_MAP_FIELDS } from '../normalize';
+import { runValueCheck, judgementLabel } from './value-check';
 
 // ─── readline 유틸 ──────────────────────────────────────
 
@@ -178,6 +182,21 @@ export function printConfig(config: AgentConfig): void {
     }
   }
   console.log('  └───────────────────────────────────────────────┘');
+
+  // ★ 2026-10-28 설치별 값 분류(P2) — 지금 고객 매핑과 컬럼이 다르면 쓰이지 않는다(normalize resolveValueMaps 한 곳)
+  if (config.valueMaps) {
+    const effective = resolveValueMaps(config.valueMaps, m.customers, { table: y.customerTable, source: valueMapSourceOf(d) }) || {};
+    console.log('');
+    console.log('  ┌── [6] 값 분류 (설치 때 분류) ─────────────────┐');
+    for (const field of VALUE_MAP_FIELDS) {
+      const entry = config.valueMaps[field];
+      if (!entry) continue;
+      const pairs = Object.entries(entry.values as Record<string, boolean | 'M' | 'F'>)
+        .map(([raw, v]) => `"${raw}" → ${judgementLabel(field, v)}`).join(', ');
+      console.log(`  │  ${field} (${entry.table} · ${entry.column}): ${pairs}${effective[field] ? '' : '  ⚠ 지금 매핑 · 테이블 · DB 와 달라 쓰이지 않음 → [6] 으로 다시 확인'}`);
+    }
+    console.log('  └───────────────────────────────────────────────┘');
+  }
 
   // ⑤ Agent
   console.log('');
@@ -453,6 +472,54 @@ async function editMapping(config: AgentConfig): Promise<AgentConfig> {
   return { ...config, mapping: updatedMapping };
 }
 
+/**
+ * ★ 2026-10-28 P2 값 확인 — 저장된 접속 · 고객 표 · 고객 매핑으로 마법사와 같은 CT(setup/value-check.ts)를 돌려 valueMaps 를 새로 쓴다.
+ * 웹 마법사로 설치한 곳 · 매핑을 바꾼 뒤 · 설치 뒤 다시 확인할 때의 길.
+ * 결과는 **최신 설정 파일에 valueMaps 만 합쳐 바로 저장**한다(Codex 설계 1R) — 대화 중 서비스의 원격 매핑 갱신을 이 편집기의 옛 사본이 덮지 않게.
+ * 확인에 쓴 매핑 · 테이블 · 접속이 최신 파일과 다르면(그새 원격 갱신 · 이 편집기의 저장 안 한 수정) 저장하지 않는다.
+ * 분류가 바뀌면 다음 기동에서 고객 커서가 폐기돼 고객 전량이 새 분류로 다시 나간다(engine cursorFingerprint).
+ */
+async function editValueMaps(config: AgentConfig): Promise<AgentConfig> {
+  console.log('');
+  console.log('  🔧 수신동의 · 탈퇴 · 성별 값 확인 (저장된 DB 접속 · 고객 테이블 · 고객 매핑으로)');
+  const target = { table: config.sync.customerTable, source: valueMapSourceOf(config.database) };
+  const checkedMapping = JSON.stringify(config.mapping.customers);
+  let valueMaps: AgentConfig['valueMaps'];
+  const connector = createDbConnector(config.database);
+  try {
+    await connector.testConnection();
+    valueMaps = await runValueCheck(connector, target, config.mapping.customers, config.valueMaps, {
+      log: (line) => console.log(line),
+      askSelect,
+    });
+  } catch (e: any) {
+    console.log(`  ⚠  DB 접속 실패 (${e?.message || e}). 값 분류를 바꾸지 않습니다.`);
+    return config;
+  } finally {
+    await connector.disconnect().catch(() => { /* 종료 경로 */ });
+  }
+
+  let stale = false;
+  try {
+    const saved = updateConfigEncrypted((latest) => {
+      if (latest.sync.customerTable !== target.table
+        || valueMapSourceOf(latest.database) !== target.source
+        || JSON.stringify(latest.mapping.customers) !== checkedMapping) {
+        stale = true;
+        throw new Error('설정이 확인 뒤 바뀌었습니다');
+      }
+      return { ...latest, valueMaps };
+    });
+    console.log('  ✅ 값 분류를 바로 저장했습니다. 에이전트를 재시작하면 고객 전체를 새 분류로 다시 보냅니다.');
+    return { ...config, valueMaps: saved.valueMaps };
+  } catch (e: any) {
+    console.log(stale
+      ? '  ⚠  저장되지 않은 수정이 있거나 그사이 설정이 바뀌어 값 분류를 저장하지 않았습니다. [저장하고 종료] 뒤 다시 열어 값 확인을 해 주세요.'
+      : `  ⚠  값 분류 저장 실패 (${e?.message || e}).`);
+    return config;
+  }
+}
+
 async function editAgent(config: AgentConfig): Promise<AgentConfig> {
   console.log('');
   console.log('  🔧 Agent 정보 수정');
@@ -502,6 +569,7 @@ export async function startEditConfig(
         { name: '[3] 동기화 설정 (테이블, timestamp, 주기)', value: 'sync' },
         { name: '[4] 컬럼 매핑 (고객/구매)', value: 'mapping' },
         { name: '[5] Agent 정보 (이름)', value: 'agent' },
+        { name: '[6] 수신동의 · 탈퇴 · 성별 값 확인', value: 'values' },
         { name: '💾 저장하고 종료', value: 'save' },
         { name: '❌ 저장하지 않고 종료', value: 'exit' },
       ]);
@@ -551,6 +619,9 @@ export async function startEditConfig(
           break;
         case 'agent':
           config = await editAgent(config);
+          break;
+        case 'values':
+          config = await editValueMaps(config);
           break;
       }
 

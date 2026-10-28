@@ -85,7 +85,7 @@ check('parse: 주문 없음(빈 return)', () => {
 // ── 주문 → CDP 매핑 ────────────────────────────────────────────────
 check('map: 회원 주문 — memId=externalId, 필드/품목/금액/동의raw', () => {
   const r = parseGodoOrderResponse(SINGLE_ORDER_XML);
-  const m = mapGodoOrderToCdp(r.orders[0]);
+  const m = mapGodoOrderToCdp(r.orders[0], { provider: 'godo', mallId: 'godo', idPrefix: null });
   assert.ok(m);
   assert.strictEqual(m!.order.orderId, '2501151716000289');
   assert.strictEqual(m!.order.externalId, 'hong');
@@ -107,7 +107,7 @@ check('map: 비회원 주문 — externalId=guest:{휴대폰}, 동의raw=n', () 
     <orderNo>G1</orderNo><orderStatus>p1</orderStatus><orderDate>2025-02-01 09:00:00</orderDate>
     <orderInfoData><orderInfoCd>1</orderInfoCd><orderCellPhone>010-9999-0000</orderCellPhone><smsFl>n</smsFl></orderInfoData>
   </order_data></return></data>`;
-  const m = mapGodoOrderToCdp(parseGodoOrderResponse(xml).orders[0]);
+  const m = mapGodoOrderToCdp(parseGodoOrderResponse(xml).orders[0], { provider: 'godo', mallId: 'godo', idPrefix: null });
   assert.strictEqual(m!.order.externalId, 'guest:010-9999-0000');
   assert.strictEqual(m!.smsRaw, 'n');
 });
@@ -117,7 +117,7 @@ check('map: settlePrice 없으면 상품금액+배송비 fallback', () => {
     <orderNo>P1</orderNo><orderStatus>d2</orderStatus><orderDate>2025-02-02 09:00:00</orderDate>
     <totalGoodsPrice>10000</totalGoodsPrice><totalDeliveryCharge>2500</totalDeliveryCharge>
   </order_data></return></data>`;
-  const m = mapGodoOrderToCdp(parseGodoOrderResponse(xml).orders[0]);
+  const m = mapGodoOrderToCdp(parseGodoOrderResponse(xml).orders[0], { provider: 'godo', mallId: 'godo', idPrefix: null });
   assert.strictEqual(m!.order.totalAmount, 12500);
   assert.strictEqual(m!.order.status, 'completed');
 });
@@ -127,17 +127,17 @@ check('map: 콤마 포함 금액 정규화', () => {
     <orderNo>P2</orderNo><orderStatus>p1</orderStatus><orderDate>2025-02-03 09:00:00</orderDate>
     <settlePrice>1,250,000</settlePrice>
   </order_data></return></data>`;
-  const m = mapGodoOrderToCdp(parseGodoOrderResponse(xml).orders[0]);
+  const m = mapGodoOrderToCdp(parseGodoOrderResponse(xml).orders[0], { provider: 'godo', mallId: 'godo', idPrefix: null });
   assert.strictEqual(m!.order.totalAmount, 1250000);
 });
 
 check('map: 주문번호 없으면 null', () => {
-  const m = mapGodoOrderToCdp({ orderStatus: 'p1', orderDate: '2025-01-01 00:00:00' });
+  const m = mapGodoOrderToCdp({ orderStatus: 'p1', orderDate: '2025-01-01 00:00:00' }, { provider: 'godo', mallId: 'godo', idPrefix: null });
   assert.strictEqual(m, null);
 });
 
 check('map: 주문일자 없으면 null', () => {
-  const m = mapGodoOrderToCdp({ orderNo: 'X1', orderStatus: 'p1' });
+  const m = mapGodoOrderToCdp({ orderNo: 'X1', orderStatus: 'p1' }, { provider: 'godo', mallId: 'godo', idPrefix: null });
   assert.strictEqual(m, null);
 });
 
@@ -146,7 +146,7 @@ check('map: smsFl 미전달 → smsRaw undefined', () => {
     <orderNo>S1</orderNo><orderStatus>p1</orderStatus><orderDate>2025-02-04 09:00:00</orderDate>
     <orderInfoData><orderInfoCd>1</orderInfoCd><orderName>김</orderName></orderInfoData>
   </order_data></return></data>`;
-  const m = mapGodoOrderToCdp(parseGodoOrderResponse(xml).orders[0]);
+  const m = mapGodoOrderToCdp(parseGodoOrderResponse(xml).orders[0], { provider: 'godo', mallId: 'godo', idPrefix: null });
   assert.strictEqual(m!.smsRaw, undefined);
 });
 

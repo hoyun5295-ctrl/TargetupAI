@@ -115,7 +115,8 @@ describe('WP2 새로 쓰는 문안 = 값 기준 혜택 대조', () => {
 describe('WP2 배선 — 문안을 새로 쓰거나 다시 쓰는 AI 출구마다 서버 대조가 붙어 있다(지시는 경계가 아니다)', () => {
   const has = (src: string, ...calls: string[]) => calls.every((c) => src.includes(c));
   it('새로 쓰는 문안(기본 · 맞춤 · DM · 이메일 · 인앱)', () => {
-    expect(has(SRC('services', 'ai.ts'), 'findInventedBenefits(', 'replaceInventedBenefits(', 'rewriteAddsFacts(')).toBe(true);   // ★ 1024 ② 다듬기 후보 = rewriteAddsFacts
+    expect(has(SRC('services', 'ai.ts'), 'applyCopyExitGuards(', 'rewriteAddsFacts(')).toBe(true);   // ★ 1024 ② 다듬기 후보 = rewriteAddsFacts · ★ 1028 K12-1 생성 출구 = 출구 CT
+    expect(has(SRC('utils', 'copy-exit-guards.ts'), 'findInventedBenefits(', 'replaceInventedBenefits(')).toBe(true);
     // ★ 2026-10-24 ② DM 알림 문자 = CT(dm-alert-copy · 옛 routes/dm.ts 인라인) · 다시 쓰기 판정 = rewriteAddsFacts(숫자 ∥ 혜택 ∥ 효능) · 원샷 HTML 이메일 삭제
     expect(has(SRC('utils', 'dm', 'dm-alert-copy.ts'), 'findInventedBenefits(', 'replaceInventedBenefits(')).toBe(true);
     expect(has(SRC('utils', 'dm', 'dm-ai.ts'), 'copyFactsExistInText(', 'rewriteAddsFacts(')).toBe(true);

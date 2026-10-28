@@ -13,7 +13,6 @@
  * ⛔ 잠금 사유 문장은 여기 한 곳이 소유한다(화면이 권한을 계산하거나 문구를 지어내지 않는다).
  */
 import { query, withTransaction, type TxRun } from '../config/database';
-import { normalizeWooMallId } from './woocommerce-core';
 import { UserFacingError } from './http-error';
 
 export type IntegrationBlockReason = 'NO_COMPANY' | 'NOT_ALLOWED' | 'NO_STORE_CODE';
@@ -93,33 +92,6 @@ export async function pickStoreCodeForConnect(actor: IntegrationActor, requested
   return { ok: false, code: 'NOT_ALLOWED' };
 }
 
-/**
- * 브라우저 수집(SDK)은 회사당 공개키가 하나라 어느 몰인지 Origin 만 안다.
- * Origin 호스트를 몰 식별자와 같은 함수로 정규화해 그 회사 연동 행의 분류코드를 찾는다.
- * 못 찾으면 null = 지금처럼 분류 없이 적재. ⛔ 실패를 던지지 않는다(수집을 막지 않는다).
- * ★ 2026-10-01 도메인을 옮긴 몰 — 연동 행의 증명된 주소(meta.woo_seen_hosts · 서명 검증된 웹훅이 채운다)도 같은 몰로 본다.
- */
-export async function resolveStoreCodeByOriginHost(companyId: string, originOrHost: string | null | undefined): Promise<string | null> {
-  const mallId = normalizeWooMallId(String(originOrHost || ''));
-  if (!companyId || !mallId) return null;
-  try {
-    const r = await query(
-      `SELECT meta->>'store_code' AS store_code
-         FROM company_integrations
-        WHERE company_id = $1::uuid AND (mall_id = $2 OR (meta->'woo_seen_hosts') ? $2) AND status <> 'revoked'
-          AND COALESCE(meta->>'store_code', '') <> ''
-        ORDER BY (mall_id = $2) DESC, created_at ASC
-        LIMIT 1`,
-      [companyId, mallId],
-    );
-    const code = cleanCode(r.rows[0]?.store_code);
-    return code || null;
-  } catch (err: any) {
-    console.warn(`[integration-scope] Origin 분류코드 조회 실패(수집은 계속) company=${companyId} host=${mallId}:`, err?.message || err);
-    return null;
-  }
-}
-
 /** 잠금·거부 사유 문장 — 고객이 읽는 말이다(내부 낱말·줄표·모델명 0). */
 export function integrationLockMessage(code: IntegrationLockCode): string {
   switch (code) {
@@ -192,21 +164,40 @@ export async function assertStoreCodeMode(run: TxRun, companyId: string, provide
 export async function guardIntegrationMode(run: TxRun, companyId: string, provider: string, mallId: string, storeCode: string | null): Promise<void> {
   await lockCompanyIntegrationMode(run, companyId);
   const cur = await run(
-    `SELECT status FROM company_integrations WHERE company_id = $1::uuid AND provider = $2 AND mall_id = $3`,
+    `SELECT status, meta->>'store_code' AS store_code FROM company_integrations WHERE company_id = $1::uuid AND provider = $2 AND mall_id = $3`,
     [companyId, provider, mallId],
   );
-  if (cur.rows.length === 0 || cur.rows[0].status === 'revoked') await assertStoreCodeMode(run, companyId, provider, mallId, storeCode);
+  if (cur.rows.length === 0 || cur.rows[0].status === 'revoked') { await assertStoreCodeMode(run, companyId, provider, mallId, storeCode); return; }
+  // ★ 1028 K14 N6 — 살아 있는 몰을 다른 분류코드로 다시 연결하지 않는다(몰 1행 = 분류코드 1개 · 해제 뒤 재연결이 길 · 우커머스 decideStoreCode 와 같은 규칙) · 코드를 안 주면 그대로
+  if (storeCode != null && cleanCode(storeCode) !== cleanCode(cur.rows[0].store_code)) {
+    throw new UserFacingError(409, 'STORE_CODE_CHANGE_NOT_SUPPORTED', integrationLockMessage('STORE_CODE_CHANGE_NOT_SUPPORTED'));
+  }
+}
+
+/**
+ * ★ 1028 K14 N6 — 우커머스 밖 몰 연결 라우트 공용: 이 연결이 붙일 분류코드(관리자 = 고른 등록부 코드 · 비우면 null · 담당자 = 자기 코드).
+ * 못 정하면 UserFacingError(라우트 respondUserError 가 그 문장으로 답한다) · 모드 판정은 저장 CT(saveIntegrationRowGuarded)가 한다.
+ */
+export async function storeCodeForConnect(user: Parameters<typeof resolveIntegrationActor>[0], requested: unknown): Promise<string | null> {
+  const actor = await resolveIntegrationActor(user);
+  if (actor.kind === 'blocked') throw new UserFacingError(403, actor.reason, integrationLockMessage(actor.reason));
+  const pick = await pickStoreCodeForConnect(actor, requested);
+  if (!pick.ok) throw new UserFacingError(409, pick.code, integrationLockMessage(pick.code));
+  return pick.storeCode;
 }
 
 /** 모드 문을 지난 저장 — provider 저장 함수가 연동 행 INSERT 를 이 안에서 쓴다(R7 · 잠금 → 판정 → 저장 = 한 트랜잭션) */
 export async function saveIntegrationRowGuarded<T>(
   companyId: string, provider: string, mallId: string, storeCode: string | null,
   save: (run: TxRun) => Promise<T>,
+  /** ★ 1028 Codex R2 #1 — 바깥 트랜잭션(승인 확정 = 연동 저장 + 승인 행 지우기 한 커밋) · 없으면 새 트랜잭션 */
+  outer?: TxRun,
 ): Promise<T> {
-  return withTransaction(async (run) => {
+  const body = async (run: TxRun) => {
     await guardIntegrationMode(run, companyId, provider, mallId, storeCode);
     return save(run);
-  });
+  };
+  return outer ? body(outer) : withTransaction(body);
 }
 
 /**
@@ -233,10 +224,12 @@ export async function decideStoreCode(
 }
 
 /** 그 연동 행의 분류코드(없으면 null) — 웹훅 처리가 어댑터에 넘긴다(★ 1027 K9 · 해제 행도 읽는다 = 그 몰 소속 행에 쓴다) */
-export async function integrationStoreCodeOf(companyId: string, provider: string, mallId: string): Promise<string | null> {
+export async function integrationRowScopeOf(companyId: string, provider: string, mallId: string): Promise<{ storeCode: string | null; idPrefix: string | null }> {
+  // ★ 1028 K9 — 같은 조회에서 몰 접두(meta.id_prefix 원문 · 키가 없으면 null = 옛 행 = 빈 접두 · 우커머스는 mallScopedIds 가 `{몰}:`)
   const r = await query(
-    `SELECT meta->>'store_code' AS store_code FROM company_integrations WHERE company_id = $1::uuid AND provider = $2 AND mall_id = $3 LIMIT 1`,
+    `SELECT meta->>'store_code' AS store_code, CASE WHEN meta ? 'id_prefix' THEN meta->>'id_prefix' END AS id_prefix
+       FROM company_integrations WHERE company_id = $1::uuid AND provider = $2 AND mall_id = $3 LIMIT 1`,
     [companyId, provider, mallId],
   );
-  return cleanCode(r.rows[0]?.store_code) || null;
+  return { storeCode: cleanCode(r.rows[0]?.store_code) || null, idPrefix: typeof r.rows[0]?.id_prefix === 'string' ? r.rows[0].id_prefix : null };
 }

@@ -49,7 +49,8 @@ X-Hanjullo-Signature: (HMAC-SHA256 서명, hex 또는 base64)
             <tbody className="text-slate-600">
               <tr className="border-b border-slate-100"><td className="py-1 pr-2 font-mono">customer.created / customer.updated</td><td className="py-1 pr-2">회원 가입·정보 변경</td><td className="py-1">external_id(필수), phone(신규 필수), name, email, birth_date, gender, grade, address, sms_opt_in(수신동의 true/false)</td></tr>
               <tr className="border-b border-slate-100"><td className="py-1 pr-2 font-mono">order.created / order.updated</td><td className="py-1 pr-2">주문 생성·상태 변경</td><td className="py-1">order_id(필수), external_id(필수), status(pending/paid/completed/shipping), total_amount, ordered_at, items, phone, name</td></tr>
-              <tr><td className="py-1 pr-2 font-mono">order.cancelled / order.refunded</td><td className="py-1 pr-2">취소·환불</td><td className="py-1">order_id(필수), external_id(필수), total_amount, cancelled_at</td></tr>
+              <tr className="border-b border-slate-100"><td className="py-1 pr-2 font-mono">order.cancelled / order.refunded</td><td className="py-1 pr-2">취소·환불</td><td className="py-1">order_id(필수), external_id(필수), total_amount, cancelled_at</td></tr>
+              <tr><td className="py-1 pr-2 font-mono">customer.deleted</td><td className="py-1 pr-2">회원 탈퇴, 삭제(선택)</td><td className="py-1">external_id(필수), deleted_at. 받으면 그 회원의 광고 수신 동의를 내립니다</td></tr>
             </tbody>
           </table>
           <div className="text-[11px] text-amber-800 mt-1.5">★ 수신동의(sms_opt_in)를 보내지 않으면 신규 고객은 발송 제외로 저장됩니다. 동의받은 회원은 반드시 true로 보내주세요.</div>

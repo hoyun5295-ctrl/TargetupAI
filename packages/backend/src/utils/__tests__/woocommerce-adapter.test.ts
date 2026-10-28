@@ -8,11 +8,11 @@ import { createHmac } from 'crypto';
 
 vi.mock('../../config/database', () => ({ query: vi.fn(async () => ({ rows: [] })) }));
 vi.mock('axios', () => ({ default: { get: vi.fn() } }));
-vi.mock('../cdp-identity', async (orig) => ({ ...(await orig<any>()), identifyCustomer: vi.fn(async () => ({})) }));
+vi.mock('../cdp-identity', async (orig) => ({ ...(await orig<any>()), identifyCustomer: vi.fn(async () => ({})), withdrawMemberConsent: vi.fn(async () => 1) }));
 vi.mock('../cdp-orders', async (orig) => ({ ...(await orig<any>()), syncOrder: vi.fn(async () => ({})) }));
 
 import { query } from '../../config/database';
-import { identifyCustomer } from '../cdp-identity';
+import { identifyCustomer, withdrawMemberConsent } from '../cdp-identity';
 import { syncOrder } from '../cdp-orders';
 import { woocommerceAdapter, parseWooEvent } from '../woocommerce-adapter';
 
@@ -134,6 +134,13 @@ describe('processWebhookEvent — 재처리 워커와 같은 시그니처(compan
     await woocommerceAdapter.processWebhookEvent(COMPANY, 'ilbonimo.com:product.created', { id: 1 }, CTX);
     expect(identifyCustomer).not.toHaveBeenCalled();
     expect(syncOrder).not.toHaveBeenCalled();
+    expect(withdrawMemberConsent).not.toHaveBeenCalled();
+  });
+  it('★1028 K5 회원 삭제({id}만) = 그 회원(몰 접두 번호)의 광고 수신 철회 · 시각 = 받은 시각 · 연동 행 분류코드', async () => {
+    (withdrawMemberConsent as any).mockClear();
+    await woocommerceAdapter.processWebhookEvent(COMPANY, 'ilbonimo.com:customer.deleted', { id: 25 }, CTX);
+    expect(withdrawMemberConsent).toHaveBeenCalledWith(COMPANY, 'woocommerce', 'ilbonimo.com:25', CTX.observedAt, null);
+    expect(identifyCustomer).not.toHaveBeenCalled();
   });
   it('회사에 그 몰 행이 없으면 던진다(재처리 워커가 failed 로 남긴다 · 조용히 성공 처리하지 않는다)', async () => {
     q.mockImplementation(async () => ({ rows: [] }));

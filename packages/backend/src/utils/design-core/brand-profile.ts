@@ -22,7 +22,7 @@ export interface BrandProfile {
   contact: { phone?: string; email?: string; website?: string };
   /** 회사가 브랜드 색을 명시 설정했는가 */
   hasBrandColors: boolean;
-  /** Brand Voice 톤 요약 (미학습 = null) — 프롬프트 주입은 buildSystemPromptWithBrandVoice가 담당 */
+  /** Brand Voice 톤 요약 (미학습 = null) — 프롬프트 주입은 목소리 CT composeVoicePrompt 가 담당 */
   voice: {
     toneSignature: string;
     customerAddress?: string;

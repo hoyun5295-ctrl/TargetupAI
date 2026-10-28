@@ -18,7 +18,7 @@ vi.mock('../ai-credit', async (orig) => ({
 vi.mock('../../services/ai', () => ({ callAIWithFallback: (p: any) => aiMock(p), getSeasonContext: () => ({ month: 10, season: '가을', keywords: [] }) }));
 vi.mock('../../config/database', () => ({ query: vi.fn(async () => ({ rows: [] })), pool: { connect: vi.fn() }, default: { connect: vi.fn(), query: vi.fn() } }));
 vi.mock('../copy-prompt-composer', () => ({ composeCopyBrain: async () => ({ promptSuffix: '', examples: [] }) }));
-vi.mock('../brand-voice-prompt', () => ({ buildSystemPromptWithBrandVoice: async (_c: string, s: string) => s }));
+vi.mock('../brand-voice-prompt', () => ({ VOICE_KIND_BY_STEP: 'by_step', voiceLearned: async () => false, getBrandVoiceSnapshot: async () => null, voiceLearnedOf: () => false, resolveGuidelineFor: () => null, composeVoicePrompt: async (i: { basePrompt: string }) => ({ system: i.basePrompt, guideline: null, shape: null, voiceLearned: false, exampleCount: 0 }) }));
 vi.mock('../best-copy-assets', () => ({ getStructureSkeleton: async () => null }));
 vi.mock('../company-memory', () => ({ buildMemoryPromptContext: async () => '' }));
 vi.mock('../company-data-profile', () => ({ getCompanyDataProfile: async () => null, formatProfileForAiPrompt: () => '' }));

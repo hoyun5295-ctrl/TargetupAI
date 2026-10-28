@@ -104,12 +104,14 @@ describe('효능 단정 판정', () => {
     }
   });
   it('금지어 지우기는 자리표시를 넣기 전 — 뒤에서 지우면 자리표시 글자가 깎여 발송 길목을 지나간다(★ Codex 3R)', () => {
-    const ai = readFileSync(resolve(__dirname, '../../services/ai.ts'), 'utf8');
-    const banned = ai.indexOf('const hit = findBannedWords(msgField, bannedWords);');
+    // ★ 2026-10-28 AI 메모리 설계 K12-1 — 출구 고리 = 출구 CT(utils/copy-exit-guards.ts)로 옮김 · 순서 계약은 그대로
+    const ai = readFileSync(resolve(__dirname, '../copy-exit-guards.ts'), 'utf8');
+    const banned = ai.indexOf('const hit = findBannedWords(msgField, [...ctx.bannedWords]);');
     expect(banned).toBeGreaterThan(0);
-    expect(banned).toBeLessThan(ai.indexOf('const inventedHere = findInventedBenefits(msgField, benefitGround);'));
-    expect(banned).toBeLessThan(ai.indexOf('const effHere = dropInventedEfficacy(msgField, benefitGround);'));
+    expect(banned).toBeLessThan(ai.indexOf('const inventedHere = findInventedBenefits(msgField, ctx.benefitGround);'));
+    expect(banned).toBeLessThan(ai.indexOf('const effHere = dropInventedEfficacy(msgField, ctx.benefitGround);'));
     expect(ai.split('findBannedWords(').length - 1).toBe(1);
+    expect(readFileSync(resolve(__dirname, '../../services/ai.ts'), 'utf8')).not.toContain('findBannedWords(msgField');
   });
   it('격식체 · 과거 · 관형 활용도 같은 단정(★ Codex 2R)', () => {
     for (const v of ['혈당을 낮춥니다', '면역력을 높입니다', '주름을 없앱니다', '피부가 달라졌어요', '달라진 피부', '피부가 좋아질 거예요', '피부가 편안해집니다', '뱃살이 빠졌어요']) {
@@ -149,8 +151,11 @@ describe('한 줄 CT 글 정리 = 같은 판정', () => {
   // ★ 1025 F — 맞춤 생성(generateCustomMessages)은 부르는 곳이 없어 지웠다 · 남은 문자 생성 = 본문 · 제목 두 자리
   it('문자 생성 경로가 같은 거름을 부른다(혜택 거름과 같은 근거 글)', () => {
     const ai = readFileSync(resolve(__dirname, '../../services/ai.ts'), 'utf8');
-    expect(ai).toContain('const effHere = dropInventedEfficacy(msgField, benefitGround);');
-    expect(ai).toContain('const subjEff = dropInventedEfficacy(subj, benefitGround);');
+    // ★ 2026-10-28 K12-1 — 출구 CT 하나(근거 글 = exitCtx.benefitGround = 같은 benefitGround)
+    const exit = readFileSync(resolve(__dirname, '../copy-exit-guards.ts'), 'utf8');
+    expect(ai).toContain('channel, isAd, bannedWords, benefitGround, baseDate,');
+    expect(exit).toContain('const effHere = dropInventedEfficacy(msgField, ctx.benefitGround);');
+    expect(exit).toContain('const subjEff = dropInventedEfficacy(subj, ctx.benefitGround);');
     expect(ai).not.toContain('export async function generateCustomMessages(');
     // 프롬프트에 효능을 쓰라는 신호가 남지 않는다(LESSONS_BACKEND 0809 — 반대 신호를 세어 지운다)
     expect(ai).not.toMatch(/before\/after 기대감|성분 효능 \+|체감 변화 \+|건강 이점|피부가 달라지는 마스크팩|몸이 가벼워지는|성분\/효과 기반 설득/);

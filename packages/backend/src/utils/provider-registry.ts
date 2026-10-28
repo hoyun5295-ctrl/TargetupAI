@@ -21,6 +21,7 @@
 
 import { UserFacingError } from './http-error';
 import type { WebhookCtx, WebhookProcessResult } from './cdp-webhook-delivery';
+import { providerReadinessOf, type ProviderReadiness } from './provider-readiness';   // ★1028 K13
 // ════════════════════════════════════════════════════════════════════
 // 표준 타입
 // ════════════════════════════════════════════════════════════════════
@@ -148,6 +149,8 @@ export type ProviderUIEntry = {
   connectMethod: 'oauth' | 'webhook' | 'polling' | 'none';
   available: boolean;
   status: 'available' | 'coming_soon';
+  /** ★1028 K13 「준비 됨」 표(단계 × 등급 · 근거) · 없으면 null = 화면이 능력 문장을 말하지 않는다 */
+  readiness: ProviderReadiness | null;
 };
 
 /**
@@ -164,6 +167,7 @@ export function buildProvidersForUI(
     connectMethod: p.connectMethod,
     available: p.available,
     status: p.available ? 'available' : 'coming_soon',
+    readiness: providerReadinessOf(p.provider),
   }));
 }
 

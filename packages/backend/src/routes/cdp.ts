@@ -26,9 +26,10 @@ import fs from 'fs';
 import { v4 as uuidv4 } from 'uuid';
 import { authenticate } from '../middlewares/auth';
 import { resolveOwnerScope } from '../utils/owner-scope';
-import { requireCdpApiKey, requireCdpBrowserOrigin, requireCdpKeyOrBrowserOrigin, recordCdpApiCall, issueCdpKeyPair, isCdpEnabledForPlan } from '../utils/cdp-auth';
-// ★ 2026-09-18 브라우저 수집의 몰 분류코드 — 검증된 Origin 호스트로 연동 행에서 찾는다
-import { resolveStoreCodeByOriginHost } from '../utils/integration-scope';
+import { requireCdpApiKey, requireCdpBrowserOrigin, requireCdpKeyOrBrowserOrigin, recordCdpApiCall, issueCdpKeyPair, isCdpEnabledForPlan, cdpFactCollectGate } from '../utils/cdp-auth';
+import { listMallAutoOrigins } from '../utils/mall-origins';
+import { requireCdpPluginKey } from '../utils/cdp-plugin-auth';   // ★ 1028 K8 플러그인 키(몰 하나 · 회원 토큰 발급만)
+import { wooPluginMemberExternalId } from '../utils/woocommerce-client';
 import { isValidBundleId } from '../utils/cdp-app-id';
 import { identifyCustomer, parseConsentValue } from '../utils/cdp-identity';
 import { trackEvent, ingestBrowserEvents } from '../utils/cdp-events';
@@ -117,6 +118,8 @@ import { getCreditCost } from '../utils/ai-credit-calc';
 import { getServePath, parseFitOption } from '../utils/image-serve';
 
 import { publicErrorText, respondUserError, UserFacingError, uploadErrorText } from '../utils/http-error';
+import { storeCodeForConnect } from '../utils/integration-scope';   // ★1028 N6 연결 분류코드
+
 const router = Router();
 
 // ★ 2026-06-25 (gap 6): CDP write 버스트 한도 — 회사당 50req/10초(보수적). bulk-import는 제외(월 한도+1000건 캡).
@@ -175,17 +178,14 @@ router.post('/ingest', requireCdpBrowserOrigin, cdpIngestBurst, async (req: Requ
     // ★ 정규화 적재 (CT-21 ingestBrowserEvents) — SDK type → 표준 event_name +
     //   identify 식별 + 익명→회원 소급. PII masking 2차 안전망은 함수 내부 normalizeBrowserEvent에서 수행.
     //   옛 inline INSERT는 없는 event_type/payload 컬럼 참조로 항상 503이었음.
-    // ★ 2026-09-18 몰별 분류코드 — SDK 공개키는 회사당 하나라 몰은 Origin 만 안다. requireCdpBrowserOrigin 이 허용 목록과
-    //   대조한 그 Origin 으로 연동 행의 분류코드를 찾아 배치에 싣는다(설계서 docs/2026-09-18-mall-integration-user-scope-design.md §3-4).
-    //   못 찾으면 null = 지금과 같은 무분류 적재. 본문 값은 읽지 않는다.
-    const storeCode = await resolveStoreCodeByOriginHost(companyId, String(req.headers['origin'] || ''));
+    // ★ 2026-10-28 자사몰 대비 K4 — 브라우저는 고객을 잇기만 해서(고객 칸 · 소속 행 쓰기 0) 몰 분류코드를 찾지 않는다.
+    //   소속 행은 몰 서버의 회원 정보 · 주문이 연동 행의 분류코드로 쓴다(옛 2026-09-18 Origin 분류코드 조회는 브라우저 identify 용이었다).
     const ingestResult = await ingestBrowserEvents(companyId, {
       anonymousId: anonymous_id || null,
       sessionId: session_id || null,
       schemaVersion: schema_version,
       sentAt: sent_at || null,
       events: events as Array<Record<string, any>>,
-      storeCode,
       // ★ 2026-10-04 SDK 가 매 전송에 싣는 회원 증명 — 검증은 ingestBrowserEvents 가 토큰으로 한다
       member: member && typeof member.external_id === 'string' && typeof member.member_token === 'string'
         ? { externalId: member.external_id, memberToken: member.member_token }
@@ -252,6 +252,25 @@ router.post('/member-token', requireCdpApiKey, async (req: Request, res: Respons
   }
 });
 
+// POST /api/cdp/plugin/member-token — 워드프레스 플러그인 1.0.3 의 회원 토큰 발급(★ 2026-10-28 자사몰 대비 K8 · D9 · K4 검증 수정 10)
+//   키 = 몰 하나의 플러그인 키(전권 CDP 비밀키 아님) · 본문 = { host, user_id, ttl_seconds } · 회원 번호는 서버가 그 몰의 고정 식별자로 만든다
+//   (도메인을 옮긴 몰도 서버 회원 연결과 같은 꼴) · 응답의 external_id 를 플러그인이 그대로 identify 에 쓴다(토큰의 회원 = 그 번호).
+router.post('/plugin/member-token', requireCdpPluginKey, async (req: Request, res: Response) => {
+  const integ = req.pluginIntegration!;
+  const externalId = wooPluginMemberExternalId(integ, req.body?.host, req.body?.user_id);
+  if (!externalId) {
+    return res.status(400).json({ success: false, error: '이 몰 주소의 회원 번호가 아니에요.', code: 'PLUGIN_MEMBER_INVALID' });
+  }
+  try {
+    const { token, expiresAt } = issueCdpMemberToken(integ.companyId, externalId, Number(req.body?.ttl_seconds) || undefined);
+    return res.json({ success: true, member_token: token, external_id: externalId, expires_at: new Date(expiresAt * 1000).toISOString() });
+  } catch (err: any) {
+    console.error('[CDP /plugin/member-token] 발급 실패:', err?.message || err);
+    if (respondUserError(res, err)) return;
+    return res.status(503).json({ success: false, error: '회원 토큰을 발급하지 못했습니다. 잠시 후 다시 시도해 주세요.', code: 'MEMBER_TOKEN_UNAVAILABLE' });
+  }
+});
+
 // POST /api/cdp/identify — 회원 식별 / upsert
 router.post('/identify', requireCdpApiKey, cdpWriteBurst, async (req: Request, res: Response) => {
   const cdpAuth = req.cdpAuth!;
@@ -263,6 +282,7 @@ router.post('/identify', requireCdpApiKey, cdpWriteBurst, async (req: Request, r
     }
 
     const result = await identifyCustomer(cdpAuth.companyId, {
+      serverVerified: true,   // ★ 1028 Codex R1 #5 몰 서버 비밀키 호출 = 브라우저 잇기의 근거
       source: cdpAuth.source,
       externalId: String(external_id),
       email,
@@ -344,6 +364,7 @@ router.post('/order', requireCdpApiKey, cdpWriteBurst, async (req: Request, res:
     }
 
     const result = await syncOrder(cdpAuth.companyId, {
+      serverVerified: true,   // ★ 1028 Codex R1 #5
       source: cdpAuth.source,
       orderId: String(order_id),
       externalId: String(external_id),
@@ -806,6 +827,7 @@ router.post('/bulk-import', requireCdpApiKey, async (req: Request, res: Response
     const result = await bulkImport(cdpAuth.companyId, {
       source: cdpAuth.source,
       customers: Array.isArray(customers) ? customers.map((c: any) => ({
+        serverVerified: true,   // ★ 1028 Codex R1 #5
         source: c.source || cdpAuth.source,
         externalId: String(c.external_id || ''),
         email: c.email,
@@ -819,6 +841,7 @@ router.post('/bulk-import', requireCdpApiKey, async (req: Request, res: Response
         smsOptIn: parseConsentValue(c.sms_opt_in ?? c.marketing_consent),
       })) : undefined,
       orders: Array.isArray(orders) ? orders.map((o: any) => ({
+        serverVerified: true,   // ★ 1028 Codex R1 #5
         source: o.source || cdpAuth.source,
         orderId: String(o.order_id || ''),
         externalId: String(o.external_id || ''),
@@ -885,9 +908,14 @@ router.get('/usage', async (req: Request, res: Response) => {
       return res.status(404).json({ success: false, error: '회사 정보를 찾을 수 없습니다.' });
     }
     const row = result.rows[0];
+    // ★ 2026-10-28 자사몰 대비 K7 — 열림 판정 · 사실 수집 마감은 서버 값(화면이 요금제 글자로 다시 판정하지 않는다 · I11)
+    const [cdpOpen, fact] = await Promise.all([isCdpEnabledForPlan(companyId), cdpFactCollectGate(companyId)]);
     return res.json({
       success: true,
       cdp_enabled: !!row.cdp_enabled,
+      cdp_open: cdpOpen,
+      collect_until: cdpOpen ? null : fact.allowed ? fact.collectUntil : null,
+      collect_stopped: !cdpOpen && !fact.allowed,
       plan_code: row.plan_code,
       plan_name: row.plan_name,
       has_key: !!row.has_key,
@@ -972,6 +1000,8 @@ router.get('/install-status', async (req: Request, res: Response) => {
       success: true,
       keyIssuedAt,
       firstEventAt: row.first_event_at || null,
+      // ★ 1028 K14 — 「데이터가 안 들어오나요?」 판정(키 발급 10분 뒤에도 0건) = 서버 값(화면은 시각을 계산하지 않는다 · I11)
+      stalled: Number(row.total || 0) === 0 && !!keyIssuedAt && Date.now() - new Date(keyIssuedAt).getTime() > 10 * 60 * 1000,
       total: row.total,
       count24h: row.count_24h,
       signals: {
@@ -1000,7 +1030,8 @@ router.get('/allowed-origins', async (req: Request, res: Response) => {
     const companyId = req.user?.companyId;
     if (!companyId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
     const r = await query(`SELECT cdp_allowed_origins FROM companies WHERE id = $1::uuid`, [companyId]);
-    return res.json({ success: true, origins: r.rows[0]?.cdp_allowed_origins || [] });
+    // ★ 1028 K12 — 몰 연동이 넣은 값(읽기 전용 · 해제하면 함께 빠짐)을 함께 준다
+    return res.json({ success: true, origins: r.rows[0]?.cdp_allowed_origins || [], auto: await listMallAutoOrigins(companyId) });
   } catch (err: any) {
     const msg = err?.message || '';
     if (msg.includes('column') && msg.includes('does not exist')) {
@@ -1055,6 +1086,10 @@ router.delete('/allowed-origins', async (req: Request, res: Response) => {
       return res.status(403).json({ success: false, error: '도메인 삭제는 회사 관리자만 가능합니다.' });
     }
     const origin = String(req.body?.origin || '').trim().toLowerCase().replace(/\/+$/, '');
+    // ★ 1028 K12 — 몰 연동이 넣은 값은 여기서 지우지 않는다(지워도 주기 갱신이 다시 넣는다 · 그 몰을 해제하면 함께 빠진다)
+    if ((await listMallAutoOrigins(companyId)).includes(origin)) {
+      return res.status(409).json({ success: false, error: '몰 연동이 넣은 도메인이에요. 그 몰 연동을 해제하면 함께 빠져요.', code: 'MALL_AUTO_ORIGIN' });
+    }
     await query(
       `UPDATE companies SET cdp_allowed_origins = array_remove(COALESCE(cdp_allowed_origins, '{}'::text[]), $2), updated_at = NOW()
        WHERE id = $1::uuid`,
@@ -2058,7 +2093,8 @@ router.post('/custom/issue-secret', async (req: Request, res: Response) => {
         code: 'PLAN_FEATURE_LOCKED',
       });
     }
-    const result = await issueCustomWebhookSecret(companyId);
+    const storeCode = await storeCodeForConnect(req.user, req.body?.store_code);   // ★1028 N6 분류코드 회사 = 매장 고르기(모드 판정 = 저장 CT)
+    const result = await issueCustomWebhookSecret(companyId, storeCode);
     return res.json({
       success: true,
       webhook_secret: result.secret,  // ★ raw secret — 본 응답에서만 1회 노출, 재발급 시 옛 secret은 폐기

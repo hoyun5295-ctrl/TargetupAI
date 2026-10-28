@@ -3,7 +3,7 @@
  *
  * /api/cdp/ingest 는 공개키 + Origin 헤더 글자 비교뿐이다(Origin 은 브라우저 밖에서 바꿔 보낼 수 있다).
  * 못 박는 것:
- *   1. identify 는 몰 서버가 받은 회원 토큰이 **이 회사·이 회원**과 맞을 때만 identifyCustomer 를 부른다.
+ *   1. identify 는 몰 서버가 받은 회원 토큰이 **이 회사·이 회원**과 맞을 때만 고객에 잇는다(★1028 K4 = 잇기만 · linkBrowserMember · identifyCustomer 0).
  *      없거나 · 다른 회원 것이거나 · 다른 회사 것이거나 · 만료면 익명 적재(고객 정보 쓰기 0 · 소급 연결 0).
  *      옛: 피해자 이메일만 알면 그 고객의 이름·이메일을 덮고 휴대폰을 공격자 번호로 바꿨다.
  *   2. 회원 토큰은 이벤트 properties 에 남지 않는다.
@@ -24,7 +24,8 @@ vi.mock('../../config/database', () => ({
 vi.mock('../cdp-identity', () => ({
   identifyCustomer: vi.fn(async () => ({ customerId: 'cust-1', linkId: 'link-1', wasCreated: false, wasMerged: true })),
   ensureAnonymousLink: vi.fn(async () => 'link-anon'),
-  findLinkedCustomerId: vi.fn(async (_c: string, _s: string, ext: string) => (ext === 'm-77' ? 'cust-1' : null)),
+  // ★ 1028 K4 — 브라우저는 잇기만(서버 연결이 가리키는 고객 하나) · identifyCustomer 는 부르지 않는다
+  linkBrowserMember: vi.fn(async (_c: string, ext: string) => (ext === 'm-77' ? { customerId: 'cust-1', linkId: 'link-1' } : null)),
 }));
 vi.mock('../cdp-auth', () => ({ isOverMonthlyCdpLimit: vi.fn(async () => false), recordCdpApiCall: vi.fn(async () => undefined) }));
 vi.mock('../customer-cdp-fusion', () => ({ fuseEventToCustomer: vi.fn(async () => undefined) }));
@@ -33,13 +34,14 @@ vi.mock('../inapp-trigger-engine', () => ({ listInAppTriggerCandidates: vi.fn(as
 
 process.env.JWT_SECRET = process.env.JWT_SECRET || 'test-jwt-secret-1004';
 
-import { identifyCustomer } from '../cdp-identity';
+import { identifyCustomer, linkBrowserMember } from '../cdp-identity';
 import { ingestBrowserEvents } from '../cdp-events';
 import { issueCdpMemberToken } from '../cdp-member-token';
 
 const COMPANY = '11111111-1111-4111-8111-111111111111';
 const OTHER = '22222222-2222-4222-8222-222222222222';
 const identify = identifyCustomer as unknown as ReturnType<typeof vi.fn>;
+const link = linkBrowserMember as unknown as ReturnType<typeof vi.fn>;
 
 const run = (identifyEvt: Record<string, any> | null, more: Array<Record<string, any>> = [], member: any = null) =>
   ingestBrowserEvents(COMPANY, {
@@ -53,7 +55,7 @@ const inserted = () =>
     .filter((c) => /INSERT INTO cdp_events/.test(String(c[0])))
     .map((c) => ({ name: c[1][3], props: JSON.parse(c[1][4]), customerId: c[1][2] }));
 
-beforeEach(() => { identify.mockClear(); clientQuery.mockClear(); dbQuery.mockClear(); });
+beforeEach(() => { identify.mockClear(); link.mockClear(); clientQuery.mockClear(); dbQuery.mockClear(); });
 
 describe('브라우저 식별 = 회원 토큰 필수 (C1)', () => {
   const victim = { external_id: 'attacker-made', email: 'victim@example.invalid', phone: '01000000009', name: '공격자' };
@@ -80,12 +82,21 @@ describe('브라우저 식별 = 회원 토큰 필수 (C1)', () => {
     expect(identify).not.toHaveBeenCalled();
   });
 
-  it('이 회사·이 회원 토큰이면 식별한다(종전 동작)', async () => {
+  it('이 회사·이 회원 토큰이면 서버 연결의 고객에 잇기만 한다(K4 · 페이지가 보낸 이메일 · 전화 · 이름은 쓰지 않음)', async () => {
     const member_token = issueCdpMemberToken(COMPANY, 'm-77').token;
-    const r = await run({ external_id: 'm-77', email: 'm77@example.invalid', member_token });
-    expect(identify).toHaveBeenCalledTimes(1);
-    expect(identify.mock.calls[0][1]).toMatchObject({ source: 'sdk', externalId: 'm-77' });
+    const r = await run({ external_id: 'm-77', email: 'm77@example.invalid', phone: '01000000009', name: '바뀐이름', member_token });
+    expect(identify).not.toHaveBeenCalled();
+    expect(link).toHaveBeenCalledTimes(1);
+    expect(link.mock.calls[0]).toEqual([COMPANY, 'm-77']);
     expect(r.customerId).toBe('cust-1');
+  });
+
+  it('토큰은 맞는데 서버 연결이 없거나 고객이 둘 이상 = 익명(K4)', async () => {
+    const member_token = issueCdpMemberToken(COMPANY, 'm-88').token;
+    const r = await run({ external_id: 'm-88', member_token }, [{ type: 'track', event: 'cart_add', properties: {} }]);
+    expect(identify).not.toHaveBeenCalled();
+    expect(r.customerId).toBeNull();
+    expect(inserted().every((e) => e.customerId === null)).toBe(true);
   });
 
   it('회원 토큰은 이벤트 properties 에 남지 않는다', async () => {
@@ -125,7 +136,7 @@ describe('배치의 고객 연결 근거 = 검증된 토큰뿐 (Codex 1004 R1 hi
   it('같은 배치에 토큰 없는 identify 뒤 토큰 있는 identify = 뒤의 것으로 식별(medium)', async () => {
     const member_token = issueCdpMemberToken(COMPANY, 'm-77').token;
     const r = await run({ external_id: 'm-77' }, [{ type: 'identify', external_id: 'm-77', member_token }]);
-    expect(identify).toHaveBeenCalledTimes(1);
+    expect(link).toHaveBeenCalledTimes(1);
     expect(r.customerId).toBe('cust-1');
   });
 

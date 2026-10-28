@@ -17,6 +17,8 @@
  */
 
 import { rewriteAddsFacts, readingAddsEfficacy, efficacyNote, EFFICACY_PROMPT_RULES, EFFICACY_REWRITE_RULE } from '../copy-benefit-detector';
+import { composeVoicePrompt } from '../brand-voice-prompt';
+import { resolveCopyIntent } from '../copy-content-type';
 import { query } from '../../config/database';
 // ★ 2026-09-26 한줄로 V2 R1-26 — 섹션 읽기·되쓰기 CT(pages 우선)
 import { extractFlatSectionsFromDm, mapDmSections, getDmDetail, updateDm, DmStaleSaveError } from './dm-builder';
@@ -162,6 +164,10 @@ async function refineAllCopy(companyId: string, campaignId: string): Promise<{ r
 async function refineSectionsCopy(companyId: string, sections: any[]): Promise<{ changes: QuickActionChange[]; rejected: number }> {
   const changes: QuickActionChange[] = [];
   let rejected = 0;
+  // ★ 2026-10-28 AI 메모리 설계 K11-1 — DM 빠른 고치기 = 고치기(예시 0 · 원문 꼴 유지) · 말투만
+  const { system: refineSystem } = await composeVoicePrompt({
+    companyId, producer: 'dm-quick-refine', mode: 'rewrite', scope: 'tone', kind: resolveCopyIntent({ isAd: true }).kind, basePrompt: REFINE_SYSTEM,
+  });
 
   for (const sec of sections) {
     const text = extractEditableText(sec);
@@ -169,7 +175,7 @@ async function refineSectionsCopy(companyId: string, sections: any[]): Promise<{
 
     try {
       const aiText = await callAIWithFallback({
-        system: REFINE_SYSTEM,
+        system: refineSystem,
         userMessage: `원본:\n${text}`,
         maxTokens: 400,
         temperature: 0.7,

@@ -11,6 +11,8 @@
  *   - 헤드라인 글 = 한 줄에 없는 숫자 · 혜택 0 · 16자 · 실패 = 한 줄 앞부분(그림 안 글자에 지어낸 값이 박히지 않게).
  */
 import { callAIWithFallback } from '../services/ai';
+import { composeVoicePrompt } from './brand-voice-prompt';
+import { resolveCopyIntent } from './copy-content-type';
 import { runInCreditBundle } from './ai-credit-context';
 import { templatePickCandidates, buildTemplateJudgePrompt, parseTemplatePick } from './sales-outreach-produce';
 import { SUB_BY_ID } from './image-studio-template-subs';
@@ -141,8 +143,12 @@ export async function pickLineHeadlines(input: LineHeadlineInput): Promise<LineH
       eventTitles: [input.line], productNames: input.productNames, focusQuote: null, now,
     }, cands);
     const system = `${p.system}\n추가: JSON 에 "title" 도 넣는다 = 포스터에 크게 들어갈 한국어 헤드라인 한 줄(${LINE_HEADLINE_TITLE_MAX}자 이내 · 숫자 · 할인율 · 금액 · 할인 · 쿠폰 · 무료 같은 혜택 말 금지(값은 그림 밖에 따로 들어간다) · 이 행사의 분위기 · 상품의 매력을 한 줄로 · 효능 · 효과 · 몸이나 피부가 달라진다는 말(~해져요 등) 금지 · 가입 · 구매를 효과로 엮지 않는다 · 이모지 금지).${input.hasPhoto ? '' : ' 제품 사진이 없으므로 product 는 빈 배열로 둔다.'}`;
+    // ★ 2026-10-28 AI 메모리 설계 K11-1 · K11-2 — 헤드라인 = 쓰기 · 그림 위 한 줄이라 말투 · 호칭만
+    const { system: voiceSystem } = await composeVoicePrompt({
+      companyId: input.companyId, producer: 'line-headline', mode: 'write', scope: 'tone', kind: resolveCopyIntent({ isAd: true }).kind, basePrompt: system,
+    });
     const raw = await runInCreditBundle(() => callAIWithFallback({
-      system, userMessage: p.user, maxTokens: 300, temperature: 0,
+      system: voiceSystem, userMessage: p.user, maxTokens: 300, temperature: 0,
       companyId: input.companyId, userId: input.userId, source: 'line-headline-pick', noCache: true,
     }));
     const parsed = parseTemplatePick(raw, { product: cands.product.map((t) => t.id), event: cands.event.map((t) => t.id) });

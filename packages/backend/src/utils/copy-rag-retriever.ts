@@ -190,11 +190,13 @@ export async function retrieveCopyExamples(input: RetrieveInput): Promise<Retrie
   const curatedTenant = getTenantRef(CURATED_SEED_KEY);
   const cols = await selectColsWithEngagement(); // ★ 2026-07-04 Tier 1: click_count 있으면 포함
 
+  // ★ 2026-10-28 AI 메모리 설계 K10-3 — 출처 표식이 있는 행 중 AI 가 쓴 글(허브 3안 그대로 · AI 경로)은 회사 예시가 아니다(옛 행 = 표식 없음 = 지금처럼)
   const companyRes = await pool.query(
     `SELECT ${cols}
      FROM ai_training_logs
      WHERE tenant_ref = $1 AND message_type = ANY($2::text[]) AND is_ad = $3
        AND final_message IS NOT NULL AND length(final_message) >= 10
+       AND COALESCE(model_params->>'authorship', '') NOT IN ('hub_as_is', 'path_ai')
      ORDER BY created_at DESC
      LIMIT $4`,
     [tenantRef, channels, isAd, FETCH_CANDIDATES],

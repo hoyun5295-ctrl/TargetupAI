@@ -124,14 +124,14 @@ describe('자격 저장 — 몰 1개 = 행 1개 · pending · 웹훅 secret 은 
     expect(r.webhookSecret).toMatch(/^[0-9a-f]{64}$/);
     const insert = q.mock.calls.find((c: any[]) => String(c[0]).includes('INSERT INTO company_integrations'));
     expect(insert).toBeDefined();
-    expect(insert![0]).toContain("'woocommerce'");
+    expect(insert![1][1]).toBe('woocommerce');
     expect(insert![0]).toContain('ON CONFLICT (company_id, provider, mall_id)');
     expect(insert![0]).toContain("'pending'");
-    const meta = JSON.parse(insert![1][2]);
-    expect(meta).toMatchObject({ woo_site_url: 'https://www.ilbonimo.com/', woo_consumer_key: 'ck_x', woo_consumer_secret: 'cs_y', woo_consent_meta_key: 'marketing_agree' });
-    expect(insert![1][1]).toBe(MALL);
+    const meta = JSON.parse(insert![1].at(-1));
+    expect(meta).toMatchObject({ woo_site_url: 'https://www.ilbonimo.com/', woo_consumer_key: 'ck_x', woo_consumer_secret: 'cs_y', woo_consent_meta_key: 'marketing_agree', id_prefix: `${MALL}:` });
+    expect(insert![1][2]).toBe(MALL);
   });
-  it('저장 시 몰 도메인을 수집 허용 도메인(companies.cdp_allowed_origins)에 등록한다(https://{mall} · https://www.{mall}) · 그 실패는 저장을 막지 않는다', async () => {
+  it('저장 시 몰 도메인을 수집 허용 도메인(companies.cdp_allowed_origins)에 등록한다(https://{mall} · www · m) · 그 실패는 저장을 막지 않는다', async () => {
     q.mockImplementation(async (sql: string) => {
       if (sql.includes('INSERT INTO company_integrations')) return { rows: [{ webhook_secret: 'b'.repeat(64) }] };
       if (sql.includes('cdp_allowed_origins')) throw new Error('column "cdp_allowed_origins" does not exist');
@@ -142,7 +142,8 @@ describe('자격 저장 — 몰 1개 = 행 1개 · pending · 웹훅 secret 은 
     const upd = q.mock.calls.find((c: any[]) => String(c[0]).includes('cdp_allowed_origins'));
     expect(upd).toBeDefined();
     expect(upd![0]).toContain('UPDATE companies');
-    expect(upd![1]).toEqual([COMPANY, ['https://ilbonimo.com', 'https://www.ilbonimo.com']]);
+    // ★1028 K12 — 그 몰 행의 값으로 적는다(CT registerMallAllowedOrigins · 해제가 그것만 뺀다) · 모바일 m. 추가
+    expect(upd![1]).toEqual([COMPANY, 'woocommerce', MALL, ['https://ilbonimo.com', 'https://www.ilbonimo.com', 'https://m.ilbonimo.com']]);
   });
   it('몰 주소가 식별자로 접히지 않으면 WooApiError(invalid_site)', async () => {
     await expect(saveWooCredentials(COMPANY, { siteUrl: 'localhost', consumerKey: '', consumerSecret: '', consentMetaKey: '' })).rejects.toBeInstanceOf(WooApiError);
@@ -644,14 +645,14 @@ describe('① 1클릭 연결 — 앱 인증 콜백 키 저장 · 웹훅 자동 �
     expect(await saveWooRestKeysFromAuth(COMPANY, MALL, { consumerKey: 'ck', consumerSecret: 'cs', permissions: 'read' })).toBe(false);
   });
 
-  it('ensureWooWebhooks: 목록에 없으면 주제 4개를 POST 로 만든다(delivery_url = 몰별 수신 주소 · secret = 행 webhook_secret · active · wp_api_v3) · id 를 meta 에 기록', async () => {
+  it('ensureWooWebhooks: 목록에 없으면 주제 5개(★1028 K5 회원 삭제 추가)를 POST 로 만든다(delivery_url = 몰별 수신 주소 · secret = 행 webhook_secret · active · wp_api_v3) · id 를 meta 에 기록', async () => {
     q.mockImplementation(async (sql: string) => (sql.includes('SELECT') || sql.includes('RETURNING id') ? { rows: [row()] } : { rows: [] }));
     get.mockResolvedValueOnce({ status: 200, headers: {}, data: [] });
     let nextId = 100;
     request.mockImplementation(async (cfg: any) => ({ status: 201, headers: {}, data: { id: nextId++, topic: JSON.parse(cfg.data).topic, status: 'active' } }));
     const r = await ensureWooWebhooks(COMPANY, MALL);
-    expect(r).toEqual({ created: 4, existing: 0, reactivated: 0, ids: [100, 101, 102, 103] });
-    expect(request).toHaveBeenCalledTimes(4);
+    expect(r).toEqual({ created: 5, existing: 0, reactivated: 0, ids: [100, 101, 102, 103, 104] });
+    expect(request).toHaveBeenCalledTimes(5);
     const bodies = request.mock.calls.map((c: any[]) => JSON.parse(c[0].data));
     expect(bodies.map((b: any) => b.topic)).toEqual(WOO_WEBHOOK_TOPICS);
     for (const b of bodies) {
@@ -669,7 +670,7 @@ describe('① 1클릭 연결 — 앱 인증 콜백 키 저장 · 웹훅 자동 �
     // id 목록은 jsonb 파라미터($3)로 병합된다 — SQL 문자열이 아니라 인자에서 찾는다
     const upd = q.mock.calls.find((c: any[]) => String(c[0]).includes('UPDATE company_integrations') && String(c[1]?.[2] || '').includes('woo_webhook_ids'));
     expect(upd).toBeDefined();
-    expect(JSON.parse(upd![1][2])).toEqual({ woo_webhook_ids: [100, 101, 102, 103] });
+    expect(JSON.parse(upd![1][2])).toEqual({ woo_webhook_ids: [100, 101, 102, 103, 104] });
   });
 
   it('ensureWooWebhooks: 같은 수신 주소·주제가 이미 있으면 만들지 않고 셈(재연결 멱등) · 목록 조회는 per_page 100', async () => {
@@ -680,7 +681,7 @@ describe('① 1클릭 연결 — 앱 인증 콜백 키 저장 · 웹훅 자동 �
     ] });
     request.mockImplementation(async (cfg: any) => ({ status: 201, headers: {}, data: { id: 200, topic: JSON.parse(cfg.data).topic } }));
     const r = await ensureWooWebhooks(COMPANY, MALL);
-    expect(r.created).toBe(3);
+    expect(r.created).toBe(4);
     expect(r.existing).toBe(1);
     expect(r.ids).toContain(7);
     expect(new URL(get.mock.calls[0][0]).searchParams.get('per_page')).toBe('100');

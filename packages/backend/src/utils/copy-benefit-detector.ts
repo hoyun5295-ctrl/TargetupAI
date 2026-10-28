@@ -916,3 +916,184 @@ export function efficacyNote(kind: 'generate' | 'rewrite', count: number): strin
     ? `요청에 없는 효능 문장 ${count}곳을 뺐어요. 인증받은 기능 문구가 있으면 한 줄에 그대로 적어 주세요.`
     : `${count}곳은 원문에 없는 효능 · 숫자 · 혜택 말이 생겨 원래 글을 뒀어요.`;
 }
+
+// ─────────────── ★ 2026-10-28 AI 메모리 설계 K1-4 · K1-7(docs/2026-10-28-ai-memory-brand-voice-design.md) ───────────────
+//   법(없는 날짜 · 기간 날조 금지)과 발송 규칙(여정 상시 발송 = 계절 낱말 금지)을 지시문 한 줄이 아니라 출구 코드가 지킨다.
+
+/** 근거 글에 없는 날짜 · 기간 자리(AI_FILL_DIRECT_PATTERN 꼴 = 발송 길목이 사람이 고치기 전까지 막는다) */
+export const DATE_PLACEHOLDER = '[날짜: 직접 입력해주세요]';
+
+/** 재생성 힌트(문자 재생성 공용) */
+export const DATE_RETRY_HINT = '요청에 없는 날짜 · 기간 · 시각(M/D · N일까지 · N일간 · D-n · N시)을 쓰지 않기. 요청에 적힌 날짜만 쓰고, 없으면 날짜 없이 쓰기';
+
+/**
+ * 날짜 근거 판정(Codex 구현 1R · 2R · 3R). 문법은 하나다 — 출력을 읽는 날짜 꼴(DATE_TOKEN_RES)을 근거 글에도 그대로 읽는다
+ *   (같은 표현 = 양쪽 같은 판정 · 「오후 3시쯤」이 근거에 있으면 출력의 같은 말도 근거가 있다). 근거 글은 그 위에 사람 말투만 더 읽는다.
+ *   - 쌍 키 `md:M/D` = 월 · 일이 한 덩이인 날짜(11/5 · 11월 5일 · 오늘 · 사람 글의 11.5 · 11/5~7). 숫자 쌍 꼴(/ · .)은 쌍 키만 낸다
+ *     = 「10.5%」 · 「1.5~2배」 · 「1/2 가격」 의 숫자가 「5일까지」 · 「2일까지」의 근거가 되지 않는다(같은 숫자 쌍을 그대로 쓴 날짜만).
+ *   - 단위 키 `일:N` 등 = 숫자에 단위가 붙은 말. 사람 말투 쪽은 단위 바로 뒤가 경계일 때만(「12일 오픈」 · 「5~7일」 = 근거 · 「3주년」 · 「5일장」 · 「3시즌」 = 아님).
+ *   - D-n 은 식별자 안에서 읽지 않는다(「LED-3」 = 아님).
+ * 출력은 위치가 있는 토큰으로 겹침 없이 읽는다(앞선 · 긴 꼴 먼저 · 「11월 5일까지」의 「5일」을 따로 다시 보지 않는다). 바꾸기도 위치로 한다.
+ * 출력의 쌍 날짜는 쌍 키가 있거나 그 월 · 일 단위 키가 둘 다 있을 때 근거가 있다(「11월 5일~7일」 → 「11/7」).
+ */
+type DateUnit = '월' | '일' | '주' | '시간' | '시각';
+const unitKey = (unit: DateUnit, n: string) => `${unit}:${Number(n)}`;
+const pairKey = (m: string, d: string) => `md:${Number(m)}/${Number(d)}`;
+
+/**
+ * 날짜 · 기간 꼴(숫자를 품은 자리 · 출력과 근거 글이 같이 쓴다). pair = 월 · 일 한 덩이 · unit = 그 단위 키.
+ * 꼴 밖의 숫자(수량 · 횟수 · 금액)는 이 판정이 보지 않는다(혜택 · 숫자 판정이 따로 본다).
+ *   M/D(요일) · M월 D일 · N일간 · N일까지 · D-n · N주간 · N시간 한정 · N시까지 · 오전/오후 N시
+ */
+const DATE_TOKEN_RES: ReadonlyArray<{ re: RegExp; pair?: true; unit?: (token: string) => DateUnit }> = [
+  { re: /(?<![\d.,/])(\d{1,2})\s*\/\s*(\d{1,2})(?![\d/])(?:\s*\([월화수목금토일]\))?/g, pair: true },
+  { re: /(?<![\d.,])(\d{1,2})\s*월\s*(\d{1,2})\s*일/g, pair: true },
+  { re: /(?<![\d.,])(\d{1,3})\s*일\s*(?=간|동안|까지|부터|한정|만(?:[\s!.,~]|$))/g, unit: () => '일' },
+  { re: /(?<![A-Za-z0-9])D\s*-\s*(\d{1,3})(?!\d)/gi, unit: () => '일' },
+  { re: /(?<![\d.,])(\d{1,3})\s*(?:주|시간)\s*(?=간|동안|한정|만(?:[\s!.,~]|$))/g, unit: (t) => (t.includes('주') ? '주' : '시간') },
+  { re: /(?:오전|오후|밤|새벽|저녁|아침)\s*(\d{1,2})\s*시(?!간)/g, unit: () => '시각' },
+  { re: /(?<![\d.,])(\d{1,2})\s*시\s*(?=까지|부터|에|~|\s*~)/g, unit: () => '시각' },
+];
+
+interface DateToken { start: number; end: number; text: string; keys: string[]; pair: boolean; m: string; d: string }
+
+/** 글을 날짜 토큰으로(위치 · 겹침 없음 · 앞선 것 먼저 · 같은 자리면 긴 것) */
+function scanDateTokens(text: string): DateToken[] {
+  const all: DateToken[] = [];
+  for (const { re, pair, unit } of DATE_TOKEN_RES) {
+    for (const x of text.matchAll(re)) {
+      const t = x[0].trimEnd();
+      const start = x.index ?? 0;
+      all.push({
+        start, end: start + t.length, text: t, pair: !!pair, m: x[1], d: x[2] ?? '',
+        keys: pair ? [pairKey(x[1], x[2])] : [unitKey(unit!(x[0]), x[1])],
+      });
+    }
+  }
+  all.sort((a, b) => a.start - b.start || b.end - a.end);
+  const kept: DateToken[] = [];
+  for (const t of all) if (!kept.some((k) => t.start < k.end && k.start < t.end)) kept.push(t);
+  return kept;
+}
+
+/** 단위 바로 뒤 경계 = 한글이 아니거나 조사 · 날짜 뒷말의 첫 글자(사람 말투 쪽만) */
+const UNIT_END = '(?:(?![가-힣])|(?=[간까부만에엔의은는이가을를로도째차께쯤내중전후말초경한동안]))';
+const unitRe = (unit: string, max: 2 | 3) => new RegExp(`(?<![\\d.,/])(\\d{1,${max}})\\s*${unit}${UNIT_END}`, 'g');
+const rangeRe = (unit: string) => new RegExp(`(?<![\\d.,/])(\\d{1,2})\\s*~\\s*(\\d{1,2})\\s*${unit}${UNIT_END}`, 'g');
+
+/** 근거 글 사람 말투: 숫자 쌍(11.5 · 범위 꼬리 11/5~7 · 11.5~7 = 쌍 키만) · 단위 말(경계) */
+const GROUND_PAIR_RES: readonly RegExp[] = [
+  /(?<![\d.,/])(\d{1,2})\s*[/.]\s*(\d{1,2})(?![\d])/g,
+  /(?<![\d.,/])(\d{1,2})\s*[/.]\s*\d{1,2}\s*~\s*(\d{1,2})(?![\d/.])/g,
+];
+const GROUND_UNIT_RES: ReadonlyArray<[RegExp, DateUnit[]]> = [
+  [rangeRe('일'), ['일', '일']],
+  [unitRe('월', 2), ['월']],
+  [unitRe('일', 3), ['일']],
+  [unitRe('주', 3), ['주']],
+  [unitRe('시간', 3), ['시간']],
+  [rangeRe('시(?!간)'), ['시각', '시각']],
+  [unitRe('시(?!간)', 2), ['시각']],
+];
+
+function groundDateKeys(ground: string): string[] {
+  const out: string[] = [];
+  for (const t of scanDateTokens(ground)) out.push(...t.keys);
+  for (const re of GROUND_PAIR_RES) for (const m of ground.matchAll(re)) out.push(pairKey(m[1], m[2]));
+  for (const [re, units] of GROUND_UNIT_RES) {
+    for (const m of ground.matchAll(re)) units.forEach((u, i) => { if (m[i + 1] !== undefined) out.push(unitKey(u, m[i + 1])); });
+  }
+  return out;
+}
+
+/** (순수) 근거 글의 상대 날짜 말을 기준일 달력으로 푼 월 · 일. 기준일 = 발송일(자동마케팅) · 그 밖 = 지금 */
+function relativeDateKeys(ground: string, base: Date): string[] {
+  const g = String(ground || '');
+  const kst = (d: Date) => new Date(d.getTime() + 9 * 3600 * 1000);
+  const out: string[] = [];
+  const add = (days: number) => {
+    const d = kst(new Date(base.getTime() + days * 86400000));
+    const mo = String(d.getUTCMonth() + 1);
+    const da = String(d.getUTCDate());
+    out.push(pairKey(mo, da), unitKey('월', mo), unitKey('일', da));
+  };
+  if (/오늘|당일/.test(g)) add(0);
+  if (/내일/.test(g)) add(1);
+  if (/모레/.test(g)) add(2);
+  if (/이번\s*주말|주말/.test(g)) {
+    const dow = kst(base).getUTCDay();   // 0 = 일
+    const toSat = (6 - dow + 7) % 7;
+    add(toSat); add(toSat + 1);
+  }
+  return out;
+}
+
+/** (순수) 출력의 근거 없는 날짜 토큰(위치 포함) · 변수 자리는 같은 길이 공백으로 가려 위치가 원문과 같다 */
+function inventedDateTokens(output: string, ground: string, base: Date): DateToken[] {
+  const out = toHalfwidth(String(output || '')).replace(/%[^%\s]{1,20}%/g, (v) => ' '.repeat(v.length));
+  const g = toHalfwidth(String(ground || ''));
+  const allowed = new Set<string>([...groundDateKeys(g), ...relativeDateKeys(g, base)]);
+  return scanDateTokens(out).filter((t) => !(t.keys.some((k) => allowed.has(k))
+    || (t.pair && allowed.has(unitKey('월', t.m)) && allowed.has(unitKey('일', t.d)))));
+}
+
+/** (순수) 출력의 날짜 · 기간 자리 중 근거 글(사람 글)에 근거가 없는 자리 원문 목록 */
+export function findInventedDates(output: string, ground: string, base: Date = new Date()): string[] {
+  return Array.from(new Set(inventedDateTokens(output, ground, base).map((t) => t.text)));
+}
+
+/** (순수) 근거 없는 날짜 · 기간 자리를 직접 채울 자리로 바꾼다(그 자리만 · 같은 글자의 다른 자리는 그대로 · 남은 자리는 발송 길목이 막는다) */
+export function replaceInventedDates(output: string, ground: string, base: Date = new Date()): string {
+  let text = String(output || '');
+  for (const t of inventedDateTokens(text, ground, base).sort((a, b) => b.start - a.start)) {
+    text = text.slice(0, t.start) + DATE_PLACEHOLDER + text.slice(t.end);
+  }
+  return text;
+}
+
+/**
+ * 여정(상시 발송) 문안에 쓰지 않는 시점 말(계절 · 월 · 날씨 · 명절) — 옛 여정 지시문 금지 목록(journey-ai-generator 「상시 발송 원칙」)을 코드로 옮긴 것.
+ *   근거 글(여정 목표)에 그 말이 있으면 쓸 수 있다(사람이 그 시기를 정했다).
+ */
+export const SEASON_WORDS: readonly string[] = [
+  '여름', '가을', '겨울', '장마', '벚꽃', '단풍', '크리스마스', '연말', '연초', '새해', '설날', '추석', '명절',
+  '환절기', '폭염', '한파', '휴가철', '바캉스', '요즘 날씨', '이 계절', '계절이 바뀌',
+];
+const SEASON_MONTH_RE = /(?<![\d.,])(\d{1,2})\s*월(?!\s*\d{1,2}\s*일)/g;
+/** 한 글자 말은 낱말 속(「돌봄」)에서 걸리지 않게 앞 글자가 한글이 아닐 때만 */
+const SEASON_SPRING_RE = /(?<![가-힣])봄/;
+
+/** (순수) 글에 있는 시점 말 중 근거 글에 없는 것 */
+export function findSeasonWords(text: string, ground: string): string[] {
+  const t = String(text || '');
+  const g = String(ground || '');
+  const words = SEASON_WORDS.filter((w) => t.includes(w) && !g.includes(w));
+  if (SEASON_SPRING_RE.test(t) && !SEASON_SPRING_RE.test(g)) words.push('봄');
+  const months = Array.from(t.matchAll(SEASON_MONTH_RE), (m) => m[0].replace(/\s+/g, '')).filter((m) => !g.replace(/\s+/g, '').includes(m));
+  return Array.from(new Set([...words, ...months]));
+}
+
+/** 여정 패키지 안내 줄(뺀 문장 수 · 화면 그대로) */
+export function seasonNote(count: number): string {
+  return `여정은 1년 내내 나가서 계절이나 달 이름이 든 문장 ${count}곳을 뺐어요. 특정 시기에 보낼 여정이면 목표에 그 시기를 적어 주세요.`;
+}
+
+/** 시점 말 문장이 다 빠진 문안에 넣는 직접 채울 자리(AI_FILL_DIRECT_PATTERN 꼴) */
+export const SEASON_PLACEHOLDER = '[안내 문구: 직접 작성해주세요]';
+
+/** (순수) 근거 없는 시점 말이 든 문장을 뺀다(효능 거름과 같은 꼴 · 문장 단위 · 다 빠지면 직접 채울 자리) */
+export function dropSeasonSentences(text: string, ground: string): { text: string; dropped: string[] } {
+  const src = String(text || '');
+  if (findSeasonWords(src, ground).length === 0) return { text: src, dropped: [] };
+  const units = splitCopyUnits(src);
+  const dropped: string[] = [];
+  const kept = units.filter((u) => {
+    if (findSeasonWords(u.s, ground).length === 0) return true;
+    dropped.push(u.s.replace(/\s+/g, ' ').trim());
+    return false;
+  });
+  const paras: string[] = [];
+  for (const u of kept) paras[u.p] = (paras[u.p] ?? '') + u.s + u.sep;
+  const out = paras.filter((x) => x && x.trim()).map((x) => x.trim()).join('\n\n');
+  return { text: out || SEASON_PLACEHOLDER, dropped };
+}

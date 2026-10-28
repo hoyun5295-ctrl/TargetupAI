@@ -29,7 +29,8 @@ describe('syncOrder · 분류코드 전달', () => {
   it('storeCode 생략: 식별 입력이 지금과 같다(storeCode 키 없음)', async () => {
     await syncOrder(COMPANY, base as any);
     expect(identify).toHaveBeenCalledTimes(1);
-    expect(identify.mock.calls[0][1]).toEqual({ source: 'woocommerce', externalId: 'iroirotokyo.net:9', email: undefined, phone: '01000000000', name: undefined });
+    // ★1028 K4 — 주문 경로 식별 = 주문자 등급(tier order · 빈 칸만)
+    expect(identify.mock.calls[0][1]).toEqual({ tier: 'order', source: 'woocommerce', externalId: 'iroirotokyo.net:9', email: undefined, phone: '01000000000', name: undefined });
     expect('storeCode' in identify.mock.calls[0][1]).toBe(false);
   });
 

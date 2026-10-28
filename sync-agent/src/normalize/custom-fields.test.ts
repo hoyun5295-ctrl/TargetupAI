@@ -71,6 +71,7 @@ describe('normalizeCustomer가 custom_fields를 정리한다', () => {
 
   it('엔진은 원본 DB 종류를 넘긴다', () => {
     const src = fs.readFileSync(path.resolve(__dirname, '../sync/engine.ts'), 'utf8');
-    expect(src).toMatch(/normalizeCustomerBatch\(mapped, \{ dbType: this\.db\.dbType \}\)/);
+    // ★ 2026-10-28 설치별 값 분류 인자가 함께 실려 여러 줄 꼴이 됐다 — 판정은 그대로 「dbType 을 넘긴다」
+    expect(src).toMatch(/normalizeCustomerBatch\(mapped, \{\s*dbType: this\.db\.dbType\b/);
   });
 });

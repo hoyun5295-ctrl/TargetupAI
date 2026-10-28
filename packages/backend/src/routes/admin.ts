@@ -1147,8 +1147,8 @@ router.get('/geo/exceptions', authenticate, requireSuperAdmin, requireAdminArea(
 router.post('/geo/exceptions', authenticate, requireSuperAdmin, requireAdminArea('geoAccess'), async (req: Request, res: Response) => {
   try {
     const scope = String(req.body?.scope || '');
-    if (!['user', 'company_api', 'company_agent', 'global'].includes(scope)) {
-      return res.status(400).json({ error: '범위는 user · company_api · company_agent · global 중 하나여야 합니다.' });
+    if (!['user', 'company_api', 'company_agent', 'company_plugin', 'global'].includes(scope)) {
+      return res.status(400).json({ error: '범위는 user · company_api · company_agent · company_plugin · global 중 하나여야 합니다.' });
     }
     const cidr = String(req.body?.cidr || '').trim();
     const cidrCheck = validateCidrToken(cidr);
@@ -1165,7 +1165,7 @@ router.post('/geo/exceptions', authenticate, requireSuperAdmin, requireAdminArea
       const t = await resolveExceptionTarget('user', req.body?.userId);
       if (!t.ok) return res.status(400).json({ error: t.reason });
       userId = t.id;
-    } else if (scope === 'company_api' || scope === 'company_agent') {
+    } else if (scope === 'company_api' || scope === 'company_agent' || scope === 'company_plugin') {
       const t = await resolveExceptionTarget('company', req.body?.companyId);
       if (!t.ok) return res.status(400).json({ error: t.reason });
       companyId = t.id;

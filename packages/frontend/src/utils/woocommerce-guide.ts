@@ -12,8 +12,8 @@
 
 import { buildSdkScriptTag } from './cdp-sdk-script';
 
-/** 우리가 받는 웹훅 주제 4종 — 고객사가 우커머스 관리자에서 이 주제로 웹훅 4개를 만든다. */
-export const WOO_WEBHOOK_TOPICS = ['order.created', 'order.updated', 'customer.created', 'customer.updated'] as const;
+/** 우리가 받는 웹훅 주제 5종(서버 WOO_WEBHOOK_TOPICS 와 같음 · ★1028 회원 삭제 추가) — 고객사가 우커머스 관리자에서 이 주제로 웹훅을 만든다. */
+export const WOO_WEBHOOK_TOPICS = ['order.created', 'order.updated', 'customer.created', 'customer.updated', 'customer.deleted'] as const;
 
 /** 우커머스 관리자 화면의 주제 표기(영문 표기 그대로 · 한국어 관리자에서는 번역된 라벨이 보일 수 있다) */
 export const WOO_TOPIC_LABEL: Record<(typeof WOO_WEBHOOK_TOPICS)[number], string> = {
@@ -21,6 +21,7 @@ export const WOO_TOPIC_LABEL: Record<(typeof WOO_WEBHOOK_TOPICS)[number], string
   'order.updated': '주문 수정(Order updated)',
   'customer.created': '고객 생성(Customer created)',
   'customer.updated': '고객 수정(Customer updated)',
+  'customer.deleted': '고객 삭제(Customer deleted)',
 };
 
 export interface BuildWooDeveloperTextInput {
@@ -33,6 +34,8 @@ export interface BuildWooDeveloperTextInput {
   consentMetaKey?: string | null;
   /** REST 키를 아직 못 받았으면 true — 발급 안내 절을 넣는다 */
   needsRestKeys?: boolean;
+  /** ★1028 K7 최근 수집 오류 원문(코드 · 서버 문장) — 화면 몰 줄에는 원인 문장만, 원문은 이 개발자 안내에만 */
+  lastError?: string | null;
 }
 
 /**
@@ -75,25 +78,27 @@ export function buildWooDeveloperText(input: BuildWooDeveloperTextInput): string
     ? `   - 마케팅 수신동의 값은 회원·주문의 meta_data 키 "${input.consentMetaKey}" 에서 읽습니다. 다른 키를 쓰시면 담당자에게 알려 주세요.`
     : '   - 마케팅 수신동의 커스텀 필드가 회원·주문 어디에 어떤 키로 저장되는지(예: 관리자 화면 캡처 1장) 담당자에게 알려 주세요.');
   lines.push('   - 웹훅을 저장하면 우커머스가 확인 요청(ping)을 한 번 보냅니다. 그 뒤 첫 주문·회원 변경이 들어오면 연동이 "연결됨"으로 바뀝니다.');
+  if (input.lastError) {
+    lines.push('');
+    lines.push(`최근 수집 오류 원문: ${input.lastError}`);
+  }
   lines.push('');
   lines.push('궁금한 점은 요청하신 담당자에게 문의해 주세요.');
   return lines.join('\n');
 }
 
 /**
- * 워드프레스 회원 식별(선택) — 로그인 회원의 식별자·회원 토큰·휴대폰·이름을 <body> 속성으로 싣는다.
+ * 워드프레스 회원 식별(선택) — 로그인 회원의 회원 연결 번호 · 회원 토큰을 <body> 속성으로 싣는다.
  * 다른 몰(고도몰)과 같은 data-hjl-* 규약. 테마 <body> 태그 한 줄 수정(미검증 · 게이트 ③ SDK 리허설에서 확인).
- * ★ 2026-10-04 한줄로는 회원 토큰이 있는 식별만 고객과 잇는다(전수점검 C1) — 토큰·몰 접두 식별자는 플러그인 1.0.2 함수가 만든다
- *   (CDP 비밀키는 플러그인 설정에만 · 테마 코드에 넣지 않는다). 플러그인이 없으면 이 조각은 아무것도 싣지 않는다.
+ * ★ 2026-10-28 자사몰 대비 K4 · K8 — 번호 · 토큰은 플러그인 1.0.3 함수(hanjullo_member_identity · 플러그인 키)가 한줄로에서 받아 온다.
+ *   한줄로는 브라우저가 보낸 휴대폰 · 이름을 쓰지 않으므로 싣지 않는다(페이지 개인정보 0). 플러그인이 없거나 토큰을 받는 중이면 아무것도 싣지 않는다.
  */
 export function buildWooBodyAttrsSnippet(): string {
   return [
     '<body <?php body_class(); ?><?php',
-    "  if ( is_user_logged_in() && function_exists( 'hanjullo_member_token' ) ) {",
-    '    $hjl_u  = wp_get_current_user();',
-    '    $hjl_id = hanjullo_member_external_id( $hjl_u->ID );',
-    "    printf( ' data-hjl-user-id=\"%s\" data-hjl-member-token=\"%s\" data-hjl-phone=\"%s\" data-hjl-name=\"%s\"',",
-    "      esc_attr( $hjl_id ), esc_attr( hanjullo_member_token( $hjl_id ) ), esc_attr( get_user_meta( $hjl_u->ID, 'billing_phone', true ) ), esc_attr( $hjl_u->display_name ) );",
+    "  $hjl_who = ( is_user_logged_in() && function_exists( 'hanjullo_member_identity' ) ) ? hanjullo_member_identity( get_current_user_id() ) : null;",
+    '  if ( $hjl_who ) {',
+    "    printf( ' data-hjl-user-id=\"%s\" data-hjl-member-token=\"%s\"', esc_attr( $hjl_who['id'] ), esc_attr( $hjl_who['token'] ) );",
     '  }',
     '?>>',
   ].join('\n');

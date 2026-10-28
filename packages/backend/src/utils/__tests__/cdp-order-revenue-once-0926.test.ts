@@ -37,7 +37,7 @@ function setDb(h: Handler) {
 const texts = () => queryMock.mock.calls.map((c) => String(c[0]));
 const idx = (re: RegExp) => texts().findIndex((t) => re.test(t));
 const RFM_ADD = /UPDATE customers SET\s+total_purchase_amount = COALESCE\(total_purchase_amount, 0\) \+ \$2/;
-const RFM_SUB = /UPDATE customers SET\s+total_purchase_amount = GREATEST\(COALESCE\(total_purchase_amount, 0\) - \$2, 0\)/;
+const RFM_SUB = /UPDATE customers c SET\s+total_purchase_amount = GREATEST\(COALESCE\(c\.total_purchase_amount, 0\) - \$2, 0\)/;   // ★1028 M21 되돌림 = 최근 구매 칸도 같은 문장
 const SELECT_EXISTING = (sql: string) => sql.startsWith('SELECT') && sql.includes("event_name IN ('purchase', 'order_placed')");
 
 beforeEach(() => { queryMock.mockReset(); trackMock.mockReset(); rolledBack = false; });

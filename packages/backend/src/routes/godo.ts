@@ -25,6 +25,8 @@ import {
 } from '../utils/godo-client';
 
 import { publicErrorText, respondUserError } from '../utils/http-error';
+import { storeCodeForConnect } from '../utils/integration-scope';   // ★1028 N6 연결 분류코드
+
 const router = Router();
 router.use(authenticate);
 
@@ -69,7 +71,8 @@ router.post('/credentials', async (req: Request, res: Response) => {
     if (!key) {
       return res.status(400).json({ success: false, error: '고도몰 쇼핑몰 인증키(key)를 입력해주세요.' });
     }
-    await saveGodoCredentials(companyId, key);
+    const storeCode = await storeCodeForConnect(req.user, req.body?.store_code);   // ★1028 N6 분류코드 회사 = 매장 고르기(모드 판정 = 저장 CT)
+    await saveGodoCredentials(companyId, key, storeCode);
     return res.json({ success: true });
   } catch (err: any) {
     console.error('[Godo /credentials] 오류:', err);
@@ -98,7 +101,7 @@ router.post('/connect', async (req: Request, res: Response) => {
     await verifyGodoConnection(companyId);
 
     // 과거 주문 백필은 시간이 걸려 백그라운드로 (요청은 즉시 응답). 실패는 로그.
-    void backfillGodoOrders(companyId).catch((e) => console.error('[Godo backfill]', e));
+    void backfillGodoOrders(companyId, { first: true }).catch((e) => console.error('[Godo backfill]', e));   // ★1028 K11 첫 가져오기 = 첫 구매 보호 표시
 
     return res.json({ success: true, message: '연동 확인 완료. 과거 주문을 가져오는 중입니다. 잠시 후 상태를 확인해주세요.' });
   } catch (err) {

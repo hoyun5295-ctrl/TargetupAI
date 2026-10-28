@@ -25,7 +25,7 @@ import {
   type LineLayout, type LineProofAnswer, type LineSlotVerdict,
   emptyLineStepsAnswers, lineStepId, lineStepsProducts, lineStepsManual, lineStepSkipped, lineStepTerms, lineManualPrice, normalizeLineLink,
   buildLineStepsBody, fetchLineCandidates, uploadLineImage, lineStepsStoreKey, loadLineStepsAnswers, saveLineStepsAnswers, LINE_UPLOAD_MAX_MB,
-  readLinePage, searchLineMall, buildLineTemplateBody, lineTemplateCount, lineProofRows, lineCompositionPreviewRequest,
+  readLinePage, searchLineMall, buildLineTemplateBody, lineTemplateCount, lineCompositionReady, lineProofRows, lineCompositionPreviewRequest,
   type LineCompositionOffer, type LineCompositionId, type LineRichPointAnswer, requestLineJudge, lineRichRows, lineStoreOf, LINE_COUPON_CODE_RE,
 } from '../../utils/one-line';
 
@@ -656,6 +656,12 @@ export default function LineStepsModal({ open, channel, state, onClose, onMake }
     const manualList = answers.manualList || [];
     const count = lineTemplateCount(answers);
     const full = count >= max;
+    // ★ 2026-10-28 B-1028-2 — 구성 = 사진 있는 상품만 실린다(서버 진단과 같은 목록) · 칸 상한은 담은 수 전부가 차지한다
+    const rd = compMode ? lineCompositionReady(answers, max) : null;
+    const ready = rd ? rd.count : count;
+    const noPhoto = rd ? rd.missingPhoto : 0;
+    const overCap = rd ? rd.overCap : 0;
+    const photoMissing = (img: string | null | undefined) => compMode && !img;
     const terms = current.terms || [];
     const onTerm = terms.find((t) => t.item === prodTab) ?? null;
     const isPicked = (c: LineMallCandidate) => picks.some((p) => candKey(p) === candKey(c));
@@ -747,11 +753,15 @@ export default function LineStepsModal({ open, channel, state, onClose, onMake }
             </div>
             <div className="mt-3 flex gap-2 justify-end">
               <button type="button" onClick={() => setManualEdit(null)} className="h-9 px-3.5 rounded-lg border border-slate-200 bg-white text-[13px] font-semibold text-slate-600 hover:bg-slate-50">취소</button>
-              <button type="button" disabled={!editing.m.name.trim() || priceBad || linkBad || (editing.at === null && full && max > 1)}
+              <button type="button" disabled={!editing.m.name.trim() || priceBad || linkBad || photoMissing(editing.m.image) || (editing.at === null && full && max > 1)}
                 onClick={saveManual}
                 className="h-9 px-3.5 rounded-lg bg-indigo-600 text-white text-[13px] font-semibold disabled:opacity-40">{editing.at !== null ? '고치기' : '담기'}</button>
             </div>
-            <p className={`mt-2 text-[11.5px] ${editing.at === null && full && max > 1 ? 'text-rose-600 font-semibold' : 'text-slate-500'}`}>{editing.at === null && full && max > 1 ? `이미 ${max}개를 담았어요. 하나를 빼면 담을 수 있어요` : '사진과 가격이 있으면 카드로, 이름만 있으면 글로 소개해요'}</p>
+            <p className={`mt-2 text-[11.5px] ${(editing.at === null && full && max > 1) || photoMissing(editing.m.image) ? 'text-rose-600 font-semibold' : 'text-slate-500'}`}>
+              {editing.at === null && full && max > 1 ? `이미 ${max}개를 담았어요. 하나를 빼면 담을 수 있어요`
+                : photoMissing(editing.m.image) ? '이 구성은 상품을 사진 카드로 실어요. 상품 사진을 넣어 주세요'
+                  : compMode ? '사진과 가격이 상품 카드로 실려요' : '사진과 가격이 있으면 카드로, 이름만 있으면 글로 소개해요'}
+            </p>
           </div>
         ) : (
           <button type="button" disabled={full && max > 1} onClick={() => startManual(null)}
@@ -763,8 +773,14 @@ export default function LineStepsModal({ open, channel, state, onClose, onMake }
         <div>
           <div className="flex items-center justify-between">
             <span className="text-[12px] font-semibold text-slate-500">담은 상품</span>
-            <span className={`text-[12px] font-bold tabular-nums ${count < min ? 'text-rose-600' : 'text-slate-700'}`}>{count} / 최대 {max}</span>
+            <span className={`text-[12px] font-bold tabular-nums ${ready < min ? 'text-rose-600' : 'text-slate-700'}`}>{ready} / 최대 {max}</span>
           </div>
+          {noPhoto > 0 && (
+            <p className="mt-1 text-[12px] font-semibold text-rose-600">사진이 없는 상품 {noPhoto}개는 실리지 않아요. 고치기를 눌러 사진을 넣어 주세요</p>
+          )}
+          {overCap > 0 && (
+            <p className="mt-1 text-[12px] font-semibold text-rose-600">이 구성은 상품을 {max}개까지 실어요. {overCap}개는 빠지니 하나씩 빼 주세요</p>
+          )}
           {count === 0 ? (
             <p className="mt-1.5 text-[12.5px] text-slate-400">{min > 0 ? `이 템플릿은 상품이 ${min}개 이상 필요해요` : '담지 않으면 상품 없이 만들어요'}</p>
           ) : (
@@ -774,7 +790,7 @@ export default function LineStepsModal({ open, channel, state, onClose, onMake }
                   {c.imageUrl ? <img src={c.imageUrl} alt="" className="w-10 h-10 rounded-lg object-cover border border-slate-200 shrink-0" /> : <span className="w-10 h-10 rounded-lg bg-slate-100 shrink-0" />}
                   <span className="flex-1 min-w-0">
                     <span className="block text-[13px] text-slate-900 truncate">{c.name}</span>
-                    <span className="block text-[12px] text-slate-500">{won(c.salePrice || c.price)} · <span className="text-emerald-700 font-semibold">우리 몰</span></span>
+                    <span className="block text-[12px] text-slate-500">{won(c.salePrice || c.price)} · <span className="text-emerald-700 font-semibold">우리 몰</span>{photoMissing(c.imageUrl) && <span className="text-rose-600 font-semibold"> · 사진 없음 · 실리지 않아요</span>}</span>
                   </span>
                   <button type="button" onClick={() => togglePick(c)} aria-label={`${c.name} 빼기`} className="w-8 h-8 rounded-lg text-slate-400 hover:bg-slate-100 hover:text-rose-600 flex items-center justify-center shrink-0"><X className="w-4 h-4" /></button>
                 </li>
@@ -784,7 +800,7 @@ export default function LineStepsModal({ open, channel, state, onClose, onMake }
                   {m.image ? <img src={m.image} alt="" className="w-10 h-10 rounded-lg object-cover border border-slate-200 shrink-0" /> : <span className="w-10 h-10 rounded-lg bg-slate-100 flex items-center justify-center shrink-0"><ImageIcon className="w-4 h-4 text-slate-300" /></span>}
                   <span className="flex-1 min-w-0">
                     <span className="block text-[13px] text-slate-900 truncate">{m.name}</span>
-                    <span className="block text-[12px] text-slate-500">{lineManualPrice(m.price) ? won(lineManualPrice(m.price)!) : '가격 없음'} · <span className="text-violet-700 font-semibold">직접</span>{m.url ? ' · 링크' : ''}</span>
+                    <span className="block text-[12px] text-slate-500">{lineManualPrice(m.price) ? won(lineManualPrice(m.price)!) : '가격 없음'} · <span className="text-violet-700 font-semibold">직접</span>{m.url ? ' · 링크' : ''}{photoMissing(m.image) && <span className="text-rose-600 font-semibold"> · 사진 없음 · 실리지 않아요</span>}</span>
                   </span>
                   <button type="button" onClick={() => startManual(i)} aria-label={`${m.name} 고치기`} className="w-8 h-8 rounded-lg text-slate-400 hover:bg-slate-100 hover:text-indigo-700 flex items-center justify-center shrink-0"><PencilLine className="w-4 h-4" /></button>
                   <button type="button" onClick={() => setA({ manualList: manualList.filter((_, j) => j !== i) })} aria-label={`${m.name} 빼기`} className="w-8 h-8 rounded-lg text-slate-400 hover:bg-slate-100 hover:text-rose-600 flex items-center justify-center shrink-0"><X className="w-4 h-4" /></button>
@@ -797,8 +813,9 @@ export default function LineStepsModal({ open, channel, state, onClose, onMake }
     );
     onNext = next;
     onSkip = current.required ? null : () => { setA({ picks: [], manualList: [] }); next(); };
-    nextDisabled = count < min || !!editing;
-    nextLabel = count > 0 ? `${count}개 담고 다음` : '상품 없이 다음';
+    nextDisabled = ready < min || !!editing;
+    // ★ 2026-10-28 B-1028-2 — 꼭 필요한 칸이 모자라면 「없이」를 권하지 않는다(눌리지 않는 버튼이 못 하는 일을 말하던 것)
+    nextLabel = ready < min ? `상품을 ${min}개 이상 담아 주세요` : ready > 0 ? `${ready}개 담고 다음` : '상품 없이 다음';
   } else if (current !== MAKE && current.key === 'product') {
     const term = current.item || '';
     const ans = answers.products[term];
@@ -1149,8 +1166,11 @@ export default function LineStepsModal({ open, channel, state, onClose, onMake }
     if (s.key === 'benefit') return answers.benefit ? `${answers.benefit}${answers.benefitNote ? ` · ${answers.benefitNote}` : ''}` : s.suggest ? `한 줄에서 찾았어요: ${s.suggest}` : '비어 있어요';
     if (s.key === 'period') return answers.period ? periodLabel(answers.period) : s.suggest ? `한 줄에서 찾았어요: ${periodLabel(s.suggest)}` : '비어 있어요';
     if (s.key === 'products') {
-      const names = [...(answers.picks || []).map((c) => c.name), ...(answers.manualList || []).filter((m) => m.name.trim()).map((m) => m.name)];
-      return names.length > 0 ? `${names.length}개 · ${names.slice(0, 3).join(', ')}${names.length > 3 ? ' 외' : ''}` : `비어 있어요${(s.min ?? 0) > 0 ? ` · ${s.min}개 이상` : ''}`;
+      // ★ 2026-10-28 B-1028-2 — 실리는 상품(사진 있는 것 · 서버 진단과 같은 목록)만 세고 사진 없는 것은 따로 알린다
+      //   칩 · 만들기 막기는 그대로 서버 진단(slotFilled) · 여기는 글만
+      const { names, missingPhoto, overCap } = lineCompositionReady(answers, s.max ?? lineTemplateCount(answers));
+      const tail = `${missingPhoto > 0 ? ` · 사진 없는 상품 ${missingPhoto}개는 빠져요` : ''}${overCap > 0 ? ` · ${s.max}개 넘은 ${overCap}개는 빠져요` : ''}`;
+      return names.length > 0 ? `${names.length}개 · ${names.slice(0, 3).join(', ')}${names.length > 3 ? ' 외' : ''}${tail}` : `비어 있어요${(s.min ?? 0) > 0 ? ` · ${s.min}개 이상` : ''}${tail}`;
     }
     if (s.key === 'points' || s.key === 'usage') { const r = lineRichRows(s.key === 'points' ? answers.points : answers.usage); return r.length > 0 ? r.map((x) => x.title).join(' · ') : '비어 있어요'; }
     if (s.key === 'mood') return (answers.mood || []).length > 0 ? <span className="inline-flex gap-1">{(answers.mood || []).map((u) => <img key={u} src={u} alt="" className="w-8 h-8 rounded object-cover border border-slate-200" />)}</span> : '비어 있어요';

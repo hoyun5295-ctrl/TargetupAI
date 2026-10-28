@@ -740,6 +740,7 @@ async function sendEmailCampaignInner(input: SendCampaignInput): Promise<{ messa
         targetCount: input.recipients.length,
         finalMessage: buildEmailTrainingMessage(campaign.subject, campaign.textBody, campaign.htmlBody),
         finalSource: campaign.aiGenerated ? 'selected_as_is' : 'manual',
+        authorship: campaign.aiGenerated ? 'path_ai' : 'path_manual',
         sendAt: new Date(),
       })
         .then(() => updateTrainingMetrics({

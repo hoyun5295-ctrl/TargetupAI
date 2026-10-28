@@ -24,6 +24,7 @@ import { getAuthSmsTable, bulkInsertSmsQueue, getCompanySmsTablesWithLogs, smsCa
 import { shouldFinalizeCampaign, shouldSkipReconcileWrite } from './sms-table-split';
 import { recordedLiveTables } from './stats-table-scope';
 import { resolveCampaignTableGroups } from './stats-aggregation';
+import { pickOwnerContact } from './owner-contact';
 
 const INTERVAL_MS = 5 * 60 * 1000; // 5분
 const BOOT_DELAY_MS = 60 * 1000;   // 서버 startup 안정화 후 첫 실행
@@ -112,7 +113,7 @@ async function runOnce(): Promise<void> {
 
     // ★ D218+ (2026-05-26) 여정 발송 결과 알림 LMS 통합 — 첫/마지막 step default ON.
     //   본 영역 = sync 종결 직후 = 통신사 reply 수집 완료 영역.
-    //   step별 default (첫/마지막 ON / 중간 OFF) 적용 + kakao_alarm_users 첫 활성 phone fallback.
+    //   step별 default (첫/마지막 ON / 중간 OFF) 적용 · 받는 사람 = 여정을 만든 계정 → 회사 관리자(★ 2026-10-28 B-1028-1 · pickOwnerContact).
     try {
       await notifyJourneyResultsToManagers();
     } catch (notifyErr: any) {
@@ -129,7 +130,8 @@ async function runOnce(): Promise<void> {
  * ★ D218+ (2026-05-26) 여정 발송 결과 알림 LMS — 첫/마지막 step default ON.
  *   - journey_executions.status='completed' + result_notified_at IS NULL + 최근 3h 완료 대상(보류 한도 2h보다 길게 · m115).
  *   - notify_manager_on_pretest TRUE = 무조건 발송 / NULL = 첫/마지막 step default ON / FALSE = skip.
- *   - 담당자 phone = kakao_alarm_users 첫 활성 (옛 D218+ Fix A 정합).
+ *   - 담당자 phone = 여정을 만든 계정 → 회사 관리자(★ 2026-10-28 B-1028-1 · `utils/owner-contact.ts` 한 곳 · 자동마케팅 · 2시간 전 안내와 같은 판정).
+ *     옛: 회사 알림톡 검수 수신자 명단(kakao_alarm_users) 첫 행 = 여정을 만든 담당자 대신 그 명단의 사람이 받았다.
  *   - LMS 본문 = 여정명 + step + 성공/실패 카운트 + 다음 step 예정 영역.
  *   - 발송 종결 후 result_notified_at = NOW() UPDATE (재발송 차단 의무).
  */
@@ -186,20 +188,14 @@ async function notifyJourneyResultsToManagers(): Promise<void> {
     );
   };
 
-  // 담당자 번호는 회사당 한 번만 조회한다(묶음마다 같은 회사를 반복 조회하지 않도록).
+  // 담당자 번호는 (회사 · 만든 계정)당 한 번만 조회한다(묶음마다 같은 주인을 반복 조회하지 않도록).
   const managerCache = new Map<string, string | null>();
-  const resolveManagerPhone = async (companyId: string): Promise<string | null> => {
-    const cached = managerCache.get(companyId);
+  const resolveManagerPhone = async (companyId: string, createdBy: string | null): Promise<string | null> => {
+    const key = `${companyId}:${createdBy || ''}`;
+    const cached = managerCache.get(key);
     if (cached !== undefined) return cached;
-    const mgrRes = await query(
-      `SELECT phone_number FROM kakao_alarm_users
-        WHERE company_id = $1::uuid AND COALESCE(active_yn,'Y')='Y'
-        ORDER BY created_at ASC LIMIT 1`,
-      [companyId],
-    );
-    const raw = mgrRes.rows.length > 0 ? String(mgrRes.rows[0].phone_number).replace(/\D/g, '') : '';
-    const phone = /^01\d{8,9}$/.test(raw) ? raw : null;
-    managerCache.set(companyId, phone);
+    const phone = (await pickOwnerContact(companyId, createdBy))?.phone ?? null;
+    managerCache.set(key, phone);
     return phone;
   };
 
@@ -219,8 +215,8 @@ async function notifyJourneyResultsToManagers(): Promise<void> {
         continue;
       }
 
-      // 담당자 phone 조회 (kakao_alarm_users 첫 활성 — D218+ Fix A fallback)
-      const managerPhone = await resolveManagerPhone(head.company_id);
+      // 담당자 phone 조회(여정을 만든 계정 → 회사 관리자 · ★ 2026-10-28 B-1028-1)
+      const managerPhone = await resolveManagerPhone(head.company_id, head.journey_created_by || null);
       if (!managerPhone) {
         // 담당자 등록 X 또는 번호 형식 이상 = 발송 skip + 재조회 차단
         await markNotified(rows);

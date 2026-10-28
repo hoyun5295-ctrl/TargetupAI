@@ -10,7 +10,7 @@
 
 import { XMLParser } from 'fast-xml-parser';
 import type { OrderInput } from './cdp-orders';
-import { orderExternalId } from './cdp-order-identity';
+import { mallScopedIds, type MallScope } from './integration-row';
 
 export const GODO_SOURCE = 'godo';
 
@@ -131,9 +131,9 @@ export interface GodoMappedOrder {
  * - 금액: settlePrice(>0) → 아니면 상품금액+배송비
  * - 반환 null: 주문번호/주문일자 누락(적재 불가)
  */
-export function mapGodoOrderToCdp(order: any): GodoMappedOrder | null {
-  const orderId = String(order?.orderNo ?? '').trim();
-  if (!orderId) return null;
+export function mapGodoOrderToCdp(order: any, scope: MallScope): GodoMappedOrder | null {
+  const orderNo = String(order?.orderNo ?? '').trim();
+  if (!orderNo) return null;
   const orderedAt = normalizeGodoDate(order?.orderDate);
   if (!orderedAt) return null;
 
@@ -145,7 +145,9 @@ export function mapGodoOrderToCdp(order: any): GodoMappedOrder | null {
   const name = String(info?.orderName ?? '').trim() || undefined;
   const email = String(info?.orderEmail ?? '').trim() || undefined;
 
-  const externalId = orderExternalId(memId, phone, orderId);   // ★ 2026-09-27 R245 — 같은 규칙을 CT로 올렸다
+  // ★ 2026-09-27 R245 고객 열쇠 규칙 · ★ 1028 K9 — 그 연동 행의 몰 접두(고도몰 = 빈 접두 · mallScopedIds 반환값)
+  const ids = mallScopedIds(scope, { memberId: memId, phone, orderId: orderNo });
+  const externalId = ids.externalId;
 
   const goodsArr: any[] = Array.isArray(order?.orderGoodsData)
     ? order.orderGoodsData
@@ -165,7 +167,7 @@ export function mapGodoOrderToCdp(order: any): GodoMappedOrder | null {
   const st = godoOrderStatusOf(String(order?.orderStatus ?? ''));
   const orderInput: OrderInput = {
     source: GODO_SOURCE,
-    orderId,
+    orderId: ids.orderId,
     externalId,
     phone,
     name,

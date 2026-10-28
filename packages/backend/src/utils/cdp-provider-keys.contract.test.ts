@@ -38,8 +38,10 @@ describe('자사몰 식별자 매핑 CT', () => {
   it('자체 호스팅은 webhook(custom)과 브라우저 SDK(sdk) 두 출처를 모두 센다', () => {
     const src = keysFile();
     expect(src).toMatch(/key: 'custom',[\s\S]{0,120}eventSources: \['custom', 'sdk'\]/);
-    // 브라우저 수집이 실제로 'sdk'로 적재되는지 백엔드에서 확인
-    expect(read(path.join(BACKEND_SRC, 'utils/cdp-events.ts'))).toContain("source: 'sdk'");
+    // 브라우저 수집이 실제로 'sdk'로 적재되는지 백엔드에서 확인(★1028 K4 — 브라우저 identify 호출이 사라져 익명 연결 · INSERT 의 출처 글자로 본다)
+    const ev = read(path.join(BACKEND_SRC, 'utils/cdp-events.ts'));
+    expect(ev).toContain("ensureAnonymousLink(companyId, 'sdk',");
+    expect(ev).toContain("$4, $5::jsonb, 'sdk',");
   });
 
   it('백엔드가 쓰는 source 실값과 프론트 매핑이 일치한다', () => {
@@ -94,7 +96,8 @@ describe('연동 현황판 시인성 규격 (Phase 2 · 설계서 §5-1·§5-5)'
 
   it('판정 축이 바뀌면 화면 문구도 함께 바뀌도록 훅이 문구를 소유한다', () => {
     const hook = read(path.join(FRONTEND_SRC, 'hooks/useCdpIntegrationStatus.ts'));
-    expect(hook).toContain('데이터 수신 중');
+    expect(hook).toContain('마지막 데이터 ${formatKstMonthDay(base.lastEventAt)}');   // ★1028 K7 「수신 중」 → 「연결됨 · 마지막 데이터 ○월 ○일」
+    expect(hook).not.toContain('데이터 수신 중');
     expect(hook).toContain('연결 완료 · 데이터 연동 준비 중');
     expect(hook).toContain('연동이 끊겼어요');
     // 매핑 보류 몰은 이벤트 0이어도 '설치 대기'가 아니라 '준비 중'이어야 한다
@@ -321,10 +324,11 @@ describe('고도몰 주기 수집 (★2026-08-10 — collect:auto 선언의 근�
 });
 
 describe('조치 필요 배지 (★2026-08-10 — 근거 확정)', () => {
-  it('판정 문자열의 근거는 어댑터가 실제로 쓰는 값이다 — refresh 실패 시 4종이 token_expired를 기록한다', () => {
+  it('판정 문자열의 근거는 어댑터가 실제로 쓰는 값이다 — refresh 실패 시 4종이 token_expired를 기록한다(★1028 K6 = 공용 CT markTokenRejected 하나)', () => {
     for (const f of ['cafe24-client.ts', 'imweb-client.ts', 'makeshop-client.ts', 'naver-commerce-client.ts']) {
-      expect(read(path.join(BACKEND_SRC, 'utils', f)), `${f}가 token_expired를 기록하지 않는다`).toContain("status = 'token_expired'");
+      expect(read(path.join(BACKEND_SRC, 'utils', f)), `${f}가 token_expired를 기록하지 않는다`).toContain('if (isDefinitiveTokenRejection(err)) await markTokenRejected(integration);');
     }
+    expect(read(path.join(BACKEND_SRC, 'utils/integration-token.ts'))).toContain("SET status = 'token_expired',");
     const hook = read(path.join(FRONTEND_SRC, 'hooks/useCdpIntegrationStatus.ts'));
     expect(hook).toMatch(/isIntegrationAuthBroken[\s\S]{0,400}'token_expired'/);
     // 사용자가 스스로 끊은 것(revoked)은 조치 대상이 아니다 — 연결 안 됨이 맞다
@@ -339,7 +343,8 @@ describe('조치 필요 배지 (★2026-08-10 — 근거 확정)', () => {
   it('고도몰은 토큰이 없으므로 수집 실패 사유가 그 신호다', () => {
     expect(read(path.join(BACKEND_SRC, 'utils/godo-client.ts'))).toMatch(/syncError/);
     const page = read(path.join(FRONTEND_SRC, 'pages/CdpSettingsPage.tsx'));
-    expect(page).toMatch(/godo: !!godoStatus\?\.syncError/);
+    // ★1028 K7 — 조치 필요 = 서버 분류가 사람 조치(action)일 때만(기다리면 풀리는 실패는 배지 그대로)
+    expect(page).toMatch(/godo: godoStatus\?\.problem\?\.kind === 'action'/);
   });
 
   it('조치 필요가 미연결보다 앞선다 — 끊긴 연동을 "아직 연결 전"으로 보여주면 재연결이 필요한 줄 모른다', () => {
@@ -482,7 +487,7 @@ describe('우커머스 연동 화면 (★2026-09-14 W4 · 설계서 docs/2026-09
     const src = page();
     expect(src).toContain("fetch('/api/woocommerce/status'");
     expect(src).toMatch(/woocommerce: !!wooStatus\?\.connected/);
-    expect(src).toMatch(/woocommerce: !!wooStatus\?\.malls\?\.some\(\(m\) => m\.syncError\)/);
+    expect(src).toMatch(/woocommerce: !!wooStatus\?\.malls\?\.some\(\(m\) => m\.problem\?\.kind === 'action'\)/);   // ★1028 K7
   });
   it('카드·모달 표에 우커머스가 있고 백엔드 식별자 매핑이 있다', () => {
     const src = page();
@@ -521,7 +526,8 @@ describe('우커머스 1클릭 연결 화면 (★2026-09-14 ① · wc-auth 관�
   it('페이지가 연결 URL 을 받아 새 창(팝업)으로 열고 · 승인 완료 메시지를 받아 상태를 다시 읽는다', () => {
     const src = page();
     expect(src).toContain("fetch('/api/woocommerce/connect-url'");
-    expect(src).toMatch(/window\.open\([^)]*'woocommerce_auth'/);
+    expect(src).toMatch(/openApprovalWindow\([^)]*'woocommerce_auth'/);   // ★1028 K14 N4 승인 창 = 닫힘 감지 도우미
+    expect(read(path.join(FRONTEND_SRC, 'hooks/useApprovalWindow.ts'))).toMatch(/const win = window\.open\(url, name/);   // ★1028 N4 공용 훅
     expect(src).toContain("hanjullo:woocommerce");
     expect(src).toMatch(/addEventListener\('message'/);
   });

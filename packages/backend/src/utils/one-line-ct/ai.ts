@@ -9,6 +9,8 @@
  *   - 실패(응답 없음 · JSON 아님)는 던진다 → 판단 = 규칙 판단(0원) · 문구 = 503(차감 전).
  */
 import { callAIWithFallback } from '../../services/ai';
+import { composeVoicePrompt } from '../brand-voice-prompt';
+import { resolveCopyIntent } from '../copy-content-type';
 import { extractJsonFromAiText } from '../ai-json';
 import { findNewNumbers, findInventedBenefits, claimsInventedEfficacy, pairClaimsInventedEfficacy } from '../copy-benefit-detector';
 import {
@@ -166,7 +168,11 @@ export async function writeLineRichCopy(comp: LineComposition, g: LineCtGround, 
     `[채울 칸]\n${fields}`,
     'JSON 으로만 답하세요.',
   ].filter(Boolean).join('\n');
-  const text = await callAIWithFallback({ system: COPY_SYSTEM, userMessage: user, maxTokens: 1200, temperature: 0.6, companyId: ctx.companyId, userId: ctx.userId, source: ctx.source, noCache: true });
+  // ★ 2026-10-28 AI 메모리 설계 K11-1 · K11-3 — 한줄 CT 문구 = 쓰기 · 말투 · 호칭 · 맺음(목소리 회사 = 다른 브랜드 예시 0)
+  const { system: voiceSystem } = await composeVoicePrompt({
+    companyId: ctx.companyId, producer: 'one-line-rich-copy', mode: 'write', scope: 'tone', kind: resolveCopyIntent({ isAd: true }).kind, basePrompt: COPY_SYSTEM,
+  });
+  const text = await callAIWithFallback({ system: voiceSystem, userMessage: user, maxTokens: 1200, temperature: 0.6, companyId: ctx.companyId, userId: ctx.userId, source: ctx.source, noCache: true });
   const parsed = extractJsonFromAiText<Record<string, unknown>>(text);
   if (!parsed || typeof parsed !== 'object') throw new Error('LINE_COPY_EMPTY');
   return sanitizeLineRichCopy(comp, parsed, lineCtGroundText(g));

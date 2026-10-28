@@ -20,6 +20,8 @@
  */
 
 import { extractJsonFromAiText, aiStr } from './ai-json';
+import { composeVoicePrompt } from './brand-voice-prompt';
+import { resolveCopyIntent } from './copy-content-type';
 import { callAIWithFallback } from '../services/ai';
 import { runChargedAi, refundCredit, reportCreditMiss } from './ai-credit';
 import { getCreditCost } from './ai-credit-calc';
@@ -117,12 +119,16 @@ ${EFFICACY_REWRITE_RULE}
   //   읽지 못함(500) · 세 안 전부 버림이어도 나갔다). 판정은 AI 직후 · 변형 행은 정산 뒤에 만든다. 만들기가 전부 실패하면 같은 키로 되돌린다.
   const parentText = `${parent.title || ''}
 ${parent.body || ''}`;
+  // ★ 2026-10-28 AI 메모리 설계 K11-1 · K11-2 — 인앱 빠른 고치기 = 고치기(예시 0 · 원문 꼴 유지) · 화면 글이라 말투 · 호칭 · 맺음만
+  const { system: voiceSystem } = await composeVoicePrompt({
+    companyId, producer: 'inapp-quick-action', mode: 'rewrite', scope: 'tone', kind: resolveCopyIntent({ isAd: parent.is_ad === true }).kind, basePrompt: system,
+  });
   const chargeKey = `inapp-quick-action:${messageId}:${randomUUID()}`;
   const { result: judged, charged } = await runChargedAi({
     companyId, cost: getCreditCost('inapp-quick-action'), source: 'inapp-quick-action', createdBy, idempotencyKey: chargeKey,
     run: async () => {
       const aiResult = await callAIWithFallback({
-        system,
+        system: voiceSystem,
         userMessage,
         model: 'opus',
         maxTokens: 2048,

@@ -14,6 +14,7 @@
  */
 
 import { useMemo } from 'react';
+import { formatKstMonthDay } from '../utils/formatDate';
 import {
   CDP_PROVIDER_KEYS,
   getProviderKeyEntry,
@@ -24,7 +25,7 @@ import {
 
 /** 배지 5종 — 설계서 §5-1-1과 1:1. */
 export type CdpIntegrationBadge =
-  | 'receiving'    // emerald — 데이터 수신 중
+  | 'receiving'    // emerald — 연결됨(데이터가 들어온 적 있음 · ★1028 K7 「수신 중」 → 「연결됨」)
   | 'awaiting'     // amber   — 연결됐는데 아직 0건. 문구는 몰 유형이 가른다(설치 대기 vs 첫 주문 대기)
   | 'preparing'    // violet  — 연결 완료·우리 쪽 매핑 준비 중
   | 'action'       // rose    — 인증 끊김(고객사 담당자 차례)
@@ -83,6 +84,8 @@ export interface UseCdpIntegrationStatusInput {
    * 화면이 안 넘기면 undefined라 그 축은 꺼진 채로 남는다(근거 없는 배지를 켜지 않는 규약 유지).
    */
   needsAction?: Partial<Record<CdpProviderKey, boolean | undefined>>;
+  /** ★1028 K7 조치 필요 배지의 몰별 문장(여러 몰 = 「몰 4곳 중 1곳 확인 필요」) · 없으면 기본 문장 */
+  actionNote?: Partial<Record<CdpProviderKey, string | undefined>>;
   /** GET /api/cdp/install-status 의 bySource (Phase 0 신설) */
   bySource: Record<string, CdpInstallStatusBySource> | null | undefined;
 }
@@ -99,6 +102,7 @@ function decide(
   connected: boolean,
   needsAction: boolean,
   bySource: Record<string, CdpInstallStatusBySource> | null | undefined,
+  actionNote?: string,
 ): CdpProviderStatus {
   const entry = getProviderKeyEntry(key);
   const events = sumEventsForProvider(key, bySource);
@@ -122,7 +126,7 @@ function decide(
   //   담당자는 재연결이 필요하다는 사실 자체를 모른다(카페24 `/status`가 그렇게 응답하고 있었다).
   //   토큰 만료는 `connected`가 false로 오므로 이 판정이 미연결보다 위에 있어야 한다.
   if (needsAction) {
-    return { ...base, badge: 'action', label: '연동이 끊겼어요 · 재연결 필요', actionLabel: '조치하기', nextActor: 'merchant' };
+    return { ...base, badge: 'action', label: actionNote || '연동이 끊겼어요 · 재연결 필요', actionLabel: '조치하기', nextActor: 'merchant' };
   }
   if (!connected) {
     return { ...base, badge: 'disconnected', label: '아직 연결 전', actionLabel: '연결하기', nextActor: 'merchant' };
@@ -131,12 +135,14 @@ function decide(
   if (eventsUnavailable) {
     return { ...base, badge: 'preparing', label: '연결 완료 · 데이터 연동 준비 중', actionLabel: '상태 보기', nextActor: 'hanjul' };
   }
+  // ★ 2026-10-28 자사몰 대비 K7 — 모든 연결 카드 = 「마지막 데이터 ○월 ○일」(서버가 준 몰별 마지막 도착 시각) · 24시간 건수는 있을 때만.
+  //   「수신 중」은 지금 들어오고 있다는 약속이라 쓰지 않는다 · 침묵 판정은 운영 감시(K10)만(0810 결정 유지).
+  const last = `마지막 데이터 ${formatKstMonthDay(base.lastEventAt)}`;
   if (count24h > 0) {
-    return { ...base, badge: 'receiving', label: `데이터 수신 중 · 24시간 ${count24h.toLocaleString()}건`, actionLabel: '상태 보기', nextActor: 'none' };
+    return { ...base, badge: 'receiving', label: `연결됨 · ${last} · 24시간 ${count24h.toLocaleString()}건`, actionLabel: '상태 보기', nextActor: 'none' };
   }
-  // 과거 수신 이력은 있으나 최근 24시간 0건 — '수신 끊김'은 임계값 확정 전까지 판정하지 않는다(§6-4).
   if (total > 0) {
-    return { ...base, badge: 'receiving', label: `연결됨 · 누적 ${total.toLocaleString()}건`, actionLabel: '상태 보기', nextActor: 'none' };
+    return { ...base, badge: 'receiving', label: `연결됨 · ${last}`, actionLabel: '상태 보기', nextActor: 'none' };
   }
   // ★ 2026-08-10 — 연결됐는데 아직 0건. 여기서 몰 유형이 갈린다.
   //   자체 호스팅은 개발자가 설치해야 들어오고, 자동 수집 몰(카페24·아임웹 웹훅 / 고도몰 주기 수집)은
@@ -148,10 +154,10 @@ function decide(
 }
 
 export function useCdpIntegrationStatus(input: UseCdpIntegrationStatusInput): UseCdpIntegrationStatusResult {
-  const { connected, needsAction, bySource } = input;
+  const { connected, needsAction, actionNote, bySource } = input;
   return useMemo(() => {
     const statuses = CDP_PROVIDER_KEYS.map((e) =>
-      decide(e.key, connected[e.key] === true, needsAction?.[e.key] === true, bySource),
+      decide(e.key, connected[e.key] === true, needsAction?.[e.key] === true, bySource, actionNote?.[e.key]),
     );
     const byKey = statuses.reduce((acc, s) => {
       acc[s.key] = s;
@@ -166,5 +172,5 @@ export function useCdpIntegrationStatus(input: UseCdpIntegrationStatusInput): Us
         action: statuses.filter((s) => s.badge === 'action').length,
       },
     };
-  }, [connected, needsAction, bySource]);
+  }, [connected, needsAction, actionNote, bySource]);
 }

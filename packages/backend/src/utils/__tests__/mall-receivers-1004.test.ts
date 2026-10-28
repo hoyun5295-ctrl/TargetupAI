@@ -32,7 +32,7 @@ import * as registry from '../provider-registry';
 
 const CO = '00000000-0000-0000-0000-0000000000c1';
 /** ★ 2026-10-27 K2-5 — 수신 CT 가 넘기는 맥락(받은 시각 · 연동 행 분류코드) */
-const CTX = { observedAt: '2026-10-04T01:00:00.000Z', storeCode: null };
+const CTX = { observedAt: '2026-10-04T01:00:00.000Z', storeCode: null, idScope: { provider: 'imweb', mallId: 'site1', idPrefix: null } };
 
 beforeEach(() => {
   q.mockReset();
@@ -59,7 +59,7 @@ describe('C5 카페24 주문 상태 코드', () => {
 describe('I2~I5 아임웹 수신부', () => {
   it('탈퇴 = 그 회원 연결 고객의 수신동의 철회 + 기록 이벤트', async () => {
     await imwebAdapter.processWebhookEvent!(CO, 'END_USER_WITHDRAWAL', { memberUid: 'u-1' }, CTX);
-    expect(withdrawMemberConsent).toHaveBeenCalledWith(CO, 'imweb', 'u-1', CTX.observedAt);   // ★ 1027 K2-2 탈퇴 시각(모르면 받은 시각)
+    expect(withdrawMemberConsent).toHaveBeenCalledWith(CO, 'imweb', 'u-1', CTX.observedAt, null);   // ★1028 K5 연동 행 분류코드(없음 = 고객 행)   // ★ 1027 K2-2 탈퇴 시각(모르면 받은 시각)
   });
   it('장바구니 = 표준 이름 cart_add', async () => {
     await imwebAdapter.processWebhookEvent!(CO, 'END_USER_CART_ADD', { memberUid: 'u-1', prodNo: 'P1' }, CTX);

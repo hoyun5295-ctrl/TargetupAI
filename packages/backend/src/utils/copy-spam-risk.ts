@@ -10,7 +10,7 @@ export const SPAM_SEED_LEXICON: string[] = [
 export const SPAM_FAIL_THRESHOLD = 0.5;
 
 /** 0~1 스팸 위험 점수 + 걸린 신호. 실제 스팸필터 호출 없음(로컬 대조만). */
-export function scoreSpamRisk(text: string): { score: number; hits: string[] } {
+export function scoreSpamRisk(text: string, opts?: { allowedSymbolCount?: number }): { score: number; hits: string[] } {
   const t = String(text || '');
   if (!t.trim()) return { score: 0, hits: [] };
   const hits: string[] = [];
@@ -19,6 +19,8 @@ export function scoreSpamRisk(text: string): { score: number; hits: string[] } {
   let score = Math.min(hits.length * 0.25, 0.8);
   // 과도한 특수문자/느낌표 가산
   const bangs = (t.match(/[!★☆♥♡~]/g) || []).length;
+  // ★ 2026-10-28 AI 메모리 설계 K2-4 — 그 회사 사람 표본의 기호 수 이하는 가산 0(재생성 힌트만 바뀐다 · 실제 스팸 검사 · 통신사 판정은 그대로)
+  if (opts?.allowedSymbolCount != null && bangs <= opts.allowedSymbolCount) return { score: Math.min(score, 1), hits };
   if (bangs >= 4) score += 0.2;
   else if (bangs >= 2) score += 0.1;
 

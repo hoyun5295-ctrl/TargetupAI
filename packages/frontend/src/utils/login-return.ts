@@ -10,6 +10,9 @@ const KEY = 'hj_login_return_path';
 const ALLOWED: RegExp[] = [
   /^\/marketing-planner(\?month=\d{4}-\d{2})?$/,
   /^\/marketing-planner\/events\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i,
+  // ★ 2026-10-28 자사몰 대비 M24 · M30 — 몰 승인이 돌아온 확정 링크 · 아임웹 앱 추가 진입(로그인 뒤 그 연결을 잇는다)
+  /^\/oauth-confirm\?provider=(cafe24|imweb)&oauth_confirm=[A-Za-z0-9_-]{20,64}$/,
+  /^\/cdp-settings\?connect=imweb&site_code=[A-Za-z0-9_-]{1,64}$/,
 ];
 
 export function isLoginReturnAllowed(path: string): boolean {

@@ -22,8 +22,9 @@ describe('CDP', () => {
     expect(ct).toContain('export function extractWebhookResource(');
     expect(src('cafe24-client.ts')).toContain('export async function getCafe24IntegrationsByMallId(');
     expect(src('imweb-client.ts')).toContain('export async function getImwebIntegrationsBySiteCode(');
-    expect(src('naver-commerce-client.ts')).toContain('export async function getNaverCommerceIntegrationsByStoreId(');
-    for (const f of ['cafe24.ts', 'imweb.ts', 'naver-commerce.ts']) {
+    // ★1028 M19 네이버 = 조회형(웹훅 수신 주소 · 스토어별 조회 삭제)
+    expect(src('naver-commerce-client.ts')).not.toContain('getNaverCommerceIntegrationsByStoreId');
+    for (const f of ['cafe24.ts', 'imweb.ts']) {
       const r = src('..', 'routes', f);
       expect(r, f).toContain('await deliverWebhookToCompanies({');
       expect(r, f).not.toContain('INSERT INTO cdp_webhook_deliveries (\n        id, company_id, source, webhook_event, idempotency_key, payload, status, retry_count, created_at');

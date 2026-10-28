@@ -187,6 +187,8 @@ export const AI_LINE_TYPE_LABEL: Readonly<Record<AiLineType, string>> = { direct
 export function styleToType(style: unknown): AiLineCopyType | null {
   const s = String(style || '').replace(/\s+/g, '').toLowerCase();
   if (!s) return null;
+  // ★ 2026-10-28 K3-6 — 지시문이 키(emo · benefit · mz)를 낸다 · 옛 이름 글자도 아래가 계속 읽는다
+  if (s === 'emo' || s === 'benefit' || s === 'mz') return s;
   if (s.includes('혜택')) return 'benefit';
   if (s.includes('mz')) return 'mz';
   if (s.includes('감성')) return 'emo';

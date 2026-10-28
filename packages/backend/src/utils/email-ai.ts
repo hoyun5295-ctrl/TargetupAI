@@ -21,7 +21,8 @@ import { UserFacingError } from './http-error';
 import { callAIWithFallback } from '../services/ai';
 import { extractJsonFromAiText, aiStr } from './ai-json';   // ★ 2026-10-26 S8 — AI JSON 칸 = 글일 때만
 import { htmlVisibleText, replaceInventedBenefits, replaceInventedBenefitsDeep, claimsInventedEfficacy, dropInventedEfficacy, dropInventedEfficacyDeep, pairClaimsInventedEfficacy, rewriteAddsFacts, readingAddsEfficacy, EFFICACY_PLACEHOLDER, HEADLINE_PLACEHOLDER, EFFICACY_PROMPT_RULES, EFFICACY_REWRITE_RULE } from './copy-benefit-detector';
-import { buildSystemPromptWithBrandVoice } from './brand-voice-prompt';
+import { composeVoicePrompt } from './brand-voice-prompt';
+import { resolveCopyIntent } from './copy-content-type';
 // 비주얼 빌더: AI 블록 출력 → 검증된 email Section[]
 import { normalizeAiBlocksToSections, buildCarouselProductsFromExtracted } from './email/email-blocks';
 // ★ 2026-07-13 행사 상품 URL 페이지 og:image 자동 채움 — DM one-shot과 공용(SSRF 리다이렉트 가드 내장)
@@ -294,7 +295,11 @@ export async function generateEmailSections(input: {
   if (input.prompt) parts.push(`[요청 내용] ${input.prompt}`);
   parts.push(`[캠페인 성격] ${input.isAd ? '광고성 (표기는 발송 시 자동 부착, 직접 넣지 말 것)' : '정보성'}`);
 
-  const baseSystem = await buildSystemPromptWithBrandVoice(input.companyId, EMAIL_BLOCKS_SYSTEM);
+  // ★ 2026-10-28 AI 메모리 설계 K11-1 · K11-2 — 이메일 생성 = 쓰기 · HTML 이라 말투 · 호칭 · 맺음만(모양 · 이모지 = 이메일 규칙)
+  const baseSystem = (await composeVoicePrompt({
+    companyId: input.companyId, producer: 'email-generate', mode: 'write', scope: 'tone',
+    kind: resolveCopyIntent({ isAd: input.isAd }).kind, isAd: input.isAd, basePrompt: EMAIL_BLOCKS_SYSTEM,
+  })).system;
   const brain = await composeCopyBrain({
     companyId: input.companyId,
     channels: ['EMAIL', 'LMS', 'MMS', 'SMS'],
@@ -377,16 +382,17 @@ export async function refineEmail(input: {
   htmlBody: string;
   instruction: string;
 }): Promise<{ subject: string; htmlBody: string }> {
-  const system = await buildSystemPromptWithBrandVoice(
-    input.companyId,
-    `당신은 한국어 이메일 마케팅 카피 에디터입니다. 기존 이메일의 구조를 유지하면서 지시에 따라 다듬습니다.
+  // ★ 2026-10-28 K11-1 — 이메일 다듬기 = 고치기(예시 0 · 원문 꼴 유지) · 성격을 받지 않는 편집기라 광고 여부 기본(마케팅 편집기)
+  const { system } = await composeVoicePrompt({
+    companyId: input.companyId, producer: 'email-refine', mode: 'rewrite', scope: 'tone', kind: resolveCopyIntent({ isAd: true }).kind,
+    basePrompt: `당신은 한국어 이메일 마케팅 카피 에디터입니다. 기존 이메일의 구조를 유지하면서 지시에 따라 다듬습니다.
 ${EMAIL_HTML_RULES}
 
 ${EFFICACY_REWRITE_RULE}
 
 반드시 아래 JSON 스키마로만 출력합니다 (코드블록/설명 금지):
 { "subject": "다듬은 제목", "html_body": "다듬은 HTML 전체" }`,
-  );
+  });
 
   const text = await callAIWithFallback({
     system,
@@ -444,7 +450,11 @@ export async function refineEmailSections(input: {
   const { slots, texts } = collectRefinableTexts(input.sections);
   if (texts.length === 0) return { sections: input.sections, changed: false, rejected: 0 };
 
-  const system = await buildSystemPromptWithBrandVoice(input.companyId, EMAIL_SECTION_REFINE_SYSTEM);
+  // ★ 2026-10-28 K11-1 — 블록 카피 다듬기 = 고치기(예시 0 · 원문 꼴 유지)
+  const { system } = await composeVoicePrompt({
+    companyId: input.companyId, producer: 'email-section-refine', mode: 'rewrite', scope: 'tone', kind: resolveCopyIntent({ isAd: true }).kind,
+    basePrompt: EMAIL_SECTION_REFINE_SYSTEM,
+  });
   const userInstruction = (input.instruction || '전체 카피를 더 매끄럽고 자연스럽게 다듬어주세요.').trim();
   const text = await callAIWithFallback({
     system,

@@ -100,7 +100,7 @@ export default function CdpIntegrationStepper({
               <div className="text-sm font-semibold text-violet-900">연결이 끝났습니다 · 데이터 연동을 준비 중이에요</div>
               <p className="text-[12px] text-slate-500 leading-relaxed">
                 {providerName}의 회원·주문을 한줄로 형식에 맞추는 작업이 남아 있습니다. 영업일 1일 안에 끝나며,
-                준비가 되면 이 화면이 자동으로 <span className="text-emerald-700">데이터 수신 중</span>으로 바뀝니다.
+                준비가 되면 이 화면이 자동으로 <span className="text-emerald-700">연결됨</span>으로 바뀝니다.
                 지금 하실 일은 없습니다.
               </p>
             </div>

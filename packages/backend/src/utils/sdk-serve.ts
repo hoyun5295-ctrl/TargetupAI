@@ -19,6 +19,11 @@ import type { Request, Response } from 'express';
 // src/utils·dist/utils 어디서든 2단계 위 = backend 루트 → sdk-serving (dist 스왑과 무관한 위치)
 const SDK_DIR = resolve(__dirname, '../../sdk-serving');
 const VERSION_RE = /^v[0-9]+\.[0-9]+\.[0-9]+(-[a-z0-9]+)?$/;
+/**
+ * ★ 2026-10-28 자사몰 대비 K15 M25 — 그대로 내주는 판 = 이 목록만(폴더에 남은 옛 판이 저절로 살아나지 않게) · 목록 밖 판 요청 = 최신 판.
+ * v0.3.5 = 브라우저 식별 값을 그대로 쓰던 판(M5 · 서버는 1028 K4 로 잇기만) · 요청 로그로 쓰는 곳 0 을 확인하면 이 목록에서 뺀다(원장 S16).
+ */
+export const SERVED_SDK_VERSIONS: readonly string[] = ['v0.3.5', 'v0.3.8', 'v0.3.9', 'v0.3.10', 'v0.3.11'];
 const sdkFileCache = new Map<string, Buffer>();
 
 function parseVer(v: string): [number, number, number] {
@@ -30,7 +35,7 @@ function parseVer(v: string): [number, number, number] {
 function latestAvailableVersion(): string | null {
   try {
     const dirs = readdirSync(SDK_DIR).filter(
-      (d) => VERSION_RE.test(d) && existsSync(resolve(SDK_DIR, d, 'hanjul.min.js')),
+      (d) => VERSION_RE.test(d) && SERVED_SDK_VERSIONS.includes(d) && existsSync(resolve(SDK_DIR, d, 'hanjul.min.js')),
     );
     if (dirs.length === 0) return null;
     dirs.sort((a, b) => {
@@ -53,7 +58,7 @@ export function serveSdkFile(req: Request, res: Response) {
   if (!VERSION_RE.test(requested)) {
     return res.status(400).type('text/plain').send('invalid version');
   }
-  const hasRequested = existsSync(resolve(SDK_DIR, requested, 'hanjul.min.js'));
+  const hasRequested = SERVED_SDK_VERSIONS.includes(requested) && existsSync(resolve(SDK_DIR, requested, 'hanjul.min.js'));
   const version = hasRequested ? requested : latestAvailableVersion();
   if (!version) {
     return res.status(404).type('text/plain').send('not found');

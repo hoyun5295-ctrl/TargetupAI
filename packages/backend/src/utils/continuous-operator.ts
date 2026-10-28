@@ -27,8 +27,10 @@
 
 // ★ 2026-09-27 한줄로 V2 R197 — 운영자 일·월 예산 창 = KST(옛 CURRENT_DATE·date_trunc는 UTC 세션 기준)
 import { UserFacingError } from './http-error';
+import { runWithRegenBudget, generationSlotsLeft } from './copy-exit-guards';
 import { sendSystemAlert } from './system-alert';
 import { isDemoCompany } from './demo-company';   // ★ 2026-10-09 시연 회사 = 발송 엔진 앞 절단
+import { pickOwnerContact } from './owner-contact';   // ★ 2026-10-28 B-1028-1 담당자 통지 받는 사람 한 곳
 import { aiOperatorAllowedForWorker } from './plan-guard';
 import { KST_TODAY_START_SQL, KST_MONTH_START_SQL } from './stats-aggregation';
 import { query, pool, withTransaction, type TxRun } from '../config/database';
@@ -1183,6 +1185,11 @@ export async function findOpenProposalForOperator(operatorId: string, companyId:
  *   오케스트레이터 호출만 건너뛰고 그 뒤 판정(0명 · 자율 자격 · 예약 중복 · 스팸 · 통지 · 통계)은 그대로 탄다.
  */
 export async function generateProposalForOperator(operatorId: string, opts?: { precomputed?: any; variantIndex?: number | null }): Promise<OperatorProposal | null> {
+  // ★ 2026-10-28 AI 메모리 설계 K12-2 — 한 회차 = 생성 호출 상한 하나(첫 생성 · 안쪽 품질 재생성 · 스팸 재생성이 함께 쓴다)
+  return runWithRegenBudget(() => generateProposalForOperatorRound(operatorId, opts));
+}
+
+async function generateProposalForOperatorRound(operatorId: string, opts?: { precomputed?: any; variantIndex?: number | null }): Promise<OperatorProposal | null> {
   // 1. Operator 조회 — ★ D212+ 5번 (2026-05-23 Harold 명시): budget_spent 영역 sub-query 통합
   const operRes = await query(
     `SELECT o.*, c.id AS c_id,
@@ -1651,13 +1658,14 @@ export async function generateProposalForOperator(operatorId: string, opts?: { p
         // 차단 시 AI 재작성 (Opus) — buildSpamRegeneratePrompt: 목표 유지 + 구체 혜택 생성 금지
         regenerateCallback: noRegen ? (async () => null) : async () => {
           try {
+            if (generationSlotsLeft() <= 0) return null;   // ★ 2026-10-28 K12-2 회차 예산 소진
             // 스팸 재생성은 자동마케팅 사이클 안전망(품질 보증) → 묶음으로 차감 0 (사이클 1회 200에 포함).
             // ★ 2026-10-03 대상 정보 형식(total_count) — 옛 { count } 는 generateMessages 가 total_count 를 읽다 던져
             //   catch 가 null 로 삼켰다(재생성이 늘 0회 · 화면 「AI 재생성 0회 후에도」의 원인).
             const regen = await runInCreditBundle(() => generateMessages(
               buildSpamRegeneratePrompt(operator.objective, buildCopyStylePromptBlock(operator.copyStyle)),
               { total_count: recipientCount },
-              { channel: channelForSpam, isAd: !!isAd, rejectNumber: adOpt080 || ctx.reject_number || undefined, model: 'opus', companyId: operator.companyId },
+              { channel: channelForSpam, isAd: !!isAd, rejectNumber: adOpt080 || ctx.reject_number || undefined, model: 'opus', companyId: operator.companyId, purpose: { operatorTargetHint: operator.targetHint } },
             ));
             const nv = regen.variants?.[0] as any;
             if (!nv) return null;
@@ -3459,7 +3467,7 @@ async function dispatchProposalSend(
         ...(useIndividualCb ? { useIndividualCallback: true, callbackFilterUserId: cbFilterUserId } : {}),
       },
       { companyId, userId },
-      { finalSource: 'selected_as_is', aiMessages: [trackedBody] },
+      { finalSource: 'selected_as_is', aiMessages: [trackedBody], authorship: 'path_ai' },
     );
     campaignId = res.campaignId;
     primarySentAt = new Date();
@@ -4159,27 +4167,7 @@ export function startContinuousOperatorScheduler(): void {
  * 현재 = 문자(LMS). 알림톡 템플릿 등록 후 = 1순위 알림톡 → 2순위 문자 fallback으로 교체 예정(아래 TODO seam).
  */
 // ★ 2026-07-02 2차: 성과 회고(operator-daily-recap)와 공유 — export (담당자 안내 발송 단일 경로 유지)
-/**
- * ★ 2026-10-18 담당자 통지 폴백 연락처 — **누가 받는가**를 한 함수가 정한다(회의론자 B8).
- *   ① 등록 계정(users.phone) ② 회사 대표 관리자(DB 원시값 user_type='admin') · 활성 · 비시스템 · 번호가 유효한 첫 행.
- * `notifyOperatorAdmins`(번호 없는 통지)와 플래너 재확인 링크(받은 계정 = 링크 권한의 주인)가 같은 함수를 쓴다 —
- *   따로 조회하면 정렬·거름이 달라 문자를 받은 계정과 기록한 계정이 갈린다. 조회 실패는 던진다(호출부가 접는다).
- */
-export async function pickOperatorFallbackContact(companyId: string, createdBy: string | null): Promise<{ userId: string; phone: string } | null> {
-  const fb = await query(
-    `SELECT id, phone FROM users
-      WHERE (($1::uuid IS NOT NULL AND id = $1::uuid)
-         OR (company_id = $2::uuid AND user_type = 'admin'))
-        AND is_active = true AND COALESCE(is_system, false) = false
-      ORDER BY (id = $1::uuid) DESC, id ASC`,
-    [createdBy || null, companyId],
-  );
-  for (const r of fb.rows as any[]) {
-    const phone = String(r.phone || '').replace(/\D/g, '');
-    if (/^01\d{8,9}$/.test(phone)) return { userId: String(r.id), phone };
-  }
-  return null;
-}
+// ★ 2026-10-28 B-1028-1 — 담당자 통지 폴백 연락처(누가 받는가) = `utils/owner-contact.ts` `pickOwnerContact` 한 곳(여정 안내 두 종도 같은 함수)
 
 export async function notifyOperatorAdmins(
   // ★ 2026-07-07: createdBy 옵셔널 — ContinuousOperator 전체를 넘기는 호출부는 자동 포함(구조 서브셋), 인라인 조립 호출부는 미지정 가능.
@@ -4206,7 +4194,7 @@ export async function notifyOperatorAdmins(
   //   기존 등록분(담당자 미입력)과 인라인 조립 호출부까지 CT 1곳에서 일괄 수혜. 조회 실패 = 기존 동작(무통지) 유지.
   if (unique.length === 0) {
     try {
-      const fallback = await pickOperatorFallbackContact(operator.companyId, operator.createdBy || null);
+      const fallback = await pickOwnerContact(operator.companyId, operator.createdBy || null);
       if (fallback) unique = [fallback.phone];
     } catch (e: any) {
       console.log('[ContinuousOperator] 담당자 폴백 연락처 조회 실패(통지 생략):', e?.message || e);

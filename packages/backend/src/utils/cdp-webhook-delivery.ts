@@ -16,15 +16,19 @@
 import { query } from '../config/database';
 import { getProvider } from './provider-registry';
 import { runSerial } from './inflight-lock';
-import { integrationStoreCodeOf } from './integration-scope';
+import { integrationRowScopeOf } from './integration-scope';
+import type { MallScope } from './integration-row';
+import { classifyIngestError } from './mall-import';
 
-export type WebhookSource = 'cafe24' | 'imweb' | 'naver_smart_store' | 'woocommerce' | 'custom';
+export type WebhookSource = 'cafe24' | 'imweb' | 'woocommerce' | 'custom';   // ★1028 M19 네이버 = 조회형(웹훅 없음)
 
 /** 처리에 함께 넘기는 수신 맥락 — 받은 시각 = 전달 행 created_at(재처리 때도 같은 값 · 원천 시각이 없는 provider 의 사건 시각 · 값 시계) */
 export interface WebhookCtx {
   observedAt: string;
   /** ★ 1027 K9 SC1 — 이 웹훅이 온 연동 행의 분류코드(없으면 null · 어댑터가 식별 · 주문 적재에 싣는다 · 요청 본문 값 아님) */
   storeCode: string | null;
+  /** ★ 1028 K9 — 외부 회원 · 주문 번호의 몰 접두 범위(그 연동 행 · 어댑터는 mallScopedIds 로만 번호를 만든다 · I9) */
+  idScope: MallScope;
 }
 
 /** 처리 결과 — 'stale' = 옛 스냅숏이라 쓰지 않음(전달은 superseded 로 닫는다) */
@@ -202,15 +206,23 @@ export async function processClaimedDelivery(row: ClaimedDelivery, isRetry: bool
   const mallId = String(row.payload?._mall_id ?? row.payload?.mall_id ?? '').trim();
   try {
     // 분류코드 조회 실패도 그 전달의 실패로 남긴다(잡은 채 빠져나가 10분 뒤까지 아무 기록이 없지 않게)
+    const scope = mallId ? await integrationRowScopeOf(row.company_id, row.source, mallId) : { storeCode: null, idPrefix: null };
     const ctx: WebhookCtx = {
       observedAt: new Date(row.created_at).toISOString(),
-      storeCode: mallId ? await integrationStoreCodeOf(row.company_id, row.source, mallId) : null,
+      storeCode: scope.storeCode,
+      idScope: { provider: row.source, mallId, idPrefix: scope.idPrefix },
     };
     const result = await adapter.processWebhookEvent(row.company_id, row.webhook_event, resource, ctx);
     const status = result === 'stale' ? 'superseded' : 'processed';
     await finishDelivery(row.id, status, null, false);
     return status;
   } catch (err: any) {
+    // ★ 1028 K11 — 넣을 수 없는 건(휴대폰 없음 · 필수 칸 · 시각 형식)은 다시 해도 같다 → 처리됨 + 사유 한 줄(새 상태 없음 · 소진 경보로 가지 않음)
+    if (classifyIngestError(err) === 'skip') {
+      console.warn(`[CDP Webhook] 넣을 수 없는 건 건너뜀 (company ${row.company_id} · ${row.source}): ${err?.message || err}`);
+      await finishDelivery(row.id, 'processed', `건너뜀: ${String(err?.message || 'unknown')}`.slice(0, 1000), false);
+      return 'processed';
+    }
     console.error(`[CDP Webhook] 이벤트 처리 실패 (company ${row.company_id} · ${row.source}):`, err?.message || err);
     await finishDelivery(row.id, 'failed', String(err?.message || 'unknown').slice(0, 1000), isRetry);
     return 'failed';
@@ -227,5 +239,5 @@ async function finishDelivery(id: string, status: 'processed' | 'superseded' | '
     );
     return;
   }
-  await query(`UPDATE cdp_webhook_deliveries SET status = $2, processed_at = NOW() WHERE id = $1::uuid`, [id, status]);
+  await query(`UPDATE cdp_webhook_deliveries SET status = $2, processed_at = NOW(), error_message = $3 WHERE id = $1::uuid`, [id, status, errorMessage]);
 }

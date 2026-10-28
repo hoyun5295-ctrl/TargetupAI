@@ -32,7 +32,9 @@ import {
 } from '../utils/imweb-client';
 import { isCdpEnabledForPlan } from '../utils/cdp-auth';
 
-import { publicErrorText } from '../utils/http-error';
+import { publicErrorText, respondUserError, UserFacingError } from '../utils/http-error';
+import { stashPendingApproval, confirmPendingApproval, approvalConfirmUrl } from '../utils/oauth-pending';   // ★1028 M24
+import { storeCodeForConnect } from '../utils/integration-scope';   // ★1028 N6 연결 분류코드
 const router = Router();
 
 // ════════════════════════════════════════════════════════════════════
@@ -112,6 +114,7 @@ router.get('/oauth/authorize', async (req: Request, res: Response) => {
       return res.status(400).json({ success: false, error: 'site_code는 필수입니다.' });
     }
 
+    const storeCode = await storeCodeForConnect(req.user, req.query.store_code);   // ★1028 N6 분류코드(확정 때 그 값으로 저장)
     const csrfNonce = randomBytes(16).toString('hex');
     await query(
       `INSERT INTO cdp_webhook_deliveries (
@@ -122,7 +125,7 @@ router.get('/oauth/authorize', async (req: Request, res: Response) => {
       ON CONFLICT (company_id, source, idempotency_key) DO UPDATE SET
         payload = EXCLUDED.payload,
         created_at = NOW()`,
-      [companyId, `state:${csrfNonce}`, JSON.stringify({ site_code: siteCode, nonce: csrfNonce })]
+      [companyId, `state:${csrfNonce}`, JSON.stringify({ site_code: siteCode, nonce: csrfNonce, store_code: storeCode })]
     );
 
     const state = Buffer.from(JSON.stringify({ company_id: companyId, nonce: csrfNonce, ts: Date.now() })).toString('base64url');
@@ -130,6 +133,7 @@ router.get('/oauth/authorize', async (req: Request, res: Response) => {
     return res.json({ success: true, authorize_url: authorizeUrl });
   } catch (err: any) {
     console.error('[Imweb /oauth/authorize] 오류:', err);
+    if (respondUserError(res, err)) return;   // ★1028 N6 분류코드 거절(고객 문장)
     return res.status(500).json({ success: false, error: publicErrorText(err, 'authorize URL 생성 실패') });
   }
 });
@@ -151,6 +155,47 @@ router.get('/status', async (req: Request, res: Response) => {
   } catch (err: any) {
     console.error('[Imweb /status] 오류:', err);
     return res.status(500).json({ success: false, error: publicErrorText(err, '조회 실패') });
+  }
+});
+
+/**
+ * POST /api/imweb/oauth/confirm  body { confirm }
+ * ★ 2026-10-28 자사몰 대비 M24 — 승인 콜백이 담아 둔 미확정 토큰을 로그인된 회사 관리자가 확정 → 저장 → 연동완료처리(이 호출이 성공해야 API 가 열린다 · 6원칙②).
+ */
+router.post('/oauth/confirm', async (req: Request, res: Response) => {
+  try {
+    const companyId = req.user?.companyId;
+    if (!companyId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
+    if (req.user?.userType !== 'company_admin') return res.status(403).json({ success: false, error: '아임웹 연동은 회사 관리자만 가능합니다.' });
+    // 승인 행 잠금 → 풀기 → 연동 저장 → 승인 행 지우기(한 트랜잭션 · 저장이 실패하면 승인 행이 남아 다시 확정할 수 있다)
+    const done = await confirmPendingApproval(companyId, 'imweb', String(req.body?.confirm || ''), async (state, pending, run) => {
+      const site = String(state.site_code || '');
+      if (!site) throw new UserFacingError(400, 'OAUTH_CONFIRM_INVALID', '승인 상태가 올바르지 않아요. 자사몰 연동에서 다시 연결해 주세요.');
+      await saveImwebIntegration(companyId, site, pending, undefined, typeof state.store_code === 'string' ? state.store_code : null, run);
+      return site;
+    });
+    if (!done) return res.status(400).json({ success: false, error: '승인 확인 시간이 지났거나 이 계정이 시작한 연결이 아니에요. 자사몰 연동에서 다시 연결해 주세요.', code: 'OAUTH_CONFIRM_INVALID' });
+    const siteCode = done.result;
+    // 연동완료처리 = 저장이 확정된 뒤(실패해도 토큰은 남고 pending_complete 로 다시 시도)
+    const integration = await getImwebIntegration(companyId, siteCode);
+    let completeOk = false;
+    if (integration) {
+      try { await completeImwebIntegration(integration); completeOk = true; }
+      catch (e: any) { console.error('[Imweb confirm] integration-complete 실패:', e); }
+    }
+    if (!completeOk) {
+      await query(
+        `UPDATE company_integrations SET status = 'pending_complete', updated_at = NOW()
+         WHERE company_id = $1::uuid AND provider = 'imweb' AND mall_id = $2`,
+        [companyId, siteCode]
+      );
+      return res.status(502).json({ success: false, error: '토큰은 발급됐으나 아임웹 연동완료처리에 실패했습니다. 잠시 후 다시 연동을 시도해주세요.' });
+    }
+    return res.json({ success: true, site_code: siteCode });
+  } catch (err: any) {
+    console.error('[Imweb /oauth/confirm] 오류:', err);
+    if (respondUserError(res, err)) return;   // 분류코드 모드 거절(409 · 고객 문장)
+    return res.status(500).json({ success: false, error: publicErrorText(err, '아임웹 연결 확정 실패') });
   }
 });
 
@@ -225,36 +270,13 @@ imwebCallbackRouter.get('/oauth/callback', async (req: Request, res: Response) =
       return res.status(400).send(renderCallbackHtml('error', 'state에 siteCode가 누락되었습니다.'));
     }
 
-    // 인가코드 → 토큰 → 저장
+    // 인가코드 → 토큰
     const token = await exchangeImwebCode(code);
-    await saveImwebIntegration(parsed.company_id, siteCode, token);
 
-    // ★ 연동완료처리 — 이 호출이 성공해야 실제 API가 열린다(6원칙② 실효 검증)
-    const integration = await getImwebIntegration(parsed.company_id, siteCode);
-    let completeOk = false;
-    if (integration) {
-      try { await completeImwebIntegration(integration); completeOk = true; }
-      catch (e: any) { console.error('[Imweb callback] integration-complete 실패:', e); }
-    }
-
-    // state 1회성 정리
-    await query(
-      `DELETE FROM cdp_webhook_deliveries
-       WHERE company_id = $1::uuid AND source = 'imweb'
-         AND webhook_event = 'oauth_state' AND idempotency_key = $2`,
-      [parsed.company_id, `state:${parsed.nonce}`]
-    );
-
-    if (!completeOk) {
-      await query(
-        `UPDATE company_integrations SET status = 'pending_complete', updated_at = NOW()
-         WHERE company_id = $1::uuid AND provider = 'imweb' AND mall_id = $2`,
-        [parsed.company_id, siteCode]
-      );
-      return res.status(502).send(renderCallbackHtml('error', '토큰은 발급됐으나 아임웹 연동완료처리에 실패했습니다. 잠시 후 다시 연동을 시도해주세요.'));
-    }
-
-    return res.send(renderCallbackHtml('ok', `아임웹(${siteCode}) 연동이 완료되었습니다. 본 창을 닫고 한줄로AI로 돌아가주세요.`));
+    // ★ 2026-10-28 자사몰 대비 M24 — 연동 행에 바로 넣지 않는다(콜백엔 로그인 정보가 없다 · 남이 시작한 승인 링크를 몰 주인이 누르면 그 몰이 남의 회사에 묶였다).
+    //   미확정으로 담고(암호문 · 그 승인 행) 로그인된 화면으로 → 화면이 그 회사 관리자로 확정해야 저장 · 연동완료처리(POST /oauth/confirm).
+    const confirm = await stashPendingApproval(parsed.company_id, 'imweb', parsed.nonce, token);
+    return res.redirect(302, approvalConfirmUrl('imweb', confirm));
   } catch (err: any) {
     console.error('[Imweb callback] 오류:', err);
     return res.status(500).send(renderCallbackHtml('error', publicErrorText(err, '아임웹 연동 처리 중 오류가 발생했습니다.')));

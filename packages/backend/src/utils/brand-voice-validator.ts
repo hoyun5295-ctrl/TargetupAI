@@ -11,8 +11,8 @@
  *   3. retries === 3 + 여전히 미달 = 최선 결과 반환 + UI 안 "1회 더 다듬기" 옵션
  *
  * 검증 매트릭스
- *   필수 1 — 빈출 표현 1건 이상 포함 (frequent_expressions 영역 안 1건+ 출현)
- *   필수 2 — 광고 표기 "(광고)" 위치 일치 (front / back)
+ *   (옛 필수 1 빈출 표현 = 2026-10-28 경고로 내림 · K5-5 · 확인된 문구 칸만 들어온다)
+ *   (옛 필수 2 「(광고) 위치」 = 2026-10-28 삭제 · 법이 정한다)
  *   필수 3 — 이모지 화이트리스트 정합 (허용 외 이모지 출현 X)
  *   필수 4 — 종결어미 스타일 일치 (2026-07-02 형태 명세 — sentence_ending_style 있을 때만, SMS 제외)
  *   필수 5 — 본문 길이 범위 ±20% 슬랙 (2026-07-02 — length_range 있고 channel LMS/MMS일 때만)
@@ -54,7 +54,7 @@ const HAPSHO_ENDING_RE = /(니다|니까|십시오)(?=[\s.!?~,)"']|$)/g;
 export function validateBrandVoiceCompliance(
   generated: string,
   guideline: BrandGuideline,
-  opts?: { channel?: string },
+  opts?: { channel?: string; skipLength?: boolean },
 ): ValidationResult {
   const issues: string[] = [];
   const warnings: string[] = [];
@@ -73,24 +73,13 @@ export function validateBrandVoiceCompliance(
       return generated.includes(expr);
     });
     if (!hasExpression) {
-      issues.push(`빈출 표현 1건 이상 포함 의무: 활용 가능 표현: ${guideline.frequent_expressions.join(' / ')}`);
+      warnings.push(`빈출 표현 1건 이상 포함 권장: 활용 가능 표현: ${guideline.frequent_expressions.join(' / ')}`);
     }
   }
 
   // ─────────────────────────────────────────────────────────────
-  // 필수 2: 광고 표기 "(광고)" 위치 일치
-  // ─────────────────────────────────────────────────────────────
-  const hasAdPrefix = generated.includes('(광고)');
-  if (hasAdPrefix) {
-    const front = /^\s*\(광고\)/.test(generated);
-    const back = /\(광고\)\s*$/.test(generated);
-    if (guideline.ad_prefix_position === 'front' && !front) {
-      issues.push('"(광고)" 표기 위치 = 본문 앞 (현재 본문 뒤)');
-    } else if (guideline.ad_prefix_position === 'back' && !back) {
-      issues.push('"(광고)" 표기 위치 = 본문 뒤 (현재 본문 앞)');
-    }
-  }
-
+  // (옛 필수 2 「(광고) 위치 일치」 = ★ 2026-10-28 AI 메모리 설계 K1-5 삭제 · (광고) · 080 위치는 법이 정하고 buildAdMessage 가 붙인다 ·
+  //   생성 본문에는 (광고)가 없어 발동할 자리가 없던 검사였다)
   // ─────────────────────────────────────────────────────────────
   // 필수 3: 이모지 화이트리스트 정합 — 카카오 제외 (이모지 허용 채널, 화이트리스트는 LMS 학습값)
   // ─────────────────────────────────────────────────────────────
@@ -132,7 +121,7 @@ export function validateBrandVoiceCompliance(
   // ─────────────────────────────────────────────────────────────
   const range = guideline.length_range;
   if (
-    (channel === 'LMS' || channel === 'MMS') &&
+    (channel === 'LMS' || channel === 'MMS') && !opts?.skipLength &&
     range && range.min_chars > 0 && range.max_chars >= range.min_chars
   ) {
     const len = generated.length;

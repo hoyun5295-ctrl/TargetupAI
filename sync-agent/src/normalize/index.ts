@@ -12,6 +12,7 @@
 
 import { getLogger } from '../logger';
 import { FIELD_MAP, getFieldByKey } from './field-map';
+import type { ValueMaps } from '../config/schema';
 import dayjs from 'dayjs';
 
 const logger = getLogger('normalize');
@@ -141,6 +142,84 @@ export function normalizeOptOutFlag(value: any): boolean | null {
   if (OPT_OUT_TRUE.has(v)) return true;
   if (OPT_OUT_FALSE.has(v)) return false;
   return null;
+}
+
+// ============================================================
+// ★ 2026-10-28 설치별 값 분류(P2 · docs/2026-10-28-sync-value-check-summary-guard-design.md §3)
+// 낱말표(위 세 표)는 손대지 않는다 — 모든 설치의 판정이 바뀐다. 낱말표가 모르는 글자만, 설치 때 사람이 분류한 표로 바꾼다.
+// 표가 없거나 안 맞으면(아래 resolveValueMaps) 지금 동작 그대로.
+// ============================================================
+export type ValueMapField = 'sms_opt_in' | 'is_opt_out' | 'gender';
+export const VALUE_MAP_FIELDS: readonly ValueMapField[] = ['sms_opt_in', 'is_opt_out', 'gender'];
+
+/** 낱말표 판정 한 곳(정규화 · 설치 값 확인 공용) — null = 모름(설치 분류 대상) */
+export function builtinValueJudgement(field: ValueMapField, raw: unknown): boolean | string | null {
+  if (field === 'sms_opt_in') return normalizeSmsOptIn(raw);
+  if (field === 'is_opt_out') return normalizeOptOutFlag(raw);
+  return normalizeGender(raw);
+}
+
+/** 그 필드에 매핑된 원본 컬럼이 정확히 하나면 그 이름 · 없거나 둘 이상(이어붙이기)이면 null */
+export function singleSourceColumn(mapping: Record<string, string>, field: string): string | null {
+  const cols = Object.keys(mapping).filter((c) => mapping[c] === field);
+  return cols.length === 1 ? cols[0] : null;
+}
+
+/**
+ * 분류표의 원본 식별 — **저장된 접속 설정 모양**(config.database)에서 만든다(마법사 · 설정 편집 · 엔진이 같은 함수 · Codex 설계 1R).
+ * 어댑터 getSourceId 를 쓰지 않는 이유 = 마법사가 접속에 쓴 객체와 저장 객체의 기본값 채움이 달라 같은 DB 가 다른 글자가 될 수 있다.
+ * 비밀번호는 넣지 않는다.
+ */
+export function valueMapSourceOf(db: { type: string; host?: string; port?: number; database?: string; username?: string; filePath?: string }): string {
+  return JSON.stringify([db.type, db.host ?? '', db.port ?? null, db.database ?? '', db.username ?? '', db.filePath ?? '']);
+}
+
+/** 분류표가 묶인 원본 · 고객 테이블 — 엔진은 config 에서, 마법사 · 설정 편집은 저장할 설정에서 */
+export interface ValueMapTarget { table: string; source: string }
+
+/**
+ * 적용 판정 한 곳 — 표의 원본 · 고객 테이블이 지금 설정과 같고, column 이 지금 고객 매핑의 단일 원본 컬럼과 같을 때만 그 표를 쓴다.
+ * DB · 테이블 · 매핑 컬럼 중 하나라도 바뀌면 옛 표는 저절로 빠진다(지금 동작 + 배치 로그 그대로 · 다시 분류 = 설정 편집 [6]).
+ */
+export function resolveValueMaps(
+  valueMaps: ValueMaps | undefined,
+  customerMapping: Record<string, string>,
+  target: ValueMapTarget,
+): ValueMaps | undefined {
+  if (!valueMaps) return undefined;
+  const fits = (field: ValueMapField, e: { column: string; table: string; source: string } | undefined) =>
+    !!e && e.table === target.table && e.source === target.source && singleSourceColumn(customerMapping, field) === e.column;
+  const out: ValueMaps = {};
+  if (fits('sms_opt_in', valueMaps.sms_opt_in)) out.sms_opt_in = valueMaps.sms_opt_in;
+  if (fits('is_opt_out', valueMaps.is_opt_out)) out.is_opt_out = valueMaps.is_opt_out;
+  if (fits('gender', valueMaps.gender)) out.gender = valueMaps.gender;
+  return Object.keys(out).length > 0 ? out : undefined;
+}
+
+/**
+ * 고객 커서 정체성에 넣는 분류표 지문 — 분류가 바뀌면 커서가 폐기돼 고객 전량이 새 분류로 다시 나간다(Codex 설계 1R).
+ * 필드 · 값 글자 순으로 정렬해 저장 순서와 무관하게 같은 표 = 같은 글자.
+ */
+export function valueMapsDigest(maps: ValueMaps): string {
+  const rows = VALUE_MAP_FIELDS.filter((f) => maps[f]).map((f) => {
+    const e = maps[f]!;
+    const vals = Object.entries(e.values as Record<string, unknown>).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
+    return [f, e.column, e.table, e.source, vals];
+  });
+  return JSON.stringify(rows);
+}
+
+/** 낱말표 판정이 null 인 글자만 표의 값으로 바꾼다(낱말표가 아는 값은 표가 있어도 그대로) */
+function applyInstallValueMaps(result: Record<string, unknown>, maps: ValueMaps): void {
+  for (const field of VALUE_MAP_FIELDS) {
+    const m = maps[field];
+    if (!m || !(field in result)) continue;
+    const raw = result[field];
+    if (raw == null || typeof raw === 'boolean') continue;
+    const v = String(raw).trim();
+    if (v === '' || builtinValueJudgement(field, v) !== null) continue;
+    if (Object.prototype.hasOwnProperty.call(m.values, v)) result[field] = (m.values as Record<string, unknown>)[v];
+  }
 }
 
 // ============================================================
@@ -511,9 +590,13 @@ export function normalizeByFieldKey(fieldKey: string, value: any): any {
 export function normalizeCustomer(
   mapped: Record<string, unknown>,
   // ★2026-09-13(3) 동기화 경로는 원본 DB 종류를 넘긴다(custom_fields 날짜 되돌림 · 없으면 날짜 되돌림 없이 원형 그대로)
-  opts?: { dbType?: string },
+  // ★ 2026-10-28 valueMaps = 엔진이 resolveValueMaps 로 거른 설치별 값 분류(없으면 지금 동작 그대로)
+  opts?: { dbType?: string; valueMaps?: ValueMaps },
 ): Record<string, unknown> {
   const result: Record<string, unknown> = { ...mapped };
+
+  // ★ 2026-10-28 설치별 값 분류는 맨 앞 — 아래 수신동의 「알아볼 수 없음」 표시 · 탈퇴 접기가 분류된 값으로 판정한다
+  if (opts?.valueMaps) applyInstallValueMaps(result, opts.valueMaps);
 
   // ★ 1.7.2 수신동의 칸에 값은 있는데 알아볼 수 없으면(낱말표 밖) 그 글자를 표시로 싣는다 — 서버가 신규 고객을 미동의로 넣는다.
   //   null 로만 접으면 서버는 「값 없음」으로 보고 신규 기본 동의(true)를 탄다(거부 표기가 동의로 들어가던 자리).
@@ -643,7 +726,7 @@ export interface NormalizationResult {
   }>;
 }
 
-export function normalizeCustomerBatch(rows: Record<string, unknown>[], opts?: { dbType?: string }): NormalizationResult {
+export function normalizeCustomerBatch(rows: Record<string, unknown>[], opts?: { dbType?: string; valueMaps?: ValueMaps }): NormalizationResult {
   const normalized: Record<string, unknown>[] = [];
   const dropped: NormalizationResult['dropped'] = [];
 

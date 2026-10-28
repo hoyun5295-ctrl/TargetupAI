@@ -91,6 +91,20 @@ export function mapRow(row: RawRow, mapping: ColumnMapping): Record<string, unkn
 }
 
 /**
+ * ★ 2026-10-28 고객 누계 보호(P3 · docs/2026-10-28-sync-value-check-summary-guard-design.md §4) — 고객 매핑이 주는 구매 요약 칸.
+ * 구매 요청에 실어 보내면 서버가 그 칸을 구매 원장 재계산으로 덮지 않는다(고객 원본이 진실).
+ * ⛔ 서버 `utils/customer-purchase-aggregates.ts SUMMARY_SET_FRAGMENTS` 와 같은 5칸(패키지가 달라 미러).
+ */
+export const CUSTOMER_SUMMARY_FIELDS: readonly string[] = [
+  'total_purchase_amount', 'purchase_count', 'recent_purchase_date', 'recent_purchase_amount', 'recent_purchase_store',
+];
+
+export function customerSummaryFieldsOf(customerMapping: ColumnMapping): string[] {
+  const targets = new Set(Object.values(customerMapping));
+  return CUSTOMER_SUMMARY_FIELDS.filter((f) => targets.has(f));
+}
+
+/**
  * 배치 매핑 (다수 행)
  */
 export function mapBatch(rows: RawRow[], mapping: ColumnMapping): Record<string, unknown>[] {

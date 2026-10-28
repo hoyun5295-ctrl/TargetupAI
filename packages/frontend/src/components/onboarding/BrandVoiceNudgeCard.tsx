@@ -1,8 +1,9 @@
 /**
  * BrandVoiceNudgeCard.tsx — D225+ Brand Voice 미등록 회사 알림 카드 (2026-05-28 Harold 명시)
  *
- * 본질: 회사 brand_guideline 미등록 시 = Dashboard 안 강력 push 카드 표시.
- *   "5건 등록 시 = AI 문안 = 회사 아이덴티티 100% 일치 / 미등록 시 = 일반 한국어 톤"
+ * 본질: 회사 목소리를 아직 배우지 않은 회사 = 대시보드 알림 카드.
+ * ★ 2026-10-28 AI 메모리 설계 K13-3 — 판정 = 서버 voice_learned(확인된 학습) · 문구 = 최근 90일 보낸 문자 수 · 과장 문구(100% 일치 · 1~5건) 삭제 ·
+ *   버튼 = /ai-memory?learn=voice(브랜드 학습 창 · 브랜드 보이스 탭 · 보낸 문자 고르기 바로 열기).
  *
  * 24h cooldown: "오늘 하루 보지 않기" 버튼 = localStorage 활용.
  *
@@ -43,6 +44,7 @@ export default function BrandVoiceNudgeCard({ suppress = false }: { suppress?: b
   const navigate = useNavigate();
   const [show, setShow] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [sentCount, setSentCount] = useState(0);
 
   useEffect(() => {
     if (isDismissed()) {
@@ -67,8 +69,14 @@ export default function BrandVoiceNudgeCard({ suppress = false }: { suppress?: b
         return;
       }
       const data = await res.json();
-      if (data.success && (!data.registered || !data.guideline_extracted)) {
+      if (data.success && data.voice_learned !== true) {
         setShow(true);
+        // 최근 90일 사람이 보낸 문자 수(보낼 수 있는 사람만 · 못 읽으면 0 = 일반 문구)
+        if (data.permissions?.canEdit) {
+          const c = await fetch('/api/ai-memory/brand-voice/sent-candidates', { headers: { Authorization: `Bearer ${token}` } }).then((r) => r.json()).catch(() => null);
+          const since = Date.now() - 90 * 86400000;
+          setSentCount(Array.isArray(c?.candidates) ? c.candidates.filter((x: any) => x?.sentAt && Date.parse(x.sentAt) >= since).length : 0);
+        }
       }
     } catch {
       // skip — 조용히 무시
@@ -94,23 +102,23 @@ export default function BrandVoiceNudgeCard({ suppress = false }: { suppress?: b
 
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-2 mb-1 flex-wrap">
-              <h3 className="text-base font-bold text-white">회사 Brand Voice 학습 미완료</h3>
+              <h3 className="text-base font-bold text-white">우리 회사 목소리를 아직 배우지 않았어요</h3>
               <span className="px-1.5 py-0.5 text-[10px] rounded bg-amber-500/20 text-amber-200 border border-amber-500/40 font-semibold">NEW</span>
             </div>
 
             <p className="text-sm text-violet-100 leading-relaxed mb-3">
-              AI 다듬기 + AI 자동 생성 = 현재 <strong className="text-amber-200">일반 한국어 톤</strong> 출력 중 (회사 아이덴티티 X).
-              <br />
-              <span className="text-violet-200/80">대표 LMS/MMS 문안 1~5건 등록 시 = 다음 발송부터 <strong className="text-emerald-200">회사 톤 100% 일치</strong> 자동 적용.</span>
+              {sentCount > 0
+                ? <>최근 90일 보낸 문자가 <strong className="text-amber-200">{sentCount}건</strong> 있어요. 이 문자로 말투 · 줄띄움 · 기호를 배우면 AI 문안이 그 꼴로 나와요.</>
+                : <>평소 보내던 문자를 올리면 말투 · 줄띄움 · 기호를 배워 AI 문안이 그 꼴로 나와요.</>}
             </p>
 
             <div className="flex items-center gap-2 flex-wrap">
               <button
-                onClick={() => navigate('/ai-memory')}
+                onClick={() => navigate('/ai-memory?learn=voice')}
                 className="px-4 py-2 text-xs bg-gradient-to-r from-violet-600 to-fuchsia-600 hover:from-violet-500 hover:to-fuchsia-500 text-white rounded-lg flex items-center gap-2 font-semibold shadow-lg transition-colors"
               >
                 <Sparkles className="w-3.5 h-3.5" />
-                지금 등록하기
+                {sentCount > 0 ? '이 문자로 목소리 배우기' : '목소리 배우기'}
                 <ArrowRight className="w-3.5 h-3.5" />
               </button>
 

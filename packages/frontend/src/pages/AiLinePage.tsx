@@ -416,6 +416,8 @@ export default function AiLinePage() {
   const [askFactsOpen, setAskFactsOpen] = useState(false);
   const [aiRefinedIdx, setAiRefinedIdx] = useState<Record<number, true>>({});
   const [proposalCVariant, setProposalCVariant] = useState<'mz' | 'punchy' | null>(null);
+  // ★ 2026-10-28 AI 메모리 설계 K3-4 — 이 3안이 회사 목소리로 만든 안인가(원장 hubVariants.voiceMode)
+  const [proposalVoiceMode, setProposalVoiceMode] = useState(false);
   // ★ 2026-07-10 (임은지 리포트): LMS/MMS 제목 확인·수정 — 변형별 제목 편집 오버라이드 (화면 표시 = 발송 값)
   const [subjectOverrides, setSubjectOverrides] = useState<Record<number, string>>({});
   const [editingBody, setEditingBody] = useState(false); // ★ 2026-06-19: 생성 문안 직접 편집(타이핑) 모드
@@ -738,6 +740,7 @@ export default function AiLinePage() {
         return;
       }
       setProposalCVariant(data.copyCVariant === 'mz' || data.copyCVariant === 'punchy' ? data.copyCVariant : null);
+      setProposalVoiceMode(data.voiceMode === true);
       // ★ D210+ Phase 2-fix7 (Harold 명시 2026-05-23): AI 응답 후 진행 시각 확보 영역.
       //   옛 사고 = setTimeout 600ms 즉시 setLoading(false) → 진행 시각 효과 영역 X (즉시 사라짐).
       //   정정 = 1500ms 후 마지막 단계 완료 표시 + 2200ms 후 화면 전환 (사용자 자연 시각 흐름).
@@ -1054,6 +1057,7 @@ export default function AiLinePage() {
           edited: refinedOverrides[idx] != null && refinedOverrides[idx] !== (variant.body || ''),
           aiRefined: !!aiRefinedIdx[idx],
           cVariant: proposalCVariant,
+          voiceMode: proposalVoiceMode,
         },
         // 오퍼레이터가 제안 때 붙인 이름을 그대로 쓴다. 없으면 필드를 비워 서버 기본명에 맡긴다.
         ...(proposal.target.suggestedName?.trim() ? { campaignName: suggestedName } : {}),

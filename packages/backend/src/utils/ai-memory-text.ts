@@ -110,8 +110,6 @@ export interface GuidelineSnapshot {
   cta_patterns: string[];
   emoji_whitelist: string[];
   greeting_pattern: string;
-  ad_prefix_position: string;
-  reject_position: string;
 }
 
 export interface ToneChange {
@@ -127,7 +125,7 @@ function sameSet(a: string[], b: string[]): boolean {
 
 /**
  * Brand Voice 가이드라인 변화 감지 — 첫 등록(prev 없음)·무변화는 null.
- * 트리거: tone_signature / 인사말 / 광고·수신거부 위치 / CTA 집합 / 이모지 집합 변화.
+ * 트리거: tone_signature / 인사말 / CTA 집합 / 이모지 집합 변화(★ 2026-10-28 K1-5 광고 · 수신거부 위치 = 법이라 목소리 변화가 아니다 · 삭제).
  * 평균 길이는 단독 트리거가 아니라 요약 맥락으로만 포함(임의 임계 회피).
  */
 export function diffGuideline(prev: GuidelineSnapshot | null, next: GuidelineSnapshot): ToneChange | null {
@@ -142,14 +140,6 @@ export function diffGuideline(prev: GuidelineSnapshot | null, next: GuidelineSna
   if (prev.greeting_pattern !== next.greeting_pattern) {
     changedFields.push('greeting_pattern');
     parts.push('인사말 패턴 변화');
-  }
-  if (prev.ad_prefix_position !== next.ad_prefix_position) {
-    changedFields.push('ad_prefix_position');
-    parts.push(`광고 표기 위치 ${prev.ad_prefix_position}→${next.ad_prefix_position}`);
-  }
-  if (prev.reject_position !== next.reject_position) {
-    changedFields.push('reject_position');
-    parts.push(`수신거부 위치 ${prev.reject_position}→${next.reject_position}`);
   }
   if (!sameSet(prev.cta_patterns || [], next.cta_patterns || [])) {
     changedFields.push('cta_patterns');

@@ -3,7 +3,7 @@
  * Plugin Name: 한줄로 (Hanjullo) for WooCommerce
  * Plugin URI: https://hanjul.ai
  * Description: 한줄로 AI 마케팅 연동. 방문·장바구니 수집 스크립트 자동 삽입, 로그인 회원 식별, 마케팅 수신동의 값의 REST 응답 노출. 주문·회원 동기화는 한줄로 관리 화면의 "우커머스 연결(관리자 승인)" 버튼으로 시작합니다.
- * Version: 1.0.2
+ * Version: 1.0.3
  * Author: 한줄로
  * Author URI: https://hanjul.ai
  * Requires at least: 6.0
@@ -15,14 +15,14 @@
 
 defined( 'ABSPATH' ) || exit;
 
-define( 'HANJULLO_WC_VERSION', '1.0.2' );
+define( 'HANJULLO_WC_VERSION', '1.0.3' );
 // SDK 경로·버전 = 한줄로 화면(cdp-sdk-script)이 안내하는 값과 같아야 한다. 올릴 때 두 곳을 함께 고친다.
 define( 'HANJULLO_SDK_URL', 'https://app.hanjul.ai/api/cdp/sdk/v0.3.9/hanjul.min.js' );
 define( 'HANJULLO_OPTION_SDK_KEY', 'hanjullo_sdk_key' );
 define( 'HANJULLO_OPTION_CONSENT_KEYS', 'hanjullo_consent_keys' );
-// 1.0.2(2026-10-04): 로그인 회원 식별 = 회원 토큰. 한줄로는 공개키만으로 온 식별을 고객에 잇지 않는다(남이 회원 정보를 바꾸지 못하게).
-//   비밀키는 이 워드프레스 서버의 설정에만 저장되고 페이지(HTML)에는 실리지 않는다 — 서버가 토큰만 받아 페이지에 싣는다.
-define( 'HANJULLO_OPTION_SECRET', 'hanjullo_cdp_secret' );
+// 1.0.3(2026-10-28): 로그인 회원 식별 = 플러그인 키(이 몰 하나 · 회원 토큰 발급만). 회사 전권 CDP 비밀키는 더 이상 받지 않는다
+//   (워드프레스 한 곳이 털려도 회원 쓰기 · 주문 쓰기 · 다른 몰 회원 토큰은 안 된다). 키는 이 서버 설정에만 저장 · 페이지에 실리지 않는다.
+define( 'HANJULLO_OPTION_PLUGIN_KEY', 'hanjullo_plugin_key' );
 define( 'HANJULLO_API_BASE', 'https://app.hanjul.ai/api/cdp' );
 // 1.0.1(2026-10-01): 코드엠샵 수신동의 값이 든 키는 *_label(YES/NO). mssms_agreement 는 on/빈 값이라 안 쓰는 필드다(고객사 확인).
 define( 'HANJULLO_DEFAULT_CONSENT_KEYS', 'mssms_agreement_label,email_agreement_label' );
@@ -124,78 +124,96 @@ add_action( 'wp_head', function () {
 }, 5 );
 
 /**
- * 이 몰의 회원 식별자 = '{몰 주소(www 제외 · 소문자)}:{회원 번호}'.
- * 1.0.2(2026-10-04): 몰이 여럿인 회사에서 회원 번호(몰마다 1부터)가 겹쳐 다른 몰 회원이 한 사람으로 합쳐지던 것을 막는다
- * (한줄로 서버의 우커머스 회원 식별자와 같은 접두 규칙).
+ * 이 몰 주소의 호스트(www 제외 · 소문자) — 한줄로가 이 몰 행이 인정하는 주소인지 본다(도메인을 옮긴 몰도 같은 회원 연결로 잇는다).
  *
- * @param int $user_id 워드프레스 회원 번호.
  * @return string
  */
-function hanjullo_member_external_id( $user_id ) {
+function hanjullo_site_host() {
 	$host = strtolower( (string) wp_parse_url( home_url(), PHP_URL_HOST ) );
-	$host = preg_replace( '/^www\./', '', $host );
-	return $host . ':' . (string) $user_id;
+	return preg_replace( '/^www\./', '', $host );
 }
 
 /**
- * 한줄로 회원 토큰(1시간 유효) — 비밀키로 서버 간 호출해 받고 50분 캐시한다. 비밀키가 없거나 실패하면 빈 문자열(식별 없이 익명 수집).
+ * 로그인 회원의 한줄로 식별(회원 연결 번호 + 회원 토큰 · 1시간 유효 · 50분 캐시).
+ * 1.0.3: 페이지를 붙잡지 않는다 — 캐시에 있으면 바로 돌려주고, 없으면 응답을 보낸 뒤(shutdown) 받아 두고 이 페이지는 익명으로 둔다.
+ * 회원 번호는 한줄로 서버가 이 몰의 고정 식별자로 만든 값(external_id)을 그대로 쓴다.
  *
- * @param string $external_id 회원 식별자.
- * @return string
+ * @param int $user_id 워드프레스 회원 번호.
+ * @return array|null { id: string, token: string } 또는 null.
  */
-function hanjullo_member_token( $external_id ) {
-	$secret = trim( (string) get_option( HANJULLO_OPTION_SECRET, '' ) );
-	$key    = trim( (string) get_option( HANJULLO_OPTION_SDK_KEY, '' ) );
-	if ( '' === $secret || '' === $key ) {
-		return '';
+function hanjullo_member_identity( $user_id ) {
+	$user_id = (int) $user_id;
+	$key     = trim( (string) get_option( HANJULLO_OPTION_PLUGIN_KEY, '' ) );
+	if ( $user_id <= 0 || '' === $key ) {
+		return null;
 	}
-	$cache_key = 'hanjullo_mt_' . md5( $external_id . '|' . $key );
+	$cache_key = 'hanjullo_mi_' . md5( $user_id . '|' . $key . '|' . hanjullo_site_host() );
 	$cached    = get_transient( $cache_key );
-	if ( is_string( $cached ) && '' !== $cached ) {
+	if ( is_array( $cached ) && ! empty( $cached['id'] ) && ! empty( $cached['token'] ) ) {
 		return $cached;
 	}
-	$res = wp_remote_post(
-		HANJULLO_API_BASE . '/member-token',
-		array(
-			'timeout' => 2,
-			'headers' => array(
-				'Content-Type'      => 'application/json',
-				'X-Hanjullo-Key'    => $key,
-				'X-Hanjullo-Secret' => $secret,
-			),
-			'body'    => wp_json_encode( array( 'external_id' => $external_id, 'ttl_seconds' => 3600 ) ),
-		)
+	hanjullo_schedule_identity_fetch( $user_id, $key, $cache_key );
+	return null;
+}
+
+/**
+ * 응답을 보낸 뒤 토큰을 받아 캐시에 둔다(한 요청에 한 번 · 실패하면 5분 동안 다시 묻지 않는다).
+ *
+ * @param int    $user_id   워드프레스 회원 번호.
+ * @param string $key       플러그인 키.
+ * @param string $cache_key 캐시 키.
+ */
+function hanjullo_schedule_identity_fetch( $user_id, $key, $cache_key ) {
+	static $scheduled = false;
+	if ( $scheduled || get_transient( $cache_key . '_wait' ) ) {
+		return;
+	}
+	$scheduled = true;
+	set_transient( $cache_key . '_wait', 1, 5 * MINUTE_IN_SECONDS );
+	add_action(
+		'shutdown',
+		function () use ( $user_id, $key, $cache_key ) {
+			if ( function_exists( 'fastcgi_finish_request' ) ) {
+				fastcgi_finish_request();
+			}
+			$res = wp_remote_post(
+				HANJULLO_API_BASE . '/plugin/member-token',
+				array(
+					'timeout' => 5,
+					'headers' => array(
+						'Content-Type'          => 'application/json',
+						'X-Hanjullo-Plugin-Key' => $key,
+					),
+					'body'    => wp_json_encode( array( 'host' => hanjullo_site_host(), 'user_id' => (string) $user_id, 'ttl_seconds' => 3600 ) ),
+				)
+			);
+			if ( is_wp_error( $res ) || 200 !== (int) wp_remote_retrieve_response_code( $res ) ) {
+				return;
+			}
+			$body = json_decode( (string) wp_remote_retrieve_body( $res ), true );
+			if ( is_array( $body ) && ! empty( $body['member_token'] ) && ! empty( $body['external_id'] ) ) {
+				set_transient( $cache_key, array( 'id' => (string) $body['external_id'], 'token' => (string) $body['member_token'] ), 50 * MINUTE_IN_SECONDS );
+				delete_transient( $cache_key . '_wait' );
+			}
+		},
+		99
 	);
-	if ( is_wp_error( $res ) || 200 !== (int) wp_remote_retrieve_response_code( $res ) ) {
-		return '';
-	}
-	$body  = json_decode( (string) wp_remote_retrieve_body( $res ), true );
-	$token = ( is_array( $body ) && ! empty( $body['member_token'] ) ) ? (string) $body['member_token'] : '';
-	if ( '' !== $token ) {
-		set_transient( $cache_key, $token, 50 * MINUTE_IN_SECONDS );
-	}
-	return $token;
 }
 
 add_action( 'wp_footer', function () {
 	if ( is_admin() || ! is_user_logged_in() ) {
 		return;
 	}
-	$key = trim( (string) get_option( HANJULLO_OPTION_SDK_KEY, '' ) );
-	if ( '' === $key ) {
+	if ( '' === trim( (string) get_option( HANJULLO_OPTION_SDK_KEY, '' ) ) ) {
 		return;
 	}
-	$user  = wp_get_current_user();
-	$phone = (string) get_user_meta( $user->ID, 'billing_phone', true );
-	$data  = array(
-		'id'    => hanjullo_member_external_id( $user->ID ),
-		'email' => (string) $user->user_email,
-		'phone' => $phone,
-		'name'  => (string) $user->display_name,
-	);
-	$data['token'] = hanjullo_member_token( $data['id'] );
+	$who = hanjullo_member_identity( get_current_user_id() );
+	if ( null === $who ) {
+		return;   // 토큰을 받는 중(다음 페이지부터 식별) · 키 없음 = 익명 수집
+	}
+	// 1.0.3: 회원 번호 + 토큰만 보낸다(한줄로는 브라우저가 보낸 이메일 · 전화 · 이름을 쓰지 않는다 · 페이지에 개인정보를 싣지 않는다).
 	// SDK 는 비동기 로드라 준비될 때까지 짧게 기다린다(최대 40회 × 250ms). 값은 JSON 이스케이프 · 스크립트 문맥 안전.
-	echo '<script>(function(){var d=' . wp_json_encode( $data, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT ) . ',n=0;function go(){if(window.hjl&&window.hjl.identify){try{window.hjl.identify(d.id,{email:d.email,phone:d.phone,name:d.name,member_token:d.token});}catch(e){}return;}if(n++<40){setTimeout(go,250);}}go();})();</script>' . "\n";
+	echo '<script>(function(){var d=' . wp_json_encode( $who, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT ) . ',n=0;function go(){if(window.hjl&&window.hjl.identify){try{window.hjl.identify(d.id,{member_token:d.token});}catch(e){}return;}if(n++<40){setTimeout(go,250);}}go();})();</script>' . "\n";
 }, 99 );
 
 // ─────────────────────────────────────────────────────────────
@@ -205,10 +223,10 @@ add_action( 'wp_footer', function () {
 add_action( 'admin_init', function () {
 	register_setting( 'hanjullo', HANJULLO_OPTION_SDK_KEY, array( 'type' => 'string', 'sanitize_callback' => 'sanitize_text_field', 'default' => '' ) );
 	register_setting( 'hanjullo', HANJULLO_OPTION_CONSENT_KEYS, array( 'type' => 'string', 'sanitize_callback' => 'sanitize_text_field', 'default' => HANJULLO_DEFAULT_CONSENT_KEYS ) );
-	// 비밀키 칸은 저장된 값을 화면에 다시 그리지 않는다 — 빈 칸으로 저장하면 기존 값을 그대로 둔다(지우려면 '-' 입력).
+	// 플러그인 키 칸은 저장된 값을 화면에 다시 그리지 않는다 — 빈 칸으로 저장하면 기존 값을 그대로 둔다(지우려면 '-' 입력).
 	register_setting(
 		'hanjullo',
-		HANJULLO_OPTION_SECRET,
+		HANJULLO_OPTION_PLUGIN_KEY,
 		array(
 			'type'              => 'string',
 			'default'           => '',
@@ -217,8 +235,8 @@ add_action( 'admin_init', function () {
 				if ( '-' === $value ) {
 					return '';
 				}
-				if ( '' === $value || 0 !== strpos( $value, 'sk_' ) ) {
-					return (string) get_option( HANJULLO_OPTION_SECRET, '' );
+				if ( '' === $value || 0 !== strpos( $value, 'pk_v1.' ) ) {
+					return (string) get_option( HANJULLO_OPTION_PLUGIN_KEY, '' );
 				}
 				return sanitize_text_field( $value );
 			},
@@ -287,10 +305,10 @@ function hanjullo_render_settings_page() {
 					</td>
 				</tr>
 				<tr>
-					<th scope="row"><label for="hanjullo_cdp_secret">한줄로 CDP 비밀키</label></th>
+					<th scope="row"><label for="hanjullo_plugin_key">한줄로 플러그인 키</label></th>
 					<td>
-						<input type="password" class="regular-text" id="hanjullo_cdp_secret" name="<?php echo esc_attr( HANJULLO_OPTION_SECRET ); ?>" value="" autocomplete="new-password" placeholder="<?php echo esc_attr( '' !== (string) get_option( HANJULLO_OPTION_SECRET, '' ) ? '저장됨 · 바꿀 때만 입력' : 'sk_ 로 시작하는 비밀키' ); ?>">
-						<p class="description">로그인 회원을 한줄로 고객과 잇는 데 씁니다. 이 서버 설정에만 저장되고 페이지에는 실리지 않습니다. 없으면 방문·장바구니는 익명으로만 수집됩니다. 지우려면 <code>-</code> 를 입력하고 저장하세요.</p>
+						<input type="password" class="regular-text" id="hanjullo_plugin_key" name="<?php echo esc_attr( HANJULLO_OPTION_PLUGIN_KEY ); ?>" value="" autocomplete="new-password" placeholder="<?php echo esc_attr( '' !== (string) get_option( HANJULLO_OPTION_PLUGIN_KEY, '' ) ? '저장됨 · 바꿀 때만 입력' : 'pk_v1. 로 시작하는 키' ); ?>">
+						<p class="description">로그인 회원을 한줄로 고객과 잇는 데 씁니다. 한줄로 관리 → 자사몰 연동 → 우커머스 → 이 몰 줄의 <strong>플러그인 키 복사</strong>로 받습니다. 이 몰 회원의 토큰을 받는 일만 할 수 있는 키이고, 이 서버 설정에만 저장되며 페이지에는 실리지 않습니다. 없으면 방문·장바구니는 익명으로만 수집됩니다. 지우려면 <code>-</code> 를 입력하고 저장하세요.</p>
 					</td>
 				</tr>
 				<tr>

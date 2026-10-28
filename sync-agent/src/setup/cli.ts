@@ -33,6 +33,9 @@ import { initLogger, getLogger, maskApiKey } from '../logger';
 import { AGENT_VERSION } from '../version';
 // ★ 2026-08-13 아난티 — 마법사가 어떤 콘솔에서 뜨든 한글이 깨지지 않게 exe가 스스로 코드페이지를 맞춘다.
 import { ensureUtf8Console } from './console-encoding';
+import { runValueCheck } from './value-check';
+import { valueMapSourceOf, type ValueMapTarget } from '../normalize';
+import type { ValueMaps } from '../config/schema';
 
 const DEV_MODE = process.env.DEV_MODE === 'true';
 
@@ -798,6 +801,34 @@ async function editMapping(
   return mapping;
 }
 
+// ─── Step 4 끝: 값 확인 (★ 2026-10-28 P2) ──────────────
+
+/**
+ * 매핑된 수신동의 · 탈퇴 표시 · 성별 컬럼 값 확인 — 판정 · 분류는 setup/value-check.ts(설정 편집과 같은 CT).
+ * 3단계 접속은 이미 끊었으므로 같은 설정으로 다시 잇고, 끝나면 끊는다. 접속 실패 = 건너뜀(설치 계속 · 지금 규칙).
+ */
+async function stepValueCheck(
+  dbConfig: DbConnectionConfig,
+  target: ValueMapTarget,
+  customerMapping: Record<string, string>,
+): Promise<ValueMaps | undefined> {
+  console.log('');
+  console.log('  [ 값 확인 ] 수신동의 · 탈퇴 · 성별 컬럼의 실제 값을 셉니다(첫 동기화 전 한 번).');
+  const connector = createDbConnector(dbConfig);
+  try {
+    await connector.testConnection();
+    return await runValueCheck(connector, target, customerMapping, undefined, {
+      log: (line) => console.log(line),
+      askSelect,
+    });
+  } catch (e: any) {
+    console.log(`  ⚠  값 확인 접속 실패 (${e?.message || e}). 건너뜁니다(지금 규칙대로 동기화합니다).`);
+    return undefined;
+  } finally {
+    await connector.disconnect().catch(() => { /* 종료 경로 */ });
+  }
+}
+
 // ─── Step 5: 동기화 설정 ─────────────────────────────────
 
 async function stepSyncSettings(): Promise<{
@@ -884,6 +915,32 @@ export async function startSetupCli(
         purchaseTableName: purchaseTable,
       });
 
+    // ★ 2026-10-28 P2 값 확인(같은 Step 4 안 · 단계 번호 그대로) — 첫 전체 동기화 전에 수신동의 · 탈퇴 · 성별 값을 DB 에서 세어
+    //   낱말표가 모르는 글자만 분류한다(엠티 「수신/미수신」 · 「탈퇴」). 실패 · 미지원 = 건너뜀(지금 규칙).
+    //   분류표는 저장할 접속 설정 모양 · 고객 테이블에 묶는다(엔진이 같은 함수로 맞춰 본다 · normalize valueMapSourceOf).
+    const savedDatabase: AgentConfig['database'] = {
+      type: dbConfig.type,
+      host: dbConfig.host || '',
+      port: dbConfig.port || 3306,
+      database: dbConfig.database,
+      username: dbConfig.username || '',
+      password: dbConfig.password || '',
+      queryTimeout: dbConfig.queryTimeout || 30000,
+      ssl: dbConfig.ssl === true, // ★ 2026-07-27 암호화 연결 여부 저장(설치 후 재기동에도 유지)
+      sslCaPath: dbConfig.sslCaPath,
+      oracleClient: dbConfig.oracleClient, // ★ 2026-10-14 Oracle 모드(접속 전 결정 · 재기동에도 유지)
+      delimiter: dbConfig.delimiter || ',',
+      encoding: dbConfig.encoding || 'utf-8',
+      watchMode: dbConfig.watchMode || false,
+      filePath: dbConfig.filePath,
+      sheetName: dbConfig.sheetName,
+    };
+    const valueMaps = await stepValueCheck(
+      dbConfig,
+      { table: customerTable, source: valueMapSourceOf(savedDatabase) },
+      customerMapping,
+    );
+
     // Step 5: 동기화 설정
     const { customerInterval, purchaseInterval, agentName } =
       await stepSyncSettings();
@@ -902,6 +959,7 @@ export async function startSetupCli(
     }
     console.log(`  고객 timestamp: ${customerTimestampColumn || '없음 (전체 동기화만)'}`);
     console.log(`  구매 timestamp: ${purchaseTimestampColumn || '없음 (전체 동기화만)'}`);
+    if (valueMaps) console.log(`  값 분류: ${Object.keys(valueMaps).join(' · ')} (설치 때 분류)`);
     if (customerKeyColumns.length > 0) console.log(`  고객 지정 키: ${customerKeyColumns.join(' + ')} (유일성 확인됨)`);
     if (purchaseKeyColumns.length > 0) console.log(`  구매 지정 키: ${purchaseKeyColumns.join(' + ')} (유일성 확인됨)`);
     console.log(`  동기화 주기: 고객 ${customerInterval}분 / 구매 ${purchaseInterval}분`);
@@ -924,23 +982,7 @@ export async function startSetupCli(
         apiKey,
         apiSecret,
       },
-      database: {
-        type: dbConfig.type,
-        host: dbConfig.host || '',
-        port: dbConfig.port || 3306,
-        database: dbConfig.database,
-        username: dbConfig.username || '',
-        password: dbConfig.password || '',
-        queryTimeout: dbConfig.queryTimeout || 30000,
-        ssl: dbConfig.ssl === true, // ★ 2026-07-27 암호화 연결 여부 저장(설치 후 재기동에도 유지)
-        sslCaPath: dbConfig.sslCaPath,
-        oracleClient: dbConfig.oracleClient, // ★ 2026-10-14 Oracle 모드(접속 전 결정 · 재기동에도 유지)
-        delimiter: dbConfig.delimiter || ',',
-        encoding: dbConfig.encoding || 'utf-8',
-        watchMode: dbConfig.watchMode || false,
-        filePath: dbConfig.filePath,
-        sheetName: dbConfig.sheetName,
-      },
+      database: savedDatabase,
       sync: {
         customerInterval,
         purchaseInterval,
@@ -960,6 +1002,8 @@ export async function startSetupCli(
         purchases: purchaseMapping,
         customFieldLabels,
       },
+      // ★ 2026-10-28 설치별 값 분류(없으면 칸 자체를 두지 않는다 = 지금 동작)
+      ...(valueMaps ? { valueMaps } : {}),
       agent: {
         name: agentName,
         // ★ 2026-06-11: 하드코딩('1.4.0') 제거 — 실행 파일 버전 단일 진입점 (저장 시 한 번 더 강제됨)

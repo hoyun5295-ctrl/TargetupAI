@@ -332,6 +332,14 @@ export function formatKstMonthDayTime(dateStr: string | null | undefined): strin
   });
 }
 
+/** ★ 2026-10-28 「10월 24일」 — 한국 시각 월 · 일(연동 카드 마지막 데이터 날짜 · 값 = 서버가 준 마지막 도착 시각) */
+export function formatKstMonthDay(dateStr: string | null | undefined): string {
+  if (!dateStr) return '-';
+  const d = safeParse(String(dateStr));
+  if (isNaN(d.getTime())) return String(dateStr);
+  return d.toLocaleDateString('ko-KR', { timeZone: 'Asia/Seoul', month: 'long', day: 'numeric' });
+}
+
 /**
  * KST(Asia/Seoul) 기준 오늘 날짜 YYYY-MM-DD 문자열.
  * date input value + 백엔드 buildDateRangeFilter(KST +09)와 같은 기준.

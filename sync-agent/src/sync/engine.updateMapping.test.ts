@@ -84,7 +84,7 @@ describe('SyncEngine.updateMapping (런타임 매핑 교체)', () => {
     expect(customer.custom_fields).toMatchObject({ custom_1: '2026-01-01' });
   });
 
-  it('customers만 넘기면 purchaseMapping은 건드리지 않는다', () => {
+  it('customers만 넘기면 purchaseMapping은 건드리지 않는다', async () => {
     const engine = new SyncEngine(
       makeDb([], ['HP']),
       null,
@@ -92,7 +92,8 @@ describe('SyncEngine.updateMapping (런타임 매핑 교체)', () => {
       makeConfig({ customerMapping: { HP: 'phone' }, purchaseMapping: { BUY_DT: 'purchase_date' } }),
     );
 
-    engine.updateMapping({ customers: { HP: 'phone', REG_DT: 'custom_1' } });
+    // ★ 2026-10-28 교체가 엔진 실행 한 줄에 줄 서므로(Promise) 기다린 뒤 읽는다
+    await engine.updateMapping({ customers: { HP: 'phone', REG_DT: 'custom_1' } });
 
     // 교체 후에도 구매 매핑은 그대로여야 한다(부분 갱신 안전성)
     expect(engine.getMapping().purchases).toEqual({ BUY_DT: 'purchase_date' });

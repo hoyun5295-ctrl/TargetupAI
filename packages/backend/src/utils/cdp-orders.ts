@@ -23,7 +23,7 @@ import { UserFacingError } from './http-error';
 import { query, withTransaction } from '../config/database';
 import { identifyCustomer, IdentifyInput } from './cdp-identity';
 import { trackOrderEvent, validateProperties } from './cdp-events';
-import { decideOrderRevenueAction, isCancelStatus, isRevenueStatus } from './cdp-order-revenue';
+import { decideOrderRevenueAction, isCancelStatus, isRevenueStatus, netPurchaseSql } from './cdp-order-revenue';
 import { kstDateKey } from './agency-send-state';
 import type { MemberIdFormat } from './mall-consent';
 // ★ 2026-09-26 한줄로 V2 R1-34 — 같은 주문 웹훅 직렬화(공용 잠금 CT)
@@ -75,6 +75,8 @@ export interface OrderInput {
    * 생략 = 식별 입력이 지금과 같다. ⛔ 호출부가 연동 행에서 읽은 값만 넣는다(요청 본문 값 금지).
    */
   storeCode?: string;
+  /** ★ 1028 Codex R1 #5 — 몰 서버가 비밀키로 보낸 주문(/order · /bulk-import) · 식별 연결에 서버 확인 표시 */
+  serverVerified?: boolean;
 }
 
 export interface OrderResult {
@@ -176,6 +178,8 @@ export async function syncOrder(
 
   // 1. customer + link 보장
   const identifyInput: IdentifyInput = {
+    tier: 'order',   // ★ 1028 K4 — 주문자 정보 = 빈 칸만 · 전화 교체 0(R23)
+    ...(input.serverVerified ? { serverVerified: true } : {}),   // ★ 1028 Codex R1 #5 몰 서버 비밀키 호출
     source: input.source,
     externalId: input.externalId,
     email: input.email,
@@ -203,7 +207,7 @@ export async function syncOrder(
   const outcome = await withKeyedLock('cdp-order', `${companyId}:${input.source}:${input.orderId}`, () => withTransaction(async (run): Promise<{ rfmUpdated: boolean; stale: boolean }> => {
   // 2. 같은 order_id의 기존 주문 사건 조회 — 결제 전(order_placed)이든 결제(purchase)든 한 주문 한 행
   const existingRes = await run(
-    `SELECT id, event_name, properties FROM cdp_events
+    `SELECT id, event_name, properties, occurred_at FROM cdp_events
      WHERE company_id = $1::uuid
        AND event_name IN ('purchase', 'order_placed')
        AND source = $2
@@ -224,7 +228,10 @@ export async function syncOrder(
   );
   if (verdict === 'stale') return { rfmUpdated: false, stale: true };
 
-  const decision = decideOrderRevenueAction(existing ? { properties: props } : null, input.status);
+  // ★ 1028 M22 — 차감까지 끝난 주문의 되살림 근거 = source 종류 provider + 취소를 본 시각 기록(판정이 그보다 늦은 본문만 여기까지 보냄)
+  const decision = decideOrderRevenueAction(existing ? { properties: props } : null, input.status, {
+    revivable: orderSrcKind(input.source) === 'source' && !!lastCancelRaw,
+  });
   const cancel = isCancelStatus(input.status);
   // 모르는 상태 표식 = 받아들인 쓰기마다 다시 쓴다(알려진 상태로 바뀌면 지운다 · 원문 글자 · 본 시각 · Codex 1R)
   const extra = input.statusKnown === false
@@ -237,7 +244,23 @@ export async function syncOrder(
 
   // 3-A. 결제 확정 — 매출 더하기 (마커 없는 주문만 1회) · 결제 전 행이면 그 순간 purchase 로 승격(K1-2)
   if (decision.action === 'apply') {
-    if (existing) {
+    if (existing && decision.revive) {
+      // ★ 1028 M22 — 취소 뒤 몰에서 다시 결제된 주문: 차감 표식을 걷고 다시 반영(사건 시각 = 새 결제 시각 · 도착 축은 그대로 = 여정 다시 진입 0)
+      const claim = await run(
+        `UPDATE cdp_events SET
+           occurred_at = $5::timestamptz,
+           properties = (COALESCE(properties, '{}'::jsonb) - 'revenue_reversed' ${UNKNOWN_KEYS})
+             || jsonb_build_object('revenue_applied', true, 'status', $2::text, 'total_amount', $3::numeric, 'src_at', $4::text, 'revived_at', $4::text)
+             || $8::jsonb
+         WHERE id = $1::uuid
+           AND event_name = 'purchase'
+           AND COALESCE(properties->>'revenue_reversed', '') = 'true'
+           AND ${guard(6, 7)}
+         RETURNING id`,
+        [existing.id, input.status, input.totalAmount, srcAt, paidAt, lastSrcRaw, lastCancelRaw, JSON.stringify(extra)]
+      );
+      if (claim.rows.length === 0) return { rfmUpdated: false, stale: true };
+    } else if (existing) {
       const claim = await run(
         `UPDATE cdp_events SET
            event_name = 'purchase',
@@ -304,19 +327,44 @@ export async function syncOrder(
     );
     if (claim.rows.length === 0) return { rfmUpdated: false, stale: true };
     const reverseAmount = decision.reverseAmount ?? input.totalAmount;
+    // ★ 1028 M21(K1-5) — 최근 구매일 · 금액 · 마지막 구매일이 이 주문의 날(사건 시각의 KST 날짜)이면, 남은 결제 구매(자사몰 순매출 + 싱크 원장)의
+    //   가장 늦은 날로 되돌린다(두 문 합산 = 여정의 이전 구매 판정과 같은 규칙 · 남은 것이 없으면 비움). 그 날이 아니면 그대로.
+    //   SET 의 오른쪽은 갱신 전 값을 본다 · 차감 표식은 같은 트랜잭션의 위 문장이 이미 걸어 이 주문은 남은 목록에서 빠진다.
+    const reversedDay = existing.occurred_at ? kstDateKey(new Date(existing.occurred_at)) : null;
+    // ★ 1028 Codex R1 #4 — 고객 행을 먼저 잠그고(앞 문장) 다음 문장의 새 스냅숏으로 남은 구매를 센다. 같은 고객의 다른 주문 취소가 겹치면
+    //   잠금을 기다린 뒤 그 취소가 커밋한 차감 표식을 본다(옛: 한 문장 안에서 잠금을 기다려도 계산은 시작 때 스냅숏이라 취소된 주문의 날로 되돌렸다).
+    await run(`SELECT 1 FROM customers WHERE id = $1::uuid FOR UPDATE`, [idResult.customerId]);
     await run(
-      `UPDATE customers SET
-        total_purchase_amount = GREATEST(COALESCE(total_purchase_amount, 0) - $2, 0),
-        total_purchase = GREATEST(COALESCE(total_purchase, 0) - $2, 0),
-        purchase_count = GREATEST(COALESCE(purchase_count, 0) - 1, 0),
+      `UPDATE customers c SET
+        total_purchase_amount = GREATEST(COALESCE(c.total_purchase_amount, 0) - $2, 0),
+        total_purchase = GREATEST(COALESCE(c.total_purchase, 0) - $2, 0),
+        purchase_count = GREATEST(COALESCE(c.purchase_count, 0) - 1, 0),
         avg_order_value = CASE
-          WHEN COALESCE(purchase_count, 0) - 1 > 0
-            THEN GREATEST(COALESCE(total_purchase_amount, 0) - $2, 0) / (COALESCE(purchase_count, 0) - 1)
+          WHEN COALESCE(c.purchase_count, 0) - 1 > 0
+            THEN GREATEST(COALESCE(c.total_purchase_amount, 0) - $2, 0) / (COALESCE(c.purchase_count, 0) - 1)
           ELSE 0
         END,
+        recent_purchase_date = CASE WHEN c.recent_purchase_date = $3::date THEN nr.day ELSE c.recent_purchase_date END,
+        recent_purchase_amount = CASE WHEN c.recent_purchase_date = $3::date THEN nr.amount ELSE c.recent_purchase_amount END,
+        last_purchase_date = CASE WHEN c.last_purchase_date = TO_CHAR($3::date, 'YYYY-MM-DD') THEN TO_CHAR(nr.day, 'YYYY-MM-DD') ELSE c.last_purchase_date END,
         updated_at = NOW()
-      WHERE id = $1::uuid`,
-      [idResult.customerId, reverseAmount]
+      FROM (SELECT 1) one
+      LEFT JOIN LATERAL (
+        SELECT u.day, u.amount FROM (
+          SELECT (e.occurred_at AT TIME ZONE 'Asia/Seoul')::date AS day, NULLIF(e.properties->>'total_amount', '')::numeric AS amount
+            FROM cdp_events e
+           WHERE e.company_id = $4::uuid AND e.customer_id = $1::uuid AND ${netPurchaseSql('e')}
+          UNION ALL
+          SELECT p.purchase_date::date AS day, SUM(p.total_amount) AS amount
+            FROM purchases p
+           WHERE p.company_id = $4::uuid AND p.customer_id = $1::uuid AND p.purchase_date IS NOT NULL
+           GROUP BY p.purchase_date::date
+        ) u
+        ORDER BY u.day DESC, u.amount DESC NULLS LAST
+        LIMIT 1
+      ) nr ON true
+      WHERE c.id = $1::uuid`,
+      [idResult.customerId, reverseAmount, reversedDay, companyId]
     );
     return { rfmUpdated: true, stale: false };
   }

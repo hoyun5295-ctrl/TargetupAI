@@ -20,6 +20,7 @@
  */
 
 import { UserFacingError } from '../utils/http-error';
+import { listRecentHumanSentTexts } from '../utils/human-sent-messages';
 import Anthropic from '@anthropic-ai/sdk';
 import { query } from '../config/database';
 import { getCompanyCosts, AI_MODELS, claudeRequestShape, resolveMaxTokens } from '../config/defaults';
@@ -243,26 +244,18 @@ export interface OrchestratorResult {
 
 export async function buildCompanyMemoryContext(companyId: string): Promise<string> {
   try {
-    const [companyRes, recentRes] = await Promise.all([
+    const [companyRes, recentTexts] = await Promise.all([
       query(
         `SELECT brand_name, brand_slogan, brand_description, brand_tone, business_type
          FROM companies WHERE id = $1::uuid`,
         [companyId]
       ),
-      query(
-        `SELECT DISTINCT message_content
-         FROM campaigns
-         WHERE company_id = $1 AND status = 'completed'
-           AND message_content IS NOT NULL AND LENGTH(message_content) > 30
-           AND sent_at > NOW() - INTERVAL '30 days'
-         ORDER BY message_content
-         LIMIT 10`,
-        [companyId]
-      ),
+      // ★ 2026-10-28 AI 메모리 K8-4 같은 뿌리 — 「사람이 보낸 발송」 CT 하나(AI 문안이 회사 예시로 되먹지 않게)
+      listRecentHumanSentTexts(companyId, { days: 30, limit: 10 }),
     ]);
 
     const company = companyRes.rows[0] || {};
-    const recentMessages: string[] = recentRes.rows.map((r: any) => r.message_content);
+    const recentMessages: string[] = recentTexts;
 
     // ★ D181 (2026-05-19) — Anthropic Memory 패턴 박음: ai_company_memory 박은 영역 박음
     const memoryContext = await buildCompanyMemoryPromptContext(companyId, 30).catch((err) => {
@@ -594,6 +587,8 @@ async function _orchestrateImpl(ctx: AgentContext): Promise<OrchestratorResult> 
       // ★ 2026-10-19 B-1005-1① — 혜택 근거 = 사용자 글자(목표 문장 · 답)만. 옛: 답이 없는 요청은 목표 문장에 붙인 회사 AI 메모리 ·
       //   계절 힌트 · 대상 블록까지 근거와 혜택 감지에 들어가 지난 학습의 수치가 이번 혜택처럼 쓰일 수 있었다(문맥으로는 그대로 간다).
       licenseText: ctx.benefitLicense ?? licenseText ?? ctx.objective,   // ★ 1024 자동 마케팅 회차 = 사람 칸만
+      // ★ 2026-10-28 AI 메모리 설계 K4-4 — 목적 코드(운영자 대상 힌트) = 종류 판정 순서의 둘째(성격 · 목소리 묶음만)
+      purpose: { operatorTargetHint: ctx.targetHint ?? null },
       ...(ctx.cVariant ? { cVariant: ctx.cVariant } : {}),
     }
   );
@@ -921,6 +916,7 @@ async function _orchestrateWithAIImpl(ctx: AgentContext): Promise<OrchestratorRe
             // ★ D225+ Brand Voice Learning — 회사별 가이드라인 자동 주입
             companyId: ctx.companyId,
             licenseText: ctx.benefitLicense ?? licenseTextAI ?? ctx.objective,   // ★ 1019 B-1005-1① 근거 = 사용자 글자만(계절 힌트 제외) · ★ 1024 자동 마케팅 = 사람 칸만
+            purpose: { operatorTargetHint: ctx.targetHint ?? null },   // ★ 2026-10-28 K4-4 목적 코드
             ...(ctx.cVariant ? { cVariant: ctx.cVariant } : {}),
           }
         );

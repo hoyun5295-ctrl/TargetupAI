@@ -24,6 +24,17 @@ const HASH_LENGTH = 8;
 const HASH_ALPHABET = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
 const SHORT_URL_BASE = (process.env.SHORT_URL_BASE || 'https://app.hanjul.ai/c').replace(/\/+$/, '');
 
+/**
+ * ★ 2026-10-28 B-1028-1 — 담당자 링크 경로(토큰이 # 뒤 · 문자로 담당자에게만 간다). 단축 주소 클릭이 이 경로면 고객 클릭이 아니다 =
+ *   cdp_events 에 기록하지 않는다(토큰이 든 원래 주소가 회사 이벤트 조회로 새지 않게 · 발송 시각 학습 등 고객 클릭 통계에 섞이지 않게).
+ *   옛: 이동 처리의 정규식이 승인 링크 둘(충전 · 대행)만 알아 자동마케팅 멈춤 링크는 기록됐다. 새 담당자 링크 = 이 목록에 같은 커밋으로(계약 시험이 원천에서 뽑아 대조).
+ */
+export const MANAGER_LINK_PATHS = ['charge-approve', 'agency-approve', 'autosend-stop', 'journey-pause', 'planner-confirm', 'planner-recheck'] as const;
+const MANAGER_LINK_RE = new RegExp(`/(?:${MANAGER_LINK_PATHS.join('|')})(?:#|\\?|$)`);
+export function isManagerLinkUrl(fullUrl: string): boolean {
+  return MANAGER_LINK_RE.test(String(fullUrl || ''));
+}
+
 function generateHash(): string {
   const bytes = randomBytes(HASH_LENGTH);
   let hash = '';

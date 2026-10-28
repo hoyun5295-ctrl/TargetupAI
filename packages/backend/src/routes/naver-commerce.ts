@@ -17,16 +17,12 @@
  *   실제 연동 업체만 SDK 연동 담당자가 개별 안내. 담당자는 서버에서 `curl -s https://api.ipify.org`로 확인.
  */
 
-import { Router, Request, Response, json } from 'express';
+import { Router, Request, Response } from 'express';
 import { authenticate } from '../middlewares/auth';
 import { query } from '../config/database';
-import { deliverWebhookToCompanies, extractWebhookResource } from '../utils/cdp-webhook-delivery';
 import {
   connectNaverCommerce,
   getNaverCommerceIntegration,
-  getNaverCommerceIntegrationsByStoreId,
-  verifyNaverCommerceWebhookSignature,
-  naverSmartStoreAdapter,
   fetchRecentNaverOrdersPreview,
 } from '../utils/naver-commerce-client';
 import { isCdpEnabledForPlan } from '../utils/cdp-auth';
@@ -34,60 +30,11 @@ import { isCdpEnabledForPlan } from '../utils/cdp-auth';
 import { describeJsonShape } from '../utils/json-shape';
 
 import { publicErrorText, respondUserError } from '../utils/http-error';
+import { storeCodeForConnect } from '../utils/integration-scope';   // ★1028 N6 연결 분류코드
 const router = Router();
 
-// ════════════════════════════════════════════════════════════════════
-// Webhook receiver (인증 미들웨어 전 — 서명 + idempotency_key로 자체 검증)
-// ════════════════════════════════════════════════════════════════════
-
-router.post(
-  '/webhook',
-  json({ limit: '1mb', verify: (req: any, _res, buf) => { req.rawBody = buf; } }),
-  async (req: Request, res: Response) => {
-    try {
-      const event = (req.headers['x-naver-event']) as string | undefined;
-      const signature = (req.headers['x-naver-signature']) as string | undefined;
-      const storeId = (req.headers['x-naver-store-id'] || req.body?.store_id || req.body?.resource?.store_id) as string | undefined;
-
-      if (!event || !storeId) {
-        return res.status(400).json({ success: false, error: 'X-Naver-Event 또는 store_id가 누락되었습니다.' });
-      }
-
-      // ★ 2026-09-27 한줄로 V2 R098 같은 뿌리 — 같은 스토어가 여러 회사에 연동돼 있으면 서명이 맞는 회사 전부에게 전달한다.
-      const integrations = await getNaverCommerceIntegrationsByStoreId(String(storeId));
-      if (integrations.length === 0) {
-        console.warn('[NaverCommerce Webhook] 미연동 store_id, 무시:', storeId);
-        return res.status(404).json({ success: false, error: '연동된 store_id가 없습니다.' });
-      }
-
-      const rawBody = (req as any).rawBody || JSON.stringify(req.body);
-      const targets = integrations.filter((i) => verifyNaverCommerceWebhookSignature(rawBody, signature || '', i.webhookSecret));
-      if (targets.length === 0) {
-        console.warn('[NaverCommerce Webhook] 서명 검증 실패, store=', storeId);
-        return res.status(401).json({ success: false, error: '서명 검증에 실패했습니다.' });
-      }
-
-      const resource = extractWebhookResource('naver_smart_store', req.body || {});
-      const idempotencyKey = naverSmartStoreAdapter.buildIdempotencyKey(event, resource, req.body || {});
-
-      // 기록 → 즉시 200 → 처리는 뒤(★ 2026-10-27 자사몰 대비 K2-5)
-      const outcome = await deliverWebhookToCompanies({
-        source: 'naver_smart_store',
-        companyIds: targets.map((i) => i.companyId),
-        event,
-        idempotencyKey,
-        payload: req.body || {},
-        mallId: String(storeId),
-        logTag: 'NaverCommerce',
-      });
-      if (outcome.recorded === 0 && outcome.duplicate > 0) return res.json({ success: true, duplicate: true });
-      return res.json({ success: true });
-    } catch (err: any) {
-      console.error('[NaverCommerce Webhook] 오류:', err);
-      return res.status(500).json({ success: false, error: publicErrorText(err, 'webhook 처리 실패') });
-    }
-  }
-);
+// ★ 2026-10-28 자사몰 대비 K15 · M19 — 웹훅 수신 주소 삭제. 네이버 커머스는 조회형(웹훅 규격 없음)이고 옛 주소는 지어낸 헤더
+//   (X-Naver-Event · X-Naver-Signature)와 이벤트 이름을 받았다(R15 · 쓰는 몰 0). 주문 · 회원은 자격 연결 뒤 조회로만 받는다.
 
 // ════════════════════════════════════════════════════════════════════
 // 회사 admin 인증 endpoint
@@ -136,7 +83,8 @@ router.post('/connect', async (req: Request, res: Response) => {
       return res.status(400).json({ success: false, error: '애플리케이션 ID(client_id)와 시크릿(client_secret)을 모두 입력해주세요.' });
     }
 
-    const { tokenExpiresAt } = await connectNaverCommerce(companyId, storeId, { clientId, clientSecret });
+    const storeCode = await storeCodeForConnect(req.user, req.body?.store_code);   // ★1028 N6 분류코드 회사 = 매장 고르기(모드 판정 = 저장 CT)
+    const { tokenExpiresAt } = await connectNaverCommerce(companyId, storeId, { clientId, clientSecret }, storeCode);
     return res.json({
       success: true,
       message: '네이버 스마트스토어 연동이 완료되었습니다.',

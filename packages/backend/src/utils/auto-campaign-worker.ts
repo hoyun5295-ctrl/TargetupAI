@@ -27,6 +27,7 @@
  */
 
 import { isDemoCompany } from './demo-company';   // ★ 2026-10-09 시연 회사 = 옛 자동발송 0
+import { runWithRegenBudget, generationSlotsLeft } from './copy-exit-guards';
 import { storeMembershipClause } from './store-scope';
 import { resolveConsentScope, consentSql, brandConsentOption } from './mall-consent';
 import { query } from '../config/database';
@@ -190,7 +191,7 @@ async function runMessageGeneration(): Promise<void> {
       }
 
       try {
-        await generateMessageForAutoCampaign(ac);
+        await runWithRegenBudget(() => generateMessageForAutoCampaign(ac));   // ★ 2026-10-28 K12-2 한 회차 = 생성 호출 상한 하나
       } catch (genErr) {
         // 실패 시 잠금 해제 (다음 tick에서 재시도 가능)
         await query('UPDATE auto_campaigns SET generating_at = NULL WHERE id = $1', [ac.id]);
@@ -291,6 +292,8 @@ async function generateMessageForAutoCampaign(ac: any): Promise<void> {
       // ★ 2026-10-23 혜택 근거 = 담당자가 적은 컨셉 글만(설계서 docs/2026-10-23-oneline-ct-complete-design.md C2 · 1005 한 줄 입구와 같은 원칙).
       //   브랜드 소개 · 슬로건의 옛 행사 혜택은 근거가 아니다 → 컨셉에 없는 혜택은 자리표시가 되고 발송 길목이 그 회차를 멈춘다.
       licenseText: ac.ai_prompt || ac.campaign_name,
+      // ★ 2026-10-28 AI 메모리 설계 K1-4 — 날짜 기준일 = 이 회차 발송일(D-1 에 만들어도 「내일」 · 「오늘만」이 발송일 기준)
+      ...(ac.next_run_at ? { baseDate: new Date(ac.next_run_at) } : {}),
     };
 
     const aiResult = await generateMessages(ac.ai_prompt || ac.campaign_name, targetInfo, extraContext);
@@ -335,6 +338,8 @@ async function generateMessageForAutoCampaign(ac: any): Promise<void> {
             firstRecipient,
             regenerateCallback: async (blockedVariantId: string) => {
               try {
+                // ★ 2026-10-28 K12-2 — 안쪽 품질 재생성과 같은 회차 예산(곱해져 6번까지 부르던 길을 닫는다)
+                if (generationSlotsLeft() <= 0) { console.log(`${logPrefix} 회차 생성 예산 소진 — 재생성 안 함`); return null; }
                 console.log(`${logPrefix} 스팸 차단 variant ${blockedVariantId} 재생성`);
                 const regenResult = await generateMessages(
                   (ac.ai_prompt || ac.campaign_name) + '\n(이전 문안이 스팸필터에 차단되었습니다. 다른 표현으로 작성해주세요.)',
@@ -1338,7 +1343,7 @@ async function runPreSendSpamTest(): Promise<void> {
     console.log(`${logPrefix} D-day 스팸테스트 대상 ${result.rows.length}건`);
 
     for (const ac of result.rows) {
-      await executePreSendSpamTest(ac);
+      await runWithRegenBudget(() => executePreSendSpamTest(ac));   // ★ 2026-10-28 K12-2 한 회차 = 생성 호출 상한 하나
     }
   } catch (err: any) {
     console.error(`${logPrefix} 스팸테스트 워커 에러:`, err);
@@ -1359,7 +1364,7 @@ async function executePreSendSpamTest(ac: any): Promise<void> {
     if (ac.ai_generate_enabled && !ac.generated_message_content) {
       console.log(`${logPrefix} generated_message_content 없음 — D-day 2h 전 AI 생성 시도 (24h 미만 등록 fallback)`);
       try {
-        await generateMessageForAutoCampaign(ac);
+        await generateMessageForAutoCampaign(ac);   // ★ 2026-10-28 K12-2 바깥(executePreSendSpamTest)이 이미 회차 예산 안
         // 재조회하여 최신 generated_message_content 확보
         const refreshed = await query('SELECT * FROM auto_campaigns WHERE id = $1', [ac.id]);
         if (refreshed.rows[0]) Object.assign(ac, refreshed.rows[0]);
@@ -1414,6 +1419,8 @@ async function executePreSendSpamTest(ac: any): Promise<void> {
       maxRetries: 2, // ★ Harold님 정책: 통과까지 재시도
       regenerateCallback: async (blockedVariantId: string) => {
         try {
+          // ★ 2026-10-28 K12-2 — 안쪽 품질 재생성과 같은 회차 예산
+          if (generationSlotsLeft() <= 0) { console.log(`${logPrefix} 회차 생성 예산 소진 — 재생성 안 함`); return null; }
           console.log(`${logPrefix} 스팸 차단 — 새 문안 재생성 (variant ${blockedVariantId})`);
           // 1단계와 동일 패턴: 회사 정보 조회 + extraContext 구성 + generateMessages 호출
           const companyResult = await query(
@@ -1462,6 +1469,8 @@ async function executePreSendSpamTest(ac: any): Promise<void> {
               personalizationVars,
               // ★ 2026-10-23 혜택 근거 = 컨셉 글만(위 1단계와 같은 값 · C2)
               licenseText: ac.ai_prompt || ac.campaign_name,
+              // ★ 2026-10-28 K1-4 날짜 기준일 = 이 회차 발송일(위 1단계와 같은 값)
+              ...(ac.next_run_at ? { baseDate: new Date(ac.next_run_at) } : {}),
             }
           );
           if (regenResult.variants?.length > 0) {

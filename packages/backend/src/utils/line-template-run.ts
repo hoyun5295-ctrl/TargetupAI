@@ -8,6 +8,7 @@
  * ⛔ 품질 관문에 걸리면 던진다(호출부 = 차감 전 실패 · 500). 관문은 조립 함수의 계약이라 걸리면 코드 결함이다.
  */
 import { randomUUID } from 'crypto';
+import { voiceLearned } from './brand-voice-prompt';
 import { formatLinePeriodEnd } from './one-line-steps';
 import { getBrandBasicInfo } from './brand-basic-info';
 import { sanitizeLineUrl } from './one-line-steps';
@@ -141,6 +142,8 @@ export async function draftLineTemplate(input: LineTemplateRunInput, ai: { userI
  */
 export async function lineCopyExemplars(companyId: string, channel: LineChannel): Promise<string | null> {
   try {
+    // ★ 2026-10-28 AI 메모리 설계 K11-3 — 목소리 회사 = 다른 브랜드 예시 0(자기 대표 문안 뼈대는 생산자의 목소리 CT 가 싣는다) · 목소리 없는 회사 = 지금 그대로
+    if (await voiceLearned(companyId)) return null;
     const basic = await getBrandBasicInfo(companyId).catch(() => null);
     const source = await loadOutreachExemplarSource();
     const r = pickOutreachExemplarsDetail(channel === 'dm' ? 'DM' : 'EMAIL', String(basic?.industry_code || '') || null, { source, max: 3, budget: 2400 });

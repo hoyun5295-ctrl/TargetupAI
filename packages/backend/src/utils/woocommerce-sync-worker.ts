@@ -18,9 +18,12 @@
 import { query } from '../config/database';
 import {
   syncWooOrdersSince, enqueueWooBackfill, ensureWooWebhooks, startWooOrderReread, removeWooWebhooks, listWooWebhookCleanupTargets,
-  runWooMemberRereadPass, WooApiError, DEFAULT_BACKFILL_DAYS, MAX_SYNC_ORDERS,
+  runWooMemberRereadPass, WooApiError, DEFAULT_BACKFILL_DAYS, MAX_SYNC_ORDERS, wooWebhookOwner,
 } from './woocommerce-client';
-import { isCdpEnabledForPlan } from './cdp-auth';
+import { cdpFactCollectGate } from './cdp-auth';
+
+/** 몰 회원 · 주문 = 사실 경로(★1028 K7 요금제가 활성에서 빠진 뒤 90일까지 받고 멈춤) */
+const factAllowed = async (companyId: string): Promise<boolean> => (await cdpFactCollectGate(companyId)).allowed;
 
 /** 주기 — 몰 서버(공유 호스팅일 수 있다)에 몰아치지 않는다. */
 const SYNC_INTERVAL_MS = 30 * 60 * 1000;
@@ -130,7 +133,7 @@ export async function runWooSyncPass(): Promise<WooSyncPassResult> {
       // REST 키 없는 몰 = 웹훅 전용 — 당겨올 길이 없다. 실패로 남기지 않고 건너뛴다(원칙 6).
       if (!row.meta?.woo_consumer_key || !row.meta?.woo_consumer_secret) { result.skipped++; continue; }
       // 요금제 게이트 — 연결 라우트와 같은 기준
-      if (!(await isCdpEnabledForPlan(row.company_id))) { result.skipped++; continue; }
+      if (!(await factAllowed(row.company_id))) { result.skipped++; continue; }
 
       // ★0921 그 몰의 연결이 시작시킨(requested) 가져오기가 안 끝났으면(실패·서버 재시작) 줄 세워 이어 간다.
       //   워커가 스스로 시작하지 않는다 — 요청 없는 몰(상태 없음 · requested 아님)은 건드리지 않고 아래 주기 수집만 돈다
@@ -175,7 +178,7 @@ export async function runWooSyncPass(): Promise<WooSyncPassResult> {
 
       // ★ 2026-10-01 우리 웹훅 4개 점검 — 없으면 만들고 꺼졌으면(disabled) 다시 켠다. 쓰기 권한 키(1클릭 연결)만.
       //   실패는 수집 성공을 뒤집지 않는다(웹훅이 꺼져도 이 주기 수집이 안전망으로 돈다).
-      if (String(row.meta?.woo_key_permissions || '').includes('write')) {
+      if (wooWebhookOwner(row.meta?.woo_key_permissions) === 'auto') {   // ★1028 M11 판정 한 곳(화면 응답과 같다)
         try {
           const wh = await ensureWooWebhooks(row.company_id, row.mall_id);
           if (wh.created + wh.reactivated > 0) {
@@ -228,7 +231,7 @@ async function rereadTick(): Promise<void> {
   if (rereadRunning) return;
   rereadRunning = true;
   try {
-    const n = await runWooMemberRereadPass(isCdpEnabledForPlan);
+    const n = await runWooMemberRereadPass(factAllowed);
     if (n > 0) console.log(`[Woo Reread] 회원 재대조 ${n}몰`);
   } catch (err) {
     console.error('[Woo Reread] 회차 오류:', err);

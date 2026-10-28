@@ -27,6 +27,7 @@ import {
   buildCafe24AuthorizeUrl,
   exchangeCafe24Code,
   saveCafe24Integration,
+  registerCafe24AllowedOrigins,
   getCafe24Integration,
   getCafe24IntegrationsByMallId,
   verifyCafe24WebhookSignature,
@@ -38,7 +39,10 @@ import {
 import { ensureCafe24ScriptTag, removeCafe24ScriptTag } from '../utils/cafe24-scripttag';
 import { signCafe24InstallState, verifyCafe24InstallState } from '../utils/cafe24-install-state';
 
-import { publicErrorText, respondUserError } from '../utils/http-error';
+import { publicErrorText, respondUserError, UserFacingError } from '../utils/http-error';
+import { releaseMallAllowedOrigins } from '../utils/mall-origins';   // ★1028 K12
+import { stashPendingApproval, confirmPendingApproval, approvalConfirmUrl } from '../utils/oauth-pending';   // ★1028 M24
+import { storeCodeForConnect } from '../utils/integration-scope';   // ★1028 N6 연결 분류코드
 const router = Router();
 
 // ════════════════════════════════════════════════════════════════════
@@ -159,6 +163,7 @@ router.get('/oauth/authorize', async (req: Request, res: Response) => {
       return res.status(400).json({ success: false, error: 'mall_id 형식이 올바르지 않습니다.' });
     }
 
+    const storeCode = await storeCodeForConnect(req.user, req.query.store_code);   // ★1028 N6 분류코드(확정 때 그 값으로 저장)
     const csrfNonce = randomBytes(16).toString('hex');
     // state 저장 (10분 TTL — Phase 2에서 Redis 검토)
     await query(
@@ -170,7 +175,7 @@ router.get('/oauth/authorize', async (req: Request, res: Response) => {
       ON CONFLICT (company_id, source, idempotency_key) DO UPDATE SET
         payload = EXCLUDED.payload,
         created_at = NOW()`,
-      [companyId, `state:${csrfNonce}`, JSON.stringify({ mall_id: mallId, nonce: csrfNonce })]
+      [companyId, `state:${csrfNonce}`, JSON.stringify({ mall_id: mallId, nonce: csrfNonce, store_code: storeCode })]
     );
 
     const state = Buffer.from(JSON.stringify({ company_id: companyId, nonce: csrfNonce, ts: Date.now() })).toString('base64url');
@@ -179,6 +184,7 @@ router.get('/oauth/authorize', async (req: Request, res: Response) => {
     return res.json({ success: true, authorize_url: authorizeUrl });
   } catch (err: any) {
     console.error('[Cafe24 /oauth/authorize] 오류:', err);
+    if (respondUserError(res, err)) return;   // ★1028 N6 분류코드 거절(고객 문장)
     return res.status(500).json({ success: false, error: publicErrorText(err, 'authorize URL 생성 실패') });
   }
 });
@@ -195,6 +201,38 @@ router.get('/oauth/callback', (_req: Request, res: Response) => {
   // 이 경로는 callbackRouter (아래)가 먼저 매칭되어야 정합.
   // 만약 본 핸들러에 도달했다면 라우터 등록 순서 오류.
   return res.status(500).send('카페24 OAuth callback 라우터 등록 순서 오류. 운영 점검 필요.');
+});
+
+/**
+ * POST /api/cafe24/oauth/confirm  body { confirm }
+ * ★ 2026-10-28 자사몰 대비 M24 — 승인 콜백이 담아 둔 미확정 토큰을 로그인된 회사 관리자가 확정한다(JWT 회사 = 승인을 시작한 회사 · 확정 표 = 콜백을 받은 브라우저만).
+ */
+router.post('/oauth/confirm', async (req: Request, res: Response) => {
+  try {
+    const companyId = req.user?.companyId;
+    if (!companyId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
+    if (req.user?.userType !== 'company_admin') return res.status(403).json({ success: false, error: '카페24 연동은 회사 관리자만 가능합니다.' });
+    // 승인 행 잠금 → 풀기 → 연동 저장 → 승인 행 지우기(한 트랜잭션 · 저장이 실패하면 승인 행이 남아 다시 확정할 수 있다)
+    const done = await confirmPendingApproval(companyId, 'cafe24', String(req.body?.confirm || ''), async (state, pending, run) => {
+      const mall = String(state.mall_id || '');
+      if (!mall) throw new UserFacingError(400, 'OAUTH_CONFIRM_INVALID', '승인 상태가 올바르지 않아요. 자사몰 연동에서 다시 연결해 주세요.');
+      await saveCafe24Integration(companyId, mall, pending, null, typeof state.store_code === 'string' ? state.store_code : null, run);
+      return mall;
+    });
+    if (!done) return res.status(400).json({ success: false, error: '승인 확인 시간이 지났거나 이 계정이 시작한 연결이 아니에요. 자사몰 연동에서 다시 연결해 주세요.', code: 'OAUTH_CONFIRM_INVALID' });
+    const mallId = done.result;
+    await registerCafe24AllowedOrigins(companyId, mallId);   // 커밋 뒤(K12 · 확정 트랜잭션 밖)
+    // ★ 2026-07-03 B-2: 연동 성공 직후 SDK scripttag 자동삽입 (fire-and-forget — 실패해도 연동은 성공).
+    //   mall.write_application scope(B-1) 필요 — 재연동 후에만 성공. raw 응답은 [Cafe24 ScriptTag] 로그로 실측.
+    ensureCafe24ScriptTag(companyId, mallId).catch((e: any) =>
+      console.log('[Cafe24 confirm] scripttag 자동삽입 실패(연동은 성공):', e?.message || e),
+    );
+    return res.json({ success: true, mall_id: mallId });
+  } catch (err: any) {
+    console.error('[Cafe24 /oauth/confirm] 오류:', err);
+    if (respondUserError(res, err)) return;   // 분류코드 모드 거절(409 · 고객 문장)
+    return res.status(500).json({ success: false, error: publicErrorText(err, '카페24 연결 확정 실패') });
+  }
 });
 
 /**
@@ -218,7 +256,8 @@ router.post('/byo-credentials', async (req: Request, res: Response) => {
       return res.status(400).json({ success: false, error: 'client_id / client_secret을 모두 입력해주세요.' });
     }
 
-    await saveCafe24ByoCredentials(companyId, mallId, clientId, clientSecret);
+    const storeCode = await storeCodeForConnect(req.user, req.body?.store_code);   // ★1028 N6
+    await saveCafe24ByoCredentials(companyId, mallId, clientId, clientSecret, storeCode);
     return res.json({ success: true });
   } catch (err: any) {
     console.error('[Cafe24 /byo-credentials] 오류:', err);
@@ -244,7 +283,7 @@ router.get('/status', async (req: Request, res: Response) => {
       //   **토큰이 만료된 연동과 아예 연결한 적 없는 상태가 화면에서 같아 보였다**(둘 다 "아직 연결 전").
       //   `status='token_expired'`는 refresh 실패 시 cafe24-client가 기록하는 실값이다 — 재연결이 필요한 상태이므로
       //   화면이 그것을 '조치 필요'로 말할 수 있어야 한다. `connected`는 그대로 false(기존 소비처 무영향).
-      return res.json({ success: true, connected: false, status: integration?.status ?? null });
+      return res.json({ success: true, connected: false, status: integration?.status ?? null, mall_id: integration?.mallId ?? null });   // ★1028 N3 재연결 미리 채움
     }
     return res.json({
       success: true,
@@ -277,12 +316,17 @@ router.delete('/disconnect', async (req: Request, res: Response) => {
       removeCafe24ScriptTag(companyId, integ.mallId).catch(() => {});
     }
 
-    await query(
+    const revoked = await query(
       `UPDATE company_integrations
        SET status = 'revoked', updated_at = NOW()
-       WHERE company_id = $1::uuid AND provider = 'cafe24'`,
+       WHERE company_id = $1::uuid AND provider = 'cafe24'
+       RETURNING mall_id`,
       [companyId]
     );
+    // ★ 1028 K12 — 그 몰들이 넣은 수집 허용 도메인만 뺀다(손 등록 · 다른 몰 값 불변 · 실패해도 해제는 그대로)
+    for (const r of revoked.rows) {
+      await releaseMallAllowedOrigins(companyId, 'cafe24', r.mall_id).catch((e: any) => console.warn(`[Cafe24 /disconnect] 수집 허용 도메인 정리 실패 mall=${r.mall_id}: ${e?.message || e}`));
+    }
     return res.json({ success: true });
   } catch (err: any) {
     console.error('[Cafe24 /disconnect] 오류:', err);
@@ -375,23 +419,11 @@ cafe24CallbackRouter.get('/oauth/callback', async (req: Request, res: Response) 
     // 토큰 교환 — 회사 self-app 자격(없으면 env)으로
     const byoCreds = await getCafe24ByoCredentials(parsed.company_id, mallId);
     const tokenRes = await exchangeCafe24Code(mallId, code, byoCreds);
-    await saveCafe24Integration(parsed.company_id, mallId, tokenRes);
 
-    // ★ 2026-07-03 B-2: 연동 성공 직후 SDK scripttag 자동삽입 (fire-and-forget — 실패해도 연동은 성공).
-    //   mall.write_application scope(B-1) 필요 — 재연동 후에만 성공. raw 응답은 [Cafe24 ScriptTag] 로그로 실측.
-    ensureCafe24ScriptTag(parsed.company_id, mallId).catch((e: any) =>
-      console.log('[Cafe24 callback] scripttag 자동삽입 실패(연동은 성공):', e?.message || e),
-    );
-
-    // state 정리
-    await query(
-      `DELETE FROM cdp_webhook_deliveries
-       WHERE company_id = $1::uuid AND source = 'cafe24'
-         AND webhook_event = 'oauth_state' AND idempotency_key = $2`,
-      [parsed.company_id, `state:${parsed.nonce}`]
-    );
-
-    return res.send(renderCafe24CallbackHtml('ok', `${mallId} 카페24 연동이 완료되었습니다. 본 창을 닫고 한줄로AI로 돌아가주세요.`));
+    // ★ 2026-10-28 자사몰 대비 M24 — 연동 행에 바로 넣지 않는다(콜백엔 로그인 정보가 없다 · 남이 시작한 승인 링크를 몰 주인이 누르면 그 몰이 남의 회사에 묶였다).
+    //   미확정으로 담고(암호문 · 그 승인 행) 로그인된 화면으로 돌려보낸다 → 화면이 그 회사 관리자로 확정해야 저장 · 스크립트 설치(POST /oauth/confirm).
+    const confirm = await stashPendingApproval(parsed.company_id, 'cafe24', parsed.nonce, tokenRes);
+    return res.redirect(302, approvalConfirmUrl('cafe24', confirm));
   } catch (err: any) {
     console.error('[Cafe24 callback] 오류:', err);
     return res.status(500).send(renderCafe24CallbackHtml('error', publicErrorText(err, '카페24 연동 처리 중 오류가 발생했습니다.')));

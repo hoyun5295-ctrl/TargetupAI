@@ -75,19 +75,24 @@ describe('R127 · R241 이미지 스튜디오 저장', () => {
   });
 });
 
-describe('R245 비회원 주문 외부 id', () => {
-  it('CT(행동) — 회원 → guest:휴대폰 → order:주문번호', async () => {
-    const { orderExternalId } = await import('../cdp-order-identity');
-    expect(orderExternalId('m1', '010-1', 'o1')).toBe('m1');
-    expect(orderExternalId('', '010-1111-2222', 'o1')).toBe('guest:010-1111-2222');
-    expect(orderExternalId(null, '', 'o1')).toBe('order:o1');
-    expect(orderExternalId(undefined, undefined, 'o2')).toBe('order:o2');
+describe('R245 비회원 주문 외부 id (★1028 K9 — CT 가 mallScopedIds 로 합쳐짐 · 몰 접두)', () => {
+  it('CT(행동) — 회원 → guest:휴대폰 → order:주문번호 · 옛 행(접두 없음) = 지금 글자 · 새 행 = 몰 접두 · 우커머스 = `{몰}:`', async () => {
+    const { mallScopedIds } = await import('../integration-row');
+    const old = { provider: 'cafe24', mallId: 'shop1', idPrefix: null };
+    expect(mallScopedIds(old, { memberId: 'm1', phone: '010-1', orderId: 'o1' }).externalId).toBe('m1');
+    expect(mallScopedIds(old, { memberId: '', phone: '010-1111-2222', orderId: 'o1' }).externalId).toBe('guest:010-1111-2222');
+    expect(mallScopedIds(old, { memberId: null, phone: '', orderId: 'o1' }).externalId).toBe('order:o1');
+    expect(mallScopedIds(old, { orderId: 'o2' })).toEqual({ memberExternalId: '', externalId: 'order:o2', orderId: 'o2' });
+    expect(mallScopedIds({ ...old, idPrefix: 'shop1:' }, { memberId: 'm1', orderId: 'o1' })).toEqual({ memberExternalId: 'shop1:m1', externalId: 'shop1:m1', orderId: 'shop1:o1' });
+    expect(mallScopedIds({ provider: 'woocommerce', mallId: 'w.example' }, { memberId: 7, orderId: 9 })).toEqual({ memberExternalId: 'w.example:7', externalId: 'w.example:7', orderId: 'w.example:9' });
   });
-  it('아임웹·카페24(2)·네이버·고도몰이 CT를 쓴다', () => {
-    expect(src('imweb-client.ts')).toContain('externalId: orderExternalId(resource.memberUid || resource.member_uid, resource.call || resource.mobile || resource.phone, resource.orderNo || resource.order_no),');
-    expect((src('cafe24-client.ts').match(/externalId: orderExternalId\(resource\.member_id \|\| resource\.customer_id, resource\.buyer_cellphone \|\| resource\.buyer_phone, resource\.order_id\),/g) || []).length).toBe(2);
-    expect(src('naver-commerce-client.ts')).toContain('externalId: orderExternalId(resource.member_id || resource.customer_id, resource.buyer_cellphone || resource.phone, resource.order_id || resource.product_order_id),');
-    expect(src('godo-parse.ts')).toContain('const externalId = orderExternalId(memId, phone, orderId);');
+  it('아임웹 · 카페24 · 고도몰 · 자체호스팅이 CT 를 쓴다(옛 CT 파일 없음)', () => {
+    expect(src('imweb-client.ts')).toContain('const ids = mallScopedIds(ctx.idScope, { memberId: memberUid, phone, orderId: orderNo });');
+    expect(src('cafe24-client.ts')).toContain('const ids = mallScopedIds(ctx.idScope, { memberId: resource.member_id || resource.customer_id, phone: resource.buyer_cellphone || resource.buyer_phone, orderId: resource.order_id });');
+    expect((src('cafe24-client.ts').match(/\.\.\.cafe24OrderIds\(ctx, resource\),/g) || []).length).toBe(2);
+    expect(src('godo-parse.ts')).toContain('const ids = mallScopedIds(scope, { memberId: memId, phone, orderId: orderNo });');
+    expect(src('custom-self-hosted-adapter.ts')).toContain('mallScopedIds(ctx.idScope,');
+    expect(() => src('cdp-order-identity.ts')).toThrow();
   });
 });
 

@@ -205,9 +205,9 @@ describe('K1-2 여정 중복 진입 두 겹(실제 진입 기록 = __entry.src t
 });
 
 describe('K9 SC1 분류코드 모드 — 한 회사 몰은 모두 분류코드 · 또는 모두 없음(만드는 순간 · 해제 행 포함)', () => {
-  const runWith = (coded: number, plain: number, status?: string | null) => vi.fn(async (sql: string) => {
+  const runWith = (coded: number, plain: number, status?: string | null, rowCode?: string | null) => vi.fn(async (sql: string) => {
     if (sql.includes('pg_advisory_xact_lock')) return { rows: [] };
-    if (sql.startsWith('SELECT status FROM company_integrations')) return { rows: status === undefined ? [] : [{ status }] };
+    if (sql.startsWith('SELECT status')) return { rows: status === undefined ? [] : [{ status, store_code: rowCode ?? null }] };
     return { rows: [{ coded, plain }] };
   });
   it('분류코드 몰이 있는 회사에 분류코드 없는 새 몰 = 거절(관리자도) · 반대도 거절 · 같은 모드 = 통과', async () => {
@@ -233,6 +233,11 @@ describe('K9 SC1 분류코드 모드 — 한 회사 몰은 모두 분류코드 �
     const existing = runWith(1, 0, 'active');
     await expect(guardIntegrationMode(existing as any, CO, 'cafe24', 'mall', null)).resolves.toBeUndefined();
     expect(existing.mock.calls.length).toBe(2);   // 잠금 + 행 조회 · 판정 문장 0
+    // ★1028 N6 — 살아 있는 몰을 다른 분류코드로 다시 연결 = 거절 · 같은 코드 · 코드를 안 줌 = 그대로
+    await expect(guardIntegrationMode(runWith(1, 0, 'active', 'S1') as any, CO, 'cafe24', 'mall', 'S2')).rejects.toMatchObject({ status: 409, code: 'STORE_CODE_CHANGE_NOT_SUPPORTED' });
+    await expect(guardIntegrationMode(runWith(1, 0, 'active', null) as any, CO, 'cafe24', 'mall', 'S2')).rejects.toMatchObject({ code: 'STORE_CODE_CHANGE_NOT_SUPPORTED' });
+    await expect(guardIntegrationMode(runWith(1, 0, 'active', 'S1') as any, CO, 'cafe24', 'mall', 'S1')).resolves.toBeUndefined();
+    await expect(guardIntegrationMode(runWith(1, 0, 'active', 'S1') as any, CO, 'cafe24', 'mall', null)).resolves.toBeUndefined();
   });
   it('잠금 키 = uuid 정규화 표기 · 다른 축 이름(정산 잠금과 갈림)', async () => {
     const run = vi.fn(async () => ({ rows: [] }));

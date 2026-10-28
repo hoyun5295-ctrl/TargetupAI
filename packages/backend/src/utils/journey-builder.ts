@@ -16,12 +16,14 @@
  */
 
 import { UserFacingError } from './http-error';
+import { composeVoicePrompt, VOICE_KIND_BY_STEP } from './brand-voice-prompt';
 import { extractJsonFromAiText, aiStr } from './ai-json';
 import { getCreditCost } from './ai-credit-calc';
 import { runChargedAi } from './ai-credit';
 import { query, pool } from '../config/database';
 import { callAIWithFallback } from '../services/ai';
-import { stripUnauthorizedBenefits, dropInventedEfficacy, EFFICACY_PROMPT_RULES } from './copy-benefit-detector';
+import { stripUnauthorizedBenefits, dropInventedEfficacy, EFFICACY_PROMPT_RULES, dropSeasonSentences } from './copy-benefit-detector';
+import { ensureSenderName } from './messageUtils';
 import { buildMemoryPromptContext } from './company-memory';
 import { seedBaselineForJourney, seedGradeStateForJourney } from './journey-entry-ledger';
 import { formatStepTiming, formatConditionChip } from './journey-step-format';
@@ -615,8 +617,13 @@ JSON 형식만 응답:
 
   // ★ D209+ (Harold 명시 2026-05-22): Sonnet 4.6 전환 — 메시지 흐름 추론 ai.ts 정합 본질 + 비용 80% 절감.
   //   Phase D 통합: companyId + source 전달 → 회사별 월 한도 + cache + 통계 자동 활성.
+  // ★ 2026-10-28 AI 메모리 설계 K11-1 · K11-4 · K11-5 — 여정 맞춤 생성 = 쓰기 · 성격별 블록 둘 · 목소리 회사 = 톤 칸 줄 대신 가이드라인 톤
+  const voice = await composeVoicePrompt({
+    companyId, producer: 'journey-custom-steps', mode: 'write', kind: VOICE_KIND_BY_STEP, channel: 'LMS', isAd: true, basePrompt: system,
+  });
+  const voiceSystem = voice.voiceLearned ? voice.system.replace(/- 톤앤매너: [^\n]*\n/, '') : voice.system;
   const text = await callAIWithFallback({
-    system,
+    system: voiceSystem,
     userMessage,
     maxTokens: 1024,
     temperature: 0.2,
@@ -645,6 +652,12 @@ JSON 형식만 응답:
       //   혜택 → 자리표시 · 효능 → 문장 빼기(다 빠지면 직접 채울 자리 · 활성화 관문이 막는다)
       base.messageTemplate = dropInventedEfficacy(stripUnauthorizedBenefits(aiStr(s.messageTemplate).slice(0, 2000), objective), objective).text;
       base.isAd = s.isAd !== undefined ? !!s.isAd : true;
+      // ★ 2026-10-28 AI 메모리 설계 K1-7 계절 낱말 = 문장 빼기(근거 = 목표문) · K1-1 문자 광고 단계 = 첫 줄에 전송자 명칭
+      const seasonless = dropSeasonSentences(base.messageTemplate || '', objective).text;
+      const ch = String(base.channel);
+      base.messageTemplate = ['sms', 'lms', 'mms'].includes(ch)
+        ? ensureSenderName(seasonless, { isAd: base.isAd !== false, channel: ch, names: [ctx.brandName, ctx.companyName] }).text
+        : seasonless;
     } else if (stepType === 'condition') {
       if (s.conditionJsonb && typeof s.conditionJsonb === 'object') {
         base.conditionJsonb = s.conditionJsonb;

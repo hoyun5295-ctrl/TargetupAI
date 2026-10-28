@@ -89,6 +89,15 @@ export interface IDbConnector {
   countKeyUniqueness?(tableName: string, keyColumns: string[]): Promise<{ total: number; distinct: number; nulls: number }>;
 
   /**
+   * ★ 2026-10-28 설치 값 확인(P2) — 한 컬럼의 값별 행 수, 많은 순 상위 limit 개 · 더 있으면 truncated.
+   * 값은 동기화 조회와 같은 글자(어댑터의 한글 보정 포함 · NULL = null) · 앞뒤 공백 합치기는 부르는 쪽(setup/value-check.ts)이 정규화와 같은 기준으로 한다.
+   * timeoutMs 가 지나면 실행을 끊고 던진다(부르는 쪽 = 건너뜀). 미구현 어댑터는 값 확인을 건너뛴다(지금 동작 · optional).
+   */
+  countColumnValues?(
+    tableName: string, column: string, limit: number, timeoutMs: number,
+  ): Promise<{ values: Array<{ value: string | null; count: number }>; truncated: boolean }>;
+
+  /**
    * 증분 데이터 조회: timestampColumn > since 인 레코드
    */
   fetchIncremental(

@@ -5,7 +5,7 @@
  * 기존 흩어진 BrandStudioCard·BrandVoiceCard 카드 2개 폐기·통합. 다크 모던·시인성.
  * 전 채널(DM·이메일·인앱)·문안 생성이 참조하는 브랜드 정보의 유일한 편집 창구.
  */
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Palette, X, IdCard, Sparkles, Mic } from 'lucide-react';
 import BrandBasicInfoTab from './BrandBasicInfoTab';
 import BrandKitTab from './BrandKitTab';
@@ -22,17 +22,23 @@ interface Props {
   token: string;
   onToast: Toast;
   onConfirm: (opts: ConfirmOpts) => void; // 브랜드보이스 카드의 삭제 확인용
+  /** ★ 2026-10-28 K13-2 여는 탭(목소리 없는 회사 · 바로 열기 = 브랜드 보이스) */
+  initialTab?: TabKey;
+  /** ★ 2026-10-28 K13-2 바로 열기 — 문안이 없으면 보낸 문자 고르기부터 */
+  autoStartVoice?: boolean;
 }
 
-type TabKey = 'basic' | 'kit' | 'voice';
+export type TabKey = 'basic' | 'kit' | 'voice';
 const TABS: Array<{ key: TabKey; label: string; icon: typeof IdCard }> = [
   { key: 'basic', label: '기본정보', icon: IdCard },
   { key: 'kit', label: '브랜드킷', icon: Palette },
   { key: 'voice', label: '브랜드보이스', icon: Mic },
 ];
 
-export default function BrandLearningModal({ open, onClose, apiBase, token, onToast, onConfirm }: Props) {
-  const [tab, setTab] = useState<TabKey>('basic');
+export default function BrandLearningModal({ open, onClose, apiBase, token, onToast, onConfirm, initialTab, autoStartVoice = false }: Props) {
+  const [tab, setTab] = useState<TabKey>(initialTab ?? 'basic');
+  // 열 때마다 여는 탭을 다시 정한다(창은 닫혀도 마운트돼 있다)
+  useEffect(() => { if (open) setTab(initialTab ?? 'basic'); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [open]);
   if (!open) return null;
 
   return (
@@ -77,7 +83,7 @@ export default function BrandLearningModal({ open, onClose, apiBase, token, onTo
         <div className="p-5 border-t border-slate-200">
           {tab === 'basic' && <BrandBasicInfoTab apiBase={apiBase} token={token} onToast={onToast} />}
           {tab === 'kit' && <BrandKitTab apiBase={apiBase} token={token} onToast={onToast} />}
-          {tab === 'voice' && <BrandVoiceCard apiBase={apiBase} token={token} onToast={onToast} onConfirm={onConfirm} />}
+          {tab === 'voice' && <BrandVoiceCard apiBase={apiBase} token={token} onToast={onToast} onConfirm={onConfirm} autoStart={autoStartVoice} />}
         </div>
       </div>
     </div>

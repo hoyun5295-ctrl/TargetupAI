@@ -20,7 +20,7 @@
  *   - source/external_id 미박힘 시 link 박지 X (비회원 이벤트 별도 처리)
  */
 
-import { UserFacingError } from './http-error';
+import { UserFacingError, CdpPhoneRequiredError } from './http-error';
 import { query } from '../config/database';
 // ★ 2026-08-14: normalizeDate 추가 — 자사몰(카페24 등)이 준 생일 문자열이 정규화 없이 SQL 파라미터로
 //   들어가 달력에 없는 값이면 PG가 행을 거절하던 자리(sync·upload와 동일 결함).
@@ -88,6 +88,17 @@ export interface IdentifyInput {
    *   호출부가 연동 행(서버가 정한 값)에서 읽어 넘긴다.
    */
   storeCode?: string;
+  /**
+   * ★ 2026-10-28 자사몰 대비 K4 — 식별 신뢰 등급(I5). 'profile'(기본) = 몰 서버의 회원 정보 · 'order' = 주문의 주문자 정보.
+   * order 는 고객 칸의 **빈 칸만** 채우고 전화번호를 바꾸지 않는다(주문자 칸이 회원 프로필을 덮지 않게 · M6) · 동의는 K2 그대로.
+   * 브라우저는 이 함수를 부르지 않는다(연결만 · cdp-events.ts · R23).
+   */
+  tier?: 'profile' | 'order';
+  /**
+   * ★ 2026-10-28 Codex R1 #5 — 몰 서버가 비밀키로 보낸 호출(/identify · /order · /bulk-import)이다. 그 연결에 서버 확인 시각(server_verified_at)을 남긴다
+   * → 브라우저 잇기(linkBrowserMember)가 출처 sdk 연결 중 이 표시가 있는 것만 근거로 쓴다(옛 브라우저 identify 가 만든 sdk 연결은 표시 없음 = 근거 아님).
+   */
+  serverVerified?: boolean;
 }
 
 /**
@@ -123,17 +134,8 @@ export interface IdentifyResult {
 // 메인 — identify (upsert)
 // ═══════════════════════════════════════════════════════════
 
-/**
- * 신규 고객인데 쓸 수 있는 휴대폰 번호가 없다 — 그 한 건을 넣을 수 없다는 뜻이지 장애가 아니다(★0921).
- * 문구는 종전 그대로(Error 하위 · 기존 호출부 동작 불변). 대량 적재 호출부가 이 타입으로 "건너뛸 건"과 "멈출 장애"를 가른다
- * (문구 문자열 대조 금지). 경위 = 우커머스 회원 가져오기가 전화번호 없는 회원 1명에서 4몰 전부 중단(BUGS B-0921-3).
- */
-export class CdpPhoneRequiredError extends Error {
-  constructor() {
-    super('신규 회원 생성 시 phone은 필수입니다 (UNIQUE 제약 정합).');
-    this.name = 'CdpPhoneRequiredError';
-  }
-}
+// 신규 고객 휴대폰 없음 = 그 건만 못 넣음(정의 = http-error.ts · ★1028 K11 적재 오류 판정 CT 가 이 모듈 없이 읽게 옮김 · 기존 import 는 여기서 그대로)
+export { CdpPhoneRequiredError };
 
 /**
  * 자사몰 회원을 한줄로 customers에 매핑/upsert.
@@ -141,6 +143,35 @@ export class CdpPhoneRequiredError extends Error {
  * - phone은 normalizePhone() 경유 (D162 영구 fix 정합)
  */
 export async function identifyCustomer(
+  companyId: string,
+  input: IdentifyInput
+): Promise<IdentifyResult> {
+  // ★ 1028 Codex R2 #2 · R3 #1 · R4 #1(같은 뿌리 세 번 → 구조로 닫음) · R5 #1 — 서버 확인 표시 = 이번 서버 호출이 그 연결을 처음 만들거나
+  //   고객 없는 연결에 고객을 붙일 때만 · 표시는 연결과 **같은 문장**에서(식별 전에 「없으면 고객 없는 확인 연결 · 고객 없는 연결이면 표시」 · 뒤 식별이 그 연결에 고객을 붙임
+  //   = 사이에서 끊겨도 다시 시도가 같은 연결을 이어 받는다). 있던 미확인 연결(고객 있음)은 승격하지 않는다: 휴대폰 · 이메일은 같은 서버 호출 길이 쓸 수 있는
+  //   칸이라 근거로 쓰면 앞 호출이 쓴 값이 다음 호출의 근거가 되는 순환이 생긴다. 옛 브라우저 연결 정리 = 원장 C73-S8.
+  if (input.serverVerified && input.source && input.externalId) await preMarkServerLink(companyId, input.source, input.externalId);
+  return identifyCustomerRow(companyId, input);
+}
+
+let serverVerifiedColumnWarned = false;
+/** 서버 호출의 연결 자리 — 없으면 고객 없는 확인 연결을 만들고 · 고객 없는 연결이면 표시 · 고객 있는 연결은 그대로(한 문장) · 칸이 없으면 = 원장 C73-DDL-4 전 · 경고 1회 · 지금 동작 */
+async function preMarkServerLink(companyId: string, source: string, externalId: string): Promise<void> {
+  try {
+    await query(
+      `INSERT INTO cdp_identity_links (id, company_id, customer_id, source, external_id, created_at, updated_at, server_verified_at)
+       VALUES (gen_random_uuid(), $1::uuid, NULL, $2, $3, NOW(), NOW(), NOW())
+       ON CONFLICT (company_id, source, external_id) DO UPDATE SET server_verified_at = NOW()
+        WHERE cdp_identity_links.customer_id IS NULL AND cdp_identity_links.server_verified_at IS NULL`,
+      [companyId, source, externalId],
+    );
+  } catch (err: any) {
+    if (err?.code !== '42703') throw err;
+    if (!serverVerifiedColumnWarned) { serverVerifiedColumnWarned = true; console.warn('[CDP Identity] cdp_identity_links.server_verified_at 칸 없음(DDL-4 전) — 서버 확인 표시를 건너뜁니다'); }
+  }
+}
+
+async function identifyCustomerRow(
   companyId: string,
   input: IdentifyInput
 ): Promise<IdentifyResult> {
@@ -262,6 +293,7 @@ export async function identifyCustomer(
       let atRef = '';
       if (clock) { params.push(consentAt); atRef = `$${params.length}::timestamptz`; }
       const ok = consentOkSql(params, 'customers', '$12::boolean', atRef, input);
+      const keep = (col: string): string => fieldWriteSql(input, `EXCLUDED.${col}`, `customers.${col}`);
       return {
         params,
         sql: `INSERT INTO customers (
@@ -277,12 +309,12 @@ export async function identifyCustomer(
       )
       ON CONFLICT (company_id, phone)
       DO UPDATE SET
-        name = COALESCE(EXCLUDED.name, customers.name),
-        email = COALESCE(EXCLUDED.email, customers.email),
-        gender = COALESCE(EXCLUDED.gender, customers.gender),
-        birth_date = COALESCE(EXCLUDED.birth_date, customers.birth_date),
-        grade = COALESCE(EXCLUDED.grade, customers.grade),
-        address = COALESCE(EXCLUDED.address, customers.address),
+        name = ${keep('name')},
+        email = ${keep('email')},
+        gender = ${keep('gender')},
+        birth_date = ${keep('birth_date')},
+        grade = ${keep('grade')},
+        address = ${keep('address')},
         sms_opt_in = CASE WHEN ${ok} THEN $12::boolean ELSE customers.sms_opt_in END,${clock ? `
         consent_source_at = CASE WHEN ${ok} THEN ${atRef} ELSE customers.consent_source_at END,` : ''}
         updated_at = NOW()
@@ -374,8 +406,23 @@ export async function withdrawMemberConsent(
   externalId: string,
   /** ★ 2026-10-27 자사몰 대비 K2-2 · K5 — 탈퇴를 본 원천 시각(삭제 시각 · 모르면 받은 시각) */
   sourceAt: string,
+  /** ★ 1028 K5 — 그 연동 행의 분류코드(있으면 그 몰 소속 행에 명시 NO · 출처 `{source}:deleted` · 고객 행은 건드리지 않는다) */
+  storeCode?: string | null,
 ): Promise<number> {
   if (!source || !externalId) return 0;
+  // 분류코드 몰 = 그 몰 소속 행이 동의의 진실(다른 매장 동의 · 고객 행 불변) · 연결 행은 지우지 않는다(다시 가입하면 같은 고객)
+  if (typeof storeCode === 'string' && storeCode.trim()) {
+    const linked = await query(
+      `SELECT DISTINCT customer_id FROM cdp_identity_links
+        WHERE company_id = $1::uuid AND source = $2 AND external_id = $3 AND customer_id IS NOT NULL`,
+      [companyId, source, externalId],
+    );
+    let n = 0;
+    for (const row of linked.rows) {
+      if (await upsertStoreConsent(companyId, row.customer_id, storeCode, false, `${source}:deleted`, sourceAt)) n++;
+    }
+    return n;
+  }
   const r = await runConsentClocked('customers', (clock) => {
     const params: any[] = [companyId, source, externalId];
     let clockSet = '';
@@ -401,18 +448,35 @@ export async function withdrawMemberConsent(
 }
 
 /**
- * ★ 2026-10-04 이미 연결된 회원의 고객 id 만 찾는다(없으면 null) — 고객 행을 만들거나 고치지 않는다.
- * 호출부가 회원 증명(토큰)을 검증한 뒤에만 부른다(cdp-events ingestBrowserEvents ②).
+ * ★ 2026-10-28 자사몰 대비 K4 — 회원 토큰이 증명한 브라우저 회원을 고객에 **잇기만** 한다(고객 칸 쓰기 0 · I5 · M5).
+ * 근거 = 같은 회원 번호의 서버 연결(source ≠ 'sdk' = 몰 서버가 보낸 회원 정보 · 주문)이 가리키는 고객 **하나**.
+ * 서로 다른 고객 둘 이상 · 서버 연결 없음 = null(익명). 찾으면 브라우저 연결(source 'sdk')도 그 고객으로 맞춘다 —
+ * 인앱 표시 · 구독 · 노출 기록이 그 연결을 읽는다(옛: 브라우저 identify 가 이 연결을 만들며 이름 · 이메일 · 전화를 덮었다).
  */
-export async function findLinkedCustomerId(companyId: string, source: string, externalId: string): Promise<string | null> {
-  if (!source || !externalId) return null;
-  const r = await query(
-    `SELECT customer_id FROM cdp_identity_links
-      WHERE company_id = $1::uuid AND source = $2 AND external_id = $3 AND customer_id IS NOT NULL
-      LIMIT 1`,
-    [companyId, source, externalId]
+export async function linkBrowserMember(companyId: string, externalId: string): Promise<{ customerId: string; linkId: string } | null> {
+  if (!externalId) return null;
+  // 근거 = 서버 연결(몰 어댑터 출처 · 또는 sdk 출처 중 서버 비밀키 호출이 확인한 것 · Codex R1 #5) · 칸이 없으면(DDL-4 전) 몰 어댑터 출처만
+  const sql = (verifiedSdk: boolean) =>
+    `SELECT DISTINCT customer_id FROM cdp_identity_links
+      WHERE company_id = $1::uuid AND external_id = $2 AND customer_id IS NOT NULL
+        AND (source <> 'sdk'${verifiedSdk ? ' OR server_verified_at IS NOT NULL' : ''})
+      ORDER BY customer_id
+      LIMIT 2`;
+  const r = await query(sql(true), [companyId, externalId]).catch((err: any) => {
+    if (err?.code !== '42703') throw err;
+    return query(sql(false), [companyId, externalId]);
+  });
+  if (r.rows.length !== 1) return null;
+  const customerId: string = r.rows[0].customer_id;
+  const link = await query(
+    `INSERT INTO cdp_identity_links (id, company_id, customer_id, source, external_id, last_seen_at, created_at, updated_at)
+     VALUES (gen_random_uuid(), $1::uuid, $2::uuid, 'sdk', $3, NOW(), NOW(), NOW())
+     ON CONFLICT (company_id, source, external_id) DO UPDATE SET
+       customer_id = EXCLUDED.customer_id, last_seen_at = NOW(), updated_at = NOW()
+     RETURNING id`,
+    [companyId, customerId, externalId]
   );
-  return r.rows[0]?.customer_id ?? null;
+  return { customerId, linkId: link.rows[0].id };
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -548,6 +612,14 @@ async function findPhoneHolderId(companyId: string, normalizedPhone: string | nu
   return r.rows.length > 0 ? r.rows[0].id : null;
 }
 
+/**
+ * 고객 칸 하나를 쓰는 SQL 조각(K4 · I5) — profile = 들어온 값이 있으면 덮음 · order = 그 칸이 비었을 때만 채움.
+ * 새 행 INSERT · 같은 번호 충돌 갱신 · 기존 고객 갱신 세 자리가 같은 조각을 쓴다(R1).
+ */
+function fieldWriteSql(input: IdentifyInput, incoming: string, existing: string): string {
+  return input.tier === 'order' ? `COALESCE(${existing}, ${incoming})` : `COALESCE(${incoming}, ${existing})`;
+}
+
 async function syncCustomerFields(
   companyId: string,
   customerId: string,
@@ -577,13 +649,13 @@ async function syncCustomerFields(
     return {
       params,
       sql: `UPDATE customers SET
-      name = COALESCE($2, name),
-      email = COALESCE($3, email),
-      gender = COALESCE($4, gender),
-      birth_date = COALESCE($5, birth_date),
-      grade = COALESCE($6, grade),
-      address = COALESCE($7, address),
-      custom_fields = COALESCE(custom_fields, '{}'::jsonb) || $8::jsonb,
+      name = ${fieldWriteSql(input, '$2', 'name')},
+      email = ${fieldWriteSql(input, '$3', 'email')},
+      gender = ${fieldWriteSql(input, '$4', 'gender')},
+      birth_date = ${fieldWriteSql(input, '$5', 'birth_date')},
+      grade = ${fieldWriteSql(input, '$6', 'grade')},
+      address = ${fieldWriteSql(input, '$7', 'address')},
+      custom_fields = ${input.tier === 'order' ? `$8::jsonb || COALESCE(custom_fields, '{}'::jsonb)` : `COALESCE(custom_fields, '{}'::jsonb) || $8::jsonb`},
       sms_opt_in = CASE WHEN ${ok} THEN $9::boolean ELSE sms_opt_in END,${clock ? `
       consent_source_at = CASE WHEN ${ok} THEN ${atRef} ELSE consent_source_at END,` : ''}
       updated_at = NOW()
@@ -594,7 +666,8 @@ async function syncCustomerFields(
   // ★ A1·A4 (2026-06-25): phone 자동 갱신 + 충돌(타 고객 점유 / email-phone 불일치) 검수 플래그.
   //   - 번호 변경 회원이 이전 번호로 남아 발송 실패하던 문제(A1) 해소: 점유자 없으면 자동 갱신.
   //   - 그 번호를 같은 회사 다른 활성 고객이 보유하면(A4 email매칭 ≠ phone보유자 포함) 자동변경 금지 + 플래그.
-  if (normalizedPhone) {
+  //   ★ 1028 K4 — 주문자 정보(tier order)는 전화번호를 바꾸지 않는다(주문자 칸 = 받는 사람 · 선물 주문이 회원 번호를 덮던 M6).
+  if (normalizedPhone && input.tier !== 'order') {
     const cur = await query(`SELECT phone FROM customers WHERE id = $1::uuid`, [customerId]);
     const currentPhone: string | null = cur.rows[0]?.phone ?? null;
     if (normalizedPhone !== currentPhone) {

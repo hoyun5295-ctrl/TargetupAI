@@ -10,7 +10,8 @@
 
 import { isDemoCompany } from './demo-company';
 import { query } from '../config/database';
-import { buildJourneyPauseUrl, generatePauseToken, pauseJourney } from './journey-pause-handler';
+import { buildJourneyPauseShortUrl, generatePauseToken, pauseJourney } from './journey-pause-handler';
+import { pickOwnerContact } from './owner-contact';
 import { getAuthSmsTable, bulkInsertSmsQueue, getPlatformNoticeCallback } from './sms-queue';
 import { runStepSpamTest } from './journey-pretest-validator';
 import { regenerateStepAvoidingSpam } from './journey-ai-generator';
@@ -271,25 +272,22 @@ async function safeNotify(b: PretestBundle, preview: string, mode: PretestMode):
 /** 반환 = 보낼 것이 없었거나(시연 회사 · 담당자 없음 · 번호 형식 아님) 큐에 실제로 한 건 들어갔다(★ Codex C 2R · 적재 0건 = false) */
 async function notifyManagerForStep(b: PretestBundle, messagePreview: string, mode: PretestMode): Promise<boolean> {
   if (await isDemoCompany(b.companyId)) return true;   // ★ 2026-10-09 시연 회사 = 담당자 문자 0(설계서 docs/2026-10-09-demo-company-design.md §2)
-  const managerRes = await query(
-    `SELECT phone_number FROM kakao_alarm_users
-      WHERE company_id = $1 AND COALESCE(active_yn, 'Y') = 'Y'
-      ORDER BY created_at ASC LIMIT 1`,
-    [b.companyId]
-  );
-  if (managerRes.rows.length === 0) return true;
-  const managerPhone = String(managerRes.rows[0].phone_number).replace(/\D/g, '');
-  if (!/^01\d{8,9}$/.test(managerPhone)) return true;
+  // ★ 2026-10-28 B-1028-1 — 받는 사람 = 여정을 만든 계정 → 회사 관리자(자동마케팅 · 플래너와 같은 함수 · 뿌리 R1 · R3).
+  //   옛: 회사 알림톡 검수 수신자 명단(kakao_alarm_users) 첫 행 = 여정을 만든 담당자 대신 그 명단의 사람이 받았다.
+  const contact = await pickOwnerContact(b.companyId, b.createdBy || null);
+  if (!contact) return true;
+  const managerPhone = contact.phone;
 
   // ★ 2026-10-18 정지 링크 — 받는 번호 · 발송 날짜를 토큰에 싣고 주소는 # 뒤(설계서 2026-10-18 §3-1).
   //   서명 키가 없으면 발급이 던진다 → 링크 줄만 빼고 안내는 보낸다(B10 · pretest_paused 는 여정이 이미 멈췄다).
+  // ★ 2026-10-28 B-1028-1 — 다른 담당자 링크(자동마케팅 멈춤 · 대행 승인 · 충전 승인)와 같이 단축 주소(실패 = 원래 주소).
   let pauseUrl: string | null = null;
   try {
     const pauseToken = await generatePauseToken({
       stepId: b.stepId, executionId: b.executionId, companyId: b.companyId, journeyId: b.journeyId,
       phone: managerPhone, sendDate: b.sendDateKst,
     });
-    pauseUrl = buildJourneyPauseUrl(pauseToken);
+    pauseUrl = await buildJourneyPauseShortUrl(b.companyId, pauseToken);
   } catch (e: any) {
     console.warn(`[journey-pretest-scan] 정지 링크 발급 실패(링크 없이 안내) journey=${b.journeyId}:`, e?.message || e);
   }

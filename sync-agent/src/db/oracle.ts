@@ -310,6 +310,58 @@ export class OracleConnector implements IDbConnector {
     }
   }
 
+  /**
+   * ★ 2026-10-28 설치 값 확인(P2) — 계약 = types.ts countColumnValues · 뷰 1회 읽기(GROUP BY) · 상위 limit+1 행으로 넘침 판정.
+   * 실행 시간 = timeoutMs 마감과 경주한다 — 마감이 먼저면 conn.break() 로 서버 쪽 실행 끊기를 시도하고 **끊기 성공 여부와 무관하게** 바로
+   *   「시간 초과」로 던진다(Codex 구현 1R · 2R: break 가 실패해도 상한이 지켜진다). 남은 연결은 기다리지 않고 닫기만 걸고,
+   *   부르는 쪽 disconnect 의 pool.close(0) 이 강제로 끝낸다.
+   *   callTimeout 을 쓰지 않는 이유 = 동봉 Instant Client 11.2(thick)는 18 미만이라 callTimeout 을 받지 않는다(DPI-1050).
+   */
+  async countColumnValues(
+    tableName: string, column: string, limit: number, timeoutMs: number,
+  ): Promise<{ values: Array<{ value: string | null; count: number }>; truncated: boolean }> {
+    this.ensureConnected();
+    const conn = await this.pool.getConnection();
+    let timedOut = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const timeoutText = `값 세기 시간 초과(${Math.round(timeoutMs / 1000)}초)`;
+    const deadline = new Promise<never>((_resolve, reject) => {
+      timer = setTimeout(() => {
+        timedOut = true;
+        Promise.resolve().then(() => conn.break()).catch(() => { /* 끊기 실패여도 마감은 지킨다 */ });
+        reject(new Error(timeoutText));
+      }, timeoutMs);
+    });
+    try {
+      const col = `"${this.sanitizeIdentifier(column)}"`;
+      const exec = conn.execute(
+        `SELECT v, n FROM (SELECT ${col} AS v, COUNT(*) AS n
+                             FROM ${this.tableRef(tableName)}
+                            GROUP BY ${col}
+                            ORDER BY COUNT(*) DESC)
+          WHERE ROWNUM <= :lim`,
+        { lim: limit + 1 },
+      );
+      exec.catch(() => { /* 마감 뒤 늦게 끝나는 실행의 거절을 삼킨다(처리되지 않은 거절 방지) */ });
+      let result: any;
+      try {
+        result = await Promise.race([exec, deadline]);
+      } catch (e) {
+        if (timedOut) throw new Error(timeoutText);
+        throw e;
+      }
+      const rows = (result.rows || []) as Record<string, unknown>[];
+      return {
+        values: rows.slice(0, limit).map((r) => ({ value: r.V == null ? null : String(r.V), count: Number(r.N) || 0 })),
+        truncated: rows.length > limit,
+      };
+    } finally {
+      clearTimeout(timer);
+      if (timedOut) conn.close().catch(() => { /* 실행이 남은 연결 · disconnect 의 pool.close(0) 이 끝낸다 */ });
+      else await conn.close();
+    }
+  }
+
   async getColumns(tableName: string): Promise<ColumnInfo[]> {
     this.ensureConnected();
     const conn = await this.pool.getConnection();

@@ -22,13 +22,15 @@
  */
 
 import { nightRangeKo, sendWindowKo } from './send-time-util';
+import { composeVoicePrompt, VOICE_KIND_BY_STEP } from './brand-voice-prompt';
 import { extractJsonFromAiText } from './ai-json';
 import { UserFacingError } from './http-error';
 import { getCreditCost } from './ai-credit-calc';
 import { runChargedAi, InsufficientCreditError } from './ai-credit';
 import { query } from '../config/database';
 import { callAIWithFallback } from '../services/ai';
-import { stripUnauthorizedBenefits, dropInventedEfficacyTitledBody, EFFICACY_PROMPT_RULES } from './copy-benefit-detector';
+import { stripUnauthorizedBenefits, dropInventedEfficacyTitledBody, EFFICACY_PROMPT_RULES, dropSeasonSentences, findSeasonWords } from './copy-benefit-detector';
+import { ensureSenderName } from './messageUtils';
 import { buildJourneyStats, JourneyFullStats, JourneyStepStat } from './journey-stats';
 import { JOURNEY_SUBJECT_MAX_CHARS } from './journey-step-limits';
 
@@ -372,8 +374,12 @@ ${stepsDescription || '(단계 영역 없음)'}
     const { result: chargedOut } = await runChargedAi({
       companyId: companyId, cost: getCreditCost('journey-step-diagnosis'), source: 'journey-step-diagnosis', createdBy: null,
       run: async () => {
+        // ★ 2026-10-28 AI 메모리 설계 K11-1 · K11-5 — 다음 단계 추천 = 쓰기 · 성격별 블록 둘 · 목소리 회사 = 톤 칸 줄 대신 가이드라인 톤
+        const voice = await composeVoicePrompt({
+          companyId, producer: 'journey-next-step', mode: 'write', kind: VOICE_KIND_BY_STEP, channel: 'LMS', isAd: true, basePrompt: system,
+        });
         const text = await callAIWithFallback({
-          system,
+          system: voice.voiceLearned ? voice.system.replace(/- 브랜드 톤: [^\n]*\n/, '') : voice.system,
           userMessage,
           maxTokens: 1500,
           temperature: 0.3,
@@ -389,11 +395,18 @@ ${stepsDescription || '(단계 영역 없음)'}
         //   근거 = 이 여정에 이미 저장된 본문 · 제목(사람이 확인한 글) · 혜택 → 자리표시 · 효능 → 문장 빼기(제목 = 비움)
         const recGround = existingSteps.map((s: any) => `${s?.message_template || ''}\n${s?.subject || ''}`).join('\n');
         //   제목 + 본문 = 이어 읽는 단위(CT dropInventedEfficacyTitledBody · 여정 생성과 같은 규칙)
-        const guardPair = (s: any) => dropInventedEfficacyTitledBody(
-          typeof s?.subject === 'string' ? stripUnauthorizedBenefits(s.subject.slice(0, JOURNEY_SUBJECT_MAX_CHARS), recGround) : '',
-          typeof s?.messageTemplate === 'string' ? stripUnauthorizedBenefits(s.messageTemplate.slice(0, 2000), recGround) : '',
-          recGround,
-        );
+        const guardPair = (s: any) => {
+          const g = dropInventedEfficacyTitledBody(
+            typeof s?.subject === 'string' ? stripUnauthorizedBenefits(s.subject.slice(0, JOURNEY_SUBJECT_MAX_CHARS), recGround) : '',
+            typeof s?.messageTemplate === 'string' ? stripUnauthorizedBenefits(s.messageTemplate.slice(0, 2000), recGround) : '',
+            recGround,
+          );
+          // ★ 2026-10-28 AI 메모리 설계 K1-7 계절 낱말 = 문장 빼기(제목 = 비움) · K1-1 문자 단계(여정 = 늘 광고) = 첫 줄 또는 제목에 전송자 명칭
+          const subject = findSeasonWords(g.subject, recGround).length > 0 ? '' : g.subject;
+          let body = dropSeasonSentences(g.body, recGround).text;
+          if (['sms', 'lms', 'mms'].includes(s?.channel)) body = ensureSenderName(body, { isAd: true, channel: s.channel, subject, names: [company.brand_name, company.company_name] }).text;
+          return { subject, body };
+        };
         const mapStep = (s: any): RecommendedStep => ({
           stepType: (['message', 'wait', 'condition'].includes(s?.stepType) ? s.stepType : 'message') as 'message' | 'wait' | 'condition',
           delayHours: typeof s?.delayHours === 'number' ? Math.max(0, Math.min(720, s.delayHours)) : 24,

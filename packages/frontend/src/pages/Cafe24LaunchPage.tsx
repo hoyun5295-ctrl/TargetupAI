@@ -16,6 +16,7 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 import { Store, ArrowRight, CheckCircle2, LogIn, ShieldCheck, Loader2, RefreshCcw } from 'lucide-react';
 import { useAuthStore } from '../stores/authStore';
 import { useToast } from '../components/ToastProvider';
+import { useApprovalWindow } from '../hooks/useApprovalWindow';
 
 export default function Cafe24LaunchPage() {
   const [searchParams] = useSearchParams();
@@ -28,6 +29,7 @@ export default function Cafe24LaunchPage() {
 
   const [statusLoading, setStatusLoading] = useState(false);
   const [connectedMallId, setConnectedMallId] = useState<string | null>(null);
+  const [brokenMallId, setBrokenMallId] = useState<string | null>(null);   // ★1028 N5 토큰이 거절돼 끊긴 몰(서버 상태 token_expired)
   const [connecting, setConnecting] = useState(false);
 
   const isCompanyAdmin = isAuthenticated && user?.userType === 'company_admin';
@@ -54,6 +56,7 @@ export default function Cafe24LaunchPage() {
         });
         const data = await res.json();
         if (alive && data?.success && data?.connected) setConnectedMallId(data.mall_id || null);
+        if (alive && data?.success && !data?.connected && data?.status === 'token_expired') setBrokenMallId(data.mall_id || null);
       } catch {
         /* 상태 조회 실패는 무시 — 연결 버튼은 그대로 노출 */
       } finally {
@@ -68,6 +71,8 @@ export default function Cafe24LaunchPage() {
     navigate('/login');
   };
 
+  const openApprovalWindow = useApprovalWindow(() => { void refreshStatus(); });
+
   const handleConnect = async () => {
     if (!mallId) { toast.error('몰 정보가 없어 연결을 시작할 수 없습니다.'); return; }
     setConnecting(true);
@@ -77,8 +82,7 @@ export default function Cafe24LaunchPage() {
       });
       const data = await res.json();
       if (data?.success && data?.authorize_url) {
-        window.open(data.authorize_url, 'cafe24_oauth', 'width=720,height=820');
-        toast.info('새 창에서 카페24 로그인·동의를 마친 뒤 [연결 확인]을 눌러주세요.');
+        openApprovalWindow(data.authorize_url, 'cafe24_oauth');   // ★1028 N4 · N5 — 창이 닫히면 상태를 다시 읽는다([연결 확인] 안내 0)
       } else {
         toast.error(data?.error || '카페24 연결을 시작하지 못했습니다.');
       }
@@ -98,6 +102,7 @@ export default function Cafe24LaunchPage() {
       const data = await res.json();
       if (data?.success && data?.connected) {
         setConnectedMallId(data.mall_id || null);
+        setBrokenMallId(null);
         toast.success('연결이 확인되었습니다.');
       } else {
         toast.info('아직 연결이 확인되지 않았습니다. 카페24 동의를 마쳤는지 확인해주세요.');
@@ -191,7 +196,8 @@ export default function Cafe24LaunchPage() {
             <span className="font-semibold text-sm">이미 연결된 몰입니다</span>
           </div>
           <p className="text-white/60 text-sm leading-relaxed mb-6">
-            회원·주문·장바구니 데이터가 한줄로에 자동으로 수집되고 있습니다.
+            {/* ★1028 N5 — 사실 문장(받는 것 · 날짜는 연동 화면이 서버 값으로 말한다 · 옛 「회원 · 주문 · 장바구니 자동 수집」은 회원 권한 승인 전이라 사실이 아니었다) */}
+            이 몰은 한줄로에 연결되어 있어요. 마지막으로 데이터가 들어온 날짜는 자사몰 연동 화면에서 볼 수 있어요.
           </p>
           <div className="space-y-2">
             <button type="button" className={primaryBtn} onClick={() => navigate('/cdp-settings')}>
@@ -209,10 +215,12 @@ export default function Cafe24LaunchPage() {
     return (
       <div className="text-center">
         <p className="text-white/70 text-sm leading-relaxed mb-6">
-          이 몰을 한줄로에 연결하면 회원·주문·장바구니 데이터 수집과 AI 마케팅 자동화가 시작됩니다.
+          {brokenMallId === mallId
+            ? '이 몰의 연결이 끊겼어요. 다시 연결하면 이어서 받아요.'
+            : '이 몰을 한줄로에 연결하면 카페24가 보내는 주문 정보가 한줄로로 들어와요.'}
         </p>
         <button type="button" className={primaryBtn} onClick={handleConnect} disabled={connecting}>
-          {connecting ? <><Loader2 className="w-4 h-4 animate-spin" /> 연결 창을 여는 중...</> : <><ShieldCheck className="w-4 h-4" /> 카페24 연결</>}
+          {connecting ? <><Loader2 className="w-4 h-4 animate-spin" /> 연결 창을 여는 중...</> : <><ShieldCheck className="w-4 h-4" /> {brokenMallId === mallId ? '다시 연결' : '카페24 연결'}</>}
         </button>
         <button
           type="button"

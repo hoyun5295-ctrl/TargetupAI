@@ -40,6 +40,13 @@ import AddMemoryModal, { NewMemoryInput } from '../components/AiMemory/AddMemory
 // ★ D225+ Brand Voice Learning (2026-05-28 Harold 명시)
 // ★ 2026-07-21 브랜드 학습 통합 — 단일 진입 카드(→ 3탭 모달). 기존 BrandStudioCard·BrandVoiceCard 카드 2개 대체(BrandVoiceCard는 모달 탭 내부에서 재사용).
 import BrandLearningCard from '../components/AiMemory/BrandLearningCard';
+import VoiceHabitsCard from '../components/AiMemory/VoiceHabitsCard';
+import JourneyModalShell from '../components/journey/JourneyModalShell';
+
+/** ★ 2026-10-28 K13-5 — 학습 출처 도넛 = 사람 말(내부 키를 그리지 않는다) */
+const MEMORY_SOURCE_LABEL: Record<string, string> = {
+  ai_auto: 'AI 자동 학습', admin_input: '직접 입력', system: '학습 상태', user_feedback: '사용자 반응', manual: '직접 입력',
+};
 
 // ════════════════════════════════════════════════════════════════════
 // 타입
@@ -253,11 +260,23 @@ export default function AiMemoryPage() {
   const [showAddModal, setShowAddModal] = useState(false);
   const [showGuideModal, setShowGuideModal] = useState(false);
   const [showDetailedAnalysis, setShowDetailedAnalysis] = useState(false);
+  const [showMemoryDetail, setShowMemoryDetail] = useState(false);
   const [confirmState, setConfirmState] = useState<ConfirmState | null>(null);
 
   const queryInputRef = useRef<HTMLInputElement>(null);
 
   const token = () => localStorage.getItem('token');
+  // ★ 2026-10-28 AI 메모리 설계 K13-2 — /ai-memory?learn=voice = 브랜드 학습 창 · 브랜드 보이스 탭 바로 열기(읽은 뒤 주소에서 지운다 · 같은 경로 이동 없이)
+  const [openVoice] = useState(() => {
+    try {
+      const sp = new URLSearchParams(window.location.search);
+      if (sp.get('learn') !== 'voice') return false;
+      sp.delete('learn');
+      const q = sp.toString();
+      window.history.replaceState(window.history.state, '', `${window.location.pathname}${q ? `?${q}` : ''}${window.location.hash}`);
+      return true;
+    } catch { return false; }
+  });
   const authHeader = () => ({ Authorization: `Bearer ${token()}` });
 
   // ── 데이터 로드
@@ -596,6 +615,7 @@ export default function AiMemoryPage() {
 
         {/* ───────── ★ 2026-07-21 브랜드 학습 통합 — 단일 진입 카드 → 모달(기본정보/브랜드킷/브랜드보이스 3탭). 기존 BrandStudioCard·BrandVoiceCard 2개 통합 ───────── */}
         <BrandLearningCard
+          openVoice={openVoice}
           apiBase=""
           token={token() || ''}
           onToast={(msg, type) => {
@@ -765,6 +785,205 @@ export default function AiMemoryPage() {
           </div>
         )}
 
+        {/* ───────── ★ 2026-10-28 AI 메모리 설계 K14 — 쓸수록 배운 습관(숫자 띠 + 조언 한 장 + 고친 말투 후보) · 학습 분포 · Top 10 = 「자세히」 창 ───────── */}
+        <VoiceHabitsCard apiBase="" token={token() || ''} onToast={(msg, type) => (type === 'success' ? toast.success(msg) : type === 'error' ? toast.error(msg) : toast.info(msg))} />
+        <div className="flex justify-end">
+          <button onClick={() => setShowMemoryDetail(true)} className="px-3 py-2 text-xs rounded-lg border border-slate-300 bg-white text-slate-700 hover:bg-slate-50 flex items-center gap-1.5">
+            <BarChart3 className="w-3.5 h-3.5" />학습 분포 · 자주 참고하는 학습 자세히
+          </button>
+        </div>
+
+        {/* ───────── 6. 1-click 액션 3 카드 ───────── */}
+        <div className="grid md:grid-cols-3 gap-3">
+          <button
+            onClick={() => handleQuickStart({ id: 'cleanup', icon: Trash2, label: '', hint: '', gradient: '', action: 'cleanup' })}
+            disabled={!isAdmin}
+            className="p-4 bg-gradient-to-br from-rose-50 to-pink-50 border border-rose-200 hover:border-rose-300 rounded-xl text-left transition-all group disabled:opacity-40 disabled:cursor-not-allowed"
+          >
+            <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-rose-400 to-pink-500 flex items-center justify-center mb-2 group-hover:scale-110 transition-transform">
+              <Trash2 className="w-5 h-5 text-white" />
+            </div>
+            <div className="text-sm font-semibold text-slate-900 mb-1">오래된 학습 정리</div>
+            <div className="text-[11px] text-slate-500 leading-relaxed">
+              90일+ 미사용 + 중요도 3 미만 학습을 일괄 삭제합니다.
+            </div>
+            {!isAdmin && <div className="text-[10px] text-rose-700 mt-1">회사 관리자 전용</div>}
+          </button>
+
+          <button
+            onClick={() => handleQuickStart({ id: 'add', icon: Plus, label: '', hint: '', gradient: '', action: 'add' })}
+            disabled={!isAdmin}
+            className="p-4 bg-gradient-to-br from-emerald-50 to-teal-50 border border-emerald-200 hover:border-emerald-300 rounded-xl text-left transition-all group disabled:opacity-40 disabled:cursor-not-allowed"
+          >
+            <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-emerald-400 to-teal-500 flex items-center justify-center mb-2 group-hover:scale-110 transition-transform">
+              <Plus className="w-5 h-5 text-white" />
+            </div>
+            <div className="text-sm font-semibold text-slate-900 mb-1">직접 학습 추가</div>
+            <div className="text-[11px] text-slate-500 leading-relaxed">
+              회사 정책·고객 인사이트·톤 가이드를 직접 입력하여 AI에게 우선 참고시킵니다.
+            </div>
+            {!isAdmin && <div className="text-[10px] text-emerald-700 mt-1">회사 관리자 전용</div>}
+          </button>
+
+          <button
+            onClick={() => setShowGuideModal(true)}
+            className="p-4 bg-gradient-to-br from-amber-50 to-orange-50 border border-amber-200 hover:border-amber-300 rounded-xl text-left transition-all group"
+          >
+            <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-amber-400 to-orange-500 flex items-center justify-center mb-2 group-hover:scale-110 transition-transform">
+              <BookOpen className="w-5 h-5 text-white" />
+            </div>
+            <div className="text-sm font-semibold text-slate-900 mb-1">5 타입 가이드</div>
+            <div className="text-[11px] text-slate-500 leading-relaxed">
+              자동 누적되는 학습과 직접 입력해야 하는 학습: 예시 + 흐름 안내.
+            </div>
+          </button>
+        </div>
+
+        {/* ───────── 7. 자세히 분석 토글 ───────── */}
+        <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden">
+          <button
+            onClick={() => setShowDetailedAnalysis((v) => !v)}
+            className="w-full flex items-center justify-between px-5 py-4 hover:bg-white transition-colors"
+          >
+            <div className="flex items-center gap-2">
+              <BarChart3 className="w-4 h-4 text-cyan-700" />
+              <span className="text-sm font-semibold text-slate-900">자세히 분석</span>
+              <span className="text-[10px] text-slate-400">출처별 분포 · 월별 누적 · 중요도 분포 · 최근 활용</span>
+            </div>
+            {showDetailedAnalysis ? <ChevronUp className="w-4 h-4 text-slate-500" /> : <ChevronDown className="w-4 h-4 text-slate-500" />}
+          </button>
+
+          {showDetailedAnalysis && (
+            <div className="px-5 pb-5 space-y-5 border-t border-slate-100 pt-5">
+              {allLoading ? (
+                <div className="flex justify-center py-12">
+                  <Loader2 className="w-5 h-5 animate-spin text-slate-400" />
+                </div>
+              ) : !detailedStats ? (
+                <div className="text-center py-8 text-slate-400 text-sm">분석할 학습 데이터가 없습니다.</div>
+              ) : (
+                <div className="grid md:grid-cols-2 gap-5">
+                  {/* a. 출처별 도넛 */}
+                  <div className="p-4 bg-white border border-slate-200 rounded-xl">
+                    <div className="text-xs font-semibold text-slate-900 mb-3">출처별 분포</div>
+                    <div className="flex items-center gap-4">
+                      <svg viewBox="0 0 200 200" className="w-32 h-32">
+                        {detailedStats.sourceSegs.map((s) => (
+                          <path key={s.source} d={s.pathD} fill={s.color}>
+                            <title>{MEMORY_SOURCE_LABEL[s.source] || '그 밖'}: {s.count}건 ({(s.percent * 100).toFixed(1)}%)</title>
+                          </path>
+                        ))}
+                        <text x="100" y="100" textAnchor="middle" dominantBaseline="middle" className="fill-slate-900" style={{ fontSize: '18px', fontWeight: 700 }}>
+                          {detailedStats.sourceTotal}
+                        </text>
+                      </svg>
+                      <div className="flex-1 space-y-1">
+                        {detailedStats.sourceSegs.map((s) => (
+                          <div key={s.source} className="flex items-center gap-2 text-[11px]">
+                            <div className="w-2.5 h-2.5 rounded-sm flex-shrink-0" style={{ background: s.color }} />
+                            <span className="text-slate-700 flex-1 truncate">{MEMORY_SOURCE_LABEL[s.source] || '그 밖'}</span>
+                            <span className="text-slate-500 font-mono">{s.count}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* b. 월별 누적 line */}
+                  <div className="p-4 bg-white border border-slate-200 rounded-xl">
+                    <div className="text-xs font-semibold text-slate-900 mb-3">월별 신규 학습 (최근 6개월)</div>
+                    {detailedStats.monthlyArr.length === 0 ? (
+                      <div className="text-center py-6 text-slate-400 text-xs">데이터 부족</div>
+                    ) : (
+                      <div className="flex items-end gap-2 h-32">
+                        {detailedStats.monthlyArr.map((m) => {
+                          const max = Math.max(...detailedStats.monthlyArr.map((x) => x.count), 1);
+                          const heightPercent = (m.count / max) * 100;
+                          return (
+                            <div key={m.month} className="flex-1 flex flex-col items-center gap-1">
+                              <div className="flex-1 w-full flex items-end">
+                                <div
+                                  className="w-full bg-gradient-to-t from-violet-500 to-fuchsia-400 rounded-t-md transition-all hover:opacity-80"
+                                  style={{ height: `${heightPercent}%`, minHeight: m.count > 0 ? '4px' : '0' }}
+                                  title={`${m.month}: ${m.count}건`}
+                                />
+                              </div>
+                              <div className="text-[9px] text-slate-400">{m.month.slice(5)}</div>
+                              <div className="text-[10px] text-slate-600 font-mono">{m.count}</div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* c. 중요도 histogram */}
+                  <div className="p-4 bg-white border border-slate-200 rounded-xl">
+                    <div className="text-xs font-semibold text-slate-900 mb-3">중요도 분포</div>
+                    <div className="flex items-end gap-1 h-32">
+                      {detailedStats.importanceHist.map((count, idx) => {
+                        const max = Math.max(...detailedStats.importanceHist, 1);
+                        const heightPercent = (count / max) * 100;
+                        const impVal = idx + 1;
+                        const color = impVal >= 8 ? '#34d399' : impVal >= 5 ? '#fbbf24' : '#64748b';
+                        return (
+                          <div key={idx} className="flex-1 flex flex-col items-center gap-1">
+                            <div className="flex-1 w-full flex items-end">
+                              <div
+                                className="w-full rounded-t-md transition-all hover:opacity-80"
+                                style={{ height: `${heightPercent}%`, minHeight: count > 0 ? '4px' : '0', background: color }}
+                                title={`중요도 ${impVal}: ${count}건`}
+                              />
+                            </div>
+                            <div className="text-[9px] text-slate-400">{impVal}</div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  {/* d. 최근 활용 timeline */}
+                  <div className="p-4 bg-white border border-slate-200 rounded-xl">
+                    <div className="text-xs font-semibold text-slate-900 mb-3 flex items-center gap-1.5">
+                      <Clock className="w-3 h-3 text-cyan-700" />
+                      최근 AI 참고 학습 (Top 8)
+                    </div>
+                    <div className="space-y-1.5 max-h-44 overflow-y-auto">
+                      {detailedStats.recentTimeline.map((m) => {
+                        const meta = TYPE_META[m.memoryType] || FALLBACK_TYPE_META;
+                        const last = new Date(m.lastAccessedAt);
+                        const daysAgo = Math.max(0, Math.floor((Date.now() - last.getTime()) / 86_400_000));
+                        return (
+                          <div key={m.id} className="flex items-start gap-2 text-[11px]">
+                            <div className="w-1.5 h-1.5 rounded-full mt-1.5 flex-shrink-0" style={{ background: meta.color }} />
+                            <div className="flex-1 min-w-0">
+                              <div className="text-slate-900 truncate">{m.memoryKey}</div>
+                              <div className="text-slate-400 text-[10px]">
+                                {meta.label} · {daysAgo === 0 ? '오늘' : `${daysAgo}일 전`}
+                                {m.usageCount ? ` · AI 활용 ${m.usageCount}회` : ''}
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+
+      </div>
+
+      {/* ───────── 모달 ───────── */}
+      <JourneyModalShell open={showMemoryDetail} onClose={() => setShowMemoryDetail(false)} labelledBy="memory-detail-title" panelClassName="w-full max-w-4xl">
+        <div className="flex flex-col max-h-[90vh]">
+          <div className="flex items-center gap-2 px-5 py-3 border-b border-slate-200">
+            <h2 id="memory-detail-title" className="text-sm font-semibold text-slate-900">학습 자세히</h2>
+            <button onClick={() => setShowMemoryDetail(false)} className="ml-auto px-3 py-1.5 text-xs border border-slate-300 rounded-lg">닫기</button>
+          </div>
+          <div className="flex-1 overflow-y-auto p-5 space-y-4">
         {/* ───────── 4. 5 메모리 타입 분포 도넛 ───────── */}
         <div className="p-5 bg-white border border-slate-200 rounded-2xl">
           <div className="flex items-center justify-between mb-4">
@@ -865,192 +1084,9 @@ export default function AiMemoryPage() {
           )}
         </div>
 
-        {/* ───────── 6. 1-click 액션 3 카드 ───────── */}
-        <div className="grid md:grid-cols-3 gap-3">
-          <button
-            onClick={() => handleQuickStart({ id: 'cleanup', icon: Trash2, label: '', hint: '', gradient: '', action: 'cleanup' })}
-            disabled={!isAdmin}
-            className="p-4 bg-gradient-to-br from-rose-50 to-pink-50 border border-rose-200 hover:border-rose-300 rounded-xl text-left transition-all group disabled:opacity-40 disabled:cursor-not-allowed"
-          >
-            <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-rose-400 to-pink-500 flex items-center justify-center mb-2 group-hover:scale-110 transition-transform">
-              <Trash2 className="w-5 h-5 text-white" />
-            </div>
-            <div className="text-sm font-semibold text-slate-900 mb-1">오래된 학습 정리</div>
-            <div className="text-[11px] text-slate-500 leading-relaxed">
-              90일+ 미사용 + 중요도 3 미만 학습을 일괄 삭제합니다.
-            </div>
-            {!isAdmin && <div className="text-[10px] text-rose-700 mt-1">회사 관리자 전용</div>}
-          </button>
-
-          <button
-            onClick={() => handleQuickStart({ id: 'add', icon: Plus, label: '', hint: '', gradient: '', action: 'add' })}
-            disabled={!isAdmin}
-            className="p-4 bg-gradient-to-br from-emerald-50 to-teal-50 border border-emerald-200 hover:border-emerald-300 rounded-xl text-left transition-all group disabled:opacity-40 disabled:cursor-not-allowed"
-          >
-            <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-emerald-400 to-teal-500 flex items-center justify-center mb-2 group-hover:scale-110 transition-transform">
-              <Plus className="w-5 h-5 text-white" />
-            </div>
-            <div className="text-sm font-semibold text-slate-900 mb-1">직접 학습 추가</div>
-            <div className="text-[11px] text-slate-500 leading-relaxed">
-              회사 정책·고객 인사이트·톤 가이드를 직접 입력하여 AI에게 우선 참고시킵니다.
-            </div>
-            {!isAdmin && <div className="text-[10px] text-emerald-700 mt-1">회사 관리자 전용</div>}
-          </button>
-
-          <button
-            onClick={() => setShowGuideModal(true)}
-            className="p-4 bg-gradient-to-br from-amber-50 to-orange-50 border border-amber-200 hover:border-amber-300 rounded-xl text-left transition-all group"
-          >
-            <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-amber-400 to-orange-500 flex items-center justify-center mb-2 group-hover:scale-110 transition-transform">
-              <BookOpen className="w-5 h-5 text-white" />
-            </div>
-            <div className="text-sm font-semibold text-slate-900 mb-1">5 타입 가이드</div>
-            <div className="text-[11px] text-slate-500 leading-relaxed">
-              자동 누적되는 학습과 직접 입력해야 하는 학습: 예시 + 흐름 안내.
-            </div>
-          </button>
+          </div>
         </div>
-
-        {/* ───────── 7. 자세히 분석 토글 ───────── */}
-        <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden">
-          <button
-            onClick={() => setShowDetailedAnalysis((v) => !v)}
-            className="w-full flex items-center justify-between px-5 py-4 hover:bg-white transition-colors"
-          >
-            <div className="flex items-center gap-2">
-              <BarChart3 className="w-4 h-4 text-cyan-700" />
-              <span className="text-sm font-semibold text-slate-900">자세히 분석</span>
-              <span className="text-[10px] text-slate-400">출처별 분포 · 월별 누적 · 중요도 분포 · 최근 활용</span>
-            </div>
-            {showDetailedAnalysis ? <ChevronUp className="w-4 h-4 text-slate-500" /> : <ChevronDown className="w-4 h-4 text-slate-500" />}
-          </button>
-
-          {showDetailedAnalysis && (
-            <div className="px-5 pb-5 space-y-5 border-t border-slate-100 pt-5">
-              {allLoading ? (
-                <div className="flex justify-center py-12">
-                  <Loader2 className="w-5 h-5 animate-spin text-slate-400" />
-                </div>
-              ) : !detailedStats ? (
-                <div className="text-center py-8 text-slate-400 text-sm">분석할 학습 데이터가 없습니다.</div>
-              ) : (
-                <div className="grid md:grid-cols-2 gap-5">
-                  {/* a. 출처별 도넛 */}
-                  <div className="p-4 bg-white border border-slate-200 rounded-xl">
-                    <div className="text-xs font-semibold text-slate-900 mb-3">출처별 분포</div>
-                    <div className="flex items-center gap-4">
-                      <svg viewBox="0 0 200 200" className="w-32 h-32">
-                        {detailedStats.sourceSegs.map((s) => (
-                          <path key={s.source} d={s.pathD} fill={s.color}>
-                            <title>{s.source}: {s.count}건 ({(s.percent * 100).toFixed(1)}%)</title>
-                          </path>
-                        ))}
-                        <text x="100" y="100" textAnchor="middle" dominantBaseline="middle" className="fill-slate-900" style={{ fontSize: '18px', fontWeight: 700 }}>
-                          {detailedStats.sourceTotal}
-                        </text>
-                      </svg>
-                      <div className="flex-1 space-y-1">
-                        {detailedStats.sourceSegs.map((s) => (
-                          <div key={s.source} className="flex items-center gap-2 text-[11px]">
-                            <div className="w-2.5 h-2.5 rounded-sm flex-shrink-0" style={{ background: s.color }} />
-                            <span className="text-slate-700 flex-1 truncate" title={s.source}>{s.source}</span>
-                            <span className="text-slate-500 font-mono">{s.count}</span>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* b. 월별 누적 line */}
-                  <div className="p-4 bg-white border border-slate-200 rounded-xl">
-                    <div className="text-xs font-semibold text-slate-900 mb-3">월별 신규 학습 (최근 6개월)</div>
-                    {detailedStats.monthlyArr.length === 0 ? (
-                      <div className="text-center py-6 text-slate-400 text-xs">데이터 부족</div>
-                    ) : (
-                      <div className="flex items-end gap-2 h-32">
-                        {detailedStats.monthlyArr.map((m) => {
-                          const max = Math.max(...detailedStats.monthlyArr.map((x) => x.count), 1);
-                          const heightPercent = (m.count / max) * 100;
-                          return (
-                            <div key={m.month} className="flex-1 flex flex-col items-center gap-1">
-                              <div className="flex-1 w-full flex items-end">
-                                <div
-                                  className="w-full bg-gradient-to-t from-violet-500 to-fuchsia-400 rounded-t-md transition-all hover:opacity-80"
-                                  style={{ height: `${heightPercent}%`, minHeight: m.count > 0 ? '4px' : '0' }}
-                                  title={`${m.month}: ${m.count}건`}
-                                />
-                              </div>
-                              <div className="text-[9px] text-slate-400">{m.month.slice(5)}</div>
-                              <div className="text-[10px] text-slate-600 font-mono">{m.count}</div>
-                            </div>
-                          );
-                        })}
-                      </div>
-                    )}
-                  </div>
-
-                  {/* c. 중요도 histogram */}
-                  <div className="p-4 bg-white border border-slate-200 rounded-xl">
-                    <div className="text-xs font-semibold text-slate-900 mb-3">중요도 분포</div>
-                    <div className="flex items-end gap-1 h-32">
-                      {detailedStats.importanceHist.map((count, idx) => {
-                        const max = Math.max(...detailedStats.importanceHist, 1);
-                        const heightPercent = (count / max) * 100;
-                        const impVal = idx + 1;
-                        const color = impVal >= 8 ? '#34d399' : impVal >= 5 ? '#fbbf24' : '#64748b';
-                        return (
-                          <div key={idx} className="flex-1 flex flex-col items-center gap-1">
-                            <div className="flex-1 w-full flex items-end">
-                              <div
-                                className="w-full rounded-t-md transition-all hover:opacity-80"
-                                style={{ height: `${heightPercent}%`, minHeight: count > 0 ? '4px' : '0', background: color }}
-                                title={`중요도 ${impVal}: ${count}건`}
-                              />
-                            </div>
-                            <div className="text-[9px] text-slate-400">{impVal}</div>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  </div>
-
-                  {/* d. 최근 활용 timeline */}
-                  <div className="p-4 bg-white border border-slate-200 rounded-xl">
-                    <div className="text-xs font-semibold text-slate-900 mb-3 flex items-center gap-1.5">
-                      <Clock className="w-3 h-3 text-cyan-700" />
-                      최근 AI 참고 학습 (Top 8)
-                    </div>
-                    <div className="space-y-1.5 max-h-44 overflow-y-auto">
-                      {detailedStats.recentTimeline.map((m) => {
-                        const meta = TYPE_META[m.memoryType] || FALLBACK_TYPE_META;
-                        const last = new Date(m.lastAccessedAt);
-                        const daysAgo = Math.max(0, Math.floor((Date.now() - last.getTime()) / 86_400_000));
-                        return (
-                          <div key={m.id} className="flex items-start gap-2 text-[11px]">
-                            <div className="w-1.5 h-1.5 rounded-full mt-1.5 flex-shrink-0" style={{ background: meta.color }} />
-                            <div className="flex-1 min-w-0">
-                              <div className="text-slate-900 truncate">{m.memoryKey}</div>
-                              <div className="text-slate-400 text-[10px]">
-                                {meta.label} · {daysAgo === 0 ? '오늘' : `${daysAgo}일 전`}
-                                {m.usageCount ? ` · AI 활용 ${m.usageCount}회` : ''}
-                              </div>
-                            </div>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  </div>
-                </div>
-              )}
-            </div>
-          )}
-        </div>
-
-        {/* ───────── 8. Source caption ───────── */}
-        <div className="text-center text-[10px] text-slate-400 italic pt-4">실측 데이터가 없으면 그 학습은 생성되지 않습니다. AI는 시스템 프롬프트에 중요도 3 이상 학습 최대 30건을 자동 포함합니다. 시간이 지날수록 추천 정확도가 향상됩니다</div>
-      </div>
-
-      {/* ───────── 모달 ───────── */}
+      </JourneyModalShell>
       <ConfirmModal state={confirmState} onClose={() => setConfirmState(null)} />
       <MemoryTypeGuideModal open={showGuideModal} onClose={() => setShowGuideModal(false)} />
       <AddMemoryModal open={showAddModal} onClose={() => setShowAddModal(false)} onSave={handleAddMemory} />

@@ -23,6 +23,19 @@ export class UserFacingError extends Error {
   }
 }
 
+/**
+ * 신규 고객인데 쓸 수 있는 휴대폰 번호가 없다 — 그 한 건을 넣을 수 없다는 뜻이지 장애가 아니다(★0921).
+ * 문구는 종전 그대로(Error 하위 · 기존 호출부 동작 불변). 대량 적재 호출부가 이 타입으로 "건너뛸 건"과 "멈출 장애"를 가른다
+ * (문구 문자열 대조 금지). 경위 = 우커머스 회원 가져오기가 전화번호 없는 회원 1명에서 4몰 전부 중단(BUGS B-0921-3).
+ * ★1028 cdp-identity.ts 에서 옮김(그 모듈이 재export) — 적재 오류 판정 CT(mall-import)가 식별 모듈 없이 읽는다.
+ */
+export class CdpPhoneRequiredError extends Error {
+  constructor() {
+    super('신규 회원 생성 시 phone은 필수입니다 (UNIQUE 제약 정합).');
+    this.name = 'CdpPhoneRequiredError';
+  }
+}
+
 /** UserFacingError → 응답(상태 · 본문) · 그 밖 = null(호출부가 지금처럼 잇는다) */
 export function userErrorResponse(err: unknown): { status: number; body: Record<string, unknown> } | null {
   if (!(err instanceof UserFacingError)) return null;

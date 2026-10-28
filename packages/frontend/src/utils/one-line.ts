@@ -769,8 +769,21 @@ export const lineStoreOf = (a: LineStepsAnswers): { address?: string; business_h
 /** 할인 코드 모양(서버와 같은 규칙 · 영숫자 · 하이픈 · 밑줄 2~24) */
 export const LINE_COUPON_CODE_RE = /^[A-Za-z0-9_-]{2,24}$/;
 
-/** 템플릿 상품 단계 — 지금 담은 상품 수(몰 + 직접) */
+/** 템플릿 상품 단계 — 지금 담은 상품 수(몰 + 직접 · 칸 상한을 차지하는 수) */
 export const lineTemplateCount = (a: LineStepsAnswers): number => (a.picks || []).length + (a.manualList || []).filter((m) => m.name.trim()).length;
+
+/**
+ * ★ 2026-10-28 B-1028-2 — 구성에 실리는 상품 수 = `lineCompositionGoods`(사진 있는 상품 · 요청 본문 · 서버 조립 `lineCookManual` · 미리보기 진단과 같은 목록).
+ *   옛: 상품 단계는 이름만 있어도 세어 「1개 담고 완료」인데 서버 진단은 사진 없는 직접 상품을 0개로 봐 「꼭 필요」로 막혔다.
+ */
+export const lineCompositionReady = (a: LineStepsAnswers, max: number): { count: number; names: string[]; missingPhoto: number; overCap: number } => {
+  const g = lineCompositionGoods(a, max);
+  const names = [...g.picks.map((c) => c.name), ...g.manual.map((m) => m.name)];
+  // 빠지는 이유 둘을 따로 센다(Codex 1R · 사진 없음 = 사진을 넣으면 실림 · 상한 넘음 = 빼야 함 · 구성을 바꾸면 상한이 줄 수 있다)
+  const withPhoto = lineCompositionGoods(a, Number.MAX_SAFE_INTEGER);
+  const missingPhoto = (a.picks || []).filter((p) => !p.imageUrl).length + (a.manualList || []).filter((m) => m.name.trim() && !m.image).length;
+  return { count: names.length, names, missingPhoto, overCap: withPhoto.picks.length + withPhoto.manual.length - names.length };
+};
 
 /**
  * 템플릿 생성 요청 몸통(세 채널 공통) — 1017 몸통 칸 그대로 + template · page.

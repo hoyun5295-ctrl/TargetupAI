@@ -249,7 +249,7 @@ export async function hasOriginException(params: {
           AND (
                 (scope = 'global'      AND user_id IS NULL AND company_id IS NULL)
              OR (scope = 'user'        AND user_id    = $3::uuid)
-             OR (scope IN ('company_api','company_agent') AND company_id = $4::uuid)
+             OR (scope IN ('company_api','company_agent','company_plugin') AND company_id = $4::uuid)
           )
         LIMIT 1`,
       [scopes, addr, params.userId || null, params.companyId || null]
@@ -330,10 +330,28 @@ export function isOriginAllowlistEnforced(now: Date = new Date()): boolean {
   return now.getTime() >= from.getTime();
 }
 
+/** 기계 경로 출발지 범위 — 회사 API(전권 키) · 사내 에이전트 · 플러그인 키(★1028 K8 · 몰 하나 · 회원 토큰 발급만) */
+export type MachineOriginScope = 'company_api' | 'company_agent' | 'company_plugin';
+
+/** 그 회사가 플러그인 키 범위 출발지를 등록했는가(조회 실패 = 거짓 = 기록만 · 통제 장치 오류로 회원 식별을 끊지 않는다) */
+async function hasCompanyPluginOrigins(companyId: string): Promise<boolean> {
+  try {
+    const r = await query(
+      `SELECT 1 FROM access_origin_allowlist
+        WHERE is_active = true AND (expires_at IS NULL OR expires_at > NOW()) AND scope = 'company_plugin' AND company_id = $1::uuid
+        LIMIT 1`,
+      [companyId],
+    );
+    return r.rows.length > 0;
+  } catch {
+    return false;
+  }
+}
+
 export async function evaluateMachineOrigin(params: {
   ip: string | null | undefined;
   companyId: string;
-  scope: 'company_api' | 'company_agent';
+  scope: MachineOriginScope;
   now?: Date;
 }): Promise<{ decision: OriginDecision; registered: boolean; ip: string | null }> {
   const addr = normalizeIp(params.ip);
@@ -347,6 +365,10 @@ export async function evaluateMachineOrigin(params: {
   });
   if (lookup === 'exempt') return { decision: 'allow', registered: true, ip: addr };
   if (lookup === 'indeterminate') return { decision: 'record', registered: false, ip: addr };
+  // ★ 2026-10-28 자사몰 대비 K8 — 플러그인 키 범위는 기본 「기록만」 · 고객사가 그 범위 출발지를 하나라도 등록하면 그 회사만 차단(시행 스위치와 따로)
+  if (params.scope === 'company_plugin') {
+    return { decision: (await hasCompanyPluginOrigins(params.companyId)) ? 'block' : 'record', registered: false, ip: addr };
+  }
 
   return {
     decision: isOriginAllowlistEnforced(params.now) ? 'block' : 'record',
@@ -382,7 +404,7 @@ function shouldRecordOnce(key: string): boolean {
 }
 
 export async function guardMachineOrigin(
-  req: any, res: any, companyId: string, scope: 'company_api' | 'company_agent',
+  req: any, res: any, companyId: string, scope: MachineOriginScope,
 ): Promise<boolean> {
   try {
     const v = await evaluateMachineOrigin({ ip: req.ip, companyId, scope });

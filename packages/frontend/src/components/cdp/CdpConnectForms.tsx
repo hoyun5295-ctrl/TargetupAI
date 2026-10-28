@@ -14,12 +14,13 @@
 import {
   Check, Loader2, Link2, Unlink, Eye, EyeOff, Code2, Copy,
   ShoppingCart, Palette, LayoutTemplate, Server, Boxes, Store, ChevronUp, ChevronDown, ExternalLink,
-  Blocks, RefreshCw, AlertCircle, X, FileText,
+  Blocks, RefreshCw, AlertCircle, X, FileText, KeyRound,
 } from 'lucide-react';
 import { GuideStep } from './CdpFormPrimitives';
 import { buildSdkScriptTag } from '../../utils/cdp-sdk-script';
 // ★ 2026-09-14 W4 우커머스 — 개발자 전달 문안·워드프레스 조각은 CT 가 만든다(폼은 그리기만)
 import { buildWooDeveloperText, buildWooBodyAttrsSnippet, WOO_WEBHOOK_TOPICS, WOO_TOPIC_LABEL } from '../../utils/woocommerce-guide';
+import { CAUSE_SENTENCE, UNKNOWN_PROBLEM_SENTENCE, type IntegrationProblem } from '../../utils/integration-cause';
 
 // ════════════════════════════════════════════════════════════════════
 // 상태 타입 — 각 provider `/status` 응답
@@ -54,6 +55,8 @@ export interface GodoStatus {
   /** ★2026-08-10 주기 수집 관측값 — 마지막 성공 시각 / 마지막 실패 사유(있으면 조치 필요). */
   lastSyncedAt?: string | null;
   syncError?: { message: string; code: string; at: string | null } | null;
+  /** ★1028 K7 서버 분류(없으면 null) */
+  problem?: IntegrationProblem | null;
 }
 
 // ★ 2026-07-06 네이버 커머스 = client_credentials — scope/Redirect URI 개념 없음. 앱에 서버 IP 등록 + "주문 판매자" API 그룹 필요.
@@ -134,7 +137,7 @@ export function CdpCafe24ConnectForm(p: CdpCafe24ConnectFormProps) {
           {/* 기본 흐름 — 한줄로 공식 앱 (mall_id만 입력, 2026-07-03) */}
           <div className="bg-violet-50 border border-violet-200 rounded-xl p-4">
             <div className="text-xs font-semibold text-violet-900 mb-1">쇼핑몰 ID만 입력하면 연결됩니다</div>
-            <div className="text-[11px] text-slate-500">한줄로 공식 카페24 앱으로 연결되어 회원·주문·장바구니가 자동 동기화됩니다. 새 창에서 카페24 로그인 + 권한 동의만 하면 끝.</div>
+            <div className="text-[11px] text-slate-500">한줄로 공식 카페24 앱으로 연결됩니다. 새 창에서 카페24 로그인과 권한 동의만 하면 돼요.</div>
           </div>
 
           <div>
@@ -545,7 +548,7 @@ export function CdpImwebConnectForm(p: CdpImwebConnectFormProps) {
               아임웹 앱스토어에서 <strong className="text-slate-800">한줄로</strong> 앱을 추가하면 전달되는 <strong className="text-slate-800">사이트 코드(siteCode)</strong>를 확인합니다.
             </GuideStep>
             <GuideStep n={2}>
-              사이트 코드를 아래에 입력하고 연결하면, 새 창에서 아임웹 동의 후 회원·주문·수신동의·장바구니가 자동 동기화됩니다.
+              사이트 코드를 아래에 입력하고 연결하면 새 창에서 아임웹 승인이 이어집니다.
             </GuideStep>
           </div>
 
@@ -633,10 +636,17 @@ export function CdpGodoConnectForm(p: CdpGodoConnectFormProps) {
             <div className="flex-1">
               <div className="text-sm font-medium text-emerald-900">고도몰 연동됨</div>
               <div className="text-xs text-emerald-700 mt-1">
-                status: {p.status.status} · 연결: {p.status.connectedAt ? new Date(p.status.connectedAt).toLocaleString('ko-KR') : '-'}
+                연결: {p.status.connectedAt ? new Date(p.status.connectedAt).toLocaleString('ko-KR') : '-'}
+                {p.status.lastSyncedAt ? ` · 마지막 수집 ${new Date(p.status.lastSyncedAt).toLocaleString('ko-KR')}` : ''}
               </div>
             </div>
           </div>
+          {/* ★1028 K14 N2 — 수집 문제 칸(서버 분류 · 원인 문장 · 사람이 할 일만 붉은 칸 · 서버 원문 대신) */}
+          {p.status.syncError && (
+            p.status.problem?.kind === 'action'
+              ? <div className="text-[12px] text-rose-800 bg-rose-50 border border-rose-200 rounded-lg px-3 py-2 flex items-start gap-1.5"><AlertCircle className="w-3.5 h-3.5 mt-0.5 shrink-0" />{CAUSE_SENTENCE[p.status.problem.cause]}</div>
+              : <div className="text-[12px] text-slate-500">{p.status.problem ? CAUSE_SENTENCE[p.status.problem.cause] : UNKNOWN_PROBLEM_SENTENCE}</div>
+          )}
           {p.isAdmin && (
             <button onClick={p.onDisconnect} className="px-4 py-2 bg-rose-100 border border-rose-300 hover:bg-rose-100 text-rose-800 text-sm font-medium rounded-lg flex items-center gap-2">
               <Unlink className="w-4 h-4" /> 연동 해제
@@ -648,7 +658,7 @@ export function CdpGodoConnectForm(p: CdpGodoConnectFormProps) {
           <div className="bg-violet-50 border border-violet-200 rounded-xl p-4 space-y-3">
             <div className="text-xs font-semibold text-violet-900">쇼핑몰 인증키 연결 · 2단계</div>
             <GuideStep n={1}>고도몰 쇼핑몰 관리자에서 한줄로 API 사용을 신청하고 <strong className="text-slate-800">쇼핑몰 인증키(key)</strong>를 발급받습니다.</GuideStep>
-            <GuideStep n={2}>발급된 인증키를 아래에 입력하면, 최근 주문이 자동으로 들어옵니다.</GuideStep>
+            <GuideStep n={2}>발급된 인증키를 아래에 입력해 연결합니다.</GuideStep>
           </div>
 
           <div>
@@ -712,6 +722,10 @@ export interface WooMallStatus {
   /** ★2026-09-18 분류 코드(없으면 회사 공용) */
   storeCode?: string | null;
   syncError: { message: string; code: string; at: string | null } | null;
+  /** ★1028 K7 서버 분류(없으면 null) */
+  problem?: IntegrationProblem | null;
+  /** ★1028 M11 웹훅을 누가 만드나(서버 판정) */
+  webhookOwner?: 'auto' | 'manual';
   /** ★2026-09-21 기존 회원·주문 가져오기 진행(수십 분~수 시간 · 백그라운드). 옛 서버 응답엔 없다 → optional */
   backfill?: { stage: 'customers' | 'orders' | 'done'; customersImported: number; ordersImported: number; noPhone?: number; failed?: number; truncated: boolean; doneAt: string | null } | null;
   /** ★2026-10-27 회원 정보 다시 맞추기(서버 사유 = reread · 첫 가져오기를 끝낸 몰만). 옛 서버 응답엔 없다 → optional */
@@ -773,6 +787,10 @@ export interface CdpWooConnectFormProps {
   onConnect: () => void;
   onDisconnect: (mallId: string) => void;
   onRotateSecret: (mallId: string) => void;
+  /** ★1028 K8 플러그인 키 — rotate false = 지금 키 복사 · true = 새로 발급(확인 뒤) */
+  onPluginKey: (mallId: string, rotate: boolean) => void;
+  /** ★1028 N3 사람이 할 일이 있는 몰을 그 주소로 다시 승인 */
+  onReauthorize?: (siteUrl: string) => void;
   issued: WooIssuedSecret | null;
   onDismissIssued: () => void;
   publicKey: string | null | undefined;
@@ -815,8 +833,8 @@ export function CdpWooConnectForm(p: CdpWooConnectFormProps) {
   ) : null;
   const wooHead = buildSdkScriptTag(p.publicKey);
   const wooBody = buildWooBodyAttrsSnippet();
-  const guideFor = (m: { mallId: string; siteUrl: string; webhookUrl: string; hasRestKeys: boolean; consentMetaKey: string | null }) =>
-    buildWooDeveloperText({ mallId: m.mallId, siteUrl: m.siteUrl, webhookUrl: m.webhookUrl, sdkKey: p.publicKey || null, consentMetaKey: m.consentMetaKey, needsRestKeys: !m.hasRestKeys });
+  const guideFor = (m: { mallId: string; siteUrl: string; webhookUrl: string; hasRestKeys: boolean; consentMetaKey: string | null; syncError?: WooMallStatus['syncError'] }) =>
+    buildWooDeveloperText({ mallId: m.mallId, siteUrl: m.siteUrl, webhookUrl: m.webhookUrl, sdkKey: p.publicKey || null, consentMetaKey: m.consentMetaKey, needsRestKeys: !m.hasRestKeys, lastError: m.syncError ? `${m.syncError.code} ${m.syncError.message}` : null });
   const issuedMall = p.issued ? malls.find((m) => m.mallId === p.issued!.mallId) : undefined;
 
   const blk = (label: string, code: string, copyLabel: string) => (
@@ -911,19 +929,31 @@ export function CdpWooConnectForm(p: CdpWooConnectFormProps) {
                   {m.memberReread?.reason === 'reread' && (
                     <div className="mt-0.5 text-[11px] text-slate-400">매주 새벽 회원 정보를 다시 맞춰요</div>
                   )}
-                  {m.syncError && (
+                  {/* ★1028 K7 — 사람이 할 일(action)만 붉은 칸 · 기다리면 풀리는 것은 회색 한 줄 · 서버 원문은 개발자 안내 복사에만 */}
+                  {m.syncError && m.problem?.kind === 'action' && (
                     <div className="mt-2 text-[11px] text-rose-800 bg-rose-50 border border-rose-200 rounded-lg px-3 py-2 inline-flex items-start gap-1.5">
-                      <AlertCircle className="w-3.5 h-3.5 mt-0.5 shrink-0" /> 수집 실패 · {m.syncError.message}
+                      <AlertCircle className="w-3.5 h-3.5 mt-0.5 shrink-0" /> {CAUSE_SENTENCE[m.problem.cause]}
                     </div>
+                  )}
+                  {m.syncError && m.problem?.kind !== 'action' && (
+                    <div className="mt-1 text-[11px] text-slate-500">{m.problem ? CAUSE_SENTENCE[m.problem.cause] : UNKNOWN_PROBLEM_SENTENCE}</div>
                   )}
                 </div>
               </div>
               <div className="mt-3 flex flex-wrap gap-2">
+                {p.isAdmin && m.problem?.kind === 'action' && p.onReauthorize && (
+                  <button type="button" onClick={() => p.onReauthorize!(m.siteUrl)} className="px-3 py-1.5 bg-rose-100 hover:bg-rose-200 text-rose-900 rounded-lg text-xs font-medium inline-flex items-center gap-1.5"><RefreshCw className="w-3.5 h-3.5" />다시 승인</button>
+                )}
                 <button type="button" onClick={() => p.onCopy(guideFor(m), '개발자 전달용 안내')} className="px-3 py-1.5 bg-violet-100 hover:bg-violet-200 text-violet-900 rounded-lg text-xs font-medium inline-flex items-center gap-1.5"><FileText className="w-3.5 h-3.5" />개발자 안내 복사</button>
                 <button type="button" onClick={() => p.onCopy(m.webhookUrl, '웹훅 URL')} className="px-3 py-1.5 bg-indigo-100 hover:bg-indigo-200 text-indigo-900 rounded-lg text-xs font-medium inline-flex items-center gap-1.5"><Copy className="w-3.5 h-3.5" />웹훅 URL</button>
                 {p.canConnect && (
                   <>
-                    <button type="button" onClick={() => p.onRotateSecret(m.mallId)} className="px-3 py-1.5 bg-white hover:bg-slate-100 border border-slate-200 text-slate-600 rounded-lg text-xs font-medium inline-flex items-center gap-1.5"><RefreshCw className="w-3.5 h-3.5" />비밀키 재발급</button>
+                    <button type="button" onClick={() => p.onPluginKey(m.mallId, false)} className="px-3 py-1.5 bg-emerald-100 hover:bg-emerald-200 text-emerald-900 rounded-lg text-xs font-medium inline-flex items-center gap-1.5" title="워드프레스 한줄로 플러그인 설정에 넣는 키 · 이 몰 회원 토큰만 받는다"><KeyRound className="w-3.5 h-3.5" />플러그인 키 복사</button>
+                    <button type="button" onClick={() => p.onPluginKey(m.mallId, true)} className="px-3 py-1.5 bg-white hover:bg-slate-100 border border-slate-200 text-slate-600 rounded-lg text-xs font-medium inline-flex items-center gap-1.5"><RefreshCw className="w-3.5 h-3.5" />플러그인 키 새로 발급</button>
+                    {/* ★1028 M11 — 1클릭 연결 몰(웹훅 = 30분 점검이 만든다)은 비밀키 재발급 버튼을 보이지 않는다 */}
+                    {m.webhookOwner !== 'auto' && (
+                      <button type="button" onClick={() => p.onRotateSecret(m.mallId)} className="px-3 py-1.5 bg-white hover:bg-slate-100 border border-slate-200 text-slate-600 rounded-lg text-xs font-medium inline-flex items-center gap-1.5"><RefreshCw className="w-3.5 h-3.5" />비밀키 재발급</button>
+                    )}
                     <button type="button" onClick={() => p.onDisconnect(m.mallId)} className="px-3 py-1.5 bg-rose-100 border border-rose-300 hover:bg-rose-100 text-rose-800 rounded-lg text-xs font-medium inline-flex items-center gap-1.5"><Unlink className="w-3.5 h-3.5" />해제</button>
                   </>
                 )}
@@ -1017,7 +1047,7 @@ export function CdpWooConnectForm(p: CdpWooConnectFormProps) {
           <a href="/api/woocommerce/plugin.zip" download className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white hover:bg-slate-100 border border-slate-200 text-slate-600 font-medium">
             <Blocks className="w-3.5 h-3.5" /> 한줄로 플러그인 다운로드(선택)
           </a>
-          <span>워드프레스 플러그인 업로드에 그대로 올리면 수집 스크립트 삽입·수신동의 REST 노출이 자동입니다. 로그인 회원 식별은 플러그인 설정에 CDP 비밀키를 넣으면 켜집니다(비밀키는 몰 서버에만 저장 · 페이지에 실리지 않음). 주문·회원 동기화는 위 승인 연결만으로 됩니다.</span>
+          <span>워드프레스 플러그인 업로드에 그대로 올리면 수집 스크립트 삽입·수신동의 REST 노출이 자동입니다. 로그인 회원 식별은 위 몰 줄의 [플러그인 키 복사]로 받은 키를 플러그인 설정에 넣으면 켜집니다(이 몰 회원 토큰만 받는 키 · 몰 서버에만 저장 · 페이지에 실리지 않음). 주문·회원 동기화는 위 승인 연결만으로 됩니다.</span>
         </div>
       </div>
 
@@ -1030,7 +1060,7 @@ export function CdpWooConnectForm(p: CdpWooConnectFormProps) {
         <div className="text-[11px] text-slate-500 -mt-2">주문(위)과 별개입니다. 테마의 &lt;head&gt; 에 아래 한 줄을 넣으면 방문·장바구니가 들어옵니다. 회원 식별(②)은 선택이며 테마 &lt;body&gt; 태그 한 줄을 바꿉니다.</div>
         <div className="space-y-4">
           {blk('① 설치 스크립트: 테마 header.php 의 <head> 안(모든 페이지)', wooHead, '우커머스 설치 스크립트')}
-          {blk('② 회원 식별(선택 · 한줄로 플러그인 1.0.2 와 CDP 비밀키 설정 필요): 테마 <body> 태그를 이렇게 바꿉니다', wooBody, '우커머스 회원 식별 코드')}
+          {blk('② 회원 식별(선택 · 한줄로 플러그인 1.0.3 과 플러그인 키 설정 필요): 테마 <body> 태그를 이렇게 바꿉니다', wooBody, '우커머스 회원 식별 코드')}
         </div>
       </div>
     </div>

@@ -15,6 +15,7 @@
 import crypto from 'crypto';
 import { query, pool } from '../config/database';
 import { pauseJourneyLineage } from './journey-lineage';
+import { createShortUrl } from './short-url';
 
 export interface PauseTokenInput {
   stepId: string;
@@ -97,6 +98,21 @@ export async function verifyPauseToken(token: string): Promise<PauseTokenPayload
 export function buildJourneyPauseUrl(token: string): string {
   const base = String(process.env.HANJUL_BASE_URL || 'https://hanjul.ai').replace(/\/+$/, '');
   return `${base}/journey-pause#t=${token}`;
+}
+
+/**
+ * ★ 2026-10-28 B-1028-1 — 문자에 싣는 정지 주소 = 단축(다른 담당자 링크 = 자동마케팅 멈춤 · 대행 승인 · 충전 승인과 같은 길) · 만료 = 토큰과 같은 24시간.
+ *   단축 실패 = 원래 주소(안내는 그대로 간다). 단축 주소 클릭은 담당자 링크라 고객 클릭 기록에서 빠진다(`isManagerLinkUrl`).
+ */
+export async function buildJourneyPauseShortUrl(companyId: string, token: string): Promise<string> {
+  const full = buildJourneyPauseUrl(token);
+  try {
+    const { shortUrl } = await createShortUrl({ companyId, fullUrl: full, expiresAt: new Date(Date.now() + TOKEN_TTL_MS) });
+    return shortUrl;
+  } catch (err: any) {
+    console.warn('[journey-pause] 정지 링크 단축 실패(원래 주소로 안내):', err?.message);
+    return full;
+  }
 }
 
 /** (순수) KST 오늘 'YYYY-MM-DD' */

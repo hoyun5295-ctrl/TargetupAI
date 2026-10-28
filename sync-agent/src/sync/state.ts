@@ -94,6 +94,23 @@ export class SyncStateManager {
     this.save();
   }
 
+  /** ★ 2026-10-28 고객 전량에 마지막으로 적용한 분류표 지문 — 칸이 없는 옛 상태 파일 = ''(분류표 없음)이라 업그레이드만으로 전량이 돌지 않는다 */
+  getAppliedValueMapsDigest(): string {
+    return this.state.appliedValueMapsDigest ?? '';
+  }
+
+  /** 디스크에 못 쓰면 메모리 값을 되돌리고 던진다 — 엔진이 「진행 중」을 못 박은 채 고객을 보내지 않게(다른 상태 칸의 save 는 삼킨다 · 그대로) */
+  setAppliedValueMapsDigest(digest: string): void {
+    const prev = this.state.appliedValueMapsDigest;
+    this.state.appliedValueMapsDigest = digest;
+    try {
+      this.writeFile();
+    } catch (error) {
+      this.state.appliedValueMapsDigest = prev;
+      throw error;
+    }
+  }
+
   /** Agent ID 설정 (서버 등록 후) */
   setAgentId(agentId: string): void {
     this.state.agentId = agentId;
@@ -198,16 +215,21 @@ export class SyncStateManager {
     return { ...DEFAULT_SYNC_STATE };
   }
 
+  /** 원자 저장 — 실패하면 던진다(save 는 삼키고 · setAppliedValueMapsDigest 는 되돌려 던진다) */
+  private writeFile(): void {
+    if (!fs.existsSync(DATA_DIR)) {
+      fs.mkdirSync(DATA_DIR, { recursive: true });
+    }
+    // ★ v1.6.1 (Codex 지적 정정): 원자 저장 — temp 쓰기 후 rename(교체).
+    //   직접 덮어쓰기는 쓰는 도중 비정상 종료(정전·강제 종료) 시 파일 손상 = 마지막 동기화 시각·ACK 보류함 유실.
+    const tmpFile = `${STATE_FILE}.tmp`;
+    fs.writeFileSync(tmpFile, JSON.stringify(this.state, null, 2), 'utf8');
+    fs.renameSync(tmpFile, STATE_FILE);
+  }
+
   private save(): void {
     try {
-      if (!fs.existsSync(DATA_DIR)) {
-        fs.mkdirSync(DATA_DIR, { recursive: true });
-      }
-      // ★ v1.6.1 (Codex 지적 정정): 원자 저장 — temp 쓰기 후 rename(교체).
-      //   직접 덮어쓰기는 쓰는 도중 비정상 종료(정전·강제 종료) 시 파일 손상 = 마지막 동기화 시각·ACK 보류함 유실.
-      const tmpFile = `${STATE_FILE}.tmp`;
-      fs.writeFileSync(tmpFile, JSON.stringify(this.state, null, 2), 'utf8');
-      fs.renameSync(tmpFile, STATE_FILE);
+      this.writeFile();
     } catch (error) {
       logger.error('동기화 상태 파일 저장 실패', {
         error: error instanceof Error ? error.message : String(error),

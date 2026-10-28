@@ -8,7 +8,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 vi.mock('../../config/database', () => ({ query: vi.fn(async () => ({ rows: [] })) }));
-vi.mock('../cdp-auth', () => ({ isCdpEnabledForPlan: vi.fn(async () => true) }));
+vi.mock('../cdp-auth', () => ({ isCdpEnabledForPlan: vi.fn(async () => true), cdpFactCollectGate: vi.fn(async () => ({ allowed: true, collectUntil: null, inactiveSinceUnknown: false })), }));   // ★1028 K7 몰 수집 = 사실 경로 판정
 vi.mock('../woocommerce-client', async (orig) => ({
   ...(await orig<any>()),
   syncWooOrdersSince: vi.fn(),

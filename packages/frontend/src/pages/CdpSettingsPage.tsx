@@ -70,6 +70,10 @@ const CDP_DASHBOARD_V2 = true;
 import { useAuthStore } from '../stores/authStore';
 import ConfirmModal, { type ConfirmState } from '../components/ConfirmModal';
 import { useToast } from '../components/ToastProvider';
+import { formatKstMonthDay } from '../utils/formatDate';
+import { serialRunner } from '../utils/dashboard-live';
+import { useApprovalWindow } from '../hooks/useApprovalWindow';
+import { readinessLines, type ProviderReadiness } from '../utils/provider-readiness-copy';
 
 // ════════════════════════════════════════════════════════════════════
 // 타입 매트릭스
@@ -77,6 +81,12 @@ import { useToast } from '../components/ToastProvider';
 
 interface CdpUsage {
   cdp_enabled: boolean;
+  /** ★1028 K7 서버 판정(요금제 · 구독 상태) — 화면은 이 값으로만 잠근다 */
+  cdp_open?: boolean;
+  /** 요금제가 끝난 뒤 몰 회원 · 주문을 받는 마지막 시각(없으면 null) */
+  collect_until?: string | null;
+  /** 받는 기간도 끝남 */
+  collect_stopped?: boolean;
   plan_code: string;
   plan_name: string;
   has_key: boolean;
@@ -89,6 +99,8 @@ interface CdpUsage {
 interface InstallStatus {
   keyIssuedAt: string | null;
   firstEventAt: string | null;
+  /** ★1028 K14 서버 판정(키 발급 10분 뒤에도 0건) */
+  stalled?: boolean;
   total: number;
   count24h: number;
   signals: { pageview: boolean; identify: boolean; consent: boolean; click: boolean };
@@ -128,24 +140,25 @@ interface CustomIssuedSecret {
 type ProviderKey = 'cafe24' | 'naver' | 'godo' | 'imweb' | 'makeshop' | 'custom' | 'woocommerce';
 
 const PROVIDER_CARDS: Array<{ key: ProviderKey; name: string; desc: string; full?: boolean }> = [
-  { key: 'cafe24', name: '카페24', desc: 'OAuth 자동 연동: 코딩 없이 회원·주문 동기화' },
-  { key: 'naver', name: '네이버 스마트스토어', desc: '커머스 API: 주문·구매고객 동기화' },
-  { key: 'godo', name: '고도몰', desc: '쇼핑몰 인증키 입력: 주문·고객 자동 동기화' },
-  { key: 'imweb', name: '아임웹', desc: 'OAuth 자동 연동: 회원·주문·수신동의 동기화' },
-  { key: 'makeshop', name: '메이크샵', desc: '커머스 API: 회원·주문·SMS수신동의 동기화' },
-  { key: 'woocommerce', name: '우커머스(워드프레스)', desc: 'REST 키·웹훅: 몰 여러 개 주문·회원 자동 동기화' },
+  // ★1028 K13 — 카드 · 창 안내는 연결 방법만 적는다(무엇이 되는지 = 서버 「준비 됨」 표 · 옛 고정 약속 문장 삭제)
+  { key: 'cafe24', name: '카페24', desc: '카페24 계정으로 승인해 연결' },
+  { key: 'naver', name: '네이버 스마트스토어', desc: '커머스 API 자격으로 연결' },
+  { key: 'godo', name: '고도몰', desc: '쇼핑몰 인증키로 연결' },
+  { key: 'imweb', name: '아임웹', desc: '아임웹 계정으로 승인해 연결' },
+  { key: 'makeshop', name: '메이크샵', desc: '파트너센터 앱 자격으로 연결' },
+  { key: 'woocommerce', name: '우커머스(워드프레스)', desc: '몰 관리자 승인 또는 REST 키로 연결 · 몰 여러 개' },
   { key: 'custom', name: '자체 호스팅 / 그 외 자사몰', desc: '직접 개발했거나 목록에 없는 자사몰: webhook 방식', full: true },
 ];
 
 // 네이버 API 그룹·메이크샵 권한 목록은 그 폼과 함께 CdpConnectForms로 옮겼다(★2026-08-10 Phase 5-3).
 
 const PROVIDER_META: Record<ProviderKey, { title: string; note: string }> = {
-  cafe24: { title: '카페24 연동', note: '쇼핑몰 ID만 입력하면 한줄로 공식 카페24 앱으로 연결됩니다. OAuth 동의 후 회원·주문이 자동 동기화됩니다.' },
+  cafe24: { title: '카페24 연동', note: '쇼핑몰 ID만 입력하면 한줄로 공식 카페24 앱으로 연결됩니다.' },
   naver: { title: '네이버 스마트스토어 연동', note: '네이버 커머스 API센터에서 만든 애플리케이션 자격을 입력하면 주문·회원이 동기화됩니다. 구매자 성명·휴대폰 번호는 주문 데이터로 제공되어 발송에 쓸 수 있습니다. 단 주문 안내 같은 정보성 메시지는 즉시 가능하지만, 광고성 메시지는 별도의 광고 수신동의가 필요합니다.' },
-  godo: { title: '고도몰 연동', note: '고도몰 쇼핑몰 인증키(key)를 입력하면 주문·고객 데이터가 자동으로 동기화됩니다.' },
-  imweb: { title: '아임웹 연동', note: '아임웹 사이트 코드(siteCode)를 입력하면 OAuth 인증 후 회원·주문·수신동의·장바구니가 동기화됩니다. 사이트 코드는 아임웹 앱스토어에서 한줄로를 추가할 때 전달됩니다.' },
+  godo: { title: '고도몰 연동', note: '고도몰 쇼핑몰 인증키(key)를 입력해 연결합니다.' },
+  imweb: { title: '아임웹 연동', note: '아임웹 사이트 코드(siteCode)를 입력하고 아임웹에서 승인해 연결합니다. 사이트 코드는 아임웹 앱스토어에서 한줄로를 추가할 때 전달됩니다.' },
   makeshop: { title: '메이크샵 연동', note: '메이크샵 파트너센터에서 만든 App의 Client ID·Secret과 상점 ID를 입력하면 회원·주문이 동기화됩니다. 회원 데이터에 SMS 수신동의 여부가 포함되어 광고 발송 대상을 정확히 가려낼 수 있습니다.' },
-  woocommerce: { title: '우커머스 연동', note: '워드프레스 우커머스 몰의 주소와 REST API 읽기 키를 입력하면 주문·회원이 자동으로 동기화됩니다. 몰이 여러 개면 몰마다 추가하세요. 웹훅 주소와 비밀키는 저장 직후 한 번 표시되며, 고객사 개발자가 우커머스 관리자에서 웹훅 4개를 만들면 실시간으로도 들어옵니다.' },
+  woocommerce: { title: '우커머스 연동', note: '워드프레스 우커머스 몰을 몰 관리자 승인으로 연결합니다. 승인이 어려우면 몰 주소와 REST API 키로 연결할 수 있어요. 몰이 여러 개면 몰마다 추가하세요.' },
   custom: { title: '자체 호스팅 / 그 외 자사몰 연동', note: '직접 개발했거나 목록에 없는 자사몰은 webhook 방식으로 연동합니다. 환경이 특수해 막히면 고객센터로 문의 주세요.' },
 };
 
@@ -156,6 +169,8 @@ type ProviderApiEntry = {
   connectMethod: 'oauth' | 'webhook' | 'polling' | 'none';
   available: boolean;
   status: 'available' | 'coming_soon';
+  /** ★1028 K13 「준비 됨」 표(서버) · 옛 응답엔 없다 */
+  readiness?: ProviderReadiness | null;
 };
 // 백엔드 provider 식별자 → 프론트 ProviderKey(전용 모달 보유분). 네이버는 식별자가 naver_smart_store라 매핑.
 const BACKEND_ID_TO_KEY: Record<string, ProviderKey> = {
@@ -210,6 +225,7 @@ export default function CdpSettingsPage() {
   const [usage, setUsage] = useState<CdpUsage | null>(null);
   const [installStatus, setInstallStatus] = useState<InstallStatus | null>(null);
   const [allowedOrigins, setAllowedOrigins] = useState<string[]>([]);
+  const [autoOrigins, setAutoOrigins] = useState<string[]>([]);   // ★1028 K12 몰 연동이 넣은 값(서버)
   const [newOrigin, setNewOrigin] = useState('');
   const [allowedAppIds, setAllowedAppIds] = useState<string[]>([]);
   const [newAppId, setNewAppId] = useState('');
@@ -249,6 +265,8 @@ export default function CdpSettingsPage() {
   const [wooIssued, setWooIssued] = useState<WooIssuedSecret | null>(null);
   const [imwebStatus, setImwebStatus] = useState<ImwebStatus | null>(null);
   const [imwebSiteCode, setImwebSiteCode] = useState('');
+  const [connectStoreCode, setConnectStoreCode] = useState('');   // ★1028 N6 우커머스 밖 몰 연결의 분류코드(분류코드 회사만)
+  const storeCodeQuery = connectStoreCode ? `&store_code=${encodeURIComponent(connectStoreCode)}` : '';
   const [imwebConnecting, setImwebConnecting] = useState(false);
   const [makeshopStatus, setMakeshopStatus] = useState<MakeshopStatus | null>(null);
   const [makeshopShopUid, setMakeshopShopUid] = useState('');
@@ -298,17 +316,24 @@ export default function CdpSettingsPage() {
   const dashboardNeedsAction = useMemo(() => ({
     cafe24: isIntegrationAuthBroken(cafe24Status?.status),
     naver: isIntegrationAuthBroken(naverStatus?.status),
-    godo: !!godoStatus?.syncError,
+    godo: godoStatus?.problem?.kind === 'action',   // ★1028 K7 사람이 할 일만(서버 분류 · 기다리면 풀리는 실패는 배지 그대로)
     imweb: isIntegrationAuthBroken(imwebStatus?.status),
     makeshop: isIntegrationAuthBroken(makeshopStatus?.status),
     custom: false,   // 자체 호스팅은 시크릿 방식이라 만료가 없다(재발급은 담당자 의사)
     // 우커머스는 키 방식이라 만료가 없다 — 주기 수집이 남긴 실패 사유(몰 하나라도)가 그 신호다(고도몰과 같은 축)
-    woocommerce: !!wooStatus?.malls?.some((m) => m.syncError),
-  }), [cafe24Status?.status, naverStatus?.status, godoStatus?.syncError, imwebStatus?.status, makeshopStatus?.status, wooStatus?.malls]);
+    woocommerce: !!wooStatus?.malls?.some((m) => m.problem?.kind === 'action'),
+  }), [cafe24Status?.status, naverStatus?.status, godoStatus?.problem, imwebStatus?.status, makeshopStatus?.status, wooStatus?.malls]);
+  // ★1028 K7 — 우커머스 카드 = 「몰 4곳 중 1곳 확인 필요」(사람이 할 일이 있는 몰만 센다)
+  const dashboardActionNote = useMemo(() => {
+    const malls = wooStatus?.malls ?? [];
+    const n = malls.filter((m) => m.problem?.kind === 'action').length;
+    return { woocommerce: n > 0 ? `몰 ${malls.length}곳 중 ${n}곳 확인 필요` : undefined };
+  }, [wooStatus?.malls]);
 
   const integrationStatus = useCdpIntegrationStatus({
     connected: dashboardConnected,
     needsAction: dashboardNeedsAction,
+    actionNote: dashboardActionNote,
     bySource: installStatus?.bySource,
   });
 
@@ -340,7 +365,7 @@ export default function CdpSettingsPage() {
   const token = () => localStorage.getItem('token');
   const isAdmin = user?.userType === 'company_admin';
   // CDP 진입 = FREE(미가입)만 차단 (백엔드 cdp-auth.isCdpEnabledForPlan = plan_code !== 'FREE'와 일치 — 전 유료 개방)
-  const cdpLocked = !!usage && usage.plan_code === 'FREE';
+  const cdpLocked = !!usage && usage.cdp_open === false;   // ★1028 K7 판정 = 서버(구독 만료 · 정지 포함)
 
   // 연동 상태 — 진입 카드 강조 + 요약 칩 노출 판정
   const connectedProviders = useMemo(() => {
@@ -357,25 +382,21 @@ export default function CdpSettingsPage() {
   const isConnected = connectedProviders.length > 0 || !!usage?.has_key;
   const hasCdpData = isConnected || (diagnostics?.events30d ?? 0) > 0;
 
-  // first-event 설치 진단 — 키 발급 후 첫 이벤트 수신 전까지 10초 폴링 (수신되면 중단)
+  // first-event 설치 진단 — ★1028 K14 N1 첫 읽기는 loadAll · 기다리는 몰(연결됐는데 아직 0건 · 키만 받고 첫 이벤트 전)이 있을 때만 10초마다 다시 읽는다(한 번에 하나)
+  const installWaiting = (!!usage?.has_key && !installStatus?.firstEventAt) || integrationStatus.statuses.some((st) => st.badge === 'awaiting');
   useEffect(() => {
-    if (!usage?.has_key) return;
+    if (!installWaiting) return;
     let stopped = false;
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    const poll = async () => {
+    const refresh = serialRunner(async () => {
       try {
         const res = await fetch('/api/cdp/install-status', { headers: { Authorization: `Bearer ${token()}` } });
         const data = await res.json();
-        if (!stopped && data.success) {
-          setInstallStatus(data);
-          if (data.firstEventAt) return; // 첫 이벤트 수신 → 폴링 종료
-        }
+        if (!stopped && data.success) setInstallStatus(data);
       } catch { /* 네트워크 일시 오류 무시 */ }
-      if (!stopped) timer = setTimeout(poll, 10000);
-    };
-    poll();
-    return () => { stopped = true; if (timer) clearTimeout(timer); };
-  }, [usage?.has_key]);
+    });
+    const id = window.setInterval(() => { void refresh(); }, 10000);
+    return () => { stopped = true; window.clearInterval(id); };
+  }, [installWaiting]);
 
   // 수집 허용 도메인 로드 (브라우저 SDK Origin allowlist)
   useEffect(() => {
@@ -383,7 +404,7 @@ export default function CdpSettingsPage() {
       try {
         const res = await fetch('/api/cdp/allowed-origins', { headers: { Authorization: `Bearer ${token()}` } });
         const data = await res.json();
-        if (data.success) setAllowedOrigins(data.origins || []);
+        if (data.success) { setAllowedOrigins(data.origins || []); setAutoOrigins(data.auto || []); }
       } catch { /* 무시 */ }
     })();
   }, []);
@@ -427,6 +448,51 @@ export default function CdpSettingsPage() {
     } catch { toast.error('도메인 삭제 네트워크 오류'); }
   };
 
+  // ★1028 K12 수집 허용 도메인 블록(자체 호스팅 웹 탭 · 카페24 · 우커머스 창 공용)
+  const originsBlock = (
+          <div className="bg-white border border-slate-200 rounded-2xl p-6">
+            <div className="flex items-center gap-2 mb-3">
+              <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-violet-500 to-fuchsia-600 flex items-center justify-center">
+                <Link2 className="w-5 h-5 text-white" />
+              </div>
+              <div>
+                <h2 className="text-base font-bold text-slate-900">수집 허용 도메인</h2>
+                <div className="text-xs text-slate-500">자사몰 도메인을 등록해야 브라우저 SDK 수집이 허용됩니다. 몰을 연결하면 몰 기본 주소는 자동으로 들어가고, 대표 도메인처럼 다른 주소는 여기서 더해 주세요. (예: https://www.example.com)</div>
+              </div>
+            </div>
+            {isAdmin ? (
+              <div className="flex gap-2 mb-3 flex-wrap">
+                <input
+                  value={newOrigin}
+                  onChange={(e) => setNewOrigin(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === 'Enter') addOrigin(); }}
+                  placeholder="https://www.example.com"
+                  className="flex-1 min-w-[200px] bg-slate-100 border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-900 placeholder-slate-400 focus:outline-none focus:border-violet-400"
+                />
+                <button onClick={addOrigin} className="px-4 py-2 bg-violet-200 hover:bg-violet-200 text-slate-900 rounded-lg text-sm font-medium">추가</button>
+              </div>
+            ) : (
+              <div className="text-xs text-slate-400 mb-3">도메인 등록은 회사 관리자만 가능합니다.</div>
+            )}
+            {allowedOrigins.length > 0 ? (
+              <div className="space-y-1.5">
+                {allowedOrigins.map((o) => (
+                  <div key={o} className="flex items-center justify-between bg-white border border-slate-200 rounded-lg px-3 py-2">
+                    <span className="text-sm text-slate-700 font-mono break-all">{o}</span>
+                    {autoOrigins.includes(o)
+                      ? <span className="text-[11px] text-slate-400 shrink-0 ml-2">몰 연동이 넣음</span>
+                      : isAdmin && (
+                        <button onClick={() => removeOrigin(o)} className="text-rose-700 hover:text-rose-800 text-xs shrink-0 ml-2">삭제</button>
+                      )}
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="text-xs text-slate-400">등록된 도메인이 없습니다. 자사몰 도메인을 추가해주세요.</div>
+            )}
+          </div>
+  );
+
   const addAppId = async () => {
     const id = newAppId.trim().toLowerCase();
     if (!id) return;
@@ -463,7 +529,7 @@ export default function CdpSettingsPage() {
       const headers = { Authorization: `Bearer ${token()}` };
       const [
         usageRes, diagRes, funnelRes, timelineRes, activeRes, chDistRes,
-        cafe24Res, naverRes, godoRes, imwebRes, makeshopRes, wooRes, customRes, providersRes,
+        cafe24Res, naverRes, godoRes, imwebRes, makeshopRes, wooRes, customRes, providersRes, installRes,
       ] = await Promise.all([
         fetch('/api/cdp/usage', { headers }),
         fetch('/api/cdp/diagnostics', { headers }),
@@ -481,6 +547,8 @@ export default function CdpSettingsPage() {
         fetch('/api/woocommerce/status', { headers }),
         fetch('/api/cdp/custom/info', { headers }),
         fetch('/api/cdp/providers', { headers }),
+        // ★1028 K14 N1 — 설치 상태는 CDP 키와 상관없이 세션으로 읽는다(옛: 키를 발급한 회사만 읽어 카페24 · 고도몰 · 우커머스만 쓰는 회사 카드가 늘 「첫 주문을 기다리는 중」)
+        fetch('/api/cdp/install-status', { headers }),
       ]);
       const usageData = await usageRes.json();
       const diagData = await diagRes.json();
@@ -496,6 +564,8 @@ export default function CdpSettingsPage() {
       const wooData = await wooRes.json();
       const customData = await customRes.json();
       const providersData = await providersRes.json();
+      const installData = await installRes.json().catch(() => null);
+      if (installData?.success) setInstallStatus(installData);
 
       if (usageData.success) setUsage(usageData);
       if (diagData.success) setDiagnostics(diagData.diagnostics);
@@ -506,10 +576,17 @@ export default function CdpSettingsPage() {
         setChannelDist(chDistData.distribution);
         setChannelCaps(chDistData.capabilities);
       }
-      if (cafe24Data.success) setCafe24Status(cafe24Data);
+      if (cafe24Data.success) {
+        setCafe24Status(cafe24Data);
+        // ★1028 N3 — 끊긴 연동도 몰 식별자를 받는다 → 재연결 칸을 미리 채운다(비어 있을 때만)
+        if (!cafe24Data.connected && cafe24Data.mall_id) setCafe24MallId((cur) => cur || String(cafe24Data.mall_id));
+      }
       if (naverData.success) setNaverStatus(naverData);
       if (godoData.success) setGodoStatus(godoData);
-      if (imwebData.success) setImwebStatus(imwebData);
+      if (imwebData.success) {
+        setImwebStatus(imwebData);
+        if (!imwebData.connected && imwebData.site_code) setImwebSiteCode((cur) => cur || String(imwebData.site_code));   // ★1028 N3
+      }
       if (makeshopData.success) setMakeshopStatus(makeshopData);
       if (wooData.success) setWooStatus(wooData);
       if (customData.success) {
@@ -529,6 +606,23 @@ export default function CdpSettingsPage() {
       setLoading(false);
     }
   }, [isAdmin]);
+
+  // ★ 2026-10-28 자사몰 대비 K14 N4 — 승인 창 = 공용 훅(닫히면 다시 읽기 · 팝업 막힘 = 이 창에서 승인)
+  const openApprovalWindow = useApprovalWindow(() => { void loadAll(); });
+
+  // ★ 2026-10-28 자사몰 대비 M30 — 아임웹 앱 추가 진입(?connect=imweb&site_code=) = 아임웹 창을 열고 사이트 코드를 채운다(승인 버튼은 사용자가 누른다)
+  useEffect(() => {
+    const sp = new URLSearchParams(window.location.search);
+    const site = sp.get('site_code') || '';
+    if (sp.get('connect') !== 'imweb' || !/^[A-Za-z0-9_-]{1,64}$/.test(site)) return;
+    setImwebSiteCode(site);
+    setConnectProvider('imweb');
+    sp.delete('connect');
+    sp.delete('site_code');
+    window.history.replaceState(null, '', `${window.location.pathname}${sp.toString() ? `?${sp.toString()}` : ''}`);
+  }, []);
+
+  // ★ 2026-10-28 자사몰 대비 M24 — 몰 승인 확정은 전용 화면(/oauth-confirm · 요금제 문 밖)이 한다 · 승인 창이 닫히면 위 공용 훅이 이 화면을 다시 읽는다
 
   useEffect(() => { loadAll(); }, [loadAll]);
 
@@ -615,13 +709,12 @@ export default function CdpSettingsPage() {
     }
     setCafe24Connecting(true);
     try {
-      const res = await fetch(`/api/cafe24/oauth/authorize?mall_id=${encodeURIComponent(mallId)}`, {
+      const res = await fetch(`/api/cafe24/oauth/authorize?mall_id=${encodeURIComponent(mallId)}${storeCodeQuery}`, {
         headers: { Authorization: `Bearer ${token()}` },
       });
       const data = await res.json();
       if (data.success && data.authorize_url) {
-        window.open(data.authorize_url, 'cafe24_oauth', 'width=720,height=820');
-        toast.info('새 창에서 카페24 로그인 + 동의 완료 후 새로고침해주세요.');
+        openApprovalWindow(data.authorize_url, 'cafe24_oauth');
       } else { toast.error(data.error || '카페24 연동 시작 실패'); }
     } catch (e: any) { toast.error(e?.message || '카페24 연동 처리 오류'); }
     finally { setCafe24Connecting(false); }
@@ -645,18 +738,17 @@ export default function CdpSettingsPage() {
       const saveRes = await fetch('/api/cafe24/byo-credentials', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token()}` },
-        body: JSON.stringify({ mall_id: mallId, client_id: clientId, client_secret: clientSecret }),
+        body: JSON.stringify({ mall_id: mallId, client_id: clientId, client_secret: clientSecret, store_code: connectStoreCode || undefined }),
       });
       const saveData = await saveRes.json();
       if (!saveData.success) { toast.error(saveData.error || '자체앱 자격 저장 실패'); return; }
 
-      const res = await fetch(`/api/cafe24/oauth/authorize?mall_id=${encodeURIComponent(mallId)}`, {
+      const res = await fetch(`/api/cafe24/oauth/authorize?mall_id=${encodeURIComponent(mallId)}${storeCodeQuery}`, {
         headers: { Authorization: `Bearer ${token()}` },
       });
       const data = await res.json();
       if (data.success && data.authorize_url) {
-        window.open(data.authorize_url, 'cafe24_oauth', 'width=720,height=820');
-        toast.info('새 창에서 카페24 로그인 + 동의 완료 후 새로고침해주세요.');
+        openApprovalWindow(data.authorize_url, 'cafe24_oauth');
       } else { toast.error(data.error || '카페24 연동 시작 실패'); }
     } catch (e: any) { toast.error(e?.message || '카페24 연동 처리 오류'); }
     finally { setCafe24Connecting(false); }
@@ -691,7 +783,7 @@ export default function CdpSettingsPage() {
       const res = await fetch('/api/naver-commerce/connect', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token()}` },
-        body: JSON.stringify({ store_id: storeId, client_id: clientId, client_secret: clientSecret }),
+        body: JSON.stringify({ store_id: storeId, client_id: clientId, client_secret: clientSecret, store_code: connectStoreCode || undefined }),
       });
       const data = await res.json();
       if (data.success) {
@@ -745,7 +837,7 @@ export default function CdpSettingsPage() {
       const res = await fetch('/api/makeshop/connect', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token()}` },
-        body: JSON.stringify({ shop_uid: shopUid, client_id: clientId, client_secret: clientSecret }),
+        body: JSON.stringify({ shop_uid: shopUid, client_id: clientId, client_secret: clientSecret, store_code: connectStoreCode || undefined }),
       });
       const data = await res.json();
       if (data.success) {
@@ -788,13 +880,12 @@ export default function CdpSettingsPage() {
     if (!siteCode) { toast.error('아임웹 사이트 코드(siteCode)를 입력해주세요.'); return; }
     setImwebConnecting(true);
     try {
-      const res = await fetch(`/api/imweb/oauth/authorize?site_code=${encodeURIComponent(siteCode)}`, {
+      const res = await fetch(`/api/imweb/oauth/authorize?site_code=${encodeURIComponent(siteCode)}${storeCodeQuery}`, {
         headers: { Authorization: `Bearer ${token()}` },
       });
       const data = await res.json();
       if (data.success && data.authorize_url) {
-        window.open(data.authorize_url, 'imweb_oauth', 'width=720,height=820');
-        toast.info('새 창에서 아임웹 로그인 + 동의 완료 후 새로고침해주세요.');
+        openApprovalWindow(data.authorize_url, 'imweb_oauth');
       } else { toast.error(data.error || '아임웹 연동 시작 실패'); }
     } catch (e: any) { toast.error(e?.message || '아임웹 연동 처리 오류'); }
     finally { setImwebConnecting(false); }
@@ -822,7 +913,7 @@ export default function CdpSettingsPage() {
       const saveRes = await fetch('/api/godo/credentials', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token()}` },
-        body: JSON.stringify({ key }),
+        body: JSON.stringify({ key, store_code: connectStoreCode || undefined }),
       });
       const saveData = await saveRes.json();
       if (!saveData.success) { toast.error(saveData.error || '인증키 저장 실패'); return; }
@@ -854,8 +945,9 @@ export default function CdpSettingsPage() {
   // 우커머스 — 몰 저장(웹훅 URL·secret 1회 노출) → REST 키가 있으면 연결 확인 1콜 + 백필. 키가 없으면 첫 웹훅이 연결 신호.
   const wooJsonHeaders = () => ({ 'Content-Type': 'application/json', Authorization: `Bearer ${token()}` });
   // ★ ① 1클릭 — 몰 저장 → 우커머스 앱 인증 URL → 새 창(관리자 로그인·승인) → 우커머스가 키를 우리 서버로 → 웹훅·백필 자동
-  const handleWooAuthorize = async () => {
-    const siteUrl = wooSiteUrl.trim();
+  const handleWooAuthorize = async (override?: unknown) => {
+    // ★1028 N3 — 몰 줄의 [다시 승인]은 그 몰 주소로(버튼 클릭 이벤트가 넘어오면 입력칸 값)
+    const siteUrl = (typeof override === 'string' ? override : wooSiteUrl).trim();
     if (!siteUrl) { toast.error('쇼핑몰 주소를 입력해주세요.'); return; }
     setWooAuthorizing(true);
     try {
@@ -866,8 +958,7 @@ export default function CdpSettingsPage() {
       });
       const data = await res.json();
       if (!data.success || !data.authorize_url) { toast.error(data.error || '연결 시작 실패'); return; }
-      window.open(data.authorize_url, 'woocommerce_auth', 'width=760,height=880');
-      toast.info('새 창에서 몰 관리자로 로그인해 "승인"을 누르면 자동으로 연결됩니다.');
+      openApprovalWindow(data.authorize_url, 'woocommerce_auth', 760, 880);
       await loadAll();
     } catch (e: any) { toast.error(e?.message || '우커머스 연결 시작 오류'); }
     finally { setWooAuthorizing(false); }
@@ -912,6 +1003,23 @@ export default function CdpSettingsPage() {
       },
     });
   };
+  // ★ 2026-10-28 자사몰 대비 K8 — 플러그인 키(이 몰 하나 · 회원 토큰 발급만). 복사 = 지금 키 · 새로 발급 = 옛 키는 바로 멈춘다(확인 한 단계)
+  const fetchWooPluginKey = async (mallId: string, rotate: boolean) => {
+    const res = await fetch('/api/woocommerce/plugin-key', { method: 'POST', headers: wooJsonHeaders(), body: JSON.stringify({ mall_id: mallId, rotate }) });
+    const data = await res.json().catch(() => ({} as any));
+    if (data.success && data.plugin_key) copyText(data.plugin_key, rotate ? '새 플러그인 키' : '플러그인 키');
+    else toast.error(data.error || '플러그인 키를 받지 못했어요.');
+  };
+  const handleWooPluginKey = (mallId: string, rotate: boolean) => {
+    if (!rotate) { void fetchWooPluginKey(mallId, false); return; }
+    setConfirm({
+      mode: 'danger',
+      title: '플러그인 키 새로 발급',
+      description: '지금 키는 바로 멈춥니다. 워드프레스 → WooCommerce → 한줄로 설정에 새 키를 넣기 전까지 로그인 회원은 익명으로 수집됩니다.',
+      confirmLabel: '새로 발급',
+      onConfirm: async () => { await fetchWooPluginKey(mallId, true); },
+    });
+  };
   const handleWooRotateSecret = (mallId: string) => {
     setConfirm({
       mode: 'danger',
@@ -947,6 +1055,7 @@ export default function CdpSettingsPage() {
       const res = await fetch('/api/cdp/custom/issue-secret', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token()}` },
+        body: JSON.stringify({ store_code: connectStoreCode || undefined }),
       });
       const data = await res.json();
       if (data.success) {
@@ -1026,7 +1135,7 @@ export default function CdpSettingsPage() {
     <ZoneFrame
       moduleId="cdp"
       kpis={showDashboard ? [
-        { label: '데이터 수신 중', value: integrationStatus.summary.receiving, tone: 'emerald' },
+        { label: '연결됨', value: integrationStatus.summary.receiving, tone: 'emerald' },
         { label: '준비 중', value: integrationStatus.summary.preparing },
         { label: '조치 필요', value: integrationStatus.summary.action, tone: integrationStatus.summary.action > 0 ? 'rose' : undefined },
       ] : [{ label: '연동', value: isConnected ? '됨' : '안 됨' }]}
@@ -1047,6 +1156,12 @@ export default function CdpSettingsPage() {
             <div>
               <div className="font-bold text-amber-900 mb-1">CDP는 유료 요금제부터 이용 가능합니다</div>
               <div className="text-sm text-amber-800">스타터 요금제 이상에서 자사몰 연동(SDK·webhook)이 모두 열립니다. 현재: {usage?.plan_name || '미가입'}.</div>
+              {usage?.collect_until && (
+                <div className="text-sm text-amber-800 mt-1">연결해 둔 몰의 회원, 주문 정보는 {formatKstMonthDay(usage.collect_until)}까지 받아 두고 그 뒤에는 멈춰요.</div>
+              )}
+              {usage?.collect_stopped && (
+                <div className="text-sm text-amber-800 mt-1">연결해 둔 몰의 회원, 주문 정보도 지금은 받지 않아요. 요금제를 다시 시작하면 이어서 받아요.</div>
+              )}
             </div>
           </div>
         )}
@@ -1213,6 +1328,18 @@ export default function CdpSettingsPage() {
             {connectProvider && (
               <div className="text-xs text-slate-600 leading-relaxed bg-white border border-slate-200 rounded-lg p-3">
                 {PROVIDER_META[connectProvider].note}
+                {(() => {
+                  // ★1028 K13 — 무엇이 되는지 = 서버 「준비 됨」 표(시험 · 실고객으로 확인된 것만 「됩니다」 · 코드만 있는 것 = 준비 중 · 조회 실패 = 말하지 않음)
+                  const backendId = Object.keys(BACKEND_ID_TO_KEY).find((k) => BACKEND_ID_TO_KEY[k] === connectProvider) ?? connectProvider;
+                  const lines = readinessLines(providerList?.find((e) => e.provider === backendId)?.readiness);
+                  if (lines.ready.length + lines.preparing.length === 0) return null;
+                  return (
+                    <ul className="mt-2 space-y-0.5">
+                      {lines.ready.map((t) => <li key={t} className="text-emerald-800">{t}</li>)}
+                      {lines.preparing.map((t) => <li key={t} className="text-slate-400">{t}</li>)}
+                    </ul>
+                  );
+                })()}
               </div>
             )}
         {/* ★ 2026-08-10 Phase 3 — 3단계 진행 패널. 옛 '검증' 탭이 ③단계로 흡수된다(설계서 §5-2).
@@ -1233,8 +1360,7 @@ export default function CdpSettingsPage() {
               }),
               '개발자 전달용 설치 안내',
             )}
-            stalled={!!installStatus && installStatus.total === 0 && !!installStatus.keyIssuedAt
-              && Date.now() - new Date(installStatus.keyIssuedAt).getTime() > 10 * 60 * 1000}
+            stalled={installStatus?.stalled === true}
             onRetryCheck={loadAll}
             connectExpanded={connectStepOpen}
             onToggleConnect={() => setConnectStepOpen((v) => !v)}
@@ -1357,6 +1483,18 @@ export default function CdpSettingsPage() {
         <div className={CDP_DASHBOARD_V2 && connectProvider
           && integrationStatus.byKey[connectProvider as CdpProviderKey]?.connected
           && !connectStepOpen ? 'hidden' : ''}>
+        {/* ★1028 K14 N6 — 분류코드 회사의 우커머스 밖 몰 연결 = 매장 고르기(우커머스 연결 창 칸과 같은 모양 · 목록 = 서버 · 분류코드 없는 회사 = 칸 없음) */}
+        {isAdmin && connectProvider && connectProvider !== 'woocommerce' && (wooStatus?.store_code_options?.length ?? 0) > 0 && (
+          <div className="bg-white border border-slate-200 rounded-2xl p-4">
+            <label className="block text-[11px] text-slate-500 mb-1">이 몰의 분류 코드(우커머스 연결 창과 같은 규칙)</label>
+            <select value={connectStoreCode} onChange={(e) => setConnectStoreCode(e.target.value)} className="w-full px-3 py-2 bg-violet-50 border border-slate-200 rounded-lg text-sm text-slate-900 focus:outline-none focus:border-indigo-300">
+              <option value="">회사 공용(분류 없음)</option>
+              {(wooStatus?.store_code_options ?? []).map((c) => <option key={c} value={c}>{c}</option>)}
+            </select>
+            <div className="text-[11px] text-slate-400 mt-1">이 몰로 들어오는 회원과 주문이 고른 분류 코드 고객으로 들어와요.</div>
+          </div>
+        )}
+
         {connectProvider === 'cafe24' && (
           <CdpCafe24ConnectForm
             status={cafe24Status}
@@ -1378,6 +1516,9 @@ export default function CdpSettingsPage() {
             onCopy={copyText}
           />
         )}
+
+        {/* ★1028 K12 — 몰 창마다 수집 허용 도메인(몰 기본 주소 = 자동 · 대표 도메인 등 예외 추가) */}
+        {connectProvider === 'cafe24' && !!cafe24Status?.connected && originsBlock}
 
         {/* 네이버 스마트스토어 — 커머스 API 자격 입력형 (★ 2026-07-06 OAuth 폐기, client_credentials) */}
         {connectProvider === 'naver' && (
@@ -1483,12 +1624,15 @@ export default function CdpSettingsPage() {
             onConnect={handleWooConnect}
             onDisconnect={handleWooDisconnect}
             onRotateSecret={handleWooRotateSecret}
+            onPluginKey={handleWooPluginKey}
+            onReauthorize={(url) => { setWooSiteUrl(url); void handleWooAuthorize(url); }}
             issued={wooIssued}
             onDismissIssued={() => setWooIssued(null)}
             publicKey={usage?.public_key}
             onCopy={copyText}
           />
         )}
+        {connectProvider === 'woocommerce' && !!wooStatus?.connected && originsBlock}
 
 
         </div>{/* ← 몰별 연결 폼 구간 끝(스테퍼 ① 내용물) */}
@@ -1545,47 +1689,7 @@ export default function CdpSettingsPage() {
         )}
 
         {/* 12-0. 수집 허용 도메인 등록 (웹 탭) */}
-        {webhookProviderOpen && customTab === 'web' && (
-          <div className="bg-white border border-slate-200 rounded-2xl p-6">
-            <div className="flex items-center gap-2 mb-3">
-              <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-violet-500 to-fuchsia-600 flex items-center justify-center">
-                <Link2 className="w-5 h-5 text-white" />
-              </div>
-              <div>
-                <h2 className="text-base font-bold text-slate-900">수집 허용 도메인</h2>
-                <div className="text-xs text-slate-500">자사몰 도메인을 등록해야 브라우저 SDK 수집이 허용됩니다. (예: https://www.example.com)</div>
-              </div>
-            </div>
-            {isAdmin ? (
-              <div className="flex gap-2 mb-3 flex-wrap">
-                <input
-                  value={newOrigin}
-                  onChange={(e) => setNewOrigin(e.target.value)}
-                  onKeyDown={(e) => { if (e.key === 'Enter') addOrigin(); }}
-                  placeholder="https://www.example.com"
-                  className="flex-1 min-w-[200px] bg-slate-100 border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-900 placeholder-slate-400 focus:outline-none focus:border-violet-400"
-                />
-                <button onClick={addOrigin} className="px-4 py-2 bg-violet-200 hover:bg-violet-200 text-slate-900 rounded-lg text-sm font-medium">추가</button>
-              </div>
-            ) : (
-              <div className="text-xs text-slate-400 mb-3">도메인 등록은 회사 관리자만 가능합니다.</div>
-            )}
-            {allowedOrigins.length > 0 ? (
-              <div className="space-y-1.5">
-                {allowedOrigins.map((o) => (
-                  <div key={o} className="flex items-center justify-between bg-white border border-slate-200 rounded-lg px-3 py-2">
-                    <span className="text-sm text-slate-700 font-mono break-all">{o}</span>
-                    {isAdmin && (
-                      <button onClick={() => removeOrigin(o)} className="text-rose-700 hover:text-rose-800 text-xs shrink-0 ml-2">삭제</button>
-                    )}
-                  </div>
-                ))}
-              </div>
-            ) : (
-              <div className="text-xs text-slate-400">등록된 도메인이 없습니다. 자사몰 도메인을 추가해주세요.</div>
-            )}
-          </div>
-        )}
+        {webhookProviderOpen && customTab === 'web' && originsBlock}
 
         {/* 12-0b. 네이티브 앱 등록 (cdp_allowed_app_ids) — 앱 SDK 키 인증 허용 번들ID (앱 탭) */}
         {webhookProviderOpen && customTab === 'app' && (

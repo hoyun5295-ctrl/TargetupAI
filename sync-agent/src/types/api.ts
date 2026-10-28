@@ -48,6 +48,8 @@ export interface SyncPurchasesRequest {
   mode: SyncMode;
   batchIndex?: number;
   totalBatches?: number;
+  /** ★ 2026-10-28 P3 고객 매핑이 주는 구매 요약 칸(mapping customerSummaryFieldsOf) · 비면 싣지 않는다 · 서버는 그 칸을 원장 재계산으로 덮지 않는다 */
+  customerSummaryFields?: string[];
 }
 
 export interface SyncPurchasesResponse {

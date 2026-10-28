@@ -70,7 +70,7 @@ describe('몰 행 ↔ 분류코드', () => {
 describe('saveWooCredentials — 분류코드 저장', () => {
   const insertMeta = () => {
     const call = q.mock.calls.find(([sql]: [string]) => String(sql).includes('INSERT INTO company_integrations'));
-    return JSON.parse(call![1][2]);
+    return JSON.parse(call![1].at(-1));   // ★1028 K9 행 생성 CT — meta = 끝 인자
   };
 
   it('storeCode 를 주면 행 meta 에 store_code 로 저장한다', async () => {

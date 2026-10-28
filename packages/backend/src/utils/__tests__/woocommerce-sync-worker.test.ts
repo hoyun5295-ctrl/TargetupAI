@@ -65,7 +65,8 @@ describe('소스 계약 — 고도몰 워커와 같은 규약', () => {
     expect(enq).toBeLessThan(loop.indexOf('syncWooOrdersSince('));
     expect(loop.slice(enq, loop.indexOf('syncWooOrdersSince('))).toContain('continue;');
     // 요금제 게이트·키 확인 뒤에만 줄 세운다
-    expect(enq).toBeGreaterThan(loop.indexOf('isCdpEnabledForPlan('));
+    expect(loop.indexOf('factAllowed(')).toBeGreaterThan(-1);   // ★1028 K7 사실 경로 판정
+    expect(enq).toBeGreaterThan(loop.indexOf('factAllowed('));
   });
   it('실패로 연동 상태를 끊지 않는다 · 실패 사유는 meta.woo_sync_error', () => {
     const src = code('woocommerce-sync-worker.ts');
@@ -81,7 +82,7 @@ describe('소스 계약 — 고도몰 워커와 같은 규약', () => {
   it('대상 = 검증된 몰(active + connected_at) · 요금제 게이트 · REST 키 없는 몰(웹훅 전용)은 건너뛴다 · 회사·몰별 try 격리', () => {
     const src = code('woocommerce-sync-worker.ts');
     expect(src).toMatch(/provider = 'woocommerce'[\s\S]{0,200}status = 'active'[\s\S]{0,120}connected_at IS NOT NULL/);
-    expect(src).toContain('isCdpEnabledForPlan(');
+    expect(src).toContain('cdpFactCollectGate(');
     expect(src).toContain('woo_consumer_key');
     expect(src).toMatch(/for \(const row of[\s\S]{0,200}try \{/);
   });

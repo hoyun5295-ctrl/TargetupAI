@@ -201,8 +201,11 @@ describe('Codex 적대 1R·2R 정정 계약 (돈 축 — 되돌아가면 빨간�
     // Harold 0829 "단축 URL로" 재도입. 유출의 뿌리는 단축이 아니라 클릭 라우트의 cdp 기록이었다.
     const clickRoute = read('../../routes/short-url.ts');
     // ①가드: 승인류 링크는 cdp 기록을 건너뛴다(충전·대행 두 축 다 · B-0828-7 종결)
-    expect(clickRoute, '승인류 비추적 가드가 사라졌다').toMatch(/charge\|agency\)-approve/);
-    const guardAt = clickRoute.indexOf(')-approve');
+    // ★ 2026-10-28 B-1028-1 — 가드 = 담당자 링크 경로 목록 한 곳(isManagerLinkUrl · 충전 · 대행 포함 · 자동마케팅 멈춤 · 여정 정지도)
+    expect(clickRoute, '승인류 비추적 가드가 사라졌다').toContain('if (isManagerLinkUrl(resolved.fullUrl)) {');
+    const shortCt = read('../short-url.ts');
+    expect(shortCt).toMatch(/MANAGER_LINK_PATHS = \[[^\]]*'charge-approve'[^\]]*'agency-approve'/);
+    const guardAt = clickRoute.indexOf('if (isManagerLinkUrl(resolved.fullUrl))');
     const trackAt = clickRoute.indexOf('void trackEvent(');
     expect(guardAt, '가드가 trackEvent보다 뒤면 기록이 먼저 나간다').toBeLessThan(trackAt);
     // ②단축 사용: 만료 = 토큰 만료 동치 · 실패 = 원본 폴백

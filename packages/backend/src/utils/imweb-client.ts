@@ -29,12 +29,14 @@
  *   - integration-complete가 site-info scope를 요구하는지: 요구 시 앱 설정에서 Site-Info 활성 필요.
  */
 
-import { query } from '../config/database';
+import { query, type TxRun } from '../config/database';
 import { saveIntegrationRowGuarded } from './integration-scope';   // ★ 2026-10-27 자사몰 대비 K9 SC1 — 연동 행 저장 = 회사 모드 잠금 → 판정 → 저장(한 트랜잭션)
 import { TIMEOUTS } from '../config/defaults';
 import { joinInflight } from './inflight-lock';
 // ★ 2026-09-26 한줄로 V2 R1-31 — 토큰 요청 실패 판정 CT(제공자 거절일 때만 연동 만료)
 import { tokenHttpError, reconnectRequiredError, isDefinitiveTokenRejection } from './integration-token-error';
+import { markTokenRejected, receiveEligibleSql, saveRefreshedToken, reReadAfterLostRefresh } from './integration-token';
+import { createIntegrationRow } from './integration-row';   // ★ 1028 K9 — 연동 행 INSERT = CT 하나(몰 접두 고정)
 import { timingSafeEqual } from 'crypto';
 import {
   IProviderAdapter,
@@ -46,7 +48,9 @@ import {
 import { identifyCustomer, withdrawMemberConsent } from './cdp-identity';
 import { syncOrder } from './cdp-orders';
 import { isKnownOrderStatus } from './cdp-order-revenue';
-import { orderExternalId } from './cdp-order-identity';
+import { mallScopedIds } from './integration-row';
+import { openSecret } from './secret-box';   // ★1028 K8 자격 읽기 이중(암호문 · 평문)
+import type { WebhookCtx } from './cdp-webhook-delivery';
 import { trackEvent } from './cdp-events';
 import { buildWebhookIdempotencyKey } from './cdp-idempotency';
 import { firstPositiveAmount } from './normalize';
@@ -89,6 +93,8 @@ export interface ImwebIntegration {
   accessToken: string;
   refreshToken: string;
   tokenExpiresAt: Date;
+  /** ★ 1028 K6 — token_expires_at DB 원문(만료 표시 CAS · markTokenRejected) */
+  tokenExpiresAtRaw: string | null;
   scope: string;
   status: string;
 }
@@ -172,34 +178,42 @@ export async function refreshImwebToken(refreshToken: string): Promise<{ accessT
 // company_integrations 저장 / 조회 / 갱신 (provider='imweb', mall_id=siteCode)
 // ════════════════════════════════════════════════════════════════════
 
+/** 아임웹 접근 토큰 수명(초) — 저장 · 갱신이 같은 값 */
+const IMWEB_ACCESS_TOKEN_SEC = 2 * 60 * 60;
+
 export async function saveImwebIntegration(
   companyId: string,
   siteCode: string,
   token: { accessToken: string; refreshToken: string; scope: string },
-  expiresInSec: number = 2 * 60 * 60, // Access Token 2시간
-): Promise<void> {
+  expiresInSec: number = IMWEB_ACCESS_TOKEN_SEC, // Access Token 2시간
+  /** ★1028 N6 연결 때 고른 분류코드(토큰 갱신 = 없음 · 그대로) */
+  storeCode: string | null = null,
+  /** ★1028 Codex R2 #1 바깥 트랜잭션(승인 확정) */
+  outer?: TxRun,
+): Promise<Date> {
   const expiresAt = new Date(Date.now() + expiresInSec * 1000);
-  await saveIntegrationRowGuarded(companyId, 'imweb', siteCode, null, (run) => run(
-    `INSERT INTO company_integrations (
-      id, company_id, provider, mall_id, access_token, refresh_token,
-      token_expires_at, scope, meta, webhook_secret, connected_at, status,
-      created_at, updated_at
-    ) VALUES (
-      gen_random_uuid(), $1::uuid, 'imweb', $2, $3, $4,
-      $5, $6, '{}'::jsonb, $7, NOW(), 'active',
-      NOW(), NOW()
-    )
-    ON CONFLICT (company_id, provider, mall_id) DO UPDATE SET
-      access_token = EXCLUDED.access_token,
-      refresh_token = EXCLUDED.refresh_token,
-      token_expires_at = EXCLUDED.token_expires_at,
-      scope = EXCLUDED.scope,
-      webhook_secret = COALESCE(EXCLUDED.webhook_secret, company_integrations.webhook_secret),
-      status = 'active',
-      connected_at = COALESCE(company_integrations.connected_at, NOW()),
-      updated_at = NOW()`,
-    [companyId, siteCode, token.accessToken, token.refreshToken, expiresAt, token.scope || DEFAULT_SCOPE, IMWEB_WEBHOOK_SECRET || null]
-  ));
+  await saveIntegrationRowGuarded(companyId, 'imweb', siteCode, storeCode, (run) => createIntegrationRow(run, {
+    companyId, provider: 'imweb', mallId: siteCode,
+    accessToken: { v: token.accessToken },
+    refreshToken: { v: token.refreshToken },
+    tokenExpiresAt: { v: expiresAt },
+    scope: { v: token.scope || DEFAULT_SCOPE },
+    meta: { ...(storeCode ? { store_code: storeCode } : {}) },
+    webhookSecret: { v: IMWEB_WEBHOOK_SECRET || null },
+    connectedAt: { sql: 'NOW()' },
+    status: { sql: "'active'" },
+    // 옛 문장은 다시 저장 때 meta 를 건드리지 않았다(들어온 meta = 빈 객체 · 합쳐도 같다)
+    onConflict: [
+      'access_token = EXCLUDED.access_token',
+      'refresh_token = EXCLUDED.refresh_token',
+      'token_expires_at = EXCLUDED.token_expires_at',
+      'scope = EXCLUDED.scope',
+      'webhook_secret = COALESCE(EXCLUDED.webhook_secret, company_integrations.webhook_secret)',
+      "status = 'active'",
+      'connected_at = COALESCE(company_integrations.connected_at, NOW())',
+    ],
+  }), outer);
+  return expiresAt;   // ★ 1028 K6 — 저장한 토큰판(호출부가 든 행의 원문을 맞춘다)
 }
 
 function rowToIntegration(r: any): ImwebIntegration {
@@ -207,9 +221,10 @@ function rowToIntegration(r: any): ImwebIntegration {
     id: r.id,
     companyId: r.company_id,
     siteCode: r.mall_id,
-    accessToken: r.access_token,
-    refreshToken: r.refresh_token,
+    accessToken: openSecret(r.access_token),
+    refreshToken: openSecret(r.refresh_token),
     tokenExpiresAt: new Date(r.token_expires_at),
+    tokenExpiresAtRaw: r.token_expires_at_raw ?? null,
     scope: r.scope || DEFAULT_SCOPE,
     status: r.status,
   };
@@ -218,13 +233,13 @@ function rowToIntegration(r: any): ImwebIntegration {
 export async function getImwebIntegration(companyId: string, siteCode?: string): Promise<ImwebIntegration | null> {
   const result = siteCode
     ? await query(
-        `SELECT id, company_id, mall_id, access_token, refresh_token, token_expires_at, scope, status
+        `SELECT id, company_id, mall_id, access_token, refresh_token, token_expires_at, token_expires_at::text AS token_expires_at_raw, scope, status
          FROM company_integrations
          WHERE company_id = $1::uuid AND provider = 'imweb' AND mall_id = $2 LIMIT 1`,
         [companyId, siteCode]
       )
     : await query(
-        `SELECT id, company_id, mall_id, access_token, refresh_token, token_expires_at, scope, status
+        `SELECT id, company_id, mall_id, access_token, refresh_token, token_expires_at, token_expires_at::text AS token_expires_at_raw, scope, status
          FROM company_integrations
          WHERE company_id = $1::uuid AND provider = 'imweb'
          ORDER BY connected_at DESC NULLS LAST LIMIT 1`,
@@ -236,9 +251,9 @@ export async function getImwebIntegration(companyId: string, siteCode?: string):
 /** ★ 2026-09-27 한줄로 V2 R244 — 같은 사이트가 여러 회사에 연동돼 있으면 전부(웹훅은 회사마다 전달 · R098과 같은 뿌리). */
 export async function getImwebIntegrationsBySiteCode(siteCode: string): Promise<ImwebIntegration[]> {
   const result = await query(
-    `SELECT id, company_id, mall_id, access_token, refresh_token, token_expires_at, scope, status
+    `SELECT id, company_id, mall_id, access_token, refresh_token, token_expires_at, token_expires_at::text AS token_expires_at_raw, scope, status
      FROM company_integrations
-     WHERE provider = 'imweb' AND mall_id = $1 AND status = 'active'
+     WHERE provider = 'imweb' AND mall_id = $1 AND ${receiveEligibleSql('imweb')}
      ORDER BY connected_at DESC NULLS LAST`,
     [siteCode]
   );
@@ -257,13 +272,15 @@ async function refreshImwebOnce(held: ImwebIntegration): Promise<ImwebIntegratio
   if (integration.tokenExpiresAt.getTime() > Date.now() + TOKEN_REFRESH_MARGIN_MS) return integration;
   try {
     const refreshed = await refreshImwebToken(integration.refreshToken);
-    await saveImwebIntegration(integration.companyId, integration.siteCode, refreshed);
-    return { ...integration, accessToken: refreshed.accessToken, refreshToken: refreshed.refreshToken, tokenExpiresAt: new Date(Date.now() + 2 * 60 * 60 * 1000) };
+    // ★ 1028 Codex R1 #2 — 갱신 저장 = 그 토큰판 · 해제 아닌 행일 때만(재연결 upsert 를 쓰지 않는다)
+    const savedExpiry = new Date(Date.now() + IMWEB_ACCESS_TOKEN_SEC * 1000);
+    const saved = await saveRefreshedToken({ id: integration.id, tokenExpiresAtRaw: integration.tokenExpiresAtRaw, accessToken: refreshed.accessToken, refreshToken: refreshed.refreshToken, tokenExpiresAt: savedExpiry });
+    if (!saved) return reReadAfterLostRefresh(await getImwebIntegration(integration.companyId, integration.siteCode).catch(() => null), integration.id);
+    return { ...integration, accessToken: refreshed.accessToken, refreshToken: refreshed.refreshToken, tokenExpiresAt: savedExpiry, tokenExpiresAtRaw: savedExpiry.toISOString() };
   } catch (err) {
     // ★ 2026-09-26 R1-31 — 제공자가 거절했을 때만 만료로 표시한다(일시 장애 한 번에 연동이 끊겨 웹훅이 유실됐다)
-    if (isDefinitiveTokenRejection(err)) {
-      await query(`UPDATE company_integrations SET status = 'token_expired', updated_at = NOW() WHERE id = $1::uuid`, [integration.id]);
-    }
+    // ★ 1028 K6 — 그 요청에 쓴 토큰판일 때만 · 유예 시계 같은 문장(markTokenRejected)
+    if (isDefinitiveTokenRejection(err)) await markTokenRejected(integration);
     throw err;
   }
 }
@@ -364,6 +381,12 @@ const imwebCapabilities: ProviderCapabilities = {
   adminApi: true,
 };
 
+/** 아임웹 주문의 고객 열쇠 · 주문 번호(★ 1028 K9 — 그 연동 행의 몰 접두 · mallScopedIds 반환값) */
+function imwebOrderIds(ctx: WebhookCtx, memberUid: unknown, phone: unknown, orderNo: unknown): { orderId: string; externalId: string } {
+  const ids = mallScopedIds(ctx.idScope, { memberId: memberUid, phone, orderId: orderNo });
+  return { orderId: ids.orderId, externalId: ids.externalId };
+}
+
 export const imwebAdapter: IProviderAdapter = {
   provider: 'imweb',
   displayName: '아임웹',
@@ -415,7 +438,7 @@ export const imwebAdapter: IProviderAdapter = {
         await identifyCustomer(companyId, {
           ...(ctx.storeCode ? { storeCode: ctx.storeCode } : {}),   // ★ 1027 K9 — 연동 행 분류코드(소속 행 · 몰 동의)
           source: 'imweb',
-          externalId: String(resource.memberUid || resource.member_uid || resource.memberCode || ''),
+          externalId: mallScopedIds(ctx.idScope, { memberId: resource.memberUid || resource.member_uid || resource.memberCode }).memberExternalId,
           email: resource.email,
           phone: resource.call || resource.mobile || resource.phone,
           name: resource.name || resource.memberName,
@@ -432,8 +455,8 @@ export const imwebAdapter: IProviderAdapter = {
       // ★ 2026-10-04 옛: 이벤트만 남기고 그 이벤트를 읽는 곳이 없어(주석의 "발송 제외"가 실제로 일어나지 않음) 탈퇴 회원이 계속 발송 대상이었다.
       //   이제 연결된 고객의 수신동의를 내린다(withdrawMemberConsent · 영구 수신거부 표로는 옮기지 않는다 = D93).
       case 'END_USER_WITHDRAWAL': {
-        const withdrawnId = String(resource.memberUid || resource.member_uid || '');
-        await withdrawMemberConsent(companyId, 'imweb', withdrawnId, String(resource.occurredAt || ctx.observedAt));
+        const withdrawnId = mallScopedIds(ctx.idScope, { memberId: resource.memberUid || resource.member_uid }).memberExternalId;
+        await withdrawMemberConsent(companyId, 'imweb', withdrawnId, String(resource.occurredAt || ctx.observedAt), ctx.storeCode);   // ★1028 K5 분류코드 몰 = 그 몰 소속 행
         await trackEvent(companyId, {
           source: 'imweb',
           eventName: 'custom_member_withdrawn',
@@ -450,7 +473,7 @@ export const imwebAdapter: IProviderAdapter = {
           source: 'imweb',
           // ★ 2026-10-04 표준 이름 — 장바구니 이탈 여정·인앱 트리거는 'cart_add' 만 본다(옛 'custom_cart_add' 는 읽는 곳 0)
           eventName: 'cart_add',
-          externalId: String(resource.memberUid || resource.member_uid || ''),
+          externalId: mallScopedIds(ctx.idScope, { memberId: resource.memberUid || resource.member_uid }).memberExternalId,
           properties: {
             product_no: resource.prodNo || resource.productNo,
             product_name: resource.prodName || resource.productName,
@@ -466,9 +489,8 @@ export const imwebAdapter: IProviderAdapter = {
         const placed = await syncOrder(companyId, {
           ...(ctx.storeCode ? { storeCode: ctx.storeCode } : {}),   // ★ 1027 K9 — 연동 행 분류코드(소속 행 · 몰 동의)
           source: 'imweb',
-          orderId: String(resource.orderNo || resource.order_no || ''),
+          ...imwebOrderIds(ctx, resource.memberUid || resource.member_uid, resource.call || resource.mobile || resource.phone, resource.orderNo || resource.order_no),
           // ★ 2026-09-27 한줄로 V2 R245 — 비회원 주문도 적재(주문 외부 id CT)
-          externalId: orderExternalId(resource.memberUid || resource.member_uid, resource.call || resource.mobile || resource.phone, resource.orderNo || resource.order_no),
           email: resource.email,
           phone: resource.call || resource.mobile || resource.phone,
           name: resource.name || resource.ordererName,
@@ -493,7 +515,7 @@ export const imwebAdapter: IProviderAdapter = {
         await trackEvent(companyId, {
           source: 'imweb',
           eventName: `custom_${event.toLowerCase()}`,
-          externalId: String(resource.memberUid || resource.member_uid || ''),
+          externalId: mallScopedIds(ctx.idScope, { memberId: resource.memberUid || resource.member_uid }).memberExternalId,
           properties: {
             order_no: resource.orderNo,
             section_code: resource.orderSectionCode,
@@ -511,13 +533,12 @@ export const imwebAdapter: IProviderAdapter = {
         const memberUid = resource.memberUid || resource.member_uid;
         const phone = resource.call || resource.mobile || resource.phone;
         const orderNo = resource.orderNo || resource.order_no;
-        // 주문 생성 때와 같은 고객 식별 규칙(orderExternalId) · 회원도 번호도 없으면 고객을 지어내지 않는다(차감 생략 · 로그)
+        // 주문 생성 때와 같은 고객 식별 규칙(mallScopedIds) · 회원도 번호도 없으면 고객을 지어내지 않는다(차감 생략 · 로그)
         if (orderNo && (memberUid || phone)) {
           const reversed = await syncOrder(companyId, {
             ...(ctx.storeCode ? { storeCode: ctx.storeCode } : {}),   // ★ 1027 K9 — 연동 행 분류코드(소속 행 · 몰 동의)
             source: 'imweb',
-            orderId: String(orderNo),
-            externalId: orderExternalId(memberUid, phone, orderNo),
+            ...imwebOrderIds(ctx, memberUid, phone, orderNo),
             email: resource.email,
             phone,
             name: resource.name || resource.ordererName,
@@ -535,7 +556,7 @@ export const imwebAdapter: IProviderAdapter = {
           await trackEvent(companyId, {
             source: 'imweb',
             eventName: 'custom_order_cancelled',
-            externalId: String(memberUid),
+            externalId: mallScopedIds(ctx.idScope, { memberId: memberUid }).memberExternalId,
             properties: { order_no: orderNo, status: event },
             occurredAt: String(resource.occurredAt || ctx.observedAt),
           });

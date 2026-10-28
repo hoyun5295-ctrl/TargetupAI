@@ -27,7 +27,7 @@ import { resolveBuildTierFromOsInfo } from '../utils/agent-build-tiers';
 // ★ 2026-07-10 원격 관리 P1: 명령 큐 정책 CT — ACK 반영·At-Least-Once 전달·버전 분기(구버전=기존 동작 불변)
 import { isAgentVersionGte, ACK_MIN_AGENT_VERSION, applyCommandAcks, markCommandsDelivered, isReportedWorthWriting } from '../utils/agent-protocol';
 // ★ 2026-07-03: 구매 배치 적재 직후 고객 구매요약 컬럼 재계산 (총구매액/최근구매 '-' 문제 근본)
-import { updateCustomerPurchaseAggregates } from '../utils/customer-purchase-aggregates';
+import { updateCustomerPurchaseAggregates, parseCustomerSummaryFields } from '../utils/customer-purchase-aggregates';
 // ★ 2026-07-03: 필드정의 변경 시 활성 필드 캐시 무효화 (고객DB 현황 성능 캐시)
 import { clearEnabledFieldsCache } from '../utils/enabled-fields';
 import { recordUnsubscribeDeleted } from '../utils/change-audit';
@@ -1252,7 +1252,10 @@ router.post('/purchases', async (req: SyncAuthRequest, res: Response) => {
     if (insertedCount > 0) {
       try {
         const aggIds = Object.values(phoneToCustomerId).filter((v): v is string => !!v);
-        await updateCustomerPurchaseAggregates(companyId, aggIds);
+        // ★ 2026-10-28 P3 — 고객 매핑이 주는 요약 칸은 원장 재계산이 덮지 않는다(1.7.3+ 만 싣는다 · 없으면 지금 동작)
+        await updateCustomerPurchaseAggregates(companyId, aggIds, {
+          keepColumns: parseCustomerSummaryFields(req.body?.customerSummaryFields),
+        });
       } catch (aggError: any) {
         console.warn(`[Sync] 구매요약 집계 실패(적재는 정상, 다음 배치에서 재계산됨): ${aggError?.message || aggError}`);
       }

@@ -9,26 +9,28 @@ import BrandLearningModal from './BrandLearningModal';
 type Toast = (msg: string, type?: 'success' | 'error' | 'info') => void;
 type ConfirmOpts = { title: string; description: string; confirmLabel?: string; cancelLabel?: string; onConfirm: () => void };
 
-interface Props { apiBase: string; token: string; onToast: Toast; onConfirm: (opts: ConfirmOpts) => void; }
+interface Props { apiBase: string; token: string; onToast: Toast; onConfirm: (opts: ConfirmOpts) => void; /** ★ 2026-10-28 K13-2 바로 열기 */ openVoice?: boolean }
 
-export default function BrandLearningCard({ apiBase, token, onToast, onConfirm }: Props) {
-  const [open, setOpen] = useState(false);
-  const [summary, setSummary] = useState<{ color?: string; logo?: boolean; name?: string } | null>(null);
+export default function BrandLearningCard({ apiBase, token, onToast, onConfirm, openVoice = false }: Props) {
+  const [open, setOpen] = useState(openVoice);
+  const [summary, setSummary] = useState<{ color?: string; logo?: boolean; name?: string; voice?: boolean } | null>(null);
   const authHeaders = useRef({ Authorization: `Bearer ${token}` }).current;
 
   const loadSummary = async () => {
     try {
-      const [k, b] = await Promise.all([
+      const [k, b, v] = await Promise.all([
         fetch(`${apiBase}/api/dm/brand-kit`, { headers: authHeaders }).then((r) => r.json()).catch(() => ({})),
         fetch(`${apiBase}/api/dm/brand-basic-info`, { headers: authHeaders }).then((r) => r.json()).catch(() => ({})),
+        fetch(`${apiBase}/api/ai-memory/brand-voice`, { headers: authHeaders }).then((r) => r.json()).catch(() => ({})),
       ]);
-      setSummary({ color: k?.brand_kit?.primary_color, logo: !!k?.brand_kit?.logo_url, name: b?.basic_info?.brand_name });
+      setSummary({ color: k?.brand_kit?.primary_color, logo: !!k?.brand_kit?.logo_url, name: b?.basic_info?.brand_name, voice: v?.voice_learned === true });
     } catch { /* 요약 실패 = 칩만 비움 */ }
   };
   useEffect(() => { loadSummary(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, []);
 
   // ★ Codex Low — primary_color는 GET이 항상 기본값을 채워 판정 불가 → 사용자가 실제 넣은 로고·브랜드명으로만 "학습됨" 판정.
-  const learned = !!(summary?.logo || summary?.name);
+  // ★ 2026-10-28 K13-3 — 회사 목소리(확인된 학습)도 「학습됨」에 든다
+  const learned = !!(summary?.logo || summary?.name || summary?.voice);
 
   return (
     <>
@@ -48,6 +50,7 @@ export default function BrandLearningCard({ apiBase, token, onToast, onConfirm }
                   {summary?.name && <span className="text-[11px] text-slate-600 bg-white border border-slate-200 rounded-full px-2 py-0.5">{summary.name}</span>}
                   {summary?.color && <span className="inline-flex items-center gap-1.5 text-[11px] text-slate-600 bg-white border border-slate-200 rounded-full px-2 py-0.5"><span className="w-3 h-3 rounded-full border border-slate-300" style={{ background: summary.color }} /> 브랜드 색</span>}
                   {summary?.logo && <span className="inline-flex items-center gap-1 text-[11px] text-slate-600 bg-white border border-slate-200 rounded-full px-2 py-0.5"><Check className="w-3 h-3 text-emerald-700" /> 로고</span>}
+                  {summary?.voice && <span className="inline-flex items-center gap-1 text-[11px] text-slate-600 bg-white border border-slate-200 rounded-full px-2 py-0.5"><Check className="w-3 h-3 text-emerald-700" /> 회사 목소리</span>}
                 </>
               ) : (
                 <span className="text-[11px] text-amber-800">아직 학습 전이에요. 3탭에 필요한 정보를 채워주세요.</span>
@@ -65,6 +68,8 @@ export default function BrandLearningCard({ apiBase, token, onToast, onConfirm }
 
       <BrandLearningModal
         open={open}
+        initialTab={openVoice || (summary && !summary.voice) ? 'voice' : undefined}
+        autoStartVoice={openVoice}
         onClose={() => { setOpen(false); loadSummary(); }}
         apiBase={apiBase}
         token={token}

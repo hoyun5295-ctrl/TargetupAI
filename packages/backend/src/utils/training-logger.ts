@@ -100,7 +100,16 @@ interface TrainingLogParams {
    *   모양이 맞으면 aiMessages · selectedIndex · finalSource · modelParams.hubVariants 를 덮고, 틀리면 무시한다(옛 기록 그대로).
    */
   aiVariantsRaw?: unknown;
+
+  /**
+   * ★ 2026-10-28 AI 메모리 설계 K10-2 — 누가 쓴 글인가(사람 판정 근거 · `model_params.authorship` · DDL 0).
+   *   허브 기록이 있으면 그 편집 여부가 진실(hub_as_is · hub_edited) · 없으면 경로가 아는 값(path_ai = 여정 · 플래너 · 운영자 · AI 캠페인 · AI 생성 깃발이 선 이메일 / path_manual = 그 밖).
+   *   `final_source` 칸(CHECK 3값)은 옛 뜻 그대로 두고, 사람 글을 고르는 쪽은 이 표식을 읽는다.
+   */
+  authorship?: TrainingAuthorship;
 }
+
+export type TrainingAuthorship = 'hub_as_is' | 'hub_edited' | 'path_ai' | 'path_manual';
 
 export interface HubVariantsRecord {
   messages: string[];
@@ -110,6 +119,8 @@ export interface HubVariantsRecord {
   edited: boolean;
   aiRefined: boolean;
   cVariant: 'mz' | 'punchy' | null;
+  /** ★ 2026-10-28 K3-4 이 3안이 회사 목소리로 만든 안인가(목소리 회사 = C안 시험 밖 · 이름 = 목소리 이름) */
+  voiceMode: boolean;
 }
 
 /** (순수) 허브 3안 선택 기록 검증 — 배열 1~3개 · 각 2000자 · 선택 인덱스 범위 · 불리언. 하나라도 틀리면 null. */
@@ -127,7 +138,7 @@ export function parseHubVariantsRecord(raw: unknown): HubVariantsRecord | null {
   const namesRaw = Array.isArray(r.names) ? r.names : [];
   const names = namesRaw.slice(0, messages.length).map((n) => (typeof n === 'string' ? n.slice(0, 20) : ''));
   const cVariant = r.cVariant === 'mz' || r.cVariant === 'punchy' ? r.cVariant : null;
-  return { messages: messages as string[], names, selectedIndex: sel, recommendedIndex, edited: r.edited, aiRefined: r.aiRefined === true, cVariant };
+  return { messages: messages as string[], names, selectedIndex: sel, recommendedIndex, edited: r.edited, aiRefined: r.aiRefined === true, cVariant, voiceMode: r.voiceMode === true };
 }
 
 interface TrainingMetricsParams {
@@ -288,10 +299,13 @@ export async function logTrainingData(params: TrainingLogParams): Promise<void> 
         finalSource: hub.edited ? 'edited' : 'selected_as_is',
         modelParams: {
           ...(params.modelParams || {}),
-          hubVariants: { names: hub.names, recommendedIndex: hub.recommendedIndex, aiRefined: hub.aiRefined, cVariant: hub.cVariant },
+          hubVariants: { names: hub.names, recommendedIndex: hub.recommendedIndex, aiRefined: hub.aiRefined, cVariant: hub.cVariant, voiceMode: hub.voiceMode },
         },
       };
     }
+    // ★ 2026-10-28 K10-2 출처 표식 — 허브 기록 > 경로가 넘긴 값 > path_manual
+    const authorship: TrainingAuthorship = hub ? (hub.edited ? 'hub_edited' : 'hub_as_is') : (params.authorship ?? 'path_manual');
+    params = { ...params, modelParams: { ...(params.modelParams || {}), authorship } };
     // source_ref: campaign_run_id를 HMAC 해시 (중복 적재 방지)
     const sourceRef = hmacHash(params.campaignRunId);
 
@@ -409,6 +423,8 @@ export async function logCampaignTraining(input: {
   userPrompt?: string;
   aiMessages?: string[];
   sendAt?: Date;
+  /** ★ 2026-10-28 K10-2 출처 표식(없으면 path_manual) */
+  authorship?: TrainingAuthorship;
 }): Promise<void> {
   try {
     const info = await pool.query('SELECT name, brand_tone, industry_code FROM companies WHERE id = $1', [input.companyId]);
@@ -426,6 +442,7 @@ export async function logCampaignTraining(input: {
       finalMessage: input.finalMessage,
       finalSource: input.finalSource,
       sendAt: input.sendAt,
+      authorship: input.authorship,
     });
   } catch (err) {
     console.error('[TrainingLog] logCampaignTraining 실패 (발송에 영향 없음):', err);

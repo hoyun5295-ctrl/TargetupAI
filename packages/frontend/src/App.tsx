@@ -18,6 +18,7 @@ import PrivacyPage from './pages/PrivacyPage';
 import TermsPage from './pages/TermsPage';
 // ★ 2026-07-03: 카페24 앱 실행 랜딩 (심사위원 동선 — 공개 라우트)
 import Cafe24LaunchPage from './pages/Cafe24LaunchPage';
+import OAuthConfirmPage from './pages/OAuthConfirmPage';
 // ★ D184 (2026-05-20): 이니시스 결제 결과 fallback 페이지 (새 창 자동 close 차단 시 fallback 표시)
 import PaymentResultPage from './pages/PaymentResultPage';
 import JourneyPausePage from './pages/JourneyPausePage'; // ★ D218+ Public 정지 페이지 (인증 X)
@@ -456,6 +457,9 @@ function App() {
             // ★ 2026-07-03: 과거 App URL(루트)로 mall_id 쿼리 진입 대비 — 쿼리 보존해 카페24 랜딩으로
             new URLSearchParams(window.location.search).get('mall_id') ? (
               <Navigate to={`/cafe24/launch${window.location.search}`} replace />
+            ) : /^[A-Za-z0-9_-]{1,64}$/.test(new URLSearchParams(window.location.search).get('siteCode') || '') ? (
+              // ★ 2026-10-28 자사몰 대비 M30 — 아임웹 앱 추가가 서비스 주소에 붙여 보내는 siteCode → 연동 화면이 값을 채운다(승인은 사용자가 누른다)
+              <Navigate to={`/cdp-settings?connect=imweb&site_code=${new URLSearchParams(window.location.search).get('siteCode')}`} replace />
             ) : isAuthenticated ? (
               user?.userType === 'super_admin' ? (
                 <Navigate to="/admin" replace />
@@ -799,6 +803,8 @@ function App() {
         <Route path="/terms" element={<TermsPage />} />
         {/* ★ 2026-07-03 카페24 앱 실행 랜딩 (심사위원 동선) — 공개, 페이지가 로그인 3분기 판별 */}
         <Route path="/cafe24/launch" element={<Cafe24LaunchPage />} />
+        {/* ★1028 M24 몰 승인 확정(로그인 필요 · 요금제 문 밖 = 미가입 계정의 카페24 앱 실행 동선도 확정까지) */}
+        <Route path="/oauth-confirm" element={<PrivateRoute allowedTypes={['company_admin']}><OAuthConfirmPage /></PrivateRoute>} />
         {/* D184: 이니시스 결제 결과 fallback (인증 X — 새 창 자동 close 차단 시 표시) */}
         <Route path="/payment/result" element={<PaymentResultPage />} />
 

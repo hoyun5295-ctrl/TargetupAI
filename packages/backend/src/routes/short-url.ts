@@ -17,7 +17,7 @@
  */
 
 import { Request, Response, Router } from 'express';
-import { resolveShortUrl } from '../utils/short-url';
+import { resolveShortUrl, isManagerLinkUrl } from '../utils/short-url';
 import { trackEvent } from '../utils/cdp-events';
 import { recordVariantClickConversion } from '../utils/bandit-optimizer';
 import { detectKoreanEcommerce, isMobileUserAgent } from '../utils/korean-ecommerce-domains';
@@ -52,7 +52,8 @@ router.get('/c/:hash', async (req: Request, res: Response) => {
     //   properties에 기록했고, 고객사가 자기 이벤트 조회로 그대로 읽어 **승인권을 회수**할 수 있었다.
     //   승인 링크 클릭은 마케팅 이벤트가 아니다 — cdp 기록 자체를 건너뛴다(click_count 갱신만 유지).
     //   판정은 경로 패턴 하나: 새 승인류 링크가 생기면 여기 등재가 같은 커밋이다.
-    if (/\/(?:charge|agency)-approve(?:#|\?|$)/.test(resolved.fullUrl)) {
+    //   ★ 2026-10-28 B-1028-1 — 판정 = 담당자 링크 경로 목록 한 곳(`isManagerLinkUrl` · 자동마케팅 멈춤 · 여정 정지 · 플래너 링크 포함).
+    if (isManagerLinkUrl(resolved.fullUrl)) {
       void query(
         `UPDATE message_short_urls SET click_count = click_count + 1, last_clicked_at = NOW() WHERE hash = $1`,
         [hash],

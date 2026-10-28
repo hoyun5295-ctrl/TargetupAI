@@ -164,6 +164,9 @@ import { startCdpWebhookRetryWorker } from './utils/cdp-webhook-retry-worker';
 import { startCdpProfileRecomputeWorker } from './utils/cdp-profile-recompute-worker';
 // ★ 2026-08-10: 고도몰 주기 수집 (30분) — 웹훅이 없는 몰이라 당겨오지 않으면 연결 후 신규 주문이 영영 안 들어온다
 import { startGodoSyncWorker } from './utils/godo-sync-worker';
+import { startTokenKeepaliveWorker } from './utils/integration-token-worker';
+import { warnIfSecretBoxKeyMissing } from './utils/secret-box';
+import { startMallWatchWorker } from './utils/mall-watch-worker';
 import { startWoocommerceSyncWorker } from './utils/woocommerce-sync-worker';
 import { logMallConsentGate } from './utils/mall-consent';
 // ★ 2026-06-13: 시스템 크리티컬 감지 워커 (발송 큐 지연 정체 + 싱크에이전트 중단 → 운영자 문자 통지)
@@ -742,6 +745,11 @@ app.listen(PORT, () => {
   // ★ 2026-08-10: 고도몰 주기 수집 (30분) — 연결 시 백필 1회가 전부였던 것을 정정.
   //   소급분이 발송이 되지 않는 근거 = 여정 발생 시각 창(journey-target-extractor).
   startGodoSyncWorker();
+
+  // ★ 2026-10-28 자사몰 대비 K6: 카페24 · 아임웹 토큰 유지(1시간) — 웹훅만 받는 몰의 갱신 토큰이 끊기기 전에 살린다
+  startTokenKeepaliveWorker();
+  warnIfSecretBoxKeyMissing();   // ★1028 K8 자격 암호화 키 없음 = 평문 유지 경고
+  startMallWatchWorker();   // ★1028 K10 2단 자사몰 연동 경보
 
   // ★ 2026-09-14: 우커머스 주기 수집 (30분 · modified_after) — 웹훅은 가속일 뿐, 이 워커가 유일한 보장 경로.
   startWoocommerceSyncWorker();

@@ -1,5 +1,8 @@
 import { CURRENT_BRIEF_DATE_SQL } from '../utils/daily-brief-policy';
 import { Request, Response, Router } from 'express';
+import { isCopyContentType } from '../utils/copy-content-type';
+import { voiceLearned } from '../utils/brand-voice-prompt';
+import { listRecentHumanSentTexts } from '../utils/human-sent-messages';
 import { isDemoCompany } from '../utils/demo-company';   // ★ 2026-10-09 시연 회사 = 여정 활성화 비용 0
 import { query, pool } from '../config/database';
 import { authenticate } from '../middlewares/auth';
@@ -314,18 +317,8 @@ router.post('/generate-message', requirePlanFeature('ai_messaging'), async (req:
     // spam_filter_tests가 아닌 campaigns(실제 발송 성공)에서 가져와야 검증된 문안만 포함
     // ★ D144: PG success_count 캐시 의존 제거 — status='completed'+sent_at 30일 조건만으로 충분
     // ★ 2026-09-27 한줄로 V2 R291 — 최근 발송 순(같은 문안은 한 번 · 옛: 가나다순이라 '최근' 문안이 아니었다)
-    const recentMsgResult = await query(`
-      SELECT message_content as content
-      FROM campaigns
-      WHERE company_id = $1 AND status = 'completed'
-        AND message_content IS NOT NULL
-        AND LENGTH(message_content) > 30
-        AND sent_at > NOW() - INTERVAL '30 days'
-      GROUP BY message_content
-      ORDER BY MAX(sent_at) DESC
-      LIMIT 10
-    `, [companyId]);
-    const recentMessages: string[] = recentMsgResult.rows.map((r: any) => r.content);
+    // ★ 2026-10-28 AI 메모리 K8-4 — 「사람이 보낸 발송」 CT 하나(직접 발송 − 허브 3안 그대로 · 여정 · 자동 · AI 문안이 회사 예시로 되먹지 않게)
+    const recentMessages: string[] = await listRecentHumanSentTexts(companyId, { days: 30, limit: 10 });
 
     const extraContext = {
       productName,
@@ -708,20 +701,8 @@ router.post('/refine-message', requirePlanFeature('ai_messaging'), async (req: R
 
     // D120 패턴 미러 — 회사별 최근 발송 문안 10개 (campaigns.message_content, 30일, status='completed', LENGTH > 30)
     //   AI few-shot 학습용 — 각 회사 톤/스타일 자동 반영해서 다듬기 품질 향상.
-    const recentMsgResult = await query(
-      // ★ 2026-09-27 한줄로 V2 R291 — 최근 발송 순(같은 문안은 한 번)
-      `SELECT message_content AS content
-         FROM campaigns
-        WHERE company_id = $1 AND status = 'completed'
-          AND message_content IS NOT NULL
-          AND LENGTH(message_content) > 30
-          AND sent_at > NOW() - INTERVAL '30 days'
-        GROUP BY message_content
-        ORDER BY MAX(sent_at) DESC
-        LIMIT 10`,
-      [companyId],
-    );
-    const recentMessages: string[] = recentMsgResult.rows.map((r: any) => r.content);
+    // ★ 2026-09-27 한줄로 V2 R291 — 최근 발송 순(같은 문안은 한 번) · ★ 2026-10-28 K8-4 — 「사람이 보낸 발송」 CT 하나
+    const recentMessages: string[] = await listRecentHumanSentTexts(companyId, { days: 30, limit: 10 });
 
     // ★ 2026-10-25 AI 결과 정산 한 곳(원장 Z4 · D1 A) — 잔액 확인 → 다듬기 → 안이 나올 때만 1크레딧(잔액 부족 402 · 원장 실패 503 · 결과 안 줌)
     const { result } = await runChargedAi({
@@ -1073,7 +1054,9 @@ router.post('/operator/propose', async (req: Request, res: Response) => {
       return res.json({ success: true, needsFacts: { benefit: true } });
     }
     // ★ 2026-10-05 C안 시험(COPY_C_TEST_COMPANY_IDS) — 제안마다 반반. 시험 밖 = undefined = 지금 그대로.
-    const copyCVariant = pickCopyCVariant(companyId);
+    // ★ 2026-10-28 AI 메모리 설계 K3-4 — 목소리 회사는 C안 시험 대상이 아니다(C = 「짧게」 · 원장에 voiceMode)
+    const voiceMode = await voiceLearned(companyId);
+    const copyCVariant = voiceMode ? undefined : pickCopyCVariant(companyId);
 
     // 회사 정보 + 통계 조회 (Orchestrator에 전달) — ★ 2026-10-18 utils/hub-company-context.ts 원형 이동(AI 한줄로 문안 생성과 같은 값)
     const { companyInfo, customerStats } = await loadHubCompanyContext(companyId, userId || null, req.user);
@@ -1104,7 +1087,7 @@ router.post('/operator/propose', async (req: Request, res: Response) => {
       ...(copyCVariant ? { cVariant: copyCVariant } : {}),
     }, { source: 'ai-operator-propose', cost: getCreditCost('ai-operator-propose'), chargeOnlyWithTarget: true });   // ★ 2026-10-18 대상 0명 = 문안이 나와도 0(결함 0-1) · ★ 1025 단가 = 단가표(숫자 박기 0 · Z2)
 
-    return res.json({ success: true, ...result, copyCVariant: copyCVariant ?? null });
+    return res.json({ success: true, ...result, copyCVariant: copyCVariant ?? null, voiceMode });
   } catch (err: any) {
     // ★ 2026-10-25 잔액 부족 = 402(옛: 500) · 원장 쓰기 실패 = 503(성공 뒤 차감 한 규칙)
     if (err instanceof InsufficientCreditError) return res.status(402).json({ success: false, error: 'AI 크레딧이 부족합니다. 크레딧을 충전해 주세요.', code: 'INSUFFICIENT_CREDIT' });
@@ -4107,7 +4090,7 @@ router.post('/operator/journeys-refine-step', async (req: Request, res: Response
     // ★ 2026-08-02 §13-3: 본문이 비어도 **여정 맥락이 있으면** 생성 모드로 간다.
     //   옛 흐름은 사람이 먼저 열 글자를 써야 AI를 부를 수 있었다(추가 입력 요구 = 1클릭 원칙 위반).
     //   맥락도 본문도 없을 때만 거절한다 — 지어낼 근거가 없기 때문이다.
-    const { message, channel, isAd, stepIntent, journey, variants } = req.body || {};
+    const { message, channel, isAd, stepIntent, journey, variants, contentType } = req.body || {};
     const body = message != null ? String(message) : '';
     const jc = journey && typeof journey === 'object' ? journey : undefined;
     const hasContext = !!jc && (!!jc.triggerLabel || !!jc.objective || (Array.isArray(jc.previousMessages) && jc.previousMessages.length > 0));
@@ -4121,6 +4104,8 @@ router.post('/operator/journeys-refine-step', async (req: Request, res: Response
       channel: ch,
       isAd: isAd !== false,
       stepIntent: stepIntent ? String(stepIntent) : undefined,
+      // ★ 2026-10-28 AI 메모리 설계 K11-4 — 그 단계 종류(생성 때 정한 값 · 허용값 밖 = 없음 = 광고 여부로 성격)
+      contentType: isCopyContentType(contentType) ? contentType : null,
       // ★ 2026-08-08 — 화면이 비포/애프터 한 쌍으로 보여 주면 안은 하나면 된다. 미지정이면 옛 흐름(3안).
       variants: Number(variants) === 1 ? 1 : 3,
       journey: jc

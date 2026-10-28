@@ -32,7 +32,8 @@ import bcrypt from 'bcryptjs';
 import { randomBytes, createHash } from 'crypto';
 import { query } from '../config/database';
 import { guardMachineOrigin } from './geo-access';
-import { loadPlanContext } from './plan-guard';
+import { loadPlanContext, ACTIVE_PAID_PLAN_WHERE } from './plan-guard';
+import { sendSystemAlert } from './system-alert';
 import { isAllowedAppId } from './cdp-app-id';
 
 // ═══════════════════════════════════════════════════════════
@@ -51,7 +52,7 @@ interface AuthCacheEntry {
   expiresAt: number;
 }
 const authCache = new Map<string, AuthCacheEntry>();
-const limitCache = new Map<string, { over: boolean; expiresAt: number }>();
+const limitCache = new Map<string, { limit: number | null; used: number; expiresAt: number }>();
 
 function sha256Hex(input: string): string {
   return createHash('sha256').update(input).digest('hex');
@@ -220,7 +221,10 @@ export async function requireCdpApiKey(req: Request, res: Response, next: NextFu
       res.status(404).json({ success: false, error: '회사 정보를 찾을 수 없습니다.', code: 'COMPANY_NOT_FOUND' });
       return;
     }
-    const cdpEnabled = await isCdpEnabledForPlan(company.id);
+    // ★ 2026-10-28 자사몰 대비 K7 — 사실(회원 · 주문 정보 · 회원 토큰) = 요금제가 끝난 뒤 90일까지 받는다 · 월 한도로 막지 않는다(경보선만) ·
+    //   행동(서버 이벤트) = 요금제 그대로 · 월 한도로 막는다. 기준 = 주소.
+    const fact = isCdpFactPath(req.path);
+    const cdpEnabled = fact ? (await cdpFactCollectGate(company.id)).allowed : await isCdpEnabledForPlan(company.id);
     if (!cdpEnabled) {
       res.status(403).json({
         success: false,
@@ -230,8 +234,9 @@ export async function requireCdpApiKey(req: Request, res: Response, next: NextFu
       return;
     }
 
-    // 월 호출 한도 게이팅 (cdp_events_per_month)
-    const overLimit = await isOverMonthlyCdpLimit(company.id);
+    // 월 호출 한도 게이팅 (cdp_events_per_month) — 행동만 · 사실은 경보선(한도 × 10)에서 우리 쪽 경보만
+    if (fact) await alertFactOverLimit(company.id, company.company_name);
+    const overLimit = !fact && await isOverMonthlyCdpLimit(company.id);
     if (overLimit) {
       res.status(429).json({
         success: false,
@@ -397,15 +402,75 @@ export async function isCdpEnabledForPlan(companyId: string): Promise<boolean> {
   // 종량제 전환(Phase 3, 2026-06-02): CDP(자사몰/이메일/네이버 연동) = 전 유료 플랜 개방.
   //   기존 cdp_enabled 플래그(BUSINESS+) 게이팅 폐지 → FREE(미가입)만 차단.
   //   월 호출 한도(cdp_events_per_month)는 isOverMonthlyCdpLimit이 별도 통제(유지).
+  // ★ 2026-10-28 자사몰 대비 K7(검증 수정 13) — 판정 = plan-guard ACTIVE_PAID_PLAN_WHERE 한 벌(미가입 + 구독 만료 · 정지 제외 ·
+  //   옛: 요금제 글자만 봐서 구독이 끝난 회사도 행동 수집 · 화면 · 발송이 열려 있었다). 사실 수집은 cdpFactCollectGate(90일).
   const result = await query(
-    `SELECT UPPER(COALESCE(p.plan_code, 'FREE')) AS plan_code
-     FROM companies c
-     LEFT JOIN plans p ON c.plan_id = p.id
-     WHERE c.id = $1::uuid`,
+    `SELECT 1 FROM companies c JOIN plans p ON c.plan_id = p.id
+      WHERE c.id = $1::uuid AND ${ACTIVE_PAID_PLAN_WHERE}`,
     [companyId]
   );
-  if (result.rows.length === 0) return false;
-  return result.rows[0].plan_code !== 'FREE';
+  return result.rows.length > 0;
+}
+
+/** 요금제가 활성에서 빠진 뒤 사실을 더 받는 날 수(법무 확인 전 기본값 · 설계서 K7) */
+export const FACT_COLLECT_GRACE_DAYS = 90;
+
+/** 사실 경로(몰 서버가 보내는 회원 · 주문 정보 · 회원 토큰) — 기준 = 주소 · 그 밖 = 행동(이벤트 · 수집 · 인앱 · 푸시) */
+const CDP_FACT_PATHS = new Set(['/identify', '/order', '/bulk-import', '/member-token', '/plugin/member-token']);
+export const isCdpFactPath = (path: string): boolean => CDP_FACT_PATHS.has(path);
+
+export interface FactCollectGate {
+  allowed: boolean;
+  /** 받는 마지막 시각(활성 요금제 = null) */
+  collectUntil: string | null;
+  /** 활성에서 빠진 시각을 모른다(구독 상태로 빠짐 · 원장 행 없음) = 계속 받고 감시 표에 띄운다 */
+  inactiveSinceUnknown: boolean;
+}
+
+/**
+ * 사실(회원 · 주문)을 받는가 — 활성 요금제 = 받음 · 활성에서 빠졌으면 그 시각(요금제 변경 원장의 마지막 행이 FREE 로 바뀐 시각) + 90일까지 ·
+ * 시각을 모르면 계속 받는다(멈출 근거 없음 · 감시 표가 띄운다). 몰 수신 · 가져오기 · 주기 수집 · 서버 API 사실 경로가 같은 판정을 쓴다.
+ */
+export async function cdpFactCollectGate(companyId: string): Promise<FactCollectGate> {
+  const r = await query(
+    `SELECT (p.id IS NOT NULL AND ${ACTIVE_PAID_PLAN_WHERE}) AS active, last.to_plan_code, last.changed_at IS NOT NULL AS has_change,
+            to_char((last.changed_at + make_interval(days => $2)) AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS collect_until,
+            (last.changed_at + make_interval(days => $2)) > NOW() AS in_grace
+       FROM companies c
+       LEFT JOIN plans p ON c.plan_id = p.id
+       LEFT JOIN LATERAL (
+         SELECT pc.to_plan_code, pc.changed_at FROM company_plan_changes pc
+          WHERE pc.company_id = c.id ORDER BY pc.changed_at DESC LIMIT 1
+       ) last ON true
+      WHERE c.id = $1::uuid`,
+    [companyId, FACT_COLLECT_GRACE_DAYS],
+  );
+  const row = r.rows[0];
+  if (!row) return { allowed: false, collectUntil: null, inactiveSinceUnknown: false };
+  if (row.active) return { allowed: true, collectUntil: null, inactiveSinceUnknown: false };
+  if (String(row.to_plan_code || '').toUpperCase() === 'FREE' && row.has_change) {
+    return { allowed: row.in_grace === true, collectUntil: row.collect_until, inactiveSinceUnknown: false };
+  }
+  return { allowed: true, collectUntil: null, inactiveSinceUnknown: true };
+}
+
+/** 사실 경로의 경보선 = 월 한도 × 이 배수(막지 않는다 · 우리 쪽 경보만) */
+export const FACT_ALERT_LIMIT_FACTOR = 10;
+
+async function alertFactOverLimit(companyId: string, companyName: string): Promise<void> {
+  try {
+    const u = await monthlyCdpUsage(companyId);
+    if (u.limit == null || u.used < u.limit * FACT_ALERT_LIMIT_FACTOR) return;
+    await sendSystemAlert({
+      dedupKey: `cdp-fact-over:${companyId}:${new Date().toISOString().slice(0, 7)}`,
+      title: '자사몰 회원 · 주문 정보 호출이 월 한도의 10배를 넘었습니다.',
+      details: [`고객사: ${companyName}`, `이번 달 호출: ${u.used}`, `월 한도: ${u.limit}`],
+      action: '막지는 않았습니다. 몰 쪽이 같은 정보를 반복해 보내는지 확인해 주세요.',
+      cooldownMs: 24 * 60 * 60 * 1000,
+    });
+  } catch (err: any) {
+    console.warn('[CDP Auth] 사실 경로 경보선 확인 실패(요청은 그대로):', err?.message || err);
+  }
 }
 
 /**
@@ -414,10 +479,16 @@ export async function isCdpEnabledForPlan(companyId: string): Promise<boolean> {
  * - 한도 초과 시 true 반환 → 429 차단
  */
 export async function isOverMonthlyCdpLimit(companyId: string): Promise<boolean> {
+  const u = await monthlyCdpUsage(companyId);
+  return u.limit != null && u.used >= u.limit;
+}
+
+/** 이번 달 호출 수 · 월 한도(NULL = 무제한 · 회사 없음 = 한도 0) */
+async function monthlyCdpUsage(companyId: string): Promise<{ limit: number | null; used: number }> {
   // 60초 캐시 — 호출마다 cdp_api_call_log 한 달치 SUM 풀스캔하던 부하 완화
   const cachedLimit = limitCache.get(companyId);
   if (cachedLimit && cachedLimit.expiresAt > Date.now()) {
-    return cachedLimit.over;
+    return cachedLimit;
   }
   const result = await query(
     `SELECT
@@ -434,12 +505,11 @@ export async function isOverMonthlyCdpLimit(companyId: string): Promise<boolean>
      WHERE c.id = $1::uuid`,
     [companyId]
   );
-  if (result.rows.length === 0) return true; // 회사 없음 = 차단
-  const limit = result.rows[0].monthly_limit;
-  const used = parseInt(result.rows[0].used || '0');
-  const over = (limit === null || limit === undefined) ? false : used >= parseInt(limit);
-  limitCache.set(companyId, { over, expiresAt: Date.now() + LIMIT_CACHE_TTL_MS });
-  return over;
+  if (result.rows.length === 0) return { limit: 0, used: 0 }; // 회사 없음 = 차단(한도 0)
+  const raw = result.rows[0].monthly_limit;
+  const usage = { limit: raw === null || raw === undefined ? null : parseInt(raw), used: parseInt(result.rows[0].used || '0') };
+  limitCache.set(companyId, { ...usage, expiresAt: Date.now() + LIMIT_CACHE_TTL_MS });
+  return usage;
 }
 
 // ═══════════════════════════════════════════════════════════

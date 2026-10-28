@@ -26,6 +26,9 @@ import { query } from '../config/database';
 import { TIMEOUTS } from '../config/defaults';
 // ★ 2026-09-26 한줄로 V2 R1-31 — 토큰 요청 실패 판정 CT(제공자 거절일 때만 연동 만료)
 import { tokenHttpError, reconnectRequiredError, isDefinitiveTokenRejection } from './integration-token-error';
+import { markTokenRejected, saveRefreshedToken, reReadAfterLostRefresh } from './integration-token';
+import { createIntegrationRow } from './integration-row';   // ★ 1028 K9 — 연동 행 INSERT = CT 하나(몰 접두 고정)
+import { openSecret } from './secret-box';   // ★1028 K8 자격 읽기 이중(암호문 · 평문)
 import { createHmac, timingSafeEqual } from 'crypto';
 import { buildNaverCommerceSignature } from './naver-commerce-signature-core';
 import {
@@ -35,13 +38,6 @@ import {
   ProviderIntegration,
   registerProvider,
 } from './provider-registry';
-import { identifyCustomer } from './cdp-identity';
-import { syncOrder } from './cdp-orders';
-import { isKnownOrderStatus } from './cdp-order-revenue';
-import { orderExternalId } from './cdp-order-identity';
-import { trackEvent } from './cdp-events';
-import { buildWebhookIdempotencyKey } from './cdp-idempotency';
-import { firstPositiveAmount } from './normalize';
 import { type MallProduct, normalizeNaverProduct } from './mall-product-normalize';
 
 const NAVER_COMMERCE_CLIENT_ID = process.env.NAVER_COMMERCE_CLIENT_ID || '';
@@ -75,6 +71,8 @@ export interface NaverCommerceIntegration {
   accessToken: string;
   refreshToken: string;
   tokenExpiresAt: Date;
+  /** ★ 1028 K6 — token_expires_at DB 원문(만료 표시 CAS · markTokenRejected) */
+  tokenExpiresAtRaw: string | null;
   scope: string;
   webhookSecret: string | null;
   status: string;
@@ -132,8 +130,10 @@ export async function saveNaverCommerceIntegration(
   storeId: string,
   tokenRes: NaverCommerceTokenResponse,
   creds?: NaverCommerceCredentials,
-  webhookSecret: string | null = null
-): Promise<void> {
+  webhookSecret: string | null = null,
+  /** ★1028 N6 연결 때 고른 분류코드(재발급 = 없음 · 그대로) */
+  storeCode: string | null = null,
+): Promise<Date> {
   const expiresAt = new Date(Date.now() + (tokenRes.expires_in || 10800) * 1000);
   // client_credentials — refresh_token 없음(''), scope 개념 없음(''). 자격은 meta에 보관(만료 시 자동 재발급용).
   const meta: Record<string, unknown> = {
@@ -145,35 +145,26 @@ export async function saveNaverCommerceIntegration(
     meta.app_client_id = creds.clientId;
     meta.app_client_secret = creds.clientSecret;
   }
-  await saveIntegrationRowGuarded(companyId, 'naver_smart_store', storeId, null, (run) => run(
-    `INSERT INTO company_integrations (
-      id, company_id, provider, mall_id, access_token, refresh_token,
-      token_expires_at, scope, meta, webhook_secret, connected_at, status,
-      created_at, updated_at
-    ) VALUES (
-      gen_random_uuid(), $1::uuid, 'naver_smart_store', $2, $3, '',
-      $4, '', $5::jsonb, $6, NOW(), 'active',
-      NOW(), NOW()
-    )
-    ON CONFLICT (company_id, provider, mall_id) DO UPDATE SET
-      access_token = EXCLUDED.access_token,
-      refresh_token = '',
-      token_expires_at = EXCLUDED.token_expires_at,
-      scope = '',
-      meta = company_integrations.meta || EXCLUDED.meta,
-      webhook_secret = COALESCE(EXCLUDED.webhook_secret, company_integrations.webhook_secret),
-      status = 'active',
-      connected_at = NOW(),
-      updated_at = NOW()`,
-    [
-      companyId,
-      storeId,
-      tokenRes.access_token,
-      expiresAt,
-      JSON.stringify(meta),
-      webhookSecret,
-    ]
-  ));
+  if (storeCode) meta.store_code = storeCode;   // ★1028 N6 분류코드
+  await saveIntegrationRowGuarded(companyId, 'naver_smart_store', storeId, storeCode, (run) => createIntegrationRow(run, {
+    companyId, provider: 'naver_smart_store', mallId: storeId,
+    accessToken: { v: tokenRes.access_token },
+    tokenExpiresAt: { v: expiresAt },
+    meta,
+    webhookSecret: { v: webhookSecret },
+    connectedAt: { sql: 'NOW()' },
+    status: { sql: "'active'" },
+    onConflict: [
+      'access_token = EXCLUDED.access_token',
+      "refresh_token = ''",
+      'token_expires_at = EXCLUDED.token_expires_at',
+      "scope = ''",
+      'webhook_secret = COALESCE(EXCLUDED.webhook_secret, company_integrations.webhook_secret)',
+      "status = 'active'",
+      'connected_at = NOW()',
+    ],
+  }));
+  return expiresAt;   // ★ 1028 K6 — 저장한 토큰판(호출부가 든 행의 원문을 맞춘다)
 }
 
 /**
@@ -184,9 +175,10 @@ export async function connectNaverCommerce(
   companyId: string,
   storeId: string,
   creds: NaverCommerceCredentials,
+  storeCode: string | null = null,
 ): Promise<{ tokenExpiresAt: Date }> {
   const tokenRes = await issueNaverCommerceToken(creds); // 실패 = throw (IP 미등록/자격 오류 등 네이버 메시지 그대로)
-  await saveNaverCommerceIntegration(companyId, storeId, tokenRes, creds);
+  await saveNaverCommerceIntegration(companyId, storeId, tokenRes, creds, null, storeCode);
   return { tokenExpiresAt: new Date(Date.now() + (tokenRes.expires_in || 10800) * 1000) };
 }
 
@@ -196,13 +188,13 @@ export async function getNaverCommerceIntegration(
 ): Promise<NaverCommerceIntegration | null> {
   const result = storeId
     ? await query(
-        `SELECT id, company_id, mall_id, access_token, refresh_token, token_expires_at, scope, webhook_secret, status
+        `SELECT id, company_id, mall_id, access_token, refresh_token, token_expires_at, token_expires_at::text AS token_expires_at_raw, scope, webhook_secret, status
          FROM company_integrations
          WHERE company_id = $1::uuid AND provider = 'naver_smart_store' AND mall_id = $2 LIMIT 1`,
         [companyId, storeId]
       )
     : await query(
-        `SELECT id, company_id, mall_id, access_token, refresh_token, token_expires_at, scope, webhook_secret, status
+        `SELECT id, company_id, mall_id, access_token, refresh_token, token_expires_at, token_expires_at::text AS token_expires_at_raw, scope, webhook_secret, status
          FROM company_integrations
          WHERE company_id = $1::uuid AND provider = 'naver_smart_store'
          ORDER BY connected_at DESC NULLS LAST LIMIT 1`,
@@ -214,35 +206,14 @@ export async function getNaverCommerceIntegration(
     id: r.id,
     companyId: r.company_id,
     storeId: r.mall_id,
-    accessToken: r.access_token,
-    refreshToken: r.refresh_token,
+    accessToken: openSecret(r.access_token),
+    refreshToken: openSecret(r.refresh_token),
     tokenExpiresAt: new Date(r.token_expires_at),
+    tokenExpiresAtRaw: r.token_expires_at_raw ?? null,
     scope: r.scope || '',
-    webhookSecret: r.webhook_secret,
+    webhookSecret: openSecret(r.webhook_secret),
     status: r.status,
   };
-}
-
-/** ★ 2026-09-27 한줄로 V2 R098 같은 뿌리 — 같은 스토어가 여러 회사에 연동돼 있으면 전부(웹훅은 서명이 맞는 회사마다 전달). */
-export async function getNaverCommerceIntegrationsByStoreId(storeId: string): Promise<NaverCommerceIntegration[]> {
-  const result = await query(
-    `SELECT id, company_id, mall_id, access_token, refresh_token, token_expires_at, scope, webhook_secret, status
-     FROM company_integrations
-     WHERE provider = 'naver_smart_store' AND mall_id = $1 AND status = 'active'
-     ORDER BY connected_at DESC NULLS LAST`,
-    [storeId]
-  );
-  return result.rows.map((r: any) => ({
-    id: r.id,
-    companyId: r.company_id,
-    storeId: r.mall_id,
-    accessToken: r.access_token,
-    refreshToken: r.refresh_token,
-    tokenExpiresAt: new Date(r.token_expires_at),
-    scope: r.scope || '',
-    webhookSecret: r.webhook_secret,
-    status: r.status,
-  }));
 }
 
 export async function ensureFreshNaverCommerceToken(
@@ -262,21 +233,21 @@ export async function ensureFreshNaverCommerceToken(
       throw reconnectRequiredError('네이버 커머스 자격(client_id/secret)이 없습니다. 연동 화면에서 다시 연결해주세요.');
     }
     const reissued = await issueNaverCommerceToken(c);
-    await saveNaverCommerceIntegration(integration.companyId, integration.storeId, reissued, c);
+    // ★ 1028 Codex R1 #2 — 재발급 저장 = 그 토큰판 · 해제 아닌 행일 때만(재연결 upsert 를 쓰지 않는다 · 자격 meta 는 건드리지 않는다)
+    const savedExpiry = new Date(Date.now() + (reissued.expires_in || 10800) * 1000);
+    const saved = await saveRefreshedToken({ id: integration.id, tokenExpiresAtRaw: integration.tokenExpiresAtRaw, accessToken: reissued.access_token, refreshToken: '', tokenExpiresAt: savedExpiry, meta: { token_type: reissued.token_type, expires_in: reissued.expires_in } });
+    if (!saved) return reReadAfterLostRefresh(await getNaverCommerceIntegration(integration.companyId, integration.storeId).catch(() => null), integration.id);
     return {
       ...integration,
       accessToken: reissued.access_token,
       refreshToken: '',
-      tokenExpiresAt: new Date(Date.now() + (reissued.expires_in || 10800) * 1000),
+      tokenExpiresAt: savedExpiry,
+      tokenExpiresAtRaw: savedExpiry.toISOString(),
     };
   } catch (err) {
     // ★ 2026-09-26 R1-31 — 제공자가 거절했을 때만 만료로 표시한다(일시 장애 한 번에 연동이 끊겨 웹훅이 유실됐다)
-    if (isDefinitiveTokenRejection(err)) {
-      await query(
-        `UPDATE company_integrations SET status = 'token_expired', updated_at = NOW() WHERE id = $1::uuid`,
-        [integration.id]
-      );
-    }
+    // ★ 1028 K6 — 그 요청에 쓴 토큰판일 때만 · 유예 시계 같은 문장(markTokenRejected)
+    if (isDefinitiveTokenRejection(err)) await markTokenRejected(integration);
     throw err;
   }
 }
@@ -301,7 +272,7 @@ export async function getNaverCommerceCredentials(companyId: string, storeId?: s
       );
   const meta = (r.rows[0]?.meta || {}) as { app_client_id?: string; app_client_secret?: string };
   const id = String(meta.app_client_id || '').trim();
-  const secret = String(meta.app_client_secret || '').trim();
+  const secret = String(openSecret(meta.app_client_secret) || '').trim();
   if (id && secret) return { clientId: id, clientSecret: secret };
   return envNaverCreds();
 }
@@ -452,8 +423,6 @@ export async function fetchNaverProducts(
 }
 
 // ════════════════════════════════════════════════════════════════════
-// Webhook 서명 검증
-// ════════════════════════════════════════════════════════════════════
 
 export function verifyNaverCommerceWebhookSignature(rawBody: Buffer | string, signature: string, secret: string | null): boolean {
   if (!secret) return false;
@@ -533,101 +502,21 @@ export const naverSmartStoreAdapter: IProviderAdapter = {
     return toProviderTokenResponse(tokenRes);
   },
 
-  verifyWebhookSignature(rawBody, signature, secret) {
-    return verifyNaverCommerceWebhookSignature(rawBody, signature, secret);
+  // ★ 2026-10-28 자사몰 대비 K15 · M19 — 조회형(웹훅 규격 없음) · 옛 추측 이벤트 매핑 삭제(메이크샵 · 고도몰과 같은 꼴)
+  verifyWebhookSignature(): boolean {
+    return false;
   },
-
-  async processWebhookEvent(companyId, event, resource, ctx) {
-    // 네이버 커머스 표준 이벤트 매트릭스 (외부 API 검증 후 정정 가능)
-    // ★ 2026-10-27 자사몰 대비 K1-3 · K1-6 — 원천 시각이 없으면 받은 시각(ctx.observedAt) · 옛 스냅숏 = 'stale'
-    switch (event) {
-      case 'customer.created':
-      case 'customer.updated':
-      case 'member.joined':
-        await identifyCustomer(companyId, {
-          ...(ctx.storeCode ? { storeCode: ctx.storeCode } : {}),   // ★ 1027 K9 — 연동 행 분류코드(소속 행 · 몰 동의)
-          source: 'naver_smart_store',
-          externalId: String(resource.member_id || resource.customer_id || resource.external_id || ''),
-          email: resource.email,
-          phone: resource.cellphone || resource.phone,
-          name: resource.name,
-          birthDate: resource.birth_date || resource.birthday,
-          gender: resource.gender,
-          grade: resource.grade,
-          customFields: {
-            naver_member_id: resource.member_id,
-            naver_join_date: resource.created_at,
-          },
-        });
-        break;
-
-      case 'order.placed':
-      case 'order.created':
-      case 'order.completed': {
-        const naverStatus = String(resource.status || 'pending');
-        const placed = await syncOrder(companyId, {
-          ...(ctx.storeCode ? { storeCode: ctx.storeCode } : {}),   // ★ 1027 K9 — 연동 행 분류코드(소속 행 · 몰 동의)
-          source: 'naver_smart_store',
-          orderId: String(resource.order_id || resource.product_order_id || ''),
-          // ★ 2026-09-27 한줄로 V2 R245 — 비회원 주문도 적재(주문 외부 id CT)
-          externalId: orderExternalId(resource.member_id || resource.customer_id, resource.buyer_cellphone || resource.phone, resource.order_id || resource.product_order_id),
-          email: resource.buyer_email || resource.email,
-          phone: resource.buyer_cellphone || resource.phone,
-          name: resource.buyer_name || resource.name,
-          status: naverStatus,
-          statusKnown: isKnownOrderStatus(naverStatus),
-          // "0.00" 문자열 truthy 함정 방어 — 공용 CT firstPositiveAmount (2026-07-03 카페24 실측 교훈 동반 적용)
-          totalAmount: firstPositiveAmount(resource.total_payment_amount, resource.total_amount),
-          itemCount: Array.isArray(resource.items) ? resource.items.length : undefined,
-          items: Array.isArray(resource.items) ? resource.items.map((it: any) => ({
-            productId: it.product_id ? String(it.product_id) : undefined,
-            productName: it.product_name,
-            price: it.price != null ? Number(it.price) : undefined,
-            quantity: it.quantity != null ? Number(it.quantity) : undefined,
-          })) : undefined,
-          orderedAt: String(resource.ordered_at || resource.order_date || ctx.observedAt),
-          srcAt: ctx.observedAt,
-          currency: 'KRW',
-        });
-        if (placed.stale) return 'stale';
-        break;
-      }
-
-      case 'order.cancelled':
-      case 'order.refunded':
-        await trackEvent(companyId, {
-          source: 'naver_smart_store',
-          eventName: 'custom_order_cancelled',
-          externalId: String(resource.member_id || resource.customer_id || ''),
-          properties: {
-            order_id: resource.order_id,
-            status: resource.status,
-            cancelled_amount: resource.total_payment_amount,
-          },
-          occurredAt: String(resource.cancelled_at || ctx.observedAt),
-        });
-        break;
-
-      default:
-        console.log(`[Naver SmartStore Adapter] 처리하지 않는 event: ${event}`);
-    }
+  async processWebhookEvent(): Promise<void> {
+    // 웹훅 미제공 — 조회로만 동기화
   },
-
-  extractMallIdFromWebhook(headers, body) {
-    const fromHeader = headers['x-naver-store-id'] || headers['X-Naver-Store-Id'];
-    if (fromHeader) return Array.isArray(fromHeader) ? fromHeader[0] : String(fromHeader);
-    return body?.store_id || body?.resource?.store_id || null;
+  extractMallIdFromWebhook(): string | null {
+    return null;
   },
-
-  extractEventFromWebhook(headers, body) {
-    const fromHeader = headers['x-naver-event'] || headers['X-Naver-Event'];
-    if (fromHeader) return Array.isArray(fromHeader) ? fromHeader[0] : String(fromHeader);
-    return body?.event || null;
+  extractEventFromWebhook(): string | null {
+    return null;
   },
-
-  buildIdempotencyKey(event, resource, body) {
-    // CT-85 — 전송 고유값 우선 + 본문 해시. 이전 엔티티ID 단독 키는 두 번째 갱신부터 영구 duplicate가 되는 결함.
-    return buildWebhookIdempotencyKey(event, resource, body);
+  buildIdempotencyKey(event: string): string {
+    return `${event}:naver_smart_store`;
   },
 };
 

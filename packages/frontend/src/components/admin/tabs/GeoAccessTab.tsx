@@ -150,6 +150,7 @@ export default function GeoAccessTab(props: GeoAccessTabProps) {
                   <option value="user">계정 (해외 근무 담당자)</option>
                   <option value="company_api">회사 API (SDK·자사몰)</option>
                   <option value="company_agent">회사 에이전트 (사내 서버)</option>
+                  <option value="company_plugin">회사 플러그인 (워드프레스 서버 · 등록하면 그 회사는 등록 대역만)</option>
                   <option value="global">전역</option>
                 </select>
                 <input
@@ -215,7 +216,7 @@ export default function GeoAccessTab(props: GeoAccessTabProps) {
                     {pageSlice(geoExceptions, geoExPage).map((x) => (
                       <tr key={x.id} className={x.is_active && !x.is_expired ? '' : 'opacity-45'}>
                         <td className="px-3 py-2 text-xs text-gray-700">
-                          {x.scope === 'user' ? '계정' : x.scope === 'company_api' ? '회사 API' : x.scope === 'company_agent' ? '회사 에이전트' : '전역'}
+                          {x.scope === 'user' ? '계정' : x.scope === 'company_api' ? '회사 API' : x.scope === 'company_agent' ? '회사 에이전트' : x.scope === 'company_plugin' ? '회사 플러그인' : '전역'}
                         </td>
                         <td className="px-3 py-2 text-xs text-gray-900"><AdminLongText text={x.login_id || x.company_name} max={180} label="대상" /></td>
                         <td className="px-3 py-2 font-mono text-xs text-gray-700">{x.cidr}</td>

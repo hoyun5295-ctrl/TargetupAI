@@ -24,7 +24,7 @@ vi.mock('../../config/database', () => ({
   query: vi.fn(async () => ({ rows: [{ company_name: '인비토', brand_tone: '친근함' }] })),
   default: { query: vi.fn(async () => ({ rows: [] })) },
 }));
-vi.mock('../brand-voice-prompt', () => ({ buildSystemPromptWithBrandVoice: async (_c: string, s: string) => s }));
+vi.mock('../brand-voice-prompt', () => ({ VOICE_KIND_BY_STEP: 'by_step', voiceLearned: async () => false, getBrandVoiceSnapshot: async () => null, voiceLearnedOf: () => false, resolveGuidelineFor: () => null, composeVoicePrompt: async (i: { basePrompt: string }) => ({ system: i.basePrompt, guideline: null, shape: null, voiceLearned: false, exampleCount: 0 }) }));
 
 import { regenerateStepAvoidingSpam } from '../journey-ai-generator';
 

@@ -20,11 +20,17 @@
 import axios from 'axios';
 import * as http from 'http';
 import * as https from 'https';
-import { randomBytes } from 'crypto';
+import { randomBytes, createHash } from 'crypto';
 import { query, pool } from '../config/database';
 import { runSerial } from './inflight-lock';
 import { guardIntegrationMode } from './integration-scope';
 import { assertOutboundUrl, OUTBOUND_AXIOS_GUARD } from './outbound-guard';
+import { issuePluginKey, pluginKeyIntegrationId, pluginKeyVersionOf, verifyPluginKey } from './cdp-plugin-key';
+import { createIntegrationRow } from './integration-row';   // ★ 1028 K9 — 연동 행 INSERT = CT 하나(몰 접두 고정)
+import { processImportItems, newImportGuard, IMPORT_MAX_CONSECUTIVE_FAILURES, type ImportRunGuard } from './mall-import';
+import { integrationProblemOf, type IntegrationProblem } from './integration-problem';
+import { registerMallAllowedOrigins, releaseMallAllowedOrigins, mallPlatformOrigins } from './mall-origins';
+import { openSecret, sealSecret, sealMetaSecrets, webhookSecretColumnFitsSealed } from './secret-box';   // ★1028 K8
 import { syncOrder } from './cdp-orders';
 import { identifyCustomer, parseConsentValue, isConsentAbsent, CdpPhoneRequiredError } from './cdp-identity';
 import { WOO_SOURCE, normalizeWooMallId, wooSiteOrigin, wooSelfHost, mapWooCustomerToCdp, mapWooOrderToCdp, wooMemberIdFormat, wooConsentReadable, type WooTopicResource } from './woocommerce-core';
@@ -74,7 +80,8 @@ export const wooTuning = {
 };
 export const STORE_PAGE_MAX = 100;                  // Store API per_page 상한
 /** 우리가 받는 웹훅 주제 4종 — 1클릭 연결이 REST 로 자동 생성한다(화면 안내 문안과 같은 목록) */
-export const WOO_WEBHOOK_TOPICS = ['order.created', 'order.updated', 'customer.created', 'customer.updated'] as const;
+// ★1028 K5 — customer.deleted(회원 삭제 = 광고 수신 철회 · 쓰기 권한 몰은 30분 점검이 자동으로 만든다)
+export const WOO_WEBHOOK_TOPICS = ['order.created', 'order.updated', 'customer.created', 'customer.updated', 'customer.deleted'] as const;
 const HTTP_TIMEOUT_MS = 20000;
 const USER_AGENT = 'Hanjullo-CDP/1.0';
 /**
@@ -227,6 +234,8 @@ export interface WooBackfillState {
    * 판이 낮은 끝난 가져오기는 주기 워커가 주문 단계만 한 번 다시 읽는다.
    */
   order_rule: number;
+  /** ★1028 K7 — 이 가져오기가 읽은 몰 주소 · REST 키의 지문(재승인 · 연결 확인은 이 값이 바뀌었을 때만 처음부터 다시 · 없는 옛 상태 = 한 번 다시) */
+  source_fp?: string;
   started_at: string;
   updated_at: string;
   done_at: string | null;
@@ -250,6 +259,7 @@ function readBackfill(v: any): WooBackfillState | null {
     truncated: v.truncated === true,
     requested: v.requested === true,
     order_rule: Math.max(1, n(v.order_rule, 1)),
+    ...(typeof v.source_fp === 'string' ? { source_fp: v.source_fp } : {}),
     started_at: String(v.started_at || ''),
     updated_at: String(v.updated_at || ''),
     done_at: v.done_at ? String(v.done_at) : null,
@@ -269,7 +279,7 @@ interface WooMeta {
   woo_seen_hosts?: string[];
   /** ★1001 REST 기준 주소 — 몰이 이동(3xx)시킨 곳이 증명된 주소일 때 따라가 성공한 origin. 호스트가 식별자·woo_seen_hosts 밖이면 쓰지 않는다 */
   woo_rest_origin?: string;
-  /** 분류코드 — provider 공통 키(접두 없음). utils/integration-scope.ts resolveStoreCodeByOriginHost 가 같은 키를 읽는다 */
+  /** 분류코드 — provider 공통 키(접두 없음). 몰 동의 · 사용자 범위 · 연결 모드 판정이 같은 키를 읽는다(integration-scope · mall-consent) */
   store_code?: string | null;
   woo_sync_error?: string;
   woo_sync_error_code?: string;
@@ -291,9 +301,9 @@ function toIntegration(r: any): WooIntegration {
     status: r.status,
     connectedAt: r.connected_at ? new Date(r.connected_at) : null,
     lastSyncedAt: r.last_synced_at ? new Date(r.last_synced_at) : null,
-    webhookSecret: r.webhook_secret || null,
-    consumerKey: meta.woo_consumer_key || '',
-    consumerSecret: meta.woo_consumer_secret || '',
+    webhookSecret: openSecret(r.webhook_secret) || null,
+    consumerKey: openSecret(meta.woo_consumer_key) || '',
+    consumerSecret: openSecret(meta.woo_consumer_secret) || '',
     consentMetaKey: meta.woo_consent_meta_key || null,
     storeCode: typeof meta.store_code === 'string' && meta.store_code.trim() ? meta.store_code.trim() : null,
     keyPermissions: meta.woo_key_permissions || '',
@@ -442,33 +452,29 @@ async function saveWooCredentialsInLine(
     if (storeCode !== undefined) meta.store_code = storeCode ? String(storeCode).trim() || null : null;
     // ★ 2026-10-27 자사몰 대비 K9 SC1 — 같은 트랜잭션에서 회사 모드 잠금 → (새 몰 · 되살리는 몰이면) 모드 판정. 잠그는 순서 = 우커머스 주소 잠금 → 모드 잠금(늘 같음)
     await guardIntegrationMode((sql, params) => db.query(sql, params) as any, companyId, 'woocommerce', mallId, meta.store_code ?? null);
-    const r = await db.query(
-    `INSERT INTO company_integrations (
-      id, company_id, provider, mall_id, access_token, refresh_token,
-      token_expires_at, scope, meta, webhook_secret, connected_at, status, created_at, updated_at
-    ) VALUES (
-      gen_random_uuid(), $1::uuid, 'woocommerce', $2, '', '',
-      NULL, '', $3::jsonb, $4, NULL, 'pending', NOW(), NOW()
-    )
-    ON CONFLICT (company_id, provider, mall_id) DO UPDATE SET
-      -- ★1001 해제됐던 몰을 되살릴 때는 옛 증명 주소·굳힌 기준 주소를 버린다(Codex R2) — 해제된 동안 그 주소를 다른 몰이 가져갔을 수 있다.
-      --   되살린 몰은 서명 검증된 웹훅으로 다시 증명받는다(한 회사 안에서 호스트 하나는 한 행에만).
-      meta = (CASE WHEN company_integrations.status = 'revoked'
-                   THEN company_integrations.meta - 'woo_seen_hosts' - 'woo_rest_origin' - 'woo_webhook_cleanup'
-                   ELSE company_integrations.meta END) || EXCLUDED.meta,
-      webhook_secret = COALESCE(company_integrations.webhook_secret, EXCLUDED.webhook_secret),
-      status = CASE WHEN company_integrations.status = 'revoked' THEN 'pending' ELSE company_integrations.status END,
-      updated_at = NOW()
-    RETURNING webhook_secret`,
-    [companyId, mallId, JSON.stringify(meta), freshSecret],
-    );
+    // ★1001 해제됐던 몰을 되살릴 때는 옛 증명 주소·굳힌 기준 주소를 버린다(Codex R2) — 해제된 동안 그 주소를 다른 몰이 가져갔을 수 있다.
+    //   되살린 몰은 서명 검증된 웹훅으로 다시 증명받는다(한 회사 안에서 호스트 하나는 한 행에만).
+    const r = await createIntegrationRow((sql, params) => db.query(sql, params) as any, {
+      companyId, provider: 'woocommerce', mallId,
+      meta,
+      webhookSecret: { v: freshSecret },
+      status: { sql: "'pending'" },
+      metaOnConflict: (existing, incoming) => `(CASE WHEN company_integrations.status = 'revoked'
+                   THEN ${existing} - 'woo_seen_hosts' - 'woo_rest_origin' - 'woo_webhook_cleanup'
+                   ELSE ${existing} END) || ${incoming}`,
+      onConflict: [
+        'webhook_secret = COALESCE(company_integrations.webhook_secret, EXCLUDED.webhook_secret)',
+        "status = CASE WHEN company_integrations.status = 'revoked' THEN 'pending' ELSE company_integrations.status END",
+      ],
+      returning: 'webhook_secret',
+    });
     return { kind: 'saved' as const, mallId, r };
   });
   if (locked.kind === 'moved') return { moved: locked.mallId };
   const { mallId, r } = locked;
-  const webhookSecret = String(r.rows[0]?.webhook_secret || freshSecret);
-  await registerWooAllowedOrigins(companyId, mallId);
-  if (typedMallId !== mallId) await registerWooAllowedOrigins(companyId, typedMallId);
+  const webhookSecret = String(openSecret(r.rows[0]?.webhook_secret) || freshSecret);
+  await registerWooAllowedOrigins(companyId, mallId, mallId);
+  if (typedMallId !== mallId) await registerWooAllowedOrigins(companyId, mallId, typedMallId);
   return { saved: { mallId, webhookUrl: buildWooWebhookUrl(mallId), webhookSecret } };
 }
 
@@ -477,18 +483,12 @@ async function saveWooCredentialsInLine(
  * (LESSONS_BACKEND 자사몰 연동 절: "연동 시 자동 등록 안 하면 SDK 깔아도 수집 0"). SQL 은 routes/cdp.ts POST /allowed-origins 와 같다.
  * 실패(미마이그레이션 등)는 저장을 막지 않고 로그만 남긴다 — 담당자가 화면에서 수동 등록할 수 있다.
  */
-async function registerWooAllowedOrigins(companyId: string, mallId: string): Promise<void> {
-  const origins = [`https://${mallId}`, `https://www.${mallId}`];
+async function registerWooAllowedOrigins(companyId: string, rowMallId: string, host: string): Promise<void> {
+  // ★ 1028 K12 — 그 몰 행이 넣은 값으로 적는다(해제가 그 값만 뺀다 · 손 등록 · 다른 몰 값 불변) · 모바일 m. 도 넣는다(판정은 www. 만 뗀다)
   try {
-    await query(
-      `UPDATE companies
-         SET cdp_allowed_origins = ARRAY(SELECT DISTINCT unnest(COALESCE(cdp_allowed_origins, '{}'::text[]) || $2::text[])),
-             updated_at = NOW()
-       WHERE id = $1::uuid`,
-      [companyId, origins],
-    );
+    await registerMallAllowedOrigins(companyId, WOO_PROVIDER, rowMallId, mallPlatformOrigins(WOO_PROVIDER, host));
   } catch (err: any) {
-    console.log(`[WooCommerce] 수집 허용 도메인 자동 등록 실패(저장은 계속) company=${companyId} mall=${mallId} err=${err?.message}`);
+    console.log(`[WooCommerce] 수집 허용 도메인 자동 등록 실패(저장은 계속) company=${companyId} mall=${rowMallId} host=${host} err=${err?.message}`);
   }
 }
 
@@ -499,7 +499,7 @@ export async function rotateWooWebhookSecret(companyId: string, mallId: string):
     `UPDATE company_integrations SET webhook_secret = $3, updated_at = NOW()
      WHERE company_id = $1::uuid AND provider = 'woocommerce' AND mall_id = $2 AND status <> 'revoked'
      RETURNING id`,
-    [companyId, mallId, secret],
+    [companyId, mallId, (await webhookSecretColumnFitsSealed()) ? sealSecret(secret) : secret],
   );
   if (r.rows.length === 0) throw new WooApiError('no_integration');
   return { webhookSecret: secret, webhookUrl: buildWooWebhookUrl(mallId) };
@@ -518,7 +518,7 @@ export async function saveWooRestKeysFromAuth(
      SET meta = COALESCE(meta, '{}'::jsonb) || $3::jsonb, updated_at = NOW()
      WHERE company_id = $1::uuid AND provider = 'woocommerce' AND mall_id = $2 AND status <> 'revoked'
      RETURNING id`,
-    [companyId, mallId, JSON.stringify({ woo_consumer_key: keys.consumerKey, woo_consumer_secret: keys.consumerSecret, woo_key_permissions: keys.permissions })],
+    [companyId, mallId, JSON.stringify(sealMetaSecrets({ woo_consumer_key: keys.consumerKey, woo_consumer_secret: keys.consumerSecret, woo_key_permissions: keys.permissions }))],
   );
   return r.rows.length > 0;
 }
@@ -561,6 +561,52 @@ export async function getWooIntegration(companyId: string, mallId: string): Prom
   );
   if (r.rows.length === 0 || r.rows[0].status === 'revoked') return undefined;
   return toIntegration(r.rows[0]);
+}
+
+/**
+ * ★ 2026-10-28 자사몰 대비 K8 · D9 — 플러그인 키로 그 몰 행을 찾는다(서명 · 판이 맞고 연결된 행만 · 그 밖 = undefined).
+ * 키 하나 = 몰 하나 · 할 수 있는 일 = 그 몰 회원의 토큰 발급뿐(routes/cdp.ts /plugin/member-token).
+ */
+export async function findWooIntegrationByPluginKey(key: unknown): Promise<WooIntegration | undefined> {
+  const id = pluginKeyIntegrationId(key);
+  if (!id) return undefined;
+  const r = await query(
+    `SELECT ${ROW_COLUMNS} FROM company_integrations WHERE id = $1::uuid AND provider = 'woocommerce' AND status = 'active'`,
+    [id],
+  );
+  if (r.rows.length === 0 || !verifyPluginKey(key, id, pluginKeyVersionOf(r.rows[0].meta))) return undefined;
+  return toIntegration(r.rows[0]);
+}
+
+/**
+ * 플러그인이 보낸 (몰 주소 · 워드프레스 회원 번호) → 이 몰의 회원 연결 식별자(`{고정 몰 식별자}:{번호}` · 서버 회원 연결과 같은 꼴).
+ * 주소는 그 행이 인정하는 호스트(식별자 · 서명 검증된 웹훅이 증명한 주소)여야 한다 — 도메인을 옮긴 몰(home_url ≠ 고정 식별자)도
+ * 같은 회원 연결로 잇는다(K4 검증 수정 10). 번호가 숫자가 아니거나 주소가 밖이면 null.
+ */
+export function wooPluginMemberExternalId(integ: Pick<WooIntegration, 'mallId' | 'seenHosts'>, host: unknown, userId: unknown): string | null {
+  const id = String(userId ?? '').trim();
+  if (!/^[1-9][0-9]{0,18}$/.test(id) || typeof host !== 'string' || !wooHostAllowed(integ, host)) return null;
+  return `${integ.mallId}:${id}`;
+}
+
+/** 그 몰의 플러그인 키(지금 판) · rotate = 판 + 1 로 새로 발급(옛 키는 그 순간 무효 · 한 문장) */
+export async function wooPluginKeyFor(companyId: string, mallId: string, rotate: boolean): Promise<string | undefined> {
+  const r = rotate
+    ? await query(
+      `UPDATE company_integrations
+          SET meta = COALESCE(meta, '{}'::jsonb) || jsonb_build_object('plugin_key_ver', COALESCE(NULLIF(meta->>'plugin_key_ver', '')::int, 1) + 1),
+              updated_at = NOW()
+        WHERE company_id = $1::uuid AND provider = 'woocommerce' AND mall_id = $2 AND status <> 'revoked'
+        RETURNING id, meta`,
+      [companyId, mallId],
+    )
+    : await query(
+      `SELECT id, meta FROM company_integrations
+        WHERE company_id = $1::uuid AND provider = 'woocommerce' AND mall_id = $2 AND status <> 'revoked'`,
+      [companyId, mallId],
+    );
+  if (r.rows.length === 0) return undefined;
+  return issuePluginKey(r.rows[0].id, pluginKeyVersionOf(r.rows[0].meta));
 }
 
 /** 회사의 우커머스 몰 전부(해제 제외). */
@@ -613,7 +659,7 @@ export async function markWooConnected(companyId: string, mallId: string): Promi
  * @returns 끊었으면 true · 행이 없거나 이미 끊겨 있으면 false(게이트를 부르지 않는다)
  */
 export async function disconnectWoo(companyId: string, mallId: string, allow?: (existing: WooIntegration) => void): Promise<boolean> {
-  return withWooIdentityLock(companyId, async (db) => {
+  const done = await withWooIdentityLock(companyId, async (db) => {
     const cur = await db.query(
       `SELECT ${ROW_COLUMNS} FROM company_integrations
         WHERE company_id = $1::uuid AND provider = 'woocommerce' AND mall_id = $2 FOR UPDATE`,
@@ -630,6 +676,9 @@ export async function disconnectWoo(companyId: string, mallId: string, allow?: (
     );
     return r.rows.length > 0;
   });
+  // ★ 1028 K12 — 그 몰이 넣은 수집 허용 도메인만 뺀다(잠금 밖 · 행 잠금을 쥔 트랜잭션이 끝난 뒤 · 실패해도 해제는 그대로)
+  if (done) await releaseMallAllowedOrigins(companyId, WOO_PROVIDER, mallId).catch((e: any) => console.warn(`[WooCommerce] 수집 허용 도메인 정리 실패 mall=${mallId}: ${e?.message || e}`));
+  return done;
 }
 
 export interface WooMallStatus {
@@ -645,6 +694,10 @@ export interface WooMallStatus {
   /** 분류코드(없으면 회사 공용) — 관리자 화면에서 어느 몰이 누구 것인지 */
   storeCode: string | null;
   syncError: { message: string; code: string; at: string | null } | null;
+  /** ★1028 K7 — 그 몰의 문제 분류(서버 판정 · 없으면 null · 화면은 이 값으로만 조치 필요를 가른다) */
+  problem: IntegrationProblem | null;
+  /** ★1028 M11 — 웹훅을 누가 만드나(auto = 30분 점검 · manual = 고객사) */
+  webhookOwner: 'auto' | 'manual';
   /** 기존 회원·주문 가져오기 진행(없으면 null) — 수십 분~수 시간 걸리는 일이라 화면이 "도는 중"임을 말해야 한다 */
   backfill: { stage: WooBackfillState['stage']; customersImported: number; ordersImported: number; noPhone: number; failed: number; truncated: boolean; doneAt: string | null } | null;
   /**
@@ -657,6 +710,14 @@ export interface WooMallStatus {
 export interface WooStatus {
   connected: boolean;
   malls: WooMallStatus[];
+}
+
+/**
+ * ★ 2026-10-28 자사몰 대비 K14 M11 — 그 몰의 웹훅을 누가 만드나(판정 한 곳 · 주기 점검 워커 · 화면 응답이 함께 부른다).
+ * auto = 쓰기 권한 키(1클릭 연결) · 30분 점검이 만들고 다시 켠다(비밀키 재발급 버튼을 보이지 않는다) · manual = 읽기 권한 키 · 고객사가 웹훅을 만든다.
+ */
+export function wooWebhookOwner(keyPermissions: string | null | undefined): 'auto' | 'manual' {
+  return String(keyPermissions || '').includes('write') ? 'auto' : 'manual';
 }
 
 /** 연동센터 표시용 — 키·secret 값은 싣지 않는다. connected = 검증된 몰(active + connected_at)이 하나라도 있으면. */
@@ -674,6 +735,8 @@ export async function getWooStatus(companyId: string): Promise<WooStatus> {
     consentMetaKey: i.consentMetaKey,
     storeCode: i.storeCode,
     syncError: i.syncError,
+    problem: integrationProblemOf('woocommerce', i.status, i.syncError?.code),
+    webhookOwner: wooWebhookOwner(i.keyPermissions),
     backfill: i.backfill
       ? {
         stage: i.backfill.stage, customersImported: i.backfill.customers_imported, ordersImported: i.backfill.orders_imported,
@@ -742,7 +805,7 @@ async function adoptWooRestOrigin(integ: WooIntegration, origin: string): Promis
       [integ.companyId, integ.mallId, JSON.stringify({ woo_rest_origin: origin })],
     );
     const host = normalizeWooMallId(origin);
-    if (host && host !== integ.mallId) await registerWooAllowedOrigins(integ.companyId, host);
+    if (host && host !== integ.mallId) await registerWooAllowedOrigins(integ.companyId, integ.mallId, host);
     console.log(`[WooCommerce] 몰 주소 이동을 따라갑니다 company=${integ.companyId} mall=${integ.mallId} ${from} → ${origin}`);
   } catch (err: any) {
     console.warn(`[WooCommerce] 이동 주소 저장 실패(이번 호출은 계속) mall=${integ.mallId} err=${err?.message || err}`);
@@ -823,7 +886,7 @@ export function resetWooSeenHostRefusals(): void { seenHostRefusedUntil.clear();
  * ★ 2026-10-01 서명이 검증된 웹훅 본문이 말하는 몰 주소를 그 몰의 증명된 주소로 적는다(새 호스트일 때만 쓰기 · 최대 WOO_SEEN_HOSTS_MAX).
  *   한 회사 안에서 호스트 하나는 한 행에만 속한다 — 다른 몰의 식별자·증명 주소와 겹치면 적지 않는다(Codex 1001 R1).
  *   ⛔ 서명 검증 **뒤에만** 부른다(routes/woocommerce.ts 수신 라우트) — 검증 안 된 본문으로 적으면 아무나 남의 몰에 주소를 꽂는다.
- *   새 주소는 수집 허용 도메인에도 넣는다(브라우저 SDK 수집 · 분류코드 판정 resolveStoreCodeByOriginHost 가 같은 목록을 본다).
+ *   새 주소는 수집 허용 도메인에도 넣는다(브라우저 SDK 수집 · 플러그인 회원 토큰의 몰 주소 판정 wooPluginMemberExternalId 가 같은 목록을 본다).
  * @returns 새로 적었으면 true
  */
 export async function noteWooSeenHost(integ: WooIntegration, resource: any): Promise<boolean> {
@@ -858,7 +921,7 @@ export async function noteWooSeenHost(integ: WooIntegration, resource: any): Pro
     return false;
   }
   integ.seenHosts = hosts.map((h: any) => String(h || '')).filter(Boolean);
-  await registerWooAllowedOrigins(integ.companyId, host);
+  await registerWooAllowedOrigins(integ.companyId, integ.mallId, host);
   console.log(`[WooCommerce] 몰의 다른 주소를 확인했습니다(서명 검증된 웹훅) company=${integ.companyId} mall=${integ.mallId} host=${host}`);
   return true;
 }
@@ -1071,43 +1134,30 @@ async function fetchWooPageWithRetry(integ: WooIntegration, resource: 'orders' |
   }
 }
 
-/**
- * 연속 실패 상한. 데이터 문제(길이 초과·형식 이상)는 드문드문 나고, 장애(DB 끊김 등)는 연속으로 난다 →
- * 드문 실패는 그 건만 세고 넘어가되, 연속으로 이만큼 실패하면 장애로 보고 멈춘다(전부 실패한 채 "완료"가 되지 않게).
- */
-export const WOO_MAX_CONSECUTIVE_FAILURES = 10;
-const MAX_FAILURE_LOGS_PER_RUN = 20;
+/** 연속 실패 상한 = 공용 가져오기 CT 값(★1028 K11 · 정의 = mall-import.ts) */
+export const WOO_MAX_CONSECUTIVE_FAILURES = IMPORT_MAX_CONSECUTIVE_FAILURES;
 
 interface WooItemTally { synced: number; noPhone: number; failed: number }
-/** 한 회차(가져오기 1회 · 주기 수집 1회) 동안 페이지를 넘어 이어지는 연속 실패 수·로그 수 */
-interface WooRunGuard { streak: number; logged: number }
+type WooRunGuard = ImportRunGuard;
 
 /**
  * 한 페이지의 건들을 적재한다 — 한 건의 실패가 회차 전체를 죽이지 않는다(★0921: 전화번호 없는 회원 1명에 4몰 가져오기 전부 중단).
- * no_phone 은 processWooResource 가 값으로 돌려준다. 그 밖의 예외는 그 건만 failed 로 세고 로그(몰·종류·id·사유 — 개인정보 없음)를 남긴다.
+ * ★1028 K11 — 건별 반복 · 건너뜀 · 연속 실패 상한 · 23505 재시도 = 공용 CT processImportItems(고도몰 · 다른 몰과 같은 규칙).
+ * no_phone 은 processWooResource 가 값으로 돌려준다 · 넣을 수 없는 건(skip)과 그 밖 실패는 failed 로 센다(화면 숫자 그대로).
  */
 async function processWooItems(integ: WooIntegration, kind: WooTopicResource, items: any[], guard: WooRunGuard, readAt: string): Promise<WooItemTally> {
-  const t: WooItemTally = { synced: 0, noPhone: 0, failed: 0 };
-  for (const raw of items) {
-    // 원천 시각 = 그 쪽을 읽은 시각(readAt · 한 쪽의 모든 건 · 재시도 같은 값)
-    const put = () => processWooResource(integ.companyId, integ.mallId, kind, raw, integ.consentMetaKey, integ.storeCode, readAt);
-    try {
-      // UNIQUE 위반(23505) = 동시에 도는 다른 페이지가 같은 휴대폰·이메일의 고객을 방금 만들었다 → 한 번 더 넣으면 그 고객에 합쳐진다
-      const r = await put().catch((e: any) => { if (e?.code === '23505') return put(); throw e; });
-      if (r === 'synced' || r === 'stale') t.synced++;   // stale = 이미 더 새 본문을 반영한 주문(처리 끝)
-      else if (r === 'no_phone') t.noPhone++;
-      guard.streak = 0;
-    } catch (err: any) {
-      t.failed++;
-      guard.streak++;
-      if (guard.logged < MAX_FAILURE_LOGS_PER_RUN) {
-        guard.logged++;
-        console.error(`[WooCommerce] 적재 실패(그 건만 건너뜀) mall=${integ.mallId} ${kind} id=${raw?.id ?? '-'} — ${err?.message || err}`);
-      }
-      if (guard.streak >= WOO_MAX_CONSECUTIVE_FAILURES) throw err;
-    }
-  }
-  return t;
+  // 원천 시각 = 그 쪽을 읽은 시각(readAt · 한 쪽의 모든 건 · 재시도 같은 값)
+  const r = await processImportItems(
+    items,
+    (raw: any) => processWooResource(integ.companyId, integ.mallId, kind, raw, integ.consentMetaKey, integ.storeCode, readAt),
+    guard,
+    (raw: any) => `woocommerce mall=${integ.mallId} ${kind} id=${raw?.id ?? '-'}`,
+  );
+  return {
+    synced: r.results.filter((x) => x === 'synced' || x === 'stale').length,   // stale = 이미 더 새 본문을 반영한 주문(처리 끝)
+    noPhone: r.results.filter((x) => x === 'no_phone').length,
+    failed: r.failed + r.skipped,
+  };
 }
 
 /** 주기 수집용 페이지 순회(상태 저장 없음 · 한 회차 안에서 끝난다). maxItems = 건수 상한. */
@@ -1123,7 +1173,7 @@ async function walkPages(
   let pages = 0;
   let totalPages = 1;
   let truncated = false;
-  const guard: WooRunGuard = { streak: 0, logged: 0 };
+  const guard: WooRunGuard = newImportGuard();
   for (let page = 1; page <= totalPages; page++) {
     if (page > maxPages) { truncated = true; break; }
     const res = await fetchWooPageWithRetry(integ, resource, { ...baseParams, page });
@@ -1212,10 +1262,15 @@ async function runBackfillStage(companyId: string, mallId: string, st: WooBackfi
   if (firstError) throw firstError;
 }
 
+/** 가져오기가 읽은 몰의 지문(주소 · REST 키 · 비밀값은 원문을 남기지 않는다) */
+function wooSourceFingerprint(integ: Pick<WooIntegration, 'siteUrl' | 'consumerKey'>): string {
+  return createHash('sha256').update(`${integ.siteUrl}|${integ.consumerKey}`).digest('hex').slice(0, 16);
+}
+
 /**
  * 기존 회원·주문 가져오기 1회 실행(끝까지 또는 실패까지).
  * - 상태 없음 → 새로 시작(주문 기준일 = 지금 - 90일 · 저장) · 진행 중 상태 → 저장된 페이지의 한 페이지 앞에서 이어 간다(겹친 건은 적재 멱등이 흡수).
- * - 끝난 상태 → 그대로 반환. restartIfDone(재승인·수동 연결) 이면 처음부터 다시.
+ * - 끝난 상태 → 그대로 반환. restartIfDone(재승인·수동 연결) 이고 몰 주소 · REST 키가 그 가져오기 때와 다르면 처음부터 다시(★1028 K7 · 같은 키로 다시 누르면 다시 읽지 않는다).
  * - 시작할 때 옛 실패 사유를 지우고, 실패하면 새로 남긴 뒤 던진다. 끝나면 active 보장(옛 backfillWooOrders 와 같은 계약).
  * 직접 부르지 말고 enqueueWooBackfill 로 줄 세운다(동시 실행 방지) — 이 함수는 테스트와 큐가 부른다.
  */
@@ -1223,7 +1278,8 @@ export async function runWooBackfill(companyId: string, mallId: string, opts?: {
   const integ = await requireIntegration(companyId, mallId);
   if (!hasKeys(integ)) throw new WooApiError('no_keys');
   const prev = integ.backfill;
-  if (prev && prev.stage === 'done' && !opts?.restartIfDone) return prev;
+  const fp = wooSourceFingerprint(integ);
+  if (prev && prev.stage === 'done' && !(opts?.restartIfDone && prev.source_fp !== fp)) return prev;
 
   let st: WooBackfillState;
   if (prev && prev.stage !== 'done' && prev.orders_after) {
@@ -1241,6 +1297,7 @@ export async function runWooBackfill(companyId: string, mallId: string, opts?: {
       orders_after: wooDateParam(new Date(now.getTime() - DEFAULT_BACKFILL_DAYS * 24 * 60 * 60 * 1000)),
       customers_imported: 0, orders_imported: 0, customers_no_phone: 0, orders_no_phone: 0, failed: 0, truncated: false, requested: false,
       order_rule: WOO_ORDER_RULE_VERSION,
+      source_fp: fp,
       started_at: now.toISOString(), updated_at: now.toISOString(), done_at: null,
     };
   }
@@ -1248,7 +1305,7 @@ export async function runWooBackfill(companyId: string, mallId: string, opts?: {
   if (opts?.requested) st.requested = true;
   await clearWooSetupError(companyId, mallId);
   await saveBackfill(companyId, mallId, st);
-  const guard: WooRunGuard = { streak: 0, logged: 0 };
+  const guard: WooRunGuard = newImportGuard();
   try {
     if (st.stage === 'customers') {
       await runBackfillStage(companyId, mallId, st, 'customers', guard);
@@ -1425,7 +1482,7 @@ export async function runWooMemberRereadSlice(companyId: string, mallId: string,
     ? { page: 1, cycle_started_at: new Date(nowMs()).toISOString(), updated_at: new Date(nowMs()).toISOString(), done_at: null, last_done_at: integ.memberReread?.last_done_at ?? null, customers_read: 0 }
     : { ...integ.memberReread! };
   await saveMemberReread(companyId, mallId, st);
-  const guard: WooRunGuard = { streak: 0, logged: 0 };
+  const guard: WooRunGuard = newImportGuard();
   while (nowMs() < untilMs) {
     const cur = await requireIntegration(companyId, mallId);   // 도는 중 해제 · 키 변경을 그 즉시 따른다
     if (!hasKeys(cur)) break;
@@ -1621,7 +1678,7 @@ async function removeWooWebhooksInLine(companyId: string, mallId: string): Promi
 
   let targets = integ.webhookIds;
   let unsure = false;   // 몰의 목록으로 확인하지 못했다(조회 실패 · 쪽수 상한)
-  if (integ.keyPermissions.includes('write')) {
+  if (wooWebhookOwner(integ.keyPermissions) === 'auto') {
     try {
       const list = await listWooWebhooks(integ);
       const found = list.items.filter(isOurWooWebhook(integ, buildWooWebhookUrl(mallId))).map((w) => Number(w?.id)).filter((n) => Number.isFinite(n));

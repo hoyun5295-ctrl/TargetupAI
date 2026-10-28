@@ -9,18 +9,23 @@ import { buildFilterWhereClauseCompat } from '../utils/customer-filter';
 import { buildJourneySafetyFilter } from '../utils/journey-safety-filter';
 import { ownerConsentTrue, ownerBrandConsent } from '../utils/mall-consent';
 import { isPlainAllCustomersRequest } from '../utils/all-customers-signal';   // ★ 2026-10-15 B-1015-1 전체 고객 신호
-import { cleanLeftoverVars } from '../utils/messageUtils';
+import { cleanLeftoverVars, ensureSenderName } from '../utils/messageUtils';
+import { calculateKoreanBytes, stripEmojis } from '../utils/copy-exit-guards';
 // ★ D210+ Phase 2 (Harold 명시 2026-05-23): CT-58 — 회사별 customer DB 실측 데이터 프로필.
 //   AI 시스템 프롬프트 안 동적 주입 → 어설픈 개인화 사고 차단.
 import { CompanyDataProfile, formatProfileForAiPrompt } from '../utils/company-data-profile';
 // ★ D225+ (2026-05-28 Harold 명시): Brand Voice Learning — 회사별 LMS 대표 문안 5건 + 자동 가이드라인 자동 주입.
-import { buildSystemPromptWithBrandVoice, getBrandGuideline, getBrandLinks } from '../utils/brand-voice-prompt';
+import { getBrandLinks, getBrandVoiceSnapshot, voiceLearnedOf, resolveGuidelineFor, composeVoicePrompt, type BrandVoiceKind } from '../utils/brand-voice-prompt';
+import { resolveCopyIntent, classifyCopyIntent, contentTypeOfPurpose, isCopyContentType, CONTENT_TYPE_JUDGE_RULES, type CopyContentType, type CopyPurpose } from '../utils/copy-content-type';
+import { buildHouseRules, variantNamesFor } from '../utils/copy-house-rules';
+import { shapeIssues } from '../utils/copy-shape';
+import { applyCopyExitGuards, compareCopyAttempts, takeGenerationSlot, type CopyExitFlags } from '../utils/copy-exit-guards';
 // ★ 2026-07-02 브랜드 링크 토큰 치환 ({{LINK:라벨}} → 등록 URL) + 브랜드보이스 형태 검증(CT-100) 배선
 import { applyBrandLinkTokens, type BrandLink } from '../utils/brand-link-core';
 import { validateBrandVoiceCompliance, buildRetryHintFromIssues } from '../utils/brand-voice-validator';
 import { composeCopyBrain } from '../utils/copy-prompt-composer';
 import { scoreSpamRisk, SPAM_FAIL_THRESHOLD } from '../utils/copy-spam-risk';
-import { detectBenefits, buildBenefitEmphasis, findInventedBenefits, replaceInventedBenefits, dropInventedEfficacy, rewriteAddsFacts, EFFICACY_PROMPT_RULES, EFFICACY_RETRY_HINT } from '../utils/copy-benefit-detector';
+import { detectBenefits, buildBenefitEmphasis, findInventedBenefits, replaceInventedBenefits, dropInventedEfficacy, rewriteAddsFacts, EFFICACY_PROMPT_RULES, EFFICACY_RETRY_HINT, findInventedDates, replaceInventedDates, DATE_RETRY_HINT } from '../utils/copy-benefit-detector';
 import { findBannedWords } from '../utils/copy-similarity-guard';
 // ★ D227+ AI 응답 JSON 안전 추출 (코드펜스 없이 설명문 혼입 방어 — 본문 0 bytes 사고 정정)
 import { extractJsonFromAiText } from '../utils/ai-json';
@@ -426,8 +431,9 @@ function parsePersonalizationDirective(
 // ============================================================
 
 // 한국 시간 기준 현재 월 달력 생성
-export function getKoreanCalendar(): string {
-  const now = new Date();
+// ★ 2026-10-28 AI 메모리 설계 K1-4 — 기준일(base · 자동마케팅 = 발송일)을 줄 수 있다. 안 주면 지금(옛 동작 그대로).
+export function getKoreanCalendar(base?: Date): string {
+  const now = base ?? new Date();
   const koreaTime = new Date(now.toLocaleString('en-US', { timeZone: 'Asia/Seoul' }));
   const year = koreaTime.getFullYear();
   const month = koreaTime.getMonth();
@@ -461,9 +467,9 @@ export function getKoreanCalendar(): string {
   return calendar;
 }
 
-// 한국 시간 기준 현재 날짜
-function getKoreanToday(): string {
-  const now = new Date();
+// 한국 시간 기준 현재 날짜(★ 2026-10-28 K1-4 기준일 · 안 주면 지금)
+function getKoreanToday(base?: Date): string {
+  const now = base ?? new Date();
   return now.toLocaleDateString('ko-KR', { 
     timeZone: 'Asia/Seoul', 
     year: 'numeric', 
@@ -492,36 +498,24 @@ function getKoreanNowTime(): string {
  * - 광고: 90 - 오버헤드 - 여유 1
  * - rejectNumber는 반드시 고객사 DB(opt_out_080_number)에서 조회한 값 전달 필수
  */
-function getAvailableSmsBytes(isAd: boolean, rejectNumber?: string): number {
+function getAvailableSmsBytes(isAd: boolean, rejectNumber?: string, senderBytes = 0): number {
   if (!isAd) return 88; // 비광고: 90 - 여유 2
+  // ★ 2026-10-28 K1-3 — 광고 SMS 는 출구가 전송자 명칭 [브랜드] 를 앞에 붙일 수 있다(ensureSenderName) · 그 몫을 미리 뺀다
   if (!rejectNumber) {
     console.warn('[AI] 수신거부번호 미전달 — 기본 10자리 가정으로 바이트 계산');
-    return 90 - (6 + 1 + 8 + 10 + 1); // 10자리 번호 가정 (가장 보수적)
+    return 90 - (6 + 1 + 8 + 10 + 1) - senderBytes; // 10자리 번호 가정 (가장 보수적)
   }
   const cleanNumber = rejectNumber.replace(/-/g, '');
   // (광고) 6 + \n 1 + 무료거부 8 + 번호길이 + 여유 1
   const overhead = 6 + 1 + 8 + cleanNumber.length + 1;
-  return 90 - overhead;
+  return 90 - overhead - senderBytes;
 }
 
 // ============================================================
 // 변수 카탈로그 관련 함수 (핵심!)
 // ============================================================
 
-/**
- * 메시지 내 개인화 변수 검증
- * - 메시지에서 %...% 패턴을 추출하여 available_vars에 없는 것이 있으면 invalid 반환
- * - 발송 전 반드시 호출하여 잘못된 변수가 고객에게 노출되는 것을 방지
- */
-export function validatePersonalizationVars(
-  message: string,
-  availableVars: string[]
-): { valid: boolean; invalidVars: string[] } {
-  const found = message.match(/%[^%\s]{1,20}%/g) || [];
-  const varNames = found.map(v => v.replace(/%/g, ''));
-  const invalidVars = varNames.filter(v => !availableVars.includes(v));
-  return { valid: invalidVars.length === 0, invalidVars };
-}
+export { validatePersonalizationVars } from '../utils/copy-exit-guards';   // ★ 2026-10-28 출구 CT 로 옮김(routes/campaigns.ts 가 여기서 가져간다)
 
 /**
  * 변수 카탈로그 → AI 프롬프트용 텍스트 생성
@@ -795,11 +789,11 @@ SMS/LMS/MMS: 이모지 절대 금지! 아래 특수문자만 사용:
 - **의미 단위로 묶어서 쓰기:** 인사+혜택을 한 단락으로, 기간+CTA를 한 단락으로. 모든 줄을 쪼개지 마세요.
 - **단락 구분은 빈 줄 1개로**: 단락과 단락 사이에 빈 줄 1개씩 자연스럽게 배치.
 - **3줄 연속 빈 줄(\\n\\n\\n) 절대 금지**. 인위적으로 늘리지 마세요.
-- **★ [브랜드명] 앞에는 빈 줄 1개**: 본문과 [브랜드명] 사이에 빈 줄 1개로 구분. [브랜드명]이 본문의 마지막 줄입니다(무료수신거부 줄은 시스템이 붙입니다).
+- **★ 전송자 명칭 = 본문 첫 줄 [브랜드명]**(법: 전송자 명칭은 광고 본문보다 앞): 본문 첫 줄을 [브랜드명]으로 시작하세요. 제목에 [브랜드명]이 있으면 생략할 수 있습니다. 끝에 다시 쓰지 않아도 됩니다(무료수신거부 줄은 시스템이 붙입니다).
 - **문장마다 빈 줄 넣기 금지**: 같은 단락 내 문장 사이는 단일 줄바꿈만.
 - 나쁜 예 1 (빈 줄 과다): "김철수님.\\n\\n봄 코트가 들어왔어요.\\n\\n이번 주 먼저 입어 보세요."
-- 나쁜 예 2 (마무리 붙음): "새 시즌 신상 입고 소식 [브랜드명]"
-- 좋은 예: "김철수님, 봄 코트와 니트가 새로 들어왔어요.\\n출근길에 가볍게 걸치기 좋은 두께예요.\\n○○에서 기다립니다.\\n\\n[브랜드명]"
+- 나쁜 예 2 (전송자 명칭이 뒤에만): "새 시즌 신상 입고 소식\\n\\n[브랜드명]"
+- 좋은 예: "[브랜드명]\\n김철수님, 봄 코트와 니트가 새로 들어왔어요.\\n출근길에 가볍게 걸치기 좋은 두께예요.\\n○○에서 기다립니다."
 
 카카오만: 이모지 사용 가능하나 절제 (1~2개 포인트)
 
@@ -931,7 +925,7 @@ SMS/LMS/MMS: 이모지 절대 금지! 아래 특수문자만 사용:
 ③ 혜택 상세 (숫자+구조화)
 ④ 개인화 어필 (포인트/등급/매장)
 ⑤ CTA (구체적 행동 유도)
-⑥ 따뜻한 마무리 (브랜드 이름으로 끝)
+⑥ 따뜻한 마무리
 각 문단은 빈 줄로 구분. 한 줄 17자 이내 유지
 
 ### 10. 업종별 킬 포인트
@@ -1044,6 +1038,20 @@ export function applyCopyCVariant(system: string, kind?: CopyCVariant): string {
   return system.replace(C_MZ_SUBJECT, C_PUNCHY_SUBJECT).replace(C_MZ_STRATEGY, C_PUNCHY_STRATEGY).replace(C_MZ_OUTPUT, C_PUNCHY_OUTPUT);
 }
 
+/** ★ 2026-10-28 K6-1 목소리 CT 의 출력 형식 줄(옛 고정 줄을 생산자가 넘긴다) */
+const VOICE_JSON_OUTPUT = `## ★ 출력 형식 재확인 (최우선)
+
+위 회사 뼈대는 모양 학습용 예시일 뿐입니다. 절대 예시처럼 본문 텍스트만 단독 출력하지 마세요.
+최종 응답은 반드시 앞에서 지정한 JSON 형식(코드펜스 없이 순수 JSON 객체) 그대로여야 합니다. 본문은 JSON 안 해당 필드 값으로만 작성하세요.`;
+
+/** 출구 CT 의 안별 거름 기록(옛 출구 고리 로그와 같은 꼬리표) */
+function logExitFlags(variantId: string, f: CopyExitFlags): void {
+  if (f.liquid) console.warn(`[copy-guard] 템플릿 문법(Liquid) 검출 → 평문화: variant ${variantId}`);
+  if (f.inventedBenefits.length > 0) console.warn(`[copy-guard] 근거 없는 혜택 → 자리표시: variant ${variantId} (${f.inventedBenefits.join(', ')})`);
+  if (f.efficacyDropped.length > 0) console.warn(`[copy-guard] 근거 없는 효능 단정 → 문장 뺌: variant ${variantId} (${f.efficacyDropped.length}문장)`);
+  if (f.inventedDates.length > 0) console.warn(`[copy-guard] 근거 없는 날짜 → 자리표시: variant ${variantId} (${f.inventedDates.length}곳)`);
+}
+
 /** 계약 테스트용 — 기본 시스템 프롬프트 원문 */
 export function brandSystemPromptForTest(): string {
   return BRAND_SYSTEM_PROMPT;
@@ -1131,6 +1139,17 @@ export async function generateMessages(
      *   안 주면 지금과 같다(마케팅 가이드라인 + 대표 문안 전체).
      */
     voiceKind?: 'marketing' | 'notice';
+    /**
+     * ★ 2026-10-28 AI 메모리 설계 K4-4 — 입력 종류(화면 칩 · AI 한줄로 사실 읽기 판정) · 생산자 목적 코드(여정 template_code · 운영자 target_hint).
+     *   판정 순서 = 입력 종류 > 목적 코드 > AI 판정(목소리 회사만 · 짧은 호출 1회 · 단가 0) > 광고 여부. 성격(목소리 묶음)만 정하고 법 축은 isAd 그대로.
+     */
+    contentType?: CopyContentType | string | null;
+    purpose?: CopyPurpose | null;
+    /**
+     * ★ 2026-10-28 AI 메모리 설계 K1-4 — 날짜 기준일(「내일」 · 「이번 주말」을 푸는 날 · 달력 · 없는 날짜 검사).
+     *   자동마케팅 = 회차 발송일(D-1 에 만들어도 발송일 기준). 안 주면 지금(옛 동작 그대로).
+     */
+    baseDate?: Date;
     // ★ D170+ (2026-05-19) Harold 명시 — AI Operator 메시지 = Opus 4.7로 격상:
     //   기본 호출(/generate-message)은 model 미박힘 → default sonnet. AI Operator는 'opus' 전달.
     model?: 'sonnet' | 'opus';
@@ -1187,7 +1206,11 @@ export async function generateMessages(
   const personalizationTags = personalizationVars.map(v => `%${v}%`).join(', ');
   
   // ★ SMS 가용 바이트 동적 계산 (광고 오버헤드 반영)
-  const smsAvailableBytes = getAvailableSmsBytes(isAd, rejectNumber);
+  // ★ 2026-10-28 K1-3 — 광고 SMS 는 출구가 전송자 명칭을 붙일 수 있으니 그 몫([브랜드] + 띄어쓰기)을 미리 뺀다
+  const senderName = (() => { const n = String(extraContext?.brandName || '').trim(); return n === '브랜드' ? '' : n; })();   // 호출부 기본값 「브랜드」 = 이름 없음
+  const senderBytes = isAd && channel === 'SMS' && senderName ? calculateKoreanBytes(`[${senderName}] `) : 0;
+  const smsAvailableBytes = getAvailableSmsBytes(isAd, rejectNumber, senderBytes);
+  const baseDate = extraContext?.baseDate instanceof Date && !isNaN(extraContext.baseDate.getTime()) ? extraContext.baseDate : new Date();
   const byteLimit = channel === 'SMS' ? smsAvailableBytes : channel === 'LMS' ? 2000 : channel === 'MMS' ? 2000 : channel === '카카오' ? 4000 : 1000;
   
   // ★ 변수 카탈로그 프롬프트 — 개인화 지정 시 해당 변수만 표시 (AI 오류 최소화 핵심)
@@ -1221,28 +1244,42 @@ export async function generateMessages(
 - 발송 가능 시간: 08:00~20:50 (이 시간 밖 발송 불가)`
     : '';
   
+  // ★ 2026-10-28 AI 메모리 설계 K4 · K6 · K2 · K3 — 종류 · 성격 · 목소리 판정(목소리 없는 회사 = 지시문 글자 그대로 · I15)
+  const voiceSnap = extraContext?.companyId ? await getBrandVoiceSnapshot(extraContext.companyId).catch(() => null) : null;
+  let aiContentType: CopyContentType | null = null;
+  if (voiceSnap && voiceLearnedOf(voiceSnap) && !isCopyContentType(extraContext?.contentType) && !contentTypeOfPurpose(extraContext?.purpose) && !extraContext?.voiceKind) {
+    aiContentType = await classifyCopyIntent(extraContext!.companyId!, licenseSource, callAIWithFallback);
+  }
+  const intent = resolveCopyIntent({ inputType: extraContext?.contentType, purpose: extraContext?.purpose, aiType: aiContentType, isAd });
+  const voiceKind: BrandVoiceKind = extraContext?.voiceKind ?? intent.kind;
+  const voiceMode = !!voiceSnap && voiceLearnedOf(voiceSnap, voiceKind);
+  const voiceGuide = voiceMode ? resolveGuidelineFor(voiceSnap!, voiceKind) : null;
+  const voiceShape = voiceGuide?.shape && voiceGuide.shape.n > 0 ? voiceGuide.shape : null;
+  // 목소리 회사 = C안 시험 대상 아님(K3-4) · 이름은 서버가 정한다(K3-2)
+  const variantNames = variantNamesFor(voiceMode, COPY_C_NAMES[!voiceMode && extraContext?.cVariant === 'punchy' ? 'punchy' : 'mz']);
+
   const userMessage = `## 캠페인 정보
 - 요청: ${cleanPrompt}
 - 채널: ${channel}
 - 타겟 고객 수: ${(Number(targetInfo?.total_count) || 0).toLocaleString()}명
 
 ## 오늘 날짜 (한국 시간)
-${getKoreanToday()}
+${getKoreanToday(baseDate)}
 ※ "내일", "모레" 등은 위 날짜 기준으로 구체적 날짜(예: 2/5(수))로 변환하세요.
 
-${getKoreanCalendar()}
+${getKoreanCalendar(baseDate)}
 ⚠️ 날짜에 요일을 표기할 때 반드시 위 달력을 참조하세요! 직접 요일을 계산하지 마세요!
 
 ## 브랜드 정보 (⚠️ 반드시 아래 브랜드명을 정확히 사용!)
 - 브랜드명: ${brandName}
 ${brandSlogan ? `- 슬로건: ${brandSlogan}` : ''}
 ${brandDescription ? `- 브랜드 소개: ${brandDescription}` : ''}
-- 톤앤매너: ${brandTone}
+${voiceMode ? '' : `- 톤앤매너: ${brandTone}`}
 ${extraContext?.productName ? `- 상품: ${extraContext.productName}` : ''}
 ${extraContext?.discountRate ? `- 할인율: ${extraContext.discountRate}%` : ''}
 ${extraContext?.eventName ? `- 이벤트: ${extraContext.eventName}` : ''}
 
-${extraContext?.recentMessages && extraContext.recentMessages.length > 0 ? `## 이 브랜드의 최근 실제 발송 문안 (⚠️ 반드시 이 톤과 구성을 참고하세요!)
+${!voiceMode && extraContext?.recentMessages && extraContext.recentMessages.length > 0 ? `## 이 브랜드의 최근 실제 발송 문안 (⚠️ 반드시 이 톤과 구성을 참고하세요!)
 ${extraContext.recentMessages.map((m: string, i: number) => `${i + 1}. ${m.replace(/\(광고\)/g, '').replace(/무료거부\d+/g, '').replace(/무료수신거부\s?\d{3}-?\d{3,4}-?\d{4}/g, '').trim().slice(0, 300)}`).join('\n')}
 
 ⚠️ 위 문안들의 톤, 표현 방식, 문장 구성, 인사말 패턴을 철저히 분석하고 동일한 스타일로 새 문안을 작성하세요!
@@ -1254,18 +1291,17 @@ ${companyProfilePrompt}
 
 ## 요청사항
 ${channel} 채널에 최적화된 3가지 문안(A/B/C)을 생성해주세요.
-- 위에 정의된 3가지 variant 전략을 그대로 따르고, variant_name은 반드시 "감성형"(A) · "혜택강조형"(B) · "${COPY_C_NAMES[extraContext?.cVariant === 'punchy' ? 'punchy' : 'mz']}"(C)으로 정확히 출력하세요. (다른 이름으로 바꾸지 말 것)
-- 계절감·해당 월 특성·시즌 시의성을 자연스럽게 녹여 내용을 풍성하게 채우고, 3개 안이 서로 다른 계절/시의성 색깔을 띠게 작성하세요. (단, 없는 혜택·날짜는 지어내지 말 것)
-- 브랜드명은 "[${brandName}]" 형태로 정확히 사용
+- 위에 정의된 3가지 variant 전략을 그대로 따르고, variant_name은 반드시 "${variantNames[0]}"(A) · "${variantNames[1]}"(B) · "${variantNames[2]}"(C)으로 정확히 출력하세요. (다른 이름으로 바꾸지 말 것)
+${voiceMode ? '' : '- 계절감·해당 월 특성·시즌 시의성을 자연스럽게 녹여 내용을 풍성하게 채우고, 3개 안이 서로 다른 계절/시의성 색깔을 띠게 작성하세요. (단, 없는 혜택·날짜는 지어내지 말 것)\n'}${voiceMode && voiceShape?.evidence.nonBracketHead ? '- 브랜드명은 이 회사 대표 문안 첫 줄과 같은 꼴로 정확히 사용' : `- 브랜드명은 "[${brandName}]" 형태로 정확히 사용`}
 ${benefitEmphasis}
 ${brandSlogan ? `- 브랜드 슬로건 "${brandSlogan}"의 느낌을 반영` : ''}
-- 톤앤매너: ${brandTone}
+${voiceMode ? '' : `- 톤앤매너: ${brandTone}`}
 - 🚫 (광고), 무료거부, 무료수신거부, 080번호 절대 포함 금지! 순수 본문만 작성!
 - 🚫 사용자가 언급하지 않은 혜택(할인율, 적립금, 사은품 등) 날조 금지!
 - 🚫 사용자가 지정하지 않은 날짜/기간/가격 날조 금지! 기간 미지정 시 날짜를 넣지 마세요!
 ${smsByteInstruction}
 ${kakaoInstruction}
-${channel === 'LMS' || channel === 'MMS' ? '- LMS/MMS는 단순 안내문이 아니라 도입부 공감 → 본문 전개 → 마무리/CTA까지 충분한 길이로 풍성하게 작성하세요(너무 짧고 가볍지 않게). 줄바꿈·문단으로 가독성 좋게, 이모지 금지!\n- ⚠️ subject(제목)에는 %변수% 절대 사용 금지! 고정 텍스트만!' : ''}
+${channel === 'LMS' || channel === 'MMS' ? `${voiceMode ? '- LMS/MMS는 이 회사 대표 문안의 길이 · 문단 · 줄바꿈 꼴을 따르세요. 이모지 금지!' : '- LMS/MMS는 단순 안내문이 아니라 도입부 공감 → 본문 전개 → 마무리/CTA까지 충분한 길이로 풍성하게 작성하세요(너무 짧고 가볍지 않게). 줄바꿈·문단으로 가독성 좋게, 이모지 금지!'}\n- ⚠️ subject(제목)에는 %변수% 절대 사용 금지! 고정 텍스트만!` : ''}
 ${channel === 'SMS' ? '- SMS는 길이가 아니라 밀도입니다. 한정된 바이트 안에 후크+혜택+CTA를 압축하세요.' : ''}
 
 ## 작성 절차 (반드시 따르되, 과정은 출력하지 말 것)
@@ -1285,10 +1321,16 @@ ${usePersonalization ? `- 사용할 개인화 변수: ${personalizationTags}
 
   // ★ D225+ Brand Voice Learning — 회사별 가이드라인 자동 주입 (회사 등록 미존재 시 옛 BRAND_SYSTEM_PROMPT 그대로)
   // ★ 2026-07-02 brandLinks: true — 문자 생성 경로 한정 브랜드 링크 토큰 규칙 포함 (여정/이메일/DM 기본 OFF)
-  const baseEnriched = await buildSystemPromptWithBrandVoice(extraContext?.companyId, applyCopyCVariant(BRAND_SYSTEM_PROMPT, extraContext?.cVariant), {
-    brandLinks: true,
-    ...(extraContext?.voiceKind ? { kind: extraContext.voiceKind } : {}),
+  // ★ 2026-10-28 K2 · K6 — 집 규칙(목소리 회사만 스타일 줄 판정) → 목소리 CT(확인된 묶음만 · I16). 목소리 없는 회사 = 글자 그대로(I15).
+  const house = buildHouseRules(
+    applyCopyCVariant(BRAND_SYSTEM_PROMPT, voiceMode ? undefined : extraContext?.cVariant),
+    voiceMode ? { shape: voiceShape, lengthRange: voiceGuide?.length_range ?? null, samples: voiceSnap!.messages.filter((m) => m.kind === voiceKind).map((m) => m.message_text) } : null,
+  );
+  const composed = await composeVoicePrompt({
+    companyId: extraContext?.companyId, producer: 'generate-messages', mode: 'write', kind: voiceKind, contentType: intent.contentType,
+    channel, isAd, basePrompt: house.system, brandLinks: true, outputFormat: VOICE_JSON_OUTPUT,
   });
+  const baseEnriched = composed.system;
   // 문안 두뇌: 캠페인 문자(SMS/LMS/MMS) 성과 RAG + 시의성 + 브랜드 키트 주입 (companyId 있을 때만)
   let enrichedSystemPrompt = baseEnriched;
   let bannedWords: string[] = [];
@@ -1339,11 +1381,26 @@ ${usePersonalization ? `- 사용할 개인화 변수: ${personalizationTags}
     let inventedBenefitsLastRun: string[] = [];
     // ★ 2026-10-24 — 직전 실행에서 근거 없는 효능 단정 문장을 뺐는지(재생성 힌트 트리거 · 한 줄 CT 와 같은 판정)
     let efficacyDroppedLastRun: string[] = [];
+    // ★ 2026-10-28 K1-4 — 직전 실행에서 근거 없는 날짜 · 기간 자리를 직접 채울 자리로 바꿨는지(재생성 힌트 트리거)
+    let inventedDatesLastRun: string[] = [];
+    // ★ 2026-10-28 K12-3 — 직전 실행 출력에 직접 채울 칸이 남았는지(뼈대 칸 포함 · 법 문제)
+    let placeholderLastRun = 0;
+    const exitCtx = {
+      channel, isAd, bannedWords, benefitGround, baseDate,
+      validationVars: usePersonalization && personalizationVars.length > 0 ? personalizationVars : availableVars,
+      stripAllVars: !!exactVars && exactVars.length === 0,
+      brandLinks, senderNames: [senderName],
+      // ★ K2-3 스타일 후처리 = 목소리 회사 기준값(구분선 · 빈 줄) · 아니면 지금
+      style: voiceMode ? { keepDividers: !!voiceShape?.evidence.divider, maxBlankRun: voiceShape?.maxBlankRun ?? null } : undefined,
+    };
+    const VARIANT_INDEX: Record<string, number> = { A: 0, B: 1, C: 2 };
     // ★ 2026-07-02 생성 1회 실행 — CT-100 검증 미달 시 재생성에서 재사용 (재생성 = creditCost 0, 추가 차감 없음)
     const runGenerateOnce = async (retryHint: string): Promise<AIRecommendResult> => {
     liquidDetectedLastRun = false;
     inventedBenefitsLastRun = [];
     efficacyDroppedLastRun = [];
+    inventedDatesLastRun = [];
+    placeholderLastRun = 0;
     const text = await callAIWithFallback({
       system: enrichedSystemPrompt,
       userMessage: retryHint ? `${userMessage}${retryHint}` : userMessage,
@@ -1360,116 +1417,20 @@ ${usePersonalization ? `- 사용할 개인화 변수: ${personalizationTags}
     // ★ D227+ 안전 파싱 — 코드펜스 없이 설명문 혼입돼도 JSON 추출 (CT ai-json). 본문 0 bytes 사고 정정.
     const result = extractJsonFromAiText(text) as AIRecommendResult;
 
-    // ★ 생성된 메시지에서 잘못된 변수 검증 + 자동 제거 (안전장치)
+    // ★ 2026-10-28 K12-1 출구 고리 = CT applyCopyExitGuards(견본과 같은 함수) · 이름 = 서버(K3-2)
     if (result.variants) {
       for (const variant of result.variants) {
-        let msgField = (variant as any).message_text || '';
-        
-        // ★ 안전장치: AI가 (광고), 무료거부 등을 포함했으면 자동 제거
-        //   D137: 기존 `\n?무료...` 패턴에서 `\n?` 제거 → 텍스트만 제거, 앞 개행은 원본 그대로 보존.
-        //   이로써 AI 생성 본문 `...\n\n무료수신거부 080...`에서 \n\n 2개가 제거되지 않고
-        //   buildAdMessage 호출 시 trailingCount=2로 계산되어 LMS/MMS 빈 줄 1개 유지.
-        msgField = msgField.replace(/^\(광고\)\s?/g, '');
-        msgField = msgField.replace(/무료거부\d{8,11}/g, '');
-        msgField = msgField.replace(/무료수신거부\s?\d{3}-?\d{3,4}-?\d{4}/g, '');
-        // ★ 안전장치: 구분선 자동 제거 (모바일 줄넘김 방지)
-        msgField = msgField.replace(/[━─═＿_~\-]{3,}/g, '');
-        // ★ D124 (N5): 빈 줄 과도 방지는 `\n{3,}→\n\n` 1중 방어선만 유지.
-        //   D123 P12에서 추가한 dnCount ≤ 3 강제 축소는 자연스러운 단락 구분(특히 마무리/연락처 앞 빈 줄)까지
-        //   단일 줄바꿈으로 축소시켜 하단이 붙는 문제 발생 → 제거. 프롬프트 규칙(줄바꿈 균형)으로 통제.
-        msgField = msgField.replace(/\n{3,}/g, '\n\n'); // 연속 3개 이상 개행 → 빈 줄 1개로 정규화
-        // ★ 안전장치: SMS/LMS/MMS 이모지 강제 제거 (카카오만 허용)
-        if (channel !== '카카오' && channel !== 'KAKAO') {
-          msgField = stripEmojis(msgField);
-        }
-        // ★ 2026-07-06 Liquid 출구 가드 — 이 생성물은 %변수% 세계. 프롬프트 지시와 무관하게(모델은 확률적으로
-        //   지시를 어긴다 — psy5868 실측) 템플릿 문법({{ }}·{% %}) 검출 시 결정적 평문화(중립 렌더 → 잔존 제거).
-        //   "존재하지 않는 필드 기반 문법"이 편집기·발송에 노출되는 것을 코드가 보장 차단. 검출 시 재생성 1회도 트리거.
-        if (detectLiquidSyntax(msgField)) {
-          liquidDetectedLastRun = true;
-          msgField = flattenLiquidToPlainText(msgField);
-          console.warn(`[copy-guard] 템플릿 문법(Liquid) 검출 → 평문화: variant ${(variant as any).variant_id || ''}`);
-        }
-        // ★ ② 출력 금지어 가드 (2026-06-30) — 브랜드 키트 banned_words 제거
-        //   ★ 2026-10-24 자리표시(혜택 · 효능)를 넣기 **전**에 지운다 — 뒤에서 지우면 금지어가 자리표시 글자(「직접」 등)를 깎아 발송 길목을 지나간다(Codex 3R)
-        if (bannedWords.length > 0) {
-          const hit = findBannedWords(msgField, bannedWords);
-          if (hit.length > 0) {
-            for (const w of hit) msgField = msgField.split(w).join('');
-            msgField = msgField.replace(/  +/g, ' ');
-            console.log(`[copy-guard] 금지어 제거: ${hit.join(', ')}`);
-          }
-        }
-        // ★ 2026-09-30 WP2 혜택 서버 차단 — 프롬프트 금지는 확률적이다. 근거에 없는 혜택 값 · 낱말은 자리표시로 바꾸고
-        //   재생성 1회를 유도한다. 남은 자리표시는 발송 길목(send-placeholder-gate)이 막는다(사람이 채우거나 지운 뒤에만 발송).
-        const inventedHere = findInventedBenefits(msgField, benefitGround);
-        if (inventedHere.length > 0) {
-          inventedBenefitsLastRun.push(...inventedHere);
-          msgField = replaceInventedBenefits(msgField, benefitGround);
-          console.warn(`[copy-guard] 근거 없는 혜택 → 자리표시: variant ${(variant as any).variant_id || ''} (${inventedHere.join(', ')})`);
-        }
-        // ★ 2026-10-24 효능 단정 거름(한 줄 CT · 그림 글과 같은 판정 · copy-benefit-detector) — 근거 글에 없는 단정 문장은 빼고 재생성 1회
-        //   다 빠지면 직접 채울 자리(EFFICACY_PLACEHOLDER)가 남아 발송 길목이 막는다 — 본문이 비지 않으므로 실패 대체 문안으로 가지 않는다(★ Codex 2R · 이미 낸 생성 요금)
-        const effHere = dropInventedEfficacy(msgField, benefitGround);
-        if (effHere.dropped.length > 0) {
-          efficacyDroppedLastRun.push(...effHere.dropped);
-          msgField = effHere.text;
-          console.warn(`[copy-guard] 근거 없는 효능 단정 → 문장 뺌: variant ${(variant as any).variant_id || ''} (${effHere.dropped.length}문장)`);
-        }
-        msgField = msgField.trim();
-        (variant as any).message_text = msgField;
-
-        // ★ D28: 제목에서 %변수% 강제 제거 (AI가 프롬프트 무시 시 안전장치)
-        // ★ 2026-07-06: 제목도 템플릿 문법 평문화 동반 (본문과 동일 보장)
-        if ((variant as any).subject) {
-          let subj = String((variant as any).subject);
-          if (detectLiquidSyntax(subj)) {
-            liquidDetectedLastRun = true;
-            subj = flattenLiquidToPlainText(subj);
-          }
-          // ★ 2026-09-30 WP2 — 제목도 같은 혜택 대조(발송 길목이 제목까지 본다)
-          const subjInvented = findInventedBenefits(subj, benefitGround);
-          if (subjInvented.length > 0) {
-            inventedBenefitsLastRun.push(...subjInvented);
-            subj = replaceInventedBenefits(subj, benefitGround);
-          }
-          const subjEff = dropInventedEfficacy(subj, benefitGround);
-          if (subjEff.dropped.length > 0) {
-            efficacyDroppedLastRun.push(...subjEff.dropped);
-            subj = subjEff.text;
-          }
-          (variant as any).subject = cleanLeftoverVars(subj).replace(/  +/g, ' ').trim();
-        }
-        
-        // ★ #11 수정: 개인화 모드일 때 personalizationVars(선택된 변수)만 허용, 비선택 변수 제거
-        const validationTarget = usePersonalization && personalizationVars.length > 0
-          ? personalizationVars  // 사용자가 선택한 변수만
-          : availableVars;       // 비개인화 모드면 전체 (혹시 AI가 변수를 넣었을 경우 대비)
-        const validation = validatePersonalizationVars(msgField, validationTarget);
-        if (!validation.valid) {
-          console.warn(`[AI 변수 검증] 잘못된 변수 발견: ${validation.invalidVars.join(', ')} → 제거`);
-          let cleaned = msgField;
-          for (const invalidVar of validation.invalidVars) {
-            cleaned = cleaned.replace(new RegExp(`%${invalidVar}%\\s*`, 'g'), '');
-            cleaned = cleaned.replace(new RegExp(`\\s*%${invalidVar}%`, 'g'), '');
-          }
-          cleaned = cleaned.replace(/  +/g, ' ').replace(/\n /g, '\n').trim();
-          (variant as any).message_text = cleaned;
-        }
-        // ★ 2026-10-18 exactVars = [] (칼럼 0개 = 변수 없이) — 목록 검증은 「개인화 아님」이면 전체 변수를 허용하므로 여기서 전부 지운다
-        if (exactVars && exactVars.length === 0) {
-          (variant as any).message_text = cleanLeftoverVars(String((variant as any).message_text || '')).replace(/  +/g, ' ').trim();
-        }
-
-        // ★ 2026-07-02 브랜드 링크 토큰 치환 — sanitize 마지막 단계 (URL이 변수 검증·기호 제거에 노출되지 않게 최후 적용).
-        //   미등록 라벨 = [링크를 입력해주세요] placeholder → 발송 전 가드(LINK_PLACEHOLDER_UNEDITED)가 차단.
-        const linkApplied = applyBrandLinkTokens(String((variant as any).message_text || ''), brandLinks);
-        if (linkApplied.replacedCount > 0 || linkApplied.unresolvedCount > 0) {
-          (variant as any).message_text = linkApplied.text;
-          if (linkApplied.unresolvedCount > 0) {
-            console.log(`[brand-link] 미등록 라벨 토큰 ${linkApplied.unresolvedCount}건 → placeholder 전환 (발송 시 편집 유도)`);
-          }
-        }
+        const out = applyCopyExitGuards(variant as any, exitCtx);
+        const vid = String((variant as any).variant_id || '');
+        logExitFlags(vid, out.flags);
+        (variant as any).message_text = out.message_text;
+        if ((variant as any).subject) (variant as any).subject = out.subject;
+        if (out.flags.liquid) liquidDetectedLastRun = true;
+        inventedBenefitsLastRun.push(...out.flags.inventedBenefits);
+        efficacyDroppedLastRun.push(...out.flags.efficacyDropped);
+        inventedDatesLastRun.push(...out.flags.inventedDates);
+        if (out.flags.placeholderLeft) placeholderLastRun += 1;
+        if (vid in VARIANT_INDEX) (variant as any).variant_name = variantNames[VARIANT_INDEX[vid]];
       }
 
       // ★ #9: SMS 바이트 초과 시 경고 로그 + 프론트 표시용 byte_count/byte_warning 추가
@@ -1491,6 +1452,27 @@ ${usePersonalization ? `- 사용할 개인화 변수: ${personalizationTags}
     return result;
     };
 
+    // ★ 2026-10-28 K12-3 한 실행의 점수(법 문제 = 직전 실행 기록 · 스팸 · 목소리)
+    const lawCount = () => inventedBenefitsLastRun.length + efficacyDroppedLastRun.length + inventedDatesLastRun.length + placeholderLastRun + (liquidDetectedLastRun ? 1 : 0);
+    const scoreAttempt = (r: AIRecommendResult): { spam: number; spamIssues: string[]; voiceIssues: string[] } => {
+      const voiceIssues: string[] = [];
+      const spamIssues: string[] = [];
+      let spam = 0;
+      for (const variant of r.variants || []) {
+        const text = String((variant as any).message_text || '');
+        if (composed.guideline) {
+          const isC = String((variant as any).variant_id || '') === 'C';
+          validateBrandVoiceCompliance(text, composed.guideline, { channel, skipLength: voiceMode && isC }).issues.forEach((i) => voiceIssues.push(i));
+        }
+        if (voiceMode) shapeIssues(text, voiceShape, channel).forEach((i) => voiceIssues.push(i));
+        // ★ 2026-07-04 스팸 위험 자기검수 · ★ K2-4 목소리 회사 = 사람 표본 기호 빈도 이하 가산 0
+        const sr = scoreSpamRisk(text, voiceMode && voiceShape?.spamSymbolMax != null ? { allowedSymbolCount: voiceShape.spamSymbolMax } : undefined);
+        spam += sr.score;
+        if (sr.score >= SPAM_FAIL_THRESHOLD) spamIssues.push(`스팸 위험 표현 회피 필요(${sr.hits.join(', ') || '특수문자 과다'})`);
+      }
+      return { spam, spamIssues, voiceIssues };
+    };
+    takeGenerationSlot();   // ★ K12-2 첫 생성도 회차 예산 하나를 쓴다(예산 밖 = 지금과 같다)
     let result = await runGenerateOnce('');
 
     // ★ 2026-07-02 CT-100 배선 — 브랜드보이스 기계 검증(빈출 표현·(광고) 위치·이모지·종결어미·길이 범위).
@@ -1501,24 +1483,10 @@ ${usePersonalization ? `- 사용할 개인화 변수: ${personalizationTags}
       try {
         const allIssues = new Set<string>();
 
-        // 브랜드보이스 기계 검증 (가이드라인 등록 회사만)
-        if (extraContext?.companyId) {
-          const guideline = await getBrandGuideline(extraContext.companyId);
-          if (guideline) {
-            for (const variant of result.variants) {
-              const check = validateBrandVoiceCompliance(String((variant as any).message_text || ''), guideline, { channel });
-              check.issues.forEach((i) => allIssues.add(i));
-            }
-          }
-        }
-
-        // ★ 2026-07-04 스팸 위험 자기검수 — 가이드라인 유무 무관, 로컬 스팸 사전 대조로 재생성 유도
-        for (const variant of result.variants) {
-          const spam = scoreSpamRisk(String((variant as any).message_text || ''));
-          if (spam.score >= SPAM_FAIL_THRESHOLD) {
-            allIssues.add(`스팸 위험 표현 회피 필요(${spam.hits.join(', ') || '특수문자 과다'})`);
-          }
-        }
+        // 브랜드보이스 기계 검증 = 해석된 성격의 가이드라인(K6-5) · 안별 · C 는 목소리 회사에서 길이 검사 제외(K3-5) · 모양 = 측정 칸만(K5-5)
+        const scored = scoreAttempt(result);
+        scored.voiceIssues.forEach((i) => allIssues.add(i));
+        scored.spamIssues.forEach((i) => allIssues.add(i));
 
         // ★ 2026-07-06 Liquid 검출 시 재생성 유도 — 평문화(결정적 가드)는 이미 적용됐으나,
         //   분기 전제로 쓰인 문안은 평문화 후 흐름이 어색할 수 있어 올바른 지시로 1회 재작성 기회 부여.
@@ -1533,12 +1501,27 @@ ${usePersonalization ? `- 사용할 개인화 변수: ${personalizationTags}
         if (efficacyDroppedLastRun.length > 0) {
           allIssues.add(EFFICACY_RETRY_HINT);
         }
+        // ★ 2026-10-28 K1-4 — 근거 없는 날짜 · 기간이 나왔으면 재생성 1회(자리표시 없이 다시 쓴 문안이 된다)
+        if (inventedDatesLastRun.length > 0) {
+          allIssues.add(DATE_RETRY_HINT);
+        }
+        // ★ 2026-10-28 K12-3 — 출력에 직접 채울 칸이 남았으면(뼈대 칸 포함) 재생성 1회
+        if (placeholderLastRun > 0) {
+          allIssues.add('대괄호 직접 채울 칸([… 직접 입력해주세요])을 남기지 않기. 요청에 없는 사실의 칸이 든 문장은 쓰지 않기');
+        }
 
-        if (allIssues.size > 0) {
+        // ★ K12-2 재생성 = 회차 예산 안에서만(예산 밖 = 지금처럼 1회) · K12-3 다시 재고 나은 쪽을 남긴다(법 → 스팸 → 목소리)
+        if (allIssues.size > 0 && takeGenerationSlot()) {
           console.log(`[copy-quality] 검증 미달 ${allIssues.size}건 — 재생성 1회 진행: ${Array.from(allIssues).join(' | ')}`);
+          const firstLaw = lawCount();
           const retried = await runGenerateOnce(buildRetryHintFromIssues(Array.from(allIssues)));
           if (retried && Array.isArray(retried.variants) && retried.variants.length > 0) {
-            result = retried;
+            const second = scoreAttempt(retried);
+            const keepRetried = compareCopyAttempts(
+              { law: lawCount(), spam: second.spam, voice: second.voiceIssues.length },
+              { law: firstLaw, spam: scored.spam, voice: scored.voiceIssues.length },
+            ) <= 0;
+            if (keepRetried) result = retried;
           }
         }
       } catch (qErr) {
@@ -1547,6 +1530,10 @@ ${usePersonalization ? `- 사용할 개인화 변수: ${personalizationTags}
     }
 
     // ★ D142+ B1(0429 PDF B2): [브랜드] placeholder → [실제브랜드명] 후처리
+    // ★ 2026-10-28 K3 — 목소리 판정 · 3안 이름 · 해석된 종류를 응답에 싣는다(화면 이름 · 원장 voiceMode)
+    (result as any).voice_mode = voiceMode;
+    (result as any).variant_names = variantNames;
+    (result as any).content_type = intent.contentType;
     return deepReplaceBrand(result, brandName);
   } catch (error) {
     console.error('AI 메시지 생성 오류:', error);
@@ -1897,6 +1884,8 @@ export async function recommendTarget(
   /** lineIntake 일 때만 — 필드명 → 그 조건의 근거라고 AI 가 적은 원문 조각(검증 전 값) */
   filter_quotes?: Record<string, string>;
   recommended_style?: string | null;
+  /** ★ 2026-10-28 lineIntake 일 때만 — 문자 종류(허용값 밖 = null) */
+  content_type?: CopyContentType | null;
   style_reason?: string | null;
   /** ★ 2026-10-20 lineIntake 일 때만 — 문안에 필요한데 목표에 없는 사실(검증 전 원본 · 화면에 싣기 전 utils/ai-line sanitizeAiAsks) */
   copy_questions?: unknown[];
@@ -2059,9 +2048,11 @@ ${varCatalogPrompt}
 ⚠️ 커스텀 필드에 날짜 데이터(생년월일, 가입일 등)가 저장된 경우: 반드시 date_gte/date_lte 사용! gte/lte는 숫자 전용입니다.
 ⚠️ 나이 기반 필터링 시: birth_date 직접 컬럼의 birth_month 연산자 또는 age 직접 컬럼을 사용하세요. 커스텀 필드의 생년월일로 나이를 계산하지 마세요.${options?.lineIntake ? `
 
-## 추가 출력 (이 요청만 · 위 JSON 에 다섯 키를 더한다)
+## 추가 출력 (이 요청만 · 위 JSON 에 여섯 키를 더한다)
 - "filter_quotes": { "필드명": "그 조건의 근거가 된 마케팅 목표 원문 조각" }: filters 의 키마다 하나. 목표 문장에 **글자 그대로 있는 조각**만 적고, 목표에 없는데 판단으로 더한 조건이면 빈 문자열 "".
-- "recommended_style": "감성형" 또는 "혜택강조형" 또는 "MZ 감성형": 이 목표에 가장 맞는 문안 종류 하나.
+- "recommended_style": "emo" 또는 "benefit" 또는 "mz": 이 목표에 가장 맞는 문안 안 하나(emo = 마음을 먼저 여는 글 · benefit = 혜택을 먼저 · mz = 짧고 가볍게).
+- "content_type": 이 문자의 종류 하나(promo · launch · howto · greeting · notice · 모르면 null):
+${CONTENT_TYPE_JUDGE_RULES.split('\n').map((l) => `  ${l}`).join('\n')}
 - "style_reason": 그 종류를 고른 이유 한 줄(25자 안쪽 · 마침표 없이).
 - "copy_questions": [ { "kind": "benefit 또는 period 또는 text", "question": "질문", "why": "왜 묻는지 한 줄", "options": ["고르기"] } ]:
   이 목표로 고객에게 보낼 문자 문안을 쓰려면 꼭 알아야 하는데 **목표 문장에 없는 사실**을 이 목표에 맞게 직접 판단해 묻는다. 정해진 항목을 채우는 것이 아니다.
@@ -2126,6 +2117,8 @@ ${varCatalogPrompt}
           .filter(([, v]) => typeof v === 'string').map(([k, v]) => [k, String(v).slice(0, 80)]))
         : {},
       recommended_style: typeof result.recommended_style === 'string' ? result.recommended_style.slice(0, 20) : null,
+      // ★ 2026-10-28 AI 메모리 설계 K4-4 — 종류 = 이미 도는 사실 읽기 호출의 한 칸(추가 호출 0 · 허용값 밖 = null)
+      content_type: isCopyContentType(result.content_type) ? result.content_type : null,
       style_reason: typeof result.style_reason === 'string' ? result.style_reason.slice(0, 60) : null,
       // ★ 2026-10-20 질문은 원본 그대로 넘기고 화면에 싣기 전 CT(sanitizeAiAsks)가 거른다 · 추천 변수는 이 회사 목록 안 것만
       copy_questions: Array.isArray(result.copy_questions) ? result.copy_questions.slice(0, 12) : [],
@@ -2247,86 +2240,6 @@ function getFallbackVariants(extraContext?: any): AIRecommendResult {
     recommendation_reason: 'AI 호출 일시 오류로 기본 골격을 제공합니다. 혜택 내용을 직접 입력해주세요.',
     fallback: true,
   };
-}
-
-// ============================================================
-// SMS 바이트 계산 (한글 2바이트, 영문/숫자/특수문자 1바이트)
-function calculateKoreanBytes(text: string): number {
-  let bytes = 0;
-  for (let i = 0; i < text.length; i++) {
-    bytes += text.charCodeAt(i) > 127 ? 2 : 1;
-  }
-  return bytes;
-}
-
-/**
- * SMS/LMS/MMS 이모지 강제 제거 안전장치
- * - AI가 프롬프트 무시하고 이모지를 넣는 경우 후처리로 제거
- * - 허용: ★☆●○◎◇◆□■△▲▽▼→←↑↓♠♣♥♡♦※☎▶◀【】「」『』 등 KS X 1001 특수문자
- * - 제거: 유니코드 이모지 (Emoticons, Pictographs, Transport, Flags 등)
- * - 카카오 채널은 이모지 허용이므로 호출하지 않음
- */
-function stripEmojis(text: string): string {
-  return text
-    // Surrogate pair 이모지 (U+1F000 이상) — 대부분의 컬러 이모지
-    .replace(/[\u{1F600}-\u{1F64F}]/gu, '')   // Emoticons
-    .replace(/[\u{1F300}-\u{1F5FF}]/gu, '')   // Misc Symbols & Pictographs
-    .replace(/[\u{1F680}-\u{1F6FF}]/gu, '')   // Transport & Map
-    .replace(/[\u{1F700}-\u{1F77F}]/gu, '')   // Alchemical
-    .replace(/[\u{1F780}-\u{1F7FF}]/gu, '')   // Geometric Extended
-    .replace(/[\u{1F800}-\u{1F8FF}]/gu, '')   // Supplemental Arrows
-    .replace(/[\u{1F900}-\u{1F9FF}]/gu, '')   // Supplemental Symbols
-    .replace(/[\u{1FA00}-\u{1FA6F}]/gu, '')   // Chess Symbols
-    .replace(/[\u{1FA70}-\u{1FAFF}]/gu, '')   // Symbols Extended-A
-    .replace(/[\u{1F1E0}-\u{1F1FF}]/gu, '')   // Regional Indicators (Flags)
-    .replace(/[\u{231A}-\u{231B}]/gu, '')     // ⌚⌛
-    .replace(/[\u{23E9}-\u{23F3}]/gu, '')     // ⏩~⏳
-    .replace(/[\u{23F8}-\u{23FA}]/gu, '')     // ⏸~⏺
-    .replace(/[\u{25FB}-\u{25FE}]/gu, '')     // ◻◼◽◾
-    .replace(/[\u{2614}-\u{2615}]/gu, '')     // ☔☕
-    .replace(/[\u{2648}-\u{2653}]/gu, '')     // ♈~♓ (별자리)
-    .replace(/[\u{267F}]/gu, '')              // ♿
-    .replace(/[\u{2693}]/gu, '')              // ⚓
-    .replace(/[\u{26A1}]/gu, '')              // ⚡
-    .replace(/[\u{26AA}-\u{26AB}]/gu, '')     // ⚪⚫
-    .replace(/[\u{26BD}-\u{26BE}]/gu, '')     // ⚽⚾
-    .replace(/[\u{26C4}-\u{26C5}]/gu, '')     // ⛄⛅
-    .replace(/[\u{26D4}]/gu, '')              // ⛔
-    .replace(/[\u{26EA}]/gu, '')              // ⛪
-    .replace(/[\u{26F2}-\u{26F3}]/gu, '')     // ⛲⛳
-    .replace(/[\u{26F5}]/gu, '')              // ⛵
-    .replace(/[\u{26FA}]/gu, '')              // ⛺
-    .replace(/[\u{26FD}]/gu, '')              // ⛽
-    .replace(/[\u{2702}]/gu, '')              // ✂
-    .replace(/[\u{2705}]/gu, '')              // ✅
-    .replace(/[\u{2708}-\u{270D}]/gu, '')     // ✈~✍
-    .replace(/[\u{270F}]/gu, '')              // ✏
-    .replace(/[\u{2712}]/gu, '')              // ✒
-    .replace(/[\u{2714}]/gu, '')              // ✔
-    .replace(/[\u{2716}]/gu, '')              // ✖
-    .replace(/[\u{271D}]/gu, '')              // ✝
-    .replace(/[\u{2721}]/gu, '')              // ✡
-    .replace(/[\u{2728}]/gu, '')              // ✨
-    .replace(/[\u{2733}-\u{2734}]/gu, '')     // ✳✴
-    .replace(/[\u{2744}]/gu, '')              // ❄
-    .replace(/[\u{2747}]/gu, '')              // ❇
-    .replace(/[\u{274C}]/gu, '')              // ❌
-    .replace(/[\u{274E}]/gu, '')              // ❎
-    .replace(/[\u{2753}-\u{2755}]/gu, '')     // ❓❔❕
-    .replace(/[\u{2757}]/gu, '')              // ❗
-    .replace(/[\u{2763}-\u{2764}]/gu, '')     // ❣❤
-    .replace(/[\u{2795}-\u{2797}]/gu, '')     // ➕➖➗
-    .replace(/[\u{27A1}]/gu, '')              // ➡
-    .replace(/[\u{27B0}]/gu, '')              // ➰
-    .replace(/[\u{27BF}]/gu, '')              // ➿
-    .replace(/[\u{FE0F}]/gu, '')              // Variation Selector-16
-    .replace(/[\u{200D}]/gu, '')              // Zero Width Joiner
-    .replace(/[\u{20E3}]/gu, '')              // Combining Enclosing Keycap
-    // 연속 공백 정리
-    .replace(/  +/g, ' ')
-    .replace(/ *\n/g, '\n')    // 줄 끝 공백 제거
-    .replace(/\n /g, '\n')     // 줄 시작 공백 제거
-    .trim();
 }
 
 // ============================================================
@@ -3010,9 +2923,14 @@ export async function refineDirectMessage(
     return { candidates: [] };
   }
 
-  // ★ D225+ Brand Voice Learning — 회사별 LMS 대표 문안 5건 + 가이드라인 자동 주입 (회사 등록 미존재 시 옛 흐름 그대로)
-  const baseSystemPrompt = buildRefineSystemPrompt({ tone, companyName, maxBytes, recentMessages });
-  const systemPrompt = withCopyRules(await buildSystemPromptWithBrandVoice(companyId, baseSystemPrompt));  // ★ 2026-08-21 직접 호출 경로라 관문을 안 거친다: 명시 부착
+  // ★ 2026-10-28 AI 메모리 설계 K11-1 — 문자 다듬기 = 고치기 모드(예시 0 · 원문 꼴 유지 규칙) · 목소리 회사 = 최근 발송 문안 블록 0(K2-3 · I6)
+  //   성격 = 광고 여부(080 이 오면 광고 문자) · 목소리 없는 회사 = 지시문 글자 그대로(I15)
+  const voiceKind: BrandVoiceKind = resolveCopyIntent({ isAd: !!rejectNumber }).kind;
+  const voiceSnap = companyId ? await getBrandVoiceSnapshot(companyId).catch(() => null) : null;
+  const voiceOn = !!voiceSnap && voiceLearnedOf(voiceSnap, voiceKind);
+  const baseSystemPrompt = buildRefineSystemPrompt({ tone, companyName, maxBytes, recentMessages: voiceOn ? undefined : recentMessages });
+  const composed = await composeVoicePrompt({ companyId, producer: 'refine-direct', mode: 'rewrite', kind: voiceKind, isAd: !!rejectNumber, basePrompt: baseSystemPrompt });
+  const systemPrompt = withCopyRules(composed.system);  // ★ 2026-08-21 직접 호출 경로라 관문을 안 거친다: 명시 부착
 
   // Claude 우선
   if (process.env.ANTHROPIC_API_KEY) {
