@@ -235,6 +235,7 @@ async function retryPendingRefunds(): Promise<void> {
         if (check.loaded.length > 0) {
           console.error(`[direct-send-worker][적재0의무축무효] campaign=${row.id} 넘긴 뒤 원행이 들어온 축 ${check.loaded.join('/')} — 그 축은 환불하지 않는다(일반 정산이 다시 잰다)`);
           void sendSystemAlert({
+            companyId: row.company_id,
             dedupKey: `zero-load-late-rows:${row.id}`,
             message: `적재 0으로 넘긴 캠페인에 늦은 적재(${check.loaded.join('/')}) — 그 축의 환불 의무를 빼고 일반 정산으로 돌렸습니다. campaign=${row.id}`,
           }).catch(() => undefined);
@@ -391,6 +392,7 @@ export async function runDirectSendOnce(): Promise<void> {
         _preparingAlertInFlight = true;
         _preparingAlertLastAttemptMs = Date.now();
         void sendSystemAlert({
+          companyId: null,
           dedupKey: 'direct-preparing-stale',
           message: `직접발송 preparing 잔존 ${staleCnt}건(최고령 ${stale.rows[0]?.oldest}) — 차감 여부 수동 확인 필요(발송은 차단된 상태). 목록: SELECT id, company_id, created_at FROM campaigns WHERE send_phase = 'preparing' AND created_at < NOW() - INTERVAL '10 minutes' ORDER BY created_at`,
         }).catch((alertErr: any) => {
@@ -650,6 +652,7 @@ async function processCampaign(campaignId: string, mode: 'normal' | 'recover' = 
     if (result.sentCount > 0 && isNightStopDue(cfg, new Date(), SEND_HOURS.start, SEND_HOURS.end)) {
       console.error(`[direct-send-worker] 캠페인 ${campaignId} 광고 묶음 적재가 발송 창 끝(${SEND_HOURS.end}시)을 넘겨 끝남 — 적재 ${result.sentCount}건 확인 필요`);
       void sendSystemAlert({
+        companyId: companyId,
         dedupKey: `night-ad-overrun:${campaignId}`,
         message: `광고 대량 발송 캠페인 ${campaignId}의 한 묶음(${result.sentCount}건) 적재가 ${SEND_HOURS.end}시를 넘겨 끝났습니다. 야간 광고로 나갔는지 발송 결과를 확인해 주세요.`,
       }).catch(() => undefined);
@@ -790,6 +793,7 @@ async function processCampaign(campaignId: string, mode: 'normal' | 'recover' = 
     }
     if (!settled) {
       void sendSystemAlert({
+        companyId: companyId,
         dedupKey: `direct-cancel-settle:${campaignId}`,
         message: `직접발송 취소 정산 보류 — campaign=${campaignId} (processing 유지 · 10분 뒤 자동 재정산)`,
       }).catch(() => { /* 경보 실패가 흐름을 막지 않는다 */ });

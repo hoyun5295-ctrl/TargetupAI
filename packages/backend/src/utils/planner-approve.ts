@@ -362,7 +362,7 @@ export async function stopPlannerEventDms(companyId: string, eventIds: string[])
     if (!ok) stuck.push(id);
   }
   if (stuck.length > 0) {
-    void sendSystemAlert({ dedupKey: `planner-cancel-dm:${companyId}:${eventIds.slice(0, 3).join(',')}`, message: `마케팅 플래너 행사 취소 뒤 모바일 DM 멈춤 실패 ${stuck.length}개(${stuck.join(', ')}): 주소가 열려 있음 · 행사 ${eventIds.join(', ')}` });
+    void sendSystemAlert({ companyId: companyId, dedupKey: `planner-cancel-dm:${companyId}:${eventIds.slice(0, 3).join(',')}`, message: `마케팅 플래너 행사 취소 뒤 모바일 DM 멈춤 실패 ${stuck.length}개(${stuck.join(', ')}): 주소가 열려 있음 · 행사 ${eventIds.join(', ')}` });
   }
   return stuck;
 }

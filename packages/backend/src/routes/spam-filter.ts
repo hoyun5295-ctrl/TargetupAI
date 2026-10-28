@@ -343,7 +343,7 @@ router.post('/test', authenticate, demoBlock, async (req: Request, res: Response
           .catch(() => ({ refunded: 0, ok: false }));
         if (!refundRes.ok) {
           console.error(`[SpamFilter] 발송 실패 환불 미완 testId=${testId} company=${companyId} — 수동 확인 필요`);
-          void sendSystemAlert({ dedupKey: `spam-refund-miss:${testId}`, message: `스팸 검사 발송 실패 환불 미완 — company=${companyId} test=${testId} 수동 확인 필요` }).catch(() => undefined);
+          void sendSystemAlert({ companyId: companyId, dedupKey: `spam-refund-miss:${testId}`, message: `스팸 검사 발송 실패 환불 미완 — company=${companyId} test=${testId} 수동 확인 필요` }).catch(() => undefined);
         }
         // 한 통도 못 나갔으면 검사를 끝낸다 — active로 남으면 폴링 없이 큐의 다음 검사를 막는다.
         if (sentCount === 0) {

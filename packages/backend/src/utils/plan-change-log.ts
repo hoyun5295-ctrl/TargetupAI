@@ -315,6 +315,7 @@ export async function alertPlanChangeFailure(companyId: string, err: unknown): P
   console.log(`[plan-change][MISS] 트랜잭션 롤백 company=${companyId}: ${msg}`);
   try {
     await sendSystemAlert({
+      companyId: companyId,
       dedupKey: `plan-change-miss:${companyId}`,
       message: `요금제 변경 실패(이력 기록 포함 롤백) — company=${companyId}. 재시도 필요. (${msg})`,
     });

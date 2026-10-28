@@ -258,7 +258,7 @@ export async function cancelMonthlyApproval(
   }
 
   if (refundMissed) {
-    void sendSystemAlert({ dedupKey: `planner-refund-miss:${companyId}:${planMonth}`, message: `마케팅 플래너 ${planMonth} 월간 대행 취소 환불 실패 — 회사 ${companyId} · ${verdict.amount}크레딧 · 서버 로그 [planner-approval][REFUND-MISS] 확인 후 수동 환불 필요` });
+    void sendSystemAlert({ companyId: companyId, dedupKey: `planner-refund-miss:${companyId}:${planMonth}`, message: `마케팅 플래너 ${planMonth} 월간 대행 취소 환불 실패 — 회사 ${companyId} · ${verdict.amount}크레딧 · 서버 로그 [planner-approval][REFUND-MISS] 확인 후 수동 환불 필요` });
   }
   console.log(`[planner-approval] 월간 취소 ${companyId} ${planMonth} — 환불 ${refunded ? verdict.amount : 0} · 발송 시도 ${work.executed}`);
   return { status: 'cancelled', refunded, refundAmount: refunded ? verdict.amount : 0, reason: refundMissed ? REFUND_MISS_TEXT : verdict.reason };

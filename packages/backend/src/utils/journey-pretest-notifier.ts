@@ -160,6 +160,7 @@ export async function scanAndPretest(): Promise<{
           await recordSchedule(b, 'cancelled');
         }
         void sendSystemAlert({
+          companyId: b.companyId,
           dedupKey: `journey-pretest-check-error:${b.journeyId}`,
           message: `여정 발송 2시간 전 스팸 검사를 ${PRETEST_CHECK_ERROR_MAX}번 연속 마치지 못했습니다(검사 장애 · ${unchecked ? '고친 문안 = 여정 멈춤' : '켤 때 통과한 문안 그대로 발송'}). journey=${b.journeyId} step=${b.stepId}`,
         }).catch(() => undefined);

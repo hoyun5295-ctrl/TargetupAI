@@ -73,14 +73,15 @@ export async function createPendingPayment(input: CreatePendingPaymentInput): Pr
  * 결제 확정은 멱등이지만 그 앞의 승인 재호출·망취소는 상태를 몰랐다. 행이 없으면 null(종전 흐름 — 확정이 거절하고 망취소한다).
  * ⛔ 상태만 읽는다(Codex 5차 1R high) — 리턴 콜백은 인증 앞 공개 경로라, 주문번호만 아는 호출자에게 잔액·금액이 새면 안 된다.
  */
-export async function readInicisPaymentState(orderId: string): Promise<{ status: string } | null> {
+// ★ 2026-10-28 B-1028-3 Codex R1 — 회사 = 운영 경보의 사내 회사 판정용(공개 응답에는 싣지 않는다)
+export async function readInicisPaymentState(orderId: string): Promise<{ status: string; companyId: string | null } | null> {
   const r = await pool.query(
-    `SELECT status FROM payments WHERE pg_order_id = $1 AND pg_provider = 'inicis'`,
+    `SELECT status, company_id FROM payments WHERE pg_order_id = $1 AND pg_provider = 'inicis'`,
     [orderId],
   );
   const row = r.rows[0];
   if (!row) return null;
-  return { status: String(row.status) };
+  return { status: String(row.status), companyId: row.company_id ? String(row.company_id) : null };
 }
 
 // ── 2단계: 결제 성공 확정 (pending → completed) ──────────

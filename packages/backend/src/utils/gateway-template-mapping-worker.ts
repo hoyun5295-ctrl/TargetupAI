@@ -125,7 +125,7 @@ export async function runPushPass(): Promise<PushPassResult> {
   const allow54 = isGateway54Enabled();
   try {
     const r = await query(
-      `SELECT id, bill_id, server, tmplcd, tran_tmplcd, senderkey, billnm, usemod, attempts
+      `SELECT id, company_id, bill_id, server, tmplcd, tran_tmplcd, senderkey, billnm, usemod, attempts
          FROM gateway_template_mappings
         WHERE sync_status = 'pending'
           AND (next_retry_at IS NULL OR next_retry_at <= now())
@@ -172,6 +172,7 @@ export async function runPushPass(): Promise<PushPassResult> {
       await markFailed(row.id, `payload 결함: ${built.error}`);
       result.failed += 1;
       await sendSystemAlert({
+        companyId: row.company_id ?? null,
         dedupKey: `gtm-payload:${row.bill_id}:${row.tmplcd}`,
         message: `게이트웨이 매핑 payload 결함 — bill=${row.bill_id} tmplcd=${row.tmplcd} (${built.error})`,
       });
@@ -197,6 +198,7 @@ export async function runPushPass(): Promise<PushPassResult> {
       if (verify.upsert.code === '21') {
         result.authErrorHalt = true;
         await sendSystemAlert({
+          companyId: null,
           dedupKey: 'gtm-auth-error',
           message: `게이트웨이 매핑 인증 오류(21) — GATEWAY_TMPL_API_TOKEN 확인 필요 (server=${server})`,
         });
@@ -233,6 +235,7 @@ async function handlePushFailure(
     await markFailed(row.id, errorMsg, attempts);
     result.failed += 1;
     await sendSystemAlert({
+      companyId: row.company_id ?? null,
       dedupKey: `gtm-failed:${row.bill_id}:${row.tmplcd}`,
       message: `게이트웨이 매핑 push ${permanent ? '영구 오류' : `${MAX_PUSH_ATTEMPTS}회 초과`} — bill=${row.bill_id} tmplcd=${row.tmplcd} (${errorMsg.slice(0, 80)})`,
     });
@@ -319,6 +322,7 @@ export async function runReconcilePass(onlyBillId?: string): Promise<ReconcilePa
   }
   if (totDrift > 0) {
     await sendSystemAlert({
+      companyId: null,
       dedupKey: 'gtm-drift',
       message: `게이트웨이 매핑 대조 드리프트 ${totDrift}건 감지 — pending 재전환됨 (bills=${result.bills.length})`,
     });

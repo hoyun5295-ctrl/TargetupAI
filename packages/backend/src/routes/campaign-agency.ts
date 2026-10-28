@@ -229,6 +229,7 @@ router.post('/requests', withImageUpload(async (req: any, res: Response) => {
 
   // 운영자 통지 (실패해도 접수 성공 — fire-and-forget)
   sendSystemAlert({
+    companyId: companyId,
     dedupKey: `agency-request:${ins.rows[0].id}`,
     message: `[캠페인 대행] 새 요청 접수: 행사명: ${parsed.title}. 슈퍼관리자 > 캠페인 대행 설계에서 확인해 주세요.`,
   }).catch((e: any) => console.log('[캠페인대행] 접수 통지 생략:', e?.message || e));

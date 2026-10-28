@@ -221,10 +221,10 @@ describe('6-1. 착지 초안 ↔ 멱등키 기억', () => {
   });
   it('회수 = 다시 시도 · 끝내 실패하면 false(기억을 남긴다)', async () => {
     let n = 0;
-    const ok = await deleteLineDraftWithRetry(async () => { n++; if (n < 2) throw new Error('x'); }, 't', { sleep: async () => {} });
+    const ok = await deleteLineDraftWithRetry(async () => { n++; if (n < 2) throw new Error('x'); }, 't', 'co-1', { sleep: async () => {} });
     expect(ok).toBe(true);
     expect(n).toBe(2);
-    const fail = await deleteLineDraftWithRetry(async () => { throw new Error('y'); }, 't', { attempts: 2, sleep: async () => {} });
+    const fail = await deleteLineDraftWithRetry(async () => { throw new Error('y'); }, 't', 'co-1', { attempts: 2, sleep: async () => {} });
     expect(fail).toBe(false);
   });
 });

@@ -223,6 +223,7 @@ router.post('/inicis/return', inicisFormParser, async (req: Request, res: Respon
       console.error(`[payments] /inicis/return 승인 불명(미수신·해석 불가) — 자동 망취소 안 함: orderId=${orderId}`, approval.resultCode, approval.resultMsg);
       if (state && state.status === 'pending' && verifyInicisCallback(orderId, callbackToken)) {
         void sendSystemAlert({
+          companyId: state.companyId,
           dedupKey: `inicis-approve-unknown:${orderId}`,
           message: `카드결제 승인 결과를 받지 못했습니다 — 주문 ${orderId}. 이니시스 관리자에서 승인 여부를 확인해 주세요(승인됐다면 카드 대금만 있고 충전은 안 된 상태).`,
         }).catch(() => undefined);
@@ -282,6 +283,7 @@ router.post('/inicis/return', inicisFormParser, async (req: Request, res: Respon
       }
       if (!after) {
         void sendSystemAlert({
+          companyId: state?.companyId ?? null,
           dedupKey: `inicis-finalize-unknown:${orderId}`,
           message: `카드결제 확정 결과를 확인하지 못했습니다 — 주문 ${orderId}${rereadFailed ? '(상태 조회 실패)' : '(결제 행 없음)'}. 망취소하지 않았습니다. 충전·카드 승인 상태를 확인해 주세요.`,
         }).catch(() => undefined);
@@ -291,7 +293,7 @@ router.post('/inicis/return', inicisFormParser, async (req: Request, res: Respon
         return;
       }
       // 빈 망취소 주소도 CT로 넘긴다 — CT가 거절하며 경보한다(PAY Codex 2R medium · 카드 승인만 남는 경우를 놓치지 않게)
-      const cancelled = await netCancelInicisPayment(callback.netCancelUrl || '', callback);
+      const cancelled = await netCancelInicisPayment(callback.netCancelUrl || '', callback, state?.companyId ?? null);
       await failTrustedCallback(orderId, callbackToken, {
         resultCode: 'FINALIZE_ERROR',
         resultMsg: `결제 확정 실패: ${finalErr.message || finalErr}`,

@@ -59,7 +59,7 @@ const IMC_MAX_PAGES = 100;  // 최대 10,000건 영역 (운영 영역 영구 안
 function warnImcListCap(where: string): void {
   const msg = `카카오 템플릿 목록 동기화(${where})가 상한 ${IMC_MAX_PAGES * IMC_PAGE_SIZE}건에서 끊겼습니다. 그 뒤 템플릿은 코드·상태가 갱신되지 않을 수 있습니다.`;
   console.error(`[kakao-template-sync] ${msg}`);
-  void sendSystemAlert({ dedupKey: 'kakao-template-list-cap', message: msg }).catch(() => undefined);
+  void sendSystemAlert({ companyId: null, dedupKey: 'kakao-template-list-cap', message: msg }).catch(() => undefined);
 }
 
 /**

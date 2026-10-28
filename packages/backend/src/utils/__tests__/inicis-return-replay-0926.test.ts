@@ -36,9 +36,9 @@ describe('리턴 콜백 재전송', () => {
     expect(pre).not.toContain('netCancelInicisPayment(');
   });
 
-  it('상태 조회 CT는 주문번호·이니시스 행의 상태만 읽는다(잔액·금액을 읽지 않는다 · Codex 5차 1R)', () => {
+  it('상태 조회 CT는 주문번호·이니시스 행의 상태 · 회사(운영 경보 사내 판정용 · B-1028-3)만 읽는다(잔액·금액을 읽지 않는다 · Codex 5차 1R)', () => {
     const f = proc.slice(proc.indexOf('export async function readInicisPaymentState('), proc.indexOf('// ── 2단계'));
-    expect(f).toContain("SELECT status FROM payments WHERE pg_order_id = $1 AND pg_provider = 'inicis'");
+    expect(f).toContain("SELECT status, company_id FROM payments WHERE pg_order_id = $1 AND pg_provider = 'inicis'");
     expect(f).not.toContain('balance');
     expect(f).not.toContain('amount');
   });

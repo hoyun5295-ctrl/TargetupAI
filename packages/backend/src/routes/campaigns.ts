@@ -409,11 +409,11 @@ router.post('/test-send', async (req: Request, res: Response) => {
             const rev = await prepaidRefund(companyId, managerContacts.length, doneType, TEST_REF, `${axis.type} 차감 실패로 ${doneType} 차감분 회수`, 'test', { refundKey: REFUND_KEYS.TEST });
             if (!rev.ok) {
               console.error(`[테스트발송][보상미완] company=${companyId} ${doneType} ${managerContacts.length}건 — 수동 환불 필요`);
-              void sendSystemAlert({ dedupKey: `test-refund-miss:${companyId}:${doneType}`, message: `테스트 발송 보상 환불 미완 — company=${companyId} ${doneType} ${managerContacts.length}건 수동 확인 필요` });
+              void sendSystemAlert({ companyId: companyId, dedupKey: `test-refund-miss:${companyId}:${doneType}`, message: `테스트 발송 보상 환불 미완 — company=${companyId} ${doneType} ${managerContacts.length}건 수동 확인 필요` });
             }
           } catch (revertErr) {
             console.error(`[테스트발송][보상실패] ${doneType} ${managerContacts.length}건 회수 실패:`, revertErr);
-            void sendSystemAlert({ dedupKey: `test-refund-miss:${companyId}:${doneType}`, message: `테스트 발송 보상 환불 실패 — company=${companyId} ${doneType} ${managerContacts.length}건 수동 확인 필요` });
+            void sendSystemAlert({ companyId: companyId, dedupKey: `test-refund-miss:${companyId}:${doneType}`, message: `테스트 발송 보상 환불 실패 — company=${companyId} ${doneType} ${managerContacts.length}건 수동 확인 필요` });
           }
         }
         // ★ 2026-09-27 한줄로 V2 m075 — 잔액 부족만 402(차감 처리 오류는 500 · 충전 안내를 띄우지 않는다)
@@ -511,11 +511,11 @@ router.post('/test-send', async (req: Request, res: Response) => {
           const refundRes = await prepaidRefund(companyId, axisFail, axis.type, TEST_REF, '테스트 발송 실패 자동 환불', 'test', { refundKey: REFUND_KEYS.TEST });
           if (!refundRes.ok) {
             console.error(`[테스트발송][환불미완] company=${companyId} ${axis.type} ${axisFail}건 — 수동 환불 필요`);
-            void sendSystemAlert({ dedupKey: `test-refund-miss:${companyId}:${axis.type}`, message: `테스트 발송 실패 환불 미완 — company=${companyId} ${axis.type} ${axisFail}건 수동 확인 필요` });
+            void sendSystemAlert({ companyId: companyId, dedupKey: `test-refund-miss:${companyId}:${axis.type}`, message: `테스트 발송 실패 환불 미완 — company=${companyId} ${axis.type} ${axisFail}건 수동 확인 필요` });
           }
         } catch (refundErr) {
           console.error(`[테스트발송][환불오류] company=${companyId} ${axis.type} ${axisFail}건:`, refundErr);
-          void sendSystemAlert({ dedupKey: `test-refund-miss:${companyId}:${axis.type}`, message: `테스트 발송 실패 환불 오류 — company=${companyId} ${axis.type} ${axisFail}건 수동 확인 필요` });
+          void sendSystemAlert({ companyId: companyId, dedupKey: `test-refund-miss:${companyId}:${axis.type}`, message: `테스트 발송 실패 환불 오류 — company=${companyId} ${axis.type} ${axisFail}건 수동 확인 필요` });
         }
       }
     }
@@ -3584,6 +3584,7 @@ router.delete('/:id/recipients/:idx', async (req: Request, res: Response) => {
         } catch (delErr: any) {
           console.error(`[예약 수신자 삭제] 환불 뒤 큐 삭제 실패 campaign=${campaignId}:`, delErr?.message || delErr);
           void sendSystemAlert({
+            companyId: companyId,
             dedupKey: `recipient-delete-after-refund:${campaignId}`,
             message: `예약 수신자 삭제 — 환불은 됐는데 큐 삭제 실패 campaign=${campaignId} phone 끝4=${String(phone).slice(-4)} (그 번호가 발송될 수 있음 · 수동 확인)`,
           }).catch(() => { /* 경보 실패가 응답을 막지 않는다 */ });

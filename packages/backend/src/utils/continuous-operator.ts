@@ -919,6 +919,7 @@ async function closeOpenProposalsOrNotify(
     `'${op.name}' 자동마케팅을 멈췄지만 남은 제안(예약 · 승인 대기)을 닫지 못했어요. 자동마케팅 화면에서 남은 제안을 확인해 주세요.`)
     .catch((e: any) => console.warn('[ContinuousOperator] 제안 닫기 실패 통지 경고:', e?.message));
   void sendSystemAlert({
+    companyId: op.companyId,
     dedupKey: `operator-close-proposals:${op.id}`,
     message: `자동마케팅 '${op.name}'(${op.id}) 중지 · 보관 뒤 열린 제안 닫기 실패 — 남은 예약 · 승인 대기 제안 확인 필요`,
   });
@@ -2624,7 +2625,7 @@ async function settlePendingCycleSnapshots(): Promise<void> {
           //   LESSONS 감시 원칙). LOG 이동 지연이면 다음 패스에 잡히고, 축 결함이면 경고가 사람을 부른다.
           console.warn(`[ContinuousOperator Settle] ${row.id} completed인데 큐 수신번호 0건 — 마커 유지·재시도(조회 축 확인 필요)`);
           // ★ 1025 #2 — 로그만이 아니라 사람에게(조회 축이 어긋나면 다음 회차에 같은 분들이 다시 잡힌다)
-          void sendSystemAlert({ dedupKey: `cycle-snapshot-zero:${row.id}`, message: `자동마케팅 제안 ${row.id} 캠페인 ${row.campaign_id} 완료인데 큐 수신번호 0건 — 회차 마감 보류(조회 축 확인 필요 · 다음 회차 중복 대상 가능)` });
+          void sendSystemAlert({ companyId: row.company_id, dedupKey: `cycle-snapshot-zero:${row.id}`, message: `자동마케팅 제안 ${row.id} 캠페인 ${row.campaign_id} 완료인데 큐 수신번호 0건 — 회차 마감 보류(조회 축 확인 필요 · 다음 회차 중복 대상 가능)` });
           continue;
         }
         const adv = await advanceCycleSnapshotForPhones(row.operator_id, row.company_id, phones);
@@ -2775,6 +2776,7 @@ async function releaseUnsentSendCharges(): Promise<void> {
       // ★ 2026-10-25 원장 #24 — 되돌림 실패 = 사람에게(옛: 로그만 · 7일 창을 벗어나면 영영 안 돌려줌)
       //   ponytail: 창은 7일 그대로 — 실패가 이어지면 그 7일 동안 1시간마다 경보가 간다(표식 쓰기는 같은 DB 장애에 같이 실패해 더하지 않음)
       void sendSystemAlert({
+        companyId: row.company_id,
         dedupKey: `operator-release-fail:${row.company_id}`,
         message: `자동마케팅 보내지 못한 회차의 발송 크레딧 되돌림 실패 — 키 ${key} · ${Number(row.amount) || 0}크레딧 · 7일 안에 자동 재시도, 계속 실패하면 같은 키로 수동 환불 필요`,
       });
@@ -4347,6 +4349,7 @@ async function sendAutoSendPrepNotice(
   );
   if (held.rows.length > 0) {
     void sendSystemAlert({
+      companyId: operator.companyId,
       dedupKey: `operator-prep-notice:${operator.id}`,
       message: `자동마케팅 '${operator.name}' 발송 예정 안내 문자를 담당자에게 보내지 못해 이번 회차 자동 발송을 멈췄습니다(제안 ${proposalId}). 담당자 번호 · 인증 라인 큐를 확인해 주세요.`,
     });

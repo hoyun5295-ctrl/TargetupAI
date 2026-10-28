@@ -54,6 +54,7 @@ export async function runMallWatchPass(nowMs: number = Date.now()): Promise<numb
     const where = [`고객사: ${r.companyName}`, `몰: ${LABEL[r.provider] || r.provider} ${r.mallId}`];
     if (r.problem?.kind === 'action') {
       sent += await sendSystemAlert({
+        companyId: r.companyId,
         dedupKey: `mall-action:${r.id}:${r.problem.cause}`,
         cooldownMs: DAY_MS,
         title: `자사몰 연동에 사람이 해야 할 일이 생겼습니다(${CAUSE_LABEL[r.problem.cause] || r.problem.cause}).`,
@@ -64,6 +65,7 @@ export async function runMallWatchPass(nowMs: number = Date.now()): Promise<numb
     const key = `${r.companyId}|${r.provider}|${r.provider === 'woocommerce' ? r.mallId : ''}`;
     if (isUnusualSilence(r, gaps.get(key), nowMs)) {
       sent += await sendSystemAlert({
+        companyId: r.companyId,
         dedupKey: `mall-silence:${r.id}`,
         cooldownMs: DAY_MS,
         title: '자사몰에서 지난 30일 중 가장 긴 시간보다 오래 데이터가 오지 않습니다.',
@@ -73,6 +75,7 @@ export async function runMallWatchPass(nowMs: number = Date.now()): Promise<numb
     }
     if (r.unknownStatuses.length > 0) {
       sent += await sendSystemAlert({
+        companyId: r.companyId,
         dedupKey: `mall-unknown-status:${r.companyId}:${r.provider}:${r.unknownStatuses.map((u) => u.status).sort().join(',')}`,
         cooldownMs: 7 * DAY_MS,
         title: '자사몰 주문에 우리 상태표에 없는 상태 글자가 들어왔습니다(결제 아님으로 둠).',

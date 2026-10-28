@@ -55,6 +55,21 @@
 
 ## 2) 활성 버그
 
+### 🟡 B-1028-3 사내 시험 회사(테스트계정)의 일이 운영 시스템 경보 문자로 온다 (🟡 수정완료-검증대기 · 1028 · Codex 적대 3R approve · 미커밋 · 배포 대기 · DDL 0 · ENV 1(원장 C77-ENV-1) · 카드 C77 · Harold 「테스트계정 관련은 시스템경보 안와야하는거아니냐」)
+- **실측(1028 Harold)**: 배포 뒤 첫 자사몰 감시 회차(20:13) 경보 2건 = `mall-action:<연동>:token_rejected`(테스트계정 카페24 gyunoo83 · 토큰 만료 07-21 · 상태 09-03) · `key_rejected`(테스트계정 고도몰 · 999 · 마지막 성공 09-03 · 마지막 거절 19:47 = 배포 · 자격 암호화 전) → 암호화와 무관 · 오래 죽은 시험 연동이 새 감시에 처음 잡힘.
+- **처리(1028 Harold 실행)**: 두 연동 status → revoked(화면 「연동 해제」와 같은 UPDATE · 옛 값 = token_expired · active) → 이 두 경보 멈춤.
+- **구조(코드)**: `sendSystemAlert` 는 회사를 받지 않고 호출부 39파일 어디에도 사내 시험 회사 거름이 없다(시연 회사 `isDemoCompany` 만 일부 호출부). 처방 방향 = 사내 시험 회사 판정 한 곳 + 회사 단위 경보만 거름(회사와 무관한 경보 = 그대로) · 구조체크 · 설계부터(Harold 승인 뒤).
+- **처방(1028 · 뿌리 R25 신설)**: 판정 CT `utils/internal-company.ts`(`isInternalCompany` = 시연 회사 is_demo 또는 ENV `INTERNAL_TEST_COMPANY_IDS` · 조회 실패 = 사내 아님 = 보낸다 · `soleCompanyId` = 묶은 행의 회사가 하나뿐일 때만) · 거르는 자리 = `sendSystemAlert` 입구 한 곳(거른 경보 = 로그 「사내 회사 경보 생략」 한 줄) · `SystemAlertParams.companyId` 필수 칸 → 경보 82곳(38파일)이 그 경보의 회사를 싣는다. 판정 규칙 = 원인이 그 회사의 상태 · 설정 · 데이터 · 돈 한 건이면 회사 · 처리기 · 인프라 · 외부 서비스 공통 · 슈퍼관리자 실행 단위 · 보안이면 null.
+  Codex 1R 3 → 2R approve(비차단 1 수용 = 래퍼로 넘긴 null 실제 1곳) → 3R approve(비차단 = 지역 변수 · 구조 분해 별칭은 계약이 안 따라감 · 1028 전수 36곳 실제 null 유입 0 = DB 행 · 인증 · string 매개변수). 1R 지적 3(요금제 · 템플릿 매핑 · 결제 승인 불명 = 회사를 아는데 null) → 같은 부류를 null 전수에서 3곳 더(망취소 실패 · 대행 메일 발송 ID 겹침 · 몰 웹훅 소진) · 2R 비차단 = 래퍼 인자로 넘긴 null → 실제 1곳(한 줄 초안 회수 실패 경보) 고침. 계약 = root-ledger R25(호출마다 companyId · null 리터럴 25곳 = 이유 목록 · 래퍼를 건너서도(여러 단계 · 의존성 주입 칸) 회사 인자 null = 이유 목록 · 운영 경보 번호를 읽는 곳 = system-alert.ts 하나).
+- **배포 뒤 할 일**: 원장 C77-ENV-1(`INTERNAL_TEST_COMPANY_IDS` = 테스트계정 a0990249-3550-4baa-92ca-32e45b185e83 + Harold 확인 회사) · restart --update-env. 넣기 전 = 시연 회사만 거름(지금 동작).
+- **실측(미검증)**: ENV 뒤 테스트계정 경보가 문자 대신 pm2 로그 한 줄로 남는가 · 고객사 경보는 그대로 오는가.
+
+### 🟡 B-1028-4 실 PG 시험 통과 기록(스탬프)이 Claude 앱 가상 폴더에 써져 push 직전 시험이 못 읽는다 (🟡 수정완료-검증대기 · 1028 · Codex 적대 1R 차단 0 · 미커밋 · 서버 배포 무관 · 카드 C77)
+- **실측(1028)**: tp-push pre-push = 「실 PG 통과 스탬프가 없다」 12건 · 같은 시험을 앱 안에서 돌리면 통과 · `LOCALAPPDATA` 는 같은 경로인데 Harold PowerShell 에서 파일 없음 · 실물 = `%LOCALAPPDATA%\Packages\Claude_pzs8sxrjxfjjc\LocalCache\Local\hanjul-pgtest`(앱 실행 파일의 AppData 쓰기 = Windows 가 앱 전용 폴더로 돌림) → 실제 위치로 복사 뒤 push 통과.
+- **처방 방향**: 덤프 · 스탬프 자리를 AppData 밖(사용자 폴더 · 앱 돌림 대상 아님)으로 · `pgTestDir` 한 곳 · 실 PG 시험층(C72) 과제. 함께 = 배포 원장 계산 스크립트가 큰 범위에서 `spawnSync git ENOBUFS` · 렌더본 정리 스크립트가 끝에 MySQL 연결을 안 닫아 종료하지 않음.
+- **처방(1028 · 뿌리 R26 신설)**: 자리 = `%USERPROFILE%\.hanjul-pgtest`(`pg/dump.ts` `pgTestDir` · AppData 밖 = 앱이 돌리지 않음 · 옛 파일 4개 복사 · 새 스탬프 기록 확인 · 시험 `pg-dump-loader`) · 배포 계산 git 버퍼 512MB · DB 를 여는 스크립트(학습 원장 정리 · 학습 데이터 내보내기) 성공 뒤 `process.exit(0)` · scripts 전수 계약(import 를 건너 config/database 도달 = 성공 길 exit · R26) · DDL 전 꼴을 주장하던 실 PG 시험 3건(cdp-identity · secret-box) = 자기 사본 안에서 DDL 전 꼴을 먼저 만든다(템플릿에 C73-DDL-2 · DDL-4 가 닫혀 깨짐).
+- **실측(미검증)**: 다음 tp-push 의 pre-push(앱 밖 PowerShell)가 새 자리 스탬프를 읽어 통과하는가.
+
 ### 🟠 B-1028-1 여정 「발송 2시간 전 안내」(정지 링크) 문자가 여정을 만든 담당자가 아니라 회사 알림톡 검수 수신자 첫 사람에게 간다 · 정지 주소가 길다 (🟡 수정완료-검증대기 · 1028 · Codex 적대 2R approve · 배포 대기 · DDL 0 · 카드 C75) · 2026-10-27 임은지 접수 `cmvq9ynar0h1sjn4eqg3ggr9c` · 댓글 서수란(주소 단축)
 - **증상(접수 사진)**: `sgbaek` 이 만든 여정 「생일 D-7 사전 축하 등급별 인사」의 2시간 전 안내가 팀장님(관리자)에게만 갔다 · 본문 = `buildPretestLmsBody` 문자열과 같다(머리 · 여정 · step · 발송 예정 · 본문 미리보기 · 즉시 정지).
 - **구조(코드)**: 받는 사람 = `journey-pretest-notifier.ts` 274~282 `kakao_alarm_users`(알림톡 검수 알림 수신자 명단 · D130) 회사 첫 활성 행 · 스캔이 `j.created_by` 를 읽고도(49) 쓰지 않는다. 여정 결과 안내도 같은 조회(`campaign-sync-worker.ts` 191~204). 자동마케팅 통지는 다른 판정(`continuous-operator.ts` 4191 담당자 번호 → 4175 `pickOperatorFallbackContact` = 만든 계정 → 회사 관리자).

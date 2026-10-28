@@ -378,11 +378,11 @@ export async function approveInicisPayment(callback: InicisCallbackBody): Promis
 }
 
 // 결제 취소 영역 (사용자가 결제창을 닫거나 인증 실패 시 netCancelUrl 호출)
-export async function netCancelInicisPayment(netCancelUrl: string, callback: InicisCallbackBody): Promise<boolean> {
+export async function netCancelInicisPayment(netCancelUrl: string, callback: InicisCallbackBody, companyId: string | null): Promise<boolean> {
   // 망취소 주소 검사(C-14) — 이니시스 주소가 아니면 호출하지 않는다(authToken·서명을 밖으로 보내지 않는다)
   if (!isTrustedInicisUrl(netCancelUrl)) {
     console.error(`[inicis-client] 이니시스가 아닌 netCancelUrl 거절: order=${callback.orderNumber} url=${String(netCancelUrl).slice(0, 200)}`);
-    alertNetCancelFail(callback, '이니시스가 아닌 망취소 주소');
+    alertNetCancelFail(callback, '이니시스가 아닌 망취소 주소', null);   // 요청이 보낸 주소 = 변조 신호 = 보안 경보처럼 늘 보낸다(회사 0)
     return false;
   }
   const config = getInicisConfig();
@@ -412,11 +412,11 @@ export async function netCancelInicisPayment(netCancelUrl: string, callback: Ini
     let code = '';
     try { code = String(JSON.parse(text)?.resultCode ?? ''); } catch { /* JSON 아님 = 실패 */ }
     const ok = response.ok && code === '0000';
-    if (!ok) alertNetCancelFail(callback, `응답 ${response.status} · resultCode ${code || '(없음)'}`);
+    if (!ok) alertNetCancelFail(callback, `응답 ${response.status} · resultCode ${code || '(없음)'}`, companyId);
     return ok;
   } catch (err: any) {
     console.error('[inicis-client] netCancel 호출 실패:', err.message || err);
-    alertNetCancelFail(callback, String(err?.message || err));
+    alertNetCancelFail(callback, String(err?.message || err), companyId);
     return false;
   }
 }
@@ -425,8 +425,9 @@ export async function netCancelInicisPayment(netCancelUrl: string, callback: Ini
  * ★ 2026-09-27 한줄로 V2 m007 — 망취소 실패 경보. 승인·확정 실패 뒤 망취소까지 실패하면 카드는 결제됐는데 잔액은 그대로이고
  * 결제 행은 failed라 아무도 모른다. 호출부가 반환값을 버려도 알 수 있게 망취소 CT 안에서 알린다. 경보 실패가 흐름을 막지 않는다.
  */
-function alertNetCancelFail(callback: InicisCallbackBody, reason: string): void {
+function alertNetCancelFail(callback: InicisCallbackBody, reason: string, companyId: string | null): void {
   void sendSystemAlert({
+    companyId,
     dedupKey: `inicis-netcancel-fail:${callback.orderNumber}`,
     message: `카드결제 망취소 실패 — 주문 ${callback.orderNumber} (${reason.slice(0, 120)}). 이니시스 관리자에서 거래 취소 여부를 확인해 주세요(카드 결제만 되고 충전은 안 된 상태일 수 있음).`,
   }).catch(() => undefined);

@@ -229,6 +229,7 @@ export async function executeAgentChargeBatch(opts: {
         }
         // 최고 위험 경로(고액 실반영 가능 + ACK 유실)일수록 즉시 알림 — 금액 무관 발송(Codex 10R)
         sendSystemAlert({
+          companyId: null,
           dedupKey: `agent-charge-uncertain:${requestId}`,
           message: `에이전트 충전 반영 불확실(커밋 응답 유실): 절대합 ${absBatch.toLocaleString()}원 ${parsed.charges.length}건 (by ${requestedBy || 'unknown'}) 사유: ${reason}. 이력 확인 후 해소 필요`,
           cooldownMs: 1000,
@@ -267,6 +268,7 @@ export async function executeAgentChargeBatch(opts: {
         // 예약이 남았다 = 전역 게이트가 막고 해소 경로가 수렴시킨다. 사람에게는 알린다.
         console.error('[agent-charges] 실패 정리 불가(예약 보존 — 해소 경로로 수렴):', cleanupErr?.message || cleanupErr);
         sendSystemAlert({
+          companyId: null,
           dedupKey: `agent-charge-claim-stuck:${requestId}`,
           title: '충전 요청 정리가 완료되지 않았습니다.',
           details: ['충전은 실행되지 않았습니다.', '신규 충전은 해소 전까지 잠깁니다.'],
@@ -299,6 +301,7 @@ export async function executeAgentChargeBatch(opts: {
     // 고액 배치(절대합 5천만+) 즉시 알림 — 단독 운영 통제 보강(Codex 9R). 알림 실패는 충전 결과 무영향
     if (absBatch >= 50_000_000) {
       sendSystemAlert({
+        companyId: null,
         dedupKey: `agent-charge-high:${requestId}`,
         message: `에이전트 고액 충전 등록: 절대합 ${absBatch.toLocaleString()}원 ${registered.length}건 (by ${requestedBy || 'unknown'}) 사유: ${reason}`,
         cooldownMs: 1000,

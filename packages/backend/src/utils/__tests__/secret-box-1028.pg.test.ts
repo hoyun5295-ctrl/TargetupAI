@@ -20,6 +20,8 @@ const raw = async (mallId: string) =>
   (await query(`SELECT access_token, refresh_token, webhook_secret, meta FROM company_integrations WHERE company_id = $1::uuid AND mall_id = $2`, [CO, mallId])).rows[0];
 
 beforeAll(async () => {
+  // 사본은 운영 + 닫힌 DDL(C73-DDL-2 = text)이다. 이 파일의 주장은 DDL-2 전(varchar(100)) 갈래라 그 꼴로 되돌린다(이 사본 안에서만 · 판정 캐시는 아직 비어 있다)
+  await query(`ALTER TABLE company_integrations ALTER COLUMN webhook_secret TYPE varchar(100)`);
   await insertMinimalRow(pool, 'companies', { id: CO });
 });
 

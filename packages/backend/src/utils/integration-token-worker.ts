@@ -49,6 +49,7 @@ export async function runTokenKeepalivePass(): Promise<number> {
         if (isDefinitiveTokenRejection(err)) {
           console.warn(`[Token Keepalive] ${provider} 갱신 거절 → 만료 표시 company=${t.companyId} mall=${t.mallId}`);
           await sendSystemAlert({
+            companyId: t.companyId,
             dedupKey: `token-rejected:${provider}:${t.id}`,
             cooldownMs: 24 * 60 * 60 * 1000,
             title: `${LABEL[provider]} 연동 토큰이 거절되어 다시 연결이 필요합니다.`,
@@ -68,6 +69,7 @@ export async function runTokenKeepalivePass(): Promise<number> {
         console.warn(`[Token Keepalive] ${provider} 일시 실패 ${fails}회 company=${t.companyId} mall=${t.mallId}: ${err?.message || err}`);
         if (fails >= FAIL_ALERT_AT) {
           await sendSystemAlert({
+            companyId: t.companyId,
             dedupKey: `token-keepalive:${provider}:${t.id}`,
             cooldownMs: 12 * 60 * 60 * 1000,
             title: `${LABEL[provider]} 연동 토큰 갱신이 ${fails}번 연속 실패했습니다.`,

@@ -1,6 +1,9 @@
 /**
  * 운영 schema-only 덤프 자리 · 싣기 전 검사(★ 2026-10-27 설계서 §2-5)
- * 자리 = 저장소 밖 %LOCALAPPDATA%\hanjul-pgtest(운영 구조 전체가 git 에 들어가지 않는다).
+ * 자리 = 저장소 밖 %USERPROFILE%\.hanjul-pgtest(운영 구조 전체가 git 에 들어가지 않는다).
+ *   ★ 2026-10-28 B-1028-4 — 옛 자리 %LOCALAPPDATA%\hanjul-pgtest 는 Claude 데스크톱 앱 안에서 돈 프로그램의 쓰기가 Windows 에 의해
+ *   앱 전용 폴더(%LOCALAPPDATA%\Packages\Claude_…\LocalCache\Local\…)로 돌려져, 앱 밖 PowerShell(tp-push pre-push 시험)이 통과 스탬프를 못 읽었다.
+ *   사용자 폴더(AppData 밖)는 돌려지지 않아 앱 안 · 밖이 같은 파일을 본다.
  */
 import { createHash } from 'node:crypto';
 import { join } from 'node:path';
@@ -8,8 +11,8 @@ import { join } from 'node:path';
 export const PROD_PG_VERSION = '15.15';
 
 export function pgTestDir(env: Record<string, string | undefined> = process.env): string {
-  if (!env.LOCALAPPDATA) throw new Error('[test:pg] LOCALAPPDATA 없음 · 덤프 · 스탬프 자리를 정할 수 없다');
-  return join(env.LOCALAPPDATA, 'hanjul-pgtest');
+  if (!env.USERPROFILE) throw new Error('[test:pg] USERPROFILE 없음 · 덤프 · 스탬프 자리를 정할 수 없다');
+  return join(env.USERPROFILE, '.hanjul-pgtest');
 }
 
 export const sha256 = (s: string): string => createHash('sha256').update(s).digest('hex');

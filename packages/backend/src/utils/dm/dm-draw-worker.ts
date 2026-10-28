@@ -34,6 +34,7 @@ async function noteDrawFailure(c: DrawableCampaign, err: any): Promise<void> {
     { noticeHeader: '[한줄로 모바일 DM 안내문자]' },
   ).catch((e: any) => console.warn('[dm-draw-worker] 추첨 실패 통지 경고:', e?.message));
   void sendSystemAlert({
+    companyId: c.companyId,
     dedupKey: `dm-draw-fail:${c.campaignId}`,
     message: `DM 마감 추첨 ${count}회 연속 실패 — 캠페인 ${c.campaignId} · 회사 ${c.companyId} · 마지막 오류: ${String(err?.message || err).slice(0, 120)}`,
   });

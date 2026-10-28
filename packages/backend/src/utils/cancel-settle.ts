@@ -143,6 +143,7 @@ export async function settleCancelOutcome(p: {
     );
     if (!upd.rowCount) {
       await sendSystemAlert({
+        companyId: c.company_id,
         dedupKey: `cancel-settle-sent-unapplied:${c.id}`,
         message: `취소 정산 보류 — 대기를 떠난 행 ${started}건이 있는데 캠페인이 취소로 굳어 있어 발송 캠페인으로 넘기지 못했습니다(청구·환불 수동 확인). campaign=${c.id}`,
       }).catch(() => { /* 경보 실패가 흐름을 막지 않는다 */ });

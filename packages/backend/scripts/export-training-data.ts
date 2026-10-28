@@ -110,7 +110,8 @@ async function main(): Promise<void> {
   await pool.end();
 }
 
-main().catch((e) => {
+// ★ 2026-10-28 B-1028-4 — 성공해도 끝낸다(DB 모듈이 연 MySQL 연결이 남아 프로세스가 끝나지 않는다 · purge-rendered 와 같은 뿌리)
+main().then(() => process.exit(0)).catch((e) => {
   console.error('[export] 실패:', e);
   process.exit(1);
 });

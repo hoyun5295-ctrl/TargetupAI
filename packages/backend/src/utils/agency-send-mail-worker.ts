@@ -44,6 +44,7 @@ import { extractAgencyVars } from './agency-send-vars';
 import { EMAIL_MIN_LEAD_MINUTES, EMAIL_DUP_BLOCKING_SQL, emailDupTimeSql } from './agency-send-state';
 import { agencyMailUser, isAgencyMailerReady, sendAgencyReplyMail } from './agency-mailer';
 import { sendSystemAlert } from './system-alert';
+import { soleCompanyId } from './internal-company';
 
 const TICK_MS = 60_000;
 /** 한 틱 처리 통수 상한(재기동 후에도 동일 · 반려 회신 폭주 완충 · §18-7) */
@@ -316,6 +317,7 @@ async function claimIntake(mailbox: string, uidl: string, messageId: string | nu
           [row.id],
         );
         await sendSystemAlert({
+          companyId: null,
           dedupKey: `agency-mail-claim-exhausted:${mailbox}`,
           message: `대행발송 메일 한 통이 처리 중 ${FAIL_MAX_ATTEMPTS}회 연속으로 끊겨 종결 처리했습니다(uidl=${uidl}). 첨부가 지나치게 크거나 파싱이 프로세스를 죽였을 수 있습니다.`,
           cooldownMs: 60 * 60 * 1000,
@@ -606,6 +608,7 @@ async function processMessage(ctx: TickCtx, seq: number, uidl: string): Promise<
   if (sender.outcome === 'unregistered') {
     await finalizeIntake(claimed.id, 'rejected', { reason: 'unregistered', replyStatus: 'skipped' });
     await sendSystemAlert({
+      companyId: null,
       dedupKey: 'agency-mail-unknown-sender',
       message: `대행발송 메일함에 미등록 발신 메일이 왔습니다(회신 없이 기록). 최근 예: ${fromAddr || '(주소 없음)'}`,
       cooldownMs: 6 * 60 * 60 * 1000,
@@ -617,6 +620,7 @@ async function processMessage(ctx: TickCtx, seq: number, uidl: string): Promise<
     await sendReplyAndRecord(claimed.id, ctx.mailbox, fromAddr, '[한줄로] 대행발송 접수 불가',
       buildRejectedReply(['접수 설정에 문제가 있어 접수되지 않았습니다. 한줄로 담당자에게 문의해 주세요.']), messageId, 'owner_inactive');
     await sendSystemAlert({
+      companyId: sender.companyId ?? null,
       // ★0827 회사 미확정(여러 회사에 걸린 주소)이면 주소로 dedup — null 키 하나로 전 주소가 접히면 안 된다
       dedupKey: `agency-mail-owner-inactive:${sender.companyId ?? fromAddr}`,
       message: `대행발송 허용 이메일의 귀속 사용자가 비활성입니다. 접수가 반려되고 있습니다: ${fromAddr}`,
@@ -970,6 +974,7 @@ async function processMessage(ctx: TickCtx, seq: number, uidl: string): Promise<
   if (unitErrors.length > 0) {
     if (ambiguousSeen) {
       await sendSystemAlert({
+        companyId: soleCompanyId(candidates.map((c) => c.companyId)),
         dedupKey: `agency-mail-billing-target-ambiguous:${fromAddr}`,
         message: `대행발송 허용 이메일의 발송 ID 표시명이 겹칩니다(지정 판정 불가·반려 중): ${fromAddr}`,
         cooldownMs: 60 * 60 * 1000,
@@ -1228,6 +1233,7 @@ export async function runAgencyMailTick(): Promise<void> {
         if (fails >= LOGIN_FAIL_PAUSE_AT) {
           await pauseMailbox(mailbox, `login_fail_x${fails}`);
           await sendSystemAlert({
+            companyId: null,
             dedupKey: 'agency-mail-login-fail',
             message: `대행발송 메일함 로그인이 ${fails}회 연속 실패해 폴링을 멈췄습니다. 비밀번호 확인 후 mail_state.paused_at을 비워 재개하세요.`,
             cooldownMs: 60 * 60 * 1000,
@@ -1239,6 +1245,7 @@ export async function runAgencyMailTick(): Promise<void> {
       log(`POP3 접속 실패(네트워크): ${err?.message || err}`);
       if (state?.lastOkAt && Date.now() - state.lastOkAt.getTime() > POLL_STALL_ALERT_MS) {
         await sendSystemAlert({
+          companyId: null,
           dedupKey: 'agency-mail-poll-fail',
           message: `대행발송 메일 폴링이 ${Math.round((Date.now() - state.lastOkAt.getTime()) / 60000)}분째 실패하고 있습니다.`,
           cooldownMs: 60 * 60 * 1000,

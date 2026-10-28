@@ -159,6 +159,7 @@ async function revertFirstActivation(companyId: string, journeyId: string): Prom
   } catch (err: any) {
     console.error(`[Journeys activate] 첫 켜기 되돌리기 실패 — 무과금 켜짐(수동 확인) journey=${journeyId}:`, err?.message || err);
     void import('./system-alert').then(({ sendSystemAlert }) => sendSystemAlert({
+      companyId: companyId,
       dedupKey: `journey-activate-revert:${journeyId}`,
       title: '여정 켜기 크레딧을 걷지 못했는데 켜기를 되돌리지 못했습니다.',
       details: ['상태: 돈을 받지 않은 여정이 켜져 있음'],

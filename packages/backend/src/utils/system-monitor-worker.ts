@@ -79,6 +79,7 @@ async function checkAbnormalStatusRows(all: string[]): Promise<void> {
   }
   if (total === 0) return;
   await sendSystemAlert({
+    companyId: null,
     dedupKey: 'queue-abnormal-status',
     cooldownMs: 12 * 60 * 60 * 1000,
     title: '발송 대기열에 결과 코드가 아닌 상태값 행이 있습니다.',
@@ -186,6 +187,7 @@ async function checkDelayedQueueRows(): Promise<void> {
 
   const dedupKey = 'queue-delay:' + stalled.map((s) => s.key).sort().join(',');
   await sendSystemAlert({
+    companyId: null,
     dedupKey,
     message:
       `발송 큐 지연 정체 — 캠페인 ${stalled.length}건, 대기 ${totalRows.toLocaleString()}행이 ` +
@@ -219,6 +221,7 @@ async function checkSyncAgents(): Promise<void> {
     if (now - hb > AGENT_HEARTBEAT_STALE_MS) {
       const min = Math.floor((now - hb) / 60000);
       await sendSystemAlert({
+        companyId: a.company_id,
         dedupKey: `agent-down:${a.id}`,
         cooldownMs: 12 * 60 * 60 * 1000,
         title: '싱크에이전트가 멈춘 것으로 보입니다.',
@@ -235,6 +238,7 @@ async function checkSyncAgents(): Promise<void> {
     if (now - ls > stallMs) {
       const hours = Math.floor((now - ls) / 3600000);
       await sendSystemAlert({
+        companyId: a.company_id,
         dedupKey: `sync-stalled:${a.id}`,
         cooldownMs: 12 * 60 * 60 * 1000,
         title: '싱크에이전트가 연결은 되어 있는데 자료를 받아오지 못하고 있습니다.',
@@ -263,13 +267,13 @@ async function checkSyncFailures(): Promise<void> {
     let rows: any[] = [];
     try {
       const res = await query(
-        `SELECT a.id, a.agent_name, co.company_name,
+        `SELECT a.id, a.company_id, a.agent_name, co.company_name,
                 SUM(l.fail_count)::int AS fails, COUNT(*)::int AS batches
            FROM sync_logs l
            JOIN sync_agents a ON a.id = l.agent_id
            LEFT JOIN companies co ON co.id = a.company_id
           WHERE l.created_at > NOW() - INTERVAL '${tier.interval}'
-          GROUP BY a.id, a.agent_name, co.company_name
+          GROUP BY a.id, a.company_id, a.agent_name, co.company_name
          HAVING SUM(l.fail_count) >= $1`,
         [tier.threshold],
       );
@@ -307,6 +311,7 @@ async function checkSyncFailures(): Promise<void> {
       const label = `${r.company_name || '(회사 미상)'} ${r.agent_name || ''}`.trim();
       const windowLabel = tier.name === '급성' ? '최근 24시간' : '최근 7일';
       const sentCount = await sendSystemAlert({
+        companyId: r.company_id,
         dedupKey: `${tier.keyPrefix}:${r.id}`,
         cooldownMs: tier.cooldownMs,
         title: `싱크 적재 실패가 쌓이고 있습니다(${tier.name}).`,

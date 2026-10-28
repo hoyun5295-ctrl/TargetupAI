@@ -1672,6 +1672,7 @@ async function runCancelSweep(): Promise<void> {
           if ((tries.rows[0]?.c || 0) >= 6) {
             try {
               await sendSystemAlert({
+                companyId: row.company_id,
                 dedupKey: `agency-cancel-stuck:${row.id}`,
                 title: '대행발송 취소가 여러 번 시도해도 끝나지 않았습니다.',
                 details: [`오류: ${error || '미상'}`],
@@ -1820,6 +1821,7 @@ async function takeOverStuckAttempt(
 async function alertStuckAttempt(): Promise<void> {
   try {
     await sendSystemAlert({
+      companyId: null,
       dedupKey: 'agency-dispatch-stuck',
       title: '대행발송 예약 시도가 끝나지 않아 멈춘 것으로 처리했습니다.',
       details: [`예약 시각이 ${ATTEMPT_STUCK_AFTER_DUE_MINUTES}분 넘게 지난 시도`],
@@ -1916,6 +1918,7 @@ const tickStages = createStageGuard((name, ms) => {
   console.warn(`${LOG} 앞 tick의 ${name} 단계가 ${Math.round(ms / 1000)}초째 돌고 있어 끝난 뒤 이어서 돈다`);
   if (ms > STAGE_STALL_ALERT_MINUTES * 60000) {
     sendSystemAlert({
+      companyId: null,
       dedupKey: `agency-worker-stage-stall:${name}`,
       title: '대행발송 워커 단계가 30분 넘게 끝나지 않았습니다.',
       details: [`단계: ${name}`, `경과: ${Math.round(ms / 60000)}분`],

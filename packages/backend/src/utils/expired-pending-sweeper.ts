@@ -64,6 +64,7 @@ export async function sweepExpiredPendingOnce(): Promise<{ failed: number; remai
     let codes: Record<string, number> = {};
     try { codes = await smsGroupByAll(all, 'status_code', ABNORMAL_WHERE, []); } catch { /* 경보 본문용이라 실패 무시 */ }
     await sendSystemAlert({
+      companyId: null,
       dedupKey: 'queue-abnormal-status-closed',
       cooldownMs: 12 * 60 * 60 * 1000,
       title: '발송 대기열의 결과 코드가 아닌 상태값 행을 실패로 닫습니다.',

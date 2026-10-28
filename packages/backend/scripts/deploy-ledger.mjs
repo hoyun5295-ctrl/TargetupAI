@@ -7,7 +7,8 @@ import { fileURLToPath } from 'node:url';
 import { parseLedger, headHash, requiredSteps, advanceDeployedHead, recomputeCards, EVIDENCE } from './deploy-ledger-lib.mjs';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
-const git = (...args) => execFileSync('git', args, { cwd: ROOT, encoding: 'utf8' });
+// ★ 2026-10-28 B-1028-4 — 범위가 크면 `git log -p` 출력이 기본 버퍼(1MB)를 넘어 ENOBUFS 로 멈췄다(C73~C76 한 커밋) → 512MB
+const git = (...args) => execFileSync('git', args, { cwd: ROOT, encoding: 'utf8', maxBuffer: 512 * 1024 * 1024 });
 const isAncestorOf = (head) => (commit) => {
   try { git('merge-base', '--is-ancestor', commit, head); return true; } catch { return false; }
 };

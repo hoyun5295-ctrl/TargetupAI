@@ -3178,3 +3178,175 @@ describe('I14(1027) 백엔드 프로세스 1개 전제 — 메모리 잠금 · �
     }
   });
 });
+
+describe('R25(1028) 사내 회사 일 = 운영 경보 아님 — 경보 입구 하나 · 부르는 곳마다 회사를 싣는다(B-1028-3)', () => {
+  it('sendSystemAlert 를 부르는 곳 전수 = 첫 인자 객체에 companyId 가 있다(as any 로 빼도 잡는다)', () => {
+    let calls = 0;
+    const missing: string[] = [];
+    for (const f of sourceFiles(BE, /\.ts$/)) {
+      const src = be(f);
+      if (!src.includes('sendSystemAlert(')) continue;
+      const sf = ts.createSourceFile(f, src, ts.ScriptTarget.Latest, true);
+      const visit = (n: ts.Node): void => {
+        if (ts.isCallExpression(n) && n.expression.getText(sf) === 'sendSystemAlert') {
+          calls += 1;
+          const a = n.arguments[0];
+          const ok = !!a && ts.isObjectLiteralExpression(a) && a.properties.some((p) => p.name?.getText(sf) === 'companyId');
+          if (!ok) missing.push(`${f}:${sf.getLineAndCharacterOfPosition(n.getStart(sf)).line + 1}`);
+        }
+        ts.forEachChild(n, visit);
+      };
+      visit(sf);
+    }
+    expect(calls).toBeGreaterThan(70);
+    expect(missing).toEqual([]);
+  });
+  it('운영 경보 번호를 읽는 곳 = system-alert.ts 하나(입구를 거치지 않는 경보 0) · companyId 는 필수 칸', () => {
+    const out = sourceFiles(BE, /\.ts$/).filter((f) => f !== 'utils/system-alert.ts' && /getSystemAlertPhones\(|parseAlertPhones\(|process\.env\.SYSTEM_ALERT_PHONES/.test(stripComments(be(f))));
+    expect(out).toEqual([]);
+    expect(be('utils/system-alert.ts')).toMatch(/\n  companyId: string \| null;/);
+  });
+});
+
+describe('R25 넓힘(1028 Codex R1) 회사 null = 이유 있는 목록 — 회사를 아는 경보에 null 을 실으면 사내 회사 경보가 그대로 나간다', () => {
+  // 키 = 파일 + dedupKey 식 · 이유 = 회사가 없거나(메일함 · 미등록 발신) · 원인이 우리 처리기 · 인프라 · 외부 서비스 공통이거나 · 슈퍼관리자 실행 단위(여러 회사 · 내부 통제) · 보안
+  // 새 null = 실패(이유를 적고 넣는다) · 사라진 null = 실패(목록을 지운다)
+  const NULL_OK: Record<string, string> = {
+    'routes/admin.ts `agent-charge-order-stuck:${requestId}`': '슈퍼관리자가 해소한 실행 단위(여러 발송 ID · 여러 회사) · 주문 되돌리기 실패 직후라 다시 읽지 않는다',
+    'utils/agency-send-mail-worker.ts \'agency-mail-login-fail\'': '공용 메일함 로그인 · 회사 없음',
+    'utils/agency-send-mail-worker.ts \'agency-mail-poll-fail\'': '공용 메일함 폴링 · 회사 없음',
+    'utils/agency-send-mail-worker.ts \'agency-mail-unknown-sender\'': '미등록 발신자 · 회사 없음',
+    'utils/agency-send-mail-worker.ts `agency-mail-claim-exhausted:${mailbox}`': '선점 단계 · 발신자 판정 전 · 회사 없음',
+    'utils/agency-send-worker.ts \'agency-dispatch-stuck\'': '처리기 건강(붙잡힌 연결 · 재시작 필요) · 회사 무관',
+    'utils/agency-send-worker.ts `agency-worker-stage-stall:${name}`': '처리기 단계 정체 · 회사 무관',
+    'utils/agent-charge-core.ts `agent-charge-claim-stuck:${requestId}`': '슈퍼관리자 충전 실행 단위(여러 발송 ID) · 내부 통제 경보',
+    'utils/agent-charge-core.ts `agent-charge-high:${requestId}`': '슈퍼관리자 고액 충전 · 내부 통제 경보(회사 무관하게 늘 보낸다)',
+    'utils/agent-charge-core.ts `agent-charge-uncertain:${requestId}`': '슈퍼관리자 충전 커밋 응답 유실 · 내부 통제 경보',
+    'utils/cafe24-client.ts \'cafe24-api-version-rejected\'': '앱 고정 API 판 = 전 몰 공통 · 몰 하나는 계기일 뿐',
+    'utils/cdp-webhook-retry-worker.ts \'cdp-webhook-backlog\'': '처리기 적체(워커가 못 따라감) · 회사 무관',
+    'utils/direct-send-worker.ts \'direct-preparing-stale\'': '처리기가 차감 중간에 죽은 흔적 · 여러 회사 집계 · 회사 무관',
+    'utils/expired-pending-sweeper.ts \'queue-abnormal-status-closed\'': '발송 대기열 상태값 이상 = 서버 · 커널 · 회사 무관',
+    'utils/gateway-template-mapping-worker.ts \'gtm-auth-error\'': '게이트웨이 인증 = 전 호출 공통',
+    'utils/gateway-template-mapping-worker.ts \'gtm-drift\'': '게이트웨이 대조 드리프트 = 동기화 처리기 · 여러 발송 ID 집계',
+    'utils/kakao-template-sync.ts \'kakao-template-list-cap\'': '카카오 템플릿 목록 상한 = 플랫폼 공통',
+    'utils/pay-ingest-monitor.ts \'pay-db:aborted-spike\'': '통계DB 인증 실패 급증 = 보안 · 인프라',
+    'utils/pay-ingest-monitor.ts \'pay-db:ingest-stall\'': '통계DB 적재 정체 = 인프라',
+    'utils/pay-ingest-monitor.ts \'pay-db:unreachable\'': '통계DB 연결 불가 = 인프라',
+    'utils/retention-sweeper.ts \'retention-pdf-delete-fail\'': '보관 파일 삭제 실패 = 저장소 · 여러 회사 작업',
+    'utils/retention-sweeper.ts \'retention-pdf-outside\'': '보관 폴더 밖 경로 = 저장소 · 여러 회사 작업',
+    'utils/system-monitor-worker.ts \'queue-abnormal-status\'': '발송 대기열 상태값 이상 = 서버 · 회사 무관',
+    'utils/system-monitor-worker.ts dedupKey': '발송 큐 지연 = 게이트웨이 · 에이전트 처리 속도 · 여러 캠페인 집계',
+    'utils/watch-alert.ts concurrent ? `watch:${e.loginId}:${e.kind}:${ip}:${otherIp}` : `watch:${e.loginId}:login:${ip}:${day}`': '보안 감시(동시 · 새 위치 로그인) = 늘 보낸다',
+  };
+  it('sendSystemAlert 에 companyId: null 을 싣는 자리 = 목록과 같다', () => {
+    const found: string[] = [];
+    for (const f of sourceFiles(BE, /\.ts$/)) {
+      const src = be(f);
+      if (!src.includes('sendSystemAlert(')) continue;
+      const sf = ts.createSourceFile(f, src, ts.ScriptTarget.Latest, true);
+      const visit = (n: ts.Node): void => {
+        if (ts.isCallExpression(n) && n.expression.getText(sf) === 'sendSystemAlert' && n.arguments[0] && ts.isObjectLiteralExpression(n.arguments[0])) {
+          const props = n.arguments[0].properties.filter(ts.isPropertyAssignment);
+          const co = props.find((p) => p.name.getText(sf) === 'companyId');
+          if (co && co.initializer.kind === ts.SyntaxKind.NullKeyword) {
+            const dk = n.arguments[0].properties.find((p) => p.name?.getText(sf) === 'dedupKey');
+            found.push(`${f} ${!dk ? '(dedupKey 없음)' : ts.isPropertyAssignment(dk) ? dk.initializer.getText(sf) : dk.getText(sf)}`);
+          }
+        }
+        ts.forEachChild(n, visit);
+      };
+      visit(sf);
+    }
+    expect(found.sort()).toEqual(Object.keys(NULL_OK).sort());
+    for (const [k, why] of Object.entries(NULL_OK)) expect(why.length, k).toBeGreaterThan(5);
+  });
+  it('래퍼를 건너서도 같다 — 회사를 매개변수로 받아 경보에 싣는 함수(여러 단계)를 부르는 곳의 회사 인자 null = 이유 있는 목록(Codex R2)', () => {
+    // 래퍼 = 경보(또는 래퍼) 호출의 회사 식이 둘러싼 함수의 매개변수에서 온 함수 · 고정점까지 넓힌다 · 회사 인자 = 그 자리(객체면 그 칸)
+    const WRAPPER_NULL_OK: Record<string, string> = {
+      'utils/inicis-client.ts alertNetCancelFail': '요청이 보낸 망취소 주소가 이니시스 밖 = 변조 신호 = 보안 경보처럼 늘 보낸다',
+    };
+    type W = { idx: number; key: string | null };
+    const wrappers = new Map<string, W>([['sendSystemAlert', { idx: 0, key: 'companyId' }]]);
+    const files = sourceFiles(BE, /\.ts$/).map((f) => ({ f, sf: ts.createSourceFile(f, be(f), ts.ScriptTarget.Latest, true) }));
+    const rootOf = (e: ts.Expression): { id: string; prop: string | null } | null => {
+      let prop: string | null = null;
+      while (ts.isPropertyAccessExpression(e) || ts.isNonNullExpression(e) || ts.isParenthesizedExpression(e)) {
+        if (ts.isPropertyAccessExpression(e)) prop = e.name.text;
+        e = e.expression;
+      }
+      return ts.isIdentifier(e) ? { id: e.text, prop } : null;
+    };
+    const companyArg = (call: ts.CallExpression, w: W, sf: ts.SourceFile): ts.Expression | null => {
+      const a = call.arguments[w.idx];
+      if (!a) return null;
+      if (!w.key) return a;
+      if (!ts.isObjectLiteralExpression(a)) return null;
+      const p = a.properties.find((x) => x.name?.getText(sf) === w.key);
+      if (!p) return null;
+      return ts.isShorthandPropertyAssignment(p) ? p.name : ts.isPropertyAssignment(p) ? p.initializer : null;
+    };
+    const fnName = (fn: ts.SignatureDeclaration): string | null =>
+      fn.name ? fn.name.getText() : ts.isVariableDeclaration(fn.parent) ? fn.parent.name.getText() : null;
+    const nullAt: string[] = [];   // 마지막 한 바퀴(고정점 뒤)에서만 센다 · 같은 파일 같은 래퍼의 두 번째 null 도 따로 잡힌다
+    for (let changed = true, last = false; changed || !last; ) {
+      last = !changed;
+      changed = false;
+      for (const { f, sf } of files) {
+        const visit = (n: ts.Node): void => {
+          // 의존성 주입 = 래퍼를 객체 칸에 담으면 그 칸 이름도 래퍼(deps.deleteWithRetry = deleteLineDraftWithRetry)
+          if (ts.isPropertyAssignment(n) && ts.isIdentifier(n.initializer) && wrappers.has(n.initializer.text) && !wrappers.has(n.name.getText(sf))) {
+            wrappers.set(n.name.getText(sf), wrappers.get(n.initializer.text)!);
+            changed = true;
+          }
+          if (ts.isCallExpression(n)) {
+            const name = n.expression.getText(sf).split('.').pop()!;
+            const w = wrappers.get(name);
+            const arg = w ? companyArg(n, w, sf) : null;
+            if (last && w && arg && name !== 'sendSystemAlert' && arg.kind === ts.SyntaxKind.NullKeyword) nullAt.push(`${f} ${name}`);
+            const r = arg ? rootOf(arg) : null;
+            for (let fn: ts.Node | undefined = n.parent; r && fn; fn = fn.parent) {
+              if (!ts.isFunctionLike(fn)) continue;
+              const idx = fn.parameters.findIndex((x) => x.name.getText(sf) === r.id);
+              if (idx < 0) continue;
+              const nm = fnName(fn);
+              if (nm && !wrappers.has(nm)) { wrappers.set(nm, { idx, key: r.prop }); changed = true; }
+              break;
+            }
+          }
+          ts.forEachChild(n, visit);
+        };
+        visit(sf);
+      }
+    }
+    expect(wrappers.size).toBeGreaterThan(15);
+    expect(wrappers.has('reportCreditMiss') && wrappers.has('deleteLineDraftWithRetry')).toBe(true);
+    expect(nullAt.sort()).toEqual(Object.keys(WRAPPER_NULL_OK).sort());
+  });
+});
+
+describe('R26(1028) DB 를 여는 운영 스크립트 = 성공해도 스스로 끝난다(B-1028-4 · MySQL 풀이 남아 멈춤)', () => {
+  it('scripts/*.ts 중 config/database 에 (건너서라도) 닿는 것 전수 = 성공 길에 process.exit', () => {
+    const SCRIPTS = join(BE, '..', 'scripts');
+    const reachesDb = (start: string): boolean => {
+      const seen = new Set<string>();
+      const stack = [start];
+      while (stack.length) {
+        const p = stack.pop()!;
+        if (seen.has(p)) continue;
+        seen.add(p);
+        if (/[\\/]config[\\/]database\.ts$/.test(p)) return true;
+        let src: string;
+        try { src = read(p); } catch { continue; }
+        for (const m of stripComments(src).matchAll(/^import\s+(?!type\b)[^;]*?from\s+'(\.{1,2}\/[^']+)'/gm)) {
+          const base = join(p, '..', m[1]);
+          for (const c of [`${base}.ts`, join(base, 'index.ts')]) stack.push(c);
+        }
+      }
+      return false;
+    };
+    const dbScripts = readdirSync(SCRIPTS).filter((f) => f.endsWith('.ts') && reachesDb(join(SCRIPTS, f)));
+    expect(dbScripts.length).toBeGreaterThan(5);
+    const noExit = dbScripts.filter((f) => !/process\.exit\((0|code|fail === 0 \? 0 : 1)\)/.test(stripComments(read(join(SCRIPTS, f)))));
+    expect(noExit).toEqual([]);
+  });
+});

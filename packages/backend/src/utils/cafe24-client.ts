@@ -459,6 +459,7 @@ export async function cafe24ApiCall<T = unknown>(
     // ★ 1028 K10 2단 · M36 — 고정한 API 버전이 막히면(0703 실측 원문 「… version … not available」 · 400) 상품 고르기 · 스크립트 등록이 일제히 실패한다 → 그 자리에서 경보
     if (res.status === 400 && /version/i.test(errBody) && /not available/i.test(errBody)) {
       void sendSystemAlert({
+        companyId: null,
         dedupKey: 'cafe24-api-version-rejected',
         cooldownMs: 24 * 60 * 60 * 1000,
         title: '카페24 API 버전을 카페24가 받지 않습니다.',

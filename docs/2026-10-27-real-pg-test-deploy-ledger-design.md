@@ -76,8 +76,9 @@
 ### 2-5 표 · 덤프
 
 - **원천** = 운영 schema-only 덤프 하나(`pg_dump --schema-only --no-owner --no-privileges` · 데이터 0).
-- **자리** = 저장소 밖 `%LOCALAPPDATA%\hanjul-pgtest\schema.sql`(회의론자 A 고친 꼴). 운영 구조 전체가 git 에 들어가지 않고(보안 무관용) · `git add -f` · 무시 예외 추가로 딸려 갈 길도 없다. 개발 기계 = 이 노트북 하나(CLAUDE.md worktree 금지).
+- **자리** = 저장소 밖 `%USERPROFILE%\.hanjul-pgtest\schema.sql`(회의론자 A 고친 꼴 · ★1028 B-1028-4 에서 옮김 · 아래 줄). 운영 구조 전체가 git 에 들어가지 않고(보안 무관용) · `git add -f` · 무시 예외 추가로 딸려 갈 길도 없다. 개발 기계 = 이 노트북 하나(CLAUDE.md worktree 금지).
   - ★1028 실측: Claude 앱(MSIX 꾸러미)이 `%LOCALAPPDATA%` 에 쓰는 파일은 Windows 가 꾸러미 폴더로 돌린다 → 이 자리의 실제 폴더 = `C:\Users\ceo\AppData\Local\Packages\Claude_pzs8sxrjxfjjc\LocalCache\Local\hanjul-pgtest\`. AI 쪽 프로세스(test:pg 포함)에는 `%LOCALAPPDATA%\hanjul-pgtest` 로 보이고 Harold 님 PowerShell 에는 보이지 않는다. **받는 꼴 ③ scp 의 받는 자리는 이 실제 폴더로 적는다**(1028 첫 scp 가 「No such file or directory」로 실패한 원인).
+  - ★1028 B-1028-4 처방: 같은 이유로 통과 스탬프도 앱 밖 pre-push 시험이 못 읽었다(push 막힘) → 자리 = `%USERPROFILE%\.hanjul-pgtest`(AppData 밖은 돌려지지 않아 앱 안 · 밖이 같은 파일 · `pg/dump.ts` `pgTestDir` · 시험 `pg-dump-loader.test.ts`). 위 꾸러미 폴더 이야기는 옛 자리의 기록이다. scp 받는 자리 = `$env:USERPROFILE\.hanjul-pgtest\`.
 - **받는 꼴 = 3명령**(회의론자 P7 · 「배포 시작하자」 때 하나씩 · 지금 서버 명령 안 줌 · 메모리 `feedback_hold_server_commands_until_deploy_go`): ① 서버 root 셸(docker DB 명령 = root · LESSONS_DEPLOY 1003)에서 `docker exec -i`(tty 없이)로 덤프를 **서버 파일**로 뜬다 ② 같은 셸에서 머리 SELECT 한 번(`SCHEMA_META_SQL` · §2-6 · 출력을 AI 가 `schema.meta.json` 에 옮긴다) ③ 노트북 PowerShell 에서 `scp` 한 줄로 받는다(출장 중이면 Tailscale 주소). 붙여넣기 · `ssh … >` 리다이렉트 금지(인코딩 · 잘림 · LESSONS_DEPLOY 0816).
 - **싣기 전 검사**(test:pg globalSetup · 하나라도 어기면 실패):
   1. 머리에 `Dumped from database version 15.15` 가 있다(판이 다르면 그릇 판도 바꿔야 한다는 문장으로 실패).
@@ -121,7 +122,7 @@ reporter 가 끝에 한 줄을 찍는다. 사람은 이 줄을 완료 보고 · 
 
 ### 2-9 스탬프 계약(D6)
 
-- test:pg 가 **전부 통과**했을 때만 `%LOCALAPPDATA%\hanjul-pgtest\last-pass.json` 에 `{ at, files: { <CT 경로>: sha256 } }` 를 쓴다. CT 경로 = 각 `*.pg.test.ts` 의 상대 import 중 `__tests__/` · `config/database` 밖의 것(기계 추출).
+- test:pg 가 **전부 통과**했을 때만 `%USERPROFILE%\.hanjul-pgtest\last-pass.json` 에 `{ at, files: { <CT 경로>: sha256 } }` 를 쓴다. CT 경로 = 각 `*.pg.test.ts` 의 상대 import 중 `__tests__/` · `config/database` 밖의 것(기계 추출).
 - 기본 시험 `pg-test-stamp.test.ts`(DB 없음 · pre-push 에서 돈다): 같은 규칙으로 CT 경로를 뽑아 지금 sha256 과 스탬프를 대조 → 스탬프가 없거나 하나라도 다르면 실패(「실 PG 시험 대상 CT 가 바뀌었다 · npm run test:pg 를 돌린 뒤 push」).
 - **`replaces:` 문법(Codex R1 #5 · #6)** = pg 시험 파일 머리 한 줄 · 값은 둘 중 하나:
   - `none` = 짝 없음 → 스탬프를 늘 요구.

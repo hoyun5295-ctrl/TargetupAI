@@ -7,8 +7,8 @@
 
 ## 머리
 
-- pulled_head: 0a4955fd · 2026-10-28 · 서버 git log -1 = 0a4955fd(HEAD -> main, origin/main)
-- deployed_head: 0a4955fd · 2026-10-28 · 서버 git log 0a4955fd · dist 문자열(C71 superseded 2 · C70 SUPER_ADMIN_LONG_SESSION_LOGIN_IDS 2) · pm2 online uptime 105s · 계산의 빠진 단계 2 = 판정 예외(backend-install = package.json 변경이 scripts 한 줄 test:pg 뿐 · restart-env = 새 env 이름이 시험 파일 둘 + 기본값 있는 C70 하나이고 앱은 부팅 때 .env 를 읽어 reload 로 반영 · 계산 과대 판정은 추가 과제)
+- pulled_head: 00e093bf · 2026-10-28 · Harold pull 완료 보고(C73 · C74 · C75 · C76 한 커밋 · push = pre-push 실 PG 스탬프가 앱 가상 폴더에 있어 실제 위치로 복사 뒤 통과)
+- deployed_head: 00e093bf · 2026-10-28 · backend · frontend build:safe · pm2 reload 19:58(부팅 로그 19:58:06) · 키 두 개 뒤 reload --update-env(online · restarts 12) · 계산 스크립트 = 이번 범위 diff 가 커서 spawnSync ENOBUFS(추가 과제 · 손 기록)
 - 이번 창 확인 출력: backend-build · frontend-build · reload · uptime
 - 마지막 해시 대조: 2026-10-28 08:27 · 같음(운영 6c12ee8b = t_tpl_closed 6c12ee8b · 덤프 + §2 DDL-1 · DDL-3 · 그 전 07:43 덤프만 043ff07c 같음 · test:pg 1파일 15건 통과)
 - 덤프: 2026-10-27 21:55 서버 파일 · server_version 15.15 · datcollate en_US.utf8 · TimeZone Etc/UTC · 머리 SELECT 2026-10-28 07:42
@@ -20,10 +20,11 @@
 | C70 | db9f8c36 |
 | C71 | 0a4955fd |
 | C72 | 0a4955fd |
-| C73 | 미커밋 |
-| C74 | 미커밋 |
-| C75 | 미커밋 |
-| C76 | 미커밋 |
+| C73 | 00e093bf |
+| C74 | 00e093bf |
+| C75 | 00e093bf |
+| C76 | 00e093bf |
+| C77 | 미커밋 |
 
 ## §1 대기
 
@@ -53,7 +54,7 @@
 - 카드: C72
 - 단계: 사전
 - 선행: 첫 판 준비 여부에 따라 C71 코드 앞(준비됨) 또는 그 창 끝(준비 전) · 설계서 §4
-- 기대: ① 서버 root 셸 docker exec -i 덤프 → 서버 파일 ② 같은 셸 SCHEMA_META_SQL 한 번 ③ 노트북 scp → %LOCALAPPDATA%\hanjul-pgtest\schema.sql
+- 기대: ① 서버 root 셸 docker exec -i 덤프 → 서버 파일 ② 같은 셸 SCHEMA_META_SQL 한 번 ③ 노트북 scp → %USERPROFILE%\.hanjul-pgtest\schema.sql(★1028 B-1028-4 · 옛 %LOCALAPPDATA% 자리는 앱 가상화로 두 벌)
 - 백업: 해당 없음(읽기)
 - 확인: 머리 SELECT 출력 → schema.meta.json · test:pg 시작 줄 「마지막 해시 대조 = 같음」
 - 결과: 1028 · ① 서버 파일 477,334바이트(15.15) · ② 해시 043ff07c(정규화 뒤) · ③ scp → 꾸러미 폴더(설계서 §2-5) · test:pg 첫 판 1파일 15건 통과 · 해시 대조 같음 · 남은 일 = 서버 ~/pgtest-schema.sql · ~/pgtest-fp-lines.txt 지우기
@@ -159,7 +160,7 @@ CREATE UNIQUE INDEX CONCURRENTLY uq_cdp_events_purchase_order ON cdp_events (com
 - 의미 바꿈: 예(없으면 플러그인 키 발급 503 · 플러그인 회원 토큰 0)
 - 기대: 32자 이상 · JWT_SECRET 과 다른 값(값 = Harold 생성 · 출력 0)
 - 확인: 길이만 출력 · restart --update-env 뒤 플러그인 키 발급 200
-- 결과:
+- 결과: 1028 Harold 실행 · 서버 openssl 64자 · .env 백업 .env.bak-1028 · reload --update-env(online · restarts 12) · 백업 = 비밀번호 관리자 메모(gpg 백업 파일은 백업 키 암호 불일치로 복호 시험 실패 · 서버 ~/backups/keys/cdp-keys-1028.env.gpg 는 남음) · 플러그인 키 발급 200 = 실측 대기
 
 ### C73-ENV-2 · CDP_SECRET_BOX_KEY(몰 연동 자격 암호화 키 · K8)
 - 카드: C73
@@ -168,37 +169,7 @@ CREATE UNIQUE INDEX CONCURRENTLY uq_cdp_events_purchase_order ON cdp_events (com
 - 의미 바꿈: 예(넣은 뒤 새로 쓰는 자격 = 암호문 · 그 뒤로는 secret-box 없는 판으로 코드를 되돌리지 않는다 · 키를 지우지 않는다)
 - 기대: 32바이트(hex 64자 또는 base64) · 같은 날 키 백업 · 복호 시험(백업 키 당일 복호 규칙)
 - 확인: 부팅 로그에 「CDP_SECRET_BOX_KEY 없음」 경고 0
-- 결과:
-
-### C73-DDL-2 · company_integrations.webhook_secret varchar(100) → text(K8)
-- 카드: C73
-- 단계: DDL
-- 선행: 코드 배포 · information_schema 확인(character_maximum_length = 100)
-- 의미 바꿈: 아니오(칸 넓힘 · 다시 쓰기 없음)
-- 백업: 정기 백업으로 갈음(칸 넓힘)
-- 확인: character_maximum_length 가 NULL · 정의 해시 다시 대조
-- 되돌리기: 남겨도 무해(넓힘)
-- 결과:
-
-```sql ddl:C73-DDL-2
-SET lock_timeout = '3s';
-ALTER TABLE company_integrations ALTER COLUMN webhook_secret TYPE text;
-```
-
-### C73-DDL-4 · cdp_identity_links.server_verified_at(서버 확인 연결 표시 · Codex R1 #5)
-- 카드: C73
-- 단계: DDL
-- 선행: 코드 배포(칸이 없으면 지금 동작 · 경고 1회) · information_schema 확인(그 칸 0행)
-- 의미 바꿈: 예(뒤로 몰 서버 비밀키 호출이 만든 sdk 연결이 브라우저 잇기의 근거가 된다 · 옛 연결은 다음 서버 호출 때 표시됨)
-- 백업: 정기 백업으로 갈음(기본값 없는 NULL 칸 · 표 다시 쓰기 없음)
-- 확인: information_schema 한 줄 · 정의 해시 다시 대조
-- 되돌리기: 남겨도 무해(칸 추가)
-- 결과:
-
-```sql ddl:C73-DDL-4
-SET lock_timeout = '3s';
-ALTER TABLE cdp_identity_links ADD COLUMN server_verified_at timestamptz NULL;
-```
+- 결과: 1028 Harold 실행 · 같은 명령으로 64자(hex) 넣음 · reload 뒤 부팅 경고 0(남은 경고 1줄 = 19:58:06 코드 배포 부팅 · 키 넣기 19:59 전) · 키 백업 = 비밀번호 관리자(Harold 저장 확인)
 
 ### C73-S8 · 자체호스팅 회사별 sdk 연결 수 · 브라우저 SDK identify 사용 여부(사후 실측 · Codex R4 #1)
 - 카드: C73
@@ -206,7 +177,7 @@ ALTER TABLE cdp_identity_links ADD COLUMN server_verified_at timestamptz NULL;
 - 선행: C73-DDL-4
 - 기대: 회사별 source = 'sdk' 연결 수 · server_verified_at 있는 수 · 그 회사가 브라우저 SDK 로 identify 를 부른 적이 있는가(고객사 확인). 브라우저 identify 를 쓴 적 없는 회사 = 그 회사의 sdk 연결 전부가 서버 비밀키 호출이 만든 것 → 그 회사만 server_verified_at 을 채우는 DML(회사 id 조건 · 고객사 확인 뒤 · SQL 원문은 그 창에서) · 쓴 적 있는 회사 = 채우지 않음(옛 브라우저 연결은 근거가 아니다 · 새로 만드는 연결부터 확인)
 - 확인: 결과 표
-- 결과:
+- 결과: 1028 20:1x Harold 실행 · sdk 연결 = 테스트계정 한 곳 2,077 · verified 0(배포 직후 정상) · 고객사 0곳 → 채우는 DML 없음
 
 ### C73-DML-2 · 몰 연동 자격 다시 쓰기(암호문 · K8)
 - 카드: C73
@@ -216,7 +187,7 @@ ALTER TABLE cdp_identity_links ADD COLUMN server_verified_at timestamptz NULL;
 - 기대: packages/backend 에서 npx ts-node scripts/seal-integration-secrets.ts · 실패 0 · 건너뜀 0(건너뜀이 있으면 다시)
 - 백업: 그 표 pg_dump -t company_integrations
 - 확인: 출력 한 줄(행 · 바꿈 · 건너뜀 · 실패) · 다시 돌리면 바꿈 0
-- 결과:
+- 결과: 1028 20:06 Harold 실행 · 백업 ~/backups/dml/company_integrations-1028-before-seal.sql.gz(600 · 4,574바이트) · 1차 행 11 · 바꿈 11 · 건너뜀 0 · 실패 0 → 2차 바꿈 0 · 이 뒤 코드 되돌림 = --reverse 먼저(되돌림 최저판)
 
 ### C74-Q-D3 · 직접 발송 상태 값 분포(사전 실측 · K8 사람이 보낸 발송)
 - 카드: C74
@@ -242,7 +213,7 @@ ALTER TABLE cdp_identity_links ADD COLUMN server_verified_at timestamptz NULL;
 - 기대: packages/backend 에서 npx ts-node scripts/purge-rendered-training-rows.ts --before=<배포 시각 ISO> = 건수 출력(읽기만) → Harold 확인 → 같은 명령 + --apply --expect=<그 건수>
 - 백업: 스크립트 jsonl(지울 행 전부) · 다시 센 수 ≠ expect 면 중단 · 지운 수 ≠ 센 수면 롤백
 - 확인: 출력 「N건 지움 · 백업 = 파일」 · 다시 점검하면 0건
-- 결과:
+- 결과: 1028 20:12 Harold 실행 · 기준 = 코드 배포 부팅 19:58:06 KST · 점검 = 출처 캠페인 139 · 97건(LMS 16 · KAKAO 81) → --apply --expect=97 = 97건 지움 · 백업 ~/purge-rendered-training-2026-10-28T11-12-36-686Z.jsonl · 스크립트가 끝에 MySQL 연결을 안 닫아 종료하지 않음(Ctrl+C · 결과 무관 · 다음 배포에 process.exit 추가 = 추가 과제)
 
 ### C76-G1 · 싱크에이전트 1.7.3 을 서버에 올리지 않는다(엠티 개별 전달 · 다른 회사 영향 0)
 - 카드: C76
@@ -251,6 +222,14 @@ ALTER TABLE cdp_identity_links ADD COLUMN server_verified_at timestamptz NULL;
 - 기대: `npm run upload:releases` · 슈퍼관리자 릴리즈 등록 · `npm run upload:agents`(`build:tiers:deploy`) 셋 다 하지 않는다 · `CURRENT_AGENT_VERSION` 1.7.2 그대로 · 엠티 zip = VM 재검증(Harold 승인) 뒤 개별 전달
 - 확인: 배포 창 SQL `SELECT version, tier, is_active FROM sync_releases WHERE is_active ORDER BY released_at DESC LIMIT 5;` 에 1.7.3 없음
 - 결과:
+
+### C77-ENV-1 · INTERNAL_TEST_COMPANY_IDS(사내 시험 회사 운영 경보 제외 · B-1028-3)
+- 카드: C77
+- 단계: ENV
+- 선행: 코드 배포
+- 의미 바꿈: 예(목록의 회사 일 = 운영 경보 문자 0 · 로그 「사내 회사 경보 생략」 한 줄만 · 비어 있으면 시연 회사만 = 지금 동작)
+- 기대: 쉼표로 이은 회사 uuid · 테스트계정 a0990249-3550-4baa-92ca-32e45b185e83 (그 밖 사내 회사 = Harold 확인 뒤 더함) · 비밀값 아님
+- 확인: restart --update-env 뒤 프로세스 env 에 그 이름이 있는가(값 길이만) · 다음 테스트계정 경보가 문자 대신 로그 한 줄로 남는가
 
 ## §2 덤프 뒤 적용분
 
@@ -266,5 +245,19 @@ ALTER TABLE customer_stores ADD COLUMN consent_source_at timestamptz NULL;
 ```sql ddl:C71-DDL-3
 SET lock_timeout = '3s';
 ALTER TABLE customers ADD COLUMN consent_source_at timestamptz NULL;
+```
+
+> C73-DDL-2 · 1028 Harold 실행 · company_integrations.webhook_secret = text(before 100 → 길이 NULL) · 되돌리기 = 남겨도 무해(넓힘) · 정의 해시 대조 = 다음 대조 때
+
+```sql ddl:C73-DDL-2
+SET lock_timeout = '3s';
+ALTER TABLE company_integrations ALTER COLUMN webhook_secret TYPE text;
+```
+
+> C73-DDL-4 · 1028 Harold 실행 · cdp_identity_links.server_verified_at 있음(timestamp with time zone · NULL 허용 · before 0행) · 되돌리기 = 남겨도 무해(칸 추가) · 정의 해시 대조 = 다음 대조 때
+
+```sql ddl:C73-DDL-4
+SET lock_timeout = '3s';
+ALTER TABLE cdp_identity_links ADD COLUMN server_verified_at timestamptz NULL;
 ```
 

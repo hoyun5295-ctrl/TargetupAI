@@ -25,6 +25,7 @@ import { getAuthSmsTable, bulkInsertSmsQueue } from './sms-queue';
 import { sanitizeSmsText } from './auto-notify-message';
 import { query } from '../config/database';
 import { isAlertOnCooldown } from './system-alert-cooldown';
+import { isInternalCompany } from './internal-company';
 
 const DEFAULT_COOLDOWN_MS = 6 * 60 * 60 * 1000; // 6시간
 
@@ -97,6 +98,12 @@ export function parseAlertPhones(rawValue: string | null | undefined): string[] 
 export interface SystemAlertParams {
   /** 중복 발송 차단 키 (예: 'queue-delay:<campaignId>', 'agent-down:<agentId>') */
   dedupKey: string;
+  /**
+   * ★ 2026-10-28 B-1028-3 — 이 경보가 어느 회사의 일인가(필수 · 회사와 무관한 경보 = null).
+   *   사내 회사(시연 · 사내 시험 · `isInternalCompany`)의 일이면 보내지 않고 로그만 남긴다. 보안 감시 경보는 늘 null(거르지 않는다).
+   *   필수 칸이라 새 경보마다 회사 여부를 정해야 컴파일된다(호출부 판정이 빠지지 않게).
+   */
+  companyId: string | null;
   /** 본문 — 짧은 사실 요약. CT가 머리말/맺음말을 붙인다. `title`을 쓰면 생략한다. */
   message?: string;
   /**
@@ -159,6 +166,11 @@ export function buildSystemAlertBody(p: SystemAlertParams): string {
  */
 export async function sendSystemAlert(params: SystemAlertParams): Promise<number> {
   try {
+    // ★ 2026-10-28 B-1028-3 — 사내 회사의 일 = 운영 경보 문자 0 · 거른 사실은 로그(꺼짐도 기록)
+    if (params.companyId && await isInternalCompany(params.companyId)) {
+      log(`사내 회사 경보 생략 — ${params.dedupKey}: ${buildSystemAlertBody(params).slice(0, 80)}`);
+      return 0;
+    }
     const phones = params.phones ? parseAlertPhones(params.phones.join(',')) : getSystemAlertPhones();
     // ★ 2026-10-25 운영 경보 두 길(뿌리 대장 R14 · 원장 Z8) — 받는 사람을 따로 정하지 않은 경보는 공용 입구(문자 + 메일)를 먼저 탄다.
     //   옛: 인증 문자 한 길뿐이라 경보 대상(발송 장애 · MySQL)이 바로 그 길을 끊으면 한 통도 안 닿았다.

@@ -87,6 +87,7 @@ async function warnUnresolvedLedger(companyId: string, referenceId: string, mess
   const msg = `[선불정산중단] ${where}: 차감 원장 설명을 되읽지 못해 정산을 멈췄다. company=${companyId} ref=${referenceId} ${messageType}`;
   console.error(msg);
   await sendSystemAlert({
+    companyId: companyId,
     dedupKey: `prepaid-ledger-unresolved:${referenceId}:${messageType}`,
     message: `선불 정산 중단 — 차감 원장 설명을 되읽지 못했습니다(환불/회수 보류). company=${companyId} ref=${referenceId} ${messageType}`,
   }).catch(() => { /* 경보 실패가 정산을 막지는 않는다 */ });

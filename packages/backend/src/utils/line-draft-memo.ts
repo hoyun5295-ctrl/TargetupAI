@@ -48,6 +48,7 @@ export function forgetLineDraft(idempotencyKey: string): void {
 export async function deleteLineDraftWithRetry(
   del: () => Promise<unknown>,
   label: string,
+  companyId: string,   // ★ 2026-10-28 B-1028-3 Codex R2 — 운영 경보의 회사(사내 회사 판정)
   opts: { attempts?: number; sleep?: (ms: number) => Promise<void> } = {},
 ): Promise<boolean> {
   const attempts = Math.max(1, opts.attempts ?? 3);
@@ -59,7 +60,7 @@ export async function deleteLineDraftWithRetry(
     } catch (err: any) {
       if (i < attempts) { await sleep(i * 200); continue; }
       // ★ 2026-10-25 원장 Z1 — 미과금 초안 회수 실패 = 사람에게 닿는다(로그 + 운영 경보 · 공용 함수)
-      reportCreditMiss({ companyId: null, source: 'line-draft', cost: 0, key: label, reason: String(err?.message || 'unknown'), tag: 'ORPHAN' });
+      reportCreditMiss({ companyId, source: 'line-draft', cost: 0, key: label, reason: String(err?.message || 'unknown'), tag: 'ORPHAN' });
     }
   }
   return false;

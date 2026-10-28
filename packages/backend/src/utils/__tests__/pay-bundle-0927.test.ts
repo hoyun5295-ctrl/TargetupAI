@@ -276,7 +276,7 @@ describe('배선', () => {
     expect(iReread).toBeLessThan(iCancel);
     expect(c).toMatch(/after\.status === 'completed'\) \{[\s\S]*?renderResultHtml\('success'[\s\S]*?return;/);
     expect(c).toMatch(/if \(!after\) \{[\s\S]*?sendSystemAlert\([\s\S]*?return;/);
-    expect(c).toContain("await netCancelInicisPayment(callback.netCancelUrl || '', callback)");
+    expect(c).toContain("await netCancelInicisPayment(callback.netCancelUrl || '', callback, state?.companyId ?? null)");
   });
 
   it('금액 CT를 쓴다 — 카드 준비·무통장 요청(정수 1,000~1억) · 관리자 조정(소수 둘째 자리)', () => {

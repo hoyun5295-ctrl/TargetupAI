@@ -488,6 +488,7 @@ export async function enqueueSpamTest(params: SpamTestEnqueueParams): Promise<Sp
  * 환불이 끝나지 않으면 경보만 남기고 던지지 않는다 — 폴링을 막지 않는다(사람이 경보로 본다).
  */
 export async function refundSpamSendFailures(testId: string): Promise<void> {
+  let alertCompanyId: string | null = null;   // 경보의 회사(검사 한 건 = 회사 하나 · 조회 전 실패 = 모름 = null)
   try {
     const r = await query(
       `SELECT t.company_id, r.message_type, COUNT(*) FILTER (WHERE ${spamFailedResultSql('r')})::int AS failed
@@ -500,12 +501,14 @@ export async function refundSpamSendFailures(testId: string): Promise<void> {
     for (const row of r.rows) {
       const failed = Number(row.failed || 0);
       if (failed <= 0) continue;
+      alertCompanyId = String(row.company_id);
       const res = await prepaidRefund(String(row.company_id), failed, String(row.message_type), testId, '스팸 검사 발송 실패 환불', 'spam', { refundKey: REFUND_KEYS.FAIL });
       if (!res.ok) throw new Error(`환불 미완(${row.message_type} ${failed}건)`);
     }
   } catch (e: any) {
     console.error(`[SpamTest] 발송 실패 환불 미완 testId=${testId}:`, e?.message || e);
     void sendSystemAlert({
+      companyId: alertCompanyId,
       dedupKey: `spam-fail-refund-miss:${testId}`,
       message: `스팸 검사 발송 실패 환불 미완 — test=${testId} 수동 확인 필요`,
     }).catch(() => undefined);
@@ -831,7 +834,7 @@ async function executeSpamTest(testId: string, isAuto: boolean, companyId: strin
         }
       } catch (refundErr: any) {
         console.error(`[SpamTestQueue] 발송 실패 환불 미완 testId=${testId}:`, refundErr?.message || refundErr);
-        void sendSystemAlert({ dedupKey: `spam-refund-miss:${testId}`, message: `스팸 검사(큐) 발송 실패 환불 미완 — test=${testId} 수동 확인 필요` }).catch(() => undefined);
+        void sendSystemAlert({ companyId: refundCompanyId, dedupKey: `spam-refund-miss:${testId}`, message: `스팸 검사(큐) 발송 실패 환불 미완 — test=${testId} 수동 확인 필요` }).catch(() => undefined);
       }
     }
     // 실패 시 completed 처리

@@ -317,6 +317,7 @@ export async function runJourneyExecutor(): Promise<{ processed: number; sent: n
           if (up.rows[0]?.status === 'failed') {
             console.error(`[JourneyExecutor] execution=${row.execution_id} 처리 실패 ${EXECUTION_ERROR_MAX}회 → 실패로 닫음`);
             void sendSystemAlert({
+              companyId: row.company_id,
               dedupKey: `journey-exec-failed:${row.journey_id}`,
               message: `여정 실행이 ${EXECUTION_ERROR_MAX}번 연속 처리 오류로 실패 처리됐습니다(더 보내지 않음). journey=${row.journey_id} execution=${row.execution_id} 마지막 오류: ${reason.slice(0, 200)}`,
             }).catch(() => undefined);
@@ -383,6 +384,7 @@ async function resolveOrphanJourneyClaims(): Promise<void> {
       } else if (resolved.result === 'closed') {
         console.error(`[JourneyExecutor][적재미증명종료] 활성 아닌 실행 execution=${row.execution_id} 표식=${row.claim_id} — 다시 보내지 않고 닫음`);
         void sendSystemAlert({
+          companyId: row.company_id,
           dedupKey: `journey-claim-unprovable:${row.claim_id}`,
           message: `여정 발송 1건의 적재 여부를 증명하지 못해 닫았습니다(정지·종료된 실행). execution=${row.execution_id} 표식=${row.claim_id} (그 1건 요금은 정산이 환불)`,
         }).catch(() => undefined);
@@ -722,6 +724,7 @@ async function processExecution(exec: ExecutionRow): Promise<StepOutcome> {
     if (!gate.rows[0]?.pending) {
       console.warn(`[JourneyExecutor][PRETEST-LATE] execution=${exec.execution_id} step=${step.step_order} 수정 문안이 ${PRETEST_PENDING_MAX_HOURS}시간 넘게 재검사 전 — 보내지 않고 기다린다(스캐너 · 검사 큐 확인)`);
       await sendSystemAlert({
+        companyId: exec.company_id,
         dedupKey: `journey-pretest-late:${exec.journey_id}`,
         title: `여정의 고친 문안을 ${PRETEST_PENDING_MAX_HOURS}시간 넘게 검사하지 못해 발송을 기다리고 있습니다.`,
         details: ['확인할 곳: 발송 전 재검사 스캐너 로그 · 스팸 검사 대기열'],
@@ -1295,6 +1298,7 @@ async function processExecution(exec: ExecutionRow): Promise<StepOutcome> {
         } catch (resolveErr: any) {
           console.error(`[JourneyExecutor][표식미판정] execution=${exec.execution_id} step=${step.step_order}:`, resolveErr?.message || resolveErr);
           void sendSystemAlert({
+            companyId: exec.company_id,
             dedupKey: `journey-claim-unresolved:${claimLogId}`,
             message: `여정 발송 적재 여부 미판정 — execution=${exec.execution_id} 표식=${claimLogId} 수동 확인 필요(큐 원행이 있으면 발송 수가 빠진 상태)`,
           }).catch(() => undefined);
@@ -1409,6 +1413,7 @@ function computeNextSendWindow(now: Date = new Date()): Date {
 function alertUnprovableClaim(exec: ExecutionRow, step: StepRow, claimId: string): void {
   console.error(`[JourneyExecutor][적재미증명종료] execution=${exec.execution_id} step=${step.step_order} 표식=${claimId} — 다시 보내지 않고 닫음`);
   void sendSystemAlert({
+    companyId: exec.company_id,
     dedupKey: `journey-claim-unprovable:${claimId}`,
     message: `여정 발송 1건의 적재 여부를 증명하지 못해 다시 보내지 않고 닫았습니다. execution=${exec.execution_id} ${step.step_order + 1}단계 표식=${claimId} (그 1건 요금은 정산이 환불)`,
   }).catch(() => undefined);

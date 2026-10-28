@@ -137,6 +137,7 @@ export async function runPayIngestMonitorOnce(nowMs: number = Date.now()): Promi
     // 조회 실패 자체가 신호다 — 방화벽 오설정으로 우리 서버조차 못 붙는 경우가 여기 걸린다.
     log('스냅샷 조회 실패:', err?.message || err);
     await sendSystemAlert({
+      companyId: null,
       dedupKey: 'pay-db:unreachable',
       message: `통계DB(pay-ingest-db) 조회 실패 — 방화벽/네트워크 확인 필요. (${err?.message || err})`,
     }).catch(() => {});
@@ -155,6 +156,7 @@ export async function runPayIngestMonitorOnce(nowMs: number = Date.now()): Promi
     const { delta } = verdict.abortedSpike;
     log(`인증 실패 급증 delta=${delta} (누적 ${snap.abortedConnects})`);
     await sendSystemAlert({
+      companyId: null,
       dedupKey: 'pay-db:aborted-spike',
       message: `통계DB 인증 실패 급증 — 10분간 ${delta}건(누적 ${snap.abortedConnects}). 23388 포트 외부 노출 상태이므로 스캔 가능성. 방화벽 출처 제한 확인 필요.`,
       cooldownMs: 60 * 60 * 1000,
@@ -165,6 +167,7 @@ export async function runPayIngestMonitorOnce(nowMs: number = Date.now()): Promi
     const { stalledMin, todayRows } = verdict.ingestStall;
     log(`적재 정체 ${stalledMin}분 (오늘 ${todayRows}행)`);
     await sendSystemAlert({
+      companyId: null,
       dedupKey: 'pay-db:ingest-stall',
       message: `통계DB 적재 정체 — ${stalledMin}분간 신규 행 0 (오늘 ${todayRows}행, 최근일자 ${snap.latestDestDt || '없음'}). 게이트웨이 push 중단 또는 방화벽 차단 확인 필요.`,
       cooldownMs: 3 * 60 * 60 * 1000,

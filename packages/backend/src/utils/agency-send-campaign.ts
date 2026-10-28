@@ -130,6 +130,7 @@ export async function neutralizeCampaign(
       // ⛔ UUID를 싣지 않는다 — 받는 사람이 그 값으로 할 수 있는 일이 없고 본문만 채운다.
       //   찾는 자리는 슈퍼관리자 화면이고, 문자는 무슨 일이 있었고 무엇을 보면 되는지만 전한다.
       await sendSystemAlert({
+        companyId: companyId,
         dedupKey: `agency-orphan:${campaignId}`,
         title: '대행발송 예약을 되돌리지 못했습니다.',
         details: [`사유: ${why}`, `오류: ${error || '미상'}`],

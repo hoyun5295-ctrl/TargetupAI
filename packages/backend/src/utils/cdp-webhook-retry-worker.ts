@@ -17,6 +17,7 @@ import { LOG_RETENTION_DAYS } from '../config/defaults';
 import { claimDeliveries, processClaimedDelivery, WEBHOOK_MAX_RETRY } from './cdp-webhook-delivery';
 // ★ 2026-10-04 재처리 소진 알림(전수점검 W1)
 import { sendSystemAlert } from './system-alert';
+import { soleCompanyId } from './internal-company';
 
 const RETRY_INTERVAL_MS = 5 * 60 * 1000;   // 5분
 const BATCH_LIMIT = 50;
@@ -48,14 +49,16 @@ export async function runCdpWebhookRetryPass(nowMs: () => number = Date.now): Pr
   //   ★ 1027 K2-6 — 생성 시각이 아니라 **소진으로 바뀐 시각**(마지막 시도 processed_at)으로 센다(나이 제한을 지운 뒤 다시 집힌 옛 행의 소진도 잡힘).
   try {
     const exhausted = await query(
-      `SELECT COUNT(*)::int AS n FROM cdp_webhook_deliveries
+      `SELECT company_id, COUNT(*)::int AS n FROM cdp_webhook_deliveries
         WHERE status = 'failed' AND retry_count >= $1 AND webhook_event != 'oauth_state'
-          AND processed_at > NOW() - INTERVAL '1 day'`,
+          AND processed_at > NOW() - INTERVAL '1 day'
+        GROUP BY company_id`,
       [WEBHOOK_MAX_RETRY]
     );
-    const n = Number(exhausted.rows[0]?.n || 0);
+    const n = exhausted.rows.reduce((s: number, r: any) => s + Number(r.n || 0), 0);
     if (n > 0) {
       await sendSystemAlert({
+        companyId: soleCompanyId(exhausted.rows.map((r: any) => r.company_id)),
         dedupKey: 'cdp-webhook-exhausted',
         cooldownMs: 12 * 60 * 60 * 1000,
         title: '자사몰 웹훅이 재처리를 다 쓰고도 실패했습니다.',
@@ -77,6 +80,7 @@ export async function runCdpWebhookRetryPass(nowMs: () => number = Date.now): Pr
     const n = Number(backlog.rows[0]?.n || 0);
     if (n > 0) {
       await sendSystemAlert({
+        companyId: null,
         dedupKey: 'cdp-webhook-backlog',
         cooldownMs: 6 * 60 * 60 * 1000,
         title: '자사몰 웹훅이 30분 넘게 처리되지 않고 쌓여 있습니다.',

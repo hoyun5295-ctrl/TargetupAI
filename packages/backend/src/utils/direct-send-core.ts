@@ -325,6 +325,7 @@ export async function createDirectSendCampaign(
         } catch (neutralizeErr: any) {
           console.error(`[direct-send-core][CRITICAL] campaign=${campaignId} 중화·의무 기록 실패 — ${revertFailedTypes[0]} ${spec.total}건 수동 환불 필요:`, neutralizeErr?.message || neutralizeErr);
           void sendSystemAlert({
+            companyId: ctx.companyId,
             dedupKey: `direct-deduct-orphan:${campaignId}`,
             message: `직접발송 차감 보상 미완 — campaign=${campaignId} ${revertFailedTypes[0]} ${spec.total}건 수동 환불 확인 필요(캠페인은 preparing으로 발송 차단됨)`,
           });
@@ -381,6 +382,7 @@ export async function createDirectSendCampaign(
       } catch (neutralizeErr: any) {
         console.error(`[direct-send-core][CRITICAL] campaign=${campaignId} 활성화 실패 중화 미완:`, neutralizeErr?.message || neutralizeErr);
         void sendSystemAlert({
+          companyId: ctx.companyId,
           dedupKey: `direct-deduct-orphan:${campaignId}`,
           message: `직접발송 활성화 실패 + 중화 미완 — campaign=${campaignId} ${deductedTypes.join('/')} ${spec.total}건 수동 확인 필요(preparing 발송 차단 상태)`,
         });
@@ -389,6 +391,7 @@ export async function createDirectSendCampaign(
     } else {
       // 미확정(재확인 실패·행 없음 등) — 자동 환불을 기록하면 실제 발송과 겹칠 수 있다. 사람이 판정한다.
       void sendSystemAlert({
+        companyId: ctx.companyId,
         dedupKey: `direct-deduct-orphan:${campaignId}`,
         message: `직접발송 활성화 결과 미확정 — campaign=${campaignId} ${deductedTypes.join('/')} ${spec.total}건, 발송·차감 상태 수동 확인 필요`,
       });

@@ -4633,6 +4633,7 @@ router.post('/agent-charges/:requestId/resolve', authenticate, requireSuperAdmin
         // 해소 자체는 이미 확정됐다 — 실패를 삼키지 않고 경보로 남긴다(주문이 processing에 갇힌다)
         console.error('[agent-charges] 주문 되돌리기 실패(수동 확인 필요):', backErr);
         sendSystemAlert({
+          companyId: null,
           dedupKey: `agent-charge-order-stuck:${requestId}`,
           title: '미반영으로 해소한 충전 요청이 처리 중 상태로 남았습니다.',
           details: ['충전은 실행되지 않았습니다.'],

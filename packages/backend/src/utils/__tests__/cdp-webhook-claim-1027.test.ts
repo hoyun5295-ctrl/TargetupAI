@@ -129,11 +129,20 @@ describe('재처리 워커 — 나이로 버리지 않는다 · 한 회차 한 �
     seed({ status: 'failed', retry: 0, createdAgo: '1 hour', processedAgo: '2 minutes' });
     expect(await claimDeliveries({ limit: 10 })).toEqual([]);
   });
-  it('옛 행(생성 30일 전)의 소진이 소진 경보에 잡힌다(기준 = 마지막 시도 시각)', async () => {
+  it('옛 행(생성 30일 전)의 소진이 소진 경보에 잡힌다(기준 = 마지막 시도 시각) · 소진 행이 한 회사뿐 = 그 회사를 싣는다(사내 회사면 입구가 거른다 · B-1028-3)', async () => {
     processWebhookEvent.mockImplementation(async () => { throw new Error('boom'); });
     seed({ status: 'failed', retry: 2, createdAgo: '30 days', processedAgo: '6 minutes' });
     await runCdpWebhookRetryPass();
-    expect(sendSystemAlert).toHaveBeenCalledWith(expect.objectContaining({ dedupKey: 'cdp-webhook-exhausted' }));
+    expect(sendSystemAlert).toHaveBeenCalledWith(expect.objectContaining({ dedupKey: 'cdp-webhook-exhausted', companyId: CO }));
+  });
+  it('소진 행이 두 회사 = 회사 null(고객사 일이 섞인 경보는 거르지 않는다) · 건수 = 합', async () => {
+    processWebhookEvent.mockImplementation(async () => { throw new Error('boom'); });
+    seed({ status: 'failed', retry: 2, createdAgo: '1 hour', processedAgo: '6 minutes' });
+    holder.db.public.none(`
+      INSERT INTO cdp_webhook_deliveries (id, company_id, source, webhook_event, idempotency_key, status, retry_count, processed_at, created_at)
+      VALUES ('${randomUUID()}', '00000000-0000-0000-0000-0000000000c2', 'cafe24', 'order.created', 'k-other', 'failed', 3, NOW() - INTERVAL '1 hour', NOW() - INTERVAL '2 hours')`);
+    await runCdpWebhookRetryPass();
+    expect(sendSystemAlert).toHaveBeenCalledWith(expect.objectContaining({ dedupKey: 'cdp-webhook-exhausted', companyId: null, details: ['최근 하루: 2건'] }));
   });
   it('30분 넘은 received 가 있으면 적체 경보', async () => {
     seed({ createdAgo: '40 minutes', processedAgo: '1 minute' });   // 줄이 잡고 아직 처리 중(워커 대상 아님)

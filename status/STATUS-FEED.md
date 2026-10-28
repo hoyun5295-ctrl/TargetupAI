@@ -214,6 +214,13 @@
 > W1 한줄전단 API(별개 저장소 hanjulDM · 원장 = hanjulDM status/STATUS.md 1027 절) = 첫 경보로 찾음 → 같은 날 닫음. 의존성 = 운영 audit 치명 1 · 높음 19 → 0(puppeteer 25 · xlsx 공식 0.20.3 · zod 제거 · allowScripts = puppeteer@25.16.0 만) · W3 렌더 크롬 = 기동 한 곳 `utils/flyer/product/render-browser.ts` · --no-sandbox 0 · 같은 /opt/hanjul-chrome · 못 뜨면 실패 · W2 로그인 요청 제한 = 비밀번호 · OTP · 등록 토큰 확인 5곳 `middlewares/login-limiter.ts`(같은 IP 처리 중 + 1분 안 실패 > 10 = 429 · 들어올 때 세고 성공하면 뺌 · Codex 1R 「동시 정상 11건째 429」는 끝난 실패만 세면 몰아 보내는 추측이 한도 없이 통과해 불수용 · 두 동작 시험 고정) · 함께 닫음 = xlsx 0.20.3 이 날짜 칸을 서버 시각대 자정으로 줘 고객 업로드 생일이 KST 에서 하루 앞 → CT `sheetDateToYmd`. 검증 = tsc 0 · vitest 375 · 변이 5 · Codex 적대 2R approve(1R 은 요청문이 파일 읽기까지 막아 4개만 읽음 = 재발 기록). 실측(09:10) = audit 운영 0 · build:safe · 새 dist 크롬 = /opt 156 · 샌드박스 끄는 인자 0 · PDF · PNG 생성 · restart 뒤 online · Node 24.22.1 · health 200 · nginx 경유 없는 아이디 11번 = 401 10 → 429(도메인 DNS = .62 직결 · CDN 없음) · 에러 로그 새 줄 0.
 > 남은 것 = 3 밤 창 apt 99 + 커널 재부팅 · 4 SSH 키 전용(두 번째 문 실측 먼저) · 5 패널 2단계(Harold) · 6 떠돌이 파일 · 8 이상 행위 경보(기준값 실데이터) · 9 백업 복구 훈련 · A4 HMAC(IMC 업체 키 발급 요청) · A1 · A5 · 미실측 = 재시작 뒤 정상 080 콜백 등록 줄 · 한줄전단 실제 전단 PDF · OG 경로 첫 요청 · 범위 밖 기록 = 한줄전단 고객 화면 파일 업로드 응답 계약 불일치(success · fileId) · pdfkit 미사용 선언 · 한줄로 프론트 react-router 7(닿지 않는 2건) · pos-agent 의존성(별도 배포본)
 
+<a id="c77"></a>
+
+### C77 · ★1028 사내 회사 운영 경보 제외(B-1028-3) · 실 PG 시험 자리 · 배포 도구(B-1028-4) — Codex 적대 3R approve · 배포 대기
+> 호출어 **"사내 회사 경보 / 테스트계정 경보 / 실 PG 스탬프 자리 / B-1028-3 / B-1028-4"** → 원문 = [BUGS](BUGS.md) B-1028-3 · B-1028-4 · 뿌리 = [뿌리 대장](../docs/ROOT-LEDGER.md) R25 · R26 · 원장 C77
+> 한 것 = 사내 회사 판정 CT(`internal-company.ts`) · 경보 입구 한 곳에서 거름 · 경보 82곳이 회사를 싣는다 · null 자리 이유 목록 두 겹(리터럴 · 래퍼) · 실 PG 시험 자리 사용자 폴더 · 배포 계산 버퍼 · DB 스크립트 종료 · DDL 전 꼴 pg 시험 3건 정비
+> 검증 = backend tsc 0 · vitest 719파일 10,558건 · 실 PG 13파일 65건(새 자리 스탬프) · 변이 11 · 컬럼 = 닫힌 시험 템플릿 information_schema · Codex 1R 3 → 2R approve(비차단 1 수용 = 래퍼로 넘긴 null 실제 1곳) → 3R approve(비차단 = 지역 변수 · 구조 분해 별칭은 계약이 안 따라감 · 1028 전수 36곳 실제 null 유입 0 = DB 행 · 인증 · string 매개변수). 남은 것 = 커밋 · 배포 · C77-ENV-1(Harold) · 실측(테스트계정 경보 = 로그만 · 다음 tp-push 스탬프)
+
 <a id="c76"></a>
 
 ### C76 · ★1028 싱크에이전트 설치 값 확인(P2) · 고객 누계 보호(P3) · 1.7.3 — 설계 1R · 구현 Codex 적대 4R approve · 배포 대기

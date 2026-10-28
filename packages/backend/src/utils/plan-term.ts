@@ -306,9 +306,9 @@ async function changePlan(
   });
 }
 
-async function alertOnce(key: string, message: string): Promise<void> {
+async function alertOnce(companyId: string, key: string, message: string): Promise<void> {
   console.warn(`[plan-term] ${message}`);
-  await sendSystemAlert({ dedupKey: `plan-term:${key}`, message: `선불 이용 기간: ${message}` })
+  await sendSystemAlert({ companyId, dedupKey: `plan-term:${key}`, message: `선불 이용 기간: ${message}` })
     .catch((e: any) => console.warn('[plan-term] 알림 실패', e?.message || e));
 }
 
@@ -393,7 +393,7 @@ async function align(client: PoolClient, s: TermState): Promise<void> {
   if (!p?.planId || p.planId === s.row.plan_id) return;
   const guard = lastPlanSetterPlanId(s.events);
   if (guard !== s.row.plan_id) {
-    await alertOnce(`align-mismatch:${s.row.id}`,
+    await alertOnce(s.row.id, `align-mismatch:${s.row.id}`,
       `${s.row.company_name}(${s.row.id.slice(0, 8)}) 요금제가 이용 기간 원장과 다릅니다(현재 ${s.row.plan_id} / 원장 ${p.planId}). 손대지 않았습니다.`);
     return;
   }
@@ -409,12 +409,12 @@ async function settle(client: PoolClient, s: TermState): Promise<void> {
   const { row } = s;
   if (!isManaged(s) || isBlocked(s) || !(row.expires_on! < s.today)) return;
   if (row.billing_type !== 'prepaid' || row.status === 'terminated') {
-    await alertOnce(`settle-skip:${row.id}`, `${row.company_name}(${row.id.slice(0, 8)}) 만료 정산을 건너뜀: 결제방식 ${row.billing_type} · 상태 ${row.status}`);
+    await alertOnce(row.id, `settle-skip:${row.id}`, `${row.company_name}(${row.id.slice(0, 8)}) 만료 정산을 건너뜀: 결제방식 ${row.billing_type} · 상태 ${row.status}`);
     return;
   }
   const nextPlan = await getPlan(client, nextPurchasePlanId(s));
   if (!nextPlan) {
-    await alertOnce(`settle-noplan:${row.id}`, `${row.company_name}(${row.id.slice(0, 8)}) 다음 구매 요금제를 찾지 못해 정산을 멈췄습니다.`);
+    await alertOnce(row.id, `settle-noplan:${row.id}`, `${row.company_name}(${row.id.slice(0, 8)}) 다음 구매 요금제를 찾지 못해 정산을 멈췄습니다.`);
     return;
   }
   const action = decideSettle({
@@ -422,7 +422,7 @@ async function settle(client: PoolClient, s: TermState): Promise<void> {
     nextPlan: { code: nextPlan.plan_code, price: nextPlan.monthly_price },
   });
   if (action === 'alert') {
-    await alertOnce(`settle-zero:${row.id}`, `${row.company_name}(${row.id.slice(0, 8)}) 다음 구매 요금제가 0원(${nextPlan.plan_code})이라 정산하지 않았습니다.`);
+    await alertOnce(row.id, `settle-zero:${row.id}`, `${row.company_name}(${row.id.slice(0, 8)}) 다음 구매 요금제가 0원(${nextPlan.plan_code})이라 정산하지 않았습니다.`);
   } else if (action === 'expire_free') {
     await expireToFree(client, s);
   } else if (action === 'renew') {
@@ -1080,7 +1080,7 @@ async function runPlanTermPassOnce(today: string): Promise<PlanTermPassResult> {
       processed++;
     } catch (err: any) {
       failed.push(id);
-      await alertOnce(`worker-fail:${id}`, `회사 ${id.slice(0, 8)} 정산 실패: ${err?.message || err}`);
+      await alertOnce(id, `worker-fail:${id}`, `회사 ${id.slice(0, 8)} 정산 실패: ${err?.message || err}`);
     }
   }
   if (processed > 0) console.log(`[plan-term] 정산·정렬 ${processed}곳`);

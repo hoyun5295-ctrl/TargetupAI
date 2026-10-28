@@ -101,7 +101,7 @@ export async function runLineCookOrder<R>(input: LineOrderInput<R>, deps: LineOr
       if (prior && priorKey) {
         if (prior.state === 'paid') return { kind: 'reused', draftId: prior.draftId };
         const discard = input.adapter.discard;
-        if (!(await deps.deleteWithRetry(() => discard(prior.draftId), `${input.adapter.label}=${prior.draftId} company=${companyId}`))) {
+        if (!(await deps.deleteWithRetry(() => discard(prior.draftId), `${input.adapter.label}=${prior.draftId} company=${companyId}`, companyId))) {
           return refuse(503, 'LINE_DRAFT_PENDING', '잠시 후 다시 시도해 주세요.');
         }
         deps.draftMemo.forget(priorKey);
@@ -153,7 +153,7 @@ export async function runLineCookOrder<R>(input: LineOrderInput<R>, deps: LineOr
         const id = draftId;
         draftId = null;
         const discard = input.adapter.discard;
-        const removed = await deps.deleteWithRetry(() => discard(id), `${input.adapter.label}=${id} company=${companyId}`);
+        const removed = await deps.deleteWithRetry(() => discard(id), `${input.adapter.label}=${id} company=${companyId}`, companyId);
         if (!removed) deps.draftMemo.remember(idemKey, id, 'orphan');
       }
       if (thrown) throw thrown;

@@ -105,10 +105,10 @@ export async function sweepExpiredAnalysisPdfs(opts: { pdfDir?: string } = {}): 
   const head = (ids: string[]) => `${ids.slice(0, 5).join(', ')}${ids.length > 5 ? ' 외' : ''}`;
   if (outside.length > 0) {
     const ok = await query(`UPDATE full_analysis_jobs SET pdf_path = NULL, updated_at = NOW() WHERE id = ANY($1::uuid[])`, [outside]).then(() => true, () => false);
-    void sendSystemAlert({ dedupKey: 'retention-pdf-outside', message: `풀분석 PDF 보관 기한 지남 · 보관 폴더 밖 경로 ${outside.length}건(작업 ${head(outside)}) — ${ok ? '경로를 비워 줄에서 뺐습니다' : '경로 비우기 실패 · 내일 다시'}. 그 파일이 남아 있으면 직접 지워 주세요.` });
+    void sendSystemAlert({ companyId: null, dedupKey: 'retention-pdf-outside', message: `풀분석 PDF 보관 기한 지남 · 보관 폴더 밖 경로 ${outside.length}건(작업 ${head(outside)}) — ${ok ? '경로를 비워 줄에서 뺐습니다' : '경로 비우기 실패 · 내일 다시'}. 그 파일이 남아 있으면 직접 지워 주세요.` });
   }
   if (failed.length > 0) {
-    void sendSystemAlert({ dedupKey: 'retention-pdf-delete-fail', message: `풀분석 PDF 보관 기한 지남 · 삭제 실패 ${failed.length}건(작업 ${head(failed)}) — 내일 다시 시도합니다. 계속되면 보관 폴더 권한을 확인해 주세요.` });
+    void sendSystemAlert({ companyId: null, dedupKey: 'retention-pdf-delete-fail', message: `풀분석 PDF 보관 기한 지남 · 삭제 실패 ${failed.length}건(작업 ${head(failed)}) — 내일 다시 시도합니다. 계속되면 보관 폴더 권한을 확인해 주세요.` });
   }
   return cleared.length;
 }

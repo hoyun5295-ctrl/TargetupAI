@@ -2,7 +2,8 @@
  * 실 PG 시험층 덤프 검사(★ 2026-10-27 설계서 §2-5 · DB 없음)
  */
 import { describe, it, expect } from 'vitest';
-import { prepareDump, parseSchemaMeta } from './pg/dump';
+import { join } from 'node:path';
+import { prepareDump, parseSchemaMeta, pgTestDir } from './pg/dump';
 
 const dump = (body: string, version = '15.15 (Debian 15.15-1.pgdg120+1)', end = true): string =>
   `--\n-- PostgreSQL database dump\n--\n\n\\restrict AbCdEf123\n\n-- Dumped from database version ${version}\n-- Dumped by pg_dump version 15.15\n\nSET statement_timeout = 0;\n${body}\n${end ? '--\n-- PostgreSQL database dump complete\n--\n\n\\unrestrict AbCdEf123\n' : ''}`;
@@ -33,5 +34,9 @@ describe('덤프 싣기 전 검사', () => {
     expect(parseSchemaMeta(JSON.stringify(ok))).toEqual(ok);
     expect(() => parseSchemaMeta(JSON.stringify({ ...ok, fingerprint: '' }))).toThrow(/fingerprint/);
     expect(() => parseSchemaMeta(JSON.stringify({ ...ok, datcollate: undefined }))).toThrow(/datcollate/);
+  });
+  it('자리 = %USERPROFILE%\\.hanjul-pgtest(앱이 돌려 쓰는 AppData 아님 · 앱 안팎이 같은 스탬프 · B-1028-4) · USERPROFILE 없으면 실패', () => {
+    expect(pgTestDir({ USERPROFILE: 'C:\\Users\\u', LOCALAPPDATA: 'C:\\Users\\u\\AppData\\Local' })).toBe(join('C:\\Users\\u', '.hanjul-pgtest'));
+    expect(() => pgTestDir({ LOCALAPPDATA: 'C:\\L' })).toThrow(/USERPROFILE/);
   });
 });

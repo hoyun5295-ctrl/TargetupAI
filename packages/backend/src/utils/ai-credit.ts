@@ -404,6 +404,7 @@ export function reportCreditMiss(info: { companyId: string | null; source: strin
   const tag = info.tag || 'MISS';
   console.log(`[CREDIT][${tag}] company=${info.companyId} source=${info.source} cost=${info.cost} key=${info.key || 'none'} reason=${info.reason}`);
   void import('./system-alert').then(({ sendSystemAlert }) => sendSystemAlert({
+    companyId: info.companyId,
     dedupKey: `credit-${tag.toLowerCase()}`,
     cooldownMs: 60 * 60 * 1000,
     title: tag === 'MISS' ? '크레딧 차감을 기록하지 못했습니다.' : '돈을 받지 않은 결과(초안 · 발행 · 게시 · 그림)를 거두지 못했습니다.',

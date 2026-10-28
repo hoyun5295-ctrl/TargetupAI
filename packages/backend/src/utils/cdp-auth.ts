@@ -462,6 +462,7 @@ async function alertFactOverLimit(companyId: string, companyName: string): Promi
     const u = await monthlyCdpUsage(companyId);
     if (u.limit == null || u.used < u.limit * FACT_ALERT_LIMIT_FACTOR) return;
     await sendSystemAlert({
+      companyId: companyId,
       dedupKey: `cdp-fact-over:${companyId}:${new Date().toISOString().slice(0, 7)}`,
       title: '자사몰 회원 · 주문 정보 호출이 월 한도의 10배를 넘었습니다.',
       details: [`고객사: ${companyName}`, `이번 달 호출: ${u.used}`, `월 한도: ${u.limit}`],

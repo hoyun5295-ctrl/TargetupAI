@@ -74,6 +74,7 @@ describe('K4 · 브라우저 회원은 서버 연결이 가리키는 고객 하�
 describe('Codex R1 #5 · 몰 서버 비밀키 호출이 만든 sdk 연결 = 브라우저 잇기의 근거(서버 확인 표시)', () => {
   it('칸이 없을 때(DDL-4 전) = 지금 동작(서버 호출이어도 sdk 연결은 근거 아님 · 표시 건너뜀) · 칸이 생긴 뒤 = 서버 확인 연결만 잇는다 · 옛 브라우저 연결은 안 잇는다', async () => {
     vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    await query(`ALTER TABLE cdp_identity_links DROP COLUMN IF EXISTS server_verified_at`);   // 사본은 C73-DDL-4 가 닫힌 꼴 · 이 시험은 DDL-4 전부터 본다(이 사본 안에서만)
     await identifyCustomer(CO, { source: 'sdk', externalId: 'srv-7', phone: '01000000701', serverVerified: true });
     expect(await linkBrowserMember(CO, 'srv-7')).toBeNull();
 

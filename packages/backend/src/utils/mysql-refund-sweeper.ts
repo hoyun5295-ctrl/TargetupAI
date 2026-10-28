@@ -153,6 +153,7 @@ async function settleZeroLoadIfStuck(camp: CampaignRow, tables: string[]): Promi
       if (!parsed) {
         log(`[적재0고착·보류] campaign=${camp.id} ${axis.type} — 차감 원장 설명을 되읽지 못해 의무 기록을 건너뛴다`);
         await sendSystemAlert({
+          companyId: camp.company_id,
           dedupKey: `zero-load-ledger-unresolved:${camp.id}:${axis.type}`,
           message: `적재 0 고착 정산 보류 — 차감 원장 설명을 되읽지 못했습니다. campaign=${camp.id} ${axis.type}`,
         }).catch(() => { /* 경보 실패가 sweep을 막지는 않는다 */ });
@@ -432,6 +433,7 @@ async function runOnce(): Promise<void> {
             if (dedTotal > 0 && ledgerUnit === null) {
               log(`[정산보류] campaign=${camp.id} ${axis.type} — 차감 원장 설명을 되읽지 못해 환불·회수를 건너뛴다`);
               await sendSystemAlert({
+                companyId: camp.company_id,
                 dedupKey: `sweep-ledger-unresolved:${camp.id}:${axis.type}`,
                 message: `선불 sweep 보류 — 차감 원장 설명을 되읽지 못했습니다(환불 보류). campaign=${camp.id} ${axis.type}`,
               }).catch(() => { /* 경보 실패가 sweep을 막지는 않는다 */ });
@@ -463,6 +465,7 @@ async function runOnce(): Promise<void> {
                   // 추측으로 돈을 움직이지 않는다 — 차액 없이 차감 단가로 정산하고(종전 동작) 사람이 보게 한다.
                   log(`[결과별정산보류] campaign=${camp.id} ${axis.type} — K행 대체 코드와 대체 행이 함께 있다`);
                   await sendSystemAlert({
+                    companyId: camp.company_id,
                     dedupKey: `alimtalk-settle-ambiguous:${camp.id}`,
                     message: `선불 알림톡 결과별 정산 보류 — K행 대체 성공 코드와 대체 행이 한 캠페인에 함께 있어 차액 환불을 멈췄습니다(차감 단가로 정산). campaign=${camp.id}`,
                   }).catch(() => { /* 경보 실패가 sweep을 막지는 않는다 */ });
@@ -573,6 +576,7 @@ async function runOnce(): Promise<void> {
                     const dir = gapCnt > 0 ? '미환불 의심(고객 손해)' : '초과환불 잔존';
                     log(`[불변식위반] campaign=${camp.id} ${axis.type} 부담 ${coveredCount} ≠ 성공 ${axisSuccess} + 순환불 ${netRefundedCnt}${unitDiffAmt > 0 ? ` (결과별 차액 ${unitDiffAmt}원)` : ''} (차이 ${Math.round(gapCnt * 10) / 10}건, ${dir})`);
                     await sendSystemAlert({
+                      companyId: camp.company_id,
                       dedupKey: `refund-invariant:${camp.id}:${axis.type}`,
                       message: `환불 불변식 위반 — ${axis.type} 캠페인: 부담 ${coveredCount}건(차감 ${deductedCount}${freeCount > 0 ? ` + 무료 ${freeCount}` : ''}) ≠ 성공 ${axisSuccess} + 순환불 ${netRefundedCnt}${unitDiffAmt > 0 ? ` (알림톡 결과별 차액 ${unitDiffAmt}원 포함)` : ''} (차이 ${Math.round(gapCnt * 10) / 10}건, ${dir}). campaign=${camp.id}`,
                     });

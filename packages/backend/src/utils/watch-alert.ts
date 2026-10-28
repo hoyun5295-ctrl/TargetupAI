@@ -254,6 +254,7 @@ export async function handleWatchEvent(e: WatchEventInput): Promise<void> {
     const phones = watchAlertPhones();
     const day = kstText(at).slice(0, 5);
     const sent = await sendSystemAlert({
+      companyId: null,
       dedupKey: concurrent ? `watch:${e.loginId}:${e.kind}:${ip}:${otherIp}` : `watch:${e.loginId}:login:${ip}:${day}`,
       title,
       details,
