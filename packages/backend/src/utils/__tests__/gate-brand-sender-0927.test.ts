@@ -32,15 +32,30 @@ import { checkBrandSendGate, senderProfileScope } from '../kakao-brand-gate';
 beforeEach(() => { state.kakaoEnabled = true; state.owned = true; sqlLog.length = 0; queryMock.mockClear(); });
 
 describe('브랜드 발송 게이트 CT', () => {
-  it('카카오 미사용 회사 = 403 KAKAO_NOT_ENABLED(발신키를 보지 않는다)', async () => {
+  it('승인 전 회사의 마수동 전체(M) · 비친구(N) = 403 KAKAO_NOT_ENABLED(발신키를 보지 않는다 · 소문자 · 공백도 같은 판정)', async () => {
     state.kakaoEnabled = false;
-    const r = await checkBrandSendGate('c1', 'KEY1');
-    expect(r).toEqual({ ok: false, status: 403, code: 'KAKAO_NOT_ENABLED', error: '카카오 브랜드메시지가 활성화되지 않은 고객사입니다.' });
-    expect(sqlLog.some((q) => q.sql.includes('kakao_sender_profiles'))).toBe(false);
+    for (const t of ['M', 'N', ' m ', 'n']) {
+      sqlLog.length = 0;
+      const r: any = await checkBrandSendGate('c1', 'KEY1', t);
+      expect([r.ok, r.status, r.code]).toEqual([false, 403, 'KAKAO_NOT_ENABLED']);
+      expect(r.error).toContain('채널 친구 발송은 지금 보낼 수 있습니다');
+      expect(sqlLog.some((q) => q.sql.includes('kakao_sender_profiles'))).toBe(false);
+    }
+  });
+  it('B-1029-1 승인 전 회사의 채널 친구(I · 빈 값 = I) = 자기 회사 활성 프로필 키면 통과 · 키가 비면 400 · 남의 키면 403', async () => {
+    state.kakaoEnabled = false;
+    expect(await checkBrandSendGate('c1', 'KEY1', 'I')).toEqual({ ok: true });
+    expect(await checkBrandSendGate('c1', 'KEY1', null)).toEqual({ ok: true });
+    expect(((await checkBrandSendGate('c1', '', 'I')) as any).code).toBe('SENDER_KEY_REQUIRED');
+    state.owned = false;
+    expect(((await checkBrandSendGate('c1', 'OTHER', 'I')) as any).code).toBe('SENDER_KEY_NOT_OWNED');
+  });
+  it('승인된 회사 = 대상 범위 무관 통과(옛 동작)', async () => {
+    for (const t of ['M', 'N', 'I']) expect(await checkBrandSendGate('c1', 'KEY1', t)).toEqual({ ok: true });
   });
   it('발신키가 그 회사의 활성 프로필 키가 아니면 403 SENDER_KEY_NOT_OWNED', async () => {
     state.owned = false;
-    const r: any = await checkBrandSendGate('c1', 'OTHER_KEY');
+    const r: any = await checkBrandSendGate('c1', 'OTHER_KEY', 'M');
     expect(r.ok).toBe(false);
     expect(r.status).toBe(403);
     expect(r.code).toBe('SENDER_KEY_NOT_OWNED');
@@ -49,12 +64,12 @@ describe('브랜드 발송 게이트 CT', () => {
     expect(q.params).toEqual(['c1', 'OTHER_KEY']);
   });
   it('자기 회사 활성 프로필 키면 통과', async () => {
-    expect(await checkBrandSendGate('c1', 'KEY1')).toEqual({ ok: true });
+    expect(await checkBrandSendGate('c1', 'KEY1', 'M')).toEqual({ ok: true });
   });
-  it('키가 비면 소유 검사를 건너뛴다(지금 동작 유지) · 필수로 부른 곳은 400', async () => {
-    expect(await checkBrandSendGate('c1', '')).toEqual({ ok: true });
+  it('승인된 회사는 키가 비면 소유 검사를 건너뛴다(지금 동작 유지) · 필수로 부른 곳은 400', async () => {
+    expect(await checkBrandSendGate('c1', '', 'I')).toEqual({ ok: true });
     expect(sqlLog.some((q) => q.sql.includes('kakao_sender_profiles'))).toBe(false);
-    const r: any = await checkBrandSendGate('c1', '  ', { requireKey: true });
+    const r: any = await checkBrandSendGate('c1', '  ', 'I', { requireKey: true });
     expect(r.status).toBe(400);
     expect(r.code).toBe('SENDER_KEY_REQUIRED');
   });
@@ -88,6 +103,9 @@ describe('배선', () => {
     expect(camp.split('await checkBrandSendGate(').length - 1).toBe(6);
     // /brand-send는 키 필수
     const bs = camp.slice(camp.indexOf("router.post('/brand-send'"), camp.indexOf("router.post('/brand-send'") + 3000);
-    expect(bs).toContain('await checkBrandSendGate(companyId, senderKey, { requireKey: true })');
+    expect(bs).toContain('await checkBrandSendGate(companyId, senderKey, targeting, { requireKey: true })');
+    // B-1029-1 — 6곳 모두 그 경로가 발송에 쓰는 대상 범위 값을 넘긴다
+    for (const call of ['checkBrandSendGate(companyId, testKakaoSenderKey, TEST_BRAND_TARGETING)', 'checkBrandSendGate(companyId, campaign.kakao_sender_key, campaign.kakao_targeting)']) expect(camp).toContain(call);
+    expect(camp.split('checkBrandSendGate(companyId, kakaoSenderKey, kakaoTargeting)').length - 1).toBe(3);
   });
 });

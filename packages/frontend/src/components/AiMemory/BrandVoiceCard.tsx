@@ -179,6 +179,9 @@ function SkeletonView({ text }: { text: string }) {
   );
 }
 
+// ★ 2026-10-29 이 카드는 브랜드 학습 창(z-[120]) 안에서 연다 · 여기서 여는 창은 그 위(옛 기본 60 = 부모 뒤에 깔림)
+const NESTED_Z = 'z-[130]';
+
 export default function BrandVoiceCard({ apiBase, token, onToast, onConfirm, autoStart = false }: BrandVoiceCardProps) {
   const [data, setData] = useState<VoiceData | null>(null);
   const [loading, setLoading] = useState(true);
@@ -213,6 +216,8 @@ export default function BrandVoiceCard({ apiBase, token, onToast, onConfirm, aut
     if (!autoStart || autoStarted.current || !data) return;
     autoStarted.current = true;
     if (data.messages.length === 0 && data.permissions.canEdit) openPicker();
+    // ★ 2026-10-29 배운 내용 확인 대기 = 대시보드 배너 [배운 내용 확인하기]로 왔다 → 확인 창을 바로 연다(카드의 첫 버튼과 같은 동작)
+    else if (data.status === 'review_pending' && data.permissions.canEdit) setReview({ edits: {}, editing: null });
   /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [autoStart, data]);
 
   const typeLabel = useMemo(() => Object.fromEntries((data?.content_types || []).map((c) => [c.key, c.label])) as Record<ContentType, string>, [data]);
@@ -539,7 +544,7 @@ export default function BrandVoiceCard({ apiBase, token, onToast, onConfirm, aut
       </div>
 
       {/* 대표 문안 한 건 창 */}
-      <JourneyModalShell open={!!editor} onClose={() => setEditor(null)} labelledBy="bv-editor-title" panelClassName="w-full max-w-4xl" disableDismiss={busy === 'save'}>
+      <JourneyModalShell zIndexClassName={NESTED_Z} open={!!editor} onClose={() => setEditor(null)} labelledBy="bv-editor-title" panelClassName="w-full max-w-4xl" disableDismiss={busy === 'save'}>
         {editor && (
           <div className="flex flex-col max-h-[90vh]">
             <div className="flex items-center gap-2 px-5 py-3 border-b border-slate-200">
@@ -594,7 +599,7 @@ export default function BrandVoiceCard({ apiBase, token, onToast, onConfirm, aut
       </JourneyModalShell>
 
       {/* 보낸 문자 고르기(K8-2) */}
-      <JourneyModalShell open={!!picker} onClose={() => setPicker(null)} labelledBy="bv-picker-title" panelClassName="w-full max-w-5xl" disableDismiss={learning}>
+      <JourneyModalShell zIndexClassName={NESTED_Z} open={!!picker} onClose={() => setPicker(null)} labelledBy="bv-picker-title" panelClassName="w-full max-w-5xl" disableDismiss={learning}>
         {picker && (
           <div className="flex flex-col max-h-[90vh]">
             <div className="flex items-center gap-2 px-5 py-3 border-b border-slate-200">
@@ -643,7 +648,7 @@ export default function BrandVoiceCard({ apiBase, token, onToast, onConfirm, aut
       </JourneyModalShell>
 
       {/* 배운 내용 확인(K5-4 · 뼈대 · 문구 칸) */}
-      <JourneyModalShell open={!!review} onClose={() => setReview(null)} labelledBy="bv-review-title" panelClassName="w-full max-w-4xl" disableDismiss={learning}>
+      <JourneyModalShell zIndexClassName={NESTED_Z} open={!!review} onClose={() => setReview(null)} labelledBy="bv-review-title" panelClassName="w-full max-w-4xl" disableDismiss={learning}>
         {review && (
           <div className="flex flex-col max-h-[90vh]">
             <div className="flex items-center gap-2 px-5 py-3 border-b border-slate-200">
@@ -729,7 +734,7 @@ export default function BrandVoiceCard({ apiBase, token, onToast, onConfirm, aut
       </JourneyModalShell>
 
       {/* 견본(K9-4) */}
-      <JourneyModalShell open={!!samples} onClose={() => setSamples(null)} labelledBy="bv-sample-title" panelClassName="w-full max-w-4xl">
+      <JourneyModalShell zIndexClassName={NESTED_Z} open={!!samples} onClose={() => setSamples(null)} labelledBy="bv-sample-title" panelClassName="w-full max-w-4xl">
         {samples && (
           <div className="flex flex-col max-h-[90vh]">
             <div className="flex items-center gap-2 px-5 py-3 border-b border-slate-200">
@@ -756,7 +761,7 @@ export default function BrandVoiceCard({ apiBase, token, onToast, onConfirm, aut
       </JourneyModalShell>
 
       {/* 성격별 가이드라인(사람 칸 · AI 에게 다시 맡기기 · 법 잠금) */}
-      <JourneyModalShell open={!!guide} onClose={() => setGuide(null)} labelledBy="bv-guide-title" panelClassName="w-full max-w-3xl" disableDismiss={busy === 'guide'}>
+      <JourneyModalShell zIndexClassName={NESTED_Z} open={!!guide} onClose={() => setGuide(null)} labelledBy="bv-guide-title" panelClassName="w-full max-w-3xl" disableDismiss={busy === 'guide'}>
         {guide && data.resolved[guide.kind] && (() => {
           const g = data.resolved[guide.kind]!;
           const admin = data.admin[guide.kind] || {};

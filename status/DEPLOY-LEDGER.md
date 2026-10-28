@@ -7,9 +7,9 @@
 
 ## 머리
 
-- pulled_head: 00e093bf · 2026-10-28 · Harold pull 완료 보고(C73 · C74 · C75 · C76 한 커밋 · push = pre-push 실 PG 스탬프가 앱 가상 폴더에 있어 실제 위치로 복사 뒤 통과)
-- deployed_head: 00e093bf · 2026-10-28 · backend · frontend build:safe · pm2 reload 19:58(부팅 로그 19:58:06) · 키 두 개 뒤 reload --update-env(online · restarts 12) · 계산 스크립트 = 이번 범위 diff 가 커서 spawnSync ENOBUFS(추가 과제 · 손 기록)
-- 이번 창 확인 출력: backend-build · frontend-build · reload · uptime
+- pulled_head: c7879512 · 2026-10-29 · Harold pull 보고(C77 · push 통과 = pre-push 가 새 자리 스탬프를 읽음)
+- deployed_head: c7879512 · 2026-10-29 · Harold 보고 = backend build:safe · pm2 reload(이 범위 프론트 변경 0 · 프론트 빌드 안 함) · ENV 는 아직(C77-ENV-1 · 넣을 때 restart --update-env)
+- 이번 창 확인 출력: backend-build · reload
 - 마지막 해시 대조: 2026-10-28 08:27 · 같음(운영 6c12ee8b = t_tpl_closed 6c12ee8b · 덤프 + §2 DDL-1 · DDL-3 · 그 전 07:43 덤프만 043ff07c 같음 · test:pg 1파일 15건 통과)
 - 덤프: 2026-10-27 21:55 서버 파일 · server_version 15.15 · datcollate en_US.utf8 · TimeZone Etc/UTC · 머리 SELECT 2026-10-28 07:42
 
@@ -24,7 +24,8 @@
 | C74 | 00e093bf |
 | C75 | 00e093bf |
 | C76 | 00e093bf |
-| C77 | 미커밋 |
+| C77 | c7879512 |
+| C78 | 미커밋 |
 
 ## §1 대기
 

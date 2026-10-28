@@ -45,6 +45,8 @@ export default function BrandVoiceNudgeCard({ suppress = false }: { suppress?: b
   const [show, setShow] = useState(false);
   const [loading, setLoading] = useState(true);
   const [sentCount, setSentCount] = useState(0);
+  // ★ 2026-10-29 서버 상태값 그대로(배운 뒤 확인만 남은 회사에 「아직 배우지 않았어요」라고 말하던 결함 · Harold 1029)
+  const [status, setStatus] = useState<string>('none');
 
   useEffect(() => {
     if (isDismissed()) {
@@ -71,6 +73,7 @@ export default function BrandVoiceNudgeCard({ suppress = false }: { suppress?: b
       const data = await res.json();
       if (data.success && data.voice_learned !== true) {
         setShow(true);
+        setStatus(String(data.status || 'none'));
         // 최근 90일 사람이 보낸 문자 수(보낼 수 있는 사람만 · 못 읽으면 0 = 일반 문구)
         if (data.permissions?.canEdit) {
           const c = await fetch('/api/ai-memory/brand-voice/sent-candidates', { headers: { Authorization: `Bearer ${token}` } }).then((r) => r.json()).catch(() => null);
@@ -91,6 +94,10 @@ export default function BrandVoiceNudgeCard({ suppress = false }: { suppress?: b
   }
 
   if (suppress || loading || !show) return null;
+  const copy: { title: string; body?: string; button?: string } =
+    status === 'review_pending' ? { title: '배운 내용 확인이 남았어요', body: '확인하면 그때부터 AI 문안이 우리 회사 목소리로 나와요.', button: '배운 내용 확인하기' }
+    : status === 'incomplete' ? { title: '목소리 배우기가 끝나지 않았어요', body: '다시 배우기를 누르면 이어서 배워요.', button: '다시 배우기' }
+    : { title: '우리 회사 목소리를 아직 배우지 않았어요' };
 
   return (
     <div className="mb-6 rounded-2xl border border-violet-500/40 bg-gradient-to-br from-violet-950/60 via-fuchsia-950/40 to-slate-900/80 backdrop-blur-md shadow-2xl overflow-hidden">
@@ -102,14 +109,14 @@ export default function BrandVoiceNudgeCard({ suppress = false }: { suppress?: b
 
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-2 mb-1 flex-wrap">
-              <h3 className="text-base font-bold text-white">우리 회사 목소리를 아직 배우지 않았어요</h3>
+              <h3 className="text-base font-bold text-white">{copy.title}</h3>
               <span className="px-1.5 py-0.5 text-[10px] rounded bg-amber-500/20 text-amber-200 border border-amber-500/40 font-semibold">NEW</span>
             </div>
 
             <p className="text-sm text-violet-100 leading-relaxed mb-3">
-              {sentCount > 0
+              {copy.body ?? (sentCount > 0
                 ? <>최근 90일 보낸 문자가 <strong className="text-amber-200">{sentCount}건</strong> 있어요. 이 문자로 말투 · 줄띄움 · 기호를 배우면 AI 문안이 그 꼴로 나와요.</>
-                : <>평소 보내던 문자를 올리면 말투 · 줄띄움 · 기호를 배워 AI 문안이 그 꼴로 나와요.</>}
+                : <>평소 보내던 문자를 올리면 말투 · 줄띄움 · 기호를 배워 AI 문안이 그 꼴로 나와요.</>)}
             </p>
 
             <div className="flex items-center gap-2 flex-wrap">
@@ -118,7 +125,7 @@ export default function BrandVoiceNudgeCard({ suppress = false }: { suppress?: b
                 className="px-4 py-2 text-xs bg-gradient-to-r from-violet-600 to-fuchsia-600 hover:from-violet-500 hover:to-fuchsia-500 text-white rounded-lg flex items-center gap-2 font-semibold shadow-lg transition-colors"
               >
                 <Sparkles className="w-3.5 h-3.5" />
-                {sentCount > 0 ? '이 문자로 목소리 배우기' : '목소리 배우기'}
+                {copy.button ?? (sentCount > 0 ? '이 문자로 목소리 배우기' : '목소리 배우기')}
                 <ArrowRight className="w-3.5 h-3.5" />
               </button>
 

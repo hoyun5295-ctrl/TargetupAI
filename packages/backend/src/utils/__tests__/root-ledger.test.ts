@@ -3350,3 +3350,35 @@ describe('R26(1028) DB 를 여는 운영 스크립트 = 성공해도 스스로 �
     expect(noExit).toEqual([]);
   });
 });
+
+describe('R27(1029) 창 안에서 여는 창 = 부모 창보다 위 — 고정 창 컴포넌트가 여는 자식의 JourneyModalShell 겹침 순서', () => {
+  it('*Modal.tsx 의 고정 덮개(fixed inset-0 z-N) 안 자식 컴포넌트가 여는 JourneyModalShell = z 가 N 보다 크다(기본 60 · 상수도 풀어 읽음)', () => {
+    const files = sourceFiles(FE, /\.tsx$/);
+    const zOf = (cls: string): number | null => { const m = /z-\[(\d+)\]/.exec(cls) || /\bz-(\d+)\b/.exec(cls); return m ? Number(m[1]) : null; };
+    const low: string[] = [];
+    let parents = 0;
+    for (const f of files.filter((x) => /Modal\.tsx$/.test(x))) {
+      const src = read(join(FE, f));
+      const outer = [...src.matchAll(/fixed inset-0[^"'`]*?z-\[?(\d+)\]?/g)].map((m) => Number(m[1]));
+      if (!outer.length) continue;
+      const parentZ = Math.max(...outer);
+      for (const m of src.matchAll(/^import\s+\w+[^;]*from\s+'(\.{1,2}\/[^']+)'/gm)) {
+        const base = join(FE, f, '..', m[1]).replace(/\\/g, '/');
+        const child = files.find((x) => join(FE, x).replace(/\\/g, '/') === `${base}.tsx`);
+        if (!child) continue;
+        const csrc = read(join(FE, child));
+        for (const tag of csrc.matchAll(/<JourneyModalShell\b[^>]*>/g)) {
+          parents += 1;
+          const v = /zIndexClassName=(?:"([^"]+)"|'([^']+)'|\{([A-Za-z_]\w*)\})/.exec(tag[0]);
+          let cls = 'z-[60]';
+          if (v?.[1] || v?.[2]) cls = (v[1] || v[2])!;
+          else if (v?.[3]) cls = new RegExp(`const ${v[3]} = '([^']+)'`).exec(csrc)?.[1] ?? '';
+          const z = zOf(cls);
+          if (z === null || z <= parentZ) low.push(`${f}(z ${parentZ}) → ${child} ${cls || v?.[3]}`);
+        }
+      }
+    }
+    expect(parents).toBeGreaterThan(0);
+    expect(low).toEqual([]);
+  });
+});

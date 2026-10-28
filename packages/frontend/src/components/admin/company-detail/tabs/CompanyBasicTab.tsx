@@ -794,7 +794,7 @@ export default function CompanyBasicTab(props: CompanyBasicTabProps) {
                       <div className="flex items-center justify-between gap-3 rounded-lg border border-gray-200 bg-white px-3.5 py-2.5">
                         <div className="min-w-0">
                           <p className="text-[13px] font-semibold text-gray-800">카카오 브랜드메시지</p>
-                          <p className="text-[11px] text-gray-500 mt-0.5">켜면 이 고객사에서 카카오 채널 발송이 가능합니다. 저장 버튼으로 반영됩니다.</p>
+                          <p className="text-[11px] text-gray-500 mt-0.5">승인(채널 친구 5만 · 마케팅 수신동의 증적) 뒤에 켜면 마수동 전체 · 비친구 발송이 열립니다. 채널 친구 발송은 꺼져 있어도 됩니다. 저장 버튼으로 반영됩니다.</p>
                         </div>
                         <label className="relative inline-flex items-center cursor-pointer shrink-0">
                           <input

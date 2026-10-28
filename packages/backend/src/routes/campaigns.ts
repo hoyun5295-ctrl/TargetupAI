@@ -326,9 +326,11 @@ router.post('/test-send', async (req: Request, res: Response) => {
     const testKakaoSenderKey = req.body.kakaoSenderKey || '';
     const testKakaoBubbleType = req.body.kakaoBubbleType || 'TEXT';
 
+    // 테스트 발송의 브랜드 대상 범위 = 채널 친구(아래 적재 · 차감이 같은 값을 쓴다 · 게이트도 이 값으로 판정)
+    const TEST_BRAND_TARGETING = 'I';
     // ★ 카카오 활성화 체크 (프론트 우회 방지) · ★ 2026-09-27 V2 R100 발신키 소유까지 — 게이트 CT(kakao-brand-gate)
     if (testChannel === 'kakao' || testChannel === 'both') {
-      const gate = await checkBrandSendGate(companyId, testKakaoSenderKey);
+      const gate = await checkBrandSendGate(companyId, testKakaoSenderKey, TEST_BRAND_TARGETING);
       if (!gate.ok) return res.status(gate.status).json({ error: gate.error, code: gate.code });
     }
 
@@ -396,7 +398,6 @@ router.post('/test-send', async (req: Request, res: Response) => {
     //   비교돼 두 번째 실패부터 0원이 됐다(ok:true라 경보도 없었다). 차감·환불이 이 요청 안에서만 짝을 이룬다.
     const TEST_REF = randomUUID();
     // 테스트 브랜드 발송은 담당자에게 채널 친구 대상으로 나간다 — 적재 조립과 차감 단가가 같은 값을 쓴다.
-    const TEST_BRAND_TARGETING = 'I';
     const testAxes = resolveRefundAxes(testChannel, testMsgType);
     const testDeductedTypes: string[] = [];
     for (const axis of testAxes) {
@@ -592,7 +593,7 @@ router.post('/', async (req: Request, res: Response) => {
     }
     // ★ 2026-09-27 한줄로 V2 R100 — 브랜드 채널이면 저장 전에 카카오 사용·발신키 소유를 본다(게이트 CT · 남의 발신키 저장 차단)
     if (createChannel.channel === 'kakao' || createChannel.channel === 'both') {
-      const gate = await checkBrandSendGate(companyId, kakaoSenderKey);
+      const gate = await checkBrandSendGate(companyId, kakaoSenderKey, kakaoTargeting);
       if (!gate.ok) return res.status(gate.status).json({ error: gate.error, code: gate.code });
     }
     // 메시지 유형은 채널과 **별개 축**이라 채널 게이트로는 안 걸린다. 목록 밖 유형은 단가표에 없어
@@ -810,7 +811,7 @@ router.post('/:id/send', async (req: Request, res: Response) => {
     //   여기서 걸리면 되돌릴 것 자체가 생기지 않는다.
     if (sendChannel === 'kakao' || sendChannel === 'both') {
       // ★ 2026-09-27 V2 R100 — 저장된 발신키 소유까지(게이트 CT · 이 수정 전에 저장된 캠페인도 발송 때 걸린다)
-      const gate = await checkBrandSendGate(companyId, campaign.kakao_sender_key);
+      const gate = await checkBrandSendGate(companyId, campaign.kakao_sender_key, campaign.kakao_targeting);
       if (!gate.ok) return res.status(gate.status).json({ error: gate.error, code: gate.code });
     }
 
@@ -1935,7 +1936,7 @@ router.post('/direct-send/commit', singleFlight('direct-send-commit', async (req
     }
     // ★ 2026-09-27 한줄로 V2 m119·R100 — 이 문은 카카오 사용 검사가 없었다(동기 경로에는 있음 · 화면만 막음). 발신키 소유까지 게이트 CT로.
     if (commitChannel.channel === 'kakao' || commitChannel.channel === 'both') {
-      const gate = await checkBrandSendGate(companyId, kakaoSenderKey);
+      const gate = await checkBrandSendGate(companyId, kakaoSenderKey, kakaoTargeting);
       if (!gate.ok) return res.status(gate.status).json({ success: false, error: gate.error, code: gate.code });
     }
     // ★ 2026-08-17 (Codex 2R high) 유형도 확정한다 — `/direct-send`와 같은 축이고, 이 문도 차감에 그대로 넘긴다.
@@ -2586,7 +2587,7 @@ router.post('/direct-send', singleFlight('direct-send', async (req: Request, res
 
     // ★ 카카오 활성화 체크 (프론트 우회 방지) · ★ 2026-09-27 V2 R100 발신키 소유까지 — 게이트 CT(kakao-brand-gate)
     if (directChannel === 'kakao' || directChannel === 'both') {
-      const gate = await checkBrandSendGate(companyId, kakaoSenderKey);
+      const gate = await checkBrandSendGate(companyId, kakaoSenderKey, kakaoTargeting);
       if (!gate.ok) return res.status(gate.status).json({ success: false, error: gate.error, code: gate.code });
     }
 
@@ -4144,7 +4145,7 @@ router.post('/brand-send', async (req: Request, res: Response) => {
 
     // ★ 2026-09-27 한줄로 V2 R100 — 카카오 사용·발신키 소유(게이트 CT). 옛 코드는 본문의 발신키를 그대로 실어
     //   남의 senderKey를 알면 그 프로필로 발송할 수 있었다. 화면(BrandMessageEditor)은 자기 회사 프로필의 profile_key를 반드시 채운다.
-    const brandGate = await checkBrandSendGate(companyId, senderKey, { requireKey: true });
+    const brandGate = await checkBrandSendGate(companyId, senderKey, targeting, { requireKey: true });
     if (!brandGate.ok) return res.status(brandGate.status).json({ error: brandGate.error, code: brandGate.code });
 
     // 큐에 실릴 회신번호를 먼저 확정한다 — campaigns와 큐가 다른 번호를 갖지 않게(판정은 CT 한 곳).
