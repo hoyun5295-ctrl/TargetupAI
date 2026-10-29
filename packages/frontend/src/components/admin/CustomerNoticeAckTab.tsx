@@ -1,12 +1,16 @@
 /**
  * CustomerNoticeAckTab — 공지 확인 현황 (★2026-10-29 Harold 「확인한 업체가 누군지 보안인증 메뉴에서 체크」 · ceo · suran · 읽기만)
  *
- * 고객 보안 공지(B 카드 · C 점검 기록)를 업체마다 봤는지 · 「확인했습니다」를 눌렀는지. 아직 안 본 곳부터.
+ * 고객 보안 공지(B 카드 · C 점검 기록)를 업체마다 봤는지 · 「확인했습니다」를 눌렀는지.
+ * ★1029 Harold 「무한 목록 말고 10개씩 · 확인한 업체 버튼 · 확인한 업체는 1페이지에 먼저」 = 순서는 서버(확인함 → 보기만 함 → 아직 안 봄) · 쪽 = ListPager 10개.
  * 집계 = 서버(utils/customer-notice.ts · 원천 audit_logs). 노출 게이팅은 부모(AdminDashboard)가 /api/admin/customer-notice-ack/access 로 한다.
  * 행을 누르면 계정별 상세 창(같은 응답 · 추가 호출 0). 설계 = docs/2026-10-29-customer-security-notice-ack-design.md §2-3 D.
  */
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { ADMIN_TABLE, ADMIN_TR_OPEN, adminRowOpen, AdminTableEmpty, AdminDetailModal } from './ui/admin-ui';
+import ListPager, { pageSlice } from '../shared/ListPager';
+
+const PAGE_SIZE = 10;
 
 type Status = 'acked' | 'seen' | 'none';
 type Filter = Status | 'all';
@@ -45,10 +49,10 @@ const STATUS: Record<Status, { label: string; chip: string; dot: string; bar: st
   acked: { label: '확인함', chip: 'bg-emerald-50 text-emerald-800 ring-emerald-200', dot: 'bg-emerald-600', bar: 'bg-emerald-600' },
 };
 const FILTERS: { key: Filter; label: string }[] = [
-  { key: 'none', label: '아직 안 봄' },
-  { key: 'seen', label: '보기만 함' },
-  { key: 'acked', label: '확인함' },
   { key: 'all', label: '전체' },
+  { key: 'acked', label: '확인한 업체' },
+  { key: 'seen', label: '보기만 함' },
+  { key: 'none', label: '아직 안 봄' },
 ];
 const fmt = (iso: string | null) => (iso ? new Date(iso).toLocaleString('ko-KR', {
   timeZone: 'Asia/Seoul', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false,
@@ -67,7 +71,8 @@ export default function CustomerNoticeAckTab() {
   const [data, setData] = useState<Data | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
-  const [filter, setFilter] = useState<Filter>('none');
+  const [filter, setFilter] = useState<Filter>('all');
+  const [page, setPage] = useState(1);
   const [open, setOpen] = useState<CompanyRow | null>(null);
 
   const load = useCallback(async (id: string | null) => {
@@ -87,8 +92,10 @@ export default function CustomerNoticeAckTab() {
   }, []);
 
   useEffect(() => { void load(noticeId); }, [noticeId, load]);
+  useEffect(() => { setPage(1); }, [filter, noticeId]);
 
-  const rows = useMemo(() => (data ? data.companies.filter((c) => filter === 'all' || c.status === filter) : []), [data, filter]);
+  const filtered = useMemo(() => (data ? data.companies.filter((c) => filter === 'all' || c.status === filter) : []), [data, filter]);
+  const rows = pageSlice(filtered, page, PAGE_SIZE);
   const s = data?.summary;
   const pct = (n: number) => (s && s.companies > 0 ? Math.round((n / s.companies) * 100) : 0);
   const counts: Record<Filter, number> = { none: s?.none ?? 0, seen: s?.seen ?? 0, acked: s?.acked ?? 0, all: s?.companies ?? 0 };
@@ -98,7 +105,7 @@ export default function CustomerNoticeAckTab() {
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div className="min-w-0">
           <h2 className="text-lg font-semibold tracking-tight">공지 확인 현황</h2>
-          <p className="text-xs text-gray-500 mt-1 break-keep">고객사마다 보안 공지를 봤는지, 「확인했습니다」를 눌렀는지 봅니다. 아직 안 본 곳부터 보입니다. 사내 회사(시연 · 사내 시험)는 빠집니다.</p>
+          <p className="text-xs text-gray-500 mt-1 break-keep">고객사마다 보안 공지를 봤는지, 「확인했습니다」를 눌렀는지 봅니다. 확인한 업체가 먼저 보입니다. 사내 회사(시연 · 사내 시험)는 빠집니다.</p>
         </div>
         {data && data.notices.length > 1 && (
           <select
@@ -166,7 +173,7 @@ export default function CustomerNoticeAckTab() {
               {loading && !data && <AdminTableEmpty colSpan={6}>불러오는 중입니다</AdminTableEmpty>}
               {error && <AdminTableEmpty colSpan={6}><span className="text-red-600">{error}</span></AdminTableEmpty>}
               {data && !error && rows.length === 0 && (
-                <AdminTableEmpty colSpan={6}>{filter === 'none' ? '아직 안 본 고객사가 없습니다' : '해당하는 고객사가 없습니다'}</AdminTableEmpty>
+                <AdminTableEmpty colSpan={6}>{filter === 'acked' ? '아직 확인한 고객사가 없습니다' : filter === 'none' ? '아직 안 본 고객사가 없습니다' : '해당하는 고객사가 없습니다'}</AdminTableEmpty>
               )}
               {rows.map((c) => (
                 <tr key={c.companyId} {...adminRowOpen(() => setOpen(c))} className={`border-t border-gray-100 ${ADMIN_TR_OPEN}`}>
@@ -184,6 +191,7 @@ export default function CustomerNoticeAckTab() {
             </tbody>
           </table>
         </div>
+        <ListPager page={page} total={filtered.length} pageSize={PAGE_SIZE} onPage={setPage} />
       </div>
 
       {open && (

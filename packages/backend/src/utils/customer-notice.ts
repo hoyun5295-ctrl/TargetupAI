@@ -166,7 +166,10 @@ export interface NoticeAckData {
 
 const iso = (v: any): string | null => (v ? new Date(v).toISOString() : null);
 const minIso = (a: string | null, b: string | null): string | null => (!a ? b : !b ? a : a < b ? a : b);
-const STATUS_ORDER: Record<NoticeAckStatus, number> = { none: 0, seen: 1, acked: 2 };
+/** ★1029 Harold 「확인한 업체는 1페이지에 먼저」 = 확인함 → 보기만 함 → 아직 안 봄 · 안에서는 그 상태가 된 시각(또는 마지막 로그인) 최근 순 */
+const STATUS_ORDER: Record<NoticeAckStatus, number> = { acked: 0, seen: 1, none: 2 };
+const sortAt = (c: NoticeAckCompany): string =>
+  (c.status === 'acked' ? c.ackAt : c.status === 'seen' ? (c.firstShownAt ?? c.reportAt) : c.lastLoginAt) || '';
 
 /**
  * 공지 확인 현황(D) — 대상 회사 = 상태 활성(NULL · active) · 사내 회사 아님 · 활성 사람 계정(admin · user) 1개 이상.
@@ -253,7 +256,7 @@ export async function loadNoticeAck(noticeId: unknown): Promise<NoticeAckData | 
     const accounts = [...byKey.values()].sort((x, y) => Number(!!y.ackAt) - Number(!!x.ackAt) || (y.lastLoginAt || '').localeCompare(x.lastLoginAt || ''));
     return { ...a, status, accounts };
   });
-  list.sort((x, y) => STATUS_ORDER[x.status] - STATUS_ORDER[y.status] || (y.lastLoginAt || '').localeCompare(x.lastLoginAt || ''));
+  list.sort((x, y) => STATUS_ORDER[x.status] - STATUS_ORDER[y.status] || sortAt(y).localeCompare(sortAt(x)));
 
   return {
     notice,

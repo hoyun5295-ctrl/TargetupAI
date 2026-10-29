@@ -220,7 +220,7 @@
 > 호출어 **"안심 팝업 / 공지 확인 현황 / Node 보안판 / KMC 공지"** → [설계서](../docs/2026-10-29-customer-security-notice-ack-design.md) · 원장 C83-S1 · S2 · 메모리 `project_2026_1029_kmc_notice_node_security_check`
 > 서버(Harold 실행 · 실측) = .66 근태 22.23.2 → 22.23.4 · ERP web · api · jobs 20.11.1 → 24.22.1(ready 35 영역 전후 같음) · 발송 콘솔 앱 · pm2 데몬 20.11.1 → 24.22.1(유닛 drop-in · 재부팅 생존) · CureOPS 24.21.0 → 24.22.1 · .65 관리 API apt 18.19.1 → /opt 24.22.1(직전 v1 발송 0 · health 200) · 옛 판은 되돌리기용으로 남김.
 > 화면 = B 카드(App 전역 · 확인은 204 뒤에만) · C `/security-report`(에이전트 회사 허용) · D 슈퍼관리자 보안 · 인증(ceo · suran). 원천 = audit_logs 사건 3(새 칸 0 · DDL 0) · CT `utils/customer-notice.ts`.
-> 검증 = tsc 0 · vitest 전체 722 파일 · 변이 9 · 시험 DB SQL 4 · 개발 서버 DOM 실측 1440 · 390 · Codex 설계 3R · 구현 1R 2 → 2R 1(같은 뿌리) → 3R approve → 4R approve(문구 한 줄 · 실측보다 앞선 「로그인, 발송, 결과 조회」 문장 정정). 1차 커밋 5264fa99 = 구현 1R 수정본(C82 와 한 커밋 · 1029 배포) · 2R 수정 · 열람 재시도 · 문구 정정은 작업 트리(C83-S2).
+> 검증 = tsc 0 · vitest 전체 722 파일 · 변이 9 · 시험 DB SQL 4 · 개발 서버 DOM 실측 1440 · 390 · Codex 설계 3R · 구현 1R 2 → 2R 1(같은 뿌리) → 3R approve → 4R approve(문구 한 줄 · 실측보다 앞선 「로그인, 발송, 결과 조회」 문장 정정). 1차 커밋 5264fa99 = 구현 1R 수정본(C82 와 한 커밋 · 1029 배포) · 2R 수정 · 열람 재시도 · 문구 정정 · D 10개씩 쪽 넘김과 확인한 업체 먼저(Harold 운영 화면 보고 지시)는 작업 트리(C83-S2 · 백엔드 + 프론트).
 
 <a id="c82"></a>
 

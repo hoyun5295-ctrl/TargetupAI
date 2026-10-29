@@ -202,12 +202,12 @@ describe('공지 확인 현황(D) 집계', () => {
     throw new Error(`예상 밖 SQL: ${sql.slice(0, 60)}`);
   }
 
-  it('상태 3종 · 아직 안 봄부터 · 지워진 계정의 확인도 그 회사 확인함 · 대상 밖 회사 사건은 버림', async () => {
+  it('상태 3종 · 확인한 업체부터(Harold 1029) · 지워진 계정의 확인도 그 회사 확인함 · 대상 밖 회사 사건은 버림', async () => {
     mockDemoIds.mockResolvedValue([DEMO]);
     mockQuery.mockImplementation(async (sql: string) => route(sql));
     const d = await loadNoticeAck(N.id);
     expect(d?.summary).toEqual({ companies: 3, acked: 1, seen: 1, none: 1 });
-    expect(d?.companies.map((c) => [c.companyName, c.status])).toEqual([['안 본 회사', 'none'], ['본 회사', 'seen'], ['확인 회사', 'acked']]);
+    expect(d?.companies.map((c) => [c.companyName, c.status])).toEqual([['확인 회사', 'acked'], ['본 회사', 'seen'], ['안 본 회사', 'none']]);
     const a = d!.companies.find((c) => c.companyId === CO_A)!;
     expect(a.ackAt).toBe('2026-10-29T11:05:00.000Z');
     expect(a.ackLoginId).toBe('a-gone');
@@ -227,6 +227,26 @@ describe('공지 확인 현황(D) 집계', () => {
     const evCall = mockQuery.mock.calls.find((c) => String(c[0]).includes('FROM audit_logs al'))!;
     expect(String(evCall[0])).toMatch(/created_at >= \(\$1::date::timestamp AT TIME ZONE 'Asia\/Seoul'\)/);
     expect(evCall[1][0]).toBe(N.startsAt);
+  });
+
+  it('같은 상태 안 = 그 상태가 된 시각 최근 순(확인함 = 확인 시각 · 아직 안 봄 = 마지막 로그인)', async () => {
+    const X = 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee';
+    const Y = 'ffffffff-ffff-4fff-8fff-ffffffffffff';
+    mockDemoIds.mockResolvedValue([]);
+    mockQuery.mockImplementation(async (sql: string) => {
+      if (sql.includes('FROM companies c')) return { rows: [{ company_id: X, company_name: '먼저 확인' }, { company_id: Y, company_name: '나중 확인' }, { company_id: CO_B, company_name: '옛 로그인' }, { company_id: CO_C, company_name: '최근 로그인' }] };
+      if (sql.includes('FROM users u')) return { rows: [
+        { company_id: CO_B, user_id: 'ub1', login_id: 'b1', name: '', last_login_at: '2026-10-20T00:00:00Z' },
+        { company_id: CO_C, user_id: 'uc1', login_id: 'c1', name: '', last_login_at: '2026-10-29T00:00:00Z' },
+      ] };
+      if (sql.includes('FROM audit_logs al')) return { rows: [
+        { company_id: X, user_id: 'x1', login_id: 'x1', action: 'customer_notice_ack', first_at: '2026-10-29T10:00:00Z' },
+        { company_id: Y, user_id: 'y1', login_id: 'y1', action: 'customer_notice_ack', first_at: '2026-10-29T11:00:00Z' },
+      ] };
+      throw new Error('예상 밖 SQL');
+    });
+    const d = await loadNoticeAck(N.id);
+    expect(d?.companies.map((c) => c.companyName)).toEqual(['나중 확인', '먼저 확인', '최근 로그인', '옛 로그인']);
   });
 
   it('원장에 없는 공지 id = null', async () => {
@@ -274,6 +294,15 @@ describe('배선 계약(소스) — 화면 · 경로 · 권한 · 문구', () =>
     expect(page).toMatch(/for \(let i = 0; i < 3 && !stop; i \+= 1\)[\s\S]{0,200}if \(status !== 503\) return;/);
     expect(page).toMatch(/if \(status === 204\) markNoticeAcked\(loginMark, SECURITY_NOTICE_ID\);/);
     expect(card).toMatch(/useBodyFlag\('data-interrupt-open', !!noticeId\)/);
+  });
+
+  it('D = 10개씩 쪽 넘김 · 기본 전체(서버 순서 = 확인한 업체 먼저) · 「확인한 업체」 버튼(Harold 1029)', () => {
+    const tab = front('components/admin/CustomerNoticeAckTab.tsx');
+    expect(tab).toMatch(/const PAGE_SIZE = 10;/);
+    expect(tab).toMatch(/<ListPager page=\{page\} total=\{filtered\.length\} pageSize=\{PAGE_SIZE\}/);
+    expect(tab).toMatch(/const rows = pageSlice\(filtered, page, PAGE_SIZE\);/);
+    expect(tab).toMatch(/useState<Filter>\('all'\)/);
+    expect(tab).toMatch(/\{ key: 'acked', label: '확인한 업체' \}/);
   });
 
   it('고객 경로는 로그인 문 뒤 · 관리자 경로는 열람 권한 문', () => {
