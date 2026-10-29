@@ -214,6 +214,14 @@
 > W1 한줄전단 API(별개 저장소 hanjulDM · 원장 = hanjulDM status/STATUS.md 1027 절) = 첫 경보로 찾음 → 같은 날 닫음. 의존성 = 운영 audit 치명 1 · 높음 19 → 0(puppeteer 25 · xlsx 공식 0.20.3 · zod 제거 · allowScripts = puppeteer@25.16.0 만) · W3 렌더 크롬 = 기동 한 곳 `utils/flyer/product/render-browser.ts` · --no-sandbox 0 · 같은 /opt/hanjul-chrome · 못 뜨면 실패 · W2 로그인 요청 제한 = 비밀번호 · OTP · 등록 토큰 확인 5곳 `middlewares/login-limiter.ts`(같은 IP 처리 중 + 1분 안 실패 > 10 = 429 · 들어올 때 세고 성공하면 뺌 · Codex 1R 「동시 정상 11건째 429」는 끝난 실패만 세면 몰아 보내는 추측이 한도 없이 통과해 불수용 · 두 동작 시험 고정) · 함께 닫음 = xlsx 0.20.3 이 날짜 칸을 서버 시각대 자정으로 줘 고객 업로드 생일이 KST 에서 하루 앞 → CT `sheetDateToYmd`. 검증 = tsc 0 · vitest 375 · 변이 5 · Codex 적대 2R approve(1R 은 요청문이 파일 읽기까지 막아 4개만 읽음 = 재발 기록). 실측(09:10) = audit 운영 0 · build:safe · 새 dist 크롬 = /opt 156 · 샌드박스 끄는 인자 0 · PDF · PNG 생성 · restart 뒤 online · Node 24.22.1 · health 200 · nginx 경유 없는 아이디 11번 = 401 10 → 429(도메인 DNS = .62 직결 · CDN 없음) · 에러 로그 새 줄 0.
 > 남은 것 = 3 밤 창 apt 99 + 커널 재부팅 · 4 SSH 키 전용(두 번째 문 실측 먼저) · 5 패널 2단계(Harold) · 6 떠돌이 파일 · 8 이상 행위 경보(기준값 실데이터) · 9 백업 복구 훈련 · A4 HMAC(IMC 업체 키 발급 요청) · A1 · A5 · 미실측 = 재시작 뒤 정상 080 콜백 등록 줄 · 한줄전단 실제 전단 PDF · OG 경로 첫 요청 · 범위 밖 기록 = 한줄전단 고객 화면 파일 업로드 응답 계약 불일치(success · fileId) · pdfkit 미사용 선언 · 한줄로 프론트 react-router 7(닿지 않는 2건) · pos-agent 의존성(별도 배포본)
 
+<a id="c83"></a>
+
+### C83 · ★1029 고객 보안 공지(B 카드 · C 점검 기록 · D 공지 확인 현황) + .65 · .66 Node 보안판 처방
+> 호출어 **"안심 팝업 / 공지 확인 현황 / Node 보안판 / KMC 공지"** → [설계서](../docs/2026-10-29-customer-security-notice-ack-design.md) · 원장 C83-S1 · S2 · 메모리 `project_2026_1029_kmc_notice_node_security_check`
+> 서버(Harold 실행 · 실측) = .66 근태 22.23.2 → 22.23.4 · ERP web · api · jobs 20.11.1 → 24.22.1(ready 35 영역 전후 같음) · 발송 콘솔 앱 · pm2 데몬 20.11.1 → 24.22.1(유닛 drop-in · 재부팅 생존) · CureOPS 24.21.0 → 24.22.1 · .65 관리 API apt 18.19.1 → /opt 24.22.1(직전 v1 발송 0 · health 200) · 옛 판은 되돌리기용으로 남김.
+> 화면 = B 카드(App 전역 · 확인은 204 뒤에만) · C `/security-report`(에이전트 회사 허용) · D 슈퍼관리자 보안 · 인증(ceo · suran). 원천 = audit_logs 사건 3(새 칸 0 · DDL 0) · CT `utils/customer-notice.ts`.
+> 검증 = tsc 0 · vitest 전체 722 파일 · 변이 9 · 시험 DB SQL 4 · 개발 서버 DOM 실측 1440 · 390 · Codex 설계 3R · 구현 1R 2 → 2R 1(같은 뿌리) → 3R approve → 4R approve(문구 한 줄 · 실측보다 앞선 「로그인, 발송, 결과 조회」 문장 정정). 1차 커밋 5264fa99 = 구현 1R 수정본(C82 와 한 커밋 · 1029 배포) · 2R 수정 · 열람 재시도 · 문구 정정은 작업 트리(C83-S2).
+
 <a id="c82"></a>
 
 ### C82 · ★1029 싱크에이전트 키 발급 = 설치 서버 공인 IP 필수 · 출발지 등록 한 번에 — 구조체크 8회 · Codex 설계 3R · 구현 3R approve · 미커밋

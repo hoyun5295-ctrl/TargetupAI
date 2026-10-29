@@ -7,9 +7,9 @@
 
 ## 머리
 
-- pulled_head: 8ee58bd7 · 2026-10-29 · Harold 배포 완료 보고(C78)
-- deployed_head: 8ee58bd7 · 2026-10-29 · Harold 「배포완료했어」(C78 = 백엔드 + 프론트) · C77-ENV-1 은 아직
-- 이번 창 확인 출력: backend-build · reload
+- pulled_head: 5264fa99 · 2026-10-29 · Harold 「배포하고 이거까지 완료」(git pull · backend · frontend build:safe · pm2 reload targetup-backend)
+- deployed_head: 5264fa99 · 2026-10-29 · 같은 보고(C79 · C80 · C81 · C82 · C83 = 백엔드 + 프론트) · 계산상 restart-env = 새 env 이름 INTERNAL_TEST_COMPANY_IDS 가 범위에 보여서 · 그 값은 아직 안 넣음(C77-ENV-1) → reload 로 충분 · C77-ENV-1 은 아직
+- 이번 창 확인 출력: backend-build · frontend-build · reload(Harold 보고 · 출력 원문은 안 받음)
 - 마지막 해시 대조: 2026-10-28 08:27 · 같음(운영 6c12ee8b = t_tpl_closed 6c12ee8b · 덤프 + §2 DDL-1 · DDL-3 · 그 전 07:43 덤프만 043ff07c 같음 · test:pg 1파일 15건 통과)
 - 덤프: 2026-10-27 21:55 서버 파일 · server_version 15.15 · datcollate en_US.utf8 · TimeZone Etc/UTC · 머리 SELECT 2026-10-28 07:42
 
@@ -29,7 +29,8 @@
 | C79 | 35966174 |
 | C80 | 35966174 |
 | C81 | ec8b59d4 |
-| C82 | 미커밋 |
+| C82 | 5264fa99 |
+| C83 | 5264fa99 |
 
 ## §1 대기
 
@@ -266,6 +267,22 @@ ALTER TABLE continuous_operators ADD COLUMN IF NOT EXISTS voice_form jsonb NULL;
 - 선행: 없음(서버 코드 변경 0 · 바뀐 파일 = sync-agent 만 · DDL 0 · ENV 0)
 - 기대: C80-G1 과 같다 — `npm run upload:releases` · 슈퍼관리자 릴리즈 등록 · `npm run upload:agents`(`build:tiers:deploy`) 셋 다 하지 않는다 · `CURRENT_AGENT_VERSION` 1.7.2 그대로 · 엠티 전달본 = `Downloads\엠티콜렉션_SyncAgent_v1.7.5\`(zip sha256 `494d081d3467ed88ed7bbc312dfd8ce19b04326a10ae44cc17777b4bbc5ab58c` · 안내서 PDF 11쪽) · 1.7.4 · 1.7.3 폴더는 보내지 않는다(1.7.4 = 날짜 결함)
 - 확인: 배포 창 SQL `SELECT version, tier, is_active FROM sync_releases WHERE is_active ORDER BY released_at DESC LIMIT 5;` 에 1.7.3 · 1.7.4 · 1.7.5 없음
+- 결과:
+
+### C83-S1 · 공지 판정 · 집계 쿼리 실행 계획(운영 · 배포 뒤 · 설계서 §5 2-1)
+- 카드: C83
+- 단계: 사후
+- 선행: 5264fa99 배포(끝)
+- 기대: 판정 SQL = `idx_audit_logs_user` Index Cond 에 user_id · created_at 함께 · 50ms 이하 / D 집계 = 2초 이하 · 넘으면 색인 설계(설계서 §5 2-1)
+- 확인: Harold 실행 · 명령은 그 시각에 하나씩(공지 시작 뒤 감사 기록이 가장 많은 사람 계정 → 그 계정으로 판정 SQL `EXPLAIN (ANALYZE, BUFFERS)` → D 집계 `EXPLAIN (ANALYZE, BUFFERS)`)
+- 결과:
+
+### C83-S2 · 공지 후속 프론트 배포(구현 2R · 3R · 4R 수정분)
+- 카드: C83
+- 단계: 사후
+- 선행: 커밋(작업 트리 = SecurityNoticeCard.tsx · SecurityReportPage.tsx · security-report.ts · customer-notice-1029.test.ts)
+- 기대: 프론트만(build:safe · 백엔드 재시작 0 · DDL 0 · ENV 0) · 배포본 C 문구 = 「교체한 뒤 서비스가 정상 동작하는 것을 확인했습니다」(1차 배포본의 「로그인, 발송, 결과 조회」 문장 사라짐)
+- 확인: 배포 뒤 hanjul.ai `/security-report` 화면 문구 · 고객 계정 로그인 때 B 카드 · 「확인했습니다」 뒤 카드 사라짐
 - 결과:
 
 ### C82-S1 · 싱크 키 발급 = 설치 서버 공인 IP 필수 · 출발지 등록 한 번에(배포 뒤 실측 · 테스트계정)

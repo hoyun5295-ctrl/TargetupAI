@@ -84,6 +84,7 @@
   - ★**SSH(22) 출발지 허용(0924)** = `115.138.27.202`(owner · 집) · `180.226.236.94`(company-admin · 회사) · `106.101.137.84`(temporary harold hotspot · **삭제 예정**). 일본 임시 `122.213.198.74` 는 0924 삭제. ⚠ 휴대폰 데이터 IP 는 재연결 때 바뀐다(0924 같은 날 `106.101.135.212` 로 바뀌어 무용) — 원격 작업용 사전 등록 수단이 못 된다. 휴대폰이 와이파이에 붙은 채 핫스팟을 켜면 그 와이파이 IP 로 나간다(tracert 실측). 삭제 = `ufw delete allow from 106.101.137.84 to any port 22 proto tcp`(root).
 - `fail2ban` 가동 중
 - 환경변수 = `/etc/default/bito-gateway`(EnvironmentFile) + 유닛 드롭인 3종
+- ★1029 관리 API Node = 공식 압축본 `/opt/node-v24.22.1-linux-x64`(sha256 대조) · `bito-admin-api.service.d/40-node24.conf` 가 ExecStart 를 바꾼다 · apt nodejs 18.19.1 은 되돌리기용으로 남김(지우면 drop-in 만 지워 되돌릴 길이 없다) · 관리 API 가 고객 발송 API(`/api/v1`)도 받는다 → 재시작 = 수 초 고객 API 끊김. 경위 = STATUS-FEED C83
 - ⚠ **비밀번호 평문 노출** — 상세 §3.
 
 ### .66 — 사내 (58.227.193.66)
@@ -92,6 +93,7 @@
 - **★0922 실측**(Harold): 보드 **ASUS ROG STRIX Z490-F GAMING**(소비자용 · DDR4 4슬롯 · 최대 128G · M.2 2개 · ECC 없음) · i7-10700 16스레드 · RAM 31G(가용 28G) · 디스크 **Samsung SSD 870 931.5G SATA 1장**(13G 사용 · NVMe 없음) · 부하 0.03 · 가동 53일 · NIC `enp3s0` 하나(`drop 40/min`) · 구동 = pm2 `bito-console` + Bito Agent 4개(`bito-agent` + test-97/98/99) + MySQL(127.0.0.1) + PostgreSQL 16(127.0.0.1) + nginx. **한줄로 DB 분리 서버로 재활용 검토 중** = [FEATURE-INFRA-CAPACITY.md §3-2](../docs/FEATURE-INFRA-CAPACITY.md)(RAM 128G + NVMe 2장 · 그 위 것들은 경량 서버로 · Agent 이전 시 `.65` 9090 허용 목록 갱신)
 - ★2026-08-30 추가 = **MySQL 8.0.46**(`smsdb` · `bind-address` `127.0.0.1` · 3306·33060 외부 노출 0) + **Bito Agent v1.0.14**(`bito-agent.service` · `/opt/bito-agent` · agentID `bito-agent-01` · 대상 `SMSQ_SEND_13`). 발송 콘솔용 사내 확인 환경이다. 그룹웨어(PostgreSQL·next-server)와 접점 없음. 절차·불변 = `bito-console/docs/OPS.md` §7-6
 - ⚠ 커널 `6.8.0-31`로 같은 24.04 계열 중 가장 오래됐다(`.65`는 136). 패치 주기에서 빠져 있다.
+- ★1029 Node 실행 판(실측) = 근태 invito-api · web `/opt/node`(링크) → `/opt/node-v22.23.4-linux-x64` · ERP web · api · jobs + 발송 콘솔 앱 · pm2 데몬 = nvm `v24.22.1`(각 유닛 `40-node24.conf` · nvm 기본 판 24.22.1) · CureOPS `/opt/cureops/runtime/node` = 24.22.1. 되돌리기용 옛 판 = nvm 20.11.1 · `/opt/node-v22.23.2-linux-x64` · `/opt/cureops/runtime/node-v24.21.0`. 저장소 판 고정(bito-console engines · Dockerfile · OPS / vito-erp engines · deploy 유닛 / CureOPS setup-runtime.sh)은 아직 20 · 24.21.0 그대로. 경위 = STATUS-FEED C83
 
 - **★1008 출장 중 접속**: .66 SSH(22)는 바깥 닫힘 · Tailscale 미설치 · **.65 에서는 열림**(`nc -zv 58.227.193.66 22` succeeded) → 노트북에서 `ssh -o PubkeyAuthentication=no -J invito@100.98.116.90 invito@58.227.193.66` · 파일 = `scp -o PubkeyAuthentication=no -J invito@100.98.116.90 <파일> invito@58.227.193.66:~/`(1008 vito-erp 소스 tar 전송 · sha256 일치 확인). 새 출발지 개방 0.
 

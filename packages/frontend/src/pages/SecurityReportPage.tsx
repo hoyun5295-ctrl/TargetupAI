@@ -24,7 +24,20 @@ export default function SecurityReportPage() {
   const [acked, setAcked] = useState(false);
   const [saving, setSaving] = useState(false);
 
-  useEffect(() => { void postNoticeEvent(SECURITY_NOTICE_ID, 'report').catch(() => {}); }, []);
+  // 「점검 기록 열람」 = D 상태를 정하는 기록 → 저장 실패(503 · 망 오류)는 이 화면에 있는 동안 두 번 더 보낸다(Codex 구현 2R)
+  useEffect(() => {
+    let stop = false;
+    (async () => {
+      for (let i = 0; i < 3 && !stop; i += 1) {
+        try {
+          const status = await postNoticeEvent(SECURITY_NOTICE_ID, 'report');
+          if (status !== 503) return;
+        } catch { /* 망 오류 = 다시 */ }
+        await new Promise((r) => setTimeout(r, 2000 * (i + 1)));
+      }
+    })();
+    return () => { stop = true; };
+  }, []);
 
   const ack = async () => {
     if (saving || acked) return;

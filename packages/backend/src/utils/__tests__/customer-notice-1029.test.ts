@@ -267,8 +267,11 @@ describe('배선 계약(소스) — 화면 · 경로 · 권한 · 문구', () =>
     // 표식은 누른 순간의 로그인(응답 순간이 아니다) · 카드는 prop 의 loginMark · 점검 기록 화면은 await 앞에서 잡는다
     expect(card).not.toMatch(/function markNoticeAcked[\s\S]{0,200}useAuthStore\.getState/);
     expect(page).toMatch(/const loginMark = currentLoginMark\(\);\s*try \{\s*const status = await postNoticeEvent/);
-    expect(card).toMatch(/readMark\(ACKED_KEY\) === `\$\{loginMark\}\|\$\{id\}`/);
-    expect(card).toMatch(/window\.addEventListener\(ACKED_EVENT, on\)/);
+    // 확인 성공을 읽는 자리 한 곳 = 먼저 구독 · 그 다음 표식(사이에 온 성공을 놓치지 않는다 · Codex 구현 2R)
+    expect(card).toMatch(/window\.addEventListener\(ACKED_EVENT, on\);\n\s*if \(readMark\(ACKED_KEY\) === key\) setNoticeId\(null\);/);
+    expect(card.match(/readMark\(ACKED_KEY\)/g)?.length).toBe(1);
+    // 점검 기록 열람 저장 실패(503 · 망 오류)는 화면에 있는 동안 다시 보낸다
+    expect(page).toMatch(/for \(let i = 0; i < 3 && !stop; i \+= 1\)[\s\S]{0,200}if \(status !== 503\) return;/);
     expect(page).toMatch(/if \(status === 204\) markNoticeAcked\(loginMark, SECURITY_NOTICE_ID\);/);
     expect(card).toMatch(/useBodyFlag\('data-interrupt-open', !!noticeId\)/);
   });

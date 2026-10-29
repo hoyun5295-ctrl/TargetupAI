@@ -104,7 +104,7 @@ function NoticeCardForLogin({ loginMark }: { loginMark: string }) {
         const d = await r.json();
         const id: string | null = r.ok && d?.notice?.id ? String(d.notice.id) : null;
         if (!id || ctl.signal.aborted) return;
-        if (readMark(CLOSED_KEY) === `${loginMark}|${id}` || readMark(ACKED_KEY) === `${loginMark}|${id}`) return;
+        if (readMark(CLOSED_KEY) === `${loginMark}|${id}`) return;
         setNoticeId(id);
         // 「떴다」 = 한 로그인에 한 번(서버도 처음 한 번만 남긴다) · 화면을 떠나도 끊지 않는다 · 남겨진 것이 확인되면 표식
         if (readMark(SHOWN_KEY) !== `${loginMark}|${id}`) {
@@ -115,11 +115,14 @@ function NoticeCardForLogin({ loginMark }: { loginMark: string }) {
     return () => { alive.current = false; ctl.abort(); };
   }, [loginMark]);
 
-  // 같은 로그인의 다른 카드 · 점검 기록 화면이 받은 확인 성공 = 이 카드도 내린다
+  // 같은 로그인의 다른 카드 · 점검 기록 화면이 받은 확인 성공 = 이 카드도 내린다.
+  // 확인 성공을 읽는 자리는 여기 한 곳 — 먼저 구독하고 그 다음 표식을 읽어 사이에 온 성공도 놓치지 않는다(Codex 구현 2R).
   useEffect(() => {
     if (!noticeId) return;
-    const on = (e: Event) => { if ((e as CustomEvent).detail === `${loginMark}|${noticeId}`) setNoticeId(null); };
+    const key = `${loginMark}|${noticeId}`;
+    const on = (e: Event) => { if ((e as CustomEvent).detail === key) setNoticeId(null); };
     window.addEventListener(ACKED_EVENT, on);
+    if (readMark(ACKED_KEY) === key) setNoticeId(null);
     return () => window.removeEventListener(ACKED_EVENT, on);
   }, [loginMark, noticeId]);
 

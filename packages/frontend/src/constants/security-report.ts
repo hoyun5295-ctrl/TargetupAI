@@ -20,7 +20,7 @@ export const SECURITY_ITEMS: ReadonlyArray<{ title: string; tag?: string; state:
     state: 'applied',
     chip: '보안판 적용',
     short: '10월 21일 공개된 보안 업데이트 판으로 서버를 올렸습니다.',
-    detail: '한줄로 서비스 서버와 발송 서버를 10월 21일 보안 업데이트 판으로 올렸습니다. 교체한 뒤 로그인, 발송, 결과 조회가 정상인지 확인했습니다.',
+    detail: '한줄로 서비스 서버와 발송 서버를 10월 21일 보안 업데이트 판으로 올렸습니다. 교체한 뒤 서비스가 정상 동작하는 것을 확인했습니다.',
   },
   {
     title: 'PHP 취약점',
