@@ -1,12 +1,13 @@
 import bcrypt from 'bcryptjs';
 import { validateElements, matchesRule, invalidateSpamBlockCache, maskSample, parseBlockMode, SPAM_BLOCK_NOTICE } from '../utils/spam-block';
 import { composeSpamCheckText } from '../utils/messageUtils';
-import { isGeoBlockEnforced, isGeoSchemaMissing, GEO_BLOCK_NOTICE, validateCidrToken, parseExceptionExpiry, resolveExceptionTarget } from '../utils/geo-access';
+import { isGeoBlockEnforced, isGeoSchemaMissing, GEO_BLOCK_NOTICE, validateCidrToken, parseExceptionExpiry, resolveExceptionTarget, insertOriginException, isInvalidCidrError } from '../utils/geo-access';
+import { issueSyncAgentKeys, listAgentOrigins } from '../utils/sync-key-issue';
 import { checkSenderLineLimit, isLineLimitSchemaMissing, getSenderLinePolicy, lineKindOf, parseLineLimitInput } from '../utils/sender-line-limit';
 import { logPrivacyExport, logPrivacyPurge } from '../utils/privacy-audit';
 import crypto from 'crypto';
 // ★2026-09-12 싱크에이전트 시크릿 해시(원문 미저장 · 발급 시 1회 노출)
-import { hashSecret, omitCompanySecrets } from '../utils/secret-hash';
+import { omitCompanySecrets } from '../utils/secret-hash';
 import { isMissingSchemaError, migrationPendingBody } from '../utils/db-errors';
 import { Request, Response, Router } from 'express';
 import { mysqlQuery, query, pool } from '../config/database';
@@ -83,7 +84,8 @@ import { applyPlanRequestWithClient, PlanTermError, planTermManagedSql, planTerm
 import { loadAgencyCallbackKinds } from '../utils/agency-send-intake';
 import { switchCompanyBillingType } from '../utils/billing-type-history';
 import { recordCallbackNumberCreated, recordCallbackNumberUpdated, recordCallbackNumberDefaultChanged, recordCallbackNumberDeleted, recordUserAccountDeleted, recordUnsubscribeDeleted } from '../utils/change-audit';
-import { recordAuditLog, isAuditLogViewer, isAiTrainingViewer, isGeoHitsViewer, isHelpQuestionViewer, isLineGroupAdmin, isSettlementOverviewViewer, isBestLayoutViewer, isPrecheckUsageViewer, isFeatureInterestViewer, isIdentityStatusViewer, isIntroLeadsViewer, isWatchLogViewer, hiddenAccessOwnerIds, diffFields } from '../utils/audit-log';
+import { recordAuditLog, isAuditLogViewer, isAiTrainingViewer, isGeoHitsViewer, isHelpQuestionViewer, isLineGroupAdmin, isSettlementOverviewViewer, isBestLayoutViewer, isPrecheckUsageViewer, isFeatureInterestViewer, isIdentityStatusViewer, isIntroLeadsViewer, isWatchLogViewer, isNoticeAckViewer, hiddenAccessOwnerIds, diffFields } from '../utils/audit-log';
+import { loadNoticeAck } from '../utils/customer-notice'; // ★ 2026-10-29 공지 확인 현황(ceo · suran)
 import { loadWatchIps, loadWatchIpEvents } from '../utils/watch-alert'; // ★ 2026-10-07 감시 기록(ceo 전용)
 import { loadIntroLeads, parseIntroLeadsQuery } from '../utils/intro-leads'; // ★ 2026-10-07 소개 방문 · 시연 요청(ceo · suran)
 import { loadFeatureInterest, parseFeatureInterestQuery } from '../utils/feature-interest'; // ★ 2026-10-06 기능 관심 업체(ceo 전용)
@@ -1174,23 +1176,20 @@ router.post('/geo/exceptions', authenticate, requireSuperAdmin, requireAdminArea
     const expiry = parseExceptionExpiry(req.body?.expiresAt);
     if (!expiry.ok) return res.status(400).json({ error: expiry.reason });
 
-    const result = await query(
-      `INSERT INTO access_origin_allowlist
-         (id, scope, company_id, user_id, cidr, reason, approved_by, approved_at, expires_at, is_active, created_at)
-       VALUES (gen_random_uuid(), $1, $2::uuid, $3::uuid, $4::cidr, $5, $6::uuid, NOW(), $7, true, NOW())
-       RETURNING id`,
-      [scope, companyId, userId, cidr, reason.slice(0, 500), req.user?.userId || null, expiry.value]
-    );
+    // ★ 2026-10-29 INSERT = geo-access CT 한 벌(싱크 키 발급 CT 와 같이 쓴다 · 문장 그대로)
+    const id = await insertOriginException(query, {
+      scope, companyId, userId, cidr, reason, approvedBy: req.user?.userId || null, expiresAt: expiry.value,
+    });
 
     await recordAuditLog({
       actorUserId: req.user?.userId,
       action: 'access_origin_exception_granted',
       targetType: 'access_origin_allowlist',
-      targetId: result.rows[0].id,
+      targetId: id,
       details: { scope, companyId, userId, cidr, reason, expiresAt: expiry.value },
       req,
     });
-    return res.json({ id: result.rows[0].id });
+    return res.json({ id });
   } catch (error: any) {
     if (isGeoSchemaMissing(error)) return res.status(503).json(GEO_MIGRATION_HINT);
     console.error('접근 예외 등록 실패:', error);
@@ -5077,6 +5076,26 @@ router.get('/intro-leads', authenticate, requireSuperAdmin, async (req: Request,
   }
 });
 
+// ★ 2026-10-29: 공지 확인 현황 — ceo · suran (NOTICE_ACK_VIEWER_IDS, 기본 'ceo,suran') AND 등급표. 메뉴 노출 게이팅용
+router.get('/customer-notice-ack/access', authenticate, requireSuperAdmin, async (req: Request, res: Response) => {
+  res.json({ allowed: await isNoticeAckViewer(req.user?.userId) });
+});
+
+/** ★ 2026-10-29 공지 확인 현황 (Harold 명시 · 읽기만) — 집계 소유 = utils/customer-notice.ts */
+router.get('/customer-notice-ack', authenticate, requireSuperAdmin, async (req: Request, res: Response) => {
+  try {
+    if (!(await isNoticeAckViewer(req.user?.userId))) {
+      return res.status(403).json({ success: false, error: '공지 확인 현황 열람 권한이 없습니다.' });
+    }
+    const data = await loadNoticeAck(typeof req.query.noticeId === 'string' ? req.query.noticeId : undefined);
+    if (!data) return res.status(404).json({ success: false, error: '공지를 찾을 수 없습니다.' });
+    return res.json({ success: true, ...data });
+  } catch (err: any) {
+    console.error('[admin/customer-notice-ack] 조회 실패:', err);
+    return res.status(500).json({ success: false, error: '공지 확인 현황을 불러오지 못했습니다.' });
+  }
+});
+
 /**
  * ★ 2026-10-27 자사몰 연동 감시 표 1단(자사몰 대비 설계 K10 · 읽기만 · 행 버튼 0) — 조회 소유 = utils/mall-integration-monitor.ts
  *   한 행 = 몰 하나 · 문제(K7 분류) · 마지막 수신 · 평소 간격 대비 · 토큰 만료 · 가져오기 · 모르는 주문 상태 글자. 첫 고객 동행 14일 동안 매일 본다.
@@ -6071,47 +6090,44 @@ router.get('/companies/:id/sync-keys', authenticate, requireSuperAdmin, async (r
   }
 });
 
-// SyncAgent 키 재발급
-router.post('/companies/:id/sync-keys/regenerate', authenticate, requireSuperAdmin, async (req: Request, res: Response) => {
-  const { id } = req.params;
+// ★ 2026-10-29 SyncAgent 접속 허용 IP — 그 회사 company_agent 활성 행 전부 + 발급 · 회수 등급 + 통제 시행 여부(싱크 탭 · 회수 = 국외 접근 통제 회수 라우트)
+//   전체 예외 목록(최신 300건)과 무관하게 회사 단위로 다 본다(설계서 docs/2026-10-29-sync-key-origin-required-design.md §2-5)
+router.get('/companies/:id/sync-origins', authenticate, requireSuperAdmin, async (req: Request, res: Response) => {
   try {
-    const exists = await query('SELECT id FROM companies WHERE id = $1', [id]);
-    if (exists.rows.length === 0) {
-      return res.status(404).json({ error: '회사를 찾을 수 없습니다.' });
-    }
+    return res.json(await listAgentOrigins(req.params.id, req.user?.userId));
+  } catch (error: any) {
+    if (isGeoSchemaMissing(error)) return res.status(503).json(GEO_MIGRATION_HINT);
+    console.error('SyncAgent 접속 허용 IP 조회 실패:', error);
+    return res.status(500).json({ error: '접속 허용 IP 조회 실패' });
+  }
+});
 
-    const newApiKey = `tk_${crypto.randomBytes(24).toString('hex')}`;
-    const newApiSecret = crypto.randomBytes(32).toString('hex');
-
-    // ★2026-09-12 **해시만 저장하고 원문은 이 응답에만 싣는다**(Harold 확정 · 자사몰 키와 같은 방식).
-    //   옛 원문 컬럼은 같은 자리에서 비운다 — 재발급한 회사가 평문을 그대로 들고 있으면 전환한 의미가 없다.
-    const result = await query(
-      `UPDATE companies
-       SET api_key = $1, api_secret_hash = $2, api_secret = NULL, updated_at = NOW()
-       WHERE id = $3
-       RETURNING api_key, use_db_sync`,
-      [newApiKey, hashSecret(newApiSecret), id]
-    );
-
-    // ★2026-09-13(3) 재발급 감사 기록(싱크 등재분 ④). 키 교체는 고객사 에이전트 연결을 즉시 끊는 조치라 누가 언제 했는지 남긴다.
-    //   ⛔ 키·시크릿 원문을 싣지 않는다(키 끝 4자리만 · 에이전트 설정과 대조용). 기록 실패는 CT가 흡수한다.
-    await recordAuditLog({
-      actorUserId: req.user?.userId,
-      action: 'sync_key_regenerate',
-      targetType: 'company',
-      targetId: id,
-      details: { apiKeyTail: newApiKey.slice(-4) },
-      req,
-    });
-
+// SyncAgent 키 재발급
+// ★ 2026-10-29 발급 = CT 한 곳(utils/sync-key-issue.ts · 설치 서버 공인 IP 필수 · 같은 트랜잭션에 출발지 등록 · 이전 발급 출발지 회수 · 감사 · 뿌리 R29).
+//   ★2026-09-12 시크릿은 해시만 저장하고 원문은 이 응답에만 싣는다(Harold 확정 · 자사몰 키와 같은 방식).
+router.post('/companies/:id/sync-keys/regenerate', authenticate, requireSuperAdmin, async (req: Request, res: Response) => {
+  try {
+    const r = await issueSyncAgentKeys({ companyId: req.params.id, originIp: req.body?.originIp, actorUserId: req.user?.userId, req });
+    if (!r.ok) return res.status(r.status).json({ error: r.error, code: r.code });
+    const originLine = r.originAdded
+      ? `접속 허용 IP ${r.originIp} 를 국외 접근 통제에 함께 등록했습니다.`
+      : `접속 허용 IP ${r.originIp} 는 국외 접근 통제에 이미 허용되어 있습니다.`;
+    const revokedLine = r.revokedOrigins.length > 0 ? ` 이전 발급 출발지 ${r.revokedOrigins.length}개는 회수했습니다.` : '';
     res.json({
       // 원문은 지금 이 응답이 유일한 전달 경로다(서버에 남지 않는다)
-      syncKeys: { ...result.rows[0], api_secret: newApiSecret, has_secret: true },
+      syncKeys: { api_key: r.apiKey, use_db_sync: r.useDbSync, api_secret: r.apiSecret, has_secret: true },
       secretShownOnce: true,
-      message: 'API Key가 재발급되었습니다. 기존 키는 즉시 무효화됩니다. 시크릿은 지금만 확인할 수 있으니 복사해 두세요.',
+      originIp: r.originIp,
+      originCidr: r.originCidr,
+      originAdded: r.originAdded,
+      revokedOrigins: r.revokedOrigins,
+      message: `API Key가 재발급되었습니다. 기존 키는 즉시 무효화됩니다. ${originLine}${revokedLine} 시크릿은 지금만 확인할 수 있으니 복사해 두세요.`,
     });
-  } catch (error) {
-    if (isMissingSchemaError(error)) return res.status(503).json(migrationPendingBody('companies.api_secret_hash ALTER'));
+  } catch (error: any) {
+    if (isInvalidCidrError(error)) return res.status(400).json({ error: 'IP 주소 형식이 아닙니다.', code: 'ORIGIN_IP_INVALID' });
+    if (isMissingSchemaError(error)) {
+      return res.status(503).json(String(error?.message || '').includes('access_origin_allowlist') ? GEO_MIGRATION_HINT : migrationPendingBody('companies.api_secret_hash ALTER'));
+    }
     console.error('SyncAgent 키 재발급 실패:', error);
     res.status(500).json({ error: 'SyncAgent 키 재발급 실패' });
   }

@@ -214,6 +214,14 @@
 > W1 한줄전단 API(별개 저장소 hanjulDM · 원장 = hanjulDM status/STATUS.md 1027 절) = 첫 경보로 찾음 → 같은 날 닫음. 의존성 = 운영 audit 치명 1 · 높음 19 → 0(puppeteer 25 · xlsx 공식 0.20.3 · zod 제거 · allowScripts = puppeteer@25.16.0 만) · W3 렌더 크롬 = 기동 한 곳 `utils/flyer/product/render-browser.ts` · --no-sandbox 0 · 같은 /opt/hanjul-chrome · 못 뜨면 실패 · W2 로그인 요청 제한 = 비밀번호 · OTP · 등록 토큰 확인 5곳 `middlewares/login-limiter.ts`(같은 IP 처리 중 + 1분 안 실패 > 10 = 429 · 들어올 때 세고 성공하면 뺌 · Codex 1R 「동시 정상 11건째 429」는 끝난 실패만 세면 몰아 보내는 추측이 한도 없이 통과해 불수용 · 두 동작 시험 고정) · 함께 닫음 = xlsx 0.20.3 이 날짜 칸을 서버 시각대 자정으로 줘 고객 업로드 생일이 KST 에서 하루 앞 → CT `sheetDateToYmd`. 검증 = tsc 0 · vitest 375 · 변이 5 · Codex 적대 2R approve(1R 은 요청문이 파일 읽기까지 막아 4개만 읽음 = 재발 기록). 실측(09:10) = audit 운영 0 · build:safe · 새 dist 크롬 = /opt 156 · 샌드박스 끄는 인자 0 · PDF · PNG 생성 · restart 뒤 online · Node 24.22.1 · health 200 · nginx 경유 없는 아이디 11번 = 401 10 → 429(도메인 DNS = .62 직결 · CDN 없음) · 에러 로그 새 줄 0.
 > 남은 것 = 3 밤 창 apt 99 + 커널 재부팅 · 4 SSH 키 전용(두 번째 문 실측 먼저) · 5 패널 2단계(Harold) · 6 떠돌이 파일 · 8 이상 행위 경보(기준값 실데이터) · 9 백업 복구 훈련 · A4 HMAC(IMC 업체 키 발급 요청) · A1 · A5 · 미실측 = 재시작 뒤 정상 080 콜백 등록 줄 · 한줄전단 실제 전단 PDF · OG 경로 첫 요청 · 범위 밖 기록 = 한줄전단 고객 화면 파일 업로드 응답 계약 불일치(success · fileId) · pdfkit 미사용 선언 · 한줄로 프론트 react-router 7(닿지 않는 2건) · pos-agent 의존성(별도 배포본)
 
+<a id="c82"></a>
+
+### C82 · ★1029 싱크에이전트 키 발급 = 설치 서버 공인 IP 필수 · 출발지 등록 한 번에 — 구조체크 8회 · Codex 설계 3R · 구현 3R approve · 미커밋
+> 호출어 **"키 발급 IP 필수 / 접속 허용 IP / 출발지 등록"** → [설계서](../docs/2026-10-29-sync-key-origin-required-design.md) §8 구조체크 · §9 Codex 설계 · §10 구현 · 원장 C82-S1 · 뿌리 = R29 신설
+> 계기 = 엠티 VM 재검증에서 운영 출발지 통제(시행 중)에 테스트계정 에이전트가 모든 싱크 API 403 · 키 발급과 출발지 등록이 따로라 빠뜨리면 조용히 막힘 → Harold 「키 · 시크릿 발급할 때 상대 IP 필수로 개발 경로 변경」.
+> 한 것 = 발급 CT `sync-key-issue.ts`(등급 = 국외 접근 통제 쓰기 · IP 표준 꼴 · 한 트랜잭션 = 키 · 이전 발급 출발지 회수 · 덮음 확인 · 등록 · 커밋 뒤 감사) · 출발지 INSERT CT 한 벌 · 새 `GET /companies/:id/sync-origins`(회사 단위 · 등급 · 시행 여부) · 싱크 탭 IP 칸 · 접속 허용 IP 칸(조회 · 회수) · 요청 상한 · 차례 · 탭 수명 · support 등급은 발급 못 함(Harold 채택).
+> 검증 = backend · frontend tsc 0 · vitest 전체 · 실 PG 15파일 75건 · 변이 18 전부 잡힘 · Codex 구현 1R 2 → 2R 3(같은 부류 두 번째 = 단위 넓힘) → 3R approve. 범위 밖 기록 = 모달 키 조회(CompanyDetailModal.tsx:143) · 기존 사용 토글에 수명 검사 없음(같은 부류 · 착수 판단 Harold) · 자사몰 SDK 키 IP 필수(R29 알려진 빈칸) · 결과 코드 515~518 → 9999 매핑(코넥스솔루션 문의). 남은 것 = 커밋(팝업 세션과 한 번에) · 배포 · C82-S1 실측 · 엠티 키 = 엠티 서버 IP 로 발급.
+
 <a id="c81"></a>
 
 ### C81 · ★1029 싱크에이전트 1.7.5 · Oracle · PG 표준 날짜 칸 하루 당김 정정 — Codex 적대 4R approve · 미커밋

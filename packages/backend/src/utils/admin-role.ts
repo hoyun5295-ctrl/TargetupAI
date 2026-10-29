@@ -185,6 +185,13 @@ export const PERMISSION_MATRIX: PermissionRow[] = [
     levels: { super: 'R', lead: 'R', support: 'NONE' },
   },
   {
+    // ★ 2026-10-29 공지 확인 현황 — ENV 허용 목록(기본 ceo,suran)과 AND(Harold 「확인한 업체가 누군지 보안인증 메뉴에서 체크」 · 보안 · 인증 묶음 = 대표 · 지원팀장)
+    key: 'noticeAck',
+    area: '공지 확인 현황',
+    screens: '공지 확인 현황(고객 보안 공지 열람 · 확인 업체)',
+    levels: { super: 'R', lead: 'R', support: 'NONE' },
+  },
+  {
     // ★ 2026-10-07 본인인증 현황 — ENV 허용 목록(기본 ceo)과 AND(Harold 「슈퍼관리자에 나만 볼 수 있게」 · 이름 · 번호는 가린 값)
     key: 'identityStatus',
     area: '본인인증 현황',

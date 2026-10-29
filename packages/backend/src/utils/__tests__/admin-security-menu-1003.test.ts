@@ -203,11 +203,11 @@ describe('5. 화면 — 메뉴 7묶음 · 노출 · 뱃지', () => {
 
   it('항목 36개 · 각 1번(삭제 0 · 중복 0)', () => {
     const keys = [...menu.matchAll(/\{ key: '(\w+)', label: '/g)].map((m) => m[1]);
-    expect(keys.length).toBe(36); // ★ 2026-10-07 소개 방문 · 시연 요청(introLeads) · 감시 기록(watchLog) 추가 · ★ 2026-10-27 자사몰 연동 감시(mallMonitor)
-    expect(new Set(keys).size).toBe(36);
+    expect(keys.length).toBe(37); // ★ 2026-10-07 소개 방문 · 시연 요청(introLeads) · 감시 기록(watchLog) 추가 · ★ 2026-10-27 자사몰 연동 감시(mallMonitor) · ★ 2026-10-29 공지 확인 현황(noticeAck)
+    expect(new Set(keys).size).toBe(37);
     for (const k of ['companies', 'users', 'marketingDiagnosis', 'salesOutreach', 'callbacks', 'templates', 'scheduled', 'allCampaigns', 'stats',
       'agencyMail', 'agencyLedger', 'campaignAgency', 'plans', 'requests', 'deposits', 'credits', 'billing',
-      'adminAccounts', 'loginBlocks', 'geoAccess', 'spamBlock', 'auditLogs', 'identityStatus', 'opsRecords',
+      'adminAccounts', 'loginBlocks', 'geoAccess', 'spamBlock', 'auditLogs', 'identityStatus', 'opsRecords', 'noticeAck',
       'syncAgents', 'mallMonitor', 'agentDeploy', 'lineGroups', 'bestCopy', 'bestLayout', 'aiTraining', 'helpQuestions', 'precheckUsage', 'featureInterest']) {
       expect(keys, k).toContain(k);
     }

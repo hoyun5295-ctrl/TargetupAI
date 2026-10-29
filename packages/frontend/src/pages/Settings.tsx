@@ -303,6 +303,17 @@ export default function Settings() {
             </section>
           )}
 
+          {/* ★ 2026-10-29 보안 점검 기록 다시 보기(고객 보안 공지 설계서 §4 결정 3) */}
+          <button
+            type="button"
+            onClick={() => navigate('/security-report')}
+            className="flex w-full items-center gap-2.5 rounded-2xl border border-neutral-200 bg-white px-5 py-3.5 text-left text-[13px] text-neutral-700 transition hover:bg-neutral-50"
+          >
+            <ShieldCheck className="h-4 w-4 shrink-0 text-emerald-600" />
+            <span className="flex-1"><b className="font-semibold text-neutral-900">보안 점검 기록</b> 2026년 10월 PHP, Node.js 취약점 공지에 대한 점검과 조치</span>
+            <ChevronRight className="h-4 w-4 shrink-0 text-neutral-400" />
+          </button>
+
           {/* 담당자 사전수신 */}
           <section className="rounded-2xl border border-neutral-200 bg-white p-5">
             <div className="mb-4 flex items-center gap-2.5">

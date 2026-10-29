@@ -1,6 +1,7 @@
 import { useEffect, useState, useCallback, useRef, createContext, useContext, Suspense, lazy } from 'react';
 // ★ 2026-08-22 도움말 봇 — 런처는 정적, 패널은 lazy. **동적 import 리터럴은 이 파일 안에 둔다**(vite 난독화 exclude 4종 중 하나, 0718 경위)
 import HelpDock from './components/help/HelpDock';
+import SecurityNoticeCard from './components/SecurityNoticeCard'; // ★ 2026-10-29 고객 보안 공지 카드(B)
 const HelpPanel = lazy(() => import('./components/help/HelpPanel'));
 import { BrowserRouter, Routes, Route, Navigate, useNavigate, useLocation } from 'react-router-dom';
 import { ScrollManager } from './lib/scroll-restoration';
@@ -50,6 +51,7 @@ const AgencyApprovePage = lazyPage(() => import('./pages/AgencyApprovePage')); /
 const ChargeApprovePage = lazyPage(() => import('./pages/ChargeApprovePage')); // ★ 2026-08-28(3) 충전 승인 링크(인증 X)
 const AutoSendPage = lazyPage(() => import('./pages/AutoSendPage'));
 const KakaoRcsPage = lazyPage(() => import('./pages/KakaoRcsPage'));
+const SecurityReportPage = lazyPage(() => import('./pages/SecurityReportPage')); // ★ 2026-10-29 보안 점검 기록(C)
 const DmBuilderPage = lazyPage(() => import('./pages/DmBuilderPage')); // ★ 모바일 DM 빌더
 // ★ D130: 슈퍼관리자 알림톡 발신프로필 모니터링 페이지
 const AlimtalkSendersPage = lazyPage(() => import('./pages/AlimtalkSendersPage'));
@@ -117,7 +119,8 @@ export const SessionTimerContext = createContext<SessionTimerContextType>({
 // ★ 2026-07-03 에이전트(QTmsg) 전용 회사 허용 라우트 — 이 외 전 라우트는 /kakao-rcs로 회수.
 //   메뉴 숨김이 아니라 라우트 자체 차단 (URL 직접 입력 누수 방지). 동종 메시징 업체 대시보드 노출 차단이 목적.
 // ★ 2026-07-20 Harold 확정: 에이전트 전용 = 3메뉴만 — 발송결과·발신번호(/manage 축소 탭)·카카오 템플릿 등록(/kakao-rcs)
-const AGENT_ALLOWED_PATHS = ['/kakao-rcs', '/manage'];
+// ★ 2026-10-29 /security-report = 보안 점검 기록(정적 공지 화면 · 대시보드 내용 0) — 공지 카드의 「점검 기록 보기」가 되돌려지지 않게(Codex 설계 1R)
+const AGENT_ALLOWED_PATHS = ['/kakao-rcs', '/manage', '/security-report'];
 
 // 인증 필요 라우트
 function PrivateRoute({ children, allowedTypes }: { children: React.ReactNode; allowedTypes?: string[] }) {
@@ -485,6 +488,16 @@ function App() {
           }
         />
 
+        {/* ★ 2026-10-29 보안 점검 기록(C) — 고객사 사용자 전부(에이전트 전용 회사 포함 · AGENT_ALLOWED_PATHS) */}
+        <Route
+          path="/security-report"
+          element={
+            <PrivateRoute allowedTypes={['company_admin', 'company_user']}>
+              <SecurityReportPage />
+            </PrivateRoute>
+          }
+        />
+
         {/* 채널 확장: 카카오&RCS */}
         <Route
           path="/kakao-rcs"
@@ -830,6 +843,8 @@ function App() {
       </PageErrorBoundary>
       {/* ★ 2026-08-22 도움말 봇 — 라우트 Suspense 밖(화면을 옮겨도 대화가 안 사라진다), 세션 가드 안(로그인 상태에서만) */}
       <HelpDock Panel={HelpPanel} />
+      {/* ★ 2026-10-29 고객 보안 공지 카드(B) — 라우트 밖 하나 · 로그인마다 새로 그린다(안쪽 key) · 도움말 버튼과 같은 자리라 떠 있는 동안 그것을 숨긴다 */}
+      <SecurityNoticeCard />
       </SessionTimeoutGuard>
       </ToastProvider>
     </BrowserRouter>

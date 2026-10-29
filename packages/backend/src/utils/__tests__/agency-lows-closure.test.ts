@@ -16,6 +16,7 @@ const intake = read('../agency-send-intake.ts');
 const route = read('../../routes/agency-send.ts');
 const approveRoute = read('../../routes/agency-approve.ts');
 const admin = read('../../routes/admin.ts');
+const syncKeyIssue = read('../sync-key-issue.ts');
 const app = read('../../app.ts');
 const directWorker = read('../direct-send-worker.ts');
 const mailWorker = read('../agency-send-mail-worker.ts');
@@ -221,11 +222,13 @@ describe('대행 ⑧ 저장 컬럼 없는 메일이 tick을 멈추지 않는다'
 });
 
 describe('싱크 ③④', () => {
-  it('재발급은 감사 기록을 남기고 키·시크릿 원문은 싣지 않는다', () => {
-    const seg = between(admin, "router.post('/companies/:id/sync-keys/regenerate'", 'res.json({');
+  it('재발급은 감사 기록을 남기고 키·시크릿 원문은 싣지 않는다(★1029 발급 = utils/sync-key-issue.ts CT 로 옮김 · 출발지 · 회수 목록이 더해짐)', () => {
+    const seg = between(syncKeyIssue, 'export async function issueSyncAgentKeys(', '\nexport async function listAgentOrigins(');
     expect(seg).toMatch(/action: 'sync_key_regenerate'/);
-    expect(seg).toMatch(/details: \{ apiKeyTail: newApiKey\.slice\(-4\) \}/);
-    expect(between(seg, 'await recordAuditLog({', '});')).not.toMatch(/newApiSecret|hashSecret/);
+    expect(seg).toMatch(/details: \{ apiKeyTail: apiKey\.slice\(-4\), originCidr: origin\.cidr, revokedOrigins: out\.revoked\.map\(\(x\) => x\.cidr\) \}/);
+    const audits = seg.split('await recordAuditLog({').slice(1).map((b) => b.slice(0, b.indexOf('});')));
+    expect(audits.length).toBeGreaterThanOrEqual(3);
+    for (const a of audits) expect(a).not.toMatch(/apiSecret\b|hashSecret/);
   });
 
   it('사용 토글은 방금 받은 1회 노출 시크릿을 지우지 않는다(같은 키일 때만)', () => {

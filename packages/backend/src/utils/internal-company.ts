@@ -6,7 +6,7 @@
  *   목록이 비면(기본) = 시연 회사만 = 지금 동작. 시험 회사는 실제 발송을 하므로 시연 회사(발송 0 · 돈 0)와 따로 둔다.
  * 판정 실패(조회 오류) = 사내 아님(경보는 모르면 보낸다).
  */
-import { isDemoCompany } from './demo-company';
+import { isDemoCompany, listDemoCompanyIds } from './demo-company';
 import { isUuid } from './normalize';
 
 export function internalTestCompanyIds(env: string | undefined = process.env.INTERNAL_TEST_COMPANY_IDS): Set<string> {
@@ -32,4 +32,11 @@ export async function isInternalCompany(companyId: string | null | undefined): P
   } catch {
     return false;
   }
+}
+
+/** 사내 회사 id 전체(시연 ∪ 사내 시험) — 전역 집계에서 빼는 목록(★ 2026-10-29 고객 보안 공지 확인 현황 · Codex 설계 1R) · 시연 목록 조회 오류는 그대로 던진다 */
+export async function listInternalCompanyIds(): Promise<string[]> {
+  const ids = new Set(internalTestCompanyIds());
+  for (const id of await listDemoCompanyIds()) ids.add(String(id).trim().toLowerCase());
+  return [...ids];
 }

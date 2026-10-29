@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useLayoutEffect, useMemo, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ArrowLeft, LogOut, Plus, Search, Smartphone } from 'lucide-react';
+import { ArrowLeft, LogOut, Plus, Search, ShieldCheck, Smartphone } from 'lucide-react';
 // ★ 2026-07-03 에이전트(QTmsg) 전용 회사 게이팅 — 요금제 가드 면제 + 알림톡 탭만 + 로그아웃 버튼
 import { useAuthStore, isAgentOnlyCompany } from '../stores/authStore';
 import RcsTemplateFormModal from '../components/RcsTemplateFormModal';
@@ -452,6 +452,17 @@ export default function KakaoRcsPage() {
             )}
           </div>
         )}
+
+        {/* ★ 2026-10-29 보안 점검 기록 다시 보기 — 에이전트 전용 회사는 설정 화면을 못 연다(고객 보안 공지 설계서 §4 결정 3) */}
+        <div className="mt-6 flex justify-end">
+          <button
+            type="button"
+            onClick={() => navigate('/security-report')}
+            className="inline-flex items-center gap-1.5 text-[12.5px] font-medium text-gray-500 transition hover:text-emerald-700"
+          >
+            <ShieldCheck className="h-3.5 w-3.5" /> 보안 점검 기록
+          </button>
+        </div>
       </main>
 
       {/* ═══ 모달들 ═══ */}

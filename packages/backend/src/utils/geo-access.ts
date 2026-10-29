@@ -24,7 +24,7 @@
  *   먼저 탐지 로그를 보고 "정상인데 걸리는 대역"을 걷어낸 뒤에 그 값을 넣는다. MFA와 같은 형태.
  */
 
-import { query } from '../config/database';
+import { query, type TxRun } from '../config/database';
 
 export type OriginCountry = 'domestic' | 'foreign' | 'unknown';
 export type OriginDecision = 'allow' | 'record' | 'block';
@@ -157,6 +157,62 @@ export function isPrivateIp(raw: string | null | undefined): boolean {
   if (p[0] === 192 && p[1] === 168) return true;
   if (p[0] === 169 && p[1] === 254) return true;
   return false;
+}
+
+/** IP 글자 → 표준 꼴(IPv4 = 10진 자리 · IPv6 = URL 표준 꼴 · IPv4-mapped = IPv4) · 못 풀면 null */
+function canonicalIp(s: string): string | null {
+  if (/^\d{1,3}(\.\d{1,3}){3}$/.test(s)) {
+    const p = s.split('.').map(Number);
+    return p.every((n) => n <= 255) ? p.join('.') : null;
+  }
+  if (!/^[0-9a-fA-F:.]+$/.test(s) || !s.includes(':')) return null;   // 대괄호 · 영역 id · 포트 · 사용자 정보 꼴은 URL 에 넘기지 않는다
+  let host: string;
+  try {
+    host = new URL(`http://[${s}]/`).hostname.slice(1, -1);            // hostname = `[::1]` 꼴 → 양끝 대괄호를 벗긴다
+  } catch {
+    return null;
+  }
+  const m = /^::ffff:([0-9a-f]{1,4}):([0-9a-f]{1,4})$/.exec(host);
+  if (!m) return host;
+  const hi = parseInt(m[1], 16);
+  const lo = parseInt(m[2], 16);
+  return [hi >> 8, hi & 255, lo >> 8, lo & 255].join('.');
+}
+
+/**
+ * ★ 2026-10-29 싱크에이전트 키 발급 출발지(설계서 docs/2026-10-29-sync-key-origin-required-design.md §2-2) — 공인 IP 한 개만 → 표준 꼴 + CIDR.
+ *
+ * ⛔ 뜻으로 풀어 한 꼴로 만든 뒤 판정한다 — `normalizeIp` 는 소문자 `::ffff:` 접두만 걷어, 같은 서버를 IPv6 꼴로 적으면
+ *   요청(IPv4 꼴)과 다른 계열로 등록돼 등록 뒤에도 403 이고, 확장형 루프백(`0:0:0:0:0:0:0:1`)은 사설 판정을 지나간다(Codex 설계 1R).
+ *   `normalizeIp` · `isPrivateIp` 자체는 바꾸지 않는다(로그인 · 기계 판정이 같이 쓴다).
+ */
+export function parseAgentOriginIp(raw: unknown): { ok: true; ip: string; cidr: string } | { ok: false; reason: string } {
+  const s = String(raw ?? '').trim();
+  if (!s) return { ok: false, reason: '설치 서버의 공인 IP를 입력해주세요.' };
+  if (s.includes('/')) return { ok: false, reason: 'IP 하나만 입력해주세요. 대역은 국외 접근 통제 화면에서 등록합니다.' };
+  const ip = canonicalIp(s);
+  if (!ip || ip === '::') return { ok: false, reason: 'IP 주소 형식이 아닙니다.' };
+  // ipconfig 의 192.168 · 10 주소를 넣는 실수가 가장 흔하다 — 등록해도 서버가 보는 주소가 아니다
+  if (isPrivateIp(ip)) return { ok: false, reason: '사설 주소입니다. 설치 서버가 밖으로 나갈 때 쓰는 공인 IP를 입력해주세요.' };
+  return { ok: true, ip, cidr: ip.includes(':') ? `${ip}/128` : `${ip}/32` };
+}
+
+/**
+ * ★ 2026-10-29 출발지 예외 행 하나 — 국외 접근 통제 등록 라우트와 싱크 키 발급 CT 가 같이 쓴다(INSERT 한 벌 · 뿌리 R1 · R29).
+ * 문장 = 옛 `routes/admin.ts` 예외 등록 INSERT 그대로. 실행자(`run`)를 받아 트랜잭션 안에서도 쓴다. 돌려주는 값 = 새 행 id.
+ */
+export async function insertOriginException(
+  run: TxRun,
+  row: { scope: string; companyId: string | null; userId: string | null; cidr: string; reason: string; approvedBy: string | null; expiresAt: string | null },
+): Promise<string> {
+  const r = await run(
+    `INSERT INTO access_origin_allowlist
+       (id, scope, company_id, user_id, cidr, reason, approved_by, approved_at, expires_at, is_active, created_at)
+     VALUES (gen_random_uuid(), $1, $2::uuid, $3::uuid, $4::cidr, $5, $6::uuid, NOW(), $7, true, NOW())
+     RETURNING id`,
+    [row.scope, row.companyId, row.userId, row.cidr, row.reason.slice(0, 500), row.approvedBy, row.expiresAt]
+  );
+  return String(r.rows[0].id);
 }
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;

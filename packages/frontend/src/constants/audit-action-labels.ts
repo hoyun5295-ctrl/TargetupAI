@@ -136,6 +136,10 @@ export const AUDIT_ACTION_LABEL: Record<string, string> = {
   autosend_link_pause: '자동마케팅 링크 일시정지',
   // ★ 2026-09-13(3) 싱크에이전트 키 재발급(기존 키 즉시 무효)
   sync_key_regenerate: '싱크 키 재발급',
+  // ★ 2026-10-29 고객 보안 공지(B 카드 · C 점검 기록) — backend utils/customer-notice.ts CUSTOMER_NOTICE_ACTIONS
+  customer_notice_shown: '보안 공지 카드 표시',
+  customer_notice_report: '보안 점검 기록 열람',
+  customer_notice_ack: '보안 공지 확인',
 };
 
 /** 액션 → 뱃지 색(등록 없으면 회색). 성공=초록 · 실패·차단·파기=빨강 · 감지·주의=호박 · 인계·변경=파랑 */

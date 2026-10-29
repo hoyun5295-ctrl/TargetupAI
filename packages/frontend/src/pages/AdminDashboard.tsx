@@ -23,6 +23,7 @@ import FeatureInterestTab from '../components/admin/FeatureInterestTab'; // ★ 
 import IdentityStatusTab from '../components/admin/IdentityStatusTab'; // ★ 2026-10-07 본인인증 현황(ceo 전용)
 import MallIntegrationMonitorTab from '../components/admin/MallIntegrationMonitorTab'; // ★ 2026-10-27 자사몰 연동 감시 표 1단(K10)
 import IntroLeadsTab from '../components/admin/IntroLeadsTab'; // ★ 2026-10-07 소개 방문 · 시연 요청(ceo · suran)
+import CustomerNoticeAckTab from '../components/admin/CustomerNoticeAckTab'; // ★ 2026-10-29 공지 확인 현황(ceo · suran)
 import WatchLogTab from '../components/admin/WatchLogTab'; // ★ 2026-10-07 감시 기록(ceo 전용)
 import PrecheckUsageTab from '../components/admin/PrecheckUsageTab'; // ★ 2026-09-26 스팸 검사·맞춤법 사용 현황(ceo 전용)
 import AgencyEmailSendersModal from '../components/admin/AgencyEmailSendersModal'; // ★ 2026-08-26 대행발송 허용 발신 이메일(§18)
@@ -98,7 +99,7 @@ export default function AdminDashboard() {
   const navigate = useNavigate();
   const { user, logout } = useAuthStore();
 
-  const [activeTab, setActiveTab] = useState<'companies' | 'users' | 'scheduled' | 'callbacks' | 'plans' | 'requests' | 'deposits' | 'credits' | 'allCampaigns' | 'stats' | 'billing' | 'syncAgents' | 'auditLogs' | 'lineGroups' | 'templates' | 'loginBlocks' | 'agentDeploy' | 'marketingDiagnosis' | 'spamBlock' | 'geoAccess' | 'helpQuestions' | 'agencyMail' | 'agencyLedger' | 'adminAccounts' | 'precheckUsage' | 'featureInterest' | 'identityStatus' | 'introLeads' | 'watchLog' | 'opsRecords' | 'mallMonitor'>('companies');
+  const [activeTab, setActiveTab] = useState<'companies' | 'users' | 'scheduled' | 'callbacks' | 'plans' | 'requests' | 'deposits' | 'credits' | 'allCampaigns' | 'stats' | 'billing' | 'syncAgents' | 'auditLogs' | 'lineGroups' | 'templates' | 'loginBlocks' | 'agentDeploy' | 'marketingDiagnosis' | 'spamBlock' | 'geoAccess' | 'helpQuestions' | 'agencyMail' | 'agencyLedger' | 'adminAccounts' | 'precheckUsage' | 'featureInterest' | 'identityStatus' | 'introLeads' | 'watchLog' | 'opsRecords' | 'mallMonitor' | 'noticeAck'>('companies');
   // ★ 2026-06-11: 감사 로그 열람 권한 (AUDIT_LOG_VIEWER_IDS — 기본 ceo 전용) — 허용 계정에만 메뉴/탭 노출
   const [auditAccessAllowed, setAuditAccessAllowed] = useState(false);
   // ★ 2026-08-27 직원 계정·권한 (전송자격인증 3.2·3.3) — 권한분류표 원본은 서버(utils/admin-role.ts)
@@ -124,6 +125,7 @@ export default function AdminDashboard() {
   const [featureInterestAllowed, setFeatureInterestAllowed] = useState(false); // ★ 2026-10-06 기능 관심 업체(ceo 전용)
   const [identityStatusAllowed, setIdentityStatusAllowed] = useState(false); // ★ 2026-10-07 본인인증 현황(ceo 전용)
   const [introLeadsAllowed, setIntroLeadsAllowed] = useState(false); // ★ 2026-10-07 소개 방문 · 시연 요청(ceo · suran)
+  const [noticeAckAllowed, setNoticeAckAllowed] = useState(false); // ★ 2026-10-29 공지 확인 현황(ceo · suran)
   const [watchLogAllowed, setWatchLogAllowed] = useState(false); // ★ 2026-10-07 감시 기록(ceo 전용)
   const [precheckUsageAllowed, setPrecheckUsageAllowed] = useState(false); // ★ 2026-09-26 스팸 검사·맞춤법 사용 현황(ceo 전용)
   // ★ 2026-08-24 AI 영업 아웃리치(ceo 전용 · 모달) — 서버 /access가 유일 소스, 미허용 = 메뉴 자체 미노출
@@ -902,6 +904,13 @@ useEffect(() => {
       const d = await r.json();
       setIntroLeadsAllowed(d.allowed === true);
     } catch { setIntroLeadsAllowed(false); }
+    try {
+      const token = localStorage.getItem('token');
+      // ★ 2026-10-29 공지 확인 현황 — 허용 계정(기본 ceo · suran)에만 메뉴 노출
+      const r = await fetch('/api/admin/customer-notice-ack/access', { headers: { Authorization: `Bearer ${token}` } });
+      const d = await r.json();
+      setNoticeAckAllowed(d.allowed === true);
+    } catch { setNoticeAckAllowed(false); }
     try {
       const token = localStorage.getItem('token');
       // ★ 2026-10-07 감시 기록 — 허용 계정(기본 ceo)에만 메뉴 노출
@@ -2781,6 +2790,8 @@ const loadStatsDetail = async (date: string, companyId: string, companyName: str
                   ...(watchLogAllowed ? [{ key: 'watchLog', label: '감시 기록' }] : []),
                   // ★ 2026-10-03 운영 기록 대장 — 작성 · 확인은 화면이 서버 판정(meta)을 받아 연다
                   ...(myPermRead.opsRecords === true ? [{ key: 'opsRecords', label: '운영 기록 대장' }] : []),
+                  // ★ 2026-10-29 (Harold) 공지 확인 현황 = 고객 보안 공지를 본 업체 · 확인한 업체(ceo · suran · 읽기만)
+                  ...(noticeAckAllowed ? [{ key: 'noticeAck', label: '공지 확인 현황' }] : []),
                 ],
               },
               {
@@ -2887,6 +2898,7 @@ const loadStatsDetail = async (date: string, companyId: string, companyName: str
         {activeTab === 'featureInterest' && featureInterestAllowed && <FeatureInterestTab />}
         {activeTab === 'identityStatus' && identityStatusAllowed && <IdentityStatusTab />}
         {activeTab === 'introLeads' && introLeadsAllowed && <IntroLeadsTab />}
+        {activeTab === 'noticeAck' && noticeAckAllowed && <CustomerNoticeAckTab />}
         {activeTab === 'watchLog' && watchLogAllowed && <WatchLogTab />}
 
         {activeTab === 'geoAccess' && <GeoAccessTab {...{ geoBusy, geoExPage, geoExceptions, geoForm, geoHits, geoHitsDenied, geoHitsPage, geoHitsTotal, geoStatus, loadGeoAccess, loadGeoHits, setGeoBusy, setGeoExPage, setGeoForm, showAlert }} />}

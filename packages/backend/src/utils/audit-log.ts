@@ -18,23 +18,31 @@ export interface AuditLogInput {
   req?: any;                     // Express req — ip / user-agent 자동 수집
 }
 
+/**
+ * 감사 로그 기록 — 실패를 던진다. 감사 기록 자체가 상태의 원장인 곳(고객 공지 확인 등)만 쓴다.
+ * ★ 2026-10-29 recordAuditLog 본문을 그대로 옮겼다(INSERT 꼴 한 곳 · 고객 보안 공지 설계 Codex 2R).
+ */
+export async function recordAuditLogStrict(input: AuditLogInput): Promise<void> {
+  const req = input.req;
+  await query(
+    `INSERT INTO audit_logs (user_id, action, target_type, target_id, details, ip_address, user_agent)
+     VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+    [
+      input.actorUserId || null,
+      input.action,
+      input.targetType || null,
+      input.targetId || null,
+      input.details !== undefined ? JSON.stringify(input.details) : null,
+      req?.ip || null,
+      req?.headers?.['user-agent'] || '',
+    ]
+  );
+}
+
 /** 감사 로그 기록 — 실패해도 본 동작에 영향 0 (모든 예외 내부 흡수) */
 export async function recordAuditLog(input: AuditLogInput): Promise<void> {
   try {
-    const req = input.req;
-    await query(
-      `INSERT INTO audit_logs (user_id, action, target_type, target_id, details, ip_address, user_agent)
-       VALUES ($1, $2, $3, $4, $5, $6, $7)`,
-      [
-        input.actorUserId || null,
-        input.action,
-        input.targetType || null,
-        input.targetId || null,
-        input.details !== undefined ? JSON.stringify(input.details) : null,
-        req?.ip || null,
-        req?.headers?.['user-agent'] || '',
-      ]
-    );
+    await recordAuditLogStrict(input);
   } catch (err: any) {
     console.log('[audit-log] 기록 실패 (본 동작 영향 없음):', err?.message);
   }
@@ -145,6 +153,14 @@ export function isWatchLogViewer(superAdminId?: string | null): Promise<boolean>
  */
 export function isIntroLeadsViewer(superAdminId?: string | null): Promise<boolean> {
   return isSuperAdminAllowed(superAdminId, 'INTRO_LEADS_VIEWER_IDS', 'ceo,suran', 'intro-leads', 'introLeads');
+}
+
+/**
+ * ★ 2026-10-29 공지 확인 현황(고객 보안 공지를 본 업체 · 확인한 업체) 열람 권한 — NOTICE_ACK_VIEWER_IDS(기본 'ceo,suran').
+ * Harold 명시: 「확인한 업체가 누군지 보안인증 메뉴에서 체크」 · 보안 · 인증 묶음 규칙 = 대표 · 지원팀장. 다른 축과 별도 env.
+ */
+export function isNoticeAckViewer(superAdminId?: string | null): Promise<boolean> {
+  return isSuperAdminAllowed(superAdminId, 'NOTICE_ACK_VIEWER_IDS', 'ceo,suran', 'notice-ack', 'noticeAck');
 }
 
 /**

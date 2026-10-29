@@ -333,7 +333,7 @@ const loadSyncKeys = async (companyId: string) => {
               {editCompanyTab === 'customers' && <CompanyCustomerDbTab {...{ adminCustPage, setCustomerDeleteConfirmName, setShowCustomerDeleteAll, setShowEditCompanyModal }} />}
 
               {/* SyncAgent 탭 */}
-              {editCompanyTab === 'sync' && <CompanySyncTab {...{ editCompany, setShowEditCompanyModal, setShowSyncRegenConfirm, setSyncKeyVisible, setSyncKeys, setSyncLoading, setSyncSecretVisible, showAlert, showSyncRegenConfirm, syncKeyVisible, syncKeys, syncLoading, syncSecretVisible }} />}
+              {editCompanyTab === 'sync' && <CompanySyncTab key={editCompany.id} {...{ editCompany, setShowEditCompanyModal, setShowSyncRegenConfirm, setSyncKeyVisible, setSyncKeys, setSyncLoading, setSyncSecretVisible, showAlert, showSyncRegenConfirm, syncKeyVisible, syncKeys, syncLoading, syncSecretVisible }} />}
 
               </div>
 

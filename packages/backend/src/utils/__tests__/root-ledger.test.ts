@@ -3458,3 +3458,175 @@ describe('R28(1029) 인증 없는 내부 입구 = 127.0.0.1 — 서버를 여는
     expect(hasListenCall(ts.createSourceFile(f, "const listen = 1; server.close(); emitter.on('listen', x);", ts.ScriptTarget.Latest, true))).toBe(false);
   });
 });
+
+describe('R29(1029) 쓸 수 있는 싱크 자격이 생기는 곳 = 출발지 등록과 한 함수 · 한 트랜잭션(키만 발급하고 등록을 빠뜨리면 출발지 통제가 에이전트를 조용히 막았다)', () => {
+  // 알려진 빈칸(대장 R29) = 자사몰 SDK 키(utils/cdp-auth.ts · company_api) · 몰 서버는 호스팅 따라 고정 IP 가 없는 곳이 많아 따로 정한다(설계서 §4 · 추가 과제)
+  const ISSUER = 'src/utils/sync-key-issue.ts';   // 이름표 = packages/backend 기준(BE = src)
+  /** 면제(이유 줄) — api_key · api_secret_hash 를 쓰는 곳. 늘리면 그 줄에 이유 */
+  const EXEMPT: Record<string, string> = {
+    'src/utils/company-create.ts': '회사 생성 = 시크릿 원문을 아무 데도 안 내보내 설치에 못 쓰는 키(해시 한 줄에서 사라진다 · 아래 시험)',
+    'src/routes/sync.ts': '옛 원문으로 이미 인증한 에이전트의 해시 채우기(api_secret_hash IS NULL 조건 · 새 자격 아님)',
+    'scripts/reset-synthetic-test-company.ts': '시험 회사 시크릿 갱신 · 수집 = 서버 안 루프백(출발지 판정 사설 통과)',
+    'scripts/setup-demo-company.ts': '시연 회사 시크릿 갱신 · 수집 = 서버 안 루프백(출발지 판정 사설 통과)',
+  };
+  const ROOTS = [[BE, 'src/'], [join(BE, '..', 'scripts'), 'scripts/']] as const;
+  const beRel = (rel: string) => read(join(BE, '..', rel));
+  const filesOf = () => ROOTS.flatMap(([root, prefix]) => sourceFiles(root, /\.(ts|js|mjs)$/).map((f) => {
+    const raw = read(join(root, f));
+    return { rel: prefix + f, raw, src: stripComments(raw) };
+  }));
+  const CRED_COL = /^(api_key|api_secret_hash|api_secret)$/i;   // 칸 이름 통째 비교 = cdp_api_key 등은 다른 칸
+  /**
+   * 소스 → 글자 식 전부(구문 트리 · 판정을 소스 글자 꼴에 맡기지 않는다 · Codex 구현 1R).
+   *   글자 상수 · 템플릿(`${…}` 자리) 하나 = 한 덩어리 · `+` 로 이어 붙인 식과 배열 `.join(구분자)` 는 접어서 한 덩어리(Codex 구현 2R) ·
+   *   글자가 아닌 조각(변수 · 호출)은 `${…}` 자리로 남겨 동적 조립으로 드러나게 한다. 접은 식의 글자 조각은 따로 내지 않는다(같은 SQL 두 번 0).
+   */
+  function stringLiterals(rel: string, text: string): string[] {
+    const sf = ts.createSourceFile(rel, text, ts.ScriptTarget.Latest, true, /\.ts$/.test(rel) ? ts.ScriptKind.TS : ts.ScriptKind.JS);
+    const HOLE = '${…}';
+    const isPlus = (n: ts.Node): n is ts.BinaryExpression => ts.isBinaryExpression(n) && n.operatorToken.kind === ts.SyntaxKind.PlusToken;
+    const isArrayJoin = (n: ts.Node): n is ts.CallExpression => ts.isCallExpression(n) && ts.isPropertyAccessExpression(n.expression)
+      && n.expression.name.text === 'join' && ts.isArrayLiteralExpression(n.expression.expression);
+    const holes: ts.Node[] = [];
+    const fold = (n: ts.Node): string => {
+      if (ts.isStringLiteral(n) || ts.isNoSubstitutionTemplateLiteral(n)) return n.text;
+      if (ts.isTemplateExpression(n)) { n.templateSpans.forEach((s) => holes.push(s.expression)); return n.head.text + n.templateSpans.map((s) => HOLE + s.literal.text).join(''); }
+      if (ts.isParenthesizedExpression(n)) return fold(n.expression);
+      if (isPlus(n)) return fold(n.left) + fold(n.right);
+      if (isArrayJoin(n)) {
+        const arg = n.arguments[0];
+        const sep = arg === undefined ? ',' : (ts.isStringLiteral(arg) || ts.isNoSubstitutionTemplateLiteral(arg)) ? arg.text : HOLE;
+        if (arg && sep === HOLE) holes.push(arg);
+        return ((n.expression as ts.PropertyAccessExpression).expression as ts.ArrayLiteralExpression).elements.map(fold).join(sep);
+      }
+      holes.push(n);
+      return HOLE;
+    };
+    const out: string[] = [];
+    const walk = (n: ts.Node): void => {
+      const foldable = ts.isStringLiteral(n) || ts.isNoSubstitutionTemplateLiteral(n) || ts.isTemplateExpression(n) || isPlus(n) || isArrayJoin(n);
+      if (!foldable) { ts.forEachChild(n, walk); return; }
+      holes.length = 0;
+      const t = fold(n);
+      const inner = [...holes];
+      if (t.replace(/\$\{…\}/g, '').length > 0) out.push(t);
+      inner.forEach(walk);   // 글자가 아닌 조각 안의 글자 식(호출 인자 등)은 따로 본다
+    };
+    walk(sf);
+    return out;
+  }
+  /** 괄호 · SQL 따옴표 밖의 쉼표로 나눈다 */
+  function splitTopLevel(s: string): string[] {
+    const parts: string[] = [];
+    let depth = 0, inQuote = false, cur = '';
+    for (const ch of s) {
+      if (ch === "'") inQuote = !inQuote;
+      else if (!inQuote && ch === '(') depth++;
+      else if (!inQuote && ch === ')') depth--;
+      if (!inQuote && depth === 0 && ch === ',') { parts.push(cur); cur = ''; } else cur += ch;
+    }
+    parts.push(cur);
+    return parts;
+  }
+  /**
+   * 파일 하나의 companies 자격 칸 쓰기 = SQL 상수마다(SQL 글자 값은 같은 길이 공백으로 가려 그 안의 쉼표 · 낱말 · 따옴표가 판정을 흔들지 않게)
+   *   UPDATE companies SET 절(WHERE · RETURNING · FROM 또는 상수 끝까지)의 대입 + INSERT INTO companies 칸 목록 · 따옴표 칸 이름도 같다.
+   *   SET 절이 비었거나 `${…}` 를 품으면 = 동적 SET(칸 이름을 코드가 정한다) → 따로 돌려준다.
+   */
+  function credWritesIn(rel: string, text: string): { writes: Array<{ file: string; col: string; value: string; sql: string }>; dynamic: string[] } {
+    const writes: Array<{ file: string; col: string; value: string; sql: string }> = [];
+    const dynamic: string[] = [];
+    for (const raw of stringLiterals(rel, text)) {
+      const sql = raw.replace(/'(?:[^']|'')*'/g, (m) => `'${' '.repeat(m.length - 2)}'`);
+      for (const m of sql.matchAll(/\bUPDATE\s+(?:ONLY\s+)?(?:"?public"?\.)?"?companies"?(?:\s+(?:AS\s+)?(?!SET\b)\w+)?\s+SET\b/gi)) {
+        const rest = sql.slice((m.index ?? 0) + m[0].length);
+        const end = rest.search(/\b(?:WHERE|RETURNING|FROM)\b/i);
+        // 끝(WHERE · RETURNING · FROM)이 이 덩어리 안에 없으면 = 뒤에 무엇이 붙는지 모른다 → 동적(완성 여부를 판정할 수 없는 조립 · Codex 구현 2R)
+        if (end < 0) { dynamic.push(raw); continue; }
+        const clause = rest.slice(0, end);
+        // 칸 이름을 코드가 정하는 자리가 있으면 동적 — 그래도 글자로 적힌 대입은 읽는다(값이 `${…}` 인 옛 원문 칸 쓰기 등)
+        if (!clause.trim() || clause.includes('${…}')) dynamic.push(raw);
+        for (const seg of splitTopLevel(clause)) {
+          const a = /^\s*"?(\w+)"?\s*=\s*([\s\S]*?)\s*$/.exec(seg);
+          if (a && CRED_COL.test(a[1])) writes.push({ file: rel, col: a[1].toLowerCase(), value: a[2], sql: raw });
+        }
+      }
+      for (const m of sql.matchAll(/\bINSERT\s+INTO\s+(?:"?public"?\.)?"?companies"?\s*\(([^)]*)\)/gi)) {
+        for (const c of m[1].split(',')) {
+          const col = c.trim().replace(/"/g, '');
+          if (CRED_COL.test(col)) writes.push({ file: rel, col: col.toLowerCase(), value: '(INSERT 칸)', sql: raw });
+        }
+      }
+    }
+    return { writes, dynamic };
+  }
+
+  it('수집기 반례 — SQL 글자 값 뒤 · 따옴표 칸 이름 · 함수 값 · 동적 SET · 이어 붙인 SQL 을 놓치지 않는다(Codex 구현 1R)', () => {
+    const one = (sql: string) => credWritesIn('x.ts', 'q(`' + sql + '`);');
+    expect(one("UPDATE companies SET status = 'active', api_key = $1, api_secret_hash = $2 WHERE id = $3").writes.map((w) => w.col)).toEqual(['api_key', 'api_secret_hash']);
+    expect(one('UPDATE companies SET "api_key" = $1 WHERE id = $2').writes.map((w) => w.col)).toEqual(['api_key']);
+    expect(one("UPDATE companies c SET name = 'a, api_key = b', api_secret = COALESCE($1, NULL) WHERE c.id = $2").writes).toMatchObject([{ col: 'api_secret', value: 'COALESCE($1, NULL)' }]);
+    expect(one('UPDATE public.companies SET api_secret = NULL WHERE id = $1').writes).toMatchObject([{ col: 'api_secret', value: 'NULL' }]);
+    expect(one('INSERT INTO companies (name, "api_secret") VALUES ($1, $2)').writes.map((w) => w.col)).toEqual(['api_secret']);
+    expect(credWritesIn('x.ts', "q(\"UPDATE companies SET api_key = $1 WHERE id = $2\");").writes.map((w) => w.col)).toEqual(['api_key']);
+    expect(credWritesIn('x.ts', 'q(`UPDATE companies SET ${sets.join(", ")} WHERE id = $1`);').dynamic).toHaveLength(1);
+    expect(credWritesIn('x.ts', "q('UPDATE companies SET ' + cols + ' WHERE id = $1');").dynamic).toHaveLength(1);
+    expect(one('SELECT api_key FROM companies WHERE id = $1').writes).toEqual([]);
+    expect(one('UPDATE companies SET cdp_api_key = $1 WHERE id = $2').writes).toEqual([]);
+    // Codex 구현 2R — 이어 붙임 · 배열 join 은 접어서 읽고, 끝을 모르는 조립은 동적
+    expect(credWritesIn('x.ts', "q('UPDATE companies SET status = $1, ' + 'api_key = $2 WHERE id = $3');").writes.map((w) => w.col)).toEqual(['api_key']);
+    expect(credWritesIn('x.ts', "q(['UPDATE companies SET status = $1', 'api_key = $2 WHERE id = $3'].join(', '));").writes.map((w) => w.col)).toEqual(['api_key']);
+    const headVar = credWritesIn('x.ts', "const h = 'UPDATE companies SET status = $1, '; q(h + 'api_key = $2 WHERE id = $3');");
+    expect(headVar.dynamic.length).toBeGreaterThanOrEqual(1);
+    expect(credWritesIn('x.ts', "q(`UPDATE companies SET status = $1, ` + `api_key = $2 WHERE id = ${id}`);").writes.map((w) => w.col)).toEqual(['api_key']);
+    const holeValue = credWritesIn('x.ts', "q(build('UPDATE companies SET api_secret = ' + v + ' WHERE id = $1'));");
+    expect(holeValue.writes).toMatchObject([{ col: 'api_secret', value: '${…}' }]);
+    expect(holeValue.dynamic).toHaveLength(1);
+  });
+
+  it('자격 칸 쓰기 = 발급 CT · 면제 목록만 · 옛 원문 칸(api_secret)은 NULL 로 비우는 쓰기만 · 동적 SET 파일엔 자격 칸 이름 0', () => {
+    const files = filesOf();
+    const per = files.map((f) => ({ ...f, ...credWritesIn(f.rel, f.raw) }));
+    const w = per.flatMap((f) => f.writes).map((x) => ({ ...x, stmt: x.sql }));
+    expect(w.length).toBeGreaterThanOrEqual(6);   // 수집이 죽지 않았다
+    const dynFiles = per.filter((f) => f.dynamic.length > 0);
+    expect(dynFiles.length).toBeGreaterThanOrEqual(2);   // brand-basic-info · plan-term(수집이 죽지 않았다)
+    for (const f of dynFiles) {
+      if (f.rel === ISSUER || f.rel in EXEMPT) continue;
+      expect(f.src, `동적 SET 파일 ${f.rel} 이 자격 칸 이름을 품음`).not.toMatch(/\b(api_key|api_secret_hash|api_secret)\b/);
+    }
+    for (const x of w) {
+      if (x.col === 'api_secret') {
+        expect(x.value.toUpperCase(), `${x.file}: ${x.stmt}`).toBe('NULL');
+        continue;
+      }
+      expect(x.file === ISSUER || x.file in EXEMPT, `${x.file}: ${x.stmt}`).toBe(true);
+    }
+    expect(w.some((x) => x.file === ISSUER && x.col === 'api_key')).toBe(true);
+    for (const [k, why] of Object.entries(EXEMPT)) {
+      expect(w.some((x) => x.file === k && x.col !== 'api_secret'), `죽은 면제 ${k}`).toBe(true);
+      expect(why.length, k).toBeGreaterThan(10);
+    }
+    // 해시 채우기 면제 = 조건이 붙은 그 문장뿐 · 회사 생성 면제 = 시크릿 원문이 변수로 남지 않는 그 한 줄
+    for (const x of w.filter((y) => y.file === 'src/routes/sync.ts')) {
+      expect(x.stmt, x.stmt).toMatch(/WHERE id = \$2 AND api_secret_hash IS NULL/);
+    }
+    expect(beRel('src/utils/company-create.ts')).toMatch(/const apiSecretHash = hashSecret\(crypto\.randomBytes\(32\)\.toString\('hex'\)\);/);
+  });
+
+  it('발급 CT = 키 UPDATE · 이전 발급 회수 · 출발지 등록이 한 withTransaction 안 · IP 는 타입 필수', () => {
+    const src = stripComments(beRel(ISSUER));
+    const at = src.indexOf('await withTransaction(async (run) => {');
+    expect(at).toBeGreaterThan(0);
+    const body = src.slice(at, src.indexOf('\n  });', at));
+    expect(body).toMatch(/UPDATE companies SET api_key = \$1/);
+    expect(body).toMatch(/UPDATE access_origin_allowlist SET is_active = false/);
+    expect(body).toMatch(/insertOriginException\(run, \{/);
+    expect(src).toMatch(/originIp: unknown;/);
+  });
+
+  it('R1 출발지 INSERT = geo-access.ts 한 곳', () => {
+    const hits = filesOf().filter((f) => /INSERT\s+INTO\s+access_origin_allowlist/i.test(f.src)).map((f) => f.rel);
+    expect(hits).toEqual(['src/utils/geo-access.ts']);
+  });
+});

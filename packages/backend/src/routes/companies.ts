@@ -17,6 +17,7 @@ import { normalizeOpt080Input, findLinkDefectInText, findLinkDefectDeep, webLink
 import { grantFreeTrial, isTrialApplyOpen, ADMIN_WEEK_TRIAL } from '../utils/basic-trial';
 // ★ 2026-07-25 요금제 변경 이력 CT — 청구서 일할계산의 진실의 원천(빠지면 그 구간이 증발)
 import { recordPlanChange, alertPlanChangeFailure } from '../utils/plan-change-log';
+import { noticeForUser, parseNoticeEvent, recordNoticeEvent, CUSTOMER_NOTICE_RATE } from '../utils/customer-notice'; // ★ 2026-10-29 고객 보안 공지
 // ★ 2026-10-04 선불 요금제 이용 기간 — 관리 중 게이트 · my-plan 표시(docs/2026-10-04-prepaid-plan-term-design.md)
 import { planTermManagedSql, PlanTermError, getPlanTermView, getScheduledFromForPlan } from '../utils/plan-term';
 import { canUseAgencySend, loadPlanContext, SPAM_FILTER_OPEN_SQL } from '../utils/plan-guard';
@@ -560,6 +561,36 @@ router.post('/plan-change/ack', async (req: Request, res: Response) => {
   } catch (error) {
     console.error('요금제 변경 안내 확인 처리 실패:', error);
     res.status(500).json({ error: '처리 실패' });
+  }
+});
+
+// ★ 2026-10-29 고객 보안 공지(B 카드 · C 점검 기록) — 판정 · 기록 소유 = utils/customer-notice.ts
+//   GET  /api/companies/notice/current = 이 계정에 띄울 공지(모르면 null · 화면은 띄우지 않는다)
+//   POST /api/companies/notice/event   = shown · report · ack(ack 는 저장이 확인돼야 204 · 실패 503)
+const noticeEventLimiter = rateLimit({
+  ...CUSTOMER_NOTICE_RATE,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: (req: Request) => `customer-notice:${req.user?.userId || 'anon'}`,
+  message: { success: false, error: '요청이 너무 잦습니다.', code: 'RATE_LIMITED' },
+});
+
+router.get('/notice/current', async (req: Request, res: Response) => {
+  const notice = await noticeForUser(req.user);
+  res.setHeader('Cache-Control', 'private, no-store');
+  return res.json({ success: true, notice: notice ? { id: notice.id } : null });
+});
+
+router.post('/notice/event', noticeEventLimiter, async (req: Request, res: Response) => {
+  const input = parseNoticeEvent(req.body);
+  if (!input) return res.status(400).json({ success: false, error: '알 수 없는 공지입니다.', code: 'NOTICE_INVALID' });
+  try {
+    const result = await recordNoticeEvent(req, input);
+    if (result === 'closed') return res.status(400).json({ success: false, error: '이미 끝난 공지입니다.', code: 'NOTICE_CLOSED' });
+    return res.status(204).end();
+  } catch (err: any) {
+    console.error('[companies/notice/event] 확인 저장 실패:', err?.message);
+    return res.status(503).json({ success: false, error: '확인을 저장하지 못했습니다. 다시 눌러 주세요.', code: 'NOTICE_ACK_NOT_SAVED' });
   }
 });
 
