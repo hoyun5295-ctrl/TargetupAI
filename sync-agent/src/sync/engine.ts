@@ -13,6 +13,7 @@
  */
 
 import type { IDbConnector, RawRow, ColumnInfo } from '../db/types';
+import { ISO_DATE_CONNECTORS } from '../db/types';
 import type { ApiClient } from '../api/client';
 import type { AlertManager } from '../alert';
 import type { SyncTarget, SyncMode, SyncResult, SyncError, SyncCursorState } from '../types/sync';
@@ -85,6 +86,11 @@ export class SyncEngine {
    * ⛔ 줄 안에서 다시 runFull/runIncremental 을 부르면 자기 자신을 기다린다 — 안쪽은 full()/incremental() 을 부른다.
    */
   private lane: Promise<unknown> = Promise.resolve();
+  /**
+   * ★ 2026-10-29 1.7.5 이번 실행의 테이블별 날짜 타입 원본 컬럼 — inLane 이 실행 시작마다 새 Map 으로 바꾼다
+   * (옛 실행 · 미리보기의 조회 결과가 이번 실행에 섞이지 않는다 · 미리보기는 이 캐시를 쓰지 않는다 · Codex 2R).
+   */
+  private runDateCols = new Map<string, ReadonlySet<string>>();
 
   constructor(
     db: IDbConnector,
@@ -101,9 +107,57 @@ export class SyncEngine {
   }
 
   private inLane<T>(fn: () => Promise<T>): Promise<T> {
-    const run = this.lane.then(fn, fn);
+    const start = (): Promise<T> => {
+      this.runDateCols = new Map(); // 실행마다 컬럼 타입을 새로 읽는다(원본 스키마 변경을 다음 실행에 반영)
+      return fn();
+    };
+    const run = this.lane.then(start, start);
     this.lane = run.catch(() => undefined);
     return run;
+  }
+
+  /**
+   * ★ 2026-10-29 1.7.5 날짜 타입 원본 컬럼 — PG · Oracle 어댑터만(그 둘이 날짜를 toISOString 글자로 넘긴다 · ISO_DATE_CONNECTORS).
+   * 매핑이 이 컬럼 값만 원본 벽시계 글자로 되돌린다(글자 모양이 아니라 컬럼 타입으로 판정 · Codex 1R). 실패 = 던진다.
+   */
+  private async lookupDateColumns(tableName: string): Promise<ReadonlySet<string>> {
+    if (!ISO_DATE_CONNECTORS.has(this.db.dbType)) return new Set();
+    return new Set(
+      (await this.db.getColumns(tableName))
+        .filter((c) => c.dataType === 'date' || c.dataType === 'datetime')
+        .map((c) => c.name),
+    );
+  }
+
+  /** 이번 실행 캐시를 거친 조회 — 성공만 담는다(실패는 던진다 · 실행 시작의 lockIfDateTypesUnknown 이 받아 잠근다) */
+  private async dateSourceColumns(tableName: string): Promise<ReadonlySet<string>> {
+    const cache = this.runDateCols;
+    const hit = cache.get(tableName);
+    if (hit) return hit;
+    const cols = await this.lookupDateColumns(tableName);
+    cache.set(tableName, cols);
+    return cols;
+  }
+
+  /**
+   * 실행 시작에 날짜 컬럼 타입을 먼저 확인한다 — 못 읽으면 한 건도 보내지 않고 커서도 그대로 둔 잠금 결과.
+   * 되돌림 없이 보내면 날짜가 하루 밀리고, 1.7.4 가 맞게 보내던 Oracle custom 날짜까지 나빠진다(Codex 2R).
+   */
+  private async lockIfDateTypesUnknown(target: SyncTarget, mode: 'incremental' | 'full'): Promise<SyncResult | null> {
+    const tableName = target === 'customers' ? this.config.customerTable : this.config.purchaseTable;
+    try {
+      await this.dateSourceColumns(tableName);
+      return null;
+    } catch (error) {
+      return this.lockedResult(
+        target,
+        'DATE_COLUMN_TYPE_UNKNOWN',
+        `원본 날짜 컬럼의 타입을 읽지 못해 이번 동기화를 보내지 않았습니다(${safeErrorText(error instanceof Error ? error.message : String(error))}). ` +
+          '날짜가 하루 밀린 채 나가지 않게 막은 것이며, 다음 주기에 다시 시도합니다.',
+        'operational',
+        mode,
+      );
+    }
   }
 
   /** 파일 원본(엑셀·CSV) — 행이 언제 바뀌었는지 알 근거(시각·원본 키)가 파일에 없다. */
@@ -111,16 +165,21 @@ export class SyncEngine {
     return this.db.dbType === 'excel' || this.db.dbType === 'csv';
   }
 
-  /** 증분을 열지 않고 사유만 남기는 회차 결과(커서 무변경). */
+  /**
+   * 증분을 열지 않고 사유만 남기는 회차 결과(커서 무변경).
+   * ★ 2026-10-29 1.7.5 kind 는 부르는 자리가 반드시 정한다 — operational = 보내지 못한 운영 장애(알림 실패) ·
+   *   policy = 설계상 · 설정 잠금(지금처럼 알림 없음). 옛: 알림 판정이 코드 이름 목록을 손으로 들고 있어 새 잠금이 빠졌다(Codex 3R).
+   */
   private async lockedResult(
-    target: SyncTarget, code: string, message: string, mode: 'incremental' | 'full' = 'incremental',
+    target: SyncTarget, code: string, message: string, kind: 'operational' | 'policy', mode: 'incremental' | 'full' = 'incremental',
   ): Promise<SyncResult> {
     const now = new Date().toISOString();
     logger.warn(`${mode === 'full' ? '전체' : '증분'} 잠금(${target}): ${message}`);
     const result: SyncResult = {
       target, mode,
       totalCount: 0, successCount: 0, failCount: 0, skippedCount: 0,
-      durationMs: 0, startedAt: now, completedAt: now, errors: [{ code, message }],
+      durationMs: 0, startedAt: now, completedAt: now,
+      errors: [{ code, message, ...(kind === 'operational' ? { operational: true } : {}) }],
     };
     this.logResult(result);
     await this.sendSyncLog(result);
@@ -208,7 +267,8 @@ export class SyncEngine {
     try {
       const rows = await this.db.fetchAll(table, 1, 0);
       if (rows.length === 0) return { ok: false, error: `${table} 테이블에 데이터가 없습니다.` };
-      const mapped = mapBatch([rows[0]], mapping)[0] || {};
+      // ★ 2026-10-29 1.7.5 미리보기도 실제 전송과 같은 날짜 되돌림(같은 행 = 같은 글자) · 실행 캐시는 쓰지 않는다(줄 밖 · Codex 2R)
+      const mapped = mapBatch([rows[0]], mapping, await this.lookupDateColumns(table))[0] || {};
       const maskFns = new Map<string, (v: string) => string>([
         ['phone', maskPhone],
         ['customer_phone', maskPhone],
@@ -330,6 +390,10 @@ export class SyncEngine {
       };
     }
 
+    // ★ 2026-10-29 1.7.5 날짜 컬럼 타입을 못 읽으면 보내지 않는다(커서 그대로 · 전량으로 넘어가는 갈래보다 앞)
+    const dateLocked = await this.lockIfDateTypesUnknown(target, 'incremental');
+    if (dateLocked) return dateLocked;
+
     // ★ 2026-10-28 설치별 값 분류가 마지막 고객 전량 때와 다르면(설정 편집 [6] · 원격 매핑 갱신) 고객 전량으로 다시 보낸다 —
     //   커서 이전 고객 · 증분 보류 · 시각 컬럼 없음 어느 경로든 여기 한 곳(Codex 설계 1R · 구현 1R).
     //   ⛔ 분류표 없는 설치 = 지금 '' · 기록 '' → 그대로(업그레이드만으로 전량이 돌지 않는다).
@@ -360,6 +424,7 @@ export class SyncEngine {
         'INCREMENTAL_LOCKED_FILE_SOURCE',
         '파일 원본의 구매는 처음 한 번만 가져옵니다(행마다 고유 번호가 없어 다시 보내면 중복됩니다). ' +
           '다시 받으려면 구매 키 컬럼을 지정하거나, 이미 받은 구매를 지운 뒤 전체 동기화를 실행해 주세요.',
+        'policy',
       );
     }
 
@@ -376,6 +441,7 @@ export class SyncEngine {
               'INCREMENTAL_LOCKED_NO_TS_NO_PK',
               `증분 불가: 구매 테이블 '${tableName}'에 갱신 시각 컬럼 '${timestampCol}'도 기본키도 없습니다. ` +
                 '매 회차 전체를 다시 보내면 같은 구매가 중복되므로 멈춥니다 — 갱신 시각 컬럼이나 기본키(또는 지정 키)를 두면 열립니다.',
+              'policy',
             );
           }
         }
@@ -778,6 +844,7 @@ export class SyncEngine {
           'VALUE_MAPS_STATE_SAVE_FAILED',
           `설치별 값 분류가 바뀌어 고객 전체를 다시 보내야 하는데, 상태 파일(data/sync_state.json)에 진행 표시를 쓰지 못해 보내지 않았습니다(${safeErrorText(e instanceof Error ? e.message : String(e))}). ` +
             '디스크 공간 · 쓰기 권한을 확인해 주세요. 다음 주기에 다시 시도합니다.',
+          'operational',
           'full',
         );
       }
@@ -806,6 +873,10 @@ export class SyncEngine {
         durationMs: 0, startedAt: now, completedAt: now, errors: [],
       };
     }
+
+    // ★ 2026-10-29 1.7.5 날짜 컬럼 타입을 못 읽으면 보내지 않는다(lastFullScanComplete = false 그대로 → 완료 기록 · 커서 씨앗 없음)
+    const dateLocked = await this.lockIfDateTypesUnknown(target, 'full');
+    if (dateLocked) return dateLocked;
 
     const startedAt = new Date().toISOString();
     const startTime = Date.now();
@@ -875,6 +946,7 @@ export class SyncEngine {
           target,
           'PURCHASE_KEY_UNUSABLE',
           `${reason}. 키 없이 보내면 다시 보낼 때마다 같은 구매가 쌓이므로 구매를 보내지 않았습니다. --edit-config로 키 컬럼을 다시 지정해 주세요.`,
+          'policy',
           'full',
         );
       }
@@ -1092,7 +1164,8 @@ export class SyncEngine {
     const mapping = target === 'customers'
       ? this.config.customerMapping
       : this.config.purchaseMapping;
-    const mapped = mapBatch(rows, mapping);
+    const tableName = target === 'customers' ? this.config.customerTable : this.config.purchaseTable;
+    const mapped = mapBatch(rows, mapping, await this.dateSourceColumns(tableName));
 
     // ①-1 원본 행 키 부착 — mapBatch는 1:1 순서 보존(rows.map). 매핑이 만든 새 객체에는
     //   소스 PK 컬럼이 없으므로 여기서 붙인다. 정규화는 spread 복사라 통과하고, Zod 스키마에 등재돼 있다.
@@ -1209,6 +1282,7 @@ export class SyncEngine {
           errors.push({
             code: 'API_SEND_FAILED',
             message: error instanceof Error ? error.message : String(error),
+            operational: true,
           });
           // ★ 1.7.2 로컬 큐에 담지 않는다 — 커서·기준 시각을 멈춘 것이 재시도다. 옛 큐는 30분 뒤 옛 값을 다시 보내
           //   그 사이 들어간 새 값(수신거부 포함)을 덮었다.
@@ -1255,8 +1329,9 @@ export class SyncEngine {
 
     // 알림 모듈에 결과 보고
     if (this.alertManager) {
-      // ★ 2026-10-28 운영 실패(보내지 못함) = 전송 실패 + 「진행 중」 저장 실패(고객 전송을 멈춘 잠금 · 보낸 건수 0 이어도 실패 · Codex 구현 3R)
-      const opErrors = result.errors.filter(e => e.code === 'API_SEND_FAILED' || e.code === 'VALUE_MAPS_STATE_SAVE_FAILED');
+      // ★ 2026-10-28 운영 실패(보내지 못함)는 보낸 건수 0 이어도 실패 · ★ 2026-10-29 1.7.5 판정 = 만드는 자리의 operational 표시
+      //   (전송 실패 · 「진행 중」 저장 실패 잠금 · 날짜 타입 조회 실패 잠금 · 옛 코드 이름 목록은 새 잠금을 빠뜨렸다 · Codex 3R)
+      const opErrors = result.errors.filter(e => e.operational === true);
       const success = result.failCount === 0 && opErrors.length === 0;
       const details = opErrors.length > 0
         ? opErrors.map(e => safeErrorText(e.message)).join('; ')

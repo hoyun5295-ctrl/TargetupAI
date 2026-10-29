@@ -25,19 +25,15 @@ describe('동기화 custom 값: 원본 DB 벽시계 글자로', () => {
     expect(f(new Date(Date.UTC(2026, 3, 16, 15, 30, 5)), 'mssql')).toBe('2026-04-16 15:30:05');
   });
 
-  it('postgresql 어댑터가 넘긴 ISO(로컬 Date의 toISOString)는 벽시계 글자로 되돌린다', () => {
-    expect(f(new Date(2026, 0, 1).toISOString(), 'postgresql')).toBe('2026-01-01');
-    expect(f(new Date(2026, 3, 16, 9, 5, 0).toISOString(), 'postgresql')).toBe('2026-04-16 09:05:00');
-  });
-
-  it('ISO 모양 문자열도 mysql·mssql에서는 원본 문자열이다(드라이버가 Date로 주는 곳)', () => {
+  // ★ 2026-10-29 1.7.5 PG · Oracle 어댑터 ISO 되돌림은 매핑이 원본 컬럼 타입으로 한다(connector-date.test.ts).
+  //   여기서 글자 모양으로 추측하면 TEXT 컬럼의 같은 꼴 원문까지 바뀐다(Codex 1R) · 옛 시험은 없는 dbType 'postgresql' 로 통과했다.
+  it('ISO 모양 문자열은 어느 DB 든 원본 문자열이다', () => {
     const s = new Date(2026, 0, 1).toISOString();
-    expect(f(s, 'mysql')).toBe(s);
-    expect(f(s, 'mssql')).toBe(s);
+    for (const db of ['postgres', 'oracle', 'mysql', 'mssql'] as const) expect(f(s, db)).toBe(s);
   });
 
   it.each(['20260416150000', '250103', '1,800', '건성', ' 앞뒤공백 ', '2026-01-01'])('문자열은 한 글자도 바꾸지 않는다: %s', (s) => {
-    expect(f(s, 'postgresql')).toBe(s);
+    expect(f(s, 'postgres')).toBe(s);
     expect(f(s, 'mysql')).toBe(s);
   });
 

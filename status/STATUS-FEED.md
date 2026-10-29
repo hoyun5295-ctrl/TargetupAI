@@ -214,6 +214,14 @@
 > W1 한줄전단 API(별개 저장소 hanjulDM · 원장 = hanjulDM status/STATUS.md 1027 절) = 첫 경보로 찾음 → 같은 날 닫음. 의존성 = 운영 audit 치명 1 · 높음 19 → 0(puppeteer 25 · xlsx 공식 0.20.3 · zod 제거 · allowScripts = puppeteer@25.16.0 만) · W3 렌더 크롬 = 기동 한 곳 `utils/flyer/product/render-browser.ts` · --no-sandbox 0 · 같은 /opt/hanjul-chrome · 못 뜨면 실패 · W2 로그인 요청 제한 = 비밀번호 · OTP · 등록 토큰 확인 5곳 `middlewares/login-limiter.ts`(같은 IP 처리 중 + 1분 안 실패 > 10 = 429 · 들어올 때 세고 성공하면 뺌 · Codex 1R 「동시 정상 11건째 429」는 끝난 실패만 세면 몰아 보내는 추측이 한도 없이 통과해 불수용 · 두 동작 시험 고정) · 함께 닫음 = xlsx 0.20.3 이 날짜 칸을 서버 시각대 자정으로 줘 고객 업로드 생일이 KST 에서 하루 앞 → CT `sheetDateToYmd`. 검증 = tsc 0 · vitest 375 · 변이 5 · Codex 적대 2R approve(1R 은 요청문이 파일 읽기까지 막아 4개만 읽음 = 재발 기록). 실측(09:10) = audit 운영 0 · build:safe · 새 dist 크롬 = /opt 156 · 샌드박스 끄는 인자 0 · PDF · PNG 생성 · restart 뒤 online · Node 24.22.1 · health 200 · nginx 경유 없는 아이디 11번 = 401 10 → 429(도메인 DNS = .62 직결 · CDN 없음) · 에러 로그 새 줄 0.
 > 남은 것 = 3 밤 창 apt 99 + 커널 재부팅 · 4 SSH 키 전용(두 번째 문 실측 먼저) · 5 패널 2단계(Harold) · 6 떠돌이 파일 · 8 이상 행위 경보(기준값 실데이터) · 9 백업 복구 훈련 · A4 HMAC(IMC 업체 키 발급 요청) · A1 · A5 · 미실측 = 재시작 뒤 정상 080 콜백 등록 줄 · 한줄전단 실제 전단 PDF · OG 경로 첫 요청 · 범위 밖 기록 = 한줄전단 고객 화면 파일 업로드 응답 계약 불일치(success · fileId) · pdfkit 미사용 선언 · 한줄로 프론트 react-router 7(닿지 않는 2건) · pos-agent 의존성(별도 배포본)
 
+<a id="c81"></a>
+
+### C81 · ★1029 싱크에이전트 1.7.5 · Oracle · PG 표준 날짜 칸 하루 당김 정정 — Codex 적대 4R approve · 미커밋
+> 호출어 **"날짜 하루 당김 / 1.7.5 / 엠티 VM 재검증"** → [설계서](../docs/2026-10-29-sync-agent-node24-wizard-loopback-design.md) §9 · [기능 문서](../docs/FEATURE-SYNC-AGENT.md) §7 2026-10-29 오후 · §10 · 원장 C81-G1 · 뿌리 = R16 넓힘
+> 계기 = 1.7.4 엠티 VM 재검증(테스트계정) · 생일 · 최근구매일이 원본보다 하루 앞(Harold 운영 PG 3행). 뿌리 = PG · Oracle 어댑터 `toISOString()` → `normalizeDate` 앞 10글자 · 0913 custom 처방은 `'postgresql'` 비교로 PG 에서 죽은 갈래.
+> 한 것 = 매핑에서 원본 컬럼 타입(date · datetime)으로 벽시계 글자(`ISO_DATE_CONNECTORS` · 어댑터 값 · source_row_key · 커서 불변) · 글자 추측 삭제 · 타입 못 읽음 = `DATE_COLUMN_TYPE_UNKNOWN` 잠금 · 경보 = `SyncError.operational`(손 등재 목록 삭제) · 엠티 1.7.5 = `Downloads\엠티콜렉션_SyncAgent_v1.7.5\`(zip sha256 `494d081d…5ab58c` · 안내서 PDF 11쪽).
+> 검증 = 에이전트 tsc 0 · vitest 34파일 305건(Node 20.19.4 · 24.22.1) · 변이 14 · Codex 1R 1 → 2R 2 → 3R 1 → 4R approve · VM 1.7.5 고객 198/200 · 운영 PG 날짜 4칸 198/198(Harold 실행). 남은 것 = 커밋 · 엠티 전달(엠티 서버 IP 국외 접근 통제 등록 · 판매 뷰 휴대폰 P1 = 출고 조건).
+
 <a id="c80"></a>
 
 ### C80 · ★1029 싱크에이전트 1.7.4 · 실린 Node 24.22.1 · 설치 마법사 이 PC 전용 — Codex 적대 3R approve · 미커밋

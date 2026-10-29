@@ -13,6 +13,7 @@
 import { getLogger } from '../logger';
 import { FIELD_MAP, getFieldByKey } from './field-map';
 import type { ValueMaps } from '../config/schema';
+import type { DbType } from '../db/types';
 import dayjs from 'dayjs';
 
 const logger = getLogger('normalize');
@@ -499,11 +500,24 @@ export function normalizeCustomFieldValue(val: any): string {
  * 드라이버별 벽시계 성분(라이브러리 소스 확인):
  *  - mysql2: timezone 기본 'local'(connection_config.js) → 로컬 성분
  *  - tedious(mssql): useUTC 기본 true(connection.js) → UTC 성분(어댑터가 useUTC를 바꾸지 않는다)
- *  - PostgreSQL·Oracle 어댑터: 로컬 Date를 toISOString으로 넘긴다(postgres-date 로컬 · oracledb DATE/TIMESTAMP 로컬) → 되돌린 뒤 로컬 성분
+ *  - PostgreSQL·Oracle 어댑터: 로컬 Date를 toISOString으로 넘긴다(postgres-date 로컬 · oracledb DATE/TIMESTAMP 로컬) → 매핑이 되돌린다(아래)
  * ⛔ 백엔드 normalizeCustomFieldValue를 쓰지 마라: UTC 올림·ISO 앞 10자리 자르기라 날짜가 하루 밀리고 시각이 사라진다.
- * ⛔ PostgreSQL·Oracle의 ISO 되돌림은 toISOString 모양(밀리초 3자리 + Z)만이다. 다른 모양의 문자열은 원본이다.
+ * ★ 2026-10-29 1.7.5 PostgreSQL·Oracle 의 ISO 되돌림은 여기서 하지 않는다 — 매핑(mapRow)이 **원본 컬럼 타입이 날짜인 값만**
+ *   adapterIsoToWallClock 으로 되돌린다(표준 날짜 칸 · custom 칸 · 구매일 공통 · 뿌리 대장 R16).
+ *   옛: 이 함수가 글자 모양(toISOString 꼴)으로 날짜를 추측했다 → TEXT 칸의 같은 꼴 원문까지 바뀌고(Codex 1R),
+ *   PG 는 'postgresql' 과 비교해(어댑터 dbType = 'postgres') 한 번도 돌지 않아 PG 날짜가 하루 밀린 채 나갔다.
  */
 const CONNECTOR_ISO_RE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
+
+/**
+ * PG · Oracle 어댑터가 날짜 타입 컬럼의 로컬 Date 를 toISOString 으로 넘긴 글자 → 원본 벽시계 글자(그 밖의 값은 그대로).
+ * ⛔ 날짜 타입 원본 컬럼의 값에만 부른다(부르는 곳 = mapping/mapRow 한 곳 · 컬럼 타입 판정 = 엔진 dateSourceColumns).
+ */
+export function adapterIsoToWallClock(v: unknown): unknown {
+  if (typeof v !== 'string' || !CONNECTOR_ISO_RE.test(v)) return v;
+  const d = new Date(v);
+  return Number.isNaN(d.getTime()) ? v : wallClockText(d, false);
+}
 
 function wallClockText(d: Date, utc: boolean): string {
   const p = (n: number, w = 2) => String(n).padStart(w, '0');
@@ -519,19 +533,11 @@ function wallClockText(d: Date, utc: boolean): string {
   return `${date} ${p(h)}:${p(mi)}:${p(s)}${ms ? `.${p(ms, 3)}` : ''}`;
 }
 
-export function normalizeSyncCustomFieldValue(v: unknown, dbType?: string): unknown {
+export function normalizeSyncCustomFieldValue(v: unknown, dbType?: DbType): unknown {
   if (v === null || v === undefined || v === '') return v;
   if (typeof v === 'bigint') return v.toString(); // JSON 직렬화 예외 방지
-  let d: Date | null = null;
-  let utc = false;
-  if (v instanceof Date) {
-    d = v;
-    utc = dbType === 'mssql';
-  } else if ((dbType === 'postgresql' || dbType === 'oracle') && typeof v === 'string' && CONNECTOR_ISO_RE.test(v)) {
-    d = new Date(v);
-  }
-  if (!d || Number.isNaN(d.getTime())) return v;
-  return wallClockText(d, utc);
+  if (!(v instanceof Date) || Number.isNaN(v.getTime())) return v;
+  return wallClockText(v, dbType === 'mssql');
 }
 
 // ============================================================
@@ -591,7 +597,7 @@ export function normalizeCustomer(
   mapped: Record<string, unknown>,
   // ★2026-09-13(3) 동기화 경로는 원본 DB 종류를 넘긴다(custom_fields 날짜 되돌림 · 없으면 날짜 되돌림 없이 원형 그대로)
   // ★ 2026-10-28 valueMaps = 엔진이 resolveValueMaps 로 거른 설치별 값 분류(없으면 지금 동작 그대로)
-  opts?: { dbType?: string; valueMaps?: ValueMaps },
+  opts?: { dbType?: DbType; valueMaps?: ValueMaps },
 ): Record<string, unknown> {
   const result: Record<string, unknown> = { ...mapped };
 
@@ -665,7 +671,7 @@ export function normalizeCustomer(
  *   ⛔ Buffer 값은 키를 뺀다. null로 보내면 서버 병합이 저장된 값을 지운다.
  *   객체가 아니면 손대지 않는다.
  */
-function normalizeSyncCustomFields(cf: unknown, dbType?: string): unknown {
+function normalizeSyncCustomFields(cf: unknown, dbType?: DbType): unknown {
   if (!cf || typeof cf !== 'object' || Array.isArray(cf)) return cf;
   const out: Record<string, unknown> = {};
   for (const [k, val] of Object.entries(cf as Record<string, unknown>)) {
@@ -679,7 +685,7 @@ function normalizeSyncCustomFields(cf: unknown, dbType?: string): unknown {
 
 export function normalizePurchase(
   mapped: Record<string, unknown>,
-  opts?: { dbType?: string },
+  opts?: { dbType?: DbType },
 ): Record<string, unknown> {
   const result: Record<string, unknown> = { ...mapped };
 
@@ -726,7 +732,7 @@ export interface NormalizationResult {
   }>;
 }
 
-export function normalizeCustomerBatch(rows: Record<string, unknown>[], opts?: { dbType?: string; valueMaps?: ValueMaps }): NormalizationResult {
+export function normalizeCustomerBatch(rows: Record<string, unknown>[], opts?: { dbType?: DbType; valueMaps?: ValueMaps }): NormalizationResult {
   const normalized: Record<string, unknown>[] = [];
   const dropped: NormalizationResult['dropped'] = [];
 
@@ -748,7 +754,7 @@ export function normalizeCustomerBatch(rows: Record<string, unknown>[], opts?: {
   return { normalized, dropped };
 }
 
-export function normalizePurchaseBatch(rows: Record<string, unknown>[], opts?: { dbType?: string }): NormalizationResult {
+export function normalizePurchaseBatch(rows: Record<string, unknown>[], opts?: { dbType?: DbType }): NormalizationResult {
   const normalized: Record<string, unknown>[] = [];
   const dropped: NormalizationResult['dropped'] = [];
 

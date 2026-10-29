@@ -11,6 +11,7 @@ import type { AuthCredentials } from '../api/auth';
 import type { AiMappingTarget, AiMappingSupportedDbType } from '../types/api';
 import { getLogger } from '../logger';
 import { requestAiMapping } from '../setup/ai-mapping-client';
+import { adapterIsoToWallClock } from '../normalize';
 import { autoSuggestMapping, assignCustomFieldSlots } from './templates';
 
 const logger = getLogger('mapping');
@@ -43,10 +44,13 @@ function naturalCompare(a: string, b: string): number {
  * 소스 DB 컬럼을 표준 필드로 매핑합니다.
  * custom_1~custom_15로 매핑된 필드는 custom_fields JSONB 객체로 모아집니다.
  * 같은 표준 필드에 소스 컬럼이 2개 이상 매핑되면(쪼개진 전화번호 등) 끝자리 숫자 순으로 이어붙입니다.
+ * ★ 2026-10-29 1.7.5 dateSourceCols = 날짜 타입 원본 컬럼(엔진이 PG · Oracle 에서만 채움) — 그 컬럼 값만 어댑터 ISO 글자를
+ *   원본 벽시계 글자로 되돌린다(KST 자정 = 전날 15:00Z · 뿌리 대장 R16). 같은 꼴 글자라도 TEXT 컬럼이면 원문 그대로.
  */
-export function mapRow(row: RawRow, mapping: ColumnMapping): Record<string, unknown> {
+export function mapRow(row: RawRow, mapping: ColumnMapping, dateSourceCols?: ReadonlySet<string>): Record<string, unknown> {
   const mapped: Record<string, unknown> = {};
   const customFields: Record<string, unknown> = {};
+  const read = (c: string): unknown => (dateSourceCols?.has(c) ? adapterIsoToWallClock(row[c]) : row[c]);
 
   // target 필드별로 소스 컬럼을 모은다(row에 실재하는 컬럼만 — 기존 동작 유지).
   const sourcesByTarget = new Map<string, string[]>();
@@ -64,14 +68,14 @@ export function mapRow(row: RawRow, mapping: ColumnMapping): Record<string, unkn
     let value: unknown;
     if (sourceCols.length === 1 || isCustom) {
       // 단일 매핑(또는 custom 슬롯 — 1:1이라 복합 없음). 기존 동작 그대로.
-      value = row[sourceCols[0]];
+      value = read(sourceCols[0]);
     } else {
       // 복합 필드: 끝자리 숫자 순으로 값을 이어붙인다(빈/널 조각은 건너뜀).
       //   전화번호류는 구분자 없이(숫자), 주소 등은 공백으로 잇는다.
       const sep = PHONE_COMPOSITE_FIELDS.has(targetField) ? '' : ' ';
       const joined = [...sourceCols]
         .sort(naturalCompare)
-        .map((c) => row[c])
+        .map((c) => read(c))
         .filter((v) => v !== null && v !== undefined && String(v).trim() !== '')
         .map((v) => String(v).trim())
         .join(sep);
@@ -107,8 +111,8 @@ export function customerSummaryFieldsOf(customerMapping: ColumnMapping): string[
 /**
  * 배치 매핑 (다수 행)
  */
-export function mapBatch(rows: RawRow[], mapping: ColumnMapping): Record<string, unknown>[] {
-  const mapped = rows.map((row) => mapRow(row, mapping));
+export function mapBatch(rows: RawRow[], mapping: ColumnMapping, dateSourceCols?: ReadonlySet<string>): Record<string, unknown>[] {
+  const mapped = rows.map((row) => mapRow(row, mapping, dateSourceCols));
   logger.debug(`매핑 완료: ${mapped.length}건`);
   return mapped;
 }

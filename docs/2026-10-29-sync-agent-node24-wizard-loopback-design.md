@@ -1,7 +1,8 @@
 # 싱크에이전트 Node 보안판 · 설치 마법사 이 PC 전용 (설계 · 2026-10-29)
 
 > 접수 = Harold 1029 「한국모바일인증 공지(PHP · Node 취약점) 체크」 → 「설계안 써 줘(마법사 127.0.0.1 · Node 판 올림 · 엠티 1.7.3 전달 전 반영)」.
-> 상태 = 1029 Harold 동의 → 구현 · 시험 · 빌드 · 엠티 1.7.4 묶음 · Codex 적대 3R approve · 미커밋 · 서버 등록 0(원장 C80-G1) · 기록 = §8 · STATUS C80.
+> 상태 = 1029 Harold 동의 → 구현 · 시험 · 빌드 · 엠티 1.7.4 묶음 · Codex 적대 3R approve · 커밋 35966174 · 서버 등록 0(원장 C80-G1) · 기록 = §8 · STATUS C80.
+> ★1029 오후 VM 재검증에서 표준 날짜 칸 하루 당김 발견 → **1.7.5**(§9 · 원장 C81) · 1.7.4 는 보내지 않는다.
 
 ## 0. 축 대조표
 
@@ -178,3 +179,36 @@
 ### 8-4 범위 밖 기록 (착수 안 함)
 
 - 싱크에이전트 운영 의존성 `npm audit --omit=dev` = 16건(치명 1 proxy-addr · 높음 axios · body-parser · form-data · mysql2 · nodemailer · path-to-regexp · xlsx · zod · 보통 7) — 1.7.3 부터 그대로(이번에 운영 의존성 바뀜 0) · 백엔드 1026 보안판(C67)이 싱크에이전트를 덮지 않았다 · R21 점검표 「운영 의존성 audit 0」에 싱크에이전트가 빠져 있다.
+
+## 9. 1.7.5 (2026-10-29 오후 · VM 재검증에서 나온 날짜 결함 · Harold 「진행해」)
+
+### 9-1 VM 재검증(1.7.4 · win2016-ko-x64 + 11g 엠티 구성 · 테스트계정)
+
+- 통과: 설치 경로(게시자 경고 → UAC → VC80 0 → 예약 작업 SYSTEM) · Node 24 + oracledb thick + IC 11.2 · 다른 스키마 뷰 · 키 지정 · 유일성 · AI 매핑 27/27 · 6/6 · P2 값 확인 정확한 건수 · config.enc · SYSTEM 작업 실행 · 듣는 포트 0 · 고객 198/200.
+- 운영 PG(Harold 실행): 고객 198 · 수신동의 153/45 · purchase_count 합 4,223 · 누계 217,701,000 · 이름 · 성별 · 생일 · 매장 198.
+- **결함 = 표준 날짜 칸 하루 당김**: 생일 · 최근구매일이 원본보다 하루 앞(Harold 실행 3행 · custom 날짜 칸은 맞음). 뿌리 = PG · Oracle 어댑터가 드라이버 로컬 Date 를 `toISOString()` 으로 넘김(KST 자정 → 전날 15:00Z) → `normalizeDate` 가 앞 10글자를 자름(R16). 0913 custom 경로 처방은 `'postgresql'` 과 비교해(어댑터 dbType = `'postgres'`) PG 에서 한 번도 돌지 않았다.
+- 기록만: 국외 접근 통제 허용 목록에 없는 에이전트 IP = AI 매핑 403(ORIGIN_NOT_ALLOWED) 뒤 마법사가 말없이 로컬 매핑으로 내려감 · 로컬 매핑이 엠티 컬럼 다수를 못 잡음 · 판매 뷰 휴대폰 없음(P1) = 구매 0.
+
+### 9-2 처방
+
+- 날짜 되돌림 = **매핑(`mapRow`)에서 원본 컬럼 타입으로**. `ISO_DATE_CONNECTORS`(`db/types.ts` · postgres · oracle) 커넥터만 `getColumns` dataType `date` · `datetime` 컬럼 값을 `adapterIsoToWallClock` 으로 벽시계 글자로. 어댑터 값 · `source_row_key` · 커서는 그대로(어댑터에서 고치면 `engine.ts` 의 `source_row_key` 가 바뀌어 구매 중복 적재).
+- 글자 모양 추측 삭제(`normalizeSyncCustomFieldValue` 는 Date · bigint 만 · TEXT 컬럼의 ISO 꼴 원문 불변).
+- 컬럼 타입을 못 읽으면 = 실행 시작에서 `DATE_COLUMN_TYPE_UNKNOWN` 잠금(fail-closed · 1.7.4 값으로 내려가지 않음). 캐시 = 실행마다 새로(`runDateCols`) · 미리보기는 캐시 안 씀.
+- 경보 = `SyncError.operational` 을 만드는 자리가 정한다(전송 실패 · 상태 저장 실패 잠금 · 날짜 타입 잠금) · `lockedResult` 는 `kind` 필수 · `logResult` 는 표시만 읽음(손 등재 코드 목록 삭제).
+- 바뀐 곳: `normalize/index.ts` · `mapping/index.ts` · `sync/engine.ts` · `db/types.ts` · `types/sync.ts` · `normalize/connector-date.test.ts`(새) · `normalize/custom-fields.test.ts` · `package.json` · `package-lock.json` 1.7.5 · `build-guide-mt.js` `VERSION` 1.7.5.
+
+### 9-3 시험 · Codex · 빌드
+
+- 빨강 먼저(날짜 · 죽은 갈래 · 잠금 · 경보) → 초록. sync-agent tsc 0 · vitest 34파일 305건 = Node 20.19.4 · 24.22.1 둘 다. 변이 14(파일 복사) 전부 잡힘. 계약 = toISOString 을 쓰는 어댑터 집합 = `ISO_DATE_CONNECTORS`.
+- Codex 적대 1R medium 1(PG 원본 ISO 글자까지 날짜로 오인 → 글자 추측 삭제 · 타입 기준) → 2R medium 2(타입 조회 실패 때 Oracle custom 날짜가 1.7.4 와 달라짐 → 잠금 · 늦게 끝난 미리보기가 실행 중 캐시를 덮음 → 실행별 캐시 · 미리보기 무캐시) → 3R medium 1(날짜 잠금이 경보에 성공으로 감 · 손 등재 운영 실패 목록이 뿌리 → 만드는 자리 표시) → **4R approve**.
+- 빌드(win-modern · Node 24.22.1) blocker 0 · exe `--version` 1.7.5 · `Downloads\엠티콜렉션_SyncAgent_v1.7.5\` = zip 168,916,963B · sha256 `494d081d3467ed88ed7bbc312dfd8ce19b04326a10ae44cc17777b4bbc5ab58c` · 안내서 PDF 11쪽(1.7.5 표기 16 · 옛 판 번호 0 · 가운뎃점 · 줄표 0).
+
+### 9-4 VM 재확인(1.7.5)
+
+- 같은 VM 에 1.7.5 · 예약 작업 1회: 고객 198/200 · 구매 0/0 · 잠금 없음 · 새 오류 0(시험 판매 행은 경보 문자 누적을 막으려 비움 · 작업은 다시 끔).
+- 운영 PG(Harold 실행 · 198명 원본 계산식 대조): 생일 198 · 최근구매일 198 · custom 첫구매일 198 · custom 등급일 198 = 전원 일치.
+
+### 9-5 남은 것 (착수 안 함 · 판단 = Harold)
+
+- 엠티 출고 조건: 엠티 서버 공인 IP 를 국외 접근 통제(company_agent)에 먼저 등록 · 판매 뷰 휴대폰(P1 · 없으면 구매 0).
+- 마법사 403 무음 내려감 · 로컬 매핑 품질 · PG · Oracle 원본을 쓰는 다른 회사의 날짜 칸 하루 당김 여부(운영 대조 = 그 회사 서버 등록 때) · Codex 범위 밖 `db/postgresql.ts:133` · `db/oracle.ts:395` · 엠티는 시각 컬럼이 없어 매 주기 전량.

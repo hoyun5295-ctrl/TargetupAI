@@ -7,6 +7,12 @@
 // node-odbc + 고객 PC ODBC 드라이버로 단일 커넥터를 추가한다 (실제 고객 발생 시).
 export type DbType = 'mssql' | 'mysql' | 'oracle' | 'postgres' | 'excel' | 'csv';
 
+/**
+ * ★ 2026-10-29 1.7.5 날짜 타입 컬럼의 로컬 Date 를 toISOString 글자로 넘기는 어댑터(oracle.ts · postgresql.ts normalizeRows).
+ * 엔진이 이 어댑터에서만 날짜 타입 원본 컬럼을 찾아 매핑에서 벽시계 글자로 되돌린다(뿌리 대장 R16) · 계약 시험 = normalize/connector-date.test.ts.
+ */
+export const ISO_DATE_CONNECTORS: ReadonlySet<DbType> = new Set<DbType>(['postgres', 'oracle']);
+
 export interface DbConnectionConfig {
   type: DbType;
   host: string;
